@@ -1,0 +1,23 @@
+// Actual Rust dev-595 captures: scratch/SolCLI8/history-capture. This fixture
+// tests the producer payloads, not a guessed receipt context or claim key.
+fn run() Never! {
+    input :: "{{\"foreign_binding\":{{\"boundary_digest\":\"boundary-v1\",\"source_identity\":\"source-v1\",\"replacement_identity\":\"replacement-v1\",\"tool_identity\":\"tool-v1\",\"target_identity\":\"target-v1\",\"coverage_digest\":\"coverage-v1\",\"assumptions\":[\"z\",\"a\",\"a\"]}},\"cases\":[{{\"case_id\":\"sample-1\",\"input_id\":\"input-1\",\"reference\":{{\"answer\":42}},\"candidate\":{{\"answer\":42}}}}]}}\n"
+    run :: jet_cli_comparison_parse(input, None) ?? panic("comparison fixture parse")
+    payload :: comparison_record_to_json(run.record) ?? panic("comparison fixture payload")
+    bytes :: canonical_json_bytes(payload)
+    id :: receipt_crypto.sha256(bytes).hex()
+    if id != "2c21b6b1bb6929718fb51b36e72887598480474fa7dc089942b582de6313b4a2" || bytes.len() != 683 -> panic("Rust canonical comparison identity")
+    report :: jet_cli_comparison_evidence(run, "corpus.json", id) ?? panic("comparison fixture evidence")
+    evidence :: evidence_report_encode(report) ?? panic("comparison fixture evidence codec")
+    if evidence.len() != 1276 || receipt_crypto.sha256(evidence).hex() != "85169d72a000a776d661a0c2aa2af630229a2365c6791b659a20cdc5cac0814d" -> panic("Rust canonical evidence bytes and derivation")
+    if !jet_cli_receipt_secret_name("--apiToken2") || !jet_cli_receipt_secret_name("--HTTPPassword") || jet_cli_receipt_secret_name("--monkey") -> panic("secret name components")
+    argv :: jet_cli_receipt_argv_identity([String]{"test-compare", "--apiToken2=hidden", "--password", "hidden", "corpus.json"})
+    expected := [U8]{}
+    loop arg in ([String]{"test-compare", "--apiToken2=<redacted>", "--password", "<redacted>", "corpus.json"}) -> jet_cli_receipt_frame(&expected, arg.bytes())
+    if argv != expected -> panic("receipt argv redaction framing")
+    members := [JetCLIReceiptInput]{}
+    jet_cli_receipt_canonical_member(JetCLIReceiptInput{path: "/project/.jet/generated/cache.bin", digest: id}, "/project", &members) ?? panic("generated exclusion")
+    if members.len() != 0 -> panic("generated inputs excluded from canonical target identity")
+    jet_cli_receipt_canonical_member(JetCLIReceiptInput{path: "/project/corpus.json", digest: id}, "/project", &members) ?? panic("relative member")
+    if members.len() != 1 || members[0].path != "corpus.json" -> panic("canonical relative target path")
+}

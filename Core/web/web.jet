@@ -10,7 +10,6 @@ package {
 }
 
 use core as core
-use core.web.forms.[WebFormError, WebFormInput, WebFormTyped]
 
 // core.web — server-rendered apps on `core.http`.
 //
@@ -28,105 +27,101 @@ module store
 module table
 module virtual
 
-pub struct App {
-    pub name: String
-    pub pages: [WebPage]
-    pub live: [LiveQuery]
-    pub sessions: [Session]
+// D-WEBAPP1=D: App and WebPage are compiler-owned opaque graph carriers.
+// Their registered constructors (`web.app`, `web.page`) and builder methods
+// retain typed handlers; a plain record cannot stand in for that graph.
+
+struct WebEvent {
+    path: String
+    title: String
+    payload: String
 }
 
-pub struct WebPage {
-    pub title: String
-    pub body: String
+struct Context {
+    path: String
+    method: String
+    session: String
 }
 
-pub struct WebEvent {
-    pub path: String
-    pub title: String
-    pub payload: String
+struct Mount {
+    path: String
+    page: String
 }
 
-pub struct Context {
-    pub path: String
-    pub method: String
-    pub session: String
+struct Auth {
+    kind: String
+    client_id: String
 }
 
-pub struct Mount {
-    pub path: String
-    pub page: String
+struct Session {
+    id: String
+    user_id: String
 }
 
-pub struct Auth {
-    pub kind: String
-    pub client_id: String
+struct LiveQuery {
+    key: String
+    data: String
+    generation: Int
+    subscribers: Int
 }
 
-pub struct Session {
-    pub id: String
-    pub user_id: String
-}
-
-pub struct LiveQuery {
-    pub key: String
-    pub data: String
-    pub generation: Int
-    pub subscribers: Int
-}
-
-pub fn app() -> App Never! { App{name: "app", pages: [WebPage]{}, live: [LiveQuery]{}, sessions: [Session]{}} }
-
-pub fn page(title: String, body: String) -> WebPage Never! { WebPage{title: title, body: body} }
-
-pub fn form(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
-    core.web.forms.typed(input, action)
-}
+// D-WEBFORM1=A: web.form(Model, action: handler) is elaborated by sema.
+// It returns the opaque typed-model form boundary, not the source forms
+// module's explicit input/action-name record API.
 
 
-pub fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
+// The web backend's DOM binding is DomRuntime.js::on. `jet_web_on` has
+// registry entries but no Rust implementation in this repository; this
+// forwarding declaration is not a Rust-to-Jet implementation or cutover.
+// Native callback admission must keep the actual backend contract.
+fn on(path: String, title: String, handler: fn(WebEvent)) Never! -[Browser]> {
     core.web.on(path, title, handler)
 }
 
-pub fn openapi(router: HTTPRouter) -> String Never! {
-    core.web.openapi(router)
+fn openapi(router: HTTPRouter) -> String Never! {
+    inputs :: core.web.__openapi_inputs(router) ?? core.web.__contract_stop(err)
+    core.web.__openapi_render(^inputs, ^"Jet HTTP Router", ^"1", ^[OpenApiServer]{}) ?? core.web.__contract_stop(err)
 }
 
-pub fn value(key: String) -[Browser]> String Never! { core.web.value(key) }
+fn value(key: String) -[Browser]> String Never! { core.web.value(key) }
 
-pub fn storage() -> String Never! { "local" }
+fn storage() -> String Never! { "local" }
 
-pub fn auth(kind: String) -> Auth Never! { Auth{kind: kind, client_id: ""} }
+fn auth(kind: String) -> Auth Never! { Auth{kind: kind, client_id: ""} }
 
-pub fn auth_oauth(auth: Auth, client_id: String) -> Auth Never! {
+fn auth_oauth(auth: Auth, client_id: String) -> Auth Never! {
     Auth{kind: "oauth", client_id: client_id}
 }
 
-pub fn auth_routes(auth: Auth) -> [String] Never! {
+fn auth_routes(auth: Auth) -> [String] Never! {
     if {
         auth.kind == "oauth" -> return [String]{"/auth/login", "/auth/callback", "/auth/logout"}
         else -> [String]{"/login", "/logout"}
     }
 }
 
-pub fn auth_show(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
+fn auth_show(auth: Auth) -> String Never! { "{auth.kind}:{auth.client_id}" }
 
-pub fn live(key: String, data: String) -> LiveQuery Never! { LiveQuery{key: key, data: data, generation: 1, subscribers: 0} }
+fn live(key: String, data: String) -> LiveQuery Never! { LiveQuery{key: key, data: data, generation: 1, subscribers: 0} }
 
-pub fn subscribe(key: String) -> LiveQuery Never! { LiveQuery{key: key, data: "", generation: 1, subscribers: 1} }
+fn subscribe(key: String) -> LiveQuery Never! { LiveQuery{key: key, data: "", generation: 1, subscribers: 1} }
 
-pub fn invalidate(key: String) -> Int Never! { key_token(key) }
+fn invalidate(key: String) -> Int Never! { key_token(key) }
 
-pub fn transact_invalidate(key: String) -> Int Never! { key_token(key) + 1 }
+fn transact_invalidate(key: String) -> Int Never! { key_token(key) + 1 }
 
-pub fn live_get(q: LiveQuery) -> String Never! { q.data }
+fn live_get(q: LiveQuery) -> String Never! { q.data }
 
-pub fn live_show(q: LiveQuery) -> String Never! { "{q.key}@{q.generation}" }
+fn live_show(q: LiveQuery) -> String Never! { "{q.key}@{q.generation}" }
 
-pub fn live_stats() -> String Never! { core.web.live_stats() }
+fn live_stats() -> String Never! {
+    facts :: core.web.__live_stats_snapshot() ?? return "LiveStats(error=live registry unavailable)"
+    "LiveStats(queries={facts.queries},active={facts.active},refreshing={facts.refreshing},limit=1024,evictions={facts.evictions},invalidations={facts.invalidations},ws_pushes={facts.ws_pushes})"
+}
 
-pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { sync_query(q, payload) }
+fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { sync_query(q, payload) }
 
-pub fn sync(key: String, data: String) -> String Never! {
+fn sync(key: String, data: String) -> String Never! {
     "{key}:{data}"
 }
 

@@ -1,0 +1,8 @@
+Error [E1102]: `edit` cannot be shared across channels — it is a view that does not live long enough
+  --> write_window_cannot_cross_channel_boundary.jet:6:17
+    |
+  6 |     sender.send(edit)
+    |                 ^^^^
+ Why: A view is a borrow, not an owned value; tasks and channels move owned values between threads
+ Fix: Send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`
+More: jet-lang.dev/e/E1102

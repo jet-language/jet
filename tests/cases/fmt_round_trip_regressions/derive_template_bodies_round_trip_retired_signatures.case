@@ -1,0 +1,9 @@
+# Port of tests/fmt_round_trip_regressions.rs:44-56. Sources copied verbatim from the original include_str! paths.
+fixture: fixtures/derive_template_bodies_round_trip_retired_signatures
+step: jet fmt derive_loop.jet
+exit: 0
+file: derive_loop.jet ~ fn $method(self) -> String { field.$name } # Original formatter substring assertion.
+copy: derive_loop.jet derive_loop.jet.once
+step: jet fmt derive_loop.jet
+exit: 0
+file: derive_loop.jet == derive_loop.jet.once

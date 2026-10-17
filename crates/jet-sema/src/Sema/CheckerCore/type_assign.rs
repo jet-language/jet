@@ -3,7 +3,7 @@ use crate::Diagnostics::{Diagnostic, Span};
 use crate::Generics::{e0905, e0909, generic_depth_exceeded, substitute_type, COMPARABLE};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::CheckerCoreLib::{
-    core_type_known, data_renamed_to_datatree, layout_handle_renamed_to_layout,
+    core_type_known, data_renamed_to_dyn, layout_handle_renamed_to_layout,
     phantom_fact_menu_diag, retired_acronym_spelling_diag, retired_authority_vocabulary_diag,
 };
 use crate::Sema::Diagnostics::{
@@ -13,7 +13,7 @@ use crate::Sema::Diagnostics::{
 };
 use crate::Sema::{Checker, KnowledgeGate, KnowledgePlane, TypeDef};
 use crate::Syntax;
-use crate::AST::Type;
+use crate::AST::{AccessConvention, Type};
 
 fn union_member_has_open_shape(ty: &Type) -> bool {
     match ty {
@@ -107,6 +107,52 @@ pub(crate) fn reject_never_value_positions(
         | Type::TraitObject(_)
         | Type::Measure(_)
         | Type::Named(_) => {}
+    }
+}
+
+/// D-NEVER2=B / D-CALLBACK-ERR1=A: an explicit `Never` type argument may fill
+/// only a failure-domain type parameter, one the signature names as a `!`
+/// domain (`fn(T) -> U E!`). In any other parameter it is a value position.
+pub(crate) fn sig_names_failure_domain(sig: &crate::AST::FuncSig, param: &str) -> bool {
+    sig.params
+        .iter()
+        .any(|(_, ty)| type_names_failure_domain(ty, param))
+        || sig
+            .return_type
+            .as_ref()
+            .is_some_and(|ty| type_names_failure_domain(ty, param))
+}
+
+fn type_names_failure_domain(ty: &Type, param: &str) -> bool {
+    match ty {
+        Type::Result { ok, err } => {
+            matches!(err.as_ref(), Type::Named(name) if name == param)
+                || type_names_failure_domain(ok, param)
+                || type_names_failure_domain(err, param)
+        }
+        Type::List(inner)
+        | Type::Shared(inner)
+        | Type::Option(inner)
+        | Type::Tagged { inner, .. }
+        | Type::FixedList { elem: inner, .. }
+        | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } => type_names_failure_domain(inner, param),
+        Type::Map { key, value, .. } => {
+            type_names_failure_domain(key, param) || type_names_failure_domain(value, param)
+        }
+        Type::Fn { params, ret, .. } => {
+            params.iter().any(|ty| type_names_failure_domain(ty, param))
+                || ret
+                    .as_ref()
+                    .is_some_and(|ty| type_names_failure_domain(ty, param))
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            args.iter().any(|ty| type_names_failure_domain(ty, param))
+        }
+        Type::Tuple(fields) => fields
+            .iter()
+            .any(|(_, field)| type_names_failure_domain(field, param)),
+        _ => false,
     }
 }
 
@@ -281,9 +327,9 @@ impl<'a> Checker<'a> {
                     self.diags.push(type_hole_diag(span));
                     return;
                 }
-                // D-SERDE13=B: the retired `Data` spelling points at `DataTree`.
+                // D-SERDE13=B: the retired `Data` spelling points at `Dyn`.
                 if n == "Data" {
-                    self.diags.push(data_renamed_to_datatree(span));
+                    self.diags.push(data_renamed_to_dyn(span));
                     return;
                 }
                 // D-LAYOUT-CTOR1: the retired `LayoutHandle` spelling points at `Layout`.
@@ -350,13 +396,37 @@ impl<'a> Checker<'a> {
                 if core_type_known(n) {
                     return;
                 }
+                if n.rsplit_once('.').is_some_and(|(alias, leaf)|
+                    self.core_imports.get(alias)
+                        .is_some_and(|module| self.core_private_native_type(module, leaf)))
+                {
+                    return;
+                }
+                // Compiler-owned IO annotations are internal to vetted Core,
+                // just like Core-only failure record literals; no export is added.
+                if matches!(n.as_str(), Syntax::TYPE_IO_OPERATION | "IOContext")
+                    && self.module_is_core_source(self.module_idx)
+                {
+                    return;
+                }
+                // Native private carriers can be named only in the cataloged
+                // Core module that owns them, without adding a public export.
+                if self.module_is_core_source(self.module_idx)
+                    && n.starts_with("__")
+                    && self.modules.and_then(|modules| modules.get(self.module_idx))
+                        .is_some_and(|state| jet_foundation::CoreModuleExports::core_source_modules()
+                            .iter().any(|source| source.alias == state.module_alias
+                                && jet_foundation::CoreModuleExports::core_leaf_kind(source.module, n).is_some()))
+                {
+                    return;
+                }
                 if self.type_param_scope.iter().any(|p| p.name == *n) {
                     return;
                 }
                 if self.trait_reg.is_trait_name(n) {
                     return;
                 }
-                if self.registry.is_type_alias(n) {
+                if self.type_alias_binding(n).is_some() {
                     self.diags.push(Diagnostic::error(
                         "E0119",
                         format!("`{}` is a type alias and needs type arguments", n),
@@ -382,6 +452,13 @@ impl<'a> Checker<'a> {
                 if self.registry.contains(n) {
                     return;
                 }
+                if let Some(owner) = self.name_ledger.namespace_owner(self.module_idx, n)
+                    .or_else(|| self.name_ledger.generated_type_owner(n))
+                {
+                    if self.modules.is_some_and(|modules| modules[owner].registry.contains(n)) {
+                        return;
+                    }
+                }
                 // Canonical imported nominals are already resolved. Keep the
                 // fully-qualified identity through validation; only the leaf
                 // is projected for the owning module's registry lookup.
@@ -405,6 +482,15 @@ impl<'a> Checker<'a> {
                 // D-CORE-USELIST1=A: a grouped Core item import
                 // (`use core.web.forms.[WebFormError]`) names that module's
                 // public source record.
+                if self.core_item_imports.get(n).zip(self.core_imports.get(n))
+                    .is_some_and(|(item, module)| crate::Sema::CheckerCoreLib::core_module_type_item(module, item))
+                {
+                    let resolved = self.resolve_type(Type::Named(n.clone()));
+                    if !matches!(&resolved, Type::Named(name) if name == n) {
+                        self.check_declared_type_rules(&resolved, span);
+                        return;
+                    }
+                }
                 if let Some(leaf) = self.core_item_imports.get(n.as_str()) {
                     if self
                         .struct_owner_module(n, None)
@@ -457,6 +543,7 @@ impl<'a> Checker<'a> {
                     .contains("::")
                     .then(|| self.name_ledger.nominal_module(name))
                     .flatten();
+                let unqualified = canonical_owner.is_none() && import_ns.is_none();
                 if lookup_name == "Any" {
                     self.diags.push(no_any_type(span));
                     for arg in args {
@@ -464,46 +551,47 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 }
-                let local_alias = canonical_owner.is_none() && import_ns.is_none();
-                if local_alias {
-                    if let Some((params, target)) = self.registry.type_alias(lookup_name) {
-                        if params.len() != args.len() {
-                            self.diags.push(Diagnostic::error(
-                                "E0119",
-                                format!(
-                                    "`{}` expects {} type argument{}, got {}",
-                                    name,
-                                    params.len(),
-                                    if params.len() == 1 { "" } else { "s" },
-                                    args.len()
-                                ),
-                                "every generic parameter needs a matching type argument"
-                                    .to_string(),
-                                format!(
-                                    "write `{}`<{}>",
-                                    name,
-                                    params
-                                        .iter()
-                                        .map(|p| p.name.as_str())
-                                        .collect::<Vec<_>>()
-                                        .join(", ")
-                                ),
-                                Some(span),
-                            ));
-                        }
-                        for arg in args {
-                            self.check_declared_type_rules(arg, span);
-                        }
-                        let subst: std::collections::HashMap<String, Type> = params
-                            .iter()
-                            .zip(args.iter())
-                            .map(|(p, a)| (p.name.clone(), a.clone()))
-                            .collect();
-                        self.check_declared_type_rules(&substitute_type(target, &subst), span);
-                        return;
+                if let Some((owner, params, target)) = self.type_alias_binding(name) {
+                    let binders: std::collections::HashSet<String> = params.iter()
+                        .map(|param| param.name.clone()).collect();
+                    let target = self.qualify_method_type(owner, target, &binders);
+                    if params.len() != args.len() {
+                        self.diags.push(Diagnostic::error(
+                            "E0119",
+                            format!(
+                                "`{}` expects {} type argument{}, got {}",
+                                name,
+                                params.len(),
+                                if params.len() == 1 { "" } else { "s" },
+                                args.len()
+                            ),
+                            "every generic parameter needs a matching type argument"
+                                .to_string(),
+                            format!(
+                                "write `{}`<{}>",
+                                name,
+                                params
+                                    .iter()
+                                    .map(|p| p.name.as_str())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            ),
+                            Some(span),
+                        ));
                     }
+                    for arg in args {
+                        self.check_declared_type_rules(arg, span);
+                    }
+                    let subst: std::collections::HashMap<String, Type> = params
+                        .iter()
+                        .zip(args.iter())
+                        .map(|(p, a)| (p.name.clone(), a.clone()))
+                        .collect();
+                    self.check_declared_type_rules(&substitute_type(&target, &subst), span);
+                    return;
                 }
-                let core_generic_arity = match import_ns {
+                let source_owned = self.source_owns_nominal(name);
+                let core_generic_arity = if source_owned { None } else { match import_ns {
                     Some(namespace) => self
                         .core_imports
                         .get(namespace)
@@ -521,7 +609,7 @@ impl<'a> Checker<'a> {
                             }
                         }),
                     None => jet_foundation::CoreModuleExports::core_generic_arity(lookup_name),
-                };
+                }};
                 if let Some(expected) = core_generic_arity {
                     if args.len() != expected {
                         self.diags.push(Diagnostic::error(
@@ -537,8 +625,8 @@ impl<'a> Checker<'a> {
                         ));
                     }
                 }
-                let is_core_generic = core_generic_arity.is_some()
-                    || (local_alias
+                let is_core_generic = !source_owned && (core_generic_arity.is_some()
+                    || (unqualified
                         && matches!(
                             lookup_name,
                             "Task"
@@ -585,7 +673,7 @@ impl<'a> Checker<'a> {
                             // and one nominal space; transforms carry two.
                             | "Point2" | "Delta2" | "Transform" | "Transform2" | "Ray2"
                         ))
-                    || (local_alias && is_core_view_generic(ty));
+                    || (unqualified && is_core_view_generic(ty)));
                 if is_core_generic
                     && matches!(
                         lookup_name,
@@ -673,12 +761,16 @@ impl<'a> Checker<'a> {
                     }
                     return;
                 }
-                if is_core_generic
-                    && lookup_name == "ExpiringSecret"
+                let source_expiring_secret =
+                    jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                        && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret");
+                let source_formal = self.module_path.ends_with("Core/crypto/vault.jet")
+                    && args.first().is_some_and(|arg| matches!(arg,
+                        Type::Named(parameter) if self.type_param_scope.iter().any(|p| p.name == *parameter)));
+                if (is_core_generic && lookup_name == "ExpiringSecret" || source_expiring_secret)
                     && (args.len() != 1
-                        || !args
-                            .first()
-                            .is_some_and(crate::Sema::Diagnostics::is_expiring_secret_member_type))
+                        || !args.first().is_some_and(|arg|
+                            crate::Sema::Diagnostics::is_expiring_secret_member_type(arg) || source_formal))
                 {
                     self.diags.push(Diagnostic::error(
                             "E0112",
@@ -1252,22 +1344,12 @@ impl<'a> Checker<'a> {
                 return true;
             }
         }
-        // Function values are structurally assignable. Keep call metadata for
-        // binding a value call, but it cannot make equal callable shapes into
-        // different value types.
-        if matches!((want, got), (Type::Fn { .. }, Type::Fn { .. }))
-            && fn_types_compatible(want, got)
+        // Call metadata does not distinguish callable value shapes, including
+        // slots nested inside containers. Keep directional obligations
+        // separate from the strict nominal-identity judgment.
+        if self.type_identity_with_callable_values(want, got, true)
             && Type::obligations_satisfy(want, got)
         {
-            return true;
-        }
-        // A qualified constructor carries the owning module in its nominal
-        // spelling, while a value from an imported signature may still carry
-        // the source leaf. Treat those spellings as one struct type before
-        // the ordinary mismatch diagnostics run. The helper is deliberately
-        // limited to registered structs and their type arguments; enum,
-        // trait, and tagged nominal identity remain distinct mechanisms.
-        if self.nominal_type_identity(want, got) {
             return true;
         }
         if Type::compute_tensor_compatible(want, got) {
@@ -1403,17 +1485,31 @@ impl<'a> Checker<'a> {
         false
     }
 
-    /// S48 (syntax-decisions.md:1613; spec.md:839, ratified): a
-    /// trait name in type position (`fn f(s: Shape)`) means dynamic dispatch
-    /// with INVISIBLE boxing. A concrete value whose type implements the
-    /// named trait therefore MEETS that slot — sema decides acceptance only;
-    /// the box itself is materialised by the slot-driven boxing lowering
-    /// already applies to a `[Shape]` list element (`TCallArg::box_as_trait`
-    /// / `preserve_typed_list_shape`), never by a second mechanism here.
-    ///
-    /// Single-trait only (the S48 shape). A multi-name `TraitObject` is the
-    /// D-ANY-JAI1 variadic loop element, which has no one `Box<dyn T>` to
-    /// coerce toward and stays on the ordinary equality path.
+    /// Whether the declared slot has the existing trait-object meaning.
+    pub(crate) fn is_trait_parameter(&self, ty: &Type) -> bool {
+        matches!(ty, Type::TraitObject(_))
+            || matches!(ty, Type::Named(name)
+                if self.trait_reg.is_trait_name(name) && !self.registry.contains(name))
+    }
+
+    pub(crate) fn borrowed_trait_parameter(&self, ty: &Type, access: AccessConvention) -> bool {
+        access != AccessConvention::Move && self.is_trait_parameter(ty)
+    }
+
+    pub(crate) fn trait_parameter_identity(&self, want: &Type, got: &Type) -> bool {
+        match (want, got) {
+            (Type::Named(name), Type::TraitObject(bounds))
+            | (Type::TraitObject(bounds), Type::Named(name))
+                if bounds.len() == 1
+                    && self.trait_reg.is_trait_name(name)
+                    && !self.registry.contains(name) =>
+            {
+                self.same_declared_name_identity(name, &bounds[0])
+            }
+            _ => self.nominal_type_identity(want, got),
+        }
+    }
+
     pub(crate) fn trait_slot_accepts(&self, want: &Type, got: &Type) -> bool {
         // A value that already IS the trait value needs no coercion: an
         // unresolved bare-trait parameter spelling can equal the argument's
@@ -1436,6 +1532,18 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn nominal_type_identity(&self, want: &Type, got: &Type) -> bool {
+        self.type_identity_with_callable_values(want, got, false)
+    }
+
+    fn type_identity_with_callable_values(
+        &self,
+        want: &Type,
+        got: &Type,
+        callable_values: bool,
+    ) -> bool {
+        if callable_values && matches!((want, got), (Type::Fn { .. }, Type::Fn { .. })) {
+            return fn_types_compatible(want, got);
+        }
         if want == got {
             return true;
         }
@@ -1463,11 +1571,15 @@ impl<'a> Checker<'a> {
                     && want_args
                         .iter()
                         .zip(got_args)
-                        .all(|(want, got)| self.nominal_type_identity(want, got))
+                        .all(|(want, got)| {
+                            self.type_identity_with_callable_values(want, got, callable_values)
+                        })
             }
             (Type::List(want), Type::List(got))
             | (Type::Shared(want), Type::Shared(got))
-            | (Type::Option(want), Type::Option(got)) => self.nominal_type_identity(want, got),
+            | (Type::Option(want), Type::Option(got)) => {
+                self.type_identity_with_callable_values(want, got, callable_values)
+            }
             (
                 Type::Result {
                     ok: want_ok,
@@ -1478,8 +1590,8 @@ impl<'a> Checker<'a> {
                     err: got_err,
                 },
             ) => {
-                self.nominal_type_identity(want_ok, got_ok)
-                    && self.nominal_type_identity(want_err, got_err)
+                self.type_identity_with_callable_values(want_ok, got_ok, callable_values)
+                    && self.type_identity_with_callable_values(want_err, got_err, callable_values)
             }
             (
                 Type::Map {
@@ -1493,8 +1605,8 @@ impl<'a> Checker<'a> {
                     ..
                 },
             ) => {
-                self.nominal_type_identity(want_key, got_key)
-                    && self.nominal_type_identity(want_value, got_value)
+                self.type_identity_with_callable_values(want_key, got_key, callable_values)
+                    && self.type_identity_with_callable_values(want_value, got_value, callable_values)
             }
             (
                 Type::FixedList {
@@ -1507,12 +1619,16 @@ impl<'a> Checker<'a> {
                     len: got_len,
                     ..
                 },
-            ) => want_len == got_len && self.nominal_type_identity(want_elem, got_elem),
+            ) => {
+                want_len == got_len
+                    && self.type_identity_with_callable_values(want_elem, got_elem, callable_values)
+            }
             (Type::Tuple(want_fields), Type::Tuple(got_fields)) => {
                 want_fields.len() == got_fields.len()
                     && want_fields.iter().zip(got_fields).all(
                         |((want_name, want), (got_name, got))| {
-                            want_name == got_name && self.nominal_type_identity(want, got)
+                            want_name == got_name
+                                && self.type_identity_with_callable_values(want, got, callable_values)
                         },
                     )
             }
@@ -1528,7 +1644,7 @@ impl<'a> Checker<'a> {
                             .enumerate()
                             .position(|(index, got_member)| {
                                 !matched[index]
-                                    && self.nominal_type_identity(want_member, got_member)
+                                    && self.type_identity_with_callable_values(want_member, got_member, callable_values)
                             })
                     else {
                         return false;
@@ -1546,7 +1662,9 @@ impl<'a> Checker<'a> {
                     marker: got_marker,
                     inner: got_inner,
                 },
-            ) if want_marker == got_marker => self.nominal_type_identity(want_inner, got_inner),
+            ) if want_marker == got_marker => {
+                self.type_identity_with_callable_values(want_inner, got_inner, callable_values)
+            }
             (
                 Type::Tagged {
                     marker:
@@ -1566,7 +1684,7 @@ impl<'a> Checker<'a> {
                         ),
                     inner,
                 },
-            ) => self.nominal_type_identity(inner, other),
+            ) => self.type_identity_with_callable_values(inner, other, callable_values),
             (
                 Type::Quantity {
                     base: want_base,
@@ -1576,7 +1694,9 @@ impl<'a> Checker<'a> {
                     base: got_base,
                     dimension: got_dimension,
                 },
-            ) if want_dimension == got_dimension => self.nominal_type_identity(want_base, got_base),
+            ) if want_dimension == got_dimension => {
+                self.type_identity_with_callable_values(want_base, got_base, callable_values)
+            }
             _ => false,
         }
     }
@@ -1593,47 +1713,37 @@ impl<'a> Checker<'a> {
         // file alias (`vis2.bank.Account`) before display projection. Resolve
         // both through the ledger's one display map instead of comparing
         // spellings or inventing another alias table.
-        let current_prefix = self
-            .modules
-            .and_then(|modules| modules.get(self.module_idx))
-            .map(|module| format!("{}.", module.module_alias));
-        // A named helper, not a closure: the returned iterator borrows the
-        // caller's `name`, and a closure would tie that borrow to the
-        // closure's own inferred lifetime.
-        fn visible_spellings<'n>(
-            name: &'n str,
-            current_prefix: Option<&'n str>,
-        ) -> impl Iterator<Item = &'n str> {
-            std::iter::once(name).chain(current_prefix.and_then(|prefix| name.strip_prefix(prefix)))
-        }
+        let current_alias = self.name_ledger.module_alias(self.module_idx);
+        let stripped = current_alias.and_then(|alias|
+            spelling.strip_prefix(alias).and_then(|rest| rest.strip_prefix('.')));
         let Some(modules) = self.modules else {
             return None;
         };
         // A bare built-in spelling (`Path`) is the built-in, never a loaded
         // record that merely shares its leaf (`core.files.path`'s `Path`).
         let bare_builtin = namespace.is_none() && Syntax::typed_head_kind(spelling).is_some();
-        for (owner, module) in modules.iter().enumerate() {
-            for candidate in module.registry.types.keys() {
-                if owner != self.module_idx && !self.type_is_pub_in(owner, candidate) {
-                    continue;
-                }
-                if bare_builtin && self.record_distinct_from_builtin(owner, candidate) {
-                    continue;
-                }
-                let display =
-                    self.name_ledger
-                        .display_path(self.module_idx, candidate, Some(owner));
-                let matches = display
-                    .as_deref()
-                    .into_iter()
-                    .chain(std::iter::once(candidate.as_str()))
-                    .any(|target| {
-                        visible_spellings(spelling, current_prefix.as_deref())
-                            .any(|name| name == target)
-                    });
-                if matches {
-                    return Some(self.canonical_nominal_name(owner, candidate));
-                }
+        let candidates = self.name_ledger.declarations_named(leaf)
+            .chain(self.name_ledger.display_declarations(self.module_idx, spelling))
+            .chain(stripped.into_iter().flat_map(|name|
+                self.name_ledger.display_declarations(self.module_idx, name)));
+        for declaration in candidates {
+            let owner = declaration.module;
+            let candidate = &declaration.name;
+            if !modules[owner].registry.contains(candidate) {
+                continue;
+            }
+            if owner != self.module_idx && !self.type_is_pub_in(owner, candidate) {
+                continue;
+            }
+            if bare_builtin && self.record_distinct_from_builtin(owner, candidate) {
+                continue;
+            }
+            let display = self.name_ledger.display_path(self.module_idx, candidate, Some(owner));
+            let matches = display.as_deref().into_iter()
+                .chain(std::iter::once(candidate.as_str()))
+                .any(|target| std::iter::once(spelling).chain(stripped).any(|name| name == target));
+            if matches {
+                return Some(self.canonical_nominal_name(owner, candidate));
             }
         }
         None
@@ -1670,19 +1780,15 @@ impl<'a> Checker<'a> {
             })?;
         let owner = self
             .struct_owner_module(leaf, namespace)
-            .or_else(|| {
-                modules.iter().enumerate().find_map(|(idx, module)| {
-                    (module.module_alias == source.alias && module.registry.contains(leaf))
-                        .then_some(idx)
-                })
-            })?;
+            .or_else(|| self.name_ledger.module_by_alias(source.alias)
+                .filter(|&owner| modules[owner].registry.contains(leaf)))?;
         modules
             .get(owner)
             .filter(|module| module.registry.contains(leaf))?;
         Some((source.module, leaf))
     }
 
-    fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
+    pub(crate) fn same_declared_name_identity(&self, want: &str, got: &str) -> bool {
         if want == got {
             return true;
         }

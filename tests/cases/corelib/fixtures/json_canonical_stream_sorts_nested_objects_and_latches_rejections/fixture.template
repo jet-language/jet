@@ -1,0 +1,67 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {
+    output :: files.create("{work}/canonical.json") ?? panic("create")
+    writer :: json.writer(^output, encoding.EncodingLimits.safe(), true) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+    writer.write(encoding.DataEvent.Key("z")) ?? panic("key")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("nested object")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("int")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+    writer.write(encoding.DataEvent.Text("x")) ?? panic("text")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("nested end")
+    writer.write(encoding.DataEvent.ArrayEnd) ?? panic("array end")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+    writer.write(encoding.DataEvent.Bool(true)) ?? panic("bool")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("object end")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish twice")
+
+    data := Dyn.Object([
+        "z": Dyn.Array([Dyn.Int(1), Dyn.Object(["b": Dyn.Int(2), "a": Dyn.Text("x")])]),
+        "a": Dyn.Bool(true),
+    ])
+    print(json.canonical(data) ?? panic("value is not canonical JSON"))
+
+    duplicate_output :: files.create("{work}/duplicate.json") ?? panic("duplicate create")
+    duplicate_writer :: json.writer(^duplicate_output, encoding.EncodingLimits.safe(), true) ?? panic("duplicate writer")
+    duplicate_writer.write(encoding.DataEvent.ObjectStart) ?? panic("duplicate object")
+    duplicate_writer.write(encoding.DataEvent.Key("same")) ?? panic("first key")
+    duplicate_writer.write(encoding.DataEvent.Int(1)) ?? panic("first value")
+    duplicate_result :: duplicate_writer.write(encoding.DataEvent.Key("same"))
+    if duplicate_result == {
+        .Ok(_) -> { print("duplicate-missed") }
+        .Err(first) -> {
+            again :: duplicate_writer.finish()
+            if again == {
+                .Ok(_) -> { print("terminal-missed") }
+                .Err(second) -> { print(first.reason == second.reason) }
+            }
+        }
+    }
+
+    limits := encoding.EncodingLimits.safe()
+    limits.max_item_bytes = 8
+    limited_output :: files.create("{work}/limited.json") ?? panic("limited create")
+    limited_writer :: json.writer(^limited_output, limits, true) ?? panic("limited writer")
+    limited_writer.write(encoding.DataEvent.ObjectStart) ?? panic("limited object")
+    limited_writer.write(encoding.DataEvent.Key("long")) ?? panic("limited key")
+    limited_writer.write(encoding.DataEvent.Text("value")) ?? panic("limited value")
+    limited_result :: limited_writer.write(encoding.DataEvent.ObjectEnd)
+    if limited_result == {
+        .Ok(_) -> { print("limit-missed") }
+        .Err(first) -> {
+            again :: &limited_writer.flush()
+            if again == {
+                .Ok(_) -> { print("limit-terminal-missed") }
+                .Err(second) -> { print(first.reason == second.reason) }
+            }
+        }
+    }
+}

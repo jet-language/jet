@@ -1,0 +1,7 @@
+# PORT tests/review.rs::review_receipt_fixture_matrix_refuses_a_missing_receipt_path; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_receipt_fixture_matrix_refuses_a_missing_receipt_path.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --base-receipt {work}/missing.jetproof --json
+exit: nonzero
+stdout+stderr: ~ "E2105" # Original contains predicate.
+stdout+stderr: ~ "Could not read receipt" # Original contains predicate.

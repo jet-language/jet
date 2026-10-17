@@ -164,16 +164,6 @@ pub mod jet_email {
     }
 
     impl Limits {
-        pub fn safe() -> Limits {
-            Limits {
-                max_reply_line_bytes: 512,
-                max_reply_lines: 100,
-                max_capabilities: 100,
-                max_recipients: 100,
-                max_message_bytes: 33_554_432,
-                max_auth_challenge_bytes: 4096,
-            }
-        }
 
         pub fn validate(&self) -> Result<(), Error> {
             for (field, value, min, max) in [
@@ -197,12 +187,14 @@ pub mod jet_email {
     // Hidden Rust generic preserves Jet's single canonical Secret type. The
     // byte default keeps direct Prelude consumers well-typed when no secret
     // value is present; runtime entry points still name Vec<u8> explicitly.
+    #[derive(Clone)]
     pub enum SMTPAuth<S = Vec<u8>> {
         None,
         Password { username: String, password: S },
     }
 
-    pub struct DkimConfig<S = Vec<u8>> {
+    #[derive(Clone)]
+    pub struct DKIMConfig<S = Vec<u8>> {
         pub domain: String,
         pub selector: String,
         pub private_key: S,
@@ -215,6 +207,7 @@ pub mod jet_email {
         SystemPlusCa { pem: Vec<u8> },
     }
 
+    #[derive(Clone)]
     pub struct SMTPConfig<S = Vec<u8>> {
         pub host: String,
         pub port: i64,
@@ -223,13 +216,13 @@ pub mod jet_email {
         pub recipient_policy: RecipientPolicy,
         pub trust: TLSTrust,
         pub limits: Limits,
-        pub dkim: JetOutcome<DkimConfig<S>, JetAbsent>,
+        pub dkim: JetOutcome<DKIMConfig<S>, JetAbsent>,
     }
 
     #[derive(Clone, Copy)]
     pub struct RuntimeFns {
-        pub tls_begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
-        pub tls_begin_ca: fn(std::net::TcpStream, &String, &Vec<u8>) -> Result<i64, String>,
+        pub tls_begin: fn(std::net::TcpStream, &str) -> Result<i64, String>,
+        pub tls_begin_ca: fn(std::net::TcpStream, &str, &Vec<u8>) -> Result<i64, String>,
         pub tls_handshake_step: fn(i64) -> Result<bool, String>,
         pub tls_set_poll_timeout: fn(i64, i64) -> Result<(), String>,
         pub tls_read: fn(i64, i64) -> Result<Vec<u8>, String>,
@@ -276,7 +269,7 @@ pub mod jet_email {
                 password: extract(password),
             },
         };
-        let dkim = config.dkim.as_ref().map(|dkim| DkimConfig::<Vec<u8>> {
+        let dkim = config.dkim.as_ref().map(|dkim| DKIMConfig::<Vec<u8>> {
             domain: dkim.domain.clone(),
             selector: dkim.selector.clone(),
             private_key: extract(&dkim.private_key),
@@ -312,83 +305,7 @@ pub mod jet_email {
         if let Ok(dkim) = &mut config.dkim { (runtime.wipe)(&mut dkim.private_key); }
     }
 
-    pub fn smtp_from_env(runtime: RuntimeFns) -> Result<Mailer, Error> {
-        let host = std::env::var("SMTP_HOST")
-            .map_err(|_| error("smtp_from_env", "SMTP_HOST is required"))?;
-        let security_text = std::env::var("SMTP_SECURITY").unwrap_or_else(|_| "starttls".to_string());
-        let security = match security_text.to_ascii_lowercase().as_str() {
-            "starttls" => SMTPSecurity::StartTLS,
-            "tls" => SMTPSecurity::TLS,
-            _ => return Err(error("smtp_from_env", "SMTP_SECURITY must be `starttls` or `tls`")),
-        };
-        let default_port = if security == SMTPSecurity::TLS { 465 } else { 587 };
-        let port = match std::env::var("SMTP_PORT") {
-            Ok(value) => value.parse::<i64>().map_err(|_| error("smtp_from_env", "SMTP_PORT must be an integer"))?,
-            Err(_) => default_port,
-        };
-        let recipient_policy = match std::env::var("SMTP_RECIPIENT_POLICY")
-            .unwrap_or_else(|_| "require_all".to_string()).to_ascii_lowercase().as_str() {
-            "require_all" => RecipientPolicy::RequireAll,
-            "deliver_accepted" => RecipientPolicy::DeliverAccepted,
-            _ => return Err(error("smtp_from_env", "SMTP_RECIPIENT_POLICY must be `require_all` or `deliver_accepted`")),
-        };
-        let trust = match std::env::var("SMTP_CA_PEM") {
-            Ok(mut pem) => TLSTrust::SystemPlusCa { pem: std::mem::take(&mut pem).into_bytes() },
-            Err(_) => TLSTrust::System,
-        };
-        let username = std::env::var("SMTP_USERNAME").ok();
-        let password = std::env::var("SMTP_PASSWORD").ok();
-        let mut auth = match (username, password) {
-            (None, None) => SMTPAuth::<Vec<u8>>::None,
-            (Some(username), Some(mut password)) => {
-                let bytes = std::mem::take(&mut password).into_bytes();
-                SMTPAuth::<Vec<u8>>::Password { username, password: bytes }
-            }
-            (None, Some(mut password)) => {
-                let mut bytes = std::mem::take(&mut password).into_bytes();
-                (runtime.wipe)(&mut bytes);
-                return Err(error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together"));
-            }
-            (Some(_), None) => return Err(error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together")),
-        };
-        let domain = std::env::var("SMTP_DKIM_DOMAIN").ok();
-        let selector = std::env::var("SMTP_DKIM_SELECTOR").ok();
-        let private_key = std::env::var("SMTP_DKIM_PRIVATE_KEY_BASE64").ok();
-        let signed_headers_env = std::env::var("SMTP_DKIM_SIGNED_HEADERS").ok();
-        let dkim = match (domain, selector, private_key) {
-            (None, None, None) if signed_headers_env.is_none() => Err(JetAbsent),
-            (Some(domain), Some(selector), Some(private_key)) => {
-                let mut encoded = private_key.into_bytes();
-                let decoded = decode_dkim_base64(&encoded, runtime.wipe);
-                (runtime.wipe)(&mut encoded);
-                let private_key = match decoded {
-                    Ok(key) => key,
-                    Err(error) => { wipe_auth(&mut auth, runtime); return Err(error); }
-                };
-                let signed_headers = match signed_headers_env {
-                    Some(value) => value.split(',').map(|name| name.trim().to_string()).collect(),
-                    None => default_dkim_headers(),
-                };
-                Ok(DkimConfig::<Vec<u8>> { domain, selector, private_key, signed_headers })
-            }
-            (_, _, Some(private_key)) => {
-                let mut encoded = private_key.into_bytes();
-                (runtime.wipe)(&mut encoded);
-                wipe_auth(&mut auth, runtime);
-                return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
-            }
-            _ => {
-                wipe_auth(&mut auth, runtime);
-                return Err(error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"));
-            }
-        };
-        smtp_bytes(SMTPConfig::<Vec<u8>> { host, port, security, auth, recipient_policy, trust,
-            limits: Limits::safe(), dkim }, runtime)
-    }
 
-    fn wipe_auth(auth: &mut SMTPAuth<Vec<u8>>, runtime: RuntimeFns) {
-        if let SMTPAuth::Password { password, .. } = auth { (runtime.wipe)(password); }
-    }
 
     pub fn validate_smtp_config<S>(config: &SMTPConfig<S>) -> Result<(), Error> {
         config.limits.validate()?;
@@ -420,10 +337,6 @@ pub mod jet_email {
         Ok(())
     }
 
-    fn default_dkim_headers() -> Vec<String> {
-        ["from", "to", "subject", "mime-version", "content-type"]
-            .iter().map(|name| name.to_string()).collect()
-    }
 
     fn valid_dns_name(value: &str) -> bool {
         !value.is_empty() && value.len() <= 253 && value.is_ascii()
@@ -432,7 +345,7 @@ pub mod jet_email {
                 && label.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
     }
 
-    fn validate_dkim_config<S>(dkim: &DkimConfig<S>) -> Result<(), Error> {
+    fn validate_dkim_config<S>(dkim: &DKIMConfig<S>) -> Result<(), Error> {
         if !valid_dns_name(&dkim.domain) {
             return Err(error("dkim", "domain must be a valid ASCII DNS name"));
         }
@@ -558,40 +471,6 @@ pub mod jet_email {
         }
     }
 
-    fn decode_dkim_base64(text: &[u8], wipe: fn(&mut Vec<u8>)) -> Result<Vec<u8>, Error> {
-        if text.is_empty() || text.len() % 4 != 0 {
-            return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-        }
-        let mut out = Vec::new();
-        for (chunk_index, chunk) in text.chunks_exact(4).enumerate() {
-            let last = chunk_index + 1 == text.len() / 4;
-            let pads = usize::from(chunk[3] == b'=') + usize::from(chunk[2] == b'=');
-            if pads > 2 || (!last && pads != 0) || (chunk[2] == b'=' && chunk[3] != b'=') {
-                wipe(&mut out);
-                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-            }
-            let a = base64_value(chunk[0]);
-            let b = base64_value(chunk[1]);
-            let c = if chunk[2] == b'=' { Some(0) } else { base64_value(chunk[2]) };
-            let d = if chunk[3] == b'=' { Some(0) } else { base64_value(chunk[3]) };
-            let (Some(a), Some(b), Some(c), Some(d)) = (a, b, c, d) else {
-                wipe(&mut out);
-                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-            };
-            if (pads == 2 && b & 0x0f != 0) || (pads == 1 && c & 0x03 != 0) {
-                wipe(&mut out);
-                return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"));
-            }
-            out.push(a << 2 | b >> 4);
-            if pads < 2 { out.push(b << 4 | c >> 2); }
-            if pads == 0 { out.push(c << 6 | d); }
-        }
-        if out.len() != 32 {
-            wipe(&mut out);
-            return Err(error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"));
-        }
-        Ok(out)
-    }
 
     #[derive(Clone, Debug, PartialEq)]
     pub struct SMTPReply { pub code: i64, pub lines: Vec<String> }
@@ -868,8 +747,8 @@ pub mod jet_email {
             stream.set_read_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
             stream.set_write_timeout(None).map_err(|e| format!("TLS socket setup failed: {e}"))?;
             let id = match trust {
-                TLSTrust::System => (self.runtime.tls_begin)(stream, &server.to_string()),
-                TLSTrust::SystemPlusCa { pem } => (self.runtime.tls_begin_ca)(stream, &server.to_string(), pem),
+                TLSTrust::System => (self.runtime.tls_begin)(stream, server),
+                TLSTrust::SystemPlusCa { pem } => (self.runtime.tls_begin_ca)(stream, server, pem),
             }?;
             self.stream = RuntimeStream::TLS(id);
             loop {
@@ -1019,7 +898,7 @@ pub mod jet_email {
         std::str::from_utf8(&header[..colon]).ok().map(str::to_ascii_lowercase)
     }
 
-    fn dkim_sign(wire: Vec<u8>, dkim: &DkimConfig<Vec<u8>>, runtime: RuntimeFns)
+    fn dkim_sign(wire: Vec<u8>, dkim: &DKIMConfig<Vec<u8>>, runtime: RuntimeFns)
         -> Result<Vec<u8>, Error>
     {
         let (headers, body) = message_headers(&wire)?;
@@ -1512,7 +1391,7 @@ pub mod jet_email {
         Ok(())
     }
 
-    pub fn address(input: &String) -> Result<Address, Error> {
+    pub fn address(input: &str) -> Result<Address, Error> {
         reject_controls(input, "email address")?;
         let value = input.trim();
         if value.is_empty() || value.len() > 512 {
@@ -1647,7 +1526,7 @@ pub mod jet_email {
         byte.is_ascii_alphanumeric() || matches!(byte, b'!' | b'#' | b'$' | b'%' | b'&' | b'\'' | b'*' | b'+' | b'-' | b'/' | b'=' | b'?' | b'^' | b'_' | b'`' | b'{' | b'|' | b'}' | b'~' | b'.')
     }
 
-    pub fn attachment(filename: &String, mime: &String, bytes: &Vec<u8>) -> Result<Attachment, Error> {
+    pub fn attachment(filename: &str, mime: &str, bytes: &Vec<u8>) -> Result<Attachment, Error> {
         reject_controls(filename, "attachment filename")?;
         reject_controls(mime, "attachment content type")?;
         if filename.trim().is_empty() || filename.contains('/') || filename.contains('\\') {
@@ -1664,16 +1543,16 @@ pub mod jet_email {
         if bytes.len() > MAX_ATTACHMENT_BYTES {
             return Err(error("LimitExceeded", format!("attachment exceeds {MAX_ATTACHMENT_BYTES} bytes")));
         }
-        Ok(Attachment { filename: filename.clone(), mime: mime.to_ascii_lowercase(), bytes: bytes.clone() })
+        Ok(Attachment { filename: filename.to_owned(), mime: mime.to_ascii_lowercase(), bytes: bytes.clone() })
     }
 
     pub fn message(
         from: &Address,
         to: &Vec<Address>,
         bcc: &Vec<Address>,
-        subject: &String,
-        text: &String,
-        html: &String,
+        subject: &str,
+        text: &str,
+        html: &str,
         attachments: &Vec<Attachment>,
     ) -> Result<Message, Error> {
         reject_controls(subject, "subject")?;
@@ -1706,8 +1585,8 @@ pub mod jet_email {
         ensure_encoded_header_lines("Subject", subject)?;
         let envelope = default_envelope(from, to, bcc)?;
         Ok(Message {
-            from: from.clone(), to: to.clone(), bcc: bcc.clone(), subject: subject.clone(),
-            text: text.clone(), html: html.clone(), attachments: attachments.clone(), envelope, wire_upper,
+            from: from.clone(), to: to.clone(), bcc: bcc.clone(), subject: subject.to_owned(),
+            text: text.to_owned(), html: html.to_owned(), attachments: attachments.clone(), envelope, wire_upper,
         })
     }
 
@@ -1726,6 +1605,61 @@ pub mod jet_email {
             return Err(error("envelope", format!("email envelope exceeds {MAX_RECIPIENTS} recipients")));
         }
         Ok(Envelope { from: from.clone(), recipients: recipients.clone() })
+    }
+
+    // Private carrier marshaling after Core source validates construction.
+    pub fn address_parts(display: Option<String>, mailbox: String) -> Address {
+        Address { display, mailbox }
+    }
+
+    pub fn attachment_parts(filename: String, mime: String, bytes: Vec<u8>) -> Attachment {
+        Attachment { filename, mime, bytes }
+    }
+
+    pub fn envelope_parts(from: Address, recipients: Vec<Address>) -> Envelope {
+        Envelope { from, recipients }
+    }
+
+    #[derive(Clone, Debug)]
+    pub struct __EmailAddressView {
+        pub display: Option<String>,
+        pub mailbox: String,
+    }
+    #[derive(Clone, Debug)]
+    pub struct __EmailAttachmentView {
+        pub filename: String,
+        pub mime: String,
+        pub bytes: Vec<u8>,
+    }
+    #[derive(Clone, Debug)]
+    pub struct __EmailMessageView {
+        pub from: Address,
+        pub to: Vec<Address>,
+        pub bcc: Vec<Address>,
+        pub subject: String,
+        pub text: String,
+        pub html: String,
+        pub attachments: Vec<Attachment>,
+        pub wire_upper: jet_foundation::Numeric::JetInt,
+    }
+    pub fn address_view(value: &Address) -> __EmailAddressView {
+        __EmailAddressView { display: value.display.clone(), mailbox: value.mailbox.clone() }
+    }
+    pub fn attachment_view(value: &Attachment) -> __EmailAttachmentView {
+        __EmailAttachmentView { filename: value.filename.clone(), mime: value.mime.clone(), bytes: value.bytes.clone() }
+    }
+    pub fn message_view(value: &Message) -> __EmailMessageView {
+        __EmailMessageView {
+            from: value.from.clone(), to: value.to.clone(), bcc: value.bcc.clone(),
+            subject: value.subject.clone(), text: value.text.clone(), html: value.html.clone(),
+            attachments: value.attachments.clone(), wire_upper: jet_foundation::Numeric::JetInt::from_i64(value.wire_upper as i64),
+        }
+    }
+    pub fn message_parts(from: Address, to: Vec<Address>, bcc: Vec<Address>, subject: String,
+        text: String, html: String, attachments: Vec<Attachment>, envelope: Envelope,
+        wire_upper: jet_foundation::Numeric::JetInt) -> Message {
+        Message { from, to, bcc, subject, text, html, attachments, envelope,
+            wire_upper: wire_upper.to_native_i64().expect("source checked wire bound") as usize }
     }
 
     impl Message {

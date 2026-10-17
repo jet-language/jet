@@ -18,8 +18,7 @@ impl<'a> Parser<'a> {
 
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): detect `#HTML(`.
     pub(super) fn at_html_marker(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_HTML)
+        self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_HTML)
     }
 
     /// D-HTMLPAIR1 (ratified 2026-07-01, c134): parse `#HTML(Path{"path.html"})` — the file's

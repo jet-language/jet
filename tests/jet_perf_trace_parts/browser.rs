@@ -10,7 +10,7 @@ fn perf_attach_uses_compiler_browser_map_after_source_changes() {
 use core.web as web
 module handlers {
     #Target(JS)
-    pub fn init() { web.on("#field", "input", (ev) => {}) }
+    fn init() { web.on("#field", "input", (ev) => {}) }
 }
 #Target(JS)
 fn run() { handlers.init() }
@@ -108,7 +108,7 @@ fn perf_attach_drives_real_devserver_browser_lifecycle() {
 use core.web as web
 module handlers {
     #Target(JS)
-    pub fn init() { web.on("#field", "input", (ev) => {}) }
+    fn init() { web.on("#field", "input", (ev) => {}) }
 }
 #Target(JS)
 fn run() { handlers.init() }

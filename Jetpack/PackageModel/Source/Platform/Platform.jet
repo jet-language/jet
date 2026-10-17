@@ -4,6 +4,7 @@
 // PATH separators, and executable suffixes live in this one module so platform
 // handling does not drift across providers, the hangar envelope, services,
 // secrets, and trust code.
+use core.sys as pkg_platform_core_sys
 
 OS_LINUX :: prep { "linux" }
 OS_MACOS :: prep { "macos" }
@@ -17,9 +18,9 @@ TIER_ONE_ARCHES :: prep { [String]{ARCH_X64, ARCH_ARM64} }
 
 // An `arch-os` target identity. The fields stay open strings because a host
 // key may name a platform outside tier one; `is_tier_one` reports that fact.
-pub struct PlatformKey {
-    pub arch: String
-    pub os: String
+struct PlatformKey {
+    arch: String
+    os: String
 
     // A tier-one key, or None when either half is outside tier one.
     fn new(arch: String, os: String) -> PlatformKey? Never! {
@@ -31,12 +32,12 @@ pub struct PlatformKey {
     // `linux`/`macos`/`windows` and `x86_64`/`aarch64`.
     fn host() -[Env]> PlatformKey Never! {
         os :: if {
-            sys.is_macos() -> OS_MACOS
-            sys.is_windows() -> OS_WINDOWS
-            sys.is_linux() -> OS_LINUX
-            else -> pkg_ascii_lower(sys.name())
+            pkg_platform_core_sys.is_macos() -> OS_MACOS
+            pkg_platform_core_sys.is_windows() -> OS_WINDOWS
+            pkg_platform_core_sys.is_linux() -> OS_LINUX
+            else -> pkg_ascii_lower(pkg_platform_core_sys.name())
         }
-        raw_arch :: pkg_ascii_lower(sys.arch())
+        raw_arch :: pkg_ascii_lower(pkg_platform_core_sys.arch())
         arch :: if raw_arch == {
             "amd64" | "x64" -> ARCH_X64
             "arm64" -> ARCH_ARM64
@@ -55,7 +56,7 @@ pub struct PlatformKey {
 }
 
 // The host's `arch-os` envelope key (Rust `host_key`).
-pub fn pkg_host_key() -[Env]> String Never! {
+fn pkg_host_key() -[Env]> String Never! {
     PlatformKey.host().envelope_key()
 }
 
@@ -71,12 +72,12 @@ fn pkg_is_tier_one(arch: String, os: String) -> Bool Never! {
     arch_ok && os_ok
 }
 
-pub fn pkg_path_separator_for_os(os: String) -> String Never! {
+fn pkg_path_separator_for_os(os: String) -> String Never! {
     if os == OS_WINDOWS -> return ";"
     ":"
 }
 
-pub fn pkg_exe_suffix_for_os(os: String) -> String Never! {
+fn pkg_exe_suffix_for_os(os: String) -> String Never! {
     if os == OS_WINDOWS -> return ".exe"
     ""
 }

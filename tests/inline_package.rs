@@ -30,7 +30,7 @@ fn inline_package_keeps_pub_package_visibility() {
     name: "inline-visibility"
 }
 
-pub(package) fn secret() -> String {
+fn secret() -> String {
     return "ok"
 }
 
@@ -155,7 +155,7 @@ fn run() {
         .unwrap();
         fs::write(
             root.join("deps/dep/dep.jet"),
-            "pub fn value() -> String { \"dependency\" }\n",
+            "fn value() -> String { \"dependency\" }\n",
         )
         .unwrap();
     }
@@ -377,7 +377,7 @@ fn run() {}
         .find(|entry| entry.diagnostic.code == "E1362")
         .expect("path escape must retain its registered diagnostic");
     assert_eq!(failure.file, path.display().to_string());
-    assert_eq!(failure.source, source);
+    assert_eq!(&*failure.source, source);
     assert!(failure.diagnostic.span.is_some());
 
     let _ = fs::remove_file(outside);
@@ -416,7 +416,7 @@ fn run() {}
         }
         "E1362" => {
             assert_eq!(failure.file, path.display().to_string());
-            assert_eq!(failure.source, source);
+            assert_eq!(&*failure.source, source);
             assert!(failure.diagnostic.span.is_some());
         }
         code => panic!("unexpected symlink diagnostic {code}"),
@@ -537,7 +537,7 @@ fn run() {}
         .find(|entry| entry.diagnostic.code == "E1202")
         .expect("stale lock must use registered E1202");
     assert!(failure.file.ends_with(".jet/lock"), "lock provenance lost: {}", failure.file);
-    assert_eq!(failure.source, lock_source);
+    assert_eq!(&*failure.source, lock_source);
     assert_eq!(fs::read_to_string(&entry).unwrap(), source);
     assert_eq!(fs::read_to_string(&lock).unwrap(), lock_source);
 
@@ -587,10 +587,9 @@ fn inline_package_extraction_matches_extracted_entry_across_build_and_run_tiers(
         assert_eq!(code, 0, "AOT build failed in {}:\n{stderr}", root.display());
     }
 
-    let modes: [&[&str]; 3] = [
+    let modes: [&[&str]; 2] = [
         &["run", "--release", "run.jet"],
         &["run", "run.jet"],
-        &["run", "--interpret", "run.jet"],
     ];
     let mut inline_results = Vec::new();
     let mut extracted_results = Vec::new();

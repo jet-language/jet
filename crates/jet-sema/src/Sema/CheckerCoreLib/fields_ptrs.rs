@@ -13,45 +13,52 @@ impl<'a> Checker<'a> {
         alias_span: Span,
         span: Span,
     ) -> Option<Type> {
-        // Direct type imports (`use core.encoding.[DataTree, DataEvent]`)
+        // Direct type imports (`use core.encoding.[Dyn, DataEvent]`)
         // bind the type name as an alias to the owning Core module. Resolve
-        // its constructors here instead of treating `DataTree.Text` as a
+        // its constructors here instead of treating `Dyn.Text` as a
         // module item lookup.
         if module == "core.encoding"
-            && alias == "DataTree"
-            && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object")
+            && alias == "Dyn"
+            && matches!(name, "Null" | "Bool" | "Int" | "Float" | "Text" | "Bytes" | "DateTime" | "Array" | "Object")
         {
             self.record_import_alias_reference(alias, alias_span);
             return Some(json_ty());
         }
-        if module == "core.encoding"
-            && matches!(alias, "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
-            && self
-                .resolve_enum_variants_cloned(alias)
-                .is_some_and(|variants| variants.contains_key(name))
-        {
-            self.record_import_alias_reference(alias, alias_span);
-            return Some(Type::Named(alias.to_string()));
+        // A grouped public Core type import names the source enum, not its
+        // module. Query its declaring registry before the module-item route.
+        if let Some(item) = self.core_item_imports.get(alias) {
+            if let Some(owner) = self.core_source_enum_owner_module(module, item) {
+                let has_variant = self.modules.is_some_and(|states|
+                    states[owner].registry.enum_variants(item)
+                        .is_some_and(|variants| variants.contains_key(name)));
+                if has_variant {
+                    let identity = self.canonical_nominal_name(owner, item);
+                    self.record_import_alias_reference(alias, alias_span);
+                    return Some(Type::Named(identity));
+                }
+            }
         }
-        // Canonical Core enum imports (`use core.compute.[ComputeError]`,
-        // etc.) keep the imported item alongside its module alias. Resolve
-        // dotted variants through the generated leaf-kind/variant tables
-        // rather than treating the variant as a module member.
-        if let Some(item) = self.core_item_imports.get(alias).cloned() {
-            let is_core_enum = matches!(
-                jet_foundation::CoreModuleExports::core_leaf_kind(module, &item),
-                Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
-            );
-            if is_core_enum
-                && self
-                    .resolve_enum_variants_cloned(&item)
-                    .is_some_and(|variants| variants.contains_key(name))
-            {
-                self.record_import_alias_reference(alias, alias_span);
-                return Some(Type::Named(item));
+        // Native enums retain their catalog leaf identity, not a source-module
+        // nominal synthesized for an imported alias. Borrow the actual case
+        // names instead of cloning a registry under that synthetic identity.
+        if let Some(item) = self.core_item_imports.get(alias) {
+            if self.core_source_enum_owner_module(module, item).is_none() {
+                let variants = super::core_types::core_native_enum_variant_names(module, item);
+                if variants.is_some_and(|variants| variants.contains(&name)) {
+                    let identity = item.clone();
+                    self.record_import_alias_reference(alias, alias_span);
+                    return Some(Type::Named(identity));
+                }
             }
         }
 
+        if matches!(jet_foundation::CoreModuleExports::core_leaf_kind(module, name),
+            Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_)))
+        {
+            if let Some(owner) = self.core_source_enum_owner_module(module, name) {
+                return Some(Type::Named(self.canonical_nominal_name(owner, name)));
+            }
+        }
         let result = match (module, name) {
             ("core.math", "pi" | "e" | "tau" | "infinity" | "nan") => Some(Type::Float),
             // D-ALLOC1/D-ALLOC-C (ratified 2026-06-19): `mem.Arena`, `mem.Bump`,
@@ -62,8 +69,9 @@ impl<'a> Checker<'a> {
             ("core.mem", "Pool") => Some(Type::Named(Syntax::MEM_POOL.to_string())),
             ("core.mem", "Fixed") => Some(Type::Named(Syntax::MEM_FIXED.to_string())),
             ("core.mem", "AllocError") => Some(Type::Named(Syntax::TYPE_ALLOC_ERROR.to_string())),
-            // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` constructs explicit solver state.
-            ("core.compute.solve", "Solver") => Some(Type::Named(Syntax::SOLVER_TYPE.to_string())),
+            ("core.compute.solve", "Solver") => self
+                .core_source_owner_module(module, name)
+                .map(|owner| Type::Named(self.canonical_nominal_name(owner, name))),
             // D-GAME1/2/3 + D-WD10: static sentinels for `game.Scene.new`,
             // `game.Replay.record` and `game.Backend.headless`.
             ("core.game", "Scene") => Some(Type::Named("GameSceneType".to_string())),

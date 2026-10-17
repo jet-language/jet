@@ -1,0 +1,73 @@
+// Exact tests/jetpack_nix_closure_replay.rs:407-556. Existing lock APIs only.
+fn pkg_integration_nix_repeat(value: String, count: Int) -> String {
+    result := ""
+    loop _ in 0..<count -> result = "{result}{value}"
+    result
+}
+fn pkg_integration_nix_digest(value: String) -> String { "sha256-{pkg_integration_nix_repeat(value, 64)}" }
+fn pkg_integration_nix_closure(output: String) -> NixClosureRecord {
+    NixClosureRecord{channel: "nixpkgs-unstable", revision: pkg_integration_nix_repeat("a", 40), system: pkg_host_platform(), index_authority: pkg_integration_nix_repeat("b", 64), derivation: pkg_integration_nix_repeat("c", 64), output: output, nar_hash: "sha256:{pkg_integration_nix_repeat("d", 64)}", size: 1, compression: "none", references: [String]{}, upstream_proof: pkg_integration_nix_digest("e"), cache_key: pkg_integration_nix_repeat("f", 64), project_cas_bundle: pkg_integration_nix_digest("0")}
+}
+fn pkg_integration_nix_envelope(output: String, platform: String) -> LockEnvelope {
+    LockEnvelope{output_hash: output, platform: platform, provenance: "integration-test", catalog_tier: "local-unofficial", catalog_trust: "unverified"}
+}
+#Test("malformed_present_lock_is_a_trust_error_not_a_cache_miss") {
+    scratch :: files.temp_dir("nix-lock-malformed") ?? panic("scratch")
+    path :: files.join(scratch.path, ".jet/lock")
+    files.create_dir_all(files.dirname(path)) ?? panic("parent")
+    files.write(path, "version = [\n") ?? panic("write")
+    if pkg_lock_load_strict(scratch.path) == {
+        .Ok(_) -> panic("malformed present lock must be rejected")
+        .Err(error) -> assert(!error.message().is_empty(), "malformed present lock must be rejected")
+    }
+    if pkg_lock_nix_realization_strict(scratch.path, "pkg@jetpack") == {
+        .Ok(_) -> panic("Nix lookup must not downgrade malformed lock state")
+        .Err(error) -> assert(!error.message().is_empty(), "Nix lookup must not downgrade malformed lock state")
+    }
+}
+#Test("nix_lock_rejects_platform_and_envelope_mismatch") {
+    scratch :: files.temp_dir("nix-lock-platform") ?? panic("scratch")
+    output :: pkg_integration_nix_digest("1")
+    closure :: pkg_integration_nix_closure(output)
+    platform :: pkg_host_platform()
+    mismatch :: if platform == "aarch64-linux" -> "x86_64-linux" else -> "aarch64-linux"
+    if pkg_lock_record_nix_realization(scratch.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, pkg_integration_nix_envelope(output, mismatch)) == {
+        .Ok(_) -> panic("mismatched lock must fail")
+        .Err(error) -> assert(error.message().contains("system does not match"))
+    }
+    assert(!files.exists(files.join(scratch.path, ".jet/lock")), "rejected identity must not publish a project lock")
+    pkg_lock_record_nix_realization(scratch.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, pkg_integration_nix_envelope(output, platform)) ?? panic("record")
+    path :: files.join(scratch.path, ".jet/lock")
+    lock := pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
+    envelope := lock.packages[0].envelope ?? panic("envelope")
+    // Original deliberately writes aarch64-linux even on an aarch64 host.
+    envelope.platform = "aarch64-linux"
+    lock.packages[0].envelope = Val(envelope)
+    files.write(path, pkg_lock_write(lock)) ?? panic("write")
+    if pkg_lock_nix_realization_strict(scratch.path, "pkg@jetpack") == {
+        .Ok(_) -> panic("envelope mismatch must fail")
+        .Err(error) -> assert(error.message().contains("envelope identity"))
+    }
+}
+#Test("nix_lock_receipt_follows_complete_closure_identity") {
+    scratch :: files.temp_dir("nix-lock-identity") ?? panic("scratch")
+    output :: pkg_integration_nix_digest("2")
+    closure := pkg_integration_nix_closure(output)
+    envelope :: pkg_integration_nix_envelope(output, "x86_64-linux")
+    pkg_lock_record_nix_realization(scratch.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, envelope) ?? panic("record")
+    path :: files.join(scratch.path, ".jet/lock")
+    lock := pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
+    receipt :: pkg_integration_nix_digest("9")
+    lock.packages[0].receipt = Val(receipt)
+    files.write(path, pkg_lock_write(lock)) ?? panic("write")
+    pkg_lock_record_nix_realization(scratch.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, envelope) ?? panic("same identity")
+    same :: pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
+    if same.packages[0].receipt == {
+        .Val(value) -> assert_eq(value, receipt)
+        .None -> panic("unchanged identity must preserve receipt")
+    }
+    closure.index_authority = pkg_integration_nix_repeat("d", 64)
+    pkg_lock_record_nix_realization(scratch.path, "pkg", "1.0.0", "pkg@jetpack", output, closure, envelope) ?? panic("changed identity")
+    changed :: pkg_lock_parse(files.read(path) ?? panic("read")) ?? panic("parse")
+    assert(changed.packages[0].receipt == None)
+}

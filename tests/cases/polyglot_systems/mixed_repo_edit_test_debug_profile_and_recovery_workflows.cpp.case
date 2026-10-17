@@ -1,0 +1,153 @@
+# Port of tests/polyglot_systems.rs:1079-1098 (cpp) and all original helpers381-1076.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# Direct needs_native/session_result(s,c)/Finished/program-finished/42: ledger-only PENDING-SEAM(debug-lib), no CLI substitute.
+requires: os:unix
+refused: build-target
+fixture: mixed_repo_edit_test_debug_profile_and_recovery_workflows.cpp.fixture
+write: cpp/package.jet mixed_repo_edit_test_debug_profile_and_recovery_workflows.cpp.package.template
+step: jet run observe/tools.jet
+exit: 0
+capture: cc stdout doc $.cc
+capture: ar stdout doc $.ar
+capture: clang stdout doc $.clang
+capture: strip stdout doc $.strip
+capture: nm stdout doc $.nm
+capture: javac stdout doc $.javac
+capture: node stdout doc $.node
+capture: python3 stdout doc $.python3
+capture: java_home stdout doc $.java_home
+capture: libjvm stdout doc $.libjvm
+capture: strip_flag stdout doc $.strip_flag
+file: {cap:libjvm} is-file # original JAVA_HOME embedded runtime assertion542-547
+step: {cap:clang} -std=c++17 -fPIC -pthread -c -target {jet-build-target} -I {work}/cpp counter.cpp -o counter.o
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: {cap:ar} rcs libcounter_impl.a counter.o
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+file: cpp/.jet/bindings/cpp/counter.jet ~ "jet-ffi-descriptor=" # original ed77c235f tests/polyglot_systems.rs:827-829 generated C++ cache contains descriptor
+file: cpp/.jet/bindings/cpp/counter.provenance ~ "schema=jet-ffi-bridge-provenance-v1\n" # original common provenance
+file: cpp/.jet/bindings/cpp/counter.provenance line ^= "identity=" # original any line starts identity
+file: cpp/.jet/bindings/cpp/counter.provenance ~ "linked-archive=" # original ed77c235f tests/polyglot_systems.rs:833 C++ provenance contains linked archive
+file: cpp/.jet/bindings/cpp/counter.provenance ~ "linked-archive-sha256=" # original ed77c235f tests/polyglot_systems.rs:834 C++ provenance contains linked archive digest
+file: cpp/.jet/bindings/cpp/counter.link is-file
+copy: cpp/libcounter_impl.a archive.before
+append: cpp/libcounter_impl.a "\u0000" # original changed_archive.push(0)
+step: jet run run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+copy: archive.before cpp/libcounter_impl.a
+copy: cpp/counter.hpp source.before
+append: cpp/counter.hpp "\n// stale binding source\n"
+step: jet run run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+copy: source.before cpp/counter.hpp
+step: jet check run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet build --profile=debug run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet test --coverage --profile=debug run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+stdout+stderr: ~ "coverage:" # original coverage report
+step: jet run --profile=debug run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.cpp.out
+step: jet perf run run.jet --profile=debug --out {work}/cpp/profile.jettrace
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+file: cpp/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; C++ call853
+file: cpp/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; C++ call853
+file: cpp/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; C++ call853
+file: cpp/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; C++ call853
+step: jet perf view profile.jettrace --json
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original ed77c235f tests/polyglot_systems.rs:680 shared workflow view contains kind; C++ call853
+stdout: ~ "\"flamegraph\":" # original ed77c235f tests/polyglot_systems.rs:681 shared workflow view contains flamegraph; C++ call853
+step: {cap:strip} {cap:strip_flag} libcounter_impl.a
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet run --profile=release run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.cpp.out
+capture: before_descriptor = text file cpp/.jet/bindings/cpp/counter.jet
+capture: stale_descriptor = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") cpp/.jet/bindings/cpp/counter.jet
+cap:stale_descriptor: != "{cap:before_descriptor}" # original replacen changes the cached descriptor
+write: cpp/.jet/bindings/cpp/counter.jet = "{cap:stale_descriptor}"
+step: jet check run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet run --profile=debug run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.cpp.out
+capture: before_target = text file cpp/.jet/bindings/cpp/counter.link
+capture: stale_target = text file.replace_first("target\t{jet-build-target}", "target\tmixed-invalid-target") cpp/.jet/bindings/cpp/counter.link
+cap:stale_target: != "{cap:before_target}" # original ed77c235f tests/polyglot_systems.rs:869-876 target replacen changes link text
+write: cpp/.jet/bindings/cpp/counter.link = "{cap:stale_target}"
+step: jet run run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3201" # original mixed_assert_failed_with helper422-428
+step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet run run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.cpp.out
+capture: before_library = text file cpp/.jet/bindings/cpp/counter.link
+capture: stale_library = text file.replace_first("l\tcounter_impl\n", "l\tcounter_impl_stale\n") cpp/.jet/bindings/cpp/counter.link
+cap:stale_library: != "{cap:before_library}" # original ed77c235f tests/polyglot_systems.rs:888-895 library replacen changes link text
+write: cpp/.jet/bindings/cpp/counter.link = "{cap:stale_library}"
+step: jet run run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+step: jet inspect bind cpp counter.hpp --target {jet-build-target} --clang {cap:clang} --ar {cap:ar} --pkg counter --namespace acme -I {work}/cpp -L {work}/cpp -l counter_impl -l pthread
+cwd: cpp
+env: NO_COLOR=1
+exit: 0
+step: jet run run.jet
+cwd: cpp
+env: NO_COLOR=1
+exit: 0

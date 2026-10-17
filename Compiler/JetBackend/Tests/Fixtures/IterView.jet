@@ -1,0 +1,82 @@
+// Compiler/JetFoundation/Source/Trace/Validate.jet:6,389 loops over a
+// View<CanonicalJSONField>, whose inline fields own String/JSON values.
+// The cursor clones the window into a List snapshot, not just its header.
+use jet_foundation.[
+    MIRBlockID, MIRDropKind, MIRField, MIRFieldValue, MIRFunctionID,
+    MIROperation, MIRPanicLoc, MIRPreludeABI, MIRPreludeFamily, MIRProgram,
+    MIRTerminator, MIRType, MIRTypeDefKind, MIRTypeKind, MIRValueID,
+    mir_field_id, mir_nominal_ref, mir_type_from_kind,
+]
+
+fn fx_iter_view_key(b: &FxBuilder, row: MIRValueID) Never! {
+    key :: fx_values_field(&b, row, "IterViewField", "key", fx_string())
+    fx_print(&b, key)
+}
+
+fn fx_iter_view_loop(b: &FxBuilder, view: MIRValueID, elem: MIRType, step: MIRValueID?, entry: U64) -> U64 Never! {
+    cursor :: fx_iter_init(&b, view, false, step)
+    fx_block(&b, entry, MIRTerminator.Jump{target: MIRBlockID{value: entry + 1}})
+    more :: fx_copy(&b, fx_bool(), MIROperation.LoopIterHasNext{call: fx_prelude_id("core.loop", "loop_iter_has_next"), cursor: cursor})
+    fx_block(&b, entry + 1, MIRTerminator.Branch{condition: more, then_target: MIRBlockID{value: entry + 2}, else_target: MIRBlockID{value: entry + 3}})
+    item :: fx_iter_value(&b, cursor, elem, false)
+    fx_iter_view_key(&b, item)
+    fx_do(&b, MIROperation.LoopIterAdvance{call: fx_prelude_id("core.loop", "loop_iter_advance"), cursor: cursor})
+    fx_block(&b, entry + 2, MIRTerminator.Jump{target: MIRBlockID{value: entry + 1}})
+    fx_do(&b, MIROperation.Drop{value: cursor, kind: MIRDropKind.Value})
+    entry + 3
+}
+
+// expect-stdout iter-owning-view: "first\nthird\nfirst\nskip\nthird\ntail\nfirst\nfirst\ntail\n"
+// expect-runtime-only iter-owning-view
+fn fx_iter_owning_view() -> MIRProgram Never! {
+    b := fx_builder()
+    elem :: fx_named("IterViewField")
+    view_ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("View"), args: [MIRType]{elem}})
+    fields := [MIRValueID]{}
+    loop name in ([String]{"outside", "first", "skip", "third", "tail"}) {
+        key :: fx_strings_literal(&b, name)
+        value :: fx_strings_literal(&b, "owned:{name}")
+        row :: fx_values_struct(&b, "IterViewField", [MIRFieldValue]{
+            MIRFieldValue{field: mir_field_id("IterViewField.key"), value: key},
+            MIRFieldValue{field: mir_field_id("IterViewField.value"), value: value},
+        })
+        &fields.push(row)
+    }
+    owner :: fx_owned(&b, fx_list_type(elem), MIROperation.BuildList{values: fields, trait_coercion: None})
+    first :: fx_int_const(&b, 1)
+    last :: fx_int_const(&b, 4)
+    view :: fx_value(&b, view_ty, fx_borrow(), MIROperation.Slice{
+        call: fx_prelude_id("core.list", "view_new"), base: owner,
+        start: first, end: last, range: None,
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0},
+    })
+    step :: fx_int_const(&b, 2)
+    at := fx_iter_view_loop(&b, view, elem, Val(step), U64{0})
+    // Reusing the view after skipped/remaining snapshot owners have been dropped
+    // proves neither Advance nor cursor destruction touched its source fields.
+    at = fx_iter_view_loop(&b, view, elem, None, at)
+    early :: fx_iter_init(&b, view, false, None)
+    taken :: fx_iter_value(&b, early, elem, true)
+    fx_do(&b, MIROperation.Drop{value: early, kind: MIRDropKind.Value})
+    // A transferred element survives early cursor drop; its owning fields are
+    // independent of the source window and the skipped/remaining snapshot.
+    fx_iter_view_key(&b, taken)
+    fx_do(&b, MIROperation.Drop{value: taken, kind: MIRDropKind.Value})
+    original_first :: fx_list_index(&b, owner, first, elem, false)
+    original_last :: fx_list_index(&b, owner, last, elem, false)
+    fx_iter_view_key(&b, original_first)
+    fx_iter_view_key(&b, original_last)
+    fx_do(&b, MIROperation.Drop{value: view, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: owner, kind: MIRDropKind.Value})
+    fx_block(&b, at, MIRTerminator.Return{value: None})
+    p := fx_iter_program(b)
+    &p.types.push(fx_type_def("IterViewField", MIRTypeDefKind.Struct{fields: [MIRField]{
+        fx_field("IterViewField", "key", fx_string()),
+        fx_field("IterViewField", "value", fx_string()),
+    }, methods: [MIRFunctionID]{}}))
+    row := fx_prelude(MIRPreludeFamily.StaticPrelude, "core.list", "view_new", "jet_view_new", 3, MIRPreludeABI.Value)
+    row.signature.borrow_mask[0] = true
+    &p.prelude_calls.push(row)
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.list", "get", "jet_list_get", 4, MIRPreludeABI.Value))
+    p
+}

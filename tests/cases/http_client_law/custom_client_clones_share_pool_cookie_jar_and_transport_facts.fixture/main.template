@@ -1,0 +1,15 @@
+// Public projection of original Rust bridge driver; raw handle/drop/None chunk assertions stay separate ledger.
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().cookies(.Memory)
+    first :: client.send(http.request("GET", "http://{cap:addr}/cookie")) ?? panic("first")
+    first_bytes :: first.body().bytes(64) ?? panic("first body")
+    print(first_bytes.len())
+    second :: client.send(http.request("GET", "http://{cap:addr}/cookie")) ?? panic("second")
+    print(second.body().text(64) ?? panic("second body"))
+    print(second.protocol())
+    print(second.remote_address() != "")
+    print(second.redirect_history().len())
+    print(second.timings().len())
+    print(second.reused_connection())
+}

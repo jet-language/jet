@@ -14,6 +14,16 @@ use std::fmt::Write as _;
 const SOURCE_MIR_SCHEMA: &str = include_str!("../../JetFoundation/Source/MIR/MIR.jet");
 const SOURCE_SUPPORT_SCHEMAS: &[(&str, &[&str])] = &[
     (
+        include_str!("../../JetFoundation/Source/DerivationTypes.jet"),
+        &[
+            "MIRResourceAccessMode", "MIRResourceIdentity", "MIRResourceRegion",
+            "MIRResourceLayout", "MIRResourceAccess", "MIRFrameCompletion",
+            "MIRFrameOperation", "MIRFrameDependency", "MIRFrameTransfer",
+            "MIRFrameReuse", "MIRFrameRetention", "MIRFrameSchedule",
+            "MIRDerivationMethod", "MIRDerivationDisposition", "MIRDerivationRef",
+        ],
+    ),
+    (
         include_str!("../../JetFoundation/Source/Registry/CoreCalls.jet"),
         &[
             "Effect",
@@ -27,7 +37,7 @@ const SOURCE_SUPPORT_SCHEMAS: &[(&str, &[&str])] = &[
     ),
     (
         include_str!("../../JetFoundation/Source/Types/Types.jet"),
-        &["ParamZone"],
+        &["ParamZone", "SymbolID"],
     ),
     (
         include_str!("../../JetFoundation/Source/Target/Layout.jet"),
@@ -67,6 +77,23 @@ const HOST_SUPPORT_SCHEMAS: &[(&str, &str)] = &[
     ("TargetMachine", include_str!("../../../crates/jet-foundation/src/TargetMachine.rs")),
     ("WebPartition", include_str!("../../../crates/jet-foundation/src/WebPartition.rs")),
 ];
+
+/// Source MIR spells a Unicode scalar as an exact Int; native MIR carries a
+/// Rust char. Project shared scalar values rather than borrowing a nominal
+/// host JetInt: the generated runtime owns a distinct exact-integer carrier.
+/// Decimal text is evaluated only on failure, and is not a character encoding.
+pub(crate) fn source_char_to_host(
+    value: Option<i64>,
+    decimal: impl FnOnce() -> String,
+) -> Result<char, String> {
+    value
+        .and_then(|value| u32::try_from(value).ok())
+        .and_then(char::from_u32)
+        .ok_or_else(|| format!(
+            "MIR integer is not a Unicode scalar: source Int -> host char; decimal value {}",
+            decimal(),
+        ))
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct Field {
@@ -109,12 +136,16 @@ enum TypeExpr {
 
 /// A Source MIR record that stands for one native tuple: Jet spells a native
 /// `(A, B, ..)` as a record over the same fields in order, and a native map as
-/// a list of two-field key/value records.
+/// a list of two-field key/value records. A one-field record with no native
+/// carrier of its own (`SymbolID { key: String }`) stands for its field's
+/// native value.
 #[derive(Clone, Debug)]
 struct PairRecord {
     symbol: String,
     /// Each field's emitted symbol and Source type, in declaration order.
     fields: Vec<(String, String)>,
+    /// Unmangled entity paths for diagnostics from inline tuple/map fields.
+    field_paths: Vec<String>,
 }
 
 impl PairRecord {
@@ -135,6 +166,7 @@ type PairRecords = BTreeMap<String, PairRecord>;
 
 fn pair_records(
     source: &[Definition],
+    host_by_name: &BTreeMap<String, Definition>,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<PairRecords, BootstrapHostCodecError> {
     let mut pairs = PairRecords::new();
@@ -142,9 +174,17 @@ fn pair_records(
         let Body::Struct(fields) = &definition.body else {
             continue;
         };
-        if fields.len() < 2 {
+        let field_carrier = fields.len() == 1
+            && !id_newtype(definition)
+            && !custom_source_converter(&definition.name)
+            && native_type_absent(&definition.name, host_by_name);
+        if fields.len() < 2 && !field_carrier {
             continue;
         }
+        let field_paths = fields
+            .iter()
+            .map(|field| format!("{}.{}", definition.name, field.name))
+            .collect();
         let fields = fields
             .iter()
             .map(|field| {
@@ -159,6 +199,7 @@ fn pair_records(
             PairRecord {
                 symbol: symbols.type_symbol(&definition.name)?.to_string(),
                 fields,
+                field_paths,
             },
         );
     }
@@ -166,16 +207,14 @@ fn pair_records(
 }
 
 /// The host element types of a parsed native tuple type `(A, B, ..)` that a
-/// Source record of the same arity stands for, if it is one.
+/// Source record of the same arity stands for, if it is one; for a one-field
+/// record standing for its field's native value, that native type.
 fn host_tuple_types(
     host_type: &TypeExpr,
     record: &PairRecord,
 ) -> Result<Option<Vec<TypeExpr>>, BootstrapHostCodecError> {
-    let TypeExpr::Named(name) = host_type else {
-        return Ok(None);
-    };
-    let Some(inner) = name.strip_prefix('(').and_then(|rest| rest.strip_suffix(')')) else {
-        return Ok(None);
+    let Some(inner) = host_tuple_inner(host_type) else {
+        return Ok((record.fields.len() == 1).then(|| vec![host_type.clone()]));
     };
     let parts = split_top_level(inner, ',')
         .into_iter()
@@ -191,22 +230,30 @@ fn host_tuple_types(
         .map(Some)
 }
 
+/// The element list of a native tuple type `(A, B, ..)`, if `host_type` is one.
+fn host_tuple_inner(host_type: &TypeExpr) -> Option<&str> {
+    let TypeExpr::Named(name) = host_type else {
+        return None;
+    };
+    name.strip_prefix('(').and_then(|rest| rest.strip_suffix(')'))
+}
+
 /// Append the typed Source-MIR and native-MIR converters to generated host glue.
 pub(crate) fn append_runtime_mir_codec(
     out: &mut String,
     symbols: &BootstrapCodecSymbols<'_>,
 ) -> Result<(), BootstrapHostCodecError> {
-    let mut source = parse_definitions(SOURCE_MIR_SCHEMA)
+    let mut source = parse_definitions(SOURCE_MIR_SCHEMA, SchemaSyntax::Jet)
         .map_err(BootstrapHostCodecError::InvalidMetadata)?;
     for (support_schema, names) in SOURCE_SUPPORT_SCHEMAS {
         source.extend(
-            parse_definitions(support_schema)
+            parse_definitions(support_schema, SchemaSyntax::Jet)
                 .map_err(BootstrapHostCodecError::InvalidMetadata)?
                 .into_iter()
                 .filter(|definition| names.contains(&definition.name.as_str())),
         );
     }
-    let host = parse_definitions(HOST_MIR_SCHEMA).map_err(BootstrapHostCodecError::InvalidMetadata)?;
+    let host = parse_definitions(HOST_MIR_SCHEMA, SchemaSyntax::Rust).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     validate_unique_definitions(&source).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     validate_unique_definitions(&host).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     // Source declarations spell acronyms in capitals (D-ACRO-LEX1); key each
@@ -245,13 +292,13 @@ pub(crate) fn append_runtime_mir_codec(
             Body::Tuple => {}
         }
     }
-    let pairs = pair_records(&source, symbols)?;
+    let pairs = pair_records(&source, &host_by_name, symbols)?;
 
 
     emit_special_structural_converters(out, symbols)?;
     writeln!(
         out,
-        "\n// Typed Source-MIR/native-MIR projection generated from Compiler/JetFoundation/Source/MIR/MIR.jet.\n"
+        "\n// Typed Source-MIR/native-MIR projection generated from MIR/MIR.jet and DerivationTypes.jet.\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
 
@@ -287,12 +334,17 @@ pub(crate) fn append_runtime_mir_codec(
             keep(emit_id_from_host_converter(out, symbols, &host_by_name, &definition.name));
             continue;
         }
+        // The only native-program ingress is the scoped host-shape view below;
+        // a full-program Source copy has no caller after that cutover.
+        if definition.name == "MIRProgram" {
+            continue;
+        }
         if custom_source_converter(&definition.name) || source_only_type(&definition.name) || native_type_absent(&definition.name, &host_by_name) {
             continue;
         }
         keep(match &definition.body {
             Body::Struct(fields) => {
-                emit_struct_from_host_converter(out, symbols, &host_by_name, &pairs, definition, fields)
+                emit_struct_from_host_converter(out, symbols, &host_by_name, &pairs, definition, fields, false)
             }
             Body::Enum(variants) => {
                 emit_enum_from_host_converter(out, symbols, &host_by_name, &pairs, definition, variants)
@@ -320,9 +372,12 @@ pub(crate) fn append_runtime_mir_codec(
             "Source MirProgram must remain a struct".to_string(),
         ));
     }
+    if let Body::Struct(fields) = &program.body {
+        emit_struct_from_host_converter(out, symbols, &host_by_name, &pairs, program, fields, true)?;
+    }
     writeln!(
         out,
-        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_program_from_host(\n    value: &::jet_foundation::MIR::MirProgram,\n) -> Result<{program_source}, String> {{\n    __jet_bootstrap_with_trap_routes(__jet_bootstrap_host_trap_routes(value), || __jet_bootstrap_mir_MIRProgram_from_host(value))\n}}\n"
+        "#[doc(hidden)]\npub(crate) fn __jet_bootstrap_mir_host_shape_program_from_host(\n    value: &::jet_foundation::MIR::MirProgram,\n) -> Result<{program_source}, String> {{\n    __jet_bootstrap_mir_MIRProgram_host_shape_from_host(value)\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
     // Runner's packaging (compiler image, run-from-host wrapper) names the
@@ -410,12 +465,12 @@ fn host_support_definition(path: &str) -> Result<Option<Definition>, String> {
         }
         let input = strip_comments(schema);
         let mut cursor = 0;
-        while let Some((keyword, start)) = find_next_definition(&input, cursor) {
+        while let Some((keyword, start)) = find_next_definition(&input, cursor, SchemaSyntax::Rust) {
             let mut position = start + keyword.len();
             skip_space(&input, &mut position);
             cursor = position;
             if read_identifier(&input, &mut position).ok().as_deref() == Some(name) {
-                return parse_definition_body(&input, keyword, name.to_string(), position)
+                return parse_definition_body(&input, keyword, name.to_string(), position, SchemaSyntax::Rust)
                     .map(|(definition, _)| Some(definition));
             }
         }
@@ -522,6 +577,7 @@ fn emit_struct_from_host_converter(
     pairs: &PairRecords,
     definition: &Definition,
     source_fields: &[Field],
+    shape_only: bool,
 ) -> Result<(), BootstrapHostCodecError> {
     let source = symbols.type_symbol(&definition.name)?;
     let host_path = host_type_path(&definition.name, host_by_name);
@@ -551,6 +607,15 @@ fn emit_struct_from_host_converter(
     let mut initializers = Vec::new();
     for source_field in source_fields {
         let source_field_symbol = symbols.field_symbol(&definition.name, &source_field.name)?;
+        // This is a scoped view, not a round-trip program. Preserve the header
+        // and the four tables read by the canonical Source shape accessor;
+        // unrelated collection rows must never be converted or cloned.
+        if shape_only {
+            if let Some(empty) = host_shape_empty_field(source_field) {
+                initializers.push(format!("        {source_field_symbol}: {empty},"));
+                continue;
+            }
+        }
         if let Some(expression) = custom_struct_field_from_host(&definition.name, &source_field.name) {
             initializers.push(format!("        {source_field_symbol}: {expression},"));
             continue;
@@ -597,13 +662,24 @@ fn emit_struct_from_host_converter(
     writeln!(
         out,
         "fn __jet_bootstrap_mir_{}_from_host(value: &{}) -> Result<{}, String> {{\n{checks}    Ok({} {{\n{}\n    }})\n}}\n",
-        definition.name,
+        if shape_only { format!("{}_host_shape", definition.name) } else { definition.name.clone() },
         host_path,
         source,
         source,
         initializers.join("\n"),
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
+fn host_shape_empty_field(field: &Field) -> Option<&'static str> {
+    if matches!(field.name.as_str(), "types" | "core_owners" | "modules" | "handles") {
+        return None;
+    }
+    match parse_type(&field.ty) {
+        Ok(TypeExpr::List(_)) => Some("::std::vec::Vec::new().into()"),
+        Ok(TypeExpr::Map(..)) => Some("crate::JetMap::new()"),
+        _ => None,
+    }
 }
 
 fn emit_enum_from_host_converter(
@@ -756,11 +832,12 @@ fn emit_id_converter(
 
 /// Source MIR identities are single-`value` records named `…ID`; native MIR
 /// carries them as `u64` newtypes. Enums that happen to end in `ID`
-/// (`MIROptimizationPassID`, `MIRRuntimePartID`) convert structurally.
+/// (`MIROptimizationPassID`, `MIRRuntimePartID`) convert structurally, and a
+/// keyed `SymbolID { key: String }` crosses as its key.
 fn id_newtype(definition: &Definition) -> bool {
     definition.name.ends_with("ID")
         && definition.name != "MIRTypeID"
-        && matches!(definition.body, Body::Struct(_))
+        && matches!(&definition.body, Body::Struct(fields) if matches!(fields.as_slice(), [field] if field.name == "value"))
 }
 
 fn custom_source_converter(name: &str) -> bool {
@@ -928,6 +1005,7 @@ fn emit_struct_converter(
                 &host_field.ty,
                 &format!("value.{}", symbols.field_symbol(&definition.name, &source_field.name)?),
                 pairs,
+                &format!("{}.{}", definition.name, source_field.name),
             )?
         } else {
             return Err(BootstrapHostCodecError::InvalidMetadata(format!(
@@ -1023,7 +1101,14 @@ fn emit_enum_converter(
             .zip(aligned.iter())
             .filter_map(|(host_field, source_index)| source_index.map(|index| (host_field, index)))
             .map(|(host_field, index)| {
-                convert_expression(&source_variant.fields[index].ty, &host_field.ty, &bindings[index], pairs)
+                let field = source_variant.fields[index].name.as_deref().unwrap_or_default();
+                convert_expression(
+                    &source_variant.fields[index].ty,
+                    &host_field.ty,
+                    &bindings[index],
+                    pairs,
+                    &format!("{}::{}.{}", definition.name, source_variant.name, field),
+                )
             })
             .collect::<Result<Vec<_>, _>>()?;
         // A derived Source field is checked against the converted native
@@ -1041,7 +1126,9 @@ fn emit_enum_converter(
                 .collect::<Vec<_>>();
             (lets, (0..values.len()).map(|index| format!("__host_{index}")).collect())
         };
-        let constructor = if host_variant.fields.is_empty() {
+        let constructor = if definition.name == "MIRConstKey" && source_variant.name == "BigInt" {
+            format!("{}::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str({})?)", host_path, bindings[0])
+        } else if host_variant.fields.is_empty() {
             format!("{}::{}", host_path, host_variant.name)
         } else if host_variant.fields.iter().all(|field| field.name.is_some()) {
             let fields = host_variant
@@ -1082,11 +1169,21 @@ fn convert_expression(
     host_type: &str,
     expression: &str,
     pairs: &PairRecords,
+    field_path: &str,
 ) -> Result<String, BootstrapHostCodecError> {
     let source_type = parse_type(source_type).map_err(BootstrapHostCodecError::InvalidMetadata)?;
     let host_type =
         parse_type(&expand_host_aliases(host_type)).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-    convert_type_expression(&source_type, &host_type, expression, pairs)
+    let converted = convert_type_expression(&source_type, &host_type, expression, pairs)?;
+    Ok(with_field_context(&converted, field_path))
+}
+
+/// Keep entity context outside the recursively generated expression, so option,
+/// list and map element failures retain the field that owns them.
+fn with_field_context(expression: &str, field_path: &str) -> String {
+    format!(
+        "(|| -> Result<_, String> {{ Ok({expression}) }})().map_err(|__error| format!(\"{{}}: {{}}\", {field_path:?}, __error))?"
+    )
 }
 
 fn convert_from_host_expression(
@@ -1254,9 +1351,10 @@ fn convert_from_host_type_expression(
         TypeExpr::Named(name) => {
             if let Some(pair) = pair_record(source_type, pairs) {
                 if let Some(host_types) = host_tuple_types(host_type, pair)? {
-                    let parts = (0..host_types.len())
-                        .map(|index| format!("&__pair.{index}"))
-                        .collect::<Vec<_>>();
+                    let parts = match host_tuple_inner(host_type) {
+                        Some(_) => (0..host_types.len()).map(|index| format!("&__pair.{index}")).collect(),
+                        None => vec!["__pair".to_string()],
+                    };
                     let parts = parts.iter().map(String::as_str).collect::<Vec<_>>();
                     let record = source_record_from_host(pair, &host_types, &parts, pairs)?;
                     return Ok(format!("{{ let __pair = {expression}; {record} }}"));
@@ -1301,9 +1399,16 @@ fn host_tuple_from_source(
         .fields
         .iter()
         .zip(host_types)
-        .map(|((symbol, ty), host_type)| {
+        .zip(&record.field_paths)
+        .map(|(((symbol, ty), host_type), field_path)| {
             let source_type = parse_type(ty).map_err(BootstrapHostCodecError::InvalidMetadata)?;
-            convert_type_expression(&source_type, host_type, &format!("({base}).{symbol}"), pairs)
+            let converted = convert_type_expression(
+                &source_type,
+                host_type,
+                &format!("({base}).{symbol}"),
+                pairs,
+            )?;
+            Ok(with_field_context(&converted, field_path))
         })
         .collect::<Result<Vec<_>, BootstrapHostCodecError>>()?;
     Ok(format!("({})", elements.join(", ")))
@@ -1365,6 +1470,11 @@ fn convert_named_from_host(
         ));
     }
     if source_name == "Int" {
+        if matches!(host_type, TypeExpr::Named(name) if name == "char") {
+            return Ok(format!(
+                "jet_foundation::Numeric::JetInt::from_i64(i64::from(u32::from(*({expression}))))"
+            ));
+        }
         return Ok(format!(
             "jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&({expression}).to_string())?)"
         ));
@@ -1549,8 +1659,20 @@ fn convert_named_expression(
         || source_name.starts_with('I')
     {
         if source_name == "Int" {
+            let target = match host_type {
+                TypeExpr::Named(name) => name.as_str(),
+                _ => return Err(BootstrapHostCodecError::InvalidMetadata(
+                    "MIR Int conversion has no named native target type".to_string(),
+                )),
+            };
+            if target == "char" {
+                return Ok(format!(
+                    "{{ let __value = &({expression}); crate::compiler_bootstrap_runtime_mir_codec::source_char_to_host(__value.to_i64(), || __value.to_string_rep())? }}"
+                ));
+            }
+            let diagnostic = format!("MIR integer is outside native range: source Int -> host {target}; decimal value {{}}");
             return Ok(format!(
-                "({expression}).to_string_rep().parse::<_>().map_err(|_| \"MIR integer is outside native range\".to_string())?"
+                "{{ let __decimal = ({expression}).to_string_rep(); __decimal.parse::<_>().map_err(|_| format!({diagnostic:?}, __decimal))? }}"
             ));
         }
         return Ok(format!("({expression}).clone()"));
@@ -1799,7 +1921,9 @@ fn source_field_name(owner: &str, host_field: &str) -> String {
         ("MIRTraitDef", "module")
         | ("MIRImplDef", "module")
         | ("MIRConstantDef", "module") => "module_id".to_string(),
-        ("MIRNameDeclaration", "module") | ("MIRNameAlias", "module") => {
+        ("MIRNameDeclaration", "module")
+        | ("MIRNameAlias", "module")
+        | ("MIRNameDisplayPath", "module") => {
             "module_index".to_string()
         }
         // `comptime` is a Jet keyword, so the Source field carries the prefix.
@@ -1808,9 +1932,14 @@ fn source_field_name(owner: &str, host_field: &str) -> String {
     }
 }
 
-/// A Source field whose native value another field's conversion carries.
+/// A Source field whose native value another field's conversion carries, or a
+/// consumer-built Source-only cache that native MIR never stores (MIRProgram's
+/// type index: empty by default, rebuilt by the lowering that needs it).
 fn source_field_is_host_derived(owner: &str, field: &str) -> bool {
-    matches!((owner, field), ("MIRFunction", "memo_unbounded"))
+    matches!(
+        (owner, field),
+        ("MIRFunction", "memo_unbounded") | ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows")
+    )
 }
 
 /// Native fields that no single Source field maps onto: a fact the native
@@ -1850,6 +1979,11 @@ fn custom_struct_field_from_host(owner: &str, source_field: &str) -> Option<Stri
             "match &value.memo_bound { Some(Some(__bound)) => Ok(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&__bound.to_string())?)), _ => Err(jet_foundation::Outcome::JetAbsent) }".to_string(),
         ),
         ("MIRFunction", "memo_unbounded") => Some("matches!(value.memo_bound, Some(None))".to_string()),
+        // The consumer-built type index is never carried natively; it comes back
+        // empty. JetMap has no Default, but collects from its own pairs.
+        ("MIRProgram", "type_id_rows") | ("MIRProgram", "type_key_rows") => {
+            Some("::std::iter::empty().collect()".to_string())
+        }
         _ => None,
     }
 }
@@ -2032,8 +2166,7 @@ fn emit_binary_overflow_derivation(
          fn __jet_bootstrap_fixed_trap_member(member: &str) -> bool {{\n    member.split_once(\".trap.\").is_some_and(|(width, op)| matches!(width, \"i8\" | \"i16\" | \"i32\" | \"i64\" | \"u8\" | \"u16\" | \"u32\" | \"u64\") && matches!(op, \"add\" | \"sub\" | \"mul\" | \"div\" | \"pow\" | \"shl\" | \"shr\"))\n}}\n\
          fn __jet_bootstrap_with_trap_routes<T>(routes: ::std::collections::BTreeSet<u64>, convert: impl FnOnce() -> Result<T, String>) -> Result<T, String> {{\n    let previous = __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.replace(Some(routes)));\n    let result = convert();\n    __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| *cell.borrow_mut() = previous);\n    result\n}}\n\
          fn __jet_bootstrap_binary_traps(dispatch: &::jet_foundation::MIR::MirBinaryDispatch) -> Result<bool, String> {{\n    match dispatch {{\n        ::jet_foundation::MIR::MirBinaryDispatch::Primitive => Ok(false),\n        ::jet_foundation::MIR::MirBinaryDispatch::Prelude {{ call, .. }} => __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.borrow().as_ref().map(|routes| routes.contains(&call.0))).ok_or_else(|| \"MIR Binary overflow derives from the program's Prelude routes; convert the whole program\".to_string()),\n    }}\n}}\n\
-         fn __jet_bootstrap_source_trap_routes(value: &{program}) -> ::std::collections::BTreeSet<u64> {{\n    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}).collect()\n}}\n\
-         fn __jet_bootstrap_host_trap_routes(value: &::jet_foundation::MIR::MirProgram) -> ::std::collections::BTreeSet<u64> {{\n    value.prelude_calls.iter().filter(|row| matches!(row.family, ::jet_foundation::MIR::MirPreludeFamily::Overflow) && __jet_bootstrap_fixed_trap_member(&row.member)).map(|row| row.id.0).collect()\n}}\n"
+         fn __jet_bootstrap_source_trap_routes(value: &{program}) -> ::std::collections::BTreeSet<u64> {{\n    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}).collect()\n}}\n"
     )
     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
 }
@@ -2151,11 +2284,19 @@ fn generic_inner<'a>(input: &'a str, name: &str) -> Option<&'a str> {
         .and_then(|rest| rest.strip_suffix('>'))
 }
 
-fn parse_definitions(input: &str) -> Result<Vec<Definition>, String> {
+/// Declaration syntax of a parsed schema: the Jet compiler sources declare
+/// items public by default (D-VIS-MODULE1); the Rust host marks them `pub`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SchemaSyntax {
+    Jet,
+    Rust,
+}
+
+fn parse_definitions(input: &str, syntax: SchemaSyntax) -> Result<Vec<Definition>, String> {
     let input = strip_comments(input);
     let mut definitions = Vec::new();
     let mut cursor = 0;
-    while let Some((keyword, start)) = find_next_definition(&input, cursor) {
+    while let Some((keyword, start)) = find_next_definition(&input, cursor, syntax) {
         cursor = start + keyword.len();
         let mut position = cursor;
         skip_space(&input, &mut position);
@@ -2166,7 +2307,7 @@ fn parse_definitions(input: &str) -> Result<Vec<Definition>, String> {
             continue;
         }
         let name = read_identifier(&input, &mut position)?;
-        let (definition, end) = parse_definition_body(&input, keyword, name, position)?;
+        let (definition, end) = parse_definition_body(&input, keyword, name, position, syntax)?;
         definitions.push(definition);
         cursor = end;
     }
@@ -2174,13 +2315,14 @@ fn parse_definitions(input: &str) -> Result<Vec<Definition>, String> {
 }
 
 /// Parse the body of the `struct`/`enum` declaration `name` whose identifier
-/// ends at `position`; returns it and the offset just past the body. `Self`
-/// in a field type is spelled as the declaring type.
+/// ends at `position`; returns it and the offset just past the body. Every
+/// field type is spelled through [`field_type`].
 fn parse_definition_body(
     input: &str,
     keyword: &str,
     name: String,
     mut position: usize,
+    syntax: SchemaSyntax,
 ) -> Result<(Definition, usize), String> {
     skip_space(input, &mut position);
     let body = match input.as_bytes().get(position).copied() {
@@ -2190,30 +2332,27 @@ fn parse_definition_body(
             position = end + 1;
             if keyword == "struct" {
                 Body::Struct(
-                    parse_fields(body)?
+                    match syntax {
+                        SchemaSyntax::Jet => parse_jet_fields(body)?,
+                        SchemaSyntax::Rust => parse_fields(body)?,
+                    }
                         .into_iter()
-                        .map(|field| Field {
-                            ty: spell_self(&field.ty, &name),
-                            ..field
-                        })
-                        .collect(),
+                        .map(|field| Ok(Field { ty: field_type(&field.ty, &name)?, ..field }))
+                        .collect::<Result<_, String>>()?,
                 )
             } else {
                 Body::Enum(
                     parse_variants(body)?
                         .into_iter()
-                        .map(|variant| Variant {
-                            fields: variant
+                        .map(|variant| {
+                            let fields = variant
                                 .fields
                                 .into_iter()
-                                .map(|field| VariantField {
-                                    ty: spell_self(&field.ty, &name),
-                                    ..field
-                                })
-                                .collect(),
-                            ..variant
+                                .map(|field| Ok(VariantField { ty: field_type(&field.ty, &name)?, ..field }))
+                                .collect::<Result<Vec<_>, String>>()?;
+                            Ok(Variant { fields, ..variant })
                         })
-                        .collect(),
+                        .collect::<Result<_, String>>()?,
                 )
             }
         }
@@ -2225,6 +2364,13 @@ fn parse_definition_body(
         _ => return Err(format!("MIR declaration `{name}` has no body")),
     };
     Ok((Definition { name, body }, position))
+}
+
+/// The one spelling of a declared field type in `owner`, whatever the schema
+/// syntax or field form: its declared default dropped, `Self` spelled as
+/// `owner`. Converter names and definitions both read this text.
+fn field_type(ty: &str, owner: &str) -> Result<String, String> {
+    Ok(spell_self(strip_field_default(ty.trim())?, owner))
 }
 
 /// `ty` with each `Self` path segment spelled as `owner`.
@@ -2256,16 +2402,32 @@ fn strip_comments(input: &str) -> String {
         .join("\n")
 }
 
-fn find_next_definition(input: &str, from: usize) -> Option<(&'static str, usize)> {
-    let struct_position = find_keyword(input, "pub struct", from);
-    let enum_position = find_keyword(input, "pub enum", from);
+fn find_next_definition(input: &str, from: usize, syntax: SchemaSyntax) -> Option<(&'static str, usize)> {
+    // A Rust row starts at `pub`, four bytes before its keyword; a Jet row
+    // starts at its keyword in column 0.
+    let (struct_position, enum_position, skip) = match syntax {
+        SchemaSyntax::Rust => (find_keyword(input, "pub struct", from), find_keyword(input, "pub enum", from), 4),
+        SchemaSyntax::Jet => (find_line_keyword(input, "struct", from), find_line_keyword(input, "enum", from), 0),
+    };
     match (struct_position, enum_position) {
-        (Some(left), Some(right)) if left < right => Some(("struct", left + 4)),
-        (Some(_), Some(right)) => Some(("enum", right + 4)),
-        (Some(position), None) => Some(("struct", position + 4)),
-        (None, Some(position)) => Some(("enum", position + 4)),
+        (Some(left), Some(right)) if left < right => Some(("struct", left + skip)),
+        (Some(_), Some(right)) => Some(("enum", right + skip)),
+        (Some(position), None) => Some(("struct", position + skip)),
+        (None, Some(position)) => Some(("enum", position + skip)),
         (None, None) => None,
     }
+}
+
+/// `keyword` as a word starting a line (a Jet top-level declaration).
+fn find_line_keyword(input: &str, keyword: &str, from: usize) -> Option<usize> {
+    let mut cursor = from;
+    while let Some(position) = find_keyword(input, keyword, cursor) {
+        if position == 0 || input.as_bytes()[position - 1] == b'\n' {
+            return Some(position);
+        }
+        cursor = position + keyword.len();
+    }
+    None
 }
 
 fn find_keyword(input: &str, keyword: &str, from: usize) -> Option<usize> {
@@ -2314,6 +2476,51 @@ fn parse_fields(input: &str) -> Result<Vec<Field>, String> {
         fields.push(Field { name, ty });
     }
     Ok(fields)
+}
+
+/// Jet struct fields: one per line, or comma-separated on one line, each
+/// `name: Type` after an optional `priv`. Marker lines carry no shape.
+fn parse_jet_fields(input: &str) -> Result<Vec<Field>, String> {
+    let mut fields = Vec::new();
+    for line in input.lines() {
+        for part in split_top_level(line, ',') {
+            let part = part.trim();
+            if part.is_empty() || part.starts_with('#') {
+                continue;
+            }
+            let part = part.strip_prefix("priv ").map_or(part, str::trim_start);
+            let index = top_level_colon(part).ok_or_else(|| format!("field `{part}` has no type"))?;
+            fields.push(Field {
+                name: part[..index].trim().to_string(),
+                ty: part[index + 1..].trim().to_string(),
+            });
+        }
+    }
+    Ok(fields)
+}
+
+/// A Jet field may declare its default as a typed literal after the type
+/// (`display_paths: [MIRNameDisplayPath]{[MIRNameDisplayPath]{}}`,
+/// `namespace: String?{None}`); the field's type is the text before it.
+fn strip_field_default(ty: &str) -> Result<&str, String> {
+    if !ty.ends_with('}') {
+        return Ok(ty);
+    }
+    let mut depth = 0usize;
+    for (index, character) in ty.char_indices() {
+        match character {
+            '[' | '(' | '<' => depth += 1,
+            ']' | ')' | '>' => depth = depth.saturating_sub(1),
+            '{' if depth == 0 => {
+                if matching_delimiter(ty, index, b'{', b'}')? + 1 == ty.len() {
+                    return Ok(ty[..index].trim_end());
+                }
+                return Ok(ty);
+            }
+            _ => {}
+        }
+    }
+    Ok(ty)
 }
 
 fn parse_named_fields(input: &str) -> Result<Vec<Field>, String> {
@@ -2512,16 +2719,19 @@ fn read_identifier(input: &str, cursor: &mut usize) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_definitions, parse_type, Body, TypeExpr};
+    use super::{host_shape_empty_field, parse_definitions, parse_type, Body, SchemaSyntax, TypeExpr, SOURCE_MIR_SCHEMA};
 
     #[test]
     fn source_schema_parser_retains_nested_typed_rows() {
         let definitions = parse_definitions(
-            "pub struct Row { pub id: Int pub values: [String] pub attrs: [String: ?MirType] }\n\
-             pub enum Choice { Empty Full(name: String, row: Row) }",
+            "struct Row {\n    id: Int\n    values: [String]\n    attrs: [String: ?MirType]\n}\n\
+             enum Choice { Empty Full(name: String, row: Row) }\n\
+             struct Pair { left: Int, priv right: Int }\n\
+             struct Named {\n    namespace: String?{None}\n    paths: [Row]{[Row]{}}\n}",
+            SchemaSyntax::Jet,
         )
         .expect("schema parser");
-        assert_eq!(definitions.len(), 2);
+        assert_eq!(definitions.len(), 4);
         let Body::Struct(fields) = &definitions[0].body else {
             panic!("expected struct");
         };
@@ -2531,12 +2741,22 @@ mod tests {
         };
         assert_eq!(variants[1].fields.len(), 2);
         assert_eq!(variants[1].fields[1].ty, "Row");
+        let Body::Struct(pair) = &definitions[2].body else {
+            panic!("expected struct");
+        };
+        assert_eq!(pair[1].name, "right");
+        // A declared default is not part of the field's type spelling.
+        let Body::Struct(named) = &definitions[3].body else {
+            panic!("expected struct");
+        };
+        assert_eq!(named[0].ty, "String?");
+        assert_eq!(named[1].ty, "[Row]");
     }
 
     #[test]
     fn type_parser_distinguishes_optional_list_and_map() {
         assert_eq!(
-            parse_type("?[String: ?MirType]").expect("type"),
+            parse_type("?[String: ?MIRType]").expect("type"),
             TypeExpr::Optional(Box::new(TypeExpr::Map(
                 Box::new(TypeExpr::Named("String".to_string())),
                 Box::new(TypeExpr::Optional(Box::new(TypeExpr::Named(
@@ -2544,5 +2764,73 @@ mod tests {
                 )))),
             )))
         );
+    }
+
+    #[test]
+    fn mir_char_codec_preserves_scalar_values_and_rejects_invalid_integers() {
+        use jet_foundation::Numeric::{CtBigInt, JetInt};
+        for expected in ['\0', ' ', 'a', 'π', '🙂', '\u{10ffff}'] {
+            let value = JetInt::from_i64(i64::from(u32::from(expected)));
+            assert_eq!(
+                super::source_char_to_host(value.to_i64(), || panic!("valid scalar must not format decimal")),
+                Ok(expected),
+            );
+        }
+        for decimal in ["-9223372036854775809", "-9223372036854775808", "-1", "55296", "57343", "1114112", "4294967296", "9223372036854775807", "18446744073709551615"] {
+            let value = JetInt::from_big(CtBigInt::from_str(decimal).expect("exact integer"));
+            let error = super::source_char_to_host(value.to_i64(), || value.to_string_rep())
+                .expect_err("not a scalar");
+            assert!(error.contains("source Int -> host char"));
+            assert!(error.contains(&format!("decimal value {decimal}")));
+        }
+        let pairs = super::PairRecords::new();
+        for owner in ["MIRConstant::Char.value", "MIRConstKey::Char.value"] {
+            let expression = super::convert_expression("Int", "char", "value", &pairs, owner)
+                .expect("generated scalar converter");
+            assert!(expression.contains("source_char_to_host"));
+            assert!(expression.contains("__value.to_i64()"));
+            assert!(expression.contains("|| __value.to_string_rep()"));
+            assert!(!expression.contains("source_char_to_host(&"));
+            assert_eq!(expression.matches("let __value =").count(), 1);
+            assert!(expression.contains(owner));
+            let reverse = super::convert_from_host_expression("Int", "char", "value", &pairs)
+                .expect("generated codepoint converter");
+            assert!(reverse.contains("u32::from"));
+            assert!(!reverse.contains("from_str"));
+        }
+    }
+
+    #[test]
+    fn mir_bigint_key_schema_and_canonical_carrier_agree() {
+        use jet_foundation::MIR::MirConstKey;
+        use jet_foundation::Numeric::CtBigInt;
+        let source = parse_definitions(super::SOURCE_MIR_SCHEMA, SchemaSyntax::Jet).expect("source schema");
+        let host = parse_definitions(super::HOST_MIR_SCHEMA, SchemaSyntax::Rust).expect("host schema");
+        let source = source.iter().find(|row| row.name == "MIRConstKey").expect("source key");
+        let host = host.iter().find(|row| row.name == "MirConstKey").expect("host key");
+        let (Body::Enum(source), Body::Enum(host)) = (&source.body, &host.body) else {
+            panic!("constant key schemas must be enums");
+        };
+        let source = source.iter().find(|row| row.name == "BigInt").expect("source BigInt");
+        let host = host.iter().find(|row| row.name == "BigInt").expect("host BigInt");
+        assert_eq!(super::align_variant_fields("MIRConstKey", source, host).unwrap(), [Some(0)]);
+        for decimal in ["18446744073709551615", "-9223372036854775809", "999999999999999999999999999999999999999999"] {
+            assert_eq!(MirConstKey::from_bigint(&CtBigInt::from_str(decimal).unwrap()),
+                MirConstKey::BigInt(decimal.to_string()));
+        }
+        for number in [i64::MIN, 0, i64::MAX] {
+            assert_eq!(MirConstKey::from_bigint(&CtBigInt::from_int(number)), MirConstKey::Int(number));
+        }
+    }
+
+    #[test]
+    fn mir_integer_diagnostic_retains_type_field_and_decimal_value() {
+        let expression = super::convert_expression(
+            "Int", "i64", "value", &super::PairRecords::new(), "MIRConstant::Int.value",
+        ).expect("generated checked integer conversion");
+        assert!(expression.contains("MIRConstant::Int.value"));
+        assert!(expression.contains("source Int -> host i64"));
+        assert!(expression.contains("decimal value {}"));
+        assert!(expression.contains("format!"));
     }
 }

@@ -367,9 +367,6 @@ fn ui_snapshots() {
         // Runtime/interpreter diagnostics still use the same exact snapshot
         // product contract as front-end diagnostics.
         let dev_interpreter = src.lines().any(|l| l.trim() == "// @dev_interpreter");
-        // #2906 / E2104: drive the generic cost-projection failure through
-        // the real `jet explain --cost` CLI surface.
-        let cost_cli = src.lines().any(|l| l.trim() == "// @cost_cli");
         // #2906 / E1250: run an offline build against a pinned, unlocked
         // scratch package so the fix names the real `jet update jet` command.
         let jetpack_e1250 = src.lines().any(|l| l.trim() == "// @jetpack_e1250");
@@ -510,7 +507,8 @@ fn ui_snapshots() {
                 .map(|p| p.trim().to_string())
         });
         let (cex_lock, cex_restore) = compiler_extension_env(compiler_extension.as_deref());
-        let actual = if let Some(manifest_source) = lint_policy_config.as_deref() {
+        let actual = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            if let Some(manifest_source) = lint_policy_config.as_deref() {
             let diagnostic = jet::Manifest::parse(Path::new("package.jet"), manifest_source)
                 .expect_err("the lint-policy code fixture must be refused");
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
@@ -613,10 +611,8 @@ fn ui_snapshots() {
             jet::render_diagnostics(&shown_path, &src, &[diagnostic])
         } else if jetpack_e1250 {
             run_jetpack_e1250_snapshot(&path)
-        } else if cost_cli {
-            run_cost_cli_snapshot(&path)
         } else if dev_interpreter {
-            match jet::Interpreter::dev_iteration(&file_arg, runtime_ffi, true) {
+            match crate::common::dev_run(&file_arg, runtime_ffi, true) {
                 jet::Interpreter::RunOutcome::Problems(diags) => {
                     jet::render_diagnostics(&shown_path, &src, &diags)
                 }
@@ -747,9 +743,23 @@ fn ui_snapshots() {
                 Err(diags) => jet::render_diagnostics(&shown_path, &src, &diags),
                 Ok(_) => "(no errors)\n".to_string(),
             }
-        };
+            }
+        }));
         drop(cex_restore);
         drop(cex_lock);
+        let actual = match actual {
+            Ok(actual) => actual,
+            Err(panic) => {
+                let message = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                    .unwrap_or("non-string panic");
+                failures.push(format!("ui fixture panicked for {shown_path}: {message}"));
+                checked += 1;
+                continue;
+            }
+        };
         let actual = normalize_volatile_ui_snapshot(&shown_path, actual);
 
         let is_directory_entry = path
@@ -976,7 +986,7 @@ fn e0507_unknown_traversal_intent_stays_explanatory() {
         .expect("collection-mutation fixture must produce E0507");
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret"])
+        .arg("run")
         .arg(&path)
         .env("NO_COLOR", "1")
         .output()
@@ -1365,30 +1375,16 @@ fn run_jetpack_e1250_snapshot(path: &Path) -> String {
         .output()
         .expect("run E1250 offline build");
     let _ = fs::remove_dir_all(&scratch);
-    assert!(!output.status.success(), "unlocked offline toolchain must fail");
-    let mut rendered = String::from_utf8(output.stdout).expect("E1250 stdout is UTF-8");
+    // A run that succeeds renders that fact into the snapshot, so the suite
+    // records one mismatch for this fixture instead of aborting every other
+    // snapshot comparison.
+    let mut rendered = if output.status.success() {
+        "(jet build exited 0; an unlocked offline toolchain must fail)\n".to_string()
+    } else {
+        String::new()
+    };
+    rendered.push_str(&String::from_utf8(output.stdout).expect("E1250 stdout is UTF-8"));
     rendered.push_str(&String::from_utf8(output.stderr).expect("E1250 stderr is UTF-8"));
-    rendered
-}
-
-fn run_cost_cli_snapshot(path: &Path) -> String {
-    let parent = path.parent().expect("cost fixture parent");
-    let entry = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .expect("cost fixture filename");
-    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["explain", "--cost", entry])
-        .current_dir(parent)
-        .env("NO_COLOR", "1")
-        .output()
-        .expect("run E2104 cost projection fixture");
-    assert!(
-        !output.status.success(),
-        "incomplete generic cost projection must fail"
-    );
-    let mut rendered = String::from_utf8(output.stdout).expect("E2104 stdout is UTF-8");
-    rendered.push_str(&String::from_utf8(output.stderr).expect("E2104 stderr is UTF-8"));
     rendered
 }
 

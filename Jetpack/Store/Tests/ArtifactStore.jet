@@ -117,8 +117,8 @@ fn store_artifact_test_host_limit(store: ArtifactStore) -[FS]> Int? Never! {
     root :: store_artifact_test_root("concurrent")
     store :: store_artifact_test_open(ArtifactStoreConfig.new(root).with_cap_bytes(1024 * 1024).with_reserve_bytes(0).with_lock_wait(time.duration_seconds(3)))
     lock :: store.acquire_lock() ?? panic("test lock")
-    left_store :: ~store
-    right_store :: ~store
+    left_store :: store.copy()
+    right_store :: store.copy()
     left :: task ^left_store { store_artifact_test_published(left_store, "left") }
     right :: task ^right_store { store_artifact_test_published(right_store, "right") }
     time.sleep(time.duration_ms(2200))
@@ -324,7 +324,7 @@ fn store_artifact_test_host_limit(store: ArtifactStore) -[FS]> Int? Never! {
     }
     assert_eq(files.read(destination) ?? panic("read restored"), "artifact")
     info :: files.stat(destination) ?? panic("restored mode")
-    assert((info.mode & 0o111) != 0)
+    assert(((info.mode).bit_and(0o111)) != 0)
     files.write(artifact.path, "broken") ?? panic("corrupt object")
     broken :: store.restore_file(key, destination) ?? panic("restore corrupt")
     if broken == {
@@ -482,4 +482,36 @@ STORE_ARTIFACT_TEST_BUILD_RECORD_V0 :: prep { `{"schema":"jet.build-record/v0","
         BuildNodeRecord{kind: "compile", key: "out", subject: "main", duration_ms: Float{9030.391929}, why_ran: "first-run", inputs: [String]{}},
     })
     assert_eq(record.to_json(), `{"schema":"jet.build-record/v1","program":"main\".jet","nodes":[{"kind":"check","key":"key","subject":"main.jet","duration_ms":1.5,"why_ran":"line\nnext\t","inputs":["a\\b","\u0008\u000c\u007f\u0085"]},{"kind":"compile","key":"out","subject":"main","duration_ms":9030.391929,"why_ran":"first-run","inputs":[]}]}`)
+}
+
+#Test("last-run pointer uses the canonical record codec and binds the program") {
+    bytes :: store_build_last_run_encode("src/run.jet", "record-key") ?? panic("encode last run")
+    assert(store_build_last_run_decode(bytes, "src/run.jet") == Val("record-key"))
+    assert(store_build_last_run_decode(bytes, "other.jet") == None)
+    damaged := bytes
+    damaged[damaged.len() - 1] = damaged[damaged.len() - 1].bit_xor(U8{1})
+    assert(store_build_last_run_decode(damaged, "src/run.jet") == None)
+    assert(store_build_last_run_decode([U8]{}, "src/run.jet") == None)
+}
+
+#Test("latest build record is selected per workspace and program") {
+    cache :: store_artifact_test_root("latest-cache")
+    workspace :: store_artifact_test_root("latest-workspace")
+    other :: store_artifact_test_root("other-workspace")
+    files.create_dir_all(workspace) ?? panic("workspace")
+    files.create_dir_all(other) ?? panic("other workspace")
+    store :: store_artifact_test_store(cache, 1048576)
+    record :: BuildRecord.new("run.jet", [BuildNodeRecord]{
+        BuildNodeRecord{kind: "compile", key: "checked-node", subject: "run.jet", duration_ms: 2.0, why_ran: "source changed", inputs: [String]{"run.jet"}},
+    })
+    _ :: store.publish_last_build_record(workspace, "checked-record", record) ?? panic("publish latest")
+    found :: store.last_build_record(workspace, "run.jet") ?? panic("read latest")
+    assert(found == Val(record))
+    missing :: store.last_build_record(other, "run.jet") ?? panic("read other workspace")
+    assert(missing == None)
+    different :: store.last_build_record(workspace, "other.jet") ?? panic("read other program")
+    assert(different == None)
+    store_artifact_test_cleanup(cache)
+    store_artifact_test_cleanup(workspace)
+    store_artifact_test_cleanup(other)
 }

@@ -1,9 +1,12 @@
 mod scopes;
 mod type_assign;
-pub(crate) use type_assign::{is_core_view_generic, reject_never_value_positions};
+pub(crate) use type_assign::{
+    is_core_view_generic, reject_never_value_positions, sig_names_failure_domain,
+};
 mod blocks;
 mod control_flow;
 mod statements;
+pub(crate) use statements::backward_range_diagnostic;
 mod switches;
 pub(crate) use switches::{
     atomic_absent_optional_subject, collect_window_names, condition_window_names,

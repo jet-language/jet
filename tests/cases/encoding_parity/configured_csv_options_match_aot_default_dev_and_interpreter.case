@@ -1,0 +1,21 @@
+# tests/encoding_parity.rs::configured_csv_options_match_aot_default_dev_and_interpreter
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: configured_csv_options_match_aot_default_dev_and_interpreter.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: = "1\n3\nada\nline1|line2\n1\ntrue\n"
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot

@@ -1,0 +1,42 @@
+// Original semantic-index comparison algorithms over real CLI-produced documents.
+use core.files as files
+use core.encoding.json as json
+
+fn s5f_member(value: Dyn, name: String) -> Dyn {
+    if value == .Object(fields) -> return fields.get(name) ?? panic("missing JSON member {name}")
+    panic("expected JSON object for {name}")
+}
+fn s5f_array(value: Dyn) -> [Dyn] {
+    if value == .Array(values) -> return values
+    panic("expected JSON array")
+}
+fn s5f_text(value: Dyn) -> String {
+    if value == .Text(text) -> return text
+    panic("expected JSON text")
+}
+fn s5f_index(path: String) -> Dyn {
+    raw :: files.read(path) ?? panic("read captured CLI document {path}")
+    document :: json.parse(raw) ?? panic("parse captured CLI document {path}")
+    s5f_member(document, "semindex")
+}
+fn s5f_original_effect_assertions() {
+    index :: s5f_index("effects.json")
+    report_found := false
+    loop definition in s5f_array(s5f_member(index, "definitions")) {
+        if s5f_text(s5f_member(definition, "leaf_name")) == "report" -> report_found = true
+    }
+    assert(report_found, "original report lookup absent")
+    assert(!s5f_array(s5f_member(index, "calls")).is_empty(), "original call edges empty")
+    effects_found := false
+    loop row in s5f_array(s5f_member(index, "effects")) {
+        if !effects_found && s5f_text(s5f_member(row, "function")) == "report" {
+            effects_found = true
+            inferred :: s5f_array(s5f_member(row, "inferred"))
+            direct :: s5f_array(s5f_member(row, "direct"))
+            assert(!inferred.is_empty() || !direct.is_empty(), "original report effects both empty: {json.to_string(row)}")
+        }
+    }
+    assert(effects_found, "original report effect_of absent")
+}
+
+#Test("original report lookup, call edges, direct OR inferred effects") { s5f_original_effect_assertions() }

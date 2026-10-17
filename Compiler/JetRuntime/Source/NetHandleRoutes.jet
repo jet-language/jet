@@ -1,0 +1,383 @@
+// NetHTTP.rs TCP handle policy over Stream56/Listener8 and FD72, never Rust
+// Word limits/counts are raw i64; Duration Word parameters borrow exact ns.
+// List bytes follow RT_HOST_U8_STRIDE. Logical close retains the descriptor.
+fn net_tcp_direction_open(stream: I64, reading: Bool, operation: I64, error: I64) -> Bool {
+    mask :: if reading -> I64{3} else -> I64{5}
+    if (jet_socket_stream_flags_raw(stream).bit_and(mask) == I64{0}) -> return true
+    _ := net_route_fail_take(NET_ERROR_CLOSED, operation, I64{0}, net_route_message(operation, rt_static_text(" failed: socket is closed")), I64{0}, error)
+    false
+}
+fn net_tcp_deadline(stream: I64, reading: Bool, save: I64) {
+    sync_mutex_lock(stream + I64{48})
+    milliseconds :: net_word(stream, if reading -> I64{32} else -> I64{40})
+    sync_mutex_unlock(stream + I64{48})
+    if (milliseconds < I64{0}) {
+        net_put(save, I64{0}, if jet_ctx_deadline_present() -> I64{1} else -> I64{0})
+        net_put(save, I64{8}, jet_ctx_deadline_ms())
+    } else { net_route_deadline_push(milliseconds, save) }
+}
+fn net_tcp_timeout_valid(milliseconds: I64, operation: I64, error: I64) -> Bool {
+    if (milliseconds >= I64{0}) -> return true
+    _ := net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
+    false
+}
+// CommonTypes.rs Duration::as_millis truncates towards zero (-1ns is 0ms, a
+// valid timeout); `/%` floors, so drop the truncated remainder first.
+fn net_deadline_millis(deadline: I64) -> I64 {
+    nanoseconds :: host_native_int(deadline)
+    (nanoseconds - nanoseconds %% I64{1000000}) /% I64{1000000}
+}
+fn net_tcp_wait(state: I64, interest: I64, operation: I64, scratch: I64, error: I64) -> I64 {
+    remaining :: if jet_ctx_deadline_present() -> jet_deadline_remaining_ms() else -> I64{-1}
+    if (jet_ctx_deadline_present() && remaining <= I64{0}) -> return net_route_timeout(operation, error)
+    timeout :: if (remaining < I64{0}) -> I64{-1} else if (remaining > I64{9223372036854}) -> I64{9223372036854775807} else -> remaining * I64{1000000}
+    ready :: jet_socket_ready_raw(state, interest, timeout, scratch)
+    if net_route_wait_stop(operation, error) -> return I64{0}
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (ready < I64{0}) -> return net_route_errno(operation, I64{0}, net_word(scratch, I64{8}), error)
+    if (ready == I64{0}) -> return net_route_timeout(operation, error)
+    ready
+}
+// The seed applies both OS timeout options before each read/write, even though
+// the socket is nonblocking. Preserve that observable error/order contract.
+fn net_tcp_apply_deadlines(stream: I64, operation: I64, scratch: I64, error: I64) -> Bool {
+    if !jet_ctx_deadline_present() -> return true
+    remaining :: jet_deadline_remaining_ms()
+    if (remaining <= I64{0}) {
+        _ := net_route_timeout(operation, error)
+        return false
+    }
+    net_put(scratch, I64{0}, remaining /% I64{1000})
+    net_put(scratch, I64{8}, remaining % I64{1000} * I64{1000})
+    state :: jet_socket_stream_fd_raw(stream)
+    option := I64{20}
+    loop option <= (I64{21}) {
+        result :: net_socket_call(state, I64{54}, I64{1}, option, scratch, I64{16}, I64{0})
+        if (result < I64{0}) {
+            name :: net_route_message(operation, if (option == I64{20}) -> rt_static_text(" read timeout") else -> rt_static_text(" write timeout"))
+            _ := net_route_errno(name, I64{0}, -result, error)
+            jet_rt_string_drop(name)
+            return false
+        }
+        option += I64{1}
+    }
+    true
+}
+fn net_tcp_read_result(stream: I64, limit: I64, output: I64, length: I64, text: Bool, explicit: Bool, error: I64) -> I64 {
+    operation :: rt_static_text("tcp read")
+    if !net_tcp_direction_open(stream, true, operation, error) -> return I64{0}
+    if (limit < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("tcp read limit must be non-negative")), I64{0}, error)
+    cap :: if (limit < I64{16777216}) -> limit else -> I64{16777216}
+    if (cap == I64{0}) {
+        net_put(output, I64{0}, if text -> jet_rt_string_clone(rt_static_text("")) else -> I64{1})
+        if !text -> net_put(length, I64{0}, I64{0})
+        return I64{1}
+    }
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_tcp_deadline(stream, true, scratch + I64{32})
+    result := I64{0}
+    if net_tcp_apply_deadlines(stream, operation, scratch, error) {
+        bytes := jet_rt_alloc(cap * RT_HOST_U8_STRIDE, I64{8})
+        loop {
+            count :: jet_socket_read_raw(jet_socket_stream_fd_raw(stream), bytes, cap, scratch)
+            if (count >= I64{0}) {
+                if text {
+                    result = net_tcp_decode_text(bytes, count, explicit, output, error)
+                } else {
+                    // The output ABI carries len but no capacity; publish exactly
+                    // len slots so its ordinary list destructor has the right layout.
+                    owned :: if (count == I64{0}) -> I64{1} else if (count == cap) -> bytes else -> jet_rt_alloc(count * RT_HOST_U8_STRIDE, I64{8})
+                    if (count != cap && count != I64{0}) -> rt_text_bytes_copy(owned, bytes, count * RT_HOST_U8_STRIDE)
+                    net_put(output, I64{0}, owned)
+                    net_put(length, I64{0}, count)
+                    if (count == cap) -> bytes = I64{0}
+                    result = I64{1}
+                }
+                break
+            }
+            code :: net_word(scratch, I64{8})
+            if (code != I64{11}) {
+                _ := net_route_errno(operation, I64{0}, code, error)
+                break
+            }
+            if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{1}, operation, scratch, error) == I64{0}) -> break
+        }
+        if (bytes != I64{0}) -> jet_rt_free(bytes, cap * RT_HOST_U8_STRIDE, I64{8})
+    }
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+fn net_tcp_decode_text(bytes: I64, count: I64, explicit: Bool, output: I64, error: I64) -> I64 {
+    at := I64{0}
+    loop at < count {
+        width :: rt_text_valid_width(bytes + at * RT_HOST_U8_STRIDE, count - at, RT_HOST_U8_STRIDE)
+        if (width < I64{0}) {
+            message :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(message, if explicit -> rt_static_text("tcp read text failed: ") else -> rt_static_text("tcp read text failed: invalid UTF-8: "))
+            lead :: host_u8_get(bytes, at)
+            expected :: if (lead >= I64{194} && lead <= I64{223}) -> I64{2} else if (lead >= I64{224} && lead <= I64{239}) -> I64{3} else if (lead >= I64{240} && lead <= I64{244}) -> I64{4} else -> I64{1}
+            if (expected > I64{1} && at - width == count) {
+                jet_rt_string_builder_push(message, rt_static_text("incomplete utf-8 byte sequence from index "))
+                rt_text_push_number(message, at)
+            } else {
+                jet_rt_string_builder_push(message, rt_static_text("invalid utf-8 sequence of "))
+                rt_text_push_number(message, -width)
+                jet_rt_string_builder_push(message, rt_static_text(" bytes from index "))
+                rt_text_push_number(message, at)
+            }
+            return net_route_fail_take(NET_ERROR_INVALID_INPUT, rt_static_text("tcp read text"), I64{0}, jet_rt_string_builder_finish(message), I64{0}, error)
+        }
+        at += width
+    }
+    builder :: jet_rt_string_builder_new()
+    if (RT_HOST_U8_STRIDE == I64{1}) {
+        rt_text_append(builder, bytes, count)
+    } else {
+        at = I64{0}
+        loop at < count {
+            rt_text_append(builder, bytes + at * RT_HOST_U8_STRIDE, I64{1})
+            at += I64{1}
+        }
+    }
+    net_put(output, I64{0}, jet_rt_string_builder_finish(builder))
+    I64{1}
+}
+#Export(c) fn jet_net_tcp_read_bytes(stream: I64, limit: I64, output: I64, length: I64, error: I64) -> I64 { net_tcp_read_result(stream, limit, output, length, false, false, error) }
+#Export(c) fn jet_net_tcp_read_text(stream: I64, limit: I64, output: I64, error: I64) -> I64 { net_tcp_read_result(stream, limit, output, I64{0}, true, false, error) }
+#Export(c) fn jet_net_tcp_read(stream: I64, output: I64, error: I64) -> I64 { jet_net_tcp_read_text(stream, I64{8192}, output, error) }
+fn net_tcp_read_deadline(stream: I64, limit: I64, milliseconds: I64, output: I64, length: I64, text: Bool, error: I64) -> I64 {
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, rt_static_text("tcp read"), error) -> return I64{0}
+    save :: jet_rt_alloc(I64{16}, I64{8})
+    net_route_deadline_push(milliseconds, save)
+    result :: net_tcp_read_result(stream, limit, output, length, text, true, error)
+    jet_ctx_pop_deadline(save)
+    jet_rt_free(save, I64{16}, I64{8})
+    result
+}
+#Export(c) fn jet_net_tcp_read_bytes_deadline(stream: I64, limit: I64, deadline: I64, output: I64, length: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, length, false, error) }
+#Export(c) fn jet_net_tcp_read_text_deadline(stream: I64, limit: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_read_deadline(stream, limit, net_deadline_millis(deadline), output, I64{0}, true, error) }
+fn net_tcp_write_current(stream: I64, data: I64, length: I64, scratch: I64, error: I64) -> I64 {
+    operation :: rt_static_text("tcp write")
+    if !net_tcp_direction_open(stream, false, operation, error) -> return I64{-1}
+    if !net_tcp_apply_deadlines(stream, operation, scratch, error) -> return I64{-1}
+    loop {
+        count :: jet_socket_write_raw(jet_socket_stream_fd_raw(stream), data, length, scratch)
+        if (count >= I64{0}) -> return count
+        code :: net_word(scratch, I64{8})
+        if (code != I64{11}) {
+            _ := net_route_errno(operation, I64{0}, code, error)
+            return I64{-1}
+        }
+        if (net_tcp_wait(jet_socket_stream_fd_raw(stream), I64{4}, operation, scratch, error) == I64{0}) -> return I64{-1}
+    }
+}
+fn net_tcp_write_result(stream: I64, data: I64, length: I64, all: Bool, output: I64, error: I64) -> I64 {
+    if (all && length == I64{0}) -> return I64{1}
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_tcp_deadline(stream, false, scratch + I64{32})
+    result := I64{1}
+    offset := I64{0}
+    loop !all || offset < length {
+        count :: net_tcp_write_current(stream, data + offset * RT_HOST_U8_STRIDE, length - offset, scratch, error)
+        if (count < I64{0}) {
+            result = I64{0}
+            break
+        }
+        if (!all) {
+            net_put(output, I64{0}, count)
+            break
+        }
+        if (count == I64{0}) {
+            result = net_route_fail_take(NET_ERROR_CONNECTION_RESET, rt_static_text("tcp write all"), I64{0}, jet_rt_string_clone(rt_static_text("tcp write all failed: zero bytes written")), I64{0}, error)
+            break
+        }
+        offset += count
+    }
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+#Export(c) fn jet_net_tcp_write_bytes(stream: I64, data: I64, length: I64, output: I64, error: I64) -> I64 { net_tcp_write_result(stream, data, length, false, output, error) }
+#Export(c) fn jet_net_tcp_write_all_bytes(stream: I64, data: I64, length: I64, error: I64) -> I64 { net_tcp_write_result(stream, data, length, true, I64{0}, error) }
+fn net_tcp_write_deadline(stream: I64, data: I64, length: I64, milliseconds: I64, all: Bool, output: I64, error: I64) -> I64 {
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, if all -> rt_static_text("tcp write all") else -> rt_static_text("tcp write"), error) -> return I64{0}
+    save :: jet_rt_alloc(I64{16}, I64{8})
+    net_route_deadline_push(milliseconds, save)
+    result :: net_tcp_write_result(stream, data, length, all, output, error)
+    jet_ctx_pop_deadline(save)
+    jet_rt_free(save, I64{16}, I64{8})
+    result
+}
+#Export(c) fn jet_net_tcp_write_bytes_deadline(stream: I64, data: I64, length: I64, deadline: I64, output: I64, error: I64) -> I64 { net_tcp_write_deadline(stream, data, length, net_deadline_millis(deadline), false, output, error) }
+#Export(c) fn jet_net_tcp_write_all_bytes_deadline(stream: I64, data: I64, length: I64, deadline: I64, error: I64) -> I64 { net_tcp_write_deadline(stream, data, length, net_deadline_millis(deadline), true, I64{0}, error) }
+fn net_tcp_write_text_result(stream: I64, text: I64, explicit: Bool, milliseconds: I64, error: I64) -> I64 {
+    if (explicit && jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    length :: rt_text_len(text)
+    bytes :: if (RT_HOST_U8_STRIDE == I64{1} || length == I64{0}) -> rt_text_data(text) else -> jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+    if (RT_HOST_U8_STRIDE != I64{1} && length != I64{0}) {
+        at := I64{0}
+        loop at < length {
+            host_u8_put(bytes, at, rt_text_byte(rt_text_data(text) + at))
+            at += I64{1}
+        }
+    }
+    result :: if explicit -> net_tcp_write_deadline(stream, bytes, length, milliseconds, true, I64{0}, error) else -> jet_net_tcp_write_all_bytes(stream, bytes, length, error)
+    if (RT_HOST_U8_STRIDE != I64{1} && length != I64{0}) -> jet_rt_free(bytes, length * RT_HOST_U8_STRIDE, I64{8})
+    result
+}
+#Export(c) fn jet_net_tcp_write_text(stream: I64, text: I64, error: I64) -> I64 { net_tcp_write_text_result(stream, text, false, I64{0}, error) }
+#Export(c) fn jet_net_tcp_write_text_deadline(stream: I64, text: I64, deadline: I64, error: I64) -> I64 { net_tcp_write_text_result(stream, text, true, net_deadline_millis(deadline), error) }
+#Export(c) fn jet_net_tcp_write(stream: I64, text: I64, error: I64) -> I64 { jet_net_tcp_write_text(stream, text, error) }
+#Export(c) fn jet_net_tcp_shutdown(stream: I64, how: I64, error: I64) -> I64 {
+    if (how < I64{0} || how > I64{2}) {
+        host_record_index_refused()
+        return I64{0}
+    }
+    operation :: rt_static_text("tcp shutdown")
+    if !net_route_stream_open(stream, operation, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    result :: jet_socket_shutdown_raw(jet_socket_stream_fd_raw(stream), how, scratch)
+    code :: net_word(scratch, I64{8})
+    jet_rt_free(scratch, I64{32}, I64{8})
+    if (result < I64{0}) -> return net_route_errno(operation, I64{0}, code, error)
+    jet_socket_stream_mark_shutdown_raw(stream, how)
+    I64{1}
+}
+#Export(c) fn jet_net_tcp_close(stream: I64, error: I64) -> I64 {
+    if (jet_socket_stream_flags_raw(stream).bit_and(I64{1}) != I64{0}) -> return I64{1}
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    result :: jet_socket_shutdown_raw(jet_socket_stream_fd_raw(stream), I64{2}, scratch)
+    code :: net_word(scratch, I64{8})
+    jet_rt_free(scratch, I64{32}, I64{8})
+    if (result < I64{0} && code != I64{107}) -> return net_route_errno(rt_static_text("tcp close"), I64{0}, code, error)
+    jet_socket_stream_mark_closed_raw(stream)
+    I64{1}
+}
+#Export(c) fn jet_net_tcp_ready_deadline(stream: I64, interest: I64, deadline: I64, output: I64, error: I64) -> I64 {
+    milliseconds :: net_deadline_millis(deadline)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (interest < I64{0} || interest > I64{2}) {
+        host_record_index_refused()
+        return I64{0}
+    }
+    operation :: rt_static_text("tcp ready")
+    if !net_route_stream_open(stream, operation, error) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, operation, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_route_deadline_push(milliseconds, scratch + I64{32})
+    mask :: if (interest == I64{0}) -> I64{1} else if (interest == I64{1}) -> I64{4} else -> I64{5}
+    ready :: net_tcp_wait(jet_socket_stream_fd_raw(stream), mask, operation, scratch, error)
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    if (ready == I64{0}) -> return I64{0}
+    value :: jet_rt_alloc(I64{16}, I64{8})
+    net_put(value, I64{0}, if (ready.bit_and(I64{1}) != I64{0}) -> I64{1} else -> I64{0})
+    net_put(value, I64{8}, if (ready.bit_and(I64{4}) != I64{0}) -> I64{1} else -> I64{0})
+    net_put(output, I64{0}, value)
+    I64{1}
+}
+#Export(c) fn jet_net_tcp_accept_deadline(listener: I64, deadline: I64, output: I64, error: I64) -> I64 {
+    milliseconds :: net_deadline_millis(deadline)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if !net_tcp_timeout_valid(milliseconds, rt_static_text("tcp accept"), error) -> return I64{0}
+    save :: jet_rt_alloc(I64{16}, I64{8})
+    net_route_deadline_push(milliseconds, save)
+    result :: jet_net_tcp_accept(listener, output, error)
+    jet_ctx_pop_deadline(save)
+    jet_rt_free(save, I64{16}, I64{8})
+    result
+}
+fn net_tcp_address_text(holder: I64, listener: Bool, peer: Bool, output: I64, error: I64) -> I64 {
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    result :: net_route_socket_address(holder, listener, peer, slot, error)
+    if (result != I64{0}) {
+        address :: net_word(slot, I64{0})
+        net_put(output, I64{0}, net_route_socket_text(address))
+        jet_rt_free(address, I64{56}, I64{8})
+    }
+    jet_rt_free(slot, I64{8}, I64{8})
+    result
+}
+#Export(c) fn jet_net_tcp_local_addr(stream: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(stream, false, false, output, error) }
+#Export(c) fn jet_net_tcp_peer_addr(stream: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(stream, false, true, output, error) }
+#Export(c) fn jet_net_listener_local_addr(listener: I64, output: I64, error: I64) -> I64 { net_tcp_address_text(listener, true, false, output, error) }
+fn net_tcp_show(holder: I64, listener: Bool) -> I64 {
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(scratch, I64{16})
+    builder :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(builder, if listener -> rt_static_text("TcpListener(") else -> rt_static_text("TcpStream("))
+    if (net_tcp_address_text(holder, listener, !listener, scratch, scratch + I64{8}) != I64{0}) {
+        address :: net_word(scratch, I64{0})
+        jet_rt_string_builder_push(builder, address)
+        jet_rt_string_drop(address)
+    } else {
+        failure :: net_word(scratch, I64{8})
+        jet_rt_string_builder_push(builder, if listener -> rt_static_text("address unavailable: ") else -> rt_static_text("peer unavailable: "))
+        host_errno_cause_append(builder, net_word(net_word(failure, NET_ERROR_PAYLOAD), NET_DETAIL_OS_CODE))
+        jet_rt_handle_drop_jet_net_error(failure)
+    }
+    jet_rt_string_builder_push(builder, rt_static_text(")"))
+    jet_rt_free(scratch, I64{16}, I64{8})
+    jet_rt_string_builder_finish(builder)
+}
+#Export(c) fn jet_rt_handle_show_jet_tcp_stream(stream: I64) -> I64 { net_tcp_show(stream, false) }
+#Export(c) fn jet_rt_handle_show_jet_tcp_listener(listener: I64) -> I64 { net_tcp_show(listener, true) }
+#Export(c) fn jet_rt_handle_clone_jet_tcp_listener(listener: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    cloned :: jet_tcp_listener_clone_raw(listener, scratch)
+    if (cloned == I64{0}) {
+        message :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(message, rt_static_text("TcpListener try_clone for spawn capture: "))
+        host_errno_cause_append(message, net_word(scratch, I64{8}))
+        text :: jet_rt_string_builder_finish(message)
+        jet_rt_panic_message(rt_text_data(text), rt_text_len(text))
+        jet_rt_string_drop(text)
+    }
+    jet_rt_free(scratch, I64{32}, I64{8})
+    cloned
+}
+#Export(c) fn jet_net_sendfile(stream: I64, path: I64, output: I64, error: I64) -> I64 {
+    if !net_tcp_direction_open(stream, false, rt_static_text("tcp sendfile"), error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    file :: jet_fd_open_raw(path, I64{1}, I64{0}, scratch)
+    if (file == I64{0}) {
+        result :: if (jet_scheduler_native_propagate() == I64{0}) -> net_route_errno(rt_static_text("tcp sendfile open"), path, net_word(scratch, I64{8}), error) else -> I64{0}
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return result
+    }
+    net_tcp_deadline(stream, false, scratch + I64{32})
+    bytes :: jet_rt_alloc(I64{8192} * RT_HOST_U8_STRIDE, I64{8})
+    written := I64{0}
+    result := I64{1}
+    loop {
+        count :: jet_fd_read_raw(file, bytes, I64{8192}, scratch)
+        if (count < I64{0}) {
+            result = net_route_errno(rt_static_text("tcp sendfile read"), path, net_word(scratch, I64{8}), error)
+            break
+        }
+        if (count == I64{0}) -> break
+        // File reads initialize compact bytes; expand backwards only in the
+        // word-stride epoch, retaining the single reusable transfer buffer.
+        if (RT_HOST_U8_STRIDE != I64{1}) {
+            at := count
+            loop at > (I64{0}) {
+                at -= I64{1}
+                host_u8_put(bytes, at, rt_text_byte(bytes + at))
+            }
+        }
+        if (jet_net_tcp_write_all_bytes(stream, bytes, count, error) == I64{0}) {
+            result = I64{0}
+            break
+        }
+        written = if (written > I64{9223372036854775807} - count) -> I64{9223372036854775807} else -> written + count
+    }
+    jet_rt_free(bytes, I64{8192} * RT_HOST_U8_STRIDE, I64{8})
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_fd_drop_raw(file)
+    jet_rt_free(scratch, I64{48}, I64{8})
+    if (result != I64{0}) -> net_put(output, I64{0}, written)
+    result
+}

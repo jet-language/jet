@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:1752-1777 package_generation_plan_rejects_lossy_external_provider_facts
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: package_generation_plan_rejects_lossy_external_provider_facts.fixture
+env: NO_COLOR=1
+mkdir: project
+mkdir: project/jet-root
+step: jetpack profile plan dev --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 2
+stderr: ~ "E1335" # original contains predicate
+stderr: ~ "lossy or conflicting provider fact" # original contains predicate
+stderr: ~ "exact version, revision, or digest" # original contains predicate
+

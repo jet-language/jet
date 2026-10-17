@@ -1,7 +1,7 @@
 package {
     name: "serde_encoding_xml_stream"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] } }
 }
 
 // D-ENCSTREAM-SURFACE1=A: bounded XML reader/writer lifecycle.
@@ -9,13 +9,13 @@ use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
 
-fn xml_name(local: String) -> DataTree {
-    return DataTree.Object(
+fn xml_name(local: String) -> Dyn {
+    return Dyn.Object(
     [
-        "raw": DataTree.Text(~local),
-        "prefix": DataTree.Null,
-        "local": DataTree.Text(~local),
-        "namespace_uri": DataTree.Null,
+        "raw": Dyn.Text(local.copy()),
+        "prefix": Dyn.Null,
+        "local": Dyn.Text(local.copy()),
+        "namespace_uri": Dyn.Null,
     ],
     )
 }
@@ -23,34 +23,34 @@ fn xml_name(local: String) -> DataTree {
 fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     output :: files.create(path) ?? return Err(err)
     writer :: xml.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
-    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_start"), "encoding": DataTree.Null, "bom": DataTree.Array([])])) ?? return Err(err)
-    semantic :: DataTree.Object(
+    writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_start"), "encoding": Dyn.Null, "bom": Dyn.Array([])])) ?? return Err(err)
+    semantic :: Dyn.Object(
     [
         "name": xml_name("r"),
-        "namespaces": DataTree.Array([]),
-        "attributes": DataTree.Array([]),
-        "empty_style": DataTree.Text("empty"),
+        "namespaces": Dyn.Array([]),
+        "attributes": Dyn.Array([]),
+        "empty_style": Dyn.Text("empty"),
     ],
     )
-    open_lexical :: DataTree.Object(
+    open_lexical :: Dyn.Object(
     [
-        "raw_text": DataTree.Null,
-        "raw_bytes": DataTree.Null,
+        "raw_text": Dyn.Null,
+        "raw_bytes": Dyn.Null,
         "semantic": semantic,
     ],
     )
-    root_event :: DataTree.Object(
+    root_event :: Dyn.Object(
     [
-        "$xml_event": DataTree.Text("element_start"),
+        "$xml_event": Dyn.Text("element_start"),
         "name": xml_name("r"),
-        "namespaces": DataTree.Array([]),
-        "attributes": DataTree.Array([]),
-        "empty_style": DataTree.Text("empty"),
+        "namespaces": Dyn.Array([]),
+        "attributes": Dyn.Array([]),
+        "empty_style": Dyn.Text("empty"),
         "open_lexical": open_lexical,
     ],
     )
     writer.write(root_event) ?? return Err(err)
-    writer.write(DataTree.Object(["$xml_event": DataTree.Text("document_end")])) ?? return Err(err)
+    writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? return Err(err)
     &writer.flush() ?? return Err(err)
     writer.finish() ?? return Err(err)
     return Ok(true)

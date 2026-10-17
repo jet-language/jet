@@ -141,9 +141,10 @@ pub fn validate_typed_boundary_before_lowering(e: &Expr) -> Option<Diagnostic> {
 
 pub(crate) fn operator_label(op: BinOp) -> String {
     match op {
-        BinOp::BitAnd => "the bitwise and operator `&`".to_string(),
-        BinOp::Pow => "the power operator `^`".to_string(),
-        BinOp::BitXor => "the bitwise xor operator `~|`".to_string(),
+        BinOp::BitAnd => "`bit_and`".to_string(),
+        BinOp::BitOr => "`bit_or`".to_string(),
+        BinOp::Pow => "`pow`".to_string(),
+        BinOp::BitXor => "`bit_xor`".to_string(),
         _ => format!("`{}`", op.spell()),
     }
 }
@@ -460,11 +461,10 @@ pub(crate) fn aliasing_while_mut(name: &str, span: Span) -> Diagnostic {
         ),
         "while something is being changed through the write-access marker `&`, nobody else may be looking at it".to_string(),
         format!(
-            "pass the write-access marker `&` (`{}{}`) only once, or copy first with `{}{}`",
+            "pass the write-access marker `&` (`{}{}`) only once, or copy first with `{}`",
             Syntax::SIGIL_WRITE,
             name,
-            Syntax::SIGIL_COPY,
-            name
+            Syntax::copy_call(name)
         ),
         Some(span),
     )
@@ -479,10 +479,26 @@ pub(crate) fn aliasing_mut_after_read(name: &str, span: Span) -> Diagnostic {
         ),
         "while something is being looked at, nobody else may be changing it".to_string(),
         format!(
-            "drop the extra use of `{}`, or copy first with `{}{}`",
+            "drop the extra use of `{}`, or copy first with `{}`",
             name,
-            Syntax::SIGIL_COPY,
-            name
+            Syntax::copy_call(name)
+        ),
+        Some(span),
+    )
+}
+
+/// E0204 (#4702): one call reads a name through an earlier argument and
+/// takes it through a later one, as in `pair(t, ^t)` or `pair(t, t)`.
+pub(crate) fn aliasing_take_while_lent(name: &str, callee: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0204",
+        format!("`{name}` is already lent to this call, so `{callee}` can't take it here too"),
+        format!(
+            "an earlier argument lets `{callee}` read `{name}` for the whole call, so this argument can't hand the same value over"
+        ),
+        format!(
+            "pass a copy to one of the two parameters with `{}`",
+            Syntax::copy_call(name),
         ),
         Some(span),
     )
@@ -696,6 +712,9 @@ pub(crate) fn owned_type_for_read_view(ty: &Type) -> Option<Type> {
 /// (`NominalWalk`) enters each named type once; without the cycle guard it
 /// never terminates.
 fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'_>) -> bool {
+    if type_is_copy(ty) {
+        return true;
+    }
     match ty {
         Type::Int | Type::Bool | Type::Float | Type::String | Type::Char => true,
         Type::IntN { .. } | Type::Float32 => true,
@@ -736,6 +755,9 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'
             walk.leave(name, key);
             result
         }
+        Type::Apply { name, .. }
+            if jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret") => false,
         // A task or imported Arrow batch owns one release duty.  Copying either
         // carrier would hand two bindings the same cleanup authority, so both
         // runtime carriers implement no `Clone` and neither does the language
@@ -743,7 +765,8 @@ fn is_cloneable_rec(ty: &Type, registry: &TypeRegistry, walk: &mut NominalWalk<'
         Type::Apply { name, .. }
             if matches!(
                 name.as_str(),
-                "DataArrowBatch"
+                "Atomic"
+                    | "DataArrowBatch"
                     | "MutationPlan"
                     | "VaultWrite"
                     | "ExpiringSecret"
@@ -927,6 +950,8 @@ pub(crate) fn pattern_variant_name(pattern: &Pattern) -> Option<String> {
         // don't cover a single variant name.
         Pattern::Range { .. }
         | Pattern::Struct { .. }
+        | Pattern::List { .. }
+        | Pattern::Map { .. }
         | Pattern::StrMatch { .. }
         | Pattern::BinMatch { .. } => None,
     }
@@ -1619,7 +1644,7 @@ pub(crate) fn is_core_shown_type(name: &str) -> bool {
 /// Outside the family on purpose: `TaskFailure` (D-FAIL-CARRIER1 owns
 /// cancellation and deadline reporting), `[FieldError]` (a list, not one named
 /// type), and component types no Core call fails with (`DataErrorKind`,
-/// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDnsError`).
+/// `EncodingCause`, `IOContext`, `NetErrorDetail`, `NetDNSError`).
 ///
 /// A source-owned Core error arrives under its canonical owner identity
 /// (`<corelib>/Core/crypto::Core/crypto/uuid.jet::UUIDError`); membership is
@@ -1629,6 +1654,8 @@ pub fn is_core_error_family_type(name: &str) -> bool {
         core_error_family_leaf(name),
         "AppError"
             | "ArchiveError"
+            | "Base32Error"
+            | "Base64Error"
             | "BuildError"
             | "BrowserError"
             | "CBORError"
@@ -1641,6 +1668,7 @@ pub fn is_core_error_family_type(name: &str) -> bool {
             | "EnvError"
             | "FileCryptoError"
             | "HTTPError"
+            | "HexError"
             | "IOError"
             | "MIMEError"
             | "ModError"
@@ -1650,6 +1678,7 @@ pub fn is_core_error_family_type(name: &str) -> bool {
             | "RangeError"
             | "TextError"
             | "TimeError"
+            | "UIHostError"
             | "URLError"
             | "UTF8Error"
             | "UUIDError"
@@ -1697,6 +1726,7 @@ pub(crate) fn is_core_error_type(name: &str) -> bool {
             | "UIHostError"
             | "KeyWrapError"
             | "NetError"
+            | "ParseError"
             | "PluginError"
             | "RangeError"
             | "ServiceError"
@@ -1732,6 +1762,7 @@ pub(crate) fn is_printable(
         Type::Named(n) => {
             registry.is_unit_type(n)
                 || registry.distinct_is_printable(n)
+                || trait_reg.implements_trait(n, Generics::DISPLAY)
                 || trait_reg.implements_trait(n, Generics::PRINTABLE)
                 || is_core_shown_type(n)
         }
@@ -1739,7 +1770,8 @@ pub(crate) fn is_printable(
         Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             (name == "View" && matches!(args.as_slice(), [Type::Named(inner)] if inner == "str"))
-                || (trait_reg.implements_trait(name, Generics::PRINTABLE)
+                || ((trait_reg.implements_trait(name, Generics::DISPLAY)
+                    || trait_reg.implements_trait(name, Generics::PRINTABLE))
                     && args.iter().all(|a| is_printable(a, registry, trait_reg)))
         }
         Type::Tuple(fields) => fields
@@ -1793,7 +1825,6 @@ pub(crate) fn is_displayable(
                 )
         }
         Type::Quantity { .. } => true,
-        Type::Apply { name, .. } if name == "KeyRef" => true,
         Type::Apply { name, args } => {
             let native_composite = matches!(
                 name.as_str(),
@@ -1807,10 +1838,10 @@ pub(crate) fn is_displayable(
                     | "Loadable"
                     | "View"
             );
-            (native_composite
-                || trait_reg.implements_trait(name, Generics::DISPLAY)
-                || trait_reg.implements_trait(name, Generics::PRINTABLE))
-                && args.iter().all(|a| is_displayable(a, type_reg, trait_reg))
+            trait_reg.type_implements_trait(ty, Generics::DISPLAY)
+                || ((native_composite
+                    || trait_reg.implements_trait(name, Generics::PRINTABLE))
+                    && args.iter().all(|a| is_displayable(a, type_reg, trait_reg)))
         }
         Type::Tuple(fields) => fields
             .iter()
@@ -1978,9 +2009,11 @@ pub(crate) fn is_equatable(
         }
         Type::Apply { name, args } => {
             trait_reg.implements_trait(name, Generics::EQUATABLE)
-                && args
-                    .iter()
-                    .all(|arg| is_equatable(arg, registry, trait_reg))
+                && args.iter().enumerate().all(|(index, arg)| {
+                    trait_reg.structural_params.get(name)
+                        .is_some_and(|stored| !stored.contains(&index))
+                        || is_equatable(arg, registry, trait_reg)
+                })
         }
         Type::Tuple(fields) => fields
             .iter()
@@ -2231,6 +2264,9 @@ pub(crate) fn type_is_copy(ty: &Type) -> bool {
         // is Copy at every runtime tier.
         || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_COMPLEX)
         || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_RANGE)
+        // The canonical runtime operation is a payload-free Copy enum, even
+        // though only Core source can name it (not a public type export).
+        || matches!(ty, Type::Named(name) if name == crate::Syntax::TYPE_IO_OPERATION)
 }
 
 pub(crate) fn is_task_type(ty: &Type) -> bool {
@@ -2376,10 +2412,10 @@ pub(crate) fn computed_field_not_settable(field: &str, span: Span) -> Diagnostic
 pub(crate) fn private_item(name: &str, span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0605",
-        format!("`{}` exists but is private to its file", name),
-        "only names marked `pub` can be used from another file (S18)".to_string(),
+        format!("`{}` is private to its module", name),
+        "a `priv module` is usable only by its enclosing module (`priv(package)`: by its package), and a `priv` field only by its type's module (D-VIS-MODULE1)".to_string(),
         format!(
-            "add `pub` before `{}`, or don't reach across files here",
+            "use `{}` from inside its module, or remove `priv` from its module or field",
             name
         ),
         Some(span),
@@ -2407,6 +2443,41 @@ mod tests {
         core_crypto_nominal, is_secret_bearing_crypto_type, suggest_field, suggest_method,
     };
     use crate::AST::{InternalTag, TagMarker, Type};
+
+    #[test]
+    fn equatable_constrains_stored_arguments_not_registered_phantoms() {
+        let registry = crate::Sema::TypeRegistry {
+            types: Default::default(),
+            source_owned_types: Default::default(),
+            core_source_module: None,
+            opaque_methods: Default::default(),
+            operator_signatures: Default::default(),
+            error_types: Default::default(),
+            unit_types: Default::default(),
+            unit_facts: Default::default(),
+            literal_facts: Default::default(),
+            computed_fields: Default::default(),
+            field_defaults: Default::default(),
+            receipt_sections: Default::default(),
+            nominal_memo: Default::default(),
+        };
+        let mut traits = crate::Traits::TraitRegistry::default();
+        traits.trait_impls.insert(("Carrier".into(), "Equatable".into()));
+        traits.structural_params.insert("Carrier".into(), vec![1]);
+        let opaque = Type::Named("Opaque".into());
+        let carrier = |stored| Type::Apply {
+            name: "Carrier".into(),
+            args: vec![opaque.clone(), stored],
+        };
+        assert!(super::is_equatable(&carrier(Type::Int), &registry, &traits));
+        assert!(!super::is_equatable(&carrier(opaque.clone()), &registry, &traits));
+        traits.structural_params.remove("Carrier");
+        assert!(!super::is_equatable(&carrier(Type::Int), &registry, &traits));
+        traits.structural_params.insert("Carrier".into(), vec![]);
+        assert!(super::is_equatable(&carrier(opaque.clone()), &registry, &traits));
+        traits.trait_impls.clear();
+        assert!(!super::is_equatable(&carrier(Type::Int), &registry, &traits));
+    }
 
     fn count_core_crypto_markers(ty: &Type) -> usize {
         match ty {

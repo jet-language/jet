@@ -1,0 +1,11 @@
+# tests/project_check.rs::missing_effect_facts_are_a_project_check_diagnostic at tests/project_check.rs:361; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: missing_effect_facts_are_a_project_check_diagnostic.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check . --gate=impure=allow
+cwd: {work}/effect_facts
+normalize: replace "{work}/effect_facts" "<fixture>"
+exit: nonzero
+stderr: ~ "Error [E2391]" # original predicate
+stderr: = missing_effect_facts_are_a_project_check_diagnostic.effect_facts.expected

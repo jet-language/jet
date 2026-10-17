@@ -1,0 +1,76 @@
+// SETUP-PORT of tests/pkg.rs:6436-6475,8486-8521,8556-8637,8647-8718.
+// Only declared public Publication/PackageModel functions. All CLI assertions
+// stay in the .case; this helper creates real signed inputs, never fake bytes.
+use core.files as s6_hand_advisory_files
+use core.sys as s6_hand_advisory_sys
+
+fn s6_hand_advisory_save(root: String, name: String, feed: PublicationAdvisoryFeed) {
+    s6_hand_advisory_files.write("{root}/{name}.db", publication_advisory_feed_text(feed)) ?? panic("write signed feed {name}")
+}
+
+fn s6_hand_advisory_setup() {
+    root :: s6_hand_advisory_sys.get("S6_HAND_ROOT") ?? panic("setup root")
+    generated :: publication_keygen("advisory", false) ?? panic("real advisory keygen")
+    public :: generated.public_key_hex
+    feed := PublicationAdvisoryFeed{
+        sequence: 1, issued_at: 100, expires_at: 10000, maturity_seconds: 86400,
+        key_id: publication_advisory_key_id(public) ?? panic("advisory key id"),
+        public_key: public, signature: "", releases: [PublicationAdvisoryRelease]{},
+        advisories: [PublicationAdvisory]{}, exceptions: [PublicationAdvisoryException]{}
+    }
+    feed.signature = publication_sign_advisory_feed(feed, generated.seed_path) ?? panic("sign clean feed")
+    s6_hand_advisory_save(root, "clean", feed)
+    s6_hand_advisory_files.write("{root}/public-key.txt", public) ?? panic("public key")
+    s6_hand_advisory_files.write("{root}/accepted-digest.txt", publication_advisory_feed_digest(feed)) ?? panic("accepted digest")
+    weakened := feed.copy()
+    weakened.maturity_seconds = 1
+    weakened.signature = publication_sign_advisory_feed(weakened, generated.seed_path) ?? panic("sign weakened feed")
+    s6_hand_advisory_save(root, "weakened", weakened)
+    fork := feed.copy()
+    fork.maturity_seconds = 86401
+    fork.signature = publication_sign_advisory_feed(fork, generated.seed_path) ?? panic("sign fork feed")
+    s6_hand_advisory_save(root, "fork", fork)
+    stale := feed.copy()
+    stale.expires_at = 150
+    stale.signature = publication_sign_advisory_feed(stale, generated.seed_path) ?? panic("sign stale feed")
+    s6_hand_advisory_save(root, "stale", stale)
+    immature := feed.copy()
+    &immature.releases.push(PublicationAdvisoryRelease{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), first_seen: 100, source_class: PublicationSourceClass.ThirdParty})
+    immature.signature = publication_sign_advisory_feed(immature, generated.seed_path) ?? panic("sign immature feed")
+    s6_hand_advisory_save(root, "immature", immature)
+    excepted := immature.copy()
+    &excepted.exceptions.push(PublicationAdvisoryException{package: "mylib", version: publication_parse_semver("1.0.0") ?? panic("version"), reason: "urgent security fix", reviewer: "security-team", expires_at: 1000})
+    excepted.signature = publication_sign_advisory_feed(excepted, generated.seed_path) ?? panic("sign exception feed")
+    s6_hand_advisory_save(root, "excepted", excepted)
+    tampered := feed.copy()
+    tampered.maturity_seconds = 86401
+    // Deliberately retain the clean signature, exactly the original tamper.
+    s6_hand_advisory_save(root, "tampered", tampered)
+    lock := LockFile.empty()
+    lock.version = 1
+    &lock.packages.push(LockedPackage{name: "mylib", version: "1.0.0", fingerprint: "sha256-locked", source: LockSource.Path("/tmp/placeholder")})
+    &lock.root_dependencies.push("mylib")
+    s6_hand_advisory_files.write("{root}/lock.txt", pkg_lock_write(lock)) ?? panic("write lock fixture")
+}
+
+#Test("S6 hand signed advisory setup") {
+    s6_hand_advisory_setup()
+}
+
+// tests/pkg.rs:6831-6835: find_map(IndexEntry::parse_line), not JSON-only parsing.
+fn s6_hand_index_first_parseable() {
+    root :: s6_hand_advisory_sys.get("S6_HAND_INDEX") ?? panic("index path")
+    target :: s6_hand_advisory_sys.get("S6_HAND_HASH_OUT") ?? panic("hash output")
+    text :: s6_hand_advisory_files.read(root) ?? panic("published index")
+    loop line in text.lines() {
+        if publication_index_parse_line(line) == .Val(entry) {
+            s6_hand_advisory_files.write(target, entry.content_hash) ?? panic("parsed content hash")
+            return
+        }
+    }
+    panic("published index line must parse")
+}
+
+#Test("S6 hand published index first parseable") {
+    s6_hand_index_first_parseable()
+}

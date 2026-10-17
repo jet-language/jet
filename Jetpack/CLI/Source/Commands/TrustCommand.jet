@@ -2,7 +2,7 @@
 // jetpack::CLI::trust_env_build::cmd_trust, D-JPK-GRANTCMD1=A). Jetpack owns
 // the trust store; top-level `jet trust` dispatches here.
 
-pub enum TrustVerb {
+enum TrustVerb {
     Grant
     List
     Explain
@@ -19,7 +19,7 @@ pub enum TrustVerb {
     }
 }
 
-pub fn cli_cmd_trust(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_trust(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     store :: trust_store_path()
     verb :: TrustVerb.parse(parsed.positional.get(0) ?? "") ?? {
         theme.error("`jet trust` needs a verb", "the trust verbs are: {TRUST_VERBS.join(", ")}.", "try `list`, `explain`, `grant`, or `revoke`.")
@@ -51,7 +51,7 @@ pub fn cli_cmd_trust(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, 
     }
 }
 
-fn cli_trust_grant(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, Time.Wait]> Int Never! {
+fn cli_trust_grant(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, Env, Time.Wait]> Int Never! {
     selector :: parsed.positional.get(1) ?? {
         theme.error("`jet trust grant` needs a grant selector", "a grant selector names one package, build, env, service, image, fleet, or jetos authority.", "try `jet trust grant service:postgres --scope repo`.")
         return EXIT_USAGE
@@ -61,7 +61,7 @@ fn cli_trust_grant(theme: Theme, parsed: CLIParsed, store: String) -[IO, FS, Tim
         theme.error("couldn't parse trust grant", err.message(), "use `--scope user` or `--scope repo`.")
         return EXIT_USAGE
     }
-    added :: trust_add_grant(store, grant)
+    added :: trust_add_grant(store, cli_current_dir(), grant) ?? return trust_report_gate_failure(theme, err)
     if added {
         theme.status("trusted {grant.authority} `{grant.subject}` ({grant.scope})")
     } else {

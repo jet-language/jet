@@ -23,7 +23,7 @@ trait __jet_Encode {}
 impl<T> __jet_Encode for T {}
 
 trait __jet_Decode: Sized {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 
 fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
@@ -37,11 +37,11 @@ fn jet_enc_json_decode<T: __jet_Decode>(
 }
 
 struct JetFileReader {
-    inner: Box<dyn std::io::Read + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Read + Send>>,
 }
 
 struct JetFileWriter {
-    inner: Box<dyn std::io::Write + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Write + Send>>,
 }
 mod jet_encoding_json {
     pub use jet_foundation::EncodingJson::*;
@@ -56,7 +56,7 @@ include!("../crates/jet-foundation/src/LiveLifecycle.rs");
 mod jet_std {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Dyn::Dyn;
     use jet_foundation::Shape::ShapeProjection;
 
     include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
@@ -120,9 +120,11 @@ mod jet_std {
         Closed(IOContext),
         Protocol(IOContext),
         Other(IOContext),
+        AlreadyExists(IOContext),
+        Unsupported(IOContext),
     }
 
-    // The canonical DataTree extension calls these exact-Int helpers. This
+    // The canonical Dyn extension calls these exact-Int helpers. This
     // fixture does not exercise large integer ownership, so the host i64
     // carrier is sufficient while the type and decode modules stay canonical.
     pub fn jet_int_from_i64(value: i64) -> i64 {
@@ -154,24 +156,17 @@ mod jet_std {
         pub typed_path: Option<Vec<(String, bool)>>,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>,
-    }
-
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
 
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
     include!("../crates/jet-codegen/src/Prelude/Core/FieldError.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/Dyn.rs");
     use crate::jet_encoding_json::quote_json;
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
-    jet_datatree_decode_helpers!();
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDyn.rs");
+    jet_dyn_decode_helpers!();
 }
 
 
@@ -397,6 +392,7 @@ fn jet_std_time_duration_to_millis(ns: i64) -> i64 {
     ns
 }
 
+include!("../crates/jet-codegen/src/Prelude/Core/NativeTaskBody.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 /// D-LIVEQUERY1/D-WS1: the native transport is the shared Prelude seam. A
@@ -849,7 +845,7 @@ include!("kept/Ws.rs");
     assert_eq!(
         consumers,
         [
-            std::path::PathBuf::from("crates/jet-jit/src/net_http_rt.rs"),
+            std::path::PathBuf::from("crates/jet-evalhost/src/net_http_rt.rs"),
             std::path::PathBuf::from("tests/http_server_lifecycle.rs"),
             std::path::PathBuf::from("tests/ws_law.rs"),
         ]

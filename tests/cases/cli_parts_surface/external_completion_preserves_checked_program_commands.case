@@ -1,0 +1,61 @@
+# Port of tests/cli_parts/surface.rs:287-391; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/commands
+step: jet build commands.jet
+env: NO_COLOR=1
+exit: 0
+step: built --help
+exit: 0
+stdout: ~ "--config CONFIG" # original predicate
+stdout: count "--config" = 1 # original predicate
+stdout: !~ "Serve" # original predicate
+stdout: !~ "Import" # original predicate
+step: jet self completions bash --for build/commands
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "serve" # original predicate
+stdout: ~ "import" # original predicate
+stdout: ~ "--port" # original predicate
+stdout: ~ "file --file" # original predicate
+stdout: ~ "--config" # original predicate
+stdout: ~any "--verbose" "-l verbose" "'--verbose'" # original predicate
+stdout: ~any "--quiet" "-l quiet" "'--quiet'" # original predicate
+stdout: ~any "--color" "-l color" "'--color'" # original predicate
+stdout: = shape_cli_program_bash.txt
+step: jet self completions zsh --for build/commands
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "serve" # original predicate
+stdout: ~ "import" # original predicate
+stdout: ~ "--port" # original predicate
+stdout: ~ ":file:value for --file" # original predicate
+stdout: ~ "--config" # original predicate
+stdout: ~any "--verbose" "-l verbose" "'--verbose'" # original predicate
+stdout: ~any "--quiet" "-l quiet" "'--quiet'" # original predicate
+stdout: ~any "--color" "-l color" "'--color'" # original predicate
+stdout: = shape_cli_program_zsh.txt
+step: jet self completions fish --for build/commands
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "serve" # original predicate
+stdout: ~ "import" # original predicate
+stdout: ~ "-l port" # original predicate
+stdout: ~ "-l file" # original predicate
+stdout: ~ "-l config" # original predicate
+stdout: ~any "--verbose" "-l verbose" "'--verbose'" # original predicate
+stdout: ~any "--quiet" "-l quiet" "'--quiet'" # original predicate
+stdout: ~any "--color" "-l color" "'--color'" # original predicate
+stdout: = shape_cli_program_fish.txt
+step: jet self completions powershell --for build/commands
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "serve" # original predicate
+stdout: ~ "import" # original predicate
+stdout: ~ "'--port'" # original predicate
+stdout: ~ "'file','--file'" # original predicate
+stdout: ~ "'--config'" # original predicate
+stdout: ~any "--verbose" "-l verbose" "'--verbose'" # original predicate
+stdout: ~any "--quiet" "-l quiet" "'--quiet'" # original predicate
+stdout: ~any "--color" "-l color" "'--color'" # original predicate
+stdout: = shape_cli_program_powershell.txt

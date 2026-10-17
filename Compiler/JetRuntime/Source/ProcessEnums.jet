@@ -1,0 +1,49 @@
+// Private native value handles, never Rust enum boxes. DataABI owns tags;
+// EncodingErrors owns the shared eight-byte enum clone/drop/equality helpers.
+// CommonTypes.rs:6603-6630: human show/display differ from Debug labels.
+#Export(c) fn jet_rt_handle_clone_process_resource_limit(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_process_resource_limit(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_process_resource_limit(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_process_stream_mode(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_process_stream_mode(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_process_stream_mode(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+fn process_resource_label(target: I64, ordinal: I64, debug: Bool) {
+    if {
+        (ordinal == PROCESS_RESOURCE_WALL_TIME) -> {
+            if debug -> rt_text_push_word(target, I64{7308613581609394519}, I64{8}) // WallTime
+            else {
+                rt_text_push_word(target, I64{7883960305295581559}, I64{8}) // wall tim
+                rt_text_push_word(target, I64{101}, I64{1})
+            }
+        }
+        (ordinal == PROCESS_RESOURCE_CPU_TIME) -> {
+            if debug -> rt_text_push_word(target, I64{28549271803752515}, I64{7}) // CpuTime
+            else -> rt_text_push_word(target, I64{7308613717771767875}, I64{8}) // CPU time
+        }
+        (ordinal == PROCESS_RESOURCE_MEMORY) -> rt_text_push_word(target, if debug -> I64{133532402672973} else -> I64{133532402673005}, I64{6})
+        (ordinal == PROCESS_RESOURCE_OPEN_FILES) -> {
+            if debug {
+                rt_text_push_word(target, I64{7308332046536241231}, I64{8}) // OpenFile
+                rt_text_push_word(target, I64{115}, I64{1})
+            } else {
+                rt_text_push_word(target, I64{7811887318127964271}, I64{8}) // open fil
+                rt_text_push_word(target, I64{7308326720558866533}, I64{8}) // e handle
+                rt_text_push_word(target, I64{115}, I64{1})
+            }
+        }
+        (ordinal == PROCESS_RESOURCE_OUTPUT) -> rt_text_push_word(target, if debug -> I64{128047746676047} else -> I64{128047746676079}, I64{6})
+        else -> rt_record_variant_panic()
+    }
+}
+fn process_resource_render(value: I64, debug: Bool) -> I64 {
+    target :: jet_rt_string_builder_new()
+    process_resource_label(target, encoding_word(value + ENCODING_ENUM_TAG), debug)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_string_drop(target)
+        return I64{0}
+    }
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_show_process_resource_limit(value: I64) -> I64 { process_resource_render(value, false) }
+#Export(c) fn jet_rt_handle_display_process_resource_limit(value: I64) -> I64 { process_resource_render(value, false) }
+#Export(c) fn jet_rt_handle_debug_process_resource_limit(value: I64) -> I64 { process_resource_render(value, true) }

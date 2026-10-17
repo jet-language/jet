@@ -1,0 +1,166 @@
+use core.files as files
+use core.time as time
+use core.sys as sys
+
+fn kit_steps_await_boundary(text: String, tokens: [KitWord]) -> Int {
+    loop index in 2..<tokens.len() {
+        if kit_expect_named(["timeout", "every", "capture", "optional"], kit_steps_byte_slice(text, tokens[index].start, tokens[index].end)) -> return index
+    }
+    tokens.len()
+}
+
+fn kit_steps_await_valid(text: String) -> Bool {
+    tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return false
+    if tokens.len() < 2 || !kit_expect_named(["file", "dir", "entry", "process"], tokens[0].text) -> return false
+    kind :: tokens[0].text
+    if kind != "process" && !kit_steps_relative_path(tokens[1].text) -> return false
+    boundary :: kit_steps_await_boundary(text, tokens)
+    if kind == "entry" {
+        cursor := 2
+        loop cursor < boundary {
+            if cursor + 1 >= boundary || !kit_expect_named(["with-file", "readable"], tokens[cursor].text) || !kit_steps_relative_path(tokens[cursor + 1].text) -> return false
+            cursor += 2
+        }
+    } else if kind == "process" {
+        if boundary == 2 -> return false
+        _ :: kit_steps_process_form(kit_steps_byte_slice(text, tokens[2].start, tokens[boundary - 1].end)) ?? return false
+    } else if boundary > 2 {
+        if kind != "file" -> return false
+        _ :: kit_steps_stream_assertion("file", "{kit_steps_byte_slice(text, tokens[1].start, tokens[boundary - 1].end)} {kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())}") ?? return false
+    }
+    options := [String]{}
+    cursor := boundary
+    loop cursor < tokens.len() {
+        key :: tokens[cursor].text
+        if kit_expect_named(options, key) -> return false
+        &options.push(key)
+        if key == "optional" -> return kind == "file" && cursor + 1 == tokens.len()
+        if cursor + 1 >= tokens.len() -> return false
+        if key == "capture" {
+            if kind != "entry" || !kit_steps_env_name(tokens[cursor + 1].text) -> return false
+        } else if !kit_expect_named(["timeout", "every"], key) || kit_steps_duration_ns(tokens[cursor + 1].text) == None -> return false
+        cursor += 2
+    }
+    kind != "entry" || kit_expect_named(options, "capture")
+}
+
+fn kit_steps_process_form(text: String) -> KitAssertion? {
+    tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return None
+    if tokens.len() == 1 {
+        mode :: tokens[0].text
+        if mode == "alive" || kit_steps_process_nonzombie_mode(mode) -> return Val(KitAssertion{stream: "process", path: "", mode: mode, value: ""})
+    }
+    if tokens.len() < 3 -> return None
+    if tokens[0].text == "state" && kit_expect_named(["in", "not-in"], tokens[1].text) {
+        values :: kit_steps_string_array(kit_steps_byte_slice(text, tokens[2].start, tokens[tokens.len() - 1].end)) ?? return None
+        return Val(KitAssertion{stream: "process", path: "", mode: "state", value: values.join("|"), extra: tokens[1].text})
+    }
+    if tokens.len() == 3 && tokens[0].text == "executable" && tokens[1].text == "=" -> return Val(KitAssertion{stream: "process", path: "", mode: "executable", value: tokens[2].text})
+    None
+}
+
+fn kit_steps_process_check(assertion: KitAssertion, context: KitStepCtx, state: KitStepState) -> KitVerdict {
+    if kit_steps_process_nonzombie_mode(assertion.mode) && sys.name() != "linux" -> return kit_expect_verdict("REFUSED", "process-state")
+    pid_text :: kit_steps_runtime_expand(assertion.path, context, state) ?? return kit_expect_verdict("ERROR", "process PID token unavailable")
+    pid :: Int.parse(pid_text) ?? return kit_expect_verdict("FAIL", "process PID is not an integer")
+    if assertion.mode == "alive" -> return if kit_steps_process_alive(pid) -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process is not alive")
+    if kit_steps_process_nonzombie_mode(assertion.mode) -> return if kit_steps_process_nonzombie(pid, assertion.mode) -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process state predicate failed")
+    if sys.name() != "linux" -> return kit_expect_verdict("REFUSED", "process-state")
+    if assertion.mode == "executable" {
+        actual :: files.canonicalize("/proc/{pid}/exe") ?? return kit_expect_verdict("FAIL", "process executable unavailable")
+        expected :: kit_steps_runtime_expand(assertion.value, context, state) ?? return kit_expect_verdict("ERROR", "process executable token unavailable")
+        path :: files.canonicalize(files.join(context.work, expected)) ?? return kit_expect_verdict("FAIL", "expected executable unavailable")
+        return if actual == path -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process executable differs")
+    }
+    stat :: files.read("/proc/{pid}/stat") ?? return kit_expect_verdict("FAIL", "process state unavailable")
+    end := -1
+    loop (index, byte) in stat.bytes() {
+        if byte == (U8{41}) -> end = index
+    }
+    if end < 0 -> return kit_expect_verdict("FAIL", "process stat malformed")
+    words :: kit_steps_whitespace_words(kit_steps_byte_slice(stat, end + 1, stat.count_bytes()))
+    if words.len() == 0 -> return kit_expect_verdict("FAIL", "process stat malformed")
+    matches :: kit_steps_host_matches(words[0], assertion.value) == (assertion.extra == "in")
+    if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "process state predicate failed")
+}
+
+fn kit_steps_await(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
+    state := previous
+    text :: step.instruction
+    tokens :: kit_steps_tokens(kit_steps_body(text)) ?? return kit_steps_action_error(state, "invalid await")
+    kind :: tokens[0].text
+    if kind == "process" && kit_steps_process_nonzombie_mode(tokens[2].text) && sys.name() != "linux" -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "process-state")}
+    raw :: kit_steps_runtime_expand(tokens[1].text, context, state) ?? return kit_steps_action_error(state, "await token unavailable")
+    path :: if kind == "process" -> raw else -> kit_steps_work_path(raw, context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "await path escapes work")
+    loop pending in state.children {
+        if pending.joined -> next
+        loop target in [pending.step.stdout_target, pending.step.stderr_target] {
+            if target != "" && target != "null" && (kit_steps_work_path(target, context.env, context.work, context.scratch, state.built) ?? "") == path -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "process-file-fd")}
+        }
+    }
+    timeout := 10000000000
+    interval := 10000000
+    capture := ""
+    boundary :: kit_steps_await_boundary(text, tokens)
+    cursor := boundary
+    loop cursor < tokens.len() {
+        key :: tokens[cursor].text
+        if key == "optional" -> break
+        if key == "timeout" -> timeout = kit_steps_duration_ns(tokens[cursor + 1].text) ?? timeout
+        if key == "every" -> interval = kit_steps_duration_ns(tokens[cursor + 1].text) ?? interval
+        if key == "capture" -> capture = tokens[cursor + 1].text
+        cursor += 2
+    }
+    started :: time.instant()
+    if kind == "process" {
+        pid :: Int.parse(raw) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "process PID is not an integer")}
+        if !kit_steps_process_nonzombie_mode(tokens[2].text) && sys.name() == "linux" && !files.exists("/proc/{pid}") -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "process unavailable")}
+    }
+    loop {
+        success := false
+        selected := ""
+        if kind == "entry" {
+            entries :: files.list_dir(path) ?? []
+            loop entry in entries {
+                matches := true
+                child_cursor := 2
+                loop child_cursor < boundary {
+                    child :: files.join(entry.path, tokens[child_cursor + 1].text)
+                    if tokens[child_cursor].text == "with-file" -> matches = matches && kit_steps_path_is_file(child)
+                    else {
+                        _ :: files.read_bytes(child) ?? {
+                            matches = false
+                            [U8]{}
+                        }
+                    }
+                    child_cursor += 2
+                }
+                if matches {
+                    selected = entry.path
+                    success = true
+                    break
+                }
+            }
+        } else if kind == "dir" -> success = files.is_dir(path)
+        else if boundary == 2 -> success = files.exists(path)
+        else {
+            assertion := if kind == "process" -> kit_steps_process_form(kit_steps_byte_slice(text, tokens[2].start, tokens[boundary - 1].end)) ?? return kit_steps_action_error(state, "invalid process await") else -> kit_steps_stream_assertion("file", "{kit_steps_byte_slice(text, tokens[1].start, tokens[boundary - 1].end)} {kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())}") ?? return kit_steps_action_error(state, "invalid file await")
+            assertion.path = path
+            verdict :: if kind == "process" -> kit_steps_process_check(assertion, context, state) else -> kit_steps_check_assertion(assertion, context, state, "", false)
+            if verdict.status == "ERROR" || verdict.status == "REFUSED" -> return KitStepResult{state: state, verdict: verdict}
+            success = verdict.status == "PASS"
+        }
+        if success {
+            if capture != "" -> &state.captures.push(KitCapture{name: capture, value: KitCapturedValue.Text(selected)})
+            state.last = kit_steps_action_run()
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
+        remaining :: timeout - started.elapsed().ns
+        if remaining <= 0 {
+            optional :: tokens[tokens.len() - 1].text == "optional"
+            state.last = kit_steps_action_run()
+            return KitStepResult{state: state, verdict: if optional -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "await deadline exceeded")}
+        }
+        time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
+    }
+}

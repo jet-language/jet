@@ -1,0 +1,26 @@
+# HAND-PORT tests/jetpack_engine.rs:8995-9074 two_process_reverse_package_order_does_not_deadlock
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: two_process_reverse_package_order_does_not_deadlock.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+env: PATH=/usr/bin:/bin
+when os unix: chmod: repo/pkgs/a/bin/a 755
+when os unix: chmod: repo/pkgs/b/bin/b 755
+mkdir: ab
+write: ab/env.jet ab.template
+mkdir: ba
+write: ba/env.jet ba.template
+step: jetpack build --no-color
+cwd: ab
+exit: 0
+spawn ab: jetpack env --no-color --trust -- /bin/sh -c true
+cwd: ab
+spawn ba: jetpack env --no-color --trust -- /bin/sh -c true
+cwd: ba
+wait: ab
+exit: 0
+wait: ba
+exit: 0
+

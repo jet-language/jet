@@ -1,0 +1,17 @@
+Error [E0212]: `xs[…]` already has a live view that conflicts with `read`
+  --> write_range_window_conflicts_with_overlapping_read_window.jet:5:5
+    |
+  5 |     read :: xs[1..2]
+    |     ^^^^
+ Why: Many read views may overlap, but an exclusive mutable view cannot overlap any other live view
+ Fix: Finish using the earlier view before creating this one, or make an owned copy
+More: jet-lang.dev/e/E0212
+
+Error [E0220]: `xs[…]` cannot be read while `edit` has a live exclusive write window into it
+  --> write_range_window_conflicts_with_overlapping_read_window.jet:6:24
+    |
+  6 |     print(edit.len() + read.len())
+    |                        ^^^^
+ Why: `edit` is an exclusive window into `xs[…]`; reading the owner beside that window would be rejected after lowering
+ Fix: Read or edit through `edit` instead of `xs[…]`
+More: jet-lang.dev/e/E0220

@@ -1,0 +1,16 @@
+// Ui.rs:302-317; C route inputs borrow owners and return a fresh cloned node.
+// Replacement drops only the clone's former metadata, never the input owner.
+#Export(c) fn jet_ui_raw_accessibility_transfer(node: I64, accessibility: I64, present: U8) -> I64 {
+    result :: jet_rt_handle_clone_jet_ui_node(node)
+    previous :: ui_carrier_word(result + UI_NODE_ACCESSIBILITY)
+    if (previous != I64{0}) -> jet_rt_handle_drop_jet_ui_accessibility(previous)
+    ui_carrier_store(result + UI_NODE_ACCESSIBILITY, if (present != U8{0}) -> jet_rt_handle_clone_jet_ui_accessibility(accessibility) else -> I64{0})
+    result
+}
+#Export(c) fn jet_ui_raw_shortcut_transfer(node: I64, shortcut: I64, present: U8) -> I64 {
+    result :: jet_rt_handle_clone_jet_ui_node(node)
+    previous :: ui_carrier_word(result + UI_NODE_SHORTCUT)
+    if (previous != I64{0}) -> jet_rt_handle_drop_jet_ui_shortcut(previous)
+    ui_carrier_store(result + UI_NODE_SHORTCUT, if (present != U8{0}) -> jet_rt_handle_clone_jet_ui_shortcut(shortcut) else -> I64{0})
+    result
+}

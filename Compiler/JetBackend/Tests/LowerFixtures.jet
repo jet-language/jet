@@ -6,7 +6,9 @@
 // unit by Compiler/JetBackend/Tests/run-lower-fixtures.mjs and is never listed
 // in Compiler/Bootstrap/sources.list.
 use jet_foundation.[
+    mir_integer_constant,
     MIRAccess,
+    MIRAllocatorPolicy,
     MIRArtifactPlan,
     MIRBasicBlock,
     MIRBinaryDispatch,
@@ -119,18 +121,20 @@ use jet_foundation.[
     MIR_SCHEMA_VERSION,
     Span,
     mir_copy_ownership,
+    mir_copy_value_ownership,
     mir_empty_optimization_facts,
     mir_field_id,
     mir_function_id,
     mir_nominal_ref,
     mir_owned_ownership,
     mir_ownership_from_access,
+    mir_type_display_name,
     mir_type_from_kind,
     mir_type_id,
     mir_type_with_identity,
     stable_id,
 ]
-use jet_backend.[LIRFunctionID, lir_lower_program, lir_print_module, x64_relocatable_object, x64_static_executable]
+use jet_backend.[LIRFunctionID, LIRModule, LowerRuntimeHandle, lir_lint_module, lir_lower_entry, lir_print_module, x64_relocatable_object, x64_static_executable]
 use core.files as files
 
 fn fx_span() -> Span Never! { Span{start: 0, end: 0} }
@@ -147,16 +151,41 @@ fn fx_named(name: String) -> MIRType Never! {
     mir_type_with_identity(mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref(name), args: [MIRType]{}}), mir_type_id(name))
 }
 
+fn fx_generic_runtime_rejection_checks() -> Bool Never! {
+    rows :: [LowerRuntimeHandle]{
+        LowerRuntimeHandle{jet_name: "FixtureGeneric<Float>", runtime: "FixtureGenericFloat", clone: true, display: false, show: false, debug: false, eq: false},
+    }
+    arguments :: [MIRType]{
+        mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8}),
+        mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64}),
+        mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 64}),
+        fx_named("F32"),
+        fx_bool(), // Admitted key spelling, but this concrete row is absent.
+        mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Nested"), args: [MIRType]{fx_int()}}),
+    }
+    loop argument in arguments {
+        ty :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("FixtureGeneric"), args: [MIRType]{argument}})
+        failure :: lower_runtime_missing_application(ty, rows) ?? return false
+        if failure == .Unsupported(reason) {
+            if !reason.contains(mir_type_display_name(ty)) -> return false
+        } else {
+            return false
+        }
+    }
+    ordinary :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("OrdinaryGeneric"), args: [MIRType]{fx_int()}})
+    lower_runtime_missing_application(ordinary, rows) == None && lower_runtime_missing_application(fx_named("FixtureGeneric"), rows) == None
+}
+
 fn fx_borrow() -> MIROwnership Never! { mir_ownership_from_access(MIRAccess.Read) }
 
 struct FxBuilder {
-    pub values: [MIRValueFact]
-    pub blocks: [MIRBasicBlock]
-    pub current: [MIRInstruction]
-    pub locals: [MIRLocal]
-    pub places: [MIRPlace]
-    pub params: [MIRParam]
-    pub next: U64
+    values: [MIRValueFact]
+    blocks: [MIRBasicBlock]
+    current: [MIRInstruction]
+    locals: [MIRLocal]
+    places: [MIRPlace]
+    params: [MIRParam]
+    next: U64
 }
 
 fn fx_builder() -> FxBuilder Never! {
@@ -176,8 +205,24 @@ fn fx_value(b: &FxBuilder, ty: MIRType, ownership: MIROwnership, operation: MIRO
     id
 }
 
+// Same scalar ownership pattern as Source/Rust TIR: exact Int is semantic Copy
+// but its carrier owns a reference; transparent canonical wrappers preserve it.
+fn fx_copy_ownership(ty: MIRType) -> MIROwnership Never! {
+    if ty.kind == {
+        .Int -> mir_copy_value_ownership()
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> fx_copy_ownership(inner)
+        else -> mir_copy_ownership()
+    }
+}
+
+fn fx_physical_ownership(ty: MIRType, ownership: MIROwnership) -> MIROwnership Never! {
+    physical := ownership
+    if ownership.mode == MIROwnershipMode.Copy -> physical.drop = fx_copy_ownership(ty).drop
+    physical
+}
+
 fn fx_copy(b: &FxBuilder, ty: MIRType, operation: MIROperation) -> MIRValueID Never! {
-    fx_value(&b, ty, mir_copy_ownership(), operation)
+    fx_value(&b, ty, fx_copy_ownership(ty), operation)
 }
 
 fn fx_owned(b: &FxBuilder, ty: MIRType, operation: MIROperation) -> MIRValueID Never! {
@@ -197,7 +242,7 @@ fn fx_block(b: &FxBuilder, id: U64, terminator: MIRTerminator) Never! {
 fn fx_local(b: &FxBuilder, name: String, ty: MIRType, ownership: MIROwnership) -> MIRPlaceID Never! {
     local :: MIRLocalID{value: fx_word(U64{300}, b.locals.len())}
     place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
-    &b.locals.push(MIRLocal{id: local, name: name, span: fx_span(), ty: ty, place: place, mutable: true, ownership: ownership, is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
+    &b.locals.push(MIRLocal{id: local, name: name, span: fx_span(), ty: ty, place: place, ssa_value: None, mutable: true, ownership: ownership, is_comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false})
     &b.places.push(MIRPlace{id: place, span: fx_span(), ty: ty, base: MIRPlaceBase.Local{local: local}, projections: [MIRProjection]{}, access: MIRAccess.Write, persist_key: None})
     place
 }
@@ -215,8 +260,9 @@ fn fx_field_place(b: &FxBuilder, root: MIRPlaceID, field: String, ty: MIRType) -
 
 fn fx_param(b: &FxBuilder, name: String, ty: MIRType, ownership: MIROwnership) -> MIRValueID Never! {
     index :: b.params.len()
-    &b.params.push(MIRParam{index: index, name: name, span: fx_span(), ty: ty, access: MIRAccess.Read, ownership: ownership, public_label: name, variadic: false, default_present: false})
-    fx_value(&b, ty, ownership, MIROperation.Parameter{index: index, name: name})
+    physical :: fx_physical_ownership(ty, ownership)
+    &b.params.push(MIRParam{index: index, name: name, span: fx_span(), ty: ty, access: MIRAccess.Read, ownership: physical, public_label: name, variadic: false, default_present: false})
+    fx_value(&b, ty, physical, MIROperation.Parameter{index: index, name: name})
 }
 
 fn fx_arg(value: MIRValueID, access: MIRAccess) -> MIRCallArg Never! {
@@ -224,7 +270,7 @@ fn fx_arg(value: MIRValueID, access: MIRAccess) -> MIRCallArg Never! {
 }
 
 fn fx_int_const(b: &FxBuilder, value: Int) -> MIRValueID Never! {
-    fx_copy(&b, fx_int(), MIROperation.Constant{value: MIRConstant.Int{value: value, width: None, spelling: None}})
+    fx_copy(&b, fx_int(), MIROperation.Constant{value: mir_integer_constant(value, None, None)})
 }
 
 fn fx_print(b: &FxBuilder, value: MIRValueID) Never! {
@@ -254,7 +300,7 @@ fn fx_function(name: String, b: FxBuilder, ret: MIRType) -> MIRFunction Never! {
         kind: MIRFunctionKind.Jet,
         form: MIRFunctionForm.TopLevel,
         visibility: MIRVisibility.Private,
-        target_applicability: MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: false},
+        target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: false},
         web_bucket: None,
         web_marker: None,
         generic_params: [MIRGenericParam]{},
@@ -327,6 +373,11 @@ fn fx_prelude_rows() -> [MIRPreludeCall] Never! {
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_has_next", "jet_loop_range_has_next", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_value", "jet_loop_range_value", 1, MIRPreludeABI.Value),
         fx_prelude(MIRPreludeFamily.StaticPrelude, "core.loop", "loop_range_advance", "jet_loop_range_advance", 1, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "core.convert", "char_to_string", "jet_rt_char_to_string", 1, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.StaticPrelude, "::JetBitSet", "new", "JetBitSet::new", 0, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "list_clear", "jet_list_clear", 1, MIRPreludeABI.Effect),
+        fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "bitset_add", "jet_bitset_add", 2, MIRPreludeABI.Value),
+        fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "bit_set_count", "jet_bit_set_count", 1, MIRPreludeABI.Value),
     }
 }
 
@@ -382,6 +433,7 @@ fn fx_type_def(name: String, kind: MIRTypeDefKind) -> MIRTypeDef Never! {
 
 fn fx_program(functions: [MIRFunction], types: ^[MIRTypeDef]) -> MIRProgram Never! {
     MIRProgram{
+        native_pack: false,
         cffi: MIRCffiFacts{import_links: [MIRCImportLink]{}, libs: [MIRCLib]{}, overlay_overrides: [MIRCOverlayOverride]{}, boundaries: [MIRFFIBoundaryFacts]{}, direct_links: [String]{}, transitive_links: [String]{}, close_adapters: [MIRCloseAdapter]{}},
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: "fixture",
@@ -393,6 +445,7 @@ fn fx_program(functions: [MIRFunction], types: ^[MIRTypeDef]) -> MIRProgram Neve
             active_os: "linux",
             inferred_layer: "std",
             allocator: "",
+            program_allocator: MIRAllocatorPolicy.HostedDefault,
             package_version: "0.1.0",
             artifact_target: None,
             target_dossier: MIRTargetDossier{machine: None, layer: MIRRuntimeLayer.Std, provider_identity: "", closure_identity: "", linker_identity: "", tier_identity: "", compiler_identity: "", environment_identity: "", dependency_identity: ""},
@@ -557,6 +610,34 @@ fn fx_control_flow() -> MIRProgram Never! {
     fx_program([MIRFunction]{fx_function("sum_to", s, fx_int()), fx_function("classify", c, fx_int()), fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
 }
 
+// Empty construction, sparse mutations, clear twice, and reuse of the same
+// owning header. Expected counts: 0, 2, 0, 0, 1.
+fn fx_bits() -> MIRProgram Never! {
+    r := fx_builder()
+    bits :: fx_owned(&r, fx_named("BitSet"), MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("::JetBitSet", "new"), args: [MIRCallArg]{}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    empty :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_print(&r, empty)
+    indices :: [Int]{1, 65}
+    loop index in indices {
+        value :: fx_int_const(&r, index)
+        _ := fx_copy(&r, fx_bool(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bitset_add"), receiver: bits, receiver_place: None, args: [MIRValueID]{value}, aggregate_fields: None}})
+    }
+    filled :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_print(&r, filled)
+    loop _ in 0..<2 {
+        fx_do(&r, MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "list_clear"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+        cleared :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+        fx_print(&r, cleared)
+    }
+    reused :: fx_int_const(&r, 5)
+    _ := fx_copy(&r, fx_bool(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bitset_add"), receiver: bits, receiver_place: None, args: [MIRValueID]{reused}, aggregate_fields: None}})
+    count :: fx_copy(&r, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.BuiltinMethod{call: fx_prelude_id("core.builtin", "bit_set_count"), receiver: bits, receiver_place: None, args: [MIRValueID]{}, aggregate_fields: None}})
+    fx_print(&r, count)
+    fx_do(&r, MIROperation.Drop{value: bits, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{})
+}
+
 // struct Point { x: Int, y: Int }
 // enum Shape { Dot, Circle(r: Int) }
 // enum Color { Red, Green }
@@ -636,52 +717,578 @@ fn fx_compare_value(b: &FxBuilder, operation: MIROperation) -> MIRValueID Never!
     fx_copy(&b, fx_bool(), operation)
 }
 
-// Lower `program`, print its LIR and issues, and, when it is clean, compile
-// it (entry `run`) to a static x86-64 executable `<name>.elf`, a relocatable
-// object `<name>.o` for the compiled runtime, and an in-memory image
-// `<name>.image` with its load manifest `<name>.mem` (`entry <offset>`, then
-// one `import <slot offset> <symbol>` line per runtime import), in the
-// working directory; check-native-fixtures.mjs runs, links and loads them.
+// Lower `program`, print its LIR and issues, then write its relocatable object,
+// explicit fresh-pack executable and in-memory image/import manifest.
 fn fx_report(name: String, program: MIRProgram) -> Bool {
-    lowered :: lir_lower_program(program)
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
     print("== {name}")
     print(lir_print_module(lowered.lir))
     loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
     if lowered.issues.len() > 0 -> return false
-    print("{name}: lint-clean")
+    entry :: lowered.entry ?? panic("lowering without issues has an entry")
+    fx_report_image(name, lowered.lir, entry.value)
+}
+
+// Runtime witnesses use the same admitted pack as every other fixture.
+fn fx_report_runtime(name: String, program: MIRProgram) -> Bool {
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    print("== {name}")
+    print(lir_print_module(lowered.lir))
+    loop issue in lowered.issues -> print("issue {issue.function}: {issue.message}")
+    if lowered.issues.len() > 0 -> return false
+    entry :: lowered.entry ?? panic("lowering without issues has an entry")
+    fx_report_image(name, lowered.lir, entry.value)
+}
+
+// The compile/write half of fx_report for a lint-clean LIR module (hand LIR
+// fixtures enter here directly, after their own lint): its entry is `run`.
+fn fx_report_lir(name: String, program: LIRModule) -> Bool {
     entry := -1
-    loop function in lowered.lir.functions { if function.name == "run" -> entry = function.id.value }
-    image :: x64_static_executable(lowered.lir, LIRFunctionID{value: entry})
-    loop error in image.errors -> print("native {name}: {error}")
-    if image.errors.len() > 0 -> return false
-    path :: "{name}.elf"
-    files.write_bytes(path, image.bytes) ?? panic("cannot write {path}")
-    files.set_mode(path, 0o755) ?? panic("cannot make {path} executable")
-    print("{name}: native image {path} ({image.bytes.len()} bytes)")
-    relocatable :: x64_relocatable_object(lowered.lir, LIRFunctionID{value: entry})
+    loop function in program.functions { if function.name == "run" -> entry = function.id.value }
+    fx_report_image(name, program, entry)
+}
+
+// Lints `program` and writes its images, started at function `entry` (a
+// lowered program's may be the generated entry, Lower/Entry.jet).
+fn fx_report_image(name: String, input: LIRModule, entry: Int) -> Bool {
+    program := input
+    hosted_entry :: test_pack_entry(&program, LIRFunctionID{value: entry})
+    issues :: lir_lint_module(program)
+    loop issue in issues -> print("issue {issue.function}: {issue.message}")
+    if issues.len() > 0 -> return false
+    print("{name}: lint-clean")
+    relocatable :: x64_relocatable_object(program, hosted_entry)
     loop error in relocatable.errors -> print("object {name}: {error}")
     if relocatable.errors.len() > 0 -> return false
     object_path :: "{name}.o"
     files.write_bytes(object_path, relocatable.bytes) ?? panic("cannot write {object_path}")
     print("{name}: object {object_path} ({relocatable.bytes.len()} bytes)")
-    memory :: x64_memory_image(lowered.lir, LIRFunctionID{value: entry})
+    if !test_pack_write(name, ^relocatable) -> return false
+    memory :: x64_memory_image(program, hosted_entry)
     loop error in memory.errors -> print("in-memory {name}: {error}")
     if memory.errors.len() > 0 -> return false
     image_path :: "{name}.image"
     files.write_bytes(image_path, memory.text) ?? panic("cannot write {image_path}")
-    manifest := "entry {memory.entry}\n"
+    manifest := "align {memory.align}\nentry {memory.entry}\ndata {memory.data_offset}\n"
     loop (index, symbol) in memory.imports -> manifest = "{manifest}import {memory.slots[index]} {symbol}\n"
+    loop reloc in memory.relocs -> manifest = "{manifest}reloc {reloc.at} {reloc.target}\n"
     files.write("{name}.mem", manifest) ?? panic("cannot write {name}.mem")
     print("{name}: in-memory image {image_path} ({memory.text.len()} bytes, {memory.imports.len()} runtime imports)")
     true
 }
 
+// Hand-compiled dirty ABI callers are relocatable objects, not static images.
+fn fx_report_executable(name: String, object: ^X64ExecutableResult) -> Bool {
+    print("== {name}")
+    test_pack_write(name, ^object)
+}
+
 fn run() {
     abi_fixtures()
     clean := true
+    if !fx_report_tls_refusals("tls-refusal") -> clean = false
+    if !fx_route_carrier_checks() -> clean = false
+    // Crossing the tagged inline and signed-word ranges must print exact decimal.
+    if !fx_report_runtime("image-overflow-decimal", fx_image_overflow_decimal()) -> clean = false
+    if !fx_runtime_o1_check() {
+        print("issue runtime-o1: library feed did not preserve canonical O1/export object bytes")
+        clean = false
+    }
+    if !fx_observe_address_checks() {
+        print("issue observe-address: checked callback address/export contract failed")
+        clean = false
+    }
+    if !fx_static_text_checks() {
+        print("issue static-text: literal view/export or non-literal refusal contract failed")
+        clean = false
+    }
+    if !fx_report_lir("static-text", fx_static_text_module()) -> clean = false
+    if !fx_comptime_budget_checks() {
+        print("issue comptime-budget: a runtime callable calls a comptime budget hook, or a compiler callable lost them")
+        clean = false
+    }
+    if !fx_runtime_sentry_checks() {
+        print("issue runtime-sentry: a runtime callable calls a memory sentry hook, or user #Unsafe lost them")
+        clean = false
+    }
+    if !fx_default_err_checks() {
+        print("issue default-err: the default Err is not the runtime JetErr (construction or Display)")
+        clean = false
+    }
+    if !fx_runtime_o1_effects_check() {
+        print("issue runtime-o1-effects: OS effects or runtime intrinsic operations changed order/count")
+        clean = false
+    }
+    if !fx_reach_graph_checks() {
+        print("issue reach: graph closure checks failed")
+        clean = false
+    }
+    if !fx_mono_structural_checks() {
+        print("issue mono: structural inventory checks failed")
+        clean = false
+    }
+    if !fx_mono_rejection_checks() {
+        print("issue mono: rejection checks failed")
+        clean = false
+    }
+    if !fx_mono_collect_all() {
+        print("issue mono: collect-all inventory/trap checks failed")
+        clean = false
+    }
+    if !fx_opaque_enum_rejection_checks() {
+        print("issue opaque-enum: rejection checks failed")
+        clean = false
+    }
+    if !fx_qualified_record_identity_checks() {
+        print("issue qualified-record-identity: canonical Core identity or schema refusal failed")
+        clean = false
+    }
+    if !fx_report_runtime("qualified-dir-entries", fx_qualified_dir_entries()) -> clean = false
+    if !fx_f32_constant_bits_checks() {
+        print("issue f32-constant-bits: binary32 rounding or exceptional payload failed")
+        clean = false
+    }
+    if !fx_report_runtime("f32-constants", fx_f32_constants()) -> clean = false
+    if !fx_atomic_mir_layout_checks() {
+        print("issue atomic-mir-layout: canonical six scalar word layouts failed")
+        clean = false
+    }
+    if !fx_atomic_copy_rejected() {
+        print("issue atomic-copy: non-Clone carrier reached an owning native copy")
+        clean = false
+    }
+    if !fx_report_runtime("atomic-scalars", fx_atomic_scalars()) -> clean = false
+    if !fx_report_runtime("atomic-record", fx_atomic_record()) -> clean = false
+    if !fx_report_runtime("atomic-try-add", fx_atomic_try_add()) -> clean = false
+    if !fx_report_runtime("atomic-int-leaks", fx_atomic_int_leaks()) -> clean = false
+    if !fx_runtime_bitcast_refusals() {
+        print("issue runtime-bitcast: scalar layout/drop refusals failed")
+        clean = false
+    }
+    if !fx_closure_atomic_refs_check() {
+        print("issue closure-atomic-refs: generated clone/drop seam failed")
+        clean = false
+    }
+    if !fx_scope_guard_reown_checks() {
+        print("issue scope-guard-reown: ownership/lint/optimizer checks failed")
+        clean = false
+    }
+    if !fx_report_lir("runtime-bitcast", fx_runtime_bitcast_module()) -> clean = false
+    if !fx_journey_address_checks() {
+        print("issue journey-address: missing-export/wrong-arity/actual-target witnesses failed")
+        clean = false
+    }
     if !fx_report("hello", fx_hello()) -> clean = false
     if !fx_report("arithmetic", fx_arithmetic()) -> clean = false
     if !fx_report("control-flow", fx_control_flow()) -> clean = false
     if !fx_report("aggregates", fx_aggregates()) -> clean = false
+    if !fx_report("bits", fx_bits()) -> clean = false
+    // Tests/Fixtures/*.jet
+    if !fx_report("close-generic", fx_close_generic()) -> clean = false
+    if !fx_report("close-option-replace", fx_close_option_replace()) -> clean = false
+    if !fx_report_runtime("close-cell-rebind", fx_close_cell_rebind()) -> clean = false
+    if !fx_close_pair_remainder_checks(true) || !fx_close_pair_remainder_checks(false) {
+        print("issue close: generic/concrete owned Pair remainder passes the moved first field to Close")
+        clean = false
+    }
+    if !fx_close_escape_checks() {
+        print("issue close: partially moved owner escaped into an aggregate")
+        clean = false
+    }
+    if !fx_close_plain_glue_checks() {
+        print("issue close: no-Close instantiation changed LIR or object bytes")
+        clean = false
+    }
+    if !fx_report("inline-asm-memory", fx_inline_asm_memory()) -> clean = false
+    if !fx_report_lir("inline-asm-call", fx_inline_asm_call(false)) -> clean = false
+    if !fx_report_lir("inline-asm-call-two", fx_inline_asm_call(true)) -> clean = false
+    if !fx_report_lir("inline-asm-call-unit", fx_inline_asm_call_unit(0)) -> clean = false
+    if !fx_report_lir("inline-asm-call-one-unit", fx_inline_asm_call_unit(1)) -> clean = false
+    if !fx_report_lir("inline-asm-call-two-unit", fx_inline_asm_call_unit(2)) -> clean = false
+    if !fx_report_lir("inline-asm-call-three-unit", fx_inline_asm_call_unit(3)) -> clean = false
+    if !fx_report("inline-asm-fixed", fx_inline_asm_fixed()) -> clean = false
+    if !fx_report("inline-asm-exit", fx_inline_asm_exit()) -> clean = false
+    if !fx_report_lir("inline-asm-int-input", fx_inline_asm_int_input()) -> clean = false
+    if !fx_report("inline-asm-import", fx_inline_asm_import()) -> clean = false
+    if !fx_report_lir("inline-asm-forms", fx_inline_asm_forms()) -> clean = false
+    if !fx_report("inline-asm-int-result", fx_inline_asm_int_result()) -> clean = false
+    if !fx_inline_asm_refusals() {
+        print("issue inline-asm: refusal/encoding witnesses failed")
+        clean = false
+    }
+    if !fx_report("layout", fx_layout()) -> clean = false
+    if !fx_report("negate-min", fx_negate_min()) -> clean = false
+    if !fx_report("write-params", fx_write_params()) -> clean = false
+    if !fx_report("payload", fx_payload()) -> clean = false
+    if !fx_report("payload-move", fx_payload_move()) -> clean = false
+    if !fx_report("payload-move-backedge", fx_payload_move_backedge()) -> clean = false
+    if !fx_report("order", fx_order()) -> clean = false
+    if !fx_report("order-equal", fx_order_equal()) -> clean = false
+    if !fx_report("core-bare-name", fx_core_bare_name()) -> clean = false
+    if !fx_payload_take_handle_check() -> clean = false
+    if !fx_payload_take_subject_local_check() -> clean = false
+    if !fx_report("lists", fx_lists()) -> clean = false
+    if !fx_report("lists-place-read", fx_lists_place_read()) -> clean = false
+    if !fx_report("lists-coalesce", fx_lists_place_coalesce()) -> clean = false
+    if !fx_report("lists-clear", fx_lists_clear()) -> clean = false
+    if !fx_report("lists-oob", fx_lists_oob()) -> clean = false
+    if !fx_report("lists-reverse", fx_lists_reverse()) -> clean = false
+    if !fx_report("lists-extend", fx_lists_extend()) -> clean = false
+    if !fx_report("lists-last", fx_lists_last()) -> clean = false
+    if !fx_report("lists-try-reserve", fx_lists_try_reserve()) -> clean = false
+    if !fx_report("lists-try-reserve-fault", fx_lists_try_reserve_fault()) -> clean = false
+    if !fx_report("disjoint-split", fx_disjoint_split()) -> clean = false
+    if !fx_report("disjoint-get", fx_disjoint_get()) -> clean = false
+    if !fx_report("disjoint-edit", fx_disjoint_edit()) -> clean = false
+    if !fx_report_runtime("para-map", fx_parallel_map()) -> clean = false
+    if !fx_report("try-map", fx_closure_try_map_fixture()) -> clean = false
+    if !fx_report_runtime("para-map-owned", fx_parallel_map_owned()) -> clean = false
+    if !fx_report("try-map-owned-ok", fx_try_map_owned_ok()) -> clean = false
+    if !fx_report("try-map-owned-err", fx_try_map_owned_err()) -> clean = false
+    if !fx_report("try-map-owned-empty", fx_try_map_owned_empty()) -> clean = false
+    if !fx_report_runtime("para-fold", fx_parallel_fold_fixture()) -> clean = false
+    if !fx_report_runtime("para-flags", fx_parallel_flags_fixture()) -> clean = false
+    if !fx_report_runtime("fixed-located-routes", fx_fixed_located_routes()) -> clean = false
+    if !fx_report("carrier-facts", fx_carrier_facts()) -> clean = false
+    if !fx_report_runtime("reflect-of", fx_reflect_of()) -> clean = false
+    if !fx_report("data-entry-list", fx_data_entry_list()) -> clean = false
+    if !fx_report("bytes-view", fx_bytes_view()) -> clean = false
+    if !fx_report("container-codecs-list", fx_container_codecs_list()) -> clean = false
+    if !fx_report("container-codecs-option", fx_container_codecs_option()) -> clean = false
+    if !fx_report("container-codecs-bytes", fx_container_codecs_bytes()) -> clean = false
+    if !fx_report("container-codecs-base64", fx_container_codecs_base64()) -> clean = false
+    if !fx_report("container-codecs-fixed", fx_container_codecs_fixed()) -> clean = false
+    if !fx_report("container-codecs-map", fx_container_codecs_map()) -> clean = false
+    if !fx_report("container-codecs-paths", fx_container_codecs_paths()) -> clean = false
+    if !fx_report("strings", fx_strings()) -> clean = false
+    if !fx_report("strings-predicates", fx_strings_predicates()) -> clean = false
+    if !fx_report_runtime("strings-concat", fx_strings_concat()) -> clean = false
+    if !fx_report_runtime("strings-join", fx_strings_join()) -> clean = false
+    if !fx_report("prep-float-text", fx_prep_float_text()) -> clean = false
+    if !fx_report("display", fx_display()) -> clean = false
+    if !fx_report("display-custom", fx_display_custom()) -> clean = false
+    if !fx_report("display-list", fx_display_list()) -> clean = false
+    if !fx_report("constants-boxed", fx_constants_boxed()) -> clean = false
+    if !fx_report("constants-boxed-struct", fx_constants_boxed_struct()) -> clean = false
+    if !fx_report("iter", fx_iter()) -> clean = false
+    if !fx_iter_taken_check() -> clean = false
+    if !fx_report("iter-zero-step", fx_iter_zero_step()) -> clean = false
+    if !fx_report("iter-large-step", fx_iter_large_step()) -> clean = false
+    if !fx_report("iter-big-step", fx_iter_big_step()) -> clean = false
+    if !fx_report("iter-big-step-overflow", fx_iter_big_step_overflow()) -> clean = false
+    if !fx_report_runtime("flat-map-owned", fx_flat_map_owned()) -> clean = false
+    if !fx_report_runtime("sort-compare-result", fx_sort_compare_result()) -> clean = false
+    if !fx_pipe_missing_carrier_checks() {
+        print("issue process-lines: missing native stream carrier was not refused")
+        clean = false
+    }
+    if !fx_report_runtime("list-try-collect", fx_list_try_collect()) -> clean = false
+    if !fx_report("tuple", fx_tuple()) -> clean = false
+    if !fx_report("tuple-members", fx_tuple_members()) -> clean = false
+    if !fx_report("struct-literal", fx_struct_literal()) -> clean = false
+    if !fx_report("values-inline", fx_values_inline()) -> clean = false
+    if !fx_report("values-owned-field", fx_values_owned_field()) -> clean = false
+    if !fx_values_int_field_drop_checks() {
+        print("issue values-int-field-drop: stored exact Int glue has invalid carrier comparisons or no bigint release")
+        clean = false
+    }
+    if !fx_report_runtime("values-int-field-drop", fx_values_int_field_drop()) -> clean = false
+    if !fx_report("dropless-inline-snapshots", fx_dropless_inline_snapshots()) -> clean = false
+    if !fx_ssa_storage_checks() {
+        print("issue ssa-storage: owning local and original SSA do not share one slot")
+        clean = false
+    }
+    if !fx_report("ssa-storage-temporary-first", fx_ssa_bound_storage(true)) -> clean = false
+    if !fx_report("ssa-storage-local-first", fx_ssa_bound_storage(false)) -> clean = false
+    if !fx_report("values-loop", fx_values_loop()) -> clean = false
+    if !fx_report("values-phi", fx_values_phi()) -> clean = false
+    if !fx_report("values-payload", fx_values_payload()) -> clean = false
+    if !fx_report("values-result-roundtrip", fx_values_result_roundtrip()) -> clean = false
+    if !fx_report("reach", fx_reach()) -> clean = false
+    if !fx_report("mono-three-types", fx_mono_three_types()) -> clean = false
+    if !fx_report("mono-nested-call", fx_mono_nested_call()) -> clean = false
+    if !fx_report("mono-generic-struct", fx_mono_generic_struct()) -> clean = false
+    if !fx_report("mono-owner-methods", fx_mono_owner_methods()) -> clean = false
+    if !fx_report("mono-recursive", fx_mono_recursive()) -> clean = false
+    if !fx_report("mono-identity-collisions", fx_mono_identity_collisions()) -> clean = false
+    if !fx_report("mono-render", fx_mono_render()) -> clean = false
+    if !fx_report("constants", fx_constants()) -> clean = false
+    if !fx_report("constants-tags", fx_constants_tags()) -> clean = false
+    if !fx_report("constants-bytes", fx_constants_bytes()) -> clean = false
+    if !fx_report("constants-map", fx_constants_map()) -> clean = false
+    if !fx_report("constants-map-u64", fx_constants_map_u64()) -> clean = false
+    if !fx_report_runtime("map-lookup-cache", fx_map_lookup_cache()) -> clean = false
+    if !fx_report_runtime("range-values", fx_range_values()) -> clean = false
+    if !fx_report_runtime("f32-operations", fx_f32_operations()) -> clean = false
+    if !fx_report("display-compiler-values", fx_display_compiler_values()) -> clean = false
+    if !fx_report_runtime("iter-owning-view", fx_iter_owning_view()) -> clean = false
+    if !fx_report("float-convert", fx_float_convert()) -> clean = false
+    if !fx_report("float-convert-checked", fx_float_convert_checked_edges()) -> clean = false
+    if !fx_report_lir("float-convert-carriers", fx_float_convert_carriers()) -> clean = false
+    if !fx_report_runtime("float-convert-widen", fx_float_convert_widen_exact()) -> clean = false
+    if !fx_report_runtime("float-convert-widen-inexact", fx_float_convert_widen_inexact()) -> clean = false
+    if !fx_report("wide-show", fx_wide_show()) -> clean = false
+    if !fx_report("wide-payload", fx_wide_payload()) -> clean = false
+    if !fx_report("wide-construct", fx_wide_construct()) -> clean = false
+    if !fx_report("unsigned", fx_unsigned()) -> clean = false
+    if !fx_report("unsigned-add-overflow", fx_unsigned_add_overflow()) -> clean = false
+    if !fx_report("unsigned-sub-overflow", fx_unsigned_sub_overflow()) -> clean = false
+    if !fx_report("unsigned-mul-overflow", fx_unsigned_mul_overflow()) -> clean = false
+    if !fx_report("unsigned-div-zero", fx_unsigned_div_zero()) -> clean = false
+    if !fx_report("unsigned-rem-zero", fx_unsigned_rem_zero()) -> clean = false
+    if !fx_report("narrow", fx_narrow_program()) -> clean = false
+    if !fx_report("narrow-storage", fx_narrow_storage()) -> clean = false
+    if !fx_report("narrow-add-overflow", fx_narrow_add_overflow()) -> clean = false
+    if !fx_report("narrow-sub-overflow", fx_narrow_sub_overflow()) -> clean = false
+    if !fx_report("narrow-mul-overflow", fx_narrow_mul_overflow()) -> clean = false
+    if !fx_report("narrow-div-overflow", fx_narrow_div_overflow()) -> clean = false
+    if !fx_report("narrow-div-zero", fx_narrow_div_zero()) -> clean = false
+    if !fx_report("narrow-shift-range", fx_narrow_shift_range()) -> clean = false
+    if !fx_report("narrow-neg-overflow", fx_narrow_neg_overflow()) -> clean = false
+    if !fx_report("implicit-ok", fx_implicit_ok()) -> clean = false
+    if !fx_report("closures", fx_closures()) -> clean = false
+    if !fx_report("closures-owned-borrow", fx_closures_owned_borrow()) -> clean = false
+    if !fx_report("closures-owned-write", fx_closures_owned_write()) -> clean = false
+    if !fx_report("scope-guard-reown", fx_scope_guard_reown()) -> clean = false
+    if !fx_report_runtime("iter-map-keys", fx_iter_map_keys()) -> clean = false
+    if !fx_report("sets", fx_sets()) -> clean = false
+    if !fx_report("ranks", fx_ranks()) -> clean = false
+    if !fx_rank_refusals() {
+        print("issue ranks: unsupported algebra was not refused")
+        clean = false
+    }
+    if !fx_report("tallies", fx_tallies()) -> clean = false
+    if !fx_report("queues", fx_queues()) -> clean = false
+    if !fx_report("priority-queues", fx_priority_queues()) -> clean = false
+    if !fx_report("trait-values", fx_trait_values()) -> clean = false
+    if !fx_trait_unimplemented_checks() {
+        print("issue trait-unimplemented: a dynamic call no implementation answers left LIR blocks without a predecessor or lost the reachable join")
+        clean = false
+    }
+    if !fx_close_owned_shape_checks() {
+        print("issue close-owned: constructor destructor provenance or Close signature contract changed")
+        clean = false
+    }
+    if !fx_report_runtime("close-stored-owners", fx_close_stored_owners(false)) -> clean = false
+    if !fx_report_runtime("close-stored-generic", fx_close_stored_owners(true)) -> clean = false
+    if !fx_report_runtime("close-shared-owners", fx_close_shared_owners()) -> clean = false
+    if !fx_report("value-builtins", fx_value_builtins()) -> clean = false
+    if !fx_report_runtime("int-radix", fx_int_radix()) -> clean = false
+    if !fx_report_runtime("int-radix-invalid", fx_int_radix_invalid()) -> clean = false
+    if !fx_report_runtime("try-capacity", fx_try_capacity()) -> clean = false
+    if !fx_report_runtime("try-capacity-fault", fx_try_capacity_fault()) -> clean = false
+    if !fx_report_runtime("try-capacity-cap", fx_try_capacity_cap()) -> clean = false
+    if !fx_report_runtime("try-capacity-unit", fx_try_capacity_unit()) -> clean = false
+    if !fx_report_runtime("try-capacity-unit-fault", fx_try_capacity_unit_fault()) -> clean = false
+    if !fx_report("stop-points", fx_stop_points()) -> clean = false
+    if !fx_sentry_scopes_check() {
+        print("issue sentry-scopes: save/restore cleanup checks failed")
+        clean = false
+    }
+    if !fx_deadline_scopes_check() {
+        print("issue deadline-scopes: save/restore cleanup checks failed")
+        clean = false
+    }
+    if !fx_report_executable("bool-abi", fx_bool_abi_executable()) -> clean = false
+    alignments :: [Int]{16, 64, 256, 8192, 8388608}
+    loop align in alignments {
+        if !fx_report_lir("align{align}", fx_align_module(align)) -> clean = false
+    }
+    if !fx_report("statics", fx_statics()) -> clean = false
+    if !fx_report_lir("statics-addresses", fx_statics_addresses_module()) -> clean = false
+    if !fx_report("statics-list", fx_statics_list()) -> clean = false
+    if !fx_report("statics-bytes", fx_statics_bytes()) -> clean = false
+    if !fx_report("statics-strings", fx_statics_strings()) -> clean = false
+    if !fx_report("statics-map", fx_statics_map()) -> clean = false
+    if !fx_report_lir("statics-map-lifetime", fx_statics_map_lifetime()) -> clean = false
+    if !fx_report("require-pass", fx_require_pass()) -> clean = false
+    if !fx_report("require-native-pass", fx_require_native_pass()) -> clean = false
+    if !fx_report("panic-task-checked", fx_panic_capability(true)) -> clean = false
+    if !fx_report("panic-task-plain", fx_panic_capability(false)) -> clean = false
+    if !fx_report("panic-root-checked", fx_panic_capability(true)) -> clean = false
+    if !fx_report("expect-match", fx_expect_fail("match")) -> clean = false
+    if !fx_report("expect-mismatch", fx_expect_fail("mismatch")) -> clean = false
+    if !fx_report("expect-unmet", fx_expect_fail("unmet")) -> clean = false
+    if !fx_report("expect-nested", fx_expect_fail("nested")) -> clean = false
+    if !fx_report("expect-r080", fx_expect_fail("r080")) -> clean = false
+    if !fx_report("expect-r080-unarmed", fx_expect_fail("r080-unarmed")) -> clean = false
+    if !fx_report("expect-deeper-close", fx_expect_fail("deeper-close")) -> clean = false
+    if !fx_report("expect-own-close", fx_expect_fail("own-close")) -> clean = false
+    if !fx_report("require-fail", fx_require_fail()) -> clean = false
+    if !fx_report("require-eq-int", fx_require_eq_int()) -> clean = false
+    if !fx_report("require-eq-string", fx_require_eq_string()) -> clean = false
+    if !fx_report("panic-message", fx_panic_message()) -> clean = false
+    if !fx_report("require-default", fx_require_default()) -> clean = false
+    if !fx_report("require-empty", fx_require_empty()) -> clean = false
+    if !fx_report("require-locals", fx_require_locals()) -> clean = false
+    if !fx_report("numeric", fx_numeric()) -> clean = false
+    if !fx_report("numeric-i64-truncation", fx_numeric_i64_truncation()) -> clean = false
+    if !fx_report("numeric-int-primitive", fx_numeric_int_primitive()) -> clean = false
+    if !fx_report("numeric-u64-binary-division", fx_numeric_u64_binary_division()) -> clean = false
+    if !fx_report("numeric-u64-binary-div-zero", fx_numeric_u64_binary_div_zero()) -> clean = false
+    if !fx_report("numeric-u64-binary-floor-zero", fx_numeric_u64_binary_floor_zero()) -> clean = false
+    if !fx_report("numeric-u64-binary-rem-zero", fx_numeric_u64_binary_rem_zero()) -> clean = false
+    if !fx_sized_literals_check() -> clean = false
+    if !fx_widen_fixed_check() -> clean = false
+    if !fx_report("widen-i64-max-stop", fx_widen_i64_max_stop()) -> clean = false
+    if !fx_report("widen-u64-max-stop", fx_widen_u64_max_stop()) -> clean = false
+    if !fx_report("widen-f32-stop", fx_widen_f32_stop()) -> clean = false
+    if !fx_report("numeric-fixed-floor", fx_numeric_fixed_floor()) -> clean = false
+    if !fx_report("numeric-floor-min-stop", fx_numeric_floor_min_stop()) -> clean = false
+    if !fx_report("numeric-floor-i8-min-stop", fx_numeric_floor_i8_min_stop()) -> clean = false
+    if !fx_report("numeric-mod-zero-stop", fx_numeric_mod_zero_stop()) -> clean = false
+    if !fx_report("numeric-pow-i8-stop", fx_numeric_pow_i8_stop()) -> clean = false
+    if !fx_report("numeric-pow-i64-stop", fx_numeric_pow_i64_stop()) -> clean = false
+    if !fx_report("numeric-pow-i16-negative-stop", fx_numeric_pow_i16_negative_stop()) -> clean = false
+    if !fx_report("numeric-add-stop", fx_numeric_add_stop()) -> clean = false
+    if !fx_report("numeric-sub-stop", fx_numeric_sub_stop()) -> clean = false
+    if !fx_report("numeric-mul-stop", fx_numeric_mul_stop()) -> clean = false
+    if !fx_report("numeric-div-stop", fx_numeric_div_stop()) -> clean = false
+    if !fx_report("numeric-zero-stop", fx_numeric_zero_stop()) -> clean = false
+    if !fx_report("numeric-rem-zero-stop", fx_numeric_rem_zero_stop()) -> clean = false
+    if !fx_report("numeric-wrapping-zero-stop", fx_numeric_wrapping_zero_stop()) -> clean = false
+    if !fx_report("numeric-saturating-zero-stop", fx_numeric_saturating_zero_stop()) -> clean = false
+    if !fx_report("numeric-pow-stop", fx_numeric_pow_stop()) -> clean = false
+    if !fx_report("numeric-pow-negative-stop", fx_numeric_pow_negative_stop()) -> clean = false
+    if !fx_report("numeric-pow-range-stop", fx_numeric_pow_range_stop()) -> clean = false
+    if !fx_report("numeric-rotate-stop", fx_numeric_rotate_stop()) -> clean = false
+    if !fx_report("numeric-euclid-zero-stop", fx_numeric_euclid_zero_stop()) -> clean = false
+    if !fx_duration_arithmetic_check() -> clean = false
+    if !fx_report("convert", fx_convert()) -> clean = false
+    if !fx_report("convert-prelude", fx_convert_prelude()) -> clean = false
+    if !fx_report_runtime("convert-units", fx_convert_units()) -> clean = false
+    if !fx_report("convert-big-positive", fx_convert_big_positive()) -> clean = false
+    if !fx_report("convert-big-negative", fx_convert_big_negative()) -> clean = false
+    if !fx_report("convert-big-float", fx_convert_big_float()) -> clean = false
+    if !fx_report("convert-big-i64-overflow", fx_convert_big_i64_overflow()) -> clean = false
+    if !fx_report("convert-big-char", fx_convert_big_char()) -> clean = false
+    if !fx_report("convert-char-surrogate", fx_convert_char_surrogate()) -> clean = false
+    if !fx_report("convert-char-large", fx_convert_char_large()) -> clean = false
+    if !fx_report("convert-char-negative", fx_convert_char_negative()) -> clean = false
+    if !fx_convert_rejection_checks() {
+        print("issue convert: rejection checks failed")
+        clean = false
+    }
+    if !fx_shared_site_checks() {
+        print("issue shared-sites: pinned startup/import/lifetime checks failed")
+        clean = false
+    }
+    if !fx_native_mode_checks() {
+        print("issue native-mode: seed/native callable mode gate failed")
+        clean = false
+    }
+    if !fx_native_err_borrow_checks() {
+        print("issue native-err-borrow: N borrowed field reads emitted an owning getter/clone")
+        clean = false
+    }
+    if !fx_native_handle_checks() {
+        print("issue native-handles: shell helpers failed signature/ownership lint")
+        clean = false
+    }
+    if !fx_foreign_descriptor_checks() {
+        print("issue foreign-descriptor: prepared Rust helper ABI failed lowering/lint/object checks")
+        clean = false
+    }
+    if !fx_lazy_clone_checks() {
+        print("issue lazy-clone: lazy descriptor clone reachability is wrong or not linear")
+        clean = false
+    }
+    if !fx_nested_size_checks() {
+        print("issue nested-size: inline record sizes are wrong or not linear in nesting depth")
+        clean = false
+    }
     print(if clean -> "all fixtures lowered lint-clean and compiled" else -> "FIXTURE ISSUES")
+}
+
+// A diamond chain Lazy0 -> {a, b} -> Lazy1 -> ... -> Lazy{depth}: every level
+// is reachable along 2^level paths. `leaf` is the last level's own field.
+fn fx_lazy_diamond(depth: Int, leaf: MIRType) -> [MIRTypeDef] Never! {
+    types := [MIRTypeDef]{}
+    loop level in 0..<depth {
+        owner :: "Lazy{level}"
+        next :: fx_named("Lazy{level + 1}")
+        &types.push(fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "a", next), fx_field(owner, "b", next), fx_field(owner, "label", fx_string())}, methods: [MIRFunctionID]{}}))
+    }
+    last :: "Lazy{depth}"
+    &types.push(fx_type_def(last, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(last, "leaf", leaf)}, methods: [MIRFunctionID]{}}))
+    types
+}
+
+fn fx_lazy_clone_program(types: ^[MIRTypeDef]) -> MIRProgram Never! {
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
+fn fx_lazy_clone_case(name: String, program: MIRProgram, root: String, expected: Bool) -> Bool Never! {
+    found :: lower_lazy_type_can_clone(program, fx_named(root))
+    if found != expected {
+        print("lazy-clone {name}: {found}, expected {expected}")
+        return false
+    }
+    print("lazy-clone {name}: {found}")
+    true
+}
+
+// lower_lazy_can_clone is the conjunction of every reachable type's own test
+// with cycles answering true. A depth-25 diamond (2^25 paths) finishes, and
+// small cases keep the per-path answers: all-cloneable true, a single-use
+// type anywhere below false, a recursive type true.
+fn fx_lazy_clone_checks() -> Bool Never! {
+    passed := true
+    deep :: fx_lazy_clone_program(fx_lazy_diamond(25, fx_int()))
+    if !fx_lazy_clone_case("diamond-25", deep, "Lazy0", true) -> passed = false
+    sealed := fx_type_def("Sealed", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Sealed", "token", fx_string())}, methods: [MIRFunctionID]{}})
+    sealed.single_use = true
+    blocked := fx_lazy_diamond(25, fx_named("Sealed"))
+    &blocked.push(sealed.copy())
+    if !fx_lazy_clone_case("diamond-25-single-use", fx_lazy_clone_program(^blocked), "Lazy0", false) -> passed = false
+    small := fx_lazy_diamond(3, fx_named("Sealed"))
+    &small.push(sealed)
+    if !fx_lazy_clone_case("diamond-3-single-use", fx_lazy_clone_program(^small), "Lazy0", false) -> passed = false
+    if !fx_lazy_clone_case("diamond-3", fx_lazy_clone_program(fx_lazy_diamond(3, fx_int())), "Lazy0", true) -> passed = false
+    node :: fx_named("LazyNode")
+    recursive :: [MIRTypeDef]{fx_type_def("LazyNode", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("LazyNode", "children", fx_list_type(node)), fx_field("LazyNode", "label", fx_string())}, methods: [MIRFunctionID]{}})}
+    if !fx_lazy_clone_case("recursive", fx_lazy_clone_program(recursive), "LazyNode", true) -> passed = false
+    passed
+}
+
+// Nest0 { a: Nest1, b: Nest1, flag: Bool } ... Nest{depth} { n: Int }: every
+// level reaches the next along two member paths. Sizing must not re-walk
+// per path (2^depth); the sizes are s(depth) = 8 and
+// s(i) = align8(2 * s(i + 1) + 1) = 16 * 2^(depth - i) - 8.
+fn fx_nested_records(depth: Int) -> MIRProgram Never! {
+    types := [MIRTypeDef]{}
+    loop level in 0..<depth {
+        owner :: "Nest{level}"
+        next :: fx_named("Nest{level + 1}")
+        &types.push(fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "a", next), fx_field(owner, "b", next), fx_field(owner, "flag", fx_bool())}, methods: [MIRFunctionID]{}}))
+    }
+    last :: "Nest{depth}"
+    &types.push(fx_type_def(last, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(last, "n", fx_int())}, methods: [MIRFunctionID]{}}))
+    b := fx_builder()
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
+fn fx_nested_size_case(name: String, program: MIRProgram, depth: Int) -> Bool Never! {
+    expected :: 16 * (1 << depth) - 8
+    size :: lower_size(program, fx_named("Nest0"))
+    inline :: lower_inline_size(program, fx_named("Nest0"))
+    members :: lower_inline_members(program, fx_named("Nest0"))
+    end :: lower_members_end(program, members, 0)
+    // b follows a; flag follows b.
+    half :: 16 * (1 << (depth - 1)) - 8
+    placed :: members.len() == 3 && members[0].offset == 0 && members[1].offset == half && members[2].offset == 2 * half
+    passed :: size.size == expected && size.align == 8 && inline == expected && end == 2 * half + 1 && placed
+    print("nested-size {name}: size {size.size}, inline {inline}, end {end}, expected {expected}")
+    passed
+}
+
+fn fx_nested_size_checks() -> Bool Never! {
+    passed := true
+    if !fx_nested_size_case("depth-2", fx_nested_records(2), 2) -> passed = false
+    if !fx_nested_size_case("depth-30", fx_nested_records(30), 30) -> passed = false
+    if !fx_nested_size_case("depth-30-indexed", lower_indexed_program(fx_nested_records(30)), 30) -> passed = false
+    passed
 }

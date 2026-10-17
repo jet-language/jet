@@ -1,0 +1,166 @@
+// Correctness path for Rust f64::from_str captures (MatchScan.rs:36-50).
+// Decimal digits become an exact rational; only the final quotient is rounded,
+// ties to even. No Float arithmetic, libc parser, or lossy decimal accumulator.
+struct ScanDecimal {
+    valid: Bool, negative: Bool, first: I64, last: I64,
+    digits: I64, fraction: I64, exponent: I64, special: I64
+}
+fn scan_decimal(data: I64, len: I64, stride: I64) -> ScanDecimal {
+    result := ScanDecimal{valid: false, negative: false, first: I64{0}, last: I64{0}, digits: I64{0}, fraction: I64{0}, exponent: I64{0}, special: I64{0}}
+    if (len == I64{0}) { return result }
+    at := I64{0}
+    first :: scan_byte(data, stride, at)
+    if (first == I64{43} || first == I64{45}) {
+        result.negative = first == I64{45}
+        at += I64{1}
+    }
+    if scan_ascii(data + at * stride, len - at, stride, I64{6712937}, I64{3}) || scan_ascii(data + at * stride, len - at, stride, I64{8751735898823356009}, I64{8}) {
+        result.valid = true
+        result.special = I64{1}
+        return result
+    }
+    if scan_ascii(data + at * stride, len - at, stride, I64{7233902}, I64{3}) {
+        result.valid = true
+        result.special = I64{2}
+        return result
+    }
+    seen := false
+    point := false
+    leading := true
+    trailing := I64{0}
+    loop at < len {
+        byte :: scan_byte(data, stride, at)
+        if (byte == I64{101} || byte == I64{69}) { break }
+        if (byte == I64{46} && !point) {
+            point = true
+            at += I64{1}
+            next
+        }
+        if (byte < I64{48} || byte > I64{57}) { return result }
+        seen = true
+        if point { result.fraction += I64{1} }
+        if (byte != I64{48}) {
+            if leading { result.first = at }
+            leading = false
+            result.last = at + I64{1}
+            trailing = I64{0}
+        } else if !leading { trailing += I64{1} }
+        if !leading { result.digits += I64{1} }
+        at += I64{1}
+    }
+    if !seen { return result }
+    if (at < len) {
+        at += I64{1}
+        minus := false
+        if (at < len) {
+            byte :: scan_byte(data, stride, at)
+            if (byte == I64{43} || byte == I64{45}) {
+                minus = byte == I64{45}
+                at += I64{1}
+            }
+        }
+        if (at == len) { return result }
+        // Saturate beyond every possible cancellation by this input's decimal
+        // point. Arbitrarily long exponent spellings still get fully validated.
+        bound :: len + I64{1024}
+        exp := I64{0}
+        loop at < len {
+            digit :: scan_byte(data, stride, at) - I64{48}
+            if (digit < I64{0} || digit > I64{9}) { return result }
+            if (exp <= (bound - digit) /% I64{10}) { exp = exp * I64{10} + digit } else { exp = bound }
+            at += I64{1}
+        }
+        result.exponent = if minus -> -exp else -> exp
+    }
+    result.exponent = result.exponent - result.fraction + trailing
+    result.digits -= trailing
+    result.valid = true
+    result
+}
+fn scan_pow10(node: I64, count: I64) {
+    remaining := count
+    loop remaining >= (I64{9}) {
+        int_scale(node, I64{1000000000}, I64{0})
+        remaining -= I64{9}
+    }
+    factor := I64{1}
+    loop remaining > (I64{0}) {
+        factor *= I64{10}
+        remaining -= I64{1}
+    }
+    int_scale(node, factor, I64{0})
+}
+fn scan_float_bits(data: I64, len: I64, stride: I64) -> I64 {
+    decimal :: scan_decimal(data, len, stride)
+    sign :: if decimal.negative -> I64{-9223372036854775808} else -> I64{0}
+    if (decimal.special == I64{1}) { return sign.bit_or(I64{9218868437227405312}) }
+    if (decimal.special == I64{2}) { return sign.bit_or(I64{9221120237041090560}) }
+    if (decimal.digits == I64{0}) { return sign }
+    order :: decimal.digits + decimal.exponent
+    if (order > I64{309}) { return sign.bit_or(I64{9218868437227405312}) }
+    if (order < I64{-324}) { return sign }
+    // Rust dec2flt's bound: every binary64 rounding boundary terminates within
+    // 768 significant decimal digits. A longer suffix can affect rounding only
+    // when the retained prefix is exactly halfway. decimal.last excludes all
+    // trailing zero digits, so an omitted suffix is necessarily nonzero.
+    retained :: if (decimal.digits > I64{768}) -> I64{768} else -> decimal.digits
+    sticky :: decimal.digits > retained
+    scale :: decimal.exponent + decimal.digits - retained
+    // Bounded private workspaces: no digit-length-dependent bigint growth.
+    // Neither node is published into the hazard domain.
+    capacity :: I64{341}
+    numerator :: int_new(capacity)
+    denominator :: int_new(capacity)
+    int_set(denominator, I64{0}, I64{1})
+    at := decimal.first
+    fed := I64{0}
+    loop fed < retained {
+        byte :: scan_byte(data, stride, at)
+        if (byte != I64{46}) {
+            int_scale(numerator, I64{10}, byte - I64{48})
+            fed += I64{1}
+        }
+        at += I64{1}
+    }
+    if (scale >= I64{0}) { scan_pow10(numerator, scale) } else { scan_pow10(denominator, -scale) }
+    exponent := I64{0}
+    loop int_compare_abs(int_tag(numerator), int_tag(denominator)) < (I64{0}) {
+        int_scale(numerator, I64{2}, I64{0})
+        exponent -= I64{1}
+    }
+    loop int_compare_abs(int_tag(numerator), int_tag(denominator)) >= (I64{0}) {
+        int_scale(denominator, I64{2}, I64{0})
+        exponent += I64{1}
+    }
+    int_scale(numerator, I64{2}, I64{0})
+    exponent -= I64{1}
+    if (exponent > I64{1023} || exponent < I64{-1075}) {
+        int_free_node(numerator)
+        int_free_node(denominator)
+        return sign.bit_or((if (exponent > I64{1023}) -> I64{9218868437227405312} else -> I64{0}))
+    }
+    shift := if (exponent >= I64{-1022}) -> I64{52} else -> exponent + I64{1074}
+    if (shift < I64{0}) { int_scale(denominator, I64{2}, I64{0}) }
+    loop shift > (I64{0}) {
+        int_scale(numerator, I64{2}, I64{0})
+        shift -= I64{1}
+    }
+    quotient :: int_division(int_tag(numerator), int_tag(denominator), I64{0}, I64{0}, I64{0}, I64{0})
+    remainder :: int_division(int_tag(numerator), int_tag(denominator), I64{0}, I64{0}, I64{0}, I64{1})
+    twice :: jet_int_add(remainder, remainder)
+    comparison :: int_compare_abs(twice, int_tag(denominator))
+    mantissa := int_word(quotient)
+    if (comparison > I64{0} || (comparison == I64{0} && (sticky || (mantissa.bit_and(I64{1})) != I64{0}))) { mantissa += I64{1} }
+    int_discard(quotient)
+    int_discard(remainder)
+    int_discard(twice)
+    int_free_node(numerator)
+    int_free_node(denominator)
+    if (exponent < I64{-1022}) { return sign.bit_or(mantissa) }
+    if (mantissa == I64{9007199254740992}) {
+        mantissa = I64{4503599627370496}
+        exponent += I64{1}
+    }
+    if (exponent > I64{1023}) { return sign.bit_or(I64{9218868437227405312}) }
+    sign.bit_or(((exponent + I64{1023}) << I64{52})).bit_or((mantissa - I64{4503599627370496}))
+}

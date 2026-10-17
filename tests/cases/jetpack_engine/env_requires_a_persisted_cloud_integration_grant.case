@@ -1,0 +1,16 @@
+# HAND-PORT tests/jetpack_engine.rs:6710-6741 env_requires_a_persisted_cloud_integration_grant
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: env_requires_a_persisted_cloud_integration_grant.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+step: jetpack env --trust --offline --no-color -- true
+cwd: project
+env: HOME={work}/home
+exit: 2
+stderr: ~ "E1335" # original contains predicate
+stderr: ~ "cloud-credentials:credential.read" # original contains predicate
+stderr: !~ "aws_production" # original negative contains predicate
+

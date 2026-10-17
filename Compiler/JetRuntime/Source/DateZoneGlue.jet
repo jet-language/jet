@@ -1,0 +1,206 @@
+// DateZoneABI only; Time.rs723-726/1159-1169/1475-1477 owns field order.
+fn datetime_leap(value: I64) -> Bool { (time_glue_word(value + DATETIME_LEAP).bit_and(I64{255})) != I64{0} }
+fn datetime_nanos(value: I64) -> I64 { time_glue_word(value + DATETIME_NANOS).bit_and(I64{4294967295}) }
+#Export(c) fn jet_rt_handle_clone_jet_date_time(value: I64) -> I64 {
+    result :: time_glue_clone(value, DATETIME_BYTES)
+    time_glue_store(result + DATETIME_NANOS, datetime_nanos(value))
+    time_glue_store(result + DATETIME_LEAP, if datetime_leap(value) -> I64{1} else -> I64{0})
+    result
+}
+// time_glue_drop (TimeGlue14-16) already guards null, like Zone/Zoned drop.
+#Export(c) fn jet_rt_handle_drop_jet_date_time(value: I64) { time_glue_drop(value, DATETIME_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_date_time(left: I64, right: I64) -> Bool {
+    // Time729-733 deliberately compares leap before nanos.
+    time_glue_word(left + DATETIME_SECS) == time_glue_word(right + DATETIME_SECS) && datetime_leap(left) == datetime_leap(right) && datetime_nanos(left) == datetime_nanos(right)
+}
+#Export(c) fn jet_rt_handle_field_jet_date_time_leap_second(value: I64) -> I64 { value + DATETIME_LEAP }
+fn datetime_saturating_add(left: I64, right: I64) -> I64 {
+    if (right > I64{0} && left > I64{9223372036854775807} - right) -> return I64{9223372036854775807}
+    if (right < I64{0} && left < I64{-9223372036854775808} - right) -> return I64{-9223372036854775808}
+    left + right
+}
+fn datetime_leap_year(year: I64) -> Bool { (year %% I64{4} == I64{0} && year %% I64{100} != I64{0}) || year %% I64{400} == I64{0} }
+fn datetime_month_days(year: I64, month: I64) -> I64 {
+    if (month == I64{2}) -> return if datetime_leap_year(year) -> I64{29} else -> I64{28}
+    if (month == I64{4} || month == I64{6} || month == I64{9} || month == I64{11}) -> I64{30} else -> I64{31}
+}
+fn datetime_year_start(year: I64) -> I64 {
+    prior :: year - I64{1}
+    I64{365} * prior + prior /% I64{4} - prior /% I64{100} + prior /% I64{400}
+}
+fn datetime_push_date(target: I64, seconds: I64) {
+    // Time51-71's initial estimate/correction/month algorithm, unchanged
+    // within a 400-year era. Gregorian leap rules repeat every 400 years
+    // (146097 days); Euclidean reduction preserves negative years too and
+    // bounds the seed's otherwise ~194M corrections at i64 seconds extremes.
+    number :: seconds /% I64{86400} + I64{719162}
+    era :: number /% I64{146097}
+    day_number := number - era * I64{146097}
+    year := day_number /% I64{365} + I64{1}
+    loop {
+        start :: datetime_year_start(year)
+        end :: datetime_year_start(year + I64{1})
+        if (day_number >= start && day_number < end) -> break
+        if (day_number < start) { year -= I64{1} } else { year += I64{1} }
+    }
+    day_number -= datetime_year_start(year)
+    month := I64{1}
+    loop month < (I64{12}) && day_number >= datetime_month_days(year, month) {
+        day_number -= datetime_month_days(year, month)
+        month += I64{1}
+    }
+    time_glue_push_date(target, year + era * I64{400}, month, day_number + I64{1})
+}
+fn datetime_push_clock(target: I64, seconds: I64, leap: Bool, nanos: I64) {
+    remainder :: seconds %% I64{86400}
+    day_seconds :: if (remainder < I64{0}) -> remainder + I64{86400} else -> remainder
+    time_glue_push_time(target, day_seconds /% I64{3600}, (day_seconds /% I64{60}) %% I64{60}, if leap -> I64{60} else -> day_seconds %% I64{60}, nanos)
+}
+#Export(c) fn jet_rt_handle_show_jet_date_time(value: I64) -> I64 {
+    // Time1147-1155, Core127-214: all trait modes omit fractional nanos.
+    seconds :: time_glue_word(value + DATETIME_SECS)
+    target :: jet_rt_string_builder_new()
+    datetime_push_date(target, seconds)
+    rt_text_push_word(target, I64{32}, I64{1})
+    datetime_push_clock(target, seconds, datetime_leap(value), I64{0})
+    rt_text_push_word(target, I64{1129600288}, I64{4}) // " UTC"
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_date_time(value: I64) -> I64 { jet_rt_handle_show_jet_date_time(value) }
+#Export(c) fn jet_rt_handle_debug_jet_date_time(value: I64) -> I64 { jet_rt_handle_show_jet_date_time(value) }
+fn zone_rows_clone(value: I64, infos: Bool) -> I64 {
+    length :: time_glue_word(value + DATA_SEQUENCE_LENGTH)
+    result :: data_sequence_new(length, ZONE_ROW_BYTES)
+    source :: time_glue_word(value + DATA_SEQUENCE_DATA)
+    target :: time_glue_word(result + DATA_SEQUENCE_DATA)
+    coll_copy(source, target, length * ZONE_ROW_BYTES)
+    if infos {
+        at := I64{0}
+        loop at < length {
+            slot :: target + at * ZONE_ROW_BYTES + ZONE_ROW_INDEX_OR_DST
+            time_glue_store(slot, if ((time_glue_word(slot).bit_and(I64{255})) != I64{0}) -> I64{1} else -> I64{0})
+            at += I64{1}
+        }
+    }
+    time_glue_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+fn zone_rows_drop(value: I64) {
+    capacity :: time_glue_word(value + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(time_glue_word(value + DATA_SEQUENCE_DATA), capacity * ZONE_ROW_BYTES, I64{8})
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+fn zone_rows_equal(left: I64, right: I64, infos: Bool) -> Bool {
+    length :: time_glue_word(left + DATA_SEQUENCE_LENGTH)
+    if length != time_glue_word(right + DATA_SEQUENCE_LENGTH) -> return false
+    a :: time_glue_word(left + DATA_SEQUENCE_DATA)
+    b :: time_glue_word(right + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        first :: a + at * ZONE_ROW_BYTES
+        second :: b + at * ZONE_ROW_BYTES
+        if time_glue_word(first + ZONE_ROW_VALUE) != time_glue_word(second + ZONE_ROW_VALUE) -> return false
+        x :: time_glue_word(first + ZONE_ROW_INDEX_OR_DST)
+        y :: time_glue_word(second + ZONE_ROW_INDEX_OR_DST)
+        if infos {
+            if ((x.bit_and(I64{255})) != I64{0}) != ((y.bit_and(I64{255})) != I64{0}) -> return false
+        } else { if (x != y) -> return false }
+        at += I64{1}
+    }
+    true
+}
+#Export(c) fn jet_rt_handle_clone_jet_zone(value: I64) -> I64 {
+    result :: jet_rt_alloc(ZONE_BYTES, I64{8})
+    time_glue_store(result + ZONE_NAME, jet_rt_string_clone(time_glue_word(value + ZONE_NAME)))
+    time_glue_store(result + ZONE_TRANSITIONS, zone_rows_clone(time_glue_word(value + ZONE_TRANSITIONS), false))
+    time_glue_store(result + ZONE_INFOS, zone_rows_clone(time_glue_word(value + ZONE_INFOS), true))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_zone(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(time_glue_word(value + ZONE_NAME))
+    zone_rows_drop(time_glue_word(value + ZONE_TRANSITIONS))
+    zone_rows_drop(time_glue_word(value + ZONE_INFOS))
+    jet_rt_free(value, ZONE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_zone(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(time_glue_word(left + ZONE_NAME), time_glue_word(right + ZONE_NAME)) &&
+        zone_rows_equal(time_glue_word(left + ZONE_TRANSITIONS), time_glue_word(right + ZONE_TRANSITIONS), false) &&
+        zone_rows_equal(time_glue_word(left + ZONE_INFOS), time_glue_word(right + ZONE_INFOS), true)
+}
+#Export(c) fn jet_rt_handle_field_jet_zone_name(value: I64, out: I64) {
+    // CAbi13342-44 lends a read/clone-only E4 header, never an owner.
+    text :: time_glue_word(value + ZONE_NAME)
+    time_glue_store(out, rt_text_data(text))
+    time_glue_store(out + I64{8}, rt_text_len(text))
+    time_glue_store(out + I64{16}, rt_text_word(text + I64{16}))
+}
+#Export(c) fn jet_rt_handle_show_jet_zone(value: I64) -> I64 { jet_rt_string_clone(time_glue_word(value + ZONE_NAME)) }
+#Export(c) fn jet_rt_handle_display_jet_zone(value: I64) -> I64 { jet_rt_handle_show_jet_zone(value) }
+#Export(c) fn jet_rt_handle_debug_jet_zone(value: I64) -> I64 { jet_rt_handle_show_jet_zone(value) }
+#Export(c) fn jet_rt_handle_clone_jet_zoned_date_time(value: I64) -> I64 {
+    result :: jet_rt_alloc(ZONED_BYTES, I64{8})
+    time_glue_store(result + ZONED_INSTANT, jet_rt_handle_clone_jet_date_time(time_glue_word(value + ZONED_INSTANT)))
+    time_glue_store(result + ZONED_ZONE, jet_rt_handle_clone_jet_zone(time_glue_word(value + ZONED_ZONE)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_zoned_date_time(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_handle_drop_jet_date_time(time_glue_word(value + ZONED_INSTANT))
+    jet_rt_handle_drop_jet_zone(time_glue_word(value + ZONED_ZONE))
+    jet_rt_free(value, ZONED_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_zoned_date_time(left: I64, right: I64) -> Bool {
+    // Time1480-1482: zone NAME only, not transition/info-table equality.
+    jet_rt_handle_eq_jet_date_time(time_glue_word(left + ZONED_INSTANT), time_glue_word(right + ZONED_INSTANT)) &&
+        jet_rt_string_eq(time_glue_word(time_glue_word(left + ZONED_ZONE) + ZONE_NAME), time_glue_word(time_glue_word(right + ZONED_ZONE) + ZONE_NAME))
+}
+#Export(c) fn jet_rt_handle_field_jet_zoned_date_time_instant(value: I64) -> I64 { time_glue_word(value + ZONED_INSTANT) }
+#Export(c) fn jet_rt_handle_field_jet_zoned_date_time_zone(value: I64) -> I64 { time_glue_word(value + ZONED_ZONE) }
+fn zone_offset(value: I64, seconds: I64) -> I64 {
+    // Time1316-1335: upper_bound, last tie wins, info[0] before first.
+    transitions :: time_glue_word(value + ZONE_TRANSITIONS)
+    data :: time_glue_word(transitions + DATA_SEQUENCE_DATA)
+    low := I64{0}
+    high := time_glue_word(transitions + DATA_SEQUENCE_LENGTH)
+    loop low < high {
+        middle :: low + (high - low) /% I64{2}
+        if time_glue_word(data + middle * ZONE_ROW_BYTES + ZONE_ROW_VALUE) <= seconds { low = middle + I64{1} } else { high = middle }
+    }
+    index :: if (low == I64{0}) -> I64{0} else -> time_glue_word(data + (low - I64{1}) * ZONE_ROW_BYTES + ZONE_ROW_INDEX_OR_DST)
+    infos :: time_glue_word(value + ZONE_INFOS)
+    // Time1318/1335 index the Vec, including empty/out-of-range failures.
+    length :: time_glue_word(infos + DATA_SEQUENCE_LENGTH)
+    if (index < I64{0} || index >= length) -> rt_seq_index_oob_stop(length, index)
+    return time_glue_word(time_glue_word(infos + DATA_SEQUENCE_DATA) + index * ZONE_ROW_BYTES + ZONE_ROW_VALUE)
+}
+#Export(c) fn jet_rt_handle_show_jet_zoned_date_time(value: I64) -> I64 {
+    // Time1501-1510/1680-1688: UTC leap bypasses offset table; normal
+    // paths saturating-add the leap timestamp and zone offset to local secs.
+    instant :: time_glue_word(value + ZONED_INSTANT)
+    zone :: time_glue_word(value + ZONED_ZONE)
+    seconds :: time_glue_word(instant + DATETIME_SECS)
+    name :: time_glue_word(zone + ZONE_NAME)
+    utc_leap :: datetime_leap(instant) && rt_text_len(name) == I64{3} && display_byte(rt_text_data(name)) == I64{85} && display_byte(rt_text_data(name) + I64{1}) == I64{84} && display_byte(rt_text_data(name) + I64{2}) == I64{67}
+    timestamp :: datetime_saturating_add(seconds, if datetime_leap(instant) -> I64{1} else -> I64{0})
+    offset :: if utc_leap -> I64{0} else -> zone_offset(zone, timestamp)
+    local :: if utc_leap -> seconds else -> datetime_saturating_add(timestamp, offset)
+    target :: jet_rt_string_builder_new()
+    datetime_push_date(target, local)
+    rt_text_push_word(target, I64{32}, I64{1})
+    // Non-UTC Time.local_parts constructs nanos0, not instant nanos.
+    datetime_push_clock(target, local, utc_leap, if utc_leap -> datetime_nanos(instant) else -> I64{0})
+    rt_text_push_word(target, I64{32}, I64{1})
+    rt_text_append(target, rt_text_data(name), rt_text_len(name))
+    rt_text_push_word(target, I64{10272}, I64{2}) // " ("
+    rt_text_push_word(target, if (offset < I64{0}) -> I64{45} else -> I64{43}, I64{1})
+    // Time1722-1725 offset.abs: valid zone offsets cannot be i64::MIN.
+    magnitude :: if (offset < I64{0}) -> -offset else -> offset
+    time_glue_pad(target, magnitude /% I64{3600}, I64{2})
+    rt_text_push_word(target, I64{58}, I64{1})
+    time_glue_pad(target, (magnitude /% I64{60}) %% I64{60}, I64{2})
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_zoned_date_time(value: I64) -> I64 { jet_rt_handle_show_jet_zoned_date_time(value) }
+#Export(c) fn jet_rt_handle_debug_jet_zoned_date_time(value: I64) -> I64 { jet_rt_handle_show_jet_zoned_date_time(value) }

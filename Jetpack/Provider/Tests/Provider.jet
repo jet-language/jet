@@ -113,6 +113,23 @@ fn provider_core_test_is_bad_output(error: ProviderError) -> Bool {
     files.remove_all(root) ?? panic("cleanup")
 }
 
+#Test("provider exclusive temporary directory creation refuses an existing child") {
+    root :: provider_core_test_dir("exclusive-temp-collision")
+    parent :: files.open_directory(root) ?? panic("hold parent")
+    name :: "git-00000000000000000000000000000000"
+    candidate :: files.join(root, name)
+    provider_create_temp_candidate(parent, name) ?? panic("first exclusive create")
+    files.write(files.join(candidate, "sentinel"), "keep") ?? panic("sentinel")
+    before :: files.stat(candidate) ?? panic("candidate identity")
+    if provider_create_temp_candidate(parent, name) == {
+        .Ok(_) -> panic("an existing temporary directory must not be reused")
+        .Err(error) -> assert(error == .AlreadyExists(_))
+    }
+    assert_eq((files.stat(candidate) ?? panic("same candidate")).id, before.id)
+    assert_eq(files.read(files.join(candidate, "sentinel")) ?? panic("read sentinel"), "keep")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
 #Test("provider nix lock digest ignores hangar receipt projection") {
     root :: provider_core_test_dir("nix-lock-receipt-digest")
     lock_path :: files.join(files.join(root, SOURCE_ROOT_DIR), "lock")

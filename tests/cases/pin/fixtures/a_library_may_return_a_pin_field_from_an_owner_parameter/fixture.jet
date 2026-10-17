@@ -1,0 +1,24 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+struct Queue {
+    label: String
+    head: Pin<Node>
+}
+
+fn attach(label: String, node: &Node) -> Queue from node {
+    return Queue{label: label.copy(), head: mem.pin(&node)}
+}
+
+fn run() {
+    node := Node{payload: 41, hops: 0}
+    queue :: attach("ready", &node)
+    queue.head.hops += 1
+    queue.head.payload += 1
+    print("{(queue.label)} {(queue.head.payload)} {(queue.head.hops)}")
+}

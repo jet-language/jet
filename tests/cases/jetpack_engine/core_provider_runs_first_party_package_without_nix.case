@@ -1,0 +1,17 @@
+# HAND-PORT tests/jetpack_engine.rs:7576-7622 core_provider_runs_first_party_package_without_nix
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: core_provider_runs_first_party_package_without_nix.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack run --no-color -- hello
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout.trim: = core_provider_runs_first_party_package_without_nix.expected # original ed77c235f tests/jetpack_engine.rs:7618-7621 stdout.trim equals hello from jet-pkgs
+

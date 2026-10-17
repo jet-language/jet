@@ -20,30 +20,6 @@ use std::collections::HashSet;
 /// Channel/Sender/Task (`receive`/`send`/`sender`/`detach` — producers not covered);
 /// `Match.group` (the `Option<Match>` unwrap chain isn't cleanly reachable).
 
-/// D-SOLVER-LIB1=A: is this `solve.Solver.new(seed)`?
-pub(crate) fn solve_new_type<'a>(
-    receiver: &'a Expr,
-    method: &str,
-    cx: &Cx,
-    locals: &HashSet<String>,
-) -> Option<&'a str> {
-    if method != "new" {
-        return None;
-    }
-    let Expr::Field(inner, solver_type, _) = receiver else {
-        return None;
-    };
-    let Expr::Ident(alias, _) = &**inner else {
-        return None;
-    };
-    if locals.contains(alias) {
-        return None;
-    }
-    if cx.any_core_import_module(alias) != Some(Syntax::CORE_SOLVE_MODULE) {
-        return None;
-    }
-    (solver_type == Syntax::SOLVER_TYPE).then_some(solver_type.as_str())
-}
 
 /// D-SHAPE-DURATION1=A: resolve a bare type-owned runtime constructor.
 pub(crate) fn duration_new_unit(
@@ -169,6 +145,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             THandleOp::ReceiptAttach
         }
         ("FileReader", "read_line", 0) => THandleOp::FileReaderReadLine,
+        ("FileReader", "read", 1) => THandleOp::FileReaderRead,
         ("MappedFile", "window", 2) => THandleOp::MappedFileWindow,
         ("MappedFile", "window_len", 2) => THandleOp::MappedFileWindowLen,
         ("MappedFile", "lines", 0) => THandleOp::MappedFileLines,
@@ -176,6 +153,8 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("MappedFile", "is_empty", 0) => THandleOp::MappedFileIsEmpty,
         ("FileWriter", "write_line", 1) => THandleOp::FileWriterWriteLine,
         ("FileWriter", "flush", 0) => THandleOp::FileWriterFlush,
+        ("FileWriter", "write_all", 1) => THandleOp::FileWriterWriteAll,
+        ("FileWriter", "fsync", 0) => THandleOp::FileWriterFsync,
         ("JSONReader", "next", 0) => THandleOp::JSONReaderNext,
         ("JSONWriter", "write", 1) => THandleOp::JSONWriterWrite,
         ("JSONWriter", "flush", 0) => THandleOp::JSONWriterFlush,
@@ -184,15 +163,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("JSONLWriter", "write", 1) => THandleOp::JSONLWriterWrite,
         ("JSONLWriter", "flush", 0) => THandleOp::JSONLWriterFlush,
         ("JSONLWriter", "finish", 0) => THandleOp::JSONLWriterFinish,
-        ("CSVReader", "next", 0) => THandleOp::CSVReaderNext,
         ("DataStream", "next", 0) => THandleOp::DataStreamNext,
         // D-FOUND-COREAPI1 / #2853: event-time Stream handles.
         ("Stream", "with_event_time", 1) => THandleOp::StreamWithEventTime,
         ("StreamEventTime", "key_by", 1) => THandleOp::StreamKeyBy,
         ("KeyedStream", "window", 3) => THandleOp::StreamWindow,
-        ("CSVWriter", "write", 1) => THandleOp::CSVWriterWrite,
-        ("CSVWriter", "flush", 0) => THandleOp::CSVWriterFlush,
-        ("CSVWriter", "finish", 0) => THandleOp::CSVWriterFinish,
         ("XMLReader", "next", 0) => THandleOp::XMLReaderNext,
         ("XMLWriter", "write", 1) => THandleOp::XMLWriterWrite,
         ("XMLWriter", "flush", 0) => THandleOp::XMLWriterFlush,
@@ -213,16 +188,10 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("Stderr", "flush", 0) => THandleOp::StderrFlush,
         ("Stderr", "is_tty", 0) => THandleOp::StderrIsTty,
         ("TestSuite", "run", 0) => THandleOp::TestSuiteRun,
-        // D-DET1: deterministic injected Clock/Rng capability methods.
-        ("Clock", "now", 0) => THandleOp::ClockNow,
-        ("Clock", "tick", 1) => THandleOp::ClockTick,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "now", 0) => THandleOp::WorldNow,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "advance", 1) => THandleOp::WorldAdvance,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "wait_idle", 0) => THandleOp::WorldWaitIdle,
         (Syntax::DETERMINISTIC_WORLD_TYPE, "history", 0) => THandleOp::WorldHistory,
-        // D-DET-CAPAPI: absolute set + Duration advance; the widened Rng draws; Duration read.
-        ("Clock", "advance", 1) => THandleOp::ClockAdvance,
-        ("Clock", "wait", 1) => THandleOp::ClockWait,
         ("RealtimeStream", "next_deadline", 0) => THandleOp::RealtimeNextDeadline,
         ("RealtimeStream", "receipt", 0) => THandleOp::RealtimeReceipt,
         ("RealtimeStream", "cancel", 0) => THandleOp::RealtimeCancel,
@@ -242,14 +211,6 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("RNG", "shuffle", 1) => THandleOp::RngShuffle,
         ("HistoryRNG", "next_u64", 0) => THandleOp::HistoryRngNextU64,
         ("HistoryRNG", "below", 1) => THandleOp::HistoryRngBelow,
-        ("Fake", "locale", 1) => THandleOp::FakeLocale,
-        ("Fake", "name", 0) => THandleOp::FakeName,
-        ("Fake", "email", 0) => THandleOp::FakeEmail,
-        ("Fake", "host", 0) => THandleOp::FakeHost,
-        ("Fake", "address", 0) => THandleOp::FakeAddress,
-        ("Solver", "require", 1) => THandleOp::SolverRequire,
-        ("Solver", "failure_count", 0) => THandleOp::SolverFailureCount,
-        ("Solver", "status", 0) => THandleOp::SolverStatus,
         ("GameScene", "on_frame", 1) => THandleOp::GameSceneOnFrame {
             schedule: None,
             derivation: None,
@@ -390,36 +351,26 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
         ("HTTPResponse", "body", 0) => THandleOp::HTTPRespField("body"),
         ("HTTPResponse", "header", 1) => THandleOp::HTTPRespHeader,
         ("HTTPResponse", "trailers", 1) => THandleOp::HTTPRespTrailers,
-        // D-SERDE-ACCESS=B: DataTree accessor methods.
-        ("DataTree", "field", 1) => THandleOp::DataTreeField,
-        ("DataTree", "at", 1) => THandleOp::DataTreeAt,
-        ("DataTree", "int", 0) => THandleOp::DataTreeInt,
-        ("DataTree", "text", 0) => THandleOp::DataTreeText,
-        ("DataTree", "bool", 0) => THandleOp::DataTreeBool,
-        ("DataTree", "float", 0) => THandleOp::DataTreeFloat,
-        ("DataTree", "to_text", 0) => THandleOp::DataTreeToText,
-        ("DataTree", "equal_unordered", 1) => THandleOp::DataTreeEqualUnordered,
+        // D-SERDE-ACCESS=B: Dyn accessor methods.
+        ("Dyn", "field", 1) => THandleOp::DynField,
+        ("Dyn", "at", 1) => THandleOp::DynAt,
+        ("Dyn", "int", 0) => THandleOp::DynInt,
+        ("Dyn", "text", 0) => THandleOp::DynText,
+        ("Dyn", "bool", 0) => THandleOp::DynBool,
+        ("Dyn", "float", 0) => THandleOp::DynFloat,
+        ("Dyn", "to_text", 0) => THandleOp::DynToText,
+        ("Dyn", "equal_unordered", 1) => THandleOp::DynEqualUnordered,
         // D-SERDE-ACCESS=B: same accessors on JSON/Data (the dynamic parse result).
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
-        ("Data" | "JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
+        ("JSON" | "TOML" | "YAML" | "CSV", "field", 1) => THandleOp::JSONField,
+        ("JSON" | "TOML" | "YAML" | "CSV", "at", 1) => THandleOp::JSONAt,
+        ("JSON" | "TOML" | "YAML" | "CSV", "int", 0) => THandleOp::JSONInt,
+        ("JSON" | "TOML" | "YAML" | "CSV", "text", 0) => THandleOp::JSONText,
+        ("JSON" | "TOML" | "YAML" | "CSV", "bool", 0) => THandleOp::JSONBool,
+        ("JSON" | "TOML" | "YAML" | "CSV", "float", 0) => THandleOp::JSONFloat,
+        ("JSON" | "TOML" | "YAML" | "CSV", "to_text", 0) => THandleOp::JSONToText,
+        ("JSON" | "TOML" | "YAML" | "CSV", "equal_unordered", 1) => {
             THandleOp::JSONEqualUnordered
         }
-        ("MIME", "media_type" | "subtype" | "essence" | "params" | "to_string", 0) => {
-            THandleOp::UrlMimeMethod {
-                kind: "MIME".to_string(),
-                method: method.to_string(),
-            }
-        }
-        ("MIME", "param", 1) => THandleOp::UrlMimeMethod {
-            kind: "MIME".to_string(),
-            method: method.to_string(),
-        },
         ("Message", "envelope", 0) | ("Message", "with_envelope", 1) | ("Mailer", "send", 1) => {
             THandleOp::EmailMethod {
                 method: method.to_string(),
@@ -540,17 +491,11 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
     };
     if matches!(
         handle,
-        Syntax::CLOCK_TYPE
-            | Syntax::RNG_TYPE
+        Syntax::RNG_TYPE
             | "HistoryRNG"
-            | Syntax::FAKE_TYPE
-            | Syntax::SOLVER_TYPE
     ) {
         let emitted_borrow = match &op {
-            THandleOp::ClockTick
-            | THandleOp::ClockAdvance
-            | THandleOp::ClockWait
-            | THandleOp::RngInt
+            THandleOp::RngInt
             | THandleOp::RngFloat
             | THandleOp::RngFloatRange
             | THandleOp::RngBool
@@ -564,12 +509,7 @@ pub(crate) fn handle_method_op(handle: &str, method: &str, nargs: usize) -> Opti
             | THandleOp::RngSample
             | THandleOp::RngShuffle
             | THandleOp::HistoryRngNextU64
-            | THandleOp::HistoryRngBelow
-            | THandleOp::FakeName
-            | THandleOp::FakeEmail
-            | THandleOp::FakeHost
-            | THandleOp::FakeAddress
-            | THandleOp::SolverRequire => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
+            | THandleOp::HistoryRngBelow => crate::Collections::BuiltinReceiverBorrow::EagerWrite,
             _ => crate::Collections::BuiltinReceiverBorrow::Read,
         };
         debug_assert_eq!(
@@ -626,7 +566,7 @@ pub(crate) fn handle_method_return_ty(
     let span = crate::Diagnostics::Span { start: 0, end: 0 };
     let mut sink = Vec::new();
     let ret = crate::Codegen::is_json_type_name(handle)
-        .then(|| crate::Sema::datatree_method_return(method, nargs).map(Some))
+        .then(|| crate::Sema::dyn_method_return(method, nargs).map(Some))
         .flatten()
         .or_else(|| crate::Sema::file_handle_method_return(handle, method, nargs, span, &mut sink))
         .or_else(|| crate::Sema::encoding_handle_method_return(handle, method, nargs))
@@ -673,13 +613,6 @@ pub(crate) fn handle_method_return_ty(
             }
         })
         .or_else(|| match (handle, method, nargs) {
-            ("MIME", "media_type" | "subtype" | "essence" | "to_string", 0) => {
-                Some(Some(Type::String))
-            }
-            ("MIME", "param", 1) => Some(Some(Type::Option(Box::new(Type::String)))),
-            ("MIME", "params", 0) => Some(Some(Type::List(Box::new(Type::List(Box::new(
-                Type::String,
-            )))))),
             ("Message", "envelope", 0) => Some(Some(Type::Named("Envelope".to_string()))),
             ("Message", "with_envelope", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("Message".to_string())),
@@ -715,13 +648,6 @@ pub(crate) fn handle_method_return_ty(
         // pattern literal's holes.
         .or_else(|| crate::Sema::binary_reader_method_return(handle, method, nargs))
         .or_else(|| crate::Sema::text_cursor_method_return(handle, method, nargs))
-        .or_else(|| {
-            if handle == crate::Syntax::SOLVER_TYPE {
-                crate::Collections::builtin_method_return(receiver_ty, method, nargs, false)
-            } else {
-                None
-            }
-        })
         .or_else(|| match (handle, method, nargs) {
             ("GameAssets", "image", 1) => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("GameImage".to_string())),

@@ -10,6 +10,9 @@ use crate::AST::{AccessConvention, CallArg, ParamZone, Type};
 /// the lower-level `Body` text operation. Keep the identity in sema so a
 /// lint can compare a constant argument to the same contract the API uses.
 pub(crate) const HTTP_DEFAULT_BODY_LIMIT: i64 = 1024 * 1024;
+
+// A lazy method-result body keeps its qualified native identity; the owned
+// source Empty/Text/Bytes enum is a different, module-relative declaration.
 /// Return the canonical leaf for a qualified HTTP nominal.  Core imports may
 /// reach the same carrier as `http.HTTPRequest`, `core.http.HTTPRequest`, or
 /// the already-canonical `HTTPRequest`; only the closed HTTP carrier family
@@ -237,7 +240,7 @@ pub fn net_method_return(
         // D-HTTP-CORE2=A: one request/response model for both HTTP roles.
         ("HTTPResponse", "status") if n_args == 0 => Some(Some(Type::Int)),
         ("HTTPResponse", "body") if n_args == 0 => {
-            Some(Some(Type::Named("Body".to_string())))
+            Some(Some(Type::Named("core.http.Body".to_string())))
         }
         ("HTTPResponse", "header") if n_args == 1 => {
             Some(Some(Type::Option(Box::new(str_ty.clone()))))
@@ -253,7 +256,7 @@ pub fn net_method_return(
             err: Box::new(Type::Named("HTTPError".to_string())),
         })),
         ("HTTPRequest", "method" | "path") if n_args == 0 => Some(Some(str_ty.clone())),
-        ("HTTPRequest", "body") if n_args == 0 => Some(Some(Type::Named("Body".to_string()))),
+        ("HTTPRequest", "body") if n_args == 0 => Some(Some(Type::Named("core.http.Body".to_string()))),
         ("HTTPRequest", "trailers") if n_args == 0 => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Headers".to_string())),
             err: Box::new(Type::Named("HTTPError".to_string())),
@@ -727,30 +730,6 @@ pub fn loadable_method_return(
     }
 }
 
-/// D-SHAPE-CTORVERB1=C: instance methods on generic `ExpiringValue<T>`.
-pub fn expiring_method_return(
-    type_apply: &Type,
-    method: &str,
-    _n_args: usize,
-) -> Option<Option<Type>> {
-    let val_ty = match type_apply {
-        Type::Apply { name, args }
-            if name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
-        {
-            args[0].clone()
-        }
-        _ => return None,
-    };
-    match method {
-        "get" => Some(Some(Type::Result {
-            ok: Box::new(val_ty),
-            err: Box::new(Type::Named("Expired".to_string())),
-        })),
-        "is_valid" => Some(Some(Type::Bool)),
-        "force" => Some(Some(val_ty)),
-        _ => None,
-    }
-}
 
 /// D-NETDEP1=A / D-HTTPLIB1=A: method return types for HTTP types.
 pub fn http_type_method_return(
@@ -786,7 +765,7 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::Named("Unknown".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "body" if args.is_empty() => mk("Body"),
+            "body" if args.is_empty() => mk("core.http.Body"),
             "trailers" if args.is_empty() => Some(Some(Type::Result {
                 ok: Box::new(Type::Named("Headers".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
@@ -840,7 +819,7 @@ pub fn http_type_method_return(
                 ok: Box::new(Type::Named("Unknown".to_string())),
                 err: Box::new(Type::Named("HTTPError".to_string())),
             })),
-            "body" if args.is_empty() => mk("Body"),
+            "body" if args.is_empty() => mk("core.http.Body"),
             "header" if args.len() == 1 => mk_opt_str(),
             "header" if args.len() == 2 => mk("HTTPResponse"),
             "trailers" if args.len() == 1 => Some(Some(Type::Result {
@@ -1082,218 +1061,16 @@ pub fn http_type_method_return(
     }
 }
 
-/// D-URL1=A: method return types for typed MIME values. `URL` is the
-/// `core.net.url` source record; its documented fields and methods resolve
-/// through the declaration, with no handle twins.
-pub fn url_mime_method_return(
-    ty: &Type,
-    method: &str,
-    args: &[crate::AST::CallArg],
-) -> Option<Option<Type>> {
-    let argc = args.len();
-    match ty {
-        Type::Named(n) if n == "MIME" => match method {
-            "media_type" | "subtype" | "essence" | "to_string" if argc == 0 => {
-                Some(Some(Type::String))
-            }
-            "param" if argc == 1 => Some(Some(Type::Option(Box::new(Type::String)))),
-            "params" if argc == 0 => Some(Some(Type::List(Box::new(Type::List(Box::new(
-                Type::String,
-            )))))),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// D-TIMEDEPTH1/D-TIME-CALENDAR1: method return types for civil-time values.
+/// Duration remains a compiler-owned quantity; civil values use source methods.
 pub fn civil_time_method_return(
     ty: &Type,
     method: &str,
     args: &[crate::AST::CallArg],
 ) -> Option<Option<Type>> {
-    let argc = args.len();
     match ty {
-        Type::Named(n) if n == "Date" || n == "LocalDate" => match method {
-            "year" | "month" | "day" | "weekday" | "iso_weekday" | "day_of_year" | "iso_week"
-            | "quarter_of_year" | "days_in_month"
-                if argc == 0 =>
-            {
-                Some(Some(Type::Int))
-            }
-            "is_leap_year" if argc == 0 => Some(Some(Type::Bool)),
-            "diff_days" if argc == 1 => Some(Some(Type::Int)),
-            "add_days" | "add_months" | "truncate" if argc == 1 => {
-                Some(Some(Type::Named("LocalDate".to_string())))
-            }
-            "replace" if argc == 3 => Some(Some(Type::Named("LocalDate".to_string()))),
-            "add_period" | "subtract_period" if argc == 1 => {
-                Some(Some(Type::Named("LocalDate".to_string())))
-            }
-            "iso_week_year" if argc == 0 => Some(Some(Type::Int)),
-            "until" | "since" if (1..=5).contains(&argc) => {
-                Some(Some(Type::Named("Duration".to_string())))
-            }
-            "with" if argc == 4 => Some(Some(Type::Result {
-                ok: Box::new(Type::Named("LocalDate".to_string())),
-                err: Box::new(Type::String),
-            })),
-            "format_checked" if argc == 1 => Some(Some(Type::Result {
-                ok: Box::new(Type::String),
-                err: Box::new(Type::Named("TextError".to_string())),
-            })),
-            "to_string" if argc == 0 => Some(Some(Type::String)),
-            "format" if argc == 1 => Some(Some(Type::String)),
-            "equal" if argc == 1 => Some(Some(Type::Bool)),
-            "compare" if argc == 1 => Some(Some(Type::Named(
-                crate::Syntax::TYPE_ORDERING.to_string(),
-            ))),
-            _ => None,
-        },
-        Type::Named(n) if n == "LocalTime" => match method {
-            "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond"
-                if argc == 0 =>
-            {
-                Some(Some(Type::Int))
-            }
-            "add_duration" | "subtract_duration" if argc == 1 => {
-                Some(Some(Type::Named("LocalTime".to_string())))
-            }
-            "round" if (1..=3).contains(&argc) => Some(Some(Type::Named("LocalTime".to_string()))),
-            "truncate" | "floor" | "ceil" if argc == 1 || argc == 2 => {
-                Some(Some(Type::Named("LocalTime".to_string())))
-            }
-            "until" | "since" if (1..=5).contains(&argc) => {
-                Some(Some(Type::Named("Duration".to_string())))
-            }
-            "to_string" if argc == 0 => Some(Some(Type::String)),
-            "format" if argc == 1 => Some(Some(Type::String)),
-            "format_checked" if argc == 1 => Some(Some(Type::Result {
-                ok: Box::new(Type::String),
-                err: Box::new(Type::Named("TextError".to_string())),
-            })),
-            "equal" if argc == 1 => Some(Some(Type::Bool)),
-            "compare" if argc == 1 => Some(Some(Type::Named(
-                crate::Syntax::TYPE_ORDERING.to_string(),
-            ))),
-            _ => None,
-        },
-        Type::Named(n) if n == "DateTime" => match method {
-            "hour" | "minute" | "second" | "millisecond" | "microsecond" | "nanosecond"
-            | "to_timestamp" | "to_unix_ms" | "to_unix_s"
-                if argc == 0 =>
-            {
-                Some(Some(Type::Int))
-            }
-            "to_unix_us" | "to_unix_ns" if argc == 0 => Some(Some(Type::Result {
-                ok: Box::new(Type::Int),
-                err: Box::new(Type::Named("RangeError".to_string())),
-            })),
-            "date" if argc == 0 => Some(Some(Type::Named("LocalDate".to_string()))),
-            "time" if argc == 0 => Some(Some(Type::Named("LocalTime".to_string()))),
-            "plus_duration" | "subtract_duration" | "add_nanoseconds" | "add_period"
-            | "subtract_period"
-                if argc == 1 =>
-            {
-                Some(Some(Type::Named("DateTime".to_string())))
-            }
-            "truncate" | "floor" | "ceil" if argc == 1 || argc == 2 => {
-                Some(Some(Type::Named("DateTime".to_string())))
-            }
-            "round" if argc == 1 || argc == 2 || argc == 3 => {
-                Some(Some(Type::Named("DateTime".to_string())))
-            }
-            "difference" if argc == 1 => Some(Some(Type::Named("Duration".to_string()))),
-            "until" | "since" if (1..=5).contains(&argc) => {
-                Some(Some(Type::Named("Duration".to_string())))
-            }
-            "replace" if argc == 6 => Some(Some(Type::Named("DateTime".to_string()))),
-            "with" if argc == 7 => Some(Some(Type::Result {
-                ok: Box::new(Type::Named("DateTime".to_string())),
-                err: Box::new(Type::String),
-            })),
-            "in_zone" if argc == 1 => Some(Some(Type::Named("ZonedDateTime".to_string()))),
-            "to_string" | "format_rfc3339" if argc == 0 => Some(Some(Type::String)),
-            "format" if argc == 1 => Some(Some(Type::String)),
-            "format_checked" if argc == 1 => Some(Some(Type::Result {
-                ok: Box::new(Type::String),
-                err: Box::new(Type::Named("TextError".to_string())),
-            })),
-            "equal" if argc == 1 => Some(Some(Type::Bool)),
-            "compare" if argc == 1 => Some(Some(Type::Named(
-                crate::Syntax::TYPE_ORDERING.to_string(),
-            ))),
-            _ => None,
-        },
-        Type::Named(n) if n == "Instant" => match method {
-            "elapsed_millis" if argc == 0 => Some(Some(Type::Int)),
-            "elapsed" if argc == 0 => Some(Some(Type::Named("Duration".to_string()))),
-            "equal" if argc == 1 => Some(Some(Type::Bool)),
-            "compare" if argc == 1 => Some(Some(Type::Named(
-                crate::Syntax::TYPE_ORDERING.to_string(),
-            ))),
-            _ => None,
-        },
-        Type::Named(n) if n == "Period" => match method {
-            "years" | "months" | "days" | "sign" if argc == 0 => Some(Some(Type::Int)),
-            "is_zero" if argc == 0 => Some(Some(Type::Bool)),
-            "abs" | "negated" if argc == 0 => Some(Some(Type::Named("Period".to_string()))),
-            "add" | "sub" if argc == 1 => Some(Some(Type::Named("Period".to_string()))),
-            "total_in" if argc == 2 => Some(Some(Type::Float)),
-            "to_string" if argc == 0 => Some(Some(Type::String)),
-            _ => None,
-        },
-        Type::Named(n) if n == "Duration" => match method {
-            "round" if (1..=3).contains(&argc) => Some(Some(Type::Named("Duration".to_string()))),
-            _ => None,
-        },
-        Type::Named(n) if n == "Zone" => match method {
-            "name" if argc == 0 => Some(Some(Type::String)),
-            "next_transition" | "previous_transition" if argc == 1 => {
-                Some(Some(Type::Option(Box::new(Type::Int))))
-            }
-            "start_of_day" if argc == 1 => Some(Some(Type::Named("ZonedDateTime".to_string()))),
-            "hours_in_day" if argc == 1 => Some(Some(Type::Int)),
-            _ => None,
-        },
-        Type::Named(n) if n == "ZonedDateTime" => match method {
-            "date" if argc == 0 => Some(Some(Type::Named("LocalDate".to_string()))),
-            "time" if argc == 0 => Some(Some(Type::Named("LocalTime".to_string()))),
-            "offset_seconds" if argc == 0 => Some(Some(Type::Int)),
-            "is_dst" if argc == 0 => Some(Some(Type::Bool)),
-            "to_datetime" if argc == 0 => Some(Some(Type::Named("DateTime".to_string()))),
-            "zone" if argc == 0 => Some(Some(Type::Named("Zone".to_string()))),
-            "add_duration" | "subtract_duration" | "add_period" | "subtract_period"
-                if argc == 1 =>
-            {
-                Some(Some(Type::Named("ZonedDateTime".to_string())))
-            }
-            "with_time" if argc == 2 => Some(Some(Type::Result {
-                ok: Box::new(Type::Named("ZonedDateTime".to_string())),
-                err: Box::new(Type::String),
-            })),
-            "with_zone" if argc == 1 => Some(Some(Type::Named("ZonedDateTime".to_string()))),
-            "equal" if argc == 1 => Some(Some(Type::Bool)),
-            "compare" if argc == 1 => Some(Some(Type::Named(
-                crate::Syntax::TYPE_ORDERING.to_string(),
-            ))),
-            "until" | "since" if (1..=5).contains(&argc) => {
-                Some(Some(Type::Named("Duration".to_string())))
-            }
-            "next_transition" | "previous_transition" if argc == 0 => {
-                Some(Some(Type::Option(Box::new(Type::Int))))
-            }
-            "start_of_day" if argc == 0 => Some(Some(Type::Named("ZonedDateTime".to_string()))),
-            "hours_in_day" if argc == 0 => Some(Some(Type::Int)),
-            "format_rfc9557" if argc == 0 => Some(Some(Type::String)),
-            "to_string" if argc == 0 => Some(Some(Type::String)),
-            "format" if argc == 1 => Some(Some(Type::String)),
-            "format_checked" if argc == 1 => Some(Some(Type::Result {
-                ok: Box::new(Type::String),
-                err: Box::new(Type::Named("TextError".to_string())),
-            })),
-            _ => None,
-        },
+        Type::Named(name) if name == "Duration" && method == "round"
+            && (1..=3).contains(&args.len()) =>
+            Some(Some(Type::Named("Duration".to_string()))),
         _ => None,
     }
 }
@@ -1324,61 +1101,6 @@ pub fn civil_time_method_contract(
     type_name: &str,
     method: &str,
 ) -> Option<Vec<crate::Sema::CheckerCoreLib::CoreParam>> {
-    let difference_type = match type_name {
-        "Date" | "LocalDate" => Some(("LocalDate", "day", "day")),
-        "LocalTime" => Some(("LocalTime", "second", "nanosecond")),
-        "DateTime" => Some(("DateTime", "second", "nanosecond")),
-        "ZonedDateTime" => Some(("ZonedDateTime", "second", "nanosecond")),
-        _ => None,
-    };
-    if matches!(method, "until" | "since") {
-        let Some((_, largest, smallest)) = difference_type else {
-            return None;
-        };
-        return Some(vec![
-            temporal_required("other"),
-            temporal_optional(
-                "largest_unit",
-                crate::Sema::CheckerCoreLib::CoreDefault::String(largest),
-            ),
-            temporal_optional(
-                "smallest_unit",
-                crate::Sema::CheckerCoreLib::CoreDefault::String(smallest),
-            ),
-            temporal_optional(
-                "rounding_mode",
-                crate::Sema::CheckerCoreLib::CoreDefault::String("trunc"),
-            ),
-            temporal_optional(
-                "increment",
-                crate::Sema::CheckerCoreLib::CoreDefault::Int(1),
-            ),
-        ]);
-    }
-    if matches!(method, "truncate" | "floor" | "ceil")
-        && matches!(type_name, "LocalTime" | "DateTime")
-    {
-        return Some(vec![
-            temporal_required("unit"),
-            temporal_optional(
-                "increment",
-                crate::Sema::CheckerCoreLib::CoreDefault::Int(1),
-            ),
-        ]);
-    }
-    if method == "round" && matches!(type_name, "LocalTime" | "DateTime") {
-        return Some(vec![
-            temporal_required("unit"),
-            temporal_optional(
-                "increment",
-                crate::Sema::CheckerCoreLib::CoreDefault::Int(1),
-            ),
-            temporal_optional(
-                "rounding_mode",
-                crate::Sema::CheckerCoreLib::CoreDefault::String("half_expand"),
-            ),
-        ]);
-    }
     if method == "round" && type_name == "Duration" {
         return Some(vec![
             temporal_required("unit"),
@@ -1392,79 +1114,9 @@ pub fn civil_time_method_contract(
             ),
         ]);
     }
-    if method == "with" && matches!(type_name, "Date" | "LocalDate") {
-        return Some(vec![
-            temporal_required("year"),
-            temporal_required("month"),
-            temporal_required("day"),
-            temporal_optional(
-                "overflow",
-                crate::Sema::CheckerCoreLib::CoreDefault::String("constrain"),
-            ),
-        ]);
-    }
-    if method == "with" && type_name == "DateTime" {
-        return Some(vec![
-            temporal_required("year"),
-            temporal_required("month"),
-            temporal_required("day"),
-            temporal_required("hour"),
-            temporal_required("minute"),
-            temporal_required("second"),
-            temporal_optional(
-                "overflow",
-                crate::Sema::CheckerCoreLib::CoreDefault::String("constrain"),
-            ),
-        ]);
-    }
-    if method == "with_time" && type_name == "ZonedDateTime" {
-        return Some(vec![
-            temporal_required("time"),
-            temporal_optional(
-                "disambiguation",
-                crate::Sema::CheckerCoreLib::CoreDefault::String("compatible"),
-            ),
-        ]);
-    }
-    if method == "total_in" && type_name == "Period" {
-        return Some(vec![temporal_required("unit"), temporal_required("anchor")]);
-    }
     None
 }
 
-/// D-APPROX1=A: return the type name string for a sketch receiver type.
-pub fn sketch_type_name(ty: &Type) -> Option<&'static str> {
-    match ty {
-        Type::Named(n) => match n.as_str() {
-            "HyperLogLog" => Some("HyperLogLog"),
-            "TDigest" => Some("TDigest"),
-            "CountMinSketch" => Some("CountMinSketch"),
-            "ReservoirSampler" => Some("ReservoirSampler"),
-            _ => None,
-        },
-        _ => None,
-    }
-}
-
-/// D-APPROX1=A: method return types for sketch data structures.
-pub fn sketch_method_return(
-    ty: &Type,
-    method: &str,
-    _args: &[crate::AST::CallArg],
-) -> Option<Option<Type>> {
-    let name = sketch_type_name(ty)?;
-    match (name, method) {
-        ("HyperLogLog", "add") => Some(None), // void
-        ("HyperLogLog", "count") => Some(Some(Type::Int)),
-        ("TDigest", "add") => Some(None),
-        ("TDigest", "quantile") => Some(Some(Type::Float)),
-        ("CountMinSketch", "add") => Some(None),
-        ("CountMinSketch", "count") => Some(Some(Type::Int)),
-        ("ReservoirSampler", "add") => Some(None),
-        ("ReservoirSampler", "sample") => Some(Some(Type::List(Box::new(Type::String)))),
-        _ => None,
-    }
-}
 
 pub fn path_method_return(
     type_name: &str,

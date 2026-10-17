@@ -1,3 +1,6 @@
+use core.net.ip as release_core_ip
+use core.sys as release_core_sys
+
 // Release-devtools build and deployment policy (D-DX-PROD1), ported from
 // Package/ReleaseInspect.rs and Package/ReleaseDevtoolsPolicy.rs. The typed
 // carriers are the compiler's (Compiler/JetFoundation/Source/Target/
@@ -15,7 +18,7 @@ INSPECT_ALLOWLIST_ENV :: prep { "JET_INSPECT_ALLOWLIST" }
 INSPECT_MAX_ALLOWLIST_ENTRIES :: prep { 64 }
 
 // Parse one of the three ratified dotted values (`.None` is `Disabled`).
-pub fn pkg_release_inspect_parse(value: String) -> JetReleaseInspect? Never! {
+fn pkg_release_inspect_parse(value: String) -> JetReleaseInspect? Never! {
     if value.trim() == {
         ".Local" -> Val(JetReleaseInspect.Local)
         ".ReadOnly" -> Val(JetReleaseInspect.ReadOnly)
@@ -25,7 +28,7 @@ pub fn pkg_release_inspect_parse(value: String) -> JetReleaseInspect? Never! {
 }
 
 // Canonical Jet source spelling (also the Rust `Display`).
-pub fn pkg_release_inspect_as_str(inspect: JetReleaseInspect) -> String Never! {
+fn pkg_release_inspect_as_str(inspect: JetReleaseInspect) -> String Never! {
     if inspect == {
         .Local -> ".Local"
         .ReadOnly -> ".ReadOnly"
@@ -34,7 +37,7 @@ pub fn pkg_release_inspect_as_str(inspect: JetReleaseInspect) -> String Never! {
 }
 
 // Stable value for the compiler's release cfg projection.
-pub fn pkg_release_inspect_cfg_value(inspect: JetReleaseInspect) -> String Never! {
+fn pkg_release_inspect_cfg_value(inspect: JetReleaseInspect) -> String Never! {
     if inspect == {
         .Local -> "local"
         .ReadOnly -> "readonly"
@@ -42,34 +45,34 @@ pub fn pkg_release_inspect_cfg_value(inspect: JetReleaseInspect) -> String Never
     }
 }
 
-pub fn pkg_release_inspect_local_rail_enabled(inspect: JetReleaseInspect) -> Bool Never! {
+fn pkg_release_inspect_local_rail_enabled(inspect: JetReleaseInspect) -> Bool Never! {
     inspect != JetReleaseInspect.Disabled
 }
 
-pub fn pkg_release_inspect_endpoint_enabled(inspect: JetReleaseInspect) -> Bool Never! {
+fn pkg_release_inspect_endpoint_enabled(inspect: JetReleaseInspect) -> Bool Never! {
     inspect == JetReleaseInspect.ReadOnly
 }
 
-pub fn pkg_release_endpoint_as_str(endpoint: JetReleaseDevtoolsEndpoint) -> String Never! {
+fn pkg_release_endpoint_as_str(endpoint: JetReleaseDevtoolsEndpoint) -> String Never! {
     if endpoint == {
         .Absent -> "absent"
         .ReadOnly -> "read_only"
     }
 }
 
-pub fn pkg_release_authentication_as_str(value: JetReleaseDevtoolsAuthentication) -> String Never! {
+fn pkg_release_authentication_as_str(value: JetReleaseDevtoolsAuthentication) -> String Never! {
     if value == {
         .BearerToken -> "bearer_token"
     }
 }
 
-pub fn pkg_release_authority_as_str(value: JetReleaseDevtoolsAuthority) -> String Never! {
+fn pkg_release_authority_as_str(value: JetReleaseDevtoolsAuthority) -> String Never! {
     if value == {
         .LoopbackOrAllowlist -> "loopback_or_allowlist"
     }
 }
 
-pub fn pkg_release_publication_as_str(value: JetReleaseDevtoolsPublication) -> String Never! {
+fn pkg_release_publication_as_str(value: JetReleaseDevtoolsPublication) -> String Never! {
     if value == {
         .SiteGated -> "site_gated"
     }
@@ -77,8 +80,8 @@ pub fn pkg_release_publication_as_str(value: JetReleaseDevtoolsPublication) -> S
 
 // Why a deployment allowlist or environment was refused.
 #Error
-pub struct ReleaseDevtoolsError {
-    pub message: String
+struct ReleaseDevtoolsError {
+    message: String
 }
 
 // One parsed IP address: 4 octets or 8 hextets as big-endian parts.
@@ -89,10 +92,10 @@ struct ReleaseIPAddress {
 
 fn pkg_release_parse_ip(text: String) -> ReleaseIPAddress? Never! {
     if text.contains(":") {
-        address :: ip.parse_ipv6(text) ?? return None
+        address :: release_core_ip.parse_ipv6(text) ?? return None
         return Val(ReleaseIPAddress{v4: false, parts: address.words})
     }
-    address :: ip.parse_ipv4(text) ?? return None
+    address :: release_core_ip.parse_ipv4(text) ?? return None
     Val(ReleaseIPAddress{v4: true, parts: [Int]{address.a, address.b, address.c, address.d}})
 }
 
@@ -164,7 +167,7 @@ fn pkg_release_pow2(exponent: Int) -> Int Never! {
 }
 
 // Parse one exact IP address or CIDR network.
-pub fn pkg_release_network_parse(input: String) -> JetReleaseDevtoolsNetwork ReleaseDevtoolsError! {
+fn pkg_release_network_parse(input: String) -> JetReleaseDevtoolsNetwork ReleaseDevtoolsError! {
     value :: input.trim()
     if value == "" -> return Err(ReleaseDevtoolsError{message: "inspect allowlist entries cannot be empty"})
     address_text := value
@@ -183,20 +186,20 @@ pub fn pkg_release_network_parse(input: String) -> JetReleaseDevtoolsNetwork Rel
 }
 
 // Whether `candidate` (an IP address) lies inside `network`.
-pub fn pkg_release_network_contains(network: JetReleaseDevtoolsNetwork, candidate: String) -> Bool Never! {
+fn pkg_release_network_contains(network: JetReleaseDevtoolsNetwork, candidate: String) -> Bool Never! {
     base :: pkg_release_parse_ip(network.address) ?? return false
     address :: pkg_release_parse_ip(candidate) ?? return false
     pkg_release_prefix_matches(base, address, network.prefix)
 }
 
 // The Rust `Display`: `address/prefix`.
-pub fn pkg_release_network_display(network: JetReleaseDevtoolsNetwork) -> String Never! {
+fn pkg_release_network_display(network: JetReleaseDevtoolsNetwork) -> String Never! {
     "{network.address}/{network.prefix}"
 }
 
 // A bounded, typed allowlist: comma-separated, blanks skipped, at most 64
 // entries, malformed input never read as an empty list.
-pub fn pkg_release_allowlist_parse(value: String) -> [JetReleaseDevtoolsNetwork] ReleaseDevtoolsError! {
+fn pkg_release_allowlist_parse(value: String) -> [JetReleaseDevtoolsNetwork] ReleaseDevtoolsError! {
     entries := [JetReleaseDevtoolsNetwork]{}
     loop piece in value.split(",") {
         item :: piece.trim()
@@ -207,19 +210,19 @@ pub fn pkg_release_allowlist_parse(value: String) -> [JetReleaseDevtoolsNetwork]
     Ok(entries)
 }
 
-pub fn pkg_release_allowlist_contains(allowlist: [JetReleaseDevtoolsNetwork], address: String) -> Bool Never! {
+fn pkg_release_allowlist_contains(allowlist: [JetReleaseDevtoolsNetwork], address: String) -> Bool Never! {
     loop network in allowlist {
         if pkg_release_network_contains(network, address) -> return true
     }
     false
 }
 
-pub fn pkg_release_deployment_default() -> JetReleaseDevtoolsDeployment Never! {
+fn pkg_release_deployment_default() -> JetReleaseDevtoolsDeployment Never! {
     JetReleaseDevtoolsDeployment{enabled: false, token: None, allowlist: [JetReleaseDevtoolsNetwork]{}}
 }
 
 // Deployment facts with a blank token dropped.
-pub fn pkg_release_deployment_with_values(enabled: Bool, token: String?, allowlist: [JetReleaseDevtoolsNetwork]) -> JetReleaseDevtoolsDeployment Never! {
+fn pkg_release_deployment_with_values(enabled: Bool, token: String?, allowlist: [JetReleaseDevtoolsNetwork]) -> JetReleaseDevtoolsDeployment Never! {
     kept :: if token == {
         .Val(text) -> if text.trim() == "" -> None else -> Val(text)
         .None -> None
@@ -228,13 +231,13 @@ pub fn pkg_release_deployment_with_values(enabled: Bool, token: String?, allowli
 }
 
 // Read `JET_INSPECT`, `JET_INSPECT_TOKEN`, and `JET_INSPECT_ALLOWLIST`.
-pub fn pkg_release_deployment_from_env() -[Env]> JetReleaseDevtoolsDeployment ReleaseDevtoolsError! {
-    enabled :: (sys.get(INSPECT_ENABLE_ENV) ?? "").trim() == "1"
+fn pkg_release_deployment_from_env() -[Env]> JetReleaseDevtoolsDeployment ReleaseDevtoolsError! {
+    enabled :: (release_core_sys.get(INSPECT_ENABLE_ENV) ?? "").trim() == "1"
     token := String?{None}
-    if sys.get(INSPECT_TOKEN_ENV) == .Val(raw) {
+    if release_core_sys.get(INSPECT_TOKEN_ENV) == .Val(raw) {
         if raw.trim() != "" -> token = Val(raw.trim())
     }
-    allowlist :: if sys.get(INSPECT_ALLOWLIST_ENV) == {
+    allowlist :: if release_core_sys.get(INSPECT_ALLOWLIST_ENV) == {
         .Val(raw) -> pkg_release_allowlist_parse(raw)
         .None -> [JetReleaseDevtoolsNetwork]{}
     }
@@ -242,7 +245,7 @@ pub fn pkg_release_deployment_from_env() -[Env]> JetReleaseDevtoolsDeployment Re
 }
 
 // The Rust `Debug` of a deployment: the bearer token is always redacted.
-pub fn pkg_release_deployment_debug(deployment: JetReleaseDevtoolsDeployment) -> String Never! {
+fn pkg_release_deployment_debug(deployment: JetReleaseDevtoolsDeployment) -> String Never! {
     token :: if deployment.token == {
         .Val(_) -> "Some(\"<redacted>\")"
         .None -> "None"
@@ -253,7 +256,7 @@ pub fn pkg_release_deployment_debug(deployment: JetReleaseDevtoolsDeployment) ->
 }
 
 // Existing `jet dev` hosts keep their session-bound writable protocol.
-pub fn pkg_release_policy_development() -> JetReleaseDevtoolsPolicy Never! {
+fn pkg_release_policy_development() -> JetReleaseDevtoolsPolicy Never! {
     JetReleaseDevtoolsPolicy{
         inspect: None,
         endpoint: JetReleaseDevtoolsEndpoint.Absent,
@@ -268,7 +271,7 @@ pub fn pkg_release_policy_development() -> JetReleaseDevtoolsPolicy Never! {
 }
 
 // Project the parsed `build.release.inspect` fact exactly once.
-pub fn pkg_release_policy_from_manifest_profile(inspect: JetReleaseInspect) -> JetReleaseDevtoolsPolicy Never! {
+fn pkg_release_policy_from_manifest_profile(inspect: JetReleaseInspect) -> JetReleaseDevtoolsPolicy Never! {
     read_only :: inspect == JetReleaseInspect.ReadOnly
     JetReleaseDevtoolsPolicy{
         inspect: Val(inspect),
@@ -283,55 +286,55 @@ pub fn pkg_release_policy_from_manifest_profile(inspect: JetReleaseInspect) -> J
     }
 }
 
-pub fn pkg_release_policy_with_deployment(policy: JetReleaseDevtoolsPolicy, deployment: JetReleaseDevtoolsDeployment) -> JetReleaseDevtoolsPolicy Never! {
+fn pkg_release_policy_with_deployment(policy: JetReleaseDevtoolsPolicy, deployment: JetReleaseDevtoolsDeployment) -> JetReleaseDevtoolsPolicy Never! {
     updated := policy
     updated.deployment = deployment
     updated
 }
 
-pub fn pkg_release_policy_from_manifest_profile_with_env(inspect: JetReleaseInspect) -[Env]> JetReleaseDevtoolsPolicy ReleaseDevtoolsError! {
+fn pkg_release_policy_from_manifest_profile_with_env(inspect: JetReleaseInspect) -[Env]> JetReleaseDevtoolsPolicy ReleaseDevtoolsError! {
     Ok(pkg_release_policy_with_deployment(pkg_release_policy_from_manifest_profile(inspect), pkg_release_deployment_from_env()))
 }
 
-pub fn pkg_release_policy_is_release(policy: JetReleaseDevtoolsPolicy) -> Bool Never! {
+fn pkg_release_policy_is_release(policy: JetReleaseDevtoolsPolicy) -> Bool Never! {
     policy.inspect != None
 }
 
-pub fn pkg_release_policy_endpoint_enabled(policy: JetReleaseDevtoolsPolicy) -> Bool Never! {
+fn pkg_release_policy_endpoint_enabled(policy: JetReleaseDevtoolsPolicy) -> Bool Never! {
     policy.endpoint == JetReleaseDevtoolsEndpoint.ReadOnly
 }
 
-pub fn pkg_release_policy_deployment_enabled(policy: JetReleaseDevtoolsPolicy) -> Bool Never! {
+fn pkg_release_policy_deployment_enabled(policy: JetReleaseDevtoolsPolicy) -> Bool Never! {
     pkg_release_policy_endpoint_enabled(policy) && policy.deployment.enabled
 }
 
 // Loopback peers, or peers inside the deployment allowlist.
-pub fn pkg_release_policy_peer_allowed(policy: JetReleaseDevtoolsPolicy, address: String) -> Bool Never! {
+fn pkg_release_policy_peer_allowed(policy: JetReleaseDevtoolsPolicy, address: String) -> Bool Never! {
     parsed :: pkg_release_parse_ip(address) ?? return false
     loopback :: if parsed.v4 -> parsed.parts[0] == 127 else -> parsed.parts == [Int]{0, 0, 0, 0, 0, 0, 0, 1}
     loopback || pkg_release_allowlist_contains(policy.deployment.allowlist, address)
 }
 
-pub fn pkg_release_policy_cfg_value(policy: JetReleaseDevtoolsPolicy) -> String? Never! {
+fn pkg_release_policy_cfg_value(policy: JetReleaseDevtoolsPolicy) -> String? Never! {
     inspect :: policy.inspect ?? return None
     Val(pkg_release_inspect_cfg_value(inspect))
 }
 
 // Safe facts for `jet inspect`/`jet explain`: never the token or the
 // activation bit.
-pub struct ReleaseDevtoolsPolicyFacts {
-    pub inspect: JetReleaseInspect?
-    pub endpoint: JetReleaseDevtoolsEndpoint
-    pub authentication: JetReleaseDevtoolsAuthentication
-    pub authority: JetReleaseDevtoolsAuthority
-    pub publication: JetReleaseDevtoolsPublication
-    pub allowlist: [JetReleaseDevtoolsNetwork]
-    pub local_rail: Bool
-    pub panel_code: Bool
-    pub stream_code: Bool
+struct ReleaseDevtoolsPolicyFacts {
+    inspect: JetReleaseInspect?
+    endpoint: JetReleaseDevtoolsEndpoint
+    authentication: JetReleaseDevtoolsAuthentication
+    authority: JetReleaseDevtoolsAuthority
+    publication: JetReleaseDevtoolsPublication
+    allowlist: [JetReleaseDevtoolsNetwork]
+    local_rail: Bool
+    panel_code: Bool
+    stream_code: Bool
 }
 
-pub fn pkg_release_policy_facts(policy: JetReleaseDevtoolsPolicy) -> ReleaseDevtoolsPolicyFacts Never! {
+fn pkg_release_policy_facts(policy: JetReleaseDevtoolsPolicy) -> ReleaseDevtoolsPolicyFacts Never! {
     ReleaseDevtoolsPolicyFacts{
         inspect: policy.inspect,
         endpoint: policy.endpoint,

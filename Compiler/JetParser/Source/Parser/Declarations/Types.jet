@@ -38,11 +38,11 @@ use jet_lexer.[
 ]
 
 fn parser_distinct_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_lookahead(&state, 2).payload.decoded == "distinct"
+    parser_current_kind(&state) == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON_COLON && parser_kind_at(&state, 2) == TOKEN_IDENT && parser_value_at(&state, 2) == "distinct"
 }
 
 fn parser_unit_family_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_lookahead(&state, 1).payload.decoded == "UnitFamily" && parser_kind_at(&state, 2) == TOKEN_LPAREN
+    parser_current_kind(&state) == TOKEN_HASH && parser_kind_at(&state, 1) == TOKEN_IDENT && parser_value_at(&state, 1) == "UnitFamily" && parser_kind_at(&state, 2) == TOKEN_LPAREN
 }
 
 fn parser_distinct_marker_derives(markers: [Marker]) -> [NamedSpan] Never! {
@@ -65,7 +65,7 @@ fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers)
     name :: parser_expect_name(&state, "as the distinct type name")
     parser_expect(&state, TOKEN_COLON_COLON, "`::` after a distinct type name")
     keyword :: parser_expect_name(&state, "after `::` in a distinct declaration")
-    if keyword.payload.decoded != "distinct" {
+    if parser_value(state, keyword) != "distinct" {
         parser_add_error(&state, keyword.span, "expected `distinct` in a distinct type declaration", "nominal declarations use `Name :: distinct Base`", "write `Name :: distinct Int`")
     }
     base :: parser_parse_type(&state, 0)
@@ -89,13 +89,13 @@ fn parser_parse_distinct(state: &JetParserState, modifiers: ParsedItemModifiers)
     }
     parser_expect(&state, TOKEN_SEMI, "after a distinct type declaration")
     markers :: modifiers.markers
-    value :: DistinctDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_markers: markers, derives: parser_distinct_marker_derives(markers), quantity: None, name: name.payload.decoded, name_span: name.span, base: base.ty, base_span: base.span, range: range_value, span: parser_cover(start, end)}
+    value :: DistinctDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, type_markers: markers, derives: parser_distinct_marker_derives(markers), quantity: None, name: parser_value(state, name), name_span: name.span, base: base.ty, base_span: base.span, range: range_value, span: parser_cover(start, end)}
     Item.Distinct{value: value}
 }
 
-pub struct DistinctRangeBound {
-    pub value: Int
-    pub span: Span
+struct DistinctRangeBound {
+    value: Int
+    span: Span
 }
 
 fn parser_distinct_range_bound(state: &JetParserState, context: String) -> DistinctRangeBound {
@@ -115,7 +115,7 @@ fn parser_distinct_range_bound(state: &JetParserState, context: String) -> Disti
         return DistinctRangeBound{value: 0, span: token.span}
     }
     parser_bump(&state)
-    DistinctRangeBound{value: token.payload.integer ?? 0, span: token.span}
+    DistinctRangeBound{value: parser_integer(state, token) ?? 0, span: token.span}
 }
 
 fn parser_type_declaration_error(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
@@ -209,7 +209,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
             loop parser_current_kind(&state) != TOKEN_RPAREN && parser_current_kind(&state) != TOKEN_EOF {
                 field :: parser_expect_name(&state, "as unit conversion metadata")
                 parser_expect(&state, TOKEN_COLON, "after unit conversion metadata")
-                if field.payload.decoded == {
+                if parser_value(state, field) == {
                     "scale" -> {
                         if saw_scale {
                             parser_type_declaration_error(&state, "E0003", field.span, "unit scale is repeated", "each unit member has one scale fact", "keep one `scale:` entry")
@@ -239,7 +239,7 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
             parser_type_declaration_error(&state, "E0003", member.span, "a unit scale cannot be zero", "unit conversion must remain invertible", "write a nonzero exact scale")
         }
         if saw_scale || saw_offset -> has_conversion = true
-        &members.push(UnitFamilyMember{name: member.payload.decoded, name_span: member.span, scale: scale, scale_provenance: scale_provenance, offset: offset})
+        &members.push(UnitFamilyMember{name: parser_value(state, member), name_span: member.span, scale: scale, scale_provenance: scale_provenance, offset: offset})
         loop parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after unit-family members")
@@ -265,13 +265,13 @@ fn parser_parse_unit_family(state: &JetParserState, modifiers: ParsedItemModifie
     Item.UnitFamily{value: UnitFamilyDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, family: family, family_span: family_span, dimension: dimension, resolved_dimension: None, resolved_owner: None, base: base, members: members, span: parser_cover(marker.span, close.span)}}
 }
 
-pub struct ParsedUnitScale {
-    pub ratio: UnitRatio
-    pub provenance: UnitScaleProvenance
+struct ParsedUnitScale {
+    ratio: UnitRatio
+    provenance: UnitScaleProvenance
 }
 
 fn parser_unit_scale(state: &JetParserState) -> ParsedUnitScale {
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "pi" {
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "pi" {
         parser_bump(&state)
         parser_expect(&state, TOKEN_SLASH, "`/` after `pi`")
         denominator :: parser_unit_integer(&state, "as a symbolic pi denominator")
@@ -280,16 +280,16 @@ fn parser_unit_scale(state: &JetParserState) -> ParsedUnitScale {
         value :: UnitRatio{numerator: 3141592653589793, denominator: 1000000000000000 * denominator_value}
         return ParsedUnitScale{ratio: value, provenance: UnitScaleProvenance.SymbolicPi{numerator: UnitRatio{numerator: 1, denominator: 1}, denominator: UnitRatio{numerator: denominator_value, denominator: 1}}}
     }
-    if parser_current_kind(&state) == TOKEN_IDENT && (parser_current(&state).payload.decoded == "conventional" || parser_current(&state).payload.decoded == "measured") {
+    if parser_current_kind(&state) == TOKEN_IDENT && (parser_value_at(&state, 0) == "conventional" || parser_value_at(&state, 0) == "measured") {
         kind :: parser_bump(&state)
-        measured :: kind.payload.decoded == "measured"
+        measured :: parser_value(state, kind) == "measured"
         parser_expect(&state, TOKEN_LPAREN, "`(` after scale provenance")
         central :: parser_unit_decimal(&state, "as the scale value")
         parser_expect(&state, TOKEN_COMMA, "after a scale value")
         label :: parser_expect_name(&state, "for scale provenance")
         parser_expect(&state, TOKEN_COLON, "after scale provenance label")
         expected_label :: if measured -> "uncertainty" else -> "source"
-        if label.payload.decoded != expected_label {
+        if parser_value(state, label) != expected_label {
             parser_type_declaration_error(&state, "E0003", label.span, "unexpected scale provenance label", "conventional scales name source and measured scales name uncertainty then source", "write `{expected_label}: ...`")
         }
         if measured {
@@ -297,7 +297,7 @@ fn parser_unit_scale(state: &JetParserState) -> ParsedUnitScale {
             parser_expect(&state, TOKEN_COMMA, "after a standard uncertainty")
             source_label :: parser_expect_name(&state, "for a measurement source")
             parser_expect(&state, TOKEN_COLON, "after a measurement source label")
-            if source_label.payload.decoded != "source" {
+            if parser_value(state, source_label) != "source" {
                 parser_type_declaration_error(&state, "E0003", source_label.span, "expected a measurement source label", "measured scales name their provenance source explicitly", "write `source: \"...\"`")
             }
             source :: parser_unit_plain_string(&state, "as a measurement source")
@@ -311,9 +311,9 @@ fn parser_unit_scale(state: &JetParserState) -> ParsedUnitScale {
     ParsedUnitScale{ratio: parser_unit_ratio(&state), provenance: UnitScaleProvenance.Rational}
 }
 
-pub struct UnitText {
-    pub text: String
-    pub span: Span
+struct UnitText {
+    text: String
+    span: Span
 }
 
 fn parser_unit_decimal(state: &JetParserState, context: String) -> UnitText {
@@ -330,7 +330,7 @@ fn parser_unit_decimal(state: &JetParserState, context: String) -> UnitText {
         return UnitText{text: "0", span: parser_cover(start, token.span)}
     }
     parser_bump(&state)
-    UnitText{text: "{sign}{token.payload.text}", span: parser_cover(start, token.span)}
+    UnitText{text: "{sign}{parser_text(state, token)}", span: parser_cover(start, token.span)}
 }
 
 fn parser_unit_integer(state: &JetParserState, context: String) -> UnitText {
@@ -347,7 +347,7 @@ fn parser_unit_integer(state: &JetParserState, context: String) -> UnitText {
         return UnitText{text: "0", span: parser_cover(start, token.span)}
     }
     parser_bump(&state)
-    UnitText{text: "{sign}{token.payload.text}", span: parser_cover(start, token.span)}
+    UnitText{text: "{sign}{parser_text(state, token)}", span: parser_cover(start, token.span)}
 }
 
 fn parser_unit_ratio(state: &JetParserState) -> UnitRatio {
@@ -371,10 +371,10 @@ fn parser_unit_plain_string(state: &JetParserState, context: String) -> String {
         return ""
     }
     parser_bump(&state)
-    if token.payload.interpolations > 0 {
+    if parser_interpolations(state, token) > 0 {
         parser_add_error(&state, token.span, "unit provenance strings cannot interpolate", "conversion provenance must be stable source text", "write a plain string")
     }
-    token.payload.decoded
+    parser_value(state, token)
 }
 
 fn parser_unit_ratio_from_text(numerator_text: String, denominator_text: String) -> UnitRatio Never! {

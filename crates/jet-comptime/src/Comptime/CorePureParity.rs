@@ -14,7 +14,7 @@ use crate::Comptime::Diagnostics::unsupported;
 use crate::Comptime::EmailAdapter;
 use crate::Comptime::Methods::as_float;
 use crate::Comptime::{ServicesLite, SyncLite};
-use jet_foundation::Prelude::{jet_as_bytes as as_bytes, tui as tui_kernel};
+use jet_foundation::Prelude::jet_as_bytes as as_bytes;
 use jet_foundation::StructuralDebug::jet_debug_map;
 use jet_foundation::Syntax::CoreCallPureRoute;
 
@@ -64,6 +64,10 @@ pub(super) fn evaluate(
         (CoreCallPureRoute::Email, "serialize") => {
             return EmailAdapter::evaluate("serialize", args, span)
         }
+        (CoreCallPureRoute::Email, "__address_parts" | "__attachment_parts" | "__envelope_parts"
+            | "__address_view" | "__attachment_view" | "__message_view" | "__message_parts") => {
+            return EmailAdapter::evaluate(row.member, args, span)
+        }
         (CoreCallPureRoute::EncodingXml, "canonical") => xml_canonical(args, span),
         (CoreCallPureRoute::Time, "period") => period(args, span),
         (CoreCallPureRoute::Time, "period_days") => period_unit(args, span, 2),
@@ -105,6 +109,10 @@ pub(super) fn evaluate(
         ))),
         (CoreCallPureRoute::Math, "decimal") => decimal_from_str(args, span),
         (CoreCallPureRoute::Math, "fraction") => fraction_new(args, span),
+        (CoreCallPureRoute::Math, "__numeric_stop") => match args {
+            [CtValue::Str(message)] => Err(unsupported(message, span)),
+            _ => Err(unsupported("core.math.__numeric_stop expects a String", span)),
+        },
         (CoreCallPureRoute::Math, "to_bits") => float_arg(args, 0, span)
             .map(|value| CtValue::Int(super::math_lib_pure::jet_std_math_to_bits(value))),
         (CoreCallPureRoute::Math, "from_bits") => one(args, 0, "core.math", "from_bits", span)
@@ -118,114 +126,23 @@ pub(super) fn evaluate(
                     big.wrapping_u64() as i64,
                 )))
             }),
-        // D-TYPE2-UNCERT1=A: `core.math.sqrt` keeps the measured grade. The
-        // existing Prelude-backed method adapter owns the uncertainty rule;
-        // ordinary Float sqrt remains on the core-call path below.
-        (CoreCallPureRoute::Math, "sqrt") => match args {
-            [value @ CtValue::Struct { type_name, .. }]
-                if type_name == crate::Syntax::TYPE_MEASUREMENT =>
-            {
-                measurement_sqrt(value, span)
-            }
-            _ => return None,
-        },
-        (CoreCallPureRoute::Measurement, "from") => measurement(args, span),
         (CoreCallPureRoute::Date, "new") => date_new_call(args, span),
         (CoreCallPureRoute::Date, "parse") => date_parse_call(args, span),
         (CoreCallPureRoute::DateTime, "from_timestamp") => datetime_from_timestamp(args, span),
-        // D-APPROX1=A: sketch constructors — same algorithms as AOT Jet* sketches.
-        (CoreCallPureRoute::SketchHll, "new") => Ok(hll_new()),
-        (CoreCallPureRoute::SketchTDigest, "new") => Ok(tdigest_new()),
-        (CoreCallPureRoute::SketchCms, "new") => Ok(cms_new()),
-        (CoreCallPureRoute::SketchReservoir, "new") => reservoir_new(args, span),
-        (CoreCallPureRoute::Ui, "point") => ui_point(args, span),
-        (CoreCallPureRoute::Ui, "size") => ui_size(args, span),
-        (CoreCallPureRoute::Ui, "rect") => ui_rect(args, span),
-        (CoreCallPureRoute::Ui, "constraint") => ui_constraint(args, span),
-        (CoreCallPureRoute::Ui, "node") => ui_node(args, span, None, None, "Custom"),
-        (CoreCallPureRoute::Ui, "node_role") => ui_node_role(args, span),
-        (CoreCallPureRoute::Ui, "node_color") => ui_node_color(args, span),
-        (CoreCallPureRoute::Ui, "text") => ui_text(args, span),
+        (CoreCallPureRoute::Ui, "__node_transfer") => ui_raw_node_transfer(args, span),
+        (CoreCallPureRoute::Ui, "__viewport_transfer") => ui_raw_viewport_transfer(args, span),
+        (CoreCallPureRoute::Ui, "__request_transfer") => ui_raw_request_transfer(args, span),
+        (CoreCallPureRoute::Ui, "__accessibility_transfer") => ui_raw_optional_slot_transfer(args, span, "accessibility", "UIAccessibility"),
+        (CoreCallPureRoute::Ui, "__shortcut_transfer") => ui_raw_optional_slot_transfer(args, span, "shortcut", "UIShortcut"),
         (CoreCallPureRoute::Ui, "button") => ui_button(args, span),
-        (CoreCallPureRoute::Ui, "box") => ui_box(args, span),
         (CoreCallPureRoute::Ui, "aria_role_button") => Ok(ui_role("Button")),
         (CoreCallPureRoute::Ui, "aria_role_text_input") => Ok(ui_role("TextInput")),
         (CoreCallPureRoute::Ui, "aria_role_label") => Ok(ui_role("Label")),
         (CoreCallPureRoute::Ui, "aria_role_container") => Ok(ui_role("Container")),
-        (CoreCallPureRoute::Ui, "key_event") => ui_key_event(args, span),
-        (CoreCallPureRoute::Ui, "resize_event") => ui_resize_event(args, span),
-        (CoreCallPureRoute::Ui, "ascii") => tui_ascii(args, span),
-        (CoreCallPureRoute::Ui, "capabilities") => Ok(tui_capabilities()),
-        (CoreCallPureRoute::Ui, "color_ansi16") => tui_color(args, span, "ANSI16", 1),
-        (CoreCallPureRoute::Ui, "color_ansi256") => tui_color(args, span, "ANSI256", 1),
-        (CoreCallPureRoute::Ui, "color_rgb") => tui_color(args, span, "RGB", 3),
-        (CoreCallPureRoute::Ui, "display_width") => tui_display_width(args, span),
-        (CoreCallPureRoute::Ui, "focus_event") => bool_value(args, 0, span)
-            .and_then(|value| tui_event("Focus", vec![(Some("focused".to_string()), value)])),
-        (CoreCallPureRoute::Ui, "close_event") => tui_event("Close", Vec::new()),
-        (CoreCallPureRoute::Ui, "horizontal") => tui_enum("TUIDirection", "Horizontal"),
-        (CoreCallPureRoute::Ui, "interrupt_event") => tui_event("Interrupt", Vec::new()),
-        (CoreCallPureRoute::Ui, "io_event") => tui_io_event(args, span),
-        (CoreCallPureRoute::Ui, "key_event_modifiers") => tui_key_event_modifiers(args, span),
-        (CoreCallPureRoute::Ui, "layout") => tui_layout(args, span),
-        (CoreCallPureRoute::Ui, "length") => tui_constraint(args, span, "Length"),
-        (CoreCallPureRoute::Ui, "fill") => tui_constraint(args, span, "Fill"),
-        (CoreCallPureRoute::Ui, "list") => tui_list(args, span),
-        (CoreCallPureRoute::Ui, "list_state") => Ok(tui_list_state(0, 0)),
-        (CoreCallPureRoute::Ui, "list_state_offset") => {
-            tui_list_state_update(args, span, false)
-        }
-        (CoreCallPureRoute::Ui, "list_state_select") => tui_list_state_update(args, span, true),
-        (CoreCallPureRoute::Ui, "list_state_selected") =>
-            one(args, 0, "core.tui", "list_state_selected", span)
-                .and_then(|state| int_field(state, "TUIListState", "selected", span))
-                .map(CtValue::Int),
-        (CoreCallPureRoute::Ui, "max") => tui_constraint(args, span, "Max"),
-        (CoreCallPureRoute::Ui, "min") => tui_constraint(args, span, "Min"),
-        (CoreCallPureRoute::Ui, "percent") => tui_constraint(args, span, "Percent"),
-        (CoreCallPureRoute::Ui, "style") => Ok(tui_style_default()),
-        (CoreCallPureRoute::Ui, "style_background") => tui_style_color(args, span, true),
-        (CoreCallPureRoute::Ui, "style_bold") => tui_style_flag(args, span, "bold"),
-        (CoreCallPureRoute::Ui, "style_dim") => tui_style_flag(args, span, "dim"),
-        (CoreCallPureRoute::Ui, "style_foreground") => tui_style_color(args, span, false),
-        (CoreCallPureRoute::Ui, "style_text") => tui_style_text(args, span),
-        (CoreCallPureRoute::Ui, "style_underline") => tui_style_flag(args, span, "underline"),
-        (CoreCallPureRoute::Ui, "table") => tui_table(args, span),
-        (CoreCallPureRoute::Ui, "timer_event") => tui_timer_event(args, span),
-        (CoreCallPureRoute::Ui, "vertical") => tui_enum("TUIDirection", "Vertical"),
         (CoreCallPureRoute::Io, "style_force") => io_style_force(args, span),
-        (CoreCallPureRoute::Net, "ip_addr") => net_ip_addr(args, span),
-        (CoreCallPureRoute::Net, "ip_to_string") => net_string_field(args, "IPAddr", "text", span),
-        (CoreCallPureRoute::Net, "ip_is_ipv4") => net_ip_is_ipv4(args, span),
-        (CoreCallPureRoute::Net, "socket_addr_parse") => net_socket_addr_parse(args, span),
-        (CoreCallPureRoute::Net, "socket_host") => {
-            net_string_field(args, "SocketAddr", "host", span)
-        }
-        (CoreCallPureRoute::Net, "socket_port") => {
-            net_value_field(args, "SocketAddr", "port", span)
-        }
-        (CoreCallPureRoute::Net, "socket_to_string") => {
-            net_string_field(args, "SocketAddr", "text", span)
-        }
-        (CoreCallPureRoute::Net, "ready_readable") => {
-            net_value_field(args, "NetReady", "readable", span)
-        }
-        (CoreCallPureRoute::Net, "ready_writable") => {
-            net_value_field(args, "NetReady", "writable", span)
-        }
-        (CoreCallPureRoute::Net, "error_operation") => {
-            net_string_field(args, "NetError", "operation", span)
-        }
-        (CoreCallPureRoute::Net, "error_address") => {
-            net_value_field(args, "NetError", "address", span)
-        }
-        (CoreCallPureRoute::Net, "error_name") => net_value_field(args, "NetError", "name", span),
-        (CoreCallPureRoute::Net, "error_message") => {
-            net_string_field(args, "NetError", "message", span)
-        }
-        (CoreCallPureRoute::Net, "error_os_code") => {
-            net_value_field(args, "NetError", "os_code", span)
-        }
+        (CoreCallPureRoute::Net, "__ip_from_bytes" | "__ip_bytes" | "__ip_is_v4"
+            | "__socket_from_parts" | "__socket_ip" | "__socket_port"
+            | "__socket_scope" | "__udp_packet_addr") => net_raw_carrier(row.member, args, span),
         (CoreCallPureRoute::Net, "dns_srv_target") => {
             net_string_field(args, "DNSSRV", "target", span)
         }
@@ -235,19 +152,6 @@ pub(super) fn evaluate(
         }
         (CoreCallPureRoute::Net, "dns_srv_weight") => {
             net_value_field(args, "DNSSRV", "weight", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_data") => net_udp_packet_data(args, span),
-        (CoreCallPureRoute::Net, "udp_packet_bytes") => {
-            net_value_field(args, "UDPPacket", "data", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_addr") => {
-            net_value_field(args, "UDPPacket", "addr", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_original_len") => {
-            net_value_field(args, "UDPPacket", "original_len", span)
-        }
-        (CoreCallPureRoute::Net, "udp_packet_truncated") => {
-            net_value_field(args, "UDPPacket", "truncated", span)
         }
         (CoreCallPureRoute::Crypto, "ed25519_verify_strict") => crypto_ed25519_verify(args, span),
         (CoreCallPureRoute::Crypto, "ed25519_sign") => crypto_ed25519_sign(args, span),
@@ -1003,73 +907,12 @@ pub(super) fn evaluate_method(
             Ok(CtValue::Float(CtFloat::f64(value)))
         }),
         ("Period", "to_string", 0) => period_string(recv, span).map(CtValue::Str),
-        ("Measurement", "value" | "uncertainty", 0) => {
-            value_field(recv, "Measurement", method, span)
-        }
-        ("Measurement", "add" | "sub" | "mul" | "div", 1) => {
-            measurement_arithmetic(recv, method, &args[0], span)
-        }
-        ("Measurement", "sqrt", 0) => measurement_sqrt(recv, span),
-        // D-APPROX1=A: non-mutating sketch queries (mutations write back in dispatch).
-        ("HyperLogLog", "count", 0) => hll_count(recv, span),
-        ("CountMinSketch", "count", 1) => cms_count(recv, args, span),
-        ("TDigest", "quantile", 1) => tdigest_quantile(recv, args, span),
-        ("ReservoirSampler", "sample", 0) => reservoir_sample(recv, span),
-        // D-SOLVER-LIB1=A: finite solver queries (`.require` mutates in dispatch).
-        ("Solver", "failure_count", 0) => solver_failure_count(recv, span),
-        ("Solver", "status", 0) => solver_status(recv, span),
         _ => return None,
     };
     Some(result)
 }
 
-/// D-APPROX1=A: mutating sketch `.add` — returns `(Unit, updated_receiver)`.
-pub(super) fn sketch_add(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    let CtValue::Struct { type_name, .. } = recv else {
-        return None;
-    };
-    jet_foundation::Syntax::core_receiver_method(type_name, "add")?;
-    let result = match type_name.as_str() {
-        "HyperLogLog" => hll_add(recv, args, span),
-        "TDigest" => tdigest_add(recv, args, span),
-        "CountMinSketch" => cms_add(recv, args, span),
-        "ReservoirSampler" => reservoir_add(recv, args, span),
-        _ => return None,
-    };
-    Some(result.map(|updated| (CtValue::Unit, updated)))
-}
 
-/// D-SOLVER-LIB1=A: `solver.require(ok)` — returns `(Unit, updated_receiver)`.
-pub(super) fn solver_require(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    let CtValue::Struct { type_name, .. } = recv else {
-        return None;
-    };
-    if type_name != crate::Syntax::SOLVER_TYPE {
-        return None;
-    }
-    jet_foundation::Syntax::core_receiver_method(type_name, "require")?;
-    Some(solver_require_update(recv, args, span).map(|updated| (CtValue::Unit, updated)))
-}
-
-/// D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — same seed/checked/failures layout as AOT.
-pub(super) fn solver_new(args: &[CtValue], span: Span) -> EvalResult {
-    if jet_foundation::Syntax::core_receiver_method(crate::Syntax::SOLVER_TYPE, "new").is_none() {
-        return Err(unsupported(
-            "Solver.new is not in the Core-call registry",
-            span,
-        ));
-    }
-    let seed = as_int(one(args, 0, "Solver", "new", span)?, span)?;
-    Ok(solver_value(super::solver_kernel::jet_solver_new(seed)))
-}
 
 /// D-DBDRIVER1 / I9: the interpreter's `DBValue` carrier needs the exact
 /// `JetShow` projection from `Prelude/CoreLib/JetStd/DBPluginWire.rs`.
@@ -1177,14 +1020,14 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
     if let Some(text) = plugin_error_display(value) {
         return Some(text);
     }
-    // DataTree values use the ordered JSON projection on every tier. The
+    // Dyn values use the ordered JSON projection on every tier. The
     // generic enum renderer below is for nominal enums and would expose the
     // erased `Object(JSONObject { ... })` carrier instead.
     if matches!(
         value,
-        CtValue::Enum { type_name, .. } if type_name == "DataTree"
+        CtValue::Enum { type_name, .. } if type_name == "Dyn"
     ) {
-        return Some(crate::Comptime::render_datatree_for_tir(value));
+        return Some(crate::Comptime::JSONInterp::display_dyn(value));
     }
     if let Some(text) = io_error_display(value) {
         return Some(text);
@@ -1390,30 +1233,6 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
                 })
         }
         CtValue::Struct { type_name, .. }
-            if core_display.is_some() && type_name == "HyperLogLog" =>
-        {
-            let CtValue::Int(n) = hll_count(value, Span::new(0, 0)).ok()? else {
-                return None;
-            };
-            Some(format!("HyperLogLog(count={n})"))
-        }
-        CtValue::Struct { type_name, .. } if core_display.is_some() && type_name == "TDigest" => {
-            Some("TDigest".to_string())
-        }
-        CtValue::Struct { type_name, .. }
-            if core_display.is_some() && type_name == "CountMinSketch" =>
-        {
-            Some("CountMinSketch".to_string())
-        }
-        CtValue::Struct { type_name, .. }
-            if core_display.is_some() && type_name == "ReservoirSampler" =>
-        {
-            let CtValue::Int(count) = field(value, "ReservoirSampler", "count")? else {
-                return None;
-            };
-            Some(format!("ReservoirSampler(n={count})"))
-        }
-        CtValue::Struct { type_name, .. }
             if core_display.is_some() && type_name == crate::Syntax::SOLVER_TYPE =>
         {
             let failures = int_field(
@@ -1571,15 +1390,7 @@ pub(super) fn display(value: &CtValue) -> Option<String> {
         }
         CtValue::Failed(CtReport::Clean(_)) => Some("null".to_string()),
         _ => {
-            if let (Some(CtValue::Float(measured)), Some(CtValue::Float(uncertainty))) = (
-                field(value, "Measurement", "value"),
-                field(value, "Measurement", "uncertainty"),
-            ) {
-                Some(super::measurement_kernel::jet_measurement_kernel_show((
-                    measured.as_f64(),
-                    uncertainty.as_f64(),
-                )))
-            } else if matches!(value, CtValue::Struct { .. } | CtValue::Enum { .. })
+            if matches!(value, CtValue::Struct { .. } | CtValue::Enum { .. })
                 && core_display.is_none()
             {
                 // A non-Core nominal needs the evaluator's declaration metadata
@@ -1912,6 +1723,8 @@ fn io_error_display(value: &CtValue) -> Option<String> {
         "Closed" => 5,
         "Protocol" => 6,
         "Other" => 7,
+        "AlreadyExists" => 9,
+        "Unsupported" => 10,
         _ => return None,
     };
     let Some((_, CtValue::Struct { type_name, fields })) = args.first() else {
@@ -2041,73 +1854,9 @@ fn ui_kind(variant: &str) -> CtValue {
     }
 }
 
-fn ui_point(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "Point",
-        vec![
-            ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-            ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-        ],
-    ))
-}
 
-fn ui_size(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "Size",
-        vec![
-            (
-                "width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
-            ),
-            (
-                "height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
-            ),
-        ],
-    ))
-}
 
-fn ui_rect(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "Rect",
-        vec![
-            ("x", CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?))),
-            ("y", CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?))),
-            (
-                "width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
-            ),
-            (
-                "height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
-            ),
-        ],
-    ))
-}
 
-fn ui_constraint(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(structure(
-        "SizeConstraint",
-        vec![
-            (
-                "min_width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 0, span)?)),
-            ),
-            (
-                "min_height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 1, span)?)),
-            ),
-            (
-                "max_width",
-                CtValue::Float(CtFloat::f64(float_arg(args, 2, span)?)),
-            ),
-            (
-                "max_height",
-                CtValue::Float(CtFloat::f64(float_arg(args, 3, span)?)),
-            ),
-        ],
-    ))
-}
 
 fn ui_node_value_with_metadata(
     label: String,
@@ -2152,6 +1901,9 @@ fn ui_node_value_with_metadata(
             ),
             ("kind", ui_kind(kind)),
             ("children", CtValue::List(children)),
+            ("style", CtValue::absent(Type::Tuple(
+                (0..5).map(|index| (index.to_string(), Box::new(Type::Int))).collect(),
+            ))),
             (
                 "shortcut",
                 shortcut.map_or(
@@ -2185,54 +1937,101 @@ fn ui_node_value(
     )
 }
 
-fn ui_node(
-    args: &[CtValue],
-    span: Span,
-    role: Option<CtValue>,
-    color: Option<String>,
-    kind: &str,
-) -> EvalResult {
-    Ok(ui_node_value(
-        string_arg(args, 0, span)?.to_string(),
-        float_arg(args, 1, span)?,
-        float_arg(args, 2, span)?,
-        role,
-        color,
-        kind,
-        Vec::new(),
-    ))
-}
-
-fn ui_node_role(args: &[CtValue], span: Span) -> EvalResult {
-    let role = args
-        .get(3)
-        .cloned()
-        .ok_or_else(|| unsupported("core.ui.node_role(): missing role", span))?;
-    let kind = match &role {
-        CtValue::Enum { variant, .. } if variant == "Button" => "Button",
-        CtValue::Enum { variant, .. } if variant == "TextInput" => "TextInput",
-        _ => "Custom",
+// A retained UI node is opaque to Source. Its private style slot retains the
+// source packer's five normalized words without substituting a native policy.
+fn ui_raw_node_transfer(args: &[CtValue], span: Span) -> EvalResult {
+    if int_arg(args, 8, span)? != 63 {
+        return Err(unsupported("invalid audited UI absent-slot carrier", span));
+    }
+    let role = match int_arg(args, 3, span)? {
+        -1 => None,
+        0 => Some(ui_role("Button")),
+        1 => Some(ui_role("TextInput")),
+        2 => Some(ui_role("Label")),
+        3 => Some(ui_role("Container")),
+        _ => return Err(unsupported("invalid audited UI role carrier", span)),
     };
-    ui_node(args, span, Some(role), None, kind)
+    let kind = match int_arg(args, 4, span)? {
+        0 => "Custom",
+        1 => "Text",
+        2 => "Box",
+        3 => "Button",
+        4 => "TextInput",
+        _ => return Err(unsupported("invalid audited UI kind carrier", span)),
+    };
+    let children = match args.get(5) {
+        Some(CtValue::List(children)) => children.clone(),
+        _ => return Err(unsupported("UI transfer needs retained child slots", span)),
+    };
+    let color = if as_bool(one(args, 6, "core.ui", "__node_transfer", span)?, span)? {
+        Some(string_arg(args, 7, span)?.to_owned())
+    } else {
+        None
+    };
+    let mut node = ui_node_value(string_arg(args, 0, span)?.to_owned(),
+        float_arg(args, 1, span)?, float_arg(args, 2, span)?, role, color, kind, children);
+    if as_bool(one(args, 9, "core.ui", "__node_transfer", span)?, span)? {
+        let CtValue::Struct { fields, .. } = &mut node else { unreachable!() };
+        let slot = fields.iter_mut().find(|(name, _)| name == "style").unwrap();
+        slot.1 = CtValue::Present(Box::new(CtValue::Struct {
+            type_name: "tuple".to_string(),
+            fields: (10..15).map(|index| int_arg(args, index, span)
+                .map(|word| ((index - 10).to_string(), CtValue::Int(word))))
+                .collect::<Result<Vec<_>, _>>()?,
+        }));
+    }
+    Ok(node)
 }
 
-fn ui_node_color(args: &[CtValue], span: Span) -> EvalResult {
-    let color = string_arg(args, 3, span)?.to_string();
-    ui_node(args, span, Some(ui_role("Label")), Some(color), "Custom")
+fn ui_raw_viewport_transfer(args: &[CtValue], span: Span) -> EvalResult {
+    let device = match int_arg(args, 0, span)? {
+        0 => "Phone", 1 => "Tablet", 2 => "Desktop",
+        _ => return Err(unsupported("invalid audited viewport device", span)),
+    };
+    Ok(structure("UIPreviewViewport", vec![
+        ("device", CtValue::Enum { type_name: "UIPreviewDevice".to_string(), variant: device.to_string(), args: Vec::new() }),
+        ("width", CtValue::Int(int_arg(args, 1, span)?)),
+        ("height", CtValue::Int(int_arg(args, 2, span)?)),
+        ("scale", CtValue::Int(int_arg(args, 3, span)?)),
+    ]))
 }
 
-fn ui_text(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?.to_string();
-    Ok(ui_node_value(
-        text.clone(),
-        text.chars().count() as f64,
-        1.0,
-        Some(ui_role("Label")),
-        None,
-        "Text",
-        Vec::new(),
-    ))
+fn ui_raw_request_transfer(args: &[CtValue], span: Span) -> EvalResult {
+    if !as_bool(one(args, 3, "core.ui.host", "__request_transfer", span)?, span)? {
+        return Err(unsupported("audited request carrier has no directory payload", span));
+    }
+    let kind = match int_arg(args, 0, span)? {
+        0 => "Open", 1 => "Save",
+        _ => return Err(unsupported("invalid audited request kind", span)),
+    };
+    Ok(structure("UIFileDialogRequest", vec![
+        ("kind", CtValue::Enum { type_name: "UIFileDialogKind".to_string(), variant: kind.to_string(), args: Vec::new() }),
+        ("title", CtValue::Str(string_arg(args, 1, span)?.to_owned())),
+        ("grant", one(args, 2, "core.ui.host", "__request_transfer", span)?.clone()),
+        ("initial_directory", CtValue::absent(Type::Named("UIGrantedPath".to_string()))),
+        ("filters", one(args, 4, "core.ui.host", "__request_transfer", span)?.clone()),
+        ("allow_multiple", CtValue::Bool(as_bool(one(args, 5, "core.ui.host", "__request_transfer", span)?, span)?)),
+    ]))
 }
+
+fn ui_raw_optional_slot_transfer(args: &[CtValue], span: Span, name: &str, type_name: &str) -> EvalResult {
+    let mut node = one(args, 0, "core.ui", "slot transfer", span)?.clone();
+    let CtValue::Struct { fields, .. } = &mut node else {
+        return Err(unsupported("UI slot transfer needs a retained node", span));
+    };
+    let slot = fields.iter_mut().find(|(field, _)| field == name)
+        .ok_or_else(|| unsupported("UI slot transfer has no named slot", span))?;
+    slot.1 = if as_bool(one(args, 2, "core.ui", "slot transfer", span)?, span)? {
+        CtValue::Present(Box::new(one(args, 1, "core.ui", "slot transfer", span)?.clone()))
+    } else {
+        CtValue::absent(Type::Named(type_name.to_string()))
+    };
+    Ok(node)
+}
+
+
+
+
 
 fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
     let label = string_arg(args, 0, span)?.to_string();
@@ -2276,583 +2075,43 @@ fn ui_button(args: &[CtValue], span: Span) -> EvalResult {
     ))
 }
 
-fn ui_box(args: &[CtValue], span: Span) -> EvalResult {
-    let children = match args.first() {
-        Some(CtValue::List(children)) => children.clone(),
-        _ => return Err(unsupported("core.ui.box() needs [UINode]", span)),
-    };
-    let mut width = 0.0_f64;
-    let mut height = 0.0_f64;
-    for child in &children {
-        width = width.max(as_float(
-            field(child, "UINode", "width")
-                .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
-            span,
-        )?);
-        height += as_float(
-            field(child, "UINode", "height")
-                .ok_or_else(|| unsupported("core.ui.box() needs UINode children", span))?,
-            span,
-        )?;
-    }
-    Ok(ui_node_value(
-        String::new(),
-        width,
-        height,
-        Some(ui_role("Container")),
-        None,
-        "Box",
-        children,
-    ))
-}
-
-fn ui_key_event(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(CtValue::Enum {
-        type_name: "InputEvent".to_string(),
-        variant: "Key".to_string(),
-        args: vec![(
-            Some("code".to_string()),
-            CtValue::Str(string_arg(args, 0, span)?.to_string()),
-        )],
-    })
-}
-
-fn ui_resize_event(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(CtValue::Enum {
-        type_name: "InputEvent".to_string(),
-        variant: "Resize".to_string(),
-        args: vec![(Some("size".to_string()), ui_size(args, span)?)],
-    })
-}
-
-fn tui_event(variant: &str, args: Vec<(Option<String>, CtValue)>) -> EvalResult {
-    Ok(CtValue::Enum {
-        type_name: "TUIEvent".to_string(),
-        variant: variant.to_string(),
-        args,
-    })
-}
-
-fn tui_enum(type_name: &str, variant: &str) -> EvalResult {
-    tui_event_for_type(type_name, variant, Vec::new())
-}
-
-fn tui_event_for_type(
-    type_name: &str,
-    variant: &str,
-    args: Vec<(Option<String>, CtValue)>,
-) -> EvalResult {
-    Ok(CtValue::Enum {
-        type_name: type_name.to_string(),
-        variant: variant.to_string(),
-        args,
-    })
-}
-
-fn bool_value(args: &[CtValue], index: usize, span: Span) -> Result<CtValue, Diagnostic> {
-    match args.get(index) {
-        Some(CtValue::Bool(value)) => Ok(CtValue::Bool(*value)),
-        _ => Err(unsupported("Core call expected a Bool argument", span)),
-    }
-}
-
-fn tui_key_event_modifiers(args: &[CtValue], span: Span) -> EvalResult {
-    tui_event(
-        "Key",
-        vec![
-            (Some("code".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string())),
-            (Some("modifiers".to_string()), CtValue::Int(int_arg(args, 1, span)?.clamp(0, 255))),
-        ],
-    )
-}
-
-fn tui_io_event(args: &[CtValue], span: Span) -> EvalResult {
-    let payload = match one(args, 1, "core.tui", "io_event", span)? {
-        CtValue::List(values) => CtValue::List(values.clone()),
-        CtValue::Bytes(values) => CtValue::Bytes(values.clone()),
-        _ => return Err(unsupported("core.tui.io_event() needs [Byte]", span)),
-    };
-    tui_event(
-        "IO",
-        vec![
-            (Some("channel".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string())),
-            (Some("payload".to_string()), payload),
-        ],
-    )
-}
-
-fn tui_timer_event(args: &[CtValue], span: Span) -> EvalResult {
-    tui_event(
-        "Timer",
-        vec![
-            (Some("id".to_string()), CtValue::Str(string_arg(args, 0, span)?.to_string())),
-            (Some("elapsed_ms".to_string()), CtValue::Int(int_arg(args, 1, span)?)),
-        ],
-    )
-}
-
-fn tui_color(args: &[CtValue], span: Span, variant: &str, arity: usize) -> EvalResult {
-    let values = (0..arity)
-        .map(|index| int_arg(args, index, span))
-        .collect::<Result<Vec<_>, Diagnostic>>()?;
-    let color = match (variant, values.as_slice()) {
-        ("ANSI16", [index]) => tui_kernel::color_ansi16(*index),
-        ("ANSI256", [index]) => tui_kernel::color_ansi256(*index),
-        ("RGB", [red, green, blue]) => tui_kernel::color_rgb(*red, *green, *blue),
-        _ => return Err(unsupported("malformed TUIColor value", span)),
-    };
-    Ok(tui_kernel_color_value(color))
-}
-fn tui_enum_parts<'a>(
-    value: &'a CtValue,
-    expected: &str,
-    span: Span,
-) -> Result<(&'a str, &'a [(Option<String>, CtValue)]), Diagnostic> {
-    let CtValue::Enum {
-        type_name,
-        variant,
-        args,
-    } = value
-    else {
-        return Err(unsupported(
-            &format!("core.tui expected {expected}"),
-            span,
-        ));
-    };
-    if type_name != expected {
-        return Err(unsupported(
-            &format!("core.tui expected {expected}"),
-            span,
-        ));
-    }
-    Ok((variant, args))
-}
-
-fn tui_kernel_profile(value: &CtValue, span: Span) -> Result<tui_kernel::ColorProfile, Diagnostic> {
-    let (variant, args) = tui_enum_parts(value, "TUIColorProfile", span)?;
-    if !args.is_empty() {
-        return Err(unsupported("core.tui color profile takes no arguments", span));
-    }
-    match variant {
-        "ANSI16" => Ok(tui_kernel::ColorProfile::Ansi16),
-        "ANSI256" => Ok(tui_kernel::ColorProfile::Ansi256),
-        "TrueColor" => Ok(tui_kernel::ColorProfile::TrueColor),
-        "ASCII" => Ok(tui_kernel::ColorProfile::Ascii),
-        _ => Err(unsupported("unknown TUIColorProfile variant", span)),
-    }
-}
-
-fn tui_kernel_color(value: &CtValue, span: Span) -> Result<tui_kernel::Color, Diagnostic> {
-    let (variant, args) = tui_enum_parts(value, "TUIColor", span)?;
-    let values = args
-        .iter()
-        .map(|(_, value)| as_int(value, span))
-        .collect::<Result<Vec<_>, _>>()?;
-    match (variant, values.as_slice()) {
-        ("ANSI16", [index]) => Ok(tui_kernel::color_ansi16(*index)),
-        ("ANSI256", [index]) => Ok(tui_kernel::color_ansi256(*index)),
-        ("RGB", [red, green, blue]) => Ok(tui_kernel::color_rgb(*red, *green, *blue)),
-        _ => Err(unsupported("malformed TUIColor value", span)),
-    }
-}
-
-fn tui_kernel_color_value(color: tui_kernel::Color) -> CtValue {
-    let (variant, values) = match color {
-        tui_kernel::Color::Ansi16(index) => ("ANSI16", vec![i64::from(index)]),
-        tui_kernel::Color::Ansi256(index) => ("ANSI256", vec![i64::from(index)]),
-        tui_kernel::Color::Rgb(red, green, blue) => (
-            "RGB",
-            vec![i64::from(red), i64::from(green), i64::from(blue)],
-        ),
-    };
-    CtValue::Enum {
-        type_name: "TUIColor".to_string(),
-        variant: variant.to_string(),
-        args: values
-            .into_iter()
-            .map(|value| (None, CtValue::Int(value)))
-            .collect(),
-    }
-}
-fn tui_kernel_bool_field(value: &CtValue, name: &str, span: Span) -> Result<bool, Diagnostic> {
-    match field(value, "TUICapabilities", name).or_else(|| field(value, "TUIStyle", name)) {
-        Some(CtValue::Bool(value)) => Ok(*value),
-        _ => Err(unsupported(
-            &format!("malformed core.tui boolean field `{name}`"),
-            span,
-        )),
-    }
-}
-
-fn tui_kernel_int_field(value: &CtValue, type_name: &str, name: &str, span: Span) -> Result<i64, Diagnostic> {
-    as_int(
-        field(value, type_name, name)
-            .ok_or_else(|| unsupported(&format!("malformed {type_name}.{name} value"), span))?,
-        span,
-    )
-}
-
-fn tui_kernel_capabilities(value: &CtValue, span: Span) -> Result<tui_kernel::Capabilities, Diagnostic> {
-    let profile = tui_kernel_profile(
-        field(value, "TUICapabilities", "profile")
-            .ok_or_else(|| unsupported("malformed TUICapabilities.profile value", span))?,
-        span,
-    )?;
-    Ok(tui_kernel::Capabilities {
-        profile,
-        color: tui_kernel_bool_field(value, "color", span)?,
-        unicode: tui_kernel_bool_field(value, "unicode", span)?,
-        mouse: tui_kernel_bool_field(value, "mouse", span)?,
-        resize: tui_kernel_bool_field(value, "resize", span)?,
-        clipboard: tui_kernel_bool_field(value, "clipboard", span)?,
-        width: tui_kernel_int_field(value, "TUICapabilities", "width", span)?
-            .max(1) as usize,
-        height: tui_kernel_int_field(value, "TUICapabilities", "height", span)?
-            .max(1) as usize,
-    })
-}
-
-fn tui_kernel_capabilities_value(capabilities: tui_kernel::Capabilities) -> CtValue {
-    let profile = match capabilities.profile {
-        tui_kernel::ColorProfile::Ansi16 => tui_profile("ANSI16"),
-        tui_kernel::ColorProfile::Ansi256 => tui_profile("ANSI256"),
-        tui_kernel::ColorProfile::TrueColor => tui_profile("TrueColor"),
-        tui_kernel::ColorProfile::Ascii => tui_profile("ASCII"),
-    };
-    structure(
-        "TUICapabilities",
-        vec![
-            ("profile", profile),
-            ("color", CtValue::Bool(capabilities.color)),
-            ("unicode", CtValue::Bool(capabilities.unicode)),
-            ("mouse", CtValue::Bool(capabilities.mouse)),
-            ("resize", CtValue::Bool(capabilities.resize)),
-            ("clipboard", CtValue::Bool(capabilities.clipboard)),
-            ("width", CtValue::Int(capabilities.width as i64)),
-            ("height", CtValue::Int(capabilities.height as i64)),
-        ],
-    )
-}
-
-fn tui_kernel_optional_color(
-    value: &CtValue,
-    name: &str,
-    span: Span,
-) -> Result<Option<tui_kernel::Color>, Diagnostic> {
-    match field(value, "TUIStyle", name) {
-        Some(CtValue::Present(inner)) => tui_kernel_color(inner, span).map(Some),
-        Some(CtValue::Failed(CtReport::Clean(_))) => Ok(None),
-        _ => Err(unsupported(
-            &format!("malformed TUIStyle.{name} value"),
-            span,
-        )),
-    }
-}
-
-fn tui_kernel_style(value: &CtValue, span: Span) -> Result<tui_kernel::Style, Diagnostic> {
-    Ok(tui_kernel::Style {
-        foreground: tui_kernel_optional_color(value, "foreground", span)?,
-        background: tui_kernel_optional_color(value, "background", span)?,
-        bold: tui_kernel_bool_field(value, "bold", span)?,
-        dim: tui_kernel_bool_field(value, "dim", span)?,
-        underline: tui_kernel_bool_field(value, "underline", span)?,
-    })
-}
-
-fn tui_kernel_constraint(
-    value: &CtValue,
-    span: Span,
-) -> Result<tui_kernel::Constraint, Diagnostic> {
-    let (variant, args) = tui_enum_parts(value, "TUIConstraint", span)?;
-    let amount = args
-        .first()
-        .map(|(_, value)| as_float(value, span))
-        .transpose()?
-        .unwrap_or(1.0);
-    match variant {
-        "Length" => Ok(tui_kernel::length(amount)),
-        "Min" => Ok(tui_kernel::min(amount)),
-        "Max" => Ok(tui_kernel::max(amount)),
-        "Percent" => Ok(tui_kernel::percent(amount)),
-        "Fill" => Ok(tui_kernel::fill(amount)),
-        _ => Err(unsupported("unknown TUIConstraint variant", span)),
-    }
-}
-
-fn tui_kernel_rect(value: &CtValue, span: Span) -> Result<tui_kernel::Rect, Diagnostic> {
-    Ok(tui_kernel::Rect {
-        x: as_float(
-            field(value, "Rect", "x")
-                .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
-            span,
-        )?,
-        y: as_float(
-            field(value, "Rect", "y")
-                .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
-            span,
-        )?,
-        width: as_float(
-            field(value, "Rect", "width")
-                .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
-            span,
-        )?,
-        height: as_float(
-            field(value, "Rect", "height")
-                .ok_or_else(|| unsupported("core.tui.layout() needs Rect", span))?,
-            span,
-        )?,
-    })
-}
-
-fn tui_profile(variant: &str) -> CtValue {
-    CtValue::Enum {
-        type_name: "TUIColorProfile".to_string(),
-        variant: variant.to_string(),
-        args: Vec::new(),
-    }
-}
-
-fn tui_capabilities() -> CtValue {
-    tui_kernel_capabilities_value(tui_kernel::capabilities(
-        tui_kernel::ColorProfile::Ascii,
-        80,
-        24,
-    ))
-}
-
-fn tui_constraint(args: &[CtValue], span: Span, variant: &str) -> EvalResult {
-    let amount = float_arg(args, 0, span)?;
-    let constraint = match variant {
-        "Length" => tui_kernel::length(amount),
-        "Min" => tui_kernel::min(amount),
-        "Max" => tui_kernel::max(amount),
-        "Percent" => tui_kernel::percent(amount),
-        "Fill" => tui_kernel::fill(amount),
-        _ => return Err(unsupported("unknown TUIConstraint variant", span)),
-    };
-    let amount = match constraint {
-        tui_kernel::Constraint::Length(value)
-        | tui_kernel::Constraint::Min(value)
-        | tui_kernel::Constraint::Max(value)
-        | tui_kernel::Constraint::Percent(value) => value,
-        tui_kernel::Constraint::Fill(weight) => f64::from(weight),
-    };
-    tui_event_for_type(
-        "TUIConstraint",
-        variant,
-        vec![(None, CtValue::Float(CtFloat::f64(amount)))],
-    )
-}
-
-fn tui_style_default() -> CtValue {
-    structure(
-        "TUIStyle",
-        vec![
-            (
-                "foreground",
-                CtValue::absent(Type::Named("TUIColor".to_string())),
-            ),
-            (
-                "background",
-                CtValue::absent(Type::Named("TUIColor".to_string())),
-            ),
-            ("bold", CtValue::Bool(false)),
-            ("dim", CtValue::Bool(false)),
-            ("underline", CtValue::Bool(false)),
-        ],
-    )
-}
-
-fn tui_style_color(args: &[CtValue], span: Span, background: bool) -> EvalResult {
-    let mut style = structure_fields(args, 0, "TUIStyle", span)?;
-    let color = tui_kernel_color(one(args, 1, "core.tui", "style_color", span)?, span)?;
-    let field_name = if background {
-        "background"
-    } else {
-        "foreground"
-    };
-    set_structure_field(
-        &mut style,
-        field_name,
-        CtValue::Present(Box::new(tui_kernel_color_value(color))),
-        span,
-    )?;
-    Ok(style)
-}
-
-fn tui_style_flag(args: &[CtValue], span: Span, field_name: &str) -> EvalResult {
-    let mut style = structure_fields(args, 0, "TUIStyle", span)?;
-    let value = bool_value(args, 1, span)?;
-    set_structure_field(&mut style, field_name, value, span)?;
-    Ok(style)
-}
-fn tui_style_text(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    let style = tui_kernel_style(one(args, 1, "core.tui", "style_text", span)?, span)?;
-    let capabilities =
-        tui_kernel_capabilities(one(args, 2, "core.tui", "style_text", span)?, span)?;
-    Ok(CtValue::Str(tui_kernel::style_text(
-        text,
-        &style,
-        &capabilities,
-    )))
-}
-
-fn structure_fields(
-    args: &[CtValue],
-    index: usize,
-    type_name: &str,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    match one(args, index, "core.tui", type_name, span)? {
-        CtValue::Struct {
-            type_name: actual,
-            fields,
-        } if actual == type_name => Ok(CtValue::Struct {
-            type_name: actual.clone(),
-            fields: fields.clone(),
-        }),
-        _ => Err(unsupported(
-            &format!("core.tui expected {type_name}"),
-            span,
-        )),
-    }
-}
-
-fn set_structure_field(
-    value: &mut CtValue,
-    wanted: &str,
-    replacement: CtValue,
-    span: Span,
-) -> Result<(), Diagnostic> {
-    let CtValue::Struct { fields, .. } = value else {
-        return Err(unsupported("core.tui expected a structure", span));
-    };
-    if let Some((_, field)) = fields.iter_mut().find(|(name, _)| name == wanted) {
-        *field = replacement;
-        Ok(())
-    } else {
-        Err(unsupported(
-            &format!("core.tui structure has no `{wanted}` field"),
-            span,
-        ))
-    }
-}
-
-fn tui_ascii(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    Ok(CtValue::Str(tui_kernel::ascii(text)))
-}
-
-fn tui_display_width(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    Ok(CtValue::Int(tui_kernel::display_width(text) as i64))
-}
-
-fn tui_rect_value(x: f64, y: f64, width: f64, height: f64) -> CtValue {
-    structure(
-        "Rect",
-        vec![
-            ("x", CtValue::Float(CtFloat::f64(x))),
-            ("y", CtValue::Float(CtFloat::f64(y))),
-            ("width", CtValue::Float(CtFloat::f64(width))),
-            ("height", CtValue::Float(CtFloat::f64(height))),
-        ],
-    )
-}
 
 
-fn tui_layout(args: &[CtValue], span: Span) -> EvalResult {
-    let rect = one(args, 0, "core.tui", "layout", span)?;
-    let direction = one(args, 1, "core.tui", "layout", span)?;
-    let constraints = match one(args, 2, "core.tui", "layout", span)? {
-        CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.layout() needs [TUIConstraint]", span)),
-    };
-    let direction = match tui_enum_parts(direction, "TUIDirection", span)?.0 {
-        "Horizontal" => tui_kernel::Direction::Horizontal,
-        "Vertical" => tui_kernel::Direction::Vertical,
-        _ => return Err(unsupported("unknown TUIDirection variant", span)),
-    };
-    let constraints = constraints
-        .iter()
-        .map(|constraint| tui_kernel_constraint(constraint, span))
-        .collect::<Result<Vec<_>, _>>()?;
-    let rects = tui_kernel::layout(tui_kernel_rect(rect, span)?, direction, &constraints);
-    Ok(CtValue::List(
-        rects
-            .into_iter()
-            .map(|rect| tui_rect_value(rect.x, rect.y, rect.width, rect.height))
-            .collect(),
-    ))
-}
 
-fn tui_list_state(selected: i64, offset: i64) -> CtValue {
-    structure(
-        "TUIListState",
-        vec![
-            ("selected", CtValue::Int(selected.max(0))),
-            ("offset", CtValue::Int(offset.max(0))),
-        ],
-    )
-}
 
-fn tui_list_state_update(args: &[CtValue], span: Span, selected: bool) -> EvalResult {
-    let state = structure_fields(args, 0, "TUIListState", span)?;
-    let value = int_arg(args, 1, span)?.max(0);
-    let field_name = if selected { "selected" } else { "offset" };
-    let mut updated = state;
-    set_structure_field(&mut updated, field_name, CtValue::Int(value), span)?;
-    Ok(updated)
-}
 
-fn tui_list(args: &[CtValue], span: Span) -> EvalResult {
-    let items = match one(args, 0, "core.tui", "list", span)? {
-        CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.list() needs [String]", span)),
-    };
-    let children = items
-        .iter()
-        .map(|item| {
-            let text = match item {
-                CtValue::Str(value) => value.clone(),
-                _ => return Err(unsupported("core.tui.list() needs [String]", span)),
-            };
-            ui_text(&[CtValue::Str(text)], span)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    ui_box(&[CtValue::List(children)], span)
-}
 
-fn tui_table(args: &[CtValue], span: Span) -> EvalResult {
-    let headers = match one(args, 0, "core.tui", "table", span)? {
-        CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.table() needs [String] headers", span)),
-    };
-    let rows = match one(args, 1, "core.tui", "table", span)? {
-        CtValue::List(values) => values,
-        _ => return Err(unsupported("core.tui.table() needs [[String]] rows", span)),
-    };
-    let mut lines = Vec::with_capacity(rows.len() + 1);
-    let join = |row: &[CtValue]| -> Result<CtValue, Diagnostic> {
-        let mut line = String::new();
-        for (index, value) in row.iter().enumerate() {
-            if index != 0 {
-                line.push_str(" | ");
-            }
-            line.push_str(string_arg(std::slice::from_ref(value), 0, span)?);
-        }
-        Ok(CtValue::Str(line))
-    };
-    lines.push(join(headers)?);
-    for row in rows {
-        let CtValue::List(values) = row else {
-            return Err(unsupported("core.tui.table() needs [[String]] rows", span));
-        };
-        lines.push(join(values)?);
-    }
-    tui_list(&[CtValue::List(lines)], span)
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
     let style = string_arg(args, 0, span)?;
@@ -2862,92 +2121,51 @@ fn io_style_force(args: &[CtValue], span: Span) -> EvalResult {
     )))
 }
 
-fn net_error(operation: &str, address: Option<String>, message: String) -> CtValue {
-    structure(
-        "NetError",
-        vec![
-            ("operation", CtValue::Str(operation.to_string())),
-            (
-                "address",
-                address.map_or(CtValue::absent(Type::String), |value| {
-                    CtValue::Present(Box::new(CtValue::Str(value)))
-                }),
-            ),
-            ("name", CtValue::absent(Type::String)),
-            ("message", CtValue::Str(message)),
-            ("os_code", CtValue::absent(Type::Int)),
-        ],
-    )
+
+// These private leaves transfer existing native carrier representation only.
+// IP parsing, scope/port validation and canonical formatting live in Jet.
+fn net_raw_carrier(member: &str, args: &[CtValue], span: Span) -> EvalResult {
+    match member {
+        "__ip_from_bytes" => Ok(structure(
+            "IPAddr",
+            vec![("bytes", CtValue::Bytes(as_bytes(one(args, 0, "core.net", member, span)?, span)?))],
+        )),
+        "__ip_bytes" => net_value_field(args, "IPAddr", "bytes", span),
+        "__ip_is_v4" => Ok(CtValue::Bool(net_raw_ip_len(one(args, 0, "core.net", member, span)?, span)? == 4)),
+        "__socket_from_parts" => Ok(structure(
+            "SocketAddr",
+            vec![
+                ("ip", one(args, 0, "core.net", member, span)?.clone()),
+                ("port", CtValue::Int(int_arg(args, 1, span)?)),
+                ("flow", CtValue::Int(int_arg(args, 2, span)?)),
+                ("scope", CtValue::Int(int_arg(args, 3, span)?)),
+            ],
+        )),
+        "__socket_ip" => net_value_field(args, "SocketAddr", "ip", span),
+        "__socket_port" => net_value_field(args, "SocketAddr", "port", span),
+        "__socket_scope" => {
+            let socket = one(args, 0, "core.net", member, span)?;
+            let ip = field(socket, "SocketAddr", "ip")
+                .ok_or_else(|| unsupported("malformed SocketAddr.ip carrier", span))?;
+            if net_raw_ip_len(ip, span)? == 4 {
+                Ok(CtValue::absent(Type::Int))
+            } else {
+                let value = field(socket, "SocketAddr", "scope")
+                    .ok_or_else(|| unsupported("malformed SocketAddr.scope carrier", span))?;
+                Ok(CtValue::Present(Box::new(value.clone())))
+            }
+        }
+        "__udp_packet_addr" => net_value_field(args, "UDPPacket", "addr", span),
+        _ => unreachable!("private net carrier dispatch"),
+    }
 }
 
-fn net_ip_addr(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    let input = text.to_string();
-    Ok(
-        match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
-            Ok(address) => CtValue::Present(Box::new(structure(
-                "IPAddr",
-                vec![("text", CtValue::Str(address.to_string()))],
-            ))),
-            Err(error) => CtValue::failed(Box::new(net_error(
-                "parse IP address",
-                Some(text.to_string()),
-                format!("invalid IP address `{text}`: {error}"),
-            ))),
-        },
-    )
-}
-
-fn net_ip_is_ipv4(args: &[CtValue], span: Span) -> EvalResult {
-    let text = match field(
-        one(args, 0, "core.net", "ip_is_ipv4", span)?,
-        "IPAddr",
-        "text",
-    ) {
-        Some(CtValue::Str(text)) => text,
-        _ => return Err(unsupported("malformed IPAddr value", span)),
-    };
-    let input = text.to_string();
-    let address = match super::net_pure_kernel::jet_net_pure_parse_ip(&input) {
-        Ok(address) => address,
-        Err(_) => return Ok(CtValue::Bool(false)),
-    };
-    Ok(CtValue::Bool(
-        super::net_pure_kernel::jet_net_pure_ip_is_ipv4(&address),
-    ))
-}
-
-fn net_socket_addr_parse(args: &[CtValue], span: Span) -> EvalResult {
-    let text = string_arg(args, 0, span)?;
-    let input = text.to_string();
-    Ok(
-        match super::net_pure_kernel::jet_net_pure_parse_socket_addr(&input) {
-            Ok(address) => CtValue::Present(Box::new(structure(
-                "SocketAddr",
-                vec![
-                    (
-                        "host",
-                        CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_host(&address)),
-                    ),
-                    (
-                        "port",
-                        CtValue::Int(super::net_pure_kernel::jet_net_pure_socket_port(&address)),
-                    ),
-                    (
-                        "text",
-                        CtValue::Str(super::net_pure_kernel::jet_net_pure_socket_to_string(
-                            &address,
-                        )),
-                    ),
-                ],
-            ))),
-            Err(error) => CtValue::failed(Box::new(net_error(
-                "parse socket address",
-                Some(text.to_string()),
-                format!("invalid socket address `{text}`: {error}"),
-            ))),
-        },
-    )
+fn net_raw_ip_len(ip: &CtValue, span: Span) -> Result<usize, Diagnostic> {
+    match field(ip, "IPAddr", "bytes") {
+        Some(CtValue::Bytes(bytes)) => Ok(bytes.len()),
+        Some(CtValue::List(bytes)) => Ok(bytes.len()),
+        _ => Err(unsupported("malformed IPAddr.bytes carrier", span)),
+    }
 }
 
 fn net_value_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -> EvalResult {
@@ -2966,12 +2184,6 @@ fn net_string_field(args: &[CtValue], type_name: &str, name: &str, span: Span) -
     }
 }
 
-fn net_udp_packet_data(args: &[CtValue], span: Span) -> EvalResult {
-    match net_value_field(args, "UDPPacket", "data", span)? {
-        CtValue::Bytes(value) => Ok(CtValue::Str(String::from_utf8_lossy(&value).into_owned())),
-        _ => Err(unsupported("malformed UDPPacket.data value", span)),
-    }
-}
 
 fn crypto_secret(type_name: &str, bytes: Vec<u8>) -> CtValue {
     structure(type_name, vec![("bytes", CtValue::Bytes(bytes))])
@@ -4036,6 +3248,22 @@ fn datetime_value(seconds: i64, nanos: u32, leap_second: bool) -> CtValue {
     )
 }
 
+pub fn dyn_datetime_value(value: jet_foundation::Dyn::DynDateTime) -> CtValue {
+    structure(
+        "ZonedDateTime",
+        vec![
+            ("instant", datetime_value(value.unix_seconds, value.nanos, value.leap_second)),
+            ("zone", structure(
+                "Zone",
+                vec![
+                    ("name", CtValue::Str(value.offset_text())),
+                    ("offset", CtValue::Int(i64::from(value.offset_seconds))),
+                ],
+            )),
+        ],
+    )
+}
+
 fn instant_start_ns(value: &CtValue, span: Span) -> Result<i64, Diagnostic> {
     int_field(value, "Instant", "start_ns", span)
 }
@@ -4182,73 +3410,6 @@ fn local_time_parse(args: &[CtValue], span: Span) -> EvalResult {
     })
 }
 
-fn measurement(args: &[CtValue], span: Span) -> EvalResult {
-    let (value, uncertainty) = super::measurement_kernel::jet_measurement_kernel_new(
-        float_arg(args, 0, span)?,
-        float_arg(args, 1, span)?,
-    );
-    Ok(structure(
-        "Measurement",
-        vec![
-            ("value", CtValue::Float(CtFloat::f64(value))),
-            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
-        ],
-    ))
-}
-
-fn measurement_arithmetic(left: &CtValue, method: &str, right: &CtValue, span: Span) -> EvalResult {
-    let left_value = match field(left, "Measurement", "value") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.value value", span)),
-    };
-    let left_uncertainty = match field(left, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
-    };
-    let right_value = match field(right, "Measurement", "value") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.value value", span)),
-    };
-    let right_uncertainty = match field(right, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
-    };
-    let left = (left_value, left_uncertainty);
-    let right = (right_value, right_uncertainty);
-    let (value, uncertainty) = match method {
-        "add" => super::measurement_kernel::jet_measurement_kernel_add(left, right),
-        "sub" => super::measurement_kernel::jet_measurement_kernel_sub(left, right),
-        "mul" => super::measurement_kernel::jet_measurement_kernel_mul(left, right),
-        "div" => super::measurement_kernel::jet_measurement_kernel_div(left, right),
-        _ => unreachable!(),
-    };
-    Ok(structure(
-        "Measurement",
-        vec![
-            ("value", CtValue::Float(CtFloat::f64(value))),
-            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
-        ],
-    ))
-}
-fn measurement_sqrt(value: &CtValue, span: Span) -> EvalResult {
-    let measured = match field(value, "Measurement", "value") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.value value", span)),
-    };
-    let uncertainty = match field(value, "Measurement", "uncertainty") {
-        Some(CtValue::Float(value)) => value.as_f64(),
-        _ => return Err(unsupported("malformed Measurement.uncertainty value", span)),
-    };
-    let (value, uncertainty) =
-        super::measurement_kernel::jet_measurement_kernel_sqrt((measured, uncertainty));
-    Ok(structure(
-        "Measurement",
-        vec![
-            ("value", CtValue::Float(CtFloat::f64(value))),
-            ("uncertainty", CtValue::Float(CtFloat::f64(uncertainty))),
-        ],
-    ))
-}
 
 // ── XML canonicalization ───────────────────────────────────────────────────
 
@@ -4317,302 +3478,40 @@ fn xml_shape_error(reason: &str) -> CtValue {
 
 // Email uses the shared Prelude kernel through `EmailAdapter`.
 
-// ── D-APPROX1=A: CtValue adapters for the shared Prelude kernel ──────────────
 
-fn hll_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetHyperLogLog, Diagnostic> {
-    let CtValue::List(registers) = field(value, "HyperLogLog", "registers")
-        .ok_or_else(|| unsupported("malformed HyperLogLog.registers value", span))?
-    else {
-        return Err(unsupported("malformed HyperLogLog.registers value", span));
-    };
-    let registers = registers
-        .iter()
-        .map(|value| match value {
-            CtValue::Int(value) if (0..=255).contains(value) => Ok(*value as u8),
-            _ => Err(unsupported("malformed HyperLogLog register", span)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetHyperLogLog::from_registers(
-        registers,
-    ))
-}
-
-fn hll_value(sketch: &super::sketch_kernel::JetHyperLogLog) -> CtValue {
-    structure(
-        "HyperLogLog",
-        vec![(
-            "registers",
-            CtValue::List(
-                sketch
-                    .registers()
-                    .into_iter()
-                    .map(|value| CtValue::Int(value as i64))
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn hll_new() -> CtValue {
-    hll_value(&super::sketch_kernel::JetHyperLogLog::new())
-}
-
-fn hll_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = hll_from_value(recv, span)?;
-    sketch.add(string_arg(args, 0, span)?);
-    Ok(hll_value(&sketch))
-}
-
-fn hll_count(recv: &CtValue, span: Span) -> EvalResult {
-    Ok(CtValue::Int(hll_from_value(recv, span)?.count()))
-}
-
-fn tdigest_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetTDigest, Diagnostic> {
-    let CtValue::List(items) = field(value, "TDigest", "centroids")
-        .ok_or_else(|| unsupported("malformed TDigest.centroids value", span))?
-    else {
-        return Err(unsupported("malformed TDigest.centroids value", span));
-    };
-    let centroids = items
-        .iter()
-        .map(|item| match item {
-            CtValue::List(pair) if pair.len() == 2 => {
-                Ok((as_float(&pair[0], span)?, as_float(&pair[1], span)?))
-            }
-            _ => Err(unsupported("malformed TDigest centroid", span)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetTDigest::from_centroids(centroids))
-}
-
-fn tdigest_value(sketch: &super::sketch_kernel::JetTDigest) -> CtValue {
-    structure(
-        "TDigest",
-        vec![(
-            "centroids",
-            CtValue::List(
-                sketch
-                    .centroids()
-                    .into_iter()
-                    .map(|(mean, weight)| {
-                        CtValue::List(vec![
-                            CtValue::Float(CtFloat::f64(mean)),
-                            CtValue::Float(CtFloat::f64(weight)),
-                        ])
-                    })
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn tdigest_new() -> CtValue {
-    tdigest_value(&super::sketch_kernel::JetTDigest::new())
-}
-
-fn tdigest_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = tdigest_from_value(recv, span)?;
-    sketch.add(float_arg(args, 0, span)?);
-    Ok(tdigest_value(&sketch))
-}
-
-fn tdigest_quantile(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let sketch = tdigest_from_value(recv, span)?;
-    Ok(CtValue::Float(CtFloat::f64(
-        sketch.quantile(float_arg(args, 0, span)?),
-    )))
-}
-
-fn cms_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetCountMinSketch, Diagnostic> {
-    let CtValue::List(rows) = field(value, "CountMinSketch", "rows")
-        .ok_or_else(|| unsupported("malformed CountMinSketch.rows value", span))?
-    else {
-        return Err(unsupported("malformed CountMinSketch.rows value", span));
-    };
-    if rows.len() != 4 {
-        return Err(unsupported("malformed CountMinSketch.rows value", span));
-    }
-    let mut out = [[0; super::sketch_kernel::JET_CMS_COLS]; 4];
-    for (row_index, row) in rows.iter().enumerate() {
-        let CtValue::List(columns) = row else {
-            return Err(unsupported("malformed CountMinSketch row", span));
-        };
-        if columns.len() != super::sketch_kernel::JET_CMS_COLS {
-            return Err(unsupported("malformed CountMinSketch row", span));
-        }
-        for (column_index, cell) in columns.iter().enumerate() {
-            let CtValue::Int(value) = cell else {
-                return Err(unsupported("malformed CountMinSketch cell", span));
-            };
-            if !(0..=u32::MAX as i64).contains(value) {
-                return Err(unsupported("malformed CountMinSketch cell", span));
-            }
-            out[row_index][column_index] = *value as u32;
-        }
-    }
-    Ok(super::sketch_kernel::JetCountMinSketch::from_rows(out))
-}
-
-fn cms_value(sketch: &super::sketch_kernel::JetCountMinSketch) -> CtValue {
-    structure(
-        "CountMinSketch",
-        vec![(
-            "rows",
-            CtValue::List(
-                sketch
-                    .rows()
-                    .into_iter()
-                    .map(|row| {
-                        CtValue::List(
-                            row.into_iter()
-                                .map(|value| CtValue::Int(value as i64))
-                                .collect(),
-                        )
-                    })
-                    .collect(),
-            ),
-        )],
-    )
-}
-
-fn cms_new() -> CtValue {
-    cms_value(&super::sketch_kernel::JetCountMinSketch::new())
-}
-
-fn cms_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = cms_from_value(recv, span)?;
-    sketch.add(string_arg(args, 0, span)?);
-    Ok(cms_value(&sketch))
-}
-
-fn cms_count(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let sketch = cms_from_value(recv, span)?;
-    Ok(CtValue::Int(sketch.count(string_arg(args, 0, span)?)))
-}
-
-fn reservoir_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::sketch_kernel::JetReservoirSampler, Diagnostic> {
-    let capacity = int_field(value, "ReservoirSampler", "capacity", span)?;
-    let count = int_field(value, "ReservoirSampler", "count", span)?;
-    let rng = int_field(value, "ReservoirSampler", "rng", span)?;
-    let CtValue::List(items) = value_field(value, "ReservoirSampler", "reservoir", span)? else {
-        return Err(unsupported(
-            "malformed ReservoirSampler.reservoir value",
-            span,
-        ));
-    };
-    let reservoir = items
-        .into_iter()
-        .map(|item| match item {
-            CtValue::Str(item) => Ok(item),
-            _ => Err(unsupported("malformed ReservoirSampler item", span)),
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(super::sketch_kernel::JetReservoirSampler::from_parts(
-        capacity as usize,
-        reservoir,
-        count as u64,
-        rng as u64,
-    ))
-}
-
-fn reservoir_value(sketch: &super::sketch_kernel::JetReservoirSampler) -> CtValue {
-    let (capacity, reservoir, count, rng) = sketch.parts();
-    structure(
-        "ReservoirSampler",
-        vec![
-            ("capacity", CtValue::Int(capacity as i64)),
-            ("count", CtValue::Int(count as i64)),
-            ("rng", CtValue::Int(rng as i64)),
-            (
-                "reservoir",
-                CtValue::List(reservoir.into_iter().map(CtValue::Str).collect()),
-            ),
-        ],
-    )
-}
-
-fn reservoir_new(args: &[CtValue], span: Span) -> EvalResult {
-    Ok(reservoir_value(
-        &super::sketch_kernel::JetReservoirSampler::new(int_arg(args, 0, span)?),
-    ))
-}
-
-fn reservoir_add(recv: &CtValue, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    let sketch = reservoir_from_value(recv, span)?;
-    sketch.add(string_arg(args, 0, span)?.to_string());
-    Ok(reservoir_value(&sketch))
-}
-
-fn reservoir_sample(recv: &CtValue, span: Span) -> EvalResult {
-    Ok(CtValue::List(
-        reservoir_from_value(recv, span)?
-            .sample()
-            .into_iter()
-            .map(CtValue::Str)
-            .collect(),
-    ))
-}
-
-// ── D-SOLVER-LIB1=A: CtValue adapter for the shared Prelude kernel ──────────
-
-fn solver_from_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<super::solver_kernel::jet_std::Solver, Diagnostic> {
-    Ok(super::solver_kernel::jet_std::Solver {
-        seed: int_field(value, crate::Syntax::SOLVER_TYPE, "seed", span)?,
-        checked: int_field(value, crate::Syntax::SOLVER_TYPE, "checked", span)?,
-        failures: int_field(value, crate::Syntax::SOLVER_TYPE, "failures", span)?,
-    })
-}
-
-fn solver_value(solver: super::solver_kernel::jet_std::Solver) -> CtValue {
-    structure(
-        crate::Syntax::SOLVER_TYPE,
-        vec![
-            ("seed", CtValue::Int(solver.seed)),
-            ("checked", CtValue::Int(solver.checked)),
-            ("failures", CtValue::Int(solver.failures)),
-        ],
-    )
-}
-
-fn solver_require_update(recv: &CtValue, args: &[CtValue], span: Span) -> EvalResult {
-    let mut solver = solver_from_value(recv, span)?;
-    let ok = as_bool(one(args, 0, "Solver", "require", span)?, span)?;
-    super::solver_kernel::jet_solver_require(&mut solver, ok);
-    Ok(solver_value(solver))
-}
-
-fn solver_failure_count(recv: &CtValue, span: Span) -> EvalResult {
-    let solver = solver_from_value(recv, span)?;
-    Ok(CtValue::Int(
-        super::solver_kernel::jet_solver_failure_count(&solver),
-    ))
-}
-
-fn solver_status(recv: &CtValue, span: Span) -> EvalResult {
-    let solver = solver_from_value(recv, span)?;
-    Ok(CtValue::Str(super::solver_kernel::jet_solver_status(
-        &solver,
-    )))
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ui_raw_style_uses_the_canonical_ct_tuple_carrier() {
+        let mut args = vec![
+            CtValue::Str("jet".to_string()),
+            CtValue::Float(CtFloat::f64(3.0)),
+            CtValue::Float(CtFloat::f64(1.0)),
+            CtValue::Int(2), CtValue::Int(1), CtValue::List(Vec::new()),
+            CtValue::Bool(false), CtValue::Str(String::new()), CtValue::Int(63),
+            CtValue::Bool(true),
+            CtValue::Int(3), CtValue::Int(795192), CtValue::Int(1),
+            CtValue::Int(2), CtValue::Int(7),
+        ];
+        let node = ui_raw_node_transfer(&args, Span::new(0, 0)).expect("audited UI transfer");
+        let CtValue::Struct { fields, .. } = node else { panic!("UI node carrier") };
+        assert_eq!(fields.iter().find(|(name, _)| name == "style").unwrap().1,
+            CtValue::Present(Box::new(structure("tuple", vec![
+                ("0", CtValue::Int(3)),
+                ("1", CtValue::Int(795192)),
+                ("2", CtValue::Int(1)),
+                ("3", CtValue::Int(2)),
+                ("4", CtValue::Int(7)),
+            ]))));
+        args[9] = CtValue::Bool(false);
+        let node = ui_raw_node_transfer(&args, Span::new(0, 0)).expect("absent UI style");
+        let CtValue::Struct { fields, .. } = node else { panic!("UI node carrier") };
+        assert!(matches!(&fields.iter().find(|(name, _)| name == "style").unwrap().1,
+            CtValue::Failed(CtReport::Clean(ty)) if matches!(ty.as_ref(), Type::Tuple(fields) if fields.len() == 5)));
+    }
 
     #[test]
     fn xml_canonical_rejects_internal_bytes_with_aot_shape_reason() {
@@ -4632,7 +3531,7 @@ mod tests {
             ],
         );
         let actual = xml_canonical(&[CtValue::Bytes(vec![1, 2, 3]), options], Span::new(0, 0))
-            .expect("invalid DataTree is a user Result error");
+            .expect("invalid Dyn is a user Result error");
         assert_eq!(
             actual,
             CtValue::failed(Box::new(xml_shape_error(
@@ -4673,7 +3572,7 @@ mod tests {
             Some("DeliveryReceipt(id=d-1, state=Accepted, attempts=1, retention_until=20, deadline=30, key=order-1, duplicate=false, authority=orders, generation=2, signature=sig)".to_string())
         );
         assert_eq!(
-            receipt.to_json(),
+            receipt.to_json().unwrap(),
             "{\"id\":\"d-1\",\"state\":\"Accepted\",\"attempts\":1,\"retention_until\":20,\"deadline\":30,\"idempotency_key\":\"order-1\",\"duplicate\":false,\"authority\":\"orders\",\"generation\":2,\"signature\":\"sig\"}"
         );
         let error = CtValue::Enum {

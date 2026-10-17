@@ -1,0 +1,20 @@
+// `use base.[names]` names members of every file of the dependency package:
+// Kind and Span come from Types.jet, kind_value from Sub/Ops.jet.
+use base.[Span, Kind, Note, Shape, MARKS, make_span, kind_value, same_shape, LIMIT]
+
+fn run() {
+    span :: make_span(1, 4)
+    print(span.width())
+    print(kind_value(Kind.Beta(3)))
+    print(LIMIT)
+    literal :: Span{start: 2, end: 9}
+    print(literal.end)
+    print(tally([Int]{1, 2}))
+    print(wide_label(make_span(0, 5)) ?? "narrow")
+    note := Note{span: Val(make_span(1, 2))}
+    shift_note(&note, 3)
+    if note.span == .Val(moved) -> print(moved.start)
+    print(twin_shapes(Shape.Dot))
+    print(MARKS.len())
+    print(same_shape(Shape.Boxed{bounds: Span{start: 0, end: 2}}, Shape.Boxed{bounds: Span{start: 0, end: 2}}))
+}

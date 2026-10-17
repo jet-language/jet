@@ -1,0 +1,77 @@
+use core.email as email
+use core.text.parse as text_parse
+
+fn test_repeat(word: String, count: Int) -> String {
+    bytes := [U8]{}
+    raw :: word.bytes()
+    loop _i in 0..<count { loop b in raw -> &bytes.push(b) }
+    String.from_bytes(bytes) ?? panic("repeat UTF-8")
+}
+fn test_wire(message: email.Message) -> String {
+    String.from_bytes(email.serialize(message) ?? panic("serialize")) ?? panic("wire UTF-8")
+}
+fn test_headers_fit(wire: String, include_folded: Bool) {
+    bytes :: wire.bytes()
+    start := 0
+    loop i in 0..<bytes.len() {
+        if bytes[i] == (U8{10}) {
+            line_bytes := [U8]{}
+            loop j in start..i -> &line_bytes.push(bytes[j])
+            line :: String.from_bytes(line_bytes) ?? panic("line UTF-8")
+            if line.contains(":") || (include_folded && line.starts_with(" ")) {
+                assert(i - start + 1 <= 998, "original MAX_HEADER_BYTES split_inclusive bound")
+            }
+            start = i + 1
+        }
+    }
+    if start < bytes.len() {
+        line_bytes := [U8]{}
+        loop j in start..<bytes.len() -> &line_bytes.push(bytes[j])
+        line :: String.from_bytes(line_bytes) ?? panic("final line UTF-8")
+        if line.contains(":") || (include_folded && line.starts_with(" ")) {
+            assert(bytes.len() - start <= 998, "original final line bound")
+        }
+    }
+}
+
+#Test("core_email_headers_and_wire_bounds_are_prospective") {
+    quoted :: email.address("\"Doe, \\\"Ada\\\"\" <ada@example.net>") ?? panic("quoted")
+    _quoted_local :: email.address("\"a@b\"@example.net") ?? panic("quoted local rejected")
+    unicode_name :: test_repeat("界", 120) + " <mara@example.com>"
+    from :: email.address(unicode_name) ?? panic("unicode from")
+    message :: email.message(from, [quoted], [email.Address]{}, test_repeat("界", 120), "plain", HTML{""}, [email.Attachment]{}) ?? panic("message")
+    wire :: test_wire(message)
+    assert(wire.contains("\"Doe, \\\"Ada\\\"\" <ada@example.net>"), "quoted display wire")
+    loop word in text_parse.split_ws(wire) {
+        if word.starts_with("=?UTF-8?B?") -> assert(word.bytes().len() <= 75, "encoded word byte bound")
+    }
+    test_headers_fit(wire, true)
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    recipient :: email.address("recipient@example.com") ?? panic("recipient")
+    at_body_limit :: test_repeat("x", 1048576)
+    _at_body_limit :: email.message(sender, [recipient], [email.Address]{}, "subject", at_body_limit, HTML{""}, [email.Attachment]{}) ?? panic("at body limit rejected")
+    over_body_limit :: test_repeat("x", 1048577)
+    if email.message(sender, [recipient], [email.Address]{}, "subject", over_body_limit, HTML{""}, [email.Attachment]{}) == {
+        .Ok(_) -> panic("over body limit accepted")
+        .Err(_) -> { _ :: 0 }
+    }
+    max_subject :: test_repeat("s", 998 - "Subject: ".bytes().len() - 2)
+    _max_subject :: email.message(sender, [recipient], [email.Address]{}, max_subject, "body", HTML{""}, [email.Attachment]{}) ?? panic("maximum physical subject rejected")
+    if email.message(sender, [recipient], [email.Address]{}, max_subject + "s", "body", HTML{""}, [email.Attachment]{}) == {
+        .Ok(_) -> panic("over physical subject accepted")
+        .Err(_) -> { _ :: 0 }
+    }
+    _filename900 :: email.attachment(test_repeat("a", 900) + ".txt", "application/octet-stream", [U8]{}) ?? panic("900-byte filename rejected")
+    if email.attachment(test_repeat("a", 960) + ".txt", "application/octet-stream", [U8]{}) == {
+        .Ok(_) -> panic("960-byte filename accepted")
+        .Err(_) -> { _ :: 0 }
+    }
+    tiny :: email.attachment("tiny.bin", "application/octet-stream", [U8]{0}) ?? panic("tiny")
+    attachments := [email.Attachment]{}
+    loop _i in 0..<65 -> &attachments.push(tiny)
+    to :: email.address("to@example.com") ?? panic("to")
+    if email.message(sender, [to], [email.Address]{}, "subject", "body", HTML{""}, attachments) == {
+        .Ok(_) -> panic("MAX_ATTACHMENTS+1 accepted")
+        .Err(_) -> { _ :: 0 }
+    }
+}

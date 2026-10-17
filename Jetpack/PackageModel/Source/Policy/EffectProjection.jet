@@ -12,11 +12,11 @@ EFFECT_AUTHORITY_PACKAGE_GRANTS :: prep { "package.jet authority.grants" }
 EFFECT_STATUS_ACTION :: prep { "build.effects" }
 
 // One checked program's application-boundary view.
-pub struct EffectProjection {
-    pub required_effects: [String]
-    pub granted_effects: [String]
-    pub denied_effects: [String]
-    pub authority: String
+struct EffectProjection {
+    required_effects: [String]
+    granted_effects: [String]
+    denied_effects: [String]
+    authority: String
 
     // The beginner basics with no sema requirement yet (Rust `Default`).
     fn default() -> EffectProjection Never! {
@@ -47,18 +47,18 @@ pub struct EffectProjection {
 // The entry file of a program run without any Package manifest: its E1803
 // repair names the exact `--allow` invocation (D-SCRIPT-CONFIRM1=A) and
 // inserts the leading inline Package carrier (D-ECO-INLINEPACKAGE1).
-pub struct ScriptEntry {
-    pub path: String
-    pub source: String
+struct ScriptEntry {
+    path: String
+    source: String
     // The `jet` command that ran the script (`run`, `build`).
-    pub command: String
+    command: String
 }
 
 // Project the application policy without changing the sema effect fact. A
 // manifest-less program, and a manifest that writes no `authority.holds`
 // (#3718), receive D-AUTH-AMBIENT1's beginner basics; written holds replace
 // that default with exactly the written policy.
-pub fn pkg_project_application_effects(required_effects: [String], manifest: PackageFacts?) -> EffectProjection Never! {
+fn pkg_project_application_effects(required_effects: [String], manifest: PackageFacts?) -> EffectProjection Never! {
     facts :: manifest ?? return pkg_effect_floor_projection(required_effects, ApplicationAuthority.ambient_basics())
     if facts.authority.holds.allow == None && facts.authority.holds.deny == None {
         return pkg_effect_floor_projection(required_effects, ApplicationAuthority.package_default())
@@ -76,7 +76,7 @@ fn pkg_effect_floor_projection(required_effects: [String], floor: ApplicationAut
 }
 
 // The projection of the exact selected entry, not the per-package aggregate.
-pub fn pkg_project_program_effects(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> EffectProjection Never! {
+fn pkg_project_program_effects(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> EffectProjection Never! {
     pkg_project_application_effects(pkg_program_effects(program, summaries, default_entry), manifest)
 }
 
@@ -96,7 +96,7 @@ fn pkg_effect_names_or_none(effects: [String]) -> String Never! {
 // undecided effects leads its Fix with the exact `--allow` command and also
 // carries the inline Package block as a needs-review edit (D-RIGHTS-DIAG1=B);
 // a denial is never repaired by a grant.
-pub fn pkg_application_policy_diagnostic(projection: EffectProjection, denied: [String], script: ScriptEntry?) -> Diagnostic Never! {
+fn pkg_application_policy_diagnostic(projection: EffectProjection, denied: [String], script: ScriptEntry?) -> Diagnostic Never! {
     missing :: projection.undecided()
     authority :: projection.application_authority()
     denied_required :: authority.denied_required_effects()
@@ -170,36 +170,36 @@ fn pkg_render_effect_line(effects: [String]) -> String Never! {
     "effects: {effects.join(", ")}"
 }
 
-fn pkg_effect_texts(effects: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop effect_name in effects -> &items.push(DataTree.Text(effect_name))
-    DataTree.Array(items)
+fn pkg_effect_texts(effects: [String]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop effect_name in effects -> &items.push(Dyn.Text(effect_name))
+    Dyn.Array(items)
 }
 
-fn pkg_render_effect_json(effects: [String]) -> String Never! {
+fn pkg_render_effect_json(effects: [String]) -> String ReportError! {
     StatusEnvelope.new(EFFECT_STATUS_ACTION, true).with_field("effects", pkg_effect_texts(effects)).json()
 }
 
-pub fn pkg_effect_summary_line_for_program(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String Never! {
+fn pkg_effect_summary_line_for_program(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String Never! {
     pkg_render_effect_line(pkg_program_effects(program, summaries, default_entry))
 }
 
-pub fn pkg_effect_summary_json_for_program(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String Never! {
+fn pkg_effect_summary_json_for_program(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String) -> String ReportError! {
     pkg_render_effect_json(pkg_program_effects(program, summaries, default_entry))
 }
 
 // Human application-boundary summary with explicit policy roles.
-pub fn pkg_effect_summary_line_for_program_with_authority(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String Never! {
+fn pkg_effect_summary_line_for_program_with_authority(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String Never! {
     pkg_render_effect_projection_line(pkg_project_program_effects(program, summaries, default_entry, manifest))
 }
 
-pub fn pkg_render_effect_projection_line(projection: EffectProjection) -> String Never! {
+fn pkg_render_effect_projection_line(projection: EffectProjection) -> String Never! {
     "required effects: {pkg_effect_names_or_none(projection.required_effects)}; granted effects: {pkg_effect_names_or_none(projection.granted_effects)}; denied effects: {pkg_effect_names_or_none(projection.denied_effects)}; authority: {projection.authority}"
 }
 
 // The JSON object embedded in semantic-index, dossier, and Canvas documents,
 // so the four roles stay one shared projection.
-pub fn pkg_render_effect_projection_object(projection: EffectProjection) -> String Never! {
+fn pkg_render_effect_projection_object(projection: EffectProjection) -> String Never! {
     required :: pkg_render_quoted_list(projection.required_effects)
     granted :: pkg_render_quoted_list(projection.granted_effects)
     denied :: pkg_render_quoted_list(projection.denied_effects)
@@ -214,28 +214,28 @@ fn pkg_render_quoted_list(values: [String]) -> String Never! {
 
 // Machine application-boundary summary. The legacy `effects` field stays for
 // existing consumers; the role fields are the canonical view.
-pub fn pkg_effect_summary_json_for_program_with_authority(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String Never! {
+fn pkg_effect_summary_json_for_program_with_authority(program: EffectBudgetProgram, summaries: [String: PackageEffectSummary], default_entry: String, manifest: PackageFacts?) -> String Never! {
     pkg_render_effect_projection_json(pkg_project_program_effects(program, summaries, default_entry, manifest))
 }
 
-pub fn pkg_render_effect_projection_json(projection: EffectProjection) -> String Never! {
+fn pkg_render_effect_projection_json(projection: EffectProjection) -> String Never! {
     required :: pkg_effect_texts(projection.required_effects)
     StatusEnvelope.new(EFFECT_STATUS_ACTION, true)
         .with_field("effects", required)
         .with_field("required_effects", required)
         .with_field("granted_effects", pkg_effect_texts(projection.granted_effects))
         .with_field("denied_effects", pkg_effect_texts(projection.denied_effects))
-        .with_field("authority", DataTree.Text(~projection.authority))
+        .with_field("authority", Dyn.Text(projection.authority.copy()))
         .json()
 }
 
 // Human build status: effects reachable through statically known calls from
 // the selected entry. Open function values stay conservative in enforcement
 // but do not invent every ambient effect here.
-pub fn pkg_effect_summary_line_for_entry(summaries: [String: PackageEffectSummary], entry: String) -> String Never! {
+fn pkg_effect_summary_line_for_entry(summaries: [String: PackageEffectSummary], entry: String) -> String Never! {
     pkg_render_effect_line(pkg_entry_effects(summaries, entry))
 }
 
-pub fn pkg_effect_summary_json_for_entry(summaries: [String: PackageEffectSummary], entry: String) -> String Never! {
+fn pkg_effect_summary_json_for_entry(summaries: [String: PackageEffectSummary], entry: String) -> String ReportError! {
     pkg_render_effect_json(pkg_entry_effects(summaries, entry))
 }

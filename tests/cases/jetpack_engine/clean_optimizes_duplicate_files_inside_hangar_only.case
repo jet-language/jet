@@ -1,0 +1,44 @@
+# HAND-PORT tests/jetpack_engine.rs:3352-3383 clean_optimizes_duplicate_files_inside_hangar_only
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+refused: hangar-fixture-backdate
+# Verbatim original setup and every predicate awaiting the named seam:
+# #[test]
+# fn clean_optimizes_duplicate_files_inside_hangar_only() {
+#     let root = Scratch::new("root");
+#     let first = write_hangar_meta(&root.path, "dup-a", "dupa", "1.0", Some(now_secs())).0;
+#     let second = write_hangar_meta(&root.path, "dup-b", "dupb", "1.0", Some(now_secs())).0;
+#     fs::write(first.join("blob"), "same payload").unwrap();
+#     fs::write(second.join("blob"), "same payload").unwrap();
+# 
+#     let out = jetpack()
+#         .args(["hangar", "clean", "--no-color", "--yes"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         out.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&out.stderr)
+#     );
+#     let stderr = String::from_utf8_lossy(&out.stderr);
+#     assert!(
+#         stderr.contains("optimized duplicate Jet-owned files: saved"),
+#         "stderr: {stderr}"
+#     );
+#     assert_eq!(
+#         fs::read_to_string(first.join("blob")).unwrap(),
+#         "same payload"
+#     );
+#     assert_eq!(
+#         fs::read_to_string(second.join("blob")).unwrap(),
+#         "same payload"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step: jetpack hangar clean --no-color --yes
+exit: 0
+stderr: ~ "optimized duplicate Jet-owned files: saved" # original contains predicate
+

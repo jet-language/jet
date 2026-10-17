@@ -1,0 +1,22 @@
+# PORT tests/repl.rs:2762-2795, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24]\r" after 200ms
+pty-send: "\r" after 200ms
+pty-send: "j" after 150ms
+pty-send: "q" after 120ms
+pty-send: ":quit\r" after 120ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "25 rows folded" # Original substring predicate rs2780.
+stdout: ~ "idx" # Original substring predicate rs2784.
+stdout: ~ "value" # Original substring predicate rs2784.
+stdout: ~ "j/k" # Original substring predicate rs2788.
+stdout: ~ "q" # Original substring predicate rs2788.
+stdout: ~ " 10 │ 10" # Original substring predicate rs2792.

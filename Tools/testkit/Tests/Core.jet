@@ -1,0 +1,160 @@
+use core.files as files
+use core.sys as sys
+use core.process as process
+
+fn kit_test_unblessed() -> KitBless {
+    KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+}
+
+#Test("report statuses have distinct exit codes") {
+    passed :: KitCaseResult{suite: "golden", case: "a", tier: "o0", status: "PASS", detail: "", exit: 0}
+    failed :: KitCaseResult{suite: "golden", case: "b", tier: "o0", status: "FAIL", detail: "", exit: 1}
+    refused :: KitCaseResult{suite: "golden", case: "c", tier: "o0", status: "REFUSED", detail: "missing public CLI", exit: -1}
+    assert_eq(kit_report_exit_code([passed]), 0)
+    assert_eq(kit_report_exit_code([passed, failed]), 1)
+    assert_eq(kit_report_exit_code([failed, refused]), 2)
+    known :: KitCaseResult{suite: "cases", case: "d", tier: "-", status: "KNOWN-FAILING", detail: "#4865", exit: 7}
+    unexpected :: KitCaseResult{suite: "golden", case: "d", tier: "o1", status: "UNEXPECTED-PASS", detail: "#4865", exit: 0}
+    assert_eq(kit_report_exit_code([known]), 0)
+    assert_eq(kit_report_exit_code([known, unexpected]), 1)
+    assert_eq(kit_report_exit_code([known, refused]), 2)
+    counts :: kit_report_counts([known, unexpected], ["golden", "cases"])
+    assert(counts.contains("\"KNOWN-FAILING\":1"))
+    assert(counts.contains("\"UNEXPECTED-PASS\":1"))
+    results := [KitCaseResult]{known, unexpected}
+    kit_golden_mark_tier_splits(&results)
+    assert(results[0].detail.starts_with("tier-split:"))
+    assert(results[1].detail.starts_with("tier-split:"))
+}
+
+#Test("bless-all reason and shard guards refuse unsafe writes") {
+    all :: KitBless{ids: [], all: true, reason: "", allow_shrink: [], first_tier: true}
+    named :: KitBless{ids: ["a"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert(kit_expect_bless_error(all, false) != "")
+    assert(kit_expect_bless_error(named, true) != "")
+    assert_eq(kit_expect_bless_error(named, false), "")
+}
+
+#Test("exact stream comparison preserves terminal newline and bounded diff") {
+    mismatch :: kit_expect_exact("case", "snapshot", Val("a\n"), "a", kit_test_unblessed(), false)
+    assert_eq(mismatch.status, "FAIL")
+    assert(mismatch.diff.starts_with("--- expected/snapshot\n+++ actual\n"))
+    assert(kit_expect_unified("snapshot", "x\n".repeat(100), "y\n".repeat(100)).split("\n").len() <= 41)
+}
+
+#Test("diagnostic shrink counts only renderer headers") {
+    assert_eq(kit_expect_diagnostics("Error [E0001]: x\n Why: Error [E0002]\nWarning [L0001]: y\nStop [E3003]: z\n"), 3)
+}
+
+fn kit_test_core_scratch(label: String) -> String {
+    path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-core-{process.current_pid()}-{label}")
+    files.create_dir_all(path) ?? panic("core scratch")
+    path
+}
+
+#Test("named blessing writes only its selected snapshot and shrink is explicit") {
+    root :: kit_test_core_scratch("bless")
+    first :: files.join(root, "first.out")
+    second :: files.join(root, "second.out")
+    kit_exec_write(first, "old first\n")
+    kit_exec_write(second, "old second\n")
+    bless :: KitBless{ids: ["first"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert_eq(kit_expect_exact("first", first, Val("old first\n"), "new first\n", bless, false).status, "PASS")
+    assert_eq(kit_expect_exact("second", second, Val("old second\n"), "new second\n", bless, false).status, "FAIL")
+    assert_eq(files.read(first) ?? panic("first"), "new first\n")
+    assert_eq(files.read(second) ?? panic("second"), "old second\n")
+    older :: "Error [E0001]: first\nError [E0002]: second\n"
+    newer :: "Error [E0001]: first\n"
+    kit_exec_write(first, older)
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, bless, (text: String) -[]> kit_expect_diagnostics(text)).status, "REFUSED")
+    assert_eq(files.read(first) ?? panic("first"), older)
+    allowed :: KitBless{ids: ["first"], all: false, reason: "", allow_shrink: ["first"], first_tier: true}
+    assert_eq(kit_expect_exact_with_count("first", first, Val(older), newer, allowed, (text: String) -[]> kit_expect_diagnostics(text)).status, "PASS")
+    assert_eq(files.read(first) ?? panic("first"), newer)
+    files.remove_all(root) ?? panic("remove bless scratch")
+}
+
+#Test("shards are disjoint and complete in sorted corpus order") {
+    ids :: ["a", "b", "c", "d", "e"]
+    all := [String]{}
+    loop shard in 1..3 {
+        options := kit_exec_defaults()
+        options.shard_index = shard
+        options.shard_count = 3
+        selection :: kit_exec_select_ids(ids, options)
+        assert_eq(selection.error, "")
+        loop id in selection.ids {
+            assert(!kit_expect_named(all, id))
+            &all.push(id)
+        }
+    }
+    &all.sort()
+    assert_eq(all, ids)
+}
+
+#Test("unknown and duplicate exact case lists are refused") {
+    root :: kit_test_core_scratch("selection")
+    path :: files.join(root, "cases.txt")
+    options := kit_exec_defaults()
+    options.cases = path
+    kit_exec_write(path, "a\na\n")
+    assert(kit_exec_select_ids(["a", "b"], options).error.contains("duplicate"))
+    kit_exec_write(path, "not-known\n")
+    assert(kit_exec_select_ids(["a", "b"], options).error.contains("unknown"))
+    files.remove_all(root) ?? panic("remove selection scratch")
+}
+
+#Test("process failures distinguish ICE timeout signal and spawn errors") {
+    ice :: KitRun{stdout: "", stderr: "", code: 101, signal: None, timed_out: false, error: ""}
+    timeout :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(9), timed_out: true, error: ""}
+    signal :: KitRun{stdout: "", stderr: "", code: -1, signal: Val(15), timed_out: false, error: ""}
+    spawn :: kit_exec_failed("executable unavailable")
+    assert_eq((kit_exec_process_failure(ice) ?? panic("ICE")).status, "ERROR")
+    assert_eq((kit_exec_process_failure(timeout) ?? panic("timeout")).status, "TIMEOUT")
+    assert_eq((kit_exec_process_failure(signal) ?? panic("signal")).status, "ERROR")
+    assert_eq((kit_exec_process_failure(spawn) ?? panic("spawn")).status, "ERROR")
+}
+
+#Test("argv0 replaces only the first usage prefix") {
+    assert_eq(kit_expect_argv0("Usage: binary\nUsage: binary\n", "binary", "source"), "Usage: source\nUsage: binary\n")
+}
+
+#Test("fixture tree preserves executable modes through recursive state staging") {
+    root :: kit_test_core_scratch("fixture-modes")
+    fixture :: files.join(root, "fixture")
+    work :: files.join(root, "work")
+    executable :: files.join(fixture, "bin/tool")
+    state_executable :: files.join(fixture, "state/hooks/tool")
+    data :: files.join(fixture, "data.txt")
+    kit_exec_write(executable, "#!/bin/sh\nprintf 'fixture executable\\n'\n")
+    kit_exec_write(state_executable, "#!/bin/sh\nprintf 'fixture executable\\n'\n")
+    kit_exec_write(data, "fixture data\n")
+    files.chmod(executable, 493) ?? panic("chmod fixture executable: {err}")
+    files.chmod(state_executable, 448) ?? panic("chmod state executable: {err}")
+    files.chmod(data, 416) ?? panic("chmod fixture data: {err}")
+    kit_exec_copy_tree(fixture, work, true)
+    copied :: files.join(work, "bin/tool")
+    copied_state :: files.join(work, ".jet/hooks/tool")
+    assert_eq((files.stat(copied) ?? panic("stat copied executable: {err}")).mode % 512, 493)
+    assert_eq((files.stat(copied_state) ?? panic("stat copied state executable: {err}")).mode % 512, 448)
+    assert_eq((files.stat(files.join(work, "data.txt")) ?? panic("stat copied data: {err}")).mode % 512, 416)
+    assert_eq(files.read(files.join(work, "data.txt")) ?? panic("read copied data: {err}"), "fixture data\n")
+    env :: kit_test_golden_env(root)
+    loop path in [copied, copied_state] {
+        result :: kit_exec_invoke(env, [path], work, root, "")
+        assert_eq(result.error, "")
+        assert_eq(result.code, 0)
+        assert_eq(result.stdout, "fixture executable\n")
+        assert_eq(result.stderr, "")
+    }
+    files.remove_all(root) ?? panic("remove fixture modes scratch")
+}
+
+#Test("timeout options refuse invalid or out-of-range durations before discovery") {
+    assert(kit_parse_options(["golden", "--timeout", "invalid"]).error != "")
+    assert(kit_parse_options(["golden", "--timeout", "0"]).error != "")
+    assert(kit_parse_options(["golden", "--timeout", "-1"]).error != "")
+    options :: kit_parse_options(["golden", "--timeout", "9223372036854775807"])
+    assert_eq(options.error, "")
+    assert_eq(kit_execute_suites(options, ""), 2)
+}

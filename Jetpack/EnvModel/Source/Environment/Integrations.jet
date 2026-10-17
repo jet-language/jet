@@ -9,10 +9,10 @@
 // represents `env.platform.android(...)` as a method call on the field path
 // `env.platform`, while bare calls are `Expr.Call`. Both spellings are the same
 // integration surface and share one lowering path.
-pub fn envmodel_qualified_call_name(expr: Expr) -> String? Never! {
+fn envmodel_qualified_call_name(expr: Expr) -> String? Never! {
     if expr == {
         .Call(call) -> Val(call.name)
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> {
             path :: envmodel_expression_path(receiver) ?? return None
             Val("{path}.{method}")
         }
@@ -35,7 +35,7 @@ fn envmodel_expression_path(expr: Expr) -> String? Never! {
 // integration is a typed projection into ordinary environment facts, not a
 // second package resolver, lock, effect system, or activation engine.
 #Comparable
-pub enum IntegrationKind {
+enum IntegrationKind {
     Android
     Apple
     Certificates
@@ -101,23 +101,23 @@ struct IntegrationTaskContract {
 // One lowered integration import. Secret-bearing inputs are represented by
 // names only; values never enter this record, fingerprints, dossiers, image
 // layers, or logs.
-pub struct EnvironmentIntegration {
-    pub kind: IntegrationKind{IntegrationKind.Android}
-    pub name: String{""}
-    pub preset: String{""}
-    pub options: [String: String]{[String: String]{}}
-    pub packages: [String]{[String]{}}
-    pub files: [ManagedFile]{[ManagedFile]{}}
+struct EnvironmentIntegration {
+    kind: IntegrationKind{IntegrationKind.Android}
+    name: String{""}
+    preset: String{""}
+    options: [String: String]{[String: String]{}}
+    packages: [String]{[String]{}}
+    files: [ManagedFile]{[ManagedFile]{}}
     // Existing lifecycle/job facts selected by the preset. These are names
     // only; activation still belongs to the ordinary environment lifecycle.
-    pub tasks: [String]{[String]{}}
+    tasks: [String]{[String]{}}
     // Provider authorities used by package and host facts. This is metadata,
     // not a second resolver.
-    pub providers: [String]{[String]{}}
-    pub host_checks: [String]{[String]{}}
-    pub secrets: [String]{[String]{}}
-    pub grants: [String]{[String]{}}
-    pub losses: [String]{[String]{}}
+    providers: [String]{[String]{}}
+    host_checks: [String]{[String]{}}
+    secrets: [String]{[String]{}}
+    grants: [String]{[String]{}}
+    losses: [String]{[String]{}}
 
     fn fingerprint(self) -> String Never! {
         lines := [String]{"jet-environment-integration-v1\nkind={self.kind.as_str()}\nname={self.name}\npreset={self.preset}\n"}
@@ -148,30 +148,30 @@ pub struct EnvironmentIntegration {
 // The non-package portion of integration lowering. These facts stay in the
 // ordinary environment plan so trust, inspection, and activation all consume
 // one projection instead of treating integrations as report-only annotations.
-pub struct IntegrationTaskFact {
-    pub name: String
-    pub integration: IntegrationKind
-    pub packages: [String]{[String]{}}
-    pub secrets: [String]{[String]{}}
-    pub providers: [String]{[String]{}}
-    pub host_checks: [String]{[String]{}}
-    pub grants: [String]{[String]{}}
+struct IntegrationTaskFact {
+    name: String
+    integration: IntegrationKind
+    packages: [String]{[String]{}}
+    secrets: [String]{[String]{}}
+    providers: [String]{[String]{}}
+    host_checks: [String]{[String]{}}
+    grants: [String]{[String]{}}
 
     fn has_empty_field(self) -> Bool Never! {
         self.name.trim() == "" || envmodel_any_blank(self.providers) || envmodel_any_blank(self.secrets) || envmodel_any_blank(self.host_checks) || envmodel_any_blank(self.grants)
     }
 }
 
-pub struct IntegrationFactProjection {
-    pub tasks: [String]{[String]{}}
+struct IntegrationFactProjection {
+    tasks: [String]{[String]{}}
     // Typed task contracts. `tasks` is only the stable disclosure projection;
     // realization consumes these records and their ordinary package,
     // provider, host, and grant facts.
-    pub task_facts: [IntegrationTaskFact]{[IntegrationTaskFact]{}}
-    pub providers: [String]{[String]{}}
-    pub host_checks: [String]{[String]{}}
-    pub grants: [String]{[String]{}}
-    pub losses: [String]{[String]{}}
+    task_facts: [IntegrationTaskFact]{[IntegrationTaskFact]{}}
+    providers: [String]{[String]{}}
+    host_checks: [String]{[String]{}}
+    grants: [String]{[String]{}}
+    losses: [String]{[String]{}}
 
     fn fingerprint(self) -> String Never! {
         lines := [String]{}

@@ -31,11 +31,9 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. `~`
-    /// (D-SHAPE-COPY1=A copy sigil) has no arm here — a parameter/argument
-    /// convention position doesn't take a copy sigil (D-SHAPE-PLACE1, place
-    /// precedence at any position, is a separate pending ballot). Returns
-    /// `None` when no sigil is present.
+    /// D-MEM1: consume a leading capability sigil `&`/`^` → Write/Move. A copy
+    /// is the method `x.copy()` (D-COPY-WORD1=A), never a convention sigil.
+    /// Returns `None` when no sigil is present.
     /// Position-disambiguated: infix `^` (power, D-EXPOP1) and `&` (BitAnd) are
     /// parsed inside expressions and never reach the start of a parameter or
     /// argument, or a type. `*` (raw) is D-CAP9, handled apart.

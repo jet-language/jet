@@ -1,0 +1,109 @@
+// Compiler-private port of crates/jet-cli/src/OutputProfile.rs.
+// Text facts are owned, valid UTF-8 octets supplied by the caller, not a
+// String view or a terminal/environment probe. The process boundary owns
+// their real projection. Width is the canonical x64 usize domain (U64).
+use jet_foundation.[foundation_read_bytes_scalar_at]
+
+enum JetCLIColorRequest {
+    Auto
+    Always
+    Never
+}
+struct JetCLIOutputFacts {
+    tty: Bool
+    term: [U8]?
+    no_color: Bool
+    force_color: Bool
+    requested_color: JetCLIColorRequest
+    json: Bool
+    width: U64?
+    unicode: Bool
+}
+enum JetCLIOutputChannel {
+    HumanStdout
+    HumanStderr
+    MachineStdout
+    Hidden
+}
+enum JetCLIOutputKind {
+    Renderable
+    Status
+    Log
+    Progress
+    Machine
+}
+#Error
+enum JetCLIOutputProfileError {
+    InvalidColorRequest(value: [U8])
+    InvalidTerm(value: [U8])
+    InvalidWidth(value: U64)
+}
+struct JetCLIOutputProfile {
+    width: U64
+    ansi_enabled: Bool
+    unicode_enabled: Bool
+    progress_enabled: Bool
+    human_enabled: Bool
+    machine_enabled: Bool
+}
+
+JET_CLI_COLOR_AUTO_BYTES :: prep { [U8]{97, 117, 116, 111} }
+JET_CLI_COLOR_ALWAYS_BYTES :: prep { [U8]{97, 108, 119, 97, 121, 115} }
+JET_CLI_COLOR_NEVER_BYTES :: prep { [U8]{110, 101, 118, 101, 114} }
+JET_CLI_TERM_DUMB_BYTES :: prep { [U8]{100, 117, 109, 98} }
+
+fn jet_cli_color_request(value: [U8]) -> JetCLIColorRequest JetCLIOutputProfileError! {
+    if value == JET_CLI_COLOR_AUTO_BYTES -> return Ok(.Auto)
+    if value == JET_CLI_COLOR_ALWAYS_BYTES -> return Ok(.Always)
+    if value == JET_CLI_COLOR_NEVER_BYTES -> return Ok(.Never)
+    Err(.InvalidColorRequest{value: value.copy()})
+}
+
+// Rust char::is_control is Cc, not the diagnostic terminal-escape policy:
+// U+2028 and U+2029 are not controls here. No scalar String/list is created.
+fn jet_cli_output_term_control(term: [U8]) -> Bool Never! {
+    index := 0
+    loop index < term.len() {
+        scalar :: foundation_read_bytes_scalar_at(term, index)
+        code :: scalar.codepoint
+        if code < 32 || (code >= 127 && code <= 159) -> return true
+        index = scalar.next_byte
+    }
+    false
+}
+
+fn jet_cli_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile JetCLIOutputProfileError! {
+    dumb := false
+    if facts.term == .Val(term) {
+        if term.len() == 0 || jet_cli_output_term_control(term) -> return Err(.InvalidTerm{value: term.copy()})
+        dumb = term == JET_CLI_TERM_DUMB_BYTES
+    }
+    width :: facts.width ?? U64{80}
+    if width == (U64{0}) -> return Err(.InvalidWidth{value: width})
+    human :: !facts.json
+    ansi :: if facts.requested_color == {
+        .Always -> true
+        .Never -> false
+        .Auto -> if facts.no_color -> false else if facts.force_color -> true else -> facts.tty
+    }
+    Ok(JetCLIOutputProfile{
+        width: width,
+        ansi_enabled: human && ansi,
+        unicode_enabled: human && facts.tty && facts.unicode && !dumb,
+        progress_enabled: human && facts.tty && !dumb,
+        human_enabled: human,
+        machine_enabled: facts.json,
+    })
+}
+
+fn jet_cli_output_channel(profile: JetCLIOutputProfile, kind: JetCLIOutputKind) -> JetCLIOutputChannel Never! {
+    if profile.machine_enabled {
+        if kind == .Machine -> return .MachineStdout
+        return .Hidden
+    }
+    if kind == {
+        .Renderable -> .HumanStdout
+        .Status | .Log | .Progress -> .HumanStderr
+        .Machine -> .Hidden
+    }
+}

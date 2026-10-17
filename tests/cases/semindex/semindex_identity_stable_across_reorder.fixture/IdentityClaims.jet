@@ -1,0 +1,54 @@
+// Original semantic-index comparison algorithms over real CLI-produced documents.
+use core.files as files
+use core.encoding.json as json
+
+fn s5f_member(value: Dyn, name: String) -> Dyn {
+    if value == .Object(fields) -> return fields.get(name) ?? panic("missing JSON member {name}")
+    panic("expected JSON object for {name}")
+}
+fn s5f_array(value: Dyn) -> [Dyn] {
+    if value == .Array(values) -> return values
+    panic("expected JSON array")
+}
+fn s5f_text(value: Dyn) -> String {
+    if value == .Text(text) -> return text
+    panic("expected JSON text")
+}
+fn s5f_index(path: String) -> Dyn {
+    raw :: files.read(path) ?? panic("read captured CLI document {path}")
+    document :: json.parse(raw) ?? panic("parse captured CLI document {path}")
+    s5f_member(document, "semindex")
+}
+fn s5f_sorted_identities(index: Dyn) -> [String] {
+    identities := [String]{}
+    loop definition in s5f_array(s5f_member(index, "definitions")) -> &identities.push(s5f_text(s5f_member(definition, "identity")))
+    &identities.sort()
+    identities
+}
+fn s5f_original_identity_assertions() {
+    before :: s5f_sorted_identities(s5f_index("before.json"))
+    after :: s5f_sorted_identities(s5f_index("after.json"))
+    assert_eq(before, after, "original sorted identity arrays differ: before={before}; after={after}")
+    module_found := false
+    fn_found := false
+    type_found := false
+    field_found := false
+    variant_found := false
+    method_found := false
+    loop id in before {
+        if id.contains("module:") -> module_found = true
+        if id.contains("fn:") -> fn_found = true
+        if id.contains("type:") && id.contains("Point") -> type_found = true
+        if id.contains("field:") && id.contains("Point.x") -> field_found = true
+        if id.contains("variant:") && id.contains("Light.Red") -> variant_found = true
+        if id.contains("method:") && id.contains("Point.sum") -> method_found = true
+    }
+    assert(module_found, "original module identity missing: {before}")
+    assert(fn_found, "original function identity missing: {before}")
+    assert(type_found, "original Point type identity missing: {before}")
+    assert(field_found, "original Point.x field identity missing: {before}")
+    assert(variant_found, "original Light.Red variant identity missing: {before}")
+    assert(method_found, "original Point.sum method identity missing: {before}")
+}
+
+#Test("original sorted semantic identities and kind witnesses") { s5f_original_identity_assertions() }

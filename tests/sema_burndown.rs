@@ -51,7 +51,7 @@ fn run() {{
     print(Int.from_u8(window[0]))
     loop line in mapped.lines() {{
         print(Int.from_u8(line[0]))
-        print(String.from_bytes(~line) ?? panic("utf8"))
+        print(String.from_bytes(line.copy()) ?? panic("utf8"))
     }}
 }}
 "#, path.display());

@@ -5,7 +5,7 @@
 // line-reading helpers are present.
 impl JetLoopSource for JetFileReader {
     fn jet_loop_source(
-        mut self,
+        self,
         source_kind: JetLoopSourceKind,
         by_value: bool,
     ) -> Box<dyn Iterator<Item = JetLoopAny>> {
@@ -15,7 +15,7 @@ impl JetLoopSource for JetFileReader {
                     jet_loop_source_error(source_kind);
                 }
                 Box::new(std::iter::from_fn(move || {
-                    match jet_std_file_reader_read_line(&mut self) {
+                    match jet_std_file_reader_read_line(&self) {
                         Ok(value) => value.map(|value| Box::new(value) as JetLoopAny),
                         Err(error) => jet_panic("<core.prelude>", 0, &error.jet_show()),
                     }

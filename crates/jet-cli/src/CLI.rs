@@ -75,12 +75,12 @@ pub struct ReservedEntry {
     pub note: &'static str,
 }
 
-/// D-MEM1 / D-SHAPE-COPY1=A / D-CONST-RETIRE1: the five teaching-reserved
+/// D-MEM1 / D-SHAPE-COPY1=A / D-COPY-WORD1=A / D-CONST-RETIRE1: the five teaching-reserved
 /// words — real identifiers a user cannot bind because the lexer/parser
 /// recognizes them only to redirect to their current spelling. Never in
 /// `crate::Syntax::JET_KEYWORD_LIST`.
 pub const TEACHING_RESERVED: &[ReservedEntry] = &[
-    ReservedEntry { spelling: crate::Syntax::KW_COPY, kind: "teaching-reserved word", note: "retired; write `~value` instead (E0991)" },
+    ReservedEntry { spelling: crate::Syntax::KW_COPY, kind: "teaching-reserved word", note: "retired; write `value.copy()` instead (E0991)" },
     ReservedEntry { spelling: crate::Syntax::KW_MUTATE, kind: "teaching-reserved word", note: "retired; write `&value` instead (E0056)" },
     ReservedEntry { spelling: crate::Syntax::KW_MOVE, kind: "teaching-reserved word", note: "retired as a bare prefix; write `^value` instead (E0057); `.take(n)` stays a valid method" },
     ReservedEntry { spelling: crate::Syntax::KW_CONST, kind: "teaching-reserved word", note: "retired; write `@name` instead (E0374)" },
@@ -110,9 +110,9 @@ pub const RESERVED_SIGILS: &[ReservedEntry] = &[
         note: "take/move ownership (D-MEM1)",
     },
     ReservedEntry {
-        spelling: crate::Syntax::SIGIL_COPY,
-        kind: "sigil",
-        note: "produce an owned copy (D-SHAPE-COPY1)",
+        spelling: crate::Syntax::SIGIL_COPY_RETIRED,
+        kind: "retired sigil",
+        note: "retired as a prefix copy; write `value.copy()` instead (E0941, D-COPY-WORD1)",
     },
     ReservedEntry {
         spelling: crate::Syntax::COMPTIME_MARK,
@@ -398,6 +398,11 @@ pub fn moved_command(name: &str) -> Option<(&'static CommandSpec, &'static Neste
         return None;
     }
     if COMMANDS.iter().any(|command| command.name == name) {
+        return None;
+    }
+    // D-ONCE-RETIRE1=C: a retired bare word hard-errors with its teaching fix;
+    // it never also teaches a grouped move (`report` is retired, not `gc report`).
+    if is_retired_root(name) {
         return None;
     }
     if command_groups().any(|group| {
@@ -718,13 +723,13 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--route", help: "With new: Alias for `--path`" },
     FlagSpec { long: "--model", help: "With new: Model name recorded beside the route source" },
     FlagSpec { long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel" },
-    FlagSpec { long: "--check", help: "With fmt/learn: Check without changing files (CI gate)" },
+    FlagSpec { long: "--check", help: "With fmt: Check without changing files (CI gate)" },
     FlagSpec { long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language" },
     FlagSpec { long: "--restore-role-files", help: "With init: Restore the exact pre-package.jet role files" },
     FlagSpec { long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file" },
-    FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest ratified spelling" },
+    FlagSpec { long: "--simplify", help: "With fmt: Rewrite to the simplest canonical spelling" },
     FlagSpec { long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)" },
-    FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`" },
+    FlagSpec { long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `.copy()`" },
     FlagSpec { long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery" },
     FlagSpec { long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin" },
     FlagSpec { long: "--small", help: "With build/run/jobs: Favor a smaller binary" },
@@ -772,13 +777,11 @@ const BASE_FLAGS: &[FlagSpec] = &[
     FlagSpec { long: "--keep", help: "With try: Keep a clean speculative edit" },
     FlagSpec { long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>" },
     FlagSpec { long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving" },
-    FlagSpec { long: "--try-anyway", help: "With dev: Interpret past unsupported features (no guarantees)" },
-    FlagSpec { long: "--interpret", help: "With dev/jobs: Force the tier-0 TIR interpreter" },
-    FlagSpec { long: "--trace-tiers", help: "With run/dev: Print per-function Cranelift vs interpreter tier selection; with test: print AOT marker" },
+    FlagSpec { long: "--try-anyway", help: "With dev --canvas: Evaluate past unsupported features (no guarantees)" },
     FlagSpec { long: "--restart", help: "With dev: Always rerun from scratch after a save" },
     FlagSpec { long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes" },
     FlagSpec { long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path" },
-    FlagSpec { long: "--watch", help: "With run/dev/learn/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once" },
+    FlagSpec { long: "--watch", help: "With run/dev/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once" },
     FlagSpec { long: "--graph", help: "With jobs: Show the checked job dependency graph" },
     FlagSpec { long: "--status", help: "With jobs: Show fresh or stale status for declared jobs" },
     FlagSpec { long: "--explain", help: "With jobs/package: Explain dependencies, phases, cache identity, and admission facts" },
@@ -1055,8 +1058,7 @@ impl HelpOrder {
     }
 }
 
-/// Every `COMMANDS` row in `order`. Names compare case-insensitively, so the
-/// capitalized `Fold` sits between `flash` and `fuzz`.
+/// Every `COMMANDS` row in `order`. Names compare ASCII-case-insensitively.
 pub fn commands_in(order: HelpOrder) -> Vec<&'static CommandSpec> {
     let by_name = |left: &CommandSpec, right: &CommandSpec| {
         left.name
@@ -2039,6 +2041,86 @@ mod tests {
     use super::*;
 
     #[test]
+    fn inspect_threads_preserves_targets_and_options_on_every_plane() {
+        for plane in InspectPlane::ALL {
+            for options in [vec!["--threads", "1"], vec!["--threads=1"]] {
+                for target_first in [false, true] {
+                    let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                    if target_first {
+                        args.push("input.jet".to_string());
+                    }
+                    args.extend(options.iter().map(|word| word.to_string()));
+                    if !target_first {
+                        args.push("input.jet".to_string());
+                    }
+                    let request = parse_inspect_args(&args).unwrap();
+                    assert_eq!(request.plane, plane);
+                    assert_eq!(request.scope, InspectScope::Target("input.jet".to_string()));
+                    assert_eq!(request.options, options);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inspect_joined_values_do_not_consume_the_target_on_every_plane() {
+        for plane in InspectPlane::ALL {
+            for flag in [
+                "--before", "--color", "--facts", "--gate", "--kind", "--output",
+                "--profile", "--scope", "--set", "--target", "--topic",
+            ] {
+                for options in [vec![flag.to_string(), "value".to_string()], vec![format!("{flag}=value")]] {
+                    let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                    args.extend(options.iter().cloned());
+                    args.push("input.jet".to_string());
+                    let request = parse_inspect_args(&args).unwrap();
+                    assert_eq!(request.plane, plane);
+                    assert_eq!(request.scope, InspectScope::Target("input.jet".to_string()));
+                    assert_eq!(request.options, options);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inspect_threads_preserves_live_replay_and_scope_errors_on_every_plane() {
+        for plane in InspectPlane::ALL {
+            let scopes: [(&[&str], InspectScope); 4] = [
+                (&["--live", "23"], InspectScope::Live(23)),
+                (&["--live=23"], InspectScope::Live(23)),
+                (&["--replay", "saved.json"], InspectScope::Replay("saved.json".to_string())),
+                (&["--replay=saved.json"], InspectScope::Replay("saved.json".to_string())),
+            ];
+            for (words, scope) in scopes {
+                let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                args.extend(words.iter().map(|word| word.to_string()));
+                args.extend(["--threads".to_string(), "1".to_string()]);
+                let request = parse_inspect_args(&args).unwrap();
+                assert_eq!(request.scope, scope);
+                assert_eq!(request.options, args[2..]);
+            }
+            for (words, expected) in [
+                (
+                    vec!["first.jet", "--threads", "1", "second.jet"],
+                    "inspect accepts at most one file or package target",
+                ),
+                (
+                    vec!["input.jet", "--threads=1", "--live", "23"],
+                    "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope",
+                ),
+                (
+                    vec!["--live", "23", "--threads", "1", "--replay", "saved.json"],
+                    "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`",
+                ),
+            ] {
+                let mut args = vec!["inspect".to_string(), plane.name().to_string()];
+                args.extend(words.iter().map(|word| word.to_string()));
+                assert_eq!(parse_inspect_args(&args).unwrap_err(), expected);
+            }
+        }
+    }
+
+    #[test]
     fn job_argv_forwards_every_word_after_the_job_name() {
         let split = |words: &[&str]| {
             let mut args = words.iter().map(|word| word.to_string()).collect::<Vec<_>>();
@@ -2046,8 +2128,8 @@ mod tests {
             args
         };
         assert_eq!(
-            split(&["--interpret", "-p", "api", "web", "--port", "3000"]),
-            ["--interpret", "-p", "api", "web", "--", "--port", "3000"]
+            split(&["--release", "-p", "api", "web", "--port", "3000"]),
+            ["--release", "-p", "api", "web", "--", "--port", "3000"]
         );
         assert_eq!(
             split(&["web", "--", "--port", "--", "x"]),
@@ -2262,7 +2344,21 @@ mod tests {
                     assert!(moved_command(action.name).is_none());
                     continue;
                 }
-                if action.also_canonical_top_level {
+                // D-ONCE-RETIRE1=C: a retired bare word hard-errors; it never
+                // teaches a grouped move and is never canonical.
+                if is_retired_root(action.name) {
+                    assert!(
+                        !action.also_canonical_top_level,
+                        "retired {} claims canonical",
+                        action.name
+                    );
+                    assert!(!is_canonical_top_level(action.name));
+                    assert!(moved_command(action.name).is_none());
+                    continue;
+                }
+                if action.also_canonical_top_level
+                    || COMMANDS.iter().any(|command| command.name == action.name)
+                {
                     assert!(is_canonical_top_level(action.name));
                     assert!(moved_command(action.name).is_none());
                     continue;
@@ -2296,12 +2392,13 @@ mod tests {
     fn typo_suggestions_never_advertise_moved_bare_actions() {
         for group in command_groups() {
             for action in group.actions {
-                let canonical_bare = COMMANDS.iter().any(|command| {
-                    command.name == action.name
-                        && command.actions.is_empty()
-                        && is_canonical_top_level(command.name)
+                // A canonical top-level command row (bare or group) may be
+                // suggested by its own name: `env` is the canonical front door
+                // even though `inspect env` is a different, nested action.
+                let canonical_top_level = COMMANDS.iter().any(|command| {
+                    command.name == action.name && is_canonical_top_level(command.name)
                 });
-                if !action.also_canonical_top_level && !canonical_bare {
+                if !action.also_canonical_top_level && !canonical_top_level {
                     assert_ne!(closest_command(action.name), Some(action.name));
                 }
             }
@@ -2350,7 +2447,11 @@ mod tests {
                     nested_command(group.name, action.name).map(|(_, value)| value.handler),
                     Some(action.handler)
                 );
-                if action.handler.keeps_group() {
+                if group.name == "inspect" && action.name == "env" {
+                    assert_eq!(action.handler, HandlerKey::Env);
+                    assert!(action.handler.keeps_group());
+                    assert_eq!(action.handler.dispatch_word(), "env");
+                } else if action.handler.keeps_group() {
                     assert_eq!(
                         action.handler.dispatch_word(),
                         group.name,
@@ -2471,26 +2572,25 @@ fn authority_flags_render_in_registry_completions_and_man() {
         assert!(is_known_flag("--allow-unofficial"));
         assert!(command_group_usage("self").contains("--allow-unofficial"));
         assert!(man_page("0.0.0").contains("--allow-unofficial"));
-        for completion in [
-            completions_bash(),
-            completions_zsh(),
-            completions_fish(),
-            completions_powershell(),
+        // fish declares a long option as `-l <name>`, the other shells as `--<name>`.
+        for (shell, completion, spelling) in [
+            ("bash", completions_bash(), "--allow-unofficial"),
+            ("zsh", completions_zsh(), "--allow-unofficial"),
+            ("fish", completions_fish(), "-l allow-unofficial"),
+            ("powershell", completions_powershell(), "--allow-unofficial"),
         ] {
-            assert!(completion.contains("--allow-unofficial"));
+            assert!(completion.contains(spelling), "{shell} completion lacks {spelling}");
         }
     }
 
-    /// #1659 criterion 1: a command is declared exactly once in the one
-    /// `COMMANDS` table. A non-keeps_group nested action's dispatch word must
-    /// never also appear as its own separate top-level `COMMANDS` row — that
-    /// would be the same command declared twice within the one table.
-    /// (`keeps_group` actions legitimately share their owning group's own row.)
+    /// #1659 criterion 1: moved-only dispatch words must not have a second
+    /// top-level `COMMANDS` row. Group-preserving actions share their owning
+    /// group's row; explicitly canonical top-level actions retain that entry.
     #[test]
     fn no_command_declared_in_both_tables() {
         for group in command_groups() {
             for action in group.actions {
-                if action.handler.keeps_group() {
+                if action.handler.keeps_group() || action.also_canonical_top_level {
                     continue;
                 }
                 assert!(

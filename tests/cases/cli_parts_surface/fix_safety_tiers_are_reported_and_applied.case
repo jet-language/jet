@@ -1,0 +1,38 @@
+# Port of tests/cli_parts/surface.rs:1657-1759; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/safety
+copy: immutable.jet immutable.bytes
+step: jet check {work}/formatting.jet --json
+env: NO_COLOR=1
+exit: 1
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.applicability = "safe"
+json: stderr doc $.fix_edits : array # original pattern
+json: stderr doc $.fix_edits #= 1
+json: stderr doc $.fix_edits[0].safety = "formatting"
+step: jet check {work}/immutable.jet --json
+env: NO_COLOR=1
+exit: 1
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.applicability = "suggested"
+json: stderr doc $.fix_edits : array # original pattern
+json: stderr doc $.fix_edits #= 1
+json: stderr doc $.fix_edits[0].safety = "api-changing"
+step: jet fix {work}/typo.jet
+env: NO_COLOR=1
+exit: 0
+file: typo.jet = safety-typo-fixed.bytes
+step: jet fix {work}/formatting.jet
+env: NO_COLOR=1
+exit: 0
+file: formatting.jet ~ "loop item in" # original predicate
+step: jet fix {work}/immutable.jet
+env: NO_COLOR=1
+exit: 0
+file: immutable.jet == immutable.bytes
+stdout: ~ "skipped 1 suggestion" # original predicate
+step: jet fix {work}/immutable.jet --all
+env: NO_COLOR=1
+exit: 0
+file: immutable.jet ~ "x := 1" # original predicate

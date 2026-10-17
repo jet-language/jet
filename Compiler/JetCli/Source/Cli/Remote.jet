@@ -1,0 +1,250 @@
+// Source/CmdRemote.rs; adapted from origin/port/compiler CacheCas.jet's
+// RemoteBuildBinding host registry. Credentials stay in their provider file.
+struct JetCLIRemoteBinding {
+    builder: String
+    root: String
+    credential_provider: String
+    trust_domain: String
+    worker_id: String
+    platform: String
+    abi: String
+    cache_read: Bool
+    cache_write: Bool
+    execute: Bool
+    fallback_local: Bool
+    timeout_ms: U64
+}
+
+fn jet_cli_remote_name(value: String) JetCLIReadError! {
+    if value == "" || value.bytes().len() > 256 -> return Err(jet_cli_read_error("remote builder must be 1..256 ASCII letters, digits, `.`, `_`, or `-`"))
+    loop byte in value.bytes() {
+        if !((byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || (byte >= U8{48} && byte <= U8{57}) || byte == U8{46} || byte == U8{95} || byte == U8{45}) {
+            return Err(jet_cli_read_error("remote builder must be 1..256 ASCII letters, digits, `.`, `_`, or `-`"))
+        }
+    }
+}
+
+fn jet_cli_remote_absolute(path: String) -[FS, Env]> String JetCLIReadError! {
+    if path.starts_with("/") -> return Ok(path)
+    cwd :: cli_sys.current_dir() ?? return Err(jet_cli_read_error("cannot resolve host path: {jet_cli_io_error_text(err)}"))
+    Ok(jet_cli_rooted_join(cwd, path))
+}
+
+fn jet_cli_remote_parts(path: String) -> [String] Never! {
+    parts := [String]{}
+    loop part in path.split("/") {
+        if part != "" && part != "." -> &parts.push(part)
+    }
+    parts
+}
+
+fn jet_cli_remote_config() -[FS, Env]> String JetCLIReadError! {
+    base :: cli_sys.get("XDG_CONFIG_HOME") ?? {
+        home :: cli_sys.get("HOME") ?? return Err(jet_cli_read_error("cannot locate the host config directory"))
+        jet_cli_rooted_join(home, ".config")
+    }
+    Ok(jet_cli_rooted_join(jet_cli_remote_absolute(base), "jet/remote-bindings"))
+}
+
+fn jet_cli_remote_credential(path: String) JetCLIReadError! -[FS, Time.Wait]> {
+    parts := jet_cli_remote_parts(path)
+    name :: &parts.pop() ?? return Err(jet_cli_read_error("credential provider path has no file name"))
+    held :: JetCLIRootedDirectory.open("/", parts, false) ?? return Err(jet_cli_read_error("cannot inspect credential provider directory: {err.message}"))
+    bytes :: if held.read(name, 4096) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_read_error("cannot read credential provider `{path}`: {error.message}")) }
+    }
+    credential :: bytes ?? return Err(jet_cli_read_error("cannot read credential provider `{path}`: No such file or directory (os error 2)"))
+    if credential.len() == 0 -> return Err(jet_cli_read_error("remote credential provider is empty"))
+}
+
+JET_CLI_REMOTE_FIELDS :: prep { [String]{"version", "builder", "root", "credential_provider", "trust_domain", "worker_id", "platform", "abi", "cache_read", "cache_write", "execute", "fallback_local", "timeout_ms"} }
+
+fn jet_cli_remote_bool(value: Bool) -> String Never! { if value -> "1" else -> "0" }
+
+fn jet_cli_remote_record(binding: JetCLIRemoteBinding) -> [U8] JetCLIReadError! {
+    values :: [String]{"1", binding.builder, binding.root, binding.credential_provider, binding.trust_domain, binding.worker_id, binding.platform, binding.abi, jet_cli_remote_bool(binding.cache_read), jet_cli_remote_bool(binding.cache_write), jet_cli_remote_bool(binding.execute), jet_cli_remote_bool(binding.fallback_local), "{binding.timeout_ms}"}
+    loop value in values {
+        if value == "" || receipt_text.has_control(value) -> return Err(jet_cli_read_error("remote binding record contains an empty or control-valued field"))
+    }
+    text := ""
+    loop (index, field) in JET_CLI_REMOTE_FIELDS -> text = "{text}{field}={values[index]}\n"
+    Ok(text.bytes())
+}
+
+fn jet_cli_remote_unsigned(value: String) -> U64? Never! {
+    bytes :: value.bytes()
+    if bytes.len() == 0 -> return None
+    start :: if Int.from_u8(bytes[0]) == 43 -> 1 else -> 0
+    if start == bytes.len() -> return None
+    result := U64{0}
+    loop index in start..<bytes.len() {
+        byte :: bytes[index]
+        code :: Int.from_u8(byte)
+        if code < 48 || code > 57 -> return None
+        digit :: U64{code - 48}
+        if (result > (U64.MAX - digit) / U64{10}) -> return None
+        result = result * U64{10} + digit
+    }
+    Val(result)
+}
+
+fn jet_cli_remote_field_bool(fields: [String:String], field: String) -> Bool JetCLIReadError! {
+    value :: fields.get(field) ?? return Err(jet_cli_read_error("remote binding has no `{field}` field"))
+    if value == "0" -> return Ok(false)
+    if value == "1" -> return Ok(true)
+    Err(jet_cli_read_error("remote binding `{field}` must be 0 or 1"))
+}
+
+fn jet_cli_remote_parse(bytes: [U8], builder: String) -> JetCLIRemoteBinding JetCLIReadError! {
+    text :: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("remote binding record is not UTF-8"))
+    fields := [String:String]{}
+    lines :: text.split("\n").to_list()
+    carriage_return :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return is valid UTF-8")
+    loop (index, line) in lines {
+        if index == lines.len() - 1 && line == "" -> next
+        // Rust lines() strips the CR of CRLF, but interior control text fails.
+        normalized := line
+        if index < lines.len() - 1 -> normalized = line.removesuffix(carriage_return)
+        parts :: normalized.split("=").to_list()
+        if parts.len() < 2 -> return Err(jet_cli_read_error("remote binding record has a malformed line"))
+        field :: parts[0]
+        value :: parts.slice(1, parts.len()).join("=")
+        if !JET_CLI_REMOTE_FIELDS.contains(field) || fields.get(field) != None -> return Err(jet_cli_read_error("remote binding record has an unknown or duplicate field"))
+        if value == "" || receipt_text.has_control(value) -> return Err(jet_cli_read_error("remote binding field `{field}` is empty or contains control text"))
+        fields[field] = value
+    }
+    if fields.get("version") != .Val("1") || fields.get("builder") != .Val(builder) -> return Err(jet_cli_read_error("remote binding record version or builder does not match"))
+    loop field in JET_CLI_REMOTE_FIELDS {
+        if fields.get(field) == None -> return Err(jet_cli_read_error("remote binding record has no `{field}` field"))
+    }
+    root :: fields.get("root") ?? return Err(jet_cli_read_error("remote binding has no `root` field"))
+    if !root.starts_with("/") -> return Err(jet_cli_read_error("remote builder root must be an absolute host path"))
+    timeout :: jet_cli_remote_unsigned(fields.get("timeout_ms") ?? "") ?? return Err(jet_cli_read_error("remote binding timeout is not a number"))
+    Ok(JetCLIRemoteBinding{builder: builder, root: root, credential_provider: fields.get("credential_provider") ?? "", trust_domain: fields.get("trust_domain") ?? "", worker_id: fields.get("worker_id") ?? "", platform: fields.get("platform") ?? "", abi: fields.get("abi") ?? "", cache_read: jet_cli_remote_field_bool(fields, "cache_read"), cache_write: jet_cli_remote_field_bool(fields, "cache_write"), execute: jet_cli_remote_field_bool(fields, "execute"), fallback_local: jet_cli_remote_field_bool(fields, "fallback_local"), timeout_ms: if (timeout > U64{1}) -> timeout else -> U64{1}})
+}
+
+fn jet_cli_remote_load(directory: String, name: String) -[FS, Env, Time.Wait]> JetCLIRemoteBinding JetCLIReadError! {
+    jet_cli_remote_name(name)
+    held :: JetCLIRootedDirectory.open("/", jet_cli_remote_parts(directory), false) ?? return Err(jet_cli_read_error("cannot read remote builder `{name}`: {err.message}"))
+    bytes :: if held.read("{name}.conf", 65536) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(jet_cli_read_error("cannot read remote builder `{name}`: {error.message}")) }
+    }
+    raw :: bytes ?? return Err(jet_cli_read_error("cannot read remote builder `{name}`: No such file or directory (os error 2)"))
+    binding :: jet_cli_remote_parse(raw, name)
+    jet_cli_remote_credential(jet_cli_remote_absolute(binding.credential_provider))
+    Ok(binding)
+}
+
+fn jet_cli_remote_value(args: [String], name: String) -> String? Never! {
+    loop (index, arg) in args {
+        if arg.starts_with("{name}=") -> return Val(arg.removeprefix("{name}="))
+        if arg == name && index + 1 < args.len() -> return Val(args[index + 1])
+    }
+    None
+}
+
+fn jet_cli_remote_has(args: [String], name: String) -> Bool Never! { args.contains(name) || args.contains("{name}=true") }
+
+fn jet_cli_remote_bind(args: [String]) -[FS, Env, Time]> JetCLIRemoteBinding JetCLIReadError! {
+    if args.len() <= 2 || args[2].starts_with("-") -> return Err(jet_cli_read_error("jet remote bind needs a builder name"))
+    builder :: args[2]
+    root :: jet_cli_remote_value(args, "--root") ?? return Err(jet_cli_read_error("jet remote bind needs `--root <absolute-path>`"))
+    credential :: jet_cli_remote_value(args, "--credential-file") ?? return Err(jet_cli_read_error("jet remote bind needs `--credential-file <path>`"))
+    trust :: jet_cli_remote_value(args, "--trust-domain") ?? return Err(jet_cli_read_error("jet remote bind needs `--trust-domain <name>`"))
+    timeout := U64{30000}
+    if jet_cli_remote_value(args, "--timeout-ms") == .Val(value) {
+        timeout = jet_cli_remote_unsigned(value) ?? return Err(jet_cli_read_error("`--timeout-ms` must be a positive integer"))
+        if (timeout == U64{0}) -> return Err(jet_cli_read_error("`--timeout-ms` must be a positive integer"))
+    }
+    known :: [String]{"--root", "--credential-file", "--trust-domain", "--worker-id", "--platform", "--abi", "--timeout-ms", "--cache-read", "--cache-write", "--execute", "--fallback-local", "--json"}
+    loop index in 3..<args.len() {
+        arg :: args[index]
+        if arg.starts_with("-") && !known.contains(arg.split("=").to_list()[0]) -> return Err(jet_cli_read_error("unknown remote bind flag `{arg}`"))
+    }
+    provider :: jet_cli_remote_absolute(credential)
+    jet_cli_remote_credential(provider)
+    jet_cli_remote_name(builder)
+    if !root.starts_with("/") -> return Err(jet_cli_read_error("remote builder root must be an absolute host path"))
+    binding :: JetCLIRemoteBinding{builder: builder, root: root, credential_provider: provider, trust_domain: trust, worker_id: jet_cli_remote_value(args, "--worker-id") ?? "worker", platform: jet_cli_remote_value(args, "--platform") ?? "{cli_sys.name()}-{cli_sys.arch()}", abi: jet_cli_remote_value(args, "--abi") ?? "native", cache_read: jet_cli_remote_has(args, "--cache-read"), cache_write: jet_cli_remote_has(args, "--cache-write"), execute: jet_cli_remote_has(args, "--execute"), fallback_local: jet_cli_remote_has(args, "--fallback-local"), timeout_ms: timeout}
+    bytes :: jet_cli_remote_record(binding)
+    directory :: jet_cli_remote_config()
+    held :: JetCLIRootedDirectory.open("/", jet_cli_remote_parts(directory), true) ?? return Err(jet_cli_read_error("cannot create remote binding directory: {err.message}"))
+    held.replace("{builder}.conf", bytes, Val(0o600)) ?? return Err(jet_cli_read_error("cannot save remote builder `{builder}`: {err.message}"))
+    Ok(binding)
+}
+
+fn jet_cli_remote_binding_fields(binding: JetCLIRemoteBinding, list: Bool) -> [JetCLIStatusField] Never! {
+    fields :: [JetCLIStatusField]{jet_cli_status_field(if list -> "name" else -> "builder", jet_cli_status_text(binding.builder)), jet_cli_status_field("root", jet_cli_status_text(binding.root)), jet_cli_status_field("trust_domain", jet_cli_status_text(binding.trust_domain)), jet_cli_status_field("worker_id", jet_cli_status_text(binding.worker_id)), jet_cli_status_field("platform", jet_cli_status_text(binding.platform)), jet_cli_status_field("abi", jet_cli_status_text(binding.abi))}
+    if !list -> return fields
+    result := fields
+    &result.push(jet_cli_status_field("cache_read", jet_cli_status_bool(binding.cache_read)))
+    &result.push(jet_cli_status_field("cache_write", jet_cli_status_bool(binding.cache_write)))
+    &result.push(jet_cli_status_field("execute", jet_cli_status_bool(binding.execute)))
+    &result.push(jet_cli_status_field("fallback_local", jet_cli_status_bool(binding.fallback_local)))
+    result
+}
+
+fn jet_cli_remote_list(json: Bool) -[FS, Env, Time.Wait]> JetDriverVerbOutput JetCLIReadError! {
+    directory :: jet_cli_remote_config()
+    present :: JetCLIRootedDirectory.present("/", jet_cli_remote_parts(directory)) ?? return Err(jet_cli_read_error("cannot inspect remote builders: {err.message}"))
+    names := [String]{}
+    if present {
+        held :: JetCLIRootedDirectory.open("/", jet_cli_remote_parts(directory), false) ?? return Err(jet_cli_read_error("cannot list remote builders: {err.message}"))
+        entries :: held.list() ?? return Err(jet_cli_read_error("cannot list remote builders: {err.message}"))
+        loop entry in entries {
+            if !entry.is_file || !entry.name.ends_with(".conf") -> next
+            name :: entry.name.removesuffix(".conf")
+            if jet_cli_remote_name(name) == .Ok(_) -> &names.push(name)
+        }
+    }
+    &names.sort()
+    text := ""
+    stderr := ""
+    rows := [JetCLIStatusValue]{}
+    loop name in names {
+        if jet_cli_remote_load(directory, name) == {
+            .Ok(binding) -> {
+                &rows.push(jet_cli_status_object(jet_cli_remote_binding_fields(binding, true)))
+                caps := [String]{}
+                if binding.cache_read -> &caps.push("cache-read")
+                if binding.cache_write -> &caps.push("cache-write")
+                if binding.execute -> &caps.push("execute")
+                text = "{text}{binding.builder}\t{binding.root}\t{binding.trust_domain}\t{caps.join(",")}\n"
+            }
+            .Err(error) -> { if !json -> stderr = "{stderr}{name}: {error.message}\n" }
+        }
+    }
+    if names.len() == 0 -> text = "no remote builders are bound\n"
+    if json -> text = "{jet_cli_status_render("remote.list", true, [JetCLIStatusField]{jet_cli_status_field("builders", jet_cli_status_array(rows))})}\n"
+    Ok(JetDriverVerbOutput{stdout: text, stderr: stderr, exit_code: 0})
+}
+
+fn jet_cli_remote_remove(args: [String]) JetCLIReadError! -[FS, Env]> {
+    if args.len() <= 2 || args[2].starts_with("-") -> return Err(jet_cli_read_error("jet remote remove needs a builder name"))
+    builder :: args[2]
+    jet_cli_remote_name(builder)
+    directory :: jet_cli_remote_config()
+    held :: JetCLIRootedDirectory.open("/", jet_cli_remote_parts(directory), false) ?? return Err(jet_cli_read_error("cannot inspect remote builder records: {err.message}"))
+    removed :: held.remove("{builder}.conf") ?? return Err(jet_cli_read_error("cannot remove remote builder `{builder}`: {err.message}"))
+    if !removed -> return Err(jet_cli_read_error("remote builder `{builder}` is not bound"))
+}
+
+fn jet_cli_remote(args: [String], json: Bool, color: Bool) -[FS, Env, Time]> JetDriverVerbOutput Never! {
+    action :: if args.len() > 1 -> args[1] else -> "help"
+    if action == "help" -> return JetDriverVerbOutput{stdout: "jet remote — manage host-owned remote builders\n\n  jet remote bind <name> --root <path> --credential-file <path> --trust-domain <name> [--execute] [--cache-read] [--cache-write] [--fallback-local]\n  jet remote list\n  jet remote remove <name>\n", stderr: "", exit_code: 0}
+    if action == "bind" {
+        binding :: jet_cli_remote_bind(args) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", err.message, "", "run `jet remote help`", color), exit_code: 2}
+        return JetDriverVerbOutput{stdout: if json -> "{jet_cli_status_render("remote.bind", true, jet_cli_remote_binding_fields(binding, false))}\n" else -> "bound remote builder `{binding.builder}`\n", stderr: "", exit_code: 0}
+    }
+    if action == "list" {
+        output :: jet_cli_remote_list(json) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", err.message, "", "run `jet remote help`", color), exit_code: 2}
+        return output
+    }
+    if action == "remove" {
+        jet_cli_remote_remove(args) ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", err.message, "", "run `jet remote help`", color), exit_code: 2}
+        return JetDriverVerbOutput{stdout: "removed remote builder `{args[2]}`\n", stderr: "", exit_code: 0}
+    }
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "unknown remote subcommand `{action}`", "", "run `jet remote help`", color), exit_code: 2}
+}

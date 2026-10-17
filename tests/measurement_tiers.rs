@@ -66,10 +66,10 @@ fn measurement_sema_accepts_the_knowledge_grade() {
 #[test]
 fn measurement_tir_keeps_the_carrier_and_operation() {
     let compiled = jet::compile(SOURCE).expect("measurement source must reach TIR");
-    assert!(compiled.rust.contains("JetMeasurement"));
+    assert!(!compiled.rust.contains("JetMeasurement"));
     assert!(
-        compiled.rust.contains("jet_std::JetMeasurement::new") || compiled.rust.contains(".add("),
-        "TIR lost the measured carrier operation:\n{}",
+        compiled.rust.contains("__measurement_new") && compiled.rust.contains("__measurement_add"),
+        "TIR lost the source-owned measured operation:\n{}",
         compiled.rust
     );
 }
@@ -87,7 +87,7 @@ fn measurement_aot_matches_the_known_result() {
 
 #[test]
 fn measurement_default_jit_matches_the_known_result() {
-    let (code, stdout, stderr) = tir_support::jit_run("measurement_tier_jit", SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("measurement_tier_jit", SOURCE);
     assert_eq!(code, 0, "default JIT failed: {stderr}");
     assert_eq!(stdout, EXPECTED);
 }
@@ -95,7 +95,7 @@ fn measurement_default_jit_matches_the_known_result() {
 #[test]
 fn measurement_interpreter_matches_the_known_result() {
     let (code, stdout, stderr) =
-        tir_support::interpreter_run("measurement_tier_interpreter", SOURCE);
+        tir_support::default_run("measurement_tier_interpreter", SOURCE);
     assert_eq!(code, 0, "interpreter failed: {stderr}");
     assert_eq!(stdout, EXPECTED);
 }
@@ -146,10 +146,10 @@ fn measurement_web_js_and_wasm_use_the_same_kernel() {
         jet::compile_web_with_path(&web_source(), "tests/fixtures/measurement_tiers_web.jet")
             .unwrap_or_else(|diagnostics| panic!("web measurement rejected: {diagnostics:#?}"));
     let web = output.web.expect("web target must produce artifacts");
-    assert!(web.js_app.contains("jet_measurement_kernel_add"));
-    assert!(web.js_app.contains("jet_measurement_show"));
-    assert!(web.wasm_rust.contains("jet_measurement_kernel_add"));
-    assert!(web.wasm_rust.contains("JetMeasurement"));
+    assert!(web.js_app.contains("__measurement_add"));
+    assert!(web.js_app.contains("__measurement_show"));
+    assert!(!web.js_app.contains("jet_measurement_kernel_add"));
+    assert!(!web.wasm_rust.contains("JetMeasurement"));
 
     if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
         eprintln!(
@@ -220,4 +220,17 @@ if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected W
         String::from_utf8_lossy(&wasm_run.stderr)
     );
     assert_eq!(String::from_utf8_lossy(&wasm_run.stdout), EXPECTED);
+}
+
+#[test]
+fn measurement_observations_are_methods_not_public_fields() {
+    for field in ["value", "uncertainty"] {
+        let source = format!("fn run() {{ m := measurement(1.0, uncertainty: 0.1)\n print(m.{field}) }}");
+        assert!(jet::compile(&source).is_err(), "Measurement.{field} unexpectedly exposed");
+    }
+    for method in ["add", "sub", "mul", "div", "sqrt"] {
+        let arguments = if method == "sqrt" { "" } else { "m" };
+        let source = format!("fn run() {{ m := measurement(1.0, uncertainty: 0.1)\n print(m.{method}({arguments})) }}");
+        assert!(jet::compile(&source).is_err(), "Measurement.{method} unexpectedly accepted");
+    }
 }

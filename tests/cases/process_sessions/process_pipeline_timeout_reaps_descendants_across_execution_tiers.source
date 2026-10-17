@@ -1,0 +1,21 @@
+
+use core.process as process
+
+fn run() {
+    timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+    first :: process.pipeline([
+        process.cmd(["{work}/session_fixture", "tree", "{work}/aot.pid"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("aot-shaped pipeline failed")
+    print(first.timed_out)
+    second :: process.pipeline([
+        process.cmd(["{work}/session_fixture", "tree", "{work}/jit.pid"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("jit-shaped pipeline failed")
+    print(second.timed_out)
+    third :: process.pipeline([
+        process.cmd(["{work}/session_fixture", "tree", "{work}/interp.pid"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("interpreter-shaped pipeline failed")
+    print(third.timed_out)
+}

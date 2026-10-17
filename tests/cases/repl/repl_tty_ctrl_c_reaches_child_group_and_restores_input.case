@@ -1,0 +1,21 @@
+# PORT tests/repl.rs:1695-1744 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+fixture: repl_tty_ctrl_c_reaches_child_group_and_restores_input.fixture
+env: NO_COLOR=1
+requires: os-name:linux
+mkdir: project
+step raw: jet repl --project {work}/project --allow-exec
+pty: true
+limit: time=8
+pty-send: "use core.process as process\r" after 200ms
+pty-send: "#FX(authority: Exec) { process.run([\"sh\", \"-c\", \"trap 'printf done > child-exited.txt; exit 130' INT; printf $$ > child.pid; while :; do :; done\"]) ?? panic(\"run failed\") }\r" after 200ms
+pty-send: "\u0003" after 800ms
+pty-send: "40 + 2\r" after 500ms
+pty-send: ":quit\r" after 300ms
+exit: 0
+stdout: ~ "42 : Int" # Original resumed input rs1727.
+file: project/child-exited.txt = repl_tty_ctrl_c_reaches_child_group_and_restores_input.fixture/done.out
+capture: child_pid = text file.trim project/child.pid
+step: kill -0 {cap:child_pid}
+exit: nonzero

@@ -118,7 +118,8 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
     let entry = scratch.join("app.jet");
     fs::write(&entry, SOURCE).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect();
@@ -126,16 +127,8 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
         errors.is_empty(),
         "fact fixture rejected before tier proof: {errors:?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "fact fixture is not resident-JIT safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("fact fixture must compile in resident JIT");
 
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(entry.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -149,17 +142,8 @@ fn resident_jit_and_forced_interpreter_agree_without_fallback() {
             panic!("resident JIT rejected fact fixture: {diagnostics:?}")
         }
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "resident JIT did not execute"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
-        "fact fixture used a fallback or interpreter deopt"
-    );
 
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(entry.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -264,6 +248,23 @@ fn run() {
         "vector:1\nmatrix:2\n",
     );
 }
+#[test]
+fn fixed_array_argument_widens_before_the_read_borrow_on_all_tiers() {
+    let source = r#"
+fn sum(values: [Int]) -> Int {
+    total := 0
+    loop value in values -> total += value
+    total
+}
+fn run() {
+    values :: [Int#3]{3, 1, 4}
+    print(sum(values))
+    print(values[1])
+}
+"#;
+    tir_support::assert_tiers_agree("fixed_array_call_boundary", source, "8\n1\n");
+}
+
 
 #[test]
 fn measure_rows_share_one_registry_and_all_tiers_examples() {

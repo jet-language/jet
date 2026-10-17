@@ -1,0 +1,30 @@
+# Port of tests/env_hook.rs::export_activates_nearest_env_from_root_and_subdir.
+# PENDING-GRAMMAR: step cwd/unset and tool token.
+fixture: export_activates_nearest_env_from_root_and_subdir.fixture
+env: PATH=/usr/bin:/bin
+mkdir: src/inner
+step: jetpack env export bash
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+stdout: ~ "export JETPACK_ENV_DIR='{work}'" # original root anchoring predicate; path-normalized
+stdout: ~ "export JETPACK_ENV=1" # original predicate
+stdout: ~ "export JETPACK_ENV_OLD_PATH=" # original predicate
+stdout: ~ "export PATH=" # original predicate
+step: jetpack env export bash
+cwd: src/inner
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+stdout: ~ "export JETPACK_ENV_DIR='{work}'" # original nested anchoring predicate; path-normalized
+stdout: ~ "export JETPACK_ENV=1" # original predicate
+stdout: ~ "export JETPACK_ENV_OLD_PATH=" # original predicate
+stdout: ~ "export PATH=" # original predicate

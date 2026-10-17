@@ -19,7 +19,7 @@ fn run() {
     if quotient.numerator != 3 || quotient.denominator != 2 -> panic("rational division")
     print("rational {sum} {difference} {product} {quotient}")
     print("rational checks {sum.numerator == 5 && sum.denominator == 6} {sum < quotient}")
-    print("rational generic {exact.pair_add(first, second)} {exact.largest([first, second, quotient])}")
+    print("rational generic {pair_add(first, second)} {largest([first, second, quotient])}")
 
     // Mixed operators keep the integer operand on the integer rail. #2775's
     // E0403 false positive is avoided by reducing only inside these bodies.
@@ -69,7 +69,7 @@ fn run() {
     }
     print("scaled decimal {decimal_sum} {decimal_product} {decimal_sum.coefficient == 12940 && decimal_sum.scale == 3}")
     print("scaled mixed {scaled_plus_int} {scaled_times_int}")
-    scaled_wire :: json.to_string(decimal_sum)
+    scaled_wire :: json.to_string(decimal_sum) ?? panic("scaled encode")
     decoded_decimal :: json.decode<ScaledDecimal>(scaled_wire) ?? panic("scaled decode")
     if decoded_decimal != decimal_sum -> panic("scaled JSON round trip")
     print("scaled json {scaled_wire}")
@@ -105,13 +105,13 @@ fn run() {
     half_up :: round_tax(invoice, 1750, Rounding.HalfUp)
     if down.cents != 1751 || up.cents != 1752 || half_up.cents != 1751 -> panic("money rounding")
     print("money {invoice} {down} {up} {half_up}")
-    money_wire :: json.to_string(invoice)
+    money_wire :: json.to_string(invoice) ?? panic("money encode")
     money_back :: json.decode<Money>(money_wire) ?? panic("money decode")
     if money_back != invoice -> panic("money JSON round trip")
     print("money mixed {money_plus_int} {money_times_int} {money_minus_int} {money_div_int}")
     print("money json {money_wire} {money_back == invoice}")
 
-    rational_wire :: json.to_string(sum)
+    rational_wire :: json.to_string(sum) ?? panic("rational encode")
     rational_back :: json.decode<Rational>(rational_wire) ?? panic("rational decode")
     if rational_back != sum -> panic("rational JSON round trip")
     print("rational json {rational_wire} {rational_back == sum}")
@@ -126,7 +126,7 @@ fn run() {
 
     built_in_raw :: "{{\"amount\":12.340,\"whole\":123456789012345678901234567890}}"
     built_in :: json.decode<BuiltInExact>(built_in_raw) ?? panic("built-in decode")
-    print("built-in json {built_in.amount.to_string()} {built_in.whole.to_string()} {json.to_string(built_in)}")
+    print("built-in json {built_in.amount.to_string()} {built_in.whole.to_string()} {json.to_string(built_in) ?? panic("JSON encode")}")
 
     million :: million_money()
     if million.cents != 49500000 -> panic("million money sum")

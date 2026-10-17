@@ -4,10 +4,10 @@ use crate::AST::{Type, VariantPayload};
 
 
 /// The payload types a variant binds, so destructured names carry their type
-/// into the body (needed so e.g. `.get` on a `Map` bound from `Object(root)`
-/// lowers to a map lookup, not list indexing — B3). Mirrors sema's
-/// `core_json_pattern_types` for the core `JSON` enum and reads `cx` for user
-/// enums. Returns `None` when the types aren't known (binding stays untyped).
+/// into the body. Mirrors sema's `core_json_pattern_types` for the core `JSON`
+/// enum (D-DATATREE-ORDER1=A: `Object` binds its ordered pair list) and reads
+/// `cx` for user enums. Returns `None` when the types aren't known (binding
+/// stays untyped).
 pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>> {
     if is_json_variant(variant) {
         let data = Type::Named(Syntax::TYPE_DATA.to_string());
@@ -17,12 +17,13 @@ pub(crate) fn variant_binding_types(cx: &Cx, variant: &str) -> Option<Vec<Type>>
             "Int" => Some(vec![Type::Int]),
             "Float" => Some(vec![Type::Float]),
             "Text" => Some(vec![Type::String]),
+            "Bytes" => Some(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
+            "DateTime" => Some(vec![Type::Named("ZonedDateTime".to_string())]),
             "Array" => Some(vec![Type::List(Box::new(data.clone()))]),
-            "Object" => Some(vec![Type::Map {
-                key: Box::new(Type::String),
-                key_span: None,
-                value: Box::new(data),
-            }]),
+            "Object" => Some(vec![Type::List(Box::new(Type::Tuple(vec![
+                ("key".to_string(), Box::new(Type::String)),
+                ("value".to_string(), Box::new(data)),
+            ])))]),
             "Number" => Some(vec![Type::String]),
             _ => None,
         };
@@ -56,18 +57,10 @@ pub(crate) fn variant_binding_types_for_enum(
         };
     }
     if enum_name == "DataEvent" {
-        return match variant {
-            "Bool" => Some(vec![Type::Bool]),
-            "Int" => Some(vec![Type::Int]),
-            "Float" => Some(vec![Type::Float]),
-            "Text" | "Key" => Some(vec![Type::String]),
-            "Bytes" => Some(vec![Type::List(Box::new(Type::Int))]),
-            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => Some(Vec::new()),
-            _ => None,
-        };
+        return crate::Sema::data_event_payload(variant).map(|payload| payload.into_iter().collect());
     }
     let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, enum_name);
-    let variants = cx.enum_variants.get(&resolved)?;
+    let variants = cx.fact_enum_variants(&resolved)?;
     let (_, payload) = variants.iter().find(|(n, _)| n == variant)?;
     match payload {
         VariantPayload::Unit => Some(Vec::new()),
@@ -88,7 +81,7 @@ pub(crate) fn group_leaves<'c>(
     let Some(et) = enum_type else {
         return Vec::new();
     };
-    let Some(vars) = cx.enum_variants.get(et) else {
+    let Some(vars) = cx.fact_enum_variants(et) else {
         return Vec::new();
     };
     let prefix = format!("{variant}.");

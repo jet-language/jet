@@ -34,7 +34,7 @@ fn store_broker_send(stream: UnixStream, bytes: [U8]) StoreError! {
 // Rust `reuse_shared_entry`: import a published shared entry into the
 // caller's Hangar. None when no broker is configured or it is not
 // listening; an imported entry must still pass cache verification.
-pub fn store_reuse_shared_entry(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> StoreEntry? StoreError! {
+fn store_reuse_shared_entry(verification: &StoreVerification, roots: HangarRoots, reference: String, expectation: CacheExpectation) -> StoreEntry? StoreError! {
     found_config :: store_shared_store_config(roots)
     config :: found_config ?? return Ok(None)
     if !files.exists(config.socket) -> return Ok(None)
@@ -54,7 +54,7 @@ pub fn store_reuse_shared_entry(verification: &StoreVerification, roots: HangarR
 
 // Rust `promote_shared_entry`: offer a verified local entry to a configured
 // broker. Missing broker state is the ordinary per-user path, not an error.
-pub fn store_promote_shared_entry(roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
+fn store_promote_shared_entry(roots: HangarRoots, entry: StoreEntry) -> Bool StoreError! {
     found_config :: store_shared_store_config(roots)
     config :: found_config ?? return Ok(false)
     if !files.exists(config.socket) -> return Ok(false)
@@ -75,7 +75,7 @@ pub fn store_promote_shared_entry(roots: HangarRoots, entry: StoreEntry) -> Bool
 // Rust `serve_shared_store_fd`: serve one socket-activated request and exit.
 // The service manager's handover is the only listener source; the
 // administrator descriptor is read explicitly, never from JETPACK_ROOT.
-pub fn store_serve_shared_store(verification: &StoreVerification, roots: HangarRoots) StoreError! {
+fn store_serve_shared_store(verification: &StoreVerification, roots: HangarRoots) StoreError! {
     if sys.family() == "windows" -> return Err(store_broker_invalid("shared-store socket activation is unsupported on this host"))
     sockets :: net.inherited_listeners() ?? return Err(store_broker_net_error(err))
     if sockets.len() != 1 -> return Err(store_broker_invalid("shared-store broker expects exactly one socket from its service manager"))
@@ -96,7 +96,7 @@ fn store_broker_unix_listener(socket: InheritedListener) -> UnixListener? Never!
 
 // Rust `serve_shared_store_connection`: authorize the kernel-reported peer,
 // then promote one write or answer one read.
-pub fn store_broker_serve_connection(verification: &StoreVerification, stream: UnixStream, config: SharedStoreConfig) StoreError! {
+fn store_broker_serve_connection(verification: &StoreVerification, stream: UnixStream, config: SharedStoreConfig) StoreError! {
     shared :: HangarRoots.at(config.shared_root)
     key :: store_broker_trust_key(config)
     peer :: net.unix_peer(stream) ?? return Err(store_broker_net_error(err))
@@ -217,7 +217,7 @@ fn store_broker_read_writer_grant(config: SharedStoreConfig, uid: Int) -> Writer
 
 // Rust `enroll_shared_store`: add or replace one administrator-approved uid
 // grant. The caller must own the private fixture root or be uid 0.
-pub fn store_enroll_shared_store(roots: HangarRoots, uid: String, writable: Bool) -> String StoreError! {
+fn store_enroll_shared_store(roots: HangarRoots, uid: String, writable: Bool) -> String StoreError! {
     found_config :: store_shared_store_config(roots)
     config :: found_config ?? return Err(store_broker_invalid("shared-store broker is not installed"))
     enrolled :: store_broker_parse_unsigned(uid) ?? return Err(store_broker_invalid("shared-store enrollment uid is invalid"))
@@ -315,7 +315,7 @@ fn store_broker_sweep_stale_incoming(incoming: String) -> Int StoreError! {
 
 // Rust `sweep_stale_incoming_at`: remove stages older than 15 minutes. A
 // symlink or more than 1024 entries fails closed.
-pub fn store_broker_sweep_stale_incoming_at(incoming: String, now: Int) -> Int StoreError! {
+fn store_broker_sweep_stale_incoming_at(incoming: String, now: Int) -> Int StoreError! {
     store_broker_ensure_real_dir(incoming)
     entries :: files.list_dir(incoming)
     if entries.len() > STORE_BROKER_MAX_INCOMING_ENTRIES -> return Err(store_broker_invalid("shared-store incoming staging directory has too many entries"))
@@ -348,7 +348,7 @@ fn store_broker_stage_created_at(path: String, info: Stat) -> Int StoreError! {
             .Err(_) -> {}
         }
     }
-    seconds :: info.modified.unix_ns /% 1000000000
+    seconds :: (info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) /% 1000000000
     Ok(if seconds < 0 -> 0 else -> seconds)
 }
 

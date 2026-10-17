@@ -1,0 +1,80 @@
+// Sketch.rs:171-227; shared Native64 owner, #4828 Arc/Mutex clone semantics.
+// The seed RNG is xorshift(13,7,17), NOT Core's divergent SplitMix64 source.
+#Export(c) fn jet_reservoir_sampler_new(capacity: I64) -> I64 {
+    value :: jet_rt_alloc(RESERVOIR_BYTES, I64{8})
+    thread_zero(value, RESERVOIR_BYTES)
+    sync_store(value + RESERVOIR_REFS, I64{1})
+    data_tree_store(value + RESERVOIR_LIMIT, if (capacity < I64{1}) -> I64{1} else -> capacity)
+    data_tree_store(value + RESERVOIR_RNG, iter_signed(U64{0xdeadbeefcafebabe}))
+    data_tree_store(value + RESERVOIR_SEQUENCE + DATA_SEQUENCE_DATA, I64{8})
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_reservoir_sampler(value: I64) -> I64 {
+    _ := sync_add(value + RESERVOIR_REFS, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_drop_jet_reservoir_sampler(value: I64) {
+    if (value == I64{0}) -> return
+    if (sync_add(value + RESERVOIR_REFS, I64{-1}) != I64{1}) -> return
+    coll_text_list_drop(value + RESERVOIR_SEQUENCE, true)
+    jet_rt_free(value, RESERVOIR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_native_reservoir_add(value: I64, text: I64) {
+    sync_mutex_lock(value + RESERVOIR_MUTEX)
+    old_count :: iter_unsigned(data_tree_word(value + RESERVOIR_COUNT))
+    // RJ18: canonical checked integer overflow before any mutation, no new rail.
+    if (old_count == U64{18446744073709551615}) {
+        jet_rt_panic_overflow()
+        sync_mutex_unlock(value + RESERVOIR_MUTEX)
+        return
+    }
+    count :: old_count + U64{1}
+    data_tree_store(value + RESERVOIR_COUNT, iter_signed(count))
+    sequence :: value + RESERVOIR_SEQUENCE
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    limit :: data_tree_word(value + RESERVOIR_LIMIT)
+    if (length < limit) {
+        process_text_list_push(sequence, text)
+        sync_mutex_unlock(value + RESERVOIR_MUTEX)
+        return
+    }
+    state := iter_unsigned(data_tree_word(value + RESERVOIR_RNG))
+    state = state.bit_xor(state << U64{13})
+    state = state.bit_xor(state >> U64{7})
+    state = state.bit_xor(state << U64{17})
+    data_tree_store(value + RESERVOIR_RNG, iter_signed(state))
+    index :: state % count
+    if (index < U64{limit}) {
+        slot :: data_tree_word(sequence + DATA_SEQUENCE_DATA) + I64{index} * DATA_TREE_ELEMENT_BYTES
+        replacement :: jet_rt_string_clone(text)
+        jet_rt_string_drop(data_tree_word(slot))
+        data_tree_store(slot, replacement)
+    }
+    sync_mutex_unlock(value + RESERVOIR_MUTEX)
+}
+#Export(c) fn jet_rt_native_reservoir_sample(value: I64) -> I64 {
+    sync_mutex_lock(value + RESERVOIR_MUTEX)
+    // Lists.jet:1-7: canonical inline len/cap/data, owned E4 elements (stride8).
+    result :: process_text_list_clone(value + RESERVOIR_SEQUENCE, false)
+    sync_mutex_unlock(value + RESERVOIR_MUTEX)
+    result
+}
+#Export(c) fn jet_rt_handle_show_jet_reservoir_sampler(value: I64) -> I64 {
+    sync_mutex_lock(value + RESERVOIR_MUTEX)
+    count :: iter_unsigned(data_tree_word(value + RESERVOIR_COUNT))
+    sync_mutex_unlock(value + RESERVOIR_MUTEX)
+    text :: jet_rt_string_builder_new()
+    rt_text_push_word(text, I64{7597421330097726802}, I64{8}) // Reservoi
+    rt_text_push_word(text, I64{8243113923098792818}, I64{8}) // rSampler
+    rt_text_push_word(text, I64{4025896}, I64{3}) // (n=
+    divisor := U64{1}
+    loop count /% divisor >= (U64{10}) { divisor *= U64{10} }
+    loop {
+        digit :: (count /% divisor) % U64{10}
+        rt_text_push_word(text, I64{digit} + I64{48}, I64{1})
+        if (divisor == U64{1}) -> break
+        divisor = divisor /% U64{10}
+    }
+    rt_text_push_word(text, I64{41}, I64{1})
+    jet_rt_string_builder_finish(text)
+}

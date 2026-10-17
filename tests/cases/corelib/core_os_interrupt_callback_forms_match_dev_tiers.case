@@ -1,0 +1,34 @@
+# Port of tests/corelib_parts/compile.rs::core_os_interrupt_callback_forms_match_dev_tiers; guest sources preserved verbatim.
+requires: os:unix
+refused: read_bytes
+# PENDING-GRAMMAR(batch-four): exact readiness/rest and SIGINT protocol.
+fixture: fixtures/core_os_interrupt_callback_forms_match_dev_tiers
+step: jet build aot.jet
+session aot raw: built
+recv aot until = "ready\n"
+stdout: = "ready\n"
+signal aot: INT
+close aot
+exit: 0
+stdout: = "named\nnamed\ninline\n"
+session jit raw: jet dev dev.jet --watch=off
+recv jit until = "ready\n" within 30s
+stdout: = "ready\n"
+signal jit: INT
+repeat while process {pid:jit} alive timeout 30s every 25ms fail "interrupt program did not exit after SIGINT"
+end repeat
+close jit
+exit: 70
+stdout: = "named\nlambda\nnamed\nstop\n"
+stderr: ~ "panic: stop" # original panic diagnostic
+session interpret raw: jet dev dev.jet --watch=off --interpret
+recv interpret until = "ready\n" within 30s
+stdout: = "ready\n"
+signal interpret: INT
+repeat while process {pid:interpret} alive timeout 30s every 25ms fail "interrupt program did not exit after SIGINT"
+end repeat
+close interpret
+exit: 70
+stdout: = "named\nlambda\nnamed\nstop\n"
+stderr: ~ "panic: stop" # original panic diagnostic
+stderr: !~ "unsupported" # original forced interpreter exclusion

@@ -1,38 +1,38 @@
-pub struct CoreModuleExportNames {
-    pub module_name: String
-    pub members: [String]
-    pub type_exports: [String]
+struct CoreModuleExportNames {
+    module_name: String
+    members: [String]
+    type_exports: [String]
 }
 
-pub enum CoreLeafKind {
+enum CoreLeafKind {
     Plain
     Enum(variants: [String])
     Generic(arity: Int)
     CryptoNominal
 }
 
-pub struct CoreModuleTypeExport {
-    pub name: String
-    pub kind: CoreLeafKind
+struct CoreModuleTypeExport {
+    name: String
+    kind: CoreLeafKind
 }
 
 // One variant of a compiler-owned Core enum family (Rust
 // `resolve_enum_variants_cloned` tables) and its positional payload types;
 // an empty payload is a unit variant.
-pub struct CoreEnumPayloadRow {
-    pub enum_name: String
-    pub variant: String
-    pub payload: [Type]
+struct CoreEnumPayloadRow {
+    enum_name: String
+    variant: String
+    payload: [Type]
 }
 
-pub struct CoreModuleDeclaration {
-    pub module_name: String
-    pub members: [String]
-    pub type_exports: [CoreModuleTypeExport]
-    pub dependencies: [String]
+struct CoreModuleDeclaration {
+    module_name: String
+    members: [String]
+    type_exports: [CoreModuleTypeExport]
+    dependencies: [String]
 }
 
-pub fn core_module_export(module_name: String) -> CoreModuleExportNames? {
+fn core_module_export(module_name: String) -> CoreModuleExportNames? {
     core_module_export_in(CORE_MODULE_EXPORTS, module_name)
 }
 
@@ -46,17 +46,17 @@ fn core_module_export_in(rows: [CoreModuleExportNames], module_name: String) -> 
 
 // A removed Core namespace and its canonical home (Rust `Syntax::RETIREMENTS`
 // semantic rows with code E1001).
-pub struct CoreModuleRetirement {
-    pub retired: String
-    pub canonical: String
-    pub decision: String
+struct CoreModuleRetirement {
+    retired: String
+    canonical: String
+    decision: String
 }
 
 fn core_module_retirement_row(retired: String, canonical: String) -> CoreModuleRetirement Never! {
     CoreModuleRetirement{retired: retired, canonical: canonical, decision: "D-CORE-TREE1=A"}
 }
 
-pub fn core_module_retirements() -> [CoreModuleRetirement] Never! {
+fn core_module_retirements() -> [CoreModuleRetirement] Never! {
     [CoreModuleRetirement]{
         CoreModuleRetirement{retired: "core.path.join/parent/extension/normalize", canonical: "Path.from(value).join(part), .parent(), .extension(), .normalize()", decision: "D-CORE-PATH1"},
         core_module_retirement_row("core.io", "core.term, core.process, or the prelude"),
@@ -95,7 +95,7 @@ pub fn core_module_retirements() -> [CoreModuleRetirement] Never! {
 
 // Rust `retired_core_module`: the longest retired namespace that is `name`
 // itself or a dotted prefix of it.
-pub fn core_module_retirement(name: String) -> CoreModuleRetirement? {
+fn core_module_retirement(name: String) -> CoreModuleRetirement? {
     found := CoreModuleRetirement?{None}
     best := -1
     loop row in core_module_retirements() {
@@ -108,24 +108,24 @@ pub fn core_module_retirement(name: String) -> CoreModuleRetirement? {
     found
 }
 
-pub fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
+fn core_module_export_has_name(names: [String], name: String) -> Bool Never! {
     loop item in names {
         if item == name -> return true
     }
     false
 }
 
-pub fn core_module_has_member(module_name: String, member: String) -> Bool Never! {
+fn core_module_has_member(module_name: String, member: String) -> Bool Never! {
     row :: core_module_export(module_name) ?? return false
     core_module_export_has_name(row.members, member)
 }
 
-pub fn core_module_has_type(module_name: String, name: String) -> Bool Never! {
+fn core_module_has_type(module_name: String, name: String) -> Bool Never! {
     row :: core_module_export(module_name) ?? return false
     core_module_export_has_name(row.type_exports, name)
 }
 
-pub fn core_module_type_leaf(name: String) -> String Never! {
+fn core_module_type_leaf(name: String) -> String Never! {
     bytes :: name.bytes()
     namespace_separator := -1
     module_separator := -1
@@ -149,7 +149,7 @@ pub fn core_module_type_leaf(name: String) -> String Never! {
     }
 }
 
-pub fn core_type_modules(name: String) -> [String] Never! {
+fn core_type_modules(name: String) -> [String] Never! {
     core_type_modules_in(CORE_MODULE_EXPORTS, core_module_type_leaf(name))
 }
 
@@ -164,7 +164,7 @@ fn core_type_modules_in(rows: [CoreModuleExportNames], leaf: String) -> [String]
 
 // Rust `CoreModuleExports::core_enum_variants`: the canonical variant names of
 // a Core enum leaf. Payload shape stays with the checked source declaration.
-pub fn core_enum_variants(name: String) -> [String]? {
+fn core_enum_variants(name: String) -> [String]? {
     core_enum_variants_in(CORE_ENUM_ROWS, name)
 }
 
@@ -176,9 +176,112 @@ fn core_enum_variants_in(rows: [CoreModuleTypeExport], name: String) -> [String]
     None
 }
 
+// One source-owned Core nominal (`source_module … types { … }` in
+// Prelude/Core.jet; Rust `CoreModuleExports::CoreSourceOwnedType`).
+struct CoreSourceOwnedType {
+    path: String
+    name: String
+}
+
+// Rust `CoreModuleExports::core_source_owns_type`: whether a checked Core
+// identity (`<corelib>/Core/net::Core/net/url.jet::URL`) names a source-owned
+// Core nominal, including exact registered source value-hook owners. An owned
+// type remains the Jet declaration on every tier, never a native projection.
+fn core_source_owns_type(name: String) -> Bool Never! {
+    core_source_owns_type_in(CORE_SOURCE_OWNED_TYPES, name)
+        || core_source_value_hook(name, "clone") != None
+        || core_source_value_hook(name, "show") != None
+        || core_source_value_hook(name, "debug") != None
+}
+
+// The table is a read parameter, so the scan reads its rows in place.
+fn core_source_owns_type_in(rows: [CoreSourceOwnedType], name: String) -> Bool Never! {
+    if !name.starts_with("<corelib>/") -> return false
+    parts :: name.split("::").to_list()
+    if parts.len() < 3 -> return false
+    leaf :: parts[parts.len() - 1]
+    file :: parts[parts.len() - 2]
+    loop row in rows {
+        if row.name == leaf && row.path == file -> return true
+    }
+    false
+}
+
+// D-CAP10: the existing public bool(p) arity targets one reserved source
+// method. This is not an overload mechanism or a native receiver route.
+CORE_SOURCE_BOOL_P_OWNER :: [CoreSourceOwnedType]{
+    CoreSourceOwnedType{path: "Core/math/random.jet", name: "RNG"},
+}
+fn core_source_receiver_method(identity: String, method: String, nargs: Int) -> String Never! {
+    if method == "bool" && nargs == 1 && core_source_owns_type(identity) && core_source_owns_type_in(CORE_SOURCE_BOOL_P_OWNER, identity) -> return "__bool_p"
+    method.copy()
+}
+
+// Exact Rust CoreModuleExports table: an established bare spelling's
+// declaring source owner, never a general public-alias re-export mechanism.
+struct CoreBareSourceModule {
+    name: String
+    module_name: String
+}
+CORE_BARE_SOURCE_MODULES :: [CoreBareSourceModule]{
+    CoreBareSourceModule{name: "URL", module_name: "core.net.url"},
+    CoreBareSourceModule{name: "Perf", module_name: "core.perf"},
+    CoreBareSourceModule{name: "RNG", module_name: "core.testing"},
+    CoreBareSourceModule{name: "Vec2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Vec3", module_name: "core.math"},
+    CoreBareSourceModule{name: "Vec4", module_name: "core.math"},
+    CoreBareSourceModule{name: "Mat3", module_name: "core.math"},
+    CoreBareSourceModule{name: "Mat4", module_name: "core.math"},
+    CoreBareSourceModule{name: "F64x4", module_name: "core.math"},
+    CoreBareSourceModule{name: "ScreenPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "ScreenDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "WorldPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "WorldDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "ViewPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "ViewDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "CameraPoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "CameraDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "DevicePoint", module_name: "core.math"},
+    CoreBareSourceModule{name: "DeviceDelta", module_name: "core.math"},
+    CoreBareSourceModule{name: "Point2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Delta2", module_name: "core.math"},
+    CoreBareSourceModule{name: "TransformError", module_name: "core.math"},
+    CoreBareSourceModule{name: "Transform", module_name: "core.math"},
+    CoreBareSourceModule{name: "Transform2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Ray2", module_name: "core.math"},
+    CoreBareSourceModule{name: "Fraction", module_name: "core.math"},
+    CoreBareSourceModule{name: "Decimal", module_name: "core.math"},
+    CoreBareSourceModule{name: "Complex", module_name: "core.math"},
+}
+fn core_bare_source_module(name: String) -> String? Never! {
+    loop row in CORE_BARE_SOURCE_MODULES {
+        if row.name == name -> return Val(row.module_name)
+    }
+    None
+}
+
+// Rust `CoreModuleExports::CORE_ROOT_TYPES`: the Core value types a bare
+// spelling names wherever Core is loaded, so a parameterless Core alias of one
+// of them stays a candidate owner of that bare name.
+CORE_ROOT_TYPES :: [String]{"Date", "LocalDate", "LocalTime", "Decimal", "Fraction", "Duration", "Instant", "Authority"}
+fn core_root_type(name: String) -> Bool Never! {
+    CORE_ROOT_TYPES.contains(name)
+}
+
+// Private semantic routes belong to an exact source declaration, never a
+// short nominal spelling. They do not add public trait implementations.
+fn core_source_value_hook(name: String, operation: String) -> String? Never! {
+    if !name.starts_with("<corelib>/") -> return None
+    if !name.ends_with("::Core/compute/solve.jet::Solver") -> return None
+    if operation == {
+        "show" -> Val("__show")
+        "debug" -> Val("__debug")
+        else -> None
+    }
+}
 // The variant names of a compiler-owned Core enum family with payload rows
 // (`IOError`, `IOOperation`, `ProcessStreamMode`, ...), in table order.
-pub fn core_enum_payload_variants(name: String) -> [String]? {
+fn core_enum_payload_variants(name: String) -> [String]? {
     variants := [String]{}
     loop row in CORE_ENUM_PAYLOAD_ROWS {
         if row.enum_name == name -> &variants.push(row.variant)
@@ -190,7 +293,7 @@ pub fn core_enum_payload_variants(name: String) -> [String]? {
 // payload rows of a compiler-owned family, otherwise a Core.jet enum leaf's
 // unit variant (Rust `core_declared_enum_variants`). `None` when the enum or
 // its variant is not a Core enum case.
-pub fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
+fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
     family := false
     loop row in CORE_ENUM_PAYLOAD_ROWS {
         if row.enum_name != name -> next
@@ -201,146 +304,31 @@ pub fn core_enum_variant_payload(name: String, variant: String) -> [Type]? {
     declared :: core_enum_variants(name) ?? return None
     if declared.contains(variant) -> Val([Type]{}) else -> None
 }
-fn core_module_source_declaration_line(source_text: String, module_name: String) -> String? {
-    prefix := "module {module_name} "
-    source_bytes := source_text.bytes()
-    line_start := 0
-    loop line_start < source_bytes.len() {
-        line_end := line_start
-        loop line_end < source_bytes.len() && source_bytes[line_end] != (U8{10}) -> line_end += 1
-        line :: String.from_bytes(source_bytes[line_start..<line_end]) ?? return None
-        trimmed := line.trim()
-        if trimmed.starts_with(prefix) -> return Val(trimmed)
-        line_start = line_end + 1
-    }
-    None
-}
 
-fn core_module_source_brace_clause(line: String, name: String) -> String? {
-    prefix := "{name} {{"
-    parts := line.split(prefix).to_list()
-    if parts.len() != 2 -> return None
-    bytes := parts[1].bytes()
-    end := 0
-    loop end < bytes.len() {
-        if bytes[end] == (U8{125}) {
-            return Val(String.from_bytes(bytes[0..<end]) ?? "")
-        }
-        end += 1
-    }
-    None
-}
-
-fn core_module_source_bracket_clause(line: String, name: String) -> String? {
-    prefix := "{name} ["
-    parts := line.split(prefix).to_list()
-    if parts.len() != 2 -> return None
-    bytes := parts[1].bytes()
-    end := 0
-    loop end < bytes.len() {
-        if bytes[end] == (U8{93}) {
-            return Val(String.from_bytes(bytes[0..<end]) ?? "")
-        }
-        end += 1
-    }
-    None
-}
-
-fn core_module_source_names(text: String) -> [String] Never! {
-    names := [String]{}
-    if text.trim() == "" -> return names
-    loop part in text.split(",") {
-        name := part.trim()
-        if name != "" -> &names.push(name)
-    }
-    names
-}
-
-fn core_module_source_names_equal(left: [String], right: [String]) -> Bool Never! {
-    if left.len() != right.len() -> return false
-    loop index in 0..<left.len() {
-        if left[index] != right[index] -> return false
-    }
-    true
-}
-
-fn core_module_source_leaf_kind(text: String) -> CoreLeafKind? {
-    value := text.trim()
-    if value == "plain" -> return Val(CoreLeafKind.Plain)
-    if value == "crypto_nominal" -> return Val(CoreLeafKind.CryptoNominal)
-    if value.starts_with("plain(") && value.ends_with(")") {
-        bytes := value.bytes()
-        variants_text :: String.from_bytes(bytes[6..<bytes.len() - 1]) ?? return None
-        variants := [String]{}
-        if variants_text.trim() != "" {
-            loop variant in variants_text.split("|") {
-                name := variant.trim()
-                if name == "" -> return None
-                &variants.push(name)
-            }
-        }
-        return Val(CoreLeafKind.Enum{variants: variants})
-    }
-    if value.starts_with("generic(") && value.ends_with(")") {
-        bytes := value.bytes()
-        arity_text :: String.from_bytes(bytes[8..<bytes.len() - 1]) ?? return None
-        arity :: Int.parse(arity_text.trim()) ?? return None
-        if arity < 0 -> return None
-        return Val(CoreLeafKind.Generic{arity: arity})
-    }
-    None
-}
-
-fn core_module_source_type_export(text: String) -> CoreModuleTypeExport? {
-    parts := text.split(":").to_list()
-    if parts.len() != 2 -> return None
-    name := parts[0].trim()
-    if name == "" -> return None
-    kind :: core_module_source_leaf_kind(parts[1]) ?? return None
-    Val(CoreModuleTypeExport{name: name, kind: kind})
-}
-
-// Parse the generated module declaration syntax directly from canonical
-// Prelude/Core.jet text. Export-name rows cross-check this specialized view.
-pub fn core_module_declaration_from_source(source_text: String, module_name: String) -> CoreModuleDeclaration? {
-    registry :: core_module_export(module_name) ?? return None
-    line :: core_module_source_declaration_line(source_text, module_name) ?? return None
-    exports :: core_module_source_brace_clause(line, "exports") ?? return None
-    type_text :: core_module_source_brace_clause(line, "types") ?? return None
-    dependency_text :: core_module_source_bracket_clause(line, "depends_on") ?? return None
-    members := core_module_source_names(exports)
-    if !core_module_source_names_equal(members, registry.members) -> return None
-    type_exports := [CoreModuleTypeExport]{}
-    type_names := [String]{}
-    if type_text.trim() != "" {
-        loop raw in type_text.split(",") {
-            row :: core_module_source_type_export(raw) ?? return None
-            &type_names.push(row.name)
-            &type_exports.push(row)
-        }
-    }
-    if !core_module_source_names_equal(type_names, registry.type_exports) -> return None
-    Val(CoreModuleDeclaration{
-        module_name: module_name,
-        members: members,
-        type_exports: type_exports,
-        dependencies: core_module_source_names(dependency_text),
-    })
+// The variants of the enum `name` that the Core module `module_name` exports:
+// the module's catalog row authenticates the export, and the generator keeps
+// every enum leaf's variant list identical across the modules that export it.
+// `None` when that module does not export `name` or `name` is not an enum.
+fn core_module_enum_variants(module_name: String, name: String) -> [String]? {
+    if !core_module_has_type(module_name, name) -> return None
+    if core_enum_payload_variants(name) == .Val(variants) -> return Val(variants)
+    core_enum_variants(name)
 }
 
 // One field of a builtin Core record (Rust `core_struct_field`); rows are
 // generated into CoreRecordRows.jet in the oracle's first-match order.
-pub struct CoreRecordFieldRow {
-    pub owner: String
-    pub field: String
-    pub ty: Type
+struct CoreRecordFieldRow {
+    owner: String
+    field: String
+    ty: Type
 }
 
 // The declared field list of a Core record users can build with a struct
 // literal (Rust `core_constructable_fields`), in declaration order.
-pub struct CoreRecordLiteralRow {
-    pub owner: String
-    pub fields: [TypeTupleField]
+struct CoreRecordLiteralRow {
+    owner: String
+    fields: [TypeTupleField]
+    core_only: Bool{false}
 }
 
 // Corelib nominal types carry a source identity; the record oracle is keyed
@@ -351,7 +339,7 @@ fn core_record_leaf(owner: String) -> String Never! {
     "{parts[parts.len() - 1]}"
 }
 
-pub fn core_record_field(owner: String, field: String) -> Type? {
+fn core_record_field(owner: String, field: String) -> Type? {
     core_record_field_in(CORE_RECORD_FIELD_ROWS, core_record_leaf(owner), field)
 }
 
@@ -363,8 +351,16 @@ fn core_record_field_in(rows: [CoreRecordFieldRow], owner: String, field: String
     None
 }
 
-pub fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
+fn core_record_literal_fields(owner: String) -> [TypeTupleField]? {
     core_record_literal_fields_in(CORE_RECORD_LITERAL_ROWS, core_record_leaf(owner))
+}
+
+fn core_record_literal_is_core_only(owner: String) -> Bool Never! {
+    leaf :: core_record_leaf(owner)
+    loop row in CORE_RECORD_LITERAL_ROWS {
+        if row.owner == leaf -> return row.core_only
+    }
+    false
 }
 
 fn core_record_literal_fields_in(rows: [CoreRecordLiteralRow], owner: String) -> [TypeTupleField]? {

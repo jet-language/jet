@@ -1,0 +1,49 @@
+// HTTPServer.rs:6350-6354 / frozen seed183042-45: Any0, List1(Vec<Text>).
+// Native Origins16 owns no child for Any, and a sequence24 of E4 owners for
+// List. Policy embeds these two words; child helpers never free that shell.
+HTTP_CORS_ORIGINS_BYTES :: prep { I64{16} }
+HTTP_CORS_ORIGINS_TAG :: prep { I64{0} }
+HTTP_CORS_ORIGINS_PAYLOAD :: prep { I64{8} }
+HTTP_CORS_TEXT_STRIDE :: prep { I64{8} }
+fn http_cors_origins_ordinal(value: I64) -> I64 {
+    ordinal :: encoding_word(value + HTTP_CORS_ORIGINS_TAG)
+    if (ordinal < I64{0} || ordinal > I64{1}) -> rt_record_variant_panic()
+    ordinal
+}
+fn http_cors_text_list_clone(value: I64) -> I64 {
+    length :: data_tree_word(value + DATA_SEQUENCE_LENGTH)
+    result :: data_sequence_new(length, HTTP_CORS_TEXT_STRIDE)
+    source :: data_tree_word(value + DATA_SEQUENCE_DATA)
+    target :: data_tree_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        offset :: at * HTTP_CORS_TEXT_STRIDE
+        data_tree_store(target + offset, jet_rt_string_clone(data_tree_word(source + offset)))
+        at += I64{1}
+    }
+    data_tree_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+fn http_cors_origins_copy(source: I64, target: I64) {
+    ordinal :: http_cors_origins_ordinal(source)
+    payload :: if (ordinal == I64{1}) -> http_cors_text_list_clone(encoding_word(source + HTTP_CORS_ORIGINS_PAYLOAD)) else -> I64{0}
+    encoding_store(target + HTTP_CORS_ORIGINS_TAG, ordinal)
+    encoding_store(target + HTTP_CORS_ORIGINS_PAYLOAD, payload)
+}
+fn http_cors_origins_drop_child(value: I64) {
+    if (http_cors_origins_ordinal(value) == I64{1}) {
+        list :: encoding_word(value + HTTP_CORS_ORIGINS_PAYLOAD)
+        coll_text_list_drop(list, true)
+        jet_rt_free(list, DATA_SEQUENCE_BYTES, I64{8})
+    }
+}
+#Export(c) fn jet_rt_handle_clone_jet_http_cors_origins(value: I64) -> I64 {
+    result :: jet_rt_alloc(HTTP_CORS_ORIGINS_BYTES, I64{8})
+    http_cors_origins_copy(value, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_http_cors_origins(value: I64) {
+    if (value == I64{0}) -> return
+    http_cors_origins_drop_child(value)
+    jet_rt_free(value, HTTP_CORS_ORIGINS_BYTES, I64{8})
+}

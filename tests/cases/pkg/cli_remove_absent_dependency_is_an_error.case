@@ -1,0 +1,13 @@
+# Port of tests/pkg.rs:5753-5784; no mutation allowed, byte identity compared to original manifest.
+# PENDING-GRAMMAR(batch-four): mkdir.
+fixture: fixtures/minimal
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: package.jet before-package.jet
+step: jet remove json
+exit: nonzero
+stderr: ~ "json" # original predicate
+stderr: ~ "not present" # original predicate
+stdout: !~ "removed" # original predicate
+stdout: !~ "fetched" # original predicate
+file: package.jet == before-package.jet

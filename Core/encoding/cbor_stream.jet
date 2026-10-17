@@ -1,0 +1,751 @@
+// Private core.encoding part. Native authority: EncodingStream.rs
+// CBORReader::{read_byte,arg,payload,string,retain_key,close_event,next_event}
+// CBORWriter::{scalar,accept,write_key,close_array,close_object,write_event,
+// flush_output,finish_output}. Only existing file and allocation leaves cross
+// the host boundary. The old byte-array cbor.jet reader is not this contract.
+use core.encoding.[DataEvent, EncodingCause, EncodingError, EncodingErrorKind, EncodingLimits]
+use core.encoding as encoding
+use core.files.[FileReader, FileWriter]
+use core.mem as mem
+use core.math as math
+use __core_encoding_stream as stream
+use __core_encoding_cbor_parse as parser
+
+fn error(kind: EncodingErrorKind, offset: Int, path: String, reason: String) -> EncodingError Never! {
+    EncodingError{format: .CBOR, kind: kind, byte_offset: offset, line: None, column: None, path: path, reason: reason, cause: None}
+}
+
+fn io_error(offset: Int, path: String, cause: EncodingCause) -> EncodingError Never! {
+    out := error(.IO, offset, path, "file IO failed")
+    out.cause = Val(cause)
+    out
+}
+
+fn allocation_error(failure: stream.__ReserveFailure, offset: Int, path: String, reason: String) -> EncodingError Never! {
+    if failure == .Heap -> error(.Limit, offset, path, "CBOR stream heap exceeded the bounded codec heap ceiling")
+    else -> error(.Limit, offset, path, reason)
+}
+
+fn reserve<T>(allocation: stream.AllocationBudget, values: &[T], additional: Int, offset: Int, path: String, reason: String) -> Int EncodingError! {
+    old :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
+    stream.__reserve_checked<T>(allocation, &values, additional) ?? return Err(allocation_error(err, offset, path, reason))
+    Ok(mem.__list_capacity<T>(values) * mem.__type_size<T>() - old)
+}
+
+// Reset through an edit borrow so terminal cleanup works for both local buffers
+// and reader/writer frame storage without moving an owner out of borrowed self.
+fn release<T>(allocation: stream.AllocationBudget, values: &[T]) Never! {
+    size :: mem.__list_capacity<T>(values) * mem.__type_size<T>()
+    values = [T]{}
+    allocation.release(size)
+}
+
+fn limits_checked(limits: EncodingLimits) EncodingError! {
+    stream.validate_limits(limits) ?? {
+        out := err
+        out.format = .CBOR
+        out.line = None
+        out.column = None
+        return Err(out)
+    }
+}
+
+struct ReadFrame {
+    object: Bool
+    remaining: U64?
+    index: U64
+    expecting_key: Bool
+    key: U64?
+    keys: [String]
+    keys_heap: U64
+}
+
+struct CBORPull {
+    input: FileReader
+    limits: EncodingLimits
+    total: Int
+    terminal: EncodingError?
+    eof: Bool
+    root_done: Bool
+    lookahead: U8?
+    frames: [ReadFrame]
+    retained: Int
+    allocation: stream.AllocationBudget
+
+    fn discard(&self) Never! {
+        nested := 0
+        loop frame in self.frames -> nested += Int.from_u64(frame.keys_heap)
+        self.allocation.release(nested)
+        release<ReadFrame>(self.allocation, &self.frames)
+        self.retained = 0
+    }
+
+    fn fail(&self, ^failure: EncodingError) -> EncodingError Never! {
+        if self.terminal == .Val(first) -> return first.copy()
+        &self.discard()
+        self.terminal = Val(failure.copy())
+        failure
+    }
+
+    fn path(self) -> String Never! {
+        out := "$"
+        loop frame in self.frames {
+            if !frame.object -> out = "{out}[{frame.index}]"
+            else if !frame.expecting_key && frame.key == .Val(key) -> out = "{out}[{frame.keys[Int.from_u64(key)]:Debug}]"
+        }
+        out
+    }
+
+    fn read_byte(&self) -[IO, Time.Wait]> U8? EncodingError! {
+        if self.lookahead == .Val(byte) {
+            self.lookahead = None
+            return Ok(Val(byte))
+        }
+        byte := U8?{None}
+        if encoding.__read_byte(&self.input) == {
+            .Ok(value) -> { byte = value }
+            .Err(cause) -> { return Err(io_error(self.total, self.path(), cause)) }
+        }
+        if byte == None -> return Ok(None)
+        if self.limits.max_total_bytes == .Val(maximum) {
+            if self.total >= maximum -> return Err(error(.Limit, self.total, self.path(), "max_total_bytes {maximum} exceeded"))
+        }
+        self.total += 1
+        Ok(byte)
+    }
+
+    fn required(&self, start: Int, reason: String) -[IO, Time.Wait]> U8 EncodingError! {
+        found :: &self.read_byte()
+        offset :: if self.total > start -> self.total else -> start
+        Ok(found ?? return Err(error(.Truncated, offset, self.path(), reason)))
+    }
+
+    fn argument(&self, additional: Int, start: Int) -[IO, Time.Wait]> U64? EncodingError! {
+        if additional < 24 -> return Ok(Val(U64{additional}))
+        if additional == 31 -> return Ok(None)
+        width :: if additional == 24 -> 1 else if additional == 25 -> 2 else if additional == 26 -> 4 else if additional == 27 -> 8 else -> 0
+        if width == 0 -> return Err(error(.Syntax, start, self.path(), "reserved CBOR additional value {additional}"))
+        value := U64{0}
+        loop _ in 0..<width {
+            byte :: &self.required(start, "CBOR argument ended before all bytes were present") ?? return Err(err)
+            value = (value << 8).bit_or(U64{Int.from_u8(byte)})
+        }
+        Ok(Val(value))
+    }
+
+    fn grow_payload(&self, bytes: &[U8]) EncodingError! {
+        capacity :: mem.__list_capacity<U8>(bytes)
+        if bytes.len() < capacity -> return
+        next :: if capacity == 0 -> 8 else -> capacity * 2
+        additional :: next - bytes.len()
+        _ :: reserve<U8>(self.allocation, &bytes, additional, self.total, self.path(), "CBOR payload allocation failed") ?? return Err(err)
+    }
+
+    fn payload(&self, length: U64, start: Int) -[IO, Time.Wait]> [U8] EncodingError! {
+        if length > (U64{self.limits.max_item_bytes}) || Int.from_u64(length) + self.retained > self.limits.max_item_bytes {
+            return Err(error(.Limit, start, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+        }
+        out := [U8]{}
+        loop _ in 0..<Int.from_u64(length) {
+            &self.grow_payload(&out) ?? return Err(err)
+            byte :: &self.required(start, "CBOR payload ended before its declared length") ?? {
+                release<U8>(self.allocation, &out)
+                return Err(err)
+            }
+            &out.push(byte)
+        }
+        self.allocation.release(mem.__list_capacity<U8>(out))
+        Ok(out)
+    }
+
+    fn string(&self, major: Int, additional: Int, start: Int) -[IO, Time.Wait]> [U8] EncodingError! {
+        length :: &self.argument(additional, start)
+        if length == .Val(count) -> return &self.payload(count, start)
+        if self.frames.len() + 1 > self.limits.max_depth -> return Err(error(.Limit, start, self.path(), "max_depth {self.limits.max_depth} exceeded"))
+        out := [U8]{}
+        loop {
+            chunk :: self.total
+            head :: &self.required(chunk, "indefinite CBOR string ended before break") ?? {
+                release<U8>(self.allocation, &out)
+                return Err(err)
+            }
+            if head == (U8{255}) -> break
+            byte :: Int.from_u8(head)
+            if (byte >> 5) != major || (byte.bit_and(31)) == 31 {
+                release<U8>(self.allocation, &out)
+                return Err(error(.Syntax, chunk, self.path(), "indefinite CBOR string contains a wrong or indefinite chunk"))
+            }
+            count :: if &self.argument(byte.bit_and(31), chunk) == {
+                .Ok(value) -> value
+                .Err(failure) -> {
+                    release<U8>(self.allocation, &out)
+                    return Err(failure)
+                }
+            }
+            n :: count ?? {
+                release<U8>(self.allocation, &out)
+                return Err(error(.Syntax, chunk, self.path(), "indefinite CBOR string contains a wrong or indefinite chunk"))
+            }
+            if Int.from_u64(n) + self.retained + out.len() > self.limits.max_item_bytes {
+                release<U8>(self.allocation, &out)
+                return Err(error(.Limit, chunk, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+            }
+            loop _ in 0..<Int.from_u64(n) {
+                &self.grow_payload(&out) ?? return Err(err)
+                value :: &self.required(chunk, "CBOR payload ended before its declared length") ?? {
+                    release<U8>(self.allocation, &out)
+                    return Err(err)
+                }
+                &out.push(value)
+            }
+        }
+        self.allocation.release(mem.__list_capacity<U8>(out))
+        Ok(out)
+    }
+
+    fn retain_key(&self, text: String, start: Int) -> U64 EncodingError! {
+        at :: self.frames.len() - 1
+        loop old in self.frames[at].keys {
+            if old == text -> return Err(error(.Unsupported, start, self.path(), "duplicate CBOR text map key"))
+        }
+        stored := [U8]{}
+        _ :: reserve<U8>(self.allocation, &stored, text.count_bytes(), start, self.path(), "CBOR map key allocation failed") ?? return Err(err)
+        capacity :: mem.__list_capacity<U8>(stored)
+        loop i in 0..<text.count_bytes() -> &stored.push(stream.byte_at(text, i))
+        key := ""
+        #Unsafe("the retained key copies exactly the already validated text bytes") {
+            key = encoding.__bytes_into_text(^stored)
+        }
+        path :: self.path()
+        growth :: reserve<String>(self.allocation, &self.frames[at].keys, 1, start, path, "CBOR map key table allocation failed") ?? {
+            self.allocation.release(capacity)
+            return Err(err)
+        }
+        index :: self.frames[at].keys.len()
+        &self.frames[at].keys.push(^key)
+        self.frames[at].keys_heap += U64{capacity + growth}
+        Ok(U64{index})
+    }
+
+    fn complete_parent(&self) Never! {
+        if self.frames.len() == 0 -> return
+        at :: self.frames.len() - 1
+        if !self.frames[at].object || !self.frames[at].expecting_key {
+            if self.frames[at].remaining == .Val(n) -> self.frames[at].remaining = Val(if n == (U64{0}) -> U64{0} else -> n - 1)
+            if !self.frames[at].object -> self.frames[at].index += 1
+            else {
+                self.frames[at].expecting_key = true
+                self.frames[at].key = None
+            }
+        }
+    }
+
+    fn close_event(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
+        if self.frames.len() == 0 -> return Ok(None)
+        at :: self.frames.len() - 1
+        eligible :: !self.frames[at].object || self.frames[at].expecting_key
+        if !eligible -> return Ok(None)
+        close := self.frames[at].remaining == (Val(U64{0}))
+        if self.frames[at].remaining == None {
+            byte :: &self.read_byte()
+            if byte == (Val(U8{255})) -> close = true else -> self.lookahead = byte
+        }
+        if !close -> return Ok(None)
+        frame :: &self.frames.pop() ?? panic("checked CBOR frame")
+        if frame.object {
+            bytes := 0
+            loop key in frame.keys -> bytes += key.count_bytes()
+            self.retained -= bytes
+            self.allocation.release(Int.from_u64(frame.keys_heap))
+        }
+        &self.complete_parent()
+        if self.frames.len() == 0 -> self.root_done = true
+        Ok(Val(if frame.object -> DataEvent.ObjectEnd else -> DataEvent.ArrayEnd))
+    }
+
+    fn float(&self, additional: Int, start: Int) -[IO, Time.Wait]> Float EncodingError! {
+        width :: if additional == 25 -> 2 else if additional == 26 -> 4 else -> 8
+        name :: if width == 2 -> "Float16" else if width == 4 -> "Float32" else -> "Float64"
+        bits := 0
+        loop i in 0..<width {
+            raw_byte :: &self.required(start, "truncated CBOR {name}") ?? return Err(err)
+            byte :: Int.from_u8(raw_byte)
+            if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
+            else -> bits = (bits << 8).bit_or(byte)
+        }
+        Ok(if width == 2 -> parser.widen_float(bits, 5, 10) else if width == 4 -> parser.widen_float(bits, 8, 23) else -> math.from_bits(bits))
+    }
+
+    fn next_inner(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
+        if self.eof -> return Ok(None)
+        closed :: &self.close_event()
+        if closed != None -> return Ok(Val(closed))
+        if self.root_done {
+            found :: &self.read_byte()
+            if found == None {
+                self.eof = true
+                return Ok(None)
+            }
+            return Err(error(.Syntax, self.total - 1, "$", "trailing CBOR data after root value"))
+        }
+        start :: if self.lookahead != None -> self.total - 1 else -> self.total
+        next :: &self.read_byte()
+        if next == None {
+            if self.frames.len() == 0 {
+                self.eof = true
+                return Ok(None)
+            }
+            return Err(error(.Truncated, self.total, self.path(), "CBOR container ended before all items were present"))
+        }
+        head :: Int.from_u8(next)
+        if head == 255 -> return Err(error(.Syntax, start, self.path(), "CBOR break outside an indefinite container"))
+        major :: head >> 5
+        additional :: head.bit_and(31)
+        key_expected :: self.frames.len() > 0 && self.frames[self.frames.len() - 1].object && self.frames[self.frames.len() - 1].expecting_key
+        if key_expected && major != 3 -> return Err(error(.Unsupported, start, self.path(), "CBOR map key must be text"))
+        event := DataEvent.Null
+        if major == 0 || major == 1 {
+            value :: &self.argument(additional, start)
+            n :: value ?? return Err(error(.Syntax, start, self.path(), "indefinite CBOR integer"))
+            if n > (U64{9223372036854775807}) -> return Err(error(.Unsupported, start, self.path(), "CBOR integer is outside Jet Int"))
+            integer :: Int.from_u64(n)
+            event = DataEvent.Int(if major == 0 -> integer else -> -integer - 1)
+        } else if major == 2 || major == 3 {
+            bytes := &self.string(major, additional, start) ?? return Err(err)
+            if major == 2 -> event = DataEvent.Bytes(^bytes)
+            else {
+                encoding.__utf8_validate(bytes) ?? return Err(error(.Syntax, start, self.path(), "CBOR text is not UTF-8"))
+                text := ""
+                #Unsafe("the exact CBOR text allocation passed strict UTF-8 validation") { text = encoding.__bytes_into_text(^bytes) }
+                if key_expected {
+                    if self.retained + text.count_bytes() * 2 > self.limits.max_item_bytes -> return Err(error(.Limit, start, self.path(), "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+                    index :: &self.retain_key(text, start) ?? return Err(err)
+                    self.retained += text.count_bytes()
+                    at :: self.frames.len() - 1
+                    self.frames[at].key = Val(index)
+                    self.frames[at].expecting_key = false
+                    return Ok(Val(DataEvent.Key(^text)))
+                }
+                event = DataEvent.Text(^text)
+            }
+        } else if major == 4 || major == 5 {
+            if self.frames.len() + 1 > self.limits.max_depth -> return Err(error(.Limit, start, self.path(), "max_depth {self.limits.max_depth} exceeded"))
+            count :: &self.argument(additional, start)
+            if self.frames.len() == mem.__list_capacity<ReadFrame>(self.frames) {
+                path :: self.path()
+                _ :: reserve<ReadFrame>(self.allocation, &self.frames, 1, start, path, "CBOR reader frame allocation failed") ?? return Err(err)
+            }
+            &self.frames.push(ReadFrame{object: major == 5, remaining: count, index: U64{0}, expecting_key: true, key: None, keys: [String]{}, keys_heap: U64{0}})
+            return Ok(Val(if major == 4 -> DataEvent.ArrayStart else -> DataEvent.ObjectStart))
+        } else if major == 6 -> return Err(error(.Unsupported, start, self.path(), "CBOR tags are outside DataEvent"))
+        else {
+            if additional == 20 -> event = DataEvent.Bool(false)
+            else if additional == 21 -> event = DataEvent.Bool(true)
+            else if additional == 22 -> event = DataEvent.Null
+            else if additional >= 25 && additional <= 27 {
+                number :: &self.float(additional, start) ?? return Err(err)
+                event = DataEvent.Float(number)
+            } else { return Err(error(.Unsupported, start, self.path(), "unsupported CBOR simple value {additional}")) }
+        }
+        &self.complete_parent()
+        if self.frames.len() == 0 -> self.root_done = true
+        Ok(Val(event))
+    }
+
+    fn next(&self) -[IO, Time.Wait]> DataEvent? EncodingError! {
+        if self.terminal == .Val(first) -> return Err(first.copy())
+        value := DataEvent?{None}
+        if &self.next_inner() == {
+            .Ok(event) -> { value = event }
+            .Err(failure) -> { return Err(&self.fail(^failure)) }
+        }
+        if value == None && self.eof -> &self.discard()
+        Ok(value)
+    }
+}
+
+fn reader(input: ^FileReader, limits: EncodingLimits) -[FS]> CBORPull EncodingError! {
+    limits_checked(limits) ?? return Err(err)
+    Ok(CBORPull{input: ^input, limits: limits, total: 0, terminal: None, eof: false, root_done: false, lookahead: None, frames: [ReadFrame]{}, retained: 0, allocation: stream.budget(limits)})
+}
+
+struct WriteFrame {
+    object: Bool
+    items: [[U8]]
+    entries: [(key: [U8], value: [U8])]
+    key: [U8]?
+}
+
+fn length_size(n: Int) -> Int Never! {
+    if n < 24 -> 1 else if n <= 255 -> 2 else if n <= 65535 -> 3 else if n <= 4294967295 -> 5 else -> 9
+}
+
+fn uint(out: &[U8], value: Int, width: Int) Never! {
+    loop i in 0..<width -> &out.push(U8{(value >> ((width - i - 1) * 8)).bit_and(255)})
+}
+
+fn length(out: &[U8], major: Int, n: Int) Never! {
+    size :: length_size(n)
+    if size == 1 -> &out.push(U8{(major << 5).bit_or(n)})
+    else {
+        &out.push(U8{(major << 5).bit_or((if size == 2 -> 24 else if size == 3 -> 25 else if size == 5 -> 26 else -> 27))})
+        uint(&out, n, size - 1)
+    }
+}
+
+fn float_width(value: Float) -> Int Never! {
+    bits :: math.to_bits(value)
+    if parser.narrow_bits(bits, 5, 10) != None -> 2 else if parser.narrow_bits(bits, 8, 23) != None -> 4 else -> 8
+}
+
+fn preferred_float(out: &[U8], value: Float) Never! {
+    bits :: math.to_bits(value)
+    if parser.narrow_bits(bits, 5, 10) == .Val(half) {
+        &out.push(U8{249})
+        uint(&out, half, 2)
+    } else if parser.narrow_bits(bits, 8, 23) == .Val(single) {
+        &out.push(U8{250})
+        uint(&out, single, 4)
+    } else {
+        &out.push(U8{251})
+        uint(&out, bits, 8)
+    }
+}
+
+fn byte_before(left: [U8], right: [U8]) -> Bool Never! {
+    n :: if left.len() < right.len() -> left.len() else -> right.len()
+    loop i in 0..<n {
+        if left[i] != right[i] -> return left[i] < right[i]
+    }
+    left.len() < right.len()
+}
+
+// In-place heapsort: native close_object sorts its existing entry table
+// without allocating a second key/index table or copying encoded payloads.
+fn sift_entries(entries: &[(key: [U8], value: [U8])], root: Int, end: Int) Never! {
+    at := root
+    loop at * 2 + 1 < end {
+        child := at * 2 + 1
+        if child + 1 < end && byte_before(entries[child].key, entries[child + 1].key) -> child += 1
+        if !byte_before(entries[at].key, entries[child].key) -> return
+        &entries.__swap(at, child)
+        at = child
+    }
+}
+
+fn sort_entries(entries: &[(key: [U8], value: [U8])]) Never! {
+    start := entries.len() /% 2
+    loop start > 0 {
+        start -= 1
+        end :: entries.len()
+        sift_entries(&entries, start, end)
+    }
+    end := entries.len()
+    loop end > 1 {
+        end -= 1
+        &entries.__swap(0, end)
+        sift_entries(&entries, 0, end)
+    }
+}
+
+fn frame_heap(frame: WriteFrame) -> Int Never! {
+    total := 0
+    if frame.object {
+        total = mem.__list_capacity<(key: [U8], value: [U8])>(frame.entries) * mem.__type_size<(key: [U8], value: [U8])>()
+        loop entry in frame.entries -> total += mem.__list_capacity<U8>(entry.key) + mem.__list_capacity<U8>(entry.value)
+        if frame.key == .Val(key) -> total += mem.__list_capacity<U8>(key)
+    } else {
+        total = mem.__list_capacity<[U8]>(frame.items) * mem.__type_size<[U8]>()
+        loop item in frame.items -> total += mem.__list_capacity<U8>(item)
+    }
+    total
+}
+
+struct CBORPush {
+    output: FileWriter
+    limits: EncodingLimits
+    terminal: EncodingError?
+    total: Int
+    frames: [WriteFrame]
+    root_written: Bool
+    finished: Bool
+    retained: Int
+    allocation: stream.AllocationBudget
+
+    fn discard(&self) Never! {
+        nested := 0
+        loop frame in self.frames -> nested += frame_heap(frame)
+        self.allocation.release(nested)
+        release<WriteFrame>(self.allocation, &self.frames)
+        self.retained = 0
+    }
+
+    fn fail(&self, ^failure: EncodingError) -> EncodingError Never! {
+        if self.terminal == .Val(first) -> return first.copy()
+        &self.discard()
+        self.terminal = Val(failure.copy())
+        failure
+    }
+
+    fn replacement(self, old: Int, size: Int) EncodingError! {
+        if self.retained - old + size > self.limits.max_item_bytes -> return Err(error(.Limit, self.total, "$", "max_item_bytes {self.limits.max_item_bytes} exceeded"))
+    }
+
+    fn allocate(self, size: Int) -> [U8] EncodingError! {
+        out := [U8]{}
+        _ :: reserve<U8>(self.allocation, &out, size, self.total, "$", "CBOR item allocation failed") ?? return Err(err)
+        Ok(out)
+    }
+
+    fn scalar(self, event: DataEvent) -> [U8] EncodingError! {
+        payload := 0
+        header := 1
+        if event == {
+            .Text(text) -> {
+                payload = text.count_bytes()
+                header = length_size(payload)
+            }
+            .Bytes(bytes) -> {
+                payload = bytes.len()
+                header = length_size(payload)
+            }
+            .Float(value) -> payload = float_width(value)
+            .Int(value) -> header = length_size(if value >= 0 -> value else -> -(value + 1))
+            .Null | .Bool(_) -> {}
+            else -> return Err(error(.State, self.total, "$", "CBOR container event reached scalar encoder"))
+        }
+        size :: header + payload
+        self.replacement(0, size) ?? return Err(err)
+        out := self.allocate(size) ?? return Err(err)
+        if event == {
+            .Null -> &out.push(U8{246})
+            .Bool(value) -> &out.push(if value -> U8{245} else -> U8{244})
+            .Int(value) -> length(&out, if value >= 0 -> 0 else -> 1, if value >= 0 -> value else -> -(value + 1))
+            .Float(value) -> preferred_float(&out, value)
+            .Text(text) -> {
+                length(&out, 3, text.count_bytes())
+                loop i in 0..<text.count_bytes() -> &out.push(stream.byte_at(text, i))
+            }
+            .Bytes(bytes) -> {
+                length(&out, 2, bytes.len())
+                loop byte in bytes -> &out.push(byte)
+            }
+            else -> panic("checked CBOR scalar")
+        }
+        Ok(out)
+    }
+
+    fn accept(&self, ^input: [U8]) EncodingError! -[IO, Time.Wait]> {
+        bytes := ^input
+        size :: bytes.len()
+        self.replacement(0, size) ?? {
+            release<U8>(self.allocation, &bytes)
+            return Err(err)
+        }
+        if self.frames.len() > 0 {
+            at :: self.frames.len() - 1
+            if self.frames[at].object {
+                if self.frames[at].key == None {
+                    release<U8>(self.allocation, &bytes)
+                    return Err(error(.State, self.total, "$", "CBOR object value written before Key"))
+                }
+                _ :: reserve<(key: [U8], value: [U8])>(self.allocation, &self.frames[at].entries, 1, self.total, "$", "CBOR object table allocation failed") ?? {
+                    release<U8>(self.allocation, &bytes)
+                    return Err(err)
+                }
+                frame := &self.frames.pop() ?? panic("checked CBOR object")
+                key :: ^frame.key ?? panic("checked CBOR key")
+                frame.key = None
+                &frame.entries.push((key: ^key, value: ^bytes))
+                &self.frames.push(^frame)
+            } else {
+                _ :: reserve<[U8]>(self.allocation, &self.frames[at].items, 1, self.total, "$", "CBOR array table allocation failed") ?? {
+                    release<U8>(self.allocation, &bytes)
+                    return Err(err)
+                }
+                &self.frames[at].items.push(^bytes)
+            }
+            self.retained += size
+            return
+        }
+        if self.root_written {
+            release<U8>(self.allocation, &bytes)
+            return Err(error(.State, self.total, "$", "CBOR writer accepts exactly one root"))
+        }
+        if self.limits.max_total_bytes == .Val(maximum) {
+            if self.total + size > maximum {
+                release<U8>(self.allocation, &bytes)
+                return Err(error(.Limit, self.total, "$", "max_total_bytes {maximum} exceeded"))
+            }
+        }
+        window :: bytes[0..<bytes.len()]
+        encoding.__write_bytes(&self.output, window) ?? {
+            release<U8>(self.allocation, &bytes)
+            return Err(io_error(self.total, "$", err))
+        }
+        self.total += size
+        self.root_written = true
+        release<U8>(self.allocation, &bytes)
+    }
+
+    fn write_key(&self, text: String) EncodingError! {
+        at :: self.frames.len() - 1
+        if at < 0 || !self.frames[at].object || self.frames[at].key != None -> return Err(error(.State, self.total, "$", "Key outside CBOR object or before prior value"))
+        size :: length_size(text.count_bytes()) + text.count_bytes()
+        self.replacement(0, size) ?? return Err(err)
+        encoded := self.allocate(size) ?? return Err(err)
+        length(&encoded, 3, text.count_bytes())
+        loop i in 0..<text.count_bytes() -> &encoded.push(stream.byte_at(text, i))
+        loop entry in self.frames[at].entries {
+            if entry.key == encoded {
+                release<U8>(self.allocation, &encoded)
+                return Err(error(.Unsupported, self.total, "$", "duplicate CBOR text map key"))
+            }
+        }
+        self.frames[at].key = Val(^encoded)
+        self.retained += size
+    }
+
+    fn close_frame(&self, ^input: WriteFrame) EncodingError! -[IO, Time.Wait]> {
+        frame := ^input
+        heap :: frame_heap(frame)
+        old := 0
+        if frame.object {
+            loop entry in frame.entries -> old += entry.key.len() + entry.value.len()
+        } else {
+            loop item in frame.items -> old += item.len()
+        }
+        count :: if frame.object -> frame.entries.len() else -> frame.items.len()
+        size :: length_size(count) + old
+        self.replacement(old, size) ?? {
+            frame = WriteFrame{object: false, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None}
+            self.retained -= old
+            self.allocation.release(heap)
+            return Err(err)
+        }
+        if frame.object -> sort_entries(&frame.entries)
+        out := self.allocate(size) ?? {
+            frame = WriteFrame{object: false, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None}
+            self.retained -= old
+            self.allocation.release(heap)
+            return Err(err)
+        }
+        length(&out, if frame.object -> 5 else -> 4, count)
+        if frame.object {
+            loop entry in frame.entries {
+                loop byte in entry.key -> &out.push(byte)
+                loop byte in entry.value -> &out.push(byte)
+            }
+        } else {
+            loop item in frame.items { loop byte in item -> &out.push(byte) }
+        }
+        frame = WriteFrame{object: false, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None}
+        self.retained -= old
+        self.allocation.release(heap)
+        &self.accept(^out)
+    }
+
+    fn write_inner(&self, event: DataEvent) EncodingError! -[IO, Time.Wait]> {
+        if self.finished -> return Err(error(.State, self.total, "$", "write called after finish"))
+        if event == {
+            .ArrayStart | .ObjectStart -> {
+                if self.frames.len() + 1 > self.limits.max_depth -> return Err(error(.Limit, self.total, "$", "max_depth {self.limits.max_depth} exceeded"))
+                _ :: reserve<WriteFrame>(self.allocation, &self.frames, 1, self.total, "$", "CBOR writer frame allocation failed") ?? return Err(err)
+                &self.frames.push(WriteFrame{object: event == .ObjectStart, items: [[U8]]{}, entries: [(key: [U8], value: [U8])]{}, key: None})
+            }
+            .Key(text) -> &self.write_key(text) ?? return Err(err)
+            .ArrayEnd -> {
+                at :: self.frames.len() - 1
+                if at < 0 || self.frames[at].object -> return Err(error(.State, self.total, "$", "ArrayEnd does not match open CBOR container"))
+                frame :: &self.frames.pop() ?? panic("checked CBOR array")
+                &self.close_frame(^frame) ?? return Err(err)
+            }
+            .ObjectEnd -> {
+                at :: self.frames.len() - 1
+                if at < 0 || !self.frames[at].object || self.frames[at].key != None -> return Err(error(.State, self.total, "$", "ObjectEnd does not match complete CBOR object"))
+                frame :: &self.frames.pop() ?? panic("checked CBOR object")
+                &self.close_frame(^frame) ?? return Err(err)
+            }
+            else -> {
+                bytes :: self.scalar(event) ?? return Err(err)
+                &self.accept(^bytes) ?? return Err(err)
+            }
+        }
+    }
+
+    fn write(&self, event: ^DataEvent) EncodingError! -[IO, Time.Wait]> {
+        if self.terminal == .Val(first) -> return Err(first.copy())
+        &self.write_inner(event) ?? return Err(&self.fail(^err))
+    }
+
+    fn flush(&self) EncodingError! -[IO, Time.Wait]> {
+        if self.terminal == .Val(first) -> return Err(first.copy())
+        encoding.__flush(&self.output) ?? return Err(&self.fail(io_error(self.total, "$", err)))
+    }
+
+    fn finish(&self) EncodingError! -[IO, Time.Wait]> {
+        if self.terminal == .Val(first) -> return Err(first.copy())
+        if self.finished -> return
+        if self.frames.len() != 0 || !self.root_written -> return Err(&self.fail(error(.State, self.total, "$", "finish requires one complete CBOR root")))
+        &self.flush() ?? return Err(err)
+        self.finished = true
+    }
+}
+
+fn writer(output: ^FileWriter, limits: EncodingLimits) -[FS]> CBORPush EncodingError! {
+    limits_checked(limits) ?? return Err(err)
+    Ok(CBORPush{output: ^output, limits: limits, terminal: None, total: 0, frames: [WriteFrame]{}, root_written: false, finished: false, retained: 0, allocation: stream.budget(limits)})
+}
+
+#Test("CBOR checked allocation maps heap and allocator failures distinctly") {
+    heap :: allocation_error(.Heap, 7, "$[0]", "CBOR item allocation failed")
+    failed :: allocation_error(.Allocation, 7, "$[0]", "CBOR item allocation failed")
+    assert_eq(heap.reason, "CBOR stream heap exceeded the bounded codec heap ceiling")
+    assert_eq(failed.reason, "CBOR item allocation failed")
+    assert_eq(heap.byte_offset, failed.byte_offset)
+    assert_eq(heap.path, failed.path)
+}
+
+#Test("CBOR buffer release resets borrowed storage and returns its heap charge") {
+    allocation :: stream.budget(EncodingLimits.safe())
+    values := [U8]{}
+    _ :: reserve<U8>(allocation, &values, 8, 0, "$", "test allocation failed") ?? panic("reserve")
+    &values.push(U8{7})
+    release<U8>(allocation, &values)
+    assert_eq(values.len(), 0)
+    assert_eq(mem.__list_capacity<U8>(values), 0)
+    guard :: allocation.state.guard_read()
+    assert_eq(guard.value.used, 0)
+}
+
+#Test("CBOR preferred float and definite length wire known answers") {
+    out := [U8]{}
+    preferred_float(&out, 1.5)
+    assert_eq(out, [U8]{249, 62, 0})
+    out = [U8]{}
+    preferred_float(&out, 100000.0)
+    assert_eq(out, [U8]{250, 71, 195, 80, 0})
+    out = [U8]{}
+    preferred_float(&out, 1.1)
+    assert_eq(out, [U8]{251, 63, 241, 153, 153, 153, 153, 153, 154})
+    out = [U8]{}
+    length(&out, 4, 24)
+    assert_eq(out, [U8]{152, 24})
+}
+
+#Test("CBOR entry heapsort preserves key order and paired payloads") {
+    entries := [(key: [U8], value: [U8])]{
+        (key: [U8]{3}, value: [U8]{30}),
+        (key: [U8]{1}, value: [U8]{10}),
+        (key: [U8]{2}, value: [U8]{20}),
+    }
+    sort_entries(&entries)
+    loop index in 0..<entries.len() {
+        assert_eq(entries[index].key, [U8]{U8{index + 1}})
+        assert_eq(entries[index].value, [U8]{U8{(index + 1) * 10}})
+    }
+    &entries.push((key: [U8]{0}, value: [U8]{0}))
+    sort_entries(&entries)
+    assert_eq(entries[0].key, [U8]{0})
+    assert_eq(entries[3].value, [U8]{30})
+}

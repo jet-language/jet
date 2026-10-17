@@ -16,7 +16,7 @@ enum ConfigGroup {
     }
 }
 
-pub fn cli_cmd_config(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_config(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     group_word :: parsed.positional.get(0) ?? ""
     group :: ConfigGroup.parse(group_word) ?? {
         theme.error("`jet os config {group_word}` isn't a command", "jet os config manages the env/dev trust store and sandbox substitute-or-refuse policy.", "try `jet os config trust list` or `jet os config sandbox status`.")
@@ -38,7 +38,8 @@ fn cli_config_trust(theme: Theme, parsed: CLIParsed, verb: String?) -[IO, FS, En
                 theme.error("`jet os config trust add` needs a pattern", "a pattern pre-authorizes matching projects by path prefix/glob.", "try `jet os config trust add ~/work/*`.")
                 return EXIT_USAGE
             }
-            status :: if trust_add_pattern(store, pattern) -> "trusted: {pattern}" else -> "already trusted: {pattern}"
+            added :: trust_add_pattern(store, cli_current_dir(), pattern) ?? return trust_report_gate_failure(theme, err)
+            status :: if added -> "trusted: {pattern}" else -> "already trusted: {pattern}"
             theme.status(status)
             EXIT_OK
         }

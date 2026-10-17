@@ -1,0 +1,13 @@
+# Port of tests/web_app_graph.rs:304-339; uses the exact committed example.
+# PENDING-GRAMMAR(batch-four strip_whitespace); runtime PENDING-SAME-HEAD.
+# KNOWN-FAILING #4830: Jet Front.jet829 refuses explain --web-graph; original assertions unchanged.
+step: jet inspect expand --facts web {root}/Examples/features/web/app_hello.jet
+exit: 0
+stdout: ~ "web —" # original predicate
+stdout: ~ "hydration: dev-overlay (shared TIR: true)" # original predicate
+stdout: ~ "  / [client] -> home" # original predicate
+step: jet explain --web-graph {root}/Examples/features/web/app_hello.jet --json
+exit: 0
+stdout.strip_whitespace: ~ "\"shared_tir\":true" # original predicate: Rust char::is_whitespace removal
+stdout.strip_whitespace: ~ "\"hydration\":\"dev-overlay\"" # original predicate
+stdout.strip_whitespace: ~ "\"render\":\"csr\"" # original predicate

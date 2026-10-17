@@ -1,0 +1,26 @@
+# Port of tests/cli_parts/runtime.rs:1501-1551; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+mkdir: loud
+mkdir: quiet
+step: jet init
+cwd: loud
+env: NO_COLOR=1
+exit: 0
+copy: {root}/tests/cases/cli_parts_runtime/budget-run.bytes loud/run.jet
+step loud: jet budget check
+cwd: loud
+env: NO_COLOR=1
+exit: 0
+stderr.trim: nonempty # original predicate
+step: jet init
+cwd: quiet
+env: NO_COLOR=1
+exit: 0
+copy: {root}/tests/cases/cli_parts_runtime/budget-run.bytes quiet/run.jet
+step quiet: jet budget check --quiet
+cwd: quiet
+env: NO_COLOR=1
+exit: 0
+exit: == loud
+stderr.trim: empty # original predicate

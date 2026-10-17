@@ -13,7 +13,7 @@ fn env_shell_control(code: Int) -> String Never! {
 }
 
 // The shells Jetpack can decorate. Anything else falls back to `bash`.
-pub enum ShellKind {
+enum ShellKind {
     Bash
     Zsh
     Fish
@@ -86,11 +86,11 @@ pub enum ShellKind {
 // appends after its own `--command` flag, so a shell entered outside
 // `ShellEnv.enter` still gets the jetpack prompt. `env_vars` must be set on
 // the outer command; `cleanup` runs once the caller's blocking wait returns.
-pub struct BrandedShell {
-    pub command_tail: [String]
-    pub env_vars: [(name: String, value: String)]
-    cleanup_file: String?
-    cleanup_dir: String?
+struct BrandedShell {
+    command_tail: [String]
+    env_vars: [(name: String, value: String)]
+    priv cleanup_file: String?
+    priv cleanup_dir: String?
 
     fn cleanup(self) -[FS]> {
         if self.cleanup_file == {
@@ -212,7 +212,7 @@ fn env_shell_bash_rc(label: String, path: PromptPathMode, strip: PromptStripMode
         "fi"
     }
     rc :: lines.join("\n")
-    "{rc}\n{ShellKind.Bash.help_prefill_widgets()}"
+    "{rc}\n{(ShellKind.Bash).help_prefill_widgets()}"
 }
 
 fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
@@ -249,7 +249,7 @@ fn env_shell_zsh_rc(label: String, path: PromptPathMode, strip: PromptStripMode)
         "fi"
     }
     rc :: lines.join("\n")
-    "{rc}\n{ShellKind.Zsh.help_prefill_widgets()}"
+    "{rc}\n{(ShellKind.Zsh).help_prefill_widgets()}"
 }
 
 fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMode) -> String Never! {
@@ -280,7 +280,7 @@ fn env_shell_fish_init(label: String, path: PromptPathMode, strip: PromptStripMo
         "printf ' \\033[{success}m❯\\033[0m '; end; end\n"
     }
     init :: parts.join("")
-    "{init}{ShellKind.Fish.help_prefill_widgets()}"
+    "{init}{(ShellKind.Fish).help_prefill_widgets()}"
 }
 
 // ── scratch files for generated shell init ──

@@ -1,0 +1,95 @@
+use core.net as net
+use core.files as files
+use core.process as process
+use core.sys as sys
+
+fn fixture_build(address: String) {
+    original :: files.read("guest.template") ?? panic("read original guest")
+    source :: original.replace("@ADDR@", address)
+    files.write("guest.jet", source) ?? panic("write guest")
+    jet :: sys.get("JET_BIN") ?? panic("JET_BIN missing")
+    build :: process.cmd([jet, "build", "guest.jet"]).stdout(.Capture).stderr(.Capture).run() ?? panic("build guest")
+    assert(build.code == 0, "original guest compilation must succeed")
+}
+fn fixture_run() -> ProcessReceipt {
+    process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
+}
+fn fixture_copy(out: &[U8], bytes: [U8], start: Int, end: Int) {
+    loop i in start..<end -> &out.push(bytes[i])
+}
+fn fixture_u16(out: &[U8], n: Int) {
+    &out.push(U8{(n /% 256) %% 256})
+    &out.push(U8{n %% 256})
+}
+fn fixture_question_end(query: [U8]) -> Int {
+    pos := 12
+    loop pos < query.len() && query[pos] != (U8{0}) {
+        pos += Int.from_u8(query[pos]) + 1
+    }
+    pos + 5
+}
+fn fixture_name(name: String) -> [U8] {
+    out := [U8]{}
+    loop label in name.split(".") {
+        &out.push(U8{label.bytes().len()})
+        fixture_copy(&out, label.bytes(), 0, label.bytes().len())
+    }
+    &out.push(U8{0})
+    out
+}
+fn fixture_header(query: [U8], flags: Int, answers: Int, authorities: Int, additional: Int) -> [U8] {
+    out := [U8]{}
+    fixture_copy(&out, query, 0, 2)
+    fixture_u16(&out, flags)
+    fixture_u16(&out, 1)
+    fixture_u16(&out, answers)
+    fixture_u16(&out, authorities)
+    fixture_u16(&out, additional)
+    fixture_copy(&out, query, 12, fixture_question_end(query))
+    out
+}
+fn fixture_response(query: [U8]) -> [U8] {
+    end :: fixture_question_end(query)
+    qtype :: Int.from_u8(query[end - 4]) * 256 + Int.from_u8(query[end - 3])
+    out := fixture_header(query, 0x8180, 1, 0, 0)
+    &out.push(U8{0xc0})
+    &out.push(U8{0x0c})
+    fixture_u16(&out, qtype)
+    fixture_u16(&out, 1)
+    fixture_copy(&out, [U8]{0, 0, 0, 0}, 0, 4)
+    data := [U8]{}
+    if qtype == 16 {
+        data = [U8]{3, 106, 101, 116}
+    } else if qtype == 33 {
+        fixture_u16(&data, 10)
+        fixture_u16(&data, 20)
+        fixture_u16(&data, 443)
+        name :: fixture_name("srv.example.test")
+        fixture_copy(&data, name, 0, name.len())
+    }
+    fixture_u16(&out, data.len())
+    fixture_copy(&out, data, 0, data.len())
+    out
+}
+fn fixture_send(socket: net.UDPSocket, packet: net.UDPPacket, bytes: [U8]) {
+    peer :: net.socket_addr(packet.host, packet.port) ?? panic("peer")
+    net.udp_send_bytes_to(socket, bytes, peer) ?? panic("send fixture response")
+}
+
+#Test("core_net_dns_rejects_wrong_transaction_id") {
+    socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind UDP")
+    address :: net.socket_to_string(net.udp_local_addr(socket) ?? panic("UDP address"))
+    server :: task {
+        packet :: net.udp_recv_from(socket, 512) ?? panic("receive query")
+        response := fixture_response(packet.data)
+        wrong :: (Int.from_u8(response[0]) * 256 + Int.from_u8(response[1]) + 1) %% 65536
+        response[0] = U8{wrong /% 256}
+        response[1] = U8{wrong %% 256}
+        fixture_send(socket, packet, response)
+    }
+    fixture_build(address)
+    observed :: fixture_run()
+    server.join() ?? panic("peer failed")
+    assert(observed.code != 0, "forged transaction ID must fail")
+    assert(observed.errors.contains("forged DNS accepted"), "original error witness")
+}

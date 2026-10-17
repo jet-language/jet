@@ -1,7 +1,8 @@
 //! D-SEMINDEX1: stable semantic-index query API over compiler facts.
+//! Index projection consumes the checked bundle and effect/name-ledger facts;
+//! the same check's MIR nominal carrier is not an input to these index builders.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 mod Build;
 mod Docs;
@@ -183,7 +184,7 @@ fn attach_package_facts(index: &mut SemIndex, entry: &Path) -> Result<(), SemInd
 /// Load, check, and build the semantic index for an entry file (loader → parser → sema).
 pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
     if !diags
         .iter()
@@ -201,7 +202,7 @@ pub fn open(entry: &Path) -> Result<SemIndex, SemIndexError> {
 /// Load, check, and build consumer-neutral symbol facts for docs/completion/help.
 pub fn open_symbols(entry: &Path) -> Result<SemanticSymbolIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_effect_facts(&entry_str, None, false);
     if !diags
         .iter()
@@ -220,7 +221,7 @@ pub fn open_with_overlays(
     overlays: &[(&Path, &str)],
 ) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
     if !diags
         .iter()
@@ -242,7 +243,7 @@ pub fn open_structural_with_overlays(
     overlays: &[(&Path, &str)],
 ) -> Result<SemIndex, SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_overlays_and_import_root(&entry_str, overlays);
     if !diags
         .iter()
@@ -276,7 +277,7 @@ pub fn open_with_overlays_diagnostics_and_inputs(
     overlays: &[(&Path, &str)],
 ) -> Result<(SemIndex, Vec<Diagnostic>, Vec<std::path::PathBuf>), SemIndexError> {
     let entry_str = entry.to_string_lossy();
-    let (diags, bundle, facts) =
+    let (diags, bundle, facts, _) =
         jet_driver::Driver::check_file_with_overlays(&entry_str, overlays, false);
     match bundle {
         Some(bundle) => {
@@ -520,7 +521,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             root.join("release.jet"),
-            "pub release :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+            "release :: Config{ outputs: { app: Executable{ entry: run } } }\n",
         )
         .unwrap();
         let entry = root.join("run.jet");
@@ -769,7 +770,7 @@ mod tests {
         let main = root.join("main.jet");
         std::fs::write(
             &main,
-            "module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}\n",
+            "module boxed<T>(n: Int) { fn value() -> Int { return n } }\nmodule a :: boxed<Int>(3)\nmodule b :: boxed<Int>(3)\nfn run() {}\n",
         ).unwrap();
 
         let index = open(&main).expect("generic module should index");
@@ -835,7 +836,7 @@ mod tests {
         std::fs::create_dir_all(&root).unwrap();
         let library = root.join("library.jet");
         let main = root.join("main.jet");
-        std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
+        std::fs::write(&library, "fn report() { print(\"library\") }\n").unwrap();
         std::fs::write(
             &main,
             "use \"./library\" as api\nuse api.[report as alias_report]\n\nstruct Worker { value: Int }\nimpl Worker {\n    fn step(self) { print(\"worker\") }\n}\nstruct Other { value: Int }\nimpl Other {\n    fn step(self) { print(\"other\") }\n}\n\nfn run() {\n    api.report()\n    alias_report()\n    worker :: Worker{value: 1}\n    worker.step()\n    other :: Other{value: 2}\n    other.step()\n}\n",

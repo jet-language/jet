@@ -1,0 +1,18 @@
+# PORT tests/pkg.rs::locked_build_rejects_manifest_lock_path_identity_mismatch:3783-3833; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/locked_build_rejects_manifest_lock_path_identity_mismatch
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet fetch
+exit: 0
+capture: entry = sole-entry store kind dir name ^= "greeter-0.1.0-"
+json: file .jet/lock toml $.package[?name = "greeter"][0].version = "0.1.0"
+capture: changed_lock = text file.replace("source = { path = \"./greeter\" }", "source = { path = \"./other\" }") .jet/lock
+write: .jet/lock changed-lock.template
+# Rust build: CmdCompile4161-4181 -> Driver/mod.rs3491-3492 -> Loader3305-3480.
+step: jet build --locked run.jet
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1204]"
+stderr: = identity.expected

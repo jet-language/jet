@@ -20,6 +20,7 @@ use jet_foundation.[
     MIRPreludeCallID,
     MIRProgram,
     MIRRuntimePartID,
+    MIRScopeKind,
     MIRSourceFileID,
     MIRType,
     MIRTypeDef,
@@ -30,34 +31,34 @@ use jet_foundation.[
     Span,
 ]
 
-pub struct JetWebTimezoneAsset {
-    pub name: String
-    pub bytes: [U8]
+struct JetWebTimezoneAsset {
+    name: String
+    bytes: [U8]
 }
 
-pub struct JetWebAssets {
-    pub dom_runtime: String
-    pub execution_prelude: String
-    pub event_prelude: String
-    pub realtime_prelude: String
-    pub data_prelude: String
-    pub history_prelude: String
-    pub compute_prelude: String
-    pub raylib_prelude: String
-    pub game_prelude: String
-    pub task_group_prelude: String
-    pub runtime_stop_metadata: String
-    pub game_default_frame_budget: Int
-    pub game_frame_budget_error: String
-    pub harfbuzz_wasm: [U8]
-    pub timezone_data: [JetWebTimezoneAsset]
-    pub index_html: String
-    pub explicit_html_path: String?
-    pub source_names: [String]
-    pub source_contents: [String]
+struct JetWebAssets {
+    dom_runtime: String
+    execution_prelude: String
+    event_prelude: String
+    realtime_prelude: String
+    data_prelude: String
+    history_prelude: String
+    compute_prelude: String
+    raylib_prelude: String
+    game_prelude: String
+    task_group_prelude: String
+    runtime_stop_metadata: String
+    game_default_frame_budget: Int
+    game_frame_budget_error: String
+    harfbuzz_wasm: [U8]
+    timezone_data: [JetWebTimezoneAsset]
+    index_html: String
+    explicit_html_path: String?
+    source_names: [String]
+    source_contents: [String]
 }
 
-pub fn jet_web_assets_with_default_shell() -> JetWebAssets Never! {
+fn jet_web_assets_with_default_shell() -> JetWebAssets Never! {
     JetWebAssets{
         // The canonical DOM/runtime fragments are supplied by Foundation/Driver.
         // Empty values are rejected by the checked publication gate rather than
@@ -84,16 +85,16 @@ pub fn jet_web_assets_with_default_shell() -> JetWebAssets Never! {
     }
 }
 
-pub struct JetWebEmitConfig {
-    pub artifact: MIRArtifactID
-    pub layout: JetTargetLayout
-    pub assets: JetWebAssets
-    pub semantic_digest: String
-    pub root_prefix: String
-    pub release_devtools_policy: JetReleaseDevtoolsPolicy
+struct JetWebEmitConfig {
+    artifact: MIRArtifactID
+    layout: JetTargetLayout
+    assets: JetWebAssets
+    semantic_digest: String
+    root_prefix: String
+    release_devtools_policy: JetReleaseDevtoolsPolicy
 }
 
-pub enum JetWebEmitFailureKind {
+enum JetWebEmitFailureKind {
     InvalidMIR
     InvalidLayout
     InvalidAssets
@@ -108,44 +109,44 @@ pub enum JetWebEmitFailureKind {
     InvalidProvenance
 }
 
-pub struct JetWebEmitFailure {
-    pub kind: JetWebEmitFailureKind
-    pub code: String
-    pub message: String
-    pub detail: String
-    pub span: Span?
+struct JetWebEmitFailure {
+    kind: JetWebEmitFailureKind
+    code: String
+    message: String
+    detail: String
+    span: Span?
 }
 
-pub struct JetWebArtifacts {
-    pub manifest_json: String
-    pub wasm_rust: String
-    pub rustc_incremental_identity: String
-    pub js_app: String
-    pub js_source_map: String
-    pub source_names: [String]
-    pub source_contents: [String]
-    pub dom_runtime: String
-    pub index_html: String
-    pub explicit_html_path: String?
-    pub command_record: [U8]
+struct JetWebArtifacts {
+    manifest_json: String
+    wasm_rust: String
+    rustc_incremental_identity: String
+    js_app: String
+    js_source_map: String
+    source_names: [String]
+    source_contents: [String]
+    dom_runtime: String
+    index_html: String
+    explicit_html_path: String?
+    command_record: [U8]
 }
 
-pub enum JetWebEmitResult {
+enum JetWebEmitResult {
     Complete(value: JetWebArtifacts)
     Incomplete(failure: JetWebEmitFailure)
 }
 
 struct JetWebEmitContext {
-    pub program: MIRProgram
-    pub config: JetWebEmitConfig
-    pub artifact: MIRArtifactPlan
-    pub functions: [MIRFunction]
-    pub entry: MIRFunction
-    pub artifact_identity: String
-    pub history_source: String
-    pub history_tool: String
-    pub history_target: String
-    pub failure: JetWebEmitFailure?
+    program: MIRProgram
+    config: JetWebEmitConfig
+    artifact: MIRArtifactPlan
+    functions: [MIRFunction]
+    entry: MIRFunction
+    artifact_identity: String
+    history_source: String
+    history_tool: String
+    history_target: String
+    failure: JetWebEmitFailure?
 }
 
 fn jet_web_failure(kind: JetWebEmitFailureKind, code: String, message: String, detail: String, span: Span?) -> JetWebEmitFailure Never! {
@@ -357,6 +358,9 @@ fn program_has_module(program: MIRProgram, id: MIRModuleID) -> Bool Never! {
 }
 
 fn jet_web_validate_partition(ctx: &JetWebEmitContext, function: MIRFunction) Never! {
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.StopCleanup -> jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR StopCleanup reached the web emitter", "StopCleanup is produced only for native host compilations", Val(scope.span))
+    }
     if function.target_applicability.web && function.web_bucket == None {
         jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidPartition, "E0003", "Web-applicable MIR function has no Web bucket", "partition selection must be a checked MIR fact before emission", Val(function.span))
     }

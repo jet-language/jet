@@ -1,0 +1,15 @@
+# Port of tests/help_pty.rs:273-292. PENDING-GRAMMAR(batch-four); exact original inputs/delays/predicates.
+requires: os:unix
+refused: pty
+normalize: replace "\r" ""
+step: jet ? --color=never
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+pty-send: "\u001bOP\u001b\u001b" after 150ms
+pty-close: after 150ms
+exit: 0
+stdout: ~ "\u001b[?1049h" # original predicate: transcript contains these exact bytes
+stdout: ~ "\u001b[?1049l" # original predicate: transcript contains these exact bytes
+stdout: ~ "Usage   jet run" # original predicate: transcript contains these exact bytes
+stdout: ~ "command palette" # original predicate: transcript contains these exact bytes

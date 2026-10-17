@@ -1,0 +1,113 @@
+// crates/jet-foundation/src/MIROptimization/Acceleration.rs: the backend-neutral
+// D-ACCEL1 gate. All observations are supplied; this code never measures them.
+MIR_ACCEL_STATIC_FLOOR_ITEMS :: 1024
+MIR_ACCEL_CACHE_BLOCK_BYTES :: 65536
+MIR_ACCEL_REQUIRED_GAIN_NUMERATOR :: U64{2}
+MIR_ACCEL_REQUIRED_GAIN_DENOMINATOR :: U64{1}
+enum MIRAccelerationPin { Scalar Local }
+enum MIRAccelerationGateStatus {
+    BelowStaticFloor Pinned(pin: MIRAccelerationPin) NotReleaseBuild
+    CrossModeParityMissing ColumnCopyNotApplicable ProofIncomplete SampleNotTimed
+    SpawnCostNotMeasured BandwidthFloorNotMeasured InvalidMeasurement
+    ProjectedGainBelowThreshold Selected
+}
+struct MIRAccelerationMeasurement {
+    items: U64
+    sample_items: U64
+    sample_nanos: U64
+    spawn_nanos: U64
+    bandwidth_floor_nanos: U64
+    floor_nanos: U64
+    projected_serial_nanos: U64?
+    required_serial_nanos: U64?
+}
+struct MIRAccelerationDecision {
+    transform: MIRAccelerationTransform
+    status: MIRAccelerationGateStatus
+    measurement: MIRAccelerationMeasurement
+}
+struct MIRAccelerationGateInput {
+    items: U64
+    sample_items: U64
+    sample_nanos: U64
+    spawn_nanos: U64
+    bandwidth_floor_nanos: U64
+    first_chunk_serial_timed: Bool
+    spawn_cost_once_per_process: Bool
+    bandwidth_floor_measured: Bool
+    release_build: Bool
+    cross_mode_parity_proven: Bool
+    pin: MIRAccelerationPin?
+    workload: MIRAccelerationWorkloadFacts
+    proof: MIRAccelerationProof
+}
+struct MIRAccelerationGate {
+    static_floor_items: U64
+    cache_block_bytes: U64
+    required_gain_numerator: U64
+    required_gain_denominator: U64
+}
+fn mir_acceleration_gate() -> MIRAccelerationGate Never! {
+    MIRAccelerationGate{static_floor_items: U64{1024}, cache_block_bytes: U64{65536}, required_gain_numerator: MIR_ACCEL_REQUIRED_GAIN_NUMERATOR, required_gain_denominator: MIR_ACCEL_REQUIRED_GAIN_DENOMINATOR}
+}
+fn mir_acceleration_deferred(fact: MIRAccelerationFact, items: U64, release_build: Bool, parity: Bool) -> MIRAccelerationGateInput Never! {
+    MIRAccelerationGateInput{items: items, sample_items: U64{0}, sample_nanos: U64{0}, spawn_nanos: U64{0}, bandwidth_floor_nanos: U64{0}, first_chunk_serial_timed: false, spawn_cost_once_per_process: false, bandwidth_floor_measured: false, release_build: release_build, cross_mode_parity_proven: parity, pin: None, workload: fact.workload, proof: fact.proof}
+}
+fn mir_acceleration_proves(proof: MIRAccelerationProof, transform: MIRAccelerationTransform) -> Bool Never! {
+    proof.source_proven && proof.independent_iterations && proof.no_aliasing && proof.no_cross_iteration_dependencies && proof.no_early_exit && proof.effect_free_body && proof.ownership_safe && proof.failure_order_preserved
+}
+fn mir_acceleration_transform_name(transform: MIRAccelerationTransform) -> String Never! {
+    if transform == {
+        .TransientColumnCopy -> "column-copy"
+        .PooledParallelChunks -> "parallel"
+    }
+}
+fn mir_acceleration_pin_name(pin: MIRAccelerationPin) -> String Never! {
+    if pin == {
+        .Scalar -> "#Scalar"
+        .Local -> "#Local"
+    }
+}
+fn mir_acceleration_status_name(status: MIRAccelerationGateStatus) -> String Never! {
+    if status == {
+        .BelowStaticFloor -> "below-static-floor"
+        .Pinned(_) -> "pinned"
+        .NotReleaseBuild -> "not-release-build"
+        .CrossModeParityMissing -> "cross-mode-parity-missing"
+        .ColumnCopyNotApplicable -> "column-copy-not-applicable"
+        .ProofIncomplete -> "proof-incomplete"
+        .SampleNotTimed -> "sample-not-timed"
+        .SpawnCostNotMeasured -> "spawn-cost-not-measured"
+        .BandwidthFloorNotMeasured -> "bandwidth-floor-not-measured"
+        .InvalidMeasurement -> "invalid-measurement"
+        .ProjectedGainBelowThreshold -> "projected-gain-below-threshold"
+        .Selected -> "selected"
+    }
+}
+fn mir_acceleration_ceil_product(a: U64, b: U64, divisor: U64) -> U64? Never! {
+    if divisor == (U64{0}) -> return None
+    maximum :: U64{18446744073709551615}
+    if b != (U64{0}) && a > maximum / b -> return None
+    product :: a * b
+    extra :: divisor - U64{1}
+    if product > maximum - extra -> return None
+    Val((product + extra) / divisor)
+}
+fn mir_acceleration_evaluate(gate: MIRAccelerationGate, transform: MIRAccelerationTransform, input: MIRAccelerationGateInput) -> MIRAccelerationDecision Never! {
+    floor :: if input.spawn_nanos > input.bandwidth_floor_nanos -> input.spawn_nanos else -> input.bandwidth_floor_nanos
+    projected :: mir_acceleration_ceil_product(input.sample_nanos, input.items, input.sample_items)
+    required :: mir_acceleration_ceil_product(floor, gate.required_gain_numerator, gate.required_gain_denominator)
+    status := MIRAccelerationGateStatus.Selected
+    if input.items <= gate.static_floor_items -> status = .BelowStaticFloor
+    else if input.pin == .Val(pin) -> status = .Pinned{pin: pin}
+    else if !input.release_build -> status = .NotReleaseBuild
+    else if !input.cross_mode_parity_proven -> status = .CrossModeParityMissing
+    else if transform == .TransientColumnCopy && !(input.workload.nested_reuse && !input.workload.single_pass) -> status = .ColumnCopyNotApplicable
+    else if !mir_acceleration_proves(input.proof, transform) -> status = .ProofIncomplete
+    else if !input.first_chunk_serial_timed -> status = .SampleNotTimed
+    else if !input.spawn_cost_once_per_process -> status = .SpawnCostNotMeasured
+    else if !input.bandwidth_floor_measured -> status = .BandwidthFloorNotMeasured
+    else if input.sample_items == (U64{0}) || input.sample_items > input.items || input.sample_nanos == (U64{0}) || input.spawn_nanos == (U64{0}) || input.bandwidth_floor_nanos == (U64{0}) || gate.required_gain_numerator == (U64{0}) || gate.required_gain_denominator == (U64{0}) || projected == None || required == None -> status = .InvalidMeasurement
+    else if (projected ?? U64{0}) < (required ?? U64{0}) -> status = .ProjectedGainBelowThreshold
+    MIRAccelerationDecision{transform: transform, status: status, measurement: MIRAccelerationMeasurement{items: input.items, sample_items: input.sample_items, sample_nanos: input.sample_nanos, spawn_nanos: input.spawn_nanos, bandwidth_floor_nanos: input.bandwidth_floor_nanos, floor_nanos: floor, projected_serial_nanos: projected, required_serial_nanos: required}}
+}

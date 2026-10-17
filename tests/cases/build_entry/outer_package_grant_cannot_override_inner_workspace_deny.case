@@ -1,0 +1,7 @@
+# Port of tests/build_entry.rs:3174-3215; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/outer_package_grant_cannot_override_inner_workspace_deny
+step: jet build child/run.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E3503"] #>= 1
+file: child/stamp absent

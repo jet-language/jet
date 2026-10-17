@@ -1,0 +1,8 @@
+# tests/single_use.rs::one_branch_is_e0141 at tests/single_use.rs:107; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Sources copied verbatim; original predicates; PENDING-SAME-HEAD (heavy lane paused).
+fixture: one_branch_is_e0141.fixture
+env: NO_COLOR=1
+step check1: jet check source-1.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0141"] #>= 1 # original predicate: code membership
+json: stdout doc $.reports[?code="E0140"] #= 0 # original predicate: code absence

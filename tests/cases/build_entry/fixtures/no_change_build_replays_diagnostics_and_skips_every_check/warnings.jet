@@ -1,0 +1,11 @@
+// OBSERVATION-PROJECTION of tests/build_entry.rs:929-935; exact ordered Rust .lines() warning vector.
+use core.files
+use core.encoding.json as json
+fn run(path: String) {
+    raw :: files.read(path) ?? panic("warning stderr")
+    selected := [Dyn]{}
+    loop row in raw.lines() {
+        if row.starts_with("Warning [") || row.trim_start().starts_with("-->") -> &selected.push(Dyn.Text(row))
+    }
+    print(json.to_string(Dyn.Array(selected)))
+}

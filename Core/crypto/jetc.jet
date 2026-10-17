@@ -1,0 +1,468 @@
+// JETC v2's pure chunk engine. Filesystem ownership and publication are kept
+// outside this private module; no plaintext/container-sized buffer lives here.
+use core as core
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+CHUNK :: 1048576
+MAX_PLAIN :: 1099511627776
+MAX_RECORDS :: 1048577
+BASE :: 74
+STANZA :: 96
+TAG :: 16
+
+
+struct Writer {
+    prefix: [U8]
+    header_hash: [U8]
+    key: crypto.Secret
+    nonce_prefix: [U8]
+    remaining: Int
+    index: Int
+    final: Bool
+}
+struct Reader {
+    header_hash: [U8]
+    key: crypto.Secret
+    nonce_prefix: [U8]
+    remaining: Int
+    index: Int
+    final: Bool
+}
+struct Recipient { id: [U8], public: crypto.X25519PublicKey }
+
+fn append(out: &[U8], bytes: [U8]) Never! { loop byte in bytes -> &out.push(byte) }
+fn bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop i in start..<end -> &out.push(raw[i])
+    out
+}
+fn little(value: Int, width: Int) -> [U8] Never! {
+    out := [U8]{}
+    loop i in 0..<width -> &out.push(U8{(value >> (i * 8)).bit_and(255)})
+    out
+}
+fn integer(raw: [U8], start: Int, width: Int) -> Int Never! {
+    value := 0
+    loop i in 0..<width -> value = value.bit_or((Int.from_u8(raw[start + i]) << (i * 8)))
+    value
+}
+fn order(left: [U8], right: [U8]) -> Int Never! {
+    loop i in 0..<left.len() {
+        if left[i] < right[i] -> return -1
+        if left[i] > right[i] -> return 1
+    }
+    0
+}
+fn id(public: [U8]) -> [U8] Never! {
+    material := "JETC2 recipient id".bytes()
+    append(&material, public)
+    bytes(crypto.sha256(material).bytes, 0, 16)
+}
+fn nonce(prefix: [U8], index: Int) -> [U8] Never! {
+    out := prefix.copy()
+    append(&out, little(index, 8))
+    out
+}
+fn info(domain: String, ephemeral: [U8], recipient: [U8]) -> [U8] Never! {
+    out := domain.bytes()
+    append(&out, ephemeral)
+    append(&out, recipient)
+    out
+}
+fn wrap_aad(fixed: [U8], base: [U8], recipient_id: [U8], public: [U8]) -> [U8] Never! {
+    out := "JETC2 wrap aad".bytes()
+    append(&out, fixed)
+    append(&out, base)
+    append(&out, recipient_id)
+    append(&out, public)
+    out
+}
+fn header_aad(fixed: [U8], header: [U8]) -> [U8] Never! {
+    out := "JETC2 header".bytes()
+    append(&out, fixed)
+    append(&out, header)
+    out
+}
+fn chunk_aad(hash: [U8], index: Int, length: Int, flags: U8) -> [U8] Never! {
+    out := "JETC2 chunk".bytes()
+    append(&out, hash)
+    append(&out, little(index, 8))
+    append(&out, little(length, 4))
+    &out.push(flags)
+    out
+}
+fn seal(key: [U8], nonce: [U8], plain: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
+    #Unsafe("Core JETC2 applies the fixed XChaCha20-Poly1305 suite and protocol-owned nonce/AAD domains") {
+        if expert.xchacha20poly1305_seal(key, nonce, plain, aad) == {
+            .Ok(bytes) -> return Ok(^bytes)
+            .Err(_) -> return Err(.SealFailed)
+        }
+    }
+}
+fn open_record(key: [U8], nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
+    #Unsafe("Core JETC2 authenticates a bounded record before releasing its plaintext") {
+        expert.xchacha20poly1305_open(key, nonce, cipher, aad) ?? return Err(.OpenFailed)
+    }
+}
+
+// Audited copies stay scoped to one operation and are wiped on both outcomes.
+// The typed source owners remain whole and retain their ordinary Close duty.
+fn derive_key(shared: crypto.SharedSecret, salt: [U8], context: [U8], width: Int) -> crypto.Secret crypto.CryptoError! {
+    #Unsafe("Core JETC2 borrows shared material through expert, wiping its copy before propagating HKDF success or failure") {
+        material := expert.shared_secret_bytes(shared)
+        if crypto.hkdf_sha256(material, salt, context, width) == {
+            .Ok(value) -> {
+                crypto.__zeroize(&material)
+                return Ok(^value)
+            }
+            .Err(error) -> {
+                crypto.__zeroize(&material)
+                return Err(error)
+            }
+        }
+    }
+}
+fn seal_key(key: crypto.Secret, nonce: [U8], plain: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
+    #Unsafe("Core JETC2 exposes only an operation-scoped key copy and wipes it before either seal outcome escapes") {
+        material := expert.secret_bytes(key)
+        if seal(material, nonce, plain, aad) == {
+            .Ok(value) -> {
+                crypto.__zeroize(&material)
+                return Ok(^value)
+            }
+            .Err(error) -> {
+                crypto.__zeroize(&material)
+                return Err(error)
+            }
+        }
+    }
+}
+fn open_key(key: crypto.Secret, nonce: [U8], cipher: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
+    #Unsafe("Core JETC2 exposes only an operation-scoped key copy and wipes it before either authentication outcome escapes") {
+        material := expert.secret_bytes(key)
+        if open_record(material, nonce, cipher, aad) == {
+            .Ok(value) -> {
+                crypto.__zeroize(&material)
+                return Ok(^value)
+            }
+            .Err(error) -> {
+                crypto.__zeroize(&material)
+                return Err(error)
+            }
+        }
+    }
+}
+fn seal_wrap(key: crypto.Secret, nonce: crypto.Secret, plain: crypto.Secret, aad: [U8]) -> [U8] crypto.FileCryptoError! {
+    #Unsafe("Core JETC2 copies its derived wrap nonce and file key only for sealing, wiping both copies on either outcome") {
+        nonce_bytes := expert.secret_bytes(nonce)
+        plain_bytes := expert.secret_bytes(plain)
+        if seal_key(key, nonce_bytes, plain_bytes, aad) == {
+            .Ok(value) -> {
+                crypto.__zeroize(&nonce_bytes)
+                crypto.__zeroize(&plain_bytes)
+                return Ok(^value)
+            }
+            .Err(error) -> {
+                crypto.__zeroize(&nonce_bytes)
+                crypto.__zeroize(&plain_bytes)
+                return Err(error)
+            }
+        }
+    }
+}
+fn open_wrap(key: crypto.Secret, nonce: crypto.Secret, cipher: [U8], aad: [U8]) -> [U8] crypto.FileCryptoError! {
+    #Unsafe("Core JETC2 copies its derived wrap nonce only for authentication, wiping the copy on either outcome") {
+        nonce_bytes := expert.secret_bytes(nonce)
+        if open_key(key, nonce_bytes, cipher, aad) == {
+            .Ok(value) -> {
+                crypto.__zeroize(&nonce_bytes)
+                return Ok(^value)
+            }
+            .Err(error) -> {
+                crypto.__zeroize(&nonce_bytes)
+                return Err(error)
+            }
+        }
+    }
+}
+fn body_length(plain: Int) -> Int? Never! {
+    if plain < 0 || plain > MAX_PLAIN -> return None
+    Val(plain + 21 * (plain /% CHUNK + 1))
+}
+fn plain_length(body: Int) -> Int? Never! {
+    if body < 21 -> return None
+    tail :: body %% (CHUNK + 21)
+    if tail < 21 -> return None
+    plain :: (body /% (CHUNK + 21)) * CHUNK + tail - 21
+    if plain > MAX_PLAIN -> return None
+    Val(plain)
+}
+fn record_shape(length: Int, flags: U8) -> Bool Never! {
+    if flags == (U8{0}) -> return length == CHUNK
+    flags == (U8{1}) && length >= 0 && length < CHUNK
+}
+
+fn canonical(recipients: [crypto.X25519PublicKey]) -> [Recipient] crypto.FileCryptoError! {
+    if recipients.len() < 1 || recipients.len() > 256 -> return Err(.SealFailed)
+    sorted := [Recipient]{}
+    loop public in recipients {
+        if public.bytes.len() != 32 -> return Err(.SealFailed)
+        &sorted.push(Recipient{id: id(public.bytes), public: public})
+    }
+    loop i in 1..<sorted.len() {
+        current :: sorted[i]
+        j := i
+        loop j > 0 {
+            comparison :: order(sorted[j - 1].id, current.id)
+            if comparison < 0 || (comparison == 0 && order(sorted[j - 1].public.bytes, current.public.bytes) <= 0) -> break
+            sorted[j] = sorted[j - 1]
+            j -= 1
+        }
+        sorted[j] = current
+    }
+    loop i in 1..<sorted.len() {
+        if sorted[i - 1].public.bytes == sorted[i].public.bytes -> return Err(.SealFailed)
+    }
+    Ok(sorted)
+}
+
+// Length-only expert copies are wiped before releasing their allocations.
+// The original Secret remains whole and retains its normal Close duty.
+fn secret_length(secret: crypto.Secret) -> Int Never! {
+    #Unsafe("Core JETC2 checks secret draw widths through the audited exposure and wipes the temporary copy") {
+        material := expert.secret_bytes(secret)
+        length :: material.len()
+        crypto.__zeroize(&material)
+        return length
+    }
+}
+
+#Test("JETC2 secret width checks preserve the original zeroizing owner") {
+    secret :: crypto.Secret.from_text("JETC2")
+    assert(secret_length(secret) == 5)
+    assert(crypto.constant_time_equal(secret, crypto.Secret.from_text("JETC2")))
+    assert(secret_length(crypto.Secret.from_bytes([U8]{})) == 0)
+}
+
+#Test("JETC2 audited wrap operations preserve zeroizing source owners on success and refusal") {
+    key :: crypto.Secret.from_text("01234567890123456789012345678901")
+    wrap_nonce :: crypto.Secret.from_text("012345678901234567890123")
+    plain :: crypto.Secret.from_text("file key material")
+    aad :: "JETC2 wrap test".bytes()
+    cipher :: seal_wrap(key, wrap_nonce, plain, aad) ?? panic("wrap seal")
+    opened :: crypto.Secret.from_bytes(open_wrap(key, wrap_nonce, cipher, aad) ?? panic("wrap open"))
+    assert(crypto.constant_time_equal(opened, plain))
+    assert(open_wrap(key, wrap_nonce, cipher, "wrong domain".bytes()) == .Err(_))
+    assert(seal_wrap(key, crypto.Secret.from_text("short"), plain, aad) == .Err(_))
+    assert(secret_length(key) == 32)
+    assert(secret_length(wrap_nonce) == 24)
+    assert(crypto.constant_time_equal(plain, crypto.Secret.from_text("file key material")))
+}
+
+// Exactly four independent draws, supplied after source snapshot/revalidation:
+// file id 16, key 32, ephemeral secret 32, nonce prefix 16.
+fn writer(sorted: [Recipient], plain_length: Int,
+    file_id: [U8], file_key: ^crypto.Secret, ephemeral_secret: ^crypto.Secret,
+    nonce_prefix: [U8]) -> Writer crypto.FileCryptoError! {
+    body :: body_length(plain_length) ?? return Err(.SourceIO)
+    if file_id.len() != 16 || secret_length(file_key) != 32 || secret_length(ephemeral_secret) != 32 || nonce_prefix.len() != 16 -> return Err(.SealFailed)
+    ephemeral_key := crypto.X25519SecretKey{bytes: [U8]{}}
+    #Unsafe("Core JETC2 copies a validated ephemeral Secret into a zeroizing X25519SecretKey; both owners retain their Close duty") {
+        ephemeral_key = crypto.X25519SecretKey.from_bytes(expert.secret_bytes(ephemeral_secret)) ?? return Err(.SealFailed)
+    }
+    ephemeral :: if crypto.x25519_public(ephemeral_key) == {
+        .Ok(value) -> ^value
+        .Err(_) -> { return Err(.SealFailed) }
+    }
+    fixed := [U8]{74, 69, 84, 67, 2, 1, 1, 0}
+    append(&fixed, little(BASE + STANZA * sorted.len() + TAG, 4))
+    append(&fixed, little(body, 8))
+    header := file_id.copy()
+    append(&header, ephemeral.bytes)
+    append(&header, nonce_prefix)
+    append(&header, little(CHUNK, 4))
+    append(&header, little(sorted.len(), 2))
+    append(&header, little(0, 4))
+    base :: header.copy()
+    loop recipient in sorted {
+        shared :: if crypto.x25519(ephemeral_key, recipient.public) == {
+            .Ok(value) -> ^value
+            .Err(_) -> { return Err(.SealFailed) }
+        }
+        kek :: if derive_key(shared, file_id, info("JETC2 wrap key", ephemeral.bytes, recipient.public.bytes), 32) == {
+            .Ok(value) -> ^value
+            .Err(_) -> { return Err(.SealFailed) }
+        }
+        wrap_nonce :: if derive_key(shared, file_id, info("JETC2 wrap nonce", ephemeral.bytes, recipient.public.bytes), 24) == {
+            .Ok(value) -> ^value
+            .Err(_) -> { return Err(.SealFailed) }
+        }
+        wrapped :: seal_wrap(kek, wrap_nonce, file_key, wrap_aad(fixed, base, recipient.id, recipient.public.bytes))
+        append(&header, recipient.id)
+        append(&header, recipient.public.bytes)
+        append(&header, wrapped)
+    }
+    auth_tag :: seal_key(file_key, nonce(nonce_prefix, 0), [U8]{}, header_aad(fixed, header))
+    append(&header, auth_tag)
+    prefix := fixed.copy()
+    append(&prefix, header)
+    hash :: crypto.sha256(prefix).bytes
+    Ok(Writer{prefix: prefix, header_hash: hash, key: ^file_key,
+        nonce_prefix: nonce_prefix, remaining: plain_length, index: 1, final: false})
+}
+
+struct Record { framing: [U8], cipher: [U8] }
+fn seal_chunk(state: &Writer, plain: [U8]) -> Record crypto.FileCryptoError! {
+    if state.final || state.index > MAX_RECORDS -> return Err(.SourceIO)
+    expected :: if state.remaining >= CHUNK -> CHUNK else -> state.remaining
+    if plain.len() != expected -> return Err(.SourceIO)
+    flags :: if expected == CHUNK -> U8{0} else -> U8{1}
+    encrypted :: seal_key(state.key, nonce(state.nonce_prefix, state.index), plain,
+        chunk_aad(state.header_hash, state.index, expected, flags))
+    record := little(expected, 4)
+    &record.push(flags)
+    state.remaining -= expected
+    state.index += 1
+    state.final = flags == (U8{1})
+    Ok(Record{framing: record, cipher: encrypted})
+}
+
+// Validate the fixed prefix before the coordinator allocates/reads a header.
+fn header_length(fixed: [U8], total: Int) -> Int crypto.FileCryptoError! {
+    if fixed.len() != 20 || bytes(fixed, 0, 8) != ([U8]{74, 69, 84, 67, 2, 1, 1, 0}) -> return Err(.OpenFailed)
+    length :: integer(fixed, 8, 4)
+    body :: integer(fixed, 12, 8)
+    if length < BASE + STANZA + TAG || length > 33554432 || plain_length(body) == None || 20 + length + body != total -> return Err(.OpenFailed)
+    Ok(length)
+}
+fn reader(identity: crypto.X25519SecretKey, fixed: [U8], header: [U8], total: Int) -> Reader crypto.FileCryptoError! {
+    length :: header_length(fixed, total)
+    if header.len() != length -> return Err(.OpenFailed)
+    count :: integer(header, 68, 2)
+    if count < 1 || count > 256 || integer(header, 64, 4) != CHUNK || integer(header, 70, 4) != 0 || length != BASE + count * STANZA + TAG -> return Err(.OpenFailed)
+    file_id :: bytes(header, 0, 16)
+    ephemeral :: bytes(header, 16, 48)
+    prefix :: bytes(header, 48, 64)
+    own :: crypto.x25519_public(identity) ?? return Err(.OpenFailed)
+    selected := 0
+    matched := false
+    previous_id := [U8]{}
+    previous_public := [U8]{}
+    loop i in 0..<count {
+        start :: BASE + i * STANZA
+        recipient_id :: bytes(header, start, start + 16)
+        public :: bytes(header, start + 16, start + 48)
+        if recipient_id != id(public) || public == ([U8]{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}) -> return Err(.OpenFailed)
+        if i > 0 {
+            comparison :: order(previous_id, recipient_id)
+            if comparison > 0 || (comparison == 0 && order(previous_public, public) >= 0) -> return Err(.OpenFailed)
+        }
+        previous_id = recipient_id
+        previous_public = public
+        if crypto.constant_time_equal_bytes(public, own.bytes) && !matched {
+            selected = i
+            matched = true
+        }
+    }
+    // As in the oracle, unmatched identities still perform one unwrap.
+    start :: BASE + selected * STANZA
+    public :: bytes(header, start + 16, start + 48)
+    shared :: crypto.x25519(identity, crypto.X25519PublicKey{bytes: ephemeral}) ?? return Err(.OpenFailed)
+    kek :: derive_key(shared, file_id, info("JETC2 wrap key", ephemeral, public), 32) ?? return Err(.OpenFailed)
+    wrap_nonce :: derive_key(shared, file_id, info("JETC2 wrap nonce", ephemeral, public), 24) ?? return Err(.OpenFailed)
+    key :: crypto.Secret{bytes: open_wrap(kek, wrap_nonce, bytes(header, start + 48, start + STANZA),
+        wrap_aad(fixed, bytes(header, 0, BASE), bytes(header, start, start + 16), public))}
+    if !matched || secret_length(key) != 32 -> return Err(.OpenFailed)
+    opened :: open_key(key, nonce(prefix, 0), bytes(header, length - TAG, length), header_aad(fixed, bytes(header, 0, length - TAG)))
+    if opened.len() != 0 -> return Err(.OpenFailed)
+    all := fixed.copy()
+    append(&all, header)
+    Ok(Reader{header_hash: crypto.sha256(all).bytes, key: ^key, nonce_prefix: prefix,
+        remaining: integer(fixed, 12, 8), index: 1, final: false})
+}
+fn open_chunk(state: &Reader, framing: [U8], encrypted: [U8]) -> crypto.Secret crypto.FileCryptoError! {
+    if state.final || state.index > MAX_RECORDS || framing.len() != 5 -> return Err(.OpenFailed)
+    length :: integer(framing, 0, 4)
+    flags :: framing[4]
+    if !record_shape(length, flags) || encrypted.len() != length + TAG || length + 21 > state.remaining -> return Err(.OpenFailed)
+    if flags == (U8{1}) && length + 21 != state.remaining -> return Err(.OpenFailed)
+    clear :: crypto.Secret{bytes: open_key(state.key, nonce(state.nonce_prefix, state.index), encrypted,
+        chunk_aad(state.header_hash, state.index, length, flags))}
+    state.remaining -= length + 21
+    state.index += 1
+    state.final = flags == (U8{1})
+    Ok(^clear)
+}
+fn finish(state: Reader, trailing: [U8]) crypto.FileCryptoError! {
+    if !state.final || state.remaining != 0 || trailing.len() != 0 -> return Err(.OpenFailed)
+    Ok()
+}
+
+#Test("JETC2 body lengths retain mandatory empty final records and caps") {
+    assert((body_length(0) ?? -1) == 21)
+    assert((body_length(CHUNK) ?? -1) == CHUNK + 42)
+    assert(plain_length(CHUNK + 21) == None)
+    assert((plain_length(CHUNK + 42) ?? -1) == CHUNK)
+    assert(body_length(MAX_PLAIN + 1) == None)
+    assert(!record_shape(CHUNK, U8{1}))
+    assert(!record_shape(0, U8{0}))
+    assert(!record_shape(0, U8{2}))
+}
+
+// Oracle: crates/jet-pkg-model/src/Prelude/Crypto.rs file_seal_impl,
+// observed 2026-10-08 with entropy bytes 0..95, recipients [9;32], [7;32].
+// Whole containers exist only in this test; production streams each record.
+#Test("JETC2 Rust-oracle vectors cross the empty and 1MiB final boundaries") {
+    digests :: [String]{
+        "46553fc7593970b82da2bc0bf524a39204127e521a4a845692f6a68ffa339b86",
+        "76054f89e80bc370286916537973ef30403cc9c934d5b499c99b152c9a4bef60",
+        "20245ea4891be6b2dddb8fcab28e14255eb93eb64e9043689b96dfb1ed48cc94",
+        "6320200c16ee9e01a0f049950208f2d66566db2b68b09610014604b573c0b165",
+    }
+    lengths :: [Int]{0, 3, CHUNK, CHUNK + 17}
+    loop case in 0..<lengths.len() {
+        identity_bytes := [U8]{}
+        other_bytes := [U8]{}
+        loop _ in 0..<32 {
+            &identity_bytes.push(U8{7})
+            &other_bytes.push(U8{9})
+        }
+        identity :: crypto.X25519SecretKey{bytes: identity_bytes}
+        other :: crypto.X25519SecretKey{bytes: other_bytes}
+        public :: crypto.x25519_public(identity) ?? panic("identity")
+        other_public :: crypto.x25519_public(other) ?? panic("other identity")
+        recipients :: canonical([other_public, public]) ?? panic("recipients")
+        file_id := [U8]{}
+        key := [U8]{}
+        ephemeral := [U8]{}
+        prefix := [U8]{}
+        loop i in 0..<16 -> &file_id.push(U8{i})
+        loop i in 16..<48 -> &key.push(U8{i})
+        loop i in 48..<80 -> &ephemeral.push(U8{i})
+        loop i in 80..<96 -> &prefix.push(U8{i})
+        file_key :: crypto.Secret{bytes: key}
+        ephemeral_secret :: crypto.Secret{bytes: ephemeral}
+        state := writer(recipients, lengths[case], file_id,
+            ^file_key, ^ephemeral_secret, prefix) ?? panic("writer")
+        decoded := reader(identity, bytes(state.prefix, 0, 20),
+            bytes(state.prefix, 20, state.prefix.len()), state.prefix.len() + (body_length(lengths[case]) ?? -1)) ?? panic("reader")
+        container := state.prefix.copy()
+        offset := 0
+        loop !state.final {
+            count :: if state.remaining >= CHUNK -> CHUNK else -> state.remaining
+            plain := [U8]{}
+            loop i in 0..<count -> &plain.push(U8{(offset + i) %% 251})
+            record :: seal_chunk(&state, plain) ?? panic("seal record")
+            append(&container, record.framing)
+            append(&container, record.cipher)
+            clear :: open_chunk(&decoded, record.framing, record.cipher) ?? panic("open record")
+            assert(crypto.constant_time_equal(clear, crypto.Secret.from_bytes(plain)))
+            offset += count
+        }
+        finish(decoded, [U8]{}) ?? panic("final record")
+        assert(offset == lengths[case])
+        assert(crypto.sha256(container).hex() == digests[case])
+        assert(container.len() == 302 + lengths[case] + 21 * (lengths[case] /% CHUNK + 1))
+    }
+}

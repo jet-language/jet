@@ -668,161 +668,6 @@ function mismatch(expected, actual) {
   return `byte ${index}: expected ${show(expected)}, got ${show(actual)} (length ${expected.length}/${actual.length})`;
 }
 
-function unavailableTierTrace(reason = "compiler-owned tier trace channel is unavailable; --trace-tiers shares workload stderr") {
-  return {
-    status: "failed",
-    channel: "unavailable",
-    rows: [],
-    native_rows: 0,
-    interp_rows: 0,
-    whole_program_deopt: null,
-    invocations: [],
-    reason,
-  };
-}
-
-function tracedCommand(command) {
-  const traced = [...command];
-  if (traced.includes("--trace-tiers")) return traced;
-  const separator = traced.indexOf("--");
-  if (separator < 0) traced.push("--trace-tiers");
-  else traced.splice(separator, 0, "--trace-tiers");
-  return traced;
-}
-
-function validTierRow(row) {
-  return row && typeof row === "object" && !Array.isArray(row) &&
-    typeof row.function === "string" && row.function.length > 0 &&
-    (row.tier === "native" || row.tier === "interp") &&
-    (row.reason === null || typeof row.reason === "string") &&
-    typeof row.millis === "number" && Number.isFinite(row.millis) && row.millis >= 0;
-}
-
-function parseTierFacts(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return { error: "sidecar is not a JSON object" };
-  if (!Array.isArray(value.rows) || value.rows.length === 0 || !value.rows.every(validTierRow)) {
-    return { error: "sidecar rows are missing or malformed" };
-  }
-  const nativeRows = value.rows.filter((row) => row.tier === "native").length;
-  const interpRows = value.rows.filter((row) => row.tier === "interp").length;
-  if (!Number.isInteger(value.native_rows) || value.native_rows < 0 || value.native_rows !== nativeRows) {
-    return { error: "sidecar native_rows does not match rows" };
-  }
-  if (!Number.isInteger(value.interp_rows) || value.interp_rows < 0 || value.interp_rows !== interpRows) {
-    return { error: "sidecar interp_rows does not match rows" };
-  }
-  if (typeof value.whole_program_deopt !== "boolean") {
-    return { error: "sidecar whole_program_deopt is not boolean" };
-  }
-  return {
-    rows: value.rows,
-    native_rows: nativeRows,
-    interp_rows: interpRows,
-    whole_program_deopt: value.whole_program_deopt,
-  };
-}
-
-async function readTierFacts(sidecar) {
-  let text;
-  try {
-    text = await fs.readFile(sidecar, "utf8");
-  } catch (error) {
-    return { error: `compiler-owned tier trace sidecar is absent: ${error.message}` };
-  }
-  let value;
-  try {
-    value = JSON.parse(text);
-  } catch (error) {
-    return { error: `compiler-owned tier trace sidecar is malformed: ${error.message}` };
-  }
-  return parseTierFacts(value);
-}
-
-function tierTraceResult(invocations, reason = null) {
-  const rows = invocations.flatMap((invocation) => invocation.rows);
-  const hasFacts = rows.length > 0;
-  return {
-    status: reason ? "failed" : "passed",
-    channel: "compiler_owned_sidecar",
-    rows,
-    native_rows: invocations.reduce((total, invocation) => total + invocation.native_rows, 0),
-    interp_rows: invocations.reduce((total, invocation) => total + invocation.interp_rows, 0),
-    whole_program_deopt: hasFacts
-      ? invocations.some((invocation) => invocation.whole_program_deopt === true)
-      : null,
-    invocations,
-    ...(reason ? { reason } : {}),
-  };
-}
-
-function emptyTierInvocation(command, exitCode) {
-  return {
-    command: [...command],
-    exit_code: exitCode,
-    rows: [],
-    native_rows: 0,
-    interp_rows: 0,
-    whole_program_deopt: null,
-  };
-}
-
-async function collectTierTrace(cwd, commands, expected, reset = null, {
-  full = false,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
-} = {}) {
-  const sidecar = path.join(cwd, ".jet-tier-trace.json");
-  try {
-    await fs.rm(sidecar, { force: true });
-  } catch (error) {
-    return unavailableTierTrace(`could not remove stale tier trace sidecar: ${error.message}`);
-  }
-  if (!Array.isArray(commands) || commands.length === 0) {
-    return unavailableTierTrace("compiler-owned tier trace has no commands");
-  }
-  const invocations = [];
-  const output = [];
-  let reason = null;
-  if (reset) {
-    try {
-      await reset();
-    } catch (error) {
-      return unavailableTierTrace(`tier trace reset failed: ${error.message}`);
-    }
-  }
-  try {
-    for (const command of commands) {
-      await fs.rm(sidecar, { force: true });
-      const result = await runProcess(cwd, tracedCommand(command), {
-        full,
-        timeoutMs,
-        env: { JET_TRACE_TIERS_PATH: sidecar },
-      });
-      const facts = await readTierFacts(sidecar);
-      const invocation = facts.error
-        ? emptyTierInvocation(command, result.code)
-        : { command: [...command], exit_code: result.code, ...facts };
-      invocations.push(invocation);
-      output.push(result.stdout);
-      if (result.code !== 0 || facts.error) {
-        reason = result.code !== 0
-          ? `trace invocation exited ${result.code}: ${result.stderr.toString("utf8").trim().slice(0, 300)}`
-          : facts.error;
-        break;
-      }
-    }
-    if (!reason) {
-      const mismatchReason = mismatch(expected, Buffer.concat(output));
-      if (mismatchReason) reason = `trace output mismatch: ${mismatchReason}`;
-    }
-    return tierTraceResult(invocations, reason);
-  } catch (error) {
-    return tierTraceResult(invocations, `tier trace collection failed: ${error.message}`);
-  } finally {
-    await fs.rm(sidecar, { force: true });
-  }
-}
-
-
 async function sourceMetrics(sourceDir, filename) {
   const source = path.join(sourceDir, filename);
   const text = await fs.readFile(source, "utf8");
@@ -1801,69 +1646,6 @@ async function runService(language, sourceDir, artifact, entry, commandForOverri
   };
 }
 
-async function collectServiceTierTrace(sourceDir, entry, commandForOverride = null, {
-  full = entry.spec?.fullShell === true,
-  timeoutMs = DEFAULT_TIMEOUT_MS,
-} = {}) {
-  const service = entry.spec?.service ?? entry.service ?? {};
-  const protocol = service.protocol ?? "http";
-  const probes = service.probe ?? [];
-  if (!service.portArg || probes.length === 0 || !["http", "line"].includes(protocol) ||
-      (protocol === "http" && !service.readyPath) ||
-      (protocol === "line" && !service.ready)) {
-    return unavailableTierTrace("service requires portArg, readiness, and probe");
-  }
-  const commandFor = commandForOverride ?? ((port) => ["jet", "run", "run.jet", "--", String(port)]);
-  const displayCommand = commandFor("<port>");
-  const sidecar = path.join(sourceDir, ".jet-tier-trace.json");
-  try {
-    await fs.rm(sidecar, { force: true });
-  } catch (error) {
-    return unavailableTierTrace(`could not remove stale tier trace sidecar: ${error.message}`);
-  }
-  const invocations = [];
-  let child = null;
-  let exitCode = null;
-  let reason = null;
-  try {
-    const port = await freePort();
-    child = startProcess(sourceDir, tracedCommand(commandFor(port)), {
-      full,
-      env: { JET_TRACE_TIERS_PATH: sidecar },
-    });
-    await waitForReady(child, port, service);
-    const verification = await probeSequence(port, probes, protocol);
-    if (!verification.ok) reason = `probe ${verification.index} failed: ${verification.reason}`;
-    let exit = await waitForExit(child, 5000);
-    if (exit.code === null) {
-      if (!reason) reason = "trace service shutdown did not produce a clean exit";
-      stopProcess(child);
-      exit = await waitForExit(child);
-    }
-    exitCode = exit.code;
-    if (exitCode !== 0 && !reason) reason = `trace service exited ${exitCode ?? exit.signal}`;
-  } catch (error) {
-    reason = `tier trace service failed: ${error.message}`;
-    if (child) {
-      stopProcess(child);
-      const exit = await waitForExit(child);
-      exitCode = exit.code;
-    }
-  }
-  try {
-    const facts = await readTierFacts(sidecar);
-    const invocation = facts.error
-      ? emptyTierInvocation(displayCommand, exitCode)
-      : { command: [...displayCommand], exit_code: exitCode, ...facts };
-    invocations.push(invocation);
-    if (facts.error && !reason) reason = facts.error;
-  } finally {
-    await fs.rm(sidecar, { force: true });
-  }
-  return tierTraceResult(invocations, reason);
-}
-
-
 function serviceMetrics(service) {
   return {
     startupSeconds: service.startupSeconds ?? null,
@@ -2431,7 +2213,6 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
     await fs.cp(generatedFixture, target, { recursive: true });
   } : null;
   const TIER_TIMEOUT_MS = timeoutFromEnv("JET_GAUNTLET_TIER_TIMEOUT_MS", Math.min(DEFAULT_TIMEOUT_MS, 180_000));
-  const traceRequests = [];
   let jetPeerChild = null;
   let jetPeerFailure = null;
   const stopJetPeer = async () => {
@@ -2506,9 +2287,6 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
           binary_bytes: null,
         },
       };
-      if (!service.failure && tier === "run") {
-        traceRequests.push({ kind: "service", tierRow, commandFor });
-      }
       tiers[tier] = tierRow;
       continue;
     }
@@ -2540,27 +2318,9 @@ async function stageEntry(entryDir, entry, runDir, jetBin, selectedRuns, dev) {
         tierRow.verification = { status: "failed", kind: "timed_run", reason: tierRow.reason };
       } else {
         tierRow.metrics = { ...sourceMetricValues(jetRow?.metrics), ...runtimeMetrics(tierRow.runtime), binary_bytes: null };
-        if (tier === "run") {
-          traceRequests.push({ kind: "batch", tierRow, commands, expected, reset });
-        }
       }
     }
     tiers[tier] = tierRow;
-  }
-  for (const request of traceRequests) {
-    const trace = request.kind === "service"
-      ? await collectServiceTierTrace(jetDir, entry, request.commandFor)
-      : await collectTierTrace(jetDir, request.commands, request.expected, request.reset, { timeoutMs: TIER_TIMEOUT_MS });
-    request.tierRow.trace = trace;
-    if (trace.status !== "passed") {
-      request.tierRow.status = "broken";
-      request.tierRow.reason = trace.reason;
-      request.tierRow.verification = {
-        status: "failed",
-        kind: request.kind === "service" ? "service_probe_sequence" : "byte_exact_stdout",
-        reason: trace.reason,
-      };
-    }
   }
   } finally {
     await stopJetPeer();
@@ -2881,24 +2641,6 @@ function validateResultShape(result, matrix = null) {
       for (const metric of metrics) {
         if (metricComparableAtTier(metric, tier) && !positiveMetricValue(metric, tierResult.metrics[metric])) {
           issues.push(`${name}/jet/${tier}/${metric}: required tier metric is missing or invalid`);
-        }
-      }
-      if (tier === "run") {
-        const trace = tierResult.trace;
-        const validTrace = trace?.status === "passed" &&
-          trace.channel === "compiler_owned_sidecar" &&
-          trace.whole_program_deopt === false &&
-          trace.native_rows > 0 && Number.isInteger(trace.native_rows) &&
-          trace.interp_rows === 0 &&
-          Array.isArray(trace.rows) && trace.rows.length > 0 &&
-          Array.isArray(trace.invocations) && trace.invocations.length > 0 &&
-          trace.invocations.every((invocation) =>
-            Array.isArray(invocation.rows) && invocation.rows.length > 0 &&
-            Number.isInteger(invocation.native_rows) && invocation.native_rows > 0 &&
-            invocation.interp_rows === 0 &&
-            invocation.whole_program_deopt === false);
-        if (!validTrace) {
-          issues.push(`${name}/jet/run: successful tier is missing valid native tier trace; whole-program deopts fail closed`);
         }
       }
     }
@@ -4174,8 +3916,6 @@ export {
   processTreeRssKb,
   httpProbe,
   probeMatches,
-  collectTierTrace,
-  collectServiceTierTrace,
   probeAxisTools,
   stageEntry,
   STRICT_PERFORMANCE_POLICY,

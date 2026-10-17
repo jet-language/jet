@@ -1,0 +1,261 @@
+// P5 known code pointers, followed by P4 bounded, non-recursive inlining.
+// Clone the original callee body, not a previously expanded version: the
+// 40-instruction eligibility and 200-instruction caller budget stay exact.
+// The Simplify renumbering helpers preserve every instruction's full metadata.
+
+struct InlineGraph {
+    edges: [[Int]]
+    index: [Int]
+    low: [Int]
+    active: [Bool]
+    stack: [Int]
+    recursive: [Bool]
+    counter: Int
+}
+
+fn inline_direct(program: LIRModule, original: LIRFunction) -> LIRFunction Never! {
+    addresses := [Int]{}
+    loop _ in original.values -> &addresses.push(-1)
+    loop block in original.blocks {
+        loop inst in block.insts {
+            if inst == .FunctionAddress(dst, target) -> addresses[dst.value] = target.value
+        }
+    }
+    function := original
+    blocks := [LIRBlock]{}
+    loop block in original.blocks {
+        insts := [LIRInst]{}
+        loop inst in block.insts {
+            rewritten := inst
+            if inst == .Call(dst, signature, callee, args) {
+                if callee == .Value(value) {
+                    target :: addresses[value.value]
+                    if target >= 0 && target < program.functions.len() {
+                        if program.functions[target].signature == signature {
+                            rewritten = LIRInst.Call{dst: dst, signature: signature, callee: LIRCallee.Function{id: LIRFunctionID{value: target}}, args: args}
+                        }
+                    }
+                }
+            }
+            &insts.push(rewritten)
+        }
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: block.lines})
+    }
+    function.blocks = blocks
+    function
+}
+
+// Tarjan's SCC algorithm. An SCC of size >1, or a singleton with a self
+// edge, is recursive. P5 has already exposed known-pointer edges here.
+fn inline_visit(graph: &InlineGraph, node: Int) Never! {
+    graph.index[node] = graph.counter
+    graph.low[node] = graph.counter
+    graph.counter += 1
+    &graph.stack.push(node)
+    graph.active[node] = true
+    loop target in graph.edges[node] {
+        if graph.index[target] < 0 {
+            inline_visit(&graph, target)
+            if graph.low[target] < graph.low[node] -> graph.low[node] = graph.low[target]
+        } else {
+            if graph.active[target] && graph.index[target] < graph.low[node] -> graph.low[node] = graph.index[target]
+        }
+    }
+    if graph.low[node] == graph.index[node] {
+        members := [Int]{}
+        loop {
+            member :: graph.stack[graph.stack.len() - 1].copy()
+            _ := &graph.stack.pop()
+            graph.active[member] = false
+            &members.push(member)
+            if member == node -> break
+        }
+        cyclic := members.len() > 1
+        if !cyclic {
+            loop target in graph.edges[node] { if target == node -> cyclic = true }
+        }
+        if cyclic { loop member in members -> graph.recursive[member] = true }
+    }
+}
+
+fn inline_graph(program: LIRModule) -> InlineGraph Never! {
+    graph := InlineGraph{edges: [[Int]]{}, index: [Int]{}, low: [Int]{}, active: [Bool]{}, stack: [Int]{}, recursive: [Bool]{}, counter: 0}
+    loop function in program.functions {
+        edges := [Int]{}
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Call(_, _, callee, _) {
+                    if callee == .Function(target) {
+                        if target.value >= 0 && target.value < program.functions.len() -> &edges.push(target.value)
+                    }
+                }
+            }
+        }
+        &graph.edges.push(edges)
+        &graph.index.push(-1)
+        &graph.low.push(-1)
+        &graph.active.push(false)
+        &graph.recursive.push(false)
+    }
+    loop node in 0..<program.functions.len() {
+        if graph.index[node] < 0 -> inline_visit(&graph, node)
+    }
+    graph
+}
+
+fn inline_target(map: [Int], blocks: [Int:Int], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    LIRJumpTarget{block: LIRBlockID{value: blocks.get(target.block.value) ?? target.block.value}, args: opt_ns(map, target.args)}
+}
+
+fn inline_terminator(map: [Int], blocks: [Int:Int], continuation: LIRBlockID, terminator: LIRTerminator) -> LIRTerminator Never! {
+    if terminator == {
+        .Jump(target) -> LIRTerminator.Jump{target: inline_target(map, blocks, target)}
+        .Branch(condition, then_target, else_target) -> LIRTerminator.Branch{condition: opt_n(map, condition), then_target: inline_target(map, blocks, then_target), else_target: inline_target(map, blocks, else_target)}
+        .Return(value) -> {
+            args := [LIRValueID]{}
+            if value == .Val(returned) -> &args.push(opt_n(map, returned))
+            LIRTerminator.Jump{target: LIRJumpTarget{block: continuation, args: args}}
+        }
+        .Unreachable -> terminator
+    }
+}
+
+fn inline_no_result() -> LIRValueID? { None }
+
+// Entry aliases must preserve drop glue and cannot make a caller use occur
+// after a consume that the original Call did not expose to the lint.
+fn inline_alias_safe(caller: LIRFunction, callee: LIRFunction, consumed: [Bool], uses: [Int], args: [LIRValueID]) -> Bool Never! {
+    if args.len() != callee.blocks[0].params.len() -> return false
+    loop (position, param) in callee.blocks[0].params {
+        arg :: args[position]
+        if callee.values[param.value].drop != caller.values[arg.value].drop -> return false
+        // Exactly one original use is this argument occurrence. This also
+        // refuses passing a consumed alias as two distinct entry parameters.
+        if consumed[param.value] && uses[arg.value] != 1 -> return false
+    }
+    true
+}
+
+fn inline_caller(program: LIRModule, original: LIRFunction, recursive: [Bool], sizes: [Int], consumed: [[Bool]]) -> LIRFunction Never! {
+    function := original
+    uses := [Int]{}
+    loop _ in original.values -> &uses.push(0)
+    loop block in original.blocks {
+        loop inst in block.insts {
+            loop value in lir_inst_uses(inst) -> uses[value.value] = uses[value.value] + 1
+        }
+        loop value in lir_terminator_uses(block.terminator) -> uses[value.value] = uses[value.value] + 1
+    }
+    fresh_block := 0
+    loop block in original.blocks { if block.id.value >= fresh_block -> fresh_block = block.id.value + 1 }
+    expanded := 0
+    changed := false
+    blocks := [LIRBlock]{}
+    loop block in original.blocks {
+        current := block.id
+        params := block.params
+        insts := [LIRInst]{}
+        lines := [Int]{}
+        loop (index, inst) in block.insts {
+            selected := -1
+            result := inline_no_result()
+            args := [LIRValueID]{}
+            if inst == .Call(dst, signature, callee, arguments) {
+                if callee == .Function(target) {
+                    id :: target.value
+                    if id >= 0 && id < program.functions.len() {
+                        if !recursive[id] && sizes[id] <= 40 && expanded + sizes[id] <= 200 {
+                            candidate :: program.functions[id]
+                            if candidate.signature == signature && candidate.blocks.len() > 0 && inline_alias_safe(original, candidate, consumed[id], uses, arguments) {
+                                selected = id
+                                result = dst
+                                args = arguments
+                            }
+                        }
+                    }
+                }
+            }
+            if selected < 0 {
+                &insts.push(inst)
+                &lines.push(opt_debug_line(block, index))
+                next
+            }
+            callee :: program.functions[selected]
+            expanded += sizes[selected]
+            changed = true
+            // Entry parameters are aliases of the call arguments. LIR lint
+            // forbids an edge back to the entry, so these need no phi nodes.
+            map := [Int]{}
+            loop _ in callee.values -> &map.push(-1)
+            loop (position, param) in callee.blocks[0].params -> map[param.value] = args[position].value
+            loop value in callee.values {
+                if map[value.id.value] < 0 {
+                    id :: LIRValueID{value: function.values.len()}
+                    map[value.id.value] = id.value
+                    &function.values.push(LIRValue{id: id, layout: value.layout, drop: value.drop, jet_type: value.jet_type})
+                }
+            }
+            block_map := [Int:Int]{}
+            loop copied in callee.blocks {
+                &block_map.add(copied.id.value, fresh_block).drop("callee block IDs are unique (LIR lint)")
+                fresh_block += 1
+            }
+            continuation :: LIRBlockID{value: fresh_block}
+            fresh_block += 1
+            entry :: LIRBlockID{value: block_map.get(callee.blocks[0].id.value) ?? -1}
+            &lines.push(opt_debug_line(block, index))
+            &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: entry, args: [LIRValueID]{}}}, lines: lines})
+            loop (position, copied) in callee.blocks {
+                copied_params :: if position == 0 -> [LIRValueID]{} else -> opt_ns(map, copied.params)
+                copied_insts := [LIRInst]{}
+                // A StackSlot stays an instruction at each site, with a new
+                // dst, so selection allocates distinct storage for each copy.
+                loop copied_inst in copied.insts -> &copied_insts.push(opt_renumber_inst(map, copied_inst))
+                copied_lines := [Int]{}
+                loop at in 0..<(copied.insts.len() + 1) {
+                    line :: if callee.debug.file == function.debug.file -> opt_debug_line(copied, at) else -> opt_debug_line(block, index)
+                    &copied_lines.push(line)
+                }
+                &blocks.push(LIRBlock{id: LIRBlockID{value: block_map.get(copied.id.value) ?? -1}, params: copied_params, insts: copied_insts, terminator: inline_terminator(map, block_map, continuation, copied.terminator), lines: copied_lines})
+            }
+            current = continuation
+            params = [LIRValueID]{}
+            if result == .Val(dst) -> &params.push(dst)
+            insts = [LIRInst]{}
+            lines = [Int]{}
+        }
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        &blocks.push(LIRBlock{id: current, params: params, insts: insts, terminator: block.terminator, lines: lines})
+    }
+    if !changed -> return function
+    function.blocks = blocks
+    // A callee with only Unreachable exits leaves the old suffix dead. Prune
+    // it and compact its now-undefined values, without simplifying any effects.
+    _ := opt_drop_unreachable(&function)
+    opt_compact(function)
+}
+
+fn lir_inline_module(program: LIRModule) -> LIRModule Never! {
+    direct := [LIRFunction]{}
+    loop function in program.functions -> &direct.push(inline_direct(program, function))
+    exposed :: LIRModule{signatures: program.signatures, functions: direct, data: program.data, debug: program.debug}
+    graph :: inline_graph(exposed)
+    sizes := [Int]{}
+    consumed := [[Bool]]{}
+    loop function in exposed.functions {
+        size := 0
+        flags := [Bool]{}
+        loop _ in function.values -> &flags.push(false)
+        loop block in function.blocks {
+            size += block.insts.len()
+            loop inst in block.insts {
+                loop value in lir_inst_consumes(inst) -> flags[value.value] = true
+            }
+        }
+        &consumed.push(flags)
+        &sizes.push(size)
+    }
+    functions := [LIRFunction]{}
+    loop function in exposed.functions -> &functions.push(inline_caller(exposed, function, graph.recursive, sizes, consumed))
+    LIRModule{signatures: program.signatures, functions: functions, data: program.data, debug: program.debug}
+}

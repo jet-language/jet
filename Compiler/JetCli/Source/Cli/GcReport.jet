@@ -1,0 +1,235 @@
+// Source/CmdGc.rs: bounded GC identity evidence, never estimated promotions.
+use jet_foundation.[Diagnostic, diagnostic_from_registry, diagnostic_render_all, diagnostic_theme_paint, foundation_parse_protocol_json]
+
+#Error
+struct JetCLIGCError {
+    kind: String
+    detail: String
+}
+struct JetCLIGCIdentity {
+    id: Int
+    retained: Bool
+}
+struct JetCLIGCSite {
+    source: String
+    span_start: Int
+    span_end: Int
+    scope: String
+    policy: String
+    reason: String
+    type_name: String
+    identities: [JetCLIGCIdentity]
+}
+struct JetCLIGCTrace {
+    project: String
+    pid: Int
+    started: Int
+    updated: Int
+    collections: Int
+    sites: [JetCLIGCSite]
+}
+fn jet_cli_gc_error(kind: String, detail: String) -> JetCLIGCError Never! { JetCLIGCError{kind: kind, detail: detail} }
+fn jet_cli_gc_object(value: Dyn, name: String) JetCLIGCError! {
+    if value == .Object(_) -> return
+    Err(jet_cli_gc_error("malformed", "{name} is not an object"))
+}
+fn jet_cli_gc_field(value: Dyn, name: String) -> Dyn JetCLIGCError! {
+    if value == .Object(fields) {
+        // Dyn objects retain ordered key/value fields, not map entries.
+        loop field in fields { if field.key == name -> return Ok(field.value) }
+        return Err(jet_cli_gc_error("malformed", "GC trace is missing `{name}`"))
+    }
+    Err(jet_cli_gc_error("malformed", "GC trace root is not an object"))
+}
+fn jet_cli_gc_text(value: Dyn, name: String) -> String JetCLIGCError! {
+    field :: jet_cli_gc_field(value, name)
+    if field == .Text(text) -> return Ok(text)
+    Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not text"))
+}
+fn jet_cli_gc_safe_text(value: Dyn, name: String) -> String JetCLIGCError! {
+    text :: jet_cli_gc_text(value, name)
+    if text == "" || text.bytes().len() > 4096 || status_text.has_control(text) -> return Err(jet_cli_gc_error("malformed", "GC trace `{name}` is empty, unsafe, or too long"))
+    Ok(text)
+}
+fn jet_cli_gc_uint(value: Dyn, name: String) -> Int JetCLIGCError! {
+    field :: jet_cli_gc_field(value, name)
+    if field == .Int(number) && number >= 0 -> return Ok(number)
+    Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not a non-negative integer"))
+}
+fn jet_cli_gc_bool(value: Dyn, name: String) -> Bool JetCLIGCError! {
+    field :: jet_cli_gc_field(value, name)
+    if field == .Bool(flag) -> return Ok(flag)
+    Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not Bool"))
+}
+fn jet_cli_gc_array(value: Dyn, name: String) -> [Dyn] JetCLIGCError! {
+    field :: jet_cli_gc_field(value, name)
+    if field == .Array(items) -> return Ok(items)
+    Err(jet_cli_gc_error("malformed", "GC trace `{name}` is not a list"))
+}
+fn jet_cli_gc_site_order(left: JetCLIGCSite, right: JetCLIGCSite) -> Ordering Never! {
+    source :: left.source <=> right.source
+    if source != Ordering.Equal -> return source
+    start :: left.span_start <=> right.span_start
+    if start != Ordering.Equal -> return start
+    end :: left.span_end <=> right.span_end
+    if end != Ordering.Equal -> return end
+    scope :: left.scope <=> right.scope
+    if scope != Ordering.Equal -> return scope
+    policy :: left.policy <=> right.policy
+    if policy != Ordering.Equal -> return policy
+    reason :: left.reason <=> right.reason
+    if reason != Ordering.Equal -> return reason
+    left.type_name <=> right.type_name
+}
+fn jet_cli_gc_parse(raw: String, expected_project: String, now: Int) -> JetCLIGCTrace JetCLIGCError! {
+    root :: foundation_parse_protocol_json(raw) ?? return Err(jet_cli_gc_error("malformed", "GC trace is not valid JSON"))
+    jet_cli_gc_object(root, "GC trace root")
+    if jet_cli_gc_text(root, "schema") != "jet.gc.trace" -> return Err(jet_cli_gc_error("incompatible", "GC trace schema is not supported"))
+    if jet_cli_gc_uint(root, "version") != 1 -> return Err(jet_cli_gc_error("incompatible", "GC trace version is not supported"))
+    if expected_project.bytes().len() > 4096 || status_text.has_control(expected_project) -> return Err(jet_cli_gc_error("unsafe", "project path is not safe to display"))
+    project :: jet_cli_gc_safe_text(root, "project")
+    if project != expected_project -> return Err(jet_cli_gc_error("stale", "GC trace belongs to project `{project}`, not `{expected_project}`"))
+    pid :: jet_cli_gc_uint(root, "pid")
+    if pid == 0 -> return Err(jet_cli_gc_error("malformed", "GC trace process id is zero"))
+    started :: jet_cli_gc_uint(root, "started_unix_ms")
+    updated :: jet_cli_gc_uint(root, "updated_unix_ms")
+    if started > updated || (updated > now && updated - now > 300000) -> return Err(jet_cli_gc_error("malformed", "GC trace timestamps are inconsistent"))
+    if now - updated > 2592000000 -> return Err(jet_cli_gc_error("stale", "GC trace is older than 30 days"))
+    complete :: jet_cli_gc_bool(root, "complete")
+    dropped :: jet_cli_gc_uint(root, "dropped_promotions")
+    if !complete || dropped != 0 -> return Err(jet_cli_gc_error("incomplete", "GC trace dropped {dropped} promotions at its safety limits"))
+    collections :: jet_cli_gc_uint(root, "collections")
+    values :: jet_cli_gc_array(root, "sites")
+    if values.len() > 4096 -> return Err(jet_cli_gc_error("oversized", "GC trace has too many promotion sites"))
+    sites := [JetCLIGCSite]{}
+    identities_seen := [Int:Bool]{}
+    loop value in values {
+        jet_cli_gc_object(value, "GC promotion site")
+        source :: jet_cli_gc_safe_text(value, "source")
+        start :: jet_cli_gc_uint(value, "span_start")
+        end :: jet_cli_gc_uint(value, "span_end")
+        if start > end -> return Err(jet_cli_gc_error("malformed", "GC promotion span is reversed"))
+        scope :: jet_cli_gc_safe_text(value, "scope")
+        policy :: jet_cli_gc_safe_text(value, "policy_provenance")
+        reason :: jet_cli_gc_safe_text(value, "reason")
+        type_name :: jet_cli_gc_safe_text(value, "type_name")
+        identity_values :: jet_cli_gc_array(value, "identities")
+        if identities_seen.len() + identity_values.len() > 65536 -> return Err(jet_cli_gc_error("oversized", "GC trace has too many identities"))
+        identities := [JetCLIGCIdentity]{}
+        retained_count := 0
+        loop row in identity_values {
+            jet_cli_gc_object(row, "GC identity")
+            id :: jet_cli_gc_uint(row, "identity")
+            if id == 0 || identities_seen.get(id) != None -> return Err(jet_cli_gc_error("malformed", "GC trace has a zero or duplicate identity"))
+            identities_seen[id] = true
+            retained :: jet_cli_gc_bool(row, "retained")
+            if retained -> retained_count += 1
+            &identities.push(JetCLIGCIdentity{id: id, retained: retained})
+        }
+        &identities.sort_by((left: JetCLIGCIdentity, right: JetCLIGCIdentity) -> left.id <=> right.id)
+        if jet_cli_gc_uint(value, "allocations") != identities.len() || jet_cli_gc_uint(value, "retained") != retained_count -> return Err(jet_cli_gc_error("malformed", "GC trace counters do not match identity evidence"))
+        &sites.push(JetCLIGCSite{source: source, span_start: start, span_end: end, scope: scope, policy: policy, reason: reason, type_name: type_name, identities: identities})
+    }
+    &sites.sort_by(jet_cli_gc_site_order)
+    loop index in 1..<sites.len() {
+        if jet_cli_gc_site_order(sites[index - 1], sites[index]) == Ordering.Equal -> return Err(jet_cli_gc_error("malformed", "GC trace repeats a promotion site"))
+    }
+    Ok(JetCLIGCTrace{project: project, pid: pid, started: started, updated: updated, collections: collections, sites: sites})
+}
+fn jet_cli_gc_read(path: String) -[FS, Env, Time.Wait]> String JetCLIGCError! {
+    parent :: jet_cli_parent(path) ?? "."
+    directory_metadata :: cli_files.stat(parent) ?? {
+        if err == .NotFound(_) -> return Err(jet_cli_gc_error("missing", "no GC trace exists at `{path}`"))
+        return Err(jet_cli_gc_error("unsafe", "cannot inspect GC trace directory: {jet_cli_io_error_text(err)}"))
+    }
+    if !directory_metadata.is_dir || directory_metadata.is_symlink -> return Err(jet_cli_gc_error("unsafe", "GC trace directory path is not a directory"))
+    info :: cli_files.stat(path) ?? {
+        if err == .NotFound(_) -> return Err(jet_cli_gc_error("missing", "no GC trace exists at `{path}`"))
+        return Err(jet_cli_gc_error("unsafe", "cannot inspect GC trace: {jet_cli_io_error_text(err)}"))
+    }
+    if !info.is_file || info.is_symlink -> return Err(jet_cli_gc_error("unsafe", "GC trace is not a regular file"))
+    canonical :: cli_files.realpath(parent) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
+    held :: JetCLIRootedDirectory.open(canonical, [String]{}, false) ?? return Err(jet_cli_gc_error("unsafe", err.message))
+    reader :: held.handle.open(jet_cli_file_name(path)) ?? return Err(jet_cli_gc_error("unsafe", "cannot securely open GC trace: {jet_cli_io_error_text(err)}"))
+    metadata :: reader.stat() ?? return Err(jet_cli_gc_error("unsafe", "cannot inspect GC trace: {jet_cli_io_error_text(err)}"))
+    if !metadata.is_file -> return Err(jet_cli_gc_error("unsafe", "GC trace is not a regular file"))
+    if cli_sys.is_unix() && (metadata.mode.bit_and(0o077)) != 0 -> return Err(jet_cli_gc_error("unsafe", "GC trace permissions expose runtime state"))
+    if cli_sys.is_linux() {
+        if cli_files.stat("/proc/{cli_sys.pid()}") == .Ok(process) {
+            if metadata.owner != process.owner -> return Err(jet_cli_gc_error("unsafe", "GC trace belongs to another user"))
+        }
+    }
+    if metadata.size > 4194304 -> return Err(jet_cli_gc_error("oversized", "GC trace exceeds the 4 MiB safety limit"))
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(jet_cli_table_min(65536, 4194305 - bytes.len())) ?? return Err(jet_cli_gc_error("malformed", "cannot read GC trace: {jet_cli_io_error_text(err)}"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > 4194304 -> return Err(jet_cli_gc_error("oversized", "GC trace exceeds the 4 MiB safety limit"))
+    }
+    Ok(String.from_bytes(bytes) ?? return Err(jet_cli_gc_error("malformed", "cannot read GC trace: stream did not contain valid UTF-8")))
+}
+fn jet_cli_gc_recommendation(site: JetCLIGCSite) -> String Never! {
+    "own {site.type_name} directly; represent identity-bearing links as Id<{site.type_name}>, or use Pool<{site.type_name}> when lifetime is bounded"
+}
+fn jet_cli_gc_retained(identities: [JetCLIGCIdentity]) -> Int Never! {
+    count := 0
+    loop identity in identities { if identity.retained -> count += 1 }
+    count
+}
+fn jet_cli_gc_identity_summary(identities: [JetCLIGCIdentity]) -> String Never! {
+    values := [String]{}
+    loop index in 0..<jet_cli_table_min(8, identities.len()) {
+        row :: identities[index]
+        &values.push("{row.id}{if row.retained -> "*" else -> ""}")
+    }
+    text := values.join(", ")
+    if identities.len() > 8 -> text = "{text} (+{identities.len() - 8} more)"
+    if text == "" -> return "-"
+    text
+}
+fn jet_cli_gc_render(trace: JetCLIGCTrace, color: Bool, json: Bool) -> String Never! {
+    allocations := 0
+    retained := 0
+    loop site in trace.sites {
+        allocations += site.identities.len()
+        retained += jet_cli_gc_retained(site.identities)
+    }
+    if !json {
+        out := "{diagnostic_theme_paint(color, "1;36", "jet gc report")} · {allocations} promotions · {retained} retained · {trace.collections} collections\n"
+        if trace.sites.len() == 0 -> return "{out}\nNo automatic GC promotions recorded.\nRemove the effective gc opt-in; ownership already proves every allocation.\n"
+        loop site in trace.sites {
+            out = "{out}\n{diagnostic_theme_paint(color, "1", "{site.source}:{site.span_start}..{site.span_end}")}  {site.type_name}\n  scope: {site.scope}\n  policy: {site.policy}\n  reason: {site.reason}\n  allocations: {site.identities.len()}  retained: {jet_cli_gc_retained(site.identities)}\n  identities: {jet_cli_gc_identity_summary(site.identities)}\n  rewrite: {jet_cli_gc_recommendation(site)}\n"
+        }
+        return out
+    }
+    sites := [JetCLIStatusValue]{}
+    loop site in trace.sites {
+        identities := [JetCLIStatusValue]{}
+        loop identity in site.identities -> &identities.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("identity", jet_cli_status_int(identity.id)), jet_cli_status_field("retained", jet_cli_status_bool(identity.retained))}))
+        &sites.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("source", jet_cli_status_text(site.source)), jet_cli_status_field("span_start", jet_cli_status_int(site.span_start)), jet_cli_status_field("span_end", jet_cli_status_int(site.span_end)), jet_cli_status_field("scope", jet_cli_status_text(site.scope)), jet_cli_status_field("policy_provenance", jet_cli_status_text(site.policy)), jet_cli_status_field("reason", jet_cli_status_text(site.reason)), jet_cli_status_field("type_name", jet_cli_status_text(site.type_name)), jet_cli_status_field("allocations", jet_cli_status_int(site.identities.len())), jet_cli_status_field("retained", jet_cli_status_int(jet_cli_gc_retained(site.identities))), jet_cli_status_field("identities", jet_cli_status_array(identities)), jet_cli_status_field("recommendation", jet_cli_status_text(jet_cli_gc_recommendation(site))),
+        }))
+    }
+    summary :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("sites", jet_cli_status_int(trace.sites.len())), jet_cli_status_field("allocations", jet_cli_status_int(allocations)), jet_cli_status_field("retained", jet_cli_status_int(retained))})
+    gc :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("schema", jet_cli_status_text("jet.gc.report")), jet_cli_status_field("version", jet_cli_status_int(1)), jet_cli_status_field("project", jet_cli_status_text(trace.project)), jet_cli_status_field("pid", jet_cli_status_int(trace.pid)), jet_cli_status_field("started_unix_ms", jet_cli_status_int(trace.started)), jet_cli_status_field("updated_unix_ms", jet_cli_status_int(trace.updated)), jet_cli_status_field("collections", jet_cli_status_int(trace.collections)), jet_cli_status_field("summary", summary), jet_cli_status_field("sites", jet_cli_status_array(sites))})
+    "{jet_cli_status_render("gc.report", true, [JetCLIStatusField]{jet_cli_status_field("gc", gc)})}\n"
+}
+fn jet_cli_gc_fail(error: JetCLIGCError, color: Bool, json: Bool) -> JetCLIPlan Never! {
+    fix :: if error.kind == "missing" -> "run `jet run --gc-trace <file.jet>`, then rerun `jet gc report`" else if error.kind == "incomplete" -> "trace a smaller complete workload; reports never estimate dropped promotions" else -> "rerun the program with `--gc-trace` to replace the rejected trace"
+    detail := error.detail
+    loop detail.ends_with(".") -> detail = detail.slice(0, detail.len() - 1)
+    diagnostic :: diagnostic_from_registry("E2110", None, "GC trace cannot be reported", "{detail}.", "{fix}.")
+    if json -> return jet_cli_done(jet_cli_status_render_with_reports("gc.report", false, jet_cli_reports_json(None, "", "", [Diagnostic]{diagnostic}), [JetCLIStatusField]{}), "", JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
+}
+fn jet_cli_gc_report_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time, Time.Wait]> JetCLIPlan Never! {
+    loop argument in args {
+        if !argument.starts_with("-") -> return jet_cli_gc_fail(jet_cli_gc_error("malformed", "unexpected gc report argument `{argument}`"), color, json)
+    }
+    path :: cli_sys.get("JET_GC_TRACE") ?? "{root}/.jet/gc/trace-v1.json"
+    raw :: jet_cli_gc_read(path) ?? return jet_cli_gc_fail(err, color, json)
+    now :: jet_cli_table_max(0, cli_time.unix_ns() /% 1000000)
+    trace :: jet_cli_gc_parse(raw, root, now) ?? return jet_cli_gc_fail(err, color, json)
+    jet_cli_done(jet_cli_gc_render(trace, color, json), "", JET_DRIVER_EXIT_OK)
+}

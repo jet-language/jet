@@ -1,0 +1,206 @@
+// Source/CmdGates.rs: load-only ledger consumer. Package/lock rows belong to
+// the canonical driver/provider; the CLI neither checks bodies nor parses locks.
+use jet_driver.[JetDriverCompileRequest, JetDriverAuthorizedSourceSnapshot, JetDriverGateQueryResult, JetDriverSourceQueryModule, JetDriverVerbOutput, jet_driver_gate_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[GateEntry, GateKind, GateLedger, Span, Diagnostic, gate_kind_name, gate_kind_parse, gate_kind_is_security, gate_ledger_push, diagnostic_line_at, diagnostic_column_at, diagnostic_render_all, diagnostic_from_registry]
+
+fn jet_cli_gates_entry(args: [String]) -> String? Never! {
+    skip := false
+    loop argument in args {
+        if skip {
+            skip = false
+            next
+        }
+        if argument == "--scope" || argument == "--kind" || argument == "--gate" {
+            skip = true
+            next
+        }
+        if argument.starts_with("--scope=") || argument.starts_with("--kind=") || argument.starts_with("--gate=") -> next
+        if !argument.starts_with("-") -> return Val(argument)
+    }
+    None
+}
+
+fn jet_cli_gate_external(kind: GateKind, scope: String, source: String, subject: String, detail: String, provenance: [String]) -> GateEntry Never! {
+    GateEntry{kind: kind, domain: "security", scope: scope, source: source, span: None, subject: subject, reason: None, status: Val("recorded"), detail: detail, provenance: provenance, operations: []}
+}
+
+// Host reads the actual canonical TrustStore once; only typed projection lives
+// here. Unknown authorities/raw records survive exactly as the store parsed them.
+fn jet_cli_gate_trust_entries(path: String, records: [TrustRecord]) -> [GateEntry] Never! {
+    rows := [GateEntry]{}
+    loop record in records {
+        if record == {
+            .Hash(hash) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, hash, "trusted project hash", [path]))
+            .Pattern(pattern) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, pattern, "trusted project pattern", [path]))
+            .Grant(grant) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, grant.scope, path, "{grant.authority}:{grant.subject}", "trusted authority grant", [path]))
+            .Raw(line) -> &rows.push(jet_cli_gate_external(GateKind.TrustGrant, "trust", path, line, "raw trust record", [path]))
+        }
+    }
+    rows
+}
+
+fn jet_cli_gate_invocation_kind(argument: String) -> GateKind? Never! {
+    if argument == "--force" -> return Val(GateKind.ForcePin)
+    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") -> return Val(GateKind.BuildFlag)
+    if argument == "--deny" || argument.starts_with("--deny=") || argument == "--trust" || argument == "--online" || argument == "--try-anyway" || argument == "--interpret" || argument == "--offline" || argument == "--locked" -> return Val(GateKind.SessionFlag)
+    None
+}
+
+// Call before gate_query so policy diagnostics see these same real writers.
+fn jet_cli_gate_append_invocation(ledger: &GateLedger, args: [String]) Never! {
+    loop (index, argument) in args {
+        kind :: jet_cli_gate_invocation_kind(argument) ?? next
+        subject := argument
+        separate :: argument == "--gate" || argument == "--allow" || argument == "--deny" || argument == "--target" || argument == "--profile"
+        if separate && index + 1 < args.len() -> subject = "{argument} {args[index + 1]}"
+        scope :: if kind == GateKind.SessionFlag -> "session" else -> "build"
+        gate_ledger_push(&ledger, jet_cli_gate_external(kind, scope, "command line", subject, "written invocation choice", ["command line"]))
+        if argument == "--allow" || argument.starts_with("--allow=") -> gate_ledger_push(&ledger, jet_cli_gate_external(GateKind.DependencyGrant, "build", "command line", subject, "invocation authority grant", ["command line"]))
+    }
+}
+
+fn jet_cli_gates_source(modules: [JetDriverSourceQueryModule], path: String) -> String Never! {
+    loop module_row in modules {
+        if module_row.path == path || module_row.physical_path == path -> return module_row.source
+    }
+    ""
+}
+
+fn jet_cli_gates_point(source: String, offset: Int) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("line", jet_cli_status_int(diagnostic_line_at(source, offset))), jet_cli_status_field("column", jet_cli_status_int(diagnostic_column_at(source, offset)))})
+}
+
+fn jet_cli_gates_location(source: String, span: Span) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_gates_point(source, span.start)), jet_cli_status_field("end", jet_cli_gates_point(source, span.end))})
+}
+
+fn jet_cli_gates_span(span: Span) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(span.start)), jet_cli_status_field("end", jet_cli_status_int(span.end))})
+}
+
+fn jet_cli_gates_entry_json(entry: GateEntry, modules: [JetDriverSourceQueryModule]) -> JetCLIStatusValue Never! {
+    source :: jet_cli_gates_source(modules, entry.source)
+    span := JetCLIStatusValue.Null
+    location := JetCLIStatusValue.Null
+    if entry.span == .Val(site) {
+        span = jet_cli_gates_span(site)
+        location = jet_cli_gates_location(source, site)
+    }
+    operations :: loop operation in entry.operations -> jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
+        jet_cli_status_field("span", jet_cli_gates_span(operation.span)),
+        jet_cli_status_field("location", jet_cli_gates_location(source, operation.span)),
+        jet_cli_status_field("required", jet_cli_status_texts(operation.required)),
+        jet_cli_status_field("asserted", jet_cli_status_texts(operation.asserted)),
+        jet_cli_status_field("discharged", jet_cli_status_bool(operation.discharged)),
+    })
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(gate_kind_name(entry.kind))),
+        jet_cli_status_field("domain", jet_cli_status_text(entry.domain)),
+        jet_cli_status_field("scope", jet_cli_status_text(entry.scope)),
+        jet_cli_status_field("source", jet_cli_status_text(entry.source)),
+        jet_cli_status_field("span", span),
+        jet_cli_status_field("location", location),
+        jet_cli_status_field("subject", jet_cli_status_text(entry.subject)),
+        jet_cli_status_field("reason", jet_cli_status_optional_text(entry.reason)),
+        jet_cli_status_field("status", jet_cli_status_optional_text(entry.status)),
+        jet_cli_status_field("detail", jet_cli_status_text(entry.detail)),
+        jet_cli_status_field("provenance", jet_cli_status_texts(entry.provenance)),
+        jet_cli_status_field("operations", jet_cli_status_array(operations)),
+    })
+}
+
+fn jet_cli_gates_matches(entry: GateEntry, kind: GateKind?, scope: String?) -> Bool Never! {
+    if kind == .Val(wanted) && entry.kind != wanted -> return false
+    filter :: scope ?? return true
+    filter == "all" || entry.scope.to_ascii_lower() == filter || entry.domain.to_ascii_lower() == filter || entry.source.to_ascii_lower() == filter
+}
+
+// Index selection borrows canonical rows instead of copying GateEntry payloads.
+fn jet_cli_gates_report(ledger: GateLedger, modules: [JetDriverSourceQueryModule], kind: GateKind?, scope: String?, json: Bool) -> String Never! {
+    selected :: loop (index, entry) in ledger.rows if jet_cli_gates_matches(entry, kind, scope) -> index
+    if json {
+        names := [String]{}
+        counts := [String:Int]{}
+        entries := [JetCLIStatusValue]{}
+        loop index in selected {
+            entry :: ledger.rows[index]
+            name :: gate_kind_name(entry.kind)
+            if !names.contains(name) -> &names.push(name)
+            counts[name] = (counts.get(name) ?? 0) + 1
+            &entries.push(jet_cli_gates_entry_json(entry, modules))
+        }
+        &names.sort()
+        fields :: loop name in names -> jet_cli_status_field(name, jet_cli_status_int(counts.get(name) ?? 0))
+        gates :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("entries", jet_cli_status_array(entries)), jet_cli_status_field("counts", jet_cli_status_object(fields))})
+        return "{jet_cli_status_render("inspect.gates", true, [JetCLIStatusField]{jet_cli_status_field("gates", gates)})}\n"
+    }
+    out := "gates: {selected.len()}\n"
+    index := 0
+    loop index < selected.len() {
+        entry_kind :: ledger.rows[selected[index]].kind
+        end := index + 1
+        loop end < selected.len() && ledger.rows[selected[end]].kind == entry_kind -> end += 1
+        count :: end - index
+        if count >= 16 && !gate_kind_is_security(entry_kind) {
+            out = "{out}  {gate_kind_name(entry_kind)}: {count} entries\n"
+        } else {
+            out = "{out}  {gate_kind_name(entry_kind)}: {count}\n"
+            loop position in index..<end {
+                entry :: ledger.rows[selected[position]]
+                source :: jet_cli_gates_source(modules, entry.source)
+                location := entry.source
+                if entry.span == .Val(site) -> location = "{entry.source}:{diagnostic_line_at(source, site.start)}:{diagnostic_column_at(source, site.start)}"
+                status :: if entry.status == .Val(value) -> " status={value}" else -> ""
+                reason :: if entry.reason == .Val(value) -> " reason={value}" else -> ""
+                out = "{out}    {location}  {entry.subject}  {entry.detail}{status}{reason}\n"
+                loop provenance in entry.provenance -> out = "{out}      provenance {provenance}\n"
+                loop operation in entry.operations {
+                    site :: operation.span
+                    out = "{out}      {entry.source}:{diagnostic_line_at(source, site.start)}:{diagnostic_column_at(source, site.start)}  {operation.kind}  {if operation.discharged -> "discharged" else -> "missing"}  required=[{operation.required.join(",")}] asserted=[{operation.asserted.join(",")}]\n"
+                }
+            }
+        }
+        index = end
+    }
+    out
+}
+
+fn jet_cli_gates_diagnostics(result: JetDriverGateQueryResult, snapshot: JetDriverAuthorizedSourceSnapshot, file: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput {
+    reports := [String]{}
+    stderr := ""
+    cwd :: if json -> jet_cli_report_cwd() else -> None
+    diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, [MIRSourceFile]{})
+    loop (index, diagnostic) in diagnostics {
+        path :: if diagnostic.origin == .Val(origin) -> origin.display else -> file
+        source :: if diagnostic.origin == .Val(origin) -> origin.source else -> jet_cli_gates_source(result.source.modules, path)
+        if json {
+            loop report in jet_cli_reports_json(cwd, path, source, [Diagnostic]{diagnostic}) -> &reports.push(report)
+        } else {
+            if index > 0 -> stderr = "{stderr}\n"
+            stderr = "{stderr}{diagnostic_render_all(path, source, [Diagnostic]{diagnostic}, color)}"
+        }
+    }
+    stdout :: if json -> "{jet_cli_status_render_with_reports("inspect.gates", false, reports, [JetCLIStatusField]{})}\n" else -> ""
+    JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+// Host prepares the authorized load-only request, including canonical package,
+// lock/trust and invocation writers. Preserve raw argv after `inspect gates`.
+fn jet_cli_gates_host(request: JetDriverCompileRequest, args: [String], file: String, color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput {
+    result :: jet_driver_gate_query(request)
+    if !result.source.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
+    kind := GateKind?{None}
+    if jet_cli_option_value(args, "--kind") == .Val(value) {
+        parsed :: gate_kind_parse(value) ?? return jet_cli_gates_usage("unknown gate kind `{value}`", "use one of unsafe, impure, dependency_grant, build_flag, session_flag, trust_grant, force_pin, taint_scrub, duty_drop, state_transition, precision_demotion, nondeterministic, structure, or lint_allow", color, json)
+        kind = Val(parsed)
+    }
+    if !result.complete -> return jet_cli_gates_diagnostics(result, request.authorized_sources, file, color, json)
+    scope :: jet_cli_option_value(args, "--scope").map((value) -> value.to_ascii_lower())
+    JetDriverVerbOutput{stdout: jet_cli_gates_report(result.ledger, result.source.modules, kind, scope, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+fn jet_cli_gates_usage(what: String, fix: String, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    diagnostic :: diagnostic_from_registry("E2104", None, what, jet_cli_why("E2104"), fix)
+    JetDriverVerbOutput{stdout: if json -> jet_cli_report_status_json(diagnostic) else -> "", stderr: if json -> "" else -> diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color), exit_code: JET_DRIVER_EXIT_USAGE}
+}

@@ -202,8 +202,29 @@ fn run() {
 use core.encoding.json as json
 
 fn run() {
-    value :: json.loads("{\"ok\":true}")
-    print(json.dump(value))
+    value :: json.loads(\`{"ok":true}\`) ?? panic("JSON parse")
+    print(json.dump(value) ?? panic(err.reason))
+}
+`],
+  ["core.encoding.json.dumps", `// core-conformance: core.encoding.json.dumps
+use core.encoding.json as api
+
+fn run() {
+    print(api.dumps(Dyn{}) ?? panic(err.reason))
+}
+`],
+  ["core.encoding.jsonl.dumps", `// core-conformance: core.encoding.jsonl.dumps
+use core.encoding.jsonl as api
+
+fn run() {
+    print(api.dumps([Dyn]{}) ?? panic(err.reason))
+}
+`],
+  ["core.encoding.jsonl.append_line", `// core-conformance: core.encoding.jsonl.append_line
+use core.encoding.jsonl as api
+
+fn run() {
+    print(api.append_line("jet", Dyn{}) ?? panic(err.reason))
 }
 `],
   ["core.encoding.json.load", `// core-conformance: core.encoding.json.load
@@ -242,114 +263,6 @@ fn run() {
     print(tls.unwrap(tls.TLSStream{fd: 0, host: "example.test", port: 443}).peer_port())
 }
 `],
-  ["core.tasks.channel", `// core-conformance: core.tasks.channel
-use core.tasks as tasks
-
-fn run() {
-    state :: tasks.channel(2)
-    print(state.capacity)
-}
-`],
-  ["core.tasks.run", `// core-conformance: core.tasks.run
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.run(tasks.after(0, 1)))
-}
-`],
-  ["core.tasks.start", `// core-conformance: core.tasks.start
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.start(tasks.after(0, 1)).value)
-}
-`],
-  ["core.tasks.waitall", `// core-conformance: core.tasks.waitall
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.waitall([tasks.after(0, 1), tasks.after(0, 2)]).len())
-}
-`],
-  ["core.tasks.waitany", `// core-conformance: core.tasks.waitany
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.waitany([tasks.after(0, 1)]))
-}
-`],
-  ["core.tasks.put", `// core-conformance: core.tasks.put
-use core.tasks as tasks
-
-fn run() {
-    state :: tasks.channel(1)
-    print(tasks.put(state, 7).values.len())
-}
-`],
-  ["core.tasks.shutdown", `// core-conformance: core.tasks.shutdown
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.shutdown(tasks.channel(1)).closed)
-}
-`],
-  ["core.tasks.stop", `// core-conformance: core.tasks.stop
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.stop(tasks.channel(1)).closed)
-}
-`],
-  ["core.tasks.acquire", `// core-conformance: core.tasks.acquire
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.acquire(tasks.lock()).locked)
-}
-`],
-  ["core.tasks.run", `// core-conformance: core.tasks.run
-use core.tasks as tasks
-
-fn run() {
-    tasks.run()
-    print(true)
-}
-`],
-  ["core.tasks.lock", `// core-conformance: core.tasks.lock
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.lock().locked)
-}
-`],
-  ["core.tasks.notify", `// core-conformance: core.tasks.notify
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.notify(tasks.lock()).generation)
-}
-`],
-  ["core.tasks.release", `// core-conformance: core.tasks.release
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.release(tasks.acquire(tasks.lock())).locked)
-}
-`],
-  ["core.tasks.reset", `// core-conformance: core.tasks.reset
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.reset(tasks.lock()).generation)
-}
-`],
-  ["core.tasks.clear", `// core-conformance: core.tasks.clear
-use core.tasks as tasks
-
-fn run() {
-    print(tasks.clear(tasks.channel(1)).values.len())
-}
-`],
 ]);
 // Dynamic Core types do not have module_items rows, but their witnesses still
 // belong to the conformance corpus. Keep the ledger's canonical row IDs here
@@ -357,6 +270,21 @@ fn run() {
 // prove several rows, and each row may require several deterministic witnesses.
 // Paths are relative to the conformance corpus root.
 const FIXTURE_BINDINGS = new Map([
+  ["core.crypto.expert.aes256gcm_open", [
+    "core/crypto/aes/nist_gcm.jet",
+    "core/crypto/aes/seed_differential.jet",
+  ]],
+  ["core.crypto.expert.aes256gcm_seal", [
+    "core/crypto/aes/nist_gcm.jet",
+    "core/crypto/aes/seed_differential.jet",
+  ]],
+  ["core.crypto.expert.x25519_raw", ["core/crypto/ct_x25519.jet"]],
+  ["core.crypto.sign", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.verify", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.expert.ed25519_sign", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.expert.ed25519_verify_strict", ["core/crypto/ct_ed25519.jet"]],
+  ["core.crypto.vault.status", ["core/crypto/vault/error_identity.jet"]],
+  ["core.crypto.vault.prepare_import_signing", ["core/crypto/vault/guard_errors.jet"]],
   ["collection.Condition.notify_one", [
     "core/sync/condition_deadline.jet",
     "core/sync/condition_notify_all.jet",
@@ -439,10 +367,10 @@ const UNIT_RESULT_KEYS = new Set([
   "core.math.random.shuffle",
   "core.time.sleep",
   "core.sys.close_fd",
+  "core.sys.atexit",
   "core.sys.sync",
   "core.sys.set",
   "core.sys.stop",
-  "core.tasks.run",
   "core.tasks.yield_now",
 ]);
 // Never-returning Core effects terminate the witness instead of yielding a
@@ -1288,7 +1216,7 @@ function sourceSignatures() {
   for (const path of coreSourceFiles()) {
     const source = readFileSync(path, "utf8");
     const code = withoutComments(source);
-    const pattern = /^pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
+    const pattern = /^fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/gm;
     for (const match of code.matchAll(pattern)) {
       const open = match.index + match[0].lastIndexOf("(");
       let close;

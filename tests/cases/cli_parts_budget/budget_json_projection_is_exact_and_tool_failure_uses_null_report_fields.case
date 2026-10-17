@@ -1,0 +1,35 @@
+# Port of tests/cli_parts/budget.rs:892-1040.
+# PENDING-SAME-HEAD: no runtime reference run.
+# PENDING-GRAMMAR(batch-four): pending predicate and step forms remain explicit.
+fixture: fixtures/exact_json
+step: jet budget check --json
+cwd: valid
+exit: 0
+stderr: empty
+stdout: machine-output = [status] # original predicate
+json: stdout canonical # original predicate
+json: stdout doc $ keys = ["action","budget","moment","ok","schema","status"] # original predicate
+json: stdout doc $.budget keys = ["applied","diagnostics","exit_code","failure_kind","plan","report","report_path","results"] # original predicate
+json: stdout doc $.budget.results[0] keys = ["baseline_report_ids","budget_id","comparison","diagnostic_code","direction","enforcement","evidence","lower95","metric","point","reason","source","stale","status","trend","unit","upper95"] # original predicate
+json: stdout doc $.budget.results[0].source keys = ["column","line","path"] # original predicate
+json: stdout doc $.budget.results[0].comparison keys = ["direction","kind","limit"] # original predicate
+copy: malformed.source valid/src/run.jet
+step: jet budget check --json
+cwd: valid
+exit: 1
+stderr: empty
+json: stdout canonical # original predicate
+json: stdout doc $.budget.failure_kind = "compiler"
+json: stdout doc $.budget.diagnostics[0].source keys = ["column","end_column","end_line","line","path"] # original predicate
+json: stdout doc $.budget.diagnostics[0].source.path = "src/run.jet"
+json: stdout doc $.budget.diagnostics[0].source.end_line : int # original predicate
+json: stdout doc $.budget.diagnostics[0].source.end_column : int # original predicate
+step: jet budget check --json
+exit: 1
+stderr: empty
+json: stdout canonical # original predicate
+json: stdout doc $.status = "fail"
+json: stdout doc $.budget.failure_kind = "tool"
+json: stdout doc $.budget.report = null
+json: stdout doc $.budget.report_path = null
+json: stdout doc $.budget.plan = null

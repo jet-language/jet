@@ -1,0 +1,11 @@
+# Port of tests/corelib_parts/system.rs::core_log_structured_file_sink_runs; original source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/system.rs:303.
+fixture: fixtures/core_log_structured_file_sink_runs
+step: jet build fixture.jet
+step baseline: built
+stdout: = core_log_structured_file_sink_runs.out
+file: service.log ~ "\"body\":\"served\"" # original predicate: file contains
+file: service.log ~ "\"route\":\"/\"" # original predicate: file contains
+file: service.log ~ "\"status\":200" # original predicate: file contains
+file: service.log ~ "\"token\":\"[redacted]\"" # original predicate: file contains
+file: service.log ~ "\"spans\":[\"request\"]" # original predicate: file contains

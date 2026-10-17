@@ -1,0 +1,8 @@
+Error [E0204]: `values` is being changed in this call, so it can't be used again here
+  --> composite_lambda_capture_walks_if_prefix_and_fallback_values_2.jet:5:29
+    |
+  5 |     both(&values, Val(() -> values.len()) ?? () -> 0)
+    |                             ^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `~values`
+More: jet-lang.dev/e/E0204

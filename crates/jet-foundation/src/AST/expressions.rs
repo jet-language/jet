@@ -244,12 +244,11 @@ pub enum BinOp {
     /// D-MODSEM1=A: infix `%%` is the truncated remainder — its answer takes
     /// the dividend's sign, so `-7 %% 2` is -1. It pairs with `/`.
     Rem,
-    /// D-EXPOP1=A / D-EXPSEM1=A: infix `^` raises the left side to the power of
-    /// the right side. Right-associative, binds tighter than unary minus.
+    /// D-SIGIL-ALGEBRA1=B: the checked numeric `pow` operation.
     Pow,
     BitAnd,
     BitOr,
-    /// D-XORSPELL1=A: bitwise exclusive-or is infix `~|`, because `^` is power.
+    /// D-SIGIL-ALGEBRA1=B: the checked integer `bit_xor` operation.
     BitXor,
     Shl,
     Shr,
@@ -403,6 +402,9 @@ pub struct LambdaMeta {
     pub escapes: bool,
     /// Sema checked this lambda inside an erased scope; it has no runtime row.
     pub runtime_erased: bool,
+    /// D-HTTP-ROUTE-EXPOSE1: checked method identity whose source body defines
+    /// the endpoint contract of a synthesized mounting callback.
+    pub http_route_source: Option<String>,
     pub needs_fn_mut: bool,
     pub mut_captures: Vec<String>,
     pub cloned_captures: Vec<String>,
@@ -778,6 +780,10 @@ pub enum Expr {
         /// meaning of "resolved user-defined receiver type"). Lowering
         /// consumes it without reconstructing the language rule.
         checked_widen: bool,
+        /// Exact executable declaration identity retained by checked nominal
+        /// method resolution. Template offsets and receiver leaf spellings
+        /// cannot identify generated bodies; abstract dispatch leaves this unset.
+        checked_callee: Option<String>,
     },
     /// D-DOTCTOR1 (ratified 2026-06-25): `Type.{ field: expr, ... }` (named) or
     /// `.{ field: expr, ... }` (inferred — type from context). Replaces the old
@@ -1414,17 +1420,7 @@ impl Expr {
         }
 
         fn walk_pattern(pattern: &mut Pattern, f: &mut impl FnMut(&mut Expr)) {
-            match pattern {
-                Pattern::Or(alts, _) => alts.iter_mut().for_each(|alt| walk_pattern(alt, f)),
-                Pattern::Struct { fields, .. } => {
-                    for field in fields {
-                        if let super::StructPatField::Value { value, .. } = field {
-                            walk(value, f);
-                        }
-                    }
-                }
-                _ => {}
-            }
+            pattern.for_each_value_expr_mut(&mut |value| walk(value, f));
         }
 
         fn walk_fallback(fallback: &mut OrFallback, f: &mut impl FnMut(&mut Expr)) {

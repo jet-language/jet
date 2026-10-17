@@ -13,7 +13,7 @@ AUTHORITY_KIND_SYMLINK :: prep { "symlink" }
 AUTHORITY_HARDLINK_DETAIL :: prep { "authority file must have exactly one hard link" }
 
 // The kind proven by a checked open.
-pub enum AuthorityKind {
+enum AuthorityKind {
     File
     Directory
 
@@ -33,28 +33,28 @@ pub enum AuthorityKind {
 // itself (kind plus device and inode): its length and mtime change whenever a
 // legitimate writer creates or removes an entry below the authority root, and
 // a path swapped between two observations still yields a different inode.
-pub struct FileIdentity {
-    pub kind: AuthorityKind
-    pub length: Int
-    pub modified_ns: Int?
-    pub device: Int
-    pub inode: Int
+struct FileIdentity {
+    kind: AuthorityKind
+    length: Int
+    modified_ns: Int?
+    device: Int
+    inode: Int
 
     fn from_stat(info: files.Stat, kind: AuthorityKind) -> FileIdentity Never! {
         if kind == AuthorityKind.Directory {
             return FileIdentity{kind: kind, length: 0, modified_ns: None, device: info.id.device, inode: info.id.inode}
         }
-        FileIdentity{kind: kind, length: info.size, modified_ns: Val(info.modified.unix_ns), device: info.id.device, inode: info.id.inode}
+        FileIdentity{kind: kind, length: info.size, modified_ns: Val(info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")), device: info.id.device, inode: info.id.inode}
     }
 }
 
 // One no-follow opened file and the bytes read from that same handle.
-pub struct CheckedFile {
-    pub path: String
-    pub relative: String
-    pub identity: FileIdentity
-    pub handle: FileReader
-    pub bytes: [U8]
+struct CheckedFile {
+    path: String
+    relative: String
+    identity: FileIdentity
+    handle: FileReader
+    bytes: [U8]
 
     // Decode the bytes that were read from the opened object.
     fn text(self) -> String AuthorityError! {
@@ -63,36 +63,36 @@ pub struct CheckedFile {
     }
 }
 
-// One no-follow opened directory.
-pub struct CheckedDirectory {
-    pub path: String
-    pub relative: String
-    pub identity: FileIdentity
-    pub handle: Directory
-    allow_hardlinks: Bool
+// One checked directory: only descendants own a new no-follow handle.
+struct CheckedDirectory {
+    path: String
+    relative: String
+    identity: FileIdentity
+    handle: Directory?
+    priv allow_hardlinks: Bool
 }
 
 // A parsed canonical `package.jet` plus the opened manifest snapshot.
-pub struct CheckedManifest {
-    pub file: CheckedFile
-    pub facts: PackageFacts
+struct CheckedManifest {
+    file: CheckedFile
+    facts: PackageFacts
 }
 
 // A checked member directory and its canonical manifest.
-pub struct CheckedMember {
-    pub directory: CheckedDirectory
-    pub manifest: CheckedManifest
+struct CheckedMember {
+    directory: CheckedDirectory
+    manifest: CheckedManifest
 }
 
 // A member snapshot after checked Config composition and member validation.
-pub struct CheckedPackage {
-    pub member: CheckedMember
-    pub facts: PackageFacts
+struct CheckedPackage {
+    member: CheckedMember
+    facts: PackageFacts
 }
 
 // Failure from the shared authority resolver.
 #Error
-pub enum AuthorityError {
+enum AuthorityError {
     Missing(String)
     // `package.jet` parsed as text but violates the manifest vocabulary; kept
     // typed so the registered manifest diagnostics reach the user.
@@ -258,25 +258,15 @@ fn pkg_authority_require_single_link(path: String, info: files.Stat) AuthorityEr
     return Err(AuthorityError.Invalid{path: path, detail: AUTHORITY_HARDLINK_DETAIL})
 }
 
-// The IOContext of a provider failure, when it carries one.
-fn pkg_io_error_context(error: IOError) -> IOContext? Never! {
-    if error == {
-        .InvalidInput(context) -> Val(context)
-        .NotFound(context) -> Val(context)
-        .PermissionDenied(context) -> Val(context)
-        .TimedOut(context) -> Val(context)
-        .Cancelled(context) -> Val(context)
-        .Closed(context) -> Val(context)
-        .Protocol(context) -> Val(context)
-        .Other(context) -> Val(context)
-        else -> None
-    }
-}
-
 // The OS error number behind a provider failure, when known.
 fn pkg_io_os_code(error: IOError) -> Int? Never! {
-    context :: pkg_io_error_context(error) ?? return None
-    context.os_code
+    if error == {
+        .InvalidInput(context) | .NotFound(context) | .PermissionDenied(context) |
+        .TimedOut(context) | .Cancelled(context) | .Closed(context) |
+        .Protocol(context) | .Other(context) | .AlreadyExists(context) |
+        .Unsupported(context) -> context.os_code
+        else -> None
+    }
 }
 
 // ELOOP: the final component was a link opened with no-follow.
@@ -314,7 +304,7 @@ fn pkg_authority_map_io(path: String, error: IOError, directory: Bool) -[Env]> A
 // `root.join(relative)`: an empty relative keeps Rust's trailing separator.
 fn pkg_authority_join(root: String, relative: String) -> String Never! {
     if relative == "" {
-        if root.ends_with("/") -> return ~root
+        if root.ends_with("/") -> return root.copy()
         return "{root}/"
     }
     files.join(root, relative)

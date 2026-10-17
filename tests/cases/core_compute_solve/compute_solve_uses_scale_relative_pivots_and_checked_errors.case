@@ -1,0 +1,19 @@
+# Port of tests/core_compute_solve.rs:6-61. PENDING-SAME-HEAD; original source bytes and assertions preserved.
+fixture: fixtures/compute_solve_uses_scale_relative_pivots_and_checked_errors
+step default: jet run main.jet
+cwd: {work}/default
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+stdout: = compute_solve_uses_scale_relative_pivots_and_checked_errors.out
+step interpreted: jet run --interpret main.jet
+cwd: {work}/interpret
+env: JET_STORE_DIR={work}/interpret/cache
+env: JETPACK_ROOT={work}/interpret/jetpack
+stdout: = compute_solve_uses_scale_relative_pivots_and_checked_errors.out
+stderr: == default # original predicate: interpreter runtime stderr equals default
+step: jet build --profile=debug main.jet
+cwd: {work}/aot
+step native: built
+cwd: {work}/aot
+stdout: = compute_solve_uses_scale_relative_pivots_and_checked_errors.out
+stderr: == default # original predicate: AOT runtime stderr equals default/interpreter

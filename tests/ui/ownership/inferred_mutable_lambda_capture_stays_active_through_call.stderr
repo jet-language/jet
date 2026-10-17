@@ -1,0 +1,8 @@
+Error [E0204]: `values` is being changed in this call, so it can't be used again here
+  --> inferred_mutable_lambda_capture_stays_active_through_call.jet:9:33
+    |
+  9 |     both(() -> &values.push(3), values)
+    |                                 ^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `~values`
+More: jet-lang.dev/e/E0204

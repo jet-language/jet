@@ -13,11 +13,6 @@ fn workspace_file(manifest_dir: &Path, relative: &str) -> PathBuf {
     manifest_dir.join(relative)
 }
 
-fn source_hash(path: &Path) -> String {
-    source_sha256::sha256_file_hex(path)
-        .unwrap_or_else(|error| panic!("cannot hash generated-table source {}: {error}", path.display()))
-}
-
 fn generated_hash(path: &Path) -> String {
     let source = fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("cannot read generated table {}: {error}", path.display()));
@@ -33,10 +28,9 @@ fn generated_hash(path: &Path) -> String {
     hash.to_string()
 }
 
-fn check_generated_view(manifest_dir: &Path, source: &str, generated: &str) {
+fn check_generated_view(manifest_dir: &Path, source: &str, generated: &str, expected: &str) {
     let source_path = workspace_file(manifest_dir, source);
     let generated_path = workspace_file(manifest_dir, generated);
-    let expected = source_hash(&source_path);
     let actual = generated_hash(&generated_path);
     if actual != expected {
         panic!(
@@ -49,6 +43,7 @@ fn check_generated_view(manifest_dir: &Path, source: &str, generated: &str) {
 
 fn main() {
     println!("cargo:rustc-check-cfg=cfg(jet_release)");
+    println!("cargo:rustc-check-cfg=cfg(jet_native_pack)");
     let manifest_dir = PathBuf::from(
         env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR is set for a crate build script"),
     );
@@ -60,6 +55,12 @@ fn main() {
 
     const EFFECT_SOURCE: &str = "../jet-codegen/src/Prelude/Effects.jet";
     const CORE_SOURCE: &str = "../jet-codegen/src/Prelude/Core.jet";
+    // External build-script data is declared through the same include closure
+    // as Rust source inputs, before Cargo installs its read-only sandbox.
+    const EFFECT_BYTES: &[u8] = include_bytes!("../jet-codegen/src/Prelude/Effects.jet");
+    const CORE_BYTES: &[u8] = include_bytes!("../jet-codegen/src/Prelude/Core.jet");
+    let effect_hash = source_sha256::sha256_hex(EFFECT_BYTES);
+    let core_hash = source_sha256::sha256_hex(CORE_BYTES);
     for path in [EFFECT_SOURCE, CORE_SOURCE] {
         println!("cargo:rerun-if-changed={}", workspace_file(&manifest_dir, path).display());
     }
@@ -73,9 +74,9 @@ fn main() {
         println!("cargo:rerun-if-changed={}", workspace_file(&manifest_dir, path).display());
     }
 
-    check_generated_view(&manifest_dir, EFFECT_SOURCE, "src/Effects.rs");
-    check_generated_view(&manifest_dir, EFFECT_SOURCE, "src/BuildEffects.rs");
-    check_generated_view(&manifest_dir, CORE_SOURCE, "src/CoreModuleExports.rs");
-    check_generated_view(&manifest_dir, CORE_SOURCE, "src/RingLayer.rs");
-    check_generated_view(&manifest_dir, CORE_SOURCE, "src/Syntax/core_calls.rs");
+    check_generated_view(&manifest_dir, EFFECT_SOURCE, "src/Effects.rs", &effect_hash);
+    check_generated_view(&manifest_dir, EFFECT_SOURCE, "src/BuildEffects.rs", &effect_hash);
+    check_generated_view(&manifest_dir, CORE_SOURCE, "src/CoreModuleExports.rs", &core_hash);
+    check_generated_view(&manifest_dir, CORE_SOURCE, "src/RingLayer.rs", &core_hash);
+    check_generated_view(&manifest_dir, CORE_SOURCE, "src/Syntax/core_calls.rs", &core_hash);
 }

@@ -1,0 +1,129 @@
+// Rust: Formatter/mod.rs:2459-2683; CanonicalAST.rs:200-229;
+// Syntax/retirements.rs:817-875; effects_surface.rs:400-425.
+// Composed formatter proofs require the complete formatter SCC, not mocks.
+
+fn fmt_core_ok(source: String) -> String { parser_test_format(source) }
+fn fmt_core_stable(source: String) -> String {
+    formatted :: fmt_core_ok(source)
+    assert(fmt_core_ok(formatted) == formatted)
+    formatted
+}
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2492
+#Test("retired_selector_rewrites_through_the_parser_and_formatter") {
+    selectors :: [String]{"Debug", "Pretty", "Fixed", "Grouped", "Hex", "Unit", "Unit"}
+    arguments :: [String]{"", "", "(2)", "(2)", "(16)", "(name)", "(bare)"}
+    loop index in 0..<selectors.len() {
+        selector :: selectors[index]
+        argument :: arguments[index]
+        source :: "fn run() {{\n    print(\"{{x#{selector}{argument}}}\")\n}}\n"
+        edits :: jfmt_retired_interpolation_selector_edits(source)
+        assert(edits.len() == 1)
+        bytes :: source.bytes()
+        assert((String.from_bytes(bytes[edits[0].span.start..<edits[0].span.end]) ?? panic("selector span is ASCII")) == "#")
+        formatted :: fmt_core_ok(source)
+        fragment :: "print(\"{{x:{selector}{argument}}}\")"
+        assert(formatted.contains(fragment))
+        assert(jfmt_retired_interpolation_selector_edits(formatted).len() == 0)
+    }
+    ordinary :: "fn run() {{ print(\"#Debug\") }}\n"
+    assert(jfmt_retired_interpolation_selector_edits(ordinary).len() == 0)
+}
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2534
+#Test("retired_core_type_edits_skip_plain_strings") {
+    source :: "Deque.new()\nprint(\"Deque\")"
+    edits :: jfmt_retired_type_edits(source)
+    assert(edits.len() == 1)
+    assert(edits[0].new_text == "Queue")
+    expected :: "Queue.new()\nprint(\"Deque\")\n"
+    assert(fmt_core_ok(source) == expected)
+}
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2551
+#Test("trailing_transaction_comment_stays_inside_transaction_block") {
+    source :: `fn transfer(from: Shared<Account>, amount: Int) {
+    #Transact(tx) {
+        from.balance -= amount  // both land, or neither
+    }
+}
+`
+    formatted :: fmt_core_stable(source)
+    comment :: parser_test_find(formatted, "// both land, or neither")
+    close :: parser_test_rfind(formatted, "}}")
+    assert(comment < close)
+}
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2570
+#Test("inner_comment_stays_before_enclosing_block_close") {
+    formatted :: fmt_core_stable("fn run() {{\n    if ready {{ launch() /* go */ }}\n}}\n")
+    assert(parser_test_find(formatted, "/* go */") < parser_test_find(formatted, "}}"))
+}
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2586
+#Test("inferred_braces_and_blocks_round_trip") {
+    source :: `struct Point {
+    x: Int
+    y: Int
+}
+
+fn make() -> Point { {x: 1, y: 2} }
+
+fn accepts(values: [String]) {}
+
+fn block() {
+    print("block")
+}
+
+fn run() {
+    accepts({"needle"})
+    p :: make()
+    block()
+}
+`
+    formatted :: fmt_core_stable(source)
+    assert(formatted.contains("{{x: 1, y: 2}}"))
+    assert(formatted.contains("accepts({{\"needle\"}})"))
+    assert(formatted.contains("fn block() {{"))
+}
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2617
+#Test("repeated_struct_list_heads_preserve_explicit_heads") {
+    source :: `struct Point {
+    x: Int
+}
+
+fn run() {
+    compact := [Point{x: 1}, Point{x: 2}]
+    spread := [
+        Point{x: 3},
+        Point{x: 4},
+    ]
+}
+`
+    plain :: fmt_core_ok(source)
+    fragment :: "compact := [Point{{x: 1}}, Point{{x: 2}}]"
+    assert(plain.contains(fragment))
+    assert(!plain.contains("compact := [Point]"))
+    simplified_result :: jet_format_source(source, true)
+    assert(simplified_result.ok)
+    simplified :: simplified_result.text
+    assert(simplified.contains(fragment))
+    assert(!simplified.contains("compact := [Point]"))
+    assert_eq(jet_format_source(simplified, true).text, simplified)
+}
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2672
+#Test("failure_formatter_keeps_prefix_and_contextual_roles") {
+    formatted :: fmt_core_stable("fn load() -> Int? IOError! {{ read()?(\n    \"loading\"\n) }}\n")
+    assert(formatted.contains("fn load() -> Int? IOError!"))
+    assert(formatted.contains("read()?(\"loading\")"))
+    source :: "fn load() -> Int IOError! {{ read() }}\n"
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.len() == 0)
+    program := parse_source(source.bytes()).program
+    if program.items[0] == .Func(function) {
+        updated := function
+        if updated.body[0] == .Expr(inner) {
+            updated.body[0] = Stmt.Expr{expr: Expr.Try{value: inner, span: expr_span(inner), conversion: TryConvert.NoConversion, context: None}}
+        } else { panic("expected expression body") }
+        program.items[0] = Item.Func{value: updated}
+    } else { panic("expected load function") }
+    rendered :: jfmt_format_program_with_tokens(program, source, [Token]{}, false)
+    assert(rendered.contains("read()"))
+    assert(!rendered.contains("read()?"))
+    assert(fmt_core_ok(rendered) == rendered)
+}

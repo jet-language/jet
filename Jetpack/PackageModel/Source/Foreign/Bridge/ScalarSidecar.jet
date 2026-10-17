@@ -10,10 +10,10 @@
 FOREIGN_SCALAR_BRIDGE_SCHEMA :: prep { "jet-ffi-scalar-sidecar-v1" }
 
 // One scalar function in the common checked sidecar ABI.
-pub struct ScalarBridgeFunction {
-    pub name: String
-    pub params: [ForeignScalar]
-    pub result: ForeignScalar
+struct ScalarBridgeFunction {
+    name: String
+    params: [ForeignScalar]
+    result: ForeignScalar
 }
 
 fn pkg_bridge_unsupported_scalar(scalar: ForeignScalar) -> String Never! {
@@ -23,14 +23,14 @@ fn pkg_bridge_unsupported_scalar(scalar: ForeignScalar) -> String Never! {
 // Build the identity shared by a scalar binder's bridge build and its
 // provenance sidecar. Input bytes matter: a path alone cannot notice a
 // changed foreign implementation behind the same filename.
-pub fn pkg_bridge_scalar_bridge_identity(descriptor: BinderDescriptor, lib: String, abi: String, runtime: String, source: String, worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_scalar_bridge_identity(descriptor: BinderDescriptor, lib: String, abi: String, runtime: String, source: String, worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_scalar_bridge_identity_with_sources(descriptor, lib, abi, runtime, [BridgeSource]{BridgeSource{role: "source", path: source}}, worker, functions)
 }
 
 // Build a scalar bridge identity from every exact foreign source file in the
 // bridge. `sources` must include the primary source passed to the C bridge
 // renderer; adapters may add declaration files or other local inputs.
-pub fn pkg_bridge_scalar_bridge_identity_with_sources(descriptor: BinderDescriptor, lib: String, abi: String, runtime: String, sources: [BridgeSource], worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_scalar_bridge_identity_with_sources(descriptor: BinderDescriptor, lib: String, abi: String, runtime: String, sources: [BridgeSource], worker: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_validate_scalar_bridge(abi, descriptor, functions)
     if abi != "{descriptor.language.bridge_prefix()}{lib}" -> return Err(pkg_bridge_error("foreign bridge ABI name does not match its descriptor language"))
     pkg_bridge_scalar_bridge_identity_with_descriptor(descriptor.language.root(), lib, abi, runtime, descriptor.stamp(), sources, worker, functions)
@@ -65,7 +65,7 @@ fn pkg_bridge_scalar_bridge_identity_with_descriptor(language: String, lib: Stri
 }
 
 // Compile the one C ABI used by supervised scalar adapters.
-pub fn pkg_bridge_compile_scalar_sidecar(cache: String, abi: String, runtime: String, worker: String, source: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_compile_scalar_sidecar(cache: String, abi: String, runtime: String, worker: String, source: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_validate_scalar_bridge(abi, descriptor, functions)
     lib :: pkg_bridge_scalar_bridge_library(abi, descriptor)
     identity :: pkg_bridge_scalar_bridge_identity(descriptor, lib, abi, runtime, source, worker, functions)
@@ -75,7 +75,7 @@ pub fn pkg_bridge_compile_scalar_sidecar(cache: String, abi: String, runtime: St
 // Compile or reuse one content-addressed scalar sidecar. The returned path is
 // the stable projection consumed by the generated binding cache; the build
 // artifact itself lives below `.bridges/<identity>`.
-pub fn pkg_bridge_compile_scalar_sidecar_with_identity(cache: String, identity: String, abi: String, runtime: String, worker: String, source: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_compile_scalar_sidecar_with_identity(cache: String, identity: String, abi: String, runtime: String, worker: String, source: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_compile_scalar_sidecar_with_identity_and_sources(cache, identity, abi, runtime, worker, source, descriptor, [BridgeSource]{BridgeSource{role: "source", path: source}}, functions)
 }
 
@@ -88,7 +88,7 @@ fn pkg_bridge_spawn_error(tool: String, error: IOError) -> String Never! {
 
 // Compile or reuse a scalar sidecar while checking an identity that contains
 // additional exact source files (for example a JS declaration plus runtime).
-pub fn pkg_bridge_compile_scalar_sidecar_with_identity_and_sources(cache: String, identity: String, abi: String, runtime: String, worker: String, source: String, descriptor: BinderDescriptor, sources: [BridgeSource], functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_compile_scalar_sidecar_with_identity_and_sources(cache: String, identity: String, abi: String, runtime: String, worker: String, source: String, descriptor: BinderDescriptor, sources: [BridgeSource], functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_validate_scalar_bridge(abi, descriptor, functions)
     lib :: pkg_bridge_scalar_bridge_library(abi, descriptor)
     expected_identity :: pkg_bridge_scalar_bridge_identity_with_sources(descriptor, lib, abi, runtime, sources, worker, functions)
@@ -128,20 +128,20 @@ pub fn pkg_bridge_compile_scalar_sidecar_with_identity_and_sources(cache: String
 }
 
 // Publish a queryable descriptor/provenance record for a scalar adapter.
-pub fn pkg_bridge_write_scalar_provenance(cache: String, lib: String, descriptor: BinderDescriptor, runtime: String, source: String, worker: String, archive: String) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_write_scalar_provenance(cache: String, lib: String, descriptor: BinderDescriptor, runtime: String, source: String, worker: String, archive: String) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_write_scalar_provenance_with_sources(cache, lib, descriptor, runtime, source, [BridgeSource]{BridgeSource{role: "source", path: source}}, worker, archive, [ScalarBridgeFunction]{})
 }
 
 // Publish scalar provenance with the exact function list used to build the
 // bridge, so the sidecar identity cannot drift from the cache key.
-pub fn pkg_bridge_write_scalar_provenance_with_functions(cache: String, lib: String, descriptor: BinderDescriptor, runtime: String, source: String, worker: String, archive: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_write_scalar_provenance_with_functions(cache: String, lib: String, descriptor: BinderDescriptor, runtime: String, source: String, worker: String, archive: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_bridge_write_scalar_provenance_with_sources(cache, lib, descriptor, runtime, source, [BridgeSource]{BridgeSource{role: "source", path: source}}, worker, archive, functions)
 }
 
 // Publish scalar provenance from the exact source roles used by the bridge.
 // The record carries a digest and path for every role; the identity itself
 // carries the complete bytes.
-pub fn pkg_bridge_write_scalar_provenance_with_sources(cache: String, lib: String, descriptor_row: BinderDescriptor, runtime: String, source: String, sources: [BridgeSource], worker: String, archive: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_bridge_write_scalar_provenance_with_sources(cache: String, lib: String, descriptor_row: BinderDescriptor, runtime: String, source: String, sources: [BridgeSource], worker: String, archive: String, functions: [ScalarBridgeFunction]) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     has_primary := false
     loop entry in sources {
         if entry.path == source -> has_primary = true
@@ -206,7 +206,7 @@ pub fn pkg_bridge_write_scalar_provenance_with_sources(cache: String, lib: Strin
 // Render the shared safe wrapper. Raw C symbols stay private to the
 // generated module and every public call checks the adapter's contained
 // error slot.
-pub fn pkg_bridge_render_scalar_jet(abi: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) -> String ForeignBridgeError! {
+fn pkg_bridge_render_scalar_jet(abi: String, descriptor: BinderDescriptor, functions: [ScalarBridgeFunction]) -> String ForeignBridgeError! {
     pkg_bridge_validate_scalar_bridge(abi, descriptor, functions)
     effect_root :: descriptor.effect_root
     out := "// jet-ffi-descriptor={descriptor.stamp()}\n#Import module c.{abi} {{\n"
@@ -220,7 +220,7 @@ pub fn pkg_bridge_render_scalar_jet(abi: String, descriptor: BinderDescriptor, f
     loop function in functions {
         params :: pkg_bridge_scalar_jet_params(function)
         result :: function.result.jet_name() ?? return Err(pkg_bridge_error(pkg_bridge_unsupported_scalar(function.result)))
-        out = "{out}pub fn {function.name}({params}) -[{effect_root}]> {result} !String {{\n"
+        out = "{out}fn {function.name}({params}) -[{effect_root}]> {result} !String {{\n"
         arguments := [String]{}
         loop index in 0..<function.params.len() -> &arguments.push("arg{index}")
         out = "{out}    value :: abi.{function.name}({arguments.join(", ")})\n    if abi.take_error() != 0 {{\n        return Err(\"foreign call failed\")\n    }}\n    return Ok(value)\n}}\n\n"

@@ -1,0 +1,57 @@
+# Port of tests/services_runtime.rs:868-949; all source bytes unchanged.
+# PENDING-GRAMMAR(batch-four): capture transformed text, relational count, relative truncate, ends-with.
+fixture: workflow_history_survives_process_restart.fixture
+step: jet build restart.jet
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_history_survives_process_restart.workflow.log-write-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_history_survives_process_restart.workflow.log-read-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-default.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_history_survives_process_restart.workflow-default.log-write-default.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-default.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_history_survives_process_restart.workflow-default.log-read-default.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-aot-to-default.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_history_survives_process_restart.workflow-aot-to-default.log-write-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-aot-to-default.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_history_survives_process_restart.workflow-aot-to-default.log-read-default.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-default-to-aot.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_history_survives_process_restart.workflow-default-to-aot.log-write-default.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-default-to-aot.log
+env: JET_SERVICE_AUTH_PHASE=read
+stdout: = workflow_history_survives_process_restart.workflow-default-to-aot.log-read-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-corrupt.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_history_survives_process_restart.workflow-corrupt.log-write-aot.out
+truncate: workflow-corrupt.log.workflows -4
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-corrupt.log
+env: JET_SERVICE_AUTH_PHASE=read
+exit: nonzero
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-extended.log
+env: JET_SERVICE_AUTH_PHASE=write
+stdout: = workflow_history_survives_process_restart.workflow-extended.log-write-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/workflow-extended.log
+env: JET_SERVICE_AUTH_PHASE=extend
+stdout: = workflow_history_survives_process_restart.workflow-extended.log-extend-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/workflow-extended.log
+env: JET_SERVICE_AUTH_PHASE=final
+stdout: = workflow_history_survives_process_restart.workflow-extended.log-final-default.out

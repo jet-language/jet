@@ -1,0 +1,50 @@
+// Seed-native HostServices.rs1030-1051; CR4 identity ruling #4825.
+// Core UIHostError remains source-owned and is NOT reinterpreted here.
+// All static-text slots must point to immutable rodata E4 views with static
+// lifetime. Producers must never lend an owned buffer as a static slot.
+// Helpers only: canonical Result providers consume them, no alias/C exports.
+fn ui_host_error_kind(value: I64) -> I64 {
+    kind :: ui_carrier_word(value + UI_HOST_ERROR_KIND)
+    if (kind < I64{0} || kind >= I64{8}) -> rt_record_variant_panic()
+    kind
+}
+fn ui_host_error_clone(value: I64) -> I64 {
+    kind :: ui_host_error_kind(value)
+    result :: jet_rt_alloc(UI_HOST_ERROR_BYTES, I64{8})
+    ui_carrier_store(result + UI_HOST_ERROR_KIND, kind)
+    ui_carrier_store(result + UI_HOST_ERROR_FIRST, I64{0})
+    ui_carrier_store(result + UI_HOST_ERROR_SECOND, I64{0})
+    ui_carrier_store(result + UI_HOST_ERROR_THIRD, I64{0})
+    if {
+        (kind == I64{6}) -> {
+            ui_shortcut_copy(value + UI_HOST_ERROR_FIRST, result + UI_HOST_ERROR_FIRST)
+            ui_carrier_store(result + UI_HOST_ERROR_THIRD, jet_rt_string_clone(ui_carrier_word(value + UI_HOST_ERROR_THIRD)))
+        }
+        else -> {
+            first :: ui_carrier_word(value + UI_HOST_ERROR_FIRST)
+            ui_carrier_store(result + UI_HOST_ERROR_FIRST, if (kind == I64{3} || kind == I64{5}) -> jet_rt_string_clone(first) else -> first)
+            if (kind == I64{4}) -> ui_carrier_store(result + UI_HOST_ERROR_SECOND, jet_rt_string_clone(ui_carrier_word(value + UI_HOST_ERROR_SECOND)))
+        }
+    }
+    result
+}
+fn ui_host_error_drop(value: I64) {
+    if (value == I64{0}) -> return
+    kind :: ui_host_error_kind(value)
+    if (kind == I64{3} || kind == I64{5}) -> jet_rt_string_drop(ui_carrier_word(value + UI_HOST_ERROR_FIRST))
+    if (kind == I64{4}) -> jet_rt_string_drop(ui_carrier_word(value + UI_HOST_ERROR_SECOND))
+    if (kind == I64{6}) {
+        ui_shortcut_fields_drop(value + UI_HOST_ERROR_FIRST)
+        jet_rt_string_drop(ui_carrier_word(value + UI_HOST_ERROR_THIRD))
+    }
+    // Static capability/service views are borrowed rodata, never released.
+    jet_rt_free(value, UI_HOST_ERROR_BYTES, I64{8})
+}
+fn ui_host_error_eq(a: I64, b: I64) -> Bool {
+    kind :: ui_host_error_kind(a)
+    if (kind != ui_host_error_kind(b)) -> return false
+    if (kind == I64{0} || kind == I64{2}) -> return ui_carrier_word(a + UI_HOST_ERROR_FIRST) == ui_carrier_word(b + UI_HOST_ERROR_FIRST)
+    if (kind == I64{6}) -> return jet_rt_handle_eq_jet_ui_shortcut(a + UI_HOST_ERROR_FIRST, b + UI_HOST_ERROR_FIRST) && jet_rt_string_eq(ui_carrier_word(a + UI_HOST_ERROR_THIRD), ui_carrier_word(b + UI_HOST_ERROR_THIRD))
+    if (!jet_rt_string_eq(ui_carrier_word(a + UI_HOST_ERROR_FIRST), ui_carrier_word(b + UI_HOST_ERROR_FIRST))) -> return false
+    kind != I64{4} || jet_rt_string_eq(ui_carrier_word(a + UI_HOST_ERROR_SECOND), ui_carrier_word(b + UI_HOST_ERROR_SECOND))
+}

@@ -1,8 +1,91 @@
 use crate::Generics::substitute_type;
 use crate::Sema::{Checker, TypeRegistry};
 use crate::AST::Type;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 impl<'a> Checker<'a> {
+    /// Builtin contracts yield only to the exact loaded Core declaration.
+    pub(crate) fn source_owns_nominal(&self, name: &str) -> bool {
+        let (namespace, leaf) = Self::split_type_name(name);
+        let Some(owner) = self.struct_owner_module(leaf, namespace) else { return false };
+        let registry = if owner == self.module_idx {
+            self.registry
+        } else {
+            let Some(module) = self.modules.and_then(|modules| modules.get(owner)) else { return false };
+            &module.registry
+        };
+        registry.contains(leaf) && registry.source_owns_type(leaf)
+    }
+
+    /// A loaded Core declaration owns its methods even when its carrier has
+    /// not crossed the nominal ownership ledger.
+    pub(crate) fn core_source_declares_method(&self, name: &str, method: &str) -> bool {
+        let (namespace, leaf) = self.struct_type_name_parts(name);
+        let Some(owner) = self.struct_owner_module(leaf, namespace) else { return false };
+        let registry = if owner == self.module_idx {
+            self.registry
+        } else {
+            let Some(module) = self.modules.and_then(|modules| modules.get(owner)) else { return false };
+            &module.registry
+        };
+        registry.core_source_module.is_some() && registry.method(leaf, method).is_some()
+    }
+
+    /// Qualified native carriers are an internal Core vocabulary, not exports.
+    pub(crate) fn core_private_native_type(&self, module: &str, leaf: &str) -> bool {
+        self.module_is_core_source(self.module_idx)
+            && jet_foundation::CoreModuleExports::core_source_module(module).is_some()
+            && crate::Sema::CheckerCoreLib::core_type_known(leaf)
+    }
+
+    /// A raw projection uses the base registered by the declaring module, not
+    /// a same-spelled type in the reader's registry.
+    pub(crate) fn distinct_base_for_reader(&self, name: &str) -> Option<Type> {
+        let (namespace, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, namespace)?;
+        let registry = if owner == self.module_idx {
+            self.registry
+        } else {
+            &self.modules?.get(owner)?.registry
+        };
+        let base = registry.distinct_base(leaf)?;
+        Some(self.owner_type_for_reader(owner, leaf, base.clone()))
+    }
+    pub(crate) fn has_source_operator_left(&self, left: &Type, trait_name: &str) -> bool {
+        let left_name = left.name();
+        self.modules.is_some_and(|modules| modules.iter().any(|module|
+            module.trait_reg.operator_impls.iter().any(|row|
+                row.left == left_name && row.trait_name == trait_name
+                && matches!(&row.rhs, Type::Named(name) | Type::Apply { name, .. }
+                    if module.registry.source_owns_type(Self::split_type_name(name).1)))))
+    }
+
+    pub(crate) fn source_operator_row(
+        &self, left: &Type, trait_name: &str, right: &Type,
+    ) -> Option<(usize, &jet_foundation::Traits::OperatorImpl)> {
+        let modules = self.modules?;
+        for operand in [left, right] {
+            let name = match operand {
+                Type::Named(name) | Type::Apply { name, .. } => name,
+                _ => continue,
+            };
+            if !self.source_owns_nominal(name) { continue; }
+            let (namespace, leaf) = Self::split_type_name(name);
+            let Some(owner) = self.struct_owner_module(leaf, namespace) else { continue; };
+            let Some(module) = modules.get(owner) else { continue; };
+            for row in &module.trait_reg.operator_impls {
+                if row.trait_name != trait_name { continue; }
+                let row_left = crate::Sema::Diagnostics::builtin_type_from_ident(&row.left)
+                    .unwrap_or_else(|| Type::Named(row.left.clone()));
+                let row_left = self.qualify_method_type(owner, &row_left, &HashSet::new());
+                let row_right = self.qualify_method_type(owner, &row.rhs, &HashSet::new());
+                if &row_left == left && &row_right == right {
+                    return Some((owner, row));
+                }
+            }
+        }
+        None
+    }
+
     /// D-TEXTHEAD-TYPE1=A: resolve a library-defined checked text through the
     /// ordinary nominal and trait registries. The returned name is canonical
     /// for imported types; the error comes from the ordinary trait impl.
@@ -60,11 +143,97 @@ impl<'a> Checker<'a> {
         self.checked_text_type_name(name).is_some()
     }
 
+    pub(crate) fn type_alias_binding(
+        &self, name: &str,
+    ) -> Option<(usize, &'a [crate::AST::TypeParam], &'a Type)> {
+        let registry: &'a TypeRegistry = self.registry;
+        if let Some((params, target)) = registry.type_alias(name) {
+            return Some((self.module_idx, params, target));
+        }
+        if registry.contains(name) {
+            return None;
+        }
+        let (namespace, leaf) = Self::split_type_name(name);
+        let owner = self.struct_owner_module(leaf, namespace)?;
+        let modules = self.modules?;
+        if let Some((params, target)) = modules.get(owner)?.registry.type_alias(leaf) {
+            return Some((owner, params, target));
+        }
+        if namespace.is_none()
+            && jet_foundation::CoreModuleExports::core_bare_source_module(leaf).is_some()
+        {
+            for declaration in self.name_ledger.declarations_named(leaf) {
+                let alias_owner = declaration.module;
+                let Some((params, target)) = modules[alias_owner].registry.type_alias(leaf) else { continue };
+                if !params.is_empty() || !self.type_is_pub_in(alias_owner, leaf) {
+                    continue;
+                }
+                if let Type::Named(target_identity) = self.bare_alias_target(alias_owner, target) {
+                    let (namespace, target_leaf) = Self::split_type_name(&target_identity);
+                    if target_leaf == leaf
+                        && namespace.and_then(|namespace|
+                            self.name_ledger.nominal_module(&format!("{namespace}::{target_leaf}"))) == Some(owner)
+                    {
+                        return Some((alias_owner, params, target));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub(crate) fn bare_alias_target(&self, owner: usize, target: &Type) -> Type {
+        if let Type::Named(name) = target {
+            let (namespace, leaf) = Self::split_type_name(name);
+            if let Some(namespace) = namespace.filter(|namespace| !namespace.contains("::")) {
+                let module = self.modules.and_then(|modules| modules.get(owner));
+                let (core_imports, imports) = if owner == self.module_idx {
+                    (self.core_imports, self.imports)
+                } else if let Some(module) = module {
+                    (&module.core_imports, &module.imports)
+                } else {
+                    return target.clone();
+                };
+                let target_owner = core_imports.get(namespace)
+                    .and_then(|module| self.core_source_owner_module(module, leaf))
+                    .or_else(|| imports.get(namespace).copied());
+                if let Some(target_owner) = target_owner {
+                    return Type::Named(self.canonical_nominal_name(target_owner, leaf));
+                }
+            }
+        }
+        self.qualify_method_type(owner, target, &HashSet::new())
+    }
+
+    fn core_annotation_nominal_name(&self, module: &str, leaf: &str) -> String {
+        self.core_source_owner_module(module, leaf)
+            .map(|owner| self.canonical_nominal_name(owner, leaf))
+            .unwrap_or_else(|| leaf.to_string())
+    }
+
+    fn bare_alias_core_annotation(&self, owner: usize, target: &Type) -> Option<Type> {
+        let Type::Named(name) = target else { return None };
+        let (namespace, leaf) = Self::split_type_name(name);
+        let namespace = namespace?;
+        let core_imports = if owner == self.module_idx {
+            &self.core_imports
+        } else {
+            &self.modules?.get(owner)?.core_imports
+        };
+        let module = core_imports.get(namespace)?;
+        if module == "core.crypto"
+            || jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_none()
+        {
+            return None;
+        }
+        Some(Type::Named(self.core_annotation_nominal_name(module, leaf)))
+    }
+
     fn imported_nominal_type(&self, name: &str) -> Option<Type> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         if owner == self.module_idx {
-            return None;
+            return Some(Type::Named(leaf.to_string()));
         }
         let module = self.modules?.get(owner)?;
         if module.trait_reg.is_trait_name(leaf) && !module.registry.contains(leaf) {
@@ -93,7 +262,7 @@ impl<'a> Checker<'a> {
         };
         let traits = std::cell::RefCell::new(HashMap::new());
         ty.map_named_types(&|name| {
-            if trait_reg.traits.contains_key(name) && !registry.contains(name) {
+            if trait_reg.trait_info(name).is_some() && !registry.contains(name) {
                 traits
                     .borrow_mut()
                     .insert(name.to_string(), Type::TraitObject(vec![name.to_string()]));
@@ -115,7 +284,7 @@ impl<'a> Checker<'a> {
         let (import_ns, leaf) = Self::split_type_name(name);
         let owner = self.struct_owner_module(leaf, import_ns)?;
         let module = self.modules?.get(owner)?;
-        if owner == self.module_idx || module.registry.enum_variants(leaf).is_some() {
+        if module.registry.enum_variants(leaf).is_some() {
             return None;
         }
         self.imported_nominal_type(name)
@@ -125,11 +294,18 @@ impl<'a> Checker<'a> {
         if name.contains("::") {
             return name.to_string();
         }
+        if let Some((item, module)) = self.core_item_imports.get(name).zip(self.core_imports.get(name)) {
+            if jet_foundation::CoreModuleExports::core_leaf_kind(module, item).is_some() {
+                return self.core_source_owner_module(module, item)
+                    .map(|owner| self.canonical_nominal_name(owner, item))
+                    .unwrap_or_else(|| item.clone());
+            }
+        }
         let (import_ns, leaf) = Self::split_type_name(name);
         if let Some(module) = import_ns.and_then(|alias| self.core_imports.get(alias)) {
             if jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some() {
-                return self
-                    .core_nominal_shadowing_builtin(module, leaf)
+                return self.core_source_owner_module(module, leaf)
+                    .map(|owner| self.canonical_nominal_name(owner, leaf))
                     .unwrap_or_else(|| leaf.to_string());
             }
         }
@@ -174,7 +350,23 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn resolve_type(&mut self, ty: Type) -> Type {
         self.record_type_import_use(&ty);
+        if let Type::Named(name) = &ty {
+            if !self.type_param_scope.iter().any(|param| &param.name == name) {
+                if let Some((owner, params, target)) = self.type_alias_binding(name) {
+                    if params.is_empty() {
+                        if let Some(target) = self.bare_alias_core_annotation(owner, target) {
+                            return target;
+                        }
+                        let target = self.bare_alias_target(owner, target);
+                        return self.resolve_type(target);
+                    }
+                }
+            }
+        }
         match ty {
+            Type::Named(name) if self.type_param_scope.iter().any(|param| param.name == name) => {
+                Type::Named(name)
+            }
             // D-NUMOPS1: typed numeric heads such as `Float{…}` are
             // source spellings for primitive carriers, not nominal types.
             // Resolve them before ordinary nominal lookup so call seams
@@ -220,14 +412,13 @@ impl<'a> Checker<'a> {
                     // Source-owned Core crypto types use the owner's canonical
                     // identity, the one its signatures and methods carry.
                     self.core_crypto_struct_type(&n).unwrap_or_else(|| {
-                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(n))
+                        crate::Sema::Diagnostics::core_crypto_nominal(Type::Named(
+                            self.core_item_imports.get(&n).cloned().unwrap_or(n),
+                        ))
                     })
                 } else {
                     let item = self.core_item_imports.get(&n).map_or(n.as_str(), String::as_str);
-                    match self.core_nominal_shadowing_builtin(module, item) {
-                        Some(canonical) => Type::Named(canonical),
-                        None => Type::Named(n),
-                    }
+                    Type::Named(self.core_annotation_nominal_name(module, item))
                 }
             }
             Type::Named(n)
@@ -248,6 +439,7 @@ impl<'a> Checker<'a> {
                 if n.rsplit_once('.').is_some_and(|(alias, leaf)| {
                     self.core_imports.get(alias).is_some_and(|module| {
                         jet_foundation::CoreModuleExports::core_leaf_kind(module, leaf).is_some()
+                            || self.core_private_native_type(module, leaf)
                     })
                 }) =>
             {
@@ -264,8 +456,7 @@ impl<'a> Checker<'a> {
                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(_))
                         | Some(jet_foundation::CoreModuleExports::CoreLeafKind::CryptoNominal)
                         | None => Type::Named(
-                            self.core_nominal_shadowing_builtin(module, leaf)
-                                .unwrap_or_else(|| leaf.to_string()),
+                            self.core_annotation_nominal_name(module, leaf),
                         ),
                     }
                 }
@@ -284,7 +475,10 @@ impl<'a> Checker<'a> {
                 if self.modules.is_some_and(|modules| {
                     self.imports
                         .get(n.rsplit_once('.').unwrap().0)
-                        .is_some_and(|&idx| modules[idx].trait_reg.is_trait_name(leaf))
+                        .is_some_and(|&idx| {
+                            !modules[idx].registry.contains(leaf)
+                                && modules[idx].trait_reg.is_trait_name(leaf)
+                        })
                 }) {
                     Type::TraitObject(vec![leaf.to_string()])
                 } else {
@@ -299,16 +493,12 @@ impl<'a> Checker<'a> {
             Type::List(inner) => Type::List(Box::new(self.resolve_type(*inner))),
             Type::Shared(inner) => Type::Shared(Box::new(self.resolve_type(*inner))),
             Type::Apply { name, args } => {
-                if self.registry.is_type_alias(&name) {
-                    if let Some((params, target)) = self.registry.type_alias(&name) {
-                        let subst: std::collections::HashMap<String, Type> = params
-                            .iter()
-                            .zip(args.iter().cloned())
-                            .map(|(p, a)| (p.name.clone(), a))
-                            .collect();
-                        let expanded = substitute_type(target, &subst);
-                        return self.resolve_type(expanded);
-                    }
+                if let Some((owner, params, target)) = self.type_alias_binding(&name) {
+                    let binders: HashSet<String> = params.iter().map(|param| param.name.clone()).collect();
+                    let target = self.qualify_method_type(owner, target, &binders);
+                    let subst: HashMap<String, Type> = params.iter().zip(args.iter().cloned())
+                        .map(|(param, argument)| (param.name.clone(), argument)).collect();
+                    return self.resolve_type(substitute_type(&target, &subst));
                 }
                 Type::Apply {
                     name: self.imported_nominal_head(&name),
@@ -417,12 +607,18 @@ impl<'a> Checker<'a> {
         (source, effective)
     }
 
-    /// Publish the canonical declared return on the checked AST function so
-    /// body checking, signatures, and TIR all project the same carrier.
-    pub(crate) fn canonicalize_function_return_type(
+    /// Publish the canonical declared types on the checked AST function so
+    /// body checking, signatures, and TIR all project the same carriers.
+    pub(crate) fn canonicalize_function_signature(
         &mut self,
         function: &mut crate::AST::Func,
     ) {
+        for param in &mut function.params {
+            if param.name != crate::Syntax::KW_SELF {
+                let ty = std::mem::replace(&mut param.ty, Type::Int);
+                param.ty = self.resolve_type(ty);
+            }
+        }
         function.return_type = function.return_type.take().map(|ty| self.resolve_type(ty));
     }
 
@@ -571,13 +767,17 @@ impl<'a> Checker<'a> {
         ty: &Type,
         subst: &HashMap<String, Type>,
     ) -> Type {
+        // Resolve declared names in the field owner's import scope before
+        // substitution; caller-supplied generic arguments retain their owner.
+        let generic_names = subst.keys().cloned().collect();
+        let ty = self.qualify_method_type(owner_mod, ty, &generic_names);
         if owner_mod == self.module_idx {
-            self.trait_reg.instantiate_type(ty, subst)
+            self.trait_reg.instantiate_type(&ty, subst)
         } else {
             self.modules
                 .and_then(|modules| modules.get(owner_mod))
-                .map(|module| module.trait_reg.instantiate_type(ty, subst))
-                .unwrap_or_else(|| substitute_type(ty, subst))
+                .map(|module| module.trait_reg.instantiate_type(&ty, subst))
+                .unwrap_or_else(|| substitute_type(&ty, subst))
         }
     }
 }

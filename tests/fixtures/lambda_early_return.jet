@@ -1,0 +1,9 @@
+// D-TAIL-RETURN1: each return exits the comparator, not the Unit function.
+fn run() {
+    values := [2, 1]
+    &values.sort_by((left: Int, right: Int) -> {
+        order :: left <=> right
+        if order != Ordering.Equal -> return order
+        left <=> right
+    })
+}

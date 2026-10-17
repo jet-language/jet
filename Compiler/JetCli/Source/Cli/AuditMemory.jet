@@ -1,0 +1,235 @@
+// Source/CmdMemory.rs audit: read the bounded cross-run witness ledger.
+// Runtime observations are never described as whole-program proof.
+use jet_foundation.[diagnostic_registry_row, diagnostic_theme_paint]
+
+struct JetCLIMemoryRow {
+    kind: String
+    code: String
+    source: String
+    span_start: Int
+    span_end: Int
+    byte_spans: Bool
+    scope: String
+    provenance: String
+    detail: String
+    expected: String?
+    repairs: [String]
+}
+
+fn jet_cli_text_has_control(value: String) -> Bool Never! {
+    raw :: value.bytes()
+    loop (index, byte) in raw {
+        code :: Int.from_u8(byte)
+        if code < 32 || code == 127 -> return true
+        if code == 194 && index + 1 < raw.len() {
+            low :: Int.from_u8(raw[index + 1])
+            if low >= 128 && low <= 159 -> return true
+        }
+    }
+    false
+}
+
+fn jet_cli_memory_field(value: JetCLIStatusValue, name: String, line: Int) -> JetCLIStatusValue JetCLIReadError! {
+    Ok(jet_cli_status_get(value, name) ?? return Err(jet_cli_read_error("memory ledger row {line} is missing `{name}`")))
+}
+
+fn jet_cli_memory_string(value: JetCLIStatusValue, name: String, line: Int) -> String JetCLIReadError! {
+    field :: jet_cli_memory_field(value, name, line)
+    Ok(jet_cli_status_string(Val(field)) ?? return Err(jet_cli_read_error("memory ledger row {line} `{name}` is not text")))
+}
+
+fn jet_cli_memory_safe(value: JetCLIStatusValue, name: String, line: Int) -> String JetCLIReadError! {
+    text :: jet_cli_memory_string(value, name, line)
+    if text == "" || text.bytes().len() > 4096 || jet_cli_text_has_control(text) {
+        return Err(jet_cli_read_error("memory ledger row {line} `{name}` is empty, unsafe, or too long"))
+    }
+    Ok(text)
+}
+
+fn jet_cli_memory_uint(value: JetCLIStatusValue, name: String, line: Int) -> Int JetCLIReadError! {
+    field :: jet_cli_memory_field(value, name, line)
+    number :: jet_cli_status_integer(Val(field)) ?? return Err(jet_cli_read_error("memory ledger row {line} `{name}` is not a non-negative integer"))
+    if number < 0 || number > 18446744073709551615 {
+        return Err(jet_cli_read_error("memory ledger row {line} `{name}` is not a non-negative integer"))
+    }
+    Ok(number)
+}
+
+fn jet_cli_memory_bool(value: JetCLIStatusValue, name: String, line: Int) -> Bool JetCLIReadError! {
+    field :: jet_cli_memory_field(value, name, line)
+    Ok(jet_cli_status_boolean(Val(field)) ?? return Err(jet_cli_read_error("memory ledger row {line} `{name}` is not Bool")))
+}
+
+fn jet_cli_memory_parse_row(value: JetCLIStatusValue, line: Int) -> JetCLIMemoryRow JetCLIReadError! {
+    if !jet_cli_status_is_object(Val(value)) {
+        return Err(jet_cli_read_error("memory ledger row {line} is not an object"))
+    }
+    schema :: jet_cli_memory_string(value, "schema", line)
+    version :: jet_cli_memory_uint(value, "version", line)
+    if schema != "jet.memory.ledger" || version != 1 {
+        return Err(jet_cli_read_error("memory ledger row {line} has an incompatible schema"))
+    }
+    start :: jet_cli_memory_uint(value, "span_start", line)
+    end :: jet_cli_memory_uint(value, "span_end", line)
+    if start > end -> return Err(jet_cli_read_error("memory ledger row {line} has a reversed span"))
+    expected := String?{None}
+    if jet_cli_status_get(value, "expected") == .Val(field) {
+        if field != JetCLIStatusValue.Null {
+            text :: jet_cli_status_string(Val(field)) ?? return Err(jet_cli_read_error("memory ledger row {line} has invalid expected text"))
+            if text.len() > 4096 -> return Err(jet_cli_read_error("memory ledger row {line} has invalid expected text"))
+            expected = Val(text)
+        }
+    }
+    repair_values :: jet_cli_status_list(jet_cli_status_get(value, "repairs")) ?? return Err(jet_cli_read_error("memory ledger row {line} has invalid repairs"))
+    if repair_values.len() > 16 -> return Err(jet_cli_read_error("memory ledger row {line} has invalid repairs"))
+    repairs := [String]{}
+    loop repair in repair_values {
+        text :: jet_cli_status_string(Val(repair)) ?? return Err(jet_cli_read_error("memory ledger row {line} has an invalid repair"))
+        if text == "" || text.len() > 4096 {
+            return Err(jet_cli_read_error("memory ledger row {line} has an invalid repair"))
+        }
+        &repairs.push(text)
+    }
+    Ok(
+    JetCLIMemoryRow{
+        kind: jet_cli_memory_safe(value, "kind", line),
+        code: jet_cli_memory_safe(value, "code", line),
+        source: jet_cli_memory_safe(value, "source", line),
+        span_start: start,
+        span_end: end,
+        byte_spans: jet_cli_memory_bool(value, "byte_spans", line),
+        scope: jet_cli_memory_safe(value, "scope", line),
+        provenance: jet_cli_memory_safe(value, "provenance", line),
+        detail: jet_cli_memory_safe(value, "detail", line),
+        expected: expected,
+        repairs: repairs,
+    },
+    )
+}
+
+fn jet_cli_memory_before(left: JetCLIMemoryRow, right: JetCLIMemoryRow) -> Bool Never! {
+    if left.source != right.source -> return left.source < right.source
+    if left.span_start != right.span_start -> return left.span_start < right.span_start
+    if left.span_end != right.span_end -> return left.span_end < right.span_end
+    if left.kind != right.kind -> return left.kind < right.kind
+    if left.code != right.code -> return left.code < right.code
+    if left.provenance != right.provenance -> return left.provenance < right.provenance
+    if left.detail != right.detail -> return left.detail < right.detail
+    shared_count :: if left.repairs.len() < right.repairs.len() -> left.repairs.len() else -> right.repairs.len()
+    loop index in 0..<shared_count {
+        if left.repairs[index] != right.repairs[index] {
+            return left.repairs[index] < right.repairs[index]
+        }
+    }
+    left.repairs.len() < right.repairs.len()
+}
+
+fn jet_cli_memory_read(path: String) -[FS]> [JetCLIMemoryRow] JetCLIReadError! {
+    stat :: cli_files.stat(path) ?? {
+        if err == .NotFound(_) -> return Err(jet_cli_read_error("no memory ledger exists at `{path}`"))
+        return Err(jet_cli_read_error("cannot inspect memory ledger `{path}`: {jet_cli_io_error_text(err)}"))
+    }
+    if !stat.is_file -> return Err(jet_cli_read_error("memory ledger `{path}` is not a regular file"))
+    if stat.size > 4194304 -> return Err(jet_cli_read_error("memory ledger exceeds its 4 MiB safety limit"))
+    raw :: cli_files.read(path) ?? return Err(jet_cli_read_error("cannot read memory ledger `{path}`: {jet_cli_io_error_text(err)}"))
+    rows := [JetCLIMemoryRow]{}
+    line := 0
+    loop text in raw.lines() {
+        if text.trim() == "" -> next
+        if rows.len() >= 65536 -> return Err(jet_cli_read_error("memory ledger has more than 65536 rows"))
+        line += 1
+        tree :: report_status_value_parse(text) ?? return Err(jet_cli_read_error("memory ledger row {line} is malformed"))
+        &rows.push(jet_cli_memory_parse_row(jet_cli_status_from_tree(tree), line))
+    }
+    // Stable merge sort by the same tuple as Rust; avoid quadratic insertion
+    // when the bounded ledger contains its full 65,536 rows.
+    width := 1
+    loop width < rows.len() {
+        merged := [JetCLIMemoryRow]{}
+        start := 0
+        loop start < rows.len() {
+            middle :: if start + width < rows.len() -> start + width else -> rows.len()
+            end :: if start + width * 2 < rows.len() -> start + width * 2 else -> rows.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                if right >= end || (left < middle && !jet_cli_memory_before(rows[right], rows[left])) {
+                    &merged.push(rows[left])
+                    left += 1
+                } else {
+                    &merged.push(rows[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        rows = merged
+        width *= 2
+    }
+    Ok(rows)
+}
+
+fn jet_cli_memory_fail(detail: String, color: Bool, json: Bool) -> JetCLIPlan Never! {
+    row :: diagnostic_registry_row("E2112") ?? panic("E2112 registry row missing")
+    diagnostic :: diagnostic_from_registry("E2112", None, "Memory ledger cannot be used: {detail}.", row.why, row.fix)
+    if json {
+        return jet_cli_done(jet_cli_render_all_json(None, "", "", [Diagnostic]{diagnostic}), "", JET_DRIVER_EXIT_USER_ERROR)
+    }
+    jet_cli_done("", diagnostic_render_all("", "", [Diagnostic]{diagnostic}, color), JET_DRIVER_EXIT_USER_ERROR)
+}
+
+fn jet_cli_audit_memory_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    loop argument in args {
+        if !argument.starts_with("-") {
+            return jet_cli_memory_fail("unexpected audit memory argument `{argument}`", color, json)
+        }
+    }
+    path :: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
+    rows :: jet_cli_memory_read(path) ?? return jet_cli_memory_fail(err.message, color, json)
+    if json {
+        values := [JetCLIStatusValue]{}
+        loop row in rows {
+            &values.push(
+            jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
+                jet_cli_status_field("code", jet_cli_status_text(row.code)),
+                jet_cli_status_field("source", jet_cli_status_text(row.source)),
+                jet_cli_status_field("span_start", jet_cli_status_int(row.span_start)),
+                jet_cli_status_field("span_end", jet_cli_status_int(row.span_end)),
+                jet_cli_status_field("byte_spans", jet_cli_status_bool(row.byte_spans)),
+                jet_cli_status_field("scope", jet_cli_status_text(row.scope)),
+                jet_cli_status_field("provenance", jet_cli_status_text(row.provenance)),
+                jet_cli_status_field("detail", jet_cli_status_text(row.detail)),
+                jet_cli_status_field("repairs", jet_cli_status_texts(row.repairs)),
+            },
+            ),
+            )
+        }
+        memory :: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("coverage", jet_cli_status_text("exercised runs only")),
+            jet_cli_status_field("witnesses", jet_cli_status_int(rows.len())),
+            jet_cli_status_field("rows", jet_cli_status_array(values)),
+        },
+        )
+        return jet_cli_done("{jet_cli_status_render("audit.memory", true, [JetCLIStatusField]{jet_cli_status_field("memory", memory)})}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    title :: diagnostic_theme_paint(color, "1;36", "jet audit memory")
+    out := "{title}\ncoverage: exercised runs only\nwitnesses: {rows.len()}\n"
+    if rows.len() == 0 -> out = "{out}\nNo runtime memory witnesses recorded.\n"
+    loop row in rows {
+        out = "{out}\n{row.source}:{row.span_start}..{row.span_end}  {row.kind} {row.code}\n  scope: {row.scope}\n  provenance: {row.provenance}\n  witness: {row.detail}\n"
+        if {
+            row.repairs.len() == 1 && row.byte_spans && row.expected != None -> {
+                out = "{out}  static repair: {row.repairs[0]}\n"
+            }
+            row.repairs.len() == 0 -> out = "{out}  static repair: none known\n"
+            else -> {
+                out = "{out}  static repair options:\n"
+                loop repair in row.repairs -> out = "{out}    - {repair}\n"
+            }
+        }
+    }
+    jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
+}

@@ -1,0 +1,160 @@
+// crates/jet-cli/src/CLI.rs:1676-1963. Scripts consume only the canonical
+// verified executable schema. The host never executes the described program.
+use jet_foundation.[CLICommandSchema, CLIInputSchema, RECORD_VERSION, read_executable]
+use core.text as cli_completion_text
+use core.text.fmt as cli_completion_fmt
+
+fn jet_cli_program_shell_quote(value: String) -> String Never! { "'{value.replace("'", "'\\''")}'" }
+fn jet_cli_program_ps_quote(value: String) -> String Never! { "'{value.replace("'", "''")}'" }
+fn jet_cli_program_zsh_single(value: String) -> String Never! { value.replace("'", "'\\''") }
+fn jet_cli_program_zsh_bracket(value: String) -> String Never! { jet_cli_program_zsh_single(value).replace("[", "\\[").replace("]", "\\]") }
+
+fn jet_cli_program_zsh_standard(standard: Bool, version: Bool) -> [String] Never! {
+    if !standard -> return [String]{}
+    specs := [String]{"    '(-v --verbose){{-v,--verbose}}[print extra detail]'", "    '(-q --quiet){{-q,--quiet}}[suppress normal output]'", "    '--color[control terminal color]:MODE:(auto always never)'"}
+    if version -> &specs.push("    '--version[show version]'")
+    specs
+}
+
+fn jet_cli_program_zsh_inputs(inputs: [CLIInputSchema]) -> [String] Never! {
+    specs := [String]{}
+    positions := [Int]{}
+    loop index in 0..<inputs.len() {
+        if inputs[index].positional == None -> next
+        &positions.push(index)
+        slot := positions.len() - 1
+        loop slot > 0 && (inputs[positions[slot - 1]].positional ?? U16{0}) > (inputs[index].positional ?? U16{0}) {
+            positions[slot] = positions[slot - 1]
+            slot -= 1
+        }
+        positions[slot] = index
+    }
+    loop index in positions {
+        input :: inputs[index]
+        meta :: (input.metavar ?? input.flag).to_lower()
+        &specs.push("    ':{jet_cli_program_zsh_single(meta)}:{jet_cli_program_zsh_bracket(input.help)}'")
+    }
+    loop input in inputs {
+        value :: if input.metavar == .Val(name) -> ":{name.to_lower()}:" else -> ""
+        names :: if input.short == .Val(short) -> "(-{short} --{input.flag}){{-{short},--{input.flag}}}" else -> "--{input.flag}"
+        &specs.push("    '{jet_cli_program_zsh_single(names)}[{jet_cli_program_zsh_bracket(input.help)}]{value}'")
+    }
+    &specs.push("    '--help[show help]'")
+    specs
+}
+
+fn jet_cli_program_completions(shell: String, name: String, schema: CLICommandSchema) -> String? Never! {
+    root_words :: schema.completion_words()
+    root_inputs :: schema.root_completion_words()
+    if shell == {
+        "bash" -> {
+            root :: jet_cli_program_shell_quote(root_words.join(" "))
+            command_name :: jet_cli_program_shell_quote(name)
+            if schema.commands.len() == 0 -> return Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
+            cases := [String]{}
+            loop command in schema.commands -> &cases.push("        {jet_cli_program_shell_quote(command.name)}) flags={jet_cli_program_shell_quote(schema.command_completion_words(command).join(" "))} ;;")
+            flags :: jet_cli_program_shell_quote(root_inputs.join(" "))
+            return Val("# bash completion from JetCommandSchema v{RECORD_VERSION}\n__jet_program_completion() {{\n    local cur flags\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    if [[ $COMP_CWORD -eq 1 ]]; then\n        COMPREPLY=( $(compgen -W {root} -- \"$cur\") )\n        return 0\n    fi\n    flags={flags}\n    case \"${{COMP_WORDS[1]}}\" in\n{cases.join("\n")}\n    esac\n    if [[ \"$cur\" == -* ]]; then\n        COMPREPLY=( $(compgen -W \"$flags\" -- \"$cur\") )\n    fi\n}}\ncomplete -F __jet_program_completion -- {command_name}\n")
+        }
+        "zsh" -> {
+            specs := jet_cli_program_zsh_standard(schema.standard, schema.version != None)
+            loop spec in jet_cli_program_zsh_inputs(schema.inputs) -> &specs.push(spec)
+            command_name :: jet_cli_program_shell_quote(name)
+            if schema.commands.len() == 0 -> return Val("#compdef {command_name}\n# zsh completion from JetCommandSchema v{RECORD_VERSION}\n_arguments \\\n{specs.join(" \\\n")}\n")
+            commands :: (loop command in schema.commands -> command.name).join(" ")
+            &specs.push("    '1:command:({commands})'")
+            cases := [String]{}
+            loop command in schema.commands {
+                command_specs :: jet_cli_program_zsh_inputs(schema.command_inputs(command))
+                &cases.push("        {jet_cli_program_shell_quote(command.name)}) _arguments \\\n{command_specs.join(" \\\n")} ;;")
+            }
+            return Val("#compdef {command_name}\n# zsh completion from JetCommandSchema v{RECORD_VERSION}\nif (( CURRENT == 2 )); then\n_arguments \\\n{specs.join(" \\\n")}\nelse\n    case $words[2] in\n{cases.join("\n")}\n    esac\nfi\n")
+        }
+        "fish" -> {
+            out := "# fish completion from JetCommandSchema v{RECORD_VERSION}\n"
+            command_name :: jet_cli_program_shell_quote(name)
+            condition :: if schema.commands.len() == 0 -> "" else -> " -n '__fish_use_subcommand'"
+            out = "{out}complete -c {command_name}{condition} -l help -d 'show help'\n"
+            if schema.standard {
+                out = "{out}complete -c {command_name}{condition} -l verbose -s v -d 'print extra detail'\ncomplete -c {command_name}{condition} -l quiet -s q -d 'suppress normal output'\ncomplete -c {command_name}{condition} -l color -r -d 'control terminal color'\n"
+                if schema.version != None -> out = "{out}complete -c {command_name}{condition} -l version -d 'show version'\n"
+            }
+            loop input in schema.inputs {
+                short :: if input.short == .Val(value) -> " -s {value}" else -> ""
+                required :: if input.metavar != None -> " -r" else -> ""
+                out = "{out}complete -c {command_name}{condition} -l {input.flag}{short} -d {jet_cli_program_shell_quote(input.help)}{required}\n"
+            }
+            loop command in schema.commands {
+                out = "{out}complete -c {command_name} -n '__fish_use_subcommand' -a {jet_cli_program_shell_quote(command.name)}\ncomplete -c {command_name} -n '__fish_seen_subcommand_from {command.name}' -l help -d 'show help'\n"
+                loop input in schema.command_inputs(command) {
+                    short :: if input.short == .Val(value) -> " -s {value}" else -> ""
+                    required :: if input.metavar != None -> " -r" else -> ""
+                    out = "{out}complete -c {command_name} -n '__fish_seen_subcommand_from {command.name}' -l {input.flag}{short} -d {jet_cli_program_shell_quote(input.help)}{required}\n"
+                }
+            }
+            return Val(out)
+        }
+        "powershell" -> {
+            root :: (loop word in root_words -> jet_cli_program_ps_quote(word)).join(",")
+            command_name :: jet_cli_program_ps_quote(name)
+            if schema.commands.len() == 0 -> return Val("# PowerShell completion from JetCommandSchema v{RECORD_VERSION}\nRegister-ArgumentCompleter -Native -CommandName {command_name} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) @({root}) | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n")
+            flags :: (loop word in root_inputs -> jet_cli_program_ps_quote(word)).join(",")
+            command_flags := [String]{}
+            loop command in schema.commands {
+                words :: (loop word in schema.command_completion_words(command) -> jet_cli_program_ps_quote(word)).join(",")
+                &command_flags.push("{jet_cli_program_ps_quote(command.name)} = @({words})")
+            }
+            return Val("# PowerShell completion from JetCommandSchema v{RECORD_VERSION}\nRegister-ArgumentCompleter -Native -CommandName {command_name} -ScriptBlock {{ param($wordToComplete,$commandAst,$cursorPosition) $root = @({root}); $flags = @({flags}); $commandFlags = @{{ {command_flags.join("; ")} }}; $words = @($commandAst.CommandElements | ForEach-Object {{ $_.Extent.Text }}); $selected = if ($words.Count -ge 2) {{ $words[1] }} else {{ '' }}; $choices = if ($commandFlags.ContainsKey($selected)) {{ $commandFlags[$selected] }} elseif ($wordToComplete.StartsWith('-')) {{ $flags }} else {{ $root }}; $choices | Where-Object {{ $_ -like \"$wordToComplete*\" }} | ForEach-Object {{ [System.Management.Automation.CompletionResult]::new($_,$_,'ParameterName',$_) }} }}\n")
+        }
+        else -> return None
+    }
+}
+
+// Unix Path::file_name components: trailing slash/dot disappear, while a
+// trailing parent component has no filename. Backslash is a filename byte.
+fn jet_cli_program_completion_name(program: String) -> String? Never! {
+    name := ""
+    loop component in program.split("/") {
+        if component == "" || component == "." -> next
+        name = component
+    }
+    if name == "" || name == ".." -> return None
+    Val(name)
+}
+
+fn jet_cli_program_completion_name_control(name: String) -> Bool Never! {
+    cli_completion_text.has_control(name)
+}
+
+// This diagnostic is direct stderr even under --json, like run_completions.
+fn jet_cli_program_completion_error(program: String, why: String) -> JetCLIPlan Never! {
+    escaped := ""
+    bytes :: program.bytes()
+    index := 0
+    loop index < bytes.len() {
+        first :: Int.from_u8(bytes[index])
+        width :: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
+        code := if width == 1 -> first else if width == 2 -> first - 192 else if width == 3 -> first - 224 else -> first - 240
+        loop offset in 1..<width -> code = code * 64 + Int.from_u8(bytes[index + offset]) - 128
+        if {
+            code == 9 -> escaped = "{escaped}\\t"
+            code == 10 -> escaped = "{escaped}\\n"
+            code == 13 -> escaped = "{escaped}\\r"
+            code == 92 -> escaped = "{escaped}\\\\"
+            code == 39 -> escaped = "{escaped}\\'"
+            code == 34 -> escaped = "{escaped}\\\""
+            code >= 32 && code <= 126 -> escaped = "{escaped}{program.slice(index..<(index + 1))}"
+            else -> escaped = "{escaped}\\u{{{cli_completion_fmt.hex(code, 0)}}}"
+        }
+        index += width
+    }
+    jet_cli_done("", "Error [E2103]: Couldn't read command metadata from `{escaped}`.\n Why: {why}.\n Fix: Rebuild the program with this Jet toolchain, then try again.\nMore: jet-lang.dev/e/E2103\n", JET_DRIVER_EXIT_USER_ERROR)
+}
+
+// Called only after the host's single nonblocking open, opened-file metadata
+// check, and bounded read. No pathname re-stat or application execution here.
+fn jet_cli_program_completion_metadata(shell: String, command_name: String, program: String, bytes: [U8], usize_max: U64) -> JetCLIPlan Never! {
+    schema :: read_executable(bytes[0..<bytes.len()], usize_max) ?? return jet_cli_program_completion_error(program, err.display())
+    script :: jet_cli_program_completions(shell, command_name, schema) ?? panic("completion shell was validated before reading metadata")
+    jet_cli_done(script, "", JET_DRIVER_EXIT_OK)
+}

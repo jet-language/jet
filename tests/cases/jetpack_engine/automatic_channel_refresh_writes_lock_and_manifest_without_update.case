@@ -1,0 +1,12 @@
+# HAND-PORT tests/jetpack_engine.rs:5552-5592 automatic_channel_refresh_writes_lock_and_manifest_without_update
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: automatic_channel_refresh_writes_lock_and_manifest_without_update.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+step: jetpack build --no-color --yes --fixtures {work}/fixtures
+cwd: project
+exit: 0
+file: project/.jet/lock ~ "name = \"automatic\"" # original predicate
+file: project/.jet/lock ~ "exact = \"nixpkgs:omp#1.2.3\"" # original predicate
+file: project/env.jet ~ "omp@nixpkgs#auto" # original predicate
+

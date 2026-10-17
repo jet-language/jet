@@ -1,0 +1,199 @@
+// Native core.text.fmt.decimal: Prelude/Core/Fmt.rs jet_fmt_decimal /
+// fixed_half_away. Round value * 10^precision (the scale built by repeated
+// `* 10.0`) half away from zero; past the i64 range, round the exact binary
+// expansion half away at the same place. Never print a negative zero.
+// The Word precision is the raw carrier word the Rust adapter receives.
+#Import(c) fn text_fmt_round(x: Float) -> Float = "round"
+
+TEXT_FMT_BIG_BYTES :: prep { I64{328} }
+
+// Exact Big32x40 (FloatShortest.jet) division by a small divisor, in place;
+// returns the remainder and trims the size to its nonzero limbs.
+fn text_fmt_big_divide(value: I64, divisor: I64) -> I64 {
+    size := display_word(value)
+    remainder := I64{0}
+    at := size
+    loop at > (I64{0}) {
+        at -= I64{1}
+        current :: (remainder << I64{32}).bit_or(float_big_limb(value, at))
+        quotient :: current /% divisor
+        float_big_put(value, at, quotient)
+        remainder = current - quotient * divisor
+    }
+    loop size > (I64{0}) && float_big_limb(value, size - I64{1}) == (I64{0}) -> size -= I64{1}
+    display_store(value, size)
+    remainder
+}
+
+// Exactly width decimal digits of 0 <= value < 10^width.
+fn text_fmt_push_padded(target: I64, value: I64, width: I64) {
+    divisor := I64{1}
+    at := I64{1}
+    loop at < width {
+        divisor *= I64{10}
+        at += I64{1}
+    }
+    loop divisor > (I64{0}) {
+        rt_text_push_scalar(target, I64{48} + (value /% divisor) % I64{10})
+        divisor = divisor /% I64{10}
+    }
+}
+
+// Decimal digits of a nonzero Big32x40 integer; consumes value.
+fn text_fmt_push_big(target: I64, value: I64) {
+    chunks :: jet_rt_alloc(I64{320}, I64{8})
+    count := I64{0}
+    loop display_word(value) > (I64{0}) {
+        rt_text_store(chunks + count * I64{8}, text_fmt_big_divide(value, I64{1000000000}))
+        count += I64{1}
+    }
+    count -= I64{1}
+    rt_text_push_number(target, rt_text_word(chunks + count * I64{8}))
+    loop count > (I64{0}) {
+        count -= I64{1}
+        text_fmt_push_padded(target, rt_text_word(chunks + count * I64{8}), I64{9})
+    }
+    jet_rt_free(chunks, I64{320}, I64{8})
+}
+
+// remainder < 2^bits: emit floor(remainder * 10 / 2^bits) and keep the rest.
+fn text_fmt_next_digit(remainder: I64, bits: I64) -> I64 {
+    float_big_mul(remainder, I64{10})
+    word :: bits /% I64{32}
+    shift :: bits % I64{32}
+    low :: float_big_limb(remainder, word) >> shift
+    high :: if (shift == I64{0}) -> I64{0} else -> float_big_limb(remainder, word + I64{1}) << (I64{32} - shift)
+    digit :: (low.bit_or(high)).bit_and(I64{15})
+    float_big_put(remainder, word, float_big_limb(remainder, word).bit_and((I64{1} << shift) - I64{1}))
+    at := word + I64{1}
+    loop at < (I64{40}) {
+        float_big_put(remainder, at, I64{0})
+        at += I64{1}
+    }
+    display_store(remainder, word + I64{1})
+    digit
+}
+
+// Fmt.rs exact_fixed_half_away: the unsigned text of finite magnitude bits.
+fn text_fmt_exact(bits: I64, precision: I64) -> I64 {
+    exponent :: (bits >> I64{52}).bit_and(I64{2047})
+    fraction :: bits.bit_and(I64{4503599627370495})
+    significand :: if (exponent == I64{0}) -> fraction else -> fraction.bit_or(I64{4503599627370496})
+    power :: if (exponent == I64{0}) -> I64{-1074} else -> exponent - I64{1075}
+    trailing := I64{0}
+    if (significand != I64{0}) {
+        loop trailing < (I64{52}) && ((significand >> trailing).bit_and(I64{1})) == (I64{0}) -> trailing += I64{1}
+    }
+    exact := if (significand == I64{0}) -> I64{0} else -> -(power + trailing)
+    if (exact < I64{0}) -> exact = I64{0}
+    rounding :: exact > precision
+    places :: if rounding -> precision + I64{1} else -> exact
+    body :: jet_rt_string_builder_new()
+    big :: jet_rt_alloc(TEXT_FMT_BIG_BYTES, I64{8})
+    if (power >= I64{0}) {
+        float_big_init(big, significand)
+        float_big_shift(big, power)
+        text_fmt_push_big(body, big)
+    } else {
+        bits_after :: -power
+        rt_text_push_number(body, if (bits_after >= I64{53}) -> I64{0} else -> significand >> bits_after)
+        float_big_init(big, if (bits_after >= I64{53}) -> significand else -> significand.bit_and((I64{1} << bits_after) - I64{1}))
+    }
+    if (places > I64{0} || (!rounding && precision > I64{0})) -> rt_text_push_scalar(body, I64{46})
+    digit := I64{0}
+    at := I64{0}
+    loop at < places {
+        digit = text_fmt_next_digit(big, -power)
+        if (!rounding || at < precision) -> rt_text_push_scalar(body, I64{48} + digit)
+        at += I64{1}
+    }
+    jet_rt_free(big, TEXT_FMT_BIG_BYTES, I64{8})
+    if !rounding {
+        text_push_repeat_byte(body, I64{48}, precision - exact)
+        return body
+    }
+    // The dropped digit decides; an exact expansion makes >=5 the half-away tie.
+    if (precision == I64{0}) -> rt_text_store(body + I64{8}, rt_text_len(body) - I64{1})
+    if (digit < I64{5}) -> return body
+    data :: rt_text_data(body)
+    index := rt_text_len(body)
+    loop index > (I64{0}) {
+        index -= I64{1}
+        byte :: rt_text_byte(data + index)
+        if (byte == I64{46}) -> next
+        if (byte != I64{57}) {
+            rt_text_put(data + index, byte + I64{1})
+            return body
+        }
+        rt_text_put(data + index, I64{48})
+    }
+    carried :: rt_text_builder_with_capacity(rt_text_len(body) + I64{1})
+    rt_text_push_scalar(carried, I64{49})
+    jet_rt_string_builder_push(carried, body)
+    jet_rt_string_drop(body)
+    carried
+}
+
+#Export(c) fn jet_fmt_decimal(value: Float, precision: I64) -> I64 {
+    raw :: rt_f64_bits(value)
+    magnitude :: raw.bit_and(I64{9223372036854775807})
+    if (magnitude >= I64{9218868437227405312}) {
+        // f64 Display of the non-finite values: NaN, inf, -inf.
+        if (magnitude > I64{9218868437227405312}) -> return jet_rt_string_clone(rt_static_text("NaN"))
+        return jet_rt_string_clone(if (raw < I64{0}) -> rt_static_text("-inf") else -> rt_static_text("inf"))
+    }
+    places :: if (precision < I64{0}) -> I64{0} else -> precision
+    scale := Float{1.0}
+    at := I64{0}
+    loop at < places {
+        scale = scale * Float{10.0}
+        if ((rt_f64_bits(scale).bit_and(I64{9223372036854775807})) == I64{9218868437227405312}) -> break
+        at += I64{1}
+    }
+    rounded :: rt_f64_bits(text_fmt_round(value * scale)).bit_and(I64{9223372036854775807})
+    body := I64{0}
+    // rounded < 2^63 (a NaN product also takes the exact expansion).
+    if (rounded < I64{4890909195324358656}) {
+        shift :: (rounded >> I64{52}) - I64{1075}
+        significand :: (rounded.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
+        whole :: if {
+            (rounded == I64{0}) -> I64{0}
+            (shift >= I64{0}) -> significand << shift
+            else -> significand >> (-shift)
+        }
+        digits :: jet_rt_i64_to_string(whole)
+        count :: rt_text_len(digits)
+        body = rt_text_builder_with_capacity(count + places + I64{2})
+        if (places == I64{0}) {
+            jet_rt_string_builder_push(body, digits)
+        } else if (count <= places) {
+            rt_text_push_scalar(body, I64{48})
+            rt_text_push_scalar(body, I64{46})
+            text_push_repeat_byte(body, I64{48}, places - count)
+            jet_rt_string_builder_push(body, digits)
+        } else {
+            rt_text_append(body, rt_text_data(digits), count - places)
+            rt_text_push_scalar(body, I64{46})
+            rt_text_append(body, rt_text_data(digits) + count - places, places)
+        }
+        jet_rt_string_drop(digits)
+    } else {
+        body = text_fmt_exact(magnitude, places)
+    }
+    if !(value < Float{0.0}) -> return body
+    data :: rt_text_data(body)
+    length :: rt_text_len(body)
+    index := I64{0}
+    loop index < length {
+        byte :: rt_text_byte(data + index)
+        if (byte >= I64{49} && byte <= I64{57}) {
+            signed :: rt_text_builder_with_capacity(length + I64{1})
+            rt_text_push_scalar(signed, I64{45})
+            jet_rt_string_builder_push(signed, body)
+            jet_rt_string_drop(body)
+            return signed
+        }
+        index += I64{1}
+    }
+    body
+}

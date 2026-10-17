@@ -9,7 +9,7 @@
 
 #[test]
 fn local_schedule_restart_does_not_replay_a_missed_window() {
-    use jet_jit::Job::{JetJobClock, JetJobSchedule};
+    use jet_evalhost::Job::{JetJobClock, JetJobSchedule};
 
     const DAY: u64 = 86_400;
     const THREE_AM: u64 = 3 * 3_600;

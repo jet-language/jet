@@ -1,0 +1,11 @@
+# Port of tests/tir_collections_and_methods.rs:1731-1759; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# Original lint/edit assertions use library diagnostics, not an asserted CLI stream.
+# Public check --json projects those diagnostics on stdout; stderr was a port bug.
+fixture: redundant_fixed_cleanup_lint_has_exact_fix_and_allow.fixture
+step: jet check run.jet --json
+json: stdout doc $.reports[?code="L0518"] #= 1 # original predicate
+json: stdout doc $.reports[?code="L0518"].fix_edits[0].new_text = ""
+json: stdout doc $.reports[?code="L0518"].fix_edits[0].span = {"start":67,"end":84}
+step: jet fix run.jet
+file: run.jet ~ "print(\"{value:Fixed(2)}\")" # original predicate

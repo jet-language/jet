@@ -1,0 +1,6 @@
+# Port of tests/corelib_parts/runtime.rs::game_run_rejects_transposed_labels; original source unchanged.
+# PENDING-GRAMMAR: JSON membership filter, batch-four.
+fixture: fixtures/game_run_rejects_transposed_labels
+step: jet check fixture.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code in ["E0764","E0769"]] #>= 1 # original predicate: any diagnostic code equals one alternative

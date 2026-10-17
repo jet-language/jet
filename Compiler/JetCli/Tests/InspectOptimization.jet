@@ -1,0 +1,95 @@
+// Production query/CLI projection fixture; replace CLI Entry when assembling.
+use jet_foundation.[CanonicalPassOptions, canonical_pass_boundary_gaps]
+use jet_optimizer.mir_decision_ledger_from_rows
+fn inspect_optimization_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("InspectOptimization: {message}")
+}
+fn inspect_optimization_request(source: String) -> JetDriverCompileRequest {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/inspect-optimization", identity: "inspect-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/inspect-optimization/run.jet", relative_path: "run.jet", identity: "inspect-source", source: source}}, foreign_cache_files: []}}, entry_root_identity: "inspect-root", entry_path: "/inspect-optimization/run.jet"}
+    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    request.host_facts.target_triple = Val("x86_64-unknown-linux-gnu")
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request
+}
+fn run() {
+    request :: inspect_optimization_request("#Inline fn helper(value: Int) -> Int {{ value + 1 }}\nfn run() {{\nanswer :: helper(3)\nprint(answer)\n}}")
+    query :: jet_driver_optimization_query(^request)
+    inspect_optimization_require(query.compile.complete && query.compile.internal_problem == None, "production query")
+    machine :: jet_cli_acceleration_report(query, "target", "run.jet", [], true)
+    inspect_optimization_require(machine.contains("\"action\":\"inspect.accel\"") && machine.contains("\"measurement_source\":\"none\""), "unobserved static report")
+    inspect_optimization_require(machine.contains("\"runtime_decisions\":[]") && machine.ends_with("\n"), "query reports actually empty runtime input")
+    plain_request :: inspect_optimization_request("fn run() {{}}")
+    plain_sources := plain_request.authorized_sources
+    plain :: jet_driver_optimization_query(^plain_request)
+    inspect_optimization_require(plain.compile.complete && plain.compile.internal_problem == None, "plain production MIR query")
+    plain_human :: "accel: scope=target source=run.jet profile=dev release_build=false runtime_profile=not-published\ngate: static_floor_items=1024 cache_block_bytes=65536 required_gain=2/1 measurement_source=none\nruntime profile: no matching authenticated receipt.\nNo vector facts declared.\nNo acceleration facts declared.\n"
+    inspect_optimization_require(jet_cli_acceleration_report(plain, "target", "run.jet", [], false) == plain_human, "exact unobserved acceleration human output")
+    plain_json :: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.accel\",\"ok\":true,\"reports\":[],\"scope\":\"target\",\"source\":\"run.jet\",\"profile\":\"dev\",\"release_build\":false,\"runtime_profile\":\"not-published\",\"measurement_source\":\"none\",\"vectors\":[],\"decisions\":[],\"runtime_decisions\":[],\"gate\":{{\"static_floor_items\":1024,\"cache_block_bytes\":65536,\"required_gain_numerator\":2,\"required_gain_denominator\":1}}}}\n"
+    inspect_optimization_require(jet_cli_acceleration_report(plain, "target", "run.jet", [], true) == plain_json, "exact unobserved acceleration JSON output")
+    plain_host :: jet_cli_optimization_host(plain_sources, plain, "accel", "target", "run.jet", [], [], false, true)
+    inspect_optimization_require(plain_host.exit_code == JET_DRIVER_EXIT_OK && plain_host.stderr == "" && plain_host.stdout == plain_json, "real checked acceleration host preserves exact observable output")
+    ledger :: query.decisions ?? panic("missing compiler ledger")
+    inspected :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], query.canonical_route_gaps, true)
+    inspect_optimization_require(inspected.contains("\"kind\":\"inline\"") && inspected.contains("\"derivation_ref\":\"") && !inspected.contains("\"function_name\""), "CLI projection is not transport JSON")
+    inspect_optimization_require(inspected.contains("\"id\":{ledger.rows[0].id}") && !inspected.contains("\"id\":\"{ledger.rows[0].id}\""), "u64 IDs are numbers")
+    text :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], query.canonical_route_gaps, false)
+    inspect_optimization_require(text.starts_with("decisions: scope=target source=run.jet profile=dev record_status=current retention=bounded redaction=none\n") && text.contains("kind inline: present\n"), "human producer projection")
+    inspect_optimization_require(!inspected.contains("\"canonical_route_gaps\""), "ordinary invocation retains exact reference schema")
+    // An empty canonical ledger exercises the wire projection, not a claim
+    // that this checked program produced no decisions or runtime evidence.
+    empty :: mir_decision_ledger_from_rows(ledger.identity, [])
+    empty_human :: "decisions: scope=target source=run.jet profile=dev record_status=current retention=bounded redaction=none\nkind tier: not-applicable\nkind inline: not-applicable\nkind vectorize: not-applicable\nkind parallel: not-applicable\nkind copy: not-applicable\nkind bounds: not-applicable\nkind deopt: not-applicable\nkind unreachable: not-applicable\nkind loop-invariant: not-applicable\n"
+    inspect_optimization_require(jet_cli_decisions_report(empty, "target", "run.jet", "dev", [], [], false) == empty_human, "exact empty canonical ledger human projection")
+    empty_json :: "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.decisions\",\"ok\":true,\"reports\":[],\"scope\":\"target\",\"source\":\"run.jet\",\"profile\":\"dev\",\"rows\":[],\"kinds\":{{\"tier\":{{\"status\":\"not-applicable\",\"rows\":0}},\"inline\":{{\"status\":\"not-applicable\",\"rows\":0}},\"vectorize\":{{\"status\":\"not-applicable\",\"rows\":0}},\"parallel\":{{\"status\":\"not-applicable\",\"rows\":0}},\"copy\":{{\"status\":\"not-applicable\",\"rows\":0}},\"bounds\":{{\"status\":\"not-applicable\",\"rows\":0}},\"deopt\":{{\"status\":\"not-applicable\",\"rows\":0}},\"unreachable\":{{\"status\":\"not-applicable\",\"rows\":0}},\"loop-invariant\":{{\"status\":\"not-applicable\",\"rows\":0}}}},\"canonical_routes\":[],\"record_status\":\"current\",\"retention\":\"bounded\",\"redaction\":\"none\"}}\n"
+    inspect_optimization_require(jet_cli_decisions_report(empty, "target", "run.jet", "dev", [], [], true) == empty_json, "exact empty canonical ledger JSON projection")
+    gaps :: canonical_pass_boundary_gaps(CanonicalPassOptions{adapter_mode: "canonical-pass", operation_ids: [String]{"sema.desugar-os-switches"}})
+    gap_json :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], gaps, true)
+    inspect_optimization_require(gap_json.contains("\"canonical_routes\":[]") && gap_json.contains("\"canonical_route_gaps\":[{{\"operation_id\":\"sema.desugar-os-switches\",\"status\":\"no Jet pass\"}}]"), "availability is separate from actual execution receipts")
+    gap_text :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", [], gaps, false)
+    inspect_optimization_require(gap_text.ends_with("canonical route sema.desugar-os-switches: no Jet pass\n"), "explicit selection reports actual producer availability")
+    broken :: inspect_optimization_request("fn run() {{ missing_callable() }}")
+    broken_sources := broken.authorized_sources
+    failed :: jet_cli_optimization_host(broken_sources, jet_driver_optimization_query(^broken), "accel", "target", "run.jet", [], [], false, true)
+    inspect_optimization_require(failed.exit_code == JET_DRIVER_EXIT_USER_ERROR && failed.stdout.contains("\"action\":\"inspect\"") && failed.stderr == "" && !failed.stdout.ends_with("\n\n"), "checked failure envelope and newline")
+    fact :: MIRAccelerationFact{loop_header: MIRBlockID{value: U64{1}}, transform: .PooledParallelChunks, workload: MIRAccelerationWorkloadFacts{nested_reuse: false, single_pass: true}, proof: MIRAccelerationProof{source_proven: true, independent_iterations: true, no_aliasing: true, no_cross_iteration_dependencies: true, no_early_exit: true, effect_free_body: true, ownership_safe: true, failure_order_preserved: true}, span: Span{start: 2, end: 9}}
+    input := mir_acceleration_deferred(fact, U64{1024}, true, true)
+    gate :: mir_acceleration_gate()
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .BelowStaticFloor, "floor includes equality")
+    input.items = U64{1025}
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .SampleNotTimed, "deferred timing")
+    input.release_build = false
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .NotReleaseBuild, "release gate")
+    input.pin = Val(MIRAccelerationPin.Scalar)
+    pinned :: MIRAccelerationGateStatus.Pinned(MIRAccelerationPin.Scalar)
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == pinned, "pin precedence")
+    input.pin = None
+    input.release_build = true
+    input.cross_mode_parity_proven = false
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .CrossModeParityMissing, "parity gate")
+    input.cross_mode_parity_proven = true
+    inspect_optimization_require(mir_acceleration_evaluate(gate, .TransientColumnCopy, input).status == .ColumnCopyNotApplicable, "single pass never column copied")
+    input.proof.ownership_safe = false
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .ProofIncomplete, "proof gate")
+    input.proof.ownership_safe = true
+    input.first_chunk_serial_timed = true
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .SpawnCostNotMeasured, "spawn gate")
+    input.spawn_cost_once_per_process = true
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .BandwidthFloorNotMeasured, "bandwidth gate")
+    input.bandwidth_floor_measured = true
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .InvalidMeasurement, "zero sample invalid")
+    input.sample_items = U64{10}
+    input.sample_nanos = U64{20}
+    input.spawn_nanos = U64{100}
+    input.bandwidth_floor_nanos = U64{120}
+    selected :: mir_acceleration_evaluate(gate, fact.transform, input)
+    projected :: Val(U64{2050})
+    required :: Val(U64{240})
+    inspect_optimization_require(selected.status == .Selected && selected.measurement.projected_serial_nanos == projected && selected.measurement.required_serial_nanos == required, "measured arithmetic")
+    input.sample_nanos = U64{1}
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .ProjectedGainBelowThreshold, "gain threshold")
+    input.sample_nanos = U64{18446744073709551615}
+    inspect_optimization_require(mir_acceleration_evaluate(gate, fact.transform, input).status == .InvalidMeasurement, "multiply overflow")
+    runtime :: JetCLIAccelerationRuntime{receipt_digest: "authenticated", receipt_verb: "build", record_sequence: U64{18446744073709551615}, sequence: U64{1}, function: "recorded", loop_header: U64{7}, source: JetCLIAccelerationSpan{start: U64.from_int(fact.span.start) ?? panic("negative span"), end: U64.from_int(fact.span.end) ?? panic("negative span")}, decision: selected}
+    observed :: jet_cli_acceleration_report(query, "target", "run.jet", [runtime], true)
+    inspect_optimization_require(observed.contains("\"record_sequence\":18446744073709551615") && observed.contains("\"runtime_profile\":\"receipt\"") && observed.contains("\"measurement_source\":\"receipt\""), "actual supplied typed receipt retained")
+}

@@ -1,0 +1,31 @@
+// CAbiRoutes.rs:2677-2715,7509-7523,10966-10979; NetHTTP.rs:184-201.
+// Ready16 owns normalized Bool words; enum8 owns raw declaration-order tags.
+// Shared scalar enum ownership comes from EncodingErrors.jet e1306aee0.
+fn net_ready_bool(word: I64) -> Bool { (word.bit_and(I64{255})) != I64{0} }
+#Export(c) fn jet_rt_record_new_jet_net_ready(readable: U8, writable: U8) -> I64 {
+    value :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(value, if (readable != U8{0}) -> I64{1} else -> I64{0})
+    rt_text_store(value + I64{8}, if (writable != U8{0}) -> I64{1} else -> I64{0})
+    value
+}
+#Export(c) fn jet_rt_record_get_jet_net_ready_readable(value: I64) -> Bool { net_ready_bool(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_net_ready_writable(value: I64) -> Bool { net_ready_bool(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_handle_clone_jet_net_ready(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(result, if jet_rt_record_get_jet_net_ready_readable(value) -> I64{1} else -> I64{0})
+    rt_text_store(result + I64{8}, if jet_rt_record_get_jet_net_ready_writable(value) -> I64{1} else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_net_ready(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, I64{16}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_net_ready(left: I64, right: I64) -> Bool {
+    jet_rt_record_get_jet_net_ready_readable(left) == jet_rt_record_get_jet_net_ready_readable(right) &&
+        jet_rt_record_get_jet_net_ready_writable(left) == jet_rt_record_get_jet_net_ready_writable(right)
+}
+#Export(c) fn jet_rt_handle_clone_jet_net_ready_interest(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_net_ready_interest(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_net_ready_interest(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_net_shutdown(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_net_shutdown(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_net_shutdown(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }

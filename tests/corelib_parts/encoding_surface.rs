@@ -129,7 +129,7 @@ fn run() {
     let compiled = compile_temp("date_today_immutable", src);
     let user_run = compiled
         .rust
-        .split_once("pub fn __jet_run() {")
+        .split_once("fn __jet_run() {")
         .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
         .expect("generated Rust must contain the __jet_run body");
     assert_eq!(
@@ -170,7 +170,7 @@ fn run() {
     let compiled = compile_temp("time_now_immutable", src);
     let user_run = compiled
         .rust
-        .split_once("pub fn __jet_run() {")
+        .split_once("fn __jet_run() {")
         .and_then(|(_, body)| body.split_once("\n}\n").map(|(body, _)| body))
         .expect("generated Rust must contain the __jet_run body");
     assert_eq!(
@@ -394,19 +394,15 @@ fn run() -[Rand, Time]> {
 
     let path = dir.join("nondeterministic_matrix.jet");
     fs::write(&path, source).unwrap();
-    jet_jit::reset_jit_trace_for_test();
-    let resident_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    let resident_stdout = match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "resident JIT stderr");
             stdout
         }
         other => panic!("nondeterministic matrix resident JIT failed: {other:?}"),
     };
-    assert!(jet_jit::jit_executed_for_test(), "random/time matrix must execute in resident JIT");
-    assert!(!jet_jit::deopt_invoked_for_test(), "random/time matrix must not deopt");
-    assert!(!jet_jit::fallback_invoked_for_test(), "random/time matrix must not fall back");
 
-    let forced_stdout = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    let forced_stdout = match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stderr.as_str()), (0, "$xml_event"), "forced interpreter stderr");
             stdout
@@ -419,7 +415,7 @@ fn run() -[Rand, Time]> {
 }
 
 #[test]
-fn encoding_breadth_codecs_share_data_tree() {
+fn encoding_breadth_codecs_share_dyn() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
         eprintln!("note: skipping encoding breadth test (need rustc)");
@@ -445,10 +441,10 @@ fn run() {
     print(json.events(data).contains("object_start $"))
     rows := jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n") ?? panic("jsonl")
     print(rows.len())
-    print(jsonl.to_string(rows).contains("\"a\":1"))
+    print((jsonl.to_string(rows) ?? panic("JSONL encode")).contains("\"a\":1"))
     source := "<r xmlns=\"urn:r\" xmlns:h=\"urn:h\" h:a=\"x&amp;y\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><h:c/></r>"
     doc := xml.parse(source) ?? panic("xml")
-    print(xml.to_string(doc))
+    print(xml.to_string(doc) ?? panic("xml render"))
     print((&doc.field("$xml") ?? panic("document tag")).text() ?? "bad")
     root := (&doc.field("children") ?? panic("document children")).at(0) ?? panic("root")
     name := &root.field("name") ?? panic("root name")
@@ -726,7 +722,7 @@ fn run() {
 
     let dev_path = dir.join("xml_whole_bytes.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
         }
@@ -748,7 +744,7 @@ fn xml_10_fifth_edition_char_errors_match_comptime_aot_and_dev() {
     let source = r#"
 use core.encoding.xml as xml
 
-fn show(result: DataTree XMLError!) -> String {
+fn show(result: Dyn XMLError!) -> String {
     if result == {
         .Ok(_) -> { return "accepted" }
         .Err(error) -> {
@@ -783,7 +779,7 @@ fn run() {
 
     let dev_path = dir.join("xml_chars.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout, stderr), (0, expected.to_string(), String::new()));
         }
@@ -817,7 +813,7 @@ fn summarize(source: String) -> String {
     reference := ((attributes.at(1) ?? panic("reference attribute")).field("normalized_value") ?? panic("reference normalized value")).text() ?? "bad"
     namespace_ok := (namespace.text() ?? "bad") == "urn: foo bar"
     literal_ok := literal == "A B C D E"
-    lexical_ok := xml.to_string(doc) == source
+    lexical_ok := (xml.to_string(doc) ?? panic("xml render")) == source
     return "{namespace_ok}|{literal_ok}|{reference.len()}|{lexical_ok}"
 }
 
@@ -843,7 +839,7 @@ fn run() {
 
     let dev_path = dir.join("xml_attribute_normalization.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(
                 (exit_code, stdout, stderr),
@@ -984,7 +980,7 @@ fn run() {
     assert_eq!(stdout, expected);
     let dev_path = dir.join("base_decoder_parity.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -1302,7 +1298,7 @@ fn run() {{
     // Hostile: document_end before document_start → State, no bytes.
     bad_out :: files.create("{input}.bad") ?? panic("bad create")
     bad :: xml.writer(^bad_out) ?? panic("bad writer")
-    end := DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+    end := Dyn.Object(["$xml_event": Dyn.Text("document_end")])
     if bad.write(end) == {{
         .Ok(_) -> {{ print("hostile-missed") }}
         .Err(error) -> {{

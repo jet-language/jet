@@ -1,0 +1,28 @@
+// Build-only byte transport. Authorization and all fetch policy live in Driver;
+// these private Core leaves are bootstrap transport, not a generic host route.
+use core.http.client as cli_build_http
+use core.net.url as cli_build_url
+use jet_driver.[JetDriverBuildHTTPInputs, JetDriverBuildHTTPResponse, JetDriverBuildHTTPError]
+
+struct JetCLIBuildHTTPInputs {}
+impl JetCLIBuildHTTPInputs.JetDriverBuildHTTPInputs {
+    fn resolve(self, host: String, port: Int) -[Net, Time.Wait]> [[U8]] JetDriverBuildHTTPError! {
+        answers :: cli_build_http.jet_http_build_resolve(host, port) ?? return Err(JetDriverBuildHTTPError{message: "{err}"})
+        Ok(answers)
+    }
+    fn get(self, url: String, addresses: [[U8]], port: Int, timeout_ms: Int, limit: Int) -[Net, Time.Wait]> JetDriverBuildHTTPResponse JetDriverBuildHTTPError! {
+        parsed :: cli_build_url.parse(url) ?? return Err(JetDriverBuildHTTPError{message: "invalid URL"})
+        host :: parsed.host() ?? return Err(JetDriverBuildHTTPError{message: "URL has no host"})
+        path := parsed.path()
+        if path == "" -> path = "/"
+        query :: parsed.query()
+        if query != "" -> path = "{path}?{query}"
+        wire := cli_build_http.jet_http_build_get(host, parsed.authority(), path, parsed.scheme() == "https", addresses, port, timeout_ms, limit) ?? return Err(JetDriverBuildHTTPError{message: "{err}"})
+        if wire.len() < 2 -> return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its response"})
+        status_bytes := &wire.pop() ?? return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its status"})
+        body := &wire.pop() ?? return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its body"})
+        status_text :: String.from_bytes(^status_bytes) ?? return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its status"})
+        status :: Int.parse(status_text) ?? return Err(JetDriverBuildHTTPError{message: "HTTP transport lost its status"})
+        Ok(JetDriverBuildHTTPResponse{status: status, headers: ^wire, body: ^body})
+    }
+}

@@ -4,21 +4,21 @@
 // The tier-one host platforms every built-in pack supports.
 ENVMODEL_LANGUAGE_PLATFORMS :: prep { [String]{"aarch64-macos", "aarch64-linux", "x86_64-macos", "x86_64-linux"} }
 
-pub struct LanguagePack {
-    pub name: String{""}
-    pub packages: [String]{[String]{}}
-    pub venv_packages: [String]{[String]{}}
-    pub variables: [String: String]{[String: String]{}}
-    pub commands: [String: String]{[String: String]{}}
+struct LanguagePack {
+    name: String{""}
+    packages: [String]{[String]{}}
+    venv_packages: [String]{[String]{}}
+    variables: [String: String]{[String: String]{}}
+    commands: [String: String]{[String: String]{}}
     // Execution authority for the pack. `native` means the pack is selected
     // for the host platform recorded in `platforms`.
-    pub host: String{""}
-    pub platforms: [String]{[String]{}}
+    host: String{""}
+    platforms: [String]{[String]{}}
     // Union of the licenses declared by the catalog entries in this pack.
-    pub license: String{""}
+    license: String{""}
     // Command names the pack promises to expose. A missing mapping is a
     // catalog error, never an empty PATH entry.
-    pub required_tools: [String]{[String]{}}
+    required_tools: [String]{[String]{}}
 
     // Stable identity for one catalog entry. Pack metadata is environment
     // policy, not presentation: variables and commands must invalidate trust
@@ -77,13 +77,13 @@ pub struct LanguagePack {
 // One user selection from `languages`. Expansion turns enabled selections
 // into ordinary package refs; the typed selection remains in the plan for
 // trust, cache, and user-facing disclosure.
-pub struct LanguageSpec {
-    pub name: String{""}
-    pub enable: Bool{false}
-    pub version: String?{None}
-    pub channel: String?{None}
-    pub venv: Bool{false}
-    pub extra_packages: [String]{[String]{}}
+struct LanguageSpec {
+    name: String{""}
+    enable: Bool{false}
+    version: String?{None}
+    channel: String?{None}
+    venv: Bool{false}
+    extra_packages: [String]{[String]{}}
 
     fn key(self) -> String Never! {
         envmodel_language_key(self.name)
@@ -103,33 +103,33 @@ pub struct LanguageSpec {
 // One typed language selection projected through its catalog entry. The
 // selection preserves author facts; `included` and `omitted` make the package
 // projection explicit for trust, image, and diagnostics consumers.
-pub struct LanguageProjection {
-    pub selection: LanguageSpec{LanguageSpec{}}
-    pub pack: LanguagePack{LanguagePack{}}
-    pub included: [String]{[String]{}}
-    pub omitted: [String]{[String]{}}
-    pub changed: [String]{[String]{}}
-    pub host: String{""}
-    pub platform: String{""}
-    pub license: String{""}
-    pub missing_tools: [String]{[String]{}}
+struct LanguageProjection {
+    selection: LanguageSpec{LanguageSpec{}}
+    pack: LanguagePack{LanguagePack{}}
+    included: [String]{[String]{}}
+    omitted: [String]{[String]{}}
+    changed: [String]{[String]{}}
+    host: String{""}
+    platform: String{""}
+    license: String{""}
+    missing_tools: [String]{[String]{}}
 
     fn fingerprint(self) -> String Never! {
         "selection={self.selection.fingerprint()}\npack={self.pack.fingerprint()}included={self.included.join(",")}\nomitted={self.omitted.join(",")}\nchanged={self.changed.join(",")}\nhost={self.host}\nplatform={self.platform}\nlicense={self.license}\nmissing-tools={self.missing_tools.join(",")}\n"
     }
 }
 
-pub struct LanguageExpansion {
-    pub applied: [String]{[String]{}}
+struct LanguageExpansion {
+    applied: [String]{[String]{}}
     // The exact catalog entries used by this expansion. Keeping these with the
     // derived package list makes the expansion the one runtime fact shared by
     // planning, trust, activation, and disclosure.
-    pub packs: [LanguagePack]{[LanguagePack]{}}
-    pub selections: [LanguageSpec]{[LanguageSpec]{}}
-    pub packages: [String]{[String]{}}
-    pub variables: [String: String]{[String: String]{}}
-    pub commands: [String: String]{[String: String]{}}
-    pub projections: [LanguageProjection]{[LanguageProjection]{}}
+    packs: [LanguagePack]{[LanguagePack]{}}
+    selections: [LanguageSpec]{[LanguageSpec]{}}
+    packages: [String]{[String]{}}
+    variables: [String: String]{[String: String]{}}
+    commands: [String: String]{[String: String]{}}
+    projections: [LanguageProjection]{[LanguageProjection]{}}
 
     fn fingerprint(self) -> String Never! {
         lines := [String]{"jet-language-expansion-v1\n"}
@@ -143,13 +143,13 @@ pub struct LanguageExpansion {
     }
 
     // Add `package` to the expanded package list once.
-    fn add_package(&self, package: String) {
+    fn add_package(&self, package: String) Never! {
         if !self.packages.contains(package) -> &self.packages.push(package)
     }
 }
 
-pub struct LanguagePackCatalog {
-    packs: [String: LanguagePack]{[String: LanguagePack]{}}
+struct LanguagePackCatalog {
+    priv packs: [String: LanguagePack]{[String: LanguagePack]{}}
 
     fn empty() -> LanguagePackCatalog Never! {
         LanguagePackCatalog{}
@@ -313,9 +313,9 @@ fn envmodel_merge_language_fact(facts: &[String: String], pack_name: String, kin
 // Pin a catalog package to the selected version unless it already carries a
 // version or channel marker.
 fn envmodel_versioned_package(package: String, version: String?) -> String Never! {
-    selected :: version ?? return package
-    parts :: package.cut_last(REF_PROVIDER_AT) ?? return package
-    if parts.before.contains("#version=") || parts.after.contains(REF_CHANNEL_MARKER) -> return package
+    selected :: version ?? return package.copy()
+    parts :: package.cut_last(REF_PROVIDER_AT) ?? return package.copy()
+    if parts.before.contains("#version=") || parts.after.contains(REF_CHANNEL_MARKER) -> return package.copy()
     "{parts.before}{REF_PROVIDER_AT}{parts.after}{REF_CHANNEL_MARKER}version={selected}"
 }
 

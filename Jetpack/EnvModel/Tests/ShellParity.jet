@@ -1,0 +1,46 @@
+// Ported from jet_shell_parity.rs:20-98. Every original predicate is retained.
+// The existing envmodel_test_repo_root helper obtains the test driver's
+// repository root (ModuleEvalSupport.jet:9-12). Pass that root explicitly:
+// neither the source read nor either evaluator relies on an ambient cwd.
+
+fn envmodel_test_shell_parity(root: String) {
+    source :: files.read(files.join(root, "env.jet")) ?? panic("root env.jet")
+    assert(!source.contains("/nix/store"))
+
+    dev :: envmodel_evaluate_env_with_environment(source, root, Val("dev")) ?? panic("default environment evaluates")
+    expected_default :: [String]{
+        "cargo@default", "sccache@default", "clippy@default", "rustc@default",
+        "rustfmt@default", "gcc@default", "clang@default", "lld@default",
+        "nodejs_22@default", "python3@default", "nixfmt@default", "ripgrep@default",
+        "jq@default", "gh@default", "fd@default", "bashInteractive@default",
+        "zsh@default", "fish@default", "util-linux@default", "wasm-tools@default",
+        "tree-sitter@default", "pkg-config@default", "tzdata@default",
+        "vulkan-loader@default", "ruby@default", "php@default", "rWrapper@default",
+        "rPackages.jsonlite@default"
+    }
+    // Rust package_set collects a BTreeSet, so duplicates are ignored before
+    // exact set equality. Equal unique counts plus membership is that equality.
+    unique := [String]{}
+    loop reference in dev.package_refs {
+        if !unique.contains(reference) -> &unique.push(reference)
+    }
+    assert_eq(unique.len(), expected_default.len())
+    loop reference in expected_default -> assert(unique.contains(reference))
+
+    full :: envmodel_evaluate_env_with_environment(source, root, Val("full")) ?? panic("full environment evaluates")
+    assert_eq(full.package_refs.len(), 51)
+    required_full :: [String]{
+        "rustup@default", "gnat@default", "fpc@default", "dart@default",
+        "powershell@default", "gfortran@default", "gnucobol@default", "go@default",
+        "jdk@default", "dotnet-sdk_8@default", "tcl@default", "lua5_4@default",
+        "octave@default", "qemu@default", "wasmtime@default", "emscripten@default",
+        "lldb@default", "raylib@default", "chromium@default", "firefox@default",
+        "geckodriver@default", "gtk4@default", "bubblewrap@default", "rWrapper@default",
+        "rPackages.jsonlite@default", "tzdata@default", "vulkan-loader@default"
+    }
+    loop reference in required_full -> assert(full.package_refs.contains(reference))
+}
+
+#Test("default_and_full_shell_declarations_are_typed_and_complete") {
+    envmodel_test_shell_parity(envmodel_test_repo_root())
+}

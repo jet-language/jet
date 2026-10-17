@@ -1,0 +1,14 @@
+# Port of tests/lsp.rs:806-858.
+# PENDING-GRAMMAR(session) and PENDING-REFERENCE: exact initialize snapshot requires original advertised-capability coverage assertion check.
+# Rust include_str marker-presence assertion is retired (Rust-source scan); public advertised coverage is retained.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_initialize_capabilities_have_named_test_coverage/0.json
+recv lsp
+stdout: = lsp_initialize_capabilities_have_named_test_coverage.initialize.stdout
+send lsp: messages/lsp_initialize_capabilities_have_named_test_coverage/1.json
+recv lsp
+send lsp: messages/lsp_initialize_capabilities_have_named_test_coverage/2.json
+close lsp
+# Original child.wait status was ignored.
+exit: any

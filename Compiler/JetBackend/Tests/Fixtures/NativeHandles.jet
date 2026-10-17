@@ -1,0 +1,140 @@
+// Native C shells reuse declaration/layout helpers. These checks instantiate
+// all six operations over inline owners, payload boxes, tags and Absent; the
+// generated module's lint validates every call/glue signature and branch.
+fn fx_native_handle_checks() -> Bool Never! {
+    p := fx_values_payload()
+    aggregates :: fx_aggregates()
+    &p.types.push(aggregates.types[2].copy())
+    scalar :: fx_named("WordRecord")
+    &p.types.push(fx_type_def("WordRecord", MIRTypeDefKind.Struct{
+        fields: [MIRField]{fx_field("WordRecord", "value", fx_int())}, methods: [MIRFunctionID]{},
+    }))
+    schema :: LowerRecordSchema{jet_name: "WordRecord", variants: "", fields: "value=Int"}
+    if lower_route_word_shape(p, scalar, "value", schema) == None -> return false
+    if lower_route_word_shape(p, scalar, "wrong", schema) != None -> return false
+    if lower_route_word_shape(p, fx_named("Pt"), "value", schema) != None -> return false
+    if lower_route_word_shape(p, fx_int(), "value", schema) != None -> return false
+    prepared := lower_mono_empty()
+    lower_mono_index(p, &prepared)
+    m := LowerModule{
+        signatures: [LIRSignature]{},
+        checked_types: prepared.checked_types.copy(),
+        test_harness: false,
+        test_rows: [Int]{},
+        test_indices: [U64:Int]{},
+        test_serial: false,
+        test_checks: [MIROutputCheck]{},
+        native_pack: true,
+        native_exports: [String:LIRFunctionID]{},
+        signature_rows: [String:Int]{},
+        data: [LIRData]{},
+        data_rows: [String:Int]{},
+        static_rows: [String:Int]{},
+        static_fixups: [LowerStaticFixup]{},
+        static_live: None,
+        shared_sites_dynamic: true,
+        shared_sites: [LIRSharedSiteExport]{},
+        source_rows: [U64:Int]{},
+        prelude_positions: [U64:Int]{},
+        asm_foreign: [U64:MIRFunctionID]{},
+        foreign_rows: [U64:Int]{},
+        mir_rows: [U64:Int]{},
+        mir_sources: [Int]{},
+        comptime_budget: false,
+        mir_signatures: [LIRSignatureID]{},
+        mir_results: [Int]{},
+        glue_base: 0,
+        glue: [LowerGlue]{},
+        close_methods: prepared.close_methods.copy(),
+        glue_rows: [String:Int]{},
+        issues: [LIRLoweringIssue]{},
+        debug_files: [String]{},
+        debug_file_rows: [U64:Int]{},
+        debug_types: [LIRDebugType]{},
+        debug_type_rows: [String:Int]{},
+        stop_points: false,
+        task_stop_points: false,
+    }
+    types :: [MIRType]{fx_named("Pt"), fx_named("Holder"), fx_named("Color"), fx_unit()}
+    operations :: [String]{"clone", "drop", "eq", "display", "show", "debug"}
+    loop ty in types {
+        loop op in operations {
+            first :: lower_native_handle_id(&m, ty, op) ?? return false
+            second :: lower_native_handle_id(&m, ty, op) ?? return false
+            if first != second -> return false
+        }
+    }
+    // Direct typed-body witnesses do not pretend these fixture declarations
+    // are production runtime owners. Export admission is tested by G1.
+    fields :: [String]{"x", "on", "name"}
+    loop field in fields -> lower_native_record_id(&m, fx_named("Pt"), "record.get", field).drop("registered typed getter witness")
+    lower_native_record_id(&m, fx_named("Pt"), "record.field", "name").drop("borrowed E4 field witness")
+    variants :: [String]{"Empty", "Has"}
+    loop variant in variants -> lower_native_record_id(&m, fx_named("Holder"), "record.new", variant).drop("native variant constructor witness")
+    lower_native_record_id(&m, fx_named("Holder"), "record.tag", "").drop("native tag witness")
+    lower_native_record_id(&m, fx_named("Holder"), "record.get", "Has").drop("owned nested getter witness")
+    bytes :: mir_type_from_kind(MIRTypeKind.List{inner: mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 8})})
+    sequence_ops :: [String]{"new", "drop", "len", "push", "get"}
+    loop op in sequence_ops -> lower_native_record_id(&m, bytes, "record.seq.{op}", "List.Byte").drop("native sequence witness")
+    // Unknown operations must neither register glue nor silently substitute it.
+    count :: m.glue.len()
+    if lower_native_handle_id(&m, fx_named("Pt"), "unknown") != None -> return false
+    if m.glue.len() != count -> return false
+    functions := [LIRFunction]{}
+    cursor := 0
+    loop cursor < m.glue.len() {
+        glue :: m.glue[cursor].copy()
+        if {
+            glue.helper != "" -> &functions.push(lower_helper_function(p, &m, glue))
+            glue.clone -> &functions.push(lower_clone_glue_function(p, &m, glue))
+            else -> &functions.push(lower_glue_function(p, &m, glue))
+        }
+        cursor += 1
+    }
+    if m.issues.len() > 0 -> return false
+    lowered :: LIRModule{signatures: m.signatures.copy(), functions: functions, data: m.data.copy(), debug: LIRModuleDebug{directory: "", files: m.debug_files.copy(), types: m.debug_types.copy()}}
+    lir_lint_module(lowered).len() == 0
+}
+
+// The mode gate is explicit; ordinary callable lowering never requests native
+// export synthesis. Empty external consumers keep the native API selective.
+fn fx_native_mode_checks() -> Bool Never! {
+    program :: fx_hello()
+    roots :: [MIRFunctionID]{mir_function_id("run")}
+    seed :: lir_lower_callables(program, roots)
+    packed :: lir_lower_native_callables(program, roots)
+    explicit :: lir_lower_native_imports(program, roots, [String]{})
+    if seed.issues.len() != 0 || packed.issues.len() != 0 || explicit.issues.len() != 0 -> return false
+    if seed.callables.len() != 1 || packed.callables.len() != 1 || explicit.callables.len() != 1 -> return false
+    if seed.native_exports.len() != 0 || packed.native_exports.len() != 0 || explicit.native_exports.len() != 0 -> return false
+    seed.lir.functions.len() == packed.lir.functions.len() && packed.lir.functions.len() == explicit.lir.functions.len()
+}
+
+fn fx_native_err_borrow_checks() -> Bool Never! {
+    error_ty :: fx_named("Err")
+    definition :: fx_type_def("Err", MIRTypeDefKind.Struct{fields: [MIRField]{
+        fx_field("Err", "message", fx_string()),
+        fx_field("Err", "code", mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})),
+        fx_field("Err", "cause", mir_type_from_kind(MIRTypeKind.Option{inner: error_ty})),
+    }, methods: [MIRFunctionID]{}})
+    body := fx_builder()
+    error :: fx_param(&body, "error", error_ty, fx_borrow())
+    loop index in 0..<1000 {
+        fx_value(&body, fx_string(), fx_borrow(), MIROperation.Field{base: error, field: mir_field_id("Err.message")}).drop("borrowed field has no owner")
+    }
+    fx_block(&body, 0, MIRTerminator.Return{value: None})
+    function :: fx_function("fixture_native_err_borrows", body, fx_unit())
+    program :: fx_program([MIRFunction]{function}, [MIRTypeDef]{definition})
+    lowered :: lir_lower_native_callables(program, [MIRFunctionID]{function.id})
+    if lowered.issues.len() != 0 || lir_lint_module(lowered.lir).len() != 0 -> return false
+    // A borrowed projection has no getter/clone/allocation calls. The C Err88
+    // fixture checks LIVE BYTES across N owned getter+drop cycles separately.
+    loop lir_function in lowered.lir.functions {
+        loop block in lir_function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, _, _) -> return false
+            }
+        }
+    }
+    true
+}

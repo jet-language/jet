@@ -47,3 +47,18 @@ pub(crate) fn jet_std_io_stdin_read_line(
     jet_std_io_read_line(&mut lock)
 }
 
+
+// Source StdinHandle owns the checkpoint and trimming. std::Stdin's process
+// buffer remains shared with input/take/read-until; this never closes fd 0.
+// Replaced by RtL7 stdio layer; Rust seed/verification dies at cutover.
+pub(crate) fn jet_stdin_line_raw() -> Result<Option<String>, jet_std::IOError> {
+    use std::io::BufRead;
+    let stdin = std::io::stdin();
+    let mut lock = stdin.lock();
+    let mut line = String::new();
+    match lock.read_line(&mut line) {
+        Ok(0) => Ok(None),
+        Ok(_) => Ok(Some(line)),
+        Err(error) => Err(jet_std::io_error_at(jet_std::IOOperation::Read, "stdin", error)),
+    }
+}

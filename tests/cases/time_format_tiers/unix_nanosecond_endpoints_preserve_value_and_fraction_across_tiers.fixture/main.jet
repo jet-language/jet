@@ -1,0 +1,17 @@
+
+use core.time as time
+
+fn run() {
+    maximum :: time.from_unix_nanoseconds(9223372036854775807)
+    minimum :: time.from_unix_nanoseconds(-9223372036854775808)
+    print(maximum.format_rfc3339())
+    print(minimum.format_rfc3339())
+    if maximum.to_unix_ns() == {
+        .Ok(number) -> { print(number) }
+        .Err(error) -> { print("unexpected: {error:Debug}") }
+    }
+    if minimum.to_unix_ns() == {
+        .Ok(number) -> { print(number) }
+        .Err(error) -> { print("unexpected: {error:Debug}") }
+    }
+}

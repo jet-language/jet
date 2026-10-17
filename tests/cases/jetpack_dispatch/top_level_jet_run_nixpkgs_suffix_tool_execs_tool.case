@@ -1,0 +1,17 @@
+# Port of tests/jetpack_dispatch.rs:465-504; PENDING-SEAM(store-ingest).
+# Exact original setup: write_runnable_fixture(fixtures,root,staging_dir),
+# support/jetpack_fixtures.rs364-382. Write bin/greet bytes
+# "#!/bin/sh\necho hello from jetpack\n", chmod0755 on Unix, then seed_hangar_object
+# canonical Store ingestion; write nixpkgs-greet.json and jetpack-greet.json from
+# the true resulting out path with drvPath /nix/store/0fixture00000000000000000000-greet.drv.
+# The store-ingest provider must supply that original fixture; never fake envelope/hash/identity.
+refused: store-ingest
+mkdir: root
+mkdir: fx
+mkdir: out
+env: JETPACK_ROOT={work}/root
+step: jet run greet@nixpkgs --no-color --offline --fixtures {work}/fx
+env: PATH=
+exit: 0
+stdout.trim: = top_level_jet_run_nixpkgs_suffix_tool_execs_tool.out
+stderr: count "running greet@nixpkgs -> greet" = 1 # original matches count

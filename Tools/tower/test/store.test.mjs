@@ -118,7 +118,8 @@ test('ratified decisions cannot be mutated by agent attribution', () => {
   const st = fresh();
   st.mutate((s, cfg) => db.addCard(s, { title: 'Protected decision' }, cfg));
   st.mutate((s) => db.addDecision(s, { cardId: '#1', id: 'D-PROTECTED', title: 'keep', draft: true, ballotMode: 'full', reviewPasses: { beginner: 'Fresh agent: reader-1. Skill: rli5. The beginner pass tested the complete ballot.', adversarial: 'Author model family: family-a. Adversarial model family: family-b. Fresh agent: reader-2.' } }));
-  st.mutate((s) => db.ratify(s, 'D-PROTECTED', 'keep', null, 'owner'));
+  // Historical ratified fixture; live drafts can no longer be ratified.
+  st.mutate((s) => { s.decisions[0].draft = false; s.decisions[0].status = 'ratified'; });
 
   for (const action of [
     (s) => db.reopenDecision(s, 'D-PROTECTED', 'agent'),

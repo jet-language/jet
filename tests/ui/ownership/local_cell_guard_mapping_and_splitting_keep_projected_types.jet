@@ -1,0 +1,15 @@
+
+struct Pair { left: Int, right: Int }
+fn inspect(cell: Cell<Pair>) {
+    mapped :: cell.guard_read().map(pair -> pair.left)
+    print(mapped.get())
+}
+fn edit_pair(cell: Cell<Pair>) {
+    (left, right) :: cell.guard_edit().split(
+        pair -> pair.left,
+        pair -> pair.right
+    )
+    &left.set(7)
+    &right.set(8)
+}
+fn run() {}

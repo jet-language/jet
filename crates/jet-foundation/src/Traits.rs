@@ -2,7 +2,7 @@
 //!
 //! D-SERDE2/D-SERDE16: `Encode` and `Decode` are ordinary trait contracts.
 //! Built-in `#Codable` registration and hand-written impls both enter this
-//! registry and reach the same typed DataTree dispatch surface; neither path
+//! registry and reach the same typed Dyn dispatch surface; neither path
 //! owns a private wire engine.
 
 use crate::Diagnostics::{Diagnostic, Span};
@@ -20,6 +20,23 @@ use crate::AST::{
 };
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
+const OPERATOR_HOOKS: &[(&str, &str)] = &[
+    (Syntax::TRAIT_ADD, "add"),
+    (Syntax::TRAIT_SUB, "sub"),
+    (Syntax::TRAIT_MUL, "mul"),
+    (Syntax::TRAIT_DIV, "div"),
+    (Syntax::TRAIT_EQUATABLE, "equal"),
+    (Syntax::TRAIT_COMPARABLE, "compare"),
+];
+
+pub fn operator_hook_name(trait_name: &str) -> Option<&'static str> {
+    OPERATOR_HOOKS.iter().find_map(|&(name, hook)| (name == trait_name).then_some(hook))
+}
+
+pub fn operator_hook_trait(method: &str) -> Option<&'static str> {
+    OPERATOR_HOOKS.iter().find_map(|&(name, hook)| (hook == method).then_some(name))
+}
+
 /// D-OPMIX1 / D-FOUND-OPMIX1=A: one checked operator hook and its concrete
 /// right-hand type. `rhs` is always concrete in this table; a bare
 /// `impl Type.Op` is recorded with the owner's type as its right-hand operand.
@@ -50,7 +67,11 @@ pub fn operator_method_identity(
 #[derive(Debug, Clone, Default)]
 pub struct TraitRegistry {
     pub traits: HashMap<String, TraitInfo>,
+    /// Package-local declarations, frozen once and shared by sibling modules.
+    pub namespace_traits: Option<Arc<HashMap<String, TraitInfo>>>,
     pub trait_impls: HashSet<(String, String)>,
+    /// Ambient runtime nominals, not implementations of a same-named source type.
+    pub synthetic_close_types: HashSet<String>,
     /// D-OPMIX1: all validated operator hooks, including multiple RHS types
     /// for one owner/trait pair. Rows stay in registration order for inspect.
     pub operator_impls: Vec<OperatorImpl>,
@@ -106,6 +127,17 @@ pub struct TraitInfo {
     /// D-LIB2: associated type names declared in the trait body (`type Item`).
     pub assoc_types: Vec<String>,
     pub span: Span,
+}
+
+impl TraitInfo {
+    pub fn from_definition(trait_def: &TraitDef) -> Self {
+        Self {
+            methods: trait_def.methods.iter()
+                .map(|method| (method.name.clone(), method.clone())).collect(),
+            assoc_types: trait_def.assoc_types.iter().map(|(name, _)| name.clone()).collect(),
+            span: trait_def.name_span,
+        }
+    }
 }
 
 /// How a field type's nominal spelling resolves during the bundle
@@ -1430,7 +1462,7 @@ impl TraitRegistry {
         }
         let local_type = self.local_types.contains(type_name);
         let local_trait = !trait_name.contains('.')
-            && (self.local_traits.contains(trait_name) || Generics::is_builtin_trait(trait_name));
+            && (self.is_local_trait(trait_name) || Generics::is_builtin_trait(trait_name));
         let rhs_local = operator_rhs.is_some() && self.operator_rhs_is_local(&rhs_type);
         if operator_trait && !local_type && !(arithmetic_trait && rhs_local) {
             diags.push(e0902(span));
@@ -1458,14 +1490,7 @@ impl TraitRegistry {
             return;
         }
         if operator_trait {
-            let expected_method = match trait_name {
-                Syntax::TRAIT_ADD => "add",
-                Syntax::TRAIT_SUB => "sub",
-                Syntax::TRAIT_MUL => "mul",
-                Syntax::TRAIT_DIV => "div",
-                Syntax::TRAIT_EQUATABLE => "equal",
-                _ => "compare",
-            };
+            let expected_method = operator_hook_name(trait_name).unwrap();
             let owner_name = owner_type.name();
             let rhs_name = rhs_type.name();
             let expected_result = match trait_name {
@@ -1548,7 +1573,10 @@ impl TraitRegistry {
             }
             return;
         }
-        if let Some(trait_info) = self.traits.get(trait_name) {
+        // Borrow only the declaration maps: validation also writes index facts.
+        if let Some(trait_info) = self.traits.get(trait_name)
+            .or_else(|| self.namespace_traits.as_ref()?.get(trait_name))
+        {
             let provided: HashSet<String> = methods.iter().map(|m| m.name.clone()).collect();
             // D-LIB2: methods that have a default body in the trait don't need to be
             // provided by the implementor.
@@ -2005,14 +2033,29 @@ impl TraitRegistry {
                 }
             }
             // A const compute dimension carries no runtime value; it is
-            // compile-time-only and therefore has no DataTree codec.
+            // compile-time-only and therefore has no Dyn codec.
             Type::Measure(_) => !matches!(trait_name, ENCODE | DECODE),
             Type::Shared(_) | Type::TraitObject(_) | Type::Fn { .. } => false,
         }
     }
 
+    pub fn trait_info(&self, name: &str) -> Option<&TraitInfo> {
+        self.traits.get(name)
+            .or_else(|| self.namespace_traits.as_ref()?.get(name))
+    }
+
+    pub fn trait_infos(&self) -> impl Iterator<Item = (&String, &TraitInfo)> {
+        self.traits.iter().chain(self.namespace_traits.iter().flat_map(|traits| traits.iter())
+            .filter(|(name, _)| !self.traits.contains_key(*name)))
+    }
+
+    pub fn is_local_trait(&self, name: &str) -> bool {
+        self.local_traits.contains(name)
+            || self.namespace_traits.as_ref().is_some_and(|traits| traits.contains_key(name))
+    }
+
     pub fn is_trait_name(&self, name: &str) -> bool {
-        self.traits.contains_key(name)
+        self.trait_info(name).is_some()
             || Generics::is_builtin_trait(name)
             || Generics::is_literal_capability(name)
     }
@@ -2028,6 +2071,12 @@ impl TraitRegistry {
     }
 
     pub fn implements_trait(&self, type_name: &str, trait_name: &str) -> bool {
+        if trait_name == CLOSE
+            && !self.local_types.contains(type_name)
+            && self.synthetic_close_types.contains(type_name)
+        {
+            return true;
+        }
         // A primitive auto-satisfies the *built-in* trait family (Printable,
         // Comparable, Renderable, …) — that's always true for every scalar. It
         // must NOT auto-satisfy an arbitrary user-declared trait (D-ANY-JAI1
@@ -2064,6 +2113,11 @@ impl TraitRegistry {
             && (trait_name == Generics::NUMERIC
                 || Syntax::NUMERIC_SUPERTRAITS.contains(&trait_name))
         {
+            return true;
+        }
+        // The sealed dynamic tree's codec is the identity bridge, just as in
+        // Source sema's structural codec-bound authority.
+        if Syntax::is_data_type_name(type_name) && matches!(trait_name, ENCODE | DECODE) {
             return true;
         }
         if self
@@ -2477,6 +2531,7 @@ impl TraitRegistry {
                 variadic: false,
                 variadic_bound_list: None,
                 declared_view_from_names: None,
+                footprint: Default::default(),
                 public_label: None,
                 zone: crate::AST::ParamZone::Either,
             }],
@@ -2504,6 +2559,7 @@ impl TraitRegistry {
                     variadic: false,
                     variadic_bound_list: None,
                     declared_view_from_names: None,
+                    footprint: Default::default(),
                     public_label: None,
                     zone: crate::AST::ParamZone::Either,
                 },
@@ -2518,6 +2574,7 @@ impl TraitRegistry {
                     variadic: false,
                     variadic_bound_list: None,
                     declared_view_from_names: None,
+                    footprint: Default::default(),
                     public_label: None,
                     zone: crate::AST::ParamZone::Either,
                 },
@@ -2586,12 +2643,11 @@ impl TraitRegistry {
             "BrowserError",
             crate::Syntax::TYPE_BYTES,
             "Clock",
-            "CountMinSketch",
             "DataError",
             "DataTracked",
             "DataWatch",
             "DataWatchStatus",
-            "DataTree",
+            "Dyn",
             "DBValue",
             "DBLease",
             "DBPoolReceipt",
@@ -2628,7 +2684,6 @@ impl TraitRegistry {
             "HTTPRouter",
             "HTTPStatus",
             "HTTPVersion",
-            "HyperLogLog",
             "ID",
             "Instant",
             "IOError",
@@ -2661,9 +2716,7 @@ impl TraitRegistry {
             "Regex",
             "RegexFlags",
             "RegexMatch",
-            "ReservoirSampler",
             "RNG",
-            "Fake",
             "Size",
             "SocketAddr",
             "Solver",
@@ -2672,7 +2725,6 @@ impl TraitRegistry {
             "TestSuite",
             "TcpListener",
             "TcpStream",
-            "TDigest",
             "TempDir",
             "TempFile",
             "TextError",
@@ -2708,7 +2760,7 @@ impl TraitRegistry {
             "DataTracked",
             "DataWatch",
             "DataWatchStatus",
-            "DataTree",
+            "Dyn",
             // Core time carriers have real Prelude JetDebug impls. Keep them
             // in the registry so nested auto-derived Debug uses that hook too.
             "Date",
@@ -2760,16 +2812,9 @@ impl TraitRegistry {
         self.auto_equatable.insert("TLSVersion".to_string());
         self.trait_impls
             .insert((Syntax::TYPE_RANGE.to_string(), DISPLAY.to_string()));
-        // D-ENCSTREAM-SURFACE1=A: EncodingError Display is the exact stream error
-        // projection law; Format/Kind/Cause/Error compare by value.
-        self.trait_impls
-            .insert(("EncodingError".to_string(), DISPLAY.to_string()));
         self.trait_impls.insert(("PluginError".to_string(), DISPLAY.to_string()));
         self.auto_debug.insert("PluginError".to_string());
         self.auto_equatable.insert("PluginLimit".to_string());
-        // D-DATAFLOW1=A: DataError Display is the typed analytics/stream error law.
-        self.trait_impls
-            .insert(("DataError".to_string(), DISPLAY.to_string()));
         // D-VALIDATE-DECODE1=B: the one accumulated decode/validate failure is
         // `[FieldError]`, and a list is displayable exactly when its element is.
         // Without this row the contract was printable (`print(errs)` — FieldError
@@ -2777,7 +2822,7 @@ impl TraitRegistry {
         // was E0915), the exact predicate split `is_core_shown_type`
         // (jet-sema/src/Sema/Diagnostics.rs) warns about. The Prelude owns the
         // text: `impl JetShow`/`impl JetDisplay for FieldError` in
-        // Prelude/CoreLib/JetStd/DataTree.rs, one projection every tier calls.
+        // Prelude/CoreLib/JetStd/Dyn.rs, one projection every tier calls.
         self.trait_impls
             .insert(("FieldError".to_string(), DISPLAY.to_string()));
         for ty in [
@@ -2830,13 +2875,12 @@ impl TraitRegistry {
             "Pool",
             "Fixed",
         ] {
-            self.trait_impls
-                .insert((ty.to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
+            self.synthetic_close_types.insert(ty.to_string());
         }
     }
 
     /// D-OPDEF1=A: operator symbols are sugar over ordinary hook traits.
-    pub fn register_synthetic_operators(&mut self) {
+    pub fn register_synthetic_operators(&mut self, source_owns_type: impl Fn(&str) -> bool) {
         for (trait_name, method, ret) in [
             (Syntax::TRAIT_ADD, "add", Type::Named(String::new())),
             (Syntax::TRAIT_SUB, "sub", Type::Named(String::new())),
@@ -2875,6 +2919,13 @@ impl TraitRegistry {
                 Type::Named("Vec3".to_string()),
             ),
         ] {
+            // The source declaration owns the complete instantiated row.
+            // Never seed a second operator beside either source-owned operand.
+            if source_owns_type(left)
+                || matches!(&rhs, Type::Named(name) | Type::Apply { name, .. } if source_owns_type(name))
+            {
+                continue;
+            }
             if !self.operator_impls.iter().any(|implementation| {
                 implementation.left == left
                     && implementation.trait_name == trait_name
@@ -2925,6 +2976,7 @@ impl TraitRegistry {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
             public_label: None,
             zone: crate::AST::ParamZone::Either,
         };
@@ -2939,6 +2991,7 @@ impl TraitRegistry {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
             public_label: None,
             zone: crate::AST::ParamZone::Either,
         };
@@ -3036,6 +3089,7 @@ impl TraitRegistry {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
             public_label: None,
             zone: crate::AST::ParamZone::Either,
         };
@@ -3059,6 +3113,7 @@ impl TraitRegistry {
                             variadic: false,
                             variadic_bound_list: None,
                             declared_view_from_names: None,
+                            footprint: Default::default(),
                             public_label: None,
                             zone: crate::AST::ParamZone::Either,
                         },
@@ -3098,6 +3153,7 @@ impl TraitRegistry {
                 variadic: false,
                 variadic_bound_list: None,
                 declared_view_from_names: None,
+                footprint: Default::default(),
                 public_label: None,
                 zone: crate::AST::ParamZone::Either,
             };
@@ -3185,6 +3241,7 @@ impl TraitRegistry {
                     variadic: false,
                     variadic_bound_list: None,
                     declared_view_from_names: None,
+                    footprint: Default::default(),
                     public_label: None,
                     zone: crate::AST::ParamZone::Either,
                 }],
@@ -3224,6 +3281,7 @@ impl TraitRegistry {
                     variadic: false,
                     variadic_bound_list: None,
                     declared_view_from_names: None,
+                    footprint: Default::default(),
                     public_label: None,
                     zone: crate::AST::ParamZone::Either,
                 }],
@@ -3264,6 +3322,7 @@ impl TraitRegistry {
                         variadic: false,
                         variadic_bound_list: None,
                         declared_view_from_names: None,
+                        footprint: Default::default(),
                         public_label: None,
                         zone: crate::AST::ParamZone::Either,
                     },
@@ -3278,6 +3337,7 @@ impl TraitRegistry {
                         variadic: false,
                         variadic_bound_list: None,
                         declared_view_from_names: None,
+                        footprint: Default::default(),
                         public_label: None,
                         zone: crate::AST::ParamZone::Either,
                     },
@@ -3319,6 +3379,7 @@ impl TraitRegistry {
                         variadic: false,
                         variadic_bound_list: None,
                         declared_view_from_names: None,
+                        footprint: Default::default(),
                         public_label: None,
                         zone: crate::AST::ParamZone::Either,
                     },
@@ -3333,6 +3394,7 @@ impl TraitRegistry {
                         variadic: false,
                         variadic_bound_list: None,
                         declared_view_from_names: None,
+                        footprint: Default::default(),
                         public_label: None,
                         zone: crate::AST::ParamZone::Either,
                     },
@@ -3347,6 +3409,7 @@ impl TraitRegistry {
                         variadic: false,
                         variadic_bound_list: None,
                         declared_view_from_names: None,
+                        footprint: Default::default(),
                         public_label: None,
                         zone: crate::AST::ParamZone::Either,
                     },
@@ -3397,9 +3460,9 @@ impl TraitRegistry {
         };
         let is_data = |ty: &Type| matches!(ty, Type::Named(n) if Syntax::is_data_type_name(n));
         let expected = if trait_name == ENCODE {
-            "`fn encode(self) -> DataTree`".to_string()
+            "`fn encode(self) -> Dyn`".to_string()
         } else {
-            format!("`fn decode(tree: DataTree) -> {type_name} [FieldError]!`")
+            format!("`fn decode(tree: Dyn) -> {type_name} [FieldError]!`")
         };
         let mut saw_verb = false;
         for m in methods {
@@ -3470,6 +3533,7 @@ impl TraitRegistry {
                 variadic: false,
                 variadic_bound_list: None,
                 declared_view_from_names: None,
+                footprint: Default::default(),
                 public_label: None,
                 zone: crate::AST::ParamZone::Either,
             }],
@@ -3515,6 +3579,7 @@ impl TraitRegistry {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
             public_label: None,
             zone: crate::AST::ParamZone::Either,
         };
@@ -3574,6 +3639,7 @@ impl TraitRegistry {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
             public_label: None,
             zone: crate::AST::ParamZone::Either,
         };
@@ -3911,6 +3977,42 @@ fn trait_assoc(items: &[Item], type_name: &str, trait_name: &str, assoc: &str) -
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn namespace_trait_metadata_is_shared_and_local_bindings_shadow_it() {
+        let namespace = Arc::new(HashMap::from([("Named".to_owned(), TraitInfo {
+            methods: HashMap::new(),
+            assoc_types: vec!["Item".to_owned()],
+            span: Span::new(1, 2),
+        })]));
+        let mut registry = TraitRegistry {
+            namespace_traits: Some(Arc::clone(&namespace)),
+            ..TraitRegistry::default()
+        };
+        let snapshot = registry.clone();
+        assert!(registry.is_trait_name("Named"));
+        assert!(registry.is_local_trait("Named"));
+        assert_eq!(registry.trait_info("Named").unwrap().assoc_types, vec!["Item"]);
+        assert!(Arc::ptr_eq(snapshot.namespace_traits.as_ref().unwrap(), &namespace));
+        registry.traits.insert("Named".to_owned(), TraitInfo {
+            methods: HashMap::new(), assoc_types: Vec::new(), span: Span::new(3, 4),
+        });
+        assert_eq!(registry.trait_info("Named").unwrap().span, Span::new(3, 4));
+        assert_eq!(snapshot.trait_info("Named").unwrap().span, Span::new(1, 2));
+        assert_eq!(registry.trait_infos().filter(|(name, _)| *name == "Named").count(), 1);
+    }
+
+    #[test]
+    fn synthetic_close_does_not_make_a_source_pool_a_resource() {
+        let mut traits = TraitRegistry::default();
+        traits.register_synthetic_close();
+        assert!(traits.implements_trait("Pool", crate::Syntax::TRAIT_CLOSE));
+        traits.local_types.insert("Pool".to_string());
+        assert!(!traits.implements_trait("Pool", crate::Syntax::TRAIT_CLOSE));
+        // A source declaration may still opt into the resource contract.
+        traits.trait_impls.insert(("Pool".to_string(), crate::Syntax::TRAIT_CLOSE.to_string()));
+        assert!(traits.implements_trait("Pool", crate::Syntax::TRAIT_CLOSE));
+    }
 
     #[test]
     fn sized_scalars_only_satisfy_builtin_traits() {

@@ -1,0 +1,98 @@
+// Comptime's JSON projection uses the same Unsupported carrier as Core codecs.
+// This is not the lossless value transport used by child/parent evaluators.
+use core.encoding as comptime_encoding
+
+fn ast_comptime_json_unsupported(reason: String) -> comptime_encoding.EncodingError Never! {
+    comptime_encoding.EncodingError{
+        format: comptime_encoding.EncodingFormat.JSON,
+        kind: comptime_encoding.EncodingErrorKind.Unsupported,
+        byte_offset: 0,
+        line: None,
+        column: None,
+        path: "$",
+        reason: reason,
+        cause: None,
+    }
+}
+
+fn ast_comptime_float_json(number: CtFloat) -> String comptime_encoding.EncodingError! {
+    finite :: if number == {
+        .F32(value) -> value.is_finite()
+        .F64(value) -> value.is_finite()
+    }
+    if !finite -> return Err(ast_comptime_json_unsupported("JSON cannot encode a non-finite Float"))
+    rendered :: ast_comptime_float_text(number)
+    Ok(if rendered.contains(".") || rendered.contains("e") || rendered.contains("E") -> rendered else -> "{rendered}.0")
+}
+
+fn ast_comptime_value_json(value: CtValue) -> String comptime_encoding.EncodingError! {
+    rendered :: if value == {
+        .Int(number) -> "{number}"
+        .Float(number) -> ast_comptime_float_json(number) ?? return Err(err)
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Char(character) -> foundation_json_quote("{character}")
+        .Str(text) -> foundation_json_quote(text)
+        .BigInt(decimal) -> foundation_json_quote(decimal)
+        .Bytes(bytes) -> {
+            parts :: loop byte in bytes -> "{byte}"
+            "[{parts.join(",")}]"
+        }
+        .List(values) -> {
+            parts := [String]{}
+            loop item in values {
+                encoded :: ast_comptime_value_json(item) ?? return Err(err)
+                &parts.push(encoded)
+            }
+            "[{parts.join(",")}]"
+        }
+        .Map(entries) -> {
+            parts := [String]{}
+            loop entry in entries {
+                key :: if entry.key == .Str(text) -> text else -> {
+                    return Err(ast_comptime_json_unsupported("JSON cannot encode non-text map keys"))
+                }
+                encoded :: ast_comptime_value_json(entry.value) ?? return Err(err)
+                &parts.push("{foundation_json_quote(key)}:{encoded}")
+            }
+            "{{{parts.join(",")}}}"
+        }
+        .Struct(_, fields) -> {
+            parts := [String]{}
+            loop field in fields {
+                if ast_comptime_memo_storage_name(field.name) -> next
+                encoded :: ast_comptime_value_json(field.value) ?? return Err(err)
+                &parts.push("{foundation_json_quote(field.name)}:{encoded}")
+            }
+            "{{{parts.join(",")}}}"
+        }
+        .Enum(_, variant, args) -> {
+            if args.len() == 0 -> return Ok(foundation_json_quote(variant))
+            labeled := true
+            loop argument in args {
+                if argument.label == None -> labeled = false
+            }
+            parts := [String]{}
+            loop argument in args {
+                encoded :: ast_comptime_value_json(argument.value) ?? return Err(err)
+                if labeled {
+                    label :: argument.label ?? panic("checked enum label")
+                    &parts.push("{foundation_json_quote(label)}:{encoded}")
+                } else {
+                    &parts.push(encoded)
+                }
+            }
+            key :: foundation_json_quote(variant)
+            if labeled -> "{{{key}:{{{parts.join(",")}}}}}" else -> "{{{key}:[{parts.join(",")}]}}"
+        }
+        .Present(inner) -> ast_comptime_value_json(inner) ?? return Err(err)
+        .Failed(report) -> if report == {
+            .Clean(_) -> "null"
+            .Told(inner) -> {
+                encoded :: ast_comptime_value_json(inner) ?? return Err(err)
+                "{{\"err\":{encoded}}}"
+            }
+        }
+        .Unit | .Closure(_) -> "null"
+    }
+    Ok(rendered)
+}

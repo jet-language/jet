@@ -12,7 +12,7 @@ ENV_FILES_STATE_FILE :: prep { "state" }
 ENV_FILES_STATE_HEADER :: prep { "jet-env-files-v1" }
 ENV_FILES_READ_CHUNK :: prep { 65536 }
 
-pub enum FileActionKind {
+enum FileActionKind {
     Create
     ReplaceOwned
     Preserve
@@ -27,13 +27,13 @@ pub enum FileActionKind {
     }
 }
 
-pub struct FileAction {
-    pub destination: String
-    pub digest: String
-    pub mode: FileMode
-    pub permissions: Int?
-    pub sensitive: Bool
-    pub kind: FileActionKind
+struct FileAction {
+    destination: String
+    digest: String
+    mode: FileMode
+    permissions: Int?
+    sensitive: Bool
+    kind: FileActionKind
 }
 
 // One recorded owned destination. Contents never enter the state file.
@@ -70,19 +70,19 @@ impl PlannedFile.Debug {
     }
 }
 
-pub struct FileSyncReport {
-    pub applied: Int
-    pub preserved: Int
-    pub unchanged: Int
+struct FileSyncReport {
+    applied: Int
+    preserved: Int
+    unchanged: Int
 }
 
-pub struct FilePlan {
-    pub actions: [FileAction]
-    planned: [PlannedFile]
-    state_before: ManagedFileState
-    state_after: ManagedFileState
-    state_path: String
-    objects_dir: String
+struct FilePlan {
+    actions: [FileAction]
+    priv planned: [PlannedFile]
+    priv state_before: ManagedFileState
+    priv state_after: ManagedFileState
+    priv state_path: String
+    priv objects_dir: String
 
     fn has_changes(self) -> Bool Never! {
         loop action in self.actions {
@@ -116,7 +116,7 @@ fn env_files_error(text: String) -> EnvironmentError Never! {
 
 // Resolve every managed file, including source bytes and all destination
 // conflicts, without changing the project.
-pub fn env_files_plan(project_dir: String, declarations: [ManagedFile]) -[FS, Env]> FilePlan EnvironmentError! {
+fn env_files_plan(project_dir: String, declarations: [ManagedFile]) -[FS, Env]> FilePlan EnvironmentError! {
     project_root :: files.canonicalize(project_dir) ?? return Err(env_files_error("couldn't resolve project root `{project_dir}`: {err}"))
     if !sys.is_unix() {
         loop declaration in declarations {
@@ -231,7 +231,7 @@ fn env_files_object_path(objects_dir: String, declaration: ManagedFile, digest: 
 
 fn env_files_effective_permissions(declaration: ManagedFile, fallback: Int) -> Int Never! {
     permissions :: declaration.permissions ?? fallback
-    if declaration.sensitive -> return permissions & 0o700
+    if declaration.sensitive -> return (permissions).bit_and(0o700)
     permissions
 }
 
@@ -247,15 +247,15 @@ fn env_files_destination_permissions(declaration: ManagedFile) -> Int? Never! {
             0o600
         }
     }
-    if declaration.sensitive -> return Val(permissions & 0o700)
+    if declaration.sensitive -> return Val((permissions).bit_and(0o700))
     Val(permissions)
 }
 
 // Whether the file at `path` carries `expected` mode bits. Non-Unix hosts
 // compare the readonly mapping.
 fn env_files_mode_matches(info: Stat, expected: Int) -[Env]> Bool Never! {
-    if sys.is_unix() -> return info.mode & 0o7777 == expected
-    info.readonly == (expected & 0o222 == 0)
+    if sys.is_unix() -> return (info.mode).bit_and(0o7777) == expected
+    info.readonly == ((expected).bit_and(0o222) == 0)
 }
 
 fn env_files_destination_permissions_match(path: String, declaration: ManagedFile) -[FS, Env]> Bool EnvironmentError! {
@@ -275,7 +275,7 @@ fn env_files_object_permissions_match(path: String, declaration: ManagedFile) -[
 // its private mode applied before the first byte is written.
 fn env_files_create_new_file(path: String, permissions: Int?) -[FS]> FileWriter IOError! {
     mode :: if permissions == {
-        .Val(value) -> Val(value & 0o7777)
+        .Val(value) -> Val((value).bit_and(0o7777))
         .None -> None
     }
     files.create(path, if_exists: .Refuse, mode: mode, links: .Refuse)

@@ -1,0 +1,18 @@
+# HAND-PORT tests/fact_reads.rs:411-439 aot_default_and_interpreter_fold_the_same_build_facts
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# ORACLE-PORT fact_reads.rs434-437 host OSTarget::host().name() via public core.sys.name; original dev/interpreter exact equality and empty stderr preserved. Oracle independent of build/package facts.
+fixture: aot_default_and_interpreter_fold_the_same_build_facts.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step oracle: jet run oracle/oracle.jet
+exit: 0
+capture: expected = text stdout
+step default: jet run main.jet
+exit: 0
+stdout: = "{cap:expected}"
+stderr: empty
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = "{cap:expected}"
+stderr: empty

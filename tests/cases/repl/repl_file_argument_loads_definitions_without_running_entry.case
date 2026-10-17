@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:3541-3568; original predicate forms, literal inputs, no blessed snapshot.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# CLI banner: crates/jet-repl/src/Render.rs24-37; prompts: Render.rs67-74, lib.rs2528-2535.
+# No assertion needle appears in the fixed banner/prompt; no stripping/projection.
+# lib.rs2469-2470: cooked floor mirrors transcript; EOF does not append :quit.
+fixture: repl_file_argument_loads_definitions_without_running_entry.fixture
+step: jet repl defs.jet
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_file_argument_loads_definitions_without_running_entry.fixture/input.txt
+exit: any # original library predicate did not assert process status
+stdout|stderr: ~ "loaded 2 items" # original predicate
+stdout|stderr: ~ "12 : Int" # original predicate
+stdout: !~ "entry ran" # original predicate
+stderr: !~ "entry ran" # original predicate

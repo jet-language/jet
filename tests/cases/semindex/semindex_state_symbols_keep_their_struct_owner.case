@@ -1,0 +1,16 @@
+# Port of tests/semindex.rs:486-535; fixture source bytes unchanged.
+# Public inspect semindex uses the same open()/to_status_envelope() as the original index.to_json().
+# A source slice equals Closed iff its byte span is one of the exact Closed occurrences below.
+# These are source-derived spans, not compiler-output snapshots or blessed span positions.
+# PENDING-GRAMMAR(batch-four): JSON suffix/relative-path filters and JSON in.
+fixture: semindex_state_symbols_keep_their_struct_owner.fixture
+step: jet inspect semindex state_owner_symbols.jet --json
+json: stdout doc $.semindex.definitions[?name$="Door.State.Closed"][0].detail.kind = "enum_variant"
+json: stdout doc $.semindex.definitions[?name$="Door.State.Closed"][0].detail.parent = "Door.State"
+capture: defstart stdout doc $.semindex.definitions[?name$="Door.State.Closed"][0].span.start
+capture: defend stdout doc $.semindex.definitions[?name$="Door.State.Closed"][0].span.end
+capture: qualified stdout doc $.semindex.definitions[?name$="Door.State.Closed"][0].name
+json: stdout doc $.semindex.references[?name="Closed"][?target.span.start={cap:defstart}][?target.span.end={cap:defend}][0].target.span.start = {cap:defstart}
+json: stdout doc $.semindex.references[?name="Closed"][?target.span.start={cap:defstart}][?target.span.end={cap:defend}][0].target.span.end = {cap:defend}
+json: stdout doc $.semindex.references[?name="Closed"][?target.span.start={cap:defstart}][?target.span.end={cap:defend}][0].span in [{"start":27,"end":33},{"start":86,"end":92},{"start":158,"end":164}]
+stdout: ~ "\"name\":\"{cap:qualified}\"" # original predicate

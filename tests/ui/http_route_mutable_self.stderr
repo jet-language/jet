@@ -1,0 +1,8 @@
+Error [E2805]: HTTP route method `joke` needs read-only self and a concrete signature
+  --> tests/ui/http_route_mutable_self.jet:5:5
+    |
+  5 |     #server.Get("/jokes")
+    |     ^^^^^^^^^^^^^^^^^^^^^
+ Why: Mounted handlers retain shared state and are called on request workers
+ Fix: Write `fn joke(self, ...)` without method type parameters; use Shared<T> for mutable shared state
+More: jet-lang.dev/e/E2805

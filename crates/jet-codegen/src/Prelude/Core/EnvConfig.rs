@@ -1,7 +1,7 @@
 // D-CONFIG-ENV1 / I9: the source-order, prefix, allowlist, dotenv, and error
 // framing rules are shared by every execution tier. Each engine supplies its
 // logical environment snapshot and marshals these entries into its existing
-// DataTree carrier.
+// Dyn carrier.
 
 #[derive(Clone, Debug)]
 pub(crate) struct JetEnvConfigEntry {

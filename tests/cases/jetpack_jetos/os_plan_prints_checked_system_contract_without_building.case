@@ -1,0 +1,14 @@
+# Port of tests/jetpack_jetos.rs:2347-2374; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+mkdir: package-root
+copy: {root}/tests/fixtures/jetpack-config project
+step: jet os plan halcyon --json --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout: ~ "\"host\":\"halcyon\"" # original plan host substring
+stdout: ~ "\"loader\":\"Limine\"" # original plan loader substring
+stdout: ~ "\"kernel\":\"CachyOS\"" # original plan kernel substring
+stdout: ~ "\"key\": \"users.nate.normal\"" # original plan user option substring
+file: package-root/systems/generations absent

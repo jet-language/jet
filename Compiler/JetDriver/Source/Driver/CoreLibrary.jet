@@ -1,0 +1,123 @@
+// Canonical all-Core producer input. The outer static host retains this recipe;
+// every factory checks it through this same Source pipeline and layout walker.
+use jet_backend.[CoreSharedCanonicalProducer, CoreSharedManifest, CoreSharedSource, CoreSharedParent, CoreSharedParentAdmission, CoreSharedParentAttachment, CoreSharedParentGetterResult, CoreSharedParentCallableResult, CoreSharedParentRuntime, core_shared_expected_manifest, core_shared_parent_new, core_shared_parent_admit, core_shared_parent_getter, core_shared_parent_payload_manifest, core_shared_parent_payload_callable]
+use jet_eval.jet_eval_runtime_config
+
+enum JetDriverCoreLibraryPreparation {
+    Prepared(producer: CoreSharedCanonicalProducer, expected: CoreSharedManifest)
+    CompileRefused(compilation: JetDriverCompileResult)
+    SchemaRefused(errors: [String])
+}
+
+fn jet_driver_core_library_sources(rows: [JetDriverCoreSource]) -> [CoreSharedSource] Never! {
+    sources := [CoreSharedSource]{}
+    loop row in rows {
+        members := row.owned_members
+        &members.sort()
+        &sources.push(CoreSharedSource{
+            module_owner_key: jet_driver_core_source_owner_key(row.path),
+            path: row.path, source: row.source, owned_members: members,
+        })
+    }
+    &sources.sort_by((a: CoreSharedSource, b: CoreSharedSource) -> (a.module_owner_key <=> b.module_owner_key).then(a.path <=> b.path))
+    sources
+}
+
+// A library request carries compiler/host execution facts, never the importing
+// user's source authority, gates or evaluation entry. This empty authority table
+// is not passed to the program snapshot validator: CoreLibrary owns its graph.
+fn jet_driver_core_library_request(template: ^JetDriverCompileRequest, rows: [JetDriverCoreSource]) -> JetDriverCompileRequest Never! {
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "", entry_path: ""},
+        canonical_effect_source: template.canonical_effect_source,
+        core_sources: rows,
+        host_facts: template.host_facts,
+        eval_config: jet_eval_runtime_config(template.eval_config),
+        target: JetDriverCompileTarget.Native,
+        record_store: ^template.record_store,
+        trace_sink: ^template.trace_sink,
+        mir_lint_every_pass: template.mir_lint_every_pass,
+        compiler_threads: template.compiler_threads,
+    }
+}
+
+fn jet_driver_prepare_core_library(request: ^JetDriverCompileRequest) -> JetDriverCoreLibraryPreparation {
+    sources :: jet_driver_core_library_sources(request.core_sources)
+    producer_identity :: request.host_facts.compiler_identity ?? ""
+    compilation := jet_driver_compile_core_library_mir(^request)
+    if !compilation.complete || compilation.internal_problem != None || compilation.mir == None {
+        return JetDriverCoreLibraryPreparation.CompileRefused{compilation: ^compilation}
+    }
+    program :: compilation.mir ?? return JetDriverCoreLibraryPreparation.CompileRefused{compilation: ^compilation}
+    expected :: core_shared_expected_manifest(program, sources)
+    if expected.errors.len() != 0 -> return JetDriverCoreLibraryPreparation.SchemaRefused{errors: expected.errors}
+    JetDriverCoreLibraryPreparation.Prepared{
+        producer: CoreSharedCanonicalProducer{program: ^program, sources: sources, producer_identity: producer_identity},
+        expected: expected,
+    }
+}
+
+// Only the outer host constructs this value. It retains source bytes and native
+// provenance, but no factory evaluator, projector, callback or type identity.
+struct JetDriverCoreSourceParentHost {
+    parent: CoreSharedParent
+    original_rows: [JetDriverCoreSource]
+    runtime: CoreSharedParentRuntime
+    attachment: Shared<CoreSharedParentAttachment?>
+}
+
+fn jet_driver_core_source_parent_new(rows: ^[JetDriverCoreSource], runtime: ^CoreSharedParentRuntime) -> JetDriverCoreSourceParentHost Never! {
+    original := ^rows
+    keys := [String:String]{}
+    loop row in original -> keys[row.path] = jet_driver_core_source_owner_key(row.path)
+    &original.sort_by((a: JetDriverCoreSource, b: JetDriverCoreSource) -> ((keys.get(a.path) ?? "") <=> (keys.get(b.path) ?? "")).then(a.path <=> b.path))
+    JetDriverCoreSourceParentHost{
+        parent: core_shared_parent_new(), original_rows: ^original, runtime: ^runtime,
+        attachment: shared CoreSharedParentAttachment?{None},
+    }
+}
+
+fn jet_driver_core_preparation_refusal(preparation: JetDriverCoreLibraryPreparation) -> String Never! {
+    if preparation == {
+        .Prepared(_, _) -> ""
+        .CompileRefused(compilation) -> {
+            reports :: loop diagnostic in compilation.diagnostics -> "{diagnostic.code}: {diagnostic.what}"
+            "CoreSharedCompileFailed: {compilation.internal_problem ?? reports.join("; ")}"
+        }
+        .SchemaRefused(errors) -> "CoreSharedManifestInvalid: {errors.join("; ")}"
+    }
+}
+
+// `prepared` is computed by the fresh factory from original_rows, through its
+// checked canonical Source helper. Admission compares before producing/getting.
+fn jet_driver_core_source_parent_attach(host: &JetDriverCoreSourceParentHost, prepared: JetDriverCoreLibraryPreparation) -> String Never! {
+    if prepared == .Prepared(producer, expected) {
+        admission :: core_shared_parent_admit(&host.parent, expected, host.runtime, producer)
+        if admission == {
+            .Attached(attachment) -> {
+                guard := host.attachment.guard_edit()
+                guard.value = Val(attachment)
+                return ""
+            }
+            .Refused(code, key) -> return "{code}: {key}"
+        }
+    }
+    "E0956: {jet_driver_core_preparation_refusal(prepared)}"
+}
+
+fn jet_driver_core_source_parent_getter(host: &JetDriverCoreSourceParentHost, site_key: String) -> CoreSharedParentGetterResult Never! {
+    guard :: host.attachment.guard_read()
+    attachment :: guard.value ?? return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedNotAdmitted"}
+    core_shared_parent_getter(&host.parent, attachment, site_key)
+}
+
+fn jet_driver_core_source_payload_manifest(host: JetDriverCoreSourceParentHost) -> CoreSharedManifest? Never! {
+    guard :: host.attachment.guard_read()
+    attachment :: guard.value ?? return None
+    core_shared_parent_payload_manifest(host.parent, attachment)
+}
+fn jet_driver_core_source_payload_callable(host: JetDriverCoreSourceParentHost, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
+    guard :: host.attachment.guard_read()
+    attachment :: guard.value ?? return CoreSharedParentCallableResult{address: 0, refusal_key: "CoreSharedNotAdmitted"}
+    core_shared_parent_payload_callable(host.parent, attachment, type_key, clone)
+}

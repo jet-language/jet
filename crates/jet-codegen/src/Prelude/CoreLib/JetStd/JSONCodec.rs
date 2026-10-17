@@ -1,9 +1,9 @@
     // Canonical std-only JSON codec shared by AOT, JIT encoding, and tier 0.
-    pub fn parse_json(text: &str) -> Result<DataTree, EncodingError> {
+    pub fn parse_json(text: &str) -> Result<Dyn, EncodingError> {
         crate::jet_encoding_json::parse_json(text, true).map_err(json_error_from_shared)
     }
 
-    pub fn parse_json_strict(text: &str) -> Result<DataTree, EncodingError> {
+    pub fn parse_json_strict(text: &str) -> Result<Dyn, EncodingError> {
         crate::jet_encoding_json::parse_json(text, true).map_err(json_error_from_shared)
     }
 

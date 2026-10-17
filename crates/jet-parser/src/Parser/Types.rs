@@ -131,8 +131,7 @@ impl<'a> Parser<'a> {
         // declaration). Retired `fn(…) --[]->` remains recognized here so the
         // callback-bound parser can teach E0062. `fn(…) --[E]->` — the retired general
         // effect-bound list — stays on `#`.
-        || (matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE)
-            && matches!(self.peek().kind, TokKind::Hash))
+        || self.unqualified_marker_name_at(self.pos) == Some(Syntax::KW_PURE)
         || (matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(n) if !n.is_empty() && n.chars().next().map_or(false, |c| c.is_uppercase())))
         || (matches!(self.peek().kind, TokKind::Hash) && matches!(self.peek2().kind, TokKind::LParen))
@@ -690,6 +689,11 @@ impl<'a> Parser<'a> {
     /// arguments `<T, …>(`. Both angle-bracket edges must be adjacent to the call
     /// name, so spaced comparisons such as `f < T > (x)` keep their meaning.
     pub(super) fn at_turbofish(&self) -> bool {
+        self.at_type_args_before(TokKind::LParen)
+    }
+
+    /// The same adjacent generic head may precede a qualified literal's brace.
+    pub(super) fn at_type_args_before(&self, following: TokKind) -> bool {
         if !matches!(self.peek().kind, TokKind::Lt) {
             return false;
         }
@@ -705,7 +709,7 @@ impl<'a> Parser<'a> {
                     depth -= 1;
                     if depth == 0 {
                         return self.toks.get(i + 1).is_some_and(|next| {
-                            matches!(next.kind, TokKind::LParen)
+                            next.kind == following
                                 && self.toks[i].span.end == next.span.start
                         });
                     }
@@ -714,7 +718,7 @@ impl<'a> Parser<'a> {
                     depth -= 2;
                     if depth <= 0 {
                         return self.toks.get(i + 1).is_some_and(|next| {
-                            matches!(next.kind, TokKind::LParen)
+                            next.kind == following
                                 && self.toks[i].span.end == next.span.start
                         });
                     }
@@ -894,7 +898,7 @@ impl<'a> Parser<'a> {
                 self.diags.push(Self::retired_effect_syntax(start));
                 self.fn_type(Some(bound))?
             }
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_PURE) =>
+            TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::KW_PURE) =>
             {
                 let bound = self.parse_fn_type_effect_bound()?;
                 self.diags.push(Self::retired_effect_syntax(start));
@@ -1494,6 +1498,7 @@ impl<'a> Parser<'a> {
                 variadic: false,
                 variadic_bound_list: None,
                 declared_view_from_names: None,
+                footprint: Default::default(),
                 public_label: None,
                 zone: crate::AST::ParamZone::Either,
             })

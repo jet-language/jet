@@ -1,0 +1,15 @@
+# Original tests/semindex.rs:983-1038; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: aggregate_view_provenance_preserves_slots_and_changes_signature_id.fixture
+copy: distinct.source aggregate_view_provenance.jet
+step before: jet inspect semindex aggregate_view_provenance.jet --json
+json: stdout doc $.semindex.definitions[?leaf_name="pair"][0].view_provenance #= 2
+json: stdout doc $.semindex.definitions[?leaf_name="pair"][0].view_provenance[0].output_path = ["left"]
+json: stdout doc $.semindex.definitions[?leaf_name="pair"][0].view_provenance[0].sources[0].source = {"kind":"parameter","index":0}
+json: stdout doc $.semindex.definitions[?leaf_name="pair"][0].view_provenance[1].output_path = ["right"]
+json: stdout doc $.semindex.definitions[?leaf_name="pair"][0].view_provenance[1].sources[0].source = {"kind":"parameter","index":1}
+stdout: ~ "\"output_path\":[\"left\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":0}" # original predicate
+stdout: ~ "\"output_path\":[\"right\"],\"sources\":[{\"source\":{\"kind\":\"parameter\",\"index\":1}" # original predicate
+copy: changed.source aggregate_view_provenance.jet
+step: jet inspect semindex aggregate_view_provenance.jet --json
+json: stdout doc $.semindex.definition_facts[?name="pair"][0].signature_id != before

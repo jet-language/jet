@@ -1,0 +1,15 @@
+// Planted retention case: multiply needs __fraction_mul and its transitive
+// constructor/gcd calls. Rust and Jet both root the closed precise-operation
+// source registry, since registered constructors (`math.fraction`) lower to
+// `__fraction_new` with no keyed call.
+// Runtime expectations are UNOBSERVED until the composed integration cycle.
+use core.math as math
+
+fn multiply(left: Fraction, right: Fraction) -> Fraction Never! { left * right }
+fn run() {
+    left :: math.fraction(1, 3) ?? panic("fraction")
+    right :: math.fraction(3, 2) ?? panic("fraction")
+    product :: multiply(left, right)
+    assert_eq(product.numerator(), 1)
+    assert_eq(product.denominator(), 2)
+}

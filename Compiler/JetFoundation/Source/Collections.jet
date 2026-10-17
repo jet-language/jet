@@ -7,10 +7,74 @@
 // law are all read from that row; no other table repeats them. Each row names
 // one COLLECTION_LAWS entry that states its timing, result ownership, callback
 // count and order, stop-item consumption, failure channel and buffering.
+// Rows are literal struct data, so both tables land without a compile-time
+// execution host.
 // `node Tools/agent/gen-core-tables.mjs --write` projects both tables into
 // Docs/spec/reference/core-library.md; `--check` rejects a stale projection.
 
-pub enum SemaCollectionKind {
+// Append owning compiler rows in input order, leaving the source empty.
+// Use pops instead of moving an indexed field/list payload out of a borrowed
+// aggregate; both passes transfer whole locals and never clone a row.
+fn compiler_transfer_rows<T>(to: &[T], from: &[T]) Never! {
+    reversed := [T]{}
+    loop from.len() > 0 {
+        row := &from.pop() ?? panic("a nonempty compiler row source failed to pop")
+        &reversed.push(^row)
+    }
+    loop reversed.len() > 0 {
+        row := &reversed.pop() ?? panic("a nonempty compiler row buffer failed to pop")
+        &to.push(^row)
+    }
+}
+
+// Compiler-internal permutation: order[new index] is the original row index.
+// The caller supplies the complete permutation produced by its stable index
+// merge. Drain owning rows into unique empty slots in reverse destination
+// order, then pop them back in canonical order into the original receiver
+// (whose allocation and capacity pop retains). No row is read out of
+// a borrowed indexed place and no owning payload is copied.
+fn compiler_apply_order<T>(rows: &[T], order: [Int]) Never! {
+    count :: rows.len()
+    if count < 2 -> return
+    changed := false
+    loop index in 0..<count {
+        if order[index] != index -> changed = true
+    }
+    if !changed -> return
+    destinations := [Int]{}
+    slots := [T?]{}
+    loop index in 0..<count {
+        &destinations.push(0)
+        &slots.push(None)
+    }
+    loop index in 0..<count -> destinations[order[index]] = index
+    loop rows.len() > 0 {
+        original :: rows.len() - 1
+        row := &rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+        slots[count - 1 - destinations[original]] = Val(^row)
+    }
+    loop slots.len() > 0 {
+        slot := &slots.pop() ?? panic("a nonempty compiler slot list failed to pop")
+        row := ^slot ?? panic("a compiler row permutation left an empty slot")
+        &rows.push(^row)
+    }
+}
+
+// Compiler-internal transfer: moves every row out of `rows` into the returned
+// list, in order, leaving `rows` empty. Each row is popped (an owned move) and
+// the result is reversed in place, so no owning payload is copied; reading a
+// list field of a borrowed owner into a binding would copy every row.
+fn compiler_take_rows<T>(rows: &[T]) -> [T] Never! {
+    taken := [T]{}
+    loop rows.len() > 0 {
+        row := &rows.pop() ?? panic("a nonempty compiler row list failed to pop")
+        &taken.push(^row)
+    }
+    &taken.reverse()
+    taken
+}
+
+enum SemaCollectionKind {
     List(element: Type)
     FixedList(element: Type)
     Iter(element: Type)
@@ -26,7 +90,7 @@ pub enum SemaCollectionKind {
     PriorityQueue(element: Type)
 }
 
-pub enum SemaCollectionOperation {
+enum SemaCollectionOperation {
     Builtin(operation: TBuiltinOp)
     Closure(operation: TClosureOp)
     ListShuffle
@@ -37,19 +101,20 @@ pub enum SemaCollectionOperation {
 
 // Receiver families a row applies to. `List` covers fixed lists and `Iter`
 // covers view iterators; `Sequence` is the shared list-and-iterator surface.
-pub enum CollectionReceivers { List Iter View Sequence Map Set Rank Bits Tally Cache Queue PriorityQueue }
+enum CollectionReceivers { List Iter View Sequence Map Set Rank Bits Tally Cache Queue PriorityQueue }
 
 // Receiver ownership. `Sequence` borrows a list or view and consumes an iterator.
-pub enum CollectionAccess { Read Write Move Sequence }
+enum CollectionAccess { Read Write Move Sequence }
 
 // Positional argument shapes. The callback shapes name their parameter and
 // return types; `Seed` is checked from the written expression.
-pub enum CollectionArg {
+enum CollectionArg {
     Element
     Key
     Value
     Integer
     Text
+    IntegerList
     RemoveBy
     ElementList
     KeyList
@@ -59,6 +124,7 @@ pub enum CollectionArg {
     ItemFn
     ItemPredicate
     PairPredicate
+    DisjointFn
     Accumulator
     Comparator
     SortKey
@@ -70,7 +136,7 @@ pub enum CollectionArg {
 }
 
 // Result projections over the receiver element, key, callback result and seed.
-pub enum CollectionResult {
+enum CollectionResult {
     Unit
     Bool
     Int
@@ -115,11 +181,14 @@ pub enum CollectionResult {
     SplitPair
     MinMax
     TryCollected
+    WriteViewPair
+    WriteViewList
+    DisjointUnit
 }
 
 // TIR producer. Fixed operations carry their TIR op; the others select one from
 // the checked callback and element facts at the call site.
-pub enum CollectionOp {
+enum CollectionOp {
     Builtin(op: TBuiltinOp)
     Closure(op: TClosureOp)
     SetClosure(op: TClosureOp)
@@ -144,6 +213,7 @@ pub enum CollectionOp {
     Indexed
     Unzip
     Split
+    SplitWrite
     Partition
     ListRemove
     PriorityQueueRemove
@@ -154,7 +224,7 @@ pub enum CollectionOp {
     ListMinMaxBy
 }
 
-pub enum CollectionLaw {
+enum CollectionLaw {
     Measure
     Lookup
     Mutate
@@ -163,6 +233,7 @@ pub enum CollectionLaw {
     Copy
     Adapt
     Window
+    Disjoint
     Visit
     Each
     Decide
@@ -180,329 +251,322 @@ pub enum CollectionLaw {
 // Current: checked and lowered on every engine. SourceOnly: checked by the
 // self-hosted compiler before every engine carries it. Proposed: ratified but
 // not accepted by the checker yet.
-pub enum CollectionStatus { Current SourceOnly Proposed }
+enum CollectionStatus { Current SourceOnly Proposed }
 
-pub struct CollectionLawFacts {
-    pub law: CollectionLaw
-    pub timing: String
-    pub result: String
-    pub callbacks: String
-    pub stop: String
-    pub failure: String
-    pub buffering: String
+struct CollectionLawFacts {
+    law: CollectionLaw
+    timing: String
+    result: String
+    callbacks: String
+    stop: String
+    failure: String
+    buffering: String
 }
 
-pub struct CollectionOperationRow {
-    pub receivers: CollectionReceivers
-    pub name: String
-    pub minimum_arity: Int
-    pub maximum_arity: Int
-    pub access: CollectionAccess
-    pub args: [CollectionArg]
-    pub result: CollectionResult
-    pub op: CollectionOp
-    pub law: CollectionLaw
-    pub empty: String
-    pub status: CollectionStatus
+struct CollectionOperationRow {
+    receivers: CollectionReceivers
+    name: String
+    minimum_arity: Int
+    maximum_arity: Int
+    access: CollectionAccess
+    args: [CollectionArg]
+    result: CollectionResult
+    op: CollectionOp
+    law: CollectionLaw
+    empty: String
+    status: CollectionStatus
 }
 
-pub struct SemaCollectionMethodContract {
-    pub receiver: Type
-    pub kind: SemaCollectionKind
-    pub row: CollectionOperationRow
-    pub minimum_arity: Int
-    pub maximum_arity: Int
-    pub receiver_access: AccessConvention
-    pub callback_indices: [Int]
-    pub seed_indices: [Int]
-    pub accepts_comparator: Bool
-}
-
-fn collection_law(law: CollectionLaw, timing: String, result: String, callbacks: String, stop: String, failure: String, buffering: String) -> CollectionLawFacts Never! {
-    CollectionLawFacts{law: law, timing: timing, result: result, callbacks: callbacks, stop: stop, failure: failure, buffering: buffering}
-}
-
-fn collection_op(receivers: CollectionReceivers, name: String, minimum: Int, maximum: Int, access: CollectionAccess, args: [CollectionArg], result: CollectionResult, op: CollectionOp, law: CollectionLaw, empty: String) -> CollectionOperationRow Never! {
-    CollectionOperationRow{receivers: receivers, name: name, minimum_arity: minimum, maximum_arity: maximum, access: access, args: args, result: result, op: op, law: law, empty: empty, status: CollectionStatus.Current}
+struct SemaCollectionMethodContract {
+    receiver: Type
+    kind: SemaCollectionKind
+    row: CollectionOperationRow
+    minimum_arity: Int
+    maximum_arity: Int
+    receiver_access: AccessConvention
+    callback_indices: [Int]
+    seed_indices: [Int]
+    accepts_comparator: Bool
 }
 
 // BEGIN COLLECTION LAWS
 COLLECTION_LAWS :: prep { [CollectionLawFacts]{
-    collection_law(CollectionLaw.Measure, "eager", "a fresh scalar", "none", "an iterator receiver is consumed whole", "none", "none"),
-    collection_law(CollectionLaw.Lookup, "eager", "an optional copy of the found item or index", "none", "an iterator receiver is consumed and cannot be resumed", "absence is None", "none"),
-    collection_law(CollectionLaw.Mutate, "eager, in place", "Unit, a Bool, or the displaced item", "none", "not applicable", "absence is None; no error channel", "the receiver's own storage"),
-    collection_law(CollectionLaw.TryMutate, "eager, in place", "a Result", "none", "not applicable", "AllocError when storage cannot grow", "the receiver's own storage"),
-    collection_law(CollectionLaw.Build, "eager", "a fresh owned collection", "none", "the whole receiver is read", "none", "the whole output"),
-    collection_law(CollectionLaw.Copy, "eager", "an independent value; storage is shared until the first write", "none", "not applicable", "none", "none until the first write"),
-    collection_law(CollectionLaw.Adapt, "lazy", "an iterator that owns the adapted source", "none", "pulls only the items it yields or skips", "none", "none"),
-    collection_law(CollectionLaw.Window, "lazy", "an iterator of lists", "none", "pulls one window or chunk at a time", "none", "one window or chunk"),
-    collection_law(CollectionLaw.Visit, "eager on lists and maps, lazy on iterators", "a List or Map on eager receivers, an iterator on iterator receivers", "once per item, in source order", "every item is visited", "a callback Err is the whole result; no partial output", "eager receivers buffer the output; iterators buffer nothing"),
-    collection_law(CollectionLaw.Each, "eager", "Unit", "once per item, in source order", "every item is visited", "none", "none"),
-    collection_law(CollectionLaw.Decide, "eager", "a Bool, Option or position", "once per item, in source order, until the answer is known", "the deciding item is consumed; later items are never read and an iterator receiver is dropped", "none", "none"),
-    collection_law(CollectionLaw.Stream, "lazy", "an iterator", "once per pulled item, in source order", "the item that ends take_while is consumed and not yielded", "none", "the current item or group"),
-    collection_law(CollectionLaw.Fold, "eager", "the accumulator or chosen item; the seed or None when empty", "once per item, in source order", "every item is read; equal keys keep the last item", "none", "none"),
-    collection_law(CollectionLaw.Group, "eager", "a fresh map, tuple or lists", "once per item, in source order, when a key callback is given", "every item is read", "none", "every item is buffered into the output"),
-    collection_law(CollectionLaw.Drain, "eager", "a fresh value", "none", "the whole source is consumed", "none", "the output"),
-    collection_law(CollectionLaw.Reorder, "eager: the whole source is read before the first result", "the reordered or trimmed items", "none", "the whole source is consumed", "none", "the whole source"),
-    collection_law(CollectionLaw.SortBy, "eager, in place", "Unit, or a Result when the key callback can fail", "key or comparator calls in the sort's order; count and order are unspecified", "not applicable", "the first callback Err is the result", "the list and its keys"),
-    collection_law(CollectionLaw.Search, "eager", "an optional index", "once per probed item, in binary-search order", "stops at the match", "absence is None", "none"),
-    collection_law(CollectionLaw.MergeEntries, "eager", "a fresh map", "once per key present in both maps", "every entry is read", "none", "the output map"),
-    collection_law(CollectionLaw.Pull, "one item per call", "an Option of the next item", "none", "exactly the returned item is consumed; the remainder stays in the source", "end is None", "none")
+    CollectionLawFacts{law: CollectionLaw.Measure, timing: "eager", result: "a fresh scalar", callbacks: "none", stop: "an iterator receiver is consumed whole", failure: "none", buffering: "none"},
+    CollectionLawFacts{law: CollectionLaw.Lookup, timing: "eager", result: "an optional copy of the found item or index", callbacks: "none", stop: "an iterator receiver is consumed and cannot be resumed", failure: "absence is None", buffering: "none"},
+    CollectionLawFacts{law: CollectionLaw.Mutate, timing: "eager, in place", result: "Unit, a Bool, or the displaced item", callbacks: "none", stop: "not applicable", failure: "absence is None; no error channel", buffering: "the receiver's own storage"},
+    CollectionLawFacts{law: CollectionLaw.TryMutate, timing: "eager, in place", result: "a Result", callbacks: "none", stop: "not applicable", failure: "AllocError when storage cannot grow", buffering: "the receiver's own storage"},
+    CollectionLawFacts{law: CollectionLaw.Build, timing: "eager", result: "a fresh owned collection", callbacks: "none", stop: "the whole receiver is read", failure: "none", buffering: "the whole output"},
+    CollectionLawFacts{law: CollectionLaw.Copy, timing: "eager", result: "an independent value; storage is shared until the first write", callbacks: "none", stop: "not applicable", failure: "none", buffering: "none until the first write"},
+    CollectionLawFacts{law: CollectionLaw.Adapt, timing: "lazy", result: "an iterator that owns the adapted source", callbacks: "none", stop: "pulls only the items it yields or skips", failure: "none", buffering: "none"},
+    CollectionLawFacts{law: CollectionLaw.Window, timing: "lazy", result: "an iterator of lists", callbacks: "none", stop: "pulls one window or chunk at a time", failure: "none", buffering: "one window or chunk"},
+    CollectionLawFacts{law: CollectionLaw.Disjoint, timing: "eager proof, borrowed windows", result: "tracked exclusive ViewMut slots; edit_disjoint returns Unit", callbacks: "edit_disjoint invokes a callback with two lent views; the other methods have none", stop: "no callback runs for an invalid selection", failure: "String error for invalid bounds or overlapping selections", buffering: "view descriptors only; the owner's elements are never copied"},
+    CollectionLawFacts{law: CollectionLaw.Visit, timing: "eager on lists and maps, lazy on iterators", result: "a List or Map on eager receivers, an iterator on iterator receivers", callbacks: "once per item, in source order", stop: "every item is visited", failure: "a callback Err is the whole result; no partial output", buffering: "eager receivers buffer the output; iterators buffer nothing"},
+    CollectionLawFacts{law: CollectionLaw.Each, timing: "eager", result: "Unit", callbacks: "once per item, in source order", stop: "every item is visited", failure: "none", buffering: "none"},
+    CollectionLawFacts{law: CollectionLaw.Decide, timing: "eager", result: "a Bool, Option or position", callbacks: "once per item, in source order, until the answer is known", stop: "the deciding item is consumed; later items are never read and an iterator receiver is dropped", failure: "none", buffering: "none"},
+    CollectionLawFacts{law: CollectionLaw.Stream, timing: "lazy", result: "an iterator", callbacks: "once per pulled item, in source order", stop: "the item that ends take_while is consumed and not yielded", failure: "none", buffering: "the current item or group"},
+    CollectionLawFacts{law: CollectionLaw.Fold, timing: "eager", result: "the accumulator or chosen item; the seed or None when empty", callbacks: "once per item, in source order", stop: "every item is read; equal keys keep the last item", failure: "none", buffering: "none"},
+    CollectionLawFacts{law: CollectionLaw.Group, timing: "eager", result: "a fresh map, tuple or lists", callbacks: "once per item, in source order, when a key callback is given", stop: "every item is read", failure: "none", buffering: "every item is buffered into the output"},
+    CollectionLawFacts{law: CollectionLaw.Drain, timing: "eager", result: "a fresh value", callbacks: "none", stop: "the whole source is consumed", failure: "none", buffering: "the output"},
+    CollectionLawFacts{law: CollectionLaw.Reorder, timing: "eager: the whole source is read before the first result", result: "the reordered or trimmed items", callbacks: "none", stop: "the whole source is consumed", failure: "none", buffering: "the whole source"},
+    CollectionLawFacts{law: CollectionLaw.SortBy, timing: "eager, in place", result: "Unit, or a Result when the key callback can fail", callbacks: "key or comparator calls in the sort's order; count and order are unspecified", stop: "not applicable", failure: "the first callback Err is the result", buffering: "the list and its keys"},
+    CollectionLawFacts{law: CollectionLaw.Search, timing: "eager", result: "an optional index", callbacks: "once per probed item, in binary-search order", stop: "stops at the match", failure: "absence is None", buffering: "none"},
+    CollectionLawFacts{law: CollectionLaw.MergeEntries, timing: "eager", result: "a fresh map", callbacks: "once per key present in both maps", stop: "every entry is read", failure: "none", buffering: "the output map"},
+    CollectionLawFacts{law: CollectionLaw.Pull, timing: "one item per call", result: "an Option of the next item", callbacks: "none", stop: "exactly the returned item is consumed; the remainder stays in the source", failure: "end is None", buffering: "none"}
 } }
 // END COLLECTION LAWS
 
 // BEGIN COLLECTION OPERATIONS
 COLLECTION_OPERATIONS :: prep { [CollectionOperationRow]{
-    collection_op(CollectionReceivers.Set, "map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.ListMapped, CollectionOp.SetMap, CollectionLaw.Visit, "empty list"),
-    collection_op(CollectionReceivers.Set, "filter", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.ListFiltered, CollectionOp.SetFilter, CollectionLaw.Visit, "empty list"),
-    collection_op(CollectionReceivers.Set, "each", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Unit, CollectionOp.SetEach, CollectionLaw.Each, "Unit"),
-    collection_op(CollectionReceivers.Set, "all", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.SetClosure{op: TClosureOp.All}, CollectionLaw.Decide, "true"),
-    collection_op(CollectionReceivers.Set, "flat_map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.FlatMapped, CollectionOp.SetClosure{op: TClosureOp.FlatMap}, CollectionLaw.Visit, "empty iterator"),
-    collection_op(CollectionReceivers.Set, "fold", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.SetClosure{op: TClosureOp.Fold}, CollectionLaw.Fold, "the seed"),
-    collection_op(CollectionReceivers.Set, "min", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.SetMinimum, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Set, "max", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Max{float: false}}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Set, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Set, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty Set"),
-    collection_op(CollectionReceivers.Set, "to_set", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty Set"),
-    collection_op(CollectionReceivers.Set, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetInsert}, CollectionLaw.Mutate, "true"),
-    collection_op(CollectionReceivers.Set, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Set, "discard", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Set, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Set, "pop", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetPop}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Set, "take", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetPop}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Set, "replace", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetReplace}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Set, "union", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetUnion}, CollectionLaw.Build, "the argument"),
-    collection_op(CollectionReceivers.Set, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetIntersection}, CollectionLaw.Build, "empty Set"),
-    collection_op(CollectionReceivers.Set, "difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetDifference}, CollectionLaw.Build, "empty Set"),
-    collection_op(CollectionReceivers.Set, "symmetric_difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SetSymmetricDifference}, CollectionLaw.Build, "the argument"),
-    collection_op(CollectionReceivers.Set, "equal", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetEqual}, CollectionLaw.Measure, "true when both are empty"),
-    collection_op(CollectionReceivers.Set, "is_subset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSubset}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Set, "issubset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSubset}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Set, "is_superset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSuperset}, CollectionLaw.Measure, "true only for an empty argument"),
-    collection_op(CollectionReceivers.Set, "issuperset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsSuperset}, CollectionLaw.Measure, "true only for an empty argument"),
-    collection_op(CollectionReceivers.Set, "is_disjoint", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsDisjoint}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Set, "isdisjoint", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SetIsDisjoint}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Set, "update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetUpdate}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Set, "difference_update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetDifferenceUpdate}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Set, "intersection_update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetIntersectionUpdate}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Set, "symmetric_difference_update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SetSymmetricDifferenceUpdate}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Set, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Set, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Set, "capacity", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.SetCapacity}, CollectionLaw.Measure, "0 or more"),
-    collection_op(CollectionReceivers.Set, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.IterToList}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.Set, "first", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.SetFirst}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Set, "values", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementIter, CollectionOp.Builtin{op: TBuiltinOp.SetValues}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Set, "sort", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.SetSort}, CollectionLaw.Reorder, "empty list"),
-    collection_op(CollectionReceivers.Set, "shuffle", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.SetShuffle}, CollectionLaw.Reorder, "empty list"),
-    collection_op(CollectionReceivers.Rank, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetInsert}, CollectionLaw.Mutate, "true"),
-    collection_op(CollectionReceivers.Rank, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.SortedSetRemove}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Rank, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Rank, "union", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetUnion}, CollectionLaw.Build, "the argument"),
-    collection_op(CollectionReceivers.Rank, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIntersection}, CollectionLaw.Build, "empty Rank"),
-    collection_op(CollectionReceivers.Rank, "difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetDifference}, CollectionLaw.Build, "empty Rank"),
-    collection_op(CollectionReceivers.Rank, "symmetric_difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.SortedSetSymmetricDifference}, CollectionLaw.Build, "the argument"),
-    collection_op(CollectionReceivers.Rank, "is_subset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsSubset}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Rank, "is_superset", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsSuperset}, CollectionLaw.Measure, "true only for an empty argument"),
-    collection_op(CollectionReceivers.Rank, "is_disjoint", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.SameKind}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsDisjoint}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Rank, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Rank, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Rank, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.SortedSetToList}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.Rank, "first", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.First}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Rank, "last", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Last}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Rank, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Bits, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.BitSetAdd}, CollectionLaw.Mutate, "true"),
-    collection_op(CollectionReceivers.Bits, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.BitSetRemove}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Bits, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Bits, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Bits, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty Bits"),
-    collection_op(CollectionReceivers.Tally, "add", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.BagAdd}, CollectionLaw.Mutate, "true"),
-    collection_op(CollectionReceivers.Tally, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.BagRemove}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Tally, "has", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.BagHas}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Tally, "count", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.BagCount}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Tally, "any", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.BagAny}, CollectionLaw.Decide, "false"),
-    collection_op(CollectionReceivers.Tally, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Tally, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Tally, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Cache, "add", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.LRUPut}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Cache, "add_new", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.LRUAddNew}, CollectionLaw.Mutate, "true"),
-    collection_op(CollectionReceivers.Cache, "get", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.LRUGet}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Cache, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.LRURemove}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Cache, "has_key", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Key}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.ContainsKey}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Cache, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Cache, "capacity", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LRUCapacity}, CollectionLaw.Measure, "the constructed capacity"),
-    collection_op(CollectionReceivers.Cache, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Cache, "keys", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.KeyList, CollectionOp.Builtin{op: TBuiltinOp.LRUKeys}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.Cache, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Queue, "push_front", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequePushFront}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Queue, "push_back", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequePushBack}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Queue, "delete", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequeDelete}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Queue, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequeGet}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Queue, "split", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.SameKind, CollectionOp.Builtin{op: TBuiltinOp.DequeSplit}, CollectionLaw.Mutate, "empty Queue"),
-    collection_op(CollectionReceivers.Queue, "join", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Text}, CollectionResult.Text, CollectionOp.Builtin{op: TBuiltinOp.DequeJoin}, CollectionLaw.Build, "empty string"),
-    collection_op(CollectionReceivers.Queue, "contains", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.DequeContains}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Queue, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Queue, "capacity", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.DequeCapacity}, CollectionLaw.Measure, "0 or more"),
-    collection_op(CollectionReceivers.Queue, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Queue, "peek_front", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePeekFront}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Queue, "peek_back", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePeekBack}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Queue, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.DequeToList}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.Queue, "pop_front", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePopFront}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Queue, "pop_back", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.DequePopBack}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Queue, "reverse", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.DequeReverse}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Queue, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.PriorityQueue, "remove", 1, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element, CollectionArg.RemoveBy}, CollectionResult.OptionElement, CollectionOp.PriorityQueueRemove, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.PriorityQueue, "push", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Push}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.PriorityQueue, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.PriorityQueue, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.PriorityQueue, "pop", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.PriorityQueuePop}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.PriorityQueue, "peek", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.PriorityQueuePeek}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.PriorityQueue, "to_sorted_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.PriorityQueueToSortedList}, CollectionLaw.Reorder, "empty list"),
-    collection_op(CollectionReceivers.PriorityQueue, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Map, "add", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.InsertMap}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Map, "try_insert", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.AllocOptionValue, CollectionOp.Builtin{op: TBuiltinOp.TryInsertMap}, CollectionLaw.TryMutate, "Ok(None)"),
-    collection_op(CollectionReceivers.Map, "add_new", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.AddNewMap}, CollectionLaw.Mutate, "true"),
-    collection_op(CollectionReceivers.Map, "setdefault", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.Element, CollectionOp.Builtin{op: TBuiltinOp.MapSetDefault}, CollectionLaw.Mutate, "the default"),
-    collection_op(CollectionReceivers.Map, "remove", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.RemoveMap}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Map, "pop", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.RemoveMap}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Map, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Key}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.GetMap}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Map, "has_key", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Key}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.ContainsKey}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Map, "contains_value", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Value}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.MapContainsValue}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.Map, "pop_first", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.MapPopFirst}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Map, "update", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Entries}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.MapUpdate}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.Map, "merge", 1, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Entries, CollectionArg.EntryMerge}, CollectionResult.Entries, CollectionOp.MapMerge, CollectionLaw.MergeEntries, "the argument"),
-    collection_op(CollectionReceivers.Map, "equal", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Entries}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.MapEqual}, CollectionLaw.Measure, "true when both are empty"),
-    collection_op(CollectionReceivers.Map, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Entries}, CollectionResult.Entries, CollectionOp.Builtin{op: TBuiltinOp.MapIntersection}, CollectionLaw.Build, "empty map"),
-    collection_op(CollectionReceivers.Map, "slice", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.KeyList}, CollectionResult.Entries, CollectionOp.Builtin{op: TBuiltinOp.MapSliceKeys}, CollectionLaw.Build, "empty map"),
-    collection_op(CollectionReceivers.Map, "top_n", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.EntryPairs, CollectionOp.MapTopN, CollectionLaw.Reorder, "empty list"),
-    collection_op(CollectionReceivers.Map, "map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryFn}, CollectionResult.EntryMapped, CollectionOp.Closure{op: TClosureOp.MapMap}, CollectionLaw.Visit, "empty map"),
-    collection_op(CollectionReceivers.Map, "filter", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryPredicate}, CollectionResult.EntryFiltered, CollectionOp.Closure{op: TClosureOp.MapFilter}, CollectionLaw.Visit, "empty map"),
-    collection_op(CollectionReceivers.Map, "flat_map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryFlatMap}, CollectionResult.Entries, CollectionOp.Closure{op: TClosureOp.MapFlatMap}, CollectionLaw.Visit, "empty map"),
-    collection_op(CollectionReceivers.Map, "each", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryFn}, CollectionResult.Unit, CollectionOp.Closure{op: TClosureOp.EachMap}, CollectionLaw.Each, "Unit"),
-    collection_op(CollectionReceivers.Map, "any", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.MapAny}, CollectionLaw.Decide, "false"),
-    collection_op(CollectionReceivers.Map, "all", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.EntryPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.MapAll}, CollectionLaw.Decide, "true"),
-    collection_op(CollectionReceivers.Map, "fold", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Seed, CollectionArg.EntryAccumulator}, CollectionResult.Folded, CollectionOp.Closure{op: TClosureOp.MapFold}, CollectionLaw.Fold, "the seed"),
-    collection_op(CollectionReceivers.Map, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty map"),
-    collection_op(CollectionReceivers.Map, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.View, "map", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Mapped, CollectionOp.SeqMap, CollectionLaw.Visit, "empty list"),
-    collection_op(CollectionReceivers.View, "fold", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.SeqFold, CollectionLaw.Fold, "the seed"),
-    collection_op(CollectionReceivers.List, "push", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Push}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "append", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Push}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "try_push", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element}, CollectionResult.AllocUnit, CollectionOp.Builtin{op: TBuiltinOp.TryPush}, CollectionLaw.TryMutate, "Ok(Unit)"),
-    collection_op(CollectionReceivers.List, "try_reserve", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer}, CollectionResult.AllocUnit, CollectionOp.Builtin{op: TBuiltinOp.TryReserve}, CollectionLaw.TryMutate, "Ok(Unit)"),
-    collection_op(CollectionReceivers.List, "insert", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Integer, CollectionArg.Element}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.InsertList}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "remove", 1, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Element, CollectionArg.RemoveBy}, CollectionResult.OptionElement, CollectionOp.ListRemove, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.List, "pop", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Pop}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.List, "reverse", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Reverse}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "clear", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.Clear}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.GetList}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.List, "index_of", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.List, "index", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.List, "contains", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.List, "count", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.CountList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.List, "copy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Receiver, CollectionOp.Copy, CollectionLaw.Copy, "empty list"),
-    collection_op(CollectionReceivers.List, "update_first", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.ItemPredicate, CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.UpdateFirst}, CollectionLaw.Decide, "false"),
-    collection_op(CollectionReceivers.List, "replace", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer, CollectionArg.Element}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListReplace}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.List, "binary_search", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.ListBinarySearch}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.List, "binary_search_by", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.OptionInt, CollectionOp.Closure{op: TClosureOp.ListBinarySearchBy}, CollectionLaw.Search, "None"),
-    collection_op(CollectionReceivers.List, "random", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.ListRandom}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.List, "min_max", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.MinMax, CollectionOp.ListMinMax, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.List, "min_max_by", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.MinMax, CollectionOp.ListMinMaxBy, CollectionLaw.Fold, "None"),
-    collection_op(CollectionReceivers.List, "sort_by", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.Comparator}, CollectionResult.Sorted, CollectionOp.SortBy, CollectionLaw.SortBy, "Unit"),
-    collection_op(CollectionReceivers.List, "sort_by_desc", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.SortKey}, CollectionResult.Sorted, CollectionOp.SortByDesc, CollectionLaw.SortBy, "Unit"),
-    collection_op(CollectionReceivers.List, "sort", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Sorted, CollectionOp.Builtin{op: TBuiltinOp.Sort}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "sort_desc", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.Sorted, CollectionOp.Builtin{op: TBuiltinOp.SortDesc}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "lazy", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementIter, CollectionOp.Builtin{op: TBuiltinOp.ListLazy}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.List, "shuffle", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Lazy, CollectionOp.ListShuffle, CollectionLaw.Reorder, "empty iterator"),
-    collection_op(CollectionReceivers.List, "to_set", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementSet, CollectionOp.Builtin{op: TBuiltinOp.SetFrom}, CollectionLaw.Build, "empty Set"),
-    collection_op(CollectionReceivers.List, "concat", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ConcatList}, CollectionLaw.Build, "the argument"),
-    collection_op(CollectionReceivers.List, "extend", 1, 1, CollectionAccess.Write, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Unit, CollectionOp.Builtin{op: TBuiltinOp.ExtendList}, CollectionLaw.Mutate, "Unit"),
-    collection_op(CollectionReceivers.List, "starts_with", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.StartsWith}, CollectionLaw.Measure, "true only for an empty prefix"),
-    collection_op(CollectionReceivers.List, "ends_with", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.EndsWith}, CollectionLaw.Measure, "true only for an empty suffix"),
-    collection_op(CollectionReceivers.List, "equal", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.ListEqual}, CollectionLaw.Measure, "true when both are empty"),
-    collection_op(CollectionReceivers.List, "union", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListUnion}, CollectionLaw.Build, "the argument's distinct items"),
-    collection_op(CollectionReceivers.List, "intersection", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListIntersection}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.List, "difference", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListDifference}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.List, "slice", 2, 2, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.ListSlice}, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.Iter, "shuffle", 0, 0, CollectionAccess.Move, [CollectionArg]{}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterShuffle}, CollectionLaw.Reorder, "empty iterator"),
-    collection_op(CollectionReceivers.Iter, "to_list", 0, 0, CollectionAccess.Move, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.IterToList}, CollectionLaw.Drain, "empty list"),
-    collection_op(CollectionReceivers.Iter, "collect", 0, 0, CollectionAccess.Move, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.IterCollect}, CollectionLaw.Drain, "empty list"),
-    collection_op(CollectionReceivers.Iter, "next", 0, 0, CollectionAccess.Write, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.IterNext}, CollectionLaw.Pull, "None"),
-    collection_op(CollectionReceivers.Sequence, "map", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Mapped, CollectionOp.SeqMap, CollectionLaw.Visit, "empty list or iterator"),
-    collection_op(CollectionReceivers.Sequence, "filter", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Filtered, CollectionOp.SeqFilter, CollectionLaw.Visit, "empty list or iterator"),
-    collection_op(CollectionReceivers.Sequence, "each", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Unit, CollectionOp.SeqEach, CollectionLaw.Each, "Unit"),
-    collection_op(CollectionReceivers.Sequence, "find", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.OptionElement, CollectionOp.Closure{op: TClosureOp.Find}, CollectionLaw.Decide, "None"),
-    collection_op(CollectionReceivers.Sequence, "any", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.Any}, CollectionLaw.Decide, "false"),
-    collection_op(CollectionReceivers.Sequence, "all", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.All}, CollectionLaw.Decide, "true"),
-    collection_op(CollectionReceivers.Sequence, "position", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.OptionInt, CollectionOp.Closure{op: TClosureOp.Position}, CollectionLaw.Decide, "None"),
-    collection_op(CollectionReceivers.Sequence, "is_sorted_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Bool, CollectionOp.Closure{op: TClosureOp.IsSortedBy}, CollectionLaw.Decide, "true"),
-    collection_op(CollectionReceivers.Sequence, "filter_map", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.LazyFilterMap, CollectionOp.Closure{op: TClosureOp.FilterMap}, CollectionLaw.Stream, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "flat_map", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.FlatMapped, CollectionOp.Closure{op: TClosureOp.FlatMap}, CollectionLaw.Visit, "empty list or iterator"),
-    collection_op(CollectionReceivers.Sequence, "take_while", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Lazy, CollectionOp.Closure{op: TClosureOp.TakeWhile}, CollectionLaw.Stream, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "skip_while", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Lazy, CollectionOp.Closure{op: TClosureOp.SkipWhile}, CollectionLaw.Stream, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "dedup_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Lazy, CollectionOp.Closure{op: TClosureOp.DedupBy}, CollectionLaw.Stream, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "chunk_while", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.PairPredicate}, CollectionResult.LazyChunks, CollectionOp.Closure{op: TClosureOp.ChunkWhile}, CollectionLaw.Stream, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "scan", 2, 2, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.LazyScan, CollectionOp.Closure{op: TClosureOp.Scan}, CollectionLaw.Stream, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "min_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.OptionElement, CollectionOp.Closure{op: TClosureOp.MinBy}, CollectionLaw.Fold, "None"),
-    collection_op(CollectionReceivers.Sequence, "max_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.OptionElement, CollectionOp.Closure{op: TClosureOp.MaxBy}, CollectionLaw.Fold, "None"),
-    collection_op(CollectionReceivers.Sequence, "count_where", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Int, CollectionOp.Closure{op: TClosureOp.CountWhere}, CollectionLaw.Fold, "0"),
-    collection_op(CollectionReceivers.Sequence, "reduce", 2, 2, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.Closure{op: TClosureOp.Reduce}, CollectionLaw.Fold, "the seed"),
-    collection_op(CollectionReceivers.Sequence, "fold", 2, 2, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, CollectionResult.Folded, CollectionOp.SeqFold, CollectionLaw.Fold, "the seed"),
-    collection_op(CollectionReceivers.Sequence, "group_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.Grouped, CollectionOp.Closure{op: TClosureOp.GroupBy}, CollectionLaw.Group, "empty map"),
-    collection_op(CollectionReceivers.Sequence, "count_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemFn}, CollectionResult.CountedBy, CollectionOp.Closure{op: TClosureOp.CountBy}, CollectionLaw.Group, "empty map"),
-    collection_op(CollectionReceivers.Sequence, "partition", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ItemPredicate}, CollectionResult.Partitioned, CollectionOp.Partition, CollectionLaw.Group, "two empty lists"),
-    collection_op(CollectionReceivers.Sequence, "counts", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Counts, CollectionOp.Builtin{op: TBuiltinOp.Counts}, CollectionLaw.Group, "empty map"),
-    collection_op(CollectionReceivers.Sequence, "unzip", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Unzipped, CollectionOp.Unzip, CollectionLaw.Group, "one empty list per field"),
-    collection_op(CollectionReceivers.Sequence, "take", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Take}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "skip", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Skip}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "step_by", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.StepBy}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "repeat", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterRepeat}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "cycle", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterCycle}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "drop_last", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.IterDropLast}, CollectionLaw.Reorder, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "chunks", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.LazyChunks, CollectionOp.Builtin{op: TBuiltinOp.Chunks}, CollectionLaw.Window, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "windows", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.LazyChunks, CollectionOp.Builtin{op: TBuiltinOp.Windows}, CollectionLaw.Window, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "dedup", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Dedup}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "flatten", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Flattened, CollectionOp.Builtin{op: TBuiltinOp.Flatten}, CollectionLaw.Adapt, "empty list or iterator"),
-    collection_op(CollectionReceivers.Sequence, "indexed", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.LazyIndexed, CollectionOp.Indexed, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "indexes", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.LazyIndexes, CollectionOp.Builtin{op: TBuiltinOp.Indexes}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "intersperse", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Element}, CollectionResult.Lazy, CollectionOp.Builtin{op: TBuiltinOp.Intersperse}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Sequence, "first", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.First}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.List, "last", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Last}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Iter, "to_set", 0, 0, CollectionAccess.Move, [CollectionArg]{}, CollectionResult.ElementSet, CollectionOp.IterToSet, CollectionLaw.Drain, "empty Set"),
-    collection_op(CollectionReceivers.Sequence, "try_collect", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.TryCollected, CollectionOp.Builtin{op: TBuiltinOp.TryCollect}, CollectionLaw.Drain, "Ok(empty list)"),
-    collection_op(CollectionReceivers.Sequence, "last_index_of", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IterLastIndexOf}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Sequence, "min", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Min, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Sequence, "max", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Max, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Sequence, "sum", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Element, CollectionOp.Sum, CollectionLaw.Drain, "0"),
-    collection_op(CollectionReceivers.Sequence, "product", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Element, CollectionOp.Product, CollectionLaw.Drain, "1"),
-    collection_op(CollectionReceivers.Sequence, "average", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Float, CollectionOp.Average, CollectionLaw.Drain, "0.0"),
-    collection_op(CollectionReceivers.Sequence, "join", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Text}, CollectionResult.Text, CollectionOp.Builtin{op: TBuiltinOp.JoinSep}, CollectionLaw.Drain, "empty string"),
-    collection_op(CollectionReceivers.Sequence, "split", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.Integer}, CollectionResult.SplitPair, CollectionOp.Split, CollectionLaw.Build, "two empty lists"),
-    collection_op(CollectionReceivers.Sequence, "is_sorted", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IterIsSorted}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Sequence, "compare", 1, 1, CollectionAccess.Sequence, [CollectionArg]{CollectionArg.ElementList}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.IterCompare}, CollectionLaw.Measure, "0 against an empty list"),
-    collection_op(CollectionReceivers.Sequence, "is_empty", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Sequence, "len", 0, 0, CollectionAccess.Sequence, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Map, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Map, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Map, "replace", 2, 2, CollectionAccess.Write, [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.InsertMap}, CollectionLaw.Mutate, "None"),
-    collection_op(CollectionReceivers.Map, "keys", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.KeyIter, CollectionOp.Builtin{op: TBuiltinOp.Keys}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Map, "values", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementIter, CollectionOp.Builtin{op: TBuiltinOp.Values}, CollectionLaw.Adapt, "empty iterator"),
-    collection_op(CollectionReceivers.Map, "first", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionKey, CollectionOp.Builtin{op: TBuiltinOp.MapFirst}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Map, "min", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.MapMin}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Map, "max", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.MapMax}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.Map, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.EntryPairs, CollectionOp.MapToList, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.Map, "items", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.EntryPairs, CollectionOp.MapToList, CollectionLaw.Build, "empty list"),
-    collection_op(CollectionReceivers.View, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.View, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.View, "get", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Integer}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.GetList}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.View, "index_of", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.OptionInt, CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.View, "first", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.First}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.View, "last", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.OptionElement, CollectionOp.Builtin{op: TBuiltinOp.Last}, CollectionLaw.Lookup, "None"),
-    collection_op(CollectionReceivers.View, "contains", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Element}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.Contains}, CollectionLaw.Measure, "false"),
-    collection_op(CollectionReceivers.View, "join", 1, 1, CollectionAccess.Read, [CollectionArg]{CollectionArg.Text}, CollectionResult.Text, CollectionOp.Builtin{op: TBuiltinOp.JoinSep}, CollectionLaw.Build, "empty string"),
-    collection_op(CollectionReceivers.Bits, "len", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.LenList}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Bits, "count", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Int, CollectionOp.Builtin{op: TBuiltinOp.BitSetCount}, CollectionLaw.Measure, "0"),
-    collection_op(CollectionReceivers.Bits, "is_empty", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.Bool, CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, CollectionLaw.Measure, "true"),
-    collection_op(CollectionReceivers.Bits, "to_list", 0, 0, CollectionAccess.Read, [CollectionArg]{}, CollectionResult.ElementList, CollectionOp.Builtin{op: TBuiltinOp.BitSetToList}, CollectionLaw.Build, "empty list")
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.ListMapped, op: CollectionOp.SetMap, law: CollectionLaw.Visit, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "filter", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.ListFiltered, op: CollectionOp.SetFilter, law: CollectionLaw.Visit, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "each", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Unit, op: CollectionOp.SetEach, law: CollectionLaw.Each, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "all", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Bool, op: CollectionOp.SetClosure{op: TClosureOp.All}, law: CollectionLaw.Decide, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "flat_map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.FlatMapped, op: CollectionOp.SetClosure{op: TClosureOp.FlatMap}, law: CollectionLaw.Visit, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "fold", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, result: CollectionResult.Folded, op: CollectionOp.SetClosure{op: TClosureOp.Fold}, law: CollectionLaw.Fold, empty: "the seed", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "min", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.SetMinimum, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "max", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Max{float: false}}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "to_set", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Receiver, op: CollectionOp.Copy, law: CollectionLaw.Copy, empty: "empty Set", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "add", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetInsert}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "discard", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "has", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.Contains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "pop", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.SetPop}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "take", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.SetPop}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "replace", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.SetReplace}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "union", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SetUnion}, law: CollectionLaw.Build, empty: "the argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "intersection", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SetIntersection}, law: CollectionLaw.Build, empty: "empty Set", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "difference", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SetDifference}, law: CollectionLaw.Build, empty: "empty Set", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "symmetric_difference", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SetSymmetricDifference}, law: CollectionLaw.Build, empty: "the argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "equal", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetEqual}, law: CollectionLaw.Measure, empty: "true when both are empty", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "is_subset", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetIsSubset}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "issubset", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetIsSubset}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "is_superset", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetIsSuperset}, law: CollectionLaw.Measure, empty: "true only for an empty argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "issuperset", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetIsSuperset}, law: CollectionLaw.Measure, empty: "true only for an empty argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "is_disjoint", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetIsDisjoint}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "isdisjoint", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SetIsDisjoint}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "update", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetUpdate}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "difference_update", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetDifferenceUpdate}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "intersection_update", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetIntersectionUpdate}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "symmetric_difference_update", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SetSymmetricDifferenceUpdate}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "capacity", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.SetCapacity}, law: CollectionLaw.Measure, empty: "0 or more", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.IterToList}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "first", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.SetFirst}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "values", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementIter, op: CollectionOp.Builtin{op: TBuiltinOp.SetValues}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "sort", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.SetSort}, law: CollectionLaw.Reorder, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Set, name: "shuffle", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.SetShuffle}, law: CollectionLaw.Reorder, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "add", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetInsert}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "has", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.Contains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "union", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetUnion}, law: CollectionLaw.Build, empty: "the argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "intersection", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetIntersection}, law: CollectionLaw.Build, empty: "empty Rank", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "difference", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetDifference}, law: CollectionLaw.Build, empty: "empty Rank", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "symmetric_difference", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetSymmetricDifference}, law: CollectionLaw.Build, empty: "the argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "is_subset", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsSubset}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "is_superset", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsSuperset}, law: CollectionLaw.Measure, empty: "true only for an empty argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "is_disjoint", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.SameKind}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetIsDisjoint}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.SortedSetToList}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "first", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.First}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "last", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Last}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Rank, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "add", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.BitSetAdd}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.BitSetRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "has", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.Contains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "add", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.BagAdd}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.BagRemove}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "has", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.BagHas}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "count", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.BagCount}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "any", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Bool, op: CollectionOp.Closure{op: TClosureOp.BagAny}, law: CollectionLaw.Decide, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Tally, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "add", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.LRUPut}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "add_new", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.LRUAddNew}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.LRUGet}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.LRURemove}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "has_key", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.ContainsKey}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "capacity", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LRUCapacity}, law: CollectionLaw.Measure, empty: "the constructed capacity", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "keys", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.KeyList, op: CollectionOp.Builtin{op: TBuiltinOp.LRUKeys}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Cache, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "push_front", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.DequePushFront}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "push_back", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.DequePushBack}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "delete", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.DequeDelete}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.DequeGet}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "split", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.SameKind, op: CollectionOp.Builtin{op: TBuiltinOp.DequeSplit}, law: CollectionLaw.Mutate, empty: "empty Queue", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "join", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Text}, result: CollectionResult.Text, op: CollectionOp.Builtin{op: TBuiltinOp.DequeJoin}, law: CollectionLaw.Build, empty: "empty string", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "contains", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.DequeContains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "capacity", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.DequeCapacity}, law: CollectionLaw.Measure, empty: "0 or more", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "peek_front", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.DequePeekFront}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "peek_back", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.DequePeekBack}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.DequeToList}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "pop_front", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.DequePopFront}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "pop_back", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.DequePopBack}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "reverse", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.DequeReverse}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Queue, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "remove", minimum_arity: 1, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element, CollectionArg.RemoveBy}, result: CollectionResult.OptionElement, op: CollectionOp.PriorityQueueRemove, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "push", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Push}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "pop", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.PriorityQueuePop}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "peek", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.PriorityQueuePeek}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "to_sorted_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.PriorityQueueToSortedList}, law: CollectionLaw.Reorder, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.PriorityQueue, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "add", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.InsertMap}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "try_insert", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.AllocOptionValue, op: CollectionOp.Builtin{op: TBuiltinOp.TryInsertMap}, law: CollectionLaw.TryMutate, empty: "Ok(None)", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "add_new", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.AddNewMap}, law: CollectionLaw.Mutate, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "setdefault", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.Element, op: CollectionOp.Builtin{op: TBuiltinOp.MapSetDefault}, law: CollectionLaw.Mutate, empty: "the default", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "remove", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.RemoveMap}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "pop", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.RemoveMap}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.GetMap}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "has_key", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Key}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.ContainsKey}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "contains_value", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Value}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.MapContainsValue}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "pop_first", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.MapPopFirst}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "update", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Entries}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.MapUpdate}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "merge", minimum_arity: 1, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Entries, CollectionArg.EntryMerge}, result: CollectionResult.Entries, op: CollectionOp.MapMerge, law: CollectionLaw.MergeEntries, empty: "the argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "equal", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Entries}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.MapEqual}, law: CollectionLaw.Measure, empty: "true when both are empty", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "intersection", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Entries}, result: CollectionResult.Entries, op: CollectionOp.Builtin{op: TBuiltinOp.MapIntersection}, law: CollectionLaw.Build, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "slice", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.KeyList}, result: CollectionResult.Entries, op: CollectionOp.Builtin{op: TBuiltinOp.MapSliceKeys}, law: CollectionLaw.Build, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "top_n", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.EntryPairs, op: CollectionOp.MapTopN, law: CollectionLaw.Reorder, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.EntryFn}, result: CollectionResult.EntryMapped, op: CollectionOp.Closure{op: TClosureOp.MapMap}, law: CollectionLaw.Visit, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "filter", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.EntryPredicate}, result: CollectionResult.EntryFiltered, op: CollectionOp.Closure{op: TClosureOp.MapFilter}, law: CollectionLaw.Visit, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "flat_map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.EntryFlatMap}, result: CollectionResult.Entries, op: CollectionOp.Closure{op: TClosureOp.MapFlatMap}, law: CollectionLaw.Visit, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "each", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.EntryFn}, result: CollectionResult.Unit, op: CollectionOp.Closure{op: TClosureOp.EachMap}, law: CollectionLaw.Each, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "any", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.EntryPredicate}, result: CollectionResult.Bool, op: CollectionOp.Closure{op: TClosureOp.MapAny}, law: CollectionLaw.Decide, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "all", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.EntryPredicate}, result: CollectionResult.Bool, op: CollectionOp.Closure{op: TClosureOp.MapAll}, law: CollectionLaw.Decide, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "fold", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Seed, CollectionArg.EntryAccumulator}, result: CollectionResult.Folded, op: CollectionOp.Closure{op: TClosureOp.MapFold}, law: CollectionLaw.Fold, empty: "the seed", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Mapped, op: CollectionOp.SeqMap, law: CollectionLaw.Visit, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "fold", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, result: CollectionResult.Folded, op: CollectionOp.SeqFold, law: CollectionLaw.Fold, empty: "the seed", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "push", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Push}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "append", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Push}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "try_push", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.AllocUnit, op: CollectionOp.Builtin{op: TBuiltinOp.TryPush}, law: CollectionLaw.TryMutate, empty: "Ok(Unit)", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "try_reserve", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.AllocUnit, op: CollectionOp.Builtin{op: TBuiltinOp.TryReserve}, law: CollectionLaw.TryMutate, empty: "Ok(Unit)", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "insert", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Element}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.InsertList}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "remove", minimum_arity: 1, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Element, CollectionArg.RemoveBy}, result: CollectionResult.OptionElement, op: CollectionOp.ListRemove, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "pop", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Pop}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "reverse", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Reverse}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "__swap", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.SwapList}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "clear", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.Clear}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.GetList}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "index_of", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionInt, op: CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "index", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionInt, op: CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "contains", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.Contains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "count", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.CountList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "update_first", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.ItemPredicate, CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Closure{op: TClosureOp.UpdateFirst}, law: CollectionLaw.Decide, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "split_write", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.WriteViewPair, op: CollectionOp.SplitWrite, law: CollectionLaw.Disjoint, empty: "Ok(two empty write views) at zero", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "get_disjoint_write", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.IntegerList}, result: CollectionResult.WriteViewList, op: CollectionOp.Builtin{op: TBuiltinOp.GetDisjointWrite}, law: CollectionLaw.Disjoint, empty: "Ok(empty view list) for no indexes", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "edit_disjoint", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.IntegerList, CollectionArg.DisjointFn}, result: CollectionResult.DisjointUnit, op: CollectionOp.Closure{op: TClosureOp.EditDisjoint}, law: CollectionLaw.Disjoint, empty: "Err for a selection that does not name two items", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "replace", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Element}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ListReplace}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "binary_search", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionInt, op: CollectionOp.Builtin{op: TBuiltinOp.ListBinarySearch}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "binary_search_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.OptionInt, op: CollectionOp.Closure{op: TClosureOp.ListBinarySearchBy}, law: CollectionLaw.Search, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "random", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.ListRandom}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "min_max", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.MinMax, op: CollectionOp.ListMinMax, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "min_max_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.MinMax, op: CollectionOp.ListMinMaxBy, law: CollectionLaw.Fold, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "sort_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Comparator}, result: CollectionResult.Sorted, op: CollectionOp.SortBy, law: CollectionLaw.SortBy, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "sort_by_desc", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.SortKey}, result: CollectionResult.Sorted, op: CollectionOp.SortByDesc, law: CollectionLaw.SortBy, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "sort", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Sorted, op: CollectionOp.Builtin{op: TBuiltinOp.Sort}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "sort_desc", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.Sorted, op: CollectionOp.Builtin{op: TBuiltinOp.SortDesc}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "lazy", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementIter, op: CollectionOp.Builtin{op: TBuiltinOp.ListLazy}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "shuffle", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Lazy, op: CollectionOp.ListShuffle, law: CollectionLaw.Reorder, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "to_set", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementSet, op: CollectionOp.Builtin{op: TBuiltinOp.SetFrom}, law: CollectionLaw.Build, empty: "empty Set", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "concat", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ConcatList}, law: CollectionLaw.Build, empty: "the argument", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "extend", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.Unit, op: CollectionOp.Builtin{op: TBuiltinOp.ExtendList}, law: CollectionLaw.Mutate, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "starts_with", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.StartsWith}, law: CollectionLaw.Measure, empty: "true only for an empty prefix", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "ends_with", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.EndsWith}, law: CollectionLaw.Measure, empty: "true only for an empty suffix", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "equal", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.ListEqual}, law: CollectionLaw.Measure, empty: "true when both are empty", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "union", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ListUnion}, law: CollectionLaw.Build, empty: "the argument's distinct items", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "intersection", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ListIntersection}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "difference", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ListDifference}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "slice", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer, CollectionArg.Integer}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.ListSlice}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Iter, name: "shuffle", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Move, args: [CollectionArg]{}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.IterShuffle}, law: CollectionLaw.Reorder, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Iter, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Move, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.IterToList}, law: CollectionLaw.Drain, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Iter, name: "collect", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Move, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.IterCollect}, law: CollectionLaw.Drain, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Iter, name: "next", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Write, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.IterNext}, law: CollectionLaw.Pull, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Mapped, op: CollectionOp.SeqMap, law: CollectionLaw.Visit, empty: "empty list or iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "filter", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Filtered, op: CollectionOp.SeqFilter, law: CollectionLaw.Visit, empty: "empty list or iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "each", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Unit, op: CollectionOp.SeqEach, law: CollectionLaw.Each, empty: "Unit", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "find", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.OptionElement, op: CollectionOp.Closure{op: TClosureOp.Find}, law: CollectionLaw.Decide, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "any", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Bool, op: CollectionOp.Closure{op: TClosureOp.Any}, law: CollectionLaw.Decide, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "all", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Bool, op: CollectionOp.Closure{op: TClosureOp.All}, law: CollectionLaw.Decide, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "position", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.OptionInt, op: CollectionOp.Closure{op: TClosureOp.Position}, law: CollectionLaw.Decide, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "is_sorted_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Bool, op: CollectionOp.Closure{op: TClosureOp.IsSortedBy}, law: CollectionLaw.Decide, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "filter_map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.LazyFilterMap, op: CollectionOp.Closure{op: TClosureOp.FilterMap}, law: CollectionLaw.Stream, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "flat_map", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.FlatMapped, op: CollectionOp.Closure{op: TClosureOp.FlatMap}, law: CollectionLaw.Visit, empty: "empty list or iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "take_while", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Lazy, op: CollectionOp.Closure{op: TClosureOp.TakeWhile}, law: CollectionLaw.Stream, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "skip_while", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Lazy, op: CollectionOp.Closure{op: TClosureOp.SkipWhile}, law: CollectionLaw.Stream, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "dedup_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Lazy, op: CollectionOp.Closure{op: TClosureOp.DedupBy}, law: CollectionLaw.Stream, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "chunk_while", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.PairPredicate}, result: CollectionResult.LazyChunks, op: CollectionOp.Closure{op: TClosureOp.ChunkWhile}, law: CollectionLaw.Stream, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "scan", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, result: CollectionResult.LazyScan, op: CollectionOp.Closure{op: TClosureOp.Scan}, law: CollectionLaw.Stream, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "min_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.OptionElement, op: CollectionOp.Closure{op: TClosureOp.MinBy}, law: CollectionLaw.Fold, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "max_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.OptionElement, op: CollectionOp.Closure{op: TClosureOp.MaxBy}, law: CollectionLaw.Fold, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "count_where", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Int, op: CollectionOp.Closure{op: TClosureOp.CountWhere}, law: CollectionLaw.Fold, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "reduce", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, result: CollectionResult.Folded, op: CollectionOp.Closure{op: TClosureOp.Reduce}, law: CollectionLaw.Fold, empty: "the seed", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "fold", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Seed, CollectionArg.Accumulator}, result: CollectionResult.Folded, op: CollectionOp.SeqFold, law: CollectionLaw.Fold, empty: "the seed", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "group_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.Grouped, op: CollectionOp.Closure{op: TClosureOp.GroupBy}, law: CollectionLaw.Group, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "count_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemFn}, result: CollectionResult.CountedBy, op: CollectionOp.Closure{op: TClosureOp.CountBy}, law: CollectionLaw.Group, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "partition", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ItemPredicate}, result: CollectionResult.Partitioned, op: CollectionOp.Partition, law: CollectionLaw.Group, empty: "two empty lists", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "counts", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Counts, op: CollectionOp.Builtin{op: TBuiltinOp.Counts}, law: CollectionLaw.Group, empty: "empty map", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "unzip", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Unzipped, op: CollectionOp.Unzip, law: CollectionLaw.Group, empty: "one empty list per field", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "take", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.Take}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "skip", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.Skip}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "step_by", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.StepBy}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "repeat", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.IterRepeat}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "cycle", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.IterCycle}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "drop_last", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.IterDropLast}, law: CollectionLaw.Reorder, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "chunks", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.LazyChunks, op: CollectionOp.Builtin{op: TBuiltinOp.Chunks}, law: CollectionLaw.Window, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "windows", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.LazyChunks, op: CollectionOp.Builtin{op: TBuiltinOp.Windows}, law: CollectionLaw.Window, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "dedup", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.Dedup}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "flatten", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Flattened, op: CollectionOp.Builtin{op: TBuiltinOp.Flatten}, law: CollectionLaw.Adapt, empty: "empty list or iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "indexed", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.LazyIndexed, op: CollectionOp.Indexed, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "indexes", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.LazyIndexes, op: CollectionOp.Builtin{op: TBuiltinOp.Indexes}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "intersperse", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Lazy, op: CollectionOp.Builtin{op: TBuiltinOp.Intersperse}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "first", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.First}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.List, name: "last", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Last}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Iter, name: "to_set", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Move, args: [CollectionArg]{}, result: CollectionResult.ElementSet, op: CollectionOp.IterToSet, law: CollectionLaw.Drain, empty: "empty Set", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "try_collect", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.TryCollected, op: CollectionOp.Builtin{op: TBuiltinOp.TryCollect}, law: CollectionLaw.Drain, empty: "Ok(empty list)", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "last_index_of", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionInt, op: CollectionOp.Builtin{op: TBuiltinOp.IterLastIndexOf}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "min", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Min, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "max", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Max, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "sum", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Element, op: CollectionOp.Sum, law: CollectionLaw.Drain, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "product", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Element, op: CollectionOp.Product, law: CollectionLaw.Drain, empty: "1", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "average", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Float, op: CollectionOp.Average, law: CollectionLaw.Drain, empty: "0.0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "join", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Text}, result: CollectionResult.Text, op: CollectionOp.Builtin{op: TBuiltinOp.JoinSep}, law: CollectionLaw.Drain, empty: "empty string", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "split", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.SplitPair, op: CollectionOp.Split, law: CollectionLaw.Build, empty: "two empty lists", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "is_sorted", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IterIsSorted}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "compare", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Sequence, args: [CollectionArg]{CollectionArg.ElementList}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.IterCompare}, law: CollectionLaw.Measure, empty: "0 against an empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Sequence, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Sequence, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "replace", minimum_arity: 2, maximum_arity: 2, access: CollectionAccess.Write, args: [CollectionArg]{CollectionArg.Key, CollectionArg.Value}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.InsertMap}, law: CollectionLaw.Mutate, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "keys", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.KeyIter, op: CollectionOp.Builtin{op: TBuiltinOp.Keys}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "values", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementIter, op: CollectionOp.Builtin{op: TBuiltinOp.Values}, law: CollectionLaw.Adapt, empty: "empty iterator", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "first", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionKey, op: CollectionOp.Builtin{op: TBuiltinOp.MapFirst}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "min", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.MapMin}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "max", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.MapMax}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.EntryPairs, op: CollectionOp.MapToList, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Map, name: "items", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.EntryPairs, op: CollectionOp.MapToList, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "get", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Integer}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.GetList}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "index_of", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.OptionInt, op: CollectionOp.Builtin{op: TBuiltinOp.IndexOf}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "first", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.First}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "last", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.OptionElement, op: CollectionOp.Builtin{op: TBuiltinOp.Last}, law: CollectionLaw.Lookup, empty: "None", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "contains", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Element}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.Contains}, law: CollectionLaw.Measure, empty: "false", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.View, name: "join", minimum_arity: 1, maximum_arity: 1, access: CollectionAccess.Read, args: [CollectionArg]{CollectionArg.Text}, result: CollectionResult.Text, op: CollectionOp.Builtin{op: TBuiltinOp.JoinSep}, law: CollectionLaw.Build, empty: "empty string", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "len", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.LenList}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "count", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Int, op: CollectionOp.Builtin{op: TBuiltinOp.BitSetCount}, law: CollectionLaw.Measure, empty: "0", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "is_empty", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.Bool, op: CollectionOp.Builtin{op: TBuiltinOp.IsEmpty}, law: CollectionLaw.Measure, empty: "true", status: CollectionStatus.Current},
+    CollectionOperationRow{receivers: CollectionReceivers.Bits, name: "to_list", minimum_arity: 0, maximum_arity: 0, access: CollectionAccess.Read, args: [CollectionArg]{}, result: CollectionResult.ElementList, op: CollectionOp.Builtin{op: TBuiltinOp.BitSetToList}, law: CollectionLaw.Build, empty: "empty list", status: CollectionStatus.Current}
 } }
 // END COLLECTION OPERATIONS
 
@@ -532,7 +596,7 @@ fn sema_collection_kind(ty: Type) -> SemaCollectionKind? {
     }
 }
 
-pub fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type Never! {
+fn sema_collection_kind_element(kind: SemaCollectionKind) -> Type Never! {
     if kind == {
         .List(element) | .FixedList(element) | .Iter(element) | .ViewIter(element) | .View(element) | .Set(element) | .Rank(element) | .Tally(element) | .Queue(element) | .PriorityQueue(element) -> element
         .Map(_, value) | .Cache(_, value) -> value
@@ -579,37 +643,38 @@ fn collection_access_convention(access: CollectionAccess, family: CollectionRece
 
 fn collection_arg_is_callback(arg: CollectionArg) -> Bool Never! {
     if arg == {
-        .ItemFn | .ItemPredicate | .PairPredicate | .Accumulator | .Comparator | .SortKey | .EntryFn | .EntryPredicate | .EntryAccumulator | .EntryFlatMap | .EntryMerge -> true
+        .ItemFn | .ItemPredicate | .PairPredicate | .DisjointFn | .Accumulator | .Comparator | .SortKey | .EntryFn | .EntryPredicate | .EntryAccumulator | .EntryFlatMap | .EntryMerge -> true
         else -> false
     }
 }
 
-// E0106 (#4432): `Unit` is the built-in no-information type (`-> Unit`,
-// `Result<Unit, E>`) the compiler carries as `Type.Named{name: "Unit"}`, so a
-// user type of that name would be indistinguishable from it. The Rust
-// reference's `Collections::RESERVED_TYPES` reserves it with the other
-// built-in type names; porting the rest of that list is the E0106 row of the
-// Rust-Jet parity ledger.
-pub fn sema_reserved_type_name(name: String) -> Bool Never! {
-    name == "Unit"
+// E0106: the same reserved vocabulary as Rust Collections::RESERVED_TYPES.
+// Source-owned Core declarations are admitted by registration, not by weakening
+// this predicate for users or for unrelated Core modules.
+// BEGIN GENERATED RESERVED TYPES
+// Source: crates/jet-foundation/src/Collections.rs; regenerate with gen-core-tables.mjs --write
+SEMA_RESERVED_TYPES :: [String]{"HashMap", "BTreeMap", "Map", "Char", "Bits", "Bytes", "Set", "Rank", "PriorityQueue", "Cache", "Iter", "ViewIter", "MemoStats", "RemoveBy", "Ordering", "Range", "SharedGuard", "Shared.Weak", "Condition", "Tally", "Queue", "Decimal", "Duration", "DurationUnit", "RangeError", "ExpiringValue", "Authority", "Validate", "BuildContext", "BuildPlan", "BuildAction", "BuildTarget", "BuildToolchain", "BuildProbe", "BuildSigningIdentity", "BuildError", "ProgramInfo", "Cell", "CellReadGuard", "CellEditGuard", "Unit"}
+// END GENERATED RESERVED TYPES
+fn sema_reserved_type_name(name: String) -> Bool Never! {
+    SEMA_RESERVED_TYPES.contains(name)
 }
 
-pub fn sema_collection_receiver_element(receiver: Type) -> Type? {
+fn sema_collection_receiver_element(receiver: Type) -> Type? {
     kind :: sema_collection_kind(receiver) ?? return None
     Val(sema_collection_kind_element(kind))
 }
 
-pub fn sema_collection_is_list(receiver: Type) -> Bool Never! {
+fn sema_collection_is_list(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.List
 }
 
-pub fn sema_collection_is_iter(receiver: Type) -> Bool Never! {
+fn sema_collection_is_iter(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Iter
 }
 
-pub fn sema_collection_is_view_iter(receiver: Type) -> Bool Never! {
+fn sema_collection_is_view_iter(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     if kind == {
         .ViewIter(_) -> true
@@ -617,19 +682,19 @@ pub fn sema_collection_is_view_iter(receiver: Type) -> Bool Never! {
     }
 }
 
-pub fn sema_collection_is_map(receiver: Type) -> Bool Never! {
+fn sema_collection_is_map(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Map
 }
 
-pub fn sema_collection_is_set(receiver: Type) -> Bool Never! {
+fn sema_collection_is_set(receiver: Type) -> Bool Never! {
     kind :: sema_collection_kind(receiver) ?? return false
     sema_collection_family(kind) == CollectionReceivers.Set
 }
 
 // The one lookup: the checked row for this receiver and method, with its
 // receiver-specific access and callback positions resolved.
-pub fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
+fn sema_collection_method_contract(receiver: Type, method: String) -> SemaCollectionMethodContract? {
     sema_collection_method_contract_in(COLLECTION_OPERATIONS, receiver, method)
 }
 
@@ -654,7 +719,7 @@ fn sema_collection_method_contract_in(rows: [CollectionOperationRow], receiver: 
 }
 
 // Mem is the effect of every exclusive (in-place) collection operation.
-pub fn sema_collection_method_effect_row(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] Never! {
+fn sema_collection_method_effect_row(contract: SemaCollectionMethodContract, span: Span) -> [EffectRowEntry] Never! {
     if contract.row.access == CollectionAccess.Write -> return [EffectRowEntry]{EffectRowEntry{name: "Mem", span: span}}
     [EffectRowEntry]{}
 }
@@ -679,7 +744,7 @@ fn sema_collection_same_kind(kind: SemaCollectionKind, element: Type) -> Type Ne
     }
 }
 
-pub fn sema_collection_method_argument_type(contract: SemaCollectionMethodContract, index: Int, seed: Type?, comparator: Bool) -> Type? {
+fn sema_collection_method_argument_type(contract: SemaCollectionMethodContract, index: Int, seed: Type?, comparator: Bool) -> Type? {
     if index < 0 || index >= contract.row.args.len() -> return None
     element := sema_collection_kind_element(contract.kind)
     key := sema_collection_kind_key(contract.kind)
@@ -688,6 +753,7 @@ pub fn sema_collection_method_argument_type(contract: SemaCollectionMethodContra
         .Element | .Value -> Val(element)
         .Key -> Val(key)
         .Integer -> Val(Type.Int)
+        .IntegerList -> Val(Type.List{element: Type.Int})
         .Text -> Val(Type.String)
         .RemoveBy -> Val(Type.Named{name: "RemoveBy"})
         .ElementList -> Val(Type.List{element: element})
@@ -698,6 +764,7 @@ pub fn sema_collection_method_argument_type(contract: SemaCollectionMethodContra
         .ItemFn | .SortKey -> Val(sema_collection_fn([Type]{element}, None))
         .ItemPredicate -> Val(sema_collection_fn([Type]{element}, Val(Type.Bool)))
         .PairPredicate -> Val(sema_collection_fn([Type]{element, element}, Val(Type.Bool)))
+        .DisjointFn -> Val(sema_collection_fn([Type]{Type.Apply{name: "ViewMut", args: [Type]{element}}, Type.Apply{name: "ViewMut", args: [Type]{element}}}, None))
         .Accumulator -> Val(sema_collection_fn([Type]{seed_ty, element}, None))
         .Comparator -> {
             if comparator -> return Val(sema_collection_fn([Type]{element, element}, Val(Type.Named{name: "Ordering"})))
@@ -712,7 +779,7 @@ pub fn sema_collection_method_argument_type(contract: SemaCollectionMethodContra
 }
 
 // Result-returning set and sequence filters preserve the error type and require Bool success.
-pub fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
+fn sema_collection_method_result_type(contract: SemaCollectionMethodContract, callback_return: Type?, seed: Type?) -> Type? {
     element := sema_collection_kind_element(contract.kind)
     key := sema_collection_kind_key(contract.kind)
     family := sema_collection_family(contract.kind)
@@ -810,6 +877,9 @@ pub fn sema_collection_method_result_type(contract: SemaCollectionMethodContract
             }
         }
         .SplitPair -> Val(Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.List{element: element}}, TypeTupleField{name: "right", ty: Type.List{element: element}}}})
+        .WriteViewPair -> Val(Type.Result{ok: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.Apply{name: "ViewMut", args: [Type]{element}}}, TypeTupleField{name: "right", ty: Type.Apply{name: "ViewMut", args: [Type]{element}}}}}, err: Type.String})
+        .WriteViewList -> Val(Type.Result{ok: Type.List{element: Type.Apply{name: "ViewMut", args: [Type]{element}}}, err: Type.String})
+        .DisjointUnit -> Val(Type.Result{ok: Type.Tuple{fields: [TypeTupleField]{}}, err: Type.String})
         .MinMax -> Val(Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "min", ty: element}, TypeTupleField{name: "max", ty: element}}}})
         .TryCollected -> {
             if element == {
@@ -834,13 +904,13 @@ fn sema_collection_filtered(filtered: Type, callback: Type) -> Type? {
 
 // `literal_remove_mode` is the removal mode a literal `RemoveBy` selector fixed;
 // only a run-time selector keeps the dynamic two-kernel removal.
-pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
+fn sema_collection_method_operation(contract: SemaCollectionMethodContract, argument_count: Int, literal_remove_mode: TListRemoveMode?, line: Int, callback_return: Type?, callback_mutable: Bool, comparator: Bool, tuple_struct: String) -> SemaCollectionOperation Never! {
     element := sema_collection_kind_element(contract.kind)
     is_view := sema_collection_family(contract.kind) == CollectionReceivers.View
     is_float := element == Type.Float || element == Type.Float32
     is_f32 := element == Type.Float32
     callback :: callback_return ?? Type.Named{name: "Unit"}
-    fallible := if callback == {.Result(_, _) -> true else -> false}
+    fallible := if callback == {.Result(_, error) -> error != Type.Named{name: "Never"} else -> false}
     remove_mode := if argument_count == 1 -> TListRemoveMode.Value else -> literal_remove_mode ?? TListRemoveMode.Dynamic
     if contract.row.op == {
         .Builtin(op) -> SemaCollectionOperation.Builtin{operation: op}
@@ -858,7 +928,9 @@ pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, 
         }}
         .SeqFilter -> SemaCollectionOperation.Closure{operation: if fallible -> TClosureOp.TryFilter else -> TClosureOp.Filter}
         .SeqEach -> SemaCollectionOperation.Closure{operation: if callback_mutable -> TClosureOp.EachMut else -> TClosureOp.Each}
-        .SeqFold -> SemaCollectionOperation.Closure{operation: if is_view -> TClosureOp.ViewFold else -> TClosureOp.Fold}
+        // A list folds through the borrowed view route (the step reads each
+        // element), so the receiver is never copied to be consumed.
+        .SeqFold -> SemaCollectionOperation.Closure{operation: if is_view || sema_collection_family(contract.kind) == CollectionReceivers.List -> TClosureOp.ViewFold else -> TClosureOp.Fold}
         .SetMap -> SemaCollectionOperation.SetClosure{operation: if {
             fallible -> TClosureOp.TryMap
             callback_mutable -> TClosureOp.MapMut
@@ -880,6 +952,7 @@ pub fn sema_collection_method_operation(contract: SemaCollectionMethodContract, 
         .Indexed -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Indexed{tuple_struct: tuple_struct}}
         .Unzip -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.Unzip{tuple_struct: tuple_struct}}
         .Split -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.IterSplit{tuple_struct: tuple_struct}}
+        .SplitWrite -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.SplitWrite{tuple_struct: tuple_struct}}
         .Partition -> SemaCollectionOperation.Closure{operation: TClosureOp.Partition{tuple_struct: tuple_struct}}
         .ListRemove -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.RemoveList{line: line, mode: remove_mode}}
         .PriorityQueueRemove -> SemaCollectionOperation.Builtin{operation: TBuiltinOp.PriorityQueueRemove{line: line, mode: remove_mode}}

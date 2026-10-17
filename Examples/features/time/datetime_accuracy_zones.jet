@@ -20,7 +20,7 @@ fn unix_ms(meta: String) -> Int {
     return i(meta, "base_utc_ms")
 }
 
-fn shown(op: String, meta: String) -> String {
+fn shown(op: String, meta: String) -[Env, FS.Read]> String {
     zone :: time.zone(field(meta, "zone")) ?? panic("zone")
     pattern :: "yyyy-MM-dd HH:mm:ss VV XXX"
     if op == "view_format" || op == "skipped_format" -> return time.zoned(time.from_unix_ms(unix_ms(meta)), zone).format(pattern)
@@ -28,7 +28,7 @@ fn shown(op: String, meta: String) -> String {
     if op == "view_dst" || op == "skipped_dst" -> return "{time.zoned(time.from_unix_ms(unix_ms(meta)), zone).is_dst()}"
     if op == "duration_format" || op == "duration_offset" || op == "duration_dst" || op == "duration_utc_ms" {
         zoned :: time.zoned(time.from_unix_ms(i(meta, "base_utc_ms")), zone)
-        value :: zoned.add_duration(Duration.hours(24) ?? panic("duration"))
+        value :: zoned.add_duration(24h)
         if op == "duration_format" -> return value.format(pattern)
         if op == "duration_offset" -> return "{value.offset_seconds()}"
         if op == "duration_dst" -> return "{value.is_dst()}"

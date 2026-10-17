@@ -1,0 +1,20 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+struct Queue {
+    head: Pin<Node>
+}
+
+fn takes_pin(n: ^Pin<Node>) -> Int { return n.payload }
+
+fn run() {
+    node := Node{payload: 7, hops: 0}
+    queue :: Queue{head: mem.pin(&node)}
+    seen :: takes_pin(^mem.pin(&queue.head))
+    print("{seen}")
+}

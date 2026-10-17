@@ -1,0 +1,866 @@
+// #4780: shared nominal types, callback factories, sequencer and suite table stay together; callbacks use forwarding lambdas.
+use core.process as process
+use core.files as files
+use core.sys as sys
+use core.time as time
+
+
+fn kit_parse_options(args: [String]) -> KitOptions {
+    options := kit_exec_defaults()
+    if args.len() == 0 -> return options
+    options.suite = args[0]
+    if options.suite != "golden" && options.suite != "ui" && options.suite != "cases" && options.suite != "all" {
+        options.error = "invalid suite: {args[0]}"
+        return options
+    }
+    i := 1
+    loop i < args.len() {
+        flag :: args[i]
+        if flag == "--list" {
+            options.list = true
+            i += 1
+            next
+        }
+        if flag == "--coverage" {
+            options.coverage = true
+            i += 1
+            next
+        }
+        if flag == "--opt-in" {
+            options.opt_in = true
+            i += 1
+            next
+        }
+        if flag == "--bless-all" {
+            options.bless.all = true
+            i += 1
+            next
+        }
+        if i + 1 >= args.len() {
+            options.error = "missing value for {flag}"
+            return options
+        }
+        value :: args[i + 1]
+        if flag == {
+            "--jet" -> options.jet = value
+            "--jetpack" -> options.jetpack = value
+            "--tier" -> options.tiers = value.split(",").to_list()
+            "--filter" -> options.filter = value
+            "--cases" -> options.cases = value
+            "--scratch" -> options.scratch = value
+            "--results" -> options.results = value
+            "--timeout" -> options.timeout = Int.parse(value) ?? 0
+            "--bless" -> &options.bless.ids.push(value)
+            "--reason" -> options.bless.reason = value
+            "--allow-shrink" -> &options.bless.allow_shrink.push(value)
+            "--shard" -> {
+                parts :: value.split("/").to_list()
+                if parts.len() != 2 {
+                    options.error = "--shard must be I/N"
+                    return options
+                }
+                options.shard_index = Int.parse(parts[0]) ?? 0
+                options.shard_count = Int.parse(parts[1]) ?? 0
+                options.sharded = true
+            }
+            else -> {
+                options.error = "unknown option: {flag}"
+                return options
+            }
+        }
+        i += 2
+    }
+    options.error = kit_expect_bless_error(options.bless, options.sharded)
+    if options.error != "" -> return options
+    if options.bless.ids.len() > 0 && options.bless.all {
+        options.error = "--bless and --bless-all are mutually exclusive"
+        return options
+    }
+    if options.shard_count <= 0 || options.shard_index <= 0 || options.shard_index > options.shard_count -> options.error = "invalid shard I/N"
+    if options.timeout <= 0 -> options.error = "timeout must be positive seconds"
+    if options.coverage && options.suite != "ui" -> options.error = "option not valid for suite: --coverage"
+    seen := [String]{}
+    loop tier in options.tiers {
+        if tier != "o0" && tier != "o1" && tier != "o2" {
+            options.error = "unknown tier: {tier}"
+            return options
+        }
+        if kit_expect_named(seen, tier) {
+            options.error = "duplicate tier: {tier}"
+            return options
+        }
+        &seen.push(tier)
+    }
+    options
+}
+
+struct KitEnv {
+    root: String
+    scratch: String
+    jet: String
+    jetpack: String
+    timeout: Duration
+    memory_limit: Int
+    env_clear: Bool{false}
+    version: String{""}
+    version_error: String{""}
+    trace_case: String{""}
+    trace_node: String{""}
+    trace_cache: String{""}
+}
+
+struct KitEnvVar {
+    name: String
+    value: String?
+    conditions: [String]{[String]{}}
+}
+
+struct KitEntry {
+    path: String
+    expected: String
+    project: String
+    suite: String
+    mode: String
+}
+
+struct KitRun {
+    stdout: String
+    stderr: String
+    code: Int
+    signal: Int?
+    timed_out: Bool
+    error: String
+    elapsed_ns: Int{0}
+    limit_hit: String{""}
+}
+struct KitOptions {
+    suite: String
+    jet: String
+    jetpack: String
+    tiers: [String]
+    filter: String
+    cases: String
+    shard_index: Int
+    shard_count: Int
+    sharded: Bool
+    timeout: Int
+    scratch: String
+    results: String
+    list: Bool
+    coverage: Bool
+    opt_in: Bool{false}
+    bless: KitBless
+    error: String
+}
+
+struct KitCtx {
+    options: KitOptions
+    env: KitEnv
+    root: String
+    scratch: String
+    bless: KitBless
+}
+
+struct KitSelection {
+    ids: [String]
+    error: String
+}
+
+struct KitVerdict {
+    status: String
+    detail: String
+    diff: String
+}
+
+struct KitBless {
+    ids: [String]
+    all: Bool
+    reason: String
+    allow_shrink: [String]
+    first_tier: Bool
+}
+
+struct KitAssertion {
+    stream: String
+    path: String
+    mode: String
+    value: String
+    json_mode: String{""}
+    json_path: String{""}
+    json_op: String{""}
+    ratio: Float{0.0}
+    extra: String{""}
+    optional_file: Bool{false}
+    file_first: Bool{false}
+    transform: String{""}
+    rhs_literal: Bool{false}
+    rhs_transform: String{""}
+    alternatives: [String]{[String]{}}
+    conditions: [String]{[String]{}}
+}
+
+struct KitJSONNormalization {
+    stream: String
+    path: String
+    kind: String
+}
+
+struct KitJSONSpan {
+    start: Int
+    end: Int
+    normalizer: Int
+}
+
+struct KitJSONResult {
+    text: String
+    error: String
+}
+
+struct KitWord {
+    text: String
+    start: Int
+    end: Int
+}
+
+struct KitPendingChild {
+    label: String
+    child: ProcessChild
+    started: Instant
+    step: KitStep
+    joined: Bool
+    input_error: String
+    signalled: Bool{false}
+}
+
+struct KitLinePredicate {
+    valid: Bool
+    value: Bool
+    next: Int
+}
+
+struct KitScalar {
+    value: Int
+    next: Int
+}
+
+enum KitCapturedValue {
+    Text(String)
+    Bytes([U8]?)
+    Numbers([Int])
+    Tree([KitTreeItem])
+    Absent
+}
+
+struct KitSubjectResult {
+    value: KitCapturedValue{KitCapturedValue.Absent}
+    verdict: KitVerdict
+}
+
+struct KitCapture {
+    name: String
+    value: KitCapturedValue
+    aggregate: Bool{false}
+}
+
+struct KitTreeItem {
+    path: String
+    bytes: [U8]
+}
+
+struct KitFreePort {
+    name: String
+    port: Int
+}
+
+struct KitCaptureScope {
+    start: Int
+    names: [String]
+    aggregates: [String]
+}
+
+struct KitLoopFrame {
+    start: Int
+    end: Int
+    kind: String
+    name: String{""}
+    values: [String]{[String]{}}
+    position: Int{0}
+    captures: [KitCapture]{[KitCapture]{}}
+    bindings: [KitCapture]{[KitCapture]{}}
+    started: Instant
+}
+
+struct KitInventoryItem {
+    path: String
+    kind: String
+    size: Int
+    modified_ms: Int
+    digest: String
+}
+
+struct KitInventory {
+    label: String
+    items: [KitInventoryItem]
+}
+
+struct KitJSONFilter {
+    key: String
+    op: String
+    expected: Dyn
+    reference: String{""}
+}
+
+struct KitReplacement {
+    from: String
+    to: String
+    literal_from: Bool{false}
+}
+
+struct KitProcessInput {
+    argv: [String]
+    cwd: String
+    stdin: String
+    env: KitEnv
+    overlay: [KitEnvVar]
+}
+
+struct KitStep {
+    argv: [String]
+    stdin: String
+    exit: String
+    exit_explicit: Bool{false}
+    assertions: [KitAssertion]
+    cwd: String{""}
+    unset: [String]{[String]{}}
+    environment: [KitEnvVar]{[KitEnvVar]{}}
+    label: String{""}
+    action: String{""}
+    literal_input: Bool{false}
+    session_mode: String{""}
+    duration: Int{0}
+    instruction: String{""}
+    limit_time: Int{0}
+    limit_memory: Int{0}
+    isolate: String{""}
+    isolate_network: String{"disabled"}
+    env_clear: Bool{false}
+    refused_capability: String{""}
+    stdout_target: String{""}
+    stderr_target: String{""}
+    json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
+    replacements: [KitReplacement]{[KitReplacement]{}}
+    conditions: [String]{[String]{}}
+    aggregate_names: [String]{[String]{}}
+}
+
+struct KitPlan {
+    requires: [String]
+    fixture: String
+    environment: [String]
+    normalize: [String]
+    compile_only: Bool
+    artifact: String
+    refused: String
+    steps: [KitStep]
+    error: String
+    opt_in: String{""}
+    json_normalize: [KitJSONNormalization]{[KitJSONNormalization]{}}
+    replacements: [KitReplacement]{[KitReplacement]{}}
+    free_ports: [String]{[String]{}}
+}
+
+struct KitOutcome {
+    verdict: KitVerdict
+    run: KitRun
+    tier: String{"-"}
+}
+
+struct KitTier {
+    name: String
+    flags: [String]
+    direct: Bool
+}
+
+struct KitGoldenStepCtx {
+    entry: KitEntry
+    tier: KitTier
+    source: String
+    expected: String
+    last_explicit: Bool
+}
+
+struct KitStepCtx {
+    plan: KitPlan
+    id: String
+    env: KitEnv
+    work: String
+    scratch: String
+    snapshots: String
+    bless: KitBless
+    golden: KitGoldenStepCtx?
+}
+
+struct KitCapturedStep {
+    label: String
+    stdout: String
+    stderr: String
+    elapsed_ns: Int
+    code: Int?{Val(0)}
+    raw_stdout: String{""}
+    raw_stderr: String{""}
+}
+
+struct KitStepState {
+    last: KitRun
+    built: String
+    built_once: Bool
+    history: [KitCapturedStep]{[KitCapturedStep]{}}
+    json_stdout: String?{None}
+    json_stderr: String?{None}
+    children: [KitPendingChild]{[KitPendingChild]{}}
+    captures: [KitCapture]{[KitCapture]{}}
+    bindings: [KitCapture]{[KitCapture]{}}
+    inventories: [KitInventory]{[KitInventory]{}}
+    replacements: [KitReplacement]{[KitReplacement]{}}
+    free_ports: [KitFreePort]{[KitFreePort]{}}
+}
+
+struct KitStepResult {
+    state: KitStepState
+    verdict: KitVerdict
+}
+
+struct KitStepHooks {
+    invoke: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitStepResult
+    check: fn(KitStep, Int, KitStepCtx, KitStepState) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> KitVerdict
+}
+
+// Keep callback factories beside their nominal types until #4780 is resolved.
+fn kit_golden_step_hooks() -> KitStepHooks {
+    KitStepHooks{
+        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_invoke(step, index, context, state),
+        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_golden_step_check(step, index, context, state)
+    }
+}
+
+fn kit_steps_hooks() -> KitStepHooks {
+    KitStepHooks{
+        invoke: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_invoke(step, index, context, state),
+        check: (step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> kit_steps_check_state(step, index, context, state)
+    }
+}
+
+// All suites share this sequencing loop. Hooks supply only suite-specific
+// invocation and expectations, never an alternative parser or executor.
+fn kit_steps_execute(original_context: KitStepCtx, hooks: KitStepHooks) -> KitOutcome {
+    context := original_context
+    state := KitStepState{last: kit_exec_failed("no steps"), built: "", built_once: false}
+    plan :: context.plan
+    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: state.last}
+    loop requirement in plan.requires {
+        if kit_steps_build_target_text(requirement) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        if !requirement.starts_with("first-existing ") -> next
+        words :: kit_steps_words(requirement) ?? return kit_steps_finish(state, kit_expect_verdict("REFUSED", "invalid first-existing requirement"))
+        found := false
+        loop index in 3..<words.len() {
+            if index % 2 == 0 -> next
+            expanded :: kit_steps_runtime_expand(words[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "requirement token unavailable"))
+            path :: files.join(context.work, expanded)
+            if files.exists(path) {
+                &state.captures.push(KitCapture{name: words[1], value: KitCapturedValue.Text(path)})
+                found = true
+                break
+            }
+        }
+        if !found -> return kit_steps_finish(state, kit_expect_verdict("SKIP-HOST", requirement))
+    }
+    requirement :: kit_steps_required(plan, context.env, context.work, context.scratch)
+    if requirement == {
+        .Val(value) -> return KitOutcome{verdict: value, run: state.last}
+        .None -> {}
+    }
+    if kit_expect_named(plan.normalize, "version") && (context.env.version == "" || context.env.version_error != "") -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "jet version: {context.env.version_error}"), run: state.last}
+    if plan.compile_only && context.golden == None -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "run: none is golden-only"), run: state.last}
+    if plan.refused != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.refused), run: state.last}
+    if plan.steps.len() == 0 -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "case has no steps"), run: state.last}
+    blessing :: kit_steps_bless_plan(plan, context.id, context.bless)
+    if blessing == {
+        .Val(value) -> return KitOutcome{verdict: value, run: state.last}
+        .None -> {}
+    }
+    files.create_dir_all(files.join(context.scratch, "tmp")) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "create case temp directory: {err}"))
+    if plan.fixture != "" -> kit_exec_copy_tree(files.join(context.snapshots, plan.fixture), context.work, true)
+    loop name in plan.free_ports {
+        port :: kit_steps_free_port(context) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+        &state.free_ports.push(KitFreePort{name: name, port: port})
+    }
+    loop index in 0..<context.plan.environment.len() {
+        context.plan.environment[index] = kit_steps_runtime_expand(context.plan.environment[index], context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "case environment token unavailable"))
+    }
+    cursor := 0
+    loops := [KitLoopFrame]{}
+    loop cursor < plan.steps.len() {
+        if loops.len() > 0 {
+            slot :: loops.len() - 1
+            if loops[slot].kind == "repeat" && cursor == loops[slot].start + 1 {
+                opening :: plan.steps[loops[slot].start]
+                activity :: kit_steps_repeat_check(opening, context, state)
+                if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+                if activity.status == "FAIL" {
+                    state = kit_steps_loop_restore(loops[slot], state)
+                    cursor = loops[slot].end + 1
+                    loops = loops.slice(0, slot)
+                    next
+                }
+                if loops[slot].started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
+            }
+        }
+        index :: cursor
+        original :: plan.steps[index]
+        cursor += 1
+        if kit_steps_build_target_conditions(original.conditions) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        if !kit_steps_conditions(original.conditions, context, state) -> next
+        if kit_steps_build_target_used(original, plan) -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "build-target"))
+        if original.action == "when" {
+            if !kit_steps_condition(original.argv[0], context, state) {
+                depth := 1
+                loop cursor < plan.steps.len() && depth > 0 {
+                    if plan.steps[cursor].action == "when" -> depth += 1
+                    if plan.steps[cursor].action == "end when" -> depth -= 1
+                    cursor += 1
+                }
+            }
+            next
+        }
+        if original.action == "end when" -> next
+        // Selected nonZ loops/awaits refuse before loop state or PID expansion.
+        // Attached assertions select their own conditions after the command.
+        if ((original.action == "repeat" && kit_steps_process_nonzombie_mode(original.argv[4])) || (original.action == "await" && original.argv[0] == "process" && kit_steps_process_nonzombie_mode(original.argv[2]))) && sys.name() != "linux" -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "process-state"))
+        if original.action == "for" || original.action == "repeat" -> state = kit_steps_loop_initialize(original, state)
+        if original.action == "for" {
+            values :: kit_steps_loop_values(kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "loop token unavailable")), context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "{err}"))
+            end :: kit_steps_block_end(plan.steps, index)
+            if values.len() == 0 {
+                cursor = end + 1
+                next
+            }
+            frame :: KitLoopFrame{start: index, end: end, kind: original.argv[1], name: original.argv[original.argv.len() - 1], values: values, captures: state.captures, bindings: state.bindings, started: time.instant()}
+            &loops.push(frame)
+            state = kit_steps_loop_bind(frame, state)
+            next
+        }
+        if original.action == "repeat" {
+            activity :: kit_steps_repeat_check(original, context, state)
+            if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+            end :: kit_steps_block_end(plan.steps, index)
+            if activity.status == "FAIL" {
+                cursor = end + 1
+                next
+            }
+            &loops.push(KitLoopFrame{start: index, end: end, kind: "repeat", captures: state.captures, bindings: state.bindings, started: time.instant()})
+            next
+        }
+        if original.action == "end for" || original.action == "end repeat" {
+            slot :: loops.len() - 1
+            frame := loops[slot]
+            state = kit_steps_loop_restore(frame, state)
+            if frame.kind == "repeat" {
+                opening :: plan.steps[frame.start]
+                activity :: kit_steps_repeat_check(opening, context, state)
+                if activity.status != "PASS" && activity.status != "FAIL" -> return kit_steps_finish(state, activity)
+                if activity.status == "PASS" {
+                    if frame.started.elapsed().ns >= (kit_steps_duration_ns(opening.argv[6]) ?? 0) -> return kit_steps_finish(state, kit_expect_verdict("FAIL", opening.argv[10]))
+                    remaining :: (kit_steps_duration_ns(opening.argv[6]) ?? 0) - frame.started.elapsed().ns
+                    interval :: kit_steps_duration_ns(opening.argv[8]) ?? 0
+                    time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
+                    cursor = frame.start + 1
+                    next
+                }
+            } else {
+                frame.position += 1
+                if frame.position < frame.values.len() {
+                    loops[slot] = frame
+                    state = kit_steps_loop_bind(frame, state)
+                    cursor = frame.start + 1
+                    next
+                }
+            }
+            loops = loops.slice(0, slot)
+            next
+        }
+        if original.action == "parallel" {
+            end :: kit_steps_block_end(plan.steps, index)
+            invoked :: kit_steps_parallel(plan.steps.slice(cursor, end), context, state)
+            state = invoked.state
+            if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
+            cursor = end + 1
+            next
+        }
+        step := kit_steps_resolve_step(original, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "undefined capture or unavailable tool token"))
+        if step.refused_capability != "" -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", step.refused_capability))
+        if step.argv.len() > 0 && step.argv[0] == "fail" {
+            if step.argv.len() != 2 -> return kit_steps_finish(state, kit_expect_verdict("REFUSED", "fail needs one message"))
+            return kit_steps_finish(state, kit_expect_verdict("FAIL", step.argv[1]))
+        }
+        invoked :: if step.action == "poll" -> kit_steps_poll(step, index, context, state, hooks) else if kit_steps_setup_kind(step.action) || kit_expect_named(["assert", "apply-edits", "await", "session", "send", "recv", "signal", "close", "spawn", "wait", "capture", "write", "inventory"], step.action) ->
+            kit_steps_action(step, context, state) else -> hooks.invoke(step, index, context, state)
+        state = invoked.state
+        if invoked.verdict.status != "PASS" -> return kit_steps_finish(state, invoked.verdict)
+        if kit_expect_named(["spawn", "session", "send", "signal"], step.action) -> next
+        if kit_expect_named(["", "wait", "close", "poll"], step.action) {
+            wired :: kit_steps_wiring_finish(step, context, state)
+            state = wired.state
+            if wired.verdict.status != "PASS" -> return kit_steps_finish(state, wired.verdict)
+        }
+        if step.action == "capture" || step.action == "assert" {
+            if step.assertions.len() > 0 || step.action == "assert" {
+                verdict :: hooks.check(step, index, context, state)
+                if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
+            }
+            next
+        }
+        step.replacements = kit_steps_replacements(step.replacements, context, state) ?? return kit_steps_finish(state, kit_expect_verdict("ERROR", "replacement token unavailable"))
+        state.replacements = step.replacements
+        state.json_stdout = None
+        state.json_stderr = None
+        if kit_expect_named(["", "wait", "close", "poll"], step.action) && (plan.json_normalize.len() > 0 || step.json_normalize.len() > 0) && kit_steps_failure(step, state.last) == None {
+            rules := plan.json_normalize
+            loop rule in step.json_normalize -> &rules.push(rule)
+            output :: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
+            errors :: kit_steps_json_normalize(state.last.stderr, "stderr", rules)
+            if output.error != "" -> return kit_steps_finish(state, kit_expect_verdict("FAIL", output.error))
+            if errors.error != "" -> return kit_steps_finish(state, kit_expect_verdict("FAIL", errors.error))
+            state.json_stdout = Val(output.text)
+            state.json_stderr = Val(errors.text)
+        }
+        if step.label != "" && kit_expect_named(["", "wait", "close", "poll"], step.action) {
+            source_name :: if context.golden == {
+                .Val(golden) -> kit_golden_source_name(golden.entry)
+                .None -> ""
+            }
+            &state.history.push(KitCapturedStep{label: step.label,
+                stdout: kit_steps_replace(kit_steps_normalize(state.json_stdout ?? state.last.stdout, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
+                stderr: kit_steps_replace(kit_steps_normalize(state.json_stderr ?? state.last.stderr, context.env, context.work, context.scratch, plan.normalize, state.built, source_name), step.replacements, context, state, true, source_name),
+                elapsed_ns: state.last.elapsed_ns,
+                code: if state.last.signal == None -> Val(state.last.code) else -> None,
+                raw_stdout: kit_steps_replace(state.last.stdout, step.replacements, context, state, false, source_name),
+                raw_stderr: kit_steps_replace(state.last.stderr, step.replacements, context, state, false, source_name)})
+        }
+        verdict :: hooks.check(step, index, context, state)
+        if verdict.status != "PASS" -> return kit_steps_finish(state, verdict)
+        if plan.compile_only -> break
+    }
+    kit_steps_finish(state, kit_expect_verdict("PASS", ""))
+}
+
+struct KitCaseResult {
+    suite: String
+    case: String
+    tier: String
+    status: String
+    detail: String
+    exit: Int
+    diff: String{""}
+}
+
+struct KitSuite {
+    name: String
+    discover: fn(KitCtx) -[FS, Mem.Alloc, Panic]> [KitEntry]
+    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> [KitOutcome]
+}
+
+struct KitSelected {
+    entry: KitEntry
+    suite: String
+    run: fn(KitEntry, KitCtx) -[Env, Exec, FS, IO, Mem.Alloc, Panic, Time, Time.Wait]> [KitOutcome]
+}
+
+struct KitUIDirective {
+    name: String
+    argv: [String]
+    parent: Bool
+    exit: String
+    streams: String
+    capability: String
+}
+
+struct KitUICall {
+    argv: [String]
+    parent: Bool
+    exit: String
+    streams: String
+    stdin: String
+    extension: String
+    refused: String
+    unlocked_toolchain: Bool{false}
+}
+
+struct KitUIRegistryRow {
+    code: String
+    plane: String
+    active: Bool
+    edit: Bool
+    reason: Bool
+}
+
+struct KitUIPlane {
+    name: String
+    edits: Int
+    reasons: Int
+    total: Int
+}
+
+struct KitUIAllowance {
+    code: String
+    side: String
+    card: String
+}
+
+fn kit_suites() -> [KitSuite] {
+    [KitSuite{name: "golden", discover: (context: KitCtx) -> kit_golden_discover_suite(context), run: (entry: KitEntry, context: KitCtx) -> kit_golden_run_suite(entry, context)},
+     KitSuite{name: "ui", discover: (context: KitCtx) -> kit_ui_discover(context), run: (entry: KitEntry, context: KitCtx) -> kit_ui_run(entry, context)},
+     KitSuite{name: "cases", discover: (context: KitCtx) -> kit_cases_discover(context), run: (entry: KitEntry, context: KitCtx) -> kit_cases_run(entry, context)}]
+}
+
+fn kit_execute_suites(options: KitOptions, root: String) -> Int {
+    selected_suites := [KitSuite]{}
+    loop suite in kit_suites() {
+        if options.suite == "all" || options.suite == suite.name -> &selected_suites.push(suite)
+    }
+    if selected_suites.len() == 0 {
+        print("REFUSED\tselection\t\tsuite not installed: {options.suite}")
+        return 2
+    }
+    timeout :: Duration.seconds(options.timeout) ?? {
+        print("REFUSED\tselection\t\ttimeout: {err}")
+        return 2
+    }
+    discovery_env :: KitEnv{root: root, scratch: "", jet: options.jet, jetpack: options.jetpack, timeout: timeout, memory_limit: 0}
+    discovery_ctx :: KitCtx{options: options, env: discovery_env, root: root, scratch: "", bless: options.bless}
+    corpus := [KitSelected]{}
+    loop suite in selected_suites {
+        loop entry in suite.discover(discovery_ctx) -> &corpus.push(KitSelected{entry: entry, suite: suite.name, run: suite.run})
+    }
+    &corpus.sort_by(item -> item.entry.path)
+    selection :: kit_exec_select_ids(corpus.map(item -> item.entry.path), options)
+    if selection.error != "" {
+        print("REFUSED\tselection\t\t{selection.error}")
+        return 2
+    }
+    entries :: corpus.filter(item -> kit_expect_named(selection.ids, item.entry.path))
+    if entries.len() == 0 {
+        print("ERROR\tselection\t\tno matching corpus entries")
+        return 2
+    }
+    if options.list {
+        loop item in entries -> print("{item.entry.suite}\t{item.entry.path}")
+        return 0
+    }
+    if options.jet == "" {
+        print("ERROR\tselection\t\t--jet must name the admitted compiler binary")
+        return 2
+    }
+    jet :: files.canonicalize(options.jet) ?? {
+        print("ERROR\tselection\t\tcompiler: {err}")
+        return 2
+    }
+    jetpack :: if options.jetpack == "" -> "" else -> files.canonicalize(options.jetpack) ?? {
+        print("ERROR\tselection\t\tjetpack: {err}")
+        return 2
+    }
+    home :: sys.get("HOME") ?? ""
+    base :: if options.scratch != "" -> options.scratch else -> sys.get("JET_TEST_SCRATCH_DIR") ?? files.join(home, ".cache/jet-dev/scratch")
+    files.create_dir_all(base) ?? {
+        print("ERROR\tselection\t\tscratch: {err}")
+        return 2
+    }
+    canonical :: files.canonicalize(base) ?? {
+        print("ERROR\tselection\t\tscratch: {err}")
+        return 2
+    }
+    if canonical == root || canonical.starts_with("{root}/") || canonical == "/tmp" || canonical.starts_with("/tmp/") {
+        print("ERROR\tselection\t\tscratch must be disk-backed and outside the checkout")
+        return 2
+    }
+    run_scratch :: files.join(canonical, "testkit-{process.current_pid()}")
+    if files.exists(run_scratch) {
+        print("ERROR\tselection\t\tscratch already exists: {run_scratch}")
+        return 2
+    }
+    files.create_dir_all(run_scratch) ?? {
+        print("ERROR\tselection\t\tscratch: {err}")
+        return 2
+    }
+    env := KitEnv{root: root, scratch: run_scratch, jet: jet, jetpack: jetpack, timeout: timeout, memory_limit: 8589934592}
+    if sys.get("JET_NATIVE_TRACE_LOG") != None {
+        env.trace_node = sys.get("JET_NATIVE_TRACE_NODE") ?? ""
+        env.trace_cache = sys.get("JET_NATIVE_TRACE_CACHE_ROOT") ?? ""
+        if env.trace_node == "" || env.trace_cache == "" {
+            print("ERROR\tselection\t\tnative trace requires JET_NATIVE_TRACE_NODE and JET_NATIVE_TRACE_CACHE_ROOT")
+            return 2
+        }
+    }
+    if entries.any(item -> item.suite == "ui" && item.entry.mode != "coverage") -> kit_ui_stage(root, files.join(run_scratch, "ui-source"))
+    version_run :: kit_exec_invoke(env, [jet, "--version"], root, run_scratch, "")
+    if version_run.code == 0 && kit_exec_process_failure(version_run) == None {
+        env.version = kit_steps_version(version_run.stdout) ?? ""
+        if env.version == "" -> env.version_error = "unparseable jet --version banner"
+    } else {
+        env.version_error = "jet --version failed: {version_run.error} {version_run.stderr}"
+    }
+    results := [KitCaseResult]{}
+    ran_suites := [String]{}
+    loop (index, item) in entries {
+        entry :: item.entry
+        scratch :: files.join(run_scratch, "{index}")
+        files.create_dir_all(scratch) ?? {
+            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "case scratch: {err}", exit: -1})
+            next
+        }
+        context := KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
+        context.env.trace_case = entry.path
+        if !kit_expect_named(ran_suites, item.suite) -> &ran_suites.push(item.suite)
+        loop outcome in item.run(entry, context) {
+            &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code, diff: outcome.verdict.diff})
+            if outcome.verdict.diff != "" -> print(outcome.verdict.diff)
+        }
+        if env.trace_node == "" {
+            files.remove_all(scratch) ?? {
+                &results.push(KitCaseResult{suite: entry.suite, case: entry.path, tier: "-", status: "ERROR", detail: "remove case scratch: {err}", exit: -1})
+            }
+        }
+    }
+    kit_golden_mark_tier_splits(&results)
+    loop result in results -> kit_report_row(result)
+    if options.bless.ids.len() > 0 || options.bless.all -> print("bless: ids={options.bless.ids} all={options.bless.all} reason={options.bless.reason}")
+    if env.trace_node == "" {
+        files.remove_all(run_scratch) ?? {
+            &results.push(KitCaseResult{suite: "kit", case: "cleanup", tier: "-", status: "ERROR", detail: "{err}", exit: -1})
+            kit_report_row(results[results.len() - 1])
+        }
+    }
+    kit_report_finish(jet, results, options.results, ran_suites)
+}
+
+fn run() {
+    args :: process.args()
+    if args.len() == 0 || args[0] == "--help" {
+        print("testkit <golden|ui|cases|all> --jet BIN [--jetpack BIN] [--tier T[,T…]] [--filter SUBSTR] [--cases FILE] [--shard I/N] [--timeout SEC] [--scratch DIR] [--results FILE] [--list] [--bless ID] [--bless-all --reason TEXT] [--allow-shrink ID]")
+        return
+    }
+    options :: kit_parse_options(args)
+    if options.error != "" {
+        print("REFUSED\tselection\t\t{options.error}")
+        process.exit(2)
+    }
+    cwd :: sys.current_dir() ?? {
+        result :: KitCaseResult{suite: "kit", case: "startup", tier: "-", status: "ERROR", detail: "checkout directory: {err}", exit: -1}
+        kit_report_row(result)
+        code :: kit_report_finish(options.jet, [result], options.results, [String]{})
+        process.exit(code)
+        return
+    }
+    root :: files.canonicalize(cwd) ?? panic("checkout root: {err}")
+    code :: kit_execute_suites(options, root)
+    if code != 0 -> process.exit(code)
+}

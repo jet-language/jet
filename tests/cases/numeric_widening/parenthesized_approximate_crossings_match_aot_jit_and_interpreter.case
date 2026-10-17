@@ -1,0 +1,23 @@
+# HAND-PORT tests/numeric_widening.rs:284 parenthesized_approximate_crossings_match_aot_jit_and_interpreter
+# PENDING-KIT; no historical failure captures blessed.
+# Exact original default/interpret/aot exit/stdout; separate stores, rustc guard erased.
+fixture: parenthesized_approximate_crossings_match_aot_jit_and_interpreter.fixture
+env: NO_COLOR=1
+# ORACLE-LITERAL tests/numeric_widening.rs original expected output bytes.
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_ROOT={work}/jetpack-default
+exit: 0
+stdout: = parenthesized_approximate_crossings_match_aot_jit_and_interpreter.stdout.expected
+step interpret: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache-interpret
+env: JETPACK_ROOT={work}/jetpack-interpret
+exit: 0
+stdout: = parenthesized_approximate_crossings_match_aot_jit_and_interpreter.stdout.expected
+step: jet build --profile=debug main.jet
+env: JET_STORE_DIR={work}/cache-aot
+env: JETPACK_ROOT={work}/jetpack-aot
+exit: 0
+step aot: built
+exit: 0
+stdout: = parenthesized_approximate_crossings_match_aot_jit_and_interpreter.stdout.expected

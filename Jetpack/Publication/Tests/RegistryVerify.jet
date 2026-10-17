@@ -27,14 +27,14 @@ fn publication_verify_test_refusal(all: [PublicationIndexEntry], entry: Publicat
     unsigned :: publication_verify_test_entry("corpkit", "1.0.0", "sha256-abc", "", "")
     publication_verify_test_refusal([PublicationIndexEntry]{unsigned}, unsigned, true, "E1247")
     assert_eq(publication_verify_index_entry([PublicationIndexEntry]{unsigned}, unsigned, false, "corp") ?? panic("optional unsigned"), [String]{})
-    whitespace := ~unsigned
+    whitespace := unsigned.copy()
     whitespace.signature = " \t\n"
     publication_verify_test_refusal([PublicationIndexEntry]{whitespace}, whitespace, true, "E1247")
 }
 #Test("publication registry signed entry without discoverable pin is E1246") {
     signed :: publication_verify_test_entry("textkit", "1.0.0", "sha256-abc", "", "nonempty")
     publication_verify_test_refusal([PublicationIndexEntry]{signed}, signed, false, "E1246")
-    candidate := ~signed
+    candidate := signed.copy()
     candidate.public_key = "candidate-key"
     publication_verify_test_refusal([PublicationIndexEntry]{signed}, candidate, false, "E1246")
 }
@@ -51,7 +51,7 @@ fn publication_verify_test_refusal(all: [PublicationIndexEntry], entry: Publicat
     good :: publication_verify_test_entry("textkit", "1.0.0", hash, public_key, signature)
     assert_eq(publication_verify_index_entry([PublicationIndexEntry]{good}, good, false, "jet") ?? panic("verify"), [String]{})
     assert(publication_verify(public_key, hash, signature) ?? panic("direct verify"))
-    bad := ~good
+    bad := good.copy()
     bad.content_hash = "sha256-TAMPEREDdeadbeef"
     publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
 }
@@ -94,7 +94,7 @@ fn publication_verify_test_refusal(all: [PublicationIndexEntry], entry: Publicat
     entry.gate_status = PublicationGateStatus{signature: .Passed, audit: .Passed, name: .Passed, liveness: .Passed, review: .NotRequired}
     publication_verify_entry_tier(entry) ?? panic("open community")
     loop gate in 0..<4 {
-        closed := ~entry
+        closed := entry.copy()
         if gate == 0 -> closed.gate_status.signature = .NotRequired
         if gate == 1 -> closed.gate_status.audit = .Blocked
         if gate == 2 -> closed.gate_status.name = .NotRequired
@@ -187,7 +187,7 @@ fn publication_verify_test_refusal(all: [PublicationIndexEntry], entry: Publicat
     good :: publication_verify_test_entry("textkit", "1.0.0", hash, generated.public_key_hex, signature)
     assert_eq(publication_verify_index_entry([PublicationIndexEntry]{good}, good, false, "jet") ?? panic("verify"), [String]{})
     assert(publication_verify(generated.public_key_hex, hash, signature) ?? panic("direct verify"))
-    bad := ~good
+    bad := good.copy()
     bad.content_hash = "sha256-TAMPEREDdeadbeef"
     publication_verify_test_refusal([PublicationIndexEntry]{bad}, bad, false, "E1246")
     if previous_keys == {

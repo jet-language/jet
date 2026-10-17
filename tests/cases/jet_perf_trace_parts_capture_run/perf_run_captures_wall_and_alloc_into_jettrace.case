@@ -1,0 +1,39 @@
+# PORT tests/jet_perf_trace_parts/capture_run.rs:1-122; all six honest helpers from support.rs129-345 preserved in honesty.jet.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD, not a reference snapshot.
+# have_rustc is toolchain-availability, erased per owner; no replacement skip.
+fixture: perf_run_captures_wall_and_alloc_into_jettrace.fixture
+mkdir: honesty
+copy: {root}/tests/cases/jet_perf_trace_parts/fixtures/honesty.jet honesty/honesty.jet
+write: session.jet session.jet.txt
+step: jet perf run session.jet --out run-capture.jettrace
+exit: 0
+stderr: ~ "trace:" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:79 contains predicate
+file: run-capture.jettrace is-file
+step: jet test honesty/honesty.jet
+env: S6_TRACE={work}/run-capture.jettrace
+env: S6_CAPTURE_MODE=run
+exit: 0
+file: run-capture.jettrace ~ "\"name\":\"probe_work\"" # Original parsed non-entry identity.
+file: run-capture.jettrace ~ "\"name\":\"run\""
+file: run-capture.jettrace ~ "session.jet"
+file: run-capture.jettrace !~ "\"duration_ns\":1," # Original anti-fabrication predicate.
+file: run-capture.jettrace !~ "\"count\":0," # Original zero-alloc scrape rejection.
+step: jet perf view run-capture.jettrace
+exit: 0
+stdout: ~ "sample wall" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:103 contains predicate
+stdout: ~ "alloc count=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:104 contains predicate
+stdout: !~ "alloc count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:105 not contains predicate
+stdout: ~ "tasks count=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:106 contains predicate
+stdout: ~ "children=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:107 contains predicate
+stdout: !~ "tasks count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:108 not contains predicate
+stdout: ~ "locks count=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:109 contains predicate
+stdout: ~ "waiters=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:110 contains predicate
+stdout: !~ "locks count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:111 not contains predicate
+stdout: ~ "io count=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:112 contains predicate
+stdout: !~ "io count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:113 not contains predicate
+stdout: ~ "native process_cpu=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:114 contains predicate
+stdout: ~ "spans count=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:115 contains predicate
+stdout: ~ "window=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:116 contains predicate
+stdout: ~ "target=" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:117 contains predicate
+stdout: ~ "session.jet#run" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:118 contains predicate
+stdout: ~ "command run" # original ed77c235f tests/jet_perf_trace_parts/capture_run.rs:119 contains predicate

@@ -1,0 +1,160 @@
+[
+  {
+    "name": "imported-rect-identity",
+    "root": 19,
+    "sourcePath": "tests/ui/core_imported_rect_identity_ok.jet",
+    "errors": []
+  },
+  {
+    "name": "user-failure-record-literal",
+    "root": 12,
+    "sourcePath": "tests/ui/core_failure_record_literal_user.jet",
+    "errors": ["E0119"]
+  },
+  {
+    "name": "user-reserved-decimal",
+    "root": 2,
+    "source": "struct Decimal { value: Int }\n",
+    "errors": ["E0106"]
+  },
+  {
+    "name": "user-reserved-decimal-enum",
+    "root": 2,
+    "source": "enum Decimal { Zero }\n",
+    "errors": ["E0106"]
+  },
+  {
+    "name": "source-decimal-declaration-owner",
+    "root": 2,
+    "source": "use core.math as math\nfn exact() -> Decimal Never! { math.decimal(\"1.20\") }\n",
+    "errors": []
+  },
+  {
+    "name": "source-measurement-observation",
+    "root": 2,
+    "source": "use core.units as units\nfn value() -> Float Never! { measured :: units.si(12.0); measured.value() }\n",
+    "errors": []
+  },
+  {
+    "name": "generic-debug-bound-interpolation",
+    "root": 2,
+    "source": "fn render<T: Debug>(value: T) -> String { \"{value:Debug}\" }\n",
+    "errors": []
+  },
+  {
+    "name": "source-geometry-generic-application",
+    "root": 8,
+    "source": "use core.math.[Point2]\nfn retain<T, Space>(value: Point2<T, Space>) -> Point2<T, Space> Never! { value }\n",
+    "errors": []
+  },
+  {
+    "name": "user-geometry-wrong-arity",
+    "root": 8,
+    "source": "struct Point2<T> { value: T }\nfn wrong(value: Point2<Int, Bool, Int>) {}\n",
+    "errors": ["E0119"]
+  },
+  {
+    "name": "source-mixed-vector-operator",
+    "root": 3,
+    "source": "use core.math.[Vec3]\nfn divide(value: Float, vector: Vec3) -> Vec3 Never! { value / vector }\n",
+    "errors": []
+  },
+  {
+    "name": "duplicate-user-mixed-operator",
+    "root": 3,
+    "source": "struct Price { value: Int }\nimpl Float.Div(Price) { fn div(self, rhs: Price) -> Price Never! { rhs } }\nimpl Float.Div(Price) { fn div(self, rhs: Price) -> Price Never! { rhs } }\n",
+    "errors": ["E0908"]
+  },
+  {
+    "name": "imported-source-vector-typed-float",
+    "root": 3,
+    "source": "use core.math.[Vec3]\nfn divide(vector: Vec3) -> Vec3 Never! { float :: Float{2.0}; float / vector }\nfn dot(float: Float, vector: Vec3) -> Vec3 Never! { float.div(vector) }\n",
+    "errors": []
+  },
+  {
+    "name": "missing-arithmetic-hook",
+    "root": 3,
+    "source": "struct Price { value: Int }\nfn add(left: &Price, right: &Price) -> Price Never! { left + right }\n",
+    "errors": ["E0360"]
+  },
+  {
+    "name": "power-has-no-hook-trait",
+    "root": 3,
+    "source": "struct Price { value: Int }\nfn power(left: &Price, right: &Price) -> Price Never! { left ^ right }\n",
+    "errors": ["E0109"]
+  },
+  {
+    "name": "source-owned-declared-equatable",
+    "root": 3,
+    "source": "use core.time.[LocalDate]\nfn same(left: LocalDate, right: LocalDate) -> Bool { left == right }\n",
+    "errors": []
+  },
+  {
+    "name": "source-rng-private-helper-through-public-normal",
+    "root": 5,
+    "source": "use core.math.random.[RNG]\nfn sample(rng: &RNG) -> Float Never! { &rng.normal(0.0, 1.0) }\n",
+    "errors": []
+  },
+  {
+    "name": "source-time-sleep-declaration",
+    "root": 10,
+    "sourcePath": "tests/ui/core_time_source_sleep_ok.jet",
+    "errors": []
+  },
+  {
+    "name": "source-expiring-value-declaration-and-impl-owner",
+    "root": 10,
+    "source": "use core.time as time\nfn millis() -> Int Never! { time.duration_ms(Duration{ns: 1000000}) }\n",
+    "errors": []
+  },
+  {
+    "name": "user-reserved-expiring-value",
+    "root": 10,
+    "source": "struct ExpiringValue<T> { value: T }\n",
+    "errors": ["E0106"]
+  },
+  {
+    "name": "user-expiring-value-impl-still-rejected",
+    "root": 10,
+    "source": "impl ExpiringValue { fn extra(self) Never! {} }\n",
+    "errors": ["E0301"]
+  },
+  {
+    "name": "infallible-unit-call-has-no-discarded-result",
+    "root": 2,
+    "source": "fn unit() Never! {}\nfn run() Never! { unit(); each :: () -> { unit() }; each() }\n",
+    "errors": []
+  },
+  {
+    "name": "source-native-carrier-impls",
+    "root": 18,
+    "sourcePath": "tests/ui/core_opaque_source_impl_ok.jet",
+    "errors": []
+  },
+  {
+    "name": "user-native-carrier-impl-still-rejected",
+    "root": 18,
+    "source": "impl Condition { fn notify_one(self) Never! {} }\nfn run() {}\n",
+    "errors": ["E0301"]
+  },
+  {
+    "name": "condition-owner-does-not-export-type",
+    "root": 18,
+    "sourcePath": "tests/ui/core_io_operation_user_opaque_owner.jet",
+    "errors": ["E0119"],
+    "errorCount": 1
+  },
+  {
+    "name": "user-io-operation-annotation",
+    "root": 20,
+    "sourcePath": "tests/ui/core_io_operation_user.jet",
+    "errors": ["E0119"],
+    "errorCount": 1
+  },
+  {
+    "name": "qualified-source-only-core-function",
+    "root": 24,
+    "sourcePath": "tests/ui/core_qualified_source_fn_ok.jet",
+    "errors": []
+  }
+]

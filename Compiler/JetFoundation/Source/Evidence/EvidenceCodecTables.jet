@@ -1,0 +1,54 @@
+// Canonical evidence codec error and bidirectional derivation code tables.
+// Shared by EvidenceEncode and EvidenceCodec; unchanged wire mappings.
+
+fn evidence_codec_error(message: String) -> EvidenceCodecError Never! {
+    EvidenceCodecError{message: message}
+}
+
+fn evidence_derivation_method_code(value: MIRDerivationMethod) -> Int Never! {
+    if value == {
+        .StaticDerivation -> 0
+        .FormalProof -> 1
+        .RecordedExecution -> 2
+        .SampledAgreement -> 3
+        .ExternalAssumption -> 4
+    }
+}
+
+fn evidence_derivation_method_from_code(code: Int) -> MIRDerivationMethod EvidenceCodecError! {
+    if code == {
+        0 -> Ok(MIRDerivationMethod.StaticDerivation)
+        1 -> Ok(MIRDerivationMethod.FormalProof)
+        2 -> Ok(MIRDerivationMethod.RecordedExecution)
+        3 -> Ok(MIRDerivationMethod.SampledAgreement)
+        4 -> Ok(MIRDerivationMethod.ExternalAssumption)
+        else -> Err(evidence_codec_error("unknown derivation method {code}"))
+    }
+}
+
+fn evidence_derivation_disposition_code(value: MIRDerivationDisposition) -> Int Never! {
+    if value == {
+        .Current -> 0
+        .Stale -> 1
+        .Expired -> 2
+        .Redacted -> 3
+        .Unavailable -> 4
+        .Unsupported -> 5
+        .BudgetExhausted -> 6
+        .Unknown -> 7
+    }
+}
+
+fn evidence_derivation_disposition_from_code(code: Int) -> MIRDerivationDisposition EvidenceCodecError! {
+    if code == {
+        0 -> Ok(MIRDerivationDisposition.Current)
+        1 -> Ok(MIRDerivationDisposition.Stale)
+        2 -> Ok(MIRDerivationDisposition.Expired)
+        3 -> Ok(MIRDerivationDisposition.Redacted)
+        4 -> Ok(MIRDerivationDisposition.Unavailable)
+        5 -> Ok(MIRDerivationDisposition.Unsupported)
+        6 -> Ok(MIRDerivationDisposition.BudgetExhausted)
+        7 -> Ok(MIRDerivationDisposition.Unknown)
+        else -> Err(evidence_codec_error("unknown derivation disposition {code}"))
+    }
+}

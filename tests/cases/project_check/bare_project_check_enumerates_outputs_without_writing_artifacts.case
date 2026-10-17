@@ -1,0 +1,17 @@
+# tests/project_check.rs::bare_project_check_enumerates_outputs_without_writing_artifacts at tests/project_check.rs:295; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+# SPLIT: exact package/lock/generated Option<SystemTime> comparisons rs296-309,328-341 ledgered PENDING-SEAM(mtime_ns), not replaced by hashes.
+fixture: bare_project_check_enumerates_outputs_without_writing_artifacts.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check --verbose
+cwd: {work}/entry_resolution
+exit: 0
+stdout: ~ "scope=project" # original predicate
+stdout.filter(^= "proof: "): lines = 4 # original ed77c235f tests/project_check.rs:197-208 proof-prefix projection and231-237/322 exact four proof rows
+stdout.filter(^= "proof: ").filter(~ "entry resolution").filter(~ "E2389"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "module graph").filter(~ "E2390"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "Core closure").filter(~ "E2391"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: ").filter(~ "tier lowering").filter(~ "E2392"): ~ "[proven]" # original predicate: one proof row contains label, code and proven
+stdout.filter(^= "proof: "): !~ "absent from the checked module graph" # original predicate
+stdout.filter(^= "proof: "): each-line ~ "output=release" # original predicate

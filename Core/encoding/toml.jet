@@ -1,14 +1,15 @@
-// core.encoding.toml — TOML v1.0 values as DataTree.
+// core.encoding.toml — TOML v1.0 values as Dyn.
 //
 // Implements the common document: comments, dotted keys, [tables]
 // [[arrays of tables]], strings (basic and literal), integers, floats
-// booleans, and inline tables/arrays. Datetimes stay text so this module
-// does not take a `core.time` dependency. Unsupported TOML constructs fail
-// closed with `EncodingError` rather than being delegated implicitly.
+// booleans, inline tables/arrays, and offset DateTime values. Local dates
+// and times stay Text. Unsupported constructs fail closed with EncodingError.
 //
 // `to_string` emits a minimal table document; it does not preserve comments.
 
-use core.encoding.[DataTree, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.[Dyn, EncodingError, EncodingErrorKind, EncodingFormat]
+use core.encoding.json as json
+use __core_encoding_stream as stream
 
 fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, path: String, reason: String) -> EncodingError Never! {
     {
@@ -22,18 +23,18 @@ fn syntax_error(format: EncodingFormat, offset: Int, line: Int, column: Int, pat
         cause: None,
     }
 }
-pub fn parse(text: String) -> DataTree EncodingError! { parse_toml(text) }
+fn parse(text: String) -> Dyn EncodingError! { parse_toml(text) }
 
-pub fn decode(text: String) -> DataTree EncodingError! { parse_toml(text) }
-pub fn loads(text: String) -> DataTree EncodingError! { parse(text) }
-pub fn load(text: String) -> DataTree EncodingError! { parse(text) }
+fn decode(text: String) -> Dyn EncodingError! { parse_toml(text) }
+fn loads(text: String) -> Dyn EncodingError! { parse(text) }
+fn load(text: String) -> Dyn EncodingError! { parse(text) }
 
-pub fn to_string(value: DataTree) -> String Never! { render_toml(value) }
+fn to_string<T: Encode>(value: T) -> String Never! { render_toml(value.encode()) }
 
-fn parse_toml(text: String) -> DataTree EncodingError! {
-    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: [String:DataTree]{}}
+fn parse_toml(text: String) -> Dyn EncodingError! {
+    p := TOMLParser{bytes: text.bytes(), index: 0, line: 1, column: 1, root: Dyn.object()}
     _ :: &p.document() ?? return Err(p.fail("TOML document could not be parsed"))
-    Ok(DataTree.Object(p.root))
+    Ok(p.root)
 }
 
 struct TOMLParser {
@@ -41,7 +42,7 @@ struct TOMLParser {
     index: Int
     line: Int
     column: Int
-    root: [String:DataTree]
+    root: Dyn
 }
 
 impl TOMLParser {
@@ -218,7 +219,7 @@ impl TOMLParser {
         Ok(keys)
     }
 
-    fn parse_value(&self) -> DataTree EncodingError! {
+    fn parse_value(&self) -> Dyn EncodingError! {
         &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
         b :: self.peek() ?? return Err(self.fail("expected a value"))
         n :: b
@@ -226,21 +227,21 @@ impl TOMLParser {
         if n == {
             34 -> {
                 s :: &self.parse_basic_string()
-                return Ok(DataTree.Text(s))
+                return Ok(Dyn.Text(s))
             }
             39 -> {
                 s :: &self.parse_literal_string()
-                return Ok(DataTree.Text(s))
+                return Ok(Dyn.Text(s))
             }
             91 -> return &self.parse_array()
             123 -> return &self.parse_inline_table()
-            116 -> return &self.parse_word("true", DataTree.Bool(true))
-            102 -> return &self.parse_word("false", DataTree.Bool(false))
+            116 -> return &self.parse_word("true", Dyn.Bool(true))
+            102 -> return &self.parse_word("false", Dyn.Bool(false))
             else -> &self.parse_number_or_text()
         }
     }
 
-    fn parse_word(&self, spelling: String, value: DataTree) -> DataTree EncodingError! {
+    fn parse_word(&self, spelling: String, value: Dyn) -> Dyn EncodingError! {
         loop b in spelling.bytes() {
             got :: &self.bump() ?? return Err(self.fail("expected `{spelling}`"))
             if got != b -> return Err(self.fail("expected `{spelling}`"))
@@ -291,15 +292,15 @@ impl TOMLParser {
         }
     }
 
-    fn parse_array(&self) -> DataTree EncodingError! {
+    fn parse_array(&self) -> Dyn EncodingError! {
         _ :: &self.bump()
-        items := [DataTree]{}
+        items := [Dyn]{}
         loop {
             &self.skip_space() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0 :: self.peek() ?? (U8{0})
             if b0 == (U8{93}) {
                 _ :: &self.bump()
-                return Ok(DataTree.Array(items))
+                return Ok(Dyn.Array(items))
             }
             value :: &self.parse_value()
             &items.push(value)
@@ -307,65 +308,92 @@ impl TOMLParser {
             b :: self.peek() ?? return Err(self.fail("unterminated TOML array"))
             if b == (U8{93}) {
                 _ :: &self.bump()
-                return Ok(DataTree.Array(items))
+                return Ok(Dyn.Array(items))
             }
             if b != (U8{44}) -> return Err(self.fail("expected ',' or ']' after a TOML array value"))
             _ :: &self.bump()
         }
     }
 
-    fn parse_inline_table(&self) -> DataTree EncodingError! {
+    fn parse_inline_table(&self) -> Dyn EncodingError! {
         _ :: &self.bump()
-        entries := [String:DataTree]{}
+        // Dyn objects retain insertion order and reject repeated inline keys.
+        entries := Dyn.object()
         loop {
             &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b0 :: self.peek() ?? (U8{0})
             if b0 == (U8{125}) {
                 _ :: &self.bump()
-                return Ok(DataTree.Object(entries))
+                return Ok(entries)
             }
             key :: &self.parse_key()
-            if entries.has_key(key) -> return Err(self.fail("duplicate key in TOML inline table"))
+            if entries.has(key) -> return Err(self.fail("duplicate key in TOML inline table"))
             eq :: &self.bump() ?? return Err(self.fail("expected '='"))
             if eq != (U8{61}) -> return Err(self.fail("expected '='"))
             value :: &self.parse_value()
-            _ :: &entries.add(key, value)
+            entries[key] = value
             &self.skip_ws() ?? return Err(self.fail("TOML whitespace scan failed"))
             b :: self.peek() ?? return Err(self.fail("unterminated TOML inline table"))
             if b == (U8{125}) {
                 _ :: &self.bump()
-                return Ok(DataTree.Object(entries))
+                return Ok(entries)
             }
             if b != (U8{44}) -> return Err(self.fail("expected ',' or '}}' after a TOML inline-table value"))
             _ :: &self.bump()
         }
     }
 
-    fn parse_number_or_text(&self) -> DataTree EncodingError! {
+    fn parse_number_or_text(&self) -> Dyn EncodingError! {
         start :: self.index
         loop {
             b :: self.peek() ?? break
             n :: b
+            if n == 32 && self.index == start + 10 && self.index + 1 < self.bytes.len() && self.bytes[self.index + 1] >= (U8{48}) && self.bytes[self.index + 1] <= (U8{57}) && valid_toml_date(self.bytes, start, start + 10) {
+                _ :: &self.bump()
+                next
+            }
             stop :: n == 32 || n == 9 || n == 10 || n == 13 || n == 44 || n == 93 || n == 125 || n == 35
             if stop -> break
             _ :: &self.bump()
         }
         if self.index <= start -> return Err(self.fail("expected a TOML value"))
-        token :: String.from_bytes(self.bytes[start..self.index - 1]) ?? ""
+        spelling :: String.from_bytes(self.bytes[start..self.index - 1]) ?? ""
+        normalized := spelling.bytes()
+        if normalized.len() >= 19 {
+            if normalized[10] == (U8{32}) || normalized[10] == (U8{116}) -> normalized[10] = U8{84}
+            if normalized[normalized.len() - 1] == (U8{122}) -> normalized[normalized.len() - 1] = U8{90}
+        }
+        token :: String.from_bytes(normalized) ?? ""
         clean :: remove_underscores(token)
+        raw :: token.bytes()
+        if raw.len() >= 28 && (raw[raw.len() - 9] == (U8{43}) || raw[raw.len() - 9] == (U8{45})) && raw[raw.len() - 6] == (U8{58}) && raw[raw.len() - 3] == (U8{58}) {
+            error := self.fail("date-time offsets with seconds are unsupported")
+            error.kind = EncodingErrorKind.Unsupported
+            return Err(error)
+        }
         if parse_radix_int(clean) == {
-            .Val(n) -> return Ok(DataTree.Int(n))
+            .Val(n) -> return Ok(stream.typed_number("{n}"))
             else -> { _ := 0 }
         }
         if Int.parse(clean) == {
-            .Ok(n) -> return Ok(DataTree.Int(n))
+            .Ok(n) -> return Ok(stream.typed_number("{n}"))
             else -> { _ := 0 }
         }
         if Float.parse(clean) == {
-            .Ok(n) -> return Ok(DataTree.Float(n))
+            .Ok(n) -> return Ok(number_tree(^clean, n))
             else -> { _ := 0 }
         }
-        if looks_toml_datetime(clean) -> return Ok(DataTree.Text(token))
+        if looks_toml_datetime(token) {
+            stamp :: Dyn.Text(^token)
+            if stamp.decode<ZonedDateTime>() == {
+                .Ok(z) -> return Ok(Dyn.DateTime(z))
+                .Err(_) -> { _ := 0 }
+            }
+            if raw.len() > 19 && (raw[raw.len() - 1] == (U8{90}) || raw[raw.len() - 1] == (U8{122}) || (raw.len() >= 25 && raw[raw.len() - 3] == (U8{58}))) {
+                return Err(self.fail("invalid TOML offset date-time"))
+            }
+            return Ok(^stamp)
+        }
         return Err(self.fail("unsupported TOML bare value; quote text or use a TOML number, boolean, or datetime"))
     }
 
@@ -377,7 +405,7 @@ impl TOMLParser {
         self.root = ensure_array_path(self.root, keys, 0)
     }
 
-    fn assign(&self, table: [String], key: [String], value: DataTree) -> Bool EncodingError! {
+    fn assign(&self, table: [String], key: [String], value: Dyn) -> Bool EncodingError! {
         path := [String]{}
         loop k in table -> &path.push(k)
         loop k in key -> &path.push(k)
@@ -510,124 +538,88 @@ fn radix_digit(b: U8, base: Int) -> Int Never! {
     d
 }
 
-fn ensure_table_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] Never! {
-    if i >= path.len() -> return ~entries
-    out := ~entries
+// Tables stay Dyn values throughout parsing, including the last table in an
+// array-of-tables. Never treat the native Object backing as a separate map.
+
+fn ensure_table_path(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
+    if i >= path.len() -> return entries.copy()
+    out := entries.copy()
     key :: path[i]
     if i == path.len() - 1 {
-        if out.get(key) == .None -> _ :: &out.add(key, DataTree.Object([String:DataTree]{}))
+        if !out.has(key) -> out[key] = Dyn.object()
         return out
     }
-    child := [String:DataTree]{}
-    existing_array := false
-    array_items := [DataTree]{}
-    if out.get(key) == {
-        .Val(existing) -> {
-            if existing == {
-                .Object(obj) -> child = obj
-                .Array(items) -> {
-                    existing_array = true
-                    if items.len() > 0 {
-                        last_item :: items[items.len() - 1]
-                        if last_item == {
-                            .Object(obj) -> child = obj
-                            else -> { _ := 0 }
-                        }
-                    }
-                    array_items = ~items
-                }
-                else -> { _ := 0 }
+    child := out.get(key) ?? Dyn.object()
+    if child == {
+        .Array(items) -> {
+            mutable := items.copy()
+            if mutable.len() == 0 {
+                &mutable.push(ensure_table_path(Dyn.object(), path, i + 1))
+            } else {
+                last :: mutable.len() - 1
+                mutable[last] = ensure_table_path(mutable[last], path, i + 1)
             }
+            out[key] = Dyn.Array(mutable)
+            return out
         }
-        else -> { _ := 0 }
+        .Object(_) -> { _ := 0 }
+        else -> child = Dyn.object()
     }
-    nested :: ensure_table_path(child, path, i + 1)
-    if existing_array {
-        if array_items.len() == 0 {
-            &array_items.push(DataTree.Object(nested))
-        } else {
-            array_items[array_items.len() - 1] = DataTree.Object(nested)
-        }
-        _ :: &out.add(key, DataTree.Array(array_items))
-    } else {
-        _ :: &out.add(key, DataTree.Object(nested))
-    }
+    out[key] = ensure_table_path(child, path, i + 1)
     out
 }
 
-fn ensure_array_path(entries: [String:DataTree], path: [String], i: Int) -> [String:DataTree] Never! {
-    if i >= path.len() -> return ~entries
-    out := ~entries
+fn ensure_array_path(entries: Dyn, path: [String], i: Int) -> Dyn Never! {
+    if i >= path.len() -> return entries.copy()
+    out := entries.copy()
     key :: path[i]
+    child := out.get(key) ?? Dyn.object()
     if i == path.len() - 1 {
-        item := DataTree.Object([String:DataTree]{})
-        if out.get(key) == {
-            .Val(existing) -> {
-                if existing == {
-                    .Array(items) -> {
-                        mutable := ~items
-                        &mutable.push(item)
-                        _ :: &out.add(key, DataTree.Array(mutable))
-                    }
-                    .Object(obj) -> {
-                        _ :: &out.add(key, DataTree.Array([DataTree]{DataTree.Object(obj), item}))
-                    }
-                    else -> _ :: &out.add(key, DataTree.Array([DataTree]{item}))
-                }
+        if child == {
+            .Array(items) -> {
+                mutable := items.copy()
+                &mutable.push(Dyn.object())
+                out[key] = Dyn.Array(mutable)
             }
-            else -> _ :: &out.add(key, DataTree.Array([DataTree]{item}))
+            .Object(_) -> {
+                if out.has(key) -> out[key] = Dyn.Array([Dyn]{child, Dyn.object()})
+                else -> out[key] = Dyn.Array([Dyn]{Dyn.object()})
+            }
+            else -> out[key] = Dyn.Array([Dyn]{Dyn.object()})
         }
         return out
     }
-    child := [String:DataTree]{}
-    existing_array := false
-    array_items := [DataTree]{}
-    if out.get(key) == {
-        .Val(existing) -> {
-            if existing == {
-                .Object(obj) -> child = obj
-                .Array(items) -> {
-                    existing_array = true
-                    if items.len() > 0 {
-                        last_item :: items[items.len() - 1]
-                        if last_item == {
-                            .Object(obj) -> child = obj
-                            else -> { _ := 0 }
-                        }
-                    }
-                    array_items = ~items
-                }
-                else -> { _ := 0 }
+    if child == {
+        .Array(items) -> {
+            mutable := items.copy()
+            if mutable.len() == 0 {
+                &mutable.push(ensure_array_path(Dyn.object(), path, i + 1))
+            } else {
+                last :: mutable.len() - 1
+                mutable[last] = ensure_array_path(mutable[last], path, i + 1)
             }
+            out[key] = Dyn.Array(mutable)
+            return out
         }
-        else -> { _ := 0 }
+        .Object(_) -> { _ := 0 }
+        else -> child = Dyn.object()
     }
-    nested :: ensure_array_path(child, path, i + 1)
-    if existing_array {
-        if array_items.len() == 0 {
-            &array_items.push(DataTree.Object(nested))
-        } else {
-            array_items[array_items.len() - 1] = DataTree.Object(nested)
-        }
-        _ :: &out.add(key, DataTree.Array(array_items))
-    } else {
-        _ :: &out.add(key, DataTree.Object(nested))
-    }
+    out[key] = ensure_array_path(child, path, i + 1)
     out
 }
 
-fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool Never! {
+fn has_path(entries: Dyn, path: [String], i: Int) -> Bool Never! {
     if i >= path.len() -> return false
     key :: path[i]
-    if i == path.len() - 1 -> return entries.has_key(key)
+    if i == path.len() - 1 -> return entries.has(key)
     child :: entries.get(key) ?? return false
     if child == {
-        .Object(obj) -> return has_path(obj, path, i + 1)
+        .Object(_) -> return has_path(child, path, i + 1)
         .Array(items) -> {
             if items.len() == 0 -> return false
             last :: items[items.len() - 1]
             if last == {
-                .Object(obj) -> return has_path(obj, path, i + 1)
+                .Object(_) -> return has_path(last, path, i + 1)
                 else -> return false
             }
         }
@@ -635,86 +627,69 @@ fn has_path(entries: [String:DataTree], path: [String], i: Int) -> Bool Never! {
     }
 }
 
-fn put_path(entries: [String:DataTree], path: [String], i: Int, value: DataTree) -> [String:DataTree] Never! {
-    out := ~entries
+fn put_path(entries: Dyn, path: [String], i: Int, value: Dyn) -> Dyn Never! {
+    out := entries.copy()
     key :: path[i]
     if i == path.len() - 1 {
-        _ :: &out.add(key, value)
+        out[key] = value
         return out
     }
-    child := [String:DataTree]{}
-    if out.get(key) == {
-        .Val(existing) -> {
-            if existing == {
-                .Object(obj) -> child = obj
-                .Array(items) -> {
-                    if items.len() > 0 {
-                        mutable := ~items
-                        last_index := mutable.len() - 1
-                        if mutable[last_index] == {
-                            .Object(obj) -> {
-                                nested :: put_path(obj, path, i + 1, value)
-                                mutable[last_index] = DataTree.Object(nested)
-                                _ :: &out.add(key, DataTree.Array(mutable))
-                                return out
-                            }
-                            else -> { _ := 0 }
-                        }
+    child := out.get(key) ?? Dyn.object()
+    if child == {
+        .Array(items) -> {
+            if items.len() > 0 {
+                mutable := items.copy()
+                last :: mutable.len() - 1
+                if mutable[last] == {
+                    .Object(_) -> {
+                        mutable[last] = put_path(mutable[last], path, i + 1, value)
+                        out[key] = Dyn.Array(mutable)
+                        return out
                     }
+                    else -> { _ := 0 }
                 }
-                else -> { _ := 0 }
             }
+            child = Dyn.object()
         }
-        else -> { _ := 0 }
+        .Object(_) -> { _ := 0 }
+        else -> child = Dyn.object()
     }
-    nested :: put_path(child, path, i + 1, value)
-    _ :: &out.add(key, DataTree.Object(nested))
+    out[key] = put_path(child, path, i + 1, value)
     out
 }
 
-fn render_toml(value: DataTree) -> String {
-    if value == {
-        .Object(entries) -> return render_toml_table(entries, "")
-        else -> return toml_leaf(value)
-    }
+fn render_toml(value: Dyn) -> String Never! {
+    render_toml_table(value, "").trim_end()
 }
 
-fn render_toml_table(entries: [String:DataTree], prefix: String) -> String {
+fn render_toml_table(value: Dyn, prefix: String) -> String Never! {
+    if value == {
+        .Object(_) -> {}
+        else -> return ""
+    }
+    entries :: stream.object_entries(value)
     out := ""
     loop pair in entries {
-        if pair.value == {
-            .Object(_) -> next
-            .Array(items) -> {
-                if all_objects(items) -> next
-            }
-            else -> { _ := 0 }
-        }
-        out = "{out}{toml_key(pair.key)} = {toml_leaf(pair.value)}\n"
+        if pair.value == .Object(_) -> next
+        if pair.value == .Array(items) && all_objects(items) -> next
+        out = "{out}{pair.key} = {toml_leaf(pair.value)}\n"
     }
     loop pair in entries {
+        path :: if prefix == "" -> pair.key else -> "{prefix}.{pair.key}"
         if pair.value == {
-            .Object(obj) -> {
-                path :: join_key(prefix, pair.key)
-                out = "{out}\n[{path}]\n{render_toml_table(obj, path)}"
-            }
+            .Object(_) -> out = "{out}\n[{path}]\n{render_toml_table(pair.value, path)}"
             .Array(items) -> {
                 if all_objects(items) {
-                    path :: join_key(prefix, pair.key)
-                    loop item in items {
-                        if item == {
-                            .Object(obj) -> out = "{out}\n[[{path}]]\n{render_toml_table(obj, path)}"
-                            else -> { _ := 0 }
-                        }
-                    }
+                    loop item in items -> out = "{out}\n[[{path}]]\n{render_toml_table(item, path)}"
                 }
             }
-            else -> { _ := 0 }
+            else -> {}
         }
     }
     out
 }
 
-fn all_objects(items: [DataTree]) -> Bool {
+fn all_objects(items: [Dyn]) -> Bool {
     if items.len() == 0 -> return false
     loop item in items {
         if item == {
@@ -725,57 +700,122 @@ fn all_objects(items: [DataTree]) -> Bool {
     true
 }
 
-fn join_key(prefix: String, key: String) -> String {
-    if prefix.len() == 0 -> return toml_key(key)
-    "{prefix}.{toml_key(key)}"
-}
 
-fn toml_key(key: String) -> String {
-    raw :: key.bytes()
-    if raw.len() > 0 {
-        valid := true
-        loop b in raw {
-            n :: b
-            if !((n >= 65 && n <= 90) || (n >= 97 && n <= 122) || (n >= 48 && n <= 57) || n == 95 || n == 45) {
-                valid = false
-            }
+fn toml_leaf(value: Dyn) -> String Never! {
+    return if value == {
+        .Null -> "\"\""
+        .Bool(v) -> "{v}"
+        .Int(n) -> "{n}"
+        .Float(n) -> "{n:Debug}"
+        .Number(text) -> text
+        .Text(s) -> json.to_string(Dyn.Text(s)) ?? panic("Text always has a JSON string representation")
+        .DateTime(_) -> value.to_text() ?? panic("DateTime always has an RFC 3339 representation")
+        .Bytes(_) -> {
+            text :: value.to_text() ?? panic("Bytes always has a base64 representation")
+            json.to_string(Dyn.Text(text)) ?? panic("Bytes text always has a JSON string representation")
         }
-        if valid -> return ~key
-    }
-    toml_quote(key)
-}
-
-fn toml_quote(text: String) -> String {
-    out := "\""
-    loop b in text.bytes() {
-        if b == (U8{92}) -> out = "{out}\\\\"
-        else if b == (U8{34}) -> out = "{out}\\\""
-        else if b == (U8{10}) -> out = "{out}\\n"
-        else if b == (U8{13}) -> out = "{out}\\r"
-        else if b == (U8{9}) -> out = "{out}\\t"
-        else -> out = "{out}{String.from_bytes([U8]{b}) ?? ""}"
-    }
-    "{out}\""
-}
-
-fn toml_leaf(value: DataTree) -> String {
-    if value == {
-        .Null -> return "\"\""
-        .Bool(v) -> {
-            if v -> return "true"
-            return "false"
-        }
-        .Int(n) -> return "{n}"
-        .Float(n) -> return "{n}"
-        .Text(s) -> return toml_quote(s)
         .Array(items) -> {
             out := "["
             loop i in 0..<items.len() {
                 if i > 0 -> out = "{out}, "
                 out = "{out}{toml_leaf(items[i])}"
             }
-            return "{out}]"
+            "{out}]"
         }
-        .Object(_) -> return "{{}}"
+        .Object(_) -> {
+            out := "{{ "
+            first := true
+            loop pair in stream.object_entries(value) {
+                if !first -> out = "{out}, "
+                first = false
+                out = "{out}{pair.key} = {toml_leaf(pair.value)}"
+            }
+            "{out} }}"
+        }
     }
 }
+
+#Test("TOML renderer preserves typed serializer layout") {
+    assert(to_string(Dyn.Int(3)) == "")
+    assert(toml_leaf(Dyn.Text("é\n")) == "\"é\\n\"")
+    assert(toml_leaf(Dyn.Float(Float{1.0})) == "1.0")
+}
+
+#Test("TOML tables retain Dyn objects through dotted and array paths") {
+    tree :: parse("title = \"root\"\nmeta.count = 2\n[[items]]\nname = \"first\"\n[items.detail]\nactive = true\n[[items]]\nname = \"second\"") ?? panic("TOML document")
+    assert_eq(tree.keys(), [String]{"title", "meta", "items"})
+    meta :: tree.get("meta") ?? panic("dotted table")
+    assert_eq(meta.get("count"), Val(stream.typed_number("2")))
+    rows :: tree.get("items") ?? panic("array of tables")
+    if rows == {
+        .Array(items) -> {
+            assert_eq(items.len(), 2)
+            assert_eq(items[0].get("name"), Val(Dyn.Text("first")))
+            detail :: items[0].get("detail") ?? panic("nested array table")
+            assert_eq(detail.get("active"), Val(Dyn.Bool(true)))
+            assert_eq(items[1].get("name"), Val(Dyn.Text("second")))
+        }
+        else -> panic("expected an array of Dyn tables")
+    }
+}
+
+#Test("TOML inline tables and canonical Dyn scalars round trip") {
+    tree :: parse("value = {{ first = 1, second = 2 }}\nnumber = 1.25") ?? panic("inline TOML table")
+    inline :: tree.get("value") ?? panic("inline table")
+    assert_eq(inline.keys(), [String]{"first", "second"})
+    assert_eq(toml_leaf(tree.get("number") ?? panic("number")), "1.25")
+    assert_eq(toml_leaf(Dyn.Bytes([U8]{1, 2, 3})), "\"AQID\"")
+    stamp :: parse("stamp = 2024-01-02T03:04:05Z") ?? panic("TOML date-time")
+    assert_eq(toml_leaf(stamp.get("stamp") ?? panic("date-time")), "2024-01-02T03:04:05Z")
+    if parse("value = {{ duplicate = 1, duplicate = 2 }}") == {
+        .Err(_) -> {}
+        else -> panic("duplicate inline key accepted")
+    }
+    if parse("meta.count = 1\nmeta.count = 2") == {
+        .Err(_) -> {}
+        else -> panic("duplicate dotted key accepted")
+    }
+}
+
+// A float keeps its own spelling when it is a JSON number token (`+`
+// dropped), else its shortest decimal spelling; `inf` and `nan` have no
+// lexeme and stay `Float`. Rust twin: jet-foundation JSONNumber.rs.
+fn number_tree(clean: ^String, value: Float) -> Dyn Never! {
+    unsigned := ^clean
+    raw :: unsigned.bytes()
+    if raw.len() > 0 && raw[0] == (U8{43}) {
+        unsigned = String.from_bytes(raw[1..<raw.len()]) ?? panic("removing an ASCII prefix preserves UTF-8")
+    }
+    if is_json_number_token(unsigned) -> return stream.typed_number(^unsigned)
+    shown := "{value}"
+    if is_json_number_token(shown) -> return stream.typed_number(^shown)
+    Dyn.Float(value)
+}
+
+fn is_json_number_token(text: String) -> Bool Never! {
+    b :: text.bytes()
+    i := 0
+    if i < b.len() && b[i] == (U8{45}) -> i += 1
+    if i >= b.len() -> return false
+    if b[i] == (U8{48}) {
+        i += 1
+    } else {
+        if b[i] < (U8{49}) || b[i] > (U8{57}) -> return false
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+    }
+    if i < b.len() && b[i] == (U8{46}) {
+        i += 1
+        fraction :: i
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+        if i == fraction -> return false
+    }
+    if i < b.len() && (b[i] == (U8{101}) || b[i] == (U8{69})) {
+        i += 1
+        if i < b.len() && (b[i] == (U8{43}) || b[i] == (U8{45})) -> i += 1
+        exponent :: i
+        loop i < b.len() && b[i] >= (U8{48}) && b[i] <= (U8{57}) -> i += 1
+        if i == exponent -> return false
+    }
+    i == b.len()
+}
+

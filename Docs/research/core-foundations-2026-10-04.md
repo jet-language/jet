@@ -169,7 +169,7 @@ Order follows dependency: a row depends only on rows above it.
 | 9 | Chip-feature requirements | No way for a helper to say it needs AVX-512; `#Multiversion` and `core.arch` absent from code | Requirement inferred like an effect, shown in hover and docs, met at a `#Multiversion` copy or `prep if $build.cpu.has(…)` | **Ballot D-CORE-FEATURE-FLOW1** (open; being revised by BallotRevise) | 1, 8 |
 | 10 | Service providers | Three ways to choose who implements a service: target facts (`Prelude/Facts.jet:54-67`), `#Context` with a fixed menu of three fields (`Prelude/Markers.jet:177`) beside the ratified provider form (D-EFFECT-HANDLE1), test fakes as separate calls (`Prelude/Core.jet:415-417`) and `#Test(faults:)` (`Markers.jet:187`) | One trait per service; all three places name a value of that trait; `#Test(faults:)` stays as a short spelling over it | **Ratified D-CORE-PROVIDER1=A** (2026-10-05) | — |
 | 11 | Trait carries its derivation | Each derivable trait exists three times: a Rust name constant, a marker row (`Markers.jet:79-100`, 10 rows) and a `derive T.X` template (`Prelude/Derives.jet:13-108`) | `derive { … }` block inside the trait; the request marker and auto-derive read it | **Ballot D-CORE-DERIVE-HOME1** (open; being revised by BallotRevise) | 2 |
-| 12 | Codable as a group | `#Codable` is a separate row beside `#Encode`, `#Decode` | `pub marker Codable = #[Encode, Decode]` | Settled by D-MARKER-GROUP1=A (impl; members are active markers, which `Encode` and `Decode` are) | 11 |
+| 12 | Codable as a group | `#Codable` is a separate row beside `#Encode`, `#Decode` | `marker Codable = #[Encode, Decode]` | Settled by D-MARKER-GROUP1=A (impl; members are active markers, which `Encode` and `Decode` are) | 11 |
 | 13 | Typed compiler tables | Prelude "Jet" files use seven row grammars that are not Jet: tab-separated `diagnostic` rows (`Prelude/Diagnostics.jet:3-7`), `bootstrap … depends_on`, `module … exports { … }`, `source_module … owns { … }`, `dispatcher_row … | <Rust>`, `format_row` (`Prelude/Core.jet:7-16,241-253`) | Every table is ordinary typed Jet: a `prep` list of typed values (as `Registry/BuiltinStatics.jet:210` already does) or a declaration with `$` facts (as `Markers.jet` and `Facts.jet` already do) | Settled by D-META-ONE1=A ("exactly one parse path"), D-OPENTABLE1=D, D-FACTDECL1=A (impl; the row grammar is internal) | — |
 | 14 | Core is its own twin | `module X exports { … }` re-lists every `pub` name of each Core file; hand Rust signatures per Core call (`crates/jet-sema/src/Sema/CheckerCoreLib/`, 26,960 lines) | The interface record is generated from Core source; `Prelude/Core.jet` module and dispatcher rows retire as modules port | Settled by D-CORE-SOURCE-AUTHORITY1=A, D-OPENTABLE1=D (Core dispatcher and export classifier generated), SP12 | 1, 13 |
 | 15 | One effect list | `Effects.jet` lists 15 roots and leaves; `core.compiler.lang.Effect` lists 12 different ones (`Random` vs `Rand`, `Proc`, `Crypto`; `Core/compiler/lang.jet:25-38`) | Generate the enum from `Effects.jet` | Settled by D-EFFECT-ENUM1=A (impl) | 13 |
@@ -286,7 +286,7 @@ total builtins such as `add_wrap` need no block.
 Before (`Core/mem/mem.jet:42-46` and `Prelude/Core.jet:255`):
 
 ```jet
-pub fn volatile_read<T>(pointer: *T) -> T Never! {
+fn volatile_read<T>(pointer: *T) -> T Never! {
     #Unsafe("volatile access requires an audited typed pointer") {
         return core.mem.volatile_read<T>(pointer)   // a routing row, not this function
     }
@@ -300,11 +300,11 @@ After:
 ```jet
 // Core/builtins/memory.jet, module jet_builtins: no body, the compiler emits one load
 #Unsafe("reads memory the type system cannot see")
-pub fn volatile_load<T>(pointer: *T) -> T Never!
+fn volatile_load<T>(pointer: *T) -> T Never!
 
 // Core/mem/mem.jet
 use jet_builtins as builtin
-pub fn volatile_read<T>(pointer: *T) -> T Never! {
+fn volatile_read<T>(pointer: *T) -> T Never! {
     #Unsafe("volatile access requires an audited typed pointer") {
         return builtin.volatile_load<T>(pointer)
     }
@@ -315,7 +315,7 @@ A builtin with a plain meaning:
 
 ```jet
 // module jet_builtins: one machine add; the body is the meaning
-pub fn add_wrap<prep n: Int>(a: Bits<n>, b: Bits<n>) -> Bits<n> Never! {
+fn add_wrap<prep n: Int>(a: Bits<n>, b: Bits<n>) -> Bits<n> Never! {
     Bits<n>.from_int((a.to_int() + b.to_int()) %% (1 << n))
 }
 ```
@@ -397,11 +397,11 @@ After (`Core/math/numeric.jet`, shape from D-TRAIT-OVERLOAD1):
 use jet_builtins as builtin
 
 #builtin.Role(.Add)
-pub trait Add {
+trait Add {
     fn add(self, rhs: Self) -> Self
 }
 
-pub trait Numeric: [Add, Sub, Mul, Comparable] {
+trait Numeric: [Add, Sub, Mul, Comparable] {
     fn zero() -> Self
     fn one() -> Self
 }
@@ -473,8 +473,8 @@ widths would give two spellings for one meaning (`Unsigned<7>` and
 // Core/math/fixed.jet (illustrative)
 use jet_builtins as builtin
 
-pub struct Unsigned<prep bits: Int> { raw: builtin.Bits<bits> }
-pub struct Signed<prep bits: Int> { raw: builtin.Bits<bits> }
+struct Unsigned<prep bits: Int> { raw: builtin.Bits<bits> }
+struct Signed<prep bits: Int> { raw: builtin.Bits<bits> }
 
 alias U8 :: Unsigned<8>
 alias U16 :: Unsigned<16>
@@ -497,7 +497,7 @@ impl Unsigned<prep bits: Int>.Add {
 Decimal family:
 
 ```jet
-pub struct IEEE<prep exponent: Int, prep fraction: Int> { raw: builtin.Float<exponent, fraction> }
+struct IEEE<prep exponent: Int, prep fraction: Int> { raw: builtin.Float<exponent, fraction> }
 alias F16 :: IEEE<5, 10>
 alias BF16 :: IEEE<8, 7>
 alias F32 :: IEEE<8, 23>
@@ -597,7 +597,7 @@ effect is permission while a feature is machine provision
 
 ```jet
 #Multiversion(x86_64, x86_64_v4)
-pub fn dot(a: [F32], b: [F32]) -> F32 {
+fn dot(a: [F32], b: [F32]) -> F32 {
     prep if $build.cpu.has(.AVX512F) { return dot16(a, b) }
     plain_dot(a, b)
 }
@@ -618,11 +618,11 @@ with one name. Proposal: the trait holds a `derive { … }` block whose members
 are generated from the type's shape. `#Equatable`, auto-derive
 (D-META-AUTO1) and the refusal `#!Equatable` all read that block; there is no
 separate marker row. A derivation-only capability with no trait, such as
-`#Codable`, is a marker group (`pub marker Codable = #[Encode, Decode]`,
+`#Codable`, is a marker group (`marker Codable = #[Encode, Decode]`,
 D-MARKER-GROUP1).
 
 ```jet
-pub trait Equatable {
+trait Equatable {
     fn equal(self, rhs: Self) -> Bool
     derive {
         fn equal(self, rhs: Self) -> Bool {

@@ -5,8 +5,8 @@
 
 PROVIDER_PLAN_FACTS_HEADER :: prep { "jet-build-plan-replay-v1" }
 
-pub struct ProviderPlanFacts {
-    entries: [String: String]
+struct ProviderPlanFacts {
+    priv entries: [String: String]
 
     // Facts with non-empty keys.
     fn from_facts(facts: [String: String]) -> ProviderPlanFacts ProviderPlanFactsError! {
@@ -46,7 +46,7 @@ pub struct ProviderPlanFacts {
 }
 
 #Error
-pub enum ProviderPlanFactsError {
+enum ProviderPlanFactsError {
     EmptyKey
     UnsupportedVersion
     TruncatedFact
@@ -94,7 +94,7 @@ fn provider_plan_hex(value: String) -> String Never! {
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
         &out.push(digits[code >> 4])
-        &out.push(digits[code & 15])
+        &out.push(digits[(code).bit_and(15)])
     }
     pkg_bytes_text(out, 0, out.len())
 }

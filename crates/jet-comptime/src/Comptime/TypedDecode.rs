@@ -8,10 +8,10 @@
 //! and the canonical `[FieldError]` value defined by `jet_std`.
 //! parity: guard tests/corelib.rs::typed_codec_decode_matches_between_full_build_and_quick_run
 //!
-//! Operates directly on the canonical `DataTree`-tagged `CtValue` tree that
+//! Operates directly on the canonical `Dyn`-tagged `CtValue` tree that
 //! `JSONInterp`/`EncodingLite` build for every codec (json/csv/toml/yaml) — its
 //! variant tags (`Null`/`Bool`/`Int`/`Float`/`Text`/`Array`/`Object`) are
-//! exactly AOT's `DataTree` shape, so no separate value type is needed at this
+//! exactly AOT's `Dyn` shape, so no separate value type is needed at this
 //! tier.
 
 use std::collections::{BTreeSet, HashMap};
@@ -28,8 +28,8 @@ mod sql_query {
     include!("../../../jet-codegen/src/Prelude/Core/SqlQuery.rs");
 }
 
-mod datatree_kind_rt {
-    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+mod dyn_kind_rt {
+    include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
 }
 
 mod inline_range_semantics {
@@ -157,7 +157,7 @@ fn migration_wire_key(style: Option<&str>, s: &StructDef, name: &str) -> String 
     }
 }
 
-// ── DataTree-tagged CtValue tree helpers (the canonical `DataTree` shape) ──
+// ── Dyn-tagged CtValue tree helpers (the canonical `Dyn` shape) ──
 
 fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
     match tree {
@@ -165,14 +165,14 @@ fn variant_of(tree: &CtValue) -> Option<(&str, Option<&CtValue>)> {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" => Some((variant.as_str(), args.first().map(|(_, v)| v))),
+        } if type_name == "Dyn" => Some((variant.as_str(), args.first().map(|(_, v)| v))),
         CtValue::Bytes(_) => Some(("Bytes", Some(tree))),
         _ => None,
     }
 }
-fn datatree_kind_for(tree: &CtValue) -> &'static str {
+fn dyn_kind_for(tree: &CtValue) -> &'static str {
     let tag = variant_of(tree).map(|(tag, _)| tag).unwrap_or("value");
-    datatree_kind_rt::datatree_kind(tag)
+    dyn_kind_rt::dyn_kind(tag)
 }
 fn object_pairs(tree: &CtValue) -> Option<Vec<(String, CtValue)>> {
     match json_payload(tree, "Object") {
@@ -414,62 +414,62 @@ fn decode_float(tree: &CtValue) -> Result<CtValue, CtValue> {
             .filter(|value| value.is_finite())
             .map(|value| CtValue::Float(CtFloat::f64(value)))
             .ok_or_else(|| decode_error("expected Float, found out-of-range Int")),
-        Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
-            let value = text
-                .trim()
-                .parse::<f64>()
-                .map_err(|_| decode_error(format!("expected Float, found text {:?}", text)))?;
-            if value.is_finite() {
-                Ok(CtValue::Float(CtFloat::f64(value)))
-            } else {
-                Err(decode_error("expected Float, found out-of-range Float"))
-            }
-        }
-        Some(("TypedText", Some(CtValue::Str(text)))) => Err(decode_error(format!(
+        Some(("Number", Some(CtValue::Str(text)))) => match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => Ok(CtValue::Float(CtFloat::f64(value))),
+            Ok(_) => Err(decode_error(format!(
+                "expected Float, found out-of-range number {text}"
+            ))),
+            Err(_) => Err(decode_error(format!("expected Float, found number {text}"))),
+        },
+        Some(("Text", Some(CtValue::Str(text)))) if super::SyncLite::text_cells_active() => text
+            .trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|value| value.is_finite())
+            .map(|value| CtValue::Float(CtFloat::f64(value)))
+            .ok_or_else(|| decode_error(format!("expected Float, found text {:?}", text))),
+        Some(("Text", Some(CtValue::Str(text)))) => Err(decode_error(format!(
             "expected Float, found text {:?}",
             text
         ))),
         _ => Err(decode_error(format!(
             "expected Float, found {}",
-            datatree_kind_for(tree)
+            dyn_kind_for(tree)
         ))),
     }
 }
 fn decode_bool(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
         Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Bool(*b)),
-        Some(("TypedText", Some(CtValue::Str(text)))) => Err(decode_error(format!(
+        Some(("Text", Some(CtValue::Str(text)))) if super::SyncLite::text_cells_active() => {
+            match text.trim() {
+                "true" => Ok(CtValue::Bool(true)),
+                "false" => Ok(CtValue::Bool(false)),
+                _ => Err(decode_error(format!(
+                    "expected Bool, found text {:?}",
+                    text
+                ))),
+            }
+        }
+        Some(("Text", Some(CtValue::Str(text)))) => Err(decode_error(format!(
             "expected Bool, found text {:?}",
             text
         ))),
-        Some(("Text", Some(CtValue::Str(text)))) => match text.trim() {
-            "true" => Ok(CtValue::Bool(true)),
-            "false" => Ok(CtValue::Bool(false)),
-            _ => Err(decode_error(format!(
-                "expected Bool, found text {:?}",
-                text
-            ))),
-        },
         _ => Err(decode_error(format!(
             "expected Bool, found {}",
-            datatree_kind_for(tree)
+            dyn_kind_for(tree)
         ))),
     }
 }
 fn decode_string(tree: &CtValue) -> Result<CtValue, CtValue> {
     match variant_of(tree) {
-        Some(("Text", Some(CtValue::Str(text))))
-        | Some(("TypedText", Some(CtValue::Str(text)))) => Ok(CtValue::Str(text.clone())),
+        Some(("Text", Some(CtValue::Str(text)))) => Ok(CtValue::Str(text.clone())),
         Some(("Number", Some(CtValue::Str(text)))) => {
             Err(decode_error(format!("expected Text, found number {text}")))
         }
-        Some(("Int", Some(CtValue::Int(n)))) => Ok(CtValue::Str(n.to_string())),
-        Some(("Int", Some(CtValue::BigInt(n)))) => Ok(CtValue::Str(n.to_string_rep())),
-        Some(("Float", Some(CtValue::Float(f)))) => Ok(CtValue::Str(format!("{:?}", f))),
-        Some(("Bool", Some(CtValue::Bool(b)))) => Ok(CtValue::Str(b.to_string())),
         _ => Err(decode_error(format!(
             "expected Text, found {}",
-            datatree_kind_for(tree)
+            dyn_kind_for(tree)
         ))),
     }
 }
@@ -495,18 +495,26 @@ fn decode_f32(tree: &CtValue) -> Result<CtValue, CtValue> {
     let value = match variant_of(tree) {
         Some(("Float", Some(CtValue::Float(value)))) => value.as_f64(),
         Some(("Int", Some(CtValue::Int(value)))) => *value as f64,
-        Some(("Number", Some(CtValue::Str(text)))) | Some(("Text", Some(CtValue::Str(text)))) => {
-            text.trim()
-                .parse::<f64>()
-                .map_err(|_| decode_error(format!("expected F32, found text {:?}", text)))?
-        }
-        Some(("TypedText", Some(CtValue::Str(text)))) => {
+        Some(("Number", Some(CtValue::Str(text)))) => match text.parse::<f64>() {
+            Ok(value) if value.is_finite() => value,
+            Ok(_) => {
+                return Err(decode_error(format!(
+                    "expected F32, found out-of-range number {text}"
+                )))
+            }
+            Err(_) => return Err(decode_error(format!("expected F32, found number {text}"))),
+        },
+        Some(("Text", Some(CtValue::Str(text)))) if super::SyncLite::text_cells_active() => text
+            .trim()
+            .parse::<f64>()
+            .map_err(|_| decode_error(format!("expected F32, found text {:?}", text)))?,
+        Some(("Text", Some(CtValue::Str(text)))) => {
             return Err(decode_error(format!("expected F32, found text {:?}", text)))
         }
         _ => {
             return Err(decode_error(format!(
                 "expected F32, found {}",
-                datatree_kind_for(tree)
+                dyn_kind_for(tree)
             )))
         }
     };
@@ -522,12 +530,6 @@ fn decode_decimal(tree: &CtValue) -> Result<CtValue, CtValue> {
         Some(("Number", Some(CtValue::Str(text)))) => {
             crate::Numeric::CtDecimal::from_json_number(text)
         }
-        Some(("TypedText", Some(CtValue::Str(text)))) => {
-            return Err(decode_error(format!(
-                "expected Decimal, found text {:?}",
-                text
-            )))
-        }
         Some(("Text", Some(CtValue::Str(text)))) => crate::Numeric::CtDecimal::from_str(text),
         Some(("Int", Some(CtValue::Int(value)))) => {
             crate::Numeric::CtDecimal::from_str(&value.to_string())
@@ -535,7 +537,7 @@ fn decode_decimal(tree: &CtValue) -> Result<CtValue, CtValue> {
         _ => {
             return Err(decode_error(format!(
                 "expected Decimal, found {}",
-                datatree_kind_for(tree)
+                dyn_kind_for(tree)
             )))
         }
     };
@@ -590,7 +592,7 @@ fn codec_int_field(
 }
 
 /// Encode one of the closed Prelude builtin codec types to the canonical
-/// DataTree-tagged comptime value. The same Codec.rs kernels are used by AOT
+/// Dyn-tagged comptime value. The same Codec.rs kernels are used by AOT
 /// and resident JIT adapters.
 pub fn encode_builtin_codec(kind: i64, value: &CtValue) -> Result<CtValue, String> {
     let text = match kind {
@@ -720,7 +722,7 @@ pub fn decode_builtin_codec(ty: &Type, tree: &CtValue) -> Result<CtValue, CtValu
 /// Decode the closed primitive/container subset without an interpreter-owned
 /// struct registry. TIR core calls retain their resolved return type but not
 /// source turbofish syntax, so CBOR uses this same scalar/list walker instead
-/// of falling through to an untyped `DataTree`.
+/// of falling through to an untyped `Dyn`.
 pub(super) fn typed_decode_builtin_value(
     ty: &Type,
     tree: &CtValue,
@@ -762,7 +764,7 @@ pub(super) fn typed_decode_value_with(
         Type::Bool => Some(decode_bool(tree)),
         Type::String => Some(decode_string(tree)),
         Type::Char => Some(decode_char(tree)),
-        Type::Named(name) if name == "DataTree" || name == "Data" => {
+        Type::Named(name) if name == "Dyn" || name == "Data" => {
             Some(Ok(tree.clone()))
         }
         Type::Named(name) if matches!(
@@ -827,7 +829,7 @@ pub(super) fn typed_decode_value_with(
             let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
                 return Some(Err(decode_error(format!(
                     "expected a list, found {}",
-                    datatree_kind_for(tree)
+                    dyn_kind_for(tree)
                 ))));
             };
             if let Type::FixedList { len, .. } = ty {
@@ -859,7 +861,7 @@ pub(super) fn typed_decode_value_with(
             let Some(pairs) = object_pairs(tree) else {
                 return Some(Err(decode_error(format!(
                     "expected an object, found {}",
-                    datatree_kind_for(tree)
+                    dyn_kind_for(tree)
                 ))));
             };
             let mut out = std::collections::BTreeMap::new();
@@ -937,7 +939,7 @@ pub(super) fn encode_typed_value_with(
         | Type::Shared(base)
         | Type::Tagged { inner: base, .. }
         | Type::Quantity { base, .. } => encode_typed_value_with(base, value, encode_nominal),
-        Type::Named(name) if name == crate::Syntax::TYPE_DATA || name == "DataTree" => {
+        Type::Named(name) if name == crate::Syntax::TYPE_DATA || name == "Dyn" => {
             Some(Ok(value.clone()))
         }
         Type::Named(name)
@@ -1088,7 +1090,7 @@ impl<'a> Interp<'a> {
                 if func.params.len() == 1 {
                     let mut frame = std::collections::HashMap::new();
                     frame.insert(func.params[0].name.clone(), value.clone());
-                    return self.call_func(&format!("{type_name}.encode"), func, frame);
+                    return self.call_func(func, frame);
                 }
             }
         }
@@ -1177,7 +1179,7 @@ impl<'a> Interp<'a> {
         let mut frame = std::collections::HashMap::new();
         frame.insert(func.params[0].name.clone(), tree.clone());
         Some(
-            match self.call_func(&format!("{name}.decode"), func, frame) {
+            match self.call_func(func, frame) {
                 Ok(CtValue::Present(value)) => Ok(*value),
                 Ok(CtValue::Failed(CtReport::Told(error))) => Err(*error),
                 Ok(CtValue::Failed(CtReport::Clean(_))) => {
@@ -1211,7 +1213,7 @@ impl<'a> Interp<'a> {
                 if let Some(decoded) = self.decode_user_value(&name, tree) {
                     return decoded;
                 }
-                let shape = datatree_kind_for(tree);
+                let shape = dyn_kind_for(tree);
                 let Some(member) = members
                     .iter()
                     .find(|member| {
@@ -1237,7 +1239,7 @@ impl<'a> Interp<'a> {
                 let Some(("Array", Some(CtValue::List(items)))) = variant_of(tree) else {
                     return Err(decode_error(format!(
                         "expected a list, found {}",
-                        datatree_kind_for(tree)
+                        dyn_kind_for(tree)
                     )));
                 };
                 if let Type::FixedList { len, .. } = ty {
@@ -1269,7 +1271,7 @@ impl<'a> Interp<'a> {
                 let Some(pairs) = object_pairs(tree) else {
                     return Err(decode_error(format!(
                         "expected an object, found {}",
-                        datatree_kind_for(tree)
+                        dyn_kind_for(tree)
                     )));
                 };
                 let mut out = std::collections::BTreeMap::new();
@@ -1426,7 +1428,7 @@ impl<'a> Interp<'a> {
             };
             let mut frame = std::collections::HashMap::new();
             frame.insert(param.name.clone(), decoded.clone());
-            match self.call_func(&format!("{name}.validate"), validate, frame) {
+            match self.call_func(validate, frame) {
                 Ok(CtValue::Present(value)) => return Ok(*value),
                 Ok(CtValue::Failed(CtReport::Told(error))) => return Err(*error),
                 Ok(other) => {
@@ -1497,7 +1499,7 @@ impl<'a> Interp<'a> {
     }
 
     /// One migration block's ops, rewriting `pairs` from shape v<i> to v<i+1>
-    /// — mirrors `Codegen/Items.rs::emit_migration_step_fns`.
+    /// — mirrors jet-sema `Registration/Serde.rs::struct_migration_decode`.
     fn apply_migration_step(
         &mut self,
         s: &StructDef,
@@ -1538,7 +1540,7 @@ impl<'a> Interp<'a> {
                         )));
                     };
                     let value = self
-                        .call_func(fn_name, func, std::collections::HashMap::new())
+                        .call_func(func, std::collections::HashMap::new())
                         .map_err(|d| decode_error(d.what.clone()))?;
                     let encoded = encode_ct_value(&value, self.structs);
                     pairs.push((key, encoded));
@@ -1576,7 +1578,7 @@ impl<'a> Interp<'a> {
                         frame.insert(param.name.clone(), old_value);
                     }
                     let new_value = self
-                        .call_func(fn_name, func, frame)
+                        .call_func(func, frame)
                         .map_err(|d| decode_error(d.what.clone()))?;
                     pairs[pos].1 = encode_ct_value(&new_value, self.structs);
                 }
@@ -1585,12 +1587,12 @@ impl<'a> Interp<'a> {
         Ok(())
     }
 
-    /// The typed decoder's full entry point — mirrors the generated canonical
-    /// `jet_decode` path's default (try current shape) plus, for a
-    /// `#PublishedSchema` type with `migration { }` blocks, the runtime
-    /// chain-walker (`emit_migration_chain_walker`): on failure, detect which
-    /// historical shape the data's key set matches (newest first) and walk
-    /// the step functions forward.
+    /// The typed decoder's full entry point — mirrors the derived `decode`
+    /// default (try current shape) plus, for a `#PublishedSchema` type with
+    /// `migration { }` blocks, the derived chain-walker (jet-sema
+    /// `Registration/Serde.rs::struct_migration_decode`): on failure, detect
+    /// which historical shape the data's key set matches (newest first) and
+    /// walk the step functions forward.
     pub(super) fn typed_decode_top(
         &mut self,
         ty: &Type,
@@ -1667,7 +1669,7 @@ impl<'a> Interp<'a> {
         }
         let parsed: Result<CtValue, CtValue> = match module {
             "core.encoding.json" => {
-                super::JSONInterp::parse_json_typed_ordered(text).map_err(|e| {
+                super::JSONInterp::parse_json(text).map_err(|e| {
                     json_parse_err_to_decode("JSON", super::JSONInterp::encoding_error_value(e))
                 })
             }

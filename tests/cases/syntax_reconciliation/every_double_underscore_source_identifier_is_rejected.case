@@ -1,0 +1,6 @@
+# Port of tests/syntax_reconciliation.rs:23-41; exact original sources and predicates.
+# Lexer-success/parser-item subclaims remain compiler-lib where separate from CLI diagnostics.
+fixture: fixtures/every_double_underscore_source_identifier_is_rejected
+step: jet inspect compiler lex every_double_underscore_source_identifier_is_rejected.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0067"] #>= 1

@@ -1,0 +1,26 @@
+Error [E0111]: `window` was made with `::`, so it can't be changed
+  --> named_write_window_calls_keep_alias_and_read_view_checks.jet:9:11
+    |
+  9 |     both(&window, value)
+    |           ^^^^^^
+ Why: `both` will change this value, so it must be mutable (`:=`)
+ Fix: Declare it with `window := ...`
+More: jet-lang.dev/e/E0111
+
+Error [E0204]: `value` is being changed in this call, so it can't be used again here
+  --> named_write_window_calls_keep_alias_and_read_view_checks.jet:9:19
+    |
+  9 |     both(&window, value)
+    |                   ^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&value`) only once, or copy first with `~value`
+More: jet-lang.dev/e/E0204
+
+Error [E0220]: `value` cannot be read while `window` has a live exclusive write window into it
+  --> named_write_window_calls_keep_alias_and_read_view_checks.jet:9:19
+    |
+  9 |     both(&window, value)
+    |                   ^^^^^
+ Why: `window` is an exclusive window into `value`; reading the owner beside that window would be rejected after lowering
+ Fix: Read or edit through `window` instead of `value`
+More: jet-lang.dev/e/E0220

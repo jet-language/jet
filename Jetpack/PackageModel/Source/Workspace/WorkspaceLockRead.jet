@@ -16,13 +16,13 @@ PKG_NO_WORKSPACE_SOURCE :: prep { "no-workspace-source" }
 // is absent, malformed, stale, or missing the identity fields a safe
 // workspace index needs; callers must not treat that as an empty workspace.
 // Reuse the session's declaration cache across lock reads and discovery scans.
-pub fn pkg_workspace_lock_load(cache: &WorkspaceDeclarationCache, workspace_root: String) -[FS]> WorkspacePlan? {
+fn pkg_workspace_lock_load(cache: &WorkspaceDeclarationCache, workspace_root: String) -[FS, Env]> WorkspacePlan? {
     resolver :: AuthorityResolver.open(workspace_root) ?? return None
     pkg_workspace_lock_load_with_resolver(&cache, resolver)
 }
 
 // Workspace facts through an already-open authority root and shared cache.
-pub fn pkg_workspace_lock_load_with_resolver(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS]> WorkspacePlan? {
+fn pkg_workspace_lock_load_with_resolver(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver) -[FS, Env]> WorkspacePlan? {
     lock_file :: resolver.checked_file(PKG_WORKSPACE_LOCK) ?? return None
     pkg_workspace_lock_load_checked_file(&cache, resolver, lock_file)
 }
@@ -30,7 +30,7 @@ pub fn pkg_workspace_lock_load_with_resolver(cache: &WorkspaceDeclarationCache, 
 // Consume one checked lock file without reopening it by pathname. Every
 // authority snapshot is revalidated around each read so a swapped file or
 // member cannot supply facts.
-pub fn pkg_workspace_lock_load_checked_file(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver, lock_file: CheckedFile) -[FS]> WorkspacePlan? {
+fn pkg_workspace_lock_load_checked_file(cache: &WorkspaceDeclarationCache, resolver: AuthorityResolver, lock_file: CheckedFile) -[FS, Env]> WorkspacePlan? {
     raw :: lock_file.text() ?? return None
     resolver.revalidate_file(lock_file) ?? return None
     lock :: pkg_lock_parse(raw) ?? return None

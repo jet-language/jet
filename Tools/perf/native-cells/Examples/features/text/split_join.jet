@@ -1,0 +1,13 @@
+// Native O1 cell split_join (text; Tools/perf/function-boundary split-join
+// with n fixed): split a 20000-word comma text and join it with ';' per round.
+fn run() {
+    words := [String]{}
+    loop i in 0..<20000 -> &words.push("w{i % 1000}")
+    text :: words.join(",")
+    acc := 0
+    loop r in 0..<300 {
+        joined :: text.split(",").join(";")
+        acc += joined.len() + r
+    }
+    print(acc)
+}

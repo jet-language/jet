@@ -1,0 +1,16 @@
+# Port of tests/jetpack_jetos.rs:111-185; fixtures and predicates copied verbatim.
+# Runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_import_writes_semantic_nixos_facts_with_audit.fixture
+mkdir: out
+step: jet os import {work}/src --host halcyon --user nate --write --out {work}/out --no-color
+exit: 0
+file: out/config.jet ~ "system.halcyon" # original predicate
+file: out/config.jet ~ "nixpkgs: NixOS/nixpkgs/nixos-24.05@github" # original predicate
+file: out/config.jet ~ "packages: [nixpkgs.git, nixpkgs.ripgrep]" # original predicate
+file: out/config.jet ~ "openssh: { enable: true" # original predicate
+file: out/config.jet ~ "user.nate.packages: [nixpkgs.neovim, nixpkgs.ghostty]" # original predicate
+file: out/config.jet ~ "user.nate.homeManager: true" # original predicate
+file: out/jetos-import-audit.json ~ "\"mode\":\"semantic-facts\"" # original predicate
+file: out/jetos-import-audit.json ~ "jetbrains.idea-ultimate" # original predicate
+file: out/jetos-import-audit.json ~ "programs.firefox.profiles" # original predicate

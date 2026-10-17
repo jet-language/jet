@@ -1694,14 +1694,11 @@ impl JetSharedGuardWaitError {
     }
 }
 
-pub fn jet_shared_guard_wait_once(
-    guard: Option<&JetSharedGuardState>,
-    condition: Option<&std::sync::Arc<JetConditionProtocol>>,
-    waiter: std::sync::Arc<dyn JetConditionWaiter>,
-) -> Result<(), JetSharedGuardWaitError> {
-    jet_shared_guard_wait_once_with_handoff(guard, condition, waiter, None)
-}
-
+// One protocol park step for every host. The route symbol
+// `jet_shared_guard_wait_once` (`core.shared_guard.wait`) is the AOT
+// `(&JetSharedGuard<T>, &JetCondition, predicate)` entry in
+// `CoreLib/Top/SharedRoutes.rs`; this kernel keeps a distinct name so the
+// flat AOT crate never holds two signatures for one symbol.
 pub fn jet_shared_guard_wait_once_with_handoff(
     guard: Option<&JetSharedGuardState>,
     condition: Option<&std::sync::Arc<JetConditionProtocol>>,
@@ -1742,6 +1739,54 @@ pub fn jet_shared_condition_wait<E>(
             return Err(JetConditionWaitError::Cancelled);
         }
     }
+}
+
+// #29 Rust-emitter seed, dies at compiler cutover. The typed site owns the
+// payload; this table carries only its quiescent reset thunk and pinned address.
+static JET_SOURCE_WORLD_SHARED_SITES: std::sync::Mutex<Vec<(usize, unsafe fn(usize))>> =
+    std::sync::Mutex::new(Vec::new());
+thread_local! {
+    static JET_SOURCE_ATTEMPT_SHARED_SITES: std::cell::RefCell<Vec<(u64, fn())>> =
+        std::cell::RefCell::new(Vec::new());
+}
+
+pub fn jet_global_shared_register_world(address: usize, reset: unsafe fn(usize)) {
+    let mut sites = JET_SOURCE_WORLD_SHARED_SITES.lock().unwrap();
+    if !sites.iter().any(|(site, _)| *site == address) {
+        sites.push((address, reset));
+    }
+}
+
+/// # Safety
+/// All readers/tasks of the retiring world must have quiesced. Site storage
+/// and its typed thunks remain pinned for process lifetime.
+pub unsafe fn jet_global_shared_reset_world() {
+    let count = JET_SOURCE_WORLD_SHARED_SITES.lock().unwrap().len();
+    for index in 0..count {
+        let (address, reset) = JET_SOURCE_WORLD_SHARED_SITES.lock().unwrap()[index];
+        reset(address);
+    }
+}
+
+pub fn jet_global_shared_register_attempt(identity: u64, reset: fn()) {
+    JET_SOURCE_ATTEMPT_SHARED_SITES.with(|sites| {
+        let mut sites = sites.borrow_mut();
+        if !sites.iter().any(|(site, _)| *site == identity) {
+            sites.push((identity, reset));
+        }
+    });
+}
+
+/// Reset on the attempt's own worker after its tasks and guards quiesce.
+/// Thread-lifetime source sites are deliberately absent from this table.
+pub fn jet_global_shared_reset_attempt() {
+    JET_SOURCE_ATTEMPT_SHARED_SITES.with(|sites| {
+        let count = sites.borrow().len();
+        for index in 0..count {
+            let reset = sites.borrow()[index].1;
+            reset();
+        }
+    });
 }
 
 #[cfg(test)]

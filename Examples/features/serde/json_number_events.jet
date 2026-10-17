@@ -1,0 +1,62 @@
+package {
+    name: "serde_json_number_events"
+    version: "0.1.0"
+    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] } }
+}
+
+// DataEvent.Number is the public, lossless numeric lexeme on every tier.
+use core.data as data
+use core.encoding as encoding
+use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn reject_json(path: Path, canonical: Bool, text: String) (EncodingError | IOError)! {
+    output :: files.create(path)
+    writer := json.writer(^output, canonical: canonical)
+    if &writer.write(encoding.DataEvent.Number(text)) == {
+        .Ok(_) -> panic("JSON writer accepted Number")
+        .Err(first) -> {
+            print(first.kind == .Unsupported)
+            print(first.byte_offset)
+            if &writer.write(encoding.DataEvent.Int(1)) == {
+                .Ok(_) -> panic("JSON writer lost its terminal error")
+                .Err(second) -> print(second == first)
+            }
+        }
+    }
+}
+
+fn reject_cbor(path: Path, text: String) (EncodingError | IOError)! {
+    output :: files.create(path)
+    writer := cbor.writer(^output)
+    if &writer.write(encoding.DataEvent.Number(text)) == {
+        .Ok(_) -> panic("CBOR writer accepted Number")
+        .Err(error) -> {
+            print(error.kind == .Unsupported)
+            print(error.byte_offset)
+        }
+    }
+}
+
+fn run() (DataError | EncodingError | IOError)! {
+    trees :: data.json<Dyn>("[123456789012345678901234567890,1e400]")
+    loop tree in trees {
+        loop event in json.events(tree) {
+            if event == {
+                .Number(text) -> print(text)
+                else -> panic("exact numeric lexeme lost")
+            }
+        }
+    }
+    scratch :: files.temp_dir("jet-json-number-events")
+    path :: Path.from(scratch.path).join("numbers")
+    loop text in ([String]{"abc", "123"}) {
+        loop canonical in ([Bool]{false, true}) {
+            reject_json(path, canonical, text)
+            print((files.read(path.to_string())).count_bytes())
+        }
+        reject_cbor(path, text)
+        print((files.read_bytes(path.to_string())).len())
+    }
+}

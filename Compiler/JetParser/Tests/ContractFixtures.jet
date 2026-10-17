@@ -58,13 +58,56 @@ fn pc_module_markers() {
     pc_require(retired.diagnostics[0].fix.contains("#Import"), "Extern replacement agrees with registry")
     pc_require(retired.program.items.len() == 1, "Extern recovery keeps the module")
     pc_require(if retired.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Extern else -> false, "Extern recovery is an import, not Bindgen")
-    active :: parse_source("#Import module c.sample {{ }}".bytes())
+    active :: parse_source("#Import module c.sqlite3 {{ fn close(database: U64) -> I32 = \"sqlite3_close\" }}\nfn run() {{}}\n".bytes())
     pc_require(active.diagnostics.len() == 0, "canonical module import is active")
+    pc_require(active.program.items.len() == 2, "C module heads precede unattached library file rules")
+    loop fact in active.program.rule_facts -> pc_require(fact.site != Val(RuleSite.File), "C import marker is not a file rule")
     bindgen :: parse_source("#Bindgen module c.sample.__bindgen__ {{ }}".bytes())
     // The marker is active; authored use of the generated-only namespace
     // still receives the independent lexical reserved-name diagnostic.
     pc_require(bindgen.diagnostics.len() == 1 && bindgen.diagnostics[0].code == "E0067", "Bindgen is active while its generated namespace stays reserved")
     pc_require(if bindgen.program.items[0] == .CModule(value) -> value.kind == CModuleKind.Bindgen else -> false, "Bindgen remains its own module kind")
+}
+
+// Rust `trait_method_sig`: an effect arrow with no result ends a trait slot
+// (no body); a free function in that shape still has no body (E0081).
+fn pc_trait_effect_slots() {
+    slots :: parse_source("trait Sink {{\n    fn begin(self, name: String) Never! -[FS]>\n    fn end(self) Never! -[FS]>\n    fn functions(self) -[]> Bool Never!\n}}\n".bytes())
+    pc_require(slots.diagnostics.len() == 0, "effect-arrow trait slots have no body")
+    pc_require(if slots.program.items[0] == .Trait(value) -> value.methods.len() == 3 && value.methods[0].default_body == None && value.methods[1].default_body == None else -> false, "effect-arrow trait slots stay requirements")
+    free :: parse_source("fn begin(name: String) Never! -[FS]>\nfn run() {{}}\n".bytes())
+    pc_require(free.diagnostics.len() == 1 && free.diagnostics[0].code == "E0081", "a free effect-arrow function without a body is E0081")
+    // D-CALLABLE-ONE1 / D-FAIL-UNIT1: the unit error contract precedes effects.
+    once :: jet_format_source("fn save(path: String) IOError! {{}}\nfn sync() Err! {{}}\nfn bounded() IOError! -[FS]> {{}}\nfn pure() Never! -[]> {{}}\ntrait Sink {{ fn save(self) IOError! -[FS]> }}\n", false)
+    pc_require(once.ok, "unit-fallible signatures format")
+    pc_require(once.text.contains("fn save(path: String) IOError!"), "unit success omits the plain arrow")
+    pc_require(once.text.contains("fn sync() Err!"), "explicit default error suffix")
+    pc_require(once.text.contains("fn bounded() IOError! -[FS]>"), "error suffix precedes the effect arrow")
+    pc_require(once.text.contains("fn pure() Never! -[]>"), "error suffix precedes the pure effect arrow")
+    pc_require(once.text.contains("fn save(self) IOError! -[FS]>"), "trait error suffix precedes the effect arrow")
+    pc_require(parse_source(once.text.bytes()).diagnostics.len() == 0, "formatted unit-fallible declarations parse")
+    twice :: jet_format_source(once.text, false)
+    pc_require(twice.ok && twice.text == once.text, "unit-fallible signatures format idempotently")
+}
+
+fn pc_enum_methods() {
+    parsed :: parse_source("enum Choice {{\n First\n Second\n fn name(self) -> String {{ \"first\" }}\n fn label(self) -> String {{ \"public\" }}\n prep fn from_int(value: Int) -> Choice {{ Choice.First }}\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "enum methods accept public-default and prep heads")
+    pc_require(if parsed.program.items[0] == .Enum(value) -> value.variants.len() == 2 && value.methods.len() == 3 && value.methods[0].is_pub && value.methods[1].is_pub && value.methods[2].is_pub && value.methods[2].is_comptime else -> false, "enum method heads preserve public-default visibility and prep facts")
+}
+
+fn pc_explicit_privacy() {
+    parsed :: parse_source("module visible {{\n fn value() -> Int {{ 1 }}\n}}\npriv module hidden {{\n fn value() -> Int {{ 2 }}\n}}\nstruct Gate {{\n priv key: Int\n label: Int\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "priv modules and fields parse without foreign-private diagnostics")
+    visible :: if parsed.program.items[0] == .CodeModule(value) -> value else -> panic("public module AST")
+    hidden :: if parsed.program.items[1] == .CodeModule(value) -> value else -> panic("private module AST")
+    pc_require(visible.is_pub && !visible.is_package_pub, "an unmarked module is public")
+    pc_require(!hidden.is_pub && !hidden.is_package_pub, "priv narrows a module")
+    public_body :: visible.body ?? panic("public module body")
+    private_body :: hidden.body ?? panic("private module body")
+    pc_require(if public_body[0] == .Func(value) -> value.is_pub else -> false, "public module members remain accessible")
+    pc_require(if private_body[0] == .Func(value) -> !value.is_pub && !value.is_package_pub else -> false, "private module members inherit explicit privacy")
+    pc_require(if parsed.program.items[2] == .Struct(value) -> value.fields.len() == 2 && !value.fields[0].is_pub && value.fields[1].is_pub else -> false, "priv fields stay private while unmarked fields are public")
 }
 
 fn pc_marker_metadata() {
@@ -86,15 +129,407 @@ fn pc_marker_metadata() {
     }
     pc_require(seen == PC_MARKER_STATUS.len(), "every marker status is covered")
     pc_require((PC_MARKER_STATUS.get("Extern") ?? "") == "#Import", "Extern registry retirement")
+    // D-DECL-META1=A: rule facts are values in the same named-parameter list.
+    facts :: parse_source("marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)\nfn run() {{}}\n".bytes())
+    pc_require(facts.diagnostics.len() == 0, "named marker metadata parses")
+    names := [String]{}
+    loop item in facts.program.items {
+        if item == .MarkerDecl(declaration) {
+            loop parameter in declaration.params {
+                &names.push(parameter.name)
+                if parameter.name.starts_with("$") {
+                    pc_require(parameter.ty == None && parameter.value != None, "marker facts carry values, not types")
+                } else {
+                    pc_require(parameter.ty != None, "marker use-site parameters carry types")
+                }
+            }
+        }
+    }
+    pc_require(names == [String]{"condition", "message", "$sites", "$repeatable"}, "marker fact and argument names keep source order")
 }
 
+fn pc_formatter_edit_boundaries() {
+    loop end in 1..<4 {
+        pc_require(jfmt_apply_source_edits("🙂x", [TextEdit]{TextEdit{span: Span{start: 0, end: end}, new_text: "a"}}) == None, "edit end cannot split a UTF-8 scalar")
+        pc_require(jfmt_apply_source_edits("🙂x", [TextEdit]{TextEdit{span: Span{start: end, end: 4}, new_text: "a"}}) == None, "edit start cannot split a UTF-8 scalar")
+    }
+    pc_require((jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 2}, new_text: "a"}}) ?? panic("whole scalar edit rejected")) == "ax", "whole scalar replacement")
+    pc_require((jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 3, end: 3}, new_text: "a"}}) ?? panic("end insertion rejected")) == "éxa", "insertion at source end")
+    pc_require((jfmt_apply_source_edits("", [TextEdit]{TextEdit{span: Span{start: 0, end: 0}, new_text: "a"}}) ?? panic("empty insertion rejected")) == "a", "insertion in empty source")
+    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 4}, new_text: "a"}}) == None, "out-of-bounds edit")
+    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 2, end: 0}, new_text: "a"}}) == None, "reversed edit")
+    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 1, end: 2}, new_text: "a"}}) == None, "edit start cannot split a UTF-8 scalar")
+    pc_require(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 1}, new_text: "a"}}) == None, "edit end cannot split a UTF-8 scalar")
+}
+
+fn pc_qualified_generic_literal() {
+    parsed :: parse_source("fn run() {{\n case :: testing.TypedHistoryCase<List<Int>>{{value: 1}}\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "qualified generic literal parses without comparison diagnostics")
+    seen := false
+    loop item in parsed.program.items {
+        if item == .Func(func) {
+            loop statement in func.body {
+                if statement == .Val(binding) {
+                    if binding.init == .StructLit(name, args, namespace, _, _, _, _) {
+                        pc_require(name == "TypedHistoryCase", "qualified literal name")
+                        pc_require(namespace == (Val("testing")), "qualified literal namespace")
+                        pc_require(args.len() == 1, "qualified literal generic arguments retained")
+                        seen = true
+                    }
+                }
+            }
+        }
+    }
+    pc_require(seen, "qualified literal AST")
+}
+
+// Exercise the production Source parser, not the reference parser used to
+// compile this fixture. Semantic Output field/binder checks belong to sema.
+fn pc_output_provider() {
+    loop kind in ([String]{"Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle", "System", "Fleet"}) {
+        source :: "app :: Output.{kind}{{ name: \"artifact\", entry: run }}\n"
+        parsed :: parse_source(source.bytes())
+        pc_require(parsed.diagnostics.len() == 0 && parsed.program.script_body.len() == 0, "{kind} enters the item route before module bindings")
+        pc_require(parsed.program.items.len() == 1, "{kind} produces exactly one declaration")
+        if parsed.program.items[0] == .Const(value) {
+            pc_require(value.name == "app" && value.name_span == Span{start: 0, end: 3}, "{kind} preserves the bare binding name span")
+            pc_require(value.span == Span{start: 0, end: source.len() - 1}, "{kind} declaration ends at the constructor close")
+            pc_require(!value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist, "{kind} stays a default-private immutable runtime declaration")
+            pc_require(value.rust_kind == RustConstKind.Const && value.attrs.len() == 0 && value.meta == None && value.ct == None && value.persist_span == None && value.resolved_output == None, "{kind} preserves ordinary Const tags")
+            pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "Output" else -> false, "{kind} carries the canonical Output type")
+            if value.value == .EnumLit(type_name, variant_name, variant_site, args, leading_dot, span) {
+                pc_require(type_name == "Output" && variant_name == kind && !leading_dot, "{kind} keeps its qualified closed-sum constructor")
+                pc_require(span == Span{start: 7, end: source.len() - 1} && variant_site == (Val(Span{start: 14, end: 14 + kind.len()})), "{kind} keeps constructor and variant byte spans")
+                pc_require(args.len() == 2, "{kind} retains both named fields")
+                pc_require(if args[0] == .Named(label, _) -> label == "name" else -> false, "{kind} retains first field label")
+                pc_require(if args[1] == .Named(label, argument) && argument == .Ident(name, _) -> label == "entry" && name == "run" else -> false, "{kind} retains the bare callable address")
+            } else { panic("Output provider lost the {kind} constructor") }
+        } else { panic("Output provider lost the {kind} Const item") }
+    }
+    source :: "defaults: {{ run: app, check: checker, enter: env }}\n"
+    parsed :: parse_source(source.bytes())
+    pc_require(parsed.diagnostics.len() == 0 && parsed.program.items.len() == 1 && parsed.program.script_body.len() == 0, "defaults enters the dedicated item route")
+    if parsed.program.items[0] == .Const(value) {
+        pc_require(value.name == "defaults" && value.name_span == Span{start: 0, end: 8} && value.span == Span{start: 0, end: source.len() - 1}, "defaults preserves existing Source declaration spans")
+        pc_require(if value.ty == .Val(annotation) && annotation == .Named(type_name) -> type_name == "__OutputDefaults" else -> false, "defaults retains the existing internal tag")
+        pc_require(!value.is_pub && !value.is_package_pub && !value.is_comptime && !value.mutable && !value.is_persist && value.rust_kind == RustConstKind.Const && value.attrs.len() == 0 && value.meta == None && value.ct == None && value.resolved_output == None, "defaults keeps its default Const facts")
+        if value.value == .StructLit(type_name, type_args, import_ns, as_trait, fields, inferred, span) {
+            pc_require(type_name == "" && type_args.len() == 0 && import_ns == None && as_trait == None && inferred && span == Span{start: 10, end: source.len() - 1}, "defaults retains the anonymous named-field record")
+            pc_require(fields.len() == 3, "defaults preserves all three addresses")
+            labels :: [String]{"run", "check", "enter"}
+            addresses :: [String]{"app", "checker", "env"}
+            loop index in 0..<fields.len() {
+                field :: fields[index]
+                pc_require(field.name == labels[index], "defaults preserves field order")
+                pc_require(if field.value == .Ident(name, _) -> name == addresses[index] else -> false, "defaults preserves bare Output addresses")
+            }
+        } else { panic("Output defaults provider lost its record") }
+    } else { panic("Output defaults provider lost its Const item") }
+    plain :: parse_source("plain :: 1\n".bytes())
+    pc_require(plain.diagnostics.len() == 0 && plain.program.script_body.len() == 0, "ordinary module bindings retain their route")
+    pc_require(if plain.program.items[0] == .Const(value) -> value.name == "plain" && value.ty == None else -> false, "ordinary bindings do not acquire Output tags")
+    nested :: parse_source("module group {{\n app :: Output.Executable{{ name: \"artifact\", entry: run }}\n defaults: {{ run: app }}\n}}\n".bytes())
+    pc_require(nested.diagnostics.len() == 0, "inline module item dispatch uses the same provider")
+    pc_require(if nested.program.items[0] == .CodeModule(value) && value.body == .Val(body) -> body.len() == 2 else -> false, "inline module retains both Output declarations")
+}
+
+// Kind-only queries are checked against the existing whole-token accessor.
+// This semantic oracle is not a production allocation or timing measurement.
+fn pc_current_kind_equivalence() {
+    sources :: [String]{">> /* after split */ name", "/* block */ // line\n name", "/* block */ // line\n"}
+    loop source in sources {
+        bytes := source.bytes()
+        lexed := lex(bytes)
+        pc_require(lexed.diagnostics.len() == 0, "current-kind fixture lexes real tokens")
+        prepared := parser_prepare_tokens(^lexed.tokens, &lexed.tables)
+        pc_require(prepared.diagnostics.len() == 0, "current-kind fixture uses canonical prepared tokens")
+        end :: bytes.len()
+        state := JetParserState{tokens: ^prepared.tokens, position: 0, diagnostics: ^lexed.diagnostics, source_end: end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: end, end: end}, result_handler_depth: 0, statement_start: -1, line_starts: parser_line_starts(bytes), sources: [[U8]]{^bytes}, allow_environment_reads: false, tables: [TokenTables]{^lexed.tables}}
+        pc_require(state.tokens.len() > 0 && state.tokens[state.tokens.len() - 1].kind == TOKEN_EOF, "fixture retains the actual lexical EOF token")
+        split :: source.starts_with(">>")
+        if split {
+            pc_require(state.tokens[0].kind == TOKEN_SHR, "real lexer produces the combined type-close token")
+            _ := parser_take_type_close(&state)
+            pc_require(state.pending_type_gt, "real type-close consumer leaves the pending second GT")
+        }
+        before :: state.position
+        oracle := state.copy()
+        expected :: parser_current(&oracle).kind
+        actual :: parser_current_kind(&state)
+        pc_require(actual == expected && "{state:Debug}" == "{oracle:Debug}", "kind-only query preserves full parser state and the token-accessor verdict")
+        if split -> pc_require(actual == TOKEN_GT && state.position == before, "pending GT precedes trivia and does not advance the cursor")
+        if !split -> pc_require(state.position > before, "mixed and trivia-only comments advance to the same real token or EOF")
+        stable :: state.position
+        pc_require(parser_current_kind(&state) == actual && state.position == stable, "repeated current-kind query is idempotent")
+        if split {
+            cursors :: [Int]{-1, state.tokens.len(), state.tokens.len() + 1}
+            loop cursor in cursors {
+                state.position = cursor
+                oracle = state.copy()
+                expected_pending :: parser_current(&oracle).kind
+                pc_require(parser_current_kind(&state) == expected_pending && expected_pending == TOKEN_GT, "pending split token precedes negative and out-of-range bounds")
+                pc_require(state.position == cursor && "{state:Debug}" == "{oracle:Debug}", "pending GT preserves even an out-of-range cursor and all state")
+                pc_require(parser_current_kind(&state) == TOKEN_GT && state.position == cursor, "pending GT remains idempotent")
+            }
+        }
+        state.pending_type_gt = false
+        cursors :: [Int]{-1, 0, state.tokens.len() - 1, state.tokens.len(), state.tokens.len() + 1}
+        loop cursor in cursors {
+            state.position = cursor
+            oracle = state.copy()
+            expected_at :: parser_current(&oracle).kind
+            actual_at :: parser_current_kind(&state)
+            pc_require(actual_at == expected_at && "{state:Debug}" == "{oracle:Debug}", "valid, comment, actual EOF, and invalid cursors match the canonical token accessor")
+            if cursor < 0 || cursor >= state.tokens.len() -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "negative, end, and beyond-end cursors return EOF without advancing")
+            if cursor == state.tokens.len() - 1 -> pc_require(actual_at == TOKEN_EOF && state.position == cursor, "the real EOF token is read without advancing")
+            after :: state.position
+            pc_require(parser_current_kind(&state) == actual_at && state.position == after, "all non-pending cursor cases remain idempotent")
+        }
+    }
+}
+
+fn pc_qualified_generic_literal() {
+    parsed :: parse_source("fn run() {{\n case :: testing.TypedHistoryCase<List<Int>>{{value: 1}}\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "qualified generic literal parses without comparison diagnostics")
+    seen := false
+    loop item in parsed.program.items {
+        if item == .Func(func) {
+            loop statement in func.body {
+                if statement == .Val(binding) {
+                    if binding.init == .StructLit(name, args, namespace, _, _, _, _) {
+                        pc_require(name == "TypedHistoryCase", "qualified literal name")
+                        pc_require(namespace == (Val("testing")), "qualified literal namespace")
+                        pc_require(args.len() == 1, "qualified literal generic arguments retained")
+                        seen = true
+                    }
+                }
+            }
+        }
+    }
+    pc_require(seen, "qualified literal AST")
+}
+
+fn pc_optional_comparison_rhs(rhs: String, binds: Bool) {
+    parsed :: parse_source("fn run() {{ result :: checked.integer_bounds == {rhs} }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "optional comparison parses: {rhs}")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding")
+    if binds {
+        pc_require(if binding.init == .PatternTest(_, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
+    } else {
+        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
+    }
+}
+
+fn pc_optional_comparisons() {
+    pc_optional_comparison_rhs("Val(value)", true)
+    pc_optional_comparison_rhs("Val(_)", true)
+    pc_optional_comparison_rhs("Val(true)", false)
+    pc_optional_comparison_rhs("Val(integer_bounds_exact(number))", false)
+    pc_optional_comparison_rhs("Val(checked.value)", false)
+    pc_optional_comparison_rhs("Val(number + 1)", false)
+    parsed :: parse_source("fn run() {{ result :: optional != Val(value) }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "inequality remains value equality")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("inequality function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("inequality binding")
+    pc_require(if binding.init == .Binary(op, _, _, _) -> op == BinOp.Ne else -> false, "inequality introduces no binder")
+    bare :: parse_source("fn run() {{ if shape == {{ Circle(r) -> print(r) }} }}".bytes())
+    pc_require(bare.diagnostics.len() == 1 && bare.diagnostics[0].code == "E0367", "bare variant dispatch still teaches the dot")
+}
+
+fn pc_optional_comparison_rhs(rhs: String, binds: Bool) {
+    parsed :: parse_source("fn run() {{ result :: checked.integer_bounds == {rhs} }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "optional comparison parses: {rhs}")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding")
+    if binds {
+        pc_require(if binding.init == .PatternTest(_, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
+    } else {
+        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
+    }
+}
+
+fn pc_optional_comparisons() {
+    pc_optional_comparison_rhs("Val(value)", true)
+    pc_optional_comparison_rhs("Val(_)", true)
+    pc_optional_comparison_rhs("Val(true)", false)
+    pc_optional_comparison_rhs("Val(integer_bounds_exact(number))", false)
+    pc_optional_comparison_rhs("Val(checked.value)", false)
+    pc_optional_comparison_rhs("Val(number + 1)", false)
+    parsed :: parse_source("fn run() {{ result :: optional != Val(value) }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "inequality remains value equality")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("inequality function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("inequality binding")
+    pc_require(if binding.init == .Binary(op, _, _, _) -> op == BinOp.Ne else -> false, "inequality introduces no binder")
+    bare :: parse_source("fn run() {{ if shape == {{ Circle(r) -> print(r) }} }}".bytes())
+    pc_require(bare.diagnostics.len() == 1 && bare.diagnostics[0].code == "E0367", "bare variant dispatch still teaches the dot")
+}
+
+fn pc_optional_comparison_rhs(rhs: String, binds: Bool) {
+    parsed :: parse_source("fn run() {{ result :: checked.integer_bounds == {rhs} }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "optional comparison parses: {rhs}")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding")
+    if binds {
+        pc_require(if binding.init == .PatternTest(_, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
+    } else {
+        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
+    }
+}
+
+fn pc_optional_comparisons() {
+    pc_optional_comparison_rhs("Val(value)", true)
+    pc_optional_comparison_rhs("Val(_)", true)
+    pc_optional_comparison_rhs("Val(true)", false)
+    pc_optional_comparison_rhs("Val(integer_bounds_exact(number))", false)
+    pc_optional_comparison_rhs("Val(checked.value)", false)
+    pc_optional_comparison_rhs("Val(number + 1)", false)
+    parsed :: parse_source("fn run() {{ result :: optional != Val(value) }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "inequality remains value equality")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("inequality function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("inequality binding")
+    pc_require(if binding.init == .Binary(op, _, _, _) -> op == BinOp.Ne else -> false, "inequality introduces no binder")
+    bare :: parse_source("fn run() {{ if shape == {{ Circle(r) -> print(r) }} }}".bytes())
+    pc_require(bare.diagnostics.len() == 1 && bare.diagnostics[0].code == "E0367", "bare variant dispatch still teaches the dot")
+}
+
+fn pc_optional_comparison_rhs(rhs: String, binds: Bool) {
+    parsed :: parse_source("fn run() {{ result :: checked.integer_bounds == {rhs} }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "optional comparison parses: {rhs}")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding")
+    if binds {
+        pc_require(if binding.init == .PatternTest(_, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
+    } else {
+        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .EnumLit(_, variant, _, args, _, _) -> variant == "Val" && args.len() == 1 else -> false) else -> false, "payload expression remains value equality: {rhs}")
+    }
+}
+
+fn pc_optional_comparisons() {
+    pc_optional_comparison_rhs("Val(value)", true)
+    pc_optional_comparison_rhs("Val(_)", true)
+    pc_optional_comparison_rhs("Val(true)", false)
+    pc_optional_comparison_rhs("Val(integer_bounds_exact(number))", false)
+    pc_optional_comparison_rhs("Val(checked.value)", false)
+    pc_optional_comparison_rhs("Val(number + 1)", false)
+    parsed :: parse_source("fn run() {{ result :: optional != Val(value) }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "inequality remains value equality")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("inequality function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("inequality binding")
+    pc_require(if binding.init == .Binary(op, _, _, _) -> op == BinOp.Ne else -> false, "inequality introduces no binder")
+    bare :: parse_source("fn run() {{ if shape == {{ Circle(r) -> print(r) }} }}".bytes())
+    pc_require(bare.diagnostics.len() == 1 && bare.diagnostics[0].code == "E0367", "bare variant dispatch still teaches the dot")
+}
+
+fn pc_optional_comparison_rhs(rhs: String, binds: Bool) {
+    parsed :: parse_source("fn run() {{ result :: checked.integer_bounds == {rhs} }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "optional comparison parses: {rhs}")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding")
+    if binds {
+        pc_require(if binding.init == .PatternTest(_, _, _) -> true else -> false, "bare payload remains a binder: {rhs}")
+    } else {
+        pc_require(if binding.init == .Binary(op, _, value, _) -> op == BinOp.Eq && (if value == .Call(call) -> call.name == "Val" else -> false) else -> false, "payload expression remains value equality: {rhs}")
+    }
+}
+
+fn pc_optional_comparisons() {
+    pc_optional_comparison_rhs("Val(value)", true)
+    pc_optional_comparison_rhs("Val(_)", true)
+    pc_optional_comparison_rhs("Val(true)", false)
+    pc_optional_comparison_rhs("Val(integer_bounds_exact(number))", false)
+    pc_optional_comparison_rhs("Val(checked.value)", false)
+    pc_optional_comparison_rhs("Val(number + 1)", false)
+    parsed :: parse_source("fn run() {{ result :: optional != Val(value) }}".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "inequality remains value equality")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("inequality function")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("inequality binding")
+    pc_require(if binding.init == .Binary(op, _, _, _) -> op == BinOp.Ne else -> false, "inequality introduces no binder")
+    bare :: parse_source("fn run() {{ if shape == {{ Circle(r) -> print(r) }} }}".bytes())
+    pc_require(bare.diagnostics.len() == 1 && bare.diagnostics[0].code == "E0367", "bare variant dispatch still teaches the dot")
+}
+
+fn pc_formatter_runtime_declarations() {
+    loop simplify in ([Bool]{false, true}) {
+        once :: jet_format_source(PC_FMT_RUNTIME_SOURCE, simplify)
+        pc_require(once.ok, "raw C imports and module bindings format")
+        pc_require(once.text == PC_FMT_RUNTIME_SOURCE, "raw C symbols, attributes and binding sigils remain byte-exact")
+        twice :: jet_format_source(once.text, simplify)
+        pc_require(twice.ok && twice.text == once.text, "runtime declaration formatting is idempotent")
+    }
+}
+
+fn pc_qualified_generic_literal() {
+    parsed :: parse_source("fn run() {{\n case :: testing.TypedHistoryCase<List<Int>>{{value: 1}}\n}}\n".bytes())
+    pc_require(parsed.diagnostics.len() == 0, "qualified generic literal parses without comparison diagnostics")
+    seen := false
+    loop item in parsed.program.items {
+        if item == .Func(func) {
+            loop statement in func.body {
+                if statement == .Val(binding) {
+                    if binding.init == .StructLit(name, args, namespace, _, _, _, _) {
+                        pc_require(name == "TypedHistoryCase", "qualified literal name")
+                        pc_require((namespace ?? "") == "testing", "qualified literal namespace")
+                        pc_require(args.len() == 1, "qualified literal generic arguments retained")
+                        seen = true
+                    }
+                }
+            }
+        }
+    }
+    pc_require(seen, "qualified literal AST")
+}
+
+fn pc_lexical_and_parser_diagnostics() {
+    parsed :: parse_source("fn run() {{\n __value :: 1 | 2\n print(__value)\n}}\n".bytes())
+    reserved := false
+    retired := false
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.code == "E0067" -> reserved = true
+        if diagnostic.code == "E0398" -> retired = true
+    }
+    pc_require(reserved && retired, "parser teaching survives lexical reserved-name errors")
+}
+
+// D-PAT-RECORD1=A: after `==`, `Name{` is a struct pattern only when its
+// brace body reads as pattern entries; typed literals and a constant before
+// an `if` body stay value equality.
+fn pc_named_struct_pattern_rhs_init(source: String, label: String) -> Expr {
+    parsed :: parse_source(source.bytes())
+    pc_require(parsed.diagnostics.len() == 0, "parses without diagnostics: {label}")
+    function :: if parsed.program.items[0] == .Func(value) -> value else -> panic("comparison function: {label}")
+    binding :: if function.body[0] == .Val(value) -> value else -> panic("comparison binding: {label}")
+    binding.init
+}
+
+fn pc_named_struct_pattern_rhs() {
+    loop rhs in ([String]{"I64{{0}}", "I64{{-4}}"}) {
+        init :: pc_named_struct_pattern_rhs_init("fn run() {{ result :: errno == {rhs} }}", rhs)
+        pc_require(if init == .Binary(op, _, _, _) -> op == BinOp.Eq else -> false, "typed literal stays value equality: {rhs}")
+    }
+    constant :: parse_source("fn run() {{\n if kind == CONST {{ print(kind) }}\n if kind == Limit {{ print(kind) }}\n}}\n".bytes())
+    pc_require(constant.diagnostics.len() == 0, "a name compared before an `if` body stays a value")
+    init :: pc_named_struct_pattern_rhs_init("fn run() {{ result :: point == Point{{x, y: 0}} }}", "Point{{x, y: 0}}")
+    shaped :: if init == .PatternTest(_, pattern, _) -> (if pattern == .Struct(fields, _, _, head) -> fields.len() == 2 && (if head == .Val(_) -> true else -> false) else -> false) else -> false
+    pc_require(shaped, "a named struct pattern still binds and compares fields")
+}
 fn run() {
     canonical :: parse_source("fn run() {{\n values :: [JSON]{{JSON.Null}}\n print(values.len())\n}}\n".bytes())
     pc_require(canonical.diagnostics.len() == 0, "canonical newline collection consumer")
     pc_semicolon("fn run() {{ first :: 1; second :: 2; third :: 3\n}}\n", "\n")
     pc_semicolon("fn run() {{\n first :: 1;\n second :: 2;\n third :: 3\n}}\n", "")
     pc_module_markers()
+    pc_named_struct_pattern_rhs()
+    pc_lexical_and_parser_diagnostics()
     pc_marker_metadata()
+    pc_formatter_edit_boundaries()
+    pc_qualified_generic_literal()
+    pc_trait_effect_slots()
+    pc_enum_methods()
+    pc_explicit_privacy()
+    pc_qualified_generic_literal()
     print("V48 semicolon edits/recovery: passed")
     print("marker registry/parser status: passed")
+    print("trait effect-arrow slots: passed")
+    print("Output provider AST facts: passed")
 }

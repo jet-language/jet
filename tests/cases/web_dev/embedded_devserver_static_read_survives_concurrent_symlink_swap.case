@@ -1,0 +1,59 @@
+# Original tests/web_dev.rs:3146-3282; exact requests, predicates and aggregate counts.
+# Original predicate: load-only threads replaced by concurrent Jet processes; per-process leaked reports AND, served reports SUM; swapper stops after all joins.
+# PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw).
+fixture: embedded_devserver_static_read_survives_concurrent_symlink_swap.fixture
+requires: os:unix
+env: S5_PORT={free-port:web}
+env: S5_ROOT={work}
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet requests/HTTP.jet
+write: app.jet app.source
+session app raw: jet dev app.jet
+stderr: null
+recv app line until ^= "App preview: " timeout 60s
+capture: served = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
+write: build/race.js inside.source
+write: outside-secret.js outside.source
+step: jet test claims
+env: S5_PORT={cap:served}
+env: S5_PHASE=baseline
+exit: 0
+spawn swapper: jet run swapper
+await: file swapper-ready timeout 60s
+spawn request0: jet run requests
+env: S5_PORT={cap:served}
+env: S5_WORKER=0
+spawn request1: jet run requests
+env: S5_PORT={cap:served}
+env: S5_WORKER=1
+spawn request2: jet run requests
+env: S5_PORT={cap:served}
+env: S5_WORKER=2
+spawn request3: jet run requests
+env: S5_PORT={cap:served}
+env: S5_WORKER=3
+wait: request0
+exit: 0
+stdout.trim: = "false" # original aggregate leaked flag must remain false for every load worker
+wait: request1
+exit: 0
+stdout.trim: = "false" # original aggregate leaked flag must remain false for every load worker
+wait: request2
+exit: 0
+stdout.trim: = "false" # original aggregate leaked flag must remain false for every load worker
+wait: request3
+exit: 0
+stdout.trim: = "false" # original aggregate leaked flag must remain false for every load worker
+write: stop stop.source
+wait: swapper
+exit: 0
+capture: swaps = text stdout.trim
+step: jet run cleanup
+exit: 0
+json: cap:swaps doc $ > 0
+step: jet test claims
+env: S5_PHASE=aggregate
+exit: 0
+signal app: KILL
+close app
+exit: any # original KillOnDrop ignores child status

@@ -1,0 +1,8 @@
+Error [E1102]: `parallel callback` can't cross a parallel worker boundary because `callback` isn't sendable
+  --> parallel_adapters_reject_unsafe_boundaries_before_codegen_3.jet:5:35
+    |
+  5 |     ignored :: [1, 2, 3].para_map(callback)
+    |                                   ^^^^^^^^
+ Why: The closure holds captures that are not sendable; this concurrent boundary moves owned values between workers
+ Fix: Copy plain owned data into the worker, or keep this operation sequential
+More: jet-lang.dev/e/E1102

@@ -1,0 +1,21 @@
+// Core/CAbiIter.rs:299-304. The request mutex serializes active/fuel and the
+// first-stop publication exactly as Comptime.work does. Shielding suppresses
+// the returned stop, NOT the charge or the publication on the current control.
+#Export(c) fn jet_rt_iter_charge() -> I64 {
+    exhausted := false
+    sync_mutex_lock(comptime_root)
+    if (sync_load(comptime_root + I64{8}) != I64{0}) {
+        remaining :: sync_load(comptime_root + I64{16})
+        if {
+            (remaining == I64{0}) -> {
+                comptime_publish_locked(I64{3}, I64{2})
+                exhausted = true
+            }
+            else -> {
+                sync_store(comptime_root + I64{16}, wrapping(remaining - I64{1}))
+            }
+        }
+    }
+    sync_mutex_unlock(comptime_root)
+    if exhausted && !scheduler_shielded() -> I64{1} else -> I64{0}
+}

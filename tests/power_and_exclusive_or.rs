@@ -1,5 +1,4 @@
-//! D-EXPOP1=A, D-EXPSEM1=A, D-XORSPELL1=A — the power operator `^`, its
-//! grouping and result types, and the `~|` spelling exclusive-or moved to.
+//! D-SIGIL-ALGEBRA1=B — named power and bit arithmetic preserve numeric meaning.
 
 mod common;
 
@@ -41,8 +40,7 @@ fn diagnostic_codes(name: &str, src: &str) -> Vec<String> {
 /// is pinned through its `.numerator()` method.
 const WANT: &str = "fn want_int(n: Int) { print(n) }\nfn want_float(n: Float) { print(n) }\n";
 
-/// D-EXPSEM1=A: `^` groups to the right and binds tighter than a leading
-/// minus. Evaluating the two shapes proves the grouping the parser built.
+/// Explicit method nesting preserves the previous power grouping.
 #[test]
 fn power_groups_right_and_beats_unary_minus() {
     if !have_rustc() {
@@ -50,12 +48,12 @@ fn power_groups_right_and_beats_unary_minus() {
     }
     let src = r#"
 fn run() {
-    print(2 ^ 3 ^ 2)
-    print((2 ^ 3) ^ 2)
-    print(-3 ^ 2)
-    print((-3) ^ 2)
-    print(2 * 3 ^ 2)
-    print(2 ^ 3 * 2)
+    print((2).pow((3).pow(2)))
+    print((2).pow(3).pow(2))
+    print(-(3).pow(2))
+    print((-3).pow(2))
+    print(2 * (3).pow(2))
+    print((2).pow(3) * 2)
 }
 "#;
     let (code, out) = build_and_run("power_grouping", src);
@@ -71,17 +69,17 @@ fn power_result_types_follow_the_operands() {
     // A whole base and a non-negative whole exponent stay exact.
     assert!(accepts(
         "int_pow",
-        &format!("{WANT}fn run() {{\n    want_int(2 ^ 10)\n}}\n")
+        &format!("{WANT}fn run() {{\n    want_int((2).pow(10))\n}}\n")
     ));
     // A written negative exponent gives an exact Fraction.
     assert!(accepts(
         "neg_pow_fraction",
-        &format!("{WANT}fn run() {{\n    print((2 ^ -1).numerator())\n}}\n")
+        &format!("{WANT}fn run() {{\n    print((2).pow(-1).numerator())\n}}\n")
     ));
     assert!(
         !diagnostic_codes(
             "neg_pow_float",
-            &format!("{WANT}fn run() {{\n    want_float(2 ^ -1)\n}}\n")
+            &format!("{WANT}fn run() {{\n    want_float((2).pow(-1))\n}}\n")
         )
         .is_empty(),
         "a written negative exponent must not infer an approximate Float"
@@ -89,7 +87,7 @@ fn power_result_types_follow_the_operands() {
     assert!(
         !diagnostic_codes(
             "neg_pow_int",
-            &format!("{WANT}fn run() {{\n    want_int(2 ^ -1)\n}}\n")
+            &format!("{WANT}fn run() {{\n    want_int((2).pow(-1))\n}}\n")
         )
         .is_empty(),
         "a negative exponent must not infer a whole number"
@@ -98,12 +96,12 @@ fn power_result_types_follow_the_operands() {
     // decimal literal is the exact Decimal carrier under D-TYPE2-DEFAULT1.
     assert!(accepts(
         "float_operand",
-        &format!("{WANT}fn run() {{\n    want_float(Float{{2.0}} ^ 10)\n}}\n")
+        &format!("{WANT}fn run() {{\n    want_float(Float{{2.0}}.pow(10))\n}}\n")
     ));
     assert!(
         !diagnostic_codes(
             "float_operand_int",
-            &format!("{WANT}fn run() {{\n    want_int(Float{{2.0}} ^ 10)\n}}\n")
+            &format!("{WANT}fn run() {{\n    want_int(Float{{2.0}}.pow(10))\n}}\n")
         )
         .is_empty(),
         "a Float operand must not infer a whole number"
@@ -115,14 +113,14 @@ fn power_result_types_follow_the_operands() {
 #[test]
 fn exact_int_power_stays_exact_across_tiers() {
     let src = r#"
-FOLDED :: prep { 2 ^ 200 }
+FOLDED :: prep { (2).pow(200) }
 
 fn show_exact(value: Int) {
     print(value)
 }
 
 fn raise(base: Int, exponent: Int) -> Int {
-    return base ^ exponent
+    return base.pow(exponent)
 }
 
 fn run() {
@@ -137,7 +135,7 @@ fn run() {
     );
 }
 
-/// D-EXPSEM1=A: `^=` raises a binding in place, on whole numbers and floats.
+/// Numeric method updates explicitly assign the result back.
 #[test]
 fn power_assign_raises_in_place() {
     if !have_rustc() {
@@ -146,10 +144,10 @@ fn power_assign_raises_in_place() {
     let src = r#"
 fn run() {
     growth := 2
-    growth ^= 10
+    growth = growth.pow(10)
     print(growth)
-    price := 1.5
-    price ^= 2.0
+    price := Float{1.5}
+    price = price.pow(Float{2.0})
     print(price)
 }
 "#;
@@ -158,17 +156,17 @@ fn run() {
     assert_eq!(out, "1024\n2.25\n", "{out}");
 }
 
-/// D-XORSPELL1=A: `~|` is exclusive-or and `~|=` is its compound.
+/// Named exclusive-or uses the same shared integer operation.
 #[test]
-fn exclusive_or_uses_the_tilde_pipe_spelling() {
+fn exclusive_or_uses_the_named_method() {
     if !have_rustc() {
         return;
     }
     let src = r#"
 fn run() {
-    print(12 ~| 10)
+    print((12).bit_xor(10))
     acc := 0
-    loop byte in [17, 42, 99, 8] { acc ~|= byte }
+    loop byte in [17, 42, 99, 8] { acc = acc.bit_xor(byte) }
     print(acc)
 }
 "#;
@@ -182,27 +180,26 @@ fn run() {
 fn exclusive_or_needs_matching_integer_widths() {
     assert!(accepts(
         "xor_same_width",
-        "fn run() {\n    a :: U8{12}\n    b :: U8{10}\n    print(a ~| b)\n}\n"
+        "fn run() {\n    a :: U8{12}\n    b :: U8{10}\n    print(a.bit_xor(b))\n}\n"
     ));
-    // A pair with no common integer type reports the D-SG9 error, exactly as
-    // it did under the old `^` spelling.
+    // A pair with no common integer type reports the integer typing error.
     let mixed = diagnostic_codes(
         "xor_mixed_width",
-        "fn run() {\n    a :: U8{12}\n    b :: I8{10}\n    print(a ~| b)\n}\n",
+        "fn run() {\n    a :: U8{12}\n    b :: I8{10}\n    print(a.bit_xor(b))\n}\n",
     );
     assert!(
         mixed.iter().any(|code| code == "E0109"),
         "mixed widths must report E0109, got {mixed:?}"
     );
-    let floats = diagnostic_codes("xor_floats", "fn run() {\n    print(1.5 ~| 2.5)\n}\n");
+    let floats = diagnostic_codes("xor_floats", "fn run() {\n    print(Float{1.5}.bit_xor(Float{2.5}))\n}\n");
     assert!(
         floats.iter().any(|code| code == "E0109"),
         "exclusive-or on floats must report E0109, got {floats:?}"
     );
 }
 
-/// D-EXPOP1=A / D-SHAPE-COPY1=A: prefix `^` is still take and prefix `~` is
-/// still copy. Position tells each apart from its infix neighbour.
+/// D-EXPOP1=A / D-COPY-WORD1=A: prefix `^` is still take, and the copy is the
+/// method `x.copy()`, so neither collides with the infix `~|` and `^`.
 #[test]
 fn prefix_take_and_copy_survive_the_rebind() {
     if !have_rustc() {
@@ -218,7 +215,7 @@ fn run() {
     print(melt(^blade))
     flags :: 12
     source :: 5
-    print(flags ~| ~source)
+    print(flags ~| source.copy())
     print(flags ^ 2)
 }
 "#;
@@ -227,16 +224,11 @@ fn run() {
     assert_eq!(out, "3\n9\n144\n", "{out}");
 }
 
-/// Greenfield: infix `^` never means exclusive-or again. `12 ^ 2` is a power,
-/// so it must not produce the old exclusive-or answer of 14.
+/// Greenfield: infix caret is retired, and names teach the replacement.
 #[test]
-fn infix_caret_never_means_exclusive_or() {
-    if !have_rustc() {
-        return;
-    }
-    let (code, out) = build_and_run("caret_is_power", "fn run() {\n    print(12 ^ 2)\n}\n");
-    assert_eq!(code, 0, "{out}");
-    assert_eq!(out, "144\n", "{out}");
+fn infix_caret_teaches_pow() {
+    let codes = diagnostic_codes("caret_retired", "fn run() {\n    print(12 ^ 2)\n}\n");
+    assert!(codes.iter().any(|code| code == "E0398"), "{codes:?}");
 }
 
 /// I9 / #1485: powers above 2^53 stay exact on every native tier. The JS tier
@@ -247,8 +239,8 @@ fn infix_caret_never_means_exclusive_or() {
 fn powers_above_two_to_the_fifty_three_stay_exact() {
     let src = r#"
 fn run() {
-    print(2 ^ 60)
-    print(3 ^ 39)
+    print((2).pow(60))
+    print((3).pow(39))
 }
 "#;
     assert_tiers_agree(

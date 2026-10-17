@@ -1,0 +1,25 @@
+// D-DATATREE-PATH1=A: Dyn reads with [key] and [i] like maps and lists, and
+// writes in place on a mutable binding.
+use core.encoding.json as json
+
+fn run() {
+    tree :: json.parse("{{\"user\":{{\"name\":\"Ada\",\"tags\":[\"x\",\"y\"]}},\"note\":null}}") ?? panic("parse")
+    print(tree["user"]["name"])
+    print(tree["user"]["tags"][1])
+    print(tree.user.name)
+    print(tree.get("user")?.get("nickname")?.to_text() ?? "anon")
+    print(tree["user"]["tags"].get(5)?.to_text() ?? "none")
+
+    // JSON null is a value, not a missing field.
+    print(tree.has("note"))
+    print(tree["note"])
+
+    key :: "user"
+    print(tree[key]["tags"].len())
+
+    doc := json.parse("{{\"user\":{{\"name\":\"Ada\",\"tags\":[\"x\",\"y\"]}}}}") ?? panic("parse")
+    doc["user"]["name"] = "Grace"
+    doc.user.tags[0] = "z"
+    doc.user.age = 36
+    print(json.to_string(doc))
+}

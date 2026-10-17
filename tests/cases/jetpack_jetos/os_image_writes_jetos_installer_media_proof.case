@@ -1,0 +1,110 @@
+# Port of tests/jetpack_jetos.rs:4342-4636. Fixture bytes verbatim; original fake native tools549-594, never claimed real guest proof.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_image_writes_jetos_installer_media_proof.fixture
+mkdir: package-root
+write: tools/limine os_image_writes_jetos_installer_media_proof.limine.template
+chmod: tools/limine 0755
+env: JETPACK_ROOT={work}/package-root
+env: PATH={work}/tools
+env: JETOS_CACHYOS_KERNEL={work}/boot/kernel
+env: JETOS_CACHYOS_INITRD={work}/boot/initrd
+step: jet os image halcyon --manual /dev/sda --no-color --offline
+cwd: project
+exit: 0
+file: package-root/systems/images/jetos-installer-halcyon.iso.proof.json ~ "\"brand\":\"jetos\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.proof.json ~ "\"kind\":\"hybrid-iso\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.proof.json ~ "\"state\":\"built\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.proof.json ~ "\"sha256\":" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso is-file
+file: package-root/systems/images/jetos-image-variants-halcyon.proof.json ~ "\"kind\":\"jetos.image-variants\"" # original predicate
+file: package-root/systems/images/jetos-image-variants-halcyon.proof.json ~ "\"kind\": \"qcow2\"" # original predicate
+file: package-root/systems/images/jetos-image-variants-halcyon.proof.json ~ "\"kind\": \"sd\"" # original predicate
+file: package-root/systems/images/jetos-image-variants-halcyon.proof.json ~ "\"kind\": \"netboot-ipxe\"" # original predicate
+file: package-root/systems/images/jetos-image-variants-halcyon.proof.json ~ "\"kind\": \"raw\"" # original predicate
+file: package-root/systems/images/jetos-image-variants-halcyon.proof.json ~ "\"state\": \"staged\"" # original predicate
+file: package-root/systems/images/jetos-image-variants-halcyon.proof.json ~any "\"proof\":\"image-variants-smoke-proved\"" "\"proof\":\"image-variants-staged\"" # original proof disjunction
+file.split("\"kind\": \"sd\"", 1): package-root/systems/images/jetos-image-variants-halcyon.proof.json ~ "\"state\": \"staged\"" # original sd split nth1 predicate
+file: package-root/systems/images/jetos-halcyon.qcow2 is-file
+file: package-root/systems/images/jetos-halcyon.raw is-file
+file: package-root/systems/images/jetos-halcyon-sd.img is-file
+file: package-root/systems/images/jetos-halcyon-netboot/vmlinuz is-file
+file: package-root/systems/images/jetos-halcyon-netboot/initrd is-file
+file: package-root/systems/images/jetos-halcyon-netboot/ipxe.conf is-file
+file: package-root/systems/images/jetos-halcyon-netboot/ipxe.conf ~ "kernel vmlinuz" # original predicate
+file: package-root/systems/images/jetos-halcyon-netboot/ipxe.conf ~ "initrd initrd" # original predicate
+file: package-root/systems/images/jetos-halcyon-netboot/ipxe.conf ~ "jetos.mode=run" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/transaction.json ~ "\"disk\":\"/dev/sda\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/transaction.json ~ "\"partition-gpt\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/transaction.json ~ "\"mkfs.vfat-esp\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/transaction.json ~ "\"install-limine-esp\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/install.sh ~ "sfdisk --wipe always" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/install.sh ~ "blockdev --rereadpt" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/install.sh ~ "mkfs.vfat -F 32" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/install.sh ~ "mkfs.ext4" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/install.sh ~ "EFI/BOOT/BOOTX64.EFI" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/install.sh ~ "installed-limine.conf" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/install.sh ~ "install-proof.json" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "system=\"$root/var/lib/jetos/generations/" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "need \"$system/plan.json\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "jetos verifier: missing $path" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "terminal/facts.json" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "serial-getty@ttyS0.service" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "desktop/facts.json" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "sw/bin/gdm" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "sw/bin/gnome-session" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "sw/bin/gnome-shell" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "jetos-desktop-session" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "jetos-studio" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "--jetos-proof" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "desktop-launchers-run" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "for svc in openssh backup metrics" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/install/guest-verify.sh ~ "\"rollback\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ^= "070701" # original raw newc prefix
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos.mode=install" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos.mode=verify" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos.mode=desktop-verify" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos/init" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "mount -t proc proc /proc" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "mount -t devtmpfs devtmpfs /dev" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "LABEL=jetos-root /dev/vda2 /dev/sda2 /dev/vda /dev/sda" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "use_system_nix" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "ln -s \"$system_nix\" /nix" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos/tools/bin/sh" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos/tools/bin/sfdisk" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos/tools/bin/blockdev" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "exec chroot /sysroot /run/current-system/sbin/init" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "SYSTEMD_UNIT_PATH=/etc/systemd/system" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "for top in etc sbin sw share studio init systemd lib usr network" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "ln -s \"$generation_target/$top\" \"/sysroot/$top\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos/modules/atkbd.ko.xz" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos/modules/usbhid.ko.xz" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "jetos/modules/xhci-hcd.ko.xz" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/initrd ~ "JETOS_GUEST_PROOF" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/limine.conf ~ "/Install jetos 26.10 (Apex) — halcyon" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/limine.conf ~ "cmdline: console=ttyS0 rdinit=/jetos/init" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/limine.conf ~ "jetos.disk=/dev/sda" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/installed-limine.conf ~ "/jetos 26.10 (Apex) — halcyon verify" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/etc/os-release == package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/usr/lib/os-release
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/etc/os-release ~ "PRETTY_NAME=\"jetos 26.10 (Apex)\"" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/etc/os-release ~ "VERSION_CODENAME=apex" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/share/backgrounds/jetos/apex.svg ~ "jetos 26.10 Apex" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/share/backgrounds/jetos/apex.svg ~ "linearGradient" # original predicate
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/share/backgrounds/jetos/apex.svg len > 1000 # original wallpaper bytes threshold
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/limine.conf !~ "NixOS" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/limine.conf !~ "Yarara" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/installed-limine.conf !~ "NixOS" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/installed-limine.conf !~ "Yarara" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/etc/os-release !~ "NixOS" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/etc/os-release !~ "Yarara" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/share/backgrounds/jetos/apex.svg !~ "NixOS" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/share/backgrounds/jetos/apex.svg !~ "Yarara" # original identity-leak exclusion
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/efiboot.img is-file
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/EFI/BOOT/BOOTX64.EFI is-file
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/boot/installed-limine.conf is-file
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/provenance.json is-file
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/etc/systemd/system/openssh.service is-file
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/limine.conf == package-root/systems/images/jetos-installer-halcyon.iso.d/boot/limine.conf
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/plan.json not-symlink
+file: package-root/systems/images/jetos-installer-halcyon.iso.d/jetos/current-system/sbin/init not-symlink

@@ -1,0 +1,35 @@
+use core.math as report_json_math
+use core.encoding.json as report_json_codec
+
+#Test("status JSON rejects non-finite fields through ReportError on every entry point") {
+    numbers :: [Float]{report_json_math.nan(), report_json_math.infinity(), -report_json_math.infinity()}
+    loop number in numbers {
+        fields :: StatusFields.new().with("value", Dyn.Float(number))
+        envelope :: StatusEnvelope.new("json", true).with_fields(fields)
+        if envelope.json() == {
+            .Ok(_) -> panic("non-finite status JSON accepted")
+            .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
+        }
+        if envelope.json_line() == {
+            .Ok(_) -> panic("non-finite status JSON line accepted")
+            .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
+        }
+        if report_render_status("json", true, fields) == {
+            .Ok(_) -> panic("non-finite report status accepted")
+            .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
+        }
+        if report_render_status_with_reports("json", true, [ReportEnvelope]{}, fields) == {
+            .Ok(_) -> panic("non-finite report status with reports accepted")
+            .Err(error) -> assert_eq(error.message, "JSON cannot encode a non-finite Float")
+        }
+    }
+}
+
+#Test("finite status JSON keeps its text and JSON-line semantics") {
+    envelope :: StatusEnvelope.new("json", true).with_field("value", Dyn.Float(1.25))
+    text :: envelope.json() ?? panic("finite status JSON")
+    line :: envelope.json_line() ?? panic("finite status JSON line")
+    assert_eq(line, "{text}\n")
+    tree :: report_json_codec.parse(text) ?? panic("finite status JSON parses")
+    assert_eq(tree.field("value") ?? panic("status value"), Dyn.Float(1.25))
+}

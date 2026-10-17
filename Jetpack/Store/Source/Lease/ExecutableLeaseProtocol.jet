@@ -27,7 +27,7 @@ LEASE_U64_MAX :: prep { 18446744073709551615 }
 LEASE_REQUEST_FIELDS :: prep { [String]{"op", "key", "request", "lease", "generation", "pid", "owner", "package", "version", "reference", "output", "previous", "snapshot", "members", "nonce", "mac"} }
 LEASE_RECEIPT_FIELDS :: prep { [String]{"lease", "generation", "pid", "owner", "package", "version", "reference", "output", "snapshot", "members", "mac"} }
 
-pub enum LeaseOperation {
+enum LeaseOperation {
     Acquire
     Replace
     Rollback
@@ -53,28 +53,28 @@ pub enum LeaseOperation {
     }
 }
 
-pub struct LeaseMember {
-    pub name: String
-    pub digest: String
+struct LeaseMember {
+    name: String
+    digest: String
 }
 
-pub struct LeaseRequest {
-    pub operation: LeaseOperation
-    pub key_id: String
-    pub request_id: String
-    pub lease_id: String
-    pub generation: Int
-    pub owner_pid: Int
-    pub owner_scope: String
-    pub package: String
-    pub version: String
-    pub reference: String
-    pub output_digest: String
-    pub previous_output_digest: String
-    pub snapshot_rel: String
-    pub members: [LeaseMember]
-    pub nonce: String
-    pub mac: String
+struct LeaseRequest {
+    operation: LeaseOperation
+    key_id: String
+    request_id: String
+    lease_id: String
+    generation: Int
+    owner_pid: Int
+    owner_scope: String
+    package: String
+    version: String
+    reference: String
+    output_digest: String
+    previous_output_digest: String
+    snapshot_rel: String
+    members: [LeaseMember]
+    nonce: String
+    mac: String
 
     // The canonical frame, with or without the authentication tag.
     fn encode_fields(self, include_mac: Bool) -> String IOError! {
@@ -104,19 +104,19 @@ pub struct LeaseRequest {
     }
 }
 
-pub struct LeaseReceipt {
-    pub lease_id: String
-    pub generation: Int
-    pub owner_pid: Int
-    pub owner_scope: String
-    pub package: String
+struct LeaseReceipt {
+    lease_id: String
+    generation: Int
+    owner_pid: Int
+    owner_scope: String
+    package: String
     // Empty for unversioned artifacts; output_digest still pins their identity.
-    pub version: String
-    pub reference: String
-    pub output_digest: String
-    pub snapshot_rel: String
-    pub members: [LeaseMember]
-    pub mac: String
+    version: String
+    reference: String
+    output_digest: String
+    snapshot_rel: String
+    members: [LeaseMember]
+    mac: String
 }
 
 fn store_lease_invalid(message: String) -> IOError Never! {
@@ -169,7 +169,7 @@ fn store_lease_field(fields: [String: String], name: String, kind: String) -> St
     Ok(value)
 }
 
-pub fn store_lease_parse_receipt(text: String) -> LeaseReceipt IOError! {
+fn store_lease_parse_receipt(text: String) -> LeaseReceipt IOError! {
     fields :: store_lease_frame_fields(text, LEASE_RECEIPT_HEADER, LEASE_RECEIPT_FIELDS, "receipt")
     kind :: "receipt"
     receipt :: LeaseReceipt{
@@ -233,7 +233,7 @@ fn store_lease_validate_request(request: LeaseRequest) IOError! {
     store_lease_validate_version(request.version)
 }
 
-pub fn store_lease_validate_members(members: [LeaseMember]) IOError! {
+fn store_lease_validate_members(members: [LeaseMember]) IOError! {
     if members.len() > LEASE_MAX_MEMBERS -> return Err(store_lease_invalid("executable lease member count exceeds the bound"))
     names := [String]{}
     loop member in members {

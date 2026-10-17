@@ -1,0 +1,46 @@
+// tests/fixtures/crypto_bridge_entropy.rs:523-553. PENDING-SAME-HEAD. Runtime UNRUN.
+// CryptoError payloads retire under D-CRYPTO-ERRFAM1=A; public tag mappings cite Core at assertion sites.
+use core.crypto as crypto
+use core.crypto.expert as expert
+use core.files as files
+fn filled(value: Int, count: Int) -> [U8] {
+    out := [U8]{}
+    loop _ in 0..<count -> &out.push((U8{value}))
+    out
+}
+fn cut(bytes: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    loop i in start..<end -> &out.push(bytes[i])
+    out
+}
+fn hex(text: String) -> [U8] {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop i in 0..<(raw.len() /% 2) {
+        a :: Int.from_u8(raw[2 * i])
+        b :: Int.from_u8(raw[2 * i + 1])
+        high :: if a <= 57 -> a - 48 else -> a - 87
+        low :: if b <= 57 -> b - 48 else -> b - 87
+        &out.push((U8{high * 16 + low}))
+    }
+    out
+}
+fn little(bytes: [U8], at: Int, width: Int) -> Int {
+    out := 0
+    loop i in 0..<width -> out = out | (Int.from_u8(bytes[at + i]) << (8 * i))
+    out
+}
+fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
+    loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)) & 255})
+}
+#Test("expert_xchacha20poly1305_matches_cfrg_vector") {
+    #Unsafe("original published known-answer vector") {
+        key :: hex("808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f")
+        nonce :: hex("404142434445464748494a4b4c4d4e4f5051525354555657")
+        plain :: hex("4c616469657320616e642047656e746c656d656e206f662074686520636c617373206f66202739393a204966204920636f756c64206f6666657220796f75206f6e6c79206f6e652074697020666f7220746865206675747572652c2073756e73637265656e20776f756c642062652069742e")
+        aad :: hex("50515253c0c1c2c3c4c5c6c7")
+        sealed :: expert.xchacha20poly1305_seal(key, nonce, plain, aad) ?? panic("seal")
+        assert_eq(sealed, hex("bd6d179d3e83d43b9576579493c0e939572a1700252bfaccbed2902c21396cbb731c7f1b0b4aa6440bf3a82f4eda7e39ae64c6708c54c216cb96b72e1213b4522f8c9ba40db5d945b11b69b982c1bb9e3f3fac2bc369488f76b2383565d3fff921f9664c97637da9768812f615c68b13b52ec0875924c1c7987947deafd8780acf49"))
+        assert_eq(expert.xchacha20poly1305_open(key, nonce, sealed, aad), Ok(plain))
+    }
+}

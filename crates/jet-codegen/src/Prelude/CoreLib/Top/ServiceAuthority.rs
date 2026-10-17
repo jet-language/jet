@@ -326,6 +326,48 @@ pub fn jet_services_active_execution_endpoint() -> Result<JetServiceEndpoint, Je
     })
 }
 
+// Raw projection only: copy authoritative facts from the existing Process
+// registry under ONE lock. Source owns endpoint-policy decisions. No channel,
+// secondary authority table, signing key cache or new lifetime is introduced.
+fn jet_services_raw_endpoint_authority_parts(endpoint: &JetServiceEndpoint)
+    -> Result<(String, String, String, jet_foundation::Numeric::JetInt, bool, bool, bool), JetServiceError>
+{
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    let registry = service_endpoint_registry().lock()
+        .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+    let state = registry.get(&key).ok_or_else(|| JetServiceError::Partitioned(
+        "service endpoint authority is not registered".to_string()))?;
+    Ok((state.authority.clone(), state.tree.clone(), state.worker.clone(),
+        jet_std::jet_int_owned_from_i64(state.generation),
+        state.started, state.draining, state.partitioned))
+}
+
+// These transports only project current storage. The source validator makes
+// every status/fallback decision from the same one-lock read, without a new
+// registry, cache, resource identity, or authority lifetime.
+type JetServiceEndpointFacts = (
+    String, String, String, jet_foundation::Numeric::JetInt, bool, bool, bool,
+);
+fn jet_services_raw_endpoint_identity_parts(endpoint: &JetServiceEndpoint)
+    -> (String, String, String, jet_foundation::Numeric::JetInt)
+{
+    (endpoint.authority.clone(), endpoint.tree.clone(), endpoint.worker.clone(),
+        jet_std::jet_int_owned_from_i64(endpoint.generation))
+}
+fn jet_services_raw_endpoint_validation_snapshot(endpoint: &JetServiceEndpoint)
+    -> Result<(Option<JetServiceEndpointFacts>, Vec<JetServiceEndpointFacts>), JetServiceError>
+{
+    let key = service_endpoint_key(&endpoint.authority, &endpoint.worker, endpoint.generation);
+    let registry = service_endpoint_registry().lock()
+        .map_err(|_| service_authority_error("service endpoint registry lock is poisoned"))?;
+    let fields = |state: &ServiceAuthorityEndpointState| (
+        state.authority.clone(), state.tree.clone(), state.worker.clone(),
+        jet_std::jet_int_owned_from_i64(state.generation),
+        state.started, state.draining, state.partitioned,
+    );
+    Ok((registry.get(&key).map(fields), registry.values().map(fields).collect()))
+}
+
 fn service_authority_require_issued(authority: &str) -> Result<(), JetServiceError> {
     // Issuance is recorded by the one endpoint authority registry. Do not
     // maintain a second process-local rights table for directory proofs.
@@ -2657,6 +2699,83 @@ pub fn jet_services_delivery_cancel(
     Ok(delivery.clone())
 }
 
+// Bootstrap transport records on the existing private plain-record rail.
+// Source owns the caller decisions; these leaves preserve the native reader,
+// captured channel identity, and each original critical section.
+#[derive(Clone, Debug)]
+struct JetServiceDeliveryRecord {
+    op: jet_foundation::Numeric::JetInt,
+    fields: Vec<String>,
+}
+#[derive(Clone, Debug)]
+struct JetServiceDeliveryFacts {
+    id: String,
+    key: String,
+    tree: String,
+    worker: String,
+    message: String,
+    authority: String,
+    generation: jet_foundation::Numeric::JetInt,
+    state: JetDeliveryState,
+    attempts: jet_foundation::Numeric::JetInt,
+    retention_until: jet_foundation::Numeric::JetInt,
+    deadline: jet_foundation::Numeric::JetInt,
+    event_sequence: jet_foundation::Numeric::JetInt,
+    duplicate: bool,
+    records: Vec<JetServiceDeliveryRecord>,
+}
+fn jet_services_raw_delivery_read(delivery: &JetDelivery, include_records: bool) -> Result<JetServiceDeliveryFacts, JetServiceError> {
+    let (_, entry, records) = service_authority_delivery_entry(delivery)?;
+    Ok(JetServiceDeliveryFacts {
+        id: entry.id, key: entry.key, tree: entry.tree, worker: entry.worker,
+        message: entry.message, authority: entry.authority,
+        generation: jet_std::jet_int_owned_from_i64(entry.generation),
+        state: entry.state,
+        attempts: jet_std::jet_int_owned_from_i64(entry.attempts),
+        retention_until: jet_std::jet_int_owned_from_i64(entry.retained_until.unwrap_or(-1)),
+        deadline: jet_std::jet_int_owned_from_i64(entry.expires),
+        event_sequence: jet_std::jet_int_owned_from_i64(entry.event_sequence),
+        duplicate: delivery.duplicate,
+        records: if include_records {
+            records.into_iter().map(|(op, fields)| JetServiceDeliveryRecord {
+                op: jet_std::jet_int_owned_from_i64(op as i64), fields,
+            }).collect()
+        } else { Vec::new() },
+    })
+}
+fn jet_services_raw_delivery_probe(delivery: &JetDelivery) -> Result<(), JetServiceError> {
+    service_authority_delivery_entry(delivery).map(|_| ())
+}
+fn jet_services_raw_delivery_store(delivery: &JetDelivery) -> String { delivery.store.clone() }
+
+#[derive(Clone, Debug)]
+struct JetServiceEndpointMailbox {
+    started: bool,
+    draining: bool,
+    channel: std::sync::Arc<JetServiceChannel<String>>,
+}
+#[derive(Clone, Debug)]
+struct JetServiceMailboxRead {
+    status: jet_foundation::Numeric::JetInt,
+    message: String,
+}
+fn jet_services_raw_endpoint_mailbox(endpoint: &JetServiceEndpoint) -> Result<JetServiceEndpointMailbox, JetServiceError> {
+    let (started, draining, channel) = service_authority_channel(endpoint)?;
+    Ok(JetServiceEndpointMailbox { started, draining, channel })
+}
+fn jet_services_raw_mailbox_started(mailbox: &JetServiceEndpointMailbox) -> bool { mailbox.started }
+fn jet_services_raw_mailbox_draining(mailbox: &JetServiceEndpointMailbox) -> bool { mailbox.draining }
+fn jet_services_raw_mailbox_depth(mailbox: &JetServiceEndpointMailbox) -> i64 { mailbox.channel.depth() as i64 }
+fn jet_services_raw_mailbox_receive(mailbox: &JetServiceEndpointMailbox) -> JetServiceMailboxRead {
+    let (status, message) = match mailbox.channel.try_recv() {
+        Ok(message) => (0, message),
+        Err(JetServiceChannelError::Empty) => (1, String::new()),
+        Err(JetServiceChannelError::Closed) => (2, String::new()),
+        Err(JetServiceChannelError::Full(_)) => (3, String::new()),
+    };
+    JetServiceMailboxRead { status: jet_std::jet_int_owned_from_i64(status), message }
+}
+
 fn service_authority_entries(
     runtime: &JetServiceRuntime,
     records: &[(char, Vec<String>)],
@@ -2840,18 +2959,12 @@ fn service_authority_entries(
     Ok(entries)
 }
 
-pub fn jet_services_runtime(store: String, retention_ms: i64) -> JetServiceRuntime {
-    JetServiceRuntime {
-        store,
-        retention_ms,
-    }
-}
 
 pub fn jet_services_runtime_send(
     runtime: &JetServiceRuntime,
     endpoint: &JetServiceEndpoint,
-    message: &String,
-    key: &String,
+    message: &str,
+    key: &str,
 ) -> Result<JetDelivery, JetServiceError> {
     service_authority_validate_runtime(runtime)?;
     service_authority_validate_endpoint(endpoint)?;
@@ -2871,7 +2984,7 @@ pub fn jet_services_runtime_send(
     }
     if let Some(entry) = entries
         .iter()
-        .find(|entry| entry.key.as_str() == key.as_str() && !entry.authority.is_empty())
+        .find(|entry| entry.key.as_str() == key && !entry.authority.is_empty())
     {
         // The provider authority token is a generation-scoped signing fact.
         // A restarted or handed-off provider gets a new token, but the same
@@ -2880,7 +2993,7 @@ pub fn jet_services_runtime_send(
         // appended or enqueued.
         if entry.tree != endpoint.tree
             || entry.worker != endpoint.worker
-            || entry.message.as_str() != message.as_str()
+            || entry.message.as_str() != message
         {
             return Err(JetServiceError::Policy(
                 "idempotency key was already used by another service authority or delivery"
@@ -2917,12 +3030,12 @@ pub fn jet_services_runtime_send(
         'S',
         &[
             id.clone(),
-            key.clone(),
+            key.to_owned(),
             endpoint.authority.clone(),
             endpoint.tree.clone(),
             endpoint.worker.clone(),
             endpoint.generation.to_string(),
-            message.clone(),
+            message.to_owned(),
             now.to_string(),
             expires.to_string(),
             signature,
@@ -3652,6 +3765,32 @@ fn jet_job_queue_json_optional_text(value: Option<&str>) -> String {
 
 fn jet_job_queue_event_time(timestamp_ms: i64) -> u64 {
     timestamp_ms.max(0) as u64
+}
+
+// Raw marshaling only: Core/jobs/jobs.jet owns the timestamp, event fields,
+// and post-commit ordering; retain the existing validated event and sink.
+fn jet_job_queue_publish_parts(
+    timestamp_ms: i64,
+    source: &String,
+    kind: &String,
+    entity: String,
+    fields: String,
+) {
+    if let Ok(event) = JetDevtoolsEvent::from_parts(
+        timestamp_ms as u64,
+        source.as_str(),
+        kind.as_str(),
+        entity,
+        fields,
+    ) {
+        jet_devtools_publish_event(event);
+    }
+}
+
+// Only marshal the source-clamped milliseconds to the queue's existing raw
+// thread wait. Do not advance the controlled scheduler's clock.
+fn jet_job_queue_sleep_ms(millis: i64) {
+    std::thread::sleep(std::time::Duration::from_millis(millis as u64));
 }
 
 fn jet_job_queue_publish_transition(observation: &JetJobQueueDevtoolsTransition) {

@@ -1,0 +1,75 @@
+
+globalThis.location = { origin: "http://localhost", href: "http://localhost/" };
+const calls = [];
+globalThis.fetch = async (url, options) => {
+  calls.push({ url, options });
+  return new Response(JSON.stringify({ saved: true }), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+};
+const { attachWebForm, webServerFunctionCall, webServerFunctionForm } =
+  await import("file://{root}/crates/jet-codegen/src/Prelude/DomRuntime.js");
+const boundary = {
+  name: "save",
+  endpoint: "/actions/save",
+  method: "POST",
+  input: "SaveInput",
+  output: "SaveResult",
+  error: "SaveError",
+  csrf: "same-origin",
+  revalidate: ["orders"],
+};
+const result = await webServerFunctionCall(boundary, { id: 7 });
+if (!result.value.saved || result.attempts !== 1 || result.revalidate[0] !== "orders") {
+  throw new Error("typed scripted call did not return its checked result");
+}
+if (calls[0].options.credentials !== "same-origin" ||
+    calls[0].options.headers["content-type"] !== "application/json") {
+  throw new Error("scripted call crossed the wrong transport boundary");
+}
+const nativeAttrs = {};
+const nativeForm = {
+  dataset: {},
+  setAttribute(name, value) { nativeAttrs[name] = value; },
+  querySelector() { return null; },
+};
+const native = webServerFunctionForm(boundary, nativeForm);
+if (!native.no_script || nativeAttrs.action !== "/actions/save" ||
+    nativeAttrs.method !== "POST" || nativeForm.dataset.jetPending !== "false") {
+  throw new Error("native form path was not configured");
+}
+let revalidated = null;
+const enhancedAttrs = {};
+const enhanced = {
+  dataset: {},
+  setAttribute(name, value) { enhancedAttrs[name] = value; },
+  addEventListener(name, handler) { this.handler = handler; },
+  removeEventListener() {},
+  dispatchEvent() {},
+};
+attachWebForm(boundary, enhanced, {
+  enhance: true,
+  encode: () => ({ id: 7 }),
+  revalidate: (keys) => { revalidated = keys; },
+});
+enhanced.handler({ preventDefault() {} });
+await new Promise((resolve) => setTimeout(resolve, 0));
+if (!Array.isArray(revalidated) || revalidated[0] !== "orders" ||
+    enhanced.dataset.jetPending !== "false") {
+  throw new Error("hydrated form did not settle and revalidate dependencies");
+}
+try {
+  await webServerFunctionCall({ endpoint: "https://evil.invalid/actions/save" }, {});
+  throw new Error("cross-origin server function was accepted");
+} catch (error) {
+  if (!(error instanceof TypeError) && error.code !== "csrf_rejected") throw error;
+}
+const cycle = {};
+cycle.self = cycle;
+try {
+  await webServerFunctionCall(boundary, cycle);
+  throw new Error("non-serializable input was accepted");
+} catch (error) {
+  if (error.code !== "invalid_input") throw error;
+}

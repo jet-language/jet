@@ -1,0 +1,16 @@
+use core.regex as re
+
+fn run() {
+    anchored :: Regex{"^(?:needle)"}
+    print(anchored.is_match("needle suffix"))
+    print(anchored.is_match("prefix needle"))
+    print(anchored.find("prefix needle") ?? "none")
+
+    multiline :: re.compile_with("^(?:needle)", re.flags(false, true, false)) ?? panic("bad pattern")
+    print(multiline.is_match("prefix\nneedle suffix"))
+    print(multiline.is_match("prefix\nxneedle suffix"))
+
+    unanchored :: Regex{"(?:needle)"}
+    print(unanchored.is_match("prefix needle"))
+    print(unanchored.is_match("prefix absent"))
+}

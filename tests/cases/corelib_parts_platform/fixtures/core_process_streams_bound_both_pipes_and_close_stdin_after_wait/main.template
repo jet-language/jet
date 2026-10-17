@@ -1,0 +1,16 @@
+
+use core.process as process
+
+fn run() -[Exec, IO, Time.Wait]> {
+    limited :: process.run_spec(process.cmd(["{work}/flood.sh"]).output_limit(1024))
+    if limited == {
+        .Ok(_) -> { print("limit:accepted") }
+        .Err(_) -> { print("limit:refused") }
+    }
+    child :: process.cmd(["sh", "-c", "exit 0"]).stdin(.Capture).spawn() ?? panic("spawn failed")
+    child.wait() ?? panic("wait failed")
+    if child.stdin.write("late") == {
+        .Ok(_) -> { print("closed:accepted") }
+        .Err(_) -> { print("closed:typed-error") }
+    }
+}

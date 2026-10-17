@@ -1,0 +1,38 @@
+// Held-root closure: no intermediate symlink, no escaped name, no path reopen.
+struct JetCLIRootedFixtureRoot { path: String }
+impl JetCLIRootedFixtureRoot.Close {
+    fn close(^self) -[FS]> {
+        cli_files.remove_all(self.path).drop("test root cleanup")
+    }
+}
+fn run() {
+    nul_name :: String.from_bytes([U8]{U8{97}, U8{0}, U8{98}}) ?? panic("NUL name fixture")
+    loop name in ([String]{"", ".", "..", "a/b", "a\\b", nul_name}) {
+        rejected :: jet_cli_rooted_validate_name(name) == .Err(_)
+        assert(rejected)
+    }
+    root :: "{cli_sys.temp_dir()}/jet-rooted-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test root")
+    owner :: JetCLIRootedFixtureRoot{path: root}
+    defer close(^owner)
+    held :: JetCLIRootedDirectory.open(root, [String]{"original"}, true) ?? panic("hold original")
+    _ :: held.publish_immutable("record", "original".bytes(), Val(0o600), 1024) ?? panic("publish original")
+    cli_files.rename("{root}/original", "{root}/moved", if_exists: .Refuse) ?? panic("move ancestor")
+    replacement :: JetCLIRootedDirectory.open(root, [String]{"original"}, true) ?? panic("replacement ancestor")
+    _ :: replacement.publish_immutable("record", "replacement".bytes(), Val(0o600), 1024) ?? panic("publish replacement")
+    bytes :: held.read("record", 1024) ?? panic("read held original")
+    assert(bytes == Val("original".bytes()))
+    present :: JetCLIRootedDirectory.present(root, [String]{"absent", "child"}) ?? panic("absent store")
+    assert(!present)
+    escaped :: held.replace("../escaped", "wrong".bytes(), None) == .Err(_)
+    assert(escaped)
+    _ :: held.replace("record", "updated".bytes(), None) ?? panic("replace held original")
+    updated :: cli_files.read("{root}/moved/record") ?? panic("read moved bytes")
+    unchanged :: cli_files.read("{root}/original/record") ?? panic("read replacement bytes")
+    assert(updated == "updated" && unchanged == "replacement")
+    canonical_root :: cli_files.realpath(root) ?? panic("canonical fixture root")
+    assert(jet_cli_build_record_program_at("moved/record", canonical_root, canonical_root) == "moved/record")
+    assert(jet_cli_build_record_program_at("nested/not-created.jet", canonical_root, canonical_root) == "nested/not-created.jet")
+    sibling :: "{canonical_root}/original-other/source.jet"
+    assert(jet_cli_build_record_program_at(sibling, "{canonical_root}/original", canonical_root) == sibling)
+}

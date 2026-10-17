@@ -1,0 +1,7 @@
+// SETUP-PORT original root basename marker replacement; no product assertions.
+use core.files
+fn run(root: String, source: String) {
+    marker :: files.basename(root).replace("-", "_")
+    template :: files.read(source)
+    files.write_all(root + "/deps/producer/producer.jet", template.replace("__MARKER__", marker))
+}

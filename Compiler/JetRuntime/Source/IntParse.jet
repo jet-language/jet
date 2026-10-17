@@ -1,0 +1,217 @@
+// CommonTypes.rs:4129-4150/4940-4965 and Numeric.rs:1013-1037,
+// 1083-1106,1841-1861. Native Result ABI: one status word, and two distinct
+// caller-owned 8B output slots; only the selected slot is initialized.
+// Inputs are borrowed E4 text and exact-Int carriers; outputs own one carrier.
+fn numeric_trim_start(text: I64) -> I64 {
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    loop at < length {
+        if !unicode_is_white_space(rt_text_decode(data + at)) -> break
+        at += rt_text_width(data + at)
+    }
+    at
+}
+
+fn numeric_trim_end(text: I64, start: I64) -> I64 {
+    data :: rt_text_data(text)
+    end := rt_text_len(text)
+    loop end > start {
+        at := end - I64{1}
+        loop at > start && (rt_text_byte(data + at).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+        if !unicode_is_white_space(rt_text_decode(data + at)) -> break
+        end = at
+    }
+    end
+}
+
+fn numeric_parse_error(text: I64, integer: Bool) -> I64 {
+    result :: rt_text_builder_with_capacity(rt_text_len(text) + I64{29})
+    rt_text_push_word(result, I64{8079585753445589347}, I64{8})
+    rt_text_push_word(result, I64{105692257284705}, I64{6})
+    rt_text_append(result, rt_text_data(text), rt_text_len(text))
+    if integer {
+        rt_text_push_word(result, I64{2336912048654458976}, I64{8})
+        rt_text_push_word(result, I64{32199642103180905}, I64{7})
+    } else {
+        // '` as a float' (the float parser shares the exact original text).
+        rt_text_push_word(result, I64{7358988583125983328}, I64{8})
+        rt_text_push_word(result, I64{1952542572}, I64{4})
+    }
+    result
+}
+
+fn numeric_radix_empty() -> I64 {
+    result :: rt_text_builder_with_capacity(I64{27})
+    rt_text_push_word(result, I64{2338042651316874857}, I64{8})
+    rt_text_push_word(result, I64{7310503796665508210}, I64{8})
+    rt_text_push_word(result, I64{7882742402838983800}, I64{8})
+    rt_text_push_word(result, I64{7959664}, I64{3})
+    result
+}
+
+fn numeric_radix_text_error(text: I64, start: I64, end: I64, radix: I64) -> I64 {
+    result :: rt_text_builder_with_capacity(end - start + I64{28})
+    rt_text_push_word(result, I64{2334106421097295465}, I64{8})
+    rt_text_push_word(result, I64{194975588706}, I64{5})
+    rt_text_push_number(result, radix)
+    rt_text_push_word(result, I64{8243108378414311712}, I64{8})
+    rt_text_push_word(result, I64{24608}, I64{2})
+    rt_text_append(result, rt_text_data(text) + start, end - start)
+    rt_text_push_scalar(result, I64{96})
+    result
+}
+
+// Exact radix -> native i64 is fallible BEFORE validating 2..36. Never take
+// jet_int_owned_to_i64's trap path: the Rust owned adapter returns this error.
+fn numeric_radix(radix: I64, err: I64) -> I64 {
+    negative :: int_negative(radix)
+    bound :: if negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if !int_fits(radix, bound) {
+        result :: rt_text_builder_with_capacity(I64{41})
+        rt_text_push_word(result, I64{7946918701727578213}, I64{8})
+        rt_text_push_word(result, I64{7935469422924537972}, I64{8})
+        rt_text_push_word(result, I64{8367816103688172655}, I64{8})
+        rt_text_push_word(result, I64{8532478930838381928}, I64{8})
+        rt_text_push_word(result, I64{4774132488612683877}, I64{8})
+        rt_text_push_word(result, I64{73}, I64{1})
+        sync_store(err, result)
+        return I64{0}
+    }
+    value :: int_word(radix)
+    if (value < I64{2} || value > I64{36}) {
+        result :: rt_text_builder_with_capacity(I64{64})
+        rt_text_push_word(result, I64{2338042651316874857}, I64{8})
+        rt_text_push_word(result, I64{8461454976435380594}, I64{8})
+        rt_text_push_word(result, I64{7305437165358445683}, I64{8})
+        rt_text_push_word(result, I64{2319952416568866676}, I64{8})
+        rt_text_push_word(result, I64{2318287501403647585}, I64{8})
+        rt_text_push_word(result, I64{544501607}, I64{4})
+        rt_text_push_number(result, value)
+        sync_store(err, result)
+        return I64{0}
+    }
+    value
+}
+
+fn numeric_digit(byte: I64) -> I64 {
+    if (byte >= I64{48} && byte <= I64{57}) -> return byte - I64{48}
+    if (byte >= I64{65} && byte <= I64{90}) -> return byte - I64{55}
+    if (byte >= I64{97} && byte <= I64{122}) -> return byte - I64{87}
+    I64{-1}
+}
+
+fn numeric_int_parse(text: I64, radix: I64, decimal: Bool, ok: I64, err: I64) -> I64 {
+    start :: numeric_trim_start(text)
+    end :: numeric_trim_end(text, start)
+    data :: rt_text_data(text)
+    at := start
+    negative := false
+    if (at < end) {
+        sign :: rt_text_byte(data + at)
+        if (sign == I64{43} || sign == I64{45}) {
+            negative = sign == I64{45}
+            at += I64{1}
+        }
+    }
+    digits :: at
+    if (at == end) {
+        sync_store(err, if decimal -> numeric_parse_error(text, true) else -> numeric_radix_empty())
+        return I64{0}
+    }
+    // Validate first: invalid text never allocates an arithmetic workspace.
+    loop at < end {
+        digit :: numeric_digit(rt_text_byte(data + at))
+        if (digit < I64{0} || digit >= radix) {
+            sync_store(err, if decimal -> numeric_parse_error(text, true) else -> numeric_radix_text_error(text, start, end, radix))
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    at = digits
+    small := I64{0}
+    node := I64{0}
+    // log_36(1e9)>5, so this capacity bounds every accepted base. Inline
+    // inputs allocate nothing; widening creates exactly one limb workspace.
+    capacity :: (end - digits) /% I64{5} + I64{1}
+    loop at < end {
+        digit :: numeric_digit(rt_text_byte(data + at))
+        if (node == I64{0}) {
+            if (small <= (I64{4611686018427387903} - digit) /% radix) {
+                small = small * radix + digit
+            } else {
+                node = int_copy(small, capacity - int_len(small))
+                int_scale(node, radix, digit)
+            }
+        } else {
+            int_scale(node, radix, digit)
+        }
+        at += I64{1}
+    }
+    if (node == I64{0}) {
+        sync_store(ok, if negative -> -small else -> small)
+    } else {
+        if negative -> int_store(node + I64{16}, I64{1})
+        sync_store(ok, int_pack(node))
+    }
+    I64{1}
+}
+
+#Export(c) fn jet_int_parse(text: I64, ok: I64, err: I64) -> I64 {
+    numeric_int_parse(text, I64{10}, true, ok, err)
+}
+
+#Export(c) fn jet_int_from_radix(text: I64, radix: I64, ok: I64, err: I64) -> I64 {
+    base :: numeric_radix(radix, err)
+    if (base == I64{0}) -> return I64{0}
+    numeric_int_parse(text, base, false, ok, err)
+}
+
+#Export(c) fn jet_int_to_radix(value: I64, radix: I64, ok: I64, err: I64) -> I64 {
+    base :: numeric_radix(radix, err)
+    if (base == I64{0}) -> return I64{0}
+    // One scratch allocation stores least-significant-first ASCII digits;
+    // int_copy owns only a private magnitude, no clone/hazard-domain owner.
+    small_carrier :: int_inline(value)
+    node :: if small_carrier -> I64{0} else -> int_copy(value, I64{0})
+    small := if small_carrier -> (if (value < I64{0}) -> -value else -> value) else -> I64{0}
+    capacity :: int_len(value) * I64{30} + I64{1}
+    result :: rt_text_builder_with_capacity(capacity)
+    data :: rt_text_data(result)
+    length := I64{0}
+    more := if small_carrier -> small != I64{0} else -> !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0})
+    loop more {
+        digit := I64{0}
+        if small_carrier {
+            digit = small % base
+            small = small /% base
+            more = small != I64{0}
+        } else {
+            digit = int_div_small(node, base)
+            more = !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0})
+        }
+        rt_text_put(data + length, if (digit < I64{10}) -> digit + I64{48} else -> digit + I64{87})
+        length += I64{1}
+    }
+    if !small_carrier -> int_free_node(node)
+    if (length == I64{0}) {
+        rt_text_put(data, I64{48})
+        length = I64{1}
+    }
+    if int_negative(value) {
+        rt_text_put(data + length, I64{45})
+        length += I64{1}
+    }
+    left := I64{0}
+    right := length - I64{1}
+    loop left < right {
+        byte :: rt_text_byte(data + left)
+        rt_text_put(data + left, rt_text_byte(data + right))
+        rt_text_put(data + right, byte)
+        left += I64{1}
+        right -= I64{1}
+    }
+    rt_text_store(result + I64{8}, length)
+    sync_store(ok, result)
+    I64{1}
+}

@@ -14,6 +14,12 @@ use core.web.virtual as virtual
 use core.web.store as store
 #Target(Web)
 
+#Error
+#Codable
+struct OrderError {
+    message: String
+}
+
 #Codable
 struct Order {
     id: Int
@@ -54,7 +60,7 @@ fn order_rows() -> [Order] {
 fn order_id(order: Order) -> String Never! { "{order.id}" }
 fn order_customer(order: Order) -> String Never! { order.customer }
 fn order_shipped(order: Order) -> String Never! { "{order.shipped}" }
-fn pending_order(order: Order) -> Bool { !order.shipped }
+fn pending_order(order: Order) -> Bool Never! { !order.shipped }
 fn render_order_row(order: Order) -> String { "<tr><td>{order.id}</td><td>{order.customer}</td><td>{order.total}</td><td>{order.shipped}</td></tr>" }
 fn render_order_rows(orders: [Order]) -> String { orders.map(render_order_row).join("") }
 fn render_keyed_order_row(row: WebTableRow<Order>) -> String { render_order_row(row.value) }
@@ -63,7 +69,7 @@ fn render_keyed_order_rows(rows: [WebTableRow<Order>]) -> String { rows.map(rend
 // The server loader receives the same typed table state as local pagination.
 // This fixture applies its known sort/filter policy before honoring the
 // requested page, so route/query state and loader state stay one contract.
-fn load_order_page(state: WebTableState) -> WebTablePage<Order> String! {
+fn load_order_page(state: WebTableState) -> WebTablePage<Order> WebTableError! {
     source :: order_rows()
     pending :: table.filter(source, pending_order)
     ordered :: table.sort(pending, true, order_id)
@@ -73,11 +79,15 @@ fn load_order_page(state: WebTableState) -> WebTablePage<Order> String! {
 // The route loader takes the route's typed search input and returns the
 // Codable route data; the App graph runs it through the router (preload,
 // cache, abort) and hands the decoded value to `orders_page` as `data`.
-fn load_orders(search: OrderSearch) -> [Order] String! {
+fn load_orders(search: OrderSearch) -> [Order] OrderError! {
     source :: order_rows()
-    if search.q == "all" -> return Ok(table.page(source, search.page, 24).rows)
-    if search.q != "pending" -> return Err("unknown order filter `{search.q}`")
-    return Ok(table.page(table.filter(source, pending_order), search.page, 24).rows)
+    if search.q == "all" {
+        page :: table.page(source, search.page, 24) ?? return Err(OrderError{message: "invalid order page"})
+        return Ok(page.rows)
+    }
+    if search.q != "pending" -> return Err(OrderError{message: "unknown order filter `{search.q}`"})
+    page :: table.page(table.filter(source, pending_order), search.page, 24) ?? return Err(OrderError{message: "invalid order page"})
+    return Ok(page.rows)
 }
 
 fn pending_page() -> WebPage { web.page(
@@ -90,7 +100,7 @@ fn error_page() -> WebPage { web.page(
     "<main data-state=\"error\"><h1>Orders</h1><p>Orders could not be loaded.</p></main>"
 ) }
 
-fn add_order_to_cart(cart: Cart) {
+fn add_order_to_cart(&cart: Cart) {
     &cart.ids.push(41)
 }
 
@@ -113,15 +123,15 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     // App.route is the sole registration graph and the App router is the
     // single navigation state; `loaded` is that router's decoded route data.
     loaded_markup :: render_order_rows(loaded)
-    search_wire :: url.percent_encode(json.to_string(route_search))
+    search_wire :: url.percent_encode(json.to_string(route_search) ?? panic("JSON encode"))
     route_text :: "route=/orders/{id} search={search_wire} loaded={loaded.len()}"
-    search :: route_search
+    search :: route_search.copy()
     next_search :: OrderSearch{q: search.q, page: search.page + 1, cart: search.cart, refresh: search.refresh}
     refresh_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart, refresh: search.refresh + 1}
     cart_search :: OrderSearch{q: search.q, page: search.page, cart: search.cart + 1, refresh: search.refresh}
-    next_link :: url.percent_encode(json.to_string(next_search))
-    refresh_link :: url.percent_encode(json.to_string(refresh_search))
-    cart_link :: url.percent_encode(json.to_string(cart_search))
+    next_link :: url.percent_encode(json.to_string(next_search) ?? panic("JSON encode"))
+    refresh_link :: url.percent_encode(json.to_string(refresh_search) ?? panic("JSON encode"))
+    cart_link :: url.percent_encode(json.to_string(cart_search) ?? panic("JSON encode"))
     ship_data :: ShipForm{id: id, carrier: "Parcel", tracking: "PX-41"}
     typed_form :: web.form(ShipForm, action: submit_ship_order)
     &typed_form.set("id", "{ship_data.id}") ?? panic("typed id value")
@@ -133,11 +143,11 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
 
     // Query.live seeds the cache with route data and reuses its loader for
     // refreshes. Invalidation exposes stale → fetching → fresh to the panel.
-    orders_query :: query.live("orders.list", "orders", json.to_string(loaded), () -> {
+    orders_query :: query.live("orders.list", "orders", json.to_string(loaded) ?? panic("JSON encode"), () -> {
         refreshed :: load_orders(route_search)
-        return Ok(json.to_string(refreshed))
+        return Ok(json.to_string(refreshed) ?? return Err(err))
     })
-    stale_generation :: orders_query.invalidate()
+    stale_generation :: &orders_query.invalidate()
     query_state :: orders_query.state()
     query_text :: "{orders_query.show()} status={query_state.status}"
 
@@ -146,14 +156,14 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     form0 :: forms.new("/actions/ship-order-progressive")
     form1 :: forms.field(form0, "id", "Int", true) ?? panic("id field")
     form2 :: forms.field(form1, "carrier", "String", true) ?? panic("carrier field")
-    form3 :: forms.field(form2, "tracking", "String", true) ?? panic("tracking field")
-    forms.set(form3, "id", "{ship_data.id}") ?? panic("id value")
-    forms.set(form3, "carrier", ship_data.carrier) ?? panic("carrier value")
-    forms.set(form3, "tracking", ship_data.tracking) ?? panic("tracking value")
-    forms.blur(form3, "carrier") ?? panic("carrier blur")
-    forms.validate(form3) ?? panic("form validation")
-    async_form :: forms.validate_async(form3)
-    submission :: forms.submit(async_form) ?? panic("form submission")
+    form3 := forms.field(form2, "tracking", "String", true) ?? panic("tracking field")
+    forms.set(&form3, "id", "{ship_data.id}") ?? panic("id value")
+    forms.set(&form3, "carrier", ship_data.carrier) ?? panic("carrier value")
+    forms.set(&form3, "tracking", ship_data.tracking) ?? panic("tracking value")
+    forms.blur(&form3, "carrier") ?? panic("carrier blur")
+    forms.validate(&form3) ?? panic("form validation")
+    async_form := forms.validate_async(form3)
+    submission :: forms.submit(&async_form) ?? panic("form submission")
     no_script_body :: forms.no_script(async_form) ?? panic("no-script body")
     form_html :: "<link rel=\"stylesheet\" href=\"/assets/app.css\">" + forms.html(async_form)
     form_text :: forms.show(async_form) + typed_form_markup
@@ -163,17 +173,16 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     // surface, even though the source dataset has 100,000 rows.
     rows :: order_rows()
     row_count :: rows.len()
-    orders_table :: table.new_keyed("OrdersTable", rows, order_id)
+    orders_table := table.new_keyed("OrdersTable", rows, order_id)
     id_column :: table.column("id", "Int", order_id)
     customer_column :: table.column("customer", "String", order_customer)
     shipped_column :: table.column("shipped", "Bool", order_shipped)
-    configured_table :: orders_table
-        .with_column(id_column)
-        .with_column(customer_column)
-        .with_column(shipped_column)
-    local_sorted :: table.sort_by(configured_table, "id", WebTableSortDirection.Descending)
-    local_table :: table.filter_by(local_sorted, "shipped", "false")
-    local_page_table :: table.paginate(local_table, search.page, 24)
+    with_id := &orders_table.with_column(id_column)
+    with_customer := &with_id.with_column(customer_column)
+    configured_table := &with_customer.with_column(shipped_column)
+    local_sorted := table.sort_by(&configured_table, "id", WebTableSortDirection.Descending)
+    local_table := table.filter_by(&local_sorted, "shipped", "false")
+    local_page_table :: table.paginate(&local_table, search.page, 24)
     table_page :: table.page_state(local_page_table) ?? panic("table page")
     table_markup :: render_order_rows(table_page.rows)
     virtual_plan :: virtual.plan_from_sizes(row_count, 0, 480, 480, 36, 8, [Int]{36, 42, 30, 36})
@@ -181,18 +190,18 @@ fn render_snapshot(id: Int, route_search: OrderSearch, loaded: [Order]) -> Strin
     visible_indices :: virtual.plan_indices(virtual_plan)
     virtual_markup :: render_keyed_order_rows(visible_rows)
     virtual_text :: virtual.plan_facts(virtual_plan)
-    server_table :: table.with_server_page(local_table, load_order_page)
-    server_page_table :: table.paginate(server_table, search.page, 24)
+    server_table := table.with_server_page(&local_table, load_order_page)
+    server_page_table :: table.paginate(&server_table, search.page, 24)
     server_page :: table.page_state(server_page_table) ?? panic("server table page")
     pending_count :: server_page.total_rows
 
     // A named store uses bounded history; transaction publishes one write and
     // one typed diff that survives a compatible development reload.
-    cart :: store.with_history("Cart", cart_seed(search), 8)
-    transaction :: store.transaction(cart, "add-order", ["ids"], add_order_to_cart)
+    cart := store.with_history("Cart", cart_seed(search), 8)
+    transaction :: store.transaction(&cart, "add-order", ["ids"], add_order_to_cart)
     store_text :: cart.facts_json()
 
-    search_link :: url.percent_encode(json.to_string(route_search))
+    search_link :: url.percent_encode(json.to_string(route_search) ?? panic("JSON encode"))
     nav :: "<nav data-panel=\"routes\" data-jet-routes=\"/,/orders,/orders/:id,/settings\"><a data-jet-route=\"/\" href=\"/\">Home</a><a data-jet-route=\"/orders\" href=\"/orders?search={search_link}\">Orders</a><a data-jet-route=\"/orders/:id\" href=\"/orders/41?search={search_link}\">Order 41</a><a data-jet-route=\"/settings\" href=\"/settings\">Settings</a></nav>"
     interactions :: "<section data-panel=\"interactions\"><a data-action=\"refresh-orders\" href=\"/orders?search={refresh_link}\">Refresh orders</a><a data-action=\"next-page\" href=\"/orders?search={next_link}\">Next page</a><a data-action=\"add-to-cart\" href=\"/orders?search={cart_link}\">Add order 41 to cart</a></section>"
     loader_html :: "<section data-panel=\"loader\"><table><tbody>{loaded_markup}</tbody></table></section>"
@@ -212,9 +221,8 @@ fn settings_page() -> WebPage { web.page("Settings", "<main><h1>Settings</h1><p>
 // progressive requests without a second RPC declaration.
 fn submit_ship_order(input: ShipForm) -> String { "ship-order submitted for {input.id} via {input.carrier}" }
 
-fn check_carrier(value: String) -> Unit String! {
+fn check_carrier(value: String) {
     if value == "" -> return Err("carrier required")
-    return Ok()
 }
 
 fn run() -> App {

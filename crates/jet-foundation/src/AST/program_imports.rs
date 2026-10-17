@@ -21,8 +21,6 @@ pub struct Program {
     pub fenced_statements: Vec<FencedStatement>,
     /// D-WASM1 (c123): optional file-level web bucket ceiling (`js target;` / `wasm target;`).
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
-    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
-    pub pub_file: bool,
     /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
     pub no_prelude: bool,
     /// D-WEBDEFAULT1 (ratified 2026-07-01, c134): `#Target(Web)` — this file's default CLI
@@ -228,6 +226,7 @@ pub fn rewrite_core_item_call(expr: &mut Expr, method: &str) {
         resolved_ret: call.resolved_ret,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
 }
 
@@ -705,12 +704,46 @@ pub struct PackageGuarantees {
     pub application_authority: crate::Authority::ApplicationAuthority,
 }
 
+/// Core auto-demand derived once from the canonical parse token stream.
+/// Literal/comment payload never enters this fact; registry order is retained
+/// for bare owners and readable-prelude owners keep their existing sorted order.
+#[derive(Debug, Default)]
+pub struct CoreIdentifierDemand {
+    pub bare_modules: Vec<&'static str>,
+    pub option_or_err: bool,
+    pub prelude_modules: Vec<&'static str>,
+}
+
+impl CoreIdentifierDemand {
+    /// Combine facts when canonical generated declarations join a module.
+    pub fn merge(&mut self, other: Self) {
+        self.option_or_err |= other.option_or_err;
+        for module in other.bare_modules {
+            if !self.bare_modules.contains(&module) {
+                self.bare_modules.push(module);
+            }
+        }
+        self.bare_modules.sort_unstable_by_key(|module| {
+            crate::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+                .iter()
+                .position(|row| row.module_name == *module)
+        });
+        for module in other.prelude_modules {
+            if !self.prelude_modules.contains(&module) {
+                self.prelude_modules.push(module);
+            }
+        }
+        self.prelude_modules.sort_unstable();
+    }
+}
+
 #[derive(Debug)]
 pub struct LoadedModule {
     pub path: std::path::PathBuf,
     /// Stable path string for diagnostics/codegen (e.g. `Examples/features/21_imports/main.jet`).
     pub display: String,
     pub source: String,
+    pub core_identifier_demand: CoreIdentifierDemand,
     /// Namespace when this file is imported (`import … as alias`).
     pub alias: String,
     pub imports: Vec<ImportDecl>,
@@ -722,8 +755,6 @@ pub struct LoadedModule {
     pub block_spans: Vec<Span>,
     /// D-WASM1: optional file-level web bucket ceiling.
     pub web_target_ceiling: Option<crate::WebPartition::WebBucket>,
-    /// D-VISDEFAULT1=C / D-VISDEFAULT2=A: `#PubFile` flips default top-level export visibility.
-    pub pub_file: bool,
     /// D-PRELUDEX1=A: `#NoPrelude` disables the readable Core prelude in this file.
     pub no_prelude: bool,
     /// D-APP-UNIFY1=B / D-WEBDEFAULT1: the file-level `#Target(Web)` default

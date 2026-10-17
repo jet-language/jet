@@ -1,0 +1,12 @@
+# tests/error_conversions.rs::conversion_cascade_links_same_span_root_and_orders_it_first at tests/error_conversions.rs:192; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# PENDING-SAME-HEAD (heavy lane paused); sources/expected literals unchanged.
+# SPLIT: cause-span equality (rs209-216) PENDING-SEAM(compiler-lib); public diagnostic order, causes, clears ported below.
+fixture: conversion_cascade_links_same_span_root_and_orders_it_first.fixture
+env: NO_COLOR=1
+step: jet check run.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0104"] #>= 1 # original predicate
+json: stdout doc $.reports[?code="E2404"] #>= 1 # original predicate
+json: stdout doc $.reports[?code in ["E0104","E2404"]][0].code = "E0104" # original predicate: first root position is before first dependent, not necessarily before unrelated reports
+json: stdout doc $.reports[?code="E2404"][0].cause = ["E0104"]
+json: stdout doc $.reports[?code="E0104"][?cause=[]][?clears=1] #>= 1 # original same-record JSON predicate

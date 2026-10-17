@@ -1,0 +1,37 @@
+# PORT tests/repl.rs:3022-3072, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+fixture: repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable.fixture
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "alpha := 1\r" after 200ms
+pty-send: "\u0002" after 120ms
+pty-send: "\u00101\r" after 120ms
+pty-send: "\u00061\r" after 120ms
+pty-send: "\u00121\r\r" after 120ms
+pty-send: "alp\t\r" after 180ms
+pty-send: "\u001bORa\r\r" after 120ms
+pty-send: ":quit\r" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "bindings" # Original substring predicate rs3029.
+stdout: ~ "select turn to pin" # Original substring predicate rs3029.
+stdout: ~ "select turn to fold" # Original substring predicate rs3029.
+stdout: ~ "select turn to edit" # Original substring predicate rs3029.
+stdout: ~ "history search>" # Original substring predicate rs3029.
+stdout: ~ "1 : Int" # Original substring predicate rs3042.
+step: jet repl
+env: XDG_STATE_HOME={work}/state
+unset: JET_REPL_HISTORY
+stdin: repl_terminal_matrix_keyboard_and_text_fallbacks_are_reachable.fixture/cooked.in
+exit: 0
+stdout: ~ "alpha: Int := 1" # Original substring predicate rs3058.
+stdout: ~ "turn pinned" # Original substring predicate rs3058.
+stdout: ~ "turn folded" # Original substring predicate rs3058.
+stdout: ~ "turn unfolded" # Original substring predicate rs3058.
+stdout: ~ "rerun #1" # Original substring predicate rs3058.
+stdout: ~ "#1 ok" # Original substring predicate rs3058.

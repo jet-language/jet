@@ -1,0 +1,20 @@
+# PORT tests/repl.rs:2169-2215 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+fixture: repl_tty_prompts_and_reuses_exact_session_tuple.fixture
+env: NO_COLOR=1
+requires: os:unix
+mkdir: project
+copy: value.txt project/value.txt
+step raw: jet repl --project {work}/project
+pty: true
+pty-send: "use core.files as fs\r" after 200ms
+pty-send: "#FX(authority: FS) { fs.read(\"value.txt\") ?? panic(\"read failed\") }\r" after 200ms
+pty-send: "s" after 200ms
+pty-send: "#FX(authority: FS) { fs.read(\"value.txt\") ?? panic(\"read failed\") }\r" after 200ms
+pty-send: "c" after 200ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "Core effect FS requests runtime authority" # Original authority prompt rs2206.
+stdout: ~ "Using session FS.Read authority for `value.txt`" # Original exact tuple reuse rs2210.
+stdout: !~ "E1803" # Original granted tuple denial absence rs2213.

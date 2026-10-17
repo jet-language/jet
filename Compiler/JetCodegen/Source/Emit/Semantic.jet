@@ -93,7 +93,7 @@ fn jet_rust_emit_portable_require_abi(ctx: &JetRustEmitContext) -> Bool Never! {
 }
 
 fn jet_rust_emit_native_int_argument(ctx: &JetRustEmitContext, value: String, location: MIRPanicLoc?) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     file := "\"<mir>\""
     line := 0
     if location == .Val(loc) {
@@ -148,7 +148,7 @@ fn jet_rust_emit_callable_parameter_borrowed(ty: MIRType, access: MIRAccess) -> 
 fn jet_rust_emit_callable_argument_from_owned(ty: MIRType, access: MIRAccess, value: String) -> String Never! {
     if access == MIRAccess.Write -> return "&mut {value}"
     if jet_rust_emit_callable_parameter_borrowed(ty, access) -> return "&{value}"
-    ~value
+    value.copy()
 }
 
 // MIRRust fn_value_call: `Fn` values are shared `Rc<RefCell<Option<Box<dyn FnMut>>>>`
@@ -185,7 +185,7 @@ fn jet_rust_emit_mutable_receiver_reference(ctx: &JetRustEmitContext, function: 
     }
     if instruction.operation == {
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, MIRAccess.Write)
-        .Parameter(_, _) | .Capture(_) -> return "&mut ({jet_rust_emit_parameter_place(ctx, function, value, true)})"
+        .Parameter(_, _) | .Capture(_) -> return "&mut ({jet_rust_emit_parameter_place(&ctx, function, value, true)})"
         else -> {}
     }
     jet_rust_emit_value_reference(ctx, value, true)
@@ -203,7 +203,7 @@ fn jet_rust_emit_borrowed_value_reference(ctx: &JetRustEmitContext, function: MI
         .AddressOf(place, _) | .ReadPlace(place) -> return jet_rust_emit_place_reference(&ctx, function, place, access)
         .Parameter(_, _) | .Capture(_) -> {
             borrow :: if mutable -> "&mut " else -> "&"
-            return "{borrow}({jet_rust_emit_parameter_place(ctx, function, value, mutable)})"
+            return "{borrow}({jet_rust_emit_parameter_place(&ctx, function, value, mutable)})"
         }
         else -> {}
     }
@@ -226,15 +226,26 @@ fn jet_rust_emit_is_test_artifact(ctx: &JetRustEmitContext) -> Bool Never! {
 
 fn jet_rust_emit_print(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, value: MIRValueID) -> String Never! {
     test_print :: jet_rust_emit_is_test_artifact(&ctx)
-    // Printing only reads its value: it borrows it. A test print takes a
-    // String, so it consumes the value at its single use.
-    rendered :: if {
-        jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String -> "({jet_rust_emit_value_borrow(ctx, value)}).jet_show()"
-        test_print -> jet_rust_emit_value_consume(ctx, function, value)
-        else -> "*{jet_rust_emit_value_borrow(ctx, value)}"
-    }
+    // Printing only reads its value: it borrows it, in the place a stable
+    // read names (jet_rust_emit_inspected_value_reference), so a read of a
+    // local or parameter is never copied first. A test print takes a String,
+    // so it consumes the value at its single use.
+    value_type :: jet_rust_emit_value_type(ctx, function, value)
+    if test_print && value_type.kind == MIRTypeKind.String -> return "jet_test_print({jet_rust_emit_value_consume(ctx, function, value)})"
+    inspected :: jet_rust_emit_inspected_value_reference(&ctx, function, value)
+    rendered :: if value_type.kind != MIRTypeKind.String -> jet_rust_emit_structural_text(&ctx, value_type, inspected, "jet_show", 0) else -> "*{inspected}"
     if test_print -> return "jet_test_print({rendered})"
     "{{ let _ = {jet_rust_emit_prelude_args(&ctx, function, call, [String]{"&({rendered})", "true"})}; }}"
+}
+
+// MIRRust print_borrows_value: `print(value)` only reads `value`, except a
+// test print of a String, which consumes it.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::print_borrows_value
+fn jet_rust_emit_print_reads(ctx: &JetRustEmitContext, function: MIRFunction, semantic: MIRSemanticOp, value: MIRValueID) -> Bool Never! {
+    if semantic == {
+        .Print(_, printed) -> return printed == value && (!jet_rust_emit_is_test_artifact(&ctx) || jet_rust_emit_value_type(ctx, function, value).kind != MIRTypeKind.String)
+        else -> return false
+    }
 }
 
 fn jet_rust_emit_ambient_input(ctx: &JetRustEmitContext, function: MIRFunction, call: MIRPreludeCallID, prompt: MIRValueID?) -> String Never! {
@@ -544,7 +555,7 @@ fn jet_rust_emit_http_method_name(method: MIRHTTPMethod) -> String Never! {
 }
 
 fn jet_rust_emit_http_route_handler_adapter(ctx: &JetRustEmitContext, function: MIRFunction, handler: MIRValueID, handler_param_names: [String], contract_json: String) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     handler_ty :: jet_rust_emit_value_type(ctx, function, handler)
     if handler_ty.kind == {
         .Fn(_) | .SendFn(_, _, _) -> {}
@@ -621,6 +632,7 @@ fn jet_rust_emit_http_router_register(ctx: &JetRustEmitContext, function: MIRFun
     source_file :: jet_rust_emit_source_path(&ctx, location.file)
     jet_rust_emit_prelude_args_exact(&ctx, function, call, [String]{receiver_text, method_text, path_text, adapted_handler, source_file, "{location.line}u32", "{jet_rust_emit_quote(contract_json)}.to_string()"})
 }
+
 
 // ---- CoreClosureCall ----------------------------------------------------------
 
@@ -865,7 +877,7 @@ fn jet_rust_emit_gc_edit(ctx: &JetRustEmitContext, function: MIRFunction, call: 
 }
 
 fn jet_rust_emit_typed_sql_binding(ctx: &JetRustEmitContext, function: MIRFunction, value: MIRValueID) -> String Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     db_value :: "{root}jet_std::DBValue"
     ty :: jet_rust_emit_value_type(ctx, function, value)
     if jet_rust_emit_nominal_name(ty) == (Val("DBValue")) -> return jet_rust_emit_value_owned(ctx, function, value)
@@ -928,11 +940,14 @@ fn jet_rust_emit_plugin_type(ctx: &JetRustEmitContext, source: MIRType) -> MIRTy
         .InlineRange(inner, _, _) | .Tagged(_, inner) -> return jet_rust_emit_plugin_type(&ctx, inner)
         .Apply(name, _) -> {
             row :: jet_rust_emit_type_index(ctx, name.id) ?? return source
-            if ctx.program.types[row].kind == .Alias(target) -> return jet_rust_emit_plugin_type(&ctx, target)
+            if ctx.program.types[row].kind == .Alias(target) {
+                aliased :: target.copy()
+                return jet_rust_emit_plugin_type(&ctx, aliased)
+            }
         }
         else -> {}
     }
-    ~source
+    source.copy()
 }
 
 fn jet_rust_emit_plugin_record_fields(ctx: &JetRustEmitContext, source: MIRType) -> [MIRField] Never! {
@@ -1042,7 +1057,7 @@ fn jet_rust_emit_plugin_decode(ctx: &JetRustEmitContext, descriptor: MIRComponen
             loop field in declared {
                 if field.skip && !field.computed -> &assignments.push("{jet_rust_emit_field_name(&ctx, field.id)}: Default::default()")
             }
-            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {assignments.join(", ")} }}) }}, _ => {wrong} }}"
+            return "match ({value}) {{ {wire}::Record(mut fields) => {{ {statements.join(" ")} if !fields.is_empty() {{ return Err(\"plugin returned a record with unexpected fields\".to_string()); }} Ok({jet_rust_emit_type(&ctx, ty)} {{ {jet_rust_emit_record_type_phantom_initializer(&ctx, ty)}{assignments.join(", ")} }}) }}, _ => {wrong} }}"
         }
     }
     panic("checked Component descriptor disagrees with its MIR carrier")

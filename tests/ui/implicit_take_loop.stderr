@@ -1,0 +1,12 @@
+Error [E0209]: `consume` takes `msg`, but `msg` is used again later
+  --> tests/ui/implicit_take_loop.jet:8:17
+    |
+  8 |         consume(msg)
+    |                 ^^^
+  --> tests/ui/implicit_take_loop.jet:8:17
+    |
+  8 |         consume(msg)
+    |                 ^^^ the next loop iteration passes `msg` here again
+ Why: `consume` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `msg`
+ Fix: Write `msg.copy()` to pass a copy and keep `msg`, or reorder so this call is the last use of `msg`
+More: jet-lang.dev/e/E0209

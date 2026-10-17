@@ -65,43 +65,43 @@ fn jet_codegen_shared_owner_host_method(receiver: Type, method: String, arg_coun
 
 // A by-value operand (`borrow_mask` false) is consumed by the route: a named
 // owner moves out of its place, and a Copy value stays an ordinary read.
-fn jet_codegen_shared_owner_owned_arg(builder: &JetCodegenBuilder, argument: TExpr) -> MIRCallArg {
+fn jet_codegen_shared_owner_owned_arg(builder: &JetCodegenBuilder, program: JetCodegenProgram, argument: TExpr) -> MIRCallArg {
     if jet_codegen_ownership(argument.ty).mode == MIROwnershipMode.Copy {
-        value := jet_codegen_lower_expr(&builder, argument)
+        value := jet_codegen_lower_expr(&builder, program, argument)
         return jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None)
     }
     move_place := if argument.kind == {
-        .Local(local) -> Val(jet_codegen_lower_local_place(&builder, local))
-        .Field(_, _) -> Val(jet_codegen_lower_place_for_access(&builder, TPlace.Expr{value: argument}, MIRAccess.Read))
+        .Local(local) -> Val(jet_codegen_lower_local_place(&builder, program, local))
+        .Field(_, _) -> Val(jet_codegen_lower_place_for_access(&builder, program, TPlace.Expr{value: argument}, MIRAccess.Read))
         else -> None
     }
     value := if move_place == {
-        None -> jet_codegen_lower_expr(&builder, argument)
-        Val(id) -> jet_codegen_emit_value(&builder, argument.span, argument.ty, MIROperation.MovePlace{place: id})
+        None -> jet_codegen_lower_expr(&builder, program, argument)
+        Val(id) -> jet_codegen_emit_value(&builder, program, argument.span, argument.ty, MIROperation.MovePlace{place: id})
     }
     jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Move, None)
 }
 
-fn jet_codegen_lower_shared_owner_host_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
+fn jet_codegen_lower_shared_owner_host_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
     transactional := method == "capture" && builder.transactions.len() > 0
     route :: jet_codegen_shared_owner_route(receiver.ty, method, args.len(), transactional) ?? panic("checked Shared owner method has no canonical route")
-    lowered := [MIRCallArg]{jet_codegen_method_receiver_arg(&builder, receiver, MIRAccess.Read)}
+    lowered := [MIRCallArg]{jet_codegen_method_receiver_arg(&builder, program, receiver, MIRAccess.Read)}
     if transactional {
         transaction := builder.transactions[builder.transactions.len() - 1]
         stm_place :: transaction.stm_place ?? panic("checked Shared transaction capture has no active STM place")
-        stm := jet_codegen_emit_value(&builder, expression.span, Type.Named{name: "Stm"}, MIROperation.ReadPlace{place: stm_place})
+        stm := jet_codegen_emit_value(&builder, program, expression.span, Type.Named{name: "Stm"}, MIROperation.ReadPlace{place: stm_place})
         &lowered.push(jet_codegen_host_call_value_arg(stm, expression.span, MIRAccess.Write, Val(stm_place)))
     }
     loop argument in args {
         if {
             route.borrow_mask[lowered.len()] -> {
-                value := jet_codegen_lower_expr(&builder, argument)
+                value := jet_codegen_lower_expr(&builder, program, argument)
                 &lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None))
             }
-            else -> &lowered.push(jet_codegen_shared_owner_owned_arg(&builder, argument))
+            else -> &lowered.push(jet_codegen_shared_owner_owned_arg(&builder, program, argument))
         }
     }
     if lowered.len() != route.borrow_mask.len() -> panic("checked Shared owner method operands disagree with its route arity")
-    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.host", route.member, route.symbol, lowered.len(), route.borrow_mask, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: lowered, type_args: [MIRType]{}})
+    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.host", route.member, route.symbol, lowered.len(), route.borrow_mask, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: call}, args: lowered, type_args: [MIRType]{}})
 }

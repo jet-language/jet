@@ -1,0 +1,102 @@
+# Port of tests/polyglot_systems.rs:1079-1098 (python) and all original helpers381-1076.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# Direct needs_native/session_result(s,c)/Finished/program-finished/42: ledger-only PENDING-SEAM(debug-lib), no CLI substitute.
+requires: os:unix
+fixture: mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.fixture
+write: python/package.jet mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.package.template
+step: jet run observe/tools.jet
+exit: 0
+capture: cc stdout doc $.cc
+capture: ar stdout doc $.ar
+capture: clang stdout doc $.clang
+capture: strip stdout doc $.strip
+capture: nm stdout doc $.nm
+capture: javac stdout doc $.javac
+capture: node stdout doc $.node
+capture: python3 stdout doc $.python3
+capture: java_home stdout doc $.java_home
+capture: libjvm stdout doc $.libjvm
+capture: strip_flag stdout doc $.strip_flag
+file: {cap:libjvm} is-file # original JAVA_HOME embedded runtime assertion542-547
+step: jet inspect bind py ops.py --pkg ops
+cwd: python
+env: NO_COLOR=1
+exit: 0
+file: python/.jet/bindings/py/ops.jet is-file
+file: python/.jet/bindings/py/ops.provenance ~ "schema=jet-ffi-bridge-provenance-v1\n" # original common provenance
+file: python/.jet/bindings/py/ops.provenance line ^= "identity=" # original any line starts identity
+step: jet check run.jet
+cwd: python
+env: NO_COLOR=1
+exit: 0
+step: jet build --profile=debug run.jet
+cwd: python
+env: NO_COLOR=1
+exit: 0
+step: jet test --coverage --profile=debug run.jet
+cwd: python
+env: NO_COLOR=1
+exit: 0
+stdout+stderr: ~ "coverage:" # original coverage report
+step: jet run --profile=debug run.jet
+cwd: python
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.out
+step: jet perf run run.jet --profile=debug --out {work}/python/profile.jettrace
+cwd: python
+env: NO_COLOR=1
+exit: 0
+file: python/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; Python call1046
+file: python/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; Python call1046
+file: python/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; Python call1046
+file: python/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; Python call1046
+step: jet perf view profile.jettrace --json
+cwd: python
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original ed77c235f tests/polyglot_systems.rs:680 shared workflow view contains kind; Python call1046
+stdout: ~ "\"flamegraph\":" # original ed77c235f tests/polyglot_systems.rs:681 shared workflow view contains flamegraph; Python call1046
+copy: python/ops.py source.before
+append: python/ops.py "\n# stale binding source\n"
+step: jet run run.jet
+cwd: python
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+copy: source.before python/ops.py
+capture: before = text file python/.jet/bindings/py/ops.jet
+capture: stale_descriptor = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") python/.jet/bindings/py/ops.jet
+cap:stale_descriptor: != "{cap:before}" # original replacen changes the cached descriptor
+write: python/.jet/bindings/py/ops.jet = "{cap:stale_descriptor}"
+step: jet check run.jet
+cwd: python
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+step: jet inspect bind py ops.py --pkg ops
+cwd: python
+env: NO_COLOR=1
+exit: 0
+step: jet run --profile=debug run.jet
+cwd: python
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.out
+step: jet inspect bind py broken.py --pkg broken
+cwd: python
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+file: python/.jet/bindings/py/broken.jet absent
+capture: stale_runtime = text file.replace("return left + right", "return left + right + 1") python/ops.py
+write: python/ops.py = "{cap:stale_runtime}"
+step: jet inspect bind py ops.py --pkg ops
+cwd: python
+env: NO_COLOR=1
+exit: 0
+step: jet run run.jet
+cwd: python
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.python.edited.out

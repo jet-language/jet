@@ -1,0 +1,17 @@
+
+use core.compute as compute
+
+fn run() {
+    seed :: compute.matrix(1, 1, 100.0) ?? panic("seed")
+    one :: compute.matrix(1, 1, 1.0) ?? panic("one")
+    f32_seed :: compute.matmul_f32_tile(seed, one) ?? panic("f32")
+    if compute.on_device(f32_seed, compute.device_vulkan()) == {
+        .Err(_) -> print("vulkan:unavailable")
+        .Ok(value) -> {
+            if compute.exp(value) == {
+                .Ok(_) -> print("nonfinite:accepted")
+                .Err(_) -> print("nonfinite:rejected")
+            }
+        }
+    }
+}

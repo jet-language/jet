@@ -1,0 +1,18 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+fn run() {
+    node := Node{payload: 7, hops: 0}
+    pinned :: mem.pin(&node)
+    handle :: task {
+        pinned.hops += 1
+        return pinned.payload
+    }
+    handle.cancel()
+    print("{(handle.join() ?? 0)}")
+}

@@ -1,0 +1,14 @@
+# Port of tests/bind.rs:806-842; input bytes copied verbatim.
+# PENDING-SAME-HEAD: historical reference exits1 E3208 on original C fixture provenance; no snapshot blessed.
+fixture: fixtures/public_c_bind_writes_parseable_hashed_cache_and_regenerates_idempotently
+step: jet "inspect" "bind" "{work}/hostile.h" "--pkg" "hostile-lib" "-o" "{work}/generated.jet"
+exit: 0
+file: "generated.jet" = public_c_bind_writes_parseable_hashed_cache_and_regenerates_idempotently.0.generated.jet.out
+file: generated.hash = public_c_bind_writes_parseable_hashed_cache_and_regenerates_idempotently.hash
+copy: generated.jet parse.jet
+step: jet fmt parse.jet
+copy: generated.jet before.jet
+step: jet "inspect" "bind" "{work}/hostile.h" "--pkg" "hostile-lib" "-o" "{work}/generated.jet"
+exit: 0
+file: "generated.jet" = public_c_bind_writes_parseable_hashed_cache_and_regenerates_idempotently.1.generated.jet.out
+file: generated.jet == before.jet

@@ -1,0 +1,40 @@
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    print("host-read")
+    if process.cmd(["bash", "-c", "if test -r '{tmp}/host-secret'; then printf escaped; else printf blocked; fi"]).cwd("{work}").under(policy).run_checked() == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("unsupported")
+    }
+    print("host-write")
+    if process.cmd(["bash", "-c", "if printf escaped > '{tmp}/host-marker'; then printf escaped; else printf blocked; fi"]).cwd("{work}").under(policy).run_checked() == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("unsupported")
+    }
+    print("source-symlink")
+    if process.cmd(["bash", "-c", "if test -r \"$PWD/link\"; then printf escaped; else printf blocked; fi"]).cwd("{work}").under(policy).run_checked() == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("unsupported")
+    }
+    print("output-symlink")
+    if process.cmd(["bash", "-c", "if '{cap:ln}' -s '{tmp}/host-marker' \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped; else printf blocked; fi"]).cwd("{work}").under(policy).run_checked() == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("unsupported")
+    }
+    print("network-exfiltration")
+    if process.cmd(["bash", "-c", "if printf escaped > /dev/tcp/127.0.0.1/{cap:port} 2>/dev/null; then printf escaped; else printf blocked; fi"]).cwd("{work}").under(policy).run_checked() == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("unsupported")
+    }
+    print("child-process")
+    if process.cmd(["bash", "-c", "(printf escaped > '{tmp}/host-marker') & printf blocked"]).cwd("{work}").under(policy).run_checked() == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("unsupported")
+    }
+    print("tmpfs-exhaustion")
+    if process.cmd(["bash", "-c", "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> '/tmp/jet-agent-hostile-fill-{pid}'; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped"]).cwd("{work}").under(policy).run_checked() == {
+        .Ok(value) -> print(value.output)
+        .Err(_) -> print("unsupported")
+    }
+}

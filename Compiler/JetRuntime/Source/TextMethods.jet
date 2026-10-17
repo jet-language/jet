@@ -1,0 +1,381 @@
+// Native String/core.text method routes: CoreLib/Top/Text.rs and
+// UnicodeString.rs over the E4 text carrier. Text arguments are borrowed;
+// every Text result is a fresh owner. Case/property decisions use the pinned
+// Unicode 17 lookups (UnicodeTables.jet, UnicodeText_<n>.jet and the frozen
+// CompilerNeededText Alphabetic/Numeric trees that match Rust char).
+
+// JetInt::to_i64(): an exact Int carrier word fits a native i64.
+fn text_route_fits(value: I64) -> Bool {
+    if int_inline(value) -> return true
+    int_fits(value, if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807})
+}
+
+fn text_route_native(value: I64) -> I64 { if int_inline(value) -> value else -> int_word(value) }
+
+// The Rust kernels' `panic!` reasons cross the guard as an ordinary panic.
+fn text_route_panic(message: I64) { jet_rt_panic_message(rt_text_data(message), rt_text_len(message)) }
+
+// Append count copies of one ASCII byte, reserving once.
+fn text_push_repeat_byte(target: I64, byte: I64, count: I64) {
+    if (count <= I64{0}) -> return
+    used :: rt_text_len(target)
+    buffer :: rt_text_reserve_extra(target, rt_text_data(target), used, count)
+    if (buffer == I64{0}) -> return
+    at := I64{0}
+    loop at < count {
+        rt_text_put(buffer + used + at, byte)
+        at += I64{1}
+    }
+    rt_text_store(target + I64{8}, used + count)
+}
+
+// Start of the scalar that ends at byte offset end (> floor).
+fn text_scalar_start(data: I64, floor: I64, end: I64) -> I64 {
+    at := end - I64{1}
+    loop at > floor && (rt_text_byte(data + at).bit_and(I64{192})) == (I64{128}) -> at -= I64{1}
+    at
+}
+
+// UnicodeString.rs jet_unicode_trim_start/_end (and str::trim_start/_end,
+// whose char::is_whitespace is the same White_Space property).
+fn text_trim_side(value: I64, leading: Bool, trailing: Bool) -> I64 {
+    data :: rt_text_data(value)
+    start := I64{0}
+    end := rt_text_len(value)
+    if leading {
+        loop start < end {
+            if !unicode_is_white_space(rt_text_decode(data + start)) -> break
+            start += rt_text_width(data + start)
+        }
+    }
+    if trailing {
+        loop end > start {
+            at :: text_scalar_start(data, start, end)
+            if !unicode_is_white_space(rt_text_decode(data + at)) -> break
+            end = at
+        }
+    }
+    rt_text_slice(value, start, end)
+}
+
+#Export(c) fn jet_text_trim_start(value: I64) -> I64 { text_trim_side(value, true, false) }
+#Export(c) fn jet_text_trim_end(value: I64) -> I64 { text_trim_side(value, false, true) }
+#Export(c) fn jet_text_parse_lstrip(value: I64) -> I64 { text_trim_side(value, true, false) }
+#Export(c) fn jet_text_parse_rstrip(value: I64) -> I64 { text_trim_side(value, false, true) }
+#Export(c) fn jet_text_parse_strip(value: I64) -> I64 { rt_text_trim(value) }
+
+#Export(c) fn jet_text_remove_prefix(value: I64, prefix: I64) -> I64 {
+    if jet_string_starts_with(value, prefix) -> return rt_text_slice(value, rt_text_len(prefix), rt_text_len(value))
+    jet_rt_string_clone(value)
+}
+
+#Export(c) fn jet_text_remove_suffix(value: I64, suffix: I64) -> I64 {
+    if jet_string_ends_with(value, suffix) -> return rt_text_slice(value, I64{0}, rt_text_len(value) - rt_text_len(suffix))
+    jet_rt_string_clone(value)
+}
+
+// s.chars().rev(): whole scalars in reverse order.
+#Export(c) fn jet_text_reverse(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    result :: rt_text_builder_with_capacity(length)
+    at := length
+    loop at > (I64{0}) {
+        start :: text_scalar_start(data, I64{0}, at)
+        rt_text_append(result, data + start, at - start)
+        at = start
+    }
+    result
+}
+
+#Export(c) fn jet_text_unicode_is_ascii(value: I64) -> Bool {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + at) >= I64{128}) -> return false
+        at += I64{1}
+    }
+    true
+}
+
+// str::find: the byte offset of the first match, or -1.
+#Export(c) fn jet_text_parse_find(value: I64, needle: I64) -> I64 {
+    jet_int_owned_from_i64(rt_text_find(value, needle, I64{0}, false))
+}
+
+#Export(c) fn jet_text_parse_partition(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
+    found :: rt_text_find(value, separator, I64{0}, false)
+    if (found < I64{0}) {
+        rt_text_store(item0, jet_rt_string_clone(value))
+        rt_text_store(item1, jet_rt_string_builder_new())
+        rt_text_store(item2, jet_rt_string_builder_new())
+        return
+    }
+    rt_text_store(item0, rt_text_slice(value, I64{0}, found))
+    rt_text_store(item1, jet_rt_string_clone(separator))
+    rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
+}
+
+// str::rfind: the byte offset of the last match, or -1 (an empty needle
+// matches at the end).
+#Export(c) fn jet_text_parse_rfind(value: I64, needle: I64) -> I64 {
+    jet_int_owned_from_i64(rt_text_find(value, needle, I64{0}, true))
+}
+
+// Text.rs jet_text_parse_rpartition: cut at the last separator; a miss keeps
+// the whole text in the third item.
+#Export(c) fn jet_text_parse_rpartition(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
+    found :: rt_text_find(value, separator, I64{0}, true)
+    if (found < I64{0}) {
+        rt_text_store(item0, jet_rt_string_builder_new())
+        rt_text_store(item1, jet_rt_string_builder_new())
+        rt_text_store(item2, jet_rt_string_clone(value))
+        return
+    }
+    rt_text_store(item0, rt_text_slice(value, I64{0}, found))
+    rt_text_store(item1, jet_rt_string_clone(separator))
+    rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
+}
+
+// Text.rs jet_text_parse_split_once: (found, head, tail) at the first
+// separator; a miss is (false, text, "").
+#Export(c) fn jet_text_parse_split_once(value: I64, separator: I64, item0: I64, item1: I64, item2: I64) {
+    found :: rt_text_find(value, separator, I64{0}, false)
+    if (found < I64{0}) {
+        #Unsafe("item0 lends the C-ABI tuple's one writable Bool byte") { os_store_u8(item0, I64{0}) }
+        rt_text_store(item1, jet_rt_string_clone(value))
+        rt_text_store(item2, jet_rt_string_builder_new())
+        return
+    }
+    #Unsafe("item0 lends the C-ABI tuple's one writable Bool byte") { os_store_u8(item0, I64{1}) }
+    rt_text_store(item1, rt_text_slice(value, I64{0}, found))
+    rt_text_store(item2, rt_text_slice(value, found + rt_text_len(separator), rt_text_len(value)))
+}
+
+// Text.rs jet_text_zfill: zeros after a leading '+'/'-' up to width scalars.
+#Export(c) fn jet_text_zfill_ref(value: I64, width: I64) -> I64 {
+    if !text_route_fits(width) {
+        text_route_panic(rt_static_text("text zfill width does not fit native i64"))
+        return I64{0}
+    }
+    target :: text_route_native(width)
+    count :: jet_char_len(value)
+    if target <= count -> return jet_rt_string_clone(value)
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    zeros :: target - count
+    if (zeros > I64{9223372036854775807} - length) {
+        rt_text_capacity_stop()
+        return I64{0}
+    }
+    lead :: if (length == I64{0}) -> I64{0} else -> rt_text_byte(data)
+    sign :: if (lead == I64{43} || lead == I64{45}) -> I64{1} else -> I64{0}
+    result :: rt_text_builder_with_capacity(length + zeros)
+    rt_text_append(result, data, sign)
+    text_push_repeat_byte(result, I64{48}, zeros)
+    rt_text_append(result, data + sign, length - sign)
+    result
+}
+
+// Text.rs jet_text_expandtabs: tabs advance to the next multiple of the
+// nonnegative tab size (dropped at zero); CR/LF reset the scalar column.
+#Export(c) fn jet_text_expandtabs(value: I64, tabsize: I64) -> I64 {
+    if !text_route_fits(tabsize) {
+        text_route_panic(rt_static_text("text tab size does not fit native i64"))
+        return I64{0}
+    }
+    native :: text_route_native(tabsize)
+    width :: if (native < I64{0}) -> I64{0} else -> native
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    result :: rt_text_builder_with_capacity(length)
+    column := I64{0}
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(data + at)
+        step :: rt_text_width(data + at)
+        if {
+            (byte == I64{9}) -> {
+                if (width > I64{0}) {
+                    spaces :: width - column % width
+                    text_push_repeat_byte(result, I64{32}, spaces)
+                    column = wrapping(column + spaces)
+                }
+            }
+            (byte == I64{10} || byte == I64{13}) -> {
+                rt_text_append(result, data + at, step)
+                column = I64{0}
+            }
+            else -> {
+                rt_text_append(result, data + at, step)
+                column = wrapping(column + I64{1})
+            }
+        }
+        at += step
+    }
+    result
+}
+
+// ---- classification -------------------------------------------------------
+// Rust char predicates: is_alphanumeric = Alphabetic or General_Category N*;
+// is_control = General_Category Cc.
+fn text_char_alnum(cp: I64) -> Bool { compiler_text_alphabetic(cp) || compiler_text_numeric(cp) }
+
+fn text_route_all(value: I64, kind: I64, empty: Bool) -> Bool {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    if (length == I64{0}) -> return empty
+    at := I64{0}
+    loop at < length {
+        cp :: rt_text_decode(data + at)
+        holds :: if {
+            (kind == I64{0}) -> text_char_alnum(cp)
+            (kind == I64{1}) -> cp >= I64{48} && cp <= I64{57}
+            else -> !unicode_is_control(cp)
+        }
+        if !holds -> return false
+        at += rt_text_width(data + at)
+    }
+    true
+}
+
+#Export(c) fn jet_text_isalnum(value: I64) -> Bool { text_route_all(value, I64{0}, false) }
+#Export(c) fn jet_text_isdecimal(value: I64) -> Bool { text_route_all(value, I64{1}, false) }
+#Export(c) fn jet_text_isdigit(value: I64) -> Bool { text_route_all(value, I64{1}, false) }
+#Export(c) fn jet_text_isprintable(value: I64) -> Bool { text_route_all(value, I64{2}, true) }
+#Export(c) fn jet_text_isnumeric(value: I64) -> Bool { compiler_text_all(value, I64{1}) }
+
+#Export(c) fn jet_text_isidentifier(value: I64) -> Bool {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    if (length == I64{0}) -> return false
+    first :: rt_text_decode(data)
+    if !(first == I64{95} || compiler_text_alphabetic(first)) -> return false
+    at := rt_text_width(data)
+    loop at < length {
+        cp :: rt_text_decode(data + at)
+        if !(cp == I64{95} || text_char_alnum(cp)) -> return false
+        at += rt_text_width(data + at)
+    }
+    true
+}
+
+// Text.rs jet_text_istitle over Rust char Uppercase/Lowercase/Alphabetic.
+#Export(c) fn jet_text_istitle(value: I64) -> Bool {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    has_cased := false
+    expect_upper := true
+    at := I64{0}
+    loop at < length {
+        cp :: rt_text_decode(data + at)
+        if {
+            unicode_is_uppercase(cp) -> {
+                has_cased = true
+                expect_upper = false
+            }
+            unicode_is_lowercase(cp) -> {
+                has_cased = true
+                if expect_upper -> return false
+            }
+            compiler_text_alphabetic(cp) -> return false
+            else -> expect_upper = true
+        }
+        at += rt_text_width(data + at)
+    }
+    has_cased
+}
+
+// Text.rs jet_text_is_lower/_upper: at least one Cased scalar, and the
+// opposite one-scalar full mapping changes every Cased scalar (a lone scalar
+// has no Final_Sigma predecessor, so its lowercase is its table mapping).
+fn text_cased_all(value: I64, lower: Bool) -> Bool {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    saw := false
+    at := I64{0}
+    loop at < length {
+        cp :: rt_text_decode(data + at)
+        if unicode_is_cased(cp) {
+            changed :: if lower -> unicode_upper_mapping(cp) != cp else -> unicode_lower_mapping(cp) != cp
+            if !changed -> return false
+            saw = true
+        }
+        at += rt_text_width(data + at)
+    }
+    saw
+}
+
+#Export(c) fn jet_text_is_lower(value: I64) -> Bool { text_cased_all(value, true) }
+#Export(c) fn jet_text_is_upper(value: I64) -> Bool { text_cased_all(value, false) }
+
+// ---- case conversion -------------------------------------------------------
+// Text.rs jet_text_capitalize: the first scalar's titlecase mapping, then the
+// remaining suffix lowercased as its own string (Final_Sigma restarts there).
+#Export(c) fn jet_text_capitalize(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    result :: rt_text_builder_with_capacity(length)
+    if (length == I64{0}) -> return result
+    unicode_append_mapping(result, unicode_title_mapping(rt_text_decode(data)))
+    unicode_lower_append(result, data, rt_text_width(data), length)
+    result
+}
+
+// Text.rs jet_text_casefold: full default case folding (C+F).
+#Export(c) fn jet_text_casefold(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    result :: rt_text_builder_with_capacity(length)
+    at := I64{0}
+    loop at < length {
+        unicode_append_mapping(result, unicode_fold_mapping(rt_text_decode(data + at)))
+        at += rt_text_width(data + at)
+    }
+    result
+}
+
+// Text.rs jet_text_swapcase: a Cased scalar takes its uppercase mapping if
+// that changes it, else its lowercase mapping; everything else is copied.
+#Export(c) fn jet_text_swapcase(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    result :: rt_text_builder_with_capacity(length)
+    at := I64{0}
+    loop at < length {
+        step :: rt_text_width(data + at)
+        cp :: rt_text_decode(data + at)
+        upper :: if unicode_is_cased(cp) -> unicode_upper_mapping(cp) else -> cp
+        if {
+            upper != cp -> unicode_append_mapping(result, upper)
+            unicode_is_cased(cp) -> unicode_append_mapping(result, unicode_lower_mapping(cp))
+            else -> rt_text_append(result, data + at, step)
+        }
+        at += step
+    }
+    result
+}
+
+// Text.rs jet_text_title: an Alphabetic/Numeric run starts with its titlecase
+// mapping and continues lowercased per scalar; any other scalar ends the word.
+#Export(c) fn jet_text_title(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    result :: rt_text_builder_with_capacity(length)
+    word_start := true
+    at := I64{0}
+    loop at < length {
+        step :: rt_text_width(data + at)
+        cp :: rt_text_decode(data + at)
+        if (compiler_text_alphabetic(cp) || compiler_text_numeric(cp)) {
+            unicode_append_mapping(result, if word_start -> unicode_title_mapping(cp) else -> unicode_lower_mapping(cp))
+            word_start = false
+        } else {
+            rt_text_append(result, data + at, step)
+            word_start = true
+        }
+        at += step
+    }
+    result
+}

@@ -1,0 +1,15 @@
+use core.service as service
+
+fn checked_worker() {}
+
+fn run() {
+    tree := service.tree("workers")
+    endpoint :: tree.worker("worker", checked_worker, capacity: 2) ?? panic("worker")
+    tree.group("supervisor", ["worker"]) ?? panic("group")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "message") ?? panic("send")
+    assert((tree.mailbox_depth(endpoint) ?? panic("depth")) == 1)
+    tree.fail_worker(endpoint) ?? panic("failure")
+    assert((tree.restarts(endpoint) ?? panic("restarts")) == 1)
+    tree.stop() ?? panic("stop")
+}

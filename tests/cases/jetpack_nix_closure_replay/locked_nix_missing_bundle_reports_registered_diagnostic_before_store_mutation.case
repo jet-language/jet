@@ -1,0 +1,103 @@
+# Port of tests/jetpack_nix_closure_replay.rs:558-603; public assertions exact, runtime PENDING-SAME-HEAD.
+# Setup requires the named authentic fixture seam; no forged Store receipts/output identities.
+# Direct library claims LEDGER-ONLY in SEAMS.tsv; full original setup and predicates below.
+refused: lock-fixture
+# ORACLE-DERIVED refused: record_nix_realization Lock.rs3426 captures runtime BuildStamp timestamp3171-3219.
+# Therefore literal inputs407-442 do NOT determine every serialized byte; no approximated lock authored.
+fixture: locked_nix_missing_bundle_reports_registered_diagnostic_before_store_mutation.fixture
+mkdir: package-root
+mkdir: home
+step: jetpack env --offline --no-color --trust -- true
+cwd: project
+env-clear: true
+env: PATH=/usr/bin
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/package-root
+exit: nonzero
+stderr: ~ "E1350" # original registered diagnostic
+stderr: ~any "project Nix CAS bundle" "locked Nix" # original lock-bound replay disjunction
+file: package-root/hangar/objects absent
+
+# Verbatim original setup/subclaims (never executed as Rust):
+# fn hex_digest(prefix: &str, fill: char) -> String {
+#     format!("{prefix}{}", fill.to_string().repeat(64))
+# }
+# 
+# fn cas_digest(fill: char) -> String {
+#     hex_digest("sha256-", fill)
+# }
+# 
+# fn valid_nix_closure(output: &str) -> jetpack::Lock::NixClosureRecord {
+#     jetpack::Lock::NixClosureRecord {
+#         channel: "nixpkgs-unstable".into(),
+#         revision: "a".repeat(40),
+#         system: jetpack::Envelope::host_platform(),
+#         index_authority: "b".repeat(64),
+#         derivation: "c".repeat(64),
+#         output: output.into(),
+#         nar_hash: format!("sha256:{}", "d".repeat(64)),
+#         size: 1,
+#         compression: "none".into(),
+#         references: Vec::new(),
+#         upstream_proof: cas_digest('e'),
+#         cache_key: "f".repeat(64),
+#         project_cas_bundle: cas_digest('0'),
+#     }
+# }
+# 
+# fn lock_envelope(output: &str, platform: &str) -> jetpack::Lock::LockEnvelope {
+#     jetpack::Lock::LockEnvelope {
+#         output_hash: output.into(),
+#         platform: platform.into(),
+#         provenance: "integration-test".into(),
+#         catalog_tier: "local-unofficial".into(),
+#         catalog_trust: "unverified".into(),
+#         ..Default::default()
+#     }
+# }
+# #[test]
+# fn locked_nix_missing_bundle_reports_registered_diagnostic_before_store_mutation() {
+#     let project = Scratch::new("nix-lock-missing-bundle-project");
+#     let root = Scratch::new("nix-lock-missing-bundle-root");
+#     fs::write(
+#         project.join("env.jet"),
+#         "module dev {\n    sources: { default: NixOS/nixpkgs/nixpkgs-unstable@github }\n    env.dev: Env{ packages: [default.pkg] }\n}\n",
+#     )
+#     .unwrap();
+# 
+#     let output = cas_digest('6');
+#     let closure = valid_nix_closure(&output);
+#     let envelope = lock_envelope(&output, &jetpack::Envelope::host_platform());
+#     jetpack::Lock::record_nix_realization(
+#         &project.path,
+#         "pkg",
+#         "1.0.0",
+#         "pkg@default",
+#         &output,
+#         closure,
+#         envelope,
+#     )
+#     .unwrap();
+# 
+#     let home = Scratch::new("nix-lock-missing-bundle-home");
+#     let command = Command::new(common::jetpack_bin())
+#         .args(["env", "--offline", "--no-color", "--trust", "--", "true"])
+#         .current_dir(&project.path)
+#         .env_clear()
+#         .env("PATH", "/usr/bin")
+#         .env("HOME", &home.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     let stderr = String::from_utf8_lossy(&command.stderr);
+#     assert!(!command.status.success(), "missing lock bytes must fail");
+#     assert!(stderr.contains("E1350"), "stderr: {stderr}");
+#     assert!(
+#         stderr.contains("project Nix CAS bundle") || stderr.contains("locked Nix"),
+#         "stderr must name the lock-bound replay: {stderr}"
+#     );
+#     assert!(
+#         !root.join("hangar/objects").exists(),
+#         "missing lock bytes must fail before Hangar mutation"
+#     );
+# }

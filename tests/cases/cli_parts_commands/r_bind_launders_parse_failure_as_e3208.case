@@ -1,0 +1,9 @@
+# Port of tests/cli_parts/commands.rs:780-802; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+fixture: fixtures/r_broken
+requires: tool:Rscript
+step: jet inspect bind r {work}/broken.R --pkg broken
+exit: nonzero
+stderr: = r_bind_launders_parse_failure_as_e3208.stderr
+stderr: !~ "unexpected '}'" # original predicate
+stderr: !~ "broken.R:" # original predicate

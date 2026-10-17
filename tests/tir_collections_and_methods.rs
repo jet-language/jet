@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use tir_support::{
     assert_release_error_tiers_agree, assert_release_tiers_agree, assert_tiers_agree, build_and_run,
     compile, have_rustc,
@@ -717,7 +717,7 @@ struct Person {
     age: Int
 }
 fn name_of(p: Person) -[]> String {
-    return ~p.name
+    return p.name.copy()
 }
 fn run() {
     p :: Person{ name: \"Grace\", age: 40 }
@@ -1288,8 +1288,8 @@ fn run() {
 fn copied_string_slice_uses_string_builtin() {
     let src = "\
 fn strip_hash(reference: String) -> String {
-    text := ~reference
-    if (~text).starts_with(\"#\") -> text = (~text).slice(1, (~text).len() - 1)
+    text := reference.copy()
+    if (text.copy()).starts_with(\"#\") -> text = (text.copy()).slice(1, (text.copy()).len() - 1)
     return text
 }
 fn run() {
@@ -1373,7 +1373,7 @@ fn set_algebra_methods() {
     }
     let src = "\
 fn sorted(xs: [Int]) -[]> [Int] {
-    ys := ~xs
+    ys := xs.copy()
     ys.sort()
     return ys
 }
@@ -1504,7 +1504,7 @@ fn run() {
     print(mapped)
     print(mapped.len())
     visits := Cell.new(0)
-    visits_copy :: ~visits
+    visits_copy :: visits.copy()
     even := nums.map((n: Int) -> n + 1).filter((n: Int) -> count_and_keep(n, visits_copy) ?? false)
     print(even)
     print(visits.get())
@@ -1515,9 +1515,11 @@ fn run() {
 }
 ";
     let rust = compile("tir_eager_container_adapters", src);
+    // #4566 slice 5: a filter whose callback has an effect (it edits a Cell
+    // through a call) does not fuse with the map before it.
     assert!(
-        rust.contains("jet_list_map_filter(("),
-        "adjacent eager adapters did not use the fused Prelude kernel"
+        !rust.contains("jet_list_map_chain("),
+        "an effectful filter callback must not fuse with the map before it"
     );
     assert!(rust.contains("jet_iter_filter("));
     assert!(rust.contains("jet_iter_map("));
@@ -1527,6 +1529,29 @@ fn run() {
         src,
         "[2, 3, 4, 5]\n4\n[2, 4]\n4\n[30, 40]\n[a, b, c]\n",
     );
+}
+
+#[test]
+fn split_aggregate_builder_uses_the_native_callback_abi() {
+    let src = r#"
+fn run() {
+    values :: [1, 2, 3, 4]
+    parts :: values.split(2)
+    print(parts.left)
+    print(parts.right)
+}
+"#;
+    let rust = compile("tir_native_split_builder", src);
+    assert!(rust.contains("jet_iter_split_at("));
+    assert!(
+        rust.contains("move |__jet_callback_arg_0: Vec<"),
+        "the owned split vectors must cross a native closure adapter"
+    );
+    if have_rustc() {
+        let (code, stdout) = build_and_run("tir_native_split_builder", src);
+        assert_eq!(code, 0);
+        assert_eq!(stdout, "[1, 2]\n[3, 4]\n");
+    }
 }
 
 /// D-ITERTOOLS1=A: positional picks have one spelling and one terminal path.
@@ -1558,12 +1583,12 @@ fn list_and_map_remove() {
     }
     let src = "\
 fn drop_first(xs: [Int]) -[]> Int {
-    ys := ~xs
+    ys := xs.copy()
     r := ys.remove(0, .Slot)
     return ys.len()
 }
 fn drop_key(m: [String:Int]) -[]> Int {
-    m2 := ~m
+    m2 := m.copy()
     r := m2.remove(\"a\")
     return m2.len()
 }
@@ -1618,7 +1643,7 @@ fn list_surface_forced_interpreter() {
         "{}/Examples/features/collections/list_surface.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1648,7 +1673,7 @@ fn bare_member_shorthand_forced_interpreter() {
         "{}/Examples/features/basics/method_chain.jet",
         env!("CARGO_MANIFEST_DIR")
     );
-    match dev_iteration(&path, false, true) {
+    match crate::common::dev_run(&path, false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1930,5 +1955,65 @@ separate result=[3, 2]\n\
 fixed values=[4, 0, 1, 3]\n\
 work seen=[2, 4, 1, 3] empty=true\n\
 empty visits=0\n",
+    );
+}
+
+#[test]
+fn shared_collection_call_abi_matches_release_tiers() {
+    let src = r#"
+fn run() {
+    rank := Rank.from([3, 1])
+    print(&rank.add(2))
+    print(&rank.add(2))
+    print(rank.to_list())
+    queue := PriorityQueue.from([4, 1, 7])
+    &queue.push(5)
+    print(queue.remove(1, .Slot) ?? -1)
+    print(queue.to_sorted_list())
+    cache := Cache.new(2)
+    print(&cache.add("a", 1) ?? -1)
+    print(&cache.add("a", 2) ?? -1)
+    print(&cache.get("a") ?? -1)
+    print(&cache.add_new("a", 3))
+    print(&cache.add_new("b", 4))
+    print(cache.has_key("b"))
+    bits := Bits.new()
+    print(&bits.add(1))
+    print(&bits.add(1))
+    print(bits.has(1))
+    &bits.remove(1)
+    print(bits.has(1))
+    bytes := Bytes.new()
+    &bytes.write_bytes([4, 5])
+    print(bytes.to_bytes())
+}
+"#;
+    assert_release_tiers_agree(
+        "tir_shared_collection_call_abi",
+        src,
+        "true\nfalse\n[1, 2, 3]\n5\n[7, 4, 1]\n-1\n1\n2\nfalse\ntrue\ntrue\ntrue\nfalse\ntrue\nfalse\n[4, 5]\n",
+    );
+}
+
+#[test]
+fn sentry_typed_int_store_keeps_exact_carrier() {
+    let src = r#"
+use core.mem
+fn run() {
+    cell := 7
+    address :: mem.address_of(cell)
+    #Unsafe("the typed pointer refers to the live local cell for these stores") {
+        pointer :: mem.Ptr<Int>.from_addr(address)
+        mem.volatile_write(pointer, 11)
+        print(mem.volatile_read(pointer))
+        mem.volatile_write(pointer, 9223372036854775808)
+        print(cell)
+    }
+}
+"#;
+    assert_release_tiers_agree(
+        "tir_sentry_typed_int_store",
+        src,
+        "11\n9223372036854775808\n",
     );
 }

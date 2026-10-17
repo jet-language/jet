@@ -1,0 +1,7 @@
+// Named-zone lookup must not hide environment or filesystem access.
+use core.time as time
+
+fn pure(name: String) -[]> Zone TimeError! { time.zone(name) }
+fn env_only(name: String) -[Env]> Zone TimeError! { time.zone(name) }
+fn read_only(name: String) -[FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
+fn run() {}

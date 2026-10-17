@@ -8,13 +8,13 @@
 
 store_shared_cas_sequence := 0
 
-pub struct SharedCASReport {
-    pub optimized_files: Int
-    pub optimized_bytes: Int
+struct SharedCASReport {
+    optimized_files: Int
+    optimized_bytes: Int
 }
 
 // Hold the shared-CAS lock for the returned guard's lifetime.
-pub fn store_with_shared_cas_lock(roots: HangarRoots) -[FS, Env, Time]> RuntimeLock StoreError! {
+fn store_with_shared_cas_lock(roots: HangarRoots) -[FS, Env, Time]> RuntimeLock StoreError! {
     shared :: roots.shared_cas_dir()
     store_ensure_real_directory(shared, "shared CAS pool")
     env_runtime_lock(shared, "shared-cas")
@@ -22,34 +22,34 @@ pub fn store_with_shared_cas_lock(roots: HangarRoots) -[FS, Env, Time]> RuntimeL
 
 // The one key format used by every shared-CAS writer and reader:
 // `<sha256 hex>-<mode without write bits, 8 hex digits>`.
-pub fn store_shared_cas_key(digest_hex: String, mode: Int) -> String Never! {
+fn store_shared_cas_key(digest_hex: String, mode: Int) -> String Never! {
     "{digest_hex}-{store_hex8(store_clear_write_bits(mode))}"
 }
 
 // `mode & !0o222`.
-fn store_clear_write_bits(mode: Int) -> Int Never! { mode - (mode & 0o222) }
+fn store_clear_write_bits(mode: Int) -> Int Never! { mode - ((mode).bit_and(0o222)) }
 
 fn store_hex8(value: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     loop index in 0..<8 {
         shift :: (7 - index) * 4
-        &out.push(digits[(value >> shift) & 15])
+        &out.push(digits[((value >> shift)).bit_and(15)])
     }
     String.from_bytes(out) ?? panic("hex digits are ASCII")
 }
 
-pub fn store_share_tree_files(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
+fn store_share_tree_files(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
     if allow_semantic_xattrs -> return
     shared_lock :: store_with_shared_cas_lock(roots)
     store_share_tree_files_unlocked(roots, root, allow_semantic_xattrs)
 }
 
-pub fn store_share_tree_files_unlocked(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
+fn store_share_tree_files_unlocked(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) StoreError! -[FS, Env, Time]> {
     store_share_tree_files_unlocked_with_report(roots, root, allow_semantic_xattrs)
 }
 
-pub fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCASReport StoreError! {
+fn store_share_tree_files_unlocked_with_report(roots: HangarRoots, root: String, allow_semantic_xattrs: Bool) -[FS, Env, Time]> SharedCASReport StoreError! {
     empty :: SharedCASReport{optimized_files: 0, optimized_bytes: 0}
     if allow_semantic_xattrs -> return Ok(empty)
     if files.stat(root).is_symlink -> return Ok(empty)
@@ -110,9 +110,9 @@ fn store_share_node(path: String, shared: String, used: &Set<String>, report: &S
     }
 }
 
-pub struct SharedCASFile {
-    pub path: String
-    pub created: Bool
+struct SharedCASFile {
+    path: String
+    created: Bool
 }
 
 fn store_ensure_shared_file(shared: String, key: String, source_path: String, source: files.Stat, mode: Int) -[FS, Env, Time]> SharedCASFile StoreError! {
@@ -192,7 +192,7 @@ fn store_same_file_inode(left: String, right: String) -[FS]> Bool Never! {
     left_info.id == right_info.id
 }
 
-fn store_permission_identity(info: files.Stat) -> Int Never! { info.mode & 0o7777 }
+fn store_permission_identity(info: files.Stat) -> Int Never! { (info.mode).bit_and(0o7777) }
 
 fn store_sha256_file_hex(path: String) -[FS]> String StoreError! {
     Ok(crypto.sha256(files.read_bytes(path)).hex())

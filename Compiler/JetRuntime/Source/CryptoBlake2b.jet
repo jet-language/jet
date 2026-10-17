@@ -1,0 +1,162 @@
+// RFC7693 BLAKE2b, reused Core/crypto/expert.jet:1111-1372@5933a61b2.
+// Streaming borrowed spans avoid copying the Argon H0 password into a message.
+// State472 aligned8: h64,v128,m128,buffer128,used8,total8,outlen8.
+fn rt_blake_iv(i: I64) -> I64 {
+    if {
+        (i == I64{0}) -> rt_crypto_word64(I64{0x6a09e667}, I64{0xf3bcc908})
+        (i == I64{1}) -> rt_crypto_word64(I64{0xbb67ae85}, I64{0x84caa73b})
+        (i == I64{2}) -> rt_crypto_word64(I64{0x3c6ef372}, I64{0xfe94f82b})
+        (i == I64{3}) -> rt_crypto_word64(I64{0xa54ff53a}, I64{0x5f1d36f1})
+        (i == I64{4}) -> rt_crypto_word64(I64{0x510e527f}, I64{0xade682d1})
+        (i == I64{5}) -> rt_crypto_word64(I64{0x9b05688c}, I64{0x2b3e6c1f})
+        (i == I64{6}) -> rt_crypto_word64(I64{0x1f83d9ab}, I64{0xfb41bd6b})
+        else -> rt_crypto_word64(I64{0x5be0cd19}, I64{0x137e2179})
+    }
+}
+fn rt_blake_sigma(round: I64, index: I64) -> I64 {
+    packed :: if {
+        (round % I64{10} == I64{0}) -> rt_crypto_word64(I64{0x01234567}, I64{0x89abcdef})
+        (round % I64{10} == I64{1}) -> rt_crypto_word64(I64{0xea489fd6}, I64{0x1c02b753})
+        (round % I64{10} == I64{2}) -> rt_crypto_word64(I64{0xb8c052fd}, I64{0xae367194})
+        (round % I64{10} == I64{3}) -> rt_crypto_word64(I64{0x7931dcbe}, I64{0x265a40f8})
+        (round % I64{10} == I64{4}) -> rt_crypto_word64(I64{0x905724af}, I64{0xe1bc683d})
+        (round % I64{10} == I64{5}) -> rt_crypto_word64(I64{0x2c6a0b83}, I64{0x4d75fe19})
+        (round % I64{10} == I64{6}) -> rt_crypto_word64(I64{0xc51fed4a}, I64{0x0763928b})
+        (round % I64{10} == I64{7}) -> rt_crypto_word64(I64{0xdb7ec139}, I64{0x50f4862a})
+        (round % I64{10} == I64{8}) -> rt_crypto_word64(I64{0x6fe9b308}, I64{0xc2d714a5})
+        else -> rt_crypto_word64(I64{0xa2847615}, I64{0xfb9e3cd0})
+    }
+    (packed >> ((I64{15} - index) * I64{4})).bit_and(I64{15})
+}
+fn rt_crypto_le64(input: I64) -> I64 {
+    rt_crypto_le32(input).bit_or((rt_crypto_le32(input + I64{4}) << I64{32}))
+}
+fn rt_crypto_put64(output: I64, word: I64) {
+    rt_crypto_put32(output, word)
+    rt_crypto_put32(output + I64{4}, (word >> I64{32}).bit_and(I64{0xffffffff}))
+}
+#Arithmetic(.Wrapping)
+fn rt_blake_g(v: I64, ai: I64, bi: I64, ci: I64, di: I64, x: I64, y: I64) {
+    a := rt_text_word(v + ai * I64{8})
+    b := rt_text_word(v + bi * I64{8})
+    c := rt_text_word(v + ci * I64{8})
+    d := rt_text_word(v + di * I64{8})
+    a = a + b + x
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{32})
+    c += d
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{24})
+    a = a + b + y
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{16})
+    c += d
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{63})
+    rt_text_store(v + ai * I64{8}, a)
+    rt_text_store(v + bi * I64{8}, b)
+    rt_text_store(v + ci * I64{8}, c)
+    rt_text_store(v + di * I64{8}, d)
+}
+fn rt_blake_compress(state: I64, count: I64, last: Bool) {
+    v :: state + I64{64}
+    m :: state + I64{192}
+    block :: state + I64{320}
+    i := I64{0}
+    loop {
+        if (i >= I64{16}) -> break
+        rt_text_store(m + i * I64{8}, rt_crypto_le64(block + i * I64{8}))
+        if (i < I64{8}) -> rt_text_store(v + i * I64{8}, rt_text_word(state + i * I64{8})) else -> rt_text_store(v + i * I64{8}, rt_blake_iv(i - I64{8}))
+        i += I64{1}
+    }
+    rt_text_store(v + I64{96}, rt_text_word(v + I64{96}).bit_xor(count))
+    if last -> rt_text_store(v + I64{112}, rt_text_word(v + I64{112}).bit_xor(I64{-1}))
+    round := I64{0}
+    loop {
+        if (round >= I64{12}) -> break
+        i = I64{0}
+        loop {
+            if (i >= I64{4}) -> break
+            rt_blake_g(v, i, i + I64{4}, i + I64{8}, i + I64{12}, rt_text_word(m + rt_blake_sigma(round, I64{2} * i) * I64{8}), rt_text_word(m + rt_blake_sigma(round, I64{2} * i + I64{1}) * I64{8}))
+            i += I64{1}
+        }
+        i = I64{0}
+        loop {
+            if (i >= I64{4}) -> break
+            rt_blake_g(v, i, I64{4} + (i + I64{1}) % I64{4}, I64{8} + (i + I64{2}) % I64{4}, I64{12} + (i + I64{3}) % I64{4}, rt_text_word(m + rt_blake_sigma(round, I64{8} + I64{2} * i) * I64{8}), rt_text_word(m + rt_blake_sigma(round, I64{9} + I64{2} * i) * I64{8}))
+            i += I64{1}
+        }
+        round += I64{1}
+    }
+    i = I64{0}
+    loop {
+        if (i >= I64{8}) -> break
+        rt_text_store(state + i * I64{8}, rt_text_word(state + i * I64{8}).bit_xor(rt_text_word(v + i * I64{8})).bit_xor(rt_text_word(v + I64{64} + i * I64{8})))
+        i += I64{1}
+    }
+}
+fn rt_blake_init(state: I64, output_len: I64) {
+    rt_crypto_wipe(state, I64{472})
+    i := I64{0}
+    loop {
+        if (i >= I64{8}) -> break
+        rt_text_store(state + i * I64{8}, rt_blake_iv(i))
+        i += I64{1}
+    }
+    rt_text_store(state, rt_text_word(state).bit_xor((I64{0x01010000}.bit_or(output_len))))
+    rt_text_store(state + I64{464}, output_len)
+}
+fn rt_blake_update(state: I64, input: I64, length: I64) {
+    used := rt_text_word(state + I64{448})
+    total := rt_text_word(state + I64{456})
+    at := I64{0}
+    loop at < length {
+        if (used == I64{128}) {
+            total += I64{128}
+            rt_blake_compress(state, total, false)
+            used = I64{0}
+        }
+        count := I64{128} - used
+        if (length - at < count) -> count = length - at
+        rt_text_bytes_copy(state + I64{320} + used, input + at, count)
+        at += count
+        used += count
+    }
+    rt_text_store(state + I64{448}, used)
+    rt_text_store(state + I64{456}, total)
+}
+fn rt_blake_finish(state: I64, output: I64) {
+    used :: rt_text_word(state + I64{448})
+    rt_crypto_wipe(state + I64{320} + used, I64{128} - used)
+    rt_blake_compress(state, rt_text_word(state + I64{456}) + used, true)
+    length :: rt_text_word(state + I64{464})
+    at := I64{0}
+    loop at < length {
+        rt_text_put(output + at, (rt_text_word(state + (at / I64{8}) * I64{8}) >> ((at % I64{8}) * I64{8})).bit_and(I64{255}))
+        at += I64{1}
+    }
+    rt_crypto_wipe(state, I64{472})
+}
+fn rt_blake_parts(left: I64, left_len: I64, right: I64, right_len: I64, output: I64, output_len: I64, state: I64) {
+    rt_blake_init(state, output_len)
+    rt_blake_update(state, left, left_len)
+    rt_blake_update(state, right, right_len)
+    rt_blake_finish(state, output)
+}
+// Argon2 H': caller scratch608, disjoint input/output, output_len>=4.
+fn rt_argon_hprime(input: I64, input_len: I64, output: I64, output_len: I64, scratch: I64) {
+    prefix :: scratch + I64{472}
+    value :: scratch + I64{480}
+    rt_crypto_put32(prefix, output_len)
+    if (output_len <= I64{64}) {
+        rt_blake_parts(prefix, I64{4}, input, input_len, output, output_len, scratch)
+    } else {
+        rt_blake_parts(prefix, I64{4}, input, input_len, value, I64{64}, scratch)
+        rt_text_bytes_copy(output, value, I64{32})
+        produced := I64{32}
+        loop {
+            if (produced + I64{64} >= output_len) -> break
+            rt_blake_parts(value, I64{64}, I64{1}, I64{0}, value, I64{64}, scratch)
+            rt_text_bytes_copy(output + produced, value, I64{32})
+            produced += I64{32}
+        }
+        rt_blake_parts(value, I64{64}, I64{1}, I64{0}, output + produced, output_len - produced, scratch)
+    }
+    rt_crypto_wipe(scratch, I64{608})
+}

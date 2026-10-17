@@ -21,25 +21,25 @@ struct CleanLocks {
 }
 
 // A locked package's name and version (a `(String, String)` set member).
-pub struct LockNameVersion {
-    pub name: String
-    pub version: String
+struct LockNameVersion {
+    name: String
+    version: String
 }
 
 // A locked package that names a Hangar receipt.
-pub struct LockReceiptPackage {
-    pub receipt: String
-    pub package: LockedPackage
+struct LockReceiptPackage {
+    receipt: String
+    package: LockedPackage
 }
 
 // Everything the nearest project lock and the lifecycle journal keep alive.
 // Every list is duplicate-free.
-pub struct LiveRoots {
-    ids: [String]
-    output_hashes: [String]
-    name_versions: [LockNameVersion]
-    pub receipts: [String]
-    receipt_packages: [LockReceiptPackage]
+struct LiveRoots {
+    priv ids: [String]
+    priv output_hashes: [String]
+    priv name_versions: [LockNameVersion]
+    receipts: [String]
+    priv receipt_packages: [LockReceiptPackage]
 
     fn empty() -> LiveRoots Never! {
         LiveRoots{ids: [String]{}, output_hashes: [String]{}, name_versions: [LockNameVersion]{}, receipts: [String]{}, receipt_packages: [LockReceiptPackage]{}}
@@ -47,13 +47,13 @@ pub struct LiveRoots {
 }
 
 // A canonical object no live record or root reaches.
-pub struct OrphanedCanonicalObject {
-    pub path: String
-    bytes: Int
+struct OrphanedCanonicalObject {
+    path: String
+    priv bytes: Int
 }
 
 // Rust `with_clean_locks`.
-fn store_clean_locks(roots: HangarRoots) -[FS, Env]> CleanLocks StoreError! {
+fn store_clean_locks(roots: HangarRoots) -[FS, Env, Time]> CleanLocks StoreError! {
     found :: store_current_project_root()
     if found == {
         .Val(project) -> {
@@ -70,7 +70,7 @@ fn store_clean_locks(roots: HangarRoots) -[FS, Env]> CleanLocks StoreError! {
 
 // Rust `live_roots_unlocked`: roots reachable from the current directory's
 // project lock and the lifecycle journal; the caller holds the Hangar lock.
-pub fn store_live_roots_unlocked(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LiveRoots StoreError! {
+fn store_live_roots_unlocked(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> LiveRoots StoreError! {
     cwd :: files.cwd()
     graph :: store_lifecycle_closure_graph_unlocked(&verification, roots)
     store_live_roots_from_graph(&verification, roots, cwd, graph)
@@ -162,7 +162,7 @@ fn store_current_project_root() -[FS, Env]> String? StoreError! {
 }
 
 // Rust `lock_roots_from`: the live roots named by the nearest project lock.
-pub fn store_lock_roots_from(start: String) -[FS]> LiveRoots StoreError! {
+fn store_lock_roots_from(start: String) -[FS]> LiveRoots StoreError! {
     found :: store_nearest_lock_path(start)
     lock_path :: found ?? return Ok(LiveRoots.empty())
     raw :: files.read(lock_path) ? text -> text ! error -> return Err(store_gc_io_context(error, "could not read project lock `{lock_path}`: {error}"))
@@ -202,7 +202,7 @@ fn store_gc_io_context(error: IOError, message: String) -> StoreError Never! {
 
 // Rust `nearest_lock_path`: the first `.jet/lock` at or above `start`. A
 // managed directory or lock that is a link or the wrong kind fails closed.
-pub fn store_nearest_lock_path(start: String) -[FS]> String? StoreError! {
+fn store_nearest_lock_path(start: String) -[FS]> String? StoreError! {
     current := start
     loop {
         managed :: pkg_managed_dir(current)
@@ -231,7 +231,7 @@ pub fn store_nearest_lock_path(start: String) -[FS]> String? StoreError! {
 
 // Rust `is_live`: a record is live through its receipt, its toolchain id, its
 // output digest, or (for pre-envelope records only) its name and version.
-pub fn store_is_live(id: String, meta: ParsedMeta, roots: LiveRoots) -> Bool Never! {
+fn store_is_live(id: String, meta: ParsedMeta, roots: LiveRoots) -> Bool Never! {
     if roots.receipts.contains(meta.receipt) || roots.ids.contains(id) -> return true
     if meta.envelope.output_hash != "" -> return roots.output_hashes.contains(meta.envelope.output_hash)
     roots.name_versions.contains(LockNameVersion{name: meta.name, version: meta.version})
@@ -282,7 +282,7 @@ fn store_retained_receipts(roots: HangarRoots, live: LiveRoots, now: Int, retire
 }
 
 // Rust `collect_orphaned_canonical_objects`.
-pub fn store_collect_orphaned_canonical_objects(verification: &StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) -[FS, Env]> [OrphanedCanonicalObject] StoreError! {
+fn store_collect_orphaned_canonical_objects(verification: &StoreVerification, roots: HangarRoots, live: LiveRoots, retired: [String]) -[FS, Env]> [OrphanedCanonicalObject] StoreError! {
     graph :: store_lifecycle_closure_graph_unlocked(&verification, roots)
     store_collect_orphaned_canonical_objects_with_graph(roots, live, retired, graph)
 }
@@ -331,7 +331,7 @@ fn store_collect_orphaned_canonical_objects_with_graph(roots: HangarRoots, live:
 // Rust `remove_hangar_node`: remove one Hangar node without following a
 // link. Only a direct canonical object root may be a link; its seal goes
 // first.
-pub fn store_remove_hangar_node(verification: &StoreVerification, path: String) StoreError! -[FS, Env]> {
+fn store_remove_hangar_node(verification: &StoreVerification, path: String) StoreError! -[FS, Env]> {
     parent :: files.dirname(path)
     is_object_node :: files.basename(parent) == STORE_OBJECTS_DIR
     if is_object_node {
@@ -354,7 +354,7 @@ pub fn store_remove_hangar_node(verification: &StoreVerification, path: String) 
             files.remove_all(path)
         }
         metadata.is_file -> {
-            files.set_mode(path, metadata.mode | 0o222)
+            files.set_mode(path, (metadata.mode).bit_or(0o222))
             files.remove(path)
         }
         else -> return Err(StoreError.InvalidData("refusing to remove unsupported Hangar node `{path}`"))
@@ -364,7 +364,7 @@ pub fn store_remove_hangar_node(verification: &StoreVerification, path: String) 
 // Rust `sweep_receipts`: count (and with `apply`, remove) receipt files no
 // retained record names. Links and non-files among canonical names fail
 // closed; other names are left alone.
-pub fn store_sweep_receipts(hangar: String, retained: [String], apply: Bool) -[FS]> CleanReport StoreError! {
+fn store_sweep_receipts(hangar: String, retained: [String], apply: Bool) -[FS]> CleanReport StoreError! {
     receipts :: files.join(hangar, STORE_RECEIPTS_DIR)
     found :: store_node_stat(receipts)
     directory :: found ?? return Ok(CleanReport.empty())
@@ -390,7 +390,7 @@ pub fn store_sweep_receipts(hangar: String, retained: [String], apply: Bool) -[F
 }
 
 // Rust `clean_plan`: the read-only report `clean` would produce.
-pub fn store_clean_plan(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+fn store_clean_plan(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     store :: roots.hangar_dir()
     found :: store_node_stat(store)
     if found == None -> return Ok(CleanReport.empty())
@@ -439,7 +439,7 @@ fn store_clean_plan_unlocked(verification: &StoreVerification, roots: HangarRoot
 }
 
 // Rust `clean`.
-pub fn store_clean(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+fn store_clean(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     locks :: store_clean_locks(roots)
     store_clean_unlocked(&verification, roots)
 }
@@ -489,7 +489,7 @@ fn store_clean_unlocked(verification: &StoreVerification, roots: HangarRoots) -[
 
 // Rust `maybe_auto_clean`: clean at most once a day unless
 // JETPACK_AUTO_CLEAN_ALWAYS is set; None when the stamp is fresh.
-pub fn store_maybe_auto_clean(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport? StoreError! {
+fn store_maybe_auto_clean(verification: &StoreVerification, roots: HangarRoots) -[FS, Env, Time]> CleanReport? StoreError! {
     locks :: store_clean_locks(roots)
     hangar :: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
@@ -498,7 +498,7 @@ pub fn store_maybe_auto_clean(verification: &StoreVerification, roots: HangarRoo
     if sys.get("JETPACK_AUTO_CLEAN_ALWAYS") == None {
         if files.stat(stamp) == {
             .Ok(metadata) -> {
-                if now.unix_ns - metadata.modified.unix_ns < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
+                if now.unix_ns - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) < STORE_AUTO_CLEAN_AFTER_SECONDS * STORE_NANOS_PER_SECOND -> return Ok(None)
             }
             .Err(_) -> {}
         }
@@ -510,7 +510,7 @@ pub fn store_maybe_auto_clean(verification: &StoreVerification, roots: HangarRoo
 
 // Rust `sweep_build_scratch`: remove orphan build and failed-build scratch;
 // a live build's marker protects its directory.
-pub fn store_sweep_build_scratch(hangar: String) -[FS, Env, Time]> CleanReport StoreError! {
+fn store_sweep_build_scratch(hangar: String) -[FS, Env, Time]> CleanReport StoreError! {
     store_gc_sweep_scratch(hangar, true)
 }
 
@@ -547,7 +547,7 @@ fn store_gc_sweep_scratch(hangar: String, apply: Bool) -[FS, Env, Time]> CleanRe
 // marker belongs to a process that can still be using it. An empty legacy
 // marker is a conservative lock; a marker without a pid is stale; a marker
 // from a vanished process keeps a one-day grace period.
-pub fn store_active_tmp_marker_is_live(path: String) -[FS, Env, Time]> Bool Never! {
+fn store_active_tmp_marker_is_live(path: String) -[FS, Env, Time]> Bool Never! {
     contents :: files.read(files.join(path, STORE_ACTIVE_TMP_MARKER)) ?? return false
     if contents.trim() == "" -> return true
     pid := Int?{None}
@@ -570,7 +570,7 @@ pub fn store_active_tmp_marker_is_live(path: String) -[FS, Env, Time]> Bool Neve
 // Rust `object_dirs`: package record directories under the Hangar root in
 // name order, skipping reserved and dot names. A record that is a link
 // fails closed.
-pub fn store_object_dirs(hangar: String) -[FS]> [DirEntry] StoreError! {
+fn store_object_dirs(hangar: String) -[FS]> [DirEntry] StoreError! {
     out := [DirEntry]{}
     entries :: files.list_dir(hangar)
     loop entry in entries {
@@ -613,7 +613,7 @@ fn store_files_under(root: String) -[FS]> [String] Never! {
 }
 
 // Rust `read_meta`: the parsed `meta.json` of a record directory.
-pub fn store_read_meta(dir: String) -[FS]> ParsedMeta? Never! {
+fn store_read_meta(dir: String) -[FS]> ParsedMeta? Never! {
     text :: files.read(files.join(dir, "meta.json")) ?? return None
     pkg_parse_meta(text)
 }

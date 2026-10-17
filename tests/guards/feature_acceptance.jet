@@ -1,0 +1,18 @@
+use core.files as feature_acceptance_files
+
+// CLI runtime output is covered by cases/feature_acceptance/prelude_opt_out.case.
+// Rust Syntax registry scans (rs330-338) retire with their subject.
+fn s3_guard_prelude_source_laws() {
+    example :: feature_acceptance_files.read("Examples/features/io/no_prelude.jet") ?? panic("read no-prelude example")
+    // The third original disjunct (first line == #NoPrelude) is implied by starts_with.
+    assert(example.starts_with("#NoPrelude") || example.contains("\n#NoPrelude\n"), "I5 example must declare #NoPrelude")
+    assert(example.contains("use core.term"), "opt-out example must use explicit core.term")
+    bare :: feature_acceptance_files.read("tests/ui/no_prelude_print.stderr") ?? panic("read no-prelude diagnostic")
+    assert(bare.contains("E0429") && bare.contains("#NoPrelude"), "bare print under #NoPrelude must be E0429")
+    duplicate :: feature_acceptance_files.read("tests/ui/no_prelude_duplicate.stderr") ?? panic("read duplicate-prelude diagnostic")
+    assert(duplicate.contains("E0428") || duplicate.contains("NoPrelude"), "duplicate #NoPrelude must diagnose")
+}
+
+#Test("prelude_opt_out_source_laws") {
+    s3_guard_prelude_source_laws()
+}

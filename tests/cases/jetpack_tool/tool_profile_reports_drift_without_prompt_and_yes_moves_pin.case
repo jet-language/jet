@@ -1,0 +1,48 @@
+# Port of tests/jetpack_tool.rs:704-830; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/tool_profile_reports_drift_without_prompt_and_yes_moves_pin
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+copy: omp-1.0.0 fx/omp-1.0.0
+copy: native-1.0.0.json fx/jetpackage-omp.json
+step: jetpack tool install omp@releases#1.0.0 --no-color --offline --fixtures {work}/fx 
+cwd: project
+exit: 0
+capture: changed = text file.replace("\"reference\":\"omp@releases#1.0.0\"", "\"reference\":\"omp@releases#0.9.0\"") home/.jet/tools/manifest.json
+write: home/.jet/tools/manifest.json = "{cap:changed}"
+step root_before: jet run snapshot.jet -- {work}/root
+exit: 0
+step home_before: jet run snapshot.jet -- {work}/home
+exit: 0
+step: jetpack hangar list --json --offline --no-color --yes
+cwd: project
+exit: 0
+stderr: empty
+step: jet run snapshot.jet -- {work}/root
+exit: 0
+stdout: == root_before
+step: jet run snapshot.jet -- {work}/home
+exit: 0
+stdout: == home_before
+step: jetpack tool list --no-color
+cwd: project
+exit: 0
+stderr: ~ "omp drifted" # original contains predicate
+stderr: ~ "installed 1.0.0" # original contains predicate
+stderr: ~ "pinned 0.9.0" # original contains predicate
+stderr: !~ "[Y/n]" # original noninteractive prompt negation
+file: home/.jet/tools/manifest.json ~ "\"reference\":\"omp@releases#0.9.0\"" # original contains predicate
+step: jetpack tool list --no-color
+cwd: project
+exit: 0
+stderr: ~ "omp drifted" # original contains predicate
+step: jetpack tool list --no-color -y
+cwd: project
+exit: 0
+file: home/.jet/tools/manifest.json ~ "\"reference\":\"omp@releases#1.0.0\"" # original contains predicate
+step: {work}/home/.jet/bin/omp
+exit: any # original invocation status was not asserted
+stdout.trim: = fixtures/tool_profile_reports_drift_without_prompt_and_yes_moves_pin/omp_version_one.out

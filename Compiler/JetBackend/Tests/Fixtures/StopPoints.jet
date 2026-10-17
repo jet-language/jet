@@ -1,0 +1,220 @@
+// Stop points of the unified execution host (#4720; Lower.jet lower_poll,
+// lower_stopped, lower_scope's Shield): the MIR a stop-point compilation
+// produces (JetCodegen Builder.jet jet_codegen_emit_poll) for
+//
+// fn twice(n: Int) -> Int { n + n }
+// fn label() -> String { "kept" }
+// fn run() {
+//     print(twice(21))
+//     s :: label()
+//     loop i in 0..<2 { print(i) }
+//     shield { print(twice(3)) }
+//     print(twice(5))
+//     print(s)
+// }
+//
+// with a Check at each function entry and at the loop's continue target, a
+// Propagate after each call outside the Shield, and stop edges that drop
+// exactly the values live there (never a call result before its resume edge).
+// The static image's runtime is no session child, so nothing ever stops it.
+// check-native-fixtures.mjs also links stop-points.o with the compiled runtime
+// and a scripted session rail (check-stop-points.c) that stops it at chosen
+// polls and counts the String the program owns.
+use jet_foundation.[
+    MIRAccess, MIRBinaryOp, MIRBlockID, MIRCallArg, MIRCallee, MIRConstant,
+    MIRDropKind, MIRFunction, MIRFunctionID, MIROperation, MIRPollKind, MIRProgram, MIRScope,
+    MIRScopeFact, MIRScopeID, MIRScopeKind, MIRTerminator, MIRType, MIRTypeDef, MIRUnsafeGate,
+    mir_function_id,
+]
+use jet_backend.[lir_lower_callables]
+
+// The exact predicate used by Builder and Legality: a raw Source Deref gets
+// Propagate; Shared/ref reads and missing operand metadata do not.
+fn fx_can_stop_deref_check() -> Bool Never! {
+    deref :: MIROperation.Deref{value: MIRValueID{value: 1}}
+    raw :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{fx_i64()}})
+    shared :: mir_type_from_kind(MIRTypeKind.Shared{inner: fx_i64()})
+    guard :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("SharedGuard"), args: [MIRType]{fx_i64()}})
+    malformed :: mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Ptr"), args: [MIRType]{}})
+    mir_operation_can_stop(deref, Val(raw), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(shared), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(guard), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(fx_i64()), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, Val(malformed), None, [MIRPreludeCall]{}, [U64:Int]{}) &&
+        !mir_operation_can_stop(deref, None, None, [MIRPreludeCall]{}, [U64:Int]{})
+}
+
+// expect-stdout stop-points: "42\n0\n1\n6\n10\nkept\n"
+// expect-static-only stop-points
+fn fx_stop_points() -> MIRProgram Never! {
+    if !fx_can_stop_deref_check() -> panic("raw Ptr alone requires Deref Propagate")
+    // twice: b0 Check -> b1 | b2 Stopped
+    t := fx_builder()
+    n :: fx_param(&t, "n", fx_int(), mir_copy_ownership())
+    fx_block(&t, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 2}})
+    doubled :: fx_int_op(&t, MIRBinaryOp.Add, "add", n, n)
+    fx_block(&t, 1, MIRTerminator.Return{value: Val(doubled)})
+    fx_block(&t, 2, MIRTerminator.Stopped)
+
+    // label: b0 Check -> b1 | b2 Stopped; the owned result exists only on b1.
+    l := fx_builder()
+    fx_block(&l, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 2}})
+    text :: fx_owned(&l, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "kept"}})
+    fx_block(&l, 1, MIRTerminator.Return{value: Val(text)})
+    fx_block(&l, 2, MIRTerminator.Stopped)
+
+    r := fx_builder()
+    stop :: MIRBlockID{value: 20}
+    fx_block(&r, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: stop})
+    twenty_one :: fx_int_const(&r, 21)
+    first :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("twice")}, args: [MIRCallArg]{fx_arg(twenty_one, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_block(&r, 1, MIRTerminator.Poll{kind: MIRPollKind.Propagate, resume: MIRBlockID{value: 2}, stop: stop})
+    fx_print(&r, first)
+    kept :: fx_owned(&r, fx_string(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("label")}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 2, MIRTerminator.Poll{kind: MIRPollKind.Propagate, resume: MIRBlockID{value: 3}, stop: stop})
+    zero :: fx_int_const(&r, 0)
+    two :: fx_int_const(&r, 2)
+    cursor :: fx_owned(&r, fx_named("RangeCursor"), MIROperation.LoopRangeInit{call: fx_prelude_id("core.loop", "loop_range_init"), start: zero, end: two, step: None, exclusive: true})
+    fx_block(&r, 3, MIRTerminator.Jump{target: MIRBlockID{value: 4}})
+    // The loop's continue target: its Check stops with `kept` and the cursor live.
+    fx_block(&r, 4, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 5}, stop: MIRBlockID{value: 21}})
+    has_next :: fx_copy(&r, fx_bool(), MIROperation.LoopRangeHasNext{call: fx_prelude_id("core.loop", "loop_range_has_next"), cursor: cursor})
+    fx_block(&r, 5, MIRTerminator.Branch{condition: has_next, then_target: MIRBlockID{value: 6}, else_target: MIRBlockID{value: 8}})
+    item :: fx_copy(&r, fx_int(), MIROperation.LoopRangeValue{call: fx_prelude_id("core.loop", "loop_range_value"), cursor: cursor})
+    fx_print(&r, item)
+    fx_block(&r, 6, MIRTerminator.Jump{target: MIRBlockID{value: 7}})
+    fx_do(&r, MIROperation.LoopRangeAdvance{call: fx_prelude_id("core.loop", "loop_range_advance"), cursor: cursor})
+    fx_block(&r, 7, MIRTerminator.Continue{target: MIRBlockID{value: 4}})
+    fx_do(&r, MIROperation.Drop{value: cursor, kind: MIRDropKind.Value})
+    // Inside the Shield the builder places no stop points; twice's own entry
+    // Check is masked there.
+    shield :: MIRScopeID{value: 1}
+    fx_do(&r, MIROperation.ScopeEnter{scope: shield, test_member: None})
+    three :: fx_int_const(&r, 3)
+    shielded :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("twice")}, args: [MIRCallArg]{fx_arg(three, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_print(&r, shielded)
+    fx_do(&r, MIROperation.ScopeExit{scope: shield})
+    five :: fx_int_const(&r, 5)
+    last :: fx_copy(&r, fx_int(), MIROperation.Call{callee: MIRCallee.User{function: mir_function_id("twice")}, args: [MIRCallArg]{fx_arg(five, MIRAccess.Read)}, type_args: [MIRType]{}})
+    fx_block(&r, 8, MIRTerminator.Poll{kind: MIRPollKind.Propagate, resume: MIRBlockID{value: 9}, stop: MIRBlockID{value: 22}})
+    fx_print(&r, last)
+    fx_print(&r, kept)
+    fx_do(&r, MIROperation.Drop{value: kept, kind: MIRDropKind.Value})
+    fx_block(&r, 9, MIRTerminator.Return{value: None})
+    fx_block(&r, 20, MIRTerminator.Stopped)
+    fx_do(&r, MIROperation.Drop{value: cursor, kind: MIRDropKind.Value})
+    fx_do(&r, MIROperation.Drop{value: kept, kind: MIRDropKind.Value})
+    fx_block(&r, 21, MIRTerminator.Stopped)
+    fx_do(&r, MIROperation.Drop{value: kept, kind: MIRDropKind.Value})
+    fx_block(&r, 22, MIRTerminator.Stopped)
+    run := fx_function("run", r, fx_unit())
+    run.scopes = [MIRScope]{MIRScope{id: shield, kind: MIRScopeKind.Shield, span: fx_span(), name: None, deadline: None, facts: [MIRScopeFact]{}}}
+    fx_program([MIRFunction]{fx_function("twice", t, fx_int()), fx_function("label", l, fx_string()), run}, [MIRTypeDef]{})
+}
+
+// A poll can leave nested sentry scopes through either cleanup edge. The
+// function unsafe gate surrounds both. Structural witness needs no substitute
+// static sentry runtime; real-source execution uses the admitted native ABI.
+// Scope witnesses lower explicit callable roots, retaining their checked
+// carriers rather than applying program-entry normalization.
+fn fx_sentry_scopes_check() -> Bool Never! {
+    b := fx_builder()
+    unsafe_scope :: MIRScopeID{value: U64{700}}
+    policy :: MIRScopeID{value: U64{701}}
+    fx_do(&b, MIROperation.ScopeEnter{scope: unsafe_scope, test_member: None})
+    fx_do(&b, MIROperation.ScopeEnter{scope: policy, test_member: None})
+    fx_block(&b, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 2}})
+    fx_do(&b, MIROperation.ScopeExit{scope: policy})
+    fx_do(&b, MIROperation.ScopeExit{scope: unsafe_scope})
+    fx_block(&b, 1, MIRTerminator.Return{value: None})
+    fx_do(&b, MIROperation.ScopeExit{scope: policy})
+    fx_do(&b, MIROperation.ScopeExit{scope: unsafe_scope})
+    fx_block(&b, 2, MIRTerminator.Stopped)
+    run := fx_function("run", b, fx_unit())
+    run.unsafe_gate = Val(MIRUnsafeGate{file: "fixture.jet", line: 7, reason: "function gate", enabled: true, fenced: false})
+    run.scopes = [MIRScope]{
+        MIRScope{id: unsafe_scope, kind: MIRScopeKind.Unsafe, span: fx_span(), name: Val("fenced"), deadline: None, facts: [MIRScopeFact]{
+            MIRScopeFact{key: "sentry_enabled", value: "false"},
+            MIRScopeFact{key: "sentry_fenced", value: "true"},
+        }},
+        MIRScope{id: policy, kind: MIRScopeKind.Policy, span: fx_span(), name: Val("disabled"), deadline: None, facts: [MIRScopeFact]{MIRScopeFact{key: "sentry_enabled", value: "false"}}},
+    }
+    program :: fx_program([MIRFunction]{run}, [MIRTypeDef]{})
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{run.id})
+    if lowered.issues.len() != 0 {
+        loop issue in lowered.issues -> print("sentry-scopes: {issue.message}")
+        return false
+    }
+    saves := 0
+    gates := 0
+    policies := 0
+    leaves := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .StackSlot(_, size, align) {
+                    if size == 64 && align == 8 -> saves += 1
+                }
+                if instruction == .Call(_, _, callee, args) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_rt_sentry_scope_enter" && args.len() == 8 -> gates += 1
+                        if symbol == "jet_rt_sentry_policy_enter" && args.len() == 2 -> policies += 1
+                        if symbol == "jet_rt_sentry_scope_leave" && args.len() == 1 -> leaves += 1
+                    }
+                }
+            }
+        }
+    }
+    if saves == 3 && gates == 2 && policies == 1 && leaves == 6 -> return true
+    print("sentry-scopes: saves {saves}, gates {gates}, policies {policies}, leaves {leaves}")
+    false
+}
+
+fn fx_deadline_scopes_check() -> Bool Never! {
+    b := fx_builder()
+    outer :: MIRScopeID{value: U64{710}}
+    inner :: MIRScopeID{value: U64{711}}
+    deadline :: fx_int_const(&b, 1700000000000)
+    fx_do(&b, MIROperation.ScopeEnter{scope: outer, test_member: None})
+    fx_do(&b, MIROperation.ScopeEnter{scope: inner, test_member: None})
+    fx_block(&b, 0, MIRTerminator.Poll{kind: MIRPollKind.Check, resume: MIRBlockID{value: 1}, stop: MIRBlockID{value: 2}})
+    fx_do(&b, MIROperation.ScopeExit{scope: inner})
+    fx_do(&b, MIROperation.ScopeExit{scope: outer})
+    fx_block(&b, 1, MIRTerminator.Return{value: None})
+    fx_do(&b, MIROperation.ScopeExit{scope: inner})
+    fx_do(&b, MIROperation.ScopeExit{scope: outer})
+    fx_block(&b, 2, MIRTerminator.Stopped)
+    run := fx_function("run", b, fx_unit())
+    run.scopes = [MIRScope]{
+        MIRScope{id: outer, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
+        MIRScope{id: inner, kind: MIRScopeKind.Context, span: fx_span(), name: None, deadline: Val(deadline), facts: [MIRScopeFact]{}},
+    }
+    lowered :: lir_lower_callables(fx_program([MIRFunction]{run}, [MIRTypeDef]{}), [MIRFunctionID]{run.id})
+    if lowered.issues.len() != 0 {
+        loop issue in lowered.issues -> print("deadline-scopes: {issue.message}")
+        return false
+    }
+    saves := 0
+    enters := 0
+    leaves := 0
+    conversions := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .StackSlot(_, size, align) {
+                    if size == 16 && align == 8 -> saves += 1
+                }
+                if instruction == .Call(_, _, callee, args) {
+                    if callee == .Runtime(symbol) {
+                        if symbol == "jet_ctx_push_deadline" && args.len() == 2 -> enters += 1
+                        if symbol == "jet_ctx_pop_deadline" && args.len() == 1 -> leaves += 1
+                        if symbol == "jet_int_owned_to_i64" && args.len() == 1 -> conversions += 1
+                    }
+                }
+            }
+        }
+    }
+    if saves == 2 && enters == 2 && leaves == 4 && conversions == 2 -> return true
+    print("deadline-scopes: saves {saves}, enters {enters}, leaves {leaves}, conversions {conversions}")
+    false
+}

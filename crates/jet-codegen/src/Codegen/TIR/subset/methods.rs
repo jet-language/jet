@@ -29,15 +29,12 @@ use crate::Codegen::TIR::is_measurement_method_name;
 use crate::Codegen::TIR::is_process_handle_method_name;
 use crate::Codegen::TIR::is_reactive_effect_method_name;
 use crate::Codegen::TIR::is_reactive_method_name;
-use crate::Codegen::TIR::is_sketch_method_name;
-use crate::Codegen::TIR::is_sketch_type;
 use crate::Codegen::TIR::is_ui_backend_method_name;
 use crate::Codegen::TIR::is_watch_handle_type;
 use crate::Codegen::TIR::is_watch_method_name;
 use crate::Codegen::TIR::lambda_in_subset;
 use crate::Codegen::TIR::router_register_in_subset;
 use crate::Codegen::TIR::service_method_route;
-use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::subset::core_call_args_in_subset;
 use crate::Codegen::TIR::tls_static_op;
 use crate::Codegen::foreign_binding_method_key;
@@ -275,7 +272,7 @@ pub(crate) fn method_call_in_subset(
             if let Some(type_name) = static_call_type_name(receiver, locals) {
                 if cx
                     .distinct_type_identity(&type_name)
-                    .and_then(|identity| cx.distinct_types.get(&identity))
+                    .and_then(|identity| cx.fact_distinct_types(&identity))
                     .is_some_and(|(base, _)| *base == Type::String)
                 {
                     return expr_in_subset(&args[0].expr, cx, locals);
@@ -525,18 +522,6 @@ pub(crate) fn method_call_in_subset(
             && args.len() == 1
             && matches!(&args[0].expr, Expr::Lambda(lam) if lambda_in_subset(lam, cx, locals));
     }
-    // Shape (m) [c109 Phase 27]: a CALL THROUGH a fn-typed struct field — `w.step(4)`
-    // where `step: fn(Int) => Int` is a field on a covered struct, NOT a user method.
-    // Sema (CheckerInfer ~L2329) sets `recv_type == Some(<StructType>)` and re-routes the
-    // node through `infer_call_value`, but registers NO `method_sigs` entry (it is a field,
-    // not a method). The AST `emit_method_call` (Expression.rs ~L1573) detects this case
-    // FIRST — a `struct_fields` entry whose type is `Type::Fn` — and emits
-    // `(({recv}).{__jet_<field>})({args})` with PLAIN args (`emit_call_args(.., None, ..)`).
-    // We mirror that order: tried before the user-method/static shapes so a fn-field whose
-    // name happens to match a method name resolves to the field, exactly as the AST path.
-    if fn_field_call_in_subset(receiver, method, args, recv_type, cx, locals) {
-        return true;
-    }
     // Shape (l) [c109 Phase 24]: a JSON construction `JSON.Boolean(b)` / `JSON.Number(n)`
     // / `JSON.Text(s)` / `JSON.Array(xs)` / `JSON.Object(map)`. The receiver is the
     // bare `Ident("JSON")` (a type name, NOT a local), and `method` is a JSON variant.
@@ -548,7 +533,8 @@ pub(crate) fn method_call_in_subset(
     // name. The single payload arg must be in-subset. `JSON.Null` is the no-arg Field
     // form, handled in `expr_in_subset`'s `Field` arm, not here.
     if let Expr::Ident(type_name, _) = receiver {
-        if !locals.contains(type_name) && is_json_type_name(type_name) && is_json_variant(method) {
+        if !locals.contains(type_name) && is_json_type_name(type_name)
+            && (is_json_variant(method) || matches!(method, "object" | "from")) {
             return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
         }
     }
@@ -577,7 +563,7 @@ pub(crate) fn method_call_in_subset(
                         && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                 }
                 if type_name == "DataEvent" {
-                    return matches!(method, "Bool" | "Int" | "Float" | "Text" | "Bytes" | "Key")
+                    return matches!(crate::Sema::data_event_payload(method), Some(Some(_)))
                         && args.len() == 1
                         && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                 }
@@ -677,11 +663,6 @@ pub(crate) fn method_call_in_subset(
             args.len() <= 1
         };
         return return_ok && arity_ok && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
-    // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` mirrors `mem.Arena.new()`:
-    // receiver is a module-field sentinel, not a runtime value.
-    if solve_new_type(receiver, method, cx, locals).is_some() {
-        return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if duration_new_unit(receiver, method, locals).is_some() {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -799,24 +780,18 @@ pub(crate) fn method_call_in_subset(
                     ("Cell", "new", 1) => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
-                    ("ExpiringSecret", "new", 3) => {
-                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-                    }
-                    ("ExpiringValue", "new", 3) => {
-                        return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-                    }
                     // D-PATHFS1: `Path.from(str)` — static constructor for typed paths.
                     // Like `Set.from`, admitted before `static_method_call_in_subset`
                     // blocks `from` (an intercepted name). Path is not a user type.
-                    ("Path", "from", 1) if !cx.type_names.contains("Path") => {
+                    ("Path", "from", 1) if !cx.fact_type_name("Path") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-SHIFT1 (c7shift): `Reader.over(bytes)` / `Cursor.over(s)` —
                     // same static-constructor admission shape as `Path.from`.
-                    ("Reader", "over", 1) if !cx.type_names.contains("Reader") => {
+                    ("Reader", "over", 1) if !cx.fact_type_name("Reader") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
-                    ("Cursor", "over", 1) if !cx.type_names.contains("Cursor") => {
+                    ("Cursor", "over", 1) if !cx.fact_type_name("Cursor") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     // D-HTTP-CORE2=A: exact nominal HTTP constructors exported
@@ -834,7 +809,7 @@ pub(crate) fn method_call_in_subset(
                     | ("HTTPHeaderName" | "HTTPHeaderValue", "new", 1)
                     | ("Headers", "new", 0)
                     | ("Body", "empty", 0)
-                    | ("Body", "bytes" | "json" | "form" | "multipart", 1)
+                    | ("Body", "bytes" | "form" | "multipart", 1)
                     | ("Body", "text" | "reader", 1 | 2) => {
                         return args
                             .iter()
@@ -844,7 +819,7 @@ pub(crate) fn method_call_in_subset(
                     // user type. `f` is a plain in-subset lambda arg (no closure-arg
                     // gate needed here — `expr_in_subset`'s `Expr::Lambda` arm already
                     // routes through `lambda_in_subset`).
-                    ("Option", "lift2", 3) if !cx.type_names.contains("Option") => {
+                    ("Option", "lift2", 3) if !cx.fact_type_name("Option") => {
                         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
                     }
                     _ => {}
@@ -974,38 +949,6 @@ pub(crate) fn method_call_in_subset(
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
-    // D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` construction and access.
-    //
-    // Sema types `ExpiringValue.new(value, ttl, clock)` with `recv_type ==
-    // Some("ExpiringValue")` (CheckerInfer/calls/method_calls.rs ~1333), so the
-    // static-call shape further down — gated on `recv_type.is_none()` — can never
-    // see the constructor, and its `("ExpiringValue", "new", 3)` row was dead. The
-    // sibling `ExpiringSecret` already claims its own `new` on the matching
-    // `recv_type` arm above; this is the same shape for the same reason.
-    //
-    // The receiver is the bare TYPE NAME, not a value, so only the arguments are
-    // checked (a type-name ident is not a local and would fail `expr_in_subset`)
-    // — again mirroring the `ExpiringSecret.new` arm. Lowering resolves the
-    // identical key through `static_call_type_name_lower` and emits
-    // `THostCall::ExpiringValueNew` (lower/method_calls.rs ~6336), which AOT
-    // (TIR/emit/expressions.rs), the resident JIT (jit/lower_ctx.rs
-    // `THostCall::ExpiringValueNew`) and the interpreter (TIR/eval/exprs.rs) all
-    // consume — so the lowering this admits exists on every tier (I9).
-    if recv_type.as_deref() == Some(Syntax::EXPIRING_VALUE_TYPE) {
-        if method == "new"
-            && args.len() == 3
-            && matches!(receiver, Expr::Ident(name, _) if name == Syntax::EXPIRING_VALUE_TYPE)
-        {
-            return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-        }
-        if matches!(
-            (method, args.len()),
-            ("get", 1) | ("is_valid", 1) | ("force", 1)
-        ) {
-            return expr_in_subset(receiver, cx, locals)
-                && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-        }
-    }
     // Shape (d7b) [D-RENDERTGT2=A]: a UI backend method.
     if matches!(
         recv_type.as_deref(),
@@ -1024,11 +967,6 @@ pub(crate) fn method_call_in_subset(
     if recv_type.as_deref() == Some("App") && is_app_method_name(method, args.len()) {
         // `.routes(from: "…")` uses a labeled arg; other builder methods stay
         // positional. Labels are erased at emit — only the expression matters.
-        return expr_in_subset(receiver, cx, locals)
-            && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
-    }
-    // Shape (d8) [D-APPROX1=A]: a sketch method (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    if is_sketch_type(recv_type.as_deref()) && is_sketch_method_name(recv_type.as_deref(), method) {
         return expr_in_subset(receiver, cx, locals)
             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
@@ -1151,7 +1089,7 @@ pub(crate) fn method_call_in_subset(
     // D-SIMD2 / D-LINALG1: a method on a built-in math value type (and NOT a user
     // type sharing the name). Admitted when the receiver + args are in-subset.
     if let Some(handle) = recv_type {
-        if crate::Sema::is_math_type(handle) && !cx.type_names.contains(handle) {
+        if crate::Sema::is_math_type(handle) && !cx.fact_type_name(handle) {
             let is_reduce = method == "reduce" && crate::Sema::is_simd_lane_type(handle);
             if is_reduce || crate::Sema::math_method_return(handle, method, args.len()).is_some() {
                 return expr_in_subset(receiver, cx, locals)
@@ -1160,10 +1098,16 @@ pub(crate) fn method_call_in_subset(
         }
     }
     if let Some(handle) = recv_type {
+        if matches!(handle.as_str(), "__DynOp__" | "__DynField__")
+            || (handle == "Dyn" && matches!(method, "get" | "has" | "keys" | "remove" | "len"))
+        {
+            return expr_in_subset(receiver, cx, locals)
+                && args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
+        }
         if (handle == "__SerdeEncode__" && method == "encode" && args.is_empty())
             || (handle == "__Debug__" && method == "debug" && args.is_empty())
             || (handle == Syntax::TYPE_DATA
-                && method == Syntax::METHOD_DATATREE_DECODE
+                && method == Syntax::METHOD_DYN_DECODE
                 && args.is_empty())
         {
             return expr_in_subset(receiver, cx, locals);
@@ -1217,7 +1161,7 @@ pub(crate) fn method_call_in_subset(
                     .values()
                     .any(|module| module == "core.email");
             if matches!(type_name.as_str(), "EncodingLimits" | "Limits")
-                && (!cx.struct_fields.contains_key(type_name) || is_core_email_limits)
+                && (!cx.fact_struct_fields(type_name).is_some() || is_core_email_limits)
             {
                 return true;
             }
@@ -1277,7 +1221,7 @@ pub(crate) fn method_call_in_subset(
     if recv_type.is_none() {
         if let Expr::Ident(type_name, _) = receiver {
             if !locals.contains(type_name) {
-                if let Some(variants) = cx.enum_variants.get(type_name) {
+                if let Some(variants) = cx.fact_enum_variants(type_name) {
                     if variants.iter().any(|(v, _)| v == method) {
                         return enum_is_covered(type_name, cx)
                             && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -1369,16 +1313,14 @@ pub(crate) fn method_call_in_subset(
     let binding_method = cx
         .extern_funcs
         .contains_key(&foreign_binding_method_key(ty, method));
-    let sig = cx.method_sigs.get(&(metadata_ty, method.to_string()));
-    let distinct_numeric_operator = cx
-        .distinct_types
-        .get(ty)
+    let sig = cx.fact_method_sigs(&(metadata_ty, method.to_string()));
+    let distinct_numeric_operator = cx.fact_distinct_types(ty)
         .is_some_and(|(_, numeric)| *numeric)
         && !cx.distinct_ranges.contains_key(ty)
         && matches!(method, "add" | "sub" | "mul" | "div")
         && args.len() == 1;
-    let distinct_trait_method = cx.distinct_types.contains_key(ty)
-        && (cx.trait_methods.contains(&(ty.clone(), method.to_string()))
+    let distinct_trait_method = cx.fact_distinct_types(ty).is_some()
+        && (cx.fact_trait_method(&(ty.clone(), method.to_string()))
             || distinct_numeric_operator);
     if sig.is_none() && !binding_method && !distinct_trait_method {
         // No user method: a name a core/stdlib/builtin/special lowering would intercept
@@ -1445,45 +1387,6 @@ pub(super) fn core_module_path_from_receiver(
     }
 }
 
-/// c109 Phase 27: is `recv.method(args)` a call THROUGH a fn-typed struct FIELD (not a
-/// user method)? Returns the field's `Type::Fn` when so. `recv_type` is the total sema
-/// fact (`Some(<StructType>)`, set by CheckerInfer's fn-field arm); the field must exist
-/// on a COVERED struct with a `Type::Fn` type and the same name as `method`. Mirrors the
-/// AST `emit_method_call` fn-field branch's guard (`struct_fields` lookup + `Type::Fn`).
-pub(crate) fn fn_field_call_ty<'a>(
-    method: &str,
-    recv_type: &Option<String>,
-    cx: &'a Cx,
-) -> Option<&'a Type> {
-    let ty_name = recv_type.as_ref()?;
-    if !is_covered_struct_ty(&Type::Named(ty_name.clone()), cx) {
-        return None;
-    }
-    let fields = cx.struct_fields.get(ty_name)?;
-    let (_, fty) = fields.iter().find(|(n, _)| n == method)?;
-    matches!(fty, Type::Fn { .. }).then_some(fty)
-}
-
-/// c109 Phase 27: is `w.step(4)` (a call through a fn-typed struct field) in-subset? The
-/// receiver and every arg must be in-subset; args are emitted PLAINLY by the AST path
-/// (`emit_call_args(.., None, ..)`), so no convention/Arc-clone fact applies — exclude any
-/// labeled / Arc-clone arg defensively (sema never produces them here, but stay strict).
-pub(crate) fn fn_field_call_in_subset(
-    receiver: &Expr,
-    method: &str,
-    args: &[crate::AST::CallArg],
-    recv_type: &Option<String>,
-    cx: &Cx,
-    locals: &HashSet<String>,
-) -> bool {
-    if fn_field_call_ty(method, recv_type, cx).is_none() {
-        return false;
-    }
-    expr_in_subset(receiver, cx, locals)
-        && args.iter().all(|a| {
-            a.label.is_none() && !a.flags.shared_auto_clone && expr_in_subset(&a.expr, cx, locals)
-        })
-}
 
 /// c109 Phase 7: is a STATIC method call `Type.make(args)` inside the subset? The
 /// AST path (Expression.rs ~L1644) emits `__jet_<Type>::__jet_<method>(args)` for a
@@ -1558,7 +1461,7 @@ pub(crate) fn static_method_call_in_subset(
     }
     let is_string_distinct = cx
         .distinct_type_identity(type_name)
-        .and_then(|identity| cx.distinct_types.get(&identity))
+        .and_then(|identity| cx.fact_distinct_types(&identity))
         .is_some_and(|(base, _)| *base == Type::String);
     if is_string_distinct && matches!(method, "from" | "encode_hole" | "raw") {
         return args.len() == 1 && args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
@@ -1570,8 +1473,8 @@ pub(crate) fn static_method_call_in_subset(
     // to the `core.args merge` CoreCall; both layers are ordinary values.
     if method == "merge"
         && args.len() == 2
-        && cx.type_names.contains(type_name)
-        && cx.struct_fields.contains_key(type_name)
+        && cx.fact_type_name(type_name)
+        && cx.fact_struct_fields(type_name).is_some()
         && !cx.sigs.contains_key(&format!("{type_name}::merge"))
     {
         return args
@@ -1590,15 +1493,6 @@ pub(crate) fn static_method_call_in_subset(
         return true;
     }
     if type_name == Syntax::TYPE_AUTHORITY && method == "from_rights" && args.len() == 1 {
-        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-    }
-    if matches!((type_name, method, args.len()), ("ExpiringValue", "new", 3)) {
-        return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
-    }
-    if matches!(
-        (type_name, method, args.len()),
-        ("ExpiringSecret", "new", 3)
-    ) {
         return args.iter().all(|arg| expr_in_subset(&arg.expr, cx, locals));
     }
     if matches!(
@@ -1624,7 +1518,7 @@ pub(crate) fn static_method_call_in_subset(
     {
         return expr_in_subset(&args[0].expr, cx, locals);
     }
-    if let Some((base, _)) = cx.distinct_types.get(type_name) {
+    if let Some((base, _)) = cx.fact_distinct_types(type_name) {
         if base.is_numeric()
             && Syntax::numeric_conversion_source(method).is_some()
             && args.len() == 1
@@ -1682,14 +1576,14 @@ pub(crate) fn static_method_call_in_subset(
     // `Vec3.from_array([…])`). Admitted when the (type, method, nargs) names a covered
     // static and every arg is in-subset.
     if crate::Sema::is_math_type(type_name)
-        && !cx.type_names.contains(type_name)
+        && !cx.fact_type_name(type_name)
         && crate::Sema::math_static_return(type_name, method, args.len()).is_some()
     {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
     if type_name == "Perf"
-        && !cx.type_names.contains("Perf")
-        && core_call_covered("core.perf", method)
+        && !cx.fact_type_name("Perf")
+        && jet_foundation::CoreModuleExports::core_source_owns_call("core.perf", method, args.len(), false)
     {
         return args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
     }
@@ -1721,14 +1615,12 @@ pub(crate) fn static_method_call_in_subset(
     }
     // An enum-name receiver whose `method` names a variant emits an enum literal,
     // not a static call — exclude (it never reaches `method_sigs` on the AST path).
-    if let Some(variants) = cx.enum_variants.get(type_name) {
+    if let Some(variants) = cx.fact_enum_variants(type_name) {
         if variants.iter().any(|(v, _)| v == method) {
             return false;
         }
     }
-    let Some(sig) = cx
-        .method_sigs
-        .get(&(type_name.to_string(), method.to_string()))
+    let Some(sig) = cx.fact_method_sigs(&(type_name.to_string(), method.to_string()))
     else {
         return false;
     };
@@ -1770,7 +1662,7 @@ pub(crate) fn is_intercepted_method_name(method: &str) -> bool {
         | "to_string" | "map" | "filter" | "each" | "find" | "any" | "all" | "count_where"
         | "sort_by" | "sort_by_desc" | "reduce" | "update_first"
         | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "normalize"
-        | "remove_prefix" | "remove_suffix" | "rsplit" | "equal" | "copy"
+        | "remove_prefix" | "remove_suffix" | "rsplit" | "equal"
         | "rfind" | "rpartition"
         // D-ITER1: lazy iterator adapters.
         | "take" | "skip" | "step_by" | "dedup" | "chunks" | "windows"
@@ -1834,7 +1726,7 @@ pub(crate) fn closure_method_in_subset(
 ) -> bool {
     let para_callback = |expr: &Expr| match expr {
         Expr::Lambda(lam) => lambda_in_subset(lam, cx, locals),
-        Expr::Ident(name, _) => cx.fn_types.contains_key(name),
+        Expr::Ident(name, _) => cx.fact_fn_types(name).is_some(),
         _ => false,
     };
     let map_callback = |expr: &Expr| match expr {
@@ -1842,7 +1734,7 @@ pub(crate) fn closure_method_in_subset(
         // Sema has already proved a local callback has the map Fn shape. Keep
         // it on the same TIR path as a literal lambda; the lowerer reads the
         // callback's resolved local type and emits the shared helper.
-        Expr::Ident(name, _) => locals.contains(name) || cx.fn_types.contains_key(name),
+        Expr::Ident(name, _) => locals.contains(name) || cx.fact_fn_types(name).is_some(),
         _ => false,
     };
     if !crate::Collections::is_closure_method(method) {

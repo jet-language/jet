@@ -26,15 +26,15 @@ impl NixDerivationStore {
 }
 
 // The outcome of a differential sample over real store derivations.
-pub struct NixCorpusReport {
-    pub checked: Int
-    pub skipped: Int
-    pub divergences: [NixError]
+struct NixCorpusReport {
+    checked: Int
+    skipped: Int
+    divergences: [NixError]
 }
 
 // Check up to `limit` `.drv` files of `store_dir` in name order. A missing
 // store directory is an empty report.
-pub fn nix_differential_corpus(store_dir: String, limit: Int) -[FS]> NixCorpusReport NixError! {
+fn nix_differential_corpus(store_dir: String, limit: Int) -[FS]> NixCorpusReport NixError! {
     report := NixCorpusReport{checked: 0, skipped: 0, divergences: [NixError]{}}
     if !files.is_dir(store_dir) -> return Ok(report)
     entries :: files.list_dir(store_dir) ?? return Err(NixError.DrvIO("{err}"))
@@ -105,7 +105,7 @@ fn nix_verify_corpus_outputs(store: &NixDerivationStore, store_dir: String, path
 }
 
 // The checked count, or the first divergence of the sample.
-pub fn nix_assert_corpus_clean(store_dir: String, limit: Int) -[FS]> Int NixError! {
+fn nix_assert_corpus_clean(store_dir: String, limit: Int) -[FS]> Int NixError! {
     report :: nix_differential_corpus(store_dir, limit)
     if report.divergences.len() > 0 -> return Err(report.divergences[0])
     Ok(report.checked)

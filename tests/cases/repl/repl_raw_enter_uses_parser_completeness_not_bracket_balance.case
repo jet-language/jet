@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:360-374 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "40 +\r" after 200ms
+pty-send: "2\r" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "· " # Original continuation predicate rs369.
+stdout: ~ "42 : Int" # Original parser-complete execution rs371.

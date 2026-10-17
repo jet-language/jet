@@ -1,0 +1,13 @@
+# PORT tests/repl.rs:2088-2110; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: repl_effect_needs_lexical_grant_even_with_allow_flag.fixture
+mkdir: project
+step: jet repl --project {work}/project --allow=FS
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_effect_needs_lexical_grant_even_with_allow_flag.fixture/input0.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "E1803" # original predicate
+stdout|stderr: ~ "no REPL runtime authority" # original predicate
+file: project/no.txt absent

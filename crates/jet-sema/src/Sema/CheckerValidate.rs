@@ -237,6 +237,7 @@ fn method_call(receiver: Expr, method: &str, args: Vec<CallArg>, span: Span) -> 
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 
@@ -352,6 +353,7 @@ fn build_validate_impl(s: &StructDef, rules: &[ValidateRule], span: Span) -> Imp
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
         public_label: None,
         zone: crate::AST::ParamZone::Either,
     };
@@ -460,6 +462,7 @@ fn generated_param(name: &str, convention: AccessConvention, ty: Type, span: Spa
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
         public_label: None,
         zone: crate::AST::ParamZone::Either,
     }
@@ -496,6 +499,7 @@ fn builder_field(base: &str, field: &str, span: Span) -> Expr {
 fn build_validate_builder_struct(span: Span) -> StructDef {
     StructDef {
         span,
+        compiler_builtin_error: false,
         is_pub: false,
         is_package_pub: false,
         name: Syntax::TYPE_VALIDATE_BUILDER.to_string(),

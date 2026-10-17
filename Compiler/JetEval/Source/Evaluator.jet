@@ -14,7 +14,10 @@ use jet_foundation.[
     MIRCaptureOperand,
     MIRComponentSignatureDescriptor,
     MIRConstant,
+    MIRConstantDef,
+    MIRSharedLifetime,
     MIRCopyFact,
+    MIRCoreCall,
     MIRCoreClosureKind,
     MIRCoreOwner,
     MIRDerivationRef,
@@ -22,6 +25,7 @@ use jet_foundation.[
     MIREnumArg,
     MIRFailureCarrier,
     MIRFieldID,
+    MIRFieldRow,
     MIRFieldValue,
     MIRForeign,
     MIRForeignID,
@@ -119,8 +123,12 @@ fn jet_eval_new_session_config(config: ^JetEvalConfig) -> JetEvalConfig {
 
 // Read-fork a fresh runtime configuration before an owning request is moved.
 // Every field is reconstructed; adapter cloning is the sole host-session copy.
-pub fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
+fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
     host_adapter := if config.host_adapter == {
+        None -> None
+        Val(adapter) -> Val(adapter.clone_adapter())
+    }
+    build_host_adapter :: if config.build_host_adapter == {
         None -> None
         Val(adapter) -> Val(adapter.clone_adapter())
     }
@@ -131,6 +139,7 @@ pub fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
         globals: config.globals,
         runtime_execution: true,
         host_adapter: host_adapter,
+        build_host_adapter: build_host_adapter,
         output_context: config.output_context,
         host_hooks: config.host_hooks,
     }
@@ -139,12 +148,12 @@ pub fn jet_eval_runtime_config(config: JetEvalConfig) -> JetEvalConfig {
 
 fn jet_eval_machine(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalMachine {
     active_config := jet_eval_new_session_config(^config)
-    registry := jet_eval_registry_new()
+    registry :: jet_eval_registry_new()
     identity := jet_eval_registry_machine_identity(registry)
     rows := jet_eval_program_rows(program)
     JetEvalMachine{program: program, rows: rows, config: active_config, registry: registry, identity: identity, frames: [JetEvalFrame]{}, callback_roots: [Int:JetEvalCallbackRoot]{}, entry_access: None, entry_shared_loans: [JetEvalSharedEntryLoan]{}, steps: 0, stdout: "", stderr: "", soft_stop: false, exit_code: None, failure: None, internal_problem: None}
 }
-pub fn jet_eval_owned_root(machine: JetEvalMachine) -> JetEvalOwnedRoot Never! {
+fn jet_eval_owned_root(machine: JetEvalMachine) -> JetEvalOwnedRoot Never! {
     config := JetEvalConfig{
         fuel: machine.config.fuel,
         max_call_depth: machine.config.max_call_depth,
@@ -155,16 +164,16 @@ pub fn jet_eval_owned_root(machine: JetEvalMachine) -> JetEvalOwnedRoot Never! {
         output_context: machine.config.output_context,
         host_hooks: machine.config.host_hooks,
     }
-    jet_eval_owned_root_from_parts(machine.program, machine.registry, config)
+    jet_eval_owned_root_from_parts(machine.program, machine.registry, ^config)
 }
-pub fn jet_eval_owned_root_new_session(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalOwnedRoot {
+fn jet_eval_owned_root_new_session(program: ^MIRProgram, config: ^JetEvalConfig) -> JetEvalOwnedRoot {
     machine := jet_eval_machine(^program, ^config)
     jet_eval_owned_root(machine)
 }
 
 // Checked root transport uses these Source-owned accessors so the private
 // configuration can be recursively encoded without retaining the typed root.
-pub fn jet_eval_owned_root_config(root: JetEvalOwnedRoot) -> JetEvalConfig Never! {
+fn jet_eval_owned_root_config(root: JetEvalOwnedRoot) -> JetEvalConfig Never! {
     JetEvalConfig{
         fuel: root.config.fuel,
         max_call_depth: root.config.max_call_depth,
@@ -176,18 +185,18 @@ pub fn jet_eval_owned_root_config(root: JetEvalOwnedRoot) -> JetEvalConfig Never
         host_hooks: root.config.host_hooks,
     }
 }
-pub fn jet_eval_owned_root_from_parts(program: MIRProgram, registry: JetEvalRegistry, config: JetEvalConfig) -> JetEvalOwnedRoot Never! {
-    active_config := config
+fn jet_eval_owned_root_from_parts(program: MIRProgram, registry: JetEvalRegistry, config: ^JetEvalConfig) -> JetEvalOwnedRoot Never! {
+    active_config := ^config
     active_config.host_adapter = None
     JetEvalOwnedRoot{program: program, registry: registry, config: active_config}
 }
 
-pub fn jet_eval_owned_root_cleanup_clone(root: &JetEvalOwnedRoot) -> JetEvalOwnedRoot Never! {
+fn jet_eval_owned_root_cleanup_clone(root: &JetEvalOwnedRoot) -> JetEvalOwnedRoot Never! {
     jet_eval_owned_root_from_parts(root.program, root.registry, jet_eval_owned_root_config(root))
 }
 fn jet_eval_owned_root_machine(root: JetEvalOwnedRoot, adapter: JetEvalHostAdapter) -> JetEvalMachine {
     root_config := jet_eval_owned_root_config(root)
-    root_config.host_adapter = Val(adapter)
+    root_config.host_adapter = Val(adapter.clone_adapter())
     active_config := jet_eval_new_session_config(^root_config)
     identity := jet_eval_registry_machine_identity(root.registry)
     rows := jet_eval_program_rows(root.program)
@@ -212,7 +221,7 @@ fn jet_eval_owned_root_machine(root: JetEvalOwnedRoot, adapter: JetEvalHostAdapt
 }
 fn jet_eval_owned_root_drop_result(machine: &JetEvalMachine, cleaned: Bool, span: Span) -> JetEvalOwnedRootDropResult Never! {
     disposition := JetEvalOwnedRootDropDisposition.ConsumedFailure
-    if cleaned && !jet_eval_has_failure(&machine) -> disposition = JetEvalOwnedRootDropDisposition.Cleaned
+    if cleaned && !jet_eval_has_failure(machine) -> disposition = JetEvalOwnedRootDropDisposition.Cleaned
     internal_problem := machine.internal_problem
     if disposition == JetEvalOwnedRootDropDisposition.ConsumedFailure && machine.failure == None && internal_problem == None {
         internal_problem = Val(JetEvalInternalProblem{span: Val(span), message: "native owned-root cleanup failed without a diagnostic"})
@@ -225,7 +234,7 @@ fn jet_eval_owned_root_drop_result(machine: &JetEvalMachine, cleaned: Bool, span
         stderr: machine.stderr,
     }
 }
-pub fn jet_eval_owned_root_drop(root: &JetEvalOwnedRoot, value: JetEvalRuntimeValue, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+fn jet_eval_owned_root_drop(root: &JetEvalOwnedRoot, value: JetEvalRuntimeValue, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
     jet_eval_owned_root_drop_value(root, value, adapter, span)
 }
 
@@ -236,7 +245,8 @@ fn jet_eval_owned_root_drop_value(root: JetEvalOwnedRoot, value: JetEvalRuntimeV
     jet_eval_owned_root_drop_result(&machine, valid && cleaned, span)
 }
 
-pub fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+
+fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
     machine := jet_eval_owned_root_machine(root, adapter)
     cleaned := true
     loop value in values {
@@ -248,14 +258,14 @@ pub fn jet_eval_owned_root_drop_values(root: &JetEvalOwnedRoot, values: ^[JetEva
 }
 // A disconnected callback reply owns its result independently of the retired
 // parent session; output is already published, so only a returned value needs cleanup.
-pub fn jet_eval_owned_root_drop_callback_result(root: &JetEvalOwnedRoot, result: JetEvalCallbackResult, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+fn jet_eval_owned_root_drop_callback_result(root: &JetEvalOwnedRoot, result: JetEvalCallbackResult, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
     if result.outcome == {
         .Value(value) -> return jet_eval_owned_root_drop(&root, value, adapter, span)
         else -> {}
     }
     JetEvalOwnedRootDropResult{disposition: JetEvalOwnedRootDropDisposition.Cleaned, failure: None, internal_problem: None, stdout: "", stderr: ""}
 }
-pub fn jet_eval_owned_root_drop_host(root: &JetEvalOwnedRoot, value: JetEvalHostValue, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
+fn jet_eval_owned_root_drop_host(root: &JetEvalOwnedRoot, value: JetEvalHostValue, adapter: JetEvalHostAdapter, span: Span) -> JetEvalOwnedRootDropResult {
     machine := jet_eval_owned_root_machine(root, adapter)
     cleaned := jet_eval_owned_host_value_discard(&machine, value, span)
     jet_eval_owned_root_drop_result(&machine, cleaned, span)
@@ -435,6 +445,7 @@ fn jet_eval_frame(function: MIRFunctionID, entry: MIRBlockID, args: [JetEvalRunt
         ip: 0,
         predecessor: None,
         params: args,
+        caller_site: None,
         captures: captures,
         values: [U64:JetEvalRuntimeValue]{},
         borrowed_values: [U64:Bool]{},
@@ -449,30 +460,33 @@ fn jet_eval_frame(function: MIRFunctionID, entry: MIRBlockID, args: [JetEvalRunt
 fn jet_eval_function_result(failure: MIRFailureCarrier, data: TComptimeValue) -> TComptimeValue Never! {
     if failure == {
         .Result(_, _) | .Optional(_) -> {
-            if data == .Present(_) -> return ~data
-            if data == .Failed(_) -> return ~data
+            if data == .Present(_) -> return data.copy()
+            if data == .Failed(_) -> return data.copy()
             return TComptimeValue.Present{value: data}
         }
         else -> {}
     }
-    ~data
+    data.copy()
 }
 fn jet_eval_result(machine: ^JetEvalMachine, value: JetEvalRuntimeValue?, complete: Bool) -> JetEvalResult Never! {
-    stdout := machine.stdout
-    stderr := machine.stderr
-    output_context := machine.config.output_context
-    steps := machine.steps
-    soft_stop := machine.soft_stop
-    exit_code := machine.exit_code
-    error := machine.failure
-    internal_problem := machine.internal_problem
-    session := JetEvalRuntimeSession{machine: machine, retired: false}
+    jet_eval_session_result(JetEvalRuntimeSession{machine: machine, retired: false}, value, complete)
+}
+
+fn jet_eval_session_result(session: ^JetEvalRuntimeSession, value: JetEvalRuntimeValue?, complete: Bool) -> JetEvalResult Never! {
+    stdout := session.machine.stdout
+    stderr := session.machine.stderr
+    output_context := session.machine.config.output_context
+    steps := session.machine.steps
+    soft_stop := session.machine.soft_stop
+    exit_code := session.machine.exit_code
+    error := session.machine.failure
+    internal_problem := session.machine.internal_problem
     JetEvalResult{complete: complete, value: value, session: Val(session), stdout: stdout, stderr: stderr, output_context: output_context, steps: steps, soft_stop: soft_stop, exit_code: exit_code, error: error, internal_problem: internal_problem}
 }
 // Discharge one owned alias per registry reference inside `value`. Terminal
 // state from the physical closer is isolated so cleanup never masks or is
 // masked by the machine's earlier outcome.
-pub fn jet_eval_drop_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
+fn jet_eval_drop_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
     original_failure := machine.failure
     original_internal := machine.internal_problem
     original_soft_stop := machine.soft_stop
@@ -611,13 +625,26 @@ fn jet_eval_retire_machine(machine: &JetEvalMachine, span: Span) -> Bool {
             }
         }
     }
+    if !jet_eval_retire_comptime_shared_sites(&machine, span) -> ok = false
     ok && !jet_eval_has_failure(machine)
 }
 
-pub fn jet_eval_retire_result(result: &JetEvalResult, span: Span) -> Bool {
+fn jet_eval_retire_result(result: &JetEvalResult, span: Span) -> Bool {
+    ok :: jet_eval_retire_in_place(&result, span) ?? return false
+    result.session = None
+    ok
+}
+
+// Retires `result`'s session where it stands: drains callbacks, drops the
+// value, cleans up the frames, and records the final outcome on `result`. The
+// retired session stays on `result` until jet_eval_retire_result drops it, or
+// its owner moves it out to evaluate the next function on the same program
+// (jet_eval_session_function). None when draining callbacks failed; the
+// session then stays live.
+fn jet_eval_retire_in_place(result: &JetEvalResult, span: Span) -> Bool? {
     ok := true
     if &result.session == {
-        None -> return true
+        None -> return Val(true)
         .Val(session) -> {
             if !session.retired {
                 if !jet_eval_drain_callbacks(&session.machine, span) {
@@ -626,33 +653,35 @@ pub fn jet_eval_retire_result(result: &JetEvalResult, span: Span) -> Bool {
                     result.stdout = session.machine.stdout
                     result.stderr = session.machine.stderr
                     result.output_context = session.machine.config.output_context
-                    return false
+                    return None
                 }
                 value := result.value
                 if value != None {
                     if !jet_eval_drop_value(&session.machine, value ?? JetEvalRuntimeValue.Moved, span) -> ok = false
                 }
                 if !jet_eval_retire_machine(&session.machine, span) -> ok = false
+                if session.shared_site_attempt {
+                    if !jet_eval_native_attempt_reset(&session.machine, span) -> ok = false
+                }
                 result.error = session.machine.failure
                 result.internal_problem = session.machine.internal_problem
                 result.stdout = session.machine.stdout
                 result.stderr = session.machine.stderr
                 result.output_context = session.machine.config.output_context
                 session.retired = true
-                ok = ok && !jet_eval_has_failure(&session.machine)
+                ok = ok && !jet_eval_has_failure(session.machine)
             }
         }
     }
-    result.session = None
     result.value = None
-    ok
+    Val(ok)
 }
 
 // Move the produced value out of a result before the session retires. The
 // caller now owns that value's aliases (valid on any machine sharing the same
 // session registry, e.g. the parent of a task); the child session still
 // retires only its own frames and callback roots.
-pub fn jet_eval_result_take_value(result: &JetEvalResult, span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_result_take_value(result: &JetEvalResult, span: Span) -> JetEvalRuntimeValue? {
     if &result.session == {
         None -> return None
         .Val(session) -> {
@@ -665,9 +694,9 @@ pub fn jet_eval_result_take_value(result: &JetEvalResult, span: Span) -> JetEval
     taken
 }
 
-pub fn jet_eval_comptime_value(result: &JetEvalResult, span: Span) -> TComptimeValue? {
+fn jet_eval_comptime_value(result: &JetEvalResult, span: Span) -> TComptimeValue? {
     if result.internal_problem != None {
-        jet_eval_retire_result(&result, span)
+        _ := jet_eval_retire_in_place(&result, span)
         return None
     }
     value :: result.value ?? return None
@@ -683,73 +712,178 @@ pub fn jet_eval_comptime_value(result: &JetEvalResult, span: Span) -> TComptimeV
         }
     }
     data :: data_result ?? {
-        jet_eval_retire_result(&result, span)
+        _ := jet_eval_retire_in_place(&result, span)
         return None
     }
-    if !jet_eval_retire_result(&result, span) -> return None
+    if !(jet_eval_retire_in_place(&result, span) ?? false) -> return None
     Val(data)
 }
 
 
-pub fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig) -> JetEvalResult {
+fn jet_eval_function(program: ^MIRProgram, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig) -> JetEvalResult {
     machine := jet_eval_machine(^program, ^config)
+    value := jet_eval_function_in(&machine, function_id, args)
+    complete :: value != None
+    attempt :: jet_eval_is_unit_attempt(machine.program, function_id, machine.config.runtime_execution)
+    jet_eval_session_result(JetEvalRuntimeSession{machine: machine, retired: false, shared_site_attempt: attempt}, value, complete)
+}
+
+fn jet_eval_is_unit_attempt(program: MIRProgram, function_id: MIRFunctionID, runtime: Bool) -> Bool Never! {
+    if !runtime -> return false
+    loop test in program.tests {
+        if test.function == function_id && test.kind == .Unit -> return true
+    }
+    false
+}
+
+// jet_eval_function on the program of `session`, a session an earlier result
+// retired in place (jet_eval_retire_in_place): it starts over with `config`
+// (jet_eval_reset_session), so the result is the one a new machine over the
+// same program would give, without rebuilding the program or its row index.
+// Only the program, its rows and the globals carry over, so a session whose
+// callbacks failed to drain is reused exactly as a fresh machine would be.
+// The evaluation's globals are the session's (those of its last evaluation)
+// plus `added`; `config`'s own are dropped. That equals a fresh machine with
+// the union as `config.globals` (the evaluator only reads globals), without
+// copying every global of a long comptime run once per evaluation.
+fn jet_eval_session_function(session: ^JetEvalRuntimeSession, function_id: MIRFunctionID, args: [TComptimeValue], config: ^JetEvalConfig, added: [String:TComptimeValue]) -> JetEvalResult {
+    reused := ^session
+    globals := ^reused.machine.config.globals
+    reused.machine.config.globals = [String:TComptimeValue]{}
+    loop (key, value) in added -> globals[key] = value
+    session_config := ^config
+    session_config.globals = ^globals
+    jet_eval_reset_session(&reused.machine, ^session_config)
+    reused.retired = false
+    reused.shared_site_attempt = jet_eval_is_unit_attempt(reused.machine.program, function_id, reused.machine.config.runtime_execution)
+    value := jet_eval_function_in(&reused.machine, function_id, args)
+    complete :: value != None
+    jet_eval_session_result(^reused, value, complete)
+}
+
+// The rows a growing comptime program (A2c: Codegen lower_comptime_growth)
+// gains between two evaluations on one session. Every function, field, Core
+// call and Prelude call id, constant key and type-instance identity is new
+// to the session's program.
+struct JetEvalProgramGrowth {
+    functions: [MIRFunction]
+    callbacks: [MIRCallbackAdapter]
+    fields: [MIRFieldRow]
+    constants: [MIRConstantDef]
+    core_calls: [MIRCoreCall]
+    prelude_calls: [MIRPreludeCall]
+    type_instances: [MIRType]
+}
+
+// Appends `growth` to the program of `session` (retired in place, as for
+// jet_eval_session_function) and indexes the new rows, so the next
+// evaluation runs on the larger program as a machine built over it would:
+// lookups go through the id maps (jet_eval_program_rows keeps the first row
+// per id, and each id here is new), and appending moves no earlier row.
+fn jet_eval_session_grow(session: &JetEvalRuntimeSession, growth: ^JetEvalProgramGrowth) {
+    jet_eval_machine_grow(&session.machine, ^growth)
+}
+
+fn jet_eval_machine_grow(machine: &JetEvalMachine, growth: ^JetEvalProgramGrowth) Never! {
+    added := ^growth
+    functions := [MIRFunction]{}
+    loop added.functions.len() > 0 {
+        function := &added.functions.pop() ?? { break }
+        &functions.push(^function)
+    }
+    loop functions.len() > 0 {
+        function := &functions.pop() ?? { break }
+        if machine.rows.functions.get(function.id.value) == None -> machine.rows.functions[function.id.value] = machine.program.functions.len()
+        &machine.rows.function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
+        &machine.program.functions.push(^function)
+    }
+    constants := [MIRConstantDef]{}
+    loop added.constants.len() > 0 {
+        constant := &added.constants.pop() ?? { break }
+        &constants.push(^constant)
+    }
+    loop constants.len() > 0 {
+        constant := &constants.pop() ?? { break }
+        if machine.rows.constants.get(constant.key) == None -> machine.rows.constants[constant.key] = machine.program.constants.len()
+        &machine.program.constants.push(^constant)
+    }
+    loop callback in added.callbacks -> &machine.program.callbacks.push(callback)
+    loop field in added.fields {
+        if machine.rows.fields.get(field.id.value) == None -> machine.rows.fields[field.id.value] = machine.program.fields.len()
+        &machine.program.fields.push(field)
+    }
+    loop call in added.core_calls {
+        if machine.rows.core_calls.get(call.id.value) == None -> machine.rows.core_calls[call.id.value] = machine.program.core_calls.len()
+        &machine.program.core_calls.push(call)
+    }
+    loop call in added.prelude_calls {
+        if machine.rows.prelude_calls.get(call.id.value) == None -> machine.rows.prelude_calls[call.id.value] = machine.program.prelude_calls.len()
+        &machine.program.prelude_calls.push(call)
+    }
+    loop instance in added.type_instances {
+        identity :: instance.identity ?? next
+        rows := machine.rows.type_instances.get(identity.value) ?? [Int]{}
+        &rows.push(machine.program.type_instances.len())
+        machine.rows.type_instances[identity.value] = rows
+        &machine.program.type_instances.push(instance)
+    }
+}
+
+// The value of one evaluation of `function_id` on `machine`; None when it
+// did not complete (the machine records why).
+fn jet_eval_function_in(machine: &JetEvalMachine, function_id: MIRFunctionID, args: [TComptimeValue]) -> JetEvalRuntimeValue? {
     function :: jet_eval_find_function(machine, function_id) ?? {
         jet_eval_compiler_fail(&machine, jet_eval_empty_span(), "requested MIR function is unavailable")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if !function.target_applicability.interpreter {
         jet_eval_unsupported(&machine, function.span, "evaluating a function disabled for the interpreter target")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     runtime_args := [JetEvalRuntimeValue]{}
     loop arg in args -> &runtime_args.push(JetEvalRuntimeValue.Data{value: arg})
     value :: jet_eval_invoke(&machine, function_id, runtime_args, [JetEvalRuntimeValue]{}, function.span) ?? {
-        if machine.soft_stop && !jet_eval_has_failure(machine) -> return jet_eval_result(^machine, Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}), true)
+        if machine.soft_stop && !jet_eval_has_failure(machine) -> return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
         if !jet_eval_has_failure(machine) -> jet_eval_compiler_fail(&machine, function.span, "MIR evaluation of `{function.key}` returned no value without a diagnostic")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if jet_eval_has_failure(machine) {
         jet_eval_drop_value(&machine, value, function.span)
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if machine.soft_stop {
         jet_eval_drop_value(&machine, value, function.span)
-        return jet_eval_result(^machine, Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}), true)
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Unit})
     }
-    if machine.config.runtime_execution {
-        return jet_eval_result(^machine, Val(value), true)
-    }
+    if machine.config.runtime_execution -> return Val(value)
     data :: jet_eval_data(value, &machine, function.span) ?? {
         if !jet_eval_has_failure(machine) -> jet_eval_compiler_fail(&machine, function.span, "the value of `{function.key}` is not compile-time data")
         jet_eval_drop_value(&machine, value, function.span)
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     if !jet_eval_drop_value(&machine, value, function.span) {
         if !jet_eval_has_failure(machine) -> jet_eval_compiler_fail(&machine, function.span, "the value of `{function.key}` did not retire cleanly")
-        return jet_eval_result(^machine, None, false)
+        return None
     }
     result_data := jet_eval_function_result(function.failure, data)
-    jet_eval_result(^machine, Val(JetEvalRuntimeValue.Data{value: result_data}), true)
+    Val(JetEvalRuntimeValue.Data{value: result_data})
 }
 
 // Run each of `function_ids` with no arguments as one pure evaluation on ONE
 // machine (Rust PureFold `evaluate` over one borrowed program): the program
 // and its row index are built once, each evaluation starts from a fresh
-// session, and the program and computed values are returned together once.
+// session under the default pure configuration, and the program and computed
+// values are returned together once.
 // Value `i` is None when evaluation `i` failed, stopped, printed, or left a
 // resource that did not retire cleanly. A machine per function copied the
 // whole program twice per evaluation (a field move clones), and the caller's
 // recursion retained one copy per evaluation.
-pub fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID], config: JetEvalConfig) -> (program: MIRProgram, values: [TComptimeValue?]) {
+fn jet_eval_pure_functions(program: ^MIRProgram, function_ids: [MIRFunctionID]) -> (program: MIRProgram, values: [TComptimeValue?]) {
     values := [TComptimeValue?]{}
     span := jet_eval_empty_span()
-    first_config := config
-    machine := jet_eval_machine(^program, ^first_config)
+    machine := jet_eval_machine(^program, jet_eval_default_config())
     loop (index, function_id) in function_ids {
-        if index > 0 {
-            session_config := config
-            jet_eval_reset_session(&machine, ^session_config)
-        }
+        if index > 0 -> jet_eval_reset_session(&machine, jet_eval_default_config())
         &values.push(jet_eval_pure_session_value(&machine, function_id, span))
     }
     (program: machine.program, values: ^values)
@@ -789,11 +923,45 @@ fn jet_eval_pure_session_value(machine: &JetEvalMachine, function_id: MIRFunctio
     if jet_eval_has_failure(machine) || machine.soft_stop || machine.stdout != "" || machine.stderr != "" -> data = None
     data
 }
+
+
+// A pure evaluation's data value and the program its machine ran on.
+struct JetEvalProgramData {
+    program: MIRProgram
+    value: TComptimeValue?
+}
+
+fn jet_eval_program_data(program: ^MIRProgram, value: TComptimeValue?) -> JetEvalProgramData Never! {
+    JetEvalProgramData{program: program, value: value}
+}
+
+// Run `function_id` with no arguments as one pure evaluation: read its value
+// as data, retire the session, and hand the program back. A caller that
+// evaluates many functions of one program (pure-call folding) moves the
+// program through every evaluation instead of copying it per call. The value
+// is None when the evaluation failed, stopped, printed, or left a resource
+// that did not retire cleanly.
+fn jet_eval_pure_function(program: ^MIRProgram, function_id: MIRFunctionID, config: ^JetEvalConfig) -> JetEvalProgramData {
+    span := jet_eval_empty_span()
+    machine := jet_eval_machine(^program, ^config)
+    data := TComptimeValue?{None}
+    if jet_eval_find_function(machine, function_id) == .Val(function) {
+        if function.target_applicability.interpreter {
+            if jet_eval_invoke(&machine, function_id, [JetEvalRuntimeValue]{}, [JetEvalRuntimeValue]{}, function.span) == .Val(value) {
+                if !jet_eval_has_failure(machine) && !machine.soft_stop -> data = jet_eval_data(value, &machine, span)
+                if !jet_eval_drop_value(&machine, value, span) -> data = None
+            }
+        }
+    }
+    if !jet_eval_drain_callbacks(&machine, span) || !jet_eval_retire_machine(&machine, span) -> data = None
+    if jet_eval_has_failure(machine) || machine.soft_stop || machine.stdout != "" || machine.stderr != "" -> data = None
+    jet_eval_program_data(^machine.program, data)
+}
 // Resume a suspended Source-MIR machine supplied by a native deoptimization
 // boundary. No frame or resource is reconstructed here: the returned session
 // retains the exact frame values and callback roots (the machine's only owned
 // references) until jet_eval_retire_result is called by the runtime owner.
-pub fn jet_eval_resume(request: ^JetEvalResumeRequest) -> JetEvalResult {
+fn jet_eval_resume(request: ^JetEvalResumeRequest) -> JetEvalResult {
     target_depth := request.target_depth
 
     identity := jet_eval_registry_machine_identity(request.registry)
@@ -801,7 +969,7 @@ pub fn jet_eval_resume(request: ^JetEvalResumeRequest) -> JetEvalResult {
     machine := JetEvalMachine{
         program: request.program,
         rows: rows,
-        config: request.config,
+        config: ^request.config,
         registry: request.registry,
         identity: identity,
         frames: request.frames,
@@ -906,7 +1074,7 @@ fn jet_eval_validate_deopt(machine: &JetEvalMachine, deopt: JetEvalDeoptRequest,
     true
 }
 
-pub fn jet_eval_resume_deopt(request: ^JetEvalResumeRequest, deopt: JetEvalDeoptRequest) -> JetEvalResult {
+fn jet_eval_resume_deopt(request: ^JetEvalResumeRequest, deopt: JetEvalDeoptRequest) -> JetEvalResult {
     target_depth := request.target_depth
 
     identity := jet_eval_registry_machine_identity(request.registry)
@@ -914,7 +1082,7 @@ pub fn jet_eval_resume_deopt(request: ^JetEvalResumeRequest, deopt: JetEvalDeopt
     machine := JetEvalMachine{
         program: request.program,
         rows: rows,
-        config: request.config,
+        config: ^request.config,
         registry: request.registry,
         identity: identity,
         frames: request.frames,
@@ -954,7 +1122,7 @@ pub fn jet_eval_resume_deopt(request: ^JetEvalResumeRequest, deopt: JetEvalDeopt
 // Start a native deopt at a checked function entry when no Source frame exists.
 // The Foundation boundary supplies recursively decoded, typed host values; this
 // path never reconstructs aggregates, closures, or owned resources from words.
-pub fn jet_eval_start_deopt(program: ^MIRProgram, entry_config: ^JetEvalConfig, function_id: MIRFunctionID, args: [JetEvalHostValue]) -> JetEvalResult {
+fn jet_eval_start_deopt(program: ^MIRProgram, entry_config: ^JetEvalConfig, function_id: MIRFunctionID, args: [JetEvalHostValue]) -> JetEvalResult {
     config := entry_config
     config.runtime_execution = true
     machine := jet_eval_machine(^program, ^config)
@@ -1019,7 +1187,7 @@ pub fn jet_eval_start_deopt(program: ^MIRProgram, entry_config: ^JetEvalConfig, 
 
 // Move the installed entry frame's Write parameters out before result retirement.
 // Other access modes and the result session remain owned by the Source machine.
-pub fn jet_eval_result_entry_writebacks(result: &JetEvalResult, function_id: MIRFunctionID, span: Span) -> JetEvalEntryWritebackBatch? {
+fn jet_eval_result_entry_writebacks(result: &JetEvalResult, function_id: MIRFunctionID, span: Span) -> JetEvalEntryWritebackBatch? {
     if &result.session == {
         .Val(session) -> jet_eval_session_entry_writebacks(&session, function_id, span)
         None -> None
@@ -1150,7 +1318,12 @@ fn jet_eval_invoke_with_borrowed_captures(machine: &JetEvalMachine, function_id:
         return None
     }
     depth := machine.frames.len()
-    &machine.frames.push(jet_eval_frame(function_id, machine.program.functions[function].entry, args, captures, [MIRAccess]{}, [JetEvalSharedEntryLoan]{}, captures_borrowed))
+    child := jet_eval_frame(function_id, machine.program.functions[function].entry, args, captures, [MIRAccess]{}, [JetEvalSharedEntryLoan]{}, captures_borrowed)
+    if depth > 0 {
+        caller := depth - 1
+        child.caller_site = Val(JetEvalCallerSite{frame: caller, block: machine.frames[caller].block, ip: machine.frames[caller].ip - 1})
+    }
+    &machine.frames.push(^child)
     value :: jet_eval_run(&machine, depth) ?? {
         loop machine.frames.len() > depth {
             frame_index := machine.frames.len() - 1
@@ -1165,7 +1338,7 @@ fn jet_eval_invoke_with_borrowed_captures(machine: &JetEvalMachine, function_id:
 fn jet_eval_invoke(machine: &JetEvalMachine, function_id: MIRFunctionID, args: [JetEvalRuntimeValue], captures: [JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
     jet_eval_invoke_with_borrowed_captures(&machine, function_id, args, captures, false, span)
 }
-pub fn jet_eval_invoke_host_callback(machine: &JetEvalMachine, closure: ^JetEvalRuntimeValue, args: ^[JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_invoke_host_callback(machine: &JetEvalMachine, closure: ^JetEvalRuntimeValue, args: ^[JetEvalRuntimeValue], span: Span) -> JetEvalRuntimeValue? {
     if closure == .Closure(function, captures) -> return jet_eval_invoke(&machine, function, args, captures, span)
     jet_eval_compiler_fail(&machine, span, "native host callback value is not a checked Source closure")
     jet_eval_drop_value(&machine, closure, span)
@@ -1231,7 +1404,7 @@ fn jet_eval_callback_root_insert(machine: &JetEvalMachine, value: ^JetEvalRuntim
     Val(lease)
 }
 
-pub fn jet_eval_callback_transfer(machine: &JetEvalMachine, closure: ^JetEvalRuntimeValue, span: Span) -> Int? {
+fn jet_eval_callback_transfer(machine: &JetEvalMachine, closure: ^JetEvalRuntimeValue, span: Span) -> Int? {
     if !jet_eval_callback_validate_root(&machine, closure, false, span) {
         jet_eval_drop_value(&machine, closure, span)
         return None
@@ -1239,7 +1412,7 @@ pub fn jet_eval_callback_transfer(machine: &JetEvalMachine, closure: ^JetEvalRun
     jet_eval_callback_root_insert(&machine, ^closure, false, span)
 }
 
-pub fn jet_eval_callback_retain(machine: &JetEvalMachine, closure: ^JetEvalRuntimeValue, span: Span) -> Int? {
+fn jet_eval_callback_retain(machine: &JetEvalMachine, closure: ^JetEvalRuntimeValue, span: Span) -> Int? {
     if !jet_eval_callback_validate_root(&machine, closure, true, span) {
         jet_eval_drop_value(&machine, closure, span)
         return None
@@ -1255,7 +1428,7 @@ pub fn jet_eval_callback_retain(machine: &JetEvalMachine, closure: ^JetEvalRunti
     jet_eval_callback_root_insert(&machine, ^retained, true, span)
 }
 
-pub fn jet_eval_callback_invoke(machine: &JetEvalMachine, lease: Int, args: ^[JetEvalRuntimeValue], span: Span) -> JetEvalCallbackResult {
+fn jet_eval_callback_invoke(machine: &JetEvalMachine, lease: Int, args: ^[JetEvalRuntimeValue], span: Span) -> JetEvalCallbackResult {
     original_failure := machine.failure
     original_internal := machine.internal_problem
     original_soft_stop := machine.soft_stop
@@ -1356,7 +1529,7 @@ pub fn jet_eval_callback_invoke(machine: &JetEvalMachine, lease: Int, args: ^[Je
     JetEvalCallbackResult{outcome: JetEvalCallbackOutcome.InternalProblem{problem: JetEvalInternalProblem{span: Val(span), message: "native callback produced no terminal result"}}, stdout: callback_stdout, stderr: callback_stderr}
 }
 
-pub fn jet_eval_callback_release(machine: &JetEvalMachine, lease: Int, span: Span) -> Bool {
+fn jet_eval_callback_release(machine: &JetEvalMachine, lease: Int, span: Span) -> Bool {
     root :: &machine.callback_roots.remove(lease) ?? {
         jet_eval_ownership_fail(&machine, span, "native callback lease was released more than once or is unknown")
         return false
@@ -1408,7 +1581,7 @@ fn jet_eval_task_machine(root: ^JetEvalTaskRoot, config: ^JetEvalConfig) -> JetE
 // root is copied: one more alias per captured reference is minted for the
 // child and the parent keeps its own. Nothing else in the parent changes; the
 // registry stays canonical for both.
-pub fn jet_eval_task_root_take(machine: &JetEvalMachine, lease: Int, span: Span) -> JetEvalTaskRoot? {
+fn jet_eval_task_root_take(machine: &JetEvalMachine, lease: Int, span: Span) -> JetEvalTaskRoot? {
     if lease <= 0 {
         jet_eval_compiler_fail(&machine, span, "native task callback lease is invalid")
         return None
@@ -1442,15 +1615,15 @@ pub fn jet_eval_task_root_take(machine: &JetEvalMachine, lease: Int, span: Span)
         callback: callback,
     })
 }
-pub fn jet_eval_task_config(machine: JetEvalMachine) -> JetEvalConfig {
+fn jet_eval_task_config(machine: JetEvalMachine) -> JetEvalConfig {
     jet_eval_runtime_config(machine.config)
 }
 
-pub fn jet_eval_task_root_config(root: &JetEvalTaskRoot) -> JetEvalConfig Never! {
+fn jet_eval_task_root_config(root: &JetEvalTaskRoot) -> JetEvalConfig Never! {
     jet_eval_owned_root_config(root.origin)
 }
 
-pub fn jet_eval_task_root_cleanup_root(root: &JetEvalTaskRoot) -> JetEvalOwnedRoot Never! {
+fn jet_eval_task_root_cleanup_root(root: &JetEvalTaskRoot) -> JetEvalOwnedRoot Never! {
     jet_eval_owned_root_cleanup_clone(&root.origin)
 }
 
@@ -1460,7 +1633,7 @@ fn jet_eval_task_root_sync_origin(root: &JetEvalTaskRoot, machine: JetEvalMachin
     root.origin.config.host_adapter = None
     root.origin.config.output_context = machine.config.output_context
 }
-pub fn jet_eval_task_callback_invoke(task_root: ^JetEvalTaskRoot, args: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalTaskCallbackInvokeResult {
+fn jet_eval_task_callback_invoke(task_root: ^JetEvalTaskRoot, args: ^[JetEvalRuntimeValue], adapter: JetEvalHostAdapter, span: Span) -> JetEvalTaskCallbackInvokeResult {
     root := task_root
     machine := jet_eval_owned_root_machine(root.origin, adapter)
     callback := root.callback
@@ -1505,7 +1678,7 @@ pub fn jet_eval_task_callback_invoke(task_root: ^JetEvalTaskRoot, args: ^[JetEva
 }
 
 
-pub fn jet_eval_task_start(root: ^JetEvalTaskRoot, config: ^JetEvalConfig, args: [JetEvalRuntimeValue], span: Span) -> JetEvalResult {
+fn jet_eval_task_start(root: ^JetEvalTaskRoot, config: ^JetEvalConfig, args: [JetEvalRuntimeValue], span: Span) -> JetEvalResult {
     lease := root.callback_lease
     machine := jet_eval_task_machine(^root, ^config)
     callback_root :: machine.callback_roots.get(lease) ?? {
@@ -1577,7 +1750,7 @@ fn jet_eval_task_cleanup_result(machine: JetEvalMachine, ok: Bool, span: Span) -
     JetEvalCallbackResult{outcome: JetEvalCallbackOutcome.Value{value: JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}}, stdout: machine.stdout, stderr: machine.stderr}
 }
 
-pub fn jet_eval_task_root_release(task_root: ^JetEvalTaskRoot, adapter: JetEvalHostAdapter, span: Span) -> JetEvalCallbackResult {
+fn jet_eval_task_root_release(task_root: ^JetEvalTaskRoot, adapter: JetEvalHostAdapter, span: Span) -> JetEvalCallbackResult {
     root := task_root
     machine := jet_eval_owned_root_machine(root.origin, adapter)
     if root.callback.value == JetEvalRuntimeValue.Moved {
@@ -1602,9 +1775,16 @@ pub fn jet_eval_task_root_release(task_root: ^JetEvalTaskRoot, adapter: JetEvalH
 }
 
 fn jet_eval_run(machine: &JetEvalMachine, target_depth: Int) -> JetEvalRuntimeValue? {
+    jet_eval_run_until(&machine, target_depth, None)
+}
+
+fn jet_eval_run_until(machine: &JetEvalMachine, target_depth: Int, boundary: JetEvalRunBoundary?) -> JetEvalRuntimeValue? {
     loop machine.frames.len() > target_depth && machine.failure == None && machine.internal_problem == None && !machine.soft_stop {
+        if boundary == .Val(stop) {
+            if machine.frames.len() == target_depth + 1 && machine.frames[target_depth].function == stop.function && machine.frames[target_depth].block == stop.block && machine.frames[target_depth].ip == 0 -> return None
+        }
         if !jet_eval_poll_callbacks(&machine, jet_eval_empty_span()) -> break
-        if !machine.config.runtime_execution && machine.steps >= machine.config.fuel {
+        if (!machine.config.runtime_execution || machine.bound_runtime_fuel || boundary != None) && machine.steps >= machine.config.fuel {
             jet_eval_fuel_fail(&machine, jet_eval_empty_span())
             break
         }
@@ -1755,6 +1935,13 @@ fn jet_eval_capture(machine: &JetEvalMachine, frame_index: Int, slot: Int, span:
         jet_eval_compiler_fail(&machine, span, "MIR capture metadata is unavailable")
         return None
     }
+    if machine.program.functions[function].capture_params[slot].place_only {
+        // This is the existing place address, not the cell's uninitialized value.
+        anchor :: machine.frames[frame_index].captures[slot].copy()
+        if anchor == .Address(_, _, _) -> return jet_eval_borrow_value(anchor, &machine, span)
+        jet_eval_compiler_fail(&machine, span, "place-only MIR capture must retain an actual place address")
+        return None
+    }
     access := machine.program.functions[function].capture_params[slot].access
     if machine.frames[frame_index].captures_borrowed {
         if access == MIRAccess.Move {
@@ -1852,7 +2039,7 @@ fn jet_eval_checked_nominal_name(machine: JetEvalMachine, id: MIRTypeID, raw: St
     loop index in 0..<machine.program.types.len() {
         if machine.program.types[index].key == raw || machine.program.types[index].name == raw -> return machine.program.types[index].name
     }
-    ~raw
+    raw.copy()
 }
 fn jet_eval_trait_box_target(machine: &JetEvalMachine, target: MIRTypeID, result_ty: MIRType?, span: Span) -> Bool Never! {
     instances :: machine.rows.type_instances.get(target.value) ?? [Int]{}
@@ -1972,7 +2159,7 @@ fn jet_eval_constant_instruction(machine: &JetEvalMachine, constant: MIRConstant
 
 fn jet_eval_option_element(ty: MIRType) -> MIRType Never! {
     if ty.kind == .Option(inner) -> return inner
-    ~ty
+    ty.copy()
 }
 
 fn jet_eval_binary_route_args(machine: &JetEvalMachine, call: MIRPreludeCallID, left: JetEvalRuntimeValue, right: JetEvalRuntimeValue, location: MIRPanicLoc?, span: Span) -> [JetEvalRuntimeValue]? {
@@ -2315,7 +2502,7 @@ fn jet_eval_call(machine: &JetEvalMachine, frame_index: Int, callee: MIRCallee, 
                 if native_binding != None {
                     return jet_eval_native_call(&machine, native_binding ?? return None, values, prepared.move_permissions, result_ty, span)
                 }
-                if jet_eval_has_failure(&machine) {
+                if jet_eval_has_failure(machine) {
                     jet_eval_drop_call_values(&machine, values, prepared.move_permissions, span)
                     return None
                 }
@@ -2533,10 +2720,10 @@ fn jet_eval_stream_collect(machine: &JetEvalMachine, stream: JetEvalRuntimeValue
 
 // A checked `Range` carrier read as its bounds.
 // Rust: crates/jet-codegen/src/Codegen/MIREval.rs::mir_range_parts
-pub struct JetEvalRangeParts {
-    pub start: Int
-    pub end: Int
-    pub exclusive: Bool
+struct JetEvalRangeParts {
+    start: Int
+    end: Int
+    exclusive: Bool
 }
 
 fn jet_eval_range_parts(machine: &JetEvalMachine, range: TComptimeValue, span: Span) -> JetEvalRangeParts? {
@@ -2745,6 +2932,7 @@ fn jet_eval_initialize_range(machine: &JetEvalMachine, frame_index: Int, start_i
 fn jet_eval_iterator_key_value(key: TComptimeKey) -> TComptimeValue Never! {
     if key == {
         .Int(value) -> return TComptimeValue.Int{value: value}
+        .BigInt(decimal) -> return TComptimeValue.BigInt{decimal: decimal}
         .String(value) -> return TComptimeValue.String{value: value}
         .Bool(value) -> return TComptimeValue.Bool{value: value}
         .Char(value) -> return TComptimeValue.Char{value: value}
@@ -2800,6 +2988,7 @@ fn jet_eval_iterator_host_value(value: JetEvalRuntimeValue, machine: &JetEvalMac
         }
         return jet_eval_read_place(&machine, frame, place, span)
     }
+    if value == .Window(_, _) -> return jet_eval_read_window(&machine, value, span)
     if value == .SharedCell(cell, access) {
         if access == MIRAccess.Move {
             jet_eval_ownership_fail(&machine, span, "MIR iterator source uses a move-only shared capture cell")
@@ -3020,7 +3209,7 @@ fn jet_eval_closure_captures(machine: &JetEvalMachine, frame_index: Int, functio
     output := [JetEvalRuntimeValue]{}
     index := 0
     loop index < operands.len() {
-        parameter :: ~machine.program.functions[target].capture_params[index]
+        parameter :: machine.program.functions[target].capture_params[index].copy()
         operand := operands[index]
         if operand == {
             .Value(value) -> {
@@ -3208,9 +3397,8 @@ fn jet_eval_host_shape_node(machine: &JetEvalMachine, ty: MIRType, nodes: &[JetE
     node
 }
 
-// The native host entry has no machine, so it indexes the program per query.
-pub fn jet_eval_host_type_shape_from_program(program: &MIRProgram, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
-    rows :: jet_eval_program_rows(program)
+// The native host supplies one shape-only index for all its ABI queries.
+fn jet_eval_host_type_shape_from_program(program: &MIRProgram, rows: &JetEvalProgramRows, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
     jet_eval_host_type_shape_from_rows(program, rows, checked_type)
 }
 
@@ -3274,7 +3462,7 @@ fn jet_eval_host_data_matches_type(machine: &JetEvalMachine, data: TComptimeValu
                 if data == .Bytes(_) -> return true
             }
             definition :: machine.rows.types.get(name.id.value) ?? return true
-            owner :: ~machine.program.types[definition]
+            owner :: machine.program.types[definition].copy()
             if owner.kind == {
                 .Struct(fields, _) -> {
                     if data == {
@@ -3460,7 +3648,7 @@ fn jet_eval_host_value_preflight(machine: &JetEvalMachine, row: MIRPreludeCall?,
     true
 }
 
-pub fn jet_eval_host_value_adopt(machine: &JetEvalMachine, row: MIRPreludeCall?, result_ty: MIRType?, value: JetEvalHostValue, allow_cursor: Bool, span: Span) -> JetEvalRuntimeValue? {
+fn jet_eval_host_value_adopt(machine: &JetEvalMachine, row: MIRPreludeCall?, result_ty: MIRType?, value: JetEvalHostValue, allow_cursor: Bool, span: Span) -> JetEvalRuntimeValue? {
     jet_eval_host_value_adopt_mode(&machine, row, result_ty, value, allow_cursor, false, span)
 }
 fn jet_eval_host_value_adopt_cleanup(machine: &JetEvalMachine, value: JetEvalHostValue, span: Span) -> JetEvalRuntimeValue? {
@@ -4324,10 +4512,9 @@ fn jet_eval_callback_closure_reusable(machine: JetEvalMachine, closure: JetEvalR
 
 // Walk the borrowed host tree to its leaf before checking it. Returning each
 // intermediate subtree would copy every remaining capture and cleanup program.
-// Only pre-adoption constructs an independently mutable carrier at the leaf.
 enum JetEvalHostTransferRead {
     Closure(function: MIRFunctionID, capture_count: Int)
-    Shared(index: Int, owner_alias_token: Int, capability: JetEvalSharedHostRootCapability, pre_adopted: Bool)
+    Shared(index: Int, owner_alias_token: Int, capability: JetEvalSharedHostRootCapability)
 }
 fn jet_eval_result_host_value_transfer_read(machine: &JetEvalMachine, value: JetEvalHostValue, path: [JetEvalHostProjection], position: Int, read: JetEvalHostTransferRead, span: Span) -> JetEvalHostValue? {
     if position >= path.len() {
@@ -4343,8 +4530,7 @@ fn jet_eval_result_host_value_transfer_read(machine: &JetEvalMachine, value: Jet
                 jet_eval_ownership_fail(&machine, span, "prepared physical closure path no longer selects its checked closure")
                 return None
             }
-            .Shared(index, token, capability, pre_adopted) -> {
-                if pre_adopted -> return jet_eval_result_host_shared_transfer_pre_adopted_leaf(&machine, value, index, token, span)
+            .Shared(index, token, capability) -> {
                 if !jet_eval_result_host_shared_transfer_validate_leaf(&machine, value, index, token, capability, span) -> return None
                 return Val(JetEvalHostValue.Data{value: TComptimeValue.Unit})
             }
@@ -4381,115 +4567,61 @@ fn jet_eval_result_host_value_transfer_read(machine: &JetEvalMachine, value: Jet
     None
 }
 
-fn jet_eval_result_host_value_transfer_replace(machine: &JetEvalMachine, value: JetEvalHostValue, path: [JetEvalHostProjection], position: Int, token: Int, index: Int, replacement: ^JetEvalHostValue, span: Span) -> JetEvalHostValue? {
+// Validation walks a read view before the alias commit. Adoption then edits
+// the same host tree: no aggregate, finalizer, or owned root is duplicated.
+fn jet_eval_result_host_value_transfer_replace(machine: &JetEvalMachine, value: &JetEvalHostValue, path: [JetEvalHostProjection], position: Int, token: Int, index: Int, span: Span) -> Bool {
     if position >= path.len() {
-        if value == .SharedCarrier(carrier) {
-            if carrier.kind == JetEvalSharedHostKind.Shared && carrier.index == (Val(index)) && carrier.owner_alias_token == (Val(token)) {
-                if replacement == .SharedCarrier(committed) {
-                    if committed.kind == JetEvalSharedHostKind.Shared && committed.index == (Val(index)) && committed.owner_alias_token == (Val(token)) && committed.owner_alias_token_pre_adopted -> return Val(JetEvalHostValue.SharedCarrier{carrier: ^committed})
-                }
+        if &value == .SharedCarrier(carrier) {
+            if carrier.kind == JetEvalSharedHostKind.Shared && carrier.index == (Val(index)) && carrier.owner_alias_token == (Val(token)) && !carrier.owner_alias_token_pre_adopted && carrier.owns_root_capability {
+                carrier.owner_alias_token_pre_adopted = true
+                return true
             }
         }
         jet_eval_ownership_fail(&machine, span, "prepared host Shared transfer no longer matches its staged owner alias")
-        return None
+        return false
     }
-    projection := path[position]
-    if value == {
-        .Present(inner) -> if projection == {
-            .Present -> {
-                updated :: jet_eval_result_host_value_transfer_replace(&machine, inner, path, position + 1, token, index, ^replacement, span) ?? return None
-                return Val(JetEvalHostValue.Present{value: updated})
-            }
-            else -> {}
+    projection :: path[position]
+    if &value == .Present(inner) {
+        if projection == .Present -> return jet_eval_result_host_value_transfer_replace(&machine, &inner, path, position + 1, token, index, span)
+    }
+    if &value == .Failed(inner) {
+        if projection == .Failed -> return jet_eval_result_host_value_transfer_replace(&machine, &inner, path, position + 1, token, index, span)
+    }
+    if &value == .List(values) {
+        if projection == .List(child) {
+            if child >= 0 && child < values.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &values[child], path, position + 1, token, index, span)
         }
-        .Failed(inner) -> if projection == {
-            .Failed -> {
-                updated :: jet_eval_result_host_value_transfer_replace(&machine, inner, path, position + 1, token, index, ^replacement, span) ?? return None
-                return Val(JetEvalHostValue.Failed{value: updated})
-            }
-            else -> {}
+    }
+    if &value == .Map(entries) {
+        if projection == .MapKey(child) {
+            if child >= 0 && child < entries.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &entries[child].key, path, position + 1, token, index, span)
         }
-        .List(values) -> if projection == {
-            .List(child) -> {
-                if child >= 0 && child < values.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, values[child], path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_values := values
-                    updated_values[child] = replaced
-                    return Val(JetEvalHostValue.List{values: updated_values})
-                }
-            }
-            else -> {}
+        if projection == .MapValue(child) {
+            if child >= 0 && child < entries.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &entries[child].value, path, position + 1, token, index, span)
         }
-        .Map(entries) -> if projection == {
-            .MapKey(child) -> {
-                if child >= 0 && child < entries.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, entries[child].key, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_entries := entries
-                    updated_entries[child].key = replaced
-                    return Val(JetEvalHostValue.Map{entries: updated_entries})
-                }
+    }
+    if &value == .Struct(_, fields) {
+        if projection == .StructField(field_name) {
+            loop child in 0..<fields.len() {
+                if fields[child].name == field_name -> return jet_eval_result_host_value_transfer_replace(&machine, &fields[child].value, path, position + 1, token, index, span)
             }
-            .MapValue(child) -> {
-                if child >= 0 && child < entries.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, entries[child].value, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_entries := entries
-                    updated_entries[child].value = replaced
-                    return Val(JetEvalHostValue.Map{entries: updated_entries})
-                }
-            }
-            else -> {}
         }
-        .Struct(name, fields) -> if projection == {
-            .StructField(field_name) -> {
-                found := Int?{None}
-                loop child in 0..<fields.len() {
-                    if fields[child].name == field_name {
-                        found = Val(child)
-                        break
-                    }
-                }
-                if found == .Val(child) {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, fields[child].value, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_fields := fields
-                    updated_fields[child].value = replaced
-                    return Val(JetEvalHostValue.Struct{type_name: name, fields: updated_fields})
-                }
-            }
-            else -> {}
+    }
+    if &value == .Enum(_, _, args) {
+        if projection == .EnumArg(child) {
+            if child >= 0 && child < args.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &args[child].value, path, position + 1, token, index, span)
         }
-        .Enum(name, variant, args) -> if projection == {
-            .EnumArg(child) -> {
-                if child >= 0 && child < args.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, args[child].value, path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_args := args
-                    updated_args[child].value = replaced
-                    return Val(JetEvalHostValue.Enum{type_name: name, variant: variant, args: updated_args})
-                }
-            }
-            else -> {}
+    }
+    if &value == .Closure(_, captures) {
+        if projection == .Capture(child) {
+            if child >= 0 && child < captures.len() -> return jet_eval_result_host_value_transfer_replace(&machine, &captures[child], path, position + 1, token, index, span)
         }
-        .Closure(function, captures) -> if projection == {
-            .Capture(child) -> {
-                if child >= 0 && child < captures.len() {
-                    replaced :: jet_eval_result_host_value_transfer_replace(&machine, captures[child], path, position + 1, token, index, ^replacement, span) ?? return None
-                    updated_captures := captures
-                    updated_captures[child] = replaced
-                    return Val(JetEvalHostValue.Closure{function: function, captures: updated_captures})
-                }
-            }
-            else -> {}
-        }
-        .Handle(handle, raw, owner, payload) -> if projection == {
-            .HandlePayload -> {
-                updated :: jet_eval_result_host_value_transfer_replace(&machine, payload, path, position + 1, token, index, ^replacement, span) ?? return None
-                return Val(JetEvalHostValue.Handle{handle: handle, raw: raw, owner: owner, payload: updated})
-            }
-            else -> {}
-        }
-        else -> {}
+    }
+    if &value == .Handle(_, _, _, payload) {
+        if projection == .HandlePayload -> return jet_eval_result_host_value_transfer_replace(&machine, &payload, path, position + 1, token, index, span)
     }
     jet_eval_ownership_fail(&machine, span, "prepared host Shared transfer path changed before commit")
-    None
+    false
 }
 
 fn jet_eval_result_host_runtime_transfer_replace(machine: &JetEvalMachine, value: JetEvalRuntimeValue, path: [JetEvalHostProjection], position: Int, expected: JetEvalRuntimeValue, span: Span) -> JetEvalRuntimeValue? {
@@ -4614,7 +4746,7 @@ fn jet_eval_result_host_shared_transfer_validate(machine: &JetEvalMachine, sourc
         jet_eval_ownership_fail(&machine, span, "prepared Shared transfer no longer selects its Source root")
         return false
     }
-    read :: JetEvalHostTransferRead.Shared{index: transfer.index, owner_alias_token: transfer.owner_alias_token, capability: jet_eval_result_host_shared_transfer_capability(transfer), pre_adopted: false}
+    read :: JetEvalHostTransferRead.Shared{index: transfer.index, owner_alias_token: transfer.owner_alias_token, capability: jet_eval_result_host_shared_transfer_capability(transfer)}
     checked :: jet_eval_result_host_value_transfer_read(&machine, host_value, transfer.path, 0, read, span) ?? return false
     true
 }
@@ -4664,21 +4796,6 @@ fn jet_eval_result_host_shared_transfer_validate_leaf(machine: &JetEvalMachine, 
     false
 }
 
-fn jet_eval_result_host_shared_transfer_pre_adopted_value(machine: &JetEvalMachine, host_value: JetEvalHostValue, transfer: JetEvalResultHostSharedTransfer, span: Span) -> JetEvalHostValue? {
-    read :: JetEvalHostTransferRead.Shared{index: transfer.index, owner_alias_token: transfer.owner_alias_token, capability: jet_eval_result_host_shared_transfer_capability(transfer), pre_adopted: true}
-    jet_eval_result_host_value_transfer_read(&machine, host_value, transfer.path, 0, read, span)
-}
-fn jet_eval_result_host_shared_transfer_pre_adopted_leaf(machine: &JetEvalMachine, host_value: JetEvalHostValue, index: Int, token: Int, span: Span) -> JetEvalHostValue? {
-    if host_value == .SharedCarrier(carrier) {
-        if carrier.kind == JetEvalSharedHostKind.Shared && carrier.index == (Val(index)) && carrier.owner_alias_token == (Val(token)) && !carrier.owner_alias_token_pre_adopted && carrier.owns_root_capability {
-            adopted := carrier
-            adopted.owner_alias_token_pre_adopted = true
-            return Val(JetEvalHostValue.SharedCarrier{carrier: adopted})
-        }
-    }
-    jet_eval_ownership_fail(&machine, span, "prepared Shared transfer cannot mark its exact host owner alias as pre-adopted")
-    None
-}
 
 fn jet_eval_result_host_transfer_shared_stage_dispose(machine: &JetEvalMachine, transfers: &[JetEvalResultHostSharedTransfer], span: Span) -> Bool {
     ok := true
@@ -4707,7 +4824,7 @@ fn jet_eval_result_host_transfer_paths_equal(left: [JetEvalHostProjection], righ
     true
 }
 
-pub fn jet_eval_result_host_transfer_handle_info(receipt: &JetEvalResultHostTransferReceipt, path: [JetEvalHostProjection], span: Span) -> JetEvalHostTransfer? {
+fn jet_eval_result_host_transfer_handle_info(receipt: &JetEvalResultHostTransferReceipt, path: [JetEvalHostProjection], span: Span) -> JetEvalHostTransfer? {
     if !receipt.committed || !receipt.foreign_committed -> return None
     loop transfer in receipt.transfers {
         if transfer.argument == 0 && jet_eval_result_host_transfer_paths_equal(transfer.path, path) -> return Val(transfer)
@@ -4715,7 +4832,7 @@ pub fn jet_eval_result_host_transfer_handle_info(receipt: &JetEvalResultHostTran
     None
 }
 
-pub fn jet_eval_result_host_transfer_shared_info(receipt: &JetEvalResultHostTransferReceipt, path: [JetEvalHostProjection], span: Span) -> JetEvalResultHostSharedTransfer? {
+fn jet_eval_result_host_transfer_shared_info(receipt: &JetEvalResultHostTransferReceipt, path: [JetEvalHostProjection], span: Span) -> JetEvalResultHostSharedTransfer? {
     if !receipt.committed -> return None
     loop transfer in receipt.shared_transfers {
         if transfer.transferred && jet_eval_result_host_transfer_paths_equal(transfer.path, path) -> return Val(transfer)
@@ -4723,7 +4840,7 @@ pub fn jet_eval_result_host_transfer_shared_info(receipt: &JetEvalResultHostTran
     None
 }
 
-pub fn jet_eval_result_host_transfer_callback_take(receipt: &JetEvalResultHostTransferReceipt, path: [JetEvalHostProjection], span: Span) -> JetEvalTaskRoot? {
+fn jet_eval_result_host_transfer_callback_take(receipt: &JetEvalResultHostTransferReceipt, path: [JetEvalHostProjection], span: Span) -> JetEvalTaskRoot? {
     if !receipt.committed || receipt.active -> return None
     loop index in 0..<receipt.closure_transfers.len() {
         transfer :: receipt.closure_transfers[index]
@@ -4734,7 +4851,7 @@ pub fn jet_eval_result_host_transfer_callback_take(receipt: &JetEvalResultHostTr
     None
 }
 
-pub fn jet_eval_result_host_transfer_prepare(result: &JetEvalResult, host_value: &JetEvalHostValue, checked_type: MIRType, span: Span) -> JetEvalResultHostTransferReceipt? {
+fn jet_eval_result_host_transfer_prepare(result: &JetEvalResult, host_value: &JetEvalHostValue, checked_type: MIRType, span: Span) -> JetEvalResultHostTransferReceipt? {
     if &result.session == {
         None -> return None
         .Val(session) -> {
@@ -4787,7 +4904,7 @@ pub fn jet_eval_result_host_transfer_prepare(result: &JetEvalResult, host_value:
     })
 }
 
-pub fn jet_eval_result_host_transfer_commit(result: &JetEvalResult, host_value: &JetEvalHostValue, receipt: &JetEvalResultHostTransferReceipt, span: Span) -> JetEvalResultHostTransferCommitDisposition {
+fn jet_eval_result_host_transfer_commit(result: &JetEvalResult, host_value: &JetEvalHostValue, receipt: &JetEvalResultHostTransferReceipt, span: Span) -> JetEvalResultHostTransferCommitDisposition {
     disposition := JetEvalResultHostTransferCommitDisposition.Rejected
     if &result.session == {
         None -> return JetEvalResultHostTransferCommitDisposition.Rejected
@@ -4830,20 +4947,6 @@ fn jet_eval_result_host_transfer_commit_session(session: &JetEvalRuntimeSession,
             }
             return JetEvalResultHostTransferCommitDisposition.Rejected
         }
-        prepared_host :: jet_eval_result_host_shared_transfer_pre_adopted_value(&session.machine, host_value, transfer, span) ?? {
-            if consumed {
-                receipt.consumed_failure = true
-                return JetEvalResultHostTransferCommitDisposition.ConsumedFailure
-            }
-            return JetEvalResultHostTransferCommitDisposition.Rejected
-        }
-        replaced_host :: jet_eval_result_host_value_transfer_replace(&session.machine, host_value, transfer.path, 0, transfer.owner_alias_token, transfer.index, ^prepared_host, span) ?? {
-            if consumed {
-                receipt.consumed_failure = true
-                return JetEvalResultHostTransferCommitDisposition.ConsumedFailure
-            }
-            return JetEvalResultHostTransferCommitDisposition.Rejected
-        }
         capability := jet_eval_result_host_shared_transfer_capability(transfer)
         committed :: jet_eval_shared_runtime_owner_alias_transfer_commit(&session.machine, transfer.index, transfer.owner_alias_token, capability, span) ?? {
             if consumed {
@@ -4856,7 +4959,10 @@ fn jet_eval_result_host_transfer_commit_session(session: &JetEvalRuntimeSession,
         transfer.transferred = true
         transfer.staged = false
         receipt.shared_transfers[index] = transfer
-        host_value = replaced_host
+        if !jet_eval_result_host_value_transfer_replace(&session.machine, &host_value, transfer.path, 0, transfer.owner_alias_token, transfer.index, span) {
+            receipt.consumed_failure = true
+            return JetEvalResultHostTransferCommitDisposition.ConsumedFailure
+        }
         expected := JetEvalRuntimeValue.Shared{index: transfer.index}
         replaced_source :: jet_eval_result_host_runtime_transfer_replace(&session.machine, source_root, transfer.path, 0, expected, span) ?? {
             receipt.consumed_failure = true
@@ -4945,7 +5051,7 @@ fn jet_eval_result_host_task_root_cleanup_ok(result: JetEvalCallbackResult) -> B
     false
 }
 
-pub fn jet_eval_result_host_transfer_dispose(result: &JetEvalResult, receipt: &JetEvalResultHostTransferReceipt, span: Span) -> Bool {
+fn jet_eval_result_host_transfer_dispose(result: &JetEvalResult, receipt: &JetEvalResultHostTransferReceipt, span: Span) -> Bool {
     cleaned := false
     if &result.session == {
         None -> return false
@@ -5058,6 +5164,15 @@ fn jet_eval_result_host_closure_shape_node(machine: &JetEvalMachine, ty: MIRType
     return Val(closure_node)
 }
 
+// Detach only the struct payload that recursive shape growth must own. The
+// source-node loan ends at this call boundary, before `nodes` can grow.
+fn jet_eval_result_host_struct_shape_owned(node: JetEvalHostTypeNode) -> (type_id: MIRTypeID, type_name: String, args: [Int], fields: [JetEvalHostTypeFieldShape])? {
+    if node == .Struct(type_id, type_name, args, fields) {
+        return Val((type_id: type_id.copy(), type_name: type_name.copy(), args: args.copy(), fields: fields.copy()))
+    }
+    None
+}
+
 fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEvalRuntimeValue, ty: MIRType, nodes: &[JetEvalHostTypeNode], seen: &[String:Int], span: Span) -> Int? {
     if value == .Closure(function, captures) -> return jet_eval_result_host_closure_shape_node(&machine, ty, function, captures, &nodes, &seen, span)
     if value == .Result(ok, nested) {
@@ -5089,18 +5204,23 @@ fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEval
         if aggregate == {
             .Struct(_, runtime_fields) -> {
                 base :: jet_eval_host_shape_node(&machine, ty, &nodes, &seen, span) ?? return None
-                if nodes[base] == .Struct(type_id, type_name, type_args, shape_fields) {
-                    if runtime_fields.len() != shape_fields.len() {
+                struct_shape := jet_eval_result_host_struct_shape_owned(nodes[base])
+                if struct_shape != None {
+                    snapshot := ^struct_shape ?? panic("validated struct shape disappeared")
+                    if runtime_fields.len() != snapshot.fields.len() {
                         jet_eval_compiler_fail(&machine, span, "Source result struct fields disagree with its checked host type shape")
                         return None
                     }
-                    updated_fields := shape_fields
+                    updated_fields := ^snapshot.fields
+                    owned_id := ^snapshot.type_id
+                    owned_name := ^snapshot.type_name
+                    owned_args := ^snapshot.args
                     loop runtime_field in runtime_fields {
                         field_ty :: jet_eval_host_struct_field_type(&machine, Val(ty), runtime_field.name, span) ?? return None
                         child :: jet_eval_result_host_type_shape_node(&machine, runtime_field.value, field_ty, &nodes, &seen, span) ?? return None
                         found := false
-                        loop field_index in 0..<shape_fields.len() {
-                            if shape_fields[field_index].name == runtime_field.name {
+                        loop field_index in 0..<updated_fields.len() {
+                            if updated_fields[field_index].name == runtime_field.name {
                                 updated_fields[field_index].node = child
                                 found = true
                             }
@@ -5111,7 +5231,7 @@ fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEval
                         }
                     }
                     node := nodes.len()
-                    &nodes.push(JetEvalHostTypeNode.Struct{type_id: type_id, type_name: type_name, args: type_args, fields: updated_fields})
+                    &nodes.push(JetEvalHostTypeNode.Struct{type_id: owned_id, type_name: owned_name, args: owned_args, fields: updated_fields})
                     return Val(node)
                 }
                 if nodes[base] == .Tuple(shape_fields) {
@@ -5119,13 +5239,13 @@ fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEval
                         jet_eval_compiler_fail(&machine, span, "Source result tuple fields disagree with its checked host type shape")
                         return None
                     }
-                    updated_fields := shape_fields
+                    updated_fields := shape_fields.copy()
                     loop runtime_field in runtime_fields {
                         field_ty :: jet_eval_host_struct_field_type(&machine, Val(ty), runtime_field.name, span) ?? return None
                         child :: jet_eval_result_host_type_shape_node(&machine, runtime_field.value, field_ty, &nodes, &seen, span) ?? return None
                         found := false
-                        loop field_index in 0..<shape_fields.len() {
-                            if shape_fields[field_index].name == runtime_field.name {
+                        loop field_index in 0..<updated_fields.len() {
+                            if updated_fields[field_index].name == runtime_field.name {
                                 updated_fields[field_index].node = child
                                 found = true
                             }
@@ -5151,14 +5271,17 @@ fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEval
                         jet_eval_compiler_fail(&machine, span, "Source result enum payload disagrees with its checked host type shape")
                         return None
                     }
-                    updated_variants := variants
+                    updated_variants := variants.copy()
+                    owned_id := type_id.copy()
+                    owned_name := type_name.copy()
+                    owned_args := type_args.copy()
                     loop arg_index in 0..<runtime_args.len() {
                         arg := runtime_args[arg_index]
                         arg_ty :: jet_eval_host_enum_arg_type(&machine, Val(ty), runtime_variant, arg.name, arg_index, span) ?? return None
                         child :: jet_eval_result_host_type_shape_node(&machine, arg.value, arg_ty, &nodes, &seen, span) ?? return None
                         shape_arg_index := -1
-                        loop candidate_index in 0..<variants[variant_index].args.len() {
-                            if variants[variant_index].args[candidate_index].name == arg.name -> shape_arg_index = candidate_index
+                        loop candidate_index in 0..<updated_variants[variant_index].args.len() {
+                            if updated_variants[variant_index].args[candidate_index].name == arg.name -> shape_arg_index = candidate_index
                         }
                         if shape_arg_index < 0 {
                             jet_eval_compiler_fail(&machine, span, "Source result enum argument is absent from its checked host type shape")
@@ -5167,7 +5290,7 @@ fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEval
                         updated_variants[variant_index].args[shape_arg_index].node = child
                     }
                     node := nodes.len()
-                    &nodes.push(JetEvalHostTypeNode.Enum{type_id: type_id, type_name: type_name, args: type_args, variants: updated_variants})
+                    &nodes.push(JetEvalHostTypeNode.Enum{type_id: owned_id, type_name: owned_name, args: owned_args, variants: updated_variants})
                     return Val(node)
                 }
             }
@@ -5177,7 +5300,7 @@ fn jet_eval_result_host_type_shape_node(machine: &JetEvalMachine, value: JetEval
     jet_eval_host_shape_node(&machine, ty, &nodes, &seen, span)
 }
 
-pub fn jet_eval_result_host_type_shape(result: &JetEvalResult, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
+fn jet_eval_result_host_type_shape(result: &JetEvalResult, checked_type: MIRType, span: Span) -> JetEvalHostTypeShape? {
     nodes := [JetEvalHostTypeNode]{}
     seen := [String:Int]{}
     root := Int?{None}
@@ -5354,7 +5477,7 @@ fn jet_eval_host_success_type(ty: MIRType) -> MIRType Never! {
         .Result(ok, _) -> return jet_eval_host_success_type(ok)
         else -> {}
     }
-    ~ty
+    ty.copy()
 }
 fn jet_eval_host_retype(source: MIRType, kind: MIRTypeKind) -> MIRType Never! {
     output := mir_type_from_kind(kind)
@@ -5397,7 +5520,7 @@ fn jet_eval_host_substitute_type(ty: MIRType, params: [MIRGenericParam], args: [
             return jet_eval_host_retype(ty, MIRTypeKind.Union{members: output})
         }
         .Quantity(inner, dimension) -> return jet_eval_host_retype(ty, MIRTypeKind.Quantity{base: jet_eval_host_substitute_type(inner, params, args), dimension: dimension})
-        else -> return ~ty
+        else -> return ty.copy()
     }
 }
 
@@ -5796,7 +5919,7 @@ fn jet_eval_host_handle_release(machine: &JetEvalMachine, lifecycle: MIRHandleLi
     jet_eval_host_unit_reply(&machine, reply, "MIR handle close returned a committed source transfer", "MIR Core handle close returned a non-Unit value", span)
 }
 
-pub fn jet_eval_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> JetEvalHostValue? {
+fn jet_eval_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> JetEvalHostValue? {
     if value == {
         .Moved -> {
             jet_eval_ownership_fail(&machine, span, "native host argument contains a moved Source value")
@@ -5876,7 +5999,7 @@ pub fn jet_eval_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeV
         }
         .HostCursor(inner, _, _, _) -> return jet_eval_host_projection(&machine, inner, span)
         .Shared(_) | .SharedWeak(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_host_projection(&machine, value, span)
-        .Address(_, _, _) | .SharedCell(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
+        .Address(_, _, _) | .Window(_, _) | .SharedCell(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
             jet_eval_compiler_fail(&machine, span, "native host argument requires a materialized Source value")
             return None
         }
@@ -5891,7 +6014,7 @@ pub fn jet_eval_host_projection(machine: &JetEvalMachine, value: JetEvalRuntimeV
 // Project a completed result while its owning evaluator session still holds
 // the Source aliases. This is a read-only boundary view; retirement remains
 // the caller's explicit ownership transition.
-pub fn jet_eval_result_host_projection(result: &JetEvalResult, span: Span) -> JetEvalHostValue? {
+fn jet_eval_result_host_projection(result: &JetEvalResult, span: Span) -> JetEvalHostValue? {
     projected := JetEvalHostValue?{None}
     if &result.session == {
         None -> return None
@@ -6013,7 +6136,7 @@ fn jet_eval_task_host_projection(machine: &JetEvalMachine, value: JetEvalRuntime
         }
         .Shared(_) | .SharedWeak(_) | .SharedGuard(_) | .SharedSnapshot(_) | .Condition(_) -> return jet_eval_shared_runtime_host_projection(&machine, value, span)
         .HostCursor(inner, _, _, _) -> return jet_eval_task_host_projection(&machine, inner, span)
-        .Address(_, _, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
+        .Address(_, _, _) | .Window(_, _) | .RangeCursor(_, _, _, _, _) | .ListCursor(_, _, _) | .Stream(_, _, _, _) -> {
             jet_eval_ownership_fail(&machine, span, "native scheduler argument has an invalid Source carrier")
             return None
         }
@@ -6053,6 +6176,12 @@ fn jet_eval_native_host_arguments(machine: &JetEvalMachine, args: [JetEvalRuntim
                 jet_eval_drop_value(&machine, materialized, span)
                 projected ?? return None
             }
+            .Window(_, _) -> {
+                materialized :: jet_eval_read_window(&machine, value, span) ?? return None
+                projected := jet_eval_host_projection(&machine, materialized, span)
+                jet_eval_drop_value(&machine, materialized, span)
+                projected ?? return None
+            }
             else -> jet_eval_task_host_projection(&machine, value, span) ?? return None
         }
         moved := index < move_permissions.len() && move_permissions[index]
@@ -6085,7 +6214,7 @@ fn jet_eval_drain_callbacks(machine: &JetEvalMachine, span: Span) -> Bool {
 // the boundary discharges each owned alias exactly once afterwards, whether
 // or not the exchange produced a value.
 fn jet_eval_discharge_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], result: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
-    if jet_eval_drop_values(&machine, args, span) -> return ~result
+    if jet_eval_drop_values(&machine, args, span) -> return result.copy()
     if result == {
         Val(produced) -> jet_eval_drop_value(&machine, produced, span)
         None -> {}
@@ -6093,7 +6222,7 @@ fn jet_eval_discharge_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeVa
     None
 }
 fn jet_eval_discharge_call_boundary(machine: &JetEvalMachine, args: [JetEvalRuntimeValue], move_permissions: [Bool], result: JetEvalRuntimeValue?, span: Span) -> JetEvalRuntimeValue? {
-    if jet_eval_drop_call_values(&machine, args, move_permissions, span) -> return ~result
+    if jet_eval_drop_call_values(&machine, args, move_permissions, span) -> return result.copy()
     if result == {
         Val(produced) -> jet_eval_drop_value(&machine, produced, span)
         None -> {}
@@ -6107,7 +6236,18 @@ fn jet_eval_host_target_exchange(machine: &JetEvalMachine, target: JetEvalHostCa
     result_shape := JetEvalHostTypeShape?{None}
     if result_ty != None -> result_shape = Val(jet_eval_host_type_shape(&machine, result_ty, span) ?? return None)
     host_args :: jet_eval_host_arguments(&machine, args, move_permissions, span) ?? return None
-    reply :: adapter.host_call(&machine, target, static_operand, ^host_args, result_shape, arg_shapes, span) ?? {
+    build_adapter := JetEvalBuildHostAdapter?{None}
+    if target == .Prelude(row)
+        && row.module_name == "core.host"
+        && (row.member.starts_with("BuildContext.") || row.member == "BuildPlan.graph")
+        && machine.config.build_host_adapter == .Val(host) {
+        build_adapter = Val(host.clone_adapter())
+    }
+    reply :: if build_adapter == .Val(owned) -> {
+        owned.build_call(&machine, target, ^host_args, span)
+    } else -> {
+        adapter.host_call(&machine, target, static_operand, ^host_args, result_shape, arg_shapes, span)
+    } ?? {
         jet_eval_unsupported(&machine, span, "MIR ambient route is unavailable to the canonical host adapter")
         return None
     }
@@ -6206,6 +6346,7 @@ fn jet_eval_host_writeback_value(machine: &JetEvalMachine, target: JetEvalRuntim
     current := JetEvalRuntimeValue?{None}
     if target == {
         .Address(frame, place, _) -> current = jet_eval_read_place(&machine, frame, place, span)
+        .Window(_, _) -> current = jet_eval_read_window(&machine, target, span)
         .SharedCell(cell, _) -> current = jet_eval_shared_read(&machine, cell, span)
         else -> {}
     }
@@ -6315,6 +6456,7 @@ fn jet_eval_host_writebacks_adopt_cleanup(machine: &JetEvalMachine, writebacks: 
 fn jet_eval_host_writeback_target_writable(target: JetEvalRuntimeValue) -> Bool Never! {
     if target == {
         .Address(_, _, access) | .SharedCell(_, access) -> return access == MIRAccess.Write
+        .Window(owner, _) -> return jet_eval_host_writeback_target_writable(owner)
         else -> return false
     }
     false
@@ -6389,6 +6531,7 @@ fn jet_eval_host_writebacks_from(machine: &JetEvalMachine, targets: [JetEvalRunt
         target := targets[writebacks[index].argument]
         written := if target == {
             .Address(frame, place, _) -> jet_eval_write_place(&machine, frame, place, replacement, span)
+            .Window(_, _) -> jet_eval_write_window(&machine, target, replacement, span)
             .SharedCell(cell, access) -> jet_eval_shared_write(&machine, cell, access, replacement, span)
             else -> {
                 jet_eval_drop_value(&machine, replacement, span)
@@ -7802,7 +7945,7 @@ fn jet_eval_host_fixed_backing_transfer_validate(machine: &JetEvalMachine, reque
             return false
         }
     }
-    if !jet_eval_host_fixed_backing_outcome_owner_matches(&outcome, transfer.owner_handle, transfer.owner_raw) {
+    if !jet_eval_host_fixed_backing_outcome_owner_matches(outcome, transfer.owner_handle, transfer.owner_raw) {
         jet_eval_compiler_fail(&machine, span, "native Fixed backing lease is not attached to the exact returned allocator owner")
         return false
     }
@@ -7851,7 +7994,7 @@ fn jet_eval_host_fixed_backing_receipts_cleanup(machine: &JetEvalMachine, reques
         attached := false
         loop candidate in transfers {
             if candidate.lease == transfer.lease
-                && jet_eval_host_fixed_backing_outcome_owner_matches(&outcome, candidate.owner_handle, candidate.owner_raw) -> attached = true
+                && jet_eval_host_fixed_backing_outcome_owner_matches(outcome, candidate.owner_handle, candidate.owner_raw) -> attached = true
         }
         if !attached
             && !jet_eval_host_fixed_backing_release(&machine, transfer.backing_handle, transfer.backing_raw, Val(transfer.lease), span) -> ok = false
@@ -8538,8 +8681,8 @@ fn jet_eval_typed_text_interp(machine: &JetEvalMachine, frame_index: Int, call: 
             expected_symbol = "jet_typed_sh_interpolate"
         }
         kind == MIRTypedHeadKind.URL -> {
-            expected_member = "url_literal"
-            expected_symbol = "jet_std::jet_typed_url_literal"
+            jet_eval_compiler_fail(&machine, span, "URL recipes must call core.net.url.literal")
+            return None
         }
         kind == MIRTypedHeadKind.Path -> {
             expected_member = "path_literal"
@@ -8572,15 +8715,18 @@ fn jet_eval_typed_text_interp(machine: &JetEvalMachine, frame_index: Int, call: 
     loop literal in literals -> &literal_values.push(TComptimeValue.String{value: literal})
     hole_values := [TComptimeValue]{}
     loop hole in holes {
-        runtime :: jet_eval_value(&machine, frame_index, hole, span) ?? return None
-        data :: jet_eval_data(runtime, &machine, span) ?? return None
+        runtime :: machine.frames[frame_index].values.get(hole.value) ?? {
+            jet_eval_compiler_fail(&machine, span, "MIR typed interpolation value is unavailable")
+            return None
+        }
         if {
             kind == MIRTypedHeadKind.SQL -> {
+                data :: jet_eval_data(runtime, &machine, span) ?? return None
                 &hole_values.push(data)
             }
             else -> {
                 ty :: jet_eval_value_type(&machine, frame_index, hole, span) ?? return None
-                shown :: jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Display, Val(ty), span) ?? return None
+                shown :: jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Display, Val(ty), span) ?? return None
                 &hole_values.push(TComptimeValue.String{value: shown})
             }
         }
@@ -8682,16 +8828,20 @@ fn jet_eval_float_order(left: Float, right: Float) -> [Int] Never! {
     [Int]{0}
 }
 fn jet_eval_semantic_display(machine: &JetEvalMachine, frame_index: Int, value: MIRValueID, span: Span) -> String? {
-    runtime :: jet_eval_value(&machine, frame_index, value, span) ?? return None
-    data :: jet_eval_data(runtime, &machine, span) ?? return None
+    runtime :: machine.frames[frame_index].values.get(value.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR rendering value is unavailable")
+        return None
+    }
     ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-    jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Display, Val(ty), span)
+    jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Display, Val(ty), span)
 }
 fn jet_eval_semantic_debug(machine: &JetEvalMachine, frame_index: Int, value: MIRValueID, span: Span) -> String? {
-    runtime :: jet_eval_value(&machine, frame_index, value, span) ?? return None
-    data :: jet_eval_data(runtime, &machine, span) ?? return None
+    runtime :: machine.frames[frame_index].values.get(value.value) ?? {
+        jet_eval_compiler_fail(&machine, span, "MIR rendering value is unavailable")
+        return None
+    }
     ty :: jet_eval_value_type(&machine, frame_index, value, span) ?? return None
-    jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Debug, Val(ty), span)
+    jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Debug, Val(ty), span)
 }
 
 fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: MIRPanicContext, span: Span) -> String? {
@@ -8712,8 +8862,7 @@ fn jet_eval_require_locals(machine: &JetEvalMachine, frame_index: Int, context: 
             jet_eval_compiler_fail(&machine, span, "MIR RequireStop context local has no runtime value")
             return None
         }
-        data :: jet_eval_data(runtime, &machine, span) ?? return None
-        debug :: jet_eval_format_string_value_full(&machine, data, MIRStringFormat.Debug, Val(local_definition.ty), span) ?? return None
+        debug :: jet_eval_render_runtime_value(&machine, runtime, MIRStringFormat.Debug, Val(local_definition.ty), span) ?? return None
         &output.push("{local.name} = {debug}")
     }
     output.join(", ")
@@ -8763,55 +8912,19 @@ fn jet_eval_task_group_exchange(machine: &JetEvalMachine, call: MIRPreludeCallID
     expected_symbol := ""
     if kind == {
         .All -> {
-            if {
-                row.member == "all" -> {
-                    expected_member = "all"
-                    expected_symbol = "jet_std::jet_task_all"
-                }
-                row.member == "all_result" -> {
-                    expected_member = "all_result"
-                    expected_symbol = "jet_std::jet_task_all_result"
-                }
-                else -> {
-                    jet_eval_compiler_fail(&machine, span, "MIR task-group all route has a non-canonical member")
-                    return None
-                }
-            }
+            expected_member = "all"
+            expected_symbol = "jet_std::jet_task_all"
         }
         .Race -> {
-            if {
-                row.member == "race" -> {
-                    expected_member = "race"
-                    expected_symbol = "jet_std::jet_task_race"
-                }
-                row.member == "race_result" -> {
-                    expected_member = "race_result"
-                    expected_symbol = "jet_std::jet_task_race_result"
-                }
-                else -> {
-                    jet_eval_compiler_fail(&machine, span, "MIR task-group race route has a non-canonical member")
-                    return None
-                }
-            }
+            expected_member = "race"
+            expected_symbol = "jet_std::jet_task_race"
         }
         .Any -> {
-            if {
-                row.member == "any" -> {
-                    expected_member = "any"
-                    expected_symbol = "jet_std::jet_task_any"
-                }
-                row.member == "any_result" -> {
-                    expected_member = "any_result"
-                    expected_symbol = "jet_std::jet_task_any_result"
-                }
-                else -> {
-                    jet_eval_compiler_fail(&machine, span, "MIR task-group any route has a non-canonical member")
-                    return None
-                }
-            }
+            expected_member = "any"
+            expected_symbol = "jet_std::jet_task_any"
         }
     }
-    if mir_symbol_name(row.symbol) != expected_symbol || tasks.len() != 1 {
+    if row.member != expected_member || mir_symbol_name(row.symbol) != expected_symbol || tasks.len() != 1 {
         jet_eval_compiler_fail(&machine, span, "MIR task-group route has an invalid symbol or operand arity")
         return None
     }
@@ -8925,14 +9038,6 @@ fn jet_eval_channel_select(machine: &JetEvalMachine, frame_index: Int, call: MIR
 
 fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRSemanticOp, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     if operation == {
-        .DataEntriesToMap(call, local) -> {
-            value :: machine.frames[frame_index].locals.get(local.value) ?? {
-                jet_eval_compiler_fail(&machine, span, "MIR data-entry local is unavailable")
-                return None
-            }
-            copy_value :: jet_eval_copy_value(value, &machine, span) ?? return None
-            return jet_eval_route_prelude_dispatch(&machine, call, [JetEvalRuntimeValue]{copy_value}, [MIRType]{}, result_ty, span)
-        }
         .MathBuiltin(_, call, args) | .PreciseBuiltin(_, call, args) -> return jet_eval_semantic_prelude(&machine, frame_index, call, args, [MIRType]{}, result_ty, span)
         .Print(call, value) -> {
             row :: jet_eval_route_prelude_row(&machine, call, span) ?? return None
@@ -9087,7 +9192,7 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
             return jet_eval_route_prelude_dispatch(&machine, call, values, [MIRType]{}, result_ty, span)
         }
         .LayoutLiteral(inner) -> return jet_eval_value(&machine, frame_index, inner, span)
-        .StructLiteral(type_id, fields, _, _, _) -> {
+        .StructLiteral(type_id, fields, _, _) -> {
             name :: jet_eval_type_name(&machine, type_id, span) ?? return None
             return jet_eval_aggregate_or_data(&machine, name, fields, frame_index, true, span)
         }
@@ -9321,23 +9426,23 @@ fn jet_eval_semantic(machine: &JetEvalMachine, frame_index: Int, operation: MIRS
     None
 }
 
-// These helpers intentionally use the checked Jet `~` operation over a full
+// These helpers intentionally use the checked Jet `.copy()` operation over a full
 // proven window. Their lowered MIR is MaterializeView, so the evaluator's own
 // generated code reaches the shared ViewCopy Prelude kernels instead of
 // carrying a second recursive clone policy.
 fn jet_eval_materialize_string_window(value: String) -> String {
     window :: value.after("")
-    ~window
+    window.copy()
 }
 
 fn jet_eval_materialize_list_window(value: [TComptimeValue]) -> [TComptimeValue] Never! {
     window :: value[0..<value.len()]
-    ~window
+    window.copy()
 }
 
 fn jet_eval_materialize_bytes_window(value: [U8]) -> [U8] Never! {
     window :: value[0..<value.len()]
-    ~window
+    window.copy()
 }
 
 
@@ -9454,7 +9559,14 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
             return jet_eval_static(&machine, name, span)
         }
         .Phi(incoming) -> return jet_eval_phi(&machine, frame_index, incoming, span)
-        .ReadPlace(place) -> return jet_eval_read_place(&machine, frame_index, place, span)
+        .ReadPlace(place) -> {
+            if result_ty == .Val(ty) {
+                if ty.kind == .Apply(name, args) {
+                    if name.name == "ViewMut" && args.len() == 1 -> return jet_eval_window_from_place(&machine, frame_index, place, span)
+                }
+            }
+            return jet_eval_read_place(&machine, frame_index, place, span)
+        }
         .MovePlace(place) -> return jet_eval_move_place(&machine, frame_index, place, span)
         .WritePlace(place, source) | .ReplacePlace(place, source) -> {
             value :: jet_eval_transfer(&machine, frame_index, source, span) ?? return None
@@ -9471,12 +9583,12 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR copy reads an unavailable SSA value")
                 return None
             }
-            value :: jet_eval_copy_value(item, &machine, span) ?? return None
+            source_ty :: jet_eval_value_type(&machine, frame_index, source, span) ?? return None
             if fact == MIRCopyFact.ViewMaterialize {
-                source_ty :: jet_eval_value_type(&machine, frame_index, source, span) ?? return None
+                value :: jet_eval_copy_value(item, &machine, span) ?? return None
                 return jet_eval_materialize_view_value(value, source_ty, result_ty, &machine, span)
             }
-            return Val(value)
+            return jet_eval_semantic_copy(item, source_ty, &machine, span)
         }
         .Move(source) -> return jet_eval_take(&machine, frame_index, source, span)
         .TraitBox(source, target) -> {
@@ -9516,6 +9628,26 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
         .BuildString(parts) -> return jet_eval_build_string(&machine, parts, frame_index, span)
         .BuildList(values, _) -> return jet_eval_build_list(&machine, values, frame_index, span)
         .BuildMap(entries) -> return jet_eval_build_map(&machine, entries, frame_index, span)
+        .MapLookup(map, key, cache) -> {
+            cached :: jet_eval_read_place(&machine, frame_index, cache, span) ?? return None
+            if cached == .Result(ok, lookup) && ok -> return Val(lookup)
+            data :: jet_eval_data(jet_eval_read_place(&machine, frame_index, map, span) ?? return None, &machine, span) ?? return None
+            wanted :: jet_eval_data_key(jet_eval_data(jet_eval_value(&machine, frame_index, key, span) ?? return None, &machine, span) ?? return None, &machine, span) ?? return None
+            if data == .Map(entries) {
+                loop (index, entry) in entries {
+                    if entry.key == wanted {
+                        lookup :: JetEvalRuntimeValue.Result{ok: true, value: JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: index}}}
+                        if !jet_eval_write_place(&machine, frame_index, cache, JetEvalRuntimeValue.Result{ok: true, value: lookup}, span) -> return None
+                        return Val(lookup)
+                    }
+                }
+                lookup :: JetEvalRuntimeValue.Result{ok: false, value: JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: -1}}}
+                if !jet_eval_write_place(&machine, frame_index, cache, JetEvalRuntimeValue.Result{ok: true, value: lookup}, span) -> return None
+                return Val(lookup)
+            }
+            jet_eval_compiler_fail(&machine, span, "MIR map lookup requires a map window")
+            return None
+        }
         .EnumIs(subject, owner, variant) -> {
             data :: jet_eval_data(jet_eval_value(&machine, frame_index, subject, span) ?? return None, &machine, span) ?? return None
             owner_name :: jet_eval_type_name(&machine, owner, span) ?? return None
@@ -9755,6 +9887,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
         .PtrFromAddr(address, _) -> return jet_eval_value(&machine, frame_index, address, span)
         .Deref(address) -> {
             value :: jet_eval_value(&machine, frame_index, address, span) ?? return None
+            if value == .Window(_, _) -> return jet_eval_read_window(&machine, value, span)
             if value == .Address(target_frame, target_place, access) {
                 if access == MIRAccess.Move {
                     jet_eval_ownership_fail(&machine, span, "MIR dereference uses a move-only address")
@@ -9778,7 +9911,16 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
             return Val(JetEvalRuntimeValue.Address{frame: frame_index, place: place, access: access})
         }
         .CoreCall(call, route, args, type_args, fallibility, _) -> {
+            row :: jet_eval_route_core_row(&machine, call, span) ?? return None
+            if row.module_name == "core.mem" && (row.member == "__string_data" || row.member == "__string_byte_len") {
+                return jet_eval_string_home_call(&machine, frame_index, call, route, args, span)
+            }
             prepared :: jet_eval_call_arguments(&machine, frame_index, args, span) ?? return None
+            route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
+            if route_row.module_name == "core.builtin" && route_row.member == "view_mut_new" {
+                window := jet_eval_write_subrange(&machine, route, args, prepared.values, span)
+                return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, window, span)
+            }
             result := jet_eval_route_core(&machine, call, route, prepared.values, type_args, fallibility, result_ty, span)
             return jet_eval_discharge_call_boundary(&machine, prepared.values, prepared.move_permissions, result, span)
         }
@@ -9834,7 +9976,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR scope enter references an unavailable scope")
                 return None
             }
-            if test_member != None || scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield {
+            if test_member != None || scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield || scope_row.kind == MIRScopeKind.StopCleanup {
                 jet_eval_unsupported(&machine, span, "MIR scope control requires runtime scheduler or test state")
                 return None
             }
@@ -9853,7 +9995,7 @@ fn jet_eval_operation(machine: &JetEvalMachine, frame_index: Int, operation: MIR
                 jet_eval_compiler_fail(&machine, span, "MIR scope exit references an unavailable scope")
                 return None
             }
-            if scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield {
+            if scope_row.deadline != None || scope_row.kind == MIRScopeKind.Shield || scope_row.kind == MIRScopeKind.StopCleanup {
                 jet_eval_unsupported(&machine, span, "MIR scope control requires runtime scheduler or test state")
                 return None
             }
@@ -10016,6 +10158,10 @@ fn jet_eval_terminator(machine: &JetEvalMachine, frame_index: Int, terminator: M
         .Yield(_, _) -> {
             if !jet_eval_run_drops(&machine, frame_index, MIRDropEdge.Normal, span) -> return None
             jet_eval_unsupported(&machine, span, "MIR generator yield")
+            return None
+        }
+        .Poll(_, _, _) | .Stopped -> {
+            jet_eval_unsupported(&machine, span, "MIR stop point (native execution host only)")
             return None
         }
         .Break(target, _) -> {

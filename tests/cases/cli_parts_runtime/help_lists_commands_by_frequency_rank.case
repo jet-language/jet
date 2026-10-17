@@ -1,0 +1,33 @@
+# Port of tests/cli_parts/runtime.rs:893-935; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+# PENDING-SEAM(compiler-lib): registry equality runtime.rs:911-916; ledger-only in S1-RUNTIME-SEAMS.tsv.
+step frequency: jet help
+env: NO_COLOR=1
+normalize: replace {jet-semver} "VERSION"
+exit: 0
+stdout: = help_frequency.txt
+capture: help_words = text stdout.after_first("\nUsage:\n").until_blank.strip_prefix_lines("  jet ").first_words
+stdout: before "  jet run " "  jet registry " # original predicate
+stdout: before "  jet run " "  jet db " # original predicate
+stdout: before "  jet run " "  jet bind " # original predicate
+stdout: before "  jet check " "  jet registry " # original predicate
+stdout: before "  jet check " "  jet db " # original predicate
+stdout: before "  jet check " "  jet bind " # original predicate
+stdout: before "  jet new " "  jet registry " # original predicate
+stdout: before "  jet new " "  jet db " # original predicate
+stdout: before "  jet new " "  jet bind " # original predicate
+stdout: before "  jet test " "  jet registry " # original predicate
+stdout: before "  jet test " "  jet db " # original predicate
+stdout: before "  jet test " "  jet bind " # original predicate
+step: jet help --sort frequency
+env: NO_COLOR=1
+normalize: replace {jet-semver} "VERSION"
+exit: 0
+stdout: == frequency
+step: jet --color=never
+env: NO_COLOR=1
+exit: 0
+stdout.after_first("\nGet started:\n").until_blank.strip_prefix_lines("  jet ").first_words: lines >= 3 # original predicate
+stdout.after_first("\nGet started:\n").until_blank.strip_prefix_lines("  jet ").first_words: has-line "run" # original predicate
+stdout.after_first("\nGet started:\n").until_blank.strip_prefix_lines("  jet ").first_words: in-order-of {cap:help_words} # original predicate

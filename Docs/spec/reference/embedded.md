@@ -89,7 +89,7 @@ A loadable package can expose a C entry point with the current function syntax:
 
 ```jet
 #Export(c)
-pub fn on_tick(dt: Int) -> Int {
+fn on_tick(dt: Int) -> Int {
     dt + 1
 }
 ```

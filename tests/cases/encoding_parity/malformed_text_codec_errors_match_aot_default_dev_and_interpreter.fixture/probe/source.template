@@ -1,0 +1,32 @@
+
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.yaml as yaml
+
+#Codable
+struct Row {
+    value: Int
+}
+
+fn json_parse_error() -[]> String {
+    json.parse("\n{{oops") ? _value -> return "accepted" ! error -> return "{error.line}|{error.message}"
+}
+
+fn json_decode_error() -[]> String {
+    json.decode<Row>("\n{{oops") ? _value -> return "accepted" ! errors -> return "{errors[0].path}|{errors[0].reason}"
+}
+
+fn toml_parse_error() -[]> String {
+    toml.parse("value = ") ? _value -> return "accepted" ! error -> return error.message
+}
+
+fn yaml_parse_error() -[]> String {
+    yaml.parse("key: value\nbad") ? _value -> return "accepted" ! error -> return error.message
+}
+
+fn run() {
+    print(json_parse_error())
+    print(json_decode_error())
+    print(toml_parse_error())
+    print(yaml_parse_error())
+}

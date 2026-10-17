@@ -1,0 +1,12 @@
+# Port of tests/toolchain_pin.rs::in_channel_pin_runs_native_without_writing_lock (150-171); sources copied verbatim from original Rust literals/templates.
+# PENDING-SAME-HEAD; no runtime or snapshot receipt claimed.
+# Channel is the first two version components, exactly original CARGO_PKG_VERSION.split dot. No runtime output assertion added: original only builds.
+fixture: fixtures/in_channel_pin_runs_native_without_writing_lock
+step: jet --version
+write: version.txt = "{jet-semver}"
+capture: major = text file.split(".",0) version.txt
+capture: minor = text file.split(".",1) version.txt
+write: package.jet = "name: \"x\"\nversion: \"1\"\njet: {cap:major}.{cap:minor}\n"
+step: jet build main.jet
+exit: 0
+file: .jet/lock absent

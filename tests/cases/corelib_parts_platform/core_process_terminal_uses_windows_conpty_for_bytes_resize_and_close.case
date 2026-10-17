@@ -1,0 +1,16 @@
+# Port of tests/corelib_parts/platform.rs:1213-1285; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_terminal_uses_windows_conpty_for_bytes_resize_and_close
+write: main.jet main.template
+requires: os:windows
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout.replace("\r\n", "\n"): ^= "true\n"
+stdout.replace("\r\n", "\n"): ~ "ready\n" # original contains
+stdout.replace("\r\n", "\n"): ~ "input:typed\n" # original contains
+stdout.replace("\r\n", "\n"): ~ "\u001b[31mcontrol\u001b[0m" # original contains
+stdout.replace("\r\n", "\n"): ~ "100" # original contains
+stdout.replace("\r\n", "\n"): ~ "30" # original contains
+stdout.replace("\r\n", "\n"): $= "closed:typed\n"

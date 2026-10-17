@@ -1,0 +1,43 @@
+
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+
+struct HandlerState {
+    label: String
+}
+
+fn route_error(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    if req.path() == "/error" -> return Err(.InvalidFraming)
+    return Err(.InvalidFraming)
+}
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
+    state :: shared HandlerState{label: "before registration"}
+    mux :: server.mux()
+    mux.get("/zero", () -> Ok(server.response(200, "zero")))
+    mux.get("/items/:id", (req: HTTPRequest) -> {
+        header :: &req.header("x-state") ?? "missing"
+        id :: req.param("id") ?? "missing"
+        path :: req.path()
+        return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
+    })
+    mux.get("/error", route_error)
+    state.label = "captured"
+    t :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    zero :: http.request("GET", "http://{address}/zero").send() ?? panic("zero")
+    print(zero.text() ?? "zero body")
+    detail :: http.request("GET", "http://{address}/items/42")
+        .header("x-state", "captured-header")
+        .send() ?? panic("detail")
+    print(detail.text() ?? "detail body")
+    failed :: http.request("GET", "http://{address}/error").send() ?? panic("error")
+    print(failed.status())
+    t.join() ?? panic("join")
+}

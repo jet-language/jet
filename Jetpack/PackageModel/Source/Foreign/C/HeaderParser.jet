@@ -198,7 +198,7 @@ struct CTypeCatalog {
             record :: self.records[key]
             if seen.contains(record.jet_name) -> next
             &seen.push(record.jet_name)
-            &out.push("#Layout(c)\npub struct {record.jet_name} {{\n")
+            &out.push("#Layout(c)\nstruct {record.jet_name} {{\n")
             loop field in record.fields -> &out.push("    {field.name}: {field.ty},\n")
             &out.push("}}\n\n")
         }
@@ -266,8 +266,11 @@ fn pkg_cbind_parse_callback_alias(decl: String) -> (alias: String, target: Strin
 }
 
 // `typedef <target> <alias>` without a body or parameter list. The target is
-// the text between the first seven bytes of the declaration and the alias.
-fn pkg_cbind_parse_scalar_or_alias_typedef(decl: String) -> (alias: String, target: String)? Never! {
+// the text between the `typedef` keyword and the alias. A split declaration
+// keeps the whitespace before it (the newline after the previous `;`), so the
+// keyword offset holds only once the declaration is trimmed.
+fn pkg_cbind_parse_scalar_or_alias_typedef(raw_decl: String) -> (alias: String, target: String)? Never! {
+    decl :: raw_decl.trim()
     tokens :: pkg_cbind_words(decl)
     if tokens.len() == 0 || tokens[0] != "typedef" || decl.contains("{{") || decl.contains("(") -> return None
     alias := ""

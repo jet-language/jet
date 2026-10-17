@@ -24,6 +24,16 @@ fn run() {
     // what binary/byte APIs work in.
     bytes :: [U8]{104, 105, 33}
     print(bytes)
+    // Every integer width can index a list; narrowing to the host index is
+    // checked rather than wrapping a wide unsigned value.
+    assert(bytes[U8{1}] == U8{105})
+    assert(bytes[I8{1}] == U8{105})
+    assert(bytes[U16{1}] == U8{105})
+    assert(bytes[I16{1}] == U8{105})
+    assert(bytes[U32{1}] == U8{105})
+    assert(bytes[I32{1}] == U8{105})
+    assert(bytes[U64{1}] == U8{105})
+    assert(bytes[I64{1}] == U8{105})
     // Safe widening is implicit. Narrowing is a destination-owned fallible
     // method (`?`/`??`) because a value might not fit.
     wide := Int{0}
@@ -37,16 +47,16 @@ fn run() {
     flags :: U8{13}
     print(flags.count_ones())
     print(Float.INFINITY.is_infinite())
-    // Bit operators (D-NUMOPS1). `&`/`~|` and compound `|=` keep the operand
+    // Bit methods (D-SIGIL-ALGEBRA1=B) keep the operand
     // width; a shift's count may be any integer (it's a bit-count, not a value
     // of the same width), and an over-width count traps cleanly.
     mask :: U8{12}
     bits :: U8{10}
-    print(mask & bits)
+    print((mask).bit_and(bits))
     combined := U8{mask}
-    combined |= bits
+    combined = (combined).bit_or(bits)
     print(combined)
-    print(mask ~| bits)
+    print((mask).bit_xor(bits))
     print(mask << 2)
     print(mask >> 1)
     print(mask.leading_zeros())

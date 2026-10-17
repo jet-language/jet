@@ -1,0 +1,618 @@
+// FileHandles.rs:9-98,265-896: held directories. One process table keyed by
+// an Int that only Core's opaque Directory carries. Keys start at 1 and are
+// never reused, so a stale key reports IOError.Closed instead of naming
+// another directory. A negative key means the current directory (AT_FDCWD).
+// Root24: mutex0, next key8, list head16. Node32: next0, key8, the table's
+// FD72 reference16, owned shown path24. Lookups retain the FD72, so a
+// concurrent close can never recycle a descriptor number still in use.
+// Core/files/files.jet owns name validation, defaults and public policy.
+fs_held_root := I64{0}
+// runtime-init: 4
+#Export(c) fn jet_rt_fs_held_init() {
+    if (fs_held_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(root, I64{24})
+    sync_store(root + I64{8}, I64{1})
+    fs_held_root = root
+}
+
+// Only the root lock reads the list.
+fn fs_held_find(key: I64) -> I64 {
+    node := rt_text_word(fs_held_root + I64{16})
+    loop node != (I64{0}) {
+        if (rt_text_word(node + I64{8}) == key) -> return node
+        node = rt_text_word(node)
+    }
+    I64{0}
+}
+
+// The retained FD72 of a live key (0: closed or negative). When path_out is
+// nonzero it receives an owned clone of the held path under the same lock.
+fn fs_held_lookup(key: I64, path_out: I64) -> I64 {
+    if (key < I64{0}) -> return I64{0}
+    root :: fs_held_root
+    sync_mutex_lock(root)
+    node :: fs_held_find(key)
+    state := I64{0}
+    if (node != I64{0}) {
+        state = jet_fd_retain_raw(rt_text_word(node + I64{16}))
+        if (path_out != I64{0}) -> rt_text_store(path_out, jet_rt_string_clone(rt_text_word(node + I64{24})))
+    }
+    sync_mutex_unlock(root)
+    state
+}
+
+fn fs_held_state(key: I64) -> I64 { fs_held_lookup(key, I64{0}) }
+
+// jet_fs_held_path: an owned base path, "" for a negative key, 0 if closed.
+fn fs_held_shown(key: I64) -> I64 {
+    if (key < I64{0}) -> return jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    rt_text_store(scratch, I64{0})
+    state :: fs_held_lookup(key, scratch)
+    path :: rt_text_word(scratch)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    if (state != I64{0}) -> jet_fd_drop_raw(state)
+    path
+}
+
+// jet_fs_shown: the held path joined to name, as errors report it; 0 if closed.
+fn fs_held_shown_name(key: I64, name: I64) -> I64 {
+    base :: fs_held_shown(key)
+    if (base == I64{0}) -> return I64{0}
+    length :: rt_text_len(base)
+    if (length == I64{0}) {
+        jet_rt_string_drop(base)
+        return jet_rt_string_clone(name)
+    }
+    if (rt_text_len(name) == I64{0}) -> return base
+    if (rt_text_byte(rt_text_data(base) + length - I64{1}) != I64{47}) -> rt_text_push_word(base, I64{47}, I64{1})
+    jet_rt_string_builder_push(base, name)
+    base
+}
+
+// Takes ownership of the FD72 and the shown path; returns the new key.
+fn fs_held_hold_state(state: I64, shown: I64) -> I64 {
+    node :: jet_rt_alloc(I64{32}, I64{8})
+    root :: fs_held_root
+    sync_mutex_lock(root)
+    key :: rt_text_word(root + I64{8})
+    rt_text_store(root + I64{8}, key + I64{1})
+    rt_text_store(node, rt_text_word(root + I64{16}))
+    rt_text_store(node + I64{8}, key)
+    rt_text_store(node + I64{16}, state)
+    rt_text_store(node + I64{24}, shown)
+    rt_text_store(root + I64{16}, node)
+    sync_mutex_unlock(root)
+    key
+}
+
+fn fs_held_hold(number: I64, shown: I64) -> I64 { fs_held_hold_state(fd_new(number, I64{0}, false), shown) }
+
+// IOError.Closed with no resource or code: the key was already released.
+fn fs_held_closed(operation: I64, error: I64) -> I64 {
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    rt_text_store(value, HOST_IO_KIND_CLOSED)
+    rt_text_store(value + I64{8}, operation)
+    rt_text_store(value + I64{16}, I64{0})
+    rt_text_store(value + I64{24}, I64{0})
+    rt_text_store(value + I64{32}, I64{0})
+    rt_text_store(value + I64{40}, jet_rt_string_clone(rt_static_text("the directory handle is already closed")))
+    rt_text_store(value + I64{48}, I64{0})
+    rt_text_store(error, value)
+    I64{0}
+}
+
+fn fs_held_release(fd: I64) {
+    if (fd >= I64{0}) -> _ := host_call(I64{3}, fd, I64{0}, I64{0})
+}
+
+// jet_fs_cstring for name[start..end]: a terminated copy, or 0 after writing
+// InvalidInput when the part contains NUL. Free with fs_held_cpart_drop.
+fn fs_held_cpart(name: I64, start: I64, end: I64, operation: I64, shown: I64, error: I64) -> I64 {
+    data :: rt_text_data(name)
+    at := start
+    loop at < end {
+        if (rt_text_byte(data + at) == I64{0}) {
+            _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{0}, jet_rt_string_clone(rt_static_text("the name contains a NUL byte")), error)
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    part :: jet_rt_alloc(end - start + I64{1}, I64{1})
+    rt_text_bytes_copy(part, data + start, end - start)
+    rt_text_put(part + end - start, I64{0})
+    part
+}
+
+fn fs_held_cpart_drop(part: I64, start: I64, end: I64) { jet_rt_free(part, end - start + I64{1}, I64{1}) }
+
+// jet_fs_parent. out+0 receives the directory holding the final part: an
+// owned descriptor, or AT_FDCWD (-100, never closed) for a negative key;
+// out+8 receives the final part's start byte. Each earlier part opens with
+// O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC; a negative key never walks.
+// The walk starts from a duplicate, so the held descriptor stays the table's.
+fn fs_held_parent(key: I64, name: I64, operation: I64, shown: I64, out: I64, error: I64) -> Bool {
+    rt_text_store(out, I64{-1})
+    rt_text_store(out + I64{8}, I64{0})
+    if (key < I64{0}) {
+        rt_text_store(out, I64{-100})
+        return true
+    }
+    state :: fs_held_state(key)
+    if (state == I64{0}) {
+        _ := fs_held_closed(operation, error)
+        return false
+    }
+    current := fd_dup_number(state)
+    jet_fd_drop_raw(state)
+    if (current < I64{0}) {
+        _ := compiler_fs_errno(operation, shown, -current, error)
+        return false
+    }
+    data :: rt_text_data(name)
+    length :: rt_text_len(name)
+    start := I64{0}
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + at) == I64{47}) {
+            part :: fs_held_cpart(name, start, at, operation, shown, error)
+            if (part == I64{0}) {
+                fs_held_release(current)
+                return false
+            }
+            next := I64{0}
+            #Unsafe("the owned walk descriptor and terminated part live through openat") {
+                next = os_syscall_i64(I64{257}, current, part, I64{720896}, I64{0}, I64{0}, I64{0})
+            }
+            fs_held_cpart_drop(part, start, at)
+            fs_held_release(current)
+            if (next < I64{0}) {
+                if (next == I64{-40}) {
+                    cause :: jet_rt_string_builder_new()
+                    jet_rt_string_builder_push(cause, rt_static_text("the part `"))
+                    rt_text_append(cause, data + start, at - start)
+                    jet_rt_string_builder_push(cause, rt_static_text("` is a symbolic link, and a held directory never follows links; name a real directory"))
+                    _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{40}, jet_rt_string_builder_finish(cause), error)
+                } else {
+                    _ := compiler_fs_errno(operation, shown, -next, error)
+                }
+                return false
+            }
+            current = next
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    rt_text_store(out, current)
+    rt_text_store(out + I64{8}, start)
+    true
+}
+
+// jet_fs_open_at. access: 0 read, 1 write and truncate, 2 append, 3 directory;
+// if_exists 1 refuses an existing name; mode < 0 is 0o666; links 1 refuses a
+// final link. Native i64 arguments. Returns an owned descriptor, or -1 after
+// writing the IOError.
+fn fs_open_at(key: I64, name: I64, access: I64, if_exists: I64, mode: I64, links: I64, error: I64) -> I64 {
+    operation :: if (access == I64{0} || access == I64{3}) -> HOST_IO_OP_READ else -> HOST_IO_OP_WRITE
+    shown :: fs_held_shown_name(key, name)
+    if (shown == I64{0}) {
+        _ := fs_held_closed(operation, error)
+        return I64{-1}
+    }
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    result := I64{-1}
+    if fs_held_parent(key, name, operation, shown, scratch, error) {
+        directory :: rt_text_word(scratch)
+        start :: rt_text_word(scratch + I64{8})
+        end :: rt_text_len(name)
+        part :: fs_held_cpart(name, start, end, operation, shown, error)
+        if (part != I64{0}) {
+            // O_CLOEXEC with O_RDONLY, O_WRONLY|O_CREAT|O_TRUNC,
+            // O_WRONLY|O_CREAT|O_APPEND, or O_RDONLY|O_DIRECTORY.
+            flags := if {
+                (access == I64{0}) -> I64{524288}
+                (access == I64{1}) -> I64{524865}
+                (access == I64{2}) -> I64{525377}
+                else -> I64{589824}
+            }
+            if (if_exists == I64{1} && (access == I64{1} || access == I64{2})) -> flags = (flags.bit_or(I64{128})).bit_and(I64{-513})
+            if (links == I64{1}) -> flags = flags.bit_or(I64{131072})
+            bits :: if (mode >= I64{0}) -> mode.bit_and(I64{4095}) else -> I64{438}
+            opened := I64{0}
+            #Unsafe("the walk directory and terminated final part live through openat") {
+                opened = os_syscall_i64(I64{257}, directory, part, flags, bits, I64{0}, I64{0})
+            }
+            fs_held_cpart_drop(part, start, end)
+            if (opened >= I64{0}) {
+                result = opened
+            } else if (links == I64{1} && opened == I64{-40}) {
+                _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, shown, I64{40}, jet_rt_string_clone(rt_static_text("the path ends in a symbolic link, and this call never follows one; name the link's target instead")), error)
+            } else if (if_exists == I64{1} && opened == I64{-17}) {
+                _ := compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, operation, shown, I64{17}, jet_rt_string_clone(rt_static_text("this call refuses to replace it; choose a new name or pass if_exists: .Replace")), error)
+            } else {
+                _ := compiler_fs_errno(operation, shown, -opened, error)
+            }
+        }
+        fs_held_release(directory)
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+    jet_rt_string_drop(shown)
+    result
+}
+
+// jet_fs_directory_open: hold name relative to key; a final link is refused.
+#Export(c) fn jet_fs_directory_open(handle: I64, name: I64, ok: I64, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    shown :: fs_held_shown_name(key, name)
+    if (shown == I64{0}) -> return fs_held_closed(HOST_IO_OP_READ, error)
+    opened :: fs_open_at(key, name, I64{3}, I64{0}, I64{-1}, I64{1}, error)
+    if (opened < I64{0}) {
+        jet_rt_string_drop(shown)
+        return I64{0}
+    }
+    rt_text_store(ok, jet_int_owned_from_i64(fs_held_hold(opened, shown)))
+    I64{1}
+}
+
+// jet_fs_directory_close: closing an unknown key is a no-op.
+#Export(c) fn jet_fs_directory_close(handle: I64) {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    root :: fs_held_root
+    sync_mutex_lock(root)
+    link := root + I64{16}
+    node := I64{0}
+    loop rt_text_word(link) != (I64{0}) {
+        candidate :: rt_text_word(link)
+        if (rt_text_word(candidate + I64{8}) == key) {
+            rt_text_store(link, rt_text_word(candidate))
+            node = candidate
+            break
+        }
+        link = candidate
+    }
+    sync_mutex_unlock(root)
+    if (node == I64{0}) -> return
+    jet_fd_drop_raw(rt_text_word(node + I64{16}))
+    jet_rt_string_drop(rt_text_word(node + I64{24}))
+    jet_rt_free(node, I64{32}, I64{8})
+}
+
+// jet_fs_directory_fsync: sync_all on the held descriptor (no EINTR retry).
+#Export(c) fn jet_fs_directory_fsync(handle: I64, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    state :: fs_held_lookup(key, scratch)
+    if (state == I64{0}) {
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return fs_held_closed(HOST_IO_OP_FLUSH, error)
+    }
+    path :: rt_text_word(scratch)
+    jet_fd_sync_raw(state, false, scratch + I64{8})
+    jet_fd_drop_raw(state)
+    failed :: rt_text_word(scratch + I64{8}) != I64{0}
+    code :: rt_text_word(scratch + I64{16})
+    jet_rt_free(scratch, I64{40}, I64{8})
+    result :: if failed -> compiler_fs_errno(HOST_IO_OP_FLUSH, path, code, error) else -> I64{1}
+    jet_rt_string_drop(path)
+    result
+}
+
+// jet_fs_directory_create: mkdirat; mode < 0 is 0o777 before the umask.
+#Export(c) fn jet_fs_directory_create(handle: I64, name: I64, mode: I64, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    native_mode :: host_native_int(mode)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    shown :: fs_held_shown_name(key, name)
+    if (shown == I64{0}) -> return fs_held_closed(HOST_IO_OP_WRITE, error)
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    result := I64{0}
+    if fs_held_parent(key, name, HOST_IO_OP_WRITE, shown, scratch, error) {
+        directory :: rt_text_word(scratch)
+        start :: rt_text_word(scratch + I64{8})
+        end :: rt_text_len(name)
+        part :: fs_held_cpart(name, start, end, HOST_IO_OP_WRITE, shown, error)
+        if (part != I64{0}) {
+            bits :: if (native_mode >= I64{0}) -> native_mode.bit_and(I64{4095}) else -> I64{511}
+            made :: host_call(I64{258}, directory, part, bits)
+            fs_held_cpart_drop(part, start, end)
+            if (made == I64{0}) {
+                result = I64{1}
+            } else if (made == I64{-17}) {
+                _ := compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, HOST_IO_OP_WRITE, shown, I64{17}, jet_rt_string_clone(rt_static_text("a directory entry with this name already exists; choose a new name or open the existing directory")), error)
+            } else {
+                _ := compiler_fs_errno(HOST_IO_OP_WRITE, shown, -made, error)
+            }
+        }
+        fs_held_release(directory)
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+    jet_rt_string_drop(shown)
+    result
+}
+
+// jet_fs_flock on the descriptor, not its displayed path. A negative key
+// passes AT_FDCWD exactly as the seed does (EBADF, empty resource).
+#Export(c) fn jet_fs_flock(handle: I64, flags: I64, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    operation :: host_native_int(flags).bit_and(I64{4294967295})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (key < I64{0}) {
+        locked :: host_call(I64{73}, I64{-100}, operation, I64{0})
+        if (locked == I64{0}) -> return I64{1}
+        empty :: jet_rt_string_builder_new()
+        _ := compiler_fs_errno(HOST_IO_OP_WRITE, empty, -locked, error)
+        jet_rt_string_drop(empty)
+        return I64{0}
+    }
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    state :: fs_held_lookup(key, scratch)
+    if (state == I64{0}) {
+        jet_rt_free(scratch, I64{40}, I64{8})
+        return fs_held_closed(HOST_IO_OP_WRITE, error)
+    }
+    path :: rt_text_word(scratch)
+    fd_operation(state, I64{73}, operation, I64{0}, scratch + I64{8})
+    jet_fd_drop_raw(state)
+    failed :: rt_text_word(scratch + I64{8}) != I64{0}
+    code :: rt_text_word(scratch + I64{16})
+    jet_rt_free(scratch, I64{40}, I64{8})
+    result :: if failed -> compiler_fs_errno(HOST_IO_OP_WRITE, path, code, error) else -> I64{1}
+    jet_rt_string_drop(path)
+    result
+}
+
+// jet_fs_directory_fd_raw: a borrowed descriptor fact. The audited Core
+// caller retains the Directory until the process leaf duplicates it.
+#Export(c) fn jet_fs_directory_fd_raw(handle: I64, available: I64, held: I64, fd: I64) {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    state :: fs_held_state(key)
+    rt_text_put(available, I64{1})
+    rt_text_put(held, if (state == I64{0}) -> I64{0} else -> I64{1})
+    rt_text_store(fd, if (state == I64{0}) -> I64{0} else -> jet_int_owned_from_i64(jet_fd_number_raw(state)))
+    if (state != I64{0}) -> jet_fd_drop_raw(state)
+}
+
+// FileStream.rs:311 -> FileHandles.rs:1079 jet_fs_link_fd_at_raw: link the
+// reader's open inode into the held directory with one AT_EMPTY_PATH linkat,
+// never reopening a source pathname. (available, held, retval, errno); an
+// unknown key is (true, false, 0, 0). Success reports errno 0, where the seed
+// reads a meaningless stale errno. Core/Jetpack classify errno (EXDEV etc.).
+#Export(c) fn jet_files_link_reader_at_raw(reader: I64, into: I64, name: I64, available: I64, held: I64, value: I64, errno: I64) {
+    key :: host_native_int(into)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    rt_text_put(available, I64{1})
+    state :: fs_held_state(key)
+    if (state == I64{0}) {
+        rt_text_put(held, I64{0})
+        rt_text_store(value, I64{0})
+        rt_text_store(errno, I64{0})
+        return
+    }
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    jet_fd_link_at_raw(reader, state, name, scratch)
+    jet_fd_drop_raw(state)
+    failed :: rt_text_word(scratch) != I64{0}
+    code :: if failed -> rt_text_word(scratch + I64{8}) else -> I64{0}
+    jet_rt_free(scratch, I64{32}, I64{8})
+    rt_text_put(held, I64{1})
+    rt_text_store(value, jet_int_owned_from_i64(if failed -> I64{-1} else -> I64{0}))
+    rt_text_store(errno, jet_int_owned_from_i64(code))
+}
+
+// jet_fs_stat_at facts: a path (negative key, follow chooses stat/lstat),
+// the held directory itself (empty name), or an entry opened
+// O_PATH|O_NOFOLLOW|O_CLOEXEC without read access. Scratch184 lends
+// StatFacts128@0, BirthTime24@128 and ErrorOut32@152. False writes the IOError.
+fn fs_stat_facts_at(key: I64, name: I64, follow: Bool, scratch: I64, error: I64) -> Bool {
+    facts :: scratch
+    birth :: scratch + I64{128}
+    errno :: scratch + I64{152}
+    if (key < I64{0}) {
+        if !compiler_fs_path(name, HOST_IO_OP_READ, error) -> return false
+        jet_fs_stat_raw(name, follow, facts, errno)
+        if (rt_text_word(errno) != I64{0}) {
+            _ := compiler_fs_errno(HOST_IO_OP_READ, name, rt_text_word(errno + I64{8}), error)
+            return false
+        }
+        jet_fs_created_raw(name, follow, birth, errno)
+        return true
+    }
+    if (rt_text_len(name) == I64{0}) {
+        path_out :: jet_rt_alloc(I64{8}, I64{8})
+        state :: fs_held_lookup(key, path_out)
+        path :: rt_text_word(path_out)
+        jet_rt_free(path_out, I64{8}, I64{8})
+        if (state == I64{0}) {
+            _ := fs_held_closed(HOST_IO_OP_READ, error)
+            return false
+        }
+        jet_fd_stat_raw(state, facts, errno)
+        failed :: rt_text_word(errno) != I64{0}
+        if failed {
+            _ := compiler_fs_errno(HOST_IO_OP_READ, path, rt_text_word(errno + I64{8}), error)
+        } else {
+            jet_fd_created_raw(state, birth, errno)
+        }
+        jet_fd_drop_raw(state)
+        jet_rt_string_drop(path)
+        return !failed
+    }
+    shown :: fs_held_shown_name(key, name)
+    if (shown == I64{0}) {
+        _ := fs_held_closed(HOST_IO_OP_READ, error)
+        return false
+    }
+    ok := false
+    if fs_held_parent(key, name, HOST_IO_OP_READ, shown, errno, error) {
+        directory :: rt_text_word(errno)
+        start :: rt_text_word(errno + I64{8})
+        end :: rt_text_len(name)
+        part :: fs_held_cpart(name, start, end, HOST_IO_OP_READ, shown, error)
+        if (part != I64{0}) {
+            opened := I64{0}
+            #Unsafe("the walk directory and terminated final part live through O_PATH|O_NOFOLLOW|O_CLOEXEC openat") {
+                opened = os_syscall_i64(I64{257}, directory, part, I64{2752512}, I64{0}, I64{0}, I64{0})
+            }
+            fs_held_cpart_drop(part, start, end)
+            if (opened < I64{0}) {
+                _ := compiler_fs_errno(HOST_IO_OP_READ, shown, -opened, error)
+            } else {
+                result := I64{0}
+                #Unsafe("the owned O_PATH descriptor and the caller's 128-byte stat facts live through fstat") {
+                    result = os_stat_facts_i64(I64{5}, opened, facts)
+                }
+                if (result < I64{0}) {
+                    _ := compiler_fs_errno(HOST_IO_OP_READ, shown, -result, error)
+                } else {
+                    rt_text_store(birth, I64{0})
+                    #Unsafe("the owned O_PATH descriptor, birth's zeroed empty pathname and three writable words live through statx") {
+                        result = os_statx_created_i64(opened, birth, I64{4096}, birth)
+                    }
+                    fd_created_finish(result, birth, errno)
+                    ok = true
+                }
+                fs_held_release(opened)
+            }
+        }
+        fs_held_release(directory)
+    }
+    jet_rt_string_drop(shown)
+    ok
+}
+
+#Export(c) fn jet_fs_stat_at(handle: I64, name: I64, follow: Bool, output: I64, len: I64, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{184}, I64{8})
+    ok :: fs_stat_facts_at(key, name, follow, scratch, error)
+    if ok -> compiler_fs_stat_row(scratch, scratch + I64{128}, output, len)
+    jet_rt_free(scratch, I64{184}, I64{8})
+    if ok -> I64{1} else -> I64{0}
+}
+
+// jet_fs_remove_at: unlinkat, AT_REMOVEDIR for an empty directory.
+#Export(c) fn jet_fs_remove_at(handle: I64, name: I64, directory: Bool, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    shown :: fs_held_shown_name(key, name)
+    if (shown == I64{0}) -> return fs_held_closed(HOST_IO_OP_WRITE, error)
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    result := I64{0}
+    if fs_held_parent(key, name, HOST_IO_OP_WRITE, shown, scratch, error) {
+        parent :: rt_text_word(scratch)
+        start :: rt_text_word(scratch + I64{8})
+        end :: rt_text_len(name)
+        part :: fs_held_cpart(name, start, end, HOST_IO_OP_WRITE, shown, error)
+        if (part != I64{0}) {
+            removed :: host_call(I64{263}, parent, part, if directory -> I64{512} else -> I64{0})
+            fs_held_cpart_drop(part, start, end)
+            if (removed == I64{0}) { result = I64{1} } else { _ := compiler_fs_errno(HOST_IO_OP_WRITE, shown, -removed, error) }
+        }
+        fs_held_release(parent)
+    }
+    jet_rt_free(scratch, I64{16}, I64{8})
+    jet_rt_string_drop(shown)
+    result
+}
+
+fn fs_rename_refused(shown: I64, error: I64) -> I64 {
+    compiler_fs_error(HOST_IO_KIND_ALREADY_EXISTS, HOST_IO_OP_WRITE, shown, I64{17}, jet_rt_string_clone(rt_static_text("the target already exists and this rename refuses to replace it; choose a new name or pass if_exists: .Replace")), error)
+}
+
+// Whether from names a directory, without following it; any error is false.
+fn fs_rename_source_is_directory(key: I64, name: I64) -> Bool {
+    scratch :: jet_rt_alloc(I64{192}, I64{8})
+    rt_text_store(scratch + I64{184}, I64{0})
+    found :: fs_stat_facts_at(key, name, false, scratch, scratch + I64{184})
+    directory :: found && (rt_text_word(scratch + I64{16}).bit_and(I64{61440})) == I64{16384}
+    if !found -> jet_rt_handle_drop_io_error(rt_text_word(scratch + I64{184}))
+    jet_rt_free(scratch, I64{192}, I64{8})
+    directory
+}
+
+// The renameat/renameat2 call and the seed's no-replace link+unlink fallback.
+fn fs_rename_parts(from_key: I64, from: I64, from_dir: I64, from_part: I64, from_shown: I64, to_dir: I64, to_part: I64, to_shown: I64, if_exists: I64, error: I64) -> I64 {
+    renamed := I64{0}
+    #Unsafe("both walk directories and terminated final parts live through renameat/renameat2") {
+        renamed = if (if_exists == I64{0}) -> os_syscall_i64(I64{264}, from_dir, from_part, to_dir, to_part, I64{0}, I64{0}) else -> os_syscall_i64(I64{316}, from_dir, from_part, to_dir, to_part, if (if_exists == I64{1}) -> I64{1} else -> I64{2}, I64{0})
+    }
+    if (renamed == I64{0}) -> return I64{1}
+    code :: -renamed
+    if (code == I64{17} && if_exists == I64{1}) -> return fs_rename_refused(to_shown, error)
+    rejected :: code == I64{22} || code == I64{38} || code == I64{95}
+    if (if_exists == I64{1} && rejected) {
+        // No-replace renames are unavailable: link the new name, then drop the
+        // old one. A directory cannot be hard-linked.
+        if fs_rename_source_is_directory(from_key, from) {
+            return compiler_fs_error(HOST_IO_KIND_UNSUPPORTED, HOST_IO_OP_WRITE, from_shown, code, jet_rt_string_clone(rt_static_text("this file system cannot rename a directory without replacing the target; pass if_exists: .Replace after checking the target yourself")), error)
+        }
+        linked := I64{0}
+        #Unsafe("both walk directories and terminated final parts live through linkat") {
+            linked = os_syscall_i64(I64{265}, from_dir, from_part, to_dir, to_part, I64{0}, I64{0})
+        }
+        if (linked == I64{-17}) -> return fs_rename_refused(to_shown, error)
+        if (linked < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, to_shown, -linked, error)
+        unlinked :: host_call(I64{263}, from_dir, from_part, I64{0})
+        if (unlinked < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, from_shown, -unlinked, error)
+        return I64{1}
+    }
+    if (if_exists == I64{2} && rejected) {
+        return compiler_fs_error(HOST_IO_KIND_UNSUPPORTED, HOST_IO_OP_WRITE, from_shown, code, jet_rt_string_clone(rt_static_text("this file system cannot swap two names in one step; replace in two steps instead")), error)
+    }
+    compiler_fs_errno(HOST_IO_OP_WRITE, from_shown, code, error)
+}
+
+// jet_fs_rename_at. if_exists: 0 replace, 1 refuse an existing target,
+// anything else swaps both names.
+#Export(c) fn jet_fs_rename_at(from_handle: I64, from: I64, to_handle: I64, to: I64, if_exists: I64, error: I64) -> I64 {
+    from_key :: host_native_int(from_handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    to_key :: host_native_int(to_handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    policy :: host_native_int(if_exists)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    from_shown :: fs_held_shown_name(from_key, from)
+    if (from_shown == I64{0}) -> return fs_held_closed(HOST_IO_OP_WRITE, error)
+    // Walk32: from directory0, from start8, to directory16, to start24.
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    rt_text_store(scratch + I64{16}, I64{-1})
+    to_shown := I64{0}
+    result := I64{0}
+    walked := fs_held_parent(from_key, from, HOST_IO_OP_WRITE, from_shown, scratch, error)
+    if walked {
+        to_shown = fs_held_shown_name(to_key, to)
+        if (to_shown == I64{0}) {
+            _ := fs_held_closed(HOST_IO_OP_WRITE, error)
+            walked = false
+        }
+    }
+    if walked -> walked = fs_held_parent(to_key, to, HOST_IO_OP_WRITE, to_shown, scratch + I64{16}, error)
+    if walked {
+        from_start :: rt_text_word(scratch + I64{8})
+        from_end :: rt_text_len(from)
+        to_start :: rt_text_word(scratch + I64{24})
+        to_end :: rt_text_len(to)
+        from_part :: fs_held_cpart(from, from_start, from_end, HOST_IO_OP_WRITE, from_shown, error)
+        if (from_part != I64{0}) {
+            to_part :: fs_held_cpart(to, to_start, to_end, HOST_IO_OP_WRITE, to_shown, error)
+            if (to_part != I64{0}) {
+                result = fs_rename_parts(from_key, from, rt_text_word(scratch), from_part, from_shown, rt_text_word(scratch + I64{16}), to_part, to_shown, policy, error)
+                fs_held_cpart_drop(to_part, to_start, to_end)
+            }
+            fs_held_cpart_drop(from_part, from_start, from_end)
+        }
+    }
+    fs_held_release(rt_text_word(scratch))
+    fs_held_release(rt_text_word(scratch + I64{16}))
+    jet_rt_free(scratch, I64{32}, I64{8})
+    if (to_shown != I64{0}) -> jet_rt_string_drop(to_shown)
+    jet_rt_string_drop(from_shown)
+    result
+}

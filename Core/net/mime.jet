@@ -5,40 +5,49 @@
 // table is the same one CoreLib uses for static HTTP files; unknown
 // extensions are absent, never `application/octet-stream`.
 #Error
-pub enum MIMEError {
+enum MIMEError {
     Syntax
 }
 
-pub struct MIME {
-    pub top: String
-    pub sub: String
-    parameters: [[String]]
+struct MIME {
+    top: String
+    sub: String
+    priv parameters: [[String]]
 }
 
 impl MIME {
     /// The lowercase top-level type, such as `text`.
-    pub fn media_type(self) -> String Never! { ~self.top }
+    fn media_type(self) -> String Never! { self.top.copy() }
 
     /// The lowercase subtype, such as `html`.
-    pub fn subtype(self) -> String Never! { ~self.sub }
+    fn subtype(self) -> String Never! { self.sub.copy() }
 
     /// `type/subtype` without parameters.
-    pub fn essence(self) -> String Never! { "{self.top}/{self.sub}" }
+    fn essence(self) -> String Never! { "{self.top}/{self.sub}" }
 
     /// The value of the named parameter; names compare case-insensitively.
-    pub fn param(self, name: String) -> String? Never! {
+    fn param(self, name: String) -> String? Never! {
         key :: ascii_lower(name)
         loop row in self.parameters {
-            if row[0] == key -> return Val(~row[1])
+            if row[0] == key -> return Val(row[1].copy())
         }
         None
     }
 
     /// Validated `[name, value]` parameter rows in source order.
-    pub fn params(self) -> [[String]] Never! { ~self.parameters }
+    fn params(self) -> [[String]] Never! { self.parameters.copy() }
+
+    /// Canonical essence followed by parameters in their original order.
+    fn to_string(self) -> String Never! {
+        out := self.essence()
+        loop row in self.parameters {
+            if row.len() == 2 -> out = "{out}; {row[0]}={row[1]}"
+        }
+        out
+    }
 }
 
-pub fn parse(text: String) -> MIME MIMEError! {
+fn parse(text: String) -> MIME MIMEError! {
     raw :: trim_ascii(text)
     bytes :: raw.bytes()
     semi := bytes.len()
@@ -89,7 +98,7 @@ pub fn parse(text: String) -> MIME MIMEError! {
     Ok(MIME{top: top, sub: sub, parameters: parameters})
 }
 
-pub fn from_extension(ext: String) -> String? Never! {
+fn from_extension(ext: String) -> String? Never! {
     key :: ascii_lower(trim_dot(ext))
     if key == {
         "html" | "htm" -> Val("text/html")
@@ -117,7 +126,7 @@ pub fn from_extension(ext: String) -> String? Never! {
     }
 }
 
-pub fn extension(mime: String) -> String? Never! {
+fn extension(mime: String) -> String? Never! {
     essence :: ascii_lower(trim_params(mime))
     if essence == {
         "text/html" -> Val("html")
@@ -145,15 +154,15 @@ pub fn extension(mime: String) -> String? Never! {
 }
 
 fn trim_dot(ext: String) -> String Never! {
-    raw :: (~ext).bytes()
+    raw :: ext.bytes()
     i := 0
     loop i < raw.len() && raw[i] == (U8{46}) -> i = i + 1
     if i > 0 -> return slice(raw, i, raw.len())
-    return ~ext
+    return ext.copy()
 }
 
 fn trim_params(mime: String) -> String Never! {
-    raw :: (~mime).bytes()
+    raw :: mime.bytes()
     loop i in 0..<raw.len() {
         if raw[i] == (U8{59}) -> return trim_ascii(slice(raw, 0, i))
     }
@@ -217,4 +226,12 @@ fn slice(raw: [U8], start: Int, end: Int) -> String Never! {
         &out.push(raw[i])
         i = i + 1
     }
+}
+
+#Test("MIME render preserves parameter order") {
+    value :: parse("Text/Plain; Charset=\"UTF-8\"; boundary=abc") ?? panic("valid MIME")
+    assert(value.to_string() == "text/plain; charset=UTF-8; boundary=abc")
+    charset :: Val("UTF-8")
+    assert(value.param("CHARSET") == charset)
+    assert(value.param("missing") == None)
 }

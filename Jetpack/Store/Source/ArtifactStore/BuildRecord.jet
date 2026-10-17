@@ -1,24 +1,25 @@
 // Immutable per-build node evidence for `explain-build` (Rust
 // `jet_store::BuildRecord`). The CAS payload is JSON so tools can inspect it
 // without a second codec.
+use jet_foundation.[RecordField, RecordSection, RecordValue, record_encode, record_decode]
 
 STORE_BUILD_RECORD_SCHEMA :: prep { "jet.build-record/v1" }
 
 // One compiler-owned node execution recorded for `explain-build`.
-pub struct BuildNodeRecord {
-    pub kind: String
-    pub key: String
-    pub subject: String
-    pub duration_ms: Float
-    pub why_ran: String
-    pub inputs: [String]
+struct BuildNodeRecord {
+    kind: String
+    key: String
+    subject: String
+    duration_ms: Float
+    why_ran: String
+    inputs: [String]
 }
 
 // Immutable per-build node evidence stored in the machine-wide CAS.
-pub struct BuildRecord {
-    pub schema: String
-    pub program: String
-    pub nodes: [BuildNodeRecord]
+struct BuildRecord {
+    schema: String
+    program: String
+    nodes: [BuildNodeRecord]
 
     fn new(program: String, nodes: [BuildNodeRecord]) -> BuildRecord Never! {
         BuildRecord{schema: STORE_BUILD_RECORD_SCHEMA, program, nodes}
@@ -48,27 +49,27 @@ pub struct BuildRecord {
     // Parse a record, refusing any schema other than the current one.
     fn from_json(payload: String) -> BuildRecord BuildRecordError! {
         value :: foundation_parse_protocol_json(payload) ?? return Err(BuildRecordError{reason: "build record is not valid JSON"})
-        object :: store_build_record_object(value) ?? return Err(BuildRecordError{reason: "build record must be an object: expected a DataTree object"})
+        object :: store_build_record_object(value) ?? return Err(BuildRecordError{reason: "build record must be an object: expected a Dyn object"})
         schema_value :: object.get("schema") ?? return Err(BuildRecordError{reason: "build record is missing schema"})
-        schema :: store_build_record_text(schema_value) ?? return Err(BuildRecordError{reason: "build record schema is invalid: expected a DataTree string"})
+        schema :: store_build_record_text(schema_value) ?? return Err(BuildRecordError{reason: "build record schema is invalid: expected a Dyn string"})
         if schema != STORE_BUILD_RECORD_SCHEMA -> return Err(BuildRecordError{reason: "unsupported build record schema `{schema}`"})
         program_value :: object.get("program") ?? return Err(BuildRecordError{reason: "build record is missing program"})
-        program :: store_build_record_text(program_value) ?? return Err(BuildRecordError{reason: "build record program is invalid: expected a DataTree string"})
+        program :: store_build_record_text(program_value) ?? return Err(BuildRecordError{reason: "build record program is invalid: expected a Dyn string"})
         nodes_value :: object.get("nodes") ?? return Err(BuildRecordError{reason: "build record is missing nodes"})
-        values :: store_build_record_array(nodes_value) ?? return Err(BuildRecordError{reason: "build record nodes are invalid: expected a DataTree array"})
+        values :: store_build_record_array(nodes_value) ?? return Err(BuildRecordError{reason: "build record nodes are invalid: expected a Dyn array"})
         nodes := [BuildNodeRecord]{}
         loop item in values {
-            node :: store_build_record_object(item) ?? return Err(BuildRecordError{reason: "build record node is invalid: expected a DataTree object"})
+            node :: store_build_record_object(item) ?? return Err(BuildRecordError{reason: "build record node is invalid: expected a Dyn object"})
             duration_value :: node.get("duration_ms") ?? return Err(BuildRecordError{reason: "build record node is missing duration_ms"})
             duration_ms :: store_build_record_number(duration_value) ?? return Err(BuildRecordError{reason: "build record node duration_ms is invalid"})
             if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 {
                 return Err(BuildRecordError{reason: "build record node duration_ms is out of range"})
             }
             inputs_value :: node.get("inputs") ?? return Err(BuildRecordError{reason: "build record node is missing inputs"})
-            input_values :: store_build_record_array(inputs_value) ?? return Err(BuildRecordError{reason: "build record node inputs are invalid: expected a DataTree array"})
+            input_values :: store_build_record_array(inputs_value) ?? return Err(BuildRecordError{reason: "build record node inputs are invalid: expected a Dyn array"})
             inputs := [String]{}
             loop input in input_values {
-                &inputs.push(store_build_record_text(input) ?? return Err(BuildRecordError{reason: "build record node input is invalid: expected a DataTree string"}))
+                &inputs.push(store_build_record_text(input) ?? return Err(BuildRecordError{reason: "build record node input is invalid: expected a Dyn string"}))
             }
             &nodes.push(BuildNodeRecord{
                 kind: store_build_record_string_field(node, "kind"),
@@ -85,31 +86,36 @@ pub struct BuildRecord {
 
 // Why a build record payload was refused (the Rust `String` error).
 #Error
-pub struct BuildRecordError {
-    pub reason: String
+struct BuildRecordError {
+    reason: String
 }
 
-fn store_build_record_string_field(node: [String: DataTree], name: String) -> String BuildRecordError! {
+fn store_build_record_string_field(node: [String: Dyn], name: String) -> String BuildRecordError! {
     value :: node.get(name) ?? return Err(BuildRecordError{reason: "build record node is missing {name}"})
-    text :: store_build_record_text(value) ?? return Err(BuildRecordError{reason: "build record node {name} is invalid: expected a DataTree string"})
+    text :: store_build_record_text(value) ?? return Err(BuildRecordError{reason: "build record node {name} is invalid: expected a Dyn string"})
     Ok(text)
 }
 
-fn store_build_record_object(value: DataTree) -> [String: DataTree]? Never! {
+fn store_build_record_object(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
-        .Object(entries) -> Val(entries)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(entries) -> {
+            members := [String: Dyn]{}
+            loop pair in entries -> members[pair.key] = pair.value
+            Val(members)
+        }
         else -> None
     }
 }
 
-fn store_build_record_array(value: DataTree) -> [DataTree]? Never! {
+fn store_build_record_array(value: Dyn) -> [Dyn]? Never! {
     if value == {
         .Array(items) -> Val(items)
         else -> None
     }
 }
 
-fn store_build_record_text(value: DataTree) -> String? Never! {
+fn store_build_record_text(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
         else -> None
@@ -117,10 +123,116 @@ fn store_build_record_text(value: DataTree) -> String? Never! {
 }
 
 // A JSON number as a Float (Rust `Int as f64` or `Float`), or None.
-fn store_build_record_number(value: DataTree) -> Float? Never! {
+fn store_build_record_number(value: Dyn) -> Float? Never! {
     if value == {
         .Int(whole) -> Val(Float.from_int(whole))
         .Float(fraction) -> Val(fraction)
         else -> None
     }
+}
+
+// Rust project_state::last_run wire; malformed or missing workspace state is
+// a miss, never a fabricated node execution. I/O is relative to held roots.
+STORE_LAST_RUN_SCHEMA :: "jet.last-run/v1"
+STORE_LAST_RUN_MAX_BYTES :: 1048576
+
+fn store_build_last_run_encode(program: String, key: String) -> [U8] ArtifactStoreError! {
+    entry :: RecordValue.Map{fields: [RecordField]{
+        RecordField{name: "program", value: RecordValue.Str{value: program}},
+        RecordField{name: "record", value: RecordValue.Str{value: key}},
+    }}
+    encoded :: record_encode(STORE_LAST_RUN_SCHEMA, [RecordSection]{RecordSection{id: 1, elements: [RecordValue]{entry}}})
+    Ok(encoded.bytes ?? return Err(ArtifactStoreError.Config(encoded.problem ?? "last-run record encoding failed")))
+}
+
+fn store_build_last_run_decode(bytes: [U8], program: String) -> String? Never! {
+    decoded :: record_decode(bytes)
+    record :: decoded.record ?? return None
+    if record.schema != STORE_LAST_RUN_SCHEMA -> return None
+    loop section in record.sections {
+        if section.id != 1 || section.elements.len() == 0 -> next
+        if section.elements[0] == .Map(fields) {
+            found := String?{None}
+            key := String?{None}
+            loop field in fields {
+                if field.value == .Str(text) {
+                    if field.name == "program" -> found = Val(text)
+                    if field.name == "record" -> key = Val(text)
+                }
+            }
+            if found == program -> return key
+        }
+    }
+    None
+}
+
+fn store_build_last_run_directory(root: String, create: Bool) -[FS, Env]> files.Directory ArtifactStoreError! {
+    absolute :: if root.starts_with("/") -> root else -> files.join(files.cwd(), root)
+    parts := [String]{}
+    loop part in absolute.split("/") {
+        if part == "" -> next
+        if part == "." || part == ".." || part.contains("\\") || part.bytes().contains(U8{0}) {
+            return Err(ArtifactStoreError.Config("workspace root must have only plain path components"))
+        }
+        &parts.push(part)
+    }
+    held := files.open_directory("/")
+    loop part in parts -> held = held.open_directory(part)
+    loop part in ([String]{".jet", "last-run"}) {
+        if create && held.entry_stat(part) == .Err(error) {
+            if error == .NotFound(_) {
+                if held.create_directory(part, mode: Val(0o700)) == .Err(failure) {
+                    if failure == {
+                        .AlreadyExists(_) -> {}
+                        else -> { return Err(ArtifactStoreError.IO(failure)) }
+                    }
+                }
+            } else { return Err(ArtifactStoreError.IO(error)) }
+        }
+        held = held.open_directory(part)
+    }
+    Ok(held)
+}
+
+fn store_build_write_last_run(root: String, program: String, key: String) ArtifactStoreError! -[FS, Env, Time.Wait]> {
+    bytes :: store_build_last_run_encode(program, key)
+    held :: store_build_last_run_directory(root, true)
+    lock :: held.lock()
+    name :: ArtifactDigest.hash(program.bytes()).to_hex()
+    temp :: ".{name}.{process.current_pid()}"
+    writer := held.create(temp, if_exists: .Refuse, mode: Val(0o600))
+    if store_build_last_run_fill(&writer, bytes) == .Err(error) {
+        close(^writer)
+        held.remove(temp).drop("preserve the original last-run publication error")
+        return Err(ArtifactStoreError.IO(error))
+    }
+    close(^writer)
+    if held.rename(temp, name, if_exists: .Replace) == .Err(error) {
+        held.remove(temp).drop("preserve the original last-run rename error")
+        return Err(ArtifactStoreError.IO(error))
+    }
+    held.fsync()
+}
+
+fn store_build_last_run_fill(writer: &files.FileWriter, bytes: [U8]) IOError! -[FS, Time.Wait]> {
+    writer.write_all(bytes)
+    writer.fsync()
+}
+
+fn store_build_last_run(root: String, program: String) -[FS, Env, Time.Wait]> String? Never! {
+    held :: store_build_last_run_directory(root, false) ?? return None
+    name :: ArtifactDigest.hash(program.bytes()).to_hex()
+    reader :: held.open(name) ?? return None
+    info :: reader.stat() ?? return None
+    if !info.is_file || info.size > STORE_LAST_RUN_MAX_BYTES -> return None
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(65536) ?? return None
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > STORE_LAST_RUN_MAX_BYTES -> return None
+    }
+    after :: reader.stat() ?? return None
+    if after.id != info.id || after.size != bytes.len() -> return None
+    store_build_last_run_decode(bytes, program)
 }

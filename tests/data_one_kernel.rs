@@ -143,10 +143,6 @@ fn every_tier_includes_the_one_kernel() {
             "AOT embeds the kernel",
         ),
         (
-            "crates/jet-jit/src/Data.rs",
-            "the Cranelift JIT host includes the kernel",
-        ),
-        (
             "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
             "comptime and the interpreter include the kernel",
         ),

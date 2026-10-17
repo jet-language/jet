@@ -1,0 +1,1102 @@
+.TH JET 1 "" "jet VERSION" "Jet Manual"
+.SH Name
+jet \- the Jet compiler and project tool
+.SH Synopsis
+.B jet
+.RI [ command ] " " [ args ...]
+.SH Description
+jet builds, checks, runs, and tests Jet programs, and manages Jet projects and their dependencies. Output is plain when piped and colored on a terminal.
+.SH Commands
+.TP
+.B registry
+Publish and manage packages
+.TP
+.B registry publish
+Publish the current package
+.TP
+.B registry yank
+Stop new installs of a published version
+.TP
+.B registry keygen
+Create a package-signing key
+.TP
+.B registry key
+Manage the package-signing key
+.TP
+.B registry vendor
+Copy dependencies into vendor/
+.TP
+.B db
+Run a bounded SQL console and manage database migrations
+.TP
+.B db migrate
+Create, preview, inspect, apply, resume, and roll back versioned database migrations
+.TP
+.B inspect
+Explore code, builds, packages, and bindings
+.TP
+.B inspect types
+Show registered type and operator facts
+.TP
+.B inspect rights
+Show required and granted rights
+.TP
+.B inspect claims
+Show receipt-backed claims
+.TP
+.B inspect shapes
+Show semantic shapes and projections
+.TP
+.B inspect accel
+Show vector proof and acceleration gate decisions
+.TP
+.B inspect decisions
+Show compiler decisions and their evidence
+.TP
+.B inspect structure
+Show structure and lifecycle facts
+.TP
+.B inspect build
+Show build identity, provenance, and coverage
+.TP
+.B inspect gates
+Show the complete compile-time gate ledger
+.TP
+.B inspect graph
+Show the build graph
+.TP
+.B inspect query
+Search code and build information
+.TP
+.B inspect explain-build
+Explain why a target, action, or file is rebuilt
+.TP
+.B inspect compiler
+Read compiler facts as versioned JSON
+.TP
+.B inspect impact
+Show code affected by a symbol
+.TP
+.B inspect provenance
+Read dependency provenance
+.TP
+.B inspect digest
+Write the one-file LLM surface digest
+.TP
+.B inspect env
+List typed environment reads in a config surface
+.TP
+.B inspect semindex
+Search the code index
+.TP
+.B inspect output
+Inspect one selected Output
+.TP
+.B inspect expand
+Show expanded meaning of Jet code (use --json for canonical facts)
+.TP
+.B inspect schema
+Inspect saved data schema versions
+.TP
+.B inspect codemod
+Preview or apply code changes
+.TP
+.B inspect audit
+Inspect implicit copies, exercised memory witnesses, or dependencies
+.TP
+.B inspect sbom
+Create a software bill of materials
+.TP
+.B inspect bind
+Generate Jet bindings from a foreign header
+.TP
+.B inspect logs
+Show recent package build logs
+.TP
+.B inspect info
+Show package details
+.TP
+.B inspect outdated
+List dependencies with available updates
+.TP
+.B inspect reserved
+List reserved words and sigils
+.TP
+.B bind
+Resolve and record a checked foreign binding plan
+.TP
+.B project
+Inspect project files and modules
+.TP
+.B project parts
+List loaded and skipped project modules
+.TP
+.B self
+Manage the Jet installation and editor tools
+.TP
+.B self toolchain
+Show the Jet version selected for this project
+.TP
+.B self update
+Verify or install a signed Jet toolchain release
+.TP
+.B self doctor
+Find and fix toolchain problems
+.TP
+.B self completions
+Print shell completions
+.TP
+.B self man
+Print the Jet manual
+.TP
+.B self devtools
+Run Jet maintenance tools
+.TP
+.B self lsp
+Start the language server
+.TP
+.B self exec
+Execute one command in an authority-bound workspace
+.TP
+.B diff
+Compare two Jet programs by meaning
+.TP
+.B merge
+Merge Jet programs without losing code structure
+.TP
+.B review
+Review meaning, authority, and proof changes
+.TP
+.B run
+Run a program or project
+.TP
+.B jobs
+List, inspect, or watch named project jobs
+.TP
+.B generate
+Run an explicit source generator with authority and a receipt
+.TP
+.B check
+Check code without creating a binary
+.TP
+.B fill
+Propose checked code for typed goals
+.TP
+.B test
+Run tests
+.TP
+.B test-compare
+Compare one recorded observation corpus against its relation
+.TP
+.B prove
+Create a proof report for code and tests
+.TP
+.B status
+Show what the project has proved
+.TP
+.B build
+Create a native executable
+.TP
+.B package
+Create a desktop or game application bundle
+.TP
+.B flash
+Flash firmware to a target board
+.TP
+.B cc
+Compile and link C with the pinned Jetpack toolchain
+.TP
+.B c++
+Compile and link C++ with the pinned Jetpack toolchain
+.TP
+.B dev
+Watch and run a program; optionally open Canvas or a local app
+.TP
+.B learn
+Practice Jet with offline code exercises
+.TP
+.B try
+Speculatively apply a plan and re-check its claims
+.TP
+.B debug
+Debug a program from Jet source
+.TP
+.B repl
+Try Jet code interactively
+.TP
+.B notebook
+Open a Jet notebook (.jetnb) or Jupyter adapter
+.TP
+.B import
+Convert supported source code into editable Jet
+.TP
+.B new
+Create a Jet project or backend source scaffold
+.TP
+.B fmt
+Format Jet and configured project files
+.TP
+.B fix
+Apply safe automatic fixes, including `fix memory`
+.TP
+.B audit
+Inspect implicit copies, exercised memory witnesses, or dependencies
+.TP
+.B lint
+Run optional code-quality checks
+.TP
+.B doc
+Generate reference documentation
+.TP
+.B explain
+Explain a diagnostic code, build fact, generic-module value, or typed cost
+.TP
+.B env
+Open the project development shell
+.TP
+.B env test
+Run environment checks in a clean environment
+.TP
+.B env hook
+Print the shell auto-activation hook
+.TP
+.B env sync
+Apply typed managed environment files
+.TP
+.B env info
+Show the typed environment plan
+.TP
+.B shared-store
+Manage the optional shared package broker
+.TP
+.B shared-store install
+Install the optional shared package broker
+.TP
+.B shared-store enroll
+Grant a user shared-store broker access
+.TP
+.B shared-store status
+Show shared-store broker configuration
+.TP
+.B shared-store broker
+Serve one shared-store broker request
+.TP
+.B cache
+Manage the machine-wide artifact store
+.TP
+.B cache status
+Show machine-wide artifact store usage
+.TP
+.B cache prune
+Prune the artifact store to a target size
+.TP
+.B cache limit
+Set the host-wide artifact store limit
+.TP
+.B remote
+Manage host-owned remote builders
+.TP
+.B trust
+Review or change trusted authority
+.TP
+.B image
+Build a declared container image
+.TP
+.B os
+Manage Jetos machines and images
+.TP
+.B os push
+Deploy one or more Jetos machines
+.TP
+.B os bridge
+Convert an existing system configuration to Jet
+.TP
+.B os services
+Manage development services
+.TP
+.B os config
+Manage Jet settings and trust
+.TP
+.B add
+Add and download a dependency
+.TP
+.B remove
+Remove a dependency
+.TP
+.B fetch
+Download locked dependencies
+.TP
+.B search
+Search the local package catalog
+.TP
+.B find
+Find code by type, effect, or example
+.TP
+.B update
+Update dependency or toolchain pins
+.TP
+.B init
+Create package settings in this directory
+.TP
+.B split
+Extract closed Package facts into Configs or members
+.TP
+.B Fold
+Reverse a recorded Package source transition
+.TP
+.B gc
+Show values moved into automatic memory management
+.TP
+.B gc report
+Show values moved into automatic memory management
+.TP
+.B clean
+Remove unused package-store data
+.TP
+.B emit
+Print generated build output
+.TP
+.B eval
+Evaluate pure Jet and print the value (`--json` for JSON)
+.TP
+.B budget
+Check performance limits or update baselines
+.TP
+.B perf
+Collect and inspect performance traces
+.TP
+.B perf run
+Run a program and write a .jettrace
+.TP
+.B perf test
+Run tests and write a .jettrace
+.TP
+.B perf attach
+Attach to a running process and write a .jettrace
+.TP
+.B perf view
+Show a .jettrace summary
+.TP
+.B perf compare
+Compare two .jettrace artifacts
+.TP
+.B perf export
+Export a loss-declared projection of a .jettrace
+.TP
+.B fuzz
+Find failing inputs for property tests
+.TP
+.B version
+Show the Jet version
+.TP
+.B help
+Show command help
+.SH Flags
+.TP
+.B --live
+With inspect: Process id for a live plane scope
+.TP
+.B --observe
+With run: Expose bounded live runtime facts for attachment
+.TP
+.B --raw-frames
+With debug: Show generated Rust frames and scopes (expert)
+.TP
+.B --dap
+With debug: Speak the Debug Adapter Protocol over stdio
+.TP
+.B --gc-trace
+With run/dev: Record bounded automatic GC-promotion evidence
+.TP
+.B --structural
+With diff/merge: Compare checked definitions by semantic identity
+.TP
+.B --base-receipt
+With review: Proof receipt for the base change-set side
+.TP
+.B --receipt
+With review: Proof receipt for the reviewed change-set side
+.TP
+.B --out
+With structural merge: Write the checked result to this path
+.TP
+.B --repo
+With merge install-driver: Git worktree to configure
+.TP
+.B --json
+Emit machine-readable facts or diagnostics
+.TP
+.B --topic
+With inspect digest: Emit one digest topic
+.TP
+.B --to
+With publish/cache/db migrate: Foreign registry, prune target size, or migration target version
+.TP
+.B --list-topics
+With inspect digest: List digest topics
+.TP
+.B --kind
+With inspect gates/package: Filter one gate or bundle kind
+.TP
+.B --quiet
+Suppress non-error status output
+.TP
+.B --color
+Color: auto | always | never
+.TP
+.B --version
+With package/new: Set bundle or migration version; global flag prints compiler version
+.TP
+.B --endpoint
+With self-update: Signed toolchain channel endpoint
+.TP
+.B --channel
+With self-update: Toolchain channel name
+.TP
+.B --platform
+With self-update: Toolchain target triple
+.TP
+.B --trust-key
+With self-update: Public trust-key file
+.TP
+.B --apply
+With self-update/generate/new: Apply the verified artifact or planned source writes
+.TP
+.B --preview
+With new: Preview deterministic backend source writes without applying them
+.TP
+.B --remove
+With new: Remove only unchanged outputs recorded by the scaffold receipt
+.TP
+.B --path
+With new: Route or output path, defaulting to `/<name>`
+.TP
+.B --route
+With new: Alias for `--path`
+.TP
+.B --model
+With new: Model name recorded beside the route source
+.TP
+.B --allow-unofficial
+With self-update: Explicitly allow a local keyless channel
+.TP
+.B --check
+With fmt/learn: Check without changing files (CI gate)
+.TP
+.B --lang
+With fmt: Delegate non-Jet files to the environment formatter for this language
+.TP
+.B --restore-role-files
+With init: Restore the exact pre-package.jet role files
+.TP
+.B --diff
+With fmt --check: Also print unified diffs for each changed file
+.TP
+.B --simplify
+With fmt: Rewrite to the simplest ratified spelling
+.TP
+.B --changed
+With fmt: Format only VCS-changed .jet files (requires git)
+.TP
+.B --explicit-copies
+With fmt: Materialize implicit read-view copies as `~`
+.TP
+.B --skipped
+With project parts: Show modules omitted from automatic discovery
+.TP
+.B --stdin-path
+With fmt -: Path label used in diagnostics when reading from stdin
+.TP
+.B --small
+With build/run/jobs: Favor a smaller binary
+.TP
+.B --lib
+With build: Emit the native Library and C header
+.TP
+.B --output
+With build/run/dev/jobs/package: Select a named output (build --lib selects a Library; Canvas uses it as the initial selection)
+.TP
+.B --locked
+With build/fetch/jobs/run: Require locked dependency and provenance facts
+.TP
+.B --effect
+With find: Require an effect such as FS.Read
+.TP
+.B --example
+With find: Search by input/output example
+.TP
+.B --lock
+With fetch/db migrate/new: Lock dependency fetching or choose a migration/scaffold lock policy
+.TP
+.B --read-only
+With shared-store enroll: Grant read-only broker access
+.TP
+.B --host
+With cache limit: Host-wide store cap
+.TP
+.B --fd
+With shared-store broker: Inherited broker socket descriptor
+.TP
+.B -p
+With run/dev/debug/check/build/jobs: Pick a workspace member by name
+.TP
+.B --annotated
+With new: Include commented example deps
+.TP
+.B --force
+With publish: Bypass pre-publish gate (with warning)
+.TP
+.B --no-sign
+With publish: Skip the optional author signature (registry metadata is still signed)
+.TP
+.B --registry
+With keygen/key: Registry name to generate or manage a signing key for
+.TP
+.B --pkg
+With bind: Library name for the generated binding module
+.TP
+.B --shape
+With bind: Binding facade shape: automatic or native
+.TP
+.B --freeze
+With bind: Record the resolved binding plan in the project lock
+.TP
+.B --policy
+With bind: Binding policy: automatic or frozen
+.TP
+.B --accept
+With bind --update: Accept exactly this candidate plan digest
+.TP
+.B --import
+With build: Import and inspect an existing foreign build graph
+.TP
+.B --clang
+With bind cpp: Path to the clang binary used to parse the header
+.TP
+.B --ar
+With bind cpp: Path to the ar archiver used to build the static library
+.TP
+.B --before
+With schema squash: Re-baseline migrations before this version
+.TP
+.B --spdx
+With sbom: Emit SPDX tag-value format (default)
+.TP
+.B --cyclonedx
+With sbom: Emit CycloneDX JSON format
+.TP
+.B --advisory-db
+With audit: Path to advisory database file
+.TP
+.B --vendor-dir
+With vendor: Directory to copy dependencies into (default vendor/)
+.TP
+.B --sbom
+With build: Also write an SPDX SBOM next to the binary
+.TP
+.B --verbose
+With build/jobs: Print the bridge steps; with check: print the status line, proof rows, and receipt notices; with run/dev/test: show advisory lints; with explain: show a syntax token's registry name and decision
+.TP
+.B --template
+With new: Start from a named template: cli, ui, web, or overrides
+.TP
+.B --sort
+With help: Order commands by use (frequency, the default), A to Z (az), or Z to A (za)
+.TP
+.B --online
+With doctor: Allow network checks
+.TP
+.B --fix
+With doctor: Apply auto-fixable problems
+.TP
+.B --dry-run
+With package/rewrite commands/generate: Preview changes without writing
+.TP
+.B --entry
+With generate: Source file containing the generator job
+.TP
+.B --keep
+With try: Keep a clean speculative edit
+.TP
+.B --edition
+With fix: Apply edition migration rewrites --edition=<year>
+.TP
+.B --all
+With fix: Apply safety classes beyond formatting and behavior-preserving
+.TP
+.B --try-anyway
+With dev --interpret: Interpret past unsupported features (no guarantees)
+.TP
+.B --interpret
+With run/dev/jobs: Run in the in-process evaluator instead of building and executing
+.TP
+.B --restart
+With dev: Always rerun from scratch after a save
+.TP
+.B --swap
+With dev: Hot-swap compatible edits and restart after type changes
+.TP
+.B --reload
+With explain: Explain the checked reload decision for a source or project path
+.TP
+.B --watch
+With run/dev/learn/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once
+.TP
+.B --graph
+With jobs: Show the checked job dependency graph
+.TP
+.B --status
+With jobs: Show fresh or stale status for declared jobs
+.TP
+.B --explain
+With jobs/package: Explain dependencies, phases, cache identity, and admission facts
+.TP
+.B --canvas
+With dev: Open the full Canvas IDE over this dev session
+.TP
+.B --app
+With dev: Select a checked local-app function
+.TP
+.B --share
+With dev: Select local-app sharing authority: loopback or lan
+.TP
+.B --canvas-host
+With dev: With --canvas, bind host (loopback by default)
+.TP
+.B --canvas-port
+With dev: With --canvas, bind an explicit port
+.TP
+.B --canvas-transport
+With dev: With --canvas, select the named transport
+.TP
+.B --canvas-authority
+With dev: With --canvas, select loopback or remote authority
+.TP
+.B --canvas-audit
+With dev: With --canvas, enable request/rebuild audit output
+.TP
+.B --project
+With repl: Load package settings and imports from this directory
+.TP
+.B --console
+With repl: Open the project-loaded capability-gated console
+.TP
+.B --sandbox
+With repl: Use the reversible data sandbox (`--sandbox data`)
+.TP
+.B --console-ttl
+With repl: Expire console authority after this many milliseconds
+.TP
+.B --protocol
+With notebook: Use the bounded headless JSONL/script session
+.TP
+.B --headless
+With notebook: Use the bounded headless session
+.TP
+.B --bind
+With notebook: Bind the local HTTP client to this address
+.TP
+.B --token
+With notebook/dev: Require a bearer token for the session
+.TP
+.B --no-prepare
+With run: Refuse Jetpack project environment preparation
+.TP
+.B --pure
+With eval: Reject code with side effects
+.TP
+.B --allow
+With run/build/jobs/repl/db: Allow comma-separated effect roots or leaves as --allow=RIGHTS
+.TP
+.B --deny
+With run/build/jobs/repl/db: Deny comma-separated effect roots or leaves as --deny=RIGHTS
+.TP
+.B --offline
+With env/run/dev/test/cc/c++: Reuse only cached signed toolchain and package data
+.TP
+.B --fixtures
+With env/run/dev/test/cc/c++: Use an explicit fixture bundle
+.TP
+.B --project-root
+With cc/c++: Scope source paths to a project directory
+.TP
+.B --build-root
+With cc/c++: Scope output paths to a build directory
+.TP
+.B -c
+With cc/c++: Compile sources without linking
+.TP
+.B -o
+With cc/c++: Choose the output path
+.TP
+.B -MMD
+With cc/c++: Emit user-header dependency data
+.TP
+.B -MD
+With cc/c++: Emit dependency data
+.TP
+.B -MF
+With cc/c++: Choose the dependency-file path
+.TP
+.B -MT
+With cc/c++: Choose the dependency target
+.TP
+.B --sysroot
+With cc/c++: Reserved; target selects the pinned sysroot
+.TP
+.B -I
+With cc/c++: Add a project-relative include path
+.TP
+.B -D
+With cc/c++: Define a preprocessor symbol
+.TP
+.B -L
+With cc/c++: Add a project-relative library path
+.TP
+.B -l
+With cc/c++: Link a declared library
+.TP
+.B -std
+With cc/c++: Select the language standard
+.TP
+.B -dumpmachine
+With cc/c++: Print the pinned target triple
+.TP
+.B -print-sysroot
+With cc/c++: Print the pinned virtual sysroot
+.TP
+.B -dumpversion
+With cc/c++: Print the pinned compiler version
+.TP
+.B -v
+With cc/c++: Print pinned toolchain details or compile verbosely
+.TP
+.B --gate
+With build/run/dev/jobs: Allow one audited gate as --gate name=allow
+.TP
+.B --target
+With build/run/dev/jobs/package/cc/c++/flash: Select a target (triple, board.<name>, or named database target)
+.TP
+.B --up
+With db migrate/new: Checked forward SQL
+.TP
+.B --sql
+With db migrate/new: Alias for checked forward SQL
+.TP
+.B --down
+With db migrate/new: Checked inverse SQL for rollback
+.TP
+.B --database
+With db migrate: Project-relative database path (receipt identity is redacted)
+.TP
+.B --risk
+With db migrate/new: Data-risk note shown before writes
+.TP
+.B --step
+With db migrate: Number of ordered migrations to apply or roll back
+.TP
+.B --format
+With db: Output format: human, text, json, jsonl, or csv
+.TP
+.B --csv
+With db: Select deterministic CSV output
+.TP
+.B --jsonl
+With db: Emit one JSON value per row
+.TP
+.B --machine
+With db: Select machine-readable output
+.TP
+.B --human
+With db: Select human-readable output
+.TP
+.B --no-color
+With db: Disable color in console output
+.TP
+.B --force-color
+With db: Force color in console output
+.TP
+.B --query
+With db: Execute one SQL query
+.TP
+.B --script
+With db: Execute SQL from a script path
+.TP
+.B --table
+With db: Set an explicit table identity as NAME=PATH
+.TP
+.B --max-rows
+With db: Bound decoded input rows
+.TP
+.B --max-bytes
+With db: Bound source or script bytes
+.TP
+.B --max-output-bytes
+With db: Bound one rendered result
+.TP
+.B --image
+With flash: Firmware image to program
+.TP
+.B --audit
+With flash: Target audit JSON for the image
+.TP
+.B --adapter
+With flash: Flash adapter: probe-rs, openocd, or emulator
+.TP
+.B --package
+With package: Set the bundle package identifier
+.TP
+.B --name
+With package: Set the bundle executable name
+.TP
+.B --executable
+With package: Path to the executable to bundle
+.TP
+.B --icon
+With package: Path to the bundle icon
+.TP
+.B --icon-format
+With package: Icon format: png, icns, ico, or svg
+.TP
+.B --icon-size
+With package: Icon size in pixels
+.TP
+.B --publisher
+With package: Publisher metadata
+.TP
+.B --description
+With package: Application description metadata
+.TP
+.B --update-channel
+With package: Updater channel
+.TP
+.B --update-url
+With package: Updater URL
+.TP
+.B --game
+With package: Build a game bundle
+.TP
+.B --source
+With package: Project source or package root for a game bundle
+.TP
+.B --phase
+With package: Comma-separated game phases: build, cook, stage, package, export, deploy, run
+.TP
+.B --backend
+With package: Game build backend: aot
+.TP
+.B --renderer
+With package: Game renderer authority: headless or raylib
+.TP
+.B --cook
+With package: Alias for --cook-mode
+.TP
+.B --cook-mode
+With package: Asset cooking mode: fast, reproducible, or scripts-only
+.TP
+.B --export
+With package: Export phase or named export preset
+.TP
+.B --export-preset
+With package: Named export preset: default, store, or headless
+.TP
+.B --deploy
+With package: Include the deploy phase
+.TP
+.B --deploy-to
+With package: Explicit deployment destination
+.TP
+.B --crash-reporter
+With package: Crash reporter policy: off, on, or opt-in
+.TP
+.B --crash-consent
+With package: Crash reporter consent: not-requested, granted, or denied
+.TP
+.B --cancel
+With package: Cancel owned game staging
+.TP
+.B --resume
+With package: Resume an owned game stage
+.TP
+.B --clean
+With package: Force-clean owned game cache/staging
+.TP
+.B --force-clean
+With package: Alias for --clean
+.TP
+.B --scripts-only
+With package: Cook only script assets
+.TP
+.B --run-now
+With package: Explicitly opt into the run phase
+.TP
+.B --run
+With package: Include the run phase
+.TP
+.B --env
+With env/run/dev/test: Select one declared env.<name> module
+.TP
+.B --preset
+With env/run/dev/test: Select one declared environment preset
+.TP
+.B --explain-partition
+With build --target=web: Show which code becomes JavaScript or WebAssembly
+.TP
+.B --fresh
+With test: Bypass only cached test results (default off); the build cache remains reusable
+.TP
+.B --docs
+With test: Run checked documentation examples only (default off)
+.TP
+.B --where
+With test: Filter recorded package, dependency, path, tag, or status facts (default all) as --where=<expr>
+.TP
+.B --capture
+With test: Capture output as failed, all, or none (default failed); watch key o cycles it
+.TP
+.B --no-capture
+With dev: Disable automatic replay capture for this session
+.TP
+.B --update-snapshots
+With test: Replace expected snapshot output
+.TP
+.B --update
+With import: Merge generated Jet into an existing target
+.TP
+.B --coverage
+With test/inspect build: Show function or diagnostic coverage
+.TP
+.B --verify
+With build: Rebuild and compare one indexed receipt artifact
+.TP
+.B --rust
+With emit: Print generated Rust source
+.TP
+.B --emit-generated
+With build: Copy generated Jet sources into `.jet/generated/`
+.TP
+.B -u
+Short form of --update-snapshots
+.TP
+.B --release
+With build/run/dev/jobs/test: Optimize for release
+.TP
+.B --profile
+With build/run/dev/jobs/package/test: How hard to optimize: release, debug, ci, hardened, or a named optimization bundle
+.TP
+.B --set
+With build/run/dev/jobs/test: Set one declared package setting as key=value
+.TP
+.B --threads
+With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads
+.TP
+.B --builder
+With build/jobs: Select a previously bound remote builder
+.TP
+.B --a11y
+With lint: Check roles, labels, and other accessibility basics
+.TP
+.B --complexity
+With lint: Report per-function cognitive complexity
+.TP
+.B --cost
+With lint/explain: Show typed hidden-copy and fallback costs
+.TP
+.B --max
+With lint --complexity: Fail when a function exceeds this score
+.TP
+.B --scope
+With inspect: Choose a ledger or trust scope
+.TP
+.B --core
+With inspect structure: Show the canonical core module export facts
+.TP
+.B --filter
+With test: Only run claims whose name contains --filter=<substr>
+.TP
+.B --grade
+With test: Select the generated property-test grade as --grade=generated
+.TP
+.B --shuffle
+With test: Run tests in random (or --shuffle=<seed>) order
+.TP
+.B --serial
+With test: Run tests one at a time instead of the parallel default
+.TP
+.B --show-default
+With run/build/dev/test: Use and report the stock default
+.TP
+.B --measure
+With test: Measure `.measure` claims
+.TP
+.B --browser
+With test/db: Select browser engines for tests or serve a loopback database inspector
+.TP
+.B --browser-retries
+With test: Retry each browser attempt up to five times
+.TP
+.B --browser-reporter
+With test: Browser report format: text, json, or html
+.TP
+.B --browser-ui
+With test: Write/open the local browser report viewer
+.TP
+.B --browser-visual
+With test: Capture screenshots for passing browser attempts
+.TP
+.B --browser-trace
+With test: Keep redacted BiDi trace entries for every browser attempt
+.TP
+.B --browser-scaffold
+With test: Create an isolated browser-test project as --browser-scaffold=<name>
+.TP
+.B --record
+With run/dev/test/debug: Record a named replay as --record=<name>
+.TP
+.B --replay
+With inspect/debug: Consume a named replay artifact
+.TP
+.B --iterations
+With fuzz: Case budget --iterations=<n> (default 1000)
+.TP
+.B --time
+With fuzz: Wall-clock budget in seconds --time=<n>
+.TP
+.B --seed
+With fuzz: Base PRNG seed --seed=<n> (default: fixed, reproducible)
+.TP
+.B --corpus
+With fuzz: Corpus directory --corpus=<dir> (default: .jet/fuzz/<test>)
+.TP
+.B --lens
+With prove: Project the human report by an exact evidence facet
+.TP
+.B --facts
+With expand: Project inline, memory, web, effects, layout, derive, templates, or callable-signature facts --facts=<lens>
+.TP
+.B --annotations
+With budget: CI annotations auto, none, or github
+.TP
+.B --baseline
+With budget update: Selected baseline name
+.TP
+.B --bootstrap
+With budget update: Create absent or stale baseline history
+.TP
+.B --accept-regression
+With budget update: Explicitly accept a regression
+.TP
+.B --reason
+With exceptional budget update: Checked-in reason
+.TP
+.B --yes
+With budget update: Apply a valid non-interactive plan
+.TP
+.B -y
+Short form of --yes
+.SH Files
+.TP
+.B pkg.jet
+The project manifest.
+.SH See Also
+jet-explain(1)

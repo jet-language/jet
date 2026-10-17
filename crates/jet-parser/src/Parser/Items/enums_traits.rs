@@ -92,6 +92,7 @@ impl<'a> Parser<'a> {
         let (name, name_span) = self.expect_ident("for a variant name")?;
         for marker in &serde_markers {
             self.bind_rule_fact(
+                &marker.name,
                 marker.name_span,
                 Some(name_span),
                 crate::Policy::RuleSite::Variant,
@@ -301,7 +302,7 @@ impl<'a> Parser<'a> {
         target: Span,
     ) {
         for marker in markers {
-            self.bind_rule_fact(marker.name_span, Some(target), crate::Policy::RuleSite::Impl);
+            self.bind_rule_fact(&marker.name, marker.name_span, Some(target), crate::Policy::RuleSite::Impl);
         }
     }
 
@@ -620,7 +621,7 @@ impl<'a> Parser<'a> {
         if !matches!(self.peek().kind, TokKind::Hash) {
             return false;
         }
-        let (name, after_name) = if matches!(self.peek2().kind, TokKind::Bang) {
+        let (name, mut after_name) = if matches!(self.peek2().kind, TokKind::Bang) {
             let TokKind::Ident(name) = &self.toks[self.pos + 2].kind else {
                 return false;
             };
@@ -631,7 +632,13 @@ impl<'a> Parser<'a> {
             };
             (name, self.pos + 2)
         };
-        if !Self::is_pascal_type_marker_name(name) || Self::is_reserved_item_rule_prefix(name) {
+        let qualified = matches!(self.toks.get(after_name).map(|token| &token.kind), Some(TokKind::Dot));
+        if qualified {
+            let name_index = if matches!(self.peek2().kind, TokKind::Bang) { self.pos + 2 } else { self.pos + 1 };
+            let Some(end) = super::super::marker_path_end(self.toks, name_index) else { return false };
+            after_name = end;
+        }
+        if !qualified && (!Self::is_pascal_type_marker_name(name) || Self::is_reserved_item_rule_prefix(name)) {
             return false;
         }
         self.type_marker_prefix_leads_to_type_def(after_name)
@@ -653,7 +660,6 @@ impl<'a> Parser<'a> {
                 | Syntax::KW_SANITIZER
                 | Syntax::KW_STATE
                 | Syntax::KW_TRANSITION
-                | Syntax::MARKER_PUB_FILE
                 | Syntax::MARKER_UNIT_FAMILY
                 | Syntax::MARKER_LAYOUT
                 | Syntax::MARKER_PUBLISHED_SCHEMA
@@ -699,9 +705,12 @@ impl<'a> Parser<'a> {
                         None => return false,
                     };
                 }
-                Some(TokKind::Ident(name)) if Self::is_pascal_type_marker_name(name) => {
-                    i += 2; // `#`/`@` and the ident
-                    i = match Self::skip_balanced_parens(&self.toks, i) {
+                Some(TokKind::Ident(_)) | Some(TokKind::Bang) => {
+                    let start = i + if matches!(self.toks[i + 1].kind, TokKind::Bang) { 2 } else { 1 };
+                    let Some(end) = super::super::marker_path_end(self.toks, start) else { return false };
+                    let TokKind::Ident(name) = &self.toks[start].kind else { return false };
+                    if end == start + 1 && !Self::is_pascal_type_marker_name(name) { break; }
+                    i = match Self::skip_balanced_parens(&self.toks, end) {
                         Some(n) => n,
                         None => return false,
                     };

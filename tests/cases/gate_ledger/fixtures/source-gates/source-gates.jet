@@ -1,0 +1,17 @@
+#UnitFamily(Length, base: meter) {
+    meter
+    thirdish(scale: 2/3)
+}
+tag Input { deny: [IO] }
+#Scrub(Input) fn scrub(raw: #Input String) -> String { raw.copy() }
+#MustUse fn discardable() -> Int { 1 }
+
+fn run() {
+    #FX(authority: IO) {}
+    discardable().drop("intentional result discard")
+    detached :: task 42
+    detached.detach()
+    approx(1)
+    wrapping(1 + 2)
+    Thirdish.from_meter_rounded(1meter, .NearestEven, digits: 0).drop("rounded conversion gate")
+}

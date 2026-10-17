@@ -58,6 +58,28 @@ fn run() {
     assert!(res.is_ok(), "injected RNG should compile: {:?}", res.err());
 }
 
+#[test]
+fn rng_int_native_word_boundary_preserves_wide_ranges() {
+    if !common::have_rustc() {
+        return;
+    }
+    let src = r#"
+use core.math.random as random
+fn run() {
+    first := random.rng(7)
+    replay := random.rng(7)
+    a :: &first.int(-3000000000000000000, 6000000000000000000)
+    b :: &replay.int(-3000000000000000000, 6000000000000000000)
+    print(a == b)
+    print(a >= -3000000000000000000 && a <= 6000000000000000000)
+    print(&first.int(6000000000000000000, 6000000000000000000))
+}
+"#;
+    let (code, stdout, stderr) = common::build_and_run("rng_native_words", "main", src);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "true\ntrue\n6000000000000000000\n");
+}
+
 /// The deterministic capability constructors (`Clock.new`, `random.rng`) are
 /// themselves usable inside a `#Pure fn` — they carry no ambient effect.
 #[test]
@@ -125,7 +147,7 @@ struct ClockBox {
 fn run() {
     clock := Clock.system()
     before := clock.now()
-    fork := ~clock
+    fork := clock.copy()
     fork_before := fork.now()
     time.sleep(2ms)
     after := clock.now()
@@ -135,12 +157,12 @@ fn run() {
     print(clock.now() >= after)
     print(clock.now() >= reported)
     manual := Clock.new(1000)
-    copied := ~manual
+    copied := manual.copy()
     &copied.tick(5000)
     print(manual.now())
     print(copied.now())
     boxed := ClockBox{ clock: Clock.new(7) }
-    copied_box := ~boxed
+    copied_box := boxed.copy()
     &copied_box.clock.tick(3)
     print(boxed.clock.now())
     print(copied_box.clock.now())
@@ -158,7 +180,6 @@ fn run() {
     let path = path.to_str().unwrap();
     for args in [
         &["run", path][..],
-        &["run", "--interpret", path][..],
         &["run", "--release", path][..],
     ] {
         let output = common::jet_cli_output_with_stdin(args, "");
@@ -221,7 +242,7 @@ struct Holder {
     clock: Clock
 }
 fn copy_clock(holder: Holder) -[]> Clock {
-    return ~holder.clock
+    return holder.clock.copy()
 }
 fn run() {
     holder := Holder{ clock: Clock.system() }
@@ -242,7 +263,7 @@ struct Holder {
     clock: Clock
 }
 fn copy_holder(holder: Holder) -[]> Holder {
-    return ~holder
+    return holder.copy()
 }
 fn run() {
     holder := Holder{ clock: Clock.system() }
@@ -264,7 +285,7 @@ enum BoxedClock {
     Held(Clock)
 }
 fn copy_box(value: BoxedClock) -[]> BoxedClock {
-    return ~value
+    return value.copy()
 }
 fn show_box(value: BoxedClock) -[]> String {
     return "{value:Debug}"
@@ -329,13 +350,13 @@ fn pure_code_rejects_clock_observation_through_an_imported_nominal_type() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("clock_box.jet"),
-        "pub enum BoxedClock {\n    Held(Clock)\n}\n",
+        "enum BoxedClock {\n    Held(Clock)\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
     std::fs::write(
         &main,
-        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) -[]> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) -[]> String {\n    return \"{value:Debug}\"\n}\nfn run() {}\n",
+        "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) -[]> clock_box.BoxedClock {\n    return value.copy()\n}\nfn show_box(value: clock_box.BoxedClock) -[]> String {\n    return \"{value:Debug}\"\n}\nfn run() {}\n",
     )
     .unwrap();
 
@@ -748,14 +769,14 @@ fn run() -[Rand, IO]> {
 "#,
     )
     .unwrap();
-    let first = run_fresh_draw_program(&uuid_dir, &["run", "--interpret", "uuid.jet"]);
-    let second = run_fresh_draw_program(&uuid_dir, &["run", "--interpret", "uuid.jet"]);
+    let first = run_fresh_draw_program(&uuid_dir, &["run", "uuid.jet"]);
+    let second = run_fresh_draw_program(&uuid_dir, &["run", "uuid.jet"]);
     assert_ne!(first.trim(), second.trim(), "uuid.v4 repeated across runs");
     let rust = run_fresh_draw_program(&uuid_dir, &["emit", "--rust", "uuid.jet"]);
     for id in [first.trim(), second.trim()] {
         assert!(!rust.contains(id), "generated Rust contains the drawn UUID {id}");
     }
-    for tier in [&["run", "seeded.jet"][..], &["run", "--interpret", "seeded.jet"]] {
+    for tier in [&["run", "seeded.jet"][..], &["run", "--release", "seeded.jet"]] {
         assert_eq!(
             run_fresh_draw_program(&seeded_dir, tier).trim(),
             "true",

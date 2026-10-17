@@ -164,6 +164,32 @@ fn ordinary_checked_text_source_compiles() {
 }
 
 #[test]
+fn checked_text_holes_keep_generic_arguments_and_dynamic_constructors() {
+    let source = r#"
+#Error
+enum TextError { Empty }
+Token :: distinct String
+impl Token.CheckedText {
+    type Error = TextError
+    fn check(text: String) TextError! -[]> {
+        if text == "" -> return Err(TextError.Empty)
+        return Ok()
+    }
+    fn encode_hole<T: Printable>(value: T) -[]> String {
+        return "[{value}]"
+    }
+}
+fn run() {
+    literal :: Token{"accepted {7} {true}"}
+    dynamic :: Token.from("accepted")
+    dynamic ? value -> print(value.raw()) ! error -> print("rejected")
+    print(literal.raw())
+}
+"#;
+    compile(source).expect("checked hole types and synthetic from must reach canonical lowering");
+}
+
+#[test]
 fn malformed_checked_text_impl_reports_the_trait_contract() {
     let source = r#"
 Pattern :: distinct String
@@ -232,7 +258,7 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
     assert!(generated.rust.contains("__jet_errconv_PatternError_to_Err"));
 
     let (jit_code, jit_out, jit_err) =
-        tir_support::jit_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
+        tir_support::default_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
     assert_eq!(
         jit_code, 1,
         "dynamic checked text failure must escape: {jit_err}"
@@ -248,7 +274,7 @@ fn dynamic_checked_text_from_keeps_the_shared_error_report() {
     assert!(jit_err.contains("Trail [E3002]"));
 
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
+        tir_support::default_run("checked_text_dynamic_error", DYNAMIC_ERROR_SOURCE);
     assert_eq!(interpreter_code, jit_code);
     assert_eq!(interpreter_out, jit_out);
     assert_eq!(

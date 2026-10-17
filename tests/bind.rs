@@ -123,12 +123,12 @@ fn assert_generated_project(
     let allowed_dynamic_fields = source_markers
         .iter()
         .flat_map(|marker| marker.lines().map(str::trim))
-        .filter(|marker| marker.contains("DataTree"))
+        .filter(|marker| marker.contains("Dyn"))
         .collect::<Vec<_>>();
     let dynamic_fields = generated
         .lines()
         .map(str::trim)
-        .filter(|line| !line.starts_with("//") && line.contains("DataTree"))
+        .filter(|line| !line.starts_with("//") && line.contains("Dyn"))
         .collect::<Vec<_>>();
     assert_eq!(
         dynamic_fields, allowed_dynamic_fields,
@@ -177,7 +177,7 @@ fn assert_generated_project(
     );
 
     let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--trace-tiers", "main.jet"])
+        .args(["run", "main.jet"])
         .current_dir(&dir)
         .env("JET_STORE_DIR", dir.join("run-cache"))
         .env("NO_COLOR", "1")
@@ -191,54 +191,12 @@ fn assert_generated_project(
     );
     let default_trace = String::from_utf8_lossy(&jit_run.stderr);
     assert!(
-        default_trace
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "default `jet run` did not execute generated {format} project natively:\n{default_trace}"
-    );
-    assert!(
-        !default_trace.contains("tier0 interp"),
-        "default `jet run` interpreted or deopted generated {format} project:\n{default_trace}"
-    );
-    assert!(
         !default_trace.contains("deopt"),
         "default `jet run` deoptimized generated {format} project:\n{default_trace}"
     );
     assert!(
         !default_trace.contains("fallback"),
         "default `jet run` used a fallback for generated {format} project:\n{default_trace}"
-    );
-    let interpreter_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--trace-tiers", "--interpret", "main.jet"])
-        .current_dir(&dir)
-        .env("JET_STORE_DIR", dir.join("interpreter-cache"))
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert_success(&interpreter_run);
-    assert_eq!(
-        String::from_utf8_lossy(&interpreter_run.stdout),
-        expected_stdout,
-        "forced interpreter output did not use generated {format} fields"
-    );
-    let interpreter_trace = String::from_utf8_lossy(&interpreter_run.stderr);
-    assert!(
-        interpreter_trace
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier0 interp")),
-        "forced `jet run --interpret` did not execute generated {format} project in tier0:\n{interpreter_trace}"
-    );
-    assert!(
-        !interpreter_trace.contains("tier1 native"),
-        "forced interpreter unexpectedly used resident JIT:\n{interpreter_trace}"
-    );
-    assert!(
-        !interpreter_trace.contains("deopt"),
-        "forced interpreter used deopt for generated {format} project:\n{interpreter_trace}"
-    );
-    assert!(
-        !interpreter_trace.contains("fallback"),
-        "forced interpreter used a fallback for generated {format} project:\n{interpreter_trace}"
     );
     let _ = fs::remove_dir_all(dir);
 }
@@ -290,7 +248,7 @@ fn data_bind_generates_all_formats() {
     assert!(json.contains(r#"#Rename("repo-name") repo_name: String"#));
     assert!(json.contains("owner: RepoOwner"));
     assert!(json.contains("tags: [String]"));
-    assert!(json.contains("note: DataTree?"));
+    assert!(json.contains("note: Dyn?"));
 
     let csv = generated(
         "csv",
@@ -461,7 +419,7 @@ fn run() {
     wire := json.parse(canonical) ?? panic("parse")
     user := wire.decode<User>() ?? panic("decode")
     encoded := user.encode()
-    reencoded := json.to_string(encoded)
+    reencoded := json.to_string(encoded) ?? panic("JSON encode")
     roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
     roundtrip := roundtrip_wire.decode<User>() ?? panic("decode roundtrip")
     if roundtrip.id != user.id { panic("id roundtrip") }
@@ -533,10 +491,10 @@ fn run() {
         "7\nJet\ntext\nelement\ntext\n",
         &[
             r#"struct Catalog {
-    #Rename("$content") content: DataTree"#,
+    #Rename("$content") content: Dyn"#,
             r#"struct CatalogBook {
     #Rename("@id") id: String
-    #Rename("$content") content: DataTree
+    #Rename("$content") content: Dyn
     title: String
 }"#,
             "book: CatalogBook",
@@ -697,8 +655,8 @@ fn xml_bind_keeps_empty_whitespace_and_mixed_content_projection() {
         "jet inspect bind xml mixed.xml --type Root",
     );
     assert!(
-        mixed.contains(r#"#Rename("$content")"#) && mixed.contains("DataTree"),
-        "mixed XML content lost ordered $content: DataTree:\n{mixed}"
+        mixed.contains(r#"#Rename("$content")"#) && mixed.contains("Dyn"),
+        "mixed XML content lost ordered $content: Dyn:\n{mixed}"
     );
 }
 
@@ -719,7 +677,7 @@ fn run() {
     wire := json.parse(canonical) ?? panic("parse")
     repo := wire.decode<Repo>() ?? panic("decode")
     encoded := repo.encode()
-    reencoded := json.to_string(encoded)
+    reencoded := json.to_string(encoded) ?? panic("JSON encode")
     roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
     roundtrip := roundtrip_wire.decode<Repo>() ?? panic("decode roundtrip")
     if roundtrip.name != repo.name { panic("name roundtrip") }

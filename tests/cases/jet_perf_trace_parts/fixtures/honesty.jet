@@ -1,0 +1,161 @@
+// ALGORITHM: support.rs87-97,129-345, called by capture_run.rs82-87/capture_attach.rs120-125.
+// The original scans COMPACT TEXT, not a semantic-JSON replacement. Keep tail scopes and first keys.
+// Decimal strings retain the original u64 domain, including values beyond signed Int and 2^53.
+use core.files as files
+use core.sys as sys
+
+fn s6_decimal_compare(a: String, b: String) -> Int {
+    left :: a.bytes()
+    right :: b.bytes()
+    if left.len() < right.len() -> return -1
+    if left.len() > right.len() -> return 1
+    loop i in 0..left.len() {
+        if left[i] < right[i] -> return -1
+        if left[i] > right[i] -> return 1
+    }
+    0
+}
+
+fn s6_json_u64_after(text: String, key: String) -> String? {
+    framed :: text.split_once("\"{key}\":") ?? return None
+    digits := [U8]{}
+    seen := false
+    nonzero := false
+    loop byte in framed.after.bytes() {
+        if byte < 48 || byte > 57 -> break
+        seen = true
+        if byte != 48 -> nonzero = true
+        if nonzero -> &digits.push(byte)
+    }
+    if !seen -> return None
+    if !nonzero -> return Val("0")
+    value :: String.from_bytes(digits) ?? return None
+    if s6_decimal_compare(value, "18446744073709551615") > 0 -> return None
+    Val(value)
+}
+
+fn s6_required_u64(text: String, key: String) -> String {
+    s6_json_u64_after(text, key) ?? panic("missing u64 {key}: {text}")
+}
+
+fn s6_tail(text: String, marker: String) -> String {
+    framed :: text.split_once(marker) ?? panic("missing {marker}: {text}")
+    framed.after.copy()
+}
+
+fn s6_array(text: String, marker: String, end: String) -> String {
+    tail :: s6_tail(text, marker)
+    framed :: tail.split_once(end) ?? panic("missing array end {end}: {text}")
+    framed.before.copy()
+}
+
+fn s6_find_task(tasks: [String], id: String) -> String {
+    loop row in tasks {
+        if s6_json_u64_after(row, "id") == Val(id) -> return row.copy()
+    }
+    panic("span task {id} missing: {tasks}")
+}
+
+fn s6_honest_capture() {
+    path :: sys.get("S6_TRACE") ?? panic("trace path")
+    text :: files.read(path) ?? panic("read real captured trace")
+    run_capture :: (sys.get("S6_CAPTURE_MODE") ?? panic("capture mode")) == "run"
+    // assert_honest_wall_and_alloc: first key following the first wall/object marker.
+    wall_tail :: s6_tail(text, "\"domain\":\"wall\"")
+    wall :: s6_required_u64(wall_tail, "duration_ns")
+    assert(s6_decimal_compare(wall, "1") > 0)
+    assert(s6_decimal_compare(wall, "1000000") >= 0)
+    alloc :: s6_tail(text, `"allocations":[{`)
+    count :: s6_required_u64(alloc, "count")
+    bytes :: s6_required_u64(alloc, "bytes")
+    assert(s6_decimal_compare(count, "0") > 0)
+    assert(s6_decimal_compare(bytes, "0") > 0)
+    // assert_honest_tasks: original tail scope includes all following text.
+    tasks_tail :: s6_tail(text, `"tasks":[{`)
+    assert(tasks_tail.contains("\"parent\":0"))
+    assert(tasks_tail.contains("\"parent\":1") || tasks_tail.contains("\"parent\":2"))
+    assert(tasks_tail.contains("\"state\":\"running\"") || tasks_tail.contains("\"state\":\"blocked\"") || tasks_tail.contains("\"state\":\"queued\"") || tasks_tail.contains("\"state\":\"done\""))
+    assert(!text.contains("\"tasks\":[]"))
+    // assert_honest_locks: original tail and conjunctive rejection, not merely a nonempty array.
+    locks :: s6_tail(text, `"locks":[{`)
+    assert(locks.contains("\"kind\":\"channel\""))
+    assert(locks.contains("\"recv_waiters\":1") || locks.contains("\"recv_waiters\":2") || locks.contains("\"send_waiters\":1") || locks.contains("\"send_waiters\":2"))
+    assert(!text.contains("\"locks\":[]"))
+    assert(!locks.contains("\"recv_waiters\":0,\"send_waiters\":0") && !locks.contains("\"send_waiters\":0,\"recv_waiters\":0"))
+    // assert_honest_io: the first nonempty [{ object through its first ]; keep original key order.
+    io :: s6_array(text, `"io":[{`, "]")
+    assert(io.contains("\"kind\":\"tcp\""))
+    assert(io.contains("\"wait\":\"tcp accept\"") || io.contains("\"wait\":\"tcp accept readiness\""))
+    assert(io.contains("\"task_id\":"))
+    start :: s6_required_u64(io, "start_ns")
+    end :: s6_required_u64(io, "end_ns")
+    assert(s6_decimal_compare(end, start) >= 0)
+    assert(!text.contains("\"io\":[]"))
+    assert(!io.contains("\"wait\":\"time sleep\"") && !io.contains("\"wait\":\"channel "))
+    // assert_honest_native: retain platform-specific captured/unavailable assertions.
+    native :: s6_tail(text, `"native":[{`)
+    assert(native.contains("\"clock\":\"process_cpu\""))
+    observed :: s6_required_u64(native, "observed_at_ns")
+    if run_capture {
+        assert(s6_decimal_compare(observed, "0") > 0)
+        assert(s6_decimal_compare(observed, wall) <= 0)
+    }
+    target_tail :: s6_tail(native, "\"target\":\"")
+    target_frame :: target_tail.split_once("\"") ?? panic("missing native target")
+    target :: target_frame.before.copy()
+    if sys.is_linux() || sys.name() == "android" {
+        assert(native.contains("\"status\":\"captured\""))
+        duration :: s6_required_u64(native, "duration_ns")
+        if run_capture -> assert(s6_decimal_compare(duration, "0") > 0)
+        assert(native.contains("\"reason\":\"\""))
+        assert(native.contains("\"task_id\":1"))
+    } else {
+        assert(native.contains("\"status\":\"unavailable\""))
+        assert(native.contains("\"duration_ns\":null"))
+        assert(native.contains("\"task_id\":null"))
+        assert(native.contains("\"reason\":\"process CPU timing is unavailable on target {target}\""))
+    }
+    assert(text.contains("\"native_row_limit\":1"))
+    assert(text.contains("\"native_rows_truncated\":false"))
+    // assert_honest_spans: retain unavailable nulls and full captured span-to-task linkage.
+    spans :: s6_array(text, "\"spans\":[", "],\"tasks\"")
+    assert(spans.contains("\"clock\":\"monotonic\""))
+    assert(spans.contains("\"kind\":\"task_observed\""))
+    assert(text.contains("\"span_row_limit\":4096"))
+    assert(text.contains("\"span_rows_truncated\":false"))
+    if !run_capture {
+        assert(spans.contains("\"status\":\"unavailable\""))
+        assert(spans.contains("\"start_ns\":null"))
+        assert(spans.contains("\"end_ns\":null"))
+        assert(spans.contains("\"task_id\":null"))
+        assert(spans.contains("\"parent_task_id\":null"))
+        assert(spans.contains("task span requires multiple live observations"))
+        return
+    }
+    assert(spans != "")
+    assert(!spans.contains("\"status\":\"unavailable\""))
+    tasks :: s6_array(text, "\"tasks\":[", "],\"toolchain\"")
+    task_rows :: tasks.split(`},{`).to_list()
+    span_count := 0
+    loop span in spans.split(`},{`).to_list() {
+        assert(span.contains("\"status\":\"captured\""))
+        task_id :: s6_required_u64(span, "task_id")
+        row :: s6_find_task(task_rows, task_id)
+        first :: s6_required_u64(span, "start_ns")
+        last :: s6_required_u64(span, "end_ns")
+        assert(s6_decimal_compare(last, first) >= 0)
+        assert(s6_decimal_compare(last, wall) <= 0)
+        parent :: s6_required_u64(row, "parent")
+        if parent == "0" {
+            assert(span.contains("\"parent_task_id\":null"))
+        } else {
+            assert(s6_json_u64_after(span, "parent_task_id") == Val(parent))
+        }
+        span_count = span_count + 1
+    }
+    assert(span_count == task_rows.len())
+}
+
+#Test("honest wall alloc task contention I/O native and span capture") {
+    s6_honest_capture()
+}

@@ -1,0 +1,10 @@
+Error [E0742]: This `hash` impl uses the effect `FS.Read`, which the trait doesn't allow
+  --> tests/ui/effects/trait_impl_exceeding_bound_is_e0742.jet:6:8
+    |
+  6 |     fn hash(self) -> Int {
+    |        ^^^^
+ Why: `Hasher` bounds `hash` to `-[]>`, so impls must be pure; `FS.Read` is outside that bound
+ Fix: Remove the `FS.Read` work from this impl, or widen the bound on the trait method
+ Denial: invocation
+ Call chain: Doc::hash
+More: jet-lang.dev/e/E0742

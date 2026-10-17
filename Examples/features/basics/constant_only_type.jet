@@ -1,0 +1,22 @@
+// Types that only module constants mention (a struct, a generic struct
+// instance and a list of records) still get their type rows, so the program
+// builds and reads the constants.
+struct Tag {
+    code: U8
+    name: String
+}
+
+struct Pair<T> {
+    left: T
+    right: T
+}
+
+TAG :: Tag{code: U8{7}, name: "seven"}
+PAIR :: Pair<Float>{left: 1.5, right: 2.5}
+TAGS :: [Tag]{Tag{code: U8{1}, name: "one"}, Tag{code: U8{2}, name: "two"}}
+
+fn run() {
+    print("{TAG.name} {TAG.code}")
+    print(PAIR.left + PAIR.right)
+    print("{TAGS.len()} {TAGS[1].name}")
+}

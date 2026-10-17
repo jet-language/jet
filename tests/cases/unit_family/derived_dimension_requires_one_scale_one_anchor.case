@@ -1,0 +1,7 @@
+# PORT tests/unit_family.rs:131-148.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: derived_dimension_requires_one_scale_one_anchor.fixture
+step: jet fmt main.jet --json
+exit: nonzero
+json: machine doc $.reports[*].code = ["E0003"]
+json: machine doc $.reports[0].fix = "Add `base: member_name` and keep that member's scale at 1 with offset 0"

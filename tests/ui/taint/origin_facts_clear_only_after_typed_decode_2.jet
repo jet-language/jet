@@ -1,0 +1,14 @@
+
+use core.files as files
+use core.encoding.json as json
+
+#Codable
+struct Config {
+    name: String
+}
+
+fn run() {
+    raw :: files.read("config.json") ?? return Err("test")
+    config :: json.decode<Config>(raw) ?? return Err("test")
+    SQL.raw(config.name)
+}

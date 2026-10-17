@@ -133,7 +133,7 @@ impl<'a> Checker<'a> {
         self.record_reference_anchor_with_identity(span, module_path, kind, def_span, None);
     }
 
-    fn record_reference_anchor_with_identity(
+    pub(crate) fn record_reference_anchor_with_identity(
         &mut self,
         span: Span,
         module_path: &str,
@@ -231,9 +231,7 @@ impl<'a> Checker<'a> {
         if let Some(mangled) = self.unqualified.get(name) {
             return Some((self.module_idx, mangled.clone()));
         }
-        self.unqualified_file
-            .get(name)
-            .map(|(function, module)| (*module, function.clone()))
+        self.file_function_binding(name).map(|(function, module)| (module, function))
     }
 
     pub(crate) fn callback_function_key(&self, name: &str) -> Option<String> {
@@ -259,20 +257,25 @@ impl<'a> Checker<'a> {
 
 
     pub(crate) fn record_const_reference(&mut self, name: &str, span: Span) {
+        let owner = if self.name_ledger.declaration(self.module_idx, name).is_some() {
+            self.module_idx
+        } else {
+            self.name_ledger.namespace_owner(self.module_idx, name).unwrap_or(self.module_idx)
+        };
         let target = self
             .name_ledger
-            .declaration(self.module_idx, name)
+            .declaration(owner, name)
             .map(|declaration| {
                 (
                     self.name_ledger
-                        .module_path(self.module_idx)
+                        .module_path(owner)
                         .unwrap_or(self.module_path)
                         .to_string(),
                     declaration.span,
                 )
             });
         if let Some((module_path, def_span)) = target {
-            let identity = self.name_ledger.semantic_identity(self.module_idx, name);
+            let identity = self.name_ledger.semantic_identity(owner, name);
             self.record_reference_anchor_with_identity(
                 span,
                 &module_path,
@@ -303,6 +306,31 @@ impl<'a> Checker<'a> {
                 identity,
             );
         }
+    }
+
+    /// Exact executable declaration selected by nominal method checking.
+    /// Abstract trait signatures also have kind `method`, but are not bodies.
+    /// No alias, nominal spelling, local-module, or source-span fallback.
+    pub(crate) fn checked_method_callee(
+        &self,
+        owner: usize,
+        owner_name: &str,
+        method_name: &str,
+    ) -> Option<String> {
+        if self
+            .name_ledger
+            .declaration(owner, owner_name)
+            .is_some_and(|declaration| declaration.kind == "trait")
+        {
+            return None;
+        }
+        let declaration = self.name_ledger.declaration(owner, method_name)?;
+        if declaration.kind != "method" {
+            return None;
+        }
+        self.name_ledger
+            .declared_identity(owner, method_name)
+            .map(str::to_owned)
     }
 
     pub(crate) fn record_method_reference(&mut self, type_name: &str, method: &str, span: Span) {

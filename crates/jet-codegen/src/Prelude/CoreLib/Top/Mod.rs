@@ -99,7 +99,7 @@ pub struct JetMod {
 impl Drop for JetMod {
     fn drop(&mut self) {
         if self.handle != 0 {
-            native::unload(self.handle);
+            jet_mod_native::close(self.handle);
             self.handle = 0;
         }
         let _ = std::fs::remove_file(&self.payload_path);
@@ -432,53 +432,6 @@ fn check_before_map(header: &JetLibHeader<'_>) -> Result<(), String> {
     Ok(())
 }
 
-fn call_int_pointer(pointer: usize, args: &[i64]) -> Result<i64, String> {
-    if pointer == 0 {
-        return Err("native export has a null function address".to_string());
-    }
-    // The metadata gate has already fixed the scalar and parameter count. The
-    // finite dispatch table is the only unsafe boundary: each arm names the
-    // exact C ABI signature instead of guessing from a loader-side convention.
-    // The language's native scalar surface currently caps practical calls at
-    // eight parameters; metadata lookup remains generic for every row.
-    // SAFETY: `pointer` came from dlsym/GetProcAddress for the checked symbol,
-    // and the selected function type matches the checked argument count.
-    unsafe {
-        match args {
-            [] => Ok(std::mem::transmute::<usize, extern "C" fn() -> i64>(pointer)()),
-            [a] => Ok(std::mem::transmute::<usize, extern "C" fn(i64) -> i64>(pointer)(*a)),
-            [a, b] => Ok(
-                std::mem::transmute::<usize, extern "C" fn(i64, i64) -> i64>(pointer)(*a, *b),
-            ),
-            [a, b, c] => Ok(std::mem::transmute::<
-                usize,
-                extern "C" fn(i64, i64, i64) -> i64,
-            >(pointer)(*a, *b, *c)),
-            [a, b, c, d] => Ok(std::mem::transmute::<
-                usize,
-                extern "C" fn(i64, i64, i64, i64) -> i64,
-            >(pointer)(*a, *b, *c, *d)),
-            [a, b, c, d, e] => Ok(std::mem::transmute::<
-                usize,
-                extern "C" fn(i64, i64, i64, i64, i64) -> i64,
-            >(pointer)(*a, *b, *c, *d, *e)),
-            [a, b, c, d, e, f] => Ok(std::mem::transmute::<
-                usize,
-                extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64,
-            >(pointer)(*a, *b, *c, *d, *e, *f)),
-            [a, b, c, d, e, f, g] => Ok(std::mem::transmute::<
-                usize,
-                extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64,
-            >(pointer)(*a, *b, *c, *d, *e, *f, *g)),
-            [a, b, c, d, e, f, g, h] => Ok(std::mem::transmute::<
-                usize,
-                extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64,
-            >(pointer)(*a, *b, *c, *d, *e, *f, *g, *h)),
-            _ => Err("native Int export has more than eight parameters".to_string()),
-        }
-    }
-}
-
 pub fn jet_mod_call_int(mod_: &JetMod, name: &str, args: &[i64]) -> Result<i64, String> {
     let export = mod_
         .exports
@@ -497,376 +450,271 @@ pub fn jet_mod_call_int(mod_: &JetMod, name: &str, args: &[i64]) -> Result<i64, 
             args.len()
         ));
     }
-    call_int_pointer(export.pointer, args)
+    jet_mod_native::call_int(export.pointer, args)
 }
 
 pub fn jet_mod_on_tick(mod_: &JetMod, dt: i64) -> Result<i64, String> {
     jet_mod_call_int(mod_, "on_tick", &[dt])
 }
 
-#[cfg(unix)]
-mod native {
-    use super::{
-        check_before_map, granted_path, jetlib_header, payload_digest, JetMod, JetModFailure,
-        JetModGrant, JetModScalar,
-    };
-    use std::ffi::{c_char, c_void, CString};
-    use std::io::Write;
-    use std::os::unix::ffi::OsStrExt;
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
+// JET_VETTED_UNSAFE_BEGIN: jet_mod_native
+// AUDIT: D-LIB-CALLGRANT1=A's only native boundary. It maps a checked payload
+// with the OS loader (dlopen/dlsym/dlclose/dlerror or LoadLibraryW/
+// GetProcAddress/FreeLibrary/GetLastError) and calls a resolved Int export
+// through its C ABI address. Safe Rust cannot express foreign loader handles
+// or calls through a raw function address. Caller invariants: `open` receives
+// only a staged payload that already passed the identity, ABI, grant and
+// digest checks; each handle is closed exactly once, after its last call;
+// `call_int` receives an address `symbol` resolved from a live handle for an
+// export whose checked metadata fixes an Int result and `args.len()`
+// parameters. Violating them maps unchecked code, unloads code that is still
+// called, or calls through a dangling or mistyped pointer: undefined behavior.
+mod jet_mod_native {
+    #[cfg(unix)]
+    mod os {
+        use std::ffi::{c_char, c_void, CString};
+        use std::os::unix::ffi::OsStrExt;
 
-    #[cfg(target_os = "linux")]
-    #[link(name = "dl")]
-    unsafe extern "C" {
-        fn dlopen(path: *const c_char, flags: i32) -> *mut c_void;
-        fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
-        fn dlclose(handle: *mut c_void) -> i32;
-        fn dlerror() -> *mut c_char;
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    unsafe extern "C" {
-        fn dlopen(path: *const c_char, flags: i32) -> *mut c_void;
-        fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
-        fn dlclose(handle: *mut c_void) -> i32;
-        fn dlerror() -> *mut c_char;
-    }
-
-    const RTLD_NOW: i32 = 2;
-    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
-    struct StagedPayload {
-        path: Option<PathBuf>,
-    }
-
-    impl StagedPayload {
-        fn new(path: PathBuf) -> Self {
-            Self { path: Some(path) }
+        #[cfg(target_os = "linux")]
+        #[link(name = "dl")]
+        unsafe extern "C" {
+            fn dlopen(path: *const c_char, flags: i32) -> *mut c_void;
+            fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
+            fn dlclose(handle: *mut c_void) -> i32;
+            fn dlerror() -> *mut c_char;
         }
 
-        fn keep(mut self) -> PathBuf {
-            self.path.take().expect("staged payload path missing")
+        #[cfg(not(target_os = "linux"))]
+        unsafe extern "C" {
+            fn dlopen(path: *const c_char, flags: i32) -> *mut c_void;
+            fn dlsym(handle: *mut c_void, name: *const c_char) -> *mut c_void;
+            fn dlclose(handle: *mut c_void) -> i32;
+            fn dlerror() -> *mut c_char;
         }
-    }
 
-    impl Drop for StagedPayload {
-        fn drop(&mut self) {
-            if let Some(path) = self.path.take() {
-                let _ = std::fs::remove_file(path);
+        const RTLD_NOW: i32 = 2;
+
+        pub(crate) const EXTENSION: &str = if cfg!(target_os = "macos") { "dylib" } else { "so" };
+
+        fn last_error() -> String {
+            // SAFETY: `dlerror` returns a process-owned NUL-terminated message
+            // or null. It is copied immediately and the pointer is not kept.
+            unsafe {
+                let ptr = dlerror();
+                if ptr.is_null() {
+                    return "native loader failed".to_string();
+                }
+                std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
+            }
+        }
+
+        pub(crate) fn open(path: &std::path::Path) -> Result<usize, String> {
+            let path_c = CString::new(path.as_os_str().as_bytes())
+                .map_err(|_| "library path contains NUL".to_string())?;
+            // SAFETY: the path is NUL-terminated; RTLD_NOW resolves every
+            // dependency before any export is called.
+            let handle = unsafe { dlopen(path_c.as_ptr(), RTLD_NOW) };
+            if handle.is_null() {
+                Err(last_error())
+            } else {
+                Ok(handle as usize)
+            }
+        }
+
+        pub(crate) fn symbol(handle: usize, symbol: &str) -> Result<usize, String> {
+            let symbol = CString::new(symbol)
+                .map_err(|_| "native library symbol contains NUL".to_string())?;
+            // SAFETY: both calls receive a live handle and a NUL-terminated symbol.
+            unsafe {
+                dlerror();
+                let pointer = dlsym(handle as *mut c_void, symbol.as_ptr());
+                if pointer.is_null() {
+                    Err(last_error())
+                } else {
+                    Ok(pointer as usize)
+                }
+            }
+        }
+
+        pub(crate) fn close(handle: usize) {
+            // SAFETY: the handle came from `dlopen` and is closed exactly once.
+            unsafe {
+                let _ = dlclose(handle as *mut c_void);
             }
         }
     }
 
-    fn last_error() -> String {
-        // SAFETY: `dlerror` returns a process-owned NUL-terminated message or
-        // null. We copy it immediately and never retain the pointer.
-        unsafe {
-            let ptr = dlerror();
-            if ptr.is_null() {
-                return "native loader failed".to_string();
-            }
-            std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
-        }
-    }
+    #[cfg(windows)]
+    mod os {
+        use std::ffi::{c_char, c_void, CString};
+        use std::os::windows::ffi::OsStrExt;
 
-    fn lookup(handle: *mut c_void, symbol: &str) -> Result<usize, String> {
-        let symbol = CString::new(symbol)
-            .map_err(|_| "native library symbol contains NUL".to_string())?;
-        // SAFETY: both calls receive a live handle and a NUL-terminated symbol.
-        unsafe {
-            dlerror();
-            let pointer = dlsym(handle, symbol.as_ptr());
+        #[link(name = "kernel32")]
+        unsafe extern "system" {
+            fn LoadLibraryW(path: *const u16) -> *mut c_void;
+            fn GetProcAddress(handle: *mut c_void, name: *const c_char) -> *mut c_void;
+            fn FreeLibrary(handle: *mut c_void) -> i32;
+            fn GetLastError() -> u32;
+        }
+
+        pub(crate) const EXTENSION: &str = "dll";
+
+        fn last_error() -> String {
+            // SAFETY: GetLastError is thread-local and has no pointer lifetime.
+            std::io::Error::from_raw_os_error(unsafe { GetLastError() } as i32).to_string()
+        }
+
+        pub(crate) fn open(path: &std::path::Path) -> Result<usize, String> {
+            let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+            wide.push(0);
+            // SAFETY: the path is a valid NUL-terminated UTF-16 string.
+            let handle = unsafe { LoadLibraryW(wide.as_ptr()) };
+            if handle.is_null() {
+                Err(last_error())
+            } else {
+                Ok(handle as usize)
+            }
+        }
+
+        pub(crate) fn symbol(handle: usize, symbol: &str) -> Result<usize, String> {
+            let symbol = CString::new(symbol)
+                .map_err(|_| "native library symbol contains NUL".to_string())?;
+            // SAFETY: handle is live and symbol is NUL-terminated ASCII metadata.
+            let pointer = unsafe { GetProcAddress(handle as *mut c_void, symbol.as_ptr()) };
             if pointer.is_null() {
                 Err(last_error())
             } else {
                 Ok(pointer as usize)
             }
         }
-    }
 
-    fn extension() -> &'static str {
-        if cfg!(target_os = "macos") {
-            "dylib"
-        } else {
-            "so"
-        }
-    }
-
-    fn stage(payload: &[u8]) -> Result<StagedPayload, String> {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "jet-mod-{}-{serial}.{}",
-            std::process::id(),
-            extension()
-        ));
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|error| format!("cannot stage library payload: {error}"))?;
-        let staged = StagedPayload::new(path);
-        let result = file
-            .write_all(payload)
-            .map_err(|error| format!("cannot stage library payload: {error}"))
-            .and_then(|()| {
-                file.flush()
-                    .map_err(|error| format!("cannot flush library payload: {error}"))
-            });
-        drop(file);
-        result?;
-        Ok(staged)
-    }
-
-    /// Every refusal is tagged (D-MOD-ERR1=A): the grant and metadata checks
-    /// tag their own; a file that cannot be read, parsed, staged or mapped is
-    /// `Invalid`.
-    pub(super) fn load(path: &str, grant: &JetModGrant) -> Result<JetMod, String> {
-        let invalid = |reason: String| JetModFailure::Invalid.tag(reason);
-        let source = granted_path(Path::new(path), grant)?;
-        let bytes = std::fs::read(&source).map_err(|error| {
-            JetModFailure::from_io(&error)
-                .tag(format!("cannot read library `{}`: {error}", source.display()))
-        })?;
-        let header = jetlib_header(&bytes).map_err(invalid)?;
-        check_before_map(&header)?;
-        if payload_digest(header.payload) != header.payload_digest {
-            return Err(invalid(format!(
-                "cannot map library payload: `{}` has a content digest that does not match its metadata",
-                header.library_name
-            )));
-        }
-        let staged = stage(header.payload).map_err(invalid)?;
-        let path_c = CString::new(staged.path.as_ref().unwrap().as_os_str().as_bytes())
-            .map_err(|_| invalid("library path contains NUL".to_string()))?;
-        // SAFETY: the staged path is NUL-terminated and remains until the
-        // returned JetMod drops; RTLD_NOW resolves every dependency now.
-        let handle = unsafe { dlopen(path_c.as_ptr(), RTLD_NOW) };
-        if handle.is_null() {
-            return Err(invalid(format!("cannot map library payload: {}", last_error())));
-        }
-
-        let mut exports = header.exports.clone();
-        for export in &mut exports {
-            let pointer = match lookup(handle, &export.symbol) {
-                Ok(pointer) => pointer,
-                Err(error) => {
-                    unload(handle as usize);
-                    return Err(invalid(format!(
-                        "E1341: library `{}` metadata names `{}`, but the payload has no `{}` export: {error}",
-                        header.library_name, export.name, export.symbol
-                    )));
-                }
-            };
-            export.pointer = pointer;
-        }
-        if header
-            .exports
-            .iter()
-            .any(|export| export.scalar == JetModScalar::Text)
-        {
-            if let Err(error) = lookup(handle, "jet_text_free") {
-                unload(handle as usize);
-                return Err(invalid(format!(
-                    "E1341: library `{}` has Text exports but no `jet_text_free` allocator release export: {error}",
-                    header.library_name
-                )));
-            }
-        }
-        Ok(JetMod {
-            handle: handle as usize,
-            exports,
-            payload_path: staged.keep(),
-        })
-    }
-
-    pub(super) fn unload(handle: usize) {
-        if handle != 0 {
-            // SAFETY: the handle was returned by `dlopen` and is unloaded once
-            // by JetMod's Drop implementation after all calls finish.
-            unsafe {
-                let _ = dlclose(handle as *mut c_void);
-            }
-        }
-}
-}
-
-#[cfg(windows)]
-mod native {
-    use super::{
-        check_before_map, granted_path, jetlib_header, payload_digest, JetMod, JetModFailure,
-        JetModGrant, JetModScalar,
-    };
-    use std::ffi::{c_char, c_void, CString};
-    use std::io::Write;
-    use std::os::windows::ffi::OsStrExt;
-    use std::path::{Path, PathBuf};
-    use std::sync::atomic::{AtomicU64, Ordering};
-
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn LoadLibraryW(path: *const u16) -> *mut c_void;
-        fn GetProcAddress(handle: *mut c_void, name: *const c_char) -> *mut c_void;
-        fn FreeLibrary(handle: *mut c_void) -> i32;
-        fn GetLastError() -> u32;
-    }
-
-    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
-
-    struct StagedPayload {
-        path: Option<PathBuf>,
-    }
-
-    impl StagedPayload {
-        fn new(path: PathBuf) -> Self {
-            Self { path: Some(path) }
-        }
-
-        fn keep(mut self) -> PathBuf {
-            self.path.take().expect("staged payload path missing")
-        }
-    }
-
-    impl Drop for StagedPayload {
-        fn drop(&mut self) {
-            if let Some(path) = self.path.take() {
-                let _ = std::fs::remove_file(path);
-            }
-        }
-    }
-
-    fn last_error() -> String {
-        // SAFETY: GetLastError is thread-local and has no pointer lifetime.
-        std::io::Error::from_raw_os_error(unsafe { GetLastError() } as i32).to_string()
-    }
-
-    fn lookup(handle: *mut c_void, symbol: &str) -> Result<usize, String> {
-        let symbol = CString::new(symbol)
-            .map_err(|_| "native library symbol contains NUL".to_string())?;
-        // SAFETY: handle is live and symbol is NUL-terminated ASCII metadata.
-        let pointer = unsafe { GetProcAddress(handle, symbol.as_ptr()) };
-        if pointer.is_null() {
-            Err(last_error())
-        } else {
-            Ok(pointer as usize)
-        }
-    }
-
-    fn stage(payload: &[u8]) -> Result<StagedPayload, String> {
-        let serial = NEXT_TEMP.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!(
-            "jet-mod-{}-{serial}.dll",
-            std::process::id()
-        ));
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-            .map_err(|error| format!("cannot stage library payload: {error}"))?;
-        let staged = StagedPayload::new(path);
-        let result = file
-            .write_all(payload)
-            .map_err(|error| format!("cannot stage library payload: {error}"))
-            .and_then(|()| {
-                file.flush()
-                    .map_err(|error| format!("cannot flush library payload: {error}"))
-            });
-        drop(file);
-        result?;
-        Ok(staged)
-    }
-
-    /// Every refusal is tagged (D-MOD-ERR1=A), as on unix.
-    pub(super) fn load(path: &str, grant: &JetModGrant) -> Result<JetMod, String> {
-        let invalid = |reason: String| JetModFailure::Invalid.tag(reason);
-        let source = granted_path(Path::new(path), grant)?;
-        let bytes = std::fs::read(&source).map_err(|error| {
-            JetModFailure::from_io(&error)
-                .tag(format!("cannot read library `{}`: {error}", source.display()))
-        })?;
-        let header = jetlib_header(&bytes).map_err(invalid)?;
-        check_before_map(&header)?;
-        if payload_digest(header.payload) != header.payload_digest {
-            return Err(invalid(format!(
-                "cannot map library payload: `{}` has a content digest that does not match its metadata",
-                header.library_name
-            )));
-        }
-        let staged = stage(header.payload).map_err(invalid)?;
-        let mut wide: Vec<u16> = staged
-            .path
-            .as_ref()
-            .unwrap()
-            .as_os_str()
-            .encode_wide()
-            .collect();
-        wide.push(0);
-        // SAFETY: the path is a valid NUL-terminated UTF-16 string and the
-        // staged file remains until the JetMod drops.
-        let handle = unsafe { LoadLibraryW(wide.as_ptr()) };
-        if handle.is_null() {
-            return Err(invalid(format!("cannot map library payload: {}", last_error())));
-        }
-
-        let mut exports = header.exports.clone();
-        for export in &mut exports {
-            let pointer = match lookup(handle, &export.symbol) {
-                Ok(pointer) => pointer,
-                Err(error) => {
-                    unload(handle as usize);
-                    return Err(invalid(format!(
-                        "E1341: library `{}` metadata names `{}`, but the payload has no `{}` export: {error}",
-                        header.library_name, export.name, export.symbol
-                    )));
-                }
-            };
-            export.pointer = pointer;
-        }
-        if header
-            .exports
-            .iter()
-            .any(|export| export.scalar == JetModScalar::Text)
-        {
-            if let Err(error) = lookup(handle, "jet_text_free") {
-                unload(handle as usize);
-                return Err(invalid(format!(
-                    "E1341: library `{}` has Text exports but no `jet_text_free` allocator release export: {error}",
-                    header.library_name
-                )));
-            }
-        }
-        Ok(JetMod {
-            handle: handle as usize,
-            exports,
-            payload_path: staged.keep(),
-        })
-    }
-
-    pub(super) fn unload(handle: usize) {
-        if handle != 0 {
-            // SAFETY: the handle was returned by LoadLibraryW and is unloaded
-            // exactly once by JetMod's Drop implementation.
+        pub(crate) fn close(handle: usize) {
+            // SAFETY: the handle came from LoadLibraryW and is closed exactly once.
             unsafe {
                 let _ = FreeLibrary(handle as *mut c_void);
             }
         }
     }
 
-}
+    pub(super) const SUPPORTED: bool = cfg!(any(unix, windows));
 
-#[cfg(not(any(unix, windows)))]
-mod native {
-    use super::{JetMod, JetModFailure, JetModGrant};
+    #[cfg(any(unix, windows))]
+    pub(super) use os::{open, symbol, EXTENSION};
 
-    pub(super) fn load(_path: &str, _grant: &JetModGrant) -> Result<JetMod, String> {
-        Err(JetModFailure::Unsupported.tag(format!(
-            "Mod.load is not supported on target `{}`",
-            std::env::consts::OS
-        )))
+    #[cfg(not(any(unix, windows)))]
+    pub(super) const EXTENSION: &str = "bin";
+
+    #[cfg(not(any(unix, windows)))]
+    pub(super) fn open(_path: &std::path::Path) -> Result<usize, String> {
+        Err("native loader is unavailable on this target".to_string())
     }
 
-    pub(super) fn unload(_handle: usize) {}
+    #[cfg(not(any(unix, windows)))]
+    pub(super) fn symbol(_handle: usize, _symbol: &str) -> Result<usize, String> {
+        Err("native loader is unavailable on this target".to_string())
+    }
 
+    pub(super) fn close(handle: usize) {
+        if handle == 0 {
+            return;
+        }
+        #[cfg(any(unix, windows))]
+        os::close(handle);
+    }
+
+    pub(super) fn call_int(pointer: usize, args: &[i64]) -> Result<i64, String> {
+        if pointer == 0 {
+            return Err("native export has a null function address".to_string());
+        }
+        // The metadata gate has already fixed the scalar and parameter count.
+        // Each arm names the exact C ABI signature instead of guessing from a
+        // loader-side convention. The language's native scalar surface caps
+        // practical calls at eight parameters; metadata lookup stays generic.
+        // SAFETY: `pointer` came from `symbol` for the checked export, and the
+        // selected function type matches the checked argument count.
+        unsafe {
+            match args {
+                [] => Ok(std::mem::transmute::<usize, extern "C" fn() -> i64>(pointer)()),
+                [a] => Ok(std::mem::transmute::<usize, extern "C" fn(i64) -> i64>(pointer)(*a)),
+                [a, b] => Ok(std::mem::transmute::<usize, extern "C" fn(i64, i64) -> i64>(
+                    pointer,
+                )(*a, *b)),
+                [a, b, c] => Ok(std::mem::transmute::<
+                    usize,
+                    extern "C" fn(i64, i64, i64) -> i64,
+                >(pointer)(*a, *b, *c)),
+                [a, b, c, d] => Ok(std::mem::transmute::<
+                    usize,
+                    extern "C" fn(i64, i64, i64, i64) -> i64,
+                >(pointer)(*a, *b, *c, *d)),
+                [a, b, c, d, e] => Ok(std::mem::transmute::<
+                    usize,
+                    extern "C" fn(i64, i64, i64, i64, i64) -> i64,
+                >(pointer)(*a, *b, *c, *d, *e)),
+                [a, b, c, d, e, f] => Ok(std::mem::transmute::<
+                    usize,
+                    extern "C" fn(i64, i64, i64, i64, i64, i64) -> i64,
+                >(pointer)(*a, *b, *c, *d, *e, *f)),
+                [a, b, c, d, e, f, g] => Ok(std::mem::transmute::<
+                    usize,
+                    extern "C" fn(i64, i64, i64, i64, i64, i64, i64) -> i64,
+                >(pointer)(*a, *b, *c, *d, *e, *f, *g)),
+                [a, b, c, d, e, f, g, h] => Ok(std::mem::transmute::<
+                    usize,
+                    extern "C" fn(i64, i64, i64, i64, i64, i64, i64, i64) -> i64,
+                >(pointer)(*a, *b, *c, *d, *e, *f, *g, *h)),
+                _ => Err("native Int export has more than eight parameters".to_string()),
+            }
+        }
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_mod_native
+
+static JET_MOD_NEXT_TEMP: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// A staged payload file that is removed unless a loaded JetMod keeps it.
+struct JetModStagedPayload {
+    path: Option<std::path::PathBuf>,
+}
+
+impl JetModStagedPayload {
+    fn keep(mut self) -> std::path::PathBuf {
+        self.path.take().expect("staged payload path missing")
+    }
+}
+
+impl Drop for JetModStagedPayload {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+fn stage_payload(payload: &[u8]) -> Result<JetModStagedPayload, String> {
+    use std::io::Write;
+    let serial = JET_MOD_NEXT_TEMP.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "jet-mod-{}-{serial}.{}",
+        std::process::id(),
+        jet_mod_native::EXTENSION
+    ));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| format!("cannot stage library payload: {error}"))?;
+    let staged = JetModStagedPayload { path: Some(path) };
+    let result = file
+        .write_all(payload)
+        .map_err(|error| format!("cannot stage library payload: {error}"))
+        .and_then(|()| {
+            file.flush()
+                .map_err(|error| format!("cannot flush library payload: {error}"))
+        });
+    drop(file);
+    result?;
+    Ok(staged)
 }
 
 fn is_reparse_point(metadata: &std::fs::Metadata) -> bool {
@@ -972,6 +820,185 @@ fn granted_path(path: &std::path::Path, grant: &JetModGrant) -> Result<std::path
     )))
 }
 
-pub fn jet_mod_load(path: &String, grant: &JetModGrant) -> Result<JetMod, String> {
-    native::load(path, grant)
+/// Every refusal is tagged (D-MOD-ERR1=A): the grant and metadata checks tag
+/// their own; a file that cannot be read, parsed, staged or mapped is
+/// `Invalid`; a target without a native loader is `Unsupported`.
+pub fn jet_mod_load(path: &str, grant: &JetModGrant) -> Result<JetMod, String> {
+    if !jet_mod_native::SUPPORTED {
+        return Err(JetModFailure::Unsupported.tag(format!(
+            "Mod.load is not supported on target `{}`",
+            std::env::consts::OS
+        )));
+    }
+    let invalid = |reason: String| JetModFailure::Invalid.tag(reason);
+    let source = granted_path(std::path::Path::new(path), grant)?;
+    let bytes = std::fs::read(&source).map_err(|error| {
+        JetModFailure::from_io(&error)
+            .tag(format!("cannot read library `{}`: {error}", source.display()))
+    })?;
+    let header = jetlib_header(&bytes).map_err(invalid)?;
+    check_before_map(&header)?;
+    if payload_digest(header.payload) != header.payload_digest {
+        return Err(invalid(format!(
+            "cannot map library payload: `{}` has a content digest that does not match its metadata",
+            header.library_name
+        )));
+    }
+    let staged = stage_payload(header.payload).map_err(invalid)?;
+    let staged_path = staged.path.as_deref().expect("staged payload path missing");
+    let handle = jet_mod_native::open(staged_path)
+        .map_err(|error| invalid(format!("cannot map library payload: {error}")))?;
+
+    let mut exports = header.exports.clone();
+    for export in &mut exports {
+        match jet_mod_native::symbol(handle, &export.symbol) {
+            Ok(pointer) => export.pointer = pointer,
+            Err(error) => {
+                jet_mod_native::close(handle);
+                return Err(invalid(format!(
+                    "E1341: library `{}` metadata names `{}`, but the payload has no `{}` export: {error}",
+                    header.library_name, export.name, export.symbol
+                )));
+            }
+        }
+    }
+    if header
+        .exports
+        .iter()
+        .any(|export| export.scalar == JetModScalar::Text)
+    {
+        if let Err(error) = jet_mod_native::symbol(handle, "jet_text_free") {
+            jet_mod_native::close(handle);
+            return Err(invalid(format!(
+                "E1341: library `{}` has Text exports but no `jet_text_free` allocator release export: {error}",
+                header.library_name
+            )));
+        }
+    }
+    Ok(JetMod {
+        handle,
+        exports,
+        payload_path: staged.keep(),
+    })
+}
+
+// The parsed borrow stays internal; metadata moves out and payload bytes
+// remain in their one owning buffer until the existing staging operation.
+struct JetModLoadContext {
+    bytes: Vec<u8>,
+    payload_offset: usize,
+    header: Option<JetLibHeader<'static>>,
+    staged: Option<JetModStagedPayload>,
+    handle: usize,
+}
+impl Drop for JetModLoadContext {
+    fn drop(&mut self) {
+        if self.handle != 0 {
+            jet_mod_native::close(self.handle);
+            self.handle = 0;
+        }
+        // The staged field drops AFTER close, matching load's old error path.
+    }
+}
+thread_local! {
+    static JET_MOD_LOAD_CONTEXTS: std::cell::RefCell<Vec<Option<JetModLoadContext>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+fn jet_mod_with_context<R>(id: i64, f: impl FnOnce(&mut JetModLoadContext) -> R) -> R {
+    JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        f(contexts.get_mut((id - 1) as usize).and_then(Option::as_mut).expect("live Core loader context"))
+    })
+}
+fn jet_mod_supported_raw() -> bool { jet_mod_native::SUPPORTED }
+fn jet_mod_os_raw() -> String { std::env::consts::OS.to_string() }
+fn jet_mod_read_context_raw(path: &String, grant: &JetModGrant) -> Result<i64, String> {
+    let source = granted_path(std::path::Path::new(path), grant)?;
+    let bytes = std::fs::read(&source).map_err(|error| JetModFailure::from_io(&error)
+        .tag(format!("cannot read library `{}`: {error}", source.display())))?;
+    Ok(JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        let mut contexts = contexts.borrow_mut();
+        let context = JetModLoadContext { bytes, payload_offset: 0, header: None, staged: None, handle: 0 };
+        if let Some(index) = contexts.iter().position(Option::is_none) {
+            contexts[index] = Some(context);
+            (index + 1) as i64
+        } else {
+            contexts.push(Some(context));
+            contexts.len() as i64
+        }
+    }))
+}
+fn jet_mod_parse_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        let header = jetlib_header(&context.bytes)?;
+        context.payload_offset = context.bytes.len() - header.payload.len();
+        context.header = Some(JetLibHeader {
+            compiler_version: header.compiler_version, compiler_build: header.compiler_build,
+            library_name: header.library_name, entry: header.entry, target: header.target,
+            target_triple: header.target_triple, linker_identity: header.linker_identity,
+            abi_identity: header.abi_identity, abi_version: header.abi_version,
+            exports: header.exports, effects: header.effects, payload_digest: header.payload_digest,
+            payload: &[],
+        });
+        Ok(())
+    })
+}
+fn jet_mod_check_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| check_before_map(context.header.as_ref().expect("parsed header")))
+}
+fn jet_mod_context_name_raw(id: i64) -> String {
+    jet_mod_with_context(id, |context| context.header.as_ref().expect("parsed header").library_name.clone())
+}
+fn jet_mod_context_digest_raw(id: i64) -> bool {
+    jet_mod_with_context(id, |context| payload_digest(&context.bytes[context.payload_offset..]) ==
+        context.header.as_ref().expect("parsed header").payload_digest)
+}
+fn jet_mod_stage_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        context.staged = Some(stage_payload(&context.bytes[context.payload_offset..])?);
+        Ok(())
+    })
+}
+fn jet_mod_open_context_raw(id: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        context.handle = jet_mod_native::open(context.staged.as_ref().expect("staged payload")
+            .path.as_deref().expect("staged payload path missing"))?;
+        Ok(())
+    })
+}
+fn jet_mod_exports_count_raw(id: i64) -> i64 {
+    jet_mod_with_context(id, |context| context.header.as_ref().expect("parsed header").exports.len() as i64)
+}
+fn jet_mod_export_info_raw(id: i64, index: i64) -> (String, String, bool) {
+    jet_mod_with_context(id, |context| {
+        let export = &context.header.as_ref().expect("parsed header").exports[index as usize];
+        (export.name.clone(), export.symbol.clone(), export.scalar == JetModScalar::Text)
+    })
+}
+fn jet_mod_resolve_export_raw(id: i64, index: i64) -> Result<(), String> {
+    jet_mod_with_context(id, |context| {
+        let export = &mut context.header.as_mut().expect("parsed header").exports[index as usize];
+        export.pointer = jet_mod_native::symbol(context.handle, &export.symbol)?;
+        Ok(())
+    })
+}
+fn jet_mod_resolve_symbol_raw(id: i64, symbol: &String) -> Result<(), String> {
+    jet_mod_with_context(id, |context| jet_mod_native::symbol(context.handle, symbol).map(|_| ()))
+}
+fn jet_mod_close_context_raw(id: i64) {
+    JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        if let Some(slot) = contexts.borrow_mut().get_mut((id - 1) as usize) { drop(slot.take()); }
+    });
+}
+fn jet_mod_finish_context_raw(id: i64) -> JetMod {
+    JET_MOD_LOAD_CONTEXTS.with(|contexts| {
+        let mut context = contexts.borrow_mut()[(id - 1) as usize].take().expect("live loader context");
+        let module = JetMod {
+            handle: context.handle,
+            exports: std::mem::take(&mut context.header.as_mut().expect("parsed header").exports),
+            payload_path: context.staged.take().expect("staged payload").keep(),
+        };
+        context.handle = 0;
+        module
+    })
 }

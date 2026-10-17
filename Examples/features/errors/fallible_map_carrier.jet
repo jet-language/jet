@@ -1,0 +1,34 @@
+// A `??` fallback that handles every failure inside a map callback leaves the
+// callback and its caller infallible; a fallible map callback projects one
+// failure carrier that the caller's `??` handles; explicit `Ok` arms in a
+// fallible body are returned once, not wrapped twice.
+fn parse(n: Int) -> Int Err! {
+    if n == 0 { return Err("bad") }
+    return n
+}
+
+fn choose(first: Bool) -> Int Err! { if first -> Ok(1) else -> Ok(2) }
+
+fn handled_map() {
+    pattern :: Regex{"^IMG_([0-9]+)[.]jpeg$"}
+    values :: ["IMG_1.jpeg", "IMG_2.jpeg"].map(line -> {
+        found :: pattern.match(line) ?? panic("bad")
+        Int.parse(found.group(1) ?? panic("bad")) ?? panic("bad")
+    })
+    print(values)
+}
+
+fn fallible_map() {
+    values :: [1, 0].map((n: Int) -> parse(n)) ?? {
+        print(err.message)
+        []
+    }
+    print(values)
+}
+
+fn run() {
+    handled_map()
+    fallible_map()
+    print(choose(true) ?? 0)
+    print(choose(false) ?? 0)
+}

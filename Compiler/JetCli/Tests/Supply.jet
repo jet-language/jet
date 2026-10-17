@@ -1,0 +1,42 @@
+// CmdSupply::run_sbom uses the real checked Package and optional lock reader.
+// Exact deterministic SPDX/CycloneDX output stays plain under --json.
+fn run() {
+    root :: "{cli_sys.temp_dir()}/jet-cli-supply-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{root}/extracted/.jet") ?? panic("extracted fixture")
+    cli_files.create_dir_all("{root}/inline/.jet") ?? panic("inline fixture")
+    package :: "name: \"myapp\"\nversion: \"0.1.0\"\n"
+    cli_files.write("{root}/extracted/package.jet", package) ?? panic("Package without entry")
+    cli_files.write("{root}/inline/run.jet", "package {{\n{package}}}\nfn run() {{}}\n") ?? panic("inline Package")
+    lock :: "version = 1\n\n[root]\ndependencies = []\n"
+    digest :: "sha256-5818e1a4ff61c5588768e1a8635440de1bb62905969dabe6786d37baf1dcf4f5"
+    expected_spdx :: "SPDXVersion: SPDX-2.3\nDataLicense: CC0-1.0\nSPDXID: SPDXRef-DOCUMENT\nDocumentNamespace: https://jet-lang.dev/spdx/myapp-0.1.0-{digest}\nDocumentName: myapp-0.1.0\nCreator: Tool: jet\nCreated: 1970-01-01T00:00:00Z\n\n##### Root package\n\nPackageName: myapp\nSPDXID: SPDXRef-root\nPackageVersion: 0.1.0\nFilesAnalyzed: false\nPackageChecksum: NOASSERTION\nPackageDownloadLocation: NOASSERTION\n\n"
+    expected_cdx :: "{{\n  \"bomFormat\": \"CycloneDX\",\n  \"specVersion\": \"1.5\",\n  \"serialNumber\": \"urn:uuid:jet-{digest}\",\n  \"version\": 1,\n  \"metadata\": {{\n    \"timestamp\": \"1970-01-01T00:00:00Z\",\n    \"tools\": [{{ \"name\": \"jet\" }}],\n    \"component\": {{\n      \"type\": \"library\",\n      \"name\": \"myapp\",\n      \"version\": \"0.1.0\"\n    }}\n  }},\n  \"components\": [\n\n  ]\n}}\n"
+    loop carrier in ([String]{"extracted", "inline"}) {
+        project :: "{root}/{carrier}"
+        cli_files.write("{project}/.jet/lock", lock) ?? panic("machine lock")
+        loop machine in ([Bool]{false, true}) {
+            spdx :: jet_cli_supply_sbom(project, [String]{}, false, machine)
+            assert_eq(spdx.stdout, expected_spdx)
+            assert_eq(spdx.stderr, "")
+            assert_eq(spdx.exit_code, JET_DRIVER_EXIT_OK)
+            cyclonedx :: jet_cli_supply_sbom(project, [String]{"--cyclonedx"}, false, machine)
+            assert_eq(cyclonedx.stdout, expected_cdx)
+            assert_eq(cyclonedx.stderr, "")
+            assert_eq(cyclonedx.exit_code, JET_DRIVER_EXIT_OK)
+        }
+        cli_files.remove("{project}/.jet/lock") ?? panic("missing lock")
+        absent :: jet_cli_supply_sbom(project, [String]{}, false, false)
+        assert_eq(absent.stdout, "")
+        assert_eq(absent.stderr, "Error [E1202]: no lockfile found — run `jet fetch` first\n Why: the lockfile must contain the exact dependency graph before a locked or supply-chain command can run\n Fix: run `jet fetch`, then run the command again\nMore: jet-lang.dev/e/E1202\n")
+        assert_eq(absent.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+        cli_files.write("{project}/.jet/lock", "not a lock\n") ?? panic("corrupt lock")
+        corrupt :: jet_cli_supply_sbom(project, [String]{}, false, false)
+        assert_eq(corrupt, absent)
+        machine_error :: jet_cli_supply_sbom(project, [String]{}, false, true)
+        expected_report :: diagnostic_from_registry("E1202", None, "no lockfile found — run `jet fetch` first", "the lockfile must contain the exact dependency graph before a locked or supply-chain command can run", "run `jet fetch`, then run the command again")
+        assert_eq(machine_error.stdout, jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{expected_report}))
+        assert_eq(machine_error.stderr, "")
+        assert_eq(machine_error.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    cli_files.remove_all(root) ?? panic("cleanup fixture")
+}

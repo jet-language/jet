@@ -1,0 +1,268 @@
+use core.files as files
+use core.encoding.json as json
+
+fn kit_steps_numeric(text: String) -> Int? {
+    plus :: kit_steps_byte_index(text, "+") ?? -1
+    if plus > 0 {
+        left :: kit_steps_numeric(kit_steps_byte_slice(text, 0, plus)) ?? return None
+        right :: Int.parse(kit_steps_byte_slice(text, plus + 1, text.count_bytes())) ?? return None
+        if right < 0 || left > 9223372036854775807 - right -> return None
+        return Val(left + right)
+    }
+    star :: kit_steps_byte_index(text, "*") ?? -1
+    if star > 0 {
+        left :: Int.parse(kit_steps_byte_slice(text, 0, star)) ?? return None
+        right :: kit_steps_numeric(kit_steps_byte_slice(text, star + 1, text.count_bytes())) ?? return None
+        if left < 0 || right < 0 || (right > 0 && left > 9223372036854775807 /% right) -> return None
+        return Val(left * right)
+    }
+    number :: Int.parse(text) ?? return None
+    if number < 0 -> return None
+    Val(number)
+}
+
+fn kit_steps_batch_form(mode: String) -> Bool {
+    kit_expect_named(["lines", "count", "count-lines", "each-line", "sorted-lines", "numeric-lines", "len", "each", "unique-after", "$=", "is-i64", "is-u32", "word", "has-line", "in-order-of", "any-line", "machine-output", "delta"], mode)
+}
+
+fn kit_steps_batch_assertion(stream: String, path: String, transform: String, original: String, offset: Int) -> KitAssertion? {
+    body :: kit_steps_body(original)
+    tokens :: kit_steps_tokens(body) ?? return None
+    words :: tokens.slice(offset, tokens.len())
+    mode :: words[0].text
+    assertion := KitAssertion{stream: stream, path: path, mode: mode, value: "", transform: transform}
+    partial :: !kit_expect_named(["numeric-lines", "lines", "machine-output"], mode) || !(body.contains("[") && body.contains("="))
+    if partial && !kit_steps_reason(original) -> return None
+    if mode == "is-i64" || mode == "is-u32" -> return if words.len() == 1 -> Val(assertion) else -> None
+    if mode == "delta" {
+        if words.len() != 4 || words[2].text != "<=" || (Int.parse(words[3].text) ?? -1) < 0 -> return None
+        assertion.value = words[1].text
+        assertion.extra = words[3].text
+        return Val(assertion)
+    }
+    if mode == "any-line" {
+        if words.len() < 3 || words[1].text != "words-prefix" -> return None
+        assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim().copy()
+        if kit_steps_string_array(assertion.value) == None -> return None
+        return Val(assertion)
+    }
+    if mode == "each-line" {
+        if words.len() == 2 && words[1].text == "hex" {
+            assertion.extra = "hex"
+            return Val(assertion)
+        }
+        if words.len() < 3 -> return None
+        assertion.extra = words[1].text
+        if assertion.extra == "where" {
+            assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes())
+            if kit_steps_expression(assertion.value, "") == None -> return None
+        } else {
+            if words.len() != 3 || !kit_expect_named(["~", "^=", "!~"], assertion.extra) -> return None
+            assertion.value = words[2].text
+        }
+        return Val(assertion)
+    }
+    if mode == "count-lines" {
+        at := 1
+        if words.len() > at && kit_expect_named(["trim", "trim_start", "trim_end"], words[at].text) {
+            assertion.alternatives = [words[at].text]
+            at += 1
+        }
+        if words.len() != at + 4 || !kit_expect_named(["^=", "~", "="], words[at].text) || words[at + 2].text != "=" -> return None
+        assertion.extra = words[at].text
+        assertion.value = words[at + 1].text
+        &assertion.alternatives.push(words[at + 3].text)
+        if !kit_steps_count_target_valid(words[at + 3].text) -> return None
+        return Val(assertion)
+    }
+    if mode == "word" {
+        if words.len() != 3 || words[1].text != "=" -> return None
+        assertion.value = words[2].text
+        return Val(assertion)
+    }
+    if kit_expect_named(["has-line", "unique-after", "in-order-of", "$="], mode) {
+        if words.len() != 2 -> return None
+        assertion.value = words[1].text
+        if mode == "$=" && body.bytes()[words[1].start] != (U8{34}) && body.bytes()[words[1].start] != (U8{39}) -> assertion.extra = "file"
+        return Val(assertion)
+    }
+    if mode == "count" {
+        if words.len() != 4 || !kit_expect_named(["=", ">=", "<=", ">", "<"], words[2].text) || words[1].text == "" || !kit_steps_count_target_valid(words[3].text) -> return None
+        assertion.value = words[1].text
+        assertion.extra = words[3].text
+        assertion.alternatives = [words[2].text]
+        return Val(assertion)
+    }
+    if words.len() < 3 -> return None
+    assertion.extra = words[1].text
+    assertion.value = kit_steps_byte_slice(body, words[2].start, body.count_bytes()).trim().copy()
+    if mode == "machine-output" {
+        if assertion.extra != "=" || !assertion.value.starts_with("[") || !assertion.value.ends_with("]") -> return None
+        loop raw in kit_steps_byte_slice(assertion.value, 1, assertion.value.count_bytes() - 1).split(",") {
+            name :: raw.trim().copy()
+            if !kit_expect_named(["status", "report", "browser-relay"], name) -> return None
+            &assertion.alternatives.push(name)
+        }
+        return Val(assertion)
+    }
+    if mode == "numeric-lines" || (mode == "lines" && assertion.value.starts_with("[")) {
+        if assertion.extra != "=" && !(mode == "numeric-lines" && assertion.extra == "==") -> return None
+        if assertion.extra == "=" {
+            expected :: json.parse(assertion.value) ?? return None
+            if kit_steps_json_type(expected) != "array" -> return None
+            if mode == "lines" && kit_steps_string_array(assertion.value) == None -> return None
+        }
+        if mode == "lines" -> assertion.mode = "lines-array"
+        return Val(assertion)
+    }
+    if mode == "sorted-lines" {
+        if words.len() != 3 || assertion.extra != "=" -> return None
+        assertion.value = words[2].text
+        return Val(assertion)
+    }
+    if words.len() != 3 || !kit_expect_named(["=", ">=", "<=", ">", "<"], assertion.extra) || !kit_steps_count_target_valid(words[2].text) -> return None
+    assertion.value = words[2].text
+    Val(assertion)
+}
+
+fn kit_steps_i64(text: String) -> Bool {
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return false
+    start :: if bytes[0] == (U8{43}) || bytes[0] == (U8{45}) -> 1 else -> 0
+    if bytes.len() == start -> return false
+    loop byte in bytes.slice(start, bytes.len()) {
+        if byte < (U8{48}) || byte > (U8{57}) -> return false
+    }
+    first := start
+    loop first < bytes.len() && bytes[first] == (U8{48}) -> first += 1
+    digits :: bytes.len() - first
+    if digits < 19 -> return true
+    if digits > 19 -> return false
+    maximum :: if bytes[0] == (U8{45}) -> "9223372036854775808" else -> "9223372036854775807"
+    bounds :: maximum.bytes()
+    loop index in 0..<19 {
+        if bytes[first + index] < bounds[index] -> return true
+        if bytes[first + index] > bounds[index] -> return false
+    }
+    true
+}
+
+fn kit_steps_float_lines(text: String) -> [Float]? {
+    result := [Float]{}
+    loop line in kit_steps_rust_lines(text) -> &result.push(Float.parse(line.trim().copy()) ?? return None)
+    Val(result)
+}
+
+fn kit_steps_batch_test(actual: String, assertion: KitAssertion, value: String, extra: String, context: KitStepCtx, state: KitStepState) -> KitVerdict? {
+    mode :: assertion.mode
+    if !kit_steps_batch_form(mode) && mode != "lines-array" -> return None
+    matches := false
+    if mode == "delta" {
+        left :: Int.parse(actual) ?? return Val(kit_expect_verdict("FAIL", "delta subject is not an integer"))
+        right :: Int.parse(value) ?? return Val(kit_expect_verdict("FAIL", "delta reference is not an integer"))
+        bound :: Int.parse(extra) ?? return Val(kit_expect_verdict("ERROR", "delta bound is not an integer"))
+        within :: if left < 0 && right >= 0 -> left >= -bound && right <= bound + left else if right < 0 && left >= 0 -> right >= -bound && left <= bound + right else if left >= right -> left - right <= bound else -> right - left <= bound
+        return Val(if within -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "integer absolute difference exceeds bound"))
+    }
+    if mode == "machine-output" {
+        failure :: kit_steps_machine_output(actual, assertion.alternatives)
+        verdict :: if failure == {
+            .Val(detail) -> kit_expect_verdict("FAIL", detail)
+            .None -> kit_expect_verdict("PASS", "")
+        }
+        return Val(verdict)
+    }
+    if mode == "is-i64" -> matches = kit_steps_i64(actual)
+    else if mode == "is-u32" -> matches = kit_steps_i64(actual) && !actual.starts_with("-") && (Int.parse(actual) ?? -1) >= 0 && (Int.parse(actual) ?? -1) <= 4294967295
+    else if mode == "lines-array" -> matches = kit_steps_rust_lines(actual) == (kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid expected line list")))
+    else if mode == "numeric-lines" {
+        left :: kit_steps_float_lines(actual) ?? return Val(kit_expect_verdict("FAIL", "non-numeric line"))
+        right := [Float]{}
+        if extra == "==" {
+            previous :: kit_steps_history_stream(value, assertion.stream, state.history, false) ?? return Val(kit_expect_verdict("ERROR", "numeric-lines label missing"))
+            right = kit_steps_float_lines(previous) ?? return Val(kit_expect_verdict("FAIL", "prior non-numeric line"))
+        } else {
+            tree :: json.parse(value) ?? return Val(kit_expect_verdict("ERROR", "invalid expected numeric lines"))
+            if tree == {
+                .Array(items) -> {
+                    loop item in items {
+                        number :: kit_steps_json_number(item) ?? return Val(kit_expect_verdict("ERROR", "expected numeric list"))
+                        &right.push(number)
+                    }
+                }
+                else -> return Val(kit_expect_verdict("ERROR", "expected numeric list"))
+            }
+        }
+        matches = left == right
+    } else if mode == "sorted-lines" {
+        expected :: files.read(files.join(context.snapshots, value)) ?? return Val(kit_expect_verdict("ERROR", "sorted-lines snapshot: {err}"))
+        lines := kit_steps_rust_lines(actual)
+        &lines.sort()
+        matches = lines == kit_steps_rust_lines(expected)
+    } else if mode == "$=" {
+        expected :: if extra == "file" -> files.read(files.join(context.snapshots, value)) ?? return Val(kit_expect_verdict("ERROR", "suffix snapshot: {err}")) else -> value
+        matches = actual.ends_with(expected)
+    } else if mode == "len" || mode == "lines" {
+        expected :: kit_steps_line_count_target(value, assertion, state.history) ?? return Val(kit_expect_verdict("ERROR", "numeric RHS unavailable"))
+        measured :: if mode == "len" -> actual.bytes().len() else -> kit_steps_lines(actual)
+        matches = kit_steps_compare(measured, extra, expected)
+    } else if mode == "count" {
+        target :: kit_steps_runtime_expand(assertion.extra, context, state) ?? return Val(kit_expect_verdict("ERROR", "count RHS token unavailable"))
+        expected :: kit_steps_numeric(target) ?? return Val(kit_expect_verdict("ERROR", "invalid numeric count RHS"))
+        matches = kit_steps_compare(kit_steps_occurrences(actual, value), assertion.alternatives[0], expected)
+    } else if mode == "each" {
+        expected :: kit_steps_numeric(value) ?? return Val(kit_expect_verdict("ERROR", "invalid list RHS"))
+        matches = true
+        loop line in kit_steps_rust_lines(actual) {
+            number :: Int.parse(line) ?? return Val(kit_expect_verdict("FAIL", "list item is not an integer"))
+            if !kit_steps_compare(number, extra, expected) -> matches = false
+        }
+    } else if mode == "count-lines" {
+        count := 0
+        line_transform :: if assertion.alternatives.len() == 2 -> assertion.alternatives[0] else -> ""
+        loop line in kit_steps_rust_lines(actual) {
+            transformed :: kit_steps_transform(line, line_transform) ?? return Val(kit_expect_verdict("FAIL", "line transform failed"))
+            if kit_steps_line_atom(transformed, extra, value) -> count += 1
+        }
+        target :: kit_steps_runtime_expand(assertion.alternatives[assertion.alternatives.len() - 1], context, state) ?? return Val(kit_expect_verdict("ERROR", "line-count RHS unavailable"))
+        matches = count == (kit_steps_numeric(target) ?? -1)
+    } else if mode == "each-line" {
+        matches = true
+        loop line in kit_steps_rust_lines(actual) {
+            matched := false
+            if extra == "hex" {
+                if !kit_steps_hex_valid(line) -> return Val(kit_expect_verdict("FAIL", "line is not even-length hexadecimal"))
+                matched = true
+            } else if extra == "where" -> matched = kit_steps_expression(value, line) ?? return Val(kit_expect_verdict("ERROR", "invalid line expression"))
+            else -> matched = kit_steps_line_atom(line, extra, value)
+            if !matched -> matches = false
+        }
+    } else if mode == "unique-after" {
+        seen := [String]{}
+        matches = true
+        loop line in kit_steps_rust_lines(actual) {
+            at :: kit_steps_byte_index(line, value) ?? return Val(kit_expect_verdict("FAIL", "line lacks unique-after marker"))
+            suffix :: kit_steps_byte_slice(line, at + value.count_bytes(), line.count_bytes())
+            if kit_expect_named(seen, suffix) -> matches = false
+            &seen.push(suffix)
+        }
+    } else if mode == "word" || mode == "has-line" || mode == "any-line" {
+        expected := [String]{}
+        if mode == "any-line" -> expected = kit_steps_string_array(value) ?? return Val(kit_expect_verdict("ERROR", "invalid word prefix"))
+        loop line in kit_steps_rust_lines(actual) {
+            if mode == "has-line" && line == value -> matches = true
+            words :: kit_steps_whitespace_words(line)
+            if mode == "word" && kit_expect_named(words, value) -> matches = true
+            if mode == "any-line" && words.len() >= expected.len() && words.slice(0, expected.len()) == expected -> matches = true
+        }
+    } else if mode == "in-order-of" {
+        previous := -1
+        matches = true
+        loop line in kit_steps_rust_lines(value) {
+            at :: kit_steps_byte_index(actual, line) ?? return Val(kit_expect_verdict("FAIL", "ordered line missing"))
+            if at <= previous -> matches = false
+            previous = at
+        }
+    }
+    Val(if matches -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("FAIL", "stream predicate {mode} failed"))
+}

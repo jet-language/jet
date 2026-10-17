@@ -178,7 +178,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     // Streamed archive bytes must match the materialized reference.
     assert_eq(got, "sha256-{pkg_sha256_hex(pkg_test_reference_archive(root, has_xattr))}")
     metadata :: files.stat(files.join(dir, "small.txt")) ?? panic("stat small")
-    expected_cas_key :: "{pkg_sha256_hex("small file".bytes())}-{pkg_envelope_hex8(pkg_envelope_mode(metadata) & 0o7777)}"
+    expected_cas_key :: "{pkg_sha256_hex("small file".bytes())}-{pkg_envelope_hex8((pkg_envelope_mode(metadata)).bit_and(0o7777))}"
     assert_eq(pkg_envelope_cas_key(metadata, pkg_sha256_hex("small file".bytes())), expected_cas_key)
     files.remove_all(dir) ?? panic("cleanup")
 }
@@ -417,7 +417,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
     files.write(file, "AAAA") ?? panic("write file")
     files.write(stamp, "stamp") ?? panic("write stamp")
     pkg_test_run([String]{"touch", "-r", stamp, file})
-    expected_mtime :: (files.stat(file) ?? panic("stat")).modified.unix_ns
+    expected_mtime :: (files.stat(file) ?? panic("stat")).modified.to_unix_ns() ?? panic("mtime")
     marker :: "{dir}.changed"
     files.remove(marker).drop("a stale marker may be absent")
     hook := EnvelopeWalkHook{
@@ -427,7 +427,7 @@ fn pkg_test_reference_encode_node(path: String, rel: String, out: &[U8], links: 
             files.write(marker, "") ?? panic("marker")
             files.write(file, "BBBB") ?? panic("rewrite")
             pkg_test_run([String]{"touch", "-r", stamp, file})
-            assert_eq((files.stat(file) ?? panic("stat")).modified.unix_ns, expected_mtime)
+            assert_eq((files.stat(file) ?? panic("stat")).modified.to_unix_ns() ?? panic("mtime"), expected_mtime)
         }
     }
     assert(pkg_test_envelope_hook_error(dir, &hook).contains("changed while hashing"))

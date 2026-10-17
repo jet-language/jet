@@ -72,8 +72,8 @@ impl JetHTTPClient {
     }
 }
 
-fn jet_http_client_request_new(method: &String, url: &String) -> JetHTTPRequest {
-    jet_http_client_request_new_owned(method.clone(), url.clone())
+fn jet_http_client_request_new(method: &str, url: &str) -> JetHTTPRequest {
+    jet_http_client_request_new_owned(method.to_owned(), url.to_owned())
 }
 
 fn jet_http_client_request_new_owned(method: String, url: String) -> JetHTTPRequest {
@@ -139,16 +139,12 @@ fn jet_http_client_request_json_text_owned(
 }
 
 
-fn jet_http_client_request_header(
-    req: JetHTTPRequest,
-    name: &String,
-    value: &String,
-) -> JetHTTPRequest {
-    jet_http_client_request_header_owned(req, name.clone(), value.clone())
+fn jet_http_client_request_header(req: JetHTTPRequest, name: &str, value: &str, ) -> JetHTTPRequest {
+    jet_http_client_request_header_owned(req, name.to_owned(), value.to_owned())
 }
 
-fn jet_http_client_request_body(mut req: JetHTTPRequest, body: &String) -> JetHTTPRequest {
-    jet_http_client_request_body_owned(req, body.clone())
+fn jet_http_client_request_body(mut req: JetHTTPRequest, body: &str) -> JetHTTPRequest {
+    jet_http_client_request_body_owned(req, body.to_owned())
 }
 
 fn jet_http_client_request_json_body(
@@ -163,18 +159,9 @@ fn jet_http_client_request_json_body(
     req
 }
 
-fn jet_http_client_request_json<T: __jet_Encode>(
-    req: JetHTTPRequest,
-    value: T,
-) -> JetHTTPRequest {
-    jet_http_client_request_json_body(req, JetHTTPBody::from_json(value))
-}
 
-fn jet_http_client_request_json_text(
-    req: JetHTTPRequest,
-    body: &String,
-) -> JetHTTPRequest {
-    jet_http_client_request_json_text_owned(req, body.clone())
+fn jet_http_client_request_json_text(req: JetHTTPRequest, body: &str, ) -> JetHTTPRequest {
+    jet_http_client_request_json_text_owned(req, body.to_owned())
 }
 
 
@@ -254,8 +241,8 @@ fn jet_http_client_request_proxy_owned(
     req
 }
 
-fn jet_http_client_request_proxy(req: JetHTTPRequest, proxy: &String) -> JetHTTPRequest {
-    jet_http_client_request_proxy_owned(req, proxy.clone())
+fn jet_http_client_request_proxy(req: JetHTTPRequest, proxy: &str) -> JetHTTPRequest {
+    jet_http_client_request_proxy_owned(req, proxy.to_owned())
 }
 
 fn jet_http_client_request_cookie_owned(
@@ -268,12 +255,8 @@ fn jet_http_client_request_cookie_owned(
     req
 }
 
-fn jet_http_client_request_cookie(
-    req: JetHTTPRequest,
-    name: &String,
-    value: &String,
-) -> JetHTTPRequest {
-    jet_http_client_request_cookie_owned(req, name.clone(), value.clone())
+fn jet_http_client_request_cookie(req: JetHTTPRequest, name: &str, value: &str, ) -> JetHTTPRequest {
+    jet_http_client_request_cookie_owned(req, name.to_owned(), value.to_owned())
 }
 
 fn jet_http_client_request_form_owned(
@@ -286,12 +269,8 @@ fn jet_http_client_request_form_owned(
     req
 }
 
-fn jet_http_client_request_form(
-    req: JetHTTPRequest,
-    name: &String,
-    value: &String,
-) -> JetHTTPRequest {
-    jet_http_client_request_form_owned(req, name.clone(), value.clone())
+fn jet_http_client_request_form(req: JetHTTPRequest, name: &str, value: &str, ) -> JetHTTPRequest {
+    jet_http_client_request_form_owned(req, name.to_owned(), value.to_owned())
 }
 
 fn jet_http_client_request_multipart_text_owned(
@@ -304,12 +283,8 @@ fn jet_http_client_request_multipart_text_owned(
     req
 }
 
-fn jet_http_client_request_multipart_text(
-    req: JetHTTPRequest,
-    name: &String,
-    value: &String,
-) -> JetHTTPRequest {
-    jet_http_client_request_multipart_text_owned(req, name.clone(), value.clone())
+fn jet_http_client_request_multipart_text(req: JetHTTPRequest, name: &str, value: &str, ) -> JetHTTPRequest {
+    jet_http_client_request_multipart_text_owned(req, name.to_owned(), value.to_owned())
 }
 
 fn jet_http_client_response_status(resp: &JetHTTPResponse) -> i64 {
@@ -369,7 +344,7 @@ fn jet_http_client_response_new(
 fn jet_http_client_response_body(resp: &JetHTTPResponse) -> JetHTTPBody {
     resp.body.clone()
 }
-fn jet_http_client_response_header(resp: &JetHTTPResponse, name: &String) -> JetOutcome<String, JetAbsent> {
+fn jet_http_client_response_header(resp: &JetHTTPResponse, name: &str) -> JetOutcome<String, JetAbsent> {
     jet_outcome_of(resp.headers.get(name).cloned())
 }
 
@@ -507,16 +482,38 @@ macro_rules! jet_http_client_bridge {
             ))
         }
 
-        fn jet_http_client_get(url: &String) -> Result<JetHTTPResponse, JetHTTPError> {
+        fn jet_http_client_get(url: &str) -> Result<JetHTTPResponse, JetHTTPError> {
             native_http_response($bridge::jet_http_client_get_parts_impl(url))
         }
 
-        fn jet_http_client_post(url: &String, body: &String) -> Result<JetHTTPResponse, JetHTTPError> {
+        fn jet_http_client_post(url: &str, body: &str) -> Result<JetHTTPResponse, JetHTTPError> {
             native_http_response($bridge::jet_http_client_post_parts_impl(url, body))
         }
 
         fn jet_http_client_request_send(req: JetHTTPRequest) -> Result<JetHTTPResponse, JetHTTPError> {
             native_http_request(req)
         }
+
+        fn native_http_build_resolve(host: &str, port: i64) -> Result<Vec<Vec<u8>>, String> {
+            $bridge::jet_http_build_resolve_impl(host, port)
+        }
+        fn native_http_build_get(
+            host: &String, authority: &String, target: &String, secure: bool,
+            addresses: &Vec<Vec<u8>>, port: i64, timeout_ms: i64, limit: i64,
+        ) -> Result<Vec<Vec<u8>>, String> {
+            $bridge::jet_http_build_get_impl(host, authority, target, secure, addresses, port, timeout_ms, limit)
+        }
     };
+}
+
+// Concrete signatures outside the bridge macro are intentional: the canonical
+// C-ABI generator reads these same kernels, for native selected execution.
+fn jet_http_build_resolve(host: &str, port: i64) -> Result<Vec<Vec<u8>>, String> {
+    native_http_build_resolve(host, port)
+}
+fn jet_http_build_get(
+    host: &String, authority: &String, target: &String, secure: bool,
+    addresses: &Vec<Vec<u8>>, port: i64, timeout_ms: i64, limit: i64,
+) -> Result<Vec<Vec<u8>>, String> {
+    native_http_build_get(host, authority, target, secure, addresses, port, timeout_ms, limit)
 }

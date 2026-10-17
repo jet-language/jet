@@ -1,0 +1,61 @@
+// PBKDF2-HMAC-SHA256, RFC8018/RFC7914 section11; SHAFamily.rs395-426.
+// Borrowed password/salt and disjoint caller-owned output; scratch872 aligned8
+// is exclusive/disjoint and wiped on every return. No allocation/concatenation.
+// Layout: HMAC672, prepared ipad64/opad64, U32, accumulator32, BE counter4 +4.
+// Password normalization and key XOR pads are computed once per derivation.
+// All loops/addresses depend on public lengths/iteration count, not secrets.
+fn rt_crypto_pbkdf2(password: I64, password_len: I64, salt: I64, salt_len: I64, iterations: I64, output: I64, length: I64, scratch: I64) -> Bool {
+    if (iterations <= I64{0} || length < I64{0} || length > I64{67108864} || password_len < I64{0} || password_len > I64{9223372036854775735} || salt_len < I64{0} || salt_len > I64{9223372036854775667}) {
+        rt_crypto_wipe(scratch, I64{872})
+        return false
+    }
+    if (length == I64{0}) {
+        rt_crypto_wipe(scratch, I64{872})
+        return true
+    }
+    inner_pad :: scratch + I64{672}
+    outer_pad :: scratch + I64{736}
+    u :: scratch + I64{800}
+    acc :: scratch + I64{832}
+    counter :: scratch + I64{864}
+    key := password
+    key_len := password_len
+    if (key_len > I64{64}) {
+        key = scratch + I64{640}
+        rt_sha256_parts(password, password_len, I64{1}, I64{0}, key, scratch)
+        key_len = I64{32}
+    }
+    i := I64{0}
+    loop i < (I64{64}) {
+        byte :: if (i < key_len) -> rt_text_byte(key + i) else -> I64{0}
+        rt_text_put(inner_pad + i, byte.bit_xor(I64{0x36}))
+        rt_text_put(outer_pad + i, byte.bit_xor(I64{0x5c}))
+        i += I64{1}
+    }
+    at := I64{0}
+    block := I64{1}
+    loop at < length {
+        rt_text_put(counter, (block >> I64{24}).bit_and(I64{255}))
+        rt_text_put(counter + I64{1}, (block >> I64{16}).bit_and(I64{255}))
+        rt_text_put(counter + I64{2}, (block >> I64{8}).bit_and(I64{255}))
+        rt_text_put(counter + I64{3}, block.bit_and(I64{255}))
+        rt_crypto_hmac_pads3(inner_pad, outer_pad, salt, salt_len, counter, I64{4}, I64{1}, I64{0}, u, scratch)
+        rt_text_bytes_copy(acc, u, I64{32})
+        round := I64{1}
+        loop round < iterations {
+            rt_crypto_hmac_pads3(inner_pad, outer_pad, u, I64{32}, I64{1}, I64{0}, I64{1}, I64{0}, u, scratch)
+            i = I64{0}
+            loop i < (I64{32}) {
+                rt_text_put(acc + i, rt_text_byte(acc + i).bit_xor(rt_text_byte(u + i)))
+                i += I64{1}
+            }
+            round += I64{1}
+        }
+        count :: if (length - at < I64{32}) -> length - at else -> I64{32}
+        rt_text_bytes_copy(output + at, acc, count)
+        at += count
+        block += I64{1}
+    }
+    rt_crypto_wipe(scratch, I64{872})
+    return true
+}

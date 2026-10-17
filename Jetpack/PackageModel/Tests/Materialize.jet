@@ -1,0 +1,71 @@
+// Native materializer policy fixtures; no synthetic native execution facts.
+#Test("native bundle staging normalizes relative paths and refuses escapes") {
+    plan :: pkg_bundle_wire_test_plan()
+    good :: BundleFile.new("a/./b", BundleFileKind.Executable, 493, "payload".bytes())
+    assert_eq(pkg_bundle_native_relative(&plan, &good, false) ?? panic("relative"), "a/b")
+    loop path in ([String]{"../a", "a/../b", "/a", "C:\\a", "", "."}) {
+        file :: BundleFile.new(path, BundleFileKind.Executable, 493, [U8]{})
+        assert(pkg_bundle_native_relative(&plan, &file, false) == .Err(_))
+    }
+    mac :: BundleFile.new("demo.app/Contents/MacOS/demo", BundleFileKind.Executable, 493, [U8]{})
+    assert_eq(pkg_bundle_native_relative(&plan, &mac, true) ?? panic("mac root"), "Contents/MacOS/demo")
+    outside :: BundleFile.new("other.app/Contents/demo", BundleFileKind.Executable, 493, [U8]{})
+    assert(pkg_bundle_native_relative(&plan, &outside, true) == .Err(_))
+}
+#Test("native bundle signing requires successful verify and canonical tool identity") {
+    absent :: BundleSigningRun{requested: false, verified: false, programs: [String]{}, identities: [String]{}}
+    assert(pkg_bundle_native_signing(absent) == .None)
+    pending :: BundleSigningRun{requested: true, verified: false, programs: [String]{"sign"}, identities: [String]{"id"}}
+    assert(pkg_bundle_native_signing(pending) == .Err(_))
+    one :: BundleSigningRun{requested: true, verified: true, programs: [String]{"verify"}, identities: [String]{"id"}}
+    fact :: if pkg_bundle_native_signing(one) == {
+        .Val(value) -> value
+        .None -> panic("verified signing fact is present")
+        .Err(error) -> panic("verified signing failed: {error.message()}")
+    }
+    assert(fact.status == BundleSigningStatus.Signed)
+    assert_eq(fact.tool, Val("verify"))
+    assert_eq(fact.tool_identity, Val("id"))
+    assert_eq(fact.tool_version, Val("unspecified"))
+    several :: BundleSigningRun{requested: true, verified: true, programs: [String]{"sign", "verify"}, identities: [String]{"b", "a"}}
+    many :: if pkg_bundle_native_signing(several) == {
+        .Val(value) -> value
+        .None -> panic("multiple verified signing fact is present")
+        .Err(error) -> panic("multiple verified signing failed: {error.message()}")
+    }
+    bytes := "a".bytes()
+    &bytes.push(U8{0})
+    &bytes.push(U8{98})
+    assert_eq(many.tool, Val("multiple"))
+    assert_eq(many.tool_identity, Val(pkg_sha256_hex(bytes)))
+}
+#Test("native macOS bundle publishes real files and refuses an occupied output") {
+    root :: files.tmpdir("jet-native-bundle") ?? panic("scratch")
+    plan := pkg_bundle_wire_test_plan()
+    plan.target = BundleTarget.MacOSApp
+    plan.artifact_name = "demo.app"
+    plan.files = [BundleFile]{BundleFile.new("demo.app/Contents/MacOS/demo", BundleFileKind.Executable, 493, "native payload".bytes())}
+    output :: files.join(root, "demo.app")
+    facts :: pkg_bundle_materialize(&plan, output, "compiler-fixture-version") ?? panic("materialize: {err}")
+    assert_eq(files.read_bytes(files.join(output, "Contents/MacOS/demo")) ?? panic("published"), "native payload".bytes())
+    assert_eq(facts.bytes, "native payload".bytes().len())
+    assert(facts.sha256 != plan.logical_artifact_sha256())
+    assert_eq(facts.materializer.tool_version, "compiler-fixture-version")
+    assert_eq(facts.materializer.authority, "in-process")
+    assert_eq(facts.signing, None)
+    assert(pkg_bundle_materialize(&plan, output, "compiler-fixture-version") == .Err(_))
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("native bundle failure cleans partially written stage") {
+    root :: files.tmpdir("jet-native-bundle-duplicate") ?? panic("scratch")
+    plan := pkg_bundle_wire_test_plan()
+    plan.target = BundleTarget.MacOSApp
+    file :: BundleFile.new("demo.app/payload", BundleFileKind.Metadata, 420, "payload".bytes())
+    plan.files = [BundleFile]{file, file}
+    output :: files.join(root, "demo.app")
+    assert(pkg_bundle_materialize(&plan, output, "test") == .Err(_))
+    assert(!files.exists(output))
+    stage :: files.join(root, ".demo.app.jet-package-app-{sys.pid()}")
+    assert(!files.exists(stage))
+    files.remove_all(root) ?? panic("cleanup")
+}

@@ -9,13 +9,14 @@ package {
     }
 }
 use core.text as unicode
+use core.text.runtime.kernel_unicode_string as parse_unicode_string
 
 // core.text.parse — scanning, splitting, and number parsers.
 //
 // These sit beside Unicode segmentation in `core.text`. Python's `str.split`
 // `partition`, `find`, `replace`, `int()`, and `float()` are the bar; Jet
 // returns `None` instead of raising on a bad number.
-pub fn split(text: String, sep: String) -> [String] Never! {
+fn split(text: String, sep: String) -> [String] Never! {
     if sep.bytes().len() == 0 -> return chars(text)
     out := [String]{}
     raw :: text.bytes()
@@ -35,7 +36,7 @@ pub fn split(text: String, sep: String) -> [String] Never! {
     out
 }
 
-pub fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] Never! {
+fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] Never! {
     parts :: split(text, sep)
     if maxsplit < 0 || parts.len() <= maxsplit + 1 -> return parts
     keep := parts.len() - maxsplit
@@ -54,28 +55,28 @@ pub fn rsplit(text: String, sep: String, maxsplit: Int) -> [String] Never! {
     out
 }
 
-pub fn split_once(text: String, sep: String) -> (found: Bool, head: String, tail: String) Never! {
+fn split_once(text: String, sep: String) -> (found: Bool, head: String, tail: String) Never! {
     i :: find(text, sep)
     if i < 0 -> return (head: text, tail: "", found: false)
     n :: sep.bytes().len()
     (head: slice_str(text, 0, i), tail: slice_str(text, i + n, text.bytes().len()), found: true)
 }
 
-pub fn partition(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
+fn partition(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
     i :: find(text, sep)
     if i < 0 -> return (head: text, sep: "", tail: "")
     n :: sep.bytes().len()
     (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
 }
 
-pub fn rpartition(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
+fn rpartition(text: String, sep: String) -> (head: String, sep: String, tail: String) Never! {
     i :: rfind(text, sep)
     if i < 0 -> return (head: "", sep: "", tail: text)
     n :: sep.bytes().len()
     (head: slice_str(text, 0, i), sep: sep, tail: slice_str(text, i + n, text.bytes().len()))
 }
 
-pub fn find(text: String, needle: String) -> Int Never! {
+fn find(text: String, needle: String) -> Int Never! {
     if needle.bytes().len() == 0 -> return 0
     raw :: text.bytes()
     nd :: needle.bytes()
@@ -86,7 +87,7 @@ pub fn find(text: String, needle: String) -> Int Never! {
     -1
 }
 
-pub fn rfind(text: String, needle: String) -> Int Never! {
+fn rfind(text: String, needle: String) -> Int Never! {
     if needle.bytes().len() == 0 -> return text.bytes().len()
     raw :: text.bytes()
     nd :: needle.bytes()
@@ -99,7 +100,7 @@ pub fn rfind(text: String, needle: String) -> Int Never! {
     -1
 }
 
-pub fn count(text: String, needle: String) -> Int Never! {
+fn count(text: String, needle: String) -> Int Never! {
     if needle.bytes().len() == 0 -> return text.bytes().len() + 1
     n := 0
     i := 0
@@ -112,8 +113,8 @@ pub fn count(text: String, needle: String) -> Int Never! {
     }
 }
 
-pub fn replace(text: String, old: String, new: String, count: Int) -> String Never! {
-    if old.bytes().len() == 0 -> return ~text
+fn replace(text: String, old: String, new: String, count: Int) -> String Never! {
+    if old.bytes().len() == 0 -> return text.copy()
     out := ""
     i := 0
     done := 0
@@ -127,7 +128,7 @@ pub fn replace(text: String, old: String, new: String, count: Int) -> String Nev
     }
 }
 
-pub fn starts_with(text: String, prefix: String) -> Bool Never! {
+fn starts_with(text: String, prefix: String) -> Bool Never! {
     a :: text.bytes()
     b :: prefix.bytes()
     if b.len() > a.len() -> return false
@@ -137,7 +138,7 @@ pub fn starts_with(text: String, prefix: String) -> Bool Never! {
     true
 }
 
-pub fn ends_with(text: String, suffix: String) -> Bool Never! {
+fn ends_with(text: String, suffix: String) -> Bool Never! {
     a :: text.bytes()
     b :: suffix.bytes()
     if b.len() > a.len() -> return false
@@ -148,24 +149,24 @@ pub fn ends_with(text: String, suffix: String) -> Bool Never! {
     true
 }
 
-pub fn strip_prefix(text: String, prefix: String) -> String Never! {
+fn strip_prefix(text: String, prefix: String) -> String Never! {
     if starts_with(text, prefix) -> return slice_str(text, prefix.bytes().len(), text.bytes().len())
-    return ~text
+    return text.copy()
 }
 
-pub fn strip_suffix(text: String, suffix: String) -> String Never! {
+fn strip_suffix(text: String, suffix: String) -> String Never! {
     if ends_with(text, suffix) {
         return slice_str(text, 0, text.bytes().len() - suffix.bytes().len())
     }
-    return ~text
+    return text.copy()
 }
 
-pub fn parse_int(text: String) -> Int? Never! { parse_int_base(text, 10) }
+fn parse_int(text: String) -> Int? Never! { parse_int_base(text, 10) }
 
 /// Parse the canonical integer representation used by String.parse.
-pub fn parse(text: String) -> Int? Never! { parse_int(text) }
+fn parse(text: String) -> Int? Never! { parse_int(text) }
 
-pub fn parse_int_base(text: String, base: Int) -> Int? Never! {
+fn parse_int_base(text: String, base: Int) -> Int? Never! {
     if base < 2 || base > 36 -> return None
     raw :: text.bytes()
     if raw.len() == 0 -> return None
@@ -192,7 +193,7 @@ pub fn parse_int_base(text: String, base: Int) -> Int? Never! {
     Val(sign * n)
 }
 
-pub fn parse_float(text: String) -> Float? Never! {
+fn parse_float(text: String) -> Float? Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return None
     sign := Float{1}
@@ -260,7 +261,7 @@ pub fn parse_float(text: String) -> Float? Never! {
     Val(sign * acc)
 }
 
-pub fn is_digit(text: String) -> Bool Never! {
+fn is_digit(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -269,7 +270,7 @@ pub fn is_digit(text: String) -> Bool Never! {
     true
 }
 
-pub fn is_alnum(text: String) -> Bool Never! {
+fn is_alnum(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -310,7 +311,7 @@ fn digit_value(b: U8) -> Int Never! {
     return -1
 }
 
-pub fn join(parts: [String], sep: String) -> String Never! {
+fn join(parts: [String], sep: String) -> String Never! {
     s := ""
     i := 0
     loop i < parts.len() {
@@ -320,7 +321,7 @@ pub fn join(parts: [String], sep: String) -> String Never! {
     s
 }
 
-pub fn splitlines(text: String, keepends: Bool) -> [String] Never! {
+fn splitlines(text: String, keepends: Bool) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     start := 0
@@ -344,7 +345,7 @@ pub fn splitlines(text: String, keepends: Bool) -> [String] Never! {
     out
 }
 
-pub fn lstrip(text: String) -> String Never! {
+fn lstrip(text: String) -> String Never! {
     raw :: text.bytes()
     i := 0
     loop i < raw.len() {
@@ -355,7 +356,7 @@ pub fn lstrip(text: String) -> String Never! {
     ""
 }
 
-pub fn rstrip(text: String) -> String Never! {
+fn rstrip(text: String) -> String Never! {
     raw :: text.bytes()
     i := raw.len()
     loop i > 0 {
@@ -366,31 +367,31 @@ pub fn rstrip(text: String) -> String Never! {
     ""
 }
 
-pub fn strip(text: String) -> String Never! { lstrip(rstrip(text)) }
+fn strip(text: String) -> String Never! { lstrip(rstrip(text)) }
 
-pub fn ljust(text: String, width: Int, fill: String) -> String Never! {
+fn ljust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     "{text}{repeat_char(pad, n)}"
 }
 
-pub fn rjust(text: String, width: Int, fill: String) -> String Never! {
+fn rjust(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     "{repeat_char(pad, n)}{text}"
 }
 
-pub fn center(text: String, width: Int, fill: String) -> String Never! {
+fn center(text: String, width: Int, fill: String) -> String Never! {
     pad :: fill_to(fill)
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     left :: n /% 2
     "{repeat_char(pad, left)}{text}{repeat_char(pad, n - left)}"
 }
 
-pub fn zfill(text: String, width: Int) -> String Never! {
+fn zfill(text: String, width: Int) -> String Never! {
     raw :: text.bytes()
     sign := ""
     rest := text
@@ -399,13 +400,13 @@ pub fn zfill(text: String, width: Int) -> String Never! {
         rest = slice_b(raw, 1, raw.len())
     }
     n := width - text.bytes().len()
-    if n <= 0 -> return ~text
+    if n <= 0 -> return text.copy()
     "{sign}{repeat_char("0", n)}{rest}"
 }
 
-pub fn capitalize(text: String) -> String Never! {
+fn capitalize(text: String) -> String Never! {
     raw :: text.bytes()
-    if raw.len() == 0 -> return ~text
+    if raw.len() == 0 -> return text.copy()
     first :: ascii_case(raw[0], true)
     out := [U8]{first}
     i := 1
@@ -416,7 +417,7 @@ pub fn capitalize(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-pub fn title(text: String) -> String Never! {
+fn title(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     word := true
@@ -435,7 +436,7 @@ pub fn title(text: String) -> String Never! {
 }
 
 /// Python `string.capwords`: collapse whitespace and capitalize each word.
-pub fn capwords(text: String) -> String Never! {
+fn capwords(text: String) -> String Never! {
     parts := split_ws(text)
     i := 0
     loop i < parts.len() {
@@ -445,7 +446,7 @@ pub fn capwords(text: String) -> String Never! {
     join(parts, " ")
 }
 
-pub fn swapcase(text: String) -> String Never! {
+fn swapcase(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
@@ -458,7 +459,7 @@ pub fn swapcase(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-pub fn lower(text: String) -> String Never! {
+fn lower(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
@@ -467,7 +468,7 @@ pub fn lower(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-pub fn upper(text: String) -> String Never! {
+fn upper(text: String) -> String Never! {
     out := [U8]{}
     loop b in text.bytes() {
         n :: b
@@ -476,7 +477,7 @@ pub fn upper(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-pub fn is_space(text: String) -> Bool Never! {
+fn is_space(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -485,7 +486,7 @@ pub fn is_space(text: String) -> Bool Never! {
     true
 }
 
-pub fn is_lower(text: String) -> Bool Never! {
+fn is_lower(text: String) -> Bool Never! {
     any := false
     loop b in text.bytes() {
         n :: b
@@ -495,7 +496,7 @@ pub fn is_lower(text: String) -> Bool Never! {
     any
 }
 
-pub fn is_upper(text: String) -> Bool Never! {
+fn is_upper(text: String) -> Bool Never! {
     any := false
     loop b in text.bytes() {
         n :: b
@@ -506,7 +507,7 @@ pub fn is_upper(text: String) -> Bool Never! {
 }
 
 /// A titlecased word starts upper/title and continues lower; uncased text alone is false.
-pub fn is_title(text: String) -> Bool Never! {
+fn is_title(text: String) -> Bool Never! {
     has_cased := false
     expect_upper := true
     loop ch in unicode.scalars(text) {
@@ -527,7 +528,7 @@ pub fn is_title(text: String) -> Bool Never! {
     has_cased
 }
 
-pub fn is_ascii(text: String) -> Bool Never! {
+fn is_ascii(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n :: b
         if n > 127 -> return false
@@ -535,7 +536,7 @@ pub fn is_ascii(text: String) -> Bool Never! {
     true
 }
 
-pub fn is_identifier(text: String) -> Bool Never! {
+fn is_identifier(text: String) -> Bool Never! {
     raw :: text.bytes()
     if raw.len() == 0 -> return false
     n0 :: raw[0]
@@ -553,13 +554,13 @@ pub fn is_identifier(text: String) -> Bool Never! {
 }
 
 /// Python `str` spellings over the same UTF-8 byte-preserving primitives.
-pub fn startswith(text: String, prefix: String) -> Bool Never! { starts_with(text, prefix) }
-pub fn endswith(text: String, suffix: String) -> Bool Never! { ends_with(text, suffix) }
-pub fn removeprefix(text: String, prefix: String) -> String Never! { strip_prefix(text, prefix) }
-pub fn removesuffix(text: String, suffix: String) -> String Never! { strip_suffix(text, suffix) }
-pub fn rindex(text: String, needle: String) -> Int Never! { rfind(text, needle) }
-pub fn encode(text: String) -> [U8] Never! { text.bytes() }
-pub fn isalpha(text: String) -> Bool Never! {
+fn startswith(text: String, prefix: String) -> Bool Never! { starts_with(text, prefix) }
+fn endswith(text: String, suffix: String) -> Bool Never! { ends_with(text, suffix) }
+fn removeprefix(text: String, prefix: String) -> String Never! { strip_prefix(text, prefix) }
+fn removesuffix(text: String, suffix: String) -> String Never! { strip_suffix(text, suffix) }
+fn rindex(text: String, needle: String) -> Int Never! { rfind(text, needle) }
+fn encode(text: String) -> [U8] Never! { text.bytes() }
+fn isalpha(text: String) -> Bool Never! {
     if text.bytes().len() == 0 -> return false
     loop b in text.bytes() {
         n :: b
@@ -567,17 +568,17 @@ pub fn isalpha(text: String) -> Bool Never! {
     }
     true
 }
-pub fn isdecimal(text: String) -> Bool Never! { is_digit(text) }
-pub fn isnumeric(text: String) -> Bool Never! { is_digit(text) }
-pub fn isalnum(text: String) -> Bool Never! { is_alnum(text) }
-pub fn isascii(text: String) -> Bool Never! { is_ascii(text) }
-pub fn isdigit(text: String) -> Bool Never! { is_digit(text) }
-pub fn isidentifier(text: String) -> Bool Never! { is_identifier(text) }
-pub fn islower(text: String) -> Bool Never! { is_lower(text) }
-pub fn isspace(text: String) -> Bool Never! { is_space(text) }
-pub fn istitle(text: String) -> Bool Never! { is_title(text) }
-pub fn isupper(text: String) -> Bool Never! { is_upper(text) }
-pub fn isprintable(text: String) -> Bool Never! {
+fn isdecimal(text: String) -> Bool Never! { is_digit(text) }
+fn isnumeric(text: String) -> Bool Never! { is_digit(text) }
+fn isalnum(text: String) -> Bool Never! { is_alnum(text) }
+fn isascii(text: String) -> Bool Never! { is_ascii(text) }
+fn isdigit(text: String) -> Bool Never! { is_digit(text) }
+fn isidentifier(text: String) -> Bool Never! { is_identifier(text) }
+fn islower(text: String) -> Bool Never! { is_lower(text) }
+fn isspace(text: String) -> Bool Never! { is_space(text) }
+fn istitle(text: String) -> Bool Never! { is_title(text) }
+fn isupper(text: String) -> Bool Never! { is_upper(text) }
+fn isprintable(text: String) -> Bool Never! {
     loop b in text.bytes() {
         n :: b
         if n < 32 || n > 126 -> return false
@@ -585,7 +586,7 @@ pub fn isprintable(text: String) -> Bool Never! {
     true
 }
 /// Expand tab stops in decoded-scalar columns, resetting at either CR or LF.
-pub fn expandtabs(text: String, tabsize: Int) -> String Never! {
+fn expandtabs(text: String, tabsize: Int) -> String Never! {
     out := ""
     column := 0
     width := tabsize
@@ -609,7 +610,7 @@ pub fn expandtabs(text: String, tabsize: Int) -> String Never! {
 }
 
 
-pub fn find_from(text: String, needle: String, start: Int) -> Int Never! {
+fn find_from(text: String, needle: String, start: Int) -> Int Never! {
     s := start
     if s < 0 -> s = 0
     rest :: slice_str(text, s, text.bytes().len())
@@ -618,21 +619,21 @@ pub fn find_from(text: String, needle: String, start: Int) -> Int Never! {
     s + j
 }
 
-pub fn rfind_from(text: String, needle: String, end: Int) -> Int Never! {
+fn rfind_from(text: String, needle: String, end: Int) -> Int Never! {
     e := end
     if e > text.bytes().len() -> e = text.bytes().len()
     rfind(slice_str(text, 0, e), needle)
 }
 
-pub fn index(text: String, needle: String) -> Int Never! {
+fn index(text: String, needle: String) -> Int Never! {
     i :: find(text, needle)
     if i < 0 -> return -1
     i
 }
 
-pub fn contains(text: String, needle: String) -> Bool Never! { find(text, needle) >= 0 }
+fn contains(text: String, needle: String) -> Bool Never! { find(text, needle) >= 0 }
 
-pub fn parse_bool(text: String) -> Bool? Never! {
+fn parse_bool(text: String) -> Bool? Never! {
     stripped :: strip(text) ?? return None
     t :: lower(stripped) ?? return None
     if t == {
@@ -642,13 +643,13 @@ pub fn parse_bool(text: String) -> Bool? Never! {
     }
 }
 
-pub fn parse_kv(text: String, sep: String) -> (key: String, ok: Bool, value: String) Never! {
+fn parse_kv(text: String, sep: String) -> (key: String, ok: Bool, value: String) Never! {
     p :: partition(text, sep)
     if p.sep.bytes().len() == 0 -> return (key: strip(text), value: "", ok: false)
     (key: strip(p.head), value: strip(p.tail), ok: true)
 }
 
-pub fn split_ws(text: String) -> [String] Never! {
+fn split_ws(text: String) -> [String] Never! {
     raw :: text.bytes()
     out := [String]{}
     start := -1
@@ -673,7 +674,7 @@ pub fn split_ws(text: String) -> [String] Never! {
     out
 }
 
-pub fn unescape_c(text: String) -> String Never! {
+fn unescape_c(text: String) -> String Never! {
     raw :: text.bytes()
     out := [U8]{}
     i := 0
@@ -697,7 +698,7 @@ pub fn unescape_c(text: String) -> String Never! {
     String.from_bytes(out) ?? text
 }
 
-pub fn escape_c(text: String) -> String Never! {
+fn escape_c(text: String) -> String Never! {
     out := ""
     loop b in text.bytes() {
         n :: b
@@ -713,6 +714,8 @@ pub fn escape_c(text: String) -> String Never! {
     out
 }
 
+// The byte-oriented padding contract retains the first fill byte, or a space.
+// Restored with ascii_case from the pre-merge implementation (2aa8b0349).
 fn fill_to(fill: String) -> String {
     if fill.bytes().len() == 0 -> return " "
     slice_b(fill.bytes(), 0, 1)
@@ -728,6 +731,7 @@ fn repeat_char(ch: String, n: Int) -> String {
     s
 }
 
+
 fn ascii_case(b: U8, upper: Bool) -> U8 {
     n :: b
     if upper {
@@ -736,4 +740,12 @@ fn ascii_case(b: U8, upper: Bool) -> U8 {
     }
     if n >= 65 && n <= 90 -> return (U8{n + 32})
     b
+}
+
+#Test("parse padding and ASCII capitalization retain their byte contract") {
+    assert_eq(ljust("a", 3, ""), "a  ")
+    assert_eq(rjust("a", 3, "_"), "__a")
+    assert_eq(center("a", 4, "_"), "_a__")
+    assert_eq(capitalize("hELLO"), "Hello")
+    assert_eq(title("hELLO wORLD"), "Hello World")
 }

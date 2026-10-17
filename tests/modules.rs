@@ -38,7 +38,7 @@ fn run_forced_interpreter(
     let scratch = common::Scratch::new(name);
     write_files(&scratch.path, files);
     let path = scratch.join(entry);
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -52,13 +52,13 @@ fn run_forced_interpreter(
 
 fn assert_bodyless_module_runs(name: &str, declaration: &str) {
     let main_src = "module lib\nuse lib.[helper]\nfn run() { print(helper.value()) }\n";
-    let lib_src = format!("{} module helper;\n", declaration);
+    let lib_src = format!("{declaration}module helper\n");
     let files = [
         ("main.jet", main_src),
         ("lib.jet", lib_src.as_str()),
         (
             "helper.jet",
-            "pub fn value() -> String { return \"visible\" }\n",
+            "fn value() -> String { return \"visible\" }\n",
         ),
     ];
 
@@ -579,12 +579,12 @@ module installer {
 
 #[test]
 fn bodyless_public_module_is_visible_through_selective_import() {
-    assert_bodyless_module_runs("bodyless_public_module", "pub");
+    assert_bodyless_module_runs("bodyless_public_module", "");
 }
 
 #[test]
 fn bodyless_package_module_is_visible_inside_package() {
-    assert_bodyless_module_runs("bodyless_package_module", "pub(package)");
+    assert_bodyless_module_runs("bodyless_package_module", "priv(package) ");
 }
 
 #[test]
@@ -597,10 +597,10 @@ fn bodyless_private_module_stays_hidden_outside_owner_file() {
                 "main.jet",
                 "module lib\nuse lib.[helper]\nfn run() { print(helper.value()) }\n",
             ),
-            ("lib.jet", "module helper;\n"),
+            ("lib.jet", "priv module helper\n"),
             (
                 "helper.jet",
-                "pub fn value() -> String { return \"private\" }\n",
+                "fn value() -> String { return \"private\" }\n",
             ),
         ],
     );
@@ -630,10 +630,10 @@ fn bodyless_package_module_stays_hidden_across_packages() {
                 "use dep\nuse dep.[helper]\nfn run() { print(helper.value()) }\n",
             ),
             ("dep/package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n"),
-            ("dep/dep.jet", "pub(package) module helper;\n"),
+            ("dep/dep.jet", "priv(package) module helper\n"),
             (
                 "dep/helper.jet",
-                "pub fn value() -> String { return \"hidden\" }\n",
+                "fn value() -> String { return \"hidden\" }\n",
             ),
         ],
     );

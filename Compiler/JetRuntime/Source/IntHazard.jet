@@ -1,0 +1,138 @@
+// Native exact-Int's ONE hazard domain, port of Numeric.rs:2902-3082.
+// Root16: hazards0, retired8; Hazard16: protectedNode0, next8.
+// Hazard records are append-only PROCESS-LIFETIME; TCB192 lends this thread's
+// record. Numeric nodes use Int.jet's established immutable Node48/limbs ABI.
+// Native arithmetic and carrier sites retire nodes through this Jet domain.
+int_hazard_root := I64{0}
+
+// Allocator init0 precedes this root; init-array completion
+// precedes all user code/Int spills (same startup law as Alloc.jet:27-29).
+// runtime-init: 4
+#Export(c) fn jet_rt_int_hazard_init() {
+    if (int_hazard_root != I64{0}) -> return
+    int_hazard_root = jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(int_hazard_root, I64{16})
+}
+
+#Export(c) fn jet_rt_int_hazard_enter() -> I64 {
+    base :: thread_base()
+    record := sync_load(base + I64{192})
+    if (record != I64{0}) -> return record
+    record = jet_rt_alloc(I64{16}, I64{8})
+    sync_store(record, I64{0})
+    loop {
+        head :: sync_load(int_hazard_root)
+        sync_store(record + I64{8}, head)
+        if sync_cas(int_hazard_root, head, record) == head -> break
+    }
+    sync_store(base + I64{192}, record)
+    record
+}
+
+#Export(c) fn jet_rt_int_hazard_protect(record: I64, node: I64) {
+    // SeqCst publication before the atomic word is reloaded/validated.
+    _ := sync_swap(record, node)
+}
+
+fn int_hazard_contains(node: I64) -> Bool {
+    record := sync_load(int_hazard_root)
+    loop record != (I64{0}) {
+        if sync_load(record) == node -> return true
+        record = sync_load(record + I64{8})
+    }
+    false
+}
+
+fn int_hazard_push_retired(node: I64) {
+    head_slot :: int_hazard_root + I64{8}
+    loop {
+        head :: sync_load(head_slot)
+        int_store(node + I64{8}, head)
+        if sync_cas(head_slot, head, node) == head -> return
+    }
+}
+
+#Export(c) fn jet_rt_int_hazard_reclaim() {
+    cursor := sync_swap(int_hazard_root + I64{8}, I64{0})
+    loop cursor != (I64{0}) {
+        next_node :: int_load(cursor + I64{8})
+        if int_hazard_contains(cursor) -> int_hazard_push_retired(cursor)
+        else -> int_free_node(cursor)
+        cursor = next_node
+    }
+}
+
+#Export(c) fn jet_rt_int_hazard_clear(record: I64) {
+    sync_store(record, I64{0})
+    // Seed threshold is ANY pending node (Numeric.rs:2974), not a new batch.
+    if (sync_load(int_hazard_root + I64{8}) != I64{0}) -> jet_rt_int_hazard_reclaim()
+}
+
+#Export(c) fn jet_rt_int_retire_zero(node: I64) {
+    // refs already0 and the publication owner has been removed. A reader
+    // publishing after this scan MUST revalidate before any node dereference.
+    if int_hazard_contains(node) -> int_hazard_push_retired(node)
+    else -> int_free_node(node)
+    if (sync_load(int_hazard_root + I64{8}) != I64{0}) -> jet_rt_int_hazard_reclaim()
+}
+
+#Export(c) fn jet_rt_int_hazard_try_retain(node: I64) -> Bool {
+    loop {
+        refs :: int_load(node)
+        if (refs == I64{0}) -> return false
+        if (refs < I64{0} || refs == I64{9223372036854775807}) -> jet_rt_unreachable(I64{0}, I64{0})
+        if sync_cas(node, refs, refs + I64{1}) == refs -> return true
+    }
+}
+
+fn int_hazard_reload(place: I64, callback: I64, context: I64) -> I64 {
+    if (callback == I64{0}) -> return sync_load(place)
+    #Unsafe("the native numeric forwarder lends a pure reload callback and its live closure context for this synchronous call") {
+        return os_call_address_i64(callback, context)
+    }
+}
+
+fn int_hazard_clone(place: I64, initial: I64, callback: I64, context: I64) -> I64 {
+    raw := initial
+    record := I64{0}
+    loop {
+        current :: int_hazard_reload(place, callback, context)
+        if current != raw -> raw = current
+        if int_inline(raw) {
+            if (record != I64{0}) -> jet_rt_int_hazard_clear(record)
+            return raw
+        }
+        if (record == I64{0}) -> record = jet_rt_int_hazard_enter()
+        jet_rt_int_hazard_protect(record, int_node(raw))
+        validated :: int_hazard_reload(place, callback, context)
+        if validated != raw {
+            raw = validated
+            jet_rt_int_hazard_clear(record)
+            next
+        }
+        if !jet_rt_int_hazard_try_retain(int_node(raw)) {
+            raw = int_hazard_reload(place, callback, context)
+            jet_rt_int_hazard_clear(record)
+            next
+        }
+        jet_rt_int_hazard_clear(record)
+        return raw
+    }
+}
+
+#Export(c) fn jet_rt_int_clone_atomic(place: I64) -> I64 {
+    int_hazard_clone(place, sync_load(place), I64{0}, I64{0})
+}
+#Export(c) fn jet_rt_int_clone_atomic_reload(initial: I64, callback: I64, context: I64) -> I64 {
+    int_hazard_clone(I64{0}, initial, callback, context)
+}
+
+// Detach invokes this AFTER all dynamic TLS/Sentry destructors. Their final
+// Int operations may have lazily created the record; never free the registry
+// node that concurrent scanners can still visit after this thread exits.
+fn int_hazard_thread_detach() {
+    base :: thread_base()
+    record :: sync_swap(base + I64{192}, I64{0})
+    if (record != I64{0}) -> jet_rt_int_hazard_clear(record)
+    else if (int_hazard_root != I64{0}) -> jet_rt_int_hazard_reclaim()
+}

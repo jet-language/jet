@@ -1,0 +1,10 @@
+# Port of tests/corelib_parts/platform.rs:808-860; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_terminal_uses_unix_pty_for_run_and_spawn
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: ^= "plain-ok\n" # original ed77c235f tests/corelib_parts/platform.rs:851 starts_with predicate
+stdout: ~ "true\nspawn: session\ntrue\npipeline: refused\nempty: invalid\n" # original contains

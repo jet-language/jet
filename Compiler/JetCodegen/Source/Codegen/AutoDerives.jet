@@ -2,6 +2,7 @@
 // facts. Equatable is not here: its body is the Prelude derive template that
 // JetSema expands into a compiler-generated impl (D-ONCE-DERIVE1=A).
 use jet_foundation.[
+    name_mangle,
     MIRField,
     MIRNominalRef,
     MIRType,
@@ -13,14 +14,11 @@ use jet_foundation.[
     mir_type_layout,
     mir_type_same_checked_type,
 ]
-use jet_sema.[
-    sema_core_error_family_member,
-]
 
-pub struct JetCodegenAutoDeriveFacts {
-    pub type_id: MIRTypeID
-    pub printable: Bool
-    pub debug: Bool
+struct JetCodegenAutoDeriveFacts {
+    type_id: MIRTypeID
+    printable: Bool
+    debug: Bool
 }
 
 fn jet_codegen_auto_derives_source_name(name: String) -> String Never! {
@@ -29,7 +27,7 @@ fn jet_codegen_auto_derives_source_name(name: String) -> String Never! {
 
 fn jet_codegen_auto_derives_type_args(definition: MIRTypeDef) -> String Never! {
     if definition.generic_params.len() == 0 -> return ""
-    names :: loop parameter in definition.generic_params -> jet_rust_emit_mangle(parameter.name)
+    names :: loop parameter in definition.generic_params -> name_mangle(parameter.name)
     "<{names.join(", ")}>"
 }
 
@@ -40,7 +38,7 @@ fn jet_codegen_auto_derives_impl_generics(ctx: &JetRustEmitContext, definition: 
         bounds := [String]{}
         loop bound in parameter.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
         if !bounds.contains(rust_bound) -> &bounds.push(rust_bound)
-        &params.push("{jet_rust_emit_mangle(parameter.name)}: {bounds.join(" + ")}")
+        &params.push("{name_mangle(parameter.name)}: {bounds.join(" + ")}")
     }
     "<{params.join(", ")}>"
 }
@@ -49,9 +47,9 @@ fn jet_codegen_auto_derives_impl_selected(ctx: &JetRustEmitContext, definition: 
     expected_trait := mir_trait_id(trait_name)
     type_kind := MIRTypeKind.Apply{name: MIRNominalRef{id: definition.id, name: definition.key}, args: [MIRType]{}}
     declared_type := MIRType{kind: type_kind, identity: Val(definition.id), layout: mir_type_layout(type_kind)}
-    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(expected_trait.value)) ?? [Int]{})
+    rows :: (ctx.impls_by_trait.get(expected_trait.value) ?? [Int]{}).copy()
     loop row in rows {
-        implementation :: ~ctx.program.impls[row]
+        implementation :: ctx.program.impls[row].copy()
         if !jet_rust_emit_impl_target_enabled(&ctx, implementation) -> next
         reference :: implementation.trait_ref ?? next
         if reference.id != expected_trait -> next
@@ -75,8 +73,18 @@ fn jet_codegen_auto_derives_boxed(definition: MIRTypeDef, edge: String) -> Bool 
 }
 
 fn jet_codegen_auto_derives_field_value(ctx: &JetRustEmitContext, definition: MIRTypeDef, field: MIRField, receiver: String, method: String, edge: String) -> String Never! {
-    value := "({receiver}).{jet_rust_emit_field_name(&ctx, field.id)}"
-    if jet_codegen_auto_derives_boxed(definition, edge) -> value = "({value}).as_ref()"
+    place :: "({receiver}).{jet_rust_emit_field_name(&ctx, field.id)}"
+    jet_codegen_auto_derives_member_text(&ctx, field.ty, place, jet_codegen_auto_derives_boxed(definition, edge), method)
+}
+
+// MIRRust structural_member_text: the `method` text of one structural member
+// `value` (a place of type `ty`, boxed when its edge is). A member reaching a
+// labeled tuple renders through the structural text, since a plain Rust tuple
+// has no protocol impl; any other member through its own impl.
+fn jet_codegen_auto_derives_member_text(ctx: &JetRustEmitContext, ty: MIRType, place: String, boxed: Bool, method: String) -> String Never! {
+    value := place
+    if boxed -> value = "({value}).as_ref()"
+    if jet_rust_emit_shows_labeled_tuple(&ctx, ty) -> return jet_rust_emit_structural_text(&ctx, ty, value, method, 0)
     "({value}).{method}()"
 }
 
@@ -112,9 +120,8 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
                 variant_path :: "Self::{jet_rust_emit_variant_name(&ctx, definition.id, variant.name)}"
                 if variant.payload == {
                     .Unit -> &lines.push("            {variant_path} => jet_debug_variant({variant_name}, None),")
-                    .Single(_) -> {
-                        value := "payload.{method}()"
-                        if jet_codegen_auto_derives_boxed(definition, variant.name) -> value = "payload.as_ref().{method}()"
+                    .Single(payload_ty) -> {
+                        value :: jet_codegen_auto_derives_member_text(&ctx, payload_ty, "payload", jet_codegen_auto_derives_boxed(definition, variant.name), method)
                         &lines.push("            {variant_path}(payload) => jet_debug_variant({variant_name}, Some({value})),")
                     }
                     .Named(fields) -> {
@@ -125,8 +132,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
                             if field.computed -> next
                             local :: "__jet_show_field_{index}"
                             &patterns.push("{jet_rust_emit_field_name(&ctx, field.id)}: {local}")
-                            value := "{local}.{method}()"
-                            if jet_codegen_auto_derives_boxed(definition, "{variant.name}.{field.name}") -> value = "{local}.as_ref().{method}()"
+                            value :: jet_codegen_auto_derives_member_text(&ctx, field.ty, local, jet_codegen_auto_derives_boxed(definition, "{variant.name}.{field.name}"), method)
                             field_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(field.name))
                             if {
                                 method == "jet_debug" -> {
@@ -153,7 +159,7 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
             &lines.push("        match self {{")
             loop member in members {
                 member_name :: jet_rust_emit_quote(jet_codegen_auto_derives_source_name(member))
-                &lines.push("            Self::{jet_rust_emit_mangle(member)} => jet_debug_variant({member_name}, None),")
+                &lines.push("            Self::{name_mangle(member)} => jet_debug_variant({member_name}, None),")
             }
             &lines.push("        }}")
         }
@@ -163,18 +169,11 @@ fn jet_codegen_auto_derives_append_show(ctx: &JetRustEmitContext, definition: MI
     &lines.push("}}")
 }
 
-// A Core web query status enum keeps its native Prelude display; MIRRust
-// is_source_owned_core_web_query_enum.
-fn jet_codegen_auto_derives_core_web_query_enum(key: String) -> Bool Never! {
-    if !key.starts_with("<corelib>/Core/web::Core/web/query.jet::") -> return false
-    key.ends_with("::WebQueryNetworkMode") || key.ends_with("::WebMutationStatus") || key.ends_with("::WebQueryStatus")
-}
-
 // D-DISPLAYDBG1: bare `{value}` of a plain enum (every case a unit case) renders
 // its case name on every tier, so `jet_fmt_display<T: JetDisplay>` gets that
 // render here. A selected user `Display` impl keeps its own rendering.
 fn jet_codegen_auto_derives_append_plain_enum_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, variants: [MIRVariant], lines: &[String]) Never! {
-    if definition.generic_params.len() > 0 || variants.len() == 0 || jet_codegen_auto_derives_core_web_query_enum(definition.key) -> return
+    if definition.generic_params.len() > 0 || variants.len() == 0 -> return
     loop variant in variants {
         if variant.payload == {
             .Unit -> {}
@@ -211,15 +210,14 @@ fn jet_codegen_auto_derives_append_distinct_display(ctx: &JetRustEmitContext, de
     &lines.push("}}")
 }
 
-// D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family member
-// onto `Err` with `Err("{self}")`, and every Prelude-owned member renders that
-// text through its `JetShow`. A member declared in Core Jet source
-// (`UUIDError`) is emitted from MIR, so it forwards `JetDisplay` to the
-// structural `JetShow` below. A unit-only enum keeps its case-name display;
-// distinct and alias rows have no structural body; a selected user `Display`
-// impl keeps its own rendering.
-fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
-    if !definition.key.starts_with("<corelib>/") || !sema_core_error_family_member(definition.key) || definition.generic_params.len() > 0 -> return
+// D-DISPLAYDBG1 / D-FAIL-CONV2=A: an auto-`Printable` record (struct, unit
+// family, or enum with a payload case) admits bare `{value}` and renders its
+// structural record on every tier (Core error family members convert onto
+// `Err` with `Err("{self}")`), so `JetDisplay` forwards to the structural
+// `JetShow` below. A unit-only enum keeps its case-name display; distinct and
+// alias rows have no structural body; a selected user `Display` impl keeps its
+// own rendering. Mirrors MIRRust emit_printable_record_display_impl.
+fn jet_codegen_auto_derives_append_record_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
     if definition.kind == {
         .Struct(_, _) | .UnitFamily(_) -> {}
         .Enum(variants, _) -> {
@@ -236,7 +234,9 @@ fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, 
     }
     if jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display") -> return
     name :: jet_rust_emit_type_name(&ctx, definition.id)
-    &lines.push("impl JetDisplay for {name} {{")
+    args :: jet_rust_emit_type_def_impl_args(ctx, definition, jet_codegen_auto_derives_type_args(definition))
+    impl_generics :: jet_codegen_auto_derives_impl_generics(&ctx, definition, "JetShow")
+    &lines.push("impl{impl_generics} JetDisplay for {name}{args} {{")
     &lines.push("    fn jet_display(&self) -> String {{")
     &lines.push("        <Self as JetShow>::jet_show(self)")
     &lines.push("    }}")
@@ -244,10 +244,32 @@ fn jet_codegen_auto_derives_append_core_error_display(ctx: &JetRustEmitContext, 
 }
 
 
+fn jet_codegen_auto_derives_append_selected_display(ctx: &JetRustEmitContext, definition: MIRTypeDef, emit_show: Bool, lines: &[String]) Never! {
+    params :: jet_rust_emit_generic_params(&ctx, definition.generic_params)
+    generics :: jet_rust_emit_type_def_generics(ctx, definition, params)
+    args :: jet_rust_emit_type_def_impl_args(ctx, definition, jet_codegen_auto_derives_type_args(definition))
+    name :: "{jet_rust_emit_type_name(&ctx, definition.id)}{args}"
+    // Source Display owns bare and nested display; do not replace it with a
+    // structural Printable rendering. Mirrors MIRRust emit_selected_display_impl.
+    &lines.push("impl{generics} JetDisplay for {name} {{")
+    &lines.push("    fn jet_display(&self) -> String {{")
+    &lines.push("        <Self as __jet_Display>::display(self)")
+    &lines.push("    }}")
+    &lines.push("}}")
+    if emit_show {
+        &lines.push("")
+        &lines.push("impl{generics} JetShow for {name} {{")
+        &lines.push("    fn jet_show(&self) -> String {{")
+        &lines.push("        <Self as __jet_Display>::display(self)")
+        &lines.push("    }}")
+        &lines.push("}}")
+    }
+}
+
 // The selection booleans are checked semantic facts keyed to one canonical MIR
 // type: `printable` is the row's auto-Printable fact and `debug` its declared
 // Debug derive. Mirrors MIRRust emit_structural_show_impl.
-pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
+fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTypeDef, facts: JetCodegenAutoDeriveFacts) -> [String] Never! {
     lines := [String]{}
     if facts.type_id != definition.id {
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "auto-derive facts name a different MIR type", "structural auto-derive selections are bound to the exact canonical type ID", Val(definition.span))
@@ -255,6 +277,12 @@ pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTy
     }
     emit_show :: facts.printable && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Printable")
     emit_debug :: facts.debug && !jet_codegen_auto_derives_impl_selected(&ctx, definition, "Debug")
+    selected_display :: jet_codegen_auto_derives_impl_selected(&ctx, definition, "Display")
+    alias :: definition.kind == .Alias(_)
+    if selected_display && !alias {
+        jet_codegen_auto_derives_append_selected_display(&ctx, definition, emit_show, &lines)
+        &lines.push("")
+    }
     // MIRRust writes every generated impl as one item followed by a blank line.
     start := lines.len()
     if definition.kind == {
@@ -266,12 +294,12 @@ pub fn jet_codegen_auto_derive_lines(ctx: &JetRustEmitContext, definition: MIRTy
     jet_codegen_auto_derives_append_distinct_display(&ctx, definition, &lines)
     jet_codegen_auto_derives_item_end(&lines, start)
     start = lines.len()
-    if emit_show -> jet_codegen_auto_derives_append_core_error_display(&ctx, definition, &lines)
+    if emit_show -> jet_codegen_auto_derives_append_record_display(&ctx, definition, &lines)
     jet_codegen_auto_derives_item_end(&lines, start)
     if !emit_show && !emit_debug -> return lines
     if definition.kind == .Alias(_) -> return lines
     start = lines.len()
-    if emit_show -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
+    if emit_show && !selected_display -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetShow", "jet_show", "JetShow", &lines)
     jet_codegen_auto_derives_item_end(&lines, start)
     start = lines.len()
     if emit_debug -> jet_codegen_auto_derives_append_show(&ctx, definition, "JetDebug", "jet_debug", "JetDebug", &lines)

@@ -1,0 +1,10 @@
+use core.files as files
+
+#Test("original symlink outside static root is rejected") {
+    port :: s5_web_port()
+    s5_web_wait_root(port, false)
+    response :: s5_web_get(port, "/escape.js", None) ?? panic("static server request")
+    assert_eq(response.status, 400)
+    outside :: files.read(sys.get("S5_OUTSIDE") ?? panic("outside path")) ?? panic("read outside")
+    assert_eq(outside, "secret\n")
+}

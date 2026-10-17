@@ -577,6 +577,7 @@ fn integration_ct_key(value: &CtValue) -> Option<CtKey> {
     match value {
         CtValue::Str(value) => Some(CtKey::Str(value.clone())),
         CtValue::Int(value) => Some(CtKey::Int(*value)),
+        CtValue::BigInt(value) => CtKey::from_value(CtValue::BigInt(value.clone())),
         CtValue::Bool(value) => Some(CtKey::Bool(*value)),
         CtValue::Char(value) => Some(CtKey::Char(*value)),
         _ => None,
@@ -698,6 +699,7 @@ fn integration_value_text(value: &CtValue) -> String {
 fn integration_key_text(key: &CtKey) -> String {
     match key {
         CtKey::Int(value) => value.to_string(),
+        CtKey::BigInt(value) => value.to_string_rep(),
         CtKey::Str(value) => value.clone(),
         CtKey::Bool(value) => value.to_string(),
         CtKey::Char(value) => value.to_string(),

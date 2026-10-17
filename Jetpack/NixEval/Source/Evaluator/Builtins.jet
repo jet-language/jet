@@ -87,7 +87,7 @@ impl NixEvaluator {
             .StorePath -> {
                 path :: argument.plain_string()
                 if !nixeval_is_store_path(path) -> return Err(NixEvalError.Unsupported("builtins.storePath requires a canonical /nix/store path"))
-                NixEvalValue.Contextual{value: ~path, contexts: [String]{"path:{path}"}}
+                NixEvalValue.Contextual{value: path.copy(), contexts: [String]{"path:{path}"}}
             }
             .Throw -> nixeval_throw(argument)
         }
@@ -237,7 +237,7 @@ impl NixEvaluator {
         }
         path :: self.ask(NixEvalRequest.Fetch{kind: fetcher.name(), url, hash, name, revision})
         if !nixeval_is_store_path(path) -> return Err(NixEvalError.Invalid("fixed-output fetch authority returned a non-store path"))
-        Ok(NixEvalValue.Contextual{value: ~path, contexts: [String]{"path:{path}"}})
+        Ok(NixEvalValue.Contextual{value: path.copy(), contexts: [String]{"path:{path}"}})
     }
 
     // The plain string of the first present field among `names`.

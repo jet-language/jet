@@ -9,7 +9,6 @@ use std::fs;
 
 use tir_support::{
     assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi,
-    run_interpret_multi,
 };
 
 #[test]
@@ -25,13 +24,123 @@ fn run() {
 }
 
 #[test]
+fn source_core_enum_constructors_retain_the_declared_owner() {
+    let scratch = common::Scratch::new("source_core_enum_owner");
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    let path = scratch.path.join("main.jet");
+    fs::write(
+        &path,
+        r#"
+use core.encoding as encoding
+use core.encoding.[DataEvent as Event]
+fn take(value: encoding.DataEvent) {}
+fn run() {
+    take(encoding.DataEvent.ArrayStart)
+    take(encoding.DataEvent.Key("qualified"))
+    take(Event.ArrayEnd)
+    take(Event.Key("member"))
+}
+"#,
+    )
+    .unwrap();
+    let (diagnostics, bundle, _, nominals) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}"
+    );
+    let bundle = bundle.expect("checked source enum fixture");
+    let declared_variants = bundle.modules.iter().flat_map(|module| &module.items)
+        .find_map(|item| match item {
+            jet::AST::Item::Enum(definition) if definition.name == "DataEvent" => {
+                Some(definition.variants.iter().map(|variant| variant.name.clone()).collect::<Vec<_>>())
+            }
+            _ => None,
+        }).expect("original source DataEvent declaration");
+    let request = jet_foundation::MIR::MirArtifactRequest::new(
+        jet_foundation::MIR::MirArtifactTarget::Cranelift,
+        jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+        jet_foundation::MIR::MirArtifactBuildMode::Dev,
+    );
+    let (program, _) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominals, request)
+        .expect("source enum constructors lower with their original declaration projection");
+    program.validate().expect("source enum nominal ownership validates");
+    let definitions = program.types.iter().filter(|definition| definition.name == "DataEvent")
+        .collect::<Vec<_>>();
+    assert_eq!(definitions.len(), 1, "one original DataEvent declaration");
+    assert_eq!(
+        definitions[0].variants.iter().map(|variant| variant.name.clone()).collect::<Vec<_>>(),
+        declared_variants,
+        "the source declaration owns every emitted variant",
+    );
+}
+
+#[test]
+fn user_same_leaf_enum_keeps_its_own_payload_projection() {
+    let scratch = common::Scratch::new("user_encoding_enum_owner");
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    let local = scratch.path.join("local.jet");
+    fs::write(&local, "enum DataEvent { Local(String) }\nfn make() -> DataEvent { return DataEvent.Local(\"local\") }\n").unwrap();
+    let path = scratch.path.join("main.jet");
+    fs::write(&path, r#"
+use "local"
+use core.encoding as encoding
+fn take_local(value: local.DataEvent) {}
+fn take_core(value: encoding.DataEvent) {}
+fn run() {
+    take_local(local.DataEvent.Local("local"))
+    take_local(local.make())
+    take_core(encoding.DataEvent.Key("core"))
+}
+"#).unwrap();
+    let (diagnostics, bundle, _, nominals) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(diagnostics.iter().all(|d| d.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}");
+    let bundle = bundle.expect("checked distinct nominal owners");
+    let owners = nominals.iter().flat_map(|facts| facts.enums.iter())
+        .filter(|(_, definition)| definition.name == "DataEvent")
+        .map(|(identity, _)| identity.clone()).collect::<std::collections::HashSet<_>>();
+    assert_eq!(owners.len(), 2, "same leaf names have distinct original owners");
+    let local_module = bundle.modules.iter().position(|module| module.path == local.to_string_lossy())
+        .expect("original local enum module");
+    let local_decl = bundle.modules[local_module].items.iter().find_map(|item| match item {
+        jet::AST::Item::Enum(definition) if definition.name == "DataEvent" => Some(definition),
+        _ => None,
+    }).expect("original local enum declaration");
+    assert_eq!(local_decl.variants.len(), 1);
+    assert_eq!(local_decl.variants[0].name, "Local");
+}
+
+#[test]
+fn native_only_core_enum_keeps_its_intrinsic_constructor_identity() {
+    assert!(jet_foundation::CoreModuleExports::core_source_module("core.term").is_none(),
+        "this fixture must exercise an actual no-source Core namespace");
+    let scratch = common::Scratch::new("native_only_enum_owner");
+    tir_support::write_test_package(&scratch.path, tir_support::TIR_TEST_PACKAGE);
+    let path = scratch.path.join("main.jet");
+    fs::write(&path, r#"
+use core.term as terminal
+fn take(value: terminal.Key) {}
+fn run() {
+    take(terminal.Key.Escape)
+}
+"#).unwrap();
+    let (diagnostics, bundle, _, _) =
+        jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
+    assert!(bundle.is_some(), "native-only constructor fixture retains its checked bundle");
+    assert!(diagnostics.iter().all(|d| d.severity != jet::Diagnostics::Severity::Error),
+        "{diagnostics:#?}");
+}
+
+#[test]
 fn soft_public_imports_warn_once_per_outside_use() {
     let dir = std::env::temp_dir().join(format!("jet_soft_public_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("note.jet"),
-        "pub struct Note {\n    pub _title: String\n}\nimpl Note {\n    pub fn _length(self) -> Int { return 1 }\n}\npub fn _legacy() -> Int { return 2 }\n",
+        "struct Note {\n    _title: String\n}\nimpl Note {\n    fn _length(self) -> Int { return 1 }\n}\nfn _legacy() -> Int { return 2 }\n",
     )
     .unwrap();
     let source = "use \"note\"\nuse note._legacy\nfn run() {\n    n :: note.Note{ _title: \"hi\" }\n    print(n._title)\n    print(n._length())\n    print(note._legacy())\n    print(_legacy())\n}\n";
@@ -68,7 +177,7 @@ fn soft_public_reexports_warn_on_the_exported_spelling_once() {
     .unwrap();
     fs::write(
         dir.join("api/implementation.jet"),
-        "pub fn _raw() -> Int { return 1 }\npub fn supported() -> Int { return 2 }\n",
+        "fn _raw() -> Int { return 1 }\nfn supported() -> Int { return 2 }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -95,7 +204,7 @@ fn imported_soft_public_declared_types_warn_once_per_occurrence() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("models.jet"),
-        "pub struct _Cell<T> { pub value: T }\npub trait _Readable { fn read(self) -> Int }\n",
+        "struct _Cell<T> { value: T }\ntrait _Readable { fn read(self) -> Int }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -133,7 +242,7 @@ fn local_soft_public_types_win_over_imported_name_collisions() {
     fs::create_dir_all(&dir).unwrap();
     fs::write(
         dir.join("library.jet"),
-        "pub struct _Thing { pub value: Int }\npub trait _Shape { fn size(self) -> Int }\n",
+        "struct _Thing { value: Int }\ntrait _Shape { fn size(self) -> Int }\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -176,10 +285,10 @@ fn run() {
 }
 ";
     let adapter_src = "\
-pub fn concrete(table: ^Table<DataTree>) -> Table<DataTree> {
+fn concrete(table: ^Table<Dyn>) -> Table<Dyn> {
     return table
 }
-pub fn generic<T>(table: ^Table<T>) -> Table<T> {
+fn generic<T>(table: ^Table<T>) -> Table<T> {
     return table
 }
 ";
@@ -207,7 +316,7 @@ fn explicit_internal_project_module_alias_runs() {
             ),
             (
                 "arbitrary.jet",
-                "module _bench { }\npub fn fixture() -> Int { return 42 }\n",
+                "module _bench { }\nfn fixture() -> Int { return 42 }\n",
             ),
         ],
     );
@@ -225,10 +334,10 @@ fn inline_code_module_qualified_call() {
     }
     let src = "\
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         return (n * 2)
     }
-    pub fn add(a: Int, b: Int) -> Int {
+    fn add(a: Int, b: Int) -> Int {
         return (a + b)
     }
 }
@@ -253,7 +362,7 @@ fn unqualified_inline_module_call() {
     let src = "\
 use math.double
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         return (n * 2)
     }
 }
@@ -273,14 +382,14 @@ fn run() {
 fn inline_module_use_list_and_pub_reexport_match_all_tiers() {
     let src = "\
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         return (n * 2)
     }
 }
 module api {
     use math.[double as twice]
     pub use math.[double as exported]
-    pub fn local(n: Int) -> Int {
+    fn local(n: Int) -> Int {
         return twice(n)
     }
 }
@@ -298,15 +407,13 @@ fn run() {
         run_default_multi("inline_use_list", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "8\n10\n");
-    assert!(stderr.contains("tier1 native"), "{stderr}");
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
 
     let dir = std::env::temp_dir().join(format!("jet_inline_use_interp_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
-    let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+    let outcome = crate::common::dev_run(path.to_str().unwrap(), false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Ran {
             stdout, exit_code, ..
@@ -331,7 +438,7 @@ use core.math.[abs, min, max, clamp]
 module api {
     use core.[math.abs]
     pub use core.[math.abs as exported]
-    pub fn local(n: Int) -> Int {
+    fn local(n: Int) -> Int {
         return abs(n)
     }
 }
@@ -356,8 +463,6 @@ fn run() {
         run_default_multi("inline_core_use_list", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n");
-    assert!(stderr.contains("tier1 native"), "{stderr}");
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
 
     let dir =
         std::env::temp_dir().join(format!("jet_inline_core_use_interp_{}", std::process::id()));
@@ -365,7 +470,7 @@ fn run() {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
-    let outcome = jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true);
+    let outcome = crate::common::dev_run(path.to_str().unwrap(), false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Ran {
             stdout, exit_code, ..
@@ -389,7 +494,7 @@ module math
 module api {
     use math.[label as decorate]
     pub use math.[label as exported]
-    pub fn local(n: Int) -> String {
+    fn local(n: Int) -> String {
         return decorate("x", n)
     }
 }
@@ -399,7 +504,7 @@ fn run() {
 }
 "#;
     let math_src = r#"
-pub fn label(prefix: String, n: Int) -> String {
+fn label(prefix: String, n: Int) -> String {
     return "{prefix}:{n}"
 }
 "#;
@@ -419,7 +524,7 @@ pub fn label(prefix: String, n: Int) -> String {
     fs::write(dir.join("main.jet"), main_src).unwrap();
     fs::write(dir.join("math.jet"), math_src).unwrap();
     let outcome =
-        jet::Interpreter::dev_iteration(dir.join("main.jet").to_str().unwrap(), false, true);
+        crate::common::dev_run(dir.join("main.jet").to_str().unwrap(), false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Ran {
             stdout, exit_code, ..
@@ -451,7 +556,7 @@ fn run() {
 }
 ";
     let math_src = "\
-pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+fn clamp(x: Int, lo: Int, hi: Int) -> Int {
     if (x < lo) {
         return lo
     }
@@ -460,10 +565,10 @@ pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
     }
     return x
 }
-pub fn label(prefix: String, n: Int) -> String {
+fn label(prefix: String, n: Int) -> String {
     return \"{prefix}:{n}\"
 }
-pub fn checked(value: Int) -> Int Err! {
+fn checked(value: Int) -> Int Err! {
     if value < 0 {
         return Err(message(value))
     }
@@ -472,7 +577,7 @@ pub fn checked(value: Int) -> Int Err! {
 fn message(value: Int) -> String {
     return \"bad {value}\"
 }
-pub fn ready() -> Bool { true }
+fn ready() -> Bool { true }
 ";
     let files = [("main.jet", main_src), ("math.jet", math_src)];
     let expected = "10\nx:5\n7\n-2\ntrue\n";
@@ -484,7 +589,7 @@ pub fn ready() -> Bool { true }
     let (code, stdout, stderr) = run_default_multi("tir_file_mod", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    let (code, stdout, stderr) = run_interpret_multi("tir_file_mod", "main.jet", &files);
+    let (code, stdout, stderr) = run_default_multi("tir_file_mod", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
 }
@@ -508,10 +613,10 @@ fn run() {
 ";
     let worker_src = "\
 #Error
-pub struct WorkerError {
-    pub message: String
+struct WorkerError {
+    message: String
 }
-pub fn checked(value: Int) -> Int WorkerError! {
+fn checked(value: Int) -> Int WorkerError! {
     if value < 0 {
         return Err(WorkerError{message: \"negative\"})
     }
@@ -525,7 +630,7 @@ pub fn checked(value: Int) -> Int WorkerError! {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (code, stdout, stderr) =
-        run_interpret_multi("imported_direct_result_match", "main.jet", &files);
+        run_default_multi("imported_direct_result_match", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     if have_rustc() {
@@ -555,11 +660,11 @@ fn run() {
 ";
     let worker_src = "\
 #Error
-pub struct WorkerError {
-    pub message: String
+struct WorkerError {
+    message: String
 }
-pub struct Value {
-    pub id: String
+struct Value {
+    id: String
 }
 fn inner() -> Bool WorkerError! {
     return Err(WorkerError{message: \"inner\"})
@@ -567,7 +672,7 @@ fn inner() -> Bool WorkerError! {
 fn fail_after(error: WorkerError) -> Value WorkerError! {
     return Err(error)
 }
-pub fn checked() -> Value WorkerError! {
+fn checked() -> Value WorkerError! {
     inner() ?? {
         return fail_after(err)
     }
@@ -581,7 +686,7 @@ pub fn checked() -> Value WorkerError! {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (code, stdout, stderr) =
-        run_interpret_multi("imported_fallible_handler_return", "main.jet", &files);
+        run_default_multi("imported_fallible_handler_return", "main.jet", &files);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     if have_rustc() {
@@ -625,19 +730,19 @@ fn run() {
 }
 ";
     let helper_src = "\
-pub fn sum(left: Int, right: Int) -> Int { left + right }
+fn sum(left: Int, right: Int) -> Int { left + right }
 #Error
-pub enum HelperError {
+enum HelperError {
     Negative
 }
-pub fn trimmed(value: String) -> String {
+fn trimmed(value: String) -> String {
     return value.trim()
 }
-pub fn checked(value: Int) -> Int HelperError! {
+fn checked(value: Int) -> Int HelperError! {
     assert(value >= 0)
     return Ok(value)
 }
-pub fn failed(value: Int) -> Int HelperError! {
+fn failed(value: Int) -> Int HelperError! {
     if value < 0 {
         return Err(HelperError.Negative)
     }
@@ -646,14 +751,14 @@ pub fn failed(value: Int) -> Int HelperError! {
 fn fallback_message() -> String {
     return \"recovered\"
 }
-pub fn recover() -> String {
+fn recover() -> String {
     values := \"\".split(\",\").to_list()
     return values.get(1) ?? fallback_message()
 }
-pub fn empty_strings() -> [String] {
+fn empty_strings() -> [String] {
     return [String]{}
 }
-pub fn reset_strings() -> [String] {
+fn reset_strings() -> [String] {
     values := [String]{}
     values = [String]{}
     return values
@@ -682,7 +787,7 @@ fn run() {
 }
 ";
     let helper_src = "\
-pub fn panic_fallback() -> String {
+fn panic_fallback() -> String {
     values := \"\".split(\",\").to_list()
     return values.get(1) ?? panic(\"imported fallback\")
 }
@@ -743,7 +848,7 @@ fn run() {
 }
 ";
     let mathlib_src = "\
-pub fn clamp(n: Int, lo: Int, hi: Int) -> Int {
+fn clamp(n: Int, lo: Int, hi: Int) -> Int {
     if (n < lo) {
         return lo
     }
@@ -752,10 +857,10 @@ pub fn clamp(n: Int, lo: Int, hi: Int) -> Int {
     }
     return n
 }
-pub fn lo() -> Int {
+fn lo() -> Int {
     return 0
 }
-pub fn hi() -> Int {
+fn hi() -> Int {
     return 100
 }
 ";
@@ -788,7 +893,7 @@ pub use wrap.wrap
 module wrap
 ";
     let wrap_src = "\
-pub fn wrap(s: String) -> String {
+fn wrap(s: String) -> String {
     return \"[{decorate(s)}]\"
 }
 fn decorate(s: String) -> String {
@@ -933,7 +1038,7 @@ fn run() {
     assert_eq!(stdout, "11\n");
 }
 
-/// c109 Phase 16: a String-payload enum. The construction `Msg.Text(~s)` explicitly
+/// c109 Phase 16: a String-payload enum. The construction `Msg.Text(s.copy())` explicitly
 /// copies the read-only String parameter into the owning payload; the match binds the
 /// payload value and returns it (owning).
 #[test]
@@ -947,7 +1052,7 @@ enum Msg {
     Code(Int)
 }
 fn wrap(s: String) -> Msg {
-    return Msg.Text(~s)
+    return Msg.Text(s.copy())
 }
 fn render(m: Msg) -> String {
     if m == {
@@ -966,7 +1071,7 @@ fn run() {
     assert_eq!(stdout, "hi\n");
 }
 
-/// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(~inner)` explicitly
+/// c109 Phase 16: a recursive (boxed) enum. Constructing `Tree.Node(inner.copy())` explicitly
 /// copies the read-only `inner: Tree` parameter before the recursive boxed edge. The
 /// match traverses it (Rust auto-derefs the `Box`).
 #[test]
@@ -980,7 +1085,7 @@ enum Tree {
     Node(Tree)
 }
 fn wrap(inner: Tree) -> Tree {
-    return Tree.Node(~inner)
+    return Tree.Node(inner.copy())
 }
 fn leaf_val(t: Tree) -> Int {
     if t == {
@@ -1041,7 +1146,7 @@ enum Shape {
     Line(Int)
 }
 fn mk(p: Point) -> Shape {
-    return Shape.Dot(~p)
+    return Shape.Dot(p.copy())
 }
 fn first(s: Shape) -> Int {
     if s == {
@@ -1079,7 +1184,7 @@ enum Holder {
     One(Int)
 }
 fn mk(xs: [Int]) -> Holder {
-    return Holder.Nums(~xs)
+    return Holder.Nums(xs.copy())
 }
 fn run() {
     b :: Crate{ items: [1, 2, 3], label: \"x\" }
@@ -1112,7 +1217,7 @@ fn pick<T>(a: ^T, b: ^T, first: Bool) -> T {
     return b
 }
 fn firstof<T>(xs: ^[T]) -> T {
-    return ~xs[0]
+    return xs[0].copy()
 }
 fn wrap<T>(x: ^T) -> [T] {
     return [x]
@@ -1130,9 +1235,8 @@ fn run() {
     assert_eq!(stdout, "5\n1\n10\n7\n");
 }
 
-/// c109 Phase 17: prelude HTTP values use their canonical Core constructors. The
-/// prelude types live in `jet_std`, which a standalone `rustc` here can't link, so
-/// this asserts the emitted Rust dispatches through the shared helper symbols.
+/// Source HTTP constructors reach their reserved resource transfer rather than
+/// a public native policy row; the client remains a typed transport constructor.
 #[test]
 fn prelude_struct_construction() {
     let src = "\
@@ -1162,11 +1266,9 @@ fn run() {
             jet::render_diagnostics(&shown, src, &diags)
         )
     });
-    // HTTPResponse: the shared server constructor helper.
     assert!(
-        out.rust
-            .contains(r#"return jet_http_srv_response(200i64, &((*__jet_body)));"#),
-        "HTTPResponse constructor helper missing:\n{}",
+        out.rust.contains("jet_http_srv_raw_response_parts("),
+        "source HTTPResponse resource transfer missing:\n{}",
         out.rust
     );
     // HTTPRequest: the shared client request helper.
@@ -1175,4 +1277,198 @@ fn run() {
         "HTTPRequest constructor helper missing:\n{}",
         out.rust
     );
+}
+
+#[test]
+fn package_namespace_uses_owner_indices_without_sibling_imports() {
+    let scratch = common::Scratch::new("namespace_owner_indices");
+    let files = [
+        ("package.jet", "name: \"namespace_owner_indices\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
+        ("main.jet", "#NoPrelude\nFOLDED :: prep { fold_record().value }\nfn run() {\n    callback :: plus\n    result :: callback(2)\n    record :: make()\n    amount :: record.amount()\n    boxed :: wrap(result + amount)\n    state :: State.Ready(boxed.value)\n}\n"),
+        ("types.jet", "#NoPrelude\nstruct Record { value: Int }\nstruct Box<T> { value: T }\nenum State { Ready(Int) }\nalias RecordView<T> :: Box<T>\nalias Again<T> :: RecordView<T>\n"),
+        ("methods.jet", "#NoPrelude\ntrait Measure { fn amount(self) -> Int }\nimpl Record.Measure {\n    fn amount(self) -> Int { self.value }\n}\n"),
+        ("values.jet", "#NoPrelude\nTOKEN :: 7\nfn plus(value: Int) -> Int { value + TOKEN }\nfn make() -> Record { Record{value: TOKEN} }\nfn fold_record() -> Record { Record{value: 11} }\nfn wrap(value: Int) -> Again<Int> { Box<Int>{value: value} }\n"),
+    ];
+    for (name, source) in files {
+        fs::write(scratch.join(name), source).unwrap();
+    }
+    let (diagnostics, bundle, _, _checked_nominals) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+        scratch.join("main.jet").to_str().unwrap(), "dev", &Default::default(), None,
+    );
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let bundle = bundle.expect("checked package");
+    let folded = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Const(constant) if constant.name == "FOLDED" => constant.ct.as_ref(),
+        _ => None,
+    }).expect("namespace comptime initializer folded");
+    match folded {
+        jet::AST::CtValue::Int(value) => assert_eq!(value.to_string(), "11"),
+        value => panic!("namespace comptime initializer produced {value:?}"),
+    }
+    let values = bundle.modules.iter().position(|module| module.path.ends_with("values.jet")).unwrap();
+    let types = bundle.modules.iter().position(|module| module.path.ends_with("types.jet")).unwrap();
+    let methods = bundle.modules.iter().position(|module| module.path.ends_with("methods.jet")).unwrap();
+    for (name, owner) in [
+        ("plus", values), ("TOKEN", values), ("Record", types), ("Again", types), ("Measure", methods),
+    ] {
+        assert_eq!(bundle.name_ledger.namespace_owner(bundle.entry, name), Some(owner));
+    }
+    for module in &bundle.modules {
+        if module.path.starts_with(&scratch.path) {
+            assert!(module.imports.is_empty(), "namespace members need no generated imports: {:?}", module.path);
+        }
+    }
+}
+
+#[test]
+fn comptime_qualified_module_function_call_reaches_its_body() {
+    let scratch = common::Scratch::new("comptime_qualified_function_call");
+    for (name, source) in [
+        ("package.jet", "name: \"comptime_qualified_function_call\"\nversion: \"0.1.0\"\noutputs: { app: .Executable{ entry: run } }\n"),
+        ("main.jet", "#NoPrelude\nmodule helper\nFOLDED :: prep { helper.double(20) + helper.double(1) }\nfn run() {}\n"),
+        ("helper.jet", "#NoPrelude\nfn double(value: Int) -> Int { value * 2 }\n"),
+    ] {
+        fs::write(scratch.join(name), source).unwrap();
+    }
+    let (diagnostics, bundle, _, _checked_nominals) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+        scratch.join("main.jet").to_str().unwrap(), "dev", &Default::default(), None,
+    );
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let bundle = bundle.expect("checked package");
+    let folded = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Const(constant) if constant.name == "FOLDED" => constant.ct.as_ref(),
+        _ => None,
+    }).expect("qualified call initializer folded");
+    match folded {
+        jet::AST::CtValue::Int(value) => assert_eq!(value.to_string(), "42"),
+        value => panic!("qualified call initializer produced {value:?}"),
+    }
+}
+
+#[test]
+fn enum_leaf_member_calls_keep_method_nodes_and_groups_build_children() {
+    let scratch = common::Scratch::new("enum_leaf_member_boundary");
+    let source = r#"
+enum Choice {
+    Empty
+    Branch { Leaf(Int), Nested { Tip(Int), Unit } }
+}
+impl Choice {
+    fn measure(self) -> Int { 7 }
+}
+fn run() {
+    text :: DataTree.Null.to_text()
+    equal :: DataTree.Null.equal_unordered(DataTree.Null)
+    empty :: Choice.Empty.measure()
+    unit :: Choice.Branch.Nested.Unit.measure()
+    leaf :: Choice.Branch.Leaf(2)
+    tip :: Choice.Branch.Nested.Tip(3)
+}
+"#;
+    let path = scratch.join("main.jet");
+    fs::write(&path, source).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let run = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }).unwrap();
+    for (binding_name, method_name) in [
+        ("text", "to_text"), ("equal", "equal_unordered"), ("empty", "measure"), ("unit", "measure"),
+    ] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::MethodCall { method, .. } if method == method_name),
+            "leaf {binding_name} was normalized as a constructor: {initializer:#?}");
+    }
+    for (binding_name, variant_name) in [("leaf", "Branch.Leaf"), ("tip", "Branch.Nested.Tip")] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::EnumLit { variant, .. } if variant == variant_name),
+            "group child {binding_name} was not normalized: {initializer:#?}");
+    }
+}
+
+#[test]
+fn imported_enum_groups_use_canonical_facts_and_local_values_shadow_types() {
+    let scratch = common::Scratch::new("imported_enum_member_boundary");
+    let source = r#"
+#NoPrelude
+use "tags"
+use tags.Choice
+struct Holder { Empty: Choice }
+fn run() {
+    alias_empty :: tags.Choice.Empty.measure()
+    imported_empty :: Choice.Empty.measure()
+    alias_leaf :: tags.Choice.Branch.Leaf(2)
+    imported_tip :: Choice.Branch.Nested.Tip(3)
+    holder :: Holder{Empty: Choice.Empty}
+    Choice :: holder
+    shadowed :: Choice.Empty.measure()
+}
+"#;
+    let tags = r#"
+#NoPrelude
+enum Choice {
+    Empty
+    Branch { Leaf(Int), Nested { Tip(Int) } }
+}
+impl Choice {
+    fn measure(self) -> Int { 7 }
+}
+"#;
+    let path = scratch.join("main.jet");
+    fs::write(&path, source).unwrap();
+    fs::write(scratch.join("tags.jet"), tags).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+    assert!(diagnostics.iter().all(|diagnostic|
+        diagnostic.severity != jet::Diagnostics::Severity::Error), "{diagnostics:#?}");
+    let run = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        jet::AST::Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }).unwrap();
+    for (binding_name, variant_name) in [("alias_leaf", "Branch.Leaf"), ("imported_tip", "Branch.Nested.Tip")] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::EnumLit { type_name, variant, .. }
+            if type_name.contains("::") && variant == variant_name), "{initializer:#?}");
+    }
+    for binding_name in ["alias_empty", "imported_empty", "shadowed"] {
+        let initializer = run.body.iter().find_map(|statement| match statement {
+            jet::AST::Stmt::Val(binding) if binding.name == binding_name => Some(&binding.init),
+            _ => None,
+        }).unwrap();
+        assert!(matches!(initializer, jet::AST::Expr::MethodCall { method, .. } if method == "measure"),
+            "{initializer:#?}");
+    }
+}
+
+#[test]
+fn enum_group_value_and_bad_child_errors_do_not_turn_leaves_into_constructors() {
+    for (label, source, expected_code) in [
+        ("enum_group_value", "#NoPrelude\nenum Choice { Branch { Leaf(Int) } }\nfn run() { value :: Choice.Branch }\n", "E0332"),
+        ("enum_group_bad_child", "#NoPrelude\nenum Choice { Branch { Leaf(Int) } }\nfn run() { value :: Choice.Branch.Missing(1) }\n", "E0304"),
+        ("enum_leaf_bad_method", "#NoPrelude\nenum Choice { Empty }\nfn run() { value :: Choice.Empty.Missing() }\n", "E0102"),
+    ] {
+        let scratch = common::Scratch::new(label);
+        let path = scratch.join("main.jet");
+        fs::write(&path, source).unwrap();
+        let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
+        let errors = diagnostics.iter().filter(|diagnostic|
+            diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .map(|diagnostic| diagnostic.code.to_string()).collect::<Vec<_>>();
+        assert_eq!(errors, [expected_code], "{label}: {diagnostics:#?}");
+    }
 }

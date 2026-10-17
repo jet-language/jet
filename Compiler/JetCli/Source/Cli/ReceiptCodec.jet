@@ -1,0 +1,393 @@
+// Source/ReceiptStore.rs wire codec and ReceiptSections.rs validation.
+// This is the same content-addressed receipt, not a CLI-specific store.
+use jet_foundation.[CanonicalJSON, CanonicalJSONField, canonical_json_parse, canonical_json_object, mir_sha256_hex]
+use core.text as receipt_text
+use core.crypto as receipt_crypto
+
+struct JetCLIReceiptInput {
+    path: String
+    digest: String
+}
+
+struct JetCLIReceiptClaim {
+    verb: String
+    key: String
+    inputs: [JetCLIReceiptInput]
+}
+
+struct JetCLIReceiptSection {
+    name: String
+    type_name: String
+    schema_digest: String
+    payload_digest: String
+    bytes: [U8]
+}
+
+struct JetCLIRecordLink {
+    kind: String
+    artifact_id: String
+}
+
+struct JetCLIReceipt {
+    claim: JetCLIReceiptClaim
+    status: Int
+    stdout: [U8]
+    stderr: [U8]
+    sections: [JetCLIReceiptSection]
+    consumed: [JetCLIRecordLink]
+    produced: [JetCLIRecordLink]
+    digest: String
+}
+
+// The wire markers include their final NUL, which is not a Jet string escape.
+JET_CLI_RECEIPT_MAGIC :: prep { "jet-receipt-v2" }
+
+JET_CLI_RECEIPT_SECTION_MAGIC :: prep { "jet-receipt-sections-v1" }
+
+JET_CLI_RECEIPT_LINK_MAGIC :: prep { "jet-receipt-links-v1" }
+
+JET_CLI_RECEIPT_MAX_FIELD :: prep { 67108864 }
+
+JET_CLI_RECEIPT_MAX_BYTES :: prep { 138412032 }
+// Persistence failures use JetCLIReadError throughout; render text at CLI boundaries.
+fn jet_cli_receipt_section_marker(name: String) -> [U8] Never! {
+    bytes := name.bytes()
+    &bytes.push(U8{0})
+    bytes
+}
+
+
+fn jet_cli_receipt_is_digest(value: String) -> Bool Never! {
+    if value.bytes().len() != 64 -> return false
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 97 && code <= 102)) -> return false
+    }
+    true
+}
+
+fn jet_cli_receipt_section_new(name: String, type_name: String, bytes: [U8]) -> JetCLIReceiptSection JetCLIReadError! {
+    section :: JetCLIReceiptSection{name: name, type_name: type_name, schema_digest: mir_sha256_hex(type_name), payload_digest: receipt_crypto.sha256(bytes).hex(), bytes: bytes}
+    jet_cli_receipt_section_validate(section)
+    Ok(section)
+}
+
+fn jet_cli_receipt_section_name_validate(name: String) JetCLIReadError! {
+    if name == "" -> return Err(jet_cli_read_error("receipt section name is empty"))
+    if name.bytes().len() > 128 {
+        return Err(jet_cli_read_error("receipt section name is too long (maximum 128 bytes)"))
+    }
+    if receipt_text.has_control(name) || name.contains("/") || name.contains("\\") {
+        return Err(jet_cli_read_error("receipt section name `{name}` is invalid"))
+    }
+}
+
+fn jet_cli_receipt_section_validate(section: JetCLIReceiptSection) JetCLIReadError! {
+    jet_cli_receipt_section_name_validate(section.name)
+    if section.type_name == "" -> return Err(jet_cli_read_error("receipt section type name is empty"))
+    if section.type_name.bytes().len() > 256 {
+        return Err(jet_cli_read_error("receipt section type name is too long (maximum 256 bytes)"))
+    }
+    if receipt_text.has_control(section.type_name) {
+        return Err(jet_cli_read_error("receipt section type name is invalid"))
+    }
+    if !jet_cli_receipt_is_digest(section.schema_digest) {
+        return Err(jet_cli_read_error("receipt section schema digest is malformed"))
+    }
+    if !jet_cli_receipt_is_digest(section.payload_digest) {
+        return Err(jet_cli_read_error("receipt section payload digest is malformed"))
+    }
+    if section.bytes.len() > JET_CLI_RECEIPT_MAX_FIELD {
+        return Err(jet_cli_read_error("receipt section `{section.name}` is too large (maximum 67108864 bytes)"))
+    }
+    if section.payload_digest != receipt_crypto.sha256(section.bytes).hex() {
+        return Err(jet_cli_read_error("receipt section `{section.name}` payload digest does not match its bytes"))
+    }
+    value :: canonical_json_parse(section.bytes) ?? return Err(jet_cli_read_error("receipt section `{section.name}` has an invalid schema: canonical JSON is invalid: {err.message}"))
+    if value == .Object(_) -> return
+    Err(jet_cli_read_error("receipt section `{section.name}` has an invalid schema: typed section value must be a canonical JSON object"))
+}
+
+fn jet_cli_receipt_normalized_sections(sections: [JetCLIReceiptSection]) -> [JetCLIReceiptSection] JetCLIReadError! {
+    if sections.len() > 256 -> return Err(jet_cli_read_error("receipt has too many sections (maximum 256)"))
+    total := 0
+    normalized := sections
+    loop section in normalized {
+        jet_cli_receipt_section_validate(section)
+        total += section.bytes.len()
+    }
+    if total > JET_CLI_RECEIPT_MAX_FIELD {
+        return Err(jet_cli_read_error("receipt sections are too large (maximum 67108864 bytes)"))
+    }
+    &normalized.sort_by((left: JetCLIReceiptSection, right: JetCLIReceiptSection) -> left.name <=> right.name)
+    loop index in 1..<normalized.len() {
+        if normalized[index - 1].name == normalized[index].name {
+            return Err(jet_cli_read_error("receipt section `{normalized[index].name}` is duplicated"))
+        }
+    }
+    Ok(normalized)
+}
+
+fn jet_cli_record_kind_rank(kind: String) -> Int JetCLIReadError! {
+    if kind == {
+        "receipt" -> Ok(0)
+        "replay" -> Ok(1)
+        "proof" -> Ok(2)
+        "evidence" -> Ok(3)
+        "comparison" -> Ok(4)
+        "trust" -> Ok(5)
+        else -> Err(jet_cli_read_error("unknown record kind `{kind}`"))
+    }
+}
+
+fn jet_cli_record_link_validate(link: JetCLIRecordLink) JetCLIReadError! {
+    _ :: jet_cli_record_kind_rank(link.kind)
+    if link.artifact_id == "" || link.artifact_id.bytes().len() > 512 || receipt_text.has_control(link.artifact_id) {
+        return Err(jet_cli_read_error("record link artifact_id is empty, too large, or contains control characters"))
+    }
+    if link.artifact_id == "." || link.artifact_id == ".." || link.artifact_id.contains("/") || link.artifact_id.contains("\\") {
+        return Err(jet_cli_read_error("record link artifact_id contains an unsafe path component"))
+    }
+}
+
+fn jet_cli_receipt_link_order(left: JetCLIRecordLink, right: JetCLIRecordLink) -> Ordering Never! {
+    left_rank :: jet_cli_record_kind_rank(left.kind) ?? panic("validated record kind")
+    right_rank :: jet_cli_record_kind_rank(right.kind) ?? panic("validated record kind")
+    if left_rank != right_rank -> return left_rank <=> right_rank
+    left.artifact_id <=> right.artifact_id
+}
+
+fn jet_cli_receipt_normalized_links(links: [JetCLIRecordLink], label: String) -> [JetCLIRecordLink] JetCLIReadError! {
+    if links.len() > 100000 -> return Err(jet_cli_read_error("receipt has too many {label} links (maximum 100000)"))
+    normalized := links
+    loop link in normalized {
+        jet_cli_record_link_validate(link) ?? return Err(jet_cli_read_error("receipt {label} link is invalid: {err.message}"))
+    }
+    &normalized.sort_by(jet_cli_receipt_link_order)
+    loop index in 1..<normalized.len() {
+        left :: normalized[index - 1]
+        right :: normalized[index]
+        if left.kind == right.kind && left.artifact_id == right.artifact_id {
+            return Err(jet_cli_read_error("receipt {label} links contain a duplicate"))
+        }
+    }
+    Ok(normalized)
+}
+
+fn jet_cli_receipt_frame(out: &[U8], bytes: [U8]) Never! {
+    jet_cli_receipt_uint(&out, bytes.len(), 8)
+    loop byte in bytes -> &out.push(byte)
+}
+
+fn jet_cli_receipt_uint(out: &[U8], number: Int, width: Int) Never! {
+    value := number
+    digits := [U8]{}
+    loop _ in 0..<width {
+        &digits.push(U8.from_int(value % 256) ?? panic("unsigned wire byte"))
+        value = value /% 256
+    }
+    loop index in 0..<width -> &out.push(digits[width - index - 1])
+}
+
+struct JetCLIReceiptCursor {
+    bytes: [U8]
+    at: Int
+    prefix: String
+    maximum: Int
+}
+
+fn jet_cli_receipt_take(cursor: &JetCLIReceiptCursor) -> [U8] JetCLIReadError! {
+    if cursor.at > cursor.bytes.len() - 8 -> return Err(jet_cli_read_error("{cursor.prefix} frame length is truncated"))
+    length := 0
+    loop _ in 0..<8 {
+        byte :: Int.from_u8(cursor.bytes[cursor.at])
+        if length > (cursor.maximum - byte) /% 256 {
+            return Err(jet_cli_read_error("{cursor.prefix} frame is too large"))
+        }
+        length = length * 256 + byte
+        cursor.at += 1
+    }
+    if length > cursor.bytes.len() - cursor.at -> return Err(jet_cli_read_error("{cursor.prefix} frame is truncated"))
+    bytes :: cursor.bytes.slice(cursor.at, cursor.at + length)
+    cursor.at += length
+    Ok(bytes)
+}
+
+fn jet_cli_receipt_take_text(cursor: &JetCLIReceiptCursor, label: String) -> String JetCLIReadError! {
+    bytes :: jet_cli_receipt_take(&cursor)
+    Ok(String.from_bytes(bytes) ?? return Err(jet_cli_read_error("{cursor.prefix} {label} is not UTF-8")))
+}
+
+fn jet_cli_receipt_number(bytes: [U8], width: Int, label: String, maximum: Int, too_large: String) -> Int JetCLIReadError! {
+    if bytes.len() != width -> return Err(jet_cli_read_error("receipt {label} is malformed"))
+    value := 0
+    loop byte in bytes {
+        digit :: Int.from_u8(byte)
+        if value > (maximum - digit) /% 256 || digit > maximum -> return Err(jet_cli_read_error(too_large))
+        value = value * 256 + digit
+    }
+    Ok(value)
+}
+
+fn jet_cli_receipt_decode_links(cursor: &JetCLIReceiptCursor, label: String) -> [JetCLIRecordLink] JetCLIReadError! {
+    count :: jet_cli_receipt_number(jet_cli_receipt_take(&cursor), 8, "{label} link count", 100000, "receipt has too many {label} links (maximum 100000)")
+    links := [JetCLIRecordLink]{}
+    loop _ in 0..<count {
+        kind :: jet_cli_receipt_take_text(&cursor, "{label} link kind")
+        _ :: jet_cli_record_kind_rank(kind) ?? return Err(jet_cli_read_error("receipt {label} link kind is invalid: {err.message}"))
+        artifact_id :: jet_cli_receipt_take_text(&cursor, "{label} link artifact_id")
+        link :: JetCLIRecordLink{kind: kind, artifact_id: artifact_id}
+        jet_cli_record_link_validate(link) ?? return Err(jet_cli_read_error("receipt {label} link is invalid: {err.message}"))
+        &links.push(link)
+    }
+    jet_cli_receipt_normalized_links(links, label)
+}
+
+fn jet_cli_receipt_decode(bytes: [U8]) -> JetCLIReceipt JetCLIReadError! {
+    if bytes.len() > JET_CLI_RECEIPT_MAX_BYTES -> return Err(jet_cli_read_error("receipt is too large"))
+    magic :: jet_cli_receipt_section_marker(JET_CLI_RECEIPT_MAGIC)
+    if bytes.len() < magic.len() || bytes.slice(0, magic.len()) != magic {
+        return Err(jet_cli_read_error("receipt magic is invalid"))
+    }
+    cursor := JetCLIReceiptCursor{bytes: bytes, at: magic.len(), prefix: "receipt", maximum: JET_CLI_RECEIPT_MAX_FIELD}
+    verb :: jet_cli_receipt_take_text(&cursor, "verb")
+    key :: jet_cli_receipt_take_text(&cursor, "key")
+    raw_status :: jet_cli_receipt_take(&cursor)
+    unsigned_status :: jet_cli_receipt_number(raw_status, 4, "status", 4294967295, "receipt status is malformed")
+    status :: if unsigned_status >= 2147483648 -> unsigned_status - 4294967296 else -> unsigned_status
+    count :: jet_cli_receipt_number(jet_cli_receipt_take(&cursor), 8, "input count", 100000, "receipt has too many inputs")
+    inputs := [JetCLIReceiptInput]{}
+    loop _ in 0..<count {
+        path :: jet_cli_receipt_take_text(&cursor, "input path")
+        digest :: jet_cli_receipt_take_text(&cursor, "input digest")
+        if !jet_cli_receipt_is_digest(digest) -> return Err(jet_cli_read_error("receipt input digest is malformed"))
+        &inputs.push(JetCLIReceiptInput{path: path, digest: digest})
+    }
+    stdout :: jet_cli_receipt_take(&cursor)
+    stderr :: jet_cli_receipt_take(&cursor)
+    extension := jet_cli_receipt_take(&cursor)
+    sections := [JetCLIReceiptSection]{}
+    consumed := [JetCLIRecordLink]{}
+    produced := [JetCLIRecordLink]{}
+    if extension == jet_cli_receipt_section_marker(JET_CLI_RECEIPT_SECTION_MAGIC) {
+        section_count :: jet_cli_receipt_number(jet_cli_receipt_take(&cursor), 8, "section count", 256, "receipt has too many sections (maximum 256)")
+        loop _ in 0..<section_count {
+            name :: jet_cli_receipt_take_text(&cursor, "section name")
+            type_name :: jet_cli_receipt_take_text(&cursor, "section type name")
+            value :: jet_cli_receipt_take(&cursor)
+            section :: jet_cli_receipt_section_new(name, type_name, value) ?? return Err(jet_cli_read_error("receipt section schema is invalid: {err.message}"))
+            &sections.push(section)
+        }
+        sections = jet_cli_receipt_normalized_sections(sections)
+        extension = jet_cli_receipt_take(&cursor)
+    }
+    if extension == jet_cli_receipt_section_marker(JET_CLI_RECEIPT_LINK_MAGIC) {
+        version :: jet_cli_receipt_take(&cursor)
+        if version.len() != 8 -> return Err(jet_cli_read_error("receipt links version is malformed"))
+        version_number := U64{0}
+        loop byte in version -> version_number = (version_number << 8).bit_or(U64.from_u8(byte))
+        if version_number != 1 -> return Err(jet_cli_read_error("unsupported receipt links version {version_number}"))
+        consumed = jet_cli_receipt_decode_links(&cursor, "consumed")
+        produced = jet_cli_receipt_decode_links(&cursor, "produced")
+        extension = jet_cli_receipt_take(&cursor)
+    }
+    digest :: String.from_bytes(extension) ?? return Err(jet_cli_read_error("receipt digest is not UTF-8"))
+    if cursor.at != bytes.len() || !jet_cli_receipt_is_digest(key) || !jet_cli_receipt_is_digest(digest) {
+        return Err(jet_cli_read_error("receipt has trailing bytes or malformed digest"))
+    }
+    receipt :: JetCLIReceipt{claim: JetCLIReceiptClaim{verb: verb, key: key, inputs: inputs}, status: status, stdout: stdout, stderr: stderr, sections: sections, consumed: consumed, produced: produced, digest: digest}
+    if digest != jet_cli_receipt_digest(receipt) {
+        return Err(jet_cli_read_error("receipt digest does not authenticate its body"))
+    }
+    Ok(receipt)
+}
+
+fn jet_cli_receipt_encode_links(out: &[U8], links: [JetCLIRecordLink]) Never! {
+    count := [U8]{}
+    jet_cli_receipt_uint(&count, links.len(), 8)
+    jet_cli_receipt_frame(&out, count)
+    sorted := links
+    &sorted.sort_by(jet_cli_receipt_link_order)
+    loop link in sorted {
+        jet_cli_receipt_frame(&out, link.kind.bytes())
+        jet_cli_receipt_frame(&out, link.artifact_id.bytes())
+    }
+}
+
+fn jet_cli_receipt_body(receipt: JetCLIReceipt) -> [U8] Never! {
+    out := jet_cli_receipt_section_marker(JET_CLI_RECEIPT_MAGIC)
+    jet_cli_receipt_frame(&out, receipt.claim.verb.bytes())
+    jet_cli_receipt_frame(&out, receipt.claim.key.bytes())
+    raw_status := [U8]{}
+    unsigned_status :: if receipt.status < 0 -> receipt.status + 4294967296 else -> receipt.status
+    jet_cli_receipt_uint(&raw_status, unsigned_status, 4)
+    jet_cli_receipt_frame(&out, raw_status)
+    count := [U8]{}
+    jet_cli_receipt_uint(&count, receipt.claim.inputs.len(), 8)
+    jet_cli_receipt_frame(&out, count)
+    loop input in receipt.claim.inputs {
+        jet_cli_receipt_frame(&out, input.path.bytes())
+        jet_cli_receipt_frame(&out, input.digest.bytes())
+    }
+    jet_cli_receipt_frame(&out, receipt.stdout)
+    jet_cli_receipt_frame(&out, receipt.stderr)
+    if receipt.sections.len() > 0 {
+        sections := receipt.sections
+        &sections.sort_by((left: JetCLIReceiptSection, right: JetCLIReceiptSection) -> left.name <=> right.name)
+        jet_cli_receipt_frame(&out, jet_cli_receipt_section_marker(JET_CLI_RECEIPT_SECTION_MAGIC))
+        section_count := [U8]{}
+        jet_cli_receipt_uint(&section_count, sections.len(), 8)
+        jet_cli_receipt_frame(&out, section_count)
+        loop section in sections {
+            jet_cli_receipt_frame(&out, section.name.bytes())
+            jet_cli_receipt_frame(&out, section.type_name.bytes())
+            jet_cli_receipt_frame(&out, section.bytes)
+        }
+    }
+    if receipt.consumed.len() > 0 || receipt.produced.len() > 0 {
+        jet_cli_receipt_frame(&out, jet_cli_receipt_section_marker(JET_CLI_RECEIPT_LINK_MAGIC))
+        version := [U8]{}
+        jet_cli_receipt_uint(&version, 1, 8)
+        jet_cli_receipt_frame(&out, version)
+        jet_cli_receipt_encode_links(&out, receipt.consumed)
+        jet_cli_receipt_encode_links(&out, receipt.produced)
+    }
+    out
+}
+
+fn jet_cli_receipt_digest(receipt: JetCLIReceipt) -> String Never! {
+    receipt_crypto.sha256(jet_cli_receipt_body(receipt)).hex()
+}
+
+fn jet_cli_receipt_encode(receipt: JetCLIReceipt) -> [U8] JetCLIReadError! {
+    _ :: jet_cli_receipt_normalized_sections(receipt.sections)
+    _ :: jet_cli_receipt_normalized_links(receipt.consumed, "consumed")
+    _ :: jet_cli_receipt_normalized_links(receipt.produced, "produced")
+    out := jet_cli_receipt_body(receipt)
+    jet_cli_receipt_frame(&out, receipt.digest.bytes())
+    if out.len() > JET_CLI_RECEIPT_MAX_BYTES {
+        return Err(jet_cli_read_error("receipt is too large (maximum 138412032 bytes)"))
+    }
+    Ok(out)
+}
+
+fn jet_cli_receipt_query_sections(sections: [JetCLIReceiptSection], names: [String]?) -> CanonicalJSON JetCLIReadError! {
+    normalized :: jet_cli_receipt_normalized_sections(sections)
+    requested := [String:Bool]{}
+    if names == .Val(selected) {
+        loop name in selected {
+            jet_cli_receipt_section_name_validate(name)
+            if requested.get(name) != None {
+                return Err(jet_cli_read_error("receipt section `{name}` is duplicated in query"))
+            }
+            requested[name] = true
+        }
+    }
+    fields := [CanonicalJSONField]{}
+    loop section in normalized {
+        if names != None && requested.get(section.name) == .None -> next
+        value :: canonical_json_parse(section.bytes) ?? return Err(jet_cli_read_error("canonical JSON is invalid: {err.message}"))
+        &fields.push(CanonicalJSONField{key: section.name, value: value})
+    }
+    canonical_json_object(fields) ?? return Err(jet_cli_read_error(err.message))
+}

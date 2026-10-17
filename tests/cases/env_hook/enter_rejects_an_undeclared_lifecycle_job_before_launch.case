@@ -1,0 +1,9 @@
+# Port of tests/env_hook.rs::enter_rejects_an_undeclared_lifecycle_job_before_launch.
+# Preserve caller PATH, as in the original.
+requires: tool:true
+fixture: enter_rejects_an_undeclared_lifecycle_job_before_launch.fixture
+step: jetpack env --trust --no-color -- true
+exit: 2
+stderr: ~ "E1294" # original predicate
+stderr: ~ "missing_task" # original predicate
+stderr: !~ "running job missing_task" # original predicate

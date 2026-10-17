@@ -1,0 +1,8 @@
+# Port of tests/semindex.rs:1559-1584; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# PENDING-GRAMMAR(batch-four): machine-output validator.
+step: jet inspect semindex {root}/Examples/features/basics/hello.jet --json
+stdout: machine-output = [status]
+stdout: ^= "{\"schema\":\"jet.status/v1\"" # original predicate
+stdout: count "\"schema\":\"jet.status/v1\"" = 1 # original predicate
+stdout: ~ "\"schema_version\":20" # original predicate

@@ -1,0 +1,44 @@
+// Paired checking fixture: no namespace selection depends on call validity.
+struct Generic<T> {
+    value: T
+    step: fn(Int) -> Int
+    fn step<U>(self, amount: U) -> Int Never! { 20 }
+}
+trait Step {
+    fn step(self, amount: Int) -> Int Never! { amount + 5 }
+}
+struct DefaultWorker { step: fn(Int) -> Int }
+impl DefaultWorker.Step {}
+struct Hook { mul: fn(Int) -> Int }
+impl Hook.Mul(Int) {
+    fn mul(self, rhs: Int) -> Int Never! { rhs + 10 }
+}
+struct MutableWorker {
+    value: Int
+    step: fn(Int) -> Int
+    fn step(&self, amount: Int) -> Int Never! {
+        self.value += amount
+        self.value
+    }
+}
+fn via_bound<T: Step>(value: T) -> Int Never! { value.step(1) }
+fn run() {
+    generic :: Generic<Int>{value: 1, step: n -> n}
+    print(generic.step<Int>(1))
+    print(generic.step.call(1))
+    inherited :: DefaultWorker{step: n -> n * 2}
+    print(inherited.step(1))
+    print(inherited.step.call(1))
+    print(via_bound(inherited))
+    computed :: Computed{base: 3}
+    print(computed.value)
+    print(computed.value())
+    hook :: Hook{mul: n -> n * 2}
+    print(hook.mul(3))
+    print(hook.mul.call(3))
+    print(hook * 3)
+    mutable := MutableWorker{value: 1, step: n -> n * 2}
+    print(&mutable.step(2))
+    print(mutable.value)
+    print(mutable.step.call(2))
+}

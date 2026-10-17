@@ -3168,6 +3168,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn key_reference_display_is_independent_of_private_metadata_and_key_type() {
+        struct NonDisplayKey;
+        let mut key = JetVaultKeyRef::<NonDisplayKey> {
+            provider: JetVaultProvider::Repo,
+            repo_uuid: [0x11; 16],
+            name: "release".to_string(),
+            generation: 7,
+            opaque_id: [0x22; 16],
+            record_hash: [0x33; 32],
+            marker: std::marker::PhantomData,
+        };
+        assert_eq!(key.to_string(), "repo:release@v7");
+        key.repo_uuid = [0xaa; 16];
+        key.opaque_id = [0xbb; 16];
+        key.record_hash = [0xcc; 32];
+        assert_eq!(key.to_string(), "repo:release@v7");
+    }
+
+    #[test]
     fn keygen_encrypt_decrypt_round_trips() {
         let (identity, recipient) = jet_vault_keygen_impl();
         let plaintext = b"hunter2".to_vec();

@@ -1,0 +1,17 @@
+# HAND-PORT tests/jetpack_engine.rs:6063-6090 env_flake_detection_ordering_project_env_wins_without_flag
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: env_flake_detection_ordering_project_env_wins_without_flag.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack env --no-color --trust -- hello
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout.trim: = env_flake_detection_ordering_project_env_wins_without_flag.expected # original ed77c235f tests/jetpack_engine.rs:6086-6089 stdout.trim equals hello from jet-pkgs
+

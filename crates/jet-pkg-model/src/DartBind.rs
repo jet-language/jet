@@ -569,9 +569,9 @@ fn render_jet(lib: &str, functions: &[Function]) -> String {
     }
     out.push_str("}\nuse c.");
     out.push_str(&abi);
-    out.push_str(" as abi\n\npub enum DartError { NotInitialized CallbackUnavailable }\n\n");
+    out.push_str(" as abi\n\nenum DartError { NotInitialized CallbackUnavailable }\n\n");
     for f in functions {
-        out.push_str("pub fn ");
+        out.push_str("fn ");
         out.push_str(&f.jet);
         jet_params(&mut out, &f.params);
         out.push_str(" -[FFI.Dart]> ");
@@ -986,7 +986,7 @@ mod tests {
         assert_eq!(functions[0].jet, "dart_double");
         assert_eq!(functions[0].params[0].name, "some_value");
         assert!(super::render_jet("callbacks", &functions)
-            .contains("pub fn dart_double(some_value: Int)"));
+            .contains("fn dart_double(some_value: Int)"));
         assert!(super::render_dart_host(
             std::path::Path::new("callbacks.dart"),
             "callbacks",
@@ -1063,7 +1063,7 @@ mod tests {
         .unwrap();
         let jet = super::render_jet("callbacks", &functions);
         assert!(jet.contains("fn dart_double(value: Int) -> Int ="));
-        assert!(jet.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int DartError!"));
+        assert!(jet.contains("fn dart_double(value: Int) -[FFI.Dart]> Int DartError!"));
         assert!(jet.contains("fn dart_half(value: Float) -> Float ="));
         assert!(!jet.contains("=>"));
 

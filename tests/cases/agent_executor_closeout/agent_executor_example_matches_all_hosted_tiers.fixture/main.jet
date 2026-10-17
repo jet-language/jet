@@ -1,0 +1,19 @@
+// #1180: one argv executor, one explicit Exec authority, one receipt.
+package {
+    name: "agent_executor"
+    authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }
+}
+
+use core.process as process
+
+fn run() -[Exec, Time.Wait]> {
+    policy :: Authority.from_rights(["Exec:printf"])
+    spec :: process.cmd(["printf", "agent-safe"])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .cwd("/tmp")
+        .under(policy)
+    receipt :: process.run_spec(spec) ?? panic("agent receipt")
+    print(receipt.output)
+    print(receipt.redacted)
+}

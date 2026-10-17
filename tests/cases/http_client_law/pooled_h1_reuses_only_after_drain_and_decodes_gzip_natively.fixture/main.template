@@ -1,0 +1,10 @@
+
+use core.http.client as http
+fn run() {
+    first :: http.get("http://{cap:addr}/first") ?? panic("first")
+    print(first.body().text(16) ?? panic("first body"))
+    second :: http.get("http://{cap:addr}/second") ?? panic("second")
+    print(second.body().text(16) ?? panic("gzip body"))
+    print(&second.header("content-encoding") ?? "missing")
+    print(&second.header("content-length") ?? "missing")
+}

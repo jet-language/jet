@@ -1,6 +1,6 @@
 use super::super::{
-    describe, Diagnostic, Expr, Parser, Pattern, Span, StrMatchPart, StrTokPart, Syntax, TokKind,
-    Token, Type,
+    describe, leading_dot_variant, Diagnostic, Expr, Parser, Pattern, Span, StrMatchPart,
+    StrTokPart, Syntax, TokKind, Token, Type,
 };
 
 enum TypedPatternKind {
@@ -216,7 +216,6 @@ impl<'a> Parser<'a> {
             type_generic_depth: 0,
             type_generic_chain: Vec::new(),
             type_generic_truncated: false,
-            pub_file_default: false,
             in_layout_body: self.in_layout_body,
             adjacent_if_body_depth: 0,
             block_depth: 0,
@@ -687,9 +686,18 @@ impl<'a> Parser<'a> {
             )
     }
 
-    pub(super) fn struct_pattern_rhs(&mut self) -> Result<Pattern, Diagnostic> {
+    /// D-DESTRUCT1 / D-PAT-RECORD1=A: the brace body of a struct pattern,
+    /// `{field, field: local, field: value, field: pattern, ..}`. The cursor
+    /// is on the `{` (or the retired `.{`); `type_name` is the written head
+    /// of `Point{…}`, already consumed by the caller.
+    pub(super) fn struct_pattern_rhs(
+        &mut self,
+        type_name: Option<(String, Span)>,
+    ) -> Result<Pattern, Diagnostic> {
         let dotted = matches!(self.peek().kind, TokKind::Dot);
-        let start = self.peek().span.start;
+        let start = type_name
+            .as_ref()
+            .map_or(self.peek().span.start, |(_, span)| span.start);
         if dotted {
             let dot = self.bump();
             self.diags.push(Diagnostic::error(
@@ -703,67 +711,490 @@ impl<'a> Parser<'a> {
         self.expect(TokKind::LBrace, "to open a struct pattern")?;
         let mut fields = Vec::new();
         let mut rest = None;
-        if !matches!(self.peek().kind, TokKind::RBrace) {
-            loop {
-                if matches!(self.peek().kind, TokKind::DotDot) {
-                    rest = Some(self.bump().span);
-                    break;
-                }
-                let (field, field_span) = self.expect_ident("for a struct-pattern field")?;
-                if matches!(self.peek().kind, TokKind::Colon) {
-                    self.bump();
-                    if let TokKind::Ident(local) = self.peek().kind.clone() {
-                        let local_span = self.peek().span;
-                        let next = self.toks.get(self.pos + 1).map(|t| &t.kind);
-                        if matches!(next, Some(TokKind::Comma | TokKind::RBrace)) {
-                            self.bump();
-                            fields.push(crate::AST::StructPatField::Bind {
-                                field,
-                                field_span,
-                                local,
-                                local_span,
-                            });
-                        } else {
-                            let value = self.expr_no_struct_lit()?;
-                            fields.push(crate::AST::StructPatField::Value {
-                                field,
-                                field_span,
-                                value: Box::new(value),
-                            });
-                        }
-                    } else {
-                        let value = self.expr_no_struct_lit()?;
-                        fields.push(crate::AST::StructPatField::Value {
-                            field,
-                            field_span,
-                            value: Box::new(value),
-                        });
-                    }
-                } else {
-                    fields.push(crate::AST::StructPatField::Bind {
-                        local: field.clone(),
-                        local_span: field_span,
-                        field,
-                        field_span,
-                    });
-                }
-                if matches!(self.peek().kind, TokKind::Comma) {
-                    self.bump();
-                    if matches!(self.peek().kind, TokKind::RBrace) {
-                        break;
-                    }
-                    continue;
-                }
+        loop {
+            self.skip_named_pattern_line_breaks();
+            if matches!(self.peek().kind, TokKind::RBrace) {
                 break;
             }
+            if matches!(self.peek().kind, TokKind::DotDot) {
+                let rest_span = self.bump().span;
+                self.skip_named_pattern_line_breaks();
+                if !matches!(self.peek().kind, TokKind::RBrace) {
+                    return Err(Self::rest_not_last(rest_span, "struct"));
+                }
+                rest = Some(rest_span);
+                break;
+            }
+            let (field, field_span) = self.expect_ident("for a struct-pattern field")?;
+            if matches!(self.peek().kind, TokKind::Colon) {
+                self.bump();
+                let local = match &self.peek().kind {
+                    TokKind::Ident(local)
+                        if !Syntax::is_constant_name(local)
+                            && !local.chars().next().is_some_and(char::is_uppercase)
+                            && matches!(
+                                self.toks.get(self.pos + 1).map(|t| &t.kind),
+                                Some(TokKind::Comma | TokKind::RBrace | TokKind::Semi)
+                            ) =>
+                    {
+                        Some(local.clone())
+                    }
+                    _ => None,
+                };
+                if let Some(local) = local {
+                    let local_span = self.bump().span;
+                    fields.push(crate::AST::StructPatField::Bind {
+                        field,
+                        field_span,
+                        local,
+                        local_span,
+                    });
+                } else if self.nested_pattern_ahead(false) {
+                    let pattern = self.nested_pattern()?;
+                    fields.push(crate::AST::StructPatField::Nested {
+                        field,
+                        field_span,
+                        pattern: Box::new(pattern),
+                    });
+                } else {
+                    let value = self.expr_no_struct_lit()?;
+                    fields.push(crate::AST::StructPatField::Value {
+                        field,
+                        field_span,
+                        value: Box::new(value),
+                    });
+                }
+            } else {
+                fields.push(crate::AST::StructPatField::Bind {
+                    local: field.clone(),
+                    local_span: field_span,
+                    field,
+                    field_span,
+                });
+            }
+            self.skip_named_pattern_line_breaks();
+            if !matches!(self.peek().kind, TokKind::Comma) {
+                break;
+            }
+            self.bump();
         }
+        self.skip_named_pattern_line_breaks();
         self.expect(TokKind::RBrace, "after struct-pattern fields")?;
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
         Ok(Pattern::Struct {
+            type_name,
             fields,
             rest,
             span: Span::new(start, end),
         })
+    }
+
+    fn rest_not_last(span: Span, form: &str) -> Diagnostic {
+        Diagnostic::error(
+            "E0003",
+            format!("`..` must be the last entry of a {form} pattern"),
+            "`..` stands for everything the pattern does not list, so nothing can follow it"
+                .to_string(),
+            "move `..` to the end of the pattern".to_string(),
+            Some(span),
+        )
+    }
+
+    /// D-PAT-RECORD1=A: `Point{…}` starts a named struct pattern when the
+    /// name is a type name and the brace body reads as pattern entries
+    /// (the D-PAT-NAMED-NEST1 lookahead), so `{` still opens a body
+    /// otherwise and conversion heads such as `Float{b}` stay values.
+    pub(super) fn named_struct_pattern_ahead(&self) -> bool {
+        let TokKind::Ident(name) = &self.peek().kind else {
+            return false;
+        };
+        if !name.chars().next().is_some_and(char::is_uppercase)
+            || Syntax::is_constant_name(name)
+            || name == "String"
+        {
+            return false;
+        }
+        let kind = |offset: usize| self.toks.get(self.pos + offset).map(|t| &t.kind);
+        if !matches!(kind(1), Some(TokKind::LBrace)) {
+            return false;
+        }
+        match kind(2) {
+            Some(TokKind::DotDot) => true,
+            Some(TokKind::Ident(field)) if field != Syntax::PAT_WILDCARD_SLOT => match kind(3) {
+                Some(TokKind::Colon | TokKind::Comma) => true,
+                Some(TokKind::RBrace) => matches!(
+                    kind(4),
+                    Some(
+                        TokKind::LBrace
+                            | TokKind::UnifiedArrow
+                            | TokKind::LambdaArrow
+                            | TokKind::Comma
+                            | TokKind::RParen
+                            | TokKind::RBracket
+                            | TokKind::RBrace
+                            | TokKind::AndAnd
+                    )
+                ),
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// D-PAT-RECORD1=A: parse `Point{…}` as a struct pattern. Unless
+    /// `forced`, a head whose entries are all `field: value` comparisons is
+    /// the struct value it spells (today's equality), so it is left for the
+    /// expression parser.
+    pub(super) fn try_named_struct_pattern(
+        &mut self,
+        forced: bool,
+    ) -> Result<Option<Pattern>, Diagnostic> {
+        let save = self.pos;
+        let save_diags = self.diags.len();
+        let TokKind::Ident(name) = self.peek().kind.clone() else {
+            return Ok(None);
+        };
+        let name_span = self.bump().span;
+        let pattern = match self.struct_pattern_rhs(Some((name, name_span))) {
+            Ok(pattern) => pattern,
+            Err(error) if forced => return Err(error),
+            Err(_) => {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
+        };
+        if forced || Self::pattern_binds_or_shapes(&pattern) {
+            return Ok(Some(pattern));
+        }
+        self.pos = save;
+        self.diags.truncate(save_diags);
+        Ok(None)
+    }
+
+    /// Whether a struct, list or map pattern does more than compare written
+    /// values: it binds, skips (`..`, `_`, `?:`), nests a pattern, or is the
+    /// empty `[]` / `[:]` shape.
+    fn pattern_binds_or_shapes(pattern: &Pattern) -> bool {
+        use crate::AST::{PatSlot, StructPatField};
+        let slot_shapes = |slot: &PatSlot| !matches!(slot, PatSlot::Value(_));
+        match pattern {
+            Pattern::Struct { fields, rest, .. } => {
+                rest.is_some()
+                    || fields
+                        .iter()
+                        .any(|field| !matches!(field, StructPatField::Value { .. }))
+            }
+            Pattern::List { items, rest, .. } => {
+                items.is_empty() || rest.is_some() || items.iter().any(slot_shapes)
+            }
+            Pattern::Map { entries, rest, .. } => {
+                entries.is_empty()
+                    || rest.is_some()
+                    || entries
+                        .iter()
+                        .any(|entry| entry.optional || slot_shapes(&entry.slot))
+            }
+            _ => true,
+        }
+    }
+
+    /// D-PAT-RECORD1 / D-PAT-MAP1: whether the cursor starts a nested
+    /// pattern rather than a compared value. `in_list` admits a bare unit
+    /// case `.Red` as a nested pattern; in a struct field it stays the
+    /// D-DESTRUCT1 value comparison it has always been.
+    pub(super) fn nested_pattern_ahead(&self, in_list: bool) -> bool {
+        let kind = |offset: usize| self.toks.get(self.pos + offset).map(|t| &t.kind);
+        match kind(0) {
+            Some(TokKind::Dot) => {
+                if !kind(1).is_some_and(|k| leading_dot_variant(k).is_some()) {
+                    return false;
+                }
+                in_list || matches!(kind(2), Some(TokKind::LParen | TokKind::LBrace | TokKind::Pipe))
+            }
+            Some(TokKind::LBrace) => self.brace_starts_record(),
+            Some(TokKind::LBracket) => !self.bracket_starts_typed_lit(),
+            Some(TokKind::Ident(_)) => self.named_struct_pattern_ahead(),
+            _ => false,
+        }
+    }
+
+    /// Parse the nested pattern `nested_pattern_ahead` found.
+    fn nested_pattern(&mut self) -> Result<Pattern, Diagnostic> {
+        match self.peek().kind {
+            TokKind::LBrace => self.struct_pattern_rhs(None),
+            TokKind::LBracket => self.bracket_pattern(true).map(|p| {
+                p.expect("a forced bracket pattern always yields a pattern")
+            }),
+            TokKind::Ident(_) => {
+                let TokKind::Ident(name) = self.peek().kind.clone() else {
+                    unreachable!("guarded by the match arm")
+                };
+                let name_span = self.bump().span;
+                self.struct_pattern_rhs(Some((name, name_span)))
+            }
+            _ => match self.try_pattern_rhs(true)? {
+                Some(pattern) => Ok(pattern),
+                None => Err(Diagnostic::error(
+                    "E0003",
+                    format!("expected a pattern, found {}", describe(&self.peek().kind)),
+                    "this position holds a nested pattern".to_string(),
+                    "write an enum case such as `.Val(x)`, a struct, list or map pattern"
+                        .to_string(),
+                    Some(self.peek().span),
+                )),
+            },
+        }
+    }
+
+    /// D-PAT-RECORD1 / D-PAT-MAP1: one item of a list pattern, one value of
+    /// a map pattern, or one enum payload slot. A bare name binds, `_`
+    /// skips, `lo..hi` tests a range, a nested shape tests inside, and any
+    /// other expression is a value compared with `==`.
+    pub(in crate::Parser) fn pattern_item(
+        &mut self,
+        in_list: bool,
+    ) -> Result<crate::AST::PatSlot, Diagnostic> {
+        use crate::AST::PatSlot;
+        let kind = |p: &Self, offset: usize| p.toks.get(p.pos + offset).map(|t| t.kind.clone());
+        match kind(self, 0) {
+            Some(TokKind::Ident(name)) if name == Syntax::PAT_WILDCARD_SLOT => {
+                self.bump();
+                return Ok(PatSlot::Wildcard);
+            }
+            Some(TokKind::Int(lo, _))
+                if matches!(kind(self, 1), Some(TokKind::DotDot))
+                    && matches!(kind(self, 2), Some(TokKind::Int(..))) =>
+            {
+                self.bump();
+                self.bump();
+                let Some(TokKind::Int(hi, _)) = kind(self, 0) else {
+                    unreachable!("guarded by the lookahead")
+                };
+                self.bump();
+                return Ok(PatSlot::Range { lo, hi });
+            }
+            Some(TokKind::Ident(name))
+                if !Syntax::is_constant_name(&name)
+                    && !name.chars().next().is_some_and(char::is_uppercase)
+                    && matches!(
+                        kind(self, 1),
+                        Some(
+                            TokKind::Comma
+                                | TokKind::RParen
+                                | TokKind::RBracket
+                                | TokKind::RBrace
+                                | TokKind::Semi
+                        )
+                    ) =>
+            {
+                let span = self.bump().span;
+                return Ok(PatSlot::Bind { name, span });
+            }
+            _ => {}
+        }
+        if self.nested_pattern_ahead(in_list) {
+            return Ok(PatSlot::Nested(Box::new(self.nested_pattern()?)));
+        }
+        let value = self.expr_no_struct_lit()?;
+        Ok(PatSlot::Value(Box::new(value)))
+    }
+
+    /// D-PAT-RECORD1 / D-PAT-MAP1: a bracket pattern. `[]`, `[x]`,
+    /// `[first, ..rest]` are list patterns; a first entry followed by `:` or
+    /// `?:` makes a map pattern; `[:]` is the empty map. Unless `forced`
+    /// (a nested position), a bracket whose entries only compare values is
+    /// the list or map value it spells, so `None` leaves it to the
+    /// expression parser with today's equality meaning.
+    pub(super) fn bracket_pattern(&mut self, forced: bool) -> Result<Option<Pattern>, Diagnostic> {
+        if !matches!(self.peek().kind, TokKind::LBracket) || self.bracket_starts_typed_lit() {
+            return Ok(None);
+        }
+        let save = self.pos;
+        let save_diags = self.diags.len();
+        let start = self.bump().span.start;
+        self.skip_named_pattern_line_breaks();
+        let finish = |p: &mut Self| p.toks[p.pos.saturating_sub(1)].span.end;
+        if matches!(self.peek().kind, TokKind::Colon)
+            && matches!(self.peek2().kind, TokKind::RBracket)
+        {
+            self.bump();
+            self.bump();
+            let end = finish(self);
+            return Ok(Some(Pattern::Map {
+                entries: Vec::new(),
+                rest: None,
+                span: Span::new(start, end),
+            }));
+        }
+        let parsed = if self.map_pattern_entry_ahead() {
+            self.map_pattern_body(start)
+        } else {
+            self.list_pattern_body(start)
+        };
+        let pattern = match parsed {
+            Ok(pattern) => pattern,
+            // A bracket that already wrote a `..` rest is a pattern; report
+            // its error. Anything else may still be a list or map value.
+            Err(error)
+                if forced
+                    || self.toks[save..=self.pos.min(self.toks.len() - 1)]
+                        .iter()
+                        .any(|t| matches!(t.kind, TokKind::DotDot)) =>
+            {
+                return Err(error)
+            }
+            Err(_) => {
+                self.pos = save;
+                self.diags.truncate(save_diags);
+                return Ok(None);
+            }
+        };
+        if forced || Self::pattern_binds_or_shapes(&pattern) {
+            return Ok(Some(pattern));
+        }
+        self.pos = save;
+        self.diags.truncate(save_diags);
+        Ok(None)
+    }
+
+    /// A map pattern entry starts with a key followed by `:` or `?:` at the
+    /// top bracket depth.
+    fn map_pattern_entry_ahead(&self) -> bool {
+        let mut depth = 0usize;
+        let mut index = self.pos;
+        while let Some(token) = self.toks.get(index) {
+            match &token.kind {
+                TokKind::LParen | TokKind::LBracket | TokKind::LBrace => depth += 1,
+                TokKind::RParen | TokKind::RBrace => depth = depth.saturating_sub(1),
+                TokKind::RBracket if depth == 0 => return false,
+                TokKind::RBracket => depth -= 1,
+                TokKind::Comma | TokKind::DotDot if depth == 0 => return false,
+                TokKind::Colon if depth == 0 => return true,
+                TokKind::Question if depth == 0 => {
+                    return matches!(
+                        self.toks.get(index + 1).map(|t| &t.kind),
+                        Some(TokKind::Colon)
+                    )
+                }
+                TokKind::Eof => return false,
+                _ => {}
+            }
+            index += 1;
+        }
+        false
+    }
+
+    fn list_pattern_body(&mut self, start: usize) -> Result<Pattern, Diagnostic> {
+        let mut items = Vec::new();
+        let mut rest = None;
+        loop {
+            self.skip_named_pattern_line_breaks();
+            if matches!(self.peek().kind, TokKind::RBracket) {
+                break;
+            }
+            if matches!(self.peek().kind, TokKind::DotDot) {
+                let dots = self.bump().span;
+                let name = match self.peek().kind.clone() {
+                    TokKind::Ident(name) if name != Syntax::PAT_WILDCARD_SLOT => {
+                        Some((name, self.bump().span))
+                    }
+                    _ => None,
+                };
+                let span = name
+                    .as_ref()
+                    .map_or(dots, |(_, name_span)| Span::new(dots.start, name_span.end));
+                self.skip_named_pattern_line_breaks();
+                if !matches!(self.peek().kind, TokKind::RBracket) {
+                    return Err(Self::rest_not_last(span, "list"));
+                }
+                rest = Some(crate::AST::ListPatRest { span, name });
+                break;
+            }
+            items.push(self.pattern_item(true)?);
+            self.skip_named_pattern_line_breaks();
+            if !matches!(self.peek().kind, TokKind::Comma) {
+                break;
+            }
+            self.bump();
+        }
+        self.skip_named_pattern_line_breaks();
+        self.expect(TokKind::RBracket, "to close the list pattern")?;
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok(Pattern::List {
+            items,
+            rest,
+            span: Span::new(start, end),
+        })
+    }
+
+    fn map_pattern_body(&mut self, start: usize) -> Result<Pattern, Diagnostic> {
+        let mut entries = Vec::new();
+        let mut rest = None;
+        loop {
+            self.skip_named_pattern_line_breaks();
+            if matches!(self.peek().kind, TokKind::RBracket) {
+                break;
+            }
+            if matches!(self.peek().kind, TokKind::DotDot) {
+                let dots = self.bump().span;
+                self.skip_named_pattern_line_breaks();
+                if !matches!(self.peek().kind, TokKind::RBracket) {
+                    return Err(Self::rest_not_last(dots, "map"));
+                }
+                rest = Some(dots);
+                break;
+            }
+            let key = self.map_pattern_key()?;
+            let key_start = key.span().start;
+            let optional = matches!(self.peek().kind, TokKind::Question);
+            if optional {
+                self.bump();
+            }
+            self.expect(TokKind::Colon, "between a map-pattern key and its pattern")?;
+            let slot = self.pattern_item(true)?;
+            let end = self.toks[self.pos.saturating_sub(1)].span.end;
+            entries.push(crate::AST::MapPatEntry {
+                key: Box::new(key),
+                optional,
+                slot,
+                span: Span::new(key_start, end),
+            });
+            self.skip_named_pattern_line_breaks();
+            if !matches!(self.peek().kind, TokKind::Comma) {
+                break;
+            }
+            self.bump();
+        }
+        self.skip_named_pattern_line_breaks();
+        self.expect(TokKind::RBracket, "to close the map pattern")?;
+        let end = self.toks[self.pos.saturating_sub(1)].span.end;
+        Ok(Pattern::Map {
+            entries,
+            rest,
+            span: Span::new(start, end),
+        })
+    }
+
+    /// D-PAT-MAP1: a map-pattern key is a literal, an enum case or a
+    /// constant (`"type"`, `-1`, `.Red`, `Color.Red`, `MAX_KEY`); sema checks
+    /// it. The key stops before `?:` / `:`.
+    fn map_pattern_key(&mut self) -> Result<Expr, Diagnostic> {
+        if matches!(self.peek().kind, TokKind::Minus) {
+            let minus = self.bump().span;
+            let inner = self.expr_primary(false)?;
+            let span = Span::new(minus.start, inner.span().end);
+            return Ok(Expr::Unary(crate::AST::UnOp::Neg, Box::new(inner), span));
+        }
+        let mut key = self.expr_primary(false)?;
+        while matches!(self.peek().kind, TokKind::Dot)
+            && matches!(self.peek2().kind, TokKind::Ident(_))
+        {
+            self.bump();
+            let (member, member_span) = self.expect_ident("after `.` in a map-pattern key")?;
+            key = Expr::Field(Box::new(key), member, member_span);
+        }
+        Ok(key)
     }
 
     /// D-PAT-NAMED-NEST1=A: in a condition, where `{` usually opens the body,

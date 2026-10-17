@@ -1,0 +1,81 @@
+// Exact missing claims tests/jetpack_semantic_lock.rs:295-433.
+// Existing Trust tests cover the pure lock operations; these reach real overlays.
+fn s6_semantic_pkg(owner: String, key: String, exact: String, hash: String) -> SemanticRecord {
+    rationale := LockRationale.empty()
+    rationale.owner_package = owner
+    rationale.reason = "{owner} declared {key}"
+    rationale.source_ref = "catalog:{key}"
+    rationale.provider = "core"
+    rationale.channel_input = "stable"
+    rationale.exact_output = exact
+    rationale.policy_fingerprint = "policy-1"
+    rationale.signature = "ed25519:sig"
+    rationale.cache_provenance = "hangar"
+    rationale.update_command = "jet update {key}"
+    SemanticRecord.new(LockIdentity{kind: LockRecordKind.Package, key: key, exact: exact, hash: hash, platform: "x86_64-linux"}, rationale)
+}
+
+#Test("real overlay policy change invalidates exact action keys and explains why") {
+    package := PackageOverride.new("foo")
+    package.version = Val("1.0.0")
+    package.patches = [String]{"patches/a.patch"}
+    before := OverlayPolicy.empty()
+    before.overlays = [OverlaySet]{OverlaySet{name: "beta", provider: None, packages: [package]}}
+    package.patches = [String]{"patches/a.patch", "patches/b.patch"}
+    after := OverlayPolicy.empty()
+    after.overlays = [OverlaySet]{OverlaySet{name: "beta", provider: None, packages: [package]}}
+    actions := [String: [String]]{}
+    actions["foo"] = [String]{"action:foo:build", "action:foo:check"}
+    invalidations :: env_overlay_invalidations_against(before, after, actions) ?? panic("overlay diff")
+    assert_eq(invalidations.len(), 1)
+    assert_eq(invalidations[0].affected_action_keys, [String]{"action:foo:build", "action:foo:check"})
+    assert(invalidations[0].reason.contains("changed package `foo`"))
+    assert(invalidations[0].policy_fingerprint_before != invalidations[0].policy_fingerprint_after)
+    records :: env_overlay_semantic_records(before, "app", "x86_64-linux") ?? panic("real overlay records")
+    lock := SemanticLockFile.with_records([SemanticRecord]{s6_semantic_pkg("app", "foo", "1.0.0", "sha256-foo"), records[0]})
+    trust_apply_overlay_invalidations(&lock, invalidations)
+    foo := SemanticRecord?{None}
+    loop record in lock.records {
+        assert(record.identity.kind != LockRecordKind.PackageOverlay)
+        if record.identity.key == "foo" -> foo = Val(record)
+    }
+    retained :: foo ?? panic("foo retained")
+    assert_eq(retained.identity.hash, "")
+}
+
+#Test("overlay semantic projection uses resolved facts and provenance") {
+    policy :: pkg_parse_workspace_policy("module workspace {{\n    overlay base {{\n        package(\"foo\").version: \"1\"\n    }}\n    overlay force {{\n        package(\"foo\").version: Force(\"2\")\n    }}\n}}") ?? panic("workspace parse")
+    records :: env_overlay_semantic_records(policy, "app", "x86_64-linux") ?? panic("semantic records")
+    selected := SemanticRecord?{None}
+    loop record in records {
+        if record.identity.key == "force:foo" -> selected = Val(record)
+    }
+    record :: selected ?? panic("force:foo record")
+    assert_eq(record.identity.exact, "2")
+    assert_eq(record.future_fields.get("overlay-fact-version"), Val("2"))
+    assert_eq(record.rationales.len(), 2)
+    base := false
+    force := false
+    loop rationale in record.rationales {
+        if rationale.reason.contains("base") -> base = true
+        if rationale.reason.contains("force") -> force = true
+    }
+    assert(base && force)
+    loaded :: trust_parse_semantic_lock(trust_write_semantic_lock(SemanticLockFile.with_records(records)))
+    roundtrip := SemanticRecord?{None}
+    loop candidate in loaded.records {
+        if candidate.identity.key == "force:foo" -> roundtrip = Val(candidate)
+    }
+    restored :: roundtrip ?? panic("roundtrip force:foo")
+    assert_eq(restored.future_fields.get("overlay-fact-version"), Val("2"))
+    assert_eq(restored.rationales.len(), 2)
+    explanation :: trust_explain_semantic_lock(SemanticLockFile.with_records([restored]), "package-overlay:force:foo") ?? panic("explanation")
+    assert_eq(explanation.contenders.len(), 2)
+    has_base := false
+    has_force := false
+    loop rationale in explanation.contenders {
+        if rationale.reason.contains("base") -> has_base = true
+        if rationale.reason.contains("force") -> has_force = true
+    }
+    assert(has_base && has_force)
+}

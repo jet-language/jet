@@ -1,0 +1,438 @@
+// Source/CmdInspect.rs capability_relation_projection and run_claims. The
+// canonical manifest supplies release truth; observations never create claims.
+JET_CLI_CLAIM_DISPOSITIONS :: [String]{"planned", "implemented-unqualified", "passed", "failed", "stale", "unavailable", "unsupported", "owner-ratified-not-applicable"}
+
+fn jet_cli_claim_digest(value: JetCLIStatusValue?) -> String? Never! {
+    text :: jet_cli_status_string(value) ?? return None
+    if !text.starts_with("sha256:") || text.len() != 71 -> return None
+    loop byte in text.slice(7..<text.len()).bytes() {
+        code :: Int.from_u8(byte)
+        if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) {
+            return None
+        }
+    }
+    Val(text)
+}
+
+fn jet_cli_claim_canonical(value: JetCLIStatusValue, root: Bool) -> String JetCLIReadError! {
+    if value == {
+        .Float(_) -> Err(jet_cli_read_error("canonical capability metadata cannot contain floating-point numbers"))
+        .Array(values) -> {
+            rendered := [String]{}
+            loop child in values -> &rendered.push(jet_cli_claim_canonical(child, false))
+            Ok("[{rendered.join(",")}]")
+        }
+        .Object(fields) -> {
+            names := [String]{}
+            loop field in fields {
+                if names.contains(field.name) {
+                    return Err(jet_cli_read_error("canonical capability metadata has duplicate object keys"))
+                }
+                &names.push(field.name)
+            }
+            &names.sort()
+            rendered := [String]{}
+            loop name in names {
+                if root && name == "content_digest" -> next
+                child :: jet_cli_status_get(value, name) ?? JetCLIStatusValue.Null
+                &rendered.push("{jet_cli_json_string(name)}:{jet_cli_claim_canonical(child, false)}")
+            }
+            Ok("{{{rendered.join(",")}}}")
+        }
+        else -> Ok(jet_cli_status_json(value))
+    }
+}
+
+fn jet_cli_claim_validate_digest(value: JetCLIStatusValue, label: String) -> String? Never! {
+    actual :: jet_cli_claim_digest(jet_cli_status_get(value, "content_digest")) ?? return Val("{label} content_digest is missing or invalid")
+    canonical :: jet_cli_claim_canonical(value, true) ?? return Val(err.message)
+    expected :: "sha256:{mir_sha256_hex(canonical)}"
+    if actual != expected -> return Val("{label} content_digest does not match canonical content")
+    None
+}
+
+fn jet_cli_claim_validate_manifest(manifest: JetCLIStatusValue) -> String? Never! {
+    errors := [String]{}
+    if jet_cli_status_string(jet_cli_status_get(manifest, "schema")) != Val("jet.hardening.surface.v1") {
+        &errors.push("schema must be jet.hardening.surface.v1")
+    }
+    if jet_cli_status_integer(jet_cli_status_get(manifest, "schema_version")) != Val(1) {
+        &errors.push("schema_version must be 1")
+    }
+    if jet_cli_claim_validate_digest(manifest, "hardening manifest") == .Val(error) {
+        &errors.push(error)
+    }
+    snapshot :: jet_cli_status_get(manifest, "source_snapshot") ?? {
+        &errors.push("source_snapshot is required")
+        return Val(errors.join("; "))
+    }
+    if jet_cli_status_string(jet_cli_status_get(snapshot, "algorithm")) != Val("sha256") {
+        &errors.push("source_snapshot algorithm must be sha256")
+    }
+    if jet_cli_claim_digest(jet_cli_status_get(snapshot, "hash")) == .None {
+        &errors.push("source_snapshot hash is missing or invalid")
+    }
+    if errors.len() == 0 -> return None
+    Val(errors.join("; "))
+}
+
+fn jet_cli_claim_nonempty(value: JetCLIStatusValue?) -> Bool Never! {
+    text :: jet_cli_status_string(value) ?? return false
+    text.trim() != ""
+}
+
+fn jet_cli_claim_validate_relation(manifest: JetCLIStatusValue, relation: JetCLIStatusValue) -> String? Never! {
+    errors := [String]{}
+    if jet_cli_status_string(jet_cli_status_get(relation, "schema")) != Val(JET_CLI_CAPABILITY_RELATION_SCHEMA) {
+        &errors.push("schema must be {JET_CLI_CAPABILITY_RELATION_SCHEMA}")
+    }
+    if jet_cli_status_integer(jet_cli_status_get(relation, "schema_version")) != Val(1) {
+        &errors.push("schema_version must be 1")
+    }
+    if jet_cli_claim_validate_digest(relation, "capability relation") == .Val(error) {
+        &errors.push(error)
+    }
+    relation_source :: jet_cli_claim_digest(jet_cli_status_get(relation, "source_snapshot_hash"))
+    manifest_source :: jet_cli_claim_digest(jet_cli_status_nested(manifest, "source_snapshot", "hash"))
+    if relation_source == .None -> &errors.push("source_snapshot_hash is missing or invalid") else if relation_source != manifest_source {
+        &errors.push("source_snapshot_hash does not match the manifest")
+    }
+    if !jet_cli_claim_nonempty(jet_cli_status_get(relation, "revision_rule")) {
+        &errors.push("revision_rule is missing or empty")
+    }
+    identities :: jet_cli_status_list(jet_cli_status_get(relation, "identities")) ?? {
+        &errors.push("identities are required")
+        [JetCLIStatusValue]{}
+    }
+    identity_names := [String]{}
+    identity_modes := [[String]]{}
+    loop identity in identities {
+        id :: jet_cli_status_string(jet_cli_status_get(identity, "capability_id")) ?? {
+            &errors.push("identity capability_id is missing")
+            next
+        }
+        if id.trim() == "" {
+            &errors.push("identity capability_id is empty")
+            next
+        }
+        old_index := Int?{None}
+        loop (index, old) in identity_names {
+            if old == id -> old_index = Val(index)
+        }
+        if old_index != None -> &errors.push("duplicate identity: {id}")
+        modes :: jet_cli_status_list(jet_cli_status_get(identity, "applicable_modes")) ?? {
+            &errors.push("identity has no applicable modes: {id}")
+            [JetCLIStatusValue]{}
+        }
+        mode_set := [String]{}
+        loop value in modes {
+            mode :: jet_cli_status_string(Val(value)) ?? {
+                &errors.push("identity mode is malformed: {id}")
+                next
+            }
+            if mode.trim() == "" || mode_set.contains(mode) {
+                &errors.push("identity mode is empty or duplicated: {id}")
+            }
+            if !mode_set.contains(mode) -> &mode_set.push(mode)
+        }
+        if !jet_cli_claim_nonempty(jet_cli_status_nested(identity, "source_identity", "path")) || jet_cli_claim_digest(jet_cli_status_nested(identity, "source_identity", "digest")) == .None {
+            &errors.push("identity source is invalid: {id}")
+        }
+        if old_index == .Val(index) -> identity_modes[index] = mode_set else {
+            &identity_names.push(id)
+            &identity_modes.push(mode_set)
+        }
+    }
+    rows :: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? {
+        &errors.push("rows are required")
+        [JetCLIStatusValue]{}
+    }
+    row_ids := [String]{}
+    dispositions := [String]{}
+    counted := 0
+    loop (index, row) in rows {
+        id :: jet_cli_status_string(jet_cli_status_get(row, "row_id")) ?? {
+            &errors.push("row#{index} row_id is missing")
+            next
+        }
+        if id.trim() == "" || row_ids.contains(id) {
+            &errors.push("duplicate or empty row_id: {id}")
+        }
+        if !row_ids.contains(id) -> &row_ids.push(id)
+        capability :: jet_cli_status_string(jet_cli_status_get(row, "capability_id"))
+        mode :: jet_cli_status_string(jet_cli_status_get(row, "mode"))
+        if capability == .Val(capability_name) && mode == .Val(mode_name) {
+            if id != "{capability_name}@{mode_name}" {
+                &errors.push("row identity is not canonical: {id}")
+            }
+            found := false
+            loop (identity_index, identity_name) in identity_names {
+                if identity_name != capability_name -> next
+                found = true
+                if !identity_modes[identity_index].contains(mode_name) {
+                    &errors.push("row has an inapplicable mode: {id}")
+                }
+                break
+            }
+            if !found -> &errors.push("row has no identity: {id}")
+        } else { &errors.push("row capability_id or mode is missing: {id}") }
+        if jet_cli_status_string(jet_cli_status_get(row, "disposition")) == .Val(disposition) {
+            if !JET_CLI_CLAIM_DISPOSITIONS.contains(disposition) {
+                &errors.push("row has an invalid disposition: {id}")
+            }
+            &dispositions.push(disposition)
+            if jet_cli_status_string(jet_cli_status_get(row, "status")) != Val(disposition) {
+                &errors.push("row status contradicts disposition: {id}")
+            }
+            if disposition != "passed" && !jet_cli_claim_nonempty(jet_cli_status_get(row, "owner_link")) {
+                &errors.push("non-pass row has no owner link: {id}")
+            }
+            if disposition == "passed" {
+                passed :: jet_cli_status_string(jet_cli_status_nested(row, "evidence", "status")) == (Val("passed"))
+                oracle :: jet_cli_status_boolean(jet_cli_status_nested(row, "oracle", "independent_expected_behavior")) == (Val(true))
+                observable :: jet_cli_status_boolean(jet_cli_status_nested(row, "observable", "value_consuming")) == (Val(true))
+                if !passed || !oracle || !observable {
+                    &errors.push("passed row lacks evidence, independent oracle, or observable value: {id}")
+                }
+                identity :: jet_cli_status_get(row, "identity") ?? JetCLIStatusValue.Null
+                exact :: jet_cli_status_string(jet_cli_status_nested(identity, "candidate", "status")) == (Val("available"))
+                concrete := true
+                loop field in ([String]{"compiler_identity", "tool_identity", "target_identity"}) {
+                    if !jet_cli_status_is_object(jet_cli_status_get(row, field)) -> concrete = false
+                }
+                candidate :: jet_cli_status_string(jet_cli_status_nested(row, "candidate_identity", "status"))
+                if !exact || !concrete || candidate != Val("available") {
+                    &errors.push("passed row lacks exact candidate identity: {id}")
+                }
+                if candidate == (Val("stale")) {
+                    &errors.push("stale candidate is marked passed: {id}")
+                }
+            }
+            if disposition == "owner-ratified-not-applicable" {
+                ratified := true
+                loop field in ([String]{"reason", "owner", "decision"}) {
+                    if !jet_cli_claim_nonempty(jet_cli_status_nested(row, "exclusion", field)) {
+                        ratified = false
+                    }
+                }
+                if !ratified -> &errors.push("capability exclusion is not owner-ratified: {id}")
+            }
+        } else { &errors.push("row disposition is missing: {id}") }
+        loop field in
+            ([String]{"contract", "route", "observable", "oracle", "evidence", "identity", "owner", "source_identity", "candidate_identity"}), {
+            if !jet_cli_status_is_object(jet_cli_status_get(row, field)) {
+                &errors.push("row {field} is missing: {id}")
+            }
+        }
+        if jet_cli_status_boolean(jet_cli_status_get(row, "counted")) != Val(true) {
+            &errors.push("row is not counted: {id}")
+        } else { counted += 1 }
+    }
+    sorted_names := identity_names.copy()
+    &sorted_names.sort()
+    loop identity_name in sorted_names {
+        loop (index, name) in identity_names {
+            if name != identity_name -> next
+            modes := identity_modes[index].copy()
+            &modes.sort()
+            loop mode in modes {
+                id :: "{identity_name}@{mode}"
+                if !row_ids.contains(id) -> &errors.push("missing applicable mode row: {id}")
+            }
+        }
+    }
+    denominator :: jet_cli_status_get(relation, "denominator") ?? JetCLIStatusValue.Null
+    if !jet_cli_status_is_object(Val(denominator)) {
+        &errors.push("denominator is required")
+        return Val(errors.join("; "))
+    }
+    if jet_cli_status_integer(jet_cli_status_get(denominator, "row_count")) != Val(rows.len()) {
+        &errors.push("denominator row_count is stale")
+    }
+    if jet_cli_status_integer(jet_cli_status_get(denominator, "counted_rows")) != Val(counted) {
+        &errors.push("denominator counted_rows is stale")
+    }
+    denominator_ids := [String]{}
+    has_ids := false
+    if jet_cli_status_list(jet_cli_status_get(denominator, "identity_ids")) == .Val(values) {
+        has_ids = true
+        loop value in values {
+            if jet_cli_status_string(Val(value)) == .Val(id) {
+                if denominator_ids.contains(id) {
+                    &errors.push("denominator identity_ids contain duplicates")
+                } else { &denominator_ids.push(id) }
+            } else { &errors.push("denominator identity_ids contain a malformed value") }
+        }
+    } else { &errors.push("denominator identity_ids are required") }
+    stale_ids := false
+    if has_ids {
+        stale_ids = denominator_ids.len() != identity_names.len()
+        loop id in denominator_ids {
+            if !identity_names.contains(id) -> stale_ids = true
+        }
+    }
+    if jet_cli_status_integer(jet_cli_status_get(denominator, "identity_count")) != Val(identity_names.len()) || stale_ids {
+        &errors.push("denominator identities are stale")
+    }
+    disposition_values :: jet_cli_status_get(denominator, "dispositions") ?? JetCLIStatusValue.Null
+    if disposition_values == .Object(fields) {
+        loop field in fields {
+            if !JET_CLI_CLAIM_DISPOSITIONS.contains(field.name) {
+                &errors.push("denominator has unknown disposition: {field.name}")
+            }
+        }
+        loop disposition in JET_CLI_CLAIM_DISPOSITIONS {
+            count := 0
+            loop actual in dispositions {
+                if actual == disposition -> count += 1
+            }
+            if jet_cli_status_integer(jet_cli_status_get(disposition_values, disposition)) != Val(count) {
+                &errors.push("denominator disposition count is stale: {disposition}")
+            }
+        }
+    } else { &errors.push("denominator dispositions are required") }
+    loop consumer in ([String]{"inspect", "hardening", "release"}) {
+        value :: jet_cli_status_nested(relation, "consumers", consumer) ?? {
+            &errors.push("consumer metadata is missing: {consumer}")
+            next
+        }
+        if jet_cli_status_string(jet_cli_status_get(value, "relation")) != Val(JET_CLI_RELEASE_CLAIM_SOURCE) {
+            &errors.push("consumer relation is not canonical: {consumer}")
+        }
+        if consumer == "release" && jet_cli_status_string(jet_cli_status_get(value, "candidate")) != Val("row.candidate_identity") {
+            &errors.push("release consumer candidate is not canonical")
+        }
+    }
+    if errors.len() == 0 -> return None
+    Val(errors.join("; "))
+}
+
+fn jet_cli_claim_unavailable(path: String, reason: String) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("schema", jet_cli_status_text(JET_CLI_CAPABILITY_RELATION_SCHEMA)),
+        jet_cli_status_field("status", jet_cli_status_text("unavailable")),
+        jet_cli_status_field("relation", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)),
+        jet_cli_status_field("path", jet_cli_status_text(path)),
+        jet_cli_status_field("reason", jet_cli_status_text(reason)),
+        jet_cli_status_field("rows", jet_cli_status_array([JetCLIStatusValue]{})),
+    },
+    )
+}
+
+fn jet_cli_capability_relation(root: String) -[FS]> JetCLIStatusValue JetCLIReadError! {
+    path :: "{root}/.jet/hardening-manifest.json"
+    if !cli_files.exists(path) {
+        return Ok(jet_cli_claim_unavailable(path, "capability relation source `{path}` is absent"))
+    }
+    raw :: cli_files.read(path) ?? return Err(jet_cli_read_error("can't read canonical capability relation source `{path}`: {jet_cli_io_error_text(err)}"))
+    tree :: report_status_value_parse(raw) ?? return Err(jet_cli_read_error("can't parse canonical manifest `{path}`: {err.message}"))
+    manifest :: jet_cli_status_from_tree(tree)
+    if jet_cli_claim_validate_manifest(manifest) == .Val(error) {
+        return Err(jet_cli_read_error("canonical manifest `{path}` is invalid: {error}"))
+    }
+    relation :: jet_cli_status_get(manifest, "capability_relation") ?? return Ok(jet_cli_claim_unavailable(path, "manifest has no capability_relation evidence"))
+    if !jet_cli_status_is_object(Val(relation)) {
+        return Err(jet_cli_read_error("canonical manifest `{path}` has a non-object capability_relation"))
+    }
+    if jet_cli_claim_validate_relation(manifest, relation) == .Val(error) {
+        return Err(jet_cli_read_error("canonical capability relation `{path}` is invalid: {error}"))
+    }
+    projection := [JetCLIStatusField]{}
+    if relation == .Object(fields) {
+        loop field in fields {
+            if field.name == "status" || field.name == "relation" || field.name == "path" -> next
+            &projection.push(field)
+        }
+    }
+    &projection.push(jet_cli_status_field("status", jet_cli_status_text("available")))
+    &projection.push(jet_cli_status_field("relation", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)))
+    &projection.push(jet_cli_status_field("path", jet_cli_status_text(path)))
+    Ok(jet_cli_status_object(projection))
+}
+
+fn jet_cli_claim_rows(relation: JetCLIStatusValue) -> [JetCLIStatusValue] Never! {
+    rows :: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? return [JetCLIStatusValue]{}
+    claims := [JetCLIStatusValue]{}
+    loop row in rows {
+        id :: jet_cli_status_string(jet_cli_status_get(row, "row_id")) ?? next
+        capability :: jet_cli_status_string(jet_cli_status_get(row, "capability_id")) ?? next
+        mode :: jet_cli_status_string(jet_cli_status_get(row, "mode")) ?? next
+        disposition :: jet_cli_status_string(jet_cli_status_get(row, "disposition")) ?? next
+        &claims.push(
+        jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("claim", jet_cli_status_text(id)),
+            jet_cli_status_field("capability", jet_cli_status_text(capability)),
+            jet_cli_status_field("mode", jet_cli_status_text(mode)),
+            jet_cli_status_field("disposition", jet_cli_status_text(disposition)),
+            jet_cli_status_field("status", jet_cli_status_text(jet_cli_status_string(jet_cli_status_get(row, "status")) ?? disposition)),
+            jet_cli_status_field("counted", jet_cli_status_bool(jet_cli_status_boolean(jet_cli_status_get(row, "counted")) ?? false)),
+            jet_cli_status_field("owner_link", jet_cli_status_get(row, "owner_link") ?? JetCLIStatusValue.Null),
+            jet_cli_status_field("candidate_identity", jet_cli_status_get(row, "candidate_identity") ?? JetCLIStatusValue.Null),
+        },
+        ),
+        )
+    }
+    claims
+}
+
+fn jet_cli_claim_candidate_evidence(relation: JetCLIStatusValue) -> Bool Never! {
+    rows :: jet_cli_status_list(jet_cli_status_get(relation, "rows")) ?? return false
+    if rows.len() == 0 -> return false
+    loop row in rows {
+        if jet_cli_status_boolean(jet_cli_status_get(row, "counted")) != Val(true) -> return false
+        disposition :: jet_cli_status_string(jet_cli_status_get(row, "disposition")) ?? return false
+        if disposition == "owner-ratified-not-applicable" -> next
+        if disposition != "passed" -> return false
+        if jet_cli_status_string(jet_cli_status_nested(row, "evidence", "status")) != Val("passed") || jet_cli_status_string(jet_cli_status_nested(row, "candidate_identity", "status")) != Val("available") {
+            return false
+        }
+    }
+    true
+}
+
+fn jet_cli_inspect_claims_manifest(file: String, json: Bool, color: Bool) -[FS, Env]> JetCLIPlan Never! {
+    base := jet_cli_parent(file) ?? "."
+    if base == "" -> base = "."
+    root :: jet_cli_inspect_package_root(base) ?? base
+    relation :: jet_cli_capability_relation(root) ?? return jet_cli_fail("E2105", err.message, jet_cli_why("E2105"), "regenerate the canonical `.jet/hardening-manifest.json` and rerun inspect claims", color, JET_DRIVER_EXIT_USER_ERROR)
+    claims :: jet_cli_claim_rows(relation)
+    relation_status :: jet_cli_status_string(jet_cli_status_get(relation, "status")) ?? "unavailable"
+    relation_ready :: relation_status == "available" && jet_cli_claim_candidate_evidence(relation)
+    release_ready :: JET_CLI_RELEASE_POLICY_ACTIVE && JET_CLI_RELEASE_READINESS == "ready" && relation_ready
+    if json {
+        release :: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("version", jet_cli_status_text(JET_CLI_VERSION)),
+            jet_cli_status_field("status", jet_cli_status_text(JET_CLI_RELEASE_CHANNEL)),
+            jet_cli_status_field("disposition", jet_cli_status_text(JET_CLI_RELEASE_DISPOSITION)),
+            jet_cli_status_field("readiness", jet_cli_status_text(JET_CLI_RELEASE_READINESS)),
+            jet_cli_status_field("compatibility_policy", jet_cli_status_text(JET_CLI_RELEASE_POLICY)),
+            jet_cli_status_field("compatibility_policy_disposition", jet_cli_status_text(JET_CLI_RELEASE_POLICY_DISPOSITION)),
+            jet_cli_status_field("compatibility_policy_active", jet_cli_status_bool(JET_CLI_RELEASE_POLICY_ACTIVE)),
+        },
+        )
+        fields :: [JetCLIStatusField]{
+            jet_cli_status_field("file", jet_cli_status_text(file)),
+            jet_cli_status_field("source", jet_cli_status_text(JET_CLI_RELEASE_CLAIM_SOURCE)),
+            jet_cli_status_field("release", release),
+            jet_cli_status_field("release_ready", jet_cli_status_bool(release_ready)),
+            jet_cli_status_field("capability_relation", relation),
+            jet_cli_status_field("claims", jet_cli_status_array(claims)),
+        }
+        return jet_cli_done("{jet_cli_status_render("inspect.claims", release_ready, fields)}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    active :: if JET_CLI_RELEASE_POLICY_ACTIVE -> "active" else -> "not active"
+    ready :: if release_ready -> "yes" else -> "no"
+    out := "claims\nrelease: {JET_CLI_RELEASE_CHANNEL} (disposition: {JET_CLI_RELEASE_DISPOSITION}; readiness: {JET_CLI_RELEASE_READINESS}; 1.0 compatibility policy: {JET_CLI_RELEASE_POLICY} [{JET_CLI_RELEASE_POLICY_DISPOSITION}; {active}])\nclaim source: {JET_CLI_RELEASE_CLAIM_SOURCE}\nrelease ready: {ready}\ncapability relation: {relation_status}\n"
+    if claims.len() == 0 -> out = "{out}none\n" else {
+        loop claim in claims {
+            id :: jet_cli_status_string(jet_cli_status_get(claim, "claim")) ?? "unknown"
+            mode :: jet_cli_status_string(jet_cli_status_get(claim, "mode")) ?? "unknown"
+            disposition :: jet_cli_status_string(jet_cli_status_get(claim, "disposition")) ?? "unknown"
+            out = "{out}{id} {mode} {disposition}\n"
+        }
+    }
+    jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
+}

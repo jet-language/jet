@@ -13,13 +13,34 @@
 // ── Streaming file handles (E2-M7, D-IO2) ────────────────────────────────────
 // FileReader / FileWriter are RAII: Drop closes (and flushes) them
 // on every exit path — including `?` early returns and panics.
+//
+// The stream sits behind the carrier's own lock (`interior_mutable_receiver`
+// in Context.rs `file_handle_carrier`): Core handle ops write the stream
+// through a handle reached from a read binding, so they take `&self`. An
+// exclusive holder uses `Mutex::get_mut` and never locks. A poisoned lock
+// still guards a valid stream (one panic interrupted one call), so every
+// access recovers it with `PoisonError::into_inner`, like the other Prelude
+// locks.
 struct JetFileReader {
-    inner: std::io::BufReader<std::fs::File>,
+    inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
     path: String,
 }
 struct JetFileWriter {
-    inner: std::io::BufWriter<std::fs::File>,
+    inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
     path: String,
+}
+// Core declares `FileReader`/`FileWriter` as records of their `path`, so
+// sema's structural `Equatable` derive compares that field; the carrier
+// gives the same answer and never compares the open stream.
+impl PartialEq for JetFileReader {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
+}
+impl PartialEq for JetFileWriter {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+    }
 }
 
 // ── core.db connection handle (D-DBDRIVER1) ──────────────────────────────────
@@ -54,8 +75,33 @@ macro_rules! jet_db_bridge {
                 self.handle
             }
         }
+        // Mechanical queue leaf marshaling, over this same SQLite bridge.
+        fn jet_db_queue_raw_open(path: &String) -> u64 {
+            $bridge::jet_db_open(path)
+        }
+        fn jet_db_queue_raw_close(handle: u64) -> bool {
+            $bridge::jet_db_close(handle)
+        }
+        fn jet_db_queue_raw_begin(handle: u64) -> bool {
+            $bridge::jet_db_begin(handle)
+        }
+        fn jet_db_queue_raw_commit(handle: u64) -> bool {
+            $bridge::jet_db_commit(handle)
+        }
+        fn jet_db_queue_raw_rollback(handle: u64) -> bool {
+            $bridge::jet_db_rollback(handle)
+        }
+        fn jet_db_queue_raw_execute(handle: u64, sql: &String, params: &Vec<jet_std::DBValue>) -> Result<i64, jet_std::DBError> {
+            let params = jet_std::jet_db_encode_params(params);
+            jet_std::jet_db_decode_execute_result(&$bridge::jet_db_execute(handle, sql, &params))
+        }
+        fn jet_db_queue_raw_query(handle: u64, sql: &String, params: &Vec<jet_std::DBValue>) -> Result<Vec<JetMap<String, jet_std::DBValue>>, jet_std::DBError> {
+            let params = jet_std::jet_db_encode_params(params);
+            jet_std::jet_db_decode_query_result(&$bridge::jet_db_query(handle, sql, &params))
+        }
 
-        fn jet_db_open(path: &String) -> JetDbConnection {
+
+        fn jet_db_open(path: &str) -> JetDbConnection {
             let handle = $bridge::jet_db_open(path);
             if handle == 0 {
                 jet_runtime_stop("E3001", "", 0, "database open failed")
@@ -172,7 +218,7 @@ macro_rules! jet_db_bridge {
 
         fn jet_db_scope_migrate(
             scope: &JetDbScope,
-            name: &String,
+            name: &str,
             steps: &Vec<jet_std::SQL>,
         ) -> Result<i64, jet_std::DBError> {
             let mut backend = JetAotDbBackend { scope };
@@ -181,7 +227,7 @@ macro_rules! jet_db_bridge {
 
         fn jet_db_scope_transaction(
             scope: &JetDbScope,
-            label: &String,
+            label: &str,
             steps: &Vec<jet_std::SQL>,
         ) -> Result<i64, jet_std::DBError> {
             let mut backend = JetAotDbBackend { scope };
@@ -191,7 +237,7 @@ macro_rules! jet_db_bridge {
         fn jet_db_scope_execute_with_metadata(
             scope: &JetDbScope,
             sql: &jet_std::SQL,
-            metadata: &String,
+            metadata: &str,
         ) -> Result<i64, jet_std::DBError> {
             let _ = metadata;
             let mut backend = JetAotDbBackend { scope };
@@ -201,7 +247,7 @@ macro_rules! jet_db_bridge {
         fn jet_db_scope_query_with_metadata(
             scope: &JetDbScope,
             sql: &jet_std::SQL,
-            metadata: &String,
+            metadata: &str,
         ) -> Result<Vec<JetMap<String, jet_std::DBValue>>, jet_std::DBError> {
             let _ = metadata;
             let mut backend = JetAotDbBackend { scope };
@@ -211,7 +257,7 @@ macro_rules! jet_db_bridge {
         fn jet_db_scope_query_one_with_metadata(
             scope: &JetDbScope,
             sql: &jet_std::SQL,
-            metadata: &String,
+            metadata: &str,
         ) -> Result<Result<JetMap<String, jet_std::DBValue>, JetAbsent>, jet_std::DBError> {
             let _ = metadata;
             let rows = jet_db_scope_query_with_metadata(scope, sql, metadata)?;
@@ -236,10 +282,10 @@ macro_rules! jet_db_bridge {
         /// module's one failure domain, `DBError`. The closed policy language
         /// itself is still compiled once by `jet_db_policy_new`.
         fn jet_db_policy_checked(
-            table: &String,
-            expression: &String,
+            table: &str,
+            expression: &str,
         ) -> Result<JetRowPolicy, jet_std::DBError> {
-            jet_db_policy_new(table.clone(), expression.clone())
+            jet_db_policy_new(table.to_owned(), expression.to_owned())
                 .map_err(|message| jet_std::DBError { message })
         }
 
@@ -264,10 +310,10 @@ macro_rules! jet_db_bridge {
         }
 
         fn jet_db_pool_new(
-            url: &String,
+            url: &str,
             max: i64,
         ) -> Result<JetDbPool<JetDbConnection>, jet_std::DBError> {
-            JetDbPool::new(url.clone(), max, jet_db_pool_hooks())
+            JetDbPool::new(url.to_owned(), max, jet_db_pool_hooks())
         }
 
         fn jet_db_pool_acquire(
@@ -331,7 +377,7 @@ struct JetPlugin {
 macro_rules! jet_plugin_bridge {
     ($bridge:ident) => {
         fn jet_plugin_load(path: &String, authority_wire: &String) -> JetPlugin {
-            let wire = $bridge::jet_plugin_load(path, authority_wire);
+            let wire = jet_plugin_load_wire_raw(path, authority_wire);
             match wire
                 .strip_prefix("O:")
                 .and_then(|value| value.parse::<u64>().ok())
@@ -343,11 +389,17 @@ macro_rules! jet_plugin_bridge {
                 }
             }
         }
+        fn jet_plugin_load_wire_raw(path: &String, authority_wire: &String) -> String {
+            $bridge::jet_plugin_load(path, authority_wire)
+        }
         fn jet_plugin_call(handle: u64, name: &str, params: &str) -> String {
             $bridge::jet_plugin_call(handle, name, params)
         }
     };
 }
+
+fn jet_plugin_from_handle_raw(handle: u64) -> JetPlugin { JetPlugin { handle } }
+fn jet_plugin_stop_raw(message: &String) -> ! { jet_runtime_stop("E3001", "", 0, message) }
 
 // The typed vault carriers live in the hidden FFI bridge.  Display remains a
 // generated-program concern so user interpolation can render opaque handles
@@ -408,11 +460,6 @@ struct RaylibColor {
     a: i64,
 }
 
-/// D-GAME-LOOP1=A: typed sound handle (headless-safe; native play is best-effort).
-#[derive(Clone, Debug)]
-struct RaylibSound {
-    path: String,
-}
 
 type RaylibAtlasRegion = JetRaylibAtlasRegion;
 
@@ -608,7 +655,7 @@ fn jet_raylib_draw_native_command(command: &JetDevtoolsNativeDrawCommand) {
     }
 }
 
-fn jet_raylib_cstring(s: &String) -> std::ffi::CString {
+fn jet_raylib_cstring(s: &str) -> std::ffi::CString {
     let filtered: Vec<u8> = s.as_bytes().iter().copied().filter(|b| *b != 0).collect();
     std::ffi::CString::new(filtered).unwrap_or_else(|_| std::ffi::CString::new("").unwrap())
 }
@@ -698,7 +745,7 @@ fn jet_raylib_api() -> Option<&'static JetRaylibApi> {
 }
 
 
-fn jet_raylib_native_texture(path: &String) -> Option<JetRaylibCTexture2D> {
+fn jet_raylib_native_texture(path: &str) -> Option<JetRaylibCTexture2D> {
     if !JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
         return None;
     }
@@ -711,11 +758,11 @@ fn jet_raylib_native_texture(path: &String) -> Option<JetRaylibCTexture2D> {
     (texture.id > 0).then_some(texture)
 }
 
-fn jet_raylib_load_texture_atlas(path: &String) -> RaylibTextureAtlas {
+fn jet_raylib_load_texture_atlas(path: &str) -> RaylibTextureAtlas {
     let spec = jet_raylib_load_texture_atlas_spec(path);
     let native_texture = spec
         .texture_path
-        .as_ref()
+        .as_deref()
         .and_then(jet_raylib_native_texture);
     RaylibTextureAtlas {
         path: spec.path,
@@ -728,7 +775,7 @@ fn jet_raylib_load_texture_atlas(path: &String) -> RaylibTextureAtlas {
 
 fn jet_raylib_draw_sprite(
     atlas: &RaylibTextureAtlas,
-    region: &String,
+    region: &str,
     x: i64,
     y: i64,
 ) {
@@ -779,7 +826,7 @@ fn jet_raylib_draw_sprite(
     }
 }
 
-fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWindow {
+fn jet_raylib_window_open(width: i64, height: i64, title: &str) -> RaylibWindow {
     let mut native = false;
     if jet_raylib_display_enabled() {
         if let Some(api) = jet_raylib_api() {
@@ -799,7 +846,7 @@ fn jet_raylib_window_open(width: i64, height: i64, title: &String) -> RaylibWind
     RaylibWindow {
         width,
         height,
-        title: title.clone(),
+        title: title.to_owned(),
         native,
     }
 }
@@ -843,11 +890,11 @@ fn jet_raylib_clear_background(color: &RaylibColor) {
     }
 }
 
-fn jet_raylib_draw_text(text: &String, x: i64, y: i64, size: i64, color: &RaylibColor) {
+fn jet_raylib_draw_text(text: &str, x: i64, y: i64, size: i64, color: &RaylibColor) {
     if JET_RAYLIB_WINDOW_OPEN.load(std::sync::atomic::Ordering::SeqCst) {
         if let Some(api) = jet_raylib_api() {
             jet_devtools_native_draw(JetDevtoolsNativeDrawCommand::Text {
-                text: text.clone(),
+                text: text.to_owned(),
                 x: x as i32,
                 y: y as i32,
                 size: size as i32,
@@ -914,12 +961,9 @@ fn jet_raylib_close_window(window: &RaylibWindow) {
     }
 }
 
-fn jet_raylib_color(r: i64, g: i64, b: i64, a: i64) -> RaylibColor {
-    RaylibColor { r, g, b, a }
-}
 
-fn jet_raylib_key_code(name: &String) -> i32 {
-    match name.as_str() {
+fn jet_raylib_key_code(name: &str) -> i32 {
+    match name {
         "Space" | "space" => 32,
         "Enter" | "enter" => 257,
         "Escape" | "escape" | "Esc" | "esc" => 256,
@@ -935,7 +979,7 @@ fn jet_raylib_key_code(name: &String) -> i32 {
     }
 }
 
-fn jet_raylib_key_down(name: &String) -> bool {
+fn jet_raylib_key_down(name: &str) -> bool {
     let key = jet_raylib_key_code(name);
     if key < 0 {
         return false;
@@ -945,7 +989,7 @@ fn jet_raylib_key_down(name: &String) -> bool {
             // SAFETY: key code is a plain raylib KeyboardKey integer.
             let pressed = unsafe { (api.is_key_down)(key) };
             if jet_devtools_native_input(JetDevtoolsNativeInput::Key {
-                code: name.clone(),
+                code: name.to_owned(),
                 pressed,
             }) {
                 return false;
@@ -956,15 +1000,15 @@ fn jet_raylib_key_down(name: &String) -> bool {
     false
 }
 
-fn jet_raylib_gamepad_button_code(name: &String) -> i32 {
+fn jet_raylib_gamepad_button_code(name: &str) -> i32 {
     jet_raylib_button_code(name).unwrap_or(-1)
 }
 
-fn jet_raylib_gamepad_axis_code(name: &String) -> i32 {
+fn jet_raylib_gamepad_axis_code(name: &str) -> i32 {
     jet_raylib_axis_code(name).unwrap_or(-1)
 }
 
-fn jet_raylib_gamepad_down(gamepad: i64, button: &String) -> bool {
+fn jet_raylib_gamepad_down(gamepad: i64, button: &str) -> bool {
     let Ok(gamepad) = i32::try_from(gamepad) else {
         return false;
     };
@@ -979,7 +1023,7 @@ fn jet_raylib_gamepad_down(gamepad: i64, button: &String) -> bool {
                 let pressed = unsafe { is_gamepad_button_down(gamepad, button_code) };
                 if jet_devtools_native_input(JetDevtoolsNativeInput::Gamepad {
                     gamepad: i64::from(gamepad),
-                    control: button.clone(),
+                    control: button.to_owned(),
                     pressed,
                 }) {
                     return false;
@@ -991,7 +1035,7 @@ fn jet_raylib_gamepad_down(gamepad: i64, button: &String) -> bool {
     false
 }
 
-fn jet_raylib_gamepad_axis(gamepad: i64, axis: &String) -> f64 {
+fn jet_raylib_gamepad_axis(gamepad: i64, axis: &str) -> f64 {
     let Ok(gamepad) = i32::try_from(gamepad) else {
         return 0.0;
     };
@@ -1020,12 +1064,4 @@ fn jet_raylib_set_target_fps(fps: i64) {
     }
 }
 
-fn jet_raylib_load_sound(path: &String) -> RaylibSound {
-    RaylibSound { path: path.clone() }
-}
-
-/// Returns whether a play was accepted (always true for a non-empty path in headless).
-fn jet_raylib_play_sound(sound: &RaylibSound) -> bool {
-    !sound.path.is_empty()
-}
 // jet:raylib-end

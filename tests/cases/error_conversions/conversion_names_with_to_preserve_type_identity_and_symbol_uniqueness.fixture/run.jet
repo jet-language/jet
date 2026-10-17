@@ -1,0 +1,36 @@
+
+#Error
+struct SourceErr {
+    message: String
+}
+
+#Error
+struct TargetErr {
+    message: String
+}
+
+impl SourceErr -> TargetErr {
+    return TargetErr{message: "converted from source"}
+}
+
+impl TargetErr -> Err {
+    return Err("converted from target")
+}
+
+fn read() -> Int SourceErr! {
+    return Err(SourceErr{message: "source failure"})
+}
+
+fn middle() -> Int TargetErr! {
+    value :: read()
+    return Ok(value)
+}
+
+fn outer() -> Int {
+    value :: middle()
+    return Ok(value)
+}
+
+fn run() {
+    outer()
+}

@@ -1,0 +1,448 @@
+// D-TEST-WORLD1=A. One World-lifetime state, shared by controlled descendants.
+// World128: refs0 mutex8 condSeq16 monotonicNs24 wallOriginMs32 rng40
+// nextSequence48 live56 runnable64 budget72 timers List<I64>@80 (triples
+// deadlineNs, sequence, OWNED ParkSlot), history List<owned E4>@104.
+// TCB104 borrows active World;112 flags (active1/waiting2);120 owns parked slot.
+// Task edges never reset clocks, RNG, timers, history or the execution budget.
+// Ordering reference: Scheduler.rs:820-865 releases one due timer then waits
+// idle; :930-950 finishes waiting tasks before provider/world restoration;
+// :1073-1079/:1108-1120 restore provider first, then the previous World.
+
+fn world_require(world: I64) {
+    if (world == I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+}
+
+#Export(c) fn jet_rt_world_current() -> I64 { sync_load(thread_base() + I64{104}) }
+fn world_current() -> I64 { jet_rt_world_current() }
+
+#Export(c) fn jet_rt_world_new() -> I64 {
+    world :: jet_rt_alloc(I64{128}, I64{8})
+    thread_zero(world, I64{128})
+    sync_store(world, I64{1})
+    sync_store(world + I64{40}, I64{5573589319906701683})
+    sync_store(world + I64{72}, I64{100000})
+    world
+}
+
+#Export(c) fn jet_rt_world_clone(world: I64) -> I64 {
+    world_require(world)
+    _ := sync_add(world, I64{1})
+    world
+}
+
+fn world_wall_locked(world: I64) -> I64 {
+    elapsed :: sync_load(world + I64{24}) /% I64{1000000}
+    origin :: sync_load(world + I64{32})
+    if (origin > I64{9223372036854775807} - elapsed) -> return I64{9223372036854775807}
+    origin + elapsed
+}
+
+#Export(c) fn jet_world_now(world: I64) -> I64 {
+    world_require(world)
+    sync_mutex_lock(world + I64{8})
+    value :: world_wall_locked(world)
+    sync_mutex_unlock(world + I64{8})
+    value
+}
+
+#Export(c) fn jet_rt_world_monotonic_ns(world: I64) -> I64 {
+    world_require(world)
+    sync_mutex_lock(world + I64{8})
+    value :: sync_load(world + I64{24})
+    sync_mutex_unlock(world + I64{8})
+    value
+}
+
+// Presence is independent of the sample: epoch zero is a controlled value.
+// output borrows one writable raw I64 word; false leaves it untouched.
+fn world_wall_ms(output: I64) -> Bool {
+    world :: world_current()
+    if (world == I64{0}) -> return false
+    sync_store(output, jet_world_now(world))
+    true
+}
+fn world_monotonic_ns(output: I64) -> Bool {
+    world :: world_current()
+    if (world == I64{0}) -> return false
+    sync_store(output, jet_rt_world_monotonic_ns(world))
+    true
+}
+
+// Provider is thread-local on the existing clock-root dynamic TLS key.
+// The callback borrows output for one call and returns raw presence 0/1.
+fn controlled_monotonic_ns(output: I64) -> Bool {
+    provider :: rt_time_monotonic_provider_get()
+    if (provider == I64{0}) -> return false
+    #Unsafe("registered provider code remains live at this world/lease boundary; output lends one writable word") {
+        return (os_call_address_i64(provider, output).bit_and(I64{255})) != I64{0}
+    }
+}
+#Export(c) fn jet_rt_time_monotonic_provider_set(provider: I64) -> I64 {
+    rt_time_monotonic_provider_set(provider)
+}
+#Export(c) fn jet_rt_world_monotonic_provider(output: I64) -> I64 {
+    if world_monotonic_ns(output) -> I64{1} else -> I64{0}
+}
+fn rt_world_monotonic_provider_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+fn world_unsigned_before(a: I64, b: I64) -> Bool {
+    ((a < I64{0}) != (b < I64{0}) && a >= I64{0}) || ((a < I64{0}) == (b < I64{0}) && a < b)
+}
+fn world_decimal(data: I64, value: I64) -> I64 {
+    // Divide unsigned bits by ten without exact-Int allocation.
+    number := value
+    count := I64{0}
+    loop {
+        half :: (number >> I64{1}).bit_and(I64{9223372036854775807})
+        quotient :: half /% I64{5}
+        digit :: wrapping(number - quotient * I64{10})
+        trap_put(data + count, I64{48} + digit)
+        count += I64{1}
+        number = quotient
+        if (number == I64{0}) -> break
+    }
+    left := I64{0}
+    right := count - I64{1}
+    loop left < right {
+        byte :: trap_byte(data + left)
+        trap_put(data + left, trap_byte(data + right))
+        trap_put(data + right, byte)
+        left += I64{1}
+        right -= I64{1}
+    }
+    count
+}
+// Takes the prefix; caller holds World mutex. History owns the finished text.
+fn world_event(world: I64, prefix: I64, first: I64, second: I64, numbers: I64) {
+    length :: sync_load(prefix + I64{8})
+    text :: scheduler_text_new(length + I64{41})
+    data :: sync_load(text)
+    coll_copy(sync_load(prefix), data, length)
+    used := length
+    if (numbers > I64{0}) -> used += world_decimal(data + used, first)
+    if (numbers > I64{1}) {
+        trap_put(data + used, I64{58})
+        used += I64{1}
+        used += world_decimal(data + used, second)
+    }
+    sync_store(text + I64{8}, used)
+    jet_rt_string_drop(prefix)
+    scheduler_words_push(world + I64{104}, text)
+}
+fn world_notify(world: I64) { sync_cond_notify_all(world + I64{16}) }
+fn world_decrement(address: I64) {
+    value :: sync_load(address)
+    if (value != I64{0}) -> sync_store(address, wrapping(value - I64{1}))
+}
+fn world_increment(address: I64) {
+    value :: sync_load(address)
+    if (value != I64{-1}) -> sync_store(address, wrapping(value + I64{1}))
+}
+
+#Export(c) fn jet_rt_world_drop(world: I64) {
+    if (world == I64{0}) -> return
+    if (sync_add(world, I64{-1}) != I64{1}) -> return
+    timers :: world + I64{80}
+    data :: sync_load(timers + I64{16})
+    at := I64{0}
+    loop at < sync_load(timers) {
+        sync_park_drop(sync_load(data + (at + I64{2}) * I64{8}))
+        at += I64{3}
+    }
+    if (sync_load(timers + I64{8}) != I64{0}) -> jet_rt_free(data, sync_load(timers + I64{8}) * I64{8}, I64{8})
+    history :: world + I64{104}
+    rows :: sync_load(history + I64{16})
+    at = I64{0}
+    loop at < sync_load(history) {
+        jet_rt_string_drop(sync_load(rows + at * I64{8}))
+        at += I64{1}
+    }
+    if (sync_load(history + I64{8}) != I64{0}) -> jet_rt_free(rows, sync_load(history + I64{8}) * I64{8}, I64{8})
+    jet_rt_free(world, I64{128}, I64{8})
+}
+// Save32: previous World, previous provider, flags, owned parked slot.
+// Enter borrows world from a live caller/worker lease for the whole scope.
+fn world_scope_enter(world: I64, save: I64, task_scope: Bool) {
+    world_require(world)
+    base :: thread_base()
+    previous :: sync_load(base + I64{104})
+    if (!task_scope && previous != I64{0}) {
+        scheduler_fatal(services_msg_world_nested())
+        return
+    }
+    sync_store(save, previous)
+    sync_store(save + I64{16}, sync_load(base + I64{112}))
+    sync_store(save + I64{24}, sync_load(base + I64{120}))
+    sync_store(base + I64{104}, world)
+    sync_store(save + I64{8}, rt_time_monotonic_provider_set(rt_world_monotonic_provider_address()))
+    sync_store(base + I64{112}, if task_scope -> I64{1} else -> I64{0})
+    sync_store(base + I64{120}, I64{0})
+}
+fn world_scope_leave(save: I64) {
+    _ := rt_time_monotonic_provider_set(sync_load(save + I64{8}))
+    base :: thread_base()
+    sync_store(base + I64{104}, sync_load(save))
+    sync_store(base + I64{112}, sync_load(save + I64{16}))
+    sync_store(base + I64{120}, sync_load(save + I64{24}))
+}
+#Export(c) fn jet_rt_world_enter(world: I64, save: I64) { world_scope_enter(world, save, false) }
+#Export(c) fn jet_rt_world_leave(save: I64) { world_scope_leave(save) }
+fn world_task_spawned(world: I64) {
+    if (world == I64{0}) -> return
+    sync_mutex_lock(world + I64{8})
+    world_increment(world + I64{56})
+    world_increment(world + I64{64})
+    world_event(world, services_msg_spawn(), I64{0}, I64{0}, I64{0})
+    world_notify(world)
+    sync_mutex_unlock(world + I64{8})
+}
+// Swap-remove one timer, transferring its OWNED ParkSlot to the caller.
+fn world_timer_remove(world: I64, index: I64) -> I64 {
+    header :: world + I64{80}
+    data :: sync_load(header + I64{16})
+    count :: sync_load(header) - I64{3}
+    slot :: sync_load(data + (index + I64{2}) * I64{8})
+    if index != count -> coll_copy(data + count * I64{8}, data + index * I64{8}, I64{24})
+    sync_store(header, count)
+    slot
+}
+fn world_timer_find(world: I64, slot: I64) -> I64 {
+    header :: world + I64{80}
+    data :: sync_load(header + I64{16})
+    at := I64{0}
+    loop at < sync_load(header) {
+        if (sync_load(data + (at + I64{2}) * I64{8}) == slot) -> return at
+        at += I64{3}
+    }
+    I64{-1}
+}
+fn world_begin_wait(world: I64, slot: I64) {
+    base :: thread_base()
+    if ((sync_load(base + I64{112}).bit_and(I64{2})) != I64{0}) -> return
+    sync_mutex_lock(world + I64{8})
+    world_decrement(world + I64{64})
+    world_notify(world)
+    sync_mutex_unlock(world + I64{8})
+    sync_park_retain(slot)
+    sync_store(base + I64{112}, sync_load(base + I64{112}).bit_or(I64{2}))
+    sync_store(base + I64{120}, slot)
+}
+fn world_park(world: I64, duration_ns: I64, slot: I64) {
+    sync_mutex_lock(world + I64{8})
+    now :: sync_load(world + I64{24})
+    if (duration_ns > I64{9223372036854775807} - now) {
+        sync_mutex_unlock(world + I64{8})
+        scheduler_fatal(services_msg_world_overflow())
+        return
+    }
+    deadline :: now + duration_ns
+    sequence :: sync_load(world + I64{48})
+    sync_store(world + I64{48}, wrapping(sequence + I64{1}))
+    world_decrement(world + I64{64})
+    sync_park_retain(slot)
+    scheduler_words_push(world + I64{80}, deadline)
+    scheduler_words_push(world + I64{80}, sequence)
+    scheduler_words_push(world + I64{80}, slot)
+    world_event(world, services_msg_register(), deadline, sequence, I64{2})
+    world_notify(world)
+    sync_mutex_unlock(world + I64{8})
+    sync_park_retain(slot)
+    sync_store(thread_base() + I64{112}, sync_load(thread_base() + I64{112}).bit_or(I64{2}))
+    sync_store(thread_base() + I64{120}, slot)
+}
+fn world_finish_park(world: I64, slot: I64) {
+    base :: thread_base()
+    if ((sync_load(base + I64{112}).bit_and(I64{2})) == I64{0}) -> return
+    sync_mutex_lock(world + I64{8})
+    index :: world_timer_find(world, slot)
+    if (index >= I64{0}) {
+        sync_park_drop(world_timer_remove(world, index))
+        world_increment(world + I64{64})
+        world_notify(world)
+    }
+    sync_mutex_unlock(world + I64{8})
+    sync_store(base + I64{112}, sync_load(base + I64{112}).bit_and(I64{-3}))
+    sync_store(base + I64{120}, I64{0})
+    sync_park_drop(slot)
+}
+fn world_task_finished(world: I64) {
+    base :: thread_base()
+    waiting :: (sync_load(base + I64{112}).bit_and(I64{2})) != I64{0}
+    slot :: sync_load(base + I64{120})
+    sync_mutex_lock(world + I64{8})
+    index :: if waiting -> world_timer_find(world, slot) else -> I64{-1}
+    if (index >= I64{0}) -> sync_park_drop(world_timer_remove(world, index)) else -> world_decrement(world + I64{64})
+    world_decrement(world + I64{56})
+    world_event(world, services_msg_finish(), I64{0}, I64{0}, I64{0})
+    world_notify(world)
+    sync_mutex_unlock(world + I64{8})
+    sync_store(base + I64{112}, I64{0})
+    sync_store(base + I64{120}, I64{0})
+    if (slot != I64{0}) -> sync_park_drop(slot)
+}
+fn world_wait(world: I64, accept_timer: Bool) {
+    world_require(world)
+    sync_mutex_lock(world + I64{8})
+    budget :: sync_load(world + I64{72})
+    at := I64{0}
+    loop at < budget {
+        if (sync_load(world + I64{64}) == I64{0} || (accept_timer && sync_load(world + I64{80}) != I64{0})) {
+            sync_mutex_unlock(world + I64{8})
+            return
+        }
+        _ := sync_cond_wait(world + I64{16}, world + I64{8}, sync_deadline(I64{50000}))
+        at += I64{1}
+    }
+    ready :: sync_load(world + I64{64}) == I64{0}
+    sync_mutex_unlock(world + I64{8})
+    if !accept_timer && !ready -> scheduler_fatal(services_msg_world_budget())
+}
+#Export(c) fn jet_world_wait_idle(world: I64) { world_wait(world, false) }
+#Export(c) fn jet_rt_world_ensure_closed(world: I64) {
+    world_require(world)
+    sync_mutex_lock(world + I64{8})
+    live :: sync_load(world + I64{56})
+    sync_mutex_unlock(world + I64{8})
+    if (live != I64{0}) -> scheduler_fatal(services_msg_world_live())
+}
+#Export(c) fn jet_world_advance(world: I64, duration_ns: I64) -> I64 {
+    world_require(world)
+    if (duration_ns < I64{0}) {
+        scheduler_fatal(services_msg_world_backwards())
+        return I64{0}
+    }
+    now :: jet_rt_world_monotonic_ns(world)
+    if (duration_ns > I64{9223372036854775807} - now) {
+        scheduler_fatal(services_msg_world_exhausted())
+        return I64{0}
+    }
+    target :: now + duration_ns
+    world_wait(world, true)
+    loop {
+        sync_mutex_lock(world + I64{8})
+        header :: world + I64{80}
+        data :: sync_load(header + I64{16})
+        best := I64{-1}
+        at := I64{0}
+        loop at < sync_load(header) {
+            deadline :: sync_load(data + at * I64{8})
+            if (deadline <= target) {
+                if (best < I64{0}) -> best = at else {
+                    old :: sync_load(data + best * I64{8})
+                    if (deadline < old || (deadline == old && world_unsigned_before(sync_load(data + (at + I64{1}) * I64{8}), sync_load(data + (best + I64{1}) * I64{8})))) -> best = at
+                }
+            }
+            at += I64{3}
+        }
+        if (best < I64{0}) {
+            sync_store(world + I64{24}, target)
+            world_event(world, services_msg_advance(), duration_ns, I64{0}, I64{1})
+            value :: world_wall_locked(world)
+            sync_mutex_unlock(world + I64{8})
+            return value
+        }
+        deadline :: sync_load(data + best * I64{8})
+        sequence :: sync_load(data + (best + I64{1}) * I64{8})
+        slot :: world_timer_remove(world, best)
+        sync_store(world + I64{24}, deadline)
+        world_increment(world + I64{64})
+        world_event(world, services_msg_timer(), deadline, sequence, I64{2})
+        sync_mutex_unlock(world + I64{8})
+        sync_park_wake(slot)
+        sync_park_drop(slot)
+        world_notify(world)
+        jet_world_wait_idle(world)
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+}
+#Export(c) fn jet_world_history(world: I64) -> I64 {
+    world_require(world)
+    sync_mutex_lock(world + I64{8})
+    header :: world + I64{104}
+    data :: sync_load(header + I64{16})
+    count :: sync_load(header)
+    length := if (count == I64{0}) -> I64{0} else -> count - I64{1}
+    at := I64{0}
+    loop at < count {
+        length += sync_load(sync_load(data + at * I64{8}) + I64{8})
+        at += I64{1}
+    }
+    text :: scheduler_text_new(length)
+    target :: sync_load(text)
+    used := I64{0}
+    at = I64{0}
+    loop at < count {
+        if (at != I64{0}) {
+            trap_put(target + used, I64{10})
+            used += I64{1}
+        }
+        row :: sync_load(data + at * I64{8})
+        size :: sync_load(row + I64{8})
+        coll_copy(sync_load(row), target + used, size)
+        used += size
+        at += I64{1}
+    }
+    sync_mutex_unlock(world + I64{8})
+    text
+}
+#Export(c) fn jet_rt_world_rng_next(output: I64) -> Bool {
+    world :: world_current()
+    if (world == I64{0}) -> return false
+    sync_mutex_lock(world + I64{8})
+    value := sync_load(world + I64{40})
+    value = value.bit_xor((value << I64{7}))
+    value = value.bit_xor(((value >> I64{9}).bit_and(I64{36028797018963967})))
+    value = wrapping(value * I64{-7046029254386353131})
+    sync_store(world + I64{40}, value)
+    world_event(world, services_msg_rng(), value, I64{0}, I64{1})
+    sync_mutex_unlock(world + I64{8})
+    sync_store(output, value)
+    true
+}
+#Export(c) fn jet_rt_world_rng_seed(seed: I64) -> Bool {
+    world :: world_current()
+    if (world == I64{0}) -> return false
+    sync_mutex_lock(world + I64{8})
+    sync_store(world + I64{40}, seed)
+    world_event(world, services_msg_seed(), seed, I64{0}, I64{1})
+    sync_mutex_unlock(world + I64{8})
+    true
+}
+#Export(c) fn jet_rt_world_reject_uncontrolled(effect_kind: I64) {
+    if (world_current() == I64{0}) -> return
+    message :: if {
+        (effect_kind == I64{1}) -> services_msg_world_network()
+        (effect_kind == I64{2}) -> services_msg_world_foreign()
+        (effect_kind == I64{3}) -> services_msg_world_entropy()
+        (effect_kind == I64{4}) -> services_msg_world_clock()
+        else -> services_msg_world_external()
+    }
+    scheduler_fatal(message)
+}
+// Callback ABI matches task callbacks: borrowed env, caller-owned result slot.
+#Export(c) fn jet_testing_world(env: I64, invoke: I64, out: I64) {
+    if (world_current() != I64{0}) {
+        scheduler_fatal(services_msg_world_nested())
+        return
+    }
+    world :: jet_rt_world_new()
+    base :: thread_base()
+    flags :: sync_load(base + I64{112})
+    slot :: sync_load(base + I64{120})
+    sync_store(base + I64{104}, world)
+    provider :: rt_time_monotonic_provider_set(rt_world_monotonic_provider_address())
+    sync_store(base + I64{112}, I64{0})
+    sync_store(base + I64{120}, I64{0})
+    _ := coll_call3(invoke, env, world, out)
+    if (jet_scheduler_native_propagate() == I64{0}) {
+        jet_world_wait_idle(world)
+        jet_rt_world_ensure_closed(world)
+    }
+    _ := rt_time_monotonic_provider_set(provider)
+    sync_store(base + I64{104}, I64{0})
+    sync_store(base + I64{112}, flags)
+    sync_store(base + I64{120}, slot)
+    jet_rt_world_drop(world)
+}

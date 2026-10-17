@@ -7,21 +7,21 @@
 CLI_COVERAGE_SCHEMA :: prep { "jetpack-migration-coverage-v1" }
 
 // One package identity in the migration inventory.
-pub struct CoveragePackage {
-    pub name: String
-    pub version: String
-    pub reference: String
+struct CoveragePackage {
+    name: String
+    version: String
+    reference: String
 
     fn new(name: String, version: String, reference: String) -> CoveragePackage Never! {
         CoveragePackage{name: name, version: version, reference: reference}
     }
 
-    fn to_json_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["name"] = DataTree.Text(self.name)
-        object["version"] = DataTree.Text(self.version)
-        object["reference"] = DataTree.Text(self.reference)
-        DataTree.Object(object)
+    fn to_json_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["name"] = Dyn.Text(self.name)
+        object["version"] = Dyn.Text(self.version)
+        object["reference"] = Dyn.Text(self.reference)
+        Dyn.Object(object)
     }
 
     // Name and reference must not be blank.
@@ -33,7 +33,7 @@ pub struct CoveragePackage {
 
 // The four package buckets. `NotYetImported` is computed from the explicit
 // inventory; a caller cannot put a package there by assertion alone.
-pub enum CoverageBucket {
+enum CoverageBucket {
     NativeRecipe
     CentrallyImportedRecipe
     LocalImport
@@ -51,11 +51,11 @@ pub enum CoverageBucket {
 
 // Inputs from a catalog producer, a local importer, and the native recipe
 // registry. Every listed package must also occur in `inventory`.
-pub struct CoverageInput {
-    pub inventory: [CoveragePackage]
-    pub native_recipes: [CoveragePackage]
-    pub centrally_imported_recipes: [CoveragePackage]
-    pub local_imports: [CoveragePackage]
+struct CoverageInput {
+    inventory: [CoveragePackage]
+    native_recipes: [CoveragePackage]
+    centrally_imported_recipes: [CoveragePackage]
+    local_imports: [CoveragePackage]
 
     fn empty() -> CoverageInput Never! {
         CoverageInput{inventory: [CoveragePackage]{}, native_recipes: [CoveragePackage]{}, centrally_imported_recipes: [CoveragePackage]{}, local_imports: [CoveragePackage]{}}
@@ -63,21 +63,21 @@ pub struct CoverageInput {
 }
 
 // Nativeization counts over the complete inventory.
-pub struct NativeizationProgress {
-    pub total: Int
-    pub nativeized: Int
-    pub remaining: Int
+struct NativeizationProgress {
+    total: Int
+    nativeized: Int
+    remaining: Int
     // Whole percentage, rounded down for deterministic CI output.
-    pub percent: Int
+    percent: Int
 }
 
 // A deterministic, disjoint migration coverage report.
-pub struct CoverageReport {
-    pub native_recipes: [CoveragePackage]
-    pub centrally_imported_recipes: [CoveragePackage]
-    pub local_imports: [CoveragePackage]
-    pub not_yet_imported: [CoveragePackage]
-    pub nativeization: NativeizationProgress
+struct CoverageReport {
+    native_recipes: [CoveragePackage]
+    centrally_imported_recipes: [CoveragePackage]
+    local_imports: [CoveragePackage]
+    not_yet_imported: [CoveragePackage]
+    nativeization: NativeizationProgress
 
     // Assign every listed package to exactly one inventory bucket; whatever
     // no bucket claims is not yet imported. Each bucket is in identity order.
@@ -118,24 +118,24 @@ pub struct CoverageReport {
     // Stable machine-readable report for CI and migration dashboards:
     // compact JSON, fields in schema order.
     fn to_json(self) -> String Never! {
-        progress := [String: DataTree]{}
-        progress["total"] = DataTree.Int(self.nativeization.total)
-        progress["nativeized"] = DataTree.Int(self.nativeization.nativeized)
-        progress["remaining"] = DataTree.Int(self.nativeization.remaining)
-        progress["percent"] = DataTree.Int(self.nativeization.percent)
-        object := [String: DataTree]{}
-        object["schema"] = DataTree.Text(CLI_COVERAGE_SCHEMA)
+        progress := [String: Dyn]{}
+        progress["total"] = Dyn.Int(self.nativeization.total)
+        progress["nativeized"] = Dyn.Int(self.nativeization.nativeized)
+        progress["remaining"] = Dyn.Int(self.nativeization.remaining)
+        progress["percent"] = Dyn.Int(self.nativeization.percent)
+        object := [String: Dyn]{}
+        object["schema"] = Dyn.Text(CLI_COVERAGE_SCHEMA)
         object["native_recipes"] = cli_coverage_packages_json(self.native_recipes)
         object["centrally_imported_recipes"] = cli_coverage_packages_json(self.centrally_imported_recipes)
         object["local_imports"] = cli_coverage_packages_json(self.local_imports)
         object["not_yet_imported"] = cli_coverage_packages_json(self.not_yet_imported)
-        object["nativeization"] = DataTree.Object(progress)
-        pkg_json_render(DataTree.Object(object))
+        object["nativeization"] = Dyn.Object(progress)
+        pkg_json_render(Dyn.Object(object))
     }
 }
 
 #Error
-pub enum CoverageError {
+enum CoverageError {
     EmptyField(field: String, package: String)
     DuplicateInventory(String)
     DuplicateBucket(bucket: CoverageBucket, package: String)
@@ -194,8 +194,8 @@ fn cli_coverage_bucket_of(assigned: [(package: CoveragePackage, bucket: Coverage
     None
 }
 
-fn cli_coverage_packages_json(packages: [CoveragePackage]) -> DataTree Never! {
-    items := [DataTree]{}
+fn cli_coverage_packages_json(packages: [CoveragePackage]) -> Dyn Never! {
+    items := [Dyn]{}
     loop package in packages -> &items.push(package.to_json_tree())
-    DataTree.Array(items)
+    Dyn.Array(items)
 }

@@ -161,7 +161,7 @@ fn sema_effect_leaf_check_function(leaves: [SemaEffectLeaf], function: Func, dia
             sema_effect_leaf_check_name(leaves, name, entry.span, &diagnostics)
         }
     }
-    loop parameter in function.params -> sema_effect_leaf_check_type(leaves, parameter.ty, &diagnostics)
+    loop parameter_index in 0..<function.params.len() -> sema_effect_leaf_check_type(leaves, function.params[parameter_index].ty, &diagnostics)
     if function.return_type == .Val(ty) -> sema_effect_leaf_check_type(leaves, ty, &diagnostics)
     sema_effect_leaf_check_statements(leaves, function.body, &diagnostics)
 }
@@ -226,20 +226,20 @@ fn sema_effect_leaf_check_items(leaves: [SemaEffectLeaf], items: [Item], diagnos
 
 // Validate every effect name written in the source modules against the
 // declared leaves of its root. Returns true when a diagnostic was reported.
-pub fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_declared_leaves(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     leaves := [SemaEffectLeaf]{}
     loop name in sema_effect_builtin_leaves() -> sema_effect_leaf_add(&leaves, name)
-    loop source_module in graph.modules {
-        if source_module.module_identity == graph.canonical_effect_module_identity -> next
-        sema_effect_leaf_collect(&leaves, source_module.program.items)
+    loop source_module_index in 0..<graph.modules.len() {
+        if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
+        sema_effect_leaf_collect(&leaves, graph.modules[source_module_index].program.items)
     }
     found := false
-    loop source_module in graph.modules {
-        if source_module.module_identity == graph.canonical_effect_module_identity -> next
+    loop source_module_index in 0..<graph.modules.len() {
+        if graph.modules[source_module_index].module_identity == graph.canonical_effect_module_identity -> next
         start :: diagnostics.len()
-        sema_effect_leaf_check_items(leaves, source_module.program.items, &diagnostics)
+        sema_effect_leaf_check_items(leaves, graph.modules[source_module_index].program.items, &diagnostics)
         if diagnostics.len() > start {
-            sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+            sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
             found = true
         }
     }
@@ -259,7 +259,7 @@ fn sema_effect_trait_bound_set(bounds: &[SemaEffectTraitBound], trait_name: Stri
 // D-EFF3: the trait-method effect ceilings one module declares. The operator
 // hooks are pure; a trait method bounds its impls when it is pure or writes a
 // closed row of known effects. An un-annotated method leaves each impl free.
-pub fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
+fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! {
     bounds := [SemaEffectTraitBound]{}
     operator_traits :: [String]{"Add", "Sub", "Mul", "Div", "Equatable", "Comparable"}
     operator_methods :: [String]{"add", "sub", "mul", "div", "equal", "compare"}
@@ -299,4 +299,23 @@ pub fn sema_effect_trait_bounds(items: [Item]) -> [SemaEffectTraitBound] Never! 
         }
     }
     bounds
+}
+
+// Rust `seed_trait_dispatch_effects` `implementations`: every
+// `{trait}::{owner}` pair one module declares, through an `impl Owner.Trait`
+// block or a struct/enum trait-impl block, whether or not the owner writes
+// each method itself.
+fn sema_effect_trait_implementers(items: [Item]) -> [String] Never! {
+    rows := [String]{}
+    loop item in items {
+        if item == {
+            .Impl(definition) -> {
+                if definition.trait_name == .Val(trait_name) -> &rows.push("{trait_name}::{definition.type_name}")
+            }
+            .Struct(definition) -> loop block in definition.trait_impls -> &rows.push("{block.trait_name}::{definition.name}")
+            .Enum(definition) -> loop block in definition.trait_impls -> &rows.push("{block.trait_name}::{definition.name}")
+            else -> {}
+        }
+    }
+    rows
 }

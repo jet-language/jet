@@ -1,0 +1,390 @@
+// Native request budgets: Core.rs:1014-1057 and Core/CAbi.rs:244-305.
+// One host request at a time; the host joins its native work before end.
+// Process-lifetime root48: mutex0 active8 fuel16 maxDepth24 firstStop32 mode40.
+// The root owns firstStop; each current Scheduler control owns a fresh copy.
+// Unsigned order is World's existing world_unsigned_before over raw I64 bits;
+// subtraction is wrapping only AFTER that unsigned bounds check. No exact Int.
+// TCB frame/scope ownership is documented in Thread.jet (65ba90e97).
+COMPTIME_ROOT_BYTES :: prep { I64{48} }
+comptime_root := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_comptime_init() {
+    if (comptime_root != I64{0}) -> return
+    comptime_root = alloc_required_valid(COMPTIME_ROOT_BYTES, I64{8})
+    thread_zero(comptime_root, COMPTIME_ROOT_BYTES)
+    sync_store(comptime_root + I64{40}, I64{1})
+}
+
+fn comptime_frame_reset() { thread_zero(thread_base() + I64{256}, I64{32}) }
+fn comptime_site(owner: I64, start: I64, end: I64) {
+    base :: thread_base()
+    sync_store(base + I64{264}, owner)
+    sync_store(base + I64{272}, start)
+    sync_store(base + I64{280}, end)
+}
+
+// Caller holds request mutex. The first exhausted thread supplies the site;
+// later threads publish precisely that first record on their own control.
+// Lock order: request -> control.mutex72. Scheduler control_publish (134-152)
+// only stores record/status, unlocks, then drops the old owned text; it never
+// invokes callbacks, waits or charges a budget. No control -> request edge.
+fn comptime_publish_locked(kind: I64, status: I64) {
+    record := sync_load(comptime_root + I64{32})
+    if (record == I64{0}) {
+        record = scheduler_stop_new(kind, scheduler_text_new(I64{0}))
+        base :: thread_base()
+        sync_store(record + I64{8}, status)
+        if (sync_load(comptime_root + I64{40}) != I64{0}) {
+            sync_store(record + I64{16}, sync_load(base + I64{264}))
+            sync_store(record + I64{24}, sync_load(base + I64{272}))
+            sync_store(record + I64{32}, sync_load(base + I64{280}))
+        }
+        sync_store(comptime_root + I64{32}, record)
+    }
+    sync_store(comptime_root + I64{16}, I64{0})
+    published :: scheduler_stop_new(sync_load(record), scheduler_text_new(I64{0}))
+    sync_store(published + I64{8}, sync_load(record + I64{8}))
+    sync_store(published + I64{16}, sync_load(record + I64{16}))
+    sync_store(published + I64{24}, sync_load(record + I64{24}))
+    sync_store(published + I64{32}, sync_load(record + I64{32}))
+    _ := scheduler_native_publish(published)
+}
+
+// Rust: extern "C" jet_rt_comptime_begin(fuel: u64,max_depth: u64)->bool.
+// Raw I64 parameters retain all 64 unsigned bits and the same C registers.
+#Export(c) fn jet_rt_comptime_begin(fuel: I64, max_depth: I64) -> Bool {
+    sync_mutex_lock(comptime_root)
+    if (sync_load(comptime_root + I64{8}) != I64{0}) {
+        sync_mutex_unlock(comptime_root)
+        return false
+    }
+    scheduler_stop_drop(sync_swap(comptime_root + I64{32}, I64{0}))
+    sync_store(comptime_root + I64{16}, fuel)
+    sync_store(comptime_root + I64{24}, max_depth)
+    sync_store(comptime_root + I64{40}, I64{1})
+    comptime_frame_reset()
+    control :: scheduler_control_new()
+    base :: thread_base()
+    scheduler_control_enter(control, base + I64{288})
+    sync_store(base + I64{200}, I64{1})
+    sync_store(comptime_root + I64{8}, I64{1})
+    sync_mutex_unlock(comptime_root)
+    true
+}
+
+// Rust: extern "C" jet_rt_comptime_work(units: u64). A zero charge does not
+// exhaust zero fuel (checked_sub(0) succeeds), even after another stop.
+#Export(c) fn jet_rt_comptime_work(units: I64) {
+    sync_mutex_lock(comptime_root)
+    if (sync_load(comptime_root + I64{8}) != I64{0}) {
+        remaining :: sync_load(comptime_root + I64{16})
+        if world_unsigned_before(remaining, units) {
+            comptime_publish_locked(I64{3}, I64{2})
+        } else {
+            sync_store(comptime_root + I64{16}, wrapping(remaining - units))
+        }
+    }
+    sync_mutex_unlock(comptime_root)
+}
+
+// Rust: extern "C" jet_rt_comptime_step(owner: u64,start: u64,end: u64).
+#Export(c) fn jet_rt_comptime_step(owner: I64, start: I64, end: I64) {
+    comptime_site(owner, start, end)
+    jet_rt_comptime_work(I64{1})
+}
+
+// Rust: extern "C" jet_rt_comptime_enter(owner: u64,start: u64,end: u64).
+#Export(c) fn jet_rt_comptime_enter(owner: I64, start: I64, end: I64) {
+    sync_mutex_lock(comptime_root)
+    if (sync_load(comptime_root + I64{8}) != I64{0}) {
+        base :: thread_base()
+        depth := sync_load(base + I64{256})
+        if (depth != I64{-1}) -> depth = wrapping(depth + I64{1})
+        sync_store(base + I64{256}, depth)
+        comptime_site(owner, start, end)
+        if world_unsigned_before(sync_load(comptime_root + I64{24}), depth) {
+            comptime_publish_locked(I64{4}, I64{3})
+        } else if (sync_load(comptime_root + I64{32}) != I64{0}) {
+            comptime_publish_locked(I64{4}, I64{3})
+        }
+    }
+    sync_mutex_unlock(comptime_root)
+}
+
+// Rust: extern "C" jet_rt_comptime_leave(). It decrements even when inactive.
+#Export(c) fn jet_rt_comptime_leave() {
+    address :: thread_base() + I64{256}
+    depth :: sync_load(address)
+    if (depth != I64{0}) -> sync_store(address, wrapping(depth - I64{1}))
+}
+
+// Rust: extern "C" jet_rt_comptime_end(). Reset the calling frame and restore
+// its previous task scope; only the request scope's control is destroyed.
+#Export(c) fn jet_rt_comptime_end() {
+    sync_mutex_lock(comptime_root)
+    sync_store(comptime_root + I64{8}, I64{0})
+    comptime_frame_reset()
+    base :: thread_base()
+    if (sync_swap(base + I64{200}, I64{0}) != I64{0}) {
+        control :: scheduler_control_current()
+        scheduler_control_leave(base + I64{288})
+        scheduler_control_drop(control)
+    }
+    // Rust retains the first record until next begin so the host may report it.
+    sync_mutex_unlock(comptime_root)
+}
+
+// One Stop56 encoder for both entry contracts. Ordinary comptime retains
+// exactly its previous BudgetFuel/BudgetDepth bytes (comptime-fixture.c),
+// including U64.MAX sites. Only execution mode determines budget presence;
+// -1 is the existing Scheduler absence sentinel for non-budget records.
+#Export(c) fn jet_rt_comptime_stop_write() -> U32 {
+    sync_mutex_lock(comptime_root)
+    record :: sync_load(comptime_root + I64{32})
+    if (record == I64{0}) {
+        sync_mutex_unlock(comptime_root)
+        return U32{0}
+    }
+    status :: sync_load(record + I64{8})
+    frame :: comptime_stop_frame(record, sync_load(comptime_root + I64{40}) != I64{0})
+    sync_mutex_unlock(comptime_root)
+    comptime_frame_write(frame)
+    U32{status}
+}
+
+#Export(c) fn jet_rt_execution_begin(fuel: I64, depth: I64, comptime_mode: I64) -> Bool {
+    started :: jet_rt_comptime_begin(fuel, depth)
+    if started {
+        sync_mutex_lock(comptime_root)
+        sync_store(comptime_root + I64{40}, if (comptime_mode != I64{0}) -> I64{1} else -> I64{0})
+        sync_mutex_unlock(comptime_root)
+    }
+    started
+}
+
+#Export(c) fn jet_rt_execution_end() {
+    // Alloc.jet reserves these two last-page words. Host-tail Trap no longer
+    // uses them; serialize the ignored raw outputs in the existing flush slot.
+    // The I64 errno and Bool WriteZero deliberately alias: neither is read.
+    lock :: alloc_root + I64{4080}
+    ignored :: alloc_root + I64{4088}
+    alloc_lock(lock)
+    jet_stdio_stdout_flush_raw(ignored, ignored)
+    jet_stdio_stderr_flush_raw(ignored, ignored)
+    alloc_unlock(lock)
+    jet_rt_comptime_end()
+}
+
+#Export(c) fn jet_rt_execution_stop_write() -> I64 {
+    sync_mutex_lock(comptime_root)
+    budget_site :: sync_load(comptime_root + I64{40}) != I64{0}
+    sync_mutex_unlock(comptime_root)
+    control :: scheduler_control_current()
+    if (control == I64{0}) -> return I64{0}
+    sync_mutex_lock(control + I64{72})
+    record :: sync_load(control + I64{40})
+    if (record == I64{0}) {
+        sync_mutex_unlock(control + I64{72})
+        return I64{0}
+    }
+    // Encoding while borrowed is the immutable snapshot: no cloned message
+    // or consumed record. Release the control before any channel write.
+    frame :: comptime_stop_frame(record, budget_site)
+    sync_mutex_unlock(control + I64{72})
+    comptime_frame_write(frame)
+    I64{1}
+}
+
+fn comptime_json_word(at: I64, word: I64, length: I64) -> I64 {
+    sync_store(at, word)
+    at + length
+}
+
+fn comptime_json_number(at: I64, value: I64, present: Bool) -> I64 {
+    if present -> at + world_decimal(at, value) else -> comptime_json_word(at, I64{1819047278}, I64{4})
+}
+
+fn comptime_json_message_size(data: I64, length: I64) -> I64 {
+    size := I64{0}
+    index := I64{0}
+    loop index < length {
+        byte :: trap_byte(data + index)
+        if (byte == I64{34} || byte == I64{92} || byte == I64{10} || byte == I64{13} || byte == I64{9}) {
+            size += I64{2}
+        } else if (byte < I64{32}) {
+            size += I64{6}
+        } else {
+            size += I64{1}
+        }
+        index += I64{1}
+    }
+    size
+}
+
+fn comptime_json_hex(value: I64) -> I64 {
+    if (value < I64{10}) -> value + I64{48} else -> value + I64{87}
+}
+
+fn comptime_json_message(begin: I64, data: I64, length: I64) -> I64 {
+    at := begin
+    index := I64{0}
+    loop index < length {
+        byte :: trap_byte(data + index)
+        if (byte == I64{34} || byte == I64{92}) {
+            trap_put(at, I64{92})
+            trap_put(at + I64{1}, byte)
+            at += I64{2}
+        } else if (byte == I64{10} || byte == I64{13} || byte == I64{9}) {
+            trap_put(at, I64{92})
+            escaped :: if (byte == I64{10}) -> I64{110} else if (byte == I64{13}) -> I64{114} else -> I64{116}
+            trap_put(at + I64{1}, escaped)
+            at += I64{2}
+        } else if (byte < I64{32}) {
+            at = comptime_json_word(at, I64{808482140}, I64{4})
+            trap_put(at, comptime_json_hex(byte / I64{16}))
+            trap_put(at + I64{1}, comptime_json_hex(byte % I64{16}))
+            at += I64{2}
+        } else {
+            trap_put(at, byte)
+            at += I64{1}
+        }
+        index += I64{1}
+    }
+    at
+}
+
+// Caller holds the record owner's mutex. Frame: bodyLength0 capacity8,
+// JSON16, trailing32 bytes for decimal-length/newline framing. 160 bytes
+// bound the fixed fields even with three U64.MAX sites and U32.MAX status.
+fn comptime_stop_frame(record: I64, budget_site: Bool) -> I64 {
+    message :: sync_load(record + I64{40})
+    data :: if (message == I64{0}) -> I64{0} else -> sync_load(message)
+    length :: if (message == I64{0}) -> I64{0} else -> sync_load(message + I64{8})
+    capacity :: I64{208} + comptime_json_message_size(data, length)
+    frame :: jet_rt_alloc(capacity, I64{8})
+    sync_store(frame + I64{8}, capacity)
+    at := comptime_json_word(frame + I64{16}, I64{4189021028785791611}, I64{8})
+    at = comptime_json_word(at, I64{34}, I64{1})
+    kind :: sync_load(record)
+    if {
+        (kind == I64{1}) -> {
+            at = comptime_json_word(at, I64{7308335478031147331}, I64{8})
+            at = comptime_json_word(at, I64{100}, I64{1})
+        }
+        (kind == I64{2}) -> { at = comptime_json_word(at, I64{7308895159530382660}, I64{8}) }
+        (kind == I64{3}) -> {
+            at = comptime_json_word(at, I64{8450569729682470210}, I64{8})
+            at = comptime_json_word(at, I64{27749}, I64{2})
+        }
+        (kind == I64{4}) -> {
+            at = comptime_json_word(at, I64{7297085275122201922}, I64{8})
+            at = comptime_json_word(at, I64{6845552}, I64{3})
+        }
+        (kind == I64{5}) -> { at = comptime_json_word(at, I64{426970603856}, I64{5}) }
+        (kind == I64{6}) -> {
+            at = comptime_json_word(at, I64{7815259683600691016}, I64{8})
+            at = comptime_json_word(at, I64{116}, I64{1})
+        }
+        else -> { at = comptime_json_word(at, I64{1885434452}, I64{4}) }
+    }
+    at = comptime_json_word(at, I64{8313491407480433698}, I64{8})
+    at = comptime_json_word(at, I64{16363427936362868}, I64{7})
+    status :: sync_load(record + I64{8})
+    at = comptime_json_number(at, status, status != I64{-1})
+    budget :: kind == I64{3} || kind == I64{4}
+    owner :: sync_load(record + I64{16})
+    start :: sync_load(record + I64{24})
+    end :: sync_load(record + I64{32})
+    at = comptime_json_word(at, I64{2482157869759144492}, I64{8})
+    at = comptime_json_word(at, I64{58}, I64{1})
+    at = comptime_json_number(at, owner, if budget -> budget_site else -> owner != I64{-1})
+    at = comptime_json_word(at, I64{2482735057479082540}, I64{8})
+    at = comptime_json_word(at, I64{58}, I64{1})
+    at = comptime_json_number(at, start, if budget -> budget_site else -> start != I64{-1})
+    at = comptime_json_word(at, I64{16363363393413676}, I64{7})
+    at = comptime_json_number(at, end, if budget -> budget_site else -> end != I64{-1})
+    at = comptime_json_word(at, I64{7449362198107595308}, I64{8})
+    at = comptime_json_word(at, I64{574235237}, I64{4})
+    at = comptime_json_message(at, data, length)
+    at = comptime_json_word(at, I64{32034}, I64{2})
+    sync_store(frame, at - frame - I64{16})
+    frame
+}
+
+fn comptime_frame_write(frame: I64) {
+    length :: sync_load(frame)
+    capacity :: sync_load(frame + I64{8})
+    header :: frame + capacity - I64{32}
+    digits :: world_decimal(header, length)
+    trap_put(header + digits, I64{10})
+    // Flush the live Jet stdout stream before the private channel frame.
+    jet_rt_stdout_flush()
+    fd :: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (fd >= I64{0}) {
+        comptime_channel_write(fd, header, digits + I64{1})
+        comptime_channel_write(fd, frame + I64{16}, length)
+        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    jet_rt_free(frame, capacity, I64{8})
+}
+
+// Borrow actual stop metadata; Root consumption uses precisely this channel
+// frame too, without depending on a separate comptime request's first stop.
+fn comptime_stop_frame_write(status: I64, owner: I64, start: I64, end: I64) -> U32 {
+    scratch :: alloc_required_valid(I64{192}, I64{8})
+    sync_store(scratch, I64{4189021028785791611})
+    at := I64{0}
+    if (status == I64{2}) {
+        sync_store(scratch + I64{8}, I64{5076794174694834722})
+        sync_store(scratch + I64{16}, I64{7163575730237629813})
+        sync_store(scratch + I64{24}, I64{8319683848551227252})
+        sync_store(scratch + I64{32}, I64{7959953058961701410})
+        sync_store(scratch + I64{40}, I64{975336037})
+        at = I64{44}
+    } else {
+        sync_store(scratch + I64{8}, I64{4932678986618978850})
+        sync_store(scratch + I64{16}, I64{7647723643521495141})
+        sync_store(scratch + I64{24}, I64{8463496752515740771})
+        sync_store(scratch + I64{32}, I64{8606134986161660531})
+        sync_store(scratch + I64{40}, I64{249686025582})
+        at = I64{45}
+    }
+    at += world_decimal(scratch + at, owner)
+    sync_store(scratch + at, I64{2482735057479082540})
+    trap_put(scratch + at + I64{8}, I64{58})
+    at += I64{9}
+    at += world_decimal(scratch + at, start)
+    sync_store(scratch + at, I64{16363363393413676})
+    at += I64{7}
+    at += world_decimal(scratch + at, end)
+    sync_store(scratch + at, I64{7449362198107595308})
+    sync_store(scratch + at + I64{8}, I64{137585556595301})
+    at += I64{14}
+    header :: scratch + I64{160}
+    digits :: world_decimal(header, at)
+    trap_put(header + digits, I64{10})
+    // Core.rs:988-994 flushes program stdout before the private channel frame.
+    // This is the same active stdout flush used by every native process stop.
+    jet_rt_stdout_flush()
+    // fcntl F_DUPFD_CLOEXEC borrows the compiler worker's lifetime descriptor3;
+    // failed duplicate is ignored just like protocol_channel's Option in Rust.
+    fd :: trap_syscall(I64{72}, I64{3}, I64{1030}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (fd >= I64{0}) {
+        comptime_channel_write(fd, header, digits + I64{1})
+        comptime_channel_write(fd, scratch, at)
+        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    alloc_release_valid(scratch, I64{192}, I64{8})
+    U32{status}
+}
+
+fn comptime_channel_write(fd: I64, data: I64, length: I64) {
+    at := I64{0}
+    loop at < length {
+        written :: trap_syscall(I64{1}, fd, data + at, length - at, I64{0}, I64{0}, I64{0})
+        if (written == I64{-4}) -> next
+        if (written <= I64{0}) -> return
+        at += written
+    }
+}

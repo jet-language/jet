@@ -1,0 +1,40 @@
+// The provider boundary preserves fixed-width raw bits, including U64's full
+// range, and failures do not advance opaque receiver handles.
+fn run() {
+    signed8 :: Reader.over([U8]{0x80})
+    print(signed8.read_i8() ?? panic("I8 minimum rejected"))
+    signed64 :: Reader.over([U8]{0x80, 0, 0, 0, 0, 0, 0, 0})
+    print(signed64.read_i64_be() ?? panic("I64 minimum rejected"))
+    unsigned64 :: Reader.over([U8]{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF})
+    print(unsigned64.read_u64_be() ?? panic("U64 maximum rejected"))
+
+    empty :: Reader.over([U8]{})
+    if empty.read_u8() == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("empty read succeeded")
+    }
+    if empty.seek(-1) == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("negative seek succeeded")
+    }
+    if empty.seek(1) == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("past-end seek succeeded")
+    }
+    if empty.skip(-1) == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("negative skip succeeded")
+    }
+    if empty.take(-1) == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("negative take succeeded")
+    }
+    print("empty={empty.remaining()}/{empty.is_at_end()}")
+    cursor :: Cursor.over("abc")
+    if cursor.take_until("\n") == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("missing delimiter matched")
+    }
+    preserved :: cursor.take_pattern("{raw:String}") ?? panic("delimiter miss consumed cursor")
+    print(preserved.raw)
+}

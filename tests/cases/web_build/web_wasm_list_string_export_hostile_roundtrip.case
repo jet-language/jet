@@ -1,0 +1,28 @@
+# HAND-PORT tests/web_build.rs:4944-5120 web_wasm_list_string_export_hostile_roundtrip
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original ABI hostility harnesses copied verbatim, including all ownership/trap/parser/bounds/free/BigInt assertions; original stdout and every JS/runtime marker retained; Rust text-only scans retire.
+requires: tool:node
+fixture: web_wasm_list_string_export_hostile_roundtrip.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "marshalAbi(" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "\"list-string\"" # original JavaScript/runtime predicate
+file: .jet/build/app.js ~ "unmarshalAbi(raw, \"list-string\", wasm)" # original JavaScript/runtime predicate
+file: .jet/build/jet_dom_runtime.js ~ "jet_abi_list_string_alloc" # original JavaScript/runtime predicate
+file: .jet/build/jet_dom_runtime.js ~ "jet_abi_list_string_free" # original JavaScript/runtime predicate
+file: .jet/build/jet_dom_runtime.js ~ "list-string" # original JavaScript/runtime predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_wasm_list_string_export_hostile_roundtrip.stdout.expected
+stdout: ~ "\t" # original hostile byte/text preservation predicate
+stdout: ~ "emoji🌍" # original hostile byte/text preservation predicate
+copy: hostile0.mjs .jet/build/hostile0.mjs
+step: node hostile0.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_wasm_list_string_export_hostile_roundtrip.hostile0.expected

@@ -1,0 +1,11 @@
+# PORT tests/task_control_tiers.rs:350-364.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: task_control_plane_matches_on_default_run.fixture
+step: jet run main.jet
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: NO_COLOR=1
+exit: 0
+stderr: !~ "E0956" # original ed77c235f tests/task_control_tiers.rs:360 not contains predicate
+# Exact strip_tier_trace task_control_tiers.rs430-436: filter starts_with [tier, .lines(), append LF per retained line.
+stdout.filter(!^= "[tier"): lines = ["7","9","[1, 2]","4","5"]

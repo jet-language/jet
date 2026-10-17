@@ -1,0 +1,2087 @@
+// The semantic index builder (crates/jet-semindex/src/Build.rs): one walk
+// over the checked modules sema settled, recording definitions, use-site
+// references, call edges, members, arithmetic policy facts, structural
+// boundaries, and spelled bypasses, then the finalized index rows
+// (`SymbolDB::finalize_index`). Reference targets come from sema's name
+// references (the Rust name ledger's `reference` rows) and effect rows from
+// the checked functions (the Rust `SemIndexEffectFacts` summaries), so this
+// walk never runs a second checker. LSP hover and inlay text have no Jet
+// consumer and are not produced.
+use jet_driver.[
+    JetDriverCompileResult,
+    JetDriverDocModule,
+]
+use jet_foundation.[
+    ArithmeticPolicyFact,
+    BindName,
+    BindPattern,
+    Binding,
+    CallArg,
+    CallablePolicy,
+    DeriveBodyItem,
+    EffectRowEntry,
+    Expr,
+    Func,
+    Item,
+    LValue,
+    MIRDerivationMethod,
+    Marker,
+    NamedSpan,
+    OutputKind,
+    Param,
+    ParamZone,
+    Span,
+    Stmt,
+    SwitchArm,
+    TraitImplBlock,
+    TraitMethodSig,
+    Type,
+    ViewProvenanceMap,
+    access_sigil,
+    derivation_identity,
+    derivation_record,
+    expr_span,
+    failure_contract_effective_type,
+    failure_contract_of_function,
+    failure_contract_source,
+    mir_sha256_hex,
+    type_name,
+]
+use jet_sema.[
+    SemaNameReferenceFact,
+    sema_compiler_index_view_map,
+    sema_compiler_index_view_provenance,
+    sema_state_graph_facts,
+]
+
+// Build.rs `CallerFrame`.
+struct JetCLISemCallerFrame {
+    name: String
+    owner: String?
+    identity: String
+}
+
+// Build.rs `SymbolDB` without the LSP hover/inlay projections.
+struct JetCLISemDB {
+    defs: [JetCLISemDef]
+    refs: [JetCLISemRef]
+    calls: [JetCLISemCall]
+    members: [JetCLISemMember]
+    arithmetic: [JetCLISemArithmetic]
+    nodes: [JetCLISemNode]
+    bypasses: [JetCLISemBypass]
+    slot_boundaries: [JetCLISemSlotBoundary]
+    view_provenance: [String: ViewProvenanceMap]
+    structural_ordinals: [String: Int]
+}
+
+// Build.rs `WalkCtx`. `display_prefix` is the code-module path the name
+// ledger prints before a nested declaration (`Inner.`).
+struct JetCLISemWalk {
+    module_path: String
+    source: String
+    scope_identity: String
+    display_prefix: String
+    caller: JetCLISemCallerFrame?
+    structural_parents: [Int]
+    structural_slot: String
+    structural_slot_kind: String
+    block_spans: [Span]
+    claimed_block_spans: [String: Bool]
+    references: [SemaNameReferenceFact]
+    module_paths: [String: String]
+}
+
+struct JetCLISemSlotSave {
+    name: String
+    kind: String
+}
+
+fn jet_cli_sem_db() -> JetCLISemDB Never! {
+    JetCLISemDB{
+        defs: [JetCLISemDef]{},
+        refs: [JetCLISemRef]{},
+        calls: [JetCLISemCall]{},
+        members: [JetCLISemMember]{},
+        arithmetic: [JetCLISemArithmetic]{},
+        nodes: [JetCLISemNode]{},
+        bypasses: [JetCLISemBypass]{},
+        slot_boundaries: [JetCLISemSlotBoundary]{},
+        view_provenance: [String: ViewProvenanceMap]{},
+        structural_ordinals: [String: Int]{},
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Identities (Build.rs `root_identity` .. `local_identity`).
+
+fn jet_cli_sem_root_identity(module_path: String) -> String Never! { "module:{module_path}" }
+fn jet_cli_sem_module_identity(scope: String, name: String) -> String Never! { "module:{scope}::{name}" }
+fn jet_cli_sem_type_identity(scope: String, name: String) -> String Never! { "type:{scope}::{name}" }
+fn jet_cli_sem_member_identity(scope: String, parent: String, kind: String, name: String) -> String Never! { "{kind}:{scope}::{parent}.{name}" }
+fn jet_cli_sem_local_identity(scope: String, kind: String, name: String) -> String Never! { "{kind}:{scope}::{name}" }
+
+fn jet_cli_sem_callable_identity(scope: String, owner: String?, name: String) -> String Never! {
+    if owner == .Val(owner_name) -> return "method:{scope}::{owner_name}.{name}"
+    "fn:{scope}::{name}"
+}
+
+fn jet_cli_sem_active_scope(ctx: JetCLISemWalk) -> String Never! {
+    if ctx.caller == .Val(frame) -> return frame.identity
+    ctx.scope_identity
+}
+
+// sema `effect_key`: `Owner::name` for a method, the bare name otherwise.
+fn jet_cli_sem_effect_key(owner: String?, name: String) -> String Never! {
+    if owner == .Val(owner_name) -> return "{owner_name}::{name}"
+    name.copy()
+}
+
+fn jet_cli_sem_display(ctx: JetCLISemWalk, owner: String?, name: String) -> String Never! {
+    if owner == .Val(owner_name) -> return "{ctx.display_prefix}{owner_name}.{name}"
+    "{ctx.display_prefix}{name}"
+}
+
+fn jet_cli_sem_def(ctx: JetCLISemWalk, identity: String, name: String, qualified: String, span: Span, kind: JetCLISemKind) -> JetCLISemDef Never! {
+    JetCLISemDef{identity: identity, name: name, qualified_name: qualified, def_span: span, module_path: ctx.module_path, kind: kind}
+}
+
+fn jet_cli_sem_member(ctx: JetCLISemWalk, owner: String, name: String, identity: String, kind: String, origin: String, origin_trait: String, signature: String, span: Span) -> JetCLISemMember Never! {
+    JetCLISemMember{owner: owner, name: name, identity: identity, kind: kind, origin: origin, origin_trait: origin_trait, signature: signature, module_path: ctx.module_path, span: span}
+}
+
+// ---------------------------------------------------------------------------
+// Callable facts (Build.rs `fn_signature`, `parameter_defaults`,
+// `callable_policies`, `callable_kind`, `function_parameter_parts`).
+
+fn jet_cli_sem_source_text(source: String, span: Span) -> String {
+    bytes :: source.bytes()
+    if span.start >= span.end || span.end > bytes.len() -> return ""
+    String.from_bytes(bytes[span.start..span.end - 1]) ?? ""
+}
+
+fn jet_cli_sem_call_label(parameter: Param) -> String Never! {
+    if parameter.public_label == .Val(label) -> return label.name
+    parameter.name
+}
+
+fn jet_cli_sem_params(params: [Param], source: String, skip_self: Bool) -> [JetCLISemParam] {
+    output := [JetCLISemParam]{}
+    loop parameter in params {
+        if skip_self && parameter.name == "self" -> next
+        default := JetCLISemDefault?{None}
+        if parameter.default == .Val(value) {
+            span :: expr_span(value)
+            default = Val(JetCLISemDefault{source_text: jet_cli_sem_source_text(source, span), source: span})
+        }
+        &output.push(JetCLISemParam{
+            name: parameter.name,
+            ty: parameter.ty,
+            source: parameter.name_span,
+            label: jet_cli_sem_call_label(parameter),
+            zone: parameter.zone,
+            variadic: parameter.variadic,
+            access: parameter.convention,
+            default: default,
+        })
+    }
+    output
+}
+
+// sema `sema_callable_policy_argument_text`: the written spelling of one
+// `#Policy` argument.
+fn jet_cli_sem_policy_argument(expr: Expr) -> String {
+    if expr == {
+        .Ident(name, _) -> name
+        .Int(value, _, _, raw) -> raw ?? "{value}"
+        .Bool(value, _) -> if value -> "true" else -> "false"
+        .Str(parts, _) -> {
+            text := ""
+            loop part in parts {
+                if part == .Lit(value) -> text = "{text}{value}"
+            }
+            "\"{text}\""
+        }
+        .Field(base, member, _) -> "{jet_cli_sem_policy_argument(base)}.{member}"
+        .Call(call) -> {
+            arguments :: loop argument in call.args -> jet_cli_sem_policy_argument(argument.expr)
+            "{call.name}({arguments.join(", ")})"
+        }
+        else -> "<expression>"
+    }
+}
+
+// Build.rs `callable_policies`: the `#Policy(...)` chain on a function.
+fn jet_cli_sem_callable_policies(markers: [Marker]) -> [CallablePolicy] {
+    policies := [CallablePolicy]{}
+    loop marker in markers {
+        if marker.name != "Policy" -> next
+        loop argument in marker.args {
+            if argument == .Expr(value) {
+                if value == .Call(call) {
+                    arguments :: loop call_argument in call.args -> jet_cli_sem_policy_argument(call_argument.expr)
+                    &policies.push(CallablePolicy{name: call.name, arguments: arguments})
+                }
+            }
+        }
+        break
+    }
+    policies
+}
+
+// `CallablePolicy::display`.
+fn jet_cli_sem_policy_display(policy: CallablePolicy) -> String Never! {
+    "{policy.name}({policy.arguments.join(", ")})"
+}
+
+fn jet_cli_sem_effective_return(function: Func) -> Type Never! {
+    failure_contract_effective_type(failure_contract_of_function(function.return_type, function.return_type_span))
+}
+
+// Build.rs `callable_kind`.
+fn jet_cli_sem_callable_kind(function: Func, source: String) -> JetCLISemKind {
+    generic_names :: loop parameter in function.type_params -> parameter.name
+    JetCLISemKind.Function{callable: JetCLISemCallable{
+        params: jet_cli_sem_params(function.params, source, true),
+        signature_facts_available: true,
+        return_type: function.return_type,
+        failure_contract: Val(failure_contract_of_function(function.return_type, function.return_type_span)),
+        failure_unavailable: None,
+        foreign_boundary: function.inline_foreign != None,
+        effects: function.declared_effects,
+        effect_via: function.effect_via,
+        policies: jet_cli_sem_callable_policies(function.markers),
+        generic_parameters: Val(generic_names),
+        generic_unavailable: None,
+    }}
+}
+
+// Build.rs `function_parameter_parts`: the public call surface, with the
+// `*` and `/` zone separators as their own parts.
+fn jet_cli_sem_parameter_parts(params: [JetCLISemParam]) -> [String] Never! {
+    parts := [String]{}
+    star_done := false
+    loop (index, parameter) in params {
+        if parameter.zone == ParamZone.LabelOnly && !star_done {
+            star_done = true
+            &parts.push("*")
+        }
+        shown :: if {
+            parameter.zone == ParamZone.PositionalOnly -> parameter.name
+            parameter.label == parameter.name -> parameter.label
+            else -> "{parameter.label} {parameter.name}"
+        }
+        rest :: if parameter.variadic -> "..." else -> ""
+        &parts.push("{shown}: {rest}{type_name(parameter.ty)}")
+        next_positional :: index + 1 < params.len() && params[index + 1].zone == ParamZone.PositionalOnly
+        if parameter.zone == ParamZone.PositionalOnly && !next_positional -> &parts.push("/")
+    }
+    parts
+}
+
+// Build.rs `fn_signature`.
+fn jet_cli_sem_fn_signature(name: String, callable: JetCLISemCallable, ret: Type?, view_provenance: ViewProvenanceMap?) -> String {
+    parts := jet_cli_sem_parameter_parts(callable.params)
+    parameter_index := 0
+    loop part_index in 0..<parts.len() {
+        if parts[part_index] == "/" || parts[part_index] == "*" -> next
+        if parameter_index < callable.params.len() {
+            parameter :: callable.params[parameter_index]
+            text := "{access_sigil(parameter.access)}{parts[part_index]}"
+            if parameter.default == .Val(default) {
+                text = "{text}{{"
+                text = "{text}{default.source_text}}}"
+            }
+            parts[part_index] = text
+        }
+        parameter_index += 1
+    }
+    shown := [String]{}
+    if callable.effects == .Val(rows) {
+        loop row in rows {
+            root :: row.name.split(".").to_list()[0]
+            if root != "Panic" && root != "Mem" -> &shown.push(row.name)
+        }
+    }
+    result :: if ret == .Val(ty) -> type_name(ty) else -> ""
+    ceiling :: if {
+        callable.effect_via == .Val(via) -> " -[via {via.name}]>"
+        shown.len() == 0 -> ""
+        else -> " -[{shown.join(", ")}]>"
+    }
+    suffix :: if {
+        ceiling != "" -> if result == "" -> ceiling else -> "{ceiling} {result}"
+        result != "" -> " -> {result}"
+        else -> ""
+    }
+    signature := "fn {name}({parts.join(", ")}){suffix}"
+    if view_provenance == .Val(map) {
+        if map.entries.len() == 1 && map.entries[0].slot.len() == 0 {
+            signature = "{signature} ; view_source = {sema_compiler_index_view_provenance(map.entries[0].value)}"
+        } else {
+            signature = "{signature} ; view_sources = {sema_compiler_index_view_map(view_provenance)}"
+        }
+    }
+    if callable.policies.len() > 0 {
+        names :: loop policy in callable.policies -> jet_cli_sem_policy_display(policy)
+        signature = "{signature} ; policies=[{names.join(", ")}]"
+    }
+    if callable.failure_contract == .Val(contract) {
+        return "{signature}\nfailure: {type_name(failure_contract_effective_type(contract))} ({failure_contract_source(contract)})"
+    }
+    reason :: if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
+    "{signature}\nfailure: unavailable ({reason})"
+}
+
+// Build.rs `method_fact`.
+fn jet_cli_sem_method_fact(ctx: JetCLISemWalk, owner: String, function: Func, origin: String, origin_trait: String) -> JetCLISemMember {
+    identity :: jet_cli_sem_callable_identity(ctx.scope_identity, Val(owner), function.name)
+    kind :: jet_cli_sem_callable_kind(function, ctx.source)
+    signature := ""
+    if kind == .Function(callable) -> signature = jet_cli_sem_fn_signature(function.name, callable, Val(jet_cli_sem_effective_return(function)), function.return_view_provenance)
+    jet_cli_sem_member(ctx, owner, function.name, identity, "method", origin, origin_trait, signature, function.name_span)
+}
+
+// ---------------------------------------------------------------------------
+// References (Build.rs `scoped_ref`, `declaration_ref`).
+
+fn jet_cli_sem_reference_kind(kind: String) -> String Never! {
+    if kind == "type" -> return "struct"
+    kind.copy()
+}
+
+fn jet_cli_sem_scoped_ref(name: String, span: Span, ctx: JetCLISemWalk) -> JetCLISemRef {
+    target := JetCLISemAnchor?{None}
+    loop reference in ctx.references {
+        if reference.span.start != span.start || reference.span.end != span.end -> next
+        module_path :: ctx.module_paths.get(reference.symbol.module_name) ?? break
+        target = Val(JetCLISemAnchor{module_path: module_path, kind: reference.kind, def_span: reference.symbol.span, semantic_identity: None})
+        break
+    }
+    JetCLISemRef{name: name, span: span, module_path: ctx.module_path, scope_identity: Val(jet_cli_sem_active_scope(ctx)), target: target, fact: None}
+}
+
+// The declaration a module-scope name names, for trait and impl heads.
+fn jet_cli_sem_declaration_kind(items: [Item], name: String) -> JetCLISemAnchor? {
+    loop item in items {
+        found := JetCLISemAnchor?{None}
+        if item == {
+            .Struct(value) -> if value.name == name { found = Val(JetCLISemAnchor{module_path: "", kind: "struct", def_span: value.name_span, semantic_identity: None}) }
+            .Enum(value) -> if value.name == name { found = Val(JetCLISemAnchor{module_path: "", kind: "enum", def_span: value.name_span, semantic_identity: None}) }
+            .Trait(value) -> if value.name == name { found = Val(JetCLISemAnchor{module_path: "", kind: "trait", def_span: value.name_span, semantic_identity: None}) }
+            .Tag(value) -> if value.name == name { found = Val(JetCLISemAnchor{module_path: "", kind: "tag", def_span: value.name_span, semantic_identity: None}) }
+            .Distinct(value) -> if value.name == name { found = Val(JetCLISemAnchor{module_path: "", kind: "type", def_span: value.name_span, semantic_identity: None}) }
+            .TypeAlias(value) -> if value.name == name { found = Val(JetCLISemAnchor{module_path: "", kind: "type", def_span: value.name_span, semantic_identity: None}) }
+            else -> {}
+        }
+        if found != None -> return found
+    }
+    None
+}
+
+fn jet_cli_sem_declaration_ref(name: String, span: Span, ctx: JetCLISemWalk, modules: [JetDriverDocModule]) -> JetCLISemRef {
+    target := JetCLISemAnchor?{None}
+    loop doc_module in modules {
+        if doc_module.path != ctx.module_path -> next
+        if jet_cli_sem_declaration_kind(doc_module.items, name) == .Val(found) {
+            anchor := found.copy()
+            anchor.module_path = doc_module.path
+            target = Val(anchor)
+        }
+    }
+    if target == None {
+        loop doc_module in modules {
+            if doc_module.path == ctx.module_path -> next
+            if jet_cli_sem_declaration_kind(doc_module.items, name) == .Val(found) {
+                anchor := found.copy()
+                anchor.module_path = doc_module.path
+                target = Val(anchor)
+                break
+            }
+        }
+    }
+    JetCLISemRef{name: name, span: span, module_path: ctx.module_path, scope_identity: Val(jet_cli_sem_active_scope(ctx)), target: target, fact: None}
+}
+
+fn jet_cli_sem_state_marker_path(expr: Expr) -> NamedSpan? {
+    if expr == {
+        .Ident(name, span) -> return Val(NamedSpan{name: name, span: span})
+        .Field(base, member, span) -> {
+            inner :: jet_cli_sem_state_marker_path(base) ?? return None
+            return Val(NamedSpan{name: "{inner.name}.{member}", span: span})
+        }
+        else -> return None
+    }
+}
+
+fn jet_cli_sem_marker_expr(marker: Marker, slot: Int) -> Expr? {
+    position := 0
+    loop argument in marker.args {
+        if argument == .Expr(value) {
+            if position == slot -> return Val(value)
+            position += 1
+        }
+    }
+    None
+}
+
+fn jet_cli_sem_state_marker_refs_for_method(method: Func, db: &JetCLISemDB, ctx: JetCLISemWalk) {
+    loop marker in method.markers {
+        slots :: if {
+            marker.name == "State" -> [Int]{0}
+            marker.name == "Transition" -> [Int]{0, 1}
+            else -> [Int]{}
+        }
+        loop slot in slots {
+            expr :: jet_cli_sem_marker_expr(marker, slot) ?? next
+            path :: jet_cli_sem_state_marker_path(expr) ?? next
+            if path.name == "Entry" -> next
+            parts :: path.name.split(".").to_list()
+            &db.refs.push(jet_cli_sem_scoped_ref(parts[parts.len() - 1], path.span, ctx))
+        }
+    }
+}
+
+// Build.rs `collect_state_marker_references`.
+fn jet_cli_sem_state_marker_refs(item: Item, db: &JetCLISemDB, ctx: JetCLISemWalk) {
+    if item == {
+        .Struct(definition) -> {
+            loop method in definition.methods -> jet_cli_sem_state_marker_refs_for_method(method, &db, ctx)
+            loop block in definition.trait_impls {
+                loop method in block.methods -> jet_cli_sem_state_marker_refs_for_method(method, &db, ctx)
+            }
+        }
+        .Impl(implementation) -> loop method in implementation.methods -> jet_cli_sem_state_marker_refs_for_method(method, &db, ctx)
+        .Enum(definition) -> loop method in definition.methods -> jet_cli_sem_state_marker_refs_for_method(method, &db, ctx)
+        else -> {}
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Structural boundaries (Build.rs `record_node`, `structural_slot`).
+
+fn jet_cli_sem_record_node(db: &JetCLISemDB, ctx: &JetCLISemWalk, class: String, shape: String, span: Span) -> Int? {
+    if span.end < span.start -> return None
+    id :: db.nodes.len()
+    parent := Int?{None}
+    if ctx.structural_parents.len() > 0 -> parent = Val(ctx.structural_parents[ctx.structural_parents.len() - 1])
+    parent_key :: if parent == .Val(value) -> "{value}" else -> "-"
+    key :: "{parent_key}|{ctx.structural_slot}"
+    ordinal :: db.structural_ordinals.get(key) ?? 0
+    db.structural_ordinals[key] = ordinal + 1
+    &db.nodes.push(JetCLISemNode{id: id, parent: parent, slot: ctx.structural_slot, slot_kind: ctx.structural_slot_kind, ordinal: ordinal, class: class, shape: shape, module_path: ctx.module_path, span: span})
+    Val(id)
+}
+
+fn jet_cli_sem_is_lexical_slot(slot: String) -> Bool Never! {
+    slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
+}
+
+fn jet_cli_sem_slot_enter(db: &JetCLISemDB, ctx: &JetCLISemWalk, name: String, kind: String) -> JetCLISemSlotSave {
+    if jet_cli_sem_is_lexical_slot(name) && ctx.structural_parents.len() > 0 {
+        parent :: ctx.structural_parents[ctx.structural_parents.len() - 1]
+        parent_start :: db.nodes[parent].span.start
+        parent_end :: db.nodes[parent].span.end
+        exact_parent_end :: db.nodes[parent].class == "arm"
+        chosen := Span?{None}
+        loop span in ctx.block_spans {
+            if span.start < parent_start -> next
+            if exact_parent_end && !(span.end <= parent_end || parent_end <= span.start) -> next
+            if ctx.claimed_block_spans.has_key("{span.start}:{span.end}") -> next
+            if chosen == .Val(current) {
+                if span.start < current.start -> chosen = Val(span)
+            } else {
+                chosen = Val(span)
+            }
+        }
+        if chosen == .Val(span) {
+            ctx.claimed_block_spans["{span.start}:{span.end}"] = true
+            &db.slot_boundaries.push(JetCLISemSlotBoundary{parent: parent, slot: name, module_path: db.nodes[parent].module_path, span: span})
+        }
+    }
+    saved :: JetCLISemSlotSave{name: ctx.structural_slot, kind: ctx.structural_slot_kind}
+    ctx.structural_slot = name
+    ctx.structural_slot_kind = kind
+    saved
+}
+
+fn jet_cli_sem_slot_leave(ctx: &JetCLISemWalk, saved: JetCLISemSlotSave) Never! {
+    ctx.structural_slot = saved.name
+    ctx.structural_slot_kind = saved.kind
+}
+
+fn jet_cli_sem_push_parent(ctx: &JetCLISemWalk, id: Int?) Never! {
+    if id == .Val(value) -> &ctx.structural_parents.push(value)
+}
+
+fn jet_cli_sem_pop_parent(ctx: &JetCLISemWalk, id: Int?) Never! {
+    if id != None -> _ := &ctx.structural_parents.pop()
+}
+
+fn jet_cli_sem_type_node(db: &JetCLISemDB, ctx: &JetCLISemWalk, slot: String, kind: String, span: Span) {
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, kind)
+    _ := jet_cli_sem_record_node(&db, &ctx, "type", "type", span)
+    jet_cli_sem_slot_leave(&ctx, saved)
+}
+
+// Build.rs `record_func_type_nodes`.
+fn jet_cli_sem_func_type_nodes(function: Func, db: &JetCLISemDB, ctx: &JetCLISemWalk) {
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, "params", "list")
+    loop parameter in function.params -> _ := jet_cli_sem_record_node(&db, &ctx, "type", "type", parameter.ty_span)
+    jet_cli_sem_slot_leave(&ctx, saved)
+    if function.return_type_span == .Val(span) -> jet_cli_sem_type_node(&db, &ctx, "return_type", "scalar", span)
+}
+
+// Build.rs `item_span` and `item_shape`.
+fn jet_cli_sem_item_head(item: Item) -> NamedSpan Never! {
+    if item == {
+        .EffectDecl(x) -> NamedSpan{name: "EffectDecl", span: x.span}
+        .MarkerDecl(x) -> NamedSpan{name: "MarkerDecl", span: x.span}
+        .FactDecl(x) -> NamedSpan{name: "FactDecl", span: x.span}
+        .Func(x) -> NamedSpan{name: "Func", span: x.span}
+        .Struct(x) -> NamedSpan{name: "Struct", span: x.span}
+        .Enum(x) -> NamedSpan{name: "Enum", span: x.span}
+        .Distinct(x) -> NamedSpan{name: "Distinct", span: x.span}
+        .TypeAlias(x) -> NamedSpan{name: "TypeAlias", span: x.span}
+        .UnitFamily(x) -> NamedSpan{name: "UnitFamily", span: x.span}
+        .Trait(x) -> NamedSpan{name: "Trait", span: x.span}
+        .Tag(x) -> NamedSpan{name: "Tag", span: x.span}
+        .Impl(x) -> NamedSpan{name: "Impl", span: x.span}
+        .Const(x) -> NamedSpan{name: "Const", span: x.span}
+        .Test(x) -> NamedSpan{name: "Test", span: x.span}
+        .ExternRust(x) -> NamedSpan{name: "ExternRust", span: x.span}
+        .Module(x) -> NamedSpan{name: "Module", span: x.span}
+        .CModule(x) -> NamedSpan{name: "CModule", span: x.span}
+        .CodeModule(x) -> NamedSpan{name: "CodeModule", span: x.span}
+        .ErrorConv(x) -> NamedSpan{name: "ErrorConv", span: x.from_span}
+        .Migration(x) -> NamedSpan{name: "Migration", span: x.span}
+        .ProtocolDecl(x) -> NamedSpan{name: "ProtocolDecl", span: x.span}
+        .UserDerive(x) -> NamedSpan{name: "UserDerive", span: x.span}
+        .TemplateLoop(x) -> NamedSpan{name: "TemplateLoop", span: x.span}
+        .GenericModule(x) -> NamedSpan{name: "GenericModule", span: x.span}
+        .ModuleAlias(x) -> NamedSpan{name: "ModuleAlias", span: x.span}
+    }
+}
+
+fn jet_cli_sem_lvalue_start(target: LValue) -> Int Never! {
+    if target == {
+        .Local(_, name_span) -> name_span.start
+        .Index(base, _, _, _) -> expr_span(base).start
+        .Field(base, _, _) -> expr_span(base).start
+    }
+}
+
+// `Stmt::span` and the statement shape.
+fn jet_cli_sem_stmt_head(stmt: Stmt) -> NamedSpan {
+    if stmt == {
+        .Expr(expr) -> NamedSpan{name: "Expr", span: expr_span(expr)}
+        .Val(binding) -> NamedSpan{name: "Val", span: Span{start: binding.name_span.start, end: expr_span(binding.init).end}}
+        .Assign(target, _, _, value) -> NamedSpan{name: "Assign", span: Span{start: jet_cli_sem_lvalue_start(target), end: expr_span(value).end}}
+        .Return(_, span) -> NamedSpan{name: "Return", span: span}
+        .While(_, _, span, _, _) -> NamedSpan{name: "While", span: span}
+        .For(_, _, _, _, _, span, _, _, _) -> NamedSpan{name: "For", span: span}
+        .Switch(_, _, _, span) -> NamedSpan{name: "Switch", span: span}
+        .Break(span) -> NamedSpan{name: "Break", span: span}
+        .BreakValue(_, span) -> NamedSpan{name: "BreakValue", span: span}
+        .Continue(span) -> NamedSpan{name: "Continue", span: span}
+        .BreakLabel(_, span) -> NamedSpan{name: "BreakLabel", span: span}
+        .BreakLabelValue(_, _, _, span) -> NamedSpan{name: "BreakLabelValue", span: span}
+        .ContinueLabel(_, span) -> NamedSpan{name: "ContinueLabel", span: span}
+        .Loop(_, span, _, _) -> NamedSpan{name: "Loop", span: span}
+        .CountedLoop(_, _, _, _, span, _, _) -> NamedSpan{name: "CountedLoop", span: span}
+        .Unsafe(_, _, _, span) -> NamedSpan{name: "Unsafe", span: span}
+        .Impure(_, _, _, span) -> NamedSpan{name: "Impure", span: span}
+        .Reactive(_, span) -> NamedSpan{name: "Reactive", span: span}
+        .Shield(_, span) -> NamedSpan{name: "Shield", span: span}
+        .Switched(_, _, span) -> NamedSpan{name: "Switched", span: span}
+        .Region(_, _, _, span) -> NamedSpan{name: "Region", span: span}
+        .Policy(_, _, span) -> NamedSpan{name: "Policy", span: span}
+        .TaskGroup(_, _, _, _, span) -> NamedSpan{name: "TaskGroup", span: span}
+        .Layout(_, _, _, span) -> NamedSpan{name: "Layout", span: span}
+        .AuthorityScope(_, _, _, _, span) -> NamedSpan{name: "AuthorityScope", span: span}
+        .ComptimeIf(_, _, _, _, span, _) -> NamedSpan{name: "ComptimeIf", span: span}
+        .ComptimeSwitch(_, _, _, span) -> NamedSpan{name: "ComptimeSwitch", span: span}
+        .ComptimeBlock(_, _, span) -> NamedSpan{name: "ComptimeBlock", span: span}
+        .ContextBlock(_, _, span) -> NamedSpan{name: "ContextBlock", span: span}
+        .Live(_, span) -> NamedSpan{name: "Live", span: span}
+        .AssumeDet(_, _, _, span) -> NamedSpan{name: "AssumeDet", span: span}
+        .Transact(_, _, _, _, span) -> NamedSpan{name: "Transact", span: span}
+        .Yield(_, span) -> NamedSpan{name: "Yield", span: span}
+        .ScopeMember(_, _, _, _, _, _, _, span) -> NamedSpan{name: "ScopeMember", span: span}
+        .DeferClose(_, span) -> NamedSpan{name: "DeferClose", span: span}
+    }
+}
+
+// Build.rs `structural_expr_span`: a call spans its name through its last
+// argument (plus the closing parenthesis).
+fn jet_cli_sem_structural_expr_span(expr: Expr) -> Span {
+    if expr == {
+        .Call(call) -> {
+            end :: if call.args.len() == 0 -> call.name_span.end + 2 else -> jet_cli_sem_structural_expr_span(call.args[call.args.len() - 1].expr).end + 1
+            return Span{start: call.name_span.start, end: end}
+        }
+        .MethodCall(receiver, _, method_span, _, _, args, _, _, _, _, _) -> {
+            end :: if args.len() == 0 -> method_span.end + 2 else -> jet_cli_sem_structural_expr_span(args[args.len() - 1].expr).end + 1
+            return Span{start: jet_cli_sem_structural_expr_span(receiver).start, end: end}
+        }
+        else -> return expr_span(expr)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The walk (Build.rs `collect_item`, `collect_stmt`, `collect_expr`).
+
+fn jet_cli_sem_record_call(db: &JetCLISemDB, ctx: JetCLISemWalk, callee: String, span: Span) Never! {
+    frame :: ctx.caller ?? return
+    &db.calls.push(JetCLISemCall{caller: jet_cli_sem_effect_key(frame.owner, frame.name), callee: callee, module_path: ctx.module_path, span: span})
+}
+
+fn jet_cli_sem_allow_markers(markers: [Marker], site: String, db: &JetCLISemDB, ctx: JetCLISemWalk) Never! {
+    loop marker in markers {
+        if marker.name != "allow" -> next
+        loop argument in marker.args {
+            if argument == .Expr(value) {
+                if value == .Ident(lint_name, _) -> &db.bypasses.push(JetCLISemBypass{kind: "lint_allow", site: site, detail: lint_name, module_path: ctx.module_path, span: marker.span})
+            }
+        }
+    }
+}
+
+fn jet_cli_sem_param_defs(params: [Param], owner_identity: String, db: &JetCLISemDB, ctx: JetCLISemWalk) Never! {
+    loop parameter in params {
+        if parameter.name == "self" -> next
+        &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_local_identity(owner_identity, "param", parameter.name), parameter.name, parameter.name, parameter.name_span, JetCLISemKind.Param{ty: parameter.ty}))
+    }
+}
+
+fn jet_cli_sem_with_caller_body(frame: JetCLISemCallerFrame, slot: String, body: [Stmt], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    previous :: ctx.caller.copy()
+    ctx.caller = Val(frame)
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, "list")
+    jet_cli_sem_stmts(body, &db, &ctx, modules)
+    jet_cli_sem_slot_leave(&ctx, saved)
+    ctx.caller = previous
+}
+
+// One method of a type body, an impl, or a nested trait block. `params`
+// asks for the method's parameter definitions (the type body and impl
+// walks record them; nested trait blocks do not).
+fn jet_cli_sem_method(owner: String, method: Func, origin: String, origin_trait: String, params: Bool, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    jet_cli_sem_func_type_nodes(method, &db, &ctx)
+    identity :: jet_cli_sem_callable_identity(ctx.scope_identity, Val(owner), method.name)
+    &db.members.push(jet_cli_sem_method_fact(ctx, owner, method, origin, origin_trait))
+    &db.defs.push(jet_cli_sem_def(ctx, identity, method.name, jet_cli_sem_display(ctx, Val(owner), method.name), method.name_span, jet_cli_sem_callable_kind(method, ctx.source)))
+    if params -> jet_cli_sem_param_defs(method.params, identity, &db, ctx)
+    jet_cli_sem_with_caller_body(JetCLISemCallerFrame{name: method.name, owner: Val(owner), identity: identity}, "method_bodies", method.body, &db, &ctx, modules)
+}
+
+fn jet_cli_sem_trait_blocks(owner: String, blocks: [TraitImplBlock], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    loop block in blocks {
+        &db.refs.push(jet_cli_sem_declaration_ref(block.trait_name, block.trait_span, ctx, modules))
+        loop method in block.methods -> jet_cli_sem_method(owner, method, "trait_impl", block.trait_name, false, &db, &ctx, modules)
+    }
+}
+
+fn jet_cli_sem_derive_names(derives: [NamedSpan]) -> [String] Never! {
+    loop entry in derives -> entry.name
+}
+
+fn jet_cli_sem_type_def(ctx: JetCLISemWalk, name: String, span: Span, derives: [String], prefix: String) -> JetCLISemDef Never! {
+    jet_cli_sem_def(ctx, "{prefix}:{ctx.scope_identity}::{name}", name, jet_cli_sem_display(ctx, None, name), span, JetCLISemKind.Type{derives: derives})
+}
+
+fn jet_cli_sem_derive_body(body: [DeriveBodyItem], nested: Bool, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    loop body_item in body {
+        if body_item == {
+            .Item(item) -> jet_cli_sem_item(item, &db, &ctx, modules)
+            .Stmt(stmt) -> jet_cli_sem_stmt(stmt, &db, &ctx, modules)
+            .Loop(_, _, source, inner, _) -> {
+                jet_cli_sem_expr(source, &db, &ctx, modules)
+                if nested -> jet_cli_sem_derive_body(inner, false, &db, &ctx, modules)
+            }
+        }
+    }
+}
+
+fn jet_cli_sem_item(item: Item, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    head :: jet_cli_sem_item_head(item)
+    structural_id :: jet_cli_sem_record_node(&db, &ctx, "item", head.name, head.span)
+    jet_cli_sem_push_parent(&ctx, structural_id)
+    jet_cli_sem_state_marker_refs(item, &db, ctx)
+    if item == {
+        .EffectDecl(_) -> {}
+        .MarkerDecl(value) -> &db.defs.push(jet_cli_sem_type_def(ctx, value.name, value.name_span, [String]{}, "rule"))
+        .FactDecl(value) -> &db.defs.push(jet_cli_sem_type_def(ctx, value.name, value.name_span, [String]{}, "fact"))
+        .Func(f) -> {
+            jet_cli_sem_func_type_nodes(f, &db, &ctx)
+            identity :: jet_cli_sem_callable_identity(ctx.scope_identity, None, f.name)
+            if f.return_view_provenance == .Val(provenance) -> db.view_provenance[identity] = provenance
+            &db.defs.push(jet_cli_sem_def(ctx, identity, f.name, jet_cli_sem_display(ctx, None, f.name), f.name_span, jet_cli_sem_callable_kind(f, ctx.source)))
+            if f.is_unsafe -> &db.bypasses.push(JetCLISemBypass{kind: "unsafe_fn", site: f.name, detail: f.unsafe_reason ?? "", module_path: ctx.module_path, span: f.unsafe_span ?? f.name_span})
+            jet_cli_sem_param_defs(f.params, identity, &db, ctx)
+            jet_cli_sem_with_caller_body(JetCLISemCallerFrame{name: f.name, owner: None, identity: identity}, "body", f.body, &db, &ctx, modules)
+        }
+        .Struct(s) -> {
+            saved :: jet_cli_sem_slot_enter(&db, &ctx, "field_types", "list")
+            loop field in s.fields -> _ := jet_cli_sem_record_node(&db, &ctx, "type", "type", field.ty_span)
+            jet_cli_sem_slot_leave(&ctx, saved)
+            jet_cli_sem_allow_markers(s.serde_markers, s.name, &db, ctx)
+            loop field in s.fields -> jet_cli_sem_allow_markers(field.serde_markers, field.name, &db, ctx)
+            loop field in s.fields {
+                if field.computed == .Val(computed) {
+                    computed_saved :: jet_cli_sem_slot_enter(&db, &ctx, "computed_fields", "list")
+                    jet_cli_sem_expr(computed, &db, &ctx, modules)
+                    jet_cli_sem_slot_leave(&ctx, computed_saved)
+                }
+            }
+            fields :: loop field in s.fields -> JetCLISemField{name: field.name, ty: field.ty}
+            &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_type_identity(ctx.scope_identity, s.name), s.name, jet_cli_sem_display(ctx, None, s.name), s.name_span, JetCLISemKind.Struct{fields: fields, derives: jet_cli_sem_derive_names(s.derives)}))
+            if s.state == .Val(state) {
+                loop entry in state.states {
+                    identity :: "state:{ctx.scope_identity}::{s.name}.State.{entry.name}"
+                    parent :: "{s.name}.State"
+                    &db.defs.push(jet_cli_sem_def(ctx, identity, entry.name, jet_cli_sem_display(ctx, Val(parent), entry.name), entry.span, JetCLISemKind.EnumVariant{parent: parent}))
+                    &db.members.push(jet_cli_sem_member(ctx, parent, entry.name, identity, "variant", "type_body", "", "{s.name}.State.{entry.name}", entry.span))
+                }
+            }
+            loop field in s.fields {
+                identity :: jet_cli_sem_member_identity(ctx.scope_identity, s.name, "field", field.name)
+                &db.defs.push(jet_cli_sem_def(ctx, identity, field.name, jet_cli_sem_display(ctx, Val(s.name), field.name), field.name_span, JetCLISemKind.Field{ty: field.ty, parent: s.name}))
+                &db.members.push(jet_cli_sem_member(ctx, s.name, field.name, identity, "field", "type_body", "", "{field.name}: {type_name(field.ty)}", field.name_span))
+            }
+            loop method in s.methods -> jet_cli_sem_method(s.name, method, "type_body", "", true, &db, &ctx, modules)
+            jet_cli_sem_trait_blocks(s.name, s.trait_impls, &db, &ctx, modules)
+        }
+        .Enum(e) -> {
+            loop variant in e.variants {
+                if variant.payload == {
+                    .Unit -> {}
+                    .Single(_, span) -> jet_cli_sem_type_node(&db, &ctx, "variant_types", "list", span)
+                    .Named(fields) -> {
+                        saved :: jet_cli_sem_slot_enter(&db, &ctx, "variant_types", "list")
+                        loop field in fields -> _ := jet_cli_sem_record_node(&db, &ctx, "type", "type", field.ty_span)
+                        jet_cli_sem_slot_leave(&ctx, saved)
+                    }
+                }
+            }
+            variants :: loop variant in e.variants -> variant.name
+            &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_type_identity(ctx.scope_identity, e.name), e.name, jet_cli_sem_display(ctx, None, e.name), e.name_span, JetCLISemKind.Enum{variants: variants, derives: jet_cli_sem_derive_names(e.derives)}))
+            loop variant in e.variants {
+                identity :: jet_cli_sem_member_identity(ctx.scope_identity, e.name, "variant", variant.name)
+                &db.defs.push(jet_cli_sem_def(ctx, identity, variant.name, jet_cli_sem_display(ctx, Val(e.name), variant.name), variant.name_span, JetCLISemKind.EnumVariant{parent: e.name}))
+                &db.members.push(jet_cli_sem_member(ctx, e.name, variant.name, identity, "variant", "type_body", "", variant.name, variant.name_span))
+            }
+            loop method in e.methods -> jet_cli_sem_method(e.name, method, "type_body", "", false, &db, &ctx, modules)
+            jet_cli_sem_trait_blocks(e.name, e.trait_impls, &db, &ctx, modules)
+        }
+        .Trait(t) -> {
+            &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_type_identity(ctx.scope_identity, t.name), t.name, jet_cli_sem_display(ctx, None, t.name), t.name_span, JetCLISemKind.Trait))
+            loop sig in t.methods {
+                callable :: jet_cli_sem_trait_callable(sig, ctx.source)
+                identity :: "method:{ctx.scope_identity}::{t.name}.{sig.name}"
+                &db.defs.push(jet_cli_sem_def(ctx, identity, sig.name, jet_cli_sem_display(ctx, Val(t.name), sig.name), sig.name_span, JetCLISemKind.Function{callable: callable}))
+                return_type :: failure_contract_effective_type(failure_contract_of_function(sig.return_type, None))
+                &db.members.push(jet_cli_sem_member(ctx, t.name, sig.name, identity, "method", "trait_requirement", t.name, jet_cli_sem_fn_signature(sig.name, callable, Val(return_type), None), sig.name_span))
+            }
+        }
+        .Tag(t) -> &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_type_identity(ctx.scope_identity, t.name), t.name, jet_cli_sem_display(ctx, None, t.name), t.name_span, JetCLISemKind.Tag))
+        .Impl(i) -> {
+            &db.refs.push(jet_cli_sem_declaration_ref(i.type_name, i.type_span, ctx, modules))
+            if i.trait_name == .Val(trait_name) {
+                if i.trait_span == .Val(trait_span) -> &db.refs.push(jet_cli_sem_declaration_ref(trait_name, trait_span, ctx, modules))
+            }
+            origin :: if i.trait_name != None -> "trait_impl" else -> "inherent_impl"
+            loop method in i.methods -> jet_cli_sem_method(i.type_name, method, origin, i.trait_name ?? "", true, &db, &ctx, modules)
+        }
+        .Const(c) -> {
+            &db.defs.push(jet_cli_sem_def(ctx, "const:{ctx.scope_identity}::{c.name}", c.name, jet_cli_sem_display(ctx, None, c.name), c.name_span, JetCLISemKind.Const))
+            saved :: jet_cli_sem_slot_enter(&db, &ctx, "value", "scalar")
+            jet_cli_sem_expr(c.value, &db, &ctx, modules)
+            jet_cli_sem_slot_leave(&ctx, saved)
+        }
+        .Test(t) -> {
+            saved :: jet_cli_sem_slot_enter(&db, &ctx, "body", "list")
+            jet_cli_sem_stmts(t.body, &db, &ctx, modules)
+            jet_cli_sem_slot_leave(&ctx, saved)
+        }
+        .ExternRust(block) -> {
+            loop function in block.functions {
+                &db.defs.push(jet_cli_sem_def(ctx, "fn:{ctx.scope_identity}::{function.name}", function.name, jet_cli_sem_display(ctx, None, function.name), function.name_span, JetCLISemKind.Function{callable: JetCLISemCallable{
+                    params: jet_cli_sem_params(function.params, ctx.source, false),
+                    signature_facts_available: true,
+                    return_type: function.return_type,
+                    failure_contract: None,
+                    failure_unavailable: Val(JetCLISemUnavailable{required_stage: "Typed", reason: "extern Jet boundary has no checked failure contract"}),
+                    foreign_boundary: true,
+                    effects: None,
+                    effect_via: None,
+                    policies: [CallablePolicy]{},
+                    generic_parameters: None,
+                    generic_unavailable: Val(JetCLISemUnavailable{required_stage: "Typed", reason: "extern declarations expose no generic parameter facts"}),
+                }}))
+            }
+        }
+        .Module(m) -> &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_module_identity(ctx.scope_identity, m.name), m.name, jet_cli_sem_display(ctx, None, m.name), m.name_span, JetCLISemKind.Module))
+        .CModule(_) -> {}
+        .CodeModule(m) -> {
+            identity :: if m.instance_identity == .Val(instance) -> "instance:{instance.fingerprint}" else -> jet_cli_sem_module_identity(ctx.scope_identity, m.name)
+            &db.defs.push(jet_cli_sem_def(ctx, identity, m.name, jet_cli_sem_display(ctx, None, m.name), m.name_span, JetCLISemKind.Module))
+            if m.body == .Val(body) {
+                previous_scope :: ctx.scope_identity.copy()
+                previous_prefix :: ctx.display_prefix.copy()
+                ctx.scope_identity = identity
+                ctx.display_prefix = "{previous_prefix}{m.name}."
+                saved :: jet_cli_sem_slot_enter(&db, &ctx, "items", "list")
+                loop nested in body -> jet_cli_sem_item(nested, &db, &ctx, modules)
+                jet_cli_sem_slot_leave(&ctx, saved)
+                ctx.scope_identity = previous_scope
+                ctx.display_prefix = previous_prefix
+            }
+        }
+        .Distinct(value) -> {
+            &db.defs.push(jet_cli_sem_type_def(ctx, value.name, value.name_span, jet_cli_sem_derive_names(value.derives), "type"))
+            jet_cli_sem_type_node(&db, &ctx, "base", "scalar", value.base_span)
+        }
+        .TypeAlias(value) -> {
+            &db.defs.push(jet_cli_sem_type_def(ctx, value.name, value.name_span, [String]{}, "type"))
+            jet_cli_sem_type_node(&db, &ctx, "target", "scalar", value.target_span)
+        }
+        .UnitFamily(value) -> {
+            &db.defs.push(jet_cli_sem_type_def(ctx, value.family, value.family_span, [String]{}, "type"))
+            loop member in value.members {
+                &db.defs.push(jet_cli_sem_def(ctx, "unit:{ctx.scope_identity}::{member.name}", member.name, jet_cli_sem_display(ctx, None, member.name), member.name_span, JetCLISemKind.Const))
+            }
+        }
+        .ErrorConv(_) -> {}
+        .Migration(_) -> {}
+        .ProtocolDecl(value) -> {
+            &db.defs.push(jet_cli_sem_type_def(ctx, value.name, value.name_span, [String]{}, "type"))
+            loop message in value.messages {
+                &db.defs.push(jet_cli_sem_def(ctx, "protocol:{ctx.scope_identity}::{message.name}", message.name, jet_cli_sem_display(ctx, Val(value.name), message.name), message.name_span, JetCLISemKind.EnumVariant{parent: value.name}))
+            }
+        }
+        .UserDerive(value) -> {
+            &db.refs.push(jet_cli_sem_scoped_ref(value.trait_name, value.trait_span, ctx))
+            saved :: jet_cli_sem_slot_enter(&db, &ctx, "body", "list")
+            jet_cli_sem_derive_body(value.body, true, &db, &ctx, modules)
+            jet_cli_sem_slot_leave(&ctx, saved)
+        }
+        .TemplateLoop(value) -> {
+            source_saved :: jet_cli_sem_slot_enter(&db, &ctx, "source", "scalar")
+            jet_cli_sem_expr(value.source, &db, &ctx, modules)
+            jet_cli_sem_slot_leave(&ctx, source_saved)
+            saved :: jet_cli_sem_slot_enter(&db, &ctx, "body", "list")
+            jet_cli_sem_derive_body(value.body, false, &db, &ctx, modules)
+            jet_cli_sem_slot_leave(&ctx, saved)
+        }
+        .GenericModule(value) -> &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_module_identity(ctx.scope_identity, value.name), value.name, jet_cli_sem_display(ctx, None, value.name), value.name_span, JetCLISemKind.Module))
+        .ModuleAlias(value) -> &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_module_identity(ctx.scope_identity, value.name), value.name, jet_cli_sem_display(ctx, None, value.name), value.name_span, JetCLISemKind.Module))
+    }
+    jet_cli_sem_pop_parent(&ctx, structural_id)
+}
+
+// The checked contract of one trait requirement (Build.rs `Item::Trait`).
+fn jet_cli_sem_trait_callable(sig: TraitMethodSig, source: String) -> JetCLISemCallable {
+    JetCLISemCallable{
+        params: jet_cli_sem_params(sig.params, source, true),
+        signature_facts_available: true,
+        return_type: sig.return_type,
+        failure_contract: Val(failure_contract_of_function(sig.return_type, None)),
+        failure_unavailable: None,
+        foreign_boundary: false,
+        effects: sig.declared_effects,
+        effect_via: None,
+        policies: [CallablePolicy]{},
+        generic_parameters: Val([String]{}),
+        generic_unavailable: None,
+    }
+}
+
+fn jet_cli_sem_stmts(stmts: [Stmt], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    loop stmt in stmts -> jet_cli_sem_stmt(stmt, &db, &ctx, modules)
+}
+
+fn jet_cli_sem_body(slot: String, stmts: [Stmt], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, "list")
+    jet_cli_sem_stmts(stmts, &db, &ctx, modules)
+    jet_cli_sem_slot_leave(&ctx, saved)
+}
+
+fn jet_cli_sem_scalar(slot: String, expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, "scalar")
+    jet_cli_sem_expr(expr, &db, &ctx, modules)
+    jet_cli_sem_slot_leave(&ctx, saved)
+}
+
+fn jet_cli_sem_list(slot: String, exprs: [Expr], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, "list")
+    loop expr in exprs -> jet_cli_sem_expr(expr, &db, &ctx, modules)
+    jet_cli_sem_slot_leave(&ctx, saved)
+}
+
+fn jet_cli_sem_local_def(name: String, span: Span, kind: String, mutable: Bool, ty: Type?, db: &JetCLISemDB, ctx: JetCLISemWalk) Never! {
+    &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_local_identity(jet_cli_sem_active_scope(ctx), kind, name), name, name, span, JetCLISemKind.Local{mutable: mutable, ty: ty}))
+}
+
+// Build.rs `collect_loop_label_def` / `collect_loop_label_ref`.
+fn jet_cli_sem_label_def(label: NamedSpan?, db: &JetCLISemDB, ctx: JetCLISemWalk) Never! {
+    value :: label ?? return
+    jet_cli_sem_local_def(value.name, value.span, "loop_label", false, None, &db, ctx)
+}
+
+fn jet_cli_sem_label_ref(name: String, span: Span, db: &JetCLISemDB, ctx: JetCLISemWalk) {
+    &db.refs.push(jet_cli_sem_scoped_ref(name, Span{start: span.start, end: span.start + name.bytes().len()}, ctx))
+}
+
+fn jet_cli_sem_arms(arms: [SwitchArm], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, "arms", "list")
+    loop arm in arms {
+        arm_id :: jet_cli_sem_record_node(&db, &ctx, "arm", "switch_arm", arm.span)
+        jet_cli_sem_push_parent(&ctx, arm_id)
+        jet_cli_sem_scalar("condition", arm.cond, &db, &ctx, modules)
+        jet_cli_sem_body("body", arm.body, &db, &ctx, modules)
+        if arm_id == .Val(id) {
+            has_boundary := false
+            loop boundary in db.slot_boundaries {
+                if boundary.parent == id && boundary.slot == "body" -> has_boundary = true
+            }
+            if !has_boundary && arm.body.len() == 1 -> &db.slot_boundaries.push(JetCLISemSlotBoundary{parent: id, slot: "body", module_path: ctx.module_path, span: jet_cli_sem_stmt_head(arm.body[0]).span})
+        }
+        jet_cli_sem_pop_parent(&ctx, arm_id)
+    }
+    jet_cli_sem_slot_leave(&ctx, saved)
+}
+
+fn jet_cli_sem_stmt(stmt: Stmt, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    head :: jet_cli_sem_stmt_head(stmt)
+    structural_id :: jet_cli_sem_record_node(&db, &ctx, "stmt", head.name, head.span)
+    jet_cli_sem_push_parent(&ctx, structural_id)
+    if stmt == {
+        .Val(binding) -> jet_cli_sem_binding(binding, &db, &ctx, modules)
+        .Expr(expr) -> jet_cli_sem_scalar("value", expr, &db, &ctx, modules)
+        .Yield(expr, _) -> jet_cli_sem_scalar("value", expr, &db, &ctx, modules)
+        .DeferClose(close, _) -> jet_cli_sem_scalar("close", close, &db, &ctx, modules)
+        .Assign(target, _, _, value) -> {
+            jet_cli_sem_lvalue(target, &db, &ctx, modules)
+            jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        }
+        .Return(value, _) -> if value == .Val(expr) -> jet_cli_sem_scalar("value", expr, &db, &ctx, modules)
+        .BreakValue(value, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        .BreakLabelValue(name, name_span, value, _) -> {
+            jet_cli_sem_label_ref(name, name_span, &db, ctx)
+            jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        }
+        .While(cond, body, _, _, label) -> {
+            jet_cli_sem_label_def(label, &db, ctx)
+            jet_cli_sem_scalar("condition", cond, &db, &ctx, modules)
+            jet_cli_sem_body("body", body, &db, &ctx, modules)
+        }
+        .For(var, var_span, var2, kind, body, _, _, label, _) -> {
+            jet_cli_sem_label_def(label, &db, ctx)
+            jet_cli_sem_local_def(var, var_span, "local", false, None, &db, ctx)
+            if var2 == .Val(second) -> jet_cli_sem_local_def(second.name, second.span, "local", false, None, &db, ctx)
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    jet_cli_sem_scalar("range_start", start, &db, &ctx, modules)
+                    jet_cli_sem_scalar("range_end", end, &db, &ctx, modules)
+                    if step == .Val(value) -> jet_cli_sem_scalar("range_step", value, &db, &ctx, modules)
+                }
+                .In(collection, step) -> {
+                    jet_cli_sem_scalar("source", collection, &db, &ctx, modules)
+                    if step == .Val(value) -> jet_cli_sem_scalar("stride", value, &db, &ctx, modules)
+                }
+            }
+            jet_cli_sem_body("body", body, &db, &ctx, modules)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            jet_cli_sem_scalar("subject", subject, &db, &ctx, modules)
+            jet_cli_sem_arms(arms, &db, &ctx, modules)
+            if else_body == .Val(body) -> jet_cli_sem_body("else_body", body, &db, &ctx, modules)
+        }
+        .CountedLoop(init, cond, step, body, _, _, label) -> {
+            jet_cli_sem_label_def(label, &db, ctx)
+            jet_cli_sem_local_def(init.name, init.name_span, "local", true, None, &db, ctx)
+            jet_cli_sem_scalar("init", init.init, &db, &ctx, modules)
+            jet_cli_sem_scalar("condition", cond, &db, &ctx, modules)
+            if step == .Val(afterthought) {
+                saved :: jet_cli_sem_slot_enter(&db, &ctx, "afterthought", "scalar")
+                jet_cli_sem_stmt(afterthought, &db, &ctx, modules)
+                jet_cli_sem_slot_leave(&ctx, saved)
+            }
+            jet_cli_sem_body("body", body, &db, &ctx, modules)
+        }
+        .Unsafe(audit, _, body, span) -> {
+            &db.bypasses.push(JetCLISemBypass{kind: "unsafe_region", site: jet_cli_sem_active_scope(ctx), detail: audit ?? "", module_path: ctx.module_path, span: span})
+            jet_cli_sem_body("body", body, &db, &ctx, modules)
+        }
+        .Loop(body, _, _, label) -> {
+            jet_cli_sem_label_def(label, &db, ctx)
+            jet_cli_sem_body("body", body, &db, &ctx, modules)
+        }
+        .Impure(_, _, body, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Transact(_, _, body, _, _) | .AssumeDet(_, _, body, _) -> jet_cli_sem_body("body", body, &db, &ctx, modules)
+        .Break(_) | .Continue(_) -> {}
+        .BreakLabel(name, span) | .ContinueLabel(name, span) -> jet_cli_sem_label_ref(name, span, &db, ctx)
+        .ComptimeBlock(body, _, _) -> jet_cli_sem_body("body", body, &db, &ctx, modules)
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            jet_cli_sem_scalar("condition", cond, &db, &ctx, modules)
+            jet_cli_sem_body("then_body", then_body, &db, &ctx, modules)
+            if else_body == .Val(body) -> jet_cli_sem_body("else_body", body, &db, &ctx, modules)
+        }
+        .ContextBlock(fields, body, _) -> {
+            values :: loop field in fields -> field.value
+            jet_cli_sem_list("fields", values, &db, &ctx, modules)
+            jet_cli_sem_body("body", body, &db, &ctx, modules)
+        }
+        .Live(body, _) -> jet_cli_sem_body("body", body, &db, &ctx, modules)
+        .ScopeMember(_, _, _, _, body, _, _, _) -> jet_cli_sem_body("body", body, &db, &ctx, modules)
+    }
+    jet_cli_sem_pop_parent(&ctx, structural_id)
+}
+
+fn jet_cli_sem_lvalue(target: LValue, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    if target == {
+        .Local(name, name_span) -> &db.refs.push(jet_cli_sem_scoped_ref(name, name_span, ctx))
+        .Index(base, index, _, _) -> {
+            jet_cli_sem_scalar("target_base", base, &db, &ctx, modules)
+            jet_cli_sem_scalar("target_index", index, &db, &ctx, modules)
+        }
+        .Field(base, _, _) -> jet_cli_sem_scalar("target_base", base, &db, &ctx, modules)
+    }
+}
+fn jet_cli_sem_bind_name(name: BindName) -> NamedSpan Never! {
+    if name.rename == .Val(rename) -> return NamedSpan{name: rename.name, span: rename.span}
+    NamedSpan{name: name.name, span: name.span}
+}
+
+
+fn jet_cli_sem_bind_names(pattern: BindPattern) -> [NamedSpan] Never! {
+    names := [NamedSpan]{}
+    if pattern == {
+        .Struct(_, _, fields, _, _) -> loop field in fields -> &names.push(jet_cli_sem_bind_name(field))
+        .List(elems, _) | .Tuple(elems, _) -> loop elem in elems -> &names.push(jet_cli_sem_bind_name(elem))
+        .Refutable(_, _, bound, _) -> loop elem in bound -> &names.push(NamedSpan{name: elem.name, span: elem.span})
+    }
+    names
+}
+
+// Build.rs `collect_binding`.
+fn jet_cli_sem_binding(binding: Binding, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    if binding.ty_span == .Val(span) -> jet_cli_sem_type_node(&db, &ctx, "type", "scalar", span)
+    if binding.pattern == .Val(pattern) {
+        jet_cli_sem_scalar("initializer", binding.init, &db, &ctx, modules)
+        loop name in jet_cli_sem_bind_names(pattern) -> jet_cli_sem_local_def(name.name, name.span, "local", binding.mutable, None, &db, ctx)
+        return
+    }
+    jet_cli_sem_local_def(binding.name, binding.name_span, "local", binding.mutable, binding.ty, &db, ctx)
+    jet_cli_sem_scalar("initializer", binding.init, &db, &ctx, modules)
+}
+
+fn jet_cli_sem_arithmetic_operation(fact: ArithmeticPolicyFact) -> String? Never! {
+    operation :: fact.operation ?? return None
+    if operation == {
+        .Add -> Val("add")
+        .Sub -> Val("sub")
+        .Mul -> Val("mul")
+        .Neg -> Val("neg")
+        .Pow -> Val("pow")
+    }
+}
+
+fn jet_cli_sem_arithmetic_mode(fact: ArithmeticPolicyFact) -> String Never! {
+    if fact.mode == {
+        .Checked -> "checked"
+        .Wrapping -> "wrapping"
+        .Saturating -> "saturating"
+    }
+}
+
+fn jet_cli_sem_args(args: [CallArg], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    exprs :: loop argument in args -> argument.expr
+    jet_cli_sem_list("args", exprs, &db, &ctx, modules)
+}
+
+fn jet_cli_sem_block_body(slot: String, stmts: [Stmt], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    saved :: jet_cli_sem_slot_enter(&db, &ctx, slot, "list")
+    loop stmt in stmts {
+        if stmt == {
+            .Val(binding) -> jet_cli_sem_binding(binding, &db, &ctx, modules)
+            .Expr(expr) | .DeferClose(expr, _) -> jet_cli_sem_expr(expr, &db, &ctx, modules)
+            else -> {}
+        }
+    }
+    jet_cli_sem_slot_leave(&ctx, saved)
+}
+
+fn jet_cli_sem_method_call(receiver: Expr, method: String, method_span: Span, args: [CallArg], db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    jet_cli_sem_scalar("receiver", receiver, &db, &ctx, modules)
+    jet_cli_sem_record_call(&db, ctx, method, method_span)
+    &db.refs.push(jet_cli_sem_scoped_ref(method, method_span, ctx))
+    if method == "drop" {
+        reason := ""
+        if args.len() > 0 {
+            if args[0].expr == .Str(parts, _) {
+                if parts.len() == 1 {
+                    if parts[0] == .Lit(text) -> reason = text
+                }
+            }
+        }
+        &db.bypasses.push(JetCLISemBypass{kind: "explicit_drop", site: jet_cli_sem_active_scope(ctx), detail: reason, module_path: ctx.module_path, span: method_span})
+    }
+    jet_cli_sem_args(args, &db, &ctx, modules)
+}
+
+fn jet_cli_sem_expr(expr: Expr, db: &JetCLISemDB, ctx: &JetCLISemWalk, modules: [JetDriverDocModule]) {
+    structural_id :: jet_cli_sem_record_node(&db, &ctx, "expr", "expr", jet_cli_sem_structural_expr_span(expr))
+    jet_cli_sem_push_parent(&ctx, structural_id)
+    if expr == {
+        .PtrFromAddr(_, _, _, addr, _) -> jet_cli_sem_scalar("address", addr, &db, &ctx, modules)
+        .Ident(name, span) -> &db.refs.push(jet_cli_sem_scoped_ref(name, span, ctx))
+        .Call(call) -> {
+            loop argument in call.args {
+                fact :: argument.flags.arithmetic_policy ?? next
+                operation :: jet_cli_sem_arithmetic_operation(fact) ?? next
+                &db.arithmetic.push(JetCLISemArithmetic{operation: operation, policy: jet_cli_sem_arithmetic_mode(fact), module_path: ctx.module_path, operation_span: fact.operation_span, scope_span: fact.scope_span})
+            }
+            jet_cli_sem_record_call(&db, ctx, call.name, call.name_span)
+            &db.refs.push(jet_cli_sem_scoped_ref(call.name, call.name_span, ctx))
+            jet_cli_sem_args(call.args, &db, &ctx, modules)
+        }
+        .MethodCall(receiver, method, method_span, _, _, args, _, _, _, _, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
+        .OptMethodCall(receiver, method, method_span, _, args, _) -> jet_cli_sem_method_call(receiver, method, method_span, args, &db, &ctx, modules)
+        .Field(base, member, span) -> {
+            jet_cli_sem_scalar("base", base, &db, &ctx, modules)
+            &db.refs.push(jet_cli_sem_scoped_ref(member, span, ctx))
+        }
+        .OptField(base, member, member_span, _, _) -> {
+            jet_cli_sem_scalar("base", base, &db, &ctx, modules)
+            &db.refs.push(jet_cli_sem_scoped_ref(member, member_span, ctx))
+        }
+        .Binary(_, left, right, _) -> {
+            jet_cli_sem_scalar("lhs", left, &db, &ctx, modules)
+            jet_cli_sem_scalar("rhs", right, &db, &ctx, modules)
+        }
+        .CompareChain(operands, _, _, _) -> jet_cli_sem_list("operands", operands, &db, &ctx, modules)
+        .Unary(_, operand, _) -> jet_cli_sem_scalar("operand", operand, &db, &ctx, modules)
+        .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) -> jet_cli_sem_scalar("operand", value, &db, &ctx, modules)
+        .Index(base, index, _, _) -> {
+            jet_cli_sem_scalar("base", base, &db, &ctx, modules)
+            jet_cli_sem_scalar("index", index, &db, &ctx, modules)
+        }
+        .Slice(base, start, end, range, _) -> {
+            jet_cli_sem_scalar("base", base, &db, &ctx, modules)
+            if range == .Val(value) {
+                jet_cli_sem_scalar("range", value, &db, &ctx, modules)
+            } else {
+                jet_cli_sem_scalar("start", start, &db, &ctx, modules)
+                jet_cli_sem_scalar("end", end, &db, &ctx, modules)
+            }
+        }
+        .Range(start, end, _, _) -> {
+            jet_cli_sem_scalar("start", start, &db, &ctx, modules)
+            jet_cli_sem_scalar("end", end, &db, &ctx, modules)
+        }
+        .Str(parts, _) -> {
+            interpolations := [Expr]{}
+            loop part in parts {
+                if part == .Interp(inner, _) -> &interpolations.push(inner)
+            }
+            jet_cli_sem_list("interpolations", interpolations, &db, &ctx, modules)
+        }
+        .ListLit(elements, _) -> jet_cli_sem_list("items", elements, &db, &ctx, modules)
+        .MemberSpread(base, _, _) -> jet_cli_sem_scalar("base", base, &db, &ctx, modules)
+        .Spread(value, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        .MapLit(entries, _) -> {
+            keys :: loop entry in entries -> entry.key
+            values :: loop entry in entries -> entry.value
+            jet_cli_sem_list("keys", keys, &db, &ctx, modules)
+            jet_cli_sem_list("values", values, &db, &ctx, modules)
+        }
+        .TupleLit(fields, _, _) -> {
+            values :: loop field in fields -> field.value
+            jet_cli_sem_list("fields", values, &db, &ctx, modules)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> {
+            values :: loop field in fields -> field.value
+            jet_cli_sem_list("fields", values, &db, &ctx, modules)
+        }
+        .TypedLit(_, body, _) -> {
+            values :: if body == {
+                .Fields(fields) -> loop field in fields -> field.value
+                .Elements(elements) -> elements
+                .Entries(entries) -> {
+                    pairs := [Expr]{}
+                    loop entry in entries {
+                        &pairs.push(entry.key)
+                        &pairs.push(entry.value)
+                    }
+                    pairs
+                }
+                .Value(value) -> [Expr]{value}
+                .ByteText(_) | .Empty -> [Expr]{}
+            }
+            jet_cli_sem_list("body", values, &db, &ctx, modules)
+        }
+        .EnumLit(_, _, _, args, _, _) -> {
+            values :: loop argument in args -> if argument == {
+                .Positional(value) -> value
+                .Named(_, value) -> value
+            }
+            jet_cli_sem_list("args", values, &db, &ctx, modules)
+        }
+        .Tainted(value, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) -> jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+        .Try(value, _, _, note) -> {
+            jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+            if note == .Val(context) -> jet_cli_sem_scalar("note", context, &db, &ctx, modules)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            jet_cli_sem_scalar("value", value, &db, &ctx, modules)
+            if fallback == {
+                .Value(inner) -> jet_cli_sem_scalar("fallback", inner, &db, &ctx, modules)
+                .Block(body, inner, _) -> {
+                    jet_cli_sem_body("fallback_body", body, &db, &ctx, modules)
+                    if inner == .Val(result) -> jet_cli_sem_scalar("fallback", result, &db, &ctx, modules)
+                }
+                .Panic(_, args) -> {
+                    values :: loop argument in args -> argument.expr
+                    jet_cli_sem_list("fallback_args", values, &db, &ctx, modules)
+                }
+                .Return(inner, _) -> if inner == .Val(result) -> jet_cli_sem_scalar("fallback", result, &db, &ctx, modules)
+                .Break(_) | .Continue(_) -> {}
+                .BreakLabel(name, span) | .ContinueLabel(name, span) -> jet_cli_sem_label_ref(name, span, &db, ctx)
+            }
+        }
+        .PatternTest(subject, _, _) -> jet_cli_sem_scalar("subject", subject, &db, &ctx, modules)
+        .Lambda(lambda) -> {
+            loop parameter in lambda.params {
+                &db.defs.push(jet_cli_sem_def(ctx, jet_cli_sem_local_identity(jet_cli_sem_active_scope(ctx), "param", parameter.name), parameter.name, parameter.name, parameter.name_span, JetCLISemKind.Param{ty: parameter.ty ?? Type.Int}))
+            }
+            if lambda.body == {
+                .Expr(value) -> jet_cli_sem_scalar("body", value, &db, &ctx, modules)
+                .Block(stmts) -> jet_cli_sem_block_body("body", stmts, &db, &ctx, modules)
+            }
+        }
+        .CallValue(callee, args, _) -> {
+            jet_cli_sem_scalar("callee", callee, &db, &ctx, modules)
+            jet_cli_sem_args(args, &db, &ctx, modules)
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            jet_cli_sem_scalar("condition", cond, &db, &ctx, modules)
+            jet_cli_sem_block_body("then_body", then_body, &db, &ctx, modules)
+            jet_cli_sem_scalar("then_value", then_value, &db, &ctx, modules)
+            jet_cli_sem_block_body("else_body", else_body, &db, &ctx, modules)
+            jet_cli_sem_scalar("else_value", else_value, &db, &ctx, modules)
+        }
+        .ComptimeName(name, span, _) -> {
+            nul :: String.from_bytes([U8]{0}) ?? ""
+            if name.starts_with("{nul}jet.fact.") && jet_cli_sem_source_text(ctx.source, span) == "$origin" -> &db.refs.push(jet_cli_sem_scoped_ref("$origin", span, ctx))
+        }
+        .Paren(value, _) -> jet_cli_sem_scalar("inner", value, &db, &ctx, modules)
+        else -> {}
+    }
+    jet_cli_sem_pop_parent(&ctx, structural_id)
+}
+
+// ---------------------------------------------------------------------------
+// Program-level facts.
+
+// The module alias the walk scopes identities under (the name ledger's
+// `module_alias`): sema's module name for the module.
+fn jet_cli_sem_module_alias(doc_module: JetDriverDocModule) -> String Never! {
+    if doc_module.module_name != "" -> return doc_module.module_name
+    if doc_module.alias != "" -> return doc_module.alias
+    parts :: doc_module.path.split("/").to_list()
+    file :: parts[parts.len() - 1]
+    if file.ends_with(".jet") -> return file.slice(0, file.len() - 4)
+    file
+}
+
+// Build.rs `add_import_alias_definitions`: one module definition per import
+// binding, sorted by module, span, and name.
+fn jet_cli_sem_import_alias_defs(db: &JetCLISemDB, modules: [JetDriverDocModule]) {
+    loop doc_module in modules {
+        found := [JetCLISemDef]{}
+        loop import in doc_module.imports {
+            alias_name :: import.alias
+            bound_elsewhere := false
+            if import.kind == .Unqualified(_, _, _, _, _) {
+                loop other in doc_module.imports {
+                    if other.alias != alias_name -> next
+                    if other.kind == {
+                        .File(_, _) | .Module(_, _) -> bound_elsewhere = true
+                        else -> {}
+                    }
+                }
+            }
+            if !bound_elsewhere && import.alias_span.start < import.alias_span.end {
+                &found.push(JetCLISemDef{identity: "import:{doc_module.path}::{import.alias_span.start}..{import.alias_span.end}", name: alias_name, qualified_name: alias_name, def_span: import.alias_span, module_path: doc_module.path, kind: JetCLISemKind.Module})
+            }
+            if import.kind == .Unqualified(_, _, items, _, _) {
+                loop (index, imported) in items {
+                    if index >= import.local_spans.len() -> break
+                    span :: import.local_spans[index]
+                    if span.start >= span.end -> next
+                    local :: imported.alias ?? imported.original
+                    &found.push(JetCLISemDef{identity: "import:{doc_module.path}::{span.start}..{span.end}", name: local, qualified_name: local, def_span: span, module_path: doc_module.path, kind: JetCLISemKind.Module})
+                }
+            }
+        }
+        loop index in 1..<found.len() {
+            value :: found[index]
+            position := index
+            loop position > 0 && (found[position - 1].def_span.start > value.def_span.start || (found[position - 1].def_span.start == value.def_span.start && (found[position - 1].def_span.end > value.def_span.end || (found[position - 1].def_span.end == value.def_span.end && found[position - 1].name > value.name)))) {
+                found[position] = found[position - 1]
+                position -= 1
+            }
+            found[position] = value
+        }
+        loop definition in found -> &db.defs.push(definition)
+    }
+}
+
+// One checked function's effect summary under its qualified key.
+struct JetCLISemSummary {
+    key: String
+    local: String
+    raw_key: String
+    direct: [String]
+    direct_spans: [Span]
+    edges: [String]
+    raw_edges: [String]
+    solved: [String]
+    maximal: Bool
+    maximal_span: Span?
+}
+
+fn jet_cli_sem_sorted_unique(values: [String]) -> [String] Never! {
+    output := [String]{}
+    loop value in values {
+        if !output.contains(value) -> &output.push(value)
+    }
+    loop index in 1..<output.len() {
+        value :: output[index]
+        position := index
+        loop position > 0 && output[position - 1] > value {
+            output[position] = output[position - 1]
+            position -= 1
+        }
+        output[position] = value
+    }
+    output
+}
+
+// sema `symbol_id` keys are `kind:module:owner:name`; the effect graph keys
+// a function as `alias::name` or `alias::Owner::name`.
+fn jet_cli_sem_function_local_key(key: String) -> String? {
+    parts :: key.split(":").to_list()
+    if parts.len() < 4 -> return None
+    name :: parts[parts.len() - 1]
+    owner_parts := [String]{}
+    loop index in 2..<parts.len() - 1 -> &owner_parts.push(parts[index])
+    owner :: owner_parts.join(":")
+    if owner == "" -> return Val(name)
+    Val("{owner}::{name}")
+}
+
+fn jet_cli_sem_function_module(key: String) -> String {
+    parts :: key.split(":").to_list()
+    if parts.len() < 4 -> return ""
+    parts[1]
+}
+
+// Validation.rs `qualified_effect_facts` over the checked user functions:
+// every summary under `alias::key`, plus its short key when exactly one
+// module defines it.
+fn jet_cli_sem_summaries(modules: [JetDriverDocModule]) -> [JetCLISemSummary] {
+    summaries := [JetCLISemSummary]{}
+    module_aliases := [String: String]{}
+    loop doc_module in modules -> module_aliases[doc_module.module_name] = jet_cli_sem_module_alias(doc_module)
+    loop doc_module in modules {
+        alias :: jet_cli_sem_module_alias(doc_module)
+        loop function in doc_module.functions {
+            if function.synthetic -> next
+            local :: jet_cli_sem_function_local_key(function.key) ?? next
+            direct :: jet_cli_sem_sorted_unique(function.effects.direct)
+            spans := [Span]{}
+            loop effect_name in direct {
+                found := Span{start: 0, end: 0}
+                loop entry in function.effects.direct_spans {
+                    if entry.name == effect_name {
+                        found = entry.span
+                        break
+                    }
+                }
+                &spans.push(found)
+            }
+            edges := [String]{}
+            loop edge in function.effects.call_edges {
+                if edge == "__jet_panic__" {
+                    &edges.push(edge)
+                    next
+                }
+                edge_local :: jet_cli_sem_function_local_key(edge) ?? {
+                    &edges.push(edge)
+                    next
+                }
+                edge_alias :: module_aliases.get(jet_cli_sem_function_module(edge)) ?? {
+                    &edges.push(edge_local)
+                    next
+                }
+                &edges.push("{edge_alias}::{edge_local}")
+            }
+            maximal_span := Span?{None}
+            if function.effects.maximal -> maximal_span = Val(function.source_span)
+            &summaries.push(JetCLISemSummary{key: "{alias}::{local}", local: local, raw_key: function.key, direct: direct, direct_spans: spans, edges: jet_cli_sem_sorted_unique(edges), raw_edges: function.effects.call_edges, solved: jet_cli_sem_sorted_unique(function.effects.solved), maximal: function.effects.maximal, maximal_span: maximal_span})
+        }
+    }
+    shorts := [JetCLISemSummary]{}
+    loop summary in summaries {
+        count := 0
+        loop other in summaries {
+            if other.local == summary.local -> count += 1
+        }
+        if count == 1 && summary.local != summary.key {
+            short := summary.copy()
+            short.key = summary.local
+            &shorts.push(short)
+        }
+    }
+    loop short in shorts -> &summaries.push(short)
+    summaries
+}
+
+fn jet_cli_sem_summary(summaries: [JetCLISemSummary], key: String) -> JetCLISemSummary? Never! {
+    loop summary in summaries {
+        if summary.key == key -> return Val(summary)
+    }
+    None
+}
+
+fn jet_cli_sem_call_span(summary: JetCLISemSummary, callee: String, modules: [JetDriverDocModule]) -> Span? {
+    raw_callee := ""
+    loop edge in summary.raw_edges {
+        local :: jet_cli_sem_function_local_key(edge) ?? next
+        if callee == local || callee.ends_with("::{local}") {
+            raw_callee = edge
+            break
+        }
+    }
+    loop doc_module in modules {
+        loop fact in doc_module.call_facts {
+            if fact.caller_key != summary.raw_key -> next
+            target :: fact.callee ?? next
+            if target.key == raw_callee -> return Val(fact.span)
+        }
+    }
+    None
+}
+
+struct JetCLISemWitness {
+    path: [String]
+    spans: [Span]
+}
+
+// JSON.rs `convert_effects` `witness`: the first call path that reaches
+// `effect` from `function`.
+fn jet_cli_sem_witness(function: String, effect_name: String, summaries: [JetCLISemSummary], seen: [String], modules: [JetDriverDocModule]) -> JetCLISemWitness? {
+    if seen.contains(function) -> return None
+    visited := seen.copy()
+    &visited.push(function)
+    summary :: jet_cli_sem_summary(summaries, function) ?? return None
+    if summary.direct.contains(effect_name) {
+        spans := [Span]{}
+        loop (index, name) in summary.direct {
+            if name == effect_name -> &spans.push(summary.direct_spans[index])
+        }
+        return Val(JetCLISemWitness{path: [String]{function}, spans: spans})
+    }
+    if summary.maximal {
+        spans := [Span]{}
+        if summary.maximal_span == .Val(span) -> &spans.push(span)
+        return Val(JetCLISemWitness{path: [String]{function}, spans: spans})
+    }
+    loop callee in summary.edges {
+        callee_summary :: jet_cli_sem_summary(summaries, callee) ?? next
+        if !callee_summary.solved.contains(effect_name) -> next
+        found :: jet_cli_sem_witness(callee, effect_name, summaries, visited, modules) ?? next
+        path := [String]{function}
+        loop part in found.path -> &path.push(part)
+        spans := [Span]{}
+        if jet_cli_sem_call_span(summary, callee, modules) == .Val(span) -> &spans.push(span)
+        loop span in found.spans -> &spans.push(span)
+        return Val(JetCLISemWitness{path: path, spans: spans})
+    }
+    None
+}
+
+// JSON.rs `convert_effects`.
+fn jet_cli_sem_effects(summaries: [JetCLISemSummary], modules: [JetDriverDocModule]) -> [JetCLISemEffect] {
+    output := [JetCLISemEffect]{}
+    loop summary in summaries {
+        provenance := [JetCLISemEffectProvenance]{}
+        loop effect_name in summary.solved {
+            found :: jet_cli_sem_witness(summary.key, effect_name, summaries, [String]{}, modules) ?? next
+            &provenance.push(JetCLISemEffectProvenance{effect_name: effect_name, call_path: found.path, spans: found.spans})
+        }
+        &output.push(JetCLISemEffect{function: summary.key, direct: summary.direct, callees: summary.edges, inferred: summary.solved, maximal: summary.maximal, provenance: provenance})
+    }
+    loop index in 1..<output.len() {
+        value :: output[index]
+        position := index
+        loop position > 0 && output[position - 1].function > value.function {
+            output[position] = output[position - 1]
+            position -= 1
+        }
+        output[position] = value
+    }
+    output
+}
+
+// Build.rs `apply_inferred_effect_rows`: a function with no written row
+// shows its solved row, sourced at its name.
+fn jet_cli_sem_apply_inferred_rows(db: &JetCLISemDB, doc_module: JetDriverDocModule, summaries: [JetCLISemSummary]) {
+    prefix :: "{jet_cli_sem_module_alias(doc_module)}::"
+    inline_keys := [String: String]{}
+    loop item in doc_module.items {
+        if item == .CodeModule(code_module) {
+            if code_module.body == .Val(body) {
+                loop nested in body {
+                    if nested == .Func(function) -> inline_keys["{function.name_span.start}:{function.name_span.end}"] = "{code_module.name}.{function.name}"
+                }
+            }
+        }
+    }
+    loop index in 0..<db.defs.len() {
+        definition :: db.defs[index].copy()
+        if definition.module_path != doc_module.path -> next
+        callable :: jet_cli_sem_callable(definition) ?? next
+        if callable.foreign_boundary || callable.effects != None || callable.effect_via != None -> next
+        local_key := definition.name
+        if inline_keys.get("{definition.def_span.start}:{definition.def_span.end}") == .Val(key) {
+            local_key = key
+        } else if definition.identity.starts_with("method:") {
+            parts :: definition.identity.split("::").to_list()
+            tail :: parts[parts.len() - 1]
+            suffix :: ".{definition.name}"
+            if tail.ends_with(suffix) -> local_key = "{tail.slice(0, tail.len() - suffix.len())}::{definition.name}"
+        }
+        summary :: jet_cli_sem_summary(summaries, "{prefix}{local_key}") ?? next
+        rows :: loop effect_name in summary.solved -> EffectRowEntry{name: effect_name, span: definition.def_span}
+        updated := callable.copy()
+        updated.effects = Val(rows)
+        db.defs[index].kind = JetCLISemKind.Function{callable: updated}
+        ret :: if updated.failure_contract == .Val(contract) -> Val(failure_contract_effective_type(contract)) else -> updated.return_type
+        signature :: jet_cli_sem_fn_signature(definition.name, updated, ret, db.view_provenance.get(definition.identity))
+        loop member_index in 0..<db.members.len() {
+            if db.members[member_index].identity == definition.identity -> db.members[member_index].signature = signature
+        }
+    }
+}
+
+// Build.rs `definition_matches_target`.
+fn jet_cli_sem_matches_target(definition: JetCLISemDef, target: JetCLISemAnchor) -> Bool Never! {
+    if definition.module_path != target.module_path || definition.def_span.start != target.def_span.start || definition.def_span.end != target.def_span.end -> return false
+    kind :: target.kind
+    if definition.kind == {
+        .Module -> kind == "module" || kind == "import_alias"
+        .Function(_) -> kind == "function" || kind == "method" || kind == "extern"
+        .Struct(_, _) -> kind == "struct"
+        .Enum(_, _) -> kind == "enum"
+        .Trait -> kind == "trait"
+        .Tag -> kind == "tag"
+        .Type(_) -> kind == "type" || kind == "state" || kind == "protocol"
+        .Const -> kind == "const"
+        .EnumVariant(_) -> kind == "enum_variant" || kind == "variant" || kind == "state"
+        .Field(_, _) -> kind == "field"
+        .Local(_, _) -> kind == "local"
+        .Param(_) -> kind == "param"
+    }
+}
+
+// sema's reference kinds name a nominal `type`; the anchor names the
+// declaration's own kind, read from the definition at that span.
+fn jet_cli_sem_anchor_kind(db: JetCLISemDB, target: JetCLISemAnchor) -> String Never! {
+    if target.kind != "type" -> return target.kind
+    loop definition in db.defs {
+        if definition.module_path != target.module_path || definition.def_span.start != target.def_span.start || definition.def_span.end != target.def_span.end -> next
+        if definition.kind == {
+            .Struct(_, _) -> return "struct"
+            .Enum(_, _) -> return "enum"
+            .Trait -> return "trait"
+            .Tag -> return "tag"
+            else -> {}
+        }
+    }
+    target.kind
+}
+
+// `SymbolDB::align_reference_targets`.
+fn jet_cli_sem_align_reference_targets(db: &JetCLISemDB) {
+    loop index in 0..<db.refs.len() {
+        target :: db.refs[index].target ?? next
+        anchor := target.copy()
+        anchor.kind = jet_cli_sem_anchor_kind(db, target)
+        matches := [String]{}
+        loop definition in db.defs {
+            if jet_cli_sem_matches_target(definition, anchor) -> &matches.push(definition.identity)
+        }
+        if matches.len() == 1 -> anchor.semantic_identity = Val(matches[0])
+        db.refs[index].target = Val(anchor)
+    }
+}
+
+// Build.rs `definition_kind`.
+fn jet_cli_sem_definition_kind(kind: JetCLISemKind) -> String Never! {
+    if kind == {
+        .Module -> "module"
+        .Function(_) -> "function"
+        .Struct(_, _) -> "struct"
+        .Enum(_, _) -> "enum"
+        .Trait -> "trait"
+        .Tag -> "tag"
+        .Type(_) -> "type"
+        .Const -> "const"
+        .EnumVariant(_) -> "variant"
+        .Field(_, _) -> "field"
+        .Local(_, _) -> "local"
+        .Param(_) -> "param"
+    }
+}
+
+// JSON.rs `convert_kind` `ret`: the effective failure route when checked,
+// else the written return type.
+fn jet_cli_sem_callable_ret(callable: JetCLISemCallable) -> String? Never! {
+    if callable.failure_contract == .Val(contract) -> return Val(type_name(failure_contract_effective_type(contract)))
+    ty :: callable.return_type ?? return None
+    Val(type_name(ty))
+}
+
+// Build.rs `definition_signature`.
+fn jet_cli_sem_definition_signature(definition: JetCLISemDefinition) -> String {
+    if definition.def.kind == {
+        .Function(callable) -> {
+            contract :: loop parameter in callable.params -> "{parameter.label}:{jet_cli_sem_zone_name(parameter.zone)}:{if parameter.variadic -> "true" else -> "false"}"
+            types :: loop parameter in callable.params -> type_name(parameter.ty)
+            views := [String]{}
+            if definition.view_provenance == .Val(map) {
+                loop entry in map.entries -> &views.push(sema_compiler_index_view_provenance(entry.value))
+            }
+            "({types.join(",")})->{jet_cli_sem_callable_ret(callable) ?? "()"};call_contract=[{contract.join(",")}];view_source={views.join("|")}"
+        }
+        .Struct(fields, _) -> {
+            types :: loop field in fields -> type_name(field.ty)
+            "{{{types.join(",")}}}"
+        }
+        .Enum(variants, _) -> "variants:{variants.len()}"
+        else -> jet_cli_sem_definition_kind(definition.def.kind)
+    }
+}
+
+// Build.rs `normalize_definition`: source without whitespace or `//`
+// comments outside string literals.
+fn jet_cli_sem_normalize_definition(source: String) -> String {
+    bytes :: source.bytes()
+    output := [U8]{}
+    in_string := false
+    index := 0
+    loop index < bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        if in_string {
+            &output.push(bytes[index])
+            if code == 92 && index + 1 < bytes.len() {
+                &output.push(bytes[index + 1])
+                index += 2
+                next
+            }
+            if code == 34 -> in_string = false
+            index += 1
+            next
+        }
+        if code == 34 {
+            in_string = true
+            &output.push(bytes[index])
+            index += 1
+            next
+        }
+        if code == 47 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) == 47 {
+            index += 2
+            loop index < bytes.len() && Int.from_u8(bytes[index]) != 10 -> index += 1
+            index += 1
+            next
+        }
+        if code != 9 && code != 10 && code != 11 && code != 12 && code != 13 && code != 32 -> &output.push(bytes[index])
+        index += 1
+    }
+    String.from_bytes(output) ?? source
+}
+
+// Build.rs `build_definition_facts`: one fact per top-level item, for the
+// first non-local definition it declares.
+fn jet_cli_sem_definition_facts(definitions: [JetCLISemDefinition], nodes: [JetCLISemNode], modules: [JetDriverDocModule]) -> [JetCLISemDefinitionFact] {
+    output := [JetCLISemDefinitionFact]{}
+    loop node in nodes {
+        if node.parent != None || node.class != "item" -> next
+        source := String?{None}
+        loop doc_module in modules {
+            if doc_module.path == node.module_path {
+                source = Val(doc_module.source)
+                break
+            }
+        }
+        module_source :: source ?? next
+        chosen := JetCLISemDefinition?{None}
+        loop definition in definitions {
+            def :: definition.def
+            if def.module_path != node.module_path || def.def_span.start < node.span.start || def.def_span.start > node.span.end || def.def_span.end > node.span.end -> next
+            if def.kind == {
+                .Local(_, _) | .Param(_) | .Field(_, _) | .EnumVariant(_) -> next
+                else -> {}
+            }
+            if chosen == .Val(current) {
+                if def.def_span.start < current.def.def_span.start -> chosen = Val(definition)
+            } else {
+                chosen = Val(definition)
+            }
+        }
+        definition :: chosen ?? next
+        kind :: jet_cli_sem_definition_kind(definition.def.kind)
+        structural :: "{kind}|{definition.def.identity}"
+        signature :: "{kind}|{jet_cli_sem_definition_signature(definition)}"
+        &output.push(JetCLISemDefinitionFact{
+            stable_id: "def:{mir_sha256_hex(structural).slice(0, 16)}",
+            signature_id: "sig:{mir_sha256_hex(signature).slice(0, 16)}",
+            content_id: "sha256:{mir_sha256_hex(jet_cli_sem_normalize_definition(jet_cli_sem_source_text(module_source, node.span)))}",
+            human_identity: definition.def.identity,
+            name: definition.def.qualified_name,
+            kind: kind,
+            module_path: definition.def.module_path,
+            span: node.span,
+        })
+    }
+    loop index in 1..<output.len() {
+        value :: output[index]
+        position := index
+        loop position > 0 && (output[position - 1].stable_id > value.stable_id || (output[position - 1].stable_id == value.stable_id && output[position - 1].human_identity > value.human_identity)) {
+            output[position] = output[position - 1]
+            position -= 1
+        }
+        output[position] = value
+    }
+    output
+}
+
+fn jet_cli_sem_hex(bytes: [U8]) -> String Never! {
+    digits :: "0123456789abcdef".bytes()
+    output := [U8]{}
+    loop byte in bytes {
+        value :: Int.from_u8(byte)
+        &output.push(digits[value /% 16])
+        &output.push(digits[value % 16])
+    }
+    String.from_bytes(output) ?? ""
+}
+
+fn jet_cli_sem_exported(item: Item) -> String? Never! {
+    name := String?{None}
+    if item == {
+        .Func(value) -> if value.is_pub { name = Val(value.name) }
+        .Struct(value) -> if value.is_pub { name = Val(value.name) }
+        .Enum(value) -> if value.is_pub { name = Val(value.name) }
+        .Trait(value) -> if value.is_pub { name = Val(value.name) }
+        .Tag(value) -> if value.is_pub { name = Val(value.name) }
+        else -> {}
+    }
+    name
+}
+
+// `SymbolDB::finalize_index` instance rows.
+fn jet_cli_sem_instances(modules: [JetDriverDocModule]) -> [JetCLISemInstance] {
+    output := [JetCLISemInstance]{}
+    loop doc_module in modules {
+        loop item in doc_module.items {
+            if item == .CodeModule(code_module) {
+                identity :: code_module.instance_identity ?? next
+                exported := [String]{}
+                if code_module.body == .Val(body) {
+                    loop nested in body {
+                        if jet_cli_sem_exported(nested) == .Val(name) -> &exported.push(name)
+                    }
+                }
+                applications :: loop application in identity.applications -> JetCLISemInstanceApplication{name: application.name, module_path: application.source_module, semantic_identity: application.semantic_identity, span: application.span}
+                arguments :: loop key in identity.argument_keys -> jet_cli_sem_hex(key)
+                &output.push(JetCLISemInstance{name: code_module.name, module_path: doc_module.path, fingerprint: identity.fingerprint, full_key_hex: jet_cli_sem_hex(identity.full_key), template_definition_id: identity.definition_id, template_span: identity.template_span, arguments: arguments, argument_values: identity.argument_values, argument_provenance: identity.argument_provenance, applications: applications, exported_members: exported})
+            }
+        }
+    }
+    output
+}
+
+fn jet_cli_sem_output_kind(kind: OutputKind) -> String Never! {
+    if kind == {
+        .Library -> "library"
+        .Executable -> "executable"
+        .Service -> "service"
+        .Check -> "check"
+        .Environment -> "environment"
+        .Image -> "image"
+        .Bundle -> "bundle"
+        .System -> "system"
+        .Fleet -> "fleet"
+    }
+}
+
+// `SymbolDB::finalize_index` output rows.
+fn jet_cli_sem_outputs(modules: [JetDriverDocModule]) -> [JetCLISemOutput] {
+    output := [JetCLISemOutput]{}
+    loop doc_module in modules {
+        loop item in doc_module.items {
+            if item == .Const(value) {
+                resolved :: value.resolved_output ?? next
+                target_alias := jet_cli_sem_module_alias(doc_module)
+                if resolved.module_id >= 0 && resolved.module_id < modules.len() -> target_alias = jet_cli_sem_module_alias(modules[resolved.module_id])
+                params :: loop parameter in resolved.params -> type_name(parameter.ty)
+                return_type := String?{None}
+                if resolved.return_type == .Val(ty) -> return_type = Val(type_name(ty))
+                &output.push(JetCLISemOutput{binding: value.name, kind: jet_cli_sem_output_kind(resolved.kind), name: resolved.output_name, module_path: doc_module.path, span: value.span, entry: JetCLISemOutputEntry{
+                    identity: "{target_alias}::{resolved.semantic_name}",
+                    name: resolved.source_name,
+                    module_path: resolved.source_path,
+                    definition_span: resolved.definition,
+                    reference_span: resolved.reference,
+                    params: params,
+                    return_type: return_type,
+                    failure_contract: type_name(failure_contract_effective_type(resolved.failure_contract)),
+                    failure_source: failure_contract_source(resolved.failure_contract),
+                    authority: "safe_jet",
+                    effects: resolved.effects,
+                }})
+            }
+        }
+    }
+    output
+}
+
+// Build.rs `build_state_graphs`.
+fn jet_cli_sem_state_graphs(modules: [JetDriverDocModule]) -> [JetCLISemStateGraph] {
+    output := [JetCLISemStateGraph]{}
+    loop doc_module in modules {
+        facts :: sema_state_graph_facts(doc_module.items)
+        loop item in doc_module.items {
+            if item == .Struct(definition) {
+                state :: definition.state ?? next
+                loop fact in facts {
+                    if fact.type_name != definition.name -> next
+                    states := [JetCLISemStateNode]{}
+                    loop node in fact.states {
+                        span := Span{start: 0, end: 0}
+                        loop entry in state.states {
+                            if entry.name == node.name {
+                                span = entry.span
+                                break
+                            }
+                        }
+                        &states.push(JetCLISemStateNode{name: node.name, terminal: node.terminal, reachable: node.reachable, span: span})
+                    }
+                    transitions :: loop transition in fact.transitions -> JetCLISemStateTransition{operation: transition.operation, from: transition.from, to: transition.to}
+                    &output.push(JetCLISemStateGraph{owner: definition.name, module_path: doc_module.path, states: states, transitions: transitions})
+                    break
+                }
+            }
+        }
+    }
+    output
+}
+
+// JSON.rs `member_signatures`: sorted, deduplicated.
+fn jet_cli_sem_member_signatures(members: [JetCLISemMember], owner: String, origin: String, trait_name: String) -> [String] {
+    methods := [String]{}
+    loop member in members {
+        if member.owner == owner && member.origin == origin && member.origin_trait == trait_name -> &methods.push(member.signature)
+    }
+    jet_cli_sem_sorted_unique(methods)
+}
+
+fn jet_cli_sem_block_contract(block: TraitImplBlock, owner: String, members: [JetCLISemMember]) -> JetCLISemTraitContract {
+    associated :: loop entry in block.assoc_type_impls -> JetCLISemAssociatedType{name: entry.name, ty: Val(type_name(entry.ty))}
+    JetCLISemTraitContract{trait_name: block.trait_name, associated_types: associated, methods: jet_cli_sem_member_signatures(members, owner, "trait_impl", block.trait_name)}
+}
+
+// JSON.rs `collect_trait_contracts`.
+fn jet_cli_sem_collect_trait_contracts(items: [Item], owner: String, members: [JetCLISemMember], contracts: &[JetCLISemTraitContract]) {
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> {
+                parts :: implementation.type_name.split(".").to_list()
+                if parts[parts.len() - 1] != owner -> next
+                trait_name :: implementation.trait_name ?? next
+                associated :: loop entry in implementation.assoc_type_impls -> JetCLISemAssociatedType{name: entry.name, ty: Val(type_name(entry.ty))}
+                &contracts.push(JetCLISemTraitContract{trait_name: trait_name, associated_types: associated, methods: jet_cli_sem_member_signatures(members, owner, "trait_impl", trait_name)})
+            }
+            .Struct(structure) -> if structure.name == owner -> loop block in structure.trait_impls -> &contracts.push(jet_cli_sem_block_contract(block, owner, members))
+            .Enum(enumeration) -> if enumeration.name == owner -> loop block in enumeration.trait_impls -> &contracts.push(jet_cli_sem_block_contract(block, owner, members))
+            .CodeModule(code_module) -> if code_module.body == .Val(body) -> jet_cli_sem_collect_trait_contracts(body, owner, members, &contracts)
+            .GenericModule(generic) -> jet_cli_sem_collect_trait_contracts(generic.body, owner, members, &contracts)
+            else -> {}
+        }
+    }
+}
+
+// JSON.rs `find_declaration`.
+fn jet_cli_sem_find_declaration(items: [Item], span: Span) -> Item? {
+    loop item in items {
+        declaration := Span?{None}
+        if item == {
+            .Distinct(value) -> declaration = Val(value.name_span)
+            .Struct(value) -> declaration = Val(value.name_span)
+            .Enum(value) -> declaration = Val(value.name_span)
+            .Trait(value) -> declaration = Val(value.name_span)
+            else -> {}
+        }
+        if declaration == .Val(found) {
+            if found.start == span.start && found.end == span.end -> return Val(item)
+        }
+        nested_items := [Item]?{None}
+        if item == {
+            .CodeModule(code_module) -> nested_items = code_module.body
+            .GenericModule(generic) -> nested_items = Val(generic.body)
+            else -> {}
+        }
+        if nested_items == .Val(body) {
+            if jet_cli_sem_find_declaration(body, span) == .Val(nested) -> return Val(nested)
+        }
+    }
+    None
+}
+
+// JSON.rs `convert_defs` / `contract_metadata`.
+fn jet_cli_sem_convert_defs(db: JetCLISemDB, modules: [JetDriverDocModule]) -> [JetCLISemDefinition] {
+    output := [JetCLISemDefinition]{}
+    loop def in db.defs {
+        derives := [String]{}
+        nominal_base := String?{None}
+        contracts := [JetCLISemTraitContract]{}
+        needs_contracts := false
+        if def.kind == {
+            .Struct(_, values) | .Enum(_, values) | .Type(values) -> {
+                derives = values
+                needs_contracts = true
+            }
+            .Trait -> needs_contracts = true
+            else -> {}
+        }
+        if needs_contracts {
+            loop doc_module in modules {
+                if doc_module.path != def.module_path && doc_module.alias != def.module_path -> next
+                found :: jet_cli_sem_find_declaration(doc_module.items, def.def_span) ?? break
+                if found == {
+                    .Distinct(distinct) -> {
+                        nominal_base = Val(type_name(distinct.base))
+                        jet_cli_sem_collect_trait_contracts(doc_module.items, distinct.name, db.members, &contracts)
+                    }
+                    .Struct(structure) -> jet_cli_sem_collect_trait_contracts(doc_module.items, structure.name, db.members, &contracts)
+                    .Enum(enumeration) -> jet_cli_sem_collect_trait_contracts(doc_module.items, enumeration.name, db.members, &contracts)
+                    .Trait(trait_def) -> {
+                        associated :: loop entry in trait_def.assoc_types -> JetCLISemAssociatedType{name: entry.name, ty: None}
+                        &contracts.push(JetCLISemTraitContract{trait_name: trait_def.name, associated_types: associated, methods: jet_cli_sem_member_signatures(db.members, trait_def.name, "trait_requirement", trait_def.name)})
+                    }
+                    else -> {}
+                }
+                break
+            }
+        }
+        &output.push(JetCLISemDefinition{def: def, view_provenance: db.view_provenance.get(def.identity), derives: derives, nominal_base: nominal_base, trait_contracts: contracts})
+    }
+    output
+}
+
+// Build.rs `build_symbol_db` + `SymbolDB::finalize_index` (Build.rs
+// `build_index`): the semantic index of the checked user modules.
+// `effect_projection` is the application authority of the same program.
+fn jet_cli_build_semindex(modules: [JetDriverDocModule], effect_projection: JetCLIAuthority) -> JetCLISemIndex {
+    db := jet_cli_sem_db()
+    module_paths := [String: String]{}
+    loop doc_module in modules -> module_paths[doc_module.module_name] = doc_module.path
+    summaries :: jet_cli_sem_summaries(modules)
+    loop doc_module in modules {
+        block_spans := doc_module.block_spans.copy()
+        loop index in 1..<block_spans.len() {
+            value :: block_spans[index].copy()
+            position := index
+            loop position > 0 && block_spans[position - 1].start > value.start {
+                block_spans[position] = block_spans[position - 1]
+                position -= 1
+            }
+            block_spans[position] = value
+        }
+        ctx := JetCLISemWalk{
+            module_path: doc_module.path,
+            source: doc_module.source,
+            scope_identity: jet_cli_sem_root_identity(jet_cli_sem_module_alias(doc_module)),
+            display_prefix: "",
+            caller: None,
+            structural_parents: [Int]{},
+            structural_slot: "root",
+            structural_slot_kind: "list",
+            block_spans: block_spans,
+            claimed_block_spans: [String: Bool]{},
+            references: doc_module.name_references,
+            module_paths: module_paths,
+        }
+        loop item in doc_module.items -> jet_cli_sem_item(item, &db, &ctx, modules)
+        jet_cli_sem_apply_inferred_rows(&db, doc_module, summaries)
+    }
+    jet_cli_sem_import_alias_defs(&db, modules)
+    loop doc_module in modules {
+        loop item in doc_module.items {
+            if item == .CodeModule(instance) {
+                identity :: instance.instance_identity ?? next
+                semantic :: "instance:{identity.fingerprint}"
+                loop application in identity.applications {
+                    present := false
+                    loop definition in db.defs {
+                        if definition.identity == semantic && definition.def_span.start == application.span.start && definition.def_span.end == application.span.end && definition.module_path == application.source_module -> present = true
+                    }
+                    if !present -> &db.defs.push(JetCLISemDef{identity: application.semantic_identity, name: application.name, qualified_name: application.name, def_span: application.span, module_path: application.source_module, kind: JetCLISemKind.Module})
+                }
+            }
+        }
+    }
+    jet_cli_sem_align_reference_targets(&db)
+    definitions :: jet_cli_sem_convert_defs(db, modules)
+    definition_facts :: jet_cli_sem_definition_facts(definitions, db.nodes, modules)
+    derivations :: loop fact in definition_facts -> derivation_record(fact.stable_id, fact.human_identity, "jet-sema", MIRDerivationMethod.StaticDerivation, "checked-definition", [String]{fact.signature_id, fact.content_id}, derivation_identity(fact.content_id, fact.signature_id, "", fact.module_path))
+    arithmetic := db.arithmetic.copy()
+    loop index in 1..<arithmetic.len() {
+        value :: arithmetic[index].copy()
+        position := index
+        loop position > 0 && (arithmetic[position - 1].module_path > value.module_path || (arithmetic[position - 1].module_path == value.module_path && (arithmetic[position - 1].operation_span.start > value.operation_span.start || (arithmetic[position - 1].operation_span.start == value.operation_span.start && arithmetic[position - 1].operation_span.end > value.operation_span.end)))) {
+            arithmetic[position] = arithmetic[position - 1]
+            position -= 1
+        }
+        arithmetic[position] = value
+    }
+    JetCLISemIndex{
+        definitions: definitions,
+        definition_facts: definition_facts,
+        derivations: derivations,
+        instances: jet_cli_sem_instances(modules),
+        outputs: jet_cli_sem_outputs(modules),
+        state_graphs: jet_cli_sem_state_graphs(modules),
+        effect_projection: effect_projection,
+        references: db.refs,
+        calls: db.calls,
+        effects: jet_cli_sem_effects(summaries, modules),
+        arithmetic: arithmetic,
+        members: db.members,
+        nodes: db.nodes,
+        slot_boundaries: db.slot_boundaries,
+        bypasses: db.bypasses,
+    }
+}
+
+// jet-semindex lib.rs `open`: the semantic index of one checked compile
+// result, its effect projection the application authority of that program.
+// Every semantic consumer (semindex, doc, impact, find, help, expand, blame,
+// review, codemod) reads this one index.
+fn jet_cli_checked_semindex(result: JetDriverCompileResult) -> JetCLISemIndex {
+    jet_cli_build_semindex(result.doc_modules, jet_cli_application_authority(result, None))
+}

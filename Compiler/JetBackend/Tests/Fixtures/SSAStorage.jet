@@ -1,0 +1,125 @@
+// expect-stdout ssa-storage-temporary-first: "184467440737095516170\n184467440737095516170\n"
+// expect-stdout ssa-storage-local-first: "184467440737095516170\n184467440737095516170\n"
+// Schema-7 owning locals alias their existing SSA cell. Both place orders must
+// see the same heap-width exact integer and retire exactly that one owner.
+use jet_foundation.[MIRAccess, MIRBasicBlock, MIRBlockID, MIRConstant, MIRDropKind, MIRFunction, MIRLocalID, MIROperation, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRProgram, MIRProjection, MIRTerminator, MIRTypeDef, MIRValueID, mir_copy_ownership, mir_ownership_from_access]
+
+fn fx_ssa_temporary(b: &FxBuilder, value: MIRValueID) -> MIRPlaceID Never! {
+    place :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
+    &b.places.push(MIRPlace{id: place, span: fx_span(), ty: fx_int(), base: MIRPlaceBase.Temporary{value: value}, projections: [MIRProjection]{}, access: MIRAccess.Read, persist_key: None})
+    place
+}
+
+fn fx_ssa_bound_storage(temporary_first: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    live :: fx_local(&b, "$ssa-live", fx_bool(), mir_copy_ownership())
+    dead :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    fx_do(&b, MIROperation.WritePlace{place: live, value: dead})
+    owner :: fx_copy(&b, fx_int(), MIROperation.Constant{value: MIRConstant.BigInt{decimal: "184467440737095516170"}})
+    temporary := MIRPlaceID{value: U64{0}}
+    if temporary_first -> temporary = fx_ssa_temporary(&b, owner)
+    storage :: fx_local(&b, "$ssa-owner", fx_int(), fx_copy_ownership(fx_int()))
+    b.locals[b.locals.len() - 1].ssa_value = Val(owner)
+    if !temporary_first -> temporary = fx_ssa_temporary(&b, owner)
+    // The same canonical row supports the earlier borrows and cleanup move.
+    loop index in 0..<b.places.len() {
+        if b.places[index].id == storage -> b.places[index].access = MIRAccess.Move
+    }
+    alive :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    fx_do(&b, MIROperation.WritePlace{place: live, value: alive})
+    from_temporary :: fx_value(&b, fx_int(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: temporary})
+    fx_print(&b, from_temporary)
+    from_local :: fx_value(&b, fx_int(), mir_ownership_from_access(MIRAccess.Read), MIROperation.ReadPlace{place: storage})
+    fx_print(&b, from_local)
+    guard :: fx_copy(&b, fx_bool(), MIROperation.ReadPlace{place: live})
+    fx_block(&b, U64{0}, MIRTerminator.Branch{condition: guard, then_target: MIRBlockID{value: U64{1}}, else_target: MIRBlockID{value: U64{2}}})
+    cleared :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    fx_do(&b, MIROperation.WritePlace{place: live, value: cleared})
+    moved :: fx_owned(&b, fx_int(), MIROperation.MovePlace{place: storage})
+    fx_do(&b, MIROperation.Drop{value: moved, kind: MIRDropKind.Value})
+    fx_block(&b, U64{1}, MIRTerminator.Jump{target: MIRBlockID{value: U64{2}}})
+    fx_block(&b, U64{2}, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^[MIRTypeDef]{})
+}
+
+// Inspect the real lowering context rather than inventing a shadow ownership
+// model: the flag and original owner are its only slots, in either place order.
+fn fx_ssa_storage_checks() -> Bool Never! {
+    loop temporary_first in [true, false] {
+        p :: fx_ssa_bound_storage(temporary_first)
+        function :: p.functions[0]
+        m := LowerModule{
+            signatures: [LIRSignature]{}, signature_rows: [String:Int]{},
+            checked_types: LowerTypeIndex{rows: [U64:Int]{}, types: [MIRType]{}},
+            test_harness: false, test_rows: [Int]{}, test_indices: [U64:Int]{},
+            test_serial: false, test_checks: [MIROutputCheck]{},
+            native_pack: false, native_exports: [String:LIRFunctionID]{},
+            data: [LIRData]{}, data_rows: [String:Int]{}, static_rows: [String:Int]{},
+            static_fixups: [LowerStaticFixup]{}, static_live: None,
+            shared_sites_dynamic: true, shared_sites: [LIRSharedSiteExport]{},
+            source_rows: [U64:Int]{},
+            mir_rows: [U64:Int]{}, mir_sources: [Int]{0}, comptime_budget: false,
+            prelude_positions: [U64:Int]{},
+            asm_foreign: [U64:MIRFunctionID]{}, foreign_rows: [U64:Int]{},
+            mir_signatures: [LIRSignatureID]{}, mir_results: [Int]{},
+            glue_base: 1, glue: [LowerGlue]{}, glue_rows: [String:Int]{},
+            close_methods: [U64:[LowerCloseImpl]]{},
+            issues: [LIRLoweringIssue]{},
+            debug_files: [String]{}, debug_file_rows: [U64:Int]{},
+            debug_types: [LIRDebugType]{}, debug_type_rows: [String:Int]{},
+            stop_points: false, task_stop_points: false,
+        }
+        signature :: lower_function_signature(p, &m, function)
+        f := lower_new_function(LIRFunctionID{value: 0}, "run", signature, function.entry)
+        c :: lower_context(p, &m, &f, function) ?? return false
+        if c.slots.len() != 2 -> return false
+        owner_local :: function.locals[1]
+        owner :: owner_local.ssa_value ?? return false
+        slot :: c.local_slots.get(owner_local.id.value) ?? return false
+        if c.defined_slots.get(owner.value) != (Val(slot)) -> return false
+        loop place in function.places {
+            if place.base == .Temporary(value) {
+                if value == owner && c.place_slots.get(place.id.value) != (Val(slot)) -> return false
+            }
+        }
+    }
+    true
+}
+
+// All members are dropless. By-value headers still snapshot independently;
+// genuine borrowed windows must continue to see the owner's nested write.
+// expect-stdout dropless-inline-snapshots: "true\ntrue\ntrue\ntrue\nfalse\nfalse\n"
+fn fx_dropless_inline_snapshots() -> MIRProgram Never! {
+    bits :: fx_named("SnapshotBits")
+    packet :: fx_named("SnapshotPacket")
+    types :: [MIRTypeDef]{
+        fx_type_def("SnapshotBits", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("SnapshotBits", "on", fx_bool()), fx_field("SnapshotBits", "off", fx_bool())}, methods: [MIRFunctionID]{}}),
+        fx_type_def("SnapshotPacket", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("SnapshotPacket", "inner", bits), fx_field("SnapshotPacket", "marker", fx_bool())}, methods: [MIRFunctionID]{}}),
+    }
+    r := fx_builder()
+    owner :: fx_local(&r, "owner", packet, mir_copy_ownership())
+    inner_place :: fx_field_place(&r, owner, "SnapshotPacket.inner", bits)
+    on_place :: MIRPlaceID{value: fx_word(U64{500}, r.places.len())}
+    &r.places.push(MIRPlace{id: on_place, span: fx_span(), ty: fx_bool(), base: MIRPlaceBase.Local{local: r.locals[0].id}, projections: [MIRProjection]{MIRProjection.Field{field: mir_field_id("SnapshotPacket.inner"), span: fx_span()}, MIRProjection.Field{field: mir_field_id("SnapshotBits.on"), span: fx_span()}}, access: MIRAccess.Write, persist_key: None})
+    on :: fx_copy(&r, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    off :: fx_copy(&r, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: false}})
+    original_bits :: fx_copy(&r, bits, MIROperation.Struct{type_id: mir_type_id("SnapshotBits"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("SnapshotBits.on"), value: on}, MIRFieldValue{field: mir_field_id("SnapshotBits.off"), value: off}}})
+    original :: fx_copy(&r, packet, MIROperation.Struct{type_id: mir_type_id("SnapshotPacket"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("SnapshotPacket.inner"), value: original_bits}, MIRFieldValue{field: mir_field_id("SnapshotPacket.marker"), value: on}}})
+    fx_do(&r, MIROperation.WritePlace{place: owner, value: original})
+    whole :: fx_copy(&r, packet, MIROperation.ReadPlace{place: owner})
+    window :: fx_value(&r, packet, fx_borrow(), MIROperation.ReadPlace{place: owner})
+    copied :: fx_copy(&r, packet, MIROperation.Copy{value: window, fact: MIRCopyFact.Scalar})
+    member :: fx_copy(&r, bits, MIROperation.Field{base: window, field: mir_field_id("SnapshotPacket.inner")})
+    projected :: fx_copy(&r, bits, MIROperation.ReadPlace{place: inner_place})
+    member_window :: fx_value(&r, bits, fx_borrow(), MIROperation.Field{base: window, field: mir_field_id("SnapshotPacket.inner")})
+    fx_do(&r, MIROperation.WritePlace{place: on_place, value: off})
+    whole_bits :: fx_value(&r, bits, fx_borrow(), MIROperation.Field{base: whole, field: mir_field_id("SnapshotPacket.inner")})
+    copied_bits :: fx_value(&r, bits, fx_borrow(), MIROperation.Field{base: copied, field: mir_field_id("SnapshotPacket.inner")})
+    window_bits :: fx_value(&r, bits, fx_borrow(), MIROperation.Field{base: window, field: mir_field_id("SnapshotPacket.inner")})
+    loop snapshot in ([MIRValueID]{whole_bits, copied_bits, member, projected, window_bits, member_window}) {
+        flag :: fx_copy(&r, fx_bool(), MIROperation.Field{base: snapshot, field: mir_field_id("SnapshotBits.on")})
+        fx_print(&r, flag)
+    }
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
+}

@@ -246,9 +246,13 @@ static JET_PROCESS_SIGNAL_DISPATCHER: std::sync::LazyLock<Result<(), String>> =
     std::sync::LazyLock::new(|| {
         std::thread::Builder::new()
             .name("jet-process-signal".to_string())
-            .spawn(|| loop {
-                std::thread::sleep(jet_interrupt_poll_interval());
-                jet_process_signal_dispatch();
+            .spawn(|| {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
+                loop {
+                    std::thread::sleep(jet_interrupt_poll_interval());
+                    jet_process_signal_dispatch();
+                }
             })
             .map(|_| ())
             .map_err(jet_interrupt_dispatcher_start_error)

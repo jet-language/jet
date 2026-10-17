@@ -14,12 +14,12 @@ use core.math as math
 // in locals, so a hashed byte costs four multiply-xors and no list access or
 // call.
 struct MIRCanonicalWriter {
-    pub bytes: [U8]
-    pub hashing: Bool
-    pub lane0: U64
-    pub lane1: U64
-    pub lane2: U64
-    pub lane3: U64
+    bytes: [U8]
+    hashing: Bool
+    lane0: U64
+    lane1: U64
+    lane2: U64
+    lane3: U64
 }
 
 fn mir_digest_writer() -> MIRCanonicalWriter Never! {
@@ -33,35 +33,35 @@ fn mir_digest_hash_writer() -> MIRCanonicalWriter Never! {
 fn mir_digest_u8(writer: &MIRCanonicalWriter, value: U8) Never! {
     if writer.hashing {
         byte :: U64.from_u8(value)
-        writer.lane0 = (writer.lane0 ~| byte).wrapping_mul(U64{0x100000001b3})
-        writer.lane1 = (writer.lane1 ~| byte).wrapping_mul(U64{0x100000001b3})
-        writer.lane2 = (writer.lane2 ~| byte).wrapping_mul(U64{0x100000001b3})
-        writer.lane3 = (writer.lane3 ~| byte).wrapping_mul(U64{0x100000001b3})
+        writer.lane0 = ((writer.lane0).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+        writer.lane1 = ((writer.lane1).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+        writer.lane2 = ((writer.lane2).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+        writer.lane3 = ((writer.lane3).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
     } else {
         &writer.bytes.push(value)
     }
 }
 
 fn mir_digest_u16(writer: &MIRCanonicalWriter, value: Int) Never! {
-    mir_digest_u8(&writer, U8{value & 255})
-    mir_digest_u8(&writer, U8{(value >> 8) & 255})
+    mir_digest_u8(&writer, U8{(value).bit_and(255)})
+    mir_digest_u8(&writer, U8{((value >> 8)).bit_and(255)})
 }
 
 // One little-endian 64-bit word: MIR ids, id lists and literal codes.
 fn mir_digest_u64(writer: &MIRCanonicalWriter, value: U64) Never! {
     if !writer.hashing {
-        loop index in 0..<8 -> &writer.bytes.push(U8.from_u64((value >> (8 * index)) & U64{255}) ?? U8{0})
+        loop index in 0..<8 -> &writer.bytes.push(U8.from_u64(((value >> (8 * index))).bit_and(U64{255})) ?? U8{0})
     } else {
         lane0 := writer.lane0
         lane1 := writer.lane1
         lane2 := writer.lane2
         lane3 := writer.lane3
         loop index in 0..<8 {
-            byte :: (value >> (8 * index)) & U64{255}
-            lane0 = (lane0 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane1 = (lane1 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane2 = (lane2 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane3 = (lane3 ~| byte).wrapping_mul(U64{0x100000001b3})
+            byte :: ((value >> (8 * index))).bit_and(U64{255})
+            lane0 = ((lane0).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane1 = ((lane1).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane2 = ((lane2).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
+            lane3 = ((lane3).bit_xor(byte)).wrapping_mul(U64{0x100000001b3})
         }
         writer.lane0 = lane0
         writer.lane1 = lane1
@@ -70,28 +70,16 @@ fn mir_digest_u64(writer: &MIRCanonicalWriter, value: U64) Never! {
     }
 }
 
+// Mask of an exact `Int`'s low 64 bits.
+MIR_DIGEST_WORD_MASK :: prep { 0xffffffffffffffff }
+
 // An exact `Int` as its low 64 bits, two's complement, in the same frame as
-// `mir_digest_u64`.
+// `mir_digest_u64`: byte `i` of the masked word is `(value >> 8i) & 255`, so
+// the bytes and every lane state are those of the word. A value already in
+// U64 range (every length and offset) is its own word.
 fn mir_digest_int(writer: &MIRCanonicalWriter, value: Int) Never! {
-    if !writer.hashing {
-        loop index in 0..<8 -> &writer.bytes.push(U8{(value >> (8 * index)) & 255})
-    } else {
-        lane0 := writer.lane0
-        lane1 := writer.lane1
-        lane2 := writer.lane2
-        lane3 := writer.lane3
-        loop index in 0..<8 {
-            byte :: U64.from_u8(U8{(value >> (8 * index)) & 255})
-            lane0 = (lane0 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane1 = (lane1 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane2 = (lane2 ~| byte).wrapping_mul(U64{0x100000001b3})
-            lane3 = (lane3 ~| byte).wrapping_mul(U64{0x100000001b3})
-        }
-        writer.lane0 = lane0
-        writer.lane1 = lane1
-        writer.lane2 = lane2
-        writer.lane3 = lane3
-    }
+    word :: U64.from_int(value) ?? (U64.from_int(value.bit_and(MIR_DIGEST_WORD_MASK)) ?? U64{0})
+    mir_digest_u64(&writer, word)
 }
 
 fn mir_digest_len(writer: &MIRCanonicalWriter, value: Int) Never! {
@@ -121,10 +109,10 @@ fn mir_digest_bytes(writer: &MIRCanonicalWriter, value: [U8]) Never! {
         lane3 := writer.lane3
         loop byte in value {
             word :: U64.from_u8(byte)
-            lane0 = (lane0 ~| word).wrapping_mul(U64{0x100000001b3})
-            lane1 = (lane1 ~| word).wrapping_mul(U64{0x100000001b3})
-            lane2 = (lane2 ~| word).wrapping_mul(U64{0x100000001b3})
-            lane3 = (lane3 ~| word).wrapping_mul(U64{0x100000001b3})
+            lane0 = ((lane0).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
+            lane1 = ((lane1).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
+            lane2 = ((lane2).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
+            lane3 = ((lane3).bit_xor(word)).wrapping_mul(U64{0x100000001b3})
         }
         writer.lane0 = lane0
         writer.lane1 = lane1
@@ -991,11 +979,6 @@ fn mir_digest_typed_head(writer: &MIRCanonicalWriter, value: MIRTypedHeadKind) N
 
 fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemanticOp) Never! {
     if value == {
-        .DataEntriesToMap(call, local) -> {
-            mir_digest_tag(&writer, "data-entries-to-map")
-            mir_digest_u64(&writer, call.value)
-            mir_digest_u64(&writer, local.value)
-        }
         .MathBuiltin(type_id, call, args)
         | .PreciseBuiltin(type_id, call, args) -> {
             mir_digest_tag(&writer, if value == {
@@ -1037,7 +1020,7 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
             mir_digest_tag(&writer, "layout-literal")
             mir_digest_u64(&writer, inner.value)
         }
-        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> {
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> {
             mir_digest_tag(&writer, "struct-literal")
             mir_digest_u64(&writer, type_id.value)
             mir_digest_len(&writer, fields.len())
@@ -1046,7 +1029,6 @@ fn mir_digest_semantic_operation(writer: &MIRCanonicalWriter, value: MIRSemantic
                 mir_digest_u64(&writer, field.value.value)
             }
             mir_digest_struct_extra(&writer, extra)
-            mir_digest_option_u64(&writer, trait_coercion.map(row -> row.value))
             mir_digest_len(&writer, boxed_fields.len())
             loop field in boxed_fields -> mir_digest_u64(&writer, field.value)
         }
@@ -1449,6 +1431,12 @@ fn mir_digest_operation(writer: &MIRCanonicalWriter, operation: MIROperation) {
                 mir_digest_u64(&writer, entry.key.value)
                 mir_digest_u64(&writer, entry.value.value)
             }
+        }
+        .MapLookup(map, key, cache) -> {
+            mir_digest_tag(&writer, "map-lookup")
+            mir_digest_u64(&writer, map.value)
+            mir_digest_u64(&writer, key.value)
+            mir_digest_u64(&writer, cache.value)
         }
         .EnumIs(subject, owner, variant) -> {
             mir_digest_tag(&writer, "enum-is")
@@ -1960,6 +1948,17 @@ fn mir_digest_constant(writer: &MIRCanonicalWriter, constant: MIRConstant) {
             mir_digest_bytes(&writer, value)
         }
         .Unit -> mir_digest_tag(&writer, "unit")
+        .SharedSite(site) -> {
+            mir_digest_tag(&writer, "shared-site")
+            mir_digest_u64(&writer, site.initializer.value)
+            lifetime :: if site.lifetime == {
+                .Process -> "process"
+                .World -> "world"
+                .Thread -> "thread"
+                .Attempt -> "attempt"
+            }
+            mir_digest_tag(&writer, lifetime)
+        }
         .BigInt(value) -> {
             mir_digest_tag(&writer, "bigint")
             mir_digest_string(&writer, value)
@@ -2021,6 +2020,10 @@ fn mir_digest_const_key(writer: &MIRCanonicalWriter, key: MIRConstKey) Never! {
         .Int(amount) -> {
             mir_digest_tag(&writer, "int")
             mir_digest_int(&writer, amount)
+        }
+        .BigInt(decimal) -> {
+            mir_digest_tag(&writer, "bigint")
+            mir_digest_string(&writer, decimal)
         }
         .String(text) -> {
             mir_digest_tag(&writer, "string")
@@ -2247,7 +2250,6 @@ fn mir_digest_serde_attributes(writer: &MIRCanonicalWriter, values: [MIRSerdeAtt
 
 fn mir_digest_target_applicability(writer: &MIRCanonicalWriter, value: MIRTargetApplicability) Never! {
     mir_digest_bool(&writer, value.rust_aot)
-    mir_digest_bool(&writer, value.cranelift)
     mir_digest_bool(&writer, value.interpreter)
     mir_digest_bool(&writer, value.web)
 }
@@ -2359,6 +2361,7 @@ fn mir_digest_capture_param(writer: &MIRCanonicalWriter, value: MIRCaptureParam)
     mir_digest_type(&writer, value.ty)
     mir_digest_string(&writer, mir_digest_access_debug(value.access))
     mir_digest_string(&writer, mir_digest_ownership_debug(value.ownership))
+    mir_digest_bool(&writer, value.place_only)
 }
 
 fn mir_digest_cli_value_kind(value: MIRCLIValueKind) -> Int Never! {
@@ -2854,7 +2857,6 @@ fn mir_digest_core_pure_route(writer: &MIRCanonicalWriter, value: CoreCallPureRo
         .EncodingXML -> 3
         .Time -> 4
         .Math -> 5
-        .Measurement -> 6
         .Date -> 7
         .DateTime -> 8
         .SketchHLL -> 9
@@ -2892,6 +2894,7 @@ fn mir_digest_core_symbol(writer: &MIRCanonicalWriter, value: CoreCallSymbol) Ne
             mir_digest_u64(&writer, 2)
             mir_digest_string(&writer, name)
         }
+        .SourceOwned -> panic("source-owned Core declaration reached executable MIR digest")
     }
 }
 
@@ -2918,8 +2921,6 @@ fn mir_digest_core_call(writer: &MIRCanonicalWriter, value: MIRCoreCall) Never! 
     mir_digest_core_symbol(&writer, value.symbol)
     mir_digest_int(&writer, value.coverage_bits)
     mir_digest_bool(&writer, value.aot_direct)
-    mir_digest_bool(&writer, value.jit_direct)
-    mir_digest_option_string(&writer, value.jit_symbol)
     mir_digest_bool(&writer, value.native_int_result)
     mir_digest_string(&writer, mir_digest_core_marker_debug(value.marker))
 }
@@ -2947,6 +2948,7 @@ fn mir_digest_foreign(writer: &MIRCanonicalWriter, value: MIRForeign) Never! {
     mir_digest_option_u64(&writer, value.close_function.map(row -> row.value))
     mir_digest_option_u64(&writer, value.close_foreign.map(row -> row.value))
     mir_digest_option_u64(&writer, value.undo_function.map(row -> row.value))
+    mir_digest_string(&writer, mir_digest_unsafe_gate_debug(value.unsafe_gate))
 }
 
 fn mir_digest_runtime_part(value: MIRRuntimePartID) -> Int Never! {
@@ -2976,7 +2978,6 @@ fn mir_digest_runtime_part(value: MIRRuntimePartID) -> Int Never! {
         .Browser -> 23
         .Args -> 24
         .Reflect -> 25
-        .AuthTokens -> 26
         .AuthSession -> 27
         .Sync -> 28
         .Services -> 29
@@ -3013,7 +3014,6 @@ fn mir_digest_runtime_order(value: MIRRuntimePartID) -> Int Never! {
         .Browser -> 23
         .Args -> 24
         .Reflect -> 25
-        .AuthTokens -> 26
         .AuthSession -> 27
         .Sync -> 28
         .Services -> 29
@@ -3279,7 +3279,6 @@ fn mir_digest_artifact_kind(value: MIRArtifactKind) -> Int Never! {
 fn mir_digest_artifact_target(value: MIRArtifactTarget) -> Int Never! {
     if value == {
         .RustAOT -> 1
-        .Cranelift -> 2
         .Interpreter -> 3
         .Web -> 4
     }
@@ -3450,6 +3449,7 @@ fn mir_digest_scope_kind_debug(value: MIRScopeKind) -> String Never! {
         .Impure -> "Impure"
         .Reactive -> "Reactive"
         .Shield -> "Shield"
+        .StopCleanup -> "StopCleanup"
         .Region -> "Region"
         .Policy -> "Policy"
         .TaskGroup -> "TaskGroup"
@@ -3540,6 +3540,12 @@ fn mir_digest_projection(writer: &MIRCanonicalWriter, value: MIRProjection) Neve
             mir_digest_string(&writer, mir_digest_panic_location_debug(location))
             mir_digest_span(&writer, span)
         }
+        .MapLookup(lookup, optional, span) -> {
+            mir_digest_tag(&writer, "map-lookup")
+            mir_digest_u64(&writer, lookup.value)
+            mir_digest_bool(&writer, optional)
+            mir_digest_span(&writer, span)
+        }
     }
 }
 
@@ -3570,6 +3576,13 @@ fn mir_digest_local(writer: &MIRCanonicalWriter, value: MIRLocal) Never! {
     mir_digest_span(&writer, value.span)
     mir_digest_type(&writer, value.ty)
     mir_digest_u64(&writer, value.place.value)
+    if value.ssa_value == {
+        .Val(bound) -> {
+            mir_digest_bool(&writer, true)
+            mir_digest_u64(&writer, bound.value)
+        }
+        .None -> mir_digest_bool(&writer, false)
+    }
     mir_digest_string(&writer, mir_digest_ownership_debug(value.ownership))
     mir_digest_bool(&writer, value.mutable)
     mir_digest_bool(&writer, value.is_comptime)
@@ -3592,6 +3605,14 @@ fn mir_digest_terminator_debug(terminator: MIRTerminator) -> String Never! {
         .Break(target, value) -> "Break(MirBlockId({target.value}), {mir_digest_debug_u64_option(value.map(row -> row.value))})"
         .Continue(target) -> "Continue(MirBlockId({target.value}))"
         .Unreachable(reason) -> "Unreachable({mir_digest_debug_quote(reason)})"
+        .Poll(kind, resume, stop) -> {
+            name :: if kind == {
+                .Check -> "Check"
+                .Propagate -> "Propagate"
+            }
+            "Poll({name}, MirBlockId({resume.value}), MirBlockId({stop.value}))"
+        }
+        .Stopped -> "Stopped"
     }
 }
 
@@ -4092,7 +4113,7 @@ fn mir_digest_cache_frame(bytes: &[U8], value: String) Never! {
 
 fn mir_digest_u64_bytes(bytes: &[U8], value: Int) Never! {
     loop index in 0..<8 {
-        &bytes.push(U8{(value >> (8 * index)) & 255})
+        &bytes.push(U8{((value >> (8 * index))).bit_and(255)})
     }
 }
 
@@ -4276,10 +4297,21 @@ fn mir_digest_app_graph(writer: &MIRCanonicalWriter, value: MIRAppGraph?) Never!
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::write_mir_program
 // Stable scalar positions: equal keys retain their original input order.
+// An input already in order (the common case: tables the optimizer leaves
+// canonically ordered) is returned as the identity order after one linear
+// check, which is exactly what the stable merge would produce.
 fn mir_digest_order(primary: [U64], secondary: [U64], tertiary: [U64], text: [String], other_text: [String], text_first: Bool) -> [Int] Never! {
     count :: if primary.len() > 0 -> primary.len() else -> text.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
+    sorted := true
+    loop index in 1..<count {
+        if mir_digest_order_before(primary, secondary, tertiary, text, other_text, text_first, index, index - 1) {
+            sorted = false
+            break
+        }
+    }
+    if sorted -> return order
     width := 1
     loop width < count {
         merged := [Int]{}
@@ -4594,6 +4626,7 @@ fn mir_program_bytes_internal(program: MIRProgram) -> [U8] {
 fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
     mir_digest_tag(&writer, "mir")
     mir_digest_u16(&writer, program.schema_version)
+    mir_digest_bool(&writer, program.native_pack)
     mir_digest_string(&writer, program.package_identity)
     mir_digest_string(&writer, program.facts.project_root)
     mir_digest_string(&writer, program.facts.edition)
@@ -4602,6 +4635,13 @@ fn mir_program_write(writer: &MIRCanonicalWriter, program: MIRProgram) {
     mir_digest_string(&writer, program.facts.active_os)
     mir_digest_string(&writer, program.facts.inferred_layer)
     mir_digest_string(&writer, program.facts.allocator)
+    if program.facts.program_allocator == .Counting(cap) {
+        mir_digest_bool(&writer, true)
+        mir_digest_bool(&writer, cap != None)
+        if cap == .Val(size) -> mir_digest_u64(&writer, U64{size.bytes})
+    } else {
+        mir_digest_bool(&writer, false)
+    }
     target_triple :: program.facts.target_dossier.machine.map(row -> row.triple) ?? ""
     dossier_bytes :: mir_digest_target_dossier_bytes(program.facts.target_dossier, target_triple)
     mir_digest_bytes(&writer, dossier_bytes)
@@ -4684,16 +4724,16 @@ fn mir_digest_hex(bytes: [U8]) -> String Never! {
     output := ""
     loop byte in bytes {
         value :: Int.from_u8(byte)
-        output = "{output}{mir_digest_hex_digit((value >> 4) & 15)}{mir_digest_hex_digit(value & 15)}"
+        output = "{output}{mir_digest_hex_digit(((value >> 4)).bit_and(15))}{mir_digest_hex_digit((value).bit_and(15))}"
     }
     output
 }
 
-pub fn mir_program_bytes(program: MIRProgram) -> [U8] {
+fn mir_program_bytes(program: MIRProgram) -> [U8] {
     mir_program_bytes_internal(program)
 }
 
-pub fn mir_program_digest(program: MIRProgram) -> String {
+fn mir_program_digest(program: MIRProgram) -> String {
     writer := mir_digest_hash_writer()
     mir_program_write(&writer, program)
     output := [U8]{}
@@ -4701,7 +4741,7 @@ pub fn mir_program_digest(program: MIRProgram) -> String {
     loop lane in lanes {
         hash :: Int.from_u64(lane)
         loop index in 0..<8 {
-            &output.push(U8{(hash >> (8 * index)) & 255})
+            &output.push(U8{((hash >> (8 * index))).bit_and(255)})
         }
     }
     mir_digest_hex(output)

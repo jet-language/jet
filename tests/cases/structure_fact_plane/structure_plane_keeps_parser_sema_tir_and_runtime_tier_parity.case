@@ -1,0 +1,35 @@
+# Port of tests/structure_fact_plane.rs::structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity (171-248); sources copied verbatim from original Rust literals/templates.
+# PENDING-SAME-HEAD; no runtime or snapshot receipt claimed.
+# ORIGINAL-TEST-BUG: duplicate JET_STORE_DIR preserved last-wins verbatim.
+# Exact lexer/parser + CompileMode.Run all-lint and sorted diagnostic codes [L0104,L2001] remain compiler-lib, not approximated with another compile mode.
+fixture: fixtures/structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity
+step: jet check Examples/features/tooling/structure_plane.jet
+step: jet inspect structure --json Examples/features/tooling/structure_plane.jet
+json: stdout doc $.structure.facts[?kind="liveness"] #>= 1 # original predicate: contains Liveness fact
+json: stdout doc $.structure.facts[?kind="lifecycle"] #>= 1 # original predicate: contains Lifecycle fact
+json: stdout doc $.structure.facts[?kind="import-edge"] #>= 1 # original predicate: contains ImportEdge fact
+step release: jet run --release Examples/features/tooling/structure_plane.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache/release/run
+env: JET_STORE_DIR={work}/cache/release/build
+exit: 0
+stdout: = "structure fact plane\n"
+step default: jet run Examples/features/tooling/structure_plane.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache/default/run
+env: JET_STORE_DIR={work}/cache/default/build
+exit: 0
+stdout: = "structure fact plane\n"
+step interpret: jet run --interpret Examples/features/tooling/structure_plane.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache/interpret/run
+env: JET_STORE_DIR={work}/cache/interpret/build
+exit: 0
+stdout: = "structure fact plane\n"
+step dev: jet dev Examples/features/tooling/structure_plane.jet --watch=off
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache/dev/run
+env: JET_STORE_DIR={work}/cache/dev/build
+exit: 0
+stdout: = "structure fact plane\n"
+

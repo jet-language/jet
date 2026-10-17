@@ -1,0 +1,72 @@
+// ORACLE-PORT of tests/jetpack_jetos.rs:20-97; actual journal observations, not guessed expected values.
+use core.files as files
+use core.process as process
+use core.text.parse as text
+use core.encoding.json as json
+use core.encoding.Dyn
+struct RootProof { kind: String, id: String, producer: String, witness: String, targets: [String], phase: String }
+fn digit(byte: U8) -> Int {
+    n :: Int.from_u8(byte)
+    if n >= 48 && n <= 57 -> return n - 48
+    if n >= 97 && n <= 102 -> return n - 87
+    if n >= 65 && n <= 70 -> return n - 55
+    panic("invalid lifecycle hex")
+}
+fn decode(value: String) -> String {
+    assert(value.bytes().len() % 2 == 0, "invalid lifecycle hex")
+    bytes :: value.bytes()
+    out := [U8]{}
+    loop i in 0..<(bytes.len() /% 2) -> &out.push(U8{digit(bytes[i * 2]) * 16 + digit(bytes[i * 2 + 1])})
+    String.from_bytes(out) ?? panic("lifecycle UTF-8")
+}
+fn root_index(roots: [RootProof], id: String) -> Int {
+    loop i in 0..<roots.len() { if roots[i].id == id -> return i }
+    -1
+}
+fn run() {
+    args :: process.args()
+    assert(args.len() == 1)
+    journal :: files.join(args[0], "hangar/lifecycle-db/journal")
+    names := files.listdir(journal) ?? panic("read lifecycle journal")
+    &names.sort()
+    roots := [RootProof]{}
+    loop name in names {
+        raw :: files.read(files.join(journal, name)) ?? panic("read journal bytes")
+        current := -1
+        loop line in raw.lines() {
+            fields :: text.split(line, "\t")
+            if fields.len() == 7 && fields[0] == "prepare" {
+                id :: decode(fields[2])
+                root :: RootProof{kind: fields[1], id: id, producer: decode(fields[3]), witness: decode(fields[5]), targets: [String]{}, phase: "prepared"}
+                index :: root_index(roots, id)
+                if index < 0 {
+                    &roots.push(root)
+                    current = roots.len() - 1
+                } else {
+                    roots[index] = root
+                    current = index
+                }
+            } else if fields.len() == 2 && fields[0] == "target" {
+                assert(current >= 0, "target must follow prepare")
+                &roots[current].targets.push(fields[1])
+            } else if fields.len() == 5 && fields[0] == "commit" {
+                index :: root_index(roots, decode(fields[1]))
+                assert(index >= 0, "commit must follow durable prepare")
+                assert_eq(roots[index].witness, decode(fields[3]))
+                roots[index].phase = "committed"
+                current = -1
+            }
+        }
+    }
+    ids := [String]{}
+    loop root in roots -> &ids.push(root.id)
+    &ids.sort()
+    observed := [Dyn]{}
+    loop id in ids {
+        root :: roots[root_index(roots, id)]
+        targets := [Dyn]{}
+        loop target in root.targets -> &targets.push(Dyn.Text(target))
+        &observed.push(Dyn.Object([String: Dyn]{"kind": Dyn.Text(root.kind), "id": Dyn.Text(root.id), "producer": Dyn.Text(root.producer), "witness": Dyn.Text(root.witness), "targets": Dyn.Array(targets), "phase": Dyn.Text(root.phase)}))
+    }
+    print(json.to_string(Dyn.Array(observed)))
+}

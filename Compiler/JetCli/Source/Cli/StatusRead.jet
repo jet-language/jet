@@ -1,0 +1,105 @@
+// Adapted from origin/port/compiler Jetpack/Foundation/Source/Report.jet
+// `report_status_value_parse`: use the Core JSON reader, not another parser.
+use core.encoding.json as cli_json
+use core.math as status_math
+use core.text as status_text
+
+// Rust's `String` refusals from the status readers (StatusValue::parse and
+// the ledgers and manifests read through it).
+#Error
+struct JetCLIReadError {
+    message: String
+}
+
+fn jet_cli_read_error(message: String) -> JetCLIReadError Never! {
+    JetCLIReadError{message: message}
+}
+
+fn report_status_value_parse(text: String) -> Dyn JetCLIReadError! {
+    if cli_json.parse(text) == {
+        .Ok(tree) -> Ok(tree)
+        .Err(error) -> Err(jet_cli_read_error(error.reason))
+    }
+}
+
+// Rust StatusValue::from_dyn. Core's public tree has seven variants;
+// typed text/bytes/number atoms are represented by Text/Array/Int here.
+fn jet_cli_status_from_tree(tree: Dyn) -> JetCLIStatusValue JetCLIReadError! {
+    value :: if tree == {
+        .Null -> JetCLIStatusValue.Null
+        .Bool(value) -> jet_cli_status_bool(value)
+        .Int(value) -> jet_cli_status_int(value)
+        .Float(value) -> {
+            if !status_math.is_finite(value) {
+                return Err(jet_cli_read_error("status fields cannot contain non-finite numbers"))
+            }
+            JetCLIStatusValue.Float{text: "{value}"}
+        }
+        .Text(value) -> jet_cli_status_text(value)
+        .Array(values) -> {
+            items := [JetCLIStatusValue]{}
+            loop value in values -> &items.push(jet_cli_status_from_tree(value))
+            jet_cli_status_array(items)
+        }
+        .Object(values) -> {
+            fields := [JetCLIStatusField]{}
+            names := [String:Bool]{}
+            loop entry in values {
+                if entry.key == "" || status_text.has_control(entry.key) {
+                    return Err(jet_cli_read_error("status field names must be non-empty and contain no control characters"))
+                }
+                if names.get(entry.key) != None {
+                    return Err(jet_cli_read_error("duplicate status field `{entry.key}`"))
+                }
+                names[entry.key] = true
+                &fields.push(jet_cli_status_field(entry.key, jet_cli_status_from_tree(entry.value)))
+            }
+            jet_cli_status_object(fields)
+        }
+    }
+    Ok(value)
+}
+
+// StatusValue::parse always goes through the canonical Core JSON reader.
+fn jet_cli_status_value_parse(text: String) -> JetCLIStatusValue JetCLIReadError! {
+    jet_cli_status_from_tree(report_status_value_parse(text))
+}
+
+fn jet_cli_status_get(value: JetCLIStatusValue, name: String) -> JetCLIStatusValue? Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.name == name -> return Val(field.value)
+        }
+    }
+    None
+}
+
+fn jet_cli_status_string(value: JetCLIStatusValue?) -> String? Never! {
+    if value == .Val(.Text(text)) -> return Val(text)
+    None
+}
+
+fn jet_cli_status_integer(value: JetCLIStatusValue?) -> Int? Never! {
+    if value == .Val(.Integer(number)) -> return Val(number)
+    None
+}
+
+fn jet_cli_status_boolean(value: JetCLIStatusValue?) -> Bool? Never! {
+    if value == .Val(.Bool(flag)) -> return Val(flag)
+    None
+}
+
+fn jet_cli_status_list(value: JetCLIStatusValue?) -> [JetCLIStatusValue]? Never! {
+    if value == .Val(.Array(items)) -> return Val(items)
+    None
+}
+
+fn jet_cli_status_is_object(value: JetCLIStatusValue?) -> Bool Never! {
+    if value == .Val(.Object(_)) -> return true
+    false
+}
+
+fn jet_cli_status_nested(value: JetCLIStatusValue, field: String, name: String) -> JetCLIStatusValue? Never! {
+    child :: jet_cli_status_get(value, field) ?? return None
+    jet_cli_status_get(child, name)
+}

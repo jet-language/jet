@@ -1,0 +1,20 @@
+# PORT tests/repl.rs:3328-3351; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_core_data_dispatch.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_core_data_dispatch.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout: !~ "E0956" # original predicate
+stderr: !~ "E0956" # original predicate
+stdout|stderr: ~ "core.data.csv" # original predicate
+stdout|stderr: ~ "path: \"native\"" # original predicate
+stdout|stderr: ~ "py.*" # original predicate
+stdout|stderr: ~ "unavailable" # original predicate
+stdout|stderr: ~ "owned-copy" # original predicate
+stdout|stderr: ~ "python-sidecar" # original predicate
+stdout: !~ "bridge-ready" # original predicate
+stderr: !~ "bridge-ready" # original predicate

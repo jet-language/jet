@@ -4,12 +4,13 @@ use core.encoding.json as json
 fn run() JSONError! {
     raw :: "{{\"name\":\"jet\",\"ok\":true,\"items\":[1,2]}}"
     data :: json.parse(raw)
-    print(json.to_string(data))
-    print(json.to_string_pretty(data).contains("\n"))
+    print(json.to_string(data) ?? panic(err.reason))
+    pretty :: json.to_string_pretty(data) ?? panic(err.reason)
+    print(pretty.contains("\n"))
     keys :: ["ok", "name", "items"]
     print(keys.len())
-    print(json.to_string(DataTree.Object([
-        "name": DataTree.Text("jet"),
-        "ok": DataTree.Bool(true)
-    ])))
+    print(json.to_string(Dyn.Object([
+        "name": Dyn.Text("jet"),
+        "ok": Dyn.Bool(true)
+    ])) ?? panic(err.reason))
 }

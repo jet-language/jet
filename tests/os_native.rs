@@ -539,8 +539,7 @@ fn run_termios_pty_case(
     let mut args = vec!["run", "--quiet"];
     match mode {
         "release" => args.push("--release"),
-        "default" => args.push("--trace-tiers"),
-        "interpret" => args.push("--interpret"),
+        "default" => {}
         other => panic!("unknown PTY mode {other}"),
     }
     args.push(entry.to_str().unwrap());
@@ -549,7 +548,6 @@ fn run_termios_pty_case(
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .env("JET_STORE_DIR", dir.join("cache"))
-        .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
         .env("JETPACK_ROOT", dir.join("jetpack"))
         .stdin(Stdio::from(slave.try_clone().unwrap()))
         .stdout(Stdio::from(slave.try_clone().unwrap()))
@@ -666,17 +664,6 @@ fn run_termios_pty_case(
         status.success(),
         "{mode} successful PTY child failed: {status}"
     );
-    if mode == "default" {
-        let output = String::from_utf8_lossy(&transcript);
-        assert!(
-            output.contains("tier1 native"),
-            "default run did not execute resident JIT: {output:?}"
-        );
-        assert!(
-            !output.contains("tier0 interp"),
-            "default run deopted to interpreter: {output:?}"
-        );
-    }
     let output = String::from_utf8_lossy(&transcript);
     assert!(
         output.contains("secret-ok:answer"),
@@ -698,7 +685,7 @@ fn termios_pty_mode_and_restore_are_hostile_proven_across_native_tiers() {
     let dir = temp_dir("termios-pty-layout");
     let (_, layout) = run_c_header_layout_probe(&dir);
     let _ = fs::remove_dir_all(&dir);
-    for mode in ["release", "default", "interpret"] {
+    for mode in ["release", "default"] {
         run_termios_pty_case(mode, TERM_PTY_SUCCESS_SOURCE, false, &layout);
         run_termios_pty_case(mode, TERM_PTY_FAILURE_SOURCE, true, &layout);
     }
@@ -726,6 +713,49 @@ fn process_pty_reuses_the_canonical_termios_abi() {
             && pty.contains("super::super::jet_term_configure_fd(slave.as_raw_fd(), raw)?;"),
         "PTY configuration must use the canonical Termios seam"
     );
+}
+
+#[test]
+fn hostname_uses_the_same_jet_environment_and_file_policy() {
+    let dir = temp_dir("hostname_policy");
+    let binary = compile(
+        &dir,
+        "hostname_policy",
+        r#"
+package {
+    name: "hostname_policy"
+    authority: { holds: { allow: [Env, FS, IO, Mem.Alloc] } }
+}
+use core.sys as os
+use core.net as net
+
+fn run() {
+    print("name:{net.gethostname()}")
+    print(net.gethostname() == os.hostname())
+}
+"#,
+    );
+    let file_name = std::fs::read_to_string("/etc/hostname")
+        .map(|value| value.trim().to_owned())
+        .unwrap_or_else(|_| "localhost".to_owned());
+    for environment in [None, Some(""), Some("  deliberate-host  ")] {
+        let mut command = Command::new(&binary);
+        command.env_remove("HOSTNAME");
+        if let Some(value) = environment {
+            command.env("HOSTNAME", value);
+        }
+        let output = command.output().unwrap();
+        assert!(
+            output.status.success(),
+            "hostname child failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected = environment.filter(|value| !value.is_empty()).unwrap_or(&file_name);
+        assert_eq!(
+            String::from_utf8(output.stdout).unwrap().replace("\r\n", "\n"),
+            format!("name:{expected}\ntrue\n")
+        );
+    }
 }
 
 #[test]

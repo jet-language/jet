@@ -1,0 +1,20 @@
+
+BASE :: prep { 40 }
+
+module cache<K>(capacity: Int) {
+    COMPUTED_SIZE :: prep { BASE + capacity }
+    struct Entry { items: [K#capacity] }
+    fn size() -> Int { COMPUTED_SIZE }
+}
+
+module x :: cache<Int>(64)
+
+module plain_template<K> {
+    fn identity(value: K) -> K { value }
+}
+module plain :: plain_template<Int>
+
+fn run() {
+    print(x.size())
+    print(plain.identity(7))
+}

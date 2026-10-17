@@ -39,14 +39,6 @@ async function freePort() {
   return port;
 }
 
-function traceSource() {
-  return [
-    "#!/usr/bin/env node",
-    "const fs = require('node:fs');",
-    "if (process.env.JET_TRACE_TIERS_PATH) fs.writeFileSync(process.env.JET_TRACE_TIERS_PATH, JSON.stringify({ rows: [{ function: 'fixture', tier: 'native', reason: null, millis: 0 }], native_rows: 1, interp_rows: 0, whole_program_deopt: false }));",
-  ].join("\n");
-}
-
 function artifactSource(runBody, peerPort = null) {
   const peerCheck = peerPort === null ? "" : [
     "const { spawnSync } = require('node:child_process');",
@@ -58,7 +50,6 @@ function artifactSource(runBody, peerPort = null) {
     "const path = require('node:path');",
     peerCheck,
     runBody,
-    traceSource().split("\n").slice(2).join("\n"),
     "",
   ].join("\n");
 }
@@ -90,7 +81,6 @@ function fakeJetSource({ expected, peerPort = null, stateful = false, failOn = n
     `if (args[0] === ${JSON.stringify(failOn)}) process.exit(1);`,
     peerCheck,
     runBody,
-    traceSource().split("\n").slice(2).join("\n"),
     "",
   ].join("\n");
 }
@@ -158,12 +148,11 @@ test("peer fixture spans all Jet tiers with one tier lifetime", stagedEntryTestO
     assert.equal(result.jet_tiers.aot.status, "ok");
     assert.equal(result.jet_tiers.run.status, "ok");
     assert.equal(result.jet_tiers.dev.status, "ok");
-    assert.equal(result.jet_tiers.run.trace.status, "passed");
     assert.deepEqual((await fs.readFile(logPath, "utf8")).trim().split("\n"), ["start", "stop", "start", "stop"]);
   });
 });
 
-test("batch-step reset is reused by measured runs and tier trace", stagedEntryTestOptions, async () => {
+test("batch-step reset is reused by measured runs", stagedEntryTestOptions, async () => {
   await withScratch("batch-reset", async (root) => {
     const expected = "1\n2\n";
     const files = await writeEntry(root, "batch-reset-fixture", {
@@ -181,8 +170,6 @@ test("batch-step reset is reused by measured runs and tier trace", stagedEntryTe
     assert.equal(result.status, "ok");
     assert.equal(result.jet_tiers.run.status, "ok");
     assert.equal(result.jet_tiers.dev.status, "ok");
-    assert.equal(result.jet_tiers.run.trace.status, "passed");
-    assert.equal(result.jet_tiers.run.trace.invocations[0].exit_code, 0);
   });
 });
 

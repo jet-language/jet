@@ -1,0 +1,19 @@
+
+struct Record {
+    kind: View<str>
+    body: View<str>
+}
+fn split(header: String, payload: String) -> Record {
+    kind :: header.after(":")
+    body :: payload.after(":")
+    return Record{kind: kind, body: body}
+}
+fn run() {
+    header :: "kind:message"
+    payload :: "body:hello"
+    record :: split(header, payload)
+    kind :: record.kind
+    body :: record.body
+    print(kind.copy())
+    print(body.copy())
+}

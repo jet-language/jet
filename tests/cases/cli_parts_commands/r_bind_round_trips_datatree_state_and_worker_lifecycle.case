@@ -1,0 +1,21 @@
+# Port of tests/cli_parts/commands.rs:629-738; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# KNOWN-FAILING #4799: original copies missing main.jet; keep the failure and EVERY later probe predicate.
+# Original C probe and example expected.out copied verbatim.
+# PENDING-GRAMMAR: file kind/negative ASCII-case substring, read-only source copy.
+fixture: fixtures/r_roundtrip
+requires: tool:Rscript
+step: jet inspect bind r {work}/ops.R --pkg ops
+exit: 0
+file: .jet/bindings/r/libjet_r_ops.a is-file
+file: .jet/bindings/r/ops_worker.R is-file
+file: .jet/bindings/r/ops.provenance ~ "workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n" # original predicate
+file: .jet/bindings/r/ops.provenance !~i "cran" # original predicate
+copy: {root}/Examples/interop/r/main.jet main.jet
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = r_bind_round_trips_datatree_state_and_worker_lifecycle.out
+step: cc lifecycle.c -L.jet/bindings/r -l:libjet_r_ops.a -lpthread -o lifecycle
+exit: 0
+step: {work}/lifecycle
+exit: 0

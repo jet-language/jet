@@ -1,0 +1,25 @@
+// core-conformance: core.data.sketch.cms.add
+// D-COPY-DEFAULT1=A: clones own independent counter values.
+use core.data.sketch.cms as cms
+
+fn run() {
+    original := cms.new()
+    &original.add("hello")
+    clone := original.copy()
+    &clone.add("hello")
+    &clone.add("world")
+    &clone.add("hello")
+    assert_eq(original.count("hello"), 1)
+    assert_eq(original.count("world"), 0)
+    assert_eq(clone.count("hello"), 3)
+    assert_eq(clone.count("world"), 1)
+    assert_eq(clone.count("absent"), 0)
+    merged := cms.merge(original, clone)
+    &merged.add("hello")
+    assert_eq(original.count("hello"), 1)
+    assert_eq(clone.count("hello"), 3)
+    assert_eq(merged.count("hello"), 5)
+    print(original.count("hello"))
+    print(clone.count("hello"))
+    print(merged.count("hello"))
+}

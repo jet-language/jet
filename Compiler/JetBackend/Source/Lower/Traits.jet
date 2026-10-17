@@ -1,0 +1,333 @@
+// Reused from db0a9182a: an owned trait value is
+// [concrete drop-helper ID, concrete payload @8]. Closed-module dispatch
+// rejects unknown keys; payloads use ordinary stored-value layout/glue.
+use jet_foundation.[MIRAccess, MIRCallArg, MIRCallee, MIRImplDef, MIRInstruction, MIRProgram, MIRTraitMethod, MIRTraitMethodID, MIRTraitRef, MIRType, MIRTypeID, MIRTypeKind, MIRValueID, mir_type_display_name, mir_type_identity_key]
+
+fn lower_trait_ref(p: MIRProgram, ty: MIRType) -> MIRTraitRef? {
+    if ty.kind == .TraitObject(bounds) {
+        if bounds.len() == 1 -> return Val(bounds[0])
+        return None
+    }
+    if ty.kind == .Apply(name, args) {
+        if args.len() != 0 || lower_type_def(p, ty) != None -> return None
+        loop definition in p.traits {
+            if definition.key == name.name || definition.name == name.name -> return Val(MIRTraitRef{id: definition.id, name: definition.name})
+        }
+    }
+    None
+}
+
+fn lower_trait_impl(p: MIRProgram, ty: MIRType, bound: MIRTraitRef) -> MIRImplDef? {
+    loop implementation in p.impls {
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.id == bound.id && mir_type_identity_key(implementation.self_type) == mir_type_identity_key(ty) -> return Val(implementation)
+    }
+    None
+}
+
+fn lower_trait_size(p: MIRProgram, ty: MIRType) -> Int Never! {
+    8 + lower_align_up(if lower_size(p, ty).size < 8 -> 8 else -> lower_size(p, ty).size, 8)
+}
+
+fn lower_trait_box_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, source: LIRValueID?, ty: MIRType, target: MIRType, dst: LIRValueID) Never! {
+    bound :: lower_trait_ref(p, target) ?? return lower_fail(&m, &f, "trait boxing target {mir_type_display_name(target)} is not a single checked trait")
+    if lower_size(p, ty).align > 8 -> return lower_fail(&m, &f, "native trait payload alignment above 8 is not lowered at O0 yet")
+    if bound.name != "Renderable" {
+        implementation :: lower_trait_impl(p, ty, bound) ?? return lower_fail(&m, &f, "trait boxing {mir_type_display_name(ty)} has no checked {bound.name} implementation")
+        loop definition in p.traits {
+            if definition.id != bound.id -> next
+            loop method in definition.methods {
+                found := false
+                loop id in implementation.methods {
+                    instance :: lower_instance_id(id, lower_call_bindings(Val(ty), [MIRType]{}))
+                    row :: lower_function_index(m, instance)
+                    if row < 0 -> next
+                    if lower_row_source(p, m, row).name == method.name -> found = true
+                }
+                if !found -> return lower_fail(&m, &f, "trait boxing default method {bound.name}.{method.name} is not lowered at O0 yet")
+            }
+        }
+    }
+    key :: lower_helper_id(&m, "trait.drop", ty)
+    lower_alloc(&m, &f, dst, lower_trait_size(p, ty))
+    lower_store_word(&f, dst, 0, key.value)
+    if source == .Val(value) -> lower_write_at(p, &f, dst, 8, value, ty)
+}
+
+fn lower_trait_box(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
+    ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "trait box payload has no checked type")
+    target :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "trait box has no checked target")
+    source :: if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, value)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    lower_trait_box_value(p, &m, &f, source, ty, target, dst)
+}
+
+fn lower_trait_arg(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, arg: MIRCallArg, target: MIRTypeID) -> LIRValueID? {
+    row :: m.checked_types.rows.get(target.value) ?? {
+        lower_fail(&m, &f, "trait argument target {target.value} has no checked type")
+        return None
+    }
+    target_ty :: m.checked_types.types[row].copy()
+    ty :: lower_value_type(c, arg.value) ?? return None
+    source := if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, arg.value)
+    if source == .Val(value) && (arg.implicit_clone || arg.shared_auto_clone || arg.access == .Read) {
+        layout :: lower_repr_layout(lower_repr(p, ty)) ?? return None
+        cloned :: lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+        lower_clone_into(p, &m, &f, value, cloned, ty)
+        source = Val(cloned)
+    }
+    dst :: lower_new_value(&f, lir_layout_pointer(), lower_drop(&m, lower_repr(p, target_ty), arg.access == .Read), target_ty.identity)
+    lower_trait_box_value(p, &m, &f, source, ty, target_ty, dst)
+    if f.failed -> None else -> Val(dst)
+}
+
+fn lower_trait_payload_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    clone :: glue.helper == "trait.clone"
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, if clone -> Val(lir_layout_pointer()) else -> None)
+    source :: f.open_params[0].copy()
+    if clone {
+        dst :: lower_pointer(&f)
+        lower_alloc(&m, &f, dst, lower_trait_size(p, glue.ty))
+        key :: lower_list_word(&f, source, 0)
+        lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: key})
+        from :: lower_address(&f, source, 8)
+        to :: lower_address(&f, dst, 8)
+        lower_list_clone_element(p, &m, &f, from, to, glue.ty)
+        lower_seal(&f, LIRTerminator.Return{value: Val(dst)})
+    } else {
+        lower_glue_drop_fields(p, &m, &f, source, [LowerGlueField]{LowerGlueField{offset: 8, ty: glue.ty}})
+        lower_free_shell(&m, &f, source, lower_trait_size(p, glue.ty))
+        lower_seal(&f, LIRTerminator.Return{value: None})
+    }
+    lir_builder_finish(f.builder)
+}
+
+fn lower_trait_glue(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, if glue.clone -> Val(lir_layout_pointer()) else -> None)
+    boxed :: f.open_params[0].copy()
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: .Eq, left: boxed, right: null})
+    absent :: lower_new_block(&f)
+    live :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(absent, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+    lower_start(&f, absent, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: if glue.clone -> Val(null) else -> None})
+    lower_start(&f, live, [LIRValueID]{})
+    key :: lower_list_word(&f, boxed, 0)
+    count :: m.glue.len()
+    loop index in 0..<count {
+        payload :: m.glue[index].copy()
+        if payload.helper != "trait.drop" -> next
+        expected :: lower_const(&f, payload.id.value)
+        selected :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: key, right: expected})
+        body :: lower_new_block(&f)
+        other :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        result := LIRValueID?{None}
+        if glue.clone -> result = Val(lower_pointer(&f))
+        lower_call_helper(&m, &f, if glue.clone -> "trait.clone" else -> "trait.drop", payload.ty, [LIRValueID]{boxed}, result)
+        lower_seal(&f, LIRTerminator.Return{value: result})
+        lower_start(&f, other, [LIRValueID]{})
+    }
+    reason :: lower_static_text(&m, &f, "unknown native trait payload key")
+    lower_noreturn_call(&m, &f, "jet_rt_unreachable", reason)
+    lir_builder_finish(f.builder)
+}
+
+fn lower_trait_method(p: MIRProgram, bound: MIRTraitRef, id: MIRTraitMethodID) -> MIRTraitMethod? {
+    loop definition in p.traits {
+        if definition.id != bound.id -> next
+        loop method in definition.methods { if method.id == id -> return Val(method) }
+    }
+    None
+}
+
+// True when a lowered concrete implementation answers `name` of `bound`.
+// lower_reach_trait_type requests every method of each boxed payload type,
+// so with none the program boxes no value of the trait: no key can reach the
+// dispatch, which is the closed set lower_trait_call emits.
+fn lower_trait_dispatches(p: MIRProgram, m: LowerModule, bound: MIRTraitRef, name: String) -> Bool Never! {
+    loop implementation in p.impls {
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.id != bound.id -> next
+        loop id in implementation.methods {
+            row :: lower_function_index(m, lower_instance_id(id, lower_call_bindings(Val(implementation.self_type), [MIRType]{})))
+            if row >= 0 && lower_row_source(p, m, row).name == name -> return true
+        }
+    }
+    false
+}
+
+// A dynamic trait call without a dispatch target stops at
+// `jet_rt_unreachable` (lower_trait_call); lowering treats it as a call that
+// does not return (lower_is_noreturn), as the MIR's own stops are.
+fn lower_trait_call_dead(p: MIRProgram, m: LowerModule, callee: MIRCallee, args: [MIRCallArg], type_args: [MIRType]) -> Bool Never! {
+    if callee == .TraitMethod(method, bound, receiver) {
+        if args.len() == 0 || type_args.len() > 0 || lower_trait_ref(p, receiver) == None -> return false
+        checked :: lower_trait_method(p, bound, method) ?? return false
+        return !lower_trait_dispatches(p, m, bound, checked.name)
+    }
+    false
+}
+
+fn lower_trait_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, method: MIRTraitMethodID, bound: MIRTraitRef, receiver: MIRType, args: [MIRCallArg], type_args: [MIRType]) Never! {
+    checked :: lower_trait_method(p, bound, method) ?? return lower_fail(&m, &f, "trait call has no checked method")
+    name :: checked.name
+    if args.len() == 0 -> return lower_fail(&m, &f, "trait call has no checked receiver")
+    if lower_trait_ref(p, receiver) == None {
+        implementation :: lower_trait_impl(p, receiver, bound) ?? return lower_fail(&m, &f, "trait call has no concrete implementation")
+        loop id in implementation.methods {
+            instance :: lower_instance_id(id, lower_call_bindings(Val(receiver), type_args))
+            row :: lower_function_index(m, instance)
+            if row >= 0 && lower_row_source(p, m, row).name == name -> return lower_call(p, c, &m, &f, instruction, .Method{function: id, owner: receiver}, args, type_args)
+        }
+        return lower_fail(&m, &f, "trait default method {bound.name}.{name} is not lowered at O0 yet")
+    }
+    if type_args.len() > 0 -> return lower_fail(&m, &f, "generic dynamic trait receivers are not object-safe at O0")
+    if !lower_trait_dispatches(p, m, bound, name) {
+        reason :: lower_static_text(&m, &f, "unknown native trait method key")
+        return lower_noreturn_call(&m, &f, "jet_rt_unreachable", reason)
+    }
+    boxed := lower_use(&m, &f, args[0].value) ?? return
+    copied_receiver :: args[0].access == .Move && (args[0].implicit_clone || args[0].shared_auto_clone)
+    if copied_receiver {
+        copied :: lower_pointer(&f)
+        lower_call_clone_glue(&m, &f, receiver, boxed, copied)
+        boxed = copied
+    }
+    key :: lower_list_word(&f, boxed, 0)
+    rest := [MIRCallArg]{}
+    loop (index, arg) in args { if index > 0 -> &rest.push(arg) }
+    lowered := [LIRValueID]{}
+    writebacks := [LowerWriteBack]{}
+    temporaries := [LIRValueID]{}
+    if !lower_call_args(p, c, &m, &f, rest, &lowered, &writebacks, &temporaries) -> return
+    dst :: lower_result(p, c, &m, &f, instruction)
+    result_ty :: lower_checked_type(c, instruction) ?? checked.return_type
+    inline_result :: lower_is_inline(p, result_ty)
+    result_storage := LIRValueID?{None}
+    if inline_result {
+        storage :: dst ?? lower_pointer(&f)
+        lower_storage_into(p, &f, storage, result_ty)
+        result_storage = Val(storage)
+    }
+    done :: lower_new_block(&f)
+    loop implementation in p.impls {
+        trait_ref :: implementation.trait_ref ?? next
+        if trait_ref.id != bound.id -> next
+        loop id in implementation.methods {
+            concrete :: implementation.self_type
+            target :: lower_instance_id(id, lower_call_bindings(Val(concrete), [MIRType]{}))
+            row :: lower_function_index(m, target)
+            if row < 0 -> next
+            function :: lower_row_source(p, m, row)
+            if function.name != name -> next
+            payload :: lower_helper_id(&m, "trait.drop", concrete)
+            expected :: lower_const(&f, payload.value)
+            selected :: lower_flag(&f)
+            lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: key, right: expected})
+            body :: lower_new_block(&f)
+            other :: lower_new_block(&f)
+            lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+            lower_start(&f, body, [LIRValueID]{})
+            call_args := [LIRValueID]{}
+            if result_storage == .Val(storage) -> &call_args.push(storage)
+            if function.params.len() == 0 -> return lower_fail(&m, &f, "dynamic trait method lacks a receiver")
+            if lower_repr(p, concrete) != .Absent {
+                if function.params[0].access == .Write || lower_is_inline(p, concrete) {
+                    &call_args.push(lower_address(&f, boxed, 8))
+                } else if lower_read_at(p, &f, boxed, 8, concrete) == .Val(value) -> &call_args.push(value)
+            }
+            loop value in lowered -> &call_args.push(value)
+            signature :: m.mir_signatures[row].copy()
+            branch_result := LIRValueID?{None}
+            if !inline_result && m.signatures[signature.value].result == .Val(layout) -> branch_result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
+            lower_emit(&f, LIRInst.Call{dst: branch_result, signature: signature, callee: .Function{id: LIRFunctionID{value: row}}, args: call_args})
+            if function.params[0].access == .Move -> lower_free_shell(&m, &f, boxed, lower_trait_size(p, concrete))
+            else if copied_receiver -> lower_call_helper(&m, &f, "trait.drop", concrete, [LIRValueID]{boxed}, None)
+            if dst == None && branch_result == .Val(value) -> lower_map_drop_value(p, &m, &f, value, result_ty)
+            join_args := [LIRValueID]{}
+            if dst != None && !inline_result && branch_result == .Val(value) -> &join_args.push(value)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, join_args)})
+            lower_start(&f, other, [LIRValueID]{})
+        }
+    }
+    reason :: lower_static_text(&m, &f, "unknown native trait method key")
+    lower_noreturn_call(&m, &f, "jet_rt_unreachable", reason)
+    params := [LIRValueID]{}
+    if !inline_result && dst == .Val(value) -> &params.push(value)
+    lower_start(&f, done, params)
+    if dst == None && result_storage == .Val(storage) -> lower_map_drop_value(p, &m, &f, storage, result_ty)
+    loop writeback in writebacks -> lower_write_back(p, c, &m, &f, writeback, None)
+    loop temporary in temporaries -> lower_emit(&f, LIRInst.Drop{value: temporary})
+}
+
+fn lower_reach_trait_type(p: MIRProgram, q: &LowerPrepared, ty: MIRType, target: MIRTypeID, parent: Int) Never! {
+    row :: q.checked_types.rows.get(target.value) ?? return
+    target_ty :: q.checked_types.types[row].copy()
+    bound :: lower_trait_ref(p, target_ty) ?? return
+    if lower_trait_ref(p, ty) != None -> return
+    if bound.name == "Renderable" {
+        lower_reach_render_child(&q, ty, false, parent)
+        lower_reach_render_child(&q, ty, true, parent)
+        return
+    }
+    implementation :: lower_trait_impl(p, ty, bound) ?? return
+    loop id in implementation.methods -> lower_mono_request(p, &q, id, Val(ty), [MIRType]{}, parent, "trait box {bound.name}").drop("trait vtable method")
+}
+
+fn lower_reach_trait_value(p: MIRProgram, q: &LowerPrepared, function: MIRFunction, facts: [U64:Int], value: MIRValueID, target: MIRTypeID, parent: Int) Never! {
+    row :: facts.get(value.value) ?? return
+    lower_reach_trait_type(p, &q, function.values[row].ty, target, parent)
+}
+
+// Renderable delegates to the concrete payload's selected renderer.
+fn lower_helper_trait_render(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    boxed :: f.open_params[0].copy()
+    key :: lower_list_word(&f, boxed, 0)
+    mode :: if glue.helper == "show" -> LowerRenderMode.Show else if glue.helper == "debug" -> LowerRenderMode.Debug else -> LowerRenderMode.Display
+    count :: m.glue.len()
+    loop index in 0..<count {
+        payload :: m.glue[index].copy()
+        if payload.helper != "trait.drop" -> next
+        expected :: lower_const(&f, payload.id.value)
+        selected :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: selected, condition: .Eq, left: key, right: expected})
+        body :: lower_new_block(&f)
+        other :: lower_new_block(&f)
+        lower_seal(&f, LIRTerminator.Branch{condition: selected, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+        lower_start(&f, body, [LIRValueID]{})
+        value :: lower_render_load(p, &f, boxed, 8, payload.ty, false)
+        text :: lower_render_value(p, &m, &f, payload.ty, value, mode) ?? {
+            lower_seal(&f, LIRTerminator.Unreachable)
+            return lir_builder_finish(f.builder)
+        }
+        result := text.value
+        if !text.owned {
+            result = lower_render_string(&f)
+            lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{text.value}, Val(result))
+        }
+        lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+        lower_start(&f, other, [LIRValueID]{})
+    }
+    reason :: lower_static_text(&m, &f, "unknown native trait render key")
+    lower_noreturn_call(&m, &f, "jet_rt_unreachable", reason)
+    lir_builder_finish(f.builder)
+}
+
+// Dynamic dispatch depends on the closed payload-key inventory.
+fn lower_trait_dispatcher(p: MIRProgram, glue: LowerGlue) -> Bool Never! {
+    if lower_trait_ref(p, glue.ty) == None -> return false
+    glue.helper == "" || glue.helper == "show" || glue.helper == "display" || glue.helper == "debug"
+}
+
+fn lower_trait_key_count(m: LowerModule) -> Int Never! {
+    count := 0
+    loop glue in m.glue { if glue.helper == "trait.drop" -> count += 1 }
+    count
+}

@@ -1,6 +1,6 @@
 mod common;
 
-fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBundle, Vec<String>) {
+fn write_source(source: &str) -> std::path::PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "jet_marker_rule_signatures_{}_{}",
         std::process::id(),
@@ -9,16 +9,36 @@ fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBund
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     std::fs::write(&path, source).unwrap();
-    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let codes = jet::Sema::check_bundle(&mut bundle, mode)
+    path
+}
+
+/// The checked diagnostics the driver gates on: parser teaching plus sema.
+fn checked_codes(bundle: &mut jet::AST::ProgramBundle, mode: jet::Sema::CompileMode) -> Vec<String> {
+    let sema = jet::Sema::check_bundle(bundle, mode);
+    std::mem::take(&mut bundle.parse_teaching)
         .into_iter()
+        .chain(sema)
         .map(|diagnostic| diagnostic.code.to_string())
-        .collect();
+        .collect()
+}
+
+fn checked(source: &str, mode: jet::Sema::CompileMode) -> (jet::AST::ProgramBundle, Vec<String>) {
+    let path = write_source(source);
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    let codes = checked_codes(&mut bundle, mode);
     (bundle, codes)
 }
 
+/// Codes for a source, including the ones that stop it at load.
 fn codes(source: &str) -> Vec<String> {
-    checked(source, jet::Sema::CompileMode::Check).1
+    let path = write_source(source);
+    match jet::Loader::load_entry(path.to_str().unwrap()) {
+        Ok(mut bundle) => checked_codes(&mut bundle, jet::Sema::CompileMode::Check),
+        Err(diagnostics) => diagnostics
+            .into_iter()
+            .map(|diagnostic| diagnostic.code.to_string())
+            .collect(),
+    }
 }
 
 fn diagnostics(source: &str) -> Vec<jet::Diagnostics::Diagnostic> {
@@ -49,7 +69,7 @@ fn parse_codes(source: &str) -> Vec<String> {
 
 #[test]
 fn core_lang_marker_enums_accept_dot_literals_without_imports() {
-    let diagnostics = codes("#Inline(.Always)\nfn helper() -> Int { 1 }\nfn run() {}");
+    let diagnostics = codes("#Inline(.Always)\nfn _helper() -> Int { 1 }\nfn run() {}");
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
 
@@ -57,7 +77,7 @@ fn core_lang_marker_enums_accept_dot_literals_without_imports() {
 fn arithmetic_policy_accepts_only_declared_sites_and_modes() {
     let valid = codes(
         r#"
-#Arithmetic(.Checked) fn checked() {}
+#Arithmetic(.Checked) fn _checked() {}
 struct Accumulator { value: U8 }
 impl Accumulator {
     #Arithmetic(.Wrapping) fn step(self) {}
@@ -107,11 +127,11 @@ fn qualified_core_lang_hierarchical_marker_enums_use_the_variant_root() {
 use core.compiler.lang as lang
 
 #Target(lang.Target.Web)
-fn helper() {}
+fn _helper() {}
 
 fn run() {
     #FX(lang.Effect.Net) {}
-    #FX(grant: lang.Effect.Net) {}
+    #FX(_grant: lang.Effect.Net) {}
 }
 "#,
     );
@@ -303,7 +323,7 @@ fn a_constant_only_row_teaches_the_marked_binding() {
     let elsewhere = parse_diagnostics("#Off\nfn run() {}");
     assert!(
         elsewhere.iter().any(|diagnostic| diagnostic.code == "E0355"
-            && diagnostic.fix == "move `#Off` to one of its registered sites"),
+            && diagnostic.fix == "Move `#Off` to one of its registered sites"),
         "{elsewhere:?}"
     );
 }
@@ -691,7 +711,7 @@ fn invariant_marker_is_retired_in_favor_of_range_types() {
         diagnostics.iter().any(|diagnostic| {
             diagnostic.code == "E0927"
                 && diagnostic.what.contains("#Invariant")
-                && diagnostic.fix.contains("distinct Int(lo..hi)")
+                && diagnostic.fix.contains("Int(lo..hi)")
         }),
         "{diagnostics:?}"
     );

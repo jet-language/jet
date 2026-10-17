@@ -115,39 +115,6 @@ pub struct JetRealtimeReceipt {
     pub end_identity: i64,
 }
 
-impl JetRealtimeReceipt {
-    pub fn render_json(&self) -> String {
-        format!(
-            "{{\"requested_rate_hz\":{},\"requested_frames\":{},\"completed_callbacks\":{},\"completed_frames\":{},\"missed\":{},\"max_lateness_ns\":{},\"start_identity\":{},\"end_identity\":{}}}",
-            self.requested_rate_hz,
-            self.requested_frames,
-            self.completed_callbacks,
-            self.completed_frames,
-            self.missed,
-            self.max_lateness_ns,
-            self.start_identity,
-            self.end_identity,
-        )
-    }
-
-    pub fn render(&self) -> String {
-        format!(
-            "RealtimeReceipt(rate_hz={}, frames={}, callbacks={}, completed_frames={}, missed={}, max_lateness_ns={}, start_identity={}, end_identity={})",
-            self.requested_rate_hz,
-            self.requested_frames,
-            self.completed_callbacks,
-            self.completed_frames,
-            self.missed,
-            self.max_lateness_ns,
-            self.start_identity,
-            self.end_identity,
-        )
-    }
-
-    pub fn frames_per_buffer(&self) -> i64 {
-        self.requested_frames
-    }
-}
 
 struct JetRealtimeShared {
     requested_rate_hz: i64,
@@ -402,7 +369,11 @@ where
         callback_skipped,
     });
     let worker_shared = shared.clone();
-    let worker = std::thread::spawn(move || jet_rt_run(worker_shared, callback, buffer));
+    let worker = std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
+        jet_rt_run(worker_shared, callback, buffer)
+    });
     JetRealtimeStream {
         shared,
         worker: std::sync::Arc::new(std::sync::Mutex::new(Some(worker))),

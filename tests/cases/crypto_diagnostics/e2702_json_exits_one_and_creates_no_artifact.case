@@ -1,0 +1,21 @@
+# Port of crypto_diagnostics.rs:17-72. PENDING-GRAMMAR: raw stream prefix.
+fixture: fixtures/output-length
+step: jet check main.jet --json
+exit: 1
+stdout: empty
+stderr: ^= "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\"" # original ed77c235f tests/crypto_diagnostics.rs:42 starts_with predicate
+stderr: ~ "\"code\":\"E2702\"" # Original JSON substring contract assertion.
+stderr: ~ "\"what\":\"crypto API misuse\"" # Original JSON substring contract assertion.
+stderr: ~ "\"reason\":\"output_length\"" # Original JSON substring contract assertion.
+stderr: ~ "\"operation\":\"hkdf_sha256\"" # Original JSON substring contract assertion.
+stderr: ~ "\"expected\":\"0..8160\"" # Original JSON substring contract assertion.
+stderr: ~ "\"actual\":8161" # Original JSON substring contract assertion.
+stderr: ~ "\"span\":" # Original JSON substring contract assertion.
+stderr: ~ "\"cause\":[],\"clears\":0" # Original JSON substring contract assertion.
+stderr: !~ password # Original secret/backend redaction assertion.
+stderr: !~ plaintext # Original secret/backend redaction assertion.
+stderr: !~ ciphertext # Original secret/backend redaction assertion.
+stderr: !~ backend # Original secret/backend redaction assertion.
+stderr: !~ rustc # Original secret/backend redaction assertion.
+stderr: !~ dependency # Original secret/backend redaction assertion.
+file: .jet/build absent

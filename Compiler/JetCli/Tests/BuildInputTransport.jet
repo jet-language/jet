@@ -1,0 +1,65 @@
+// Real filesystem transport, assembled with the full canonical compiler unit.
+fn run() {
+    root :: "{cli_sys.temp_dir()}/jet-build-input-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{root}/nested") ?? panic("test root")
+    cli_files.write("{root}/nested/data.txt", "héllo") ?? panic("test bytes")
+    content :: jet_cli_build_read_rooted(root, "nested/data.txt", 6) ?? panic("bounded rooted read")
+    assert(content == "héllo".bytes())
+    normalized :: jet_cli_build_read_rooted("{root}/.", "./nested//data.txt", 6) ?? panic("normal OS components")
+    assert(normalized == content)
+    oversized :: jet_cli_build_read_rooted(root, "nested/data.txt", 5)
+    if oversized == {
+        .Err(detail) -> assert(detail.message == "file exceeds its read bound")
+        .Ok(_) -> panic("oversized rooted read was accepted")
+    }
+    empty :: jet_cli_build_read_rooted(root, "./", 6)
+    if empty == {
+        .Err(detail) -> assert(detail.message == "file authority path is empty")
+        .Ok(_) -> panic("empty rooted path was accepted")
+    }
+    escaped :: jet_cli_build_read_rooted(root, "../data.txt", 6)
+    if escaped == {
+        .Err(detail) -> assert(detail.message == "file authority path must be relative and normalized")
+        .Ok(_) -> panic("parent path escape was accepted")
+    }
+    absolute :: jet_cli_build_read_rooted(root, "{root}/nested/data.txt", 6)
+    if absolute == {
+        .Err(detail) -> assert(detail.message == "file authority path must be relative and normalized")
+        .Ok(_) -> panic("absolute rooted path was accepted")
+    }
+    nonregular :: jet_cli_build_read_rooted(root, "nested", 6)
+    assert(nonregular == .Err(_))
+    missing :: jet_cli_build_read_rooted(root, "absent", 6)
+    assert(missing == .Err(_))
+    cli_files.symlink("{root}/nested/data.txt", "{root}/linked.txt") ?? panic("test final link")
+    final_link :: jet_cli_build_read_rooted(root, "linked.txt", 6)
+    assert(final_link == .Err(_))
+    cli_files.symlink("{root}/nested", "{root}/alias") ?? panic("test parent link")
+    parent_link :: jet_cli_build_read_rooted(root, "alias/data.txt", 6)
+    assert(parent_link == .Err(_))
+    root_link :: jet_cli_build_read_rooted("{root}/alias", "data.txt", 6)
+    assert(root_link == .Err(_))
+    cli_files.hard_link("{root}/nested/data.txt", "{root}/duplicate.txt") ?? panic("test hard link")
+    hard_link :: jet_cli_build_read_rooted(root, "nested/data.txt", 6)
+    if hard_link == {
+        .Err(detail) -> assert(detail.message == "file authority input has multiple hard links")
+        .Ok(_) -> panic("rooted hard link was accepted")
+    }
+    // Unrooted file-URL reads share a held no-follow reader but intentionally
+    // retain their reference policy permitting regular multi-link files.
+    file_url :: JetCLIBuildInputs{}.read("{root}/nested/data.txt", 6) ?? panic("file URL read")
+    assert(file_url == content)
+    file_url_link :: JetCLIBuildInputs{}.read("{root}/linked.txt", 6)
+    if file_url_link == {
+        .Err(detail) -> assert(detail.message == "file is not a regular file")
+        .Ok(_) -> panic("file URL link was accepted")
+    }
+    file_url_oversized :: JetCLIBuildInputs{}.read("{root}/nested/data.txt", 5)
+    if file_url_oversized == {
+        .Err(detail) -> assert(detail.message == "file exceeds its read bound")
+        .Ok(_) -> panic("oversized file URL read was accepted")
+    }
+    cli_files.remove("{root}/linked.txt") ?? panic("final link cleanup")
+    cli_files.remove("{root}/alias") ?? panic("parent link cleanup")
+    cli_files.remove_all(root) ?? panic("test root cleanup")
+}

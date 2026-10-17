@@ -8,6 +8,27 @@ fn pkg_test_authority_root(label: String) -[FS, Env]> String Never! {
     root
 }
 
+fn pkg_test_authority_snapshot_probe(resolver: AuthorityResolver, path: String, descendant: Bool) Never! -[FS, Env]> {
+    directory :: resolver.checked_directory(path) ?? panic("check directory")
+    if descendant -> assert(directory.handle == .Val(_))
+    else -> assert(directory.handle == None)
+    handle :: resolver.directory_handle(directory)
+    assert((handle.stat() ?? panic("held directory")).is_dir)
+}
+
+#Test("authority root snapshots borrow and child snapshots own independently") {
+    root :: pkg_test_authority_root("one-owner")
+    files.create_dir_all(files.join(root, "child")) ?? panic("mkdir child")
+    resolver :: AuthorityResolver.open(root) ?? panic("hold root")
+    pkg_test_authority_snapshot_probe(resolver, ".", false)
+    pkg_test_authority_snapshot_probe(resolver, "child", true)
+    // Both snapshots have closed; the resolver still owns its original pin.
+    resolver.revalidate_root() ?? panic("root still live")
+    again :: resolver.checked_directory(".") ?? panic("root snapshot again")
+    assert(again.handle == None)
+    files.remove_all(root).drop("test cleanup")
+}
+
 #Test("authority project candidate stays pinned but shared temp does not") {
     parent :: pkg_test_authority_root("candidate-parent")
     root :: files.join(parent, "project")

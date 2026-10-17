@@ -1,0 +1,30 @@
+# HAND-PORT tests/jetpack_engine.rs:7257-7363 bridge_flake_commits_transitive_locked_registry_facts_without_nix
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: bridge_flake_commits_transitive_locked_registry_facts_without_nix.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step first: jetpack bridge flake --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout: ~ "packages: [fd]" # original contains predicate
+copy: project/.jet/lock before.lock
+json: file project/.jet/lock toml $.semantic_record[?key="flake-lock-node:tools"][0].exact = "{\"inputs\":[{\"name\":\"nixpkgs\",\"target\":\"nixpkgs\"}],\"locked\":{\"owner\":\"example\",\"repo\":\"tools\",\"rev\":\"0123456789abcdef0123456789abcdef01234567\",\"type\":\"github\"},\"name\":\"tools\",\"original\":{\"owner\":\"example\",\"repo\":\"tools\",\"type\":\"github\"}}"
+json: file project/.jet/lock toml $.semantic_record[?key="flake-registry:nixpkgs"][0].exact = "{\"alias\":\"nixpkgs\",\"locked\":{\"owner\":\"NixOS\",\"repo\":\"nixpkgs\",\"rev\":\"89abcdef0123456789abcdef0123456789abcdef\",\"type\":\"github\"},\"node\":\"nixpkgs\",\"original\":{\"id\":\"nixpkgs\",\"type\":\"indirect\"}}"
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout: == first
+file: project/.jet/lock == before.lock
+remove: project/.jet/lock
+write: project/flake.lock wrong.template
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 1
+stderr: ~ "Error [E1340]: couldn't load the foreign graph" # original contains predicate
+stderr: ~ "flake.lock root input `tools` maps to node `tools` with a different source URL or indirect alias" # original contains predicate
+

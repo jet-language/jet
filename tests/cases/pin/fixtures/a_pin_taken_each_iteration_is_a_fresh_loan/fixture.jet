@@ -1,0 +1,16 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+fn run() {
+    node := Node{payload: 0, hops: 0}
+    loop i in 0..2 {
+        pinned :: mem.pin(&node)
+        pinned.hops += 1
+    }
+    print("{(node.hops)}")
+}

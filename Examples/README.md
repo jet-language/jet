@@ -23,6 +23,12 @@ node Tools/agent/run-feature-examples.mjs
 For the contributor workflow around the executable and its environment, see
 [`AGENTS.md`](../AGENTS.md) and [`Tools/agent/jet-env`](../Tools/agent/jet-env).
 
+Examples that depend on environment or process identity should print checked
+relationships instead of raw paths or process IDs. For example,
+[`system_projection.jet`](features/io/system_projection.jet) compares the home
+directory with its environment source and checks child exit statuses, preserving
+the system calls while keeping the stdout contract independent of the host.
+
 ## Find an example
 
 Start with the smallest source in [`features/basics/`](features/basics/), then
@@ -47,6 +53,10 @@ copies. Its [golden](features/expected/basics/struct_call_word.out) preserves al
 borrowed returns from named owners and direct operations on the returned view.
 The caller keeps the owner alive; binding the returned view first is optional.
 
+[`view_subranges.jet`](features/memory/view_subranges.jet) shows subranges of
+declared views: `view[a..<b]` keeps the view's owner, never copies, and writes
+through a `ViewMut` subrange land in the owning list.
+
 ## Auxiliary golden stream suffix
 
 The feature runner discovers `.jet` files and project directories containing a
@@ -64,13 +74,24 @@ listed below:
 | Fixture | Meaning |
 | --- | --- |
 | `<stem>.out` | Expected native stdout. |
-| `<stem>.err.out` | Expected non-zero execution, including a panic or uncaught error. |
+| `<stem>.err.out` | Expected stderr for failing execution; ratified runtime faults exit 70, source-proved unhandled/fatal entries exit 1. |
 | `<stem>.stderr.out` | Expected stderr while execution exits successfully. |
 | `<stem>.web.out` | Web-target output used by the corresponding web fixture. |
 | `<stem>.harness.out` | Harness-managed output. |
 | `<stem>.seed.out` / `<stem>.greet.out` | Input-specific output for the matching example. |
 | `<stem>.test.out` | Test-command output. |
 | `<stem>.fuzz.out` | Fuzz-command output. |
+
+Failing runs compare stdout as well as stderr and the exact exit code. A
+failure's sibling `.out` is authoritative; without one, stdout must be empty.
+Unknown failure contracts and contradictory exit claims in an oracle are
+missing exit proofs, not permission to accept an arbitrary nonzero status.
+These rules apply to the Rust feature
+runner (`tests/golden.rs`), the native backend runner
+(`Compiler/JetBackend/Tests/run-goldens.mjs`), and the runtime trap runner
+(`Compiler/JetRuntime/Tests/run-trap-goldens.mjs`). Native parity additionally
+requires an executed reference with the same exit and both output streams;
+an emit-only reference does not establish runtime parity.
 
 The relevant golden checker is the executable definition of each mapping. Keep
 source changes and their fixtures together; do not use this README as a second
@@ -80,9 +101,7 @@ list of expected output.
 
 `features/basics/` is the shortest path through expressions, functions, and
 output. Continue through the language/data row before choosing a runtime or
-application topic. [`Examples/learn/`](learn/README.md) is a separate,
-offline curriculum: it teaches prediction, evidence, explanation, a controlled
-change, and transfer rather than adding another feature inventory.
+application topic.
 
 ## Short path first
 

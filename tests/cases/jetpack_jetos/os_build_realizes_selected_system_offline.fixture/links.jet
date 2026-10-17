@@ -1,0 +1,21 @@
+// Exact tests/support/jetpack_fixtures.rs:266-290; follows no symlinks.
+use core.files as files
+use core.process as process
+fn check_links(path: String) {
+    info :: files.stat(path) ?? return
+    if info.is_symlink {
+        target :: files.read_link(path) ?? panic("read link")
+        assert(!target.contains("/proc/self/fd/"), "ephemeral FD link")
+        assert(!target.contains("/leases/"), "ephemeral lease link")
+        return
+    }
+    if info.is_dir {
+        entries :: files.list_dir(path) ?? panic("entries")
+        loop entry in entries -> check_links(entry.path)
+    }
+}
+fn run() {
+    args :: process.args()
+    assert(args.len() == 1)
+    check_links(args[0])
+}

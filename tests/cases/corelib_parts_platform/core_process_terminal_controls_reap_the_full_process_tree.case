@@ -1,0 +1,27 @@
+# Port of tests/corelib_parts/platform.rs:927-1025; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_terminal_controls_reap_the_full_process_tree
+write: main.jet main.template
+write: tree.sh tree.sh.template
+chmod: tree.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "false\nfalse\nfalse\ntrue\ndrop returned\n"
+capture: interrupt = text file.trim interrupt.pid
+repeat while process {cap:interrupt} alive timeout 1s every 10ms fail "terminal descendant survived"
+end repeat
+capture: terminate = text file.trim terminate.pid
+repeat while process {cap:terminate} alive timeout 1s every 10ms fail "terminal descendant survived"
+end repeat
+capture: kill = text file.trim kill.pid
+repeat while process {cap:kill} alive timeout 1s every 10ms fail "terminal descendant survived"
+end repeat
+capture: timeout = text file.trim timeout.pid
+repeat while process {cap:timeout} alive timeout 1s every 10ms fail "terminal descendant survived"
+end repeat
+capture: drop = text file.trim drop.pid
+repeat while process {cap:drop} alive timeout 1s every 10ms fail "terminal descendant survived"
+end repeat

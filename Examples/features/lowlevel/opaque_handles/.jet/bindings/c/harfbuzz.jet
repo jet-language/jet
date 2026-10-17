@@ -1,34 +1,34 @@
 // jet-ffi-descriptor=jet-ffi-descriptor-v1;language=C;surface=Namespace;status=Active;runtime=DirectCAbi;stub=CHeader;contract=jet-ffi-descriptor-v1;version=1;calling=C;layout=CAbi;ownership=SignatureDeclared;errors=JetBoundary;callbacks=ReentrantThreadSafe;async=JetTask;tasks=RejectCapturedState;safety=GeneratedWrapper;integer=Int;float=Float;bool=Bool;char=Char;string=String;effect=FFI;provider=System;cache=jet;type-stub=None;capabilities=[TypedStub, SafeWrapper, OwnershipConversion, LayoutValidation, ErrorConversion, CallbackValidation, CacheProvenance, PackageProvider, UnsafeRawEscape];bridge=
 // jet-ffi-boundary=jet-ffi-boundary-v1;language=c;library=harfbuzz;disposition=supported;source-authority=foreign-until-accepted;digest=a3c40d45a6f770f9b62badab6b76422fddab1b73493a0fdf21fe9db89cd99337
-pub struct HbBlob {}
-pub struct HbBuffer {}
-pub struct HbFace {}
-pub struct HbFont {}
+struct HbBlob {}
+struct HbBuffer {}
+struct HbFace {}
+struct HbFont {}
 
 #Layout(c)
-pub struct HbFeature {
-    tag_field: U32,
-    value: U32,
-    start: U32,
-    end: U32,
+struct HbFeature {
+    priv tag_field: U32,
+    priv value: U32,
+    priv start: U32,
+    priv end: U32,
 }
 
 #Layout(c)
-pub struct HbGlyphInfo {
-    codepoint: U32,
-    mask: U32,
-    cluster: U32,
-    var1: U32,
-    var2: U32,
+struct HbGlyphInfo {
+    priv codepoint: U32,
+    priv mask: U32,
+    priv cluster: U32,
+    priv var1: U32,
+    priv var2: U32,
 }
 
 #Layout(c)
-pub struct HbGlyphPosition {
-    x_advance: I32,
-    y_advance: I32,
-    x_offset: I32,
-    y_offset: I32,
-    var: U32,
+struct HbGlyphPosition {
+    priv x_advance: I32,
+    priv y_advance: I32,
+    priv x_offset: I32,
+    priv y_offset: I32,
+    priv var: U32,
 }
 
 #Bindgen module c.harfbuzz.__bindgen__ {
@@ -41,6 +41,7 @@ fn hb_font_create(face: &HbFace) -> HbFont = "hb_font_create"
     fn hb_font_set_scale(font: &HbFont, x_scale: Int, y_scale: Int) = "hb_font_set_scale"
     #Close(hb_buffer_destroy)
 fn hb_buffer_create() -> HbBuffer = "hb_buffer_create"
+    fn hb_buffer_add_codepoints(buffer: &HbBuffer, text: [U32], text_length: Int, item_offset: Int, item_length: Int) = "hb_buffer_add_codepoints"
     fn hb_buffer_guess_segment_properties(buffer: &HbBuffer) = "hb_buffer_guess_segment_properties"
     fn hb_shape(font: &HbFont, buffer: &HbBuffer, features: [HbFeature], num_features: Int) = "hb_shape"
     fn hb_buffer_get_length(buffer: &HbBuffer) -> Int = "hb_buffer_get_length"

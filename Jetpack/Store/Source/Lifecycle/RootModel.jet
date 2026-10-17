@@ -10,7 +10,7 @@ STORE_LIFECYCLE_MAX_TOTAL_TARGETS :: prep { 65536 }
 STORE_LIFECYCLE_MAX_RECOVERY_WORK :: prep { 1000000 }
 STORE_LIFECYCLE_MAX_IDENTITY_BYTES :: prep { 512 }
 
-pub enum RootKind {
+enum RootKind {
     ProjectLock
     ProfileGeneration
     Toolchain
@@ -40,8 +40,8 @@ pub enum RootKind {
 }
 
 // The stable identity of one root.
-pub struct RootID {
-    value: String
+struct RootID {
+    priv value: String
 
     fn new(value: String) -> RootID StoreError! {
         store_lifecycle_validate_identity("root id", value)
@@ -54,8 +54,8 @@ pub struct RootID {
 }
 
 // The producer that owns a root.
-pub struct ProducerID {
-    value: String
+struct ProducerID {
+    priv value: String
 
     fn new(value: String) -> ProducerID StoreError! {
         store_lifecycle_validate_identity("producer", value)
@@ -68,8 +68,8 @@ pub struct ProducerID {
 }
 
 // The producer's witness for one incarnation.
-pub struct RootWitness {
-    value: String
+struct RootWitness {
+    priv value: String
 
     fn new(value: String) -> RootWitness StoreError! {
         store_lifecycle_validate_identity("witness", value)
@@ -82,8 +82,8 @@ pub struct RootWitness {
 }
 
 // A never-reused, nonzero root incarnation.
-pub struct Incarnation {
-    value: Int
+struct Incarnation {
+    priv value: Int
 
     fn new(value: Int) -> Incarnation StoreError! {
         if value == 0 -> return Err(StoreError.InvalidData("lifecycle incarnation must be nonzero"))
@@ -96,8 +96,8 @@ pub struct Incarnation {
 }
 
 // Unix seconds recorded by a lifecycle transition.
-pub struct LifecycleTimestamp {
-    value: Int
+struct LifecycleTimestamp {
+    priv value: Int
 
     fn from_unix_seconds(value: Int) -> LifecycleTimestamp Never! {
         LifecycleTimestamp{value}
@@ -111,9 +111,9 @@ pub struct LifecycleTimestamp {
 // Compare-and-swap token for a durable root incarnation: the never-reused
 // incarnation, then the durable root revision. Both are persisted so a retry
 // after a crash cannot accept an older mutation.
-pub struct RootEtag {
-    incarnation: Int
-    revision: Int
+struct RootEtag {
+    priv incarnation: Int
+    priv revision: Int
 
     fn new(incarnation: Int, revision: Int) -> RootEtag StoreError! {
         Incarnation.new(incarnation)
@@ -143,10 +143,10 @@ pub struct RootEtag {
 }
 
 // Optional metadata of manually retained roots.
-pub struct RootMetadata {
-    label: String?
-    reference: String?
-    expires_at: LifecycleTimestamp?
+struct RootMetadata {
+    priv label: String?
+    priv reference: String?
+    priv expires_at: LifecycleTimestamp?
 
     fn empty() -> RootMetadata Never! {
         RootMetadata{label: None, reference: None, expires_at: None}
@@ -178,19 +178,19 @@ pub struct RootMetadata {
 }
 
 // The typed identity a producer supplies for one root incarnation.
-pub struct RootIdentity {
-    kind: RootKind
-    id: RootID
-    producer: ProducerID
-    incarnation: Incarnation
-    witness: RootWitness
+struct RootIdentity {
+    priv kind: RootKind
+    priv id: RootID
+    priv producer: ProducerID
+    priv incarnation: Incarnation
+    priv witness: RootWitness
 
     fn new(kind: RootKind, id: RootID, producer: ProducerID, incarnation: Incarnation, witness: RootWitness) -> RootIdentity Never! {
         RootIdentity{kind, id, producer, incarnation, witness}
     }
 }
 
-pub enum RootPhase {
+enum RootPhase {
     Prepared
     Committed
     Tombstoned
@@ -216,17 +216,17 @@ pub enum RootPhase {
 // One durable root. `targets` are the exact targets of this incarnation;
 // `protected_targets` are protected during replay (old union new while
 // prepared).
-pub struct LifecycleRoot {
-    identity: RootIdentity
-    targets: [String]
-    protected_targets: [String]
-    phase: RootPhase
-    prepared_at: LifecycleTimestamp
-    committed_at: LifecycleTimestamp?
-    tombstoned_at: LifecycleTimestamp?
-    metadata: RootMetadata
-    revision: Int
-    legacy: Bool
+struct LifecycleRoot {
+    priv identity: RootIdentity
+    priv targets: [String]
+    priv protected_targets: [String]
+    priv phase: RootPhase
+    priv prepared_at: LifecycleTimestamp
+    priv committed_at: LifecycleTimestamp?
+    priv tombstoned_at: LifecycleTimestamp?
+    priv metadata: RootMetadata
+    priv revision: Int
+    priv legacy: Bool
 
     // State validation guarantees this pair is nonzero.
     fn etag(self) -> RootEtag Never! {
@@ -252,8 +252,8 @@ pub struct LifecycleRoot {
     }
 }
 
-pub struct LifecycleRevision {
-    value: String
+struct LifecycleRevision {
+    priv value: String
 
     fn as_str(self) -> String Never! {
         self.value
@@ -261,21 +261,21 @@ pub struct LifecycleRevision {
 }
 
 // The composite revision of the closure journal head and the lifecycle state.
-pub struct StoreRevision {
-    lifecycle: LifecycleRevision
-    closure_head: String
-    digest: String
+struct StoreRevision {
+    priv lifecycle: LifecycleRevision
+    priv closure_head: String
+    priv digest: String
 
     fn as_str(self) -> String Never! {
         self.digest
     }
 }
 
-pub struct LifecycleSnapshot {
-    roots: [String: LifecycleRoot]
-    protected_targets: [String]
-    revision: LifecycleRevision
-    store_revision: StoreRevision
+struct LifecycleSnapshot {
+    priv roots: [String: LifecycleRoot]
+    priv protected_targets: [String]
+    priv revision: LifecycleRevision
+    priv store_revision: StoreRevision
 
     // Roots in root-id order.
     fn root_list(self) -> [LifecycleRoot] Never! {
@@ -287,10 +287,10 @@ pub struct LifecycleSnapshot {
 }
 
 // A root observed in a pre-journal record, imported as committed.
-pub struct LegacyRoot {
-    identity: RootIdentity
-    targets: [String]
-    observed_at: LifecycleTimestamp
+struct LegacyRoot {
+    priv identity: RootIdentity
+    priv targets: [String]
+    priv observed_at: LifecycleTimestamp
 }
 
 // One lifecycle journal transaction.
@@ -313,12 +313,12 @@ enum LifecycleJournalEntry {
 // One complete replacement request. The caller supplies the stable typed
 // identity and expected token; the journal owns incarnation allocation,
 // old-union-new protection, and the prepare/commit sequence.
-pub struct RootUpdate {
-    identity: RootIdentity
-    targets: [String]
-    metadata: RootMetadata
-    expected_etag: String?
-    at: LifecycleTimestamp
+struct RootUpdate {
+    priv identity: RootIdentity
+    priv targets: [String]
+    priv metadata: RootMetadata
+    priv expected_etag: String?
+    priv at: LifecycleTimestamp
 }
 
 // Rust `validate_identity`: 1..=512 bytes and no ASCII control byte.
@@ -375,14 +375,14 @@ fn store_lifecycle_pad20(value: Int) -> String Never! {
 
 // Sorted, duplicate-free union of two target sets.
 fn store_lifecycle_union(left: [String], right: [String]) -> [String] Never! {
-    merged := ~left
+    merged := left.copy()
     loop value in right -> &merged.push(value)
     store_lifecycle_sorted_set(merged)
 }
 
 // Sort and drop duplicates.
 fn store_lifecycle_sorted_set(values: [String]) -> [String] Never! {
-    sorted := ~values
+    sorted := values.copy()
     &sorted.sort()
     out := [String]{}
     loop value in sorted {

@@ -166,7 +166,7 @@ impl<'a> Parser<'a> {
                                     let span = expr.span();
                                     expr = self.struct_lit_after_name(full, Vec::new(), span)?;
                                 } else {
-                                    expr = self.struct_lit_after_import(alias, type_name, start)?;
+                                    expr = self.struct_lit_after_import(alias, type_name, Vec::new(), start)?;
                                 }
                                 continue;
                             }
@@ -188,13 +188,22 @@ impl<'a> Parser<'a> {
                             continue;
                         }
                     }
-                    // D-GENERIC-CALL1=A: optional call-site type arguments on
-                    // every method call, such as `decode<Order>(…)`.
-                    let type_args = if self.at_turbofish() {
+                    let generic_literal = allow_struct_lit
+                        && member.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+                        && self.at_type_args_before(TokKind::LBrace);
+                    let type_args = if generic_literal || self.at_turbofish() {
                         self.parse_turbofish()?
                     } else {
                         Vec::new()
                     };
+                    if generic_literal {
+                        if let Expr::Ident(alias, _) = &expr {
+                            let full = format!("{alias}.{member}");
+                            let span = expr.span();
+                            expr = self.struct_lit_after_path(full, type_args, span)?;
+                            continue;
+                        }
+                    }
                     if matches!(self.peek().kind, TokKind::LParen) {
                         self.bump();
                         let mut args = Vec::new();
@@ -281,6 +290,7 @@ impl<'a> Parser<'a> {
                             resolved_ret: None,
                             operator_rhs: None,
                             checked_widen: false,
+                            checked_callee: None,
                         };
                     } else {
                         expr = Expr::Field(Box::new(expr), member, member_span);
@@ -396,7 +406,7 @@ impl<'a> Parser<'a> {
                             let span = expr.span();
                             expr = self.struct_lit_after_name(full, Vec::new(), span)?;
                         } else {
-                            expr = self.struct_lit_after_import(alias, type_name, start)?;
+                            expr = self.struct_lit_after_import(alias, type_name, Vec::new(), start)?;
                         }
                     } else if allow_struct_lit
                         && matches!(
@@ -541,7 +551,7 @@ impl<'a> Parser<'a> {
 
     /// D-SPREAD1=A: after consuming `.`, parse `[a, b, c]` into `MemberSpread`.
     /// `spread_start` is the base expression's start (or the leading ident span).
-    pub(super) fn parse_member_spread(
+    pub(in crate::Parser) fn parse_member_spread(
         &mut self,
         base: Expr,
         spread_start: usize,
@@ -630,6 +640,33 @@ impl<'a> Parser<'a> {
         expr: Expr,
         compound_op: Option<crate::AST::BinOp>,
     ) -> Result<LValue, Diagnostic> {
+        let method = match compound_op {
+            Some(crate::AST::BinOp::BitAnd) => Some("bit_and"),
+            Some(crate::AST::BinOp::BitOr) => Some("bit_or"),
+            Some(crate::AST::BinOp::BitXor) => Some("bit_xor"),
+            Some(crate::AST::BinOp::Pow) => Some("pow"),
+            _ => None,
+        };
+        if let Some(method) = method {
+            fn place_start(expr: &Expr) -> usize {
+                match expr {
+                    Expr::Field(base, ..) | Expr::Index { base, .. } => place_start(base),
+                    _ => expr.span().start,
+                }
+            }
+            let lhs = expr.span();
+            if let Some(index) = self.toks[..self.pos].iter().position(|token| {
+                token.span.start >= lhs.end && token.kind.compound_op() == compound_op
+            }) {
+                let lhs = Span::new(place_start(&expr), self.toks[index - 1].span.end);
+                if let Some(first) = self.toks.get(index + 1) {
+                    let end = self.toks[index + 1..self.pos].iter()
+                        .filter(|token| !matches!(token.kind, TokKind::Semi))
+                        .last().map_or(first.span.end, |token| token.span.end);
+                    self.teach_arithmetic_method(method, lhs, Span::new(first.span.start, end), self.toks[index].span, true);
+                }
+            }
+        }
         let expr = expr.without_parens().clone();
         match expr {
             Expr::Ident(name, name_span) => Ok(LValue::Local { name, name_span }),

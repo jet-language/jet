@@ -1,0 +1,177 @@
+// Assemble with the canonical Compiler unit; PortInteg owns execution/proof.
+fn cli_metadata_require(ok: Bool, why: String) Never! { if !ok -> panic("CLI metadata: {why}") }
+fn cli_metadata_zeros(length: Int) -> [U8] Never! { loop _ in 0..<length -> U8{0} }
+fn cli_metadata_copy(out: &[U8], at: Int, bytes: [U8]) Never! {
+    loop index in 0..<bytes.len() -> out[at + index] = bytes[index]
+}
+fn cli_metadata_number(out: &[U8], at: Int, width: Int, value: U64, little: Bool) Never! {
+    loop index in 0..<width {
+        shift :: if little -> index * 8 else -> (width - index - 1) * 8
+        out[at + index] = U8{(value >> shift).bit_and(U64{255})}
+    }
+}
+fn cli_metadata_elf(record: [U8], wide: Bool, little: Bool) -> [U8] Never! {
+    header :: if wide -> 64 else -> 52
+    stride :: if wide -> 64 else -> 40
+    width :: if wide -> 8 else -> 4
+    names :: [U8]{0, 46, 115, 104, 115, 116, 114, 116, 97, 98, 0, 46, 106, 101, 116, 95, 99, 111, 109, 109, 97, 110, 100, 0}
+    record_at :: header + names.len()
+    table :: record_at + record.len()
+    out := cli_metadata_zeros(table + 3 * stride)
+    cli_metadata_copy(&out, 0, [U8]{127, 69, 76, 70})
+    out[4] = if wide -> U8{2} else -> U8{1}
+    out[5] = if little -> U8{1} else -> U8{2}
+    cli_metadata_number(&out, if wide -> 40 else -> 32, width, U64{table}, little)
+    cli_metadata_number(&out, if wide -> 58 else -> 46, 2, U64{stride}, little)
+    cli_metadata_number(&out, if wide -> 60 else -> 48, 2, U64{3}, little)
+    cli_metadata_number(&out, if wide -> 62 else -> 50, 2, U64{1}, little)
+    cli_metadata_copy(&out, header, names)
+    cli_metadata_copy(&out, record_at, record)
+    offset_field :: if wide -> 24 else -> 16
+    size_field :: if wide -> 32 else -> 20
+    loop index in 1..<3 {
+        base :: table + index * stride
+        cli_metadata_number(&out, base, 4, if index == 1 -> U64{1} else -> U64{11}, little)
+        cli_metadata_number(&out, base + offset_field, width, U64{if index == 1 -> header else -> record_at}, little)
+        cli_metadata_number(&out, base + size_field, width, U64{if index == 1 -> names.len() else -> record.len()}, little)
+    }
+    out
+}
+fn cli_metadata_pe(record: [U8], count: Int, trailing: [U8]) -> [U8] Never! {
+    table :: 0x80 + 24
+    raw :: table + count * 40
+    size :: record.len() + trailing.len()
+    out := cli_metadata_zeros(raw + count * size)
+    cli_metadata_copy(&out, 0, [U8]{77, 90})
+    cli_metadata_number(&out, 0x3c, 4, U64{0x80}, true)
+    cli_metadata_copy(&out, 0x80, [U8]{80, 69, 0, 0})
+    cli_metadata_number(&out, 0x80 + 6, 2, U64{count}, true)
+    loop index in 0..<count {
+        base :: table + index * 40
+        at :: raw + index * size
+        cli_metadata_copy(&out, base, ".jetcmd".bytes())
+        cli_metadata_number(&out, base + 16, 4, U64{size}, true)
+        cli_metadata_number(&out, base + 20, 4, U64{at}, true)
+        cli_metadata_copy(&out, at, record)
+        cli_metadata_copy(&out, at + record.len(), trailing)
+    }
+    out
+}
+fn cli_metadata_mach(record: [U8], wide: Bool) -> [U8] Never! {
+    header :: if wide -> 32 else -> 28
+    sections :: if wide -> 72 else -> 56
+    stride :: if wide -> 80 else -> 68
+    size :: sections + stride
+    at :: header + size
+    out := cli_metadata_zeros(at + record.len())
+    cli_metadata_copy(&out, 0, [U8]{if wide -> U8{207} else -> U8{206}, 250, 237, 254})
+    cli_metadata_number(&out, 16, 4, U64{1}, true)
+    cli_metadata_number(&out, 20, 4, U64{size}, true)
+    cli_metadata_number(&out, header, 4, if wide -> U64{25} else -> U64{1}, true)
+    cli_metadata_number(&out, header + 4, 4, U64{size}, true)
+    cli_metadata_number(&out, header + (if wide -> 64 else -> 48), 4, U64{1}, true)
+    base :: header + sections
+    cli_metadata_copy(&out, base, "__jetcmd".bytes())
+    cli_metadata_number(&out, base + (if wide -> 40 else -> 36), if wide -> 8 else -> 4, U64{record.len()}, true)
+    cli_metadata_number(&out, base + (if wide -> 48 else -> 40), 4, U64{at}, true)
+    cli_metadata_copy(&out, at, record)
+    out
+}
+fn cli_metadata_fat(first: [U8], second: [U8], wide: Bool, little: Bool) -> [U8] Never! {
+    stride :: if wide -> 32 else -> 20
+    width :: if wide -> 8 else -> 4
+    first_at :: 8 + 2 * stride
+    second_at :: first_at + first.len()
+    out := cli_metadata_zeros(second_at + second.len())
+    cli_metadata_number(&out, 0, 4, if wide -> U64{0xcafebabf} else -> U64{0xcafebabe}, little)
+    cli_metadata_number(&out, 4, 4, U64{2}, little)
+    cli_metadata_number(&out, 16, width, U64{first_at}, little)
+    cli_metadata_number(&out, 16 + width, width, U64{first.len()}, little)
+    cli_metadata_number(&out, 8 + stride + 8, width, U64{second_at}, little)
+    cli_metadata_number(&out, 8 + stride + 8 + width, width, U64{second.len()}, little)
+    cli_metadata_copy(&out, first_at, first)
+    cli_metadata_copy(&out, second_at, second)
+    out
+}
+fn cli_metadata_leb(out: &[U8], value: Int) Never! {
+    rest := value
+    loop {
+        byte := U8{rest.bit_and(127)}
+        rest >>= 7
+        if rest != 0 -> byte = byte.bit_or(U8{128})
+        &out.push(byte)
+        if rest == 0 -> break
+    }
+}
+fn cli_metadata_wasm(record: [U8], count: Int) -> [U8] Never! {
+    out := [U8]{0, 97, 115, 109, 1, 0, 0, 0}
+    payload := [U8]{}
+    cli_metadata_leb(&payload, 11)
+    &payload.extend("jet.command".bytes())
+    &payload.extend(record)
+    loop _ in 0..<count {
+        &out.push(U8{0})
+        cli_metadata_leb(&out, payload.len())
+        &out.extend(payload)
+    }
+    out
+}
+fn cli_metadata_accept(bytes: [U8], expected: CLICommandSchema) Never! {
+    actual :: read_executable(bytes.view(0..<bytes.len()), JET_COMPILER_TARGET_USIZE_MAX) ?? panic("read fixture")
+    cli_metadata_require(actual == expected, "cross-format record round trip")
+}
+fn cli_metadata_refuse(bytes: [U8], expected: MetadataError, maximum: U64) Never! {
+    actual :: read_executable(bytes.view(0..<bytes.len()), maximum)
+    refused :: if actual == {
+        .Err(error) -> error == expected
+        .Ok(_) -> false
+    }
+    cli_metadata_require(refused, "canonical failure classification")
+}
+fn run() {
+    input :: CLIInputSchema{field: "output_file", flag: "output-file", short: Val("o"), env: Val("OUTPUT_FILE"), help: "destination", metavar: Val("OUTPUT_FILE"), shape: CLIInputShape.Value{kind: CLIValueKind.Path, optional: false, default: None}, positional: Val(U16{0})}
+    job :: JobFact{name: "release", scope: JobScope.Ship, doc: Val("ship"), arguments: [JobArgumentSchema]{}, after: [String]{}, packages: [String]{"."}, cwd: None, inputs: [String]{"a"}, outputs: [String]{"b"}, skip: Val(JobSkip.UnlessPlatform{platform: "linux"}), cache: JobCachePolicy.Shared, parallel: 2, limits: [StringMapEntry]{StringMapEntry{key: "cpu", value: "2"}}, schedule: Val("daily")}
+    hidden := job.copy()
+    hidden.scope = JobScope.Internal
+    schema :: CLICommandSchema{entry_type: "Options", description: Val("example"), inputs: [CLIInputSchema]{input}, commands: [CLISubcommandSchema]{CLISubcommandSchema{name: "send", description: None, inputs: [CLIInputSchema]{}}}, jobs: [JobFact]{job, job, hidden}, standard: true, version: Val("1.2.3")}
+    record :: encode_record(schema)
+    decoded :: decode_record(record.view(0..<record.len())) ?? panic("decode fixture")
+    cli_metadata_require(decoded == schema, "all v8 fields round trip")
+    cli_metadata_require(decoded.root_completion_words() == [String]{"--help", "--verbose", "-v", "--quiet", "-q", "--color", "--version", "output-file", "--output-file", "-o"}, "root completion order")
+    cli_metadata_require(decoded.job_completion_words() == [String]{"release", "release"}, "visible duplicate jobs retained")
+    cli_metadata_require(decoded.command_completion_words(decoded.commands[0]) == [String]{"--help"}, "root inputs not repeated in command")
+    flags :: [Bool]{false, true}
+    loop wide in flags {
+        loop little in flags {
+            cli_metadata_accept(cli_metadata_elf(record, wide, little), schema)
+            cli_metadata_accept(cli_metadata_fat(cli_metadata_mach(record, false), cli_metadata_mach(record, true), wide, little), schema)
+        }
+        cli_metadata_accept(cli_metadata_mach(record, wide), schema)
+    }
+    cli_metadata_accept(cli_metadata_pe(record, 1, [U8]{}), schema)
+    cli_metadata_accept(cli_metadata_pe(record, 1, [U8]{0, 0}), schema)
+    cli_metadata_accept(cli_metadata_wasm(record, 1), schema)
+    max :: JET_COMPILER_TARGET_USIZE_MAX
+    cli_metadata_refuse("not executable".bytes(), MetadataError.UnknownFormat, max)
+    cli_metadata_refuse([U8]{0, 97, 115, 109, 1, 0, 0, 0}, MetadataError.Missing, max)
+    cli_metadata_refuse(cli_metadata_pe(record, 2, [U8]{}), MetadataError.Duplicate, max)
+    cli_metadata_refuse(cli_metadata_pe(record, 1, record), MetadataError.Duplicate, max)
+    cli_metadata_refuse(cli_metadata_pe(record, 1, [U8]{0, 7}), MetadataError.Malformed{why: "nonzero bytes after PE metadata record"}, max)
+    cli_metadata_refuse(cli_metadata_wasm(record, 2), MetadataError.Duplicate, max)
+    nested :: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(record, true), false, false)
+    cli_metadata_refuse(cli_metadata_fat(nested, nested, false, false), MetadataError.Malformed{why: "nested universal Mach-O slice"}, max)
+    unsupported := record.copy()
+    unsupported[8] = U8{6}
+    cli_metadata_refuse(cli_metadata_wasm(unsupported, 1), MetadataError.UnsupportedVersion{version: U16{6}}, max)
+    corrupt := record.copy()
+    corrupt[corrupt.len() - 1] = corrupt[corrupt.len() - 1].bit_xor(U8{1})
+    cli_metadata_refuse(cli_metadata_wasm(corrupt, 1), MetadataError.Malformed{why: "digest mismatch"}, max)
+    disagreement :: cli_metadata_fat(cli_metadata_mach(record, true), cli_metadata_mach(corrupt, true), false, false)
+    cli_metadata_refuse(disagreement, MetadataError.Malformed{why: "universal Mach-O slices disagree"}, max)
+    offset_overflow := cli_metadata_elf(record, true, true)
+    cli_metadata_number(&offset_overflow, 40, 8, U64{0x100000000}, true)
+    cli_metadata_refuse(offset_overflow, MetadataError.Malformed{why: "file offset overflow"}, U64{0xffffffff})
+    invalid_name := cli_metadata_pe(record, 1, [U8]{})
+    invalid_name[0x80 + 24] = U8{255}
+    cli_metadata_refuse(invalid_name, MetadataError.Malformed{why: "section name is not UTF-8"}, max)
+}

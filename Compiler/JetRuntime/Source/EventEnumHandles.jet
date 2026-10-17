@@ -1,0 +1,33 @@
+// ReactiveEventWatch.rs:826-830,853,880-887; Stream.rs:126-128.
+// Closed unit enums all reuse EncodingABI's ordinal owner. No private copies
+// of the layout, allocation policy or pointer-identity equality shortcut.
+#Export(c) fn jet_rt_handle_clone_jet_failure_policy(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_failure_policy(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_failure_policy(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_dispatch_state(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_dispatch_state(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_dispatch_state(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_event_config_error(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_event_config_error(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_event_config_error(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_late_event_disposition(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_late_event_disposition(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_late_event_disposition(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+// ReactiveEventWatch.rs:499-507 wraps sole AllowDepthFirst in EventPolicy;
+// :1720-1723 defines sole FirstCancelElseTransform in HookPolicy.
+// Shared enum owner dependency: e1306aee0 (EncodingErrors/EncodingABI).
+#Export(c) fn jet_rt_handle_clone_jet_hook_policy(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_hook_policy(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_clone_jet_event_policy(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_event_policy(value: I64) { encoding_enum_drop(value) }
+// Ui.rs:1361-1364 unit ordinals, :2459-2465 exact Show spellings.
+// Bad ordinal uses shared record-variant stop (composition dep 2442d5d80).
+#Export(c) fn jet_rt_handle_clone_jet_event_result(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_event_result(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_event_result(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_event_result(value: I64) -> I64 {
+    ordinal :: encoding_word(value + ENCODING_ENUM_TAG)
+    if (ordinal != I64{0} && ordinal != I64{1}) -> rt_record_variant_panic()
+    // Shared exact-size E4 literal owner; no growable builder or temporary Int.
+    display_literal(if (ordinal == I64{0}) -> I64{28259013886894408} else -> I64{28259039841249097}, I64{7})
+}

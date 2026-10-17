@@ -1,0 +1,139 @@
+# HAND-PORT tests/jetpack_engine.rs:8590-8712 epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+env: NO_COLOR=1
+refused: hangar-fixture-backdate
+# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
+# #[test]
+# fn epoch4_dogfood_portfolio_rebuilds_offline_after_component_loss() {
+#     // Card #955: this is the smallest real package-manager portfolio gate. It
+#     // uses the local Core provider, the Hangar, and the CLI build path. An
+#     // empty PATH proves the result does not depend on an installed Nix or
+#     // ambient build tool. Removing both the realized output and its source
+#     // executable injects a component failure; that run must not look cached.
+#     let (base, project, root) = core_hello_project("epoch4-dogfood-portfolio");
+#     let missing_tools = base.join("missing-tools");
+#     fs::create_dir_all(&missing_tools).unwrap();
+#     let source_executable = base.join("jet-pkgs/pkgs/hello/bin/hello");
+#     let build = |offline: bool| {
+#         let mut command = jetpack();
+#         command
+#             .args(["build", "--no-color"])
+#             .current_dir(&project)
+#             .env("JETPACK_ROOT", &root)
+#             .env("PATH", &missing_tools);
+#         if offline {
+#             command.arg("--offline");
+#         }
+#         command.output().unwrap()
+#     };
+# 
+#     let first = build(false);
+#     assert!(
+#         first.status.success(),
+#         "first portfolio build failed: {}",
+#         String::from_utf8_lossy(&first.stderr)
+#     );
+#     let first_stderr = String::from_utf8_lossy(&first.stderr);
+#     assert!(
+#         first_stderr.contains("built") && first_stderr.contains("1 built"),
+#         "first portfolio build must publish a real result: {first_stderr}"
+#     );
+# 
+#     let cached = build(true);
+#     assert!(
+#         cached.status.success(),
+#         "offline portfolio reuse failed: {}",
+#         String::from_utf8_lossy(&cached.stderr)
+#     );
+#     let cached_stderr = String::from_utf8_lossy(&cached.stderr);
+#     assert!(
+#         cached_stderr.contains("cached") && cached_stderr.contains("1 cached"),
+#         "offline portfolio reuse must report a verified cache hit: {cached_stderr}"
+#     );
+# 
+#     let entered = jetpack()
+#         .args(["env", "--no-color", "--trust", "--offline", "--", "hello"])
+#         .current_dir(&project)
+#         .env("JETPACK_ROOT", &root)
+#         .env("HOME", base.join("home"))
+#         .env("PATH", &missing_tools)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         entered.status.success(),
+#         "offline front-door entry needs no ambient tools: {}",
+#         String::from_utf8_lossy(&entered.stderr)
+#     );
+#     assert_eq!(
+#         String::from_utf8_lossy(&entered.stdout).trim(),
+#         "hello from jet-pkgs"
+#     );
+# 
+#     let roots = jetpack::Store::Roots::at(root.clone());
+#     let entry = fs::read_dir(roots.hangar_dir())
+#         .unwrap()
+#         .filter_map(Result::ok)
+#         .find_map(|node| {
+#             let text = fs::read_to_string(node.path().join("meta.json")).ok()?;
+#             let entry = jetpack::Store::parse_meta(&text)?;
+#             (entry.reference == "hello@mine").then_some(entry)
+#         })
+#         .expect("portfolio build must register its Hangar entry");
+#     make_directories_writable(Path::new(&entry.out));
+#     fs::remove_dir_all(&entry.out).unwrap();
+#     fs::remove_file(&source_executable).unwrap();
+# 
+#     let failed = build(true);
+#     assert!(
+#         !failed.status.success(),
+#         "missing portfolio component must fail closed"
+#     );
+#     let failed_stderr = String::from_utf8_lossy(&failed.stderr);
+#     assert!(
+#         !failed_stderr.contains("built 1 package(s): 0 built, 1 cached"),
+#         "missing portfolio component was falsely reported as cached: {failed_stderr}"
+#     );
+# 
+#     fs::write(&source_executable, "#!/bin/sh\necho hello from jet-pkgs\n").unwrap();
+#     #[cfg(unix)]
+#     {
+#         use std::os::unix::fs::PermissionsExt;
+#         fs::set_permissions(&source_executable, fs::Permissions::from_mode(0o755)).unwrap();
+#     }
+#     let rebuilt = build(true);
+#     assert!(
+#         rebuilt.status.success(),
+#         "offline portfolio rebuild failed: {}",
+#         String::from_utf8_lossy(&rebuilt.stderr)
+#     );
+#     let rebuilt_stderr = String::from_utf8_lossy(&rebuilt.stderr);
+#     assert!(
+#         rebuilt_stderr.contains("built") && !rebuilt_stderr.contains("1 cached"),
+#         "repaired portfolio must rebuild instead of hiding the failure: {rebuilt_stderr}"
+#     );
+# 
+#     let stale = write_hangar_meta(&root, "epoch4-dogfood-stale", "stale", "1.0", Some(1)).0;
+#     let clean = jetpack()
+#         .args(["hangar", "clean", "--no-color", "--yes"])
+#         .env("JETPACK_ROOT", &root)
+#         .env("PATH", &missing_tools)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         clean.status.success(),
+#         "portfolio clean failed: {}",
+#         String::from_utf8_lossy(&clean.stderr)
+#     );
+#     assert!(!stale.exists(), "portfolio clean left stale Hangar state");
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build --no-color
+cwd: project
+exit: 0
+stderr: ~ "built" # original contains predicate
+stderr: ~ "1 built" # original contains predicate
+

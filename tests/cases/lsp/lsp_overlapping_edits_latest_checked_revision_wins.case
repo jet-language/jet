@@ -1,0 +1,41 @@
+# Port of tests/lsp.rs:3224-3365; source/input bytes preserved.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 ballot + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/0.json
+recv lsp
+stdout: ~ "documentSymbolProvider" # original predicate; other response fields vary
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/1.json
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields vary
+stdout: ~ "\"version\":10" # original predicate; other response fields vary
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/3.json
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/4.json
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/5.json
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/6.json
+recv lsp
+stdout: ~ "\"id\":2" # original predicate; other response fields vary
+stdout: ~ "marker_one" # original predicate; other response fields vary
+stdout: !~ "marker_new" # original negative predicate; other response fields vary
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/7.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields vary
+stdout: ~ "\"version\":12" # original predicate; other response fields vary
+recv lsp
+stdout: ~ "\"id\":3" # original predicate; other response fields vary
+stdout: ~ "marker_new" # original predicate; other response fields vary
+stdout: !~ "marker_two" # original negative predicate; other response fields vary
+stdout: !~ "marker_stale" # original negative predicate; other response fields vary
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/8.json
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/9.json
+recv lsp
+stdout: ~ "\"id\":3" # original predicate; other response fields vary
+stdout: ~ "marker_new" # original predicate; other response fields vary
+stdout: !~ "\"code\":-32800" # original negative predicate; other response fields vary
+send lsp: messages/lsp_overlapping_edits_latest_checked_revision_wins/10.json
+recv lsp
+stdout: ~ "\"id\":99" # original predicate; other response fields vary
+stdout: ~ "result" # original predicate; other response fields vary
+close lsp
+# Original child.wait did not assert status.
+exit: any

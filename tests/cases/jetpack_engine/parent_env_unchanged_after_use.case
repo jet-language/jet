@@ -1,0 +1,104 @@
+# HAND-PORT tests/jetpack_engine.rs:3541-3630 parent_env_unchanged_after_use
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
+# #[test]
+# fn parent_env_unchanged_after_use() {
+#     // The composed PATH only reaches the child. Ask the child to echo PATH and
+#     // confirm our bin dirs lead; the test process's own PATH is unaffected
+#     // because we never mutate it.
+#     //
+#     // Realization leases are mandatory (card #418): the consumer never sees
+#     // the raw fixture `out_dir` directly, only a sealed, hardlinked snapshot
+#     // copy under the hangar's `leases/` dir. The sealed, FD-pinned
+#     // exec-wrapper dir (`/proc/self/fd/N` on Linux, immutable and race-safe
+#     // against parent rename/symlink swaps) is the only package executable
+#     // path exposed to the child.
+#     let root = Scratch::new("root");
+#     let fixtures = Scratch::new("fx");
+#     write_native_lease_fixture(&fixtures.path);
+#     let before = std::env::var("PATH").unwrap_or_default();
+# 
+#     let output = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "-y",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .args([
+#             "--",
+#             "sh",
+#             "-c",
+#             "printf %s \"$PATH\"",
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "lease handoff command failed: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let child_path = String::from_utf8_lossy(&output.stdout);
+#     let mut entries = child_path.split(':');
+#     let wrapper = entries.next().unwrap_or_default();
+#     assert!(
+#         wrapper.starts_with("/proc/self/fd/"),
+#         "expected the sealed FD-pinned exec-wrapper dir first, got: {child_path}"
+#     );
+#     let bin = entries.next().unwrap_or_default();
+#     assert!(
+#         !bin.starts_with(&root.path.to_string_lossy().into_owned()),
+#         "raw package output escaped the lease handoff, got: {child_path}"
+#     );
+#     assert_eq!(std::env::var("PATH").unwrap_or_default(), before);
+# 
+#     let entry = jetpack::Store::find_by_reference(
+#         &jetpack::Store::Roots::at(root.path.clone()),
+#         "omp@releases#1.0.0",
+#     )
+#     .unwrap();
+#     let explicit_raw_path = Path::new(&entry.out).join("bin/omp");
+#     let output = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "-y",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .args([
+#             "--",
+#             explicit_raw_path.to_str().unwrap(),
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "explicit leased executable escaped confinement: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     assert_eq!(
+#         String::from_utf8_lossy(&output.stdout).trim(),
+#         "hello from jetpack"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- sh -c "printf %s \"$PATH\""
+cwd: project
+exit: 0
+

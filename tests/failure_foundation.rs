@@ -6,6 +6,22 @@ use std::fs;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
+
+#[test]
+fn arrowless_unit_failure_contract_keeps_explicit_carrier_tails() {
+    const FIVE_LINE_CASE: &str = "#Error enum MyError { X }\n\
+fn f(bad: Bool) MyError! {\n\
+    if bad -> return Err(MyError.X)\n\
+    Ok(())\n\
+}\n";
+    let source = format!(
+        "{FIVE_LINE_CASE}\nfn run() {{\n\
+         if f(false) == {{ .Ok(_) -> print(\"ok\") .Err(e) -> print(e) }}\n\
+         if f(true) == {{ .Ok(_) -> print(\"unexpected\") .Err(e) -> print(e) }}\n\
+         }}\n"
+    );
+    tir_support::assert_tiers_agree("arrowless_unit_failure_contract", &source, "ok\nX\n");
+}
 const CONTRACT_MATRIX: &str = r#"
 #Error
 enum TypedFailure {
@@ -122,6 +138,62 @@ fn failure_contract_matrix_agrees_across_execution_tiers() {
         "failure_contract_matrix",
         CONTRACT_MATRIX,
         "2\n-1\n2\n-2\n2\n-3\n2\n-4\n-5\n2\n-6\n7\n-7\n2\n-8\n2\n-9\n7\n",
+    );
+}
+
+#[test]
+fn eager_collection_callable_values_keep_default_failure_routes() {
+    tir_support::assert_tiers_agree(
+        "eager_collection_callable_values",
+        r#"
+fn key(value: Int) -> Int {
+    if value == 0 -> return Err("zero")
+    value
+}
+
+fn positive(value: Int) -> Bool {
+    if value == 0 -> return Err("zero")
+    value > 0
+}
+
+fn mapped(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    values.map(callback)
+}
+
+fn filtered(values: [Int], callback: fn(Int) -> Bool) -> [Int] {
+    values.filter(callback)
+}
+
+fn nested(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] {
+    values.map(items -> items.map(callback))
+}
+
+fn ascending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    items := values
+    &items.sort_by(callback)
+    items
+}
+
+fn descending(values: [Int], callback: fn(Int) -> Int) -> [Int] {
+    items := values
+    &items.sort_by_desc(callback)
+    items
+}
+
+fn run() {
+    print((mapped([1, 2], key) ?? [-1]).len())
+    print((mapped([1, 0, 2], key) ?? [-1]).len())
+    print((filtered([-1, 2], positive) ?? [-1, -2]).len())
+    print((filtered([-1, 0, 2], positive) ?? [-1, -2]).len())
+    print((ascending([2, 1], key) ?? [-1])[0])
+    print((ascending([2, 0, 1], key) ?? [-1])[0])
+    print((descending([1, 2], key) ?? [-1])[0])
+    print((descending([1, 0, 2], key) ?? [-1])[0])
+    print((nested([[1, 2], [3, 4]], key) ?? [[]]).len())
+    print((nested([[1, 0], [3, 4]], key) ?? [[]]).len())
+}
+"#,
+        "2\n1\n1\n2\n1\n-1\n2\n-1\n2\n1\n",
     );
 }
 
@@ -288,6 +360,55 @@ fn impossible(value: Bool) -> Int Never! {
         fail()
     }
     return 7
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value map",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Int) -> [Int] Never! {
+    values.map(callback)
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value filter",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Bool) -> [Int] Never! {
+    values.filter(callback)
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value sort key",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Int) -> [Int] Never! {
+    items := values
+    &items.sort_by(callback)
+    items
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value descending sort key",
+            r#"
+fn impossible(values: [Int], callback: fn(Int) -> Int) -> [Int] Never! {
+    items := values
+    &items.sort_by_desc(callback)
+    items
+}
+fn run() {}
+"#,
+        ),
+        (
+            "callable value inside lambda",
+            r#"
+fn impossible(values: [[Int]], callback: fn(Int) -> Int) -> [[Int]] Never! {
+    values.map(items -> items.map(callback))
 }
 fn run() {}
 "#,

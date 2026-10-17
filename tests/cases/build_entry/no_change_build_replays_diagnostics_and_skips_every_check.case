@@ -1,0 +1,24 @@
+# Port of tests/build_entry.rs:902-986; original source and effective duplicate env override preserved.
+# PENDING-SAME-HEAD + PENDING-SEAM(build-plan-exec): last_build_record(store) nominal nodes.
+# ORIGINAL-TEST-BUG: original env915 is overridden by env916; builds write run-cache, nominal record query reads store.
+# That exact store query and its first nonempty assertion remain in the seam kit, never replaced by run-cache.
+fixture: fixtures/no_change_build_replays_diagnostics_and_skips_every_check
+env: NO_COLOR=1
+step cold: jet build main.jet
+env: JET_STORE_DIR={work}/run-cache
+stderr: file cold.stderr
+file: cold.stderr count-lines ^= "Warning [L0104]" = 2 # original ed77c235f tests/build_entry.rs:946-951 starts_with warning count
+file: cold.stderr !~ "up to date: " # original negation
+step cold_warnings: jet run warnings.jet -- cold.stderr
+step warm: jet build main.jet
+env: JET_STORE_DIR={work}/run-cache
+stderr: file warm.stderr
+stdout: == cold
+file: warm.stderr ~ "up to date: " # original contains
+step: jet run warnings.jet -- warm.stderr
+stdout: == cold_warnings
+step fresh_json: jet build main.jet --json
+env: JET_STORE_DIR={work}/run-cache
+step: jet build main.jet --json
+env: JET_STORE_DIR={work}/run-cache
+stdout: == fresh_json

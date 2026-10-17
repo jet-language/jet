@@ -301,6 +301,8 @@ pub const IO_ERROR_VARIANTS: &[&str] = &[
     "Protocol",
     "Other",
     "ResourceLimit",
+    "AlreadyExists",
+    "Unsupported",
 ];
 pub const PROCESS_RESOURCE_LIMIT_VARIANTS: &[&str] =
     &["WallTime", "CpuTime", "Memory", "OpenFiles", "Output"];
@@ -314,36 +316,37 @@ pub const TYPE_ENCODING_ERROR: &str = "EncodingError";
 
 /// D-ENC-DYN1=A+ (ratified 2026-06-25) + D-SERDE13=B (ratified 2026-07-11): the
 /// one dynamic encoding value every format's `parse` returns and every hand codec
-/// constructs and returns. `DataTree` is the single canonical user-facing
+/// constructs and returns. `Dyn` is the single canonical user-facing
 /// spelling — renamed from the old `Data` face by D-SERDE13=B (it is a tree of
 /// data, distinct from any user type named `Data`; the retired `Data` spelling is
 /// a teaching error, E0351, not an alias, per I8). `JSON`/`TOML`/`YAML`/`CSV` are
 /// format-tagged aliases over the same structure, so `json.parse` is typed
 /// `JSON`, `toml.parse` is typed `TOML`, etc., but one walker and one accessor
-/// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Array`,
-/// `Object`.
-pub const TYPE_DATA: &str = "DataTree";
+/// set back them. Variants: `Null`, `Bool`, `Int`, `Float`, `Text`, `Bytes`,
+/// `DateTime`, `Array`, `Object`.
+pub const TYPE_DATA: &str = "Dyn";
 /// D-SERDE16=A (ratified 2026-07-11): public target-directed subtree dispatch.
 /// `tree.decode<T>()` calls only `T`'s ordinary `Decode` protocol impl.
-pub const METHOD_DATATREE_DECODE: &str = "decode";
+pub const METHOD_DYN_DECODE: &str = "decode";
 pub const TYPE_DATA_JSON: &str = "JSON";
 pub const TYPE_DATA_TOML: &str = "TOML";
 pub const TYPE_DATA_YAML: &str = "YAML";
 pub const TYPE_DATA_CSV: &str = "CSV";
 
 /// The accepted spellings of the dynamic encoding value (D-ENC-DYN1=A+ /
-/// D-SERDE13=B): canonical `DataTree` plus the four format-tagged aliases. The
+/// D-SERDE13=B): canonical `Dyn` plus the four format-tagged aliases. The
 /// old bare `Data` spelling is intentionally absent — it is caught as E0351.
 pub fn is_data_type_name(name: &str) -> bool {
-    matches!(name, "DataTree" | "JSON" | "TOML" | "YAML" | "CSV")
+    matches!(name, "Dyn" | "JSON" | "TOML" | "YAML" | "CSV")
 }
 
-/// The variants of the dynamic `Data` value (D-ENC-DYN1=A+), the user-facing face
-/// of `DataTree`. `Bytes` stays internal (no dynamic constructor).
+/// The constructible variants of the dynamic `Dyn` value (D-ENC-DYN1=A+,
+/// #4602). `Number` (an exact parsed lexeme) is matchable but only parsers
+/// build it.
 pub fn is_data_variant(variant: &str) -> bool {
     matches!(
         variant,
-        "Null" | "Bool" | "Int" | "Float" | "Text" | "Array" | "Object"
+        "Null" | "Bool" | "Int" | "Float" | "Text" | "Bytes" | "DateTime" | "Array" | "Object"
     )
 }
 
@@ -435,19 +438,14 @@ pub const OP_PERCENT: &str = "%";
 /// answer takes the dividend's sign, so `-7 %% 2` is -1. It partners `/`.
 pub const OP_PERCENT_PERCENT: &str = "%%";
 pub const OP_AMP: &str = "&";
-/// D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A (ratified 2026-08-28): peer
-/// alternatives and value-position bitwise OR use the single bar; it is not
-/// a general flow operator.
+/// D-PATO / D-SHAPE-PIPE1=C: peer alternatives use the single bar.
+/// D-SIGIL-ALGEBRA1=B retires its arithmetic meaning.
 pub const OP_PIPE: &str = "|";
-/// D-EXPOP1=A (ratified 2026-08-05): infix `^` raises to a power. Prefix `^`
-/// stays the take sigil (D-MEM1); parser position tells them apart.
+/// D-SIGIL-ALGEBRA1=B: prefix `^` is take; infix power is retired.
 pub const OP_CARET: &str = "^";
 /// D-XORSPELL1=A (ratified 2026-08-05): bitwise exclusive-or, the exclusive
-/// variant of `|`. Prefix `~` stays the copy sigil (D-SHAPE-COPY1).
+/// variant of `|`. Prefix `~` is the retired copy sigil (D-COPY-WORD1, E0941).
 pub const OP_TILDE_PIPE: &str = "~|";
-/// D-BITNOT1=A (ratified 2026-08-05): prefix `!` turns over every bit it is
-/// given — the one bit of a `Bool`, or every bit of a whole number.
-pub const OP_BIT_NOT: &str = OP_NOT;
 pub const OP_SHL: &str = "<<";
 pub const OP_SHR: &str = ">>";
 
@@ -489,9 +487,9 @@ pub const OP_PERCENT_EQ: &str = "%=";
 pub const OP_PERCENT_PERCENT_EQ: &str = "%%=";
 pub const OP_AMP_EQ: &str = "&=";
 pub const OP_PIPE_EQ: &str = "|=";
-/// D-EXPOP1=A (ratified 2026-08-05): power-assign.
+/// D-SIGIL-ALGEBRA1=B: retained only to teach a `pow` assignment.
 pub const OP_CARET_EQ: &str = "^=";
-/// D-XORSPELL1=A (ratified 2026-08-05): exclusive-or-assign.
+/// D-SIGIL-ALGEBRA1=B: retained only to teach a `bit_xor` assignment.
 pub const OP_TILDE_PIPE_EQ: &str = "~|=";
 pub const OP_SHL_EQ: &str = "<<=";
 pub const OP_SHR_EQ: &str = ">>=";
@@ -510,12 +508,8 @@ pub const PAT_WILDCARD_SLOT: &str = "_";
 // D-PATR (ratified 2026-06-19): range patterns (`lo..hi`) reuse OP_RANGE (S22) at arm-head
 // level and inside variant payload slots. Open Int/Char subjects always still require `else`.
 
-// D-PATO (ratified 2026-06-19), D-SHAPE-PIPE1=C (ratified 2026-07-15), and
-// D-BITOREXPR1=A (ratified 2026-08-28):
-// structural or-patterns and choice alternatives use OP_PIPE (single `|`).
-// `Active(id) | Reconnecting(id) -> …`; alternatives must bind the same names at the same types.
-// Value-position `|` is bitwise OR and binds above comparisons. No general bar
-// flow operator exists. `||` remains value-or / boolean-or; `|=` remains bitwise-or-assign under S17.
+// D-PATO / D-SHAPE-PIPE1=C: structural or-patterns and choice alternatives
+// use OP_PIPE. D-SIGIL-ALGEBRA1=B retires value arithmetic and |=.
 
 // D-ENUMDOT1 (ratified 2026-06-26, implemented): a leading `.` before a variant name in pattern
 // position (`.Circle(r)`, `.Empty`) is now accepted everywhere a variant pattern is written —
@@ -758,6 +752,9 @@ pub const FOREIGN_OR_FALLBACK: &str = "or";
 
 /// S36 (ratified M4): bug-stop builtins (like `print`).
 pub const BUILTIN_PANIC: &str = "panic";
+/// D-META-USER1=A: a checked rule body rejects with a registered project
+/// diagnostic: `reject(code:, what:, why:, fix:)`.
+pub const BUILTIN_REJECT: &str = "reject";
 /// D-INTBIG1/D-NUMOPS1: default `Int` is exact. Fixed-width per-op overflow
 /// opt-ins wrap one integer `+`/`-`/`*`/`/`: `wrapping(…)` wraps around,
 /// `saturating(…)` clamps to the type's range, and `checked(…) -> ?T` returns

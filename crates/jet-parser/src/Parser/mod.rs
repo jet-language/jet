@@ -27,6 +27,8 @@ mod Items;
 mod Modules;
 mod Statements;
 mod Types;
+mod NamedMarkerGroups;
+pub use NamedMarkerGroups::{expand_named_marker_groups, expand_named_marker_groups_with_uses, map_marker_group_members, marker_path_at, marker_path_end, named_marker_groups, NamedMarkerGroupTokens};
 
 /// D-TAIL-RETURN1=A: value-block parsers accept a final control statement
 /// only when it cannot fall through to the closing brace. Keep this structural
@@ -182,6 +184,7 @@ pub fn parse_for_check_with_source(
 
 fn prepare_tokens<'a>(
     toks: &'a [Token],
+    expand_groups: bool,
 ) -> Result<(Cow<'a, [Token]>, Vec<crate::AST::FencedStatement>), Vec<Diagnostic>> {
     // Ordinary source has neither comments nor fences. Keep its lexer-owned
     // token slice: the parser only reads tokens, and every span is already a
@@ -205,6 +208,12 @@ fn prepare_tokens<'a>(
     } else {
         Cow::Borrowed(toks)
     };
+    let code = if expand_groups {
+        match expand_named_marker_groups(code.as_ref(), &[]) {
+            Cow::Borrowed(_) => code,
+            Cow::Owned(expanded) => Cow::Owned(expanded),
+        }
+    } else { code };
     if has_fences {
         let (expanded, fenced_statements) = crate::FencedNames::expand(code.as_ref())?;
         check_token_nesting(&expanded)?;
@@ -219,11 +228,11 @@ fn parse_for_check_inner(
     toks: &[Token],
     source: Option<&str>,
 ) -> Result<(Program, Vec<Diagnostic>), Vec<Diagnostic>> {
-    let (toks, fenced_statements) = prepare_tokens(toks)?;
+    let (toks, fenced_statements) = prepare_tokens(toks, true)?;
 
     let mut p = Parser {
         toks: &toks,
-        source: source.map(str::to_owned),
+        source,
         pos: 0,
         diags: Vec::new(),
         explicit_semicolon_reported: false,
@@ -234,7 +243,6 @@ fn parse_for_check_inner(
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
-        pub_file_default: false,
         in_layout_body: 0,
         adjacent_if_body_depth: 0,
         block_depth: 0,
@@ -255,6 +263,7 @@ fn parse_for_check_inner(
         prep_value_escape: None,
     };
     let mut prog = p.program();
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ItemsParsed, prog.items.len());
     prog.fenced_statements = fenced_statements;
     if p.diags.is_empty() {
         Ok((prog, Vec::new()))
@@ -275,10 +284,10 @@ fn parse_inner(
     allow_environment_reads: bool,
     source: Option<&str>,
 ) -> Result<Program, Vec<Diagnostic>> {
-    let (toks, fenced_statements) = prepare_tokens(toks)?;
+    let (toks, fenced_statements) = prepare_tokens(toks, !for_fmt)?;
     let mut p = Parser {
         toks: &toks,
-        source: source.map(str::to_owned),
+        source,
         pos: 0,
         explicit_semicolon_reported: false,
         retired_step: None,
@@ -289,7 +298,6 @@ fn parse_inner(
         type_generic_depth: 0,
         type_generic_chain: Vec::new(),
         type_generic_truncated: false,
-        pub_file_default: false,
         in_layout_body: 0,
         adjacent_if_body_depth: 0,
         block_depth: 0,
@@ -310,6 +318,7 @@ fn parse_inner(
         prep_value_escape: None,
     };
     let mut prog = p.program();
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ItemsParsed, prog.items.len());
     prog.fenced_statements = fenced_statements;
     if p.diags.is_empty() {
         return Ok(prog);
@@ -431,7 +440,7 @@ fn is_teaching_parse_diag(code: &str) -> bool {
 
 struct Parser<'a> {
     toks: &'a [Token],
-    source: Option<String>,
+    source: Option<&'a str>,
     pos: usize,
     diags: Vec<Diagnostic>,
     /// D-SEMI1=A: report one explicit semicolon boundary per source file.
@@ -451,8 +460,6 @@ struct Parser<'a> {
     type_generic_chain: Vec<String>,
     /// Set when generic depth exceeds the limit mid-parse.
     type_generic_truncated: bool,
-    /// D-VISDEFAULT2=A: when true, top-level items default to public unless `priv`.
-    pub_file_default: bool,
     /// D-LAYOUT1 / D-LAYOUT-CTOR1: >0 while parsing a `Layout.{ … }` body.
     /// Retained for forks/probes; constraint elements are parsed as typed-
     /// literal exprs (not bare expression statements), so the E0003
@@ -1365,11 +1372,41 @@ mod s61_tests {
     }
 
     #[test]
+    fn optional_present_comparison_rhs_classification() {
+        for (rhs, binds) in [
+            ("Val(value)", true),
+            ("Val(_)", true),
+            ("Val(true)", false),
+            ("Val(integer_bounds_exact(number))", false),
+            ("Val(checked.value)", false),
+            ("Val(number + 1)", false),
+        ] {
+            let source = format!("fn run() {{ result :: checked.integer_bounds == {rhs} }}");
+            let parsed = program(&source);
+            let Item::Func(function) = &parsed.items[0] else { panic!("function") };
+            let Stmt::Val(binding) = &function.body[0] else { panic!("binding") };
+            if binds {
+                assert!(matches!(binding.init, Expr::PatternTest { .. }), "{rhs}");
+            } else {
+                let Expr::Binary(BinOp::Eq, _, value, _) = &binding.init else { panic!("{rhs}: value equality") };
+                assert!(matches!(value.as_ref(), Expr::EnumLit { variant, args, .. } if variant == Syntax::LIT_VALUE && args.len() == 1), "{rhs}");
+            }
+        }
+        let parsed = program("fn run() { result :: optional != Val(value) }");
+        let Item::Func(function) = &parsed.items[0] else { panic!("function") };
+        let Stmt::Val(binding) = &function.body[0] else { panic!("binding") };
+        assert!(matches!(binding.init, Expr::Binary(BinOp::Ne, ..)));
+        let (tokens, errors) = lex("fn run() { if shape == { Circle(r) -> print(r) } }");
+        assert!(errors.is_empty());
+        assert!(parse(&tokens).unwrap_err().iter().any(|diagnostic| diagnostic.code == "E0367"));
+    }
+
+    #[test]
     fn clean_preparation_reuses_byte_identical_tokens() {
         let (tokens, errors) = lex("fn run() { value :: 1 }\n");
         assert!(errors.is_empty(), "lex errors: {errors:?}");
         let expected = crate::Lexer::without_comments(&tokens);
-        let (prepared, fences) = prepare_tokens(&tokens).expect("clean source");
+        let (prepared, fences) = prepare_tokens(&tokens, true).expect("clean source");
         assert!(fences.is_empty());
         assert_eq!(prepared.as_ref(), expected.as_slice());
         assert!(
@@ -1379,14 +1416,14 @@ mod s61_tests {
     }
 
     #[test]
-    fn prefix_failure_contracts_cover_nested_type_positions() {
+    fn suffix_failure_contracts_cover_nested_type_positions() {
         let parsed = program(
             "struct Holder {\n\
                  optional: Int?\n\
-                 unit: !IOError\n\
+                 unit: IOError!\n\
                  union: Int (DbError | TimeoutError)!\n\
                  callback: fn(Int? IOError!) IOError!\n\
-                 impossible: !Never\n\
+                 impossible: Never!\n\
              }\n\
              alias Box<T> :: T? IOError!\n\
              fn fetch(value: Int? IOError!) -> Int? (DbError | TimeoutError)! { value }\n\
@@ -1432,7 +1469,7 @@ mod s61_tests {
         let formatted = crate::Formatter::format_source(
             "fn save() IOError! {}\nfn load() -> Int (DbError | TimeoutError)! { 1 }\n",
         )
-        .expect("prefix formatter");
+        .expect("suffix formatter");
         assert!(formatted.contains("fn save() IOError!"), "{formatted}");
         assert!(
             formatted.contains("fn load() -> Int (DbError | TimeoutError)!"),
@@ -1639,7 +1676,7 @@ mod s61_tests {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param { ~self.value }
+    fn get_value(self) -> @param { self.value.copy() }
     fn type_name(self) -> String { T.$name }
 }
 "#,
@@ -2070,7 +2107,7 @@ prep loop T in [Point] {
                 "#[Target(Web), HTML(\"index.html\")]",
             ),
             (
-                "#PubFile\n#NoPrelude\nfn main() {}\n",
+                "\n#NoPrelude\nfn main() {}\n",
                 "#[PubFile, NoPrelude]",
             ),
             (
@@ -2220,44 +2257,64 @@ prep loop T in [Point] {
         }
     }
 
-    /// D-VISDEFAULT2=A: `#PubFile` flips default top-level visibility; `priv` opts out.
+    /// D-VIS-MODULE1: declarations are public by default; members of a
+    /// `priv module` take the module's privacy, `priv(package)` its package's;
+    /// fields keep their own `priv`.
     #[test]
-    fn pub_file_marker_sets_default_visibility() {
-        let src = r#"#PubFile
-
-fn greet() -> String {
+    fn visibility_is_public_by_default_and_private_by_module() {
+        let src = r#"fn greet() -> String {
     return "hi"
 }
 
-priv fn secret() -> Int {
-    return 0
+struct Secret {
+    priv value: String
+    label: String
 }
 
-fn run() {
-    return
+priv module internal {
+    fn helper() -> Int { return 0 }
+}
+
+priv(package) module shared {
+    fn bump() -> Int { return 1 }
 }"#;
         let p = program(src);
-        assert!(p.pub_file);
-        let mut funcs: Vec<_> = p
+        let func = |items: &[crate::AST::Item], name: &str| -> (bool, bool) {
+            items
+                .iter()
+                .find_map(|item| match item {
+                    crate::AST::Item::Func(f) if f.name == name => Some((f.is_pub, f.is_package_pub)),
+                    _ => None,
+                })
+                .expect(name)
+        };
+        assert_eq!(func(&p.items, "greet"), (true, false));
+        let module = |name: &str| {
+            p.items
+                .iter()
+                .find_map(|item| match item {
+                    crate::AST::Item::CodeModule(m) if m.name == name => Some(m),
+                    _ => None,
+                })
+                .expect(name)
+        };
+        assert_eq!(func(module("internal").body.as_deref().unwrap(), "helper"), (false, false));
+        assert_eq!(func(module("shared").body.as_deref().unwrap(), "bump"), (true, true));
+        let secret = p
             .items
             .iter()
-            .filter_map(|i| match i {
-                crate::AST::Item::Func(f) => Some(f),
+            .find_map(|item| match item {
+                crate::AST::Item::Struct(s) if s.name == "Secret" => Some(s),
                 _ => None,
             })
-            .collect();
-        funcs.sort_by_key(|f| f.name.as_str());
-        let greet = funcs.iter().find(|f| f.name == "greet").expect("greet");
-        let secret = funcs.iter().find(|f| f.name == "secret").expect("secret");
-        let run = funcs.iter().find(|f| f.name == "run").expect("run");
-        assert!(greet.is_pub);
-        assert!(!secret.is_pub);
-        assert!(run.is_pub);
+            .expect("Secret");
+        assert!(!secret.fields[0].is_pub);
+        assert!(secret.fields[1].is_pub);
     }
 
     #[test]
     fn pub_file_section_label_emits_e0415() {
-        let src = "#PubFile\n\npriv:\nfn run() { return }\n";
+        let src = "\n\npriv:\nfn run() { return }\n";
         let (toks, errs) = lex(src);
         assert!(errs.is_empty(), "lex errors: {errs:?}");
         let toks = crate::Lexer::without_comments(&toks);
@@ -2274,7 +2331,6 @@ fn run() {
             type_generic_depth: 0,
             type_generic_chain: Vec::new(),
             type_generic_truncated: false,
-            pub_file_default: false,
             in_layout_body: 0,
             adjacent_if_body_depth: 0,
             block_depth: 0,
@@ -2444,58 +2500,6 @@ fn notify(ready: Bool) -[Net]> {
         // `Type{value}` is a one-value construction (`Meters{n + 1}`), so a
         // braced value after the arrow is a body, never a return type.
         program("fn run() { f :: (n: Int) -> Point { n + 1 } }\n");
-    }
-
-    #[test]
-    fn retired_arrow_control_forms_have_specific_teaching_diagnostics() {
-        for (src, code) in [
-            ("fn old() -> Int { return 1 }\n", "E0068"),
-            ("fn old() --[FS]-> Int { return 1 }\n", "E0066"),
-            ("fn old() :> Int { return 1 }\n", "E0068"),
-            ("fn old() :> 1\n", "E0070"),
-            ("fn old() => 1\n", "E0070"),
-            ("fn old() Int :: 1\n", "E0065"),
-            ("fn run() { if ready send() }\n", "E0372"),
-            (
-                "fn run() { #Grant(FS) { caps -> use_caps(caps) } }\n",
-                "E0077",
-            ),
-            (
-                "protocol Old { client -> server: Hello(id: Int) }\n",
-                "E0154",
-            ),
-            (
-                "fn run() { f :: take(value) (x: Int) => x + value }\n",
-                "E0057",
-            ),
-        ] {
-            let (tokens, lex_diagnostics) = lex(src);
-            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-            let diagnostics = parse(&tokens).expect_err("retired syntax must teach");
-            assert!(
-                diagnostics.iter().any(|diagnostic| diagnostic.code == code),
-                "expected {code}, got {diagnostics:?}"
-            );
-            if code == "E0065" {
-                assert_eq!(
-                    diagnostics
-                        .iter()
-                        .find(|diagnostic| diagnostic.code == code)
-                        .and_then(|diagnostic| diagnostic.edit.as_ref())
-                        .map(|edit| edit.new_text.as_str()),
-                    Some("->"),
-                    "the retired function-body marker must offer the canonical replacement"
-                );
-            }
-            if code == "E0077" {
-                let diagnostic = diagnostics
-                    .iter()
-                    .find(|diagnostic| diagnostic.code == code)
-                    .expect("E0077");
-                assert!(diagnostic.what.contains("#Grant"), "{diagnostic:?}");
-                assert!(diagnostic.fix.contains("#FX"), "{diagnostic:?}");
-            }
-        }
     }
 
     #[test]
@@ -2802,25 +2806,11 @@ fn notify(ready: Bool) -[Net]> {
     }
 
     #[test]
-    fn bare_default_error_contract_is_not_accepted() {
-        for source in [
-            "struct Holder { bare: ! }\n",
-            "alias DefaultFailure :: !;\n",
-            "fn sync() ! {}\n",
-            "fn callback(value: Int !) {}\n",
-        ] {
-            let (tokens, lex_diagnostics) = lex(source);
-            assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-            parse(&tokens).expect_err("bare default error contracts must not produce an AST");
-        }
-    }
-
-    #[test]
-    fn prefix_contract_reaches_nested_general_type_positions() {
+    fn suffix_contract_reaches_nested_general_type_positions() {
         let parsed = program(
             "struct Holder {\n\
-                 map: [String: !IOError]\n\
-                 tuple: (entry: Entry? StoreError!, failure: !Err)\n\
+                 map: [String: IOError!]\n\
+                 tuple: (entry: Entry? StoreError!, failure: Err!)\n\
                  callback: fn(Int? StoreError!) IOError!\n\
              }\n\
              alias Callback :: fn(Int? StoreError!) IOError!\n\
@@ -2915,12 +2905,24 @@ fn notify(ready: Bool) -[Net]> {
         parse(&tokens).expect_err("retired infix spelling must not produce an AST");
     }
 
+    /// D-TYPE-SUFFIX1=A: an error suffix alone has a unit success type.
     #[test]
-    fn retired_failure_suffix_is_not_accepted() {
-        let source = "alias Old :: String!\n";
-        let (tokens, lex_diagnostics) = lex(source);
-        assert!(lex_diagnostics.is_empty(), "{lex_diagnostics:?}");
-        parse(&tokens).expect_err("retired suffix spelling must not produce an AST");
+    fn unit_failure_suffix_is_accepted_in_aliases() {
+        let parsed = program("alias Failure :: String!\n");
+        let alias = parsed
+            .items
+            .iter()
+            .find_map(|item| match item {
+                crate::AST::Item::TypeAlias(alias) if alias.name == "Failure" => Some(alias),
+                _ => None,
+            })
+            .expect("Failure alias");
+        assert!(matches!(
+            &alias.target,
+            crate::AST::Type::Result { ok, err }
+                if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+                    && matches!(err.as_ref(), crate::AST::Type::String)
+        ));
     }
 
     #[test]
@@ -2939,12 +2941,19 @@ fn notify(ready: Bool) -[Net]> {
     fn unit_fallible_signatures_format_without_arrow() {
         use crate::Formatter::format_source;
 
-        let source =
-            "fn save(path: String) IOError! {}\nfn sync() Err! {}\nfn bounded() IOError! -[FS]> {}\n";
+        let source = "fn save(path: String) IOError! {}\nfn sync() Err! {}\n\
+                      fn bounded() IOError! -[FS]> {}\nfn pure() Never! -[]> {}\n\
+                      trait Sink { fn save(self) IOError! -[FS]> }\n";
         let once = format_source(source).expect("unit-fallible signatures format");
         assert!(once.contains("fn save(path: String) IOError!"), "{once}");
         assert!(once.contains("fn sync() Err!"), "{once}");
         assert!(once.contains("fn bounded() IOError! -[FS]>"), "{once}");
+        assert!(once.contains("fn pure() Never! -[]>"), "{once}");
+        assert!(once.contains("fn save(self) IOError! -[FS]>"), "{once}");
+        program(&once);
+        program(include_str!(
+            "../../../../Compiler/JetParser/Tests/ContractFixtures.jet"
+        ));
         assert_eq!(
             once,
             format_source(&once).expect("formatted form is stable")

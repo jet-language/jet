@@ -12,56 +12,56 @@ STORE_NIX_RECIPE_DOMAIN :: prep { "nix-binary-cache-substitution-v1" }
 STORE_NIX_STAGE_PREFIX :: prep { "nix-cache-" }
 STORE_NIX_U128_MAX :: prep { "340282366920938463463374607431768211455" }
 
-pub struct NixOutputRequest {
-    pub name: String
-    pub store_path: String
+struct NixOutputRequest {
+    name: String
+    store_path: String
 }
 
-pub struct AdmittedNixObject {
-    pub store_path: String
-    pub hangar_path: String
-    pub hangar_digest: String
-    pub direct_reference_digests: [String]
-    pub upstream_proof_sha256: String
-    pub nar_hash: String
-    pub size: Int
-    pub compression: String
+struct AdmittedNixObject {
+    store_path: String
+    hangar_path: String
+    hangar_digest: String
+    direct_reference_digests: [String]
+    upstream_proof_sha256: String
+    nar_hash: String
+    size: Int
+    compression: String
 }
 
-pub struct AdmittedNixClosure {
-    pub outputs: [String: AdmittedNixObject]
-    pub objects: [String: AdmittedNixObject]
-    pub closure_receipt_sha256: String
+struct AdmittedNixClosure {
+    outputs: [String: AdmittedNixObject]
+    objects: [String: AdmittedNixObject]
+    closure_receipt_sha256: String
 }
 
 // One closure member, either freshly staged (`stage`) or already verified in
 // the Hangar (`stage == None`).
-pub struct FetchedObject {
-    pub store_path: String
-    pub stage: String?
-    pub hangar_path: String
-    pub hangar_digest: String
-    pub references: [String]
-    pub direct_reference_digests: [String]
-    pub download_bytes: Int
-    pub unpacked_bytes: Int
-    pub proof: String
-    pub nar_hash: String
-    pub compression: String
+struct FetchedObject {
+    store_path: String
+    stage: String?
+    hangar_path: String
+    hangar_digest: String
+    references: [String]
+    direct_reference_digests: [String]
+    download_bytes: Int
+    unpacked_bytes: Int
+    proof: String
+    nar_hash: String
+    compression: String
 }
 
 // The closure receipt digest and the exact bytes it names.
-pub struct NixClosureReceipt {
-    pub digest: String
-    pub bytes: [U8]
+struct NixClosureReceipt {
+    digest: String
+    bytes: [U8]
 }
 
-pub fn store_admit_nix_closure(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
+fn store_admit_nix_closure(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
     store_admit_nix_closure_with_progress(&verification, roots, outputs, offline, None, None)
 }
 
 // Use the same signature/NAR admission transaction for discovery and repair.
-pub fn store_admit_nix_closure_with_progress(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
+fn store_admit_nix_closure_with_progress(verification: &StoreVerification, roots: HangarRoots, outputs: [NixOutputRequest], offline: Bool, expected_closure_receipt: String?, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
     transaction := NixAdmission.new(&verification, roots, expected_closure_receipt)
     admitted :: &transaction.admit(outputs, offline, progress) ? value -> value ! error -> {
         &transaction.rollback()
@@ -70,12 +70,12 @@ pub fn store_admit_nix_closure_with_progress(verification: &StoreVerification, r
     Ok(admitted)
 }
 
-pub struct NixAdmission {
-    verification: StoreVerification
-    roots: HangarRoots
-    expected_closure_receipt: String?
-    pub stage: String
-    committed: Bool
+struct NixAdmission {
+    priv verification: StoreVerification
+    priv roots: HangarRoots
+    priv expected_closure_receipt: String?
+    stage: String
+    priv committed: Bool
 
     fn new(verification: &StoreVerification, roots: HangarRoots, expected_closure_receipt: String?) -[FS, Env, Time]> NixAdmission NixCacheError! {
         hangar :: roots.hangar_dir()
@@ -85,7 +85,7 @@ pub struct NixAdmission {
         stage :: files.join(stage_parent, "{STORE_NIX_STAGE_PREFIX}{store_nix_unique_suffix()}")
         files.create_dir(stage) ?? return Err(store_nix_io_error(.Admission, err))
         store_nix_sweep_dead_admission_stages(stage_parent)
-        Ok(NixAdmission{verification: ~verification, roots, expected_closure_receipt, stage, committed: false})
+        Ok(NixAdmission{verification: verification.copy(), roots, expected_closure_receipt, stage, committed: false})
     }
 
     fn admit(&self, requested: [NixOutputRequest], offline: Bool, progress: ProgressHandle?) -[IO, FS, Net, Env, Time, Time.Wait]> AdmittedNixClosure NixCacheError! {
@@ -132,11 +132,10 @@ pub struct NixAdmission {
             objects := [String: FetchedObject]{}
             first_error := NixCacheError?{None}
             loop store_path in pending {
-                object :: self.fetch_pending(endpoint, planned_infos, store_path, store_dir, progress) ? value -> value ! error -> {
-                    if first_error == None -> first_error = Val(error)
-                    next
+                if self.fetch_pending(endpoint, planned_infos, store_path, store_dir, progress) == {
+                    .Ok(object) -> objects[store_path] = object
+                    .Err(error) -> if first_error == None -> first_error = Val(error)
                 }
-                objects[store_path] = object
             }
             names := objects.keys().to_list()
             &names.sort()
@@ -406,7 +405,7 @@ fn store_nix_validate_requests(requested: [NixOutputRequest]) -> [String: NixOut
         }
         store_nix_validate_store_path(request.store_path, "/nix/store")
         if result.has_key(request.name) -> return Err(NixCacheError.new(.DuplicateEntry, "Nix closure admission repeats an output name"))
-        result[request.name] = ~request
+        result[request.name] = request.copy()
     }
     Ok(result)
 }
@@ -417,7 +416,7 @@ fn store_nix_entries_by_store_path(entries: [StoreEntry]) -> [String: StoreEntry
     loop entry in entries {
         producer :: ProducerRecord.decode(entry.producer_record) ?? next
         store_path :: producer.facts.get("nix.store-path") ?? next
-        if !by_store_path.has_key(store_path) -> by_store_path[store_path] = ~entry
+        if !by_store_path.has_key(store_path) -> by_store_path[store_path] = entry.copy()
     }
     by_store_path
 }
@@ -546,7 +545,7 @@ fn store_nix_push_bytes(output: &[U8], value: [U8]) Never! {
 fn store_nix_push_u64(output: &[U8], value: Int) Never! {
     loop index in 0..<8 {
         shift :: (7 - index) * 8
-        &output.push(U8{(value >> shift) & 255})
+        &output.push(U8{((value >> shift)).bit_and(255)})
     }
 }
 
@@ -584,7 +583,7 @@ fn store_nix_sweep_dead_admission_stages(stage_parent: String) Never! -[FS, Env]
     }
 }
 
-pub fn store_nix_admission_stage_is_dead(name: String, current_pid: Int) -[FS]> Bool Never! {
+fn store_nix_admission_stage_is_dead(name: String, current_pid: Int) -[FS]> Bool Never! {
     pid :: store_nix_admission_stage_pid(name) ?? return false
     pid != current_pid && !store_nix_admission_process_alive(pid)
 }

@@ -1,0 +1,139 @@
+use core.encoding.json as json
+
+// Port of crates/jet-foundation/src/MachineOutput.rs:13-141. Do not replace
+// validation with a schema-only check: nested reports and edit reasons matter.
+fn kit_steps_machine_object(value: Dyn) -> Dyn? {
+    if value == {
+        .Object(_) -> Val(value)
+        else -> None
+    }
+}
+
+fn kit_steps_machine_string(fields: Dyn, key: String) -> String? {
+    child :: fields.get(key) ?? return None
+    if child == {
+        .Text(text) -> Val(text)
+        else -> None
+    }
+}
+
+fn kit_steps_machine_has(fields: Dyn, key: String) -> Bool {
+    if fields.get(key) == {
+        .Val(_) -> true
+        .None -> false
+    }
+}
+
+fn kit_steps_machine_control(text: String) -> Bool {
+    // Rust char::is_control = Unicode Cc (C0, DEL, C1).
+    bytes :: text.bytes()
+    index := 0
+    loop index < bytes.len() {
+        scalar :: kit_steps_scalar(bytes, index)
+        if scalar.value < 32 || (scalar.value >= 127 && scalar.value <= 159) -> return true
+        index = scalar.next
+    }
+    false
+}
+
+fn kit_steps_machine_report(object: Dyn) -> String? {
+    loop key in ["moment", "severity", "code", "what", "why", "fix"] {
+        _ :: kit_steps_machine_string(object, key) ?? return Val("report record is missing string `{key}`")
+    }
+    edits :: object.get("fix_edits")
+    reason :: object.get("no_fix_reason")
+    if kit_steps_machine_has(object, "fix_edits") && kit_steps_machine_has(object, "no_fix_reason") -> return Val("report record cannot contain both `fix_edits` and `no_fix_reason`")
+    if edits == {
+        .Val(value) -> {
+            if value == {
+                .Array(items) -> {
+                    loop item in items {
+                        edit :: kit_steps_machine_object(item) ?? return Val("report edit is not an object")
+                        _ :: kit_steps_machine_string(edit, "file") ?? return Val("report edit is missing string `file`")
+                        span_value :: edit.get("span") ?? return Val("report edit is missing `span`")
+                        span :: kit_steps_machine_object(span_value) ?? return Val("report edit `span` is not an object")
+                        loop key in ["start", "end"] {
+                            if !kit_steps_machine_has(span, key) -> return Val("report edit span is missing `{key}`")
+                        }
+                        _ :: kit_steps_machine_string(edit, "new_text") ?? return Val("report edit is missing string `new_text`")
+                        _ :: kit_steps_machine_string(edit, "safety") ?? return Val("report edit is missing string `safety`")
+                    }
+                }
+                else -> return Val("report `fix_edits` is not an array")
+            }
+        }
+        .None -> {}
+    }
+    if reason == {
+        .Val(value) -> {
+            fields :: kit_steps_machine_object(value) ?? return Val("no-fix reason is not an object")
+            kind :: kit_steps_machine_string(fields, "kind") ?? return Val("no-fix reason is missing string `kind`")
+            if !kit_expect_named(["behavior", "design", "ambiguous"], kind) -> return Val("unknown no-fix reason kind `{kind}`")
+            action :: kit_steps_machine_string(fields, "next") ?? return Val("no-fix reason is missing string `next`")
+            if action.trim() == "" || kit_steps_machine_control(action) -> return Val("no-fix reason `next` must be a reviewed printable action")
+        }
+        .None -> {}
+    }
+    None
+}
+
+fn kit_steps_machine_status(object: Dyn) -> String? {
+    action :: kit_steps_machine_string(object, "action") ?? return Val("status record is missing string `action`")
+    if action == "" || kit_steps_machine_control(action) -> return Val("status record `action` must be a non-empty printable string")
+    if kit_steps_machine_has(object, "status") -> return Val("status record must not contain the legacy `status` key")
+    ok :: object.get("ok") ?? return Val("status record is missing `ok`")
+    if ok == {
+        .Bool(_) -> {}
+        else -> return Val("status record field `ok` is not boolean")
+    }
+    reports :: object.get("reports") ?? return Val("status record is missing `reports`")
+    if reports == {
+        .Array(items) -> {
+            loop item in items {
+                report :: kit_steps_machine_object(item) ?? return Val("status report is not an object")
+                schema :: kit_steps_machine_string(report, "schema") ?? return Val("status report is missing string `schema`")
+                if schema != "jet.report/v3" -> return Val("status report uses `{schema}`; expected `jet.report/v3`")
+                failure :: kit_steps_machine_report(report)
+                if failure != None -> return failure
+            }
+        }
+        else -> return Val("status record `reports` is not an array")
+    }
+    None
+}
+
+fn kit_steps_machine_line(text: String) -> String Err! {
+    value :: json.parse(text.trim().copy()) ?? return Err("machine JSON: {err}")
+    object :: kit_steps_machine_object(value) ?? return Err("machine record is not an object")
+    schema :: kit_steps_machine_string(object, "schema") ?? return Err("machine record is missing `schema`")
+    if schema == "jet.report/v3" {
+        failure :: kit_steps_machine_report(object)
+        if failure == {
+            .Val(detail) -> return Err(detail)
+            .None -> {}
+        }
+        return Ok("report")
+    }
+    if schema == "jet.status/v1" {
+        failure :: kit_steps_machine_status(object)
+        if failure == {
+            .Val(detail) -> return Err(detail)
+            .None -> {}
+        }
+        action :: kit_steps_machine_string(object, "action") ?? ""
+        return Ok(if action == "browser.relay" -> "browser-relay" else -> "status")
+    }
+    Err("machine record uses `{schema}`; expected `jet.report/v3` or `jet.status/v1`")
+}
+
+fn kit_steps_machine_output(text: String, expected: [String]) -> String? {
+    records := [String]{}
+    loop (index, line) in kit_steps_rust_lines(text) {
+        if line.trim() == "" -> next
+        record :: kit_steps_machine_line(line) ?? return Val("machine record {index + 1}: {err}")
+        &records.push(record)
+    }
+    if records.len() == 0 -> return Val("machine output contains no records")
+    if records != expected -> return Val("machine output record kinds differ")
+    None
+}

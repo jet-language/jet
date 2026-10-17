@@ -1,0 +1,26 @@
+Error [E0212]: The lent mutable view `edit` cannot be returned
+  --> lending_disjoint_views_reject_every_retaining_boundary_4.jet:4:36
+    |
+  4 |     loop edit in selected { return edit }
+    |                                    ^^^^
+ Why: The view is valid only while the current iteration or callback invocation is active
+ Fix: Use the view inside that scope, and keep only owned values outside it
+More: jet-lang.dev/e/E0212
+
+Error [E2305]: Returned views need a stable owner relationship
+  --> lending_disjoint_views_reject_every_retaining_boundary_4.jet:4:36
+    |
+  4 |     loop edit in selected { return edit }
+    |                                    ^^^^
+ Why: Each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources
+ Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`
+More: jet-lang.dev/e/E2305
+
+Error [E0433]: This ViewMut<Int> value is thrown away
+  --> lending_disjoint_views_reject_every_retaining_boundary_4.jet:9:5
+    |
+  9 |     leak(&values)
+    |     ^^^^
+ Why: `run` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `run` should return it, write `-> ViewMut<Int>` after its parameter list; to discard it on purpose, write `.drop("reason")`
+More: jet-lang.dev/e/E0433

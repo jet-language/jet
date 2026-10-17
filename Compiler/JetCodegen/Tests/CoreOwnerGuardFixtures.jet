@@ -1,0 +1,10 @@
+// Qualified closure intrinsics must use the same checked lowering as aliases.
+use core as core
+fn run() {
+    _guard :: core.mem.scope.guard(() -> print("guard"))
+    print("body")
+    stdout := core.term.stdout()
+    stderr := core.term.stderr()
+    &stdout.write("stdout owner\n") ?? panic("stdout write")
+    &stderr.write("stderr owner\n") ?? panic("stderr write")
+}

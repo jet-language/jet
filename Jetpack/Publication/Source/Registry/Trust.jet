@@ -3,15 +3,15 @@
 // one. Foundation owns held no-follow reads/publication. Native gates #3593,
 // typed InvalidData #4409; signed/TUF composition and entropy #3597/#4262.
 
-pub fn publication_registry_root_key_path(registry_name: String) -[Env]> String Never! {
+fn publication_registry_root_key_path(registry_name: String) -[Env]> String Never! {
     publication_registry_trust_path(publication_keys_dir(), registry_name, "registry-roots", "pub")
 }
-pub fn publication_registry_checkpoint_path(registry_name: String) -[Env]> String Never! {
+fn publication_registry_checkpoint_path(registry_name: String) -[Env]> String Never! {
     publication_registry_trust_path(publication_keys_dir(), registry_name, "registry-checkpoints", "state")
 }
 // Rust Path::parent of a root has no value; a single relative component has
 // the EMPTY parent, not '.'. Preserve that distinction.
-pub fn publication_registry_trust_path(keys_dir: String, registry_name: String, directory: String, extension: String) -> String Never! {
+fn publication_registry_trust_path(keys_dir: String, registry_name: String, directory: String, extension: String) -> String Never! {
     base :: if keys_dir == "/" || keys_dir == "" -> "." else -> files.dirname(keys_dir)
     files.join(files.join(base, directory), "{pkg_sha256_hex(registry_name.bytes())}.{extension}")
 }
@@ -19,7 +19,7 @@ fn publication_configured_registry_root_key_path(registry_name: String) -[Env]> 
     configured :: sys.get("JET_REGISTRY_ROOT_KEY") ?? ""
     if configured != "" -> configured else -> publication_registry_root_key_path(registry_name)
 }
-pub fn publication_registry_root_key_is_hex(public_key: String) -> Bool Never! {
+fn publication_registry_root_key_is_hex(public_key: String) -> Bool Never! {
     bytes :: public_key.bytes()
     if bytes.len() != 64 -> return false
     loop byte in bytes {
@@ -50,7 +50,7 @@ fn publication_check_registry_root_pin(path: String, public_key: String) -[FS, E
     if existing != public_key -> return Err(IOError.PermissionDenied(publication_registry_trust_context(path, "registry root key pin changed")))
     Ok(true)
 }
-pub fn publication_ensure_registry_root_key(registry_name: String, public_key: String) -[FS, Env, Time, Time.Wait]> String IOError! {
+fn publication_ensure_registry_root_key(registry_name: String, public_key: String) -[FS, Env, Time, Time.Wait]> String IOError! {
     if !publication_registry_root_key_is_hex(public_key) -> return Err(IOError.InvalidData(publication_registry_trust_context(registry_name, "registry root key is not a 32-byte hexadecimal public key")))
     path :: publication_configured_registry_root_key_path(registry_name)
     if publication_check_registry_root_pin(path, public_key) -> return Ok(path)
@@ -76,10 +76,10 @@ pub fn publication_ensure_registry_root_key(registry_name: String, public_key: S
 fn publication_install_registry_root_pin(path: String, public_key: String) -[FS, Env, Time]> String IOError! {
     if publication_check_registry_root_pin(path, public_key) -> return Ok(path)
     policy :: FoundationPublicationPolicy{mode: 384, create: .CreateNew, destination_links: .Refuse, create_root: false}
-    foundation_write_file_nofollow_at_root(files.dirname(path), files.basename(path), "{public_key}\n".bytes(), None, policy)
+    foundation_write_file_nofollow_at_root(files.dirname(path), files.basename(path), "{public_key}\n".bytes(), None, policy) ?? return Err(err.error)
     Ok(path)
 }
-pub fn publication_read_registry_root_key(registry_name: String) -[FS, Env]> String IOError! {
+fn publication_read_registry_root_key(registry_name: String) -[FS, Env]> String IOError! {
     path :: publication_configured_registry_root_key_path(registry_name)
     info :: files.stat(path) ?? return Err(publication_registry_root_key_read_error(path, err))
     if info.is_symlink || !info.is_file -> return Err(IOError.InvalidData(publication_registry_trust_context(path, "registry root key is not a regular file")))

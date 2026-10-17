@@ -1,0 +1,25 @@
+# Port of tests/cli_parts/surface.rs:1194-1265; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/name_fix
+step: jet check {work}/name.jet --json
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.code = "E0107"
+json: stderr doc $.fix_edits : array # original pattern
+json: stderr doc $.fix_edits #= 1
+json: stderr doc $.fix_edits[0].file = "{work}/name.jet"
+json: stderr doc $.fix_edits[0].span.start = 37 # ORACLE-DERIVED source byte position of print(scor), rs1198/1237
+json: stderr doc $.fix_edits[0].span.end = 41 # ORACLE-DERIVED source byte position of print(scor), rs1198/1237
+json: stderr doc $.fix_edits[0].new_text = "score"
+step: jet fix {work}/name.jet
+env: NO_COLOR=1
+exit: 0
+file: name.jet = name-fixed.bytes
+step: jet check {work}/name.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: empty
+stderr: empty

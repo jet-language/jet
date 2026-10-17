@@ -8,7 +8,7 @@
 // session, staging, validation, and close.
 
 // World `compiler-extension-v1`: one pure `analyze(snapshot) -> list<u8>`.
-pub trait CompilerExtensionGuest {
+trait CompilerExtensionGuest {
     fn analyze(self, snapshot: [U8]) -> [U8]
 }
 
@@ -21,11 +21,11 @@ fn cli_compiler_extension_limits(limits: ExtensionResourceLimits) -> plugin.Limi
 }
 
 // The one loaded guest behind the orchestration's handle protocol.
-pub struct CompilerExtensionSlot {
-    pub guest: Plugin<CompilerExtensionGuest>?
+struct CompilerExtensionSlot {
+    guest: Plugin<CompilerExtensionGuest>?
 }
 
-pub fn cli_run_compiler_extension_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_run_compiler_extension_host(args: [String]) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     if args.len() != 1 {
         term.eprint("compiler-extension host requires exactly one component path")
         return EXIT_USAGE
@@ -60,7 +60,8 @@ pub fn cli_run_compiler_extension_host(args: [String]) -[IO, FS, Env, Exec, Time
         term.eprint("compiler-extension response exceeds IPC limit ({response.len()} > {snapshot.limits.max_response_bytes})")
         return EXIT_USAGE
     }
-    term.stdout().write_bytes(response) ?? {
+    stdout_handle := term.stdout()
+    &stdout_handle.write_bytes(response) ?? {
         term.eprint("couldn't write compiler-extension response: {err}")
         return EXIT_USAGE
     }

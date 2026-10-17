@@ -1,0 +1,28 @@
+# Port of tests/cli_parts/expand.rs:752-811; exact original sources and predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): text split/filter, cap comparisons, zero-key JSON.
+step: jet inspect expand --facts effects {root}/tests/fixtures/expand_effects_layout.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "audit" # original predicate
+stdout: ~ "resolved=[]" # original predicate
+step: jet inspect expand --facts layout {root}/tests/fixtures/expand_effects_layout.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "AuditPacket.$layout" # original predicate
+stdout: ~ "byte_facts=unavailable" # original predicate
+stdout: ~ "[E0959]" # original predicate
+step: jet inspect expand --facts effects --json {root}/tests/fixtures/expand_effects_layout.jet
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $ valid # original predicate: JSON parses
+stdout: ~ "\"selection\":\"effects\"" # original predicate
+stdout: ~ "\"inferred\":[]" # original predicate
+step: jet inspect expand --facts layout --json {root}/tests/fixtures/expand_effects_layout.jet
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $ valid # original predicate: JSON parses
+stdout: ~ "\"selection\":\"layout\"" # original predicate
+stdout: ~ "\"byte_facts\":{\"diagnostic\"" # original predicate
+stdout: ~ "\"status\":\"unavailable\"" # original predicate
+stdout: ~ "\"code\":\"E0959\"" # original predicate

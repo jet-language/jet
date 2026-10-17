@@ -1,0 +1,35 @@
+// Main's veto-able family identity ruling: golden is UNOBSERVED.
+use core.math as math
+use core.reflect as reflect
+fn screen(value: ^ScreenPoint) -> math.ScreenPoint { ^value }
+fn world(value: ^WorldPoint) -> math.WorldPoint { ^value }
+fn view(value: ^ViewPoint) -> math.ViewPoint { ^value }
+fn camera(value: ^CameraPoint) -> math.CameraPoint { ^value }
+fn device(value: ^DevicePoint) -> math.DevicePoint { ^value }
+fn screen_delta(value: ^ScreenDelta) -> math.ScreenDelta { ^value }
+fn world_delta(value: ^WorldDelta) -> math.WorldDelta { ^value }
+fn view_delta(value: ^ViewDelta) -> math.ViewDelta { ^value }
+fn camera_delta(value: ^CameraDelta) -> math.CameraDelta { ^value }
+fn device_delta(value: ^DeviceDelta) -> math.DeviceDelta { ^value }
+fn dynamic(value: ^Point2<Float, World>) -> math.Point2<Float, World> { ^value }
+fn dynamic_delta(value: ^Delta2<Float, World>) -> math.Delta2<Float, World> { ^value }
+fn error(value: ^TransformError) -> math.TransformError { ^value }
+fn run() {
+    a :: ScreenPoint.new(1.0, 2.0)
+    b :: screen(a.copy())
+    print(reflect.of(a).type_name() == reflect.of(b).type_name())
+    print("{a}" == ("{b}"))
+    assert_eq(world(WorldPoint.new(1.0, 2.0)).x, 1.0)
+    assert_eq(view(ViewPoint.new(1.0, 2.0)).y, 2.0)
+    assert_eq(camera(CameraPoint.new(1.0, 2.0)).x, 1.0)
+    assert_eq(device(DevicePoint.new(1.0, 2.0)).y, 2.0)
+    assert_eq(screen_delta(ScreenDelta.new(1.0, 2.0)).x, 1.0)
+    assert_eq(world_delta(WorldDelta.new(1.0, 2.0)).y, 2.0)
+    assert_eq(view_delta(ViewDelta.new(1.0, 2.0)).x, 1.0)
+    assert_eq(camera_delta(CameraDelta.new(1.0, 2.0)).y, 2.0)
+    assert_eq(device_delta(DeviceDelta.new(1.0, 2.0)).x, 1.0)
+    p :: dynamic(Point2<Float, World>.new(1.0, 2.0, 11))
+    d :: dynamic_delta(Delta2<Float, World>.new(3.0, 4.0, 11))
+    print((p + d ?? panic("dynamic arithmetic")).frame_id)
+    assert_eq(error(TransformError{message: "frame"}).message, "frame")
+}

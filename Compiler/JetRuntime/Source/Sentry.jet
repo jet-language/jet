@@ -1,0 +1,545 @@
+// D-MEM-SENTRY1. Gate/fence/frame stack are per-thread at TCB128..184.
+// Process112: mutex0 hardened8 release16 nextFrame24 nextSeq32 heapList40
+// expiredStackList64 liveFrameList88. Heap rows5: start,len,live,owner,seq.
+// Frame32: unique id0 and triple (start,len,seq) native word List at8.
+// Expired stack ranges deduplicate by (start,len), retaining the newest seq.
+// Source literals borrowed by gate scopes remain alive with the calling image.
+// S36 / D-FAIL-EXIT1: metadata and the stop boundary share this fault status.
+SENTRY_RUNTIME_EXIT_CODE :: prep { I64{70} }
+sentry_root := I64{0}
+
+// runtime-init: 4
+#Export(c) fn jet_rt_sentry_init() {
+    if (sentry_root != I64{0}) -> return
+    sentry_root = alloc_required_valid(I64{112}, I64{8})
+    thread_zero(sentry_root, I64{112})
+    sync_store(sentry_root + I64{24}, I64{1})
+}
+fn sentry_available() -> Bool {
+    sync_load(sentry_root + I64{16}) == I64{0} || sync_load(sentry_root + I64{8}) != I64{0} || sync_load(thread_base() + I64{176}) != I64{0}
+}
+#Export(c) fn jet_rt_sentry_set_hardened(enabled: I64) { _ := sync_swap(sentry_root + I64{8}, enabled) }
+#Export(c) fn jet_rt_sentry_set_release(enabled: I64) { _ := sync_swap(sentry_root + I64{16}, enabled) }
+fn sentry_save(save: I64) { coll_copy(thread_base() + I64{128}, save, I64{56}) }
+#Export(c) fn jet_rt_sentry_scope_enter(save: I64, enabled: I64, fenced: I64, file: I64, file_len: I64, line: I64, reason: I64, reason_len: I64) {
+    sentry_save(save)
+    base :: thread_base()
+    if (fenced != I64{0}) {
+        depth :: sync_load(base + I64{176})
+        if (depth != I64{-1}) -> sync_store(base + I64{176}, wrapping(depth + I64{1}))
+    }
+    sync_store(base + I64{128}, if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
+    sync_store(base + I64{136}, file)
+    sync_store(base + I64{144}, file_len)
+    sync_store(base + I64{152}, line.bit_and(I64{4294967295}))
+    sync_store(base + I64{160}, reason)
+    sync_store(base + I64{168}, reason_len)
+}
+#Export(c) fn jet_rt_sentry_policy_enter(save: I64, enabled: I64) {
+    sentry_save(save)
+    sync_store(thread_base() + I64{128}, if (enabled != I64{0} && sentry_available()) -> I64{1} else -> I64{0})
+}
+#Export(c) fn jet_rt_sentry_scope_leave(save: I64) { coll_copy(save, thread_base() + I64{128}, I64{56}) }
+fn sentry_sequence() -> I64 {
+    sequence :: wrapping(sync_load(sentry_root + I64{32}) + I64{1})
+    sync_store(sentry_root + I64{32}, sequence)
+    sequence
+}
+fn sentry_stack() -> I64 {
+    stack := sync_load(thread_base() + I64{184})
+    if (stack == I64{0}) {
+        stack = alloc_required_valid(I64{24}, I64{8})
+        thread_zero(stack, I64{24})
+        sync_store(thread_base() + I64{184}, stack)
+    }
+    stack
+}
+#Export(c) fn jet_rt_sentry_frame_enter() -> I64 {
+    if !sentry_available() -> return I64{0}
+    frame :: alloc_required_valid(I64{32}, I64{8})
+    thread_zero(frame, I64{32})
+    sync_mutex_lock(sentry_root)
+    sync_store(frame, sync_load(sentry_root + I64{24}))
+    sync_store(sentry_root + I64{24}, wrapping(sync_load(frame) + I64{1}))
+    scheduler_words_push(sentry_root + I64{88}, frame)
+    sync_mutex_unlock(sentry_root)
+    scheduler_words_push(sentry_stack(), frame)
+    frame
+}
+fn sentry_current_frame() -> I64 {
+    stack :: sync_load(thread_base() + I64{184})
+    if (stack == I64{0} || sync_load(stack) == I64{0}) -> return I64{0}
+    sync_load(sync_load(stack + I64{16}) + (sync_load(stack) - I64{1}) * I64{8})
+}
+fn sentry_words_remove(header: I64, at: I64, width: I64) {
+    count :: sync_load(header) - width
+    data :: sync_load(header + I64{16})
+    if at < count -> coll_copy(data + count * I64{8}, data + at * I64{8}, width * I64{8})
+    sync_store(header, count)
+}
+fn sentry_expire(start: I64, length: I64, sequence: I64) {
+    header :: sentry_root + I64{64}
+    data :: sync_load(header + I64{16})
+    at := I64{0}
+    loop at < sync_load(header) {
+        row :: data + at * I64{8}
+        if (sync_load(row) == start && sync_load(row + I64{8}) == length) {
+            if world_unsigned_before(sync_load(row + I64{16}), sequence) -> sync_store(row + I64{16}, sequence)
+            return
+        }
+        at += I64{3}
+    }
+    scheduler_words_push(header, start)
+    scheduler_words_push(header, length)
+    scheduler_words_push(header, sequence)
+}
+#Export(c) fn jet_rt_sentry_frame_leave(frame: I64) {
+    if (frame == I64{0}) -> return
+    stack :: sync_load(thread_base() + I64{184})
+    count :: sync_load(stack)
+    data :: sync_load(stack + I64{16})
+    at := I64{0}
+    // Stable removal supports Rust's explicit out-of-order guard drop too.
+    loop at < count {
+        if (sync_load(data + at * I64{8}) == frame) {
+            index := at
+            loop index + (I64{1}) < count {
+                sync_store(data + index * I64{8}, sync_load(data + (index + I64{1}) * I64{8}))
+                index += I64{1}
+            }
+            sync_store(stack, count - I64{1})
+            break
+        }
+        at += I64{1}
+    }
+    sync_mutex_lock(sentry_root)
+    header :: frame + I64{8}
+    rows :: sync_load(header + I64{16})
+    at = I64{0}
+    loop at < sync_load(header) {
+        row :: rows + at * I64{8}
+        sentry_expire(sync_load(row), sync_load(row + I64{8}), sync_load(row + I64{16}))
+        at += I64{3}
+    }
+    live :: sentry_root + I64{88}
+    entries :: sync_load(live + I64{16})
+    at = I64{0}
+    loop at < sync_load(live) {
+        if (sync_load(entries + at * I64{8}) == frame) {
+            sentry_words_remove(live, at, I64{1})
+            break
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(sentry_root)
+    capacity :: sync_load(header + I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(rows, capacity * I64{8}, I64{8})
+    alloc_release_valid(frame, I64{32}, I64{8})
+}
+fn sentry_thread_detach() {
+    stack :: sync_load(thread_base() + I64{184})
+    if (stack == I64{0}) -> return
+    loop sync_load(stack) != (I64{0}) -> jet_rt_sentry_frame_leave(sentry_current_frame())
+    scheduler_words_drop(stack)
+    sync_store(thread_base() + I64{184}, I64{0})
+}
+fn sentry_register(owner: I64, frame: I64, start: I64, bytes: I64) {
+    if (!sentry_available() || start == I64{0}) -> return
+    length :: if (bytes == I64{0}) -> I64{1} else -> bytes
+    sync_mutex_lock(sentry_root)
+    sequence :: sentry_sequence()
+    if (frame == I64{0}) {
+        heap :: sentry_root + I64{40}
+        scheduler_words_push(heap, start)
+        scheduler_words_push(heap, length)
+        scheduler_words_push(heap, I64{1})
+        scheduler_words_push(heap, owner)
+        scheduler_words_push(heap, sequence)
+    } else {
+        header :: frame + I64{8}
+        data :: sync_load(header + I64{16})
+        at := I64{0}
+        loop at < sync_load(header) {
+            row :: data + at * I64{8}
+            if (sync_load(row) == start && sync_load(row + I64{8}) == length) {
+                sync_store(row + I64{16}, sequence)
+                sync_mutex_unlock(sentry_root)
+                return
+            }
+            at += I64{3}
+        }
+        scheduler_words_push(header, start)
+        scheduler_words_push(header, length)
+        scheduler_words_push(header, sequence)
+    }
+    sync_mutex_unlock(sentry_root)
+}
+#Export(c) fn jet_rt_sentry_register_allocation(start: I64, bytes: I64) { sentry_register(I64{0}, I64{0}, start, bytes) }
+#Export(c) fn jet_rt_sentry_register_owned_allocation(owner: I64, start: I64, bytes: I64) { sentry_register(owner, I64{0}, start, bytes) }
+#Export(c) fn jet_rt_sentry_register_stack_allocation(start: I64, bytes: I64) {
+    frame :: sentry_current_frame()
+    if (frame != I64{0}) -> sentry_register(I64{0}, frame, start, bytes)
+}
+#Export(c) fn jet_rt_sentry_stack_address_of(start: I64, bytes: I64) -> I64 {
+    jet_rt_sentry_register_stack_allocation(start, bytes)
+    start
+}
+#Export(c) fn jet_rt_sentry_quarantine_owner(owner: I64) {
+    if !sentry_available() -> return
+    sync_mutex_lock(sentry_root)
+    header :: sentry_root + I64{40}
+    data :: sync_load(header + I64{16})
+    at := I64{0}
+    loop at < sync_load(header) {
+        row :: data + at * I64{8}
+        if (sync_load(row + I64{24}) == owner) -> sync_store(row + I64{16}, I64{0})
+        at += I64{5}
+    }
+    sync_mutex_unlock(sentry_root)
+}
+#Export(c) fn jet_rt_sentry_quarantine(start: I64, bytes: I64) {
+    if (!sentry_available() || start == I64{0}) -> return
+    sync_mutex_lock(sentry_root)
+    heap :: sentry_root + I64{40}
+    data :: sync_load(heap + I64{16})
+    poisoned := false
+    at := I64{0}
+    loop at < sync_load(heap) {
+        row :: data + at * I64{8}
+        if (sync_load(row) == start && sync_load(row + I64{16}) != I64{0}) {
+            sync_store(row + I64{16}, I64{0})
+            poisoned = true
+        }
+        at += I64{5}
+    }
+    live :: sentry_root + I64{88}
+    frames :: sync_load(live + I64{16})
+    index := I64{0}
+    loop index < sync_load(live) {
+        header :: sync_load(frames + index * I64{8}) + I64{8}
+        rows :: sync_load(header + I64{16})
+        at = I64{0}
+        loop at < sync_load(header) {
+            row :: rows + at * I64{8}
+            if (sync_load(row) == start) {
+                sentry_expire(start, sync_load(row + I64{8}), sync_load(row + I64{16}))
+                sentry_words_remove(header, at, I64{3})
+                poisoned = true
+            } else { at += I64{3} }
+        }
+        index += I64{1}
+    }
+    if poisoned {
+        at = I64{0}
+        loop at < bytes {
+            trap_put(start + at, I64{221})
+            at += I64{1}
+        }
+    }
+    sync_mutex_unlock(sentry_root)
+}
+fn sentry_range_end(start: I64, length: I64) -> I64 {
+    end :: wrapping(start + length)
+    if world_unsigned_before(end, start) -> I64{-1} else -> end
+}
+// Return raw facts: 0 valid, 1 provenance, 2 heap expired, 3 alignment,
+// 4 stack expired, 5 live-range boundary. Provenance precedes alignment.
+#Export(c) fn jet_rt_sentry_check(start: I64, bytes: I64, alignment: I64, strict: I64) -> I64 {
+    if (sync_load(thread_base() + I64{128}) == I64{0}) -> return I64{0}
+    length :: if (bytes == I64{0}) -> I64{1} else -> bytes
+    align :: if (alignment == I64{0}) -> I64{1} else -> alignment
+    end :: wrapping(start + length)
+    overflow :: world_unsigned_before(end, start)
+    live := false
+    starts_live := false
+    expired := I64{0}
+    newest := I64{0}
+    sync_mutex_lock(sentry_root)
+    header :: sentry_root + I64{40}
+    data :: sync_load(header + I64{16})
+    at := I64{0}
+    loop at < sync_load(header) {
+        row :: data + at * I64{8}
+        begin :: sync_load(row)
+        limit :: sentry_range_end(begin, sync_load(row + I64{8}))
+        inside :: !world_unsigned_before(start, begin)
+        if (sync_load(row + I64{16}) != I64{0}) {
+            if inside && !world_unsigned_before(limit, start) -> starts_live = true
+            if inside && !overflow && !world_unsigned_before(limit, end) -> live = true
+        } else {
+            sequence :: sync_load(row + I64{32})
+            if (inside && world_unsigned_before(start, limit) && (expired == I64{0} || world_unsigned_before(newest, sequence))) {
+                expired = I64{2}
+                newest = sequence
+            }
+        }
+        at += I64{5}
+    }
+    frames :: sentry_root + I64{88}
+    entries :: sync_load(frames + I64{16})
+    index := I64{0}
+    loop index < sync_load(frames) {
+        rows :: sync_load(entries + index * I64{8}) + I64{8}
+        data_frame :: sync_load(rows + I64{16})
+        at = I64{0}
+        loop at < sync_load(rows) {
+            row :: data_frame + at * I64{8}
+            begin :: sync_load(row)
+            limit :: sentry_range_end(begin, sync_load(row + I64{8}))
+            inside :: !world_unsigned_before(start, begin)
+            if inside && !world_unsigned_before(limit, start) -> starts_live = true
+            if inside && !overflow && !world_unsigned_before(limit, end) -> live = true
+            at += I64{3}
+        }
+        index += I64{1}
+    }
+    expired_rows :: sentry_root + I64{64}
+    expired_data :: sync_load(expired_rows + I64{16})
+    at = I64{0}
+    loop at < sync_load(expired_rows) {
+        row :: expired_data + at * I64{8}
+        begin :: sync_load(row)
+        limit :: sentry_range_end(begin, sync_load(row + I64{8}))
+        sequence :: sync_load(row + I64{16})
+        if (!world_unsigned_before(start, begin) && world_unsigned_before(start, limit) && (expired == I64{0} || world_unsigned_before(newest, sequence))) {
+            expired = I64{4}
+            newest = sequence
+        }
+        at += I64{3}
+    }
+    sync_mutex_unlock(sentry_root)
+    fault :: if {
+        live -> (if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0})
+        (expired != I64{0}) -> expired
+        starts_live -> I64{5}
+        (strict != I64{0} || start == I64{0} || overflow) -> I64{1}
+        else -> (if (sentry_remainder(start, align) != I64{0}) -> I64{3} else -> I64{0})
+    }
+    sentry_checked_fault(fault, start, align)
+}
+// MemSentry.rs:704-717 observes each detected fault, even if the caller returns
+// it instead of stopping. Classification is complete and its lock is released.
+fn sentry_checked_fault(fault: I64, start: I64, alignment: I64) -> I64 {
+    if (fault == I64{0}) -> return fault
+    gate :: sentry_gate_name()
+    detail :: sentry_detail(fault, start, alignment)
+    sentry_ledger(fault, gate, detail)
+    jet_rt_string_drop(gate)
+    jet_rt_string_drop(detail)
+    fault
+}
+#Export(c) fn jet_rt_sentry_read(start: I64, bytes: I64, alignment: I64) -> I64 {
+    fault :: jet_rt_sentry_check(start, bytes, alignment, I64{1})
+    if (fault != I64{0}) {
+        sentry_stop(fault, I64{0}, false)
+        return I64{0}
+    }
+    start
+}
+
+fn sentry_remainder(value: I64, divisor: I64) -> I64 {
+    if ((divisor.bit_and(wrapping(divisor - I64{1}))) == I64{0}) -> return value.bit_and(wrapping(divisor - I64{1}))
+    remainder := I64{0}
+    shift := I64{63}
+    loop {
+        // Modular doubling without overflowing an unsigned machine word.
+        gap :: wrapping(divisor - remainder)
+        remainder = if !world_unsigned_before(remainder, gap) -> wrapping(remainder - gap) else -> wrapping(remainder + remainder)
+        bit :: (value >> shift).bit_and(I64{1})
+        remainder = if (remainder == wrapping(divisor - I64{1}) && bit != I64{0}) -> I64{0} else -> wrapping(remainder + bit)
+        if (shift == I64{0}) -> break
+        shift -= I64{1}
+    }
+    remainder
+}
+
+fn sentry_append_owned(text: I64, suffix: I64) {
+    jet_rt_string_builder_push(text, suffix)
+    jet_rt_string_drop(suffix)
+}
+fn sentry_append_number(text: I64, number: I64) {
+    scratch :: scheduler_text_new(I64{20})
+    count :: world_decimal(sync_load(scratch), number)
+    sync_store(scratch + I64{8}, count)
+    sentry_append_owned(text, scratch)
+}
+fn sentry_hex(text: I64, value: I64) {
+    shift := I64{60}
+    started := false
+    loop {
+        digit :: (value >> shift).bit_and(I64{15})
+        if (digit != I64{0} || started || shift == I64{0}) {
+            rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
+            started = true
+        }
+        if (shift == I64{0}) -> break
+        shift -= I64{4}
+    }
+}
+// Rust debug quoting for source gate names; JSON quoting for ledger strings.
+fn sentry_quote(text: I64, value: I64, json: Bool) {
+    rt_text_push_scalar(text, I64{34})
+    data :: rt_text_data(value)
+    end :: rt_text_len(value)
+    at := I64{0}
+    loop at < end {
+        scalar :: rt_text_decode(data + at)
+        at += rt_text_width(data + at)
+        if {
+            (scalar == I64{34} || scalar == I64{92}) -> {
+                rt_text_push_scalar(text, I64{92})
+                rt_text_push_scalar(text, scalar)
+            }
+            (scalar == I64{10} || scalar == I64{13} || scalar == I64{9}) -> {
+                rt_text_push_scalar(text, I64{92})
+                rt_text_push_scalar(text, if (scalar == I64{10}) -> I64{110} else -> if (scalar == I64{13}) -> I64{114} else -> I64{116})
+            }
+            (!json && scalar == I64{0}) -> {
+                rt_text_push_scalar(text, I64{92})
+                rt_text_push_scalar(text, I64{48})
+            }
+            (scalar < I64{32} || (scalar >= I64{127} && scalar <= I64{159})) -> {
+                rt_text_push_scalar(text, I64{92})
+                rt_text_push_scalar(text, I64{117})
+                if json {
+                    shift := I64{12}
+                    loop {
+                        digit :: (scalar >> shift).bit_and(I64{15})
+                        rt_text_push_scalar(text, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
+                        if (shift == I64{0}) -> break
+                        shift -= I64{4}
+                    }
+                } else {
+                    rt_text_push_scalar(text, I64{123})
+                    sentry_hex(text, scalar)
+                    rt_text_push_scalar(text, I64{125})
+                }
+            }
+            else -> rt_text_push_scalar(text, scalar)
+        }
+    }
+    rt_text_push_scalar(text, I64{34})
+}
+fn sentry_gate_name() -> I64 {
+    base :: thread_base()
+    if (sync_load(base + I64{168}) != I64{0}) -> return rt_text_copy(sync_load(base + I64{160}), sync_load(base + I64{168}))
+    text :: rt_text_copy(sync_load(base + I64{136}), sync_load(base + I64{144}))
+    rt_text_push_scalar(text, I64{58})
+    sentry_append_number(text, sync_load(base + I64{152}))
+    text
+}
+fn sentry_template(text: I64, template: I64, operation: I64, gate: I64, obligation: I64) {
+    data :: rt_text_data(template)
+    end :: rt_text_len(template)
+    at := I64{0}
+    loop at < end {
+        if (trap_byte(data + at) == I64{123}) {
+            finish := at + I64{1}
+            loop finish < end && trap_byte(data + finish) != (I64{125}) -> finish += I64{1}
+            if finish < end {
+                size :: finish - at - I64{1}
+                value :: if (size == I64{4}) -> gate else -> if (size == I64{9}) -> operation else -> obligation
+                jet_rt_string_builder_push(text, value)
+                at = finish + I64{1}
+                next
+            }
+        }
+        rt_text_append(text, data + at, I64{1})
+        at += I64{1}
+    }
+    jet_rt_string_drop(template)
+}
+fn sentry_code(fault: I64) -> I64 {
+    if (fault == I64{2} || fault == I64{4}) -> I64{2} else -> if (fault == I64{3}) -> I64{3} else -> I64{1}
+}
+fn sentry_detail(fault: I64, start: I64, alignment: I64) -> I64 {
+    if {
+        (fault == I64{2}) -> services_msg_sentry_heap()
+        (fault == I64{4}) -> services_msg_sentry_stack()
+        (fault == I64{5}) -> services_msg_sentry_bounds()
+        (fault == I64{3}) -> {
+            text :: services_msg_sentry_address()
+            sentry_hex(text, start)
+            sentry_append_owned(text, services_msg_sentry_alignment())
+            sentry_append_number(text, if (alignment == I64{0}) -> I64{1} else -> alignment)
+            sentry_append_owned(text, services_msg_sentry_bytes())
+            text
+        }
+        else -> services_msg_sentry_provenance()
+    }
+}
+fn sentry_report(fault: I64, operation: I64, obligation: I64, component: I64, fenced: Bool, gate: I64) -> I64 {
+    code :: sentry_code(fault)
+    report :: jet_rt_string_builder_new()
+    what :: if {
+        (code == I64{2}) -> services_msg_sentry_r0802_what()
+        (code == I64{3}) -> services_msg_sentry_r0803_what()
+        else -> services_msg_sentry_r0801_what()
+    }
+    sentry_template(report, what, operation, gate, obligation)
+    rt_text_push_scalar(report, I64{10})
+    base :: thread_base()
+    if (sync_load(base + I64{144}) != I64{0}) {
+        sentry_append_owned(report, services_msg_sentry_location())
+        rt_text_append(report, sync_load(base + I64{136}), sync_load(base + I64{144}))
+        rt_text_push_scalar(report, I64{58})
+        sentry_append_number(report, sync_load(base + I64{152}))
+        sentry_append_owned(report, services_msg_sentry_gate())
+        sentry_quote(report, gate, false)
+        rt_text_push_scalar(report, I64{10})
+    }
+    sentry_append_owned(report, services_msg_sentry_why())
+    why :: if {
+        (code == I64{2}) -> services_msg_sentry_r0802_why()
+        (code == I64{3}) -> services_msg_sentry_r0803_why()
+        else -> services_msg_sentry_r0801_why()
+    }
+    sentry_template(report, why, operation, gate, obligation)
+    sentry_append_owned(report, services_msg_sentry_fix())
+    fix :: if {
+        (code == I64{2}) -> services_msg_sentry_r0802_fix()
+        (code == I64{3}) -> services_msg_sentry_r0803_fix()
+        else -> services_msg_sentry_r0801_fix()
+    }
+    sentry_template(report, fix, operation, gate, obligation)
+    // This seam's obligation is the native read's canonical valid_ptr fact.
+    sentry_append_owned(report, services_msg_sentry_obligation())
+    if (component != I64{0} && rt_text_len(component) != I64{0}) {
+        sentry_append_owned(report, services_msg_sentry_foreign())
+        jet_rt_string_builder_push(report, component)
+        sentry_append_owned(report, if fenced -> services_msg_sentry_fenced() else -> services_msg_sentry_unfenced())
+    }
+    sentry_append_owned(report, services_msg_sentry_exit())
+    sentry_append_number(report, SENTRY_RUNTIME_EXIT_CODE)
+    rt_text_push_scalar(report, I64{10})
+    footer :: if {
+        (code == I64{2}) -> services_msg_sentry_footer2()
+        (code == I64{3}) -> services_msg_sentry_footer3()
+        else -> services_msg_sentry_footer1()
+    }
+    sentry_append_owned(report, footer)
+    report
+}
+fn sentry_stop(fault: I64, component: I64, fenced: Bool) {
+    domain :: jet_rt_stop_domain()
+    if (domain != I64{0}) -> _ := scheduler_panic_check()
+    operation :: services_msg_sentry_read()
+    obligation :: services_msg_sentry_valid_ptr()
+    gate :: sentry_gate_name()
+    report :: sentry_report(fault, operation, obligation, component, fenced, gate)
+    jet_rt_string_drop(operation)
+    jet_rt_string_drop(obligation)
+    jet_rt_string_drop(gate)
+    if (domain == I64{1}) {
+        _ := scheduler_root_publish_owned(report, SENTRY_RUNTIME_EXIT_CODE)
+        return
+    }
+    if (domain == I64{2}) {
+        rt_task_panic_publish_owned(report, I64{1})
+        return
+    }
+    jet_rt_stdout_flush()
+    trap_write_handle(report)
+    jet_rt_string_drop(report)
+    trap_exit(SENTRY_RUNTIME_EXIT_CODE)
+}

@@ -1,0 +1,26 @@
+
+use core.process as process
+
+fn run() {
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 80, rows: 24 },
+        mode: .Cooked
+    }
+    child :: process.cmd(["{work}/session_fixture", "terminal"]).terminal(policy).spawn() ?? panic("spawn failed")
+    session :: child.terminal ?? panic("missing terminal session")
+    session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
+    child.stdin.write("typed\n") ?? panic("write failed")
+    result :: child.wait() ?? panic("wait failed")
+    print(result.success)
+    print(result.output.contains("input:typed"))
+    print(result.output.contains("size:30x100"))
+    print(result.output)
+    if child.stdin.write("late") == {
+        .Ok(_) -> {
+            print("closed:accepted")
+        }
+        .Err(_) -> {
+            print("closed:error")
+        }
+}
+}

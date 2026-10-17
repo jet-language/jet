@@ -575,7 +575,7 @@ fn render(lib: &str, routines: &[Routine]) -> String {
     out.push_str(&abi);
     out.push_str(" as abi\n\n");
     for routine in routines {
-        out.push_str("pub fn ");
+        out.push_str("fn ");
         out.push_str(&routine.jet_name);
         render_params(&mut out, &routine.params);
         // D-PANICROOT1=A: the wrapper's column-major extent guard is a local

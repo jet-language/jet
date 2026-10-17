@@ -81,38 +81,38 @@ use jet_foundation.[
     type_mir_identity_key,
 ]
 
-struct MIRInlineIDMap { pub source: U64, pub target: U64 }
+struct MIRInlineIDMap { source: U64, target: U64 }
 
-struct MIRInlineValueMap { pub source: MIRValueID, pub target: MIRValueID, pub parameter: Bool }
+struct MIRInlineValueMap { source: MIRValueID, target: MIRValueID, parameter: Bool }
 
-struct MIRInlinePlaceMap { pub source: MIRPlaceID, pub target: MIRPlaceID, pub materialize: Bool }
+struct MIRInlinePlaceMap { source: MIRPlaceID, target: MIRPlaceID, materialize: Bool }
 
-struct MIRInlineTypeSubstitution { pub name: String, pub ty: MIRType }
+struct MIRInlineTypeSubstitution { name: String, ty: MIRType }
 
 struct MIRInlineMaps {
-    pub values: [MIRInlineValueMap]
-    pub blocks: [MIRInlineIDMap]
-    pub places: [MIRInlinePlaceMap]
-    pub locals: [MIRInlineIDMap]
-    pub scopes: [MIRInlineIDMap]
-    pub operations: [MIRInlineIDMap]
+    values: [MIRInlineValueMap]
+    blocks: [MIRInlineIDMap]
+    places: [MIRInlinePlaceMap]
+    locals: [MIRInlineIDMap]
+    scopes: [MIRInlineIDMap]
+    operations: [MIRInlineIDMap]
 }
 
 struct MIRInlinePlan {
-    pub entry: MIRBlockID
-    pub continuation: MIRBlockID
-    pub blocks: [MIRBasicBlock]
-    pub adapter_instructions: [MIRInstruction]
-    pub values: [MIRValueFact]
-    pub locals: [MIRLocal]
-    pub places: [MIRPlace]
-    pub scopes: [MIRScope]
-    pub drops: [MIRDropAction]
-    pub return_incoming: [MIRPhiIncoming]
-    pub returns: Bool
+    entry: MIRBlockID
+    continuation: MIRBlockID
+    blocks: [MIRBasicBlock]
+    adapter_instructions: [MIRInstruction]
+    values: [MIRValueFact]
+    locals: [MIRLocal]
+    places: [MIRPlace]
+    scopes: [MIRScope]
+    drops: [MIRDropAction]
+    return_incoming: [MIRPhiIncoming]
+    returns: Bool
 }
 
-struct MIRInlinePlanResult { pub plan: MIRInlinePlan?, pub error: MIROptimizationError? }
+struct MIRInlinePlanResult { plan: MIRInlinePlan?, error: MIROptimizationError? }
 
 fn mir_pass_inline_plan(
     caller: MIRFunction,
@@ -174,7 +174,7 @@ fn mir_pass_inline_plan(
                 ownership.moved = false
                 ownership.last_use = false
                 &adapter_values.push(MIRValueFact{id: cloned, ty: argument_fact.ty, span: argument_fact.span, ownership: ownership})
-                fact :: mir_copy_fact_for_ownership(if argument.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, argument_fact.ownership.mode)
+                fact :: mir_copy_fact_for_ownership(if argument.shared_auto_clone -> MIRCopyFact.Share else -> MIRCopyFact.Materialize, argument_fact.ownership)
                 &adapters.push(MIRInstruction{id: operation_id, span: argument_fact.span, source_line: None, result: Val(cloned), ty: Val(argument_fact.ty), operation: MIROperation.Copy{value: argument.value, fact: fact}})
                 cloned
             }
@@ -249,7 +249,7 @@ fn mir_pass_inline_plan(
         map :: mir_pass_inline_place_map(maps, place.id) ?? MIRInlinePlaceMap{source: place.id, target: place.id, materialize: false}
         if !map.materialize -> next
         parameter_source :: mir_pass_inline_parameter_place_source(place, parameter_values, args)
-        base := mir_pass_inline_place_base(place.base, maps)
+        base := mir_pass_inline_place_base(caller, place.base, maps)
         projections := [MIRProjection]{}
         if parameter_source == .Val(source_id) {
             source_place :: mir_pass_find_place(caller.places, source_id) ?? next
@@ -266,6 +266,7 @@ fn mir_pass_inline_plan(
             span: local.span,
             ty: mir_pass_inline_type(local.ty, substitutions),
             place: mir_pass_inline_place(maps, local.place),
+            ssa_value: mir_pass_inline_optional_value(maps, local.ssa_value),
             mutable: local.mutable,
             ownership: local.ownership,
             is_comptime: local.is_comptime,
@@ -312,6 +313,11 @@ fn mir_pass_inline_plan(
                 }
                 if mapped_value == .Val(returned) -> &plan.return_incoming.push(MIRPhiIncoming{block: mir_pass_inline_block(maps, block.id), value: returned})
                 MIRTerminator.Jump{target: continuation}
+            }
+            // A callee's stop edge must reach the caller's own cleanup, which a
+            // remapped Stopped cannot: a stop-point body is never inlined.
+            .Poll(_, _, _) | .Stopped -> {
+                return MIRInlinePlanResult{plan: None, error: None}
             }
             else -> mir_pass_inline_terminator(block.terminator, maps)
         }
@@ -463,14 +469,33 @@ fn mir_pass_inline_parameter_place_source(place: MIRPlace, parameters: [MIRValue
     mir_pass_inline_parameter_place(place, parameters, args)
 }
 
-fn mir_pass_inline_place_base(base: MIRPlaceBase, maps: MIRInlineMaps) -> MIRPlaceBase Never! {
+fn mir_pass_inline_place_base(caller: MIRFunction, base: MIRPlaceBase, maps: MIRInlineMaps) -> MIRPlaceBase Never! {
     if base == {
         .Local(local) -> MIRPlaceBase.Local{local: mir_pass_inline_local(maps, local)}
-        .Parameter(value) -> MIRPlaceBase.Parameter{value: mir_pass_inline_value(maps, value)}
+        .Parameter(value) -> mir_pass_inline_argument_place_base(caller, mir_pass_inline_value(maps, value))
         .Capture(value) -> MIRPlaceBase.Capture{value: mir_pass_inline_value(maps, value)}
         .Temporary(value) -> MIRPlaceBase.Temporary{value: mir_pass_inline_value(maps, value)}
         .Static(name) -> MIRPlaceBase.Static{name: name}
     }
+}
+
+// A callee parameter place whose argument has no caller place is rebased on
+// the caller's own definition of the argument value. Only a caller parameter
+// or capture keeps that base; every other argument (a constant, a computed
+// value, or an adapter copy/move) is an SSA temporary of the caller.
+fn mir_pass_inline_argument_place_base(caller: MIRFunction, value: MIRValueID) -> MIRPlaceBase Never! {
+    loop block in caller.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            if result != value -> next
+            return if instruction.operation == {
+                .Parameter(_, _) -> MIRPlaceBase.Parameter{value: value}
+                .Capture(_) -> MIRPlaceBase.Capture{value: value}
+                else -> MIRPlaceBase.Temporary{value: value}
+            }
+        }
+    }
+    MIRPlaceBase.Temporary{value: value}
 }
 
 fn mir_pass_inline_projection(projection: MIRProjection, maps: MIRInlineMaps) -> MIRProjection Never! {
@@ -480,6 +505,7 @@ fn mir_pass_inline_projection(projection: MIRProjection, maps: MIRInlineMaps) ->
         .Deref(span) -> MIRProjection.Deref{span: span}
         .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
         .Range(range, location, span) -> MIRProjection.Range{range: mir_pass_inline_value(maps, range), location: location, span: span}
+        .MapLookup(lookup, optional, span) -> MIRProjection.MapLookup{lookup: mir_pass_inline_value(maps, lookup), optional: optional, span: span}
     }
 }
 
@@ -505,6 +531,9 @@ fn mir_pass_inline_terminator(terminator: MIRTerminator, maps: MIRInlineMaps) ->
         .Break(target, value) -> MIRTerminator.Break{target: mir_pass_inline_block(maps, target), value: mir_pass_inline_optional_value(maps, value)}
         .Continue(target) -> MIRTerminator.Continue{target: mir_pass_inline_block(maps, target)}
         .Unreachable(reason) -> MIRTerminator.Unreachable{reason: reason}
+        // Unreachable from planning (a stop-point body is never inlined).
+        .Poll(kind, resume, stop) -> MIRTerminator.Poll{kind: kind, resume: mir_pass_inline_block(maps, resume), stop: mir_pass_inline_block(maps, stop)}
+        .Stopped -> MIRTerminator.Stopped
     }
 }
 
@@ -786,6 +815,7 @@ fn mir_pass_inline_operation(operation: MIROperation, maps: MIRInlineMaps, subst
             mapped :: loop entry in entries -> MIRMapEntry{key: mir_pass_inline_value(maps, entry.key), value: mir_pass_inline_value(maps, entry.value)}
             Val(MIROperation.BuildMap{entries: mapped})
         }
+        .MapLookup(map, key, cache) -> Val(MIROperation.MapLookup{map: mir_pass_inline_place(maps, map), key: mir_pass_inline_value(maps, key), cache: mir_pass_inline_place(maps, cache)})
         .EnumIs(subject, owner, variant) -> Val(MIROperation.EnumIs{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant})
         .EnumPayload(subject, owner, variant, index) -> Val(MIROperation.EnumPayload{subject: mir_pass_inline_value(maps, subject), owner: owner, variant: variant, index: index})
         .OptionIsSome(subject) -> Val(MIROperation.OptionIsSome{subject: mir_pass_inline_value(maps, subject)})
@@ -890,7 +920,6 @@ fn mir_pass_inline_optional_test_scope_member(member: MIRTestScopeMember?, maps:
 
 fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, substitutions: [MIRInlineTypeSubstitution]) -> MIRSemanticOp Never! {
     if operation == {
-        .DataEntriesToMap(call, local) -> MIRSemanticOp.DataEntriesToMap{call: call, local: mir_pass_inline_local(maps, local)}
         .MathBuiltin(type_id, call, args) -> MIRSemanticOp.MathBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
         .PreciseBuiltin(type_id, call, args) -> MIRSemanticOp.PreciseBuiltin{type_id: type_id, call: call, args: mir_pass_inline_values(args, maps)}
         .Print(call, value) -> MIRSemanticOp.Print{call: call, value: mir_pass_inline_value(maps, value)}
@@ -902,7 +931,7 @@ fn mir_pass_inline_semantic(operation: MIRSemanticOp, maps: MIRInlineMaps, subst
             MIRSemanticOp.ReflectOf{type_name: type_name, path: path, display: mir_pass_inline_value(maps, display), fields: mapped}
         }
         .LayoutLiteral(inner) -> MIRSemanticOp.LayoutLiteral{inner: mir_pass_inline_value(maps, inner)}
-        .StructLiteral(type_id, fields, extra, trait_coercion, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra, trait_coercion: trait_coercion, boxed_fields: boxed_fields}
+        .StructLiteral(type_id, fields, extra, boxed_fields) -> MIRSemanticOp.StructLiteral{type_id: type_id, fields: mir_pass_inline_field_values(fields, maps), extra: extra, boxed_fields: boxed_fields}
         .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> MIRSemanticOp.CellGuardProject{map_call: map_call, split_call: split_call, guard: mir_pass_inline_value(maps, guard), paths: paths, editable: editable, edit_paths_disjoint: disjoint}
         .SharedGuardMap(call, guard, path, editable) -> MIRSemanticOp.SharedGuardMap{call: call, guard: mir_pass_inline_value(maps, guard), path: path, editable: editable}
         .SharedGuardSplit(call, map_call, guard, first, second, editable) -> MIRSemanticOp.SharedGuardSplit{call: call, map_call: map_call, guard: mir_pass_inline_value(maps, guard), first: first, second: second, editable: editable}

@@ -1,0 +1,11 @@
+# Original tests/services_runtime.rs:1068-1099; source and predicates preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+fixture: workflow_wait_methods_publish_typed_effects.fixture
+step: jet check main.jet
+exit: 0
+step: jet inspect rights main.jet --json
+exit: 0
+json: stdout doc $.callables[?name="time_wait"] #>= 1
+json: stdout doc $.callables[?name="time_wait"][0].effects.direct has "Time"
+json: stdout doc $.callables[?name="activity_wait"] #>= 1
+json: stdout doc $.callables[?name="activity_wait"][0].effects.direct has "IO"

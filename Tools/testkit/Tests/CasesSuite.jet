@@ -1,0 +1,153 @@
+use core.files as files
+use core.sys as sys
+use core.process as process
+
+fn cases_test_root(label: String) -> String {
+    path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-cases-{process.current_pid()}-{label}")
+    files.create_dir_all(path) ?? panic("case test scratch: {err}")
+    path
+}
+
+fn cases_test_context(root: String, scratch: String) -> KitCtx {
+    options :: kit_exec_defaults()
+    env :: KitEnv{root: root, scratch: scratch, jet: "/bin/sh", jetpack: "/bin/sh", timeout: 5s, memory_limit: 0}
+    KitCtx{options: options, env: env, root: root, scratch: scratch, bless: options.bless}
+}
+
+fn cases_test_entry(name: String) -> KitEntry {
+    path :: "tests/cases/group/{name}.case"
+    KitEntry{path: path, expected: path, project: "tests/cases/group", suite: "cases", mode: ""}
+}
+
+fn cases_test_source(root: String, name: String, text: String) {
+    kit_exec_write(files.join(root, cases_test_entry(name).path), text)
+}
+
+#Test("cases discovery recurses through groups and sorts repository relative ids") {
+    root :: cases_test_root("discovery")
+    cases_test_source(root, "z", "step: printf z\n")
+    cases_test_source(root, "a", "step: printf a\n")
+    kit_exec_write(files.join(root, "tests/cases/deeper/group/b.case"), "step: printf b\n")
+    kit_exec_write(files.join(root, "tests/cases/.hidden/hidden.case"), "step: printf hidden\n")
+    kit_exec_write(files.join(root, "tests/run/not-a-case.case"), "step: printf ignored\n")
+    kit_exec_write(files.join(root, "tests/cases/group/a.out"), "a")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    entries :: kit_cases_discover(context)
+    assert_eq(entries.map(entry -> entry.path), ["tests/cases/deeper/group/b.case", "tests/cases/group/a.case", "tests/cases/group/z.case"])
+    assert_eq(entries[1].suite, "cases")
+    assert_eq(entries[1].project, "tests/cases/group")
+    assert_eq(kit_cases_collect(root, "missing").len(), 0)
+    kit_exec_write(files.join(root, "Tools/testkit/retired-with-rust.tsv"), "# source-id and owner reason\n" + "tests/cases/group/a.case\tRetired with Rust: fixture compiler dependency.\nCompiler/JetBackend/Tests/FrontFeed.jet\tRetired with Rust: differential oracle.\n")
+    assert_eq(kit_cases_retired(root), ["tests/cases/group/a.case"])
+    active :: kit_cases_discover(context)
+    assert_eq(active.map(entry -> entry.path), ["tests/cases/deeper/group/b.case", "tests/cases/group/z.case"])
+    // The raw discovery still accounts for the retired authored file; only the
+    // canonical active corpus excludes the explicitly retired ID.
+    assert_eq(kit_cases_collect(root, "tests/cases").len(), 3)
+    files.remove_all(root) ?? panic("remove discovery scratch")
+}
+
+#Test("cases stage fixture state and execute sequential steps with files and stdin") {
+    root :: cases_test_root("execution")
+    directory :: files.join(root, "tests/cases/group")
+    // Programs are authored at runtime, never discovered as kit modules.
+    kit_exec_write(files.join(directory, "tree/main.jet"), "fn run() {{ print(\"fixture\") }}\n")
+    kit_exec_write(files.join(directory, "tree/state/receipt.txt"), "authored\n")
+    kit_exec_write(files.join(directory, "tree/.jet/ignored.txt"), "cache\n")
+    kit_exec_write(files.join(directory, "answers.stdin"), "two words\n")
+    kit_exec_write(files.join(directory, "answer.out"), "two words\n")
+    cases_test_source(root, "execute", "fixture: tree\nstep: jet -c 'cat > result.txt'\nstdin: answers.stdin\nfile: result.txt = answer.out\nfile: main.jet exists\nfile: .jet/receipt.txt exists\nfile: .jet/ignored.txt absent\nstdout: empty\nstderr: empty\nstep: jetpack -c 'cat result.txt'\nstdout: = answer.out\nstderr: empty\n")
+    scratch :: files.join(root, "scratch")
+    context :: cases_test_context(root, scratch)
+    outcomes :: kit_cases_run(cases_test_entry("execute"), context)
+    assert_eq(outcomes.len(), 1)
+    assert_eq(outcomes[0].tier, "-")
+    assert_eq(outcomes[0].verdict.status, "PASS")
+    assert_eq(outcomes[0].run.stdout, "two words\n")
+    files.remove_all(root) ?? panic("remove execution scratch")
+}
+
+#Test("cases expand environment tokens and normalize paths before exact comparison") {
+    root :: cases_test_root("tokens")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "paths.out"), "{{work}}\n{{root}}\n{{scratch}}\n")
+    cases_test_source(root, "tokens", "env: LOCATION={{work}}\nstep: jet -c 'printf \"%s\\\\n\" \"$LOCATION\" \"$1\" \"$2\"' scenario {{root}} {{scratch}}\nstdout: = paths.out\nstderr: empty\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    result :: kit_cases_run(cases_test_entry("tokens"), context)[0]
+    assert_eq(result.verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove token scratch")
+}
+
+#Test("cases host skips precede refusals and malformed scenarios do not spawn") {
+    root :: cases_test_root("refusals")
+    cases_test_source(root, "skip", "requires: os:not-{sys.family()}\nrefused: missing host capability\n")
+    cases_test_source(root, "refused", "requires: os:{sys.family()}\nrefused: missing host capability\n")
+    cases_test_source(root, "grammar", "step: jet -c 'exit 0'\nstdout: ~ unstable\n")
+    cases_test_source(root, "empty", "# empty case\n")
+    cases_test_source(root, "golden", "run: none\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("skip"), context)[0].verdict.status, "SKIP-HOST")
+    assert_eq(kit_cases_run(cases_test_entry("refused"), context)[0].verdict.detail, "missing host capability")
+    assert_eq(kit_cases_run(cases_test_entry("grammar"), context)[0].verdict.status, "REFUSED")
+    assert_eq(kit_cases_run(cases_test_entry("empty"), context)[0].verdict.status, "REFUSED")
+    assert_eq(kit_cases_run(cases_test_entry("golden"), context)[0].verdict.status, "REFUSED")
+    assert_eq(kit_cases_run(cases_test_entry("missing"), context)[0].verdict.status, "ERROR")
+    files.remove_all(root) ?? panic("remove refusal scratch")
+}
+
+#Test("cases preserve exact mismatch nonzero exit and stop after a failing step") {
+    root :: cases_test_root("failure")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "expected.out"), "wanted\n")
+    cases_test_source(root, "failure", "step: jet -c 'printf wrong'\nstdout: = expected.out\nstep: jet -c 'touch should-not-exist'\n")
+    cases_test_source(root, "nonzero", "step: jet -c 'exit 7'\nexit: nonzero\nstdout: empty\nstderr: empty\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    mismatch :: kit_cases_run(cases_test_entry("failure"), context)[0]
+    assert_eq(mismatch.verdict.status, "FAIL")
+    assert(mismatch.verdict.diff.contains("wanted"))
+    assert(!files.exists(files.join(context.scratch, "work/should-not-exist")))
+    nonzero :: kit_cases_run(cases_test_entry("nonzero"), context)[0]
+    assert_eq(nonzero.verdict.status, "PASS")
+    assert_eq(nonzero.run.code, 7)
+    files.remove_all(root) ?? panic("remove failure scratch")
+}
+
+#Test("cases one-of accepts exact alternatives and named blessing writes exact snapshots") {
+    root :: cases_test_root("bless")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "first.out"), "first")
+    kit_exec_write(files.join(directory, "second.out"), "second")
+    cases_test_source(root, "alternatives", "step: jet -c 'printf second'\nstdout: one-of first.out second.out # host-dependent result\n")
+    cases_test_source(root, "bless", "step: jet -c 'printf new'\nstdout: = new.out\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("alternatives"), context)[0].verdict.status, "PASS")
+    context.bless.ids = [cases_test_entry("alternatives").path]
+    assert_eq(kit_cases_run(cases_test_entry("alternatives"), context)[0].verdict.status, "REFUSED")
+    assert_eq(files.read(files.join(directory, "second.out")) ?? panic("second"), "second")
+    context.bless.ids = [cases_test_entry("bless").path]
+    assert_eq(kit_cases_run(cases_test_entry("bless"), context)[0].verdict.status, "PASS")
+    assert_eq(files.read(files.join(directory, "new.out")) ?? panic("new snapshot"), "new")
+    files.remove_all(root) ?? panic("remove bless scratch")
+}
+
+#Test("case known-failing headers and ledger preserve real failures and reject stale passes") {
+    root :: cases_test_root("known-failing")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 7'\n")
+    cases_test_source(root, "ledger", "step: jet -c 'exit 8'\n")
+    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "{cases_test_entry("ledger").path}\t#4866\towned case failure\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    header :: kit_cases_run(cases_test_entry("header"), context)[0]
+    assert_eq(header.verdict.status, "KNOWN-FAILING")
+    assert_eq(header.run.code, 7)
+    assert(header.verdict.detail.contains("#4865"))
+    assert_eq(kit_cases_run(cases_test_entry("ledger"), context)[0].verdict.status, "KNOWN-FAILING")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstep: jet -c 'exit 0'\n")
+    cases_test_source(root, "ledger", "step: jet -c 'exit 0'\n")
+    assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "UNEXPECTED-PASS")
+    assert_eq(kit_cases_run(cases_test_entry("ledger"), context)[0].verdict.status, "UNEXPECTED-PASS")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nrequires: os:not-{sys.family()}\nstep: jet -c 'exit 7'\n")
+    assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "SKIP-HOST")
+    cases_test_source(root, "header", "# KNOWN-FAILING #4865\nstdout: ~ invalid\n")
+    assert_eq(kit_cases_run(cases_test_entry("header"), context)[0].verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove known-failing case scratch")
+}

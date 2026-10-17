@@ -61,7 +61,7 @@ fn provider_packagist_parse_metadata(repository: String, name: String, raw: Stri
                         loop entry in require {
                             dependency_name :: entry.key
                             if dependency_name == "php" || dependency_name.starts_with("ext-") || dependency_name.starts_with("lib-") -> next
-                            if !ScriptRegistryKind.Packagist.valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
+                            if !(ScriptRegistryKind.Packagist).valid_name(dependency_name) -> return Err(RegistryError.Reason("package `{name}` has unsafe dependency `{dependency_name}`"))
                             requirement :: provider_script_json_str(entry.value)
                             &dependencies.push(RegistryDependency{name: dependency_name, requirement})
                         }
@@ -81,7 +81,7 @@ fn provider_packagist_parse_metadata(repository: String, name: String, raw: Stri
                         }
                         if autoload.get("psr-4") == {
                             .Val(mappings_value) -> {
-                                mappings :: pkg_json_object(mappings_value) ?? [String: DataTree]{}
+                                mappings :: pkg_json_object(mappings_value) ?? [String: Dyn]{}
                                 loop mapping in mappings {
                                     paths :: provider_packagist_psr4_paths(mapping.value)
                                     if provider_script_has_nul(mapping.key) || paths.len() == 0 -> return Err(RegistryError.Reason("unsafe PSR-4 autoload path"))
@@ -107,7 +107,7 @@ fn provider_packagist_parse_metadata(repository: String, name: String, raw: Stri
 }
 
 // A PSR-4 target: one string or an ordered string list.
-fn provider_packagist_psr4_paths(value: DataTree) -> [String] RegistryError! {
+fn provider_packagist_psr4_paths(value: Dyn) -> [String] RegistryError! {
     if value == {
         .Text(path) -> Ok([String]{path})
         .Array(items) -> {
@@ -121,20 +121,20 @@ fn provider_packagist_psr4_paths(value: DataTree) -> [String] RegistryError! {
 
 // Composer v2 minified metadata: each release lists only the fields that
 // changed from the previous one, and `"__unset"` removes a field.
-fn provider_packagist_expand_releases(metadata: DataTree, releases: [DataTree]) -> [DataTree] RegistryError! {
+fn provider_packagist_expand_releases(metadata: Dyn, releases: [Dyn]) -> [Dyn] RegistryError! {
     minified :: if provider_script_json_field(metadata, "minified") == {
         .Val(value) -> pkg_json_text(value)
         .None -> None
     }
     format :: minified ?? return Ok(releases)
     if format != "composer/2.0" -> return Err(RegistryError.Reason("unsupported Packagist metadata minifier"))
-    expanded := [DataTree]{}
-    previous := [(key: String, value: DataTree)]{}
+    expanded := [Dyn]{}
+    previous := [(key: String, value: Dyn)]{}
     loop release in releases {
         changes :: pkg_json_object(release) ?? return Err(RegistryError.Reason("invalid minified release: {PKG_JSON_NOT_OBJECT}"))
         loop change in changes {
             unset :: (pkg_json_text(change.value) ?? "") == "__unset"
-            next_fields := [(key: String, value: DataTree)]{}
+            next_fields := [(key: String, value: Dyn)]{}
             replaced := false
             loop field in previous {
                 if field.key == change.key {
@@ -149,9 +149,9 @@ fn provider_packagist_expand_releases(metadata: DataTree, releases: [DataTree]) 
             if !unset && !replaced -> &next_fields.push((key: change.key, value: change.value))
             previous = next_fields
         }
-        object := [String: DataTree]{}
+        object := [String: Dyn]{}
         loop field in previous -> object[field.key] = field.value
-        &expanded.push(DataTree.Object(object))
+        &expanded.push(Dyn.Object(object))
     }
     Ok(expanded)
 }
@@ -159,7 +159,7 @@ fn provider_packagist_expand_releases(metadata: DataTree, releases: [DataTree]) 
 // The GitHub repository a digestless zipball comes from, when the release's
 // `source` names the same full commit and the dist URL is exactly that
 // repository's zipball of it.
-fn provider_packagist_verified_git_source(release: DataTree, dist_url: String, reference: String) -> String? Never! {
+fn provider_packagist_verified_git_source(release: Dyn, dist_url: String, reference: String) -> String? Never! {
     width :: reference.bytes().len()
     if (width != 40 && width != 64) || !provider_registry_valid_hex(reference, width) -> return None
     source :: provider_script_json_field(release, "source") ?? return None

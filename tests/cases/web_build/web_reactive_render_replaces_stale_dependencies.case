@@ -1,0 +1,15 @@
+# HAND-PORT tests/web_build.rs:4138-4167 web_reactive_render_replaces_stale_dependencies
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates and exact runtime oracles retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_reactive_render_replaces_stale_dependencies.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_reactive_render_replaces_stale_dependencies.stdout.expected

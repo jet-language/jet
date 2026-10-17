@@ -1,0 +1,19 @@
+enum HTTP {
+    Good(Int)
+    Fail(Int)
+}
+fn classify(r: HTTP) -> String {
+    if r == {
+        .Good(200..299) -> { return "success" }
+        .Good(400..499) -> { return "client error" }
+        .Good(_) -> { return "other" }
+        .Fail(_) -> { return "network error" }
+    }
+    return "unknown"
+}
+fn run() {
+    print(classify(HTTP.Good(201)))
+    print(classify(HTTP.Good(404)))
+    print(classify(HTTP.Good(302)))
+    print(classify(HTTP.Fail(0)))
+}

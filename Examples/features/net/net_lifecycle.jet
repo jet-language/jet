@@ -37,13 +37,13 @@ fn run() {
     client :: net.tcp_connect_addr(address) ?? panic("connect")
     server :: net.tcp_accept(listener) ?? panic("accept")
     client.write_text("ping") ?? panic("client write")
-    net.tcp_shutdown(client, NetShutdown.Write) ?? panic("shutdown")
-    first :: net.tcp_read_text(server, 64) ?? panic("server read")
+    net.tcp_shutdown(&client, NetShutdown.Write) ?? panic("shutdown")
+    first :: net.tcp_read_text(&server, 64) ?? panic("server read")
     print("tcp server read:{first}")
-    eof :: net.tcp_read_text(server, 64) ?? panic("server eof read")
+    eof :: net.tcp_read_text(&server, 64) ?? panic("server eof read")
     print("tcp server after half-close:[{eof}]")
     server.write_text("pong") ?? panic("server write")
-    reply :: net.tcp_read_text(client, 64) ?? panic("client read")
+    reply :: net.tcp_read_text(&client, 64) ?? panic("client read")
     print("tcp client still reads:{reply}")
 
     // Deadline: nothing more will arrive on the client, so readiness times out.

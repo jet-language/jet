@@ -1,0 +1,21 @@
+
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["sh", "-c", "while true; do sleep 1; done"])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .cwd("/tmp")
+        .under(policy)
+    if spec.spawn() == {
+        .Ok(child) -> {
+            child.kill() ?? panic("authority-bound cancellation failed")
+            receipt :: child.wait() ?? panic("cancelled child did not reap")
+            print(receipt.success)
+            print(receipt.timed_out)
+            print(receipt.descendants)
+        }
+        .Err(_) -> print("unsupported")
+    }
+}

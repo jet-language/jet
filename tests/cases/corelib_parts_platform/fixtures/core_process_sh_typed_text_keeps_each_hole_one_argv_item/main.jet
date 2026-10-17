@@ -1,0 +1,17 @@
+
+use core.process as process
+
+fn run() -[Exec, Time.Wait]> {
+    hostile :: "two words;*.jet"
+    first_spec :: process.cmd(["printf", "<%s>", hostile])
+    first :: process.run_spec(first_spec) ?? panic("typed-head command failed")
+    print(first.output)
+
+    second_spec :: process.cmd(["printf", "[%s]", hostile])
+    second :: process.run_spec(second_spec) ?? panic("second typed-head failed")
+    print(second.output)
+
+    audited :: process.cmd(["printf", "raw"])
+    third :: process.run_spec(audited) ?? panic("raw command failed")
+    print(third.output)
+}

@@ -4,9 +4,9 @@
 // per-phase report over their JET_TRACE_FILE traces.
 //
 //   ladder.mjs rungs SOURCE_TREE RUNGS_DIR
-//     For L1..L4, a private tree holding only the rung's packages (hard links
-//     to SOURCE_TREE's files), SOURCE_TREE's own assemble.mjs, the
-//     sources.list filtered to those packages in their canonical order, and
+//     For L1..L4, a private tree holding the rung's packages and the manifest's
+//     shared sources (independent copies of SOURCE_TREE's files), SOURCE_TREE's own
+//     assemble.mjs, sources.list filtered in its canonical order, and
 //     an anchor file (Compiler/Bootstrap/Host/LadderAnchor.jet, outside the
 //     inventory like Host/Entry.jet); that tree's assemble.mjs writes
 //     RUNGS_DIR/<rung>/project (package.jet + src/compiler.jet) and
@@ -23,7 +23,7 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
 import {
-  copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync,
+  constants, copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -85,8 +85,8 @@ fn jet_ladder_optimizer_complete(program: &MIRProgram) -> Bool {
 `,
   codegen: `use jet_codegen.[JetRustEmitConfig, JetRustEmitResult, jet_rust_emit_program, lower_functions]
 
-fn jet_ladder_codegen_lower(functions: [TFunc], modules: [SemaGraphModuleResult], source_files: [MIRSourceFile]) -> Int {
-    lower_functions(functions, modules, source_files, None).functions.len()
+fn jet_ladder_codegen_lower(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> Int {
+    lower_functions(&functions, &modules, source_files, compiler_threads_single(), None, false).functions.len()
 }
 
 fn jet_ladder_codegen_emit(program: MIRProgram, config: JetRustEmitConfig) -> Bool {
@@ -129,11 +129,9 @@ function assemble(tree, dir) {
 
 function place(source, target) {
   mkdirSync(dirname(target), { recursive: true });
-  try {
-    linkSync(source, target);
-  } catch {
-    copyFileSync(source, target);
-  }
+  // A rung must not add writable aliases to package authority sources.
+  // Prefer copy-on-write extents where available, but always a fresh inode.
+  copyFileSync(source, target, constants.COPYFILE_FICLONE);
 }
 
 function rungs(sourceTree, rungsDir) {
@@ -158,11 +156,23 @@ function rungs(sourceTree, rungsDir) {
     } else {
       const tree = join(dir, "tree");
       rmSync(tree, { recursive: true, force: true });
-      const selected = listed.filter((path) => rung.packages.some((pkg) => path.startsWith(`Compiler/${pkg}/`)));
+      // Manifest entries outside Compiler/ are shared source dependencies,
+      // including Jetpack's canonical Syntax constants; keep that closure.
+      const selected = listed.filter((path) => !path.startsWith("Compiler/") || rung.packages.some((pkg) => path.startsWith(`Compiler/${pkg}/`)));
       if (selected.length === 0) fail(`${rung.name}: no sources for ${rung.packages.join(",")}`);
       for (const root of sourceRoots) mkdirSync(join(tree, root), { recursive: true });
       for (const path of selected) place(join(src, path), join(tree, path));
       copyFileSync(assembler, join(tree, "Compiler/Bootstrap/assemble.mjs"));
+      // Assembly checks the inventory boundary and generates MIR observation
+      // helpers even for partial trees; these files add no rung sources.
+      for (const metadata of [
+        "Compiler/JetRuntime/sources.list",
+        "Compiler/JetBackend/Tests/mir-debug.mjs",
+        "Compiler/JetBackend/Tests/front-feed-codec.mjs",
+      ]) {
+        mkdirSync(dirname(join(tree, metadata)), { recursive: true });
+        copyFileSync(join(src, metadata), join(tree, metadata));
+      }
       const anchor = [
         `// Ladder rung ${rung.name} anchor (stage1/ladder.mjs): the rung's counterpart of Host/Entry.jet.`,
         `// Packages: ${rung.packages.join(", ")}.`,

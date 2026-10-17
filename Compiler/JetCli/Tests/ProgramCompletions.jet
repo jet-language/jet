@@ -1,0 +1,35 @@
+use jet_foundation.[CLICommandSchema, CLIInputSchema, CLIInputShape, CLISubcommandSchema, JobFact]
+
+fn program_completion_require(ok: Bool, label: String) Never! {
+    if !ok -> panic("program completion contract: {label}")
+}
+
+fn run() {
+    schema := CLICommandSchema{entry_type: "Args", description: None, inputs: [CLIInputSchema]{}, commands: [CLISubcommandSchema]{}, jobs: [JobFact]{}, standard: false, version: None}
+    bash :: jet_cli_program_completions("bash", "greeter", schema) ?? panic("bash supported")
+    program_completion_require(bash == "# bash completion from JetCommandSchema v8\n__jet_program_completion() {{\n    local cur\n    COMPREPLY=()\n    cur=\"${{COMP_WORDS[COMP_CWORD]}}\"\n    COMPREPLY=( $(compgen -W '--help' -- \"$cur\") )\n}}\ncomplete -F __jet_program_completion -- 'greeter'\n", "plain bash exact captured bytes")
+    zsh :: jet_cli_program_completions("zsh", "greeter", schema) ?? panic("zsh supported")
+    program_completion_require(zsh == "#compdef 'greeter'\n# zsh completion from JetCommandSchema v8\n_arguments \\\n    '--help[show help]'\n", "plain zsh exact captured bytes")
+    program_completion_require(jet_cli_program_completions("unknown", "greeter", schema) == None, "unsupported shell")
+    input :: CLIInputSchema{field: "name", flag: "name", short: None, env: None, help: "person to greet", metavar: Val("NAME"), shape: CLIInputShape.Value{kind: .String, optional: false, default: None}, positional: Val(U16{0})}
+    schema.inputs = [CLIInputSchema]{input}
+    input_zsh :: jet_cli_program_completions("zsh", "greeter", schema) ?? panic("input zsh supported")
+    program_completion_require(input_zsh.contains("':name:person to greet'") && input_zsh.contains("'--name[person to greet]:name:'"), "canonical lowercase metavars for positional and flag inputs")
+    fish :: jet_cli_program_completions("fish", "greeter'odd", schema) ?? panic("fish supported")
+    program_completion_require(fish == "# fish completion from JetCommandSchema v8\ncomplete -c 'greeter'\\''odd' -l help -d 'show help'\ncomplete -c 'greeter'\\''odd' -l name -d 'person to greet' -r\n", "quoted fish and value marker")
+    schema.standard = true
+    schema.version = Val("1.2.3")
+    schema.commands = [CLISubcommandSchema]{CLISubcommandSchema{name: "serve", description: None, inputs: [CLIInputSchema]{}}}
+    standard_zsh :: jet_cli_program_completions("zsh", "greeter", schema) ?? panic("standard zsh supported")
+    program_completion_require(standard_zsh.contains("'(-v --verbose){{-v,--verbose}}[print extra detail]'") && standard_zsh.contains("'(-q --quiet){{-q,--quiet}}[suppress normal output]'"), "standard zsh groups preserve literal shell braces")
+    shell :: jet_cli_program_completions("powershell", "greeter", schema) ?? panic("PowerShell supported")
+    program_completion_require(shell.contains("'--verbose','-v','--quiet','-q','--color','--version'") && shell.contains("'serve' = @('--help')") && shell.contains("$commandFlags.ContainsKey($selected)"), "standard and command inputs use canonical carrier")
+    program_completion_require(jet_cli_program_completion_name("build/greeter/.") == (Val("greeter")), "basename components")
+    program_completion_require(jet_cli_program_completion_name("/") == None && jet_cli_program_completion_name("..") == None, "no usable basename")
+    program_completion_require(jet_cli_program_completion_name_control("safe\nINJECT") && !jet_cli_program_completion_name_control("épreuve"), "Unicode control classification")
+    if jet_cli_program_completion_error("épreuve\n", "bad metadata") == .Done(output) {
+        program_completion_require(output.stdout == "" && output.exit_code == 1 && output.stderr.contains("`\\u{{e9}}preuve\\n`"), "Rust escape_default, stderr and status")
+    } else {
+        panic("metadata error must be direct diagnostic")
+    }
+}

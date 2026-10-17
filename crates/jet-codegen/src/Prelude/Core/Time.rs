@@ -208,8 +208,8 @@ impl JetDate {
         let date = monday.add_days((week - 1).saturating_mul(7).saturating_add(weekday - 1));
         (date.iso_week_year() == year && date.iso_week() == week).then_some(date)
     }
-    pub(crate) fn truncate(&self, unit: &String) -> JetDate {
-        match unit.as_str() {
+    pub(crate) fn truncate(&self, unit: &str) -> JetDate {
+        match unit {
             "year" => JetDate::new(self.year, 1, 1),
             "month" => JetDate::new(self.year, self.month, 1),
             _ => self.clone(),
@@ -271,10 +271,10 @@ impl JetDate {
     ) -> i64 {
         other.until_ns(self, largest_unit, smallest_unit, rounding_mode, increment)
     }
-    pub(crate) fn format_pattern(&self, pattern: &String) -> String {
+    pub(crate) fn format_pattern(&self, pattern: &str) -> String {
         jet_time_format_pattern(pattern, self, &JetLocalTime::new(0, 0, 0), None)
     }
-    pub(crate) fn format_checked(&self, pattern: &String) -> Result<String, String> {
+    pub(crate) fn format_checked(&self, pattern: &str) -> Result<String, String> {
         jet_time_format_pattern_checked(pattern, self, &JetLocalTime::new(0, 0, 0), None)
     }
     pub(crate) fn to_string_fmt(&self) -> String {
@@ -460,13 +460,13 @@ impl JetLocalTime {
     pub(crate) fn ceil_with(&self, unit: &str, increment: i64) -> JetLocalTime {
         self.round_with(unit, increment, "ceil")
     }
-    pub(crate) fn round(&self, unit: &String) -> JetLocalTime {
+    pub(crate) fn round(&self, unit: &str) -> JetLocalTime {
         self.round_with(unit, 1, "half_expand")
     }
-    pub(crate) fn format_pattern(&self, pattern: &String) -> String {
+    pub(crate) fn format_pattern(&self, pattern: &str) -> String {
         jet_time_format_pattern(pattern, &JetDate::new(1970, 1, 1), self, None)
     }
-    pub(crate) fn format_checked(&self, pattern: &String) -> Result<String, String> {
+    pub(crate) fn format_checked(&self, pattern: &str) -> Result<String, String> {
         jet_time_format_pattern_checked(pattern, &JetDate::new(1970, 1, 1), self, None)
     }
     pub(crate) fn to_string_fmt(&self) -> String {
@@ -799,9 +799,9 @@ impl JetDateTime {
         )
     }
     pub(crate) fn now() -> Self {
-        // Keep host nanosecond precision outside a world. A controlled world
-        // intentionally exposes its millisecond wall-clock origin.
-        if let Some(millis) = jet_scheduler_world_now_ms() {
+        // Replay and controlled worlds share the wall-clock provider with
+        // deadlines. Uncontrolled host reads retain nanosecond precision.
+        if let Some(millis) = jet_scheduler_world_now_ms().or_else(jet_time_wall_override_ms) {
             return JetDateTime {
                 secs: millis.div_euclid(1_000),
                 nanos: millis.rem_euclid(1_000) as u32 * 1_000_000,
@@ -944,10 +944,10 @@ impl JetDateTime {
             )
         }
     }
-    pub(crate) fn format_pattern(&self, pattern: &String) -> String {
+    pub(crate) fn format_pattern(&self, pattern: &str) -> String {
         jet_time_format_pattern(pattern, &self.date(), &self.time_for_output(), None)
     }
-    pub(crate) fn format_checked(&self, pattern: &String) -> Result<String, String> {
+    pub(crate) fn format_checked(&self, pattern: &str) -> Result<String, String> {
         jet_time_format_pattern_checked(pattern, &self.date(), &self.time_for_output(), None)
     }
     pub(crate) fn plus_duration_ns(&self, ns: i64) -> JetDateTime {
@@ -1053,8 +1053,8 @@ impl JetDateTime {
     ) -> i64 {
         other.until_ns(self, largest_unit, smallest_unit, rounding_mode, increment)
     }
-    pub(crate) fn truncate(&self, unit: &String) -> JetDateTime {
-        match unit.as_str() {
+    pub(crate) fn truncate(&self, unit: &str) -> JetDateTime {
+        match unit {
             "day" => JetDateTime {
                 secs: self.secs.div_euclid(86400) * 86400,
                 nanos: 0,
@@ -1088,15 +1088,15 @@ impl JetDateTime {
             _ => self.clone(),
         }
     }
-    pub(crate) fn floor(&self, unit: &String) -> JetDateTime {
+    pub(crate) fn floor(&self, unit: &str) -> JetDateTime {
         self.truncate(unit)
     }
-    pub(crate) fn ceil(&self, unit: &String) -> JetDateTime {
+    pub(crate) fn ceil(&self, unit: &str) -> JetDateTime {
         let floored = self.truncate(unit);
         if &floored == self {
             return floored;
         }
-        match unit.as_str() {
+        match unit {
             "day" => floored.plus_duration_ns(86400 * 1_000_000_000),
             "hour" => floored.plus_duration_ns(3600 * 1_000_000_000),
             "minute" => floored.plus_duration_ns(60 * 1_000_000_000),
@@ -1106,7 +1106,7 @@ impl JetDateTime {
             _ => self.clone(),
         }
     }
-    pub(crate) fn round(&self, unit: &String) -> JetDateTime {
+    pub(crate) fn round(&self, unit: &str) -> JetDateTime {
         self.round_with(unit, 1, "half_expand")
     }
     pub(crate) fn round_with(&self, unit: &str, increment: i64, mode: &str) -> JetDateTime {
@@ -1183,9 +1183,20 @@ impl JetZone {
             }],
         }
     }
-    pub(crate) fn named(name: &String) -> Result<Self, String> {
+    pub(crate) fn named(name: &str) -> Result<Self, String> {
         if name == "UTC" || name == "Etc/UTC" || name == "Z" {
             return Ok(Self::utc());
+        }
+        if name.starts_with('+') || name.starts_with('-') {
+            if name.len() != 6 || name.as_bytes()[3] != b':' {
+                return Err(format!("invalid fixed time zone offset: {name}"));
+            }
+            let offset = jet_time_parse_offset(name)?;
+            if offset == 0 { return Ok(Self::utc()); }
+            return Ok(Self {
+                name: name.to_owned(), transitions: Vec::new(),
+                infos: vec![JetTtInfo { offset, is_dst: false }],
+            });
         }
         if name.contains("..") || name.starts_with('/') || name.starts_with('\\') {
             return Err(format!("invalid time zone name: {}", name));
@@ -1195,7 +1206,7 @@ impl JetZone {
             .trim_start_matches("right/");
         #[cfg(target_arch = "wasm32")]
         if let Some(bytes) = jet_time_embedded_zone_bytes(rel) {
-            return Self::parse_tzif(name.clone(), bytes);
+            return Self::parse_tzif(name.to_owned(), bytes);
         }
         let mut roots = Vec::new();
         if let Some(dir) = std::env::var_os("JET_TZDB_DIR") {
@@ -1214,7 +1225,7 @@ impl JetZone {
         for base in roots {
             let path = base.join(rel);
             if let Ok(bytes) = std::fs::read(&path) {
-                return Self::parse_tzif(name.clone(), &bytes);
+                return Self::parse_tzif(name.to_owned(), &bytes);
             }
         }
         Err(format!(
@@ -1499,15 +1510,11 @@ impl Ord for JetZonedDateTime {
 
 impl JetZonedDateTime {
     fn display_parts(&self) -> (JetDate, JetLocalTime, i64) {
-        if self.instant.leap_second && self.zone.name == "UTC" {
-            (
-                self.instant.date(),
-                self.instant.time_for_output(),
-                0,
-            )
-        } else {
-            self.zone.local_parts(self.instant.to_timestamp())
-        }
+        let offset = self.zone.offset_at_utc(self.instant.unix_seconds_anchor());
+        let local = JetDateTime::from_timestamp_ns_with_leap(
+            self.instant.unix_seconds_anchor().saturating_add(offset),
+            self.instant.nanos, self.instant.leap_second);
+        (local.date(), local.time_for_output(), offset)
     }
     pub(crate) fn now(zone: &JetZone) -> Self {
         JetDateTime::now().in_zone(zone)
@@ -1539,7 +1546,7 @@ impl JetZonedDateTime {
         let (datetime_text, zone_name) = head
             .rsplit_once('[')
             .ok_or_else(|| format!("RFC9557 datetime needs a [zone]: {}", value))?;
-        let zone = JetZone::named(&zone_name.to_string())?;
+        let zone = JetZone::named(zone_name)?;
         let (date_text, rest) = datetime_text
             .split_once('T')
             .ok_or_else(|| format!("invalid RFC9557 datetime: {}", value))?;
@@ -1657,7 +1664,7 @@ impl JetZonedDateTime {
     pub(crate) fn hours_in_day(&self) -> i64 {
         self.zone.hours_in_day(&self.date())
     }
-    pub(crate) fn format_pattern(&self, pattern: &String) -> String {
+    pub(crate) fn format_pattern(&self, pattern: &str) -> String {
         let date = self.date();
         let time = self.time();
         jet_time_format_pattern(
@@ -1667,7 +1674,7 @@ impl JetZonedDateTime {
             Some((&self.zone, self.offset_seconds())),
         )
     }
-    pub(crate) fn format_checked(&self, pattern: &String) -> Result<String, String> {
+    pub(crate) fn format_checked(&self, pattern: &str) -> Result<String, String> {
         let date = self.date();
         let time = self.time();
         jet_time_format_pattern_checked(
@@ -1766,12 +1773,12 @@ fn jet_time_year_string(year: i64) -> String {
 }
 
 pub(crate) fn jet_time_format_pattern(
-    pattern: &String,
+    pattern: &str,
     date: &JetDate,
     time: &JetLocalTime,
     zone: Option<(&JetZone, i64)>,
 ) -> String {
-    let mut out = pattern.clone();
+    let mut out = pattern.to_owned();
     let weekday_index = (date.iso_weekday() - 1) as usize;
     let weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][weekday_index];
     let weekday_full = [
@@ -1871,7 +1878,7 @@ pub(crate) fn jet_time_format_pattern(
 /// formatter. Quoted text is protected from token replacement, so the checked
 /// route cannot silently turn a typo into literal output.
 pub(crate) fn jet_time_format_pattern_checked(
-    pattern: &String,
+    pattern: &str,
     date: &JetDate,
     time: &JetLocalTime,
     zone: Option<(&JetZone, i64)>,
@@ -2006,7 +2013,7 @@ pub(crate) fn jet_time_format_pattern_checked(
 // The public Core call and every evaluator route use this one Prelude symbol.
 // Keeping the wrapper beside `JetDateTime` lets the evaluator reuse the exact
 // parser without importing the larger time-surface fragment.
-pub(crate) fn jet_time_parse_rfc3339(s: &String) -> Result<JetDateTime, String> {
+pub(crate) fn jet_time_parse_rfc3339(s: &str) -> Result<JetDateTime, String> {
     JetDateTime::parse_rfc3339(s)
 }
 
@@ -2019,6 +2026,6 @@ pub(crate) fn jet_time_from_iso_week(
         .ok_or_else(|| format!("ISO week date out of range: {year}-W{week:02}-{weekday}"))
 }
 
-pub(crate) fn jet_time_parse_zoned(s: &String) -> Result<JetZonedDateTime, String> {
+pub(crate) fn jet_time_parse_zoned(s: &str) -> Result<JetZonedDateTime, String> {
     JetZonedDateTime::from_rfc9557(s)
 }

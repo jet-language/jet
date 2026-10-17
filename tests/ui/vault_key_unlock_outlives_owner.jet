@@ -1,0 +1,15 @@
+// KeyUnlock owner-lifetime negative: E2305 snapshot UNOBSERVED until first real fixture run.
+use core.crypto as crypto
+use core.crypto.vault as vault
+
+fn escape() -> vault.KeyUnlock {
+    bytes := [U8]{}
+    loop _ in 0..<32 -> &bytes.push(U8{1})
+    identity :: crypto.X25519SecretKey.from_bytes(^bytes) ?? panic("fixture key rejected")
+    unlock :: vault.KeyUnlock.Recipient(&identity)
+    return unlock
+}
+
+fn run() {
+    escape().drop("only the borrowed KeyUnlock escape is under test")
+}

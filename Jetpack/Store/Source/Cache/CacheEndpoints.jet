@@ -13,18 +13,18 @@ STORE_CACHE_STDERR_LIMIT :: prep { 4096 }
 
 // What an endpoint can do. `credential_required` endpoints need an explicit
 // typed credential provider; none may execute remote commands.
-pub struct CacheEndpointCapabilities {
-    pub read: Bool
-    pub write: Bool
-    pub promote: Bool
-    pub remote_execute: Bool
-    pub trust: Bool
-    pub credential: Bool
-    pub credential_required: Bool
+struct CacheEndpointCapabilities {
+    read: Bool
+    write: Bool
+    promote: Bool
+    remote_execute: Bool
+    trust: Bool
+    credential: Bool
+    credential_required: Bool
 }
 
 // One parsed cache mirror.
-pub enum CacheEndpoint {
+enum CacheEndpoint {
     Local(String)
     HTTP(String)
     SSH(target: String, root: String)
@@ -434,7 +434,7 @@ fn store_cache_bounded_stderr(text: String) -> String Never! {
     // back off to its lead byte and render the partial scalar as U+FFFD,
     // as Rust's lossy decoding does.
     end := STORE_CACHE_STDERR_LIMIT
-    loop end > 0 && (Int.from_u8(raw[end]) & 0xC0) == 0x80 -> end -= 1
+    loop end > 0 && ((Int.from_u8(raw[end])).bit_and(0xC0)) == 0x80 -> end -= 1
     kept :: pkg_bytes_text(raw, 0, end)
     if end == STORE_CACHE_STDERR_LIMIT -> return kept.trim()
     "{kept}�".trim()

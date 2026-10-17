@@ -1,0 +1,30 @@
+# Port of tests/generics.rs::generic_modules_complete_instantiation (302-445 plushelpers505-632); all original source bytes/assertions retained.
+# PENDING-GRAMMAR(batch4 semantic-index nested filters/distinct/projection); runtime PENDING-SAME-HEAD.
+# ORACLE-LITERAL nested stdout rs575; semantic index is the public projection of original API facts.
+fixture: complete.fixture
+step: jet check compile/complete.jet
+exit: 0
+step: jet check compile/nested.jet
+exit: 0
+step: jet check compile/body_items.jet
+exit: 0
+step: jet check compile/distinct_names.jet
+exit: 0
+step: jet inspect semindex identity/main.jet --json
+exit: 0
+json: stdout doc $.semindex.instances #= 4
+json: stdout doc $.semindex.instances[?applications[*].name="first"].applications[*].name = ["first","equivalent"]
+json: stdout doc $.semindex.instances[*].full_key #distinct= 4 # original predicate
+step: jet check nested/main.jet
+exit: 0
+step: jet inspect semindex nested/main.jet --json
+exit: 0
+json: stdout doc $.semindex.instances #= 2
+json: stdout doc $.semindex.instances[?applications[*].name="selected_plain_closed"].applications[*].name = ["selected_plain_closed","selected_plain_forwarded"]
+step: jet run {work}/nested/main.jet
+exit: 0
+stdout: = nested.out
+step: jet inspect semindex values/main.jet --json
+exit: 0
+json: stdout doc $.semindex.instances #= 6
+json: stdout doc $.semindex.instances[?applications[*].name="same"].applications[*].name = ["same","equivalent"]

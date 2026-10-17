@@ -67,12 +67,12 @@ PKG_PWSH_JET_TYPES :: prep { ```}
 use c.@@abi@@ as abi
 use core.encoding.json as json
 
-pub struct Session {
+struct Session {
     value: Int
 }
 
 #Error
-pub enum PowerShellError {
+enum PowerShellError {
     NotRunning
     Timeout
     Cancelled
@@ -87,15 +87,15 @@ PKG_PWSH_JET_SESSION :: prep { ```impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) {}
+fn close(session: ^Session) {}
 
-pub fn open() -> Session PowerShellError! {
+fn open() -> Session PowerShellError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
 ``` }
 
@@ -110,7 +110,7 @@ struct PwshBoundFunction {
 }
 
 // Bind the top-level functions of the PowerShell script at `path`.
-pub fn pkg_powershell_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+fn pkg_powershell_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
     language :: WorkerLanguage.PowerShell
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
@@ -175,13 +175,13 @@ fn pkg_powershell_render_jet(lib: String, functions: [PwshBoundFunction]) -> Str
     &out.push(pkg_render_decode_response("PowerShellError", DecoderProtocol.StandardEnvelope))
     &out.push(PKG_PWSH_JET_SESSION)
     loop function in functions {
-        &out.push("pub fn {function.jet}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{\n    raw :: abi.{function.jet}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {function.jet}(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PowerShellError! {{\n    payload :: json.to_string(input) ?? return Err(PowerShellError.Protocol)\n    raw :: abi.{function.jet}(session.value, payload, deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
 
 // The generated surface for the binder registry's rendering probe.
-pub fn pkg_powershell_render_probe() -> String Never! {
+fn pkg_powershell_render_probe() -> String Never! {
     pkg_powershell_render_jet("registry", [PwshBoundFunction]{PwshBoundFunction{pwsh: "Transform", jet: "transform"}})
 }
 

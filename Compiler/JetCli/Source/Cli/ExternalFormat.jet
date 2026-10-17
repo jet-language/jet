@@ -1,0 +1,50 @@
+// The post-child continuation of CmdCompile.rs run_external_fmt. The env
+// child must return: EngineDispatch's Unix exec shortcut loses this work (#4733).
+use core.files as cli_files
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+use jet_parser.jet_format_unified_diff
+
+// Decode only when a diff was selected. External formatters operate on bytes;
+// invalid UTF-8 is displayed with replacement characters, never as empty text.
+fn jet_cli_external_fmt_diff(path: String, before: [U8], after: [U8]) -> String Never! {
+    jet_format_unified_diff(path, String.from_bytes_lossy(before), String.from_bytes_lossy(after))
+}
+
+// Collect every staged output before publishing anything. Check/diff never
+// writes originals; ordinary mode publishes changed bytes in input order and
+// retains preceding writes if a subsequent write fails, like the Rust contract.
+fn jet_cli_external_fmt_finish(project_dir: String, files: [String], staged: [String], befores: [[U8]], check_only: Bool, show_diff: Bool, json: Bool, color: Bool) -> JetDriverVerbOutput {
+    changed := [Int]{}
+    afters := [[U8]]{}
+    loop index in 0..<files.len() {
+        after :: cli_files.read_bytes(staged[index]) ?? return jet_cli_external_fmt_fail("E1340", "environment formatter did not produce readable output", jet_cli_io_error_text(err), "check the formatter package and retry", color, JET_DRIVER_EXIT_USER_ERROR)
+        if befores[index] != after -> &changed.push(index)
+        &afters.push(after)
+    }
+    if changed.len() == 0 -> return jet_cli_external_fmt_ok(json)
+    if check_only {
+        stdout := ""
+        entries := [JetCLIStatusValue]{}
+        loop index in changed {
+            path :: jet_cli_fmt_relative(files[index], project_dir)
+            if json {
+                if show_diff {
+                    diff :: jet_cli_external_fmt_diff(path, befores[index], afters[index])
+                    &entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
+                } else {
+                    &entries.push(jet_cli_status_text(path))
+                }
+            } else {
+                stdout = "{stdout}{path}\n"
+                if show_diff -> stdout = "{stdout}{jet_cli_external_fmt_diff(path, befores[index], afters[index])}"
+            }
+        }
+        if json -> stdout = jet_cli_external_fmt_status("dirty", Val(entries))
+        return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    loop index in changed {
+        path :: files[index]
+        cli_files.write_bytes(path, afters[index]) ?? return jet_cli_external_fmt_fail("E1340", "could not write `{path}`", jet_cli_io_error_text(err), "fix the file permissions and rerun the formatter", color, JET_DRIVER_EXIT_USAGE)
+    }
+    jet_cli_external_fmt_ok(json)
+}

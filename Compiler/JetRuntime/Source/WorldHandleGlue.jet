@@ -1,0 +1,12 @@
+// CAbiRoutes1655-1665 delegates seed Clone/Drop. Scheduler.rs1301-1305
+// derives Clone over Arc<Mutex<JetWorldState>> and Arc<Condvar>: clones share
+// state, never deep-copy it. The existing native producer World.jet18/425
+// owns World128 refs0; its callbacks and all world routes use this pointer.
+// Core head02ffaf12a Core.jet186 registers only Fake as a source testing type;
+// DeterministicWorld remains runtime-owned. Reuse the existing native leases.
+#Export(c) fn jet_rt_handle_clone_jet_deterministic_world(value: I64) -> I64 {
+    jet_rt_world_clone(value)
+}
+#Export(c) fn jet_rt_handle_drop_jet_deterministic_world(value: I64) {
+    jet_rt_world_drop(value)
+}

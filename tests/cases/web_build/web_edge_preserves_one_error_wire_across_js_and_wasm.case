@@ -1,0 +1,75 @@
+# HAND-PORT tests/web_build.rs:2609-2919 web_edge_preserves_one_error_wire_across_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# PENDING-SAME-HEAD
+# volatile: possible original path mismatch (main.jet vs default_err_edge.jet)
+# All original native report equality, JS/Wasm typed-wire/frame/target predicates, Ok42 roundtrip and exact existing DOM golden; original four Node harnesses byte-for-byte. Generated-Rust-only predicates retired; no renamed CLI source to hide possible main.jet frame mismatch.
+requires: tool:node
+fixture: web_edge_preserves_one_error_wire_across_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet run --quiet main.jet
+exit: 1
+stderr.trim_end: = web_edge_preserves_one_error_wire_across_js_and_wasm.cli-report.expected
+step: jet build --target web wasm/Examples/features/errors/default_err_edge.jet
+exit: 0
+file: wasm/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2
+file: wasm/.jet/build/web.manifest.json ~ "\"partitions\"" # original helper partitions
+file: wasm/.jet/build/app.wasm is-file
+file: wasm/.jet/build/app.js ~ "jetDom.takeWasmError" # original generated JavaScript predicate
+file: wasm/.jet/build/app.js ~ "jet_wasm_error_status" # original generated JavaScript predicate
+file: wasm/.jet/build/app.js ~ "jet_web_wasm_host_error" # original generated JavaScript predicate
+file: wasm/.jet/build/app.js ~ "const JET_EDGE_TARGET = \"web\";" # original generated JavaScript predicate
+file: wasm/.jet/build/app.js !~ "_isMain" # original generated JavaScript predicate
+file: wasm/.jet/build/app.js !~ "process.argv[1]" # original generated JavaScript predicate
+copy: wasm-harness.mjs wasm/.jet/build/failure_edge_harness.mjs
+step: node failure_edge_harness.mjs
+cwd: wasm/.jet/build
+exit: 0
+stdout: ~ "rawStatus=1" # original wasm stdout contains
+stdout: ~ "raw={\"tag\":\"Err\",\"error\":{\"schema\":\"jet.err/v1\",\"message\":\"unhandled default error\",\"code\":\"RUNFAIL\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":null,\"cause\":null}}}" # original wasm stdout contains
+stdout: ~ "kind=JetError" # original wasm stdout contains
+stdout: ~ "instance=true" # original wasm stdout contains
+stdout: ~ "name=JetError" # original wasm stdout contains
+stdout: ~ "code=RUNFAIL" # original wasm stdout contains
+stdout: ~ "message=unhandled default error" # original wasm stdout contains
+stdout: ~ "cause=disk offline" # original wasm stdout contains
+stdout: ~ "journey=" # original wasm stdout contains
+stdout: has-line "frame=\"Error [RUNFAIL]: unhandled default error\\n  cause: disk offline\\n  failed here: run (default_err_edge.jet:3)\""
+step: jet build --target web ok/tests/fixtures/failure_edge_wasm_ok.jet
+exit: 0
+file: ok/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2
+file: ok/.jet/build/web.manifest.json ~ "\"partitions\"" # original helper partitions
+file: ok/.jet/build/app.wasm is-file
+copy: ok-harness.mjs ok/.jet/build/failure_edge_wasm_ok_harness.mjs
+step: node failure_edge_wasm_ok_harness.mjs
+cwd: ok/.jet/build
+exit: 0
+stdout: = web_edge_preserves_one_error_wire_across_js_and_wasm.ok-edge.expected
+step: jet build --target web js/tests/fixtures/failure_edge_js.jet
+exit: 0
+file: js/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2
+file: js/.jet/build/web.manifest.json ~ "\"partitions\"" # original helper partitions
+file: js/.jet/build/app.wasm is-file
+file: js/.jet/build/app.js ~ "class JetError extends Error" # original generated JavaScript predicate
+file: js/.jet/build/app.js ~ "toJSON()" # original generated JavaScript predicate
+file: js/.jet/build/app.js ~ "jet_web_edge_result" # original generated JavaScript predicate
+file: js/.jet/build/app.js !~ "class JetWebRuntimeError" # original generated JavaScript predicate
+file: js/.jet/build/app.js !~ "_isMain" # original generated JavaScript predicate
+file: js/.jet/build/app.js !~ "process.argv[1]" # original generated JavaScript predicate
+copy: js-harness.mjs js/.jet/build/failure_edge_harness.mjs
+step: node failure_edge_harness.mjs
+cwd: js/.jet/build
+exit: 0
+stdout: ~ "kind=JetError" # original JS stdout contains
+stdout: ~ "instance=true" # original JS stdout contains
+stdout: ~ "name=JetError" # original JS stdout contains
+stdout: ~ "code=RUNFAIL" # original JS stdout contains
+stdout: ~ "message=unhandled default error" # original JS stdout contains
+stdout: ~ "cause=disk offline" # original JS stdout contains
+stdout: ~ "journey=" # original JS stdout contains
+stdout: ~ "wire={\"schema\":\"jet.err/v1\",\"message\":\"unhandled default error\",\"code\":\"RUNFAIL\",\"cause\":{\"schema\":\"jet.err/v1\",\"message\":\"disk offline\",\"code\":null,\"cause\":null}}" # original JS stdout contains
+stdout: has-line "frame=\"Error [RUNFAIL]: unhandled default error\\n  cause: disk offline\\n  failed here: run (default_err_edge.jet:3)\""
+copy: dom-harness.mjs js/.jet/build/failure_edge_dom_harness.mjs
+step: node failure_edge_dom_harness.mjs
+cwd: js/.jet/build
+exit: 0
+stdout: = web_edge_preserves_one_error_wire_across_js_and_wasm.dom-edge.expected

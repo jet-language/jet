@@ -1,0 +1,23 @@
+// D-CONF-MODULE1=A: a typed build setting is a legal generic-module value.
+package {
+    name: "fact_value_arguments"
+    settings: {
+        cache_slots: Int = 3,
+    }
+    build: {
+        compact: Build{ optimize: full, settings: { cache_slots: 2 } },
+        spacious: Build{ optimize: full, settings: { cache_slots: 5 } },
+    }
+}
+
+module cache<K>(capacity: Int) {
+    struct Buffer {
+        items: [K#capacity]
+    }
+
+    fn slots() -> Int { capacity }
+}
+
+module tuned :: cache<Int>($build.settings.cache_slots)
+
+fn run() { print(tuned.slots()) }

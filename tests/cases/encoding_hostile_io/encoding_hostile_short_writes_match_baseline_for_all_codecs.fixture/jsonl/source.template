@@ -1,0 +1,13 @@
+
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn run() {
+    output :: files.create("{work}/jsonl/output.data") ?? panic("create")
+    writer :: jsonl.writer(^output) ?? panic("writer")
+    writer.write(Dyn.Text("alpha")) ?? panic("write")
+    writer.write(Dyn.Int(7)) ?? panic("write2")
+    writer.finish() ?? panic("finish")
+    print(files.read("{work}/jsonl/output.data") ?? panic("read"))
+}

@@ -1,7 +1,7 @@
 # Routine verification sets: every declared test target belongs to exactly one (#2025).
 #
 # A target nobody runs is a target whose failures are invisible. `golden`,
-# `ban_bare_panic` and `jit_run` were each found red while sitting outside every
+# `ban_bare_panic` and a run-tier target were each found red while sitting outside every
 # set an agent routinely ran, because membership was REMEMBERED rather than
 # enforced. This file makes it enforced: it is the one list of sets, and
 # tests/suite_membership.rs::every_test_target_belongs_to_a_named_set walks
@@ -43,7 +43,6 @@ guards:
   tests/ice_regressions
   tests/ice_report_single_home
   tests/impl_shape_matrix
-  tests/jit_no_unwind_boundary
   tests/parity
   tests/parity_lint
   tests/retirement_ratchet
@@ -53,16 +52,13 @@ guards:
   tests/unsafe_ratchet
   tests/unsafe_sentries
 
-# The edit-run loop and its tiers: `jet dev`, the JIT/run entry points, REPL,
+# The edit-run loop and its tiers: `jet dev`, the run entry points, REPL,
 #   notebook, formatter, LSP, perf trace, and the test harnesses.
 dev_loop:
   tests/codemod
   tests/comptime_diff
   tests/debug
   tests/dev
-  tests/dev_corpus
-  tests/dev_corpus_gate
-  tests/dev_default_parity
   tests/dev_interp_parity
   tests/dev_latency
   tests/dev_tier_parity
@@ -79,18 +75,16 @@ dev_loop:
   tests/jet_perf_trace_capture_run
   tests/jet_perf_trace_views
   tests/jet_test
-  tests/jit_run
   tests/live_inspect
-  tests/learn
   tests/lsp
   tests/nbody_witness
   tests/notebook
   tests/repl
   tests/report
-  tests/run_cache
   tests/run_entry
-  tests/run_interpret
+  tests/run_regressions
   tests/run_tier_diagnostics
+  tests/run_tiers
   tests/semindex
   tests/simd_witness
   tests/s5_columnar_witness
@@ -132,6 +126,7 @@ language:
   tests/lib_use
   tests/local_cell_tiers
   tests/marker_declarations
+  tests/marker_groups_modules
   tests/marker_registry_coverage
   tests/marker_rule_signatures
   tests/math_display_parity

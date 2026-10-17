@@ -1,0 +1,46 @@
+// Seed runtime.rs131641-131653 / HostServices.rs1392-1403; #4825.
+fn ui_ime_composition_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(UI_IME_COMPOSITION_BYTES, I64{8})
+    ui_carrier_store(result + UI_IME_COMPOSITION_TEXT, jet_rt_string_clone(ui_carrier_word(value + UI_IME_COMPOSITION_TEXT)))
+    ui_carrier_store(result + UI_IME_COMPOSITION_SELECTION + UI_TEXT_RANGE_START, ui_carrier_word(value + UI_IME_COMPOSITION_SELECTION + UI_TEXT_RANGE_START))
+    ui_carrier_store(result + UI_IME_COMPOSITION_SELECTION + UI_TEXT_RANGE_END, ui_carrier_word(value + UI_IME_COMPOSITION_SELECTION + UI_TEXT_RANGE_END))
+    ui_carrier_store(result + UI_IME_COMPOSITION_MARKED, ui_text_range_clone(ui_carrier_word(value + UI_IME_COMPOSITION_MARKED)))
+    result
+}
+fn ui_ime_composition_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_IME_COMPOSITION_TEXT))
+    ui_text_range_drop(ui_carrier_word(value + UI_IME_COMPOSITION_MARKED))
+    jet_rt_free(value, UI_IME_COMPOSITION_BYTES, I64{8})
+}
+fn ui_ime_composition_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    jet_rt_string_eq(ui_carrier_word(a + UI_IME_COMPOSITION_TEXT), ui_carrier_word(b + UI_IME_COMPOSITION_TEXT)) && ui_text_range_eq(a + UI_IME_COMPOSITION_SELECTION, b + UI_IME_COMPOSITION_SELECTION) && ui_text_range_eq(ui_carrier_word(a + UI_IME_COMPOSITION_MARKED), ui_carrier_word(b + UI_IME_COMPOSITION_MARKED))
+}
+fn ui_ime_event_phase(value: I64) -> I64 {
+    phase :: ui_carrier_word(value + UI_IME_EVENT_PHASE)
+    if (phase < I64{0} || phase >= I64{4}) -> rt_record_variant_panic()
+    phase
+}
+fn ui_ime_event_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    phase :: ui_ime_event_phase(value)
+    result :: jet_rt_alloc(UI_IME_EVENT_BYTES, I64{8})
+    ui_carrier_store(result + UI_IME_EVENT_TARGET, jet_rt_string_clone(ui_carrier_word(value + UI_IME_EVENT_TARGET)))
+    ui_carrier_store(result + UI_IME_EVENT_PHASE, phase)
+    ui_carrier_store(result + UI_IME_EVENT_COMPOSITION, ui_ime_composition_clone(ui_carrier_word(value + UI_IME_EVENT_COMPOSITION)))
+    result
+}
+fn ui_ime_event_drop(value: I64) {
+    if (value == I64{0}) -> return
+    ui_ime_event_phase(value)
+    jet_rt_string_drop(ui_carrier_word(value + UI_IME_EVENT_TARGET))
+    ui_ime_composition_drop(ui_carrier_word(value + UI_IME_EVENT_COMPOSITION))
+    jet_rt_free(value, UI_IME_EVENT_BYTES, I64{8})
+}
+fn ui_ime_event_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    if (ui_ime_event_phase(a) != ui_ime_event_phase(b)) -> return false
+    jet_rt_string_eq(ui_carrier_word(a + UI_IME_EVENT_TARGET), ui_carrier_word(b + UI_IME_EVENT_TARGET)) && ui_ime_composition_eq(ui_carrier_word(a + UI_IME_EVENT_COMPOSITION), ui_carrier_word(b + UI_IME_EVENT_COMPOSITION))
+}

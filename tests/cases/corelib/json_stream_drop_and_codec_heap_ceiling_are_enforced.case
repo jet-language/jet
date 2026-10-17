@@ -1,0 +1,14 @@
+# Port of tests/corelib_parts/encoding_streams.rs::json_stream_drop_and_codec_heap_ceiling_are_enforced; guest source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/encoding_streams.rs:962.
+# PENDING-SAME-HEAD: unchanged count++ retains historical E0160 (class identified batch5); never rewritten.
+fixture: fixtures/json_stream_drop_and_codec_heap_ceiling_are_enforced
+write: guest.jet fixtures/json_stream_drop_and_codec_heap_ceiling_are_enforced/fixture.template
+step aot: jet build guest.jet
+step aot_run: built
+stdout: = json_stream_drop_and_codec_heap_ceiling_are_enforced.out
+stderr: empty
+file: partial.json = json_stream_drop_and_codec_heap_ceiling_are_enforced.partial.json.expected
+step: jet run guest.jet
+stdout: = json_stream_drop_and_codec_heap_ceiling_are_enforced.out
+stderr: empty
+file: partial.json = json_stream_drop_and_codec_heap_ceiling_are_enforced.partial.json.expected

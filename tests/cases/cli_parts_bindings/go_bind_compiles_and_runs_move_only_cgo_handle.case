@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/bindings.rs:611-678. Sources copied verbatim.
+# ORACLE-LITERAL tests/cli_parts/bindings.rs:677 (stdout bytes 42\n).
+fixture: fixtures/go_handle
+step: jet inspect bind go {work}/handles.go --pkg handles
+exit: 0
+file: .jet/bindings/go/handles.jet ~ pub struct Handle { value: Int } # Original generated Jet carrier predicate; not Rust text, keep spelling verbatim.
+file: .jet/bindings/go/handles.jet ~ pub fn new_handle(value: Int) -> Handle { # Original generated Jet constructor predicate.
+file: .jet/bindings/go/handles.jet ~ pub fn consume_handle(handle: Handle) -> Int { # Original generated Jet consumer predicate.
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = forty-two.out

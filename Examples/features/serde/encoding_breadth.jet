@@ -1,4 +1,5 @@
 // D-ENCSTREAM1: format breadth over one value tree.
+use core.encoding as encoding
 use core.encoding.json as json
 use core.encoding.jsonl as jsonl
 use core.encoding.xml as xml
@@ -9,12 +10,12 @@ use core.encoding.base32 as base32
 fn run() {
     data :: json.parse("{{\"b\":2,\"a\":1}}")
     print(json.canonical(data))
-    print(json.events(data).contains("object_start $"))
+    print(json.events(data).contains(encoding.DataEvent.ObjectStart))
     rows :: jsonl.parse("{{\"a\":1}}\n{{\"a\":2}}\n")
     print(rows.len())
-    print(jsonl.to_string(rows).contains("\"a\":1"))
-    doc :: xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>")
-    print(xml.to_string(doc))
+    print((jsonl.to_string(rows) ?? panic("JSONL encode")).contains("\"a\":1"))
+    doc :: xml.parse("<r xmlns:h=\"urn:h\"><h:c id=\"7\">ok</h:c></r>") ?? panic("xml parse")
+    print(xml.to_string(doc) ?? panic("xml render"))
     encoded :: cbor.to_bytes(data)
     print(encoded.len() > 0)
     decoded :: cbor.parse(encoded)

@@ -1,0 +1,20 @@
+# HAND-PORT tests/failure_foundation.rs:278-307 optional_success_result_fallback_agrees_across_execution_tiers
+# PENDING-KIT; no runtime/reference proof.
+# Exact original application policy and three tier complete output/status equality; rustc guard removed.
+fixture: optional_success_result_fallback_agrees_across_execution_tiers.fixture
+env: NO_COLOR=1
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "8080\n0\n0\n"
+capture: aot-out = text stdout
+capture: aot-err = text stderr
+step default: jet run main.jet
+exit: 0
+stdout: = "{cap:aot-out}"
+stderr: = "{cap:aot-err}"
+step interpreter: jet run --interpret main.jet
+exit: 0
+stdout: = "{cap:aot-out}"
+stderr: = "{cap:aot-err}"

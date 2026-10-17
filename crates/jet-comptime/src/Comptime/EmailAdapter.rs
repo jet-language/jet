@@ -22,8 +22,8 @@ use kernel::jet_email;
 
 #[derive(Clone, Copy)]
 pub struct RuntimeFns {
-    pub tls_begin: fn(std::net::TcpStream, &String) -> Result<i64, String>,
-    pub tls_begin_ca: fn(std::net::TcpStream, &String, &Vec<u8>) -> Result<i64, String>,
+    pub tls_begin: fn(std::net::TcpStream, &str) -> Result<i64, String>,
+    pub tls_begin_ca: fn(std::net::TcpStream, &str, &Vec<u8>) -> Result<i64, String>,
     pub tls_handshake_step: fn(i64) -> Result<bool, String>,
     pub tls_set_poll_timeout: fn(i64, i64) -> Result<(), String>,
     pub tls_read: fn(i64, i64) -> Result<Vec<u8>, String>,
@@ -66,6 +66,11 @@ pub fn evaluate(method: &str, args: &[CtValue], span: Span) -> Option<Result<CtV
         "message" => email_message(args, span),
         "envelope" => email_envelope(args, span),
         "serialize" => email_serialize(args, span),
+        "__address_parts" => email_address_parts(args, span),
+        "__attachment_parts" => email_attachment_parts(args, span),
+        "__envelope_parts" => email_envelope_parts(args, span),
+        "__address_view" | "__attachment_view" | "__message_view" => email_view(method, args, span),
+        "__message_parts" => email_message_parts(args, span),
         _ => return None,
     };
     Some(result)
@@ -200,6 +205,52 @@ fn address_list(value: &CtValue, span: Span) -> Result<Vec<jet_email::Address>, 
         .iter()
         .map(|value| address_from_value(value, span))
         .collect()
+}
+
+fn email_address_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let display = match one(args, 0, "__address_parts", span)? {
+        CtValue::Present(value) => Some(string(value, span)?.to_string()),
+        CtValue::Failed(CtReport::Clean(_)) => None,
+        _ => return Err(unsupported("email Address display is invalid", span)),
+    };
+    let mailbox = string(one(args, 1, "__address_parts", span)?, span)?.to_string();
+    Ok(address_value(&jet_email::address_parts(display, mailbox)))
+}
+
+fn email_attachment_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let filename = string(one(args, 0, "__attachment_parts", span)?, span)?.to_string();
+    let mime = string(one(args, 1, "__attachment_parts", span)?, span)?.to_string();
+    let bytes = bytes(one(args, 2, "__attachment_parts", span)?, span)?;
+    Ok(attachment_value(&jet_email::attachment_parts(filename, mime, bytes)))
+}
+
+fn email_envelope_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let from = address_from_value(one(args, 0, "__envelope_parts", span)?, span)?;
+    let recipients = address_list(one(args, 1, "__envelope_parts", span)?, span)?;
+    Ok(envelope_value(&jet_email::envelope_parts(from, recipients)))
+}
+
+fn email_view(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let input = one(args, 0, method, span)?;
+    let (owner, result, names): (&str, &str, &[&str]) = match method {
+        "__address_view" => ("Address", "__EmailAddressView", &["display", "mailbox"]),
+        "__attachment_view" => ("Attachment", "__EmailAttachmentView", &["filename", "mime", "bytes"]),
+        _ => ("Message", "__EmailMessageView",
+            &["from", "to", "bcc", "subject", "text", "html", "attachments", "wire_upper"]),
+    };
+    let fields = names.iter().map(|name| {
+        field(input, owner, name).cloned().map(|value| (*name, value))
+            .ok_or_else(|| unsupported("email carrier is missing a private part", span))
+    }).collect::<Result<Vec<_>, _>>()?;
+    Ok(structure(result, fields))
+}
+
+fn email_message_parts(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
+    let names = ["from", "to", "bcc", "subject", "text", "html", "attachments", "envelope", "wire_upper"];
+    let fields = names.iter().enumerate().map(|(index, name)| {
+        one(args, index, "__message_parts", span).cloned().map(|value| (*name, value))
+    }).collect::<Result<Vec<_>, _>>()?;
+    Ok(structure("Message", fields))
 }
 
 fn attachment_value(attachment: &jet_email::Attachment) -> CtValue {
@@ -500,26 +551,6 @@ fn limits_from_value(value: &CtValue, span: Span) -> Result<jet_email::Limits, D
     })
 }
 
-pub fn limits_safe_value() -> CtValue {
-    let limits = jet_email::Limits::safe();
-    structure(
-        "Limits",
-        vec![
-            (
-                "max_reply_line_bytes",
-                CtValue::Int(limits.max_reply_line_bytes),
-            ),
-            ("max_reply_lines", CtValue::Int(limits.max_reply_lines)),
-            ("max_capabilities", CtValue::Int(limits.max_capabilities)),
-            ("max_recipients", CtValue::Int(limits.max_recipients)),
-            ("max_message_bytes", CtValue::Int(limits.max_message_bytes)),
-            (
-                "max_auth_challenge_bytes",
-                CtValue::Int(limits.max_auth_challenge_bytes),
-            ),
-        ],
-    )
-}
 
 fn auth_from_value(
     value: &CtValue,
@@ -556,7 +587,7 @@ fn trust_from_value(value: &CtValue, span: Span) -> Result<jet_email::TLSTrust, 
 fn dkim_from_value(
     value: &CtValue,
     span: Span,
-) -> Result<jet_email::DkimConfig<Vec<u8>>, Diagnostic> {
+) -> Result<jet_email::DKIMConfig<Vec<u8>>, Diagnostic> {
     let domain = field(value, "DKIMConfig", "domain")
         .ok_or_else(|| unsupported("email DKIMConfig.domain is missing", span))
         .and_then(|value| string(value, span).map(str::to_string))?;
@@ -569,7 +600,7 @@ fn dkim_from_value(
     let signed_headers = field(value, "DKIMConfig", "signed_headers")
         .ok_or_else(|| unsupported("email DKIMConfig.signed_headers is missing", span))
         .and_then(|value| string_list(value, span))?;
-    Ok(jet_email::DkimConfig {
+    Ok(jet_email::DKIMConfig {
         domain,
         selector,
         private_key,
@@ -752,10 +783,6 @@ pub fn ambient_core_call(
             jet_email::wipe_config_secrets(&mut config, email_runtime);
             result(smtp_result, store_mailer)
         }
-        "smtp_from_env" if args.is_empty() => result(
-            jet_email::smtp_from_env(kernel_runtime(runtime)),
-            store_mailer,
-        ),
         _ => return None,
     };
     Some(Ok(result))

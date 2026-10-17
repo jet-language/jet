@@ -953,7 +953,7 @@ fn compiler_seam_crates_have_only_path_dependencies() {
     const EXEMPTIONS: &[(&str, &[&str])] = &[
         // Root package: test-only rustls lifecycle HTTPS e2e (D-DEP1).
         ("<root>", &["D-DEP1"]),
-        ("jet-jit", &["D-JITDEP1", "D-JIT2", "D-DEP1"]),
+        ("jet-evalhost", &["D-JITDEP1", "D-JIT2", "D-DEP1"]),
         ("jet-net", &["D-DEP1"]),
         ("jetpack", &["D-DEP-CRYPTO1=A", "D-CODECS1"]),
         // D-DX5-HOOK1: compiler-extension Wasmtime host runs only in the
@@ -1668,7 +1668,7 @@ fn canonical_shared_include(relative: &str, line: &str) -> bool {
                 || line.trim_start().starts_with("include! (")))
         || (relative == "crates/jet-codegen/src/lib.rs"
             && line.contains("include!(\"SchedulerHost.rs\")"))
-        || (relative == "crates/jet-jit/src/net_http_rt.rs"
+        || (relative == "crates/jet-evalhost/src/net_http_rt.rs"
             && line.contains("include!(\"net_http_hosts.rs\")"))
 }
 

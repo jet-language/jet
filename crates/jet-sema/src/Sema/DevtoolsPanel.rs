@@ -20,16 +20,11 @@ pub const E_DEVTOOLS_UNFED_FIELD: &str = "E1414";
 pub fn check_devtools_panels(
     package: &str,
     module: &str,
-    package_items: &[&Item],
+    structs: &std::collections::HashMap<&str, &crate::AST::StructDef>,
     module_items: &[Item],
     registry: &mut DevtoolsRegistry,
     diags: &mut Vec<Diagnostic>,
 ) {
-    let structs = package_items.iter().filter_map(|item| match *item {
-        Item::Struct(def) => Some((def.name.as_str(), def)),
-        _ => None,
-    });
-    let structs = structs.collect::<std::collections::BTreeMap<_, _>>();
 
     for function in module_items.iter().filter_map(|item| match item {
         Item::Func(function) if has_dev_panel_marker(function) => Some(function),
@@ -268,7 +263,7 @@ fn validate_panel_signature(function: &Func, diags: &mut Vec<Diagnostic>) -> Opt
             E_DEVTOOLS_INVALID_PANEL,
             &function.name,
             "a devtools panel is a public package entry point",
-            "write `pub fn panel(state: State) -> UINode { ... }`",
+            "write `fn panel(state: State) -> UINode { ... }` outside any `priv module`",
             function.name_span,
         ));
         return None;

@@ -1,0 +1,26 @@
+# Port of tests/jetpack_env_use_offline.rs:414-484; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+fixture: native_env_and_use_enter_without_network_or_prompt.fixture
+mkdir: package-root
+mkdir: home
+env: JETPACK_ROOT={work}/package-root
+env: HOME={work}/home
+step: jetpack env --prep --yes --trust --offline --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 0
+remove: fixtures/jetpackage-omp.json
+remove: fixtures/omp-1.0.0
+step: jetpack env --trust --offline --no-color -- omp
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+unset: JETPACK_FIXTURES
+exit: 0
+stdout.trim: = "cached"
+stderr: !~ "continue?" # original cached entry must not prompt
+step: jetpack use omp@releases#1.0.0 --offline --no-color -- omp
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+unset: JETPACK_FIXTURES
+exit: 0
+stdout.trim: = "cached"
+stderr: !~ "continue?" # original cached entry must not prompt
+

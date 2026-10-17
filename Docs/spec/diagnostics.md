@@ -25,6 +25,13 @@ those rows rather than defining a second message or exposing raw backend text.
 Retired marker spellings retain their `$retired` replacement in
 `Prelude/Markers.jet`. Parser recovery must teach that same replacement and
 must not reinterpret a retired foreign import as a binding-generator module.
+Known declaration heads such as `#Import module c.<lib>` are parsed as items
+before unresolved library marker heads are retained as file-level rule facts.
+
+Lexical recovery does not end diagnostic collection: the retained token stream
+is parsed so parser-owned teaching (including retired operators) accompanies
+lexer errors. Failed embedded-Core parses keep the Core source identity and
+text through loader-error conversion, just as successful parses do.
 
 ## Plain-words rubric
 
@@ -42,6 +49,14 @@ words for the learner who hit it:
   or stage names. That material belongs to `jet explain CODE --verbose` and
   `--json`.
 
+E0396 teaches `value.pow(exponent)` for the non-Jet `**` spelling, under
+D-SIGIL-ALGEBRA1=B. Its structured repair covers both operands and parenthesizes
+the receiver before calling `pow`, like E0398's precedence-preserving repairs;
+it never replaces `**` with the retired arithmetic `^` spelling.
+The source-less parser keeps the same teaching and exact `**` location;
+spaced `a * *p` remains ordinary multiplication and raw-pointer-of syntax,
+with its unsafe obligation checked separately.
+
 ## Human rendering
 
 The fixed headings are `Error [CODE]:` and `Warning [CODE] (lint_name):`. A
@@ -51,6 +66,21 @@ a span omits that block. Every report keeps `Why:`, `Fix:`, and
 `More:`. Multiple diagnostics are separated by one blank line. Lints do not
 block compilation by default; a package may deny a named lint through its lint
 policy, but a diagnostic code is never a policy value.
+
+Package-budget reports retain the authored callable witness's span and source
+snapshot, including witnesses in dependency modules. A named witness must not
+be rendered against the entry file merely because enforcement runs there.
+
+A default-error entry report uses `Error [E3015]:` with the registry-owned
+What, Why, Fix, and More. The error value's own code remains report data rather
+than replacing the diagnostic identity. A handled `Err` printed as a value is
+not this unhandled-entry report.
+
+In this report, journey locations retain columns supplied by their producer.
+Unavailable source must not acquire an invented snippet, caret, path, or zero
+column. Terminal escaping is display-only: it does not rewrite the error or
+journey data. This does not change standalone journey transport's ordinary
+text policy.
 
 What, Why, and Fix are sentence-cased plain language. What names the rejected
 operation or value, Why states the rule, and Fix gives an imperative next step.
@@ -70,6 +100,13 @@ Build authority repairs use `--allow=Effect` (for example `--allow=Exec`);
 action stderr is decoded from the structured report before terminal rendering,
 so its line breaks remain actual lines rather than JSON escapes.
 
+Memory sentries (`R0801`–`R0803`) are program-side faults, not unhandled entry
+errors. Their `exit:` metadata is rendered from the same exit-code fact that
+the returned runtime report carries: 70 under S36 / D-FAIL-EXIT1. Execution
+boundaries deliver that report and preserve its status; they do not classify
+the fault from its prose. An unresolved diagnostic row remains a host defect
+with status 101.
+
 ## Machine reports and causes
 
 The canonical machine envelope is `jet.report/v3`. Its `cause` array is
@@ -79,6 +116,24 @@ Repeated codes are not deduplicated. Every field comes from that cause's own
 and never inherit the root diagnostic's location. If a source snapshot is
 unavailable, the projection must not invent a path, line, column, or `0:0`
 position. An explicitly supplied byte span remains unchanged.
+
+Registry-supplied machine next actions must apply to the actual diagnostic,
+not leak a registry example's names. E0104's `no_fix_reason.next` directs the
+learner to the called function or method's parameters and argument count;
+an arity error for `List.pop`, `String.split` or `Map.get` never points to an
+unrelated `show` definition.
+
+Bundle checks retain the owning source snapshot when a later phase reports
+against a module-local span. In particular, solved-effect boundary diagnostics
+belong to the function's declaring module, not the bundle entry file. The
+Jet checker attaches the module's source segments when publishing effect
+reports; the reference checker attaches the same origin before merging them.
+For a transitive unbounded trait dispatch (E0743), the witness is the actual
+dispatch call in the callee's module, even when the effect ceiling belongs to
+a caller elsewhere. If that witness has no identifiable source module, the
+report remains unlocated instead of borrowing the caller's position.
+When both the ceiling and its dispatch witness belong to the entry module,
+the entry's existing supplied rendering context is retained unchanged.
 
 ## No-OS E3301 contract
 
@@ -144,6 +199,44 @@ the source. Keep one meaning across AOT, `jet run`, the interpreter, LSP,
 machine output, and web. Documentation and rendering changes must not mint a
 new diagnostic or change compiler semantics.
 
+### Running and blessing snapshots
+
+Build the Jet test runner once with `jet build --release Tools/testkit/run.jet`. From
+the checkout root, run the reported artifact as `testkit ui --jet <compiler>`
+to compare UI and lint snapshots; use `--filter <repo-relative-name>` for a
+focused selection, and `--results <file>` for machine-readable verdicts.
+`testkit ui --coverage --jet <compiler>` checks independently derived emitted
+and rendered code sets, owned exclusions in
+`tests/diagnostics_coverage_allowlist.tsv` (lowering-only ceiling: 152), and
+the exact per-plane repair counts in `tests/diagnostics_coverage_baseline.txt`.
+The transitional emission scan reads `Source/**/*.rs` and `crates/**/*.rs`;
+the native compiler cutover moves this scan to its Jet sources.
+
+Plain fixtures run `jet check` and record rendered stderr on failure, or
+exactly `(no errors)` on success, even when advisory lints exist. Lint fixtures
+run `jet check --verbose`: they must succeed and emit at least one warning.
+The lint invocation is admitted only after a same-head comparison against
+Cargo's `lint_snapshots` reports zero `.warn` mismatches; advisory differences
+are not filtered out.
+Only the CLI's final summary/explain envelope and volatile root paths are
+normalized; diagnostic bodies are retained. Group directories are recursive;
+project entries stop recursion. Fixed companions must check clean, build, and
+run on each selected tier. Internal fixture directives without a public CLI
+capability are `REFUSED`, never silently converted to ordinary checks.
+
+After reviewing a compiler change, bless only the affected fixture:
+
+```sh
+testkit ui --jet <compiler> --bless tests/ui/example.jet
+```
+
+Blessing creates or updates that fixture's snapshot from actual tool output.
+A lower diagnostic count is refused unless the reviewed invocation also names
+`--allow-shrink tests/ui/example.jet`. Broad blessing requires
+`--bless-all --reason "<compiler change>"`; blessing with `--shard` is refused.
+Expected files are read-only in ordinary runs.
+
+
 ## Latency and runtime-query boundaries
 
 D-DEV3 is a wall-clock promise: a save gives diagnostic feedback in well under
@@ -175,3 +268,91 @@ Core receiver types have a closed method surface. Their fallback fixes may
 name a documented operation or a safe spelling edit, but must not suggest
 adding an `impl` to a protected Core type. A user-defined type wins the
 reserved-name guard and retains the ordinary user-type fix.
+
+## Compiler ownership consumers
+
+Native lowering and code generation detach copyable scalar IDs from owner
+projections before requesting write access to that owner. A detached scalar
+does not allocate or duplicate an aggregate. This keeps parameter debug binds,
+result storage writes, reachability requests, sentry exits, and pattern-cache
+block switching within the existing read/write loan contract.
+
+Compiler comparisons against an already-bound optional ID or interpolated
+symbol use parenthesized value expressions, not capture patterns. Decision
+hashing passes byte ranges as `View<U8>` and projects only runtime-part variants
+present in the canonical MIR inventory.
+
+Prepared host Shared transfers validate the borrowed tree before committing
+the owner alias. After that commit, adoption updates the original carrier
+through write views; it does not copy containers, finalizers, or cleanup roots.
+An adoption failure after alias commitment is a consumed failure, never a
+rejection that pretends the original Source alias is still active.
+
+Recursive host type-shape growth detaches the needed struct payload at a call
+boundary before growing its owner vector. Compiler carriers whose tables move
+into a separate program owner restore their empty moved fields before the
+remaining carrier is borrowed again.
+
+Boolean values returned by `Never!` helpers consume their checked failure
+carrier before entering logical joins. MIR Phi inputs must retain matching
+drop obligations; recursive write views of trait-owning enum/list values do
+not relax that invariant. `compiler_host_owner_write_view.jet` is lowered and
+validated by the bootstrap regression, which checks plain Bool Phi inputs.
+
+An internal checked-TIR lowering failure preserves its underlying reason and
+source-byte span in the existing ICE report and exits 101 under I2.
+
+Borrowed enum payload bindings over checked list indexes remain rooted in
+their stable collection owner. Rust emission references the selected element's
+payload instead of cloning it; the existing owner-invalidation rules still
+govern the view. The recursive noncopy-owner regression compiles and executes
+the generated Rust in addition to validating MIR.
+
+An exhaustive value-form Result dispatch checks its subject once, including
+when coverage visits an `.Err` arm before an `.Ok` arm. The ordinary condition
+walk reuses the already checked carrier and its elaborated expression; coverage
+must not repeat ownership effects and manufacture an earlier-loop E0121.
+Native Jet already hoists dispatch subjects into one checked compiler local.
+The regression restores the original Core service rollback body and executes
+an Err-first taking subject with a single-use owner and a call counter.
+
+Converting a checked String failure payload into the canonical Prelude `Err`
+record also retains that checked message. The record checker still supplies
+private defaults and applies visibility, field-type and view-escape rules;
+it must not re-infer a taking call inside the synthesized message field.
+Native Jet constructs the default-error record before checking its fields.
+The same runtime regression exercises both outer and branch-local single-use
+owners in deferred Err arms before the new taking dispatch.
+When lowering such a value-if, the Err literal's absent success slot takes the
+live sibling's checked carrier type, not the enclosing function's return type.
+
+Hosted Rust emission binds caller-owned return storage before compacting local
+names. A return place is not an ordinary owned local that declaration folding
+may initialize with an internal reuse marker. Its preserved declaration and
+writes pass through the existing return-slot binder, which clears and refills
+the caller's buffer without an undeclared `__jet_return_reuse` reference.
+The compiler SHA256 hex-builder regression executes populated, empty and
+populated-again refills through the generated return-slot entry points.
+
+Hosted Rust derives follow the actual native carrier's capabilities: owned
+FileReader and FileWriter streams provide neither Rust Clone nor Debug, even
+when their opaque checked type has no generic arguments. Enclosing records
+must not gain those structural derives from an empty argument list. Checked
+source value hooks, such as Clock's semantic fork and Debug, remain available.
+Retained native config and Encode helpers use the canonical Dyn carrier; the
+retired DataTree Rust type is not restored as an alias.
+
+Source-hook capability queries snapshot only the type identity, key and span
+before a write-access call on the owning emission context. The hook lookup does
+not require copying a full MIR type definition or its field/variant lists, and
+the checked program rows remain unchanged.
+
+Manifestless script binding searches keep first-match root, entry-file and
+import-reference indices. Missing roots or files return normally; missing
+references append the existing E0003 diagnostic and continue to the next
+admission. These statement exits are outside finite value-loop fallbacks, whose
+exhaustion route cannot carry a multi-statement diagnostic block.
+The standalone regression
+`tests/fixtures/r19_metadata_and_dependency_search.jet` exercises all three metadata
+snapshots, unchanged definition payloads, absent roots/files, duplicate
+first-match candidates and continuation after a missing reference.

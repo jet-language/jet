@@ -1,0 +1,11 @@
+# HAND-PORT tests/compiler_api.rs:7-21 lexer_api_returns_stable_value_tokens
+# Public inspect compiler lex is the same Source/Compiler.rs JSON projection; PENDING-KIT.
+# PENDING-GRAMMAR(batch-four) when using [-1]; original predicates, no captured expectations.
+fixture: lexer_api_returns_stable_value_tokens.fixture
+step: jet inspect compiler lex input.jet
+exit: 0
+json: stdout doc $.compiler.value.api_version = 1 # ORACLE-DERIVED Source/Compiler.rs:15 API_VERSION=1
+json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.tokens[?kind="keyword.fn"][?text="fn"][?start.line=1][?start.column=1] #>= 1
+json: stdout doc $.compiler.value.tokens[?kind="identifier"][?text="run"] #>= 1
+json: stdout doc $.compiler.value.tokens[-1].kind = "eof" # original last().map(kind)

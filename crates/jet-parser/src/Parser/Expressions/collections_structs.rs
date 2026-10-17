@@ -104,7 +104,7 @@ impl<'a> Parser<'a> {
     /// without entering the recursive type parser. Ordinary list values take
     /// this small lexical path; the larger typed-literal parser is called only
     /// after a constructor body is actually present.
-    fn bracket_starts_typed_lit(&self) -> bool {
+    pub(super) fn bracket_starts_typed_lit(&self) -> bool {
         if !matches!(self.peek().kind, TokKind::LBracket) {
             return false;
         }
@@ -502,6 +502,7 @@ impl<'a> Parser<'a> {
                 return self.struct_lit_after_import(
                     import_ns.to_string(),
                     local_name.to_string(),
+                    type_args,
                     start_span.start,
                 );
             }
@@ -513,6 +514,7 @@ impl<'a> Parser<'a> {
         &mut self,
         alias: String,
         type_name: String,
+        type_args: Vec<Type>,
         start: usize,
     ) -> Result<Expr, Diagnostic> {
         // D-BOUND-SINK1=A: imported library text heads use the same
@@ -520,7 +522,11 @@ impl<'a> Parser<'a> {
         // body remains the ordinary imported struct constructor.
         if !brace_body_looks_like_fields(&self.toks, self.pos + 1) {
             let head_name = format!("{alias}.{type_name}");
-            let head = Type::Named(head_name);
+            let head = if type_args.is_empty() {
+                Type::Named(head_name)
+            } else {
+                Type::Apply { name: head_name, args: type_args }
+            };
             let body = self.typed_lit_body_for_head(&head)?;
             let end = self.toks[self.pos.saturating_sub(1)].span.end;
             return Ok(Expr::TypedLit {
@@ -534,7 +540,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos.saturating_sub(1)].span.end;
         Ok(Expr::StructLit {
             type_name,
-            type_args: Vec::new(),
+            type_args,
             import_ns: Some(alias),
             as_trait: None,
             fields,
@@ -671,6 +677,23 @@ impl<'a> Parser<'a> {
         Ok((args, end))
     }
 
+    /// S31/D-OPT-LIFT1: only `== Val(name)` binds. Other present-value
+    /// constructors compare their values; dispatch pattern heads keep their
+    /// separate grammar in `try_pattern_rhs`.
+    pub(in crate::Parser) fn try_comparison_pattern_rhs(
+        &mut self,
+        allow_named_fields: bool,
+    ) -> Result<Option<Pattern>, Diagnostic> {
+        if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::LIT_VALUE)
+            && !(matches!(self.toks.get(self.pos + 1).map(|token| &token.kind), Some(TokKind::LParen))
+                && matches!(self.toks.get(self.pos + 2).map(|token| &token.kind), Some(TokKind::Ident(_)))
+                && matches!(self.toks.get(self.pos + 3).map(|token| &token.kind), Some(TokKind::RParen)))
+        {
+            return Ok(None);
+        }
+        self.try_pattern_rhs(allow_named_fields)
+    }
+
     /// S31 / D-ENUMDOT1: try to parse a pattern on the right of `==`.
     ///
     /// Leading-dot `.Variant` / `.Variant(...)`, optional `None` / `Val(n)`,
@@ -694,6 +717,19 @@ impl<'a> Parser<'a> {
         if let Some(pat) = self.try_string_typed_str_match_pattern()? {
             return Ok(Some(pat));
         }
+        // D-PAT-RECORD1 / D-PAT-MAP1: list and map patterns. A bracket that
+        // only compares written values stays the list or map value.
+        if matches!(self.peek().kind, TokKind::LBracket) {
+            return self.bracket_pattern(false);
+        }
+        // D-PAT-RECORD1=A: the named struct head `Point{x: 0, y}`. Where a
+        // struct value cannot be written (an `if` condition, whose `{` opens
+        // the body) the head is always a pattern.
+        if self.named_struct_pattern_ahead() {
+            if let Some(pat) = self.try_named_struct_pattern(!allow_named_fields)? {
+                return Ok(Some(pat));
+            }
+        }
         match &self.peek().kind {
             // D-PARSESTR1: an interpolation literal in pattern position —
             // `subject == "prefix-{id:Int}-suffix"`. Each hole must reduce to
@@ -715,26 +751,23 @@ impl<'a> Parser<'a> {
             TokKind::Ident(name) if name == Syntax::LIT_VALUE => {
                 let start = self.bump().span;
                 self.expect(TokKind::LParen, &format!("after `{}`", Syntax::LIT_VALUE))?;
-                let (binding, binding_span) =
-                    self.expect_ident(&format!("inside `{}(...)`", Syntax::LIT_VALUE))?;
+                let binding = self.pattern_slot()?;
                 self.expect(
                     TokKind::RParen,
                     &format!("after the binding in `{}(...)`", Syntax::LIT_VALUE),
                 )?;
+                let end = self.toks[self.pos.saturating_sub(1)].span.end;
                 return Ok(Some(Pattern::Variant {
                     variant: Syntax::LIT_VALUE.to_string(),
-                    bindings: vec![crate::AST::PatSlot::Bind {
-                        name: binding,
-                        span: binding_span,
-                    }],
+                    bindings: vec![binding],
                     leading_dot: false,
-                    span: Span::new(start.start, binding_span.end),
+                    span: Span::new(start.start, end),
                 }));
             }
             // D-LIT-DOT1: struct-shaped dispatch arm head:
             // `{ kind: "page", title, .. } -> ...`.
             TokKind::LBrace if self.brace_starts_record() => {
-                return self.struct_pattern_rhs().map(Some);
+                return self.struct_pattern_rhs(None).map(Some);
             }
             // Retired `.{ … }` pattern. Fmt rewrites; compile rejects.
             TokKind::Dot
@@ -755,7 +788,7 @@ impl<'a> Parser<'a> {
                     return Err(diagnostic);
                 }
                 self.diags.push(diagnostic);
-                return self.struct_pattern_rhs().map(Some);
+                return self.struct_pattern_rhs(None).map(Some);
             }
             // D-ENUMDOT1: bare unit `Variant | …` starts an or-pattern (lone
             // `Variant` stays value equality so typos don't get a fake E0367).
@@ -963,52 +996,11 @@ impl<'a> Parser<'a> {
     }
 
     /// One payload slot inside `.Variant(…)`: a binding name, `_` (D-PATW),
-    /// an integer range `lo..hi` (D-PATR), or a nested leading-dot pattern
-    /// (S31: `.Err(.Low)`, `.Val(.Rect(w, h))`).
+    /// an integer range `lo..hi` (D-PATR), a nested pattern (S31:
+    /// `.Err(.Low)`, `.Val(.Rect(w, h))`; D-PAT-RECORD1: `.Val(Point{x, ..})`,
+    /// `.Val([first, ..])`), or a compared value (D-PAT-MAP1: `.Text("push")`).
     pub(in crate::Parser) fn pattern_slot(&mut self) -> Result<crate::AST::PatSlot, Diagnostic> {
-        if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PAT_WILDCARD_SLOT) {
-            self.bump();
-            return Ok(crate::AST::PatSlot::Wildcard);
-        }
-        if let TokKind::Int(lo_val, _) = &self.peek().kind.clone() {
-            let lo = *lo_val;
-            self.bump();
-            if !matches!(self.peek().kind, TokKind::DotDot) {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    "expected `..` after the lower bound of a range pattern".to_string(),
-                    "range patterns need `lo..hi` syntax".to_string(),
-                    "write `0..100` for an inclusive range".to_string(),
-                    Some(self.peek().span),
-                ));
-            }
-            self.bump();
-            let TokKind::Int(hi_val, _) = &self.peek().kind.clone() else {
-                return Err(Diagnostic::error(
-                    "E0003",
-                    "expected an integer after `..` in a range pattern".to_string(),
-                    "range patterns need both ends: `lo..hi`".to_string(),
-                    "write `0..100` for an inclusive range".to_string(),
-                    Some(self.peek().span),
-                ));
-            };
-            let hi = *hi_val;
-            self.bump();
-            return Ok(crate::AST::PatSlot::Range { lo, hi });
-        }
-        if matches!(self.peek().kind, TokKind::Dot)
-            && self
-                .toks
-                .get(self.pos + 1)
-                .and_then(|token| leading_dot_variant(&token.kind))
-                .is_some()
-        {
-            if let Some(inner) = self.try_pattern_rhs(true)? {
-                return Ok(crate::AST::PatSlot::Nested(Box::new(inner)));
-            }
-        }
-        let (name, span) = self.expect_ident("for a pattern binding")?;
-        Ok(crate::AST::PatSlot::Bind { name, span })
+        self.pattern_item(true)
     }
 
     /// D-ENUMDOT1 / D-PATO: one alternative after `|` in an or-pattern.

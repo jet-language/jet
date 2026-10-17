@@ -1,0 +1,27 @@
+# Exact tests/jetpack_platform.rs:53-110; runtime PENDING-SAME-HEAD.
+fixture: platform_tier_gate_runs_native_package_offline_and_cleans_store.fixture
+requires: os-name:linux
+mkdir: package-root
+mkdir: missing-tools
+step: jet build native.jet
+exit: 0
+step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationPlatformSetup.jet --filter "S3 platform authentic fixture setup"
+env: JET_TEST_PLATFORM_SETUP={work}
+env: JET_TEST_PLATFORM_MODE=native
+exit: 0
+step: jetpack use native-jetpack@nixpkgs --no-color --offline -- jetpack{sys:exe-suffix} --help
+env: JETPACK_ROOT={work}/package-root
+env: JETPACK_FIXTURES={work}/fixtures
+env: PATH={work}/missing-tools
+exit: 0
+stdout: ~ "jetpack" # original native package predicate
+step: jet test {root}/Jetpack/Store/Tests/PkgIntegrationPlatformSetup.jet --filter "S3 platform authentic fixture setup"
+env: JET_TEST_PLATFORM_SETUP={work}
+env: JET_TEST_PLATFORM_MODE=stale
+exit: 0
+capture: object = text file fixture-object
+step: jetpack hangar clean --no-color --yes
+env: JETPACK_ROOT={work}/package-root
+env: PATH={work}/missing-tools
+exit: 0
+file: {cap:object} absent

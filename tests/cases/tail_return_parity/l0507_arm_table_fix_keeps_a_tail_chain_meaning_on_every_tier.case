@@ -1,0 +1,49 @@
+# tests/tail_return_parity.rs::l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier
+# Exact source and compiler-published L0507 fix_edits; no hand-written fixed text.
+# Original2edits/applied tail-table/no repeat lint and original+fixed all3tiers remain.
+fixture: l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.fixture
+copy: run.jet classic.jet
+step: jet check {work}/run.jet --json
+exit: 0
+json: stdout doc $.reports[?code="L0507"][?fix_edits!=null] #= 2
+apply-edits: stdout doc $.reports[?code="L0507"].fix_edits[*]
+file: run.jet ~ "    if {\n        score >= 90 -> {" # original ed77c235f tests/tail_return_parity.rs:224 applied fix text contains exact arm-table prefix
+step: jet check {work}/run.jet --json
+exit: 0
+json: stdout doc $.reports[?code="L0507"] #= 0
+step: jet run --release classic.jet
+env: JET_STORE_DIR={work}/cache-classic.jet-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.out
+step: jet run classic.jet
+env: JET_STORE_DIR={work}/cache-classic.jet-1
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.out
+step: jet run --interpret classic.jet
+env: JET_STORE_DIR={work}/cache-classic.jet-2
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.out
+step: jet run --release run.jet
+env: JET_STORE_DIR={work}/cache-run.jet-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.out
+step: jet run run.jet
+env: JET_STORE_DIR={work}/cache-run.jet-1
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.out
+step: jet run --interpret run.jet
+env: JET_STORE_DIR={work}/cache-run.jet-2
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier.out

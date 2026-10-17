@@ -1,0 +1,59 @@
+// EnvConfig.rs (D-CONFIG-ENV1) pieces of the native env decode kernel: dotenv
+// parsing and overlay order, segment nesting, renames, project-relative
+// files, and the E2416 error framing with secret redaction.
+fn env_fixture_row(values: I64, index: I64, name: I64, value: I64) -> Bool {
+    row :: csv_words_get(values, index)
+    jet_rt_string_eq(trap_word(row + I64{8}), name) && jet_rt_string_eq(trap_word(row + I64{16}), value)
+}
+
+#Export(c) fn jet_rt_codec_env_fixture() -> I64 {
+    if (!env_file_relative(rt_static_text(".env")) || !env_file_relative(rt_static_text("cfg/..x/.env"))) -> return I64{1}
+    if (env_file_relative(rt_static_text("/etc/.env")) || env_file_relative(rt_static_text("a/../.env")) || env_file_relative(rt_static_text(".."))) -> return I64{2}
+    allow :: csv_words_new()
+    values :: csv_words_new()
+    text :: rt_static_text("# comment\n\nexport APP_PORT = 8080 # inline\napp_name='x # y'\nAPP_PORT=9090\nIGNORED\n")
+    failure :: env_dotenv_load(text, allow, values)
+    if (failure == I64{0} || !jet_rt_string_eq(failure, rt_static_text("invalid .env line 6"))) -> return I64{3}
+    jet_rt_string_drop(failure)
+    if (trap_word(values) != I64{2} || !env_fixture_row(values, I64{0}, rt_static_text("APP_PORT"), rt_static_text("9090")) || !env_fixture_row(values, I64{1}, rt_static_text("app_name"), rt_static_text("x # y"))) -> return I64{4}
+    env_values_put(values, jet_rt_string_clone(rt_static_text("APP_DB__HOST")), jet_rt_string_clone(rt_static_text("h")))
+    env_values_put(values, jet_rt_string_clone(rt_static_text("app_port")), jet_rt_string_clone(rt_static_text("7")))
+    env_values_sort(values)
+    if (trap_word(values) != I64{3} || !env_fixture_row(values, I64{0}, rt_static_text("APP_DB__HOST"), rt_static_text("h")) || !env_fixture_row(values, I64{2}, rt_static_text("app_port"), rt_static_text("7"))) -> return I64{5}
+    env_values_free(values)
+    csv_words_push(allow, jet_rt_string_clone(rt_static_text("app_port")))
+    if (!env_allowed(allow, rt_static_text("APP_PORT")) || env_allowed(allow, rt_static_text("APP_NAME"))) -> return I64{6}
+    csv_record_free(allow)
+    segments :: env_segments(rt_text_data(rt_static_text("DB____Host__")), I64{12})
+    if (trap_word(segments) != I64{2} || !jet_rt_string_eq(csv_words_get(segments, I64{0}), rt_static_text("db")) || !jet_rt_string_eq(csv_words_get(segments, I64{1}), rt_static_text("host"))) -> return I64{7}
+    tree :: data_tree_new(DATA_TREE_OBJECT, data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
+    env_tree_insert(tree, segments, I64{0}, jet_rt_string_clone(rt_static_text("a")))
+    upper :: csv_words_new()
+    csv_words_push(upper, jet_rt_string_clone(rt_static_text("DB")))
+    csv_words_push(upper, jet_rt_string_clone(rt_static_text("HOST")))
+    env_tree_insert(tree, upper, I64{0}, jet_rt_string_clone(rt_static_text("b")))
+    shown :: jet_rt_handle_debug_dyn(tree)
+    if !jet_rt_string_eq(shown, rt_static_text("{{\"db\":{{\"host\":\"b\"}}}}")) -> return I64{8}
+    jet_rt_string_drop(shown)
+    jet_rt_handle_drop_dyn(tree)
+    csv_record_free(segments)
+    csv_record_free(upper)
+    names :: rt_static_text("APP_PORT=port\nlimit=max\n")
+    renamed :: env_renamed(names, rt_static_text("app_limit"), rt_text_data(rt_static_text("limit")), I64{5})
+    if (renamed == I64{0} || !jet_rt_string_eq(renamed, rt_static_text("max"))) -> return I64{9}
+    jet_rt_string_drop(renamed)
+    if (env_renamed(names, rt_static_text("APP_OTHER"), rt_text_data(rt_static_text("OTHER")), I64{5}) != I64{0}) -> return I64{10}
+    origins :: csv_words_new()
+    csv_words_push(origins, jet_rt_string_clone(rt_static_text("APP_DB__TOKEN")))
+    csv_words_push(origins, jet_rt_string_clone(rt_static_text("db.token")))
+    framed :: jet_rt_record_new_field_error(rt_static_text("DB.Token"), rt_static_text("expected Int, found text \"s\""))
+    env_frame_error(framed, origins)
+    if !jet_rt_string_eq(text_glue_word(framed + TEXT_FIELD_REASON), rt_static_text("E2416: env var APP_DB__TOKEN -> DB.Token: secret value rejected")) -> return I64{11}
+    jet_rt_handle_drop_field_error(framed)
+    plain :: jet_rt_record_new_field_error(rt_static_text("port"), rt_static_text("missing"))
+    env_frame_error(plain, origins)
+    if !jet_rt_string_eq(text_glue_word(plain + TEXT_FIELD_REASON), rt_static_text("E2416: config field port: missing")) -> return I64{12}
+    jet_rt_handle_drop_field_error(plain)
+    csv_record_free(origins)
+    I64{0}
+}

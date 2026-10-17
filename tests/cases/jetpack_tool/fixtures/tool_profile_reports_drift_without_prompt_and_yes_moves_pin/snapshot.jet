@@ -1,0 +1,37 @@
+// ORACLE-PORT tests/jetpack_tool.rs:131-172 (not a hash inventory).
+// Core files stat is lstat: files.jet:840-843/1057; final symlinks are not followed.
+// Waits for ratified Stat in 3ec4f6b0c; no coarser modified_ms comparison.
+// original predicate: modified().ok() (None unreachable on supported hosts).
+use core.files
+use core.sys
+use core.encoding.hex
+use core.encoding.json
+fn visit(root: String, path: String) {
+    info :: files.stat(path.copy())
+    kind := 4
+    if info.is_symlink -> kind = 3
+    else if info.is_dir -> kind = 1
+    else if info.is_file -> kind = 2
+    mode := info.mode
+    if sys.family() != "unix" {
+        mode = 0
+        if info.readonly -> mode = 1
+    }
+    bytes := ""
+    if info.is_file -> bytes = hex.encode(files.read_bytes(path.copy()))
+    // Hex is injective over bytes; JSON quoting is injective over relative paths.
+    relative := ""
+    if path != root -> relative = files.relative(path.copy(), root.copy())
+    shown :: json.to_string(Dyn.Text(relative))
+    modified :: info.modified.to_unix_ns() ?? panic("mtime outside Unix nanosecond range")
+    print("{shown}\t{kind}\t{info.size}\t{mode}\tsome:{modified}\t{bytes}")
+    if !info.is_dir -> return
+    entries :: files.list_dir(path)
+    children := [String]{}
+    loop entry in entries -> &children.push(entry.path)
+    &children.sort()
+    loop child in children -> visit(root.copy(), child)
+}
+fn run(root: String) {
+    visit(root.copy(), root)
+}

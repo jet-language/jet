@@ -54,10 +54,10 @@ fn arithmetic_policy_is_visible_in_function_reflection() {
     let path = root.join("main.jet");
     std::fs::write(
         &path,
-        "#Arithmetic(.Wrapping)\npub fn wrapped(value: U8) -> U8 { return value + U8{1} }\nfn run() {}\n",
+        "#Arithmetic(.Wrapping)\nfn wrapped(value: U8) -> U8 { return value + U8{1} }\nfn run() {}\n",
     )
     .unwrap();
-    let (diagnostics, bundle, effect_facts) =
+    let (diagnostics, bundle, effect_facts, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
@@ -113,7 +113,7 @@ fn run() {}
 "#,
     )
     .unwrap();
-    let (diagnostics, bundle, _) =
+    let (diagnostics, bundle, _, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
@@ -200,6 +200,7 @@ fn method(name: &str, is_pub: bool) -> Func {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
         }],
         return_type: Some(Type::Named("String".to_string())),
         return_type_span: Some(span()),
@@ -337,8 +338,10 @@ fn state_info_keeps_no_entry_reachability_unknown() {
 fn type_info_exposes_methods_type_params_and_markers() {
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Box".to_string(),
         name_span: span(),
         type_params: vec![TypeParam {
@@ -416,8 +419,10 @@ fn type_info_exposes_methods_type_params_and_markers() {
 fn field_info_carries_visibility() {
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Secret".to_string(),
         name_span: span(),
         type_params: Vec::new(),
@@ -460,6 +465,7 @@ fn field_info_carries_visibility() {
 fn marker_arguments_are_typed_in_the_written_view() {
     let marker = Marker {
         name: "Inline".to_string(),
+        declaration: None,
         negated: false,
         name_span: span(),
         args: vec![jet_foundation::AST::MarkerCallArg::Expr(Expr::Ident(
@@ -472,8 +478,10 @@ fn marker_arguments_are_typed_in_the_written_view() {
     };
     let s = StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Hot".to_string(),
         name_span: span(),
         type_params: Vec::new(),
@@ -529,6 +537,7 @@ fn marker_arguments_are_typed_in_the_written_view() {
 fn distinct_capability_marker_is_visible_in_reflection() {
     let marker = Marker {
         name: "Comparable".to_string(),
+        declaration: None,
         negated: false,
         name_span: span(),
         args: Vec::new(),
@@ -626,8 +635,10 @@ fn registered_type_planes_reflect_as_typed_values() {
     }
     let info = build_struct_type_info(&StructDef {
         span: span(),
+        compiler_builtin_error: false,
         is_pub: true,
         is_package_pub: false,
+        compiler_builtin_error: false,
         name: "Planes".to_string(),
         name_span: span(),
         type_params: Vec::new(),

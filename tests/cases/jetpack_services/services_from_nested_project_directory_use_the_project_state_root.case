@@ -1,0 +1,26 @@
+# Port of tests/jetpack_services.rs:245-299; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# PENDING-GRAMMAR(batch-four): mkdir, chmod and host-name conditional.
+fixture: services_from_nested_project_directory_use_the_project_state_root.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+mkdir: root
+mkdir: home
+when os-name linux: mkdir: state
+when os-name linux: chmod: bin/systemd-run 755
+when os-name linux: chmod: bin/systemctl 755
+mkdir: src/nested
+step: jetpack services up --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+cwd: src/nested
+file: .jet/services/fixture/pid is-file
+file: src/nested/.jet/services/fixture/pid absent
+step: jetpack services health --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+cwd: src/nested
+step: jetpack services down --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+cwd: src/nested

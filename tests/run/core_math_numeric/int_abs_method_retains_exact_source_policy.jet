@@ -1,0 +1,15 @@
+// No math import: the receiver spelling must autoload the canonical source.
+fn magnitude(value: Int) -> Int Never! { value.abs() }
+// An unrelated local function must not replace the canonical method policy.
+fn abs(value: Int) -> Int Never! { 0 }
+
+fn run() {
+    print(magnitude(-7))
+    print(magnitude(0))
+    print(magnitude(9007199254740993))
+    print(magnitude(-9007199254740993))
+    print(magnitude(-9223372036854775808))
+    print(magnitude(-9223372036854775809))
+    print(magnitude(-340282366920938463463374607431768211457))
+    print(magnitude(-340282366920938463463374607431768211457) == 340282366920938463463374607431768211457)
+}

@@ -8,7 +8,7 @@
 
 // One step of a build recipe. Names are internal; the user-facing spellings
 // are the finite `Recipe.build(steps: […])` forms (D-JPK-BUILDRECIPE1).
-pub enum BuildStep {
+enum BuildStep {
     // A locked network fetch. `sha256` must be present; an empty hash is
     // ungranted ambient network (`E1236`).
     Fetch(url: String, sha256: String)
@@ -59,8 +59,8 @@ pub enum BuildStep {
 }
 
 // A build recipe over a staged source tree.
-pub struct BuildRecipe {
-    pub steps: [BuildStep]
+struct BuildRecipe {
+    steps: [BuildStep]
 
     // A stable content hash of the recipe, used by the trust gate.
     fn recipe_hash(self) -> String Never! {
@@ -134,7 +134,7 @@ struct RecipeCanonicalWriter {
     fn push_count(&self, value: Int) Never! {
         shift := 56
         loop shift >= 0 {
-            byte :: (value >> shift) & 255
+            byte :: ((value >> shift)).bit_and(255)
             &self.bytes.push(U8{byte})
             shift -= 8
         }

@@ -38,7 +38,7 @@ fn terminal_esc() -> String Never! {
 }
 
 // The explicit colour choice a user made on the command line.
-pub enum ColorChoice {
+enum ColorChoice {
     Auto
     Always
     Never
@@ -72,8 +72,8 @@ fn terminal_auto_color(is_tty: Bool) -[Env]> Bool Never! {
 
 // One palette vocabulary shared by every terminal surface. Plain mode is
 // byte-stable: every role returns its text unchanged.
-pub struct TerminalPalette {
-    pub color: Bool
+struct TerminalPalette {
+    color: Bool
 
     fn new(color: Bool) -> TerminalPalette Never! {
         TerminalPalette{color: color}
@@ -84,7 +84,7 @@ pub struct TerminalPalette {
     }
 
     fn paint(self, sgr: String, text: String) -> String Never! {
-        if !self.color -> return ~text
+        if !self.color -> return text.copy()
         esc :: terminal_esc()
         "{esc}[{sgr}m{text}{esc}[0m"
     }
@@ -124,7 +124,7 @@ pub struct TerminalPalette {
 
 // A mutation plan row's mark. Plain output keeps the symbol, so logs and
 // reviews read the same plan without colour.
-pub enum PlanMark {
+enum PlanMark {
     Add
     Remove
     Change
@@ -139,19 +139,19 @@ pub enum PlanMark {
 }
 
 // One collapsed root cause: its first card and how often it repeated.
-pub struct DiagnosticGroup {
-    pub code: String
-    pub root_cause_key: String
-    pub what: String
-    pub why: String
-    pub fix: String
-    pub count: Int
-    pub color: Bool
+struct DiagnosticGroup {
+    code: String
+    root_cause_key: String
+    what: String
+    why: String
+    fix: String
+    count: Int
+    color: Bool
 }
 
 // The coded failures one Jetpack invocation recorded, one card per root cause.
-pub struct DiagnosticCollector {
-    pub groups: [DiagnosticGroup]
+struct DiagnosticCollector {
+    groups: [DiagnosticGroup]
 
     fn new() -> DiagnosticCollector Never! {
         DiagnosticCollector{groups: [DiagnosticGroup]{}}
@@ -186,8 +186,8 @@ pub struct DiagnosticCollector {
 
 // One invocation's diagnostic recorder (Rust `begin_invocation`). Themes built
 // with `with_invocation` record into it; closing it flushes every card once.
-pub struct DiagnosticInvocation {
-    pub collector: Shared<DiagnosticCollector>
+struct DiagnosticInvocation {
+    collector: Shared<DiagnosticCollector>
 }
 
 impl DiagnosticInvocation.Close {
@@ -199,7 +199,7 @@ impl DiagnosticInvocation.Close {
     }
 }
 
-pub fn terminal_begin_invocation() -> DiagnosticInvocation Never! {
+fn terminal_begin_invocation() -> DiagnosticInvocation Never! {
     DiagnosticInvocation{collector: shared DiagnosticCollector.new()}
 }
 
@@ -227,7 +227,8 @@ fn terminal_columns() -[Env]> Int Never! {
 
 // Every Jetpack stderr transition is one complete write, which may wait for IO.
 fn terminal_write_output(text: String) Never! -[IO, Time.Wait]> {
-    term.stderr().write(text).drop("terminal output is best-effort")
+    stderr_handle := term.stderr()
+    &stderr_handle.write(text).drop("terminal output is best-effort")
 }
 
 // The indent under the gutter that detail and ledger rows share.
@@ -239,7 +240,7 @@ fn terminal_pad() -> String Never! {
 fn terminal_pad_end(text: String, width: Int) -> String Never! {
     scalars := 0
     loop _ in text.chars() -> scalars += 1
-    if scalars >= width -> return ~text
+    if scalars >= width -> return text.copy()
     "{text}{" ".repeat(width - scalars)}"
 }
 
@@ -304,9 +305,9 @@ fn terminal_ansi_visible_width(input: String) -> Int Never! {
 
 // Keep a live line on one physical terminal row. Control sequences take no
 // columns, and a reset is restored when an active style is cut.
-pub fn terminal_fit_line(input: String, width: Int) -> String Never! {
+fn terminal_fit_line(input: String, width: Int) -> String Never! {
     if width <= 0 -> return ""
-    if terminal_ansi_visible_width(input) <= width -> return ~input
+    if terminal_ansi_visible_width(input) <= width -> return input.copy()
     content_width :: width - 1
     raw :: input.bytes()
     index := 0
@@ -352,7 +353,7 @@ fn terminal_round_half_even(numerator: Int, denominator: Int) -> Int Never! {
 
 // `240 MB` / `1.3 GB` / `512 B`: decimal units. Bytes and any value of 100 or
 // more print whole; everything else keeps one decimal place.
-pub fn terminal_human_size(bytes: Int) -> String Never! {
+fn terminal_human_size(bytes: Int) -> String Never! {
     unit := 0
     divisor := 1
     loop bytes >= divisor * 1000 && unit < TERMINAL_SIZE_UNITS.len() - 1 {
@@ -366,7 +367,7 @@ pub fn terminal_human_size(bytes: Int) -> String Never! {
 }
 
 // A short human duration for the ledger's `built 42s` / `built 2m 03s` tag.
-pub fn terminal_human_duration(duration: time.Duration) -> String Never! {
+fn terminal_human_duration(duration: time.Duration) -> String Never! {
     seconds :: duration.ns /% 1000000000
     if seconds >= 60 {
         remainder :: seconds % 60
@@ -377,11 +378,11 @@ pub fn terminal_human_duration(duration: time.Duration) -> String Never! {
 }
 
 // The terminal theme every Jetpack line goes through.
-pub struct Theme {
-    pub color: Bool
+struct Theme {
+    color: Bool
     // The invocation whose coded failures collapse into one card per root
     // cause. A Theme outside an invocation prints each card at once.
-    pub invocation: Shared<DiagnosticCollector>?{None}
+    invocation: Shared<DiagnosticCollector>?{None}
 
     // The deterministic no-colour floor.
     fn plain() -> Theme Never! {
@@ -396,7 +397,7 @@ pub struct Theme {
 
     // The shared explicit > NO_COLOR > FORCE_COLOR > TTY policy for stderr.
     fn resolve_choice(choice: ColorChoice) -[IO, Env]> Theme Never! {
-        Theme.resolve_for(choice, term.stderr().is_terminal())
+        Theme.resolve_for(choice, term.stderr().is_tty())
     }
 
     // Resolve against the stream that will actually receive the bytes.
@@ -444,7 +445,7 @@ pub struct Theme {
     }
 
     fn live_enabled(self) -[IO, Env]> Bool Never! {
-        terminal_live_output_enabled(self.color, term.stderr().is_terminal(), sys.get("CI") != None)
+        terminal_live_output_enabled(self.color, term.stderr().is_tty(), sys.get("CI") != None)
     }
 
     // The aligned `jetpack` gutter every status line shares.
@@ -596,7 +597,7 @@ pub struct Theme {
             self.status("applying plan (--yes)")
             return true
         }
-        if !term.stdin().is_terminal() {
+        if !term.stdin().is_tty() {
             self.status("plan only; pass -y or --yes to apply in a non-interactive shell.")
             return false
         }
@@ -623,7 +624,7 @@ pub struct Theme {
                 self.status("using and remembering the detected local catalog (--yes)")
                 return Val(path)
             }
-            if !term.stdin().is_terminal() {
+            if !term.stdin().is_tty() {
                 self.error_coded("E1340", "the detected local catalog needs approval and cannot prompt here", "local-unofficial catalogs require an explicit first-use choice", "rerun in a terminal, pass -y, or pass --local-nix-catalog <dir>")
                 return None
             }
@@ -637,7 +638,7 @@ pub struct Theme {
             self.status("catalog setup cancelled.")
             return None
         }
-        if assume_yes || !term.stdin().is_terminal() {
+        if assume_yes || !term.stdin().is_tty() {
             self.error_coded("E1340", "this environment needs a package catalog", "no official signed registry or local catalog was found", "run in a terminal to choose a local catalog, or pass --local-nix-catalog <dir>")
             return None
         }
@@ -689,7 +690,7 @@ pub struct Theme {
     fn spinner(self, msg: String) -[IO, Env, Time]> Spinner Never! {
         if !self.live_enabled() -> return Spinner{stop: None, running: None}
         stop :: shared SpinnerState{stop: false}
-        flag :: ~stop
+        flag :: stop.copy()
         pad :: terminal_pad()
         shown :: terminal_fit_live_line(msg, terminal_columns() - 1)
         esc :: terminal_esc()
@@ -756,14 +757,14 @@ pub struct Theme {
 }
 
 // The stop flag a spinner task polls.
-pub struct SpinnerState {
-    pub stop: Bool
+struct SpinnerState {
+    stop: Bool
 }
 
 // A running spinner; closing it stops and clears it.
-pub struct Spinner {
-    stop: Shared<SpinnerState>?
-    running: Task<Never!>?
+struct Spinner {
+    priv stop: Shared<SpinnerState>?
+    priv running: Task<Never!>?
 }
 
 impl Spinner.Close {
@@ -778,39 +779,39 @@ impl Spinner.Close {
 
 // Byte facts for a realization closure. `None` means the counter overflowed
 // (transferred) or no object disclosed a trusted total yet (total).
-pub struct ByteProgressSnapshot {
-    pub transferred: Int?
-    pub total: Int?
+struct ByteProgressSnapshot {
+    transferred: Int?
+    total: Int?
 }
 
 // The aggregate line a live region draws while bytes move.
-pub struct AggregateProgressRenderer {
-    pub theme: Theme
-    pub tty: Bool
-    pub drawn: Int
+struct AggregateProgressRenderer {
+    theme: Theme
+    tty: Bool
+    drawn: Int
 }
 
 // Mutable progress facts behind one lock. Updates are additive; an unknown
 // denominator stays unknown rather than guessed.
-pub struct ByteProgressState {
-    pub transferred: Int?
-    pub total: Int?
-    pub total_overflowed: Bool
-    pub phase: String
-    pub package_done: Int
-    pub package_total: Int
-    pub object_done: Int
-    pub object_total: Int
-    pub object_base_done: Int
-    pub object_base_total: Int
-    pub last_rendered_phase: String
-    pub last_rendered_package_done: Int
-    pub last_rendered_package_total: Int
-    pub last_rendered_object_done: Int
-    pub last_rendered_object_total: Int
-    pub last_rendered_transferred: Int?
-    pub last_rendered_total: Int?
-    pub renderer: AggregateProgressRenderer?
+struct ByteProgressState {
+    transferred: Int?
+    total: Int?
+    total_overflowed: Bool
+    phase: String
+    package_done: Int
+    package_total: Int
+    object_done: Int
+    object_total: Int
+    object_base_done: Int
+    object_base_total: Int
+    last_rendered_phase: String
+    last_rendered_package_done: Int
+    last_rendered_package_total: Int
+    last_rendered_object_done: Int
+    last_rendered_object_total: Int
+    last_rendered_transferred: Int?
+    last_rendered_total: Int?
+    renderer: AggregateProgressRenderer?
 
     fn new() -> ByteProgressState Never! {
         ByteProgressState{
@@ -844,8 +845,8 @@ fn terminal_erase_lines(lines: Int) -> String Never! {
 
 // A thread-safe byte ledger for a realization's closure. Discovery and NAR
 // reads run on parallel workers, so every update takes the one lock.
-pub struct ByteProgress {
-    pub state: Shared<ByteProgressState>
+struct ByteProgress {
+    state: Shared<ByteProgressState>
 
     fn new() -> ByteProgress Never! {
         ByteProgress{state: shared ByteProgressState.new()}
@@ -1006,12 +1007,12 @@ pub struct ByteProgress {
 // `finish` promotes one permanent row above it. Non-TTY, NO_COLOR and CI only
 // ever print sequential lines; `set_status` and `collapse` never emit cursor
 // controls there.
-pub struct LiveRegion {
-    pub theme: Theme
-    pub tty: Bool
+struct LiveRegion {
+    theme: Theme
+    tty: Bool
     // Lines currently drawn, so the next redraw erases exactly that many.
-    pub drawn: Int
-    pub progress: ByteProgress
+    drawn: Int
+    progress: ByteProgress
 
     fn clear_control(&self) -> String Never! {
         erase := self.progress.clear_renderer()

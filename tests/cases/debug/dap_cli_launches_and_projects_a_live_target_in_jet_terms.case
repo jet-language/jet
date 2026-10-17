@@ -1,0 +1,39 @@
+# tests/debug.rs::dap_cli_launches_and_projects_a_live_target_in_jet_terms
+# Original source and wire predicates; PENDING-GRAMMAR(batch-four), PENDING-SAME-HEAD; runtime UNRUN.
+# Native compiler rustc availability guard retires at Jet backend cutover.
+requires: tool:lldb
+fixture: dap_cli_launches_and_projects_a_live_target_in_jet_terms.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\",\"linesStartAt1\":true,\"columnsStartAt1\":true}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":7}]}}"
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":true,\"args\":[],\"env\":{}}}"
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"threads\",\"arguments\":{}}"
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+send dap: "{\"seq\":8,\"type\":\"request\",\"command\":\"stackTrace\",\"arguments\":{\"threadId\":1}}"
+send dap: "{\"seq\":9,\"type\":\"request\",\"command\":\"continue\",\"arguments\":{\"threadId\":1}}"
+close dap
+exit: 0
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"type\":\"response\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"command\":\"setBreakpoints\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"verified\":true" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":2,"): ~ "\"id\":1,\"verified\":true,\"line\":7" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":8,"): ~ "\"type\":\"response\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":8,"): ~ "\"command\":\"stackTrace\"" # original substring predicate
+stdout.find_block("Content-Length:", ~ "\"request_seq\":8,"): ~ "\"line\":7" # original substring predicate
+stdout: ~ "\"request_seq\":1,\"success\":true,\"command\":\"initialize\"" # original substring predicate
+stdout: ~ "\"event\":\"stopped\"" # original substring predicate
+stdout: ~ "\"reason\":\"breakpoint\"" # original substring predicate
+stdout: ~ "\"hitBreakpointIds\":[1]" # original substring predicate
+stdout: ~ "\"command\":\"threads\"" # original substring predicate
+stdout: ~ "\"command\":\"stackTrace\"" # original substring predicate
+stdout: ~ "\"name\":\"run\"" # original substring predicate
+stdout: ~ "\"line\":2" # original substring predicate
+stdout: ~ "\"path\":\"{work}/main.jet\"" # original substring predicate
+stdout: ~ "\"event\":\"output\"" # original substring predicate
+stdout: ~ "total is " # original substring predicate
+stdout: ~ "\"event\":\"exited\"" # original substring predicate
+stdout: ~ "\"event\":\"terminated\"" # original substring predicate
+stdout: !~ "__jet_" # original substring predicate

@@ -1,0 +1,20 @@
+# Port of tests/cli_parts/runtime.rs:939-971; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+# PENDING-SEAM(compiler-lib): canonical registry-derived sorted word equality for az/equals-az/za :943-958; ledger-only subclaims in S1-RUNTIME-SEAMS.tsv.
+step: jet help --sort az
+env: NO_COLOR=1
+normalize: replace {jet-semver} "VERSION"
+exit: 0
+stdout: = help_az.txt
+step: jet help --sort=az
+env: NO_COLOR=1
+exit: 0
+step: jet help --sort za
+env: NO_COLOR=1
+exit: 0
+step: jet help --sort alpha
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "E2104" # original predicate
+stderr: ~ "frequency, az, za" # original predicate

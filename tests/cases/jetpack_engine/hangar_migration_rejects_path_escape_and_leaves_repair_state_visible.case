@@ -1,0 +1,28 @@
+# HAND-PORT tests/jetpack_engine.rs:188-231 hangar_migration_rejects_path_escape_and_leaves_repair_state_visible
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: hangar_migration_rejects_path_escape_and_leaves_repair_state_visible.fixture
+requires: os:unix
+mkdir: data
+mkdir: legacy
+mkdir: legacy/jet/hangar
+symlink: ../../escape-target legacy/jet/hangar/escape
+step: jet hangar path --no-color
+unset: JETPACK_ROOT
+unset: LOCALAPPDATA
+env: XDG_STATE_HOME={work}/legacy
+env: XDG_DATA_HOME={work}/data
+exit: 2
+stderr: ~ "E2604" # original predicate
+stderr: ~ "escapes its migration root" # original predicate
+file: data/jet/hangar absent
+file: data/jet/.hangar-migration.partial is-dir
+file: legacy/escape-target = hangar_migration_rejects_path_escape_and_leaves_repair_state_visible.outside.expected
+step: jet hangar path --no-color
+unset: JETPACK_ROOT
+unset: LOCALAPPDATA
+env: XDG_STATE_HOME={work}/legacy
+env: XDG_DATA_HOME={work}/data
+exit: 2
+stderr: ~ "incomplete Hangar migration" # original predicate
+file: legacy/escape-target = hangar_migration_rejects_path_escape_and_leaves_repair_state_visible.outside.expected
+

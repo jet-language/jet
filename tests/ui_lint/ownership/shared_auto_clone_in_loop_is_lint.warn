@@ -1,0 +1,26 @@
+Warning [L0102] (unused_parameter): Parameter `h` is never used.
+  --> shared_auto_clone_in_loop_is_lint.jet:2:9
+    |
+  2 | fn noop(h: Shared<Int>) {
+    |         ^
+ Why: An unused parameter often means the function contract or implementation is incomplete; Jet keeps this warning-only so prototypes stay unblocked.
+ Fix: Use `h`, rename it to `_h` when it is intentionally unused, or remove it from the function contract.
+More: jet-lang.dev/e/L0102
+
+Warning [L0202] (shared_auto_clone): Auto-cloned `h` inside a loop; consider hoisting or caching
+  --> shared_auto_clone_in_loop_is_lint.jet:8:14
+    |
+  8 |         noop(h)
+    |              ^
+ Why: Shared handles are cloned when used across a loop boundary
+ Fix: Hoist `h` before the loop, or clone once outside
+More: jet-lang.dev/e/L0202
+
+Warning [L0104] (unused_private_fn): Private function `loop_user` is never called or used as a value.
+  --> shared_auto_clone_in_loop_is_lint.jet:6:4
+    |
+  6 | fn loop_user(h: Shared<Int>) {
+    |    ^^^^^^^^^
+ Why: A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.
+ Fix: Remove the function, or rename `loop_user` to `_loop_user` when it is intentional.
+More: jet-lang.dev/e/L0104

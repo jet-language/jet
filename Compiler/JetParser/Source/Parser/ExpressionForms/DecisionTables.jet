@@ -19,6 +19,7 @@ use jet_foundation.[
 ]
 use jet_lexer.[
     TOKEN_AND_AND,
+    TOKEN_BREAK,
     TOKEN_EOF,
     TOKEN_EQ_EQ,
     TOKEN_GE,
@@ -40,29 +41,70 @@ use jet_lexer.[
     TOKEN_RBRACE,
     TOKEN_RBRACKET,
     TOKEN_RPAREN,
+    TOKEN_RETURN,
     TOKEN_SEMI,
     TOKEN_UNIFIED_ARROW,
 ]
 
 struct ParserExpressionFormValueBranch {
-    pub body: [Stmt]
-    pub value: Expr
-    pub span: Span
+    body: [Stmt]
+    value: Expr
+    span: Span
 }
 
 struct ParserExpressionFormArm {
-    pub cond: Expr
-    pub body: [Stmt]
-    pub value: Expr
+    cond: Expr
+    body: [Stmt]
+    value: Expr
 }
 
 fn parser_expression_form_error(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
     parser_add_error_code(&state, code, span, what, why, fix)
 }
 
+// A direct control statement cannot be a value arm. Decide that from tokens
+// before callable-tail speculation; recursively reparsing such guard tables
+// as values and then statements makes a balanced table exponentially costly.
+// Braced control arms still participate in ordinary value parsing.
+fn parser_guard_table_has_statement_arm(state: JetParserState) -> Bool Never! {
+    // Unlike cursor queries, this lexical probe must not normalize state.
+    if state.pending_type_gt || state.position < 0 -> return false
+    index := state.position
+    loop index < state.tokens.len() && parser_is_trivia(state.tokens[index].kind) -> index += 1
+    if index >= state.tokens.len() || state.tokens[index].kind != TOKEN_KW_IF -> return false
+    index += 1
+    loop index < state.tokens.len() && parser_is_trivia(state.tokens[index].kind) -> index += 1
+    if index >= state.tokens.len() || state.tokens[index].kind != TOKEN_LBRACE -> return false
+    index += 1
+    braces := 1
+    parens := 0
+    brackets := 0
+    loop index < state.tokens.len() {
+        kind :: state.tokens[index].kind
+        if braces == 1 && parens == 0 && brackets == 0 && (kind == TOKEN_UNIFIED_ARROW || kind == TOKEN_LAMBDA_ARROW) {
+            next_index := index + 1
+            loop next_index < state.tokens.len() && parser_is_trivia(state.tokens[next_index].kind) -> next_index += 1
+            next_kind :: if next_index < state.tokens.len() -> state.tokens[next_index].kind else -> TOKEN_EOF
+            if next_kind == TOKEN_RETURN || next_kind == TOKEN_BREAK -> return true
+        }
+        if kind == TOKEN_LBRACE -> braces += 1
+        if kind == TOKEN_RBRACE {
+            braces -= 1
+            if braces == 0 -> return false
+        }
+        if kind == TOKEN_LPAREN -> parens += 1
+        if kind == TOKEN_RPAREN && parens > 0 -> parens -= 1
+        if kind == TOKEN_LBRACKET -> brackets += 1
+        if kind == TOKEN_RBRACKET && brackets > 0 -> brackets -= 1
+        if kind == TOKEN_EOF -> return false
+        index += 1
+    }
+    false
+}
+
 fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_KW_IF -> return false
-    if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return true
+    if parser_kind_at(&state, 1) == TOKEN_LBRACE -> return !parser_guard_table_has_statement_arm(state)
     offset := 1
     parens := 0
     brackets := 0
@@ -93,11 +135,11 @@ fn parser_expression_form_if_ahead(state: &JetParserState) -> Bool Never! {
 // `allow_bare_lambda` is false inside a control header, where a trailing
 // `->` introduces the body (`if ready -> stmt`), so `name ->` is no lambda.
 // `if` and `loop` reach `parser_parse_expression_form` from the prefix parser.
-pub fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
+fn parser_expression_form_ahead(state: &JetParserState, allow_bare_lambda: Bool) -> Bool Never! {
     allow_bare_lambda && parser_current_kind(&state) == TOKEN_IDENT && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_LAMBDA_ARROW || (parser_kind_at(&state, 1) == TOKEN_MINUS && parser_kind_at(&state, 2) == TOKEN_LBRACKET))
 }
 
-pub fn parser_parse_expression_form(state: &JetParserState, depth: Int) -> ParsedExpr {
+fn parser_parse_expression_form(state: &JetParserState, depth: Int) -> ParsedExpr {
     if parser_current_kind(&state) == {
         TOKEN_KW_IF -> {
             parts := [ParserBranchPart]{}
@@ -172,7 +214,7 @@ fn parser_expression_form_arm_atom(state: &JetParserState, subject: Expr, op: Bi
         .PatternTest(_, _, _) -> true
         .Bool(_, _) -> prefer_predicate
         .Unary(unary_op, _, _) -> unary_op == UnOp.Not
-        .Ident(_, _) | .Field(_, _, _) | .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _) -> prefer_predicate
+        .Ident(_, _) | .Field(_, _, _) | .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) -> prefer_predicate
         else -> false
     }
     if is_predicate -> return raw.expr
@@ -255,11 +297,16 @@ fn parser_expression_form_value_block(state: &JetParserState, depth: Int, result
             if result_handler -> parser_expression_form_result_error(&state, token.span, "expected `}}` to close this Result handler branch", "every `{{` needs a matching `}}`", "add a closing `}}`") else -> parser_expression_form_error(&state, "E0003", token.span, "expected `}}` to close this value branch", "every `{{` needs a matching `}}`", "add `}}` after the branch value")
             return ParserExpressionFormValueBranch{body: statements, value: Expr.NoElse{span: token.span}, span: parser_cover(open.span, token.span)}
         }
+        current_token :: parser_current(&state)
+        if kind == TOKEN_IDENT && parser_value(state, current_token) == "next" && (parser_kind_at(&state, 1) == TOKEN_SEMI || parser_kind_at(&state, 1) == TOKEN_RBRACE || parser_kind_at(&state, 1) == TOKEN_LPAREN) {
+            &statements.push(parser_parse_statement(&state))
+            next
+        }
         // As in Rust's value blocks: a line that reaches the closing `}` is
         // tried as the branch value and kept when it parses cleanly; any
         // other line, or a failed try, is an ordinary statement.
         before :: state.position
-        if parser_value_tail_ahead(state) {
+        if !parser_guard_table_has_statement_arm(state) && parser_value_tail_ahead(state) {
             saved_position :: state.position
             saved_diagnostics :: state.diagnostics.len()
             saved_blocks :: state.block_spans.len()
@@ -494,7 +541,7 @@ fn parser_expression_form_parse_bare_lambda(state: &JetParserState, depth: Int) 
     span :: Span{start: name.span.start, end: body.end}
     lambda :: Lambda{
         take_names: [NamedSpan]{},
-        params: [LambdaParam]{LambdaParam{name: name.payload.decoded, name_span: name.span, ty: None, ty_span: None}},
+        params: [LambdaParam]{LambdaParam{name: parser_value(state, name), name_span: name.span, ty: None, ty_span: None}},
         effects: effects.effects,
         body: body.body,
         span: span,

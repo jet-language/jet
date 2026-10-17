@@ -1,0 +1,21 @@
+
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    ev :: event.with_policy<Int>(event.policy_sync())
+    sub :: ev.on(scope, (n) -> { print("low {n}") })
+    ev.on_priority(scope, 10, (n) -> { print("high {n}") })
+    ev.once(scope, (n) -> { print("once {n}") })
+    print(&ev.emit(1).summary())
+    sub.unsubscribe()
+    print(&ev.emit(2).summary())
+    print(scope.active_count())
+
+    hook :: event.hook<Int, String>("base")
+    hook.on(scope, (n) -> "seen {n}")
+    print(hook.run(7, "fallback"))
+    scope.cancel()
+    print(hook.run(8, "fallback"))
+}
+

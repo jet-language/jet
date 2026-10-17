@@ -19,7 +19,7 @@ PACKAGE_PROFILE_POINTER_SCHEMA :: prep { "jet-package-generation-pointer-v1" }
 PACKAGE_PROFILE_MAX_NODES :: prep { 100000 }
 PACKAGE_PROFILE_LOCK_PREFIX :: prep { "package-profile-" }
 
-pub enum PackageOutputNodeKind {
+enum PackageOutputNodeKind {
     File
     Directory
     Symlink
@@ -34,35 +34,35 @@ pub enum PackageOutputNodeKind {
 }
 
 // One filesystem node of a realized package output, relative to its root.
-pub struct PackageOutputNode {
-    pub package: String
-    pub path: String
-    pub kind: PackageOutputNodeKind
+struct PackageOutputNode {
+    package: String
+    path: String
+    kind: PackageOutputNodeKind
     // `sha256-…` of a file's bytes or a symlink's target; empty for a directory.
-    pub digest: String
-    pub source: String
-    pub link_target: String?
+    digest: String
+    source: String
+    link_target: String?
 }
 
 // A realized package, its checked StoreEntry and lease, and its output nodes.
-pub struct RealizedProfilePackage {
-    pub fact: PackageProfileFact
-    pub entry: StoreEntry
-    pub lease: CacheLease
-    pub nodes: [PackageOutputNode]
+struct RealizedProfilePackage {
+    fact: PackageProfileFact
+    entry: StoreEntry
+    lease: CacheLease
+    nodes: [PackageOutputNode]
 }
 
 // A complete generation: number, plan fingerprint, witness, and lock text.
-pub struct PackageGenerationRecord {
-    pub generation: Int
-    pub fingerprint: String
-    pub witness: String
-    pub metadata: String
+struct PackageGenerationRecord {
+    generation: Int
+    fingerprint: String
+    witness: String
+    metadata: String
 }
 
-pub struct PackageGenerationPointer {
-    pub generation: Int
-    pub witness: String
+struct PackageGenerationPointer {
+    generation: Int
+    witness: String
 }
 
 // One recorded collision contender, in `(provider, kind, digest)` order.
@@ -104,7 +104,7 @@ impl PackageGenerationStage.Close {
     }
 }
 
-pub fn cli_package_profile_state_dir(project_dir: String, name: String) -> String Never! {
+fn cli_package_profile_state_dir(project_dir: String, name: String) -> String Never! {
     files.join(files.join(pkg_managed_dir(project_dir), PACKAGE_PROFILE_STATE_DIR), name)
 }
 
@@ -113,7 +113,7 @@ fn cli_package_generations_dir(state: String) -> String Never! {
 }
 
 // The per-profile project lock; released at scope exit.
-pub fn cli_package_profile_lock(project_dir: String, profile: String) -[FS, Env]> RuntimeLock IOError! {
+fn cli_package_profile_lock(project_dir: String, profile: String) -[FS, Env, Time]> RuntimeLock IOError! {
     env_runtime_project_lock(project_dir, "{PACKAGE_PROFILE_LOCK_PREFIX}{profile}")
 }
 
@@ -125,7 +125,7 @@ fn cli_package_profile_owner(project_dir: String) -> String Never! {
 
 // Realize every package fact, project the chosen outputs into a staged
 // generation root, record and root its lock, and publish the generation.
-pub fn cli_build_package_generation(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
+fn cli_build_package_generation(verification: &StoreVerification, cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed, project_dir: String, plan: PackageProfilePlan) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int CLIError! {
     realized := [RealizedProfilePackage]{}
     built :: cli_build_package_generation_body(&verification, &cache, theme, parsed, project_dir, plan, &realized)
     loop package in realized -> package.lease.release()
@@ -309,7 +309,7 @@ fn cli_package_collision_record(metadata: String, path: String) -> PackageCollis
     record :: pkg_json_object(record_value) ?? return Err(CLIError.Other("profile collision record is not an object"))
     selected := String?{None}
     if record.get("selected") == .Val(value) {
-        if value != DataTree.Null {
+        if value != Dyn.Null {
             text :: pkg_json_text(value) ?? return Err(CLIError.Other(PKG_JSON_NOT_STRING))
             selected = Val(text)
         }
@@ -327,9 +327,9 @@ fn cli_package_collision_record(metadata: String, path: String) -> PackageCollis
     Ok(Val(PackageCollisionRecord{selected: selected, contenders: cli_sorted_contenders(contenders)}))
 }
 
-// A required string field: `missing` when absent, the DataTree accessor
+// A required string field: `missing` when absent, the Dyn accessor
 // message when not a string.
-fn cli_required_json_text(object: [String: DataTree], key: String, missing: String) -> String CLIError! {
+fn cli_required_json_text(object: [String: Dyn], key: String, missing: String) -> String CLIError! {
     value :: object.get(key) ?? return Err(CLIError.Other(missing))
     text :: pkg_json_text(value) ?? return Err(CLIError.Other(PKG_JSON_NOT_STRING))
     Ok(text)
@@ -455,7 +455,7 @@ fn cli_copy_projection_file(source: String, destination: String, expected: Strin
     info :: files.stat(source)
     if info.is_symlink || !info.is_file -> return Err(CLIError.Other("profile projection source is not a regular file"))
     files.copy2(source, destination)
-    if sys.is_unix() -> files.set_mode(destination, info.mode & TOOL_PROFILE_PERMISSION_BITS)
+    if sys.is_unix() -> files.set_mode(destination, (info.mode).bit_and(TOOL_PROFILE_PERMISSION_BITS))
     actual :: "sha256-{foundation_sha256_file_hex(destination)}"
     if actual != expected -> return Err(CLIError.Other("profile projection source changed while copying"))
 }
@@ -491,7 +491,7 @@ fn cli_next_package_generation(state: String) -[FS]> Int CLIError! {
 }
 
 // Every complete generation, ascending; abandoned stages are removed first.
-pub fn cli_read_package_generations(verification: &StoreVerification, state: String) -[FS, Env]> [PackageGenerationRecord] CLIError! {
+fn cli_read_package_generations(verification: &StoreVerification, state: String) -[FS, Env]> [PackageGenerationRecord] CLIError! {
     directory :: cli_package_generations_dir(state)
     info :: cli_stat_optional(directory) ?? return Ok([PackageGenerationRecord]{})
     if info.is_symlink || !info.is_dir -> return Err(CLIError.Other("profile generations path is not a real directory"))
@@ -514,7 +514,7 @@ pub fn cli_read_package_generations(verification: &StoreVerification, state: Str
     Ok(records)
 }
 
-fn cli_positive_json_int(value: DataTree?) -> Int? Never! {
+fn cli_positive_json_int(value: Dyn?) -> Int? Never! {
     if value == {
         .Val(tree) -> if tree == {
             .Int(number) -> if number > 0 -> Val(number) else -> None
@@ -528,7 +528,7 @@ fn cli_positive_json_int(value: DataTree?) -> Int? Never! {
 // profile, number, fingerprint, root hash, each package's provider facts and
 // their digest, the completion witness, the projected root, and its Store
 // root.
-pub fn cli_read_package_generation_record(verification: &StoreVerification, state: String, generation: Int) -[FS, Env]> PackageGenerationRecord CLIError! {
+fn cli_read_package_generation_record(verification: &StoreVerification, state: String, generation: Int) -[FS, Env]> PackageGenerationRecord CLIError! {
     directory :: files.join(cli_package_generations_dir(state), "{generation}")
     metadata :: cli_read_bounded(files.join(directory, PACKAGE_PROFILE_META_FILE))
     object :: pkg_json_object(cli_json_parse(metadata)) ?? return Err(CLIError.Other(PKG_JSON_NOT_OBJECT))
@@ -571,7 +571,7 @@ pub fn cli_read_package_generation_record(verification: &StoreVerification, stat
 // One recorded package: its output digest, and provider facts that parse,
 // validate, match their digest, and agree with the package's raw ref,
 // target, and provider. Returns the output digest.
-fn cli_validate_package_generation_entry(package: [String: DataTree]) -> String CLIError! {
+fn cli_validate_package_generation_entry(package: [String: Dyn]) -> String CLIError! {
     output_hash :: cli_required_json_text(package, "output_hash", "profile generation package lacks output hash")
     if !cli_is_canonical_digest(output_hash) -> return Err(CLIError.Other("profile generation package has invalid output hash"))
     facts_value :: package.get("provider_facts") ?? return Err(CLIError.Other("profile generation package lacks provider facts"))
@@ -594,7 +594,7 @@ fn cli_validate_package_generation_entry(package: [String: DataTree]) -> String 
 }
 
 // The published pointer, verified against the generation it names.
-pub fn cli_read_package_current_pointer(verification: &StoreVerification, state: String) -[FS, Env]> PackageGenerationPointer? CLIError! {
+fn cli_read_package_current_pointer(verification: &StoreVerification, state: String) -[FS, Env]> PackageGenerationPointer? CLIError! {
     path :: files.join(state, PACKAGE_PROFILE_CURRENT_FILE)
     info :: cli_stat_optional(path) ?? return Ok(None)
     if info.is_symlink || !info.is_file -> return Err(CLIError.Other("profile current pointer is not a regular file"))
@@ -611,7 +611,7 @@ pub fn cli_read_package_current_pointer(verification: &StoreVerification, state:
 
 // Point `current` at one verified generation (refusing a stale one when the
 // plan fingerprint is given) and re-read the pointer to prove it.
-pub fn cli_activate_package_generation(verification: &StoreVerification, project_dir: String, profile: String, generation: Int, expected_fingerprint: String?) -[FS, Env]> PackageGenerationRecord CLIError! {
+fn cli_activate_package_generation(verification: &StoreVerification, project_dir: String, profile: String, generation: Int, expected_fingerprint: String?) -[FS, Env]> PackageGenerationRecord CLIError! {
     state :: cli_package_profile_state_dir(project_dir, profile)
     record :: cli_read_package_generation_record(&verification, state, generation)
     if expected_fingerprint == .Val(expected) {
@@ -633,7 +633,7 @@ pub fn cli_activate_package_generation(verification: &StoreVerification, project
 // `switch` selects the active generation; the shell never rebuilds a profile
 // or adds source outputs directly. `--env` selects an environment module,
 // not a package generation.
-pub fn cli_dev_shell_projection(verification: &StoreVerification, project_dir: String, environment: EnvironmentFacts) -[FS, Env]> String? CLIError! {
+fn cli_dev_shell_projection(verification: &StoreVerification, project_dir: String, environment: EnvironmentFacts) -[FS, Env]> String? CLIError! {
     name :: "dev"
     declared := false
     loop profile in environment.package_profiles {

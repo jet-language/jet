@@ -1,0 +1,36 @@
+// The Jet backend's optimization levels over LIR (Compiler/JetBackend/Docs/O1.md).
+// Level 0 (`jet run`, `jet dev`, compile-time code) compiles the lowered LIR
+// as is; level 1 (`jet build`) runs the O1 pipeline on every function and
+// level 2 (`--release`) adds the O2 passes. The result must lint like any
+// lowered module: x64_compile_module lints it again, so an optimizer bug
+// refuses the build instead of producing wrong code.
+
+fn lir_optimize_module(program: LIRModule, level: Int) -> LIRModule Never! {
+    if level <= 0 -> return program.copy()
+    // P5/P4 first (module): inlined bodies then go through the per-function
+    // passes. Strength reduction before Simplify: Simplify folds its constants
+    // and removes what it leaves dead. P3 facts before Simplify, so Simplify
+    // folds the inline tests P3 proved and drops their slow paths; P6 CSE on
+    // the simplified function, then Simplify again removes what CSE aliased.
+    // Level 2: scalar replacement on the simplified function (inlined struct
+    // returns are local slots by then), Simplify propagates the promoted
+    // fields, CSE, LICM hoists what is invariant, and Simplify cleans up.
+    inlined :: lir_inline_module(program)
+    functions := [LIRFunction]{}
+    loop function in inlined.functions {
+        simplified :: lir_simplify_function(lir_inline_facts_function(lir_strength_function(function)))
+        if level == 1 {
+            &functions.push(lir_simplify_function(lir_cse_function(simplified)))
+            next
+        }
+        promoted :: lir_simplify_function(lir_scalar_replace_function(simplified))
+        &functions.push(lir_simplify_function(lir_licm_function(lir_cse_function(promoted))))
+    }
+    LIRModule{signatures: program.signatures, functions: functions, data: program.data, debug: program.debug}
+}
+
+// Unknown source positions stay zero, including generated instructions.
+fn opt_debug_line(block: LIRBlock, index: Int) -> Int Never! {
+    if block.lines.len() != block.insts.len() + 1 -> return 0
+    block.lines[index]
+}

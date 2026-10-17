@@ -1,0 +1,66 @@
+// Browser.rs:48-89,578-595; frozen CAbiRoutes.rs:13919-13931.
+// Error kind borrows an immutable process-lifetime E4 view (native .data);
+// cloning never owns that view, and dropping frees only the Error8 carrier.
+fn ui_browser_error_new(kind: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_BROWSER_ERROR_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_BROWSER_ERROR_KIND, kind)
+    result
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_browser_error(value: I64) -> I64 {
+    ui_browser_error_new(ui_carrier_word(value + UI_CARRIER_BROWSER_ERROR_KIND))
+}
+#Export(c) fn jet_rt_handle_drop_jet_browser_error(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_free(value, UI_CARRIER_BROWSER_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_browser_error(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_ERROR_KIND), ui_carrier_word(b + UI_CARRIER_BROWSER_ERROR_KIND))
+}
+
+fn ui_browser_error_message(kind: I64) -> I64 {
+    if {
+        jet_rt_string_eq(kind, rt_static_text("invalid profile")) -> rt_static_text("browser profile is not supported")
+        jet_rt_string_eq(kind, rt_static_text("invalid timeout")) -> rt_static_text("browser timeout must be between 1 and 600000 milliseconds")
+        jet_rt_string_eq(kind, rt_static_text("unsupported protocol")) -> rt_static_text("browser protocol is not available in this session")
+        jet_rt_string_eq(kind, rt_static_text("timeout")) -> rt_static_text("browser operation timed out")
+        jet_rt_string_eq(kind, rt_static_text("closed")) -> rt_static_text("browser session is closed")
+        jet_rt_string_eq(kind, rt_static_text("transport")) -> rt_static_text("browser transport failed")
+        jet_rt_string_eq(kind, rt_static_text("missing lock")) -> rt_static_text("no locked browser for this engine in .jet/lock")
+        jet_rt_string_eq(kind, rt_static_text("unknown engine")) -> rt_static_text("browser engine is not supported")
+        jet_rt_string_eq(kind, rt_static_text("missing binary")) -> rt_static_text("locked browser binary was not found")
+        jet_rt_string_eq(kind, rt_static_text("size mismatch")) -> rt_static_text("locked browser binary size drifted")
+        jet_rt_string_eq(kind, rt_static_text("invalid lock")) -> rt_static_text("browser lock entry is incomplete")
+        else -> rt_static_text("browser protocol failed")
+    }
+}
+#Export(c) fn jet_rt_handle_show_jet_browser_error(value: I64) -> I64 {
+    jet_rt_string_clone(ui_browser_error_message(ui_carrier_word(value + UI_CARRIER_BROWSER_ERROR_KIND)))
+}
+#Export(c) fn jet_rt_handle_debug_jet_browser_error(value: I64) -> I64 { jet_rt_handle_show_jet_browser_error(value) }
+#Export(c) fn jet_rt_handle_display_jet_browser_error(value: I64) -> I64 { jet_rt_handle_show_jet_browser_error(value) }
+
+// Seed pure producers, not a Browser host/connect implementation. Frozen
+// Result ABI writes ONLY the selected out pointer and returns 1=Ok, 0=Err.
+#Export(c) fn jet_browser_profile(name: I64, ok: I64, err: I64) -> I64 {
+    version :: if {
+        jet_rt_string_eq(name, rt_static_text("playwright-bidi-2025.5")) -> rt_static_text("2025.5")
+        jet_rt_string_eq(name, rt_static_text("playwright-bidi-2024.11")) -> rt_static_text("2024.11")
+        else -> {
+            ui_carrier_store(err, ui_browser_error_new(rt_static_text("invalid profile")))
+            return I64{0}
+        }
+    }
+    ui_carrier_store(ok, jet_rt_record_new_jet_browser_profile(name, version))
+    I64{1}
+}
+#Export(c) fn jet_browser_timeout(milliseconds: I64, ok: I64, err: I64) -> I64 {
+    if (milliseconds < I64{1} || milliseconds > I64{600000}) {
+        ui_carrier_store(err, ui_browser_error_new(rt_static_text("invalid timeout")))
+        return I64{0}
+    }
+    // The caller has already narrowed to raw i64, unlike the record ctor's
+    // exact-Int input. Do not reinterpret or narrow this word a second time.
+    ui_carrier_store(ok, ui_carrier_scalar_new(milliseconds))
+    I64{1}
+}

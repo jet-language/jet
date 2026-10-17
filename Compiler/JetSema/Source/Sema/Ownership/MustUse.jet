@@ -18,16 +18,16 @@ fn sema_must_use_core_type(name: String) -> Bool Never! {
 }
 
 // Rust `type_is_must_use`.
-fn sema_must_use_type(ty: Type, environment: SemaScopeEnvironment) -> Bool {
+fn sema_must_use_type(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
     name :: sema_expr_type_base_name(ty) ?? return false
     if sema_must_use_core_type(name) -> return true
-    definition :: sema_serde_type_definition(environment, name) ?? return false
+    definition :: sema_serde_type_definition(environment, program, name) ?? return false
     definition.must_use
 }
 
-fn sema_must_use_function(call: Call, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> Bool {
+fn sema_must_use_function(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> Bool {
     symbol :: sema_scope_resolve(scopes, call.name) ?? return false
-    declaration :: sema_scope_resolve_declaration(environment, symbol.id) ?? return false
+    declaration :: sema_scope_resolve_declaration(environment, program, symbol.id) ?? return false
     if declaration == {
         .Func(func) -> func.is_must_use
         else -> false
@@ -36,14 +36,14 @@ fn sema_must_use_function(call: Call, environment: SemaScopeEnvironment, scopes:
 
 // Rust `method_is_must_use`: a `#MustUse` method declared on the receiver's
 // nominal type.
-fn sema_must_use_method(type_name: String, method: String, environment: SemaScopeEnvironment) -> Bool {
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return false
-    loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
-        methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
-        loop method_index in 0..<methods.len() {
-            function :: methods[method_index]
-            if function.symbol.name == method && function.declaration.is_must_use -> return true
+fn sema_must_use_method(type_name: String, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool {
+    if program.registration_graph == .Val(graph) {
+        loop nominal_row in sema_registration_nominal_rows_named(graph, type_name) {
+            methods :: graph.modules[nominal_row.module_index].nominals[nominal_row.row].methods
+            loop method_index in 0..<methods.len() {
+                function :: methods[method_index]
+                if function.symbol.name == method && function.declaration.is_must_use -> return true
+            }
         }
     }
     false
@@ -51,20 +51,20 @@ fn sema_must_use_method(type_name: String, method: String, environment: SemaScop
 
 // Rust `ignored_must_use_call_target`: the name of the `#MustUse` function or
 // method the statement calls. A method counts only on a named receiver.
-fn sema_must_use_call_target(expr: Expr, environment: SemaScopeEnvironment, scopes: SemaScopeTable) -> String? {
+fn sema_must_use_call_target(expr: Expr, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable) -> String? {
     if expr == {
         .Call(call) -> {
-            if sema_must_use_function(call, environment, scopes) -> return Val(call.name)
+            if sema_must_use_function(call, environment, program, scopes) -> return Val(call.name)
         }
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> {
             if receiver == .Ident(name, _) {
-                symbol :: sema_scope_resolve(scopes, name) ?? return None
-                ty :: symbol.ty ?? return None
+                index :: sema_scope_resolve_index(scopes, name) ?? return None
+                ty :: sema_scope_binding_type(environment, scopes, index) ?? return None
                 // A resolved receiver type carries its canonical identity
                 // (`module::Name`); the method rows are keyed by its leaf.
                 base :: sema_expr_type_base_name(ty) ?? return None
                 owner :: sema_expr_operator_row_name(base)
-                if sema_must_use_method(owner, method, environment) -> return Val("{owner}.{method}")
+                if sema_must_use_method(owner, method, environment, program) -> return Val("{owner}.{method}")
             }
         }
         else -> {}
@@ -73,14 +73,14 @@ fn sema_must_use_call_target(expr: Expr, environment: SemaScopeEnvironment, scop
 }
 
 // Rust `check_ignored_must_use`, for a statement whose value is not fallible.
-pub fn sema_must_use_check_statement(expr: Expr, ty: Type, span: Span, environment: SemaScopeEnvironment, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
+fn sema_must_use_check_statement(expr: Expr, ty: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: SemaScopeTable, diagnostics: &[Diagnostic]) {
     if ty == .Apply(name, _) {
         if name == "Task" -> return
     }
-    target := sema_must_use_call_target(expr, environment, scopes)
+    target := sema_must_use_call_target(expr, environment, program, scopes)
     if target == None {
         if ty == (Type.Named{name: "Unit"}) -> return
-        if !sema_must_use_type(ty, environment) -> return
+        if !sema_must_use_type(ty, environment, program) -> return
         target = Val(type_name(ty))
     }
     shown :: target ?? return

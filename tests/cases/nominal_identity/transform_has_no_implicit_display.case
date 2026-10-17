@@ -1,0 +1,19 @@
+# Transform source identity does not grant an undeclared Display capability.
+# syntax-decisions.md:2271-2279; core-library.md:1939,1976.
+fixture: transform_has_no_implicit_display.fixture
+step: jet check transform.jet
+exit: nonzero
+stderr: ~ "[E0112]" # runtime reflection requires declared Display
+stderr: ~ "[E0915]" # interpolation requires declared Display
+step: jet check qualified_transform.jet
+exit: nonzero
+stderr: ~ "[E0112]" # qualification does not grant runtime reflection
+stderr: ~ "[E0915]" # qualification does not grant Display
+step: jet check transform2.jet
+exit: nonzero
+stderr: ~ "[E0112]" # scalar specialization does not grant reflection
+stderr: ~ "[E0915]" # scalar specialization does not grant Display
+step: jet check qualified_transform2.jet
+exit: nonzero
+stderr: ~ "[E0112]" # qualified specialization has the same refusal
+stderr: ~ "[E0915]" # qualified specialization has the same refusal

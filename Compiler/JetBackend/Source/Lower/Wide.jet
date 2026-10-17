@@ -1,0 +1,252 @@
+// O0 fixed 128-bit values used by JetCli/Source/Cli/AdaptiveTable.jet:
+// Integer/Unsigned payloads (13-14), normalization (81-82), and canonical
+// decimal Show (146-147,155-156,164-170). No wide arithmetic is used there.
+// The native inline ABI carries an address of two little-endian word halves;
+// payload storage, moves and copies use the same 16 bytes as other aggregates.
+use jet_foundation.[MIRInstruction, MIRPanicLoc, MIRProgram, MIRType, MIRValueID]
+
+fn lower_wide_signed(p: MIRProgram, ty: MIRType) -> Bool? Never! {
+    if ty.kind == {
+        .IntN(signed, bits) -> return if bits == 128 -> Val(signed) else -> None
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_wide_signed(p, inner)
+        else -> {}
+    }
+    if lower_type_def(p, ty) == .Val(definition) {
+        if definition.kind == {
+            .Alias(inner) | .Distinct(inner, _) -> return lower_wide_signed(p, inner)
+            else -> {}
+        }
+    }
+    None
+}
+
+// MIR's host Int is exact. Reinterpret each half as a signed machine word
+// before emitting Const, avoiding any truncating host conversion or parser.
+fn lower_wide_word(value: Int) -> Int Never! {
+    modulus :: 18446744073709551616
+    bits :: value.bit_and((modulus - 1))
+    if bits >= 9223372036854775808 -> bits - modulus else -> bits
+}
+
+fn lower_wide_constant(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, ty: MIRType, value: Int) Never! {
+    lower_storage_into(p, &f, dst, ty)
+    low :: lower_const(&f, lower_wide_word(value))
+    high :: lower_const(&f, lower_wide_word(value >> 64))
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: low})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: high})
+}
+
+fn lower_wide_constant_decimal(p: MIRProgram, f: &LowerFunction, dst: LIRValueID, ty: MIRType, decimal: String) Never! {
+    value :: Int.parse(decimal) ?? panic("checked wide integer constant is not decimal")
+    lower_wide_constant(p, &f, dst, ty, value)
+}
+
+fn lower_wide_load(f: &LowerFunction, value: LIRValueID, offset: Int) -> LIRValueID Never! {
+    word :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: word, base: value, offset: offset})
+    word
+}
+
+// Canonical base-10 formatting needs only four base-2^32 digits. Each division
+// input is at most 10*2^32-1, so ordinary word division cannot overflow. The
+// generated loop writes into a bounded frame buffer and allocates only the
+// owned String required by Show; it never constructs an exact/big Int owner.
+fn lower_wide_show(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, value: LIRValueID, ty: MIRType) Never! {
+    signed :: lower_wide_signed(p, ty) ?? panic("wide Show type")
+    low :: lower_wide_load(&f, value, 0)
+    high :: lower_wide_load(&f, value, 8)
+    zero :: lower_const(&f, 0)
+    negative :: lower_flag(&f)
+    magnitude_low := low
+    magnitude_high := high
+    if signed {
+        lower_emit(&f, LIRInst.Compare{dst: negative, condition: LIRCondition.Lt, left: high, right: zero})
+        // Two's-complement absolute value also represents I128.MIN's magnitude.
+        neg_low :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, low)
+        low_nonzero :: lower_numeric_compare(&f, LIRCondition.Ne, low, zero)
+        borrow :: lower_word(&f)
+        lower_emit(&f, LIRInst.Convert{dst: borrow, src: low_nonzero})
+        neg_high_base :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, high)
+        neg_high :: lower_numeric_binary(&f, LIRBinaryOp.Sub, neg_high_base, borrow)
+        magnitude_low = lower_numeric_choose(&f, negative, neg_low, low)
+        magnitude_high = lower_numeric_choose(&f, negative, neg_high, high)
+    } else {
+        lower_emit(&f, LIRInst.Const{dst: negative, value: 0})
+    }
+    buffer :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: buffer, size: 40, align: 8})
+    end :: lower_const(&f, 40)
+    one :: lower_const(&f, 1)
+    ten :: lower_const(&f, 10)
+    shift :: lower_const(&f, 32)
+    mask :: lower_const(&f, 4294967295)
+    ascii_zero :: lower_const(&f, 48)
+    digits :: lower_new_block(&f)
+    finished :: lower_new_block(&f)
+    current_low :: lower_word(&f)
+    current_high :: lower_word(&f)
+    cursor :: lower_word(&f)
+    start :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(digits, [LIRValueID]{magnitude_low, magnitude_high, end})})
+    lower_start(&f, digits, [LIRValueID]{current_low, current_high, cursor})
+    limbs :: [LIRValueID]{
+        lower_numeric_binary(&f, LIRBinaryOp.UShr, current_high, shift),
+        lower_numeric_binary(&f, LIRBinaryOp.And, current_high, mask),
+        lower_numeric_binary(&f, LIRBinaryOp.UShr, current_low, shift),
+        lower_numeric_binary(&f, LIRBinaryOp.And, current_low, mask),
+    }
+    remainder := zero
+    quotients := [LIRValueID]{}
+    loop limb in limbs {
+        remainder_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, remainder, shift)
+        input :: lower_numeric_binary(&f, LIRBinaryOp.Or, remainder_shifted, limb)
+        &quotients.push(lower_numeric_binary(&f, LIRBinaryOp.UDiv, input, ten))
+        remainder = lower_numeric_binary(&f, LIRBinaryOp.URem, input, ten)
+    }
+    quotient_high_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, quotients[0], shift)
+    next_high :: lower_numeric_binary(&f, LIRBinaryOp.Or, quotient_high_shifted, quotients[1])
+    quotient_low_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, quotients[2], shift)
+    next_low :: lower_numeric_binary(&f, LIRBinaryOp.Or, quotient_low_shifted, quotients[3])
+    next_cursor :: lower_numeric_binary(&f, LIRBinaryOp.Sub, cursor, one)
+    digit :: lower_numeric_binary(&f, LIRBinaryOp.Add, remainder, ascii_zero)
+    byte :: lower_new_value(&f, LIRLayout{size: 1, align: 1, class: LIRABIClass.Integer}, LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Convert{dst: byte, src: digit})
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: address, base: buffer, offset: next_cursor})
+    lower_emit(&f, LIRInst.Store{base: address, offset: 0, value: byte})
+    joined :: lower_numeric_binary(&f, LIRBinaryOp.Or, next_low, next_high)
+    more :: lower_numeric_compare(&f, LIRCondition.Ne, joined, zero)
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(digits, [LIRValueID]{next_low, next_high, next_cursor}), else_target: lower_target(finished, [LIRValueID]{next_cursor})})
+    lower_start(&f, finished, [LIRValueID]{start})
+    minus :: lower_new_block(&f)
+    ready :: lower_new_block(&f)
+    text_start :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: negative, then_target: lower_target(minus, [LIRValueID]{}), else_target: lower_target(ready, [LIRValueID]{start})})
+    lower_start(&f, minus, [LIRValueID]{})
+    minus_at :: lower_numeric_binary(&f, LIRBinaryOp.Sub, start, one)
+    minus_address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: minus_address, base: buffer, offset: minus_at})
+    minus_byte :: lower_new_value(&f, LIRLayout{size: 1, align: 1, class: LIRABIClass.Integer}, LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Const{dst: minus_byte, value: 45})
+    lower_emit(&f, LIRInst.Store{base: minus_address, offset: 0, value: minus_byte})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(ready, [LIRValueID]{minus_at})})
+    lower_start(&f, ready, [LIRValueID]{text_start})
+    text :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: text, base: buffer, offset: text_start})
+    length :: lower_numeric_binary(&f, LIRBinaryOp.Sub, end, text_start)
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", [LIRValueID]{text, length}, Val(dst))
+}
+
+// The compiler's SharedOutput.jet:25-26,227-228 uses checked Int constructors.
+// Borrow the exact-Int ABI documented in JetRuntime/Source/Int.jet:1-4:
+// an inline signed word or immutable base-1e9 limbs in a tagged node. Four
+// base-2^32 accumulators suffice after checking each carry; no big-Int clones
+// or temporary Strings/allocations are needed to construct the two halves.
+fn lower_wide_checked_construct(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID, target: MIRType, location: MIRPanicLoc) Never! {
+    signed :: lower_wide_signed(p, target) ?? panic("wide constructor target")
+    source :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "wide constructor has no checked source")
+    if !lower_is_exact_int(source) -> return lower_fail(&m, &f, "wide checked constructor requires exact Int")
+    operand :: lower_use(&m, &f, value) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    site :: lower_numeric_location(p, c, &m, &f, instruction, Val(location))
+    message :: "value doesn't fit in destination type"
+    zero :: lower_const(&f, 0)
+    one :: lower_const(&f, 1)
+    shift :: lower_const(&f, 32)
+    mask :: lower_const(&f, 4294967295)
+    base :: lower_const(&f, 1000000000)
+    small :: lower_new_block(&f)
+    large :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    inline :: lower_inline_test(&f, [LIRValueID]{operand})
+    lower_seal(&f, LIRTerminator.Branch{condition: inline, then_target: lower_target(small, [LIRValueID]{}), else_target: lower_target(large, [LIRValueID]{})})
+    lower_start(&f, small, [LIRValueID]{})
+    small_negative :: lower_numeric_compare(&f, LIRCondition.Lt, operand, zero)
+    if !signed -> lower_numeric_check(p, Val(c), &m, &f, small_negative, site, message)
+    sixty_three :: lower_const(&f, 63)
+    small_high :: if signed -> lower_numeric_binary(&f, LIRBinaryOp.Shr, operand, sixty_three) else -> zero
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{operand, small_high})})
+    lower_start(&f, large, [LIRValueID]{})
+    node_mask :: lower_const(&f, 4611686018427387903)
+    node_bits :: lower_numeric_binary(&f, LIRBinaryOp.And, operand, node_mask)
+    node :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Bitcast{dst: node, src: node_bits})
+    sign_word :: lower_wide_load(&f, node, 16)
+    negative :: lower_numeric_compare(&f, LIRCondition.Ne, sign_word, zero)
+    if !signed -> lower_numeric_check(p, Val(c), &m, &f, negative, site, message)
+    limbs :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: limbs, base: node, offset: 24})
+    length :: lower_wide_load(&f, node, 32)
+    five :: lower_const(&f, 5)
+    too_long :: lower_numeric_compare(&f, LIRCondition.UGt, length, five)
+    lower_numeric_check(p, Val(c), &m, &f, too_long, site, message)
+    digits :: lower_new_block(&f)
+    accumulated :: lower_new_block(&f)
+    at :: lower_word(&f)
+    low :: lower_word(&f)
+    high :: lower_word(&f)
+    final_low :: lower_word(&f)
+    final_high :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(digits, [LIRValueID]{length, zero, zero})})
+    lower_start(&f, digits, [LIRValueID]{at, low, high})
+    index :: lower_numeric_binary(&f, LIRBinaryOp.Sub, at, one)
+    four :: lower_const(&f, 4)
+    offset :: lower_numeric_binary(&f, LIRBinaryOp.Mul, index, four)
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: address, base: limbs, offset: offset})
+    packed :: lower_new_value(&f, LIRLayout{size: 4, align: 4, class: LIRABIClass.Integer}, LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Load{dst: packed, base: address, offset: 0})
+    digit :: lower_word(&f)
+    lower_emit(&f, LIRInst.Convert{dst: digit, src: packed})
+    words :: [LIRValueID]{
+        lower_numeric_binary(&f, LIRBinaryOp.And, low, mask),
+        lower_numeric_binary(&f, LIRBinaryOp.UShr, low, shift),
+        lower_numeric_binary(&f, LIRBinaryOp.And, high, mask),
+        lower_numeric_binary(&f, LIRBinaryOp.UShr, high, shift),
+    }
+    carry := digit
+    products := [LIRValueID]{}
+    loop word in words {
+        scaled :: lower_numeric_binary(&f, LIRBinaryOp.Mul, word, base)
+        product :: lower_numeric_binary(&f, LIRBinaryOp.Add, scaled, carry)
+        &products.push(lower_numeric_binary(&f, LIRBinaryOp.And, product, mask))
+        carry = lower_numeric_binary(&f, LIRBinaryOp.UShr, product, shift)
+    }
+    overflow :: lower_numeric_compare(&f, LIRCondition.Ne, carry, zero)
+    lower_numeric_check(p, Val(c), &m, &f, overflow, site, message)
+    product_low_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, products[1], shift)
+    next_low :: lower_numeric_binary(&f, LIRBinaryOp.Or, products[0], product_low_shifted)
+    product_high_shifted :: lower_numeric_binary(&f, LIRBinaryOp.Shl, products[3], shift)
+    next_high :: lower_numeric_binary(&f, LIRBinaryOp.Or, products[2], product_high_shifted)
+    more :: lower_numeric_compare(&f, LIRCondition.Ne, index, zero)
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(digits, [LIRValueID]{index, next_low, next_high}), else_target: lower_target(accumulated, [LIRValueID]{next_low, next_high})})
+    lower_start(&f, accumulated, [LIRValueID]{final_low, final_high})
+    result_low := final_low
+    result_high := final_high
+    if signed {
+        max_high :: lower_const(&f, 9223372036854775807)
+        min_high :: lower_const(&f, -9223372036854775807 - 1)
+        bound :: lower_numeric_choose(&f, negative, min_high, max_high)
+        exceeds :: lower_numeric_compare(&f, LIRCondition.UGt, final_high, bound)
+        lower_numeric_check(p, Val(c), &m, &f, exceeds, site, message)
+        at_min :: lower_numeric_compare(&f, LIRCondition.Eq, final_high, min_high)
+        nonzero_low :: lower_numeric_compare(&f, LIRCondition.Ne, final_low, zero)
+        beyond_min :: lower_flag(&f)
+        lower_logic(&f, beyond_min, true, at_min, nonzero_low)
+        lower_numeric_check(p, Val(c), &m, &f, beyond_min, site, message)
+        neg_low :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, final_low)
+        borrow :: lower_word(&f)
+        lower_emit(&f, LIRInst.Convert{dst: borrow, src: nonzero_low})
+        neg_high_base :: lower_numeric_binary(&f, LIRBinaryOp.Sub, zero, final_high)
+        neg_high :: lower_numeric_binary(&f, LIRBinaryOp.Sub, neg_high_base, borrow)
+        result_low = lower_numeric_choose(&f, negative, neg_low, final_low)
+        result_high = lower_numeric_choose(&f, negative, neg_high, final_high)
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{result_low, result_high})})
+    output_low :: lower_word(&f)
+    output_high :: lower_word(&f)
+    lower_start(&f, done, [LIRValueID]{output_low, output_high})
+    lower_storage_into(p, &f, dst, target)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: output_low})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: output_high})
+}

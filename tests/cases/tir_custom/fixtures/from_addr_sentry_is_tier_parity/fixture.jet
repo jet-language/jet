@@ -1,0 +1,11 @@
+
+use core.mem as _mem
+
+fn run() {
+    value :: 7
+    #Unsafe("value is live on this stack frame and the pointer never escapes") {
+        addr :: _mem.address_of(value)
+        result :: _mem.Ptr<Int>.from_addr(addr)
+        print(result.*)
+    }
+}

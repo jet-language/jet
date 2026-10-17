@@ -14,7 +14,7 @@ fn store_hex_bytes(bytes: [U8]) -> String Never! {
     loop byte in bytes {
         code :: Int.from_u8(byte)
         &out.push(digits[code >> 4])
-        &out.push(digits[code & 15])
+        &out.push(digits[(code).bit_and(15)])
     }
     pkg_bytes_text(out, 0, out.len())
 }
@@ -48,7 +48,7 @@ fn store_is_lower_hex(value: String, count: Int) -> Bool Never! {
     true
 }
 // One decoded lowercase-hex text field, or the reason it failed.
-pub enum StoreUnhex {
+enum StoreUnhex {
     Text(String)
     OddLength
     NotLowerHex
@@ -110,19 +110,19 @@ fn store_text_split_last(text: String, needle: String) -> (before: String, after
 fn store_push_u64_be(out: &[U8], value: Int) Never! {
     shift := 56
     loop shift >= 0 {
-        &out.push(U8{(value >> shift) & 255})
+        &out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
 }
 
 // Append `value` as 8 little-endian bytes.
 fn store_push_u64_le(out: &[U8], value: Int) Never! {
-    loop shift in 0..<8 -> &out.push(U8{(value >> (shift * 8)) & 255})
+    loop shift in 0..<8 -> &out.push(U8{((value >> (shift * 8))).bit_and(255)})
 }
 
 // Append `value` as 16 little-endian bytes (Rust `i128::to_le_bytes`).
 fn store_push_i128_le(out: &[U8], value: Int) Never! {
-    loop shift in 0..<8 -> &out.push(U8{(value >> (shift * 8)) & 255})
+    loop shift in 0..<8 -> &out.push(U8{((value >> (shift * 8))).bit_and(255)})
     fill :: if value < 0 -> 255 else -> 0
     loop _ in 0..<8 -> &out.push(U8{fill})
 }
@@ -140,7 +140,7 @@ fn store_push_frame(out: &[U8], field: [U8]) Never! {
 
 // Sorted, de-duplicated copy of `values` (Rust `BTreeSet<String>`).
 fn store_sorted_unique(values: [String]) -> [String] Never! {
-    sorted := ~values
+    sorted := values.copy()
     &sorted.sort()
     out := [String]{}
     loop value in sorted {

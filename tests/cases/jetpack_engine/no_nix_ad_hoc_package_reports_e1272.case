@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:5222-5246 no_nix_ad_hoc_package_reports_e1272
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step: jetpack env -p postgres --no-color --trust -- true
+cwd: project
+env: PATH=
+exit: 2
+stderr: ~ "E1272" # original contains predicate
+stderr: ~ "postgres@nixpkgs" # original contains predicate
+stderr: !~ "couldn't run `nix`" # original negative contains predicate
+

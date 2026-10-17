@@ -35,7 +35,7 @@ fn run() {
     status :: reactive.derived(() -> if saved.get() -> "saved" else -> "dirty")
 
     tui_backend :: ui.tui_backend()
-    render_backend :: ~tui_backend
+    render_backend :: tui_backend.copy()
     ui.reactive_render(
     () -> {
         save_action :: ui.node_shortcut(
@@ -163,8 +163,8 @@ fn run() {
     if _grant == {
         .Ok(grant) -> {
             print("filesystem grant: {grant.root}")
-            open_request :: gui.open_request(~grant)
-            save_request :: gui.save_request(~grant)
+            open_request :: gui.open_request(grant.copy())
+            save_request :: gui.save_request(grant.copy())
             open_result :: gui.open_file(open_request)
             if open_result == {
                 .Ok(selection) -> {
@@ -211,7 +211,7 @@ fn run() {
     if _shortcut == {
         .Ok(shortcut) -> {
             print("host shortcut: {shortcut.key}")
-            binding_result :: gui.bind_shortcut(~shortcut, "save")
+            binding_result :: gui.bind_shortcut(shortcut.copy(), "save")
             if binding_result == {
                 .Ok(binding) -> {
                     register_result :: gui.register_shortcut(binding)
@@ -222,7 +222,7 @@ fn run() {
                 }
                 .Err(_) -> print("shortcut binding outcome: cancelled or failed")
             }
-            dispatch_result :: gui.dispatch_shortcut(~shortcut)
+            dispatch_result :: gui.dispatch_shortcut(shortcut.copy())
             if dispatch_result == {
                 .Ok(_) -> { print("shortcut dispatch completed") }
                 .Err(_) -> print("shortcut dispatch outcome: cancelled or failed")
@@ -233,7 +233,7 @@ fn run() {
     if _a11y == {
         .Ok(metadata) -> {
             a11y_node :: gui.editor_view(draft.get(), selected.get(), theme.get(), settings_open.get())
-            accessible_tree :: ui.node_accessibility(a11y_node, ~metadata)
+            accessible_tree :: ui.node_accessibility(a11y_node, metadata.copy())
             if accessible_tree.accessibility == {
                 .Some(_) -> {
                     print("accessibility metadata on labeled node: {accessible_tree.label}")
@@ -241,7 +241,7 @@ fn run() {
                 .None -> panic("accessibility metadata missing")
             }
             accessibility_backend :: ui.null_backend()
-            ui.mount(accessibility_backend, ~accessible_tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+            ui.mount(accessibility_backend, accessible_tree.copy(), ui.constraint(0.0, 0.0, 80.0, 24.0))
             print("accessibility mount commands: {accessibility_backend.commands().len()}")
             attached :: gui.attach_accessibility(a11y_node, metadata)
             if attached == {

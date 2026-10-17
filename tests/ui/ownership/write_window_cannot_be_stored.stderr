@@ -1,0 +1,17 @@
+Error [E2305]: `edit` cannot be shared — it does not live long enough to be stored in a struct field
+  --> write_window_cannot_be_stored.jet:6:31
+    |
+  6 |     holder :: Holder{ window: edit }
+    |                               ^^^^
+ Why: `edit` is a view into `xs`; sharing it outside `xs`'s scope would let it outlive its owner and point into freed storage
+ Fix: Keep `edit` inside `xs`'s scope, or copy what you need before it leaves
+More: jet-lang.dev/e/E2305
+
+Error [E0212]: `xs[…]` already has a live view that conflicts with `holder`
+  --> write_window_cannot_be_stored.jet:6:5
+    |
+  6 |     holder :: Holder{ window: edit }
+    |     ^^^^^^
+ Why: Many read views may overlap, but an exclusive mutable view cannot overlap any other live view
+ Fix: Finish using the earlier view before creating this one, or make an owned copy
+More: jet-lang.dev/e/E0212

@@ -1,0 +1,14 @@
+# Port of tests/testing_tiers.rs::testing_file_helpers_preserve_success_and_failure_values_across_tiers; original source unchanged.
+# ORACLE-LITERAL: testing_tiers.rs:41. Template resolves original repository absolute paths at runtime.
+# PENDING-GRAMMAR: write template token expansion.
+fixture: fixtures/testing_file_helpers_preserve_success_and_failure_values_across_tiers
+write: fixture.jet testing_file_helpers_preserve_success_and_failure_values_across_tiers.template
+step default: jet run fixture.jet
+stdout: = testing_file_helpers_preserve_success_and_failure_values_across_tiers.out
+step: jet run --interpret fixture.jet
+stdout: = testing_file_helpers_preserve_success_and_failure_values_across_tiers.out
+stderr: == default
+step: jet build fixture.jet
+step: built
+stdout: = testing_file_helpers_preserve_success_and_failure_values_across_tiers.out
+stderr: == default

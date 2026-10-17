@@ -1,0 +1,19 @@
+// Seed runtime.rs131922-131926 / HostServices.rs1673-1676, identity #4825.
+// Optional owner; NodeId String plus inline metadata, never a second tree.
+fn ui_accessibility_projection_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(UI_ACCESSIBILITY_PROJECTION_BYTES, I64{8})
+    ui_carrier_store(result + UI_ACCESSIBILITY_PROJECTION_NODE, jet_rt_string_clone(ui_carrier_word(value + UI_ACCESSIBILITY_PROJECTION_NODE)))
+    ui_accessibility_copy(value + UI_ACCESSIBILITY_PROJECTION_METADATA, result + UI_ACCESSIBILITY_PROJECTION_METADATA)
+    result
+}
+fn ui_accessibility_projection_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_ACCESSIBILITY_PROJECTION_NODE))
+    ui_accessibility_fields_drop(value + UI_ACCESSIBILITY_PROJECTION_METADATA)
+    jet_rt_free(value, UI_ACCESSIBILITY_PROJECTION_BYTES, I64{8})
+}
+fn ui_accessibility_projection_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    jet_rt_string_eq(ui_carrier_word(a + UI_ACCESSIBILITY_PROJECTION_NODE), ui_carrier_word(b + UI_ACCESSIBILITY_PROJECTION_NODE)) && jet_rt_handle_eq_jet_ui_accessibility(a + UI_ACCESSIBILITY_PROJECTION_METADATA, b + UI_ACCESSIBILITY_PROJECTION_METADATA)
+}

@@ -1,0 +1,8 @@
+# Port of tests/explain_syntax.rs:64-86.
+# PENDING-REFERENCE: verbose snapshot must come from a real run, checked to start with
+# the actual default stream and include the current lookup("^") row's name and decision.
+step default: jet explain "^"
+# Original dictionary snapshot retained so the dynamic prefix source cannot silently change.
+stdout: = ../../cli/explain_syntax_caret.txt
+step: jet explain "^" --verbose
+stdout: = explain_syntax_verbose_names_registry_constant_and_decision.stdout

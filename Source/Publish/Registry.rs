@@ -8,7 +8,7 @@ use crate::Diagnostics::Diagnostic;
 use crate::Publish::Index::{self, IndexEntry};
 use crate::Publish::Sign;
 use crate::SHA256;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json};
 use std::cell::Cell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -2112,7 +2112,7 @@ pub(super) fn verify_oci_referrers(repo: &Path, entry: &IndexEntry) -> io::Resul
     Ok(())
 }
 
-fn object_get<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_get<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -2129,7 +2129,7 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
         .as_object()
         .map_err(|_| invalid_oci("OCI referrer index is not an object"))?;
     require_oci_keys(object, &["schemaVersion", "subject", "manifests"], "index")?;
-    if !matches!(object_get(object, "schemaVersion"), Some(DataTree::Int(2))) {
+    if !matches!(object_get(object, "schemaVersion"), Some(Dyn::Int(value)) if value.to_i64() == Some(2)) {
         return Err(invalid_oci(
             "OCI referrer index has an unsupported schema version",
         ));
@@ -2195,7 +2195,8 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
             .to_string();
         validate_oci_digest(&digest)?;
         let size = match object_get(manifest, "size") {
-            Some(DataTree::Int(value)) if *value >= 0 => *value as u64,
+            Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| invalid_oci(
+                "OCI referrer descriptor size is not a non-negative integer"))?,
             _ => {
                 return Err(invalid_oci(
                     "OCI referrer descriptor size is not a non-negative integer",
@@ -2208,7 +2209,7 @@ fn parse_oci_index(bytes: &[u8], subject: &str) -> io::Result<Vec<(String, Strin
 }
 
 fn require_oci_keys(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     keys: &[&str],
     label: &str,
 ) -> io::Result<()> {
@@ -2498,7 +2499,7 @@ fn parse_registry_package_metadata(
     // formats registry.json across lines. JSON strings cannot contain literal
     // newlines, so trimming and joining lines preserves the parsed meaning.
     let canonical = text.lines().map(str::trim).collect::<String>();
-    let DataTree::Object(object) = parse_json(&canonical)
+    let Dyn::Object(object) = parse_json(&canonical)
         .map_err(|_| invalid_registry_metadata("registry.json is not valid JSON"))?
     else {
         return Err(invalid_registry_metadata(
@@ -2528,7 +2529,7 @@ fn parse_registry_package_metadata(
         let Some(value) = object_get(&object, field) else {
             continue;
         };
-        let DataTree::Object(values) = value else {
+        let Dyn::Object(values) = value else {
             return Err(invalid_registry_metadata(&format!(
                 "registry `{field}` dependencies must be an object"
             )));
@@ -2540,20 +2541,20 @@ fn parse_registry_package_metadata(
 
     let mut feature_map = BTreeMap::<String, Vec<String>>::new();
     if let Some(value) = object_get(&object, "features") {
-        let DataTree::Object(features) = value else {
+        let Dyn::Object(features) = value else {
             return Err(invalid_registry_metadata(
                 "registry `features` must be an object of string arrays",
             ));
         };
         for (feature, values) in features {
-            let DataTree::Array(values) = values else {
+            let Dyn::Array(values) = values else {
                 return Err(invalid_registry_metadata(
                     "registry feature values must be arrays",
                 ));
             };
             let mut names = Vec::new();
             for value in values {
-                let DataTree::Text(name) = value else {
+                let Dyn::Text(name) = value else {
                     return Err(invalid_registry_metadata(
                         "registry feature members must be strings",
                     ));
@@ -2568,7 +2569,7 @@ fn parse_registry_package_metadata(
     }
 
     if let Some(value) = object_get(&object, "constraints") {
-        let DataTree::Object(constraints) = value else {
+        let Dyn::Object(constraints) = value else {
             return Err(invalid_registry_metadata(
                 "registry `constraints` must be an object",
             ));
@@ -2615,7 +2616,7 @@ fn parse_registry_package_metadata(
 fn merge_registry_dependency(
     dependencies: &mut BTreeMap<String, RegistryDependency>,
     name: &str,
-    descriptor: &DataTree,
+    descriptor: &Dyn,
     role: &str,
 ) -> io::Result<()> {
     validate_registry_dependency_name(name)?;
@@ -2650,7 +2651,7 @@ fn merge_registry_dependency(
 }
 
 fn parse_registry_dependency_descriptor(
-    descriptor: &DataTree,
+    descriptor: &Dyn,
 ) -> io::Result<(Vec<String>, Vec<String>, BTreeSet<String>, bool, bool)> {
     let mut requirements = Vec::new();
     let mut prefer = Vec::new();
@@ -2658,12 +2659,12 @@ fn parse_registry_dependency_descriptor(
     let mut strict = false;
     let mut enabled_by_default = false;
     match descriptor {
-        DataTree::Text(requirement) => requirements.push(requirement.clone()),
-        DataTree::Object(fields) => {
+        Dyn::Text(requirement) => requirements.push(requirement.clone()),
+        Dyn::Object(fields) => {
             if let Some(value) =
                 object_get(fields, "require").or_else(|| object_get(fields, "version"))
             {
-                let DataTree::Text(requirement) = value else {
+                let Dyn::Text(requirement) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `require` must be a string",
                     ));
@@ -2673,7 +2674,7 @@ fn parse_registry_dependency_descriptor(
                 requirements.push("*".to_string());
             }
             if let Some(value) = object_get(fields, "prefer") {
-                let DataTree::Text(requirement) = value else {
+                let Dyn::Text(requirement) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `prefer` must be a string",
                     ));
@@ -2681,13 +2682,13 @@ fn parse_registry_dependency_descriptor(
                 prefer.push(requirement.clone());
             }
             if let Some(value) = object_get(fields, "reject") {
-                let DataTree::Array(values) = value else {
+                let Dyn::Array(values) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `reject` must be an array",
                     ));
                 };
                 for value in values {
-                    let DataTree::Text(version) = value else {
+                    let Dyn::Text(version) = value else {
                         return Err(invalid_registry_metadata(
                             "registry dependency reject values must be strings",
                         ));
@@ -2701,7 +2702,7 @@ fn parse_registry_dependency_descriptor(
                 }
             }
             if let Some(value) = object_get(fields, "strict") {
-                let DataTree::Bool(value) = value else {
+                let Dyn::Bool(value) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `strict` must be boolean",
                     ));
@@ -2709,7 +2710,7 @@ fn parse_registry_dependency_descriptor(
                 strict = *value;
             }
             if let Some(value) = object_get(fields, "default") {
-                let DataTree::Bool(value) = value else {
+                let Dyn::Bool(value) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `default` must be boolean",
                     ));
@@ -2717,14 +2718,14 @@ fn parse_registry_dependency_descriptor(
                 enabled_by_default = *value;
             }
             if let Some(value) = object_get(fields, "features") {
-                let DataTree::Array(values) = value else {
+                let Dyn::Array(values) = value else {
                     return Err(invalid_registry_metadata(
                         "registry dependency `features` must be an array",
                     ));
                 };
                 if values
                     .iter()
-                    .any(|value| !matches!(value, DataTree::Text(_)))
+                    .any(|value| !matches!(value, Dyn::Text(_)))
                 {
                     return Err(invalid_registry_metadata(
                         "registry dependency feature values must be strings",
@@ -2773,11 +2774,11 @@ fn activate_registry_feature(
 }
 
 fn required_metadata_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     key: &str,
 ) -> io::Result<String> {
     match object_get(object, key) {
-        Some(DataTree::Text(value)) if !value.trim().is_empty() => Ok(value.clone()),
+        Some(Dyn::Text(value)) if !value.trim().is_empty() => Ok(value.clone()),
         _ => Err(invalid_registry_metadata(&format!(
             "registry.json requires a non-empty `{key}`"
         ))),

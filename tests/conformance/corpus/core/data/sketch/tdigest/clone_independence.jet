@@ -1,0 +1,26 @@
+// core-conformance: core.data.sketch.tdigest.add
+// D-COPY-DEFAULT1=A: cloned centroid storage is independent.
+use core.data.sketch.tdigest as tdigest
+
+fn run() {
+    original := tdigest.new()
+    assert_eq(original.quantile(Float{0.5}), Float{0.0})
+    &original.add(Float{2.0})
+    clone := original.copy()
+    &clone.add(Float{1.0})
+    &clone.add(Float{3.0})
+    &clone.add(Float{4.0})
+    &clone.add(Float{5.0})
+    assert_eq(original.quantile(Float{0.5}), Float{2.0})
+    assert_eq(clone.quantile(Float{-1.0}), Float{1.0})
+    assert_eq(clone.quantile(Float{0.5}), Float{3.0})
+    assert_eq(clone.quantile(Float{0.51}), Float{3.0})
+    assert_eq(clone.quantile(Float{2.0}), Float{5.0})
+    &original.add(Float{0.0})
+    assert_eq(clone.quantile(Float{-1.0}), Float{1.0})
+    repeated := tdigest.new()
+    loop _ in 0..<500 -> &repeated.add(Float{1.0})
+    assert_eq(repeated.quantile(Float{0.5}), Float{1.0})
+    print(original.quantile(Float{0.5}))
+    print(clone.quantile(Float{0.5}))
+}

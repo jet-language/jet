@@ -28,7 +28,7 @@ pub(super) fn no_matching_union(span: Span) -> Stmt {
 
 pub(super) fn enum_payload_type(variant: &crate::AST::Variant) -> Type {
     match &variant.payload {
-        VariantPayload::Unit | VariantPayload::Named(_) => data_tree_type(),
+        VariantPayload::Unit | VariantPayload::Named(_) => dyn_type(),
         VariantPayload::Single(ty, _) => ty.clone(),
     }
 }
@@ -317,8 +317,8 @@ pub(super) fn string_expr(value: &str, span: Span) -> Expr {
     Expr::Str(vec![crate::AST::StrPart::Lit(value.to_string())], span)
 }
 
-pub(super) fn data_tree_type() -> Type {
-    Type::Named("DataTree".to_string())
+pub(super) fn dyn_type() -> Type {
+    Type::Named("Dyn".to_string())
 }
 pub(super) fn field_error_type() -> Type {
     Type::Named("FieldError".to_string())
@@ -373,27 +373,27 @@ pub(super) fn map_literal(values: Vec<(Expr, Expr)>, span: Span) -> Expr {
     Expr::MapLit(values, span)
 }
 
-pub(super) fn data_tree_object(entries: Vec<(Expr, Expr)>, span: Span) -> Expr {
-    data_tree_variant("Object", vec![map_literal(entries, span)], span)
+pub(super) fn dyn_object(entries: Vec<(Expr, Expr)>, span: Span) -> Expr {
+    dyn_variant("Object", vec![map_literal(entries, span)], span)
 }
 
-pub(super) fn data_tree_object_expr(map: Expr, span: Span) -> Expr {
-    data_tree_variant("Object", vec![map], span)
+pub(super) fn dyn_object_expr(map: Expr, span: Span) -> Expr {
+    dyn_variant("Object", vec![map], span)
 }
 
-pub(super) fn data_tree_null(span: Span) -> Expr {
-    data_tree_variant("Null", Vec::new(), span)
+pub(super) fn dyn_null(span: Span) -> Expr {
+    dyn_variant("Null", Vec::new(), span)
 }
-pub(super) fn data_tree_text(value: &str, span: Span) -> Expr {
-    data_tree_variant("Text", vec![string_expr(value, span)], span)
+pub(super) fn dyn_text(value: &str, span: Span) -> Expr {
+    dyn_variant("Text", vec![string_expr(value, span)], span)
 }
 
-pub(super) fn data_tree_variant(variant: &str, args: Vec<Expr>, span: Span) -> Expr {
+pub(super) fn dyn_variant(variant: &str, args: Vec<Expr>, span: Span) -> Expr {
     if args.is_empty() {
-        Expr::Field(Box::new(ident("DataTree", span)), variant.to_string(), span)
+        Expr::Field(Box::new(ident("Dyn", span)), variant.to_string(), span)
     } else {
         Expr::MethodCall {
-            receiver: Box::new(ident("DataTree", span)),
+            receiver: Box::new(ident("Dyn", span)),
             method: variant.to_string(),
             method_span: span,
             owner_type_args: Vec::new(),
@@ -403,6 +403,7 @@ pub(super) fn data_tree_variant(variant: &str, args: Vec<Expr>, span: Span) -> E
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 }
@@ -473,6 +474,7 @@ pub(super) fn method_with_owner_args(
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 
@@ -484,10 +486,11 @@ pub(super) fn method_with_type_args(receiver: Expr, name: &str, type_args: Vec<T
         owner_type_args: Vec::new(),
         type_args,
         args: Vec::new(),
-        recv_type: (name == Syntax::METHOD_DATATREE_DECODE).then(|| Syntax::TYPE_DATA.to_string()),
+        recv_type: (name == Syntax::METHOD_DYN_DECODE).then(|| Syntax::TYPE_DATA.to_string()),
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 
@@ -532,6 +535,7 @@ pub(super) fn named_param(name: &str, ty: Type, span: Span) -> Param {
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
     }
 }
 

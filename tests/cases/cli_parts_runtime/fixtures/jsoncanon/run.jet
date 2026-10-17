@@ -1,0 +1,19 @@
+use core.encoding.json as json
+
+fn show() Never! {
+    data :: json.parse(`{"a":1}`) ?? panic("json")
+    r :: json.canonical(data)
+    print(r)
+}
+
+fn sign() -> String {
+    data :: json.parse(`{"a":1}`)
+    r :: json.canonical(data)
+    r
+}
+
+fn already_migrated() Never! {
+    data :: json.parse(`{"a":1}`) ?? panic("json")
+    r :: json.canonical(data) ?? panic("value is not canonical JSON")
+    print(r)
+}

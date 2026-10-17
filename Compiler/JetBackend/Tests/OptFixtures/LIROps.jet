@@ -1,0 +1,128 @@
+// Bitcast and InlineAsm through every optimizer pass. Bitcast is a pure value
+// operation (renamed, shared, hoisted, removed when dead) but never an alias:
+// its destination may change ABI class. InlineAsm is an effect: kept when its
+// result is dead, a barrier for loads, and an escape for stack slots.
+fn olops_float(b: &LIRFunctionBuilder) -> LIRValueID Never! {
+    lir_builder_value(&b, lir_layout_float(), LIRDrop.Trivial, None)
+}
+
+fn olops_asm(dst: LIRValueID?, args: [LIRValueID]) -> LIRInst Never! {
+    regs := [Int]{}
+    loop i in 0..<args.len() -> &regs.push(LIR_ASM_INPUTS[i])
+    LIRInst.InlineAsm{dst: dst, args: args, regs: regs, result: if dst == None -> -1 else -> 0, code: [U8]{U8{144}}}
+}
+
+fn olops_unchanged(function: LIRFunction, after: LIRFunction) -> Bool Never! {
+    ofx_check(function, after, lir_print_module(ofx_module(function)))
+}
+
+fn olops_simplify_bitcast(dead: Bool) -> Bool Never! {
+    b := ofx_builder(if dead -> "bitcast-dead-removed" else -> "bitcast-renamed-not-aliased")
+    x :: lir_builder_word(&b)
+    y :: lir_builder_word(&b)
+    c :: olops_float(&b)
+    lir_builder_push(&b, LIRInst.Copy{dst: y, src: x})
+    lir_builder_push(&b, LIRInst.Bitcast{dst: c, src: y})
+    if dead -> return ofx_simplify(ofx_finish(&b, [LIRValueID]{x}, x), "  b0(v0: i64):\n    ret v0")
+    ofx_simplify(ofx_finish(&b, [LIRValueID]{x}, c), "  b0(v0: i64):\n    v1: f64 = bitcast v0\n    ret v1")
+}
+
+fn olops_simplify_asm() -> Bool Never! {
+    b := ofx_builder("inline-asm-kept-renamed")
+    x :: lir_builder_word(&b)
+    y :: lir_builder_word(&b)
+    out :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Copy{dst: y, src: x})
+    lir_builder_push(&b, olops_asm(Val(out), [LIRValueID]{y}))
+    lir_builder_push(&b, olops_asm(None, [LIRValueID]{}))
+    function :: ofx_finish(&b, [LIRValueID]{x}, x)
+    // After renumbering: x stays v0, the dead asm result becomes v1.
+    first :: lir_print_inst(function, olops_asm(Val(LIRValueID{value: 1}), [LIRValueID]{x}))
+    second :: lir_print_inst(function, olops_asm(None, [LIRValueID]{}))
+    ofx_simplify(function, "  b0(v0: i64):\n    {first}\n    {second}\n    ret v0")
+}
+
+fn olops_cse_bitcast(shared: Bool) -> Bool Never! {
+    b := ofx_builder(if shared -> "cse-bitcast-shared" else -> "cse-bitcast-layout-key")
+    x :: lir_builder_word(&b)
+    a :: olops_float(&b)
+    c :: if shared -> olops_float(&b) else -> lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Bitcast{dst: a, src: x})
+    lir_builder_push(&b, LIRInst.Bitcast{dst: c, src: x})
+    if (!shared) {
+        function :: ofx_finish(&b, [LIRValueID]{x}, c)
+        return olops_unchanged(function, lir_cse_function(function))
+    }
+    d :: olops_float(&b)
+    lir_builder_push(&b, LIRInst.Binary{dst: d, op: LIRBinaryOp.Add, left: a, right: c})
+    function :: ofx_finish(&b, [LIRValueID]{x}, d)
+    ofx_check(function, lir_cse_function(function), ofx_expected(function, "  b0(v0: i64):\n    v1: f64 = bitcast v0\n    v3: f64 = add v1, v1\n    ret v3"))
+}
+
+fn olops_cse_asm_barrier() -> Bool Never! {
+    b := ofx_builder("cse-load-inline-asm-barrier")
+    p :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
+    x :: lir_builder_word(&b)
+    y :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Load{dst: x, base: p, offset: 0})
+    lir_builder_push(&b, olops_asm(None, [LIRValueID]{}))
+    lir_builder_push(&b, LIRInst.Load{dst: y, base: p, offset: 0})
+    z :: ofx_binary(&b, LIRBinaryOp.Add, x, y)
+    function :: ofx_finish(&b, [LIRValueID]{p}, z)
+    olops_unchanged(function, lir_cse_function(function))
+}
+
+fn olops_licm_bitcast() -> Bool Never! {
+    b := ofx_builder("licm-bitcast-hoisted")
+    x :: lir_builder_word(&b)
+    gate :: lir_builder_bool(&b)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x, gate}, LIRTerminator.Jump{target: ofacts_target(10, [LIRValueID]{})})
+    c :: olops_float(&b)
+    lir_builder_push(&b, LIRInst.Bitcast{dst: c, src: x})
+    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Branch{condition: gate, then_target: ofacts_target(20, [LIRValueID]{}), else_target: ofacts_target(30, [LIRValueID]{})})
+    lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Jump{target: ofacts_target(10, [LIRValueID]{})})
+    lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Return{value: Val(c)})
+    olicm_check(lir_builder_finish(b), "  b0(v0: i64, v1: i8):\n    v2: f64 = bitcast v0\n    jmp b10()\n  b10():\n    br v1, b20(), b30()\n  b20():\n    jmp b10()\n  b30():\n    ret v2")
+}
+
+fn olops_licm_asm_clobber() -> Bool Never! {
+    b := ofx_builder("licm-header-load-inline-asm-kept")
+    pointer :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
+    gate :: lir_builder_bool(&b)
+    loaded :: lir_builder_word(&b)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{pointer, gate}, LIRTerminator.Jump{target: ofacts_target(10, [LIRValueID]{})})
+    lir_builder_push(&b, LIRInst.Load{dst: loaded, base: pointer, offset: 8})
+    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Branch{condition: gate, then_target: ofacts_target(20, [LIRValueID]{}), else_target: ofacts_target(30, [LIRValueID]{})})
+    lir_builder_push(&b, olops_asm(None, [LIRValueID]{}))
+    lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Jump{target: ofacts_target(10, [LIRValueID]{})})
+    lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Return{value: Val(loaded)})
+    function :: lir_builder_finish(b)
+    olops_unchanged(function, lir_licm_function(function))
+}
+
+fn olops_scalar_escape(asm: Bool) -> Bool Never! {
+    b := ofx_builder(if asm -> "scalar-inline-asm-escape" else -> "scalar-bitcast-escape")
+    slot :: oscalar_slot(&b, 8)
+    x :: ofx_const(&b, 17)
+    oscalar_store(&b, slot, 0, x)
+    y :: oscalar_load(&b, slot, 0)
+    escaped :: lir_builder_word(&b)
+    lir_builder_push(&b, if asm -> olops_asm(Val(escaped), [LIRValueID]{slot}) else -> LIRInst.Bitcast{dst: escaped, src: slot})
+    result :: ofx_binary(&b, LIRBinaryOp.Add, y, escaped)
+    oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, result))
+}
+
+fn opt_fixtures_lirops() -> Bool Never! {
+    passed := true
+    if !olops_simplify_bitcast(false) -> passed = false
+    if !olops_simplify_bitcast(true) -> passed = false
+    if !olops_simplify_asm() -> passed = false
+    if !olops_cse_bitcast(true) -> passed = false
+    if !olops_cse_bitcast(false) -> passed = false
+    if !olops_cse_asm_barrier() -> passed = false
+    if !olops_licm_bitcast() -> passed = false
+    if !olops_licm_asm_clobber() -> passed = false
+    if !olops_scalar_escape(false) -> passed = false
+    if !olops_scalar_escape(true) -> passed = false
+    passed
+}

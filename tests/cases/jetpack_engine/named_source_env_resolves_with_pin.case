@@ -1,0 +1,43 @@
+# HAND-PORT tests/jetpack_engine.rs:5727-5753 named_source_env_resolves_with_pin
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: named_source_env_resolves_with_pin.fixture
+env: NO_COLOR=1
+refused: hangar-verified-fixture
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn named_source_env_resolves_with_pin() {
+#     // An env that declares a named source `stable` and references it inline as
+#     // `ripgrep@stable` resolves via the nix provider against the pin. The
+#     // fixture is keyed by the source name (`stable-ripgrep.json`).
+#     let proj = Scratch::new("proj");
+#     let root = Scratch::new("root");
+#     fs::write(
+#         proj.join("env.jet"),
+#         "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"ripgrep@stable\"])\n    ]\n}\n",
+#     )
+#     .unwrap();
+#     let output = jetpack()
+#         .args(["build", "--no-color", "--offline"])
+#         .current_dir(&proj.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     assert!(stderr.contains("ripgrep"), "stderr: {stderr}");
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build --no-color --offline
+cwd: project
+exit: 0
+stderr: ~ "ripgrep" # original contains predicate
+

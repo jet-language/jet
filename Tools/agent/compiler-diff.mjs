@@ -44,10 +44,10 @@ const EXT = "jet";
 const WORKSPACE_FILE = "workspace.jet";
 
 const CORPORA = ["golden", "ui", "differential"];
-const PHASES = ["check", "run", "interpret", "build"];
+const PHASES = ["check", "run", "build"];
 const DEFAULT_PHASES = {
   golden: ["check", "run"],
-  differential: ["check", "run", "interpret"],
+  differential: ["check", "run"],
   canary: ["check", "run"],
 };
 // The order a divergence is reported in: the most specific fact first.
@@ -64,10 +64,10 @@ export function usage() {
   return [
     "Usage: compiler-diff.mjs --reference <jet> --candidate <jet> [options]",
     "       compiler-diff.mjs --canary [--reference <jet>]",
-    "  --reference PATH     pinned reference compiler (default $JET_REFERENCE_COMPILER, else target/debug/jet)",
+    "  --reference PATH     pinned reference compiler (default $JET_REFERENCE_COMPILER, else $JET; required)",
     "  --candidate PATH     candidate compiler (default $JET_CANDIDATE_COMPILER; required)",
     "  --corpus NAME        golden | ui | differential | all (default all; repeatable)",
-    "  --phases LIST        override phases: check,run,interpret,build",
+    "  --phases LIST        override phases: check,run,build",
     "  --filter TEXT        keep cases whose path contains TEXT (repeatable)",
     "  --limit N            compare at most N cases (after filtering)",
     "  --keep-going         compare every case; report every divergence",
@@ -84,7 +84,7 @@ class Unavailable extends Error {}
 
 export function parseArgs(argv) {
   const options = {
-    reference: process.env.JET_REFERENCE_COMPILER || join(ROOT, "target/debug/jet"),
+    reference: process.env.JET_REFERENCE_COMPILER || process.env.JET || null,
     candidate: process.env.JET_CANDIDATE_COMPILER || null,
     corpora: [],
     phases: null,
@@ -172,6 +172,38 @@ function copyTopLevelFiles(source, destination) {
   }
 }
 
+// D-FAIL-EXIT1: program-side stops exit 70; unhandled/fatal entry reports exit 1.
+// Unknown report forms have no exit oracle and must remain explicit wrong rows.
+export function goldenFailureExit(stem, stderr) {
+  if (stderr.startsWith("Stop [") || stderr.startsWith("Error [E3003]:")) return 70;
+  if (stderr.startsWith("Runtime fault [R0801]:") || stderr.startsWith("Runtime fault [R0802]:")) {
+    const contradicted = stderr.split("\n").some((line) => {
+      const trimmed = line.trim();
+      return trimmed.startsWith("exit:") && trimmed.slice(5).trim() !== "70";
+    });
+    return contradicted ? null : 70;
+  }
+  // #1474: this source disables logging before log.fatal exits 1.
+  if (stderr === "") return stem === "io/log_fatal" ? 1 : null;
+  // Source-proved entry returns, matching tests/golden.rs; fatal_exit explicitly
+  // calls process.exit(1). An arbitrary Error prefix is not an exit oracle.
+  switch (stem) {
+    case "errors/propagation_journey":
+    case "errors/propagation_journey_direct":
+    case "errors/propagation_journey_one_hop":
+    case "errors/propagation_journey_core":
+    case "errors/error_context":
+    case "errors/default_error_conversion":
+    case "errors/default_err_edge":
+    case "errors/fatal_exit":
+    case "serde/decode_error_exit":
+    case "crypto/crypto_error_run":
+      return 1;
+    default:
+      return null;
+  }
+}
+
 // Port of `collect_feature_golden_entries` (tests/golden.rs).
 export function collectGoldenEntries(exDir = FEATURES) {
   const entries = [];
@@ -234,7 +266,6 @@ function phaseArgs(phase, file) {
   switch (phase) {
     case "check": return ["check", file];
     case "run": return ["run", file];
-    case "interpret": return ["run", "--interpret", file];
     case "build": return ["build", file];
     default: throw new Error(`unknown phase ${phase}`);
   }
@@ -244,7 +275,7 @@ function commandsFor(phases, file, stdin) {
   return phases.map((phase) => ({
     phase,
     args: phaseArgs(phase, file),
-    stdin: phase === "run" || phase === "interpret" ? stdin : null,
+    stdin: phase === "run" ? stdin : null,
   }));
 }
 
@@ -305,10 +336,9 @@ function uiCommands(source, file) {
   if (has("sandbox_effect") || has("plugin_target")) return [{ phase: "build", args: ["build", file, "--target=sandbox"] }];
   if (complexity) return [{ phase: "check", args: ["lint", "--complexity", file, `--max=${complexity.split(/\s+/u)[1]}`] }];
   if (has("cost_cli")) return [{ phase: "check", args: ["explain", "--cost", file] }];
-  if (has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {
-    return [{ phase: "interpret", args: ["run", "--interpret", file] }];
+  if (has("run_cli") || has("web_run") || has("dev_interpreter") || has("runtime_ffi") || has("parent_control_cancel")) {
+    return [{ phase: "run", args: ["run", file] }];
   }
-  if (has("run_cli") || has("web_run")) return [{ phase: "run", args: ["run", file] }];
   return [{ phase: "check", args: ["check", file] }];
 }
 
@@ -420,7 +450,7 @@ function scratchRoot(options) {
 }
 
 function requireExecutable(path, role) {
-  if (!path) throw new Unavailable(`no ${role} compiler: pass --${role} or set JET_${role.toUpperCase()}_COMPILER`);
+  if (!path) throw new Unavailable(`no ${role} compiler: pass --${role} or set JET_${role.toUpperCase()}_COMPILER${role === "reference" ? " or JET" : ""}`);
   const absolute = resolve(path);
   try {
     if (!statSync(absolute).isFile()) throw new Error("not a file");
@@ -1074,10 +1104,6 @@ async function compare(options) {
   const probeEnv = baseEnv();
   if (options.memLimit !== "none" && !toolAvailable("systemd-run", ["--version"], probeEnv)) {
     throw new Unavailable("systemd-run is unavailable for --mem-limit; pass --mem-limit none to run uncapped");
-  }
-  const needsRustc = cases.some((c) => c.commands.some((command) => command.phase === "run" || command.phase === "build"));
-  if (needsRustc && !toolAvailable("rustc", ["--version"], probeEnv)) {
-    throw new Unavailable("rustc is unavailable; run and build phases cannot be compared (run under Tools/agent/jet-env)");
   }
 
   const release = acquireLock(root);

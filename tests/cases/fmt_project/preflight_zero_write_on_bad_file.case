@@ -1,0 +1,10 @@
+# Port of tests/fmt_project.rs::preflight_zero_write_on_bad_file (524-551).
+# PENDING-SAME-HEAD: original predicates, no reference snapshot or blessing.
+# Intentional parse error: bad.jet (original INVALID at line 45).
+fixture: preflight_zero_write_on_bad_file.fixture
+copy: good.jet good.before
+copy: bad.jet bad.before
+step: jet fmt
+exit: 2
+file: good.jet == good.before
+file: bad.jet == bad.before

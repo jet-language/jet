@@ -1,0 +1,47 @@
+# Port of tests/release_gates.rs::compiled_workload_release_gate_uses_frozen_contract_and_canaries; all original predicates, runtime UNRUN.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "--contract" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "--check" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "outcomes.tsv" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "measurements.tsv" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "tiers.tsv" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "jet_tool_version" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "peer_tool_version" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "review_status" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "review_evidence" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "review.tsv" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "reviewer_is_independent" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "review_workflow" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "review_run" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "review_actor" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "rust_tolerance_ratio" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-gate.sh ~ "metric_is_loss" # Original gate.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "runMeasured" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "process.hrtime.bigint" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "JET_WEB_CHROMIUM" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "CdpDriver" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "network=loopback-only" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "network=disabled" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "peerMeasured" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "samples" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "targetArtifactProof" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ "JET_STORE_DIR" # Original runner.contains.
+file: {root}/Tools/ci/compiled-workload-runner.mjs ~ ".jet" # Original runner.contains.
+step: node {root}/Tools/ci/compiled-workload-runner.mjs --measurement-registry
+cwd: {root}
+exit: 0
+stdout: ~ "\"linux\"" # Original measurement-registry contains.
+stdout: ~ "\"macos\"" # Original measurement-registry contains.
+stdout: ~ "\"windows\"" # Original measurement-registry contains.
+stdout: ~ "\"VmHWM\"" # Original measurement-registry contains.
+stdout: ~ "\"VmRSS\"" # Original measurement-registry contains.
+stdout: ~ "\"PeakWorkingSet64\"" # Original measurement-registry contains.
+stdout: ~ "\"processProperty\":\"PeakWorkingSet64\"" # Original measurement-registry contains.
+for line file.skip_lines(1).filter(!= "") {root}/tests/compiled_workloads/canaries.tsv as r
+capture: canary = text cap:r.split("\t", 1)
+file: {root}/Tools/ci/test-compiled-workload-gate.sh ~ "expect_reject {cap:canary}" # Original all nonempty rows after header; second field unwrap + self_check.contains.
+end for
+file.trim_lines: {root}/tests/suites.txt has-line "tests/compiled_workloads" # Original any(trim==path).
+step: bash {root}/Tools/ci/compiled-workload-gate.sh --contract
+cwd: {root}
+exit: 0
+

@@ -1,0 +1,14 @@
+# HAND-PORT tests/env_overlay.rs:540-553 env_set_is_visible_identically_on_aot_and_interpreter
+# PENDING-KIT; no runtime/reference proof.
+# Exact original env+terminal two-owner readback and AOT/interpreter stdout parity; unchecked stderr remains unchecked; thread/rustc guard removed.
+fixture: env_set_is_visible_identically_on_aot_and_interpreter.fixture
+env: NO_COLOR=1
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "shared-owner\n137\n41\n"
+capture: aot = text stdout
+step interpreter: jet run --interpret main.jet
+exit: 0
+stdout: = "{cap:aot}"

@@ -21,7 +21,7 @@ fn label_width(label: String) -> Int { label.len() }
 fn width(shape: Shape) -> Int {
     if shape == {
         .Pair(left, _) -> {
-            size := label_width(upper("pair{left}"))
+            size :: label_width(upper("pair{left}"))
             size
         }
         .Single(value) -> value
@@ -41,13 +41,16 @@ fn touches(shape: Shape) -> Bool {
 }
 
 fn total(flag: Bool) -> Int Never! {
-    if flag -> {
-        sum := 0
-        loop child in children(1) {
-            sum += child
+    if {
+        flag -> {
+            sum := 0
+            loop child in children(1) {
+                sum += child
+            }
+            sum
         }
-        sum
-    } else -> 0
+        else -> 0
+    }
 }
 
 fn render(flag: Bool, words: [String]) -> [String] {

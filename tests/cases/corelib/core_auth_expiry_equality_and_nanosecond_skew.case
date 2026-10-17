@@ -1,0 +1,20 @@
+# Port of tests/corelib_parts/runtime.rs::core_auth_expiry_equality_and_nanosecond_skew; guest sources preserved verbatim.
+# SETUP-PORT: runtime.rs:1586-1632 generates fresh signed tokens for EACH original tier; wait predicate runtime.rs:1723-1737 preserved using wall seconds +yield.
+# ORACLE-LITERAL: tests/corelib_parts/runtime.rs:1742.
+# ORIGINAL-TEST-BUG #4812: original TOKEN/SKEW_TOKEN and UPPER/ABOVE_UPPER/LOWER/BELOW_LOWER replacement collisions preserved in their original order.
+fixture: fixtures/core_auth_expiry_equality_and_nanosecond_skew
+step: jet run setup.jet
+step: jet build clock.jet
+step: jet run wait.jet
+step: built
+stdout: = core_auth_expiry_equality_and_nanosecond_skew.out
+step: jet run setup.jet
+step: jet run wait.jet
+step: jet run --interpret clock.jet
+stdout: = core_auth_expiry_equality_and_nanosecond_skew.out
+stderr: empty
+step: jet run setup.jet
+step: jet run wait.jet
+step: jet run clock.jet
+stdout: = core_auth_expiry_equality_and_nanosecond_skew.out
+stderr: empty

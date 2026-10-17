@@ -88,17 +88,17 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
     let state_list = states.join(", ");
 
     out.push_str(&format!(
-        "#{} struct {client} {{\n    state {{ {state_list} }}\n    _token: Int,\n}}\n\n",
+        "#{} struct {client} {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n",
         Syntax::MARKER_SINGLE_USE
     ));
     out.push_str(&format!(
-        "#{} struct {server} {{\n    state {{ {state_list} }}\n    _token: Int,\n}}\n\n",
+        "#{} struct {server} {{\n    state {{ {state_list} }}\n\n    _token: Int\n}}\n\n",
         Syntax::MARKER_SINGLE_USE
     ));
 
     out.push_str(&format!("impl {client} {{\n"));
     out.push_str(&format!(
-        "    #{}(_, S0) fn client() {client} -> {{\n        return {client}{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_, S0) fn client() -> {client} {{ {{_token: 0}} }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -113,7 +113,7 @@ fn generate_protocol_source(decl: &ProtocolDecl) -> String {
 
     out.push_str(&format!("impl {server} {{\n"));
     out.push_str(&format!(
-        "    #{}(_, S0) fn server() {server} -> {{\n        return {server}{{ _token: 0 }}\n    }}\n\n",
+        "    #{}(_, S0) fn server() -> {server} {{ {{_token: 0}} }}\n\n",
         Syntax::KW_TRANSITION
     ));
     for (idx, msg) in decl.messages.iter().enumerate() {
@@ -146,15 +146,18 @@ fn append_send_method(
     };
     if terminal {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) {{\n        return\n    }}\n\n",
+            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) {{}}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {}(self: ^{handle}{param_suffix}) -> {handle} {}{} {{ {}(self) }}\n\n",
             Syntax::KW_TRANSITION,
             msg.name,
+            Syntax::TYPE_ERR,
+            Syntax::TYPE_FALLIBLE_MARK,
+            Syntax::LIT_OK,
         ));
     }
 }
@@ -172,13 +175,16 @@ fn append_recv_method(
     let method = format!("recv_{}", msg.name);
     if terminal {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {method}(self: ^{handle}) {{\n        return\n    }}\n\n",
+            "    #{}({from}, {to}) fn {method}(self: ^{handle}) {{}}\n\n",
             Syntax::KW_TRANSITION,
         ));
     } else {
         out.push_str(&format!(
-            "    #{}({from}, {to}) fn {method}(self: ^{handle}) -> {handle} !Err {{\n        return Ok(self)\n    }}\n\n",
+            "    #{}({from}, {to}) fn {method}(self: ^{handle}) -> {handle} {}{} {{ {}(self) }}\n\n",
             Syntax::KW_TRANSITION,
+            Syntax::TYPE_ERR,
+            Syntax::TYPE_FALLIBLE_MARK,
+            Syntax::LIT_OK,
         ));
     }
 }

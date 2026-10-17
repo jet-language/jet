@@ -1,0 +1,59 @@
+# PORT tests/pkg.rs:9185-9377; all three hostile Git identities and literal diagnostic retained.
+# KNOWN-FAILING #4833: Jet lacks fetch/build --locked and dependency root resolution.
+# Rust build: main.rs2852,4962 -> CmdCompile4161-4181 -> Driver/mod.rs3491-3492 -> Loader3305-3480.
+# PENDING-GRAMMAR(batch-four); no runtime/reference proof or invented snapshot.
+requires: tool:git
+fixture: fixtures/locked_build_rejects_manifest_lock_git_identity_mismatches
+mkdir: store
+mkdir: home
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: git init
+cwd: mylib_source
+exit: 0
+step: git config user.email test@jet.test
+cwd: mylib_source
+exit: 0
+step: git config user.name "Jet Test"
+cwd: mylib_source
+exit: 0
+step: git add .
+cwd: mylib_source
+exit: 0
+step: git commit -m init
+cwd: mylib_source
+exit: 0
+step: git rev-parse HEAD
+cwd: mylib_source
+exit: any
+# Original setup checks output spawning, UTF-8, trim and length, not rev-parse exit.
+capture: revision = text stdout.trim
+cap:revision: len = 40
+step: git clone --bare {work}/mylib_source {work}/mylib.git
+exit: 0
+write: package.jet package.template
+step: jet fetch
+env: HOME={work}/home
+exit: 0
+json: file .jet/lock toml $.package[?name = "mylib"][0].source.git = "file://{work}/mylib.git"
+json: file .jet/lock toml $.package[?name = "mylib"][0].locked.rev = "{cap:revision}"
+step: jet build --locked run.jet
+exit: 0
+copy: .jet/lock base.lock
+capture: hostile_lock = text file.replace("file://{work}/mylib.git", "file://{work}/other.git") base.lock
+write: .jet/lock lock-mutation.template
+step: jet build --locked run.jet
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1204]"
+stderr: = identity.expected
+capture: hostile_lock = text file.replace("source = { git = \"file://{work}/mylib.git\", rev = \"{cap:revision}\" }", "source = { git = \"file://{work}/mylib.git\", tag = \"hostile-selector\" }") base.lock
+write: .jet/lock lock-mutation.template
+step: jet build --locked run.jet
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1204]"
+stderr: = identity.expected
+capture: hostile_lock = text file.replace("locked = { rev = \"{cap:revision}\"", "locked = { rev = \"0000000000000000000000000000000000000000\"") base.lock
+write: .jet/lock lock-mutation.template
+step: jet build --locked run.jet
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1204]"
+stderr: = identity.expected

@@ -19,19 +19,19 @@ enum ProfileField {
 }
 
 // A `profile.<name>: Profile{ … }` contribution written as an expression.
-pub fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+fn envmodel_evaluate_package_profile_expr(name: String, value: Expr, src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
     if value == {
         .StructLit(type_name, _, _, _, fields, _, _) -> {
             if type_name != "" && type_name != TYPE_PROFILE -> return Err(envmodel_wrong_namespace_type(TYPE_PROFILE, type_name, expr_span(value)))
             named := [NamedExpr]{}
-            loop field in fields -> { &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value}) }
+            loop field in fields -> &named.push(NamedExpr{name: field.name, name_span: field.name_span, value: field.value})
             Ok(envmodel_evaluate_package_profile_fields(name, named, src, scope, globals, module_name))
         }
         else -> Err(envmodel_not_a_namespace_literal(TYPE_PROFILE, expr_span(value)))
     }
 }
 
-pub fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
+fn envmodel_evaluate_package_profile_fields(name: String, fields: [NamedExpr], src: String, scope: ModuleEvalScope, globals: [String: CtValue], module_name: String) -> PackageProfileSpec EnvModelEvalError! {
     seen := [String]{}
     loop field in fields {
         if ProfileField.parse(field.name) == None {
@@ -123,7 +123,7 @@ fn envmodel_package_profile_collisions_source(src: String, name: String, span: S
 // left unterminated.
 fn envmodel_quoted_collision_values(fragment: String) -> [String] Never! {
     values := [String]{}
-    characters :: fragment.chars().to_list()
+    characters :: fragment.chars()
     index := 0
     loop index < characters.len() {
         character :: characters[index]

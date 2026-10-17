@@ -1,0 +1,63 @@
+use core.encoding.json as json
+use core.files as files
+
+fn kit_steps_json_number(value: Dyn) -> Float? {
+    Val(value.float() ?? return None)
+}
+
+fn kit_steps_json_canonical(text: String) -> String? {
+    if !text.ends_with("\n") || text.ends_with("\n\n") || text.starts_with("﻿") -> return Val("canonical JSON requires exactly one trailing LF and no BOM")
+    body :: kit_steps_byte_slice(text, 0, text.count_bytes() - 1)
+    tree :: json.parse(body) ?? return Val("canonical JSON parse failed")
+    canonical :: json.canonical(tree) ?? return Val("canonical JSON number or value rejected")
+    if text != ("{canonical}\n") -> return Val("JSON bytes are not canonical")
+    None
+}
+
+fn kit_steps_json_files(directory: String, canonical: Bool) -> String Err! {
+    entries :: files.list_dir(directory) ?? return Err("JSON files directory: {err}")
+    documents := [Dyn]{}
+    loop entry in entries {
+        text :: files.read(entry.path) ?? return Err("JSON files read: {err}")
+        if canonical {
+            failure :: kit_steps_json_canonical(text)
+            if failure == {
+                .Val(message) -> return Err(message)
+                .None -> {}
+            }
+        }
+        &documents.push(json.parse(text) ?? return Err("JSON files parse: {err}"))
+    }
+    encoded :: json.to_string(Dyn.Array(documents)) ?? return Err("JSON files encode: {err}")
+    Ok(encoded)
+}
+
+fn kit_steps_json_zero(tree: Dyn, key: String) -> Dyn {
+    if tree == {
+        .Object(fields) -> {
+            result := [String: Dyn]{}
+            loop pair in fields {
+                _ :: &result.add(pair.key, if pair.key == key -> Dyn.Int(0) else -> kit_steps_json_zero(pair.value, key))
+            }
+            return Dyn.Object(result)
+        }
+        .Array(items) -> {
+            result := [Dyn]{}
+            loop item in items -> &result.push(kit_steps_json_zero(item, key))
+            return Dyn.Array(result)
+        }
+        else -> return tree.copy()
+    }
+}
+
+fn kit_steps_json_distinct(values: [Dyn]) -> Int {
+    unique := [Dyn]{}
+    loop value in values {
+        present := false
+        loop other in unique {
+            if kit_steps_json_equal(value, other) -> present = true
+        }
+        if !present -> &unique.push(value)
+    }
+    unique.len()
+}

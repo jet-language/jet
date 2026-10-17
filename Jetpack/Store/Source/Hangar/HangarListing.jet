@@ -26,39 +26,39 @@ store_optimize_sequence := 0
 store_gc_quarantine_sequence := 0
 
 // Active and stale executable leases.
-pub struct LeaseInventory {
-    pub active: Int
-    pub stale: Int
+struct LeaseInventory {
+    active: Int
+    stale: Int
 }
 
 // The audit projection: every committed entry and the lease inventory.
-pub struct AuditSnapshot {
-    pub entries: [StoreEntry]
-    pub leases: LeaseInventory
+struct AuditSnapshot {
+    entries: [StoreEntry]
+    leases: LeaseInventory
 }
 
 // The package records of this root (the checked model listing). The Rust
 // process memo keyed by the WAL identity stamp is a performance cache only;
 // every call reads the committed projection.
-pub fn store_list_unlocked(roots: HangarRoots) -> [StoreEntry] StoreError! {
+fn store_list_unlocked(roots: HangarRoots) -> [StoreEntry] StoreError! {
     pkg_store_list_checked(roots)
 }
 
 // Inspect package projections without taking a lock or replaying journals.
 // Health/reporting paths use this so observation cannot create or repair
 // store state.
-pub fn store_list_read_only(roots: HangarRoots) -> [StoreEntry] Never! {
+fn store_list_read_only(roots: HangarRoots) -> [StoreEntry] Never! {
     pkg_store_list(roots)
 }
 
 // Strictly read the committed package projection without taking the Hangar
 // lock or replaying a migration. Audit uses this boundary so observation
 // cannot publish a repaired projection as a side effect.
-pub fn store_list_read_only_checked(roots: HangarRoots) -> [StoreEntry] StoreError! {
+fn store_list_read_only_checked(roots: HangarRoots) -> [StoreEntry] StoreError! {
     pkg_store_list_checked(roots)
 }
 
-pub fn store_is_hangar_internal_directory(name: String) -> Bool Never! {
+fn store_is_hangar_internal_directory(name: String) -> Bool Never! {
     if name == {
         "build-scratch" | "failed-scratch" | "objects" | ".stage" | "cas" | "referrers" | "closure-db" | "lifecycle-db" | "quarantine" | "receipts" | "seals" | "stage" | ".archive-stage" | "reproducibility-staging" | "unreproducible" -> true
         else -> false
@@ -68,7 +68,7 @@ pub fn store_is_hangar_internal_directory(name: String) -> Bool Never! {
 // Read executable-lease ownership without changing the lease directory.
 // Recovery and doctor share the same parser and kernel-lock rule so a lease
 // cannot be healthy to one command and stale to the other.
-pub fn store_inspect_leases(roots: HangarRoots) -> LeaseInventory StoreError! {
+fn store_inspect_leases(roots: HangarRoots) -> LeaseInventory StoreError! {
     stale_flags :: store_lease_nodes_unlocked(roots)
     active := 0
     stale := 0
@@ -84,7 +84,7 @@ pub fn store_inspect_leases(roots: HangarRoots) -> LeaseInventory StoreError! {
 // Produce the audit projection without a lock, migration, journal replay, or
 // cleanup. A malformed object or committed closure cannot be omitted from a
 // successful report.
-pub fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
+fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoots) -> AuditSnapshot StoreError! {
     graph :: store_closure_graph_read_only(&verification, roots)
     entries :: store_list_read_only_checked(roots)
     known := [String: Bool]{}
@@ -116,7 +116,7 @@ pub fn store_audit_read_only(verification: &StoreVerification, roots: HangarRoot
         if metadata != record.package_meta {
             return Err(StoreError.InvalidData("metadata projection for `{entry.id}` disagrees with the committed closure record"))
         }
-        expected_outputs := ~entry.named_outputs
+        expected_outputs := entry.named_outputs.copy()
         expected_outputs["out"] = entry.envelope.output_hash
         if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs || record.references != store_sorted_unique(entry.references) || (record.producer_record != "" && record.producer_record != entry.producer_record) {
             return Err(StoreError.InvalidData("closure graph for `{entry.id}` disagrees with its metadata projection"))
@@ -148,7 +148,7 @@ fn store_sorted_record_ids(graph: ClosureGraph) -> [String] Never! {
 // Listing is a checked engine boundary, not the model-only view: it runs the
 // same legacy closure migration used by verify, clean, and cache reuse so
 // every consumer observes one receipt-bearing projection.
-pub fn store_list_checked(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
+fn store_list_checked(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     _ :: store_migrate_closure_graph_unlocked(&verification, roots)
     entries :: store_list_unlocked(roots)
@@ -185,7 +185,7 @@ pub fn store_list_checked(verification: &StoreVerification, roots: HangarRoots) 
 // List committed records for an explicit full Hangar audit without verifying
 // outputs; the audit loop must be the only content-hashing authority for
 // `hangar verify`.
-pub fn store_list_for_full_audit(roots: HangarRoots) -> [StoreEntry] StoreError! {
+fn store_list_for_full_audit(roots: HangarRoots) -> [StoreEntry] StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     store_list_unlocked(roots)
 }
@@ -194,13 +194,13 @@ pub fn store_list_for_full_audit(roots: HangarRoots) -> [StoreEntry] StoreError!
 // Corrupt WAL fails closed as an empty list for compatibility with the
 // historical infallible listing API; integrity-sensitive callers use
 // `store_list_checked`.
-pub fn store_list(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] Never! {
+fn store_list(verification: &StoreVerification, roots: HangarRoots) -> [StoreEntry] Never! {
     store_list_checked(&verification, roots) ?? [StoreEntry]{}
 }
 
 // Recover every Hangar crash surface under one advisory-lock ownership
 // interval. The unlocked helpers are also used by already-locked operations.
-pub fn store_recover_hangar(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
+fn store_recover_hangar(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     store_ensure_real_directory(roots.hangar_dir(), "Hangar root")
     staging :: AdmissionTransaction.recover_unlocked(roots)
@@ -288,7 +288,7 @@ fn store_parse_decimal(text: String) -> Int? Never! {
 // same name+version from different refs don't collide (D-PM1). The version
 // segment is dropped when unknown. Never hash-first: identity for
 // correctness is the lockfile, the directory name is for humans.
-pub fn store_entry_id(name: String, version: String, reference: String, out: String) -> String Never! {
+fn store_entry_id(name: String, version: String, reference: String, out: String) -> String Never! {
     fingerprint :: store_sha256_hex("{reference}\n{out}".bytes())
     store_short_entry_id(name, version, fingerprint)
 }
@@ -297,7 +297,7 @@ pub fn store_entry_id(name: String, version: String, reference: String, out: Str
 // Provider outputs are projected into a root-local Hangar path, so hashing
 // that path would make the same locked result look different on every
 // checkout or machine.
-pub fn store_content_addressed_entry_id(name: String, version: String, reference: String, output_hash: String) -> String Never! {
+fn store_content_addressed_entry_id(name: String, version: String, reference: String, output_hash: String) -> String Never! {
     canonical := "jet.content-entry.v1".bytes()
     &canonical.push(U8{0})
     store_push_bytes(&canonical, reference.bytes())
@@ -315,7 +315,7 @@ fn store_short_entry_id(name: String, version: String, fingerprint: String) -> S
 // The identity expected for a persisted entry. Provider records whose output
 // is content-addressed use the immutable output digest; legacy records retain
 // the existing local output-path identity until they are rewritten.
-pub fn store_expected_entry_id(entry: StoreEntry) -> String Never! {
+fn store_expected_entry_id(entry: StoreEntry) -> String Never! {
     content_addressed :: if ProducerRecord.decode(entry.producer_record) == {
         .Ok(producer) -> producer.provider == "nix" || producer.provider == "jetpackage"
         .Err(_) -> false

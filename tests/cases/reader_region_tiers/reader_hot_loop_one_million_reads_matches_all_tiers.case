@@ -1,0 +1,24 @@
+# Port of tests/reader_region_tiers.rs:9-13; existing source/golden reused verbatim.
+# tir_support/mod.rs411-497: all three modes and exact output/baseline equality retained.
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+mkdir: release
+mkdir: default
+mkdir: interpret
+step release: jet run --release {root}/Examples/features/parsing/reader_hot_loop.jet
+env: JET_STORE_DIR={work}/release/cache
+env: JETPACK_ROOT={work}/release/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/parsing/reader_hot_loop.out
+step: jet run {root}/Examples/features/parsing/reader_hot_loop.jet
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/parsing/reader_hot_loop.out
+stdout: == release
+step: jet run --interpret {root}/Examples/features/parsing/reader_hot_loop.jet
+env: JET_STORE_DIR={work}/interpret/cache
+env: JETPACK_ROOT={work}/interpret/jetpack
+exit: 0
+stdout: = ../../../Examples/features/expected/parsing/reader_hot_loop.out
+stdout: == release

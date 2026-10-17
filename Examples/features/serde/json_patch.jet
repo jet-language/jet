@@ -16,7 +16,7 @@ fn kind_name(kind: encoding.EncodingErrorKind) -> String {
     "other"
 }
 
-fn text(value: DataTree) -> String { json.canonical(value) ?? panic("canonical") }
+fn text(value: Dyn) -> String { json.canonical(value) ?? panic("canonical") }
 
 fn apply(label: String, doc_text: String, ops_text: String) {
     doc :: json.parse(doc_text) ?? panic("document")
@@ -56,17 +56,17 @@ fn run() {
 
     // Integers stay exact: 2^53 + 1 is not rounded through a Float.
     exact :: json.patch(json.parse("{{\"n\":1}}") ?? panic("doc"), json.parse("[{{\"op\":\"add\",\"path\":\"/big\",\"value\":9007199254740993}}]") ?? panic("ops")) ?? panic("patch")
-    print("exact: {json.to_string(json.pointer(exact, "/big") ?? panic("pointer"))}")
+    print("exact: {json.to_string(json.pointer(exact, "/big") ?? panic("pointer")) ?? panic("JSON encode")}")
 
     limit_case()
 
     // Typed re-entry runs the ordinary Decode validation on the patched value.
     settings_doc :: json.parse("{{\"count\":2,\"name\":\"keep\"}}") ?? panic("doc")
     good :: json.patch(settings_doc, json.parse("[{{\"op\":\"replace\",\"path\":\"/count\",\"value\":3}}]") ?? panic("ops")) ?? panic("patch")
-    settings :: json.decode<Settings>(json.to_string(good)) ?? panic("decode")
+    settings :: json.decode<Settings>(json.to_string(good) ?? panic("JSON encode")) ?? panic("decode")
     print("typed: count={settings.count} name={settings.name}")
     bad :: json.patch(settings_doc, json.parse("[{{\"op\":\"replace\",\"path\":\"/count\",\"value\":\"three\"}}]") ?? panic("ops")) ?? panic("patch")
-    json.decode<Settings>(json.to_string(bad)) ?? {
+    json.decode<Settings>(json.to_string(bad) ?? panic("JSON encode")) ?? {
         print("typed: rejected with {err.len()} field error(s)")
         return
     }

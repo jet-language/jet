@@ -1,0 +1,124 @@
+// One Jet provider for perf consumers. The command layer provisions/awaits the
+// producer and supplies observation ticks; no synthetic samples or durations.
+use jet_foundation.[TraceSkeleton, TraceToolchain, TraceHardware, CapturePolicy, TraceSample, TraceAllocation, TraceBrowser, TraceGameFrame, TraceGameDrawEvent, TraceTask, TraceLock, TraceIO, TraceNative, TraceSpan, TraceReceiptSection, SourceIdentity, TraceSourceMap, TraceProfile, JetSymbolRef, capture_policy_default_exclusions, trace_profile_unsupported, trace_io_kind_for_wait, build_skeleton_bytes, verify_jettrace]
+
+struct JetCLIPerfObservation { at_ns: U64, live: JetCLIPerfLive }
+struct JetCLIPerfCapture {
+    samples: [TraceSample], profile: TraceProfile, allocations: [TraceAllocation], browser: [TraceBrowser],
+    tasks: [TraceTask], locks: [TraceLock], io: [TraceIO], native: [TraceNative], spans: [TraceSpan],
+    source_identity: [SourceIdentity], source_maps: [TraceSourceMap], policy: CapturePolicy
+}
+fn jet_cli_perf_capture_new(profile: TraceProfile, sources: [SourceIdentity]) -> JetCLIPerfCapture Never! {
+    JetCLIPerfCapture{samples: [TraceSample]{}, profile: profile, allocations: [TraceAllocation]{}, browser: [TraceBrowser]{}, tasks: [TraceTask]{}, locks: [TraceLock]{}, io: [TraceIO]{}, native: [TraceNative]{}, spans: [TraceSpan]{}, source_identity: sources, source_maps: [TraceSourceMap]{}, policy: capture_policy_default_exclusions()}
+}
+fn jet_cli_perf_capture_observations(capture: &JetCLIPerfCapture, observations: [JetCLIPerfObservation], symbol: JetSymbolRef, target: String) JetCLIReadError! {
+    if observations.len() == 0 -> return Err(jet_cli_read_error("perf capture requires a real runtime observation"))
+    if observations.len() > 4096 -> return Err(jet_cli_read_error("perf observation collection exceeds 4096 rows"))
+    first :: observations[0]
+    latest :: observations[observations.len() - 1]
+    task_indexes := [U64:Int]{}
+    first_seen := [U64:U64]{}
+    last_seen := [U64:U64]{}
+    previous := U64{0}
+    loop observed in observations {
+        live :: observed.live
+        if live.pid != first.live.pid || live.start_id != first.live.start_id || live.session_id != first.live.session_id || live.source_id != first.live.source_id || live.build_id != first.live.build_id || live.revision != first.live.revision || live.world_id != first.live.world_id -> return Err(jet_cli_read_error("perf observations cross a process/session/source/build revision boundary"))
+        if observed.at_ns < previous -> return Err(jet_cli_read_error("perf observation clock is not monotonic"))
+        previous = observed.at_ns
+        loop observed_task in live.tasks {
+            if !([String]{"running", "queued", "blocked", "done"}).contains(observed_task.state) -> next
+            fact :: TraceTask{id: observed_task.id, parent: observed_task.parent, state: observed_task.state, wait: observed_task.wait, cancelled: observed_task.cancelled, symbol: symbol}
+            if task_indexes.has_key(observed_task.id) {
+                index :: task_indexes[observed_task.id]
+                if capture.tasks[index].parent != observed_task.parent -> return Err(jet_cli_read_error("observed task parent changed"))
+                capture.tasks[index] = fact
+            } else {
+                if capture.tasks.len() >= 4096 {
+                    capture.policy.task_rows_truncated = true
+                    next
+                }
+                task_indexes[observed_task.id] = capture.tasks.len()
+                first_seen[observed_task.id] = observed.at_ns
+                &capture.tasks.push(fact)
+            }
+            last_seen[observed_task.id] = observed.at_ns
+        }
+    }
+    loop index in 0..<capture.tasks.len() {
+        // Retain only scalar identities before mutating the task owner.
+        observed_id :: capture.tasks[index].id
+        observed_parent :: capture.tasks[index].parent
+        if observed_parent != (U64{0}) && !task_indexes.has_key(observed_parent) -> return Err(jet_cli_read_error("observed task has an unobserved parent"))
+        stable_id :: U64{index + 1}
+        stable_parent :: if observed_parent == (U64{0}) -> U64{0} else -> U64{task_indexes[observed_parent] + 1}
+        capture.tasks[index].id = stable_id
+        capture.tasks[index].parent = stable_parent
+        if observations.len() > 1 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: Val(first_seen[observed_id]), end_ns: Val(last_seen[observed_id]), kind: "task_observed", parent_task_id: if stable_parent == (U64{0}) -> None else -> Val(stable_parent), reason: "", status: "captured", symbol: symbol, task_id: Val(stable_id)})
+    }
+    if capture.spans.len() == 0 -> &capture.spans.push(TraceSpan{clock: "monotonic", start_ns: None, end_ns: None, kind: "task_observed", parent_task_id: None, reason: "task span requires multiple live observations", status: "unavailable", symbol: symbol, task_id: None})
+    // Instantaneous blocked facts, not invented syscall duration intervals.
+    loop observed_task in latest.live.tasks {
+        if task_indexes.has_key(observed_task.id) && observed_task.state == "blocked" && trace_io_kind_for_wait(observed_task.wait) == .Val(kind) -> &capture.io.push(TraceIO{start_ns: latest.at_ns, end_ns: latest.at_ns, kind: kind, task_id: U64{task_indexes[observed_task.id] + 1}, wait: observed_task.wait, symbol: symbol})
+    }
+    loop channel in latest.live.channels {
+        if channel.send_waiters == (U64{0}) && channel.recv_waiters == (U64{0}) -> next
+        &capture.locks.push(TraceLock{kind: "channel", id: channel.id, depth: channel.depth, capacity: channel.capacity, send_waiters: channel.send_waiters, recv_waiters: channel.recv_waiters, closed: channel.closed, symbol: symbol})
+    }
+    if latest.live.arena_allocations > (U64{0}) || latest.live.arena_bytes > (U64{0}) -> &capture.allocations.push(TraceAllocation{count: latest.live.arena_allocations, bytes: latest.live.arena_bytes, symbol: symbol})
+    root := U64?{None}
+    loop observed_task in capture.tasks {
+        if observed_task.parent == (U64{0}) {
+            root = Val(observed_task.id)
+            break
+        }
+    }
+    jet_cli_perf_window(&capture.profile, latest.live.runtime)
+    if latest.live.runtime == .Val(window) {
+        &capture.samples.push(TraceSample{domain: "wall", duration_ns: window.elapsed_ns, symbol: symbol})
+        if window.cpu_ns == .Val(cpu) {
+            &capture.samples.push(TraceSample{domain: "cpu", duration_ns: cpu, symbol: symbol})
+            if root != None -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(cpu), observed_at_ns: latest.at_ns, reason: "", status: "captured", symbol: symbol, target: target, task_id: root})
+            else -> &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "root task causality was not observable", status: "unavailable", symbol: symbol, target: target, task_id: None})
+        } else {
+            &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
+        }
+    } else {
+        &capture.native.push(TraceNative{clock: "process_cpu", duration_ns: None, observed_at_ns: latest.at_ns, reason: "the runtime did not publish process CPU timing", status: "unavailable", symbol: symbol, target: target, task_id: None})
+    }
+}
+fn jet_cli_perf_capture_source(path: String, text: String, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
+    if observations.len() == 0 -> return Err(jet_cli_read_error("source sampling requires a live runtime snapshot"))
+    if observations.len() > 4096 -> return Err(jet_cli_read_error("source sampling exceeds its observation bound"))
+    source :: jet_cli_perf_source(path, text)
+    cpu_samples := U64{0}
+    loop observed in observations { if observed.live.runtime == .Val(window) && window.cpu_ns != None -> cpu_samples += U64{1} }
+    profile :: jet_cli_perf_source_profile(source, U64{observations.len()}, cpu_samples, false)
+    capture := jet_cli_perf_capture_new(profile, [SourceIdentity]{source.identity})
+    jet_cli_perf_window(&capture.profile, observations[observations.len() - 1].live.runtime)
+    if source.run_span != None -> jet_cli_perf_capture_observations(&capture, observations, JetSymbolRef{path: path, name: "run"}, target)
+    Ok(capture)
+}
+fn jet_cli_perf_capture_browser(browser: JetCLIPerfBrowser, observations: [JetCLIPerfObservation], target: String) -> JetCLIPerfCapture JetCLIReadError! {
+    capture := jet_cli_perf_capture_new(trace_profile_unsupported("browser relay supplies compiler-checked symbol identities, not parser-span samples"), browser.sources)
+    capture.browser = browser.rows
+    capture.source_maps = browser.source_maps
+    capture.policy.browser_rows_truncated = browser.truncated
+    if observations.len() > 0 {
+        symbol := JetSymbolRef?{None}
+        loop source in capture.source_identity {
+            loop named in source.symbols {
+                if symbol == None || (named.name == "run" && named.kind == "fn") -> symbol = Val(JetSymbolRef{path: source.path, name: named.name})
+            }
+        }
+        checked :: symbol ?? return Err(jet_cli_read_error("browser runtime facts require a compiler-provided symbol"))
+        jet_cli_perf_capture_observations(&capture, observations, checked, target)
+    }
+    Ok(capture)
+}
+// Only the shared JetTrace codec writes bytes, then authenticates its own wire.
+fn jet_cli_perf_capture_bytes(capture: JetCLIPerfCapture, command: String, argv: [String], toolchain: TraceToolchain, hardware: TraceHardware) -> [U8] JetCLIReadError! {
+    skeleton :: TraceSkeleton{command: command, argv: argv, toolchain: toolchain, hardware: hardware, capture_policy: capture.policy, samples: capture.samples, profile: capture.profile, allocations: capture.allocations, browser: capture.browser, game_frames: [TraceGameFrame]{}, game_draw_events: [TraceGameDrawEvent]{}, tasks: capture.tasks, locks: capture.locks, io: capture.io, native: capture.native, spans: capture.spans, receipt_sections: [TraceReceiptSection]{}, source_identity: capture.source_identity, source_maps: capture.source_maps}
+    bytes :: build_skeleton_bytes(skeleton) ?? return Err(jet_cli_read_error(err.message))
+    _ :: verify_jettrace(bytes) ?? return Err(jet_cli_read_error(err.message))
+    Ok(bytes)
+}

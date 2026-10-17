@@ -4,6 +4,8 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    rust-overlay.url = "github:oxalica/rust-overlay";
+    rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
     # D-COMPILER-PROOF-TOOLS1=A: proof artifacts use the exact Lean 4.29.1
     # derivation recorded by the compiler-proof manifest, independently from
     # the rolling nixpkgs input used by ordinary Jet development.
@@ -16,13 +18,37 @@
       nixpkgs,
       flake-utils,
       proofNixpkgs,
+      rust-overlay,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = nixpkgs.legacyPackages.${system};
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ rust-overlay.overlays.default ];
+        };
         proofPkgs = proofNixpkgs.legacyPackages.${system};
         jetR = pkgs.rWrapper.override { packages = [ pkgs.rPackages.jsonlite ]; };
+
+        # User FFI helpers opt into this compiler/sysroot explicitly. Keep
+        # normal Jet compilation and runtime Rust on nixpkgs' source-built
+        # toolchain: its metadata is not interchangeable with upstream std.
+        # Both inputs pin the same compiler version; no ambient rustup needed.
+        jetHasMuslHelpers = system == "x86_64-linux";
+        jetRustToolchain = pkgs.rust-bin.stable.${pkgs.rustc.version}.default.override {
+          targets = [
+            "wasm32-unknown-unknown"
+            "wasm32v1-none"
+          ] ++ pkgs.lib.optional jetHasMuslHelpers "x86_64-unknown-linux-musl";
+        };
+        jetMuslCC = pkgs.pkgsCross.musl64.stdenv.cc;
+        jetMuslLinker = "${jetMuslCC}/bin/x86_64-unknown-linux-musl-cc";
+        jetMuslAR = "${jetMuslCC.bintools}/bin/x86_64-unknown-linux-musl-ar";
+        jetRustHelperHook = pkgs.lib.optionalString jetHasMuslHelpers ''
+          export JET_RUST_MUSL_TOOLCHAIN="${jetRustToolchain}"
+          export JET_RUST_MUSL_LINKER="${jetMuslLinker}"
+          export JET_RUST_MUSL_AR="${jetMuslAR}"
+        '';
 
         # jet build/run shells out to rustc; keep this path in one place.
         jetRuntimePath = pkgs.lib.makeBinPath [
@@ -84,7 +110,12 @@
             wrapProgram $out/bin/jet \
               --prefix PATH : "${jetRuntimePath}" \
               --prefix ${jetRuntimeLibraryVariable} : "${jetRuntimeLibraryPath}" \
-              --set-default TZDIR "${jetTzdb}"
+              --set-default TZDIR "${jetTzdb}" \
+              ${pkgs.lib.optionalString jetHasMuslHelpers ''
+                --set JET_RUST_MUSL_TOOLCHAIN "${jetRustToolchain}" \
+                --set JET_RUST_MUSL_LINKER "${jetMuslLinker}" \
+                --set JET_RUST_MUSL_AR "${jetMuslAR}" \
+              ''}
           '';
 
           meta = with pkgs.lib; {
@@ -114,6 +145,7 @@
             root="''${root:-$PWD}"
             bin="$root/target/debug/${name}"
             export PATH="${jetRuntimePath}:$PATH"
+            ${jetRustHelperHook}
             ${jetRuntimeLibraryHook}
             if [ ! -x "$bin" ]; then
               echo "jet: no debug binary at $bin" >&2
@@ -154,6 +186,9 @@
           inherit jet;
           jetpack = jet;
           proof-toolchain = proofToolchain;
+          rust-musl-toolchain = jetRustToolchain;
+        } // pkgs.lib.optionalAttrs jetHasMuslHelpers {
+          musl-linker = jetMuslCC;
         };
 
         apps.default = {
@@ -177,6 +212,8 @@
             pkgs.gcc
             pkgs.clang
             pkgs.lld
+            # D-DBG3/D-DX-DEBUGBACK1: `jet debug` steps and records through LLDB.
+            pkgs.lldb
             pkgs.nodejs_22
             pkgs.bun
             jetVite
@@ -217,6 +254,7 @@
             export TZDIR="${jetTzdb}"
             ${jetRuntimeLibraryHook}
             ${jetCargoLinkerHook}
+            ${jetRustHelperHook}
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"
             ''}
@@ -336,6 +374,7 @@
             export TZDIR="${jetTzdb}"
             ${jetRuntimeLibraryHook}
             ${jetCargoLinkerHook}
+            ${jetRustHelperHook}
             export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.raylib ]}:''${LD_LIBRARY_PATH:-}"
             ${pkgs.lib.optionalString pkgs.stdenv.hostPlatform.isLinux ''
               export LD_LIBRARY_PATH="${pkgs.lib.makeLibraryPath [ pkgs.vulkan-loader ]}:''${LD_LIBRARY_PATH:-}"

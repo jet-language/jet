@@ -192,7 +192,7 @@ fn run() {
         tensor_shape: tensor_shape,
         regression: regression,
     }
-    receipt_json :: json.to_string(receipt)
+    receipt_json :: json.to_string(receipt) ?? panic(err.reason)
     files.write("/home/nate/.cache/jet-dev/dx3/area-data/analysis.receipt.json", receipt_json) ?? panic("write receipt")
     mark("receipt")
     print("rows={receipt.rows} cols={receipt.columns} filtered={receipt.filtered} groups={receipt.groups} joined={receipt.joined} pivot={receipt.pivot_cells} rolling={rolling.len()} stats={summary.count} coord={coordinate_value} tensor={tensor_cell} svg={receipt.svg_bytes}")

@@ -1,0 +1,20 @@
+use cpp.counter as cpp
+
+fn increment(value: Int) Int -[]> {
+    return value + 1
+}
+
+#Test("C++ callback and thread boundary") {
+    assert_eq(cpp.apply(increment, 41) ?? -1, 42)
+    assert_eq(cpp.threaded(41) ?? -1, 42)
+}
+
+fn run() {
+    counter := cpp.new_counter(10) ?? panic("constructor")
+    print(counter.add_amount(5) ?? panic("integer overload"))
+    print(counter.add_factor(2.0) ?? panic("float overload"))
+    print(cpp.apply(increment, 41) ?? panic("callback"))
+    print(cpp.threaded(41) ?? panic("thread"))
+    print(counter.fail_if_negative(-1) ?? -1)
+    cpp.close_counter(^counter)
+}

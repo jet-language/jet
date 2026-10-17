@@ -1,0 +1,22 @@
+
+fn source_flag(value: Int) -> Bool {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn retain_flag(value: Bool) -> Bool { value }
+
+fn run() {
+    kept :: [1, 2, 3].filter((value: Int) -> {
+        if value == 2 {
+            return retain_flag(source_flag(value))
+        }
+        if value == 3 {
+            return "kept"
+        }
+        retain_flag(source_flag(value))
+    }) ?? []
+    print(kept.len())
+}

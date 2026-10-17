@@ -1,0 +1,10 @@
+// SETUP-PORT tests/web_dev.rs:3793-3798; real UnixListener held until case KILL.
+use core.net as net
+use core.sys as sys
+use core.time as time
+
+fn run() {
+    listener :: net.unix_listen(sys.get("S5_SOCKET") ?? panic("socket path")) ?? panic("UnixListener bind")
+    print("ready")
+    loop { time.sleep(time.duration_ms(1000)) }
+}

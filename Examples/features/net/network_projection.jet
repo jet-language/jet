@@ -10,7 +10,7 @@ fn run() {
     ip :: net.ip_addr("127.0.0.1") ?? return
     print("ip:{net.ip_to_string(ip)}:{net.ip_is_ipv4(ip)}")
     parsed :: net.socket_addr_parse("127.0.0.1:8080") ?? return
-    print("socket:{net.socket_host(parsed)}:{net.socket_type(parsed)}")
+    print("socket:{net.socket_host(parsed)}:{net.socket_port(parsed)}")
 
     listener :: net.tcp_listen("127.0.0.1:0") ?? return
     address :: net.listener_local_socket_addr(listener) ?? return
@@ -23,8 +23,12 @@ fn run() {
     peer_address :: net.tcp_peer_addr(client) ?? return
     local_socket :: net.tcp_local_socket_addr(client) ?? return
     peer_socket :: net.tcp_peer_socket_addr(client) ?? return
-    print("tcp:{local_address}")
-    print("peer:{peer_address}")
+    // Both ends use ephemeral ports, so print only stable facts about them.
+    local_is_loopback :: local_address.starts_with("127.0.0.1:")
+    expected_peer :: "127.0.0.1:{port}"
+    peer_is_listener :: peer_address == expected_peer
+    print("tcp:{local_is_loopback}")
+    print("peer:{peer_is_listener}")
     print("local-socket:{net.socket_host(local_socket)}")
     print("peer-socket:{net.socket_host(peer_socket)}")
     print("type:{net.socket_type(client)}")

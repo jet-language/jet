@@ -1,0 +1,22 @@
+// Port of tests/jetpack_tool.rs:633-650, every meta.json candidate and whole-file predicate.
+use core.files
+use core.sys
+fn native_metadata_check() {
+    store :: sys.get("TOOL_STORE") ?? panic("TOOL_STORE")
+    entries :: files.list_dir(store + "/hangar")
+    found_any := false
+    matched := false
+    loop entry in entries {
+        path :: entry.path + "/meta.json"
+        if files.is_file(path.copy()) {
+            found_any = true
+            metadata :: files.read(path)
+            if metadata.contains("omp@releases") && !metadata.contains("/nix/store/") -> matched = true
+        }
+    }
+    assert(found_any, "native install did not register Hangar metadata")
+    assert(matched, "native package was not recorded as a Hangar-owned output")
+}
+#Test("native Hangar registration") {
+    native_metadata_check()
+}

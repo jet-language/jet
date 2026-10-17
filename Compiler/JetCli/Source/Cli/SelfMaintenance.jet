@@ -1,0 +1,110 @@
+// CmdDevTools.rs:3641-3825. These commands keep direct confirmation output,
+// even under --json/--quiet; only CLI diagnostic macros use machine mode.
+use core.files as cli_files
+use jet_driver.[JetDriverCompileMode, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
+use jet_foundation.diagnostic_render_all
+
+fn jet_cli_maintenance_error(code: String, what: String, fix: String?, color: Bool, json: Bool) -> JetDriverVerbOutput Never! {
+    diagnostic_copy :: jet_cli_diagnostic_copy(code)
+    repair :: fix ?? diagnostic_copy.fix
+    JetDriverVerbOutput{stdout: if json -> jet_cli_fail_json(code, what, diagnostic_copy.why, repair) else -> "", stderr: if json -> "" else -> jet_cli_report(code, what, diagnostic_copy.why, repair, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+
+fn jet_cli_new_ui_source() -> String Never! {
+    "// TODO: describe what this diagnostic demonstrates.\nfn run() {{\n    print(definitely_undefined_scaffold_symbol)\n}}\n"
+}
+
+fn jet_cli_devtools_new_ui(args: [String], color: Bool, json: Bool) -> JetDriverVerbOutput {
+    if args.len() == 0 -> return JetDriverVerbOutput{stdout: "", stderr: "usage: jet devtools new-ui <name>\n", exit_code: JET_DRIVER_EXIT_USAGE}
+    name :: args[0]
+    if name == "" || name.contains("/") || name.contains(".") -> return jet_cli_maintenance_error("E2104", "`new-ui` takes a bare fixture name, no path or extension: got `{name}`", None, color, json)
+    file :: "tests/ui/{name}.jet"
+    expected :: "tests/ui/{name}.stderr"
+    if cli_files.exists(file) -> return jet_cli_maintenance_error("E2104", "`{file}` already exists", None, color, json)
+    cli_files.create_dir_all("tests/ui") ?? return jet_cli_maintenance_error("E2105", "couldn't create `tests/ui`: {jet_cli_io_error_text(err)}", None, color, json)
+    source :: jet_cli_new_ui_source()
+    cli_files.write(file, source) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{file}`: {jet_cli_io_error_text(err)}", None, color, json)
+    actual := "(no errors)\n"
+    if jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program) == {
+        .Refused(output) -> return output
+        .Compiled(result, snapshot) -> {
+            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            errors :: jet_cli_errors(diagnostics)
+            if errors.len() > 0 -> actual = diagnostic_render_all(file, source, errors, false)
+            if errors.len() == 0 && result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+        }
+    }
+    cli_files.write(expected, actual) ?? return jet_cli_maintenance_error("E2105", "couldn't write `{expected}`: {jet_cli_io_error_text(err)}", None, color, json)
+    stdout := "wrote {file}\nwrote {expected}\n"
+    if actual == "(no errors)\n" -> stdout = "{stdout}note: scaffold compiled cleanly — edit `{file}` to trigger the diagnostic you want, then `jet devtools bless diagnostic_snapshots`\n"
+    JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+fn jet_cli_fixture_literal(text: String) -> Bool Never! {
+    prefix :: text.starts_with("Examples/features/") || text.starts_with("Docs/spec/") || text.starts_with("tests/ui/") || text.starts_with("tests/ui_lint/") || text.starts_with("tests/cli/") || text.starts_with("tests/release/")
+    if !prefix || text.contains("{") || text.contains("}") -> return false
+    text.ends_with(".jet") || text.ends_with(".md") || text.ends_with(".out") || text.ends_with(".stderr") || text.ends_with(".warn") || text.ends_with(".txt") || text.ends_with(".snapshot")
+}
+
+// Byte scanner, not a Rust parser: escaped quote bytes skip the next byte;
+// display-label exclusions examine the same forty-byte preceding window.
+fn jet_cli_extract_fixture_paths(text: String) -> [String] Never! {
+    bytes :: text.bytes()
+    paths := [String]{}
+    index := 0
+    loop index < bytes.len() {
+        if bytes[index] != 34 {
+            index += 1
+            next
+        }
+        start :: index + 1
+        end := start
+        loop end < bytes.len() && bytes[end] != 34 {
+            if bytes[end] == 92 -> end += 1
+            end += 1
+        }
+        // Rust drops a literal whose trailing backslash passed EOF.
+        if end <= bytes.len() {
+            literal :: text.slice(start..<end)
+            before_start := if start > 40 -> start - 40 else -> 0
+            loop before_start < index && bytes[before_start] >= 128 && bytes[before_start] < 192 -> before_start += 1
+            before :: text.slice(before_start..<index)
+            display :: before.contains("render_diagnostics(") || before.contains("render_all_colored(") || before.contains("render_all_json(")
+            if !display && jet_cli_fixture_literal(literal) -> &paths.push(literal)
+        }
+        index = end + 1
+    }
+    paths
+}
+
+fn jet_cli_collect_fixture_rs(directory: String, files: &[String]) Never! -[FS]> {
+    // Core's deterministic sorted enumeration is intentional (owner ruling,
+    // 2026-10-07); Rust read_dir order is unspecified. Parity compares missing
+    // diagnostics as a set, but repeated literal occurrences still count.
+    entries :: cli_files.listdir(directory) ?? return
+    loop name in entries {
+        path :: "{directory}/{name}"
+        if cli_files.is_dir(path) {
+            jet_cli_collect_fixture_rs(path, &files)
+        } else if name.ends_with(".rs") && name != ".rs" {
+            &files.push(path)
+        }
+    }
+}
+
+fn jet_cli_devtools_fixture_paths(color: Bool, json: Bool) -> JetDriverVerbOutput {
+    if !cli_files.is_dir("tests") -> return jet_cli_maintenance_error("E2104", "no `tests/` directory here", Val("run from the repo root"), color, json)
+    files := [String]{}
+    jet_cli_collect_fixture_rs("tests", &files)
+    checked := 0
+    missing := [String]{}
+    loop file in files {
+        source :: cli_files.read(file) ?? ""
+        loop path in jet_cli_extract_fixture_paths(source) {
+            checked += 1
+            if !cli_files.exists(path) -> &missing.push("  {file} -> `{path}` does not exist\n")
+        }
+    }
+    if missing.len() == 0 -> return JetDriverVerbOutput{stdout: "check-fixture-paths: {checked} embedded path(s) across {files.len()} file(s), all present\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    JetDriverVerbOutput{stdout: "", stderr: "check-fixture-paths: {missing.len()} missing path(s):\n{missing.join("")}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}

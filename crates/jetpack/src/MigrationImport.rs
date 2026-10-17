@@ -5,12 +5,12 @@
 
 use super::ProviderGraph::{normalize_provider_document, ProviderFamily};
 use super::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_pkg_model::ProviderFacts::{ProviderFactValue, ProviderFacts};
 use jet_pkg_model::{RefSpec, Syntax};
 use std::collections::BTreeMap;
 
-fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -319,7 +319,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
         &root_reference,
         source_path,
     );
-    if let Some(DataTree::Array(pkgs)) = obj.and_then(|object| object_field(object, "packages")) {
+    if let Some(Dyn::Array(pkgs)) = obj.and_then(|object| object_field(object, "packages")) {
         for (index, pkg) in pkgs.iter().enumerate() {
             let Some((name, provider_ref, locked, immutable_source, exact)) =
                 nix_import_package(pkg)
@@ -339,7 +339,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
                 dev: false,
             });
             let mut facts = ProviderFacts::for_reference("nix", &provider_ref);
-            if let DataTree::Object(_) = pkg {
+            if let Dyn::Object(_) = pkg {
                 let package_report =
                     normalize_provider_document(ProviderFamily::Nix, &nix_json_value(pkg));
                 merge_provider_projection(
@@ -367,7 +367,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
                     facts.add_loss("provider.selector", reason, source_path);
                 }
             }
-            if let DataTree::Object(package) = pkg {
+            if let Dyn::Object(package) = pkg {
                 for key in [
                     "pname", "version", "revision", "rev", "narHash", "hash", "drvPath",
                 ] {
@@ -403,7 +403,7 @@ pub fn import_nix_facts(source_path: &str, facts_json: &str) -> ImportPlan {
     plan
 }
 
-fn nix_import_string(object: &[(String, DataTree)], key: &str) -> Option<String> {
+fn nix_import_string(object: &[(String, Dyn)], key: &str) -> Option<String> {
     object_field(object, key)
         .and_then(|value| value.as_str().ok())
         .filter(|value| !value.trim().is_empty())
@@ -438,23 +438,17 @@ fn merge_provider_projection(
     }
 }
 
-fn nix_json_value(value: &DataTree) -> String {
+fn nix_json_value(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => value.to_string(),
-        DataTree::Number(value) => value.clone(),
-        DataTree::Text(value) | DataTree::TypedText(value) => JSON::quote(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => format!(
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => value.to_string(),
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => JSON::quote(value),
+        Dyn::Bytes(values) => JSON::quote(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => JSON::quote(&value.to_rfc3339()),
+        Dyn::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -462,7 +456,7 @@ fn nix_json_value(value: &DataTree) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        DataTree::Object(values) => format!(
+        Dyn::Object(values) => format!(
             "{{{}}}",
             values
                 .iter()
@@ -474,10 +468,10 @@ fn nix_json_value(value: &DataTree) -> String {
 }
 
 fn nix_import_package(
-    value: &DataTree,
+    value: &Dyn,
 ) -> Option<(String, String, String, Option<String>, bool)> {
     let (name, source, version, revision, digest, reference) = match value {
-        DataTree::Text(raw) | DataTree::TypedText(raw) => {
+        Dyn::Text(raw) => {
             let raw = raw.trim();
             if raw.is_empty() {
                 return None;
@@ -495,7 +489,7 @@ fn nix_import_package(
             };
             (name, None, None, None, None, Some(reference))
         }
-        DataTree::Object(object) => (
+        Dyn::Object(object) => (
             nix_import_string(object, "name")
                 .or_else(|| nix_import_string(object, "pname"))
                 .or_else(|| nix_import_string(object, "package"))?,
@@ -538,7 +532,7 @@ fn nix_import_package(
     };
     let exact = selector_facts.selector.is_exact();
     let immutable_source = match value {
-        DataTree::Object(object) => nix_import_string(object, "drvPath")
+        Dyn::Object(object) => nix_import_string(object, "drvPath")
             .or_else(|| nix_import_string(object, "immutableSource"))
             .or_else(|| nix_import_string(object, "sourceIdentity"))
             .or_else(|| nix_import_string(object, "sourcePath")),
@@ -749,7 +743,7 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
         ("optionalDependencies", false, "optional"),
         ("peerDependencies", false, "peer"),
     ] {
-        let Some(DataTree::Object(deps)) = obj.and_then(|object| object_field(object, field)) else {
+        let Some(Dyn::Object(deps)) = obj.and_then(|object| object_field(object, field)) else {
             continue;
         };
         for (name, val) in deps {
@@ -827,12 +821,12 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
             plan.retain_provider_facts_with_source(facts, "package.json");
         }
     }
-    if let Some(DataTree::Array(bundled)) =
+    if let Some(Dyn::Array(bundled)) =
         obj.and_then(|object| object_field(object, "bundledDependencies"))
     {
         if !bundled.is_empty() {
             for (index, value) in bundled.iter().enumerate() {
-                if !matches!(value, DataTree::Text(_) | DataTree::TypedText(_)) {
+                if !matches!(value, Dyn::Text(_)) {
                     plan.record_provider_finding(
                         "package.json".to_string(),
                         format!(
@@ -847,7 +841,7 @@ pub fn import_npm(package_json: &str) -> ImportPlan {
             );
         }
     }
-    if let Some(DataTree::Object(scripts)) =
+    if let Some(Dyn::Object(scripts)) =
         obj.and_then(|object| object_field(object, "scripts"))
     {
         for (name, _) in scripts {

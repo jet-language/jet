@@ -119,34 +119,34 @@ fn render_jet(lib: &str) -> String {
 }}
 use c.{abi} as abi
 
-pub struct Session {{ value: Int }}
-pub enum TclError {{ Eval }}
+struct Session {{ value: Int }}
+enum TclError {{ Eval }}
 
-pub fn open() -[FFI.Tcl]> Session TclError! {{
+fn open() -[FFI.Tcl]> Session TclError! {{
     value :: abi.open()
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(Session{{ value: value }})
 }}
 
-pub fn eval(session: Session, code: String) -[FFI.Tcl]> String TclError! {{
+fn eval(session: Session, code: String) -[FFI.Tcl]> String TclError! {{
     value :: abi.eval(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }}
 
-pub fn eval_once(code: String) -[FFI.Tcl]> String TclError! {{
+fn eval_once(code: String) -[FFI.Tcl]> String TclError! {{
     value :: abi.eval_once(code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }}
 
-pub fn eval_int(session: Session, code: String) -[FFI.Tcl]> Int TclError! {{
+fn eval_int(session: Session, code: String) -[FFI.Tcl]> Int TclError! {{
     value :: abi.eval_int(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }}
 
-pub fn eval_float(session: Session, code: String) -[FFI.Tcl]> Float TclError! {{
+fn eval_float(session: Session, code: String) -[FFI.Tcl]> Float TclError! {{
     value :: abi.eval_float(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
@@ -156,7 +156,7 @@ impl Session.Close {{
     fn close(^self) {{ abi.close(self.value) }}
 }}
 
-pub fn close(session: ^Session) -[FFI.Tcl]> {{ abi.close(session.value) }}
+fn close(session: ^Session) -[FFI.Tcl]> {{ abi.close(session.value) }}
 "#
     )
 }

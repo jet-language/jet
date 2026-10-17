@@ -1,0 +1,58 @@
+use core.http.client as http
+use core.files as files
+use core.time as time
+struct Observed {
+    body: String
+    chunks: Int
+    protocol: String
+    reused: Bool
+}
+fn observe(response: HTTPResponse) -> Observed {
+    body := ""
+    count := 0
+    // Exact original max64, cardinality and NORMAL FIRST EOF; transparent HTTPMessage.rs746-773 mapping.
+    loop chunk in response.body().chunks(64) {
+        bytes :: chunk ?? panic("read")
+        body += String.from_bytes(bytes) ?? panic("expected original ASCII bytes")
+        count += 1
+    }
+    return Observed{body: body, chunks: count, protocol: response.protocol(), reused: response.reused_connection()}
+}
+fn run() {
+    client :: http.Client.new().protocols(true, false, true)
+    warm :: observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("warm"))
+    first_task :: task {
+        files.write_atomic("{work}/first.ready", "ready".bytes()) ?? panic("first barrier")
+        loop !files.exists("{work}/barrier.go") { time.sleep(1) }
+        return observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("first"))
+    }
+    second_task :: task {
+        files.write_atomic("{work}/second.ready", "ready".bytes()) ?? panic("second barrier")
+        loop !files.exists("{work}/barrier.go") { time.sleep(1) }
+        return observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("second"))
+    }
+    // Original THREE-party barrier: both task arrivals and main release, AFTER warm drain.
+    loop !files.exists("{work}/first.ready") || !files.exists("{work}/second.ready") { time.sleep(1) }
+    files.write_atomic("{work}/barrier.go", "go".bytes()) ?? panic("release barrier")
+    first :: first_task.join() ?? panic("first task")
+    second :: second_task.join() ?? panic("second task")
+    bodies := [String]{first.body, second.body}
+    &bodies.sort()
+    print(warm.body)
+    print(warm.chunks)
+    print(bodies[0])
+    print(bodies[1])
+    print(first.chunks)
+    print(second.chunks)
+    third :: observe(client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("third"))
+    print(third.body)
+    print(third.chunks)
+    print(warm.protocol)
+    print(first.protocol)
+    print(second.protocol)
+    print(third.protocol)
+    print(warm.reused)
+    print(first.reused)
+    print(second.reused)
+    print(third.reused)
+}

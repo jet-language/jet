@@ -1,0 +1,93 @@
+// Read-only compiler source queries use the authorized loader, not a semantic
+// check. This is the CmdSchema/Source-query seam over the same compile request.
+use jet_foundation.[Diagnostic, Item, Program, NameLedger, MIRNameModule, MIRNameAlias, MIRNameVisibility, MIRStructureFact, MIRStructureFactKind, ast_program, compiler_transfer_rows, name_ledger_from_facts]
+use jet_sema.[SemaSourceOrigin, SemaRegistrationImportEdge, sema_name_loaded_facts]
+
+struct JetDriverSourceQueryModule {
+    module_identity: String
+    package_identity: String
+    path: String
+    physical_path: String
+    source: String
+    program: Program
+}
+struct JetDriverSourceQueryResult {
+    modules: [JetDriverSourceQueryModule]
+    diagnostics: [Diagnostic]
+    complete: Bool
+    // None for a loose source or an omitted version; an explicitly empty
+    // declared string remains Val(""). The CLI owns its display fallback.
+    entry_package_version: String?{None}
+    entry_module_index: Int{-1}
+    names: NameLedger?{None}
+}
+
+fn jet_driver_source_query(request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
+    jet_driver_source_query_loaded(jet_driver_load(request), request)
+}
+
+fn jet_driver_source_query_loaded(load: JetDriverLoadResult, request: JetDriverCompileRequest) -> JetDriverSourceQueryResult {
+    entry_package_version := String?{None}
+    loop package in load.packages {
+        if package.identity == load.package_identity {
+            entry_package_version = package.version
+            break
+        }
+    }
+    modules := [JetDriverSourceQueryModule]{}
+    source_positions :: jet_driver_source_file_positions(load.source_files)
+    loop loaded in load.modules {
+        unit :: load.source_units[loaded.source_unit_index]
+        physical := unit.path
+        source := ""
+        if unit.source_origin == SemaSourceOrigin.Snapshot && unit.root_index >= 0 && unit.file_index >= 0 {
+            file :: request.authorized_sources.roots[unit.root_index].files[unit.file_index]
+            physical = file.path
+            source = file.source
+        } else { source = jet_driver_source_text_at(load.source_files, source_positions, unit.path) }
+        &modules.push(JetDriverSourceQueryModule{
+            module_identity: loaded.module_identity,
+            package_identity: loaded.package_identity,
+            path: unit.path,
+            physical_path: physical,
+            source: source,
+            program: loaded.program,
+        })
+    }
+    entry_index := -1
+    loop (index, module_row) in load.modules {
+        if module_row.module_identity == load.entry_module_identity -> entry_index = index
+    }
+    JetDriverSourceQueryResult{modules: modules, diagnostics: load.diagnostics, complete: load.complete, entry_package_version: entry_package_version, entry_module_index: entry_index, names: load.names}
+}
+
+// The name facts read each module's items once: the items move out of the
+// loaded modules for the read and back after it (pushing each program into
+// the list copied the whole parse tree).
+fn jet_driver_loaded_names(loaded: &[JetDriverLoadedModule], units: [JetDriverSourceUnit], edges: [SemaRegistrationImportEdge]) -> NameLedger Never! {
+    modules := [MIRNameModule]{}
+    programs := [Program]{}
+    positions := [String:Int]{}
+    loop index in 0..<loaded.len() {
+        unit_index :: loaded[index].source_unit_index
+        positions[loaded[index].module_identity] = index
+        namespace :: if units[unit_index].in_namespace -> Val(loaded[index].package_identity) else -> None
+        &modules.push(MIRNameModule{alias: loaded[index].module_name, path: jet_driver_module_display(units[unit_index].relative_path), package: loaded[index].package_identity, namespace: namespace})
+        items := ast_program()
+        compiler_transfer_rows<Item>(&items.items, &loaded[index].program.items)
+        &programs.push(^items)
+    }
+    aliases := [MIRNameAlias]{}
+    structure := [MIRStructureFact]{}
+    loop edge in edges {
+        source :: positions.get(edge.source_module_identity) ?? next
+        target :: positions.get(edge.target_module_identity) ?? next
+        declaration :: edge.declaration
+        visibility :: if declaration.is_pub -> MIRNameVisibility.Public else -> if declaration.is_package_pub -> MIRNameVisibility.Package else -> MIRNameVisibility.Private
+        &aliases.push(MIRNameAlias{module_index: source, name: declaration.alias, target: modules[target].alias, target_module: Val(target), span: declaration.alias_span, visibility: visibility})
+        &structure.push(MIRStructureFact{kind: MIRStructureFactKind.ImportEdge, subject: "{modules[source].alias} -> {modules[target].alias}", source: units[loaded[source].source_unit_index].path, span: declaration.span, status: "resolved", detail: "resolved import edge", gate: None})
+    }
+    facts :: sema_name_loaded_facts(modules, programs, aliases, structure)
+    loop index in 0..<loaded.len() -> compiler_transfer_rows<Item>(&loaded[index].program.items, &programs[index].items)
+    name_ledger_from_facts(facts)
+}

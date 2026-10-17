@@ -1,0 +1,12 @@
+# HAND-PORT tests/jetpack_engine.rs:8055-8068 offline_without_fixtures_errors
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step: jetpack build fastfetch@nixpkgs --no-color --offline
+unset: JETPACK_FIXTURES
+exit: nonzero
+stderr: ~ "E1276" # original contains predicate
+stderr: ~ "fastfetch@nixpkgs" # original contains predicate
+

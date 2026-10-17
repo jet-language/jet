@@ -1,0 +1,17 @@
+# HAND-PORT tests/allocator_families.rs:597-654 allocator_constructors_agree_on_interpreter_and_aot
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original whole-function rustc guard, no-error sema and exact interpreter/AOT stdout. Interpreter exit is asserted0 by runnable case; original only required Ran.
+fixture: allocator_constructors_agree_on_interpreter_and_aot.fixture
+env: NO_COLOR=1
+requires: tool:rustc
+step: jet check --json main.jet
+exit: 0
+json: stdout doc $.reports[?severity="error"] #= 0
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = allocator_constructors_agree_on_interpreter_and_aot.stdout.expected
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = allocator_constructors_agree_on_interpreter_and_aot.stdout.expected

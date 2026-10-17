@@ -1,0 +1,9 @@
+
+module cache<K>(capacity: Int) {
+    struct Buffer { items: [K#capacity] }
+    fn slots() -> Int { capacity }
+}
+PROFILE_SLOTS :: prep { $build.settings.cache_slots }
+module tuned :: cache<Int>($build.settings.cache_slots)
+module chained :: cache<Int>(PROFILE_SLOTS)
+fn run() { print(tuned.slots()) }

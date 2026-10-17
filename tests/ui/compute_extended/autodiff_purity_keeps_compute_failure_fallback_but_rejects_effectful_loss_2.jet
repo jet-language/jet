@@ -1,0 +1,13 @@
+
+use core.compute as compute
+
+fn loss(value: Tensor) -> Tensor {
+    print("side effect")
+    return compute.mul(value, value) ?? panic("loss")
+}
+
+fn run() {
+    value :: compute.ones([1]) ?? panic("value")
+    gradient :: compute.gradient(loss, value.copy())
+    print(compute.to_list(gradient))
+}

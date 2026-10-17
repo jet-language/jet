@@ -1,0 +1,15 @@
+# HAND-PORT tests/jetpack_engine.rs:7624-7682 typed_core_source_inferred_from_pack_jet
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: typed_core_source_inferred_from_pack_jet.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack env --trust --yes --no-color -- hello
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout.trim: = typed_core_source_inferred_from_pack_jet.expected # original ed77c235f tests/jetpack_engine.rs:7678-7681 stdout.trim equals hello from jet-pkgs
+

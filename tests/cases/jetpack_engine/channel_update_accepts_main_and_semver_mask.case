@@ -1,0 +1,15 @@
+# HAND-PORT tests/jetpack_engine.rs:5449-5500 channel_update_accepts_main_and_semver_mask
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: channel_update_accepts_main_and_semver_mask.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+step: jetpack update --no-color --yes --fixtures {work}/fixtures
+cwd: project
+exit: 0
+file: project/.jet/lock ~ "name = \"trunk\"" # original predicate
+file: project/.jet/lock ~ "channel = \"main\"" # original predicate
+file: project/.jet/lock ~ "exact = \"github:acme/tools#abc123\"" # original predicate
+file: project/.jet/lock ~ "name = \"stable\"" # original predicate
+file: project/.jet/lock ~ "channel = \"v0.x\"" # original predicate
+file: project/.jet/lock ~ "exact = \"github:acme/tools#v0.9.4\"" # original predicate
+

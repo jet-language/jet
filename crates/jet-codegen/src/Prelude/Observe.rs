@@ -32,6 +32,8 @@ struct JetObserveTask {
     deadline_ms: Option<i64>,
     cancelled: bool,
     control: Option<std::sync::Weak<dyn JetObserveControl>>,
+    #[cfg(jet_native_pack)]
+    native_control: Option<std::sync::Arc<JetObserveNativeControl>>,
 }
 
 #[derive(Clone)]
@@ -610,6 +612,8 @@ fn jet_observe_task_register_at_with_control_weak(
             deadline_ms: None,
             cancelled: false,
             control,
+            #[cfg(jet_native_pack)]
+            native_control: None,
         },
     );
     observe_id.store(id, Ordering::Relaxed);
@@ -786,9 +790,13 @@ pub fn jet_observe_runtime_start_with_decision_ledger(
             sequence: 0,
         }),
     });
-    std::thread::spawn(move || loop {
-        jet_observe_publish(writer, false);
-        std::thread::sleep(std::time::Duration::from_millis(100));
+    std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
+        loop {
+            jet_observe_publish(writer, false);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
     });
 }
 
@@ -954,4 +962,120 @@ fn jet_allocation_probe_take() -> (usize, usize) {
         JET_PROBE_ARENA_ALLOCS.swap(0, std::sync::atomic::Ordering::SeqCst),
         JET_PROBE_ARENA_BYTES.swap(0, std::sync::atomic::Ordering::SeqCst),
     )
+}
+
+// Interim L8a raw-word bridge. Dies when Observe ports. The registry keeps an
+// Arc wrapper (not a payload) so its ordinary Weak control can cancel Jet tasks
+// at exit; the wrapper retains the same Jet control until registry removal.
+#[cfg(jet_native_pack)]
+struct JetObserveNativeControl(usize);
+#[cfg(jet_native_pack)]
+impl JetObserveControl for JetObserveNativeControl {
+    fn cancel(&self) {
+        unsafe extern "C" { fn jet_rt_scheduler_control_cancel(control: usize); }
+        unsafe { jet_rt_scheduler_control_cancel(self.0) };
+    }
+}
+#[cfg(jet_native_pack)]
+impl Drop for JetObserveNativeControl {
+    fn drop(&mut self) {
+        unsafe extern "C" { fn jet_rt_scheduler_control_drop(control: usize); }
+        unsafe { jet_rt_scheduler_control_drop(self.0) };
+    }
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub unsafe extern "C" fn jet_rt_observe_task_register(control: usize, site: usize, label: *mut u8) -> usize {
+    unsafe extern "C" { fn jet_rt_scheduler_control_retain(control: usize); }
+    unsafe { jet_rt_scheduler_control_retain(control) };
+    let control = std::sync::Arc::new(JetObserveNativeControl(control));
+    let erased: std::sync::Arc<dyn JetObserveControl> = control.clone();
+    let id_word = std::sync::atomic::AtomicUsize::new(0);
+    let id = jet_observe_task_register_at_with_control_weak(&id_word, site, Some(std::sync::Arc::downgrade(&erased)));
+    if let Some(registry) = jet_observe_registry() {
+        if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
+            task.native_control = Some(control);
+        }
+    }
+    jet_observe_task_set_label(id, jet_c_abi::view(label.cast()));
+    jet_observe_register_exit_drain(|| {
+        unsafe extern "C" { fn jet_scheduler_drain_after_exit(); }
+        unsafe { jet_scheduler_drain_after_exit() };
+    });
+    id
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_task_enter(id: usize) { jet_observe_task_enter(id) }
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_task_finish(id: usize) { jet_observe_task_finish(id) }
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_task_control(id: usize, state: i64, cancelled: i64) {
+    if let Some(registry) = jet_observe_registry() {
+        if let Some(task) = registry.tasks.lock().unwrap().get_mut(&id) {
+            if state == 1 { task.state = "running"; }
+            if state == 3 { task.state = "paused"; }
+            if cancelled >= 0 { task.cancelled = cancelled != 0; }
+        }
+    }
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub unsafe extern "C" fn jet_rt_observe_task_wait(state: i64, wait: *mut u8, present: i64, remaining: i64) {
+    let state = match state { 0 => "queued", 1 => "running", 2 => "blocked", 3 => "paused", _ => unreachable!() };
+    let wait = if wait.is_null() { "" } else { jet_c_abi::view(wait.cast()) };
+    jet_observe_task_update(state, wait, (present != 0).then_some(remaining));
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_task_identity(id: usize) -> *mut u8 {
+    jet_c_abi::handle(jet_observe_task_identity(id)).cast()
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_has_parked_tasks() -> bool { jet_observe_has_parked_tasks() }
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_pool(workers: i64, queued_delta: i64) {
+    use std::sync::atomic::Ordering;
+    if workers >= 0 { JET_OBSERVE_WORKERS.store(workers as usize, Ordering::Relaxed); }
+    if queued_delta > 0 { JET_OBSERVE_QUEUED.fetch_add(queued_delta as usize, Ordering::Relaxed); }
+    if queued_delta < 0 { JET_OBSERVE_QUEUED.fetch_sub(queued_delta.unsigned_abs() as usize, Ordering::Relaxed); }
+}
+// Generated-runtime seed provider (HostIO.jet owns it in the native pack); jet-codegen's in-crate copy exports nothing.
+#[cfg(all(not(jet_native_pack), not(jet_codegen_host)))]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_io_quiescent() -> bool {
+    use std::sync::atomic::Ordering;
+    METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
+        && METRIC_IO_ALLOCATED.load(Ordering::Acquire) == METRIC_IO_RETIRED.load(Ordering::Acquire)
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_channel_new(bounded: i64, capacity: i64) -> usize {
+    let Some(registry) = jet_observe_registry() else { return 0 };
+    let id = registry.next_channel.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    registry.channels.lock().unwrap().insert(id, JetObserveChannel {
+        depth: 0, capacity: (bounded != 0).then_some(capacity as usize),
+        send_waiters: 0, recv_waiters: 0, closed: false,
+    });
+    id
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_channel_update(id: usize, depth: usize, send_waiters: usize, recv_waiters: usize, closed: i64) {
+    let Some(registry) = jet_observe_registry() else { return };
+    if let Some(channel) = registry.channels.lock().unwrap().get_mut(&id) {
+        channel.depth = depth;
+        channel.send_waiters = send_waiters;
+        channel.recv_waiters = recv_waiters;
+        channel.closed = closed != 0;
+    }
+}
+#[cfg(jet_native_pack)]
+#[no_mangle]
+pub extern "C" fn jet_rt_observe_channel_drop(id: usize) {
+    if let Some(registry) = jet_observe_registry() { registry.channels.lock().unwrap().remove(&id); }
 }

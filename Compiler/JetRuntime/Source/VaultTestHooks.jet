@@ -1,0 +1,195 @@
+// Test-only transport for SecretsCrypto.rs:2021-2029,2052-2057,2871-2916.
+// One dynamic Thread TLS key; no alternate TCB, Rust TLS, or process env hooks.
+// TLS32: authorizer closure0, trust raw-text8, fault text16, borrow flag24.
+// The source owns cleanup; the C test transport supplies its real code address.
+vault_test_key := I64{0}
+vault_test_destructor := I64{0}
+vault_test_backup_mutex := I64{0}
+vault_test_backup_config := I64{0}
+#Export(c) fn jet_rt_vault_test_hooks_init(destructor_code: I64) {
+    if (destructor_code == I64{0}) -> panic("vault test hooks initializer received a null destructor")
+    sync_mutex_lock(thread_tls_registry)
+    if (vault_test_key != I64{0}) {
+        same :: vault_test_destructor == destructor_code
+        sync_mutex_unlock(thread_tls_registry)
+        if !same -> panic("vault test hooks initializer changed its destructor")
+        return
+    }
+    destructor :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(destructor, I64{1})
+    sync_store(destructor + I64{8}, destructor_code)
+    sync_store(destructor + I64{16}, I64{0})
+    vault_test_destructor = destructor_code
+    vault_test_backup_mutex = jet_rt_alloc(I64{8}, I64{8})
+    sync_store(vault_test_backup_mutex, I64{0})
+    vault_test_key = thread_tls_key_new_locked(destructor, I64{0})
+    sync_mutex_unlock(thread_tls_registry)
+}
+fn vault_test_state() -> I64 {
+    if (vault_test_key == I64{0}) -> return I64{0}
+    jet_rt_tls_get(vault_test_key)
+}
+fn vault_test_state_ensure() -> I64 {
+    if (vault_test_key == I64{0}) -> panic("vault test hooks used before initialization")
+    state := vault_test_state()
+    if (state == I64{0}) {
+        state = jet_rt_alloc(I64{32}, I64{8})
+        thread_zero(state, I64{32})
+        jet_rt_tls_set(vault_test_key, state)
+    }
+    state
+}
+// rustc1.97.1(8bab26f4f) library/core/src/cell.rs:902,912-918:
+// BorrowMutError Display / panic_already_borrowed = "RefCell already borrowed".
+// Foreign panic precedent: flush stdout, exact body + LF on stderr, exit101;
+// no Jet program stop publication, atexit, or Rust thread/backtrace prefix.
+fn vault_test_borrow_stop() {
+    jet_rt_stdout_flush()
+    trap_write_word(I64{2336361488876725586}, I64{8})
+    trap_write_word(I64{2340011850872286305}, I64{8})
+    trap_write_word(I64{7234319696985747298}, I64{8})
+    trap_msg_newline()
+    trap_exit(I64{101})
+}
+#Export(c) fn jet_rt_vault_test_hooks_destroy(_closure: I64, state: I64) -> I64 {
+    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
+    authorizer :: sync_load(state)
+    trust :: sync_load(state + I64{8})
+    fault :: sync_load(state + I64{16})
+    if (authorizer != I64{0}) -> scheduler_closure_drop(authorizer)
+    if (trust != I64{0}) -> jet_rt_string_drop(trust)
+    if (fault != I64{0}) -> jet_rt_string_drop(fault)
+    jet_rt_free(state, I64{32}, I64{8})
+    I64{0}
+}
+// Adopts one scheduler closure. Call/header + borrowed preview -> low-byte Bool;
+// the closure's release entry owns its environment and header on final drop.
+#Export(c) fn jet_rt_vault_set_test_authorizer(closure: I64) {
+    state :: vault_test_state_ensure()
+    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
+    previous :: sync_load(state)
+    sync_store(state, closure)
+    if (previous != I64{0}) -> scheduler_closure_drop(previous)
+}
+#Export(c) fn jet_rt_vault_clear_test_authorizer() {
+    state :: vault_test_state()
+    if (state == I64{0}) -> return
+    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
+    previous :: sync_load(state)
+    sync_store(state, I64{0})
+    if (previous != I64{0}) -> scheduler_closure_drop(previous)
+}
+// -1 = absent (provider must perform its normal authorization); 0/1 = answer.
+#Export(c) fn jet_rt_vault_test_authorize(preview: I64) -> I64 {
+    state :: vault_test_state()
+    if (state == I64{0}) -> return I64{-1}
+    closure :: sync_load(state)
+    if (closure == I64{0}) -> return I64{-1}
+    if (sync_load(state + I64{24}) != I64{0}) -> vault_test_borrow_stop()
+    sync_store(state + I64{24}, I64{1})
+    answer :: coll_call2(sync_load(closure + I64{8}), closure, preview)
+    sync_store(state + I64{24}, I64{0})
+    if ((answer.bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1}
+}
+fn vault_test_set_text(offset: I64, text: I64) {
+    state :: vault_test_state_ensure()
+    previous :: sync_load(state + offset)
+    // Clone before dropping: callers may borrow the existing hook value.
+    next :: if (text == I64{0}) -> I64{0} else -> jet_rt_string_clone(text)
+    sync_store(state + offset, next)
+    if (previous != I64{0}) -> jet_rt_string_drop(previous)
+}
+#Export(c) fn jet_rt_vault_set_test_trust_path(path: I64) { vault_test_set_text(I64{8}, path) }
+#Export(c) fn jet_rt_vault_test_trust_path() -> I64 {
+    state :: vault_test_state()
+    if (state == I64{0}) -> I64{0} else -> sync_load(state + I64{8})
+}
+#Export(c) fn jet_rt_vault_set_test_fault(fault: I64) { vault_test_set_text(I64{16}, fault) }
+#Export(c) fn jet_rt_vault_test_fault(name: I64) -> Bool {
+    state :: vault_test_state()
+    if (state == I64{0}) -> return false
+    fault :: sync_load(state + I64{16})
+    fault != I64{0} && jet_rt_string_eq(fault, name)
+}
+// Reusable native barrier48: refs0 mutex8 participants16 remaining24
+// generation32 condition-sequence40. Mirrors std::sync::Barrier wait semantics.
+#Export(c) fn jet_rt_vault_test_barrier_new(participants: I64) -> I64 {
+    if (participants < I64{0}) -> panic("vault test barrier needs a nonnegative participant count")
+    barrier :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(barrier, I64{48})
+    sync_store(barrier, I64{1})
+    sync_store(barrier + I64{16}, participants)
+    sync_store(barrier + I64{24}, participants)
+    barrier
+}
+fn vault_test_barrier_retain(barrier: I64) { _ := sync_add(barrier, I64{1}) }
+#Export(c) fn jet_rt_vault_test_barrier_drop(barrier: I64) {
+    if (sync_add(barrier, I64{-1}) == I64{1}) -> jet_rt_free(barrier, I64{48}, I64{8})
+}
+#Export(c) fn jet_rt_vault_test_barrier_wait(barrier: I64) {
+    mutex :: barrier + I64{8}
+    sync_mutex_lock(mutex)
+    // std::sync::Barrier::new(0), like new(1), releases each waiter immediately.
+    // Keep the mutex/generation publication edge even for the zero case.
+    if (sync_load(barrier + I64{16}) == I64{0}) {
+        sync_store(barrier + I64{32}, wrapping(sync_load(barrier + I64{32}) + I64{1}))
+        sync_cond_notify_all(barrier + I64{40})
+        sync_mutex_unlock(mutex)
+        return
+    }
+    generation :: sync_load(barrier + I64{32})
+    remaining :: sync_load(barrier + I64{24}) - I64{1}
+    sync_store(barrier + I64{24}, remaining)
+    if (remaining == I64{0}) {
+        sync_store(barrier + I64{24}, sync_load(barrier + I64{16}))
+        sync_store(barrier + I64{32}, wrapping(generation + I64{1}))
+        sync_cond_notify_all(barrier + I64{40})
+    } else {
+        loop sync_load(barrier + I64{32}) == generation {
+            _ := sync_cond_wait(barrier + I64{40}, mutex, I64{-1})
+        }
+    }
+    sync_mutex_unlock(mutex)
+}
+// Immutable shared config32: refs0 raw-root Text8 entered16 release24.
+// A blocked writer keeps the exact snapshot alive across replacement/clear.
+fn vault_test_backup_drop(config: I64) {
+    if (config == I64{0}) -> return
+    if (sync_add(config, I64{-1}) != I64{1}) -> return
+    jet_rt_string_drop(sync_load(config + I64{8}))
+    jet_rt_vault_test_barrier_drop(sync_load(config + I64{16}))
+    jet_rt_vault_test_barrier_drop(sync_load(config + I64{24}))
+    jet_rt_free(config, I64{32}, I64{8})
+}
+#Export(c) fn jet_rt_vault_set_test_backup_barrier(root: I64, entered: I64, release: I64) {
+    if (vault_test_key == I64{0}) -> panic("vault test hooks used before initialization")
+    next := I64{0}
+    if (root != I64{0}) {
+        if (entered == I64{0} || release == I64{0}) -> panic("vault test backup barrier pair is incomplete")
+        next = jet_rt_alloc(I64{32}, I64{8})
+        sync_store(next, I64{1})
+        sync_store(next + I64{8}, jet_rt_string_clone(root))
+        vault_test_barrier_retain(entered)
+        vault_test_barrier_retain(release)
+        sync_store(next + I64{16}, entered)
+        sync_store(next + I64{24}, release)
+    } else if (entered != I64{0} || release != I64{0}) -> panic("vault test backup barrier root is absent")
+    sync_mutex_lock(vault_test_backup_mutex)
+    previous :: vault_test_backup_config.copy()
+    vault_test_backup_config = next
+    sync_mutex_unlock(vault_test_backup_mutex)
+    vault_test_backup_drop(previous)
+}
+#Export(c) fn jet_rt_vault_test_pause_after_backup(root: I64) {
+    if (vault_test_key == I64{0}) -> return
+    sync_mutex_lock(vault_test_backup_mutex)
+    config :: vault_test_backup_config
+    if (config != I64{0}) -> _ := sync_add(config, I64{1})
+    sync_mutex_unlock(vault_test_backup_mutex)
+    if (config == I64{0}) -> return
+    if jet_rt_string_eq(sync_load(config + I64{8}), root) {
+        jet_rt_vault_test_barrier_wait(sync_load(config + I64{16}))
+        jet_rt_vault_test_barrier_wait(sync_load(config + I64{24}))
+    }
+    vault_test_backup_drop(config)
+}

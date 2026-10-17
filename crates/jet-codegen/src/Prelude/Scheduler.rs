@@ -9,13 +9,51 @@ use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
+// Interim native-pack seam: every remaining Rust thread attaches to Jet's GS
+// TCB before it can call a Jet runtime export. Dies when each spawner ports.
+#[cfg(jet_native_pack)]
+pub struct JetNativeThreadAttachment;
+
+#[cfg(jet_native_pack)]
+impl JetNativeThreadAttachment {
+    pub fn enter() -> Self {
+        extern "C" {
+            #[link_name = "jet_rt_thread_bootstrap"]
+            fn bootstrap();
+        }
+        // SAFETY: this is the first operation on a new runtime-owned thread;
+        // inherited GS may point to a freed parent's TCB, so bootstrap never
+        // reads it and always installs a fresh TCB before any Jet work.
+        unsafe { bootstrap() };
+        Self
+    }
+}
+
+#[cfg(jet_native_pack)]
+impl Drop for JetNativeThreadAttachment {
+    fn drop(&mut self) {
+        extern "C" {
+            #[link_name = "jet_rt_thread_detach"]
+            fn detach();
+        }
+        // SAFETY: the guard outlives this thread's runtime work and drops last,
+        // running Jet TLS destructors before releasing its TCB.
+        unsafe { detach() };
+    }
+}
+
 struct Job { run:Box<dyn FnOnce()+Send>,blocking:bool }
 
 fn spawn_scheduler_worker(name: String, work: impl FnOnce() + Send + 'static) {
     thread::Builder::new()
         .name(name.clone())
         .stack_size(jet_foundation::CompilerStack::COMPILER_STACK_SIZE)
-        .spawn(work)
+        .spawn(move || {
+            jet_runtime_stack_thread_stack(jet_foundation::CompilerStack::COMPILER_STACK_SIZE);
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
+            work()
+        })
         .unwrap_or_else(|error| {
             jet_scheduler_fatal(&format!("could not start {name}: {error}"))
         });
@@ -585,6 +623,14 @@ impl Drop for JetTaskCancelCallbackGuard {
 pub struct JetTaskControl {
     pub paused: Arc<AtomicBool>,
     pub cancelled: Arc<AtomicBool>,
+    // Native code has no unwind tables. The foreign boundary translates the
+    // scheduler's typed transfer into this same task's MIR stop rail; merely
+    // requesting Task.cancel does not deliver it at a call or loop poll.
+    // `native_status` is the rail's word; `native_stop_record` is the shared
+    // stop record published with it (publish_native_stop).
+    native_status: std::sync::atomic::AtomicU64,
+    native_interrupt_pending: AtomicBool,
+    native_stop_record: Mutex<Option<JetStopRecord>>,
     /// D-TASK-PAUSE-TIER1=E: 0 = WaitPoints (default), 1 = CheckLoops.
     pub pause_mode: AtomicU8,
     observe_id: AtomicUsize,
@@ -599,6 +645,9 @@ impl JetTaskControl {
         Arc::new(JetTaskControl {
             paused: Arc::new(AtomicBool::new(false)),
             cancelled: Arc::new(AtomicBool::new(false)),
+            native_status: std::sync::atomic::AtomicU64::new(0),
+            native_interrupt_pending: AtomicBool::new(false),
+            native_stop_record: Mutex::new(None),
             pause_mode: AtomicU8::new(0),
             observe_id: AtomicUsize::new(0),
             park: ParkSlot::new(),
@@ -606,6 +655,14 @@ impl JetTaskControl {
             cancel_callbacks: Mutex::new(HashMap::new()),
             next_cancel_callback: AtomicUsize::new(0),
         })
+    }
+
+    /// Request a session interrupt without claiming the current call result is
+    /// uninitialized. Only a Check poll (or canonical wait delivery) publishes
+    /// the stop rail. Waking uses the ordinary task-control mechanism.
+    pub fn interrupt_native(&self) {
+        self.native_interrupt_pending.store(true, Ordering::Release);
+        self.cancel();
     }
 
     /// Register a short-lived bridge for provider futures and other foreign
@@ -756,6 +813,469 @@ pub fn jet_scheduler_current_task_control() -> Option<Arc<JetTaskControl>> {
 fn current_task_control() -> Option<Arc<JetTaskControl>> {
     TASK_CONTROL.with(|t| t.borrow().clone())
 }
+
+
+pub const JET_NATIVE_STOP_CANCELLED: u64 = 1;
+pub const JET_NATIVE_STOP_DEADLINE: u64 = 2;
+pub const JET_NATIVE_STOP_BUDGET_FUEL: u64 = 3;
+pub const JET_NATIVE_STOP_BUDGET_DEPTH: u64 = 4;
+pub const JET_NATIVE_STOP_TASK_PANIC: u64 = 5;
+
+/// Why a native execution stopped (unified host/stop contract, #4720). The
+/// first four are recoverable: they travel on the task control's stop rail and
+/// leave through explicit MIR cleanup. A native SendFn's intentional Panic
+/// becomes TaskFailure after its callback returns; a root panic, host fault
+/// or trap invalidates the child.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum JetStopKind {
+    Cancelled,
+    Deadline,
+    BudgetFuel,
+    BudgetDepth,
+    Panic,
+    HostFault,
+    Trap,
+}
+
+impl JetStopKind {
+    pub fn name(self) -> &'static str {
+        match self {
+            JetStopKind::Cancelled => "Cancelled",
+            JetStopKind::Deadline => "Deadline",
+            JetStopKind::BudgetFuel => "BudgetFuel",
+            JetStopKind::BudgetDepth => "BudgetDepth",
+            JetStopKind::Panic => "Panic",
+            JetStopKind::HostFault => "HostFault",
+            JetStopKind::Trap => "Trap",
+        }
+    }
+
+    /// The stop-rail word of a recoverable kind; a fatal kind never reaches
+    /// the rail.
+    fn rail_status(self) -> Option<u64> {
+        match self {
+            JetStopKind::Cancelled => Some(JET_NATIVE_STOP_CANCELLED),
+            JetStopKind::Deadline => Some(JET_NATIVE_STOP_DEADLINE),
+            JetStopKind::BudgetFuel => Some(JET_NATIVE_STOP_BUDGET_FUEL),
+            JetStopKind::BudgetDepth => Some(JET_NATIVE_STOP_BUDGET_DEPTH),
+            JetStopKind::Panic if jet_scheduler_native_task_body_active() => Some(JET_NATIVE_STOP_TASK_PANIC),
+            JetStopKind::Panic | JetStopKind::HostFault | JetStopKind::Trap => None,
+        }
+    }
+}
+
+/// The shared stop record: internal to the host and runtime, not Core API.
+/// `jct_status` keeps the comptime meanings (1 runtime panic, 2 fuel, 3 depth,
+/// 4 foreign/host panic), distinct from the rail words. `owner` is the dense
+/// row of the retained MIR function and `start`/`end` are source byte offsets
+/// of the current comptime frame; a signal or trap outside comptime has no
+/// site, and none is fabricated. `message` keeps its exact UTF-8 bytes (the
+/// canonical deadline report, a panic message).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JetStopRecord {
+    pub kind: JetStopKind,
+    pub jct_status: Option<u32>,
+    pub owner: Option<u64>,
+    pub start: Option<u64>,
+    pub end: Option<u64>,
+    pub message: String,
+}
+
+impl JetStopRecord {
+    /// A stop with no comptime site.
+    pub fn signal(kind: JetStopKind, message: String) -> Self {
+        JetStopRecord { kind, jct_status: None, owner: None, start: None, end: None, message }
+    }
+
+    /// The private control channel's frame: the body's decimal UTF-8 byte
+    /// length, a newline, then exactly that many bytes. The body is one JSON
+    /// object holding every field (an absent one is `null`).
+    pub fn encode(&self) -> Vec<u8> {
+        use std::fmt::Write as _;
+        fn number<T: std::fmt::Display>(value: Option<T>) -> String {
+            value.map_or_else(|| "null".to_string(), |value| value.to_string())
+        }
+        let mut body = String::with_capacity(96 + self.message.len());
+        let _ = write!(
+            body,
+            "{{\"kind\":\"{}\",\"jct_status\":{},\"owner\":{},\"start\":{},\"end\":{},\"message\":\"",
+            self.kind.name(),
+            number(self.jct_status),
+            number(self.owner),
+            number(self.start),
+            number(self.end),
+        );
+        for ch in self.message.chars() {
+            match ch {
+                '"' => body.push_str("\\\""),
+                '\\' => body.push_str("\\\\"),
+                '\n' => body.push_str("\\n"),
+                '\r' => body.push_str("\\r"),
+                '\t' => body.push_str("\\t"),
+                ch if (ch as u32) < 0x20 => { let _ = write!(body, "\\u{:04x}", ch as u32); }
+                ch => body.push(ch),
+            }
+        }
+        body.push_str("\"}");
+        let mut frame = format!("{}\n", body.len()).into_bytes();
+        frame.extend_from_slice(body.as_bytes());
+        frame
+    }
+}
+
+/// Publish a recoverable stop on `control`: the record first, then its rail
+/// word, so a reader that sees the word (Acquire) finds the record. The first
+/// stop wins, except that Deadline supersedes Cancelled (the canonical
+/// deadline-before-cancellation precedence). False for a fatal kind or when an
+/// earlier stop keeps the rail.
+fn publish_native_stop(control: &JetTaskControl, record: JetStopRecord) -> bool {
+    let Some(word) = record.kind.rail_status() else { return false };
+    let mut slot = control.native_stop_record.lock().unwrap_or_else(|poison| poison.into_inner());
+    let current = control.native_status.load(Ordering::Acquire);
+    if current != 0 && !(word == JET_NATIVE_STOP_DEADLINE && current == JET_NATIVE_STOP_CANCELLED) {
+        return false;
+    }
+    *slot = Some(record);
+    control.native_status.store(word, Ordering::Release);
+    true
+}
+
+/// Publish a recoverable stop on the current task's control (no control: the
+/// thread runs no native task, and nothing is published).
+pub fn jet_scheduler_native_publish(record: JetStopRecord) -> bool {
+    current_task_control().is_some_and(|control| publish_native_stop(&control, record))
+}
+
+/// The stop record published with the current task's rail word, if any.
+pub fn jet_scheduler_native_stop_record() -> Option<JetStopRecord> {
+    let control = current_task_control()?;
+    let slot = control.native_stop_record.lock().unwrap_or_else(|poison| poison.into_inner());
+    slot.clone()
+}
+
+/// Raw status for a returned Stopped edge or the session entry adapter. No Arc
+/// is cloned on this hot path, and reading does not consume a pending stop.
+pub fn jet_scheduler_native_status() -> u64 {
+    TASK_CONTROL.with(|slot| {
+        slot.borrow().as_ref().map_or(0, |control| {
+            control.native_status.load(Ordering::Acquire)
+        })
+    })
+}
+
+/// The same Shield rule protects user scopes and the entire MIR cleanup chain.
+pub fn jet_scheduler_native_poll() -> u64 {
+    if jet_scheduler_shielded() { return 0; }
+    TASK_CONTROL.with(|slot| {
+        slot.borrow().as_ref().map_or(0, |control| {
+            if control.native_interrupt_pending.swap(false, Ordering::AcqRel) {
+                publish_native_stop(control, JetStopRecord::signal(JetStopKind::Cancelled, String::new()));
+            }
+            control.native_status.load(Ordering::Acquire)
+        })
+    })
+}
+
+/// Post-call Propagate observes only a transfer the callee already delivered.
+/// A request arriving after successful result initialization must wait for the
+/// next Check, when that result participates in ordinary initialized cleanup.
+pub fn jet_scheduler_native_propagate() -> u64 {
+    if jet_scheduler_shielded() { 0 } else { jet_scheduler_native_status() }
+}
+
+/// Convert ONLY the canonical typed scheduler transfers, after they have been
+/// caught inside a Rust runtime frame above native code. Unknown panics retain
+/// their original payload and follow the existing fatal host boundary.
+pub fn jet_scheduler_native_record_unwind(
+    payload: Box<dyn std::any::Any + Send>,
+) -> Result<(), Box<dyn std::any::Any + Send>> {
+    if jet_scheduler_native_task_body_active() && payload.is::<JetNativeTaskPanic>() {
+        let Some(control) = current_task_control() else { return Err(payload) };
+        let panic = payload.downcast::<JetNativeTaskPanic>().unwrap_or_else(|_| unreachable!("checked native task panic marker"));
+        publish_native_stop(&control, JetStopRecord::signal(JetStopKind::Panic, panic.0));
+        return Ok(());
+    }
+    if !jet_scheduler_is_cancel_unwind(&*payload)
+        && !jet_scheduler_is_deadline_unwind(&*payload)
+    {
+        return Err(payload);
+    }
+    let Some(control) = current_task_control() else { return Err(payload) };
+    let record = match jet_scheduler_classify_unwind::<()>(payload) {
+        JetSchedulerWait::Cancelled => JetStopRecord::signal(JetStopKind::Cancelled, String::new()),
+        JetSchedulerWait::Deadline(rendered) => JetStopRecord::signal(JetStopKind::Deadline, rendered),
+        _ => unreachable!("only typed control transfers reach the native stop rail"),
+    };
+    publish_native_stop(&control, record);
+    Ok(())
+}
+
+/// A native callback returned through its Stopped edge. Called ONLY after a
+/// nonzero masked poll and after native frames have returned to Rust; the
+/// ordinary scheduler boundary owns the resulting typed transfer. A budget
+/// stop ends the callback's task as cancelled: the comptime request's budget
+/// is spent for every thread (jet_native_comptime_budget_stop), so the root's
+/// next budget operation stops it with the request's first budget record.
+pub fn jet_scheduler_resume_native_stop() -> ! {
+    let record = jet_scheduler_native_stop_record()
+        .expect("native callback claimed Stopped without a control transfer");
+    match record.kind {
+        JetStopKind::Cancelled | JetStopKind::BudgetFuel | JetStopKind::BudgetDepth => jet_task_unwind_cancel(),
+        JetStopKind::Deadline => std::panic::panic_any(JetDeadlineUnwind { rendered: record.message }),
+        JetStopKind::Panic => std::panic::resume_unwind(Box::new(record.message)),
+        JetStopKind::HostFault | JetStopKind::Trap => {
+            unreachable!("a fatal stop never reaches the native stop rail")
+        }
+    }
+}
+
+/// Owning-thread entry scope for a session root or a nested native task. Its
+/// control owns the stop rail; switching tasks cannot inherit a parent's
+/// Shield depth, and leaving restores the caller's exact context.
+#[must_use]
+pub struct JetNativeTaskControlScope {
+    previous: Option<Arc<JetTaskControl>>,
+    previous_shield: u32,
+    previous_task_boundary: bool,
+    _owning_thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl JetNativeTaskControlScope {
+    pub fn enter(control: Arc<JetTaskControl>) -> Self {
+        let (previous, same_task) = TASK_CONTROL.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            let same_task = slot.as_ref().is_some_and(|previous| Arc::ptr_eq(previous, &control));
+            (slot.replace(control), same_task)
+        });
+        let previous_shield = SHIELD_DEPTH.with(|depth| {
+            if same_task { depth.get() } else { depth.replace(0) }
+        });
+        let previous_task_boundary = JET_IN_SCHEDULER_TASK.with(|in_task| in_task.replace(true));
+        Self {
+            previous, previous_shield, previous_task_boundary,
+            _owning_thread: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for JetNativeTaskControlScope {
+    fn drop(&mut self) {
+        TASK_CONTROL.with(|slot| *slot.borrow_mut() = self.previous.take());
+        SHIELD_DEPTH.with(|depth| depth.set(self.previous_shield));
+        JET_IN_SCHEDULER_TASK.with(|in_task| in_task.set(self.previous_task_boundary));
+    }
+}
+
+#[cfg(test)]
+mod native_status_tests {
+    use super::*;
+
+    fn deliver_wait_cancel() {
+        let payload = jet_scheduler_catch_foreign_boundary(jet_task_wait_point_cancel_check)
+            .expect_err("an unshielded wait must deliver the canonical cancellation");
+        assert!(jet_scheduler_native_record_unwind(payload).is_ok());
+    }
+
+    #[test]
+    fn task_cancel_keeps_wait_point_delivery() {
+        let control = JetTaskControl::new();
+        let _scope = JetNativeTaskControlScope::enter(control.clone());
+        control.cancel();
+        assert_eq!(jet_scheduler_native_poll(), 0);
+        deliver_wait_cancel();
+        assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+    }
+
+    #[test]
+    fn child_interrupt_and_sibling_cancel_do_not_leak_into_root() {
+        let root = JetTaskControl::new();
+        let child = JetTaskControl::new();
+        let sibling = JetTaskControl::new();
+        let _root = JetNativeTaskControlScope::enter(root.clone());
+        {
+            let _child = JetNativeTaskControlScope::enter(child.clone());
+            child.interrupt_native();
+            assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+        {
+            let _sibling = JetNativeTaskControlScope::enter(sibling.clone());
+            sibling.cancel();
+            assert_eq!(jet_scheduler_native_poll(), 0);
+            deliver_wait_cancel();
+            assert_eq!(jet_scheduler_native_status(), JET_NATIVE_STOP_CANCELLED);
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+        assert!(!root.cancelled.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn interrupt_arriving_in_drop_callback_does_not_interrupt_cleanup() {
+        struct Cleanup {
+            control: Arc<JetTaskControl>,
+            completed: Arc<AtomicUsize>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                self.control.interrupt_native();
+                // A callback on this same task must retain the caller's mask.
+                let _callback = JetNativeTaskControlScope::enter(self.control.clone());
+                assert_eq!(jet_scheduler_native_poll(), 0);
+                jet_task_wait_point_cancel_check();
+                self.completed.fetch_add(1, Ordering::Release);
+            }
+        }
+        let control = JetTaskControl::new();
+        let completed = Arc::new(AtomicUsize::new(0));
+        let _root = JetNativeTaskControlScope::enter(control.clone());
+        jet_scheduler_shield_enter();
+        drop(Cleanup { control, completed: completed.clone() });
+        assert_eq!(completed.load(Ordering::Acquire), 1);
+        assert_eq!(jet_scheduler_native_poll(), 0);
+        assert_eq!(jet_scheduler_native_status(), 0);
+        assert_eq!(jet_scheduler_shield_leave_status(), JetShieldExit::Cancelled);
+        assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+    }
+
+    #[test]
+    fn a_post_result_interrupt_waits_for_check_and_drops_the_result_once() {
+        struct ResultValue(Arc<AtomicUsize>);
+        impl Drop for ResultValue {
+            fn drop(&mut self) { self.0.fetch_add(1, Ordering::Release); }
+        }
+        let control = JetTaskControl::new();
+        let drops = Arc::new(AtomicUsize::new(0));
+        let _root = JetNativeTaskControlScope::enter(control.clone());
+        let result = ResultValue(drops.clone());
+        control.interrupt_native();
+        assert_eq!(jet_scheduler_native_propagate(), 0);
+        assert_eq!(drops.load(Ordering::Acquire), 0);
+        assert_eq!(jet_scheduler_native_poll(), JET_NATIVE_STOP_CANCELLED);
+        drop(result);
+        assert_eq!(drops.load(Ordering::Acquire), 1);
+    }
+
+    #[test]
+    fn deadline_precedence_retains_the_canonical_report() {
+        let control = JetTaskControl::new();
+        let _root = JetNativeTaskControlScope::enter(control.clone());
+        control.interrupt_native();
+        let rendered = "Error [E3003]: Deadline exceeded while waiting in task join".to_string();
+        assert!(jet_scheduler_native_record_unwind(Box::new(JetDeadlineUnwind {
+            rendered: rendered.clone(),
+        })).is_ok());
+        assert!(jet_scheduler_native_record_unwind(Box::new(JetCancelUnwind)).is_ok());
+        assert_eq!(jet_scheduler_native_status(), JET_NATIVE_STOP_DEADLINE);
+        let payload = jet_scheduler_catch_foreign_boundary(|| jet_scheduler_resume_native_stop())
+            .expect_err("a returned native stop propagates only through Rust");
+        match jet_scheduler_classify_unwind::<()>(payload) {
+            JetSchedulerWait::Deadline(report) => assert_eq!(report, rendered),
+            _ => panic!("native deadline changed scheduler outcome"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_panic_never_becomes_a_recoverable_stop() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        let payload = jet_scheduler_native_record_unwind(Box::new("host defect".to_string()))
+            .expect_err("only typed scheduler transfers are recoverable");
+        assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some("host defect"));
+        assert_eq!(jet_scheduler_native_status(), 0);
+    }
+
+    fn budget_record(kind: JetStopKind, status: u32) -> JetStopRecord {
+        JetStopRecord {
+            kind,
+            jct_status: Some(status),
+            owner: Some(7),
+            start: Some(13),
+            end: Some(17),
+            message: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_budget_stop_publishes_its_record_with_the_rail_word() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        assert!(jet_scheduler_native_publish(budget_record(JetStopKind::BudgetFuel, 2)));
+        assert_eq!(jet_scheduler_native_status(), JET_NATIVE_STOP_BUDGET_FUEL);
+        assert_eq!(jet_scheduler_native_propagate(), JET_NATIVE_STOP_BUDGET_FUEL);
+        assert_eq!(jet_scheduler_native_stop_record(), Some(budget_record(JetStopKind::BudgetFuel, 2)));
+        // The first stop keeps the rail; a later depth stop or cancel does not replace it.
+        assert!(!jet_scheduler_native_publish(budget_record(JetStopKind::BudgetDepth, 3)));
+        assert!(jet_scheduler_native_record_unwind(Box::new(JetCancelUnwind)).is_ok());
+        assert_eq!(jet_scheduler_native_status(), JET_NATIVE_STOP_BUDGET_FUEL);
+        // A budget stop is masked inside a Shield like any other.
+        jet_scheduler_shield_enter();
+        assert_eq!(jet_scheduler_native_propagate(), 0);
+    }
+
+    #[test]
+    fn deadline_supersedes_only_cancellation_and_fatal_kinds_never_reach_the_rail() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        assert!(!jet_scheduler_native_publish(JetStopRecord::signal(JetStopKind::Panic, "boom".to_string())));
+        assert_eq!(jet_scheduler_native_status(), 0);
+        assert!(jet_scheduler_native_publish(JetStopRecord::signal(JetStopKind::Cancelled, String::new())));
+        assert!(jet_scheduler_native_publish(JetStopRecord::signal(JetStopKind::Deadline, "late".to_string())));
+        assert_eq!(jet_scheduler_native_status(), JET_NATIVE_STOP_DEADLINE);
+        assert_eq!(jet_scheduler_native_stop_record().map(|record| record.message), Some("late".to_string()));
+        assert!(!jet_scheduler_native_publish(budget_record(JetStopKind::BudgetDepth, 3)));
+    }
+
+    #[test]
+    fn a_stop_record_frames_every_field_with_its_exact_byte_length() {
+        let record = JetStopRecord {
+            kind: JetStopKind::Panic,
+            jct_status: Some(1),
+            owner: Some(7),
+            start: Some(13),
+            end: Some(17),
+            message: "n \"must\" be\nover 100 \u{e9}\u{1}".to_string(),
+        };
+        let body = "{\"kind\":\"Panic\",\"jct_status\":1,\"owner\":7,\"start\":13,\"end\":17,\"message\":\"n \\\"must\\\" be\\nover 100 \u{e9}\\u0001\"}";
+        assert_eq!(record.encode(), format!("{}\n{body}", body.len()).into_bytes());
+        let signal = JetStopRecord::signal(JetStopKind::Trap, String::new()).encode();
+        let body = "{\"kind\":\"Trap\",\"jct_status\":null,\"owner\":null,\"start\":null,\"end\":null,\"message\":\"\"}";
+        assert_eq!(signal, format!("{}\n{body}", body.len()).into_bytes());
+    }
+    #[test]
+    fn native_task_panic_keeps_exact_reason_and_does_not_stop_the_root() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        assert!(jet_scheduler_native_record_unwind(Box::new(JetNativeTaskPanic("outside".into()))).is_err());
+        {
+            let _child = JetNativeTaskControlScope::enter(JetTaskControl::new());
+            let _body = JetNativeTaskBodyScope::enter();
+            let reason = "boom: λ\npayload";
+            assert!(jet_scheduler_native_record_unwind(Box::new(JetNativeTaskPanic(reason.into()))).is_ok());
+            assert_eq!(jet_scheduler_native_propagate(), JET_NATIVE_STOP_TASK_PANIC);
+            let payload = jet_scheduler_catch_foreign_boundary(|| jet_scheduler_resume_native_stop())
+                .expect_err("native callback has returned before Rust resumes the panic");
+            assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some(reason));
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+        assert!(!jet_scheduler_native_task_body_active());
+    }
+
+    #[test]
+    fn native_test_and_property_callback_bodies_resume_exact_panics_after_return() {
+        let _root = JetNativeTaskControlScope::enter(JetTaskControl::new());
+        for reason in ["#Test: λ\nbody", "property-generator: λ\nbody"] {
+            let _child = JetNativeTaskControlScope::enter(JetTaskControl::new());
+            let returned = std::cell::Cell::new(false);
+            let payload = jet_scheduler_catch_foreign_boundary(|| {
+                jet_native_callback_body(|| {
+                    assert!(jet_scheduler_native_record_unwind(Box::new(JetNativeTaskPanic(reason.into()))).is_ok());
+                    returned.set(true);
+                })
+            }).expect_err("the callback returns before its exact panic resumes");
+            assert!(returned.get());
+            assert_eq!(payload.downcast_ref::<String>().map(String::as_str), Some(reason));
+            assert!(!jet_scheduler_native_task_body_active());
+        }
+        assert_eq!(jet_scheduler_native_status(), 0);
+    }
+}
+
 // D-TEST-WORLD1=A: scoped deterministic execution worlds share this Prelude
 // scheduler. The world is an ordinary cloneable capability backed by isolated
 // state; no process-global clock or second task engine is introduced.
@@ -985,6 +1505,20 @@ impl JetDeterministicWorld {
         }
     }
 
+    fn rng_state(&self) -> u64 {
+        self.state.lock().unwrap_or_else(|error| error.into_inner()).rng
+    }
+
+    fn rng_try_update(&self, expected: u64, replacement: u64) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        if state.rng != expected {
+            return false;
+        }
+        state.rng = replacement;
+        state.history.push(format!("rng:{replacement}"));
+        true
+    }
+
     fn rng_next(&self) -> u64 {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let mut x = state.rng;
@@ -1039,7 +1573,7 @@ pub fn jet_scheduler_world_monotonic_now_ns() -> Option<i64> {
 /// deterministic world. Time, seeded pseudo-randomness, and scheduler waits
 /// use their dedicated seams; external effects must never silently use host
 /// state from inside the world.
-pub fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
+pub fn jet_scheduler_world_reject_uncontrolled(effect: &str) {
     if jet_scheduler_current_world().is_none() {
         return;
     }
@@ -1052,6 +1586,14 @@ pub fn jet_scheduler_world_reject_uncontrolled(effect: &'static str) {
     };
     jet_scheduler_fatal(message);
 }
+pub fn jet_scheduler_world_rng_state() -> Option<u64> {
+    jet_scheduler_current_world().map(|world| world.rng_state())
+}
+
+pub fn jet_scheduler_world_rng_try_update(expected: u64, replacement: u64) -> Option<bool> {
+    jet_scheduler_current_world().map(|world| world.rng_try_update(expected, replacement))
+}
+
 
 pub fn jet_scheduler_world_rng_next() -> Option<u64> {
     jet_scheduler_current_world().map(|world| world.rng_next())
@@ -1725,16 +2267,22 @@ pub fn jet_scheduler_yield_now() {
     jet_scheduler_yield("task yield", &slot, Some(Duration::ZERO));
 }
 
-/// Control-plane trace for the TLS current task (idle defaults when none).
-pub fn jet_scheduler_current_task_trace() -> String {
-    match current_task_control() {
-        Some(ctrl) => {
-            let paused = ctrl.paused.load(std::sync::atomic::Ordering::Relaxed);
-            let cancel = ctrl.cancelled.load(std::sync::atomic::Ordering::Relaxed);
-            crate::jet_task_control_trace(paused, cancel)
-        }
-        None => crate::jet_task_control_trace(false, false),
-    }
+/// Read the current host task's pause flag; absence is preserved for Jet.
+pub fn jet_scheduler_task_paused() -> Option<bool> {
+    TASK_CONTROL.with(|task| {
+        task.borrow().as_ref().map(|control| {
+            control.paused.load(std::sync::atomic::Ordering::Relaxed)
+        })
+    })
+}
+
+/// Read the current host task's cancellation flag; absence is preserved for Jet.
+pub fn jet_scheduler_task_cancelled_state() -> Option<bool> {
+    TASK_CONTROL.with(|task| {
+        task.borrow().as_ref().map(|control| {
+            control.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+        })
+    })
 }
 
 // ── M2: IO poll substrate (native epoll on Linux; portable fallback elsewhere) ─
@@ -2676,7 +3224,11 @@ fn jet_raw_io_poller() -> Arc<JetRawIoPoller> {
                 next_key: AtomicUsize::new(0),
             });
             let worker = poller.clone();
-            thread::spawn(move || worker.run());
+            thread::spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
+                worker.run()
+            });
             poller
         })
         .clone()
@@ -2838,7 +3390,11 @@ fn io_poller() -> Arc<IOPoller> {
                 iocp_shutdown_done: AtomicBool::new(false),
             });
             let p = poller.clone();
-            thread::spawn(move || p.run());
+            thread::spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
+                p.run()
+            });
             poller
         })
         .clone()
@@ -2993,12 +3549,16 @@ impl<T: Send> JetSchedulerChannel<T> {
         Self::with_capacity(None, JetChannelKind::Channel, 0)
     }
 
+    /// A bounded channel holds at least one value. A capacity below 1 has no
+    /// ratified meaning (no rendezvous channel), so it stops the program the
+    /// way sema's E0395 rejects a literal one; it is never clamped.
     pub fn bounded(capacity: i64) -> Self {
-        Self::with_capacity(
-            Some(capacity.max(1) as usize),
-            JetChannelKind::Channel,
-            0,
-        )
+        if capacity < 1 {
+            jet_scheduler_runtime_stop(&format!(
+                "channel capacity must be at least 1, got {capacity}"
+            ));
+        }
+        Self::with_capacity(Some(capacity as usize), JetChannelKind::Channel, 0)
     }
 
     pub fn timer(delay_ms: i64) -> Self {
@@ -3256,7 +3816,7 @@ impl<T: Send> JetSchedulerSender<T> {
                     active: true,
                 });
             }
-            jet_scheduler_yield("channel send capacity", &slot, None);
+            jet_scheduler_yield("channel send", &slot, None);
             let mut state = self.inner.state.lock().unwrap();
             state.send_waiters.retain(|waiter| !Arc::ptr_eq(waiter, &slot));
             jet_observe_channel_update(self.inner.observe_id, &state);
@@ -3448,11 +4008,22 @@ impl<T> ChannelInner<T> {
     }
 
     fn remove_waiter(&self, slot: &ParkSlot) {
-        self.state
-            .lock()
-            .unwrap()
-            .recv_waiters
-            .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+        let waiter = {
+            let mut state = self.state.lock().unwrap();
+            let before = state.recv_waiters.len();
+            state.recv_waiters
+                .retain(|w| !std::ptr::eq(Arc::as_ptr(w), std::ptr::from_ref(slot)));
+            // A send already consumed this selector's registration, but the
+            // selector may have chosen an earlier arm. Hand its wake onward.
+            if before == state.recv_waiters.len() && !state.queue.is_empty() {
+                state.recv_waiters.pop()
+            } else {
+                None
+            }
+        };
+        if let Some(waiter) = waiter {
+            waiter.wake();
+        }
     }
 }
 
@@ -3664,72 +4235,60 @@ pub fn jet_scheduler_metric_io_operations() -> (usize, usize, usize) {
     )
 }
 
-// ── M1: work-stealing pool ───────────────────────────────────────────────────
-
-struct WorkerSlot {
-    queue: Mutex<VecDeque<Job>>,
-}
+// ── M1: shared-queue worker pool ─────────────────────────────────────────────
 
 // Fixed ceiling prevents blocking waiters from turning scheduler progress into an unbounded thread source.
 const JET_BLOCKING_COMPENSATION_LIMIT:usize=8;
 struct BlockingWaitState { waits:usize,threads:usize,peak:usize,reserve:bool }
 
 struct Scheduler {
-    workers: Vec<WorkerSlot>,
     global: Mutex<VecDeque<Job>>,
+    /// Idle pool workers park here with no timeout. Every push to `global`
+    /// notifies it, and a worker parks only after seeing `global` empty under
+    /// its lock, so no submit is lost and an idle pool costs no CPU.
+    work_ready: Condvar,
+    /// Blocking-wait compensation threads poll here; it also wakes them when
+    /// the blocking-wait count drops so they can retire.
     notify: Condvar,
     live: AtomicUsize,
-    shutdown: AtomicBool,
     blocking_wait:Mutex<BlockingWaitState>,
 }
 
 impl Scheduler {
-    fn pop_local(&self, id: usize,allow_blocking:bool) -> Option<Job> {
-        let mut queue=self.workers[id].queue.lock().unwrap();if allow_blocking{queue.pop_back()}else{queue.iter().rposition(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
+    fn pop(queue:&mut VecDeque<Job>,allow_blocking:bool) -> Option<Job> {
+        if allow_blocking{queue.pop_front()}else{queue.iter().position(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
     }
 
-    fn pop_global(&self,allow_blocking:bool) -> Option<Job> {
-        let mut queue=self.global.lock().unwrap();if allow_blocking{queue.pop_front()}else{queue.iter().position(|job|!job.blocking).map(|index|queue.remove(index).unwrap())}
+    /// No queued job, no job in hand, and no outstanding I/O. `live` is read
+    /// under the `global` lock, where workers count a popped job live.
+    fn quiescent(&self) -> bool {
+        let queue = self.global.lock().unwrap();
+        queue.is_empty()
+            && self.live.load(Ordering::Relaxed) == 0
+            && METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
+            && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
+                == METRIC_IO_RETIRED.load(Ordering::Acquire)
     }
 
-    fn steal_from(&self, thief: usize,allow_blocking:bool) -> Option<Job> {
-        for (idx, w) in self.workers.iter().enumerate() {
-            if idx == thief {
-                continue;
-            }
-            let mut q = w.queue.lock().unwrap();
-            let job=if allow_blocking{q.pop_front()}else{q.iter().position(|job|!job.blocking).map(|index|q.remove(index).unwrap())};
-            if let Some(job) = job {
-                return Some(job);
-            }
-        }
-        None
+    /// The caller pops `job` and counts it live under the `global` lock, so a
+    /// drain never sees an empty queue with no live job while one is in hand.
+    fn run_job(&self,job:Job) {
+        JET_OBSERVE_QUEUED.fetch_sub(1, Ordering::Relaxed);
+        (job.run)();
+        self.live.fetch_sub(1, Ordering::Relaxed);
     }
 
-    fn take_work(&self, id: usize,allow_blocking:bool) -> Option<Job> {
-        self.pop_local(id,allow_blocking)
-            .or_else(|| self.pop_global(allow_blocking))
-            .or_else(|| self.steal_from(id,allow_blocking))
-    }
-
-    fn worker_loop(self: &Arc<Self>, id: usize) {
+    fn worker_loop(self: &Arc<Self>) {
+        let mut queue = self.global.lock().unwrap();
         loop {
-            if let Some(job) = self.take_work(id,true) {
-                JET_OBSERVE_QUEUED.fetch_sub(1, Ordering::Relaxed);
+            if let Some(job) = queue.pop_front() {
                 self.live.fetch_add(1, Ordering::Relaxed);
-                (job.run)();
-                self.live.fetch_sub(1, Ordering::Relaxed);
-                self.notify.notify_one();
+                drop(queue);
+                self.run_job(job);
+                queue = self.global.lock().unwrap();
                 continue;
             }
-            if self.shutdown.load(Ordering::Relaxed) {
-                break;
-            }
-            let g = self.global.lock().unwrap();
-            let _ = self
-                .notify
-                .wait_timeout(g, Duration::from_millis(10))
-                .unwrap();
+            queue = self.work_ready.wait(queue).unwrap();
         }
     }
 
@@ -3747,14 +4306,16 @@ impl Scheduler {
     fn compensation_loop(self:&Arc<Self>,reserve:bool){
         loop{
             {let mut state=self.blocking_wait.lock().unwrap();if (reserve&&state.waits<=JET_BLOCKING_COMPENSATION_LIMIT)||(!reserve&&state.waits==0){state.threads-=1;if reserve{state.reserve=false}return}}
-            if let Some(job)=self.take_work(0,!reserve){JET_OBSERVE_QUEUED.fetch_sub(1,Ordering::Relaxed);self.live.fetch_add(1,Ordering::Relaxed);(job.run)();self.live.fetch_sub(1,Ordering::Relaxed);self.notify.notify_one();continue}
-            let guard=self.global.lock().unwrap();let _=self.notify.wait_timeout(guard,Duration::from_millis(2)).unwrap();
+            let mut queue=self.global.lock().unwrap();
+            if let Some(job)=Self::pop(&mut queue,!reserve){self.live.fetch_add(1,Ordering::Relaxed);drop(queue);self.run_job(job);continue}
+            let _=self.notify.wait_timeout(queue,Duration::from_millis(2)).unwrap();
         }
     }
 
     fn submit(self: &Arc<Self>, job: Job) {
         JET_OBSERVE_QUEUED.fetch_add(1, Ordering::Relaxed);
         self.global.lock().unwrap().push_back(job);
+        self.work_ready.notify_one();
         self.notify.notify_one();
     }
 }
@@ -3789,20 +4350,15 @@ fn scheduler() -> Arc<Scheduler> {
             let n = worker_count();
             JET_OBSERVE_WORKERS.store(n, Ordering::Relaxed);
             let sched = Arc::new(Scheduler {
-                workers: (0..n)
-                    .map(|_| WorkerSlot {
-                        queue: Mutex::new(VecDeque::new()),
-                    })
-                    .collect(),
                 global: Mutex::new(VecDeque::new()),
+                work_ready: Condvar::new(),
                 notify: Condvar::new(),
                 live: AtomicUsize::new(0),
-                shutdown: AtomicBool::new(false),
                 blocking_wait:Mutex::new(BlockingWaitState{waits:0,threads:0,peak:0,reserve:false}),
             });
             for id in 0..n {
                 let s = sched.clone();
-                spawn_scheduler_worker(format!("jet-scheduler-{id}"), move || s.worker_loop(id));
+                spawn_scheduler_worker(format!("jet-scheduler-{id}"), move || s.worker_loop());
             }
             sched
         })
@@ -4223,12 +4779,18 @@ where
         world.task_spawned();
         let task_world = world.clone();
         let _ = thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let _world_scope = jet_scheduler_world_task_enter(Some(task_world));
             f();
         });
         return;
     }
-    let _ = thread::spawn(f);
+    let _ = thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
+        f()
+    });
 }
 
 /// Submit `f` to the M:N pool and return a join handle. An empty label keeps
@@ -4409,18 +4971,8 @@ pub fn jet_scheduler_drain() {
         if jet_observe_has_parked_tasks() {
             return;
         }
-        if sched.live.load(Ordering::Relaxed) == 0 {
-            let g = sched.global.lock().unwrap();
-            let pending_local = sched
-                .workers
-                .iter()
-                .any(|w| !w.queue.lock().unwrap().is_empty());
-            let io_drained = METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
-                && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
-                    == METRIC_IO_RETIRED.load(Ordering::Acquire);
-            if g.is_empty() && !pending_local && io_drained {
-                return;
-            }
+        if sched.quiescent() {
+            return;
         }
         thread::sleep(Duration::from_millis(1));
     }
@@ -4433,20 +4985,56 @@ pub fn jet_scheduler_drain() {
 pub fn jet_scheduler_drain_after_exit() {
     let sched = scheduler();
     loop {
-        if sched.live.load(Ordering::Relaxed) == 0 {
-            let g = sched.global.lock().unwrap();
-            let pending_local = sched
-                .workers
-                .iter()
-                .any(|w| !w.queue.lock().unwrap().is_empty());
-            let io_drained = METRIC_IO_ACTIVE.load(Ordering::Acquire) == 0
-                && METRIC_IO_ALLOCATED.load(Ordering::Acquire)
-                    == METRIC_IO_RETIRED.load(Ordering::Acquire);
-            if g.is_empty() && !pending_local && io_drained {
-                return;
-            }
+        if sched.quiescent() {
+            return;
         }
         thread::yield_now();
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod idle_pool_park_tests {
+    use super::*;
+
+    /// Voluntary context switches of each pool worker thread, keyed by tid.
+    fn pool_worker_switches() -> Vec<(String, u64)> {
+        let mut workers = Vec::new();
+        for entry in std::fs::read_dir("/proc/self/task").unwrap().flatten() {
+            let path = entry.path();
+            let Ok(comm) = std::fs::read_to_string(path.join("comm")) else { continue };
+            if !comm.starts_with("jet-scheduler-") {
+                continue;
+            }
+            let Ok(status) = std::fs::read_to_string(path.join("status")) else { continue };
+            let switches = status
+                .lines()
+                .find_map(|line| line.strip_prefix("voluntary_ctxt_switches:"))
+                .and_then(|count| count.trim().parse().ok())
+                .expect("/proc task status reports voluntary_ctxt_switches");
+            workers.push((entry.file_name().to_string_lossy().into_owned(), switches));
+        }
+        workers
+    }
+
+    #[test]
+    fn every_submitted_job_runs_and_idle_pool_workers_park() {
+        let mut joins: Vec<_> = (0..2000i64).map(|n| jet_scheduler_spawn(move || n * 2)).collect();
+        let total: i64 = joins.iter_mut().map(|join| join.join().unwrap()).sum();
+        assert_eq!(total, 2 * (0..2000i64).sum::<i64>());
+        thread::sleep(Duration::from_millis(100));
+        let before = pool_worker_switches();
+        assert!(!before.is_empty(), "the scheduler started no jet-scheduler workers");
+        thread::sleep(Duration::from_millis(300));
+        let after = pool_worker_switches();
+        // A worker polling its queue on a timer wakes dozens of times in this
+        // window; a parked worker wakes only for submitted work. Other tests
+        // in this process may submit jobs, so require one quiet worker, not all.
+        let quietest = before
+            .iter()
+            .filter_map(|(tid, was)| after.iter().find(|(id, _)| id == tid).map(|(_, now)| now - was))
+            .min()
+            .expect("pool workers outlive the idle window");
+        assert!(quietest <= 2, "every idle pool worker woke {quietest}+ times in 300 ms: the pool polls instead of parking");
     }
 }
 
@@ -4636,6 +5224,36 @@ mod interrupt_boundary_tests {
         });
         rx.recv_timeout(Duration::from_millis(250))
             .expect("select did not wake after every channel closed")
+    }
+
+    #[test]
+    fn select_deregistration_hands_consumed_late_arm_wake_to_plain_receiver() {
+        let early = JetSchedulerChannel::<u64>::new();
+        let late = JetSchedulerChannel::<u64>::new();
+        let early_sender = early.sender();
+        let late_sender = late.sender();
+        let plain = ParkSlot::new();
+        let master = ParkSlot::new();
+        late.inner.register_select_waiter(plain.clone());
+        let inners = vec![early.inner.clone(), late.inner.clone()];
+        let registration = SelectRegistration::new(&inners, master, None);
+
+        assert!(early_sender.send(10));
+        assert!(late_sender.send(20));
+        assert!(!plain.notified.load(Ordering::Acquire));
+        assert_eq!(late.inner.state.lock().unwrap().queue.len(), 1);
+        assert!(matches!(
+            jet_scheduler_try_select(inners, Vec::new()),
+            Some(JetSelectOutcome::Recv { arm: 0, value: 10 })
+        ));
+
+        // The earlier arm won; dropping the actual registration must return
+        // the later arm's consumed wake while its message remains queued.
+        drop(registration);
+        assert!(plain.notified.load(Ordering::Acquire));
+        assert!(late.inner.state.lock().unwrap().recv_waiters.is_empty());
+        assert_eq!(late.inner.state.lock().unwrap().queue.len(), 1);
+        assert_eq!(late.inner.try_pop(), Some(20));
     }
 
     #[test]

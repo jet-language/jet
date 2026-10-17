@@ -8,57 +8,48 @@ package {
         app: .Library{ entry: app }
     }
 }
-LIVE_MAX_PAYLOAD :: 4194304
-LIVE_MAX_SUBSCRIBERS :: 1024
 AUTH_MAX_PROVIDERS :: 64
-// app is the headless application boundary.  The compiler/runtime dispatcher
-// owns the shared live registry, sync session registry, and authentication
-// policy; these source bodies own pure value validation and fail closed for
-// stateful calls when no checked provider route is available, rather than
-// manufacturing a successful empty value.
+// Process-wide live queries and sync sessions retain runtime-owned identity.
+// Source publishes the vocabulary and delegates to that one ambient registry.
+use app as provider
 
 #Error
-pub enum AppError {
+enum AppError {
     Invalid
     Unsupported
 }
 
-pub struct Auth {
-    pub users_table: String
-    pub providers: [String]
+struct Auth {
+    users_table: String
+    providers: [String]
 }
 
-pub struct Session {
-    pub id: String
-    pub user_id: String
-    pub cookie: String
-    pub expires_at: Int
+struct Session {
+    id: String
+    user_id: String
+    cookie: String
+    expires_at: Int
 }
 
-pub struct LiveQuery {
-    pub key: String
-    pub data: String
-    pub generation: Int
-    pub subscribers: Int
-}
-pub fn auth(users_table: String) -> Auth Never! {
+use provider.[LiveQuery]
+fn auth(users_table: String) -> Auth Never! {
     Auth{users_table: canonical_table(users_table), providers: [String]{}}
 }
 
-pub fn auth_oauth(auth: Auth, providers: String) -> Auth Never! {
+fn auth_oauth(auth: Auth, providers: String) -> Auth Never! {
     configured := [String]{}
     loop comma_group in providers.split(",") {
         loop raw in comma_group.split(" ") {
             provider :: raw.trim()
             if valid_provider(provider) && !contains_string(configured, provider) && configured.len() < AUTH_MAX_PROVIDERS {
-                &configured.push(~provider)
+                &configured.push(provider.copy())
             }
         }
     }
     Auth{users_table: canonical_table(auth.users_table), providers: configured}
 }
 
-pub fn auth_routes(auth: Auth) -> String Never! {
+fn auth_routes(auth: Auth) -> String Never! {
     table := canonical_table(auth.users_table)
     routes := [String]{
         "POST /login -> password ({table})",
@@ -74,13 +65,13 @@ pub fn auth_routes(auth: Auth) -> String Never! {
     "AuthRoutes({routes.join("; ")})"
 }
 
-pub fn auth_show(auth: Auth) -> String Never! {
+fn auth_show(auth: Auth) -> String Never! {
     table := canonical_table(auth.users_table)
     providers := canonical_providers(auth.providers)
     "Auth(users={table}, providers=[{providers.join(",")}])"
 }
 fn canonical_table(value: String) -> String {
-    if valid_identifier(value) -> return ~value
+    if valid_identifier(value) -> return value.copy()
     ""
 }
 
@@ -88,68 +79,29 @@ fn canonical_providers(values: [String]) -> [String] {
     providers := [String]{}
     loop provider in values {
         if valid_provider(provider) && !contains_string(providers, provider) && providers.len() < AUTH_MAX_PROVIDERS {
-            &providers.push(~provider)
+            &providers.push(provider.copy())
         }
     }
     providers
 }
 
-pub fn live(key: String, data: String) -> LiveQuery Never! {
-    if !valid_footprint(key) -> return live_error("invalid live footprint")
-    if data.bytes().len() > LIVE_MAX_PAYLOAD -> return live_error("live query payload is too large")
-    LiveQuery{key: canonical_footprint(key), data: data, generation: 1, subscribers: 0}
-}
+fn live(key: String, data: String) -> LiveQuery Never! { provider.live(key, data) }
 
-pub fn live_get(q: LiveQuery) -> String Never! {
-    if valid_live_error(q) -> return "LiveError({q.data})"
-    if !valid_live_query(q) -> return "LiveError(invalid live query)"
-    q.data
-}
+fn live_get(q: LiveQuery) -> String Never! { provider.live_get(q) }
 
-pub fn live_show(q: LiveQuery) -> String Never! {
-    if valid_live_error(q) -> return "LiveQueryError(id=0, reason={q.data})"
-    if !valid_live_query(q) -> return "LiveQueryError(id=0, reason=invalid live query)"
-    source :: if q.key.starts_with("ext:") -> "external" else -> "database"
-    "LiveQuery(key={q.key},source={source},footprint={q.key},generation={q.generation},active=true,dirty=false,refreshing=false,observers={q.subscribers},freshness_ms=0,cause=created,value_bytes={q.data.bytes().len()},error_bytes=0)"
-}
+fn live_show(q: LiveQuery) -> String Never! { provider.live_show(q) }
 
-pub fn live_stats() -> String Never! {
-    // Source evaluation has no ambient registry.  The runtime route replaces
-    // this projection with shared registry facts; zero is the actual local
-    // state, not a swallowed provider error.
-    "LiveStats(queries=0,active=0,refreshing=0,limit=1024,evictions=0,invalidations=0,ws_pushes=0)"
-}
+fn live_stats() -> String Never! { provider.live_stats() }
 
-pub fn subscribe(source: String) -> LiveQuery Never! {
-    if !valid_live_source(source) -> return live_error("subscription source is invalid")
-    LiveQuery{key: "ext:{source.trim()}", data: "", generation: 1, subscribers: 1}
-}
+fn subscribe(source: String) -> LiveQuery Never! { provider.subscribe(source) }
 
-pub fn invalidate(footprint: String) -> Int AppError! {
-    if !valid_footprint(footprint) -> return Err(AppError.Invalid)
-    Err(AppError.Unsupported)
-}
+fn invalidate(footprint: String) -> Int Never! { provider.invalidate(footprint) }
 
-pub fn transact_invalidate(write_set: String) -> Int AppError! {
-    if !valid_footprint(write_set) -> return Err(AppError.Invalid)
-    Err(AppError.Unsupported)
-}
+fn transact_invalidate(write_set: String) -> Int Never! { provider.transact_invalidate(write_set) }
 
-pub fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! {
-    if valid_live_error(q) -> return live_error(q.data)
-    if !valid_live_query(q) -> return live_error("live query is invalid")
-    if payload.bytes().len() > LIVE_MAX_PAYLOAD -> return live_error("live query payload is too large")
-    if q.generation >= 9223372036854775807 -> return live_error("live query generation exhausted")
-    LiveQuery{key: q.key, data: payload, generation: q.generation + 1, subscribers: q.subscribers}
-}
+fn signal_push(q: LiveQuery, payload: String) -> LiveQuery Never! { provider.signal_push(q, payload) }
 
-pub fn sync(doc_show: String, over: String) -> String AppError! {
-    session :: over.trim()
-    if session == "" || session.len() > 512 || has_control(session) || !canonical_document(doc_show) {
-        return Err(AppError.Invalid)
-    }
-    Err(AppError.Unsupported)
-}
+fn sync(doc_show: String, over: String) -> String Never! { provider.sync(doc_show, over: over) }
 
 fn valid_provider(value: String) -> Bool {
     if value == "" || value.len() > 64 -> return false
@@ -168,7 +120,7 @@ fn valid_provider(value: String) -> Bool {
 fn valid_identifier(value: String) -> Bool {
     trimmed :: value.trim()
     if trimmed == "" || trimmed.len() > 128 || value != trimmed -> return false
-    loop byte in trimmed.bytes() {
+    loop byte in value.bytes() {
         n :: Int.from_u8(byte)
         allowed ::
             (n >= 48 && n <= 57) ||
@@ -180,94 +132,6 @@ fn valid_identifier(value: String) -> Bool {
     true
 }
 
-fn has_control(value: String) -> Bool Never! {
-    loop byte in value.bytes() {
-        n :: Int.from_u8(byte)
-        if n < 32 || n == 127 -> return true
-    }
-    false
-}
-
-fn footprint_atoms(value: String) -> [String] Never! {
-    atoms := [String]{}
-    loop comma_group in value.split(",") {
-        loop semi_group in comma_group.split(";") {
-            loop raw in semi_group.split(" ") {
-                atom :: raw.trim()
-                if atom == "" -> return [String]{}
-                &atoms.push(~atom)
-            }
-        }
-    }
-    atoms
-}
-
-fn canonical_footprint(value: String) -> String {
-    paths := [String]{}
-    loop atom in footprint_atoms(value) {
-        if !contains_string(paths, atom) -> &paths.push(~atom)
-    }
-    &paths.sort()
-    paths.join(",")
-}
-
-
-fn valid_live_source(value: String) -> Bool {
-    source := value.trim()
-    if source == "" || source.len() + 4 > 512 -> return false
-    loop byte in source.bytes() {
-        if byte == (U8{32}) || byte == (U8{44}) || byte == (U8{59}) -> return false
-    }
-    valid_footprint("ext:{source}")
-}
-
-fn live_error(message: String) -> LiveQuery {
-    LiveQuery{key: "", data: message, generation: 0, subscribers: 0}
-}
-fn valid_live_error(q: LiveQuery) -> Bool {
-    q.key == "" && q.generation == 0 && q.subscribers == 0 &&
-        q.data != "" && q.data.bytes().len() <= 512 && !has_control(q.data)
-}
-
-fn valid_live_query(q: LiveQuery) -> Bool {
-    if q.generation <= 0 || q.subscribers < 0 || q.subscribers > LIVE_MAX_SUBSCRIBERS -> return false
-    if q.data.bytes().len() > LIVE_MAX_PAYLOAD || !valid_footprint(q.key) -> return false
-    canonical_footprint(q.key) == q.key
-}
-
-
-fn valid_footprint(value: String) -> Bool Never! {
-    if value.trim() == "" || value.len() > 512 -> return false
-    atoms := footprint_atoms(value)
-    if atoms.len() == 0 -> return false
-    loop atom in atoms {
-        if !valid_footprint_atom(atom) -> return false
-    }
-    true
-}
-
-fn valid_footprint_atom(value: String) -> Bool Never! {
-    loop byte in value.bytes() {
-        n :: Int.from_u8(byte)
-        allowed ::
-            (n >= 48 && n <= 57) ||
-            (n >= 65 && n <= 90) ||
-            (n >= 97 && n <= 122) ||
-            n == 95 || n == 45 || n == 46 || n == 58 ||
-            n == 47 || n == 91 || n == 93
-        if !allowed -> return false
-    }
-    true
-}
-
-fn canonical_document(value: String) -> Bool Never! {
-    if value.len() == 0 || value.len() > LIVE_MAX_PAYLOAD || value != value.trim() || has_control(value) || !value.ends_with(")") -> return false
-    if value.starts_with("SyncText(") -> return true
-    if value.starts_with("SyncMap(") -> return true
-    if value.starts_with("SyncList(") -> return true
-    if value.starts_with("PNCounter(") -> return true
-    false
-}
 
 fn contains_string(values: [String], value: String) -> Bool {
     loop item in values {

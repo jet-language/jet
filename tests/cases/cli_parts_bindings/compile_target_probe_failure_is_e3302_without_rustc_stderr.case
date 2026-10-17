@@ -1,0 +1,12 @@
+# Port of tests/cli_parts/bindings.rs:340-367 and fake_rustc_fixture.
+# PENDING-GRAMMAR: step environment; pending kit mode-preserve fix.
+requires: os:unix
+fixture: fixtures/fake_rustc_bad
+step: jet build main.jet --target=web
+env: PATH={work}/bin
+env: HOME={work}
+env: JET_FAKE_SYSROOT={work}/sysroot
+exit: 1
+# Both exact captures must contain E3302 in their concatenation and exclude rustc-probe-sentinel.
+stdout: = build-web-probe.stdout
+stderr: = build-web-probe.stderr

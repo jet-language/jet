@@ -1,0 +1,30 @@
+// Observation-only port of trace selectors tests/jetpack_jetos.rs:3347-3388/3614-3635/3704-3712.
+use core.files as files
+use core.text.parse as parse
+fn run() {
+    trace :: files.read("trace.log") ?? panic("read original syscall trace")
+    lines :: trace.lines()
+    marker :: "/.nixos-comparison-publish-halcyon-gnome-"
+    mkdir := -1
+    first_input := -1
+    first_output := -1
+    protected := [Int]{}
+    insecure := false
+    collision := false
+    loop i in 0..<lines.len() {
+        line :: lines[i]
+        if !line.contains(marker) -> next
+        if mkdir < 0 && line.contains("mkdir(") && line.contains("0700") -> mkdir = i
+        if first_input < 0 && (line.contains("/flake.nix") || line.contains("/configuration.nix") || line.contains("/input-facts.json")) -> first_input = i
+        if first_output < 0 && line.contains("/nixos/halcyon-gnome/system.qcow2") -> first_output = i
+        if (line.contains("st_mode=S_IFDIR|") || line.contains("stx_mode=S_IFDIR|")) && !line.contains("S_IFDIR|0700") -> insecure = true
+        if line.contains("mkdir(") && line.contains("0700") && line.contains("EEXIST") -> collision = true
+    }
+    loop i in 0..<lines.len() {
+        line :: lines[i]
+        if line.contains(marker) && line.contains("AT_SYMLINK_NOFOLLOW") && (line.contains("S_IFDIR|0700") || line.contains("stx_mode=S_IFDIR|0700")) -> &protected.push(i)
+    }
+    numbers := [String]{}
+    loop index in protected -> &numbers.push("{index}")
+    print("{{\"mkdir\":{mkdir},\"first_input\":{first_input},\"first_output\":{first_output},\"protected\":[{parse.join(numbers, ",")}],\"insecure\":{insecure},\"collision\":{collision}}}")
+}

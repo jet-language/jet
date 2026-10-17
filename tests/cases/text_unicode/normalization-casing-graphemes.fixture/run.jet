@@ -1,0 +1,181 @@
+use core.files as s3_unicode_files
+use core.text as s3_unicode_text
+use core.text.parse as s3_unicode_parse
+use core.text.fmt as s3_unicode_fmt
+
+fn s3_unicode_scalar(cp: Int) -> String Never! {
+    if cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) -> return ""
+    bytes := [U8]{}
+    if cp < 128 {
+        &bytes.push(U8{cp})
+    } else if cp < 2048 {
+        &bytes.push(U8{192 | (cp >> 6)})
+        &bytes.push(U8{128 | (cp & 63)})
+    } else if cp < 65536 {
+        &bytes.push(U8{224 | (cp >> 12)})
+        &bytes.push(U8{128 | ((cp >> 6) & 63)})
+        &bytes.push(U8{128 | (cp & 63)})
+    } else {
+        &bytes.push(U8{240 | (cp >> 18)})
+        &bytes.push(U8{128 | ((cp >> 12) & 63)})
+        &bytes.push(U8{128 | ((cp >> 6) & 63)})
+        &bytes.push(U8{128 | (cp & 63)})
+    }
+    String.from_bytes(bytes) ?? panic("valid Unicode scalar encoding")
+}
+
+// Reuses Core.text.wrap's Unicode splitter and the public Core.text primitives.
+fn s3_unicode_split_ws(text: String) -> [String] Never! {
+    out := [String]{}
+    current := ""
+    loop scalar in s3_unicode_text.scalars(text) {
+        if s3_unicode_text.is_whitespace(scalar) {
+            if current.bytes().len() > 0 {
+                &out.push(current)
+                current = ""
+            }
+        } else {
+            current = "{current}{scalar}"
+        }
+    }
+    if current.bytes().len() > 0 -> &out.push(current)
+    out
+}
+
+// Original cps(): invalid hex/scalars are filtered out.
+fn s3_unicode_cps(field: String) -> String Never! {
+    out := ""
+    loop token in s3_unicode_split_ws(field) {
+        cp :: s3_unicode_parse.parse_int_base(token, 16) ?? next
+        scalar :: s3_unicode_scalar(cp)
+        out = "{out}{scalar}"
+    }
+    out
+}
+
+struct S3UnicodeBreak {
+    full: String,
+    segments: [String],
+}
+
+// Original parse_break(): malformed hex/scalar => None; empty => None.
+fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
+    full := ""
+    current := ""
+    segments := [String]{}
+    any := false
+    loop token in s3_unicode_split_ws(line) {
+        if token == "÷" {
+            if current != "" {
+                &segments.push(current.copy())
+                current = ""
+            }
+        } else if token != "×" {
+            cp :: s3_unicode_parse.parse_int_base(token, 16) ?? return None
+            scalar :: s3_unicode_scalar(cp)
+            if scalar == "" -> return None
+            full = "{full}{scalar}"
+            current = "{current}{scalar}"
+            any = true
+        }
+    }
+    if current != "" -> &segments.push(current)
+    if !any -> return None
+    Val(S3UnicodeBreak{full: full, segments: segments})
+}
+
+fn s3_unicode_clean(raw: String) -> String Never! {
+    // Rust raw.split('#').next().unwrap_or("").trim().
+    head :: s3_unicode_parse.split(raw, "#")[0]
+    head.trim().copy()
+}
+
+// Port of tests/text_unicode.rs:184-295. Only include!/rustc machinery retires.
+#Test fn s3_full_unicode_corpora() {
+    normalization :: s3_unicode_files.read_text("data/NormalizationTest.txt") ?? panic("missing normalization corpus")
+    normalization_lines := 0
+    loop raw in normalization.lines() {
+        line :: s3_unicode_clean(raw)
+        if line == "" || line.starts_with("@") -> next
+        fields :: s3_unicode_parse.split(line, ";")
+        if fields.len() < 5 -> next
+        c1 :: s3_unicode_cps(fields[0])
+        c2 :: s3_unicode_cps(fields[1])
+        c3 :: s3_unicode_cps(fields[2])
+        c4 :: s3_unicode_cps(fields[3])
+        c5 :: s3_unicode_cps(fields[4])
+        canonical_inputs :: [String]{c1.copy(), c2.copy(), c3.copy()}
+        loop input in canonical_inputs {
+            assert_eq(s3_unicode_text.nfc(input), c2)
+            assert_eq(s3_unicode_text.nfd(input), c3)
+        }
+        compatibility_inputs :: [String]{c4.copy(), c5.copy()}
+        loop input in compatibility_inputs {
+            assert_eq(s3_unicode_text.nfc(input), c4)
+            assert_eq(s3_unicode_text.nfd(input), c5)
+        }
+        all_inputs :: [String]{c1.copy(), c2.copy(), c3.copy(), c4.copy(), c5.copy()}
+        loop input in all_inputs {
+            assert_eq(s3_unicode_text.nfkc(input), c4)
+            assert_eq(s3_unicode_text.nfkd(input), c5)
+        }
+        normalization_lines += 1
+    }
+    folding :: s3_unicode_files.read_text("data/ucd/CaseFolding.txt") ?? panic("missing folding corpus")
+    fold_lines := 0
+    loop raw in folding.lines() {
+        line :: s3_unicode_clean(raw)
+        if line == "" -> next
+        fields :: s3_unicode_parse.split(line, ";")
+        if fields.len() < 3 -> next
+        status :: fields[1].trim().copy()
+        if status != "C" && status != "F" -> next
+        assert_eq(s3_unicode_text.casefold(s3_unicode_cps(fields[0])), s3_unicode_cps(fields[2].trim().copy()))
+        fold_lines += 1
+    }
+    lower := [Int:String]{}
+    upper := [Int:String]{}
+    unicode_data :: s3_unicode_files.read_text("data/ucd/UnicodeData.txt") ?? panic("missing UnicodeData")
+    loop raw in unicode_data.lines() {
+        fields :: s3_unicode_parse.split(raw, ";")
+        if fields.len() < 14 -> next
+        cp :: s3_unicode_parse.parse_int_base(fields[0], 16) ?? panic("invalid UnicodeData hex")
+        if fields[12] != "" -> &upper.insert(cp, s3_unicode_cps(fields[12]))
+        if fields[13] != "" -> &lower.insert(cp, s3_unicode_cps(fields[13]))
+    }
+    special_casing :: s3_unicode_files.read_text("data/ucd/SpecialCasing.txt") ?? panic("missing SpecialCasing")
+    loop raw in special_casing.lines() {
+        line :: s3_unicode_clean(raw)
+        if line == "" -> next
+        fields :: s3_unicode_parse.split(line, ";")
+        if fields.len() < 5 -> next
+        if fields[4].trim().copy() != "" -> next
+        cp :: s3_unicode_parse.parse_int_base(fields[0].trim().copy(), 16) ?? panic("invalid SpecialCasing hex")
+        &lower.insert(cp, s3_unicode_cps(fields[1].trim().copy()))
+        &upper.insert(cp, s3_unicode_cps(fields[3].trim().copy()))
+    }
+    casing_scalars := 0
+    loop cp in 0..<0x110000 {
+        input :: s3_unicode_scalar(cp)
+        if input == "" -> next
+        assert_eq(s3_unicode_text.lower(input), lower.get(cp) ?? input.copy())
+        assert_eq(s3_unicode_text.upper(input), upper.get(cp) ?? input.copy())
+        casing_scalars += 1
+    }
+    assert_eq(s3_unicode_text.lower("ΟΣ"), "ος")
+    grapheme_data :: s3_unicode_files.read_text("data/GraphemeBreakTest.txt") ?? panic("missing grapheme corpus")
+    grapheme := 0
+    loop raw in grapheme_data.lines() {
+        parsed :: s3_unicode_break(s3_unicode_clean(raw)) ?? next
+        assert_eq(s3_unicode_text.graphemes(parsed.full), parsed.segments, "break mismatch: {raw}")
+        grapheme += 1
+    }
+    assert(normalization_lines > 15000 && fold_lines > 1500)
+    assert(grapheme > 500)
+    // Exact first four fields of the original six-count stdout oracle.
+    print("{normalization_lines} {fold_lines} {casing_scalars} {grapheme}")
+}
+
+fn run() {
+    s3_full_unicode_corpora()
+}

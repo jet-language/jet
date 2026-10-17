@@ -133,7 +133,7 @@ void @@abi@@_close(int64_t h){php_failed=0;int n=(int)(h&255)-1;uint32_t gen=(ui
 PKG_PHP_RESERVED :: prep { [String]{"open", "take_error", "cancel", "close", "decode_response", "abi", "json", "PhpPool", "PhpError"} }
 
 // Bind the top-level one-argument functions of the PHP script at `path`.
-pub fn pkg_php_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+fn pkg_php_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
     language :: WorkerLanguage.Php
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
@@ -165,7 +165,7 @@ fn pkg_php_lint(php: String, script: String) ForeignBindError! -[Exec, Time.Wait
         .Ok(_) -> {}
         .Err(error) -> {
             if error == {
-                .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: WorkerLanguage.Php.action(), detail: "the PHP source has a parse error"})
+                .ToolFailed(_, _, _) -> return Err(ForeignBindError.ToolFailed{tool: "php", action: (WorkerLanguage.Php).action(), detail: "the PHP source has a parse error"})
                 else -> return Err(error)
             }
         }
@@ -215,16 +215,16 @@ fn pkg_php_render_jet(lib: String, functions: [String]) -> String Never! {
     loop name in functions {
         &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct PhpPool {{ value: Int }}\n#Error\npub enum PhpError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^pool: PhpPool) {{ abi.close(pool.value) }}\n\npub fn open() -> PhpPool PhpError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool{{ value: handle }})\n}}\n\npub fn cancel(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n")
+    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\nstruct PhpPool {{ value: Int }}\n#Error\nenum PhpError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl PhpPool.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\nfn close(^pool: PhpPool) {{ abi.close(pool.value) }}\n\nfn open() -> PhpPool PhpError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PhpError.NotRunning) }}\n    return Ok(PhpPool{{ value: handle }})\n}}\n\nfn cancel(pool: PhpPool) {{ abi.cancel(pool.value) }}\n\n")
     &out.push(pkg_render_decode_response("PhpError", DecoderProtocol.StandardEnvelope))
     loop name in functions {
-        &out.push("pub fn {name}(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {{\n    raw :: abi.{name}(pool.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {name}(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {{\n    payload :: json.to_string(input) ?? return Err(PhpError.Protocol)\n    raw :: abi.{name}(pool.value, payload, deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
 
 // The generated surface for the binder registry's rendering probe.
-pub fn pkg_php_render_probe() -> String Never! {
+fn pkg_php_render_probe() -> String Never! {
     pkg_php_render_jet("registry", [String]{"transform"})
 }
 

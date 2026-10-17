@@ -1,0 +1,101 @@
+use core.files as files
+
+fn kit_steps_terminal_size(text: String) -> Bool {
+    pair :: text.split("x").to_list()
+    if pair.len() != 2 -> return false
+    rows :: Int.parse(pair[0]) ?? return false
+    columns :: Int.parse(pair[1]) ?? return false
+    rows >= 0 && columns >= 0
+}
+
+fn kit_steps_wiring_valid(key: String, original: String) -> Bool {
+    tokens :: kit_steps_tokens(kit_steps_body(original)) ?? return false
+    words := [String]{}
+    loop token in tokens -> &words.push(token.text)
+    if key == "stderr-to-stdout" -> return words == ["true"]
+    if key == "pty" {
+        if words.len() == 0 -> return false
+        if words[0] != "true" {
+            loop fd in words[0].split(",") {
+                if !kit_expect_named(["stdin", "stdout", "stderr"], fd) -> return false
+            }
+        }
+        return words.len() == 1 || (words.len() == 3 && words[1] == "size" && kit_steps_terminal_size(words[2]))
+    }
+    if key == "pty-send" -> return words.len() == 3 && words[1] == "after" && original.starts_with("\"") && kit_steps_duration_ns(words[2]) != None
+    if key == "pty-close" -> return words.len() == 2 && words[0] == "after" && kit_steps_duration_ns(words[1]) != None
+    words.len() == 3 && kit_steps_terminal_size(words[0]) && words[1] == "at" && kit_steps_duration_ns(words[2]) != None
+}
+
+// Core Capture drains concurrently. Null discards at this boundary; its fd-type
+// and 64 MiB lifetime-budget differences require process-null-fd refusal where
+// the original observes either. File wiring is observable only after completion;
+// a live observation requires process-file-fd instead.
+fn kit_steps_wiring_finish(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitStepResult {
+    result := state
+    loop pair in [[step.stdout_target, result.last.stdout], [step.stderr_target, result.last.stderr]] {
+        if pair[0] == "" || pair[0] == "null" -> next
+        path :: kit_steps_work_path(pair[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "output file escapes work")
+        files.create_dir_all(files.dirname(path)) ?? return kit_steps_action_error(state, "output file parent: {err}")
+        files.write(path, pair[1]) ?? return kit_steps_action_error(state, "output file write: {err}")
+    }
+    if step.stdout_target == "null" -> result.last.stdout = ""
+    if step.stderr_target == "null" -> result.last.stderr = ""
+    KitStepResult{state: result, verdict: kit_expect_verdict("PASS", "")}
+}
+
+fn kit_steps_stream_nulled(selector: String, output: Bool, errors: Bool) -> Bool {
+    subject :: kit_steps_subject(selector)
+    if subject.starts_with("cap:") -> return false
+    (output && (subject.contains("stdout") || subject == "machine")) || (errors && (subject.contains("stderr") || subject == "machine"))
+}
+
+// Joining inherits the opener's wiring. Check at the plan boundary so neither
+// JSON/capture selectors nor a later recv can bypass the stream assertion rule.
+fn kit_steps_wiring_error(plan: KitPlan) -> String {
+    output := false
+    errors := false
+    loop step in plan.steps {
+        if step.action == "recv" || step.action == "send" {
+            loop opened in plan.steps {
+                if opened.label != step.label || opened.action != "session" -> next
+                if step.action == "recv" && opened.stdout_target == "null" -> return "recv on a nulled stream"
+                if step.action == "send" && opened.stdin == "null" -> return "send on closed null stdin"
+            }
+        }
+        if step.action == "capture" {
+            selector := step.argv[1]
+            if selector == "=" || selector == "+=" -> selector = if step.argv[2] == "text" || step.argv[2] == "lines" -> step.argv[3] else -> ""
+            if kit_steps_stream_nulled(selector, output, errors) -> return "capture on a nulled stream"
+        } else if step.action == "for" && step.argv[1] == "line" {
+            loop_output := output
+            loop_errors := errors
+            if step.argv.len() == 7 {
+                loop opened in plan.steps {
+                    if opened.label == step.argv[4] && kit_expect_named(["", "poll", "session", "spawn"], opened.action) {
+                        loop_output = opened.stdout_target == "null"
+                        loop_errors = opened.stderr_target == "null"
+                    }
+                }
+            }
+            if kit_steps_stream_nulled(step.argv[2], loop_output, loop_errors) -> return "line loop on a nulled stream"
+        } else if step.action == "" || step.action == "poll" {
+            output = step.stdout_target == "null"
+            errors = step.stderr_target == "null"
+        } else if step.action == "wait" || step.action == "close" {
+            loop opened in plan.steps {
+                if opened.label == step.label && (opened.action == "session" || opened.action == "spawn") {
+                    output = opened.stdout_target == "null"
+                    errors = opened.stderr_target == "null"
+                }
+            }
+        } else if !kit_expect_named(["assert", "session", "spawn", "send", "signal", "for", "end for", "repeat", "end repeat", "when", "end when", "parallel", "end parallel"], step.action) {
+            output = false
+            errors = false
+        }
+        loop assertion in step.assertions {
+            if kit_steps_stream_nulled(assertion.stream, output, errors) -> return "assertion on a nulled stream"
+        }
+    }
+    ""
+}

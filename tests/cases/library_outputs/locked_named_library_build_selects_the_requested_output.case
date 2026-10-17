@@ -1,0 +1,9 @@
+# Port of tests/library_outputs.rs:908-930; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# Original demanded a working native build; failure remains FAIL, never a rustc-availability skip after Rust exit.
+fixture: ../../fixtures/foreign_build_hosts/cmake
+copy: lock.fixture .jet/lock
+step: jet build --lib --locked --output core library.jet
+file: .jet/build/libloadable.a is-file
+file: .jet/build/loadable.h is-file
+file: .jet/build/loadable.jetlib is-file

@@ -36,6 +36,7 @@ fn jet_codegen_prepared_constant_root(modules: [SemaGraphModuleResult], symbol: 
 
 fn jet_codegen_prepared_constant_field(value: TComptimeValue, name: String) -> TComptimeValue? {
     if name.starts_with("$") -> return sema_fact_reflected_field(value, name)
+    if value == .Present(inner) -> return jet_codegen_prepared_constant_field(inner, name)
     if value == .Struct(_, fields) {
         loop field in fields {
             if field.name == name -> return Val(field.value)
@@ -76,17 +77,17 @@ fn jet_codegen_prepared_constant_value(modules: [SemaGraphModuleResult], express
 
 // A field with no nominal owner reads a compiler-owned record (or a tuple
 // element). Over a prepared constant it is emitted as the constant it names.
-fn jet_codegen_fold_prepared_field(builder: &JetCodegenBuilder, expression: TExpr, reference: TFieldRef) -> MIRValueID? {
+fn jet_codegen_fold_prepared_field(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, reference: TFieldRef) -> MIRValueID? {
     if reference.owner != None -> return None
-    value :: jet_codegen_prepared_constant_value(builder.modules, expression) ?? return None
-    constant :: jet_codegen_lower_comptime_value(value, builder.modules, builder.function.module_identity, builder.generic_type_names) ?? return None
-    Val(jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Constant{value: constant}))
+    value :: jet_codegen_prepared_constant_value(program.modules, expression) ?? return None
+    constant :: jet_codegen_lower_comptime_value(value, program.modules, builder.function.module_identity, builder.generic_type_names) ?? return None
+    Val(jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant}))
 }
 
 // `subject == .Variant` over a compiler fact enum value known before code
 // generation. The fold is the only lowering: a fact never reaches runtime
 // dispatch.
-fn jet_codegen_fold_fact_enum_test(builder: &JetCodegenBuilder, expression: TExpr, subject: TExpr, pattern: TPattern) -> MIRValueID? {
+fn jet_codegen_fold_fact_enum_test(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, subject: TExpr, pattern: TPattern) -> MIRValueID? {
     tested := ""
     if pattern.shape == {
         .Variant(variant, bindings, _, _) -> {
@@ -95,7 +96,7 @@ fn jet_codegen_fold_fact_enum_test(builder: &JetCodegenBuilder, expression: TExp
         }
         else -> return None
     }
-    value :: jet_codegen_prepared_constant_value(builder.modules, subject) ?? return None
+    value :: jet_codegen_prepared_constant_value(program.modules, subject) ?? return None
     enum_name := ""
     held := ""
     if value == {
@@ -108,7 +109,7 @@ fn jet_codegen_fold_fact_enum_test(builder: &JetCodegenBuilder, expression: TExp
     }
     variants :: sema_fact_enum_variants(enum_name) ?? return None
     if !variants.contains(held) || !variants.contains(tested) -> return None
-    Val(jet_codegen_emit_value(&builder, expression.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: held == tested}}))
+    Val(jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: held == tested}}))
 }
 
 // A payload-free fact-enum value known before code generation: a fact-enum
@@ -132,15 +133,15 @@ fn jet_codegen_fact_enum_value(modules: [SemaGraphModuleResult], expression: TEx
 
 // `left == right` / `left != right` between compiler fact enum values of one
 // enum (Rust `fold_typed_fact_enum_equality`).
-fn jet_codegen_fold_fact_enum_equality(builder: &JetCodegenBuilder, expression: TExpr, op: TBinaryOp, lhs: TExpr, rhs: TExpr) -> MIRValueID? {
+fn jet_codegen_fold_fact_enum_equality(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, op: TBinaryOp, lhs: TExpr, rhs: TExpr) -> MIRValueID? {
     equal := true
     if op == {
         .Eq -> equal = true
         .Ne -> equal = false
         else -> return None
     }
-    left :: jet_codegen_fact_enum_value(builder.modules, lhs) ?? return None
-    right :: jet_codegen_fact_enum_value(builder.modules, rhs) ?? return None
+    left :: jet_codegen_fact_enum_value(program.modules, lhs) ?? return None
+    right :: jet_codegen_fact_enum_value(program.modules, rhs) ?? return None
     same := false
     if left == .Enum(left_type, left_variant, _) {
         if right == .Enum(right_type, right_variant, _) {
@@ -148,5 +149,5 @@ fn jet_codegen_fold_fact_enum_equality(builder: &JetCodegenBuilder, expression: 
             same = left_variant == right_variant
         }
     }
-    Val(jet_codegen_emit_value(&builder, expression.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: same == equal}}))
+    Val(jet_codegen_emit_value(&builder, program, expression.span, Type.Bool, MIROperation.Constant{value: MIRConstant.Bool{value: same == equal}}))
 }

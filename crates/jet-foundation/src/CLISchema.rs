@@ -1066,6 +1066,7 @@ fn mir_constant_display(value: &crate::MIR::MirConstant) -> String {
             values.iter().map(|value| value.to_string()).collect::<Vec<_>>().join(", ")
         ),
         crate::MIR::MirConstant::Unit => "()".to_string(),
+        crate::MIR::MirConstant::SharedSite(_) => panic!("publication site nested in CLI default"),
         crate::MIR::MirConstant::BigInt(value) => value.clone(),
         crate::MIR::MirConstant::List(values) => format!(
             "[{}]",
@@ -1120,6 +1121,7 @@ fn mir_constant_display(value: &crate::MIR::MirConstant) -> String {
 fn mir_const_key_display(value: &crate::MIR::MirConstKey) -> String {
     match value {
         crate::MIR::MirConstKey::Int(value) => value.to_string(),
+        crate::MIR::MirConstKey::BigInt(value) => value.clone(),
         crate::MIR::MirConstKey::String(value) => value.clone(),
         crate::MIR::MirConstKey::Bool(value) => value.to_string(),
         crate::MIR::MirConstKey::Char(value) => value.to_string(),

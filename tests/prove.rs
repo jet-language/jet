@@ -28,11 +28,7 @@ fn budget_workspace(name: &str) -> PathBuf {
     // (D-VERDICT-678-1); retired `main.jet` is not a discovery fallback.
     fs::write(
         root.join("src/run.jet"),
-        r#"package {
-    name: "app"
-}
-
-module perf.package {
+        r#"module perf.package {
     budgets: [Budget{
         name: "public-api",
         scope: .Package,
@@ -41,7 +37,7 @@ module perf.package {
         limit: .AtMost(10),
     }],
 }
-pub fn api() {}
+fn api() {}
 fn run() {}
 "#,
     )
@@ -126,7 +122,7 @@ fn prove_json_is_derived_from_real_front_end_and_sorted_target() {
         String::from_utf8_lossy(&out.stderr)
     );
     let report = String::from_utf8(out.stdout).unwrap();
-    assert!(report.contains("\"kind\":\"workspace\""), "{report}");
+    assert!(report.contains("\"kind\":\"package\""), "{report}");
     assert!(
         report.find("a.jet").unwrap() < report.find("b.jet").unwrap(),
         "{report}"
@@ -255,6 +251,18 @@ fn prove_capture_replay_round_trip_and_corruption_fail_closed() {
     let artifact_text = String::from_utf8_lossy(&artifact_bytes);
     assert!(artifact_text.contains("\"roots\":[\"Time\"]"));
     assert!(artifact_text.contains("\"time_site_id\":"));
+    let replay_id = artifact_text
+        .split("\"artifact_id\":\"")
+        .nth(1)
+        .unwrap()
+        .split('"')
+        .next()
+        .unwrap();
+    assert_eq!(
+        fs::read(root.join(format!(".jet/replays/{replay_id}.jetproof-replay"))).unwrap(),
+        artifact_bytes,
+        "the index must retain the canonical capture, independently of its export"
+    );
     let build_digest = artifact_text
         .split("\"build_digest\":\"")
         .nth(1)
@@ -317,7 +325,7 @@ fn run_recorded_alias_time_receipt_replays_without_execution() {
     .unwrap();
     fs::write(
         root.join("main.jet"),
-        "use core.time as time\nuse core.process as process\nfn run() {\n    observed :: time.now()\n    argument :: process.args()[0]\n    marker :: \"recorded-{observed}\"\n    print(marker)\n    print(argument)\n}\n",
+        "use core.time as time\nuse core.process as process\nfn run() {\n    observed :: time.now()\n    epoch :: observed.unix_ms()\n    argument :: process.args()[0]\n    marker :: \"recorded-{epoch}\"\n    print(marker)\n    print(argument)\n}\n",
     )
     .unwrap();
     let recorded = Command::new(jet())
@@ -357,7 +365,7 @@ fn run_recorded_alias_time_receipt_replays_without_execution() {
         .stdin
         .take()
         .unwrap()
-        .write_all(format!("why observed == {recorded_value}\nwhen observed\nc\n").as_bytes())
+        .write_all(format!("why epoch == {recorded_value}\nwhen observed\nc\n").as_bytes())
         .unwrap();
     let output = debug.wait_with_output().unwrap();
     assert_eq!(
@@ -368,7 +376,7 @@ fn run_recorded_alias_time_receipt_replays_without_execution() {
     );
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
-        stdout.contains(&format!("observed = {recorded_value} because act")),
+        stdout.contains(&format!("epoch = {recorded_value} because act")),
         "{stdout}"
     );
     assert!(stdout.contains("last change:"), "{stdout}");
@@ -453,6 +461,19 @@ fn prove_lens_union_is_canonical_and_keeps_the_complete_report() {
         baseline.stdout, selected.stdout,
         "presentation lenses changed ProofReport"
     );
+    let artifacts = fs::read_dir(root.join(".jet/proofs/file/main"))
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .collect::<Vec<_>>();
+    assert_eq!(artifacts.len(), 2, "distinct delivery links need distinct artifacts");
+    let mut report_ids = Vec::new();
+    for path in artifacts {
+        let envelope = fs::read_to_string(&path).unwrap();
+        let artifact_id = envelope.split("\"artifact_id\":\"").nth(1).unwrap().split('"').next().unwrap();
+        assert_eq!(path.file_stem().unwrap().to_str().unwrap(), &artifact_id[..16]);
+        report_ids.push(envelope.split("\"report_id\":\"").nth(1).unwrap().split('"').next().unwrap().to_string());
+    }
+    assert_eq!(report_ids[0], report_ids[1], "delivery metadata changed semantic identity");
 
     let human = Command::new(jet())
         .current_dir(&root)
@@ -809,11 +830,11 @@ fn prove_captures_contract_results_and_runtime_panics_structurally() {
     let root = workspace("contract_runtime");
     fs::write(
         root.join("a_contract_pass.jet"),
-        "#Pre(value > 0, \"positive\") fn checked(value: Int) -[]> Int { return value }\n#Test(\"contract pass\") { assert_eq(checked(1), 1) }\n",
+        "#Pre(value > 0, \"positive\") fn checked_pass(value: Int) -[]> Int { return value }\n#Test(\"contract pass\") { assert_eq(checked_pass(1), 1) }\n",
     ).unwrap();
     fs::write(
         root.join("b_contract_fail.jet"),
-        "#Pre(value > 0, \"positive\") fn checked(value: Int) -[]> Int { return value }\n#Test(\"contract fail\") { checked(0) }\n",
+        "#Pre(value > 0, \"positive\") fn checked_fail(value: Int) -[]> Int { return value }\n#Test(\"contract fail\") { checked_fail(0) }\n",
     ).unwrap();
     fs::write(
         root.join("c_panic.jet"),
@@ -928,12 +949,12 @@ fn prove_reports_real_doctests_and_continues() {
     let root = workspace("doctests");
     fs::write(
         root.join("a_pass.jet"),
-        "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn value() -[]> Int { return 4 }\n",
+        "/// ```jet\n/// 2 + 2 // => 4\n/// ```\nfn passed_value() -[]> Int { return 4 }\n",
     )
     .unwrap();
     fs::write(
         root.join("b_fail.jet"),
-        "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn value() -[]> Int { return 4 }\n",
+        "/// ```jet\n/// 2 + 2 // => 5\n/// ```\nfn failed_value() -[]> Int { return 4 }\n",
     )
     .unwrap();
     fs::write(
@@ -1111,13 +1132,111 @@ fn prove_solver_counterexample_is_checked_producer_evidence() {
     assert_eq!(
         out.status.code(),
         Some(1),
-        "{}",
-        String::from_utf8_lossy(&out.stderr)
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
     );
     let report = String::from_utf8(out.stdout).unwrap();
     assert!(report.contains("\"code\":\"E2950\""), "{report}");
     assert!(report.contains("\"outcome\":\"disproved\""), "{report}");
     assert!(report.contains("\"counterexample\":["), "{report}");
+    assert!(report.contains("\"code\":\"E3001\""), "{report}");
+
+    // The child and parent publish one immutable evidence artifact with the
+    // same source identity, including the caught runtime observation.
+    let index = jet::RecordIndex::RecordIndex::load_for_project(&root).unwrap();
+    let evidence = index
+        .entries()
+        .into_iter()
+        .filter(|entry| entry.kind == jet::RecordIndex::RecordKind::Evidence)
+        .collect::<Vec<_>>();
+    assert_eq!(evidence.len(), 1, "{evidence:?}");
+    let bytes = fs::read(root.join(&evidence[0].path)).unwrap();
+    assert_eq!(evidence[0].artifact_id, jet::SHA256::sha256_hex(&bytes));
+    let (records, _) = jet_foundation::Evidence::decode_report_bytes(&bytes).unwrap();
+    assert!(
+        records.iter().any(|record| record.is_caught_property_case()),
+        "{records:?}"
+    );
+    for record in &records {
+        assert_eq!(
+            evidence[0].identity.target_inputs_sha256,
+            record.revision.source
+        );
+    }
+
+    let repeated = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "bad.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        repeated.status.code(),
+        Some(1),
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&repeated.stderr),
+        String::from_utf8_lossy(&repeated.stdout)
+    );
+    assert!(String::from_utf8_lossy(&repeated.stdout).contains("\"code\":\"E2950\""));
+}
+
+#[test]
+fn prove_caught_property_stop_does_not_capture_later_unit_panic() {
+    let root = workspace("property_capture_boundary");
+    fs::write(
+        root.join("mixed.jet"),
+        r#"#[Pre(value > 0, "positive"), Post(result > value, "fee grows")] fn add_fee(value: Int) -[]> Int { return value }
+#Test("ordinary same site") { assert_eq(add_fee(1), 1) }
+#Test("ordinary later panic") {
+    panic("ordinary later panic")
+    assert(true)
+}
+"#,
+    )
+    .unwrap();
+    let out = Command::new(jet())
+        .current_dir(&root)
+        .args(["prove", "mixed.jet", "--lens", "solver", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(
+        out.status.code(),
+        Some(70),
+        "stderr={} stdout={}",
+        String::from_utf8_lossy(&out.stderr),
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let report = String::from_utf8(out.stdout).unwrap();
+    assert!(report.contains("\"code\":\"E3001\""), "{report}");
+    assert!(report.contains("\"code\":\"E2950\""), "{report}");
+    let index = jet::RecordIndex::RecordIndex::load_for_project(&root).unwrap();
+    let evidence = index
+        .entries()
+        .into_iter()
+        .find(|entry| entry.kind == jet::RecordIndex::RecordKind::Evidence)
+        .unwrap();
+    let bytes = fs::read(root.join(evidence.path)).unwrap();
+    let (records, _) = jet_foundation::Evidence::decode_report_bytes(&bytes).unwrap();
+    assert!(
+        records.iter().any(|record| record.is_caught_property_case()),
+        "{records:?}"
+    );
+    assert!(
+        records.iter().any(|record| {
+            record.kind == jet_foundation::Evidence::EvidenceKind::Runtime
+                && !record.is_caught_property_case()
+                && record.detail.contains("fee grows")
+        }),
+        "{records:?}"
+    );
+    assert!(
+        records.iter().any(|record| {
+            record.kind == jet_foundation::Evidence::EvidenceKind::Runtime
+                && !record.is_caught_property_case()
+                && record.detail.contains("ordinary later panic")
+        }),
+        "{records:?}"
+    );
 }
 
 #[test]
@@ -1257,4 +1376,33 @@ fn prove_solver_lens_reports_a_verified_counterexample() {
     let report = String::from_utf8(out.stdout).unwrap();
     assert!(report.contains("\"code\":\"E2950\""), "{report}");
     assert!(report.contains("\"status\":\"disproved\""), "{report}");
+}
+
+#[test]
+fn moving_method_results_can_reinitialize_their_receiver_place() {
+    let root = workspace("move_rebind");
+    fs::write(root.join("run.jet"), r#"struct Build {
+    state { Queued, Running, Finished }
+    name: String
+}
+impl Build {
+    #Transition(_, Queued) fn queue(name: String) -> Build { Build{name: name.copy()} }
+    #Transition(Queued, Running) fn start(self: ^Build) -> Build { self }
+    #Transition(Running, Finished) fn finish(self: ^Build) -> Build { self }
+    #State(Finished) fn report(self) -> String { "finished:{self.name}" }
+}
+fn run() {
+    build := Build.queue("compile")
+    build = ^build.start()
+    build = ^build.finish()
+    print(build.report())
+}
+"#).unwrap();
+    let output = Command::new(jet())
+        .current_dir(&root)
+        .args(["run", "run.jet"])
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(0), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8(output.stdout).unwrap(), "finished:compile\n");
 }

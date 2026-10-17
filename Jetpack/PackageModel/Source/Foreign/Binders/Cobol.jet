@@ -10,35 +10,35 @@
 COBOL_BIND_SCHEMA :: prep { "jet-cobol-bind-v1" }
 COBOL_TOOL_ACTION :: prep { "rejected the COBOL binding" }
 
-pub struct CobolBindResult {
-    pub source: String
-    pub archive: String
-    pub runtime_dir: String
-    pub program: String
-    pub layout: CobolRecordLayout
-    pub provenance: String
+struct CobolBindResult {
+    source: String
+    archive: String
+    runtime_dir: String
+    program: String
+    layout: CobolRecordLayout
+    provenance: String
 }
 
 // One level 01 record and its level 05 fields in declaration order.
-pub struct CobolRecordLayout {
-    pub name: String
-    pub width: Int
-    pub fields: [CobolFieldLayout]
+struct CobolRecordLayout {
+    name: String
+    width: Int
+    fields: [CobolFieldLayout]
 }
 
-pub struct CobolFieldLayout {
-    pub name: String
-    pub offset: Int
-    pub width: Int
-    pub kind: CobolFieldKind
+struct CobolFieldLayout {
+    name: String
+    offset: Int
+    width: Int
+    kind: CobolFieldKind
 }
 
-pub enum CobolFieldKind {
+enum CobolFieldKind {
     FixedText(characters: Int)
     NativeInt(digits: Int, signed: Bool)
     PackedDecimal(digits: Int, scale: Int, signed: Bool)
 
-    pub fn jet_type(self) -> String Never! {
+    fn jet_type(self) -> String Never! {
         if self == {
             .FixedText(_) -> "String"
             .NativeInt(_, _) -> "Int"
@@ -88,7 +88,7 @@ pub enum CobolFieldKind {
 
 // Compile the program with cobc, prove the C bridge links against libcob,
 // archive both objects, and render the Jet binding with provenance.
-pub fn pkg_cobol_bind(source_path: String, source: String, copybook_path: String, copybook: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> CobolBindResult ForeignBindError! {
+fn pkg_cobol_bind(source_path: String, source: String, copybook_path: String, copybook: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> CobolBindResult ForeignBindError! {
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
     program :: pkg_cobol_parse_program_id(source)
     layout :: pkg_cobol_parse_copybook(copybook)
@@ -151,7 +151,7 @@ fn pkg_cobol_remove_scratch(paths: [String]) -[FS]> {
 
 // Parse the closed copybook subset: one level 01 record of level 05 PIC
 // fields laid out back to back.
-pub fn pkg_cobol_parse_copybook(source: String) -> CobolRecordLayout ForeignBindError! {
+fn pkg_cobol_parse_copybook(source: String) -> CobolRecordLayout ForeignBindError! {
     record := String?{None}
     fields := [CobolFieldLayout]{}
     names := [String]{}
@@ -358,13 +358,13 @@ fn pkg_cobol_render_jet(lib: String, layout: CobolRecordLayout, packed: CobolFie
         }
         out = "{out}// cobol-field {field.name}: offset={field.offset} width={field.width} type={field.kind.jet_type()}{encoding}\n"
     }
-    out = "{out}#Codable\npub struct {pkg_cobol_upper_camel(layout.name)} {{\n"
+    out = "{out}#Codable\nstruct {pkg_cobol_upper_camel(layout.name)} {{\n"
     loop field in layout.fields -> out = "{out}    {field.name}: {field.kind.jet_type()}\n"
     out = "{out}}}\n\n"
     record_param :: if input != None -> "record_id: Int, " else -> ""
     record_arg :: if input != None -> "record_id, " else -> ""
-    out = "{out}#Import module c.{abi} {{\n    fn apply_minor({record_param}{packed.name}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\npub enum CobolError {{ Range ProgramFailed }}\n\n"
-    out = "{out}pub fn apply_minor({record_param}{packed.name}_minor: Int) -[FFI.Cobol]> Int CobolError! {{\n"
+    out = "{out}#Import module c.{abi} {{\n    fn apply_minor({record_param}{packed.name}_minor: Int) -> Int = \"{abi}_apply_minor\"\n}}\nuse c.{abi} as abi\n\nenum CobolError {{ Range ProgramFailed }}\n\n"
+    out = "{out}fn apply_minor({record_param}{packed.name}_minor: Int) -[FFI.Cobol]> Int CobolError! {{\n"
     if packed.kind == {
         .PackedDecimal(digits, _, signed) -> {
             max :: pkg_cobol_max_digits(digits)

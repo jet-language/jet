@@ -1,6 +1,6 @@
 //! #2025: every declared test target belongs to exactly one named verification set.
 //!
-//! Three targets — `golden`, `ban_bare_panic` and `jit_run` — were each found red
+//! Three targets — `golden`, `ban_bare_panic` and a run-tier target — were each found red
 //! while sitting outside every set an agent routinely ran. None of them was
 //! broken by the session that found them; they had simply been red for a while
 //! with nothing watching. The defect is not the three targets, it is that suite
@@ -75,10 +75,12 @@ const UNASSIGNED_CEILING: usize = 0;
 /// measurement suite whose sample count is ratified policy is the real
 /// exception, so `tests/suite_budgets.txt` exists — and this number is what
 /// keeps that exception an exception. It equals the row count today, so a
-/// SECOND exemption cannot land without moving this pin in the same reviewed
+/// THIRD exemption cannot land without moving this pin in the same reviewed
 /// diff. That friction is the feature: the goal is to speed development up, not
 /// to let the slow suites become the norm they were guarded against.
-const OVER_DEFAULT_BUDGET_CEILING: usize = 1;
+// The second named exception is authority: six isolated cold AOT plugin stores
+// plus the measured remaining witnesses cannot share one 900s suite deadline.
+const OVER_DEFAULT_BUDGET_CEILING: usize = 2;
 
 /// The targets that cannot run in any executable set, with the observed gate and
 /// the card that owes the fix. Sorted, and compared EXACTLY against the
@@ -396,8 +398,8 @@ fn suite_ledger_audit_fires_on_a_target_in_no_set() {
     ];
     let discovered = vec![
         "tests/dev".to_string(),
+        "tests/forgotten_today".to_string(),
         "tests/golden".to_string(),
-        "tests/jit_run".to_string(),
         "tests/os_interrupt_windows".to_string(),
     ];
 
@@ -405,7 +407,7 @@ fn suite_ledger_audit_fires_on_a_target_in_no_set() {
 
     assert_eq!(
         audit.unassigned,
-        vec!["tests/jit_run".to_string()],
+        vec!["tests/forgotten_today".to_string()],
         "a target in no set must be named, not counted away"
     );
     assert_eq!(

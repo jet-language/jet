@@ -1,0 +1,14 @@
+use core.time as time
+fn time_view() -> String {
+    local :: time.parse_time("23:59:58") ?? panic("time")
+    datetime :: time.from_unix_ms(-1)
+    period :: time.period(1, 2, 3)
+    return "{local.hour()}:{local.minute()}:{local.second()}|{local.to_string()}|{datetime.to_timestamp()}|{datetime.to_unix_ms()}|{period.to_string()}"
+}
+EXPECTED :: prep { time_view() }
+
+fn run() {
+    actual :: time_view()
+    print("{EXPECTED}")
+    print("{actual}")
+}

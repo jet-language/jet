@@ -1,0 +1,16 @@
+# Port of tests/feature_acceptance.rs:368-423. Rust registry and Rust-sema grep assertions retire.
+# Existing committed example/oracle reused verbatim; expected.trim() expression applied.
+# PENDING-GRAMMAR(batch4 filters); runtime PENDING-SAME-HEAD.
+fixture: maturity.fixture
+step: jet run example.jet
+exit: 0
+stdout.filter(!^= "effects:").trim: = maturity.out # original predicate
+file: maturity-docs.txt ~ "#Meta(maturity: .Experimental)" # original predicate
+file: maturity-docs.txt ~ .Tested # original predicate
+file: maturity-docs.txt ~ .Hardened # original predicate
+file: maturity-docs.txt ~any "do not propagate" "does not warn" "zero semantic" "without changing compiler behavior" # original predicate
+file: example.jet ~ "#Meta(maturity: .Experimental)" # original predicate
+file: example.jet ~ "#Meta(maturity: .Tested)" # original predicate
+file: example.jet ~ "#Meta(maturity: .Hardened)" # original predicate
+file: retired.stderr ~ "isn't a known marker" # original predicate
+file: retired.stderr ~ Experimental # original predicate

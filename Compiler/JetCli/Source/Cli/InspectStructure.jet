@@ -1,0 +1,154 @@
+// Source/CmdStructure.rs: checked NameLedger and structure slice of GateLedger.
+// Registry/Core views are generated from canonical Facts.jet and Core.jet.
+use jet_driver.[JetDriverCompileResult, JetDriverVerbOutput, JetDriverCompileMode, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[CoreLeafKind, CoreModuleTypeExport, MIRStructureFact, MIRStructureFactKind, MIRNameFacts, GateLedger, GateKind, Span, Diagnostic, diagnostic_render_all, name_ledger_from_facts]
+use jet_sema.sema_gate_append_structure
+
+fn jet_cli_structure_kind(kind: MIRStructureFactKind) -> String Never! {
+    if kind == {
+        .Liveness -> "liveness"
+        .Lifecycle -> "lifecycle"
+        .ImportEdge -> "import-edge"
+    }
+}
+
+fn jet_cli_structure_registry(kind: MIRStructureFactKind) -> String Never! {
+    leaf :: if kind == {
+        .Liveness -> "Liveness"
+        .Lifecycle -> "Lifecycle"
+        .ImportEdge -> "ImportEdge"
+    }
+    name :: "Structure.{leaf}"
+    loop row in JET_CLI_STRUCTURE_ROWS { if row.name == name -> return row.name }
+    jet_cli_structure_kind(kind)
+}
+
+fn jet_cli_structure_span(span: Span) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(span.start)), jet_cli_status_field("end", jet_cli_status_int(span.end))})
+}
+
+fn jet_cli_structure_facts(result: JetDriverCompileResult) -> [MIRStructureFact] Never! {
+    loop doc in result.doc_modules {
+        storage :: doc.name_ledger ?? next
+        permit :: storage.guard_read()
+        return permit.value.facts.structure_facts.copy()
+    }
+    if result.mir == .Val(program) -> return program.names.structure_facts.copy()
+    result.structure_facts
+}
+
+fn jet_cli_structure_report(facts: [MIRStructureFact], ledger: GateLedger, json: Bool) -> String Never! {
+    gates :: loop entry in ledger.rows if entry.kind == GateKind.Structure -> entry
+    if json {
+        rows :: loop row in JET_CLI_STRUCTURE_ROWS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(row.name)), jet_cli_status_field("safe_direction", jet_cli_status_text(row.safe_direction)), jet_cli_status_field("gates", jet_cli_status_texts(row.gates)), jet_cli_status_field("decision", jet_cli_status_text(row.decision))})
+        fact_rows :: loop fact in facts -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text(jet_cli_structure_kind(fact.kind))), jet_cli_status_field("registry", jet_cli_status_text(jet_cli_structure_registry(fact.kind))), jet_cli_status_field("subject", jet_cli_status_text(fact.subject)), jet_cli_status_field("source", jet_cli_status_text(fact.source)), jet_cli_status_field("span", jet_cli_structure_span(fact.span)), jet_cli_status_field("status", jet_cli_status_text(fact.status)), jet_cli_status_field("detail", jet_cli_status_text(fact.detail)), jet_cli_status_field("gate", jet_cli_status_optional_text(fact.gate))})
+        gate_rows :: loop entry in gates -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("structure")), jet_cli_status_field("scope", jet_cli_status_text(entry.scope)), jet_cli_status_field("source", jet_cli_status_text(entry.source)), jet_cli_status_field("span", jet_cli_structure_span(entry.span ?? Span{start: 0, end: 0})), jet_cli_status_field("subject", jet_cli_status_text(entry.subject)), jet_cli_status_field("reason", jet_cli_status_optional_text(entry.reason)), jet_cli_status_field("status", jet_cli_status_optional_text(entry.status)), jet_cli_status_field("detail", jet_cli_status_text(entry.detail)), jet_cli_status_field("provenance", jet_cli_status_texts(entry.provenance))})
+        structure :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("facts", jet_cli_status_array(fact_rows)), jet_cli_status_field("gates", jet_cli_status_array(gate_rows))})
+        return "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("structure", structure)})}\n"
+    }
+    output := "structure\n"
+    loop row in JET_CLI_STRUCTURE_ROWS -> output = "{output}  {row.name}  safe={row.safe_direction}  gates={row.gates.join(", ")}\n"
+    output = "{output}facts: {facts.len()}\n"
+    if facts.len() == 0 -> output = "{output}  (none in this program)\n"
+    loop fact in facts -> output = "{output}  {jet_cli_structure_kind(fact.kind)}  {fact.source}:{fact.span.start}..{fact.span.end}  {fact.subject}  {fact.status} — {fact.detail}\n"
+    output = "{output}gates: {gates.len()}\n"
+    if gates.len() == 0 -> output = "{output}  (none in this program)\n"
+    loop entry in gates {
+        span :: entry.span ?? Span{start: 0, end: 0}
+        output = "{output}  {entry.scope}  {entry.source}:{span.start}..{span.end}  {entry.subject}  {entry.reason ?? "unknown"} — {entry.detail}\n"
+        loop provenance in entry.provenance -> output = "{output}    provenance {provenance}\n"
+    }
+    output
+}
+
+fn jet_cli_structure_core_type(entry: CoreModuleTypeExport) -> JetCLIStatusValue Never! {
+    kind :: if entry.kind == {
+        .Plain -> "plain"
+        .CryptoNominal -> "crypto_nominal"
+        .Generic(_) -> "generic"
+        .Enum(_) -> "enum"
+    }
+    fields := [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(entry.name)), jet_cli_status_field("kind", jet_cli_status_text(kind))}
+    if entry.kind == .Enum(variants) -> &fields.push(jet_cli_status_field("variants", jet_cli_status_texts(variants)))
+    jet_cli_status_object(fields)
+}
+
+fn jet_cli_structure_core(json: Bool) -> JetDriverVerbOutput Never! {
+    if json {
+        bootstrap :: loop step in JET_CLI_CORE_BOOTSTRAP -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(step.name)), jet_cli_status_field("dependencies", jet_cli_status_texts(step.dependencies))})
+        modules :: loop core_module in JET_CLI_CORE_DECLARATIONS -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("module", jet_cli_status_text(core_module.module_name)), jet_cli_status_field("members", jet_cli_status_texts(core_module.members)), jet_cli_status_field("type_exports", jet_cli_status_array(loop entry in core_module.type_exports -> jet_cli_structure_core_type(entry))), jet_cli_status_field("dependencies", jet_cli_status_texts(core_module.dependencies))})
+        core :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("bootstrap", jet_cli_status_array(bootstrap)), jet_cli_status_field("root_types", jet_cli_status_texts(JET_CLI_CORE_ROOT_TYPES)), jet_cli_status_field("modules", jet_cli_status_array(modules))})
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.structure", true, [JetCLIStatusField]{jet_cli_status_field("core", core)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    output := "core\nbootstrap:\n"
+    loop (index, step) in JET_CLI_CORE_BOOTSTRAP -> output = "{output}  {index + 1}. {step.name}  depends_on [{if step.dependencies.len() == 0 -> "none" else -> step.dependencies.join(", ")}]\n"
+    output = "{output}root types: {JET_CLI_CORE_ROOT_TYPES.join(", ")}\nmodules: {JET_CLI_CORE_DECLARATIONS.len()}\n"
+    loop core_module in JET_CLI_CORE_DECLARATIONS {
+        output = "{output}  module {core_module.module_name}  depends_on [{if core_module.dependencies.len() == 0 -> "none" else -> core_module.dependencies.join(", ")}]\n    members: {core_module.members.join(", ")}\n"
+        if core_module.type_exports.len() == 0 {
+            output = "{output}    types: (none)\n"
+        } else {
+            output = "{output}    types:\n"
+            loop entry in core_module.type_exports {
+                kind :: if entry.kind == {
+                    .Plain -> "plain"
+                    .CryptoNominal -> "crypto_nominal"
+                    .Generic(arity) -> "generic({arity})"
+                    .Enum(variants) -> "enum [{variants.join(", ")}]"
+                }
+                output = "{output}      {entry.name} ({kind})\n"
+            }
+        }
+    }
+    JetDriverVerbOutput{stdout: output, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// Compilation and ledger failures use inspect.structure, with no human summary.
+fn jet_cli_structure_host(file: String, color: Bool, json: Bool, threads: Int?) -> JetDriverVerbOutput {
+    compiled :: jet_cli_compile_file(file, color, false, threads, JetDriverCompileMode.Doc)
+    if compiled == {
+        .Refused(refusal) -> return refusal.copy()
+        .Compiled(result, snapshot) -> {
+            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            errors :: jet_cli_errors(diagnostics)
+            facts :: jet_cli_structure_facts(result)
+            ledger := GateLedger{}
+            if jet_cli_gate_ledger(result) == .Val(storage) {
+                permit :: storage.guard_read()
+                ledger = permit.value.copy()
+            }
+            if errors.len() > 0 {
+                ledger = GateLedger{}
+                names :: name_ledger_from_facts(MIRNameFacts{modules: [], declarations: [], aliases: [], references: [], structure_facts: facts})
+                sema_gate_append_structure(&ledger, names)
+                // Rust preserves any published structure facts on frontend failure.
+                stdout := if facts.len() > 0 -> jet_cli_structure_report(facts, ledger, json) else -> ""
+                stderr := ""
+                if json {
+                    source :: jet_cli_inspection_source(result, snapshot, file)
+                    stdout = "{stdout}{jet_cli_status_render_with_reports("inspect.structure", false, jet_cli_reports_json(jet_cli_report_cwd(), file, source, diagnostics), [JetCLIStatusField]{})}"
+                } else {
+                    loop error in diagnostics {
+                        origin :: if error.origin == .Val(value) -> value.display else -> file
+                        source :: if error.origin == .Val(value) -> value.source else -> jet_cli_inspection_source(result, snapshot, origin)
+                        stderr = "{stderr}{diagnostic_render_all(origin, source, [Diagnostic]{error}, color)}"
+                    }
+                }
+                return JetDriverVerbOutput{stdout: stdout, stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            }
+            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            if ledger.diagnostic_rows.len() > 0 {
+                reports := [String]{}
+                stderr := ""
+                loop row in ledger.diagnostic_rows {
+                    source :: jet_cli_inspection_source(result, snapshot, row.source)
+                    if json {
+                        loop report in jet_cli_reports_json(jet_cli_report_cwd(), row.source, source, [Diagnostic]{row.diagnostic}) -> &reports.push(report)
+                    } else { stderr = "{stderr}{diagnostic_render_all(row.source, source, [Diagnostic]{row.diagnostic}, color)}" }
+                }
+                return JetDriverVerbOutput{stdout: if json -> jet_cli_status_render_with_reports("inspect.structure", false, reports, [JetCLIStatusField]{}) else -> "", stderr: stderr, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            }
+            return JetDriverVerbOutput{stdout: jet_cli_structure_report(facts, ledger, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+    }
+}

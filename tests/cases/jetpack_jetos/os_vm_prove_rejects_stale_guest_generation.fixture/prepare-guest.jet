@@ -1,0 +1,14 @@
+// SETUP-PORT of tests/jetpack_jetos.rs:4317-4327: write the original format! guest proof. No assertions.
+use core.files as files
+use core.sys as sys
+use core.encoding.json as json
+use core.encoding.Dyn
+fn run() {
+    proof :: "package-root/systems/vm-proofs/halcyon-vm-proof-vm-proof.json"
+    guest :: "package-root/systems/vm-proofs/halcyon-vm-proof-vm-proof-guest-proof.json"
+    media :: files.join(sys.current_dir(), "package-root/systems/images/jetos-installer-halcyon.iso.proof.json")
+    harness :: files.read(proof) ?? panic("read harness")
+    template :: files.read("guest.template") ?? panic("read guest template")
+    body := template.replace("@MEDIA@", json.to_string(Dyn.Text(media))).replace("@HARNESS@", json.to_string(Dyn.Text(harness)))
+    files.write(guest, body) ?? panic("write original guest proof")
+}

@@ -1,0 +1,34 @@
+# HAND-PORT tests/tir_control_and_data.rs:1005-1012 field_error_entry_golden_matches_all_execution_tiers
+# PENDING-GRAMMAR: approved batch-two/four forms, no runtime parity claim.
+fixture: field_error_entry_golden_matches_all_execution_tiers.fixture
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+step: jet run --profile=debug Examples/features/serde/decode_error_exit.jet
+env: JET_STORE_DIR={work}/cache-0-debug
+env: JETPACK_ROOT={work}/jetpack-0-debug
+normalize: replace "{work}/" ""
+exit: 1
+stdout: empty
+stderr: = field_error_entry_golden_matches_all_execution_tiers.oracle0.expected
+step: jet run --release Examples/features/serde/decode_error_exit.jet
+env: JET_STORE_DIR={work}/cache-0-release
+env: JETPACK_ROOT={work}/jetpack-0-release
+normalize: replace "{work}/" ""
+exit: 1
+stdout: empty
+stderr: = field_error_entry_golden_matches_all_execution_tiers.oracle0.expected
+step: jet run Examples/features/serde/decode_error_exit.jet
+env: JET_STORE_DIR={work}/cache-0-default
+env: JETPACK_ROOT={work}/jetpack-0-default
+normalize: replace "{work}/" ""
+exit: 1
+stdout: empty
+stderr: = field_error_entry_golden_matches_all_execution_tiers.oracle0.expected
+step: jet run --interpret Examples/features/serde/decode_error_exit.jet
+env: JET_STORE_DIR={work}/cache-0-interpret
+env: JETPACK_ROOT={work}/jetpack-0-interpret
+normalize: replace "{work}/" ""
+exit: 1
+stdout: empty
+stderr: = field_error_entry_golden_matches_all_execution_tiers.oracle0.expected
+

@@ -1,0 +1,17 @@
+# Port of tests/corelib_parts/platform.rs:1320-1395; exact original source and predicates.
+# PENDING-SAME-HEAD/PENDING-GRAMMAR(batch-four bit_and/first-existing).
+fixture: fixtures/core_time_calendar_zone_and_dst_run
+requires: first-existing zone = "{env:TZDIR}/America/New_York" | "/usr/share/zoneinfo/America/New_York"
+mkdir: tzdb/America
+copy: {cap:zone} tzdb/America/New_York
+step: jet build main.jet
+env: JET_TZDB_DIR={work}/tzdb
+exit: 0
+step aot: built
+env: JET_TZDB_DIR={work}/tzdb
+exit: 0
+stdout: = "2024-03-10 01:30:00 America/New_York -05:00\n2024-03-11 01:30:00 America/New_York -04:00\n2024-03-11 02:30:00 America/New_York -04:00\n2024-03-10T06:30:00Z\n2024-03-10 01:30:00 America/New_York -05:00\n"
+step: jet run main.jet
+env: JET_TZDB_DIR={work}/tzdb
+exit: 0
+stdout: == aot

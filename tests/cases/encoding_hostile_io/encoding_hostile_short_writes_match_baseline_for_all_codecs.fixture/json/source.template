@@ -1,0 +1,26 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {
+    output :: files.create("{work}/json/output.data") ?? panic("create")
+    writer :: json.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("object")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("key")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+    if writer.finish() == {
+        .Ok(_) -> { print("finish-ok") }
+        .Err(first) -> {
+            again :: writer.finish()
+            if again == {
+                .Ok(_) -> { print("finish-not-latched") }
+                    .Err(second) -> {
+                        print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+                    }
+            }
+        }
+    }
+    print(files.read("{work}/json/output.data") ?? panic("read"))
+}

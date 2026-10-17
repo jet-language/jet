@@ -1,0 +1,523 @@
+# Port of tests/jetpack_jetos.rs:885-2344. Every 247 original assertion emitted; sources and expected-value literals verbatim.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_switch_activates_and_sets_current.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+step out: jet os switch halcyon --name known-good --no-color --yes --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "activated" # original predicate
+stderr: ~ "known-good" # original predicate
+file: {work}/package-root/systems/current exists # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/openssh.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/hello exists # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/btop exists # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/systemd exists # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/gdm exists # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/gnome-session exists # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/gnome-shell exists # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/hostname = "halcyon\n" # original exact equality
+file: {work}/package-root/systems/generations/known-good/etc/timezone = "Europe/London\n" # original exact equality
+file: {work}/package-root/systems/generations/known-good/etc/fstab ~ "jetos-root" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/fstab ~ "/dev/disk/by-label/swap\tnone\tswap\tpri=5" # original predicate
+file: {work}/package-root/systems/generations/known-good/activation-diff.txt ~ "packages: 7" # original predicate
+file: {work}/package-root/systems/generations/known-good/activation-diff.txt ~ "services: 3" # original predicate
+file: {work}/package-root/systems/generations/known-good/health-checks.txt ~ "openssh" # original predicate
+file: {work}/package-root/systems/generations/known-good/health-checks.txt ~ "backup" # original predicate
+file: {work}/package-root/systems/generations/known-good/health-checks.txt ~ "metrics" # original predicate
+file: {work}/package-root/systems/generations/known-good/provenance.json ~ "\"hello\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/provenance.json ~ "\"cachyos-kernel\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/provenance.json ~ "core-source" # original predicate
+file: {work}/package-root/systems/generations/known-good/provenance.json ~ "packages.overlay.nixpkgs" # original predicate
+file: {work}/package-root/systems/generations/known-good/provenance.json ~ "\"bootstrap\":\"source-built\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/passwd ~ "nate:x:1000" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/passwd ~ "/run/current-system/sw/bin/hello" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/group ~ "wheel:x:2000:nate" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/sysusers.d/jetos.conf ~ "u nate 1000" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/sysusers.d/jetos.conf ~ "g wheel 2000" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/shells ~ "/run/current-system/sw/bin/hello" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/profile ~ "/run/current-system/sw/bin" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/profile ~ "export JETOS_BRAND=JetOS" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/profile ~ "export JETOS_PROMPT='JetOS halcyon'" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/profile ~ "\\033[1;36m\\]JetOS" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/issue ~ "JetOS halcyon" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/issue ~ "proof-backed system shell" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/motd ~ "JetOS halcyon" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/motd ~ "source-owned, proof-backed" # original predicate
+file: {work}/package-root/systems/generations/known-good/terminal/facts.json ~ "\"login_user\":\"nate\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/terminal/facts.json ~ "\"serial_tty\":\"ttyS0\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/terminal/facts.json ~ "\"prompt\":\"JetOS halcyon $ \"" # original predicate
+file: {work}/package-root/systems/generations/known-good/terminal/facts.json ~ "terminal-login-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/serial-getty@ttyS0.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/getty.target.wants/serial-getty@ttyS0.service exists # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/facts.json ~ "\"loader\":\"Limine\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/facts.json ~ "\"kernel\":\"CachyOS\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/facts.json ~ "\"kernel_package\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/facts.json ~ "\"output_hash\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/facts.json ~ "\"source_recipe\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/facts.json ~ "\"sha256\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/kernel ~ "MZ fixture-built cachyos kernel" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/kernel ~ "HdrS" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/limine.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/network/facts.json ~ "\"interface\":\"enp0s1\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/network/facts.json ~ "\"firewall_allowed_tcp_ports\":[\"22\",\"443\"]" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/network/10-jetos.network ~ "Address=192.0.2.10/24" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/nftables/jetos-firewall.nft ~ "tcp dport { 22, 443 } accept" # original predicate
+file: {work}/package-root/systems/generations/known-good/init/systemd.json ~ "graphical.target" # original predicate
+file: {work}/package-root/systems/generations/known-good/init/systemd.json ~ "\"systemd\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/sbin/init exists # original predicate
+file: {work}/package-root/systems/generations/known-good/usr/lib/systemd/system/graphical.target exists # original predicate
+file: {work}/package-root/systems/generations/known-good/systemd/lib/systemd/system/graphical.target exists # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/graphical.target exists # original predicate
+file: {work}/package-root/systems/generations/known-good/usr/lib/systemd/system/rescue.target exists # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/default.target exists # original predicate
+file: {work}/package-root/systems/generations/known-good/root/etc/hostname is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/root/boot/kernel is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/root/sbin/init exists # original predicate
+file: {work}/package-root/systems/generations/known-good/root/run/current-system/etc/systemd/system/openssh.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/root/home/nate/.profile is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/users/nate/profile.json ~ "\"kind\":\"jetos.user-generation\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/users/nate/profile.json ~ "\"user\":\"nate\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/users/nate/profile.json ~ "\"syncthing\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/user/jetos-user-nate.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-user-apply is-file # original predicate
+step user_apply: {work}/package-root/systems/generations/known-good/sw/bin/jetos-user-apply nate
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_USER_HOME={work}/package-root/applied-home
+exit: 0
+file: {work}/package-root/applied-home/.config/ghostty/config ~ "managed-by=jetos" # original predicate
+file: {work}/package-root/applied-home/.config/ghostty/config ~ "home/ghostty/config" # original predicate
+file: {work}/package-root/applied-home/.jetos/profile/bin/hello exists # original predicate
+file: {work}/package-root/applied-home/.config/systemd/user/syncthing.service is-file # original predicate
+file: {work}/package-root/applied-home/.jetos/proof/user-nate.json ~ "\"state\":\"applied\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/root/run/current-system/terminal/facts.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/backup.timer is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/timers.target.wants/backup.timer exists # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/metrics.socket is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/sockets.target.wants/metrics.socket exists # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/display-manager.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/graphical.target.wants/display-manager.service exists # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/multi-user.target.wants/openssh.service exists # original predicate
+file: {work}/package-root/systems/generations/known-good/hardware/facts.json ~ "iwlwifi" # original predicate
+file: {work}/package-root/systems/generations/known-good/hardware/facts.json ~ "amdgpu" # original predicate
+file: {work}/package-root/systems/generations/known-good/hardware/facts.json ~ "framework-13-amd" # original predicate
+file: {work}/package-root/systems/generations/known-good/hardware/facts.json ~ "jetos.hardware" # original predicate
+file: {work}/package-root/systems/generations/known-good/hardware/facts.json ~ "jetos-hardware-doctor" # original predicate
+file: {work}/package-root/systems/generations/known-good/hardware/halcyon.jet is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/hardware/profile-framework-13-amd.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/specialisations/plasmaBeta.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-hardware-scan is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-hardware-doctor is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/specialisations/plasmaBeta.conf ~ "title jetos 26.10 (Apex) — halcyon (plasmaBeta)" # original predicate
+mkdir: {work}/package-root/fake-hardware/proc
+mkdir: {work}/package-root/fake-hardware/sys/class/block/nvme0n1
+mkdir: {work}/package-root/fake-hardware/sys/class/drm/card0
+write: {work}/package-root/fake-hardware/proc/modules os_switch_activates_and_sets_current.setup-1.bytes
+step scan: {work}/package-root/systems/generations/known-good/sw/bin/jetos-hardware-scan halcyon
+env: JETOS_HW_ROOT={work}/package-root/fake-hardware
+env: JETOS_HARDWARE_OUT={work}/package-root/halcyon-scan.jet
+exit: 0
+file: {work}/package-root/halcyon-scan.jet ~ "hardware.halcyon.scan.modules" # original predicate
+file: {work}/package-root/halcyon-scan.jet ~ "amdgpu,nvme" # original predicate
+file: {work}/package-root/halcyon-scan.jet ~ "nvme0n1" # original predicate
+step doctor: {work}/package-root/systems/generations/known-good/sw/bin/jetos-hardware-doctor
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_HW_ROOT={work}/package-root/fake-hardware
+exit: 0
+stdout: ~ "\"state\":\"match\"" # original predicate
+stdout: ~ "hardware-drift-checked" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/facts.json ~ "\"profile\":\"Gaming\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/facts.json ~ "\"kernel_profile\":\"CachyOSLatest\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/facts.json ~ "vm.swappiness" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/facts.json ~ "performance/initrd.json" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/facts.json ~ "performance/bootloader.json" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/profile.json ~ "kernel-tuning-profile-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/profile.json ~ "CachyOSLatest" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/scheduler.json ~ "ScxLavd" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/scheduler.json ~ "sched-ext-service-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/jetos-performance-scheduler.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/multi-user.target.wants/jetos-performance-scheduler.service exists # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-performance-scheduler is-file # original predicate
+write: {work}/package-root/fake-scheduler os_switch_activates_and_sets_current.setup-2.bytes
+chmod: {work}/package-root/fake-scheduler 0755
+step scheduler_run: {work}/package-root/systems/generations/known-good/sw/bin/jetos-performance-scheduler
+env: JETOS_SCHEDULER_BIN={work}/package-root/fake-scheduler
+env: JETOS_SCHEDULER_LOG={work}/package-root/scheduler.log
+exit: 0
+file: {work}/package-root/scheduler.log ~ "scheduler" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/initrd.json ~ "\"systemd\":true" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/initrd.json ~ "\"verbosity\":\"quiet\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/bootloader.json ~ "\"limine_max_generations\":\"7\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/performance/bootloader.json ~ "\"efi_can_touch_variables\":false" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/sysctl.d/90-jetos-performance.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/zram-generator.conf.d/jetos.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/facts.json ~ "jetos.storage-tree" # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/facts.json ~ "disk.main.device" # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/facts.json ~ "jetos-storage-apply" # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/facts.json ~ "\"ephemeral_root\":true" # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/plan.json ~ "\"root_fs\":\"Btrfs\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/plan.json ~ "/var/lib" # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/plan.json ~ "requires --manual plus --execute" # original predicate
+file: {work}/package-root/systems/generations/known-good/storage/mounts.fstab is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-storage-plan is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-storage-apply is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-persist-activate is-file # original predicate
+step storage_apply: {work}/package-root/systems/generations/known-good/sw/bin/jetos-storage-apply --manual
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_STORAGE_LOG={work}/package-root/storage-apply.sh
+env: JETOS_STORAGE_PROOF_DIR={work}/package-root/storage-proofs
+exit: 0
+file: {work}/package-root/storage-apply.sh ~ "sfdisk --wipe always /dev/sda" # original predicate
+file: {work}/package-root/storage-apply.sh ~ "mkfs.btrfs -L jetos-root" # original predicate
+file: {work}/package-root/storage-proofs/apply-proof.json ~ "\"executed\":false" # original predicate
+file: {work}/package-root/storage-proofs/apply-proof.json ~ "manual-storage-plan-reviewed" # original predicate
+step hostile_storage_apply: {work}/package-root/systems/generations/known-good/sw/bin/jetos-storage-apply --manual
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_STORAGE_DISK=/dev/sda; touch {work}/package-root/storage-injection-marker
+exit: 2
+file: {work}/package-root/storage-injection-marker absent # original predicate
+step persist: {work}/package-root/systems/generations/known-good/sw/bin/jetos-persist-activate
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_PERSIST_ROOT={work}/package-root/persist-root
+env: JETOS_EPHEMERAL_ROOT={work}/package-root/ephemeral-root
+env: JETOS_STORAGE_PROOF_DIR={work}/package-root/storage-proofs
+exit: 0
+file: {work}/package-root/persist-root/home/nate is-dir # original predicate
+file: {work}/package-root/persist-root/var/lib is-dir # original predicate
+file: {work}/package-root/ephemeral-root/home/nate is-dir # original predicate
+file: {work}/package-root/storage-proofs/persistence-proof.json ~ "\"state\":\"activated\"" # original predicate
+file: {work}/package-root/storage-proofs/persistence-proof.json ~ "impermanence-persist-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/module-system/explain.json ~ "\"key\":\"services.displayManager\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/module-system/explain.json ~ "\"value\":\"gdm\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/module-system/explain.json ~ "\"value\":\"sddm\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/module-system/explain.json ~ "\"winner\":true" # original predicate
+file: {work}/package-root/systems/generations/known-good/module-system/explain.json ~ "Force" # original predicate
+file: {work}/package-root/systems/generations/known-good/module-system/explain.json ~ "stylix.kmscon" # original predicate
+file: {work}/package-root/systems/generations/known-good/module-system/disabled-modules.manifest ~ "stylix.kmscon" # original predicate
+file: {work}/package-root/systems/generations/known-good/theme/facts.json ~ "\"name\":\"halcyon\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/theme/facts.json ~ "theme-projected" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/themes/jetos/gtk-4.0/gtk.css is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/share/qt6ct/colors/jetos.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/share/terminal/theme.toml is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/share/editor/theme.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/share/display-manager/theme.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/theme-preview.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/theme-preview.json ~ "jetos.theme-preview" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/theme-preview.json ~ "#7aa2f7" # original predicate
+file: {work}/package-root/systems/generations/known-good/flatpak/plan.json ~ "com.discordapp.Discord" # original predicate
+file: {work}/package-root/systems/generations/known-good/flatpak/plan.json ~ "flatpak-reconcile-planned" # original predicate
+file: {work}/package-root/systems/generations/known-good/flatpak/plan.json ~ "obsidian" # original predicate
+file: {work}/package-root/systems/generations/known-good/appimage/plan.json ~ "appimage-runtime-integrated" # original predicate
+file: {work}/package-root/systems/generations/known-good/appimage/plan.json ~ "/opt/apps/Obsidian.AppImage" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-flatpak-reconcile is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-appimage-run is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/appimage/obsidian.desktop is-file # original predicate
+write: {work}/package-root/fake-flatpak os_switch_activates_and_sets_current.setup-3.bytes
+chmod: {work}/package-root/fake-flatpak 0755
+step flatpak_run: {work}/package-root/systems/generations/known-good/sw/bin/jetos-flatpak-reconcile
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_FLATPAK_BIN={work}/package-root/fake-flatpak
+env: JETOS_FLATPAK_LOG={work}/package-root/flatpak.log
+exit: 0
+file: {work}/package-root/flatpak.log ~ "remote-add --if-not-exists flathub" # original predicate
+file: {work}/package-root/flatpak.log ~ "install -y flathub com.discordapp.Discord" # original predicate
+file: {work}/package-root/flatpak.log ~ "override com.discordapp.Discord --filesystem=Downloads" # original predicate
+file: {work}/package-root/flatpak.log ~ "uninstall -y com.spotify.Client" # original predicate
+file: {work}/package-root/flatpak.log ~ "update -y" # original predicate
+step appimage_print: {work}/package-root/systems/generations/known-good/sw/bin/jetos-appimage-run obsidian --print
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+exit: 0
+stdout: ~ "/opt/apps/Obsidian.AppImage" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/facts.json ~ "\"name\":\"web\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/facts.json ~ "\"backend\":\"Container\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/facts.json ~ "\"name\":\"sandbox\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/facts.json ~ "\"backend\":\"MicroVM\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/facts.json ~ "web-token" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/web.plan.json ~ "/srv/web:/srv/web:ro" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/web.plan.json ~ "\"memory\":\"512M\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/web.plan.json ~ "\"rollback_keep\":\"3\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/web.plan.json ~ "workload-proof-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/sandbox.plan.json ~ "qemu-system-x86_64" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/sandbox.plan.json ~ "-m 2048M" # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/sandbox.plan.json ~ "\"backend\":\"MicroVM\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/workload-web.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/web.rollback.manifest is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/health-web.sh is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/workloads/sandbox.rollback.manifest is-file # original predicate
+step workload_run: {work}/package-root/systems/generations/known-good/sw/bin/jetos-workload-run web
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_WORKLOAD_LOG={work}/package-root/workload.log
+exit: 0
+file: {work}/package-root/workload.log ~ "workload" # original predicate
+file: {work}/package-root/systems/generations/known-good/fleet/deploy-plan.json ~ "staged-proof-gated-rollback-stop" # original predicate
+file: {work}/package-root/systems/generations/known-good/fleet/deploy-plan.json ~ "\"fleet\": \"home\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-fleet-deploy is-file # original predicate
+mkdir: {work}/package-root/deploy-proofs
+step deploy: {work}/package-root/systems/generations/known-good/sw/bin/jetos-fleet-deploy halcyon
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_DEPLOY_PROOF_DIR={work}/package-root/deploy-proofs
+env: JETOS_DEPLOY_LOG={work}/package-root/deploy.log
+exit: 0
+file: {work}/package-root/deploy.log ~ "push" # original predicate
+file: {work}/package-root/deploy.log ~ "proof" # original predicate
+file: {work}/package-root/deploy.log ~ "switch" # original predicate
+file: {work}/package-root/deploy.log ~ "health" # original predicate
+file: {work}/package-root/deploy-proofs/home-halcyon.json ~ "\"state\":\"deployed\"" # original predicate
+file: {work}/package-root/deploy-proofs/home-halcyon.json ~ "remote-proof-before-switch" # original predicate
+file: {work}/package-root/systems/generations/known-good/options/reference.json ~ "apps.flatpak.app.discord.ref" # original predicate
+file: {work}/package-root/systems/generations/known-good/options/reference.json ~ "performance.sysctl.vm.swappiness" # original predicate
+file: {work}/package-root/systems/generations/known-good/options/reference.json ~ "\"type\":" # original predicate
+file: {work}/package-root/systems/generations/known-good/options/reference.json ~ "\"doc\":" # original predicate
+file: {work}/package-root/systems/generations/known-good/options/reference.json ~ "\"tier\":" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-options-search is-file # original predicate
+step option_exact: {work}/package-root/systems/generations/known-good/sw/bin/jetos-options-search --exact services.displayManager
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+exit: 0
+stdout: ~ "services.displayManager" # original predicate
+stdout: ~ "gdm" # original predicate
+step option_explain: {work}/package-root/systems/generations/known-good/sw/bin/jetos-options-search --explain services.displayManager
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+exit: 0
+stdout: ~ "services.displayManager" # original predicate
+stdout: ~ "winner" # original predicate
+file: {work}/package-root/systems/generations/known-good/image-variants/matrix.json ~ "\"name\": \"installer\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/image-variants/matrix.json ~ "image-variant-plan-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/policy.json ~ "gc" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/policy.json ~ "rollback_window" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/policy.json ~ "\"auto_upgrade\":true" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/auto-upgrade.json ~ "auto-upgrade-proof-gated" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/auto-upgrade.json ~ "rollback-on-fail" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/channel.json ~ "\"channel\":\"stable\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/channel.json ~ "channel-policy-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-lifecycle-gc is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-channel-update is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-auto-upgrade is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/jetos-auto-upgrade.timer is-file # original predicate
+mkdir: {work}/package-root/gc-systems/generations/old
+mkdir: {work}/package-root/gc-systems/generations/mid
+mkdir: {work}/package-root/gc-systems/generations/new
+write: {work}/package-root/gc-systems/generations.log os_switch_activates_and_sets_current.setup-4.bytes
+step gc: {work}/package-root/systems/generations/known-good/sw/bin/jetos-lifecycle-gc --apply
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_SYSTEMS_DIR={work}/package-root/gc-systems
+exit: 0
+file: {work}/package-root/gc-systems/generations/old absent # original predicate
+file: {work}/package-root/gc-systems/generations/mid exists # original predicate
+file: {work}/package-root/gc-systems/generations/new exists # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/gc-plan.txt ~ "reason=older-than-retention" # original predicate
+file: {work}/package-root/systems/generations/known-good/lifecycle/gc-plan.txt ~ "reason=within-retention" # original predicate
+step upgrade: {work}/package-root/systems/generations/known-good/sw/bin/jetos-auto-upgrade
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_LIFECYCLE_PROOF_DIR={work}/package-root/lifecycle-proofs
+env: JETOS_UPGRADE_FETCH_CMD=echo fetch >> '{work}/package-root/lifecycle.log'
+env: JETOS_UPGRADE_BUILD_CMD=echo build >> '{work}/package-root/lifecycle.log'
+env: JETOS_UPGRADE_PROOF_CMD=echo proof >> '{work}/package-root/lifecycle.log'
+env: JETOS_UPGRADE_SWITCH_CMD=echo switch >> '{work}/package-root/lifecycle.log'
+env: JETOS_UPGRADE_HEALTH_CMD=echo health >> '{work}/package-root/lifecycle.log'
+exit: 0
+file: {work}/package-root/lifecycle.log ~ "fetch" # original predicate
+file: {work}/package-root/lifecycle.log ~ "build" # original predicate
+file: {work}/package-root/lifecycle.log ~ "proof" # original predicate
+file: {work}/package-root/lifecycle.log ~ "switch" # original predicate
+file: {work}/package-root/lifecycle.log ~ "health" # original predicate
+file: {work}/package-root/lifecycle-proofs/auto-upgrade-proof.json ~ "\"state\":\"switched\"" # original predicate
+file: {work}/package-root/lifecycle-proofs/auto-upgrade-proof.json ~ "health-passed" # original predicate
+step rollback: {work}/package-root/systems/generations/known-good/sw/bin/jetos-auto-upgrade
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_LIFECYCLE_PROOF_DIR={work}/package-root/lifecycle-rollback-proofs
+env: JETOS_UPGRADE_FETCH_CMD=true
+env: JETOS_UPGRADE_BUILD_CMD=true
+env: JETOS_UPGRADE_PROOF_CMD=true
+env: JETOS_UPGRADE_SWITCH_CMD=true
+env: JETOS_UPGRADE_HEALTH_CMD=false
+env: JETOS_UPGRADE_ROLLBACK_CMD=echo rollback >> '{work}/package-root/lifecycle-rollback.log'
+exit: nonzero
+file: {work}/package-root/lifecycle-rollback.log ~ "rollback" # original predicate
+file: {work}/package-root/lifecycle-rollback-proofs/auto-upgrade-proof.json ~ "\"state\":\"rolled-back\"" # original predicate
+file: {work}/package-root/lifecycle-rollback-proofs/auto-upgrade-proof.json ~ "health-failed" # original predicate
+file: {work}/package-root/systems/generations/known-good/service-manager/facts.json ~ "tmpfiles" # original predicate
+file: {work}/package-root/systems/generations/known-good/service-manager/facts.json ~ "hardening" # original predicate
+file: {work}/package-root/systems/generations/known-good/service-manager/facts.json ~ "journal" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/tmpfiles.d/backup.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-service-logs is-file # original predicate
+write: {work}/package-root/fake-journalctl os_switch_activates_and_sets_current.setup-5.bytes
+chmod: {work}/package-root/fake-journalctl 0755
+step service_logs: {work}/package-root/systems/generations/known-good/sw/bin/jetos-service-logs openssh --since "1 hour ago"
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_JOURNALCTL_BIN={work}/package-root/fake-journalctl
+env: JETOS_JOURNAL_LOG={work}/package-root/journalctl.log
+exit: 0
+file: {work}/package-root/journalctl.log ~ "-u openssh --since 1 hour ago" # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/modules.json ~ "app-module-library" # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/modules.json ~ "ghosttyConfig" # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/modules.json ~ "\"name\":\"git\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/modules.json ~ "\"name\":\"vscode\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/modules.json ~ "jetos-app-module-apply" # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/programs/git/module.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/programs/vscode/config is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/programs/discord/module.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/coverage.manifest is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/gap-cards.manifest is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-app-module-apply is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/programs/git/config ~ "user.name = Nate" # original predicate
+file: {work}/package-root/systems/generations/known-good/apps/programs/git/config ~ "user.email" # original predicate
+step app_apply: {work}/package-root/systems/generations/known-good/sw/bin/jetos-app-module-apply
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_USER_HOME={work}/package-root/app-home
+exit: 0
+file: {work}/package-root/app-home/.config/git/config is-file # original predicate
+file: {work}/package-root/app-home/.config/Code/User/settings.json is-file # original predicate
+file: {work}/package-root/app-home/.jetos/proof/app-modules.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/jetos-host-coverage.json ~ "jetos.host-coverage" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/jetos-host-coverage.json ~ "\"state\": \"covered\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/jetos-host-coverage.json ~ "jetos-host-covered" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/jetos-host-coverage.json ~ "\"omissions\":[]" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/coverage-matrix.tsv ~ "desktop-audio-locale-fonts-virt-gaming-smartcard\tcovered" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/coverage-matrix.tsv ~ "flatpak-appimage\tcovered" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/coverage-matrix.tsv ~ "lifecycle-gc-auto-upgrade\tcovered" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/coverage-matrix.tsv !~ "\tmissing\t" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/vm-gates.json ~ "desktop-session-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/vm-gates.json ~ "app-modules-present" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/vm-gates.json ~ "vm-acceptance-required" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/os-release = "NAME=jetos\nID=jetos\nVERSION=\"26.10 (Apex)\"\nVERSION_ID=26.10\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10 (Apex)\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n" # original exact equality
+file: {work}/package-root/systems/generations/known-good/usr/lib/os-release = "NAME=jetos\nID=jetos\nVERSION=\"26.10 (Apex)\"\nVERSION_ID=26.10\nVERSION_CODENAME=apex\nPRETTY_NAME=\"jetos 26.10 (Apex)\"\nHOME_URL=\"https://jet-lang.dev/jetos\"\n" # original exact equality
+file: {work}/package-root/systems/generations/known-good/boot/limine.conf ~ "/jetos 26.10 (Apex) — halcyon" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/backgrounds/jetos/apex.svg ^= "<svg " # original predicate
+file: {work}/package-root/systems/generations/known-good/share/backgrounds/jetos/apex.svg ~ "jetos 26.10 Apex" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/backgrounds/jetos/apex.svg ~ "linearGradient" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/backgrounds/jetos/apex.svg len > 1000 # original byte threshold
+file: {work}/package-root/systems/generations/known-good/etc/os-release !~ "NixOS" # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/os-release !~ "Yarara" # original predicate
+file: literal-6.bytes !~ "NixOS" # original predicate
+file: literal-7.bytes !~ "Yarara" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/limine.conf !~ "NixOS" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/limine.conf !~ "Yarara" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/specialisations/plasmaBeta.conf !~ "NixOS" # original predicate
+file: {work}/package-root/systems/generations/known-good/boot/specialisations/plasmaBeta.conf !~ "Yarara" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/backgrounds/jetos/apex.svg !~ "NixOS" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/backgrounds/jetos/apex.svg !~ "Yarara" # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/owner-jetos-coverage.md is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-acceptance-prove is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/nixos-parity.json absent # original predicate
+file: {work}/package-root/systems/generations/known-good/acceptance/owner-nixos-diff.md absent # original predicate
+step acceptance_run: {work}/package-root/systems/generations/known-good/sw/bin/jetos-acceptance-prove
+env: JETOS_SYSTEM_ROOT={work}/package-root/systems/generations/known-good
+env: JETOS_ACCEPTANCE_PROOF_DIR={work}/package-root/acceptance-proofs
+exit: 0
+file: {work}/package-root/acceptance-proofs/acceptance-proof.json ~ "\"state\":\"passed\"" # original predicate
+file: {work}/package-root/acceptance-proofs/acceptance-proof.json ~ "jetos-host-covered" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/facts.json ~ "\"session\":\"gnome-wayland\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/facts.json ~ "\"display_manager\":\"gdm\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/facts.json ~ "\"terminal_fallback\":\"ttyS0+tty1\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/facts.json ~ "desktop-session-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-desktop-session is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/breadth.json ~ "desktop-module-breadth-ready" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/breadth.json ~ "\"audio\":true" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/breadth.json ~ "plasma-wayland" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/breadth.json ~ "libvirtd" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/breadth.json ~ "gamemode" # original predicate
+file: {work}/package-root/systems/generations/known-good/desktop/breadth.json ~ "Inter" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/wayland-sessions/jetos-plasma.desktop is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/pipewire/jetos.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/security/limits.d/99-jetos-rtkit.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/locale.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/vconsole.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/fonts/local.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/share/applications/mimeapps.list is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/libvirtd.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/gamemoded.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/systemd/system/pcscd.service is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/etc/binfmt.d/appimage.conf is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-desktop-session ~ "--jetos-proof" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-desktop-session ~ "desktop session command gnome-session" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-display-manager ~ "--jetos-proof" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-display-manager ~ "display manager command gdm" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/gdm is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/gnome-session is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/gnome-shell is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-terminal-fallback is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-terminal-fallback ~ "cat /etc/motd" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-terminal-fallback ~ "ttyS0 and tty1 remain available" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/wayland-sessions/jetos-gnome.desktop is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/store/cache.json ~ "jetpack-hangar" # original predicate
+file: {work}/package-root/systems/generations/known-good/compat/escape-hatches.json ~ "\"studio_visible\": \"true\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-studio is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/share/applications/jetos-studio.desktop is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/app.json ~ "\"runtime\": \"jetos-system-app\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/app.json ~ "\"browser_fallback\": \"true\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/app.json !~ "Canvas" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"kind\":\"jetos-studio-projection\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"artifacts\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"dashboard\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"selected_host\":\"halcyon\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"page_registry\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"id\":\"changeset\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"controller\":\"studio-actions\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"model_contract\":" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"read_only\":" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"apply_gate\":\"single-source-transaction\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"secret_policy\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"plaintext_in_projection\":false" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"fleet\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"mode\":\"adaptive\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"canvas_bridge\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"mode\":\"separate-app-deeplink\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"first_boot\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"role\":\"os-control-center\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"canvas_first_surface\":false" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/data.json ~ "\"openssh\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/first-boot.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/first-boot.json ~ "\"role\":\"os-control-center\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/first-boot.json ~ "\"proof\":\"first-boot-control-center-ready\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/first-boot.json ~ "\"first_surface\":false" # original predicate
+file: {work}/package-root/systems/generations/known-good/share/xdg/autostart/jetos-studio-first-boot.desktop is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/sw/bin/jetos-studio-first-boot is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/first-boot.pending is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/root/run/current-system/studio/app.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/root/run/current-system/studio/data.json is-file # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "Jetos Studio" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-page-registry=\"studio-pages\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-page-kind=\"dashboard\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "Service Configuration" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "Proof/Rollback Status" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-page-kind=\"settings\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-stage-setting=\"network.hostName\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-page-kind=\"changeset\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-apply-gate=\"single-source-transaction\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-changeset-action=\"apply\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-changeset-action=\"discard\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "Impact Ledger" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "Build Only" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-changeset-tray=\"true\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-secret-policy=\"no-plaintext\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "plaintext: never projected" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-page-kind=\"fleet\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-fleet-mode=\"adaptive\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "proof-before-switch" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "openssh" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "network.hostName" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-stage-source=\"true\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-pipeline=\"build-switch\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-run=\"proof\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "const PAGE_CONTROLLERS" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "synthetic-registered-page" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "resolvePageBinding" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html !~ "renderMissing" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "data-open-canvas=\"source\"" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "Open Canvas" # original predicate
+file: {work}/package-root/systems/generations/known-good/studio/index.html ~ "Jetos Studio" # original predicate
+file: {work}/package-root/systems/generations/known-good/secrets.tmpfs.manifest ~ "wifi\tsecrets/wifi.age" # original predicate
+file: {work}/package-root/systems/generations/known-good/vm-proof.txt ~ "plan-sha256:" # original predicate
+file: {work}/package-root/systems/generations/known-good/vm-proof.txt ~ "service-artifacts: pass" # original predicate
+step proof: jet os proof halcyon --json --no-color
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout: ~ "\"host\":\"halcyon\"" # original predicate
+stdout: ~ "\"boot\":" # original predicate
+stdout: ~ "\"provenance\":" # original predicate
+stdout: ~ "\"vm_proof\":" # original predicate

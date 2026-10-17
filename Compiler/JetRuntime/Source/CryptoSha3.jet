@@ -1,0 +1,159 @@
+// FIPS202 Keccak-f1600; reuses Core/crypto keccak_f's fixed lane layout.
+// State200, theta40 and rho/pi200 bytes: caller-owned aligned scratch440.
+fn rt_keccak_rot(index: I64) -> I64 {
+    if {
+        (index == I64{0}) -> I64{0}
+        (index == I64{1}) -> I64{1}
+        (index == I64{2}) -> I64{62}
+        (index == I64{3}) -> I64{28}
+        (index == I64{4}) -> I64{27}
+        (index == I64{5}) -> I64{36}
+        (index == I64{6}) -> I64{44}
+        (index == I64{7}) -> I64{6}
+        (index == I64{8}) -> I64{55}
+        (index == I64{9}) -> I64{20}
+        (index == I64{10}) -> I64{3}
+        (index == I64{11}) -> I64{10}
+        (index == I64{12}) -> I64{43}
+        (index == I64{13}) -> I64{25}
+        (index == I64{14}) -> I64{39}
+        (index == I64{15}) -> I64{41}
+        (index == I64{16}) -> I64{45}
+        (index == I64{17}) -> I64{15}
+        (index == I64{18}) -> I64{21}
+        (index == I64{19}) -> I64{8}
+        (index == I64{20}) -> I64{18}
+        (index == I64{21}) -> I64{2}
+        (index == I64{22}) -> I64{61}
+        (index == I64{23}) -> I64{56}
+        else -> I64{14}
+    }
+}
+fn rt_keccak_rc(round: I64) -> I64 {
+    if {
+        (round == I64{0}) -> I64{0x0000000000000001}
+        (round == I64{1}) -> I64{0x0000000000008082}
+        (round == I64{2}) -> rt_crypto_word64(I64{0x80000000}, I64{0x0000808a})
+        (round == I64{3}) -> rt_crypto_word64(I64{0x80000000}, I64{0x80008000})
+        (round == I64{4}) -> I64{0x000000000000808b}
+        (round == I64{5}) -> I64{0x0000000080000001}
+        (round == I64{6}) -> rt_crypto_word64(I64{0x80000000}, I64{0x80008081})
+        (round == I64{7}) -> rt_crypto_word64(I64{0x80000000}, I64{0x00008009})
+        (round == I64{8}) -> I64{0x000000000000008a}
+        (round == I64{9}) -> I64{0x0000000000000088}
+        (round == I64{10}) -> I64{0x0000000080008009}
+        (round == I64{11}) -> I64{0x000000008000000a}
+        (round == I64{12}) -> I64{0x000000008000808b}
+        (round == I64{13}) -> rt_crypto_word64(I64{0x80000000}, I64{0x0000008b})
+        (round == I64{14}) -> rt_crypto_word64(I64{0x80000000}, I64{0x00008089})
+        (round == I64{15}) -> rt_crypto_word64(I64{0x80000000}, I64{0x00008003})
+        (round == I64{16}) -> rt_crypto_word64(I64{0x80000000}, I64{0x00008002})
+        (round == I64{17}) -> rt_crypto_word64(I64{0x80000000}, I64{0x00000080})
+        (round == I64{18}) -> I64{0x000000000000800a}
+        (round == I64{19}) -> rt_crypto_word64(I64{0x80000000}, I64{0x8000000a})
+        (round == I64{20}) -> rt_crypto_word64(I64{0x80000000}, I64{0x80008081})
+        (round == I64{21}) -> rt_crypto_word64(I64{0x80000000}, I64{0x00008080})
+        (round == I64{22}) -> I64{0x0000000080000001}
+        else -> rt_crypto_word64(I64{0x80000000}, I64{0x80008008})
+    }
+}
+fn rt_keccak_rotl(value: I64, count: I64) -> I64 {
+    if (count == I64{0}) -> return value
+    return (value << count).bit_or(rt_crypto_shr64(value, I64{64} - count))
+}
+fn rt_keccak_f(state: I64) {
+    column :: state + I64{200}
+    permuted :: state + I64{240}
+    round := I64{0}
+    loop round < (I64{24}) {
+        x := I64{0}
+        loop x < (I64{5}) {
+            rt_text_store(column + x * I64{8}, rt_text_word(state + x * I64{8}).bit_xor(rt_text_word(state + (x + I64{5}) * I64{8})).bit_xor(rt_text_word(state + (x + I64{10}) * I64{8})).bit_xor(rt_text_word(state + (x + I64{15}) * I64{8})).bit_xor(rt_text_word(state + (x + I64{20}) * I64{8})))
+            x += I64{1}
+        }
+        x = I64{0}
+        loop x < (I64{5}) {
+            delta :: rt_text_word(column + ((x + I64{4}) % I64{5}) * I64{8}).bit_xor(rt_keccak_rotl(rt_text_word(column + ((x + I64{1}) % I64{5}) * I64{8}), I64{1}))
+            y := I64{0}
+            loop y < (I64{5}) {
+                p :: state + (x + I64{5} * y) * I64{8}
+                rt_text_store(p, rt_text_word(p).bit_xor(delta))
+                y += I64{1}
+            }
+            x += I64{1}
+        }
+        y := I64{0}
+        loop y < (I64{5}) {
+            x = I64{0}
+            loop x < (I64{5}) {
+                index :: x + I64{5} * y
+                target :: y + I64{5} * ((I64{2} * x + I64{3} * y) % I64{5})
+                rt_text_store(permuted + target * I64{8}, rt_keccak_rotl(rt_text_word(state + index * I64{8}), rt_keccak_rot(index)))
+                x += I64{1}
+            }
+            y += I64{1}
+        }
+        y = I64{0}
+        loop y < (I64{5}) {
+            x = I64{0}
+            loop x < (I64{5}) {
+                lane :: rt_text_word(permuted + (x + I64{5} * y) * I64{8})
+                left :: rt_text_word(permuted + ((x + I64{1}) % I64{5} + I64{5} * y) * I64{8})
+                right :: rt_text_word(permuted + ((x + I64{2}) % I64{5} + I64{5} * y) * I64{8})
+                rt_text_store(state + (x + I64{5} * y) * I64{8}, lane.bit_xor(((left.bit_xor(I64{-1})).bit_and(right))))
+                x += I64{1}
+            }
+            y += I64{1}
+        }
+        rt_text_store(state, rt_text_word(state).bit_xor(rt_keccak_rc(round)))
+        round += I64{1}
+    }
+}
+// Private valid rates/output pairs only; borrowed input/output disjoint from
+// exclusive scratch440. Final absorption is virtual, not a copied block.
+// Canonical FIPS202 padding intentionally differs from the KNOWN SEED BUG at
+// length%rate==rate-1: domain0x06 and final0x80 combine into one byte0x86.
+fn rt_crypto_sha3(input: I64, length: I64, rate: I64, output: I64, count: I64, scratch: I64) {
+    rt_crypto_wipe(scratch, I64{440})
+    at := I64{0}
+    loop {
+        remaining :: length - at
+        full :: remaining >= rate
+        lane := I64{0}
+        loop lane < (rate / I64{8}) {
+            word := I64{0}
+            b := I64{0}
+            loop b < (I64{8}) {
+                index :: lane * I64{8} + b
+                byte := if (index < remaining) -> rt_text_byte(input + at + index) else -> I64{0}
+                if !full {
+                    if (index == remaining) -> byte = byte.bit_or(I64{6})
+                    if (index == rate - I64{1}) -> byte = byte.bit_or(I64{128})
+                }
+                word = word.bit_or((byte << (b * I64{8})))
+                b += I64{1}
+            }
+            p :: scratch + lane * I64{8}
+            rt_text_store(p, rt_text_word(p).bit_xor(word))
+            lane += I64{1}
+        }
+        rt_keccak_f(scratch)
+        if !full -> break
+        at += rate
+    }
+    // Native target is little-endian x86_64; state lanes are LE digest bytes.
+    rt_text_bytes_copy(output, scratch, count)
+    rt_crypto_wipe(scratch, I64{440})
+}
+fn rt_crypto_sha3_224(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_crypto_sha3(input, length, I64{144}, output, I64{28}, scratch)
+}
+fn rt_crypto_sha3_256(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_crypto_sha3(input, length, I64{136}, output, I64{32}, scratch)
+}
+fn rt_crypto_sha3_384(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_crypto_sha3(input, length, I64{104}, output, I64{48}, scratch)
+}
+fn rt_crypto_sha3_512(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_crypto_sha3(input, length, I64{72}, output, I64{64}, scratch)
+}

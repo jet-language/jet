@@ -11,9 +11,68 @@ package {
 }
 // core.devtools — the typed inspector publication boundary.
 //
-// The checked `field:`/`value:` form is lowered with package, module, and
-// panel identity into the host's canonical `jet.devtools.v1` event. The
-// provider validates and constructs that event before fanning it out to every
-// installed sink. This unit-returning API does not claim durable delivery:
-// when no sink is installed, observation is explicitly unavailable rather
-// than reported as a successful persisted write.
+// The checked `field:`/`value:` form supplies package/module/panel identity.
+// Source owns the canonical identity and escaped field envelope. The raw leaf
+// only attaches the existing typed payload to the validated event and fans
+// it out through the existing global sink; no sink means no durable delivery.
+
+use core as core
+
+// The first three strings are the existing checked publication ABI facts,
+// not user labels. The public field/value check still runs before lowering.
+fn json_escape(text: String) -> String Never! {
+    bytes :: text.bytes()
+    escaped := [U8]{}
+    hex :: "0123456789abcdef".bytes()
+    index := 0
+    loop {
+        if index == bytes.len() -> break
+        byte :: Int.from_u8(bytes[index])
+        control := byte < 32 || byte == 127
+        scalar := byte
+        if byte == 194 && index + 1 < bytes.len() {
+            next :: Int.from_u8(bytes[index + 1])
+            if next >= 128 && next <= 159 {
+                control = true
+                scalar = next
+                index += 1
+            }
+        }
+        piece :: if {
+            byte == 34 -> "\\\""
+            byte == 92 -> "\\\\"
+            byte == 10 -> "\\n"
+            byte == 13 -> "\\r"
+            byte == 9 -> "\\t"
+            control -> "\\u00{String.from_bytes([U8]{hex[scalar /% 16], hex[scalar %% 16]}) ?? panic("ASCII escape")}"
+            else -> ""
+        }
+        if piece.bytes().len() == 0 {
+            &escaped.push(bytes[index])
+        } else {
+            loop part in piece.bytes() -> &escaped.push(part)
+        }
+        index += 1
+    }
+    String.from_bytes(escaped) ?? panic("escaping preserves UTF-8")
+}
+
+fn envelope_fields(package: String, module_name: String, panel: String, field: String) -> String Never! {
+    "{{\"package\":\"{json_escape(package)}\",\"module\":\"{json_escape(module_name)}\",\"panel\":\"{json_escape(panel)}\",\"field\":\"{json_escape(field)}\"}}"
+}
+
+fn publish<T>(package: String, module_name: String, panel: String, field: String, value: T) Never! {
+    source :: "{package}::{module_name}"
+    entity :: "{source}::{panel}"
+    fields :: envelope_fields(package, module_name, panel, field)
+    core.devtools.__publish_payload(^source, ^entity, ^fields, ^field, ^value)
+}
+
+#Test("devtools identity field envelope has canonical order and exact escapes") {
+    assert_eq(envelope_fields("pkg", "mod", "panel", "field"),
+        "{{\"package\":\"pkg\",\"module\":\"mod\",\"panel\":\"panel\",\"field\":\"field\"}}")
+    controls :: String.from_bytes([U8]{U8{1}, U8{127}, U8{194}, U8{133}, U8{195}, U8{169}}) ?? panic("control fixture")
+    panel :: String.from_bytes([U8]{U8{120}, U8{13}, U8{9}}) ?? panic("panel fixture")
+    assert_eq(envelope_fields("p\"\\", "m\n", panel, controls),
+        "{{\"package\":\"p\\\"\\\\\",\"module\":\"m\\n\",\"panel\":\"x\\r\\t\",\"field\":\"\\u0001\\u007f\\u0085é\"}}")
+}

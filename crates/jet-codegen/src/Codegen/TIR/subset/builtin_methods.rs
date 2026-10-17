@@ -109,7 +109,7 @@ pub(crate) fn is_covered_builtin_name(method: &str, nargs: usize) -> bool {
         | ("write_bytes", 1) | ("write", 1)
         | ("position", 0) | ("eof", 0) | ("rewind", 0) | ("flush", 0) | ("close", 0)
         | ("shutdown", 0) | ("get_buffer", 0) | ("buffer", 0) | ("string", 0)
-        | ("title", 0) | ("clone", 0) | ("copy", 0) | ("read", 0)
+        | ("title", 0) | ("clone", 0) | ("read", 0)
         | ("seek", 1) | ("read_bytes", 1) | ("read_string", 1)
         | ("last_index_of", 1) | ("equal", 1) | ("compare", 1) | ("copy_to", 1)
         | ("binary_search", 1) | ("random", 0) | ("min_max", 0) | ("slice", 1)
@@ -702,24 +702,6 @@ pub fn is_civil_time_method_name(recv_type: Option<&str>, method: &str) -> bool 
     }
 }
 
-/// D-APPROX1=A: is this a sketch receiver type?
-pub(crate) fn is_sketch_type(recv_type: Option<&str>) -> bool {
-    matches!(
-        recv_type,
-        Some("HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler")
-    )
-}
-
-/// D-APPROX1=A: is `method` a valid method for this sketch type?
-pub(crate) fn is_sketch_method_name(recv_type: Option<&str>, method: &str) -> bool {
-    match recv_type {
-        Some("HyperLogLog") => matches!(method, "add" | "count"),
-        Some("TDigest") => matches!(method, "add" | "quantile"),
-        Some("CountMinSketch") => matches!(method, "add" | "count"),
-        Some("ReservoirSampler") => matches!(method, "add" | "sample"),
-        _ => false,
-    }
-}
 
 /// Resolve a numeric receiver query into a total TIR operation.
 pub(crate) fn resolve_numeric_op(method: &str, src_name: &str, line: u32) -> Option<TNumericOp> {
@@ -836,7 +818,7 @@ fn numeric_host_kind(signed: bool, bits: u8) -> Option<i64> {
     })
 }
 
-fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>)> {
+pub(crate) fn numeric_rust_type_tir(name: &str) -> Option<(&'static str, Option<(bool, u8)>)> {
     Some(match name {
         "I8" => ("i8", Some((true, 8))),
         "I16" => ("i16", Some((true, 16))),
@@ -881,6 +863,10 @@ pub(crate) fn parse_int_name_tir(name: &str) -> Option<(bool, u8)> {
 /// `recv_type.is_none()` gate — it must be covered here as a distinct op.
 pub(crate) fn is_covered_numeric_method(method: &str, nargs: usize) -> bool {
     crate::Collections::numeric_overflow_method(method, nargs).is_some()
+        || matches!(
+            (method, nargs),
+            ("bit_not", 0) | ("bit_and" | "bit_or" | "bit_xor" | "pow", 1)
+        )
         || (nargs == 1
             && matches!(
                 method,

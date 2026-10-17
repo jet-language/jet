@@ -1,0 +1,40 @@
+// Pure helper input fixtures use the production signature carriers.
+fn rust_foreign_fixture_function(name: String, path: String) -> JetDriverRustForeignFunction Never! {
+    JetDriverRustForeignFunction{name: name, params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "s", ty: Type.String}}, return_type: Val(Type.String), rust_path: path, generated: false, close: None}
+}
+fn rust_foreign_fixture_scalar(name: String, ty: Type) -> JetDriverRustForeignEntry Never! {
+    JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: name, params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "value", ty: ty}}, return_type: Val(ty), rust_path: "std::convert::identity", generated: false, close: None}}
+}
+fn rust_foreign_fixture_facts(name: String) -> JetDriverRustForeignFacts Never! {
+    entries := [JetDriverRustForeignEntry]{JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "base64@0.22", declaration: rust_foreign_fixture_function(name, "base64::encode")}}
+    &entries.push(rust_foreign_fixture_scalar("identity_bool", Type.Bool))
+    &entries.push(rust_foreign_fixture_scalar("identity_char", Type.Char))
+    &entries.push(rust_foreign_fixture_scalar("identity_u32", Type.IntN{signed: false, bits: 32}))
+    &entries.push(rust_foreign_fixture_scalar("identity_f64", Type.Float))
+    &entries.push(rust_foreign_fixture_scalar("identity_f32", Type.Float32))
+    &entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "maximum", params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "a", ty: Type.Int}, JetDriverRustForeignParam{convention: AccessConvention.Read, name: "b", ty: Type.Int}}, return_type: Val(Type.Int), rust_path: "std::cmp::max", generated: false, close: None}})
+    &entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "spin", params: [], return_type: None, rust_path: "std::hint::spin_loop", generated: false, close: None}})
+    &entries.push(JetDriverRustForeignEntry{module_identity: "fixture", crate_spec: "std", declaration: JetDriverRustForeignFunction{name: "panic_foreign", params: [JetDriverRustForeignParam]{JetDriverRustForeignParam{convention: AccessConvention.Read, name: "message", ty: Type.String}}, return_type: None, rust_path: "std::panic::panic_any", generated: false, close: None}})
+    JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: [String:String]{}}
+}
+fn run() {
+    facts :: rust_foreign_fixture_facts("b64encode")
+    plan :: jet_driver_rust_foreign_plan(facts, "rustc\nfixture-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("helper plan: {err}")
+    assert(plan.key.len() == 64 && plan.shared_key.len() == 64)
+    assert(plan.dependencies.len() == 1 && plan.dependencies[0].name == "base64" && plan.dependencies[0].version == "0.22")
+    assert(plan.manifest.contains("crate-type = [\"staticlib\"]"))
+    assert(plan.source.contains("base64::encode(p0)"))
+    assert(plan.source.contains("jet_ffi_b64encode_cabi"))
+    assert(plan.source.contains("String::from_utf8(p0_bytes)"))
+    assert(plan.source.contains("jet_ffi_cabi_free"))
+    assert(plan.source.contains("JET_FFI_PANIC_BOUNDARY_DEPTH"))
+    other :: jet_driver_rust_foreign_plan(rust_foreign_fixture_facts("other"), "rustc\nfixture-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("other helper")
+    assert(plan.key != other.key && plan.shared_key == other.shared_key)
+    changed :: jet_driver_rust_foreign_plan(facts, "changed-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("changed helper")
+    assert(plan.key != changed.key && plan.shared_key != changed.shared_key)
+    print("FFI helper fixtures passed")
+    print("---JET-FFI-MANIFEST---")
+    print(plan.manifest)
+    print("---JET-FFI-SOURCE---")
+    print(plan.source)
+}

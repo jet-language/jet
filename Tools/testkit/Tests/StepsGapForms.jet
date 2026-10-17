@@ -1,0 +1,88 @@
+use core.files as files
+
+#Test("apply-edits uses published spans descending byte offsets across multiple files") {
+    root :: cases_test_root("gap-apply-edits")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "edits"), "{{\"fix_edits\":[{{\"file\":\"one\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"long\"}},{{\"file\":\"two\",\"span\":{{\"start\":0,\"end\":2}},\"new_text\":\"é\"}},{{\"file\":\"one\",\"span\":{{\"start\":4,\"end\":5}},\"new_text\":\"Z\"}}]}}")
+    prefix :: "write: one = \"ABCDE\"\nwrite: two = \"xy!\"\n"
+    source :: "{prefix}step: cat\nstdin: edits\napply-edits: stdout doc $.fix_edits\nfile: one = \"AlongDZ\"\nfile: two = \"é!\"\n"
+    assert_eq(cases_test_advanced(root, "descending", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}file: one = \"wrong\"\n").verdict.status, "FAIL")
+    file_source :: "{prefix}write: edits edits\napply-edits: file edits doc $.fix_edits\nfile: one = \"AlongDZ\"\n"
+    assert_eq(cases_test_advanced(root, "file-selector", file_source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "grammar", "apply-edits: stdout ndjson $\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove apply edits scratch")
+}
+
+#Test("apply-edits rejects invalid overlapping and non-boundary spans with FAIL") {
+    root :: cases_test_root("gap-invalid-edits")
+    directory :: files.join(root, "tests/cases/group")
+    rows :: [
+        "[{{\"file\":\"one\",\"span\":{{\"start\":0,\"end\":99}},\"new_text\":\"x\"}}]",
+        "[{{\"file\":\"one\",\"span\":{{\"start\":3,\"end\":2}},\"new_text\":\"x\"}}]",
+        "[{{\"file\":\"one\",\"span\":{{\"start\":-1,\"end\":2}},\"new_text\":\"x\"}}]",
+        "[{{\"file\":\"one\",\"span\":{{\"start\":1,\"end\":3}},\"new_text\":\"x\"}},{{\"file\":\"one\",\"span\":{{\"start\":2,\"end\":4}},\"new_text\":\"y\"}}]",
+        "[{{\"file\":\"one\",\"start\":0,\"end\":1,\"new_text\":\"x\"}}]",
+        "[{{\"file\":\"../escape\",\"span\":{{\"start\":0,\"end\":1}},\"new_text\":\"x\"}}]"
+    ]
+    loop (index, row) in rows {
+        kit_exec_write(files.join(directory, "edits"), row)
+        source :: "write: one = \"ABCDE\"\nwrite: edits edits\napply-edits: file edits doc $\n"
+        assert_eq(cases_test_advanced(root, "invalid-{index}", source).verdict.status, "FAIL")
+    }
+    kit_exec_write(files.join(directory, "edits"), "[{{\"file\":\"one\",\"span\":{{\"start\":1,\"end\":2}},\"new_text\":\"x\"}}]")
+    assert_eq(cases_test_advanced(root, "unicode-boundary", "write: one = \"é!\"\nwrite: edits edits\napply-edits: file edits doc $\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "empty", "write: edits = \"[]\"\napply-edits: file edits doc $\n").verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove invalid edits scratch")
+}
+
+#Test("absolute elapsed bounds judge real receipts without killing the process") {
+    root :: cases_test_root("gap-elapsed-absolute")
+    prefix :: "step measured: printf done\nstdout: = \"done\"\n"
+    loop predicate in ["< 1m", "<= 1m", "> 0ns", ">= 0ns"] {
+        assert_eq(cases_test_advanced(root, "bound", "{prefix}elapsed: measured {predicate}\n").verdict.status, "PASS")
+    }
+    loop predicate in ["< 0ns", "<= 0ns", "> 1m", ">= 1m", "= 0ns"] {
+        assert_eq(cases_test_advanced(root, "failed", "{prefix}elapsed: measured {predicate}\n").verdict.status, "FAIL")
+    }
+    loop predicate in ["unknown < 1s", "measured < -1s", "measured == 1s", "measured < 1day"] {
+        assert_eq(cases_test_advanced(root, "invalid", "{prefix}elapsed: {predicate}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove absolute elapsed scratch")
+}
+
+#Test("build-target tokens precisely refuse the seam but quoted normalizer text stays literal") {
+    root :: cases_test_root("gap-build-target")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "template"), "{{jet-build-target}}")
+    sources :: [
+        "step: printf '%s' {{jet-build-target}}\n",
+        "step: printf ignored\nenv: TARGET={{jet-build-target}}\n",
+        "step: printf ignored\nstdout: = \"{{jet-build-target}}\"\n",
+        "write: target template\n",
+        "requires: probe printf '%s' {{jet-build-target}}\nstep: printf ignored\n"
+    ]
+    loop source in sources {
+        result :: cases_test_advanced(root, "refused", source)
+        assert_eq(result.verdict.status, "REFUSED")
+        assert_eq(result.verdict.detail, "build-target")
+    }
+    literal :: "step: printf TOKEN\nnormalize: replace \"TOKEN\" \"{{jet-build-target}}\"\nstdout: ~ \"jet-build-target\" # original predicate\n"
+    assert_eq(cases_test_advanced(root, "literal", literal).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove build target scratch")
+}
+
+#Test("poke hexadecimal and xor update raw bytes with mid offsets and share hex validation") {
+    root :: cases_test_root("gap-poke")
+    source :: "write: data = \"ABCDE\"\npoke: data at 1 hex \"78\"\npoke: data at mid xor \"01\"\nfile: data = \"AxBDE\"\npoke: data at 4 hex \"6a\"\nfile: data = \"AxBDj\"\nstep: printf 6A\nstdout: each-line hex # original predicate\n"
+    assert_eq(cases_test_advanced(root, "bytes", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}file: data = \"wrong\"\n").verdict.status, "FAIL")
+    loop arg in ["f", "gg", "é0"] {
+        result :: cases_test_advanced(root, "bad-hex", "write: data = \"ABC\"\npoke: data at 0 hex \"{arg}\"\n")
+        assert_eq(result.verdict.status, "ERROR")
+        assert(result.verdict.detail.contains(arg))
+    }
+    assert_eq(cases_test_advanced(root, "overrun", "write: data = \"A\"\npoke: data at 1 hex \"ff\"\n").verdict.status, "ERROR")
+    assert_eq(cases_test_advanced(root, "negative", "write: data = \"A\"\npoke: data at -1 hex \"ff\"\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove poke scratch")
+}

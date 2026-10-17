@@ -1,0 +1,464 @@
+// U2-T1: tests run with the canonical JetFoundation/JetLexer unit sources.
+// Reused origin/port/compiler@371361c3e Entry.jet and Payload01.jet controls;
+// inputs and assertions are preserved from the Rust source tags below.
+// Rust-only scoped-driver/unwind, mutation injection and cross-tier orchestration
+// in tests/selfhost_terminators.rs:197-386 stay outside this source-lexer suite.
+
+fn lexer_test_raw(source: String) -> Lexed { lex_payload(source.bytes(), false) }
+
+// Rust inputs contain byte 13; Jet deliberately has no \r string escape.
+fn lexer_test_cr() -> String Never! { String.from_bytes([U8]{13}) ?? panic("ASCII carriage return") }
+
+fn lexer_test_strings(tokens: [Token]) -> [[StringPart]] Never! {
+    strings := [[StringPart]]{}
+    loop token in tokens {
+        if token.kind == TOKEN_STRING -> &strings.push(token.payload.string_parts.copy())
+    }
+    strings
+}
+
+fn lexer_test_text(parts: [StringPart], expected: String) -> Bool Never! {
+    parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text == expected
+}
+
+fn lexer_test_hole(parts: [StringPart]) -> Bool Never! {
+    loop part in parts {
+        if part.kind == STRING_PART_INTERPOLATION -> return true
+    }
+    false
+}
+
+fn lexer_test_first_string(source: String) -> String Never! {
+    lexed :: lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    strings :: lexer_test_strings(lexed.tokens)
+    assert(strings.len() > 0)
+    parts :: strings[0]
+    assert(parts.len() == 1 && parts[0].kind == STRING_PART_TEXT)
+    parts[0].text.copy()
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:15
+#Test("spaceship_is_one_longest_match_before_le") {
+    lexed :: lex("a <=> b <= c".bytes())
+    assert(lexed.diagnostics.is_empty())
+    tokens :: lexed.tokens
+    assert(tokens[1].kind == TOKEN_COMPARE)
+    assert_eq(tokens[1].span.end - tokens[1].span.start, 3)
+    assert(tokens[3].kind == TOKEN_LE)
+    assert_eq(tokens[3].span.end - tokens[3].span.start, 2)
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:45
+#Test("typed_head_keeps_backslash_literal") {
+    assert_eq(lexer_test_first_string(`Regex.{"\d+"}`), `\d+`)
+    assert_eq(lexer_test_first_string(`Regex.{"a\nb"}`), `a\nb`)
+    assert_eq(lexer_test_first_string(`"a\nb"`), "a\nb")
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:52
+#Test("typed_head_quote_stays_in_body_when_slashed") {
+    assert_eq(lexer_test_first_string(`Regex.{"a\"b"}`), `a\"b`)
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:57
+#Test("typed_head_doubled_braces_stay_literal") {
+    assert_eq(lexer_test_first_string(`Regex.{"\d{{2}}"}`), `\d{2}`)
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:62
+#Test("typed_head_holes_still_split_interpolation") {
+    lexed :: lex(`URL.{"https://x/{name}"}`.bytes())
+    assert(lexed.diagnostics.is_empty())
+    strings :: lexer_test_strings(lexed.tokens)
+    assert_eq(strings.len(), 1)
+    parts :: strings[0]
+    assert(parts.len() == 2 && parts[0].kind == STRING_PART_TEXT && parts[1].kind == STRING_PART_INTERPOLATION && parts[0].text == "https://x/")
+}
+
+// Rust: crates/jet-lexer/src/lib.rs:83
+#Test("plain_string_still_rejects_unknown_escapes") {
+    lexed :: lexer_test_raw(`"C:\path"`)
+    found := false
+    loop diagnostic in lexed.diagnostics {
+        if diagnostic.what.contains("isn't an escape") -> found = true
+    }
+    assert(found)
+}
+
+// Reuses origin/port/compiler Payload01.jet and Strings.jet Scan controls.
+struct LexerTestDelimiterCase { source: String, runs: [Span] }
+
+fn lexer_test_delimiter_cases() -> [LexerTestDelimiterCase] Never! {
+    [LexerTestDelimiterCase]{
+        LexerTestDelimiterCase{source: "\"\"\"Hello\n    kept\n    \"\"\"", runs: [Span]{Span{start: 3, end: 8}}},
+        LexerTestDelimiterCase{source: "\"\"\"\n    kept\n    end\"\"\"", runs: [Span]{Span{start: 17, end: 20}}},
+        LexerTestDelimiterCase{source: "\"\"\"Hello\n    kept\n    end\"\"\"", runs: [Span]{Span{start: 3, end: 8}, Span{start: 22, end: 25}}},
+        LexerTestDelimiterCase{source: "\"\"\"abc\"\"\"", runs: [Span]{Span{start: 3, end: 6}, Span{start: 3, end: 6}}},
+        LexerTestDelimiterCase{source: "\"\"\"{{name}}\nkept\n\"\"\"", runs: [Span]{Span{start: 3, end: 9}}},
+        LexerTestDelimiterCase{source: "\"\"\" \té😀 rest\nkept\n\"\"\"", runs: [Span]{Span{start: 5, end: 11}}},
+        LexerTestDelimiterCase{source: "SQL{{\"\"\"query\nkept\n\"\"\"}}", runs: [Span]{Span{start: 7, end: 12}}},
+        LexerTestDelimiterCase{source: "\"\"\"{lexer_test_cr()}stray\nkept\n\"\"\"", runs: [Span]{Span{start: 3, end: 9}}},
+    }
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1062
+#Test("triple_delimiter_text_has_exact_run_spans_and_keeps_recovery_text") {
+    loop row in lexer_test_delimiter_cases() {
+        lexed :: lexer_test_raw(row.source)
+        assert_eq(lexed.diagnostics.len(), row.runs.len())
+        loop (index, diagnostic) in lexed.diagnostics {
+            assert_eq(diagnostic.code, "E0084")
+            assert_eq(diagnostic.span, Val(row.runs[index]))
+            assert(diagnostic.fix.contains("ordinary string"))
+            assert(diagnostic.fix.contains("backtick raw string"))
+        }
+        assert(lexer_test_strings(lexed.tokens).len() > 0)
+    }
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1086
+#Test("triple_delimiter_whitespace_crlf_and_foreign_bodies_are_legal") {
+    sources :: [String]{
+        "\"\"\"   \nhello\n   \"\"\" }}",
+        "\"\"\"\t\t\nhello\n\t\t\"\"\"",
+        "\"\"\" \t{lexer_test_cr()}\nhello{lexer_test_cr()}\n \t\"\"\"",
+        "SQL{{\"\"\"\nhello\n\"\"\"}}",
+    }
+    loop source in sources {
+        lexed :: lexer_test_raw(source)
+        assert(lexed.diagnostics.is_empty())
+        expected :: if source.contains(lexer_test_cr()) -> "hello{lexer_test_cr()}" else -> "hello"
+        assert(lexer_test_text(lexer_test_strings(lexed.tokens)[0], expected))
+    }
+    languages :: [String]{"c", "cpp", "asm"}
+    loop lang in languages {
+        lexed :: lexer_test_raw("#FFI({lang}) fn foreign() {{ \"\"\"text {{value}} \\raw\"\"\" }}")
+        assert(lexed.diagnostics.is_empty())
+        assert(lexer_test_text(lexer_test_strings(lexed.tokens)[0], `text {value} \raw`))
+    }
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1116
+#Test("raw_foreign_body_marker_does_not_capture_a_later_function") {
+    source :: `#FFI(c) fn foreign() -> Int {
+    """int64_t foreign(void) { return 1; }"""
+}
+
+fn ordinary(value: Int) {
+    text :: """
+value={value}
+"""
+}`
+    lexed :: lexer_test_raw(source)
+    assert(lexed.diagnostics.is_empty())
+    strings :: lexer_test_strings(lexed.tokens)
+    assert_eq(strings.len(), 2)
+    assert(strings[0].len() == 1 && strings[0][0].kind == STRING_PART_TEXT)
+    assert(lexer_test_hole(strings[1]))
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1146
+#Test("grouped_ffi_marker_keeps_foreign_body_raw") {
+    source :: `#[Unsafe("scalar registers"), FFI(asm)]
+fn add(a: Int, b: Int) -> Int {
+    """add {a}, {b} ; -> return"""
+}`
+    lexed :: lexer_test_raw(source)
+    assert(lexed.diagnostics.is_empty())
+    found := false
+    loop parts in lexer_test_strings(lexed.tokens) {
+        if parts.len() == 1 && parts[0].kind == STRING_PART_TEXT && parts[0].text.contains("-> return") -> found = true
+    }
+    assert(found)
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1165
+#Test("adjacent_ffi_markers_keep_foreign_body_raw_in_both_orders") {
+    sources :: [String]{
+        `#Unsafe("registers") #FFI(asm) fn add() { """add {a}, {b}""" }`,
+        `#FFI(asm) #Unsafe("registers") fn add() { """add {a}, {b}""" }`,
+    }
+    loop source in sources {
+        lexed :: lexer_test_raw(source)
+        assert(lexed.diagnostics.is_empty())
+        assert(lexer_test_text(lexer_test_strings(lexed.tokens)[1], `add {a}, {b}`))
+    }
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1181
+#Test("grouped_ffi_argument_name_does_not_make_an_ordinary_body_raw") {
+    source :: "#[Meta(category: FFI(asm)), Task] fn work() {{ text :: \"\"\"\nvalue={{value}}\n\"\"\" }}"
+    lexed :: lexer_test_raw(source)
+    assert(lexed.diagnostics.is_empty())
+    assert(lexer_test_hole(lexer_test_strings(lexed.tokens)[0]))
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1197
+#Test("typed_head_bodies_keep_backslashes_and_shared_holes_but_plain_strings_decode_them") {
+    source :: `plain :: "\n"
+pattern :: Regex.{"\n{{literal}}-{value}"}
+multiline :: Path.{"""
+\logs\app
+"""}`
+    lexed :: lexer_test_raw(source)
+    assert(lexed.diagnostics.is_empty())
+    strings :: lexer_test_strings(lexed.tokens)
+    assert_eq(strings.len(), 3)
+    assert(lexer_test_text(strings[0], "\n"))
+    assert(strings[1].len() == 2 && strings[1][0].kind == STRING_PART_TEXT && strings[1][0].text == `\n{literal}-`)
+    assert_eq(strings[1][1].kind, STRING_PART_INTERPOLATION)
+    assert(lexer_test_text(strings[2], `\logs\app`))
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1228
+#Test("typed_head_lookbehind_preserves_comments_incomplete_and_byte_heads") {
+    prefix_count :: 128
+    source := ""
+    loop index in 0..<prefix_count -> source = "{source}prefix{index} :: \"prefix\"; "
+    tail :: `
+ordinary :: "\n"
+raw_dot :: Regex /* block */ . // line comment
+{ /* block */ "\n" }
+raw_name :: Regex /* block */ { // line comment
+"\n" }
+ordinary_lower :: regex /* block */ { /* block */ "\n" }
+incomplete_raw :: Regex /* block */ . /* block */ "\n"
+byte :: [ /* block */ U8 // line comment
+] /* block */ { /* block */ "\x41" }
+byte_fixed :: [ /* block */ U8 /* block */ # /* block */ 8 /* block */ ] /* block */ { /* block */ "\x42" }
+`
+    lexed :: lexer_test_raw("{source}{tail}")
+    assert(lexed.diagnostics.is_empty())
+    strings :: lexer_test_strings(lexed.tokens)
+    assert_eq(strings.len(), prefix_count + 7)
+    assert(lexer_test_text(strings[prefix_count], "\n"))
+    assert(lexer_test_text(strings[prefix_count + 1], `\n`))
+    assert(lexer_test_text(strings[prefix_count + 2], `\n`))
+    assert(lexer_test_text(strings[prefix_count + 3], "\n"))
+    assert(lexer_test_text(strings[prefix_count + 4], "\n"))
+    first :: strings[prefix_count + 5]
+    second :: strings[prefix_count + 6]
+    assert(first.len() == 1 && first[0].kind == STRING_PART_BYTE && first[0].byte == 0x41)
+    assert(second.len() == 1 && second[0].kind == STRING_PART_BYTE && second[0].byte == 0x42)
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1284 (stale no-diagnostics assert;
+// current lex_raw emits E0003 and $layout, D-META-ROOT3=A).
+#Test("at_distinguishes_prefix_package_ref_and_fence") {
+    lexed :: lexer_test_raw("foo@bar @baz T.@layout <:0, 1:> $build T.$layout a$b $[x]$")
+    assert_eq(lexed.diagnostics.len(), 1)
+    assert_eq(lexed.diagnostics[0].code, "E0003")
+    assert_eq(lexed.diagnostics[0].span, Val(Span{start: 15, end: 22}))
+    edit :: lexed.diagnostics[0].edit ?? panic("retired layout edit")
+    assert_eq(edit.new_text, "$layout")
+    tokens :: lexed.tokens
+    assert(tokens[0].kind == TOKEN_IDENT && tokens[0].payload.decoded == "foo")
+    assert_eq(tokens[1].kind, TOKEN_AT)
+    assert(tokens[2].kind == TOKEN_IDENT && tokens[2].payload.decoded == "bar")
+    assert(tokens[3].kind == TOKEN_IDENT && tokens[3].payload.decoded == "@baz")
+    assert(tokens[4].kind == TOKEN_IDENT && tokens[4].payload.decoded == "T")
+    assert_eq(tokens[5].kind, TOKEN_DOT)
+    assert(tokens[6].kind == TOKEN_IDENT && tokens[6].payload.decoded == "$layout")
+    assert_eq(tokens[7].kind, TOKEN_FENCE_OPEN)
+    assert_eq(tokens[11].kind, TOKEN_FENCE_CLOSE)
+    assert(tokens[12].kind == TOKEN_IDENT && tokens[12].payload.decoded == "$build")
+    assert(tokens[13].kind == TOKEN_IDENT && tokens[13].payload.decoded == "T")
+    assert_eq(tokens[14].kind, TOKEN_DOT)
+    assert(tokens[15].kind == TOKEN_IDENT && tokens[15].payload.decoded == "$layout")
+    assert(tokens[16].kind == TOKEN_IDENT && tokens[16].payload.decoded == "a")
+    assert_eq(tokens[17].kind, TOKEN_DOLLAR)
+    assert(tokens[18].kind == TOKEN_IDENT && tokens[18].payload.decoded == "b")
+    assert_eq(tokens[19].kind, TOKEN_DOLLAR)
+    assert_eq(tokens[20].kind, TOKEN_LBRACKET)
+    assert_eq(tokens[22].kind, TOKEN_RBRACKET)
+    assert_eq(tokens[23].kind, TOKEN_DOLLAR)
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1316
+#Test("fence_digraphs_are_longest_match_beside_comparisons_and_generics") {
+    lexed :: lexer_test_raw("<: a :> x < y x <= y x <=> y x > y List<Int> a::b c:=d e:f")
+    assert(lexed.diagnostics.is_empty())
+    kinds := [Int]{}
+    loop token in lexed.tokens {
+        if token.kind != TOKEN_IDENT && token.kind != TOKEN_EOF -> &kinds.push(token.kind)
+    }
+    assert_eq(kinds, [Int]{TOKEN_FENCE_OPEN, TOKEN_FENCE_CLOSE, TOKEN_LT, TOKEN_LE, TOKEN_COMPARE, TOKEN_GT, TOKEN_LT, TOKEN_GT, TOKEN_COLON_COLON, TOKEN_COLON_EQ, TOKEN_COLON})
+}
+
+// Rust: crates/jet-lexer/src/Lexer/Scan.rs:1347
+#Test("retired_fence_digraphs_teach_the_new_spelling_with_edits") {
+    lexed :: lexer_test_raw("print(@[ a, b ]@) x:]@")
+    edits := [String]{}
+    loop diagnostic in lexed.diagnostics {
+        assert_eq(diagnostic.code, "E-FENCE-SPELLING")
+        edit :: diagnostic.edit ?? panic("fence respelling edit")
+        &edits.push(edit.new_text.copy())
+    }
+    assert_eq(edits, [String]{"<:", ":>", " :>"})
+    assert_eq(lexed.tokens[2].kind, TOKEN_FENCE_OPEN)
+    assert_eq(lexed.tokens[6].kind, TOKEN_FENCE_CLOSE)
+}
+
+// Rust: tests/selfhost_terminators.rs:387-438
+#Test("payload_golden_whitespace_exponents_and_shifted_spans") {
+    raw := [U8]{9, 11, 12, 13, 10, 32, 32}
+    loop byte in `1_2.5e-1 1.25e+1 3.5E-1 3.25E+1 "prefix {1.25e-2} suffix"`.bytes() -> &raw.push(byte)
+    result :: lex_payload(raw, false)
+    assert(result.diagnostics.is_empty())
+    assert_eq(result.tokens.len(), 6)
+    starts :: [Int]{7, 16, 24, 31}
+    ends :: [Int]{15, 23, 30, 38}
+    spellings :: [String]{"1_2.5e-1", "1.25e+1", "3.5E-1", "3.25E+1"}
+    decimals :: [Float]{1.25, 12.5, 0.35, 32.5}
+    loop index in 0..<4 {
+        token :: result.tokens[index]
+        assert_eq(token.kind, 5)
+        assert_eq(token.span, Span{start: starts[index], end: ends[index]})
+        assert_eq(token.payload.text, spellings[index])
+        assert_eq(token.payload.integer ?? -1, -1)
+        assert_eq(token.payload.decimal ?? 0.0, decimals[index])
+        assert_eq(token.payload.suffix, "")
+    }
+    string :: result.tokens[4]
+    assert_eq(string.span, Span{start: 39, end: 64})
+    assert_eq(string.kind, 3)
+    assert_eq(string.payload.text, `"prefix {1.25e-2} suffix"`)
+    assert_eq(string.payload.integer ?? -1, -1)
+    assert_eq(string.payload.decimal ?? 0.0, 0.0)
+    assert_eq(string.payload.suffix, "")
+    eof :: result.tokens[5]
+    assert_eq(eof.span, Span{start: 64, end: 64})
+    assert_eq(eof.kind, 49)
+    assert_eq(eof.payload.text, "")
+    assert_eq(eof.payload.integer ?? -1, -1)
+    assert_eq(eof.payload.decimal ?? 0.0, 0.0)
+    assert_eq(eof.payload.suffix, "")
+    nested :: string.payload.string_parts[1].tokens[0]
+    assert_eq(nested.span, Span{start: 48, end: 55})
+    assert_eq(nested.kind, 5)
+    assert_eq(nested.payload.text, "1.25e-2")
+    assert_eq(nested.payload.decimal ?? 0.0, 0.0125)
+}
+
+fn lexer_test_triple_parity(source: String, starts: [Int], ends: [Int], kinds: [Int], decoded: String, runs: [Span], positions: [String]) Never! {
+    result :: lexer_test_raw(source)
+    assert_eq(result.tokens.len(), kinds.len())
+    loop (index, token) in result.tokens {
+        assert_eq(token.kind, kinds[index])
+        assert_eq(token.span, Span{start: starts[index], end: ends[index]})
+        expected_raw :: String.from_bytes(source.bytes().slice(starts[index], ends[index])) ?? panic("literal UTF-8 boundary")
+        assert_eq(token.payload.text, expected_raw)
+        if token.kind == 3 -> assert_eq(token.payload.decoded, decoded)
+    }
+    assert_eq(result.diagnostics.len(), runs.len())
+    loop (index, diagnostic) in result.diagnostics {
+        assert_eq(diagnostic.code, "E0084")
+        assert_eq(diagnostic.span, Val(runs[index]))
+        assert_eq(diagnostic.what, "Text {positions[index]} `\"\"\"` is not allowed")
+        assert_eq(diagnostic.why, "Only spaces or tabs may follow the opening quotes or precede the closing quotes on their line.")
+        assert_eq(diagnostic.fix, "Move the text to its own line, or use an ordinary string or a backtick raw string for one line of text.")
+    }
+}
+
+// Rust: tests/selfhost_terminators.rs:443-497 (decoded compared for Str tokens
+// only; Rust has no decoded fact for other kinds).
+#Test("triple_delimiter_parity_text_and_diagnostics") {
+    lexer_test_triple_parity("\"\"\"Hello\n    kept\n    \"\"\"", [Int]{0, 25}, [Int]{25, 25}, [Int]{3, 49}, "kept", [Span]{Span{start: 3, end: 8}}, [String]{"after the opening"})
+    lexer_test_triple_parity("\"\"\"\n    kept\n    end\"\"\"", [Int]{0, 23}, [Int]{23, 23}, [Int]{3, 49}, "    kept", [Span]{Span{start: 17, end: 20}}, [String]{"before the closing"})
+    lexer_test_triple_parity("\"\"\"Hello\n    kept\n    end\"\"\"", [Int]{0, 28}, [Int]{28, 28}, [Int]{3, 49}, "    kept", [Span]{Span{start: 3, end: 8}, Span{start: 22, end: 25}}, [String]{"after the opening", "before the closing"})
+    lexer_test_triple_parity("\"\"\"abc\"\"\"", [Int]{0, 9}, [Int]{9, 9}, [Int]{3, 49}, "", [Span]{Span{start: 3, end: 6}, Span{start: 3, end: 6}}, [String]{"after the opening", "before the closing"})
+    lexer_test_triple_parity("\"\"\"{{name}}\nkept\n\"\"\"", [Int]{0, 18}, [Int]{18, 18}, [Int]{3, 49}, "kept", [Span]{Span{start: 3, end: 9}}, [String]{"after the opening"})
+    lexer_test_triple_parity("\"\"\" \té😀 rest\nkept\n\"\"\"", [Int]{0, 25}, [Int]{25, 25}, [Int]{3, 49}, "kept", [Span]{Span{start: 5, end: 11}}, [String]{"after the opening"})
+    lexer_test_triple_parity("\"\"\"   \nhello\n   \"\"\" }}", [Int]{0, 20, 21}, [Int]{19, 21, 21}, [Int]{3, 16, 49}, "hello", [Span]{}, [String]{})
+    lexer_test_triple_parity("\"\"\"\t\t\nhello\n\t\t\"\"\"", [Int]{0, 17}, [Int]{17, 17}, [Int]{3, 49}, "hello", [Span]{}, [String]{})
+    lexer_test_triple_parity("\"\"\" \t{lexer_test_cr()}\nhello{lexer_test_cr()}\n \t\"\"\"", [Int]{0, 19}, [Int]{19, 19}, [Int]{3, 49}, "hello{lexer_test_cr()}", [Span]{}, [String]{})
+    lexer_test_triple_parity("\"\"\"{lexer_test_cr()}stray\nkept\n\"\"\"", [Int]{0, 18}, [Int]{18, 18}, [Int]{3, 49}, "kept", [Span]{Span{start: 3, end: 9}}, [String]{"after the opening"})
+    lexer_test_triple_parity("SQL{{\"\"\"query\nkept\n\"\"\"}}", [Int]{0, 3, 4, 21, 22}, [Int]{3, 4, 21, 22, 22}, [Int]{1, 46, 3, 16, 49}, "kept", [Span]{Span{start: 7, end: 12}}, [String]{"after the opening"})
+    lexer_test_triple_parity("SQL{{\"\"\"\nhello\n\"\"\"}}", [Int]{0, 3, 4, 17, 18}, [Int]{3, 4, 17, 18, 18}, [Int]{1, 46, 3, 16, 49}, "hello", [Span]{}, [String]{})
+    lexer_test_triple_parity("\"\"\"\nhello\n\"\"\"", [Int]{0, 13}, [Int]{13, 13}, [Int]{3, 49}, "hello", [Span]{}, [String]{})
+    lexer_test_triple_parity("#FFI(c) fn f() {{ \"\"\"text {{value}} \\raw\"\"\" }}", [Int]{0, 1, 4, 5, 6, 8, 11, 12, 13, 15, 17, 41, 42}, [Int]{1, 4, 5, 6, 7, 10, 12, 13, 14, 16, 40, 42, 42}, [Int]{106, 1, 47, 1, 14, 57, 1, 47, 14, 46, 3, 16, 49}, `text {value} \raw`, [Span]{}, [String]{})
+    lexer_test_triple_parity("#FFI(cpp) fn f() {{ \"\"\"text {{value}} \\raw\"\"\" }}", [Int]{0, 1, 4, 5, 8, 10, 13, 14, 15, 17, 19, 43, 44}, [Int]{1, 4, 5, 8, 9, 12, 14, 15, 16, 18, 42, 44, 44}, [Int]{106, 1, 47, 1, 14, 57, 1, 47, 14, 46, 3, 16, 49}, `text {value} \raw`, [Span]{}, [String]{})
+    lexer_test_triple_parity("#FFI(asm) fn f() {{ \"\"\"text {{value}} \\raw\"\"\" }}", [Int]{0, 1, 4, 5, 8, 10, 13, 14, 15, 17, 19, 43, 44}, [Int]{1, 4, 5, 8, 9, 12, 14, 15, 16, 18, 42, 44, 44}, [Int]{106, 1, 47, 1, 14, 57, 1, 47, 14, 46, 3, 16, 49}, `text {value} \raw`, [Span]{}, [String]{})
+}
+
+// Rust: tests/selfhost_terminators.rs:500-510
+#Test("parser_ready_tokens_spans_payloads_and_diagnostics") {
+    result :: lexer_test_raw("Name 500ms 1.25 true \"ok\" 'x'")
+    assert_eq(result.tokens[0].kind, 1)
+    assert_eq(result.tokens[0].payload.text, "Name")
+    assert_eq(result.tokens[1].kind, 6)
+    assert_eq(result.tokens[1].payload.integer ?? -1, 500)
+    assert_eq(result.tokens[1].payload.suffix, "ms")
+    assert_eq(result.tokens[2].kind, 5)
+    assert_eq(result.tokens[2].payload.decimal ?? 0.0, 1.25)
+    assert_eq(result.tokens[3].kind, 8)
+    assert_eq(result.tokens[4].kind, 3)
+    assert_eq(result.tokens[4].payload.decoded, "ok")
+    assert_eq(result.tokens[5].kind, 7)
+    assert_eq(result.tokens[5].payload.decoded, "x")
+    assert_eq(result.tokens[6].kind, 49)
+    assert_eq(result.diagnostics.len(), 0)
+    interpolated :: lexer_test_raw(`"a{value + 1}b"`)
+    parts :: interpolated.tokens[0].payload.string_parts
+    assert_eq(parts.len(), 3)
+    assert_eq(parts[0].kind, 1)
+    assert_eq(parts[1].kind, 2)
+    assert_eq(parts[1].tokens.len(), 4)
+    assert_eq(parts[1].tokens[0].span.start, 3)
+    assert_eq(parts[1].tokens[3].kind, 49)
+    assert_eq(parts[1].tokens[3].span.start, 12)
+    terminated :: lex("fn f() {{\n    value\n}}".bytes())
+    assert_eq(terminated.tokens[6].kind, 86)
+    assert_eq(terminated.tokens[6].span, Span{start: 18, end: 18})
+    bad :: lexer_test_raw("§§")
+    assert_eq(bad.diagnostics.len(), 2)
+    first_span :: bad.diagnostics[0].span ?? panic("first invalid-byte span")
+    second_span :: bad.diagnostics[1].span ?? panic("second invalid-byte span")
+    assert_eq(first_span.start, 0)
+    assert_eq(second_span.start, 2)
+    prefix :: lexer_test_raw(`r"bad"`)
+    assert_eq(prefix.diagnostics[0].code, "E0003")
+    prefix_span :: prefix.diagnostics[0].span ?? panic("retired prefix span")
+    assert_eq(prefix_span.end, 1)
+}
+
+// Rust: tests/selfhost_terminators.rs:514-537
+#Test("inline_foreign_bodies_and_commented_interpolations") {
+    foreign :: lexer_test_raw(`#FFI(C) fn f() { """int f() { return "x"; }""" }`)
+    assert_eq(foreign.tokens[10].payload.decoded, `int f() { return "x"; }`)
+    assert_eq(foreign.tokens[10].payload.string_parts[0].kind, 1)
+    assert_eq(foreign.diagnostics.len(), 0)
+    missing :: lexer_test_raw(`#FFI(C) fn bad() { """int f() {`)
+    assert_eq(missing.diagnostics.len(), 1)
+    assert_eq(missing.diagnostics[0].code, "E0002")
+    span :: missing.diagnostics[0].span ?? panic("missing foreign close span")
+    assert_eq(span.start, 19)
+    commented :: lexer_test_raw(`"a{ /* } */ value + 1}b"`)
+    nested :: commented.tokens[0].payload.string_parts[1].tokens[1]
+    assert_eq(nested.payload.text, "value")
+    assert_eq(nested.span.start, 12)
+}
+
+// Rust: tests/selfhost_terminators.rs:540-559
+#Test("unicode_alphanumeric_unit_suffixes") {
+    result :: lexer_test_raw("12msμ 3usd٢")
+    assert_eq(result.tokens[0].kind, 6)
+    assert_eq(result.tokens[0].payload.suffix, "msμ")
+    assert_eq(result.tokens[0].span.end, 6)
+    assert_eq(result.tokens[1].kind, 6)
+    assert_eq(result.tokens[1].payload.suffix, "usd٢")
+    assert_eq(result.tokens[1].span.end, 13)
+    assert_eq(result.tokens[2].kind, 49)
+}
+
+// Rust: tests/selfhost_terminators.rs:562-580
+#Test("integer_payload_overflow_is_zero") {
+    result :: lexer_test_raw("9223372036854775807 9223372036854775808 0x7fffffffffffffff 0x8000000000000000")
+    assert_eq(result.tokens[0].payload.integer ?? -1, 9223372036854775807)
+    assert_eq(result.tokens[1].payload.integer ?? -1, 0)
+    assert_eq(result.tokens[2].payload.integer ?? -1, 9223372036854775807)
+    assert_eq(result.tokens[3].payload.integer ?? -1, 0)
+    assert_eq(result.diagnostics.len(), 0)
+    assert_eq(result.tokens[4].kind, 49)
+}

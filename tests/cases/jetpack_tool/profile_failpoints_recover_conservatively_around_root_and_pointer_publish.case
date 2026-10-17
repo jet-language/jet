@@ -1,0 +1,166 @@
+# Port of tests/jetpack_tool.rs:1331-1409; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/profile_failpoints_recover_conservatively_around_root_and_pointer_publish
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: after-generation/root
+mkdir: after-generation/home
+mkdir: after-generation/root/hangar/provider-fixture-greet/bin
+copy: after-generation-greet after-generation/root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: after-generation/root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: after-generation/root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: after-generation/root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json after-generation-greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: HOME={work}/after-generation/home
+env: JETPACK_ROOT={work}/after-generation/root
+env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=after-generation
+exit: 2
+file: after-generation/home/.jet/tools/generations/1/complete is-file
+file: after-generation/home/.jet/tools/current absent
+step: jetpack tool list --no-color
+cwd: project
+env: HOME={work}/after-generation/home
+env: JETPACK_ROOT={work}/after-generation/root
+exit: 0
+file: after-generation/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: after-generation/home/.jet/tools/generations/1 is-dir
+file: after-generation/home/.jet/tools/generations/2 absent
+capture: wire_after-generation = concat-files after-generation/root/hangar/lifecycle-db/journal sorted
+cap:wire_after-generation: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original lifecycle_wire sorted concatenation contains predicate
+mkdir: after-root-prepare/root
+mkdir: after-root-prepare/home
+mkdir: after-root-prepare/root/hangar/provider-fixture-greet/bin
+copy: after-root-prepare-greet after-root-prepare/root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: after-root-prepare/root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: after-root-prepare/root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: after-root-prepare/root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json after-root-prepare-greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: HOME={work}/after-root-prepare/home
+env: JETPACK_ROOT={work}/after-root-prepare/root
+env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=after-root-prepare
+exit: 2
+file: after-root-prepare/home/.jet/tools/generations/1/complete is-file
+file: after-root-prepare/home/.jet/tools/current absent
+step: jetpack tool list --no-color
+cwd: project
+env: HOME={work}/after-root-prepare/home
+env: JETPACK_ROOT={work}/after-root-prepare/root
+exit: 0
+file: after-root-prepare/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: after-root-prepare/home/.jet/tools/generations/1 is-dir
+file: after-root-prepare/home/.jet/tools/generations/2 absent
+capture: wire_after-root-prepare = concat-files after-root-prepare/root/hangar/lifecycle-db/journal sorted
+cap:wire_after-root-prepare: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original lifecycle_wire sorted concatenation contains predicate
+mkdir: after-root-commit/root
+mkdir: after-root-commit/home
+mkdir: after-root-commit/root/hangar/provider-fixture-greet/bin
+copy: after-root-commit-greet after-root-commit/root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: after-root-commit/root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: after-root-commit/root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: after-root-commit/root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json after-root-commit-greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: HOME={work}/after-root-commit/home
+env: JETPACK_ROOT={work}/after-root-commit/root
+env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=after-root-commit
+exit: 2
+file: after-root-commit/home/.jet/tools/generations/1/complete is-file
+file: after-root-commit/home/.jet/tools/current absent
+step: jetpack tool list --no-color
+cwd: project
+env: HOME={work}/after-root-commit/home
+env: JETPACK_ROOT={work}/after-root-commit/root
+exit: 0
+file: after-root-commit/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: after-root-commit/home/.jet/tools/generations/1 is-dir
+file: after-root-commit/home/.jet/tools/generations/2 absent
+capture: wire_after-root-commit = concat-files after-root-commit/root/hangar/lifecycle-db/journal sorted
+cap:wire_after-root-commit: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original lifecycle_wire sorted concatenation contains predicate
+mkdir: before-pointer/root
+mkdir: before-pointer/home
+mkdir: before-pointer/root/hangar/provider-fixture-greet/bin
+copy: before-pointer-greet before-pointer/root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: before-pointer/root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: before-pointer/root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: before-pointer/root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json before-pointer-greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: HOME={work}/before-pointer/home
+env: JETPACK_ROOT={work}/before-pointer/root
+env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=before-pointer
+exit: 2
+file: before-pointer/home/.jet/tools/generations/1/complete is-file
+file: before-pointer/home/.jet/tools/current absent
+step: jetpack tool list --no-color
+cwd: project
+env: HOME={work}/before-pointer/home
+env: JETPACK_ROOT={work}/before-pointer/root
+exit: 0
+file: before-pointer/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: before-pointer/home/.jet/tools/generations/1 is-dir
+file: before-pointer/home/.jet/tools/generations/2 absent
+capture: wire_before-pointer = concat-files before-pointer/root/hangar/lifecycle-db/journal sorted
+cap:wire_before-pointer: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original lifecycle_wire sorted concatenation contains predicate
+mkdir: after-current-pointer/root
+mkdir: after-current-pointer/home
+mkdir: after-current-pointer/root/hangar/provider-fixture-greet/bin
+copy: after-current-pointer-greet after-current-pointer/root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: after-current-pointer/root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: after-current-pointer/root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: after-current-pointer/root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json after-current-pointer-greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: HOME={work}/after-current-pointer/home
+env: JETPACK_ROOT={work}/after-current-pointer/root
+env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=after-current-pointer
+exit: 2
+file: after-current-pointer/home/.jet/tools/generations/1/complete is-file
+file: after-current-pointer/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: after-current-pointer/home/.jet/tools/profile.json absent
+step: jetpack tool list --no-color
+cwd: project
+env: HOME={work}/after-current-pointer/home
+env: JETPACK_ROOT={work}/after-current-pointer/root
+exit: 0
+file: after-current-pointer/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: after-current-pointer/home/.jet/tools/generations/1 is-dir
+file: after-current-pointer/home/.jet/tools/generations/2 absent
+capture: wire_after-current-pointer = concat-files after-current-pointer/root/hangar/lifecycle-db/journal sorted
+cap:wire_after-current-pointer: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original lifecycle_wire sorted concatenation contains predicate
+mkdir: after-pointer/root
+mkdir: after-pointer/home
+mkdir: after-pointer/root/hangar/provider-fixture-greet/bin
+copy: after-pointer-greet after-pointer/root/hangar/provider-fixture-greet/bin/greet
+when os unix: chmod: after-pointer/root/hangar/provider-fixture-greet/bin/greet 0555
+when os unix: chmod: after-pointer/root/hangar/provider-fixture-greet/bin 0555
+when os unix: chmod: after-pointer/root/hangar/provider-fixture-greet 0555
+write: fx/nixpkgs-greet.json after-pointer-greet.json
+step: jetpack tool install greet@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: HOME={work}/after-pointer/home
+env: JETPACK_ROOT={work}/after-pointer/root
+env: JETPACK_INTERNAL_TEST_PROFILE_FAILPOINT=after-pointer
+exit: 2
+file: after-pointer/home/.jet/tools/generations/1/complete is-file
+file: after-pointer/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: after-pointer/home/.jet/tools/profile.json is-file
+step: jetpack tool list --no-color
+cwd: project
+env: HOME={work}/after-pointer/home
+env: JETPACK_ROOT={work}/after-pointer/root
+exit: 0
+file: after-pointer/home/.jet/tools/current ~ "generation\t1" # original contains predicate
+file: after-pointer/home/.jet/tools/generations/1 is-dir
+file: after-pointer/home/.jet/tools/generations/2 absent
+capture: wire_after-pointer = concat-files after-pointer/root/hangar/lifecycle-db/journal sorted
+cap:wire_after-pointer: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original lifecycle_wire sorted concatenation contains predicate

@@ -25,7 +25,7 @@ fn publication_oci_context(path: String, detail: String) -> IOContext Never! {
 fn publication_invalid_oci(detail: String) -> IOError Never! {
     IOError.InvalidData(publication_oci_context("", detail))
 }
-pub fn publication_validate_oci_digest(value: String) IOError! {
+fn publication_validate_oci_digest(value: String) IOError! {
     if !value.starts_with("sha256-") -> return Err(publication_invalid_oci("OCI referrer subject is not a sha256- digest"))
     digest_hex :: value.removeprefix("sha256-")
     if digest_hex.bytes().len() != 64 -> return Err(publication_invalid_oci("OCI referrer subject is not a complete sha256- digest"))
@@ -34,7 +34,7 @@ pub fn publication_validate_oci_digest(value: String) IOError! {
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 70) || (code >= 97 && code <= 102)) -> return Err(publication_invalid_oci("OCI referrer subject is not a complete sha256- digest"))
     }
 }
-pub fn publication_oci_referrer_root(repo: String, subject: String) -[FS, Env]> String IOError! {
+fn publication_oci_referrer_root(repo: String, subject: String) -[FS, Env]> String IOError! {
     publication_validate_oci_digest(subject)
     root :: files.join(repo, "referrers")
     if files.stat(root) == {
@@ -59,7 +59,7 @@ pub fn publication_oci_referrer_root(repo: String, subject: String) -[FS, Env]> 
     _ :: foundation_open_directory_authority(subject_root)
     Ok(subject_root)
 }
-pub fn publication_existing_oci_referrer_root(repo: String, subject: String) -[FS, Env]> String IOError! {
+fn publication_existing_oci_referrer_root(repo: String, subject: String) -[FS, Env]> String IOError! {
     publication_validate_oci_digest(subject)
     root :: files.join(repo, "referrers")
     info :: files.stat(root)
@@ -70,17 +70,17 @@ pub fn publication_existing_oci_referrer_root(repo: String, subject: String) -[F
     _ :: foundation_open_directory_authority(subject_root)
     Ok(subject_root)
 }
-pub fn publication_stage_oci_sbom(repo: String, source: String, name: String, version: String, subject: String) IOError! -[FS, Env, Time]> {
+fn publication_stage_oci_sbom(repo: String, source: String, name: String, version: String, subject: String) IOError! -[FS, Env, Time]> {
     root :: publication_oci_referrer_root(repo, subject)
     lock :: publication_load_publish_lock(source)
     sbom :: publication_registry_spdx(lock, name, version, subject)
     publication_write_oci_file(files.join(root, PUBLICATION_OCI_PENDING_SBOM), sbom.bytes(), "pending OCI SBOM")
 }
-pub fn publication_finalize_oci_referrers_for_package(repo: String, name: String, version: String) IOError! -[FS, Env, Time]> {
+fn publication_finalize_oci_referrers_for_package(repo: String, name: String, version: String) IOError! -[FS, Env, Time]> {
     entry :: publication_find_entry(repo, name, version) ?? return
     publication_finalize_oci_referrers(repo, entry)
 }
-pub fn publication_finalize_oci_referrers(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
+fn publication_finalize_oci_referrers(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env, Time]> {
     artifact :: publication_artifact_path(repo, entry.name, entry.version)
     info :: if files.stat(artifact) == {
         .Ok(info) -> info
@@ -171,7 +171,7 @@ fn publication_oci_check_existing(path: String, bytes: [U8], label: String) -[FS
     if existing != bytes -> return Err(IOError.AlreadyExists(publication_oci_context(path, "immutable {label} changed")))
     Ok(true)
 }
-pub fn publication_write_oci_file(path: String, bytes: [U8], label: String) IOError! -[FS, Env, Time]> {
+fn publication_write_oci_file(path: String, bytes: [U8], label: String) IOError! -[FS, Env, Time]> {
     if bytes.len() > PUBLICATION_MAX_OCI_REFERRER_BYTES -> return Err(publication_invalid_oci("{label} exceeds the 4 MiB limit"))
     if publication_oci_check_existing(path, bytes, label) -> return
     parent :: files.dirname(path)
@@ -183,7 +183,7 @@ pub fn publication_write_oci_file(path: String, bytes: [U8], label: String) IOEr
     if foundation_write_file_nofollow_at_root(parent, files.basename(path), bytes, None, FoundationPublicationPolicy{create: .CreateNew, create_root: true}) == {
         .Ok(_) -> {}
         .Err(error) -> {
-            publication_oci_reconcile_winner(authority, path, bytes, label, error)
+            publication_oci_reconcile_winner(authority, path, bytes, label, error.error)
         }
     }
 }
@@ -222,7 +222,7 @@ fn publication_oci_reconcile_winner(authority: FoundationDirectoryAuthority, pat
     authority.revalidate()
     if !identical -> return Err(error)
 }
-pub fn publication_read_oci_file(path: String, limit: Int) -[FS, Env]> [U8] IOError! {
+fn publication_read_oci_file(path: String, limit: Int) -[FS, Env]> [U8] IOError! {
     info :: files.stat(path)
     if info.is_symlink || !info.is_file -> return Err(publication_invalid_oci("OCI referrer payload is not a regular file"))
     if info.size > limit -> return Err(publication_invalid_oci("OCI referrer payload exceeds its size limit"))
@@ -242,7 +242,7 @@ pub fn publication_read_oci_file(path: String, limit: Int) -[FS, Env]> [U8] IOEr
     held.revalidate()
     Ok(bytes)
 }
-pub fn publication_referrer_index_digest(repo: String, entry: PublicationIndexEntry) -[FS, Env]> String IOError! {
+fn publication_referrer_index_digest(repo: String, entry: PublicationIndexEntry) -[FS, Env]> String IOError! {
     root :: publication_existing_oci_referrer_root(repo, entry.content_hash) ?? return Err(publication_oci_unavailable(err, "OCI referrer index is unavailable: {err}"))
     bytes :: publication_read_oci_file(files.join(root, PUBLICATION_OCI_REFERRER_INDEX), PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? return Err(publication_oci_unavailable(err, "OCI referrer index is unavailable: {err}"))
     Ok("sha256-{pkg_sha256_hex(bytes)}")
@@ -270,7 +270,7 @@ fn publication_render_oci_index(subject: String, descriptors: [PublicationOCIDes
     loop descriptor in descriptors -> &manifests.push("{{\"artifactType\":{foundation_json_quote(descriptor.artifact_type)},\"digest\":{foundation_json_quote(descriptor.digest)},\"mediaType\":{foundation_json_quote(descriptor.artifact_type)},\"size\":{descriptor.size}}}")
     "{{\"schemaVersion\":2,\"subject\":{{\"digest\":{foundation_json_quote(subject)}}},\"manifests\":[{manifests.join(",")}]}}\n"
 }
-pub fn publication_verify_oci_referrers(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env]> {
+fn publication_verify_oci_referrers(repo: String, entry: PublicationIndexEntry) IOError! -[FS, Env]> {
     publication_validate_oci_digest(entry.content_hash)
     root :: publication_existing_oci_referrer_root(repo, entry.content_hash) ?? return Err(publication_oci_unavailable(err, "OCI referrer set is unavailable: {err}; restore it from the registry or republish the immutable package"))
     root_authority :: foundation_open_directory_authority(root)
@@ -310,7 +310,7 @@ pub fn publication_verify_oci_referrers(repo: String, entry: PublicationIndexEnt
     blob_authority.revalidate()
     root_authority.revalidate()
 }
-fn publication_require_oci_keys(object: [String: DataTree], keys: [String], label: String) IOError! {
+fn publication_require_oci_keys(object: [String: Dyn], keys: [String], label: String) IOError! {
     if object.len() != keys.len() -> return Err(publication_invalid_oci("OCI {label} has unknown or missing fields"))
     loop key in object.keys() {
         if !keys.contains(key) -> return Err(publication_invalid_oci("OCI {label} has unknown or missing fields"))

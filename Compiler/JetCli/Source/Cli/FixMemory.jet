@@ -1,0 +1,194 @@
+// Source/CmdMemory.rs fix: runtime-ledger witnesses are suggestions unless the
+// original UTF-8 bytes still match. The caller supplies Loader's selected root.
+struct JetCLIMemoryApplied {
+    row: JetCLIMemoryRow
+    changed: Bool
+}
+
+fn jet_cli_memory_boundary(bytes: [U8], offset: Int) -> Bool Never! {
+    offset >= 0 && offset <= bytes.len() && (offset == bytes.len() || (Int.from_u8(bytes[offset]).bit_and(192)) != 128)
+}
+
+fn jet_cli_memory_matches(bytes: [U8], expected: [U8], start: Int) -> Bool Never! {
+    if start < 0 || start > bytes.len() || expected.len() > bytes.len() - start -> return false
+    loop index in 0..<expected.len() {
+        if bytes[start + index] != expected[index] -> return false
+    }
+    true
+}
+
+fn jet_cli_memory_repair_path(root: String, source: String) -[FS]> String? Never! {
+    joined :: if source.starts_with("/") -> source else -> jet_cli_entry_join(root, source)
+    stat :: cli_files.stat(joined) ?? return None
+    if !stat.is_file || stat.is_symlink -> return None
+    canonical_root :: cli_files.realpath(root) ?? return None
+    canonical_source :: cli_files.realpath(joined) ?? return None
+    if canonical_source == canonical_root || canonical_root == "/" || canonical_source.starts_with("{canonical_root}/") {
+        return Val(canonical_source)
+    }
+    None
+}
+
+fn jet_cli_memory_write_atomic(path: String, source: String) JetCLIReadError! -[FS, Env, Time.Wait]> {
+    parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("source has no parent directory"))
+    name :: jet_cli_file_name(path)
+    canonical :: cli_files.realpath(parent) ?? return Err(jet_cli_read_error("cannot inspect source directory: {jet_cli_io_error_text(err)}"))
+    held :: JetCLIRootedDirectory.open(canonical, [String]{}, false)
+    mode :: held.file_mode(name)
+    held.replace(name, source.bytes(), Val(mode))
+}
+
+fn jet_cli_memory_read_source(path: String) -[FS, Time.Wait]> String JetCLIReadError! {
+    parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("source has no parent directory"))
+    name :: jet_cli_file_name(path)
+    held :: JetCLIRootedDirectory.open(parent, [String]{}, false)
+    bytes :: if held.read(name, Int.MAX) == {
+        .Ok(value) -> value
+        .Err(error) -> { return Err(error) }
+    }
+    raw :: bytes ?? return Err(jet_cli_read_error("source disappeared"))
+    Ok(String.from_bytes(raw) ?? return Err(jet_cli_read_error("source is not UTF-8")))
+}
+
+fn jet_cli_fix_memory_at(root: String, args: [String], color: Bool, json: Bool) -[FS, Env, Time.Wait]> JetCLIPlan Never! {
+    loop argument in args {
+        if !argument.starts_with("-") {
+            return jet_cli_memory_fail("unexpected fix memory argument `{argument}`", color, json)
+        }
+    }
+    dry_run :: args.contains("--dry-run")
+    ledger_path :: cli_sys.get("JET_MEMORY_LEDGER") ?? "{root}/.jet/memory/ledger-v1.jsonl"
+    rows :: jet_cli_memory_read(ledger_path) ?? return jet_cli_memory_fail(err.message, color, json)
+    candidates := [String:[JetCLIMemoryRow]]{}
+    options := [JetCLIMemoryRow]{}
+    loop row in rows {
+        if row.byte_spans && row.expected != None && row.repairs.len() == 1 {
+            if jet_cli_memory_repair_path(root, row.source) == .Val(candidate_path) {
+                previous :: candidates.get(candidate_path) ?? [JetCLIMemoryRow]{}
+                edits := previous
+                &edits.push(row)
+                candidates[candidate_path] = edits
+            } else { &options.push(row) }
+        } else { &options.push(row) }
+    }
+    paths := [String]{}
+    loop entry in candidates -> &paths.push(entry.key)
+    &paths.sort()
+    applied := [JetCLIMemoryApplied]{}
+    loop path in paths {
+        edits :: candidates.get(path) ?? panic("candidate path is present")
+        source := jet_cli_memory_read_source(path) ?? {
+            loop row in edits -> &options.push(row)
+            next
+        }
+        // Stable descending (start,end) order, as Rust's sort_by_key(Reverse).
+        order := [Int]{}
+        loop index in 0..<edits.len() -> &order.push(index)
+        width := 1
+        loop width < order.len() {
+            merged := [Int]{}
+            start := 0
+            loop start < order.len() {
+                middle :: if start + width < order.len() -> start + width else -> order.len()
+                end :: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
+                left := start
+                right := middle
+                loop left < middle || right < end {
+                    take_left := right >= end
+                    if !take_left && left < middle {
+                        a :: edits[order[left]]
+                        b :: edits[order[right]]
+                        take_left = a.span_start > b.span_start || (a.span_start == b.span_start && a.span_end >= b.span_end)
+                    }
+                    if take_left {
+                        &merged.push(order[left])
+                        left += 1
+                    } else {
+                        &merged.push(order[right])
+                        right += 1
+                    }
+                }
+                start = end
+            }
+            order = merged
+            width *= 2
+        }
+        last_start := Int?{None}
+        changed := false
+        loop index in order {
+            row :: edits[index]
+            start :: row.span_start
+            end :: row.span_end
+            expected :: row.expected ?? panic("candidate has expected text")
+            replacement :: row.repairs[0]
+            if last_start == .Val(last) {
+                if end > last {
+                    &options.push(row)
+                    next
+                }
+            }
+            bytes :: source.bytes()
+            replacement_bytes :: replacement.bytes()
+            replacement_end :: start + replacement_bytes.len()
+            if jet_cli_memory_boundary(bytes, start) && jet_cli_memory_boundary(bytes, replacement_end) && jet_cli_memory_matches(bytes, replacement_bytes, start) {
+                &applied.push(JetCLIMemoryApplied{row: row, changed: false})
+                last_start = Val(start)
+                next
+            }
+            expected_bytes :: expected.bytes()
+            if start > end || !jet_cli_memory_boundary(bytes, start) || !jet_cli_memory_boundary(bytes, end) || end - start != expected_bytes.len() || !jet_cli_memory_matches(bytes, expected_bytes, start) {
+                &options.push(row)
+                next
+            }
+            updated := [U8]{}
+            loop offset in 0..<start -> &updated.push(bytes[offset])
+            loop byte in replacement_bytes -> &updated.push(byte)
+            loop offset in end..<bytes.len() -> &updated.push(bytes[offset])
+            source = String.from_bytes(updated) ?? panic("validated UTF-8 repair boundaries")
+            changed = true
+            &applied.push(JetCLIMemoryApplied{row: row, changed: true})
+            last_start = Val(start)
+        }
+        if changed && !dry_run {
+            jet_cli_memory_write_atomic(path, source) ?? return jet_cli_memory_fail("cannot apply memory repair to `{path}`: {err.message}", color, json)
+        }
+    }
+    if json {
+        values := [JetCLIStatusValue]{}
+        loop entry in applied {
+            row :: entry.row
+            &values.push(
+            jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("source", jet_cli_status_text(row.source)),
+                jet_cli_status_field("span_start", jet_cli_status_int(row.span_start)),
+                jet_cli_status_field("span_end", jet_cli_status_int(row.span_end)),
+                jet_cli_status_field("repair", jet_cli_status_text(row.repairs[0])),
+                jet_cli_status_field("changed", jet_cli_status_bool(entry.changed && !dry_run)),
+            },
+            ),
+            )
+        }
+        memory :: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("dry_run", jet_cli_status_bool(dry_run)),
+            jet_cli_status_field("applied", jet_cli_status_array(values)),
+            jet_cli_status_field("options", jet_cli_status_int(options.len())),
+        },
+        )
+        return jet_cli_done("{jet_cli_status_render("fix.memory", true, [JetCLIStatusField]{jet_cli_status_field("memory", memory)})}\n", "", JET_DRIVER_EXIT_OK)
+    }
+    out := "jet fix memory\ncoverage: exercised runs only\n"
+    if applied.len() == 0 -> out = "{out}applied: none\n"
+    loop entry in applied {
+        row :: entry.row
+        action :: if dry_run && entry.changed -> "would apply" else if entry.changed -> "applied" else -> "already applied"
+        out = "{out}{action}: {row.source}:{row.span_start}..{row.span_end} -> {row.repairs[0]}\n"
+    }
+    loop row in options {
+        out = "{out}options: {row.source}:{row.span_start}..{row.span_end} {row.detail}\n"
+        if row.repairs.len() == 0 -> out = "{out}  - no safe automatic repair is known\n"
+        loop repair in row.repairs -> out = "{out}  - {repair}\n"
+    }
+    jet_cli_done(out, "", JET_DRIVER_EXIT_OK)
+}

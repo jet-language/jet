@@ -1,0 +1,55 @@
+# HAND-PORT tests/web_build.rs:3212-3316 web_two_hop_journey_matches_all_execution_tiers
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original3native exit1/empty stdout/exact normalized reports +both JS/Wasm journey/frame equalities; harness verbatim and original path normalizer/assertion logic translated literally into independent verifier. Original JS target1line offset only.
+requires: tool:node
+fixture: web_two_hop_journey_matches_all_execution_tiers.fixture
+env: NO_COLOR=1
+step: jet build web_two_hop_journey.jet
+exit: 0
+step aot: built
+exit: 1
+stdout: empty
+capture: report = text stderr
+write: native-report.txt = "{cap:report}"
+step: node verify.mjs native-report.txt 0 native
+exit: 0
+step default: jet run web_two_hop_journey.jet
+exit: 1
+stdout: empty
+capture: default_report = text stderr
+write: native-report.txt = "{cap:default_report}"
+step: node verify.mjs native-report.txt 0 native
+exit: 0
+step interpret: jet run --interpret web_two_hop_journey.jet
+exit: 1
+stdout: empty
+capture: interpret_report = text stderr
+write: native-report.txt = "{cap:interpret_report}"
+step: node verify.mjs native-report.txt 0 native
+exit: 0
+step: jet build --target web js/tests/fixtures/web_two_hop_journey.jet
+exit: 0
+file: js/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2
+file: js/.jet/build/web.manifest.json ~ "\"partitions\"" # original helper partitions
+file: js/.jet/build/app.wasm is-file
+copy: harness.mjs js/.jet/build/two_hop_journey_harness.mjs
+step: node two_hop_journey_harness.mjs
+cwd: js/.jet/build
+exit: 0
+capture: transcript = text stdout
+write: js-transcript.txt = "{cap:transcript}"
+step: node verify.mjs js-transcript.txt 1 web
+exit: 0
+step: jet build --target web wasm/tests/fixtures/web_two_hop_journey.jet
+exit: 0
+file: wasm/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2
+file: wasm/.jet/build/web.manifest.json ~ "\"partitions\"" # original helper partitions
+file: wasm/.jet/build/app.wasm is-file
+copy: harness.mjs wasm/.jet/build/two_hop_journey_harness.mjs
+step: node two_hop_journey_harness.mjs
+cwd: wasm/.jet/build
+exit: 0
+capture: wasm_transcript = text stdout
+write: wasm-transcript.txt = "{cap:wasm_transcript}"
+step: node verify.mjs wasm-transcript.txt 0 web
+exit: 0

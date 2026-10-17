@@ -21,12 +21,12 @@ FOUNDATION_U64_SHIFTS :: prep { [Int]{56, 48, 40, 32, 24, 16, 8, 0} }
 // identities can hash large artifacts without whole-file reads.
 // REMOVE-AT-FLOORFIX: replace this wrapper with the canonical compiler-owned
 // public streaming hasher when that provider lands; never copy compression.
-pub struct StreamingSHA256 {
+struct StreamingSHA256 {
     state: [U32]
-    words: [U32]
-    k: [U32]
-    block: [U8]
-    total: Int
+    priv words: [U32]
+    priv k: [U32]
+    priv block: [U8]
+    priv total: Int
 
     fn new() -> StreamingSHA256 Never! {
         state :: loop word in MIR_SHA256_H0 -> U32{word}
@@ -39,7 +39,7 @@ pub struct StreamingSHA256 {
         loop byte in data {
             &self.block.push(byte)
             if self.block.len() == 64 {
-                mir_sha256_compress(&self.state, &self.words, self.k, self.block)
+                mir_sha256_compress(&self.state, &self.words, self.k, self.block[0..<64], 0)
                 &self.block.clear()
             }
         }
@@ -55,20 +55,20 @@ pub struct StreamingSHA256 {
         &block.push(U8{128})
         if block.len() > 56 {
             loop block.len() < 64 -> &block.push(U8{0})
-            mir_sha256_compress(&state, &words, self.k, block)
+            mir_sha256_compress(&state, &words, self.k, block[0..<64], 0)
             &block.clear()
         }
         loop block.len() < 56 -> &block.push(U8{0})
-        bit_length :: (self.total * 8) & MIR_SHA256_LENGTH_MASK
-        loop shift in FOUNDATION_U64_SHIFTS -> &block.push(U8{(bit_length >> shift) & 255})
-        mir_sha256_compress(&state, &words, self.k, block)
+        bit_length :: ((self.total * 8)).bit_and(MIR_SHA256_LENGTH_MASK)
+        loop shift in FOUNDATION_U64_SHIFTS -> &block.push(U8{((bit_length >> shift)).bit_and(255)})
+        mir_sha256_compress(&state, &words, self.k, block[0..<64], 0)
         digest := [U8]{}
         loop lane in state {
             word :: Int.from_u32(lane)
-            &digest.push(U8{(word >> 24) & 255})
-            &digest.push(U8{(word >> 16) & 255})
-            &digest.push(U8{(word >> 8) & 255})
-            &digest.push(U8{word & 255})
+            &digest.push(U8{((word >> 24)).bit_and(255)})
+            &digest.push(U8{((word >> 16)).bit_and(255)})
+            &digest.push(U8{((word >> 8)).bit_and(255)})
+            &digest.push(U8{(word).bit_and(255)})
         }
         digest
     }
@@ -80,7 +80,7 @@ pub struct StreamingSHA256 {
 
 // Failure while proving a source tree's contents.
 #Error
-pub enum TreeHashError {
+enum TreeHashError {
     IO(path: String, detail: String)
     Symlink(String)
     Special(String)
@@ -117,7 +117,7 @@ struct TreeHashBudget {
 // visited entry consumes one MAX_TREE_NODES unit, including empty
 // directories and entries excluded from the identity (dot entries, `build`,
 // `target`), which are still inspected before skipping.
-pub fn foundation_try_tree_hash(root: String) -[FS]> String TreeHashError! {
+fn foundation_try_tree_hash(root: String) -[FS]> String TreeHashError! {
     root_stat :: if files.stat(root) == {
         .Ok(stat) -> stat
         .Err(error) -> { return Err(TreeHashError.IO{path: root, detail: "{error}"}) }
@@ -140,7 +140,7 @@ pub fn foundation_try_tree_hash(root: String) -[FS]> String TreeHashError! {
 
 // A tree hash for a tree that must be hashable; failure is a broken
 // invariant.
-pub fn foundation_tree_hash(root: String) -[FS]> String Never! {
+fn foundation_tree_hash(root: String) -[FS]> String Never! {
     if foundation_try_tree_hash(root) == {
         .Ok(hash) -> hash
         .Err(error) -> panic("cannot hash source tree `{root}`: {error.message()}")
@@ -186,10 +186,7 @@ fn foundation_same_file_identity(left: Stat, right: Stat) -> Bool Never! {
 // Fold one regular file into the tree hash through a no-follow handle whose
 // identity matches the walk's observation before and after reading.
 fn foundation_hash_regular_nofollow(path: String, expected: Stat, hasher: &StreamingSHA256, total_bytes: &Int) TreeHashError! -[FS]> {
-    reader :: if files.open(path, links: .Refuse) == {
-        .Ok(opened) -> opened
-        .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
-    }
+    reader :: files.open(path, links: .Refuse) ?? return Err(TreeHashError.IO{path: path, detail: "{err}"})
     opened :: if reader.stat() == {
         .Ok(stat) -> stat
         .Err(error) -> { return Err(TreeHashError.IO{path: path, detail: "{error}"}) }
@@ -199,7 +196,7 @@ fn foundation_hash_regular_nofollow(path: String, expected: Stat, hasher: &Strea
     next_total :: total_bytes + opened.size
     if next_total > MAX_TREE_TOTAL_BYTES -> return Err(TreeHashError.TooLarge{path: path, limit: MAX_TREE_TOTAL_BYTES})
     length := [U8]{}
-    loop shift in FOUNDATION_U64_SHIFTS -> &length.push(U8{(opened.size >> shift) & 255})
+    loop shift in FOUNDATION_U64_SHIFTS -> &length.push(U8{((opened.size >> shift)).bit_and(255)})
     &hasher.update(length)
     actual_length := 0
     loop {
@@ -230,31 +227,31 @@ struct FoundationNofollowFile {
 }
 fn foundation_open_regular_nofollow(path: String) -[FS]> FoundationNofollowFile IOError! {
     expected :: files.stat(path)
-    if expected.is_symlink || !expected.is_file -> return Err(IOError.InvalidData(foundation_io_context(.Read, path, "file is not a regular file")))
+    if expected.is_symlink || !expected.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file is not a regular file")}))
     handle :: files.open(path, links: .Refuse)
     opened :: handle.stat()
-    if !opened.is_file || !foundation_same_file_identity(expected, opened) -> return Err(IOError.Other(foundation_io_context(.Read, path, "file changed before reading")))
+    if !opened.is_file || !foundation_same_file_identity(expected, opened) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed before reading")}))
     Ok(FoundationNofollowFile{handle: handle, expected: expected})
 }
 
 // Lowercase hex SHA-256 of one regular file, read through a no-follow
 // handle and bounded by MAX_TREE_FILE_BYTES. The file must keep its
 // identity and length while it is read.
-pub fn foundation_sha256_file_hex(path: String) -[FS]> String IOError! {
+fn foundation_sha256_file_hex(path: String) -[FS]> String IOError! {
     opened :: foundation_open_regular_nofollow(path)
-    if opened.expected.size > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, path, "file exceeds the tree hashing bound"))
+    if opened.expected.size > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file exceeds the tree hashing bound"))
     hasher := StreamingSHA256.new()
     actual_length := 0
     loop {
         chunk :: opened.handle.read(FOUNDATION_READ_CHUNK)
         if chunk.len() == 0 -> break
         actual_length += chunk.len()
-        if actual_length > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, path, "file grew beyond the tree hashing bound"))
+        if actual_length > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file grew beyond the tree hashing bound"))
         &hasher.update(chunk)
     }
     after :: opened.handle.stat()
     path_after :: files.stat(path)
-    if actual_length != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) -> return Err(IOError.Other(foundation_io_context(.Read, path, "file changed while hashing")))
+    if actual_length != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed while hashing")}))
     Ok(hasher.finalize_hex())
 }
 
@@ -262,15 +259,15 @@ pub fn foundation_sha256_file_hex(path: String) -[FS]> String IOError! {
 // from the shared no-follow handle. The caller's finite bound is capped by the
 // tree-file bound, checked before and during the read; afterwards the handle
 // and the path must still name the same unchanged file.
-pub fn foundation_read_file_nofollow(path: String, max_bytes: Int) -[FS]> [U8] IOError! {
-    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, path, "file read bound exceeds the tree hashing bound"))
+fn foundation_read_file_nofollow(path: String, max_bytes: Int) -[FS]> [U8] IOError! {
+    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, path, "file read bound exceeds the tree hashing bound"))
     opened :: foundation_open_regular_nofollow(path)
-    bound_error :: IOError.InvalidData(foundation_io_context(.Read, path, "file exceeds its read bound"))
+    bound_error :: IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file exceeds its read bound")})
     if opened.expected.size > max_bytes -> return Err(bound_error)
     content :: foundation_read_handle_bounded(opened.handle, max_bytes, bound_error)
     after :: opened.handle.stat()
     path_after :: files.stat(path)
-    if content.len() != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) -> return Err(IOError.Other(foundation_io_context(.Read, path, "file changed while reading")))
+    if content.len() != opened.expected.size || !foundation_same_file_identity(opened.expected, after) || !foundation_same_file_identity(opened.expected, path_after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file changed while reading")}))
     Ok(content)
 }
 
@@ -300,13 +297,15 @@ fn foundation_open_or_create_directory(parent: Directory, name: String) -[FS]> D
             else -> return Err(err)
         }
         created := true
-        parent.create_directory(name, mode: Val(448)) ?? {
-            if err == {
-                .AlreadyExists(_) -> {}
-                else -> return Err(err)
+        if parent.create_directory(name, mode: Val(448)) == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                if error == {
+                    .AlreadyExists(_) -> {}
+                    else -> { return Err(error) }
+                }
+                created = false
             }
-            created = false
-            ()
         }
         // Only our successful mkdir requires a parent durability barrier.
         if created -> parent.fsync()
@@ -326,13 +325,26 @@ struct FoundationPublicationDirectory {
 // Typed publication policy; defaults preserve every existing caller's 0600,
 // replace-regular-file, refuse-links behavior. Signing uses create-new or force
 // replacement of a symlink BINDING (never its referent) and public mode 0644.
-pub enum FoundationPublicationCreate { Replace CreateNew }
-pub enum FoundationPublicationLinks { Refuse ReplaceBinding }
-pub struct FoundationPublicationPolicy {
-    pub mode: Int{384}
-    pub create: FoundationPublicationCreate{FoundationPublicationCreate.Replace}
-    pub destination_links: FoundationPublicationLinks{FoundationPublicationLinks.Refuse}
-    pub create_root: Bool{false}
+enum FoundationPublicationCreate { Replace CreateNew }
+enum FoundationPublicationLinks { Refuse ReplaceBinding }
+struct FoundationPublicationPolicy {
+    mode: Int{384}
+    create: FoundationPublicationCreate{FoundationPublicationCreate.Replace}
+    destination_links: FoundationPublicationLinks{FoundationPublicationLinks.Refuse}
+    create_root: Bool{false}
+}
+
+// Phase is recorded at the producing operation, never guessed from IO text.
+// All callers share this one publisher; callers needing only IO project error.
+enum FoundationPublicationPhase {
+    PreparePath OpenRoot OpenParent InspectDestination CreateStage
+    WriteStage SetMode SyncStage InspectStage ValidateSource
+    ValidateAuthority Rename SyncParent ValidatePublished
+}
+#Error
+struct FoundationPublicationError {
+    phase: FoundationPublicationPhase
+    error: IOError
 }
 
 // Rust SHA256::rooted_authority::write, with CmdPkg::write_package_source's
@@ -342,22 +354,28 @@ pub struct FoundationPublicationPolicy {
 // after write/fsync, before the final authority checks and descriptor-relative
 // rename; failure removes the stage. None uses the same mechanism without
 // source validation (e.g. a new lock).
-pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) IOError! -[FS, Env, Time]> {
-    components :: foundation_normal_components(.Write, relative)
-    if components.len() == 0 -> return Err(foundation_io_error(.Write, relative, "file authority publication path is empty"))
-    directories := foundation_open_root_directories(root, policy.create_root)
+fn foundation_write_file_nofollow_at_root(root: String, relative: String, contents: [U8], before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) FoundationPublicationError! -[FS, Env, Time]> {
+    components :: foundation_normal_components(true, relative) ?? return Err(FoundationPublicationError{phase: .PreparePath, error: err})
+    if components.len() == 0 -> return Err(FoundationPublicationError{phase: .PreparePath, error: foundation_io_error(true, relative, "file authority publication path is empty")})
+    directories := foundation_open_root_directories(root, policy.create_root) ?? return Err(FoundationPublicationError{phase: .OpenRoot, error: err})
     loop index in 0..<(components.len() - 1) {
         name :: components[index]
         parent_index :: directories.len() - 1
-        child :: foundation_open_or_create_directory(directories[parent_index].handle, name)
+        child :: foundation_open_or_create_directory(directories[parent_index].handle, name) ?? return Err(FoundationPublicationError{phase: .OpenParent, error: err})
         child_path :: files.join(directories[parent_index].path, name)
         // Both parent projections end before resizing the held chain.
         &directories.push(FoundationPublicationDirectory{handle: child, path: child_path, publication_parent: true})
     }
     parent :: directories[directories.len() - 1].handle
     final_name :: components[components.len() - 1]
-    expected_destination :: foundation_inspect_destination(parent, final_name, policy.destination_links)
-    if policy.create == .CreateNew && expected_destination != None -> return Err(IOError.AlreadyExists(foundation_io_context(.Write, relative, "file authority publication target already exists")))
+    // D-FAIL-BIND1: preserve absence separately from an inspection failure.
+    expected_destination := FileID?{None}
+    if foundation_inspect_destination(parent, final_name, policy.destination_links) == {
+        .Val(identity) -> expected_destination = Val(identity)
+        .None -> {}
+        .Err(error) -> { return Err(FoundationPublicationError{phase: .InspectDestination, error: error}) }
+    }
+    if policy.create == .CreateNew && expected_destination != None -> return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target already exists")})})
     stamp :: time.unix_ms(time.now())
     pid :: sys.pid()
     loop attempt in 0..<128 {
@@ -366,17 +384,22 @@ pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, co
         writer :: parent.create(candidate, if_exists: .Refuse, mode: Val(384)) ?? {
             if err == {
                 .AlreadyExists(_) -> {}
-                else -> return Err(err)
+                else -> return Err(FoundationPublicationError{phase: .CreateStage, error: err})
             }
             next
         }
         if foundation_stage_and_rename(directories, parent, writer, candidate, final_name, contents, expected_destination, before_rename, policy) == {
             .Ok(staged) -> {
-                loop directory in directories -> directory.handle.fsync()
-                foundation_ensure_directories_current(directories)
-                current :: foundation_inspect_destination(parent, final_name)
-                published :: current ?? return Err(IOError.Other(foundation_io_context(.Write, relative, "file authority publication target disappeared after rename")))
-                if published != staged -> return Err(IOError.Other(foundation_io_context(.Write, relative, "file authority publication target changed after rename")))
+                loop directory in directories {
+                    directory.handle.fsync() ?? return Err(FoundationPublicationError{phase: .SyncParent, error: err})
+                }
+                foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidatePublished, error: err})
+                published :: if foundation_inspect_destination(parent, final_name) == {
+                    .Val(identity) -> identity
+                    .None -> { return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target disappeared after rename")})}) }
+                    .Err(error) -> { return Err(FoundationPublicationError{phase: .ValidatePublished, error: error}) }
+                }
+                if published != staged -> return Err(FoundationPublicationError{phase: .ValidatePublished, error: IOError.Other(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("file authority publication target changed after rename")})})
                 return
             }
             .Err(error) -> {
@@ -385,7 +408,7 @@ pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, co
             }
         }
     }
-    return Err(IOError.AlreadyExists(foundation_io_context(.Write, relative, "could not reserve a temporary authority file")))
+    return Err(FoundationPublicationError{phase: .CreateStage, error: IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(relative), os_code: None, cause: Val("could not reserve a temporary authority file")})})
 }
 
 // Rust rooted_authority::Authority: one regular single-link file opened
@@ -395,12 +418,12 @@ pub fn foundation_write_file_nofollow_at_root(root: String, relative: String, co
 // through the original handle AND a rename of the source away (to a backup)
 // or a replacement bound at its path. A handle-only revalidation
 // (Authority.rs revalidate_file) cannot see the last two.
-pub struct FoundationFileAuthority {
-    directories: [FoundationPublicationDirectory]
-    handle: FileReader
-    relative: String
-    pub path: String
-    identity: Stat
+struct FoundationFileAuthority {
+    priv directories: [FoundationPublicationDirectory]
+    priv handle: FileReader
+    priv relative: String
+    path: String
+    priv identity: Stat
 
     // Rust Authority::ensure_paths_current: every held directory and the file
     // are still the objects bound at their paths (path metadata never follows
@@ -409,14 +432,14 @@ pub struct FoundationFileAuthority {
         loop directory in self.directories {
             current :: files.stat(directory.path)
             if !foundation_same_directory(current, directory.handle.stat()) {
-                return Err(IOError.Other(foundation_io_context(.Read, directory.path, "file authority directory moved while it was held")))
+                return Err(IOError.Other(IOContext{operation: .Read, resource: Val(directory.path), os_code: None, cause: Val("file authority directory moved while it was held")}))
             }
         }
         bound :: files.stat(self.path)
-        if bound.is_symlink || !bound.is_file -> return Err(IOError.Other(foundation_io_context(.Read, self.path, "file authority input is not a regular file")))
-        if bound.links != 1 -> return Err(IOError.Other(foundation_io_context(.Read, self.path, "file authority input has multiple hard links")))
+        if bound.is_symlink || !bound.is_file -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input is not a regular file")}))
+        if bound.links != 1 -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input has multiple hard links")}))
         if !foundation_same_authority_identity(self.identity, bound) {
-            return Err(IOError.Other(foundation_io_context(.Read, self.path, "file authority input moved while it was held")))
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input moved while it was held")}))
         }
     }
 
@@ -424,12 +447,12 @@ pub struct FoundationFileAuthority {
     // the paths and handle identity must hold before and after the read.
     fn read_bounded(self, max_bytes: Int) -[FS]> [U8] IOError! {
         self.ensure_paths_current()
-        bound_error :: foundation_io_error(.Read, self.relative, "file exceeds its read bound")
+        bound_error :: foundation_io_error(false, self.relative, "file exceeds its read bound")
         if self.identity.size > max_bytes -> return Err(bound_error)
         bytes :: foundation_read_handle_bounded(self.handle, max_bytes, bound_error)
         after :: self.handle.stat()
         if self.ensure_paths_current() == .Err(_) || !after.is_file || after.links != 1 || !foundation_same_authority_identity(self.identity, after) || after.size != bytes.len() {
-            return Err(IOError.Other(foundation_io_context(.Read, self.relative, "file changed while it was being read")))
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.relative), os_code: None, cause: Val("file changed while it was being read")}))
         }
         Ok(bytes)
     }
@@ -439,15 +462,15 @@ pub struct FoundationFileAuthority {
     fn revalidate(self) IOError! -[FS]> {
         held :: self.handle.stat()
         if !held.is_file || held.links != 1 || !foundation_same_authority_identity(self.identity, held) {
-            return Err(IOError.Other(foundation_io_context(.Read, self.path, "file authority input changed while it was held")))
+            return Err(IOError.Other(IOContext{operation: .Read, resource: Val(self.path), os_code: None, cause: Val("file authority input changed while it was held")}))
         }
         self.ensure_paths_current()
     }
 
     // Remove only this checked file's binding through its ORIGINAL parent.
     // Used by TUF rollback; a borrowed file authority cannot delete siblings.
-    pub fn remove(self, basename: String) IOError! -[FS]> {
-        if basename != files.basename(self.relative) -> return Err(foundation_io_error(.Write, basename, "file authority removal name does not match its held file"))
+    fn remove(self, basename: String) IOError! -[FS]> {
+        if basename != files.basename(self.relative) -> return Err(foundation_io_error(true, basename, "file authority removal name does not match its held file"))
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1].handle
         parent.remove(basename)
@@ -458,18 +481,40 @@ pub struct FoundationFileAuthority {
 
 // A directory-operation carrier retaining the ORIGINAL canonical held chain.
 // No public descriptor/vector escapes, and no second walker or lock authority.
-pub struct FoundationDirectoryAuthority {
-    directories: [FoundationPublicationDirectory]
+struct FoundationDirectoryAuthority {
+    priv directories: [FoundationPublicationDirectory]
 
-    pub fn revalidate(self) IOError! -[FS]> {
+    fn revalidate(self) IOError! -[FS]> {
         foundation_ensure_directories_current(self.directories)
     }
-    pub fn create_exclusive(self, name: String, mode: Int) -[FS]> FileWriter IOError! {
+    // RuntimePolicy's domain is this ORIGINAL root inode, not a marker file.
+    fn identity(self) -[FS]> FileID IOError! {
+        self.revalidate()
+        info :: self.directories[self.directories.len() - 1].handle.stat()
+        self.revalidate()
+        Ok(info.id)
+    }
+    fn lock(self) -[FS]> AdvisoryLock IOError! {
+        self.revalidate()
+        owner :: self.directories[self.directories.len() - 1].handle.lock()
+        self.revalidate()
+        Ok(owner)
+    }
+    // Markers are opened relative to the retained parent, never a pathname.
+    // The RuntimePolicy caller validates regular-file kind and marker identity.
+    fn open_file(self, name: String) -[FS]> FileReader IOError! {
+        foundation_directory_authority_name(name)
+        self.revalidate()
+        reader :: self.directories[self.directories.len() - 1].handle.open(name)
+        self.revalidate()
+        Ok(reader)
+    }
+    fn create_exclusive(self, name: String, mode: Int) -[FS]> FileWriter IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         self.directories[self.directories.len() - 1].handle.create(name, if_exists: .Refuse, mode: Val(mode))
     }
-    pub fn remove(self, name: String) IOError! -[FS]> {
+    fn remove(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1].handle
@@ -479,14 +524,14 @@ pub struct FoundationDirectoryAuthority {
     }
     // Registry clone installation: mutate only this retained parent, never
     // reopen a path for staging/rollback. Core Directory leaves remain #3593.
-    pub fn entry_stat(self, name: String) -[FS]> Stat IOError! {
+    fn entry_stat(self, name: String) -[FS]> Stat IOError! {
         foundation_directory_authority_name(name)
         self.revalidate()
         info :: self.directories[self.directories.len() - 1].handle.entry_stat(name)
         self.revalidate()
         Ok(info)
     }
-    pub fn rename(self, from: String, to: String, replace: Bool{false}) IOError! -[FS]> {
+    fn rename(self, from: String, to: String, replace: Bool{false}) IOError! -[FS]> {
         foundation_directory_authority_name(from)
         foundation_directory_authority_name(to)
         self.revalidate()
@@ -494,7 +539,7 @@ pub struct FoundationDirectoryAuthority {
         if replace -> parent.rename(from, to) else -> parent.rename(from, to, if_exists: .Refuse)
         self.revalidate()
     }
-    pub fn remove_tree(self, name: String) IOError! -[FS]> {
+    fn remove_tree(self, name: String) IOError! -[FS]> {
         foundation_directory_authority_name(name)
         self.revalidate()
         parent :: self.directories[self.directories.len() - 1].handle
@@ -502,16 +547,244 @@ pub struct FoundationDirectoryAuthority {
         parent.fsync()
         self.revalidate()
     }
+
+    fn path(self) -> String Never! {
+        self.directories[self.directories.len() - 1].path
+    }
+    fn fsync(self) IOError! -[FS]> {
+        self.revalidate()
+        self.directories[self.directories.len() - 1].handle.fsync()
+        self.revalidate()
+    }
+    // The process owns a duplicate of this held directory through exec. Git
+    // consumes only the child fd/cwd, never a re-opened authority pathname.
+    fn process_directory(self, spec: ProcessSpec, child_fd: Int, as_cwd: Bool) -[FS, Exec, Env]> ProcessSpec IOError! {
+        self.revalidate()
+        #Unsafe("the authority retains the held directory until the process provider duplicates its descriptor; the child descriptor slot is supplied by the compiler") {
+            files.compiler_with_process_directory(spec, self.directories[self.directories.len() - 1].handle, child_fd, as_cwd)
+        }
+    }
+    fn child(self, name: String, create: Bool{false}) -[FS]> FoundationDirectoryAuthority IOError! {
+        foundation_directory_authority_name(name)
+        self.revalidate()
+        parent :: self.directories[self.directories.len() - 1]
+        handle :: if create -> foundation_open_or_create_directory(parent.handle, name) else -> parent.handle.open_directory(name)
+        directories := self.directories
+        &directories.push(FoundationPublicationDirectory{handle: handle, path: files.join(parent.path, name), publication_parent: true})
+        foundation_ensure_directories_current(directories)
+        Ok(FoundationDirectoryAuthority{directories: directories})
+    }
+    fn private_child(self, prefix: String) -[FS, Env, Time]> FoundationDirectoryAuthority IOError! {
+        foundation_directory_authority_name(prefix)
+        self.revalidate()
+        parent :: self.directories[self.directories.len() - 1].handle
+        pid :: sys.pid()
+        stamp :: time.unix_ns()
+        loop attempt in 0..<128 {
+            name :: ".jet-{prefix}-{pid}-{stamp}-{attempt}"
+            parent.create_directory(name, mode: Val(448)) ?? {
+                if err == .AlreadyExists(_) -> next
+                return Err(err)
+            }
+            parent.fsync()
+            return self.child(name)
+        }
+        Err(IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(self.path()), os_code: None, cause: Val("could not reserve a private source directory")}))
+    }
+    // Source/Store.rs: traverse and read only the retained directory handles.
+    // Files are kept open through hashing; a rebound path cannot redirect bytes.
+    fn tree_hash(self, reject_hardlinks: Bool{false}) -[FS]> String IOError! {
+        self.revalidate()
+        rows := [FoundationHeldTreeFile]{}
+        root :: self.directories[self.directories.len() - 1].handle
+        foundation_collect_held_tree(root, "", &rows, 0, reject_hardlinks)
+        &rows.sort_by((left: FoundationHeldTreeFile, right: FoundationHeldTreeFile) -> left.relative <=> right.relative)
+        hasher := StreamingSHA256.new()
+        total := 0
+        loop row in rows {
+            if row.identity.size > MAX_TREE_FILE_BYTES || row.identity.size > MAX_TREE_TOTAL_BYTES - total -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package tree exceeds the hashing size bound")}))
+            &hasher.update(row.relative.bytes())
+            &hasher.update([U8]{0})
+            length :: loop shift in FOUNDATION_U64_SHIFTS -> U8{(row.identity.size >> shift).bit_and(255)}
+            &hasher.update(length)
+            actual := 0
+            loop {
+                chunk :: row.reader.read(FOUNDATION_READ_CHUNK)
+                if chunk.len() == 0 -> break
+                actual += chunk.len()
+                if actual > row.identity.size -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package source file grew while hashing")}))
+                &hasher.update(chunk)
+            }
+            after :: row.reader.stat()
+            if actual != row.identity.size || !foundation_same_file_identity(row.identity, after) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(row.relative), os_code: None, cause: Val("package source file changed while hashing")}))
+            total += actual
+        }
+        self.revalidate()
+        digest :: hasher.finalize_hex()
+        Ok("sha256-{digest}")
+    }
+    fn copy_tree_from(self, source: FoundationDirectoryAuthority, reject_hardlinks: Bool{true}) IOError! -[FS]> {
+        source.revalidate()
+        self.revalidate()
+        source_root :: source.directories[source.directories.len() - 1].handle
+        destination :: self.directories[self.directories.len() - 1].handle
+        foundation_copy_held_tree(source_root, destination, "", reject_hardlinks)
+        source.revalidate()
+        self.revalidate()
+    }
+    fn link_tree_from(self, source: FoundationDirectoryAuthority) IOError! -[FS, Env]> {
+        source.revalidate()
+        self.revalidate()
+        source_root :: source.directories[source.directories.len() - 1].handle
+        destination :: self.directories[self.directories.len() - 1].handle
+        foundation_link_held_tree(source_root, destination, "")
+        source.revalidate()
+        self.revalidate()
+    }
 }
-pub fn foundation_open_directory_authority(root: String, create: Bool{false}) -[FS, Env]> FoundationDirectoryAuthority IOError! {
+fn foundation_open_directory_authority(root: String, create: Bool{false}) -[FS, Env]> FoundationDirectoryAuthority IOError! {
     directories :: foundation_open_root_directories(root, create)
     Ok(FoundationDirectoryAuthority{directories: directories})
 }
 fn foundation_directory_authority_name(name: String) IOError! {
-    components :: foundation_normal_components(.Write, name)
-    if components.len() != 1 || components[0] != name -> return Err(foundation_io_error(.Write, name, "directory authority operation needs one normal basename"))
+    components :: foundation_normal_components(true, name)
+    if components.len() != 1 || components[0] != name -> return Err(foundation_io_error(true, name, "directory authority operation needs one normal basename"))
 }
 
+// The source-store excludes these names whether they name files or directories,
+// but inspects/refuses links and special entries before excluding them.
+fn foundation_source_tree_ignored(name: String) -> Bool Never! {
+    name.starts_with(".") || name == "build" || name == "target"
+}
+struct FoundationHeldTreeFile {
+    relative: String
+    reader: FileReader
+    identity: Stat
+}
+fn foundation_held_tree_names(directory: Directory) -[FS]> [String] IOError! {
+    out := [String]{}
+    loop entry in directory.list() {
+        if !entry.name_is_unicode -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(entry.path), os_code: None, cause: Val("package tree contains a non-UTF-8 name")}))
+        &out.push(entry.name)
+    }
+    Ok(out)
+}
+fn foundation_collect_held_tree(directory: Directory, relative: String, rows: &[FoundationHeldTreeFile], depth: Int, reject_hardlinks: Bool) IOError! -[FS]> {
+    if depth > MAX_TREE_DEPTH -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package tree exceeds the maximum directory depth")}))
+    names :: foundation_held_tree_names(directory)
+    loop name in names {
+        path :: if relative == "" -> name else -> files.join(relative, name)
+        info :: directory.entry_stat(name)
+        if info.is_symlink -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a symlink")}))
+        if info.is_dir {
+            child :: directory.open_directory(name)
+            if foundation_source_tree_ignored(name) -> next
+            foundation_collect_held_tree(child, path, &rows, depth + 1, reject_hardlinks)
+        } else if info.is_file {
+            reader :: directory.open(name)
+            opened :: reader.stat()
+            if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
+            if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
+            if foundation_source_tree_ignored(name) -> next
+            if rows.len() >= MAX_TREE_FILES -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains too many files")}))
+            &rows.push(FoundationHeldTreeFile{relative: path, reader: reader, identity: opened})
+        } else {
+            return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
+        }
+    }
+    if names != foundation_held_tree_names(directory) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package source changed while inspecting directory")}))
+}
+
+fn foundation_copy_held_tree(source: Directory, destination: Directory, relative: String, reject_hardlinks: Bool) IOError! -[FS]> {
+    names :: foundation_held_tree_names(source)
+    loop name in names {
+        path :: if relative == "" -> name else -> files.join(relative, name)
+        info :: source.entry_stat(name)
+        if info.is_symlink -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a symlink")}))
+        if info.is_dir {
+            child_source :: source.open_directory(name)
+            if foundation_source_tree_ignored(name) -> next
+            destination.create_directory(name, mode: Val(448))
+            destination.fsync()
+            child_destination :: destination.open_directory(name)
+            foundation_copy_held_tree(child_source, child_destination, path, reject_hardlinks)
+        } else if info.is_file {
+            reader :: source.open(name)
+            opened :: reader.stat()
+            if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
+            if reject_hardlinks && opened.links > 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("refusing multiply linked source file")}))
+            if foundation_source_tree_ignored(name) -> next
+            actual :: foundation_copy_held_reader(reader, destination, name)
+            if actual != opened.size || !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package source file changed while copying")}))
+        } else {
+            return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("package tree contains a special entry")}))
+        }
+    }
+    if names != foundation_held_tree_names(source) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("package source changed while copying directory")}))
+}
+
+fn foundation_copy_held_reader(reader: FileReader, destination: Directory, name: String) -[FS]> Int IOError! {
+    writer :: destination.create(name, if_exists: .Refuse, mode: Val(384))
+    actual := 0
+    loop {
+        chunk :: reader.read(FOUNDATION_READ_CHUNK)
+        if chunk.len() == 0 -> break
+        actual += chunk.len()
+        writer.write_all(chunk)
+    }
+    writer.fsync()
+    Ok(actual)
+}
+
+fn foundation_link_held_reader(reader: FileReader, destination: Directory, name: String) -[FS, Env]> Bool IOError! {
+    foundation_directory_authority_name(name)
+    #Unsafe("source-store linkat uses the live held reader and directory, a validated plain name, and no source pathname; raw syscall facts are classified here") {
+        facts :: files.compiler_link_held(reader, destination, name)
+        if !facts.available {
+            if sys.is_macos() || sys.name() == "ios" -> return Ok(false)
+            return Err(IOError.Other(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("held source linking is unavailable on this platform")}))
+        }
+        if !facts.held -> return Err(IOError.Other(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("dependency destination directory is closed")}))
+        if facts.value == 0 -> return Ok(true)
+        // Store directory_platform::link_file: exactly these Linux/Android
+        // results permit a byte copy. Other errors never select a fallback.
+        if facts.errno == 18 || facts.errno == 1 || facts.errno == 95 -> return Ok(false)
+        context :: IOContext{operation: .Write, resource: Val(name), os_code: Val(facts.errno), cause: None}
+        if facts.errno == 2 -> return Err(IOError.NotFound(context))
+        if facts.errno == 13 -> return Err(IOError.PermissionDenied(context))
+        if facts.errno == 17 -> return Err(IOError.AlreadyExists(context))
+        if facts.errno == 22 -> return Err(IOError.InvalidInput(context))
+        return Err(IOError.Other(context))
+    }
+}
+
+fn foundation_link_held_tree(source: Directory, destination: Directory, relative: String) IOError! -[FS, Env]> {
+    names :: foundation_held_tree_names(source)
+    loop name in names {
+        path :: if relative == "" -> name else -> files.join(relative, name)
+        info :: source.entry_stat(name)
+        if info.is_symlink -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store entry contains a symlink")}))
+        if info.is_dir {
+            child_source :: source.open_directory(name)
+            if foundation_source_tree_ignored(name) -> next
+            destination.create_directory(name, mode: Val(448))
+            destination.fsync()
+            child_destination :: destination.open_directory(name)
+            foundation_link_held_tree(child_source, child_destination, path)
+        } else if info.is_file {
+            reader :: source.open(name)
+            opened :: reader.stat()
+            if !opened.is_file -> return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store entry contains a special entry")}))
+            if foundation_source_tree_ignored(name) -> next
+            linked :: foundation_link_held_reader(reader, destination, name)
+            if !linked -> foundation_copy_held_reader(reader, destination, name)
+            if !foundation_same_file_identity(opened, reader.stat()) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store source file changed while linking")}))
+        } else {
+            return Err(IOError.InvalidInput(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("store entry contains a special entry")}))
+        }
+    }
+    if names != foundation_held_tree_names(source) -> return Err(IOError.Other(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("store entry changed while linking directory")}))
+}
 // Rust std::fs host-path semantics for host-configured locations (registry
 // root key and cache, Registry.rs:469-582,910-924): the OS resolves every
 // ANCESTOR, including symlinked parents and `..` after them (realpath, never
@@ -522,8 +795,8 @@ fn foundation_directory_authority_name(name: String) IOError! {
 // foundation_open_file_authority; strict callers keep their no-follow root walk.
 // `create` makes missing ancestors (0700, held no-follow) as create_dir_all
 // would, never the final component.
-pub fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
-    trimmed := ~path
+fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS, Env]> String IOError! {
+    trimmed := path.copy()
     loop trimmed.len() > 1 && (trimmed.ends_with("/") || trimmed.ends_with("/.")) {
         trimmed = if trimmed.ends_with("/") -> trimmed.removesuffix("/") else -> trimmed.removesuffix("/.")
         if trimmed == "" -> trimmed = "/"
@@ -550,10 +823,10 @@ pub fn foundation_resolve_path_ancestors(path: String, create: Bool{false}) -[FS
 // Rust rooted_authority::open: every parent component is a directory opened
 // relative to the held chain without following links; the final component
 // must be a single-link regular file.
-pub fn foundation_open_file_authority(root: String, relative: String) -[FS, Env]> FoundationFileAuthority IOError! {
-    components :: foundation_normal_components(.Read, relative)
+fn foundation_open_file_authority(root: String, relative: String) -[FS, Env]> FoundationFileAuthority IOError! {
+    components :: foundation_normal_components(false, relative)
     directories := foundation_open_root_directories(root)
-    if components.len() == 0 -> return Err(foundation_io_error(.Read, relative, "file authority path is empty"))
+    if components.len() == 0 -> return Err(foundation_io_error(false, relative, "file authority path is empty"))
     loop index in 0..<(components.len() - 1) {
         name :: components[index]
         parent_index :: directories.len() - 1
@@ -566,15 +839,15 @@ pub fn foundation_open_file_authority(root: String, relative: String) -[FS, Env]
     final_name :: components[components.len() - 1]
     handle :: parent.handle.open(final_name)
     opened :: handle.stat()
-    if !opened.is_file -> return Err(IOError.PermissionDenied(foundation_io_context(.Read, relative, "file authority input is not a regular file")))
-    if opened.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Read, relative, "file authority input has multiple hard links")))
+    if !opened.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input is not a regular file")}))
+    if opened.links != 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Read, resource: Val(relative), os_code: None, cause: Val("file authority input has multiple hard links")}))
     Ok(FoundationFileAuthority{directories: directories, handle: handle, relative: relative, path: files.join(parent.path, final_name), identity: opened})
 }
 
 // Rust `read_file_nofollow_at_root`: one regular file below `root`, read from
 // the held no-follow handle and bounded by `max_bytes`.
-pub fn foundation_read_file_nofollow_at_root(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
-    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(.Read, relative, "file read bound exceeds the tree hashing bound"))
+fn foundation_read_file_nofollow_at_root(root: String, relative: String, max_bytes: Int) -[FS, Env]> [U8] IOError! {
+    if max_bytes > MAX_TREE_FILE_BYTES -> return Err(foundation_io_error(false, relative, "file read bound exceeds the tree hashing bound"))
     source :: foundation_open_file_authority(root, relative)
     source.read_bounded(max_bytes)
 }
@@ -592,31 +865,36 @@ fn foundation_same_directory(path_stat: Stat, held: Stat) -> Bool Never! {
 
 // One staging/rename path; the callback is fallible production validation,
 // not a notification hook. All failures here are pre-publication.
-fn foundation_stage_and_rename(directories: [FoundationPublicationDirectory], parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID IOError! {
-    writer.write_all(contents)
+fn foundation_stage_and_rename(directories: [FoundationPublicationDirectory], parent: Directory, writer: FileWriter, temporary: String, final_name: String, contents: [U8], expected_destination: FileID?, before_rename: (fn() IOError! -[FS, Env]>)?, policy: FoundationPublicationPolicy{FoundationPublicationPolicy{}}) -[FS, Env]> FileID FoundationPublicationError! {
+    writer.write_all(contents) ?? return Err(FoundationPublicationError{phase: .WriteStage, error: err})
     // #3593: permissions are applied to the HELD writer, never a pathname.
     // The stage starts owner-only even when its final public mode is 0644.
-    writer.set_mode(policy.mode)
-    writer.fsync()
-    staged :: writer.stat()
-    if staged.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has multiple hard links")))
-    if staged.mode & 4095 != policy.mode -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, temporary, "file authority temporary has incorrect permissions")))
-    if before_rename == .Val(validate) -> validate()
-    foundation_ensure_directories_current(directories)
-    destination :: foundation_inspect_destination(parent, final_name, policy.destination_links)
+    writer.set_mode(policy.mode) ?? return Err(FoundationPublicationError{phase: .SetMode, error: err})
+    writer.fsync() ?? return Err(FoundationPublicationError{phase: .SyncStage, error: err})
+    staged :: writer.stat() ?? return Err(FoundationPublicationError{phase: .InspectStage, error: err})
+    if staged.links != 1 -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(temporary), os_code: None, cause: Val("file authority temporary has multiple hard links")})})
+    if staged.mode.bit_and(4095) != policy.mode -> return Err(FoundationPublicationError{phase: .InspectStage, error: IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(temporary), os_code: None, cause: Val("file authority temporary has incorrect permissions")})})
+    if before_rename == .Val(validate) -> validate() ?? return Err(FoundationPublicationError{phase: .ValidateSource, error: err})
+    foundation_ensure_directories_current(directories) ?? return Err(FoundationPublicationError{phase: .ValidateAuthority, error: err})
+    destination := FileID?{None}
+    if foundation_inspect_destination(parent, final_name, policy.destination_links) == {
+        .Val(identity) -> destination = Val(identity)
+        .None -> {}
+        .Err(error) -> { return Err(FoundationPublicationError{phase: .InspectDestination, error: error}) }
+    }
     if destination != expected_destination {
         // An immutable CreateNew contender appeared after staging. Report the
         // typed collision so callers can authenticate identical/conflict bytes;
         // ordinary replacement and every authority/durability refusal stay Other.
-        if policy.create == .CreateNew && expected_destination == None && destination != None -> return Err(IOError.AlreadyExists(foundation_io_context(.Write, final_name, "file authority publication target already exists")))
-        return Err(IOError.Other(foundation_io_context(.Write, final_name, "file authority publication target changed while staging")))
+        if policy.create == .CreateNew && expected_destination == None && destination != None -> return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(final_name), os_code: None, cause: Val("file authority publication target already exists")})})
+        return Err(FoundationPublicationError{phase: .InspectDestination, error: IOError.Other(IOContext{operation: .Write, resource: Val(final_name), os_code: None, cause: Val("file authority publication target changed while staging")})})
     }
     if policy.create == .CreateNew {
         // #3593: descriptor-relative atomic no-replace rename is mandatory;
         // checking absence then ordinary rename would clobber a competing key.
-        parent.rename(temporary, final_name, if_exists: .Refuse)
+        parent.rename(temporary, final_name, if_exists: .Refuse) ?? return Err(FoundationPublicationError{phase: .Rename, error: err})
     } else {
-        parent.rename(temporary, final_name)
+        parent.rename(temporary, final_name) ?? return Err(FoundationPublicationError{phase: .Rename, error: err})
     }
     Ok(staged.id)
 }
@@ -627,11 +905,11 @@ fn foundation_inspect_destination(parent: Directory, name: String, links: Founda
     if parent.entry_stat(name) == {
         .Ok(stat) -> {
             if stat.is_symlink && links == .ReplaceBinding {
-                if stat.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, name, "file authority publication target has multiple hard links")))
+                if stat.links != 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target has multiple hard links")}))
                 return Ok(Val(stat.id))
             }
-            if stat.is_symlink || !stat.is_file -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, name, "file authority publication target is not a regular file")))
-            if stat.links != 1 -> return Err(IOError.PermissionDenied(foundation_io_context(.Write, name, "file authority publication target has multiple hard links")))
+            if stat.is_symlink || !stat.is_file -> return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target is not a regular file")}))
+            if stat.links != 1 -> return Err(IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(name), os_code: None, cause: Val("file authority publication target has multiple hard links")}))
             Ok(Val(stat.id))
         }
         .Err(error) -> if error == {
@@ -644,7 +922,7 @@ fn foundation_inspect_destination(parent: Directory, name: String, links: Founda
 // One no-follow root walk shared by reads and writes.
 fn foundation_open_root_directories(root: String, create: Bool{false}) -[FS, Env]> [FoundationPublicationDirectory] IOError! {
     loop part in root.split("/") {
-        if part == ".." -> return Err(foundation_io_error(.Write, root, "file authority root must not contain parent components"))
+        if part == ".." -> return Err(foundation_io_error(true, root, "file authority root must not contain parent components"))
     }
     absolute :: files.absolute(root)
     directories := [FoundationPublicationDirectory]{FoundationPublicationDirectory{handle: files.open_directory("/"), path: "/", publication_parent: false}}
@@ -665,48 +943,44 @@ fn foundation_ensure_directories_current(directories: [FoundationPublicationDire
     loop directory in directories {
         if !foundation_same_directory(files.stat(directory.path), directory.handle.stat()) {
             detail :: if directory.publication_parent -> "file authority publication parent moved while it was held" else -> "file authority root moved while it was held"
-            return Err(IOError.Other(foundation_io_context(.Write, directory.path, detail)))
+            return Err(IOError.Other(IOContext{operation: .Write, resource: Val(directory.path), os_code: None, cause: Val(detail)}))
         }
     }
 }
 
 // Rust rooted_authority::normal_components: the plain components of a
 // relative path; `..` and absolute paths are refused.
-fn foundation_normal_components(operation: IOOperation, relative: String) -> [String] IOError! {
-    if relative.starts_with("/") -> return Err(foundation_io_error(operation, relative, "file authority path must be relative and normalized"))
+fn foundation_normal_components(write: Bool, relative: String) -> [String] IOError! {
+    if relative.starts_with("/") -> return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
     components := [String]{}
     loop part in relative.split("/") {
         if part == "" || part == "." -> next
-        if part == ".." -> return Err(foundation_io_error(operation, relative, "file authority path must be relative and normalized"))
+        if part == ".." -> return Err(foundation_io_error(write, relative, "file authority path must be relative and normalized"))
         &components.push(part)
     }
     Ok(components)
 }
 
-fn foundation_io_context(operation: IOOperation, resource: String, cause: String) -> IOContext Never! {
-    IOContext{operation: operation, resource: Val(resource), os_code: None, cause: Val(cause)}
-}
-
-// Existing rooted authority InvalidInput refusals; path-only InvalidData
-// refusals construct their typed error explicitly at the caller.
-fn foundation_io_error(operation: IOOperation, resource: String, cause: String) -> IOError Never! {
-    IOError.InvalidInput(foundation_io_context(operation, resource, cause))
+// Existing rooted authority InvalidInput refusals, including invalid source
+// bytes and read bounds, use Core's canonical typed input-error variant.
+fn foundation_io_error(write: Bool, resource: String, cause: String) -> IOError Never! {
+    IOError.InvalidInput(IOContext{operation: if write -> .Write else -> .Read, resource: Val(resource), os_code: None, cause: Val(cause)})
 }
 
 // Attach availability detail to an IOError: the kind and the operation,
 // resource and OS code stay; only the cause is replaced.
-pub fn foundation_io_error_with_cause(error: IOError, cause: String) -> IOError Never! {
+fn foundation_io_error_with_cause(error: IOError, cause: String) -> IOError Never! {
     if error == {
         .NotFound(context) -> IOError.NotFound(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .PermissionDenied(context) -> IOError.PermissionDenied(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .AlreadyExists(context) -> IOError.AlreadyExists(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .InvalidInput(context) -> IOError.InvalidInput(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
-        .InvalidData(context) -> IOError.InvalidData(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .TimedOut(context) -> IOError.TimedOut(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .Cancelled(context) -> IOError.Cancelled(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .Closed(context) -> IOError.Closed(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .Protocol(context) -> IOError.Protocol(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         .Other(context) -> IOError.Other(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
+        .Unsupported(context) -> IOError.Unsupported(IOContext{operation: context.operation, resource: context.resource, os_code: context.os_code, cause: Val(cause)})
         // Canonical Core's ResourceLimit is ProcessResourceLimit, not IOContext.
         // Preserve its typed identity; context attachment remains gated #3593.
         .ResourceLimit(_) -> error
@@ -715,7 +989,7 @@ pub fn foundation_io_error_with_cause(error: IOError, cause: String) -> IOError 
 
 // Moved from Provider/RemoteCheckout: one descriptor-relative tree remover.
 // Core Directory open/list/unlink leaves remain #3593; no pathname fallback.
-pub fn foundation_remove_held_tree(parent: Directory, child: String) IOError! -[FS]> {
+fn foundation_remove_held_tree(parent: Directory, child: String) IOError! -[FS]> {
     directory :: parent.open_directory(child) ?? {
         if err == .NotFound(_) -> return
         parent.remove(child) ?? {

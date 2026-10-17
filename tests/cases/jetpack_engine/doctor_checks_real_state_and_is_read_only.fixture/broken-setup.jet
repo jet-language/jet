@@ -1,0 +1,22 @@
+// SETUP-PORT jetpack_engine.rs:2559-2574; no assertions.
+use core.files as files
+fn doctor_setup_writable(path: String) {
+    info :: files.stat(path) ?? panic("metadata")
+    if info.is_dir {
+        entries :: files.list_dir(path) ?? panic("directory")
+        loop entry in entries -> doctor_setup_writable(entry.path)
+    }
+    if core.sys.is_unix() -> files.chmod(path, info.mode | 0o200) ?? panic("writable")
+}
+fn run(args: [String]) {
+    meta :: args[0]
+    old_used :: args[1]
+    output :: args[2]
+    root :: args[3]
+    text :: files.read(meta) ?? panic("meta")
+    files.write(meta, text.replace("\"last_used_at\": \"{old_used}\"", "\"last_used_at\": \"0\"")) ?? panic("stale meta")
+    doctor_setup_writable(output)
+    files.write(files.join(output, "payload"), "corrupt bytes") ?? panic("corrupt output")
+    files.create_dir_all(files.join(root, ".locks")) ?? panic("locks")
+    files.write(files.join(root, ".locks/abandoned.lock"), "pid=4294967294\n") ?? panic("stale lock")
+}

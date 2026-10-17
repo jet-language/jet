@@ -1,0 +1,22 @@
+// FSIoEnvOsTesting.rs645-672: the one logical environment writer is already
+// LogicalEnvironment.jet. These C result adapters add no OS environment writes.
+#Export(c) fn jet_std_env_try_set(name: I64, value: I64, error: I64) -> I64 {
+    status :: jet_rt_logical_env_set(name, value)
+    if jet_scheduler_native_propagate() != (I64{0}) -> return I64{0}
+    if status == (I64{0}) -> return I64{1}
+    kind :: if status == (I64{-1}) -> I64{0} else -> I64{1}
+    encoding_store(error, env_overlay_error_new(kind))
+    I64{0}
+}
+#Export(c) fn jet_std_env_unset(name: I64, removed: I64, error: I64) -> I64 {
+    status :: jet_rt_logical_env_unset(name)
+    if jet_scheduler_native_propagate() != (I64{0}) -> return I64{0}
+    if status < (I64{0}) {
+        encoding_store(error, env_overlay_error_new(I64{0}))
+        return I64{0}
+    }
+    #Unsafe("removed lends exactly one initialized writable C bool byte; no adjacent padding belongs to this output") {
+        os_store_u8(removed, status)
+    }
+    I64{1}
+}

@@ -1,0 +1,42 @@
+# HAND-PORT tests/jetpack_engine.rs:5755-5779 unknown_named_source_in_env_is_friendly
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: unknown_named_source_in_env_is_friendly.fixture
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
+# #[test]
+# fn unknown_named_source_in_env_is_friendly() {
+#     let proj = Scratch::new("proj");
+#     let root = Scratch::new("root");
+#     // References `neovim@beta` but only declares `stable`.
+#     fs::write(
+#         proj.join("env.jet"),
+#         "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"stable\", \"NixOS/nixpkgs/nixos-24.05@github\"),\n        pkg.packages([\"neovim@beta\"])\n    ]\n}\n",
+#     )
+#     .unwrap();
+#     let output = jetpack()
+#         .args(["build", "--no-color", "--offline"])
+#         .current_dir(&proj.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+#         .output()
+#         .unwrap();
+#     assert_eq!(output.status.code(), Some(2));
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     assert!(stderr.contains("not a known source"), "stderr: {stderr}");
+#     assert!(
+#         stderr.contains("stable"),
+#         "should list declared names: {stderr}"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build --no-color --offline
+cwd: project
+exit: 2
+stderr: ~ "not a known source" # original contains predicate
+stderr: ~ "stable" # original contains predicate
+

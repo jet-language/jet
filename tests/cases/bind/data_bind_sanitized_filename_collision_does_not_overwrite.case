@@ -1,0 +1,11 @@
+# Port of tests/bind.rs:1055-1093; input bytes copied verbatim.
+# PENDING-SAME-HEAD: historical reference default output layout lacks original bindings/a_b.jet; original path assertion retained.
+fixture: fixtures/data_bind_sanitized_filename_collision_does_not_overwrite
+step: jet "inspect" "bind" "json" "a b.json" "--type" "First"
+exit: 0
+file: "bindings/a_b.jet" = data_bind_sanitized_filename_collision_does_not_overwrite.0.generated.jet.out
+copy: bindings/a_b.jet before.jet
+step: jet "inspect" "bind" "json" "a_b.json" "--type" "Second"
+exit: 1
+stderr: = data_bind_sanitized_filename_collision_does_not_overwrite.1.stderr
+file: bindings/a_b.jet == before.jet

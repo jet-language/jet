@@ -440,21 +440,17 @@ impl JetHTTPBody {
             JetHTTPBodyKind::Text,
         )
     }
-    fn from_text_with_mime(text: String, content_type: jet_std::JetMIME) -> Self {
+    /// `content_type` is the rendered `core.net.mime.MIME` (`to_string()`);
+    /// the compiler converts the source-owned value at the call site.
+    fn from_text_with_mime(text: String, content_type: String) -> Self {
         Self::from_source_bytes(
             text.into_bytes(),
-            Some(content_type.to_string_value()),
+            Some(content_type),
             JetHTTPBodyKind::Text,
         )
     }
 
 
-    fn from_json<T: __jet_Encode>(value: T) -> Self {
-        Self::from_bytes_with_content_type(
-            jet_enc_json_to_string(&value).into_bytes(),
-            Some("application/json".to_string()),
-        )
-    }
 
     fn from_form<I>(values: I) -> Self
     where
@@ -576,13 +572,15 @@ impl JetHTTPBody {
     }
 
     fn from_reader(reader: JetFileReader) -> Result<Self, JetHTTPError> {
-        Ok(Self::reader(reader.inner, None))
+        let stream = reader.inner.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(Self::reader(stream, None))
     }
 
     fn from_reader_with_length(reader: JetFileReader, length: i64) -> Result<Self, JetHTTPError> {
         let length = usize::try_from(length).ok().filter(|length| *length <= 1024 * 1024 * 1024)
             .ok_or(JetHTTPError::BodyTooLarge { limit: length })?;
-        Ok(Self::reader(std::io::Read::take(reader.inner, length as u64), Some(length)))
+        let stream = reader.inner.into_inner().unwrap_or_else(std::sync::PoisonError::into_inner);
+        Ok(Self::reader(std::io::Read::take(stream, length as u64), Some(length)))
     }
 
     fn bridge(
@@ -876,7 +874,12 @@ fn jet_http_body_copy_to(
         if total > limit {
             return Err(JetHTTPError::BodyTooLarge { limit: limit as i64 });
         }
-        writer.inner.write_all(&chunk).map_err(|_| JetHTTPError::IO { operation: "copy body".to_string() })?;
+        writer
+            .inner
+            .get_mut()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .write_all(&chunk)
+            .map_err(|_| JetHTTPError::IO { operation: "copy body".to_string() })?;
     }
     i64::try_from(total).map_err(|_| JetHTTPError::BodyTooLarge { limit: limit as i64 })
 }
@@ -1136,18 +1139,18 @@ impl JetHTTPHeaders {
     }
 }
 
-fn jet_http_headers_first(headers: &JetHTTPHeaders, name: &String) -> Option<String> {
+fn jet_http_headers_first(headers: &JetHTTPHeaders, name: &str) -> Option<String> {
     headers.get(name).cloned()
 }
 
-fn jet_http_headers_all(headers: &JetHTTPHeaders, name: &String) -> Vec<String> {
+fn jet_http_headers_all(headers: &JetHTTPHeaders, name: &str) -> Vec<String> {
     headers.all(name).into_iter().map(str::to_string).collect()
 }
 
 fn jet_http_headers_append(
     mut headers: JetHTTPHeaders,
-    name: &String,
-    value: &String,
+    name: &str,
+    value: &str,
 ) -> Result<JetHTTPHeaders, JetHTTPError> {
     headers.append(name, value).map_err(|_| JetHTTPError::InvalidHeader)?;
     Ok(headers)
@@ -1155,14 +1158,14 @@ fn jet_http_headers_append(
 
 fn jet_http_headers_set(
     mut headers: JetHTTPHeaders,
-    name: &String,
-    value: &String,
+    name: &str,
+    value: &str,
 ) -> Result<JetHTTPHeaders, JetHTTPError> {
     headers.set(name, value).map_err(|_| JetHTTPError::InvalidHeader)?;
     Ok(headers)
 }
 
-fn jet_http_headers_remove(mut headers: JetHTTPHeaders, name: &String) -> JetHTTPHeaders {
+fn jet_http_headers_remove(mut headers: JetHTTPHeaders, name: &str) -> JetHTTPHeaders {
     headers.remove(name);
     headers
 }
@@ -1275,10 +1278,10 @@ pub fn jet_http_reason_phrase(code: i64) -> String {
     phrase.to_string()
 }
 
-pub fn jet_http_basic_auth(user: &String, password: &String) -> String {
+pub fn jet_http_basic_auth(user: &str, password: &str) -> String {
     format!("Basic {user}:{password}")
 }
 
-pub fn jet_http_bearer_auth(token: &String) -> String {
+pub fn jet_http_bearer_auth(token: &str) -> String {
     format!("Bearer {token}")
 }

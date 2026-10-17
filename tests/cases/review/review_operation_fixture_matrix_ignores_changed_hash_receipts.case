@@ -1,0 +1,8 @@
+# PORT tests/review.rs::review_operation_fixture_matrix_ignores_changed_hash_receipts; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_operation_fixture_matrix_ignores_changed_hash_receipts.fixture
+mkdir: head/.jet/codemods
+write: head/.jet/codemods/rename.log.json rename.txt
+step: jet review {work}/base/run.jet {work}/head/run.jet --json
+exit: 0
+stdout: !~ "\"kind\":\"renamed\"" # Original negative predicate.

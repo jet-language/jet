@@ -1,0 +1,17 @@
+
+derive T.TypeName {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn get_value(self) -> @param { self.value.copy() }
+    fn type_name(self) -> String { T.$name }
+}
+
+#TypeName
+struct Box<T> { value: T }
+
+fn run() {
+    boxed := Box<Int>{ value: 7 }
+    n := boxed.get_value()
+    print(n)
+    print(boxed.type_name())
+}

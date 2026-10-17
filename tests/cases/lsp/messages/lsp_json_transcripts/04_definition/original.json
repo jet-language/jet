@@ -1,0 +1,26 @@
+{
+  "description": "go-to-definition returns the span where the function is defined",
+  "source": "fn greet() {}\nfn main() {\n    greet();\n}\n",
+  "steps": [
+    {
+      "send": {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"capabilities":{}}},
+      "expect_contains": ["definitionProvider"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","method":"initialized","params":{}},
+      "expect_notification": null
+    },
+    {
+      "open": {"uri": "file:///tmp/lsp_def_test.jet"},
+      "expect_notification": "publishDiagnostics"
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":2,"method":"textDocument/definition","params":{"textDocument":{"uri":"file:///tmp/lsp_def_test.jet"},"position":{"line":2,"character":4}}},
+      "expect_contains": ["uri", "range"]
+    },
+    {
+      "send": {"jsonrpc":"2.0","id":99,"method":"shutdown","params":{}},
+      "expect_contains": ["result"]
+    }
+  ]
+}

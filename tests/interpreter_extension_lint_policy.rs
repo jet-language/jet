@@ -16,24 +16,13 @@ fn compiler_extension() -> PathBuf {
         .join("crates/jet-pkg-model/fixtures/compiler_extension/lint_no_x.wasm")
 }
 
-fn run(dir: &Path, interpret: bool) -> Output {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
-    command.arg("run");
-    if interpret {
-        command.arg("--interpret");
-    }
-    command
+fn run(dir: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
         .arg("main.jet")
         .current_dir(dir)
         .env("JET_COMPILER_EXTENSION", compiler_extension())
-        .env(
-            "JET_RUN_CACHE_DIR",
-            dir.join(if interpret {
-                "cache-interpreter"
-            } else {
-                "cache-default"
-            }),
-        )
+        .env("JET_STORE_DIR", dir.join("cache-default"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run literal jet CLI")
@@ -78,21 +67,19 @@ fn assert_retired_policy_ignored(label: &str, output: &Output) {
 }
 
 #[test]
-fn literal_cli_run_and_interpret_enforce_compiler_extension_lint_policy() {
+fn literal_cli_run_enforces_compiler_extension_lint_policy() {
     let project = Scratch::new("extension-lint-policy");
     fs::write(project.join("package.jet"), POLICY).unwrap();
     fs::write(project.join("main.jet"), SOURCE).unwrap();
 
-    assert_denied("jet run", &run(&project.path, false));
-    assert_denied("jet run --interpret", &run(&project.path, true));
+    assert_denied("jet run", &run(&project.path));
 }
 
 #[test]
-fn literal_cli_run_and_interpret_ignore_retired_pkg_jet_lint_policy() {
+fn literal_cli_run_ignores_retired_pkg_jet_lint_policy() {
     let project = Scratch::new("retired-extension-lint-policy");
     fs::write(project.join("pkg.jet"), POLICY).unwrap();
     fs::write(project.join("main.jet"), SOURCE).unwrap();
 
-    assert_retired_policy_ignored("jet run", &run(&project.path, false));
-    assert_retired_policy_ignored("jet run --interpret", &run(&project.path, true));
+    assert_retired_policy_ignored("jet run", &run(&project.path));
 }

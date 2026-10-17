@@ -9,6 +9,14 @@ struct Incident {
     kind: String
 }
 
+fn owned_pair(seed: Int) -> (left: [Int], right: [Int]) {
+    (left: [seed, seed + 1], right: [seed + 2])
+}
+
+fn owned_incident() -> Incident {
+    Incident{id: 3, severity: 2, title: "owned result", kind: "page"}
+}
+
 fn run() {
     incident :: Incident{id: 1, severity: 5, title: "database down", kind: "page"}
     Incident{id, severity: sev, ..} :: incident
@@ -18,4 +26,10 @@ fn run() {
         {kind: "page", title, ..} -> { print("page {title}") }
         else -> { print("other") }
     }
+    loop i in 0..<3 {
+        (left, right) :: owned_pair(i)
+        print(left[1] + right[0])
+    }
+    Incident{id: owned_id, title: owned_title, ..} :: owned_incident()
+    print("#{owned_id} {owned_title}")
 }

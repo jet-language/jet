@@ -51,6 +51,7 @@ pub fn with_terminator_driver<R>(driver: Option<TerminatorDriver>, work: impl Fn
     work()
 }
 
+
 /// Every raw kind has a distinct tag. No statement/continuation decision is
 /// encoded here, and adding a token kind must update this exhaustive match.
 #[doc(hidden)]
@@ -275,6 +276,7 @@ fn insert_terminators(src: &str, toks: &mut Vec<Token>, diags: &mut Vec<Diagnost
 pub fn lex(src: &str) -> (Vec<Token>, Vec<Diagnostic>) {
     let (mut toks, mut diags) = lex_raw(src);
     insert_terminators(src, &mut toks, &mut diags);
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::Tokens, toks.len());
     (toks, diags)
 }
 

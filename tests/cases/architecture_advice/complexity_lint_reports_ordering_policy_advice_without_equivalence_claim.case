@@ -1,0 +1,9 @@
+# Port of tests/architecture_advice.rs:115-162 and assert_architecture_contract.
+# Exact snapshots retain every field-order, source-evidence, uncertainty and absence assertion.
+# PENDING-GRAMMAR: typed JSON span normalization.
+fixture: fixtures
+step: jet lint --complexity ordering_policy.jet --json
+normalize: json stdout $.check.elapsed_ms : number # Wall-clock checking duration varies; every other emitted byte remains exact.
+stdout: = complexity_lint_reports_ordering_policy_advice_without_equivalence_claim.json.out
+step: jet lint --complexity ordering_policy.jet
+stdout: = complexity_lint_reports_ordering_policy_advice_without_equivalence_claim.text.out

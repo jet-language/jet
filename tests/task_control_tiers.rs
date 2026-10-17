@@ -111,7 +111,7 @@ use core.time as time
 
 fn run() {{
     (sender, receiver) :: channel<Int>()
-    second_sender :: ~sender
+    second_sender :: sender.copy()
     task.group limited(limit: {limit}) {{
         first :: task {{
             sender.send(1)
@@ -157,7 +157,7 @@ fn parser_accepts_one_keyword_task_family() {
 fn checked_task_bundle_for(
     name: &str,
     source: &str,
-) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
+) -> (jet::Driver::CheckedSourceBundle, std::path::PathBuf) {
     let dir = std::env::temp_dir().join(format!(
         "jet_task_control_frontend_{name}_{}",
         std::process::id()
@@ -167,22 +167,22 @@ fn checked_task_bundle_for(
     fs::write(&path, source).unwrap();
     let shown = path.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("task source must load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     let errors = diagnostics
         .iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "sema diagnostics: {errors:?}");
-    (bundle, dir)
+    (jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals), dir)
 }
 
-fn checked_task_bundle(name: &str) -> (jet::AST::ProgramBundle, std::path::PathBuf) {
+fn checked_task_bundle(name: &str) -> (jet::Driver::CheckedSourceBundle, std::path::PathBuf) {
     checked_task_bundle_for(name, SOURCE)
 }
 
 #[test]
 fn stream_drop_uses_task_cancel_cleanup_path() {
-    let (bundle, dir) = checked_task_bundle_for("stream", STREAM_SOURCE);
+    let (_, dir) = checked_task_bundle_for("stream", STREAM_SOURCE);
     let _ = fs::remove_dir_all(dir);
 
     let interpreted = run_forced_interpreter("stream", STREAM_SOURCE);
@@ -190,15 +190,11 @@ fn stream_drop_uses_task_cancel_cleanup_path() {
 
     let (code, stdout, stderr) =
         run_default_multi("stream_cancel", "main.jet", &[("main.jet", STREAM_SOURCE)]);
-    assert_eq!(code, 0, "default JIT: {stderr}");
+    assert_eq!(code, 0, "default run: {stderr}");
     assert_eq!(
         strip_tier_trace(&stdout),
         STREAM_EXPECTED,
-        "JIT drifted: {stderr}"
-    );
-    assert!(
-        stderr.lines().any(|line| line.contains("tier1 native")),
-        "stream fixture did not execute in resident JIT: {stderr}"
+        "default run drifted: {stderr}"
     );
 
     if have_rustc() {
@@ -273,7 +269,7 @@ fn run_forced_interpreter(name: &str, source: &str) -> String {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, source).unwrap();
-    let result = match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    let result = match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -295,11 +291,11 @@ fn run_forced_interpreter(name: &str, source: &str) -> String {
 fn sema_resolves_task_failure_rail_and_core_reachability() {
     let (bundle, dir) = checked_task_bundle("sema");
     assert!(
-        bundle.used_core.contains("core.concurrency::task"),
+        bundle.bundle.used_core.contains("core.concurrency::task"),
         "canonical task syntax must reach the shared Prelude: {:?}",
-        bundle.used_core
+        bundle.bundle.used_core
     );
-    let run = bundle.modules[bundle.entry]
+    let run = bundle.bundle.modules[bundle.bundle.entry]
         .items
         .iter()
         .find_map(|item| match item {
@@ -329,11 +325,6 @@ fn sema_resolves_direct_nested_task_control_bindings() {
         .spawn(|| {
             let (bundle, dir) = checked_task_bundle_for("nested", NESTED_SOURCE);
             assert!(bundle.used_core.contains("core.concurrency::task"));
-            assert!(
-                common::cranelift_resident_safe(&bundle),
-                "nested task source must stay resident-JIT safe: {}",
-                common::cranelift_resident_safe_detail(&bundle)
-            );
             let _ = fs::remove_dir_all(dir);
 
             let interpreted = run_forced_interpreter("nested", NESTED_SOURCE);
@@ -343,10 +334,6 @@ fn sema_resolves_direct_nested_task_control_bindings() {
                 run_default_multi("task_nested", "main.jet", &[("main.jet", NESTED_SOURCE)]);
             assert_eq!(code, 0, "resident JIT: {stderr}");
             assert_eq!(stdout, interpreted, "resident JIT output drifted: {stderr}");
-            assert!(
-                stderr.lines().any(|line| line.contains("tier1 native")),
-                "nested task source did not execute in resident JIT: {stderr}"
-            );
 
             if have_rustc() {
                 let (code, stdout) = build_and_run("task_nested", NESTED_SOURCE);
@@ -431,10 +418,6 @@ fn task_combinators_cancel_losers_on_every_tier() {
     );
     assert_eq!(code, 0, "resident JIT: {stderr}");
     assert_eq!(stdout, expected, "resident JIT output drifted: {stderr}");
-    assert!(
-        stderr.lines().any(|line| line.contains("tier1 native")),
-        "loser-cleanup source did not execute in resident JIT: {stderr}"
-    );
 
     if have_rustc() {
         let (code, stdout) = build_and_run("task_loser_cleanup", LOSER_CLEANUP_SOURCE);
@@ -443,8 +426,7 @@ fn task_combinators_cancel_losers_on_every_tier() {
     }
 }
 
-/// `run_default_multi` passes `--trace-tiers`, which may prefix diagnostics of
-/// its own on stdout. Keep only the program's transcript.
+/// Keep only the program's transcript lines.
 fn strip_tier_trace(stdout: &str) -> String {
     stdout
         .lines()

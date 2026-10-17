@@ -1,0 +1,62 @@
+# Port of tests/jet_perf_trace_parts/views.rs:1-164; all original command/stream/file assertions retained.
+# PENDING-GRAMMAR(batch-four): {pid} is the kit's live process PID (original std::process::id()).
+fixture: fixtures/views
+step: jet perf attach {pid} --out {work}/session.jettrace
+exit: 0
+stderr: ~ "trace:" # original predicate
+file: session.jettrace is-file
+file: session.jettrace ~ "\"schema\":\"jet.trace\"" # original predicate
+file: session.jettrace ~ "\"version\":1" # original predicate
+file: session.jettrace ~ "\"trace_id\":" # original predicate
+file: session.jettrace ~ "\"capture_policy\":" # original predicate
+step: jet perf view session.jettrace
+exit: 0
+stdout: ~ "schema jet.trace v1" # original predicate
+stdout: ~ "command attach" # original predicate
+step: jet perf view session.jettrace --json
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original predicate
+stdout: ~ "\"timeline\":" # original predicate
+stdout: ~ "\"flamegraph\":" # original predicate
+step: jet perf view session.jettrace --html
+exit: 0
+stdout: ~ "<!doctype html>" # original predicate
+stdout: ~ "flamegraph" # original predicate
+stdout: ~ "timeline" # original predicate
+step: jet perf view session.jettrace --frames=all
+env: NO_COLOR=1
+exit: 0
+stdout: !~ "\u001b" # original predicate: no ESC byte
+stdout: ~ "frames all" # original predicate
+stdout: ~ "generated-frames:" # original predicate
+step: jet perf compare session.jettrace session.jettrace
+exit: 0
+stdout: ~ "compare ok" # original predicate
+step: jet perf export session.jettrace --json
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.projection\"" # original predicate
+stdout: ~ "\"loss\":" # original predicate
+stdout: ~ "\"schema\":\"jet.trace\"" # original predicate
+stdout: ~ "--chrome" # original predicate
+stdout: !~ "no pprof/otel/chrome payloads" # original predicate
+step: jet perf export session.jettrace --pprof
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.pprof-projection\"" # original predicate
+stdout: ~ "\"loss\":" # original predicate
+step: jet perf export session.jettrace --otel
+exit: 0
+stdout: ~ "otel-projection" # original predicate
+step: jet perf export session.jettrace --chrome
+exit: 0
+stdout: ~ "chrome-projection" # original predicate
+stdout: ~ "\"traceEvents\":[" # original predicate
+step: jet perf export session.jettrace --emit-profile-map
+exit: 0
+stdout: ~ "profile-map-projection" # original predicate
+step: jet perf compare session.jettrace session.jettrace --override-identity
+exit: 0
+stdout: ~ "budgets:" # original predicate
+copy: corrupt.txt corrupt.jettrace
+step: jet perf view corrupt.jettrace
+exit: 2
+stderr: ~ "jettrace" # original predicate

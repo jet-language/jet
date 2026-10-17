@@ -1,0 +1,462 @@
+// `jet inspect rights` (Source/CmdInspect.rs `run_rights`): every checked
+// callable's declared and inferred rights rows, walked against the selected
+// application authority by the one canonical walker (jet-foundation sema.rs
+// `RightsRow::walk`), with the semantic index's effect provenance for each
+// refusal. The facts are the checked program's own: the Doc-mode modules the
+// semantic index reads (SemIndexBuild.jet summaries and witnesses) and the
+// entry's application authority.
+use core.files as cli_files
+use jet_driver.[
+    JetDriverAuthorityPolicy,
+    JetDriverCompileResult,
+    JetDriverDocModule,
+    JetDriverVerbOutput,
+    JET_DRIVER_EXIT_OK,
+]
+use jet_foundation.[
+    EffectRowEntry,
+    Func,
+    Item,
+    Span,
+]
+
+// Effects.rs `EFFECT_DECLARATIONS`: the Prelude effect declarations in
+// source order, with their irreversibility.
+struct JetCLIEffectDeclaration {
+    name: String
+    irreversible: Bool
+}
+
+JET_CLI_EFFECT_DECLARATIONS :: [JetCLIEffectDeclaration]{
+    JetCLIEffectDeclaration{name: "Net", irreversible: true},
+    JetCLIEffectDeclaration{name: "FS", irreversible: false},
+    JetCLIEffectDeclaration{name: "FS.Read", irreversible: false},
+    JetCLIEffectDeclaration{name: "FS.Write", irreversible: true},
+    JetCLIEffectDeclaration{name: "IO", irreversible: false},
+    JetCLIEffectDeclaration{name: "DB", irreversible: false},
+    JetCLIEffectDeclaration{name: "Time", irreversible: false},
+    JetCLIEffectDeclaration{name: "Rand", irreversible: false},
+    JetCLIEffectDeclaration{name: "Env", irreversible: false},
+    JetCLIEffectDeclaration{name: "Exec", irreversible: true},
+    JetCLIEffectDeclaration{name: "Log", irreversible: false},
+    JetCLIEffectDeclaration{name: "GPU", irreversible: false},
+    JetCLIEffectDeclaration{name: "FFI", irreversible: true},
+    JetCLIEffectDeclaration{name: "Browser", irreversible: false},
+    JetCLIEffectDeclaration{name: "Secret", irreversible: false},
+}
+
+// Syntax.rs `BUILTIN_EFFECT_LEAVES`.
+JET_CLI_BUILTIN_EFFECT_LEAVES :: [String]{
+    "DB.Read", "DB.Write", "FS.Read", "FS.Write", "Rand.Draw", "Exec.Exit", "Exec.Args", "Time.Wait",
+    "FFI.Go", "FFI.Java", "FFI.DotNet", "FFI.Fortran", "FFI.Cobol", "FFI.Tcl", "FFI.Lua", "FFI.Ada",
+    "FFI.Pascal", "FFI.Dart", "FFI.PowerShell", "FFI.Perl", "FFI.Ruby", "FFI.Php", "FFI.R", "FFI.Com",
+    "FFI.C", "FFI.Cpp", "FFI.Asm", "FFI.Py", "FFI.Octave",
+}
+
+// sema.rs `RightsProvenance`.
+struct JetCLIRightsProvenance {
+    source: String
+    reason: String
+}
+
+// sema.rs `RightsRow`: `allow == None` is unbounded; denials win.
+struct JetCLIRightsRow {
+    kind: String
+    allow: [String]?
+    deny: [String]
+    provenance: JetCLIRightsProvenance
+}
+
+// sema.rs `ScopeFrame`.
+struct JetCLIScopeFrame {
+    scope: String
+    name: String
+    grants: [String]
+    provenance: JetCLIRightsProvenance
+}
+
+// sema.rs `RightsDenial` with its `DenialChain`.
+struct JetCLIRightsDenial {
+    right: String
+    verdict: String
+    call_chain: [String]
+    scope_chain: [JetCLIScopeFrame]
+    nearest: JetCLIScopeFrame?
+}
+
+// CmdInspect.rs `run_rights` `CallableView`.
+struct JetCLICallableView {
+    key: String
+    name: String
+    source: String
+    span: Span
+    declared_effects: [String]?
+    is_pure: Bool
+    is_comptime: Bool
+    is_replayable: Bool
+    inferred_seed: String?
+}
+
+// sema.rs `normalize_holds`: canonical rights as a sorted set.
+fn jet_cli_rights_normalize(rights: [String]) -> [String] Never! {
+    canonical :: loop right in rights -> jet_cli_parse_right(right) ?? right.trim()
+    jet_cli_sorted_set(canonical)
+}
+
+// sema.rs `expand_leaves`: each right with every known leaf it covers.
+fn jet_cli_rights_expand(rights: [String]) -> [String] Never! {
+    leaves := JET_CLI_BUILTIN_EFFECT_LEAVES
+    loop declaration in JET_CLI_EFFECT_DECLARATIONS {
+        if declaration.name.contains(".") -> &leaves.push(declaration.name)
+    }
+    expanded := [String]{}
+    loop right in rights {
+        canonical :: jet_cli_parse_right(right) ?? right.trim()
+        &expanded.push(canonical)
+        loop leaf in leaves {
+            if jet_cli_right_covers(canonical, leaf) -> &expanded.push(leaf)
+        }
+    }
+    jet_cli_sorted_set(expanded)
+}
+
+fn jet_cli_rights_row(kind: String, allow: [String]?, deny: [String], provenance: JetCLIRightsProvenance) -> JetCLIRightsRow Never! {
+    normalized := [String]?{None}
+    if allow == .Val(rights) -> normalized = Val(jet_cli_rights_normalize(rights))
+    JetCLIRightsRow{kind: kind, allow: normalized, deny: jet_cli_rights_normalize(deny), provenance: provenance}
+}
+
+// sema.rs `RightsRow::invocation`.
+fn jet_cli_rights_invocation(allow: [String], deny: [String], provenance: JetCLIRightsProvenance) -> JetCLIRightsRow Never! {
+    jet_cli_rights_row("invocation", Val(jet_cli_rights_expand(allow)), jet_cli_rights_expand(deny), provenance)
+}
+
+// sema.rs `RightsRow::decide`.
+fn jet_cli_rights_decide(row: JetCLIRightsRow, right: String) -> String Never! {
+    if jet_cli_covers_any(row.deny, right) -> return "denied"
+    allow :: row.allow ?? return "allowed"
+    if jet_cli_covers_any(allow, right) -> return "allowed"
+    "missing"
+}
+
+// sema.rs `RightsRow::walk`: every reached right the row does not allow, in
+// set order, each with its denial chain.
+fn jet_cli_rights_walk(row: JetCLIRightsRow, effects: [String], call_chain: [String], scope_chain: [JetCLIScopeFrame]) -> [JetCLIRightsDenial] Never! {
+    denials := [JetCLIRightsDenial]{}
+    loop right in effects {
+        verdict :: jet_cli_rights_decide(row, right)
+        if verdict == "allowed" -> next
+        nearest := JetCLIScopeFrame?{None}
+        loop index in 0..<scope_chain.len() {
+            frame :: scope_chain[scope_chain.len() - 1 - index]
+            if jet_cli_covers_any(frame.grants, right) {
+                nearest = Val(frame)
+                break
+            }
+        }
+        &denials.push(JetCLIRightsDenial{right: right, verdict: verdict, call_chain: call_chain, scope_chain: scope_chain, nearest: nearest})
+    }
+    denials
+}
+
+// `RightsWalk::verdict`: any denial wins over a missing right.
+fn jet_cli_rights_verdict(denials: [JetCLIRightsDenial]) -> String Never! {
+    missing := false
+    loop denial in denials {
+        if denial.verdict == "denied" -> return "denied"
+        if denial.verdict == "missing" -> missing = true
+    }
+    if missing -> return "missing"
+    "allowed"
+}
+
+fn jet_cli_rights_effect_names(effects: [EffectRowEntry]?) -> [String]? Never! {
+    entries :: effects ?? return None
+    Val(loop entry in entries -> entry.name)
+}
+
+fn jet_cli_rights_add_func(out: &[JetCLICallableView], alias: String, namespace: String, source: String, owner: String?, function: Func) {
+    identity :: if owner == .Val(name) -> "{namespace}{name}::{function.name}" else -> "{namespace}{function.name}"
+    &out.push(JetCLICallableView{key: "{alias}::{identity}", name: function.name, source: source, span: function.span, declared_effects: jet_cli_rights_effect_names(function.declared_effects), is_pure: function.is_pure, is_comptime: function.is_comptime, is_replayable: function.is_replayable, inferred_seed: None})
+}
+
+// `run_rights` `collect_items`: functions, impl/struct/enum methods and trait
+// blocks, trait requirements, extern bindings, and nested code modules.
+fn jet_cli_rights_collect(items: [Item], alias: String, namespace: String, source: String, out: &[JetCLICallableView]) {
+    loop item in items {
+        if item == {
+            .Func(function) -> jet_cli_rights_add_func(&out, alias, namespace, source, None, function)
+            .Impl(definition) -> {
+                loop method in definition.methods -> jet_cli_rights_add_func(&out, alias, namespace, source, Val(definition.type_name), method)
+            }
+            .Struct(definition) -> {
+                loop method in definition.methods -> jet_cli_rights_add_func(&out, alias, namespace, source, Val(definition.name), method)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> jet_cli_rights_add_func(&out, alias, namespace, source, Val(definition.name), method)
+                }
+            }
+            .Enum(definition) -> {
+                loop method in definition.methods -> jet_cli_rights_add_func(&out, alias, namespace, source, Val(definition.name), method)
+                loop block in definition.trait_impls {
+                    loop method in block.methods -> jet_cli_rights_add_func(&out, alias, namespace, source, Val(definition.name), method)
+                }
+            }
+            .Trait(definition) -> {
+                loop method in definition.methods {
+                    &out.push(JetCLICallableView{key: "{alias}::{namespace}{definition.name}::{method.name}", name: method.name, source: source, span: method.span, declared_effects: jet_cli_rights_effect_names(method.declared_effects), is_pure: method.is_pure, is_comptime: false, is_replayable: false, inferred_seed: None})
+                }
+            }
+            .ExternRust(block) -> {
+                loop function in block.functions {
+                    &out.push(JetCLICallableView{key: "{alias}::{namespace}{function.name}", name: function.name, source: source, span: function.span, declared_effects: None, is_pure: false, is_comptime: false, is_replayable: false, inferred_seed: Val(function.effect_root ?? "FFI")})
+                }
+            }
+            .CodeModule(nested) -> {
+                if nested.body == .Val(body) -> jet_cli_rights_collect(body, alias, "{namespace}{nested.name}__", source, &out)
+            }
+            .GenericModule(nested) -> jet_cli_rights_collect(nested.body, alias, "{namespace}{nested.name}__", source, &out)
+            else -> {}
+        }
+    }
+}
+
+// `run_rights` `declared_row`.
+fn jet_cli_rights_declared(view: JetCLICallableView) -> JetCLIRightsRow Never! {
+    reason := "inferred callable declaration"
+    if view.declared_effects != None -> reason = "declared effect row"
+    if view.is_replayable -> reason = "replayable declaration"
+    if view.is_pure -> reason = "pure declaration"
+    if view.is_comptime -> reason = "comptime declaration"
+    provenance :: JetCLIRightsProvenance{source: view.key, reason: reason}
+    if view.is_comptime -> return jet_cli_rights_row("comptime", Val([String]{"Mem"}), [String]{}, provenance)
+    if view.is_pure -> return jet_cli_rights_row("pure", Val([String]{}), [String]{}, provenance)
+    if view.is_replayable -> return jet_cli_rights_row("replayable", None, [String]{"Time", "Rand", "Net", "IO"}, provenance)
+    if view.declared_effects == .Val(effects) {
+        allow := [String]{}
+        deny := [String]{}
+        loop name in effects {
+            if name.starts_with("!") {
+                &deny.push(name.slice(1..<name.len()))
+            } else {
+                &allow.push(name)
+            }
+        }
+        return jet_cli_rights_invocation(allow, deny, provenance)
+    }
+    jet_cli_rights_row("callable", None, [String]{}, provenance)
+}
+
+// The bundle's `package_guarantees.application_authority` (Loader.rs
+// `package_guarantees_for_manifest` over Authority.rs `from_policy`): a
+// manifest's written `authority.holds` rows under `<manifest> authority.holds`
+// (no beginner floor), else the application default; `required` is the
+// entry's solved effect row.
+fn jet_cli_rights_authority(result: JetDriverCompileResult) -> JetCLIAuthority Never! {
+    authority := jet_cli_application_authority(result, None)
+    policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, allow: None, deny: None}
+    if policy.manifest_path == .Val(manifest) {
+        authority.granted = jet_cli_policy_effects(policy.allow ?? [String]{})
+        authority.denied = jet_cli_policy_effects(policy.deny ?? [String]{})
+        authority.authority = "{manifest} authority.holds"
+    }
+    authority
+}
+
+fn jet_cli_rights_text(rights: [String]) -> String Never! {
+    rights.join(", ")
+}
+
+fn jet_cli_rights_row_text(row: JetCLIRightsRow) -> String Never! {
+    allow :: if row.allow == .Val(rights) -> jet_cli_rights_text(rights) else -> "unbounded"
+    "kind={row.kind} allow=[{allow}] deny=[{jet_cli_rights_text(row.deny)}]"
+}
+
+fn jet_cli_rights_provenance_value(provenance: JetCLIRightsProvenance) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("source", jet_cli_status_text(provenance.source)),
+        jet_cli_status_field("reason", jet_cli_status_text(provenance.reason)),
+    })
+}
+
+fn jet_cli_rights_row_value(row: JetCLIRightsRow) -> JetCLIStatusValue Never! {
+    allow :: if row.allow == .Val(rights) -> jet_cli_status_texts(rights) else -> JetCLIStatusValue.Null
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
+        jet_cli_status_field("allow", allow),
+        jet_cli_status_field("deny", jet_cli_status_texts(row.deny)),
+        jet_cli_status_field("provenance", jet_cli_rights_provenance_value(row.provenance)),
+    })
+}
+
+fn jet_cli_rights_frame_value(frame: JetCLIScopeFrame) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("scope", jet_cli_status_text(frame.scope)),
+        jet_cli_status_field("name", jet_cli_status_text(frame.name)),
+        jet_cli_status_field("grants", jet_cli_status_texts(frame.grants)),
+        jet_cli_status_field("authority", jet_cli_rights_provenance_value(frame.provenance)),
+    })
+}
+
+fn jet_cli_rights_span_value(source: String, start: Int, end: Int) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("source", jet_cli_status_text(source)),
+        jet_cli_status_field("start", jet_cli_status_int(start)),
+        jet_cli_status_field("end", jet_cli_status_int(end)),
+    })
+}
+
+// Is `doc_module` the explicitly named `target` (by display or by real path)?
+fn jet_cli_rights_selected(doc_module: JetDriverDocModule, target: String) -[FS]> Bool Never! {
+    if doc_module.path == target -> return true
+    selected :: cli_files.realpath(target) ?? return false
+    module_real :: cli_files.realpath(doc_module.path) ?? ""
+    if module_real == selected -> return true
+    base :: jet_cli_parent(target) ?? return false
+    candidate :: cli_files.realpath(jet_cli_entry_join(base, doc_module.path)) ?? return false
+    candidate == selected
+}
+
+// Sort by key, then span, and keep the first callable of each key.
+fn jet_cli_rights_sorted(views: [JetCLICallableView]) -> [JetCLICallableView] Never! {
+    sorted := views
+    loop index in 1..<sorted.len() {
+        value :: sorted[index]
+        position := index
+        loop position > 0 {
+            previous :: sorted[position - 1]
+            before :: previous.key > value.key || (previous.key == value.key && (previous.span.start > value.span.start || (previous.span.start == value.span.start && previous.span.end > value.span.end)))
+            if !before -> break
+            sorted[position] = previous
+            position -= 1
+        }
+        sorted[position] = value
+    }
+    unique := [JetCLICallableView]{}
+    loop view in sorted {
+        if unique.len() > 0 && unique[unique.len() - 1].key == view.key -> next
+        &unique.push(view)
+    }
+    unique
+}
+
+// CmdInspect.rs `run_rights` over one checked program: `project` is the
+// project scope, `target` the entry the scope resolved.
+fn jet_cli_inspect_rights(result: JetDriverCompileResult, project: Bool, target: String, json: Bool) -[FS]> JetDriverVerbOutput {
+    modules :: result.doc_modules
+    views := [JetCLICallableView]{}
+    loop doc_module in modules {
+        if !project && !jet_cli_rights_selected(doc_module, target) -> next
+        jet_cli_rights_collect(doc_module.items, jet_cli_sem_module_alias(doc_module), "", doc_module.path, &views)
+    }
+    callables :: jet_cli_rights_sorted(views)
+    summaries :: jet_cli_sem_summaries(modules)
+    application :: jet_cli_rights_authority(result)
+    scope_chain :: [JetCLIScopeFrame]{JetCLIScopeFrame{scope: "package", name: application.authority, grants: jet_cli_rights_normalize(application.granted), provenance: JetCLIRightsProvenance{source: application.authority, reason: "selected application authority"}}}
+    scope_name :: if project -> "project" else -> "explicit-file"
+    text := "rights\nscope: {scope_name}\ntarget: {target}\nevidence: checked_static\nruntime observation: not_run\nprovenance scope: checked_semantic_index\n"
+    text = "{text}authority: {application.authority}\ngranted: {jet_cli_rights_text(application.granted)}\ndenied: {jet_cli_rights_text(application.denied)}\nauthority facts:\n"
+    facts := [JetCLIStatusValue]{}
+    loop declaration in JET_CLI_EFFECT_DECLARATIONS {
+        marker :: if declaration.irreversible -> " (irreversible)" else -> ""
+        text = "{text}  {declaration.name}{marker}\n"
+        &facts.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(declaration.name)), jet_cli_status_field("irreversible", jet_cli_status_bool(declaration.irreversible))}))
+    }
+    values := [JetCLIStatusValue]{}
+    loop view in callables {
+        declared :: jet_cli_rights_declared(view)
+        summary :: jet_cli_sem_summary(summaries, view.key)
+        inferred_effects := [String]{}
+        direct := [String]{}
+        callees := [String]{}
+        maximal := false
+        if summary == .Val(found) {
+            inferred_effects = found.solved
+            direct = found.direct
+            callees = found.edges
+            maximal = found.maximal
+            if inferred_effects.len() == 0 -> inferred_effects = found.direct
+        }
+        if inferred_effects.len() == 0 {
+            if view.inferred_seed == .Val(seed) -> inferred_effects = [String]{seed}
+        }
+        inferred_effects = jet_cli_sorted_set(inferred_effects)
+        inferred :: jet_cli_rights_invocation(inferred_effects, [String]{}, JetCLIRightsProvenance{source: view.key, reason: "sema inferred effect facts"})
+        // SemIndex `effect_of(key).provenance.first().call_path`, else the
+        // callable alone.
+        call_chain := [String]{view.key}
+        if summary == .Val(found) {
+            loop effect_name in found.solved {
+                witness :: jet_cli_sem_witness(view.key, effect_name, summaries, [String]{}, modules) ?? next
+                if witness.path.len() > 0 -> call_chain = witness.path
+                break
+            }
+        }
+        denials :: jet_cli_rights_walk(declared, inferred_effects, call_chain, scope_chain)
+        verdict :: jet_cli_rights_verdict(denials)
+        text = "{text}callable: {view.key} @ {view.source}:{view.span.start}-{view.span.end}\n  declared row: {jet_cli_rights_row_text(declared)}\n  inferred row: {jet_cli_rights_row_text(inferred)}\n"
+        text = "{text}  inferred effects: {jet_cli_rights_text(inferred_effects)}\n  verdict: {verdict}\n"
+        if denials.len() == 0 -> text = "{text}  denials: none\n"
+        denial_values := [JetCLIStatusValue]{}
+        loop denial in denials {
+            via :: if denial.call_chain.len() == 0 -> "none" else -> denial.call_chain.join(" -> ")
+            text = "{text}  denial: {denial.right} ({denial.verdict}) via {via}\n"
+            spans := [JetCLIStatusValue]{}
+            if summary == .Val(found) {
+                if found.solved.contains(denial.right) {
+                    if jet_cli_sem_witness(view.key, denial.right, summaries, [String]{}, modules) == .Val(witness) {
+                        loop span in witness.spans -> &spans.push(jet_cli_rights_span_value(view.source, span.start, span.end))
+                    }
+                }
+            }
+            nearest :: if denial.nearest == .Val(frame) -> jet_cli_rights_frame_value(frame) else -> JetCLIStatusValue.Null
+            chain :: jet_cli_status_object([JetCLIStatusField]{
+                jet_cli_status_field("right", jet_cli_status_text(denial.right)),
+                jet_cli_status_field("call_chain", jet_cli_status_texts(denial.call_chain)),
+                jet_cli_status_field("scope_chain", jet_cli_status_array(loop frame in denial.scope_chain -> jet_cli_rights_frame_value(frame))),
+                jet_cli_status_field("nearest_granting_scope", nearest),
+            })
+            &denial_values.push(jet_cli_status_object([JetCLIStatusField]{
+                jet_cli_status_field("right", jet_cli_status_text(denial.right)),
+                jet_cli_status_field("verdict", jet_cli_status_text(denial.verdict)),
+                jet_cli_status_field("chain", chain),
+                jet_cli_status_field("source_spans", jet_cli_status_array(spans)),
+            }))
+        }
+        effects :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("direct", jet_cli_status_texts(direct)),
+            jet_cli_status_field("callees", jet_cli_status_texts(callees)),
+            jet_cli_status_field("maximal", jet_cli_status_bool(maximal)),
+        })
+        &values.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("callable", jet_cli_status_text(view.key)),
+            jet_cli_status_field("name", jet_cli_status_text(view.name)),
+            jet_cli_status_field("source_span", jet_cli_rights_span_value(view.source, view.span.start, view.span.end)),
+            jet_cli_status_field("declared_row", jet_cli_rights_row_value(declared)),
+            jet_cli_status_field("inferred_row", jet_cli_rights_row_value(inferred)),
+            jet_cli_status_field("inferred_effects", jet_cli_status_texts(inferred_effects)),
+            jet_cli_status_field("effects", effects),
+            jet_cli_status_field("verdict", jet_cli_status_text(verdict)),
+            jet_cli_status_field("denials", jet_cli_status_array(denial_values)),
+        }))
+    }
+    if json {
+        authority :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("source", jet_cli_status_text(application.authority)),
+            jet_cli_status_field("required", jet_cli_status_texts(application.required)),
+            jet_cli_status_field("granted", jet_cli_status_texts(application.granted)),
+            jet_cli_status_field("denied", jet_cli_status_texts(application.denied)),
+        })
+        fields :: [JetCLIStatusField]{
+            jet_cli_status_field("scope", jet_cli_status_text(scope_name)),
+            jet_cli_status_field("target", jet_cli_status_text(target)),
+            jet_cli_status_field("authority", authority),
+            jet_cli_status_field("evidence", jet_cli_status_text("checked_static")),
+            jet_cli_status_field("runtime_observation", jet_cli_status_text("not_run")),
+            jet_cli_status_field("provenance_scope", jet_cli_status_text("checked_semantic_index")),
+            jet_cli_status_field("authority_facts", jet_cli_status_array(facts)),
+            jet_cli_status_field("callables", jet_cli_status_array(values)),
+        }
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.rights", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    JetDriverVerbOutput{stdout: text, stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}

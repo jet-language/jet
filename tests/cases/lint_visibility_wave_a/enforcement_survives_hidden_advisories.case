@@ -1,0 +1,49 @@
+# HAND-PORT tests/lint_visibility_wave_a.rs:171-220 enforcement_survives_hidden_advisories
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: enforcement_survives_hidden_advisories.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: deny
+exit: nonzero
+stdout+stderr: ~ "[E1293]" # original predicate
+step: jet run --verbose main.jet
+cwd: deny
+exit: nonzero
+stdout+stderr: ~ "[E1293]" # original predicate
+step: jet test main.jet
+cwd: deny
+exit: nonzero
+stdout+stderr: ~ "[E1293]" # original predicate
+step: jet test --verbose main.jet
+cwd: deny
+exit: nonzero
+stdout+stderr: ~ "[E1293]" # original predicate
+step: jet run main.jet
+cwd: sema
+exit: nonzero
+stdout+stderr: ~ "[E0109]" # original predicate
+step: jet test main.jet
+cwd: sema
+exit: nonzero
+stdout+stderr: ~ "[E0109]" # original predicate
+step: jet run main.jet
+cwd: runtime
+exit: nonzero
+stdout+stderr: ~ "[E3001]" # original predicate
+step: jet run --verbose main.jet
+cwd: runtime
+exit: nonzero
+stdout+stderr: ~ "[E3001]" # original predicate
+step: jet test main.jet
+cwd: runtime
+exit: nonzero
+stdout+stderr: ~ "0 passed, 1 failed" # original predicate
+step: jet run main.jet
+cwd: authority
+exit: nonzero
+stdout+stderr: ~ "[E1220]" # original predicate
+step: jet run --verbose main.jet
+cwd: authority
+exit: nonzero
+stdout+stderr: ~ "[E1220]" # original predicate
+

@@ -1,0 +1,27 @@
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2461
+#Test("formatter_edits_refuse_non_utf8_boundaries") {
+    loop bounds in [(start: 1, finish: 2), (start: 0, finish: 1), (start: 0, finish: 4), (start: 2, finish: 1)] {
+        edits :: [TextEdit]{TextEdit{span: Span{start: bounds.start, end: bounds.finish}, new_text: "a"}}
+        assert(jfmt_apply_source_edits("éx", edits) == None)
+    }
+    assert_eq(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 0, end: 2}, new_text: "a"}}), Val("ax"))
+    loop offset in 1..<4 {
+        assert(jfmt_apply_source_edits("🙂x", [TextEdit]{TextEdit{span: Span{start: 0, end: offset}, new_text: "a"}}) == None)
+        assert(jfmt_apply_source_edits("🙂x", [TextEdit]{TextEdit{span: Span{start: offset, end: 4}, new_text: "a"}}) == None)
+    }
+    assert_eq(jfmt_apply_source_edits("🙂x", [TextEdit]{TextEdit{span: Span{start: 0, end: 4}, new_text: "a"}}), Val("ax"))
+    assert_eq(jfmt_apply_source_edits("éx", [TextEdit]{TextEdit{span: Span{start: 3, end: 3}, new_text: "a"}}), Val("éxa"))
+    assert_eq(jfmt_apply_source_edits("", [TextEdit]{TextEdit{span: Span{start: 0, end: 0}, new_text: "a"}}), Val("a"))
+}
+
+// Rust: crates/jet-parser/src/Formatter/mod.rs:2653
+#Test("lambda_interface_round_trips_parameters_and_pure_effect_row") {
+    formatted :: parser_test_stable(`enum LambdaError { Invalid }
+
+fn run() {
+    increment :: (n: Int) -[]> { return n + 1 }
+}
+`)
+    assert(formatted.contains("(n: Int) -[]>"))
+    assert(!formatted.contains("(n: Int) Int"))
+}

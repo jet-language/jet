@@ -1,0 +1,3 @@
+{
+  outputs = { ... }: { nixosConfigurations.halcyon = { }; };
+}

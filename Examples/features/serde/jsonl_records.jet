@@ -27,12 +27,17 @@ fn whole(label: String, text: String) {
 fn read_all(text: String) {
     records := jsonl.reader(text)
     loop _ in 0..<3 {
-        row :: &records.next() ?? {
-            line :: err.line ?? 0
-            print("reader: {kind_name(err.kind)} at `{err.path}` line {line} byte {err.byte_offset}: {err.reason}")
-            return
+        if &records.next() == {
+            .Val(row) -> {
+                print("reader: {json.canonical(row) ?? panic("canonical")}")
+            }
+            .None -> return
+            .Err(error) -> {
+                line :: error.line ?? 0
+                print("reader: {kind_name(error.kind)} at `{error.path}` line {line} byte {error.byte_offset}: {error.reason}")
+                return
+            }
         }
-        print("reader: {json.canonical(row) ?? panic("canonical")}")
     }
 }
 

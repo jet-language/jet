@@ -1,0 +1,13 @@
+
+use core.http.client as http
+fn run() {
+    client :: http.Client.new()
+        .cookies(.Memory)
+        .proxy(.URL("http://{cap:addr}"))
+        .protocols(false, true, false)
+    seed :: client.send(http.request("GET", "http://shop.example.co.uk/dir/seed")) ?? panic("seed")
+    same :: client.send(http.request("GET", "http://other.example.co.uk/dir/start")) ?? panic("same site")
+    cross :: client.send(http.request("GET", "http://evil.co.uk/start")) ?? panic("cross site")
+    idn_seed :: client.send(http.request("GET", "http://seed.b.xn--55qx5d.cn/seed")) ?? panic("idn seed")
+    idn_cross :: client.send(http.request("GET", "http://a.xn--55qx5d.cn/start")) ?? panic("idn site")
+}

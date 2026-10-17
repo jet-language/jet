@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:433-467 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true size 24x20
+limit: time=8
+pty-send: "10 + 20 + 30 + 49" after 200ms
+pty-send: "\u001b[D\u001b[3~\r" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "\u001b[1A" # Original physical-row cursor movement rs460.
+stdout: ~ "64 : Int" # Original wrapped deletion execution rs464.

@@ -1,0 +1,67 @@
+# HAND-PORT tests/jetpack_engine.rs:1578-1624 package_generation_build_applies_exact_path_collision_selection
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: package_generation_build_applies_exact_path_collision_selection.fixture
+env: NO_COLOR=1
+refused: store-ingest
+# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
+# #[test]
+# fn package_generation_build_applies_exact_path_collision_selection() {
+#     let project = Scratch::new("profile-generation-selected-collision-project");
+#     let root = Scratch::new("profile-generation-selected-collision-root");
+#     let fixtures = Scratch::new("profile-generation-selected-collision-fixtures");
+# 
+#     for (package, contents) in [("left", "left editor\n"), ("right", "right editor\n")] {
+#         seed_profile_fixture(&root.path, &fixtures.path, package, |staging| {
+#             let bin = staging.join("bin");
+#             fs::create_dir_all(&bin).unwrap();
+#             let editor = bin.join("editor");
+#             fs::write(&editor, contents).unwrap();
+#             #[cfg(unix)]
+#             {
+#                 use std::os::unix::fs::PermissionsExt;
+#                 fs::set_permissions(&editor, fs::Permissions::from_mode(0o755)).unwrap();
+#             }
+#         });
+#     }
+#     fs::write(
+#         project.join("env.jet"),
+#         "module profile.dev { packages: [default.left, default.right] collisions: {\"bin/editor\": \"right@default\"} }\n",
+#     )
+#     .unwrap();
+#     let output = jetpack()
+#         .args(["profile", "build", "dev", "--no-color", "--offline"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let generation = project.join(".jet/profiles/dev/generations/1");
+#     assert_eq!(
+#         fs::read_to_string(generation.join("root/bin/editor")).unwrap(),
+#         "right editor\n"
+#     );
+#     let metadata = fs::read_to_string(generation.join("meta.json")).unwrap();
+#     assert!(metadata.contains("\"selected\":\"right@default\""));
+#     assert!(metadata.contains("left@default"));
+#     assert!(metadata.contains("right@default"));
+#     assert!(metadata.matches("sha256-").count() >= 3);
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack profile build dev --no-color --offline
+cwd: project
+exit: 0
+file: project/.jet/profiles/dev/generations/1/root/bin/editor = package_generation_build_applies_exact_path_collision_selection.expected
+file: project/.jet/profiles/dev/generations/1/meta.json ~ "\"selected\":\"right@default\"" # original contains predicate
+file: project/.jet/profiles/dev/generations/1/meta.json ~ "left@default" # original contains predicate
+file: project/.jet/profiles/dev/generations/1/meta.json ~ "right@default" # original contains predicate
+file: project/.jet/profiles/dev/generations/1/meta.json count "sha256-" >= 3
+

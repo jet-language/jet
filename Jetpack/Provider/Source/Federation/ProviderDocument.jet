@@ -7,7 +7,7 @@
 // Normalize one provider-native metadata document into the shared fact
 // model. The report stays separate from `MetadataFacts`: unsupported or
 // ambiguous fields remain visible instead of becoming silent defaults.
-pub fn provider_normalize_document(family: ProviderFamily, document: String) -> ProviderFactReport Never! {
+fn provider_normalize_document(family: ProviderFamily, document: String) -> ProviderFactReport Never! {
     native_format :: provider_document_format(family, document)
     report := if family == {
         .Npm -> ProviderFactReport.npm_document(document)
@@ -76,19 +76,19 @@ impl MetadataFacts {
     // Name, version, license, dependencies, scripts, and bins from a
     // package.json (Rust `normalize_npm`).
     fn from_npm(package_json: String) -> MetadataFacts Never! {
-        object :: provider_graph_json_root(package_json) ?? [String: DataTree]{}
-        facts := MetadataFacts.empty(ProviderFamily.Npm, pkg_json_text(object.get("name") ?? DataTree.Null) ?? "")
-        facts.version = pkg_json_text(object.get("version") ?? DataTree.Null) ?? ""
-        facts.license = pkg_json_text(object.get("license") ?? DataTree.Null) ?? ""
-        if pkg_json_object(object.get("dependencies") ?? DataTree.Null) == {
+        object :: provider_graph_json_root(package_json) ?? [String: Dyn]{}
+        facts := MetadataFacts.empty(ProviderFamily.Npm, pkg_json_text(object.get("name") ?? Dyn.Null) ?? "")
+        facts.version = pkg_json_text(object.get("version") ?? Dyn.Null) ?? ""
+        facts.license = pkg_json_text(object.get("license") ?? Dyn.Null) ?? ""
+        if pkg_json_object(object.get("dependencies") ?? Dyn.Null) == {
             .Val(dependencies) -> facts.dependencies = dependencies.keys().to_list()
             .None -> {}
         }
-        if pkg_json_object(object.get("scripts") ?? DataTree.Null) == {
+        if pkg_json_object(object.get("scripts") ?? Dyn.Null) == {
             .Val(scripts) -> facts.scripts = scripts.keys().to_list()
             .None -> {}
         }
-        if pkg_json_object(object.get("bin") ?? DataTree.Null) == {
+        if pkg_json_object(object.get("bin") ?? Dyn.Null) == {
             .Val(bins) -> facts.bins = bins.keys().to_list()
             .None -> {}
         }

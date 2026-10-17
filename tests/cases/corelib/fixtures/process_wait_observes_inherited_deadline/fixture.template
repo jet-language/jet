@@ -1,0 +1,10 @@
+
+use core.process as process
+use core.time as time
+
+fn run() {
+    child :: process.cmd(["{work}/sleep.sh"]).spawn() ?? panic("spawn failed")
+    #Context(deadline: time.now() + 20) {
+        child.wait() ?? panic("wait failed")
+    }
+}

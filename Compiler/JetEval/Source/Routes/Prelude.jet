@@ -1,5 +1,6 @@
 // Pure Prelude dispatch. The row and symbol are checked before any route body is
 // selected; route names are only used after the canonical MIR row is found.
+use core.math as math
 use jet_foundation.[
     MIRCallFallibility,
     MIRPreludeABI,
@@ -11,7 +12,6 @@ use jet_foundation.[
     TComptimeEnumArg,
     TComptimeField,
     TComptimeKey,
-    TComptimeKeyField,
     TComptimeMapEntry,
     TComptimeReport,
     TComptimeValue,
@@ -186,17 +186,17 @@ fn jet_eval_route_parse_integer_failure(text: String, radix: Int) -> String Neve
     "invalid base-{radix} integer `{trimmed}`"
 }
 
-// The receiver-first String rows of `string_method_route` and the zero-copy
-// text-view rows. The evaluator calls the same String operations the compiled
-// program calls, so `find` stays a byte offset and a view reads as the text it
-// borrows on every tier (I9; MIREval's builtin table and
-// `TextLite::string_route`).
+// The receiver-first String rows of `string_method_route`, including owned
+// before/after results and their zero-copy text-view counterparts.
+// The evaluator calls the compiled program's String operations, so `find`
+// stays a byte offset and views read as borrowed text on every tier (I9;
+// MIREval's builtin table and `TextLite::string_route`).
 fn jet_eval_route_is_text_member(member: String) -> Bool Never! {
     if member == {
         "title" | "casefold" | "find" | "rfind" | "strip" | "lstrip" | "rstrip" | "zfill" | "center" | "ljust" | "rjust" | "expandtabs" | "partition" | "rpartition" -> true
         "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit" | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "islower" | "isupper" -> true
         "is_lower" | "is_upper" | "capitalize" | "swapcase" | "reverse" | "normalize" | "remove_prefix" | "remove_suffix" -> true
-        "string_before_view" | "string_after_view" | "string_trim_view" | "string_index_of" | "last_index_of" -> true
+        "string_before" | "string_after" | "string_before_view" | "string_after_view" | "string_trim_view" | "string_index_of" | "last_index_of" -> true
         else -> false
     }
 }
@@ -226,7 +226,7 @@ fn jet_eval_route_text_method(member: String, args: [TComptimeValue], machine: &
         }
     }
     want_text :: if member == {
-        "find" | "rfind" | "partition" | "rpartition" | "remove_prefix" | "remove_suffix" | "string_before_view" | "string_after_view" | "string_index_of" | "last_index_of" | "center" | "ljust" | "rjust" -> 1
+        "find" | "rfind" | "partition" | "rpartition" | "remove_prefix" | "remove_suffix" | "string_before" | "string_after" | "string_before_view" | "string_after_view" | "string_index_of" | "last_index_of" | "center" | "ljust" | "rjust" -> 1
         else -> 0
     }
     want_number :: if member == {
@@ -279,8 +279,8 @@ fn jet_eval_route_text_method(member: String, args: [TComptimeValue], machine: &
         "normalize" -> TComptimeValue.String{value: receiver.normalize()}
         "remove_prefix" -> TComptimeValue.String{value: receiver.removeprefix(needle)}
         "remove_suffix" -> TComptimeValue.String{value: receiver.removesuffix(needle)}
-        "string_before_view" -> TComptimeValue.String{value: receiver.before(needle)}
-        "string_after_view" -> TComptimeValue.String{value: receiver.after(needle)}
+        "string_before" | "string_before_view" -> TComptimeValue.String{value: receiver.before(needle)}
+        "string_after" | "string_after_view" -> TComptimeValue.String{value: receiver.after(needle)}
         "string_trim_view" -> TComptimeValue.String{value: receiver.trim()}
         else -> TComptimeValue.Unit
     }
@@ -300,7 +300,7 @@ fn jet_eval_route_is_mutating_member(member: String) -> Bool Never! {
     if member == {
         "map_insert" | "set_insert" | "set_remove" | "set_replace" | "set_pop" | "sorted_set_insert" | "sorted_set_remove" -> true
         "set_update" | "set_difference_update" | "set_intersection_update" | "set_symmetric_difference_update" -> true
-        "list_push" | "list_extend" | "list_reverse" | "list_sort" | "list_sort_desc" | "list_clear" | "list_try_push" | "list_try_reserve" -> true
+        "list_push" | "list_extend" | "list_reverse" | "list_swap" | "list_sort" | "list_sort_desc" | "list_clear" | "list_try_push" | "list_try_reserve" -> true
         "list_pop" | "list_insert" | "list_remove_value" | "list_remove_slot" | "priority_queue_pop" -> true
         "map_add_new" | "map_setdefault" | "map_try_insert" | "map_remove" | "map_pop_first" | "string_try_push" -> true
         else -> false
@@ -478,7 +478,7 @@ fn jet_eval_route_mutating_rank(member: String, receiver: TComptimeValue, args: 
         }
         return Val(JetEvalRouteMutation{receiver: jet_eval_route_collection_value("Rank", updated), result: unit})
     }
-    if present -> return Val(JetEvalRouteMutation{receiver: receiver, result: unit})
+    if present -> return Val(JetEvalRouteMutation{receiver: receiver, result: JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: false}}})
     placed := false
     loop item in items {
         if !placed {
@@ -491,7 +491,7 @@ fn jet_eval_route_mutating_rank(member: String, receiver: TComptimeValue, args: 
         &updated.push(item)
     }
     if !placed -> &updated.push(value)
-    Val(JetEvalRouteMutation{receiver: jet_eval_route_collection_value("Rank", updated), result: unit})
+    Val(JetEvalRouteMutation{receiver: jet_eval_route_collection_value("Rank", updated), result: JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: true}}})
 }
 
 // MIREval `direct_absent_value`: the clean absence of the row's checked
@@ -512,64 +512,6 @@ fn jet_eval_route_map_put(entries: &[TComptimeMapEntry], key: TComptimeKey, valu
     &entries.push(inserted[inserted.len() - 1])
 }
 
-fn jet_eval_route_rank_order(left: Int, right: Int) -> Int Never! {
-    if left < right -> return -1
-    if left > right -> return 1
-    0
-}
-
-fn jet_eval_route_text_order(left: String, right: String) -> Int Never! {
-    if left < right -> return -1
-    if left > right -> return 1
-    0
-}
-
-fn jet_eval_route_key_rank(key: TComptimeKey) -> Int Never! {
-    if key == {
-        .Int(_) -> 0
-        .String(_) -> 1
-        .Bool(_) -> 2
-        .Char(_) -> 3
-        .Tuple(_) -> 4
-        .Struct(_, _) -> 5
-        .Enum(_, _) -> 6
-    }
-}
-
-fn jet_eval_route_key_fields_order(left: [TComptimeKeyField], right: [TComptimeKeyField]) -> Int Never! {
-    common :: if left.len() < right.len() -> left.len() else -> right.len()
-    loop index in 0..<common {
-        name :: jet_eval_route_text_order(left[index].name, right[index].name)
-        if name != 0 -> return name
-        order :: jet_eval_route_key_order(left[index].key, right[index].key)
-        if order != 0 -> return order
-    }
-    jet_eval_route_rank_order(left.len(), right.len())
-}
-
-// The derived `Ord` of MIREval's `MirConstKey` (variant order, then payload).
-fn jet_eval_route_key_order(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
-    rank :: jet_eval_route_rank_order(jet_eval_route_key_rank(left), jet_eval_route_key_rank(right))
-    if rank != 0 -> return rank
-    if left == {
-        .Int(a) -> if right == .Int(b) -> return jet_eval_route_rank_order(a, b)
-        .String(a) -> if right == .String(b) -> return jet_eval_route_text_order(a, b)
-        .Bool(a) -> if right == .Bool(b) -> return jet_eval_route_rank_order(if a -> 1 else -> 0, if b -> 1 else -> 0)
-        .Char(a) -> if right == .Char(b) -> return jet_eval_route_rank_order(a, b)
-        .Tuple(a) -> if right == .Tuple(b) -> return jet_eval_route_key_fields_order(a, b)
-        .Struct(a_name, a_fields) -> if right == .Struct(b_name, b_fields) {
-            name :: jet_eval_route_text_order(a_name, b_name)
-            if name != 0 -> return name
-            return jet_eval_route_key_fields_order(a_fields, b_fields)
-        }
-        .Enum(a_name, a_variant) -> if right == .Enum(b_name, b_variant) {
-            name :: jet_eval_route_text_order(a_name, b_name)
-            if name != 0 -> return name
-            return jet_eval_route_text_order(a_variant, b_variant)
-        }
-    }
-    0
-}
 
 // Map entries in the key order MIREval's ordered maps iterate in.
 fn jet_eval_route_entries_by_key(entries: [TComptimeMapEntry]) -> [TComptimeMapEntry] Never! {
@@ -578,7 +520,7 @@ fn jet_eval_route_entries_by_key(entries: [TComptimeMapEntry]) -> [TComptimeMapE
         placed := false
         next_sorted := [TComptimeMapEntry]{}
         loop held in sorted {
-            if !placed && jet_eval_route_key_order(entry.key, held.key) < 0 {
+            if !placed && jet_eval_key_compare(entry.key, held.key) < 0 {
                 &next_sorted.push(entry)
                 placed = true
             }
@@ -608,6 +550,24 @@ fn jet_eval_route_sort_order(left: TComptimeValue, right: TComptimeValue, machin
     jet_eval_route_order(left, right, &machine, span)
 }
 
+// MIREval `mir_sort_compare` (D-FLOATSORT1): a sort orders two Floats
+// totally; every NaN follows every non-NaN value and two NaNs compare equal.
+fn jet_eval_route_sort_compare(left: TComptimeValue, right: TComptimeValue, machine: &JetEvalMachine, span: Span) -> Int? {
+    if left == .Float(left_value, _) {
+        if right == .Float(right_value, _) {
+            left_nan :: math.is_nan(left_value)
+            right_nan :: math.is_nan(right_value)
+            if left_nan && right_nan -> return Val(0)
+            if left_nan -> return Val(1)
+            if right_nan -> return Val(-1)
+            if left_value < right_value -> return Val(-1)
+            if left_value > right_value -> return Val(1)
+            return Val(0)
+        }
+    }
+    jet_eval_route_sort_order(left, right, &machine, span)
+}
+
 // Stable merge sort (Rust `sort_by`); `descending` reverses the comparator.
 fn jet_eval_route_sorted(items: [TComptimeValue], descending: Bool, machine: &JetEvalMachine, span: Span) -> [TComptimeValue]? {
     if items.len() < 2 -> return Val(items)
@@ -618,7 +578,7 @@ fn jet_eval_route_sorted(items: [TComptimeValue], descending: Bool, machine: &Je
     left_index := 0
     right_index := 0
     loop left_index < left.len() && right_index < right.len() {
-        order := jet_eval_route_sort_order(left[left_index], right[right_index], &machine, span) ?? return None
+        order := jet_eval_route_sort_compare(left[left_index], right[right_index], &machine, span) ?? return None
         if descending -> order = 0 - order
         if order > 0 {
             &merged.push(right[right_index])
@@ -677,7 +637,7 @@ fn jet_eval_route_mutating_collection(member: String, receiver: TComptimeValue, 
             if entries.len() == 0 -> return Val(JetEvalRouteMutation{receiver: receiver, result: jet_eval_route_direct_absent(result_ty, &machine, span) ?? return None})
             first := 0
             loop index in 1..<entries.len() {
-                if jet_eval_route_key_order(entries[index].key, entries[first].key) < 0 -> first = index
+                if jet_eval_key_compare(entries[index].key, entries[first].key) < 0 -> first = index
             }
             popped :: entries[first].value
             remaining := [TComptimeMapEntry]{}
@@ -748,6 +708,18 @@ fn jet_eval_route_mutating_collection(member: String, receiver: TComptimeValue, 
             loop item in other -> &items.push(item)
             Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: items}, result: unit})
         }
+        "list_swap" -> {
+            if args.len() != 2 -> return jet_eval_route_mutation_fail(member, "requires two indices", &machine, span)
+            first :: jet_eval_route_int_value(args[0], &machine, span) ?? return None
+            second :: jet_eval_route_int_value(args[1], &machine, span) ?? return None
+            _ := jet_eval_list_position(&machine, first, items.len(), span) ?? return None
+            _ := jet_eval_list_position(&machine, second, items.len(), span) ?? return None
+            // Evaluator values own no user resource; writeback preserves the parent.
+            value :: items[first].copy()
+            items[first] = items[second]
+            items[second] = value
+            Val(JetEvalRouteMutation{receiver: TComptimeValue.List{values: items}, result: unit})
+        }
         "list_reverse" -> {
             reversed := [TComptimeValue]{}
             index := items.len() - 1
@@ -807,6 +779,8 @@ fn jet_eval_route_mutating_collection(member: String, receiver: TComptimeValue, 
         else -> jet_eval_route_mutation_fail(member, "is not a receiver-writing collection route", &machine, span)
     }
 }
+
+
 
 fn jet_eval_route_mutating_builtin(member: String, receiver: TComptimeValue, args: [TComptimeValue], result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRouteMutation? {
     if member.starts_with("sorted_set_") -> return jet_eval_route_mutating_rank(member, receiver, args, &machine, span)
@@ -1317,6 +1291,21 @@ fn jet_eval_route_builtin(member: String, symbol: String, args: [TComptimeValue]
             }
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Map{entries: entries}})
         }
+        "string_count" -> {
+            if symbol != "jet_unicode_count" {
+                jet_eval_compiler_fail(&machine, span, "MIR String.count route has an unknown checked symbol")
+                return None
+            }
+            if args.len() != 2 {
+                jet_eval_compiler_fail(&machine, span, "MIR String.count route requires two Strings")
+                return None
+            }
+            text :: jet_eval_route_string_operand(args, 0, member, &machine, span) ?? return None
+            needle :: jet_eval_route_string_operand(args, 1, member, &machine, span) ?? return None
+            // Call the canonical runtime kernel: empty needle is zero and
+            // matches never overlap; this is not core.text.parse.count.
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: text.count(needle)}})
+        }
         "string_ends_with" -> {
             if symbol != "jet_string_ends_with" {
                 jet_eval_compiler_fail(&machine, span, "MIR String prefix/suffix route has an unknown checked symbol")
@@ -1457,7 +1446,7 @@ fn jet_eval_route_builtin(member: String, symbol: String, args: [TComptimeValue]
                 loop held in ranked {
                     if !placed {
                         order :: jet_eval_route_order(held.value, entry.value, &machine, span) ?? return None
-                        if order < 0 || (order == 0 && jet_eval_route_key_order(entry.key, held.key) < 0) {
+                        if order < 0 || (order == 0 && jet_eval_key_compare(entry.key, held.key) < 0) {
                             &next_ranked.push(entry)
                             placed = true
                         }
@@ -1503,6 +1492,7 @@ fn jet_eval_route_prelude(machine: &JetEvalMachine, call: MIRPreludeCallID, args
         return jet_eval_copy_value(args[0], &machine, span)
     }
     symbol :: jet_eval_route_symbol_prelude(row, &machine, span) ?? return None
+    if row.family == MIRPreludeFamily.StaticPrelude && row.module_name == "core.host" && symbol == "jet_comptime_host_method" && (row.member.starts_with("BuildContext.") || row.member == "BuildPlan.graph") -> return jet_eval_host_row(&machine, row, args, result_ty, span)
     data :: jet_eval_route_args(args, &machine, span) ?? return None
     // MIREval `core.text.fmt` display/debug: the evaluator-owned structural
     // renderers (Formatting/Values.jet), never a source target.

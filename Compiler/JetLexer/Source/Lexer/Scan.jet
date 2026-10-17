@@ -44,17 +44,25 @@ fn ascii_digit(value: Int) -> Bool Never! {
     value >= 48 && value <= 57
 }
 
+// ASCII bytes take the byte tests alone: on an ASCII scalar the Unicode
+// predicates agree with them (alphabetic = A-Z a-z, numeric = 0-9, uppercase
+// = A-Z), and the String building in `scalar_at` is skipped. A position past
+// the end (byte -1) keeps the general path.
 fn is_identifier_start(source: [U8], index: Int) -> Bool Never! {
     value :: byte_at(source, index)
+    if value >= 0 && value < 128 -> return value == 95 || ascii_alpha(value)
     value == 95 || ascii_alpha(value) || unicode.is_alphabetic(scalar_at(source, index))
 }
 
 fn is_identifier_continue(source: [U8], index: Int) -> Bool Never! {
     value :: byte_at(source, index)
+    if value >= 0 && value < 128 -> return value == 95 || ascii_alpha(value) || ascii_digit(value)
     value == 95 || ascii_alpha(value) || ascii_digit(value) || unicode.is_alphabetic(scalar_at(source, index)) || unicode.is_numeric(scalar_at(source, index))
 }
 
 fn first_char_is_upper(source: [U8], start: Int) -> Bool Never! {
+    value :: byte_at(source, start)
+    if value >= 0 && value < 128 -> return value >= 65 && value <= 90
     scalar := scalar_at(source, start)
     unicode.is_alphabetic(scalar) && unicode.upper(scalar) == scalar && unicode.lower(scalar) != scalar
 }
@@ -69,6 +77,9 @@ fn is_whitespace_at(source: [U8], index: Int) -> Bool Never! {
 }
 
 fn slice_text(source: [U8], start: Int, end: Int) -> String Never! {
+    stop :: if end < source.len() -> end else -> source.len()
+    if start >= stop -> return ""
+    if start >= 0 -> return String.from_bytes(source.slice(start, stop)) ?? ""
     out := [U8]{}
     i := start
     loop i < end && i < source.len() {
@@ -122,48 +133,153 @@ fn scan_unit_suffix_end(source: [U8], start: Int) -> Int {
     i
 }
 
+// BEGIN GENERATED LEXER KEYWORD SPANS
+// Derived from Jet Lexer/Keywords and Syntax literals; do not hand edit.
+// No spelling ownership here: Payload still builds the exact token text.
 fn word_kind(source: [U8], start: Int, end: Int, previous_kind: Int) -> Int Never! {
-    word :: slice_text(source, start, end)
-    previous_is_dot :: if previous_kind == {
-        K_DOT -> true
-        K_QUESTION_DOT -> true
-        else -> false
-    }
-    if word == "in" && previous_is_dot -> return K_IDENT
-    if word == {
-        "true" -> K_TRUE
-        "false" -> K_FALSE
-        "None" -> K_NULL
-        "self" -> K_SELF
-        "break" -> K_BREAK
-        "return" -> K_RETURN
-        "fn" -> K_FN
-        "pub" -> K_PUB
-        "priv" -> K_PRIV
-        "if" -> K_IF
-        "else" -> K_ELSE
-        "in" -> K_IN
-        "mut" -> K_MUTATE
-        "take" -> K_MOVE
-        "copy" -> K_COPY
-        "struct" -> K_STRUCT
-        "enum" -> K_ENUM
-        "impl" -> K_IMPL
-        "trait" -> K_TRAIT
-        "tag" -> K_TAG
-        "effect" -> K_EFFECT
-        "derive" -> K_DERIVE
-        "it" -> K_IT
-        "const" -> K_CONST
-        "comptime" -> K_COMPTIME
-        "loop" -> K_LOOP
-        "yield" -> K_YIELD
-        "use" -> K_USE
-        "extern" -> K_EXTERN
-        "module" -> K_MODULE
+    kind :: if end - start == {
+        2 -> {
+            if byte_at(source, start + 0) == {
+                102 -> {
+                    if byte_at(source, start + 1) == 110 -> K_FN else -> K_IDENT // Syntax::KW_FN
+                }
+                105 -> {
+                    if byte_at(source, start + 1) == {
+                        102 -> {
+                            K_IF // Syntax::KW_IF
+                        }
+                        110 -> {
+                            K_IN // Syntax::KW_IN
+                        }
+                        116 -> {
+                            K_IT // Syntax::KW_IT
+                        }
+                        else -> K_IDENT
+                    }
+                }
+                else -> K_IDENT
+            }
+        }
+        3 -> {
+            if byte_at(source, start + 0) == {
+                109 -> {
+                    if byte_at(source, start + 1) == 117 && byte_at(source, start + 2) == 116 -> K_MUTATE else -> K_IDENT // Syntax::KW_MUTATE
+                }
+                112 -> {
+                    if byte_at(source, start + 1) == 117 && byte_at(source, start + 2) == 98 -> K_PUB else -> K_IDENT // Syntax::KW_PUB
+                }
+                116 -> {
+                    if byte_at(source, start + 1) == 97 && byte_at(source, start + 2) == 103 -> K_TAG else -> K_IDENT // Syntax::KW_TAG
+                }
+                117 -> {
+                    if byte_at(source, start + 1) == 115 && byte_at(source, start + 2) == 101 -> K_USE else -> K_IDENT // Syntax::KW_USE
+                }
+                else -> K_IDENT
+            }
+        }
+        4 -> {
+            if byte_at(source, start + 0) == {
+                78 -> {
+                    if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 110 && byte_at(source, start + 3) == 101 -> K_NULL else -> K_IDENT // Syntax::LIT_NULL
+                }
+                99 -> {
+                    if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 112 && byte_at(source, start + 3) == 121 -> K_COPY else -> K_IDENT // Syntax::KW_COPY
+                }
+                101 -> {
+                    if byte_at(source, start + 1) == {
+                        108 -> {
+                            if byte_at(source, start + 2) == 115 && byte_at(source, start + 3) == 101 -> K_ELSE else -> K_IDENT // Syntax::KW_ELSE
+                        }
+                        110 -> {
+                            if byte_at(source, start + 2) == 117 && byte_at(source, start + 3) == 109 -> K_ENUM else -> K_IDENT // Syntax::KW_ENUM
+                        }
+                        else -> K_IDENT
+                    }
+                }
+                105 -> {
+                    if byte_at(source, start + 1) == 109 && byte_at(source, start + 2) == 112 && byte_at(source, start + 3) == 108 -> K_IMPL else -> K_IDENT // Syntax::KW_IMPL
+                }
+                108 -> {
+                    if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 111 && byte_at(source, start + 3) == 112 -> K_LOOP else -> K_IDENT // Syntax::KW_LOOP
+                }
+                112 -> {
+                    if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 105 && byte_at(source, start + 3) == 118 -> K_PRIV else -> K_IDENT // Syntax::KW_PRIV
+                }
+                115 -> {
+                    if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 108 && byte_at(source, start + 3) == 102 -> K_SELF else -> K_IDENT // Syntax::KW_SELF
+                }
+                116 -> {
+                    if byte_at(source, start + 1) == {
+                        97 -> {
+                            if byte_at(source, start + 2) == 107 && byte_at(source, start + 3) == 101 -> K_MOVE else -> K_IDENT // Syntax::KW_MOVE
+                        }
+                        114 -> {
+                            if byte_at(source, start + 2) == 117 && byte_at(source, start + 3) == 101 -> K_TRUE else -> K_IDENT // Syntax::LIT_TRUE
+                        }
+                        else -> K_IDENT
+                    }
+                }
+                else -> K_IDENT
+            }
+        }
+        5 -> {
+            if byte_at(source, start + 0) == {
+                98 -> {
+                    if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 101 && byte_at(source, start + 3) == 97 && byte_at(source, start + 4) == 107 -> K_BREAK else -> K_IDENT // Syntax::KW_BREAK
+                }
+                99 -> {
+                    if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 110 && byte_at(source, start + 3) == 115 && byte_at(source, start + 4) == 116 -> K_CONST else -> K_IDENT // Syntax::KW_CONST
+                }
+                102 -> {
+                    if byte_at(source, start + 1) == 97 && byte_at(source, start + 2) == 108 && byte_at(source, start + 3) == 115 && byte_at(source, start + 4) == 101 -> K_FALSE else -> K_IDENT // Syntax::LIT_FALSE
+                }
+                116 -> {
+                    if byte_at(source, start + 1) == 114 && byte_at(source, start + 2) == 97 && byte_at(source, start + 3) == 105 && byte_at(source, start + 4) == 116 -> K_TRAIT else -> K_IDENT // Syntax::KW_TRAIT
+                }
+                121 -> {
+                    if byte_at(source, start + 1) == 105 && byte_at(source, start + 2) == 101 && byte_at(source, start + 3) == 108 && byte_at(source, start + 4) == 100 -> K_YIELD else -> K_IDENT // Syntax::KW_YIELD
+                }
+                else -> K_IDENT
+            }
+        }
+        6 -> {
+            if byte_at(source, start + 0) == {
+                100 -> {
+                    if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 114 && byte_at(source, start + 3) == 105 && byte_at(source, start + 4) == 118 && byte_at(source, start + 5) == 101 -> K_DERIVE else -> K_IDENT // Syntax::KW_DERIVE
+                }
+                101 -> {
+                    if byte_at(source, start + 1) == {
+                        102 -> {
+                            if byte_at(source, start + 2) == 102 && byte_at(source, start + 3) == 101 && byte_at(source, start + 4) == 99 && byte_at(source, start + 5) == 116 -> K_EFFECT else -> K_IDENT // Syntax::KW_EFFECT_DECL
+                        }
+                        120 -> {
+                            if byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 101 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> K_EXTERN else -> K_IDENT // Syntax::KW_EXTERN
+                        }
+                        else -> K_IDENT
+                    }
+                }
+                109 -> {
+                    if byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 100 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 108 && byte_at(source, start + 5) == 101 -> K_MODULE else -> K_IDENT // Syntax::KW_MODULE
+                }
+                114 -> {
+                    if byte_at(source, start + 1) == 101 && byte_at(source, start + 2) == 116 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 114 && byte_at(source, start + 5) == 110 -> K_RETURN else -> K_IDENT // Syntax::KW_RETURN
+                }
+                115 -> {
+                    if byte_at(source, start + 1) == 116 && byte_at(source, start + 2) == 114 && byte_at(source, start + 3) == 117 && byte_at(source, start + 4) == 99 && byte_at(source, start + 5) == 116 -> K_STRUCT else -> K_IDENT // Syntax::KW_STRUCT
+                }
+                else -> K_IDENT
+            }
+        }
+        8 -> {
+            if byte_at(source, start + 0) == 99 && byte_at(source, start + 1) == 111 && byte_at(source, start + 2) == 109 && byte_at(source, start + 3) == 112 && byte_at(source, start + 4) == 116 && byte_at(source, start + 5) == 105 && byte_at(source, start + 6) == 109 && byte_at(source, start + 7) == 101 -> K_COMPTIME else -> K_IDENT // Syntax::KW_COMPTIME
+        }
         else -> K_IDENT
     }
+    // D-TIME-IN1=C: only exact in becomes a member after a postfix dot.
+    if kind == K_IN && (previous_kind == K_DOT || previous_kind == K_QUESTION_DOT) -> return K_IDENT
+    kind
 }
+// END GENERATED LEXER KEYWORD SPANS
 
 fn scan_digits(source: [U8], start: Int) -> Int Never! {
     i := start
@@ -522,7 +638,7 @@ fn scan_block_comment_end(source: [U8], start: Int) -> Int Never! {
     i
 }
 
-pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
+fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
     facts := [Int]{}
     last_code := -1
     i := 0
@@ -1061,7 +1177,7 @@ pub fn raw_token_facts(source: [U8], config_surface: Bool) -> [Int] {
     facts
 }
 
-pub fn terminator_events_scanned(source: [U8], config_surface: Bool) -> [Int] {
+fn terminator_events_scanned(source: [U8], config_surface: Bool) -> [Int] {
     facts :: raw_token_facts(source, config_surface)
     terminator_events(source, facts)
 }

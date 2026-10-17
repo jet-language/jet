@@ -441,7 +441,7 @@ fn jet_ws_send_message(conn: &JetWsConn, opcode: u8, payload: &[u8]) -> Result<(
     jet_ws_write_frame(&mut stream, opcode, payload, masked)
 }
 
-fn jet_ws_send_text(conn: &JetWsConn, text: &String) -> Result<(), JetWsError> {
+fn jet_ws_send_text(conn: &JetWsConn, text: &str) -> Result<(), JetWsError> {
     jet_ws_send_message(conn, 0x1, text.as_bytes())
 }
 
@@ -449,7 +449,7 @@ fn jet_ws_send_binary(conn: &JetWsConn, bytes: &Vec<u8>) -> Result<(), JetWsErro
     jet_ws_send_message(conn, 0x2, bytes)
 }
 
-fn jet_ws_close(conn: &JetWsConn, code: i64, reason: &String) -> Result<(), JetWsError> {
+fn jet_ws_close(conn: &JetWsConn, code: i64, reason: &str) -> Result<(), JetWsError> {
     if conn.closed.get() {
         return Ok(());
     }
@@ -551,7 +551,7 @@ fn jet_ws_finish_data(opcode: u8, payload: Vec<u8>) -> Result<JetWsMessage, JetW
         _ => Err(JetWsError::Protocol),
     }
 }
-fn jet_ws_connect(url: &String) -> Result<JetWsConn, JetWsError> {
+fn jet_ws_connect(url: &str) -> Result<JetWsConn, JetWsError> {
     #[cfg(not(any(
         target_os = "linux",
         target_os = "android",
@@ -688,6 +688,6 @@ fn jet_ws_message_bytes(message: &JetWsMessage) -> Result<Vec<u8>, JetWsError> {
     }
 }
 
-fn jet_ws_accept_key_public(key: &String) -> String {
+fn jet_ws_accept_key_public(key: &str) -> String {
     jet_ws_accept_key(key)
 }

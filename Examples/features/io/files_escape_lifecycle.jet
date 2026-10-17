@@ -4,7 +4,7 @@
 // from a line loop closes the file handle (observed through /proc/self/fd).
 package {
     name: "files_escape_lifecycle"
-    authority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc, Time.Wait] } }
+    authority: { holds: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] } }
 }
 
 use core.files as files
@@ -15,7 +15,7 @@ fn fd_count() -> Int {
 }
 
 fn first_line(path: String) -> String IOError! {
-    handle :: files.open(~path)
+    handle :: files.open(path.copy())
     loop line in handle.lines() -> return Ok(line)
     Ok("")
 }
@@ -47,9 +47,13 @@ fn run() {
     after :: fd_count()
     print("fds leaked after 5 early exits: {after - before}")
 
-    // A missing file is a typed error, not an empty stream.
+    // A missing file is a typed error, not an empty stream. The temp root's
+    // name differs per run, so the message shows paths relative to it.
     if first_line("{root}/missing.txt") == {
         .Ok(_) -> print("missing: accepted")
-        .Err(error) -> print("missing: {error}")
+        .Err(error) -> {
+            message :: "{error}".replace("{base}/", "")
+            print("missing: {message}")
+        }
     }
 }

@@ -95,10 +95,10 @@ fn publication_metadata_test_refusal(text: String, detail: String) Never! {
 }
 #Test("publication metadata descriptor merge stable lists and boolean OR") {
     dependencies := [String: PublicationRegistryDependency]{}
-    first :: DataTree.Object([String: DataTree]{"require": DataTree.Text("^1"), "prefer": DataTree.Text("~1.2"), "reject": pkg_json_texts([String]{"1.2.3", "1.0.0", "1.2.3"}), "strict": DataTree.Bool(true), "default": DataTree.Bool(true)})
+    first :: Dyn.Object([String: Dyn]{"require": Dyn.Text("^1"), "prefer": Dyn.Text("~1.2"), "reject": pkg_json_texts([String]{"1.2.3", "1.0.0", "1.2.3"}), "strict": Dyn.Bool(true), "default": Dyn.Bool(true)})
     publication_merge_registry_dependency(&dependencies, "x", first, "optional") ?? panic("first descriptor")
-    publication_merge_registry_dependency(&dependencies, "x", DataTree.Text("^1"), "normal") ?? panic("duplicate requirement")
-    publication_merge_registry_dependency(&dependencies, "x", DataTree.Text(">=1.1"), "build") ?? panic("second requirement")
+    publication_merge_registry_dependency(&dependencies, "x", Dyn.Text("^1"), "normal") ?? panic("duplicate requirement")
+    publication_merge_registry_dependency(&dependencies, "x", Dyn.Text(">=1.1"), "build") ?? panic("second requirement")
     x :: dependencies["x"]
     assert_eq(x.roles, [String]{"build", "normal", "optional"})
     assert_eq(x.requirements, [String]{"^1", ">=1.1"})
@@ -271,4 +271,57 @@ fn publication_metadata_test_root(label: String) -[FS, Env]> String Never! {
     }
     assert(!files.exists(publication_artifact_path(repo, "cycle-kit", "1.0.0") ?? panic("artifact path")))
     files.remove_all(root) ?? panic("cleanup")
+}
+
+// Missing artifact/hash consumers, ported from tests/pkg.rs:8083-8148.
+#Test("publication registry_corrupt_artifact_is_rejected_before_install original") {
+    root :: publication_metadata_test_root("corrupt-artifact")
+    repo :: files.join(root, "registry")
+    artifact :: files.join(repo, "artifacts/corruptkit/1.0.0")
+    files.create_dir_all(artifact) ?? panic("artifact")
+    files.write(files.join(artifact, "package.jet"), "not-the-published-bytes") ?? panic("source")
+    entry := publication_index_test_entry("corruptkit", "1.0.0", false)
+    entry.content_hash = "sha256-not-the-tree"
+    if publication_verify_artifact(repo, entry) == {
+        .Err(.InvalidData(context)) -> assert((context.cause ?? "").contains("failed its content hash"))
+        else -> panic("corrupt artifact accepted or wrong refusal")
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication registry_artifact_hash_covers_auxiliary_files original") {
+    root :: publication_metadata_test_root("artifact-auxiliary-hash")
+    repo :: files.join(root, "registry")
+    source :: files.join(root, "source")
+    files.create_dir_all(repo) ?? panic("registry")
+    files.create_dir_all(source) ?? panic("source")
+    files.write(files.join(source, "package.jet"), "package bytes") ?? panic("package")
+    files.write(files.join(source, "registry.json"), "{{\"name\":\"asset-kit\",\"version\":\"1.0.0\"}}") ?? panic("metadata")
+    files.write(files.join(source, "embedded.bin"), "published asset") ?? panic("asset")
+    expected :: publication_registry_artifact_hash(source) ?? panic("hash")
+    files.write(files.join(source, "embedded.bin"), "tampered asset") ?? panic("tamper")
+    if publication_publish_artifact(repo, source, "asset-kit", "1.0.0", expected) == {
+        .Err(.InvalidData(context)) -> assert((context.cause ?? "").contains("source hash changed"))
+        else -> panic("changed auxiliary artifact accepted or wrong refusal")
+    }
+    assert(!files.exists(publication_artifact_path(repo, "asset-kit", "1.0.0") ?? panic("path")))
+    files.remove_all(root) ?? panic("cleanup")
+}
+#Test("publication registry_artifact_parent_symlink_is_rejected_before_hashing original") {
+    if sys.name() != "windows" {
+        root :: publication_metadata_test_root("artifact-parent-symlink")
+        repo :: files.join(root, "registry")
+        outside :: files.join(root, "outside")
+        files.create_dir_all(repo) ?? panic("registry")
+        files.create_dir_all(files.join(outside, "escape-kit/1.0.0")) ?? panic("outside")
+        files.write(files.join(outside, "escape-kit/1.0.0/package.jet"), "must not be followed") ?? panic("outside bytes")
+        files.symlink(outside, files.join(repo, "artifacts")) ?? panic("link")
+        entry := publication_index_test_entry("escape-kit", "1.0.0", false)
+        entry.content_hash = "sha256-unchecked"
+        if publication_verify_artifact(repo, entry) == {
+            .Err(.InvalidData(context)) -> assert((context.cause ?? "").contains("not a real directory"))
+            else -> panic("artifact ancestor link accepted or wrong refusal")
+        }
+        assert(files.is_file(files.join(outside, "escape-kit/1.0.0/package.jet")))
+        files.remove_all(root) ?? panic("cleanup")
+    }
 }

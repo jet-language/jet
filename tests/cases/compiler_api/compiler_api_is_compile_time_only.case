@@ -1,0 +1,9 @@
+# HAND-PORT tests/compiler_api.rs:412-430 compiler_api_is_compile_time_only
+# PENDING-SAME-HEAD runtimeGap=original-assert; PENDING-GRAMMAR, no historical failure captures blessed.
+# All original public predicates retained.
+fixture: compiler_api_is_compile_time_only.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0956"] #>= 1
+json: stdout doc $.reports[?what~="compile-time only"] #>= 1

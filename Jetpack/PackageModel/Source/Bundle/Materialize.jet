@@ -1,0 +1,254 @@
+// Source/CmdPackage.rs:415-1204. Native transport of the checked BundlePlan.
+// Never replace a failed native adapter with the logical artifact digest.
+// Materialization retains the native adapter's exact failure detail in a typed
+// domain; transport failures never masquerade as a logical bundle digest.
+#Error
+struct BundleMaterializeError {
+    reason: String
+
+    fn message(self) -> String Never! { self.reason }
+}
+
+struct BundleNativeFacts {
+    sha256: String
+    bytes: Int
+    materializer: BundleMaterializerFact
+    signing: BundleSigningFact?
+}
+struct BundleSigningRun { requested: Bool, verified: Bool, programs: [String], identities: [String] }
+
+fn pkg_bundle_native_free(path: String) BundleMaterializeError! -[FS]> {
+    if files.stat(path) == {
+        .Ok(_) -> Err(BundleMaterializeError{reason: "package output `{path}` already exists"})
+        .Err(error) -> if error == .NotFound(_) -> Ok() else -> Err(BundleMaterializeError{reason: "could not inspect package output `{path}`: {error}"})
+    }
+}
+fn pkg_bundle_native_regular(path: String) -[FS]> String BundleMaterializeError! {
+    stat :: files.stat(path) ?? return Err(BundleMaterializeError{reason: "could not inspect package file `{path}`: {err}"})
+    if stat.is_symlink || !stat.is_file -> return Err(BundleMaterializeError{reason: "package file `{path}` is not a regular file"})
+    files.canonicalize(path) ?? return Err(BundleMaterializeError{reason: "could not canonicalize package file `{path}`: {err}"})
+}
+fn pkg_bundle_native_tool(name: String, signing: Bool) -[FS, Env]> String BundleMaterializeError! {
+    if name == "" -> return Err(BundleMaterializeError{reason: "signing hook program cannot be empty"})
+    if name.contains("/") || name.contains("\\") {
+        if signing -> return pkg_bundle_native_regular(name)
+        return Err(BundleMaterializeError{reason: "package materializer tool `{name}` must be a bare executable name"})
+    }
+    path :: sys.get("PATH") ?? return Err(BundleMaterializeError{reason: "package materializer cannot resolve tools without PATH"})
+    loop directory in path.split(sys.pathsep()) {
+        candidate :: files.join(directory, name)
+        if files.stat(candidate) == {
+            .Ok(stat) -> {
+                if stat.is_symlink || !stat.is_file -> next
+                return pkg_bundle_native_regular(candidate)
+            }
+            .Err(error) -> if error == {
+                .NotFound(_) -> {}
+                else -> { return Err(BundleMaterializeError{reason: "could not inspect package materializer tool `{candidate}`: {error}"}) }
+            }
+        }
+    }
+    Err(BundleMaterializeError{reason: "required package materializer tool `{name}` was not found on PATH"})
+}
+fn pkg_bundle_native_hash(path: String) -[FS]> String BundleMaterializeError! {
+    bytes :: files.read_bytes(path) ?? return Err(BundleMaterializeError{reason: "could not hash package file `{path}`: {err}"})
+    Ok(pkg_sha256_hex(bytes))
+}
+fn pkg_bundle_native_run(tool: String, args: [String], source: String, output: String) -[FS, Env, Exec, Time, Time.Wait]> NativeSandboxOutput BundleMaterializeError! {
+    environment :: [String:String]{"LC_ALL": "C", "SOURCE_DATE_EPOCH": "0", "TZ": "UTC"}
+    foundation_run_native_sandboxed(tool, args, source, Val(output), environment, false) ?? return Err(BundleMaterializeError{reason: "checked native process authority could not run package tool: {err}"})
+}
+fn pkg_bundle_native_text(bytes: [U8]) -> String Never! { String.from_bytes_lossy(bytes) }
+fn pkg_bundle_native_detail(run: NativeSandboxOutput) -> String Never! {
+    stdout :: pkg_bundle_native_text(run.receipt.stdout[0..<(if run.receipt.stdout.len() > 4096 -> 4096 else -> run.receipt.stdout.len())]).trim()
+    stderr :: pkg_bundle_native_text(run.receipt.stderr[0..<(if run.receipt.stderr.len() > 4096 -> 4096 else -> run.receipt.stderr.len())]).trim()
+    if stdout == "" && stderr == "" -> return "no tool output"
+    if stdout == "" -> return "stderr: {stderr}"
+    if stderr == "" -> return "stdout: {stdout}"
+    "stdout: {stdout}; stderr: {stderr}"
+}
+fn pkg_bundle_native_version(run: NativeSandboxOutput) -> String BundleMaterializeError! {
+    loop text in ([String]{pkg_bundle_native_text(run.receipt.stdout), pkg_bundle_native_text(run.receipt.stderr)}) {
+        loop line in text.split("\n") {
+            value :: line.trim()
+            if value == "" -> next
+            if pkg_text_has_control(value) -> return Err(BundleMaterializeError{reason: "package materializer tool version contains a control character"})
+            return Ok(value)
+        }
+    }
+    Err(BundleMaterializeError{reason: "package materializer tool returned no version text"})
+}
+fn pkg_bundle_native_hooks(plan: &BundlePlan, phase: SigningPhase, source: String, output: String, run: &BundleSigningRun) BundleMaterializeError! -[FS, Env, Exec, Time, Time.Wait]> {
+    loop hook in plan.signing_hooks {
+        if hook.phase != phase -> next
+        loop expected in hook.inputs {
+            found := false
+            loop input in plan.inputs {
+                if input.path == expected.path && input.digest == expected.digest -> found = true
+            }
+            loop file in plan.files {
+                if file.path == expected.path && file.digest() == expected.digest -> found = true
+            }
+            if !found -> return Err(BundleMaterializeError{reason: "signing hook `{hook.name}` names an input with an unverified digest: `{expected.path}`"})
+        }
+        tool :: pkg_bundle_native_tool(hook.program, true)
+        identity :: pkg_bundle_native_hash(tool)
+        executed :: pkg_bundle_native_run(tool, hook.args, source, output)
+        if !executed.receipt.success -> return Err(BundleMaterializeError{reason: "signing hook `{hook.name}` ({tool}) failed in {phase.as_str()} phase: {pkg_bundle_native_detail(executed)}"})
+        &run.programs.push(hook.program)
+        &run.identities.push(identity)
+        if phase == SigningPhase.Verify -> run.verified = true
+    }
+    Ok()
+}
+fn pkg_bundle_native_signing(run: BundleSigningRun) -> BundleSigningFact? BundleMaterializeError! {
+    if !run.requested -> return Ok(None)
+    if !run.verified -> return Err(BundleMaterializeError{reason: "signing hooks were requested but no successful verify-phase hook ran"})
+    identities := run.identities
+    &identities.sort()
+    separator :: String.from_bytes([U8]{U8{0}}) ?? panic("NUL is UTF-8")
+    identity :: if identities.len() == 1 -> identities[0] else -> pkg_sha256_hex(identities.join(separator).bytes())
+    tool :: if run.programs.len() == 1 -> run.programs[0] else -> if run.programs.len() == 0 -> "unknown" else -> "multiple"
+    Ok(Val(BundleSigningFact.signed().with_tool(tool, identity, "unspecified")))
+}
+// Exact Component::Normal/CurDir policy, including stripped macOS app root.
+fn pkg_bundle_native_relative(plan: &BundlePlan, file: &BundleFile, strip: Bool) -> String BundleMaterializeError! {
+    raw := file.path.replace("\\", "/")
+    if strip {
+        root :: "{plan.metadata.identifier}.app/"
+        if !raw.starts_with(root) -> return Err(BundleMaterializeError{reason: "macOS package path `{file.path}` is outside `{plan.metadata.identifier}.app`"})
+        raw = raw.slice(root.len()..<raw.len())
+    }
+    if files.is_abs(raw) -> return Err(BundleMaterializeError{reason: "package path `{file.path}` escapes its staging root"})
+    parts := [String]{}
+    loop part in raw.split("/") {
+        if part == "" || part == "." -> next
+        if part == ".." -> return Err(BundleMaterializeError{reason: "package path `{file.path}` escapes its staging root"})
+        &parts.push(part)
+    }
+    if parts.len() == 0 -> return Err(BundleMaterializeError{reason: "package path `{file.path}` is empty"})
+    Ok(parts.join("/"))
+}
+fn pkg_bundle_native_tree(plan: &BundlePlan, stage: String, strip: Bool) BundleMaterializeError! -[FS, Env]> {
+    seen := [String]{}
+    loop file in plan.files {
+        relative :: pkg_bundle_native_relative(&plan, &file, strip)
+        if seen.contains(relative) -> return Err(BundleMaterializeError{reason: "package plan emits duplicate materialized path `{relative}`"})
+        &seen.push(relative)
+        destination :: files.join(stage, relative)
+        pkg_bundle_native_free(destination)
+        files.create_dir_all(files.dirname(destination)) ?? return Err(BundleMaterializeError{reason: "could not create package path `{destination}`: {err}"})
+        files.write_bytes(destination, file.bytes) ?? return Err(BundleMaterializeError{reason: "could not write package file `{destination}`: {err}"})
+        if sys.is_unix() -> files.set_mode(destination, file.mode) ?? return Err(BundleMaterializeError{reason: "could not set package mode on `{destination}`: {err}"})
+    }
+    Ok()
+}
+fn pkg_bundle_native_builtin(plan: &BundlePlan, compiler_version: String) -[FS, Env]> BundleNativeFacts BundleMaterializeError! {
+    executable :: pkg_bundle_native_regular(sys.executable())
+    tool_identity :: pkg_bundle_native_hash(executable)
+    paths := [String]{}
+    loop file in plan.files -> &paths.push(pkg_bundle_native_relative(&plan, &file, true))
+    order := [Int]{}
+    loop index in 0..<paths.len() -> &order.push(index)
+    &order.sort_by((left: Int, right: Int) -> paths[left] <=> paths[right])
+    digest := "jet-package-materialized-v1".bytes()
+    &digest.push(U8{0})
+    total := 0
+    loop index in order {
+        file :: plan.files[index]
+        pkg_bundle_frame(&digest, paths[index].bytes())
+        pkg_bundle_frame(&digest, file.kind.as_str().bytes())
+        pkg_bundle_push_big_endian(&digest, file.mode, 4)
+        pkg_bundle_frame(&digest, file.bytes)
+        if total > 18446744073709551615 - file.bytes.len() -> return Err(BundleMaterializeError{reason: "materialized package exceeds the supported byte count"})
+        total += file.bytes.len()
+    }
+    Ok(BundleNativeFacts{sha256: pkg_sha256_hex(digest), bytes: total,
+        materializer: BundleMaterializerFact{tool: "jet-package-materializer", tool_identity: tool_identity,
+            tool_version: compiler_version, executable: executable, authority: "in-process", mechanism: "filesystem-staging", policy: "checked-plan-only"}, signing: None})
+}
+// Cleanup is attempted after both successful publication and all failure rails.
+fn pkg_bundle_materialize(plan: &BundlePlan, output: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts BundleMaterializeError! {
+    parent :: files.dirname(output)
+    files.create_dir_all(parent) ?? return Err(BundleMaterializeError{reason: "could not create package output directory `{parent}`: {err}"})
+    pkg_bundle_native_free(output)
+    name :: files.basename(output)
+    if name == "" -> return Err(BundleMaterializeError{reason: "package output `{output}` has no UTF-8 file name"})
+    suffix :: if plan.target == {
+        .LinuxAppImage -> "appdir"
+        .MacOSApp -> "app"
+        .WindowsMsix -> "msix"
+    }
+    stage :: files.join(parent, ".{name}.jet-package-{suffix}-{sys.pid()}")
+    output_stage :: files.join(parent, ".{name}.jet-package-appimage-output-{sys.pid()}")
+    staged_msix :: files.join(parent, ".{name}.jet-package-msix-output-{sys.pid()}")
+    pkg_bundle_native_free(stage)
+    if plan.target == BundleTarget.LinuxAppImage -> pkg_bundle_native_free(output_stage)
+    if plan.target == BundleTarget.WindowsMsix {
+        if !sys.is_windows() -> return Err(BundleMaterializeError{reason: "windows-msix materialization requires a Windows host with the native `makeappx` adapter"})
+        pkg_bundle_native_free(staged_msix)
+    }
+    // Retain the call's report until staging cleanup has run on both rails.
+    if pkg_bundle_native_materialize(&plan, output, parent, name, stage, output_stage, staged_msix, compiler_version) == {
+        .Ok(facts) -> {
+            if plan.target != BundleTarget.MacOSApp -> files.remove_all(stage).drop("native bundle stage cleanup is best-effort after publication")
+            if plan.target == BundleTarget.LinuxAppImage -> files.remove_all(output_stage).drop("native bundle output stage cleanup is best-effort")
+            if plan.target == BundleTarget.WindowsMsix -> files.remove(staged_msix).drop("native bundle MSIX stage cleanup is best-effort")
+            return Ok(facts)
+        }
+        .Err(error) -> {
+            files.remove_all(stage).drop("native bundle stage cleanup must not replace the materialization error")
+            if plan.target == BundleTarget.LinuxAppImage -> files.remove_all(output_stage).drop("native bundle output stage cleanup must not replace the materialization error")
+            if plan.target == BundleTarget.WindowsMsix -> files.remove(staged_msix).drop("native bundle MSIX stage cleanup must not replace the materialization error")
+            return Err(error)
+        }
+    }
+}
+fn pkg_bundle_native_materialize(plan: &BundlePlan, output: String, parent: String, name: String, stage: String, output_stage: String, staged_msix: String, compiler_version: String) -[FS, Env, Exec, Time, Time.Wait]> BundleNativeFacts BundleMaterializeError! {
+    files.create_dir(stage) ?? return Err(BundleMaterializeError{reason: "could not stage package `{stage}`: {err}"})
+    mac :: plan.target == BundleTarget.MacOSApp
+    linux :: plan.target == BundleTarget.LinuxAppImage
+    if linux -> files.create_dir(output_stage) ?? return Err(BundleMaterializeError{reason: "could not stage AppImage output `{output_stage}`: {err}"})
+    pkg_bundle_native_tree(&plan, stage, mac)
+    writable :: if linux -> output_stage else -> parent
+    signing := BundleSigningRun{requested: plan.signing_hooks.len() > 0, verified: false, programs: [String]{}, identities: [String]{}}
+    if mac {
+        pkg_bundle_native_hooks(&plan, SigningPhase.PreSign, stage, writable, &signing)
+        facts := pkg_bundle_native_builtin(&plan, compiler_version)
+        pkg_bundle_native_hooks(&plan, SigningPhase.PostSign, stage, writable, &signing)
+        pkg_bundle_native_hooks(&plan, SigningPhase.Verify, stage, writable, &signing)
+        facts.signing = pkg_bundle_native_signing(signing)
+        files.rename(stage, output) ?? return Err(BundleMaterializeError{reason: "could not publish macOS app `{output}`: {err}"})
+        return Ok(facts)
+    }
+    tool_name :: if linux -> "appimagetool" else -> "makeappx.exe"
+    tool :: pkg_bundle_native_tool(tool_name, false)
+    identity :: pkg_bundle_native_hash(tool)
+    status :: foundation_native_sandbox_status()
+    if !status.available -> return Err(BundleMaterializeError{reason: "package materialization requires the checked native process authority; {status.reason} ({status.mechanism})"})
+    pkg_bundle_native_hooks(&plan, SigningPhase.PreSign, stage, writable, &signing)
+    version :: pkg_bundle_native_run(tool, [String]{if linux -> "--version" else -> "/?"}, stage, writable)
+    if !version.receipt.success -> return Err(BundleMaterializeError{reason: "declared package tool `{tool}` failed its version probe: {pkg_bundle_native_detail(version)}"})
+    tool_version :: pkg_bundle_native_version(version)
+    artifact :: if linux -> files.join(output_stage, name) else -> staged_msix
+    args :: if linux -> {
+        [String]{if sys.is_linux() -> "/work/source" else -> stage, if sys.is_linux() -> "/work/output/{name}" else -> artifact}
+    } else -> {
+        [String]{"pack", "/d", stage, "/p", artifact, "/o"}
+    }
+    packaged :: pkg_bundle_native_run(tool, args, stage, writable)
+    if !packaged.receipt.success -> return Err(BundleMaterializeError{reason: "declared package tool `{tool}` failed to materialize `{name}`: {pkg_bundle_native_detail(packaged)}"})
+    _ :: pkg_bundle_native_regular(artifact)
+    metadata :: files.stat(artifact) ?? return Err(BundleMaterializeError{reason: "could not inspect materialized package `{artifact}`: {err}"})
+    if linux -> files.set_mode(artifact, 493) ?? return Err(BundleMaterializeError{reason: "could not set package mode on `{artifact}`: {err}"})
+    // AppImage facts precede post-sign hooks; MSIX hashes after hooks (Rust).
+    digest := if linux -> pkg_bundle_native_hash(artifact) else -> ""
+    pkg_bundle_native_hooks(&plan, SigningPhase.PostSign, stage, writable, &signing)
+    pkg_bundle_native_hooks(&plan, SigningPhase.Verify, stage, writable, &signing)
+    if !linux -> digest = pkg_bundle_native_hash(artifact)
+    fact :: pkg_bundle_native_signing(signing)
+    files.rename(artifact, output) ?? return Err(BundleMaterializeError{reason: "could not publish materialized package `{output}`: {err}"})
+    Ok(BundleNativeFacts{sha256: digest, bytes: metadata.size,
+        materializer: BundleMaterializerFact{tool: if linux -> "appimagetool" else -> "makeappx", tool_identity: identity,
+            tool_version: tool_version, executable: tool, authority: "Build.native_sandboxed", mechanism: packaged.mechanism, policy: packaged.policy}, signing: fact})
+}

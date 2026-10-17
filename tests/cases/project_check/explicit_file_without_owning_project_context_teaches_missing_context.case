@@ -1,0 +1,13 @@
+# tests/project_check.rs::explicit_file_without_owning_project_context_teaches_missing_context at tests/project_check.rs:379; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: explicit_file_without_owning_project_context_teaches_missing_context.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check orphan.jet
+cwd: {work}/missing_context
+env: JET_RECEIPT_BYPASS=1
+normalize: replace "{work}/missing_context" "<fixture>"
+exit: nonzero
+stderr: ~ "Error [E2393]" # original predicate
+stderr: ~ "Use project.<module>" # original predicate
+stderr: = explicit_file_without_owning_project_context_teaches_missing_context.missing_context.expected

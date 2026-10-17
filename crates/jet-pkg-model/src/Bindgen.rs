@@ -30,7 +30,7 @@ pub(crate) enum DecoderProtocol {
 pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> String {
     match protocol {
         DecoderProtocol::StandardEnvelope => format!(
-            r#"fn decode_response(raw: String, code: Int) -> DataTree !{error} {{
+            r#"fn decode_response(raw: String, code: Int) -> Dyn !{error} {{
     if code == {{
         1 -> {{ return Err({error}.NotRunning) }}
         2 -> {{ return Err({error}.Timeout) }}
@@ -40,15 +40,15 @@ pub(crate) fn render_decode_response(error: &str, protocol: DecoderProtocol) -> 
         else -> {{ return Err({error}.Protocol) }}
     }}
     response := json.parse(raw) ?? return Err({error}.Protocol)
-    succeeded := (response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    succeeded := (response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err({error}.CommandFailed)
-    return Ok(response.field("value") ?? DataTree.Null)
+    return Ok(response.field("value") ?? Dyn.Null)
 }}
 
 "#,
         ),
         DecoderProtocol::LuaRawJson => format!(
-            r#"fn decode_response(raw: String, code: Int) -> DataTree !{error} {{
+            r#"fn decode_response(raw: String, code: Int) -> Dyn !{error} {{
     decode_status(code)
     value := json.parse(raw) ?? return Err({error}.Protocol)
     return Ok(value)
@@ -243,7 +243,7 @@ mod tests {
                 .collect::<Vec<_>>();
             assert!(!response_externs.is_empty());
             for name in response_externs {
-                let marker = format!("pub fn {name}");
+                let marker = format!("\nfn {name}");
                 let start = source
                     .find(&format!("{marker}("))
                     .or_else(|| source.find(&format!("{marker}<")))
@@ -297,7 +297,7 @@ mod tests {
                     .collect::<Vec<_>>();
                 assert!(!view_externs.is_empty(), "Lua probe lacks view externs");
                 for name in view_externs {
-                    let marker = format!("pub fn {name}(");
+                    let marker = format!("\nfn {name}(");
                     let start = source
                         .find(&marker)
                         .expect("every Lua view extern has a generated wrapper");
@@ -875,7 +875,7 @@ impl BindingPlan {
                     self.operation.name
                 ));
                 source.push_str(&format!(
-                    "pub fn {}({}: &[U8]) -> {} {{\n    return __jet_ffi_native_{}({}, {}.len())\n}}\n",
+                    "fn {}({}: &[U8]) -> {} {{\n    return __jet_ffi_native_{}({}, {}.len())\n}}\n",
                     self.operation.name,
                     pointer_count.pointer_parameter,
                     self.operation.result_type,

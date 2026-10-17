@@ -1,0 +1,18 @@
+# PORT tests/repl.rs:2798-2821, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "\u0002" after 200ms
+pty-send: "score := 7\r" after 120ms
+pty-send: ":quit\r" after 200ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "session" # Original substring predicate rs2810.
+stdout: ~ "bindings" # Original substring predicate rs2810.
+stdout: ~ "│ score: Int := 7" # Original substring predicate rs2814.
+stdout: ~ "new this step" # Original substring predicate rs2818.

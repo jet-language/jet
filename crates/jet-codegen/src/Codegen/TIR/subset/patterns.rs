@@ -75,13 +75,7 @@ pub(crate) fn struct_pattern_values_in_subset(
     cx: &Cx,
     locals: &HashSet<String>,
 ) -> bool {
-    match pattern {
-        Pattern::Struct { fields, .. } => fields.iter().all(|f| match f {
-            StructPatField::Value { value, .. } => expr_in_subset(value, cx, locals),
-            StructPatField::Bind { .. } => true,
-        }),
-        _ => true,
-    }
+    !pattern.any_value_expr(&mut |value| !expr_in_subset(value, cx, locals))
 }
 
 /// c109 Phase 8: an arm head that is a fallible/optional pattern test over the
@@ -151,7 +145,7 @@ pub(crate) fn arm_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) -> Optio
         }
         Expr::Binary(BinOp::Eq, lhs, rhs, _) if pattern_subjects_match(cx, lhs, subject) => {
             if let Expr::Ident(variant, rhs_span) = rhs.as_ref() {
-                if cx.variant_owner.contains_key(variant) {
+                if cx.fact_variant_owner(variant).is_some() {
                     return Some(Pattern::Variant {
                         variant: variant.clone(),
                         bindings: Vec::new(),
@@ -182,23 +176,10 @@ pub(crate) fn arm_guarded_variant_pattern(cx: &Cx, cond: &Expr, subject: &Expr) 
 }
 
 /// `DataEvent` is a prelude enum whose variants are not entered in the ordinary
-/// user-variant owner table. Keep its surface list here for subset admission;
+/// user-variant owner table. Subset admission reads the canonical Core table;
 /// lowering resolves the concrete enum from the subject's typed TIR expression.
 pub(crate) fn is_data_event_variant(variant: &str) -> bool {
-    matches!(
-        variant,
-        "Null"
-            | "Bool"
-            | "Int"
-            | "Float"
-            | "Text"
-            | "Bytes"
-            | "ArrayStart"
-            | "ArrayEnd"
-            | "ObjectStart"
-            | "Key"
-            | "ObjectEnd"
-    )
+    crate::Sema::data_event_payload(variant).is_some()
 }
 
 pub(crate) fn is_hook_outcome_variant(variant: &str) -> bool {
@@ -243,7 +224,7 @@ pub(crate) fn variant_pattern_uses_payload(pattern: &Pattern) -> bool {
 /// The owning enum of a variant (or or-of-variant) pattern, via `cx.variant_owner`.
 pub(crate) fn variant_pattern_enum(cx: &Cx, pattern: &Pattern) -> Option<String> {
     match pattern {
-        Pattern::Variant { variant, .. } => cx.variant_owner.get(variant).cloned(),
+        Pattern::Variant { variant, .. } => cx.fact_variant_owner(variant).cloned(),
         Pattern::Or(alts, _) => alts.iter().find_map(|a| variant_pattern_enum(cx, a)),
         _ => None,
     }
@@ -309,12 +290,8 @@ pub(crate) fn add_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<
 
 /// Record names bound by a struct-pattern arm head.
 pub(crate) fn add_struct_pattern_binding_names(pattern: &Pattern, locals: &mut HashSet<String>) {
-    if let Pattern::Struct { fields, .. } = pattern {
-        for field in fields {
-            if let StructPatField::Bind { local, .. } = field {
-                locals.insert(local.clone());
-            }
-        }
+    for binding in pattern.binding_names() {
+        locals.insert(binding.local_name().to_string());
     }
 }
 

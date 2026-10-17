@@ -1,0 +1,143 @@
+use core.files as s1_host_files
+
+// Exact maintained-file assertions of tests/foreign_build_hosts.rs:19-185.
+// Test-body helpers are definition-before-use, collision-qualified, no production policy copied.
+fn s1_host_read(path: String) -> String { s1_host_files.read(path) ?? panic("read {path}") }
+fn s1_host_maintained_lines(path: String) -> Int {
+    count := 0
+    loop line in s1_host_read(path).lines() {
+        // #4819: stored trim views ICE at String method calls; keep owned text.
+        trimmed :: line.trim().copy()
+        if !trimmed.is_empty() && !trimmed.starts_with("#") && !trimmed.starts_with("//") && !trimmed.starts_with("<!--") -> count += 1
+    }
+    count
+}
+
+fn s1_host_adapters_use_one_jet_library_runner_and_fail_closed_outputs() {
+    root :: "Tools/foreign-build-hosts"
+    runner :: s1_host_read("{root}/jet-library.sh")
+    powershell :: s1_host_read("{root}/jet-library.ps1")
+    loop text in [runner, powershell] {
+        assert(text.contains("build"))
+        assert(text.contains("--lib"))
+        assert(text.contains("--locked"))
+        assert(text.contains("--output"))
+        assert(text.contains("package.jet"))
+        assert(text.contains(".jet/lock"))
+        assert(text.contains("jet-host.receipt"))
+        assert(text.contains("jet-host.stamp"))
+        assert(text.contains("sha256"))
+        assert(text.contains("jet-library.complete"))
+        assert(text.contains("timed out"))
+        assert(text.contains("JET-HOST-TOOL"))
+        assert(text.contains("JET-HOST-INPUT"))
+        assert(text.contains("JET-HOST-ABI"))
+        assert(text.contains("cl.exe"))
+        assert(!text.contains("fetch --locked"))
+        assert(text.contains("\"schema\":2") || text.contains("schema = 2"))
+        assert(text.contains("kill") || text.contains("Stop-Process"))
+    }
+    assert(runner.contains("${{CC:-cc}}"))
+    assert(powershell.contains("taskkill.exe"))
+    assert(powershell.contains("project parts"))
+    assert(powershell.contains("TimeoutSeconds"))
+    variables :: [String]{"RUSTC", "RUSTC_LINKER", "CC", "NO_COLOR", "PATH"}
+    loop variable in variables -> assert(powershell.contains("EnvironmentVariables[\"{variable}\"]"))
+    adapters :: [String]{"cmake/Jet.cmake", "gradle/jet-library.gradle", "bazel/jet_library.bzl", "msbuild/Jet.Library.targets"}
+    loop relative in adapters {
+        text :: s1_host_read("{root}/{relative}")
+        assert(text.contains("jet-library"))
+        assert(!text.contains("rustc"))
+        assert(!text.contains("cargo"))
+    }
+}
+
+fn s1_host_representative_projects_declare_exact_inputs_and_stay_under_ten_lines() {
+    root :: "tests/fixtures/foreign_build_hosts"
+    hosts :: [String]{"cmake", "gradle", "bazel", "msbuild"}
+    descriptors :: [String]{"CMakeLists.txt", "build.gradle", "BUILD.bazel", "host.proj"}
+    loop i in 0..<hosts.len() {
+        host :: hosts[i]
+        project :: "{root}/{host}"
+        build :: s1_host_read("{project}/{descriptors[i]}")
+        assert(s1_host_maintained_lines("{project}/{descriptors[i]}") < 10)
+        inputs :: [String]{"package.jet", ".jet/lock", "library.jet", "extra.jet"}
+        fixtures :: [String]{"package.jet", "lock.fixture", "library.jet", "extra.jet"}
+        loop j in 0..<inputs.len() {
+            assert(s1_host_files.is_file("{project}/{fixtures[j]}"))
+            input :: inputs[j]
+            assert(build.contains(input) || (input == ".jet/lock" && build.contains(".jet\\lock")))
+        }
+        assert(s1_host_files.is_file("{project}/package.jet"))
+        assert(s1_host_read("{project}/lock.fixture").contains("[build.stamp]"))
+        assert(s1_host_read("{project}/package.jet").contains(".Library"))
+        assert(build.contains("loadable"))
+        host_source :: if host == "msbuild" -> "host.cpp" else -> "host.c"
+        assert(s1_host_read("{project}/{host_source}").contains("on_tick(41) == 42"))
+    }
+}
+
+fn s1_host_descriptors_are_small_and_route_to_native_library_targets() {
+    cmake :: s1_host_read("tests/fixtures/foreign_build_hosts/cmake/CMakeLists.txt")
+    assert(cmake.contains("find_package(Jet REQUIRED)"))
+    assert(cmake.contains("jet_library"))
+    assert(cmake.contains("target_link_libraries"))
+    assert(!cmake.contains("CMAKE_MODULE_PATH"))
+    cmake_adapter :: s1_host_read("Tools/foreign-build-hosts/cmake/Jet.cmake")
+    assert(cmake_adapter.contains("set(_kind static)"))
+    assert(cmake_adapter.contains("CMAKE_CXX_COMPILER"))
+    assert(cmake_adapter.contains("add_custom_target(\"${{TARGET}}_jet\" DEPENDS ${{_outputs}})"))
+    gradle :: s1_host_read("tests/fixtures/foreign_build_hosts/gradle/build.gradle")
+    assert(gradle.contains("jet-library.gradle"))
+    assert(gradle.contains("dependsOn \"jetLibrary\""))
+    assert(gradle.contains("jetLibrary.staticLibrary"))
+    assert(gradle.contains("inputs.files jetLibrary.staticLibrary()"))
+    bazel :: s1_host_read("tests/fixtures/foreign_build_hosts/bazel/BUILD.bazel")
+    assert(bazel.contains("jet_library"))
+    assert(bazel.contains("cc_binary"))
+    assert(bazel.contains("linkopts"))
+    bazel_adapter :: s1_host_read("Tools/foreign-build-hosts/bazel/jet_library.bzl")
+    assert(bazel_adapter.contains("ctx.actions.run"))
+    assert(bazel_adapter.contains("args.add"))
+    assert(bazel_adapter.contains("short_path"))
+    assert(!bazel_adapter.contains("$(location"))
+    msbuild :: s1_host_read("tests/fixtures/foreign_build_hosts/msbuild/host.proj")
+    assert(msbuild.contains("Jet.Library.targets"))
+    assert(msbuild.contains("DependsOnTargets=\"JetLibrary\""))
+    assert(msbuild.contains("JetLibraryStatic"))
+    assert(msbuild.contains("Inputs=\"$(MSBuildProjectDirectory)\\host.cpp"))
+    assert(msbuild.contains("Outputs=\"$(IntermediateOutputPath)host.exe"))
+    msbuild_adapter :: s1_host_read("Tools/foreign-build-hosts/msbuild/Jet.Library.targets")
+    assert(msbuild_adapter.contains("$(MSBuildProjectDirectory)\\"))
+    assert(msbuild_adapter.contains(".jet\\lock"))
+    assert(msbuild_adapter.contains("$(MSBuildThisFileDirectory)..\\jet-library.ps1"))
+    assert(msbuild_adapter.contains("$(JetLibraryIntermediate)\\jet-host.stamp"))
+    assert(s1_host_files.is_file("tests/fixtures/foreign_build_hosts/msbuild/lifecycle.cpp"))
+    lifecycle :: s1_host_read("tests/fixtures/foreign_build_hosts/msbuild/lifecycle.cpp")
+    assert(lifecycle.contains("#ifdef _WIN32"))
+    assert(lifecycle.contains("LoadLibraryA"))
+    assert(lifecycle.contains("std::thread"))
+    docs :: s1_host_read("Docs/spec/reference/foreign-build-hosts.md")
+    assert(docs.contains("CMake"))
+    assert(docs.contains("Gradle"))
+    assert(docs.contains("Bazel"))
+    assert(docs.contains("MSBuild"))
+    assert(docs.contains("--locked"))
+    assert(docs.contains("jet-host.receipt"))
+    assert(docs.contains("jet-host.stamp"))
+    assert(docs.contains("jet-library-set-v1"))
+    assert(docs.contains("lifecycle.cpp"))
+    assert(docs.contains("CMAKE_TOOLCHAIN_FILE"))
+}
+
+#Test("adapters_use_one_jet_library_runner_and_fail_closed_outputs") {
+    s1_host_adapters_use_one_jet_library_runner_and_fail_closed_outputs()
+}
+
+#Test("representative_projects_declare_exact_inputs_and_stay_under_ten_lines") {
+    s1_host_representative_projects_declare_exact_inputs_and_stay_under_ten_lines()
+}
+
+#Test("host_descriptors_are_small_and_route_to_native_library_targets") {
+    s1_host_descriptors_are_small_and_route_to_native_library_targets()
+}

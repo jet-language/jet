@@ -1,0 +1,24 @@
+# Port of tests/corelib_parts/platform.rs:679-756; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_limits_kill_descendants_and_stop_output_early
+write: main.jet main.template
+write: timeout.sh timeout.sh.template
+chmod: timeout.sh 755
+write: output.sh output.sh.template
+chmod: output.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: ~ "true\nlimit:refused\n" # original contains
+step rerun: built
+exit: 0
+stdout: = "true\nlimit:refused\n"
+elapsed: rerun < 2s
+capture: timeout = text file.trim timeout.pid
+step: kill -0 {cap:timeout}
+exit: nonzero
+capture: output = text file.trim output.pid
+step: kill -0 {cap:output}
+exit: nonzero

@@ -1,0 +1,14 @@
+# HAND-PORT tests/web_build.rs:5571-5644 web_runtime_uses_streaming_wasm_for_browser_mime
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original harness, including its intentionally hostile host fixture, tests the LIVE canonical Prelude JS via reviewer-approved copy: {root}/...; original exact stdout retained.
+requires: tool:node
+fixture: web_runtime_uses_streaming_wasm_for_browser_mime.fixture
+env: NO_COLOR=1
+mkdir: build
+copy: package.json build/package.json
+copy: {root}/crates/jet-codegen/src/Prelude/DomRuntime.js build/jet_dom_runtime.js
+copy: harness.mjs build/harness.mjs
+step: node harness.mjs
+cwd: build
+exit: 0
+stdout: = web_runtime_uses_streaming_wasm_for_browser_mime.stdout.expected

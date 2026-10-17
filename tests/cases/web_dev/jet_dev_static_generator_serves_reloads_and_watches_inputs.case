@@ -1,0 +1,20 @@
+# Original tests/web_dev.rs:3052-3143; verbatim source and exact original predicates.
+# PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw).
+fixture: jet_dev_static_generator_serves_reloads_and_watches_inputs.fixture
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+env: S5_PORT={free-port:web}
+env: S5_ROOT={work}
+copy: {root}/Examples/features/devloop/static_site_generator/run.jet generate.jet
+copy: {root}/Examples/features/devloop/static_site_generator/package.jet package.jet
+session app raw: jet dev generate.jet
+stderr: null
+recv app line until ^= "App preview: " timeout 60s
+capture: port = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
+cap:port: is-u32
+json: cap:port doc $ <= 65535
+step: jet test claims
+env: S5_PORT={cap:port}
+exit: 0
+signal app: KILL
+close app
+exit: any # original KillOnDrop ignores child status

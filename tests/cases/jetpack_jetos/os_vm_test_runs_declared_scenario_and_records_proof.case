@@ -1,0 +1,24 @@
+# Port of tests/jetpack_jetos.rs:4062-4140. Original fixtures verbatim; native tools are original helper549-594.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) where used.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_vm_test_runs_declared_scenario_and_records_proof.fixture
+mkdir: package-root
+write: tools/limine os_vm_test_runs_declared_scenario_and_records_proof.limine.template
+chmod: tools/limine 0755
+env: JETPACK_ROOT={work}/package-root
+env: PATH={work}/tools
+write: project/config.jet os_vm_test_runs_declared_scenario_and_records_proof.config.template
+step: jet os vm test ssh-smoke --disk ssh-smoke.qcow2 --name vmtest-proof --no-color --offline
+cwd: project
+exit: 0
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"kind\":\"jetos.vmtest.proof\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"state\":\"passed\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"name\":\"ssh-smoke\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"name\": \"halcyon\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"system\": \"halcyon\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"disk\": \"ssh-smoke.qcow2\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"wait_for_boot\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"assert_unit_active\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "\"assert_port_open\"" # original predicate
+file: package-root/systems/vm-tests/ssh-smoke-vmtest-proof.json ~ "halcyon.assert_unit_active(.openssh)" # original predicate
+file: package-root/systems/vm-proofs/halcyon-vmtest-proof-vm-proof.json is-file

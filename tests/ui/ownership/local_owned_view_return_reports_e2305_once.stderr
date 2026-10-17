@@ -1,0 +1,17 @@
+Error [E2305]: This view points into `incidents`, which this function owns
+  --> local_owned_view_return_reports_e2305_once.jet:4:21
+    |
+  4 |     return incidents[0..2]
+    |                     ^^^^^^
+ Why: `incidents` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
+ Fix: Return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it
+More: jet-lang.dev/e/E2305
+
+Error [E0433]: The result of `make` is thrown away
+  --> tests/ui/ownership/local_owned_view_return_reports_e2305_once.jet:8:5
+    |
+  8 |     make()
+    |     ^^^^
+ Why: `make` is pure (it has no effects and changes nothing through `&`), so this line does nothing
+ Fix: Use the result, bind it with `result :: make`, or write `.drop("reason")` if dropping it is intended
+More: jet-lang.dev/e/E0433

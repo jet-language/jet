@@ -1,0 +1,10 @@
+# HAND-PORT tests/codemod.rs:661-684 typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: typed_ast_variadic_capture_is_rejected_in_binary_scalar_slot.fixture
+env: NO_COLOR=1
+copy: Examples/a.jet before.bytes
+step: jet inspect codemod variadic.codemod.json --dry-run
+exit: nonzero
+stderr: ~any "not a valid Jet expr template" "matched 0, expected 1" # original predicate
+file: Examples/a.jet == before.bytes
+

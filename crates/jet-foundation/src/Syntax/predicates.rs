@@ -356,11 +356,11 @@ fn encode_generated_path(name: &str) -> String {
     encoded
 }
 
-/// Decode a generated path suffix for composition by `member_name`.
-///
-/// The decoder is intentionally crate-visible: generated names are an
-/// internal representation, while callers still operate on source identities.
-pub(crate) fn decode_generated_path_suffix(suffix: &str) -> Option<String> {
+/// Decode a generated path suffix for composition by `member_name`, and for
+/// the native debugger's projection of a link-named frame back to its Jet
+/// identity. Callers still operate on source identities; the encoding stays
+/// an internal representation.
+pub fn decode_generated_path_suffix(suffix: &str) -> Option<String> {
     fn hex_value(byte: u8) -> Option<u8> {
         match byte {
             b'0'..=b'9' => Some(byte - b'0'),

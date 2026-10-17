@@ -1,6 +1,11 @@
 use std::path::{Path, PathBuf};
 
 fn main() {
+    // Prelude generators and directly included kernels share the native-pack
+    // cutover cfg with jet-codegen; register it for every generated fragment.
+    println!("cargo:rustc-check-cfg=cfg(jet_native_pack)");
+    println!("cargo:rustc-check-cfg=cfg(jet_platform_seeds)");
+    println!("cargo:rustc-check-cfg=cfg(jet_codegen_host)");
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
     write_web_kernel_std(&manifest);
     write_native_scheduler(&manifest);
@@ -44,8 +49,9 @@ fn write_web_kernel_std(manifest: &Path) {
     let reactive_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/ReactiveEventWatch.rs");
     let encoding_types_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
     let json_codec_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
+    let json_tree_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/JSONDyn.rs");
     let math_task_src = manifest.join("../jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs");
-    for source in [&reactive_src, &encoding_types_src, &json_codec_src, &math_task_src] {
+    for source in [&reactive_src, &encoding_types_src, &json_codec_src, &json_tree_src, &math_task_src] {
         println!("cargo:rerun-if-changed={}", source.display());
     }
 
@@ -56,13 +62,18 @@ fn write_web_kernel_std(manifest: &Path) {
     let json_codec = unindent(
         &std::fs::read_to_string(&json_codec_src).expect("read JSONCodec.rs"),
     );
+    let json_tree = std::fs::read_to_string(&json_tree_src).expect("read JSONDyn.rs");
+    let renderer_start = json_tree.find("    pub fn render_dyn_json(").expect("JSON renderer");
+    let renderer_end = json_tree[renderer_start..].find("    /// Parse JSON into the ordered tree")
+        .map(|offset| renderer_start + offset).expect("JSON renderer end");
+    let json_renderer = unindent(&json_tree[renderer_start..renderer_end]);
     let native_task =
         extract_native_task(&std::fs::read_to_string(&math_task_src).expect("read MathTaskMem.rs"));
     let shared =
         extract_shared(&std::fs::read_to_string(&math_task_src).expect("read MathTaskMem.rs"));
 
     let mut body = String::with_capacity(
-        native_task.len() + shared.len() + reactive.len() + encoding_types.len() + json_codec.len() + 4,
+        native_task.len() + shared.len() + reactive.len() + encoding_types.len() + json_codec.len() + json_renderer.len() + 4,
     );
     body.push_str("use jet_foundation::Outcome::{JetAbsent, JetOutcome};\n");
     body.push_str(&native_task);
@@ -74,6 +85,8 @@ fn write_web_kernel_std(manifest: &Path) {
     body.push_str(&encoding_types);
     body.push('\n');
     body.push_str(&json_codec);
+    body.push('\n');
+    body.push_str(&json_renderer);
 
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_std.rs");
     std::fs::write(&out, body).expect("write web_kernel_std.rs");
@@ -84,11 +97,13 @@ fn write_native_scheduler(manifest: &Path) {
     let sources = [
         (manifest.join("../jet-codegen/src/Prelude/Deadline.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/WorkflowWait.rs"), false),
+        (manifest.join("../jet-codegen/src/Prelude/Core/NativeTaskBody.rs"), false),
         (manifest.join("../jet-codegen/src/SchedulerHost.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Core/TimeMonotonic.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Core/TimeInstant.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Core/Realtime.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/TimeSleep.rs"), false),
+        (manifest.join("../jet-codegen/src/Prelude/Core/RuntimeStack.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Scheduler.rs"), true),
         (manifest.join("../jet-codegen/src/Prelude/CoreLib/Top/WorkflowSleep.rs"), false),
         (manifest.join("../jet-codegen/src/Prelude/Stream.rs"), false),
@@ -114,6 +129,9 @@ fn write_native_scheduler(manifest: &Path) {
             .unwrap_or_else(|error| panic!("read {}: {error}", runtime_control_src.display())),
     ));
     body.push_str("\n\n");
+    // This crate borrows the scheduler's Rust implementation, not its C ABI.
+    // Seed exports belong to the generated runtime; the native pack has its own owners.
+    let body = body.replace("#[no_mangle]", "");
 
     let out =
         PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("web_kernel_native_scheduler.rs");

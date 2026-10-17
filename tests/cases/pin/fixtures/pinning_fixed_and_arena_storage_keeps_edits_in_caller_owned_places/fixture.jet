@@ -1,0 +1,23 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+fn run() {
+    fixed :: mem.Fixed.new(size: 256)
+    fixed_node :: fixed.alloc(Node{payload: 3, hops: 0})
+    fixed_pin :: mem.pin(&fixed_node)
+    fixed_pin.hops += 1
+
+    arena :: mem.Arena.new(capacity: 1024)
+    arena_node :: arena.alloc(Node{payload: 5, hops: 0})
+    arena_pin :: mem.pin(&arena_node)
+    arena_pin.hops += 2
+
+    print("{(fixed_pin.payload)} {(fixed_pin.hops)} {(arena_pin.payload)} {(arena_pin.hops)}")
+    close(^fixed)
+    close(^arena)
+}

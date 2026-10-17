@@ -1,0 +1,19 @@
+// core-conformance: core.data.sketch.hll.add
+// D-COPY-DEFAULT1=A: mutation of a clone must not change the original.
+use core.data.sketch.hll as hll
+
+fn run() {
+    original := hll.new()
+    assert_eq(original.count(), 0)
+    &original.add("apple")
+    clone := original.copy()
+    &clone.add("banana")
+    &clone.add("cherry")
+    &clone.add("apple")
+    assert_eq(original.count(), 1)
+    assert_eq(clone.count(), 3)
+    &original.add("pear")
+    assert_eq(clone.count(), 3)
+    print(original.count())
+    print(clone.count())
+}

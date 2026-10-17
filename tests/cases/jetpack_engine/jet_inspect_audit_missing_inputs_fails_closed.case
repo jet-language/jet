@@ -1,0 +1,23 @@
+# HAND-PORT tests/jetpack_engine.rs:9283-9340 jet_inspect_audit_missing_inputs_fails_closed
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: jet_inspect_audit_missing_inputs_fails_closed.fixture
+env: NO_COLOR=1
+mkdir: project
+step: jet inspect audit --no-color
+cwd: project
+unset: JET_ADVISORY_DB
+unset: JET_ADVISORY_TRUST
+unset: JET_ADVISORY_PUBLIC_KEY
+exit: 1
+stderr: ~ "E2611" # original contains predicate
+stderr: ~ "unified lockfile" # original contains predicate
+copy: lock.txt project/.jet/lock
+step: jet inspect audit --no-color
+cwd: project
+unset: JET_ADVISORY_DB
+unset: JET_ADVISORY_TRUST
+unset: JET_ADVISORY_PUBLIC_KEY
+exit: 1
+stderr: ~ "E2611" # original contains predicate
+stderr: ~ "signed advisory database" # original contains predicate
+

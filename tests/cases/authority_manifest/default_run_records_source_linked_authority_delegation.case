@@ -1,0 +1,10 @@
+# Port of tests/authority_manifest.rs:61-115. Source copied verbatim.
+# PENDING-SAME-HEAD: historical run exits 1 (E1004 core.process.run, E0711).
+# PENDING-GRAMMAR: JSONL assertions.
+# The same delegation row must have scope beginning authority@ and every field below.
+# The exact receipt snapshot is absent until an assertion-checked same-head capture.
+fixture: fixtures/receipts
+step: jet run run.jet
+exit: 0
+json: file .jet/receipts/authority.jsonl ndjson $ has {"kind":"delegation","resource":"process","operation":"run","source":"run.jet","authority":"authority","policy_source":"#FX; declared policy"}
+file: .jet/receipts/authority.jsonl = delegation.receipt.out

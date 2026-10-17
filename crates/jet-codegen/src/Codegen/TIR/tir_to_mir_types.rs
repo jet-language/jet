@@ -437,11 +437,6 @@ fn lower_nominal_ref(name: &str) -> MirNominalRef {
 /// Project one checked source type into the canonical ABI-bearing type carrier.
 /// The semantic type key is deterministic and remains present on every MIR
 pub(super) fn lower_type(ty: &Type) -> MirType {
-    if let Type::Named(name) = ty {
-        if let Some(carrier) = core_term_stream_carrier(name) {
-            return lower_type(&Type::Named(carrier.to_string()));
-        }
-    }
     let lowered = {
         let kind = lower_type_kind(ty);
         MirType::from_kind(kind).with_identity(MirTypeId(stable_id(
@@ -766,7 +761,7 @@ fn ownership_for_definition(single_use: bool) -> TirOwnership {
 }
 
 fn qualified_key(module: &str, name: &str) -> String {
-    if module.is_empty() {
+    if module.is_empty() || name.contains("::") {
         name.to_string()
     } else {
         format!("{module}::{name}")
@@ -791,14 +786,15 @@ fn lower_generic_params(params: &[crate::AST::TypeParam]) -> Vec<super::TGeneric
         .collect()
 }
 
-/// Sema attaches its structural `Equatable` provider (never a user impl) as a
-/// compiler-generated impl. That checked fact reaches MIR as the `Equatable`
-/// derive, which the Rust printer lowers to the native `PartialEq` that
-/// `jet_eq` (behind `assert_eq`) requires.
+/// Sema attaches its structural `Equatable` / `Comparable` providers (never a
+/// user impl) as compiler-generated impls. Those checked facts reach MIR as
+/// derives, which the Rust printer lowers to the native `PartialEq` that
+/// `jet_eq` (behind `assert_eq`) requires and the `Eq`/`Ord` that ordered
+/// carriers such as `JetMap` keys require.
 fn lower_derive_names(
     derives: &[(String, Span)],
     auto_debug: bool,
-    generated_equatable: bool,
+    trait_impls: &[TraitImplBlock],
 ) -> Vec<String> {
     let mut names = derives
         .iter()
@@ -808,17 +804,20 @@ fn lower_derive_names(
     if auto_debug && !names.iter().any(|name| name == crate::Generics::DEBUG) {
         names.push(crate::Generics::DEBUG.to_string());
     }
-    if generated_equatable && !names.iter().any(|name| name == crate::Generics::EQUATABLE) {
-        names.push(crate::Generics::EQUATABLE.to_string());
+    for provider in [crate::Generics::EQUATABLE, crate::Generics::COMPARABLE] {
+        if has_generated_block(trait_impls, provider) && !names.iter().any(|name| name == provider)
+        {
+            names.push(provider.to_string());
+        }
     }
     names
 }
 
 /// Struct and enum providers ride on the type as a compiler-generated block.
-fn has_generated_equatable_block(trait_impls: &[TraitImplBlock]) -> bool {
+fn has_generated_block(trait_impls: &[TraitImplBlock], trait_name: &str) -> bool {
     trait_impls
         .iter()
-        .any(|block| block.compiler_generated && block.trait_name == crate::Generics::EQUATABLE)
+        .any(|block| block.compiler_generated && block.trait_name == trait_name)
 }
 
 fn marker_arg_text(marker: &Marker) -> Option<String> {
@@ -1345,6 +1344,7 @@ pub(super) fn lower_erasure(
 
 pub(super) fn lower_tir_declarations(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     boxed_edges_by_module: &BTreeMap<String, HashSet<(String, String)>>,
     auto_printable_by_module: &BTreeMap<String, HashSet<String>>,
     auto_debug_by_module: &BTreeMap<String, HashSet<String>>,
@@ -1384,11 +1384,10 @@ pub(super) fn lower_tir_declarations(
                 )
             },
             seed_parse_error,
-            None,
+            Some(checked_nominals[index].as_ref()),
         );
     }
     discard_duplicate_core_enum_fallbacks(&mut out);
-    discard_core_term_stream_carriers(&mut out);
     ensure_builtin_debug_trait(&mut out);
     out
 }
@@ -1415,7 +1414,7 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
     boxed_edges: &HashSet<(String, String)>,
     auto_printable: &HashSet<String>,
     auto_debug: &HashSet<String>,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) -> TirDeclarations {
     let mut out = TirDeclarations::default();
     let layout_engine = TargetLayoutEngine::new(items, target_layout.clone());
@@ -1443,7 +1442,6 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
         checked_nominals,
     );
     discard_duplicate_core_enum_fallbacks(&mut out);
-    discard_core_term_stream_carriers(&mut out);
     ensure_builtin_debug_trait(&mut out);
     out
 }
@@ -1451,13 +1449,21 @@ pub(super) fn lower_declarations_from_items_with_boxed_edges(
 // Loaded Core source enums own their canonical identity. A synthetic plain
 // Core export row is needed only when no source declaration is available;
 // otherwise it shadows the checked enum in MIR and creates a second Rust type.
+// A plain row also stays out when a program declaration (outside
+// `<corelib>/`) spells its leaf: declared keys are module-qualified, so the
+// key dedupe never sees it, and the bootstrap host codec resolves enum owners
+// by leaf name, so a plain `JobScope` row shadows the program's own `JobScope`
+// (every variant reported as not emitted).
 fn discard_duplicate_core_enum_fallbacks(declarations: &mut TirDeclarations) {
     let mut source_enum_counts = HashMap::<String, usize>::new();
+    let mut program_type_names = HashSet::<String>::new();
     for row in &declarations.type_defs {
-        if row.key.starts_with("<corelib>/")
-            && row.key != row.name
-            && matches!(&row.kind, TirTypeDefKind::Enum { .. })
-        {
+        if row.key == row.name {
+            continue;
+        }
+        if !row.key.starts_with("<corelib>/") {
+            program_type_names.insert(row.name.clone());
+        } else if matches!(&row.kind, TirTypeDefKind::Enum { .. }) {
             *source_enum_counts.entry(row.name.clone()).or_default() += 1;
         }
     }
@@ -1465,30 +1471,11 @@ fn discard_duplicate_core_enum_fallbacks(declarations: &mut TirDeclarations) {
         row.key != row.name
             || !matches!(&row.kind, TirTypeDefKind::Enum { .. })
             || compiler_owned_enum_variants(&row.name).is_some()
-            || source_enum_counts.get(&row.name) != Some(&1)
+            || (source_enum_counts.get(&row.name) != Some(&1)
+                && !program_type_names.contains(&row.name))
     });
 }
 
-/// `core.term` declares `Stdout`, `Stderr`, and `StdinHandle` so Jet code can
-/// name them, but their values are the Prelude's native stream carriers
-/// (`core.term.stdout()` and friends), not records. MIR therefore types every
-/// spelling of these handles as the one native nominal, exactly like the bare
-/// host signature; a record row here would make the JIT drop a record the
-/// value never was.
-pub(crate) fn core_term_stream_carrier(name: &str) -> Option<&'static str> {
-    match name {
-        "<corelib>/Core/term::Core/term/term.jet::Stdout" => Some("Stdout"),
-        "<corelib>/Core/term::Core/term/term.jet::Stderr" => Some("Stderr"),
-        "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => Some("StdinHandle"),
-        _ => None,
-    }
-}
-
-fn discard_core_term_stream_carriers(declarations: &mut TirDeclarations) {
-    declarations
-        .type_defs
-        .retain(|row| core_term_stream_carrier(&row.key).is_none());
-}
 
 fn collect_items(
     out: &mut TirDeclarations,
@@ -1501,7 +1488,7 @@ fn collect_items(
     qualify_type: &impl Fn(&Type, &[String]) -> Type,
     impl_owner: &impl Fn(&str) -> String,
     seed_parse_error: bool,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) {
     // A bare trait name in a declared field, payload, or trait signature is
     // the trait value, the same canonical type every checked body and impl
@@ -1527,7 +1514,7 @@ fn collect_items(
     for item in items {
         match item {
             Item::Struct(definition) => {
-                out.type_defs.push(lower_struct(
+                let mut row = lower_struct(
                     definition,
                     module,
                     &canonical,
@@ -1535,7 +1522,15 @@ fn collect_items(
                     boxed_edges,
                     is_auto_printable(auto_printable, module, &definition.name),
                     is_auto_debug(auto_debug, module, &definition.name),
-                ));
+                );
+                if definition.compiler_builtin_error && checked_nominals.is_some_and(|facts| {
+                    let identity = facts.name_ledger.declared_identity(facts.module_idx, &definition.name)
+                        .or_else(|| facts.nominal_identities.get(&definition.name).map(String::as_str));
+                    identity.is_some() && identity == facts.compiler_owned_default_err_identity.as_deref()
+                }) {
+                    row.compiler_builtin = Some(MirCompilerBuiltin::DefaultErr);
+                }
+                out.type_defs.push(row);
                 push_nested_trait_impls(out, &definition.name, &definition.trait_impls, module);
             }
             Item::Enum(definition) => {
@@ -1578,7 +1573,14 @@ fn collect_items(
                 }
             }
             Item::Trait(definition) => {
-                out.traits.push(lower_trait(definition, module, &canonical))
+                out.traits.push(lower_trait(
+                    definition,
+                    module,
+                    &canonical,
+                    checked_nominals.and_then(|facts| {
+                        facts.compiler_owned_default_err_identity.as_deref()
+                    }),
+                ))
             }
             Item::Impl(definition) => out.impls.push(lower_impl(
                 definition,
@@ -1697,11 +1699,7 @@ fn lower_struct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(
-            &definition.derives,
-            auto_debug,
-            has_generated_equatable_block(&definition.trait_impls),
-        ),
+        derives: lower_derive_names(&definition.derives, auto_debug, &definition.trait_impls),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: definition.is_published_schema,
@@ -1787,11 +1785,7 @@ fn lower_enum(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: lower_generic_params(&definition.type_params),
-        derives: lower_derive_names(
-            &definition.derives,
-            auto_debug,
-            has_generated_equatable_block(&definition.trait_impls),
-        ),
+        derives: lower_derive_names(&definition.derives, auto_debug, &definition.trait_impls),
         auto_derive_default: definition.auto_derive_default,
         auto_printable,
         published_schema: false,
@@ -1834,7 +1828,7 @@ fn lower_distinct(
         public: definition.is_pub,
         package_public: definition.is_package_pub,
         generic_params: Vec::new(),
-        derives: lower_derive_names(&definition.derives, false, false),
+        derives: lower_derive_names(&definition.derives, false, &[]),
         auto_derive_default: false,
         // D-CAPBUNDLE1: `#Printable` on a distinct type grants the base
         // type's rendering, so the adapters emit the same Printable surface
@@ -1970,6 +1964,7 @@ fn lower_trait(
     definition: &TraitDef,
     module: &str,
     qualify_type: &impl Fn(&Type, &[String]) -> Type,
+    default_err_identity: Option<&str>,
 ) -> TirTraitDef {
     TirTraitDef {
         module: module.to_string(),
@@ -2004,15 +1999,23 @@ fn lower_trait(
                     }
                     params.push(lower_trait_param(params.len(), param, qualify_type));
                 }
+                let mut contract = method.failure_contract();
+                // The implicit error domain belongs to the original Prelude
+                // declaration, not to an unresolved (or shadowing) `Err` leaf.
+                if let (crate::AST::FailureContract::Default { error, .. }, Some(identity)) =
+                    (&mut contract, default_err_identity)
+                {
+                    *error = Type::Named(identity.to_owned());
+                }
                 TirTraitMethod {
                     key: qualified_key(module, &method.name),
-                    name: method.name.clone(),
+                    name: method.name.rsplit("::").next().expect("checked trait method name").to_string(),
                     span: method.span,
                     self_access,
                     params,
                     declared_return: method.return_type.as_ref().map(|ty| qualify_type(ty, &[])),
-                    return_type: qualify_type(&method.effective_return_type(), &[]),
-                    failure: super::TFailureCarrier::from_contract(&method.failure_contract())
+                    return_type: qualify_type(&contract.effective_type(), &[]),
+                    failure: super::TFailureCarrier::from_contract(&contract)
                         .map_types(|ty| qualify_type(ty, &[])),
                     is_pure: method.is_pure,
                     declared_effects: method.declared_effects.clone(),
@@ -2160,6 +2163,10 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("HookOutcome", &["Continue", "Cancel", "Fail"]),
     ("HookDecision", &["Continue", "Transform", "Cancel", "Fail"]),
     (
+        "UnitScaleProvenanceKind",
+        &["Rational", "SymbolicPi", "Conventional", "Measured"],
+    ),
+    (
         "DispatchState",
         &[
             "Delivered",
@@ -2289,36 +2296,21 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
     (
-        "DataTree",
+        "Dyn",
         &[
             "Null",
             "Bool",
             "Int",
             "Float",
             "Number",
-            "TypedText",
             "Text",
             "Bytes",
+            "DateTime",
             "Array",
             "Object",
         ],
     ),
-    (
-        "DataEvent",
-        &[
-            "Null",
-            "ArrayStart",
-            "ArrayEnd",
-            "ObjectStart",
-            "ObjectEnd",
-            "Bool",
-            "Int",
-            "Float",
-            "Text",
-            "Bytes",
-            "Key",
-        ],
-    ),
+    ("DataEvent", &crate::Sema::DATA_EVENT_VARIANTS),
     ("XMLCanonicalMode", &["Inclusive11", "Exclusive10"]),
     ("PluginLimit", &["Fuel", "Memory", "Table", "Time", "Wire"]),
     ("PluginError", &["Guest", "Denied", "Budget", "Defect"]),
@@ -2344,7 +2336,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
     ("TLSTrust", &["System", "SystemPlusCa"]),
     ("TLSVersion", &["TLS12", "TLS13"]),
     ("TLSClientTrust", &["System", "SystemPlus", "CustomOnly"]),
-    ("NetDnsError", &["NotFound", "Failure"]),
+    ("NetDNSError", &["NotFound", "Failure"]),
     (
         "NetError",
         &[
@@ -2371,6 +2363,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         "WatchKind",
         &["Created", "Modified", "Removed", "Error", "Exited", "Ready"],
     ),
+    ("LateEventDisposition", &["Drop", "SideOutput"]),
     ("NetReadyInterest", &["Read", "Write", "ReadWrite"]),
     (
         "WsError",
@@ -2387,6 +2380,14 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
         ],
     ),
 ];
+
+// Reflection values have checked nominal rows even without source declarations.
+// Unlike the runtime-owned enums above, these declarations belong to the
+// artifact, not to the cached runtime or Prelude.
+const COMPILER_OWNED_REFLECTION_ENUMS: &[(&str, &[&str])] = &[(
+    "UnitScaleProvenanceKind",
+    &["Rational", "SymbolicPi", "Conventional", "Measured"],
+)];
 // Compiler-owned Core records are checked values, not user declarations. Keep
 // their owner rows in the checked declaration table so a field projection can
 // use the same nominal identity in every engine. The field list is only the
@@ -2395,6 +2396,7 @@ const COMPILER_OWNED_ENUMS: &[(&str, &[&str])] = &[
 const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("PluginFrame", &["function", "component", "offset"]),
     ("PluginFault", &["export", "message", "frames"]),
+    ("RangeError", &["reason"]),
     (
         crate::Syntax::TYPE_IO_CONTEXT,
         crate::Syntax::IO_CONTEXT_FIELDS,
@@ -2403,6 +2405,7 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
         "NetErrorDetail",
         &["operation", "address", "name", "message", "os_code"],
     ),
+    ("__ResolveError", &["kind", "has_os_code", "os_code", "message"]),
     ("AsyncPolicy", &["capacity", "overflow"]),
     ("CSVRow", &["fields", "line"]),
     (
@@ -2470,6 +2473,13 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "max_expansion_bytes",
         ],
     ),
+    ("CBOROptions", &["max_depth", "max_items", "max_bytes", "require_canonical"]),
+    ("CBORError", &["kind", "byte_offset", "path", "reason"]),
+    ("XMLLimits", &["max_depth", "max_nodes", "max_attributes_per_element", "max_name_bytes", "max_text_bytes", "max_entity_declarations", "max_entity_depth", "max_entity_replacement_bytes"]),
+    ("XMLParseOptions", &["entities", "limits"]),
+    ("XMLRenderOptions", &["encoding", "lexical"]),
+    ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
+    ("XMLError", &["kind", "byte_offset", "line", "column", "path", "reason"]),
     ("DataProvenance", &["source", "format", "authority"]),
     (
         "DataSchema",
@@ -2490,17 +2500,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "buffered_bytes",
             "backpressure",
             "last_good",
-        ],
-    ),
-    (
-        "Claims",
-        &[
-            "subject",
-            "audience",
-            "issuer",
-            "expires_at",
-            "not_before",
-            "issued_at",
         ],
     ),
     (
@@ -2645,6 +2644,9 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("Address", &[]),
     ("Message", &[]),
     ("Attachment", &[]),
+    ("__EmailAddressView", &["display", "mailbox"]),
+    ("__EmailAttachmentView", &["filename", "mime", "bytes"]),
+    ("__EmailMessageView", &["from", "to", "bcc", "subject", "text", "html", "attachments", "wire_upper"]),
     (
         "RecipientReport",
         &["address", "accepted", "code", "message"],
@@ -2690,6 +2692,19 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
             "dkim",
         ],
     ),
+    (
+        "RealtimeReceipt",
+        &[
+            "requested_rate_hz",
+            "requested_frames",
+            "completed_callbacks",
+            "completed_frames",
+            "missed",
+            "max_lateness_ns",
+            "start_identity",
+            "end_identity",
+        ],
+    ),
     ("XMLCanonical", &["mode", "comments", "inclusive_prefixes"]),
     ("Size", &["width", "height"]),
     (
@@ -2713,20 +2728,6 @@ const COMPILER_OWNED_CORE_RECORDS: &[(&str, &[&str])] = &[
     ("TempFile", &["path"]),
     ("FileLock", &["path"]),
     ("WatchEvent", &["path", "domain", "kind"]),
-    (
-        "Stat",
-        &[
-            "size",
-            "modified_ms",
-            "created_ms",
-            "readonly",
-            "is_file",
-            "is_dir",
-            "is_symlink",
-            "kind",
-            "mode",
-        ],
-    ),
     ("DataColumn", &["id", "name", "type_name", "nullable"]),
     (
         "DataStatus",
@@ -3002,6 +3003,11 @@ const COMPILER_OWNED_GEOMETRY_RECORDS: &[(&str, &[&str], &[&str])] = &[
 ];
 
 pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
+    // Source ownership is authoritative even when a native carrier shares
+    // the leaf name. Such rows must retain their canonical declarations.
+    if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
+        return false;
+    }
     let source_name = name;
     let name = crate::Codegen::core_source_type_leaf(name);
     COMPILER_OWNED_ENUMS.iter().any(|(owned, _)| *owned == name)
@@ -3025,12 +3031,13 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
                 crate::Codegen::file_handle_rust_type(source_name),
                 Some("JetFileReader" | "JetFileWriter" | "JetFileScope")
             ))
-        || name == crate::Syntax::TYPE_MEASUREMENT
         || name == crate::Syntax::TYPE_ERR
+        // Core/compute declares its own `VJPRun` record (source-owned shape);
+        // only the autodiff transform's bare `VJPRun` is the native carrier.
+        || (name == "VJPRun" && !source_name.starts_with("<corelib>/Core/compute::"))
         || matches!(
             name,
-            "VJPRun"
-                | "Group"
+            "Group"
                 | "DataJoin"
                 | "DataSnapshot"
                 | "DataPivotCell"
@@ -3045,9 +3052,18 @@ pub(crate) fn is_compiler_owned_type(name: &str) -> bool {
         )
 }
 
+/// True for the checked Core record rows of `COMPILER_OWNED_CORE_RECORDS`.
+pub(crate) fn is_compiler_owned_core_record(name: &str) -> bool {
+    let name = crate::Codegen::core_source_type_leaf(name);
+    COMPILER_OWNED_CORE_RECORDS
+        .iter()
+        .any(|(owned, _)| *owned == name)
+}
+
 pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'static str]> {
     COMPILER_OWNED_ENUMS
         .iter()
+        .chain(COMPILER_OWNED_REFLECTION_ENUMS.iter())
         .find(|(owned, _)| *owned == name)
         .map(|(_, variants)| *variants)
 }
@@ -3056,7 +3072,7 @@ pub(crate) fn compiler_owned_enum_variants(name: &str) -> Option<&'static [&'sta
 /// retained from sema's checked source enum facts when that source is loaded.
 fn compiler_owned_core_enums(
     module: &str,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) -> Vec<TirTypeDef> {
     let span = Span::new(0, 0);
     let mut seen = HashSet::new();
@@ -3141,7 +3157,7 @@ fn compiler_owned_core_enums(
 }
 
 fn checked_core_enum_payloads<'a>(
-    checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&'a crate::AST::MirFragmentNominalFacts>,
 ) -> HashMap<(&'a str, &'a str), &'a EnumDef> {
     let mut payloads = HashMap::new();
     let Some(checked_nominals) = checked_nominals else {
@@ -3170,58 +3186,6 @@ fn checked_core_enum_payloads<'a>(
         payloads.insert((source.module, name), definition);
     }
     payloads
-}
-
-fn compiler_owned_default_err(module: &str) -> TirTypeDef {
-    let span = Span::new(0, 0);
-    let field = |name: &str, ty: Type| TirField {
-        name: name.to_string(),
-        shape_names: ShapeFieldNames::from_source(name),
-        skip: false,
-        ty,
-        span,
-        public: true,
-        package_public: false,
-        computed: false,
-        has_default: false,
-        redact: false,
-    };
-    TirTypeDef {
-        module: module.to_string(),
-        key: crate::Syntax::TYPE_ERR.to_string(),
-        name: crate::Syntax::TYPE_ERR.to_string(),
-        span,
-        public: true,
-        package_public: false,
-        generic_params: Vec::new(),
-        derives: Vec::new(),
-        auto_derive_default: false,
-        auto_printable: false,
-        published_schema: false,
-        single_use: false,
-        must_use: false,
-        layout: None,
-        layout_alignment: None,
-        c_layout_tag: None,
-        enum_layout: None,
-        serde: Vec::new(),
-        cli_bindings: Vec::new(),
-        cli: None,
-        ownership: TirOwnership::Owned,
-        boxed_edges: Vec::new(),
-        compiler_builtin: Some(MirCompilerBuiltin::DefaultErr),
-        kind: TirTypeDefKind::Struct {
-            fields: vec![
-                field("message", Type::String),
-                field("code", Type::Option(Box::new(Type::String))),
-                field(
-                    "cause",
-                    Type::Option(Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string()))),
-                ),
-            ],
-            methods: Vec::new(),
-        },
-    }
 }
 
 fn compiler_owned_record(
@@ -3406,10 +3370,10 @@ fn compiler_owned_parse_error(module: &str) -> TirTypeDef {
 fn compiler_owned_type_defs<'a>(
     module: &'a str,
     seed_parse_error: bool,
-    checked_nominals: Option<&crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&crate::AST::MirFragmentNominalFacts>,
 ) -> impl Iterator<Item = TirTypeDef> + 'a {
     let span = Span::new(0, 0);
-    let net_error_variants = ["NetDnsError", "NetError"]
+    let net_error_variants = ["NetDNSError", "NetError"]
         .into_iter()
         .map(|enum_name| {
             (
@@ -3419,7 +3383,7 @@ fn compiler_owned_type_defs<'a>(
             )
         })
         .collect::<HashMap<_, _>>();
-    for enum_name in ["NetDnsError", "NetError"] {
+    for enum_name in ["NetDNSError", "NetError"] {
         let canonical_names = compiler_owned_enum_variants(enum_name)
             .unwrap_or_else(|| panic!("missing canonical MIR enum {enum_name}"));
         let variants = net_error_variants
@@ -3439,6 +3403,7 @@ fn compiler_owned_type_defs<'a>(
     }
     COMPILER_OWNED_ENUMS
         .iter()
+        .chain(COMPILER_OWNED_REFLECTION_ENUMS.iter())
         .map(move |(name, variants)| TirTypeDef {
             module: module.to_string(),
             key: name.to_string(),
@@ -3669,25 +3634,17 @@ fn compiler_owned_type_defs<'a>(
                                 _ => TirVariantPayload::Unit,
                             }
                         } else if *name == "DataEvent" {
-                            match *variant {
-                                "Bool" => TirVariantPayload::Single(Type::Bool),
-                                "Int" => TirVariantPayload::Single(Type::Int),
-                                "Float" => TirVariantPayload::Single(Type::Float),
-                                "Text" | "Key" => TirVariantPayload::Single(Type::String),
-                                "Bytes" => {
-                                    TirVariantPayload::Single(Type::List(Box::new(Type::IntN {
-                                        signed: false,
-                                        bits: 8,
-                                    })))
-                                }
+                            match crate::Sema::data_event_payload(variant) {
+                                Some(Some(ty)) => TirVariantPayload::Single(ty),
                                 _ => TirVariantPayload::Unit,
                             }
-                        } else if *name == "DataTree" {
+                        } else if *name == "Dyn" {
                             match *variant {
                                 "Bool" => TirVariantPayload::Single(Type::Bool),
                                 "Int" => TirVariantPayload::Single(Type::Int),
                                 "Float" => TirVariantPayload::Single(Type::Float),
-                                "Number" | "TypedText" | "Text" => {
+                                "DateTime" => TirVariantPayload::Single(Type::Named("ZonedDateTime".to_string())),
+                                "Number" | "Text" => {
                                     TirVariantPayload::Single(Type::String)
                                 }
                                 "Bytes" => {
@@ -3697,20 +3654,20 @@ fn compiler_owned_type_defs<'a>(
                                     })))
                                 }
                                 "Array" => TirVariantPayload::Single(Type::List(Box::new(
-                                    Type::Named("DataTree".to_string()),
+                                    Type::Named("Dyn".to_string()),
                                 ))),
                                 "Object" => TirVariantPayload::Single(Type::List(Box::new(
                                     Type::Tuple(vec![
                                         ("key".to_string(), Box::new(Type::String)),
                                         (
                                             "value".to_string(),
-                                            Box::new(Type::Named("DataTree".to_string())),
+                                            Box::new(Type::Named("Dyn".to_string())),
                                         ),
                                     ]),
                                 ))),
                                 _ => TirVariantPayload::Unit,
                             }
-                        } else if matches!(*name, "NetError" | "NetDnsError") {
+                        } else if matches!(*name, "NetError" | "NetDNSError") {
                             let (_, payload) = net_error_variants
                                 .get(*name)
                                 .and_then(|variants| variants.get(*variant))
@@ -3728,7 +3685,6 @@ fn compiler_owned_type_defs<'a>(
             },
         })
         .chain(compiler_owned_core_enums(module, checked_nominals))
-        .chain(std::iter::once(compiler_owned_default_err(module)))
         .chain(std::iter::once(compiler_owned_record(
             module,
             "FieldError",
@@ -3859,21 +3815,6 @@ fn compiler_owned_type_defs<'a>(
             }];
             row
         }))
-        .chain(std::iter::once({
-            let mut row = compiler_owned_record(
-                module,
-                crate::Syntax::TYPE_MEASUREMENT,
-                [
-                    ("value", Type::Named("T".to_string())),
-                    ("uncertainty", Type::Named("T".to_string())),
-                ],
-            );
-            row.generic_params = vec![super::TGenericParam {
-                name: "T".to_string(),
-                bounds: Vec::new(),
-            }];
-            row
-        }))
         .chain(std::iter::once(compiler_owned_record(
             module,
             "DataPivotCell",
@@ -3939,6 +3880,8 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
         name,
         crate::Generics::ENCODE
             | crate::Generics::DECODE
+            | crate::Generics::PRINTABLE
+            | crate::Generics::RENDERABLE
             | crate::Generics::DISPLAY
             | crate::Generics::DEBUG
             | crate::Generics::EQUATABLE
@@ -3954,4 +3897,109 @@ pub(crate) fn is_compiler_owned_trait(name: &str) -> bool {
             | crate::Generics::DIV
             | crate::Syntax::TRAIT_ROLLBACK
     )
+}
+
+#[cfg(test)]
+mod native_encoding_record_tests {
+    use super::*;
+
+    #[test]
+    fn source_owned_math_records_keep_canonical_declarations() {
+        for leaf in ["Vec2", "Vec3", "Vec4", "Point2", "Delta2", "Transform", "Transform2"] {
+            let identity = format!("<corelib>/Core/math::Core/math/math.jet::{leaf}");
+            assert!(jet_foundation::CoreModuleExports::core_source_owns_type(&identity));
+            assert!(!is_compiler_owned_type(&identity), "{identity} is source-owned");
+        }
+        assert!(is_compiler_owned_type("Vec3"), "bare native carrier remains runtime-owned");
+        assert!(!is_compiler_owned_type("program::Vec3"), "user nominal keeps its identity");
+    }
+
+    #[test]
+    fn compiler_owned_core_records_all_have_canonical_fields() {
+        let mut missing = Vec::new();
+        for (name, fields) in COMPILER_OWNED_CORE_RECORDS {
+            for field in *fields {
+                if crate::Sema::core_struct_field_type(name, field, &[]).is_none() {
+                    missing.push(format!("{name}.{field}"));
+                }
+            }
+        }
+        assert!(missing.is_empty(), "missing canonical Core fields: {missing:?}");
+    }
+
+    #[test]
+    fn private_source_records_do_not_get_synthetic_compiler_owned_rows() {
+        let emitter = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Emit/Types.jet"
+        ));
+        let emitter_records = emitter
+            .split("JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep")
+            .nth(1)
+            .expect("paired compiler-owned record inventory")
+            .split("} }")
+            .next()
+            .expect("paired compiler-owned record entries");
+        let codegen = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Codegen/Types.jet"
+        ));
+        let codegen_records = codegen
+            .split("JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS :: prep")
+            .nth(1)
+            .expect("Source Codegen compiler-owned record inventory")
+            .split("} }")
+            .next()
+            .expect("Source Codegen compiler-owned record entries");
+        for (module, name) in [
+            ("core.service", "__DeliveryFacts"),
+            ("core.service", "__DeliveryRecord"),
+            ("core.service", "__MailboxRead"),
+            ("core.encoding.csv", "__QueryRead"),
+            ("core.crypto", "__JetcRaw"),
+            ("core.crypto", "__JetcStat"),
+            ("core.testing", "__EvidenceRead"),
+            ("core.testing", "__TempFacts"),
+            ("core.testing", "__TempPath"),
+            ("core.testing", "__TempRemove"),
+            ("core.testing", "__TempCreate"),
+        ] {
+            let source = jet_sema::CoreSources::core_source_text(module).expect(module);
+            assert!(source.contains(&format!("struct {name} {{")), "{module}::{name}");
+            assert!(!is_compiler_owned_core_record(name), "{name}");
+            assert!(!is_compiler_owned_type(name), "{name}");
+            assert!(!emitter_records.contains(&format!("\"{name}\"")), "{name}");
+            assert!(!codegen_records.contains(&format!("\"{name}\"")), "{name}");
+            if matches!(module, "core.testing" | "core.crypto") {
+                let rust = crate::Codegen::Context::root_prelude_rust_type_name(name)
+                    .expect("raw transport retains its root carrier mapping");
+                assert!(emitter.contains(&format!("\"{name}\" -> Val(\"{rust}\")")), "{name}");
+            }
+        }
+    }
+
+    #[test]
+    fn native_encoding_records_keep_checked_mir_owners_without_source_modules() {
+        let rows = compiler_owned_type_defs("encoding-fixture", false, None).collect::<Vec<_>>();
+        for (name, count) in [
+            ("CBOROptions", 4), ("CBORError", 4), ("XMLLimits", 8),
+            ("XMLParseOptions", 2), ("XMLRenderOptions", 2),
+            ("XMLCanonical", 3), ("XMLError", 6),
+        ] {
+            let row = rows.iter().find(|row| row.name == name).expect(name);
+            assert!(is_compiler_owned_core_record(name));
+            assert!(crate::Codegen::core_rust_type_name(name).is_some());
+            let TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+                panic!("{name} must have its checked record shape");
+            };
+            assert_eq!(fields.len(), count, "{name}");
+            for field in fields {
+                assert_eq!(
+                    Some(field.ty.clone()),
+                    crate::Sema::core_struct_field_type(name, &field.name, &[]),
+                    "{name}.{}", field.name,
+                );
+            }
+        }
+    }
 }

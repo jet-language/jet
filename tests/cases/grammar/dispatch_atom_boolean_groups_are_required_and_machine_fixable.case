@@ -1,0 +1,16 @@
+# Original tests/grammar.rs:764-831; verbatim sources and original predicates.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference-run or PASS claim.
+fixture: dispatch_atom_boolean_groups_are_required_and_machine_fixable.fixture
+step: jet check invalid.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0386"] #>= 1
+json: machine doc $.reports[?code="E0386"][0].applicability = "safe"
+json: machine doc $.reports[?code="E0386"][0].fix_edits[0].span.start = 63
+json: machine doc $.reports[?code="E0386"][0].fix_edits[0].span.end = 70
+json: machine doc $.reports[?code="E0386"][0].fix_edits[0].new_text = "(48 | 45)"
+json: machine doc $.reports[?code="E0386"][0].fix_edits[0].safety = "formatting"
+step: jet fmt --check legal.jet
+exit: in [0, 1] # original parser success; formatting style difference1 permitted, syntax failure2 excluded
+step: jet check untouched.jet --json
+exit: any # original parser-only recovery does not assert sema status
+json: machine doc $.reports[?code="E0386"] #= 0

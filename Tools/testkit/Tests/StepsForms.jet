@@ -1,0 +1,144 @@
+use core.files as files
+use core.encoding.hex as hex
+
+#Test("batch-four transforms are composable and both exact success and failure pass through real case files") {
+    root :: cases_test_root("forms-transforms")
+    directory :: files.join(root, "tests/cases/group")
+    esc :: kit_steps_ascii_scalar(27)
+    cr :: kit_steps_ascii_scalar(13)
+    rows :: [
+        ["trim_start.trim_end", "  a  ", "a"],
+        ["filter(~ \"a\" \"b\").trim_lines", " a \nc\n b \n", "a\nb"],
+        ["filter(!^= \"skip\")", "skip a\nkeep b\n", "keep b"],
+        ["filter(= \"a\")", "a\nb\n", "a"],
+        ["filter(!= \"a\")", "a\nb\n", "b"],
+        ["filter(where (~ \"a\" && $= \"x\") || ! (~ \"a\" || chars > 1))", "ax\naz\nb\n", "ax\nb"],
+        ["cut(\"MARK\")", "a\n\nMARK tail", "a\n"],
+        ["strip_ansi", "{esc}[31ma{esc}[0m{esc}", "a"],
+        ["strip_sgr", "{esc}[31ma{esc}[0m", "a"],
+        ["strip_whitespace", "a  \tb\n", "ab"],
+        ["strip_ascii_whitespace", "a  \tb\n", "a b"],
+        ["split(\"|\", 1)", "a|b|c", "b"],
+        ["find_block(\"|\", ~ \"b\")", "a|b|c", "b"],
+        ["slice(1, 3)", "abcd", "bc"],
+        ["line(1)", "a{cr}\nb\n", "b"],
+        ["prepend(\"x\").append(\"y\")", "a", "xay"],
+        ["after_first(\"|\")", "a|b|c", "b|c"],
+        ["after_last(\"|\")", "a|b|c", "c"],
+        ["from_or_all(\"|\")", "a|b|c", "|b|c"],
+        ["strip_prefix(\"pre\")", "prefix", "fix"],
+        ["strip_prefix_lines(\"pre\")", "prefix\nother\nprelude\n", "fix\nlude"],
+        ["until_blank", "a\nb\n\nc\n", "a\nb"],
+        ["first_words", " a b\nc d\n\n", "a\nc"],
+        ["replace(\"a\", \"b\")", "aaa", "bbb"],
+        ["replace_first(\"a\", \"b\")", "aaa", "baa"],
+        ["visible_cols", "{esc}[31mé{esc}[0m\nx\n", "1\n1"],
+        ["cursor_up_counts", "a{esc}[3Ab{esc}[12A", "3\n12"],
+        ["final_frame", "old{esc}[Jnew{cr}\n{esc}[2A{esc}[Jcleanup", "new\n"]
+    ]
+    loop (index, row) in rows {
+        kit_exec_write(files.join(directory, "input.txt"), row[1])
+        kit_exec_write(files.join(directory, "expected.txt"), row[2])
+        kit_exec_write(files.join(directory, "wrong.txt"), "wrong")
+        source :: "step: cat\nstdin: input.txt\nstdout.{row[0]}: = expected.txt # original predicate\n"
+        assert_eq(cases_test_advanced(root, "pass-{index}", source).verdict.status, "PASS")
+        wrong :: "step: cat\nstdin: input.txt\nstdout.{row[0]}: = wrong.txt # original predicate\n"
+        assert_eq(cases_test_advanced(root, "fail-{index}", wrong).verdict.status, "FAIL")
+    }
+    loop selector in ["split(\"|\", 9)", "find_block(\"|\", ~ \"missing\")", "slice(0, 99)", "line(9)", "strip_prefix(\"missing\")", "after_first(\"missing\")", "final_frame"] {
+        assert_eq(cases_test_advanced(root, "absent", "step: printf a\nstdout.{selector}: empty # original predicate\n").verdict.status, "FAIL")
+    }
+    assert_eq(cases_test_advanced(root, "unknown", "step: printf a\nstdout.unknown: empty # original predicate\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove transform scratch")
+}
+
+#Test("line and numeric forms preserve Rust lines semantics and reject unequal values") {
+    root :: cases_test_root("forms-predicates")
+    directory :: files.join(root, "tests/cases/group")
+    cr :: kit_steps_ascii_scalar(13)
+    rows :: [
+        ["a{cr}\nb\n", "lines = [\"a\",\"b\"]", "lines = [\"a\",\"c\"]"],
+        ["a\nb\n", "lines >= 2", "lines < 2"],
+        [" a\na\nb\n", "count-lines trim = \"a\" = 2", "count-lines trim = \"a\" = 1"],
+        ["ab\nab\n", "each-line ~ \"a\"", "each-line ~ \"x\""],
+        ["ab\nac\n", "each-line ^= \"a\"", "each-line ^= \"x\""],
+        ["ab\nac\n", "each-line !~ \"x\"", "each-line !~ \"a\""],
+        ["ab\nac\n", "each-line where ^= \"a\" && chars = 2", "each-line where chars = 1"],
+        ["aaa", "count \"a\" >= 3", "count \"a\" < 3"],
+        ["ab", "len = 2", "len = 3"],
+        ["m:a\nm:b\n", "unique-after \"m:\"", "unique-after \"missing\""],
+        ["ab", "$= \"b\"", "$= \"a\""],
+        ["+9223372036854775807", "is-i64", "is-u32"],
+        ["4294967295", "is-u32", "len = 1"],
+        ["a word b", "word = \"word\"", "word = \"wor\""],
+        ["a\nb\n", "has-line \"b\"", "has-line \"c\""],
+        [" a b c\nx\n", "any-line words-prefix [\"a\",\"b\"]", "any-line words-prefix [\"a\",\"c\"]"],
+        ["1.5\n 2 \n", "numeric-lines = [1.5,2]", "numeric-lines = [1.5,3]"],
+        ["1\n2\n", "each <= 2", "each < 2"]
+    ]
+    loop (index, row) in rows {
+        kit_exec_write(files.join(directory, "input.txt"), row[0])
+        assert_eq(cases_test_advanced(root, "pass-{index}", "step: cat\nstdin: input.txt\nstdout: {row[1]} # original predicate\n").verdict.status, "PASS")
+        assert_eq(cases_test_advanced(root, "fail-{index}", "step: cat\nstdin: input.txt\nstdout: {row[2]} # original predicate\n").verdict.status, "FAIL")
+    }
+    loop value in ["", " 1", "1 ", "9223372036854775808", "-9223372036854775809", "+", "1a"] {
+        kit_exec_write(files.join(directory, "input.txt"), value)
+        assert_eq(cases_test_advanced(root, "not-i64", "step: cat\nstdin: input.txt\nstdout: is-i64 # original predicate\n").verdict.status, "FAIL")
+    }
+    vacuous :: "step: printf ''\nstdout: each-line hex # original predicate\nstdout: each-line ~ \"missing\" # original predicate\nstdout: unique-after \"missing\" # original predicate\nstdout: each <= 0 # original predicate\n"
+    assert_eq(cases_test_advanced(root, "vacuous", vacuous).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove predicates scratch")
+}
+
+#Test("captured subjects numeric arithmetic stream inequality and sorted lines execute from case text") {
+    root :: cases_test_root("forms-captures")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "sorted.txt"), "a\nb\n")
+    source :: "step first: printf 'b\\na\\n'\ncapture: n = lines stdout\ncapture: text = text stdout\ncap:text: lines = {{cap:n}} # original predicate\ncap:text: sorted-lines = sorted.txt # original predicate\nstep second: printf 'b\\na\\nb\\na\\n'\nstdout: lines = 2*{{cap:n}} # original predicate\nstdout: lines = {{cap:n}}+2 # original predicate\nstdout: != first # original predicate\nstdout: in-order-of {{cap:text}} # original predicate\n"
+    assert_eq(cases_test_advanced(root, "capture", source).verdict.status, "PASS")
+    wrong :: "step first: printf a\nstep second: printf a\nstdout: != first # original predicate\n"
+    assert_eq(cases_test_advanced(root, "equal", wrong).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove forms capture scratch")
+}
+
+#Test("comptime_diff parity hex frames preserve newline delimiter payloads and reject same-length inequality") {
+    // KIT-SELFTEST port of tests/comptime_diff.rs:778-802. All assertions use .case text.
+    root :: cases_test_root("forms-parity")
+    directory :: files.join(root, "tests/cases/group")
+    folded_payload :: "3\n__comptime_diff_frame(999)\n0\n"
+    runtime :: "\n3\n__comptime_diff_frame(999)\n0"
+    first :: hex.encode(folded_payload.bytes())
+    second :: hex.encode(runtime.bytes())
+    kit_exec_write(files.join(directory, "frames.txt"), "{first}\n{second}\n")
+    source :: "step: cat\nstdin: frames.txt\nstdout: each-line hex # original predicate\nstdout: lines = [\"{first}\",\"{second}\"]\n"
+    assert_eq(cases_test_advanced(root, "preserve", source).verdict.status, "PASS")
+    alpha :: hex.encode("alpha\nbeta".bytes())
+    zeta :: hex.encode("alpha\nzeta".bytes())
+    kit_exec_write(files.join(directory, "unequal.txt"), "{alpha}\n{zeta}\n")
+    unequal :: "step: cat\nstdin: unequal.txt\nstdout: each-line hex # original predicate\nstdout: lines = [\"{alpha}\",\"{alpha}\"]\n"
+    result :: cases_test_advanced(root, "divergence", unequal)
+    assert_eq(result.verdict.status, "FAIL")
+    assert(result.verdict.detail.contains("lines-array"))
+    files.remove_all(root) ?? panic("remove parity scratch")
+}
+
+#Test("normalize_journey_paths ports checked_text line paths CRLF and final LF through real cases") {
+    root :: cases_test_root("forms-journey-paths")
+    source :: "step: printf 'error (some/thing.jet:12)\\r\\nnote (other.txt:1)\\n'\nstdout.normalize_journey_paths: = \"error (<source>:12)\\nnote (other.txt:1)\\n\" # original checked_text.rs135-156\n"
+    assert_eq(cases_test_advanced(root, "normalize", source).verdict.status, "PASS")
+    malformed :: "step: printf 'prefix : suffix (file.jet\\n'\nstdout.normalize_journey_paths: = \"unused\" # original checked_text.rs135-156 invalid slice\n"
+    assert_eq(cases_test_advanced(root, "bad-range", malformed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove journey path scratch")
+}
+
+#Test("Unicode stream assertions captures and transforms retain Rust-compatible byte offsets") {
+    root :: cases_test_root("forms-unicode-spans")
+    directory :: files.join(root, "tests/cases/group")
+    cr :: kit_steps_ascii_scalar(13)
+    kit_exec_write(files.join(directory, "input"), "é·→—😀{cr}\nβ·tail\n")
+    source :: "step: cat\nstdin: input\nstdout: = \"é·→—😀\\r\\nβ·tail\\n\"\nstdout: count \"·\" = 2 # original predicate\nstdout: count-lines ^= \"é\" = 1 # original predicate\nstdout.line(0).after_first(\"·\").strip_prefix(\"→\").after_last(\"—\"): = \"😀\" # original predicate\nstdout.line(0).slice(2,4): = \"·\" # original byte slice\nstdout: each-line where ~ \"·\" && chars >= 2 # Unicode scalar count\ncapture: tail stdout after \"β·\" # original predicate\ncap:tail: = \"tail\"\nstdout.replace_first(\"·\",\"—\"): = \"é—→—😀\\r\\nβ·tail\\n\" # original predicate\n"
+    assert_eq(cases_test_advanced(root, "unicode", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}cap:tail: = \"wrong\"\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "bad-boundary", "{source}stdout.line(0).slice(1,2): = \"é\" # not a UTF-8 boundary\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove Unicode span scratch")
+}

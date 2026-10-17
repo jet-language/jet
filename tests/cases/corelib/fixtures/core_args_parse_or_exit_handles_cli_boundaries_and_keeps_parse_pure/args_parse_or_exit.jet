@@ -1,0 +1,12 @@
+
+use core.args as args
+use core.term as io
+
+fn run() {
+    spec :: args.spec()
+        .flag("verbose", "print extra detail")
+    parsed :: spec.parse_or_exit(process.argv())
+    embedded :: spec.parse(["embedded", "--verbose"]) ?? panic("pure parse failed")
+    print(parsed.flag("verbose"))
+    print(embedded.flag("verbose"))
+}

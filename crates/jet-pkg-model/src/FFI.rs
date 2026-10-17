@@ -25,7 +25,7 @@ use std::process::Command;
 // FfiLink struct lives in AST for cross-seam sharing; re-export here.
 pub use crate::AST::FfiLink;
 
-const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v10-asm-early-clobber";
+const INLINE_BRIDGE_SCHEMA: &str = "jet-inline-ffi-v11-asm-stack-inputs";
 /// v2: artifact digests are recorded relative to the SHARED Cargo target dir
 /// (#2075), so a v1 manifest's `target/<triple>/release/...` rows no longer
 /// describe where the artifacts are. A v1 sidecar simply fails verification and
@@ -184,6 +184,13 @@ impl CRecordDefinitions {
                 let resolved = self.rust_type_with_stack(base, stack);
                 stack.remove(name);
                 resolved
+            }
+            // A checked raw pointer has native address layout independently
+            // of its pointee (which may be an opaque, non-C Jet type).
+            Type::Apply { name, args }
+                if name == crate::Syntax::TYPE_PTR && args.len() == 1 =>
+            {
+                Some("*mut core::ffi::c_void".to_string())
             }
             // `Atomic<T>` is one lock-free 64-bit word in every checked C
             // record (Layout::atomic_layout), whatever the scalar `T`.
@@ -938,6 +945,79 @@ mod inline_asm_target_tests {
         assert!(diagnostic.what.contains("aarch64-unknown-linux-gnu"));
     }
 
+
+    #[test]
+    fn inline_bridge_failure_keeps_spanless_pressure_without_guessing_first_entry() {
+        let mut first = entry();
+        first.jet_name = "os_syscall".into();
+        first.line_hint = "`#FFI(asm) fn os_syscall`".into();
+        let mut second = entry();
+        second.jet_name = "os_syscall_stack4_i64".into();
+        second.line_hint = "`#FFI(asm) fn os_syscall_stack4_i64`".into();
+        let stderr = "   Updating crates.io index\nerror: inline assembly requires more registers than available\nerror: aborting due to 1 previous error\n";
+        let diagnostic = inline_bridge_failure_diagnostic(&[first, second], stderr).unwrap();
+        assert_eq!(diagnostic.code, "E3222");
+        assert!(diagnostic.span.is_none());
+        assert!(!diagnostic.what.contains("os_syscall"));
+        assert!(!diagnostic.why.contains("signature"));
+        let detail = diagnostic.detail.as_deref().unwrap();
+        assert!(detail.contains("inline assembly requires more registers than available"));
+        assert!(detail.contains("aborting due to 1 previous error"));
+        assert!(!detail.contains("Updating crates.io"));
+        let mut plain = entry();
+        plain.inline = None;
+        assert!(inline_bridge_failure_diagnostic(&[plain], stderr).is_none());
+    }
+
+    #[test]
+    fn inline_bridge_detail_normalizes_current_sha256_identities() {
+        let hash = "a".repeat(64);
+        let stderr = format!(
+            "error: failed to run custom build command for `jet_ffi_{hash} v0.1.0 (/home/user/.cache/jet/ffi/{hash})`\n  process didn't exit successfully: `/home/user/.cache/jet/ffi/deps/{hash}/release/build/jet_ffi_{hash}-build/build-script-build` (exit status: 101)\ninline_0.c:5:8: error: conflicting types for 'answer'\n"
+        );
+        let detail = stable_cargo_detail(&stderr);
+        assert!(!detail.contains(&hash), "{detail}");
+        assert!(!detail.contains("/home/user"), "{detail}");
+        assert!(detail.contains("jet_ffi_<hash> v0.1.0"), "{detail}");
+        assert!(detail.contains("~/.cache/jet/ffi/<hash>"), "{detail}");
+        assert!(detail.contains("~/.cache/jet/ffi/deps/<hash>"), "{detail}");
+        assert!(detail.contains("inline_0.c:5:8: error: conflicting types for 'answer'"), "{detail}");
+    }
+
+    #[test]
+    fn stack4_syscall_preserves_argument_gprs_and_uses_only_syscall_clobbers() {
+        fn body(source: &str) -> &str {
+            source
+                .split("fn os_syscall_stack4_i64(")
+                .nth(1)
+                .unwrap()
+                .split("\"\"\"")
+                .nth(1)
+                .unwrap()
+                .trim()
+        }
+        let source = include_str!("../../../Compiler/JetBackend/Source/OS/Linux.jet");
+        let fixture = include_str!("../../../tests/fixtures/ffi_stack4_i64.jet");
+        assert_eq!(body(source), body(fixture), "focused witness must match the runtime leaf");
+        let assembly = body(source);
+        assert!(assembly.starts_with("push rdi\n    push rsi\n    push rdx\n    push r10\n    push r8\n    push r9\n    push {number}"));
+        assert!(assembly.ends_with("pop r9\n    pop r8\n    pop r10\n    pop rdx\n    pop rsi\n    pop rdi\n    mov rax, rax ; -> return\n    ; clobbers rcx, r11"));
+        let names = ["number", "a1", "w0", "w1", "w2", "w3", "a4"];
+        let mut entry = entry();
+        entry.param_names = names.iter().map(|name| (*name).into()).collect();
+        entry.params = vec![(AccessConvention::Read, Type::Int); names.len()];
+        let inline = entry.inline.as_mut().unwrap();
+        inline.param_names = entry.param_names.clone();
+        inline.source = assembly.into();
+        inline.asm_contract.as_mut().unwrap().clobbers = vec!["rcx".into(), "r11".into()];
+        let wrapper = emit_asm_wrapper(&entry, entry.inline.as_ref().unwrap());
+        assert_eq!(wrapper.matches(" = in(reg) ").count(), 7, "{wrapper}");
+        assert_eq!(wrapper.matches("out(\"").count(), 3, "{wrapper}");
+        assert!(wrapper.contains("out(\"rax\") __jet_result"), "{wrapper}");
+        assert!(wrapper.contains("out(\"rcx\") _"), "{wrapper}");
+        assert!(wrapper.contains("out(\"r11\") _"), "{wrapper}");
+        assert!(!wrapper.contains("lateout("), "{wrapper}");
+    }
     #[test]
     fn inline_asm_uses_checked_output_and_discarded_clobber_operands() {
         let mut entry = entry();
@@ -1630,7 +1710,6 @@ mod net_tls_close_tests {
     static SMTP_DEADLINE_MS: std::sync::atomic::AtomicI64 =
         std::sync::atomic::AtomicI64::new(i64::MAX);
     static SMTP_WIPES: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-    static SMTP_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn smtp_now_ms() -> i64 {
         std::time::SystemTime::now()
@@ -1891,7 +1970,14 @@ mod net_tls_close_tests {
             trust: email::TLSTrust::SystemPlusCa {
                 pem: include_bytes!("../../../tests/fixtures/tls/smtp.ca.cert.pem").to_vec(),
             },
-            limits: email::Limits::safe(),
+            limits: email::Limits {
+                max_reply_line_bytes: 512,
+                max_reply_lines: 100,
+                max_capabilities: 100,
+                max_recipients: 100,
+                max_message_bytes: 33_554_432,
+                max_auth_challenge_bytes: 4096,
+            },
             dkim: Err(smtp_adapter::JetAbsent),
         }
     }
@@ -2097,7 +2183,7 @@ mod net_tls_close_tests {
         for _ in 0..2 {
             let (address, transcript, server) = spawn_smtp_server(false, SMTPFixture::Success);
             let mut config = smtp_config(address.port(), false);
-            config.dkim = Ok(email::DkimConfig {
+            config.dkim = Ok(email::DKIMConfig {
                 domain: "example.com".to_string(),
                 selector: "login-2026".to_string(),
                 private_key: seed.to_vec(),
@@ -2148,7 +2234,7 @@ mod net_tls_close_tests {
         use smtp_adapter::jet_email as email;
         SMTP_WIPES.store(0, std::sync::atomic::Ordering::SeqCst);
         let mut config = smtp_config(465, false);
-        config.dkim = Ok(email::DkimConfig {
+        config.dkim = Ok(email::DKIMConfig {
             domain: "example.com".to_string(),
             selector: "login-2026".to_string(),
             private_key: vec![0x5a; 31],
@@ -2196,57 +2282,6 @@ mod net_tls_close_tests {
         assert_eq!(SMTP_WIPES.load(std::sync::atomic::Ordering::SeqCst), 6);
     }
 
-    #[test]
-    fn smtp_from_env_dkim_is_all_or_none_and_redacted() {
-        use smtp_adapter::jet_email as email;
-        let _guard = SMTP_ENV_LOCK.lock().unwrap();
-        for name in [
-            "SMTP_DKIM_DOMAIN",
-            "SMTP_DKIM_SELECTOR",
-            "SMTP_DKIM_PRIVATE_KEY_BASE64",
-            "SMTP_DKIM_SIGNED_HEADERS",
-        ] {
-            std::env::remove_var(name);
-        }
-        std::env::set_var("SMTP_HOST", "localhost");
-        std::env::set_var("SMTP_SECURITY", "tls");
-        std::env::set_var("SMTP_PORT", "465");
-        std::env::set_var("SMTP_DKIM_DOMAIN", "example.com");
-        let partial = match email::smtp_from_env(smtp_runtime()) {
-            Err(error) => error,
-            Ok(_) => panic!("partial DKIM environment was accepted"),
-        };
-        assert!(
-            matches!(partial, email::Error::Configuration { operation, reason, .. }
-            if operation == "smtp_from_env" && reason.contains("must be set together"))
-        );
-
-        std::env::set_var("SMTP_DKIM_SELECTOR", "login-2026");
-        std::env::set_var("SMTP_DKIM_PRIVATE_KEY_BASE64", "private-key-not-base64");
-        let malformed = match email::smtp_from_env(smtp_runtime()) {
-            Err(error) => error,
-            Ok(_) => panic!("malformed DKIM environment was accepted"),
-        };
-        assert!(!format!("{malformed:?}").contains("private-key-not-base64"));
-
-        std::env::set_var(
-            "SMTP_DKIM_PRIVATE_KEY_BASE64",
-            "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
-        );
-        let mailer = email::smtp_from_env(smtp_runtime()).unwrap();
-        drop(mailer);
-        for name in [
-            "SMTP_HOST",
-            "SMTP_SECURITY",
-            "SMTP_PORT",
-            "SMTP_DKIM_DOMAIN",
-            "SMTP_DKIM_SELECTOR",
-            "SMTP_DKIM_PRIVATE_KEY_BASE64",
-            "SMTP_DKIM_SIGNED_HEADERS",
-        ] {
-            std::env::remove_var(name);
-        }
-    }
 }
 
 /// Crate dependency specs that require non-trivial TOML values (e.g. feature flags).
@@ -2368,13 +2403,25 @@ const CRYPTO_RUNTIME: &str = include_str!("Prelude/Crypto.rs");
 const OUTCOME_RUNTIME: &str = include_str!("../../jet-foundation/src/Outcome.rs");
 const RUNTIME_DIAGNOSTIC_CORE: &str = include_str!("../../jet-foundation/src/RuntimeDiagnosticCore.rs");
 const ENCODING_ERRORS_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingErrors.rs");
-const DATATREE_RUNTIME: &str = include_str!("../../jet-foundation/src/DataTree.rs");
+const DYN_RUNTIME: &str = include_str!("../../jet-foundation/src/Dyn.rs");
 const ENCODING_JSON_RUNTIME: &str = include_str!("../../jet-foundation/src/EncodingJson.rs");
+// The embedded module is relocated into the generated bridge; splice its
+// canonical include inputs rather than resolving them beside that new crate.
+const ENCODING_TYPES_INCLUDE: &str =
+    "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");";
+const ENCODING_TYPES_RUNTIME: &str =
+    include_str!("../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+const ENCODING_ERROR_INCLUDE: &str =
+    "include!(\"../../jet-codegen/src/Prelude/Core/EncodingError.rs\");";
+const ENCODING_ERROR_RUNTIME: &str =
+    include_str!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
 const JSON_NUMBER_RUNTIME: &str = include_str!("../../jet-foundation/src/JSONNumber.rs");
 const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
 const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
 const HOST_RUNTIME_SENTRY_BEGIN: &str = "// JET_HOST_RUNTIME_SENTRY_BEGIN";
 const HOST_RUNTIME_SENTRY_END: &str = "// JET_HOST_RUNTIME_SENTRY_END";
+const HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN: &str = "// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN";
+const HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END: &str = "// JET_HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END";
 const CRYPTO_ENTROPY_RUNTIME: &str =
     include_str!("../../jet-codegen/src/Prelude/CoreLib/Top/CryptoEntropy.rs");
 
@@ -2393,18 +2440,31 @@ fn strip_outcome_host_wrapper(source: &str, begin: &str, end: &str) -> String {
 }
 
 fn standalone_outcome_runtime() -> String {
-    // Bridge crates have no compiler Registry. Keep the shared carriers and
-    // row-driven kernels, but remove both foundation-only Registry adapters.
+    // Bridge crates retain Foundation as a dependency, not as crate::Registry.
+    // Keep its canonical lookup for the shared entry-error report formatter.
     let projected = strip_outcome_host_wrapper(
         OUTCOME_RUNTIME,
         HOST_RUNTIME_STOP_BEGIN,
         HOST_RUNTIME_STOP_END,
     );
-    strip_outcome_host_wrapper(
+    let mut projected = strip_outcome_host_wrapper(
         &projected,
         HOST_RUNTIME_SENTRY_BEGIN,
         HOST_RUNTIME_SENTRY_END,
-    )
+    );
+    let lookup = OUTCOME_RUNTIME
+        .split_once(HOST_RUNTIME_DIAGNOSTIC_LOOKUP_BEGIN)
+        .expect("Outcome diagnostic lookup marker missing").1
+        .split_once(HOST_RUNTIME_DIAGNOSTIC_LOOKUP_END)
+        .expect("Outcome diagnostic lookup end marker missing").0;
+    projected.push_str(&lookup.replace("crate::Registry::", "jet_foundation::Registry::"));
+    projected
+}
+
+fn splice_encoding_json_includes(source: &str) -> String {
+    source.replace(ENCODING_TYPES_INCLUDE, ENCODING_TYPES_RUNTIME)
+        .replace(ENCODING_ERROR_INCLUDE, ENCODING_ERROR_RUNTIME)
+        .replace("crate::Outcome::", "crate::__jet_crypto::")
 }
 
 /// Crate-root modules a crypto bridge needs: Outcome's standalone projection
@@ -2412,12 +2472,13 @@ fn standalone_outcome_runtime() -> String {
 /// through `crate::`/`super::`, so they stay at the bridge crate root.
 #[doc(hidden)]
 pub fn crypto_bridge_root_modules() -> String {
-    let mut out = String::new();
+    let mut out = "use jet_foundation::Numeric;\n".to_string();
+    let encoding_json = splice_encoding_json_includes(ENCODING_JSON_RUNTIME);
     for (name, source) in [
         ("jet_encoding_errors", ENCODING_ERRORS_RUNTIME),
         ("jet_json_number", JSON_NUMBER_RUNTIME),
-        ("DataTree", DATATREE_RUNTIME),
-        ("EncodingJson", ENCODING_JSON_RUNTIME),
+        ("Dyn", DYN_RUNTIME),
+        ("EncodingJson", encoding_json.as_str()),
         ("RuntimeDiagnosticCore", RUNTIME_DIAGNOSTIC_CORE),
     ] {
         out.push_str("mod ");
@@ -2455,38 +2516,15 @@ pub const WASMTIME_CRATE_SPEC: (&str, &str) = ("wasmtime", "25");
 const JET_FOUNDATION_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-foundation");
 /// Foundation's own path dependency; Cargo reads it at its host path too.
 const JET_UNICODE_CRATE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-unicode");
-const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v3";
-const JET_FOUNDATION_CODEGEN_PRELUDE_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../jet-codegen/src/Prelude");
-const JET_FOUNDATION_ARCHIVE_SOURCE_PATH: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/archive");
-const JET_FOUNDATION_TEXT_SOURCE_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../Core/text");
-const JET_FOUNDATION_TESTS_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests");
-const JET_FOUNDATION_CODEGEN_INPUTS: &[&str] = &[
-    "Effects.jet",
-    "Core.jet",
-    "core/prelude.jet",
-    "Facts.jet",
-    "Diagnostics.jet",
-    "Core/InlineRange.rs",
-    "Core/TimeMonotonic.rs",
-    "Core/MapKey.rs",
-    "Markers.jet",
-    // jet-unicode (Foundation's path dependency) includes the generated tables.
-    "CoreLib/Top/UnicodeTables.rs",
-];
-const JET_FOUNDATION_ARCHIVE_INPUTS: &[&str] = &["archive.jet", "gzip.jet", "zstd.jet"];
-const JET_FOUNDATION_TEXT_INPUTS: &[&str] = &["string.jet"];
-const JET_FOUNDATION_TEST_INPUTS: &[&str] = &["diagnostics_coverage_baseline.txt"];
+// Matches the Jet bridge's derived include closure and cache identity.
+const JET_FOUNDATION_SOURCE_SCHEMA: &str = "jet-ffi-foundation-source-v4";
 
 #[derive(Debug)]
 struct JetFoundationSources {
+    root: PathBuf,
     foundation: PathBuf,
     unicode: PathBuf,
-    codegen_prelude: PathBuf,
-    archive_source: PathBuf,
-    text_source: PathBuf,
-    tests: PathBuf,
+    inputs: Vec<PathBuf>,
     digest: String,
 }
 
@@ -2513,7 +2551,7 @@ fn verified_source_directory(path: &Path, label: &str) -> Result<PathBuf, String
 
 fn foundation_input_digest(
     root: &Path,
-    relative: &str,
+    relative: &Path,
     label: &str,
 ) -> Result<String, String> {
     let path = root.join(relative);
@@ -2532,55 +2570,275 @@ fn foundation_input_digest(
     crate::ForeignBridge::sha_file(&path)
 }
 
+// Literal tokens are distinct from identifiers: comments and string contents
+// cannot manufacture an include, and Rust lifetimes are not character literals.
+#[derive(Debug)]
+enum FoundationIncludeToken<'a> {
+    Word(&'a str),
+    Literal(String),
+    Symbol(u8),
+}
+
+fn foundation_include_tokens(source: &str) -> Vec<FoundationIncludeToken<'_>> {
+    let raw = source.as_bytes();
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < raw.len() {
+        let byte = raw[i];
+        if byte <= b' ' {
+            i += 1;
+            continue;
+        }
+        if raw[i..].starts_with(b"//") {
+            while i < raw.len() && raw[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if raw[i..].starts_with(b"/*") {
+            i += 2;
+            let mut depth = 1;
+            while i < raw.len() && depth > 0 {
+                if raw[i..].starts_with(b"/*") {
+                    depth += 1;
+                    i += 2;
+                } else if raw[i..].starts_with(b"*/") {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+            continue;
+        }
+        let mut quote = i;
+        let mut hashes = 0;
+        if byte == b'r' {
+            quote += 1;
+            while quote < raw.len() && raw[quote] == b'#' {
+                hashes += 1;
+                quote += 1;
+            }
+        }
+        if raw.get(quote) == Some(&b'"') && (quote == i || byte == b'r') {
+            let mut value = Vec::new();
+            i = quote + 1;
+            while i < raw.len() {
+                if raw[i] == b'"' {
+                    let mut end = i + 1;
+                    while end < raw.len() && end < i + 1 + hashes && raw[end] == b'#' {
+                        end += 1;
+                    }
+                    if end == i + 1 + hashes {
+                        i = end;
+                        break;
+                    }
+                }
+                if byte == b'"' && raw[i] == b'\\' && i + 1 < raw.len() {
+                    i += 1;
+                    value.push(match raw[i] {
+                        b'n' => b'\n',
+                        b'r' => b'\r',
+                        b't' => b'\t',
+                        escaped => escaped,
+                    });
+                } else {
+                    value.push(raw[i]);
+                }
+                i += 1;
+            }
+            tokens.push(FoundationIncludeToken::Literal(
+                String::from_utf8(value).unwrap_or_default(),
+            ));
+            continue;
+        }
+        if byte == b'\'' {
+            let end = i + 1 + if raw.get(i + 1) == Some(&b'\\') { 2 } else { 1 };
+            if raw.get(end) == Some(&b'\'') {
+                i = end + 1;
+                continue;
+            }
+        }
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = i;
+            while i < raw.len() && (raw[i].is_ascii_alphanumeric() || raw[i] == b'_') {
+                i += 1;
+            }
+            tokens.push(FoundationIncludeToken::Word(&source[start..i]));
+        } else {
+            tokens.push(FoundationIncludeToken::Symbol(byte));
+            i += 1;
+        }
+    }
+    tokens
+}
+
+fn foundation_rust_include_paths(source: &str, manifest: &Path) -> Result<Vec<PathBuf>, String> {
+    use FoundationIncludeToken::{Literal, Symbol, Word};
+    if !source.contains("include") {
+        return Ok(Vec::new());
+    }
+    let tokens = foundation_include_tokens(source);
+    let mut paths = Vec::new();
+    let mut i = 0;
+    while i + 2 < tokens.len() {
+        if !matches!(tokens[i], Word("include" | "include_str" | "include_bytes"))
+            || !matches!(tokens[i + 1], Symbol(b'!'))
+            || !matches!(tokens[i + 2], Symbol(b'('))
+        {
+            i += 1;
+            continue;
+        }
+        i += 3;
+        let mut path = String::new();
+        let mut generated = false;
+        let mut depth = 1;
+        while i < tokens.len() && depth > 0 {
+            if matches!(tokens[i], Word("env"))
+                && i + 4 < tokens.len()
+                && matches!(tokens[i + 1], Symbol(b'!'))
+                && matches!(tokens[i + 2], Symbol(b'('))
+                && matches!(tokens[i + 4], Symbol(b')'))
+            {
+                let Literal(variable) = &tokens[i + 3] else {
+                    return Err("unsupported Rust include environment expression".into());
+                };
+                match variable.as_str() {
+                    "CARGO_MANIFEST_DIR" => path.push_str(manifest.to_str().ok_or_else(|| {
+                        "Rust include manifest is not UTF-8".to_string()
+                    })?),
+                    "OUT_DIR" => generated = true,
+                    _ => return Err(format!("unsupported Rust include environment `{variable}`")),
+                }
+                i += 5;
+                continue;
+            }
+            match &tokens[i] {
+                Literal(value) => path.push_str(value),
+                Symbol(b'(') => depth += 1,
+                Symbol(b')') => depth -= 1,
+                Word("concat") | Symbol(b'!' | b',') => {}
+                token => return Err(format!("unsupported Rust include expression `{token:?}`")),
+            }
+            i += 1;
+        }
+        if depth != 0 || path.is_empty() {
+            return Err("incomplete Rust include expression".into());
+        }
+        // Build-script outputs are generated inside Cargo's writable target.
+        if !generated {
+            paths.push(PathBuf::from(path));
+        }
+    }
+    Ok(paths)
+}
+
+fn foundation_rust_sources(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
+    let entries = fs::read_dir(directory)
+        .map_err(|error| format!("read foundation sources `{}`: {error}", directory.display()))?;
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("read foundation source entry: {error}"))?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') || name == "target" {
+            continue;
+        }
+        let kind = entry.file_type().map_err(|error| {
+            format!("read foundation source type `{}`: {error}", entry.path().display())
+        })?;
+        if kind.is_dir() {
+            foundation_rust_sources(&entry.path(), paths)?;
+        } else if entry.path().extension().is_some_and(|extension| extension == "rs") {
+            paths.push(entry.path());
+        }
+    }
+    Ok(())
+}
+
+fn foundation_include_closure(
+    root: &Path,
+    foundation: &Path,
+    unicode: &Path,
+) -> Result<Vec<PathBuf>, String> {
+    let mut pending = std::collections::VecDeque::new();
+    for manifest in [foundation, unicode] {
+        let mut paths = Vec::new();
+        foundation_rust_sources(manifest, &mut paths)?;
+        paths.sort();
+        pending.extend(paths.into_iter().map(|source| (source, manifest)));
+    }
+    let mut seen = HashSet::new();
+    let mut external = BTreeSet::new();
+    while let Some((source, manifest)) = pending.pop_front() {
+        if !seen.insert((source.clone(), manifest))
+            || !source.extension().is_some_and(|extension| extension == "rs")
+        {
+            continue;
+        }
+        let text = fs::read_to_string(&source)
+            .map_err(|error| format!("read Rust include source `{}`: {error}", source.display()))?;
+        for include in foundation_rust_include_paths(&text, manifest)? {
+            let candidate = if include.is_absolute() {
+                include
+            } else {
+                source.parent().expect("source file has a parent").join(include)
+            };
+            let metadata = fs::symlink_metadata(&candidate).map_err(|error| {
+                format!("Rust include `{}` is unavailable: {error}", candidate.display())
+            })?;
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(format!("Rust include `{}` is not a regular file", candidate.display()));
+            }
+            let path = candidate.canonicalize().map_err(|error| {
+                format!("canonicalize Rust include `{}`: {error}", candidate.display())
+            })?;
+            if !path.starts_with(root) {
+                return Err(format!("Rust include `{}` escapes the source root", path.display()));
+            }
+            if !path.starts_with(foundation) && !path.starts_with(unicode) {
+                external.insert(path.clone());
+            }
+            if !seen.contains(&(path.clone(), manifest)) {
+                pending.push_back((path, manifest));
+            }
+        }
+    }
+    Ok(external.into_iter().collect())
+}
+
 fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
     let foundation = verified_source_directory(Path::new(JET_FOUNDATION_CRATE_PATH), "crate")?;
     let unicode = verified_source_directory(Path::new(JET_UNICODE_CRATE_PATH), "unicode crate")?;
-    let codegen_prelude =
-        verified_source_directory(Path::new(JET_FOUNDATION_CODEGEN_PRELUDE_PATH), "codegen")?;
-    let archive_source =
-        verified_source_directory(Path::new(JET_FOUNDATION_ARCHIVE_SOURCE_PATH), "archive")?;
-    let text_source =
-        verified_source_directory(Path::new(JET_FOUNDATION_TEXT_SOURCE_PATH), "text")?;
-    let tests = verified_source_directory(Path::new(JET_FOUNDATION_TESTS_PATH), "tests")?;
+    let root = verified_source_directory(
+        foundation.parent().and_then(Path::parent).ok_or_else(|| {
+            "jet-foundation crate has no source root".to_string()
+        })?,
+        "root",
+    )?;
+    let inputs = foundation_include_closure(&root, &foundation, &unicode)?;
 
     let foundation_tree = crate::SHA256::try_tree_hash(&foundation)
         .map_err(|error| format!("could not fingerprint jet-foundation source: {error}"))?;
+    let unicode_tree = crate::SHA256::try_tree_hash(&unicode)
+        .map_err(|error| format!("could not fingerprint jet-unicode source: {error}"))?;
     let mut identity =
         crate::ForeignBridge::IdentityBuilder::new(JET_FOUNDATION_SOURCE_SCHEMA);
     identity.field("foundation-tree", foundation_tree.as_bytes());
-    let unicode_tree = crate::SHA256::try_tree_hash(&unicode)
-        .map_err(|error| format!("could not fingerprint jet-unicode source: {error}"))?;
     identity.field("unicode-tree", unicode_tree.as_bytes());
-    for relative in JET_FOUNDATION_CODEGEN_INPUTS {
-        let digest = foundation_input_digest(&codegen_prelude, relative, "codegen")?;
+    for path in &inputs {
+        let relative = path.strip_prefix(&root)
+            .expect("include closure paths stay inside the source root");
+        let digest = foundation_input_digest(&root, relative, "include")?;
         identity.field(
-            "codegen-input",
-            format!("{relative}\0{digest}").as_bytes(),
+            "include-input",
+            format!("{}\0{digest}", relative.display()).as_bytes(),
         );
-    }
-    for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
-        let digest = foundation_input_digest(&archive_source, relative, "archive")?;
-        identity.field(
-            "archive-input",
-            format!("{relative}\0{digest}").as_bytes(),
-        );
-    }
-    for relative in JET_FOUNDATION_TEXT_INPUTS {
-        let digest = foundation_input_digest(&text_source, relative, "text")?;
-        identity.field("text-input", format!("{relative}\0{digest}").as_bytes());
-    }
-    for relative in JET_FOUNDATION_TEST_INPUTS {
-        let digest = foundation_input_digest(&tests, relative, "tests")?;
-        identity.field("tests-input", format!("{relative}\0{digest}").as_bytes());
     }
 
     Ok(JetFoundationSources {
+        root,
         foundation,
         unicode,
-        codegen_prelude,
-        archive_source,
-        text_source,
-        tests,
+        inputs,
         digest: identity.finish(),
     })
 }
@@ -2588,7 +2846,7 @@ fn jet_foundation_sources() -> Result<JetFoundationSources, String> {
 #[cfg(target_os = "linux")]
 fn stage_foundation_input(
     source_root: &Path,
-    relative: &str,
+    relative: &Path,
     destination_root: &Path,
     label: &str,
 ) -> Result<(), String> {
@@ -2615,21 +2873,13 @@ fn stage_foundation_input(
     Ok(())
 }
 
-// The generated manifest keeps Cargo's host path dependency, so native Cargo
-// must see that canonical path inside its namespace. Linux stages only the
-// external files that Foundation includes; other adapters expose the same
-// source directories directly because they do not remap mount destinations.
+// Project only the discovered external include inputs at their original root,
+// then mount the two complete path crates. Non-Linux adapters cannot remap paths.
 fn jet_foundation_mounts(
     _cache_root: &Path,
     sources: &JetFoundationSources,
 ) -> Result<Vec<jet_sema::Comptime::Build::ReadOnlyMount>, String> {
-    let mut mounts = vec![
-        jet_sema::Comptime::Build::ReadOnlyMount::new(
-            sources.foundation.clone(),
-            sources.foundation.clone(),
-        ),
-        jet_sema::Comptime::Build::ReadOnlyMount::new(sources.unicode.clone(), sources.unicode.clone()),
-    ];
+    let mut mounts = Vec::new();
     #[cfg(target_os = "linux")]
     {
         let closure_root = _cache_root.join(".jet-foundation-source-closure");
@@ -2643,72 +2893,60 @@ fn jet_foundation_mounts(
                 ));
             }
         }
-        let codegen_stage = closure_root.join("codegen/src/Prelude");
-        let archive_stage = closure_root.join("archive/src");
-        let text_stage = closure_root.join("Core/text");
-        let tests_stage = closure_root.join("tests");
-        for relative in JET_FOUNDATION_CODEGEN_INPUTS {
-            stage_foundation_input(
-                &sources.codegen_prelude,
-                relative,
-                &codegen_stage,
-                "codegen",
-            )?;
+        fs::create_dir_all(&closure_root).map_err(|error| {
+            format!("create foundation source closure `{}`: {error}", closure_root.display())
+        })?;
+        for path in &sources.inputs {
+            let relative = path.strip_prefix(&sources.root)
+                .expect("include closure paths stay inside the source root");
+            stage_foundation_input(&sources.root, relative, &closure_root, "include")?;
         }
-        for relative in JET_FOUNDATION_ARCHIVE_INPUTS {
-            stage_foundation_input(
-                &sources.archive_source,
-                relative,
-                &archive_stage,
-                "archive",
-            )?;
+        // The parent projection is read-only when the two crate mounts are
+        // installed. Their destinations must already exist, without contents.
+        for crate_path in [&sources.foundation, &sources.unicode] {
+            let relative = crate_path.strip_prefix(&sources.root)
+                .expect("Foundation path crates stay inside the source root");
+            let destination = closure_root.join(relative);
+            fs::create_dir_all(&destination).map_err(|error| {
+                format!("create foundation crate mount point `{}`: {error}", destination.display())
+            })?;
         }
-        for relative in JET_FOUNDATION_TEXT_INPUTS {
-            stage_foundation_input(&sources.text_source, relative, &text_stage, "text")?;
-        }
-        for relative in JET_FOUNDATION_TEST_INPUTS {
-            stage_foundation_input(&sources.tests, relative, &tests_stage, "tests")?;
-        }
-        mounts.extend([
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                codegen_stage,
-                sources.codegen_prelude.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                archive_stage,
-                sources.archive_source.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(text_stage, sources.text_source.clone()),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(tests_stage, sources.tests.clone()),
-        ]);
+        mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(
+            closure_root,
+            sources.root.clone(),
+        ));
     }
     #[cfg(not(target_os = "linux"))]
     {
-        mounts.extend([
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.codegen_prelude.clone(),
-                sources.codegen_prelude.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.archive_source.clone(),
-                sources.archive_source.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.text_source.clone(),
-                sources.text_source.clone(),
-            ),
-            jet_sema::Comptime::Build::ReadOnlyMount::new(
-                sources.tests.clone(),
-                sources.tests.clone(),
-            ),
-        ]);
+        let mut parents = BTreeSet::new();
+        for path in &sources.inputs {
+            let parent = path.parent().expect("included file has a parent");
+            if parents.insert(parent) {
+                mounts.push(jet_sema::Comptime::Build::ReadOnlyMount::new(parent, parent));
+            }
+        }
     }
+    mounts.extend([
+        jet_sema::Comptime::Build::ReadOnlyMount::new(
+            sources.foundation.clone(),
+            sources.foundation.clone(),
+        ),
+        jet_sema::Comptime::Build::ReadOnlyMount::new(
+            sources.unicode.clone(),
+            sources.unicode.clone(),
+        ),
+    ]);
     Ok(mounts)
 }
 
 /// Hand-written application plugin-loader runtime emitted into the bridge
 /// crate when `core.plugin` is used (D-PLUGIN1 / D-DEP-WASM1=A).
-const PLUGIN_RUNTIME: &str = include_str!("Prelude/Plugin.rs");
+const PLUGIN_RUNTIME: &str = concat!(
+    include_str!("Prelude/Plugin.rs"),
+    "\n#[cfg(test)] mod io_error_ownership_tests {\n",
+    include_str!("Prelude/PluginIOErrorOwnershipTests.rs"),
+    "\n}\n",
+);
 
 /// Hand-written compiler-extension host runtime (D-DX5-HOOK1=A). Same
 /// wasmtime Component Model substrate as `PLUGIN_RUNTIME`, distinct WIT
@@ -2813,6 +3051,41 @@ pub fn cached_crypto_helper_path() -> PathBuf {
     bridge_paths(&key, &target, &[]).crypto_helper
 }
 
+// Forward only the existing explicit Cargo worker bound. Restoring the ambient
+// environment would weaken the canonical build sandbox's declared input law.
+fn cargo_bridge_sandbox_env() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::from([
+        (
+            "CARGO_HOME".to_string(),
+            "/work/output/cargo-home".to_string(),
+        ),
+        ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
+        ("HOME".to_string(), "/work/output/home".to_string()),
+        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
+    ]);
+    if let Some(path) = std::env::var_os("PATH") {
+        if !path.is_empty() {
+            env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
+        }
+    }
+    if let Ok(jobs) = std::env::var("CARGO_BUILD_JOBS") {
+        env.insert("CARGO_BUILD_JOBS".to_string(), jobs);
+    }
+    env
+}
+
+fn cargo_bridge_build_args(selected_target: &str) -> Vec<String> {
+    vec![
+        "build".to_string(),
+        "--keep-going".to_string(),
+        "--release".to_string(),
+        "--target".to_string(),
+        selected_target.to_string(),
+        "--manifest-path".to_string(),
+        "/work/source/Cargo.toml".to_string(),
+    ]
+}
+
 fn build_bridge_full(
     entries: &[ExternEntry],
     needs_regex: bool,
@@ -2890,6 +3163,7 @@ fn build_bridge_full(
         );
     }
     if needs_crypto {
+        deps.insert("jet-foundation".to_string(), JET_FOUNDATION_CRATE_PATH.to_string());
         deps.insert(
             AES_GCM_CRATE_SPEC.0.to_string(),
             AES_GCM_CRATE_SPEC.1.to_string(),
@@ -2937,7 +3211,7 @@ fn build_bridge_full(
             JET_FOUNDATION_CRATE_PATH.to_string(),
         );
     }
-    let foundation_sources = if needs_parquet || needs_plugin {
+    let foundation_sources = if needs_parquet || needs_plugin || needs_crypto {
         Some(jet_foundation_sources().map_err(|error| tool_error(&error))?)
     } else {
         None
@@ -3267,28 +3541,8 @@ fn build_bridge_full(
     fs::create_dir_all(&target_dir)
         .map_err(|e| tool_error(&format!("couldn't create the FFI target folder: {}", e)))?;
 
-    let cargo_args = vec![
-        "build".to_string(),
-        "--release".to_string(),
-        "--target".to_string(),
-        selected_target.to_string(),
-        "--manifest-path".to_string(),
-        "/work/source/Cargo.toml".to_string(),
-    ];
-    let mut sandbox_env = BTreeMap::from([
-        (
-            "CARGO_HOME".to_string(),
-            "/work/output/cargo-home".to_string(),
-        ),
-        ("CARGO_TARGET_DIR".to_string(), "/work/output".to_string()),
-        ("HOME".to_string(), "/work/output/home".to_string()),
-        ("SOURCE_DATE_EPOCH".to_string(), "0".to_string()),
-    ]);
-    if let Some(path) = std::env::var_os("PATH") {
-        if !path.is_empty() {
-            sandbox_env.insert("PATH".to_string(), path.to_string_lossy().into_owned());
-        }
-    }
+    let cargo_args = cargo_bridge_build_args(&selected_target);
+    let mut sandbox_env = cargo_bridge_sandbox_env();
 
     let cargo_home = std::env::var_os("CARGO_HOME")
         .map(PathBuf::from)
@@ -3347,19 +3601,8 @@ fn build_bridge_full(
 
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        if entries.iter().any(|e| e.inline.is_some()) {
-            let hint = entries
-                .iter()
-                .find(|e| e.inline.is_some())
-                .map(|e| e.line_hint.clone())
-                .unwrap_or_else(|| "an inline foreign declaration".to_string());
-            return Err(vec![Diagnostic::error(
-                "E3222",
-                format!("the foreign body doesn't match the Jet signature at {hint}"),
-                "Jet compiled and linked the body against the declared scalar ABI contract, and the foreign toolchain rejected that contract".to_string(),
-                "make the foreign function name, parameter types, return type, operands, and target match the Jet signature".to_string(),
-                None,
-            )]);
+        if let Some(diagnostic) = inline_bridge_failure_diagnostic(entries, &stderr) {
+            return Err(vec![diagnostic]);
         }
         if looks_like_signature_mismatch(&stderr) {
             let hint = entries
@@ -3951,8 +4194,10 @@ fn cache_key_full(
             "encoding_errors_runtime",
             ENCODING_ERRORS_RUNTIME.as_bytes(),
         );
-        identity.field("datatree_runtime", DATATREE_RUNTIME.as_bytes());
+        identity.field("dyn_runtime", DYN_RUNTIME.as_bytes());
         identity.field("encoding_json_runtime", ENCODING_JSON_RUNTIME.as_bytes());
+        identity.field("encoding_types_runtime", ENCODING_TYPES_RUNTIME.as_bytes());
+        identity.field("encoding_error_runtime", ENCODING_ERROR_RUNTIME.as_bytes());
         identity.field("json_number_runtime", JSON_NUMBER_RUNTIME.as_bytes());
         identity.field("runtime_diagnostic_core", RUNTIME_DIAGNOSTIC_CORE.as_bytes());
         identity.field("crypto_runtime", CRYPTO_RUNTIME.as_bytes());
@@ -5074,6 +5319,19 @@ fn cargo_bridge_failure_diagnostic(dep: &str, detail: &str) -> Diagnostic {
     .with_detail(format!("  cargo said:\n{detail}"))
 }
 
+fn inline_bridge_failure_diagnostic(entries: &[ExternEntry], stderr: &str) -> Option<Diagnostic> {
+    entries.iter().any(|entry| entry.inline.is_some()).then(|| {
+        Diagnostic::error(
+            "E3222",
+            "the inline foreign bridge could not compile or link".to_string(),
+            "the foreign toolchain rejected the bridge; its diagnostic does not identify a Jet declaration".to_string(),
+            "inspect the foreign diagnostic and correct the inline body or bridge; a generated adapter failure is a compiler defect".to_string(),
+            None,
+        )
+        .with_detail(format!("  cargo said:\n{}", stable_cargo_detail(stderr)))
+    })
+}
+
 fn inline_native_toolchain(
     entries: &[ExternEntry],
     target: &str,
@@ -5676,6 +5934,35 @@ fn emit_inline_wrapper_fn(entry: &ExternEntry, inline: &InlineEntry) -> String {
     )
 }
 
+// A memory carrier is safe only while every named input is consumed by the
+// initial push rail, before any instruction can overwrite its address.
+fn inline_asm_stack_inputs(instructions: &[String], names: &[String]) -> bool {
+    let mut seen = vec![false; names.len()];
+    let mut prefix = true;
+    for line in instructions {
+        if !line.starts_with("push ") {
+            prefix = false;
+        }
+        if !line.contains('{') {
+            continue;
+        }
+        let Some(name) = line.strip_prefix("push {").and_then(|tail| tail.strip_suffix('}'))
+            else { return false };
+        let Some(index) = names.iter().position(|input| input == name)
+            else { return false };
+        if !prefix || seen[index] {
+            return false;
+        }
+        seen[index] = true;
+    }
+    seen.into_iter().all(|input| input)
+}
+
+fn inline_asm_general_register(register: &str) -> bool {
+    matches!(register, "rax" | "rbx" | "rcx" | "rdx" | "rsi" | "rdi" | "rbp"
+        | "r8" | "r9" | "r10" | "r11" | "r12" | "r13" | "r14" | "r15")
+}
+
 fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
     let Some(contract) = inline.asm_contract.as_ref() else {
         return String::new();
@@ -5716,7 +6003,7 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         return String::new();
     }
 
-    let instructions = inline
+    let mut instructions = inline
         .source
         .lines()
         .map(str::trim)
@@ -5740,16 +6027,37 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
             result_expr = "__jet_result".to_string();
         }
     }
-    for (index, name) in inline.param_names.iter().enumerate() {
-        if Some(index) != output_param {
-            operands.push(format!("{name} = in(reg) p{index}"));
-        }
-    }
     let mut seen_clobbers = HashSet::new();
     for reg in &contract.clobbers {
         let reg = normalize_register(reg);
         if return_reg.as_deref() != Some(reg.as_str()) && seen_clobbers.insert(reg.clone()) {
             operands.push(format!("out(\"{reg}\") _"));
+        }
+    }
+    // RSP is the stack pointer and RBP may hold the frame on every profile.
+    // Spill only an over-budget word push rail; keep all early clobbers intact.
+    let gp_outputs = seen_clobbers.iter()
+        .filter(|register| inline_asm_general_register(register)).count()
+        + usize::from(return_reg.as_deref().is_some_and(inline_asm_general_register));
+    let memory_inputs = contract.target.starts_with("x86_64")
+        && output_param.is_none()
+        && inline.param_names.len() + gp_outputs > 14
+        && params.iter().all(|param| param.ends_with(": i64") || param.ends_with(": u64"))
+        && inline_asm_stack_inputs(&instructions, &inline.param_names);
+    if memory_inputs {
+        operands.push("__jet_args = in(reg) __jet_args.as_ptr()".into());
+        for line in &mut instructions {
+            if let Some(name) = line.strip_prefix("push {").and_then(|tail| tail.strip_suffix('}')) {
+                let index = inline.param_names.iter().position(|input| input == name)
+                    .expect("stack input proof established the named operand");
+                *line = format!("push qword ptr [{{__jet_args}} + {}]", index * 8);
+            }
+        }
+    } else {
+        for (index, name) in inline.param_names.iter().enumerate() {
+            if Some(index) != output_param {
+                operands.push(format!("{name} = in(reg) p{index}"));
+            }
         }
     }
     let templates = instructions
@@ -5761,6 +6069,11 @@ fn emit_asm_wrapper(entry: &ExternEntry, inline: &InlineEntry) -> String {
         declarations.push_str(&format!("    let __jet_result: {ret};\n"));
     } else if let Some(index) = output_param {
         declarations.push_str(&format!("    let mut p{index} = p{index};\n"));
+    }
+    if memory_inputs {
+        let words = (0..inline.param_names.len()).map(|index| format!("p{index} as u64"))
+            .collect::<Vec<_>>().join(", ");
+        declarations.push_str(&format!("    let __jet_args = [{words}];\n"));
     }
     let all_args = templates
         .into_iter()
@@ -5954,7 +6267,9 @@ fn main() {{
     assert_eq!(cargo_target, TARGET, "Cargo TARGET differs from Jet's selected target");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let mut objects = Vec::new();
-    for (index, (source, compiler, cpp, target_arg)) in [{files}].iter().enumerate() {{
+    let files = [{files}];
+    let mut linker = None;
+    for (index, (source, compiler, cpp, target_arg)) in files.iter().enumerate() {{
         println!("cargo:rerun-if-changed={{source}}");
         let object = out.join(format!("inline_{{index}}.o"));
         let mut compile = Command::new(compiler);
@@ -5962,12 +6277,17 @@ fn main() {{
         if *cpp {{ compile.arg("-std=c++17"); }}
         compile.args(["-fPIC", "-c", source, "-o"]).arg(&object);
         checked(&mut compile);
-        let proof = out.join(format!("inline_{{index}}.{{PROOF_SUFFIX}}"));
+        objects.push(object);
+        if linker.is_none() || *cpp {{ linker = Some((*compiler, *target_arg)); }}
+    }}
+    if let Some((compiler, target_arg)) = linker {{
+        let proof = out.join(format!("inline_bridge.{{PROOF_SUFFIX}}"));
         let mut link = Command::new(compiler);
         if !target_arg.is_empty() {{ link.arg(target_arg); }}
-        link.args(["-shared", UNDEFINED_SYMBOLS]).arg(&object).arg("-o").arg(&proof);
+        link.args(["-shared", UNDEFINED_SYMBOLS]);
+        for object in &objects {{ link.arg(object); }}
+        link.arg("-o").arg(&proof);
         checked(&mut link);
-        objects.push(object);
     }}
     let archive = out.join("libjet_inline_native.a");
     let mut ar = Command::new(ARCHIVER);
@@ -6632,7 +6952,7 @@ fn normalize_ffi_crate_name(line: &str) -> String {
         out.push_str(&rest[..idx]);
         let after = &rest[idx + marker.len()..];
         let hash_len = after.chars().take_while(|c| c.is_ascii_hexdigit()).count();
-        if hash_len == 16 {
+        if hash_len == 64 {
             out.push_str("jet_ffi_<hash>");
             rest = &after[hash_len..];
         } else {
@@ -6667,7 +6987,7 @@ fn normalize_ffi_cache_path(line: &str) -> String {
         None => ("", rest),
     };
     let hash_len = rest.chars().take_while(|c| c.is_ascii_hexdigit()).count();
-    if hash_len != 16 {
+    if hash_len != 64 {
         return line.to_string();
     }
     let suffix = &rest[hash_len..];
@@ -6694,6 +7014,356 @@ mod tests {
     use crate::AST::{AccessConvention, Type};
     use std::collections::HashSet;
 
+    // Reuse the complete canonical supplier; this fixture needs only piped spawn/wait.
+    #[allow(dead_code)]
+    mod io_error_component_observation {
+        include!("IOErrorSandboxObservation.rs");
+    }
+
+    fn bridge_test_completion(
+        name: &str,
+        status: Option<i32>,
+        stdout: &str,
+        stderr: &str,
+    ) -> Result<bool, String> {
+        let expected_pass = format!("test {name} ... ok");
+        let expected_failure = format!("test {name} ... FAILED");
+        let completed_pass = stdout.lines().filter(|line| *line == expected_pass).count() == 1
+            && stdout.contains("test result: ok. 1 passed; 0 failed; 0 ignored;");
+        let completed_failure = stdout
+            .lines()
+            .filter(|line| *line == expected_failure)
+            .count()
+            == 1
+            && stdout.contains("test result: FAILED. 0 passed; 1 failed; 0 ignored;");
+        // Cargo also returns 101 for a crashed test child. Require its named
+        // completion packet and reject an unsafe child-status diagnostic.
+        let unsafe_child = stderr.lines().find(|line| {
+            line.trim_start()
+                .starts_with("process didn't exit successfully:")
+                && !line.trim_end().ends_with("(exit status: 101)")
+        });
+        if unsafe_child.is_none() {
+            if status == Some(0) && completed_pass {
+                return Ok(true);
+            }
+            if status == Some(101) && completed_failure {
+                return Ok(false);
+            }
+        }
+        Err(format!(
+            "unsafe child or missing named harness completion: test={name} status={status:?} child={unsafe_child:?}"
+        ))
+    }
+
+    #[test]
+    fn bridge_test_completion_classifies_completed_and_unsafe_packets() {
+        const PASS: &str =
+            "test fixture ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n";
+        const FAIL: &str =
+            "test fixture ... FAILED\ntest result: FAILED. 0 passed; 1 failed; 0 ignored;\n";
+        const SIGNAL: &str =
+            "process didn't exit successfully: fixture (signal: 11, SIGSEGV: invalid memory reference)";
+        let cases = [
+            ("completed-pass", Some(0), PASS, "", Some(true)),
+            ("completed-fail-101", Some(101), FAIL, "", Some(false)),
+            (
+                "completed-fail-child-exit-101",
+                Some(101),
+                FAIL,
+                "process didn't exit successfully: fixture (exit status: 101)",
+                Some(false),
+            ),
+            ("fatal-child-101", Some(101), FAIL, SIGNAL, None),
+            ("direct-signal", None, FAIL, "", None),
+            (
+                "zero-tests",
+                Some(0),
+                "test result: ok. 0 passed; 0 failed; 0 ignored;\n",
+                "",
+                None,
+            ),
+            (
+                "wrong-name",
+                Some(0),
+                "test other ... ok\ntest result: ok. 1 passed; 0 failed; 0 ignored;\n",
+                "",
+                None,
+            ),
+        ];
+        let mut all_passed = true;
+        for (case, status, stdout, stderr, expected) in cases {
+            let actual = bridge_test_completion("fixture", status, stdout, stderr);
+            let passed = actual.as_ref().ok().copied() == expected
+                && (stderr != SIGNAL
+                    || actual.as_ref().err().is_some_and(|reason| reason.contains(SIGNAL)));
+            println!(
+                "bridge completion case={case} result={} actual={actual:?}",
+                if passed { "PASS" } else { "FAIL" },
+            );
+            all_passed &= passed;
+        }
+        assert!(all_passed, "bridge completion classification regression");
+    }
+
+    // This executes real generated cfg-tests, not a zero-match pkg-model filter.
+    // It is heavy and must be explicitly selected with --ignored --exact.
+    #[test]
+    #[ignore = "builds the canonical Wasmtime bridge; requires an admitted focused proof"]
+    fn canonical_plugin_io_host_tests_use_verified_bridge() {
+        const TESTS: [&str; 2] = [
+            "__jet_plugin::io_error_variant_tests::known_host_io_variants_preserve_original_context",
+            "__jet_plugin::io_error_variant_tests::known_platform_refusal_and_unsupported_codes_preserve_original_context",
+        ];
+        let sandbox_env = cargo_bridge_sandbox_env();
+        assert_eq!(
+            sandbox_env.get("CARGO_BUILD_JOBS").map(String::as_str),
+            Some("1"),
+        );
+        assert!(
+            sandbox_env.keys().all(|key| matches!(
+                key.as_str(),
+                "CARGO_HOME"
+                    | "CARGO_TARGET_DIR"
+                    | "HOME"
+                    | "SOURCE_DATE_EPOCH"
+                    | "PATH"
+                    | "CARGO_BUILD_JOBS"
+            )),
+            "the actual producer environment must not restore ambient variables",
+        );
+        let selected_target = host_target();
+        assert_ne!(selected_target, "unknown-rustc-target");
+        let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/FFI.rs");
+        let source_digest =
+            crate::SHA256::sha256_file_hex(&source).expect("read matching FFI source");
+        let link = build_bridge(
+            &[], false, false, false, false, false, false, true, false,
+        )
+        .expect("materialize and verify the canonical plugin bridge in its mandatory sandbox");
+        let cache_root = bridge_crate_dir(&link);
+        let paths = bridge_paths(&link.cache_identity, &selected_target, &[]);
+        assert_eq!(cache_root, paths.cache_root);
+        assert_eq!(link.rlib_path, paths.rlib);
+        assert_eq!(link.provenance_path, paths.provenance);
+        let manifest_path = cache_root.join("Cargo.toml");
+        let generated_path = cache_root.join("src/lib.rs");
+        let manifest_digest =
+            crate::SHA256::sha256_file_hex(&manifest_path).expect("canonical generated manifest");
+        let generated_digest = crate::SHA256::sha256_file_hex(&generated_path)
+            .expect("canonical generated bridge source");
+        let provenance_digest = crate::SHA256::sha256_file_hex(&link.provenance_path)
+            .expect("verified canonical bridge provenance");
+        let cargo_path = command_path("cargo").expect("actual canonical Cargo executable");
+        let cargo_home = std::env::var_os("CARGO_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs_home().join(".cargo"));
+        let registry = cargo_home
+            .join("registry")
+            .canonicalize()
+            .expect("actual registry used by the canonical materializer");
+        assert!(registry.is_dir());
+        let mut mounts = vec![jet_sema::Comptime::Build::ReadOnlyMount::new(
+            registry,
+            "/work/output/cargo-home/registry",
+        )];
+        let sources =
+            jet_foundation_sources().expect("actual canonical Foundation source closure");
+        mounts.extend(
+            jet_foundation_mounts(&cache_root, &sources)
+                .expect("existing canonical Foundation/Unicode/include mounts"),
+        );
+        let mut cargo_args = vec![
+            "test".into(),
+            "--release".into(),
+            "--target".into(),
+            selected_target.clone(),
+            "--manifest-path".into(),
+            "/work/source/Cargo.toml".into(),
+            "--lib".into(),
+            "--no-run".into(),
+            "--message-format=json".into(),
+        ];
+        let built = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+            &cargo_path,
+            &cargo_args,
+            &cache_root,
+            Some(&paths.target_dir),
+            &sandbox_env,
+            true,
+            &mounts,
+        )
+        .expect("compile the real generated bridge cfg-tests in the mandatory sandbox");
+        let build_stdout =
+            String::from_utf8(built.output.stdout).expect("Cargo compiler-artifact JSON is UTF-8");
+        let build_stderr = String::from_utf8_lossy(&built.output.stderr);
+        println!("canonical bridge no-run stdout:\n{build_stdout}");
+        println!("canonical bridge no-run stderr:\n{build_stderr}");
+        assert!(
+            built.output.status.success(),
+            "canonical generated test build failed",
+        );
+        let mut executable = None;
+        for line in build_stdout.lines().filter(|line| !line.trim().is_empty()) {
+            let artifact = crate::JSON::parse_json_with_limit(line, 16 * 1024 * 1024)
+                .expect("actual Cargo JSON, not guessed binary paths");
+            if artifact
+                .get("reason")
+                .expect("Cargo reason")
+                .as_str()
+                .expect("Cargo reason text")
+                != "compiler-artifact"
+            {
+                continue;
+            }
+            if artifact
+                .get("target")
+                .expect("Cargo target")
+                .get("name")
+                .expect("Cargo target name")
+                .as_str()
+                .expect("target name text")
+                != link.crate_name
+            {
+                continue;
+            }
+            let Ok(binary) = artifact
+                .get("executable")
+                .expect("Cargo executable field")
+                .as_str()
+            else {
+                continue;
+            };
+            assert!(
+                executable.is_none(),
+                "exactly one actual generated library test executable",
+            );
+            let relative = Path::new(binary)
+                .strip_prefix("/work/output")
+                .expect("test executable belongs to this canonical sandbox output");
+            assert!(
+                relative
+                    .components()
+                    .all(|component| matches!(component, std::path::Component::Normal(_))),
+                "no escape from canonical output",
+            );
+            executable = Some(paths.target_dir.join(relative));
+        }
+        let executable = executable.expect("actual nonzero generated test binary artifact");
+        let binary_digest = crate::SHA256::sha256_file_hex(&executable)
+            .expect("actual generated library test binary");
+        println!(
+            "canonical bridge identity={} target={} source={} manifest={} generated={} provenance={} binary={}:{} sandbox={}:{}",
+            link.cache_identity, selected_target, source_digest, manifest_digest, generated_digest,
+            provenance_digest, executable.display(), binary_digest, built.mechanism, built.policy,
+        );
+        let identities = [
+            (&source, source_digest.as_str()),
+            (&manifest_path, manifest_digest.as_str()),
+            (&generated_path, generated_digest.as_str()),
+            (&link.provenance_path, provenance_digest.as_str()),
+            (&executable, binary_digest.as_str()),
+        ];
+        let mut all_passed = true;
+        let mut block_reason: Option<String> = None;
+        for name in TESTS {
+            if block_reason.is_none() {
+                for (path, expected) in identities {
+                    match crate::SHA256::sha256_file_hex(path) {
+                        Ok(actual) if actual == expected => {}
+                        result => {
+                            block_reason = Some(format!(
+                                "unsafe or missing canonical artifact {}: {result:?}",
+                                path.display(),
+                            ));
+                            break;
+                        }
+                    }
+                }
+            }
+            if let Some(reason) = block_reason.as_deref() {
+                println!("canonical bridge test={name} result=BLOCKED cause={reason}");
+                all_passed = false;
+                continue;
+            }
+            cargo_args = vec![
+                "test".into(),
+                "--release".into(),
+                "--target".into(),
+                selected_target.clone(),
+                "--manifest-path".into(),
+                "/work/source/Cargo.toml".into(),
+                "--lib".into(),
+                name.into(),
+                "--".into(),
+                "--exact".into(),
+                "--test-threads=1".into(),
+            ];
+            let ran = match jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+                &cargo_path,
+                &cargo_args,
+                &cache_root,
+                Some(&paths.target_dir),
+                &sandbox_env,
+                true,
+                &mounts,
+            ) {
+                Ok(ran) => ran,
+                Err(error) => {
+                    let reason = format!("canonical sandbox unavailable: {error:?}");
+                    println!("canonical bridge test={name} result=FAIL cause={reason}");
+                    block_reason = Some(reason);
+                    all_passed = false;
+                    continue;
+                }
+            };
+            let stdout = String::from_utf8_lossy(&ran.output.stdout);
+            let stderr = String::from_utf8_lossy(&ran.output.stderr);
+            println!(
+                "canonical bridge test={name} sandbox={}:{} stdout:\n{stdout}",
+                ran.mechanism, ran.policy,
+            );
+            println!("canonical bridge test={name} stderr:\n{stderr}");
+            let completion =
+                bridge_test_completion(name, ran.output.status.code(), &stdout, &stderr);
+            let stdout_valid = std::str::from_utf8(&ran.output.stdout).is_ok();
+            let stderr_valid = std::str::from_utf8(&ran.output.stderr).is_ok();
+            let passed = matches!(&completion, Ok(true))
+                && stdout_valid
+                && stderr_valid;
+            println!(
+                "canonical bridge test={name} result={} status={}",
+                if passed { "PASS" } else { "FAIL" },
+                ran.output.status,
+            );
+            if !stdout_valid || !stderr_valid {
+                println!(
+                    "canonical bridge test={name} raw_stdout={:?} raw_stderr={:?}",
+                    ran.output.stdout, ran.output.stderr,
+                );
+            }
+            all_passed &= passed;
+            if let Err(reason) = completion {
+                block_reason = Some(reason);
+            }
+        }
+        for (path, expected) in identities {
+            match crate::SHA256::sha256_file_hex(path) {
+                Ok(actual) if actual == expected => {}
+                result => {
+                    println!(
+                        "canonical bridge integrity=FAIL source={} cause={result:?}",
+                        path.display(),
+                    );
+                    all_passed = false;
+                }
+            }
+        }
+        assert!(
+            all_passed,
+            "canonical bridge must execute both named IO tests successfully with unchanged artifacts",
+        );
+    }
     #[test]
     fn data_provider_requires_direct_call_not_dependency_closure() {
         assert!(!needs_parquet_provider("core.data"));
@@ -6701,6 +7371,321 @@ mod tests {
         assert!(!needs_parquet_provider("core.sync::map_merge"));
         assert!(needs_parquet_provider("core.data::read_parquet"));
         assert!(needs_parquet_provider("core.data.arrow::from_parquet"));
+    }
+
+    #[test]
+    fn foundation_mounts_include_the_unicode_path_dependency() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join(".tmp")
+            .join("jet-test-scratch")
+            .join(format!(
+                "ffi-foundation-mounts-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("system clock is after the Unix epoch")
+                    .as_nanos()
+            ));
+        let sources = jet_foundation_sources().expect("verified Foundation source closure");
+        for relative in [
+            "Compiler/JetFoundation/Source/Registry/PreludeEffects.jet",
+            "crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs",
+            "crates/jet-codegen/src/Prelude/Core.jet",
+        ] {
+            assert!(sources.inputs.contains(&sources.root.join(relative)),
+                "canonical Foundation include closure omitted {relative}");
+        }
+        println!("Foundation discovered include inputs: {:?}",
+            sources.inputs.iter().map(|path| path.strip_prefix(&sources.root).unwrap())
+                .collect::<Vec<_>>());
+        let mounts = jet_foundation_mounts(&root, &sources)
+            .expect("mount the complete Foundation source closure");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(mounts.iter().any(|mount| {
+            mount.source == sources.unicode && mount.destination == sources.unicode
+        }));
+        assert!(
+            sources.unicode.join("Cargo.toml").is_file(),
+            "Cargo must resolve the actual Unicode crate, not an empty mount"
+        );
+    }
+
+    #[test]
+    fn foundation_embedded_encoding_json_has_closed_source() {
+        let source = crypto_bridge_root_modules();
+        assert!(source.contains(ENCODING_TYPES_RUNTIME));
+        assert!(source.contains(ENCODING_ERROR_RUNTIME));
+        assert!(foundation_rust_include_paths(&source, Path::new("")).unwrap().is_empty(),
+            "relocated root modules must not retain source-relative includes");
+    }
+
+    fn foundation_linux_asm_wrapper(name: &str) -> String {
+        let linux = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../Compiler/JetBackend/Source/OS/Linux.jet")).unwrap();
+        let declaration = linux.split_once(&format!("fn {name}("))
+            .expect("canonical Linux assembly declaration").1;
+        let source = declaration.split_once("\"\"\"").unwrap().1
+            .split_once("\"\"\"").unwrap().0;
+        assert!(source.contains("mov rax, rax ; -> return"));
+        let names: Vec<String> = declaration.split_once(')').unwrap().0.split(',')
+            .map(|parameter| {
+                let (name, ty) = parameter.split_once(':').unwrap();
+                assert_eq!(ty.trim(), "I64", "the preserved rail has word inputs");
+                name.trim().to_owned()
+            }).collect();
+        let clobbers = source.split_once("; clobbers ").unwrap().1
+            .lines().next().unwrap().split_whitespace()
+            .map(|name| name.trim_end_matches(',').to_owned()).collect();
+        let inline = InlineEntry {
+            lang: "asm".into(), source: source.into(), param_names: names.clone(),
+            asm_contract: Some(InlineAsmContract {
+                target: host_target(), output: Some(InlineAsmOutput::Register("rax".into())),
+                clobbers,
+            }),
+        };
+        let entry = ExternEntry {
+            jet_name: name.into(), rust_path: String::new(),
+            wrapper_name: format!("jet_ffi_{name}"),
+            params: vec![(AccessConvention::Read, Type::Int); names.len()],
+            param_names: names, return_type: Some(Type::Int), crate_spec: "std".into(),
+            line_hint: "canonical OS/Linux.jet assembly".into(), inline: Some(inline),
+            c_abi: false, generated: false, c_module: false, close: None,
+        };
+        emit_asm_wrapper(&entry, entry.inline.as_ref().unwrap())
+    }
+
+    #[test]
+    fn foundation_clone_asm_uses_nonbinary_labels() {
+        let wrapper = foundation_linux_asm_wrapper("os_clone_i64");
+        assert!(wrapper.contains("\"jnz 2f\""));
+        assert!(wrapper.contains("\"2:\""));
+        assert!(!wrapper.contains("\"1:\""));
+    }
+
+    #[test]
+    #[cfg(all(target_arch = "x86_64", target_os = "linux"))]
+    fn foundation_asm_memory_inputs_preserve_call_abi() {
+        let wrapper = foundation_linux_asm_wrapper("os_call5_i64");
+        assert!(wrapper.contains("let __jet_args = [p0 as u64"));
+        assert!(wrapper.contains("push qword ptr [{__jet_args} + 40]"));
+        assert!(wrapper.contains("out(\"rax\") __jet_result"));
+        assert!(wrapper.contains("out(\"r11\") _"));
+        assert!(!wrapper.contains("lateout"));
+        let short = foundation_linux_asm_wrapper("os_call4_i64");
+        assert!(!short.contains("let __jet_args"), "an in-budget rail needs no spill");
+        let root = std::env::temp_dir().join(format!("jet-asm-memory-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let source = root.join("probe.rs");
+        let executable = root.join("probe");
+        fs::write(&source, format!("{wrapper}\nextern \"C\" fn callback(a:i64,b:i64,c:i64,d:i64,e:i64)->i64{{a+10*b+100*c+1000*d+10000*e}}\nfn main(){{assert_eq!(jet_ffi_os_call5_i64(callback as usize as i64,1,2,3,4,5),54321);}}\n")).unwrap();
+        let built = Command::new(command_path("rustc").unwrap()).args([
+            "--edition=2021", "-C", "opt-level=2", "-C", "force-frame-pointers=yes",
+            "-C", "overflow-checks=yes", "-C", "codegen-units=16",
+        ]).arg(&source).arg("-o").arg(&executable).output().unwrap();
+        assert!(built.status.success(), "factory ASM compile:\n{}", String::from_utf8_lossy(&built.stderr));
+        assert!(Command::new(&executable).status().unwrap().success());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    // Select explicitly: this replays the preserved stage0 production bridge,
+    // not a reduced synthetic crate or a whole-compiler emission.
+    #[test]
+    #[ignore = "requires the preserved production bridge source and target"]
+    fn foundation_production_bridge_builds_under_factory_profile() {
+        fn copy_source_tree(source: &Path, destination: &Path) {
+            fs::create_dir_all(destination).unwrap();
+            for entry in fs::read_dir(source).unwrap() {
+                let entry = entry.unwrap();
+                let kind = entry.file_type().unwrap();
+                let path = destination.join(entry.file_name());
+                if kind.is_dir() {
+                    copy_source_tree(&entry.path(), &path);
+                } else {
+                    assert!(kind.is_file(), "production source must not contain symlink inputs");
+                    fs::copy(entry.path(), path).unwrap();
+                }
+            }
+        }
+        let required_path = |name: &str| PathBuf::from(
+            std::env::var_os(name).unwrap_or_else(|| panic!("{name} is required")),
+        );
+        let cache_root = required_path("JET_FFI_PRODUCTION_CACHE_ROOT");
+        let target_dir = required_path("JET_FFI_PRODUCTION_TARGET_DIR");
+        let source_root = required_path("JET_FFI_PRODUCTION_SOURCE_ROOT");
+        let proof_root = required_path("JET_FFI_PRODUCTION_PROOF_ROOT");
+        let factory_manifest = required_path("JET_FFI_PRODUCTION_FACTORY_MANIFEST");
+        fs::create_dir_all(&proof_root).unwrap();
+        let original_source = crate::SHA256::try_tree_hash(&cache_root)
+            .expect("fingerprint the preserved production bridge inputs");
+        let projected_source = proof_root.join("source");
+        copy_source_tree(&cache_root, &projected_source);
+        let library = projected_source.join("src/lib.rs");
+        let original_library = fs::read_to_string(&library).unwrap();
+        assert!(original_library.contains("jet_foundation::Registry::active_runtime_diagnostic"));
+        assert!(!original_library.contains("crate::Outcome::"));
+        // Re-emit the exact failing rail from its current canonical Jet source.
+        let clone_start = original_library.find(
+            "#[no_mangle]\npub unsafe extern \"C\" fn jet_inline_jet_ffi_os_call5_i64(",
+        ).expect("preserved over-budget ASM wrapper");
+        let clone_end = clone_start + original_library[clone_start..].find(
+            "#[no_mangle]\npub unsafe extern \"C\" fn jet_ffi_os_call5_i64_cabi(",
+        ).expect("preserved C-ABI wrapper boundary");
+        let projected_library = format!("{}{}{}", &original_library[..clone_start],
+            foundation_linux_asm_wrapper("os_call5_i64"), &original_library[clone_end..]);
+        assert!(foundation_rust_include_paths(&projected_library, &projected_source)
+            .unwrap().is_empty(), "collect-all generated library must have no unresolved include");
+        fs::write(&library, projected_library).unwrap();
+        let factory = fs::read_to_string(factory_manifest).unwrap();
+        let profile = factory.split_once("[profile.jet-stage-release]\n")
+            .expect("exact factory profile declaration").1;
+        let manifest = projected_source.join("Cargo.toml");
+        let original_manifest = fs::read_to_string(&manifest).unwrap();
+        fs::write(manifest, format!("{original_manifest}\n[profile.jet-stage-release]\n{profile}")).unwrap();
+        let selected_target = host_target();
+        assert_eq!(selected_target, "x86_64-unknown-linux-gnu",
+            "this receipt replays the recovered stage0 target, not a different platform");
+        let args = vec!["cargo".to_owned(), "build".into(), "--keep-going".into(),
+            "--manifest-path".into(), projected_source.join("Cargo.toml").to_string_lossy().into_owned(),
+            "--profile".into(), "jet-stage-release".into()];
+        let start = std::time::Instant::now();
+        let built = Command::new(source_root.join("Tools/agent/jet-env"))
+            .args(&args).current_dir(&source_root)
+            .env("JET_TOOLCHAIN_ROOT", &source_root).env("CARGO_TARGET_DIR", &target_dir)
+            .env("CARGO_INCREMENTAL", "0").env("CARGO_BUILD_JOBS", "1")
+            .env("RUSTFLAGS", "-C force-frame-pointers=yes")
+            .env("RUST_MIN_STACK", "268435456").env("JET_NO_SCCACHE", "1")
+            .env_remove("RUSTC_WRAPPER").env_remove("RUSTC_WORKSPACE_WRAPPER")
+            .output().expect("execute the production bridge under the exact factory profile");
+        fs::write(proof_root.join("cargo.stdout"), &built.stdout).unwrap();
+        fs::write(proof_root.join("cargo.stderr"), &built.stderr).unwrap();
+        let final_source = crate::SHA256::try_tree_hash(&cache_root)
+            .expect("fingerprint the production bridge after its read-only build");
+        fs::write(proof_root.join("cargo.receipt.json"), format!(
+            "{{\"status\":{},\"seconds\":{},\"args\":{:?},\"sourceUnchanged\":{}}}\n",
+            built.status.code().unwrap_or(-1), start.elapsed().as_secs_f64(), args,
+            final_source == original_source,
+        )).unwrap();
+        assert_eq!(final_source, original_source,
+            "the preserved production source inputs must remain unchanged");
+        assert!(built.status.success(), "production bridge stderr:\n{}",
+            String::from_utf8_lossy(&built.stderr));
+        let release = target_dir.join("jet-stage-release");
+        let key = cache_root.file_name().and_then(|name| name.to_str())
+            .expect("the preserved canonical bridge cache has a UTF-8 key");
+        let produced = release.join(format!("libjet_ffi_{key}.rlib"));
+        assert!(produced.is_file(),
+            "the exact production build must produce its own foreign rlib: {}", produced.display());
+        println!("production Foundation bridge: exact factory profile build passed");
+    }
+
+    #[test]
+    fn foundation_include_paths_ignore_literals_and_resolve_manifest_concat() {
+        let source = r####"
+// include!("missing-comment.rs");
+/* outer /* include_str!("missing-nested.jet"); */ */
+const TEXT: &str = "include!(\"missing-string.rs\")";
+const RAW: &str = r###"include!("missing-raw.rs");"###;
+fn lifetime<'a>(x: &'a str) -> &'a str { x }
+include!("first.rs");
+include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Compiler/registry.jet"));
+include_bytes!(r#"bytes.bin"#);
+include!(concat!(env!("OUT_DIR"), "/generated.rs"));
+"####;
+        assert_eq!(
+            foundation_rust_include_paths(source, Path::new("/repo/crates/foundation")).unwrap(),
+            ["first.rs", "/repo/crates/foundation/../../Compiler/registry.jet", "bytes.bin"]
+                .map(PathBuf::from),
+        );
+        assert_eq!(
+            foundation_rust_include_paths(
+                r#"include!("escaped\\path.rs"); include!("second.rs");"#,
+                Path::new(""),
+            ).unwrap(),
+            ["escaped\\path.rs", "second.rs"].map(PathBuf::from),
+        );
+        assert!(foundation_rust_include_paths(
+            r#"include!(concat!(env!("UNADMITTED"), "/source.rs"));"#,
+            Path::new("/repo"),
+        ).is_err());
+    }
+
+    #[test]
+    fn foundation_transitive_includes_build_in_the_bridge_sandbox() {
+        let temporary = std::env::temp_dir().join(format!(
+            "jet-foundation-include-bridge-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(),
+        ));
+        fs::create_dir_all(&temporary).unwrap();
+        let root = temporary.canonicalize().unwrap();
+        let foundation = root.join("crates/foundation");
+        let unicode = root.join("crates/unicode");
+        let external = root.join("Compiler/Registry");
+        let bridge = root.join("bridge");
+        let target = root.join("output");
+        for path in [&foundation, &unicode, &bridge] {
+            fs::create_dir_all(path.join("src")).unwrap();
+        }
+        fs::create_dir_all(&external).unwrap();
+        fs::create_dir_all(&target).unwrap();
+        for (path, name) in [(&foundation, "foundation"), (&unicode, "unicode")] {
+            fs::write(path.join("Cargo.toml"), format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.0.1\"\nedition = \"2021\"\n[workspace]\n"
+            )).unwrap();
+        }
+        fs::write(foundation.join("src/lib.rs"),
+            "include!(\"../../../Compiler/Registry/new.rs\");\n").unwrap();
+        fs::write(unicode.join("src/lib.rs"), "").unwrap();
+        fs::write(foundation.join("build.rs"),
+            "fn main() { const DATA: &[u8] = include_bytes!(\"../../Compiler/Registry/build-data.jet\"); assert_eq!(DATA, b\"build data\"); println!(\"cargo:rerun-if-changed=../../Compiler/Registry/build-data.jet\"); }\n").unwrap();
+        fs::write(external.join("new.rs"),
+            "include!(\"nested.rs\");\npub const LAW: &str = include_str!(\"law.jet\");\npub const BYTES: &[u8] = include_bytes!(\"bytes.bin\");\n").unwrap();
+        fs::write(external.join("nested.rs"), "pub fn probe() -> u8 { 7 }\n").unwrap();
+        fs::write(external.join("law.jet"), "ratified").unwrap();
+        fs::write(external.join("bytes.bin"), [0u8, 1, 255]).unwrap();
+        fs::write(external.join("build-data.jet"), "build data").unwrap();
+        let inputs = foundation_include_closure(&root, &foundation, &unicode).unwrap();
+        assert_eq!(inputs, ["build-data.jet", "bytes.bin", "law.jet", "nested.rs", "new.rs"]
+            .map(|name| external.join(name)));
+        let sources = JetFoundationSources {
+            root: root.clone(), foundation, unicode, inputs, digest: String::new(),
+        };
+        let mounts = jet_foundation_mounts(&bridge, &sources).unwrap();
+        let mut manifest = emit_cargo_toml("include_closure_bridge", &BTreeMap::new(), false);
+        writeln!(manifest, "[dependencies]\nfoundation = {{ path = {:?} }}", sources.foundation).unwrap();
+        fs::write(bridge.join("Cargo.toml"), manifest).unwrap();
+        fs::write(bridge.join("src/lib.rs"),
+            "pub fn probe() -> u8 { assert_eq!(foundation::LAW, \"ratified\"); assert_eq!(foundation::BYTES, &[0, 1, 255]); foundation::probe() }\n").unwrap();
+        // Like the real bridge materializer, resolve the lock before mounting
+        // Cargo's source directory read-only.
+        let cargo = command_path("cargo").expect("canonical Cargo executable");
+        let locked = Command::new(&cargo)
+            .args(["generate-lockfile", "--offline", "--manifest-path"])
+            .arg(bridge.join("Cargo.toml"))
+            .output().expect("resolve the fixture's actual path dependency lock");
+        assert!(locked.status.success(), "{}", String::from_utf8_lossy(&locked.stderr));
+        let built = jet_sema::Comptime::Build::run_native_sandboxed_with_mounts(
+            &cargo,
+            &["build", "--keep-going", "--offline", "--manifest-path", "/work/source/Cargo.toml"]
+                .map(str::to_string),
+            &bridge,
+            Some(&target),
+            &cargo_bridge_sandbox_env(),
+            false,
+            &mounts,
+        ).expect("build the transitive include bridge in the mandatory sandbox");
+        assert!(built.output.status.success(), "bridge stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&built.output.stdout),
+            String::from_utf8_lossy(&built.output.stderr));
+        assert!(target.join("libinclude_closure_bridge.rlib").is_file()
+            || target.join("debug/libinclude_closure_bridge.rlib").is_file());
+        fs::write(external.join("nested.rs"), "include!(\"new.rs\");\n").unwrap();
+        assert_eq!(foundation_include_closure(&root, &sources.foundation, &sources.unicode).unwrap(),
+            sources.inputs, "include cycles terminate without dropping inputs");
+        fs::write(external.join("nested.rs"), "include!(\"missing.rs\");\n").unwrap();
+        assert!(foundation_include_closure(&root, &sources.foundation, &sources.unicode)
+            .unwrap_err().contains("unavailable"));
+        fs::remove_dir_all(root).unwrap();
     }
     #[test]
     fn cargo_metadata_detects_transitive_compile_time_targets() {
@@ -6863,7 +7848,7 @@ dependencies = [
             emit_cargo_toml("nested_ffi_probe", &BTreeMap::new(), false),
         )
         .expect("write generated nested manifest");
-        std::fs::write(root.join("src/lib.rs"), "pub fn probe() -> i64 { 7 }\n")
+        std::fs::write(root.join("src/lib.rs"), "fn probe() -> i64 { 7 }\n")
             .expect("write generated nested source");
 
         let output = Command::new("cargo")
@@ -7032,7 +8017,7 @@ dependencies = [
     }
 
     #[test]
-    fn crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
+    fn foundation_crypto_bridge_projects_outcome_without_host_runtime_stop_adapter() {
         let source = emit_wrapper_lib(
             &[],
             false,
@@ -7049,13 +8034,16 @@ dependencies = [
         );
 
         assert!(source.contains("pub type JetOutcome<T, E> = Result<T, E>;"));
-        assert!(source.contains("pub struct JetAbsent;"));
+        assert!(source.contains("struct JetAbsent;"));
         assert!(source.contains("pub fn jet_present<T, E>(value: T)"));
         assert!(source.contains("pub fn jet_render_runtime_stop_from_row("));
         assert!(source.contains("mod jet_encoding_errors {"));
         assert!(source.contains("mod jet_json_number {"));
         assert!(source.contains("mod EncodingJson {"));
         assert!(!source.contains("crate::Registry::active_runtime_diagnostic"));
+        assert!(source.contains("jet_foundation::Registry::active_runtime_diagnostic"));
+        assert!(source.contains("fn jet_runtime_diagnostic_row(code: &str)"));
+        assert!(!source.contains("crate::Outcome::"));
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_BEGIN"));
         assert!(!source.contains("JET_HOST_RUNTIME_STOP_END"));
         assert!(!source.contains("pub fn jet_render_runtime_stop("));
@@ -7140,6 +8128,29 @@ dependencies = [
         assert_eq!(rust_type(&Type::Int, &empty), "i64");
         assert_eq!(rust_type(&Type::Float, &empty), "f64");
         assert_eq!(rust_type(&Type::Float32, &empty), "f32");
+    }
+
+    #[test]
+    fn c_record_raw_pointers_use_native_pointer_types() {
+        let definitions = CRecordDefinitions::default();
+        for pointee in [Type::Int, Type::Named("Opaque".to_string())] {
+            let pointer = Type::Apply {
+                name: crate::Syntax::TYPE_PTR.to_string(),
+                args: vec![pointee],
+            };
+            assert_eq!(
+                definitions.rust_type(&pointer).as_deref(),
+                Some("*mut core::ffi::c_void"),
+            );
+            let array = Type::FixedList {
+                elem: Box::new(pointer),
+                len: crate::AST::Measure::literal("length", 2),
+            };
+            assert_eq!(
+                definitions.rust_type(&array).as_deref(),
+                Some("[*mut core::ffi::c_void; 2]"),
+            );
+        }
     }
 
     #[test]

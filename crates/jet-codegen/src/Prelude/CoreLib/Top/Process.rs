@@ -53,6 +53,15 @@ fn jet_process_on_signal(signal: &jet_std::ProcessSignal) {
     }
 }
 
+// Existing shared signal host operation; source computes the mask and formats
+// the deterministic on_signal failure. L7 replacement, dies at cutover.
+fn jet_process_signal_arm_raw(mask: i64) -> Result<(), String> {
+    let _ = jet_scheduler_root_task_control();
+    let callback: std::sync::Arc<dyn Fn() + Send + Sync + 'static> =
+        std::sync::Arc::new(|| jet_scheduler_root_task_control().cancel());
+    jet_process_signal_register(mask as usize, callback)
+}
+
 fn jet_process_spec_timeout(
     mut spec: jet_std::ProcessSpec,
     timeout: &jet_std::Duration,
@@ -291,9 +300,13 @@ fn jet_process_command_builder_with_identity(
     }
     let mut command = std::process::Command::new(executable_identity.unwrap_or(&spec.cmd[0]));
     command.args(&spec.cmd[1..]);
-    if let Some(cwd) = &spec.cwd {
-        command.current_dir(cwd);
+    if !spec.inherited_directories.iter().any(|entry| entry.as_cwd) {
+        if let Some(cwd) = &spec.cwd {
+            command.current_dir(cwd);
+        }
     }
+    jet_std::jet_process_attach_held_directories(&mut command, &spec.inherited_directories)
+        .map_err(|error| jet_std::IOError::other(jet_std::IOOperation::Resolve, spec.cmd.first().cloned(), error))?;
     if spec.env_clear || !spec.env_set.is_empty() || !spec.env_remove.is_empty() {
         let child_env = jet_process_environment(spec)?;
         command.env_clear();
@@ -400,6 +413,40 @@ fn jet_process_sandbox_env(
     Ok(environment)
 }
 
+
+/// The exact wait statuses of the most recently waited children, newest last,
+/// keyed by the receipt's process id. Bounded: the compiler-private
+/// `core.process.jet_process_exit_status_raw` leaf reads a receipt's status right after the
+/// run that produced it, so only recent children are kept.
+static JET_PROCESS_EXIT_STATUSES: std::sync::Mutex<
+    std::collections::VecDeque<(i64, std::process::ExitStatus)>,
+> = std::sync::Mutex::new(std::collections::VecDeque::new());
+const JET_PROCESS_EXIT_STATUS_RECENT: usize = 64;
+
+fn jet_process_record_exit_status(pid: i64, status: std::process::ExitStatus) {
+    let mut recent = JET_PROCESS_EXIT_STATUSES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if recent.len() == JET_PROCESS_EXIT_STATUS_RECENT {
+        recent.pop_front();
+    }
+    recent.push_back((pid, status));
+}
+
+/// `core.process.jet_process_exit_status_raw`: compiler-private raw leaf (one host fact, no
+/// policy). The Rust `ExitStatus` display of the most recently waited child
+/// with process id `pid` (`exit status: N`, or `signal: N (SIGNAME)` with a
+/// ` (core dumped)` suffix), or None when no child with that id was waited.
+pub(crate) fn jet_process_exit_status_raw(pid: i64) -> Option<String> {
+    let recent = JET_PROCESS_EXIT_STATUSES
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    recent
+        .iter()
+        .rev()
+        .find(|(recorded, _)| *recorded == pid)
+        .map(|(_, status)| status.to_string())
+}
 
 fn jet_process_receipt(
     spec: &jet_std::ProcessSpec,
@@ -1224,6 +1271,8 @@ where
     });
     let worker_state = state.clone();
     let worker = std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         jet_process_output_worker(
             reader,
             worker_state,
@@ -1263,6 +1312,8 @@ where
 {
     reader.map(|mut reader| {
         std::thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut bytes = Vec::with_capacity(jet_process_output_buffer_capacity(limit));
                 let mut exceeded = false;
@@ -1670,6 +1721,7 @@ fn jet_process_spec_run_direct(
             .map(i64::from)
             .map(jet_foundation::Numeric::JetInt::from_i64),
     );
+    jet_process_record_exit_status(pid, status);
     let result = jet_process_receipt(
         spec,
         None,
@@ -2184,6 +2236,8 @@ fn jet_process_spec_pipeline(
             let limit_hit = pipeline_limit_hit.clone();
             let cancel = pipeline_cancel.clone();
             forwarders.push(std::thread::spawn(move || {
+                #[cfg(jet_native_pack)]
+                let _jet_thread = crate::JetNativeThreadAttachment::enter();
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     jet_process_forward_pipeline_output(
                         stdout, stdin, limit, budget, limit_hit, cancel.clone(), groups.clone(),
@@ -2833,6 +2887,7 @@ fn jet_process_child_wait(
     );
     #[cfg(not(unix))]
     let signal = Err(JetAbsent);
+    jet_process_record_exit_status(pid, status);
     let result = jet_process_receipt(
         &child.audit_spec,
         child.audit_plan.as_deref(),
@@ -3180,7 +3235,7 @@ fn jet_process_stdin_close(
 #[cfg(unix)]
 fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
-    text: &String,
+    text: &str,
 ) -> Result<(), jet_std::IOError> {
     use std::io::ErrorKind;
     use std::os::fd::AsRawFd;
@@ -3275,7 +3330,7 @@ fn jet_process_stdin_write(
 #[cfg(not(unix))]
 fn jet_process_stdin_write(
     handle: &std::rc::Rc<std::cell::RefCell<Option<jet_std::ProcessStdin>>>,
-    text: &String,
+    text: &str,
 ) -> Result<(), jet_std::IOError> {
     let mut handle = handle.borrow_mut();
     let Some(stdin) = handle.as_mut() else {
@@ -3313,4 +3368,19 @@ fn jet_process_stream_next_line<R: std::io::Read>(
     handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
 ) -> Result<Option<String>, jet_std::IOError> {
     jet_process_child_read_line(&mut handle.borrow_mut())
+}
+
+// Temporary OS shared-pipe buffered read. Shared position/BufReader lifetime
+// are unchanged; source owns EOF, UTF8 and the one-CRLF terminator rule.
+// Replaced by Jet runtime L7, dies at cutover (CoreFiles1-2 ledger).
+fn jet_process_stream_line_bytes_raw<R: std::io::Read>(
+    handle: &std::rc::Rc<std::cell::RefCell<Option<std::io::BufReader<R>>>>,
+) -> Result<Vec<u8>, jet_std::IOError> {
+    let mut held = handle.borrow_mut();
+    let Some(reader) = held.as_mut() else { return Ok(Vec::new()); };
+    let mut bytes = Vec::new();
+    std::io::BufRead::read_until(reader, b'\n', &mut bytes).map_err(|error| jet_std::IOError::other(
+        jet_std::IOOperation::Read, Some("process output".to_string()), error,
+    ))?;
+    Ok(bytes)
 }

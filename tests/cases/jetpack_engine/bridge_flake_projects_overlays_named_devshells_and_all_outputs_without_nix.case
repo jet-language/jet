@@ -1,0 +1,26 @@
+# HAND-PORT tests/jetpack_engine.rs:7107-7192 bridge_flake_projects_overlays_named_devshells_and_all_outputs_without_nix
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: bridge_flake_projects_overlays_named_devshells_and_all_outputs_without_nix.fixture
+env: NO_COLOR=1
+mkdir: project
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 0
+stdout: ~ "packages: [fd]" # original contains predicate
+stderr: ~ "L0204" # original contains predicate
+stderr: ~ "inputsFrom" # original contains predicate
+file: project/.jet/lock ~ "flake-devshell:devShells:x86_64-linux:debug" # original contains predicate
+file: project/.jet/lock ~ "packages=ripgrep;unsupported=inputsFrom,shellHook" # original contains predicate
+file: project/.jet/lock ~ "flake-derivation:packages:x86_64-linux:default" # original contains predicate
+file: project/.jet/lock ~ "drvPath=/nix/store/iqjpmbf780gw1gqzhcvarkhw6h9y4c98-many.drv;dev=/nix/store/0cmdcz6gdcx6k0wf2ir78dh5isib04w3-many-dev;doc=/nix/store/v5m6bfihjhlp2ggsr9zcgw1j4wz1z1az-many-doc;out=/nix/store/3d8xbsqfn74lgzz2x82y3hh8i9mmx7xy-many" # original contains predicate
+copy: project/.jet/lock before.lock
+copy: over-budget.nix project/flake.nix
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 1
+stderr: ~ "E1256" # original contains predicate
+stderr: ~ "overlay list exceeds 64" # original contains predicate
+file: project/.jet/lock == before.lock
+

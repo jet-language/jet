@@ -1,0 +1,394 @@
+// The one `jet.report/v3` machine projection of a diagnostic
+// (crates/jet-foundation/src/Diagnostics.rs `to_report_with_clears`,
+// `report_clear_counts`, `render_all_json`, and Report.rs `ReportPath`,
+// `ReportEnvelope::json`; the `build_error` member is Outcome.rs
+// `JetErrorReport::to_json`), plus the `jet.check/v1` success contract
+// (CmdInspect.rs `check_result_json`). Every `--json` surface that carries
+// diagnostics serializes them here; the status envelope around them is
+// Status.jet.
+use core.files as cli_files
+use jet_foundation.[
+    Diagnostic,
+    DiagnosticBuildError,
+    DiagnosticCause,
+    DiagnosticCryptoMisuseReason,
+    DiagnosticFixSafety,
+    DiagnosticMoment,
+    DiagnosticNoFixReasonKind,
+    DiagnosticOrigin,
+    DiagnosticStructured,
+    DIAGNOSTIC_LINT,
+    TextEdit,
+    diagnostic_column_at,
+    diagnostic_from_registry,
+    diagnostic_line_at,
+]
+
+JET_CLI_REPORT_SCHEMA :: "jet.report/v3"
+
+// `std::env::current_dir`: the base that makes a relative report path
+// absolute. `None` when the process has no readable working directory.
+fn jet_cli_report_cwd() -[FS, Env]> String? Never! {
+    directory :: cli_files.cwd() ?? return None
+    Val(directory)
+}
+
+// Report.rs `ReportPath::from_process`: an empty or synthetic (`<…>`) label
+// stays as written; a disk path becomes absolute against `cwd` and lexically
+// normalized (`.` dropped, `..` pops a component, never above the root). No
+// filesystem lookup is involved, so the path need not exist.
+fn jet_cli_report_path(cwd: String?, value: String) -> String Never! {
+    if value.len() == 0 || value.starts_with("<") -> return value.copy()
+    absolute := value.copy()
+    if !value.starts_with("/") {
+        base :: cwd ?? return value.copy()
+        absolute = "{base}/{value}"
+    }
+    parts := [String]{}
+    loop part in absolute.split("/") {
+        if {
+            part == "" || part == "." -> {}
+            part == ".." -> {
+                if parts.len() > 0 -> _ := &parts.pop()
+            }
+            else -> &parts.push(part)
+        }
+    }
+    "/{parts.join("/")}"
+}
+
+fn jet_cli_report_moment(moment: DiagnosticMoment) -> String Never! {
+    if moment == {
+        .Compile -> "compile"
+        .Run -> "run"
+        .Test -> "test"
+        .Tool -> "tool"
+    }
+}
+
+// Report.rs `FixSafety::as_str`.
+fn jet_cli_report_safety(safety: DiagnosticFixSafety) -> String Never! {
+    if safety == {
+        .Formatting -> "formatting"
+        .BehaviorPreserving -> "behavior-preserving"
+        .APIChanging -> "api-changing"
+        .TargetChanging -> "target-changing"
+        .NeedsReview -> "needs-review"
+    }
+}
+
+// Report.rs `NoFixReasonKind::as_str`.
+fn jet_cli_report_no_fix_kind(kind: DiagnosticNoFixReasonKind) -> String Never! {
+    if kind == {
+        .Behavior -> "behavior"
+        .Design -> "design"
+        .Ambiguous -> "ambiguous"
+    }
+}
+
+// Diagnostics.rs `CryptoMisuseReason::as_str`.
+fn jet_cli_report_crypto_reason(reason: DiagnosticCryptoMisuseReason) -> String Never! {
+    if reason == {
+        .InvalidLength -> "invalid_length"
+        .NonceLength -> "nonce_length"
+        .OutputLength -> "output_length"
+        .SaltLength -> "salt_length"
+        .MemoryCost -> "memory_cost"
+        .IterationCount -> "iteration_count"
+        .LaneCount -> "lane_count"
+        .MemoryTimeCost -> "memory_time_cost"
+        .RawNonce -> "raw_nonce"
+        .RawAlgorithm -> "raw_algorithm"
+        .DeterministicEntropy -> "deterministic_entropy"
+    }
+}
+
+fn jet_cli_report_hex_digit(value: Int) -> String Never! {
+    if value < 10 -> return String.from_bytes([U8{48 + value}]) ?? "0"
+    String.from_bytes([U8{87 + value}]) ?? "0"
+}
+
+// JSON.rs `json_escape` / Outcome.rs `jet_error_json_quote`, quoted: unlike
+// `jet_cli_json_string`, every `char::is_control` scalar (C0, DEL, and the C1
+// block U+0080..U+009F) other than `\n`, `\r`, `\t` becomes `\u00xx`, and
+// backspace and form feed take that form too. The C1 scalars are the UTF-8
+// pairs `C2 80`..`C2 9F`; every other byte run is copied verbatim.
+fn jet_cli_json_control_quote(value: String) -> String Never! {
+    bytes :: value.bytes()
+    out := [U8]{U8{34}}
+    index := 0
+    loop index < bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        escape := if byte == {
+            34 -> "\\\""
+            92 -> "\\\\"
+            10 -> "\\n"
+            13 -> "\\r"
+            9 -> "\\t"
+            else -> ""
+        }
+        width := 1
+        if escape.len() == 0 {
+            if byte < 32 || byte == 127 -> escape = "\\u00{jet_cli_report_hex_digit((byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(byte.bit_and(15))}"
+            if byte == 194 && index + 1 < bytes.len() {
+                next_byte :: Int.from_u8(bytes[index + 1])
+                if next_byte >= 128 && next_byte <= 159 {
+                    escape = "\\u00{jet_cli_report_hex_digit((next_byte >> 4).bit_and(15))}{jet_cli_report_hex_digit(next_byte.bit_and(15))}"
+                    width = 2
+                }
+            }
+        }
+        if escape.len() > 0 {
+            loop escaped in escape.bytes() -> &out.push(escaped)
+        } else {
+            &out.push(bytes[index])
+        }
+        index += width
+    }
+    &out.push(U8{34})
+    String.from_bytes(out) ?? ""
+}
+
+fn jet_cli_report_optional_string(value: String?) -> String Never! {
+    text :: value ?? return "null"
+    jet_cli_json_string(text)
+}
+
+fn jet_cli_report_strings(values: [String]) -> String Never! {
+    rendered :: loop value in values -> jet_cli_json_string(value)
+    "[{rendered.join(",")}]"
+}
+
+fn jet_cli_report_span(start: Int, end: Int) -> String Never! {
+    "{{\"start\":{start},\"end\":{end}}}"
+}
+
+// Outcome.rs `JetErrorReport::to_json`: the `jet.err/v1` object a build error
+// carries. A Jet error frame records no column and the report no separate
+// origin frame (the host codec's projection), so `column` is 0 and `origin`
+// is absent.
+fn jet_cli_build_error_json(report: DiagnosticBuildError) -> String Never! {
+    fields := [String]{
+        "\"schema\":\"jet.err/v1\"",
+        "\"message\":{jet_cli_json_control_quote(report.message)}",
+    }
+    code :: if report.code == {
+        .Val(text) -> jet_cli_json_control_quote(text)
+        else -> "null"
+    }
+    &fields.push("\"code\":{code}")
+    cause :: if report.causes.len() == {
+        0 -> "null"
+        1 -> jet_cli_build_error_json(report.causes[0])
+        else -> {
+            causes :: loop item in report.causes -> jet_cli_build_error_json(item)
+            "[{causes.join(",")}]"
+        }
+    }
+    &fields.push("\"cause\":{cause}")
+    if report.typed_identity == .Val(identity) -> &fields.push("\"typed_identity\":{jet_cli_json_control_quote(identity)}")
+    if report.context_frames.len() > 0 {
+        frames :: loop frame in report.context_frames -> "{{\"text\":{jet_cli_json_control_quote(frame.text)},\"file\":{jet_cli_json_control_quote(frame.file)},\"line\":{frame.line}}}"
+        &fields.push("\"context_frames\":[{frames.join(",")}]")
+    }
+    if report.source_journey.len() > 0 {
+        frames :: loop frame in report.source_journey -> "{{\"fn_name\":{jet_cli_json_control_quote(frame.fn_name)},\"file\":{jet_cli_json_control_quote(frame.file)},\"line\":{frame.line},\"column\":0,\"note\":{jet_cli_json_control_quote(frame.note)},\"hops\":{frame.hops}}}"
+        &fields.push("\"source_journey\":[{frames.join(",")}]")
+    }
+    if report.conversion_history.len() > 0 {
+        conversions :: loop conversion in report.conversion_history -> "{{\"source\":{jet_cli_json_control_quote(conversion.source)},\"target\":{jet_cli_json_control_quote(conversion.target)}}}"
+        &fields.push("\"conversion_history\":[{conversions.join(",")}]")
+    }
+    if report.details == .Val(details) {
+        // JetErrorDetails::to_json: field values are already JSON text.
+        members :: loop field in details.fields -> "{jet_cli_json_control_quote(field.name)}:{field.value}"
+        source_span :: if details.source_span == {
+            .Val(span) -> jet_cli_report_span(span.start, span.end)
+            else -> "null"
+        }
+        &fields.push("\"details\":{{\"variant\":{jet_cli_json_control_quote(details.variant)},\"fields\":{{{members.join(",")}}},\"source_span\":{source_span}}}")
+    }
+    "{{{fields.join(",")}}}"
+}
+
+// Diagnostics.rs `all_edits`: the primary repair, then any source-derived
+// alternatives.
+fn jet_cli_report_edits(diagnostic: Diagnostic) -> [TextEdit] Never! {
+    edits := [TextEdit]{}
+    if diagnostic.edit == .Val(edit) -> &edits.push(edit)
+    if diagnostic.structured == .Val(structured) {
+        if structured == {
+            .SuggestedEdits(alternatives) -> {
+                loop alternative in alternatives -> &edits.push(alternative)
+            }
+            else -> {}
+        }
+    }
+    edits
+}
+
+fn jet_cli_report_same_origin(left: DiagnosticOrigin?, right: DiagnosticOrigin?) -> Bool Never! {
+    first :: left ?? return right == None
+    second :: right ?? return false
+    first.revision == second.revision && first.path == second.path && first.display == second.display && first.source == second.source
+}
+
+// Diagnostics.rs `DiagnosticCause::matches`: a cause names a report by its
+// code, span, and originating snapshot.
+fn jet_cli_report_cause_names(cause: DiagnosticCause, diagnostic: Diagnostic) -> Bool Never! {
+    cause.code == diagnostic.code && cause.span == diagnostic.span && jet_cli_report_same_origin(cause.origin, diagnostic.origin)
+}
+
+// Diagnostics.rs `report_clear_counts`: for each report, how many other
+// reports in the batch name it in their cause chain.
+fn jet_cli_report_clear_counts(diagnostics: [Diagnostic]) -> [Int] Never! {
+    any_cause :: loop diagnostic in diagnostics {
+        if diagnostic.cause.len() > 0 -> break true
+    } ?? false
+    counts := [Int]{}
+    loop (index, diagnostic) in diagnostics {
+        count := 0
+        if any_cause {
+            loop (dependent_index, dependent) in diagnostics {
+                if dependent_index == index -> next
+                named :: loop cause in dependent.cause {
+                    if jet_cli_report_cause_names(cause, diagnostic) -> break true
+                } ?? false
+                if named -> count += 1
+            }
+        }
+        &counts.push(count)
+    }
+    counts
+}
+
+// Diagnostics.rs `to_report_with_clears` + Report.rs `ReportEnvelope::json`:
+// one report object. `file` is the batch's report path (`jet_cli_report_path`)
+// and `source` its bytes; a diagnostic's own origin replaces both. `cwd`
+// makes origin paths absolute the way `ReportPath::from_process` does.
+fn jet_cli_report_json(diagnostic: Diagnostic, cwd: String?, file: String, source: String, clears: Int) -> String Never! {
+    report_file := file.copy()
+    text := source.copy()
+    if diagnostic.origin == .Val(origin) {
+        report_file = jet_cli_report_path(cwd, origin.path)
+        text = origin.source
+    }
+    severity :: if diagnostic.severity == DIAGNOSTIC_LINT -> "warning" else -> "error"
+    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_REPORT_SCHEMA)},\"moment\":{jet_cli_json_string(jet_cli_report_moment(diagnostic.moment))},\"severity\":{jet_cli_json_string(severity)},\"code\":{jet_cli_json_string(diagnostic.code)},\"what\":{jet_cli_json_string(diagnostic.what)},\"why\":{jet_cli_json_string(diagnostic.why)},\"fix\":{jet_cli_json_string(diagnostic.fix)}"
+    if diagnostic.applicability == .Val(applicability) {
+        grade :: if applicability == {
+            .Safe -> "safe"
+            .Suggested -> "suggested"
+        }
+        out = "{out},\"applicability\":{jet_cli_json_string(grade)}"
+    }
+    out = "{out},\"detail\":{jet_cli_report_optional_string(diagnostic.detail)},\"denial_kind\":{jet_cli_report_optional_string(diagnostic.denial_kind)},\"call_chain\":{jet_cli_report_strings(diagnostic.call_chain)},\"scope_chain\":{jet_cli_report_strings(diagnostic.scope_chain)},\"nearest_granting_scope\":{jet_cli_report_optional_string(diagnostic.nearest_granting_scope)}"
+    file_json :: if report_file.len() > 0 -> jet_cli_json_string(report_file) else -> "null"
+    out = "{out},\"file\":{file_json}"
+    if diagnostic.span == .Val(span) {
+        out = "{out},\"line\":{diagnostic_line_at(text, span.start)},\"col\":{diagnostic_column_at(text, span.start)},\"span\":{jet_cli_report_span(span.start, span.end)}"
+    } else {
+        out = "{out},\"line\":null,\"col\":null,\"span\":null"
+    }
+    edits :: jet_cli_report_edits(diagnostic)
+    if edits.len() > 0 {
+        if diagnostic.no_fix_reason != None -> panic("internal compiler error: a report cannot carry fix_edits and no_fix_reason (diagnostic `{diagnostic.code}`)")
+        safety :: diagnostic.safety ?? panic("internal compiler error: diagnostic `{diagnostic.code}` has an edit without a safety grade")
+        grade :: jet_cli_json_string(jet_cli_report_safety(safety))
+        rendered :: loop edit in edits -> "{{\"file\":{jet_cli_json_string(report_file)},\"span\":{jet_cli_report_span(edit.span.start, edit.span.end)},\"new_text\":{jet_cli_json_string(edit.new_text)},\"safety\":{grade}}}"
+        out = "{out},\"fix_edits\":[{rendered.join(",")}]"
+    } else if diagnostic.no_fix_reason == .Val(reason) {
+        out = "{out},\"no_fix_reason\":{{\"kind\":{jet_cli_json_string(jet_cli_report_no_fix_kind(reason.kind))},\"next\":{jet_cli_json_string(reason.next)}}}"
+    } else {
+        out = "{out},\"fix_edits\":[]"
+    }
+    causes :: loop cause in diagnostic.cause -> {
+        cause_file := "null"
+        cause_line := "null"
+        cause_col := "null"
+        if cause.origin == .Val(cause_origin) {
+            path :: jet_cli_report_path(cwd, cause_origin.path)
+            if path.len() > 0 -> cause_file = jet_cli_json_string(path)
+            if cause.span == .Val(cause_span) {
+                cause_line = "{diagnostic_line_at(cause_origin.source, cause_span.start)}"
+                cause_col = "{diagnostic_column_at(cause_origin.source, cause_span.start)}"
+            }
+        }
+        cause_span_json :: if cause.span == {
+            .Val(cause_span) -> jet_cli_report_span(cause_span.start, cause_span.end)
+            else -> "null"
+        }
+        "{{\"code\":{jet_cli_json_string(cause.code)},\"file\":{cause_file},\"line\":{cause_line},\"col\":{cause_col},\"span\":{cause_span_json}}}"
+    }
+    out = "{out},\"cause\":[{causes.join(",")}]"
+    if diagnostic.labels.len() > 0 {
+        labels :: loop label in diagnostic.labels -> "{{\"line\":{diagnostic_line_at(text, label.span.start)},\"col\":{diagnostic_column_at(text, label.span.start)},\"span\":{jet_cli_report_span(label.span.start, label.span.end)},\"message\":{jet_cli_json_string(label.message)}}}"
+        out = "{out},\"labels\":[{labels.join(",")}]"
+    }
+    out = "{out},\"clears\":{clears}"
+    if diagnostic.structured == .Val(structured) {
+        if structured == {
+            .CryptoMisuse(reason, operation, expected, actual) -> {
+                out = "{out},\"reason\":{jet_cli_json_string(jet_cli_report_crypto_reason(reason))},\"operation\":{jet_cli_json_string(operation)}"
+                if expected == .Val(expected_text) -> out = "{out},\"expected\":{jet_cli_json_string(expected_text)}"
+                if actual == .Val(actual_value) -> out = "{out},\"actual\":{actual_value}"
+            }
+            .BuildError(error_report) -> out = "{out},\"build_error\":{jet_cli_build_error_json(error_report)}"
+            else -> {}
+        }
+    }
+    "{out}}}"
+}
+
+// One report object per diagnostic, each with its batch clear count. `file`
+// is the process label the diagnostics were checked under.
+fn jet_cli_reports_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> [String] Never! {
+    report_file :: jet_cli_report_path(cwd, file)
+    clears :: jet_cli_report_clear_counts(diagnostics)
+    reports := [String]{}
+    loop (index, diagnostic) in diagnostics -> &reports.push(jet_cli_report_json(diagnostic, cwd, report_file, source, clears[index]))
+    reports
+}
+
+// Diagnostics.rs `render_all_json`: JSON Lines, one report per line; an empty
+// batch is no bytes.
+fn jet_cli_render_all_json(cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
+    out := ""
+    loop report in jet_cli_reports_json(cwd, file, source, diagnostics) -> out = "{out}{report}\n"
+    out
+}
+
+// The one status line around a batch of reports (main.rs `report_problems`,
+// CmdInspect.rs `render_check_failure`): `action` names the producer and `ok`
+// matches the exit status.
+fn jet_cli_reports_status_json(action: String, ok: Bool, cwd: String?, file: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
+    "{jet_cli_status_render_with_reports(action, ok, jet_cli_reports_json(cwd, file, source, diagnostics), [JetCLIStatusField]{})}\n"
+}
+
+// main.rs `emit_cli_report`: one spanless command diagnostic in the `cli`
+// status envelope, with no file.
+fn jet_cli_report_status_json(diagnostic: Diagnostic) -> String Never! {
+    "{jet_cli_status_render_with_reports("cli", false, [String]{jet_cli_report_json(diagnostic, None, "", "", 0)}, [JetCLIStatusField]{})}\n"
+}
+
+// The `--json` form of a spanless CLI error (Source/main.rs `cli_error!` in
+// machine mode): one failed `cli` status line on stdout.
+fn jet_cli_fail_json(code: String, what: String, why: String, fix: String) -> String Never! {
+    jet_cli_report_status_json(diagnostic_from_registry(code, None, what, why, fix))
+}
+
+// CmdInspect.rs `explicit_file_proof_rows`.
+JET_CLI_CHECK_EXPLICIT_FILE_ROWS :: [[String]]{
+    [String]{"entry resolution", "explicit-file checks resolve only the named source file", "E2389"},
+    [String]{"module graph", "explicit-file checks keep semantic scope and do not promise a project graph", "E2390"},
+    [String]{"Core closure", "explicit-file checks keep semantic scope and do not promise project Core closure", "E2391"},
+    [String]{"tier lowering", "explicit-file checks keep semantic scope and do not promise project tier lowering", "E2392"},
+}
+
+// CmdInspect.rs `check_result_json` for an explicit-file check: the
+// `jet.check/v1` contract a clean `jet check --json <file>` prints. `source`
+// is the entry as the user named it and `diagnostics` the checked count.
+fn jet_cli_check_result_json(source: String, profile: String, diagnostics: Int, elapsed_ms: Int) -> String Never! {
+    rows :: loop row in JET_CLI_CHECK_EXPLICIT_FILE_ROWS -> "{{\"output\":\"not-applicable\",\"name\":{jet_cli_json_control_quote(row[0])},\"status\":\"not applicable\",\"detail\":{jet_cli_json_control_quote(row[1])},\"diagnostic\":{jet_cli_json_control_quote(row[2])}}}"
+    "{{\"status\":\"passed\",\"contract\":\"jet.check/v1\",\"schema_version\":1,\"scope\":\"explicit-file\",\"elapsed_ms\":{elapsed_ms},\"provenance\":{{\"source\":{jet_cli_json_control_quote(source)},\"profile\":{jet_cli_json_control_quote(profile)},\"front_end\":\"Driver::check_file_with_effect_facts_profile\",\"programmable_build\":\"not-selected\",\"diagnostics\":{diagnostics}}},\"rows\":[{rows.join(",")}]}}"
+}

@@ -1,0 +1,37 @@
+enum MetadataType {
+    Named(name: String)
+    Apply(name: String, args: [MetadataType])
+}
+struct DeferredMetadata { key: Int, ty: MetadataType }
+struct MetadataBuilder { deferred: [DeferredMetadata], mutations: Int }
+fn mutate(builder: &MetadataBuilder) Never! {
+    builder.mutations += 1
+}
+fn read_snapshot(builder: &MetadataBuilder) -> MetadataType Never! {
+    loop row_view in builder.deferred {
+        if row_view.key != 7 -> next
+        row := row_view.copy()
+        mutate(&builder)
+        return row.ty
+    }
+    panic("missing deferred metadata")
+}
+fn run() Never! {
+    builder := MetadataBuilder{
+        deferred: [DeferredMetadata]{DeferredMetadata{
+            key: 7,
+            ty: MetadataType.Apply{name: "List", args: [MetadataType]{MetadataType.Named{name: "U8"}}}
+        }},
+        mutations: 0
+    }
+    snapshot := read_snapshot(&builder)
+    assert(builder.mutations == 1)
+    if snapshot == .Apply(name, args) {
+        assert(name == "List")
+        assert(args.len() == 1)
+        if args[0] == .Named(inner) -> assert(inner == "U8")
+        else -> panic("wrong copied metadata argument")
+    } else {
+        panic("wrong copied metadata shape")
+    }
+}

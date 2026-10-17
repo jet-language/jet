@@ -1,0 +1,276 @@
+// Raw nonblocking socket facts. Core owns retries, deadlines, limits and error
+// selection. Every syscall is a single attempt; readiness uses HostNetPoller.
+// FD72 is the sole descriptor/closed owner, including logical network close.
+// Setup calls own 128B scratch; no scratch pointer survives the syscall.
+// No operation yields with a lock or couples networking to the stdout mutex.
+fn net_socket_domain(family: I64) -> I64 {
+    if (family == I64{4}) -> I64{2} else if (family == I64{6}) -> I64{10} else -> family
+}
+fn net_socket_call(state: I64, number: I64, a2: I64, a3: I64, a4: I64, a5: I64, a6: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        #Unsafe("the FD72 lock prevents native descriptor close/reuse throughout this nonblocking syscall") {
+            result = os_syscall_i64(number, fd_word(state, I64{8}), a2, a3, a4, a5, a6)
+        }
+    }
+    fd_unlock(state)
+    result
+}
+#Export(c) fn jet_socket_create_raw(family: I64, kind: I64, protocol: I64, error: I64) -> I64 {
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: host_call(I64{41}, net_socket_domain(family), (kind.bit_and(I64{15})).bit_or(I64{526336}), protocol)
+    _ := fd_error(result, error)
+    if (result < I64{0}) -> I64{0} else -> jet_fd_adopt_unbuffered_raw(result, I64{0})
+}
+fn net_socket_address_call(state: I64, address: I64, number: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
+        length :: jet_socket_address_encode_raw(address, scratch)
+        result = host_call(number, fd_word(state, I64{8}), scratch, length)
+        jet_rt_free(scratch, I64{128}, I64{8})
+    }
+    fd_unlock(state)
+    result
+}
+#Export(c) fn jet_socket_bind_raw(state: I64, address: I64, error: I64) -> I64 {
+    fd_error(net_socket_address_call(state, address, I64{49}), error)
+}
+#Export(c) fn jet_socket_connect_raw(state: I64, address: I64, error: I64) -> I64 {
+    // EINPROGRESS is an errno fact, not a successful connection. Core waits for
+    // writable readiness and reads SO_ERROR before reporting connected.
+    fd_error(net_socket_address_call(state, address, I64{42}), error)
+}
+#Export(c) fn jet_socket_listen_raw(state: I64, backlog: I64, error: I64) -> I64 {
+    fd_error(net_socket_call(state, I64{50}, backlog, I64{0}, I64{0}, I64{0}, I64{0}), error)
+}
+#Export(c) fn jet_socket_accept_raw(state: I64, address_out: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        if (address_out == I64{0}) {
+            #Unsafe("accept4 retains no address pointers and atomically sets CLOEXEC/NONBLOCK on the accepted socket") {
+                result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), I64{0}, I64{0}, I64{526336}, I64{0}, I64{0})
+            }
+        } else {
+            scratch :: jet_rt_alloc(I64{128}, I64{8})
+            size :: wrapping(scratch + I64{32})
+            net_store_uint(size, I64{4}, I64{32})
+            #Unsafe("private scratch lends sockaddr bytes and its exact 4B socklen; accept4 retains neither pointer") {
+                result = os_syscall_i64(I64{288}, fd_word(state, I64{8}), scratch, size, I64{526336}, I64{0}, I64{0})
+            }
+            if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) {
+                _ := host_call(I64{3}, result, I64{0}, I64{0})
+                result = I64{-22}
+            }
+            jet_rt_free(scratch, I64{128}, I64{8})
+        }
+    }
+    fd_unlock(state)
+    _ := fd_error(result, error)
+    if (result < I64{0}) -> I64{0} else -> jet_fd_adopt_unbuffered_raw(result, I64{0})
+}
+#Export(c) fn jet_socket_address_raw(state: I64, peer: Bool, address_out: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
+        size :: wrapping(scratch + I64{32})
+        net_store_uint(size, I64{4}, I64{32})
+        result = host_call(if peer -> I64{52} else -> I64{51}, fd_word(state, I64{8}), scratch, size)
+        if (result >= I64{0} && !net_socket_decode(scratch, net_load_uint(size, I64{4}), address_out)) -> result = I64{-22}
+        jet_rt_free(scratch, I64{128}, I64{8})
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_option_get_raw(state: I64, level: I64, option: I64, value_out: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
+        size :: wrapping(scratch + I64{8})
+        net_store_uint(size, I64{4}, I64{4})
+        #Unsafe("private scratch lends one native int and its 4B socklen; getsockopt retains neither pointer") {
+            result = os_syscall_i64(I64{55}, fd_word(state, I64{8}), level, option, scratch, size, I64{0})
+        }
+        if (result >= I64{0}) -> net_put(value_out, I64{0}, net_load_uint(scratch, I64{4}))
+        jet_rt_free(scratch, I64{128}, I64{8})
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_option_set_raw(state: I64, level: I64, option: I64, value: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
+        net_store_uint(scratch, I64{4}, value)
+        #Unsafe("private scratch lends exactly one native int; setsockopt retains no pointer") {
+            result = os_syscall_i64(I64{54}, fd_word(state, I64{8}), level, option, scratch, I64{4}, I64{0})
+        }
+        jet_rt_free(scratch, I64{128}, I64{8})
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_shutdown_raw(state: I64, how: I64, error: I64) -> I64 {
+    fd_error(net_socket_call(state, I64{48}, how, I64{0}, I64{0}, I64{0}, I64{0}), error)
+}
+#Export(c) fn jet_socket_mark_closed_raw(state: I64) {
+    // Rust network close is logical while the owning socket remains alive.
+    // Last FD72 drop closes its still-owned descriptor, even when closed16=1.
+    fd_lock(state)
+    if (fd_word(state, I64{16}) == I64{0}) {
+        fd_put(state, I64{16}, I64{1})
+        _ := net_fd_closed(state)
+    }
+    fd_unlock(state)
+}
+
+fn net_copy_packed(data: I64, length: I64, output: I64) {
+    at := I64{0}
+    #Unsafe("data lends length native U8 elements; output owns length compact bytes") {
+        loop at < length {
+            os_store_u8(wrapping(output + at), host_u8_get(data, at))
+            at = at + I64{1}
+        }
+    }
+}
+fn net_socket_transfer(state: I64, data: I64, length: I64, reading: Bool, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        temporary :: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
+        packed :: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
+        if (!reading && temporary) -> net_copy_packed(data, length, packed)
+        #Unsafe("the held FD72 lock lends its live nonblocking socket; packed lends exactly length bytes; no pointer survives recvfrom/sendto") {
+            result = os_syscall_i64(if reading -> I64{45} else -> I64{44}, fd_word(state, I64{8}), packed, length, if reading -> I64{0} else -> I64{16384}, I64{0}, I64{0})
+        }
+        if (temporary && reading && result > I64{0}) {
+            at := I64{0}
+            #Unsafe("recvfrom initialized result compact bytes; data owns the corresponding mutable native U8 slots") {
+                loop at < result {
+                    host_u8_put(data, at, os_load_u8(wrapping(packed + at)))
+                    at = at + I64{1}
+                }
+            }
+        }
+        if temporary -> jet_rt_free(packed, length, I64{8})
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_read_raw(state: I64, data: I64, length: I64, error: I64) -> I64 {
+    net_socket_transfer(state, data, length, true, error)
+}
+#Export(c) fn jet_socket_write_raw(state: I64, data: I64, length: I64, error: I64) -> I64 {
+    // std's Unix socket write uses MSG_NOSIGNAL independent of the embedding
+    // host's SIGPIPE disposition. This is not a process-wide signal change.
+    net_socket_transfer(state, data, length, false, error)
+}
+#Export(c) fn jet_socket_send_to_raw(state: I64, data: I64, length: I64, address: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        // Word epoch needs one combined conversion/address allocation. Packed
+        // epoch lends the input directly and owns only the address scratch.
+        size :: if (RT_HOST_U8_STRIDE == I64{1}) -> I64{128} else -> wrapping(I64{128} + length)
+        scratch :: jet_rt_alloc(size, I64{8})
+        packed :: if (RT_HOST_U8_STRIDE == I64{1}) -> data else -> wrapping(scratch + I64{128})
+        if (RT_HOST_U8_STRIDE != I64{1}) -> net_copy_packed(data, length, packed)
+        address_length :: jet_socket_address_encode_raw(address, scratch)
+        #Unsafe("the FD72 lock retains the socket; private scratch lends sockaddr bytes; packed lends length bytes; sendto retains no pointers") {
+            result = os_syscall_i64(I64{44}, fd_word(state, I64{8}), packed, length, I64{16384}, scratch, address_length)
+        }
+        jet_rt_free(scratch, size, I64{8})
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_receive_from_raw(state: I64, data: I64, length: I64, address_out: I64, error: I64) -> I64 {
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        size :: if (RT_HOST_U8_STRIDE == I64{1}) -> I64{128} else -> wrapping(I64{128} + length)
+        scratch :: jet_rt_alloc(size, I64{8})
+        packed :: if (RT_HOST_U8_STRIDE == I64{1}) -> data else -> wrapping(scratch + I64{128})
+        address_length :: wrapping(scratch + I64{32})
+        net_store_uint(address_length, I64{4}, I64{32})
+        #Unsafe("private scratch lends sockaddr/socklen and packed lends length mutable bytes; MSG_TRUNC returns the complete datagram length while writing at most length bytes") {
+            result = os_syscall_i64(I64{45}, fd_word(state, I64{8}), packed, length, I64{32}, scratch, address_length)
+        }
+        if (result >= I64{0}) {
+            if !net_socket_decode(scratch, net_load_uint(address_length, I64{4}), address_out) {
+                result = I64{-22}
+            } else if (RT_HOST_U8_STRIDE != I64{1}) {
+                used :: if (result < length) -> result else -> length
+                at := I64{0}
+                #Unsafe("recvfrom initialized used compact bytes; the caller owns used mutable native U8 elements") {
+                    loop at < used {
+                        host_u8_put(data, at, os_load_u8(wrapping(packed + at)))
+                        at = at + I64{1}
+                    }
+                }
+            }
+        }
+        jet_rt_free(scratch, size, I64{8})
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+
+// Rust 1.90 library/std/src/os/unix/net/addr.rs sockaddr_un:33-45.
+// NUL is checked FIRST, including an overlength path containing NUL. These
+// are logical InvalidInput facts, not counterfeit Linux errno. Core maps the
+// named status to the exact std message and os_code=None.
+HOST_UNIX_PATH_TOO_LONG :: prep { I64{-4097} }
+HOST_UNIX_PATH_NUL :: prep { I64{-4098} }
+fn net_unix_path_status(path: I64) -> I64 {
+    length :: rt_text_len(path)
+    source :: rt_text_data(path)
+    at := I64{0}
+    #Unsafe("path lends its immutable E4 bytes for std-compatible sockaddr_un validation") {
+        loop at < length {
+            if (os_load_u8(wrapping(source + at)) == I64{0}) -> return HOST_UNIX_PATH_NUL
+            at = at + I64{1}
+        }
+    }
+    if (length >= I64{108}) -> HOST_UNIX_PATH_TOO_LONG else -> I64{0}
+}
+fn net_socket_unix_call(state: I64, path: I64, number: I64, error: I64) -> I64 {
+    refusal :: net_unix_path_status(path)
+    if (refusal != I64{0}) {
+        host_error_out(I64{0}, I64{0}, error)
+        return refusal
+    }
+    fd_lock(state)
+    result := I64{-9}
+    if (fd_word(state, I64{16}) == I64{0}) {
+        scratch :: jet_rt_alloc(I64{128}, I64{8})
+        length :: rt_text_len(path)
+        net_store_uint(scratch, I64{2}, I64{1})
+        rt_text_bytes_copy(wrapping(scratch + I64{2}), rt_text_data(path), length)
+        if (length != I64{0}) {
+            #Unsafe("scratch owns the sockaddr_un pathname and its final zero byte") {
+                os_store_u8(wrapping(scratch + I64{2} + length), I64{0})
+            }
+        }
+        // Empty path is addrlen=2, exactly std's SUN_PATH_OFFSET; no invented
+        // pathname, abstract-name policy, unlink or terminator-length change.
+        address_length :: I64{2} + length + (if (length == I64{0}) -> I64{0} else -> I64{1})
+        result = host_call(number, fd_word(state, I64{8}), scratch, address_length)
+        jet_rt_free(scratch, I64{128}, I64{8})
+    }
+    fd_unlock(state)
+    fd_error(result, error)
+}
+#Export(c) fn jet_socket_unix_bind_raw(state: I64, path: I64, error: I64) -> I64 {
+    net_socket_unix_call(state, path, I64{49}, error)
+}
+#Export(c) fn jet_socket_unix_connect_raw(state: I64, path: I64, error: I64) -> I64 {
+    net_socket_unix_call(state, path, I64{42}, error)
+}

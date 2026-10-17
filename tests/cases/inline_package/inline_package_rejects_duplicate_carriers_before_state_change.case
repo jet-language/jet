@@ -1,0 +1,13 @@
+# Port of tests/inline_package.rs:547-563; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_package_rejects_duplicate_carriers_before_state_change
+file: workspace.jet = "module workspace { members: [] }\n"
+step: jet check run.jet --json
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: nonzero
+json: machine doc $.reports[0].code = "E1361"
+file: run.jet = "package { name: \"first\" }\nfn run() {}\npackage { name: \"second\" }\n"

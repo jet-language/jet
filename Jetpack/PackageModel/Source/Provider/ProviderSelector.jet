@@ -7,14 +7,14 @@
 // carrier can report it instead of guessing.
 
 // The selector facts a provider reference may carry after `#`.
-pub struct ProviderSelector {
-    pub raw: String
-    pub version: String
-    pub revision: String
-    pub baseline: String
-    pub features: [String]
-    pub digest: String
-    pub platform: String
+struct ProviderSelector {
+    raw: String
+    version: String
+    revision: String
+    baseline: String
+    features: [String]
+    digest: String
+    platform: String
 
     fn empty(raw: String) -> ProviderSelector Never! {
         ProviderSelector{raw: raw, version: "", revision: "", baseline: "", features: [String]{}, digest: "", platform: ""}
@@ -79,23 +79,23 @@ pub struct ProviderSelector {
     }
 
     // The carrier's `selector` object, fields in schema order.
-    fn to_json_tree(self) -> DataTree Never! {
-        features := [DataTree]{}
-        loop feature in self.features -> &features.push(DataTree.Text(feature))
-        object := [String: DataTree]{}
-        object["raw"] = DataTree.Text(~self.raw)
-        object["version"] = DataTree.Text(~self.version)
-        object["revision"] = DataTree.Text(~self.revision)
-        object["baseline"] = DataTree.Text(~self.baseline)
-        object["features"] = DataTree.Array(features)
-        object["digest"] = DataTree.Text(~self.digest)
-        object["platform"] = DataTree.Text(~self.platform)
-        DataTree.Object(object)
+    fn to_json_tree(self) -> Dyn Never! {
+        features := [Dyn]{}
+        loop feature in self.features -> &features.push(Dyn.Text(feature))
+        object := [String: Dyn]{}
+        object["raw"] = Dyn.Text(self.raw.copy())
+        object["version"] = Dyn.Text(self.version.copy())
+        object["revision"] = Dyn.Text(self.revision.copy())
+        object["baseline"] = Dyn.Text(self.baseline.copy())
+        object["features"] = Dyn.Array(features)
+        object["digest"] = Dyn.Text(self.digest.copy())
+        object["platform"] = Dyn.Text(self.platform.copy())
+        Dyn.Object(object)
     }
 
     // Read the carrier's `selector` object; every field is required.
-    fn from_json_tree(value: DataTree?) -> ProviderSelector ProviderFactsError! {
-        object :: pkg_json_object(value ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `selector` is not an object"})
+    fn from_json_tree(value: Dyn?) -> ProviderSelector ProviderFactsError! {
+        object :: pkg_json_object(value ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `selector` is not an object"})
         raw_features :: object.get("features") ?? return Err(ProviderFactsError{message: "provider selector lacks `features`"})
         feature_values :: pkg_json_array(raw_features) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_ARRAY})
         features := [String]{}
@@ -116,7 +116,7 @@ pub struct ProviderSelector {
 
 // One selector fact key. `rev`, `feature`, `hash`/`sha256`, and `target` are
 // accepted spellings of their canonical keys.
-pub enum ProviderSelectorField {
+enum ProviderSelectorField {
     Version
     Revision
     Baseline
@@ -169,11 +169,11 @@ pub enum ProviderSelectorField {
 }
 
 // A selector with the facts it could not normalize losslessly.
-pub struct ProviderSelectorDetails {
-    pub selector: ProviderSelector
-    pub unknown: [String]
-    pub conflicts: [(key: String, left: String, right: String)]
-    pub duplicates: [String]
+struct ProviderSelectorDetails {
+    selector: ProviderSelector
+    unknown: [String]
+    conflicts: [(key: String, left: String, right: String)]
+    duplicates: [String]
 
     // Facts separate on `&`, and on a `,` that starts another known
     // `key=value` fact; a fact without `=` is a version.

@@ -7,10 +7,10 @@
 // Validate the artifacts behind one directly linked library.
 fn pkg_cffi_validate_link_inputs(lib: String, project_root: String, target: String, flags: LinkFlags, overlay_overrides: [COverlayOverride], entry: String?) CFFIError! -[FS, Env, Exec, Time.Wait]> {
     bindings_root :: files.join(project_root, SOURCE_ROOT_DIR)
-    cpp_prefix :: ForeignLanguage.Cpp.bridge_prefix()
+    cpp_prefix :: (ForeignLanguage.Cpp).bridge_prefix()
     if lib.starts_with(cpp_prefix) {
         actual :: lib.removeprefix(cpp_prefix)
-        directory :: files.join(bindings_root, ForeignLanguage.Cpp.bindings_subdir())
+        directory :: files.join(bindings_root, (ForeignLanguage.Cpp).bindings_subdir())
         archive :: files.join(directory, "lib{lib}.a")
         pkg_cffi_validate_generated_artifact(files.join(directory, "{actual}.provenance"), archive, lib)
         return pkg_cffi_validate_cpp_symbols(actual, lib, archive, target, flags)
@@ -23,9 +23,9 @@ fn pkg_cffi_validate_link_inputs(lib: String, project_root: String, target: Stri
         directory :: files.join(bindings_root, language.bindings_subdir())
         return pkg_cffi_validate_generated_artifact(files.join(directory, "{actual}.provenance"), files.join(directory, "lib{lib}.a"), lib)
     }
-    com_prefix :: ForeignLanguage.Com.bridge_prefix()
+    com_prefix :: (ForeignLanguage.Com).bridge_prefix()
     if lib.starts_with(com_prefix) {
-        directory :: files.join(bindings_root, ForeignLanguage.Com.bindings_subdir())
+        directory :: files.join(bindings_root, (ForeignLanguage.Com).bindings_subdir())
         return pkg_cffi_validate_com_binding(lib.removeprefix(com_prefix), directory, files.join(directory, "lib{lib}.a"))
     }
     pkg_cffi_validate_c_binding(lib, project_root, overlay_overrides, entry)
@@ -151,7 +151,7 @@ fn pkg_cffi_binding_symbols(source: String) -> [String] Never! {
 // A generated C++ archive may only need symbols the local archives of its
 // declared libraries export (C++ runtime and standard-library symbols aside).
 fn pkg_cffi_validate_cpp_symbols(actual: String, lib: String, generated_archive: String, target: String, flags: LinkFlags) CFFIError! -[FS, Env, Exec, Time.Wait]> {
-    generated_name :: "{ForeignLanguage.Cpp.bridge_prefix()}{actual}"
+    generated_name :: "{(ForeignLanguage.Cpp).bridge_prefix()}{actual}"
     libraries := [String]{}
     loop name in flags.link_names {
         bare := name

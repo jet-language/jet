@@ -1,4 +1,4 @@
-use crate::Diagnostics::{Diagnostic, Severity, TextEdit};
+use crate::Diagnostics::{Diagnostic, Severity, Span, TextEdit};
 use crate::Sema::CheckerCoreLib::{
     core_struct_field_type, is_swizzleable_math_type, parse_swizzle_member, swizzle_write_overlaps,
     SwizzleParse,
@@ -79,7 +79,7 @@ fn return_value_fix(want: &Type, got: &Type) -> String {
 fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
-        "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
+        "JSONLReader" | "XMLReader" => Some(Type::Named("Dyn".to_string())),
         "CSVReader" => Some(Type::Named("CSVRow".to_string())),
         _ => None,
     }
@@ -197,6 +197,7 @@ impl<'a> Checker<'a> {
             label: pending_label.or_else(|| label.map(|(name, _)| name.clone())),
             kind,
             ty: None,
+            moved_before: self.flow.moved.clone(),
         });
     }
 
@@ -236,6 +237,11 @@ impl<'a> Checker<'a> {
         after_body: &crate::Sema::FlowFacts::FlowFacts,
         may_skip: bool,
     ) {
+        if after_body.reachable {
+            self.check_loop_move_backedge(self.loop_value_frames.len());
+        }
+        let checked_body = self.flow.clone();
+        let after_body = &checked_body;
         let mut break_paths = self
             .loop_break_flows
             .pop()
@@ -413,8 +419,31 @@ impl<'a> Checker<'a> {
             Expr::Index { base, .. } => match self.compound_expr_type(base)? {
                 Type::List(elem) | Type::FixedList { elem, .. } => Some(*elem),
                 Type::Map { value, .. } => Some(*value),
+                ty if crate::Sema::CheckerCoreLib::is_dyn_type(&ty) => Some(ty),
                 _ => None,
             },
+            _ => None,
+        }
+    }
+
+    fn dyn_write_path(&self, expr: &Expr) -> Option<(Expr, Vec<(Option<String>, Expr)>)> {
+        match expr {
+            Expr::Field(base, field, span)
+                if self.compound_expr_type(base).as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) =>
+            {
+                let (root, mut steps) = self.dyn_write_path(base)?;
+                steps.push((Some(field.clone()), Expr::Str(vec![crate::AST::StrPart::Lit(field.clone())], *span)));
+                Some((root, steps))
+            }
+            Expr::Index { base, index, .. }
+                if self.compound_expr_type(base).as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) =>
+            {
+                let (root, mut steps) = self.dyn_write_path(base)?;
+                steps.push((None, *index.clone()));
+                Some((root, steps))
+            }
+            _ if self.compound_expr_type(expr).as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) =>
+                Some((expr.clone(), Vec::new())),
             _ => None,
         }
     }
@@ -425,7 +454,7 @@ impl<'a> Checker<'a> {
             LValue::Local { name, .. } => {
                 self.lookup(name).map(|info| info.ty.clone()).or_else(|| {
                     self.is_global_mutable_binding(name)
-                        .then(|| self.consts.get(name).cloned())
+                        .then(|| self.const_type(name).cloned())
                         .flatten()
                 })
             }
@@ -439,6 +468,11 @@ impl<'a> Checker<'a> {
     }
 
     fn compound_field_type(&self, base: &Expr, field: &str) -> Option<Type> {
+        if let Some(ty) = self.compound_expr_type(base) {
+            if crate::Sema::CheckerCoreLib::is_dyn_type(&ty) {
+                return Some(ty);
+            }
+        }
         let owner = self.compound_expr_type(base)?;
         self.compound_owner_field_type(&owner, field)
     }
@@ -529,7 +563,14 @@ impl<'a> Checker<'a> {
         calls_start: usize,
         diagnostics_start: usize,
     ) {
-        if matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE) || ty.is_never()
+        // `Never!` retains its Result carrier at a bare statement site.
+        // D-DISCARD1 concerns the success value, not the infallible wrapper.
+        let success = match ty.without_user_tags() {
+            Type::Result { ok, err } if err.is_never() => ok.without_user_tags(),
+            other => other,
+        };
+        if matches!(success, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
+            || success.is_never()
         {
             return;
         }
@@ -694,6 +735,10 @@ impl<'a> Checker<'a> {
         span: &crate::Diagnostics::Span,
         return_type: Option<Type>,
     ) {
+        // An open callback inferring its own failure carrier keeps `ret` for
+        // that carrier; its `return` value meets the callback's expected
+        // success row, which every check below treats as the written return.
+        let return_type = return_type.or_else(|| self.failure_carrier_success.clone());
         // D-ENC-DYN1=A+: the declared return type may be a `Data` alias
         // (`JSON`/`TOML`/…); canonicalize it so it unifies with the returned value.
         let resolved_ret = return_type
@@ -794,18 +839,41 @@ impl<'a> Checker<'a> {
                 // a named `View<T>` return boundary. Keep the source
                 // acquisition explicit before inference so the returned type
                 // remains a view instead of being materialized as a list.
-                let bare_place_return = {
-                    let transparent = e.without_parens();
+                let bare_place = |checker: &Self, value: &Expr| {
+                    let transparent = value.without_parens();
                     matches!(return_value_type, Type::Apply { name, .. } if name == "View")
                         && !string_view_return
                         && !matches!(transparent, Expr::Copy(..) | Expr::Place(..))
-                        && (self.place_from_expr(transparent).is_some()
+                        && (checker.place_from_expr(transparent).is_some()
                             || matches!(transparent, Expr::Slice { .. }))
                 };
-                if bare_place_return {
+                if bare_place(self, e) {
                     let span = e.span();
                     let inner = std::mem::replace(e, Expr::Absent(span));
                     *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+                } else if matches!(&rt, Type::Result { .. }) {
+                    // `Ok(place)` fills the same view success slot. Return the
+                    // window itself; the success lift below re-wraps it in `Ok`
+                    // after its provenance is proved, so the `Ok` payload never
+                    // materializes the view as an owning slot would.
+                    let payload = match e {
+                        Expr::Ok(value, _) => Some(value.as_mut()),
+                        Expr::Call(call)
+                            if call.name == Syntax::LIT_OK
+                                && call.args.len() == 1
+                                && !self.funcs.contains_key(&call.name) =>
+                        {
+                            call.args.first_mut().map(|arg| &mut arg.expr)
+                        }
+                        _ => None,
+                    };
+                    if let Some(value) = payload {
+                        if bare_place(self, value) {
+                            let span = value.span();
+                            let inner = std::mem::replace(value, Expr::Absent(span));
+                            *e = Expr::Place(Box::new(inner), crate::AST::PlaceAccess::Read, span);
+                        }
+                    }
                 }
                 let saved_expected = self.expected_type.clone();
                 // D-FAILURE-FOUNDATION1=A: a direct fallible call in a return
@@ -892,7 +960,19 @@ impl<'a> Checker<'a> {
                 }
                 // D-DYNARRAY1: E2305 — returning a `View<T>` whose owner
                 // list is local to this function would outlive it.
-                if string_view_return {
+                // A failure exit carries no view; only success values need a
+                // stable owner.
+                let failure_exit = matches!(&rt, Type::Result { .. })
+                    && match e.without_parens() {
+                        Expr::Err(..) => true,
+                        Expr::Call(call) => {
+                            call.name == Syntax::LIT_ERR && !self.funcs.contains_key(&call.name)
+                        }
+                        _ => false,
+                    };
+                if failure_exit {
+                    // Nothing to prove for an `Err(..)` exit.
+                } else if string_view_return {
                     if let Expr::Ident(n, nspan) = &*e {
                         if self.is_string_view(n) {
                             self.check_named_string_view_binding_return(n, *nspan);
@@ -920,6 +1000,9 @@ impl<'a> Checker<'a> {
                     if let Expr::Ident(n, nspan) = &*e {
                         if self.is_list_view(n) {
                             self.check_named_view_binding_return(n, *nspan);
+                        } else if let Some((place, access)) = self.declared_view_owner_place(n) {
+                            // A declared view parameter is its own owner path.
+                            self.check_named_view_return(&place, access, Vec::new(), *nspan);
                         } else {
                             self.report_view_return_boundary(e.span());
                         }
@@ -1029,11 +1112,10 @@ impl<'a> Checker<'a> {
                                 "this function has read access only and does not own the value"
                                     .to_string(),
                                 format!(
-                                    "return a copy: `return {}{};` — or take ownership with the move marker `^`: `{}: {}{}`. \
+                                    "return a copy: `return {}` — or take ownership with the move marker `^`: `{}: {}{}`. \
                                      To return borrowed data, declare `-> View<T> from {}` and \
                                      return a view derived from `{}`",
-                                    Syntax::SIGIL_COPY,
-                                    n,
+                                    Syntax::copy_call(n),
                                     n,
                                     Syntax::SIGIL_MOVE,
                                     display_type,
@@ -1187,11 +1269,11 @@ impl<'a> Checker<'a> {
     }
 
     fn check_stmt_inner(&mut self, stmt: &mut Stmt) {
-        // D-CONC-SHARE1=A (card #1561): a plain field write on a
+        // D-CONC-SHARE1=A (card #1561): a projected write through a
         // `Shared<T>` handle is one atomic locked step. Rewrite before the
         // compound-assignment expansion below, so a read-modify-write
         // stays inside one lock and cannot lose an update.
-        if self.desugar_shared_field_write(stmt) {
+        if self.desugar_shared_place_write(stmt) {
             self.check_stmt_inner(stmt);
             return;
         }
@@ -1257,6 +1339,63 @@ impl<'a> Checker<'a> {
                 region.unbounded_control.push(*span);
             }
         }
+        if let Stmt::Assign { target, op: None, value, .. } = stmt {
+            let place = match &*target {
+                LValue::Field { base, field, span } => Some(Expr::Field(base.clone(), field.clone(), *span)),
+                LValue::Index { base, index, span, kind } => Some(Expr::Index {
+                    base: base.clone(), index: index.clone(), span: *span, kind: kind.clone(),
+                }),
+                _ => None,
+            };
+            if let Some(place) = place {
+                if let Some((mut root, steps)) = self.dyn_write_path(&place) {
+                    if !steps.is_empty() {
+                        let span = place.span();
+                        self.check_lvalue_change(target, "be assigned");
+                        if let Some(name) = expr_root_ident(&root) { self.mark_local_write(name); }
+                        let mut args = Vec::with_capacity(steps.len() * 2 + 2);
+                        let saved = self.expected_type.take();
+                        self.borrow_ctx = true;
+                        if self.infer(&mut root).is_none() {
+                            self.expected_type = saved;
+                            return;
+                        }
+                        for (field, mut step) in steps {
+                            if let Some(field) = field {
+                                if crate::Sema::CheckerCoreLib::dyn_member(&field) {
+                                    self.diags.push(Diagnostic::error("E0171",
+                                        format!("`{field}` is a `Dyn` method, not a field"),
+                                        "Dyn member names are reserved for methods".to_string(),
+                                        format!("use indexing, for example `d[\"{field}\"]`"), Some(span)));
+                                    self.expected_type = saved;
+                                    return;
+                                }
+                            }
+                            let Some(ty) = self.infer(&mut step) else {
+                                self.expected_type = saved; return;
+                            };
+                            if ty != Type::String && ty != Type::Int {
+                                self.diags.push(Diagnostic::error("E0505",
+                                    format!("Dyn index must be String or Int, not {}", ty.show()),
+                                    "Dyn indexes object keys and array positions".to_string(),
+                                    "use a String key or an Int index".to_string(), Some(step.span())));
+                                self.expected_type = saved; return;
+                            }
+                            args.push(Expr::Bool(ty == Type::String, span));
+                            args.push(step);
+                        }
+                        let result = self.infer_with_expected(value, &Type::Named("Dyn".to_string()));
+                        self.expected_type = saved;
+                        if result.is_none() { return; }
+                        args.push(std::mem::replace(value, Expr::Absent(span)));
+                        args.push(self.dyn_site(span));
+                        *stmt = Stmt::Expr(crate::Sema::CheckerCoreLib::dyn_call(root,
+                            "__dyn_set_path", args, Type::Named("Unit".to_string()), span));
+                        return;
+                    }
+                }
+            }
+        }
         if let Stmt::Assign {
             target: LValue::Field { base, field, span },
             op: Some(op),
@@ -1315,7 +1454,7 @@ impl<'a> Checker<'a> {
                 .map(|info| info.ty.clone())
                 .or_else(|| {
                     self.is_global_mutable_binding(name)
-                        .then(|| self.consts.get(name).cloned())
+                        .then(|| self.const_type(name).cloned())
                         .flatten()
                 })
                 .and_then(|ty| {
@@ -1464,7 +1603,7 @@ impl<'a> Checker<'a> {
                                 ),
                                 "this function has read access only and does not own the value"
                                     .to_string(),
-                                format!("copy it explicitly with `{}{name}`", Syntax::SIGIL_COPY),
+                                format!("copy it explicitly with `{}`", Syntax::copy_call(name)),
                                 Some(*span),
                             );
                             self.diags.push(self.with_ownership_copy_edit(
@@ -1520,7 +1659,7 @@ impl<'a> Checker<'a> {
                                 // declaration registration.
                                 return;
                             }
-                            if self.consts.contains_key(name.as_str()) {
+                            if self.const_type(name.as_str()).is_some() {
                                 self.diags.push(Diagnostic::error(
                                     "E0111",
                                     format!("`{}` is a const and can never change", name),
@@ -1654,8 +1793,13 @@ impl<'a> Checker<'a> {
                             None
                         };
                         self.borrow_ctx = true;
+                        // The target and its key have no value slot: the
+                        // enclosing arm's Dyn expectation must not convert
+                        // a typed map or a String loop key into Dyn here.
+                        let saved_expected = self.expected_type.take();
                         let base_ty = self.infer(base);
                         let idx_ty = self.infer(index);
+                        self.expected_type = saved_expected;
                         match &base_ty {
                             Some(Type::Map { .. }) => *kind = IndexKind::Map,
                             // S76/D-FIXARR1: `buf[i] = v` on a fixed-size `[T#N]` indexes
@@ -2338,11 +2482,7 @@ impl<'a> Checker<'a> {
                 self.expected_type = saved_expected;
             }
             Stmt::Return(expr, span) => {
-                // D-COPY-DEFAULT1=A: `return` leaves every loop, so its moves
-                // are last uses, not reuses on a later iteration.
-                let saved_exit = self.loop_exit_depth.replace((0, self.loop_depth));
                 self.check_return_expr(expr, span, None);
-                self.loop_exit_depth = saved_exit;
             }
             // D-STREAMYIELD1: `yield expr` — legal only in a function whose return
             // type is `Stream<T>` (E0805 otherwise); `expr: T` (E0807 on mismatch).
@@ -2503,8 +2643,6 @@ impl<'a> Checker<'a> {
                 // zero times, so the facts after the loop join the zero-turn
                 // path with the path one walk of the body left behind.
                 let before_loop = self.flow.clone();
-                self.push_loop_value_frame(label.as_ref());
-                self.push_loop_break_frame();
                 match kind {
                     ForKind::Range {
                         start,
@@ -2564,11 +2702,21 @@ impl<'a> Checker<'a> {
                                 }
                             }
                         }
+                        // D-RANGE-BACKWARD1=A: written ends that count the
+                        // wrong way are a check error; computed ends stay
+                        // empty at run time.
+                        if let Some(diagnostic) =
+                            backward_range_diagnostic(start, end, step.as_ref(), *exclusive, true)
+                        {
+                            self.diags.push(diagnostic);
+                        }
+                        self.push_loop_value_frame(label.as_ref());
+                        self.push_loop_break_frame();
                         self.loop_depth += 1;
                         self.push_scope();
                         let vs = *var_span;
                         let v = var.clone();
-                        if self.lookup(&v).is_some() || self.consts.contains_key(&v) {
+                        if self.lookup(&v).is_some() || self.const_type(&v).is_some() {
                             self.diags.push(already_defined(&v, vs));
                         }
                         self.declare_in_scope(
@@ -2753,6 +2901,8 @@ impl<'a> Checker<'a> {
                             }
                             _ => None,
                         };
+                        self.push_loop_value_frame(label.as_ref());
+                        self.push_loop_break_frame();
                         self.loop_depth += 1;
                         if let Some(n) = driven.clone() {
                             self.iter_borrowed.insert(n);
@@ -2957,9 +3107,9 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                self.pop_loop_value_frame();
                 let after_body = self.flow.clone();
                 self.join_loop_flow(&before_loop, &after_body, true);
+                self.pop_loop_value_frame();
                 if label.is_some() {
                     self.loop_labels.pop();
                 }
@@ -2981,18 +3131,15 @@ impl<'a> Checker<'a> {
                 self.check_break_without_value(None, *span);
             }
             Stmt::BreakValue(value, span) => {
-                // D-COPY-DEFAULT1=A: an unlabeled `break` value leaves the
-                // innermost loop only.
-                let saved_exit = self
-                    .loop_exit_depth
-                    .replace((self.loop_depth.saturating_sub(1), self.loop_depth));
                 self.check_break_value(None, value, *span);
-                self.loop_exit_depth = saved_exit;
             }
             Stmt::Continue(span) => {
                 if self.loop_depth == 0 {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_NEXT, *span));
+                }
+                if self.loop_depth > 0 {
+                    self.check_loop_move_backedge(self.loop_depth);
                 }
             }
             // D-ARROW-CONTROL1: `break(name)` / `next(name)`.
@@ -3009,6 +3156,9 @@ impl<'a> Checker<'a> {
                 } else if !self.loop_labels.iter().any(|l| l == name) {
                     self.diags
                         .push(undefined_loop_label(name, &self.loop_labels, *span));
+                } else if let Some(index) = self.loop_value_frames.iter()
+                    .rposition(|frame| frame.label.as_deref() == Some(name)) {
+                    self.check_loop_move_backedge(index + 1);
                 }
             }
             Stmt::CountedLoop {
@@ -3093,13 +3243,17 @@ impl<'a> Checker<'a> {
             // gate. At runtime (which is what sema is checking here), this block is
             // semantically a plain block: it has no runtime significance. The gate is
             // enforced only inside the comptime interpreter. L3102 fires when no
-            // reason was given.
+            // reason was given; a checked String argument that is not a literal
+            // (`#Impure(reason)`) is a reason.
             Stmt::Impure {
-                reason, body, span, ..
+                reason,
+                reason_expr,
+                body,
+                span,
             } => {
                 let policy_allowed =
                     self.audited_gate_allowed(crate::Policy::PolicyKey::Impure, *span);
-                if reason.is_none() {
+                if reason.is_none() && reason_expr.is_none() {
                     self.diags.push(Diagnostic::lint(
                         "L3102",
                         "this `#Impure` block has no reason".to_string(),
@@ -4158,5 +4312,93 @@ fn expr_place_spell(expr: &Expr) -> Option<String> {
             expr_place_spell(index).unwrap_or_else(|| "…".to_string())
         )),
         _ => None,
+    }
+}
+
+/// D-RANGE-BACKWARD1=A: a number written in the source, with an optional
+/// leading minus. Named constants and computed values are not written ends.
+pub(crate) fn written_range_int(expr: &Expr) -> Option<i64> {
+    match expr {
+        Expr::Int(value, ..) => Some(*value),
+        Expr::Paren(inner, _) => written_range_int(inner),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => written_range_int(inner)?.checked_neg(),
+        _ => None,
+    }
+}
+
+/// D-RANGE-BACKWARD1=A: a range whose written ends and step count in
+/// opposite directions is E0170. A loop range gets a fix edit for its step;
+/// a range value (`step` slot absent, `loop_range` false) is taught to write
+/// its ends in order. Equal ends are an ordinary (possibly empty) range.
+pub(crate) fn backward_range_diagnostic(
+    start: &Expr,
+    end: &Expr,
+    step: Option<&Expr>,
+    exclusive: bool,
+    loop_range: bool,
+) -> Option<Diagnostic> {
+    let s = written_range_int(start)?;
+    let e = written_range_int(end)?;
+    let op = if exclusive { "..<" } else { ".." };
+    let written_step = step.and_then(written_range_int);
+    if s > e {
+        match (step, written_step) {
+            (None, _) if loop_range => Some(
+                Diagnostic::error(
+                    "E0170",
+                    format!("this range counts down from {s} to {e} but has no step"),
+                    format!("a range without a step counts up, so `{s}{op}{e}` would run zero times"),
+                    format!("add the minus step: `{s}{op}{e}, -1`"),
+                    Some(Span::new(start.span().start, end.span().end)),
+                )
+                .with_edit(TextEdit {
+                    span: Span::new(end.span().end, end.span().end),
+                    new_text: ", -1".to_string(),
+                }),
+            ),
+            (None, _) => Some(Diagnostic::error(
+                "E0170",
+                format!("this range counts down from {s} to {e} and holds no numbers"),
+                "a range value always counts up from its start, so a bigger start leaves it empty".to_string(),
+                format!("write the smaller end first, `{e}{op}{s}`; count down in a loop with `{s}{op}{e}, -1`"),
+                Some(Span::new(start.span().start, end.span().end)),
+            )),
+            (Some(step), Some(k)) if k > 0 => Some(
+                Diagnostic::error(
+                    "E0170",
+                    format!("this range counts down from {s} to {e} but its step {k} counts up"),
+                    format!("a positive step moves away from {e}, so the loop would run zero times"),
+                    format!("make the step negative: `{s}{op}{e}, -{k}`"),
+                    Some(step.span()),
+                )
+                .with_edit(TextEdit {
+                    span: step.span(),
+                    new_text: format!("-{k}"),
+                }),
+            ),
+            _ => None,
+        }
+    } else if s < e {
+        let step = step?;
+        let k = written_step?;
+        if k >= 0 {
+            return None;
+        }
+        let up = k.checked_neg()?;
+        Some(
+            Diagnostic::error(
+                "E0170",
+                format!("this range counts up from {s} to {e} but its step {k} counts down"),
+                format!("a negative step moves away from {e}, so the loop would run zero times"),
+                format!("make the step positive: `{s}{op}{e}, {up}`"),
+                Some(step.span()),
+            )
+            .with_edit(TextEdit {
+                span: step.span(),
+                new_text: up.to_string(),
+            }),
+        )
+    } else {
+        None
     }
 }

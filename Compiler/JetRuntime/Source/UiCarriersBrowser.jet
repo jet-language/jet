@@ -1,0 +1,70 @@
+// Browser.rs:92-112 derives Clone/PartialEq, CAbiRoutes.rs:9590-9656.
+// Borrowed E4 text inputs clone; getters own new headers. Rust size/ms are i64
+// raw private words: checked ctor narrowing, fresh exact Int getters only.
+#Export(c) fn jet_rt_record_new_jet_browser_profile(m0: I64, m1: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_BROWSER_PROFILE_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_BROWSER_PROFILE_NAME, jet_rt_string_clone(m0))
+    ui_carrier_store(result + UI_CARRIER_BROWSER_PROFILE_VERSION, jet_rt_string_clone(m1))
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_browser_profile(value: I64) -> I64 {
+    jet_rt_record_new_jet_browser_profile(ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_NAME), ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_VERSION))
+}
+#Export(c) fn jet_rt_handle_drop_jet_browser_profile(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_NAME))
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_VERSION))
+    jet_rt_free(value, UI_CARRIER_BROWSER_PROFILE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_browser_profile(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_PROFILE_NAME), ui_carrier_word(b + UI_CARRIER_BROWSER_PROFILE_NAME)) && jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_PROFILE_VERSION), ui_carrier_word(b + UI_CARRIER_BROWSER_PROFILE_VERSION))
+}
+#Export(c) fn jet_rt_record_get_jet_browser_profile_name(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_NAME)) }
+#Export(c) fn jet_rt_record_get_jet_browser_profile_version(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_PROFILE_VERSION)) }
+
+#Export(c) fn jet_rt_record_new_jet_browser_timeout(m0: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(m0)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ui_carrier_scalar_new(raw)
+}
+#Export(c) fn jet_rt_handle_clone_jet_browser_timeout(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value + UI_CARRIER_BROWSER_TIMEOUT_MS)) }
+#Export(c) fn jet_rt_handle_drop_jet_browser_timeout(value: I64) { ui_carrier_scalar_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_browser_timeout(a: I64, b: I64) -> Bool { ui_carrier_word(a + UI_CARRIER_BROWSER_TIMEOUT_MS) == ui_carrier_word(b + UI_CARRIER_BROWSER_TIMEOUT_MS) }
+#Export(c) fn jet_rt_record_get_jet_browser_timeout_milliseconds(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_CARRIER_BROWSER_TIMEOUT_MS)) }
+
+fn ui_carrier_browser_locked_new(engine: I64, version: I64, binary: I64, protocol: I64, size: I64, hash: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_BROWSER_LOCKED_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_BROWSER_LOCKED_ENGINE, jet_rt_string_clone(engine))
+    ui_carrier_store(result + UI_CARRIER_BROWSER_LOCKED_VERSION, jet_rt_string_clone(version))
+    ui_carrier_store(result + UI_CARRIER_BROWSER_LOCKED_BINARY, jet_rt_string_clone(binary))
+    ui_carrier_store(result + UI_CARRIER_BROWSER_LOCKED_PROTOCOL, jet_rt_string_clone(protocol))
+    ui_carrier_store(result + UI_CARRIER_BROWSER_LOCKED_SIZE, size)
+    ui_carrier_store(result + UI_CARRIER_BROWSER_LOCKED_HASH, jet_rt_string_clone(hash))
+    result
+}
+#Export(c) fn jet_rt_record_new_jet_browser_locked(m0: I64, m1: I64, m2: I64, m3: I64, m4: I64, m5: I64) -> I64 {
+    size :: jet_int_owned_to_i64(m4)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ui_carrier_browser_locked_new(m0, m1, m2, m3, size, m5)
+}
+#Export(c) fn jet_rt_handle_clone_jet_browser_locked(value: I64) -> I64 {
+    ui_carrier_browser_locked_new(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_ENGINE), ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_VERSION), ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_BINARY), ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_PROTOCOL), ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_SIZE), ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_HASH))
+}
+#Export(c) fn jet_rt_handle_drop_jet_browser_locked(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_ENGINE))
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_VERSION))
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_BINARY))
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_PROTOCOL))
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_HASH))
+    jet_rt_free(value, UI_CARRIER_BROWSER_LOCKED_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_browser_locked(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_LOCKED_ENGINE), ui_carrier_word(b + UI_CARRIER_BROWSER_LOCKED_ENGINE)) && jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_LOCKED_VERSION), ui_carrier_word(b + UI_CARRIER_BROWSER_LOCKED_VERSION)) && jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_LOCKED_BINARY), ui_carrier_word(b + UI_CARRIER_BROWSER_LOCKED_BINARY)) && jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_LOCKED_PROTOCOL), ui_carrier_word(b + UI_CARRIER_BROWSER_LOCKED_PROTOCOL)) && ui_carrier_word(a + UI_CARRIER_BROWSER_LOCKED_SIZE) == ui_carrier_word(b + UI_CARRIER_BROWSER_LOCKED_SIZE) && jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_BROWSER_LOCKED_HASH), ui_carrier_word(b + UI_CARRIER_BROWSER_LOCKED_HASH))
+}
+#Export(c) fn jet_rt_record_get_jet_browser_locked_engine(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_ENGINE)) }
+#Export(c) fn jet_rt_record_get_jet_browser_locked_version(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_VERSION)) }
+#Export(c) fn jet_rt_record_get_jet_browser_locked_binary(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_BINARY)) }
+#Export(c) fn jet_rt_record_get_jet_browser_locked_protocol(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_PROTOCOL)) }
+#Export(c) fn jet_rt_record_get_jet_browser_locked_size(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_SIZE)) }
+#Export(c) fn jet_rt_record_get_jet_browser_locked_output_hash(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_BROWSER_LOCKED_HASH)) }

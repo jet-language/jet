@@ -25,11 +25,11 @@ PROVIDER_DENY_NETWORK_ENV :: prep { "JETPACK_DENY_NETWORK" }
 // The one hardened Git subprocess policy: its fixed working directory, the
 // environment it sets, the ambient variables it removes, and the leading
 // configuration arguments. No caller can create a weaker policy.
-pub struct HardenedGitPolicy {
-    pub cwd: String
-    pub env: [String: String]
-    pub removed_env: [String]
-    pub args: [String]
+struct HardenedGitPolicy {
+    cwd: String
+    env: [String: String]
+    removed_env: [String]
+    args: [String]
 
     fn current() -[Env]> HardenedGitPolicy Never! {
         null_device :: provider_git_null_device()
@@ -60,12 +60,12 @@ pub struct HardenedGitPolicy {
 }
 
 // The hardened Git command every provider and Source Fetch operation runs.
-pub fn provider_hardened_git_command() -[Env, Exec]> ProcessSpec Never! {
+fn provider_hardened_git_command() -[Env, Exec]> ProcessSpec Never! {
     HardenedGitPolicy.current().spec()
 }
 
 // The non-interactive SSH policy shared by every hardened Git command.
-pub fn provider_hardened_ssh_command() -[Env]> String Never! {
+fn provider_hardened_ssh_command() -[Env]> String Never! {
     if sys.is_windows() -> return "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F NUL"
     "ssh -oBatchMode=yes -oIdentitiesOnly=yes -oIdentityAgent=none -oIdentityFile=none -F /dev/null"
 }
@@ -88,22 +88,29 @@ fn provider_git_available() -[Env, Exec, Time.Wait]> Bool Never! {
 
 // Create a CSPRNG-named directory under `parent` without deleting or reusing a
 // collision. The caller owns cleanup (`provider_remove_tree_quiet(dir)`).
-pub fn provider_exclusive_temp_dir(parent: String, prefix: String) -[FS, Rand]> String IOError! {
+fn provider_exclusive_temp_dir(parent: String, prefix: String) -[FS, Rand]> String IOError! {
     if prefix == "" || prefix == "." || prefix == ".." || pkg_text_has_control(prefix) || prefix.contains("/") || prefix.contains("\\") {
         return Err(provider_io_error_invalid(prefix, "temporary-directory prefix must be one safe path component"))
     }
     files.create_dir_all(parent)
+    directory :: files.open_directory(parent)
     loop _ in 0..<16 {
         bytes :: random.bytes(16) ?? return Err(provider_io_error_other(parent, "operating-system randomness is unavailable"))
-        candidate :: files.join(parent, "{prefix}-{pkg_hex_bytes(bytes)}")
-        if files.create_dir(candidate) == {
-            .Ok(_) -> return Ok(candidate)
+        name :: "{prefix}-{pkg_hex_bytes(bytes)}"
+        if provider_create_temp_candidate(directory, name) == {
+            .Ok(_) -> return Ok(files.join(parent, name))
             .Err(error) -> {
                 if !store_io_is_already_exists(error) -> return Err(error)
             }
         }
     }
     Err(provider_io_error_exists(parent, "could not allocate an exclusive temporary directory"))
+}
+
+// Exclusive mkdirat on the held parent, not the idempotent whole-path helper.
+// AlreadyExists belongs to the naming loop; a collision is never reused.
+fn provider_create_temp_candidate(parent: Directory, name: String) IOError! -[FS]> {
+    _ :: parent.create_directory(name)
 }
 
 // Best-effort removal of a temporary tree (Rust `TempDirGuard` drop).
@@ -124,10 +131,10 @@ fn provider_io_error_other(path: String, message: String) -> IOError Never! {
 }
 
 // `JETPACK_DENY_NETWORK` set to any non-empty value forbids every fetch.
-pub fn provider_network_denied() -[Env]> Bool Never! {
+fn provider_network_denied() -[Env]> Bool Never! {
     (sys.get(PROVIDER_DENY_NETWORK_ENV) ?? "") != ""
 }
 
-pub fn provider_ensure_network_allowed(need: String) ProviderError! -[Env]> {
+fn provider_ensure_network_allowed(need: String) ProviderError! -[Env]> {
     if provider_network_denied() -> return Err(ProviderError.Offline("network disabled by {PROVIDER_DENY_NETWORK_ENV} while trying to {need}"))
 }

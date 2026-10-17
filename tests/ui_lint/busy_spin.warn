@@ -1,5 +1,5 @@
 Warning [L0207] (shared_busy_wait): This unbounded loop polls `Shared` state without waiting
-  --> busy_spin.jet:6:15
+  --> tests/ui_lint/busy_spin.jet:6:15
     |
   6 |     loop flag.ready == false {}
     |               ^^^^^^^^^^^^^^
@@ -8,7 +8,7 @@ Warning [L0207] (shared_busy_wait): This unbounded loop polls `Shared` state wit
 More: jet-lang.dev/e/L0207
 
 Warning [L0528] (mutable_never_reassigned): This mutable binding receives no later write, so its mutability is unused
-  --> busy_spin.jet:45:5
+  --> tests/ui_lint/busy_spin.jet:45:5
     |
  45 |     flag := shared Flag{ ready: true, ticks: 0 }
     |     ^^^^
@@ -17,10 +17,13 @@ Warning [L0528] (mutable_never_reassigned): This mutable binding receives no lat
 More: jet-lang.dev/e/L0528
 
 Warning [L0528] (mutable_never_reassigned): This mutable binding receives no later write, so its mutability is unused
-  --> busy_spin.jet:46:5
+  --> tests/ui_lint/busy_spin.jet:46:5
     |
  46 |     changed := Condition.new()
     |     ^^^^^^^
  Why: The binding is marked mutable but receives no later write.
  Fix: Declare it with `::` instead of `:=`
 More: jet-lang.dev/e/L0528
+
+ok: `tests/ui_lint/busy_spin.jet` has no errors (3 warnings)
+run `jet explain L0207` to learn more

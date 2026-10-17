@@ -1,0 +1,20 @@
+# HAND-PORT tests/web_build.rs:4871-4942 web_wasm_fixed_int_list_rejects_forged_ownership
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original ABI hostility harnesses copied verbatim, including all ownership/trap/parser/bounds/free/BigInt assertions; original stdout and every JS/runtime marker retained; Rust text-only scans retire.
+requires: tool:node
+fixture: web_wasm_fixed_int_list_rejects_forged_ownership.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_wasm_fixed_int_list_rejects_forged_ownership.stdout.expected
+copy: hostile0.mjs .jet/build/hostile0.mjs
+step: node hostile0.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_wasm_fixed_int_list_rejects_forged_ownership.hostile0.expected

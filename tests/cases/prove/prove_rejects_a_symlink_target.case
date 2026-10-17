@@ -1,0 +1,8 @@
+# Port of tests/prove.rs:749-763. Every original predicate retained; original fixture bytes copied from Rust literals.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: prove_rejects_a_symlink_target.fixture
+requires: os:unix
+symlink: "{work}/real.jet" link.jet
+step: jet prove link.jet
+exit: 1
+stderr: ~ "must not be a symlink" # original predicate

@@ -1,7 +1,7 @@
 // Expression and call AST. Recursive expression types and semantic type
 // annotations are shared across compiler phases; `Type` is JetFoundation's.
 
-pub enum Expr {
+enum Expr {
     Str(parts: [StrPart], span: Span)
     StrMatchLit(parts: [StrMatchPart], span: Span)
     BinMatchLit(parts: [BinMatchPart], span: Span)
@@ -29,7 +29,7 @@ pub enum Expr {
     Place(value: Expr, access: PlaceAccess, span: Span)
     Field(base: Expr, member: String, span: Span)
     OptField(base: Expr, member: String, member_span: Span, flatten: Bool, span: Span)
-    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?, operator_rhs: Type?, checked_widen: Bool)
+    MethodCall(receiver: Expr, method: String, method_span: Span, owner_type_args: [Type], type_args: [Type], args: [CallArg], recv_type: String?, resolved_ret: Type?, operator_rhs: Type?, checked_widen: Bool, checked_callee: String?)
     OptMethodCall(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg], span: Span)
     StructLit(type_name: String, type_args: [Type], import_ns: String?, as_trait: String?, fields: [ExprField], inferred: Bool, span: Span)
     TypedLit(head: Type?, body: TypedLitBody, span: Span)
@@ -54,96 +54,96 @@ pub enum Expr {
     Paren(value: Expr, span: Span)
 }
 
-pub struct IntegerWidth {
-    pub signed: Bool
-    pub bits: Int
+struct IntegerWidth {
+    signed: Bool
+    bits: Int
 }
 
-pub struct ExprField {
-    pub name: String
-    pub name_span: Span
-    pub value: Expr
+struct ExprField {
+    name: String
+    name_span: Span
+    value: Expr
 }
 
-pub struct ExprMember {
-    pub name: String
-    pub span: Span
+struct ExprMember {
+    name: String
+    span: Span
 }
 
-pub struct ExprPair {
-    pub key: Expr
-    pub value: Expr
+struct ExprPair {
+    key: Expr
+    value: Expr
 }
 
-pub struct TupleField {
-    pub name: String
-    pub value: Expr
+struct TupleField {
+    name: String
+    value: Expr
 }
 
-pub enum EnumLitArg {
+enum EnumLitArg {
     Positional(value: Expr)
     Named(label: String, expr: Expr)
 }
 
-pub struct Call {
-    pub name: String
-    pub name_span: Span
-    pub type_args: [Type]
-    pub args: [CallArg]
-    pub resolved_ret: Type?
-    pub range_checked: Bool
-    pub widen_approx: Bool
+struct Call {
+    name: String
+    name_span: Span
+    type_args: [Type]
+    args: [CallArg]
+    resolved_ret: Type?
+    range_checked: Bool
+    widen_approx: Bool
 }
 
-pub struct CallArg {
-    pub convention: AccessConvention
-    pub expr: Expr
-    pub span: Span
-    pub flags: CallArgFlags
-    pub label: CallLabel?
-    pub spread: Bool
+struct CallArg {
+    convention: AccessConvention
+    expr: Expr
+    span: Span
+    flags: CallArgFlags
+    label: CallLabel?
+    spread: Bool
 }
 
-pub struct CallLabel {
-    pub name: String
-    pub span: Span
+struct CallLabel {
+    name: String
+    span: Span
 }
 
-pub struct CallArgFlags {
-    pub implicit_clone: Bool
-    pub shared_auto_clone: Bool
-    pub owned_last_use: Bool
-    pub shared_access_desugar: Bool
-    pub is_trailing_block: Bool
-    pub template_items: [DeriveBodyItem]?
-    pub c_callback_symbol: Bool
-    pub c_callback_function_key: String?
-    pub c_callback_managed: Bool
-    pub c_callback_plan_digest: String?
-    pub c_callback_identity: String?
-    pub trusted_html: Bool
-    pub source_index: Int?
-    pub binder_slot: Int?
-    pub binder_label: String?
-    pub binder_refs: [BinderRef]
-    pub binder_site: Int?
-    pub callable_policy: CallablePolicyChain?
-    pub authority_boundary: Bool
-    pub arithmetic_policy: ArithmeticPolicyFact?
+struct CallArgFlags {
+    implicit_clone: Bool
+    shared_auto_clone: Bool
+    owned_last_use: Bool
+    shared_access_desugar: Bool
+    is_trailing_block: Bool
+    template_items: [DeriveBodyItem]?
+    c_callback_symbol: Bool
+    c_callback_function_key: String?
+    c_callback_managed: Bool
+    c_callback_plan_digest: String?
+    c_callback_identity: String?
+    trusted_html: Bool
+    source_index: Int?
+    binder_slot: Int?
+    binder_label: String?
+    binder_refs: [BinderRef]
+    binder_site: Int?
+    callable_policy: CallablePolicyChain?
+    authority_boundary: Bool
+    arithmetic_policy: ArithmeticPolicyFact?
 }
 
-pub struct BinderRef {
-    pub name: String
-    pub slot: Int
-    pub ty: Type
+struct BinderRef {
+    name: String
+    slot: Int
+    ty: Type
 }
 
-pub enum MarkerCallArg {
+enum MarkerCallArg {
     Expr(value: Expr)
     EffectRow(effects: [EffectRowEntry], span: Span)
 }
 
-pub enum BinOp {
+enum BinOp {
     Add
     Sub
     Mul
@@ -168,12 +168,12 @@ pub enum BinOp {
     Or
 }
 
-pub enum UnOp {
+enum UnOp {
     Neg
     Not
 }
 
-pub enum IndexKind {
+enum IndexKind {
     Unknown
     List
     Range
@@ -187,13 +187,13 @@ pub enum IndexKind {
 
 // D-CAP-RECEIVER1=D: `Take` is the `^` mark on the place a method call
 // consumes (`^buf.seal()`); sema checks it and lowers the unmarked call.
-pub enum PlaceAccess {
+enum PlaceAccess {
     Read
     Write
     Take
 }
 
-pub enum TryConvert {
+enum TryConvert {
     NoConversion
     Never
     DefaultErr
@@ -201,12 +201,12 @@ pub enum TryConvert {
     WidenUnion(enum_name: String, tag: String)
 }
 
-pub enum StrPart {
+enum StrPart {
     Lit(text: String)
     Interp(expr: Expr, format: StrFormat)
     Byte(value: U8)
 }
-pub fn ast_empty_call_arg_flags() -> CallArgFlags Never! {
+fn ast_empty_call_arg_flags() -> CallArgFlags Never! {
     CallArgFlags{
         implicit_clone: false,
         shared_auto_clone: false,
@@ -231,7 +231,7 @@ pub fn ast_empty_call_arg_flags() -> CallArgFlags Never! {
     }
 }
 
-pub fn ast_empty_lambda_meta() -> LambdaMeta Never! {
+fn ast_empty_lambda_meta() -> LambdaMeta Never! {
     LambdaMeta{
         escapes: false,
         runtime_erased: false,
@@ -265,7 +265,7 @@ pub fn ast_empty_lambda_meta() -> LambdaMeta Never! {
     }
 }
 
-pub enum StrFormat {
+enum StrFormat {
     Display
     Debug
     Pretty
@@ -281,71 +281,72 @@ pub enum StrFormat {
     Unit(format: UnitFormat)
 }
 
-pub enum UnitFormat {
+enum UnitFormat {
     Symbol
     Name
     Bare
 }
 
-pub struct LambdaParam {
-    pub name: String
-    pub name_span: Span
-    pub ty: Type?
-    pub ty_span: Span?
+struct LambdaParam {
+    name: String
+    name_span: Span
+    ty: Type?
+    ty_span: Span?
 }
 
-pub enum LambdaBody {
+enum LambdaBody {
     Expr(value: Expr)
     Block(body: [Stmt])
 }
 
-pub struct Lambda {
-    pub take_names: [NamedSpan]
-    pub params: [LambdaParam]
-    pub effects: [EffectRowEntry]?
-    pub body: LambdaBody
-    pub span: Span
-    pub meta: LambdaMeta
+struct Lambda {
+    take_names: [NamedSpan]
+    params: [LambdaParam]
+    effects: [EffectRowEntry]?
+    body: LambdaBody
+    span: Span
+    meta: LambdaMeta
 }
 
-pub struct NamedSpan {
-    pub name: String
-    pub span: Span
+struct NamedSpan {
+    name: String
+    span: Span
 }
 
-pub struct LambdaMeta {
-    pub escapes: Bool
-    pub runtime_erased: Bool
-    pub needs_fn_mut: Bool
-    pub mut_captures: [String]
-    pub cloned_captures: [String]
-    pub effect_direct: [String]
-    pub effect_solved: [String]
-    pub effect_call_edges: [String]
-    pub effect_maximal: Bool
-    pub effect_direct_spans: [EffectRowEntry]
-    pub frozen_captures: [String]
-    pub materialized_captures: [String]
-    pub moved_captures: [String]
-    pub collecting_loop: Bool
-    pub collect_item_type: Type?
-    pub result_loop: Bool
-    pub requires_exhaustion_route: Bool
-    pub exhaustion_span: Span?
-    pub exhaustion_route_attached: Bool
-    pub loop_result_type: Type?
-    pub loop_label: NamedSpan?
-    pub guard_projection: [String]?
-    pub return_view_provenance: ViewProvenanceMap?
-    pub cell_projection_path: [String]?
-    pub fallible_propagation: Bool
-    pub fallible_carrier: Type?
-    pub frame_schedule_explanation: String?
-    pub frame_schedule: FrameSchedule?
-    pub frame_schedule_derivation: DerivationRef?
+struct LambdaMeta {
+    escapes: Bool
+    runtime_erased: Bool
+    http_route_source: String?{None}
+    needs_fn_mut: Bool
+    mut_captures: [String]
+    cloned_captures: [String]
+    effect_direct: [String]
+    effect_solved: [String]
+    effect_call_edges: [String]
+    effect_maximal: Bool
+    effect_direct_spans: [EffectRowEntry]
+    frozen_captures: [String]
+    materialized_captures: [String]
+    moved_captures: [String]
+    collecting_loop: Bool
+    collect_item_type: Type?
+    result_loop: Bool
+    requires_exhaustion_route: Bool
+    exhaustion_span: Span?
+    exhaustion_route_attached: Bool
+    loop_result_type: Type?
+    loop_label: NamedSpan?
+    guard_projection: [String]?
+    return_view_provenance: ViewProvenanceMap?
+    cell_projection_path: [String]?
+    fallible_propagation: Bool
+    fallible_carrier: Type?
+    frame_schedule_explanation: String?
+    frame_schedule: FrameSchedule?
+    frame_schedule_derivation: DerivationRef?
 }
 
-pub enum TypedLitBody {
+enum TypedLitBody {
     Fields(fields: [ExprField])
     Elements(elements: [Expr])
     Entries(entries: [ExprPair])
@@ -354,25 +355,25 @@ pub enum TypedLitBody {
     Empty
 }
 
-pub enum ByteTextPart {
+enum ByteTextPart {
     Lit(text: String)
     Byte(value: U8)
 }
 
-pub struct ArithmeticPolicyFact {
-    pub mode: ArithmeticMode
-    pub scope_span: Span
-    pub operation_span: Span
-    pub operation: ArithmeticOperation?
+struct ArithmeticPolicyFact {
+    mode: ArithmeticMode
+    scope_span: Span
+    operation_span: Span
+    operation: ArithmeticOperation?
 }
 
-pub enum ArithmeticMode {
+enum ArithmeticMode {
     Checked
     Wrapping
     Saturating
 }
 
-pub enum ArithmeticOperation {
+enum ArithmeticOperation {
     Add
     Sub
     Mul
@@ -380,104 +381,104 @@ pub enum ArithmeticOperation {
     Pow
 }
 
-pub struct FrameSchedule {
-    pub operations: [FrameOperation]
-    pub dependencies: [FrameDependency]
-    pub transfers: [FrameTransfer]
-    pub reuse: [FrameReuse]
-    pub retentions: [FrameRetention]
-    pub conservative: [String]
+struct FrameSchedule {
+    operations: [FrameOperation]
+    dependencies: [FrameDependency]
+    transfers: [FrameTransfer]
+    reuse: [FrameReuse]
+    retentions: [FrameRetention]
+    conservative: [String]
 }
 
-pub struct FrameOperation {
-    pub name: String
-    pub source_index: Int
-    pub accesses: [ResourceAccess]
-    pub completion: FrameCompletion
-    pub completion_provider: String?
-    pub external_effect: Bool
+struct FrameOperation {
+    name: String
+    source_index: Int
+    accesses: [ResourceAccess]
+    completion: FrameCompletion
+    completion_provider: String?
+    external_effect: Bool
 }
 
-pub struct ResourceAccess {
-    pub resource: ResourceIdentity
-    pub mode: ResourceAccessMode
-    pub region: ResourceRegion
-    pub layout: ResourceLayout?
-    pub temporary: Bool
+struct ResourceAccess {
+    resource: ResourceIdentity
+    mode: ResourceAccessMode
+    region: ResourceRegion
+    layout: ResourceLayout?
+    temporary: Bool
 }
 
-pub enum ResourceIdentity {
+enum ResourceIdentity {
     Named(name: String)
     Unknown
 }
 
-pub enum ResourceAccessMode {
+enum ResourceAccessMode {
     Read
     Write
     Move
 }
 
-pub enum ResourceRegion {
+enum ResourceRegion {
     Whole
     Bytes(start: Int, length: Int)
     Unknown
 }
 
-pub struct ResourceLayout {
-    pub size: Int
-    pub align: Int
-    pub layout: String
-    pub device: String
+struct ResourceLayout {
+    size: Int
+    align: Int
+    layout: String
+    device: String
 }
 
-pub enum FrameCompletion {
+enum FrameCompletion {
     Synchronous
     Pending(token: String)
     Event(token: String)
 }
 
-pub struct FrameDependency {
-    pub before: Int
-    pub after: Int
-    pub resource: String
-    pub reason: String
+struct FrameDependency {
+    before: Int
+    after: Int
+    resource: String
+    reason: String
 }
 
-pub struct FrameTransfer {
-    pub before: Int
-    pub after: Int
-    pub resource: String
-    pub from_device: String
-    pub to_device: String
+struct FrameTransfer {
+    before: Int
+    after: Int
+    resource: String
+    from_device: String
+    to_device: String
 }
 
-pub struct FrameReuse {
-    pub previous_resource: String
-    pub next_resource: String
-    pub previous_last_use: Int
-    pub next_first_use: Int
-    pub legal: Bool
-    pub reason: String
+struct FrameReuse {
+    previous_resource: String
+    next_resource: String
+    previous_last_use: Int
+    next_first_use: Int
+    legal: Bool
+    reason: String
 }
 
-pub struct FrameRetention {
-    pub resource: String
-    pub operation: Int
-    pub owner: String
-    pub completion_token: String?
-    pub completed: Bool
+struct FrameRetention {
+    resource: String
+    operation: Int
+    owner: String
+    completion_token: String?
+    completed: Bool
 }
 
-pub struct DerivationRef {
-    pub id: String
+struct DerivationRef {
+    id: String
 }
 // S71 / D-SUGAR6: the ordinary call that `receiver?.method(args)` runs on the
 // present payload. Syntax walkers reuse their `MethodCall` facts through it.
-pub fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
-    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false}
+fn expr_optional_method_call_as_call(receiver: Expr, method: String, method_span: Span, type_args: [Type], args: [CallArg]) -> Expr Never! {
+    Expr.MethodCall{receiver: receiver, method: method, method_span: method_span, owner_type_args: [Type]{}, type_args: type_args, args: args, recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false, checked_callee: None}
 }
 
-pub fn expr_span(expr: Expr) -> Span {
+fn expr_span(expr: Expr) -> Span {
     if expr == {
         .Str(_, span) -> return span
         .StrMatchLit(_, span) -> return span
@@ -506,7 +507,7 @@ pub fn expr_span(expr: Expr) -> Span {
         .Place(_, _, span) -> return span
         .Field(_, _, span) -> return span
         .OptField(_, _, _, _, span) -> return span
-        .MethodCall(_, _, method_span, _, _, _, _, _, _, _) -> return method_span
+        .MethodCall(_, _, method_span, _, _, _, _, _, _, _, _) -> return method_span
         .OptMethodCall(_, _, method_span, _, _, _) -> return method_span
         .StructLit(_, _, _, _, _, _, span) -> return span
         .TypedLit(_, _, span) -> return span

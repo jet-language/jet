@@ -119,6 +119,137 @@ pub(super) fn inject_units_prelude(bundle: &mut ProgramBundle) -> Vec<Diagnostic
     diagnostics
 }
 
+/// #4745: a parameter default belongs to its declaring module. The binder
+/// copies a default into each caller, so a canonical Time suffix (`0ms`) is
+/// resolved here, against the declaring module's injected catalog, to the
+/// same checked Duration constructor sema elaborates for a written literal.
+/// A caller then needs no unit in scope, and its own `ms` cannot rebind it.
+pub(super) fn resolve_default_time_literals(bundle: &mut ProgramBundle) {
+    for module in &mut bundle.modules {
+        let canonical = module
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::UnitFamily(family) if family.is_canonical_time() => Some(family),
+                _ => None,
+            })
+            .flat_map(|family| {
+                family.members.iter().filter_map(|member| {
+                    let scale = member.scale.num.to_string().parse::<i64>().ok()?;
+                    Some((member.name.clone(), scale))
+                })
+            })
+            .collect::<HashMap<_, _>>();
+        if canonical.is_empty() {
+            continue;
+        }
+        let resolve = |params: &mut [crate::AST::Param]| {
+            for param in params {
+                let Some(default) = param.default.as_deref_mut() else {
+                    continue;
+                };
+                default.for_each_expr_mut(|node| {
+                    let crate::AST::Expr::UnitLit {
+                        int,
+                        float,
+                        suffix,
+                        suffix_span,
+                        span,
+                        ..
+                    } = node
+                    else {
+                        return;
+                    };
+                    let Some(scale) = canonical.get(suffix.as_str()) else {
+                        return;
+                    };
+                    *node = canonical_time_literal(*int, *float, *scale, *span, *suffix_span);
+                });
+            }
+        };
+        for item in &mut module.items {
+            match item {
+                Item::Func(function) => resolve(&mut function.params),
+                Item::Impl(implementation) => {
+                    for method in &mut implementation.methods {
+                        resolve(&mut method.params);
+                    }
+                }
+                Item::Struct(definition) => {
+                    for method in &mut definition.methods {
+                        resolve(&mut method.params);
+                    }
+                }
+                Item::Enum(definition) => {
+                    for method in &mut definition.methods {
+                        resolve(&mut method.params);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+}
+
+/// D-TYPE2-TIME1: the checked elaboration of a canonical Time literal,
+/// `Duration.nanoseconds(value * scale) ?? panic(...)`.
+pub(crate) fn canonical_time_literal(
+    int: Option<i64>,
+    float: Option<f64>,
+    scale: i64,
+    span: Span,
+    suffix_span: Span,
+) -> crate::AST::Expr {
+    use crate::AST::{AccessConvention, BinOp, CallArg, CallArgFlags, Expr, OrFallback, StrPart};
+    let is_float = float.is_some();
+    let mut value = match (int, float) {
+        (Some(value), _) => Expr::Int(value, span, None, None),
+        (_, Some(value)) => Expr::Float(value, span, false, None),
+        _ => Expr::Int(0, span, None, None),
+    };
+    if scale != 1 {
+        let multiplier = if is_float {
+            Expr::Float(scale as f64, span, false, None)
+        } else {
+            Expr::Int(scale, span, None, None)
+        };
+        value = Expr::Binary(BinOp::Mul, Box::new(value), Box::new(multiplier), span);
+    }
+    let argument = |expr: Expr| CallArg {
+        convention: AccessConvention::Read,
+        expr,
+        span,
+        flags: CallArgFlags::default(),
+        label: None,
+        spread: false,
+    };
+    let constructor = Expr::MethodCall {
+        receiver: Box::new(Expr::Ident(crate::Syntax::DURATION_TYPE.to_string(), suffix_span)),
+        method: "nanoseconds".to_string(),
+        method_span: suffix_span,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: vec![argument(value)],
+        recv_type: None,
+        resolved_ret: None,
+        operator_rhs: None,
+        checked_widen: false,
+        checked_callee: None,
+    };
+    Expr::OrFallback {
+        value: Box::new(constructor),
+        fallback: OrFallback::Panic {
+            name_span: suffix_span,
+            args: vec![argument(Expr::Str(
+                vec![StrPart::Lit("time literal is outside Duration's i64 range".to_string())],
+                span,
+            ))],
+        },
+        is_option: false,
+        span,
+    }
+}
+
 fn dimension_dependencies(expression: &crate::AST::Expr) -> Vec<String> {
     match expression {
         crate::AST::Expr::Ident(name, _) => vec![name.clone()],

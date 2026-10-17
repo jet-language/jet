@@ -1,0 +1,46 @@
+// D-COREIO1=A / D-IO-PROMPT1=A: terminal facts, streams, and interactive prompts.
+package {
+    name: "terminal_parity"
+    authority: { holds: { allow: [Env, IO, Mem.Alloc, Time.Wait] } }
+}
+
+use core.sys as env
+use core.term as io
+
+fn run() {
+    env.set("COLUMNS", "100")
+    env.set("LINES", "40")
+    env.set("NO_COLOR", "1")
+    confirmed :: io.confirm("Continue?")
+    print("confirm: {confirmed}")
+    // A closed input stream, or ten rejected answers, stops `choose` instead of
+    // asking again without end. That makes every non-interactive run finish, and
+    // this program answers such a stop with the documented "staging" default.
+    choice :: io.choose("Choose a target:", ["staging", "production"]) ?? "staging"
+    print("choice: {choice}")
+    if io.input_secret("Secret: ") == {
+        .Ok(secret) -> { print("secret length: {secret.len()}") }
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(_) -> { print("secret: non-tty") }
+                else -> { print("secret: other error") }
+            }
+        }
+    }
+    out := io.stdout()
+    err_stream := io.stderr()
+    &out.write("stdout") ?? panic("stdout write failed")
+    &out.write(" stream") ?? panic("stdout write failed")
+    &out.flush() ?? panic("stdout flush failed")
+    &out.write_line("") ?? panic("stdout newline failed")
+    bytes :: [U8]{114, 97, 119, 10}
+    &out.write_bytes(bytes) ?? panic("stdout bytes failed")
+    print("stdout tty: {out.is_tty()}")
+    print("stderr tty: {err_stream.is_tty()}")
+    print("size: {io.terminal_width()}x{io.terminal_height()}")
+    print(io.style("red", "plain"))
+    print(io.style_force("green", "forced").len())
+    io.progress("progress") ?? panic("progress failed")
+    &err_stream.write_line("stderr stream") ?? panic("stderr write failed")
+    &err_stream.flush() ?? panic("stderr flush failed")
+}

@@ -33,19 +33,19 @@ fn store_lease_descriptor_path(slot: Int) -> String Never! {
 // One opened regular file of a lease: a snapshot member (`relative`) or an
 // executable (`relative` is its file name). `id` is the identity recorded
 // when the file was opened; `file` is None once handed to a process spec.
-pub struct SnapshotFile {
-    pub relative: String
-    pub file: FileReader?
-    pub id: FileID
-    pub slot: Int
+struct SnapshotFile {
+    relative: String
+    file: FileReader?
+    id: FileID
+    slot: Int
 }
 
 // One held directory of a lease.
-pub struct LeasedDirectory {
-    pub path: String
-    directory: Directory?
-    pub id: FileID
-    pub slot: Int
+struct LeasedDirectory {
+    path: String
+    priv directory: Directory?
+    id: FileID
+    slot: Int
 
     // The same witness without the handle, once the handle left the parent.
     fn detached(self) -> LeasedDirectory Never! {
@@ -59,7 +59,7 @@ pub struct LeasedDirectory {
 }
 
 // A held Nix projection source: its directory or regular file.
-pub enum ProjectionHandle {
+enum ProjectionHandle {
     Directory(Directory)
     File(FileReader)
 
@@ -88,9 +88,9 @@ struct NixProjectionBinding {
 
 // A logical `/nix/store/<name>` path and the stable source a rootless
 // namespace binds there.
-pub struct NixProjectionPath {
-    pub logical: String
-    pub source: String
+struct NixProjectionPath {
+    logical: String
+    source: String
 }
 
 // A leased output root and the stable root consumers resolve it through.
@@ -99,45 +99,45 @@ struct LeasedOutputRoot {
     lease_root: String
 }
 
-pub enum ConsumptionStatus {
+enum ConsumptionStatus {
     Consumable
     NonConsumable(String)
 }
 
-pub struct CacheLease {
-    verification: StoreVerification
-    files: [SnapshotFile]
-    executables: [SnapshotFile]
-    out: String
-    lease_root: String
-    lease_lock_path: String
-    live_lock: RuntimeLock?
-    handed_off: Bool
-    protocol_lease_id: String
-    protocol_generation: Int
-    protocol_owner_scope: String
-    protocol_owner_lock: RuntimeLock?
-    pub snapshot_root: String
-    snapshot_dir: LeasedDirectory?
-    bin_relative: String?
-    expected_digest: String
-    direct_cas: Bool
-    package: String
-    version: String
-    reference: String
-    store_root: String
-    consumption_status_value: ConsumptionStatus
-    wrapper_root: String?
+struct CacheLease {
+    priv verification: StoreVerification
+    priv files: [SnapshotFile]
+    priv executables: [SnapshotFile]
+    priv out: String
+    priv lease_root: String
+    priv lease_lock_path: String
+    priv live_lock: RuntimeLock?
+    priv handed_off: Bool
+    priv protocol_lease_id: String
+    priv protocol_generation: Int
+    priv protocol_owner_scope: String
+    priv protocol_owner_lock: RuntimeLock?
+    snapshot_root: String
+    priv snapshot_dir: LeasedDirectory?
+    priv bin_relative: String?
+    priv expected_digest: String
+    priv direct_cas: Bool
+    priv package: String
+    priv version: String
+    priv reference: String
+    priv store_root: String
+    priv consumption_status_value: ConsumptionStatus
+    priv wrapper_root: String?
     // Logical `/nix/store/<name>` paths mapped to a verified lease root or
     // canonical Hangar object; shell consumers use them only inside a
     // rootless namespace.
-    nix_store_projection_paths: [NixProjectionPath]
+    priv nix_store_projection_paths: [NixProjectionPath]
     // Verified output roots accepted by `stable_path`.
-    leased_output_roots: [LeasedOutputRoot]
-    bin_output_root: String?
-    projected_bin_root: String?
-    nix_projection_bindings: [NixProjectionBinding]
-    wrapper_directory_handle: LeasedDirectory?
+    priv leased_output_roots: [LeasedOutputRoot]
+    priv bin_output_root: String?
+    priv projected_bin_root: String?
+    priv nix_projection_bindings: [NixProjectionBinding]
+    priv wrapper_directory_handle: LeasedDirectory?
 
     // Record that a launched process tree may now hold the lease handles.
     fn mark_process_handoff(&self) Never! {
@@ -257,7 +257,7 @@ pub struct CacheLease {
         if !store_reuse_same_path(self.out, expected) -> return None
         object_info :: files.stat(expected) ?? return None
         if object_info.is_symlink || !object_info.is_dir -> return None
-        if sys.family() != "windows" && object_info.mode & 0o222 != 0 -> return None
+        if sys.family() != "windows" && (object_info.mode).bit_and(0o222) != 0 -> return None
         seal :: files.join(files.join(hangar, STORE_SEALS_DIR), self.expected_digest)
         sealed :: store_check_seal(&verification, expected, hangar) ?? None
         if sealed != Val(self.expected_digest) -> return None
@@ -266,7 +266,7 @@ pub struct CacheLease {
         bin_path :: files.join(expected, bin)
         bin_info :: files.stat(bin_path) ?? return None
         if bin_info.is_symlink || !bin_info.is_dir -> return None
-        if sys.family() != "windows" && bin_info.mode & 0o222 != 0 -> return None
+        if sys.family() != "windows" && (bin_info.mode).bit_and(0o222) != 0 -> return None
         Val(bin_path)
     }
 

@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:1911-1943 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=4
+pty-send: "loop { }\r" after 200ms
+pty-send: "\u0003" after 300ms
+pty-send: "\u0003" after 30ms
+pty-send: "40 + 2\r" after 300ms
+exit: 0
+stdout: !~ "42 : Int" # Original double-interrupt refuses later input rs1940.

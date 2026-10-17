@@ -38,7 +38,6 @@ fn assert_nest_p001_form_stages() {
     .expect("write NEST-P001 authority");
     let stages: &[(&str, &[&str])] = &[
         ("default", &["run", "run.jet"]),
-        ("interpreter", &["run", "--interpret", "run.jet"]),
         ("profile-debug", &["run", "--profile=debug", "run.jet"]),
     ];
     for (stage, args) in stages {

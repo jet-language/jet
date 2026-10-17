@@ -20,10 +20,10 @@ fn jet_services_start(tree: &mut JetServiceTree) -> Result<(), JetServiceError> 
     })
 }
 
-/// The shared CBOR codec normalizes kernel failures into `EncodingError`.
-/// Keep that conversion at the queue boundary so a payload encoding failure
-/// becomes the queue's typed service error instead of a panic or an unwrap.
-fn jet_job_queue_cbor_error(error: jet_std::EncodingError) -> JetServiceError {
+/// Canonical CBOR encoding reports the closed `CBORError`. Keep that
+/// conversion at the queue boundary so a payload encoding failure becomes the
+/// queue's typed service error instead of a panic or an unwrap.
+fn jet_job_queue_cbor_error(error: jet_std::CBORError) -> JetServiceError {
     let location = if error.path.is_empty() {
         format!("byte {}", error.byte_offset)
     } else {

@@ -96,21 +96,25 @@ pub(crate) fn jet_set_remove<T: Eq + std::hash::Hash>(
     set.remove(&value);
 }
 
-/// D-COLLBREADTH1=A: `Rank<T>.add(v)` / `.remove(v)` on the ordered carrier.
-pub(crate) fn jet_sorted_set_insert<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {
-    set.insert(value);
+/// D-COLLBREADTH1=A: `Rank<T>.add(v)` reports whether a new member was stored.
+pub(crate) fn jet_sorted_set_insert<T: Ord>(
+    set: &mut std::collections::BTreeSet<T>,
+    value: T,
+) -> bool {
+    set.insert(value)
 }
 
 pub(crate) fn jet_sorted_set_remove<T: Ord>(set: &mut std::collections::BTreeSet<T>, value: T) {
     set.remove(&value);
 }
 
-/// D-TAG1: `Tally<T>.add(v)` — one more occurrence of `v`.
+/// D-TAG1: `Tally<T>.add(v)` stores one more occurrence and reports success.
 pub(crate) fn jet_bag_add<T: Eq + std::hash::Hash>(
     bag: &mut std::collections::HashMap<T, usize>,
     value: T,
-) {
+) -> bool {
     *bag.entry(value).or_insert(0) += 1;
+    true
 }
 
 /// D-TAG1: `Tally<T>.remove(v)` — one fewer occurrence of `v`. Removing an

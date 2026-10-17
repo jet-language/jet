@@ -148,12 +148,10 @@ fn publication_oci_test_write_outcome(path: String, payload: String) -[FS, Env, 
     loop attempt in 0..<16 {
         path :: files.join(repo, "blob-{publication_registry_unique_suffix()}-{attempt}")
         left :: task {
-            left_outcome :: publication_oci_test_write_outcome(path, "left")
-            left_outcome
+            return publication_oci_test_write_outcome(path, "left")
         }
         right :: task {
-            right_outcome :: publication_oci_test_write_outcome(path, "right")
-            right_outcome
+            return publication_oci_test_write_outcome(path, "right")
         }
         a :: left.join() ?? panic("join left")
         b :: right.join() ?? panic("join right")
@@ -201,7 +199,7 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
     index :: files.join(root, PUBLICATION_OCI_REFERRER_INDEX)
     assert_eq(publication_referrer_index_digest(repo, entry) ?? panic("digest"), "sha256-{pkg_sha256_hex((publication_render_oci_index(entry.content_hash, descriptors)).bytes())}")
     original :: publication_read_oci_file(index, PUBLICATION_MAX_OCI_REFERRER_BYTES) ?? panic("index bytes")
-    changed := ~descriptors
+    changed := descriptors.copy()
     changed[0].size += 1
     files.write(index, publication_render_oci_index(entry.content_hash, changed)) ?? panic("size tamper")
     assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
@@ -211,13 +209,13 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
     files.write(blob, "x".repeat(bytes.len())) ?? panic("same length digest tamper")
     assert(publication_verify_oci_referrers(repo, entry) == .Err(.InvalidData(_)))
     files.write_bytes(blob, bytes) ?? panic("restore blob")
-    changed_entry := ~entry
+    changed_entry := entry.copy()
     changed_entry.public_key = "changed"
     assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
-    changed_entry = ~entry
+    changed_entry = entry.copy()
     changed_entry.name = "different"
     assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
-    changed_entry = ~entry
+    changed_entry = entry.copy()
     changed_entry.fingerprint = "different"
     assert(publication_verify_oci_referrers(repo, changed_entry) == .Err(.InvalidData(_)))
     extra :: files.join(root, "blobs/extra")
@@ -255,7 +253,10 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
         files.write(path, "winner")
     }
     error :: if foundation_write_file_nofollow_at_root(repo, "blob", "loser".bytes(), Val(collide), FoundationPublicationPolicy{create: .CreateNew}) == {
-        .Err(error) -> error
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.InspectDestination)
+            error.error
+        }
         .Ok(_) -> panic("CreateNew replaced an appearing winner")
     }
     assert(error == .AlreadyExists(_))
@@ -280,7 +281,13 @@ fn publication_oci_test_evidence(repo: String, entry: PublicationIndexEntry) -[F
         assert_eq("{actual}", "{failure}")
     }
     files.remove(path) ?? panic("remove winner")
-    assert(foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(IOError.Other(publication_oci_context(path, "validation refused after fsync"))) }), FoundationPublicationPolicy{create: .CreateNew}) == .Err(.Other(_)))
+    if foundation_write_file_nofollow_at_root(repo, "blob", "winner".bytes(), Val(() -[FS, Env]> { return Err(IOError.Other(publication_oci_context(path, "validation refused after fsync"))) }), FoundationPublicationPolicy{create: .CreateNew}) == {
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
+            assert(error.error == .Other(_))
+        }
+        .Ok(_) -> panic("validation refusal must prevent publication")
+    }
     assert(!files.lexists(path))
     files.remove_all(repo) ?? panic("cleanup")
 }

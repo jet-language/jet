@@ -34,7 +34,7 @@ const EXCLUDED_PREFIXES = ["Tools/tower/.tower/", "Tools/cli-census/", "tests/cl
 const TABLES = [
   {
     path: join(ROOT, "Compiler/JetFoundation/Source/Registry/CLICommands.jet"),
-    open: "pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{\n",
+    open: "JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{\n",
     close: "\n} }\n",
     rowPattern: /^ {4}JetCLICommandSpec\{\n[\s\S]*?^ {4}\},?$/gm,
   },

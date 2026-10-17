@@ -72,9 +72,9 @@ struct NixImportPackage {
 
 // ── Nix ──
 
-pub fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPlan Never! {
+fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("nix")
-    object :: cli_import_json_object(facts_json) ?? [String: DataTree]{}
+    object :: cli_import_json_object(facts_json) ?? [String: Dyn]{}
     report :: provider_normalize_document(ProviderFamily.Nix, facts_json)
     name :: if report.facts.name == "" -> cli_import_nix_string(object, "name") ?? "nix-import" else -> report.facts.name
     version :: if report.facts.version == "" || report.facts.version == "set" -> "0.1.0" else -> report.facts.version
@@ -103,7 +103,7 @@ pub fn cli_import_nix_facts(source_path: String, facts_json: String) -> ImportPl
 
 impl ImportPlan {
     // One `packages[index]` entry as a dependency with its provider facts.
-    fn import_nix_package(&self, index: Int, value: DataTree, source_path: String, facts_json: String) Never! {
+    fn import_nix_package(&self, index: Int, value: Dyn, source_path: String, facts_json: String) Never! {
         package :: cli_import_nix_package(value) ?? {
             &self.record_provider_finding(source_path, "Nix provider package entry {index} has no usable package identity; migration is unresolved")
             return
@@ -144,7 +144,7 @@ impl ImportPlan {
 }
 
 // A non-blank text field of `object`.
-fn cli_import_nix_string(object: [String: DataTree], key: String) -> String? Never! {
+fn cli_import_nix_string(object: [String: Dyn], key: String) -> String? Never! {
     value :: object.get(key) ?? return None
     text :: pkg_json_text(value) ?? return None
     if text.trim() == "" -> return None
@@ -152,7 +152,7 @@ fn cli_import_nix_string(object: [String: DataTree], key: String) -> String? Nev
 }
 
 // The first non-blank text field among `keys`.
-fn cli_import_nix_first_string(object: [String: DataTree], keys: [String]) -> String? Never! {
+fn cli_import_nix_first_string(object: [String: Dyn], keys: [String]) -> String? Never! {
     loop key in keys {
         found :: cli_import_nix_string(object, key) ?? next
         return Val(found)
@@ -178,7 +178,7 @@ fn cli_import_merge_provider_projection(target: &ProviderFacts, source: Provider
 }
 
 // A package name, `name@source` / `name#selector` ref, or exact record.
-fn cli_import_nix_package(value: DataTree) -> NixImportPackage? Never! {
+fn cli_import_nix_package(value: Dyn) -> NixImportPackage? Never! {
     name := ""
     source := String?{None}
     version := String?{None}
@@ -229,7 +229,7 @@ fn cli_import_nix_package(value: DataTree) -> NixImportPackage? Never! {
 
 // ── Cargo ──
 
-pub fn cli_import_cargo(cargo_toml: String, cargo_lock: String) -> ImportPlan Never! {
+fn cli_import_cargo(cargo_toml: String, cargo_lock: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("cargo")
     source_name :: cli_import_toml_string(cargo_toml, "name") ?? ""
     source_version :: cli_import_toml_string(cargo_toml, "version") ?? ""
@@ -305,11 +305,11 @@ impl ImportPlan {
 
 // ── npm ──
 
-pub fn cli_import_npm(package_json: String) -> ImportPlan Never! {
+fn cli_import_npm(package_json: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("npm")
-    object :: cli_import_json_object(package_json) ?? [String: DataTree]{}
-    source_name :: pkg_json_text(object.get("name") ?? DataTree.Null) ?? ""
-    source_version :: pkg_json_text(object.get("version") ?? DataTree.Null) ?? ""
+    object :: cli_import_json_object(package_json) ?? [String: Dyn]{}
+    source_name :: pkg_json_text(object.get("name") ?? Dyn.Null) ?? ""
+    source_version :: pkg_json_text(object.get("version") ?? Dyn.Null) ?? ""
     name :: if source_name == "" -> "npm-import" else -> source_name
     version :: if source_version == "" -> "0.1.0" else -> source_version
     root_reference :: if source_name == "" || source_version == "" -> "{name}@npm" else -> "{name}@npm{REF_CHANNEL_MARKER}version={version}"
@@ -317,12 +317,12 @@ pub fn cli_import_npm(package_json: String) -> ImportPlan Never! {
     root_facts :: cli_import_retain_normalized_root(&plan, ProviderFamily.Npm, package_json, root_reference, "package.json")
     kinds :: [NpmDependencyKind]{NpmDependencyKind.Runtime, NpmDependencyKind.Dev, NpmDependencyKind.Optional, NpmDependencyKind.Peer}
     loop kind in kinds {
-        deps :: pkg_json_object(object.get(kind.field()) ?? DataTree.Null) ?? next
+        deps :: pkg_json_object(object.get(kind.field()) ?? Dyn.Null) ?? next
         loop entry in deps {
             &plan.import_npm_dependency(entry.key, entry.value, kind, package_json, root_facts)
         }
     }
-    if pkg_json_array(object.get("bundledDependencies") ?? DataTree.Null) == {
+    if pkg_json_array(object.get("bundledDependencies") ?? Dyn.Null) == {
         .Val(bundled) -> {
             if bundled.len() > 0 {
                 loop index in 0..<bundled.len() {
@@ -335,7 +335,7 @@ pub fn cli_import_npm(package_json: String) -> ImportPlan Never! {
         }
         .None -> {}
     }
-    if pkg_json_object(object.get("scripts") ?? DataTree.Null) == {
+    if pkg_json_object(object.get("scripts") ?? Dyn.Null) == {
         .Val(scripts) -> {
             loop script in scripts {
                 &plan.todos.push(ImportTodo{source_path: "package.json", message: "npm script `{script.key}` becomes a declared legacy build action", suggested_surface: Val("Tier-2 legacy build action")})
@@ -348,7 +348,7 @@ pub fn cli_import_npm(package_json: String) -> ImportPlan Never! {
 
 impl ImportPlan {
     // One npm dependency request with its provider facts.
-    fn import_npm_dependency(&self, name: String, value: DataTree, kind: NpmDependencyKind, package_json: String, root_facts: ProviderFacts) Never! {
+    fn import_npm_dependency(&self, name: String, value: Dyn, kind: NpmDependencyKind, package_json: String, root_facts: ProviderFacts) Never! {
         field :: kind.field()
         field_source :: "package.json.{field}"
         requested :: pkg_json_text(value)
@@ -407,7 +407,7 @@ fn cli_import_copy_provider_projection(target: &ProviderFacts, source: ProviderF
 
 // ── Python and SwiftPM ──
 
-pub fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> ImportPlan Never! {
+fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> ImportPlan Never! {
     plan := ImportPlan.empty("pypi")
     &plan.packages.push(ImportedPackage{name: name, version: "0.1.0"})
     loop field in dynamic_fields {
@@ -420,7 +420,7 @@ pub fn cli_import_python_metadata(name: String, dynamic_fields: [String]) -> Imp
     plan
 }
 
-pub fn cli_import_swiftpm(name: String, revision: String) -> ImportPlan Never! {
+fn cli_import_swiftpm(name: String, revision: String) -> ImportPlan Never! {
     plan := ImportPlan.empty("swiftpm")
     &plan.packages.push(ImportedPackage{name: name, version: revision})
     provider_ref :: "{name}@swiftpm{REF_CHANNEL_MARKER}revision={revision}"
@@ -437,7 +437,7 @@ pub fn cli_import_swiftpm(name: String, revision: String) -> ImportPlan Never! {
 // ── Document helpers ──
 
 // The top-level object of a JSON document, or None when it is not one.
-fn cli_import_json_object(text: String) -> [String: DataTree]? Never! {
+fn cli_import_json_object(text: String) -> [String: Dyn]? Never! {
     if pkg_json_parse_protocol(text) == {
         .Parsed(tree) -> pkg_json_object(tree)
         .Failed(_) -> None

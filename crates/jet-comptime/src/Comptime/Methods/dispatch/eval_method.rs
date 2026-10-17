@@ -157,11 +157,6 @@ impl<'a> Interp<'a> {
                             );
                         }
                     }
-                    if self.core_imports.get(alias).map(String::as_str) == Some("core.email")
-                        && type_name == "Limits"
-                    {
-                        return Ok(super::super::super::EmailAdapter::limits_safe_value());
-                    }
                     if self.core_imports.get(alias).map(String::as_str) == Some("core.data")
                         && type_name == "DataLimits"
                     {
@@ -170,31 +165,6 @@ impl<'a> Interp<'a> {
                         );
                     }
                 }
-            }
-        }
-        // D-SOLVER-LIB1=A: `solve.Solver.new(seed)` — module-field sentinel constructor.
-        if method == "new" {
-            let solver_ctor = match receiver {
-                Expr::Ident(type_name, _) if type_name == crate::Syntax::SOLVER_TYPE => true,
-                Expr::Field(base, type_name, _)
-                    if type_name == crate::Syntax::SOLVER_TYPE
-                        && matches!(
-                            base.as_ref(),
-                            Expr::Ident(alias, _)
-                                if self.core_imports.get(alias).map(String::as_str)
-                                    == Some("core.compute.solve")
-                        ) =>
-                {
-                    true
-                }
-                _ => false,
-            };
-            if solver_ctor {
-                let mut argv = Vec::with_capacity(args.len());
-                for a in args {
-                    argv.push(self.eval(&a.expr, scope)?);
-                }
-                return solver_new(&argv, span);
             }
         }
         // D-SHAPE-CONVERT1=A: numeric-backed distinct/unit conversion is the
@@ -348,17 +318,6 @@ impl<'a> Interp<'a> {
         // c97/D-STRPARSE1: static method on a built-in type name (e.g. `Int.parse(s)`).
         // Check *before* evaluating the receiver so `Int`/`Float` don't fail scope lookup.
         if let Expr::Ident(type_name, _) = receiver {
-            // D-SHAPE-CTORVERB1=C: deterministic fresh state is type-owned.
-            if type_name == crate::Syntax::CLOCK_TYPE && method == "new" {
-                let seed = self.eval(&args[0].expr, scope)?;
-                let CtValue::Int(seed) = seed else {
-                    return Err(unsupported("Clock.new expects an Int seed", span));
-                };
-                return Ok(CtValue::Struct {
-                    type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-                    fields: vec![("now".to_string(), CtValue::Int(seed))],
-                });
-            }
             if type_name == crate::Syntax::DURATION_TYPE {
                 let Some(unit) = crate::Syntax::duration_unit_for_constructor(method) else {
                     return Err(super::super::super::Diagnostics::unsupported(
@@ -401,14 +360,6 @@ impl<'a> Interp<'a> {
                         fields: vec![("reason".to_string(), CtValue::Str(reason.to_string()))],
                     })),
                 });
-            }
-            // D-SOLVER-LIB1=A: bare `Solver.new(seed)` (same state as `solve.Solver.new`).
-            if type_name == crate::Syntax::SOLVER_TYPE && method == "new" {
-                let mut argv = Vec::with_capacity(args.len());
-                for a in args {
-                    argv.push(self.eval(&a.expr, scope)?);
-                }
-                return solver_new(&argv, span);
             }
             // Only intercept known built-in type names; user struct names use normal path.
             let is_builtin_type = crate::AST::numeric_type_from_name(type_name).is_some()
@@ -518,6 +469,9 @@ impl<'a> Interp<'a> {
                 // Plot construction/rendering also needs the sema-resolved
                 // row type and declaration metadata. Keep this route beside
                 // the typed table path, before generic Core dispatch.
+                if module == "core.data.plot" && method == "__plot_aggregate_none" {
+                    return Ok(super::super::super::DataPipeline::plot_aggregate_none_value());
+                }
                 if matches!(
                     (module.as_str(), method),
                     (
@@ -728,19 +682,17 @@ impl<'a> Interp<'a> {
                     && matches!(method, "to_string" | "to_string_pretty")
                 {
                     if let Some(value) = argv.first() {
-                        // Keep the canonical DataTree value on its renderer path.
+                        // Keep the canonical Dyn value on its renderer path.
                         // Every other value must enter the typed Encode adapter,
                         // which recursively gives nested explicit codecs precedence
                         // over structural fallback.
-                        let is_dynamic_data_tree =
-                            matches!(value, CtValue::Enum { type_name, .. } if type_name == "DataTree");
-                        if !is_dynamic_data_tree {
+                        let is_dynamic_dyn =
+                            matches!(value, CtValue::Enum { type_name, .. } if type_name == "Dyn");
+                        if !is_dynamic_dyn {
                             let tree = self.encode_value(value, span)?;
-                            return Ok(CtValue::Str(
-                                super::super::super::JSONInterp::render_ordered_datatree(
-                                    &tree,
-                                    method == "to_string_pretty",
-                                    0,
+                            return Ok(crate::Comptime::json_render_result_for_tir(
+                                super::super::super::JSONInterp::render_ordered_dyn(
+                                    &tree, method == "to_string_pretty", 0,
                                 ),
                             ));
                         }
@@ -748,7 +700,7 @@ impl<'a> Interp<'a> {
                 }
                 // D-ENC-CBOR-SURFACE1 / R12: generic whole-value CBOR decode
                 // uses the same typed tree walker as every other codec.  Keep
-                // this ahead of the compatibility `cbor.decode(DataTree)` arm
+                // this ahead of the compatibility `cbor.decode(Dyn)` arm
                 // below: the type argument is the semantic distinction.
                 if module == "core.encoding.cbor" && method == "decode" && !type_args.is_empty() {
                     let bytes = match argv.first() {
@@ -771,7 +723,7 @@ impl<'a> Interp<'a> {
                         }
                     };
                     let tree = match super::super::super::EncodingLite::cbor_decode(
-                        &bytes, &options, true,
+                        &bytes, &options,
                     ) {
                         Ok(tree) => tree,
                         Err(error) => {
@@ -1040,7 +992,7 @@ impl<'a> Interp<'a> {
                             let v = self.eval(&a.expr, scope)?;
                             frame.insert(p.name.clone(), v);
                         }
-                        return self.call_func(&format!("{}.{}", name, method), f, frame);
+                        return self.call_func(f, frame);
                     }
                 }
                 let qualified = format!("{name}::{method}");
@@ -1051,7 +1003,7 @@ impl<'a> Interp<'a> {
                             let v = self.eval(&a.expr, scope)?;
                             frame.insert(p.name.clone(), v);
                         }
-                        return self.call_func(&qualified, f, frame);
+                        return self.call_func(f, frame);
                     }
                 }
                 let mangled = jet_foundation::Names::member_name(name, method);
@@ -1062,7 +1014,7 @@ impl<'a> Interp<'a> {
                             let v = self.eval(&a.expr, scope)?;
                             frame.insert(p.name.clone(), v);
                         }
-                        return self.call_func(&mangled, f, frame);
+                        return self.call_func(f, frame);
                     }
                 }
             }
@@ -1538,7 +1490,7 @@ impl<'a> Interp<'a> {
                 (
                     CtValue::Struct { type_name, fields },
                     method @ ("add" | "remove" | "has" | "count" | "len" | "is_empty" | "clear"
-                    | "to_list" | "copy"),
+                    | "to_list"),
                 ) if type_name == crate::Syntax::TYPE_BITS => {
                     let mut bits = fields
                         .iter()
@@ -1562,10 +1514,6 @@ impl<'a> Interp<'a> {
                         "has" => {
                             CtValue::Bool(bits.contains(&CtValue::Int(as_int(&argv[0], span)?)))
                         }
-                        "copy" => CtValue::Struct {
-                            type_name: crate::Syntax::TYPE_BITS.to_string(),
-                            fields: vec![("bits".to_string(), CtValue::List(bits.clone()))],
-                        },
                         "to_list" => CtValue::List(bits.clone()),
                         "add" => {
                             let bit = as_int(&argv[0], span)?;
@@ -1973,6 +1921,7 @@ impl<'a> Interp<'a> {
             "extend",
             "clear",
             "reverse",
+            "__swap",
             "sort",
             "sort_desc",
         ];
@@ -1981,15 +1930,7 @@ impl<'a> Interp<'a> {
                 Some(value) => value,
                 None => self.eval(receiver, scope)?,
             };
-            let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_))
-                || matches!(
-                    &container,
-                    CtValue::Struct { type_name, .. }
-                        if method == "add" && matches!(
-                            type_name.as_str(),
-                            "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
-                        )
-                );
+            let handled_here = matches!(&container, CtValue::List(_) | CtValue::Map(_));
             if handled_here {
                 let mut argv = Vec::new();
                 for a in args {
@@ -2016,11 +1957,6 @@ impl<'a> Interp<'a> {
                             Ok(CtValue::Unit)
                         }
                     };
-                }
-                if let Some(result) = sketch_add(&container, &argv, span) {
-                    let (ret, updated) = result?;
-                    self.write_back(receiver, updated, scope)?;
-                    return Ok(ret);
                 }
                 let ret = apply_mutating(&mut container, method, argv, span)?;
                 self.write_back(receiver, container, scope)?;
@@ -2145,7 +2081,7 @@ impl<'a> Interp<'a> {
                         let v = self.eval(&a.expr, scope)?;
                         frame.insert(p.name.clone(), v);
                     }
-                    return self.call_func(&format!("{}.{}", tn, method), f, frame);
+                    return self.call_func(f, frame);
                 }
             }
         }
@@ -2181,53 +2117,6 @@ impl<'a> Interp<'a> {
             return Ok(CtValue::Int(i64::from(count)));
         }
         match (&recv, method) {
-            (CtValue::Struct { type_name, fields }, method @ ("tick" | "advance" | "wait"))
-                if type_name == crate::Syntax::CLOCK_TYPE =>
-            {
-                if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-                    return Err(unsupported("Clock method on a temporary value", span));
-                }
-                let mut argv = Vec::with_capacity(args.len());
-                for arg in args {
-                    argv.push(self.eval(&arg.expr, scope)?);
-                }
-                let now = fields
-                    .iter()
-                    .find_map(|(name, value)| match (name.as_str(), value) {
-                        ("now", CtValue::Int(now)) => Some(*now),
-                        _ => None,
-                    })
-                    .unwrap_or(0);
-                let next = match method {
-                    "tick" => now.wrapping_add(as_int(&argv[0], span)?),
-                    "advance" => as_int(&argv[0], span)?,
-                    "wait" => match &argv[0] {
-                        CtValue::Struct { type_name, fields }
-                            if type_name == crate::Syntax::DURATION_TYPE =>
-                        {
-                            let millis = fields
-                                .iter()
-                                .find_map(|(name, value)| match (name.as_str(), value) {
-                                    ("ns", CtValue::Int(ns)) => Some(ns.saturating_div(1_000_000)),
-                                    _ => None,
-                                })
-                                .unwrap_or(0);
-                            now.wrapping_add(millis)
-                        }
-                        _ => return Err(unsupported("Clock.wait expects a Duration", span)),
-                    },
-                    _ => unreachable!("Clock mutation set is closed"),
-                };
-                self.write_back(
-                    receiver,
-                    CtValue::Struct {
-                        type_name: crate::Syntax::CLOCK_TYPE.to_string(),
-                        fields: vec![("now".to_string(), CtValue::Int(next))],
-                    },
-                    scope,
-                )?;
-                return Ok(CtValue::Int(next));
-            }
             (
                 CtValue::Struct { type_name, fields },
                 method @ ("len" | "is_empty" | "clear" | "to_bytes" | "write_u8" | "write_u16_le"
@@ -2369,42 +2258,6 @@ impl<'a> Interp<'a> {
                     scope,
                 )?;
                 return Ok(value);
-            }
-            (
-                CtValue::Struct { type_name, .. },
-                method @ ("locale" | "name" | "email" | "host" | "address"),
-            ) if type_name == crate::Syntax::FAKE_TYPE => {
-                if method != "locale" && !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-                    return Err(unsupported("Fake method on a temporary value", span));
-                }
-                // The kernel advances the generator's own state, so it needs a
-                // mutable value; `recv` is bound by the match, so take a local
-                // copy and write it back below exactly as the RNG arm does.
-                let mut fake_recv = recv.clone();
-                let value = super::super::core_calls::apply_fake_method(
-                    &mut fake_recv,
-                    method,
-                    &argv,
-                    span,
-                )?;
-                if method != "locale" {
-                    self.write_back(receiver, fake_recv, scope)?;
-                }
-                return Ok(value);
-            }
-            // D-SOLVER-LIB1=A: `solver.require(ok)` records a Bool constraint in place.
-            (CtValue::Struct { type_name, .. }, "require")
-                if type_name == crate::Syntax::SOLVER_TYPE =>
-            {
-                if !matches!(receiver, Expr::Ident(..) | Expr::Field(..)) {
-                    return Err(unsupported("Solver method on a temporary value", span));
-                }
-                let Some(result) = solver_require(&recv, &argv, span) else {
-                    return Err(unsupported("`Solver.require`", span));
-                };
-                let (ret, updated) = result?;
-                self.write_back(receiver, updated, scope)?;
-                return Ok(ret);
             }
             _ => {}
         }

@@ -19,7 +19,7 @@ enum ToolchainInstallOutcome {
 
 // Verify the configured channel and, when `apply` is set, install the
 // verified artifact. Without apply this is a complete dry-run verification.
-pub fn recipe_toolchain_update_run(options: ToolchainUpdateOptions, current_exe: String?) -[FS, Env, Exec, Net, Time, Time.Wait]> ToolchainUpdateResult RecipeError! {
+fn recipe_toolchain_update_run(options: ToolchainUpdateOptions, current_exe: String?) -[FS, Env, Exec, Net, Time, Time.Wait]> ToolchainUpdateResult RecipeError! {
     recipe_toolchain_update_run_at(options, current_exe, recipe_update_now_seconds())
 }
 
@@ -284,12 +284,12 @@ fn recipe_update_health_check(path: String) RecipeError! -[Exec, Time.Wait]> {
 }
 
 // Whether this process was started as the deferred Windows update helper.
-pub fn recipe_toolchain_windows_update_helper_requested() -[Env]> Bool Never! {
+fn recipe_toolchain_windows_update_helper_requested() -[Env]> Bool Never! {
     sys.is_windows() && sys.get(TOOLCHAIN_WINDOWS_HELPER_ENV) != None
 }
 
 // Run the deferred Windows helper; the process exit code.
-pub fn recipe_toolchain_run_windows_update_helper() -[FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn recipe_toolchain_run_windows_update_helper() -[FS, Env, Exec, Time, Time.Wait]> Int Never! {
     if !sys.is_windows() -> return 1
     if recipe_update_windows_helper_run() == {
         .Ok(_) -> 0

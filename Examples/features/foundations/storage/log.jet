@@ -2,20 +2,20 @@ use core.files as fs
 
 // The package keeps the imported fallible log boundary intact; native AOT
 // remains gated by #2763 while the executable path is exercised by `jet run`.
-pub struct Recovery {
-    records: [String]
-    discarded_tail: Bool
+struct Recovery {
+    priv records: [String]
+    priv discarded_tail: Bool
 }
 
 fn empty_recovery() -> Recovery { Recovery{records: [String]{}, discarded_tail: false} }
 
-pub fn append_record(path: Path, record: String) -> Bool {
+fn append_record(path: Path, record: String) -> Bool {
     fs.append_all(path, "{record}\n") ?? return false
     fs.fsync(path) ?? return false
     return true
 }
 
-pub fn recover(path: Path) -> Recovery {
+fn recover(path: Path) -> Recovery {
     if !fs.exists(path) -> return empty_recovery()
     mapped :: fs.map(path) ?? return empty_recovery()
     if mapped.is_empty() -> return empty_recovery()
@@ -25,7 +25,7 @@ pub fn recover(path: Path) -> Recovery {
     complete_tail :: Int.from_u8(final_byte[0]) == 10
     records := [String]{}
     loop line in mapped.lines() {
-        &records.push(String.from_bytes(~line) ?? panic("storage log is not UTF-8"))
+        &records.push(String.from_bytes(line.copy()) ?? panic("storage log is not UTF-8"))
     }
 
     discarded_tail := false
@@ -36,12 +36,12 @@ pub fn recover(path: Path) -> Recovery {
     return Recovery{records: records, discarded_tail: discarded_tail}
 }
 
-pub fn read_records(path: Path) -> [String] {
+fn read_records(path: Path) -> [String] {
     recovered :: recover(path)
     return recovered.records
 }
 
-pub fn compact_records(path: Path, records: [String]) -> Bool {
+fn compact_records(path: Path, records: [String]) -> Bool {
     temp :: Path.from("{path.to_string()}.compact")
     writer :: fs.create(temp) ?? return false
     loop record in records -> &writer.write_line(record) ?? return false

@@ -1,0 +1,14 @@
+
+struct Resource { name: String }
+impl Resource.Close {
+    fn close(^self) { print("close {self.name}") }
+}
+fn run() {
+    automatic := Resource{ name: "automatic" }
+    deferred := Resource{ name: "deferred" }
+    defer close(^deferred)
+    assert(true)
+    print("before failure")
+    assert(false, "stop")
+    print(automatic.name)
+}

@@ -1,0 +1,51 @@
+# Port of tests/lsp.rs:1171-1344; source/input bytes preserved.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 ballot + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/0.json
+recv lsp
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/1.json
+recv lsp
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/2.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/3.json
+recv lsp
+stdout: ~ "\"version\":11" # original predicate; other response fields vary
+recv lsp
+stdout: ~ "fn fresh" # original predicate; other response fields vary
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/4.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/5.json
+recv lsp
+stdout: ~ "\"id\":20" # original predicate; other response fields vary
+stdout: ~ "fn fresh" # original predicate; other response fields vary
+stdout: !~ "stale" # original negative predicate; other response fields vary
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/6.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/7.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/8.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/9.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/10.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/11.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/12.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/13.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/14.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/15.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/16.json
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/17.json
+recv lsp
+stdout: ~ "\"version\":12" # original predicate; other response fields vary
+recv lsp
+stdout: ~ "fn final" # original predicate; other response fields vary
+stdout: ~ "😀" # original predicate; other response fields vary
+stdout: !~ "fresh" # original negative predicate; other response fields vary
+stdout: !~ "stale" # original negative predicate; other response fields vary
+stdout: !~ "backward" # original negative predicate; other response fields vary
+stdout: !~ "outside" # original negative predicate; other response fields vary
+stdout: !~ "float" # original negative predicate; other response fields vary
+stdout: !~ "wide" # original negative predicate; other response fields vary
+stdout: !~ "wide_position" # original negative predicate; other response fields vary
+stdout: !~ "wide_length" # original negative predicate; other response fields vary
+stdout: !~ "bad_type" # original negative predicate; other response fields vary
+stdout: !~ "bad_length" # original negative predicate; other response fields vary
+send lsp: messages/lsp_incremental_sync_rejects_stale_and_malformed_edits/18.json
+recv lsp
+close lsp
+# Original child.wait did not assert status.
+exit: any

@@ -27,14 +27,14 @@ fn run() {
             }
         }
     }
-    out :: io.stdout()
-    err_stream :: io.stderr()
-    out.write("stdout") ?? panic("stdout write failed")
-    out.write(" stream") ?? panic("stdout write failed")
+    out := io.stdout()
+    err_stream := io.stderr()
+    &out.write("stdout") ?? panic("stdout write failed")
+    &out.write(" stream") ?? panic("stdout write failed")
     &out.flush() ?? panic("stdout flush failed")
     &out.write_line("") ?? panic("stdout newline failed")
     bytes :: [U8]{114, 97, 119, 10}
-    out.write_bytes(bytes) ?? panic("stdout bytes failed")
+    &out.write_bytes(bytes) ?? panic("stdout bytes failed")
     print("stdout tty: {out.is_tty()}")
     print("stderr tty: {err_stream.is_tty()}")
     print("size: {io.terminal_width()}x{io.terminal_height()}")

@@ -1,0 +1,43 @@
+// Checked Prelude route effects. Both compiler halves read these rows; a
+// returned Result is not a Panic effect. Panic is deny-only, never authority.
+PRELUDE_ROUTE_EFFECT_ROWS :: prep { """
+::JetAuthority with Panic
+::JetAtomic try_new Mem
+core.shared_guard map_read Panic
+core.shared_guard map_edit Panic
+core.shared_guard split_read Panic
+core.shared_guard split_edit Panic
+core.shared_guard wait Panic
+core.collections slice_string Panic
+core.collections slice_string_range Panic
+core.collections slice_list Panic
+core.collections slice_list_range Panic
+core.builtin string_slice Panic
+core.numeric div_euclid Panic
+core.numeric rem_euclid Panic
+""" }
+
+struct PreludeRouteEffect { module_name: String, member: String, effect_kind: Effect }
+
+fn prelude_route_effect_rows() -> [PreludeRouteEffect] Never! {
+    rows := [PreludeRouteEffect]{}
+    loop line in PRELUDE_ROUTE_EFFECT_ROWS.lines() {
+        if line == "" -> next
+        fields :: line.split(" ").to_list()
+        if fields.len() != 3 -> panic("invalid Prelude effect registry row")
+        effect_kind :: if fields[2] == {
+            "Panic" -> Effect.Panic
+            "Mem" -> Effect.Mem
+            else -> panic("invalid Prelude effect registry effect")
+        }
+        &rows.push(PreludeRouteEffect{module_name: fields[0], member: fields[1], effect_kind: effect_kind})
+    }
+    rows
+}
+
+fn prelude_route_effect(module_name: String, member: String) -> Effect? Never! {
+    loop row in prelude_route_effect_rows() {
+        if row.module_name == module_name && row.member == member -> return Val(row.effect_kind)
+    }
+    None
+}

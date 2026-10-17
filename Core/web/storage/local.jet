@@ -1,15 +1,90 @@
 use core as core
 
-// core.web.storage.local — origin-local key/value store.
-pub fn get(key: String) -> String? Never! { core.web.storage.local.get(key) }
+// The shipped process-default store survives evaluator runs and reloads
+// (App.rs:1781-1812). Web is registered-unsupported, not an origin store.
+struct LocalStorage {
+    entries: [String:String]
+}
 
-pub fn set(key: String, value: String) Never! { core.web.storage.local.set(key, value) }
+fn init_local_storage() -> Shared<LocalStorage> Never! {
+    shared LocalStorage{entries: [String:String]{}}
+}
 
-pub fn remove(key: String) Never! { core.web.storage.local.remove(key) }
+fn get(key: String) -[Browser]> String? Never! {
+    state :: core.mem.__process_shared(init_local_storage)
+    guard :: state.guard_read()
+    guard.value.entries.get(key)
+}
 
-pub fn clear() Never! { core.web.storage.local.clear() }
+fn set(key: String, value: String) Never! -[Browser]> {
+    state :: core.mem.__process_shared(init_local_storage)
+    guard := state.guard_edit()
+    _ :: &guard.value.entries.add(key, value)
+}
 
-pub fn get_or(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
+fn remove(key: String) Never! -[Browser]> {
+    state :: core.mem.__process_shared(init_local_storage)
+    guard := state.guard_edit()
+    _ :: &guard.value.entries.remove(key)
+}
 
-pub fn has(key: String) -> Bool Never! { get(key) != None }
+fn clear() Never! -[Browser]> {
+    state :: core.mem.__process_shared(init_local_storage)
+    guard := state.guard_edit()
+    &guard.value.entries.clear()
+}
 
+fn get_or(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
+
+fn has(key: String) -> Bool Never! { get(key) != None }
+
+// An explicit Browser-only caller bounds the inferred effects of both helpers.
+fn test_helper_effects() Never! -[Browser]> {
+    key :: "Core.web.storage.local.helper.effects"
+    remove(key)
+    assert_eq(get_or(key, "fallback"), "fallback")
+    assert_eq(has(key), false)
+}
+
+#Test("local helper calls fit the shipped Browser effect row") {
+    test_helper_effects()
+}
+
+
+#Test("local storage preserves miss, replacement, removal and empty keys") {
+    key :: "Core.web.storage.local.contract"
+    remove(key)
+    assert_eq(get(key), None)
+    set(key, "first")
+    set(key, "second")
+    assert_eq(get(key), Val("second"))
+    remove(key)
+    assert_eq(get(key), None)
+    set("", "")
+    assert_eq(get(""), Val(""))
+    remove("")
+}
+
+#Test("local and session storage keep separate identities") {
+    key :: "Core.web.storage.separation"
+    set(key, "local")
+    core.web.storage.session.set(key, "session")
+    assert_eq(get(key), Val("local"))
+    assert_eq(core.web.storage.session.get(key), Val("session"))
+    remove(key)
+    assert_eq(core.web.storage.session.get(key), Val("session"))
+    core.web.storage.session.remove(key)
+}
+
+#Test("two tasks do not lose independent local storage writes") {
+    first :: task { loop i in 0..<64 -> set("Core.local.first.{i}", "{i}") }
+    second :: task { loop i in 0..<64 -> set("Core.local.second.{i}", "{i}") }
+    ^first.join() ?? panic("first storage writer failed")
+    ^second.join() ?? panic("second storage writer failed")
+    loop i in 0..<64 {
+        assert_eq(get("Core.local.first.{i}"), Val("{i}"))
+        assert_eq(get("Core.local.second.{i}"), Val("{i}"))
+        remove("Core.local.first.{i}")
+        remove("Core.local.second.{i}")
+    }
+}

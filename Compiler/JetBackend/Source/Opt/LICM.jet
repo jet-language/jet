@@ -1,0 +1,230 @@
+// O2 LICM: natural loops only, innermost first. Definitions keep their ids;
+// preheaders forward fresh block parameters without changing backedge args.
+// Speculation excludes ownership effects, stack slots, overflow checks and
+// potentially trapping integer division. Float expressions move, never fold.
+fn opt_licm_dominates(dom: OptDominators, ancestor: Int, row: Int) -> Bool Never! {
+    cursor := row
+    loop cursor >= 0 {
+        if cursor == ancestor -> return true
+        parent :: dom.parent[cursor].copy()
+        if parent == cursor -> return false
+        cursor = parent
+    }
+    false
+}
+
+// Merge all latches of a header, stopping the reverse walk at the header.
+// A side entry (including an unreachable incoming edge) refuses the loop.
+fn opt_licm_body(function: LIRFunction, dom: OptDominators, header: Int) -> [Bool]? {
+    body := [Bool]{}
+    loop _ in function.blocks -> &body.push(false)
+    body[header] = true
+    pending := [Int]{}
+    loop source in dom.predecessors[header] {
+        if opt_licm_dominates(dom, header, source) && !body[source] {
+            body[source] = true
+            &pending.push(source)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        row :: pending[cursor].copy()
+        cursor += 1
+        if !opt_licm_dominates(dom, header, row) -> return None
+        loop predecessor in dom.predecessors[row] {
+            if !body[predecessor] {
+                body[predecessor] = true
+                &pending.push(predecessor)
+            }
+        }
+    }
+    Val(body)
+}
+
+fn opt_licm_clobber(inst: LIRInst) -> Bool Never! {
+    if inst == {
+        .Call(_, _, _, _) | .InlineAsm(_, _, _, _, _) | .Store(_, _, _) | .Drop(_) | .Move(_, _) | .Reown(_, _) -> true
+        else -> false
+    }
+}
+
+// Match the permitted instructions directly rather than allocating a use list
+// for every candidate on every invariant-discovery sweep.
+fn opt_licm_available(inst: LIRInst, available: [Bool]) -> Bool Never! {
+    if inst == {
+        .Const(_, _) | .DataAddress(_, _) | .FunctionAddress(_, _) -> true
+        .Binary(_, _, left, right) | .Compare(_, _, left, right) -> available[left.value] && available[right.value]
+        .PointerAdd(_, base, offset) -> available[base.value] && available[offset.value]
+        .Convert(_, src) | .Bitcast(_, src) -> available[src.value]
+        .Load(_, base, _) -> available[base.value]
+        else -> false
+    }
+}
+
+fn opt_licm_candidate(function: LIRFunction, defs: OptDefs, inst: LIRInst, header: Bool, clobbered: Bool) -> Bool Never! {
+    if inst == {
+        .Const(_, _) | .Compare(_, _, _, _) | .PointerAdd(_, _, _) |
+        .DataAddress(_, _) | .FunctionAddress(_, _) | .Convert(_, _) | .Bitcast(_, _) -> true
+        .Binary(_, op, left, right) -> {
+            // IEEE Float division cannot trap; no folding/reassociation occurs.
+            if function.values[left.value].layout.class == .Float -> return true
+            if op == .Div || op == .Rem || op == .UDiv || op == .URem {
+                if defs.insts[right.value] == .Val(.Const(_, divisor)) {
+                    if divisor == 0 -> return false
+                    if (op == .Div || op == .Rem) && divisor == -1 -> return false
+                    return true
+                }
+                return false
+            }
+            true
+        }
+        .Load(_, _, _) -> header && !clobbered
+        else -> false
+    }
+}
+
+fn opt_licm_target(target: LIRJumpTarget, header: LIRBlockID, preheader: LIRBlockID) -> LIRJumpTarget Never! {
+    if target.block == header -> LIRJumpTarget{block: preheader, args: target.args} else -> target
+}
+
+fn opt_licm_redirect(terminator: LIRTerminator, header: LIRBlockID, preheader: LIRBlockID) -> LIRTerminator Never! {
+    if terminator == {
+        .Jump(target) -> LIRTerminator.Jump{target: opt_licm_target(target, header, preheader)}
+        .Branch(condition, yes, no) -> LIRTerminator.Branch{condition: condition, then_target: opt_licm_target(yes, header, preheader), else_target: opt_licm_target(no, header, preheader)}
+        else -> terminator
+    }
+}
+
+fn opt_licm_loop(function: &LIRFunction, header: Int) Never! {
+    dom :: opt_dominators(function)
+    body :: opt_licm_body(function, dom, header) ?? return
+    // The entry header has no preheader, and is not speculated above entry.
+    if header == 0 -> return
+    outside := [Int]{}
+    loop predecessor in dom.predecessors[header] {
+        if !body[predecessor] -> &outside.push(predecessor)
+    }
+    if outside.len() == 0 -> return
+    defs :: opt_defs(function)
+    available := [Bool]{}
+    consumed := [Bool]{}
+    loop _ in function.values {
+        &available.push(false)
+        &consumed.push(false)
+    }
+    clobbered := false
+    loop (row, block) in function.blocks {
+        // Only definitions dominating the header are available at its outside
+        // edges. In particular, a loop block parameter is always variant.
+        dominates :: !body[row] && opt_licm_dominates(dom, row, header)
+        loop param in block.params -> available[param.value] = dominates
+        loop inst in block.insts {
+            if lir_inst_def(inst) == .Val(dst) -> available[dst.value] = dominates
+            loop value in lir_inst_consumes(inst) -> consumed[value.value] = true
+            if body[row] && opt_licm_clobber(inst) -> clobbered = true
+        }
+    }
+    hoisted := [LIRInst]{}
+    hoisted_lines := [Int]{}
+    changed := true
+    // Storage order need not be dominance order. Revisit earlier rows once
+    // their invariant inputs move, emitting each definition exactly once.
+    loop changed {
+        changed = false
+        loop (row, member) in body {
+            if !member -> next
+            kept := [LIRInst]{}
+            kept_lines := [Int]{}
+            loop (index, inst) in function.blocks[row].insts {
+                movable := opt_licm_candidate(function, defs, inst, row == header, clobbered)
+                if lir_inst_def(inst) == .Val(dst) {
+                    if consumed[dst.value] || function.values[dst.value].drop != .Trivial -> movable = false
+                } else {
+                    movable = false
+                }
+                if movable -> movable = opt_licm_available(inst, available)
+                if movable {
+                    if lir_inst_def(inst) == .Val(dst) -> available[dst.value] = true
+                    &hoisted.push(inst)
+                    &hoisted_lines.push(opt_debug_line(function.blocks[row], index))
+                    changed = true
+                } else {
+                    &kept.push(inst)
+                    &kept_lines.push(opt_debug_line(function.blocks[row], index))
+                }
+            }
+            &kept_lines.push(opt_debug_line(function.blocks[row], function.blocks[row].insts.len()))
+            function.blocks[row].lines = kept_lines
+            function.blocks[row].insts = kept
+        }
+    }
+    if hoisted.len() == 0 -> return
+    header_id :: function.blocks[header].id
+    if outside.len() == 1 {
+        predecessor :: outside[0].copy()
+        if function.blocks[predecessor].terminator == .Jump(target) {
+            if target.block == header_id {
+                lines := [Int]{}
+                loop at in 0..<function.blocks[predecessor].insts.len() -> &lines.push(opt_debug_line(function.blocks[predecessor], at))
+                loop line in hoisted_lines -> &lines.push(line)
+                &lines.push(opt_debug_line(function.blocks[predecessor], function.blocks[predecessor].insts.len()))
+                function.blocks[predecessor].lines = lines
+                loop inst in hoisted -> &function.blocks[predecessor].insts.push(inst)
+                return
+            }
+        }
+    }
+    fresh := 0
+    loop block in function.blocks { if block.id.value >= fresh -> fresh = block.id.value + 1 }
+    preheader :: LIRBlockID{value: fresh}
+    params := [LIRValueID]{}
+    loop param in function.blocks[header].params {
+        value :: function.values[param.value]
+        id :: LIRValueID{value: function.values.len()}
+        &function.values.push(LIRValue{id: id, layout: value.layout, drop: value.drop, jet_type: value.jet_type})
+        &params.push(id)
+    }
+    loop (row, member) in body {
+        if !member -> function.blocks[row].terminator = opt_licm_redirect(function.blocks[row].terminator, header_id, preheader)
+    }
+    &hoisted_lines.push(opt_debug_line(function.blocks[header], function.blocks[header].insts.len()))
+    &function.blocks.push(LIRBlock{id: preheader, params: params, insts: hoisted, terminator: LIRTerminator.Jump{target: LIRJumpTarget{block: header_id, args: params}}, lines: hoisted_lines})
+}
+
+fn lir_licm_function(original: LIRFunction) -> LIRFunction Never! {
+    function := original
+    dom :: opt_dominators(function)
+    rows :: opt_block_rows(function)
+    headers := [Int]{}
+    sizes := [Int]{}
+    seen := [Bool]{}
+    loop _ in function.blocks -> &seen.push(false)
+    loop source in dom.order {
+        loop target in lir_terminator_targets(function.blocks[source].terminator) {
+            header :: rows.get(target.block.value) ?? -1
+            if header < 0 -> next
+            if seen[header] || !opt_licm_dominates(dom, header, source) -> next
+            seen[header] = true
+            if opt_licm_body(function, dom, header) == .Val(body) {
+                size := 0
+                loop member in body { if member -> size += 1 }
+                &headers.push(header)
+                &sizes.push(size)
+            }
+        }
+    }
+    // Selection by increasing body size processes nested loops first. Rebuild
+    // each body at processing time so newly created inner preheaders belong
+    // to enclosing loops and their invariants can move outward again.
+    loop _ in headers {
+        selected := -1
+        loop (index, size) in sizes {
+            if size >= 0 && (selected < 0 || size < sizes[selected]) -> selected = index
+        }
+        if selected >= 0 {
+            sizes[selected] = -1
+            opt_licm_loop(&function, headers[selected])
+        }
+    }
+    function
+}

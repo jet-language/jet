@@ -20,29 +20,29 @@ STORE_NAR_CHUNK_BYTES :: prep { 65536 }
 
 store_nar_stage_sequence := 0
 
-pub struct NarStats {
-    pub digest: String
-    pub bytes: Int
-    pub nodes: Int
+struct NarStats {
+    digest: String
+    bytes: Int
+    nodes: Int
 }
 
 // A decoded NAR tree.
-pub enum NarNode {
+enum NarNode {
     Directory([NarDirectoryEntry])
     Regular(executable: Bool, bytes: [U8])
     Symlink([U8])
 }
 
-pub struct NarDirectoryEntry {
-    pub name: [U8]
-    pub node: NarNode
+struct NarDirectoryEntry {
+    name: [U8]
+    node: NarNode
 }
 
 // A byte source for streaming decode (an `io.Reader` such as a file handle or
 // a `zstd.reader`): `read(limit)` returns at most `limit` bytes and `[]` at
 // the end of the data; cache sources also emit terminal progress while reading.
-pub struct NarByteSource {
-    pub read: fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!
+struct NarByteSource {
+    read: fn(Int) -[IO, FS, Net, Env, Time.Wait]> [U8] IOError!
 }
 
 fn store_nar_invalid(message: String) -> StoreError Never! {
@@ -50,7 +50,7 @@ fn store_nar_invalid(message: String) -> StoreError Never! {
 }
 
 // Serialize a store tree into canonical NAR bytes.
-pub fn store_write_nar(root: String) -> (bytes: [U8], stats: NarStats) StoreError! {
+fn store_write_nar(root: String) -> (bytes: [U8], stats: NarStats) StoreError! {
     if files.stat(root).is_symlink -> return Err(store_nar_invalid("NAR source root cannot be a symlink"))
     canonical :: files.canonicalize(root) ?? return Err(store_nar_invalid("cannot resolve NAR source: {StoreError.IO(err).message()}"))
     output := [U8]{}
@@ -61,7 +61,7 @@ pub fn store_write_nar(root: String) -> (bytes: [U8], stats: NarStats) StoreErro
 }
 
 // Serialize a tree and write it atomically to a regular file.
-pub fn store_write_nar_file(root: String, destination: String) -> NarStats StoreError! {
+fn store_write_nar_file(root: String, destination: String) -> NarStats StoreError! {
     encoded :: store_write_nar(root)
     store_nar_write_atomic(destination, encoded.bytes)
     Ok(encoded.stats)
@@ -69,24 +69,24 @@ pub fn store_write_nar_file(root: String, destination: String) -> NarStats Store
 
 // Read a NAR, fully validate it, and publish the decoded tree at
 // `destination`, which must not already exist.
-pub fn store_read_nar(bytes: [U8], destination: String) -> NarStats StoreError! {
+fn store_read_nar(bytes: [U8], destination: String) -> NarStats StoreError! {
     decoded :: store_decode_nar_with_mode(bytes, false)
     store_nar_publish_decoded_node(decoded.node, destination)
     Ok(decoded.stats)
 }
 
 // Validate a NAR byte stream without materializing it.
-pub fn store_validate_nar(bytes: [U8]) -> NarStats StoreError! {
+fn store_validate_nar(bytes: [U8]) -> NarStats StoreError! {
     Ok(store_decode_nar_with_mode(bytes, false).stats)
 }
 
 // Read and stage a NAR file before atomically publishing its decoded tree.
-pub fn store_read_nar_file(source: String, destination: String) -> NarStats StoreError! {
+fn store_read_nar_file(source: String, destination: String) -> NarStats StoreError! {
     store_read_nar(store_nar_read_bounded(source, STORE_MAX_NAR_BYTES), destination)
 }
 
 // Compute the canonical digest of a NAR byte stream.
-pub fn store_nar_digest(bytes: [U8]) -> String Never! {
+fn store_nar_digest(bytes: [U8]) -> String Never! {
     store_nar_digest_for(bytes)
 }
 
@@ -155,7 +155,7 @@ fn store_nar_encode_node(path: String, root: String, out: &[U8], nodes: &Int, de
             store_nar_put_text(&out, "(")
             store_nar_put_text(&out, "type")
             store_nar_put_text(&out, "regular")
-            if metadata.mode & 73 != 0 {
+            if (metadata.mode).bit_and(73) != 0 {
                 store_nar_put_text(&out, "executable")
                 store_nar_put_text(&out, "")
             }
@@ -198,7 +198,7 @@ struct NarReader {
     fn field(&self) -> [U8] StoreError! {
         raw :: &self.take_bytes(8)
         length := 0
-        loop index in 0..<8 -> length = length | (Int.from_u8(raw[index]) << (8 * index))
+        loop index in 0..<8 -> length = (length).bit_or((Int.from_u8(raw[index]) << (8 * index)))
         if length < 0 || length > STORE_NAR_MAX_NODE_BYTES -> return Err(store_nar_invalid("NAR field exceeds the 512 MiB limit"))
         value :: &self.take_bytes(length)
         padding :: &self.take_bytes((8 - length % 8) % 8)
@@ -295,13 +295,13 @@ fn store_nar_bytes_less(left: [U8], right: [U8]) -> Bool Never! {
 // Decode a NAR directly from a bounded source into a fresh destination.
 // Metadata is bounded separately and regular-file contents are copied in
 // fixed-size chunks; the whole archive is never retained in memory.
-pub fn store_read_nar_stream(source: NarByteSource, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
+fn store_read_nar_stream(source: NarByteSource, destination: String, expected_nar_size: Int) -> NarStats StoreError! {
     store_read_nar_stream_with_mode(source, destination, expected_nar_size, false)
 }
 
 // Read a NAR with the POSIX-only allowances used by standard Nix cache
 // admission. Native ingest keeps the strict wrapper above.
-pub fn store_read_nar_stream_with_mode(source: NarByteSource, destination: String, expected_nar_size: Int, allow_nix_store_symlinks: Bool) -> NarStats StoreError! {
+fn store_read_nar_stream_with_mode(source: NarByteSource, destination: String, expected_nar_size: Int, allow_nix_store_symlinks: Bool) -> NarStats StoreError! {
     if expected_nar_size <= 0 -> return Err(store_nar_invalid("NAR stream size must be nonzero"))
     if files.lexists(destination) -> return Err(store_nar_invalid("NAR stream destination already exists"))
     parent :: files.dirname(destination)
@@ -355,7 +355,7 @@ struct NarStreamReader {
     fn u64(&self) -> Int StoreError! {
         raw :: &self.read_exact(8)
         value := 0
-        loop index in 0..<8 -> value = value | (Int.from_u8(raw[index]) << (8 * index))
+        loop index in 0..<8 -> value = (value).bit_or((Int.from_u8(raw[index]) << (8 * index)))
         Ok(value)
     }
 
@@ -536,7 +536,7 @@ fn store_nar_validate_sibling_names(names: [[U8]], allow_nix_store_symlinks: Boo
     pkg_reject_casefold_collisions(names) ?? return Err(store_nar_invalid("NAR path law rejected: {err.detail}"))
 }
 
-pub fn store_nar_validate_name(value: [U8], allow_nix_store_symlinks: Bool) StoreError! {
+fn store_nar_validate_name(value: [U8], allow_nix_store_symlinks: Bool) StoreError! {
     // Nix admission accepts exactly Nix's own name law (any byte except `/`
     // and NUL; not `.`/`..`). Native ingest keeps the portable-name law: no
     // backslash, no control bytes.
@@ -606,7 +606,7 @@ fn store_nar_validate_relative_symlink_depth(target: [U8], start_depth: Int, all
     }
 }
 
-pub fn store_nar_validate_store_path(value: String) StoreError! {
+fn store_nar_validate_store_path(value: String) StoreError! {
     store_nar_validate_store_path_bytes(value.bytes())
 }
 
@@ -665,7 +665,7 @@ fn store_nar_unique_suffix(sequence: Int) -> String Never! {
 
 // Read a regular file of at most `limit` bytes without following a final
 // link, refusing a file that changes identity while it is read.
-pub fn store_nar_read_bounded(path: String, limit: Int) -> [U8] StoreError! {
+fn store_nar_read_bounded(path: String, limit: Int) -> [U8] StoreError! {
     store_nar_read_bounded_with_expected(path, limit, None)
 }
 
@@ -704,7 +704,7 @@ fn store_nar_same_regular_metadata(left: Stat, right: Stat) -> Bool Never! {
 
 // Publish `bytes` at a fresh `path` through an exclusive partial and a hard
 // link, so a concurrent writer with the same bytes also succeeds.
-pub fn store_nar_write_atomic(path: String, bytes: [U8]) StoreError! {
+fn store_nar_write_atomic(path: String, bytes: [U8]) StoreError! {
     parent :: files.dirname(path)
     if parent == "" -> return Err(store_nar_invalid("binary-cache destination has no parent"))
     store_nar_validate_destination_parent(parent)

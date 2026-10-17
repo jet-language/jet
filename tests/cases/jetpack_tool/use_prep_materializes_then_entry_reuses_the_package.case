@@ -1,0 +1,15 @@
+# Port of tests/jetpack_tool.rs:316-368. AUTHORED PENDING-SAME-HEAD; batch-four conditionals.
+# Sources/literal predicates exact originals; provider artifact SHA is computed from the same original script bytes.
+fixture: fixtures/use_prep_materializes_then_entry_reuses_the_package
+mkdir: root
+env: JETPACK_ROOT={work}/root
+mkdir: home
+env: HOME={work}/home
+step: jetpack use omp@releases#1.0.0 --prep --no-color --offline --fixtures {work}/fx
+exit: 0
+stdout: empty
+remove: fx/jetpackage-omp.json
+remove: fx/omp-1.0.0
+step: jetpack use omp@releases#1.0.0 --no-color --offline --fixtures {work}/fx -- omp
+exit: 0
+stdout.trim: = use_prep_materializes_then_entry_reuses_the_package.out

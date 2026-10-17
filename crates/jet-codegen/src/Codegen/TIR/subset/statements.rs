@@ -121,7 +121,7 @@ fn stmt_in_subset_inner(s: &Stmt, cx: &Cx, locals: &mut HashSet<String>) -> bool
                     || matches!(
                         pattern,
                         Pattern::Variant { variant, .. }
-                            if cx.variant_owner.contains_key(variant)
+                            if cx.fact_variant_owner(variant).is_some()
                     ) =>
                 {
                     let ok = !b.is_comptime
@@ -655,7 +655,7 @@ pub(crate) fn if_cond_in_subset(
             // shape mirrors the JSON-variant if-let exactly).
             //
             // D-UNIONTYPE1=A: anonymous-union member tags are not in `variant_owner`
-            // (they collide with DataTree/etc.), same as `switch_in_subset`'s
+            // (they collide with Dyn/etc.), same as `switch_in_subset`'s
             // `union_shaped` fallback — accept the single-bind case and resolve the
             // generated `__JetUnion_*` enum from the subject's type at lowering.
             if !bindings.is_empty()
@@ -673,7 +673,7 @@ pub(crate) fn if_cond_in_subset(
                         _ => None,
                     })
                     .collect();
-                if let Some(owner) = cx.variant_owner.get(variant) {
+                if let Some(owner) = cx.fact_variant_owner(variant) {
                     let covered = if variant_pattern_uses_payload(pattern) {
                         enum_is_covered(owner, cx)
                     } else {
@@ -689,7 +689,7 @@ pub(crate) fn if_cond_in_subset(
             // D-TAG1: a binding-free variant/group test (`if d == .Fire { … }`)
             // is a plain Bool condition — the expression subset lowers it to
             // `matches!` (`TExprKind::PatternMatches`), no if-let, no bindings.
-            if bindings.is_empty() && cx.variant_owner.contains_key(variant) {
+            if bindings.is_empty() && cx.fact_variant_owner(variant).is_some() {
                 return Some(Vec::new());
             }
             return None;
@@ -850,7 +850,7 @@ pub(crate) fn switch_in_subset(
                 .all(|stmt| stmt_in_subset(stmt, cx, &mut else_locals))
         });
     }
-    // D-ENC-DYN1=A+ / card #2356: DataTree dispatch uses the same typed
+    // D-ENC-DYN1=A+ / card #2356: Dyn dispatch uses the same typed
     // if-let lowering as the expression condition path, but its tags are not
     // in `variant_owner` and therefore cannot satisfy the generic exhaustive
     // enum branch below. Admit unit, wildcard, and bound payload slots here;
@@ -865,7 +865,7 @@ pub(crate) fn switch_in_subset(
     }) {
         for arm in arms {
             let pattern = arm_variant_pattern(cx, &arm.cond, subject)
-                .expect("DataTree switch arm was checked above");
+                .expect("Dyn switch arm was checked above");
             let mut body_locals = locals.clone();
             add_pattern_binding_names(&pattern, &mut body_locals);
             if !arm
@@ -939,7 +939,7 @@ pub(crate) fn switch_in_subset(
                 .is_some_and(|pattern| variant_pattern_uses_payload(&pattern))
         });
         // D-UNIONTYPE1=A: union matches use member-type arm heads. Those tags are
-        // not in `variant_owner` (they collide with DataTree/etc.), so the owning
+        // not in `variant_owner` (they collide with Dyn/etc.), so the owning
         // enum is resolved later from the subject's Jet type in `lower_enum_match`.
         let union_shaped = subj_enum.is_none()
             && arms.iter().all(|a| {

@@ -1,0 +1,303 @@
+use core.files as s2_syntax_files_api
+use core.text.parse as s2_syntax_parse
+
+// DATA and document subclaims of tests/syntax_reconciliation.rs.
+// Rust-source law assertions retire; lexical/registry oracles remain compiler-lib.
+// Plain helpers make the author check cover assertion bodies (#4790).
+fn s2_syntax_paths(root: String) -> [String] {
+    out := [String]{}
+    kind :: s2_syntax_files_api.stat(root) ?? return out
+    if kind.is_symlink -> return out
+    if kind.is_file {
+        &out.push(root)
+        return out
+    }
+    if !kind.is_dir -> return out
+    entries :: s2_syntax_files_api.list_dir(root) ?? return out
+    loop entry in entries {
+        name :: entry.name
+        skipped :: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
+        omit := false
+        loop candidate in skipped {
+            if name == candidate -> omit = true
+        }
+        if entry.is_dir && (omit || name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-")) -> next
+        children :: s2_syntax_paths(entry.path)
+        loop child in children -> &out.push(child)
+    }
+    out
+}
+fn s2_syntax_skip(path: String) -> Bool {
+    parts :: path.split("/").to_list()
+    name :: parts[parts.len() - 1]
+    path.contains("/target/") || name.starts_with("retired_") || name.contains("_retired_") || name.ends_with("_retired") || path.ends_with(".published.snapshot") || path.ends_with("tests/syntax_reconciliation.rs") || path.ends_with("Docs/spec/syntax-decisions.md")
+}
+fn s2_syntax_forbidden(line: String, needle: String) -> Bool {
+    if needle != "List<" && needle != "List[" && needle != "Map<" -> return line.contains(needle)
+    offset := 0
+    raw :: line.bytes()
+    loop {
+        index :: s2_syntax_parse.find_from(line, needle, offset)
+        if index < 0 -> return false
+        preceded := false
+        if index > 0 {
+            ch :: Int.from_u8(raw[index - 1])
+            preceded = ch == 95 || (ch >= 48 && ch <= 57) || (ch >= 65 && ch <= 90) || (ch >= 97 && ch <= 122)
+        }
+        if !preceded -> return true
+        offset = index + needle.bytes().len()
+    }
+}
+fn s2_syntax_trim_start(text: String) -> String {
+    bytes :: text.bytes()
+    index := 0
+    loop index < bytes.len() {
+        width :: policy_space_width(bytes, index)
+        if width == 0 -> break
+        index += width
+    }
+    policy_slice_bytes(text, index, bytes.len())
+}
+fn s2_syntax_old_binding(line: String) -> Bool {
+    words :: [String]{"let", "val", "var", "set"}
+    loop block in line.split("{{") {
+        loop segment in block.split(";") {
+            trimmed :: s2_syntax_trim_start(segment)
+            loop word in words {
+                if trimmed.starts_with("{word} ") || trimmed.starts_with("{word}\t") -> return true
+            }
+        }
+    }
+    false
+}
+
+fn s2_syntax_live_surface_has_no_retired_spellings() {
+    roots :: [String]{"AGENTS.md", "CLAUDE.md", "Docs/spec", "Docs/spec/reference/syntax-surface.jet", "Source", "crates", "Examples", "tests/ui"}
+    forbidden :: [String]{"@unsafe", "@audit", "@extern", "@bindgen", "#extern", "#bindgen", "#layout", "#grant", "#context", "#test", "#pure", "pure fn", "#todo", "List<", "List[", "Map<", "#[Serialize", "Serialize]", "#[Deserialize", "Deserialize]", "core.json", "use jet.", "use std.", "?continue", "?break", "?return", "comptime val "}
+    loop root in roots {
+        loop path in s2_syntax_paths(root) {
+            if path.ends_with(".rs") || s2_syntax_skip(path) -> next
+            source :: s2_syntax_files_api.read(path) ?? next
+            loop (index, line) in source.lines() {
+                loop needle in forbidden {
+                    if needle == "pure fn" && !path.starts_with("Docs") -> next
+                    assert(!s2_syntax_forbidden(line, needle), "{path}:{index + 1} contains retired {needle}")
+                }
+            }
+        }
+    }
+}
+#Test("live_surface_has_no_retired_spellings") {
+    s2_syntax_live_surface_has_no_retired_spellings()
+}
+
+fn s2_syntax_pipe_family_has_no_stale_flow_reservation() {
+    decision :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    normalized :: policy_split_whitespace(decision).join(" ")
+    assert(normalized.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"))
+    assert(normalized.contains("value-position `|` is bitwise OR"))
+}
+#Test("pipe_family_has_no_stale_flow_reservation") {
+    s2_syntax_pipe_family_has_no_stale_flow_reservation()
+}
+
+fn s2_syntax_active_maturity_docs_use_meta_field_only() {
+    paths :: [String]{"Docs/spec/reference/maturity-tags.md"}
+    required :: [String]{"#Meta(maturity:", ".Experimental", ".Tested", ".Hardened"}
+    retired :: [String]{"#Experimental", "#Tested", "#Hardened", "#Experimental", "#Tested", "#Hardened"}
+    loop path in paths {
+        source :: s2_syntax_files_api.read(path) ?? panic("read maturity surface {path}")
+        loop needle in required -> assert(source.contains(needle), "{path} does not teach {needle}")
+        loop line in source.lines() {
+            loop needle in retired -> assert(!line.contains(needle) || line.contains("not grammar"), "{path} teaches standalone {needle}")
+        }
+    }
+}
+#Test("active_maturity_docs_use_meta_field_only") {
+    s2_syntax_active_maturity_docs_use_meta_field_only()
+}
+
+fn s2_syntax_proposal_marker_census_matches_syntax_registry() {
+    source :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read marker census")
+    normalized :: policy_split_whitespace(source).join(" ")
+    required :: [String]{"`#` is the sole prefix for attributes, instructions, and properties.", "Prefix `@` is now the compile-time and fact-read mark; infix `@`", "A leading `@Rule` in marker position produces E0063 with the canonical `#Rule` fix."}
+    loop needle in required -> assert(normalized.contains(needle), "marker census lost {needle}")
+}
+#Test("proposal_marker_census_matches_syntax_registry") {
+    s2_syntax_proposal_marker_census_matches_syntax_registry()
+}
+
+fn s2_syntax_old_binding_migration_paths_stay_removed() {
+    roots :: [String]{"crates/jet-foundation/src/Syntax.rs", "crates/jet-parser/src/Parser", "Source/FixEngine.rs", "Source/LSP", "Docs/spec/reference/syntax-surface.jet", "Tools/editors/vscode/README.md", "Tools/editors/zed/README.md", "tests/cli", "tests/lsp", "tests/ui"}
+    codes :: [String]{"E0009", "E0010", "E0985"}
+    loop root in roots {
+        loop path in s2_syntax_paths(root) {
+            if path.ends_with(".rs") || s2_syntax_skip(path) -> next
+            source :: s2_syntax_files_api.read(path) ?? next
+            loop (index, line) in source.lines() {
+                allowed :: path.ends_with("tests/ui/foreign_declaration_binding.jet") && s2_syntax_old_binding(line)
+                loop code in codes -> assert(!line.contains(code) || allowed, "{path}:{index + 1} contains retired binding diagnostic {code}")
+                assert(!s2_syntax_old_binding(line) || allowed, "{path}:{index + 1} contains retired binding spelling")
+            }
+        }
+    }
+}
+#Test("old_binding_migration_paths_stay_removed") {
+    s2_syntax_old_binding_migration_paths_stay_removed()
+}
+
+fn s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged() {
+    reference :: s2_syntax_files_api.read("Docs/spec/reference/syntax-surface.jet") ?? panic("read syntax reference")
+    spec :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    listed :: [String]{"S74", "D-ONCE-UITREE1", "S56", "D-MIGRATE2A", "D-MIGRATE2D", "D-MIGRATE2E"}
+    expected := [String:Int]{"S74": 1, "D-ONCE-UITREE1": 1}
+    loop line in reference.lines() {
+        suffix :: s2_syntax_parse.split_once(line, "# RATIFIED, NOT YET IMPLEMENTED (")
+        if !suffix.found -> next
+        ids :: s2_syntax_parse.split_once(suffix.tail, ")")
+        if !ids.found -> next
+        loop raw in ids.head.split("/") {
+            // #4819: map[key] = v with a trimmed view key ICEs; owned key here.
+            id :: raw.trim().copy()
+            if id != "<id>" -> expected[id] = 1
+        }
+    }
+    assert(expected.len() == listed.len(), "ratified inventory set size drifted")
+    loop id in listed -> assert((expected.get(id) ?? 0) == 1, "ratified inventory lost {id}")
+    assert(spec.contains("retires S74's pattern-left refutable binding"), "S74 source evidence missing")
+    disposition_0 :: "retired by D-CHOOSE-TEST1; card #1652"
+    assert(disposition_0.contains("card #") && (disposition_0.contains("retired") || disposition_0.contains("deferred") || disposition_0.contains("tracked")))
+    assert(spec.contains("ratified-but-unbuilt `.Button.{{ }}` UI-tree spelling"), "D-ONCE-UITREE1 source evidence missing")
+    disposition_1 :: "deferred to the architecture result; card #1588 via #1736"
+    assert(disposition_1.contains("card #") && (disposition_1.contains("retired") || disposition_1.contains("deferred") || disposition_1.contains("tracked")))
+    assert(reference.contains("# RATIFIED, NOT YET IMPLEMENTED (S56)"), "S56 source evidence missing")
+    disposition_2 :: "deferred to Epoch 3 typed reflection; card #756"
+    assert(disposition_2.contains("card #") && (disposition_2.contains("retired") || disposition_2.contains("deferred") || disposition_2.contains("tracked")))
+    assert(reference.contains("# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)"), "D-MIGRATE2A source evidence missing")
+    disposition_3 :: "tracked by the imported decision ledger; card #1735"
+    assert(disposition_3.contains("card #") && (disposition_3.contains("retired") || disposition_3.contains("deferred") || disposition_3.contains("tracked")))
+    assert(reference.contains("# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)"), "D-MIGRATE2D source evidence missing")
+    disposition_4 :: "tracked by the imported decision ledger; card #1735"
+    assert(disposition_4.contains("card #") && (disposition_4.contains("retired") || disposition_4.contains("deferred") || disposition_4.contains("tracked")))
+    assert(reference.contains("# RATIFIED, NOT YET IMPLEMENTED (D-MIGRATE2A / D-MIGRATE2D / D-MIGRATE2E)"), "D-MIGRATE2E source evidence missing")
+    disposition_5 :: "tracked by the imported decision ledger; card #1735"
+    assert(disposition_5.contains("card #") && (disposition_5.contains("retired") || disposition_5.contains("deferred") || disposition_5.contains("tracked")))
+}
+#Test("ratified_unshipped_spellings_are_listed_and_triaged") {
+    s2_syntax_ratified_unshipped_spellings_are_listed_and_triaged()
+}
+
+fn s2_syntax_syntax_status_matrix_covers_unbuilt_notes() {
+    spec :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    assert(spec.contains("A ratified entry may sit unbuilt **only** when gated on"))
+    lines :: spec.lines()
+    loop (index, line) in lines {
+        lower :: s2_syntax_parse.lower(line)
+        if !lower.contains("unbuilt") && !lower.contains("not yet implemented") -> next
+        if index < 20 || lower.contains("have/have-not ledger") -> next
+        if !lower.contains("ratified") && !lower.contains("not yet implemented") -> next
+        start := index
+        loop start > 0 {
+            if lines[start - 1].trim().is_empty() -> break
+            start = start - 1
+        }
+        end := index + 1
+        loop end < lines.len() {
+            if lines[end].trim().is_empty() -> break
+            end = end + 1
+        }
+        context := [String]{}
+        at := start
+        loop at < end {
+            &context.push(lines[at])
+            at = at + 1
+        }
+        paragraph :: context.join("\n")
+        assert(paragraph.contains("card #") || paragraph.contains("cards #"), "unbuilt syntax note lacks live card gate {index + 1}: {line}")
+    }
+}
+#Test("syntax_status_matrix_covers_unbuilt_notes") {
+    s2_syntax_syntax_status_matrix_covers_unbuilt_notes()
+}
+
+fn s2_syntax_environment_reference_is_canonical_and_navigable() {
+    reference :: s2_syntax_files_api.read("Docs/spec/reference/environment.md") ?? panic("read environment reference")
+    docs :: s2_syntax_files_api.read("Docs/README.md") ?? panic("read docs index")
+    assert(docs.contains("reference/environment.md"), "docs index must link canonical environment reference")
+    required :: [String]{"JET_PROP_SEED", "JET_RAYLIB_DISPLAY", "JET_UI_HEADLESS", "JET_ENV_DISABLE", "JET_TEST_JOBS", "JET_CANVAS_PREREQUISITES", "## Naming convention"}
+    loop needle in required -> assert(reference.contains(needle), "environment reference missing {needle}")
+}
+#Test("environment_reference_is_canonical_and_navigable") {
+    s2_syntax_environment_reference_is_canonical_and_navigable()
+}
+
+fn s2_syntax_lexical_ledger_is_rendered_from_syntax() {
+    decisions :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    start :: s2_syntax_parse.find(decisions, "<!-- BEGIN GENERATED LEXICAL LEDGER -->")
+    end :: s2_syntax_parse.find(decisions, "<!-- END GENERATED LEXICAL LEDGER -->")
+    assert(start >= 0 && end >= 0, "lexical ledger markers must exist")
+    assert(start < end, "lexical ledger markers must be ordered")
+    block :: policy_slice_bytes(decisions, start, end)
+    assert(block.contains("Generated by `Tools/agent/lexical-ledger.mjs`"), "lexical ledger must identify renderer")
+}
+#Test("lexical_ledger_is_rendered_from_syntax") {
+    s2_syntax_lexical_ledger_is_rendered_from_syntax()
+}
+
+fn s2_syntax_marker_plane_matrix_covers_current_marker_families() {
+    decisions :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    assert(decisions.contains("**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,") && decisions.contains("owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*:"))
+    anchors :: [String]{"D-MARKER-FAMILY1", "D-MARKERMOVE1", "D-UNSAFE2", "D-TESTPAREN1", "D-BENCH1", "D-CAPBUNDLE1", "D-CTMARKER1"}
+    loop anchor in anchors -> assert(decisions.contains(anchor), "live syntax decisions lost {anchor}")
+}
+#Test("marker_plane_matrix_covers_current_marker_families") {
+    s2_syntax_marker_plane_matrix_covers_current_marker_families()
+}
+
+fn s2_syntax_authority_vocabulary_has_one_live_name_and_retired_marker_tombstones() {
+    paths :: [String]{"Docs/spec/reference/syntax-surface.jet", "tests/cli/man.txt", "tests/cli/completions_bash.txt", "tests/cli/completions_fish.txt", "tests/cli/completions_powershell.txt", "tests/cli/completions_zsh.txt"}
+    retired :: [String]{"Ability", "Abilities", "Capability", "Caps", "KW_CAPS", "TYPE_ABILITIES", "CAP_HANDLE_TYPE", "Stmt::Caps"}
+    loop path in paths {
+        source :: s2_syntax_files_api.read(path) ?? panic("read authority surface {path}")
+        loop word in retired -> assert(!source.contains(word), "{path} contains retired {word}")
+    }
+}
+#Test("authority_vocabulary_has_one_live_name_and_retired_marker_tombstones") {
+    s2_syntax_authority_vocabulary_has_one_live_name_and_retired_marker_tombstones()
+}
+
+fn s2_syntax_card_511_census_matches_current_law() {
+    decisions :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    laws :: [String]{"D-MARKER-FAMILY1", "D-DET1", "D-REPLAY1", "D-MARK-META1"}
+    loop law in laws -> assert(decisions.contains(law), "current syntax law omits {law}")
+}
+#Test("card_511_census_matches_current_law") {
+    s2_syntax_card_511_census_matches_current_law()
+}
+
+fn s2_syntax_module_internal_is_discovery_not_access_control() {
+    decisions :: s2_syntax_files_api.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    assert(decisions.contains("`use project._name` remains allowed"))
+    assert(decisions.contains("underscore changes discovery, not access"))
+    assert(!decisions.contains("| D-SHAPE-MODULEINTERNAL1 |"))
+}
+#Test("module_internal_is_discovery_not_access_control") {
+    s2_syntax_module_internal_is_discovery_not_access_control()
+}
+
+fn s2_syntax_artifact_extensions_are_one_closed_kind_specific_family() {
+    roots :: [String]{"Source", "crates", "Examples", "tests", "Docs"}
+    retired :: [String]{".jproof", ".jtrace", ".jreplay"}
+    loop root in roots {
+        loop path in s2_syntax_paths(root) {
+            if path.ends_with(".rs") || path.ends_with("tests/guards/syntax_reconciliation.jet") -> next
+            source :: s2_syntax_files_api.read(path) ?? next
+            loop (index, line) in source.lines() {
+                loop suffix in retired -> assert(!line.contains(suffix) || line.contains("jet.jproof"), "{path}:{index + 1} retains retired artifact suffix {suffix}")
+            }
+        }
+    }
+}
+#Test("artifact_extensions_are_one_closed_kind_specific_family") {
+    s2_syntax_artifact_extensions_are_one_closed_kind_specific_family()
+}

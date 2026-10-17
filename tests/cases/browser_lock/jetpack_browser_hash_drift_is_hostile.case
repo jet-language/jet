@@ -1,0 +1,14 @@
+# HAND-PORT tests/browser_lock.rs:161-188 jetpack_browser_hash_drift_is_hostile
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: jetpack_browser_hash_drift_is_hostile.fixture
+env: NO_COLOR=1
+requires: os:unix
+chmod: chromium 0755
+step: jetpack browser lock chromium --binary {work}/chromium --version 1
+exit: 0
+copy: tampered chromium
+chmod: chromium 0755
+step: jetpack browser resolve chromium
+exit: nonzero
+stderr: ~any "drift" "hash" "size" # original predicate
+

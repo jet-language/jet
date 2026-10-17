@@ -2,7 +2,7 @@ package {
     name: "core.encoding"
     version: "0.0.1"
     edition: "2026"
-    description: "Codecs and the shared DataTree interchange model."
+    description: "Codecs and the shared Dyn interchange model."
     license: "MIT"
     outputs: {
         encoding: .Library{ entry: encoding }
@@ -11,10 +11,10 @@ package {
 // core.encoding — interchange codecs and the one dynamic value tree.
 //
 // Every format in this package speaks the same two verbs: `parse` (text or
-// bytes → `DataTree`) and `to_string` / `to_bytes` (value → wire). JSON, JSONL
+// bytes → `Dyn`) and `to_string` / `to_bytes` (value → wire). JSON, JSONL
 // CSV, TOML, YAML, XML, and CBOR are nested modules so a program pays only for
 // the format it imports. Hex, Base32, and Base64 are byte alphabets, not
-// DataTree adapters; they live beside the formats because they are the usual
+// Dyn adapters; they live beside the formats because they are the usual
 // way to carry those bytes through text.
 //
 // This is compiler-owned Core source and is loaded as the `core.encoding`
@@ -24,8 +24,12 @@ package {
 // Portable codecs below are written in Jet.
 //
 // Invariants:
-// - `DataTree` is the only user-facing dynamic tree. There is no `Data` alias.
+// - `Dyn` is the only user-facing dynamic tree. There is no `Data` alias.
 // - Objects keep insertion order. Integers and floats stay distinct variants.
+// - The closed cases are Null, Bool, Int, Float, Text, Bytes, DateTime, Array,
+//   and Object. Bytes text is padded RFC 4648 base64; DateTime text is canonical
+//   RFC 3339 with a fixed offset. TOML/YAML/CBOR retain their native kinds;
+//   JSON/JSONL/CSV render them as text. XML retains its separate node schema.
 // - No codec fabricates a value for malformed input. Syntax problems are
 //   `EncodingError`; alphabet helpers use their local typed errors.
 // - Whole-value codecs are pure (`->`) and callers pass text or bytes directly.
@@ -50,19 +54,156 @@ module cbor
 module binary
 
 module ini
+
+/// Handle-free streaming events. Number is public; writers reject it as Unsupported.
+enum DataEvent {
+    Null
+    Bool(Bool)
+    Int(Int)
+    Float(Float)
+    Number(String)
+    Text(String)
+    Bytes([U8])
+    ArrayStart
+    ArrayEnd
+    ObjectStart
+    Key(String)
+    ObjectEnd
+}
+
+#Equatable
+enum EncodingFormat {
+    JSON
+    JSONL
+    CSV
+    TOML
+    YAML
+    XML
+    CBOR
+}
+impl EncodingFormat {
+    fn as_str(self) -> String Never! {
+        if self == {
+            .JSON -> "JSON"
+            .JSONL -> "JSONL"
+            .CSV -> "CSV"
+            .TOML -> "TOML"
+            .YAML -> "YAML"
+            .XML -> "XML"
+            .CBOR -> "CBOR"
+        }
+    }
+}
+
+#Equatable
+enum EncodingErrorKind {
+    Syntax
+    Truncated
+    Unsupported
+    Limit
+    IO
+    State
+}
+fn encoding_kind_name(kind: EncodingErrorKind) -> String Never! {
+    if kind == {
+        .Syntax -> "Syntax"
+        .Truncated -> "Truncated"
+        .Unsupported -> "Unsupported"
+        .Limit -> "Limit"
+        .IO -> "IO"
+        .State -> "State"
+    }
+}
+
+#Equatable
+struct EncodingCause {
+    kind: String
+    os_code: Int?
+    message: String
+}
+
+/// The same location ladder used by the seed encoding error kernel.
+fn encoding_error_text(format: String, kind: String, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String) -> String Never! {
+    out := "{format} {kind} at byte {byte_offset}"
+    if line == {
+        Val(value) -> out = "{out}, line {value}"
+        None -> {}
+    }
+    if column == {
+        Val(value) -> out = "{out}, column {value}"
+        None -> {}
+    }
+    if path != "" -> out = "{out}, path {path}"
+    "{out}: {reason}"
+}
+
+#[Error, Equatable]
+struct EncodingError {
+    format: EncodingFormat
+    kind: EncodingErrorKind
+    byte_offset: Int
+    line: Int?
+    column: Int?
+    path: String
+    reason: String
+    cause: EncodingCause?
+    impl Display {
+        fn display(self) -> String { self.display_text() }
+    }
+    impl Debug {
+        fn debug(^self) -> String { self.display_text() }
+    }
+}
+impl EncodingError {
+    fn new(format: EncodingFormat, kind: EncodingErrorKind, byte_offset: Int, line: Int?, column: Int?, path: String, reason: String) -> EncodingError Never! {
+        EncodingError{format: format, kind: kind, byte_offset: byte_offset, line: line, column: column, path: path, reason: reason, cause: None}
+    }
+    fn with_cause(self, cause: EncodingCause) -> EncodingError Never! {
+        EncodingError{format: self.format, kind: self.kind, byte_offset: self.byte_offset, line: self.line, column: self.column, path: self.path.copy(), reason: self.reason.copy(), cause: Val(cause)}
+    }
+    fn cause(self) -> EncodingCause? Never! { self.cause.copy() }
+    fn display_text(self) -> String Never! {
+        encoding_error_text(self.format.as_str(), encoding_kind_name(self.kind), self.byte_offset, self.line, self.column, self.path, self.reason)
+    }
+}
+
+#Equatable
+struct EncodingLimits {
+    buffer_bytes: Int
+    max_depth: Int
+    max_item_bytes: Int
+    max_total_bytes: Int?
+    max_expansion_depth: Int
+    max_expansion_bytes: Int
+}
+impl EncodingLimits {
+    fn safe() -> EncodingLimits Never! {
+        EncodingLimits{buffer_bytes: 65536, max_depth: 256, max_item_bytes: 16777216, max_total_bytes: None, max_expansion_depth: 32, max_expansion_bytes: 8388608}
+    }
+}
+
 /// Error returned by the root hexadecimal decoder.
 #Error
-pub struct HexError {
-    pub reason: String
+struct HexError {
+    reason: String
+    impl Display {
+        fn display(self) -> String { self.reason }
+    }
+    impl Debug {
+        fn debug(^self) -> String { self.reason }
+    }
+}
+impl HexError {
+    fn new(reason: String) -> HexError Never! { HexError{reason: reason} }
 }
 /// Convert one nibble to lowercase ASCII. Callers must pass `0..15`.
-pub fn hex_nibble(n: Int) -> U8 Never! {
+fn hex_nibble(n: Int) -> U8 Never! {
     if n < 10 -> return (U8{48 + n})
     (U8{87 + n})
 }
 
 /// Hex alphabet lookup. Accepts `0-9A-Fa-f`. Other bytes are absent.
-pub fn hex_value(b: U8) -> Int? Never! {
+fn hex_value(b: U8) -> Int? Never! {
     n :: Int.from_u8(b)
     if n >= 48 && n <= 57 -> return Val(n - 48)
     if n >= 97 && n <= 102 -> return Val(n - 87)
@@ -71,7 +212,7 @@ pub fn hex_value(b: U8) -> Int? Never! {
 }
 
 /// Lowercase hex of `bytes`. Allocates `2 * bytes.len()` ASCII bytes.
-pub fn bytes_to_hex(bytes: [U8]) -> String Never! {
+fn bytes_to_hex(bytes: [U8]) -> String Never! {
     out := [U8]{}
     loop b in bytes {
         n :: Int.from_u8(b)
@@ -82,7 +223,7 @@ pub fn bytes_to_hex(bytes: [U8]) -> String Never! {
 }
 
 /// Decode a hex string into bytes. Whitespace is rejected; length must be even.
-pub fn hex_to_bytes(text: String) -> [U8] HexError! {
+fn hex_to_bytes(text: String) -> [U8] HexError! {
     raw :: text.bytes()
     if raw.len() %% 2 != 0 {
         return Err(HexError{reason: "odd-length hex string; hex text encodes whole bytes, so the length must be even"})
@@ -100,6 +241,6 @@ pub fn hex_to_bytes(text: String) -> [U8] HexError! {
 
 /// 32-bit wrap used by hashes and CBOR integer codecs. Jet `Int` is exact; mask
 /// after arithmetic to get machine-word wrapping without a second integer type.
-pub fn wrap32(n: Int) -> Int Never! { n & 4294967295 }
+fn wrap32(n: Int) -> Int Never! { n.bit_and(4294967295) }
 
 

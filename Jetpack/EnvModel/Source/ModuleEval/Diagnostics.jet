@@ -6,15 +6,21 @@
 // evaluator stopped on. Module surfaces are evaluated, not type-checked, so
 // the first diagnostic is the whole failure.
 #Error
-pub struct EnvModelEvalError {
-    pub diagnostic: Diagnostic
+struct EnvModelEvalError {
+    diagnostic: Diagnostic
 }
 
 impl ComptimeEvalError -> EnvModelEvalError { return EnvModelEvalError{diagnostic: self.diagnostic} }
 
 // Rust `Diagnostic::error(code, what, why, fix, span)`.
-pub fn envmodel_error(code: String, what: String, why: String, fix: String, span: Span?) -> EnvModelEvalError Never! {
+fn envmodel_error(code: String, what: String, why: String, fix: String, span: Span?) -> EnvModelEvalError Never! {
     EnvModelEvalError{diagnostic: diagnostic_from_registry(code, span, what, why, fix)}
+}
+
+// E1242: a fleet or vmtest host references a system that no contribution
+// defines (U15). `known` is the rendered hint naming the captured systems.
+fn envmodel_fleet_unknown_system(fleet: String, host: String, system: String, known: String) -> EnvModelEvalError Never! {
+    envmodel_error("E1242", "the fleet `{fleet}` host `{host}` names an unknown system `{system}`", "fleets are frozen jetos research capture; captured hosts must still point at a captured system so the plan is coherent", "define captured `system.{system}: {{ … }}`, or point the host at an existing captured system ({known})", None)
 }
 
 fn envmodel_bad_source_ref(ref_text: String, span: Span?) -> EnvModelEvalError Never! {
@@ -63,9 +69,19 @@ fn envmodel_prompt_bad_value(field: String, expected: String, span: Span) -> Env
     envmodel_error("E0966", "`Prompt.{field}` isn't shaped like {expected}", "The shell prompt is source-owned by `env.jet`; each prompt setting has one typed shape", "Write `{field}: {expected}`", Val(span))
 }
 
+// E0972: an unknown field on a `System` / `Image` / `Service` record (U11/U14).
+fn envmodel_unknown_record_field(type_name: String, field: String, known: String, span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E0972", "`{field}` isn't a field of `{type_name}`", "A `{type_name}` has a fixed set of fields: {known}", "Remove `{field}`, or use one of {known}", Val(span))
+}
+
 // E0973: an image `target:` names an unknown platform (U13).
 fn envmodel_unknown_platform(os: String, arch: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0973", "`{os}.{arch}` isn't a platform Jet knows", "U13: a `target` is a typed platform value, not a piece of quoted text — it must be `linux.x64` or `linux.arm64`", "Write `target: linux.x64` or `target: linux.arm64`", Val(span))
+}
+
+// E0974: a `System` with no `target` field (U11).
+fn envmodel_missing_system_target(span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E0974", "This `System` has no `target`", "U11: every machine names the platform it runs on with a typed `target` value", "Add `target: linux.x64` (or `linux.arm64`)", Val(span))
 }
 
 // E0975: a `Service` record's `enable` field is not a yes/no value (U12).
@@ -76,6 +92,11 @@ fn envmodel_service_enable_not_bool(span: Span) -> EnvModelEvalError Never! {
 // E0975: a `Service` record with no `enable` field (U12).
 fn envmodel_service_missing_enable(name: String, span: Span) -> EnvModelEvalError Never! {
     envmodel_error("E0975", "The service `{name}` has no `enable`", "U12: every `Service` says whether it is on with a required `enable` flag, then any further settings", "Add `enable: true` (or `false`) to `{name}`", Val(span))
+}
+
+// E0976: an `Image` `format:` that isn't `iso` / `qcow` / `raw` (U14).
+fn envmodel_image_bad_format(word: String, span: Span) -> EnvModelEvalError Never! {
+    envmodel_error("E0976", "`{word}` isn't a disk-image format", "Disk-image formats are frozen jetos research; Jetpack only builds `.Oci` images today", "Use `kind: .Oci` for an active image, or keep disk-image notes in the jetos research appendix", Val(span))
 }
 
 // E0977: an `Image` with no `from:` field (U14).
@@ -117,7 +138,7 @@ fn envmodel_image_field_shape(field: String, expected: String, span: Span) -> En
 }
 
 // Wrap a merge conflict (§6) as a user-facing diagnostic (I4).
-pub fn envmodel_merge_error_to_diagnostic(error: MergeError) -> EnvModelEvalError Never! {
+fn envmodel_merge_error_to_diagnostic(error: MergeError) -> EnvModelEvalError Never! {
     if error == {
         .SourceConflict(name, a, b) -> envmodel_error("E0967", "Source `{name}` is declared with two different refs", "One module declares `{name}` as `{a}`, another as `{b}` — sources merge by name, so the refs must agree", "Make every declaration of this source agree, or rename one of them", None)
         .FactConflict(fact_error) -> {

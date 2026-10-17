@@ -1,0 +1,22 @@
+# Port of tests/cli_parts/inspect.rs:196-259; exact original sources and assertions.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): setup actions and prepend/append line transforms.
+fixture: fixtures/test_hardened
+step: jet test main.jet --profile=release
+cwd: release
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "1 passed" # original predicate
+stdout: !~ "Runtime fault [R0802]" # original predicate
+stderr: !~ "Runtime fault [R0802]" # original predicate
+step: jet test main.jet --profile=hardened
+cwd: hardened
+env: NO_COLOR=1
+exit: 1
+stdout+stderr: ~ "Runtime fault [R0802]" # original predicate
+stdout+stderr: ~ "test deliberately reads after arena reset" # original predicate
+stdout+stderr: ~ "Why:" # original predicate
+stdout+stderr: ~ "Fix:" # original predicate
+stdout+stderr: ~ "obligation `valid_ptr` was not met on this run" # original predicate
+stdout+stderr: !~ "panicked at" # original predicate
+stdout+stderr: !~ "RUST_BACKTRACE" # original predicate

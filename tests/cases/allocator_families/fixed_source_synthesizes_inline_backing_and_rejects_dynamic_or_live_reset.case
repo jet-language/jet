@@ -1,0 +1,25 @@
+# HAND-PORT tests/allocator_families.rs:399-489 fixed_source_synthesizes_inline_backing_and_rejects_dynamic_or_live_reset
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# All five original compile-success/rejection sources, exact codes, original conditional Fixed.over AOT9 output; only Rust backing/Close symbol scans retire.
+fixture: fixed_source_synthesizes_inline_backing_and_rejects_dynamic_or_live_reset.fixture
+env: NO_COLOR=1
+step: jet check --json source0/main.jet
+exit: 0
+step: jet check --json source1/main.jet
+exit: 0
+step: jet check --json source2/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0103"] #>= 1
+step: jet check --json source3/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0212"] #>= 1
+step: jet check --json source4/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0631"] #>= 1
+when tool rustc
+step: jet build --profile=debug source1/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = fixed_source_synthesizes_inline_backing_and_rejects_dynamic_or_live_reset.stdout.expected
+end when

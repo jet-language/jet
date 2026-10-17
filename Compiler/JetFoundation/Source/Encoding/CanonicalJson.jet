@@ -1,0 +1,110 @@
+// A-canonical receipt/proof JSON (crates/jet-foundation/src/PerformanceBudget.rs
+// `CanonicalJson`): sorted unique object keys, integers as canonical decimal
+// text, one trailing LF. This is NOT RFC 8785 JCS.
+enum CanonicalJSON {
+    Null
+    Bool(Bool)
+    Integer(String)
+    String(String)
+    Array([CanonicalJSON])
+    // Rust keeps a BTreeMap; the fields here are always sorted by key bytes.
+    Object([CanonicalJSONField])
+}
+
+struct CanonicalJSONField {
+    key: String
+    value: CanonicalJSON
+}
+
+// Rust's `String` refusal.
+#Error
+struct CanonicalJSONError {
+    message: String
+}
+
+// Rust `CanonicalJson::object`: a repeated key is refused.
+fn canonical_json_object(fields: [CanonicalJSONField]) -> CanonicalJSON CanonicalJSONError! {
+    seen := [String:Bool]{}
+    loop field in fields {
+        if seen.get(field.key) != None -> return Err(CanonicalJSONError{message: "duplicate JSON key `{field.key}`"})
+        seen[field.key] = true
+    }
+    sorted := fields
+    &sorted.sort_by((left: CanonicalJSONField, right: CanonicalJSONField) -> left.key <=> right.key)
+    Ok(CanonicalJSON.Object(sorted))
+}
+
+// Rust `CanonicalJson::bytes`: the encoding plus one LF.
+fn canonical_json_bytes(value: CanonicalJSON) -> [U8] Never! {
+    out := [U8]{}
+    canonical_json_encode(value, &out)
+    &out.push(U8{10})
+    out
+}
+
+// Rust `CanonicalJson::sha256`.
+fn canonical_json_sha256(value: CanonicalJSON) -> String Never! {
+    bytes :: canonical_json_bytes(value)
+    mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+}
+
+fn canonical_json_append(out: &[U8], text: String) Never! {
+    loop byte in text.bytes() -> &out.push(byte)
+}
+
+// Rust `encode_json`.
+fn canonical_json_encode(value: CanonicalJSON, out: &[U8]) Never! {
+    if value == {
+        .Null -> canonical_json_append(&out, "null")
+        .Bool(flag) -> canonical_json_append(&out, if flag -> "true" else -> "false")
+        .Integer(number) -> canonical_json_append(&out, number)
+        .String(text) -> canonical_json_encode_string(text, &out)
+        .Array(values) -> {
+            &out.push(U8{91})
+            loop (index, child) in values {
+                if index != 0 -> &out.push(U8{44})
+                canonical_json_encode(child, &out)
+            }
+            &out.push(U8{93})
+        }
+        .Object(fields) -> {
+            &out.push(U8{123})
+            loop (index, field) in fields {
+                if index != 0 -> &out.push(U8{44})
+                canonical_json_encode_string(field.key, &out)
+                &out.push(U8{58})
+                canonical_json_encode(field.value, &out)
+            }
+            &out.push(U8{125})
+        }
+    }
+}
+
+// Rust `encode_string`: short escapes for `"`, `\`, BS, FF, LF, CR, TAB; other
+// C0 controls as `\u00xx`; every other scalar verbatim.
+fn canonical_json_encode_string(value: String, out: &[U8]) Never! {
+    hex :: "0123456789abcdef".bytes()
+    &out.push(U8{34})
+    loop byte in value.bytes() {
+        code :: Int.from_u8(byte)
+        if code == {
+            34 -> canonical_json_append(&out, "\\\"")
+            92 -> canonical_json_append(&out, "\\\\")
+            8 -> canonical_json_append(&out, "\\b")
+            12 -> canonical_json_append(&out, "\\f")
+            10 -> canonical_json_append(&out, "\\n")
+            13 -> canonical_json_append(&out, "\\r")
+            9 -> canonical_json_append(&out, "\\t")
+            else -> {
+                if code < 32 {
+                    canonical_json_append(&out, "\\u00")
+                    &out.push(hex[code >> 4])
+                    &out.push(hex[code.bit_and(15)])
+                } else {
+                    &out.push(byte)
+                }
+            }
+        }
+    }
+    &out.push(U8{34})
+}

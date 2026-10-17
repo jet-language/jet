@@ -1,0 +1,35 @@
+// A `prep` list of records built through the module's own calls: one
+// builder takes the record another same-module call returns and writes its
+// fields. The fold sees the module's own record, struct and enum types under
+// their source names, so the constant matches the same list built at run time.
+struct Cov { bits: Int }
+
+enum Route {
+    NoRoute
+    Typed
+}
+
+struct Rec {
+    member: String
+    coverage: Cov
+    route: Route
+}
+
+fn rec_new(member: String) -> Rec Never! {
+    Rec{member: member, coverage: Cov{bits: 1}, route: Route.Typed}
+}
+
+fn rec_with_coverage(member: String, coverage: Cov) -> Rec Never! {
+    row := rec_new(member)
+    row.coverage = coverage
+    row.route = Route.NoRoute
+    row
+}
+
+ROWS :: prep { [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) } }
+
+fn run() {
+    rows :: [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) }
+    print("{ROWS[1].member} {ROWS[1].coverage.bits} {ROWS[1].route == Route.NoRoute}")
+    print("{rows[1].member} {rows[1].coverage.bits} {rows[1].route == Route.NoRoute}")
+}

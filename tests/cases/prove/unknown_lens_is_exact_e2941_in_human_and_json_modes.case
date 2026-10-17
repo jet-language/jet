@@ -1,0 +1,12 @@
+# Port of tests/prove.rs:1024-1053. Every original predicate retained; original fixture bytes copied from Rust literals.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: unknown_lens_is_exact_e2941_in_human_and_json_modes.fixture
+step: jet prove plain.jet --lens test
+exit: 2
+stdout: empty # original predicate
+stderr: = unknown-lens.out # ORACLE-LITERAL tests/prove.rs1037 exact bytes
+step: jet prove plain.jet --lens=test --json
+exit: 2
+stdout: ~ "\"code\":\"E2941\"" # original predicate
+stderr: empty # original predicate
+stdout: !~ "\"evidence\"" # original predicate

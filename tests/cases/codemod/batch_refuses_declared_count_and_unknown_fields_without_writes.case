@@ -1,0 +1,15 @@
+# HAND-PORT tests/codemod.rs:300-331 batch_refuses_declared_count_and_unknown_fields_without_writes
+# Original predicates; same-head kit verification pending.
+fixture: batch_refuses_declared_count_and_unknown_fields_without_writes.fixture
+env: NO_COLOR=1
+copy: Examples/a.jet before.bytes
+step: jet inspect codemod rename.codemod.json --dry-run
+exit: nonzero
+stderr: ~ "matched 2, expected 3" # original predicate
+file: Examples/a.jet == before.bytes
+copy: unknown.json rename.codemod.json
+step: jet inspect codemod rename.codemod.json --dry-run
+exit: nonzero
+stderr: ~ "unknown field" # original predicate
+file: Examples/a.jet == before.bytes
+

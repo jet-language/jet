@@ -35,3 +35,57 @@ fn run() {
         "true\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n",
     );
 }
+
+#[test]
+fn source_encoding_error_display_has_one_bundle_implementation() {
+    tir_support::assert_tiers_agree(
+        "source_encoding_error_display",
+        r#"
+use core.encoding.[EncodingError, EncodingErrorKind, EncodingFormat]
+
+fn run() {
+    err :: EncodingError{
+        format: .CBOR, kind: .Syntax, byte_offset: 7,
+        line: Val(2), column: Val(3), path: "$[0]",
+        reason: "truncated item", cause: None,
+    }
+    print("{err}")
+}
+"#,
+        "CBOR Syntax at byte 7, line 2, column 3, path $[0]: truncated item\n",
+    );
+}
+
+#[test]
+fn user_duplicate_display_is_rejected_as_e0908() {
+    let source = r#"
+struct UserMessage {
+    text: String
+}
+
+impl UserMessage.Display {
+    fn display(self) -> String { self.text }
+}
+
+impl UserMessage.Display {
+    fn display(self) -> String { "duplicate" }
+}
+
+fn run() {}
+"#;
+    let diagnostics = jet::compile(source).expect_err("a user Display impl must remain unique");
+    let errors = diagnostics
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+        .collect::<Vec<_>>();
+    let codes = errors
+        .iter()
+        .map(|diagnostic| diagnostic.code.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, ["E0908"], "unexpected diagnostics: {diagnostics:?}");
+    assert!(
+        errors[0].what.contains("UserMessage")
+            && errors[0].what.contains("Display"),
+        "duplicate Display diagnostic lost its owner or trait: {diagnostics:?}"
+    );
+}

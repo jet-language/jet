@@ -1,0 +1,213 @@
+// Source/CmdFill.rs: typed goal cards and proposals validated by the same
+// checker that checked the original module. The checked TIR owns goal types.
+use core.files as cli_files
+use jet_driver.[JetDriverCompileMode, JetDriverCompileResult, JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR, jet_driver_present_diagnostics]
+use jet_foundation.[Func, Item, Span, TExpr, TFunc, diagnostic_line_at, diagnostic_render_all, tir_expr_children, tir_stmt_children, type_name]
+
+struct JetCLIFillFunction {
+    name: String
+    return_type: String
+}
+
+struct JetCLIFillGoal {
+    span: Span
+    expected: String
+}
+
+fn jet_cli_fill_function_info(function: Func, infos: &[JetCLIFillFunction]) Never! {
+    if function.params.len() == 0 && function.return_type == .Val(ty) {
+        &infos.push(JetCLIFillFunction{name: function.name, return_type: type_name(ty)})
+    }
+}
+
+fn jet_cli_fill_function_infos(items: [Item], infos: &[JetCLIFillFunction]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> { jet_cli_fill_function_info(function, &infos) }
+            .Struct(structure) -> {
+                loop function in structure.methods -> jet_cli_fill_function_info(function, &infos)
+                loop block in structure.trait_impls {
+                    loop function in block.methods -> jet_cli_fill_function_info(function, &infos)
+                }
+            }
+            .Enum(enumeration) -> {
+                loop function in enumeration.methods -> jet_cli_fill_function_info(function, &infos)
+                loop block in enumeration.trait_impls {
+                    loop function in block.methods -> jet_cli_fill_function_info(function, &infos)
+                }
+            }
+            .Impl(implementation) -> {
+                loop function in implementation.methods {
+                    jet_cli_fill_function_info(function, &infos)
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+fn jet_cli_fill_expr(expression: TExpr, goals: &[JetCLIFillGoal]) {
+    if expression.kind == .Never(reason) && reason == "todo" {
+        &goals.push(JetCLIFillGoal{span: expression.span, expected: expression.goal_expected_type ?? "(unknown)"})
+    }
+    loop child in tir_expr_children(expression) -> jet_cli_fill_expr(child, &goals)
+}
+
+fn jet_cli_fill_function_name(function: TFunc) -> String Never! {
+    if function.kind == {
+        .Method(_, owner) | .TraitMethod(_, _, owner, _, _) -> {
+            return "{type_name(owner)}.{function.name}"
+        }
+        else -> {}
+    }
+    function.name
+}
+
+fn jet_cli_fill_effects(function: TFunc, alias: String, facts: [JetCLISemEffect]) -> String Never! {
+    local :: jet_cli_fill_function_name(function).replace(".", "::")
+    keys :: [String]{"{alias}::{local}", local, function.name}
+    loop key in keys {
+        loop fact in facts {
+            if fact.function == key {
+                return if fact.inferred.len() == 0 -> "none" else -> "[{fact.inferred.join(", ")}]"
+            }
+        }
+    }
+    "none"
+}
+
+fn jet_cli_fill_candidate_checks(file: String, source: String, goal: JetCLIFillGoal, candidate: String) -> Bool JetCLIReadError! {
+    if goal.span.start < 0 || goal.span.start > goal.span.end || goal.span.end > source.bytes().len() {
+        return false
+    }
+    bytes :: source.bytes()
+    replacement :: "{jet_cli_doc_text(bytes, 0, goal.span.start)}{candidate}{jet_cli_doc_text(bytes, goal.span.end, bytes.len())}"
+    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(replacement), None) ?? return Err(jet_cli_read_error("the fill candidate compiler failed before returning diagnostics"))
+    if compiled == {
+        .Refused(_) -> return false
+        .Compiled(result, _) -> {
+            return result.diagnostics.len() == 0 && result.internal_problem == .None
+        }
+    }
+}
+
+fn jet_cli_fill_candidates(unit: JetDriverDocModule, function: TFunc, infos: [JetCLIFillFunction], goal: JetCLIFillGoal) -> [String] JetCLIReadError! {
+    candidates := [String]{}
+    loop parameter in function.params {
+        if type_name(parameter.ty) == goal.expected -> &candidates.push(parameter.name)
+    }
+    loop info in infos {
+        if info.name != function.name && info.return_type == goal.expected {
+            &candidates.push("{info.name}()")
+        }
+    }
+    literal :: if goal.expected == {
+        "Int" -> "0"
+        "Float" | "F32" -> "0.0"
+        "Bool" -> "false"
+        "String" -> "\"\""
+        "Char" -> "'a'"
+        "Unit" | "()" -> "()"
+        else -> if goal.expected.ends_with("?") -> "null" else -> ""
+    }
+    if literal != "" -> &candidates.push(literal)
+    checked := [String]{}
+    loop candidate in candidates {
+        if !checked.contains(candidate) && jet_cli_fill_candidate_checks(unit.physical_path, unit.source, goal, candidate) {
+            &checked.push(candidate)
+        }
+    }
+    checked
+}
+
+// Also usable by `jet check`: include_candidates=false prints only the card.
+fn jet_cli_fill_report(result: JetDriverCompileResult, file: String?, line: Int?, include_candidates: Bool, json: Bool) -> String? JetCLIReadError! {
+    index :: jet_cli_checked_semindex(result) ?? return Err(jet_cli_read_error("the checked semantic index could not be read for fill"))
+    text := ""
+    cards := [JetCLIStatusValue]{}
+    loop unit in result.doc_modules {
+        if file == .Val(filter) && jet_cli_report_path(jet_cli_report_cwd(), unit.physical_path) != jet_cli_report_path(jet_cli_report_cwd(), filter) {
+            next
+        }
+        infos := [JetCLIFillFunction]{}
+        jet_cli_fill_function_infos(unit.items, &infos)
+        loop function in unit.functions {
+            if function.synthetic -> next
+            goals := [JetCLIFillGoal]{}
+            loop statement in function.body {
+                loop expression in tir_stmt_children(statement) {
+                    jet_cli_fill_expr(expression, &goals)
+                }
+            }
+            loop goal in goals {
+                goal_line :: diagnostic_line_at(unit.source, goal.span.start)
+                if line == .Val(filter_line) && filter_line != goal_line -> next
+                name :: jet_cli_fill_function_name(function)
+                effects :: jet_cli_fill_effects(function, unit.alias, index.effects)
+                candidates :: if include_candidates -> jet_cli_fill_candidates(unit, function, infos, goal) else -> [String]{}
+                &cards.push(
+                jet_cli_status_object(
+                [JetCLIStatusField]{
+                    jet_cli_status_field("file", jet_cli_status_text(unit.path)),
+                    jet_cli_status_field("line", jet_cli_status_int(goal_line)),
+                    jet_cli_status_field("function", jet_cli_status_text(name)),
+                    jet_cli_status_field("expected_type", jet_cli_status_text(goal.expected)),
+                    jet_cli_status_field("required_effects", jet_cli_status_text(effects)),
+                    jet_cli_status_field("candidates", jet_cli_status_texts(candidates)),
+                },
+                ),
+                )
+                text = "{text}goal: {unit.path}:{goal_line} ({name})\n  expected type: {goal.expected}\n  required effects: {effects}\n"
+                if include_candidates {
+                    if candidates.len() == 0 {
+                        text = "{text}  candidates: none (no local expression passed the checker)\n"
+                    } else {
+                        text = "{text}  candidates:\n"
+                        loop (number, candidate) in candidates {
+                            text = "{text}    {number + 1}. {candidate} (checked)\n"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if cards.len() == 0 -> return None
+    if json {
+        return Val(jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array(cards))}))}))
+    }
+    Val(text)
+}
+
+fn jet_cli_compile_fill(target: String, json: Bool, color: Bool) -> JetDriverVerbOutput {
+    file := target
+    line := Int?{None}
+    colon :: jet_cli_find_byte(target, 58, true)
+    if colon >= 0 {
+        suffix :: jet_cli_find_text(target, colon + 1, target.bytes().len())
+        number :: Int.parse(suffix) ?? -1
+        if number >= 0 {
+            file = jet_cli_find_text(target, 0, colon)
+            line = Val(number)
+        }
+    }
+    if jet_cli_compile_file(file, color, false, None, JetDriverCompileMode.Doc) == {
+        .Refused(refusal) -> return refusal.copy()
+        .Compiled(result, snapshot) -> {
+            diagnostics :: jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files)
+            if jet_cli_errors(diagnostics).len() > 0 {
+                source :: cli_files.read(file) ?? ""
+                if json {
+                    return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, source, diagnostics), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+                }
+                return JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(file, source, diagnostics, color), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+            }
+            if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+            checked_report :: if jet_cli_fill_report(result, Val(file), line, true, json) == {
+                .Ok(value) -> value
+                .Err(error) -> { return jet_cli_ice(error.message) }
+            }
+            report :: checked_report ?? if json -> jet_cli_status_render("fill", true, [JetCLIStatusField]{jet_cli_status_field("fill", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("goals", jet_cli_status_array([JetCLIStatusValue]{}))}))}) else -> "no goals found in '{file}'"
+            return JetDriverVerbOutput{stdout: "{report}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+        }
+    }
+}

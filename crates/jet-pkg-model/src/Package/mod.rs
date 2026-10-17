@@ -1578,7 +1578,9 @@ impl PackageFacts {
         Ok(entries)
     }
 
-    fn source_files_checked(
+    /// Canonical package source enumeration, excluding manifest/configuration
+    /// inputs and nested packages. Command and namespace discovery share it.
+    pub fn source_files_checked(
         &self,
         resolver: &AuthorityResolver,
     ) -> Result<Vec<CheckedFile>, AuthorityError> {
@@ -3771,18 +3773,14 @@ fn named_entries_checked(
     Ok(entries)
 }
 
-/// Parse the file form `pub name :: Config{ ... }` while keeping the file
+/// Parse the file form `name :: Config{ ... }` while keeping the file
 /// itself layout-neutral. The same helper also recognizes an inline Config
 /// declaration in `package.jet`.
 fn config_wrapper<'a>(text: &'a str) -> Result<Option<(String, &'a str)>, PackageParseError> {
     let Some(separator) = text.find("::") else {
         return Ok(None);
     };
-    let name = text[..separator]
-        .trim()
-        .strip_prefix("pub ")
-        .unwrap_or(text[..separator].trim())
-        .trim();
+    let name = text[..separator].trim();
     if name.is_empty() {
         return Err(PackageParseError::MalformedField(text.trim().to_string()));
     }
@@ -4484,12 +4482,12 @@ outputs: { core: .Library{ native: "yes" } }"#,
         .unwrap();
         std::fs::write(
             dir.join("first.jet"),
-            "pub first :: Config{ version: \"1\" }\n",
+            "first :: Config{ version: \"1\" }\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("second.jet"),
-            "pub second :: Config{ version: \"2\" }\n",
+            "second :: Config{ version: \"2\" }\n",
         )
         .unwrap();
 
@@ -4539,7 +4537,7 @@ dev :: Config{
         .unwrap();
         std::fs::write(
             dir.join("release.jet"),
-            r#"pub release :: Config{ outputs: { app: Executable{ entry: run } } }"#,
+            r#"release :: Config{ outputs: { app: Executable{ entry: run } } }"#,
         )
         .unwrap();
         let facts = PackageFacts::load(&dir).unwrap().unwrap();
@@ -4555,15 +4553,15 @@ dev :: Config{
         std::fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
         std::fs::write(
             dir.join("_dev.jet"),
-            "pub dev :: Config{ version: \"ignored\" }\n",
+            "dev :: Config{ version: \"ignored\" }\n",
         )
         .unwrap();
         std::fs::write(
             dir.join("one.jet"),
-            "pub dev :: Config{ version: \"selected\" }\n",
+            "dev :: Config{ version: \"selected\" }\n",
         )
         .unwrap();
-        std::fs::write(dir.join("ordinary.jet"), "pub run() { }\n").unwrap();
+        std::fs::write(dir.join("ordinary.jet"), "fn run() { }\n").unwrap();
 
         let facts = PackageFacts::load(&dir).unwrap().unwrap();
         assert_eq!(facts.version.as_deref(), Some("selected"));
@@ -4589,7 +4587,7 @@ dev :: Config{
         let dir = temp_dir("config-ambiguous");
         std::fs::write(dir.join("package.jet"), "name: \"demo\"\nconfigs: [dev]\n").unwrap();
         for file in ["one.jet", "two.jet"] {
-            std::fs::write(dir.join(file), "pub dev :: Config{ version: \"same\" }\n").unwrap();
+            std::fs::write(dir.join(file), "dev :: Config{ version: \"same\" }\n").unwrap();
         }
 
         let error = PackageFacts::load(&dir).unwrap().unwrap_err().to_string();

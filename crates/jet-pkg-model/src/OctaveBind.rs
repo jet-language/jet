@@ -419,12 +419,12 @@ use core.encoding.json as json
     out.push_str(&format!(
         r#"}}
 
-pub struct Session {{
+struct Session {{
     value: Int
 }}
 
 #Error
-pub enum OctaveError {{
+enum OctaveError {{
     NotRunning
     Timeout
     Cancelled
@@ -446,33 +446,33 @@ pub enum OctaveError {{
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
+fn close(session: ^Session) -[FFI.Octave]> { abi.close(session.value) }
 
-pub fn open() -[FFI.Octave]> Session OctaveError! {
+fn open() -[FFI.Octave]> Session OctaveError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(OctaveError.NotRunning)
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
+fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
 
 "#,
     );
     for function in functions {
         out.push_str(&format!(
-            r#"pub fn {function}(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {{
+            r#"fn {function}(session: Session, input: Tensor, deadline_ms: Int) -[FFI.Octave, GPU]> Tensor OctaveError! {{
     if compute.rank(input) != 2 -> return Err(OctaveError.Shape)
-    shape_wire := [DataTree]{{}}
+    shape_wire := [Dyn]{{}}
     loop dimension in compute.shape(input) {{
-        shape_wire.push(DataTree.Int(dimension))
+        shape_wire.push(Dyn.Int(dimension))
     }}
-    data_wire := [DataTree]{{}}
+    data_wire := [Dyn]{{}}
     loop value in compute.to_list(input) {{
-        data_wire.push(DataTree.Float(value))
+        data_wire.push(Dyn.Float(value))
     }}
-    request :: json.to_string(DataTree.Object([
-        "shape": DataTree.Array(shape_wire),
-        "data": DataTree.Array(data_wire)
+    request :: json.to_string(Dyn.Object([
+        "shape": Dyn.Array(shape_wire),
+        "data": Dyn.Array(data_wire)
     ]))
     raw :: abi.{function}(session.value, request, deadline_ms)
     code :: abi.take_error()
@@ -483,8 +483,8 @@ pub fn cancel(session: Session) -[FFI.Octave]> { abi.cancel(session.value) }
         rows :: shape_values[0].int() ?? return Err(OctaveError.Shape)
         cols :: shape_values[1].int() ?? return Err(OctaveError.Shape)
         if rows < 0 || cols < 0 -> return Err(OctaveError.Shape)
-        data_tree :: value.field("data") ?? return Err(OctaveError.Protocol)
-        if data_tree == .Array(items) {{
+        dyn_value :: value.field("data") ?? return Err(OctaveError.Protocol)
+        if dyn_value == .Array(items) {{
             if items.len() != rows * cols -> return Err(OctaveError.Width)
             flat := [Float]{{}}
             loop item in items {{
@@ -655,8 +655,8 @@ mod tests {
     #[test]
     fn generated_surface_keeps_tensor_shape_checks_and_current_arrows() {
         let source = super::render_jet("matrix", &["scale".into()]);
-        assert!(source.contains("DataTree.Object(["));
-        assert!(source.contains("\"shape\": DataTree.Array(shape_wire)"));
+        assert!(source.contains("Dyn.Object(["));
+        assert!(source.contains("\"shape\": Dyn.Array(shape_wire)"));
         assert!(source.contains(".Array(shape_values) {"));
         assert!(source.contains("compute.reshape(tensor, [rows, cols])"));
         assert!(source.contains("compute.rank(input) != 2 ->"));

@@ -85,7 +85,7 @@ impl ObservationRelation {
         declared_equal: Option<bool>,
     ) -> Result<bool, ()> {
         match self {
-            Self::TypedEquality => Ok(reference.raw == candidate.raw),
+            Self::TypedEquality => declared_equal.ok_or(()),
             Self::OrderedEffects => Ok(
                 reference.raw == candidate.raw
                     && reference.ordered_effects == candidate.ordered_effects
@@ -199,7 +199,8 @@ pub struct ComparisonSample {
     pub candidate: ComparisonObservation,
     pub reference_replay: Option<ComparisonObservation>,
     pub candidate_replay: Option<ComparisonObservation>,
-    /// Required only for [`ObservationRelation::Custom`].
+    /// Checked semantic equality for TypedEquality, or the explicit Custom oracle.
+    /// Diagnostic `raw` renderings are not nominal/value equality facts.
     pub declared_equal: Option<bool>,
 }
 
@@ -845,7 +846,7 @@ pub fn compare_samples_with_discarded(
             Err(()) => {
                 record.status = ComparisonStatus::InvalidOracle;
                 record.reason = Some(
-                    "custom comparison relation did not declare an observation result".to_string(),
+                    "comparison relation did not declare a checked equality result".to_string(),
                 );
                 return record;
             }
@@ -909,7 +910,10 @@ mod tests {
 
     #[test]
     fn finite_equal_corpus_is_not_universal_proof() {
-        let record = compare_samples(ObservationRelation::TypedEquality, [sample("one", "a", "a")]);
+        let record = compare_samples(
+            ObservationRelation::TypedEquality,
+            [sample("one", "a", "a").with_declared_equal(true)],
+        );
         assert_eq!(record.status, ComparisonStatus::Matched);
         assert!(!record.universal_proof);
         assert!(record.assert_equal().is_ok());
@@ -923,7 +927,7 @@ mod tests {
 
         let discarded = compare_samples_with_discarded(
             ObservationRelation::TypedEquality,
-            [sample("one", "a", "a")],
+            [sample("one", "a", "a").with_declared_equal(true)],
             1,
         );
         assert_eq!(discarded.status, ComparisonStatus::InvalidOracle);
@@ -941,10 +945,12 @@ mod tests {
     fn replay_contamination_and_relation_aware_reduction_are_preserved() {
         let contaminated = compare_samples(
             ObservationRelation::TypedEquality,
-            [sample("one", "a", "a").with_replays(
-                ComparisonObservation::value("changed"),
-                ComparisonObservation::value("a"),
-            )],
+            [sample("one", "a", "a")
+                .with_declared_equal(true)
+                .with_replays(
+                    ComparisonObservation::value("changed"),
+                    ComparisonObservation::value("a"),
+                )],
         );
         assert_eq!(contaminated.status, ComparisonStatus::Contaminated);
         assert!(contaminated.contamination.is_some());
@@ -963,5 +969,35 @@ mod tests {
             reduced.as_ref().map(|sample| sample.identity.case_id.as_str()),
             Some("one")
         );
+    }
+    #[test]
+    fn typed_equality_requires_checked_facts_not_display_string_equality() {
+        let missing = compare_samples(
+            ObservationRelation::TypedEquality,
+            [sample("missing", "same", "same")],
+        );
+        assert_eq!(missing.status, ComparisonStatus::InvalidOracle);
+        assert!(missing.assert_equal().is_err());
+
+        // Explicit supplier facts: the classifier must not infer them from text.
+        for (reference, candidate, equal) in [
+            ("NaN", "NaN", false),
+            ("-0.0", "0.0", true),
+            ("{\"a\":1,\"b\":2}", "{\"b\":2,\"a\":1}", true),
+            ("1", "1.0", false),
+        ] {
+            let record = compare_samples(
+                ObservationRelation::TypedEquality,
+                [sample("checked", reference, candidate).with_declared_equal(equal)],
+            );
+            assert_eq!(
+                record.status,
+                if equal {
+                    ComparisonStatus::Matched
+                } else {
+                    ComparisonStatus::Mismatch
+                },
+            );
+        }
     }
 }

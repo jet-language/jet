@@ -9,17 +9,17 @@
 //    only; offline Core realization never takes this branch);
 // 3. otherwise none, and the caller emits E1240.
 
-pub struct BuildToolchain {
+struct BuildToolchain {
     // The `cargo` executable this toolchain builds with.
-    pub cargo: String
+    cargo: String
     // A stable provenance identity (`toolchain-<version>`, `toolchain`, or `host`).
-    pub id: String
+    id: String
     // The pinned toolchain version (empty for the host dev toolchain).
-    pub version: String
+    version: String
     // A pinned/realized object (reproducible output hash), or the host dev toolchain.
-    pub pinned: Bool
+    pinned: Bool
     // Prebuilt ring artifacts keyed by ring name (`http`, `regex`, …).
-    pub ring_artifacts: [String: String]
+    ring_artifacts: [String: String]
 
     // The active build toolchain, or None when neither a realized object nor
     // a host toolchain is available.
@@ -63,7 +63,7 @@ fn recipe_toolchain_from_object(dir: String) -[FS, Env]> BuildToolchain? Never! 
     if !recipe_toolchain_is_regular_file(cargo) -> return None
     if !sys.is_windows() {
         cargo_info :: files.stat(cargo) ?? return None
-        if cargo_info.mode & 0o111 == 0 -> return None
+        if (cargo_info.mode).bit_and(0o111) == 0 -> return None
     }
     version_path :: files.join(dir, "version")
     version := ""
@@ -103,7 +103,7 @@ fn recipe_toolchain_host() -[FS, Env, Exec, Time.Wait]> BuildToolchain? Never! {
 
 // E1240: no realized Rust toolchain and no Nix to build an `extern rust`
 // bridge dependency. Names both fixes.
-pub fn recipe_toolchain_e1240() -> RecipeDiagnostic Never! {
+fn recipe_toolchain_e1240() -> RecipeDiagnostic Never! {
     RecipeDiagnostic.new(
         "E1240",
         "no Rust build toolchain is available to build this package",

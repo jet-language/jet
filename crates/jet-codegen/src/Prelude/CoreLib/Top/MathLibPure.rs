@@ -98,18 +98,28 @@ pub fn jet_std_math_abs_f32(value: f32) -> f32 {
     value.abs()
 }
 
-/// Scalar IEEE-754 predicates shared by AOT, resident JIT, and comptime.
-pub fn jet_std_math_is_nan(value: f64) -> bool {
-    value.is_nan()
+// Float builtin-method lowering still targets these symbols. The public Jet
+// scalar implementations do not use these policy-free predicate operations.
+pub fn jet_std_math_is_nan(value: f64) -> bool { value.is_nan() }
+pub fn jet_std_math_is_infinite(value: f64) -> bool { value.is_infinite() }
+pub fn jet_std_math_is_finite(value: f64) -> bool { value.is_finite() }
+
+// core_source_owns retains cmp on the compiler route pending its paired cutover.
+pub fn jet_std_math_cmp(a: f64, b: f64) -> i64 {
+    match a.partial_cmp(&b) {
+        Some(std::cmp::Ordering::Less) => -1,
+        Some(std::cmp::Ordering::Equal) => 0,
+        Some(std::cmp::Ordering::Greater) => 1,
+        None => {
+            if a.is_nan() && b.is_nan() { 0 }
+            else if a.is_nan() { 1 }
+            else { -1 }
+        }
+    }
 }
 
-pub fn jet_std_math_is_infinite(value: f64) -> bool {
-    value.is_infinite()
-}
 
-pub fn jet_std_math_is_finite(value: f64) -> bool {
-    value.is_finite()
-}
+
 
 pub fn jet_std_math_asinh(value: f64) -> f64 {
     value.asinh()
@@ -643,41 +653,17 @@ pub fn jet_std_math_ln_1p(value: f64) -> f64 {
     value.ln_1p()
 }
 
-pub fn jet_std_math_log(value: f64, base: f64) -> f64 {
-    value.log(base)
-}
 
-pub fn jet_std_math_copysign(value: f64, sign: f64) -> f64 {
-    value.copysign(sign)
-}
 
-pub fn jet_std_math_signum(value: f64) -> f64 {
-    value.signum()
-}
 
 pub fn jet_std_math_fma(a: f64, b: f64, c: f64) -> f64 {
     a.mul_add(b, c)
 }
 
-pub fn jet_std_math_identity_f64(value: f64) -> f64 {
-    value
-}
 
-pub fn jet_std_math_zero_f64(_: f64) -> f64 {
-    0.0
-}
 
-pub fn jet_std_math_lerp(a: f64, b: f64, t: f64) -> f64 {
-    a + (b - a) * t
-}
 
-pub fn jet_std_math_degrees(value: f64) -> f64 {
-    value.to_degrees()
-}
 
-pub fn jet_std_math_radians(value: f64) -> f64 {
-    value.to_radians()
-}
 
 pub fn jet_std_math_is_even(value: i64) -> bool {
     value % 2 == 0
@@ -710,75 +696,24 @@ pub fn jet_std_math_checked_rem(left: i64, right: i64) -> Option<i64> {
     left.checked_rem(right)
 }
 
-pub fn jet_std_math_is_normal(value: f64) -> bool {
-    value.is_normal()
-}
-pub fn jet_std_math_is_subnormal(value: f64) -> bool {
-    value.is_subnormal()
-}
 
-pub fn jet_std_math_is_canonical(value: f64) -> bool {
-    value.is_finite() || value.is_nan()
-}
 
-pub fn jet_std_math_is_signed(value: f64) -> bool {
-    value.is_sign_negative()
-}
 
-pub fn jet_std_math_is_zero(value: f64) -> bool {
-    value == 0.0
-}
 
-pub fn jet_std_math_is_integer(value: f64) -> bool {
-    value.is_finite() && value.fract() == 0.0
-}
 
-pub fn jet_std_math_sign_bit(value: f64) -> bool {
-    value.is_sign_negative()
-}
-pub fn jet_std_math_next_up(value: f64) -> f64 {
-    value.next_up()
-}
 
-pub fn jet_std_math_next_down(value: f64) -> f64 {
-    value.next_down()
-}
 
-pub fn jet_std_math_radix(_value: f64) -> i64 {
-    2
-}
 
 pub fn jet_std_math_zero() -> f64 {
     0.0
 }
 
-pub fn jet_std_math_copy(value: f64) -> f64 {
-    value
-}
-pub fn jet_std_math_cot(value: f64) -> f64 {
-    1.0 / value.tan()
-}
 
-pub fn jet_std_math_inv(value: f64) -> f64 {
-    1.0 / value
-}
 pub fn jet_std_math_sin_cos(value: f64) -> (f64, f64) {
     value.sin_cos()
 }
 
-pub fn jet_std_math_modf(value: f64) -> (f64, f64) {
-    (value.fract(), value.trunc())
-}
 
-pub fn jet_std_math_frexp(value: f64) -> (f64, i64) {
-    let exponent = jet_std_math_ilogb(value).unwrap_or(0);
-    let fraction = if value == 0.0 || !value.is_finite() {
-        value
-    } else {
-        jet_std_math_ldexp(value, -exponent)
-    };
-    (fraction, exponent)
-}
 
 pub fn jet_std_math_div_mod(left: i64, right: i64) -> (i64, i64) {
     (left.div_euclid(right), left.rem_euclid(right))
@@ -808,10 +743,6 @@ pub fn jet_std_math_max_i64(left: i64, right: i64) -> i64 {
     left.max(right)
 }
 
-/// `round` uses nearest-integer ties away from zero, for both signs.
-pub fn jet_std_math_round(value: f64) -> i64 {
-    value.round() as i64
-}
 
 pub fn jet_std_math_clamp_i64(value: i64, low: i64, high: i64) -> i64 {
     value.clamp(low, high)
@@ -865,14 +796,31 @@ pub fn jet_std_math_isqrt(value: i64) -> Option<i64> {
     }
     let mut root = (value as f64).sqrt() as i64;
     // The float square root can land either side on large values, so walk back
-    // to the exact answer.
-    while root > 0 && root.saturating_mul(root) > value {
+    // to the exact answer without saturating a product into a false equality.
+    while root > 0 && root > value / root {
         root -= 1;
     }
-    while (root + 1).saturating_mul(root + 1) <= value {
+    while root + 1 <= value / (root + 1) {
         root += 1;
     }
     Some(root)
+}
+
+#[cfg(test)]
+mod fixed_isqrt_tests {
+    #[test]
+    fn fixed_isqrt_handles_maximum_and_square_boundaries() {
+        assert_eq!(super::jet_std_math_isqrt(i64::MAX), Some(3037000499));
+        for (value, expected) in [
+            (-1, None), (0, Some(0)), (1, Some(1)),
+            (15, Some(3)), (16, Some(4)), (17, Some(4)),
+        ] {
+            assert_eq!(super::jet_std_math_isqrt(value), expected);
+        }
+        let square = 3037000499i64 * 3037000499;
+        assert_eq!(super::jet_std_math_isqrt(square - 1), Some(3037000498));
+        assert_eq!(super::jet_std_math_isqrt(square), Some(3037000499));
+    }
 }
 
 /// The product of every whole number from 1 to `value`, or absent when there is
@@ -1426,249 +1374,23 @@ pub fn jet_std_math_fmod(value: f64, divisor: f64) -> f64 {
     value % divisor
 }
 
-pub fn jet_std_math_remainder(value: f64, divisor: f64) -> f64 {
-    if !value.is_finite() || !divisor.is_finite() || divisor == 0.0 {
-        return f64::NAN;
-    }
-    let quotient = value / divisor;
-    let lower = quotient.floor();
-    let fraction = quotient - lower;
-    let nearest = if fraction < 0.5 {
-        lower
-    } else if fraction > 0.5 || lower % 2.0 != 0.0 {
-        lower + 1.0
-    } else {
-        lower
-    };
-    value - nearest * divisor
-}
-
-pub fn jet_std_math_isclose(
-    left: f64,
-    right: f64,
-    relative_tolerance: f64,
-    absolute_tolerance: f64,
-) -> bool {
-    if relative_tolerance < 0.0 || absolute_tolerance < 0.0 {
-        return false;
-    }
-    if left == right {
-        return true;
-    }
-    if !left.is_finite() || !right.is_finite() {
-        return false;
-    }
-    (left - right).abs()
-        <= (relative_tolerance * left.abs().max(right.abs())).max(absolute_tolerance)
-}
-
-pub fn jet_std_math_dist(left: Vec<f64>, right: Vec<f64>) -> f64 {
-    if left.len() != right.len() {
-        return f64::NAN;
-    }
-    left.into_iter()
-        .zip(right)
-        .map(|(a, b)| {
-            let delta = a - b;
-            delta * delta
-        })
-        .sum::<f64>()
-        .sqrt()
-}
 
 
-pub fn jet_std_math_digits(value: i64) -> i64 {
-    if value == 0 {
-        return 1;
-    }
-    let mut n = value.unsigned_abs();
-    let mut count = 0i64;
-    while n > 0 {
-        count += 1;
-        n /= 10;
-    }
-    count
-}
 
-pub fn jet_std_math_leading_ones(value: i64) -> i64 {
-    (value as u64).leading_ones() as i64
-}
 
-pub fn jet_std_math_trailing_ones(value: i64) -> i64 {
-    (value as u64).trailing_ones() as i64
-}
 
-pub fn jet_std_math_cmp(a: f64, b: f64) -> i64 {
-    match a.partial_cmp(&b) {
-        Some(std::cmp::Ordering::Less) => -1,
-        Some(std::cmp::Ordering::Equal) => 0,
-        Some(std::cmp::Ordering::Greater) => 1,
-        None => {
-            // NaN sorts after every finite value, matching a stable total order
-            // for audit output: NaN vs NaN is equal; NaN vs number is greater.
-            if a.is_nan() && b.is_nan() {
-                0
-            } else if a.is_nan() {
-                1
-            } else {
-                -1
-            }
-        }
-    }
-}
 
-pub fn jet_std_math_ulp(x: f64) -> f64 {
-    if x.is_nan() {
-        return f64::NAN;
-    }
-    if x.is_infinite() {
-        return f64::INFINITY;
-    }
-    let x = x.abs();
-    if x == 0.0 {
-        return f64::from_bits(1);
-    }
-    let bits = x.to_bits();
-    let next = f64::from_bits(bits + 1);
-    next - x
-}
 
-pub fn jet_std_math_significand(x: f64) -> f64 {
-    if x == 0.0 || !x.is_finite() {
-        return x;
-    }
-    let bits = x.to_bits();
-    let exp = ((bits >> 52) & 0x7ff) as i32;
-    if exp == 0 {
-        // Subnormal: scale into the normal significand range.
-        let mut v = x.abs();
-        while v < 1.0 {
-            v *= 2.0;
-        }
-        return if x.is_sign_negative() { -v } else { v };
-    }
-    let frac_bits = bits & ((1u64 << 52) - 1);
-    let sig = f64::from_bits((0x3ffu64 << 52) | frac_bits);
-    if x.is_sign_negative() {
-        -sig
-    } else {
-        sig
-    }
-}
 
-pub fn jet_std_math_ilogb(x: f64) -> Option<i64> {
-    if x == 0.0 || !x.is_finite() {
-        return None;
-    }
-    Some(x.abs().log2().floor() as i64)
-}
 
-pub fn jet_std_math_logb(x: f64) -> f64 {
-    match jet_std_math_ilogb(x) {
-        Some(e) => e as f64,
-        None if x == 0.0 => f64::NEG_INFINITY,
-        None => f64::INFINITY,
-    }
-}
 
-pub fn jet_std_math_ldexp(x: f64, exp: i64) -> f64 {
-    if !x.is_finite() || x == 0.0 || exp == 0 {
-        return x;
-    }
-    x * 2f64.powi(exp.clamp(-2099, 2099) as i32)
-}
 
-pub fn jet_std_math_next_after(x: f64, toward: f64) -> f64 {
-    if x.is_nan() || toward.is_nan() {
-        return f64::NAN;
-    }
-    if x == toward {
-        return toward;
-    }
-    if x == 0.0 {
-        return if toward > 0.0 {
-            f64::from_bits(1)
-        } else {
-            -f64::from_bits(1)
-        };
-    }
-    let bits = x.to_bits();
-    let next = if (toward > x) == x.is_sign_positive() {
-        bits + 1
-    } else {
-        bits - 1
-    };
-    f64::from_bits(next)
-}
 
-/// Abramowitz & Stegun 7.1.26 — max error under 1.5e-7 on the real line.
-pub fn jet_std_math_erf(x: f64) -> f64 {
-    if x.is_nan() {
-        return f64::NAN;
-    }
-    if x.is_infinite() {
-        return x.signum();
-    }
-    let sign = if x < 0.0 { -1.0 } else { 1.0 };
-    let ax = x.abs();
-    let t = 1.0 / (1.0 + 0.3275911 * ax);
-    let poly = t
-        * (0.254829592
-            + t * (-0.284496736
-                + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
-    sign * (1.0 - poly * (-ax * ax).exp())
-}
 
-pub fn jet_std_math_erfc(x: f64) -> f64 {
-    1.0 - jet_std_math_erf(x)
-}
 
-/// Lanczos approximation for Γ(x) on positive reals; reflected for (0,1).
-pub fn jet_std_math_gamma(x: f64) -> f64 {
-    if x.is_nan() {
-        return f64::NAN;
-    }
-    if x <= 0.0 {
-        if x == x.floor() {
-            return f64::NAN;
-        }
-        // Reflection: Γ(z)Γ(1−z) = π / sin(πz)
-        return std::f64::consts::PI / ((std::f64::consts::PI * x).sin() * jet_std_math_gamma(1.0 - x));
-    }
-    // Lanczos g=7, n=9
-    const G: f64 = 7.0;
-    const C: [f64; 9] = [
-        0.99999999999980993,
-        676.5203681218851,
-        -1259.1392167224028,
-        771.32342877765313,
-        -176.61502916214059,
-        12.507343278686905,
-        -0.13857109526572012,
-        9.984369654078991e-6,
-        1.5056327351493116e-7,
-    ];
-    let mut z = x;
-    if z < 0.5 {
-        return std::f64::consts::PI / ((std::f64::consts::PI * z).sin() * jet_std_math_gamma(1.0 - z));
-    }
-    z -= 1.0;
-    let mut xacc = C[0];
-    for i in 1..9 {
-        xacc += C[i] / (z + i as f64);
-    }
-    let t = z + G + 0.5;
-    (2.0 * std::f64::consts::PI).sqrt() * t.powf(z + 0.5) * (-t).exp() * xacc
-}
 
-pub fn jet_std_math_lgamma(x: f64) -> f64 {
-    let g = jet_std_math_gamma(x);
-    if g.is_nan() || g <= 0.0 {
-        f64::NAN
-    } else {
-        g.ln()
-    }
-}
+
+
 
 
 pub fn jet_std_math_checked_sub(left: i64, right: i64) -> Option<i64> {
@@ -1691,13 +1413,7 @@ pub fn jet_std_math_tau() -> f64 {
     std::f64::consts::TAU
 }
 
-pub fn jet_std_math_hypot3(a: f64, b: f64, c: f64) -> f64 {
-    a.hypot(b).hypot(c)
-}
 
-pub fn jet_std_math_midpoint(a: f64, b: f64) -> f64 {
-    a + (b - a) * 0.5
-}
 
 pub fn jet_std_math_gcd_many(values: &[i64]) -> i64 {
     values.iter().copied().fold(0, jet_std_math_gcd)
@@ -1744,6 +1460,3 @@ pub fn jet_std_math_in_range(value: i64, low: i64, high: i64) -> bool {
     value >= low && value < high
 }
 
-pub fn jet_std_math_xor(left: i64, right: i64) -> i64 {
-    left ^ right
-}

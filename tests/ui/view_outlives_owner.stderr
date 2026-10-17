@@ -4,5 +4,5 @@ Error [E2305]: This view points into `incidents`, which this function owns
   3 |     return incidents[0..2]
     |                     ^^^^^^
  Why: `incidents` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
- Fix: Return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it
+ Fix: Return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it
 More: jet-lang.dev/e/E2305

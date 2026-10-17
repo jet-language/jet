@@ -279,10 +279,10 @@ fn parse_inspect_pid(value: &str) -> Result<u32, String> {
     Ok(pid)
 }
 
+// Only bare flags consume the next token; joined values must leave TARGET intact.
 fn inspect_flag_takes_value(argument: &str) -> bool {
-    let name = argument.split('=').next().unwrap_or(argument);
     matches!(
-        name,
+        argument,
         "--before"
             | "--color"
             | "--facts"
@@ -294,6 +294,7 @@ fn inspect_flag_takes_value(argument: &str) -> bool {
             | "--set"
             | "--target"
             | "--topic"
+            | "--threads"
     )
 }
 
@@ -491,7 +492,9 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     NestedCommandSpec { name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: HandlerKey::Codemod, also_canonical_top_level: false },
     NestedCommandSpec { name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "Inspect implicit copies, exercised memory witnesses, or dependencies", handler: HandlerKey::Audit, also_canonical_top_level: true },
     NestedCommandSpec { name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: HandlerKey::Sbom, also_canonical_top_level: false },
-    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: false },
+    // D-FFI-AUTO1=A: `jet inspect bind` and the top-level `jet bind` are one command
+    // (`run_bind`), so the nested spelling is explicitly canonical at the top level too.
+    NestedCommandSpec { name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: HandlerKey::Bind, also_canonical_top_level: true },
     NestedCommandSpec { name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: HandlerKey::Logs, also_canonical_top_level: false },
     NestedCommandSpec { name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: HandlerKey::Info, also_canonical_top_level: false },
     NestedCommandSpec { name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: HandlerKey::Outdated, also_canonical_top_level: false },
@@ -500,12 +503,13 @@ const INSPECT_ACTIONS: &[NestedCommandSpec] = &[
     // identifiers with a redirect to their current spelling.
     NestedCommandSpec { name: "reserved", usage: "reserved [--json]", summary: "List reserved words and sigils", handler: HandlerKey::Reserved, also_canonical_top_level: false },
 ];
+// D-CLI-ONE1=A retired bare `report`, so `gc report` is not canonical at the top level.
 const GC_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "report",
     usage: "report",
     summary: "Show values moved into automatic memory management",
     handler: HandlerKey::GcReport,
-    also_canonical_top_level: true,
+    also_canonical_top_level: false,
 }];
 const PROJECT_ACTIONS: &[NestedCommandSpec] = &[NestedCommandSpec {
     name: "parts",
@@ -921,15 +925,6 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: Some("dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"),
     },
     CommandSpec {
-        name: "learn",
-        summary: "Practice Jet with offline code exercises",
-        headline: false,
-        frequency_rank: 37,
-        actions: &[],
-        exhaustive: false,
-        usage: Some("learn [--check] [--watch|--watch=off] [--json] [--quiet] [--color[=<mode>]]"),
-    },
-    CommandSpec {
         name: "try",
         summary: "Speculatively apply a plan and re-check its claims",
         headline: false,
@@ -1179,7 +1174,7 @@ pub const COMMANDS: &[CommandSpec] = &[
         usage: None,
     },
     CommandSpec {
-        name: "Fold",
+        name: "fold",
         summary: "Reverse a recorded Package source transition",
         headline: false,
         frequency_rank: 62,

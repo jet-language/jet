@@ -1,0 +1,26 @@
+# Port of tests/process_sessions.rs:202-259; original source after format/repeat expansion.
+# ORACLE-LITERAL; PENDING-SAME-HEAD; have_rustc guard erased, so all3 tiers are mandatory.
+requires: os:unix
+requires: tool:sh
+requires: tool:cat
+fixture: process_stdin_text_preserves_input_and_io_error_all_tiers.fixture
+write: run.template process_stdin_text_preserves_input_and_io_error_all_tiers.fixture/run.template
+step: jet run generate-source.jet
+exit: 0
+step default: jet run run.jet
+exit: 0
+stdout: = process_stdin_text_preserves_input_and_io_error_all_tiers.out
+step: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default
+entries: . kind file ext = "txt" = 3
+for file . kind file ext = "txt" as input
+file: {input.path} = process_stdin_text_preserves_input_and_io_error_all_tiers.input
+end for

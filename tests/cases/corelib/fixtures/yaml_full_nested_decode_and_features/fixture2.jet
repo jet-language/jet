@@ -1,0 +1,17 @@
+
+use core.encoding.yaml as yaml
+fn run() {
+    raw :: "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
+    d :: yaml.parse(raw) ?? panic("bad yaml")
+    if d == .Object(top) {
+        if top["flowlist"] == .Array(xs) {
+            print(xs.len())
+        }
+        if top["use"] == .Object(u) {
+            print(u.len())
+        }
+        if top["note"] == .Text(s) {
+            print(s.contains("one"))
+        }
+    }
+}

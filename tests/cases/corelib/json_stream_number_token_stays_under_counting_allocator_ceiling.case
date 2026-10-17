@@ -1,0 +1,9 @@
+# Port of tests/corelib_parts/encoding_streams.rs::json_stream_number_token_stays_under_counting_allocator_ceiling; guest source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/encoding_streams.rs:1117.
+# PENDING-SEAM(codec-allocation-probe): original encoding_streams.rs:1100 requires peak requested allocation during json.reader.next <= jet_encoding_codec_heap_ceiling(reader.limits) for EACH call. Never replaced by RSS/process memory or success-only checks. Generated-Rust function/attribute replacement assertions (1052,1107) retire as Rust-only.
+refused: codec-allocation-probe
+fixture: fixtures/json_stream_number_token_stays_under_counting_allocator_ceiling
+write: guest.jet fixtures/json_stream_number_token_stays_under_counting_allocator_ceiling/fixture.template
+step aot: jet build guest.jet
+step aot_run: built
+stdout: = json_stream_number_token_stays_under_counting_allocator_ceiling.out

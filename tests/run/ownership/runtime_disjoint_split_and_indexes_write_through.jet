@@ -1,0 +1,15 @@
+
+fn run() {
+    split_values := [1, 2, 3, 4]
+    parts :: &split_values.split_write(2) ?? panic("split failed")
+    parts.left[0] = 10
+    parts.right[0] = 30
+    print(split_values)
+
+    indexed_values := [5, 6, 7, 8]
+    edits :: &indexed_values.get_disjoint_write([0, 3]) ?? panic("index proof failed")
+    loop edit in edits {
+        edit[0] = edit[0] + 45
+    }
+    print(indexed_values)
+}

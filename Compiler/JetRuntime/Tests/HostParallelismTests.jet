@@ -1,0 +1,17 @@
+// HostParallelism fixture hooks driven by HostParallelismWitness.c: the cgroup quota (I64 max = unlimited) and the online-list
+// count under a fake root. Not Core API.
+#Export(c) fn jet_rt_host_cpu_quota_fixture(root: I64, root_len: I64) -> I64 {
+    ctx :: cpu_ctx_new(root, root_len)
+    quota :: cpu_quota(ctx)
+    cpu_ctx_drop(ctx)
+    quota
+}
+#Export(c) fn jet_rt_host_cpu_online_fixture(root: I64, root_len: I64) -> I64 {
+    ctx :: cpu_ctx_new(root, root_len)
+    count :: cpu_online_count(ctx)
+    cpu_ctx_drop(ctx)
+    count
+}
+#Export(c) fn jet_rt_host_cpu_parallelism_fixture(root: I64, root_len: I64) -> I64 {
+    cpu_available_parallelism(root, root_len)
+}

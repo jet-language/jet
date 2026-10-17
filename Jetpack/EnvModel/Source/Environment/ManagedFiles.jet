@@ -5,7 +5,7 @@
 // The one managed-file write policy. The default is a symlink to an immutable
 // Jet-owned content object; `Seed` preserves an existing destination and
 // `Copy` owns the destination after the first successful application.
-pub enum FileMode {
+enum FileMode {
     Symlink
     Seed
     Copy
@@ -22,7 +22,7 @@ pub enum FileMode {
 // Conflict handling is intentionally closed in v1. A managed file never
 // overwrites an unmanaged destination; the user must resolve that choice in
 // source before `jet env sync` can apply it.
-pub enum FileConflict {
+enum FileConflict {
     Refuse
 
     fn as_str(self) -> String Never! {
@@ -32,21 +32,21 @@ pub enum FileConflict {
     }
 }
 
-pub struct ManagedFile {
-    pub destination: String{""}
+struct ManagedFile {
+    destination: String{""}
     // A project-relative source path, when the declaration names one.
-    pub source: String?{None}
+    source: String?{None}
     // Inline bytes after comptime evaluation, when the declaration supplies a
     // value rather than a source path.
-    pub content: [U8]?{None}
-    pub mode: FileMode{FileMode.Symlink}
-    pub permissions: Int?{None}
-    pub sensitive: Bool{false}
-    pub generation: String?{None}
+    content: [U8]?{None}
+    mode: FileMode{FileMode.Symlink}
+    permissions: Int?{None}
+    sensitive: Bool{false}
+    generation: String?{None}
     // Hash of the declarative source identity. Jetpack re-hashes source bytes
     // before applying a path-backed entry.
-    pub source_digest: String{""}
-    pub conflict: FileConflict{FileConflict.Refuse}
+    source_digest: String{""}
+    conflict: FileConflict{FileConflict.Refuse}
 
     fn fingerprint(self) -> String Never! {
         source :: self.source ?? "<inline>"
@@ -69,7 +69,7 @@ impl ManagedFile.Debug {
 }
 
 #Error
-pub enum ManagedFileError {
+enum ManagedFileError {
     InvalidDestination(String)
     InvalidSource(String)
     InvalidEntry(String)
@@ -99,7 +99,7 @@ struct ManagedFileEntry {
 // Convert the closed `files: [destination: value]` fact into deterministic
 // managed-file records, ordered by destination; a repeated destination is
 // rejected.
-pub fn envmodel_files_from_value(value: CtValue) -> [ManagedFile] ManagedFileError! {
+fn envmodel_files_from_value(value: CtValue) -> [ManagedFile] ManagedFileError! {
     entries := [ManagedFileEntry]{}
     if value == {
         .Map(map_entries) -> {
@@ -123,15 +123,15 @@ pub fn envmodel_files_from_value(value: CtValue) -> [ManagedFile] ManagedFileErr
         }
         else -> { return Err(ManagedFileError.InvalidEntry("files must be a map or a list of managed file records")) }
     }
-    files := [ManagedFile]{}
-    loop entry in entries -> &files.push(envmodel_managed_file_from_value(entry.destination, entry.value))
-    &files.sort_by(file -> file.destination)
-    loop index in 1..<files.len() {
-        if files[index - 1].destination == files[index].destination {
-            return Err(ManagedFileError.InvalidDestination(files[index - 1].destination))
+    managed := [ManagedFile]{}
+    loop entry in entries -> &managed.push(envmodel_managed_file_from_value(entry.destination, entry.value))
+    &managed.sort_by(file -> file.destination)
+    loop index in 1..<managed.len() {
+        if managed[index - 1].destination == managed[index].destination {
+            return Err(ManagedFileError.InvalidDestination(managed[index - 1].destination))
         }
     }
-    Ok(files)
+    Ok(managed)
 }
 
 fn envmodel_managed_file_from_value(destination: String, value: CtValue) -> ManagedFile ManagedFileError! {

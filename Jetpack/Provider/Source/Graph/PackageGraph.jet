@@ -4,10 +4,10 @@
 // substrate: a package sees its declared dependencies only, plus catalog
 // edges a caller-owned surface already selected.
 
-pub struct PackageNode {
-    pub name: String
-    pub direct_deps: [String]
-    pub transitive_deps: [String]
+struct PackageNode {
+    name: String
+    direct_deps: [String]
+    transitive_deps: [String]
 
     fn new(name: String) -> PackageNode Never! {
         PackageNode{name: name, direct_deps: [String]{}, transitive_deps: [String]{}}
@@ -26,30 +26,30 @@ pub struct PackageNode {
     }
 }
 
-pub struct CatalogEntry {
-    pub logical_name: String
-    pub provider_ref: String
-    pub version_rule: String
-    pub allowed_packages: [String]
-    pub owner_workspace: String
-    pub rationale: String
+struct CatalogEntry {
+    logical_name: String
+    provider_ref: String
+    version_rule: String
+    allowed_packages: [String]
+    owner_workspace: String
+    rationale: String
 }
 
-pub enum VisibleEdgeKind {
+enum VisibleEdgeKind {
     DirectDep
     Catalog
 }
 
-pub struct VisibleEdge {
-    pub owner_package: String
-    pub dependency: String
-    pub provider_ref: String
-    pub kind: VisibleEdgeKind
-    pub rationale: String
+struct VisibleEdge {
+    owner_package: String
+    dependency: String
+    provider_ref: String
+    kind: VisibleEdgeKind
+    rationale: String
 }
 
 // How a package can make a hidden dependency visible.
-pub enum MissingDependencyFix {
+enum MissingDependencyFix {
     DirectAddPath(dep: String, path: String)
     DirectAddGit(dep: String, url: String, tag_name: String)
     CatalogData(logical_name: String, packages: [String])
@@ -58,11 +58,11 @@ pub enum MissingDependencyFix {
 
 // A dependency a package asked for but cannot see.
 #Error
-pub struct MissingDependency {
-    pub owner_package: String
-    pub requested: String
-    pub reason: String
-    pub fix: MissingDependencyFix
+struct MissingDependency {
+    owner_package: String
+    requested: String
+    reason: String
+    fix: MissingDependencyFix
 
     // The fix as one teaching sentence.
     fn fix_text(self) -> String Never! {
@@ -75,10 +75,10 @@ pub struct MissingDependency {
     }
 }
 
-pub struct PackageGraph {
-    packages: [String: PackageNode]
-    catalogs: [CatalogEntry]
-    workspace_members: [String: [String]]
+struct PackageGraph {
+    priv packages: [String: PackageNode]
+    priv catalogs: [CatalogEntry]
+    priv workspace_members: [String: [String]]
 
     fn new() -> PackageGraph Never! {
         PackageGraph{packages: [String: PackageNode]{}, catalogs: [CatalogEntry]{}, workspace_members: [String: [String]]{}}
@@ -106,14 +106,14 @@ pub struct PackageGraph {
         if self.packages.get(owner_package) == {
             .Val(node) -> {
                 loop dep in node.direct_deps {
-                    &edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~dep, provider_ref: ~dep, kind: VisibleEdgeKind.DirectDep, rationale: "declared direct dependency"})
+                    &edges.push(VisibleEdge{owner_package: owner_package.copy(), dependency: dep.copy(), provider_ref: dep.copy(), kind: VisibleEdgeKind.DirectDep, rationale: "declared direct dependency"})
                 }
             }
             .None -> {}
         }
         loop catalog in self.catalogs {
             if catalog.allowed_packages.contains(owner_package) {
-                &edges.push(VisibleEdge{owner_package: ~owner_package, dependency: ~catalog.logical_name, provider_ref: ~catalog.provider_ref, kind: VisibleEdgeKind.Catalog, rationale: ~catalog.rationale})
+                &edges.push(VisibleEdge{owner_package: owner_package.copy(), dependency: catalog.logical_name.copy(), provider_ref: catalog.provider_ref.copy(), kind: VisibleEdgeKind.Catalog, rationale: catalog.rationale.copy()})
             }
         }
         provider_graph_stable_sort_edges(edges)
@@ -130,14 +130,14 @@ pub struct PackageGraph {
         if self.workspace_members.get(requested) == {
             .Val(candidates) -> {
                 if candidates.len() > 1 {
-                    return Err(MissingDependency{owner_package: ~owner_package, requested: ~requested, reason: "`{owner_package}` asked for `{requested}`, but that name is ambiguous", fix: MissingDependencyFix.DisambiguateMember{candidates: candidates}})
+                    return Err(MissingDependency{owner_package: owner_package.copy(), requested: requested.copy(), reason: "`{owner_package}` asked for `{requested}`, but that name is ambiguous", fix: MissingDependencyFix.DisambiguateMember{candidates: candidates}})
                 }
             }
             .None -> {}
         }
         packages_using :: self.packages_using_hidden_dep(requested)
-        fix :: if packages_using.len() > 1 -> MissingDependencyFix.CatalogData{logical_name: ~requested, packages: packages_using} else -> MissingDependencyFix.DirectAddPath{dep: ~requested, path: "../{requested}"}
-        Err(MissingDependency{owner_package: ~owner_package, requested: ~requested, reason: "`{owner_package}` can use only direct deps or selected catalog deps; `{requested}` is not visible", fix: fix})
+        fix :: if packages_using.len() > 1 -> MissingDependencyFix.CatalogData{logical_name: requested.copy(), packages: packages_using} else -> MissingDependencyFix.DirectAddPath{dep: requested.copy(), path: "../{requested}"}
+        Err(MissingDependency{owner_package: owner_package.copy(), requested: requested.copy(), reason: "`{owner_package}` can use only direct deps or selected catalog deps; `{requested}` is not visible", fix: fix})
     }
 
     // Names of the packages that reach `dep` transitively, sorted.

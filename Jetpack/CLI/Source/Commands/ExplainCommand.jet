@@ -7,14 +7,14 @@ fn cli_explain_error(theme: Theme, parsed: CLIParsed, code: String, what: String
     cli_status_error(theme, parsed.flags.json, "explain", code, what, why, fix)
 }
 
-fn cli_optional_text(value: String?) -> DataTree Never! {
+fn cli_optional_text(value: String?) -> Dyn Never! {
     if value == {
-        .Val(text) -> DataTree.Text(text)
-        .None -> DataTree.Null
+        .Val(text) -> Dyn.Text(text)
+        .None -> Dyn.Null
     }
 }
 
-pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_explain(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query :: parsed.positional.get(0) ?? return cli_explain_error(theme, parsed, "E1274", "explain needs a package ref", "`jet explain <CODE>` is handled by the main compiler; `jetpack explain` explains package refs.", "write `jet explain weirdctl` after a failed build.")
     if query.starts_with("package-overlay:") -> return cli_cmd_explain_overlay(&cache, theme, parsed, query)
@@ -22,15 +22,17 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net
         explanation :: explain_lookup(query) ?? panic("the syntax and explain dictionaries must be one table")
         if parsed.flags.json {
             fields := StatusFields.new()
-            fields = fields.with("code", DataTree.Text(explanation.code))
-            fields = fields.with("stage", DataTree.Text(explanation.stage))
-            fields = fields.with("what", DataTree.Text(explanation.what ?? explanation.meaning))
+            fields = fields.with("code", Dyn.Text(explanation.code))
+            fields = fields.with("stage", Dyn.Text(explanation.stage))
+            fields = fields.with("what", Dyn.Text(explanation.what ?? explanation.meaning))
             fields = fields.with("why", cli_optional_text(explanation.why))
             fields = fields.with("fix", cli_optional_text(explanation.fix))
             fields = fields.with("example", cli_optional_text(explanation.example))
-            print(StatusEnvelope.new("explain", true).with_field("explain", report_status_object(fields)).json())
+            text :: StatusEnvelope.new("explain", true).with_field("explain", report_status_object(fields)).json() ?? return cli_status_encoding_error(err)
+            print(text)
         } else {
-            term.stdout().write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
+            stdout_handle := term.stdout()
+            &stdout_handle.write(explain_render(explanation, theme.color)).drop("explain output is best-effort")
         }
         return EXIT_OK
     }
@@ -49,13 +51,14 @@ pub fn cli_cmd_explain(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net
         package = parsed.positional.get(1) ?? return cli_explain_error(theme, parsed, "E1274", "explain lens `{query}` needs a package ref", "causal package explanations need the lens and the package ref.", "write `jet explain {query} <ref>`.")
     }
     roots :: pkg_resolve_roots()
-    if store_explain_package(roots, package, lens) == {
+    if store_explain_package(&verification, roots, package, lens) == {
         .Ok(found) -> {
             explanation :: found ?? return cli_explain_error(theme, parsed, "E1274", "no package record or build attempt for `{package}`", "`jet explain` reads the Hangar Store and persisted Jetpack realization attempts; neither contains this package.", "run `jet build {package}` first, or use `jet explain E1234` for diagnostic-code help.")
             if parsed.flags.json {
-                print(explanation.to_json())
+                print(explanation.to_json() ?? return cli_status_encoding_error(err))
             } else {
-                term.stdout().write(explanation.text()).drop("explain output is best-effort")
+                stdout_handle := term.stdout()
+                &stdout_handle.write(explanation.text()).drop("explain output is best-effort")
             }
             loop report in explanation.reports {
                 if report.kind == ExplainReportKind.Conflict -> return EXIT_USAGE
@@ -81,38 +84,39 @@ fn cli_cmd_explain_overlay(cache: &WorkspaceDeclarationCache, theme: Theme, pars
     lock :: SemanticLockFile.with_records(records)
     fact :: trust_explain_semantic_lock(lock, query) ?? return cli_explain_error(theme, parsed, "E1274", "no overlay record for `{query}`", "`workspace.jet` has overlay policy, but not that overlay/package key.", "query `package-overlay:<overlay>:<package>`.")
     if parsed.flags.json {
-        owners := [DataTree]{}
-        loop owner in fact.owners -> &owners.push(DataTree.Text(owner))
-        contenders := [DataTree]{}
+        owners := [Dyn]{}
+        loop owner in fact.owners -> &owners.push(Dyn.Text(owner))
+        contenders := [Dyn]{}
         loop contender in fact.contenders {
             contender_fields := StatusFields.new()
-            contender_fields = contender_fields.with("owner", DataTree.Text(contender.owner_package))
-            contender_fields = contender_fields.with("provider", DataTree.Text(contender.provider))
-            contender_fields = contender_fields.with("exact", DataTree.Text(contender.exact_output))
-            contender_fields = contender_fields.with("reason", DataTree.Text(contender.reason))
-            contender_fields = contender_fields.with("source", DataTree.Text(contender.source_ref))
-            contender_fields = contender_fields.with("channel", DataTree.Text(contender.channel_input))
-            contender_fields = contender_fields.with("policy", DataTree.Text(contender.policy_fingerprint))
-            contender_fields = contender_fields.with("recipe", DataTree.Text(contender.recipe_id))
-            contender_fields = contender_fields.with("adapter", DataTree.Text(contender.adapter_id))
-            contender_fields = contender_fields.with("signature", DataTree.Text(contender.signature))
-            contender_fields = contender_fields.with("cache_provenance", DataTree.Text(contender.cache_provenance))
-            contender_fields = contender_fields.with("update", DataTree.Text(contender.update_command))
+            contender_fields = contender_fields.with("owner", Dyn.Text(contender.owner_package))
+            contender_fields = contender_fields.with("provider", Dyn.Text(contender.provider))
+            contender_fields = contender_fields.with("exact", Dyn.Text(contender.exact_output))
+            contender_fields = contender_fields.with("reason", Dyn.Text(contender.reason))
+            contender_fields = contender_fields.with("source", Dyn.Text(contender.source_ref))
+            contender_fields = contender_fields.with("channel", Dyn.Text(contender.channel_input))
+            contender_fields = contender_fields.with("policy", Dyn.Text(contender.policy_fingerprint))
+            contender_fields = contender_fields.with("recipe", Dyn.Text(contender.recipe_id))
+            contender_fields = contender_fields.with("adapter", Dyn.Text(contender.adapter_id))
+            contender_fields = contender_fields.with("signature", Dyn.Text(contender.signature))
+            contender_fields = contender_fields.with("cache_provenance", Dyn.Text(contender.cache_provenance))
+            contender_fields = contender_fields.with("update", Dyn.Text(contender.update_command))
             &contenders.push(report_status_object(contender_fields))
         }
         fields := StatusFields.new()
-        fields = fields.with("query", DataTree.Text(query))
-        fields = fields.with("lens", DataTree.Text("overlay"))
-        fields = fields.with("semantic_key", DataTree.Text(fact.semantic_key))
-        fields = fields.with("owners", DataTree.Array(owners))
-        fields = fields.with("contenders", DataTree.Array(contenders))
-        fields = fields.with("provider", DataTree.Text(fact.provider))
-        fields = fields.with("platform", DataTree.Text(fact.platform))
-        fields = fields.with("exact", DataTree.Text(fact.exact_artifact))
-        fields = fields.with("policy", DataTree.Text(fact.policy_fingerprint))
-        fields = fields.with("update", DataTree.Text(fact.update_command))
-        fields = fields.with("offline", DataTree.Bool(fact.offline_satisfied))
-        print(StatusEnvelope.new("explain", true).with_fields(fields).json())
+        fields = fields.with("query", Dyn.Text(query))
+        fields = fields.with("lens", Dyn.Text("overlay"))
+        fields = fields.with("semantic_key", Dyn.Text(fact.semantic_key))
+        fields = fields.with("owners", Dyn.Array(owners))
+        fields = fields.with("contenders", Dyn.Array(contenders))
+        fields = fields.with("provider", Dyn.Text(fact.provider))
+        fields = fields.with("platform", Dyn.Text(fact.platform))
+        fields = fields.with("exact", Dyn.Text(fact.exact_artifact))
+        fields = fields.with("policy", Dyn.Text(fact.policy_fingerprint))
+        fields = fields.with("update", Dyn.Text(fact.update_command))
+        fields = fields.with("offline", Dyn.Bool(fact.offline_satisfied))
+        text :: StatusEnvelope.new("explain", true).with_fields(fields).json() ?? return cli_status_encoding_error(err)
+        print(text)
         return EXIT_OK
     }
     print(fact.semantic_key)
@@ -136,7 +140,9 @@ fn cli_cmd_explain_overlay(cache: &WorkspaceDeclarationCache, theme: Theme, pars
 fn cli_explain_workspace_failure(parsed: CLIParsed, diagnostic: Diagnostic) -[IO, FS, Env, Time.Wait]> Int Never! {
     if parsed.flags.json {
         report :: cli_diagnostic_to_report(diagnostic, ReportPath.from_process(WORKSPACE_FILE))
-        term.stdout().write(StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line()).drop("status output is best-effort")
+        line :: StatusEnvelope.new("explain", false).with_reports([ReportEnvelope]{report}).json_line() ?? return cli_status_encoding_error(err)
+        stdout_handle := term.stdout()
+        &stdout_handle.write(line).drop("status output is best-effort")
     } else {
         terminal_write_output(diagnostics_render_all(WORKSPACE_FILE, "", [Diagnostic]{diagnostic}))
     }

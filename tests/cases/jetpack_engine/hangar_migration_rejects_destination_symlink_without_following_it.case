@@ -1,0 +1,23 @@
+# HAND-PORT tests/jetpack_engine.rs:261-297 hangar_migration_rejects_destination_symlink_without_following_it
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: hangar_migration_rejects_destination_symlink_without_following_it.fixture
+requires: os:unix
+requires: tool:readlink
+mkdir: data
+mkdir: legacy
+mkdir: data/jet
+symlink: {work}/outside data/jet/hangar
+step: jet hangar path --no-color
+unset: JETPACK_ROOT
+unset: LOCALAPPDATA
+env: XDG_STATE_HOME={work}/legacy
+env: XDG_DATA_HOME={work}/data
+exit: 2
+stderr: ~ "E2604" # original predicate
+stderr: ~ "Inspect the reported Hangar path" # original predicate
+stderr: ~ "is a symlink" # original predicate
+file: outside/marker = hangar_migration_rejects_destination_symlink_without_following_it.outside.expected
+step: readlink data/jet/hangar
+exit: 0
+stdout: lines = ["{work}/outside"] # original read_link path identity
+

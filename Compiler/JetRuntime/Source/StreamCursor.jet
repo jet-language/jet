@@ -1,0 +1,252 @@
+// Canonical opaque Cursor/Reader provider. Private 32B align8:
+// [packed data@0, byte length@8, capacity@16, byte position@24].
+// Cursor's first24B are exactly an E4 header. Empty data=1, cap=0.
+// Constructors borrow input (Reader accepts checked element stride1/8).
+// All advances prove pos <= len before writing. Clones own independent bytes;
+// drop releases (cap,1) only when nonempty, then the (32,8) carrier.
+// This replaces Rust Box<JetCursor/JetReader> in native packs, never mixes it.
+// Reference semantics: Foundation/StreamCursor.rs26-498.
+fn stream_new(data: I64, len: I64, stride: I64, position: I64) -> I64 {
+    handle :: jet_rt_alloc(I64{32}, I64{8})
+    target :: if (len == I64{0}) -> I64{1} else -> jet_rt_alloc(len, I64{1})
+    at := I64{0}
+    loop at < len {
+        rt_text_put(target + at, scan_byte(data, stride, at))
+        at += I64{1}
+    }
+    rt_text_store(handle, target)
+    rt_text_store(handle + I64{8}, len)
+    rt_text_store(handle + I64{16}, len)
+    rt_text_store(handle + I64{24}, position)
+    handle
+}
+fn stream_drop(handle: I64) {
+    if (handle == I64{0}) {
+        return
+    }
+    capacity :: rt_text_word(handle + I64{16})
+    if (capacity != I64{0}) { jet_rt_free(rt_text_data(handle), capacity, I64{1}) }
+    jet_rt_free(handle, I64{32}, I64{8})
+}
+fn stream_clone(handle: I64) -> I64 {
+    stream_new(rt_text_data(handle), rt_text_len(handle), I64{1}, rt_text_word(handle + I64{24}))
+}
+#Export(c) fn jet_rt_handle_drop_jet_cursor(handle: I64) { stream_drop(handle) }
+#Export(c) fn jet_rt_handle_drop_jet_reader(handle: I64) { stream_drop(handle) }
+#Export(c) fn jet_rt_handle_clone_jet_cursor(handle: I64) -> I64 { stream_clone(handle) }
+#Export(c) fn jet_rt_handle_clone_jet_reader(handle: I64) -> I64 { stream_clone(handle) }
+#Export(c) fn jet_rt_handle_field_jet_cursor_buf(handle: I64, output: I64) {
+    // G1 field projection is a borrowed read/clone-only E4 stack header, not an
+    // owner. The caller must neither grow nor drop this temporary view.
+    rt_text_store(output, rt_text_data(handle))
+    rt_text_store(output + I64{8}, rt_text_len(handle))
+    rt_text_store(output + I64{16}, rt_text_word(handle + I64{16}))
+}
+#Export(c) fn jet_cursor_over(text: I64) -> I64 {
+    stream_new(rt_text_data(text), rt_text_len(text), I64{1}, I64{0})
+}
+#Export(c) fn jet_reader_over(data: I64, len: I64, stride: I64) -> I64 {
+    stream_new(data, len, stride, I64{0})
+}
+#Export(c) fn jet_reader_over_owned(data: I64, len: I64, stride: I64) -> I64 {
+    // The C route lends its source buffer even for the lowering-only owned
+    // constructor; the reference list_in adapter also copies before transfer.
+    stream_new(data, len, stride, I64{0})
+}
+#Export(c) fn jet_cursor_skip_ws(handle: I64) {
+    position := rt_text_word(handle + I64{24})
+    length :: rt_text_len(handle)
+    loop position < length {
+        scalar :: rt_text_decode(rt_text_data(handle) + position)
+        if !unicode_is_white_space(scalar) { break }
+        position += rt_text_width(rt_text_data(handle) + position)
+    }
+    rt_text_store(handle + I64{24}, position)
+}
+#Export(c) fn jet_cursor_take_until(handle: I64, delimiter: I64, ok: I64, error: I64) -> I64 {
+    position :: rt_text_word(handle + I64{24})
+    length :: rt_text_len(handle)
+    found :: rt_text_find_bytes(rt_text_data(handle), length, rt_text_data(delimiter), rt_text_len(delimiter), position, false)
+    if (found < I64{0}) {
+        quoted :: jet_rt_require_debug_string(delimiter)
+        message :: jet_rt_string_builder_new()
+        rt_text_push_word(message, I64{8371754580332148035}, I64{8}) // Cursor.t
+        rt_text_push_word(message, I64{7598819921671580513}, I64{8}) // ake_unti
+        rt_text_push_word(message, I64{2112108}, I64{3}) // l:
+        rt_text_append(message, rt_text_data(quoted), rt_text_len(quoted))
+        rt_text_push_word(message, I64{8462094514430897696}, I64{8}) //  not fou
+        rt_text_push_word(message, I64{7526676535825163374}, I64{8}) // nd in th
+        rt_text_push_word(message, I64{7955997339207999589}, I64{8}) // e remain
+        rt_text_push_word(message, I64{8392569455039180393}, I64{8}) // ing text
+        jet_rt_string_drop(quoted)
+        rt_text_store(error, message)
+        return I64{0}
+    }
+    captured :: rt_text_copy(rt_text_data(handle) + position, found - position)
+    rt_text_store(ok, captured)
+    // Delimiter is not consumed, exactly StreamCursor.rs481-487.
+    rt_text_store(handle + I64{24}, found)
+    I64{1}
+}
+fn stream_method(message: I64, method: I64, width: I64, little: Bool) {
+    if (method < I64{4}) {
+        word :: if (method == I64{1}) -> I64{1801807216} else if (method == I64{2}) -> I64{1701536116} else -> I64{1885956979}
+        rt_text_push_word(message, word, I64{4})
+        return
+    }
+    rt_text_push_word(message, I64{409705997682}, I64{5}) // read_
+    rt_text_push_word(message, if (method == I64{4}) -> I64{117} else if (method == I64{5}) -> I64{105} else -> I64{102}, I64{1})
+    rt_text_push_number(message, width)
+    if (width > I64{8}) { rt_text_push_word(message, if little -> I64{6646879} else -> I64{6644319}, I64{3}) }
+}
+fn stream_bounds_error(handle: I64, need: I64, method: I64, width: I64, little: Bool) -> I64 {
+    message :: jet_rt_string_builder_new()
+    rt_text_push_word(message, I64{13073628730058066}, I64{7}) // Reader.
+    stream_method(message, method, width, little)
+    rt_text_push_word(message, I64{7234298763096760378}, I64{8}) // : needed
+    rt_text_push_word(message, I64{32}, I64{1})
+    rt_text_push_number(message, need)
+    rt_text_push_word(message, I64{435745808928}, I64{5}) //  byte
+    if (need != I64{1}) { rt_text_push_word(message, I64{115}, I64{1}) }
+    rt_text_push_word(message, I64{7598539523675676960}, I64{8}) //  at posi
+    rt_text_push_word(message, I64{139291748724}, I64{5}) // tion
+    position :: rt_text_word(handle + I64{24})
+    rt_text_push_number(message, position)
+    rt_text_push_word(message, I64{9140705870946348}, I64{7}) // , only
+    rt_text_push_number(message, rt_text_len(handle) - position)
+    rt_text_push_word(message, I64{31078114606281248}, I64{7}) //  remain
+    message
+}
+fn stream_read(handle: I64, width: I64, little: Bool, signed: Bool, floating: Bool, ok: I64, error: I64) -> I64 {
+    position :: rt_text_word(handle + I64{24})
+    need :: width /% I64{8}
+    method :: if floating -> I64{6} else if signed -> I64{5} else -> I64{4}
+    if (need > rt_text_len(handle) - position) {
+        rt_text_store(error, stream_bounds_error(handle, need, method, width, little))
+        return I64{0}
+    }
+    data :: rt_text_data(handle) + position
+    value := I64{0}
+    at := I64{0}
+    loop at < need {
+        byte :: rt_text_byte(data + at)
+        if little { value = value.bit_or(byte << (at * I64{8})) } else { value = (value << I64{8}).bit_or(byte) }
+        at += I64{1}
+    }
+    if (signed && width < I64{64}) { value = (value << (I64{64} - width)) >> (I64{64} - width) }
+    // Fixed IntN and Float outputs carry their raw bits, not exact-Int tags.
+    rt_text_store(ok, value)
+    rt_text_store(handle + I64{24}, position + need)
+    I64{1}
+}
+#Export(c) fn jet_reader_read_u8(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{8}, false, false, false, ok, error) }
+#Export(c) fn jet_reader_read_i8(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{8}, false, true, false, ok, error) }
+#Export(c) fn jet_reader_read_u16_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{16}, true, false, false, ok, error) }
+#Export(c) fn jet_reader_read_u16_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{16}, false, false, false, ok, error) }
+#Export(c) fn jet_reader_read_i16_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{16}, true, true, false, ok, error) }
+#Export(c) fn jet_reader_read_i16_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{16}, false, true, false, ok, error) }
+#Export(c) fn jet_reader_read_u32_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, true, false, false, ok, error) }
+#Export(c) fn jet_reader_read_u32_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, false, false, false, ok, error) }
+#Export(c) fn jet_reader_read_i32_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, true, true, false, ok, error) }
+#Export(c) fn jet_reader_read_i32_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, false, true, false, ok, error) }
+#Export(c) fn jet_reader_read_u64_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, true, false, false, ok, error) }
+#Export(c) fn jet_reader_read_u64_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, false, false, false, ok, error) }
+#Export(c) fn jet_reader_read_i64_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, true, true, false, ok, error) }
+#Export(c) fn jet_reader_read_i64_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, false, true, false, ok, error) }
+// F32 routes carry binary32 bits zero-extended in an eight-byte out slot;
+// Lower bitcasts at the typed boundary. No Float arithmetic touches NaNs.
+#Export(c) fn jet_reader_read_f32_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, true, false, true, ok, error) }
+#Export(c) fn jet_reader_read_f32_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{32}, false, false, true, ok, error) }
+#Export(c) fn jet_reader_read_f64_le(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, true, false, true, ok, error) }
+#Export(c) fn jet_reader_read_f64_be(handle: I64, ok: I64, error: I64) -> I64 { stream_read(handle, I64{64}, false, false, true, ok, error) }
+#Export(c) fn jet_reader_at_end(handle: I64) -> Bool { rt_text_word(handle + I64{24}) >= rt_text_len(handle) }
+#Export(c) fn jet_reader_remaining(handle: I64) -> I64 {
+    jet_int_owned_from_i64(rt_text_len(handle) - rt_text_word(handle + I64{24}))
+}
+#Export(c) fn jet_reader_peek(handle: I64, ok: I64, error: I64) -> I64 {
+    position :: rt_text_word(handle + I64{24})
+    if (position == rt_text_len(handle)) {
+        rt_text_store(error, stream_bounds_error(handle, I64{1}, I64{1}, I64{8}, false))
+        return I64{0}
+    }
+    rt_text_store(ok, rt_text_byte(rt_text_data(handle) + position))
+    I64{1}
+}
+fn stream_negative_error(method: I64, value: I64) -> I64 {
+    message :: jet_rt_string_builder_new()
+    rt_text_push_word(message, I64{13073628730058066}, I64{7})
+    if (method == I64{0}) {
+        rt_text_push_word(message, I64{1801807219}, I64{4}) // seek
+    } else {
+        stream_method(message, method, I64{0}, false)
+    }
+    // Seek's noun is position; take/skip's noun is length.
+    rt_text_push_word(message, I64{8250}, I64{2}) // :
+    if (method == I64{0}) { rt_text_push_word(message, I64{7957695015293251440}, I64{8}) } else {
+        rt_text_push_word(message, I64{114849160783212}, I64{6}) // length
+    }
+    rt_text_push_word(message, I64{32}, I64{1})
+    rt_text_push_word(message, I64{8390045716486255981}, I64{8}) // must not
+    rt_text_push_word(message, I64{7018690067944530464}, I64{8}) //  be nega
+    rt_text_push_word(message, I64{8027420235864107380}, I64{8}) // tive, go
+    rt_text_push_word(message, I64{8308}, I64{2}) // t
+    rt_text_push_number(message, value)
+    message
+}
+#Export(c) fn jet_reader_seek(handle: I64, position: I64, error: I64) -> I64 {
+    if (position < I64{0}) {
+        rt_text_store(error, stream_negative_error(I64{0}, position))
+        return I64{0}
+    }
+    if (position > rt_text_len(handle)) {
+        message :: jet_rt_string_builder_new()
+        rt_text_push_word(message, I64{13073628730058066}, I64{7})
+        rt_text_push_word(message, I64{1801807219}, I64{4})
+        rt_text_push_word(message, I64{8250}, I64{2})
+        rt_text_push_word(message, I64{7957695015293251440}, I64{8}) // position
+        rt_text_push_word(message, I64{32}, I64{1})
+        rt_text_push_number(message, position)
+        rt_text_push_word(message, I64{8032562882517625120}, I64{8})
+        rt_text_push_word(message, I64{9117624560542830}, I64{7})
+        rt_text_push_number(message, rt_text_len(handle))
+        rt_text_store(error, message)
+        return I64{0}
+    }
+    rt_text_store(handle + I64{24}, position)
+    I64{1}
+}
+#Export(c) fn jet_reader_skip(handle: I64, count: I64, error: I64) -> I64 {
+    if (count < I64{0}) {
+        rt_text_store(error, stream_negative_error(I64{3}, count))
+        return I64{0}
+    }
+    position :: rt_text_word(handle + I64{24})
+    if (count > rt_text_len(handle) - position) {
+        rt_text_store(error, stream_bounds_error(handle, count, I64{3}, I64{0}, false))
+        return I64{0}
+    }
+    rt_text_store(handle + I64{24}, position + count)
+    I64{1}
+}
+#Export(c) fn jet_reader_take(handle: I64, count: I64, stride: I64, ok_data: I64, ok_len: I64, error: I64) -> I64 {
+    if (count < I64{0}) {
+        rt_text_store(error, stream_negative_error(I64{2}, count))
+        return I64{0}
+    }
+    position :: rt_text_word(handle + I64{24})
+    if (count > rt_text_len(handle) - position) {
+        rt_text_store(error, stream_bounds_error(handle, count, I64{2}, I64{0}, false))
+        return I64{0}
+    }
+    output :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(count * stride, I64{8})
+    at := I64{0}
+    loop at < count {
+        byte :: rt_text_byte(rt_text_data(handle) + position + at)
+        if (stride == I64{1}) { rt_text_put(output + at, byte) } else { rt_text_store(output + at * stride, byte) }
+        at += I64{1}
+    }
+    rt_text_store(ok_data, output)
+    rt_text_store(ok_len, count)
+    rt_text_store(handle + I64{24}, position + count)
+    I64{1}
+}

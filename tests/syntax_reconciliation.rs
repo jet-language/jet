@@ -170,11 +170,11 @@ const FORBIDDEN: &[&str] = &[
 
 const OLD_BINDING_CODES: &[&str] = &["E0009", "E0010", "E0985"];
 const OLD_BINDING_WORDS: &[&str] = &["let", "val", "var", "set"];
-const DATATREE_NORMATIVE_SURFACES: &[&str] = &[
+const DYN_NORMATIVE_SURFACES: &[&str] = &[
     "Docs/spec/syntax-decisions.md",
     "Docs/spec/encoding-decisions.md",
     "Docs/spec/reference/core-library.md",
-    "Examples/features/serde/datatree_accessors.jet",
+    "Examples/features/serde/dyn_accessors.jet",
     "Examples/features/serde/encoding_breadth.jet",
     "Examples/features/serde/encoding_base.jet",
     "Examples/features/serde/encoding_base_expert/run.jet",
@@ -229,11 +229,11 @@ fn pipe_family_has_no_stale_flow_reservation() {
 }
 
 #[test]
-fn dynamic_encoding_surface_uses_datatree_name() {
+fn dynamic_encoding_surface_uses_dyn_name() {
     let mut failures = Vec::new();
-    for relative in DATATREE_NORMATIVE_SURFACES {
+    for relative in DYN_NORMATIVE_SURFACES {
         let text = fs::read_to_string(relative).unwrap_or_else(|error| {
-            panic!("cannot read DataTree inventory surface {relative}: {error}")
+            panic!("cannot read Dyn inventory surface {relative}: {error}")
         });
         let markdown = Path::new(relative)
             .extension()
@@ -254,13 +254,13 @@ fn dynamic_encoding_surface_uses_datatree_name() {
     }
     assert!(
         failures.is_empty(),
-        "current dynamic-encoding surfaces must use `DataTree`; label historical `Data` references explicitly:\n{}",
+        "current dynamic-encoding surfaces must use `Dyn`; label historical `Data` references explicitly:\n{}",
         failures.join("\n")
     );
 }
 
 #[test]
-fn datatree_name_check_distinguishes_prose_and_type_names() {
+fn dyn_name_check_distinguishes_prose_and_type_names() {
     for lawful in [
         "| `conn.send_text(text)` | Data frames; client frames are masked |",
         "| Data ownership | Official UCD inputs are checked in. |",
@@ -292,7 +292,7 @@ fn datatree_name_check_distinguishes_prose_and_type_names() {
     );
     assert_eq!(markdown_data_name_lines("```jet\nvalue: Data")[0].0, 2);
 
-    let lawful_source = "// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: DataTree";
+    let lawful_source = "// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: Dyn";
     assert!(source_identifier_offsets(lawful_source, "Data").is_empty());
     assert_eq!(source_identifier_offsets("value: Data", "Data").len(), 1);
 }
@@ -713,7 +713,6 @@ fn marker_plane_matrix_covers_current_marker_families() {
     );
 
     for syntax_anchor in [
-        "MARKER_PUB_FILE",
         "MARKER_TARGET",
         "MARKER_LAYOUT",
         "MARKER_CODABLE",
@@ -1080,7 +1079,7 @@ fn historical_data_reference(line: &str) -> bool {
         "old `Data`",
         "former `Data`",
         "historical `Data`",
-        "pre-`DataTree`",
+        "pre-`Dyn`",
         "edition 2026",
     ]
     .iter()
@@ -1242,7 +1241,6 @@ fn files(path: &Path) -> Vec<PathBuf> {
                         | ".jet"
                         | ".tower"
                         | ".agent-worktrees"
-                        | "jit-aot-parity-report"
                         | "node_modules"
                         | "target"
                         | "build"

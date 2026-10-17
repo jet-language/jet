@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum LockRecordKind {
     Package,
@@ -1428,7 +1428,7 @@ fn flake_lock_node_json(node: &FlakeLockNode) -> String {
     )
 }
 
-fn data_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn data_field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -1610,7 +1610,7 @@ fn parse_composition_record(raw: &str) -> Result<FlakeComposition, FlakeGraphErr
         .map_err(FlakeGraphError::InvalidAssignment)?
         .to_string();
     let per_system = match data_field(object, "perSystem") {
-        Some(DataTree::Bool(value)) => *value,
+        Some(Dyn::Bool(value)) => *value,
         _ => {
             return Err(FlakeGraphError::InvalidAssignment(
                 "composition perSystem is not boolean".to_string(),
@@ -1927,7 +1927,7 @@ fn quoted_rhs(value: &str) -> Option<String> {
 
 fn flake_lock_node_values(
     nodes: &[FlakeLockNode],
-) -> Result<BTreeMap<String, DataTree>, FlakeGraphError> {
+) -> Result<BTreeMap<String, Dyn>, FlakeGraphError> {
     nodes
         .iter()
         .map(|node| {
@@ -1947,9 +1947,9 @@ fn flake_lock_node_values(
                 .collect::<Result<Vec<_>, _>>()?;
             Ok((
                 node.name.clone(),
-                DataTree::Object(vec![(
+                Dyn::Object(vec![(
                     "inputs".to_string(),
-                    DataTree::Object(inputs),
+                    Dyn::Object(inputs),
                 )]),
             ))
         })
@@ -1995,29 +1995,23 @@ fn flake_query_fields(query: &str) -> Option<BTreeMap<String, String>> {
     Some(fields)
 }
 
-fn canonical_json(value: &DataTree) -> String {
+fn canonical_json(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => {
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => {
             if value.is_finite() && value.fract() == 0.0 {
                 format!("{value:.0}")
             } else {
                 value.to_string()
             }
         }
-        DataTree::Number(value) => value.clone(),
-        DataTree::Text(value) | DataTree::TypedText(value) => crate::JSON::quote(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => format!(
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => crate::JSON::quote(value),
+        Dyn::Bytes(values) => crate::JSON::quote(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => crate::JSON::quote(&value.to_rfc3339()),
+        Dyn::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -2025,7 +2019,7 @@ fn canonical_json(value: &DataTree) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        DataTree::Object(values) => format!(
+        Dyn::Object(values) => format!(
             "{{{}}}",
             values
                 .iter()
@@ -2038,7 +2032,7 @@ fn canonical_json(value: &DataTree) -> String {
     }
 }
 
-fn canonical_object(object: &[(String, DataTree)], key: &str) -> String {
+fn canonical_object(object: &[(String, Dyn)], key: &str) -> String {
     data_field(object, key)
         .map(canonical_json)
         .unwrap_or_else(|| "{}".to_string())
@@ -2190,7 +2184,7 @@ fn flake_source_identity(url: &str) -> Option<FlakeSourceIdentity> {
 }
 
 fn json_string_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
 ) -> Option<&'a str> {
     data_field(object, key).and_then(|value| value.as_str().ok())
@@ -2198,8 +2192,8 @@ fn json_string_field<'a>(
 
 fn source_query_matches(
     query: &BTreeMap<String, String>,
-    original: &[(String, DataTree)],
-    locked: &[(String, DataTree)],
+    original: &[(String, Dyn)],
+    locked: &[(String, Dyn)],
     validate_revision: bool,
 ) -> bool {
     query.iter().all(|(key, expected)| {
@@ -2220,7 +2214,7 @@ fn source_query_matches(
 fn source_revision_matches(
     identity_revision: Option<&String>,
     input: &FlakeInput,
-    locked: &[(String, DataTree)],
+    locked: &[(String, Dyn)],
     validate_revision: bool,
 ) -> bool {
     if !validate_revision {
@@ -2237,8 +2231,8 @@ fn validate_root_input_identity(
     input: &FlakeInput,
     node_name: &str,
     node: &FlakeLockNode,
-    root_inputs: &BTreeMap<String, DataTree>,
-    nodes: &BTreeMap<String, DataTree>,
+    root_inputs: &BTreeMap<String, Dyn>,
+    nodes: &BTreeMap<String, Dyn>,
     validate_revision: bool,
 ) -> Result<(), FlakeGraphError> {
     let original = crate::JSON::parse(&node.original).map_err(|error| {
@@ -2586,27 +2580,27 @@ fn apply_flake_lock(graph: &mut FlakeGraph, text: &str) -> Result<(), FlakeGraph
 }
 
 fn lock_node_name(
-    value: Option<&DataTree>,
-    nodes: &BTreeMap<String, DataTree>,
+    value: Option<&Dyn>,
+    nodes: &BTreeMap<String, Dyn>,
     start_node: &str,
 ) -> Result<Option<String>, FlakeGraphError> {
     let Some(value) = value else {
         return Ok(None);
     };
     fn resolve(
-        value: &DataTree,
-        nodes: &BTreeMap<String, DataTree>,
+        value: &Dyn,
+        nodes: &BTreeMap<String, Dyn>,
         path: &mut BTreeSet<String>,
         start_node: &str,
     ) -> Result<Option<String>, FlakeGraphError> {
         match value {
-            DataTree::Text(value) | DataTree::TypedText(value) if !value.is_empty() => {
+            Dyn::Text(value) if !value.is_empty() => {
                 Ok(Some(value.clone()))
             }
-            DataTree::Text(_) | DataTree::TypedText(_) => Err(FlakeGraphError::Io(
+            Dyn::Text(_) => Err(FlakeGraphError::Io(
                 "flake.lock node reference is empty".to_string(),
             )),
-            DataTree::Array(values) => {
+            Dyn::Array(values) => {
                 if values.is_empty() {
                     return Ok(None);
                 }

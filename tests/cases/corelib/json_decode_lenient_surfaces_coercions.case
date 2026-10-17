@@ -1,0 +1,20 @@
+# Port of tests/corelib_parts/system.rs::json_decode_lenient_surfaces_coercions; original guest source preserved.
+# ORACLE-LITERAL-STREAMS: tests/corelib_parts/system.rs:600,629,658.
+# PENDING-GRAMMAR(batch-four): filtered line counts; same-line substring conjunction.
+fixture: fixtures/json_decode_lenient_surfaces_coercions
+step: jet build a.jet
+step: built
+stdout: = json_decode_lenient_surfaces_coercions.a.expected-stream
+stderr: ~ "json coerce" # original predicate
+stderr: ~ "port" # original predicate
+stderr: ~ "number" # original predicate
+step: jet build b.jet
+step: built
+stdout: = json_decode_lenient_surfaces_coercions.b.expected-stream
+stderr: !~ "json coerce" # original predicate
+step: jet build c.jet
+step: built
+stdout: = json_decode_lenient_surfaces_coercions.c.expected-stream
+stderr: count-lines ~ "json coerce" = 2 # original predicate
+stderr.filter(~ "json coerce"): ~ "port" # original ed77c235f tests/corelib_parts/system.rs:661-664,672-674 filtered coercion lines.any contains port
+stderr.filter(~ "json coerce"): ~ "enabled" # original ed77c235f tests/corelib_parts/system.rs:661-664,676-678 filtered coercion lines.any contains enabled

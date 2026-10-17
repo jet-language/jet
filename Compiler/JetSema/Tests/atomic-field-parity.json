@@ -1,0 +1,16 @@
+[
+  {"name":"bool","accepted":true,"atomic":true,"source":"struct Box { value: Atomic<Bool> }\nfn make() -> Box { Box{value: true} }\n"},
+  {"name":"int","accepted":true,"atomic":true,"source":"struct Box { value: Atomic<Int> }\nfn make() -> Box { Box{value: 3} }\n"},
+  {"name":"i32","accepted":true,"atomic":true,"source":"struct Box { value: Atomic<I32> }\nfn make(value: I32) -> Box { Box{value: value} }\n"},
+  {"name":"u32","accepted":true,"atomic":true,"source":"struct Box { value: Atomic<U32> }\nfn make(value: U32) -> Box { Box{value: value} }\n"},
+  {"name":"i64","accepted":true,"atomic":true,"source":"struct Box { value: Atomic<I64> }\nfn make(value: I64) -> Box { Box{value: value} }\n"},
+  {"name":"u64","accepted":true,"atomic":true,"source":"struct Box { value: Atomic<U64> }\nfn make(value: U64) -> Box { Box{value: value} }\n"},
+  {"name":"generic","accepted":true,"atomic":true,"source":"struct Box<T> { value: Atomic<T> }\nfn make() -> Box<Int> { Box<Int>{value: 3} }\n"},
+  {"name":"default_atomic","accepted":true,"atomic":true,"source":"struct Box { value: Atomic<Int>{Atomic<Int>.new(3)} }\nfn make() -> Box { Box{} }\n"},
+  {"name":"default_scalar","accepted":false,"atomic":false,"source":"struct Box { value: Atomic<Int>{3} }\nfn make() -> Box { Box{} }\n"},
+  {"name":"wrong_scalar","accepted":false,"atomic":false,"source":"struct Box { value: Atomic<Int> }\nfn make() -> Box { Box{value: true} }\n"},
+  {"name":"unsupported_i16","accepted":false,"atomic":false,"source":"struct Box { value: Atomic<I16> }\nfn make(value: I16) -> Box { Box{value: value} }\n"},
+  {"name":"unsupported_string","accepted":false,"atomic":false,"source":"struct Box { value: Atomic<String> }\nfn make(value: String) -> Box { Box{value: value} }\n"},
+  {"name":"ordinary_generic","accepted":true,"atomic":false,"source":"struct Box<T> { value: T }\nfn make() -> Box<Int> { Box<Int>{value: 3} }\n"},
+  {"name":"atomic_value","accepted":false,"atomic":false,"source":"struct Box { value: Atomic<Int> }\nfn make(value: Atomic<Int>) -> Box { Box{value: value} }\n"}
+]

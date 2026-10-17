@@ -56,13 +56,13 @@ struct FingerprintBudget {
 }
 
 // Hash the checked activation plan for the default environment selection.
-pub fn env_hook_definition_fingerprint(root: String, requested_preset: String?) -[FS, Env]> String? Never! {
+fn env_hook_definition_fingerprint(root: String, requested_preset: String?) -[FS, Env]> String? Never! {
     env_hook_definition_fingerprint_with_selections(root, requested_preset, None)
 }
 
 // Hash the activation plan for both kinds of explicit selection: a named
 // preset inside `env.jet`, and one declared `env.<name>` module.
-pub fn env_hook_definition_fingerprint_with_selections(root: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> String? Never! {
+fn env_hook_definition_fingerprint_with_selections(root: String, requested_preset: String?, requested_environment: String?) -[FS, Env]> String? Never! {
     raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return None
     bytes :: raw ?? return None
     source :: String.from_bytes(bytes) ?? return None
@@ -83,7 +83,7 @@ pub fn env_hook_definition_fingerprint_with_selections(root: String, requested_p
 // canonical entry path has evaluated `env.jet` once; reusing that projection
 // keeps the exact source and input fingerprint the prompt hook computes.
 // Legacy `pkg.*` plans have no typed source projection and return None.
-pub fn env_hook_definition_fingerprint_from_facts(root: String, requested_preset: String?, requested_environment: String?, facts: EnvironmentFacts) -[FS, Env]> String? Never! {
+fn env_hook_definition_fingerprint_from_facts(root: String, requested_preset: String?, requested_environment: String?, facts: EnvironmentFacts) -[FS, Env]> String? Never! {
     if facts.source_files.len() == 0 -> return None
     env_hook_fingerprint_from_inputs(root, requested_preset, requested_environment, facts.source_files, facts.lifecycle, facts.files, facts.package_profiles, facts.presets, facts.languages)
 }
@@ -149,7 +149,7 @@ fn env_hook_u64_le(value: Int) -> [U8] Never! {
     out := [U8]{}
     remaining := value
     loop _ in 0..<8 {
-        &out.push(U8{remaining & 255})
+        &out.push(U8{(remaining).bit_and(255)})
         remaining = remaining >> 8
     }
     out
@@ -309,12 +309,12 @@ fn env_hook_relative_to(path: String, root: String) -> String Never! {
 
 // The typed reload policy, read without realizing packages or executing
 // project code. Legacy `pkg.*` env files use the normal prompt policy.
-pub fn env_hook_reload_policy(root: String) -[FS, Env]> ReloadPolicy Never! {
+fn env_hook_reload_policy(root: String) -[FS, Env]> ReloadPolicy Never! {
     env_hook_reload_policy_with_environment(root, None)
 }
 
 // The reload policy of the selected `env.<name>` environment module.
-pub fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env]> ReloadPolicy Never! {
+fn env_hook_reload_policy_with_environment(root: String, requested_environment: String?) -[FS, Env]> ReloadPolicy Never! {
     raw :: env_hook_read_nofollow(files.join(root, ENV_FILE), MAX_TREE_FILE_BYTES) ?? return ReloadPolicy.Prompt
     bytes :: raw ?? return ReloadPolicy.Prompt
     source :: String.from_bytes(bytes) ?? return ReloadPolicy.Prompt
@@ -325,7 +325,7 @@ pub fn env_hook_reload_policy_with_environment(root: String, requested_environme
 // Coalesce a watched definition change until its debounce window expires.
 // State is project-local and holds only the definition hash and a clock
 // value; it never stores environment values or secrets.
-pub fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int) -[FS, Env, Time]> Bool EnvironmentError! {
+fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int) -[FS, Env, Time]> Bool EnvironmentError! {
     if debounce_ms == 0 -> return Ok(true)
     state_dir :: files.join(root, CONFIG_DEFAULT_DIR)
     state_path :: files.join(state_dir, ENV_HOOK_RELOAD_STATE_FILE)
@@ -347,6 +347,6 @@ pub fn env_hook_watch_reload_ready(root: String, hash: String, debounce_ms: Int)
 }
 
 // Remove the debounce marker after a watched definition has activated.
-pub fn env_hook_clear_watch_reload(root: String) -[FS]> {
+fn env_hook_clear_watch_reload(root: String) -[FS]> {
     files.remove(files.join(files.join(root, CONFIG_DEFAULT_DIR), ENV_HOOK_RELOAD_STATE_FILE)).drop("an absent debounce marker needs no removal")
 }

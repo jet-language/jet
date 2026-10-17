@@ -1,3 +1,5 @@
+use core.files as cbind_core_files
+
 // Native C header -> Jet `#Bindgen` cache generator, ported from
 // jet_pkg_model::CBind (E2-M14).
 //
@@ -14,37 +16,37 @@
 
 // Why a C header could not produce a binding cache.
 #Error
-pub struct CBindError {
-    pub message: String
+struct CBindError {
+    message: String
 }
 
 // Result of translating a header: the cache source plus what was bound.
-pub struct CBindResult {
+struct CBindResult {
     // The `#Bindgen module ...` cache file text.
-    pub source: String
+    source: String
     // Function names successfully bound.
-    pub bound: [String]
+    bound: [String]
     // Prototypes skipped because a type is not bindable, with the reason.
-    pub skipped: [(name: String, reason: String)]
+    skipped: [(name: String, reason: String)]
     // Opaque typedefs that became owned nominal Jet handle facts.
-    pub handles: [HandleFact]
+    handles: [HandleFact]
     // Opaque typedefs withheld because ownership was not resolvable.
-    pub handle_skipped: [(typedef_name: String, reason: String)]
+    handle_skipped: [(typedef_name: String, reason: String)]
     // Explicit primary plus transitive native libraries for this binding.
-    pub link_closure: LinkClosure
+    link_closure: LinkClosure
     // Exact descriptor identity embedded in the generated cache.
-    pub descriptor_stamp: String
+    descriptor_stamp: String
     // The one boundary row consumed by binders, sema, inspect, and
     // comparison views; the foreign source stays authoritative.
-    pub boundary: ForeignBoundaryContract
+    boundary: ForeignBoundaryContract
     // Caller-selected adaptation plans whose boundary digest matches.
-    pub plans: [BindingPlan]
+    plans: [BindingPlan]
 }
 
 // The bind hash for a header + cflags pair (cache invalidation):
 // SHA-256(header || NUL || cflags) as 64 lowercase hex digits. `cflags` is a
 // space-joined flag list, `""` when there are none.
-pub fn pkg_cbind_compute_bind_hash(header_src: String, cflags: String) -> String Never! {
+fn pkg_cbind_compute_bind_hash(header_src: String, cflags: String) -> String Never! {
     input := header_src.bytes()
     &input.push(U8{0})
     loop byte in cflags.bytes() -> &input.push(byte)
@@ -53,7 +55,7 @@ pub fn pkg_cbind_compute_bind_hash(header_src: String, cflags: String) -> String
 
 // The sidecar path holding the hash next to a `<lib>.jet` cache: the cache
 // path with its extension replaced by (or extended with) `hash`.
-pub fn pkg_cbind_hash_sidecar_path(cache_path: String) -> String Never! {
+fn pkg_cbind_hash_sidecar_path(cache_path: String) -> String Never! {
     bytes :: cache_path.bytes()
     name_start := bytes.len()
     loop name_start > 0 && Int.from_u8(bytes[name_start - 1]) != 47 -> name_start -= 1
@@ -64,37 +66,37 @@ pub fn pkg_cbind_hash_sidecar_path(cache_path: String) -> String Never! {
 }
 
 // The stored hash from the sidecar, or nothing when absent or unreadable.
-pub fn pkg_cbind_read_stored_hash(cache_path: String) -[FS]> String? {
-    text :: files.read(pkg_cbind_hash_sidecar_path(cache_path)) ?? return None
+fn pkg_cbind_read_stored_hash(cache_path: String) -[FS]> String? {
+    text :: cbind_core_files.read(pkg_cbind_hash_sidecar_path(cache_path)) ?? return None
     Val(text.trim())
 }
 
 // Write the hash sidecar next to `cache_path`.
-pub fn pkg_cbind_write_bind_hash(cache_path: String, header_src: String, cflags: String) IOError! -[FS]> {
-    files.write(pkg_cbind_hash_sidecar_path(cache_path), pkg_cbind_compute_bind_hash(header_src, cflags))
+fn pkg_cbind_write_bind_hash(cache_path: String, header_src: String, cflags: String) IOError! -[FS]> {
+    cbind_core_files.write(pkg_cbind_hash_sidecar_path(cache_path), pkg_cbind_compute_bind_hash(header_src, cflags))
 }
 
 // Translate C header source into a `#Bindgen` cache for library `lib`. The
 // only failure is structural (no bindable function at all), so the caller can
 // surface E3208 instead of writing an empty cache.
-pub fn pkg_cbind_generate(header_src: String, lib: String) -> CBindResult CBindError! {
+fn pkg_cbind_generate(header_src: String, lib: String) -> CBindResult CBindError! {
     pkg_cbind_generate_with_descriptor(header_src, lib, pkg_cbind_c_descriptor())
 }
 
 // Generate with explicit opaque-handle overlay facts.
-pub fn pkg_cbind_generate_with_overlay(header_src: String, lib: String, overlay: HandleOverlay) -> CBindResult CBindError! {
+fn pkg_cbind_generate_with_overlay(header_src: String, lib: String, overlay: HandleOverlay) -> CBindResult CBindError! {
     pkg_cbind_generate_with_descriptor_and_overlay(header_src, lib, pkg_cbind_c_descriptor(), overlay)
 }
 
 // The overlay as generator options.
-pub fn pkg_cbind_generate_with_options(header_src: String, lib: String, overlay: HandleOverlay) -> CBindResult CBindError! {
+fn pkg_cbind_generate_with_options(header_src: String, lib: String, overlay: HandleOverlay) -> CBindResult CBindError! {
     pkg_cbind_generate_with_overlay(header_src, lib, overlay)
 }
 
 // Generate a C cache and append caller-selected, already-resolved facades.
 // Plans are accepted only when their boundary digest matches this exact
 // header/overlay generation.
-pub fn pkg_cbind_generate_with_overlay_and_plans(header_src: String, lib: String, overlay: HandleOverlay, plans: [String: BindingPlan]) -> CBindResult CBindError! {
+fn pkg_cbind_generate_with_overlay_and_plans(header_src: String, lib: String, overlay: HandleOverlay, plans: [String: BindingPlan]) -> CBindResult CBindError! {
     result := pkg_cbind_generate_with_overlay(header_src, lib, overlay)
     pkg_cbind_attach_plans(&result, plans, "generated")
     Ok(result)
@@ -103,26 +105,26 @@ pub fn pkg_cbind_generate_with_overlay_and_plans(header_src: String, lib: String
 // Generate against a caller-supplied canonical boundary contract and carry
 // the selected plans into the cache. The contract identity must still name
 // this exact header/library generation.
-pub fn pkg_cbind_generate_with_contract_and_plans(header_src: String, lib: String, overlay: HandleOverlay, contract: ForeignBoundaryContract, plans: [String: BindingPlan]) -> CBindResult CBindError! {
+fn pkg_cbind_generate_with_contract_and_plans(header_src: String, lib: String, overlay: HandleOverlay, contract: ForeignBoundaryContract, plans: [String: BindingPlan]) -> CBindResult CBindError! {
     result := pkg_cbind_generate_with_overlay(header_src, lib, overlay)
     if result.boundary.identity != contract.identity || result.boundary.library != contract.library {
         return Err(CBindError{message: "canonical foreign boundary contract is stale against the generated C source"})
     }
     previous_stamp :: result.boundary.stamp()
     result.source = result.source.replace(previous_stamp, contract.stamp())
-    result.boundary = contract
+    result.boundary = contract.copy()
     pkg_cbind_attach_plans(&result, plans, "canonical")
     Ok(result)
 }
 
 // Generate from an explicit descriptor: the production entry points supply
 // the canonical C descriptor; descriptor mutation uses the same path.
-pub fn pkg_cbind_generate_with_descriptor(header_src: String, lib: String, descriptor: BinderDescriptor) -> CBindResult CBindError! {
+fn pkg_cbind_generate_with_descriptor(header_src: String, lib: String, descriptor: BinderDescriptor) -> CBindResult CBindError! {
     pkg_cbind_generate_with_descriptor_and_overlay(header_src, lib, descriptor, HandleOverlay.empty())
 }
 
 // Descriptor-aware generation with explicit opaque-handle facts.
-pub fn pkg_cbind_generate_with_descriptor_and_overlay(header_src: String, lib: String, descriptor: BinderDescriptor, overlay: HandleOverlay) -> CBindResult CBindError! {
+fn pkg_cbind_generate_with_descriptor_and_overlay(header_src: String, lib: String, descriptor: BinderDescriptor, overlay: HandleOverlay) -> CBindResult CBindError! {
     if pkg_cbind_overlay_contains_line_break(overlay) -> return Err(CBindError{message: "C binding overlay identities cannot contain line breaks"})
     contract :: descriptor.contract
     cleaned :: pkg_cbind_strip_comments_and_directives(header_src)
@@ -145,13 +147,13 @@ pub fn pkg_cbind_generate_with_descriptor_and_overlay(header_src: String, lib: S
                 &bound.push(proto.name)
                 &lines.push("    {line}\n")
                 if pkg_cbind_managed_callback_param_index(proto, catalog) != None {
-                    &lines.push("    fn {proto.name}(callback: fn(FfiCallbackEvent<I64>)) FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
+                    &lines.push("    fn {proto.name}(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = {pkg_cbind_quote(proto.name)}\n")
                 }
                 if proto.name == "unsubscribe" && pkg_cbind_native_void_pointer_proto(proto) {
                     &lines.push("    fn unsubscribe(subscription: ^FfiCallbackRegistration) -> Task<!String> = \"__jet_ffi_callback_unsubscribe\"\n")
                 }
                 if proto.name == "emit_async" {
-                    &lines.push("    fn emit_async(value: I64) Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
+                    &lines.push("    fn emit_async(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n")
                 }
             }
             .Err(skip) -> &skipped.push((name: proto.name, reason: skip.reason))

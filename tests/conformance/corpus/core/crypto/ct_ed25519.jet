@@ -1,0 +1,2400 @@
+// core-conformance supplementary: RFC 8032 and frozen Core/seed semantics
+use core.crypto as crypto
+use core.crypto.expert as expert
+
+// rfc_1
+fn case_0() {
+        public :: [U8]{215,90,152,1,130,177,10,183,213,75,254,211,201,100,7,58,14,225,114,243,218,166,35,37,175,2,26,104,247,7,81,26}
+        message :: [U8]{}
+        signature :: [U8]{229,86,67,0,195,96,172,114,144,134,226,204,128,110,130,138,132,135,127,30,184,229,217,116,216,115,224,101,34,73,1,85,95,184,130,21,144,163,59,172,198,30,57,112,28,249,180,107,210,91,245,240,89,91,190,36,101,81,65,67,142,122,16,11}
+        key :: crypto.SigningKey.from_bytes([U8]{157,97,177,157,239,253,90,96,186,132,74,244,146,236,44,196,68,73,197,105,123,50,105,25,112,59,172,3,28,174,127,96}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{157,97,177,157,239,253,90,96,186,132,74,244,146,236,44,196,68,73,197,105,123,50,105,25,112,59,172,3,28,174,127,96}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// rfc_2
+fn case_1() {
+        public :: [U8]{61,64,23,195,232,67,137,90,146,183,10,167,77,27,126,188,156,152,44,207,46,196,150,140,192,205,85,241,42,244,102,12}
+        message :: [U8]{114}
+        signature :: [U8]{146,160,9,169,240,212,202,184,114,14,130,11,95,100,37,64,162,178,123,84,22,80,63,143,179,118,34,35,235,219,105,218,8,90,193,228,62,21,153,110,69,143,54,19,208,241,29,140,56,123,46,174,180,48,42,238,176,13,41,22,18,187,12,0}
+        key :: crypto.SigningKey.from_bytes([U8]{76,205,8,155,40,255,150,218,157,182,195,70,236,17,78,15,91,138,49,159,53,171,166,36,218,140,246,237,79,184,166,251}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{76,205,8,155,40,255,150,218,157,182,195,70,236,17,78,15,91,138,49,159,53,171,166,36,218,140,246,237,79,184,166,251}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// rfc_3
+fn case_2() {
+        public :: [U8]{252,81,205,142,98,24,161,163,141,164,126,208,2,48,240,88,8,22,237,19,186,51,3,172,93,235,145,21,72,144,128,37}
+        message :: [U8]{175,130}
+        signature :: [U8]{98,145,214,87,222,236,36,2,72,39,230,156,58,190,1,163,12,229,72,162,132,116,58,68,94,54,128,215,219,90,195,172,24,255,155,83,141,22,242,144,174,103,247,96,152,77,198,89,74,124,21,233,113,110,210,141,192,39,190,206,234,30,196,10}
+        key :: crypto.SigningKey.from_bytes([U8]{197,170,141,244,63,159,131,123,237,183,68,47,49,220,183,177,102,211,133,53,7,111,9,75,133,206,58,46,11,68,88,247}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{197,170,141,244,63,159,131,123,237,183,68,47,49,220,183,177,102,211,133,53,7,111,9,75,133,206,58,46,11,68,88,247}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// rfc_1024
+fn case_3() {
+        public :: [U8]{39,129,23,252,20,76,114,52,15,103,208,242,49,110,131,134,206,255,191,43,36,40,201,197,31,239,124,89,127,29,66,110}
+        message :: [U8]{8,184,178,183,51,66,66,67,118,15,228,38,164,181,73,8,99,33,16,166,108,47,101,145,234,189,51,69,227,228,235,152,250,110,38,75,240,158,254,18,238,80,248,245,78,159,119,177,227,85,246,197,5,68,226,63,177,67,61,223,115,190,132,216,121,222,124,0,70,220,73,150,217,231,115,244,188,158,254,87,56,130,154,219,38,200,27,55,201,58,27,39,11,32,50,157,101,134,117,252,110,165,52,224,129,10,68,50,130,107,245,140,148,30,251,101,213,122,51,139,189,46,38,100,15,137,255,188,26,133,142,252,184,85,14,227,165,225,153,139,209,119,233,58,115,99,195,68,254,107,25,158,229,208,46,130,213,34,196,254,186,21,69,47,128,40,138,130,26,87,145,22,236,109,173,43,59,49,13,169,3,64,26,166,33,0,171,93,26,54,85,62,6,32,59,51,137,12,201,184,50,247,158,248,5,96,204,185,163,156,231,103,150,126,214,40,198,173,87,60,177,22,219,239,239,215,84,153,218,150,189,104,168,169,123,146,138,139,188,16,59,102,33,252,222,43,236,161,35,29,32,107,230,205,158,199,175,246,246,201,79,205,114,4,237,52,85,198,140,131,244,164,29,164,175,43,116,239,92,83,241,216,172,112,189,203,126,209,133,206,129,189,132,53,157,68,37,77,149,98,158,152,85,169,74,124,25,88,209,248,173,165,208,83,46,216,165,170,63,178,209,123,167,14,182,36,142,89,78,26,34,151,172,187,179,157,80,47,26,140,110,182,241,206,34,179,222,26,31,64,204,36,85,65,25,168,49,169,170,214,7,156,173,136,66,93,230,189,225,169,24,126,187,96,146,207,103,191,43,19,253,101,242,112,136,215,139,126,136,60,135,89,210,196,245,198,90,219,117,83,135,138,213,117,249,250,216,120,232,10,12,155,166,59,203,204,39,50,230,148,133,187,201,201,11,251,214,36,129,217,8,155,236,207,128,207,226,223,22,162,207,101,189,146,221,89,123,7,7,224,145,122,244,139,187,117,254,212,19,210,56,245,85,90,122,86,157,128,195,65,74,141,8,89,220,101,164,97,40,186,178,122,248,122,113,49,79,49,140,120,43,35,235,254,128,139,130,176,206,38,64,29,46,34,240,77,131,209,37,93,197,26,221,211,183,90,43,26,224,120,69,4,223,84,58,248,150,155,227,234,112,130,255,127,201,136,140,20,77,162,175,88,66,158,201,96,49,219,202,211,218,217,175,13,203,170,175,38,140,184,252,255,234,217,79,60,124,164,149,224,86,169,180,122,205,183,81,251,115,230,102,198,198,85,173,232,41,114,151,208,122,209,186,94,67,241,188,163,35,1,101,19,57,226,41,4,204,140,66,245,140,48,192,74,175,219,3,141,218,8,71,221,152,141,205,166,243,191,209,92,75,76,69,37,0,74,160,110,239,248,202,97,120,58,172,236,87,251,61,31,146,176,254,47,209,168,95,103,36,81,123,101,230,20,173,104,8,214,246,238,52,223,247,49,15,220,130,174,191,217,4,176,30,29,197,75,41,39,9,75,45,182,141,111,144,59,104,64,26,222,191,90,126,8,215,143,244,239,93,99,101,58,101,4,12,249,191,212,172,167,152,74,116,211,113,69,152,103,128,252,11,22,172,69,22,73,222,97,136,167,219,223,25,31,100,181,252,94,42,180,123,87,247,247,39,108,212,25,193,122,60,168,225,185,57,174,73,228,136,172,186,107,150,86,16,181,72,1,9,200,177,123,128,225,183,183,80,223,199,89,141,93,80,17,253,45,204,86,0,163,46,245,181,42,30,204,130,14,48,138,163,66,114,26,172,9,67,191,102,134,182,75,37,121,55,101,4,204,196,147,217,126,106,237,63,176,249,205,113,164,61,212,151,240,31,23,192,226,203,55,151,170,42,47,37,102,86,22,142,108,73,106,252,95,185,50,70,246,177,17,99,152,163,70,241,166,65,243,176,65,233,137,247,145,79,144,204,44,127,255,53,120,118,229,6,181,13,51,75,167,124,34,91,195,7,186,83,113,82,243,241,97,14,78,175,229,149,246,217,217,13,17,250,169,51,161,94,241,54,149,70,134,138,127,58,69,169,103,104,212,15,217,208,52,18,192,145,198,49,92,244,253,231,203,104,96,105,55,56,13,178,234,170,112,123,76,65,133,195,46,221,205,211,6,112,94,77,193,255,200,114,238,238,71,90,100,223,172,134,171,164,28,6,24,152,63,135,65,197,239,104,211,161,1,232,163,184,202,198,12,144,92,21,252,145,8,64,185,76,0,160,185,208}
+        signature :: [U8]{10,171,76,144,5,1,179,226,77,124,223,70,99,50,106,58,135,223,94,72,67,178,203,219,103,203,246,228,96,254,195,80,170,83,113,177,80,143,159,69,40,236,234,35,196,54,217,75,94,143,205,79,104,30,48,166,172,0,169,112,74,24,138,3}
+        key :: crypto.SigningKey.from_bytes([U8]{245,229,118,124,241,83,49,149,23,99,15,34,104,118,184,108,129,96,204,88,59,192,19,116,76,107,242,85,245,204,14,229}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{245,229,118,124,241,83,49,149,23,99,15,34,104,118,184,108,129,96,204,88,59,192,19,116,76,107,242,85,245,204,14,229}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// rfc_SHA_abc_
+fn case_4() {
+        public :: [U8]{236,23,43,147,173,94,86,59,244,147,44,112,225,36,80,52,195,84,103,239,46,253,77,100,235,248,25,104,52,103,226,191}
+        message :: [U8]{221,175,53,161,147,97,122,186,204,65,115,73,174,32,65,49,18,230,250,78,137,169,126,162,10,158,238,230,75,85,211,154,33,146,153,42,39,79,193,168,54,186,60,35,163,254,235,189,69,77,68,35,100,60,232,14,42,154,201,79,165,76,164,159}
+        signature :: [U8]{220,42,68,89,231,54,150,51,165,43,27,242,119,131,154,0,32,16,9,163,239,191,62,203,105,190,162,24,108,38,181,137,9,53,31,201,172,144,179,236,253,251,199,198,100,49,224,48,61,202,23,156,19,138,193,122,217,190,241,23,115,49,167,4}
+        key :: crypto.SigningKey.from_bytes([U8]{131,63,230,36,9,35,123,157,98,236,119,88,117,32,145,30,154,117,156,236,29,25,117,91,125,169,1,185,109,202,61,66}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{131,63,230,36,9,35,123,157,98,236,119,88,117,32,145,30,154,117,156,236,29,25,117,91,125,169,1,185,109,202,61,66}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// tamper_R
+fn case_5() {
+        public :: [U8]{215,90,152,1,130,177,10,183,213,75,254,211,201,100,7,58,14,225,114,243,218,166,35,37,175,2,26,104,247,7,81,26}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{133,163,16,57,247,100,198,2,80,53,113,192,9,220,36,153,116,253,226,164,35,132,186,92,115,210,185,210,237,108,94,34,108,182,237,167,245,189,212,110,78,159,38,149,47,230,174,25,126,230,172,95,96,81,220,250,134,28,218,8,184,255,173,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// tamper_S
+fn case_6() {
+        public :: [U8]{215,90,152,1,130,177,10,183,213,75,254,211,201,100,7,58,14,225,114,243,218,166,35,37,175,2,26,104,247,7,81,26}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{132,163,16,57,247,100,198,2,80,53,113,192,9,220,36,153,116,253,226,164,35,132,186,92,115,210,185,210,237,108,94,34,109,182,237,167,245,189,212,110,78,159,38,149,47,230,174,25,126,230,172,95,96,81,220,250,134,28,218,8,184,255,173,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// tamper_message
+fn case_7() {
+        public :: [U8]{215,90,152,1,130,177,10,183,213,75,254,211,201,100,7,58,14,225,114,243,218,166,35,37,175,2,26,104,247,7,81,26}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,102}
+        signature :: [U8]{132,163,16,57,247,100,198,2,80,53,113,192,9,220,36,153,116,253,226,164,35,132,186,92,115,210,185,210,237,108,94,34,108,182,237,167,245,189,212,110,78,159,38,149,47,230,174,25,126,230,172,95,96,81,220,250,134,28,218,8,184,255,173,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_0
+fn case_8() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_1
+fn case_9() {
+        public :: [U8]{199,23,106,112,61,77,216,79,186,60,11,118,13,16,103,15,42,32,83,250,44,57,204,198,78,199,253,119,146,172,3,122}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_2
+fn case_10() {
+        public :: [U8]{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,128}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_3
+fn case_11() {
+        public :: [U8]{38,232,149,143,194,178,39,176,69,195,244,137,242,239,152,240,213,223,172,5,211,198,51,57,177,56,2,136,109,83,252,5}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_4
+fn case_12() {
+        public :: [U8]{236,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_5
+fn case_13() {
+        public :: [U8]{38,232,149,143,194,178,39,176,69,195,244,137,242,239,152,240,213,223,172,5,211,198,51,57,177,56,2,136,109,83,252,133}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_6
+fn case_14() {
+        public :: [U8]{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_A_7
+fn case_15() {
+        public :: [U8]{199,23,106,112,61,77,216,79,186,60,11,118,13,16,103,15,42,32,83,250,44,57,204,198,78,199,253,119,146,172,3,250}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_0
+fn case_16() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_1
+fn case_17() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{199,23,106,112,61,77,216,79,186,60,11,118,13,16,103,15,42,32,83,250,44,57,204,198,78,199,253,119,146,172,3,122,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_2
+fn case_18() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,128,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_3
+fn case_19() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{38,232,149,143,194,178,39,176,69,195,244,137,242,239,152,240,213,223,172,5,211,198,51,57,177,56,2,136,109,83,252,5,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_4
+fn case_20() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{236,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_5
+fn case_21() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{38,232,149,143,194,178,39,176,69,195,244,137,242,239,152,240,213,223,172,5,211,198,51,57,177,56,2,136,109,83,252,133,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_6
+fn case_22() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// small_order_R_7
+fn case_23() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{199,23,106,112,61,77,216,79,186,60,11,118,13,16,103,15,42,32,83,250,44,57,204,198,78,199,253,119,146,172,3,250,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y0_sign0
+fn case_24() {
+        public :: [U8]{237,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y0_sign0
+fn case_25() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{237,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y0_sign1
+fn case_26() {
+        public :: [U8]{237,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y0_sign1
+fn case_27() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{237,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y1_sign0
+fn case_28() {
+        public :: [U8]{238,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y1_sign0
+fn case_29() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{238,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y1_sign1
+fn case_30() {
+        public :: [U8]{238,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y1_sign1
+fn case_31() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{238,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y2_sign0
+fn case_32() {
+        public :: [U8]{239,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y2_sign0
+fn case_33() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{239,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y2_sign1
+fn case_34() {
+        public :: [U8]{239,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y2_sign1
+fn case_35() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{239,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y3_sign0
+fn case_36() {
+        public :: [U8]{240,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y3_sign0
+fn case_37() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{240,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y3_sign1
+fn case_38() {
+        public :: [U8]{240,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y3_sign1
+fn case_39() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{240,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y4_sign0
+fn case_40() {
+        public :: [U8]{241,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y4_sign0
+fn case_41() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{241,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y4_sign1
+fn case_42() {
+        public :: [U8]{241,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y4_sign1
+fn case_43() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{241,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y5_sign0
+fn case_44() {
+        public :: [U8]{242,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y5_sign0
+fn case_45() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{242,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y5_sign1
+fn case_46() {
+        public :: [U8]{242,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y5_sign1
+fn case_47() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{242,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y6_sign0
+fn case_48() {
+        public :: [U8]{243,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y6_sign0
+fn case_49() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{243,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y6_sign1
+fn case_50() {
+        public :: [U8]{243,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y6_sign1
+fn case_51() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{243,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y7_sign0
+fn case_52() {
+        public :: [U8]{244,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y7_sign0
+fn case_53() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{244,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y7_sign1
+fn case_54() {
+        public :: [U8]{244,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y7_sign1
+fn case_55() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{244,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y8_sign0
+fn case_56() {
+        public :: [U8]{245,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y8_sign0
+fn case_57() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{245,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y8_sign1
+fn case_58() {
+        public :: [U8]{245,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y8_sign1
+fn case_59() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{245,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y9_sign0
+fn case_60() {
+        public :: [U8]{246,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y9_sign0
+fn case_61() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{246,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y9_sign1
+fn case_62() {
+        public :: [U8]{246,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y9_sign1
+fn case_63() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{246,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y10_sign0
+fn case_64() {
+        public :: [U8]{247,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y10_sign0
+fn case_65() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{247,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y10_sign1
+fn case_66() {
+        public :: [U8]{247,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y10_sign1
+fn case_67() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{247,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y11_sign0
+fn case_68() {
+        public :: [U8]{248,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y11_sign0
+fn case_69() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{248,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y11_sign1
+fn case_70() {
+        public :: [U8]{248,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y11_sign1
+fn case_71() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{248,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y12_sign0
+fn case_72() {
+        public :: [U8]{249,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y12_sign0
+fn case_73() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{249,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y12_sign1
+fn case_74() {
+        public :: [U8]{249,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y12_sign1
+fn case_75() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{249,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y13_sign0
+fn case_76() {
+        public :: [U8]{250,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y13_sign0
+fn case_77() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{250,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y13_sign1
+fn case_78() {
+        public :: [U8]{250,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y13_sign1
+fn case_79() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{250,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y14_sign0
+fn case_80() {
+        public :: [U8]{251,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y14_sign0
+fn case_81() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{251,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y14_sign1
+fn case_82() {
+        public :: [U8]{251,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y14_sign1
+fn case_83() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{251,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y15_sign0
+fn case_84() {
+        public :: [U8]{252,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y15_sign0
+fn case_85() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{252,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y15_sign1
+fn case_86() {
+        public :: [U8]{252,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y15_sign1
+fn case_87() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{252,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y16_sign0
+fn case_88() {
+        public :: [U8]{253,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y16_sign0
+fn case_89() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{253,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y16_sign1
+fn case_90() {
+        public :: [U8]{253,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y16_sign1
+fn case_91() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{253,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y17_sign0
+fn case_92() {
+        public :: [U8]{254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y17_sign0
+fn case_93() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y17_sign1
+fn case_94() {
+        public :: [U8]{254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y17_sign1
+fn case_95() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{254,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y18_sign0
+fn case_96() {
+        public :: [U8]{255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y18_sign0
+fn case_97() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,127,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// noncanonical_A_y18_sign1
+fn case_98() {
+        public :: [U8]{255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// noncanonical_R_y18_sign1
+fn case_99() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// S_equal_L
+fn case_100() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,237,211,245,92,26,99,18,88,214,156,247,162,222,249,222,20,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,16}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// S_above_L
+fn case_101() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,238,211,245,92,26,99,18,88,214,156,247,162,222,249,222,20,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,16}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// S_all_ff
+fn case_102() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// S_L_minus_1
+fn case_103() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{88,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,102,230,236,211,245,92,26,99,18,88,214,156,247,162,222,249,222,20,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,16}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+// valid_mixed_order_1
+fn case_104() {
+        public :: [U8]{8,232,70,27,172,232,43,80,175,101,64,47,241,202,211,210,57,154,254,69,149,68,9,106,127,16,108,84,252,135,93,66}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{60,249,253,101,7,88,230,94,194,60,0,119,30,201,122,134,156,146,144,220,150,18,35,93,148,35,15,135,241,99,63,99,109,58,226,72,152,232,91,206,122,250,166,180,142,244,215,18,48,220,32,82,36,240,240,80,186,176,176,71,55,213,20,5}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// valid_mixed_order_2
+fn case_105() {
+        public :: [U8]{157,115,67,162,217,229,209,45,227,150,92,121,136,158,248,226,168,224,140,107,195,12,2,253,71,168,145,255,26,92,58,16}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{47,17,50,202,97,171,56,223,240,15,47,234,50,40,242,76,108,113,213,128,133,184,14,71,225,149,21,203,39,232,208,71,134,200,30,169,72,141,146,10,255,131,79,197,181,229,215,96,64,169,24,30,235,31,73,24,178,107,138,49,96,45,145,14}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// valid_mixed_order_4
+fn case_106() {
+        public :: [U8]{25,75,10,135,183,151,60,253,251,252,219,152,232,19,233,96,8,97,217,159,113,94,217,94,84,150,17,136,46,78,152,237}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{149,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,153,108,36,119,110,192,141,252,201,186,96,104,171,22,210,150,105,243,45,89,70,238,114,160,0,26,246,10,115,194,75,225,8}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// invalid_point_y2
+fn case_107() {
+        public :: [U8]{2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// invalid_point_y7
+fn case_108() {
+        public :: [U8]{7,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// invalid_point_y8
+fn case_109() {
+        public :: [U8]{8,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// invalid_point_y11
+fn case_110() {
+        public :: [U8]{11,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{101,100,103,101,32,97,99,99,101,112,116,97,110,99,101}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == false)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// random_sign_0
+fn case_111() {
+        public :: [U8]{16,139,148,222,105,18,170,172,23,224,137,99,12,75,93,35,74,176,222,87,208,95,90,187,125,38,65,212,127,49,20,220}
+        message :: [U8]{}
+        signature :: [U8]{115,109,204,218,77,39,126,241,138,153,207,223,147,15,59,183,21,66,186,6,160,250,16,77,214,39,122,69,235,140,138,99,205,82,196,125,0,133,19,157,69,182,202,100,181,133,255,151,175,85,6,23,166,71,160,81,46,28,36,114,2,174,35,1}
+        key :: crypto.SigningKey.from_bytes([U8]{31,25,40,157,204,231,140,23,66,206,239,190,10,31,169,106,252,198,7,252,187,114,178,79,249,125,169,131,193,25,52,156}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{31,25,40,157,204,231,140,23,66,206,239,190,10,31,169,106,252,198,7,252,187,114,178,79,249,125,169,131,193,25,52,156}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_1
+fn case_112() {
+        public :: [U8]{243,7,190,255,237,112,43,184,143,165,170,4,220,88,235,99,94,9,5,49,59,178,197,210,166,213,253,113,185,214,185,67}
+        message :: [U8]{14}
+        signature :: [U8]{32,161,67,72,156,103,215,89,109,183,48,217,74,115,154,138,223,252,206,62,70,86,212,180,208,235,79,137,31,10,156,199,132,39,218,165,116,155,125,133,64,64,177,173,68,226,137,163,248,148,196,160,108,222,92,193,148,72,78,42,84,169,53,1}
+        key :: crypto.SigningKey.from_bytes([U8]{106,247,38,85,204,103,196,91,95,211,152,13,121,0,247,238,180,202,129,250,12,215,6,255,154,216,119,39,114,26,49,90}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{106,247,38,85,204,103,196,91,95,211,152,13,121,0,247,238,180,202,129,250,12,215,6,255,154,216,119,39,114,26,49,90}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_2
+fn case_113() {
+        public :: [U8]{134,197,65,240,157,82,92,201,85,79,95,186,164,221,127,185,25,22,89,85,232,19,226,18,169,187,142,187,115,6,190,106}
+        message :: [U8]{1,199}
+        signature :: [U8]{155,78,69,200,203,121,59,154,160,47,100,105,200,28,113,43,133,235,108,255,194,98,231,251,86,141,55,73,169,29,162,58,49,88,55,13,48,176,212,68,190,6,250,243,204,181,205,174,224,255,119,148,150,151,171,17,60,29,127,58,148,203,80,11}
+        key :: crypto.SigningKey.from_bytes([U8]{200,210,12,67,167,101,94,123,208,176,105,200,214,46,211,243,73,41,238,136,174,230,147,79,156,84,220,79,188,156,139,238}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{200,210,12,67,167,101,94,123,208,176,105,200,214,46,211,243,73,41,238,136,174,230,147,79,156,84,220,79,188,156,139,238}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_3
+fn case_114() {
+        public :: [U8]{81,164,212,250,167,150,139,146,15,220,69,151,112,29,12,21,130,161,35,84,129,238,109,33,232,174,49,147,214,26,59,209}
+        message :: [U8]{161,169,130,198,203,175,71}
+        signature :: [U8]{186,134,48,52,41,121,41,194,149,185,178,168,38,220,255,140,13,167,215,106,250,183,35,231,208,88,77,231,173,238,0,150,109,149,222,168,90,238,78,92,130,249,13,104,5,136,81,225,98,70,21,5,253,47,247,143,143,219,116,54,116,126,0,12}
+        key :: crypto.SigningKey.from_bytes([U8]{104,234,116,144,39,142,17,70,106,131,114,13,184,174,74,20,92,147,2,40,21,169,169,99,138,243,232,180,49,73,135,55}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{104,234,116,144,39,142,17,70,106,131,114,13,184,174,74,20,92,147,2,40,21,169,169,99,138,243,232,180,49,73,135,55}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_4
+fn case_115() {
+        public :: [U8]{118,28,22,68,52,39,99,187,38,36,37,152,106,25,68,120,115,91,140,89,16,222,189,113,5,113,138,255,253,107,42,7}
+        message :: [U8]{213,215,131,5,177,64,99,145,146,22,179,166,227,107,120}
+        signature :: [U8]{138,24,51,111,246,122,160,120,45,44,197,69,72,9,218,40,193,94,112,162,231,212,85,83,164,187,129,76,149,105,237,106,138,8,202,185,107,165,155,100,218,89,239,11,103,162,255,41,76,223,1,62,181,218,36,143,73,72,211,236,179,9,197,3}
+        key :: crypto.SigningKey.from_bytes([U8]{160,174,223,3,249,190,144,63,126,63,233,113,236,201,2,224,86,72,163,104,90,225,105,247,27,199,253,146,10,154,121,195}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{160,174,223,3,249,190,144,63,126,63,233,113,236,201,2,224,86,72,163,104,90,225,105,247,27,199,253,146,10,154,121,195}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_5
+fn case_116() {
+        public :: [U8]{119,234,96,72,195,172,143,242,210,194,11,68,173,225,72,18,90,240,241,118,12,61,213,198,193,179,63,34,112,121,118,102}
+        message :: [U8]{187,73,108,115,154,222,98,152,193,113,240,46,121,50,52,137}
+        signature :: [U8]{212,112,82,239,125,170,165,37,17,3,177,161,103,77,102,215,243,246,165,41,14,20,50,48,139,135,160,163,159,146,118,16,223,35,186,17,154,113,150,177,228,194,99,235,131,106,153,184,218,70,214,224,0,123,151,134,30,140,147,125,45,255,227,0}
+        key :: crypto.SigningKey.from_bytes([U8]{204,226,64,46,96,141,123,81,233,204,97,51,143,161,129,241,99,236,50,59,28,73,85,66,130,239,188,161,103,199,3,166}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{204,226,64,46,96,141,123,81,233,204,97,51,143,161,129,241,99,236,50,59,28,73,85,66,130,239,188,161,103,199,3,166}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_6
+fn case_117() {
+        public :: [U8]{157,31,203,131,160,197,93,9,166,158,246,148,137,217,207,173,30,16,147,102,74,141,158,16,235,246,42,185,193,162,29,11}
+        message :: [U8]{11,145,45,45,233,226,192,82,219,254,45,129,209,251,196,9,84}
+        signature :: [U8]{94,42,129,15,28,193,231,118,211,80,191,213,92,177,61,81,155,6,156,211,94,98,43,221,48,113,175,172,46,107,209,205,203,203,134,123,170,235,233,183,89,100,151,115,132,173,245,123,206,218,3,236,178,91,103,63,135,19,250,116,105,213,225,14}
+        key :: crypto.SigningKey.from_bytes([U8]{110,54,46,233,236,184,38,149,214,221,28,107,220,74,92,204,176,115,213,82,159,101,47,250,76,40,17,131,129,204,83,42}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{110,54,46,233,236,184,38,149,214,221,28,107,220,74,92,204,176,115,213,82,159,101,47,250,76,40,17,131,129,204,83,42}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_7
+fn case_118() {
+        public :: [U8]{176,183,27,77,148,1,149,94,169,11,34,199,180,126,191,180,237,19,0,63,127,77,175,79,98,203,200,29,254,104,23,9}
+        message :: [U8]{182,94,156,94,107,131,16,109,27,148,188,20,0,195,11,35,191,239,177,20,131,254,246,214,200,47,7,155,233,110,136}
+        signature :: [U8]{171,39,173,249,161,16,110,207,85,11,232,221,163,233,219,18,4,36,98,69,7,206,13,122,98,100,139,211,198,80,157,234,76,124,199,191,39,34,202,114,141,153,168,88,94,117,89,52,93,131,183,63,50,151,240,4,192,69,202,47,123,168,25,7}
+        key :: crypto.SigningKey.from_bytes([U8]{114,52,5,23,235,84,71,100,228,116,155,242,174,220,44,71,42,187,207,118,82,204,223,41,143,203,159,210,229,253,155,110}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{114,52,5,23,235,84,71,100,228,116,155,242,174,220,44,71,42,187,207,118,82,204,223,41,143,203,159,210,229,253,155,110}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_8
+fn case_119() {
+        public :: [U8]{39,135,2,102,115,51,71,183,135,229,125,54,183,157,91,90,19,51,190,98,194,201,230,199,138,22,110,40,126,144,201,211}
+        message :: [U8]{151,64,95,112,14,198,85,152,180,52,183,229,208,77,198,76,112,59,139,206,138,19,199,145,26,199,96,85,19,36,131,44}
+        signature :: [U8]{50,148,97,77,19,142,209,198,67,96,42,99,184,38,234,121,124,215,28,28,217,195,81,185,159,194,254,226,167,189,116,100,131,38,123,198,175,12,254,71,189,96,81,69,102,146,129,211,103,180,188,185,180,180,143,204,94,133,31,4,198,103,166,3}
+        key :: crypto.SigningKey.from_bytes([U8]{72,45,61,138,1,136,203,227,139,235,139,44,58,109,9,10,224,83,112,216,165,162,64,233,166,236,245,255,84,126,202,81}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{72,45,61,138,1,136,203,227,139,235,139,44,58,109,9,10,224,83,112,216,165,162,64,233,166,236,245,255,84,126,202,81}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_9
+fn case_120() {
+        public :: [U8]{203,86,253,71,14,174,14,252,90,44,107,0,58,249,80,144,58,98,38,16,120,26,126,241,170,23,33,125,133,155,166,172}
+        message :: [U8]{219,243,237,184,9,193,174,54,165,91,195,190,39,170,113,154,88,125,28,78,73,108,216,115,198,40,142,219,53,156,36,255,207}
+        signature :: [U8]{48,70,224,1,50,67,130,55,204,152,73,37,109,225,64,63,23,211,141,233,113,83,55,68,141,43,161,35,85,53,72,122,109,86,243,242,185,48,253,129,23,61,191,221,95,159,36,117,82,115,11,144,37,153,114,253,104,127,165,105,166,202,205,9}
+        key :: crypto.SigningKey.from_bytes([U8]{155,72,68,241,41,74,41,138,218,249,25,240,37,58,160,173,65,130,38,12,177,132,219,162,125,169,203,135,0,193,123,126}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{155,72,68,241,41,74,41,138,218,249,25,240,37,58,160,173,65,130,38,12,177,132,219,162,125,169,203,135,0,193,123,126}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_10
+fn case_121() {
+        public :: [U8]{94,45,146,202,216,227,238,153,162,79,240,191,235,111,32,225,79,132,200,73,211,251,231,150,244,134,18,141,111,29,126,172}
+        message :: [U8]{132,126,121,73,225,161,64,29,123,15,180,57,209,217,182,247,198,100,252,92,250,20,201,156,174,229,174,42,217,74,241,14,160,97,126,26,38,56,219,201,14,208,35,32,201,255,232,117,14,89,175,125,142,28,20,129,201,143,65,59,169,7,216}
+        signature :: [U8]{202,232,106,129,26,0,62,16,78,179,16,255,112,12,116,7,29,28,37,250,41,127,175,60,63,160,243,206,129,198,98,185,255,47,10,150,173,98,10,199,168,247,103,9,158,225,137,242,106,140,185,103,202,218,35,49,213,142,223,34,20,34,255,12}
+        key :: crypto.SigningKey.from_bytes([U8]{107,19,237,27,194,254,254,214,176,146,145,225,190,71,201,63,105,145,36,1,145,80,152,101,247,138,103,129,182,180,240,67}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{107,19,237,27,194,254,254,214,176,146,145,225,190,71,201,63,105,145,36,1,145,80,152,101,247,138,103,129,182,180,240,67}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_11
+fn case_122() {
+        public :: [U8]{20,126,185,161,39,243,187,89,54,134,67,248,193,152,147,159,188,93,103,251,116,13,139,214,211,218,204,210,245,201,79,2}
+        message :: [U8]{174,107,197,62,195,248,139,4,42,74,94,49,26,126,3,210,79,9,4,42,241,240,57,20,117,8,147,227,132,159,205,142,152,186,158,58,109,210,91,117,110,91,253,146,96,245,245,238,156,216,27,125,144,111,163,160,141,12,24,128,13,72,140,128}
+        signature :: [U8]{3,240,97,139,7,55,1,204,56,25,218,224,206,230,209,249,228,38,167,77,144,108,180,11,204,48,175,63,193,164,186,53,127,13,136,222,153,135,135,81,139,82,9,246,117,104,56,180,190,82,182,132,195,138,226,53,175,245,213,88,178,111,234,7}
+        key :: crypto.SigningKey.from_bytes([U8]{36,47,164,125,59,231,145,72,165,113,78,127,68,112,14,160,85,253,234,118,104,205,142,78,4,83,231,165,63,146,212,184}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{36,47,164,125,59,231,145,72,165,113,78,127,68,112,14,160,85,253,234,118,104,205,142,78,4,83,231,165,63,146,212,184}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_12
+fn case_123() {
+        public :: [U8]{43,146,18,239,202,202,25,202,51,249,1,161,203,123,147,18,2,164,146,7,96,222,189,235,54,170,245,25,238,74,224,9}
+        message :: [U8]{125,216,125,101,189,15,224,84,8,10,148,239,133,129,172,7,188,122,134,248,198,184,4,222,3,229,214,228,251,237,98,69,70,167,0,177,82,152,22,250,197,16,227,23,162,164,183,49,166,28,23,162,237,7,171,120,200,218,99,196,15,212,242,233,133}
+        signature :: [U8]{59,179,6,233,71,196,130,225,123,155,55,33,25,162,177,1,98,105,43,154,140,24,200,143,200,219,226,211,214,42,244,139,88,233,45,115,229,214,31,54,249,175,57,84,122,128,248,25,80,2,36,62,123,169,128,140,14,94,79,214,69,254,210,5}
+        key :: crypto.SigningKey.from_bytes([U8]{194,122,167,179,238,194,147,196,145,210,84,69,112,181,172,138,125,137,102,75,2,126,148,89,42,6,140,12,30,233,48,17}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{194,122,167,179,238,194,147,196,145,210,84,69,112,181,172,138,125,137,102,75,2,126,148,89,42,6,140,12,30,233,48,17}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_13
+fn case_124() {
+        public :: [U8]{91,243,49,203,218,5,86,95,124,90,199,52,130,142,11,39,177,177,82,28,144,131,76,248,132,150,86,130,196,154,32,5}
+        message :: [U8]{76,129,76,161,30,222,246,83,5,9,170,239,128,225,197,29,142,201,30,191,172,127,9,83,136,196,99,105,141,91,158,102,208,144,215,254,157,146,173,129,75,147,144,211,8,220,227,219,13,196,98,217,219,143,247,116,174,203,170,134,166,64,255,41,253,79,136,186,3,236,23,199,238,197,151,96,237,62,3,198,117,4,125,162,20,35,140,3,47,100,176,251,191,169,128,172,6,200,109,124,146,77,8,156,95,143,202,152,179,219,113}
+        signature :: [U8]{97,142,45,142,141,18,91,197,37,171,87,112,239,199,107,106,16,31,4,44,198,13,128,105,255,147,127,47,212,178,34,253,160,219,153,146,89,45,113,177,230,115,7,133,131,7,56,33,161,109,44,241,240,120,248,94,76,158,207,146,214,2,50,9}
+        key :: crypto.SigningKey.from_bytes([U8]{221,243,249,102,213,162,238,27,8,241,26,130,214,66,236,168,112,69,189,218,0,232,36,28,200,236,212,98,36,226,73,211}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{221,243,249,102,213,162,238,27,8,241,26,130,214,66,236,168,112,69,189,218,0,232,36,28,200,236,212,98,36,226,73,211}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_14
+fn case_125() {
+        public :: [U8]{237,231,127,59,163,43,58,23,78,207,156,34,78,87,252,237,14,25,218,192,86,98,145,168,195,164,149,154,77,124,17,59}
+        message :: [U8]{104,13,69,52,10,201,149,161,69,133,31,81,66,95,214,83,78,49,128,231,82,100,236,168,218,61,103,136,224,194,65,105,157,19,187,234,234,63,18,208,22,168,211,255,45,33,184,91,32,156,161,147,229,2,242,101,194,177,190,197,54,22,162,178,141,76,13,224,204,84,238,31,79,12,230,52,50,111,134,207,74,227,238,115,70,29,96,231,94,87,176,241,50,16,215,50,3,150,112,81,75,237,231,61,153,32,224,178,224,191,131,180}
+        signature :: [U8]{209,144,185,250,243,129,195,34,250,48,49,115,238,108,91,1,163,246,31,50,174,145,115,164,45,194,186,179,124,197,210,62,193,127,34,149,72,203,176,35,162,124,169,26,226,5,167,195,234,9,126,46,41,58,238,132,2,228,17,136,175,97,54,4}
+        key :: crypto.SigningKey.from_bytes([U8]{174,183,219,80,200,21,56,94,216,70,45,53,228,165,21,188,245,48,108,165,38,206,161,90,137,63,50,195,135,10,188,38}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{174,183,219,80,200,21,56,94,216,70,45,53,228,165,21,188,245,48,108,165,38,206,161,90,137,63,50,195,135,10,188,38}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_15
+fn case_126() {
+        public :: [U8]{221,216,247,32,148,58,30,205,69,135,243,65,90,225,69,166,19,245,197,174,96,59,195,214,218,39,102,134,70,5,11,182}
+        message :: [U8]{162,217,81,206,120,100,146,151,195,189,201,101,40,199,99,133,13,132,225,40,243,68,250,222,48,97,238,86,89,20,49,141,145,139,197,157,142,34,191,83,148,243,26,253,135,121,204,24,85,227,64,138,248,161,81,193,140,59,82,197,66,110,118,10,121,77,89,15,161,20,152,237,171,43,231,166,215,52,177,238,237,120,242,140,115,174,128,76,75,61,190,180,176,176,220,168,78,103,92,35,24,248,76,214,153,230,48,20,108,61,112,41,220}
+        signature :: [U8]{151,180,169,103,107,146,6,155,33,73,231,34,7,249,179,32,94,200,37,95,58,104,148,246,66,71,100,31,44,152,103,188,69,7,63,205,98,224,219,93,118,187,152,153,127,106,141,50,14,8,203,134,216,153,14,222,120,29,15,248,145,170,248,1}
+        key :: crypto.SigningKey.from_bytes([U8]{137,229,249,21,73,162,16,245,232,63,129,13,25,86,202,179,17,97,44,107,104,51,246,251,230,121,144,135,104,139,244,61}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{137,229,249,21,73,162,16,245,232,63,129,13,25,86,202,179,17,97,44,107,104,51,246,251,230,121,144,135,104,139,244,61}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_16
+fn case_127() {
+        public :: [U8]{62,220,159,247,220,41,134,189,102,196,198,15,93,143,238,152,95,40,16,79,76,148,22,125,94,109,246,171,206,151,51,118}
+        message :: [U8]{117,14,249,246,190,101,156,170,206,38,118,159,144,42,170,105,157,233,170,86,127,214,104,13,220,7,189,214,237,215,167,31,176,27,70,19,118,122,113,254,190,194,50,129,67,122,3,155,8,222,155,220,201,3,167,237,167,151,66,226,86,162,28,250,200,110,243,240,0,213,30,238,234,192,38,153,153,6,140,36,102,139,173,79,37,241,165,64,197,54,254,59,140,164,70,101,3,119,19,123,37,66,1,96,211,103,204,247,243,31,184,203,174,93,90,68,128,203,196,216,37,156,90,243,121,0,201}
+        signature :: [U8]{181,150,217,249,130,138,143,188,174,224,22,125,133,170,240,28,58,119,51,93,21,46,77,147,10,87,4,85,79,101,228,152,44,150,197,83,189,211,207,213,144,151,185,215,100,107,105,131,19,82,109,183,45,96,107,174,198,51,189,222,32,134,115,1}
+        key :: crypto.SigningKey.from_bytes([U8]{191,125,217,31,40,245,49,249,131,176,201,55,224,173,92,145,18,152,97,39,84,12,222,191,121,160,48,210,5,175,232,195}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{191,125,217,31,40,245,49,249,131,176,201,55,224,173,92,145,18,152,97,39,84,12,222,191,121,160,48,210,5,175,232,195}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_17
+fn case_128() {
+        public :: [U8]{49,123,148,117,124,252,230,202,122,35,180,9,101,63,220,26,140,181,11,157,49,214,154,53,51,3,175,206,130,27,39,236}
+        message :: [U8]{26,117,103,73,129,110,185,174,208,72,138,234,212,191,36,167,102,163,217,86,1,106,230,43,225,233,33,170,45,245,196,250,47,146,104,232,148,19,9,85,32,107,254,73,154,99,17,180,194,114,28,147,81,145,31,141,206,81,184,167,151,206,119,213,213,31,112,235,26,60,234,109,198,177,108,173,174,199,16,25,140,16,245,93,112,44,160,88,56,231,60,147,72,172,68,188,99,223,126,141,18,183,41,146,146,50,237,105,48,219,47,184,186,212,113,223,191,146,71,29,69,101,103,71,39,217,87,18}
+        signature :: [U8]{50,221,167,39,187,175,103,238,214,184,208,65,233,230,55,99,253,75,225,139,124,174,65,236,78,6,199,4,207,36,165,203,183,97,85,190,79,203,23,162,216,180,134,199,127,104,21,184,153,57,174,118,248,11,38,35,218,168,117,175,27,242,227,14}
+        key :: crypto.SigningKey.from_bytes([U8]{62,30,47,215,154,134,54,186,183,102,18,226,124,13,4,219,22,211,184,154,130,216,118,110,173,75,232,18,189,164,109,148}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{62,30,47,215,154,134,54,186,183,102,18,226,124,13,4,219,22,211,184,154,130,216,118,110,173,75,232,18,189,164,109,148}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_18
+fn case_129() {
+        public :: [U8]{107,67,237,181,104,186,234,246,244,198,232,120,193,252,226,210,220,186,134,129,143,250,178,214,167,25,45,156,197,50,91,122}
+        message :: [U8]{62,172,159,140,12,213,187,72,125,250,224,139,83,86,143,240,209,194,183,230,125,194,219,47,203,73,10,138,147,209,32,8,44,16,215,208,95,54,138,71,79,187,181,49,99,177,172,108,21,39,190,16,174,107,30,125,219,100,33,204,181,149,26,94,145,238,45,236,66,232,111,113,14,24,167,8,245,208,191,175,174,176,142,184,59,188,151,178,163,93,119,68,1,107,139,196,247,31,47,62,100,112,205,232,32,250,46,123,56,50,97,205,49,142,142,197,185,248,33,36,183,64,185,124,42,70,52,138,232}
+        signature :: [U8]{118,2,10,221,151,152,171,77,218,129,94,193,108,172,117,25,154,85,62,181,203,236,226,180,7,69,66,49,202,1,36,232,251,199,209,29,114,95,253,102,222,255,20,0,95,105,15,8,103,180,16,240,105,176,140,81,31,115,12,244,121,204,231,4}
+        key :: crypto.SigningKey.from_bytes([U8]{184,102,67,24,98,140,145,1,136,42,84,3,177,251,228,6,14,32,203,78,228,158,104,37,211,68,206,155,136,229,211,70}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{184,102,67,24,98,140,145,1,136,42,84,3,177,251,228,6,14,32,203,78,228,158,104,37,211,68,206,155,136,229,211,70}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_19
+fn case_130() {
+        public :: [U8]{161,55,227,29,65,139,37,185,9,57,143,6,182,7,39,248,166,77,18,70,26,247,23,12,224,189,244,229,130,73,213,129}
+        message :: [U8]{100,72,82,53,49,202,192,149,168,134,126,54,29,198,46,205,230,72,235,158,184,18,194,177,249,160,27,209,199,168,163,10,86,149,37,45,196,197,152,49,184,238,72,237,236,195,137,34,177,47,133,89,57,62,204,13,2,5,95,19,116,172,25,70,127,104,113,65,107,88,23,142,78,203,51,89,255,8,4,231,76,80,104,213,190,49,172,129,188,107,169,176,192,203,77,67,34,224,13,83,38,61,207,89,78,38,200,82,184,192,239,86,32,147,120,80,65,143,159,208,67,63,35,121,160,207,135,197,7,126,115,228,186,129,25,47,119,41,144,182,225,158,58,134,16,23,210,184,211,215,150,25,252,178,235,215,81,12,134,41,242,175,134,158,200,76,17,195,6,127,83,43,38,66,193,170,168,179,108,34,203,40,168,157,100,5,218,59,209,146,22,126,233,56,68,170,235,193,99,248,230,244,168,78,168,223,149,182,145,196,249,221,37,101,33,24,180,37,145,113,27,50,181,71,253,10,29,6,117,219,84,152,98,107,223,61,227,81,42,121,216,22,175,244,131,200,160,80,252,255,191,131,243,140,6}
+        signature :: [U8]{230,66,6,221,197,95,71,168,110,145,167,146,222,196,12,137,42,149,215,238,254,140,76,125,207,30,187,211,218,8,247,17,41,167,0,106,198,195,253,214,222,86,212,155,76,45,221,7,130,209,101,86,223,196,6,5,115,245,140,219,20,253,175,15}
+        key :: crypto.SigningKey.from_bytes([U8]{14,74,15,57,93,111,42,35,183,131,143,149,146,185,106,193,63,141,233,143,212,87,181,116,59,145,106,142,156,208,202,227}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{14,74,15,57,93,111,42,35,183,131,143,149,146,185,106,193,63,141,233,143,212,87,181,116,59,145,106,142,156,208,202,227}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_20
+fn case_131() {
+        public :: [U8]{56,23,107,148,238,168,15,217,231,247,179,126,26,237,166,59,73,172,49,55,23,42,95,212,176,131,242,166,73,102,98,230}
+        message :: [U8]{89,125,67,181,19,63,9,66,209,120,181,87,100,136,6,165,238,106,8,32,181,253,25,32,151,50,182,66,226,147,21,176,129,184,16,45,103,209,241,115,51,242,72,89,106,157,86,42,83,183,253,95,63,235,94,168,172,98,9,255,55,25,154,224,63,210,227,113,195,143,245,7,158,99,33,209,4,32,112,82,25,226,140,27,61,18,207,253,161,92,109,179,82,29,68,240,209,200,81,196,136,170,82,146,243,52,150,21,244,233,131,188,65,182,161,157,117,56,153,121,71,129,136,50,11,3,52,125,79,217,112,249,213,122,82,236,21,145,255,209,11,123,229,62,239,1,170,186,55,215,6,188,219,206,192,20,97,237,189,69,166,237,186,73,57,172,250,9,221,135,223,59,252,187,31,227,84,2,1,249,236,120,0,227,92,89,245,119,130,50,135,210,73,224,132,26,59,142,21,155,72,111,229,213,201,207,69,126,147,177,162,53,146,229,105,221,236,175,105,136,110,154,234,185,89,250,205,128,148,39,170,135,178,125,47,206,5,72,169,125,2,177,123,239,233,94,164,184,0,235,40,47,74,103,238,3}
+        signature :: [U8]{22,243,234,215,178,248,126,128,116,220,52,60,85,182,55,0,248,36,227,118,138,86,147,28,147,194,79,175,207,87,204,202,157,241,100,59,144,146,229,121,210,155,54,200,104,180,199,184,57,224,86,205,130,53,63,137,220,200,96,49,63,213,97,11}
+        key :: crypto.SigningKey.from_bytes([U8]{147,151,92,195,112,155,247,234,181,18,84,153,149,106,232,109,36,145,200,88,70,237,38,83,118,35,235,64,211,51,161,201}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{147,151,92,195,112,155,247,234,181,18,84,153,149,106,232,109,36,145,200,88,70,237,38,83,118,35,235,64,211,51,161,201}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_21
+fn case_132() {
+        public :: [U8]{37,56,147,194,9,33,0,84,54,204,81,248,46,4,77,113,176,174,99,172,41,123,139,246,154,122,170,136,45,189,190,245}
+        message :: [U8]{139,242,42,247,152,160,206,252,52,94,201,94,27,23,114,230,156,92,30,222,245,89,137,254,190,97,86,35,156,80,45,182,191,88,133,149,119,89,203,145,181,114,32,40,5,6,244,252,137,8,133,63,39,8,211,73,232,137,152,220,199,47,15,180,147,218,19,50,24,254,113,39,246,9,120,214,17,16,174,76,117,72,122,254,230,32,48,58,205,254,243,249,75,14,196,93,3,206,60,25,237,84,233,32,171,67,229,170,27,4,130,110,112,170,234,98,75,45,24,54,29,198,88,255,94,147,42,61,1,227,205,84,92,248,176,67,1,172,9,14,29,231,116,192,103,117,233,130,191,167,54,91,118,253,224,204,45,43,118,145,175,75,39,122,152,185,137,216,186,244,74,151,87,150,190,109,124,5,189,244,143,170,224,43,242,139,254,207,82,15,170,5,104,68,105,125,21,167,245,98,45,59,134,242,253,245,122,189,90,238,244,8,76,160,5,129,204,174,192,182,110,15,32,4,159,82,98,5,220,77,204,18,132,8,69,228,57,171,120,136,113,14,9,51,251,248,193,132,91,21,80,102,196,157,177,160,156}
+        signature :: [U8]{199,90,239,105,121,160,76,190,103,129,192,182,129,55,247,230,186,191,18,33,209,117,246,253,162,37,121,165,236,232,198,231,147,222,127,55,169,228,89,215,144,126,35,245,133,34,12,243,206,111,45,202,224,25,162,50,84,104,38,241,77,183,173,15}
+        key :: crypto.SigningKey.from_bytes([U8]{200,170,70,153,206,153,49,145,119,7,198,93,207,175,107,217,130,83,88,34,48,222,192,155,24,216,134,218,194,102,163,178}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{200,170,70,153,206,153,49,145,119,7,198,93,207,175,107,217,130,83,88,34,48,222,192,155,24,216,134,218,194,102,163,178}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_22
+fn case_133() {
+        public :: [U8]{247,189,100,201,52,164,203,183,114,234,26,165,205,62,86,196,63,138,10,31,120,45,139,2,114,142,171,23,4,213,237,255}
+        message :: [U8]{}
+        signature :: [U8]{34,47,228,27,163,43,56,189,240,11,178,71,181,243,102,217,205,64,70,23,4,206,240,114,91,219,20,201,116,240,33,27,239,50,193,41,128,123,152,177,228,35,52,72,162,77,144,223,248,73,127,136,30,133,103,116,137,232,117,108,77,154,72,3}
+        key :: crypto.SigningKey.from_bytes([U8]{4,8,46,251,66,130,77,205,136,103,128,234,122,64,66,47,251,244,85,216,23,243,13,222,10,181,203,197,121,160,184,1}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{4,8,46,251,66,130,77,205,136,103,128,234,122,64,66,47,251,244,85,216,23,243,13,222,10,181,203,197,121,160,184,1}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_23
+fn case_134() {
+        public :: [U8]{242,45,226,76,219,177,8,230,83,69,70,236,45,183,5,228,156,181,95,201,222,45,200,87,107,162,174,23,14,208,207,14}
+        message :: [U8]{115}
+        signature :: [U8]{162,130,208,193,1,118,166,113,82,171,237,206,6,3,66,8,57,19,155,126,23,242,251,113,125,56,41,244,219,148,66,16,90,42,167,217,175,135,79,11,41,17,193,211,62,227,217,37,85,13,162,69,210,77,97,227,29,15,65,53,214,249,238,15}
+        key :: crypto.SigningKey.from_bytes([U8]{222,245,172,122,144,66,147,64,143,166,185,201,224,23,174,163,11,169,202,195,18,39,190,200,181,254,117,78,95,5,151,204}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{222,245,172,122,144,66,147,64,143,166,185,201,224,23,174,163,11,169,202,195,18,39,190,200,181,254,117,78,95,5,151,204}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_24
+fn case_135() {
+        public :: [U8]{35,74,161,245,218,93,223,208,243,96,151,90,114,35,117,113,192,44,195,12,17,77,244,232,36,134,42,194,231,135,164,61}
+        message :: [U8]{216,173}
+        signature :: [U8]{130,184,29,97,51,243,237,158,104,236,53,189,189,46,189,70,24,56,93,18,142,62,65,121,76,115,16,53,90,110,225,197,56,93,236,74,96,150,191,182,11,93,113,142,223,135,243,193,195,237,22,168,74,1,252,175,158,7,50,174,46,8,135,11}
+        key :: crypto.SigningKey.from_bytes([U8]{38,200,169,45,188,93,234,97,68,117,139,61,189,214,186,198,6,235,203,45,157,141,185,137,217,237,94,196,0,138,183,144}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{38,200,169,45,188,93,234,97,68,117,139,61,189,214,186,198,6,235,203,45,157,141,185,137,217,237,94,196,0,138,183,144}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_25
+fn case_136() {
+        public :: [U8]{19,240,78,40,4,223,72,219,150,121,197,116,147,229,117,14,220,73,101,24,55,159,18,82,46,123,56,102,61,234,105,132}
+        message :: [U8]{85,166,28,59,125,115,224}
+        signature :: [U8]{238,211,176,67,13,79,247,162,159,151,149,142,165,155,54,47,194,49,37,55,41,244,44,152,161,212,245,184,81,83,135,7,96,33,229,25,189,217,114,192,67,135,111,18,154,121,133,210,143,201,9,91,230,20,185,158,207,180,137,146,220,194,250,0}
+        key :: crypto.SigningKey.from_bytes([U8]{48,60,142,48,166,43,216,143,253,141,185,228,205,88,106,96,172,182,175,107,155,211,236,94,168,55,11,23,7,238,218,12}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{48,60,142,48,166,43,216,143,253,141,185,228,205,88,106,96,172,182,175,107,155,211,236,94,168,55,11,23,7,238,218,12}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_26
+fn case_137() {
+        public :: [U8]{47,219,113,143,78,212,64,159,230,26,117,21,198,68,61,202,40,157,226,153,223,97,234,58,194,164,191,192,222,175,193,23}
+        message :: [U8]{156,25,248,3,233,20,251,159,76,221,172,81,191,155,206}
+        signature :: [U8]{178,4,192,12,63,203,214,243,42,137,72,123,180,124,151,84,182,213,66,165,130,97,84,22,173,34,148,40,42,46,157,185,157,201,32,191,195,86,186,138,243,175,101,135,197,49,44,126,73,158,119,231,62,193,135,134,65,195,200,91,141,130,179,7}
+        key :: crypto.SigningKey.from_bytes([U8]{192,81,155,201,159,102,246,158,134,46,115,246,158,192,123,181,140,169,238,184,56,141,127,68,179,150,97,147,104,47,234,240}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{192,81,155,201,159,102,246,158,134,46,115,246,158,192,123,181,140,169,238,184,56,141,127,68,179,150,97,147,104,47,234,240}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_27
+fn case_138() {
+        public :: [U8]{180,127,67,140,203,155,155,202,173,40,168,75,182,238,174,212,113,136,182,235,199,69,46,142,159,191,200,88,147,75,103,226}
+        message :: [U8]{76,20,34,99,141,29,121,84,139,146,165,98,125,138,189,240}
+        signature :: [U8]{127,161,169,156,172,91,181,136,215,177,175,110,0,175,101,47,1,31,53,188,130,23,161,75,237,231,183,41,215,163,124,190,12,38,30,180,6,21,39,117,36,139,109,244,144,222,61,92,138,251,255,190,87,22,115,66,194,195,126,187,1,104,157,14}
+        key :: crypto.SigningKey.from_bytes([U8]{217,96,29,209,114,108,71,233,203,32,90,13,65,136,130,191,79,56,242,227,132,98,192,75,116,161,199,127,181,221,16,129}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{217,96,29,209,114,108,71,233,203,32,90,13,65,136,130,191,79,56,242,227,132,98,192,75,116,161,199,127,181,221,16,129}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_28
+fn case_139() {
+        public :: [U8]{102,57,238,190,208,241,209,30,184,239,8,63,40,71,48,83,135,179,43,66,243,121,41,248,49,111,130,30,47,206,151,159}
+        message :: [U8]{169,37,71,49,64,236,205,71,118,51,205,201,145,20,242,55,110}
+        signature :: [U8]{99,123,194,89,194,134,29,108,141,187,156,178,240,146,239,166,71,222,43,7,19,192,237,128,31,111,162,27,185,163,89,243,243,112,180,67,76,16,233,140,152,142,52,20,65,46,96,208,179,216,75,204,67,80,133,110,39,212,87,86,210,126,15,1}
+        key :: crypto.SigningKey.from_bytes([U8]{122,209,127,247,246,114,238,29,255,80,41,17,33,65,237,245,55,141,224,170,4,182,250,142,28,74,238,115,171,225,51,37}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{122,209,127,247,246,114,238,29,255,80,41,17,33,65,237,245,55,141,224,170,4,182,250,142,28,74,238,115,171,225,51,37}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_29
+fn case_140() {
+        public :: [U8]{6,223,15,88,137,99,128,164,56,14,130,111,164,22,121,201,147,139,90,241,65,76,84,11,37,95,2,18,233,26,175,172}
+        message :: [U8]{25,202,176,114,190,101,188,108,138,89,23,206,32,49,16,18,75,92,61,225,194,111,200,152,249,174,198,223,118,54,179}
+        signature :: [U8]{223,145,31,142,160,246,184,63,139,225,106,199,149,62,85,169,251,111,63,214,12,37,5,118,0,170,2,82,224,214,227,155,134,181,144,128,89,140,239,20,255,52,242,230,121,16,83,58,219,198,214,7,166,0,24,68,108,246,33,72,175,54,112,4}
+        key :: crypto.SigningKey.from_bytes([U8]{118,20,121,94,133,222,55,50,106,186,198,205,140,243,114,82,158,171,241,192,251,163,143,76,219,132,163,189,94,62,169,164}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{118,20,121,94,133,222,55,50,106,186,198,205,140,243,114,82,158,171,241,192,251,163,143,76,219,132,163,189,94,62,169,164}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_30
+fn case_141() {
+        public :: [U8]{247,107,140,228,140,90,168,58,225,141,150,150,246,211,159,249,194,209,63,118,221,51,111,214,55,197,199,224,225,63,166,96}
+        message :: [U8]{205,35,119,16,119,85,179,82,19,49,60,228,110,27,128,55,82,172,201,200,222,193,186,97,74,157,180,2,77,20,16,45}
+        signature :: [U8]{170,89,192,200,188,251,113,15,215,218,194,86,130,214,152,145,167,185,6,136,6,95,28,177,186,97,89,207,42,151,12,55,185,84,139,11,197,152,83,189,194,157,55,12,41,123,16,240,151,211,64,42,171,254,136,80,236,21,18,15,151,87,166,15}
+        key :: crypto.SigningKey.from_bytes([U8]{99,211,81,255,110,44,89,245,137,97,253,165,123,15,28,122,62,72,163,254,255,26,4,99,156,87,109,203,229,189,136,209}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{99,211,81,255,110,44,89,245,137,97,253,165,123,15,28,122,62,72,163,254,255,26,4,99,156,87,109,203,229,189,136,209}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_31
+fn case_142() {
+        public :: [U8]{166,218,47,85,46,190,147,157,210,241,13,69,116,122,234,98,111,111,89,47,99,125,222,208,202,30,148,164,57,74,114,247}
+        message :: [U8]{173,52,164,177,183,237,42,19,43,223,135,97,59,72,225,143,22,65,128,142,125,172,99,208,253,210,45,32,23,138,217,36,168}
+        signature :: [U8]{16,209,164,46,227,242,156,239,100,120,132,31,31,160,159,108,60,229,151,117,160,233,38,122,134,76,225,98,220,158,144,218,221,161,244,241,108,11,164,229,214,61,246,93,156,187,40,227,224,254,134,255,47,11,4,80,41,202,196,192,39,39,14,15}
+        key :: crypto.SigningKey.from_bytes([U8]{74,140,114,164,156,159,245,76,150,27,23,145,63,175,91,52,17,62,89,202,3,200,158,97,98,85,185,240,201,242,216,111}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{74,140,114,164,156,159,245,76,150,27,23,145,63,175,91,52,17,62,89,202,3,200,158,97,98,85,185,240,201,242,216,111}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_32
+fn case_143() {
+        public :: [U8]{55,207,162,135,64,23,107,127,218,186,241,139,91,120,58,78,219,182,85,220,75,162,208,48,66,171,179,83,121,81,50,79}
+        message :: [U8]{17,248,98,78,52,96,160,198,54,109,3,86,184,195,146,174,182,89,190,208,116,85,118,58,63,17,179,95,37,98,225,142,246,28,80,46,173,209,111,119,11,50,60,7,88,202,129,126,160,197,126,199,43,117,212,74,65,155,56,45,207,152,11}
+        signature :: [U8]{114,92,119,248,231,47,183,92,227,225,29,3,144,74,11,16,130,186,224,184,236,89,66,214,95,250,197,217,228,76,96,224,189,200,164,11,252,21,255,38,53,25,40,153,235,97,121,54,80,7,29,43,147,7,249,26,213,43,214,63,253,138,219,0}
+        key :: crypto.SigningKey.from_bytes([U8]{133,85,11,70,47,189,183,122,180,112,106,64,23,134,184,232,186,24,130,111,172,90,244,82,165,67,166,12,98,15,71,124}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{133,85,11,70,47,189,183,122,180,112,106,64,23,134,184,232,186,24,130,111,172,90,244,82,165,67,166,12,98,15,71,124}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_33
+fn case_144() {
+        public :: [U8]{60,186,221,80,152,52,49,147,165,218,227,227,76,103,221,121,121,20,80,118,56,252,215,14,101,107,77,102,31,233,68,88}
+        message :: [U8]{54,123,156,39,222,49,114,109,41,27,255,189,207,64,85,82,184,171,211,1,55,240,137,173,149,46,119,63,251,52,96,112,230,159,249,253,220,7,118,228,90,69,29,65,249,156,13,194,79,78,180,161,250,30,126,180,132,45,152,193,11,125,235,82}
+        signature :: [U8]{222,16,71,16,233,243,114,8,250,116,144,219,126,130,232,214,122,224,99,191,214,239,225,94,186,230,122,96,69,213,112,188,8,66,82,126,169,199,248,165,75,105,224,80,171,232,130,250,241,199,127,132,83,85,42,176,50,14,42,23,153,189,1,2}
+        key :: crypto.SigningKey.from_bytes([U8]{232,118,186,62,126,211,199,146,188,8,112,24,136,241,42,211,134,226,239,154,37,90,176,179,232,229,97,78,64,212,207,139}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{232,118,186,62,126,211,199,146,188,8,112,24,136,241,42,211,134,226,239,154,37,90,176,179,232,229,97,78,64,212,207,139}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_34
+fn case_145() {
+        public :: [U8]{100,85,144,245,231,251,189,57,153,75,53,60,10,62,89,208,65,24,170,102,200,166,182,31,20,71,217,250,165,218,202,107}
+        message :: [U8]{122,54,18,32,152,19,44,126,188,55,130,48,247,77,53,141,222,17,5,147,7,254,141,185,91,130,253,168,195,134,233,191,167,123,15,98,210,146,154,209,62,164,173,237,85,189,192,36,209,250,67,147,82,115,186,31,142,181,67,213,108,74,221,199,118}
+        signature :: [U8]{16,2,236,146,252,180,1,229,78,45,169,136,4,139,108,195,75,190,102,137,24,215,58,0,38,45,114,173,164,13,88,1,39,180,98,14,250,135,243,71,1,224,19,169,249,148,226,241,152,247,184,216,33,50,17,23,251,221,13,139,255,220,131,10}
+        key :: crypto.SigningKey.from_bytes([U8]{165,100,108,17,53,235,237,172,209,199,84,42,15,157,219,71,98,219,190,193,222,19,61,13,97,89,30,111,74,63,97,54}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{165,100,108,17,53,235,237,172,209,199,84,42,15,157,219,71,98,219,190,193,222,19,61,13,97,89,30,111,74,63,97,54}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_35
+fn case_146() {
+        public :: [U8]{121,105,109,155,175,155,29,24,248,190,196,143,113,232,150,190,92,244,194,66,75,115,117,15,192,82,14,106,169,124,218,76}
+        message :: [U8]{40,68,131,193,59,63,231,29,158,65,142,178,102,66,40,139,157,96,25,57,65,77,225,210,48,16,218,150,178,186,211,169,97,12,84,144,137,20,184,176,177,166,238,74,211,253,179,191,67,65,215,231,238,224,100,197,203,213,84,58,165,210,73,158,12,244,229,23,245,15,111,95,46,144,206,200,119,43,123,240,217,37,3,98,27,49,66,180,140,254,238,107,21,97,210,105,22,69,65,134,196,175,129,60,137,120,163,63,73,220,93}
+        signature :: [U8]{244,130,50,210,116,40,47,13,105,168,5,52,153,208,71,203,77,175,85,204,49,204,59,49,87,30,139,165,151,96,113,153,225,152,180,248,124,173,95,119,178,2,225,31,25,63,15,44,231,208,60,167,141,75,125,239,87,192,215,4,104,107,227,5}
+        key :: crypto.SigningKey.from_bytes([U8]{185,224,32,255,163,120,181,164,63,61,249,108,24,99,190,225,243,102,38,110,207,167,203,168,80,222,217,60,46,15,135,254}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{185,224,32,255,163,120,181,164,63,61,249,108,24,99,190,225,243,102,38,110,207,167,203,168,80,222,217,60,46,15,135,254}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_36
+fn case_147() {
+        public :: [U8]{232,97,230,51,90,135,106,187,107,108,103,132,115,78,98,181,221,198,242,97,221,27,20,175,18,134,205,51,30,209,176,41}
+        message :: [U8]{25,203,217,152,130,53,102,33,66,19,184,233,123,226,2,39,93,69,74,207,65,145,233,103,227,83,110,230,147,33,198,145,89,148,251,66,242,0,181,77,226,6,153,108,147,208,115,52,111,122,202,136,171,132,69,40,249,83,249,116,31,177,89,44,186,51,170,220,186,2,50,11,246,83,123,118,29,32,141,228,241,193,147,42,11,40,109,166,201,149,24,112,195,254,184,247,233,161,216,225,231,87,122,104,177,166,254,170,55,11,155,213}
+        signature :: [U8]{115,181,18,206,142,175,252,67,87,10,136,117,82,46,75,232,25,196,170,0,114,85,209,185,222,48,193,110,185,89,75,254,33,30,117,233,233,160,20,214,190,69,221,136,6,61,29,40,27,142,43,156,90,67,31,34,216,242,16,135,115,204,44,13}
+        key :: crypto.SigningKey.from_bytes([U8]{174,55,45,231,210,176,37,4,201,215,55,214,96,82,30,62,81,145,231,103,242,134,84,108,242,249,235,229,241,58,70,218}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{174,55,45,231,210,176,37,4,201,215,55,214,96,82,30,62,81,145,231,103,242,134,84,108,242,249,235,229,241,58,70,218}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_37
+fn case_148() {
+        public :: [U8]{114,175,181,148,229,140,158,128,138,247,161,17,208,22,218,160,71,74,149,254,97,52,81,84,71,124,121,117,153,171,77,15}
+        message :: [U8]{240,1,15,177,114,200,129,77,34,212,124,207,166,226,186,83,153,219,108,83,83,15,174,242,57,156,174,72,142,116,231,233,244,55,243,77,37,234,153,90,159,219,175,117,154,231,117,174,227,114,159,22,90,224,194,5,86,145,128,107,224,154,83,76,44,126,227,202,4,38,62,176,95,123,147,5,217,22,103,174,218,162,150,9,229,47,78,192,215,239,65,37,20,149,97,70,87,50,140,207,135,95,31,85,30,208,251,29,211,174,163,3,245}
+        signature :: [U8]{198,85,228,57,85,49,146,3,148,242,32,241,144,76,232,120,54,169,183,50,11,217,148,22,89,8,116,41,122,221,188,3,166,133,128,60,250,19,45,35,91,220,131,10,100,5,9,142,26,116,105,50,64,150,68,201,228,137,70,21,43,127,215,5}
+        key :: crypto.SigningKey.from_bytes([U8]{110,146,33,22,134,29,194,232,12,144,223,114,161,107,21,204,69,226,152,126,142,159,218,66,101,196,123,167,179,234,178,117}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{110,146,33,22,134,29,194,232,12,144,223,114,161,107,21,204,69,226,152,126,142,159,218,66,101,196,123,167,179,234,178,117}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_38
+fn case_149() {
+        public :: [U8]{141,36,133,65,118,162,69,227,235,99,121,92,185,183,210,170,233,48,79,249,250,242,40,54,75,237,233,61,149,215,27,49}
+        message :: [U8]{181,8,177,145,10,226,116,12,127,16,25,34,143,94,135,115,49,207,199,205,110,222,110,220,248,59,30,143,222,224,159,242,80,139,221,252,232,139,182,95,17,176,250,165,81,199,3,56,192,91,29,229,114,104,128,254,124,144,27,203,176,227,229,189,212,180,115,67,215,51,7,60,36,113,243,216,47,146,49,173,232,4,86,249,231,79,43,172,241,225,32,227,57,118,93,173,61,18,181,145,193,115,82,200,251,6,174,120,92,240,147,242,86,220,210,85,129,104,238,177,88,35,196,3,50,168,7}
+        signature :: [U8]{160,216,96,170,129,65,225,23,193,159,172,225,199,19,68,28,141,57,56,9,208,148,67,162,186,164,15,137,37,39,116,80,10,205,94,80,214,106,114,175,250,88,7,217,98,170,26,143,246,219,220,62,184,15,255,70,144,138,137,239,160,155,212,8}
+        key :: crypto.SigningKey.from_bytes([U8]{182,92,192,169,92,185,185,133,86,215,147,108,52,18,124,231,186,249,86,193,140,20,16,65,189,184,82,144,226,101,207,44}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{182,92,192,169,92,185,185,133,86,215,147,108,52,18,124,231,186,249,86,193,140,20,16,65,189,184,82,144,226,101,207,44}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_39
+fn case_150() {
+        public :: [U8]{72,187,63,10,4,122,64,48,29,216,28,191,31,163,105,159,193,0,203,134,195,23,116,166,149,114,126,40,244,59,232,227}
+        message :: [U8]{134,130,142,239,227,80,28,141,107,247,56,51,205,83,234,14,75,161,140,146,46,183,213,214,188,157,149,131,116,236,211,55,175,32,52,222,3,130,167,180,48,66,63,103,103,188,216,92,172,182,112,205,94,100,137,253,157,65,174,46,184,123,68,24,255,85,250,238,241,168,7,173,40,9,51,0,126,98,30,213,32,72,116,64,188,169,207,186,0,23,73,71,24,59,141,4,83,208,154,197,95,97,26,136,49,178,169,83,156,34,227,73,192,151,217,152,225,65,28,76,57,151,27,7,198,15,187,98}
+        signature :: [U8]{76,58,82,52,210,107,137,190,98,95,250,102,190,101,137,167,92,161,107,40,231,211,182,54,178,69,138,56,76,132,34,110,109,138,104,140,122,227,176,242,72,57,110,216,130,125,100,59,254,46,4,178,244,186,130,83,93,103,123,235,29,80,38,4}
+        key :: crypto.SigningKey.from_bytes([U8]{202,186,80,95,43,84,172,24,102,149,149,130,47,174,2,109,167,138,77,206,88,75,239,37,20,229,41,28,252,99,217,111}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{202,186,80,95,43,84,172,24,102,149,149,130,47,174,2,109,167,138,77,206,88,75,239,37,20,229,41,28,252,99,217,111}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_40
+fn case_151() {
+        public :: [U8]{111,120,8,199,122,95,146,29,117,187,169,19,112,66,243,100,118,113,35,67,33,47,118,50,120,22,193,93,249,222,1,163}
+        message :: [U8]{8,194,204,88,109,202,83,164,255,168,221,233,33,68,186,183,134,151,44,107,217,205,90,106,116,193,219,203,98,38,120,82,58,131,132,58,251,117,30,54,119,1,32,233,101,203,24,172,132,96,182,30,177,193,109,199,193,41,94,12,193,104,251,126,41,8,58,147,59,55,218,174,119,29,114,74,140,235,49,140,232,209,177,203,7,242,34,181,4,218,30,98,155,210,198,160,13,29,151,4,99,215,56,68,239,98,194,122,23,26,233,142,76,200,11,39,126,2,220,167,116,26,138,154,154,107,202,189,168}
+        signature :: [U8]{71,47,165,101,142,52,172,67,199,86,104,2,20,150,56,73,89,36,128,16,194,253,196,79,238,4,1,74,147,150,21,156,7,136,174,113,222,174,243,22,195,63,13,97,4,115,127,130,112,212,237,252,71,82,117,176,84,39,207,127,71,39,18,11}
+        key :: crypto.SigningKey.from_bytes([U8]{39,133,199,108,42,77,145,67,87,57,72,158,108,219,236,166,219,216,156,105,175,79,36,108,141,171,93,255,8,213,53,22}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{39,133,199,108,42,77,145,67,87,57,72,158,108,219,236,166,219,216,156,105,175,79,36,108,141,171,93,255,8,213,53,22}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_41
+fn case_152() {
+        public :: [U8]{99,73,3,71,229,59,108,195,190,202,229,173,22,91,243,120,111,252,72,104,138,129,134,238,110,28,238,213,125,175,3,94}
+        message :: [U8]{240,28,106,101,103,176,72,119,137,250,159,78,246,184,145,180,211,243,124,234,27,153,60,19,142,43,2,133,11,112,30,75,128,187,202,197,197,22,185,144,19,77,168,33,138,68,157,60,246,76,115,82,7,221,232,17,8,243,87,135,1,207,34,11,98,90,51,22,215,170,239,61,214,39,151,75,42,90,83,206,198,212,125,176,51,13,143,254,41,223,116,145,145,165,169,146,16,132,67,212,93,194,216,161,46,59,137,24,181,137,59,184,33,12,99,241,219,89,54,96,235,23,2,100,166,201,110,168,108,19,125,10,60,99,173,90,81,12,104,31,153,72,79,153,253,47,49,215,174,167,23,184,203,32,33,213,131,221,116,7,219,189,144,236,25,47,3,195,20,9,81,105,51,91,26,95,78,35,83,187,220,127,67,132,155,42,79,74,119,19,28,36,252,54,95,89,242,2,252,41,161,103,3,83,251,51,206,138,223,58,52,11,151,146,95,248,155,143,243,185,232,139,95,55,35,44,225,242,220,67,46,190,84,204,113,170,251,176,233,151,199,135,228,250,183,35,226,133,36,202,37,6,31,220,191}
+        signature :: [U8]{32,67,214,156,252,80,186,135,83,12,125,111,35,113,213,195,180,235,231,99,29,81,71,200,196,90,216,218,107,94,170,177,142,166,105,126,103,108,219,215,65,7,166,76,13,68,31,135,85,157,247,223,229,96,13,218,182,194,9,66,186,185,127,8}
+        key :: crypto.SigningKey.from_bytes([U8]{213,166,193,128,130,4,40,78,31,219,114,111,77,102,195,77,145,119,180,7,181,41,117,211,138,71,193,35,189,156,66,246}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{213,166,193,128,130,4,40,78,31,219,114,111,77,102,195,77,145,119,180,7,181,41,117,211,138,71,193,35,189,156,66,246}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_42
+fn case_153() {
+        public :: [U8]{163,76,46,52,129,64,119,252,161,87,144,61,123,162,160,140,49,13,221,203,96,3,196,210,76,144,200,149,92,74,171,133}
+        message :: [U8]{16,194,10,63,253,255,238,25,53,92,97,122,136,111,133,71,241,64,165,39,149,215,153,105,204,42,57,219,13,205,106,241,224,85,97,112,176,157,14,192,8,83,209,7,251,72,236,239,176,51,148,223,120,226,5,161,11,251,69,188,239,91,142,112,92,207,12,74,212,192,40,57,197,65,184,228,66,160,36,210,45,129,255,200,117,99,111,212,164,225,39,103,133,58,200,31,99,255,228,62,102,100,127,56,197,43,23,221,239,74,99,199,83,169,219,55,127,42,235,93,144,235,72,144,219,204,226,254,131,22,210,251,48,23,252,152,157,215,147,32,131,134,20,223,87,51,246,29,235,46,136,131,97,96,148,107,132,49,31,130,126,51,216,197,234,75,24,149,155,73,155,90,69,244,27,4,173,124,88,165,71,177,169,201,249,95,9,99,236,101,249,214,71,54,251,130,15,39,170,244,32,63,240,214,253,210,194,215,19,214,71,141,52,23,118,162,94,109,63,188,20,241,245,250,248,105,178,120,23,82,177,240,235,192,11,116,65,173,16,214,225,119,72,192,8,80,121,93,208,189,202,194,118,21,54,232}
+        signature :: [U8]{48,254,197,242,126,54,246,178,110,212,159,202,82,189,172,101,124,69,13,139,154,64,172,23,170,148,248,35,215,217,227,42,177,92,18,38,153,170,3,126,180,249,195,120,194,33,125,12,226,0,182,143,244,87,205,252,113,224,101,90,115,51,116,11}
+        key :: crypto.SigningKey.from_bytes([U8]{144,178,219,86,113,169,225,158,218,119,65,72,43,133,161,198,20,116,244,210,217,250,120,170,68,2,32,13,255,56,29,119}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{144,178,219,86,113,169,225,158,218,119,65,72,43,133,161,198,20,116,244,210,217,250,120,170,68,2,32,13,255,56,29,119}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// random_sign_43
+fn case_154() {
+        public :: [U8]{112,136,79,196,191,253,42,153,11,98,178,70,227,39,211,104,232,79,80,249,37,45,26,106,175,79,175,188,24,20,255,197}
+        message :: [U8]{150,207,42,219,89,126,182,234,192,180,124,230,2,20,134,36,117,176,1,232,84,131,137,91,169,40,130,120,247,2,249,105,184,191,36,112,8,115,103,13,3,149,125,117,239,73,70,174,212,240,182,190,15,251,255,132,190,131,231,189,45,245,216,53,174,182,71,125,137,80,49,222,207,237,162,117,248,42,2,109,16,218,230,24,186,5,21,179,215,231,222,96,98,119,4,12,134,227,54,154,108,205,38,24,253,173,231,183,191,126,219,105,4,22,49,42,28,30,194,22,50,114,86,210,23,82,209,140,176,170,146,75,100,85,32,109,87,193,67,49,1,134,219,97,171,162,252,92,79,170,225,100,48,120,55,8,151,70,151,53,12,234,193,133,102,86,182,235,61,113,135,236,106,33,182,238,14,10,202,200,61,64,191,131,65,204,13,111,22,101,185,242,230,166,157,94,51,69,35,194,96,63,155,196,236,185,10,131,37,6,109,222,109,222,239,138,138,1,242,167,130,247,14,153,117,182,18,186,146,36,171,51,40,255,174,203,169,235,106,215,244,39,23,255,171,190,195,156,114,220,222,217,84,253,1,132,70}
+        signature :: [U8]{127,214,13,80,226,13,223,194,63,248,73,247,185,113,108,112,112,72,242,54,22,66,135,17,138,132,219,41,234,51,45,199,200,101,115,18,220,160,215,86,67,216,170,133,145,78,234,165,91,201,169,70,229,213,185,145,238,188,89,93,126,109,80,5}
+        key :: crypto.SigningKey.from_bytes([U8]{232,12,7,106,32,125,70,134,126,142,56,41,126,157,71,220,199,150,73,227,247,230,221,4,86,31,233,231,74,237,84,61}) ?? panic("seed")
+        assert(key.public_key().bytes == public)
+        assert((crypto.sign(key, message) ?? panic("sign")).bytes == signature)
+        #Unsafe("frozen Ed25519 sign witness") {
+            assert((expert.ed25519_sign([U8]{232,12,7,106,32,125,70,134,126,142,56,41,126,157,71,220,199,150,73,227,247,230,221,4,86,31,233,231,74,237,84,61}, message) ?? panic("expert sign")).bytes == signature)
+        }
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == true)
+        }
+}
+
+// negative_zero_A
+fn case_155() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,128}
+        message :: [U8]{}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            rejected :: if expert.ed25519_verify_strict(public, message, signature) == {
+                .Err(.KeyRejected) -> true
+                .Err(_) -> false
+                .Ok(_) -> false
+            }
+            assert(rejected)
+        }
+}
+
+// negative_zero_R
+fn case_156() {
+        public :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        message :: [U8]{}
+        signature :: [U8]{1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,128,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}
+        assert((crypto.verify(crypto.VerifyKey{bytes: public}, message, crypto.Signature{bytes: signature}) ?? panic("verify")) == true)
+        #Unsafe("public Ed25519 acceptance witness") {
+            assert((expert.ed25519_verify_strict(public, message, signature) ?? panic("strict")) == false)
+        }
+}
+
+fn run() {
+    case_0()
+    case_1()
+    case_2()
+    case_3()
+    case_4()
+    case_5()
+    case_6()
+    case_7()
+    case_8()
+    case_9()
+    case_10()
+    case_11()
+    case_12()
+    case_13()
+    case_14()
+    case_15()
+    case_16()
+    case_17()
+    case_18()
+    case_19()
+    case_20()
+    case_21()
+    case_22()
+    case_23()
+    case_24()
+    case_25()
+    case_26()
+    case_27()
+    case_28()
+    case_29()
+    case_30()
+    case_31()
+    case_32()
+    case_33()
+    case_34()
+    case_35()
+    case_36()
+    case_37()
+    case_38()
+    case_39()
+    case_40()
+    case_41()
+    case_42()
+    case_43()
+    case_44()
+    case_45()
+    case_46()
+    case_47()
+    case_48()
+    case_49()
+    case_50()
+    case_51()
+    case_52()
+    case_53()
+    case_54()
+    case_55()
+    case_56()
+    case_57()
+    case_58()
+    case_59()
+    case_60()
+    case_61()
+    case_62()
+    case_63()
+    case_64()
+    case_65()
+    case_66()
+    case_67()
+    case_68()
+    case_69()
+    case_70()
+    case_71()
+    case_72()
+    case_73()
+    case_74()
+    case_75()
+    case_76()
+    case_77()
+    case_78()
+    case_79()
+    case_80()
+    case_81()
+    case_82()
+    case_83()
+    case_84()
+    case_85()
+    case_86()
+    case_87()
+    case_88()
+    case_89()
+    case_90()
+    case_91()
+    case_92()
+    case_93()
+    case_94()
+    case_95()
+    case_96()
+    case_97()
+    case_98()
+    case_99()
+    case_100()
+    case_101()
+    case_102()
+    case_103()
+    case_104()
+    case_105()
+    case_106()
+    case_107()
+    case_108()
+    case_109()
+    case_110()
+    case_111()
+    case_112()
+    case_113()
+    case_114()
+    case_115()
+    case_116()
+    case_117()
+    case_118()
+    case_119()
+    case_120()
+    case_121()
+    case_122()
+    case_123()
+    case_124()
+    case_125()
+    case_126()
+    case_127()
+    case_128()
+    case_129()
+    case_130()
+    case_131()
+    case_132()
+    case_133()
+    case_134()
+    case_135()
+    case_136()
+    case_137()
+    case_138()
+    case_139()
+    case_140()
+    case_141()
+    case_142()
+    case_143()
+    case_144()
+    case_145()
+    case_146()
+    case_147()
+    case_148()
+    case_149()
+    case_150()
+    case_151()
+    case_152()
+    case_153()
+    case_154()
+    case_155()
+    case_156()
+    print(true)
+}

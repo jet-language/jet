@@ -1,0 +1,123 @@
+// Native Unicode kernels over the one E4 {ptr,len,cap} UTF-8 text carrier.
+// Pinned mapping/property decisions are generated in UnicodeTables.jet.
+// Reuses the stream/trim/scalar-offset policies of the prior Jet
+// Core/text/runtime/kernel_unicode_string.jet port, with fixed-word storage
+// and L3a's audited byte helpers instead of Core lists or exact Int indexing.
+// Emit every scalar of a full mapping into the caller's one text builder.
+// The generator validates <=3 nonzero scalar lanes. Unmapped NUL occupies
+// the first lane and is still emitted; zero only terminates later lanes.
+fn unicode_append_mapping(builder: I64, mapping: I64) {
+    rt_text_push_scalar(builder, mapping.bit_and(I64{2097151}))
+    second :: (mapping >> I64{21}).bit_and(I64{2097151})
+    if (second != I64{0}) { rt_text_push_scalar(builder, second) }
+    third :: (mapping >> I64{42}).bit_and(I64{2097151})
+    if (third != I64{0}) { rt_text_push_scalar(builder, third) }
+}
+
+// Nearest non-Case_Ignorable successor, exactly like Rust Final_Sigma.
+// The predecessor's cased status is maintained by the streaming caller.
+// No scalar vector, suffix copy, or per-scalar allocation is necessary.
+fn unicode_final_sigma_after(data: I64, length: I64, start: I64) -> Bool {
+    at := start
+    loop at < length {
+        address :: wrapping(data + at)
+        cp :: rt_text_decode(address)
+        if !unicode_is_case_ignorable(cp) -> return !unicode_is_cased(cp)
+        at = wrapping(at + rt_text_width(address))
+    }
+    true
+}
+
+// Lowercase scalars [start, length) into builder. Final_Sigma's predecessor
+// state starts uncased at start, exactly like lowering that suffix alone; the
+// successor search still reads to length (the suffix's own end).
+fn unicode_lower_append(builder: I64, data: I64, start: I64, length: I64) {
+    at := start
+    before_cased := false
+    loop at < length {
+        address :: wrapping(data + at)
+        cp :: rt_text_decode(address)
+        next_at :: wrapping(at + rt_text_width(address))
+        if (cp == I64{931} && before_cased && unicode_final_sigma_after(data, length, next_at)) {
+            rt_text_push_scalar(builder, I64{962})
+        } else { unicode_append_mapping(builder, unicode_lower_mapping(cp)) }
+        // Cased and Case_Ignorable overlap: ignorable takes priority in the
+        // Rust context search, so it must not replace predecessor state.
+        if !unicode_is_case_ignorable(cp) -> before_cased = unicode_is_cased(cp)
+        at = next_at
+    }
+}
+
+#Export(c) fn jet_unicode_lower(value: I64) -> I64 {
+    length :: rt_text_len(value)
+    builder :: rt_text_builder_with_capacity(length)
+    unicode_lower_append(builder, rt_text_data(value), I64{0}, length)
+    jet_rt_string_builder_finish(builder)
+}
+
+#Export(c) fn jet_unicode_upper(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    builder :: rt_text_builder_with_capacity(length)
+    at := I64{0}
+    loop at < length {
+        address :: wrapping(data + at)
+        unicode_append_mapping(builder, unicode_upper_mapping(rt_text_decode(address)))
+        at = wrapping(at + rt_text_width(address))
+    }
+    jet_rt_string_builder_finish(builder)
+}
+
+#Export(c) fn jet_unicode_trim(value: I64) -> I64 {
+    // Same pinned predicate as trim_view; inspect only leading/trailing bytes.
+    rt_text_trim(value)
+}
+
+fn unicode_scalar_offset(value: I64, byte: I64) -> I64 {
+    data :: rt_text_data(value)
+    at := I64{0}
+    count := I64{0}
+    loop at < byte {
+        at = wrapping(at + rt_text_width(wrapping(data + at)))
+        count = wrapping(count + I64{1})
+    }
+    count
+}
+
+// Inline Int carrier: |v| < 2^62 by construction. Linux x86-64 user-space
+// addresses (including five-level paging) have fewer than 62 address bits;
+// a scalar index/count cannot exceed the byte extent of a live text buffer.
+fn unicode_index(value: I64, needle: I64, some: I64, last: Bool) -> I64 {
+    byte :: rt_text_find(value, needle, I64{0}, last)
+    if (byte < I64{0}) { return I64{0} }
+    index :: unicode_scalar_offset(value, byte)
+    #Unsafe("some is the caller's writable aligned Option<Int> payload slot, written only on success") {
+        os_store_i64(some, index)
+    }
+    I64{1}
+}
+
+// Inline Int carrier: |v| < 2^62 by construction (bounded by live text bytes).
+#Export(c) fn jet_unicode_index_of(value: I64, needle: I64, some: I64) -> I64 {
+    unicode_index(value, needle, some, false)
+}
+
+// Inline Int carrier: |v| < 2^62 by construction (bounded by live text bytes).
+#Export(c) fn jet_unicode_last_index_of(value: I64, needle: I64, some: I64) -> I64 {
+    unicode_index(value, needle, some, true)
+}
+
+// Inline Int carrier: |v| < 2^62 by construction (bounded by live text bytes).
+#Export(c) fn jet_unicode_count(value: I64, needle: I64) -> I64 {
+    size :: rt_text_len(needle)
+    if (size == I64{0}) { return I64{0} }
+    from := I64{0}
+    count := I64{0}
+    loop {
+        at :: rt_text_find(value, needle, from, false)
+        if (at < I64{0}) { break }
+        count = wrapping(count + I64{1})
+        from = wrapping(at + size)
+    }
+    count
+}

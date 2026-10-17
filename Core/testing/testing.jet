@@ -9,13 +9,20 @@ package {
     }
 }
 use core as core
+use core.files as files
+use core.sys as sys
+use core.math.random as random
+use core.testing.[__evidence_read, __record_failure, __clear_failure, __temp_facts, __temp_join, __temp_remove, __temp_create, __text_window, __suite_snapshot, __histories_with_provenance]
+
+// D-VIS-REEXPORT1 / D-ALIAS-BIND2: a second spelling, never a second owner.
+alias RNG :: random.RNG
 
 // core.testing — deterministic tests and comparison records.
 //
-// Fixture, golden, world, fake-data, and suite state remain host-owned;
+// World lifecycle and suite harness state remain host-owned;
 // callback comparison and bounded history generation stay portable Jet code.
 
-pub fn assert_equal(comparison: TestComparison) -> Bool Never! {
+fn assert_equal(comparison: TestComparison) -> Bool Never! {
     // The typed provider also requires recorded samples; the source twin can
     // validate only the scalar proof fields exposed by the declaration.
     comparison.status == "matched" && !comparison.universal_proof && comparison.first_difference < 0
@@ -23,16 +30,16 @@ pub fn assert_equal(comparison: TestComparison) -> Bool Never! {
 
 /// D-CALLBACK-ERR1=A: both callbacks share one failure type `E`, which the
 /// comparison passes up; two callbacks that cannot fail make it `Never`.
-pub fn compare<E>(cases: [DataTree], reference: fn(DataTree) -> DataTree E!, candidate: fn(DataTree) -> DataTree E!, relation: String) -> TestComparison E! {
+fn compare<E>(cases: [Dyn], reference: fn(Dyn) -> Dyn E!, candidate: fn(Dyn) -> Dyn E!, relation: String) -> TestComparison E! {
     normalized := relation
     if normalized.len() == 0 -> normalized = "typed_equality"
     if normalized == "ordered_effects" || normalized == "typed_failure" {
         return terminal_comparison(normalized, "relation requires recorded observations")
     }
     if cases.len() == 0 -> return terminal_comparison(normalized, "comparison needs at least one case")
-    inputs := [DataTree]{}
-    reference_values := [DataTree]{}
-    candidate_values := [DataTree]{}
+    inputs := [Dyn]{}
+    reference_values := [Dyn]{}
+    candidate_values := [Dyn]{}
     case_ids := [String]{}
     first_difference := -1
     loop i in 0..<cases.len() {
@@ -77,41 +84,459 @@ fn terminal_comparison(relation: String, reason: String) -> TestComparison {
         target: "embedded-prelude",
         seed: None,
         case_ids: [String]{},
-        inputs: [DataTree]{},
-        reference: [DataTree]{},
-        candidate: [DataTree]{},
+        inputs: [Dyn]{},
+        reference: [Dyn]{},
+        candidate: [Dyn]{},
         first_difference: -1,
         reason: reason,
         universal_proof: false,
     }
 }
 
-/// Compare or create a host-managed snapshot for `name`.
-pub fn snap(name: String, value: String) -[FS]> Bool Never! { core.testing.snap(name, value) }
-
-pub fn golden(name: String, value: String) -[FS]> Bool Never! {
-    core.testing.golden(name, value)
+/// Compare or create a snapshot. Updating observes JET_UPDATE_SNAPSHOTS,
+/// so the environment read is part of the declared effect row.
+fn snap(name: String, value: String) -[FS, Env]> Bool Never! {
+    path :: "__snapshots__/{snapshot_name(name)}.snap"
+    update :: (sys.get("JET_UPDATE_SNAPSHOTS") ?? "") == "1"
+    if update || !files.is_file(path) {
+        if files.mkdir("__snapshots__", true) == {
+            .Ok(_) -> {}
+            .Err(_) -> {}
+        }
+        files.write(path, value) ?? return false
+        return true
+    }
+    expected :: files.read(path) ?? return false
+    expected == value
 }
 
-pub fn fixture(name: String) -[FS]> String Never! { core.testing.fixture(name) }
+fn golden(name: String, value: String) -[FS]> Bool Never! {
+    read :: __evidence_read(name)
+    if !read.ok {
+        reason :: if read.missing -> "golden file is missing: {name}" else -> "golden file cannot be read: {name}"
+        __record_failure(reason, "path: {name}")
+        return false
+    }
+    if read.text == value {
+        __clear_failure()
+        return true
+    }
+    diff :: testing_unified_diff(name, read.text, value)
+    __record_failure("golden file differs: {name}", "path: {name}\n{diff}")
+    false
+}
 
-pub fn temp_dir(prefix: String) -[FS]> String Never! { core.testing.temp_dir(prefix) }
+fn fixture(name: String) -[FS]> String Never! {
+    read :: __evidence_read(name)
+    if read.ok {
+        __clear_failure()
+        return read.text
+    }
+    reason :: if read.missing -> "fixture is missing: {name}" else -> "fixture cannot be read: {name}"
+    __record_failure(reason, "path: {name}")
+    ""
+}
 
-pub fn corpus(glob: String) -[FS]> [String] Never! { core.testing.corpus(glob) }
+fn temp_dir(prefix: String) -[FS]> String Never! {
+    facts :: __temp_facts()
+    safe :: testing_ascii_name(prefix, false)
+    thread :: testing_ascii_name(facts.thread, true)
+    // __TempPath.path is opaque platform encoding produced by the host.
+    // Never construct, slice, decode, or edit it; only pass it back unchanged.
+    location :: __temp_join("jet_test_{safe}_{facts.pid}_{thread}")
+    path :: location.text
+    removed :: __temp_remove(location.path)
+    if !removed.ok && !removed.missing {
+        panic(testing_temp_error("remove_temp_dir", path, removed.cause))
+    }
+    created :: __temp_create(location.path)
+    if !created.ok -> panic(testing_temp_error("create_temp_dir", path, created.cause))
+    path
+}
+
+/// Read each readable regular file in a directory, ordered by its full path.
+/// The parameter retains the historical spelling `glob`; it names a directory.
+fn corpus(glob: String) -[FS]> [String] Never! {
+    entries :: files.list_dir(glob) ?? return [String]{}
+    paths := [String]{}
+    loop entry in entries -> &paths.push(entry.path)
+    &paths.sort()
+    values := [String]{}
+    loop path in paths {
+        if !files.is_file(path) -> next
+        value :: files.read(path) ?? next
+        &values.push(value)
+    }
+    values
+}
 
 /// The test-facing spelling of the deterministic Prelude `Clock` built by `Clock.new`.
-pub fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
+fn fake_clock(unix_ms: Int) -> Clock Never! { Clock.new(unix_ms) }
 
-/// A deterministic Prelude `Rng` seeded by the provider constructor.
-pub fn fake_rng(seed: Int) -> RNG Never! { core.testing.fake_rng(seed) }
+/// A caller-owned deterministic RNG seeded by the ordinary source constructor.
+fn fake_rng(seed: Int) -> random.RNG Never! { random.rng(seed) }
 
-/// The deterministic Prelude `Fake` data capability built by the provider constructor.
-pub fn fake_data(seed: Int) -> Fake Never! { core.testing.fake_data(seed) }
+/// Deterministic fake data uses the same source SplitMix64 stream as RNG.
+fn fake_data(seed: Int) -> Fake Never! {
+    Fake{state: U64{Int{I64{seed}}.bit_and(18446744073709551615)}, locale_code: 0}
+}
+
+struct Fake {
+    state: U64
+    locale_code: Int
+
+    impl Display {
+        fn display(self) -> String {
+            language :: if self.locale_code == 1 -> "de" else -> "en"
+            "Fake {{ locale: {language} }}"
+        }
+    }
+
+    impl Debug {
+        fn debug(^self) -> String {
+            "Fake {{ state: {self.state}, locale: {self.locale_code} }}"
+        }
+    }
+
+    fn locale(self, locale: String) -> Fake Never! {
+        code :: if locale == "en" -> 0 else if locale == "de" -> 1 else -> panic("unsupported fake-data locale `{locale}`; supported locales: en, de")
+        Fake{state: self.state.bit_xor(U64{code}.wrapping_mul(U64{15111065706836454659})), locale_code: code}
+    }
+
+    fn name(&self) -> String Never! {
+        first :: fake_first(&self.state, self.locale_code)
+        last :: fake_last(&self.state, self.locale_code)
+        "{first} {last}"
+    }
+
+    fn email(&self) -> String Never! {
+        first :: core.text.parse.lower(fake_first(&self.state, self.locale_code))
+        last :: core.text.parse.lower(fake_last(&self.state, self.locale_code))
+        host :: fake_host(&self.state, self.locale_code)
+        "{first}.{last}@{host}"
+    }
+
+    fn host(&self) -> String Never! {
+        name :: fake_host(&self.state, self.locale_code)
+        "www.{name}"
+    }
+
+    fn address(&self) -> String Never! {
+        number :: core.math.random.__seeded_int(&self.state, 1, 999) ?? panic("fake address has a valid range")
+        street :: fake_street(&self.state, self.locale_code)
+        city :: fake_city(&self.state, self.locale_code)
+        "{number} {street}, {city}"
+    }
+}
+
+FAKE_EN_FIRST :: [String]{"Alice", "Bob", "Clara", "Diego"}
+FAKE_EN_LAST :: [String]{"Smith", "Jones", "Taylor", "Brown"}
+FAKE_EN_HOSTS :: [String]{"example.test", "mail.test", "demo.test"}
+FAKE_EN_STREETS :: [String]{"Oak Street", "Pine Street", "Maple Street", "Cedar Street"}
+FAKE_EN_CITIES :: [String]{"Austin", "Boston", "Denver", "Portland"}
+FAKE_DE_FIRST :: [String]{"Anna", "Bruno", "Clara", "Dieter"}
+FAKE_DE_LAST :: [String]{"Schmidt", "Fischer", "Weber", "Wagner"}
+FAKE_DE_HOSTS :: [String]{"beispiel.test", "mail.test", "demo.test"}
+FAKE_DE_STREETS :: [String]{"Bahnhofstraße", "Hauptstraße", "Lindenweg", "Gartenweg"}
+FAKE_DE_CITIES :: [String]{"Berlin", "Bremen", "Dresden", "Hamburg"}
+
+fn fake_index(state: &U64, count: Int) -> Int Never! {
+    core.math.random.__seeded_int(&state, 0, count - 1) ?? panic("fake tables are nonempty")
+}
+
+fn fake_first(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_FIRST[index] else -> FAKE_EN_FIRST[index]
+}
+
+fn fake_last(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_LAST[index] else -> FAKE_EN_LAST[index]
+}
+
+fn fake_host(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 3)
+    if locale == 1 -> FAKE_DE_HOSTS[index] else -> FAKE_EN_HOSTS[index]
+}
+
+fn fake_street(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_STREETS[index] else -> FAKE_EN_STREETS[index]
+}
+
+fn fake_city(state: &U64, locale: Int) -> String Never! {
+    index :: fake_index(&state, 4)
+    if locale == 1 -> FAKE_DE_CITIES[index] else -> FAKE_EN_CITIES[index]
+}
+
+#Test("Fake English draw order matches the shipped seed 42 corpus") {
+    fake := fake_data(42)
+    assert_eq(&fake.name(), "Clara Smith")
+    assert_eq(&fake.email(), "bob.jones@example.test")
+    assert_eq(&fake.host(), "www.demo.test")
+    assert_eq(&fake.address(), "219 Cedar Street, Boston")
+}
+
+#Test("Fake German locale salt and draw order match the shipped seed 42 corpus") {
+    fake := fake_data(42).locale("de")
+    assert_eq(&fake.name(), "Dieter Schmidt")
+    assert_eq(&fake.email(), "bruno.schmidt@mail.test")
+    assert_eq(&fake.host(), "www.beispiel.test")
+    assert_eq(&fake.address(), "406 Hauptstraße, Berlin")
+}
+
+#Test("Fake copies keep independent streams and locale selection does not draw") {
+    original := fake_data(-1)
+    duplicate := original.copy()
+    english := original.locale("en")
+    assert_eq(&original.name(), &duplicate.name())
+    fresh := fake_data(-1)
+    assert_eq(&english.name(), &fresh.name())
+}
+
+#Test("Fake debug keeps the native state and locale field rendering") {
+    assert_eq(fake_data(42).debug(), "Fake {{ state: 42, locale: 0 }}")
+}
 
 /// The Prelude `TestSuite` carrying the current harness iteration and result.
-pub fn test_suite() -> TestSuite Never! { core.testing.test_suite() }
+fn test_suite() -> TestSuite Never! { __suite_snapshot() }
 
-pub fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
+fn histories<T>(
+    seed: Int,
+    cases: Int,
+    strategy: HistoryStrategy<T>?{None},
+    model: fn([T]) -> Dyn,
+    actual: fn([T]) -> Dyn,
+    observe: fn(Dyn) -> Dyn,
+) -> TestComparison Err! {
+    // Fresh command/observation copies precede callbacks. Host validation
+    // messages enter the default typed Err rail, never a String failure domain.
+    model_copy :: (commands: [T]) -> { model(commands.copy()) }
+    actual_copy :: (commands: [T]) -> { actual(commands.copy()) }
+    observe_copy :: (value: Dyn) -> { observe(value.copy()) }
+    __histories_with_provenance<T>(seed, cases, strategy, model_copy, actual_copy, observe_copy) ?? return Err(err)
+}
 
-pub fn status(comparison: TestComparison) -> String Never! { comparison.status }
+// I9: exact interpreter DiagnosticErr cleanup needs an error-capture rail.
+// Preserve the existing native lifecycle rather than changing Err-path order.
+fn world(body: fn(DeterministicWorld)) Never! { core.testing.world(body) }
 
+fn status(comparison: TestComparison) -> String Never! { comparison.status }
+
+
+#Test("corpus reports an absent directory as an empty collection") {
+    assert_eq(corpus("__jet_absent_corpus__/missing").len(), 0)
+}
+
+fn snapshot_name(name: String) -> String Never! {
+    out := [U8]{}
+    loop byte in name.bytes() {
+        c :: Int.from_u8(byte)
+        if (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45 || c == 95 {
+            &out.push(byte)
+        } else if c < 128 || c >= 192 {
+            // String is valid UTF-8; only a leading byte starts a scalar.
+            &out.push(U8{95})
+        }
+    }
+    if out.len() == 0 -> return "case"
+    String.from_bytes(out) ?? panic("snapshot names contain only ASCII")
+}
+
+#Test("Snapshot names replace each non-ASCII scalar exactly once") {
+    assert_eq(snapshot_name(""), "case")
+    assert_eq(snapshot_name("a/B.c é界"), "a_B_c___")
+    assert_eq(snapshot_name("safe-Name_42"), "safe-Name_42")
+}
+
+// String storage primitives are shared with the encoding kernel. Bounds and
+// UTF-8 boundary choices are made here, not in a host-side diff algorithm.
+fn testing_byte(text: String, index: Int) -> Int Never! {
+    #Unsafe("the caller bounded this byte position by the String storage length") {
+        return Int.from_u8(core.encoding.__string_byte(text, U64{index}))
+    }
+}
+
+fn testing_boundary(text: String, end: Int) -> Int Never! {
+    position := end
+    length :: text.count_bytes()
+    loop position > 0 && position < length {
+        byte :: testing_byte(text, position)
+        if byte < 128 || byte >= 192 -> break
+        position = position - 1
+    }
+    position
+}
+
+fn testing_window(text: String, start: Int, end: Int) -> String Never! {
+    __text_window(text, U64{start}, U64{end})
+}
+
+fn testing_owned_text(bytes: ^[U8]) -> String Never! {
+    #Unsafe("all appended bytes came from complete UTF-8 strings or ASCII") {
+        return core.encoding.__bytes_into_text(^bytes)
+    }
+}
+
+struct TestingDiffLines {
+    lines: [String]
+    truncated: Bool
+}
+
+fn testing_diff_lines(text: String) -> TestingDiffLines Never! {
+    length :: text.count_bytes()
+    end :: testing_boundary(text, if length > 65536 -> 65536 else -> length)
+    lines := [String]{}
+    start := 0
+    cursor := 0
+    loop cursor < end && lines.len() < 256 {
+        byte :: testing_byte(text, cursor)
+        cursor = cursor + 1
+        if byte == 10 {
+            &lines.push(testing_window(text, start, cursor))
+            start = cursor
+        }
+    }
+    if start < cursor && lines.len() < 256 -> &lines.push(testing_window(text, start, cursor))
+    TestingDiffLines{lines: ^lines, truncated: end < length || cursor < end}
+}
+
+struct TestingDiffOutput {
+    bytes: [U8]
+    truncated: Bool
+}
+
+fn testing_append_bytes(output: &[U8], text: String, end: Int) Never! {
+    loop index in 0..<end -> &output.push(U8{testing_byte(text, index)})
+}
+
+fn testing_diff_push(output: &TestingDiffOutput, text: String) Never! {
+    if output.truncated -> return
+    length :: text.count_bytes()
+    available :: 32768 - output.bytes.len()
+    if length <= available {
+        testing_append_bytes(&output.bytes, text, length)
+        return
+    }
+    marker :: "\n... diff output truncated ...\n"
+    marker_length :: marker.count_bytes()
+    if available >= marker_length {
+        end :: testing_boundary(text, available - marker_length)
+        testing_append_bytes(&output.bytes, text, end)
+        testing_append_bytes(&output.bytes, marker, marker_length)
+    } else if available > 0 {
+        testing_append_bytes(&output.bytes, marker, available)
+    }
+    output.truncated = true
+}
+
+fn testing_diff_line(output: &TestingDiffOutput, marker: String, line: String) Never! {
+    if output.truncated -> return
+    line_length :: line.count_bytes()
+    newline :: !line.ends_with("\n")
+    length :: 1 + line_length + if newline -> 1 else -> 0
+    available :: 32768 - output.bytes.len()
+    if length <= available {
+        testing_append_bytes(&output.bytes, marker, 1)
+        testing_append_bytes(&output.bytes, line, line_length)
+        if newline -> testing_append_bytes(&output.bytes, "\n", 1)
+        return
+    }
+    truncated_marker :: "\n... diff output truncated ...\n"
+    marker_length :: truncated_marker.count_bytes()
+    if available >= marker_length {
+        budget :: available - marker_length
+        if budget > 0 {
+            testing_append_bytes(&output.bytes, marker, 1)
+            end :: testing_boundary(line, budget - 1)
+            testing_append_bytes(&output.bytes, line, end)
+        }
+        testing_append_bytes(&output.bytes, truncated_marker, marker_length)
+    } else if available > 0 {
+        testing_append_bytes(&output.bytes, truncated_marker, available)
+    }
+    output.truncated = true
+}
+
+fn testing_unified_diff(path: String, expected: String, actual: String) -> String Never! {
+    before :: testing_diff_lines(expected)
+    after :: testing_diff_lines(actual)
+    rows :: before.lines.len() + 1
+    cols :: after.lines.len() + 1
+    lcs := [Int]{}
+    loop _ in 0..<(rows * cols) -> &lcs.push(0)
+    row := before.lines.len() - 1
+    loop row >= 0 {
+        col := after.lines.len() - 1
+        loop col >= 0 {
+            index :: row * cols + col
+            if before.lines[row] == after.lines[col] {
+                lcs[index] = 1 + lcs[(row + 1) * cols + col + 1]
+            } else {
+                down :: lcs[(row + 1) * cols + col]
+                right :: lcs[row * cols + col + 1]
+                lcs[index] = if down > right -> down else -> right
+            }
+            col = col - 1
+        }
+        row = row - 1
+    }
+    output := TestingDiffOutput{bytes: [U8]{}, truncated: false}
+    testing_diff_push(&output, "--- expected {path}\n+++ actual {path}\n")
+    if before.truncated -> testing_diff_push(&output, "# expected input truncated\n")
+    if after.truncated -> testing_diff_push(&output, "# actual input truncated\n")
+    testing_diff_push(&output, "@@ -1,{before.lines.len()} +1,{after.lines.len()} @@\n")
+    row = 0
+    col := 0
+    loop row < before.lines.len() || col < after.lines.len() {
+        if row < before.lines.len() && col < after.lines.len() && before.lines[row] == after.lines[col] {
+            testing_diff_line(&output, " ", before.lines[row])
+            row = row + 1
+            col = col + 1
+        } else if col < after.lines.len() && (row == before.lines.len() || lcs[row * cols + col + 1] > lcs[(row + 1) * cols + col]) {
+            testing_diff_line(&output, "+", after.lines[col])
+            col = col + 1
+        } else if row < before.lines.len() {
+            testing_diff_line(&output, "-", before.lines[row])
+            row = row + 1
+        }
+    }
+    testing_owned_text(^output.bytes)
+}
+
+fn testing_ascii_name(text: String, thread: Bool) -> String Never! {
+    bytes := [U8]{}
+    loop index in 0..<text.count_bytes() {
+        byte :: testing_byte(text, index)
+        alnum :: (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122) || (byte >= 48 && byte <= 57)
+        if alnum || (!thread && (byte == 95 || byte == 45)) {
+            &bytes.push(U8{byte})
+        } else if !thread && (byte < 128 || byte >= 192) {
+            &bytes.push(U8{95})
+        }
+    }
+    testing_owned_text(^bytes)
+}
+
+fn testing_temp_error(operation: String, path: String, cause: String) -> String Never! {
+    "test evidence {operation} failed for {path}: {cause}"
+}
+
+#Test("golden diff uses delete-before-insert ties and final newline normalization") {
+    assert_eq(testing_unified_diff("golden", "one\ntwo", "one\nthree"),
+        "--- expected golden\n+++ actual golden\n@@ -1,2 +1,2 @@\n one\n-two\n+three\n")
+    assert_eq(testing_unified_diff("empty", "", ""),
+        "--- expected empty\n+++ actual empty\n@@ -1,0 +1,0 @@\n")
+}
+
+#Test("temporary names sanitize each Unicode scalar, not each UTF-8 byte") {
+    assert_eq(testing_ascii_name("a/é--中_z", false), "a__--__z")
+    assert_eq(testing_ascii_name("ThreadId(42)", true), "ThreadId42")
+}
+
+// Private plain-record physical facts, not raw-codec tuples.
+struct __EvidenceRead { ok: Bool, text: String, missing: Bool }
+struct __TempFacts { pid: U64, thread: String }
+struct __TempPath { path: [U8], text: String }
+struct __TempRemove { ok: Bool, missing: Bool, cause: String }
+struct __TempCreate { ok: Bool, cause: String }

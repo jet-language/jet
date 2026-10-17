@@ -12,6 +12,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt;
 use crate::MIR::{
     canonical_identity, canonical_payload, stable_id, MirAccess, MirAccelerationFact,
+    mir_call_arg_consumes, MirValueConsumption,
     MirArtifactPlan, MirBasicBlock, MirBinaryOp,
     MirBlockId, MirBoundsFact, MirCallbackAdapter, MirCallee, MirCallFallibility, MirCliDefault,
     MirDominators,
@@ -162,6 +163,22 @@ impl std::error::Error for MirOptimizationError {}
 /// later adapter.  The verifier is intentionally independent of optimization
 /// or backend representation.
 pub fn verify_mir_legality(program: &MirProgram) -> Result<(), MirLegalityError> {
+    let result = verify_mir_legality_first(program);
+    if std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0") {
+        if let Err(first) = &result {
+            let errors = collect_mir_legality_errors(program, first);
+            for error in &errors {
+                eprintln!("JET_DEBUG_LOWER_ALL legality: {error}");
+            }
+            eprintln!("JET_DEBUG_LOWER_ALL legality summary: {} violations", errors.len());
+        } else {
+            eprintln!("JET_DEBUG_LOWER_ALL legality summary: 0 violations");
+        }
+    }
+    result
+}
+
+fn verify_mir_legality_first(program: &MirProgram) -> Result<(), MirLegalityError> {
     program.validate().map_err(MirLegalityError::Validation)?;
     verify_operator_markers(program)?;
     let function_ids: HashSet<_> = program.functions.iter().map(|function| function.id).collect();
@@ -217,6 +234,122 @@ pub fn verify_mir_legality(program: &MirProgram) -> Result<(), MirLegalityError>
         verify_transparent_conversions(function, &program.types)?;
     }
     Ok(())
+}
+
+// Measurement only: retain the original failure, but do not let one invalid
+// program row hide independent rows or functions. A failed prerequisite inside
+// one verifier still stops that component before it can index malformed data.
+fn collect_mir_legality_errors(program: &MirProgram, first: &MirLegalityError) -> Vec<MirLegalityError> {
+    let mut errors = vec![first.clone()];
+    let mut record = |result: Result<(), MirLegalityError>| {
+        if let Err(error) = result {
+            if !errors.contains(&error) {
+                errors.push(error);
+            }
+        }
+    };
+    macro_rules! identities {
+        ($rows:expr, $field:ident, $kind:literal) => {{
+            let mut seen = HashMap::new();
+            for (index, row) in $rows.iter().enumerate() {
+                let id = row.$field.0;
+                if id == 0 {
+                    record(Err(MirLegalityError::Validation(MirValidationError::ZeroId {
+                        kind: $kind, span: None,
+                    })));
+                }
+                if let Some(previous) = seen.insert(id, index) {
+                    eprintln!("JET_DEBUG_LOWER_ALL identity: kind={} id={} rows={previous},{index}", $kind, id);
+                    record(Err(MirLegalityError::Validation(MirValidationError::DuplicateId {
+                        kind: $kind, id,
+                    })));
+                }
+            }
+        }};
+    }
+    identities!(program.modules, id, "module");
+    identities!(program.imports, id, "import");
+    identities!(program.traits, id, "trait");
+    identities!(program.impls, id, "impl");
+    identities!(program.constants, id, "constant");
+    identities!(program.foreign, id, "foreign");
+    identities!(program.links, id, "link unit");
+    identities!(program.callbacks, id, "callback");
+    identities!(program.handles, id, "handle");
+    identities!(program.jobs, id, "job");
+    identities!(program.tests, id, "test");
+    identities!(program.harnesses, id, "harness");
+    identities!(program.artifacts, id, "artifact");
+    identities!(program.functions, id, "function");
+    identities!(program.types, id, "type definition");
+    identities!(program.core_owners, id, "Core owner");
+    identities!(program.core_owners, nominal_id, "Core owner nominal");
+    identities!(program.fields, id, "field");
+    identities!(program.source_files, id, "source file");
+    identities!(program.core_calls, id, "Core call");
+    identities!(program.prelude_calls, id, "Prelude call");
+    let mut instance_ids = HashSet::new();
+    for row in &program.type_instances {
+        match row.identity {
+            None => record(Err(MirLegalityError::Validation(MirValidationError::MissingTypeIdentity))),
+            Some(id) => {
+                if id.0 == 0 {
+                    record(Err(MirLegalityError::Validation(MirValidationError::ZeroId {
+                        kind: "type instance", span: None,
+                    })));
+                }
+                if !instance_ids.insert(id) {
+                    record(Err(MirLegalityError::Validation(MirValidationError::DuplicateId {
+                        kind: "type instance", id: id.0,
+                    })));
+                }
+            }
+        }
+    }
+    let mut constant_ids = HashMap::new();
+    for row in &program.constants {
+        if let Some(previous) = constant_ids.insert(row.id, row) {
+            eprintln!("JET_DEBUG_LOWER_ALL constant collision: id={} first=({:?},{:?},{:?}) second=({:?},{:?},{:?})",
+                row.id.0, previous.key, previous.name, previous.span, row.key, row.name, row.span);
+        }
+    }
+    let function_ids: HashSet<_> = program.functions.iter().map(|row| row.id).collect();
+    let type_ids: HashSet<_> = program.types.iter().map(|row| row.id)
+        .chain(program.type_instances.iter().filter_map(|row| row.identity)).collect();
+    let field_ids: HashSet<_> = program.fields.iter().map(|row| row.id).collect();
+    let source_ids: HashSet<_> = program.source_files.iter().map(|row| row.id).collect();
+    let foreign_ids: HashSet<_> = program.foreign.iter().map(|row| row.id).collect();
+    let callback_ids: HashSet<_> = program.callbacks.iter().map(|row| row.id).collect();
+    let trait_ids: HashSet<_> = program.traits.iter().map(|row| row.id).collect();
+    let core_ids: HashSet<_> = program.core_calls.iter().map(|row| row.id).collect();
+    let core_calls: HashMap<_, _> = program.core_calls.iter().map(|row| (row.id, row)).collect();
+    let prelude_calls: HashMap<_, _> = program.prelude_calls.iter().map(|row| (row.id, row)).collect();
+    record(verify_operator_markers(program));
+    record(verify_program_rows(program, &function_ids, &type_ids, &field_ids, &source_ids));
+    record(verify_hardware_setups(program));
+    record(verify_prelude_rows(program, &type_ids, &field_ids));
+    for row in &program.core_calls {
+        record(verify_core_call(row));
+    }
+    for row in &program.types {
+        record(verify_type_def(row, &function_ids, &field_ids));
+    }
+    for row in &program.type_instances {
+        record(verify_type(row, Span { start: 0, end: 0 }, MirFunctionId(0)));
+    }
+    let mut keys = HashSet::new();
+    for function in &program.functions {
+        if !keys.insert(function.key.as_str()) {
+            record(Err(MirLegalityError::Validation(MirValidationError::DuplicateKey {
+                kind: "function", key: function.key.clone(),
+            })));
+        }
+        record(verify_function(function, &function_ids, &type_ids, &trait_ids, &field_ids,
+            &source_ids, &foreign_ids, &callback_ids, &core_ids, &core_calls, &prelude_calls));
+        record(verify_capture_operations(function));
+        record(verify_transparent_conversions(function, &program.types));
+    }
+    errors
 }
 fn invalid_program_row(subject: impl Into<String>, span: Span) -> MirLegalityError {
     MirLegalityError::InvalidReference {
@@ -309,6 +442,7 @@ fn verify_mir_param(
 
 fn verify_mir_constant(constant: &MirConstant, span: Span) -> Result<(), MirLegalityError> {
     match constant {
+        MirConstant::SharedSite(_) => Err(invalid_program_row("publication site nested in constant value", span)),
         MirConstant::Int { .. }
         | MirConstant::Float { .. }
         | MirConstant::Bool(_)
@@ -608,6 +742,7 @@ fn verify_program_rows(
         }
     }
     let mut seen_constants = HashSet::new();
+    let mut site_initializers = HashSet::new();
     for constant in &program.constants {
         verify_row_id(constant.id.0, "constant", &mut seen_constants, constant.span)?;
         verify_row_ref(&module_ids, &constant.module, "constant module", constant.span)?;
@@ -615,7 +750,25 @@ fn verify_program_rows(
             return Err(invalid_program_row(format!("constant {:?}", constant.id), constant.span));
         }
         verify_type(&constant.ty, constant.span, MirFunctionId(0))?;
-        verify_mir_constant(&constant.value, constant.span)?;
+        if let MirConstant::SharedSite(site) = &constant.value {
+            let initializer = program.functions.iter().find(|function| function.id == site.initializer)
+                .ok_or_else(|| invalid_program_row("publication site initializer missing", constant.span))?;
+            if constant.is_storage || !matches!(constant.ty.kind, MirTypeKind::Shared(_))
+                || initializer.module_id != constant.module || !initializer.params.is_empty()
+                || !initializer.generic_params.is_empty() || !initializer.capture_params.is_empty()
+                || initializer.kind != crate::MIR::MirFunctionKind::Jet
+                || !matches!(initializer.form, crate::MIR::MirFunctionForm::TopLevel)
+                || initializer.failure != MirFailureCarrier::Infallible
+                || !initializer.return_type.same_checked_type(&constant.ty)
+                || constant.key != format!("shared-site:{}", site.initializer.0)
+                || !site_initializers.insert(site.initializer)
+                || initializer.effects.solved.iter().any(|effect| effect != "Mem")
+            {
+                return Err(invalid_program_row("invalid checked Core publication site", constant.span));
+            }
+        } else {
+            verify_mir_constant(&constant.value, constant.span)?;
+        }
     }
 
     let mut seen_links = HashSet::new();
@@ -1022,16 +1175,15 @@ fn verify_core_call(call: &crate::MIR::MirCoreCall) -> Result<(), MirLegalityErr
         || call.member.is_empty()
         || call.arity != call.borrow_mask.len()
         || call.arity > call.max_arity
-        || call.coverage_bits & !0x7f != 0
+        || call.coverage_bits & !0x3f != 0
         // A symbol is required exactly when an executable backend claims the
-        // row (AOT bit 3, interpreter bit 4, JIT bit 6); typed intrinsics are
+        // row (AOT bit 3, interpreter bit 4); typed intrinsics are
         // interpreter-executable without a symbol, and sema-only rows
         // (`receiver_with_coverage`) legitimately have none until their
         // backend adapters land.
         || (call.symbol.name().is_empty()
-            && call.coverage_bits & 0b101_1000 != 0
+            && call.coverage_bits & 0b001_1000 != 0
             && !matches!(call.interpreter_route, CoreCallInterpreterRoute::TypedIntrinsic))
-        || call.jit_symbol.as_deref().is_some_and(str::is_empty)
     {
         return Err(MirLegalityError::InvalidCoreCall {
             call: call.id.0,
@@ -1292,6 +1444,17 @@ fn verify_function(
                 span: capture.span,
             });
         }
+        if capture.place_only
+            && !matches!((capture.access, capture.ownership.mode),
+                (MirAccess::Read, MirOwnershipMode::ReadBorrow)
+                | (MirAccess::Write, MirOwnershipMode::WriteBorrow))
+        {
+            return Err(MirLegalityError::InvalidReference {
+                function: function.id,
+                subject: "place-only capture must lend a borrowed address".to_string(),
+                span: capture.span,
+            });
+        }
         verify_type(&capture.ty, capture.span, function.id)?;
         verify_ownership(
             capture.ownership,
@@ -1376,6 +1539,8 @@ fn verify_function(
             return Err(MirLegalityError::MissingValueMetadata { function: function.id, value: *value });
         }
     }
+    let mut bound_values = HashSet::new();
+    let mut bound_locals = HashMap::new();
     for local in &function.locals {
         verify_type(&local.ty, local.span, function.id)?;
         verify_ownership(local.ownership, local.span, function.id, MirValueId(local.id.0))?;
@@ -1386,9 +1551,78 @@ fn verify_function(
                 span: local.span,
             });
         }
+        if let Some(value) = local.ssa_value {
+            let invalid = |subject: &str| MirLegalityError::InvalidReference {
+                function: function.id, subject: subject.to_owned(), span: local.span,
+            };
+            if !bound_values.insert(value) {
+                return Err(invalid("SSA value is associated with more than one local cell"));
+            }
+            let Some((_, _, ty, ownership)) = defs.get(&value) else {
+                return Err(invalid("SSA-bound local references a missing definition"));
+            };
+            if !ownership.is_runtime_owned() {
+                return Err(invalid("SSA-bound local does not name a physical owner"));
+            }
+            if !local.ty.same_checked_type(ty) || local.ownership.mode != ownership.mode || local.ownership.drop != ownership.drop {
+                return Err(invalid("SSA-bound local changes its definition's type or ownership"));
+            }
+            let root = place_map[&local.place];
+            if root.base != MirPlaceBase::Local(local.id) || !root.projections.is_empty() {
+                return Err(invalid("SSA-bound local does not name its whole local cell"));
+            }
+            if local.uninit || local.comptime || local.arena_view || local.string_view {
+                return Err(invalid("SSA-bound owner uses another storage mechanism"));
+            }
+            bound_locals.insert(local.id, value);
+        }
     }
     for place in &function.places {
         verify_place(place, function, &local_ids, &defs, field_ids, source_file_ids, prelude_calls)?;
+    }
+    if !bound_locals.is_empty() {
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            if instruction.result.is_some_and(|value| bound_values.contains(&value)) {
+                if matches!(&instruction.operation, MirOperation::Parameter { .. } | MirOperation::Capture { .. }) {
+                    return Err(MirLegalityError::InvalidReference {
+                        function: function.id,
+                        subject: "SSA-bound local duplicates parameter or capture storage".to_owned(),
+                        span: instruction.span,
+                    });
+                }
+                for place in operation_place_refs(&instruction.operation) {
+                    if let Some(place) = place_map.get(&place) {
+                        if let MirPlaceBase::Local(local) = place.base {
+                            if bound_locals.get(&local).copied() == instruction.result {
+                                return Err(MirLegalityError::InvalidReference {
+                                    function: function.id,
+                                    subject: "SSA-bound definition reads its own uninitialized cell".to_owned(),
+                                    span: instruction.span,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+            let place = match &instruction.operation {
+                MirOperation::WritePlace { place, .. } | MirOperation::ReplacePlace { place, .. }
+                | MirOperation::InitializeUninit { place } => place_map.get(place),
+                _ => None,
+            };
+            if let Some(place) = place {
+                if place.projections.is_empty() {
+                    if let MirPlaceBase::Local(local) = place.base {
+                        if bound_locals.contains_key(&local) {
+                            return Err(MirLegalityError::InvalidReference {
+                                function: function.id,
+                                subject: "SSA-bound local has a writer other than its definition".to_owned(),
+                                span: instruction.span,
+                            });
+                        }
+                    }
+                }
+            }
+        }
     }
     let reachable = reachable_blocks(function);
     let predecessors = predecessor_map(function);
@@ -1419,7 +1653,7 @@ fn verify_function(
     verify_host_borrow_callback_uses(function, &prelude_calls)?;
     verify_drops(function, &block_ids, &place_map)?;
     verify_copy_facts(function, &defs)?;
-    verify_moves_and_borrows(function, &defs, &dominators, &reachable, &place_map)?;
+    verify_moves_and_borrows(function, &defs, &dominators, &reachable, &place_map, prelude_calls)?;
     verify_facts(function, &block_ids, &instruction_ids, &defs)?;
     Ok(())
 }
@@ -1536,7 +1770,7 @@ fn verify_ownership(
     value: MirValueId,
 ) -> Result<(), MirLegalityError> {
     let valid = match ownership.mode {
-        MirOwnershipMode::Copy => ownership.drop == crate::MIR::MirDropKind::None && !ownership.moved,
+        MirOwnershipMode::Copy => matches!(ownership.drop, crate::MIR::MirDropKind::None | crate::MIR::MirDropKind::Value) && !ownership.moved,
         MirOwnershipMode::Owned => matches!(ownership.drop, crate::MIR::MirDropKind::Value | crate::MIR::MirDropKind::ForeignHandle),
         MirOwnershipMode::Shared => ownership.drop == crate::MIR::MirDropKind::Shared,
         MirOwnershipMode::ReadBorrow => matches!(ownership.drop, crate::MIR::MirDropKind::None | crate::MIR::MirDropKind::View),
@@ -1574,13 +1808,15 @@ fn verify_panic_context(
     if context.function.is_empty() {
         return invalid("panic context has no function".to_string());
     }
-    let mut seen_locals = HashSet::new();
+    // A read alias (`count :: rows`) reports under its own name while sharing
+    // the owner's local, so the report key is the name, not the local.
+    let mut seen_names = HashSet::new();
     for (name, local) in &context.locals {
         if name.is_empty() {
             return invalid("panic context has an unnamed local".to_string());
         }
-        if !seen_locals.insert(*local) {
-            return invalid(format!("duplicate panic context local {local:?}"));
+        if !seen_names.insert(name.as_str()) {
+            return invalid(format!("duplicate panic context local `{name}`"));
         }
         if !function.locals.iter().any(|candidate| candidate.id == *local) {
             return invalid(format!("panic context local {local:?}"));
@@ -1738,6 +1974,18 @@ fn verify_place(
                 }
                 if !source_file_ids.contains(&location.file) {
                     return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("source file {:?}", location.file), span: *span });
+                }
+                if span.start > span.end {
+                    return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: *span });
+                }
+            }
+            MirProjection::MapLookup { lookup, span, .. } => {
+                if !defs.contains_key(lookup) || place.access != crate::MIR::MirAccess::Read {
+                    return Err(MirLegalityError::InvalidReference {
+                        function: function.id,
+                        subject: format!("read-only map lookup window {lookup:?}"),
+                        span: *span,
+                    });
                 }
                 if span.start > span.end {
                     return Err(MirLegalityError::InvalidSpan { function: Some(function.id), span: *span });
@@ -2173,6 +2421,9 @@ fn verify_operation_metadata(
             let Some(record) = core_calls.get(call) else {
                 return invalid(format!("Core call {call:?}"));
             };
+            if matches!(record.symbol, crate::Syntax::CoreCallSymbol::SourceOwned) {
+                return invalid(format!("source-owned Core declaration {} reached executable MIR", record.key));
+            }
             let Some(route_record) = prelude_calls.get(route) else {
                 return invalid(format!("Prelude call {route:?}"));
             };
@@ -2525,8 +2776,18 @@ fn verify_call_args(
                 return invalid(format!("trait boxing type {type_id:?}"));
             }
         }
+        // A plain Read trait formal receives a borrowed trait view, not an
+        // owning box. This matches lower_call_arg and call_arg_for_function.
+        let borrows_trait = arg.access == MirAccess::Read
+            && !arg.authority_boundary
+            && !arg.implicit_clone
+            && !arg.shared_auto_clone
+            && !arg.widen_fixed_to_list
+            && arg.widen_to_union.is_none()
+            && arg.fn_coercion.is_none();
         let boxes_trait = arg.box_as_trait.is_some()
-            && !matches!(source_ty.kind(), MirTypeKind::TraitObject(_));
+            && !matches!(source_ty.kind(), MirTypeKind::TraitObject(_))
+            && !borrows_trait;
         let coercion_consumes =
             arg.fn_coercion.is_some() || arg.widen_to_union.is_some() || boxes_trait;
         if coercion_consumes
@@ -2579,7 +2840,7 @@ fn typed_text_interp_route_shape(
         crate::Syntax::TypedHeadKind::SQL => ("sql_interpolate", "jet_typed_sql_interpolate", 2, &[true, false]),
         crate::Syntax::TypedHeadKind::HTML => ("html_interpolate", "jet_typed_html_interpolate", 3, &[true, false, true]),
         crate::Syntax::TypedHeadKind::Sh => ("sh_interpolate", "jet_typed_sh_interpolate", 2, &[true, false]),
-        crate::Syntax::TypedHeadKind::URL => ("url_literal", "jet_std::jet_typed_url_literal", 2, &[true, false]),
+        crate::Syntax::TypedHeadKind::URL => unreachable!("URL recipes are source calls"),
         crate::Syntax::TypedHeadKind::Path => ("path_literal", "jet_typed_path_literal", 2, &[true, false]),
         crate::Syntax::TypedHeadKind::DateTime => ("datetime_literal", "jet_typed_datetime_literal", 2, &[true, false]),
     }
@@ -2980,11 +3241,6 @@ fn verify_semantic_operation(
         Ok(())
     };
     match operation {
-        MirSemanticOp::DataEntriesToMap { local, .. } => {
-            if !function.locals.iter().any(|candidate| candidate.id == *local) {
-                return invalid(format!("local {local:?}"));
-            }
-        }
         MirSemanticOp::HardwareCall {
             call,
             op,
@@ -3013,16 +3269,7 @@ fn verify_semantic_operation(
         MirSemanticOp::MathBuiltin { type_id, .. } | MirSemanticOp::PreciseBuiltin { type_id, .. } => {
             check_type(*type_id)?;
         }
-        MirSemanticOp::StructLiteral {
-            type_id,
-            trait_coercion,
-            ..
-        } => {
-            check_type(*type_id)?;
-            if let Some(trait_coercion) = trait_coercion {
-                check_type(*trait_coercion)?;
-            }
-        }
+        MirSemanticOp::StructLiteral { type_id, .. } => check_type(*type_id)?,
         MirSemanticOp::ColumnarRead {
             accessor,
             column_index,
@@ -3248,13 +3495,15 @@ fn verify_semantic_operation(
             if context.function.is_empty() {
                 return invalid("require-stop context has no function".to_string());
             }
-            let mut seen_locals = HashSet::new();
+            // A read alias reports under its own name while sharing the
+            // owner's local; the report key is the name, not the local.
+            let mut seen_names = HashSet::new();
             for (name, local) in &context.locals {
                 if name.is_empty() {
                     return invalid("require-stop context has an unnamed local".to_string());
                 }
-                if !seen_locals.insert(*local) {
-                    return invalid(format!("duplicate require-stop local {local:?}"));
+                if !seen_names.insert(name.as_str()) {
+                    return invalid(format!("duplicate require-stop local `{name}`"));
                 }
                 if !function.locals.iter().any(|candidate| candidate.id == *local) {
                     return invalid(format!("require-stop local {local:?}"));
@@ -3346,6 +3595,9 @@ fn verify_semantic_operation(
             holes,
             trusted_html,
         } => {
+            if *kind == crate::Syntax::TypedHeadKind::URL {
+                return invalid("URL recipes must call core.net.url.literal".to_string());
+            }
             let (member, symbol, arity, borrow_mask) = typed_text_interp_route_shape(*kind);
             let Some(route) = prelude_calls.get(call) else {
                 return invalid(format!("Prelude call {call:?}"));
@@ -3734,6 +3986,7 @@ fn operation_place_refs(operation: &MirOperation) -> Vec<crate::MIR::MirPlaceId>
         | MirOperation::AddressOf { place, .. }
         | MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![*place],
+        MirOperation::MapLookup { map, cache, .. } => vec![*map, *cache],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
@@ -3778,18 +4031,13 @@ fn place_value_uses(place: &MirPlace) -> Vec<MirValueId> {
         match projection {
             MirProjection::Index { index, .. } => values.push(*index),
             MirProjection::Range { range, .. } => values.push(*range),
+            MirProjection::MapLookup { lookup, .. } => values.push(*lookup),
             MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => {}
         }
     }
     values
 }
 
-fn call_arg_consumes(arg: &crate::MIR::MirCallArg) -> bool {
-    if arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list {
-        return false;
-    }
-    arg.access == MirAccess::Move || arg.owned_last_use
-}
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct MirPlacePath {
     root: String,
@@ -3819,6 +4067,7 @@ fn mir_place_path(place: &MirPlace) -> MirPlacePath {
                 }
             },
             MirProjection::Range { range, .. } => (10, range.0),
+            MirProjection::MapLookup { lookup, optional, .. } => (if *optional { 12 } else { 11 }, lookup.0),
         })
         .collect();
     MirPlacePath { root, projections }
@@ -3853,7 +4102,7 @@ enum MirPlaceUse {
 }
 
 fn call_arg_place_use(arg: &crate::MIR::MirCallArg) -> MirPlaceUse {
-    if call_arg_consumes(arg) {
+    if mir_call_arg_consumes(arg) {
         MirPlaceUse::Move
     } else if arg.access == MirAccess::Write {
         MirPlaceUse::Borrow
@@ -3869,6 +4118,7 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
         MirOperation::InitializeUninit { place } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::RawAddressOf { place }
         | MirOperation::AddressOf { place, .. } => vec![(*place, MirPlaceUse::Borrow)],
+        MirOperation::MapLookup { map, cache, .. } => vec![(*map, MirPlaceUse::Borrow), (*cache, MirPlaceUse::Reinitialize)],
         MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![(*place, MirPlaceUse::Reinitialize)],
         MirOperation::Closure { captures, .. } => captures
@@ -3916,144 +4166,132 @@ fn operation_place_uses(operation: &MirOperation) -> Vec<(crate::MIR::MirPlaceId
 /// locals through CFG joins so a provably false cleanup edge is not mistaken
 /// for a second move. Only unaliased scalar locals participate; unknown values
 /// and disagreeing loop/backedge facts always retain both branch successors.
-fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId> {
-    // Tracked locals are dense slots, so cloning and joining a block's facts
-    // is a flat copy/compare rather than one hash per tracked local.
-    #[derive(Clone)]
-    struct Facts {
-        places: Vec<Option<bool>>,
-        values: HashMap<MirValueId, bool>,
-    }
-    let place_bases: HashMap<_, _> =
-        function.places.iter().map(|place| (place.id, &place.base)).collect();
-    let mut borrowed = HashSet::new();
-    for block in &function.blocks {
-        for instruction in &block.instructions {
-            for (place, usage) in operation_place_uses(&instruction.operation) {
-                if usage == MirPlaceUse::Borrow {
-                    if let Some(MirPlaceBase::Local(local)) = place_bases.get(&place) {
-                        borrowed.insert(*local);
+struct BooleanLocals<'a> {
+    blocks: HashMap<MirBlockId, &'a MirBasicBlock>,
+    /// Tracked locals are dense slots, so cloning and joining a block's facts
+    /// is a flat copy/compare rather than one hash per tracked local.
+    tracked: HashMap<crate::MIR::MirPlaceId, usize>,
+    slots: usize,
+    /// A value read only inside its defining block is recomputed there on
+    /// every visit, so its fact never needs to cross an edge. Carrying every
+    /// known value made each edge merge linear in the function's value count.
+    crosses_edge: HashSet<MirValueId>,
+    /// The entry, then every failure/unwind cleanup root.
+    roots: Vec<MirBlockId>,
+}
+
+#[derive(Clone)]
+struct BooleanFacts {
+    places: Vec<Option<bool>>,
+    values: HashMap<MirValueId, bool>,
+}
+
+impl<'a> BooleanLocals<'a> {
+    fn new(function: &'a MirFunction) -> Self {
+        let place_bases: HashMap<_, _> =
+            function.places.iter().map(|place| (place.id, &place.base)).collect();
+        let mut borrowed = HashSet::new();
+        for block in &function.blocks {
+            for instruction in &block.instructions {
+                for (place, usage) in operation_place_uses(&instruction.operation) {
+                    if usage == MirPlaceUse::Borrow {
+                        if let Some(MirPlaceBase::Local(local)) = place_bases.get(&place) {
+                            borrowed.insert(*local);
+                        }
                     }
                 }
             }
         }
-    }
-    let mut slots: HashMap<MirLocalId, usize> = HashMap::new();
-    let mut tracked: HashMap<crate::MIR::MirPlaceId, usize> = HashMap::new();
-    for place in &function.places {
-        if let MirPlaceBase::Local(local) = place.base {
-            if place.ty.is_bool() && place.projections.is_empty() && !borrowed.contains(&local) {
-                let next = slots.len();
-                tracked.insert(place.id, *slots.entry(local).or_insert(next));
+        let mut slots: HashMap<MirLocalId, usize> = HashMap::new();
+        let mut tracked: HashMap<crate::MIR::MirPlaceId, usize> = HashMap::new();
+        for place in &function.places {
+            if let MirPlaceBase::Local(local) = place.base {
+                if place.ty.is_bool() && place.projections.is_empty() && !borrowed.contains(&local) {
+                    let next = slots.len();
+                    tracked.insert(place.id, *slots.entry(local).or_insert(next));
+                }
             }
         }
-    }
-    if tracked.is_empty() {
-        return reachable_blocks(function);
-    }
-    let blocks: HashMap<_, _> = function.blocks.iter().map(|block| (block.id, block)).collect();
-    // A value read only inside its defining block is recomputed there on
-    // every visit, so its fact never needs to cross an edge. Carrying every
-    // known value made each edge merge linear in the function's value count.
-    let mut defined_in = HashMap::new();
-    for block in &function.blocks {
-        for instruction in &block.instructions {
-            if let Some(result) = instruction.result {
-                defined_in.insert(result, block.id);
-            }
-        }
-    }
-    let mut crosses_edge = HashSet::new();
-    for block in &function.blocks {
-        let uses = block
-            .instructions
-            .iter()
-            .flat_map(|instruction| instruction.operation.value_uses())
-            .chain(block.terminator.value_uses());
-        for value in uses {
-            if defined_in.get(&value) != Some(&block.id) {
-                crosses_edge.insert(value);
-            }
-        }
-    }
-    let mut incoming = HashMap::<MirBlockId, Facts>::new();
-    let mut roots = vec![function.entry];
-    for drop in &function.drops {
-        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
-            roots.push(target);
-        }
-    }
-    for root in &roots {
-        incoming.insert(*root, Facts { places: vec![None; slots.len()], values: HashMap::new() });
-    }
-    // Visit in reverse postorder: a join is evaluated after its forward
-    // predecessors, so narrowing one diamond does not re-walk everything
-    // downstream of it. The fixpoint is order-independent.
-    let mut rank: HashMap<MirBlockId, usize> = HashMap::with_capacity(blocks.len());
-    let mut postorder = Vec::with_capacity(blocks.len());
-    let mut seen = HashSet::with_capacity(blocks.len());
-    for &root in &roots {
-        if !blocks.contains_key(&root) || !seen.insert(root) {
-            continue;
-        }
-        let mut stack = vec![(root, blocks[&root].terminator.targets(), 0usize)];
-        while let Some(top) = stack.last_mut() {
-            if let Some(&target) = top.1.get(top.2) {
-                top.2 += 1;
-                if let Some(row) = blocks.get(&target) {
-                    if seen.insert(target) {
-                        stack.push((target, row.terminator.targets(), 0));
+        let mut crosses_edge = HashSet::new();
+        if !tracked.is_empty() {
+            let mut defined_in = HashMap::new();
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    if let Some(result) = instruction.result {
+                        defined_in.insert(result, block.id);
                     }
                 }
+            }
+            for block in &function.blocks {
+                let uses = block
+                    .instructions
+                    .iter()
+                    .flat_map(|instruction| instruction.operation.value_uses())
+                    .chain(block.terminator.value_uses());
+                for value in uses {
+                    if defined_in.get(&value) != Some(&block.id) {
+                        crosses_edge.insert(value);
+                    }
+                }
+            }
+        }
+        let mut roots = vec![function.entry];
+        for drop in &function.drops {
+            if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+                roots.push(target);
+            }
+        }
+        Self {
+            blocks: function.blocks.iter().map(|block| (block.id, block)).collect(),
+            tracked,
+            slots: slots.len(),
+            crosses_edge,
+            roots,
+        }
+    }
+
+    fn unknown(&self) -> BooleanFacts {
+        BooleanFacts { places: vec![None; self.slots], values: HashMap::new() }
+    }
+
+    fn step(&self, facts: &mut BooleanFacts, instruction: &MirInstruction) {
+        let known = match &instruction.operation {
+            MirOperation::Constant(MirConstant::Bool(value)) => Some(*value),
+            MirOperation::ReadPlace(place) =>
+                self.tracked.get(place).and_then(|&slot| facts.places[slot]),
+            MirOperation::Copy { value, .. } | MirOperation::Move { value } =>
+                facts.values.get(value).copied(),
+            MirOperation::Unary { op: MirUnaryOp::Not, value } =>
+                facts.values.get(value).map(|value| !value),
+            _ => None,
+        };
+        if let Some(result) = instruction.result {
+            if let Some(value) = known {
+                facts.values.insert(result, value);
             } else {
-                postorder.push(top.0);
-                stack.pop();
+                facts.values.remove(&result);
             }
         }
-    }
-    for (index, block) in postorder.iter().rev().enumerate() {
-        rank.insert(*block, index);
-    }
-    let order: Vec<MirBlockId> = postorder.into_iter().rev().collect();
-    let mut work: BTreeSet<usize> = roots.iter().filter_map(|root| rank.get(root).copied()).collect();
-    while let Some(position) = work.pop_first() {
-        let id = order[position];
-        let block = blocks[&id];
-        let mut facts = incoming[&id].clone();
-        for instruction in &block.instructions {
-            let known = match &instruction.operation {
-                MirOperation::Constant(MirConstant::Bool(value)) => Some(*value),
-                MirOperation::ReadPlace(place) =>
-                    tracked.get(place).and_then(|&slot| facts.places[slot]),
-                MirOperation::Copy { value, .. } | MirOperation::Move { value } =>
-                    facts.values.get(value).copied(),
-                MirOperation::Unary { op: MirUnaryOp::Not, value } =>
-                    facts.values.get(value).map(|value| !value),
-                _ => None,
-            };
-            if let Some(result) = instruction.result {
-                if let Some(value) = known {
-                    facts.values.insert(result, value);
-                } else {
-                    facts.values.remove(&result);
+        match &instruction.operation {
+            MirOperation::WritePlace { place, value }
+            | MirOperation::ReplacePlace { place, value } => {
+                if let Some(&slot) = self.tracked.get(place) {
+                    facts.places[slot] = facts.values.get(value).copied();
                 }
             }
-            match &instruction.operation {
-                MirOperation::WritePlace { place, value }
-                | MirOperation::ReplacePlace { place, value } => {
-                    if let Some(&slot) = tracked.get(place) {
-                        facts.places[slot] = facts.values.get(value).copied();
-                    }
+            MirOperation::MovePlace { place } | MirOperation::InitializeUninit { place } => {
+                if let Some(&slot) = self.tracked.get(place) {
+                    facts.places[slot] = None;
                 }
-                MirOperation::MovePlace { place } | MirOperation::InitializeUninit { place } => {
-                    if let Some(&slot) = tracked.get(place) {
-                        facts.places[slot] = None;
-                    }
-                }
-                _ => {}
             }
+            _ => {}
         }
-        let targets = match &block.terminator {
+    }
+
+    /// The successors `terminator` can take under `facts`, which then keep
+    /// only the values read across an edge.
+    fn successors(&self, terminator: &MirTerminator, facts: &mut BooleanFacts) -> Vec<MirBlockId> {
+        let targets = match terminator {
             MirTerminator::Branch { condition, then_target, else_target } => {
                 match facts.values.get(condition) {
                     Some(true) => vec![*then_target],
@@ -4063,28 +4301,175 @@ fn reachable_with_boolean_locals(function: &MirFunction) -> BTreeSet<MirBlockId>
             }
             other => other.targets(),
         };
-        facts.values.retain(|value, _| crosses_edge.contains(value));
-        for target in targets {
-            if let Some(previous) = incoming.get_mut(&target) {
-                let mut narrowed = false;
-                for (known, current) in previous.places.iter_mut().zip(&facts.places) {
-                    if known.is_some() && known != current {
-                        *known = None;
-                        narrowed = true;
+        facts.values.retain(|value, _| self.crosses_edge.contains(value));
+        targets
+    }
+
+    /// Join `facts` into a block's incoming facts; true when they narrowed.
+    fn narrow(incoming: &mut BooleanFacts, facts: &BooleanFacts) -> bool {
+        let mut narrowed = false;
+        for (known, current) in incoming.places.iter_mut().zip(&facts.places) {
+            if known.is_some() && known != current {
+                *known = None;
+                narrowed = true;
+            }
+        }
+        let before = incoming.values.len();
+        incoming.values.retain(|id, value| facts.values.get(id) == Some(value));
+        narrowed || incoming.values.len() != before
+    }
+
+    /// The blocks reachable from the roots along the edges the facts allow.
+    fn feasible_blocks(&self, function: &MirFunction) -> BTreeSet<MirBlockId> {
+        if self.slots == 0 {
+            return reachable_blocks(function);
+        }
+        let mut incoming = HashMap::<MirBlockId, BooleanFacts>::new();
+        for root in &self.roots {
+            incoming.insert(*root, self.unknown());
+        }
+        // Visit in reverse postorder: a join is evaluated after its forward
+        // predecessors, so narrowing one diamond does not re-walk everything
+        // downstream of it. The fixpoint is order-independent.
+        let mut rank: HashMap<MirBlockId, usize> = HashMap::with_capacity(self.blocks.len());
+        let mut postorder = Vec::with_capacity(self.blocks.len());
+        let mut seen = HashSet::with_capacity(self.blocks.len());
+        for &root in &self.roots {
+            if !self.blocks.contains_key(&root) || !seen.insert(root) {
+                continue;
+            }
+            let mut stack = vec![(root, self.blocks[&root].terminator.targets(), 0usize)];
+            while let Some(top) = stack.last_mut() {
+                if let Some(&target) = top.1.get(top.2) {
+                    top.2 += 1;
+                    if let Some(row) = self.blocks.get(&target) {
+                        if seen.insert(target) {
+                            stack.push((target, row.terminator.targets(), 0));
+                        }
                     }
+                } else {
+                    postorder.push(top.0);
+                    stack.pop();
                 }
-                let before = previous.values.len();
-                previous.values.retain(|id, value| facts.values.get(id) == Some(value));
-                if narrowed || previous.values.len() != before {
+            }
+        }
+        for (index, block) in postorder.iter().rev().enumerate() {
+            rank.insert(*block, index);
+        }
+        let order: Vec<MirBlockId> = postorder.into_iter().rev().collect();
+        let mut work: BTreeSet<usize> =
+            self.roots.iter().filter_map(|root| rank.get(root).copied()).collect();
+        while let Some(position) = work.pop_first() {
+            let id = order[position];
+            let block = self.blocks[&id];
+            let mut facts = incoming[&id].clone();
+            for instruction in &block.instructions {
+                self.step(&mut facts, instruction);
+            }
+            for target in self.successors(&block.terminator, &mut facts) {
+                if let Some(previous) = incoming.get_mut(&target) {
+                    if Self::narrow(previous, &facts) {
+                        work.extend(rank.get(&target).copied());
+                    }
+                } else {
+                    incoming.insert(target, facts.clone());
                     work.extend(rank.get(&target).copied());
                 }
-            } else {
-                incoming.insert(target, facts.clone());
-                work.extend(rank.get(&target).copied());
+            }
+        }
+        incoming.into_keys().collect()
+    }
+
+    /// Whether execution continues from just after `start` to `target`
+    /// without running an instruction `stops` names, along the edges the
+    /// facts allow. Facts start unknown, and a failure/unwind cleanup root may
+    /// be entered from any point after `start`.
+    fn reaches(
+        &self,
+        start: (MirBlockId, usize),
+        target: (MirBlockId, usize),
+        stops: impl Fn(MirBlockId, usize) -> bool,
+    ) -> bool {
+        let mut incoming = HashMap::<MirBlockId, BooleanFacts>::new();
+        let mut work = vec![(start.0, start.1 + 1, self.unknown())];
+        for root in &self.roots[1..] {
+            if incoming.insert(*root, self.unknown()).is_none() {
+                work.push((*root, 0, self.unknown()));
+            }
+        }
+        while let Some((id, from, mut facts)) = work.pop() {
+            let Some(block) = self.blocks.get(&id) else {
+                continue;
+            };
+            let mut stopped = false;
+            for (index, instruction) in block.instructions.iter().enumerate().skip(from) {
+                if (id, index) == target {
+                    return true;
+                }
+                if stops(id, index) {
+                    stopped = true;
+                    break;
+                }
+                self.step(&mut facts, instruction);
+            }
+            if stopped {
+                continue;
+            }
+            for next in self.successors(&block.terminator, &mut facts) {
+                if let Some(previous) = incoming.get_mut(&next) {
+                    if Self::narrow(previous, &facts) {
+                        work.push((next, 0, previous.clone()));
+                    }
+                } else {
+                    incoming.insert(next, facts.clone());
+                    work.push((next, 0, facts.clone()));
+                }
+            }
+        }
+        false
+    }
+}
+
+/// Whole-owner `MovePlace` results that only feed a releasing `Drop`: the
+/// scope-end cleanup of an owner. After a field of that owner was moved
+/// (`x := ^run.graph`) the cleanup releases the remaining fields, which
+/// every backend's partial-move plan does (MIRRust `partial_drop_node`).
+fn partial_move_remainder_drops(
+    function: &MirFunction,
+    place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
+) -> HashSet<MirValueId> {
+    let mut drops: HashMap<MirValueId, bool> = HashMap::new();
+    for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+        if let (MirOperation::MovePlace { place }, Some(result)) = (&instruction.operation, instruction.result) {
+            if place_map.get(place).is_some_and(|row| row.projections.is_empty()) {
+                drops.insert(result, false);
             }
         }
     }
-    incoming.into_keys().collect()
+    if drops.is_empty() {
+        return HashSet::new();
+    }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let releases = match &instruction.operation {
+                MirOperation::Drop { value, kind } if *kind != crate::MIR::MirDropKind::None => Some(*value),
+                _ => None,
+            };
+            for value in instruction.operation.value_uses() {
+                if let Some(dropped) = drops.get_mut(&value) {
+                    if releases == Some(value) {
+                        *dropped = true;
+                    } else {
+                        drops.remove(&value);
+                    }
+                }
+            }
+        }
+        for value in block.terminator.value_uses() {
+            drops.remove(&value);
+        }
+    }
+    drops.into_iter().filter_map(|(value, dropped)| dropped.then_some(value)).collect()
 }
 
 fn verify_moves_and_borrows(
@@ -4093,13 +4478,12 @@ fn verify_moves_and_borrows(
     dominators: &MirDominators,
     reachable: &BTreeSet<MirBlockId>,
     place_map: &HashMap<crate::MIR::MirPlaceId, &MirPlace>,
+    prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>,
 ) -> Result<(), MirLegalityError> {
-    let mut consumed: HashMap<MirValueId, (MirBlockId, usize, Span)> = HashMap::new();
-    let feasible = reachable_with_boolean_locals(function);
-    let mut scope_deadlines = HashMap::with_capacity(function.scopes.len());
-    for scope in &function.scopes {
-        scope_deadlines.entry(scope.id).or_insert(scope.deadline);
-    }
+    let booleans = BooleanLocals::new(function);
+    let feasible = booleans.feasible_blocks(function);
+    verify_physical_consumption(function, defs, &feasible, prelude_calls)?;
+    let remainder_drops = partial_move_remainder_drops(function, place_map);
     // Only paths under one root can overlap, so events are grouped by root:
     // each use scans its own root's moves, not every move in the function.
     type PlaceEvents = HashMap<String, Vec<(MirPlacePath, MirBlockId, usize)>>;
@@ -4136,29 +4520,6 @@ fn verify_moves_and_borrows(
             continue;
         }
         for (index, instruction) in block.instructions.iter().enumerate() {
-            let scope_deadline = match &instruction.operation {
-                MirOperation::ScopeEnter { scope, .. } => scope_deadlines.get(scope).copied().flatten(),
-                _ => None,
-            };
-            for value in instruction
-                .operation
-                .value_uses()
-                .into_iter()
-                .chain(scope_deadline)
-            {
-                if let Some((consumed_block, consumed_index, consumed_span)) = consumed.get(&value) {
-                    let dominates = *consumed_block == block.id && *consumed_index < index
-                        || *consumed_block != block.id
-                            && dominators.dominates(*consumed_block, block.id);
-                    if dominates {
-                        return Err(MirLegalityError::InvalidMove {
-                            function: function.id,
-                            value,
-                            span: *consumed_span,
-                        });
-                    }
-                }
-            }
             for (place_id, use_kind) in operation_place_uses(&instruction.operation) {
                 let Some(place) = place_map.get(&place_id).copied() else {
                     continue;
@@ -4204,21 +4565,39 @@ fn verify_moves_and_borrows(
                 let path = mir_place_path(place);
                 // Block storage order is not execution order. A move remains
                 // live at this use only if no intervening dominating write
-                // reinitialized its whole path.
+                // reinitialized its whole path, and only if some feasible
+                // path runs from the move to this use without passing such a
+                // write: a cleanup move guarded by a drop flag the move
+                // cleared, on every path that skips the refill, never runs.
                 let reinitialized = reinitialized_places.get(&path.root).unwrap_or(&no_events);
                 let has_live_move = moved_places.get(&path.root).unwrap_or(&no_events).iter().any(|(moved_path, moved_block, moved_index)| {
                     let conflicts = match use_kind {
                         MirPlaceUse::Reinitialize => {
                             mir_place_path_is_prefix(moved_path, &path) && moved_path != &path
                         }
+                        // The remainder drop of a partly moved owner releases
+                        // only the fields still in place: an earlier move of
+                        // a field below it is not a second move of that field.
+                        MirPlaceUse::Move
+                            if instruction.result.is_some_and(|value| remainder_drops.contains(&value)) =>
+                        {
+                            mir_place_path_is_prefix(moved_path, &path)
+                        }
                         _ => mir_place_paths_overlap(moved_path, &path),
                     };
+                    let refills = reinitialized
+                        .iter()
+                        .filter(|(written_path, _, _)| mir_place_path_is_prefix(written_path, moved_path));
                     conflicts
                         && precedes(*moved_block, *moved_index, block.id, index)
-                        && !reinitialized.iter().any(|(written_path, written_block, written_index)| {
-                            mir_place_path_is_prefix(written_path, moved_path)
-                                && precedes(*moved_block, *moved_index, *written_block, *written_index)
+                        && !refills.clone().any(|(_, written_block, written_index)| {
+                            precedes(*moved_block, *moved_index, *written_block, *written_index)
                                 && precedes(*written_block, *written_index, block.id, index)
+                        })
+                        && booleans.reaches((*moved_block, *moved_index), (block.id, index), |stop_block, stop_index| {
+                            refills.clone().any(|(_, written_block, written_index)| {
+                                *written_block == stop_block && *written_index == stop_index
+                            })
                         })
                 });
                 if has_live_move {
@@ -4229,66 +4608,184 @@ fn verify_moves_and_borrows(
                     });
                 }
             }
-            let mut moved = Vec::new();
-            match &instruction.operation {
-                MirOperation::Move { value } | MirOperation::TraitBox { value, .. } => {
-                    moved.push(*value)
-                }
-                MirOperation::Drop { value, kind } if *kind != crate::MIR::MirDropKind::None => {
-                    moved.push(*value)
-                }
-                MirOperation::Closure { captures, .. } => {
-                    moved.extend(captures.iter().filter_map(|capture| match capture {
-                        crate::MIR::MirCaptureOperand::Value(value) => Some(*value),
-                        crate::MIR::MirCaptureOperand::Place(_) => None,
-                    }));
-                }
-                MirOperation::Call { args, .. }
-                | MirOperation::CoreCall { args, .. }
-                | MirOperation::IndirectCall { args, .. } => {
-                    moved.extend(
-                        args.iter()
-                            .filter(|arg| call_arg_consumes(arg))
-                            .map(|arg| arg.value),
-                    );
-                }
-                MirOperation::Semantic(
-                    MirSemanticOp::StaticPreludeCall { args, .. }
-                    | MirSemanticOp::HardwareCall { args, .. }
-                    | MirSemanticOp::ClosureMethod { args, .. }
-                    | MirSemanticOp::HostCall { args, .. },
-                ) => {
-                    moved.extend(
-                        args.iter()
-                            .filter(|arg| call_arg_consumes(arg))
-                            .map(|arg| arg.value),
-                    );
-                }
-                _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn consumption_borrow_mask<'a>(
+    operation: &MirOperation,
+    prelude: &HashMap<MirPreludeCallId, &'a MirPreludeCall>,
+) -> &'a [bool] {
+    operation.consumption_route()
+        .and_then(|call| prelude.get(&call))
+        .map_or(&[], |row| row.signature.borrow_mask.as_slice())
+}
+
+fn consume_ssa_value(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    moved: &mut HashSet<MirValueId>,
+    value: MirValueId,
+    consumption: MirValueConsumption,
+    span: Span,
+    check: bool,
+) -> Result<(), MirLegalityError> {
+    if !consumption.transfers() {
+        return Ok(());
+    }
+    let Some((_, _, _, ownership)) = defs.get(&value) else {
+        return Err(MirLegalityError::InvalidReference { function: function.id, subject: format!("consume {value:?}"), span });
+    };
+    if !ownership.is_runtime_owned() {
+        if check && consumption == (MirValueConsumption::Yes { requires_owner: true }) {
+            return Err(MirLegalityError::InvalidMove { function: function.id, value, span });
+        }
+        return Ok(());
+    }
+    if !moved.insert(value) && check {
+        return Err(MirLegalityError::InvalidMove { function: function.id, value, span });
+    }
+    Ok(())
+}
+
+fn consumption_block(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    prelude: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+    block: &MirBasicBlock,
+    moved: &mut HashSet<MirValueId>,
+    check: bool,
+) -> Result<(), MirLegalityError> {
+    for instruction in &block.instructions {
+        if matches!(instruction.operation, MirOperation::Phi { .. }) {
+            if let Some(defined) = instruction.result {
+                moved.remove(&defined);
             }
-            for value in moved {
-                let Some((_, _, _, ownership)) = defs.get(&value) else {
-                    return Err(MirLegalityError::InvalidReference {
-                        function: function.id,
-                        subject: format!("move {value:?}"),
-                        span: instruction.span,
-                    });
-                };
-                if matches!(
-                    ownership.mode,
-                    MirOwnershipMode::Copy
-                        | MirOwnershipMode::ReadBorrow
-                        | MirOwnershipMode::WriteBorrow
-                ) || consumed.contains_key(&value)
-                {
-                    return Err(MirLegalityError::InvalidMove {
-                        function: function.id,
-                        value,
-                        span: instruction.span,
-                    });
+            continue;
+        }
+        let uses = instruction.operation.value_uses();
+        if check {
+            if let MirOperation::ScopeEnter { scope, .. } = instruction.operation {
+                if let Some(deadline) = function.scopes.iter().find(|row| row.id == scope).and_then(|row| row.deadline) {
+                    if moved.contains(&deadline) {
+                        return Err(MirLegalityError::InvalidMove { function: function.id, value: deadline, span: instruction.span });
+                    }
                 }
-                consumed.insert(value, (block.id, index, instruction.span));
             }
+            for &value in &uses {
+                if moved.contains(&value) {
+                    return Err(MirLegalityError::InvalidMove { function: function.id, value, span: instruction.span });
+                }
+            }
+        }
+        if let Some(defined) = instruction.result {
+            moved.remove(&defined);
+        }
+        let mask = consumption_borrow_mask(&instruction.operation, prelude);
+        for value in uses {
+            consume_ssa_value(function, defs, moved, value, instruction.operation.value_consumption(value, mask), instruction.span, check)?;
+        }
+    }
+    for value in block.terminator.value_uses() {
+        if check && moved.contains(&value) {
+            return Err(MirLegalityError::InvalidMove { function: function.id, value, span: block.span });
+        }
+        consume_ssa_value(function, defs, moved, value, block.terminator.value_consumption(value), block.span, check)?;
+    }
+    Ok(())
+}
+
+fn consumption_phi_edge(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    from: MirBlockId,
+    target: &MirBasicBlock,
+    moved: &mut HashSet<MirValueId>,
+    check: bool,
+) -> Result<(), MirLegalityError> {
+    for instruction in &target.instructions {
+        if let MirOperation::Phi { incoming } = &instruction.operation {
+            for &(predecessor, value) in incoming {
+                if predecessor != from {
+                    continue;
+                }
+                if check && moved.contains(&value) {
+                    return Err(MirLegalityError::InvalidMove { function: function.id, value, span: instruction.span });
+                }
+                consume_ssa_value(function, defs, moved, value, instruction.operation.value_consumption(value, &[]), instruction.span, check)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn verify_physical_consumption(
+    function: &MirFunction,
+    defs: &HashMap<MirValueId, (MirBlockId, usize, MirType, MirOwnership)>,
+    feasible: &BTreeSet<MirBlockId>,
+    prelude: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> Result<(), MirLegalityError> {
+    let positions: HashMap<_, _> = function.blocks.iter().enumerate().map(|(row, block)| (block.id, row)).collect();
+    let Some(&entry) = positions.get(&function.entry) else {
+        return Err(MirLegalityError::InvalidReference { function: function.id, subject: "physical-consumption entry".to_owned(), span: function.span });
+    };
+    let mut states = vec![HashSet::new(); function.blocks.len()];
+    let mut reached = vec![false; function.blocks.len()];
+    let mut queued = vec![false; function.blocks.len()];
+    let mut work = vec![entry];
+    reached[entry] = true;
+    queued[entry] = true;
+    for drop in &function.drops {
+        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+            if let Some(&root) = positions.get(&target) {
+                if !reached[root] {
+                    reached[root] = true;
+                    queued[root] = true;
+                    work.push(root);
+                }
+            }
+        }
+    }
+    let mut head = 0;
+    while head < work.len() {
+        let row = work[head];
+        head += 1;
+        queued[row] = false;
+        let block = &function.blocks[row];
+        let mut current = states[row].clone();
+        consumption_block(function, defs, prelude, block, &mut current, false)?;
+        for target in block.terminator.targets() {
+            if !feasible.contains(&target) {
+                continue;
+            }
+            let Some(&destination) = positions.get(&target) else { continue };
+            let mut edge = current.clone();
+            consumption_phi_edge(function, defs, block.id, &function.blocks[destination], &mut edge, false)?;
+            let mut changed = !reached[destination];
+            reached[destination] = true;
+            for value in edge {
+                changed |= states[destination].insert(value);
+            }
+            if changed && !queued[destination] {
+                queued[destination] = true;
+                work.push(destination);
+            }
+        }
+    }
+    for (row, block) in function.blocks.iter().enumerate() {
+        if !reached[row] {
+            continue;
+        }
+        let mut current = states[row].clone();
+        consumption_block(function, defs, prelude, block, &mut current, true)?;
+        for target in block.terminator.targets() {
+            if !feasible.contains(&target) {
+                continue;
+            }
+            let Some(&destination) = positions.get(&target) else { continue };
+            let mut edge = current.clone();
+            consumption_phi_edge(function, defs, block.id, &function.blocks[destination], &mut edge, true)?;
         }
     }
     Ok(())
@@ -4710,6 +5207,60 @@ fn record_canonical_transition(
     );
 }
 
+// Measurement-only transactions: keep at most one owning snapshot, discard a
+// rejected pass's entire output, and never publish/seal a partially run pipeline.
+struct MirPassCensus {
+    enabled: bool,
+    first_failure: Option<MirOptimizationError>,
+}
+
+impl MirPassCensus {
+    fn checkpoint(&self, program: &MirProgram) -> Option<MirProgram> {
+        self.enabled.then(|| program.clone())
+    }
+
+    fn validate_or_rollback(
+        &mut self,
+        program: &mut MirProgram,
+        checkpoint: Option<MirProgram>,
+        pass: MirOptimizationPassId,
+        operation: &str,
+    ) -> Result<(), MirOptimizationError> {
+        if !self.enabled {
+            return validate_after(program, pass);
+        }
+        if let Err(first) = verify_mir_legality_first(program) {
+            let errors = collect_mir_legality_errors(program, &first);
+            for error in &errors {
+                eprintln!("JET_DEBUG_LOWER_ALL optimization: operation={operation} pass={} violation={error:?}", pass.as_str());
+            }
+            eprintln!("JET_DEBUG_LOWER_ALL optimization summary: operation={operation} pass={} violations={} output=discarded", pass.as_str(), errors.len());
+            *program = checkpoint.expect("collect-all pass verification requires its valid input snapshot");
+            // Track traversal only so later fact checks see a valid pass-order
+            // prefix. This measurement result is never sealed or emitted.
+            let through = MIR_OPTIMIZATION_PASS_ORDER.iter().position(|id| *id == pass)
+                .expect("a verified optimization phase has a canonical pass identity");
+            for function in &mut program.functions {
+                function.optimization.pass_ids.clear();
+                function.optimization.pass_ids.extend_from_slice(&MIR_OPTIMIZATION_PASS_ORDER[..=through]);
+            }
+            if self.first_failure.is_none() {
+                self.first_failure = Some(MirOptimizationError::Legality { pass, error: first });
+            }
+        } else {
+            eprintln!("JET_DEBUG_LOWER_ALL optimization summary: operation={operation} pass={} violations=0 output=accepted", pass.as_str());
+        }
+        Ok(())
+    }
+
+    fn complete(self) -> Result<(), MirOptimizationError> {
+        match self.first_failure {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Optimize `program` in place of a copy: the canonical program is the
 /// largest compile-time structure, so the pipeline consumes its input.
 pub fn optimize_mir_program(
@@ -4717,6 +5268,10 @@ pub fn optimize_mir_program(
     policy: &MirOptimizationPolicy,
 ) -> Result<MirProgram, MirOptimizationError> {
     let _ = policy;
+    let mut pass_census = MirPassCensus {
+        enabled: std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0"),
+        first_failure: None,
+    };
     let pipeline_before_payload = CanonicalPass::enabled()
         .then(|| crate::MIR::canonical_payload(&program));
     let pipeline_before_identity = CanonicalPass::enabled()
@@ -4738,6 +5293,7 @@ pub fn optimize_mir_program(
     }) && optimized_pass_order_complete(&program, &mir_program_digest(&program));
     if already_optimized {
         let mut optimized = program;
+        let checkpoint = pass_census.checkpoint(&optimized);
         run_canonical_pass(
             "mir.fixed-reduction-normalization",
             "crates/jet-foundation/src/MIROptimization.rs",
@@ -4750,7 +5306,9 @@ pub fn optimize_mir_program(
             &mut optimized,
             refresh_acceleration_facts,
         );
-        validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+        pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts,
+            "mir.fixed-reduction-normalization+mir.acceleration-facts")?;
+        pass_census.complete()?;
         seal_derived_facts(&mut optimized);
         record_canonical_transition(
             "mir.optimize-pipeline",
@@ -4767,6 +5325,7 @@ pub fn optimize_mir_program(
         .iter()
         .map(|function| function.optimization.loop_facts.clone())
         .collect::<Vec<_>>();
+    let checkpoint = pass_census.checkpoint(&optimized);
     clear_derived_facts(&mut optimized);
     // Checked #Inline(Always) is expanded here, before any target-neutral
     // proof pass. Keeping it in this one MIR pipeline means every execution
@@ -4779,8 +5338,9 @@ pub fn optimize_mir_program(
         expand_inline_always,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::LegalityVerification);
-    validate_after(&optimized, MirOptimizationPassId::LegalityVerification)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::LegalityVerification, "mir.inline-always")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.unreachable-block-elimination",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -4788,8 +5348,9 @@ pub fn optimize_mir_program(
         eliminate_unreachable_blocks,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::UnreachableBlockElimination);
-    validate_after(&optimized, MirOptimizationPassId::UnreachableBlockElimination)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::UnreachableBlockElimination, "mir.unreachable-block-elimination")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.cfg-simplification",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -4797,8 +5358,9 @@ pub fn optimize_mir_program(
         simplify_cfg,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::CfgSimplification);
-    validate_after(&optimized, MirOptimizationPassId::CfgSimplification)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CfgSimplification, "mir.cfg-simplification")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.exact-constant-folding",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -4806,8 +5368,9 @@ pub fn optimize_mir_program(
         fold_exact_constants,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::ExactConstantFolding);
-    validate_after(&optimized, MirOptimizationPassId::ExactConstantFolding)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::ExactConstantFolding, "mir.exact-constant-folding")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.bounds-check-elimination",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -4815,8 +5378,9 @@ pub fn optimize_mir_program(
         derive_bounds_facts,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::BoundsCheckElimination);
-    validate_after(&optimized, MirOptimizationPassId::BoundsCheckElimination)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::BoundsCheckElimination, "mir.bounds-check-elimination")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.dead-pure-value-elimination",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -4824,8 +5388,9 @@ pub fn optimize_mir_program(
         eliminate_dead_pure_values,
     );
     mark_pass(&mut optimized, MirOptimizationPassId::DeadPureValueElimination);
-    validate_after(&optimized, MirOptimizationPassId::DeadPureValueElimination)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::DeadPureValueElimination, "mir.dead-pure-value-elimination")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.canonical-loop-facts",
         "crates/jet-foundation/src/MIROptimization.rs",
@@ -4852,22 +5417,26 @@ pub fn optimize_mir_program(
     derive_loop_and_vector_facts(&mut optimized, &post_reduction_loop_facts);
     normalize_fixed_reduction_loops(&mut optimized);
     mark_pass(&mut optimized, MirOptimizationPassId::CanonicalLoopFacts);
-    validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts,
+        "mir.canonical-loop-facts+mir.fixed-reduction-normalization")?;
 
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.acceleration-facts",
         "crates/jet-foundation/src/MIROptimization.rs",
         &mut optimized,
         refresh_acceleration_facts,
     );
-    validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts, "mir.acceleration-facts")?;
+    let checkpoint = pass_census.checkpoint(&optimized);
     run_canonical_pass(
         "mir.canonical-program-order",
         "crates/jet-foundation/src/MIROptimization.rs",
         &mut optimized,
         canonicalize_program_order,
     );
-    validate_after(&optimized, MirOptimizationPassId::CanonicalLoopFacts)?;
+    pass_census.validate_or_rollback(&mut optimized, checkpoint, MirOptimizationPassId::CanonicalLoopFacts, "mir.canonical-program-order")?;
+    pass_census.complete()?;
     seal_derived_facts(&mut optimized);
     record_canonical_transition(
         "mir.optimize-pipeline",
@@ -5256,6 +5825,9 @@ fn inline_call(
         || inline_has_return_drop(callee)
         || callee.capture_params.len() != 0
         || (caller.generator.is_none() && callee.generator.is_some())
+        // A callee's stop edge must reach the caller's own cleanup, which a
+        // remapped Stopped cannot: a stop-point body is never inlined.
+        || callee.blocks.iter().any(|block| matches!(block.terminator, MirTerminator::Poll { .. } | MirTerminator::Stopped))
         || block_index >= caller.blocks.len()
         || instruction_index >= caller.blocks[block_index].instructions.len()
     {
@@ -5374,11 +5946,11 @@ fn inline_call(
                     } else {
                         MirCopyFact::Materialize
                     }
-                    .for_ownership(argument_ownership.mode),
+                    .for_ownership(&argument_ownership),
                 },
             });
             value
-        } else if call_arg_consumes(argument) {
+        } else if mir_call_arg_consumes(argument) {
             let value = MirValueId(inline_fresh_id(
                 &mut used_values,
                 "mir-inline-value",
@@ -5531,7 +6103,7 @@ fn inline_call(
                     cloned_places.push(mapped);
                     continue;
                 }
-                MirPlaceBase::Parameter(inline_value(&ids, *value))
+                inline_argument_place_base(caller, inline_value(&ids, *value))
             }
             MirPlaceBase::Local(local) => MirPlaceBase::Local(inline_local(&ids, *local)),
             MirPlaceBase::Capture(value) => MirPlaceBase::Capture(inline_value(&ids, *value)),
@@ -5567,6 +6139,7 @@ fn inline_call(
             span: local.span,
             ty: inline_type(&local.ty, &substitutions),
             place: ids.places[&local.place],
+            ssa_value: local.ssa_value.map(|value| ids.values[&value]),
             mutable: local.mutable,
             ownership: local.ownership,
             comptime: local.comptime,
@@ -5793,6 +6366,24 @@ fn inline_call(
     true
 }
 
+/// A callee parameter place whose argument has no caller place is rebased on
+/// the caller's own definition of the argument value. Only a caller parameter
+/// or capture keeps that base; every other argument (a constant, a computed
+/// value, or an adapter copy/move) is an SSA temporary of the caller.
+fn inline_argument_place_base(caller: &MirFunction, value: MirValueId) -> MirPlaceBase {
+    let definition = caller
+        .blocks
+        .iter()
+        .flat_map(|block| &block.instructions)
+        .find(|instruction| instruction.result == Some(value))
+        .map(|instruction| &instruction.operation);
+    match definition {
+        Some(MirOperation::Parameter { .. }) => MirPlaceBase::Parameter(value),
+        Some(MirOperation::Capture { .. }) => MirPlaceBase::Capture(value),
+        _ => MirPlaceBase::Temporary(value),
+    }
+}
+
 fn inline_fresh_id(used: &mut HashSet<u64>, namespace: &str, identity: &str) -> u64 {
     let mut salt = 0u64;
     loop {
@@ -5874,6 +6465,9 @@ fn inline_projection(projection: &MirProjection, ids: &InlineIdMaps) -> MirProje
             range: inline_value(ids, *range),
             location: *location,
             span: *span,
+        },
+        MirProjection::MapLookup { lookup, optional, span } => MirProjection::MapLookup {
+            lookup: inline_value(ids, *lookup), optional: *optional, span: *span,
         },
     }
 }
@@ -6007,6 +6601,9 @@ fn inline_operation(
                 .collect(),
         },
         MirOperation::ReadPlace(place) => MirOperation::ReadPlace(inline_place(ids, *place)),
+        MirOperation::MapLookup { map, key, cache } => MirOperation::MapLookup {
+            map: inline_place(ids, *map), key: inline_value(ids, *key), cache: inline_place(ids, *cache),
+        },
         MirOperation::MovePlace { place } => MirOperation::MovePlace {
             place: inline_place(ids, *place),
         },
@@ -6404,10 +7001,6 @@ fn inline_semantic(
     substitutions: &HashMap<String, MirType>,
 ) -> MirSemanticOp {
     match semantic {
-        MirSemanticOp::DataEntriesToMap { call, local } => MirSemanticOp::DataEntriesToMap {
-            call: *call,
-            local: inline_local(ids, *local),
-        },
         MirSemanticOp::MathBuiltin { type_id, call, args } => MirSemanticOp::MathBuiltin {
             type_id: *type_id,
             call: *call,
@@ -6463,7 +7056,6 @@ fn inline_semantic(
             type_id,
             fields,
             extra,
-            trait_coercion,
             boxed_fields,
         } => MirSemanticOp::StructLiteral {
             type_id: *type_id,
@@ -6472,7 +7064,6 @@ fn inline_semantic(
                 .map(|(field, value)| (*field, inline_value(ids, *value)))
                 .collect(),
             extra: extra.clone(),
-            trait_coercion: *trait_coercion,
             boxed_fields: boxed_fields.clone(),
         },
         MirSemanticOp::ReflectOf {
@@ -6971,6 +7562,13 @@ fn inline_terminator(terminator: &MirTerminator, ids: &InlineIdMaps) -> MirTermi
         MirTerminator::Unreachable { reason } => MirTerminator::Unreachable {
             reason: reason.clone(),
         },
+        // Unreachable from inline_call (a stop-point body is never inlined).
+        MirTerminator::Poll { kind, resume, stop } => MirTerminator::Poll {
+            kind: *kind,
+            resume: inline_block(ids, *resume),
+            stop: inline_block(ids, *stop),
+        },
+        MirTerminator::Stopped => MirTerminator::Stopped,
     }
 }
 
@@ -7896,6 +8494,7 @@ fn normalized_local_place(
         span,
         ty: ty.clone(),
         place,
+        ssa_value: None,
         mutable: true,
         ownership: MirOwnership::copy(),
         comptime: false,
@@ -7986,12 +8585,58 @@ fn eliminate_unreachable_blocks(program: &mut MirProgram) {
     for function in &mut program.functions {
         let reachable = reachable_blocks(function);
         let kept: HashSet<_> = reachable.iter().copied().collect();
+        let old_block_count = function.blocks.len();
         function.blocks.retain(|block| kept.contains(&block.id));
         let live_values: HashSet<_> = function
             .blocks
             .iter()
             .flat_map(|block| block.instructions.iter().filter_map(|instruction| instruction.result))
             .collect();
+        if function.blocks.len() != old_block_count {
+            // A loop binding may alias an indexed place rather than own a
+            // storage cell. Drop unused aliases with their orphaned places;
+            // live operations/drops still retain malformed references so
+            // legality can reject a genuinely live dangling operand.
+            let live_places: HashSet<_> = function.places.iter().filter(|place| {
+                let base_live = match place.base {
+                    MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value) | MirPlaceBase::Temporary(value) => live_values.contains(&value),
+                    MirPlaceBase::Local(_) | MirPlaceBase::Static(_) => true,
+                };
+                base_live && place.projections.iter().all(|projection| match projection {
+                    MirProjection::Index { index, .. } => live_values.contains(index),
+                    MirProjection::Range { range, .. } => live_values.contains(range),
+                    MirProjection::MapLookup { lookup, .. } => live_values.contains(lookup),
+                    MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => true,
+                })
+            }).map(|place| place.id).collect();
+            let mut referenced_places: HashSet<_> = function.drops.iter().map(|action| action.place).collect();
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    referenced_places.extend(operation_place_refs(&instruction.operation));
+                }
+            }
+            let referenced_locals: HashSet<_> = function.places.iter().filter_map(|place| {
+                if referenced_places.contains(&place.id) {
+                    if let MirPlaceBase::Local(local) = place.base {
+                        return Some(local);
+                    }
+                }
+                None
+            }).collect();
+            function.locals.retain(|local| {
+                live_places.contains(&local.place)
+                    || referenced_places.contains(&local.place)
+                    || referenced_locals.contains(&local.id)
+            });
+            referenced_places.extend(function.locals.iter().map(|local| local.place));
+            let live_locals: HashSet<_> = function.locals.iter().map(|local| local.id).collect();
+            function.places.retain(|place| {
+                referenced_places.contains(&place.id) || (live_places.contains(&place.id) && match place.base {
+                    MirPlaceBase::Local(local) => live_locals.contains(&local),
+                    _ => true,
+                })
+            });
+        }
         function.values.retain(|(value, _, _, _)| live_values.contains(value));
         let predecessors = predecessor_map(function);
         for block in &mut function.blocks {
@@ -8585,14 +9230,17 @@ fn semantic_operation_is_pure(
     // `sender.close`, `receiver.close`, `clock.tick`, ...) mutates
     // runtime-owned shared state behind its handle, and so does a host
     // method on a runtime cell (`Shared.edit`, `Shared.set`, `Cell.edit`,
-    // `Pool.remove`, ...). None of that is part of the route's own effect
-    // row, so an unused unit or scalar result never makes the call dead.
+    // `Pool.remove`, ...) and an HTTP route registration (`mux.get`,
+    // `router.post`, ...), which adds the route to the mux or router behind
+    // its handle. None of that is part of the route's own effect row, so an
+    // unused unit or scalar result never makes the call dead.
     if matches!(
         operation,
         MirSemanticOp::ClosureMethod { .. }
             | MirSemanticOp::CoreClosureCall { .. }
             | MirSemanticOp::HandleMethod { .. }
             | MirSemanticOp::HostCall { .. }
+            | MirSemanticOp::HttpRouterRegister { .. }
     ) {
         return false;
     }
@@ -11890,7 +12538,7 @@ fn place_projection_has_effect(
         }
         // A range window checks its bounds and may stop.
         MirProjection::Range { .. } => true,
-        MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } => {
+        MirProjection::Field { .. } | MirProjection::Deref { .. } | MirProjection::Payload { .. } | MirProjection::MapLookup { .. } => {
             false
         }
     })
@@ -12163,6 +12811,7 @@ pub fn mir_program_bytes(program: &MirProgram) -> Vec<u8> {
 fn write_mir_program(mut writer: CanonicalWriter, program: &MirProgram) -> CanonicalWriter {
     writer.tag("mir");
     writer.u16(program.schema_version);
+    writer.bool(program.native_pack);
     writer.str(&program.package_identity);
     writer.str(&program.facts.project_root);
     writer.str(&program.facts.edition);
@@ -12170,6 +12819,15 @@ fn write_mir_program(mut writer: CanonicalWriter, program: &MirProgram) -> Canon
     writer.str(&program.facts.active_os);
     writer.str(&program.facts.inferred_layer);
     writer.str(&program.facts.allocator);
+    if let crate::TargetMachine::AllocatorPolicy::Counting { cap } = &program.facts.program_allocator {
+        writer.bool(true);
+        writer.bool(cap.is_some());
+        if let Some(size) = cap {
+            writer.u64(size.bytes);
+        }
+    } else {
+        writer.bool(false);
+    }
     let dossier = &program.facts.target_dossier;
     let target_triple = dossier
         .machine
@@ -12870,7 +13528,6 @@ fn encode_serde_attributes(writer: &mut CanonicalWriter, attributes: &[crate::MI
 
 fn encode_target_applicability(writer: &mut CanonicalWriter, target: crate::MIR::MirTargetApplicability) {
     writer.bool(target.rust_aot);
-    writer.bool(target.cranelift);
     writer.bool(target.interpreter);
     writer.bool(target.web);
 }
@@ -13149,6 +13806,7 @@ fn encode_core_symbol(writer: &mut CanonicalWriter, symbol: crate::Syntax::CoreC
             writer.u64(2);
             writer.str(name);
         }
+        crate::Syntax::CoreCallSymbol::SourceOwned => panic!("source-owned Core declaration reached executable MIR digest"),
     }
 }
 
@@ -13301,7 +13959,6 @@ fn encode_core_pure_route(writer: &mut CanonicalWriter, route: crate::Syntax::Co
         crate::Syntax::CoreCallPureRoute::EncodingXml => 3,
         crate::Syntax::CoreCallPureRoute::Time => 4,
         crate::Syntax::CoreCallPureRoute::Math => 5,
-        crate::Syntax::CoreCallPureRoute::Measurement => 6,
         crate::Syntax::CoreCallPureRoute::Date => 7,
         crate::Syntax::CoreCallPureRoute::DateTime => 8,
         crate::Syntax::CoreCallPureRoute::SketchHll => 9,
@@ -14048,7 +14705,6 @@ fn encode_artifact_kind(writer: &mut CanonicalWriter, kind: crate::MIR::MirArtif
 fn encode_artifact_target(writer: &mut CanonicalWriter, target: crate::MIR::MirArtifactTarget) {
     let code = match target {
         crate::MIR::MirArtifactTarget::RustAot => 1,
-        crate::MIR::MirArtifactTarget::Cranelift => 2,
         crate::MIR::MirArtifactTarget::Interpreter => 3,
         crate::MIR::MirArtifactTarget::Web => 4,
     };
@@ -14103,7 +14759,6 @@ fn encode_runtime_part(writer: &mut CanonicalWriter, part: crate::MIR::MirRuntim
         crate::MIR::MirRuntimePartId::Browser => 23,
         crate::MIR::MirRuntimePartId::Args => 24,
         crate::MIR::MirRuntimePartId::Reflect => 25,
-        crate::MIR::MirRuntimePartId::AuthTokens => 26,
         crate::MIR::MirRuntimePartId::AuthSession => 27,
         crate::MIR::MirRuntimePartId::Sync => 28,
         crate::MIR::MirRuntimePartId::Services => 29,
@@ -14539,11 +15194,6 @@ fn encode_component_signature(
 
 fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemanticOp) {
     match operation {
-        MirSemanticOp::DataEntriesToMap { call, local } => {
-            writer.tag("data-entries-to-map");
-            writer.u64(call.0);
-            writer.u64(local.0);
-        }
         MirSemanticOp::MathBuiltin { type_id, call, args } => {
             writer.tag("math-builtin");
             writer.u64(type_id.0);
@@ -14604,7 +15254,6 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
             type_id,
             fields,
             extra,
-            trait_coercion,
             boxed_fields,
         } => {
             writer.tag("struct-literal");
@@ -14615,7 +15264,6 @@ fn encode_semantic_operation(writer: &mut CanonicalWriter, operation: &MirSemant
                 writer.u64(value.0);
             }
             encode_struct_extra(writer, *extra);
-            writer.option_u64(trait_coercion.map(|ty| ty.0));
             writer.len(boxed_fields.len());
             for field in boxed_fields {
                 writer.u64(field.0);
@@ -15177,6 +15825,7 @@ fn encode_capture_param(
     writer.mir_type(&param.ty);
     writer.debug(&param.access);
     writer.debug(&param.ownership);
+    writer.bool(param.place_only);
 }
 
 fn encode_foreign(writer: &mut CanonicalWriter, foreign: &MirForeign) {
@@ -15209,6 +15858,7 @@ fn encode_foreign(writer: &mut CanonicalWriter, foreign: &MirForeign) {
     writer.option_u64(foreign.close_function.map(|function| function.0));
     writer.option_u64(foreign.close_foreign.map(|foreign| foreign.0));
     writer.option_u64(foreign.undo_function.map(|function| function.0));
+    writer.debug(&foreign.unsafe_gate);
 }
 
 fn encode_failure_carrier(writer: &mut CanonicalWriter, carrier: &MirFailureCarrier) {
@@ -15264,8 +15914,6 @@ fn encode_core_call(writer: &mut CanonicalWriter, call: &crate::MIR::MirCoreCall
     encode_core_symbol(writer, call.symbol);
     writer.u64(u64::from(call.coverage_bits));
     writer.bool(call.aot_direct);
-    writer.bool(call.jit_direct);
-    writer.option_str(call.jit_symbol.as_deref());
     writer.bool(call.native_int_result);
     writer.debug(&call.marker);
 }
@@ -15375,6 +16023,13 @@ fn encode_local(writer: &mut CanonicalWriter, local: &crate::MIR::MirLocal) {
     writer.span(local.span);
     writer.mir_type(&local.ty);
     writer.u64(local.place.0);
+    match local.ssa_value {
+        Some(value) => {
+            writer.bool(true);
+            writer.u64(value.0);
+        }
+        None => writer.bool(false),
+    }
     writer.debug(&local.ownership);
     writer.bool(local.mutable);
     writer.bool(local.comptime);
@@ -15453,6 +16108,12 @@ fn encode_place(writer: &mut CanonicalWriter, place: &MirPlace) {
                 writer.tag("range");
                 writer.u64(range.0);
                 writer.debug(location);
+                writer.span(*span);
+            }
+            MirProjection::MapLookup { lookup, optional, span } => {
+                writer.tag("map-lookup");
+                writer.u64(lookup.0);
+                writer.debug(optional);
                 writer.span(*span);
             }
         }
@@ -15744,6 +16405,16 @@ fn encode_mir_constant(writer: &mut CanonicalWriter, value: &MirConstant) {
             writer.raw(value);
         }
         MirConstant::Unit => writer.tag("unit"),
+        MirConstant::SharedSite(site) => {
+            writer.tag("shared-site");
+            writer.u64(site.initializer.0);
+            writer.tag(match site.lifetime {
+                crate::MIR::MirSharedLifetime::Process => "process",
+                crate::MIR::MirSharedLifetime::World => "world",
+                crate::MIR::MirSharedLifetime::Thread => "thread",
+                crate::MIR::MirSharedLifetime::Attempt => "attempt",
+            });
+        }
         MirConstant::BigInt(value) => {
             writer.tag("bigint");
             writer.str(value);
@@ -15812,6 +16483,10 @@ fn encode_mir_const_key(writer: &mut CanonicalWriter, key: &MirConstKey) {
             writer.tag("int");
             writer.u64(*value as u64);
         }
+        MirConstKey::BigInt(value) => {
+            writer.tag("bigint");
+            writer.str(value);
+        }
         MirConstKey::String(value) => {
             writer.tag("string");
             writer.str(value);
@@ -15846,6 +16521,87 @@ fn encode_mir_const_key(writer: &mut CanonicalWriter, key: &MirConstKey) {
             writer.str(type_name);
             writer.str(variant);
         }
+    }
+}
+
+#[cfg(test)]
+mod pass_census_tests {
+    use super::*;
+
+    fn valid_program() -> MirProgram {
+        MirProgram {
+            cffi: crate::MIR::MirCffiFacts::default(), native_pack: false,
+            schema_version: crate::MIR::MIR_SCHEMA_VERSION, package_identity: "pass-census".into(),
+            facts: crate::MIR::MirPackageFacts::default(), names: crate::MIR::MirNameFacts::default(),
+            modules: Vec::new(), imports: Vec::new(), types: Vec::new(), traits: Vec::new(),
+            core_owners: Vec::new(), impls: Vec::new(), constants: Vec::new(),
+            fields: Vec::new(), source_files: Vec::new(), functions: Vec::new(),
+            foreign: Vec::new(), links: Vec::new(), callbacks: Vec::new(),
+            handles: Vec::new(), jobs: Vec::new(), tests: Vec::new(), harnesses: Vec::new(),
+            artifacts: Vec::new(), core_calls: Vec::new(), prelude_calls: Vec::new(),
+            type_instances: Vec::new(), codec_migrations: HashMap::new(), unreachable: Vec::new(),
+        }
+    }
+
+    fn run_rejected_outputs(
+        program: &mut MirProgram,
+        census: &mut MirPassCensus,
+        visited: &mut Vec<MirOptimizationPassId>,
+    ) -> Result<(), MirOptimizationError> {
+        for (pass, id) in [
+            (MirOptimizationPassId::CfgSimplification, 7),
+            (MirOptimizationPassId::ExactConstantFolding, 9),
+        ] {
+            // Every following pass must start from the last valid program,
+            // never from a preceding rejected output.
+            assert!(program.constants.is_empty());
+            verify_mir_legality_first(program).unwrap();
+            let checkpoint = census.checkpoint(program);
+            visited.push(pass);
+            let constant = MirConstantDef {
+                id: crate::MIR::MirConstantId(id), module: crate::MIR::MirModuleId(1),
+                key: format!("rejected-{id}"), name: format!("rejected-{id}"),
+                span: Span::new(23, 31), visibility: crate::MIR::MirVisibility::Private,
+                ty: MirType::from_kind(MirTypeKind::Bool), is_storage: false,
+                value: MirConstant::Bool(false),
+            };
+            program.constants = vec![constant.clone(), constant];
+            census.validate_or_rollback(program, checkpoint, pass, pass.as_str())?;
+        }
+        let checkpoint = census.checkpoint(program);
+        visited.push(MirOptimizationPassId::DeadPureValueElimination);
+        eliminate_dead_pure_values(program);
+        census.validate_or_rollback(program, checkpoint, MirOptimizationPassId::DeadPureValueElimination,
+            "mir.dead-pure-value-elimination")?;
+        Ok(())
+    }
+
+    #[test]
+    fn debug_pass_census_rolls_back_and_continues_without_publishing() {
+        let mut program = valid_program();
+        let mut census = MirPassCensus { enabled: true, first_failure: None };
+        let mut visited = Vec::new();
+        run_rejected_outputs(&mut program, &mut census, &mut visited).unwrap();
+        assert_eq!(visited, [MirOptimizationPassId::CfgSimplification,
+            MirOptimizationPassId::ExactConstantFolding, MirOptimizationPassId::DeadPureValueElimination]);
+        assert!(program.constants.is_empty(), "both invalid outputs must be discarded");
+        verify_mir_legality_first(&program).unwrap();
+        assert!(matches!(census.complete(), Err(MirOptimizationError::Legality {
+            pass: MirOptimizationPassId::CfgSimplification,
+            error: MirLegalityError::Validation(MirValidationError::DuplicateId { kind: "constant", id: 7 }),
+        })), "the complete census must still reject the pipeline with its original first failure");
+    }
+
+    #[test]
+    fn normal_pass_verification_stops_at_the_first_rejected_output() {
+        let mut program = valid_program();
+        let mut census = MirPassCensus { enabled: false, first_failure: None };
+        assert!(census.checkpoint(&program).is_none(), "normal mode must not clone MIR");
+        let mut visited = Vec::new();
+        assert!(matches!(run_rejected_outputs(&mut program, &mut census, &mut visited),
+            Err(MirOptimizationError::Legality { pass: MirOptimizationPassId::CfgSimplification, .. })));
+        assert_eq!(visited, [MirOptimizationPassId::CfgSimplification]);
+        assert_eq!(program.constants.len(), 2, "normal mode must not install a measurement rollback");
     }
 }
 
@@ -15897,6 +16653,7 @@ mod ownership_guard_tests {
         let locals = places.iter().map(|place| MirLocal {
             id: MirLocalId(place.id.0), name: format!("local{}", place.id.0),
             span: place.span, ty: place.ty.clone(), place: place.id, mutable: true,
+            ssa_value: None,
             ownership: if place.ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned },
             comptime: false, uninit: false, arena_view: false, string_view: false, gc_root: false,
         }).collect();
@@ -15937,6 +16694,93 @@ mod ownership_guard_tests {
         }
     }
 
+    #[test]
+    fn read_trait_reference_preserves_noncopy_coercion_guards() {
+        use crate::MIR::{MirCallArg, MirFnCoercion, MirUnionCoercion};
+        let function = MirFunctionId(1);
+        let source = MirValueId(1);
+        let span = Span::new(0, 1);
+        let defs = HashMap::from([(
+            source,
+            (MirBlockId(0), 0, MirType::from_kind(MirTypeKind::String), MirOwnership::Owned),
+        )]);
+        let types = HashSet::from([MirTypeId(2), MirTypeId(3)]);
+        let borrowed = MirCallArg {
+            value: source, place: Some(OWNER), access: MirAccess::Read, span,
+            label: None, source_index: None, binder_slot: None, spread: false,
+            implicit_clone: false, shared_auto_clone: false, owned_last_use: false,
+            authority_boundary: false, fn_coercion: None, widen_fixed_to_list: false,
+            widen_to_union: None, box_as_trait: Some(MirTypeId(3)),
+        };
+        let invalid = |subject| Err(MirLegalityError::InvalidReference { function, subject, span });
+        assert!(verify_call_args(std::slice::from_ref(&borrowed), &types, &defs, function, &invalid).is_ok());
+
+        let mut boundary = borrowed.clone();
+        boundary.authority_boundary = true;
+        let mut widening = borrowed.clone();
+        widening.widen_to_union = Some(MirUnionCoercion { union: MirTypeId(2), variant: "String".into() });
+        let mut function_coercion = borrowed.clone();
+        function_coercion.fn_coercion = Some(MirFnCoercion { ty: MirType::from_kind(MirTypeKind::Bool), already_boxed: false });
+        let mut fixed_widening = borrowed.clone();
+        fixed_widening.widen_fixed_to_list = true;
+        for arg in [boundary, widening, function_coercion, fixed_widening] {
+            assert!(matches!(
+                verify_call_args(&[arg], &types, &defs, function, &invalid),
+                Err(MirLegalityError::InvalidReference { subject, .. })
+                    if subject.contains("coercion consumes non-Copy")
+            ));
+        }
+    }
+
+    #[test]
+    fn legality_census_reports_all_duplicate_tables_and_independent_functions() {
+        let constant = |id, name: &str| MirConstantDef {
+            id: crate::MIR::MirConstantId(id), module: crate::MIR::MirModuleId(1),
+            key: name.into(), name: name.into(), span: Span::new(0, 1),
+            visibility: crate::MIR::MirVisibility::Private,
+            ty: MirType::from_kind(MirTypeKind::Bool), is_storage: false,
+            value: MirConstant::Bool(false),
+        };
+        let mut first_function = cleanup_function(false);
+        first_function.id = MirFunctionId(1);
+        let mut second_function = cleanup_function(false);
+        second_function.id = MirFunctionId(2);
+        second_function.key = "second_function".into();
+        let program = MirProgram {
+            cffi: crate::MIR::MirCffiFacts::default(), native_pack: false,
+            schema_version: crate::MIR::MIR_SCHEMA_VERSION, package_identity: "legality-census".into(),
+            facts: crate::MIR::MirPackageFacts::default(), names: crate::MIR::MirNameFacts::default(),
+            modules: Vec::new(), imports: Vec::new(), types: Vec::new(), traits: Vec::new(),
+            core_owners: Vec::new(), impls: Vec::new(),
+            constants: vec![constant(7, "first"), constant(7, "first"),
+                constant(9, "second"), constant(9, "second")],
+            fields: Vec::new(), source_files: Vec::new(),
+            functions: vec![first_function, second_function],
+            foreign: Vec::new(), links: Vec::new(), callbacks: Vec::new(),
+            handles: Vec::new(), jobs: Vec::new(), tests: Vec::new(), harnesses: Vec::new(),
+            artifacts: Vec::new(), core_calls: Vec::new(), prelude_calls: Vec::new(),
+            type_instances: Vec::new(), codec_migrations: HashMap::new(), unreachable: Vec::new(),
+        };
+        let first = verify_mir_legality_first(&program).unwrap_err();
+        assert!(matches!(first, MirLegalityError::Validation(MirValidationError::DuplicateId {
+            kind: "constant", id: 7,
+        })));
+        let errors = collect_mir_legality_errors(&program, &first);
+        for id in [7, 9] {
+            assert!(errors.contains(&MirLegalityError::Validation(MirValidationError::DuplicateId {
+                kind: "constant", id,
+            })), "a later duplicate table must not be hidden by the first");
+        }
+        for id in [1, 2] {
+            assert!(errors.iter().any(|error| matches!(error,
+                MirLegalityError::InvalidReference { function, .. } if function.0 == id)),
+                "a global identity failure must not hide any independent function");
+        }
+        assert!(matches!(optimize_mir_program(program, &MirOptimizationPolicy::conservative()),
+            Err(MirOptimizationError::Legality { error, .. }) if error == first),
+            "the debug census must not change the optimizer's original failure");
+    }
+
     // Exercise the ownership verifier itself, deriving its CFG inputs through
     // the same predecessor/dominator routines used by whole-program legality.
     fn verify(function: &MirFunction) -> Result<(), MirLegalityError> {
@@ -15946,11 +16790,11 @@ mod ownership_guard_tests {
         let defs = function.blocks.iter().flat_map(|block| {
             block.instructions.iter().enumerate().filter_map(move |(index, instruction)| {
                 let ty = instruction.ty.clone()?;
-                let ownership = if ty.is_bool() { MirOwnership::copy() } else { MirOwnership::Owned };
+                let ownership = if ty.is_bool() { MirOwnership::copy() } else if matches!(ty.kind(), MirTypeKind::Int) { MirOwnership::copy_value() } else { MirOwnership::Owned };
                 Some((instruction.result?, (block.id, index, ty, ownership)))
             })
         }).collect();
-        verify_moves_and_borrows(function, &defs, &dominators, &reachable, &places)
+        verify_moves_and_borrows(function, &defs, &dominators, &reachable, &places, &HashMap::new())
     }
 
     fn rejects_second_move(function: &MirFunction) {
@@ -15964,7 +16808,8 @@ mod ownership_guard_tests {
     #[test]
     fn dead_cleanup_edge_accepts_prior_move() {
         assert!(matches!(verify(&cleanup_function(false)), Ok(())));
-        assert!(!reachable_with_boolean_locals(&cleanup_function(false)).contains(&MirBlockId(2)));
+        let function = cleanup_function(false);
+        assert!(!BooleanLocals::new(&function).feasible_blocks(&function).contains(&MirBlockId(2)));
     }
 
     #[test]
@@ -16014,6 +16859,89 @@ mod ownership_guard_tests {
         let mut function = cleanup_function(false);
         function.blocks[3].instructions = write_flag(40, FLAG, true);
         function.blocks[3].terminator = MirTerminator::Jump { target: MirBlockId(1) };
+        rejects_second_move(&function);
+    }
+
+    /// A last-use move clears the drop flag; one branch refills the place and
+    /// sets the flag again, the other leaves it clear. The flag-guarded
+    /// cleanup move after the join is dominated by the move and by no refill,
+    /// yet runs only on the refilled path.
+    #[test]
+    fn refill_on_one_branch_guards_flagged_cleanup_after_join() {
+        let mut function = cleanup_function(true);
+        function.blocks[0].instructions.extend(write_flag(40, FLAG, false));
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(4), else_target: MirBlockId(5),
+        };
+        let mut refill = vec![
+            instruction(50, MirOperation::Constant(MirConstant::String("replacement".into())), Some(MirTypeKind::String)),
+            instruction(51, MirOperation::ReplacePlace { place: OWNER, value: MirValueId(50) }, None),
+        ];
+        refill.extend(write_flag(52, FLAG, true));
+        function.blocks.extend([
+            block(4, refill, MirTerminator::Jump { target: MirBlockId(1) }),
+            block(5, Vec::new(), MirTerminator::Jump { target: MirBlockId(1) }),
+        ]);
+        assert!(matches!(verify(&function), Ok(())));
+    }
+
+    /// The same join without the refill: the flag is set again on one branch
+    /// with the place still moved, so the cleanup move is a second move.
+    #[test]
+    fn flag_set_without_refill_keeps_cleanup_a_second_move() {
+        let mut function = cleanup_function(true);
+        function.blocks[0].instructions.extend(write_flag(40, FLAG, false));
+        function.blocks[0].terminator = MirTerminator::Branch {
+            condition: MirValueId(15), then_target: MirBlockId(4), else_target: MirBlockId(5),
+        };
+        function.blocks.extend([
+            block(4, write_flag(52, FLAG, true), MirTerminator::Jump { target: MirBlockId(1) }),
+            block(5, Vec::new(), MirTerminator::Jump { target: MirBlockId(1) }),
+        ]);
+        rejects_second_move(&function);
+    }
+
+    /// #4744: `x := ^owner.field` moves one field (instruction 14 moves a
+    /// projected place); the owner's flag-guarded scope-end cleanup then
+    /// moves the whole owner only to release it. That remainder drop
+    /// releases the fields still in place, so it is not a second move.
+    fn partial_move_function(cleanup_drops: bool) -> MirFunction {
+        const FIELD: MirPlaceId = MirPlaceId(2);
+        let mut function = cleanup_function(true);
+        let owner = function.places[0].clone();
+        function.places.push(MirPlace {
+            id: FIELD,
+            projections: vec![MirProjection::Field { field: MirFieldId(7), span: Span::new(0, 1) }],
+            ..owner
+        });
+        function.blocks[0].instructions[4].operation = MirOperation::MovePlace { place: FIELD };
+        if cleanup_drops {
+            function.blocks[2].instructions.push(instruction(
+                31,
+                MirOperation::Drop { value: MirValueId(30), kind: MirDropKind::Value },
+                None,
+            ));
+        }
+        function
+    }
+
+    #[test]
+    fn remainder_drop_after_field_move_is_not_a_second_move() {
+        assert!(matches!(verify(&partial_move_function(true)), Ok(())));
+    }
+
+    /// A whole-owner move that is not released by a drop (here: unused) still
+    /// reuses the moved field, and a remainder drop after a move of the whole
+    /// owner is still a second move.
+    #[test]
+    fn only_a_remainder_drop_follows_a_field_move() {
+        rejects_second_move(&partial_move_function(false));
+        let mut function = cleanup_function(true);
+        function.blocks[2].instructions.push(instruction(
+            31,
+            MirOperation::Drop { value: MirValueId(30), kind: MirDropKind::Value },
+            None,
+        ));
         rejects_second_move(&function);
     }
 
@@ -16189,6 +17117,7 @@ mod ownership_guard_tests {
             span,
             ty: ty.clone(),
             place: MirPlaceId(3),
+            ssa_value: None,
             mutable: true,
             ownership: MirOwnership::Owned,
             comptime: false,
@@ -16269,6 +17198,7 @@ mod ownership_guard_tests {
             inline_guard_function(1, "candidate_caller", false, vec![bad_call, good_call]);
         let mut program = MirProgram {
             cffi: crate::MIR::MirCffiFacts::default(),
+            native_pack: false,
             schema_version: crate::MIR::MIR_SCHEMA_VERSION,
             package_identity: "inline-drop-guard".into(),
             facts: crate::MIR::MirPackageFacts::default(),
@@ -16321,5 +17251,113 @@ mod ownership_guard_tests {
             .drops
             .iter()
             .any(|drop| matches!(&drop.edge, MirDropEdge::Return)));
+    }
+
+    /// `contracts/inline_contracts`: `double(5)` passes a constant with no
+    /// caller place. The inlined parameter place must name the caller's SSA
+    /// temporary, never a `Parameter` base on a value no Parameter defines.
+    #[test]
+    fn inline_always_rebases_placeless_argument_parameter_place_on_a_temporary() {
+        let span = Span::new(0, 100);
+        let int = MirType::from_kind(MirTypeKind::Int);
+        let mut callee = inline_guard_function(
+            5,
+            "inline_double",
+            true,
+            vec![
+                instruction(
+                    1,
+                    MirOperation::Parameter { index: 0, name: "x".into() },
+                    Some(MirTypeKind::Int),
+                ),
+                instruction(2, MirOperation::ReadPlace(MirPlaceId(7)), Some(MirTypeKind::Int)),
+            ],
+        );
+        callee.blocks[0].terminator = MirTerminator::Return { value: Some(MirValueId(2)) };
+        callee.return_type = int.clone();
+        callee.params.push(crate::MIR::MirParam {
+            index: 0,
+            name: "x".into(),
+            span,
+            ty: int.clone(),
+            access: MirAccess::Read,
+            ownership: MirOwnership::copy(),
+            public_label: "x".into(),
+            variadic: false,
+            default_present: false,
+        });
+        callee.places.push(MirPlace {
+            id: MirPlaceId(7),
+            span,
+            ty: int.clone(),
+            base: MirPlaceBase::Parameter(MirValueId(1)),
+            projections: Vec::new(),
+            access: MirAccess::Read,
+            persist_key: None,
+        });
+        callee.values.extend([
+            (MirValueId(1), int.clone(), span, MirOwnership::copy()),
+            (MirValueId(2), int.clone(), span, MirOwnership::copy()),
+        ]);
+
+        let call = instruction(
+            11,
+            MirOperation::Call {
+                callee: MirCallee::User(callee.id),
+                args: vec![crate::MIR::MirCallArg {
+                    value: MirValueId(10),
+                    place: None,
+                    access: MirAccess::Read,
+                    span,
+                    label: None,
+                    source_index: Some(0),
+                    binder_slot: None,
+                    spread: false,
+                    implicit_clone: false,
+                    shared_auto_clone: false,
+                    owned_last_use: false,
+                    authority_boundary: false,
+                    fn_coercion: None,
+                    widen_fixed_to_list: false,
+                    widen_to_union: None,
+                    box_as_trait: None,
+                }],
+                type_args: Vec::new(),
+            },
+            Some(MirTypeKind::Int),
+        );
+        let constant = instruction(
+            10,
+            MirOperation::Constant(MirConstant::Int { value: 5, width: None, spelling: None }),
+            Some(MirTypeKind::Int),
+        );
+        let mut caller =
+            inline_guard_function(4, "inline_caller", false, vec![constant, call.clone()]);
+        caller.values.extend([
+            (MirValueId(10), int.clone(), span, MirOwnership::copy()),
+            (MirValueId(11), int, span, MirOwnership::copy()),
+        ]);
+
+        assert!(inline_call(&mut caller, &callee, 0, 1, &call));
+        let parameter_values = caller
+            .blocks
+            .iter()
+            .flat_map(|block| &block.instructions)
+            .filter(|instruction| matches!(instruction.operation, MirOperation::Parameter { .. }))
+            .filter_map(|instruction| instruction.result)
+            .collect::<HashSet<_>>();
+        for place in &caller.places {
+            if let MirPlaceBase::Parameter(value) = &place.base {
+                assert!(
+                    parameter_values.contains(value),
+                    "inlined place {:?} names Parameter({value:?}) with no Parameter definition",
+                    place.id,
+                );
+            }
+        }
+        assert!(caller
+            .places
+            .iter()
+            .any(|place| place.base == MirPlaceBase::Temporary(MirValueId(10))));
     }
 }

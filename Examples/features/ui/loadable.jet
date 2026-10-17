@@ -4,18 +4,20 @@ use core.reactive.loadable as loadable
 fn fetch_user(id: Int) -> String { if id == 0 -> Err("user not found") else -> Ok("Alice") }
 
 fn run() {
-    idle_state :: loadable.idle()
-    loading_state :: loadable.loading()
-    print(idle_state.is_idle())
-    print(loading_state.is_loading())
+    idle_state :: loadable.idle<String, String>()
+    loading_state :: loadable.loading<String, String>()
+    print(loadable.is_idle(idle_state))
+    print(loadable.is_loading(loading_state))
     if fetch_user(1) == .Ok(name) {
-        loaded_state :: loadable.loaded(name)
-        print(loaded_state.is_loaded())
-        print(loaded_state.loaded() ?? "none")
-        print(loaded_state.or_else("unknown"))
+        loaded_state :: loadable.loaded<String, String>(name)
+        print(loadable.is_loaded(loaded_state))
+        print(loadable.value(loaded_state) ?? "none")
+        print(loadable.reason(loaded_state) ?? name)
     }
     if fetch_user(0) == .Err(msg) {
-        failed_state :: loadable.failed(msg)
-        print(failed_state.is_failed())
+        // The callable's default Err owns the report; this UI state stores its message.
+        failed_state :: loadable.failed<String, String>(msg.message)
+        assert((loadable.reason(failed_state) ?? "") == msg.message)
+        print(loadable.is_failed(failed_state))
     }
 }

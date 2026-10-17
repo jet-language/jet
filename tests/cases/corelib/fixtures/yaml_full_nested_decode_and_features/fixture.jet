@@ -1,0 +1,14 @@
+
+use core.encoding.yaml as yaml
+#Codable
+struct Service { name: String  port: Int }
+#Codable
+struct Config { app: String  services: [Service] }
+fn run() {
+    raw :: "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
+    cfg :: yaml.decode<Config>(raw) ?? panic("bad yaml")
+    print(cfg.app)
+    print(cfg.services.len())
+    print(cfg.services[0].name)
+    print(cfg.services[1].port)
+}

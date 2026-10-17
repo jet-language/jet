@@ -1,0 +1,15 @@
+# Port of tests/corelib_parts/platform.rs:866-921; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_terminal_is_tty_bidirectional_and_preserves_control_bytes
+write: main.jet main.template
+write: terminal_probe.sh terminal_probe.sh.template
+chmod: terminal_probe.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: ^= "true\nready\ninput:typed\n" # original ed77c235f tests/corelib_parts/platform.rs:917 starts_with predicate
+stdout: ~ "\u001b[31mcontrol\u001b[0m" # original contains
+stdout: ~ "30 100" # original contains
+stdout: $= "closed:typed-error\n" # original ed77c235f tests/corelib_parts/platform.rs:920 ends_with predicate

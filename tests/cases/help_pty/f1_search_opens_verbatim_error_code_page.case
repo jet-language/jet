@@ -1,0 +1,14 @@
+# Port of tests/help_pty.rs:294-304. PENDING-GRAMMAR(batch-four); exact original inputs/delays/predicates.
+requires: os:unix
+refused: pty
+normalize: replace "\r" ""
+step: jet explain E0102 --color=never
+capture: canonical = text stdout
+step: jet ? --color=never
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+pty-send: "\u001bOPE0102\u001b\u001b" after 150ms
+pty-close: after 150ms
+exit: 0
+stdout: ~ "{cap:canonical}" # original predicate: CR-normalized transcript contains full canonical Explain(false) bytes

@@ -85,6 +85,6 @@ fn fnv1a(bytes: [U8]) -> U64 {
     offset :: u64_from_bytes([U8]{"\xCB\xF2\x9C\xE4\x84\x22\x23\x25"})
     prime :: u64_from_bytes([U8]{"\x00\x00\x01\x00\x00\x00\x01\xB3"})
     hash := offset
-    loop byte in bytes -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in bytes -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash
 }

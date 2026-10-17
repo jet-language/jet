@@ -1,0 +1,34 @@
+# HAND-PORT tests/jetpack_engine.rs:6989-7105 bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: bridge_flake_projects_fetchers_cross_packages_and_external_flakes_without_nix.fixture
+env: NO_COLOR=1
+mkdir: project
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 0
+stdout: ~ "packages: [fd, fetched]" # original contains predicate
+stderr: ~ "cross-package:aarch64-linux/foo" # original contains predicate
+stderr: !~ "nix eval" # original negative contains predicate
+file: project/.jet/lock ~ "flake-devshell:devShells:x86_64-linux:default" # original contains predicate
+file: project/.jet/lock ~ "packages=fd;unsupported=cross-package:aarch64-linux/foo" # original contains predicate
+file: project/.jet/lock ~ "flake-derivation:packages:x86_64-linux:fetched" # original contains predicate
+copy: project/.jet/lock before.lock
+copy: tampered.txt project/source.txt
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 1
+stderr: ~ "E1256" # original contains predicate
+stderr: ~ "verified fetch hash mismatch" # original contains predicate
+file: project/.jet/lock == before.lock
+copy: no-authority.nix project/flake.nix
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 1
+stderr: ~ "E1256" # original contains predicate
+stderr: ~ "provider authority" # original contains predicate
+stderr: !~ "nix eval" # original negative contains predicate
+file: project/.jet/lock == before.lock
+

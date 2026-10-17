@@ -162,15 +162,6 @@ fn known_regressions_keep_their_results_on_a_two_mib_embedder_stack() {
         .expect("the full local Cell surface must still compile");
 }
 
-const JIT_ENTRY_SOURCE: &str = r#"
-fn twice(n: Int) -> Int {
-    return n + n
-}
-fn run() {
-    print(twice(21))
-}
-"#;
-
 const PACKAGE_EDITION_PROGRAM: &str = r#"
 use core.data as data
 
@@ -208,12 +199,12 @@ fn package_edition_survives_tir_eval_worker() {
 
     for (tier, outcome) in [
         (
-            "forced interpreter",
-            jet::Interpreter::run_interpreter_once_with_args(&path, &[]),
+            "in-process evaluator",
+            common::dev_run(&path, false, true),
         ),
         (
-            "default JIT",
-            jet::Interpreter::run_jit_once_with_args(&path, &[]),
+            "default jet run",
+            common::dev_run(&path, false, false),
         ),
     ] {
         match outcome {
@@ -232,51 +223,6 @@ fn package_edition_survives_tir_eval_worker() {
             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
                 panic!("{tier} rejected the edition fixture: {diagnostics:?}");
             }
-        }
-    }
-
-    let _ = std::fs::remove_dir_all(&dir);
-}
-
-/// An embedder holding a checked bundle reaches the JIT without ever touching
-/// the driver's compile entries, so the Cranelift backend has to own the same
-/// sized stack they own: MIR lowering and the whole-program interpreter on the
-/// deopt route are the same unbounded-depth recursive descent, and either tier
-/// alone exhausts a 2 MiB embedder thread.
-#[test]
-fn the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread() {
-    let dir = common::unique_tmp("jet_compiler_stack_jit_entry");
-    std::fs::create_dir_all(&dir).expect("create the fixture directory");
-    let file = dir.join("main.jet");
-    std::fs::write(&file, JIT_ENTRY_SOURCE).expect("write the fixture");
-    let path = file.to_string_lossy().into_owned();
-
-    let outcome = std::thread::Builder::new()
-        .stack_size(2 * 1024 * 1024)
-        .spawn(move || {
-            let bundle = jet::run_compiler_work(move || {
-                let mut bundle = jet::Loader::load_entry(&path).expect("the fixture should load");
-                let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-                assert!(
-                    !diagnostics
-                        .iter()
-                        .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
-                    "{diagnostics:?}"
-                );
-                bundle
-            });
-            let mut backend = jet_jit::CraneliftBackend::new();
-            let policy = common::development_policy();
-            common::run_cranelift_bundle(&mut backend, &bundle, false, &policy)
-        })
-        .expect("spawn the embedder thread")
-        .join()
-        .expect("the JIT backend must not overflow the embedder thread");
-
-    match outcome {
-        jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "42\n"),
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-            panic!("the fixture must run on one of the two tiers: {diagnostics:?}")
         }
     }
 
@@ -302,7 +248,7 @@ fn the_compiler_boundary_never_nests_a_second_worker() {
         (
             std::thread::current().id(),
             jet::run_compiler_work(|| std::thread::current().id()),
-            jet_jit::on_compiler_stack(|| std::thread::current().id()),
+            jet_evalhost::on_compiler_stack(|| std::thread::current().id()),
         )
     });
     assert_eq!(
@@ -314,7 +260,7 @@ fn the_compiler_boundary_never_nests_a_second_worker() {
         "a JIT entry inside a driver entry must reuse the active worker"
     );
 
-    let (worker, driver_inside_jit) = jet_jit::on_compiler_stack(|| {
+    let (worker, driver_inside_jit) = jet_evalhost::on_compiler_stack(|| {
         (
             std::thread::current().id(),
             jet::run_compiler_work(|| std::thread::current().id()),

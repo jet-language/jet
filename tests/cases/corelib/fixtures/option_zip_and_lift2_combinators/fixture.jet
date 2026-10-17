@@ -1,0 +1,30 @@
+
+fn missing_float() -> Float? { None }
+fn multiply_options(x: Float, y: Float) -> Float {
+    return x * y
+}
+fn choose_multiplier() -> fn(Float, Float) -> Float {
+    print("choose")
+    return multiply_options
+}
+fn run() {
+    both_a :: Val(2.0)
+    both_b :: Val(5.0)
+    print(both_a.zip(both_b).map((pair) -> pair.a * pair.b))
+    print(Option.lift2((x, y) -> x * y, both_a, both_b))
+    print(Option.lift2(multiply_options, both_a, both_b))
+    multiplier :: multiply_options
+    print(Option.lift2(multiplier, both_a, both_b))
+    print(Option.lift2(choose_multiplier(), both_a, both_b))
+
+    a_only :: Val(2.0)
+    b_missing :: missing_float()
+    print(a_only.zip(b_missing).map((pair) -> pair.a * pair.b))
+    print(Option.lift2((x, y) -> x * y, a_only, b_missing))
+    print(Option.lift2(choose_multiplier(), a_only, b_missing))
+
+    both_missing_a :: missing_float()
+    both_missing_b :: missing_float()
+    print(both_missing_a.zip(both_missing_b).map((pair) -> pair.a * pair.b))
+    print(Option.lift2((x, y) -> x * y, both_missing_a, both_missing_b))
+}

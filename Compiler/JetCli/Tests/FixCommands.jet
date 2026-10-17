@@ -1,0 +1,56 @@
+// Canonical diagnostic edit grades, deferred rounds and edition migrations.
+use jet_foundation.[DiagnosticFixApplicability, DiagnosticFixSafety, Span, TextEdit]
+
+fn cli_fix_fixture_edit(start: Int, end: Int, text: String, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> JetCLIFix Never! {
+    JetCLIFix{title: "fixture edit", edit: TextEdit{span: Span{start: start, end: end}, new_text: text}, applicability: applicability, safety: safety}
+}
+
+fn cli_fix_fixture_fact(name: String, signature: String, module_path: String) -> JetCLISemDefinitionFact Never! {
+    JetCLISemDefinitionFact{stable_id: "def:{name}", signature_id: signature, content_id: "content:{name}", human_identity: "{module_path}::{name}", name: name, kind: "function", module_path: module_path, span: Span{start: 0, end: 1}}
+}
+
+fn run() Never! {
+    safe :: cli_fix_fixture_edit(0, 1, "S", .Safe, .Formatting)
+    suggested :: cli_fix_fixture_edit(1, 2, "R", .Suggested, .NeedsReview)
+    changing :: cli_fix_fixture_edit(2, 3, "A", .Safe, .APIChanging)
+    selected :: jet_cli_safe_fixes([JetCLIFix]{safe, suggested, changing})
+    if selected.len() != 1 || selected[0].edit.new_text != "S" -> panic("unattended edits require both safe applicability and safe class")
+    edited :: jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{safe, safe, suggested})
+    if edited.source != "SRc" || edited.applied != 2 || edited.deferred != 0 -> panic("duplicate exact edits apply once")
+    outer :: cli_fix_fixture_edit(0, 3, "X", .Safe, .BehaviorPreserving)
+    nested :: jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{safe, outer})
+    if nested.source != "X" || nested.applied != 1 || nested.deferred != 1 -> panic("widest same-start edit wins; nested edit is deferred")
+    insert_a :: cli_fix_fixture_edit(1, 1, "A", .Safe, .Formatting)
+    insert_b :: cli_fix_fixture_edit(1, 1, "B", .Safe, .Formatting)
+    inserted :: jet_cli_fix_apply_non_overlapping("π", [JetCLIFix]{cli_fix_fixture_edit(0, 0, "A", .Safe, .Formatting), cli_fix_fixture_edit(0, 0, "B", .Safe, .Formatting)})
+    if inserted.source != "ABπ" || inserted.applied != 2 -> panic("same-point insertions are stable and UTF-8 exact")
+    if jet_cli_fix_apply_non_overlapping("abc", [JetCLIFix]{insert_a, insert_b}).source != "aABbc" -> panic("insertion order")
+
+    infallible :: "fn run() Never! {{ json.canonical(data) }}\n"
+    migrated :: jet_cli_fix_edition_2027(infallible)
+    if migrated != "fn run() Never! {{ json.canonical(data) ?? panic(\"value is not canonical JSON\") }}\n" -> panic("infallible JSON migration")
+    if jet_cli_fix_edition_2027(migrated) != migrated -> panic("fallback migration is idempotent after whitespace")
+    fallible :: "fn run() {{ if true {{ json.canonical(data) }} }}\n"
+    if jet_cli_fix_edition_2027(fallible) != fallible -> panic("implicit Err propagates in enclosing function")
+    if jet_cli_fix_edition_2027("value :: json.canonical(data)?\n") != "value :: json.canonical(data)?\n" -> panic("written propagation is retained")
+    if jet_cli_fix_edition_2027("value :: cbor.encode(data)\nother :: cbor.decode(data)\n") != "value :: cbor.to_bytes(data)\nother :: cbor.parse(data)\n" -> panic("CBOR forwarding migration")
+    if jet_cli_fix_edition_2027("value :: cbor.encode(<T>data)\n") != "value :: cbor.encode(<T>data)\n" -> panic("typed call forwarding stays written")
+    paren_prefix :: "data, \"escaped \\\" )\", nested(1)"
+    if jet_cli_fix_matching_paren("{paren_prefix}) tail", 0) != Val(paren_prefix.len()) -> panic("quoted parens and escaped quotes do not alter nesting")
+    if jet_cli_fix_inline_insertion("// header\n/// run docs\nfn run() {{}}\n") != "// header\n".len() -> panic("docs stay on first declaration")
+    if jet_cli_fix_inline_insertion("/* header */fn run() {{}}") != "/* header */".len() -> panic("same-line leading block comment")
+    if jet_cli_fix_inline_insertion("#!/usr/bin/env jet\n// tool\n\nfn run() {{}}") != "#!/usr/bin/env jet\n// tool\n\n".len() -> panic("launch header and leading trivia")
+    if !jet_cli_fix_inline_authority("my-tool.jet", [String]{"FS", "IO"}).contains("name: \"my-tool\"") -> panic("script stem")
+    if !jet_cli_fix_inline_authority("épreuve.jet", [String]{"Net"}).contains("name: \"script\"") -> panic("unportable script stem uses canonical fallback")
+
+    old :: cli_fix_fixture_fact("report", "sig1", "run.jet")
+    renamed :: cli_fix_fixture_fact("summarize", "sig1", "run.jet")
+    operations :: jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old}, [JetCLISemDefinitionFact]{renamed})
+    if operations.len() != 1 || operations[0].kind != "rename" || operations[0].rule_id != Val("jet-fix") || operations[0].from != Val("report") || operations[0].to != Val("summarize") -> panic("checked rename provenance")
+    if operations[0].targets[0].stable_id != old.stable_id || operations[0].targets[0].after != renamed.human_identity -> panic("rename retains original stable identity")
+    ambiguous :: cli_fix_fixture_fact("other", "sig1", "run.jet")
+    if jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old}, [JetCLISemDefinitionFact]{renamed, ambiguous}).len() != 0 -> panic("ambiguous forward rename refused")
+    if jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old, ambiguous}, [JetCLISemDefinitionFact]{renamed}).len() != 0 -> panic("ambiguous reverse rename refused")
+    different :: cli_fix_fixture_fact("summarize", "sig2", "run.jet")
+    if jet_cli_semantic_rename_ops([JetCLISemDefinitionFact]{old}, [JetCLISemDefinitionFact]{different}).len() != 0 -> panic("signature change is not a rename")
+}

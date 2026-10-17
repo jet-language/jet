@@ -1,0 +1,9 @@
+// SETUP-PORT of tests/process_sessions.rs:209-237. Generate the original
+// 131072-byte literal in the under-test source, not a runtime replacement.
+// This setup program asserts nothing; every assertion stays in the case.
+use core.files as files
+fn run() {
+    template :: files.read("run.template") ?? panic("read source template")
+    payload :: "x".repeat(131072)
+    files.write("run.jet", template.replace("__JET_PAYLOAD__", payload)) ?? panic("write original source")
+}

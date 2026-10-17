@@ -1,0 +1,20 @@
+# Port of tests/jetpack_jetos.rs:3717-3749; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+copy: {root}/tests/fixtures/jetpack-config project
+mkdir: package-root0
+step: jetpack os migrate compare-nixos halcyon --out {work}/package-root0/should-not-publish --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root0
+env: JET_INTERNAL_ROOT_DISPATCH_PID={pid}
+exit: 2
+stderr: ~ "available only through root `jet`" # original direct-engine denial
+file: package-root0/should-not-publish absent
+mkdir: package-root1
+step: jetos migrate compare-nixos halcyon --out {work}/package-root1/should-not-publish --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root1
+env: JET_INTERNAL_ROOT_DISPATCH_PID={pid}
+exit: 2
+stderr: ~ "available only through root `jet`" # original direct-engine denial
+file: package-root1/should-not-publish absent
+

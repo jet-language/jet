@@ -1,0 +1,13 @@
+# HAND-PORT tests/concurrency_freeze_tiers.rs:34-46 parser_and_sema_accept_the_ratified_crossing_surface
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# Exact three original stages: no lexer diagnostics, parse success, sema acceptance.
+fixture: parser_and_sema_accept_the_ratified_crossing_surface.fixture
+env: NO_COLOR=1
+step: jet inspect compiler lex main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+step: jet inspect compiler parse main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+step: jet check main.jet
+exit: 0

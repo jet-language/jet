@@ -1,6 +1,6 @@
 package {
     name: "deterministic_world"
-    authority: { holds: { allow: [IO, Time.Wait] } }
+    authority: { holds: { allow: [IO, Time] } }
 }
 
 use core.testing as testing
@@ -12,7 +12,7 @@ fn run() {
     testing.world(
     world -> {
         slow :: task work() ?? return
-        &world.advance(40ms)
+        world.advance(40ms)
         ^slow.join() ?? return
     },
     )

@@ -1,0 +1,717 @@
+// Modeled Jet programs exercise Float predicates, exact Int Euclidean methods,
+// and all 64-bit numeric policies, including unsigned high-bit words. Float NaN
+// and infinities come from arithmetic, not math.to_bits (Tower #4340).
+use jet_foundation.[
+    MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallFallibility, MIRConstant, MIRConversion, MIRDropKind,
+    MIRCallArg, MIREnumArg, MIRFunction, MIRFunctionID, MIROperation, MIRPanicLoc, MIRPreludeABI, MIRPreludeFamily, MIRPreludeTypeArg,
+    MIRProgram, MIRSemanticOp, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind,
+    MIRUnaryOp, MIRValueID, MIRVariant, MIRVariantPayload, mir_function_id, mir_integer_constant, mir_type_from_kind, mir_type_id,
+]
+
+fn fx_numeric_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    predicates :: [String]{"is_nan", "is_infinite", "is_finite"}
+    loop method in predicates {
+        &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.math", method, "jet_std_math_{method}", 1, MIRPreludeABI.Value))
+    }
+    euclidean :: [String]{"div_euclid", "rem_euclid"}
+    loop method in euclidean {
+        &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", method, "jet_std::jet_int_{method}", 2, MIRPreludeABI.Value))
+    }
+    widths :: [String]{"i64", "u64"}
+    modes :: [String]{"checked", "checked_policy", "wrapping", "saturating"}
+    operations :: [String]{"add", "sub", "mul", "div", "rem", "pow"}
+    rotations :: [String]{"rotate_left", "rotate_right"}
+    loop width in widths {
+        loop mode in modes {
+            loop op in operations {
+                if op == "rem" && (mode == "wrapping" || mode == "saturating") -> next
+                arity :: if mode == "checked" || ((mode == "wrapping" || mode == "saturating") && (op == "add" || op == "sub" || op == "mul")) -> 2 else -> 4
+                runtime_mode :: if mode == "checked_policy" -> "trap" else -> mode
+                &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "{width}.{mode}.{op}", "jet_{width}_{runtime_mode}_{op}", arity, MIRPreludeABI.Value))
+            }
+        }
+        loop mode in rotations {
+            &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "{width}.{mode}.rotate", "jet_{width}_{mode}", 4, MIRPreludeABI.Value))
+        }
+    }
+    p
+}
+
+fn fx_numeric_label(b: &FxBuilder, text: String) Never! {
+    value :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: text}})
+    fx_print(&b, value)
+    fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+}
+
+fn fx_numeric_float(b: &FxBuilder, value: Float) -> MIRValueID Never! {
+    fx_copy(&b, mir_type_from_kind(MIRTypeKind.Float), MIROperation.Constant{value: MIRConstant.Float{value: value, f32: false, spelling: None}})
+}
+
+fn fx_numeric_float_binary(b: &FxBuilder, op: MIRBinaryOp, left: MIRValueID, right: MIRValueID) -> MIRValueID Never! {
+    fx_copy(&b, mir_type_from_kind(MIRTypeKind.Float), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+}
+
+fn fx_numeric_euclid(b: &FxBuilder, op: String, left: Int, right: Int) -> MIRValueID Never! {
+    a :: fx_int_const(&b, left)
+    c :: fx_int_const(&b, right)
+    fx_owned(&b, fx_int(), MIROperation.Semantic{operation: MIRSemanticOp.NumericBinaryMethod{call: fx_prelude_id("core.numeric", op), receiver: a, argument: c}})
+}
+
+fn fx_numeric_fixed(b: &FxBuilder, unsigned: Bool, mode: String, op: String, left: Int, right: Int) -> MIRValueID Never! {
+    ty :: if unsigned -> fx_u64() else -> fx_i64()
+    a :: if unsigned -> fx_u64_const(&b, left) else -> fx_i64_const(&b, left)
+    c :: if unsigned -> fx_u64_const(&b, right) else -> fx_i64_const(&b, right)
+    width :: if unsigned -> "u64" else -> "i64"
+    arity :: if mode == "checked" || ((mode == "wrapping" || mode == "saturating") && (op == "add" || op == "sub" || op == "mul")) -> 2 else -> 4
+    loc :: if arity == 4 -> Val(MIRPanicLoc{file: fx_source_file(), line: 3, column: 0}) else -> None
+    operation :: MIROperation.Semantic{operation: MIRSemanticOp.OverflowOption{call: fx_prelude_id("core.numeric", "{width}.{mode}.{op}"), left: a, right: c, location: loc}}
+    if mode == "checked" -> fx_owned(&b, mir_type_from_kind(MIRTypeKind.Option{inner: ty}), operation)
+    else -> fx_copy(&b, ty, operation)
+}
+
+fn fx_numeric_checked(b: &FxBuilder, unsigned: Bool, op: String, left: Int, right: Int, present: Bool) Never! {
+    value :: fx_numeric_fixed(&b, unsigned, "checked", op, left, right)
+    some :: fx_copy(&b, fx_bool(), MIROperation.OptionIsSome{subject: value})
+    fx_print(&b, some)
+    if present {
+        inner :: fx_copy(&b, if unsigned -> fx_u64() else -> fx_i64(), MIROperation.OptionValue{subject: value})
+        fx_print(&b, inner)
+    }
+    fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+}
+
+fn fx_numeric_print_fixed(b: &FxBuilder, unsigned: Bool, mode: String, op: String, left: Int, right: Int) Never! {
+    value :: fx_numeric_fixed(&b, unsigned, mode, op, left, right)
+    fx_print(&b, value)
+}
+
+// The compiler's fixed infix division uses Binary(Prelude), not OverflowOption.
+fn fx_numeric_u64_binary(b: &FxBuilder, op: MIRBinaryOp, member: String, left: Int, right: Int) -> MIRValueID Never! {
+    a :: fx_u64_const(&b, left)
+    divisor :: fx_u64_const(&b, right)
+    location :: MIRPanicLoc{file: fx_source_file(), line: 3, column: 0}
+    fx_copy(&b, fx_u64(), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Prelude{call: fx_prelude_id("core.numeric", "u64.trap.{member}"), location: Val(location)}, overflow: MIRBinaryOverflow.Unchecked, left: a, right: divisor})
+}
+
+fn fx_numeric_u64_binary_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    loop member in ([String]{"div", "floor_div", "rem"}) {
+        &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "u64.trap.{member}", "jet_u64_trap_{member}", 4, MIRPreludeABI.Value))
+    }
+    p
+}
+
+// expect-stdout numeric-u64-binary-division: "2\n2\n1\n9223372036854775807\n9223372036854775807\n1\n"
+fn fx_numeric_u64_binary_division() -> MIRProgram Never! {
+    b := fx_builder()
+    // -1 carries U64.MAX's high-bit word, as in Unsigned.jet's fixtures.
+    loop pair in ([(left: Int, right: Int)]{(left: 7, right: 3), (left: -1, right: 2)}) {
+        quotient :: fx_numeric_u64_binary(&b, .Div, "div", pair.left, pair.right)
+        fx_print(&b, quotient)
+        floor_quotient :: fx_numeric_u64_binary(&b, .FloorDiv, "floor_div", pair.left, pair.right)
+        fx_print(&b, floor_quotient)
+        remainder :: fx_numeric_u64_binary(&b, .Rem, "rem", pair.left, pair.right)
+        fx_print(&b, remainder)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_u64_binary_program(b)
+}
+
+fn fx_numeric_u64_binary_zero(op: MIRBinaryOp, member: String) -> MIRProgram Never! {
+    b := fx_builder()
+    _ := fx_numeric_u64_binary(&b, op, member, 7, 0)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_u64_binary_program(b)
+}
+
+// expect-stdout numeric-u64-binary-div-zero: ""
+// expect-exit numeric-u64-binary-div-zero: 70
+// expect-stderr numeric-u64-binary-div-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_u64_binary_div_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.Div, "div") }
+
+// expect-stdout numeric-u64-binary-floor-zero: ""
+// expect-exit numeric-u64-binary-floor-zero: 70
+// expect-stderr numeric-u64-binary-floor-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_u64_binary_floor_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.FloorDiv, "floor_div") }
+
+// expect-stdout numeric-u64-binary-rem-zero: ""
+// expect-exit numeric-u64-binary-rem-zero: 70
+// expect-stderr numeric-u64-binary-rem-zero: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_u64_binary_rem_zero() -> MIRProgram Never! { fx_numeric_u64_binary_zero(.Rem, "rem") }
+
+// Sized integer literals (`I64{5}`, `U64{18446744073709551615}`): an exact
+// Int constant through the infallible int_checked_fixed route is the fixed
+// word itself (Rust `5i64`), for every width and both signed bounds.
+fn fx_sized_literal(b: &FxBuilder, signed: Bool, bits: Int, constant: MIRConstant) -> MIRValueID Never! {
+    number :: fx_copy(&b, fx_int(), MIROperation.Constant{value: constant})
+    kind :: fx_int_const(&b, 0)
+    target :: fx_narrow(signed, bits)
+    fx_copy(&b, target, MIROperation.Convert{value: number, parameters: [MIRValueID]{kind}, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "int_checked_fixed"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 1},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+// `I64{-n}` as MIR may spell it: Neg of the exact constant `n`, then the
+// sized-literal conversion.
+fn fx_sized_negated(b: &FxBuilder, signed: Bool, bits: Int, constant: MIRConstant) -> MIRValueID Never! {
+    number :: fx_copy(&b, fx_int(), MIROperation.Constant{value: constant})
+    negated :: fx_copy(&b, fx_int(), MIROperation.Unary{op: MIRUnaryOp.Neg, value: number})
+    kind :: fx_int_const(&b, 0)
+    target :: fx_narrow(signed, bits)
+    fx_copy(&b, target, MIROperation.Convert{value: negated, parameters: [MIRValueID]{kind}, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "int_checked_fixed"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 1},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+// Every width at its bounds, U64 above I64::MAX, I64 MIN, and both shapes of
+// Int.jet int_inline's `value >= I64{-4611686018427387904}`: the folded
+// negative constant plus a leftover unused `2^62`, and Neg(2^62). Neither
+// may build an exact Int (2^62 is beyond the inline range).
+// expect-stdout sized-literals: "5\n-9223372036854775808\n9223372036854775807\n18446744073709551615\n9223372036854775808\n255\n-128\n-32768\n4294967295\n2147483647\n0\n-4611686018427387904\n-4611686018427387904\n-9223372036854775808\n-7\ntrue\nfalse\n"
+fn fx_sized_literals() -> MIRProgram Never! {
+    b := fx_builder()
+    rows :: [(signed: Bool, bits: Int, constant: MIRConstant)]{
+        (signed: true, bits: 64, constant: mir_integer_constant(5, None, None)),
+        (signed: true, bits: 64, constant: mir_integer_constant(-9223372036854775808, None, None)),
+        (signed: true, bits: 64, constant: mir_integer_constant(9223372036854775807, None, None)),
+        (signed: false, bits: 64, constant: MIRConstant.BigInt{decimal: "18446744073709551615"}),
+        (signed: false, bits: 64, constant: MIRConstant.BigInt{decimal: "9223372036854775808"}),
+        (signed: false, bits: 8, constant: mir_integer_constant(255, None, None)),
+        (signed: true, bits: 8, constant: mir_integer_constant(-128, None, None)),
+        (signed: true, bits: 16, constant: mir_integer_constant(-32768, None, None)),
+        (signed: false, bits: 32, constant: mir_integer_constant(4294967295, None, None)),
+        (signed: true, bits: 32, constant: mir_integer_constant(2147483647, None, None)),
+        (signed: false, bits: 16, constant: mir_integer_constant(0, None, None)),
+    }
+    loop row in rows {
+        value :: fx_sized_literal(&b, row.signed, row.bits, row.constant)
+        fx_print(&b, value)
+    }
+    _ := fx_int_const(&b, 4611686018427387904)
+    folded :: fx_sized_literal(&b, true, 64, mir_integer_constant(-4611686018427387904, None, None))
+    fx_print(&b, folded)
+    lowest :: fx_sized_negated(&b, true, 64, mir_integer_constant(4611686018427387904, None, None))
+    fx_print(&b, lowest)
+    minimum :: fx_sized_negated(&b, true, 64, MIRConstant.BigInt{decimal: "9223372036854775808"})
+    fx_print(&b, minimum)
+    minus_seven :: fx_sized_negated(&b, true, 8, mir_integer_constant(7, None, None))
+    fx_print(&b, minus_seven)
+    // int_inline: `value >= I64{-2^62}` for an inline and a non-inline word.
+    loop word in ([Int]{5, -4611686018427387905}) {
+        value :: fx_i64_const(&b, word)
+        bound :: fx_sized_negated(&b, true, 64, mir_integer_constant(4611686018427387904, None, None))
+        inline :: fx_compare(&b, MIRBinaryOp.Ge, value, bound)
+        fx_print(&b, inline)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "int_checked_fixed", "jet_std::jet_int_checked_fixed", 4, MIRPreludeABI.Value))
+    p
+}
+
+// The literals build no exact Int and call no checked conversion: the
+// runtime's own Int kernels are written with them.
+fn fx_sized_literals_check() -> Bool Never! {
+    program :: fx_sized_literals()
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    text :: lir_print_module(lowered.lir)
+    if lowered.issues.len() != 0 || text.contains("jet_int_checked_fixed") || text.contains("jet_int_owned_from_i64") || text.contains("jet_rt_int_from_static") {
+        print("sized-literals: a sized literal lowered through a runtime Int conversion")
+        return false
+    }
+    fx_report("sized-literals", program)
+}
+
+// `Float{n}` of a fixed integer: the checked_widen route
+// (jet_numeric_checked_widen_at, arity 5: value, signed, target_f32, file,
+// line) lowered inline, never as a runtime call (the runtime's own widen
+// would call itself). Exact values cross; one that loses precision stops.
+fn fx_widen_fixed(b: &FxBuilder, signed: Bool, bits: Int, value: Int, single: Bool) -> MIRValueID Never! {
+    source :: fx_narrow_const(&b, signed, bits, value)
+    signed_flag :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: signed}})
+    single_flag :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: single}})
+    target :: mir_type_from_kind(if single -> MIRTypeKind.Float32 else -> MIRTypeKind.Float)
+    fx_copy(&b, target, MIROperation.Convert{value: source, parameters: [MIRValueID]{signed_flag, single_flag}, target: target, conversion: MIRConversion.Prelude{
+        call: fx_prelude_id("core.numeric", "checked_widen"),
+        location: MIRPanicLoc{file: fx_source_file(), line: 3, column: 0},
+        fallibility: MIRCallFallibility.Infallible,
+    }})
+}
+
+fn fx_widen_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.numeric", "checked_widen", "jet_numeric_checked_widen_at", 5, MIRPreludeABI.Value))
+    p
+}
+
+// I64 3, I64 -2^53, I64 MIN, U64 2^63 (its high-bit word), I32 -7 and 0.
+// expect-stdout widen-fixed: "3\n-9007199254740992\n-9223372036854775808\n9223372036854775808\n-7\n0\n"
+fn fx_widen_fixed_values() -> MIRProgram Never! {
+    b := fx_builder()
+    rows :: [(signed: Bool, bits: Int, value: Int)]{
+        (signed: true, bits: 64, value: 3),
+        (signed: true, bits: 64, value: -9007199254740992),
+        (signed: true, bits: 64, value: -9223372036854775808),
+        (signed: false, bits: 64, value: -9223372036854775808),
+        (signed: true, bits: 32, value: -7),
+        (signed: true, bits: 64, value: 0),
+    }
+    loop row in rows {
+        value :: fx_widen_fixed(&b, row.signed, row.bits, row.value, false)
+        fx_print(&b, value)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_widen_program(b)
+}
+
+// The widen is inline: no runtime widen helper is called.
+fn fx_widen_fixed_check() -> Bool Never! {
+    program :: fx_widen_fixed_values()
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    if lowered.issues.len() != 0 || lir_print_module(lowered.lir).contains("jet_numeric_checked_widen_at") {
+        print("widen-fixed: a fixed-width widen lowered through the runtime helper")
+        return false
+    }
+    fx_report("widen-fixed", program)
+}
+
+fn fx_widen_stop(signed: Bool, bits: Int, value: Int, single: Bool) -> MIRProgram Never! {
+    b := fx_builder()
+    _ := fx_widen_fixed(&b, signed, bits, value, single)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_widen_program(b)
+}
+
+// fn run() { Float{I64.MAX} }
+// expect-stdout widen-i64-max-stop: ""
+// expect-exit widen-i64-max-stop: 70
+// expect-stderr widen-i64-max-stop: "Stop [E3010]: `whole number cannot cross into the decimal without losing precision`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_widen_i64_max_stop() -> MIRProgram Never! { fx_widen_stop(true, 64, 9223372036854775807, false) }
+
+// fn run() { Float{U64.MAX} }
+// expect-stdout widen-u64-max-stop: ""
+// expect-exit widen-u64-max-stop: 70
+// expect-stderr widen-u64-max-stop: "Stop [E3010]: `whole number cannot cross into the decimal without losing precision`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_widen_u64_max_stop() -> MIRProgram Never! { fx_widen_stop(false, 64, -1, false) }
+
+// fn run() { Float32{I32{16777217}} }
+// expect-stdout widen-f32-stop: ""
+// expect-exit widen-f32-stop: 70
+// expect-stderr widen-f32-stop: "Stop [E3010]: `whole number cannot cross into the decimal without losing precision`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_widen_f32_stop() -> MIRProgram Never! { fx_widen_stop(true, 32, 16777217, true) }
+
+// Fixed infix floor division, floored modulo and power are the trapping
+// Prelude routes Core.rs jet_fixed_route_kernels defines for every width
+// (FixedArithmetic.rs floor_div / floored_mod, Power.rs jet_pow).
+fn fx_numeric_fixed_trap(b: &FxBuilder, signed: Bool, bits: Int, op: MIRBinaryOp, member: String, left: Int, right: Int) -> MIRValueID Never! {
+    a :: fx_narrow_const(&b, signed, bits, left)
+    c :: fx_narrow_const(&b, signed, bits, right)
+    width :: if signed -> "i{bits}" else -> "u{bits}"
+    location :: MIRPanicLoc{file: fx_source_file(), line: 3, column: 0}
+    fx_copy(&b, fx_narrow(signed, bits), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Prelude{call: fx_prelude_id("core.numeric", "{width}.trap.{member}"), location: Val(location)}, overflow: MIRBinaryOverflow.Trap, left: a, right: c})
+}
+
+fn fx_numeric_fixed_trap_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    loop width in ([String]{"i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64"}) {
+        loop member in ([String]{"floor_div", "mod", "pow"}) {
+            &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.Overflow, "core.numeric", "{width}.trap.{member}", "jet_{width}_trap_{member}", 4, MIRPreludeABI.Value))
+        }
+    }
+    p
+}
+
+// Floor division rounds toward negative infinity and the floored remainder
+// takes the divisor's sign (I64 and I8 with negative operands, MIN / 1 and
+// MIN mod -1); unsigned operands divide and take the remainder; a power that
+// lands on the signed MIN still fits.
+// expect-stdout numeric-fixed-floor: "-4\n1\n-4\n-1\n3\n-1\n3\n1\n-9223372036854775808\n0\n-43\n1\n-64\n-1\n127\n1\n9223372036854775807\n1\n-128\n81\n2147483648\n-9223372036854775808\n"
+fn fx_numeric_fixed_floor() -> MIRProgram Never! {
+    b := fx_builder()
+    // -1 as U64 carries U64.MAX's high-bit word, as in Unsigned.jet's fixtures.
+    divisions :: [(signed: Bool, bits: Int, left: Int, right: Int)]{
+        (signed: true, bits: 64, left: -7, right: 2),
+        (signed: true, bits: 64, left: 7, right: -2),
+        (signed: true, bits: 64, left: -7, right: -2),
+        (signed: true, bits: 64, left: 7, right: 2),
+        (signed: true, bits: 8, left: -128, right: 3),
+        (signed: true, bits: 8, left: 127, right: -2),
+        (signed: false, bits: 8, left: 255, right: 2),
+        (signed: false, bits: 64, left: -1, right: 2),
+    }
+    loop (index, row) in divisions {
+        quotient :: fx_numeric_fixed_trap(&b, row.signed, row.bits, .FloorDiv, "floor_div", row.left, row.right)
+        fx_print(&b, quotient)
+        remainder :: fx_numeric_fixed_trap(&b, row.signed, row.bits, .Mod, "mod", row.left, row.right)
+        fx_print(&b, remainder)
+        if index == 3 {
+            minimum :: fx_numeric_fixed_trap(&b, true, 64, .FloorDiv, "floor_div", -9223372036854775808, 1)
+            fx_print(&b, minimum)
+            zero :: fx_numeric_fixed_trap(&b, true, 64, .Mod, "mod", -9223372036854775808, -1)
+            fx_print(&b, zero)
+        }
+    }
+    powers :: [(signed: Bool, bits: Int, left: Int, right: Int)]{
+        (signed: true, bits: 8, left: -2, right: 7),
+        (signed: true, bits: 16, left: 3, right: 4),
+        (signed: false, bits: 32, left: 2, right: 31),
+        (signed: true, bits: 64, left: -2, right: 63),
+    }
+    loop row in powers {
+        power :: fx_numeric_fixed_trap(&b, row.signed, row.bits, .Pow, "pow", row.left, row.right)
+        fx_print(&b, power)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_fixed_trap_program(b)
+}
+
+fn fx_numeric_fixed_trap_stop(signed: Bool, bits: Int, op: MIRBinaryOp, member: String, left: Int, right: Int) -> MIRProgram Never! {
+    b := fx_builder()
+    _ := fx_numeric_fixed_trap(&b, signed, bits, op, member, left, right)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_fixed_trap_program(b)
+}
+
+// fn run() { I64.MIN /% I64{-1} }
+// expect-stdout numeric-floor-min-stop: ""
+// expect-exit numeric-floor-min-stop: 70
+// expect-stderr numeric-floor-min-stop: "Stop [E3010]: `This division overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_floor_min_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 64, .FloorDiv, "floor_div", -9223372036854775808, -1) }
+
+// fn run() { I8{-128} /% I8{-1} }
+// expect-stdout numeric-floor-i8-min-stop: ""
+// expect-exit numeric-floor-i8-min-stop: 70
+// expect-stderr numeric-floor-i8-min-stop: "Stop [E3010]: `This division overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_floor_i8_min_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 8, .FloorDiv, "floor_div", -128, -1) }
+
+// Fixed floored modulo by zero (jet_i64_trap_mod).
+// expect-stdout numeric-mod-zero-stop: ""
+// expect-exit numeric-mod-zero-stop: 70
+// expect-stderr numeric-mod-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_mod_zero_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 64, .Mod, "mod", -7, 0) }
+
+// fn run() { I8{2}.pow(I8{7}) }
+// expect-stdout numeric-pow-i8-stop: ""
+// expect-exit numeric-pow-i8-stop: 70
+// expect-stderr numeric-pow-i8-stop: "Stop [E3010]: `This power overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_i8_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 8, .Pow, "pow", 2, 7) }
+
+// fn run() { I64{3}.pow(I64{40}) }
+// expect-stdout numeric-pow-i64-stop: ""
+// expect-exit numeric-pow-i64-stop: 70
+// expect-stderr numeric-pow-i64-stop: "Stop [E3010]: `This power overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_i64_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 64, .Pow, "pow", 3, 40) }
+
+// fn run() { I16{2}.pow(I16{-1}) }
+// expect-stdout numeric-pow-i16-negative-stop: ""
+// expect-exit numeric-pow-i16-negative-stop: 70
+// expect-stderr numeric-pow-i16-negative-stop: "Stop [E3010]: `A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_i16_negative_stop() -> MIRProgram Never! { fx_numeric_fixed_trap_stop(true, 16, .Pow, "pow", 2, -1) }
+
+// Raw I64 `/` truncates toward zero and `%` keeps the dividend's sign.
+// Negative non-integral cases distinguish these operators from floor division.
+// expect-stdout numeric-i64-truncation: "-2\n-1\n-2\n1\n2\n-1\n2\n1\n0\n-1\n0\n1\n"
+fn fx_numeric_i64_truncation() -> MIRProgram Never! {
+    b := fx_builder()
+    cases :: [(left: Int, right: Int)]{
+        (left: -7, right: 3), (left: 7, right: -3),
+        (left: -7, right: -3), (left: 7, right: 3),
+        (left: -1, right: 3), (left: 1, right: -3),
+    }
+    loop pair in cases {
+        left :: fx_i64_const(&b, pair.left)
+        right :: fx_i64_const(&b, pair.right)
+        quotient :: fx_copy(&b, fx_i64(), MIROperation.Binary{op: MIRBinaryOp.Div, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+        remainder :: fx_copy(&b, fx_i64(), MIROperation.Binary{op: MIRBinaryOp.Rem, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: left, right: right})
+        fx_print(&b, quotient)
+        fx_print(&b, remainder)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_program(b)
+}
+
+// Codegen's synthesized exact Int arithmetic (the read-list walk's index
+// advance, pattern counts) is Primitive, not a Prelude route; it lowers to
+// the same exact jet_int_* arithmetic.
+// expect-stdout numeric-int-primitive: "10\n4\n21\n-4\n"
+fn fx_numeric_int_primitive() -> MIRProgram Never! {
+    b := fx_builder()
+    seven :: fx_int_const(&b, 7)
+    three :: fx_int_const(&b, 3)
+    loop op in ([MIRBinaryOp]{.Add, .Sub, .Mul}) {
+        result :: fx_copy(&b, fx_int(), MIROperation.Binary{op: op, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: seven, right: three})
+        fx_print(&b, result)
+    }
+    negative :: fx_copy(&b, fx_int(), MIROperation.Binary{op: MIRBinaryOp.Sub, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: three, right: seven})
+    fx_print(&b, negative)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_program(b)
+}
+
+// fn run() {
+//   for x in [0.0, -0.0, 1.0, 1.0/0.0, -1.0/0.0, 0.0/0.0] {
+//     print(x.is_nan()); print(x.is_infinite()); print(x.is_finite())
+//   }
+//   // Also test all IEEE comparisons with NaN on each side.
+//   // Test exact Euclidean results with all sign combinations.
+//   // Test checked I64/U64 add/sub/mul/div/rem/pow including MIN rem -1.
+//   // Test wrapping, saturating, checked_policy and rotation boundaries.
+// }
+// expect-stdout numeric: "predicates\nfalse\nfalse\ntrue\nfalse\nfalse\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\nfalse\nfalse\ntrue\nfalse\ntrue\nfalse\nfalse\ncomparisons\nfalse\ntrue\nfalse\nfalse\nfalse\nfalse\nfalse\ntrue\nfalse\nfalse\nfalse\nfalse\neuclid\n-3\n2\n3\n2\n-2\n1\n2\n1\n0\nchecked\ntrue\n5\nfalse\ntrue\n-5\nfalse\ntrue\n-6\nfalse\ntrue\n-2\nfalse\nfalse\ntrue\n0\nfalse\ntrue\n-8\nfalse\nfalse\nfalse\ntrue\n-9223372036854775808\ntrue\n1\nfalse\nfalse\nfalse\ntrue\n9223372036854775807\ntrue\n1\ntrue\n9223372036854775808\nfalse\nwrapping\n-9223372036854775808\n9223372036854775807\n-2\n-9223372036854775808\n0\n0\n18446744073709551615\n18446744073709551614\n9223372036854775807\n9223372036854775808\nsaturating\n9223372036854775807\n-9223372036854775808\n-9223372036854775808\n9223372036854775807\n-9223372036854775808\n18446744073709551615\n0\n18446744073709551615\n9223372036854775807\n18446744073709551615\ntrap\n5\n-5\n-6\n-2\n0\n-8\nrotations\n-9223372036854775808\n1\n1\n-9223372036854775808\n9223372036854775808\n1\n9223372036854775808\n"
+fn fx_numeric() -> MIRProgram Never! {
+    b := fx_builder()
+    fx_numeric_label(&b, "predicates")
+    zero :: fx_numeric_float(&b, 0.0)
+    one :: fx_numeric_float(&b, 1.0)
+    negative_zero :: fx_copy(&b, mir_type_from_kind(MIRTypeKind.Float), MIROperation.Unary{op: MIRUnaryOp.Neg, value: zero})
+    infinity :: fx_numeric_float_binary(&b, MIRBinaryOp.Div, one, zero)
+    negative_infinity :: fx_copy(&b, mir_type_from_kind(MIRTypeKind.Float), MIROperation.Unary{op: MIRUnaryOp.Neg, value: infinity})
+    nan :: fx_numeric_float_binary(&b, MIRBinaryOp.Div, zero, zero)
+    floats :: [MIRValueID]{zero, negative_zero, one, infinity, negative_infinity, nan}
+    predicates :: [String]{"is_nan", "is_infinite", "is_finite"}
+    loop value in floats {
+        loop method in predicates {
+            result :: fx_copy(&b, fx_bool(), MIROperation.Semantic{operation: MIRSemanticOp.NumericMethod{call: fx_prelude_id("core.math", method), receiver: value}})
+            fx_print(&b, result)
+        }
+    }
+    fx_numeric_label(&b, "comparisons")
+    orders :: [Bool]{false, true}
+    comparisons :: [MIRBinaryOp]{MIRBinaryOp.Eq, MIRBinaryOp.Ne, MIRBinaryOp.Lt, MIRBinaryOp.Le, MIRBinaryOp.Gt, MIRBinaryOp.Ge}
+    loop swapped in orders {
+        loop op in comparisons {
+            result :: fx_compare(&b, op, if swapped -> one else -> nan, if swapped -> nan else -> one)
+            fx_print(&b, result)
+        }
+    }
+    fx_numeric_label(&b, "euclid")
+    euclidean :: [String]{"div_euclid", "rem_euclid"}
+    loop signs in 0..<4 {
+        a :: if signs < 2 -> -7 else -> 7
+        c :: if signs == 0 || signs == 3 -> 3 else -> -3
+        loop op in euclidean {
+            value :: fx_numeric_euclid(&b, op, a, c)
+            fx_print(&b, value)
+            fx_do(&b, MIROperation.Drop{value: value, kind: MIRDropKind.Value})
+        }
+    }
+    rem :: fx_numeric_euclid(&b, "rem_euclid", -4611686018427387904, -1)
+    fx_print(&b, rem)
+    fx_do(&b, MIROperation.Drop{value: rem, kind: MIRDropKind.Value})
+    fx_numeric_label(&b, "checked")
+    fx_numeric_checked(&b, false, "add", 2, 3, true)
+    fx_numeric_checked(&b, false, "add", 9223372036854775807, 1, false)
+    fx_numeric_checked(&b, false, "sub", -2, 3, true)
+    fx_numeric_checked(&b, false, "sub", -9223372036854775808, 1, false)
+    fx_numeric_checked(&b, false, "mul", -2, 3, true)
+    fx_numeric_checked(&b, false, "mul", 9223372036854775807, 2, false)
+    fx_numeric_checked(&b, false, "div", -7, 3, true)
+    fx_numeric_checked(&b, false, "div", -9223372036854775808, -1, false)
+    fx_numeric_checked(&b, false, "div", 7, 0, false)
+    fx_numeric_checked(&b, false, "rem", -9223372036854775808, -1, true)
+    fx_numeric_checked(&b, false, "rem", 7, 0, false)
+    fx_numeric_checked(&b, false, "pow", -2, 3, true)
+    fx_numeric_checked(&b, false, "pow", 9223372036854775807, 2, false)
+    fx_numeric_checked(&b, false, "pow", 2, -1, false)
+    fx_numeric_checked(&b, false, "pow", 1, 4294967296, false)
+    fx_numeric_checked(&b, false, "pow", -9223372036854775808, 1, true)
+    fx_numeric_checked(&b, false, "pow", 0, 0, true)
+    fx_numeric_checked(&b, true, "add", -1, 1, false)
+    fx_numeric_checked(&b, true, "sub", 0, 1, false)
+    fx_numeric_checked(&b, true, "mul", -1, 2, false)
+    fx_numeric_checked(&b, true, "div", -1, 2, true)
+    fx_numeric_checked(&b, true, "rem", -1, 2, true)
+    fx_numeric_checked(&b, true, "pow", 2, 63, true)
+    fx_numeric_checked(&b, true, "pow", 2, 64, false)
+    fx_numeric_label(&b, "wrapping")
+    fx_numeric_print_fixed(&b, false, "wrapping", "add", 9223372036854775807, 1)
+    fx_numeric_print_fixed(&b, false, "wrapping", "sub", -9223372036854775808, 1)
+    fx_numeric_print_fixed(&b, false, "wrapping", "mul", 9223372036854775807, 2)
+    fx_numeric_print_fixed(&b, false, "wrapping", "div", -9223372036854775808, -1)
+    fx_numeric_print_fixed(&b, false, "wrapping", "pow", 2, 64)
+    fx_numeric_print_fixed(&b, true, "wrapping", "add", -1, 1)
+    fx_numeric_print_fixed(&b, true, "wrapping", "sub", 0, 1)
+    fx_numeric_print_fixed(&b, true, "wrapping", "mul", -1, 2)
+    fx_numeric_print_fixed(&b, true, "wrapping", "div", -1, 2)
+    fx_numeric_print_fixed(&b, true, "wrapping", "pow", 2, 63)
+    fx_numeric_label(&b, "saturating")
+    fx_numeric_print_fixed(&b, false, "saturating", "add", 9223372036854775807, 1)
+    fx_numeric_print_fixed(&b, false, "saturating", "sub", -9223372036854775808, 1)
+    fx_numeric_print_fixed(&b, false, "saturating", "mul", -9223372036854775808, 2)
+    fx_numeric_print_fixed(&b, false, "saturating", "div", -9223372036854775808, -1)
+    fx_numeric_print_fixed(&b, false, "saturating", "pow", -2, 63)
+    fx_numeric_print_fixed(&b, true, "saturating", "add", -1, 1)
+    fx_numeric_print_fixed(&b, true, "saturating", "sub", 0, 1)
+    fx_numeric_print_fixed(&b, true, "saturating", "mul", -1, 2)
+    fx_numeric_print_fixed(&b, true, "saturating", "div", -1, 2)
+    fx_numeric_print_fixed(&b, true, "saturating", "pow", 2, 64)
+    fx_numeric_label(&b, "trap")
+    fx_numeric_print_fixed(&b, false, "checked_policy", "add", 2, 3)
+    fx_numeric_print_fixed(&b, false, "checked_policy", "sub", -2, 3)
+    fx_numeric_print_fixed(&b, false, "checked_policy", "mul", -2, 3)
+    fx_numeric_print_fixed(&b, false, "checked_policy", "div", -7, 3)
+    fx_numeric_print_fixed(&b, false, "checked_policy", "rem", -9223372036854775808, -1)
+    fx_numeric_print_fixed(&b, false, "checked_policy", "pow", -2, 3)
+    fx_numeric_label(&b, "rotations")
+    fx_numeric_print_fixed(&b, false, "rotate_left", "rotate", 1, 63)
+    fx_numeric_print_fixed(&b, false, "rotate_left", "rotate", 1, 0)
+    fx_numeric_print_fixed(&b, false, "rotate_left", "rotate", 1, 64)
+    fx_numeric_print_fixed(&b, false, "rotate_right", "rotate", 1, 1)
+    fx_numeric_print_fixed(&b, true, "rotate_left", "rotate", 1, 63)
+    fx_numeric_print_fixed(&b, true, "rotate_right", "rotate", 1, 64)
+    fx_numeric_print_fixed(&b, true, "rotate_left", "rotate", 1, -1)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_program(b)
+}
+
+fn fx_numeric_stop(mode: String, op: String, left: Int, right: Int) -> MIRProgram Never! {
+    b := fx_builder()
+    if mode == "exact" {
+        _ := fx_numeric_euclid(&b, op, left, right)
+    } else {
+        _ := fx_numeric_fixed(&b, false, mode, op, left, right)
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_numeric_program(b)
+}
+
+// fn run() { I64.MAX.checked_policy_add(I64{1}) }
+// expect-stdout numeric-add-stop: ""
+// expect-exit numeric-add-stop: 70
+// expect-stderr numeric-add-stop: "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_add_stop() -> MIRProgram Never! { fx_numeric_stop("checked_policy", "add", 9223372036854775807, 1) }
+
+// fn run() { I64.MIN.checked_policy_sub(I64{1}) }
+// expect-stdout numeric-sub-stop: ""
+// expect-exit numeric-sub-stop: 70
+// expect-stderr numeric-sub-stop: "Stop [E3010]: `This subtraction overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_sub_stop() -> MIRProgram Never! { fx_numeric_stop("checked_policy", "sub", -9223372036854775808, 1) }
+
+// fn run() { I64.MAX.checked_policy_mul(I64{2}) }
+// expect-stdout numeric-mul-stop: ""
+// expect-exit numeric-mul-stop: 70
+// expect-stderr numeric-mul-stop: "Stop [E3010]: `This multiplication overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_mul_stop() -> MIRProgram Never! { fx_numeric_stop("checked_policy", "mul", 9223372036854775807, 2) }
+
+// fn run() { I64.MIN.checked_policy_div(I64{-1}) }
+// expect-stdout numeric-div-stop: ""
+// expect-exit numeric-div-stop: 70
+// expect-stderr numeric-div-stop: "Stop [E3010]: `This division overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_div_stop() -> MIRProgram Never! { fx_numeric_stop("checked_policy", "div", -9223372036854775808, -1) }
+
+// fn run() { I64{7}.checked_policy_div(I64{0}) }
+// expect-stdout numeric-zero-stop: ""
+// expect-exit numeric-zero-stop: 70
+// expect-stderr numeric-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_zero_stop() -> MIRProgram Never! { fx_numeric_stop("checked_policy", "div", 7, 0) }
+
+// fn run() { I64{7}.checked_policy_rem(I64{0}) }
+// expect-stdout numeric-rem-zero-stop: ""
+// expect-exit numeric-rem-zero-stop: 70
+// expect-stderr numeric-rem-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_rem_zero_stop() -> MIRProgram Never! { fx_numeric_stop("checked_policy", "rem", 7, 0) }
+
+// fn run() { I64{7}.wrapping_div(I64{0}) }
+// expect-stdout numeric-wrapping-zero-stop: ""
+// expect-exit numeric-wrapping-zero-stop: 70
+// expect-stderr numeric-wrapping-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_wrapping_zero_stop() -> MIRProgram Never! { fx_numeric_stop("wrapping", "div", 7, 0) }
+
+// fn run() { I64{7}.saturating_div(I64{0}) }
+// expect-stdout numeric-saturating-zero-stop: ""
+// expect-exit numeric-saturating-zero-stop: 70
+// expect-stderr numeric-saturating-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_saturating_zero_stop() -> MIRProgram Never! { fx_numeric_stop("saturating", "div", 7, 0) }
+
+// fn run() { I64.MAX.checked_policy_pow(I64{2}) }
+// expect-stdout numeric-pow-stop: ""
+// expect-exit numeric-pow-stop: 70
+// expect-stderr numeric-pow-stop: "Stop [E3010]: `This power overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_stop() -> MIRProgram Never! { fx_numeric_stop("checked_policy", "pow", 9223372036854775807, 2) }
+
+// fn run() { I64{2}.wrapping_pow(I64{-1}) }
+// expect-stdout numeric-pow-negative-stop: ""
+// expect-exit numeric-pow-negative-stop: 70
+// expect-stderr numeric-pow-negative-stop: "Stop [E3010]: `A negative exponent has no whole-number result (make the base a Float to raise it to a negative power)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_negative_stop() -> MIRProgram Never! { fx_numeric_stop("wrapping", "pow", 2, -1) }
+
+// fn run() { I64{1}.saturating_pow(I64{4294967296}) }
+// expect-stdout numeric-pow-range-stop: ""
+// expect-exit numeric-pow-range-stop: 70
+// expect-stderr numeric-pow-range-stop: "Stop [E3010]: `This power overflows the value's type (the result is outside its range)`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_pow_range_stop() -> MIRProgram Never! { fx_numeric_stop("saturating", "pow", 1, 4294967296) }
+
+// fn run() { I64{1}.rotate_left(I64{-1}) }
+// expect-stdout numeric-rotate-stop: ""
+// expect-exit numeric-rotate-stop: 70
+// expect-stderr numeric-rotate-stop: "Stop [E3010]: `A rotation count cannot be negative`\n  --> fixture.jet:3\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_rotate_stop() -> MIRProgram Never! { fx_numeric_stop("rotate_left", "rotate", 1, -1) }
+
+// fn run() { (-7).div_euclid(0) }
+// expect-stdout numeric-euclid-zero-stop: ""
+// expect-exit numeric-euclid-zero-stop: 70
+// expect-stderr numeric-euclid-zero-stop: "Stop [E3010]: `divided by zero`\n  --> fixture.jet:1\n Why: The operands or position do not produce a valid result, so the safe runtime stops instead of returning corrupted data — with Jet file and line.\n Fix: Check the operands or bounds before the operation, or use a checked operation that returns an outcome.\nMore: jet-lang.dev/e/E3010\n"
+fn fx_numeric_euclid_zero_stop() -> MIRProgram Never! { fx_numeric_stop("exact", "div_euclid", -7, 0) }
+
+// Canonical saturated nanoseconds, including both I64 boundaries. The modeled
+// constructors use the same Result/Duration carrier as real-source lowering.
+// expect-stdout duration-arithmetic: "0ns\n0ns\ntrue\n-4ns\n-10ns\nfalse\n9223372036854775807ns\n9223372036854775806ns\nfalse\n-9223372036854775808ns\n-9223372036854775807ns\nfalse\n-1ns\n9223372036854775807ns\nfalse\n-1ns\n-9223372036854775808ns\nfalse\n"
+// expect-runtime-only duration-arithmetic
+// expect-requires-route duration-arithmetic jet_rt_int_drop
+fn fx_duration_operand(b: &FxBuilder, number: Int) -> (owner: MIRValueID, value: MIRValueID) Never! {
+    integer :: fx_int_const(&b, number)
+    unit :: fx_copy(&b, fx_named("DurationUnit"), MIROperation.Enum{type_id: mir_type_id("DurationUnit"), variant: "Nanoseconds", args: [MIREnumArg]{}})
+    duration :: fx_named("Duration")
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: duration, err: fx_named("RangeError")})
+    owner :: fx_owned(&b, result, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.time", "duration_from_int"), args: [MIRCallArg]{fx_arg(integer, .Read), fx_arg(unit, .Read)}, owner_type_args: [MIRPreludeTypeArg]{}, type_args: [MIRType]{}}})
+    fx_do(&b, MIROperation.Drop{value: integer, kind: MIRDropKind.Value})
+    value :: fx_value(&b, duration, fx_borrow(), MIROperation.ResultValue{subject: owner, ok: true})
+    (owner: owner, value: value)
+}
+
+fn fx_duration_arithmetic() -> MIRProgram Never! {
+    b := fx_builder()
+    pairs :: [[Int]]{[Int]{0, 0}, [Int]{-7, 3}, [Int]{9223372036854775807, 1}, [Int]{-9223372036854775808, -1}, [Int]{9223372036854775807, -9223372036854775808}, [Int]{-9223372036854775808, 9223372036854775807}}
+    loop pair in pairs {
+        left :: fx_duration_operand(&b, pair[0])
+        right :: fx_duration_operand(&b, pair[1])
+        sum :: fx_owned(&b, fx_named("Duration"), MIROperation.Binary{op: .Add, left: left.value, right: right.value, dispatch: .Primitive, overflow: .Unchecked})
+        fx_print(&b, sum)
+        fx_do(&b, MIROperation.Drop{value: sum, kind: MIRDropKind.Value})
+        difference :: fx_owned(&b, fx_named("Duration"), MIROperation.Binary{op: .Sub, left: left.value, right: right.value, dispatch: .Primitive, overflow: .Unchecked})
+        fx_print(&b, difference)
+        fx_do(&b, MIROperation.Drop{value: difference, kind: MIRDropKind.Value})
+        equal :: fx_copy(&b, fx_bool(), MIROperation.Binary{op: .Eq, left: left.value, right: right.value, dispatch: .Primitive, overflow: .Unchecked})
+        fx_print(&b, equal)
+        fx_do(&b, MIROperation.Drop{value: left.owner, kind: MIRDropKind.Value})
+        fx_do(&b, MIROperation.Drop{value: right.owner, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    units :: [String]{"Nanoseconds", "Microseconds", "Milliseconds", "Seconds", "Minutes", "Hours"}
+    variants := [MIRVariant]{}
+    loop unit in units -> &variants.push(fx_variant(unit, MIRVariantPayload.Unit))
+    definition :: fx_type_def("DurationUnit", MIRTypeDefKind.Enum{variants: variants, methods: [MIRFunctionID]{}})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{definition})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.time", "duration_from_int", "jet_duration_from_int", 2, MIRPreludeABI.Value))
+    p
+}
+
+fn fx_duration_arithmetic_check() -> Bool Never! {
+    program :: fx_duration_arithmetic()
+    if lower_runtime_route("jet_rt_int_drop") != None -> return fx_report_runtime("duration-arithmetic", program)
+    lowered :: lir_lower_entry(program, mir_function_id("run"))
+    expected :: "Duration arithmetic requires the canonical exact-Int lifetime runtime ABI"
+    loop issue in lowered.issues {
+        if issue.message == expected {
+            print("duration-arithmetic: REFUSED until the canonical exact-Int lifetime ABI is present")
+            return true
+        }
+    }
+    print("duration-arithmetic: missing expected lifetime-ABI refusal")
+    false
+}

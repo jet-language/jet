@@ -11,7 +11,9 @@ fn load() -> [Task] (IOError | [FieldError])! {
 }
 
 fn save(tasks: [Task]) IOError! {
-    files.write("tasks.json", json.to_string(Store{tasks: tasks}))
+    // Task's closed schema contains only Int, Text, and Bool leaves.
+    wire :: json.to_string(Store{tasks: tasks}) ?? panic("typed tasks must be JSON-encodable")
+    files.write("tasks.json", wire)
 }
 
 fn run() (IOError | [FieldError])! {
@@ -23,7 +25,7 @@ fn run() (IOError | [FieldError])! {
         "add" -> {
             text :: args.get(1) ?? ""
             id :: tasks.len() + 1
-            &tasks.push(Task{id: id, text: ~text, done: false})
+            &tasks.push(Task{id: id, text: text.copy(), done: false})
             save(tasks)
             print("added {id} {text}")
         }

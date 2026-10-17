@@ -1,0 +1,13 @@
+# Port of tests/cli_parts/bindings.rs:316-337 and fake_rustc_fixture.
+# PENDING-GRAMMAR: step-scoped environment.
+requires: os:unix
+fixture: fixtures/fake_rustc_bad
+chmod: bin/rustc 755
+step: jet self doctor --target=web
+env: PATH={work}/bin
+env: HOME={work}
+env: JET_FAKE_SYSROOT={work}/sysroot
+exit: 1
+stdout: ~ web: could not run the rustc target metadata probe # Doctor prefix contains host cache paths and counts; preserve original problem assertion.
+stdout: !~ [note] web: # Same volatile prefix; preserve original no-downgrade assertion.
+stdout: !~ rustc-probe-sentinel # Same volatile prefix; preserve original hidden-child-stderr assertion.

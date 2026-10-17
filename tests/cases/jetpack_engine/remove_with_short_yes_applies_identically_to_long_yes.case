@@ -1,0 +1,20 @@
+# HAND-PORT tests/jetpack_engine.rs:4039-4086 remove_with_short_yes_applies_identically_to_long_yes
+# PENDING-GRAMMAR: approved batch-two/four forms.
+fixture: remove_with_short_yes_applies_identically_to_long_yes.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack add hello@mine --no-color
+cwd: project
+exit: 0
+step: jetpack remove hello@mine --no-color -y
+cwd: project
+exit: 0
+file: project/env.jet !~ "\"hello@mine\"" # original predicate
+stderr: ~ "Plan env edit" # original predicate
+stderr: ~ "- hello" # original predicate
+stderr: ~any "applying plan (--yes)" "removed" # original predicate
+

@@ -1,0 +1,141 @@
+// R5-reviewed native addresses, independent of Rust enum/struct layouts.
+// IP24: family0 (4/6), network-order octets8..23, unused IPv4 octets zero.
+// Socket56: inline IP0..23, raw unsigned port24, flow32, scope40, reserved48.
+fn net_word(value: I64, offset: I64) -> I64 {
+    #Unsafe("value lends a complete initialized network header") { return os_load_i64(wrapping(value + offset)) }
+}
+fn net_put(value: I64, offset: I64, word: I64) {
+    #Unsafe("value exclusively owns the network header or its mutex") { os_store_i64(wrapping(value + offset), word) }
+}
+fn net_copy(value: I64, size: I64) -> I64 {
+    result :: jet_rt_alloc(size, I64{8})
+    rt_text_bytes_copy(result, value, size)
+    result
+}
+fn net_equal(a: I64, b: I64, size: I64) -> Bool {
+    at := I64{0}
+    loop at < size {
+        if (net_word(a, at) != net_word(b, at)) -> return false
+        at = wrapping(at + I64{8})
+    }
+    true
+}
+#Export(c) fn jet_rt_handle_clone_jet_ip_addr(value: I64) -> I64 { net_copy(value, I64{24}) }
+#Export(c) fn jet_rt_handle_drop_jet_ip_addr(value: I64) { if (value != I64{0}) -> jet_rt_free(value, I64{24}, I64{8}) }
+#Export(c) fn jet_rt_handle_eq_jet_ip_addr(a: I64, b: I64) -> Bool { net_equal(a, b, I64{24}) }
+#Export(c) fn jet_rt_handle_clone_jet_socket_addr(value: I64) -> I64 { net_copy(value, I64{56}) }
+#Export(c) fn jet_rt_handle_drop_jet_socket_addr(value: I64) { if (value != I64{0}) -> jet_rt_free(value, I64{56}, I64{8}) }
+#Export(c) fn jet_rt_handle_eq_jet_socket_addr(a: I64, b: I64) -> Bool { net_equal(a, b, I64{56}) }
+
+// The C boundary borrows native List<U8> data; Lower owns its capacity/drop.
+#Export(c) fn jet_net_raw_ip_from_bytes(bytes: I64, length: I64) -> I64 {
+    if (length != I64{4} && length != I64{16}) -> host_record_index_refused()
+    value :: jet_rt_alloc(I64{24}, I64{8})
+    net_put(value, I64{0}, if (length == I64{4}) -> I64{4} else -> I64{6})
+    net_put(value, I64{8}, I64{0})
+    net_put(value, I64{16}, I64{0})
+    at := I64{0}
+    #Unsafe("value owns sixteen octets; bytes lends length initialized U8 elements") {
+        loop at < length {
+            os_store_u8(wrapping(value + I64{8} + at), host_u8_get(bytes, at))
+            at = wrapping(at + I64{1})
+        }
+    }
+    value
+}
+#Export(c) fn jet_net_raw_ip_bytes(value: I64, data_out: I64) -> I64 {
+    length :: if (net_word(value, I64{0}) == I64{4}) -> I64{4} else -> I64{16}
+    data :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+    at := I64{0}
+    #Unsafe("value lends IP24; data owns length initialized native U8 elements; output receives ownership") {
+        loop at < length {
+            host_u8_put(data, at, os_load_u8(wrapping(value + I64{8} + at)))
+            at = wrapping(at + I64{1})
+        }
+        os_store_i64(data_out, data)
+    }
+    length
+}
+#Export(c) fn jet_net_raw_ip_is_v4(value: I64) -> Bool { net_word(value, I64{0}) == I64{4} }
+// Explicit PARAM-ONLY narrow widening: each unsigned scalar discards upper bits.
+#Export(c) fn jet_net_raw_socket_from_parts(ip: I64, port: I64, flow: I64, scope: I64) -> I64 {
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    rt_text_bytes_copy(value, ip, I64{24})
+    ipv4 :: net_word(ip, I64{0}) == I64{4}
+    net_put(value, I64{24}, port.bit_and(I64{65535}))
+    net_put(value, I64{32}, if ipv4 -> I64{0} else -> flow.bit_and(I64{4294967295}))
+    net_put(value, I64{40}, if ipv4 -> I64{0} else -> scope.bit_and(I64{4294967295}))
+    net_put(value, I64{48}, I64{0})
+    value
+}
+#Export(c) fn jet_net_raw_socket_ip(value: I64) -> I64 { net_copy(value, I64{24}) }
+#Export(c) fn jet_net_raw_socket_port(value: I64) -> I64 { net_word(value, I64{24}) }
+#Export(c) fn jet_net_raw_socket_scope(value: I64, output: I64) -> I64 {
+    if (net_word(value, I64{0}) == I64{4}) -> return I64{0}
+    net_put(output, I64{0}, net_word(value, I64{40}))
+    I64{1}
+}
+
+// Linux sockaddr fields are packed, not naturally aligned eight-byte words.
+fn net_load_uint(bytes: I64, width: I64) -> I64 {
+    result := I64{0}
+    at := I64{0}
+    #Unsafe("bytes lends width initialized little-endian bytes (width<=8)") {
+        loop at < width {
+            result = result.bit_or((os_load_u8(wrapping(bytes + at)) << (at * I64{8})))
+            at = wrapping(at + I64{1})
+        }
+    }
+    result
+}
+fn net_store_uint(bytes: I64, width: I64, value: I64) {
+    at := I64{0}
+    #Unsafe("bytes owns width writable little-endian bytes (width<=8)") {
+        loop at < width {
+            os_store_u8(wrapping(bytes + at), (value >> (at * I64{8})).bit_and(I64{255}))
+            at = wrapping(at + I64{1})
+        }
+    }
+}
+fn net_swap16(value: I64) -> I64 { ((value.bit_and(I64{255})) << I64{8}).bit_or(((value >> I64{8}).bit_and(I64{255}))) }
+// Fills caller-owned 32B scratch; IPv4=16B, IPv6=28B. No heap conversion.
+#Export(c) fn jet_socket_address_encode_raw(value: I64, output: I64) -> I64 {
+    net_put(output, I64{0}, I64{0})
+    net_put(output, I64{8}, I64{0})
+    net_put(output, I64{16}, I64{0})
+    net_put(output, I64{24}, I64{0})
+    ipv4 :: net_word(value, I64{0}) == I64{4}
+    net_store_uint(output, I64{2}, if ipv4 -> I64{2} else -> I64{10})
+    net_store_uint(wrapping(output + I64{2}), I64{2}, net_swap16(net_word(value, I64{24})))
+    if ipv4 {
+        rt_text_bytes_copy(wrapping(output + I64{4}), wrapping(value + I64{8}), I64{4})
+        return I64{16}
+    }
+    // Rust 1.90 socket.rs socket_addr_v6_to_c passes flowinfo raw; only port
+    // is network-order. https://github.com/rust-lang/rust/blob/1.90.0/library/std/src/sys/net/connection/socket.rs
+    net_store_uint(wrapping(output + I64{4}), I64{4}, net_word(value, I64{32}))
+    rt_text_bytes_copy(wrapping(output + I64{8}), wrapping(value + I64{8}), I64{16})
+    net_store_uint(wrapping(output + I64{24}), I64{4}, net_word(value, I64{40}))
+    I64{28}
+}
+// Copies one OS answer into inline Socket56, preserving v6 flow/scope.
+fn net_socket_decode(bytes: I64, length: I64, output: I64) -> Bool {
+    family :: if (length >= I64{2}) -> net_load_uint(bytes, I64{2}) else -> I64{0}
+    if ((family == I64{2} && length < I64{16}) || (family == I64{10} && length < I64{28}) || (family != I64{2} && family != I64{10})) -> return false
+    at := I64{0}
+    loop at < (I64{56}) {
+        net_put(output, at, I64{0})
+        at = wrapping(at + I64{8})
+    }
+    net_put(output, I64{0}, if (family == I64{2}) -> I64{4} else -> I64{6})
+    net_put(output, I64{24}, net_swap16(net_load_uint(wrapping(bytes + I64{2}), I64{2})))
+    if (family == I64{2}) {
+        rt_text_bytes_copy(wrapping(output + I64{8}), wrapping(bytes + I64{4}), I64{4})
+    } else {
+        rt_text_bytes_copy(wrapping(output + I64{8}), wrapping(bytes + I64{8}), I64{16})
+        net_put(output, I64{32}, net_load_uint(wrapping(bytes + I64{4}), I64{4}))
+        net_put(output, I64{40}, net_load_uint(wrapping(bytes + I64{24}), I64{4}))
+    }
+    true
+}
+#Export(c) fn jet_socket_address_decode_raw(bytes: I64, length: I64, output: I64) -> Bool { net_socket_decode(bytes, length, output) }

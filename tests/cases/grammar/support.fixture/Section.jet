@@ -1,0 +1,23 @@
+// ORACLE-PORT tests/grammar.rs:25-42,95-123: exact marker-line slice.
+// Prints a JSON string only; every equality/inequality remains in the case.
+use core.files as files
+use core.sys as sys
+use core.encoding.json as json
+
+fn run() {
+    text :: files.read(sys.get("S5_FILE") ?? panic("file")) ?? panic("read grammar")
+    begin :: "BEGIN GENERATED JET SYNTAX HIGHLIGHTS"
+    finish :: "END GENERATED JET SYNTAX HIGHLIGHTS"
+    start :: text.find(begin) ?? panic("missing start marker")
+    line_start := 0
+    loop index in 0..<start {
+        if text.bytes()[index] == (U8{10}) -> line_start = index + 1
+    }
+    after :: text.slice(start..<text.len())
+    end :: after.find(finish) ?? panic("missing end marker")
+    end_marker :: start + end + finish.len()
+    suffix :: text.slice(end_marker..<text.len())
+    line_end :: if suffix.find("\n") == .Val(index) -> end_marker + index else -> text.len()
+    section :: text.slice(line_start..<line_end)
+    print(json.to_string(section))
+}

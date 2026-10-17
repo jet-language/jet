@@ -1,0 +1,8 @@
+# Port of crypto_diagnostics.rs:74-108. PENDING-GRAMMAR: token-sensitive raw stream predicates.
+fixture: fixtures/absolute-path
+# Materialize the original empty .git root marker under scratch, never a nested checkout fixture.
+copy: project-marker project/.git/marker
+step: jet check {work}/project/src/main.jet --json
+exit: 1
+stderr: ~ "\"file\":\"src/main.jet\"" # Original project-relative diagnostic path assertion.
+stderr: !~ {work} # Original forbids the absolute scratch root; token predicate uses RAW stderr.

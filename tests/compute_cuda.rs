@@ -9,7 +9,7 @@ mod common;
 mod tir_support;
 
 use tir_support::{
-    assert_example_cli_tiers_agree, build_and_run_full, have_rustc, interpreter_run, jit_run,
+    assert_example_cli_tiers_agree, build_and_run_full, have_rustc, default_run,
 };
 
 #[test]
@@ -41,7 +41,7 @@ fn run() {
     one_seed :: compute.matrix(1, 1, 1.0) ?? panic("one_seed")
     one :: compute.matmul_f32_tile(one_seed, one_seed) ?? panic("one")
     cpu_gradient_input :: compute.full([1, 1], 6.0) ?? panic("cpu_gradient_input")
-    cpu_gradient_result :: compute.gradient(cuda_loss, ~cpu_gradient_input)
+    cpu_gradient_result :: compute.gradient(cuda_loss, cpu_gradient_input.copy())
     cpu_gradient :: cpu_gradient_result.value
     cpu_gradient_tail :: compute.get(cpu_gradient, [0, 0]) ?? panic("cpu_gradient_tail")
     request :: compute.on_device(f32_row, compute.device_cuda())
@@ -81,7 +81,7 @@ fn run() {
             if sum_tail < 9251.999 || sum_tail > 9252.001 -> panic("cuda sum parity")
             print("cuda:sum_tail:{sum_tail}")
 
-            gradient_result :: compute.gradient(cuda_loss, ~cuda_row)
+            gradient_result :: compute.gradient(cuda_loss, cuda_row.copy())
             gradient :: gradient_result.value
             gradient_tail :: compute.get(gradient, [0, 256]) ?? panic("gradient_tail")
             if gradient_tail < cpu_gradient_tail - 0.001 || gradient_tail > cpu_gradient_tail + 0.001 -> panic("cuda gradient parity")
@@ -90,7 +90,7 @@ fn run() {
             mse :: cuda_mse(cuda_row, cuda_target)
             mse_value :: compute.get(mse, [0]) ?? panic("mse_value")
             if mse_value < 15.999 || mse_value > 16.001 -> panic("cuda mse parity")
-            (mse_gradient, mse_target_gradient) :: compute.gradient(cuda_mse, ~cuda_row, ~cuda_target)
+            (mse_gradient, mse_target_gradient) :: compute.gradient(cuda_mse, cuda_row.copy(), cuda_target.copy())
             mse_gradient_tail :: compute.get(mse_gradient, [0, 256]) ?? panic("mse_gradient_tail")
             mse_target_gradient_tail :: compute.get(mse_target_gradient, [0, 256]) ?? panic("mse_target_gradient_tail")
             if mse_gradient_tail < 0.030 || mse_gradient_tail > 0.032 -> panic("cuda mse gradient")
@@ -103,14 +103,14 @@ fn run() {
             if mse_jvp_value_tail < 15.999 || mse_jvp_value_tail > 16.001 -> panic("cuda mse jvp value")
             if mse_jvp_tangent_tail < 47.999 || mse_jvp_tangent_tail > 48.001 -> panic("cuda mse jvp")
 
-            vjp_run :: compute.vjp(cuda_mse, ~cuda_row, ~cuda_target)
+            vjp_run :: compute.vjp(cuda_mse, cuda_row.copy(), cuda_target.copy())
             (vjp_gradient, vjp_target_gradient) :: vjp_run.grads
             vjp_gradient_tail :: compute.get(vjp_gradient, [0, 256]) ?? panic("vjp_gradient_tail")
             vjp_target_gradient_tail :: compute.get(vjp_target_gradient, [0, 256]) ?? panic("vjp_target_gradient_tail")
             if vjp_gradient_tail < 0.030 || vjp_gradient_tail > 0.032 -> panic("cuda vjp")
             if vjp_target_gradient_tail > -0.030 || vjp_target_gradient_tail < -0.032 -> panic("cuda vjp target")
             pull_fn :: vjp_run.pull
-            (pull_gradient, _) :: pull_fn(~cuda_one)
+            (pull_gradient, _) :: pull_fn(cuda_one.copy())
             pull_gradient_tail :: compute.get(pull_gradient, [0, 256]) ?? panic("pull_gradient_tail")
             if pull_gradient_tail < 0.030 || pull_gradient_tail > 0.032 -> panic("cuda vjp pull")
 
@@ -136,7 +136,7 @@ fn run() {
 }
 "#;
 
-    let (jit_code, jit_stdout, jit_stderr) = jit_run("compute_cuda_backend", source);
+    let (jit_code, jit_stdout, jit_stderr) = default_run("compute_cuda_backend", source);
     assert_eq!(jit_code, 0, "default jet run failed: {jit_stderr}");
     assert!(
         jit_stdout.contains("cuda:unavailable") || jit_stdout.contains("cuda:available"),
@@ -144,7 +144,7 @@ fn run() {
     );
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("compute_cuda_backend", source);
+        default_run("compute_cuda_backend", source);
     assert_eq!(
         interpreter_code, jit_code,
         "interpreter/JIT exit drift: {interpreter_stderr}"

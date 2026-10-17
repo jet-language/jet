@@ -1,0 +1,164 @@
+// D-NETDNS2/D-OS-FLOOR1: platform resolver, not a private hosts/DNS policy.
+// musl imports are ledgered until the native linker hosts glibc dynamically.
+// Rust 1.90 std/sys/net/connection/socket.rs LookupHost: zeroed hints with
+// SOCK_STREAM, null service; apply the requested port after ordered copying.
+// socket/unix.rs cvt_gai: EAI_SYSTEM preserves errno; others prefix gai text.
+#Import(c) fn net_getaddrinfo(host: I64, service: I64, hints: I64, result: I64) -> I64 = "getaddrinfo"
+#Import(c) fn net_freeaddrinfo(result: I64) = "freeaddrinfo"
+#Import(c) fn net_gai_strerror(code: I64) -> I64 = "gai_strerror"
+#Import(c) fn net_errno_location() -> I64 = "__errno_location"
+
+// Checked FunctionAddress intrinsic in the canonical RuntimeLibrary table.
+fn rt_net_resolver_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+fn net_i32(value: I64) -> I64 { ((value.bit_and(I64{4294967295})).bit_xor(I64{2147483648})) - I64{2147483648} }
+fn net_os_kind(errno: I64) -> I64 {
+    if (errno == I64{22} || errno == I64{84}) -> return I64{1}
+    if (errno == I64{1} || errno == I64{13}) -> return I64{2}
+    if (errno == I64{98}) -> return I64{3}
+    if (errno == I64{99}) -> return I64{4}
+    if (errno == I64{111}) -> return I64{5}
+    if (errno == I64{32} || errno == I64{103} || errno == I64{104}) -> return I64{6}
+    if (errno == I64{107}) -> return I64{7}
+    if (errno == I64{11} || errno == I64{110}) -> return I64{8}
+    if (errno == I64{38} || errno == I64{95}) -> return I64{9}
+    I64{0}
+}
+fn net_resolve_error(kind: I64, present: I64, code: I64, message: I64) -> I64 {
+    value :: jet_rt_record_new_jet_resolve_error(kind, present, code, message)
+    jet_rt_string_drop(message)
+    value
+}
+fn net_gai_error(status: I64) -> I64 {
+    if (status == I64{-11}) {
+        errno :: net_i32(net_load_uint(net_errno_location(), I64{4}))
+        return net_resolve_error(net_os_kind(errno), I64{1}, errno, host_errno_cause(errno))
+    }
+    bytes :: net_gai_strerror(status)
+    message :: host_resolver_prefix()
+    jet_rt_string_builder_push_static(message, bytes, host_startup_byte_length(bytes))
+    net_resolve_error(I64{0}, I64{0}, I64{0}, jet_rt_string_builder_finish(message))
+}
+
+// Job136: refs0, mutex8, done16, owned NUL-host24, hostLength32, port40,
+// owned Socket56 rows48, rowCount56, owned ResolveError64, ParkSlot72,
+// zeroed addrinfo hints80..127, addrinfo* output128. Worker and caller own
+// independent refs; a cancelled/deadline caller abandons without joining.
+fn net_resolver_job_drop(job: I64) {
+    if (sync_add(job, I64{-1}) != I64{1}) -> return
+    jet_rt_free(net_word(job, I64{24}), net_word(job, I64{32}) + I64{1}, I64{1})
+    rows :: net_word(job, I64{48})
+    if (rows != I64{0}) -> jet_rt_free(rows, net_word(job, I64{56}) * I64{56}, I64{8})
+    jet_rt_handle_drop_jet_resolve_error(net_word(job, I64{64}))
+    sync_park_drop(net_word(job, I64{72}))
+    jet_rt_free(job, I64{136}, I64{8})
+}
+#Export(c) fn jet_rt_net_resolver_worker(job: I64) -> I64 {
+    status :: net_i32(net_getaddrinfo(net_word(job, I64{24}), I64{0}, wrapping(job + I64{80}), wrapping(job + I64{128})))
+    error := I64{0}
+    rows := I64{0}
+    count := I64{0}
+    answers :: net_word(job, I64{128})
+    if (status != I64{0}) { error = net_gai_error(status) } else {
+        cursor := answers
+        // addrinfo48: flags0/family4/socktype8/protocol12/addrlen16,
+        // ai_addr24, canonname32, next40. Only AF_INET/AF_INET6 survive
+        // Rust's sockaddr conversion; never sort or dedupe valid answers.
+        loop cursor != (I64{0}) {
+            family :: net_load_uint(wrapping(cursor + I64{4}), I64{4})
+            length :: net_load_uint(wrapping(cursor + I64{16}), I64{4})
+            if ((family == I64{2} && length >= I64{16}) || (family == I64{10} && length >= I64{28})) -> count = count + I64{1}
+            cursor = net_word(cursor, I64{40})
+        }
+        if (count != I64{0}) -> rows = jet_rt_alloc(count * I64{56}, I64{8})
+        cursor = answers
+        at := I64{0}
+        loop cursor != (I64{0}) {
+            family :: net_load_uint(wrapping(cursor + I64{4}), I64{4})
+            length :: net_load_uint(wrapping(cursor + I64{16}), I64{4})
+            if ((family == I64{2} && length >= I64{16}) || (family == I64{10} && length >= I64{28})) {
+                row :: wrapping(rows + at * I64{56})
+                if !net_socket_decode(net_word(cursor, I64{24}), length, row) -> host_record_index_refused()
+                net_put(row, I64{24}, net_word(job, I64{40}))
+                at = at + I64{1}
+            }
+            cursor = net_word(cursor, I64{40})
+        }
+    }
+    // libc owns the answer chain even if copying produced no usable answers.
+    if (answers != I64{0}) -> net_freeaddrinfo(answers)
+    sync_mutex_lock(wrapping(job + I64{8}))
+    net_put(job, I64{48}, rows)
+    net_put(job, I64{56}, count)
+    net_put(job, I64{64}, error)
+    net_put(job, I64{16}, I64{1})
+    sync_park_wake(net_word(job, I64{72}))
+    sync_mutex_unlock(wrapping(job + I64{8}))
+    net_resolver_job_drop(job)
+    I64{0}
+}
+#Export(c) fn jet_net_raw_resolve_ordered(host: I64, port: I64, rows_out: I64, length_out: I64, error_out: I64) -> I64 {
+    // Source has already validated host/port. The NUL case still has std's
+    // exact InvalidInput meaning at this foreign-string boundary.
+    length :: rt_text_len(host)
+    at := I64{0}
+    #Unsafe("host lends length E4 bytes; outputs lend their writable pointer/count words") {
+        loop at < length {
+            if (os_load_u8(wrapping(rt_text_data(host) + at)) == I64{0}) {
+                os_store_i64(error_out, net_resolve_error(I64{1}, I64{0}, I64{0}, host_resolver_nul()))
+                return I64{0}
+            }
+            at = at + I64{1}
+        }
+    }
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    wait_kind :: host_net_wait_kind()
+    if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_deadline_check(wait_kind) != I64{0}) {
+        jet_rt_string_drop(wait_kind)
+        return I64{0}
+    }
+    job :: jet_rt_alloc(I64{136}, I64{8})
+    thread_zero(job, I64{136})
+    net_put(job, I64{0}, I64{2})
+    name :: jet_rt_alloc(length + I64{1}, I64{1})
+    rt_text_bytes_copy(name, rt_text_data(host), length)
+    #Unsafe("name owns a trailing NUL byte") { os_store_u8(wrapping(name + length), I64{0}) }
+    net_put(job, I64{24}, name)
+    net_put(job, I64{32}, length)
+    net_put(job, I64{40}, port.bit_and(I64{65535}))
+    net_put(job, I64{72}, sync_park_new())
+    net_store_uint(wrapping(job + I64{88}), I64{4}, I64{1})
+    worker :: thread_spawn(rt_net_resolver_worker_address(), job)
+    if (worker < I64{0}) {
+        net_put(error_out, I64{0}, net_resolve_error(net_os_kind(-worker), I64{1}, -worker, host_errno_cause(-worker)))
+        net_resolver_job_drop(job)
+        net_resolver_job_drop(job)
+        jet_rt_string_drop(wait_kind)
+        return I64{0}
+    }
+    _ := thread_detach(worker)
+    loop jet_scheduler_native_propagate() == (I64{0}) {
+        if (scheduler_wait_point_cancel_check() != I64{0}) -> break
+        if (sync_load(wrapping(job + I64{16})) != I64{0}) -> break
+        if (scheduler_yield(wait_kind, net_word(job, I64{72}), I64{-1}) != I64{0}) -> break
+    }
+    _ := scheduler_deadline_check(wait_kind)
+    result := I64{0}
+    if (jet_scheduler_native_propagate() == I64{0}) {
+        sync_mutex_lock(wrapping(job + I64{8}))
+        if (net_word(job, I64{16}) != I64{1}) -> host_record_index_refused()
+        if (net_word(job, I64{64}) != I64{0}) {
+            net_put(error_out, I64{0}, net_word(job, I64{64}))
+            net_put(job, I64{64}, I64{0})
+        } else {
+            net_put(rows_out, I64{0}, net_word(job, I64{48}))
+            net_put(length_out, I64{0}, net_word(job, I64{56}))
+            net_put(job, I64{48}, I64{0})
+            result = I64{1}
+        }
+        sync_mutex_unlock(wrapping(job + I64{8}))
+    }
+    net_resolver_job_drop(job)
+    jet_rt_string_drop(wait_kind)
+    result
+}

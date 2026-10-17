@@ -1,0 +1,34 @@
+# Port of tests/lsp.rs:4280-4412; source bytes/order/assertions unchanged.
+# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+fixture: lsp_definition_imported_identity_collisions_are_exact.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp until $.id = 1
+stdout: ~ "definitionProvider" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"use scoring as grades\\nuse \\\"util\\\"\\nfn run() {\\n    print(grades.letter(91))\\n    print(util.letter(91))\\n}\\nfn local(letter: Int) {\\n    print(letter)\\n}\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/scoring.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"pub fn letter(score: Int) -> String { \\\"A\\\" }\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/util.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"pub fn letter(score: Int) -> String { \\\"unrelated\\\" }\\n\"}}}"
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":3,\"character\":19}}}"
+recv lsp until $.id = 2
+json: stdout doc $.result.uri = "file://{work}/scoring.jet" # original literal oracle
+json: stdout doc $.result.range = {"start":{"line":0,"character":7},"end":{"line":0,"character":13}} # original literal oracle
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":4,\"character\":17}}}"
+recv lsp until $.id = 3
+json: stdout doc $.result.uri = "file://{work}/util.jet" # original literal oracle
+json: stdout doc $.result.range = {"start":{"line":0,"character":7},"end":{"line":0,"character":13}} # original literal oracle
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/definition\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/run.jet\"},\"position\":{\"line\":7,\"character\":12}}}"
+recv lsp until $.id = 4
+json: stdout doc $.result.uri = "file://{work}/run.jet" # original literal oracle
+json: stdout doc $.result.range = {"start":{"line":6,"character":9},"end":{"line":6,"character":15}} # original literal oracle
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp until $.id = 99
+close lsp
+exit: 0

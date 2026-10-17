@@ -10,10 +10,10 @@ use jet_foundation.[
     VariantPayload,
 ]
 
-pub struct SemaTypeMetadataAutoDerives {
-    pub printable: Bool
-    pub debug: Bool
-    pub equatable: Bool
+struct SemaTypeMetadataAutoDerives {
+    printable: Bool
+    debug: Bool
+    equatable: Bool
 }
 
 fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool Never! {
@@ -41,9 +41,9 @@ fn sema_type_metadata_field_auto_ok(ty: Type) -> Bool Never! {
 
 fn sema_type_metadata_struct_auto_ok(definition: StructDef) -> Bool Never! {
     if definition.is_single_use -> return false
-    loop field in definition.fields {
-        if field.computed != None -> next
-        if !sema_type_metadata_field_auto_ok(field.ty) -> return false
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].computed != None -> next
+        if !sema_type_metadata_field_auto_ok(definition.fields[field_index].ty) -> return false
     }
     true
 }
@@ -63,8 +63,8 @@ fn sema_type_metadata_variant_auto_ok(payload: VariantPayload) -> Bool Never! {
 
 fn sema_type_metadata_enum_auto_ok(definition: EnumDef) -> Bool Never! {
     if definition.is_single_use -> return false
-    loop variant in definition.variants {
-        if !sema_type_metadata_variant_auto_ok(variant.payload) -> return false
+    loop variant_index in 0..<definition.variants.len() {
+        if !sema_type_metadata_variant_auto_ok(definition.variants[variant_index].payload) -> return false
     }
     true
 }
@@ -88,7 +88,7 @@ fn sema_type_metadata_has_trait_block(blocks: [TraitImplBlock], trait_name: Stri
     false
 }
 
-pub fn sema_type_metadata_impl_key(type_name: String, trait_name: String) -> String Never! {
+fn sema_type_metadata_impl_key(type_name: String, trait_name: String) -> String Never! {
     "{type_name.len()}:{type_name}:{trait_name}"
 }
 
@@ -105,7 +105,7 @@ fn sema_type_metadata_select_trait(markers: [Marker], package_default: Bool, str
 // that same module's top-level trait impl declarations (see
 // `sema_registration_push_declaration`), so unrelated modules cannot suppress
 // this type's selection.
-pub fn sema_type_metadata_auto_derives(definition: Item, declared_trait_impls: [String:Bool]) -> SemaTypeMetadataAutoDerives Never! {
+fn sema_type_metadata_auto_derives(definition: Item, declared_trait_impls: [String:Bool]) -> SemaTypeMetadataAutoDerives Never! {
     if definition == {
         .Struct(value) -> {
             eligible :: sema_type_metadata_struct_auto_ok(value)

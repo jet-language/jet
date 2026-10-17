@@ -11,9 +11,9 @@ use core.data.[
 
 /// Build a chart plan. Values shorter than labels are explicit zero-valued
 /// observations; excess values are not silently rendered without an x label.
-pub fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlotPlan Never! {
+fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetDataPlotPlan Never! {
     xs := [String]{}
-    loop label in labels -> &xs.push(~label)
+    loop label in labels -> &xs.push(label.copy())
     ys := [Float]{}
     loop i in 0..<labels.len() {
         if i < values.len() -> &ys.push(values[i]) else -> &ys.push(Float{0.0})
@@ -31,40 +31,40 @@ pub fn plot(mark: JetDataPlotMark, labels: [String], values: [Float]) -> JetData
     }
 }
 
-pub fn bar_text(labels: [String], values: [Int]) -> String Never! {
+fn bar_text(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_bar_text(labels, align_values(labels, ys))
 }
 
-pub fn bar_svg(labels: [String], values: [Int]) -> String Never! {
+fn bar_svg(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_bar_svg(labels, align_values(labels, ys))
 }
 
-pub fn line_text(labels: [String], values: [Int]) -> String Never! {
+fn line_text(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_line_text(labels, align_values(labels, ys))
 }
 
-pub fn line_svg(labels: [String], values: [Int]) -> String Never! {
+fn line_svg(labels: [String], values: [Int]) -> String Never! {
     ys := [Float]{}
     loop v in values -> &ys.push(Float{v})
     render_line_svg(labels, align_values(labels, ys))
 }
 
-pub fn inspect(labels: [String], values: [Int]) -> String Never! { bar_text(labels, values) }
+fn inspect(labels: [String], values: [Int]) -> String Never! { bar_text(labels, values) }
 
-pub fn inspect_json(plan: JetDataPlotPlan) -> String Never! {
+fn inspect_json(plan: JetDataPlotPlan) -> String Never! {
     mark := "bar"
     if plan.mark == JetDataPlotMark.Line -> mark = "line"
     if plan.mark == JetDataPlotMark.Point -> mark = "point"
     "{{\"mark\":\"{mark}\",\"n\":{plan.labels.len()},\"width\":{plan.layout.width},\"height\":{plan.layout.height}}}"
 }
 
-pub fn render(plan: JetDataPlotPlan) -> JetDataPlotRender Never! {
+fn render(plan: JetDataPlotPlan) -> JetDataPlotRender Never! {
     normalized :: normalize_plan(plan)
     if normalized.mark == JetDataPlotMark.Line {
         return {format: .SVG, body: render_line_svg(normalized.labels, normalized.values)}
@@ -75,16 +75,16 @@ pub fn render(plan: JetDataPlotPlan) -> JetDataPlotRender Never! {
     {format: .SVG, body: render_bar_svg(normalized.labels, normalized.values)}
 }
 
-pub fn svg(plan: JetDataPlotPlan) -> String Never! { render(plan).body }
+fn svg(plan: JetDataPlotPlan) -> String Never! { render(plan).body }
 
-pub fn text(plan: JetDataPlotPlan) -> String Never! {
+fn text(plan: JetDataPlotPlan) -> String Never! {
     normalized :: normalize_plan(plan)
     if normalized.mark == JetDataPlotMark.Line -> return render_line_text(normalized.labels, normalized.values)
     if normalized.mark == JetDataPlotMark.Point -> return render_point_text(normalized.labels, normalized.values)
     render_bar_text(normalized.labels, normalized.values)
 }
 
-pub fn show(plan: JetDataPlotPlan) -> String Never! { text(plan) }
+fn show(plan: JetDataPlotPlan) -> String Never! { text(plan) }
 
 fn normalize_plan(plan: JetDataPlotPlan) -> JetDataPlotPlan {
     ys := [Float]{}
@@ -227,7 +227,7 @@ fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> I
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
-    Int{ratio * (Float{extent})}
+    Int.from_float(ratio * (Float{extent})) ?? panic("plot coordinate must be finite")
 }
 
 fn xml_escape(text: String) -> String {

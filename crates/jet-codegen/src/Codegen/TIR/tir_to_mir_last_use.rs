@@ -25,22 +25,23 @@
 //! One backward liveness pass over the function's blocks decides all of it;
 //! the pass is linear in instructions times the candidate bitset width.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use jet_foundation::AST::Type;
 use jet_foundation::MIR::{
-    MirAccess, MirBlockId, MirCallArg, MirCaptureOperand, MirConstant, MirCopyFact, MirFieldId,
+    MirAccess, MirBlockId, MirCaptureOperand, MirConstant, MirFieldId,
     MirInstruction, MirLocalId, MirOpId, MirOperation, MirOwnershipMode, MirPlaceBase, MirPlaceId,
     MirPreludeCall, MirPreludeCallId, MirProjection, MirSemanticOp, MirTerminator, MirType,
-    MirTypeId, MirTypeKind, MirValueId, stable_id,
+    MirTypeId, MirTypeKind, MirValueId, MirValueConsumption, stable_id,
 };
 
 use super::mir::{LowerCtx, LowerError, checked_operation_place_refs, retain_place_access};
 
 #[derive(Clone, Copy)]
 enum Candidate {
-    /// An owned local: its whole place and its drop flag.
-    Local { place: MirPlaceId, flag: MirPlaceId },
+    /// An owned local: its whole place and its drop flag. A split root
+    /// (`split_drop_roots`) has no whole flag; its leaves carry theirs.
+    Local { place: MirPlaceId, flag: Option<MirPlaceId> },
     /// A field path (`paths`) of the owned local candidate `root`.
     Field { root: usize },
     /// An enum subject value whose payloads one block binds.
@@ -111,98 +112,14 @@ enum Event {
     Kill(usize),
 }
 
-/// How one operation treats one of its operand values.
-enum Consume {
-    /// The operation takes the value (stores, wraps or passes it owned).
-    Yes,
-    /// The operation's result carries the value onward.
-    Through,
-    /// The operation only inspects the value.
-    No,
-}
-
-fn consumes(
+/// Checked access metadata; the physical-consumption classifier is Foundation's.
+fn operation_borrow_mask<'a>(
     operation: &MirOperation,
-    value: MirValueId,
-    prelude: &HashMap<MirPreludeCallId, &MirPreludeCall>,
-) -> Consume {
-    let owned_arg = |args: &[MirCallArg]| {
-        if args.iter().any(|arg| arg.value == value && arg.access == MirAccess::Move) {
-            Consume::Yes
-        } else {
-            Consume::No
-        }
-    };
-    match operation {
-        MirOperation::WritePlace { value: stored, .. }
-        | MirOperation::ReplacePlace { value: stored, .. } => {
-            if *stored == value {
-                Consume::Yes
-            } else {
-                Consume::No
-            }
-        }
-        MirOperation::Move { .. }
-        | MirOperation::TraitBox { .. }
-        | MirOperation::Present { .. }
-        | MirOperation::ResultOk { .. }
-        | MirOperation::ResultErr { .. }
-        | MirOperation::BuildList { .. }
-        | MirOperation::BuildMap { .. }
-        | MirOperation::Struct { .. }
-        | MirOperation::Tuple { .. }
-        | MirOperation::Enum { .. }
-        | MirOperation::Semantic(MirSemanticOp::StructLiteral { .. }) => Consume::Yes,
-        MirOperation::Copy { fact, .. } => {
-            if matches!(fact, MirCopyFact::Explicit | MirCopyFact::ViewMaterialize) {
-                Consume::No
-            } else {
-                Consume::Through
-            }
-        }
-        MirOperation::Phi { .. }
-        | MirOperation::OptionValue { .. }
-        | MirOperation::ResultValue { .. }
-        | MirOperation::EnumPayload { .. } => Consume::Through,
-        MirOperation::Call { args, .. }
-        | MirOperation::IndirectCall { args, .. }
-        | MirOperation::CoreCall { args, .. }
-        | MirOperation::Semantic(
-            MirSemanticOp::StaticPreludeCall { args, .. }
-            | MirSemanticOp::HostCall { args, .. }
-            | MirSemanticOp::ClosureMethod { args, .. },
-        ) => owned_arg(args),
-        // A builtin method borrows its receiver; an argument is passed owned
-        // exactly when the route's borrow mask (receiver first) says so.
-        MirOperation::Semantic(MirSemanticOp::BuiltinMethod { call, receiver, args, .. }) => {
-            let owned = *receiver != value
-                && args.iter().enumerate().any(|(index, arg)| {
-                    *arg == value
-                        && prelude.get(call).is_some_and(|row| {
-                            row.signature.borrow_mask.get(index + 1) == Some(&false)
-                        })
-                });
-            if owned { Consume::Yes } else { Consume::No }
-        }
-        MirOperation::LoopIterInit { by_value, .. } => {
-            if *by_value {
-                Consume::Yes
-            } else {
-                Consume::No
-            }
-        }
-        MirOperation::Closure { captures, .. } => {
-            if captures
-                .iter()
-                .any(|capture| matches!(capture, MirCaptureOperand::Value(captured) if *captured == value))
-            {
-                Consume::Yes
-            } else {
-                Consume::No
-            }
-        }
-        _ => Consume::No,
-    }
+    prelude: &HashMap<MirPreludeCallId, &'a MirPreludeCall>,
+) -> &'a [bool] {
+    operation.consumption_route()
+        .and_then(|call| prelude.get(&call))
+        .map_or(&[], |row| row.signature.borrow_mask.as_slice())
 }
 
 /// The payload bindings of one subject value: their block and instruction
@@ -263,9 +180,12 @@ impl LowerCtx<'_> {
             }
         }
 
-        // Owned locals: a whole local place with a drop flag. Places whose
-        // release is observable (a scope-end `close`, a file owner, a
-        // function-level drop row) keep their lexical lifetime.
+        // Owned locals: a whole local place with a drop flag, or a split
+        // root whose leaves each carry one. Places whose release is
+        // observable (a scope-end `close`, a function-level drop row) keep
+        // their lexical lifetime. A file-owner root moves whole: its leaf
+        // cleanups run under their own live flags, which a move clears; a
+        // split root's leaf cleanups likewise.
         let place_rows: HashMap<MirPlaceId, usize> = self
             .places
             .iter()
@@ -273,18 +193,28 @@ impl LowerCtx<'_> {
             .map(|(index, row)| (row.id, index))
             .collect();
         let mut excluded_roots: HashSet<Root> = HashSet::new();
-        for place in self.file_owner_places.iter().chain(self.drops.iter().map(|drop| &drop.place)) {
+        for drop in &self.drops {
             if let Some(root) = place_rows
-                .get(place)
+                .get(&drop.place)
                 .and_then(|row| place_root(&self.places[*row].base))
             {
                 excluded_roots.insert(root);
             }
         }
-        let mut owned: Vec<(MirPlaceId, MirPlaceId)> = self
+        let mut file_owner_leaves: HashMap<Root, Vec<(MirPlaceId, MirPlaceId)>> = HashMap::new();
+        for (leaf, flag) in &self.file_owner_places {
+            if let Some(root) = place_rows
+                .get(leaf)
+                .and_then(|row| place_root(&self.places[*row].base))
+            {
+                file_owner_leaves.entry(root).or_default().push((*leaf, *flag));
+            }
+        }
+        let mut owned: Vec<(MirPlaceId, Option<MirPlaceId>)> = self
             .drop_live_places
             .iter()
-            .map(|(place, flag)| (*place, *flag))
+            .map(|(place, flag)| (*place, Some(*flag)))
+            .chain(self.split_drop_roots.iter().map(|place| (*place, None)))
             .collect();
         owned.sort_unstable_by_key(|(place, _)| place.0);
         let mut candidates: Vec<Candidate> = Vec::new();
@@ -304,7 +234,7 @@ impl LowerCtx<'_> {
             if !row.projections.is_empty()
                 || row.persist_key.is_some()
                 || excluded_roots.contains(&root)
-                || self.scope_end_close(&row.ty).is_some()
+                || self.scope_end_close_for_place(place, &row.ty).is_some()
                 || is_view(&row.ty)
             {
                 continue;
@@ -314,10 +244,48 @@ impl LowerCtx<'_> {
                 continue;
             }
             root_candidate.insert(root, candidates.len());
-            flag_candidate.insert(flag, candidates.len());
+            if let Some(flag) = flag {
+                flag_candidate.insert(flag, candidates.len());
+            }
             candidates.push(Candidate::Local { place, flag });
             paths.push(Vec::new());
             rejected.push(false);
+        }
+        // File-owner leaves of a whole candidate: each leaf's cleanup is
+        // guarded by its own live flag, so it is that candidate's cleanup.
+        let mut leaf_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
+        let mut owner_leaves: HashMap<usize, &[(MirPlaceId, MirPlaceId)]> = HashMap::new();
+        for (root, leaves) in &file_owner_leaves {
+            let Some(&candidate) = root_candidate.get(root) else {
+                continue;
+            };
+            for (leaf, flag) in leaves {
+                leaf_candidate.insert(*leaf, candidate);
+                flag_candidate.insert(*flag, candidate);
+            }
+            owner_leaves.insert(candidate, leaves);
+        }
+        // The flagged leaves of a split candidate are its cleanup the same
+        // way; moving it whole clears every one of their flags.
+        let mut split_leaves: HashMap<usize, Vec<MirPlaceId>> = HashMap::new();
+        for (leaf, flag) in &self.drop_live_places {
+            let Some(row) = place_rows.get(leaf).map(|row| &self.places[*row]) else {
+                continue;
+            };
+            if row.projections.is_empty() {
+                continue;
+            }
+            let Some(&candidate) = place_root(&row.base).and_then(|root| root_candidate.get(&root)) else {
+                continue;
+            };
+            if matches!(candidates[candidate], Candidate::Local { flag: None, .. }) {
+                leaf_candidate.insert(*leaf, candidate);
+                flag_candidate.insert(*flag, candidate);
+                split_leaves.entry(candidate).or_default().push(*flag);
+            }
+        }
+        for flags in split_leaves.values_mut() {
+            flags.sort_unstable_by_key(|flag| flag.0);
         }
         let mut place_candidate: HashMap<MirPlaceId, usize> = HashMap::new();
         for row in &self.places {
@@ -364,11 +332,17 @@ impl LowerCtx<'_> {
                 let candidate = match by_path.get(&(owner, path.clone())) {
                     Some(candidate) => *candidate,
                     None => {
+                        // A field that holds or sits inside a file-owner leaf
+                        // would leave that leaf's live flag naming a moved
+                        // value; it stays a read.
+                        let splits_leaf = owner_leaves.get(&owner).into_iter().flat_map(|leaves| leaves.iter()).any(|(leaf, _)| {
+                            overlaps(&self.places[place_rows[leaf]].projections, &path)
+                        });
                         let candidate = candidates.len();
                         by_path.insert((owner, path.clone()), candidate);
                         candidates.push(Candidate::Field { root: owner });
                         paths.push(path);
-                        rejected.push(false);
+                        rejected.push(splits_leaf);
                         root_fields.entry(owner).or_default().push(candidate);
                         candidate
                     }
@@ -441,9 +415,11 @@ impl LowerCtx<'_> {
             }
         }
 
-        // Enum subjects: every use is an EnumIs or an EnumPayload of one
-        // variant, and the payloads (each index once) sit in one block after
-        // every EnumIs of that block.
+        // Enum subjects: every use is an EnumIs or an EnumPayload, and each
+        // block that binds payloads binds those of one variant (each index
+        // once) after every EnumIs of that block. Each such block (one match
+        // arm) is its own payload group; an arm whose bindings are the
+        // subject's last use takes the subject apart there.
         type EnumUse = (usize, usize, Option<(MirTypeId, String, usize)>);
         let mut enum_uses: HashMap<MirValueId, Vec<EnumUse>> = HashMap::new();
         let mut other_uses: HashSet<MirValueId> = HashSet::new();
@@ -478,21 +454,25 @@ impl LowerCtx<'_> {
         let mut subject_candidate: HashMap<MirValueId, usize> = HashMap::new();
         let mut groups: Vec<PayloadGroup> = Vec::new();
         for (value, uses) in subjects {
-            let payloads: Vec<&EnumUse> = uses.iter().filter(|(_, _, payload)| payload.is_some()).collect();
-            let Some(first) = payloads.first() else {
+            let mut arms: BTreeMap<usize, Vec<&EnumUse>> = BTreeMap::new();
+            for row in uses.iter().filter(|(_, _, payload)| payload.is_some()) {
+                arms.entry(row.0).or_default().push(row);
+            }
+            if arms.is_empty() {
                 continue;
-            };
-            let (block, first_index) = (first.0, first.1);
-            let shape = first.2.as_ref().map(|(owner, variant, _)| (*owner, variant.clone()));
-            let mut indices = HashSet::new();
-            let one_block = payloads.iter().all(|(payload_block, _, payload)| {
-                let (owner, variant, index) = payload.as_ref().expect("payload use");
-                *payload_block == block
-                    && shape.as_ref() == Some(&(*owner, variant.clone()))
-                    && indices.insert(*index)
-            });
-            let tests_first = uses.iter().all(|(use_block, index, payload)| {
-                payload.is_some() || *use_block != block || *index < first_index
+            }
+            let arms_ok = arms.iter().all(|(block, payloads)| {
+                let first = payloads[0];
+                let shape = first.2.as_ref().map(|(owner, variant, _)| (*owner, variant.clone()));
+                let mut indices = HashSet::new();
+                let one_variant = payloads.iter().all(|(_, _, payload)| {
+                    let (owner, variant, index) = payload.as_ref().expect("payload use");
+                    shape.as_ref() == Some(&(*owner, variant.clone())) && indices.insert(*index)
+                });
+                let tests_first = uses.iter().all(|(use_block, index, payload)| {
+                    payload.is_some() || use_block != block || *index < first.1
+                });
+                one_variant && tests_first
             });
             let defined = match definitions.get(&value) {
                 Some((def_block, def_index)) => !matches!(
@@ -507,17 +487,17 @@ impl LowerCtx<'_> {
                 mode_of(value),
                 Some(MirOwnershipMode::Owned | MirOwnershipMode::Move)
             );
-            if !one_block || !tests_first || !defined || !owned_value
-                || self.read_window_of(value).is_some()
-            {
+            if !arms_ok || !defined || !owned_value || self.read_window_of(value).is_some() {
                 continue;
             }
             subject_candidate.insert(value, candidates.len());
-            groups.push(PayloadGroup {
-                candidate: candidates.len(),
-                block,
-                payloads: payloads.iter().map(|(_, index, _)| *index).collect(),
-            });
+            for (block, payloads) in arms {
+                groups.push(PayloadGroup {
+                    candidate: candidates.len(),
+                    block,
+                    payloads: payloads.iter().map(|(_, index, _)| *index).collect(),
+                });
+            }
             candidates.push(Candidate::Subject { value });
             paths.push(Vec::new());
             rejected.push(false);
@@ -589,6 +569,72 @@ impl LowerCtx<'_> {
                 && preds.iter().all(|pred| flag_guard(*pred) == guard && then_target(*pred) == Some(block))
             {
                 guarded[block] = guard;
+            }
+        }
+        // A match arm chain binds an arm's payloads on the true edge of its
+        // test, joins, and re-branches on that same test (or a trivial phi of
+        // it) to enter the arm. An edge into such a re-test whose source
+        // already decided the test can only continue to that test's own
+        // successor: `correlated` maps the edge to it, and liveness follows
+        // only that successor through the join.
+        let tested = |mut value: MirValueId| {
+            while let Some(&(block, index)) = definitions.get(&value) {
+                match &self.blocks[block].instructions[index].operation {
+                    MirOperation::Phi { incoming }
+                        if incoming.split_first().is_some_and(|((_, first), rest)| {
+                            rest.iter().all(|(_, other)| other == first)
+                        }) =>
+                    {
+                        value = incoming[0].1;
+                    }
+                    _ => break,
+                }
+            }
+            value
+        };
+        let test_of = |block: usize| match &self.blocks[block].terminator {
+            MirTerminator::Branch { condition, then_target, else_target } if then_target != else_target => Some((
+                tested(*condition),
+                block_index.get(then_target).copied()?,
+                block_index.get(else_target).copied()?,
+            )),
+            _ => None,
+        };
+        // The outcome of `condition` along the edge `from -> to`, when `from`
+        // branches on it.
+        let edge_outcome = |from: usize, to: usize, condition: MirValueId| match test_of(from) {
+            Some((tested, then_block, _)) if tested == condition && then_block == to => Some(true),
+            Some((tested, _, else_block)) if tested == condition && else_block == to => Some(false),
+            _ => None,
+        };
+        let mut correlated: HashMap<(usize, usize), usize> = HashMap::new();
+        for (join, preds) in predecessors.iter().enumerate() {
+            let Some((condition, then_block, else_block)) = test_of(join) else {
+                continue;
+            };
+            let Some(&(defined, _)) = definitions.get(&condition) else {
+                continue;
+            };
+            if defined == join {
+                continue;
+            }
+            for &pred in preds {
+                // The source branches on the test itself, or (not defining
+                // it) is entered only along one outcome of it.
+                let outcome = match test_of(pred) {
+                    Some(_) => edge_outcome(pred, join, condition),
+                    None if defined != pred => {
+                        let entries = &predecessors[pred];
+                        let first = entries.first().and_then(|entry| edge_outcome(*entry, pred, condition));
+                        first.filter(|outcome| {
+                            entries.iter().all(|entry| edge_outcome(*entry, pred, condition) == Some(*outcome))
+                        })
+                    }
+                    None => None,
+                };
+                if let Some(outcome) = outcome {
+                    correlated.insert((pred, join), if outcome { then_block } else { else_block });
+                }
             }
         }
 
@@ -801,8 +847,11 @@ impl LowerCtx<'_> {
                                 {
                                     Some(true)
                                 }
+                                // The candidate's own flag-guarded cleanup:
+                                // its scope-end drop, or a file-owner leaf's.
                                 MirOperation::MovePlace { .. }
-                                    if place == whole && guarded[block] == Some(candidate) =>
+                                    if (place == whole || leaf_candidate.get(&place) == Some(&candidate))
+                                        && guarded[block] == Some(candidate) =>
                                 {
                                     None
                                 }
@@ -835,9 +884,6 @@ impl LowerCtx<'_> {
                     }
                 }
                 let locals: Vec<MirLocalId> = match &instruction.operation {
-                    MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => {
-                        vec![*local]
-                    }
                     MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
                         context.locals.iter().map(|(_, local)| *local).collect()
                     }
@@ -901,6 +947,14 @@ impl LowerCtx<'_> {
                 }
             }
         }
+        // A subject's payload take is a value `Move`, which MIR legality
+        // checks path-insensitively; its liveness keeps every edge.
+        let mut subject_bits = vec![0u64; words];
+        for (candidate, row) in candidates.iter().enumerate() {
+            if matches!(row, Candidate::Subject { .. }) {
+                bit_set(&mut subject_bits, candidate);
+            }
+        }
         let mut live_in = vec![0u64; block_count * words];
         let mut live_out = vec![0u64; block_count * words];
         let mut changed = true;
@@ -909,9 +963,19 @@ impl LowerCtx<'_> {
             for block in (0..block_count).rev() {
                 let range = block * words..(block + 1) * words;
                 for word in 0..words {
-                    let out = successors[block]
-                        .iter()
-                        .fold(0u64, |acc, target| acc | live_in[target * words + word]);
+                    let out = successors[block].iter().fold(0u64, |acc, target| {
+                        let all = live_in[target * words + word];
+                        acc | match correlated.get(&(block, *target)) {
+                            // Through a re-test this edge already decided.
+                            Some(next) => {
+                                ((generated[target * words + word]
+                                    | (live_in[next * words + word] & !killed[target * words + word]))
+                                    & !subject_bits[word])
+                                    | (all & subject_bits[word])
+                            }
+                            None => all,
+                        }
+                    });
                     live_out[range.start + word] = out;
                     let input = generated[range.start + word] | (out & !killed[range.start + word]);
                     if input != live_in[range.start + word] {
@@ -947,21 +1011,15 @@ impl LowerCtx<'_> {
                 for &(block, index) in users.get(&value).into_iter().flatten() {
                     let row = &self.blocks[block];
                     let Some(instruction) = row.instructions.get(index) else {
-                        if matches!(
-                            &row.terminator,
-                            MirTerminator::Return { value: Some(returned) }
-                            | MirTerminator::Break { value: Some(returned), .. }
-                            | MirTerminator::Yield { value: returned, .. }
-                                if *returned == value
-                        ) {
+                        if row.terminator.value_consumption(value) != MirValueConsumption::No {
                             return true;
                         }
                         continue;
                     };
-                    match consumes(&instruction.operation, value, &prelude) {
-                        Consume::Yes => return true,
-                        Consume::Through => pending.extend(instruction.result),
-                        Consume::No => {}
+                    match instruction.operation.value_consumption(value, operation_borrow_mask(&instruction.operation, &prelude)) {
+                        MirValueConsumption::Yes { .. } => return true,
+                        MirValueConsumption::Through { .. } => pending.extend(instruction.result),
+                        MirValueConsumption::No => {}
                     }
                 }
             }
@@ -1120,14 +1178,23 @@ impl LowerCtx<'_> {
                 MirOperation::Constant(MirConstant::Bool(false)),
             )?;
             let off_value = off.result.expect("constant result");
-            let write = self.last_use_instruction(
-                span,
-                source_line,
-                "owned.local.last-use.update",
-                None,
-                MirOperation::WritePlace { place: flag, value: off_value },
-            )?;
-            inserts.push((block, index + 1, vec![off, write]));
+            // A whole move also takes every file-owner leaf and every split
+            // leaf, as an explicit move clears their cleanup flags.
+            let flags = flag
+                .into_iter()
+                .chain(owner_leaves.get(&candidate).into_iter().flat_map(|leaves| leaves.iter().map(|(_, live)| *live)))
+                .chain(split_leaves.get(&candidate).into_iter().flatten().copied());
+            let mut instructions = vec![off];
+            for flag in flags {
+                instructions.push(self.last_use_instruction(
+                    span,
+                    source_line,
+                    "owned.local.last-use.update",
+                    None,
+                    MirOperation::WritePlace { place: flag, value: off_value },
+                )?);
+            }
+            inserts.push((block, index + 1, instructions));
         }
         inserts.sort_unstable_by(|left, right| (right.0, right.1).cmp(&(left.0, left.1)));
         for (block, position, instructions) in inserts {

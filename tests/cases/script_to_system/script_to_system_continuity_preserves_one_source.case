@@ -1,0 +1,205 @@
+# SPLIT port of tests/script_to_system.rs:370-1328. Exact original source, templates and stdout oracle.
+# PENDING-SAME-HEAD. PENDING-GRAMMAR(batch-four): first-spawnable/digest capture/prefixed capture.
+# Independent checked-PackageFacts/Rust-Debug graph recomputation remains compiler-lib.
+# Only host-harness receipt bookkeeping1248-1323 retires.
+fixture: fixtures/script_to_system_continuity_preserves_one_source
+file: . names = ["run.jet"]
+file: package.jet absent
+file: .jet absent
+file: target absent
+mkdir: cache
+capture: source = opt-bytes file run.jet
+capture: source_sha = sha256 file run.jet
+env: HOME={work}/cache/home
+env: JET_STORE_DIR={work}/cache/jet-cache
+env: JETPACK_ROOT={work}/cache/jetpack
+env: NO_COLOR=1
+step direct: jet run run.jet -- --minutes 1
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+stdout|stderr: ~ "L0104" # original compiler_text predicate; needle cannot span labeled stream boundary
+step interpreted: jet run --interpret run.jet -- --minutes 1
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+exit: == direct
+stdout: == direct
+stderr: == direct
+step dev: jet dev run.jet
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+step init: jet init run.jet
+exit: 0
+file: package.jet is-file
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+mkdir: support
+write: support/package.jet support.package.template
+write: support/support.jet support.source.jet.template
+step add: jet add support --path ./support
+exit: 0
+step fetch: jet fetch
+exit: 0
+file: package.jet ~ "support: ./support" # original contains predicate
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+capture: package_after_add = text file package.jet
+write: package.jet package-config.template
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+capture: package_before_install = opt-bytes file package.jet
+capture: lock_before_install = opt-bytes file .jet/lock
+step install: jetpack tool install ./ --as pulse --trust --no-color
+exit: != 0
+stdout|stderr: ~ "E1272" # original compiler_text predicate; needle cannot span labeled stream boundary
+stdout|stderr: ~ "need a pinned compatibility output" # original compiler_text predicate
+stdout|stderr: ~ "does not invoke an installed Nix executable" # original compiler_text predicate
+stdout|stderr: ~ "Provide a pinned fixture or verified Hangar output" # original compiler_text predicate
+file: package.jet same-as {cap:package_before_install}
+file: .jet/lock same-as {cap:lock_before_install}
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+step test: jet test run.jet
+exit: 0
+stdout|stderr: ~ "1 passed" # original compiler_text predicate; needle cannot span labeled stream boundary
+step package_run: jet run run.jet -- --minutes 1
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+step service: jet run --quiet --output api run.jet
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+step explain: jet explain build.settings.default_minutes
+exit: 0
+stdout: ~ "Build.Settings.default_minutes = 1" # original contains predicate
+capture: initial_lock = opt-bytes file .jet/lock
+capture: initial_lock_sha = sha256 file .jet/lock
+step aot: jet build run.jet
+exit: 0
+file: .jet/lock same-as {cap:initial_lock}
+file: .jet/lock sha256 = "{cap:initial_lock_sha}"
+file: .jet/build/run{sys:exe-suffix} is-file
+step native: built
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+capture: pre_library_exe = opt-bytes file .jet/build/run{sys:exe-suffix}
+capture: pre_library_exe_sha = sha256 file .jet/build/run{sys:exe-suffix}
+capture: package_before_library = text file package.jet
+capture: package_with_library = text file.replace("    api: .Service{ name: \"pulse-api\", entry: serve },\n}\n", "    api: .Service{ name: \"pulse-api\", entry: serve },\n    core: .Library{\n        name: \"pulse\",\n        native: true,\n        loadable: true,\n        bindings: [c],\n    },\n}\n") package.jet
+cap:package_with_library: != "{cap:package_before_library}"
+write: package.jet = "{cap:package_with_library}"
+file: .jet/lock same-as {cap:initial_lock}
+file: .jet/lock sha256 = "{cap:initial_lock_sha}"
+step after_library_output: jet build run.jet
+exit: 0
+file: .jet/lock same-as {cap:initial_lock}
+file: .jet/lock sha256 = "{cap:initial_lock_sha}"
+file: .jet/build/run{sys:exe-suffix} same-as {cap:pre_library_exe}
+file: .jet/build/run{sys:exe-suffix} sha256 = "{cap:pre_library_exe_sha}"
+step library: jet build --lib run.jet
+exit: 0
+file: .jet/lock same-as {cap:initial_lock}
+file: .jet/lock sha256 = "{cap:initial_lock_sha}"
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+file: .jet/build/run{sys:exe-suffix} same-as {cap:pre_library_exe}
+file: .jet/build/run{sys:exe-suffix} sha256 = "{cap:pre_library_exe_sha}"
+file: .jet/build/libpulse.a is-file
+file: .jet/build/pulse.h is-file
+file: .jet/build/pulse.jetlib is-file
+file: .jet/build/bindings/pulse.h is-file
+file: .jet/build/libpulse{sys:dll-suffix} is-file
+file: .jet/build/pulse.h ~ "int64_t seconds(int64_t p0);" # original header predicate
+capture: header_bytes = opt-bytes file .jet/build/pulse.h
+capture: header_sha = sha256 file .jet/build/pulse.h
+remove: .jet/build
+step clean_aot: jet build --locked run.jet
+exit: 0
+file: .jet/lock same-as {cap:initial_lock}
+file: .jet/lock sha256 = "{cap:initial_lock_sha}"
+step clean_library: jet build --lib --locked run.jet
+exit: 0
+file: .jet/lock same-as {cap:initial_lock}
+file: .jet/lock sha256 = "{cap:initial_lock_sha}"
+file: .jet/build/pulse.h same-as {cap:header_bytes}
+file: .jet/build/pulse.h sha256 = "{cap:header_sha}"
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+file: package.jet = "{cap:package_with_library}"
+file: .jet/lock same-as {cap:initial_lock}
+file: .jet/lock sha256 = "{cap:initial_lock_sha}"
+when os unix:
+capture: cc = first-spawnable cc --version | gcc --version | clang --version
+when captured cc:
+write: foreign.c foreign.c.template
+when os-name linux: step: {cap:cc} -std=c11 -I {work}/.jet/build {work}/foreign.c {work}/.jet/build/libpulse.a -o {work}/foreign -ldl -lpthread -lm
+when os-name !linux: step: {cap:cc} -std=c11 -I {work}/.jet/build {work}/foreign.c {work}/.jet/build/libpulse.a -o {work}/foreign
+exit: 0
+step: {work}/foreign
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+end when
+end when
+capture: package_before_split = opt-bytes file package.jet
+capture: lock_before_transition = opt-bytes file .jet/lock
+file: package.jet = "{cap:package_with_library}"
+step split_check: jet split env --check
+exit: 0
+stdout: ~ "No files changed." # original predicate
+stdout: ~ "package graph unchanged" # original predicate
+file: package.jet same-as {cap:package_before_split}
+file: .jet/lock same-as {cap:lock_before_transition}
+file: package/env.jet absent
+capture: split_check_before = prefixed stdout "package graph unchanged: " | "package graph before: "
+capture: split_check_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+cap:split_check_before: = "{cap:split_check_after}"
+step split: jet split env
+exit: 0
+capture: split_before = prefixed stdout "package graph unchanged: " | "package graph before: "
+capture: split_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+cap:split_before: = "{cap:split_after}"
+capture: journal = prefixed stdout "Transition journal: "
+file: {cap:journal} is-file
+file: {cap:journal} first-line = "jet-package-transition-v1"
+capture: journal_before = prefixed file {cap:journal} "before="
+capture: journal_after = prefixed file {cap:journal} "after="
+cap:journal_before: nonempty
+cap:journal_after: nonempty
+cap:journal_before: = "{cap:split_before}"
+cap:journal_after: = "{cap:split_after}"
+file: package/env.jet is-file
+file: package/env.jet = split-env.expected
+file: package.jet !~ "environments:" # original absence predicate
+capture: package_after_split = opt-bytes file package.jet
+capture: generated_after_split = opt-bytes file package/env.jet
+file: .jet/lock same-as {cap:lock_before_transition}
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+step split_run: jet run run.jet -- --minutes 1
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out
+step fold_check: jet Fold package/env.jet --check
+exit: 0
+stdout: ~ "No files changed." # original predicate
+file: package.jet same-as {cap:package_after_split}
+file: package/env.jet same-as {cap:generated_after_split}
+file: .jet/lock same-as {cap:lock_before_transition}
+capture: fold_check_before = prefixed stdout "package graph unchanged: " | "package graph before: "
+capture: fold_check_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+cap:fold_check_before: = "{cap:fold_check_after}"
+step fold: jet Fold package/env.jet
+exit: 0
+capture: fold_before = prefixed stdout "package graph unchanged: " | "package graph before: "
+capture: fold_after = prefixed stdout "package graph unchanged: " | "package graph after: "
+cap:fold_before: = "{cap:fold_after}"
+file: package.jet same-as {cap:package_before_split}
+file: package/env.jet absent
+file: .jet/lock same-as {cap:lock_before_transition}
+file: run.jet same-as {cap:source}
+file: run.jet sha256 = "{cap:source_sha}"
+when file .jet/build/pulse.h is-file: file: .jet/build/pulse.h sha256 = "{cap:header_sha}"
+step rollback_run: jet run run.jet -- --minutes 1
+exit: 0
+stdout: = script_to_system_continuity_preserves_one_source.out

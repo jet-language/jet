@@ -1,105 +1,100 @@
-pub CORE_CALL_COVERAGE_SEMA :: prep { 1 }
+CORE_CALL_COVERAGE_SEMA :: prep { 1 }
 CORE_CALL_COVERAGE_TIR_SUBSET :: prep { 2 }
 CORE_CALL_COVERAGE_TIR_EVAL :: prep { 4 }
 CORE_CALL_COVERAGE_AOT :: prep { 8 }
 CORE_CALL_COVERAGE_INTERPRETER :: prep { 16 }
 CORE_CALL_COVERAGE_COMPTIME :: prep { 32 }
-CORE_CALL_COVERAGE_JIT :: prep { 64 }
-CORE_CALL_COVERAGE_KNOWN :: prep { 127 }
+CORE_CALL_COVERAGE_KNOWN :: prep { 63 }
 
-pub enum Effect { Net FS IO DB Time Rand Env Exec Log GPU Panic FFI Browser Secret Mem }
+enum Effect { Net FS IO DB Time Rand Env Exec Log GPU Panic FFI Browser Secret Mem }
 
-// D-AUTH-AMBIENT1=A: reading the program's own arguments, a leaf of `Exec`
-// (jet_foundation::Syntax::EFFECT_LEAF_EXEC_ARGS). The `Exec` root also covers
-// spawning processes, so the manifest-less floor grants only this leaf.
-EFFECT_LEAF_EXEC_ARGS :: prep { "Exec.Args" }
+enum SinkClass { Credential }
 
-pub enum SinkClass { Credential }
+enum CoreCallFallibility { Sema }
 
-pub enum CoreCallFallibility { Sema }
+enum CoreCallResourceAccessMode { Read Write Move }
 
-pub enum CoreCallResourceAccessMode { Read Write Move }
+enum CoreCallCompletionKind { Synchronous Pending Event }
 
-pub enum CoreCallCompletionKind { Synchronous Pending Event }
+enum CoreCapabilityKind { Pure NativeRequired PortableFallback ExplicitSimulation }
 
-pub enum CoreCapabilityKind { Pure NativeRequired PortableFallback ExplicitSimulation }
-
-pub enum CoreCallPureRoute {
-    NoPureRoute MIME Email EncodingXML Time Math Measurement Date DateTime SketchHLL SketchTDigest
+enum CoreCallPureRoute {
+    NoPureRoute MIME Email EncodingXML Time Math Date DateTime SketchHLL SketchTDigest
     SketchCMS SketchReservoir UI Raylib IO Net Crypto
 }
 
-pub enum CoreCallInterpreterRoute { NoRoute Pure(route: CoreCallPureRoute) Ambient TypedIntrinsic }
+enum CoreCallInterpreterRoute { NoRoute Pure(route: CoreCallPureRoute) Ambient TypedIntrinsic }
 
-pub enum CoreCallSymbol { Prelude(name: String) Rust(name: String) }
+// SourceOwned carries declaration facts only; execution uses the owning Jet function.
+enum CoreCallSymbol { Prelude(name: String) Rust(name: String) SourceOwned }
 
-pub struct CoreCallSignature {
-    pub arity: Int
-    pub max_arity: Int
-    pub borrow_mask: [Bool]
+struct CoreCallSignature {
+    arity: Int
+    max_arity: Int
+    borrow_mask: [Bool]
 }
 
-pub struct CoreCallCoverage { pub bits: Int }
+struct CoreCallCoverage { bits: Int }
 
-pub struct CoreCallResourceAccess {
-    pub argument: Int
-    pub mode: CoreCallResourceAccessMode
+struct CoreCallResourceAccess {
+    argument: Int
+    mode: CoreCallResourceAccessMode
 }
 
-pub struct CoreCallCompletion {
-    pub kind: CoreCallCompletionKind
-    pub token: String?
-    pub provider: String
+struct CoreCallCompletion {
+    kind: CoreCallCompletionKind
+    token: String?
+    provider: String
 }
 
-pub struct CoreCapabilityContract {
-    pub kind: CoreCapabilityKind
-    pub provider: String?
-    pub fallback: String?
-    pub failure: String?
+struct CoreCapabilityContract {
+    kind: CoreCapabilityKind
+    provider: String?
+    fallback: String?
+    failure: String?
 }
 
-pub struct CoreMarkerApplication {
-    pub member: String
-    pub since: String
-    pub replacement: String
-    pub removed_in: String?
+struct CoreMarkerApplication {
+    member: String
+    since: String
+    replacement: String
+    removed_in: String?
 }
 
-pub struct CoreCallRecord {
-    pub module_name: String
-    pub member: String
-    pub receiver_types: [String]
-    pub signature: CoreCallSignature
-    pub frame_accesses: [CoreCallResourceAccess]
-    pub frame_completion: CoreCallCompletion?
-    pub fallibility: CoreCallFallibility
-    pub effect_kind: Effect?
-    pub capability: CoreCapabilityContract
-    pub effect_leaf: String?
-    pub sink_class: SinkClass?
-    pub pure_route: CoreCallPureRoute
-    pub interpreter_route: CoreCallInterpreterRoute
-    pub symbol: CoreCallSymbol
-    pub coverage: CoreCallCoverage
-    pub aot_direct: Bool
-    pub jit_direct: Bool
-    pub jit_symbol: String?
+struct CoreCallRecord {
+    module_name: String
+    member: String
+    receiver_types: [String]
+    signature: CoreCallSignature
+    frame_accesses: [CoreCallResourceAccess]
+    frame_completion: CoreCallCompletion?
+    fallibility: CoreCallFallibility
+    effect_kind: Effect?
+    capability: CoreCapabilityContract
+    effect_leaf: String?
+    sink_class: SinkClass?
+    pure_route: CoreCallPureRoute
+    interpreter_route: CoreCallInterpreterRoute
+    symbol: CoreCallSymbol
+    // Optional checked Jet export name after special-call normalization.
+    source_target: String?
+    coverage: CoreCallCoverage
+    aot_direct: Bool
     // Rust: CoreCallRecord::native_int_result. The kernel returns its `Int`
     // results as raw machine words; engines widen them into the carrier.
-    pub native_int_result: Bool
-    pub ui_capabilities: [String]
-    pub marker: CoreMarkerApplication?
-    pub authority: MIRAuthorityDecision?
+    native_int_result: Bool
+    ui_capabilities: [String]
+    marker: CoreMarkerApplication?
+    authority: MIRAuthorityDecision?
 }
 
-pub enum CoreCallProjectionError {
+enum CoreCallProjectionError {
     Unknown
     Uncovered(projection: Int)
     Arity(expected: Int, actual: Int)
 }
 
-pub enum CoreCallProjectionResult {
+enum CoreCallProjectionResult {
     Row(record: CoreCallRecord)
     Error(error: CoreCallProjectionError)
 }
@@ -113,382 +108,35 @@ fn core_call_one_of(value: String, choices: [String]) -> Bool Never! {
     false
 }
 
-fn core_call_effect_for(module_name: String, member: String) -> Effect? {
-    if {
-        (module_name == "core.time" && core_call_one_of(member, [String]{
-            "clock", "time", "local_time", "parse_time", "new", "parse", "from_timestamp",
-            "period", "period_days", "period_months", "period_years", "parse_rfc3339",
-            "from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds",
-            "parse_iso_week_date", "from_iso_week", "parse_zoned", "datetime", "zone", "utc",
-            "zoned", "zoned_local", "days_in_month", "is_leap_year"
-        })) || (module_name == "core.math.random" && member == "rng") -> None
-        module_name == "core.time" && core_call_one_of(member, [String]{"now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"}) -> Val(Effect.Time)
-        module_name == "core.rt" && member == "callback" -> Val(Effect.Time)
-        (module_name == "core.math.random" && core_call_one_of(member, [String]{
-            "int", "float", "float_range", "bool", "normal", "exponential", "pick", "weighted_pick",
-            "sample", "shuffle", "seed", "split", "bytes"
-        })) || (module_name == "core.crypto.random" && member == "bytes") -> Val(Effect.Rand)
-        member == "style_force" && module_name == "core.term" -> None
-        module_name == "core.net" && core_call_one_of(member, [String]{
-            "ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4",
-            "is_ipv6", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string",
-            "ready_readable", "ready_writable", "error_operation", "error_address", "error_name",
-            "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority",
-            "dns_srv_weight", "udp_packet_data", "udp_packet_addr", "udp_packet_bytes",
-            "udp_packet_original_len", "udp_packet_truncated"
-        }) -> None
-        module_name == "core.watcher" -> if member == {
-            "files" -> Val(Effect.FS)
-            "process_pid" -> Val(Effect.Exec)
-            "port" -> Val(Effect.Net)
-            else -> None
-        }
-        module_name == "core.web.browser" -> if {
-            core_call_one_of(member, [String]{"profile", "timeout"}) -> None
-            member == "locked" -> Val(Effect.FS)
-            member == "config_from_env" -> Val(Effect.Env)
-            else -> Val(Effect.Net)
-        }
-        // Encoding readers and writers.
-        (core_call_one_of(module_name, [String]{
-            "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
-        }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val(Effect.FS)
-        module_name == "core.compute" && member != "device_cpu" -> Val(Effect.GPU)
-        module_name == "core.files" -> Val(Effect.FS)
-        module_name == "core.net" || module_name == "core.net.tls" || module_name == "core.http.client" || module_name == "core.http.server" || module_name == "core.http.middleware" || (module_name == "core.http" && core_call_one_of(member, [String]{"serve", "get"})) -> Val(Effect.Net)
-        module_name == "core.game.raylib" -> Val(Effect.GPU)
-        module_name == "core.time" -> Val(Effect.Time)
-        module_name == "core.math.random" || module_name == "core.crypto.random" -> Val(Effect.Rand)
-        // Key generation draws from the OS generator, like crypto.random.bytes.
-        module_name == "core.crypto" && core_call_one_of(member, [String]{"__x25519_generate", "__signing_generate"}) -> Val(Effect.Rand)
-        module_name == "core.sys" && member == "success" -> None
-        module_name == "core.sys" -> Val(Effect.Env)
-        module_name == "core.process" && member == "status_ok" -> None
-        module_name == "core.process" -> Val(Effect.Exec)
-        module_name == "core.term" -> Val(Effect.IO)
-        module_name == "core.db" || module_name == "core.jobs" -> Val(Effect.DB)
-        module_name == "core.auth" && core_call_one_of(member, [String]{
-            "register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume",
-            "oauth_begin", "oauth_finish"
-        }) -> Val(Effect.DB)
-        module_name == "core.plugin" || module_name == "core.mod" -> Val(Effect.Exec)
-        module_name == "core.log" -> Val(Effect.Log)
-        module_name == "core.ui" || module_name == "core.web" || module_name == "core.web.storage.local" || module_name == "core.web.storage.session" -> Val(Effect.Browser)
-        module_name == "core.crypto.vault" && core_call_one_of(member, [String]{
-            "get", "current", "versions", "load", "status", "prepare_generate", "prepare_store",
-            "prepare_rotate", "prepare_retire", "prepare_revoke", "authorize_write", "commit_generate",
-            "commit_store", "commit_rotate", "commit_retire", "commit_revoke", "export_to_recipients",
-            "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped",
-            "prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519"
-        }) -> Val(Effect.Secret)
-        else -> None
-    }
+fn core_call_coverage_contains(coverage: CoreCallCoverage, projection: Int) -> Bool Never! {
+    coverage.bits.bit_and(projection) == projection
 }
 
-fn core_call_effect_leaf_for(module_name: String, member: String) -> String? {
-    if {
-        module_name == "core.time" && core_call_one_of(member, [String]{"sleep", "sleep_until"}) -> Val("Time.Wait")
-        module_name == "core.tasks" && member == "yield_now" -> Val("Time.Wait")
-        module_name == "core.files" && member == "scope" -> Val("FS.Read")
-        // A file operation names the one leaf it needs, so `--allow=FS.Read`
-        // covers a read and never a write. `copy` and `copy_dir` both read and
-        // write, so they keep the bare `FS` root.
-        module_name == "core.files" && core_call_one_of(member, [String]{
-            "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
-            "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute"
-        }) -> Val("FS.Read")
-        module_name == "core.files" && core_call_one_of(member, [String]{
-            "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
-            "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
-            "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock"
-        }) -> Val("FS.Write")
-        // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
-        // `Exec`; spawning a process keeps the ungranted `Exec` root.
-        module_name == "core.process" && core_call_one_of(member, [String]{"argv", "args"}) -> Val(EFFECT_LEAF_EXEC_ARGS)
-        module_name == "core.term" && core_call_one_of(member, [String]{
-            "confirm", "choose", "input_secret", "read_all_input", "readline", "read_until", "take", "binread",
-            "binwrite", "progress", "read_key"
-        }) -> Val("Time.Wait")
-        module_name == "core.sys" && core_call_one_of(member, [String]{"wait", "waitpid"}) -> Val("Time.Wait")
-        module_name == "core.process" && core_call_one_of(member, [String]{"run", "pipeline"}) -> Val("Time.Wait")
-        module_name == "core.net" && core_call_one_of(member, [String]{
-            "tcp_accept", "tcp_connect", "tcp_connect_addr", "tcp_connect_timeout", "tcp_connect_happy", "tcp_read",
-            "tcp_write", "tcp_read_bytes", "tcp_read_text", "tcp_write_bytes", "tcp_write_all_bytes", "tcp_write_text",
-            "tcp_ready", "sendfile", "tcp_reply", "udp_send_to", "udp_recv_from", "udp_send_bytes_to", "udp_receive",
-            "unix_accept", "unix_connect", "unix_read", "unix_write", "unix_read_bytes", "unix_write_all_bytes",
-            "dns_a", "dns_aaaa", "dns_a_at", "dns_aaaa_at", "dns_txt", "dns_txt_at", "dns_ptr", "dns_srv",
-            "dns_srv_at", "getservbyname", "getservbyport", "tls_connect", "tls_read", "tls_write", "tls_close"
-        }) -> Val("Time.Wait")
-        // TLS waits.
-        module_name == "core.net.tls" && core_call_one_of(member, [String]{"client", "read", "read_text", "write", "write_all", "write_text", "close"}) -> Val("Time.Wait")
-        // HTTP waits.
-        (module_name == "core.http.client" && core_call_one_of(member, [String]{"get", "post", "request"})) || (module_name == "core.http" && member == "get") || (module_name == "core.http.server" && core_call_one_of(member, [String]{"serve", "serve_once", "serve_once_listener"})) -> Val("Time.Wait")
-        // Encoding readers and writers.
-        (core_call_one_of(module_name, [String]{
-            "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor"
-        }) && core_call_one_of(member, [String]{"reader", "writer"})) || (module_name == "core.encoding.csv" && member == "query") -> Val("Time.Wait")
-        module_name == "core.db" && core_call_one_of(member, [String]{"transaction", "migrate"}) -> Val("Time.Wait")
-        module_name == "core.jobs" && core_call_one_of(member, [String]{"wait", "poll"}) -> Val("Time.Wait")
-        module_name == "core.service" && core_call_one_of(member, [String]{
-            "send", "send_durable", "receive", "endpoint_send", "endpoint_receive", "workflow_sleep",
-            "workflow_activity_wait", "workflow_all"
-        }) -> Val("Time.Wait")
-        else -> None
-    }
-}
-
-fn core_call_sink_for(module_name: String, member: String) -> SinkClass? {
-    if {
-        module_name == "core.log" -> Val(SinkClass.Credential)
-        module_name == "core.term" && core_call_one_of(member, [String]{"print", "eprint"}) -> Val(SinkClass.Credential)
-        // Encoding serializers.
-        (core_call_one_of(module_name, [String]{
-            "core.encoding.json", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.cbor", "core.encoding.xml"
-        }) && core_call_one_of(member, [String]{"to_string", "to_string_pretty", "to_bytes", "to_bytes_canonical"})) || (module_name == "core.encoding.jsonl" && member == "to_string") -> Val(SinkClass.Credential)
-        else -> None
-    }
-}
-
-fn core_call_default_capability(module_name: String, effect_kind: Effect?) -> CoreCapabilityContract Never! {
-    if {
-        effect_kind != None -> CoreCapabilityContract{
-            kind: CoreCapabilityKind.NativeRequired,
-            provider: Val(module_name),
-            fallback: None,
-            failure: Val("core.capability.unavailable"),
-        }
-        else -> CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}
-    }
-}
-
-fn core_call_default_interpreter_route(effect_kind: Effect?) -> CoreCallInterpreterRoute Never! {
-    if effect_kind == None -> CoreCallInterpreterRoute.TypedIntrinsic
-    else -> CoreCallInterpreterRoute.NoRoute
-}
-
-fn core_call_interpreter_route_is_executable(route: CoreCallInterpreterRoute) -> Bool Never! {
-    if route == {
-        .NoRoute -> false
-        .Pure(pure_route) -> pure_route != CoreCallPureRoute.NoPureRoute
-        else -> true
-    }
-}
-
-pub fn core_call_coverage_contains(coverage: CoreCallCoverage, projection: Int) -> Bool Never! {
-    coverage.bits & projection == projection
-}
-
-pub fn core_call_coverage_is_complete(coverage: CoreCallCoverage) -> Bool Never! {
+fn core_call_coverage_is_complete(coverage: CoreCallCoverage) -> Bool Never! {
     coverage.bits == CORE_CALL_COVERAGE_KNOWN
 }
 
-pub fn core_call_new(module_name: String, member: String, symbol: String, prelude: Bool, borrow_mask: [Bool]) -> CoreCallRecord Never! {
-    effect_kind :: core_call_effect_for(module_name, member)
-    route :: core_call_default_interpreter_route(effect_kind)
-    coverage_bits :: if core_call_interpreter_route_is_executable(route) -> CORE_CALL_COVERAGE_KNOWN else -> CORE_CALL_COVERAGE_KNOWN - CORE_CALL_COVERAGE_INTERPRETER
-    CoreCallRecord{
-        module_name: module_name,
-        member: member,
-        receiver_types: [String]{},
-        signature: CoreCallSignature{arity: borrow_mask.len(), max_arity: borrow_mask.len(), borrow_mask: borrow_mask},
-        frame_accesses: [CoreCallResourceAccess]{},
-        frame_completion: None,
-        fallibility: CoreCallFallibility.Sema,
-        effect_kind: effect_kind,
-        capability: core_call_default_capability(module_name, effect_kind),
-        effect_leaf: core_call_effect_leaf_for(module_name, member),
-        sink_class: core_call_sink_for(module_name, member),
-        pure_route: CoreCallPureRoute.NoPureRoute,
-        interpreter_route: route,
-        symbol: if prelude -> CoreCallSymbol.Prelude{name: symbol} else -> CoreCallSymbol.Rust{name: symbol},
-        coverage: CoreCallCoverage{bits: coverage_bits},
-        aot_direct: true,
-        jit_direct: true,
-        jit_symbol: None,
-        native_int_result: false,
-        ui_capabilities: [String]{},
-        marker: None,
-        authority: None,
-    }
+fn core_call_source_member(row: CoreCallRecord) -> String? Never! {
+    if row.symbol != CoreCallSymbol.SourceOwned -> return None
+    Val(row.source_target ?? row.member)
 }
 
-pub fn core_call_new_with_coverage(module_name: String, member: String, symbol: String, prelude: Bool, borrow_mask: [Bool], coverage: CoreCallCoverage) -> CoreCallRecord Never! {
-    row := core_call_new(module_name, member, symbol, prelude, borrow_mask)
-    row.coverage = coverage
-    row
+// The same checked boundary fact used by legacy Core MIR and source forwarding.
+fn core_call_authority_boundary_at(row: CoreCallRecord, index: Int) -> Bool Never! {
+    row.module_name == "core.plugin" && row.member == "load" && index == 1
 }
 
-pub fn core_call_receiver(receiver_types: [String], member: String, borrow_mask: [Bool]) -> CoreCallRecord Never! {
-    CoreCallRecord{
-        module_name: "",
-        member: member,
-        receiver_types: receiver_types,
-        signature: CoreCallSignature{arity: borrow_mask.len(), max_arity: borrow_mask.len(), borrow_mask: borrow_mask},
-        frame_accesses: [CoreCallResourceAccess]{},
-        frame_completion: None,
-        fallibility: CoreCallFallibility.Sema,
-        effect_kind: None,
-        capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None},
-        effect_leaf: None,
-        sink_class: None,
-        pure_route: CoreCallPureRoute.NoPureRoute,
-        interpreter_route: CoreCallInterpreterRoute.TypedIntrinsic,
-        symbol: CoreCallSymbol.Rust{name: ""},
-        coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN},
-        aot_direct: false,
-        jit_direct: false,
-        jit_symbol: None,
-        native_int_result: false,
-        ui_capabilities: [String]{},
-        marker: None,
-        authority: None,
-    }
+#Test("authority boundary stays on plugin load argument one") {
+    row :: core_call("core.plugin", "load") ?? panic("plugin load row")
+    assert_eq(core_call_authority_boundary_at(row, 0), false)
+    assert_eq(core_call_authority_boundary_at(row, 1), true)
+    assert_eq(core_call_authority_boundary_at(row, 2), false)
+    wire :: core_call("core.plugin", "__authority_to_wire") ?? panic("authority wire row")
+    assert_eq(core_call_authority_boundary_at(wire, 1), false)
+    assert_eq(wire.effect_kind, None)
 }
 
-pub fn core_call_receiver_with_symbol(receiver_types: [String], member: String, symbol: String, prelude: Bool, borrow_mask: [Bool]) -> CoreCallRecord Never! {
-    row := core_call_receiver(receiver_types, member, borrow_mask)
-    row.symbol = if prelude -> CoreCallSymbol.Prelude{name: symbol} else -> CoreCallSymbol.Rust{name: symbol}
-    row
-}
-
-pub fn core_call_receiver_with_coverage(receiver_types: [String], member: String, borrow_mask: [Bool], coverage: CoreCallCoverage) -> CoreCallRecord Never! {
-    row := core_call_receiver(receiver_types, member, borrow_mask)
-    row.coverage = coverage
-    row.interpreter_route = CoreCallInterpreterRoute.NoRoute
-    row
-}
-
-pub fn core_call_web(module_name: String, member: String, symbol: String, borrow_mask: [Bool]) -> CoreCallRecord Never! {
-    core_call_with_interpreter_route(core_call_new(module_name, member, symbol, true, borrow_mask), CoreCallInterpreterRoute.TypedIntrinsic)
-}
-
-pub fn core_call_with_frame_accesses(row: ^CoreCallRecord, accesses: [CoreCallResourceAccess]) -> CoreCallRecord Never! {
-    updated := row
-    updated.frame_accesses = accesses
-    updated
-}
-
-pub fn core_call_with_frame_completion(row: ^CoreCallRecord, completion: CoreCallCompletion) -> CoreCallRecord Never! {
-    updated := row
-    updated.frame_completion = Val(completion)
-    updated
-}
-
-pub fn core_call_with_max_arity(row: ^CoreCallRecord, max_arity: Int) -> CoreCallRecord Never! {
-    updated := row
-    updated.signature.max_arity = max_arity
-    updated
-}
-
-pub fn core_call_with_pure_route(row: ^CoreCallRecord, route: CoreCallPureRoute) -> CoreCallRecord Never! {
-    updated := row
-    updated.pure_route = route
-    updated.interpreter_route = CoreCallInterpreterRoute.Pure{route: route}
-    if route != CoreCallPureRoute.NoPureRoute -> updated.coverage.bits = updated.coverage.bits | CORE_CALL_COVERAGE_INTERPRETER
-    updated
-}
-
-pub fn core_call_with_interpreter_route(row: ^CoreCallRecord, route: CoreCallInterpreterRoute) -> CoreCallRecord Never! {
-    updated := row
-    updated.interpreter_route = route
-    if core_call_interpreter_route_is_executable(route) -> updated.coverage.bits = updated.coverage.bits | CORE_CALL_COVERAGE_INTERPRETER
-    updated
-}
-
-pub fn core_call_with_capability(row: ^CoreCallRecord, capability: CoreCapabilityContract) -> CoreCallRecord Never! {
-    updated := row
-    updated.capability = capability
-    updated
-}
-
-pub fn core_call_without_direct_aot(row: ^CoreCallRecord) -> CoreCallRecord Never! {
-    updated := row
-    updated.aot_direct = false
-    updated
-}
-
-pub fn core_call_without_direct_jit(row: ^CoreCallRecord) -> CoreCallRecord Never! {
-    updated := row
-    updated.jit_direct = false
-    updated
-}
-
-pub fn core_call_with_jit_symbol(row: ^CoreCallRecord, symbol: String) -> CoreCallRecord Never! {
-    updated := row
-    updated.jit_direct = true
-    updated.jit_symbol = Val(symbol)
-    updated
-}
-
-pub fn core_call_with_native_int_result(row: ^CoreCallRecord) -> CoreCallRecord Never! {
-    updated := row
-    updated.native_int_result = true
-    updated
-}
-
-pub fn core_call_with_ui_capabilities(row: ^CoreCallRecord, capabilities: [String]) -> CoreCallRecord Never! {
-    updated := row
-    updated.ui_capabilities = capabilities
-    updated
-}
-
-pub fn core_call_with_marker(row: ^CoreCallRecord, marker: CoreMarkerApplication) -> CoreCallRecord Never! {
-    updated := row
-    updated.marker = Val(marker)
-    updated
-}
-
-pub fn core_call_with_authority(row: ^CoreCallRecord, decision: MIRAuthorityDecision) -> CoreCallRecord Never! {
-    updated := row
-    updated.authority = Val(decision)
-    updated
-}
-
-pub fn core_call_resource_access_read(argument: Int) -> CoreCallResourceAccess Never! {
-    CoreCallResourceAccess{argument: argument, mode: CoreCallResourceAccessMode.Read}
-}
-
-pub fn core_call_resource_access_write(argument: Int) -> CoreCallResourceAccess Never! {
-    CoreCallResourceAccess{argument: argument, mode: CoreCallResourceAccessMode.Write}
-}
-
-pub fn core_call_resource_access_move(argument: Int) -> CoreCallResourceAccess Never! {
-    CoreCallResourceAccess{argument: argument, mode: CoreCallResourceAccessMode.Move}
-}
-
-pub fn core_call_completion_synchronous(provider: String) -> CoreCallCompletion Never! {
-    CoreCallCompletion{kind: CoreCallCompletionKind.Synchronous, token: None, provider: provider}
-}
-
-pub fn core_call_completion_pending(token: String, provider: String) -> CoreCallCompletion Never! {
-    CoreCallCompletion{kind: CoreCallCompletionKind.Pending, token: Val(token), provider: provider}
-}
-
-pub fn core_call_completion_event(token: String, provider: String) -> CoreCallCompletion Never! {
-    CoreCallCompletion{kind: CoreCallCompletionKind.Event, token: Val(token), provider: provider}
-}
-
-pub fn core_marker_deprecated(member: String, since: String, replacement: String, removed_in: String?) -> CoreMarkerApplication Never! {
-    CoreMarkerApplication{member: member, since: since, replacement: replacement, removed_in: removed_in}
-}
-
-pub fn core_capability_pure() -> CoreCapabilityContract Never! {
-    CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}
-}
-
-pub fn core_capability_native_required(provider: String, failure: String) -> CoreCapabilityContract Never! {
-    CoreCapabilityContract{kind: CoreCapabilityKind.NativeRequired, provider: Val(provider), fallback: None, failure: Val(failure)}
-}
-
-pub fn core_capability_portable_fallback(provider: String, fallback: String, failure: String) -> CoreCapabilityContract Never! {
-    CoreCapabilityContract{kind: CoreCapabilityKind.PortableFallback, provider: Val(provider), fallback: Val(fallback), failure: Val(failure)}
-}
-
-pub fn core_capability_explicit_simulation(provider: String, failure: String) -> CoreCapabilityContract Never! {
-    CoreCapabilityContract{kind: CoreCapabilityKind.ExplicitSimulation, provider: Val(provider), fallback: None, failure: Val(failure)}
-}
-
-pub fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -> Bool Never! {
+fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -> Bool Never! {
     provider_present :: if capability.provider == {
         .Val(value) -> value != ""
         .None -> false
@@ -509,53 +157,54 @@ pub fn core_call_capability_is_well_formed(capability: CoreCapabilityContract) -
     }
 }
 
-pub fn core_call_symbol_name(symbol: CoreCallSymbol) -> String Never! {
+fn core_call_symbol_name(symbol: CoreCallSymbol) -> String Never! {
     if symbol == {
         .Prelude(name) | .Rust(name) -> name
+        .SourceOwned -> panic("source-owned Core declarations have no host symbol")
     }
 }
 
-pub fn core_call_is_receiver(row: CoreCallRecord) -> Bool Never! {
+fn core_call_is_receiver(row: CoreCallRecord) -> Bool Never! {
     row.receiver_types.len() > 0
 }
 
-pub fn core_call_key(row: CoreCallRecord) -> String Never! {
+fn core_call_key(row: CoreCallRecord) -> String Never! {
     if !core_call_is_receiver(row) -> return "{row.module_name}.{row.member}"
     receiver_key :: row.receiver_types.join("|")
     "receiver({receiver_key}).{row.member}"
 }
 
-pub fn core_call_accepts_arity(row: CoreCallRecord, count: Int) -> Bool Never! {
+fn core_call_accepts_arity(row: CoreCallRecord, count: Int) -> Bool Never! {
     count >= row.signature.arity && count <= row.signature.max_arity
 }
 
-pub fn core_call_has_direct_symbol(row: CoreCallRecord) -> Bool Never! {
+fn core_call_has_direct_symbol(row: CoreCallRecord) -> Bool Never! {
     row.aot_direct && !core_call_is_receiver(row) && core_call_symbol_name(row.symbol) != ""
 }
 
-pub fn core_call_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreCallRecord? {
+fn core_call_in(rows: [CoreCallRecord], module_name: String, member: String) -> CoreCallRecord? {
     loop row in rows {
         if !core_call_is_receiver(row) && row.module_name == module_name && row.member == member -> return Val(row)
     }
     None
 }
 
-pub fn core_call(module_name: String, member: String) -> CoreCallRecord? {
+fn core_call(module_name: String, member: String) -> CoreCallRecord? {
     core_call_in(CORE_CALLS, module_name, member)
 }
 
-pub fn core_receiver_method_in(rows: [CoreCallRecord], receiver_type: String, member: String) -> CoreCallRecord? {
+fn core_receiver_method_in(rows: [CoreCallRecord], receiver_type: String, member: String) -> CoreCallRecord? {
     loop row in rows {
         if row.member == member && core_call_one_of(receiver_type, row.receiver_types) -> return Val(row)
     }
     None
 }
 
-pub fn core_receiver_method(receiver_type: String, member: String) -> CoreCallRecord? {
+fn core_receiver_method(receiver_type: String, member: String) -> CoreCallRecord? {
     core_receiver_method_in(CORE_CALLS, receiver_type, member)
 }
 
-pub fn core_marker_application(module_name: String, member: String) -> CoreMarkerApplication? {
+fn core_marker_application(module_name: String, member: String) -> CoreMarkerApplication? {
     core_marker_application_in(CORE_CALLS, module_name, member)
 }
 
@@ -570,8 +219,9 @@ fn core_marker_application_in(rows: [CoreCallRecord], module_name: String, membe
     None
 }
 
-pub fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
+fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
     row :: core_call_in(rows, module_name, member) ?? return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Unknown}
+    if row.symbol == CoreCallSymbol.SourceOwned && projection != CORE_CALL_COVERAGE_SEMA -> return CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
     authority_boundary_form :: actual_arity == row.signature.arity + 1 && module_name == "core.process" && member == "run"
     if {
         !core_call_coverage_contains(row.coverage, projection) -> CoreCallProjectionResult.Error{error: CoreCallProjectionError.Uncovered{projection: projection}}
@@ -580,6 +230,6 @@ pub fn core_call_projection_in(rows: [CoreCallRecord], module_name: String, memb
     }
 }
 
-pub fn core_call_projection(module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
+fn core_call_projection(module_name: String, member: String, projection: Int, actual_arity: Int) -> CoreCallProjectionResult Never! {
     core_call_projection_in(CORE_CALLS, module_name, member, projection, actual_arity)
 }

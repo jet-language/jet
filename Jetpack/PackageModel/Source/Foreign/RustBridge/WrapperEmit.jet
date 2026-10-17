@@ -48,7 +48,7 @@ static JET_FFI_PANIC_HOOK: std::sync::LazyLock<()> = std::sync::LazyLock::new(||
 });
 
 #[no_mangle]
-pub extern "C" fn jet_ffi_clear_panic_hook() {
+extern "C" fn jet_ffi_clear_panic_hook() {
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         let previous = JET_FFI_PREVIOUS_PANIC_HOOK
             .lock()
@@ -83,12 +83,12 @@ where
 }
 
 #[no_mangle]
-pub extern "C" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {
+extern "C" fn jet_ffi_set_reporter(reporter: JetFfiReporter) {
     *JET_FFI_REPORTER.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(reporter);
 }
 
 #[no_mangle]
-pub extern "C" fn jet_ffi_take_failure() -> i8 {
+extern "C" fn jet_ffi_take_failure() -> i8 {
     JET_FFI_FAILURE.with(|failure| failure.replace(0) as i8)
 }
 
@@ -108,7 +108,7 @@ fn ffi_panic() -> ! {
 
 ``` }
 
-pub fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_native: Bool, foundation_crate_path: String?) -> String Never! {
+fn pkg_ffi_emit_cargo_toml(crate_name: String, deps: [String: String], has_native: Bool, foundation_crate_path: String?) -> String Never! {
     build :: if has_native -> "build = \"build.rs\"\n" else -> ""
     s := "[package]\nname = \"{crate_name}\"\nversion = \"0.1.0\"\nedition = \"2021\"\n{build}\n[workspace]\n\n[lib]\ncrate-type = [\"rlib\", \"cdylib\"]\n\n"
     if deps.len() == 0 -> return s
@@ -150,7 +150,7 @@ fn pkg_ffi_runtime_mod(name: String, body: String) -> String Never! {
     "mod {name} {{\n{body}}}\npub use {name}::*;\n"
 }
 
-pub fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBridgeNeeds, handle_names: [String], record_defs: CRecordDefinitions) -> String Never! {
+fn pkg_ffi_emit_wrapper_lib_with_handles(entries: [ExternEntry], needs: RustBridgeNeeds, handle_names: [String], record_defs: CRecordDefinitions) -> String Never! {
     out := FFI_WRAPPER_PRELUDE
     out = "{out}#[repr(C)]\npub struct JetFfiSlot {{\npub value: u64,\npub ptr: *mut u8,\npub len: usize,\n}}\n\n"
     out = "{out}{record_defs.source}"
@@ -207,8 +207,8 @@ fn pkg_ffi_crypto_modules(needs: RustBridgeNeeds) -> String Never! {
         roots :: [(name: String, source: String)]{
             (name: "jet_encoding_errors", source: FFI_ENCODING_ERRORS_RUNTIME),
             (name: "jet_json_number", source: FFI_JSON_NUMBER_RUNTIME),
-            (name: "DataTree", source: FFI_DATATREE_RUNTIME),
-            (name: "EncodingJson", source: FFI_ENCODING_JSON_RUNTIME),
+            (name: "Dyn", source: FFI_DYN_RUNTIME),
+            (name: "EncodingJson", source: FFI_ENCODING_JSON_RUNTIME.replace(FFI_ENCODING_TYPES_INCLUDE, FFI_ENCODING_TYPES_RUNTIME).replace(FFI_ENCODING_ERROR_INCLUDE, FFI_ENCODING_ERROR_RUNTIME).replace("crate::Outcome::", "crate::__jet_crypto::")),
             (name: "RuntimeDiagnosticCore", source: FFI_RUNTIME_DIAGNOSTIC_CORE)
         }
         loop root in roots -> out = "{out}mod {root.name} {{\n{root.source}\n}}\n"
@@ -357,6 +357,36 @@ fn pkg_ffi_asm_instructions(source: String) -> [String] Never! {
     instructions
 }
 
+fn pkg_ffi_asm_stack_inputs(instructions: [String], names: [String]) -> Bool Never! {
+    seen := [Bool]{}
+    loop _ in names -> &seen.push(false)
+    prefix := true
+    loop line in instructions {
+        if !line.starts_with("push ") -> prefix = false
+        if !line.contains("{{") -> next
+        head :: line.split_once("push {{") ?? return false
+        tail :: head.after.split_once("}}") ?? return false
+        if !prefix || head.before != "" || tail.after != "" -> return false
+        found := false
+        loop (index, name) in names {
+            if name != tail.before -> next
+            if seen[index] -> return false
+            seen[index] = true
+            found = true
+        }
+        if !found -> return false
+    }
+    loop value in seen {
+        if !value -> return false
+    }
+    true
+}
+
+fn pkg_ffi_asm_general_register(register: String) -> Bool Never! {
+    registers :: [String]{"rax", "rbx", "rcx", "rdx", "rsi", "rdi", "rbp", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"}
+    registers.contains(register)
+}
+
 fn pkg_ffi_emit_asm_wrapper(entry: ExternEntry, inline: InlineEntry) -> String Never! {
     contract :: inline.asm_contract ?? return ""
     if inline.param_names != entry.param_names || inline.param_names.len() != entry.params.len() -> return ""
@@ -392,25 +422,57 @@ fn pkg_ffi_emit_asm_wrapper(entry: ExternEntry, inline: InlineEntry) -> String N
             result_expr = "__jet_result"
         }
     }
-    loop index in 0..<inline.param_names.len() {
-        if output_param != Val(index) -> &operands.push("{inline.param_names[index]} = in(reg) p{index}")
-    }
     seen_clobbers := [String]{}
     clobbers :: contract.clobbers
     loop clobber in clobbers {
         register :: pkg_ffi_normalize_register(clobber)
-        if return_reg == Val(register) || seen_clobbers.contains(register) -> next
+        wanted_return :: Val(register)
+        if return_reg == wanted_return || seen_clobbers.contains(register) -> next
         &seen_clobbers.push(register)
         &operands.push("out(\"{register}\") _")
     }
+    instructions := pkg_ffi_asm_instructions(inline.source)
+    gp_outputs := 0
+    loop register in seen_clobbers {
+        if pkg_ffi_asm_general_register(register) -> gp_outputs += 1
+    }
+    if return_reg == .Val(register) {
+        if pkg_ffi_asm_general_register(register) -> gp_outputs += 1
+    }
+    word_inputs := true
+    loop parameter in params {
+        if !parameter.ends_with(": i64") && !parameter.ends_with(": u64") -> word_inputs = false
+    }
+    // RSP and a possible frame RBP leave fourteen allocatable GP registers.
+    memory_inputs :: contract.target.starts_with("x86_64") && output_param == None && inline.param_names.len() + gp_outputs > 14 && word_inputs && pkg_ffi_asm_stack_inputs(instructions, inline.param_names)
+    if memory_inputs {
+        &operands.push("__jet_args = in(reg) __jet_args.as_ptr()")
+        loop (line_index, line) in instructions {
+            if !line.starts_with("push {{") -> next
+            loop (index, name) in inline.param_names {
+                wanted :: "push {{{name}}}"
+                if line == wanted -> instructions[line_index] = "push qword ptr [{{__jet_args}} + {index * 8}]"
+            }
+        }
+    } else {
+        loop index in 0..<inline.param_names.len() {
+            wanted_output :: Val(index)
+            if output_param != wanted_output -> &operands.push("{inline.param_names[index]} = in(reg) p{index}")
+        }
+    }
     all_args := [String]{}
-    loop line in pkg_ffi_asm_instructions(inline.source) -> &all_args.push("\"{pkg_ffi_rust_string(line)}\"")
+    loop line in instructions -> &all_args.push("\"{pkg_ffi_rust_string(line)}\"")
     loop operand in operands -> &all_args.push(operand)
     declarations := ""
     if ret != "()" && output_param == None {
         declarations = "    let __jet_result: {ret};\n"
     } else if output_param == .Val(index) {
         declarations = "    let mut p{index} = p{index};\n"
+    }
+    if memory_inputs {
+        words := [String]{}
+        loop index in 0..<inline.param_names.len() -> &words.push("p{index} as u64")
+        declarations = "{declarations}    let __jet_args = [{words.join(", ")}];\n"
     }
     symbol :: "jet_inline_{entry.wrapper_name}"
     args := [String]{}
@@ -492,8 +554,8 @@ fn pkg_ffi_emit_native_inline_source(entry: ExternEntry, index: Int) -> String N
 }
 
 // The build script that compiles every inline C/C++ body with the selected
-// target's audited tools, proves each links with no undefined symbols, and
-// archives them into the static library the bridge links.
+// target's audited tools, proves the complete bridge has no undefined symbols,
+// and archives them into the static library the bridge links.
 fn pkg_ffi_emit_inline_build_rs(entries: [ExternEntry], toolchain: InlineNativeToolchain) -> String Never! {
     rows := [String]{}
     has_cpp := false
@@ -535,7 +597,9 @@ fn main() {{
     assert_eq!(cargo_target, TARGET, "Cargo TARGET differs from Jet's selected target");
     let out = PathBuf::from(env::var_os("OUT_DIR").unwrap());
     let mut objects = Vec::new();
-    for (index, (source, compiler, cpp, target_arg)) in [{file_rows}].iter().enumerate() {{
+    let files = [{file_rows}];
+    let mut linker = None;
+    for (index, (source, compiler, cpp, target_arg)) in files.iter().enumerate() {{
         println!("cargo:rerun-if-changed={{source}}");
         let object = out.join(format!("inline_{{index}}.o"));
         let mut compile = Command::new(compiler);
@@ -543,12 +607,17 @@ fn main() {{
         if *cpp {{ compile.arg("-std=c++17"); }}
         compile.args(["-fPIC", "-c", source, "-o"]).arg(&object);
         checked(&mut compile);
-        let proof = out.join(format!("inline_{{index}}.{{PROOF_SUFFIX}}"));
+        objects.push(object);
+        if linker.is_none() || *cpp {{ linker = Some((*compiler, *target_arg)); }}
+    }}
+    if let Some((compiler, target_arg)) = linker {{
+        let proof = out.join(format!("inline_bridge.{{PROOF_SUFFIX}}"));
         let mut link = Command::new(compiler);
         if !target_arg.is_empty() {{ link.arg(target_arg); }}
-        link.args(["-shared", UNDEFINED_SYMBOLS]).arg(&object).arg("-o").arg(&proof);
+        link.args(["-shared", UNDEFINED_SYMBOLS]);
+        for object in &objects {{ link.arg(object); }}
+        link.arg("-o").arg(&proof);
         checked(&mut link);
-        objects.push(object);
     }}
     let archive = out.join("libjet_inline_native.a");
     let mut ar = Command::new(ARCHIVER);
@@ -924,5 +993,5 @@ fn pkg_ffi_rust_type(ty: Type, user_types: [String]) -> String Never! {
 fn pkg_ffi_named_rust_type(name: String, user_types: [String]) -> String Never! {
     if name == "Error" -> return "String"
     if user_types.contains(name) -> return pkg_ffi_mangle_path(name)
-    ~name
+    name.copy()
 }

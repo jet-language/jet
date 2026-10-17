@@ -1,0 +1,28 @@
+text_commutes:true
+text_merged:SyncText(hello, world!)
+text_associates:true
+text_idempotent:true
+text_all_edits:SyncText(goodbye, world!)
+text_clock:LamportClock(r1=12,r2=12,r3=18)
+mid_low:SyncText(aZb)
+mid_high:SyncText(aZb)
+text_collision:SyncError(invalid SyncText)
+map_converges:true
+list_converges:true
+counter_idempotent:5
+invalid_policy:rejected
+owner_allowed:true
+owner_denied:false
+public_allowed:true
+invalid_text:SyncError(invalid SyncText)
+SyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))
+SyncOver(session=sync-laws, generation=1, doc=SyncMap(k=right))
+SyncOver(session=sync-merge-laws, generation=1, doc=SyncMap(a=1))
+SyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))
+SyncOver(session=sync-merge-laws, generation=2, doc=SyncMap(a=1,b=2))
+SyncError(document is not a canonical CRDT value)
+SyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))
+SyncError(document merge denied)
+SyncOver(session=sync-conflict-laws, generation=1, doc=SyncMap(k=left))
+SyncError(document is not a canonical CRDT value)
+SyncError(document is not a canonical CRDT value)

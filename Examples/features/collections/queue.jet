@@ -27,4 +27,29 @@ fn run() {
     rest := &e.split(1)
     print("after split left: {e.to_list()}")
     print("after split right: {rest.to_list()}")
+
+    // Borrowed constructors snapshot owning elements; membership must compare
+    // their contents rather than the native String-handle addresses.
+    source := ["alpha", "beta"]
+    words := Queue.init(source)
+    &source.push("gamma")
+    assert(words.to_list() == ["alpha", "beta"])
+    assert(words.contains("alpha"))
+    &words.delete("alpha")
+    assert(words.to_list() == ["beta"])
+    popped :: &words.pop_front()
+    if popped == {
+        .Val(value) -> assert(value == "beta")
+        .None -> assert(false)
+    }
+    assert(words.is_empty())
+
+    // Split clamps exact Int bounds, including values beyond machine words.
+    bounded := Queue.init([1, 2])
+    beyond := &bounded.split(100000000000000000000000000000000)
+    assert(bounded.len() == 2)
+    assert(beyond.is_empty())
+    whole := &bounded.split(-1)
+    assert(bounded.is_empty())
+    assert(whole.to_list() == [1, 2])
 }

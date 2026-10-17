@@ -1,0 +1,115 @@
+// Exact reviewed tests/pkg.rs semantic-lock predicates; package-tests seam.
+// Ported from pkg.rs:312-348. Every rationale field is retained.
+fn trust_pkg_integration_record(owner: String, key: String, exact: String) -> SemanticRecord Never! {
+    SemanticRecord.new(
+        LockIdentity{kind: LockRecordKind.Package, key: key, exact: exact, hash: "sha256-{exact}", platform: "x86_64-linux"},
+        LockRationale{owner_package: owner, reason: "{owner} declared {key}", source_ref: "catalog:{key}", provider: "core", channel_input: "stable", exact_output: exact, policy_fingerprint: "policy-1", recipe_id: "", adapter_id: "", signature: "ed25519:sig", cache_provenance: "hangar", update_command: "jet update {key}"}
+    )
+}
+
+fn trust_pkg_integration_lock(owner: String, key: String, exact: String) -> SemanticLockFile Never! {
+    SemanticLockFile.with_records([SemanticRecord]{trust_pkg_integration_record(owner, key, exact)})
+}
+
+// Ported from pkg.rs:426-437.
+#Test("pkg integration lock_records_catalog_owner_and_rationale") {
+    text :: trust_write_semantic_lock(trust_pkg_integration_lock("app", "core.log", "1.2.3"))
+    assert(text.contains("owner-package = \"app\""))
+    assert(text.contains("reason = \"app declared core.log\""))
+    parsed :: trust_parse_semantic_lock(text)
+    assert_eq(parsed.records[0].rationales[0].owner_package, "app")
+}
+
+// Ported from pkg.rs:440-454.
+#Test("pkg integration catalog_merge_conflict_names_owner_package") {
+    out :: trust_merge_semantic_locks(SemanticLockFile.empty(), trust_pkg_integration_lock("app", "core.log", "1.2.3"), trust_pkg_integration_lock("app", "core.log", "1.3.0"))
+    assert_eq(out.conflicts.len(), 1)
+    assert_eq(out.conflicts[0].owner_package, "app")
+    assert_eq(out.conflicts[0].semantic_key, "package:core.log")
+}
+
+// Ported from pkg.rs:499-519. Future(_) is a kind predicate, not an exact value assertion.
+#Test("pkg integration lock_record_kinds_roundtrip_unknown_future_fields") {
+    raw :: "semantic-lock-version = 1\n\n[[semantic_record]]\nkind = \"future-kind\"\nkey = \"k\"\nexact = \"e\"\nhash = \"h\"\nplatform = \"p\"\nfuture-key = \"future-value\"\n"
+    parsed :: trust_parse_semantic_lock(raw)
+    future :: if parsed.records[0].identity.kind == {
+        .Future(_) -> true
+        else -> false
+    }
+    assert(future)
+    assert_eq(parsed.records[0].future_fields.get("future-key"), Val("future-value"))
+    reparsed :: trust_parse_semantic_lock(trust_write_semantic_lock(SemanticLockFile.with_records(parsed.records)))
+    assert_eq(reparsed.records[0].future_fields.get("future-key"), Val("future-value"))
+}
+
+// Ported from pkg.rs:522-534.
+#Test("pkg integration lock_rationale_preserves_exact_identity") {
+    a :: trust_pkg_integration_lock("app", "core.log", "1.2.3")
+    b := a.copy()
+    b.records[0].rationales[0].reason = "human text changed"
+    assert_eq(a.records[0].identity.machine_identity(), b.records[0].identity.machine_identity())
+}
+
+// Ported from pkg.rs:537-550.
+#Test("pkg integration lock_merge_independent_additions") {
+    out :: trust_merge_semantic_locks(SemanticLockFile.empty(), trust_pkg_integration_lock("app", "core.log", "1.2.3"), trust_pkg_integration_lock("app", "core.http", "2.0.0"))
+    assert_eq(out.conflicts.len(), 0)
+    assert_eq(out.merged.records.len(), 2)
+}
+
+// Ported from pkg.rs:553-566.
+#Test("pkg integration lock_merge_same_identity_two_owners") {
+    out :: trust_merge_semantic_locks(SemanticLockFile.empty(), trust_pkg_integration_lock("app", "core.log", "1.2.3"), trust_pkg_integration_lock("worker", "core.log", "1.2.3"))
+    assert_eq(out.conflicts.len(), 0)
+    assert_eq(out.merged.records[0].rationales.len(), 2)
+}
+
+// Ported from pkg.rs:569-582.
+#Test("pkg integration lock_merge_conflicting_identity_diagnostic") {
+    out :: trust_merge_semantic_locks(SemanticLockFile.empty(), trust_pkg_integration_lock("app", "core.log", "1.2.3"), trust_pkg_integration_lock("app", "core.log", "1.3.0"))
+    assert_eq(out.conflicts[0].left_reason, "app declared core.log")
+    assert_eq(out.conflicts[0].right_reason, "app declared core.log")
+}
+
+// Ported from pkg.rs:585-607; only hash differs.
+#Test("pkg integration lock_merge_conflicts_on_same_version_different_hash") {
+    left := trust_pkg_integration_lock("app", "core.log", "1.2.3")
+    left.records[0].identity.hash = "sha256-left"
+    right := trust_pkg_integration_lock("app", "core.log", "1.2.3")
+    right.records[0].identity.hash = "sha256-right"
+    assert_eq(trust_merge_semantic_locks(SemanticLockFile.empty(), left, right).conflicts.len(), 1)
+}
+
+// Ported from pkg.rs:610-624.
+#Test("pkg integration lock_merge_accepts_one_sided_identity_change_from_base") {
+    base :: trust_pkg_integration_lock("app", "core.log", "1.2.3")
+    out :: trust_merge_semantic_locks(base, base.copy(), trust_pkg_integration_lock("app", "core.log", "1.3.0"))
+    assert_eq(out.conflicts.len(), 0)
+    assert_eq(out.merged.records[0].identity.exact, "1.3.0")
+}
+
+// Ported from pkg.rs:627-642.
+#Test("pkg integration lock_merge_platform_specific_records") {
+    left :: trust_pkg_integration_lock("app", "bin.tool:x86_64-linux", "1")
+    right := trust_pkg_integration_lock("app", "bin.tool:aarch64-macos", "1")
+    right.records[0].identity.platform = "aarch64-macos"
+    out :: trust_merge_semantic_locks(SemanticLockFile.empty(), left, right)
+    assert_eq(out.conflicts.len(), 0)
+    assert_eq(out.merged.records.len(), 2)
+}
+
+// Ported from pkg.rs:645-657.
+#Test("pkg integration lock_explain_names_owner_policy_provider_platform") {
+    fact :: trust_explain_semantic_lock(trust_pkg_integration_lock("app", "core.log", "1.2.3"), "package:core.log") ?? panic("explain fact")
+    assert_eq(fact.owners, [String]{"app"})
+    assert_eq(fact.provider, "core")
+    assert_eq(fact.platform, "x86_64-linux")
+    assert_eq(fact.policy_fingerprint, "policy-1")
+    assert_eq(fact.contenders.len(), 1)
+}
+
+// Ported from pkg.rs:689-698.
+#Test("pkg integration read_only_verbs_do_not_rewrite_lock") {
+    before :: trust_write_semantic_lock(trust_pkg_integration_lock("app", "core.log", "1.2.3"))
+    assert_eq(before, trust_write_semantic_lock(trust_parse_semantic_lock(before)))
+}

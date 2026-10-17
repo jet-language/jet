@@ -1,0 +1,166 @@
+// Assemble with JetRuntime/Source and the fixed-width OS leaves. Native exit
+// witness once E1/E2 land: stdout exactly "alloc tests: ok\n", status 0. A failed
+// witness exits 1 without requiring text, containers or any other runtime layer.
+// Tests are single-threaded; raw metadata inspection owns the entire heap here.
+fn alloc_test_require(ok: Bool) {
+    if ok {
+        return
+    }
+    #Unsafe("a failed allocator witness terminates this isolated test process") {
+        _ := os_syscall_i64(I64{231}, I64{1}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    loop {
+
+    }
+}
+
+fn alloc_test_payload(size: I64, align: I64) {
+    first :: jet_rt_alloc(size, align)
+    second :: jet_rt_alloc(size, align)
+    count :: if (size == I64{0}) -> I64{1} else -> size
+    alloc_test_require(first != I64{0} && second != I64{0} && first != second)
+    alloc_test_require((first.bit_and(wrapping(align - I64{1}))) == I64{0})
+    alloc_test_require((second.bit_and(wrapping(align - I64{1}))) == I64{0})
+    alloc_test_require(wrapping(first + count) <= second || wrapping(second + count) <= first)
+    #Unsafe("both allocations own count bytes; touching their endpoints must not alias each other or their metadata") {
+        os_store_u8(first, I64{17})
+        os_store_u8(wrapping(first + count - I64{1}), I64{29})
+        os_store_u8(second, I64{43})
+        os_store_u8(wrapping(second + count - I64{1}), I64{61})
+        alloc_test_require(os_load_u8(wrapping(first + count - I64{1})) == I64{29})
+        alloc_test_require(os_load_u8(wrapping(second + count - I64{1})) == I64{61})
+        if (count > I64{1}) {
+            alloc_test_require(os_load_u8(first) == I64{17})
+            alloc_test_require(os_load_u8(second) == I64{43})
+        }
+    }
+    jet_rt_free(second, size, align)
+    jet_rt_free(first, size, align)
+}
+
+fn alloc_test_boundaries(align: I64) {
+    slot := I64{32}
+    loop slot <= (I64{4096}) {
+        boundary :: wrapping(slot - I64{16} - align + I64{1})
+        if {
+            boundary > (I64{0}) -> {
+                alloc_test_require(alloc_class(boundary, align) == slot)
+                alloc_test_require(alloc_class(wrapping(boundary + I64{1}), align) == (if (slot == I64{4096}) -> I64{0} else -> wrapping(slot * I64{2})))
+                alloc_test_payload(wrapping(boundary - I64{1}), align)
+                alloc_test_payload(boundary, align)
+                alloc_test_payload(wrapping(boundary + I64{1}), align)
+            }
+            else -> alloc_test_payload(slot, align)
+        }
+        slot = wrapping(slot * I64{2})
+    }
+}
+
+fn alloc_test_reuse() {
+    first :: jet_rt_alloc(I64{8}, I64{8})
+    jet_rt_free(first, I64{8}, I64{8})
+    second :: jet_rt_alloc(I64{8}, I64{8})
+    alloc_test_require(first == second)
+    jet_rt_free(second, I64{8}, I64{8})
+    // The retained slab must serve every iteration: not merely an equal virtual
+    // address obtained by munmap/mmap. Its head/live/free words remain present.
+    head :: alloc_head(alloc_root, I64{32})
+    slab := I64{0}
+    #Unsafe("the test is the only heap user and the class has a retained empty slab") {
+        slab = os_load_i64(head)
+        alloc_test_require(slab != I64{0} && os_load_i64(wrapping(head + I64{64})) == slab)
+    }
+    iteration := I64{0}
+    loop iteration < (I64{1000}) {
+        pointer :: jet_rt_alloc(I64{8}, I64{8})
+        #Unsafe("pointer's private header identifies its still-live slab, which must be the retained mapping") {
+            alloc_test_require(os_load_i64(wrapping(pointer - I64{16})) == slab)
+        }
+        jet_rt_free(pointer, I64{8}, I64{8})
+        #Unsafe("no other thread touches the retained slab or its state cell") {
+            alloc_test_require(os_load_i64(head) == slab)
+            alloc_test_require(os_load_i64(wrapping(slab + I64{24})) == I64{0})
+        }
+        iteration = wrapping(iteration + I64{1})
+    }
+}
+
+fn alloc_test_full_slabs() {
+    // Class 4096 has 15 blocks/slab. The 16th block must come from a second
+    // mapping. Keep our pointer chain inside owned payloads, not a Jet list.
+    chain := I64{0}
+    first_slab := I64{0}
+    count := I64{0}
+    loop count < (I64{16}) {
+        pointer :: jet_rt_alloc(I64{2048}, I64{16})
+        #Unsafe("the test owns the full payload and can read its allocator header") {
+            slab :: os_load_i64(wrapping(pointer - I64{16}))
+            if (count == I64{0}) { first_slab = slab }
+            if (count < I64{15}) { alloc_test_require(slab == first_slab) } else {
+                alloc_test_require(slab != first_slab)
+            }
+            os_store_i64(pointer, chain)
+        }
+        chain = pointer
+        count = wrapping(count + I64{1})
+    }
+    loop chain != (I64{0}) {
+        pointer :: chain
+        #Unsafe("the chain word remains readable until its payload is freed") {
+            chain = os_load_i64(pointer)
+        }
+        jet_rt_free(pointer, I64{2048}, I64{16})
+    }
+    head :: alloc_head(alloc_root, I64{4096})
+    #Unsafe("after all payloads are freed, exactly one empty slab is retained; any second empty slab was unlinked and unmapped") {
+        retained :: os_load_i64(wrapping(head + I64{64}))
+        alloc_test_require(retained != I64{0} && os_load_i64(head) == retained)
+        alloc_test_require(os_load_i64(retained) == I64{0})
+        alloc_test_require(os_load_i64(wrapping(retained + I64{8})) == I64{0})
+        alloc_test_require(os_load_i64(wrapping(retained + I64{24})) == I64{0})
+    }
+}
+
+fn alloc_test_nullable() {
+    alloc_test_require(alloc_try(I64{1}, I64{0}) == I64{0})
+    alloc_test_require(alloc_try(I64{1}, I64{3}) == I64{0})
+    alloc_test_require(alloc_try(I64{-1}, I64{8}) == I64{0})
+    // Valid Layout, but the allocator's mapping overhead cannot fit.
+    alloc_test_require(alloc_try(I64{9223372036854775807}, I64{1}) == I64{0})
+    // The actual kernel refuses an address-space-sized mapping.
+    alloc_test_require(alloc_map_try(I64{-1}) == I64{0})
+    small :: alloc_try(I64{8}, I64{8})
+    alloc_test_require(small != I64{0})
+    jet_rt_free(small, I64{8}, I64{8})
+    aligned :: alloc_try(I64{0}, I64{8192})
+    alloc_test_require(aligned != I64{0} && (aligned.bit_and(I64{8191})) == I64{0})
+    jet_rt_free(aligned, I64{0}, I64{8192})
+}
+
+fn alloc_tests() {
+    jet_rt_alloc_init()
+    jet_rt_alloc_init()
+    alloc_test_require(alloc_layout_valid(I64{0}, I64{1}))
+    alloc_test_require(!alloc_layout_valid(I64{1}, I64{0}))
+    alloc_test_require(!alloc_layout_valid(I64{1}, I64{3}))
+    alloc_test_require(!alloc_layout_valid(I64{-1}, I64{8}))
+    alloc_test_require(!alloc_layout_valid(I64{9223372036854775807}, I64{8}))
+    // Null must remain a no-op even with an otherwise-invalid layout.
+    jet_rt_free(I64{0}, I64{-1}, I64{0})
+    alloc_test_nullable()
+    alloc_test_boundaries(I64{1})
+    alloc_test_boundaries(I64{8})
+    alloc_test_boundaries(I64{16})
+    alloc_test_boundaries(I64{64})
+    alloc_test_boundaries(I64{4096})
+    alloc_test_payload(I64{0}, I64{1})
+    alloc_test_payload(I64{0}, I64{8192})
+    alloc_test_payload(I64{1}, I64{8192})
+    alloc_test_payload(I64{65537}, I64{8192})
+    alloc_test_reuse()
+    alloc_test_full_slabs()
+    #Unsafe("the exact success line is two bounded stack words written to stdout") {
+        _ := os_write_word_i64(I64{1}, I64{7310503706572385377}, I64{8})
+        _ := os_write_word_i64(I64{1}, I64{750815947097601139}, I64{8})
+    }
+}

@@ -16,13 +16,39 @@ pub(super) use Derives::{expand_builtin_derive_items, expand_builtin_derive_item
 pub(crate) use Items::{
     check_strong_shared_cycles, comptime_context_from_items, const_evaluated_at_build,
     core_string_source_method, eval_comptime_items, name_defined,
-    register_const, register_distinct, register_enum, register_impl_methods,
+    register_builtin_error_struct, register_const, register_distinct, register_enum, register_impl_methods,
     register_missing_type_methods, register_struct, register_type_alias, register_type_methods,
     resolve_comptime_declaration_values,
 };
 pub(crate) use Serde::{
     expand_builtin_serde_items, expand_builtin_serde_items_with_auto, inject_anonymous_union_items,
 };
+
+pub(crate) fn is_operator_trait(name: &str) -> bool {
+    jet_foundation::Traits::operator_hook_name(name).is_some()
+}
+
+/// Operator signatures share the coherence registry's unspellable pair identity.
+pub(crate) fn operator_signature_key(
+    owner: &str,
+    trait_name: Option<&str>,
+    method: &str,
+    rhs: Option<&Type>,
+) -> Option<String> {
+    let trait_name = trait_name?;
+    if !is_operator_trait(trait_name) {
+        return None;
+    }
+    let implied;
+    let rhs = match rhs {
+        Some(rhs) => rhs,
+        None => {
+            implied = Type::Named(owner.to_string());
+            &implied
+        }
+    };
+    Some(jet_foundation::Traits::operator_method_identity(owner, trait_name, method, rhs))
+}
 
 /// Seed a checker-only declaration view before top-level comptime values run.
 /// The production registration pass remains authoritative; this view only
@@ -202,17 +228,6 @@ pub(crate) fn normalize_operator_rhs(items: &mut Vec<Item>) {
         }
     }
 
-    fn is_operator_trait(name: &str) -> bool {
-        matches!(
-            name,
-            Syntax::TRAIT_ADD
-                | Syntax::TRAIT_SUB
-                | Syntax::TRAIT_MUL
-                | Syntax::TRAIT_DIV
-                | Syntax::TRAIT_EQUATABLE
-                | Syntax::TRAIT_COMPARABLE
-        )
-    }
 
     fn normalize_nested(items: &mut [Item]) {
         let owners: HashMap<String, Type> = items
@@ -586,6 +601,7 @@ impl<'a> Checker<'a> {
     /// Shared tail of `check_func_body` and the failure-union probe:
     /// declare parameters, check the body, enforce definite return.
     pub(crate) fn check_params_and_body(&mut self, f: &mut Func, owner_type: Option<&str>) {
+        jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsChecked, 1);
         // A public fallible signature is an API boundary. Validate its error
         // carrier before checking the body so the public contract teaches the
         // required visibility change at the declaration that owns it.
@@ -762,12 +778,26 @@ impl<'a> Checker<'a> {
         // D-STRUCT-POLICY1=A: callable marker values use the same package
         // vocabulary as `apply`; declaration bodies are checked separately
         // against each wrapped function signature below the bundle seam.
-        for marker in &f.markers {
+        for marker in &mut f.markers {
             if marker.name == Syntax::MARKER_POLICY
                 && crate::AST::CallablePolicyChain::parse(&marker.expr_args_owned()).is_ok()
             {
-                let policy_args = marker.expr_args_owned();
-                let _ = self.validate_callable_policy_values(&policy_args, marker.span);
+                let mut policy_args = marker.expr_args_owned().into_iter().map(|expr| {
+                    crate::AST::CallArg { convention: AccessConvention::Read, span: expr.span(), expr, flags: Default::default(), label: None, spread: false }
+                }).collect::<Vec<_>>();
+                self.bind_user_policy_arguments(&mut policy_args, marker.span);
+                let expressions = policy_args.iter().map(|arg| arg.expr.clone()).collect::<Vec<_>>();
+                if self.validate_callable_policy_values(&expressions, marker.span) {
+                    for argument in &mut policy_args {
+                        if let crate::AST::Expr::Call(policy) = &mut argument.expr {
+                            for value in &mut policy.args {
+                                self.infer(&mut value.expr);
+                            }
+                        }
+                    }
+                    self.normalize_user_policy_arguments(&mut policy_args);
+                    marker.args = policy_args.into_iter().map(|arg| crate::AST::MarkerCallArg::Expr(arg.expr)).collect();
+                }
             }
         }
         for mut marker in self.take_targeted_rule_facts(f.span) {
@@ -952,7 +982,7 @@ impl<'a> Checker<'a> {
             self.lost_tail_span = previous_lost_tail;
         }
         // D-COPY-DEFAULT1=A: every use is known now, so each unmarked move
-        // that a later use reached becomes an ordinary `~name` copy.
+        // that a later use reached becomes an ordinary `name.copy()` copy.
         self.materialize_share_sites(&mut f.body);
         self.arithmetic_policy_stack
             .truncate(arithmetic_policy_depth);
@@ -1339,13 +1369,15 @@ pub(crate) fn check_effect_boundaries(
     items: &[Item],
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
+    modules: &[crate::AST::LoadedModule],
+    entry_module: Option<usize>,
     diags: &mut Vec<Diagnostic>,
 ) {
-    fn unbounded_dispatch(
+    fn unbounded_dispatch<'a>(
         key: &str,
-        summaries: &HashMap<String, EffectSummary>,
+        summaries: &'a HashMap<String, EffectSummary>,
         seen: &mut HashSet<String>,
-    ) -> Option<(String, Span)> {
+    ) -> Option<(&'a str, Option<&'a super::MemoryFacts::MemoryCall>)> {
         if !seen.insert(key.to_string()) {
             return None;
         }
@@ -1355,14 +1387,12 @@ pub(crate) fn check_effect_boundaries(
                 .get(callee)
                 .is_some_and(|target| target.unbounded_trait_dispatch)
             {
-                let span = summary
+                let call = summary
                     .memory
                     .calls
                     .iter()
-                    .find(|call| call.callee == *callee)
-                    .map(|call| call.span)
-                    .unwrap_or_else(|| Span::new(0, 0));
-                return Some((callee.clone(), span));
+                    .find(|call| call.callee == *callee);
+                return Some((callee, call));
             }
             if let Some(found) = unbounded_dispatch(callee, summaries, seen) {
                 return Some(found);
@@ -1400,6 +1430,8 @@ pub(crate) fn check_effect_boundaries(
         identity: Option<&str>,
         solved: &HashMap<String, EffectSet>,
         summaries: &HashMap<String, EffectSummary>,
+        modules: &[crate::AST::LoadedModule],
+        entry_module: Option<usize>,
         diags: &mut Vec<Diagnostic>,
     ) {
         let Some(declared_list) = &f.declared_effects else {
@@ -1408,9 +1440,26 @@ pub(crate) fn check_effect_boundaries(
         let key = identity
             .map(str::to_owned)
             .unwrap_or_else(|| effect_key(owner, &f.name));
-        if let Some((trait_method, span)) = unbounded_dispatch(&key, summaries, &mut HashSet::new())
+        if let Some((trait_method, call)) = unbounded_dispatch(&key, summaries, &mut HashSet::new())
         {
-            diags.push(e0743(&trait_method, span));
+            let owner = call.and_then(|call| {
+                modules.iter().enumerate()
+                    .find(|(_, module)| module.display == call.source)
+                    .map(|(index, module)| (index, module, call.span))
+            });
+            let mut diagnostic = e0743(trait_method, owner.map(|(_, _, span)| span));
+            // Preserve the supplied rendering context only when BOTH the
+            // ceiling and its actual dispatch witness belong to the entry.
+            if let Some((_, module, _)) = owner.filter(|(index, _, _)| entry_module != Some(*index)) {
+                diagnostic.set_origin(std::sync::Arc::new(
+                    jet_foundation::Diagnostics::DiagnosticOrigin::new(
+                        module.display.clone(),
+                        module.path.to_string_lossy().into_owned(),
+                        module.source.clone(),
+                    ),
+                ));
+            }
+            diags.push(diagnostic);
             return;
         }
         // Validate names and build the declared set; an unknown name is E0119.
@@ -1500,25 +1549,25 @@ pub(crate) fn check_effect_boundaries(
     }
     for item in items {
         match item {
-            Item::Func(f) => check_one(f, None, None, solved, summaries, diags),
+            Item::Func(f) => check_one(f, None, None, solved, summaries, modules, entry_module, diags),
             Item::Impl(i) => {
                 for m in &i.methods {
-                    check_one(m, Some(&i.type_name), None, solved, summaries, diags);
+                    check_one(m, Some(&i.type_name), None, solved, summaries, modules, entry_module, diags);
                 }
             }
             Item::Struct(s) => {
                 for m in &s.methods {
-                    check_one(m, Some(&s.name), None, solved, summaries, diags);
+                    check_one(m, Some(&s.name), None, solved, summaries, modules, entry_module, diags);
                 }
                 for block in &s.trait_impls {
                     for m in &block.methods {
-                        check_one(m, Some(&s.name), None, solved, summaries, diags);
+                        check_one(m, Some(&s.name), None, solved, summaries, modules, entry_module, diags);
                     }
                 }
             }
             Item::Enum(e) => {
                 for m in &e.methods {
-                    check_one(m, Some(&e.name), None, solved, summaries, diags);
+                    check_one(m, Some(&e.name), None, solved, summaries, modules, entry_module, diags);
                 }
             }
             Item::CodeModule(module) => {
@@ -1526,7 +1575,7 @@ pub(crate) fn check_effect_boundaries(
                     for item in body {
                         if let Item::Func(f) = item {
                             let identity = super::inline_effect_key(&module.name, &f.name);
-                            check_one(f, None, Some(&identity), solved, summaries, diags);
+                            check_one(f, None, Some(&identity), solved, summaries, modules, entry_module, diags);
                         }
                     }
                 }
@@ -1683,20 +1732,6 @@ pub(crate) fn defined_twice(name: &str, why: &str, span: Span) -> Diagnostic {
         format!("`{}` is defined twice", name),
         why.to_string(),
         "rename or remove one of the definitions".to_string(),
-        Some(span),
-    )
-}
-
-/// E0105: a method's name collides with a field on the same type.
-pub(crate) fn method_field_clash(method: &str, type_name: &str, span: Span) -> Diagnostic {
-    Diagnostic::error(
-        "E0105",
-        format!(
-            "method `{}` can't share a name with a field on `{}`",
-            method, type_name
-        ),
-        "a type's methods and fields must have different names".to_string(),
-        "rename the method or the field".to_string(),
         Some(span),
     )
 }
@@ -1901,6 +1936,7 @@ pub(crate) fn synthesize_delegation_method(
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
 
     // Wrap in a return stmt if there's a return type; otherwise a bare expr stmt.
@@ -1922,6 +1958,7 @@ pub(crate) fn synthesize_delegation_method(
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
         public_label: None,
         zone: crate::AST::ParamZone::Either,
     };
@@ -2010,6 +2047,7 @@ pub(crate) fn synthesize_default_method(
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
         public_label: None,
         zone: crate::AST::ParamZone::Either,
     };

@@ -1,0 +1,119 @@
+# HAND-PORT tests/jetpack_engine.rs:3632-3736 use_rejects_unrecorded_path_inside_lease
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
+# #[test]
+# fn use_rejects_unrecorded_path_inside_lease() {
+#     let root = Scratch::new("lease-caller-confinement-root");
+#     let fixtures = Scratch::new("lease-caller-confinement-fixtures");
+#     write_native_lease_fixture(&fixtures.path);
+# 
+#     let prime = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "-y",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .args([
+#             "--",
+#             "sh",
+#             "-c",
+#             "true",
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         prime.status.success(),
+#         "lease setup failed: {}",
+#         String::from_utf8_lossy(&prime.stderr)
+#     );
+# 
+#     let entry = jetpack::Store::find_by_reference(
+#         &jetpack::Store::Roots::at(root.path.clone()),
+#         "omp@releases#1.0.0",
+#     )
+#     .unwrap();
+#     // Keep the path valid after OS normalization. A bypassed Store lease
+#     // would execute the recorded `omp` member through this unrecorded form.
+#     let unrecorded = Path::new(&entry.out).join("bin/../bin/omp");
+# 
+#     let output = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "-y",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .args([
+#             "--",
+#             unrecorded.to_str().unwrap(),
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+# 
+#     assert_eq!(
+#         output.status.code(),
+#         Some(126),
+#         "unrecorded lease path must fail before child launch: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     assert!(stderr.contains("Error [E1340]:"), "stderr: {stderr}");
+#     assert!(stderr.contains("not a recorded member"), "stderr: {stderr}");
+#     assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+# 
+#     #[cfg(unix)]
+#     {
+#         let alias = root.path.join("lease-output-alias");
+#         std::os::unix::fs::symlink(Path::new(&entry.out).join("bin"), &alias).unwrap();
+#         let aliased = alias.join("omp");
+#         let output = jetpack()
+#             .args([
+#                 "use",
+#                 "omp@releases#1.0.0",
+#                 "-y",
+#                 "--no-color",
+#                 "--offline",
+#                 "--fixtures",
+#             ])
+#             .arg(&fixtures.path)
+#             .args(["--", aliased.to_str().unwrap()])
+#             .env("JETPACK_ROOT", &root.path)
+#             .env("JETPACK_FIXTURES", &fixtures.path)
+#             .output()
+#             .unwrap();
+#         assert_eq!(
+#             output.status.code(),
+#             Some(126),
+#             "symlink alias into a lease must fail before child launch: {}",
+#             String::from_utf8_lossy(&output.stderr)
+#         );
+#         assert!(
+#             String::from_utf8_lossy(&output.stderr).contains("not a recorded member"),
+#             "stderr: {}",
+#             String::from_utf8_lossy(&output.stderr)
+#         );
+#         assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+#     }
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- sh -c true
+cwd: project
+exit: 0
+

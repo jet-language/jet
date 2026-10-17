@@ -1,0 +1,12 @@
+# HAND-PORT tests/fmt_round_trip_regressions.rs:183-203 interpolated_struct_literals_survive_retired_dot_migration
+# PENDING-KIT; no runtime/reference proof.
+# Original formatter success and every exact substring presence/absence + byte-identical second formatting fixed-point.
+fixture: interpolated_struct_literals_survive_retired_dot_migration.fixture
+step: jet fmt main.jet
+exit: 0
+file: main.jet ~ "print(\"{NoDebug{value: 2}:Debug}\")" # original formatter contains
+file: main.jet ~ "print(\"{Probe{value: 2} == Probe{value: 1}:Debug}\")" # original formatter contains
+copy: main.jet first.jet
+step: jet fmt main.jet
+exit: 0
+file: main.jet == first.jet

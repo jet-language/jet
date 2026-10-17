@@ -25,8 +25,7 @@ use std::sync::mpsc;
 const MAX_FRONTEND_WORKERS: usize = 8;
 
 pub(crate) enum PreparedFrontendModule {
-    Parsed(crate::AST::Program, Vec<Diagnostic>),
-    LexFailed(Vec<Diagnostic>),
+    Parsed(crate::AST::Program, Vec<Diagnostic>, crate::AST::CoreIdentifierDemand),
     ParseFailed(Vec<Diagnostic>),
 }
 
@@ -423,17 +422,37 @@ fn package_facts_from_resolver(
     }
 }
 
+/// Lexer recovery retains tokens, so parser teaching must survive lexical errors.
+fn parse_frontend_tokens(
+    tokens: &[crate::Lexer::Token],
+    source: &str,
+    mut diagnostics: Vec<Diagnostic>,
+) -> Result<(crate::AST::Program, Vec<Diagnostic>), Vec<Diagnostic>> {
+    match Parser::parse_for_check_with_source(tokens, source) {
+        Ok((program, teaching)) if diagnostics.is_empty() => Ok((program, teaching)),
+        Ok((_, teaching)) => {
+            diagnostics.extend(teaching);
+            Err(diagnostics)
+        }
+        Err(parse_diagnostics) => {
+            diagnostics.extend(parse_diagnostics);
+            Err(diagnostics)
+        }
+    }
+}
+
 fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
     let source_for_parse = match crate::Package::mask_inline_package_source(source) {
         Ok((masked, _)) => masked,
-        Err(error) => return PreparedFrontendModule::LexFailed(vec![error.diagnostic()]),
+        Err(error) => return PreparedFrontendModule::ParseFailed(vec![error.diagnostic()]),
     };
     let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
-    if !lex_diags.is_empty() {
-        return PreparedFrontendModule::LexFailed(lex_diags);
-    }
-    match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-        Ok((program, teaching)) => PreparedFrontendModule::Parsed(program, teaching),
+    match parse_frontend_tokens(&tokens, &source_for_parse, lex_diags) {
+        Ok((program, teaching)) => PreparedFrontendModule::Parsed(
+            program,
+            teaching,
+            Lexer::core_identifier_demand(&tokens),
+        ),
         Err(diagnostics) => PreparedFrontendModule::ParseFailed(diagnostics),
     }
 }
@@ -521,7 +540,7 @@ pub(crate) fn prepare_frontend_sources(sources: Vec<(PathBuf, String)>) -> Prepa
 #[derive(Debug, Clone)]
 pub struct LoaderDiagnostic {
     pub file: String,
-    pub source: String,
+    pub source: std::sync::Arc<str>,
     pub diagnostic: Diagnostic,
     pub structure_fact: Option<jet_foundation::Names::StructureFact>,
 }
@@ -533,12 +552,15 @@ struct LoaderError {
 
 impl LoaderError {
     fn at(file: &str, source: &str, diagnostics: Vec<Diagnostic>) -> Self {
+        // A rejected large unit can have thousands of diagnostics. Retain its
+        // bytes once, not once per diagnostic (including advisory reports).
+        let source: std::sync::Arc<str> = source.into();
         Self {
             diagnostics: diagnostics
                 .into_iter()
                 .map(|diagnostic| LoaderDiagnostic {
                     file: file.to_string(),
-                    source: source.to_string(),
+                    source: source.clone(),
                     diagnostic,
                     structure_fact: None,
                 })
@@ -572,7 +594,7 @@ impl LoaderError {
                     std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
                         display,
                         path.to_string_lossy().into_owned(),
-                        entry.source.clone(),
+                        entry.source.to_string(),
                     ))
                 })
                 .clone();
@@ -686,7 +708,7 @@ fn project_parts_loader_error(
                 .unwrap_or_else(|| (project_root.display().to_string(), String::new()));
             LoaderDiagnostic {
                 file,
-                source,
+                source: source.into(),
                 diagnostic: conflict.diagnostic(project_root, None),
                 structure_fact: None,
             }
@@ -1085,9 +1107,9 @@ pub fn load_entry_with_diagnostics(
         Ok(bundle) => Ok(bundle),
         Err(fallback) => {
             if diagnostics.is_empty() {
-                let source = checked_source_file(Path::new(entry_path), entry_path)
+                let source: std::sync::Arc<str> = checked_source_file(Path::new(entry_path), entry_path)
                     .ok()
-                    .map(|(_, _, source)| source)
+                    .map(|(_, _, source)| source.into())
                     .unwrap_or_default();
                 diagnostics.extend(fallback.into_iter().map(|diagnostic| LoaderDiagnostic {
                     file: entry_path.to_string(),
@@ -2656,18 +2678,18 @@ fn load_entry_with_overlays_mode_on_stack(
         build_facts,
         edition: package_edition,
     };
-    // A bare `URL` (a type or a typed `URL{"…"}` head) is the `core.net.url`
-    // record, so a module that names it loads that Core source without a `use`.
-    let url_carrier = jet_foundation::Syntax::TypedHeadKind::URL.carrier_record_module();
-    let names_url_carrier = bundle
-        .modules
-        .iter()
-        .any(|module| source_names_identifier(&module.source, "URL"));
+    // Automatic owners come only from the canonical parse's identifiers.
+    // The lowercase URL typed head and Option.or_err retain their existing
+    // owners; literal metadata and comments do not load library source.
     let mut core_source_modules = jet_foundation::CoreModuleExports::core_source_modules()
         .iter()
         .copied()
         .filter(|source_module| {
-            (names_url_carrier && Some(source_module.module) == url_carrier)
+            bundle.modules.iter().any(|module| {
+                module.core_identifier_demand.bare_modules.contains(&source_module.module)
+                    || (module.core_identifier_demand.option_or_err
+                        && source_module.module == "core.prelude")
+            })
                 || bundle.modules.iter().any(|module| {
                     module.imports.iter().any(|import| {
                         core_source_import_module(import).as_deref() == Some(source_module.module)
@@ -2679,19 +2701,42 @@ fn load_entry_with_overlays_mode_on_stack(
         .iter()
         .map(|source_module| source_module.module)
         .collect::<HashSet<_>>();
-    // `Core/text/string.jet` is a compiler-private source part of `core.text`.
-    // Schedule it beside its public owner without adding a public module row or
-    // teaching ordinary Core import resolution about the reserved identity.
-    if scheduled_core_source_modules
-        .contains(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER)
-    {
-        if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-        ) {
-            if scheduled_core_source_modules.insert(part.source.module) {
-                core_source_modules.push(part.source);
-            }
+    for module in &bundle.modules {
+        schedule_core_declaration_owners(
+            &module.items,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+        );
+    }
+    // Private Core parts are scheduled beside their public owner, but their
+    // reserved identities are never exposed as public Core import names.
+    for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+        if scheduled_core_source_modules.contains(part.owner)
+            && scheduled_core_source_modules.insert(part.source.module)
+        {
+            core_source_modules.push(part.source);
         }
+    }
+    // Queue position i loads at core_module_base + i. Runtime entry checks
+    // reuse that entry rather than scheduling a second copy of the same unit.
+    let core_module_base = bundle.modules.len();
+    let mut runtime_targets = HashMap::<&'static str, usize>::new();
+    if let Some(part) =
+        core_runtime_entry(&bundle.modules[entry_idx].path, &bundle.modules[entry_idx].source)
+    {
+        scheduled_core_source_modules.insert(part.module);
+        runtime_targets.insert(part.module, entry_idx);
+        let mut imports = std::mem::take(&mut bundle.modules[entry_idx].imports);
+        bind_core_runtime_imports(
+            &mut imports,
+            entry_idx,
+            core_module_base,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+            &mut runtime_targets,
+            &mut bundle.name_ledger,
+        );
+        bundle.modules[entry_idx].imports = imports;
     }
     let mut core_source_module_index = 0;
     while core_source_module_index < core_source_modules.len() {
@@ -2701,38 +2746,46 @@ fn load_entry_with_overlays_mode_on_stack(
             .unwrap_or_else(|| panic!("Core source module `{}` has no body text", source_module.module))
             .to_string();
         let display = source_module.path.to_string();
-        let source_for_parse = crate::Package::mask_inline_package_source(&source)
+        let (source_for_parse, inline_package) = crate::Package::mask_inline_package_source(&source)
             .map_err(|error| {
                 record_loader_error(
                     &mut sink,
-                    LoaderError::at(&display, &source, vec![error.diagnostic()]),
+                    LoaderError::at(&display, &source, vec![error.diagnostic()])
+                        .with_module_origin(&display, Path::new(&display)),
                 )
-            })?
-            .0;
+            })?;
         // Embedded Core sources are vetted stdlib internals (I1): they may
         // spell the reserved `__name` namespace, e.g. `core.crypto.__zeroize`.
         // Only this embedded-Core path lexes that way; a user file, even one
         // named `Core/...`, goes through `Lexer::lex` and still gets E0067.
         let (tokens, lex_diags) = Lexer::lex_generated(&source_for_parse);
-        if !lex_diags.is_empty() {
-            return Err(record_loader_error(
-                &mut sink,
-                LoaderError::at(&display, &source, lex_diags),
-            ));
-        }
-        let (mut program, teaching) = match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
+        let (mut program, teaching) = match parse_frontend_tokens(&tokens, &source_for_parse, lex_diags) {
             Ok(parsed) => parsed,
             Err(diags) => {
                 return Err(record_loader_error(
                     &mut sink,
-                    LoaderError::at(&display, &source, diags),
+                    LoaderError::at(&display, &source, diags)
+                        .with_module_origin(&display, Path::new(&display)),
                 ));
             }
         };
         // Source Core packages can call other source-owned Core members.
         // Include their transitive import closure so lowering has each private
         // module alias available, rather than falling back to a Core ABI call.
-        for dependency in program.imports.iter().filter_map(core_source_import_module) {
+        for import in &program.imports {
+            let private_alias = match &import.kind {
+                ImportKind::Module(alias, _) => Some(alias.as_str()),
+                ImportKind::Unqualified { module_alias, .. } => Some(module_alias.as_str()),
+                _ => None,
+            };
+            if let Some(part) = private_alias.and_then(
+                jet_foundation::CoreSourceParts::core_private_source_part_by_alias,
+            ) {
+                if scheduled_core_source_modules.insert(part.source.module) {
+                    core_source_modules.push(part.source);
+                }
+            }
+            let Some(dependency) = core_source_import_module(import) else { continue };
             if let Some(dependency) =
                 jet_foundation::CoreModuleExports::core_source_module(&dependency)
             {
@@ -2740,30 +2793,51 @@ fn load_entry_with_overlays_mode_on_stack(
                     core_source_modules.push(*dependency);
                 }
             }
-            // A source package importing `core.text` also schedules the
-            // compiler-private String receiver part. It remains keyed by its
-            // reserved internal module identity, not by `core.text.string`.
-            if dependency == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER {
-                if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-                    jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-                ) {
-                    if scheduled_core_source_modules.insert(part.source.module) {
-                        core_source_modules.push(part.source);
-                    }
+            for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+                if dependency == part.owner
+                    && scheduled_core_source_modules.insert(part.source.module)
+                {
+                    core_source_modules.push(part.source);
                 }
             }
         }
-        // Source metadata selects the public members that have crossed the
-        // Core cutover. Keep private helpers and declarations needed by those
-        // members, but do not compile legacy public wrappers that still use
-        // their compiler-owned routes.
+        // Core-only runtime imports join the closure lazily and become
+        // ordinary module edges, preserving the source's chosen alias.
+        bind_core_runtime_imports(
+            &mut program.imports,
+            bundle.modules.len(),
+            core_module_base,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+            &mut runtime_targets,
+            &mut bundle.name_ledger,
+        );
+        // Source metadata selects the declared members that have crossed the
+        // Core cutover. Keep helpers and declarations needed by those members,
+        // but do not compile legacy wrappers (declared Core members that still
+        // use their compiler-owned routes). Declarations are public by default
+        // (D-VIS-MODULE1), so the declared member list, not `is_pub`, tells a
+        // legacy wrapper from a helper.
+        let declared_members = jet_foundation::CoreModuleExports::core_modules()
+            .iter()
+            .find(|declaration| declaration.module == source_module.module)
+            .map_or(&[][..], |declaration| declaration.members);
         program.items.retain(|item| match item {
-            Item::Func(function) if function.is_pub => source_module
-                .owned_members
-                .iter()
-                .any(|member| *member == function.name),
+            Item::Func(function) => {
+                !declared_members.contains(&function.name.as_str())
+                    || source_module.owned_members.contains(&function.name.as_str())
+            }
             _ => true,
         });
+        // Declaration dependencies are not import edges: Stat's DateTime
+        // fields, for example, implicitly name the registered core.time owner.
+        // Schedule them on this same queue so their own declarations close
+        // transitively before sema freezes nominal facts for MIR.
+        schedule_core_declaration_owners(
+            &program.items,
+            &mut core_source_modules,
+            &mut scheduled_core_source_modules,
+        );
         // Core is library source, not the user's program: its parser
         // teaching lints never reach user output. Anything stronger keeps
         // its Core origin so it renders against the Core file, never at a
@@ -2802,13 +2876,13 @@ fn load_entry_with_overlays_mode_on_stack(
             path: PathBuf::from(core_path),
             display,
             source,
+            core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             alias,
             imports: std::mem::take(&mut program.imports),
             items: program.items,
             script_body: program.script_body,
             block_spans: program.block_spans,
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -2829,7 +2903,7 @@ fn load_entry_with_overlays_mode_on_stack(
                     .into_iter()
                     .map(|entry| LoaderDiagnostic {
                         file: entry.file,
-                        source: entry.source,
+                        source: entry.source.into(),
                         diagnostic: entry.diagnostic,
                         // Namespace assembly reports a name clash, not a
                         // structure observation; the fact plane stays empty.
@@ -2849,7 +2923,7 @@ fn load_entry_with_overlays_mode_on_stack(
                         .into_iter()
                         .map(|entry| LoaderDiagnostic {
                             file: entry.file,
-                            source: entry.source,
+                            source: entry.source.into(),
                             diagnostic: entry.diagnostic,
                             // Same as above: a CFFI provenance failure carries
                             // no structure fact.
@@ -4452,30 +4526,30 @@ fn load_file_located(
         })
         .expect("one source reader must provide the module text");
 
+    // A runtime unit entry is the embedded Core unit itself; it lexes as Core
+    // and keeps its runtime imports (see `core_runtime_entry`).
+    let core_entry = path_to_idx.is_empty() && core_runtime_entry(&norm, &source).is_some();
     let prepared = prepared_frontend
         .as_deref_mut()
         .and_then(|cache| cache.remove(&norm))
-        .filter(|entry| entry.source == source)
+        .filter(|entry| entry.source == source && !core_entry)
         .map(|entry| entry.module);
-    let (mut prog, teaching) = match prepared {
-        Some(PreparedFrontendModule::Parsed(program, teaching)) => (program, teaching),
-        Some(PreparedFrontendModule::LexFailed(diagnostics)) => {
-            return Err(LoaderError::at(display, &source, diagnostics));
-        }
+    let (mut prog, teaching, core_identifier_demand) = match prepared {
+        Some(PreparedFrontendModule::Parsed(program, teaching, demand)) => (program, teaching, demand),
         Some(PreparedFrontendModule::ParseFailed(diagnostics)) => {
             return Err(LoaderError::at(display, &source, diagnostics));
         }
         None => {
-            let source_for_parse =
-                crate::Package::mask_inline_package_source(&source)
-                    .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
-                    .0;
-            let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
-            if !lex_diags.is_empty() {
-                return Err(LoaderError::at(display, &source, lex_diags));
-            }
-            match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-                Ok(parsed) => parsed,
+            let source_for_parse = crate::Package::mask_inline_package_source(&source)
+                .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
+                .0;
+            let (tokens, lex_diags) = if core_entry {
+                Lexer::lex_generated(&source_for_parse)
+            } else {
+                Lexer::lex(&source_for_parse)
+            };
+            match parse_frontend_tokens(&tokens, &source_for_parse, lex_diags) {
+                Ok((program, teaching)) => (program, teaching, Lexer::core_identifier_demand(&tokens)),
                 Err(diagnostics) => return Err(LoaderError::at(display, &source, diagnostics)),
             }
         }
@@ -4622,13 +4696,13 @@ fn load_file_located(
         path: path.to_path_buf(),
         display: display.to_string(),
         source: source.clone(),
+        core_identifier_demand,
         alias,
         imports: imports.clone(),
         items: prog.items,
         script_body: prog.script_body,
         block_spans: prog.block_spans,
         web_target_ceiling: prog.web_target_ceiling,
-        pub_file: prog.pub_file,
         no_prelude: prog.no_prelude,
         default_target: prog.default_target,
         html_path: prog.html_path.clone(),
@@ -4647,6 +4721,9 @@ fn load_file_located(
         // D-MOD3: `use alias.Item` / `use alias.[A,B]` forms don't load new files;
         // sema resolves them against already-loaded modules (E0609–E0611).
         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
+            continue;
+        }
+        if core_entry && core_runtime_import_target(imp).is_some() {
             continue;
         }
         if let Err(d) = check_reserved_import(imp) {
@@ -4983,16 +5060,164 @@ pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
     imp.core_module_path()
 }
 
-/// True when `source` spells `name` as a whole identifier. A comment or string
-/// that mentions it only schedules one more Core source, never a wrong one.
-fn source_names_identifier(source: &str, name: &str) -> bool {
+
+/// Close the loaded declaration graph over implicit source-owned Core types.
+/// Match the codegen nominal fallback: local declarations and generic binders
+/// win; otherwise only a registered, unique Core owner may supply a bare name.
+fn schedule_core_declaration_owners(
+    items: &[Item],
+    pending: &mut Vec<jet_foundation::CoreModuleExports::CoreSourceModule>,
+    scheduled: &mut HashSet<&'static str>,
+) {
+    let owned = items.iter().filter_map(|item| match item {
+        Item::Struct(row) => Some(row.name.as_str()),
+        Item::Enum(row) => Some(row.name.as_str()),
+        Item::Distinct(row) => Some(row.name.as_str()),
+        Item::TypeAlias(row) => Some(row.name.as_str()),
+        _ => None,
+    }).collect::<HashSet<_>>();
+    let mut schedule_name = |name: &str, binders: &[crate::AST::TypeParam]| {
+        if owned.contains(name) || binders.iter().any(|binder| binder.name == name)
+            || name.contains("::") || name.contains('.')
+        {
+            return;
+        }
+        let module = if let Some(kind) = Syntax::typed_head_kind(name) {
+            let Some(module) = kind.carrier_record_module() else { return };
+            module
+        } else {
+            let mut owners = jet_foundation::CoreModuleExports::core_modules().iter()
+                .filter(|module| module.type_exports.iter().any(|(leaf, _)| *leaf == name));
+            let Some(owner) = owners.next() else { return };
+            if owners.next().is_some() { return; }
+            owner.module
+        };
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) else { return };
+        if !jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES.iter()
+            .any(|row| row.path == source.path && row.name == name)
+        {
+            return;
+        }
+        if scheduled.insert(source.module) {
+            pending.push(*source);
+            for part in jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS {
+                if part.owner == source.module && scheduled.insert(part.source.module) {
+                    pending.push(part.source);
+                }
+            }
+        }
+    };
+    fn visit(
+        ty: &Type,
+        binders: &[crate::AST::TypeParam],
+        name: &mut impl FnMut(&str, &[crate::AST::TypeParam]),
+    ) {
+        match ty {
+            Type::Named(value) => name(value, binders),
+            Type::Apply { name: value, args } => {
+                name(value, binders);
+                for arg in args { visit(arg, binders, name); }
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner)
+            | Type::FixedList { elem: inner, .. } | Type::InlineRange { base: inner, .. }
+            | Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => visit(inner, binders, name),
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                visit(key, binders, name);
+                visit(value, binders, name);
+            }
+            Type::Union(types) => {
+                for ty in types { visit(ty, binders, name); }
+            }
+            Type::Tuple(fields) => {
+                for (_, ty) in fields { visit(ty, binders, name); }
+            }
+            Type::Fn { params, ret, .. } => {
+                for ty in params { visit(ty, binders, name); }
+                if let Some(ty) = ret { visit(ty, binders, name); }
+            }
+            _ => {}
+        }
+    }
+    for item in items {
+        match item {
+            Item::Struct(row) => {
+                for field in &row.fields { visit(&field.ty, &row.type_params, &mut schedule_name); }
+            }
+            Item::Enum(row) => {
+                for variant in &row.variants {
+                    match &variant.payload {
+                        crate::AST::VariantPayload::Single(ty, _) => visit(ty, &row.type_params, &mut schedule_name),
+                        crate::AST::VariantPayload::Named(fields) => {
+                            for field in fields { visit(&field.ty, &row.type_params, &mut schedule_name); }
+                        }
+                        crate::AST::VariantPayload::Unit => {}
+                    }
+                }
+            }
+            Item::Distinct(row) => visit(&row.base, &[], &mut schedule_name),
+            Item::TypeAlias(row) => visit(&row.target, &row.type_params, &mut schedule_name),
+            _ => {}
+        }
+    }
+}
+
+/// Schedule the compiler-private String receiver part `Core/text/string.jet`.
+/// It keeps its reserved internal module identity, never `core.text.string`.
+fn schedule_core_text_string_part(
+    core_source_modules: &mut Vec<jet_foundation::CoreModuleExports::CoreSourceModule>,
+    scheduled_core_source_modules: &mut HashSet<&'static str>,
+) {
+    if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+        jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+    ) {
+        if scheduled_core_source_modules.insert(part.source.module) {
+            core_source_modules.push(part.source);
+        }
+    }
+}
+
+/// The String receiver methods `Core/text/string.jet` owns, except `len`: a
+/// `.len()` call is usually a list's, so it never loads the Unicode kernels on
+/// its own and keeps scheduling with `core.text`.
+fn string_source_methods() -> &'static [String] {
+    static METHODS: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    METHODS.get_or_init(|| {
+        jet_sema::CoreSources::core_source_text(
+            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_MODULE,
+        )
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|line| {
+            let (name, _) = line.strip_prefix("fn ")?.split_once("(receiver: String")?;
+            (name != "len").then(|| name.to_string())
+        })
+        .collect()
+    })
+}
+
+/// True when `source` spells a call `.name(` of a String method that
+/// `Core/text/string.jet` owns. Every String method call then lowers to that
+/// one Jet body; a hit on another receiver only schedules the part once more.
+fn source_calls_string_source_method(source: &str) -> bool {
+    let methods = string_source_methods();
     let is_ident = |byte: u8| byte == b'_' || byte.is_ascii_alphanumeric();
     let bytes = source.as_bytes();
-    source.match_indices(name).any(|(start, _)| {
-        let end = start + name.len();
-        (start == 0 || !is_ident(bytes[start - 1]))
-            && bytes.get(end).map_or(true, |byte| !is_ident(*byte))
-    })
+    let mut at = 0;
+    while let Some(offset) = source[at..].find('.') {
+        let start = at + offset + 1;
+        let mut end = start;
+        while end < bytes.len() && is_ident(bytes[end]) {
+            end += 1;
+        }
+        if end > start
+            && bytes.get(end) == Some(&b'(')
+            && methods.iter().any(|method| method.as_str() == &source[start..end])
+        {
+            return true;
+        }
+        at = start;
+    }
+    false
 }
 
 /// Resolve Core source package imports, including selective `use core.x.[T]`
@@ -5058,6 +5283,132 @@ pub fn e1241_ring_platform_miss(ring: &str) -> Diagnostic {
     )
 }
 
+/// The runtime unit an entry file is, when the file sits at that unit's
+/// `Core/<area>/runtime/<unit>.jet` path and is byte-identical to the
+/// embedded unit. Only that exact text earns the Core-source privileges
+/// (`__` names, runtime imports), so `jet test` over a unit runs its controls
+/// through the real loader path and grants nothing Core does not already run.
+fn core_runtime_entry(
+    path: &Path,
+    source: &str,
+) -> Option<&'static jet_foundation::CoreModuleExports::CoreSourceModule> {
+    jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS
+        .iter()
+        .find(|part| {
+            path.ends_with(part.path)
+                && jet_sema::CoreSources::core_source_text(part.module) == Some(source)
+        })
+}
+
+/// The runtime unit (and selected member) a `use` names, if any.
+fn core_runtime_import_target(
+    imp: &ImportDecl,
+) -> Option<(&'static jet_foundation::CoreModuleExports::CoreSourceModule, Option<String>)> {
+    let path = match &imp.kind {
+        ImportKind::Module(name, _) => name,
+        ImportKind::Unqualified { module_alias, .. } => module_alias,
+        ImportKind::File(..) => return None,
+    };
+    let (part, item) = jet_foundation::CoreSourceParts::core_runtime_import(path)?;
+    // `use core.a.runtime.u.[...]` names the unit; a dotted member path
+    // inside a member list is not a unit binding.
+    if item.is_some() && matches!(imp.kind, ImportKind::Unqualified { .. }) {
+        return None;
+    }
+    Some((part, item.map(str::to_string)))
+}
+
+/// Bind every runtime-unit import of one Core source (or of a runtime unit
+/// entry) to the loaded unit: schedule the unit on first use, rewrite the
+/// import to the unit's reserved module alias, and record the module edge in
+/// the name ledger so sema and every tier read an ordinary module import.
+/// `use core.a.runtime.u [as x]` binds the unit; `use core.a.runtime.u.[f]`
+/// and `use core.a.runtime.u.f [as g]` bind members through one reserved
+/// binding of the unit per importing module.
+#[allow(clippy::too_many_arguments)]
+fn bind_core_runtime_imports(
+    imports: &mut Vec<ImportDecl>,
+    module_idx: usize,
+    core_module_base: usize,
+    core_source_modules: &mut Vec<jet_foundation::CoreModuleExports::CoreSourceModule>,
+    scheduled: &mut HashSet<&'static str>,
+    runtime_targets: &mut HashMap<&'static str, usize>,
+    name_ledger: &mut crate::AST::NameLedger,
+) {
+    let mut bindings = Vec::new();
+    let mut bound_units = HashSet::new();
+    for imp in imports.iter_mut() {
+        let Some((part, item)) = core_runtime_import_target(imp) else {
+            continue;
+        };
+        let target = *runtime_targets.entry(part.module).or_insert_with(|| {
+            scheduled.insert(part.module);
+            core_source_modules.push(*part);
+            core_module_base + core_source_modules.len() - 1
+        });
+        let module_span = match &imp.kind {
+            ImportKind::Module(_, span) => *span,
+            ImportKind::Unqualified {
+                module_alias_span, ..
+            } => *module_alias_span,
+            ImportKind::File(..) => unreachable!("runtime imports are module paths"),
+        };
+        let binding_span = match (matches!(imp.kind, ImportKind::Module(..)), item) {
+            (true, None) => {
+                imp.kind = ImportKind::Module(part.alias.to_string(), module_span);
+                name_ledger.record_import_target(module_idx, imp.span, target);
+                continue;
+            }
+            (true, Some(item)) => {
+                // `use core.a.runtime.u.f [as g]` is the one-member list
+                // `use core.a.runtime.u.[f as g]`.
+                let unit_span =
+                    Span::new(module_span.start, module_span.start + part.module.len());
+                let member_span = Span::new(unit_span.end + 1, module_span.end);
+                let local_span = if imp.alias_span.start == imp.span.start {
+                    member_span
+                } else {
+                    imp.alias_span
+                };
+                let local = (imp.alias != item).then(|| imp.alias.clone());
+                imp.kind = ImportKind::Unqualified {
+                    module_alias: part.alias.to_string(),
+                    module_alias_span: unit_span,
+                    items: vec![(item, local)],
+                    items_span: member_span,
+                    span: imp.span,
+                };
+                imp.item_spans = vec![member_span];
+                imp.local_spans = vec![local_span];
+                unit_span
+            }
+            (false, _) => {
+                if let ImportKind::Unqualified { module_alias, .. } = &mut imp.kind {
+                    *module_alias = part.alias.to_string();
+                }
+                module_span
+            }
+        };
+        if bound_units.insert(part.alias) {
+            bindings.push((part.alias, binding_span, target));
+        }
+    }
+    for (alias, span, target) in bindings {
+        name_ledger.record_import_target(module_idx, span, target);
+        imports.push(ImportDecl {
+            kind: ImportKind::Module(alias.to_string(), span),
+            alias: alias.to_string(),
+            alias_span: span,
+            span,
+            item_spans: Vec::new(),
+            local_spans: Vec::new(),
+            is_pub: false,
+            is_package_pub: false,
+            inline_version: None,
+        });
+    }
+}
+
 fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
     if crate::AST::target_profile_path(imp).is_some() {
         return Ok(());
@@ -5069,6 +5420,11 @@ fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
                 ImportKind::File(_, _) | ImportKind::Unqualified { .. } => imp.span,
             };
             if let Some(diagnostic) = Syntax::retired_core_module_diagnostic(&module, span) {
+                return Err(diagnostic);
+            }
+            if let Some(diagnostic) =
+                jet_foundation::CoreSourceParts::core_private_unit_diagnostic(&module, span)
+            {
                 return Err(diagnostic);
             }
             return Err(Diagnostic::error(
@@ -5289,8 +5645,11 @@ fn namespace_root(path: &Path, cache: &mut HashMap<PathBuf, Option<PathBuf>>) ->
 /// excluding its manifest and the files of nested packages, in path order.
 fn package_member_files(root: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
     let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
-    let files = resolver
-        .discover_source_files()
+    let facts = package_facts_for_root(root)
+        .map_err(|diagnostics| diagnostics.into_iter().next().expect("package error diagnostic"))?
+        .expect("a namespace root has package facts");
+    let files = facts
+        .source_files_checked(&resolver)
         .map_err(|error| error.diagnostic())?;
     Ok(files
         .into_iter()
@@ -5352,13 +5711,10 @@ fn member_error(
     }
 }
 
-/// D-MOD-CYCLE1=A: make every package one namespace. Each member file is
-/// recorded under its package root, a name declared in two member files is
-/// E0624, and each member receives compiler-owned bindings for its siblings'
-/// top-level names. Those bindings use the ordinary file-module and member
-/// import path, so sema, lowering, and every tier resolve a sibling name
-/// exactly like an imported one. They carry zero-width spans: they are not
-/// written source, so they never render, and liveness never reports them.
+/// D-MOD-CYCLE1=A: each package has one implicit namespace. Reject duplicate
+/// top-level declarations (E0624), then index their declaring files once in the
+/// shared ledger. Semantic and lowering consumers resolve a sibling binding
+/// through that index; no source imports or synthetic spans are materialized.
 fn bind_package_namespaces(
     modules: &mut [LoadedModule],
     entry_idx: usize,
@@ -5366,13 +5722,16 @@ fn bind_package_namespaces(
     name_ledger: &mut crate::AST::NameLedger,
 ) -> Result<(), LoaderError> {
     let mut groups: Vec<(PathBuf, Vec<usize>)> = Vec::new();
+    let mut group_positions = HashMap::<PathBuf, usize>::new();
     for module_idx in 0..modules.len() {
         let Some(root) = namespace_root(&modules[module_idx].path, namespace_roots) else {
             continue;
         };
-        match groups.iter_mut().find(|(group_root, _)| *group_root == root) {
-            Some((_, members)) => members.push(module_idx),
-            None => groups.push((root, vec![module_idx])),
+        if let Some(&position) = group_positions.get(&root) {
+            groups[position].1.push(module_idx);
+        } else {
+            group_positions.insert(root.clone(), groups.len());
+            groups.push((root, vec![module_idx]));
         }
     }
     for (root, members) in &groups {
@@ -5441,6 +5800,11 @@ fn bind_package_namespaces(
                 }
             }
         }
+        for (position, member_names) in names.iter().enumerate() {
+            for (name, _) in member_names {
+                name_ledger.record_namespace_name(members[position], name.clone());
+            }
+        }
         // A library package has no `fn run`.
         let declares_library = facts.as_ref().is_some_and(|facts| {
             facts.outputs.values().any(|output| {
@@ -5459,71 +5823,6 @@ fn bind_package_namespaces(
                         Diagnostic::from_row("E0625", &[], Some(*span)),
                     ));
                 }
-            }
-        }
-        for &member in members {
-            // Each binding needs a zero-width span of its own: the name
-            // ledger keys import targets and alias uses by span. A written
-            // `use dep.[…]` already binds its package at the zero-width span
-            // of its alias, and the Prelude binds Core at 0, so skip those.
-            let mut taken: HashSet<usize> = modules[member]
-                .imports
-                .iter()
-                .filter(|import| import.span.start == import.span.end)
-                .map(|import| import.span.start)
-                .collect();
-            taken.insert(0);
-            let mut next_span = 0usize;
-            let mut fresh_span = || {
-                while taken.contains(&next_span) {
-                    next_span += 1;
-                }
-                taken.insert(next_span);
-                Span::new(next_span, next_span)
-            };
-            for (sibling_position, &sibling) in members.iter().enumerate() {
-                if sibling == member || names[sibling_position].is_empty() {
-                    continue;
-                }
-                let alias = format!("__jet_pkg_{}", modules[sibling].alias);
-                let file_span = fresh_span();
-                let list_span = fresh_span();
-                let bound = names[sibling_position]
-                    .iter()
-                    .map(|(name, _)| (name.clone(), None))
-                    .collect::<Vec<_>>();
-                let count = bound.len();
-                let sibling_display = modules[sibling].display.clone();
-                let imports = &mut modules[member].imports;
-                imports.push(ImportDecl {
-                    kind: ImportKind::File(sibling_display, file_span),
-                    alias: alias.clone(),
-                    alias_span: file_span,
-                    span: file_span,
-                    item_spans: Vec::new(),
-                    local_spans: Vec::new(),
-                    is_pub: false,
-                    is_package_pub: false,
-                    inline_version: None,
-                });
-                imports.push(ImportDecl {
-                    kind: ImportKind::Unqualified {
-                        module_alias: alias.clone(),
-                        module_alias_span: list_span,
-                        items: bound,
-                        items_span: list_span,
-                        span: list_span,
-                    },
-                    alias,
-                    alias_span: list_span,
-                    span: list_span,
-                    item_spans: vec![list_span; count],
-                    local_spans: vec![list_span; count],
-                    is_pub: false,
-                    is_package_pub: false,
-                    inline_version: None,
-                });
-                name_ledger.record_import_target(member, file_span, sibling);
             }
         }
     }
@@ -5885,6 +6184,24 @@ pub fn is_physically_within(root: &Path, path: &Path) -> bool {
 mod stale_manifest_name_tests {
     use super::*;
 
+    #[test]
+    fn loader_error_shares_source_across_reports_and_provenance_sink() {
+        let source = "source line\n".repeat(100_000);
+        let diagnostics = (0..1_000).map(|_| Diagnostic::error(
+            "E0003", "invalid item".into(), "source error".into(),
+            "repair the item".into(), Some(Span::new(0, 6)),
+        )).collect();
+        let error = LoaderError::at("large.jet", &source, diagnostics);
+        let shared = error.diagnostics[0].source.clone();
+        assert_eq!(shared.as_ref(), source);
+        assert!(error.diagnostics.iter().all(|entry| std::sync::Arc::ptr_eq(&shared, &entry.source)));
+        let mut recorded = Vec::new();
+        let plain = record_loader_error(&mut Some(&mut recorded), error);
+        assert_eq!(plain.len(), 1_000);
+        assert_eq!(recorded.len(), 1_000);
+        assert!(recorded.iter().all(|entry| std::sync::Arc::ptr_eq(&shared, &entry.source)));
+    }
+
     /// Keep fixtures outside enclosing project roots; system temp can itself
     /// live inside a repository, workspace, or package.
     fn tempdir(tag: &str) -> PathBuf {
@@ -5916,6 +6233,26 @@ mod stale_manifest_name_tests {
         ));
         std::fs::create_dir_all(&p).unwrap();
         p
+    }
+
+    #[test]
+    fn package_namespace_excludes_declared_config_inputs() {
+        let root = tempdir("namespace-config");
+        fs::create_dir_all(root.join("config")).unwrap();
+        fs::write(
+            root.join(Syntax::PACKAGE_FILE),
+            "name: \"namespace_config\"\nversion: \"0.1.0\"\nconfigs: [\"config/build.jet\"]\n",
+        ).unwrap();
+        fs::write(
+            root.join("config/build.jet"),
+            "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+        ).unwrap();
+        fs::write(root.join("run.jet"), "fn build() {}\nfn run() {}\n").unwrap();
+        assert_eq!(
+            package_member_files(&root).unwrap(),
+            vec![normalize_path(&root.join("run.jet"))],
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -6020,14 +6357,228 @@ mod stale_manifest_name_tests {
             prepared
                 .get(&normalize_path(&first))
                 .map(|entry| &entry.module),
-            Some(PreparedFrontendModule::Parsed(_, _))
+            Some(PreparedFrontendModule::Parsed(_, _, _))
         ));
         assert!(matches!(
             prepared
                 .get(&normalize_path(&second))
                 .map(|entry| &entry.module),
-            Some(PreparedFrontendModule::Parsed(_, _))
+            Some(PreparedFrontendModule::Parsed(_, _, _))
         ));
+    }
+
+    #[test]
+    fn frontend_reports_parser_teaching_after_lexical_errors() {
+        let source = include_str!("../../../tests/ui/dunder_retired_bit_operator.jet");
+        let PreparedFrontendModule::ParseFailed(diagnostics) = prepare_frontend_module(source) else {
+            panic!("reserved names and retired bit operators must fail");
+        };
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"));
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0398"));
+        let (tokens, lex_diagnostics) = Lexer::lex(source);
+        let direct = parse_frontend_tokens(&tokens, source, lex_diagnostics).unwrap_err();
+        assert_eq!(
+            diagnostics.iter().map(|diagnostic| &diagnostic.code).collect::<Vec<_>>(),
+            direct.iter().map(|diagnostic| &diagnostic.code).collect::<Vec<_>>(),
+        );
+        assert_eq!(
+            crate::Diagnostics::render_all("tests/ui/dunder_retired_bit_operator.jet", source, &diagnostics),
+            include_str!("../../../tests/ui/dunder_retired_bit_operator.stderr"),
+        );
+    }
+
+    #[test]
+    fn embedded_core_parse_failures_keep_their_source_origin() {
+        let display = "<corelib>/Core/crypto/crypto.jet";
+        let source = "fn run() { value :: 1 | 2 }\n";
+        let (tokens, lexical) = Lexer::lex_generated(source);
+        let diagnostics = parse_frontend_tokens(&tokens, source, lexical).unwrap_err();
+        let diagnostics = record_loader_error(
+            &mut None,
+            LoaderError::at(display, source, diagnostics)
+                .with_module_origin(display, Path::new(display)),
+        );
+        let diagnostic = diagnostics.iter().find(|diagnostic| diagnostic.code == "E0398").unwrap();
+        let origin = diagnostic.origin().expect("Core origin must survive plain conversion");
+        assert_eq!(origin.display, display);
+        assert_eq!(origin.source, source);
+        assert!(diagnostic.span.is_some());
+        assert_eq!(
+            crate::Diagnostics::render_all("run.jet", "fn run() {}\n", &diagnostics),
+            include_str!("../../../tests/fixtures/core_parse_origin.stderr"),
+        );
+    }
+
+    #[test]
+    fn declared_rule_rejection_uses_its_registered_diagnostic() {
+        let root = tempdir("declared-rule-rejection");
+        let entry = root.join("run.jet");
+        let source = include_str!("../../../Compiler/JetSema/Tests/RejectDiagnosticFixtures.jet");
+        fs::write(&entry, source).unwrap();
+        let (diagnostics, _) = crate::Driver::check_file(entry.to_str().unwrap(), None, false);
+        let errors = diagnostics.iter()
+            .filter(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+            .collect::<Vec<_>>();
+        assert_eq!(errors.len(), 1, "{errors:?}");
+        assert_eq!(errors[0].code, "E0927", "{errors:?}");
+        assert_eq!(errors[0].what, "The rule rejected this type");
+        assert_eq!(errors[0].why, "The test rule is deliberately strict");
+        assert_eq!(errors[0].fix, "Remove the marker");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn negative_literal_power_keeps_fraction_result_and_dynamic_int() {
+        let root = tempdir("negative-literal-power");
+        let entry = root.join("run.jet");
+        let source = include_str!("../../../Compiler/JetSema/Tests/NegativePowerFixtures.jet");
+        fs::write(&entry, source).unwrap();
+        let (diagnostics, bundle) = crate::Driver::check_file(entry.to_str().unwrap(), None, false);
+        let errors = diagnostics.iter()
+            .filter(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+            .collect::<Vec<_>>();
+        assert!(errors.is_empty(), "{errors:?}");
+        assert!(bundle.is_some(), "the checked power fixture must retain its bundle");
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn taking_service_variant_subject_retains_single_evaluation() {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let root = tempdir("taking-service-variant-subject");
+            let entry = root.join("main.jet");
+            fs::write(&entry, "use core.service as service\nfn receive(tree: &service.ServiceTree, endpoint: service.ServiceEndpoint) -> String service.ServiceError! { service.receive(&tree, endpoint) }\nfn run() {}\n").unwrap();
+            let mut bundle = load_entry(entry.to_str().unwrap()).expect("service import closure loads");
+            let module = bundle.modules.iter_mut()
+                .find(|module| module.display.ends_with("Core/service/service.jet"))
+                .expect("service source is retained");
+            let start = module.source.find("fn pending_delivery_rollback(").unwrap();
+            let end = module.source[start..].find("fn pending_rollback_error(").unwrap() + start;
+            let original = r#"fn pending_delivery_rollback(tree: &ServiceTree, endpoint: ServiceEndpoint, index: Int, remaining: ^[(id: String, message: String, store: String)], before: ^[String], draining: Bool, error: ServiceError) -> ServiceError Never! {
+    #Unsafe("Services2693-2762: retain authority requeue then mailbox-restore ordering and both failure texts") {
+        if core.service.__requeue_pending(endpoint, ^remaining) == {
+            .Err(rollback_error) -> {
+                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
+                    .Err(mailbox_error) -> return pending_rollback_error(error, Val(rollback_error), Val(mailbox_error))
+                    .Ok(_) -> return pending_rollback_error(error, Val(rollback_error), None)
+                }
+            }
+            .Ok(_) -> {
+                if core.service.__mailbox_restore(&tree, index, ^before, draining) == {
+                    .Err(rollback_error) -> return pending_rollback_error(error, None, Val(rollback_error))
+                    .Ok(_) -> return pending_rollback_error(error, None, None)
+                }
+            }
+        }
+    }
+}
+
+"#;
+            let source = format!("{}{}{}", &module.source[..start], original, &module.source[end..]);
+            let masked = crate::Package::mask_inline_package_source(&source).unwrap().0;
+            let (tokens, lexical) = Lexer::lex_generated(&masked);
+            let (program, _) = parse_frontend_tokens(&tokens, &masked, lexical)
+                .expect("original rollback parses");
+            module.items = program.items;
+            module.source = source.into();
+            let diagnostics = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Eval);
+            let errors: Vec<_> = diagnostics.iter()
+                .filter(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error).collect();
+            assert!(errors.is_empty(), "{errors:#?}");
+            fs::remove_dir_all(root).unwrap();
+        });
+    }
+
+    #[test]
+    fn core_text_runtime_imports_keep_aliases_and_load_each_unit_once() {
+        let root = tempdir("core-text-runtime-imports");
+        let entry = root.join("main.jet");
+        fs::write(
+            &entry,
+            "use core.text as text\nfn run() { print(\"A\".lower()); print(text.display_width(\"a\")) }\n",
+        ).unwrap();
+        let bundle = load_entry(entry.to_str().unwrap()).expect("Core text runtime closure loads");
+        for (owner, alias, target) in [
+            ("Core/text/string.jet", "string_unicode", "core.text.runtime.kernel_unicode_string"),
+            ("Core/text/string.jet", "string_width", "core.text.runtime.kernel_text_width"),
+            ("Core/text/text.jet", "text_unicode_string", "core.text.runtime.kernel_unicode_string"),
+        ] {
+            let part = jet_foundation::CoreSourceParts::core_runtime_part(target).unwrap();
+            assert_eq!(bundle.modules.iter().filter(|module| module.alias == part.alias).count(), 1);
+            let source = bundle.modules.iter().find(|module| module.display == owner).unwrap();
+            assert!(source.imports.iter().any(|import| {
+                import.alias == alias
+                    && matches!(&import.kind, ImportKind::Module(name, _) if name == part.alias)
+            }), "{owner} must retain {alias} as an ordinary module binding");
+        }
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn core_private_alias_import_loads_its_part_without_public_owner_import() {
+        let root = tempdir("core-private-alias-closure");
+        let entry = root.join("main.jet");
+        fs::write(&entry, "use core.encoding as encoding\nfn run() {}\n").unwrap();
+        let bundle = load_entry(entry.to_str().unwrap()).expect("Core encoding closure loads");
+        let part = jet_foundation::CoreSourceParts::core_private_source_part_by_alias(
+            "__core_encoding_cbor_parse",
+        ).expect("CBOR parse part is cataloged");
+        assert_eq!(bundle.modules.iter().filter(|module| module.alias == part.source.alias).count(), 1);
+        let stream = bundle.modules.iter()
+            .find(|module| module.display == "Core/encoding/cbor_stream.jet")
+            .expect("encoding owns the CBOR stream part");
+        assert!(stream.imports.iter().any(|import|
+            import.alias == "parser"
+                && matches!(&import.kind, ImportKind::Module(name, _) if name == part.source.alias)));
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn declaration_core_owners_follow_types_not_leaf_coincidences() {
+        let schedule = |source: &str| {
+            let (tokens, diagnostics) = Lexer::lex_generated(source);
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let (program, diagnostics) = Parser::parse_for_check_with_source(&tokens, source).unwrap();
+            assert!(diagnostics.iter().all(|row| row.severity != crate::Diagnostics::Severity::Error));
+            let mut pending = Vec::new();
+            let mut scheduled = HashSet::new();
+            schedule_core_declaration_owners(&program.items, &mut pending, &mut scheduled);
+            pending.into_iter().map(|row| row.module).collect::<Vec<_>>()
+        };
+        assert!(schedule("struct DateTime { value: Int }\nstruct Stat { modified: DateTime? }\n").is_empty());
+        assert!(schedule("struct Stat<DateTime> { modified: DateTime? }\n").is_empty());
+        assert!(schedule("struct Stat { modified: unrelated.DateTime }\n").is_empty());
+        let owners = schedule("alias Times :: [DateTime?]\nenum Stamp {\n At(DateTime)\n Missing\n}\nstruct Stat { times: Times }\n");
+        assert_eq!(owners.iter().filter(|module| **module == "core.time").count(), 1);
+    }
+
+    #[test]
+    fn core_demand_metadata_does_not_load_owners_but_real_names_keep_import_closure() {
+        let root = tempdir("lexical-core-demand");
+        let entry = root.join("main.jet");
+        let names = jet_foundation::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+            .iter()
+            .map(|row| format!("\"{}\"", row.name))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let source = format!("fn run() {{\n    names :: [String]{{{names}}}\n    print(names.len())\n}}\n");
+        fs::write(&entry, &source).unwrap();
+        let data = load_entry(entry.to_str().unwrap()).expect("literal metadata source loads");
+        assert!(data.modules.iter().all(|module| !module.is_core_source()));
+        assert!(data.modules.iter().all(|module| module.core_identifier_demand.prelude_modules.is_empty()));
+
+        fs::write(&entry, "fn run(value: URL) {}\n").unwrap();
+        let real = load_entry(entry.to_str().unwrap()).expect("real URL owner loads");
+        fs::write(&entry, "use core.net.url as imported_url\nfn run() {}\n").unwrap();
+        let imported = load_entry(entry.to_str().unwrap()).expect("explicit URL owner loads");
+        let core_paths = |bundle: &ProgramBundle| {
+            bundle.modules.iter().filter(|module| module.is_core_source())
+                .map(|module| module.path.clone()).collect::<std::collections::BTreeSet<_>>()
+        };
+        let real_paths = core_paths(&real);
+        assert!(!real_paths.is_empty(), "real identifiers must retain their owner source");
+        assert_eq!(real_paths, core_paths(&imported), "bare demand keeps explicit-import dependency/private-part closure");
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -6036,7 +6587,7 @@ mod stale_manifest_name_tests {
         let entry = dir.join("main.jet");
         let dependency = dir.join("dep.jet");
         let entry_source = "module dep\nfn run() -> Int { return dep.value() }\n";
-        let valid_dependency = "pub fn value() -> Int { return 7 }\n";
+        let valid_dependency = "fn value() -> Int { return 7 }\n";
         fs::write(&entry, entry_source).unwrap();
         fs::write(&dependency, valid_dependency).unwrap();
 
@@ -6055,7 +6606,7 @@ mod stale_manifest_name_tests {
             "valid staged batch diagnosed: {diagnostics:?}"
         );
 
-        let invalid_dependency = "pub fn value() -> Int { return 7 }\n::\n";
+        let invalid_dependency = "fn value() -> Int { return 7 }\n::\n";
         let invalid_overlays = [
             (entry.as_path(), entry_source),
             (dependency.as_path(), invalid_dependency),
@@ -6264,7 +6815,7 @@ mod stale_manifest_name_tests {
         let outside = tempdir("file-import-symlink-outside");
         let entry = root.join("run.jet");
         fs::write(&entry, "use \"./escape\" as escape\nfn run() {}\n").unwrap();
-        fs::write(outside.join("secret.jet"), "pub fn fixture() {}\n").unwrap();
+        fs::write(outside.join("secret.jet"), "fn fixture() {}\n").unwrap();
         symlink(outside.join("secret.jet"), root.join("escape.jet")).unwrap();
 
         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
@@ -6289,7 +6840,7 @@ mod stale_manifest_name_tests {
         .unwrap();
         fs::write(
             dir.join("arbitrary.jet"),
-            "module _bench { }\npub fn fixture() {}\n",
+            "module _bench { }\nfn fixture() {}\n",
         )
         .unwrap();
 
@@ -6411,11 +6962,11 @@ mod stale_manifest_name_tests {
         let dir = tempdir("module-directory-entry");
         let module_dir = dir.join("tool");
         fs::create_dir_all(&module_dir).unwrap();
-        fs::write(module_dir.join("main.jet"), "pub fn run() {}").unwrap();
+        fs::write(module_dir.join("main.jet"), "fn run() {}").unwrap();
         assert!(find_module_files("tool", &dir).unwrap().is_empty());
 
         let run = module_dir.join(Syntax::DEFAULT_ENTRY_FILE);
-        fs::write(&run, "pub fn run() {}\n").unwrap();
+        fs::write(&run, "fn run() {}\n").unwrap();
         assert_eq!(
             find_module_files("tool", &dir).unwrap(),
             vec![normalize_path(&run)]

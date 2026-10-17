@@ -6,6 +6,17 @@
 // reports the same `DataError`. A second copy of this math on any tier is an
 // I9 violation; `tests/data_one_kernel.rs` fails the build on one.
 
+/// Raw host metadata query. Bytes are split only at ASCII boundaries from
+/// OsString::into_encoded_bytes; all PATH policy remains in Core/data/data.jet.
+pub(crate) fn jet_data_host_path_is_file(path: &Vec<u8>) -> Result<bool, jet_std::EncodingCause> {
+    let native = unsafe { std::ffi::OsStr::from_encoded_bytes_unchecked(path) };
+    std::fs::metadata(native).map(|metadata| metadata.is_file()).map_err(|error| jet_std::EncodingCause {
+        kind: format!("{:?}", error.kind()),
+        os_code: error.raw_os_error().map(i64::from).ok_or(JetAbsent),
+        message: error.to_string(),
+    })
+}
+
 pub(crate) fn jet_data_error(
     kind: jet_std::DataErrorKind,
     operation: &str,
@@ -606,39 +617,6 @@ pub(crate) fn jet_data_status() -> Vec<jet_std::DataStatus> {
     ]
 }
 
-pub(crate) fn jet_data_normalize_bridge_provider(provider: &str) -> Option<&'static str> {
-    let lower = provider.trim().trim_end_matches('.').to_ascii_lowercase();
-    let p = lower.strip_suffix(".*").unwrap_or(lower.as_str());
-    match p {
-        "py" | "python" => Some("py.*"),
-        "r" => Some("r.*"),
-        "gpu" | "cuda" | "metal" | "vulkan" | "webgpu" => Some("gpu.*"),
-        _ => None,
-    }
-}
-
-/// Fail closed when a Python/R/GPU bridge is not available. Never invent results.
-pub(crate) fn jet_data_require_bridge(provider: &String) -> Result<(), jet_std::DataError> {
-    let Some(step) = jet_data_normalize_bridge_provider(provider) else {
-        return Err(jet_data_error(
-            jet_std::DataErrorKind::InvalidArgument,
-            "require_bridge",
-            format!("unknown data bridge provider `{provider}`; expected py, r, or gpu"),
-        ));
-    };
-    let status = jet_data_bridge_status(step);
-    if status.path == "available" {
-        return Ok(());
-    }
-    Err(jet_data_error(
-        jet_std::DataErrorKind::Bridge,
-        "require_bridge",
-        format!(
-            "{step} unavailable (clone_value={}, ownership={}, trust={}, fallback={}, replacement={})",
-            status.clone_value, status.ownership, status.trust, status.fallback, status.replacement
-        ),
-    ))
-}
 
 pub(crate) fn jet_data_bar_text<K, V>(
     groups: &Vec<jet_std::GroupValue<K, V>>,

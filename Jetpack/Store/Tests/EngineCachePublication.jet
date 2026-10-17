@@ -1,0 +1,195 @@
+// Exact engine cache/reproducibility predicates from tests/jetpack_engine.rs.
+// PENDING-SEAM(package-tests): no runtime/reference proof claimed.
+fn engine_cache_ingest(verification: &StoreVerification, roots: HangarRoots, name: String, reference: String, source: String, identity: CacheIdentity, refs: [String], provenance: String) -> StoreEntry {
+    result :: store_ingest_tree(&verification, roots, IngestRequest{name, version: "1", reference, cache_identity: identity, references: refs, outputs: [String: String]{"out": source}, signature: "", provenance, platform_artifact_kind: ""}) ?? panic("real ingest")
+    result.entry
+}
+fn engine_cache_identity(prefix: String) -> CacheIdentity {
+    CacheIdentity{source_fingerprint: "sha256:{prefix}-source", recipe_fingerprint: "sha256:{prefix}-recipe", policy_fingerprint: "sha256:{prefix}-policy", platform: pkg_host_platform()}
+}
+fn engine_cache_verify_error(verification: &StoreVerification, roots: HangarRoots, id: String) -> String {
+    if store_verify_cache_transfer(&verification, roots, id, "public") == {
+        .Ok(_) -> panic("invalid cache transfer passed")
+        .Err(error) -> error.message()
+    }
+}
+fn engine_cache_substitute_rejected(verification: &StoreVerification, roots: HangarRoots, id: String, destination: String) {
+    assert(store_substitute_cache_entry(&verification, roots, id, "public", destination) == .Err(_))
+    assert(!files.exists(destination))
+}
+fn engine_cache_clear_negative(mirror: String) {
+    files.remove_all(files.join(mirror, ".jet-negative")).drop("original ignored missing negative hints")
+}
+#Test("binary_cache_local_publish_verify_and_reject_corruption") {
+    root :: files.tmpdir("engine-cache-root-") ?? panic("root")
+    source :: files.tmpdir("engine-cache-source-") ?? panic("source")
+    blocked :: files.tmpdir("engine-cache-blocked-") ?? panic("blocked")
+    mirror :: files.tmpdir("engine-cache-mirror-") ?? panic("mirror")
+    files.remove_all(blocked) ?? panic("remove blocked")
+    files.write(blocked, "the first mirror is unavailable") ?? panic("blocked mirror")
+    roots :: HangarRoots{root, dev_mode: false}
+    files.write(files.join(source, "payload"), "cache bytes\n") ?? panic("payload")
+    if sys.is_unix() -> files.symlink("payload", files.join(source, "alias")) ?? panic("alias")
+    verification := StoreVerification.new()
+    entry :: engine_cache_ingest(&verification, roots, "cache-demo", "./cache-demo", source, engine_cache_identity("cache"), [String]{}, "cache test")
+    store_bind_cache(roots, "public", [String]{blocked, mirror}, None, None, true) ?? panic("cache binding")
+    published :: store_publish_cache_entry(&verification, roots, entry.id, "public") ?? panic("publish")
+    assert_eq(published.output_hash, entry.envelope.output_hash)
+    assert_eq(published.mirror, mirror)
+    verified :: store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("verify")
+    assert_eq(verified.output_hash, entry.envelope.output_hash)
+    assert_eq(verified.builder, published.builder)
+    assert_eq(verified.provenance, published.provenance)
+    witness :: published.witness ?? panic("published witness")
+    assert(witness != "")
+    assert_eq(verified.witness, published.witness)
+    assert_eq(published.receipt_version, Val(1))
+    assert(published.receipt_expires_unix != None)
+    assert_eq(verified.receipt_version, Val(1))
+    assert(verified.receipt_expires_unix != None)
+    assert(verified.signed_fingerprint != "")
+    report_json :: verified.json("verify")
+    fields :: [String]{"\"operation\":\"verify\"", "\"signed_fingerprint\":", "\"builder\":", "\"provenance\":", "\"witness\":", "\"receipt_version\":1", "\"receipt_expires_unix\":"}
+    loop field in fields -> assert(report_json.contains(field))
+    explanation :: (store_explain_package(roots, entry.id, ExplainLens.Rebuild) ?? panic("explain")) ?? panic("published explanation")
+    explanation_json :: explanation.to_json()
+    explanation_fields :: [String]{"\"cache_admissions\":", "\"decision\":\"accepted\"", "\"receipt_version\":1", "\"receipt_expires_unix\":", published.builder, "\"decision\":\"rebuild-required\"", "producer record lacks the shared provider-facts carrier"}
+    loop field in explanation_fields -> assert(explanation_json.contains(field))
+    assert(explanation.text().contains("cache-trust public accepted"))
+    restored :: files.tmpdir("engine-cache-restored-") ?? panic("restored")
+    store_substitute_cache_entry(&verification, roots, entry.id, "public", files.join(restored, "out")) ?? panic("substitute")
+    assert_eq(files.read(files.join(restored, "out/payload")) ?? panic("restored payload"), "cache bytes\n")
+    if sys.is_unix() -> assert_eq(files.read_link(files.join(restored, "out/alias")) ?? panic("restored alias"), "payload")
+    nar :: files.join(mirror, "nar/{entry.envelope.output_hash}.nar")
+    info :: files.join(mirror, "{entry.envelope.output_hash}-{entry.id}.narinfo")
+    nar_bytes :: files.read_bytes(nar) ?? panic("nar")
+    info_bytes :: files.read_bytes(info) ?? panic("info")
+    files.remove(blocked) ?? panic("unblock")
+    files.create_dir_all(files.join(blocked, "nar")) ?? panic("blocked nar")
+    files.write(files.join(blocked, "nar/{entry.envelope.output_hash}.nar"), "corrupted first mirror") ?? panic("corrupt first")
+    files.write_bytes(files.join(blocked, "{entry.envelope.output_hash}-{entry.id}.narinfo"), info_bytes) ?? panic("first info")
+    fallback :: store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("fallback")
+    assert_eq(fallback.mirror, mirror)
+    files.remove(nar) ?? panic("remove nar")
+    files.remove(info) ?? panic("remove info")
+    nar_partial :: files.join(mirror, "nar/{entry.envelope.output_hash}.partial")
+    info_partial :: files.join(mirror, "{entry.envelope.output_hash}-{entry.id}.partial")
+    files.write_bytes(nar_partial, nar_bytes[0..<nar_bytes.len().max(2) /% 2]) ?? panic("nar partial")
+    files.write_bytes(info_partial, info_bytes[0..<info_bytes.len().max(2) /% 2]) ?? panic("info partial")
+    store_publish_cache_entry(&verification, roots, entry.id, "public") ?? panic("republish")
+    assert_eq(files.read_bytes(nar) ?? panic("republished nar"), nar_bytes)
+    assert_eq(files.read_bytes(info) ?? panic("republished info"), info_bytes)
+    assert(!files.exists(nar_partial))
+    assert(!files.exists(info_partial))
+    key_path :: files.join(root, "trust/cache-public.key")
+    key_bytes :: files.read_bytes(key_path) ?? panic("key")
+    key :: TrustKey.from_secret(key_bytes) ?? panic("decode key")
+    info_text :: String.from_bytes(info_bytes) ?? panic("UTF-8 info")
+    unsigned := [String]{}
+    loop line in info_text.lines() {
+        if !line.starts_with("Sig: ") -> &unsigned.push(line.copy())
+    }
+    files.write(info, "{unsigned.join("\n")}\n") ?? panic("unsigned")
+    assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
+    engine_cache_substitute_rejected(&verification, roots, entry.id, files.join(root, "unsigned-rejected/out"))
+    engine_cache_clear_negative(mirror)
+    files.write_bytes(info, info_bytes) ?? panic("restore info")
+    mismatched := NarInfo.parse(info_text) ?? panic("mismatched info")
+    mismatched.deriver = Val("/jet/derivations/{store_test_repeat("f", 64)}")
+    files.write(info, (mismatched.signed(key) ?? panic("mismatch signature")).to_text() ?? panic("mismatch text")) ?? panic("mismatch write")
+    assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
+    engine_cache_substitute_rejected(&verification, roots, entry.id, files.join(root, "mismatched-rejected/out"))
+    engine_cache_clear_negative(mirror)
+    replayed := NarInfo.parse(info_text) ?? panic("replay info")
+    replayed.store_path = "/jet/hangar/{entry.envelope.output_hash}-replayed"
+    files.write(info, (replayed.signed(key) ?? panic("replay signature")).to_text() ?? panic("replay text")) ?? panic("replay write")
+    assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
+    engine_cache_clear_negative(mirror)
+    files.write_bytes(info, info_bytes) ?? panic("restore info")
+    malicious_nar :: "this is not a NAR".bytes()
+    malicious := NarInfo.parse(info_text) ?? panic("malicious info")
+    malicious.file_size = malicious_nar.len()
+    malicious.nar_size = malicious_nar.len()
+    malicious.nar_hash = store_nar_digest(malicious_nar)
+    files.write_bytes(nar, malicious_nar) ?? panic("malicious nar")
+    files.write(info, (malicious.signed(key) ?? panic("malicious signature")).to_text() ?? panic("malicious text")) ?? panic("malicious info write")
+    assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
+    engine_cache_substitute_rejected(&verification, roots, entry.id, files.join(root, "malicious-rejected/out"))
+    engine_cache_clear_negative(mirror)
+    files.write_bytes(nar, nar_bytes) ?? panic("restore nar")
+    files.write_bytes(info, info_bytes) ?? panic("restore info")
+    files.write(nar, "corrupted cache bytes") ?? panic("corrupt nar")
+    assert(store_verify_cache_transfer(&verification, roots, entry.id, "public") == .Err(_))
+    engine_cache_substitute_rejected(&verification, roots, entry.id, files.join(root, "corrupt-rejected/out"))
+    changed_key := [U8]{}
+    loop _ in 0..<32 -> &changed_key.push(U8{127})
+    files.write_bytes(key_path, changed_key) ?? panic("changed key")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("cache key for `public` changed"))
+    files.write_bytes(key_path, key_bytes) ?? panic("restore key")
+    trust_revoke_cache_builder(root, published.builder) ?? panic("revoke")
+    revoked :: engine_cache_verify_error(&verification, roots, entry.id)
+    assert(revoked.contains("revoked"))
+    assert(revoked.contains("rebuild"))
+    engine_cache_substitute_rejected(&verification, roots, entry.id, files.join(root, "revoked-rejected/out"))
+    revoked_explanation :: ((store_explain_package(roots, entry.id, ExplainLens.Rebuild) ?? panic("revoked explain")) ?? panic("revoked explanation")).to_json()
+    assert(revoked_explanation.contains("\"decision\":\"denied\""))
+    assert(revoked_explanation.contains("cache builder is revoked"))
+    store_make_tree_writable_for_removal(root).drop("cleanup")
+    files.remove_all(root).drop("cleanup")
+    files.remove_all(source).drop("cleanup")
+    files.remove_all(blocked).drop("cleanup")
+    files.remove_all(mirror).drop("cleanup")
+    store_make_tree_writable_for_removal(restored).drop("cleanup")
+    files.remove_all(restored).drop("cleanup")
+}
+#Test("reproducibility_registration_writes_first_difference_and_blocks_cache") {
+    roots :: HangarRoots{root: files.tmpdir("engine-repro-root-") ?? panic("root"), dev_mode: false}
+    first_source :: files.tmpdir("engine-repro-first-") ?? panic("first source")
+    second_source :: files.tmpdir("engine-repro-second-") ?? panic("second source")
+    mirror :: files.tmpdir("engine-repro-mirror-") ?? panic("mirror")
+    files.write(files.join(first_source, "payload"), "first bytes\n") ?? panic("first payload")
+    files.write(files.join(second_source, "payload"), "second bytes\n") ?? panic("second payload")
+    verification := StoreVerification.new()
+    identity :: engine_cache_identity("repro")
+    first :: engine_cache_ingest(&verification, roots, "reproducible-action", "reproducibility:action", first_source, identity, [String]{}, "builder:first")
+    request :: IngestRequest{name: "reproducible-action", version: "1", reference: "reproducibility:action", cache_identity: identity, references: [String]{}, outputs: [String: String]{"out": second_source}, signature: "", provenance: "builder:second", platform_artifact_kind: ""}
+    if store_ingest_tree(&verification, roots, request) == {
+        .Ok(_) -> panic("conflicting action bytes registered")
+        .Err(error) -> {
+            assert(error.message().contains("unreproducible"))
+            assert(error.message().contains("conflicting bytes"))
+        }
+    }
+    reports :: files.list_dir(files.join(roots.root, "private/unreproducible")) ?? panic("reports")
+    report_path := String?{None}
+    loop entry in reports {
+        if files.suffix(entry.path) == ".json" {
+            report_path = Val(entry.path)
+            break
+        }
+    }
+    report :: files.read(report_path ?? panic("structured report")) ?? panic("report read")
+    json.parse(report) ?? panic("report must be valid JSON")
+    fields :: [String]{"\"schema\":\"jet-reproducibility-report-v1\"", "\"producer_action\"", "\"first_difference\"", "\"path\":\"payload\"", first.envelope.output_hash}
+    loop field in fields -> assert(report.contains(field))
+    loop entry in store_list_checked(&verification, roots) ?? panic("list") -> assert_eq(entry.envelope.output_hash, first.envelope.output_hash)
+    store_bind_cache(roots, "trusted", [String]{mirror}, None, None, true) ?? panic("bind")
+    assert(store_publish_cache_entry(&verification, roots, first.id, "trusted") == .Err(_))
+    store_make_tree_writable_for_removal(roots.root).drop("cleanup")
+    files.remove_all(roots.root).drop("cleanup")
+    files.remove_all(first_source).drop("cleanup")
+    files.remove_all(second_source).drop("cleanup")
+    files.remove_all(mirror).drop("cleanup")
+}
+#Test("package_explain_matches_failed_provider_reference_target") {
+    root :: files.tmpdir("engine-explain-failed-") ?? panic("root")
+    roots :: HangarRoots{root, dev_mode: false}
+    attempt := BuildAttempt.new("left-pad", "left-pad#version=2.0.17@npm", "npm", "sha256-recipe", "sha256-source")
+    &attempt.push_step(StepLog{index: 1, total: 1, name: "fetch", command: "fetch left-pad", cwd: root, status: "failed", stdout: "", stderr: "network unavailable"})
+    attempt.persist(roots.hangar_dir()) ?? panic("persist")
+    explanation :: (store_explain_package(roots, "left-pad#version=2.0.17@npm", ExplainLens.Rebuild) ?? panic("explain")) ?? panic("failed provider explanation")
+    assert(explanation.entry == None)
+    assert_eq(explanation.rebuild.decision, "rebuild-required")
+    assert_eq((explanation.rebuild.attempt ?? panic("attempt")).package, "left-pad")
+    files.remove_all(root).drop("cleanup")
+}

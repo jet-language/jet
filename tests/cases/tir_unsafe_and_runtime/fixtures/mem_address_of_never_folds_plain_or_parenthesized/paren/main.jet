@@ -1,0 +1,13 @@
+use core.mem
+#Unsafe("reads through a raw pointer; addr must be a live, valid Int")
+fn read_reg(addr: Int) -> Int {
+    p :: mem.Ptr<Int>.from_addr(addr)
+    return mem.volatile_read(p)
+}
+fn run() {
+    cell :: 1337
+    addr :: (mem.address_of(cell))
+    #Unsafe("addr is the address of `cell`, a live Int on this stack frame") {
+        print(read_reg(addr))
+    }
+}

@@ -1,0 +1,77 @@
+// Allocation channel of the ONE test-fault schedule, not an Alloc effect.
+// FaultInjection.rs60-72/102-114: observe every scheduled allocation, inject
+// exactly the selected fail_nth, and retain injected until schedule cleanup.
+// FaultSchedule extends this same TLS owner with effect selectors; both rails
+// share failNth and injected. State56 starts [failNth,count,active,injected].
+fault_allocation_key := I64{0}
+
+fn rt_fault_allocation_drop_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_fault_allocation_init() {
+    if (fault_allocation_key != I64{0}) {
+        return
+    }
+    closure :: jet_rt_alloc(I64{24}, I64{8})
+    trap_store(closure, I64{1})
+    trap_store(closure + I64{8}, rt_fault_allocation_drop_address())
+    trap_store(closure + I64{16}, I64{0})
+    fault_allocation_key = jet_rt_tls_key_new(closure)
+}
+
+#Export(c) fn jet_rt_fault_allocation_drop(_closure: I64, state: I64) -> I64 {
+    fault_schedule_release_selectors(state)
+    jet_rt_free(state, I64{56}, I64{8})
+    I64{0}
+}
+
+fn fault_allocation_state() -> I64 {
+    if (fault_allocation_key == I64{0}) { return I64{0} }
+    jet_rt_tls_get(fault_allocation_key)
+}
+
+// Arm before entering the body; normal allocation here never observes the
+// fallible rail. A clean pass has active=false or fail_nth=0. Machine words
+// carry the unsigned source ordinal bits, including ordinals above isize::MAX.
+#Export(c) fn jet_rt_fault_allocation_arm(fail_nth: I64, active: Bool) {
+    state :: fault_schedule_ensure()
+    fault_schedule_release_selectors(state)
+    trap_store(state, fail_nth)
+    trap_store(state + I64{8}, I64{0})
+    trap_store(state + I64{16}, if active -> I64{1} else -> I64{0})
+    trap_store(state + I64{24}, I64{0})
+}
+
+#Export(c) fn jet_fault_should_fail_allocation() -> Bool {
+    state :: fault_allocation_state()
+    if (state == I64{0}) { return false }
+    old :: trap_word(state + I64{8})
+    count :: if (old == I64{-1}) -> old else -> wrapping(old + I64{1})
+    trap_store(state + I64{8}, count)
+    fail_nth :: trap_word(state)
+    inject :: trap_word(state + I64{16}) != I64{0} && fail_nth != I64{0} && count == fail_nth
+    if inject -> trap_store(state + I64{24}, I64{1})
+    inject
+}
+
+// Facts0/1 are the channel's observed count and injection flag; clear removes
+// the target altogether, exactly FaultInjection.rs34-47. Thread detach invokes
+// the same ownership destructor even when the scheduler cancels the body.
+#Export(c) fn jet_rt_fault_allocation_fact(index: I64) -> I64 {
+    state :: fault_allocation_state()
+    if (state == I64{0}) { return I64{0} }
+    if (index == I64{0}) { return trap_word(state + I64{8}) }
+    if (index == I64{1}) { return trap_word(state + I64{24}) }
+    I64{0}
+}
+
+#Export(c) fn jet_rt_fault_allocation_clear() {
+    state :: fault_allocation_state()
+    if (state == I64{0}) {
+        return
+    }
+    jet_rt_tls_set(fault_allocation_key, I64{0})
+    _ := jet_rt_fault_allocation_drop(I64{0}, state)
+}

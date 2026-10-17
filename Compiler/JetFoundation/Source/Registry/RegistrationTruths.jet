@@ -1,0 +1,22 @@
+// Jet-owned corpus-truth rows, migrated from Registry/FactReads02.jet.
+// These are the registration table's published home/renderer/guard identities;
+// a path in a row is report data, not a runtime dependency on that file.
+struct RegistrationTruthRow {
+    name: String
+    home: String
+    renderers: [String]
+    guard_test: String
+    guard_file: String
+    guard_proof: String
+    decision: String
+}
+REGISTRATION_TRUTH_ROWS :: prep { [RegistrationTruthRow]{
+    RegistrationTruthRow{name: "RegistrationTable", home: "crates/jet-foundation/src/Registry.rs", renderers: [String]{"jet explain", "jet inspect types", "compile-time reflection"}, guard_test: "every_row_states_the_one_way_law", guard_file: "tests/marker_registry_coverage.rs", guard_proof: "counts definition sites", decision: "D-META-REG1"},
+    RegistrationTruthRow{name: "JitHostSymbols", home: "crates/jet-jit/src/jit/runtime_host.rs", renderers: [String]{"host_fns! declarations", "JIT lowering call_host"}, guard_test: "all_host_symbols_declared_match_all_registered", guard_file: "crates/jet-jit/src/jit/runtime_host.rs", guard_proof: "counts definition sites", decision: "D-ONCE-LAW1"},
+    RegistrationTruthRow{name: "CoreCalls", home: "crates/jet-foundation/src/Syntax/core_calls.rs", renderers: [String]{"sema/TIR/AOT/comptime projections of every plain core.* call", "effect and sink facts for every plain core.* call"}, guard_test: "core_projection_is_complete_both_directions", guard_file: "tests/core_call_table.rs", guard_proof: "counts definition sites", decision: "D-ONCE-LAW1"},
+    RegistrationTruthRow{name: "ExactIntSnip", home: "crates/jet-foundation/src/Numeric.rs", renderers: [String]{"compile-time evaluation", "JIT encoding", "the Prelude"}, guard_test: "comptime_exact_int_matches_runtime", guard_file: "tests/comptime_diff.rs", guard_proof: "diffs behavior", decision: "D-ONCE-LAW1"},
+    RegistrationTruthRow{name: "Scheduler", home: "crates/jet-codegen/src/Prelude/Scheduler.rs", renderers: [String]{"AOT programs", "the JIT scheduler host"}, guard_test: "the_jit_scheduler_is_the_prelude_scheduler", guard_file: "crates/jet-codegen/src/SchedulerHost.rs", guard_proof: "counts definition sites", decision: "D-ONCE-LAW1"},
+    RegistrationTruthRow{name: "IceReport", home: "crates/jet-foundation/src/Diagnostics.rs", renderers: [String]{"the jet binary panic hook", "the ice! macro", "compile driver reports"}, guard_test: "no_hand_typed_ice_banner_outside_the_one_home", guard_file: "tests/ice_report_single_home.rs", guard_proof: "counts definition sites", decision: "D-ONCE-LAW1"},
+    RegistrationTruthRow{name: "Retirements", home: "crates/jet-foundation/src/Syntax/retirements.rs", renderers: [String]{"jet fmt", "jet fix", "the retirement diagnostics"}, guard_test: "adoption_ratchets_toward_zero", guard_file: "tests/retirement_ratchet.rs", guard_proof: "counts definition sites", decision: "D-ONCE-RETIRE1"},
+    RegistrationTruthRow{name: "JetVocabulary", home: "Docs/spec/vocabulary.md", renderers: [String]{"Markdown docs"}, guard_test: "vocabulary_page_has_one_definition_and_no_retired_senses", guard_file: "tests/truthfulness.rs", guard_proof: "counts definition sites", decision: "D-ONCE-WORD1=A"},
+} }

@@ -1,0 +1,23 @@
+
+use core.http.client as http
+fn run() {
+    client :: http.Client.new()
+        .redirects(.Follow{ max: 2, same_origin_credentials: true })
+        .protocols(false, true, false)
+    forbidden :: http.request("GET", "http://{cap:forbidden}/forbidden")
+        .header("Proxy-Authorization", "Basic secret")
+    if client.send(forbidden) == {
+        .Ok(_) -> print("proxy-auth accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy-auth rejected")
+            else -> print("proxy-auth wrong")
+        }
+        else -> print("proxy-auth unexpected")
+    }
+    req :: http.request("GET", "http://{cap:addr}/start")
+        .header("Authorization", "Bearer secret")
+        .header("Cookie", "session=secret")
+    resp :: client.send(req) ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}

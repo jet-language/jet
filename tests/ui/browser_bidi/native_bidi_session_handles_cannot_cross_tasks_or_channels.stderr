@@ -1,0 +1,26 @@
+Error [E1102]: `session` can't cross into a task because `Browser` isn't sendable
+  --> native_bidi_session_handles_cannot_cross_tasks_or_channels.jet:9:28
+    |
+  9 |     handle :: task session.close()
+    |                            ^^^^^
+ Why: `Browser` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Fix: Give the task plain owned data, or rebuild the value as an owned copy before spawning
+More: jet-lang.dev/e/E1102
+
+Error [E1102]: `session` can't be sent because `Browser` isn't sendable
+  --> native_bidi_session_handles_cannot_cross_tasks_or_channels.jet:11:17
+    |
+ 11 |     sender.send(session)
+    |                 ^^^^^^^
+ Why: `Browser` owns thread-local state and must stay on the thread that created it; tasks and channels move owned values between threads
+ Fix: Send plain owned data instead, or rebuild the value as an owned copy before calling `.send()`
+More: jet-lang.dev/e/E1102
+
+Error [L1101]: ``handle`` still owes `join`
+  --> native_bidi_session_handles_cannot_cross_tasks_or_channels.jet:9:5
+    |
+  9 |     handle :: task session.close()
+    |     ^^^^^^
+ Why: The program may end before this task finishes
+ Fix: Join it with `.join()`, use its result, or write `.detach()` to let it go free
+More: jet-lang.dev/e/L1101

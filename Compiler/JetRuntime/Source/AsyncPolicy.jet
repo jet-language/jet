@@ -1,0 +1,28 @@
+// ReactiveEventWatch.rs:808-837; CAbiRoutes.rs:9545-9558.
+// Codec construction does NOT call JetAsyncPolicy.validate; negative capacity
+// remains representable here exactly as in the seed record constructor.
+#Export(c) fn jet_rt_record_new_jet_async_policy(capacity: I64, overflow: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(capacity)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (overflow < I64{0} || overflow > I64{2}) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    value :: jet_rt_alloc(ASYNC_POLICY_BYTES, I64{8})
+    data_tree_store(value + ASYNC_POLICY_CAPACITY, raw)
+    data_tree_store(value + ASYNC_POLICY_OVERFLOW, overflow)
+    value
+}
+#Export(c) fn jet_rt_record_get_jet_async_policy_capacity(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + ASYNC_POLICY_CAPACITY)) }
+#Export(c) fn jet_rt_record_get_jet_async_policy_overflow(value: I64) -> I64 { data_tree_word(value + ASYNC_POLICY_OVERFLOW) }
+#Export(c) fn jet_rt_handle_clone_jet_async_policy(value: I64) -> I64 {
+    result :: jet_rt_alloc(ASYNC_POLICY_BYTES, I64{8})
+    coll_copy(value, result, ASYNC_POLICY_BYTES)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_async_policy(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, ASYNC_POLICY_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_clone_jet_event_overflow(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_event_overflow(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_event_overflow(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }

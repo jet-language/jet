@@ -1,0 +1,63 @@
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.math as math
+
+COMPTIME_UNSUPPORTED :: prep { json.to_string(Dyn.Float(math.nan())) }
+COMPTIME_CHAR :: prep { json.to_string('\n') ?? panic("comptime Char JSON") }
+C0_EXPECTED :: prep { "\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f\"" }
+
+fn reject(label: String, number: Float) {
+    tree :: Dyn.Array([Dyn]{Dyn.Float(number)})
+    if json.to_string(tree) == {
+        .Ok(_) -> panic("non-finite JSON accepted")
+        .Err(error) -> {
+            assert(error.format == .JSON && error.kind == .Unsupported)
+            assert_eq(error.path, "$")
+            assert_eq(error.byte_offset, 0)
+            print("{label}: {error.reason}")
+        }
+    }
+    if json.dumps(tree) == .Ok(_) -> panic("non-finite dumps accepted")
+    if json.dump(tree) == .Ok(_) -> panic("non-finite dump accepted")
+    if json.to_string_pretty(tree) == .Ok(_) -> panic("non-finite pretty accepted")
+    leaf :: Dyn.Float(number)
+    assert_eq(leaf.show(), number.show())
+    print("display: {number} {leaf}")
+}
+
+fn run() {
+    if COMPTIME_UNSUPPORTED == {
+        .Ok(_) -> panic("comptime non-finite JSON accepted")
+        .Err(error) -> {
+            assert(error.format == .JSON && error.kind == .Unsupported)
+            assert_eq(error.reason, "JSON cannot encode a non-finite Float")
+        }
+    }
+    assert_eq(COMPTIME_CHAR, json.to_string('\n') ?? panic("Char JSON parity"))
+    reject("nan", math.nan())
+    reject("positive infinity", math.infinity())
+    reject("negative infinity", -math.infinity())
+    print("aliases: rejected")
+    print("Char: {json.to_string('\n') ?? panic("Char JSON")}")
+    bytes := [U8]{}
+    loop index in 0..<32 -> &bytes.push(U8{index})
+    controls :: String.from_bytes(bytes) ?? panic("C0 text")
+    wire :: json.to_string(controls) ?? panic("C0 JSON")
+    assert_eq(wire, C0_EXPECTED)
+    assert_eq(json.parse(wire) ?? panic("C0 round trip"), Dyn.Text(controls))
+    print("C0 lowercase: {wire.contains("\\u001f") && !wire.contains("\\u001F")}")
+    bad :: Dyn.Float(math.nan())
+    if jsonl.to_string([Dyn]{Dyn.Int(12), bad}) == {
+        .Ok(_) -> panic("non-finite JSONL accepted")
+        .Err(error) -> {
+            assert(error.format == .JSONL && error.kind == .Unsupported)
+            print("JSONL: {error.path} offset={error.byte_offset} line={error.line ?? panic("record line")}")
+        }
+    }
+    if jsonl.dumps([Dyn]{bad}) == .Ok(_) -> panic("non-finite JSONL dumps accepted")
+    if jsonl.append_line("\n12", bad) == {
+        .Ok(_) -> panic("non-finite append accepted")
+        .Err(error) -> print("append: {error.path} offset={error.byte_offset} line={error.line ?? panic("record line")}")
+    }
+    print("exact Int: {json.to_string(Dyn.Int(9007199254740993)) ?? panic("exact JSON")}")
+}

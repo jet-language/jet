@@ -1,0 +1,23 @@
+use c.[c as libc, m]
+
+#Import module c.c {
+    fn clamp(left: Int, middle: Int, right: Int) -> Int = "libc_clamp"
+}
+#Import module c.m {
+    fn version(left: Int, middle: Int, right: Int) -> Int = "libm_version"
+}
+
+module c_scope {
+    use c.[c as lib]
+    fn call() -> Int {
+        return lib.clamp(1, 2, 3)
+    }
+}
+module m_scope {
+    use c.[m as lib]
+    fn call() -> Int {
+        return lib.version(1, 2, 3)
+    }
+}
+
+fn run() { }

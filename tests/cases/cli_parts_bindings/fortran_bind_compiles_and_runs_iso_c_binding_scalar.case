@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/bindings.rs:417-472. Sources copied verbatim.
+# ORACLE-LITERAL tests/cli_parts/bindings.rs:471 (stdout bytes 42\n).
+# PENDING-GRAMMAR: exact file-kind assertions.
+fixture: fixtures/fortran_scalar
+step: jet inspect bind fortran {work}/scalar.f90 --pkg scalar
+exit: 0
+file: .jet/bindings/fortran/scalar.jet is-file
+file: .jet/bindings/fortran/libjet_fortran_scalar.a is-file
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = forty-two.out

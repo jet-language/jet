@@ -525,8 +525,8 @@ fn nixeval_test_resource_limit(error: NixEvalError) -> String {
 // An authority answering only the listed requests, like the Rust closures
 // over a BTreeMap; unlisted requests are denied with `<label> `<request>``.
 fn nixeval_test_map_authority(files: [String: String], label: String) -> NixEvalAuthority {
-    responses :: ~files
-    prefix :: ~label
+    responses :: files.copy()
+    prefix :: label.copy()
     NixEvalAuthority{answer: (request: String) -[]> {
         if responses.get(request) == {
             .Val(text) -> Ok(text)
@@ -566,7 +566,7 @@ fn nixeval_test_seeds(document: NixEvalJSON, root: [String: Int]) -> [Int] {
 
 fn nixeval_test_output_named(outputs: [NixEvalDerivationOutput], name: String) -> NixEvalDerivationOutput {
     loop output in outputs {
-        if output.name == name -> return ~output
+        if output.name == name -> return output.copy()
     }
     panic("fixture output name {name} must be declared")
 }

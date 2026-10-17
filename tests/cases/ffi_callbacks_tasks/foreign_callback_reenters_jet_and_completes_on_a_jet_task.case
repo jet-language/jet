@@ -1,0 +1,17 @@
+# tests/ffi_callbacks_tasks.rs::foreign_callback_reenters_jet_and_completes_on_a_jet_task
+# ORACLE-LITERAL; PENDING-SAME-HEAD. Generated Rust C trampoline text/rustc link machinery RETIRE; actual C thread callback/runtime proof retained.
+requires: os:unix
+fixture: foreign_callback_reenters_jet_and_completes_on_a_jet_task.fixture
+step select: jet run select_cc.jet
+exit: 0
+capture: cc = text stdout.trim
+step: {cap:cc} -pthread -c callback.c -o callback.o
+exit: 0
+step: ar rcs libcallback.a callback.o
+exit: 0
+write: package.jet package.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = foreign_callback_reenters_jet_and_completes_on_a_jet_task.out

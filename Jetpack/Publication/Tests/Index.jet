@@ -242,7 +242,7 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     publication_write_index_entry(repo, entry) ?? panic("write")
     publication_write_index_entry(repo, entry) ?? panic("identical retry")
     assert_eq((publication_read_entries(repo, "textkit") ?? panic("read")).len(), 1)
-    changed := ~entry
+    changed := entry.copy()
     changed.fingerprint = "different"
     if publication_write_index_entry(repo, changed) == {
         .Err(error) -> assert(error == .AlreadyExists(_))
@@ -263,7 +263,9 @@ fn publication_index_test_root(label: String) -[FS, Env]> String Never! {
     lock :: files.join(files.join(repo, "index"), ".textkit.lock")
     files.create_dir_all(files.dirname(lock)) ?? panic("index root")
     files.write(lock, "") ?? panic("plant stale lock")
-    sys.utime(lock, 1, 1) ?? panic("age stale lock")
+    #Unsafe("the test owns the planted lock file it ages") {
+        sys.utime(lock, 1, 1) ?? panic("age stale lock")
+    }
     publication_write_index_entry(repo, publication_index_test_entry("textkit", "1.0.0", false)) ?? panic("stale lock reclaimed")
     assert(!files.lexists(lock))
     assert_eq((publication_read_entries(repo, "textkit") ?? panic("read")).len(), 1)

@@ -10,14 +10,14 @@ OPAQUE_HANDLE_CLOSE_VERBS :: prep { [String]{"close", "destroy", "free", "releas
 
 // Thread safety is an explicit overlay fact. `Unspecified` is intentional:
 // the binder never infers a concurrency guarantee from C spelling.
-pub enum ThreadSafety {
+enum ThreadSafety {
     Unspecified
     Safe
     Unsafe
 }
 
 // Why a handle's close symbol was selected.
-pub enum CloseSource {
+enum CloseSource {
     Conventional
     Overlay
 }
@@ -25,9 +25,9 @@ pub enum CloseSource {
 // Native libraries that must stay attached to one generated binding.
 // `primary` is the library the C import names; `transitive` holds only
 // libraries the overlay supplied, never ones guessed from includes or symbols.
-pub struct LinkClosure {
-    pub primary: String
-    pub transitive: [String]
+struct LinkClosure {
+    primary: String
+    transitive: [String]
 
     // The overlay's libraries without the primary or repeats, sorted.
     fn new(primary: String, transitive: [String]) -> LinkClosure Never! {
@@ -49,15 +49,15 @@ pub struct LinkClosure {
 }
 
 // Explicit metadata supplied by a package's C binding overlay.
-pub struct HandleOverlay {
+struct HandleOverlay {
     // A C typedef, its generated Jet name, or an opaque struct tag mapped to a
     // close symbol; required when conventional discovery is absent or
     // ambiguous.
-    pub close_functions: [String: String]
+    close_functions: [String: String]
     // Per-handle concurrency declarations; missing entries stay unspecified.
-    pub thread_safety: [String: ThreadSafety]
+    thread_safety: [String: ThreadSafety]
     // Explicit transitive libraries this binding needs.
-    pub links: [String]
+    links: [String]
 
     fn empty() -> HandleOverlay Never! {
         HandleOverlay{close_functions: [String: String]{}, thread_safety: [String: ThreadSafety]{}, links: [String]{}}
@@ -107,16 +107,16 @@ pub struct HandleOverlay {
 
 // A generated owned handle. Every fact is owned, so its close symbol is
 // mandatory; handles without one stay in `unresolved`.
-pub struct HandleFact {
+struct HandleFact {
     // The C typedef spelling that introduced the opaque pointer.
-    pub typedef_name: String
+    typedef_name: String
     // The generated nominal Jet type name.
-    pub jet_name: String
+    jet_name: String
     // The native close function.
-    pub close: String
-    pub close_source: CloseSource
-    pub thread_safety: ThreadSafety
-    pub link_closure: LinkClosure
+    close: String
+    close_source: CloseSource
+    thread_safety: ThreadSafety
+    link_closure: LinkClosure
 }
 
 // An opaque pointer shape: the incomplete struct (or `void`) it names and
@@ -151,14 +151,14 @@ struct OpaqueCTypeShape {
 }
 
 // Opaque handle discovery over one C header, consumed by the C binder.
-pub struct OpaqueHandleDiscovery {
-    pub handles: [HandleFact]
+struct OpaqueHandleDiscovery {
+    handles: [HandleFact]
     // Opaque typedefs that cannot safely become owned handles, with the
     // reason, so the binder reports them instead of pretending they are
     // scalars.
-    pub unresolved: [(typedef_name: String, reason: String)]
-    opaque: [String: OpaqueHandleShape]
-    handle_indices: [String: Int]
+    unresolved: [(typedef_name: String, reason: String)]
+    priv opaque: [String: OpaqueHandleShape]
+    priv handle_indices: [String: Int]
 
     // Discover opaque struct-pointer typedefs and resolve their ownership
     // facts. `source` is the original header or the binder's cleaned
@@ -203,7 +203,7 @@ pub struct OpaqueHandleDiscovery {
             if overlay.close_for(typedef_name, jet_name, shape.struct_tag) == {
                 .Val(symbol) -> {
                     if !pkg_opaque_is_ident(symbol) {
-                        &unresolved.push((typedef_name: ~typedef_name, reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier"))
+                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "overlay close symbol `{symbol}` for opaque handle `{typedef_name}` is not a valid C identifier"))
                         next
                     }
                     close = symbol
@@ -211,11 +211,11 @@ pub struct OpaqueHandleDiscovery {
                 }
                 .None -> {
                     if candidates.len() == 0 {
-                        &unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping"))
+                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "opaque handle `{typedef_name}` has no conventional close function; provide an overlay close mapping"))
                         next
                     }
                     if candidates.len() > 1 {
-                        &unresolved.push((typedef_name: ~typedef_name, reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"))
+                        &unresolved.push((typedef_name: typedef_name.copy(), reason: "opaque handle `{typedef_name}` has ambiguous conventional close functions ({candidates.join(", ")}); provide an overlay close mapping"))
                         next
                     }
                     close = candidates[0]
@@ -228,7 +228,7 @@ pub struct OpaqueHandleDiscovery {
                 close: close,
                 close_source: close_source,
                 thread_safety: safety,
-                link_closure: ~links
+                link_closure: links.copy()
             })
         }
         handle_indices := [String: Int]{}
@@ -265,7 +265,7 @@ pub struct OpaqueHandleDiscovery {
     // One empty nominal struct per handle, then a blank line.
     fn render_type_declarations(self) -> String Never! {
         lines := [String]{}
-        loop handle in self.handles -> &lines.push("pub struct {handle.jet_name} {{}}\n")
+        loop handle in self.handles -> &lines.push("struct {handle.jet_name} {{}}\n")
         if lines.len() == 0 -> return ""
         "{lines.join("")}\n"
     }
@@ -280,7 +280,7 @@ fn pkg_opaque_sorted_keys(keys: [String]) -> [String] Never! {
 // `name_t` names its handle `name`.
 fn pkg_opaque_handle_name_seed(typedef_name: String) -> String Never! {
     if typedef_name.ends_with("_t") && typedef_name != "_t" -> return typedef_name.removesuffix("_t")
-    ~typedef_name
+    typedef_name.copy()
 }
 
 // Whether `function` is `<stem><verb>`, `<stem>_<verb>`, or `<verb>_<stem>`
@@ -307,7 +307,7 @@ fn pkg_opaque_conventional_close_name(function: String, typedef_name: String, st
     wanted :: function.to_lower()
     loop stem in stems {
         loop verb in OPAQUE_HANDLE_CLOSE_VERBS {
-            forms :: [String]{[String]{~stem, ~verb}.join(""), "{stem}_{verb}", "{verb}_{stem}"}
+            forms :: [String]{[String]{stem.copy(), verb.copy()}.join(""), "{stem}_{verb}", "{verb}_{stem}"}
             if forms.contains(wanted) -> return true
         }
     }
@@ -529,7 +529,7 @@ fn pkg_opaque_parse_type_shape(raw: String) -> OpaqueCTypeShape Never! {
             else -> {
                 if pkg_opaque_is_ident(token) {
                     if previous_struct {
-                        shape.struct_tag = Val(~token)
+                        shape.struct_tag = Val(token.copy())
                         previous_struct = false
                     }
                     shape.base = Val(token)
@@ -637,20 +637,20 @@ fn pkg_opaque_strip_comments_and_directives(text: String) -> String Never! {
 fn pkg_opaque_without_trailing_cr(line: String) -> String Never! {
     bytes :: line.bytes()
     if bytes.len() > 0 && Int.from_u8(bytes[bytes.len() - 1]) == 13 -> return pkg_bytes_text(bytes, 0, bytes.len() - 1)
-    ~line
+    line.copy()
 }
 
 // `preferred`, or `preferred_2`, `preferred_3`, … when taken.
 fn pkg_opaque_unique_name(used: &[String], preferred: String) -> String Never! {
     if !used.contains(preferred) {
-        &used.push(~preferred)
-        return ~preferred
+        &used.push(preferred.copy())
+        return preferred.copy()
     }
     suffix := 2
     loop {
         candidate :: "{preferred}_{suffix}"
         if !used.contains(candidate) {
-            &used.push(~candidate)
+            &used.push(candidate.copy())
             return candidate
         }
         suffix += 1

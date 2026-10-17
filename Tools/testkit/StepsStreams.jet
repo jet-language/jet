@@ -1,0 +1,301 @@
+use core.text as strtext
+use core.encoding.json as json
+
+fn kit_steps_relation_label(reference: String) -> String {
+    if reference.ends_with(".stdout") || reference.ends_with(".stderr") -> return kit_steps_byte_slice(reference, 0, reference.count_bytes() - 7)
+    reference.copy()
+}
+
+fn kit_steps_relation_stream(reference: String, fallback: String) -> String {
+    if reference.ends_with(".stdout") -> return "stdout"
+    if reference.ends_with(".stderr") -> return "stderr"
+    fallback.copy()
+}
+
+fn kit_steps_known_relation(plan: KitPlan, reference: String, before: Int) -> Bool {
+    kit_steps_known_label(plan, kit_steps_relation_label(reference), before)
+}
+
+fn kit_steps_subject(selector: String) -> String {
+    kit_steps_byte_slice(selector, 0, kit_steps_byte_index(selector, ".") ?? selector.count_bytes())
+}
+
+fn kit_steps_subject_transform(selector: String) -> String {
+    dot :: kit_steps_byte_index(selector, ".") ?? return ""
+    kit_steps_byte_slice(selector, dot + 1, selector.count_bytes())
+}
+
+fn kit_steps_subject_valid(selector: String) -> Bool {
+    subject :: kit_steps_subject(selector)
+    known :: kit_expect_named(["stdout", "stderr", "stdout+stderr", "stderr+stdout", "stdout|stderr", "stderr|stdout", "file", "file?", "files", "machine"], subject) || (subject.starts_with("cap:") && subject.len() > 4)
+    known && kit_steps_transform_valid(kit_steps_subject_transform(selector))
+}
+
+fn kit_steps_stream_assertion(key: String, original: String) -> KitAssertion? {
+    value :: kit_steps_body(original)
+    tokens :: kit_steps_tokens(value) ?? return None
+    subject :: kit_steps_subject(key)
+    transform :: kit_steps_subject_transform(key)
+    if !kit_steps_subject_valid(key) || (transform != "" && !kit_steps_reason(original)) -> return None
+    offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
+    if tokens.len() <= offset -> return None
+    stream :: if offset == 1 -> "file" else -> subject
+    path :: if offset == 1 -> tokens[0].text else -> ""
+    if offset == 1 && !kit_steps_relative_path(path) -> return None
+    mode := tokens[offset].text
+    if stream == "file" && mode == "first" {
+        inner :: "{kit_steps_byte_slice(original, 0, tokens[offset].start)}{kit_steps_byte_slice(original, tokens[offset].end, original.count_bytes())}"
+        assertion := kit_steps_stream_assertion(key, inner) ?? return None
+        if assertion.file_first -> return None
+        assertion.file_first = true
+        return Val(assertion)
+    }
+    data := ""
+    extra := ""
+    alternatives := [String]{}
+    literal := false
+    rhs_transform := ""
+    arity :: tokens.len() - offset
+    if mode == "is-f64" || mode == "f64" -> return kit_steps_f64_assertion(stream, path, transform, original, offset)
+    if kit_steps_batch_form(mode) -> return kit_steps_batch_assertion(stream, path, transform, original, offset)
+    if stream == "file" && mode == "same-as" {
+        if arity != 2 -> return None
+        data = tokens[offset + 1].text
+        if !data.starts_with("{{cap:") || !data.ends_with("}}") -> return None
+        return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data})
+    }
+    if stream == "file" && mode == "names" {
+        if arity < 3 || (tokens[offset + 1].text != "=" && tokens[offset + 1].text != "==") -> return None
+        extra = tokens[offset + 1].text
+        data = if extra == "==" -> tokens[offset + 2].text else -> kit_steps_byte_slice(value, tokens[offset + 2].start, value.count_bytes()).trim().copy()
+        if extra == "==" {
+            if arity != 3 || !kit_steps_relative_path(data) -> return None
+        } else if kit_steps_string_array(data) == None -> return None
+        return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra})
+    }
+    if stream == "file" && (mode == "size" || mode == "mode" || mode == "permissions" || mode == "sha256") {
+        if arity != 3 || !kit_expect_named(["=", ">=", "<=", ">", "<"], tokens[offset + 1].text) -> return None
+        extra = tokens[offset + 1].text
+        data = tokens[offset + 2].text
+        token_value :: data.starts_with("{{cap:") && data.ends_with("}}")
+        if mode == "mode" || mode == "permissions" {
+            if extra != "=" || (!token_value && mode == "mode" && kit_steps_octal(data) == None) -> return None
+        } else if mode == "sha256" {
+            if extra != "=" || (!token_value && data.len() != 64) -> return None
+        } else if !token_value && (Int.parse(data) ?? -1) < 0 -> return None
+        return Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra, optional_file: subject == "file?"})
+    }
+    if kit_expect_named(["empty", "nonempty", "exists", "absent", "is-file", "is-dir", "!is-file", "!is-dir", "is-symlink", "not-symlink"], mode) {
+        if arity != 1 || (stream != "file" && mode != "empty" && mode != "nonempty") -> return None
+        if mode == "nonempty" && !kit_steps_reason(original) -> return None
+    } else if mode == "~" || mode == "!~" {
+        if arity < 2 || !kit_steps_reason(original) -> return None
+        if arity == 2 -> data = tokens[offset + 1].text
+        else {
+            raw :: kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim().copy()
+            if raw.starts_with("\"") || raw.starts_with("'") -> return None
+            data = raw
+        }
+    } else if mode == "~any" {
+        if arity < 2 || !kit_steps_reason(original) -> return None
+        loop token in tokens.slice(offset + 1, tokens.len()) -> &alternatives.push(token.text)
+    } else if mode == "one-of" {
+        if arity < 3 || !kit_steps_reason(original) -> return None
+        data = kit_steps_byte_slice(value, tokens[offset + 1].start, value.count_bytes()).trim().copy()
+    } else if mode == "line" {
+        if (arity != 3 && arity != 5) || tokens[offset + 1].text != "^=" || !kit_steps_reason(original) -> return None
+        data = tokens[offset + 2].text
+        if arity == 5 {
+            if tokens[offset + 3].text != "~" -> return None
+            extra = tokens[offset + 4].text
+        }
+    } else if mode == "from" || mode == "count" {
+        if arity != 4 || tokens[offset + 2].text != "=" || !kit_steps_reason(original) -> return None
+        data = tokens[offset + 1].text
+        extra = tokens[offset + 3].text
+        if mode == "count" && (data == "" || (Int.parse(extra) ?? -1) < 0) -> return None
+    } else if mode == "lines" {
+        if arity != 3 || tokens[offset + 1].text != "=" || !kit_steps_reason(original) -> return None
+        data = tokens[offset + 2].text
+        if !kit_steps_count_target_valid(data) -> return None
+    } else if mode == "first-line" {
+        if arity != 5 || tokens[offset + 1].text != "~" || !kit_steps_reason(original) -> return None
+        comparison :: tokens[offset + 3].text
+        if comparison != "=" && comparison != "==" -> return None
+        mode = "first-line{comparison}"
+        extra = tokens[offset + 2].text
+        data = tokens[offset + 4].text
+    } else if mode == "before" {
+        if arity != 3 || !kit_steps_reason(original) -> return None
+        data = tokens[offset + 1].text
+        extra = tokens[offset + 2].text
+    } else {
+        if !kit_expect_named(["=", "==", "!=", "~", "!~", "^=", "~i", "!~i"], mode) -> return None
+        explicit_path :: arity == 3 && tokens[offset + 1].text == "path"
+        if arity != 2 && !explicit_path -> return None
+        rhs :: tokens[offset + if explicit_path -> 2 else -> 1]
+        data = rhs.text
+        literal = !explicit_path && (value.bytes()[rhs.start] == (U8{34}) || value.bytes()[rhs.start] == (U8{39}))
+        if explicit_path && mode != "=" && mode != "!=" -> return None
+        if !literal && mode == "=" && data.ends_with(".trim") {
+            rhs_transform = "trim"
+            data = kit_steps_byte_slice(data, 0, data.count_bytes() - 5)
+        }
+        if kit_expect_named(["~", "!~", "^=", "~i", "!~i"], mode) && !kit_steps_reason(original) -> return None
+        if (mode == "~i" || mode == "!~i") && kit_steps_ascii_lower(data) != data -> return None
+        if mode == "!=" && stream != "file" && arity != 2 -> return None
+        if !literal && (mode == "==" || mode == "!=") && stream == "file" && !kit_steps_relative_path(data) -> return None
+    }
+    // #4814: jet fmt adds a trailing comma inside Val(...) here; keep this layout
+    Val(KitAssertion{stream: stream, path: path, mode: mode, value: data, extra: extra,
+        optional_file: subject == "file?", transform: transform, alternatives: alternatives, rhs_literal: literal, rhs_transform: rhs_transform})
+}
+
+fn kit_steps_ascii_lower(text: String) -> String {
+    bytes := text.bytes()
+    loop i in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[i])
+        if byte >= 65 && byte <= 90 -> bytes[i] = U8{byte + 32}
+    }
+    String.from_bytes(bytes) ?? panic("ASCII case conversion changed UTF-8")
+}
+
+fn kit_steps_occurrences(text: String, needle: String) -> Int {
+    if needle == "" -> return 0
+    count := 0
+    cursor := 0
+    loop cursor <= text.count_bytes() {
+        found :: kit_steps_byte_index(kit_steps_byte_slice(text, cursor, text.count_bytes()), needle) ?? break
+        count += 1
+        cursor += found + needle.count_bytes()
+    }
+    count
+}
+
+fn kit_steps_line(text: String, prefix: String, substring: String) -> String? {
+    kit_steps_line_value(text, prefix, substring, true)
+}
+
+// Like Rust str::lines: LF and CRLF end lines; a final bare CR is data.
+fn kit_steps_line_value(text: String, prefix: String, substring: String, tail: Bool) -> String? {
+    bytes :: text.bytes()
+    start := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+        content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
+        line :: String.from_bytes(bytes.slice(start, content_end)) ?? panic("line span is not UTF-8")
+        if line.starts_with(prefix) && line.contains(substring) -> return Val(if tail -> kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()) else -> line.copy())
+        start = end + 1
+    }
+    None
+}
+
+
+fn kit_steps_count_target_valid(target: String) -> Bool {
+    if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return true
+    star :: kit_steps_byte_index(target, "*") ?? return false
+    (Int.parse(kit_steps_byte_slice(target, 0, star)) ?? -1) >= 0 && kit_steps_byte_slice(target, star + 1, target.count_bytes()) != ""
+}
+
+fn kit_steps_count_label(target: String) -> String {
+    star :: kit_steps_byte_index(target, "*") ?? return ""
+    if kit_steps_numeric(kit_steps_json_preview(target)) != None -> return ""
+    kit_steps_byte_slice(target, star + 1, target.count_bytes())
+}
+
+fn kit_steps_lines(text: String) -> Int {
+    if text == "" -> return 0
+    count :: kit_steps_occurrences(text, "\n")
+    if text.ends_with("\n") -> count else -> count + 1
+}
+
+fn kit_steps_select_stream(stdout: String, stderr: String, subject: String) -> String {
+    if subject == "stderr" -> return stderr.copy()
+    if subject == "stdout+stderr" -> return "{stdout}{stderr}"
+    if subject == "stderr+stdout" -> return "{stderr}{stdout}"
+    if subject == "machine" -> return if stdout.trim_start().starts_with("{{") -> stdout.trim().copy() else -> stderr.trim().copy()
+    stdout.copy()
+}
+
+fn kit_steps_bytes_search(bytes: [U8], needle: [U8], start: Int, end: Int, insensitive: Bool) -> Int? {
+    cursor := start
+    loop cursor + needle.len() <= end {
+        matches := true
+        loop i in 0..<needle.len() {
+            left := Int.from_u8(bytes[cursor + i])
+            right := Int.from_u8(needle[i])
+            if insensitive {
+                if left >= 65 && left <= 90 -> left += 32
+                if right >= 65 && right <= 90 -> right += 32
+            }
+            if left != right {
+                matches = false
+                break
+            }
+        }
+        if matches -> return Val(cursor)
+        cursor += 1
+    }
+    None
+}
+
+// Raw file predicates operate on bytes, not on a lossy or fallible UTF-8 view.
+fn kit_steps_file_predicate(bytes: [U8], mode: String, value: String, extra: String, alternatives: [String]) -> Bool {
+    if mode == "empty" || mode == "nonempty" -> return (bytes.len() == 0) == (mode == "empty")
+    needle :: value.bytes()
+    if mode == "^=" -> return needle.len() <= bytes.len() && (kit_steps_bytes_search(bytes, needle, 0, needle.len(), false) ?? -1) == 0
+    if mode == "~" || mode == "~i" || mode == "!~" || mode == "!~i" {
+        found :: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), mode == "~i" || mode == "!~i")
+        return (found != None) == (mode == "~" || mode == "~i")
+    }
+    if mode == "~any" {
+        loop alternative in alternatives {
+            if kit_steps_bytes_search(bytes, alternative.bytes(), 0, bytes.len(), false) != None -> return true
+        }
+        return false
+    }
+    if mode == "count" {
+        if needle.len() == 0 -> return false
+        count := 0
+        cursor := 0
+        loop cursor <= bytes.len() {
+            at :: kit_steps_bytes_search(bytes, needle, cursor, bytes.len(), false) ?? break
+            count += 1
+            cursor = at + needle.len()
+        }
+        return count == (Int.parse(extra) ?? -1)
+    }
+    if mode == "before" {
+        left :: kit_steps_bytes_search(bytes, needle, 0, bytes.len(), false) ?? return false
+        right :: kit_steps_bytes_search(bytes, extra.bytes(), 0, bytes.len(), false) ?? return false
+        return left < right
+    }
+    tail :: extra.bytes()
+    start := 0
+    loop start < bytes.len() {
+        end := start
+        loop end < bytes.len() && bytes[end] != (U8{10}) -> end += 1
+        content_end :: if end < bytes.len() && end > start && bytes[end - 1] == (U8{13}) -> end - 1 else -> end
+        if (kit_steps_bytes_search(bytes, needle, start, content_end, false) ?? -1) == start && kit_steps_bytes_search(bytes, tail, start, content_end, false) != None -> return true
+        start = end + 1
+    }
+    false
+}
+
+fn kit_steps_string_array(text: String) -> [String]? {
+    tree :: json.parse(text) ?? return None
+    if tree == {
+        .Array(items) -> {
+            result := [String]{}
+            loop item in items {
+                if item == {
+                    .Text(value) -> &result.push(value)
+                    else -> return None
+                }
+            }
+            return Val(result)
+        }
+        else -> return None
+    }
+}

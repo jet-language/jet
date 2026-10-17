@@ -1,6 +1,24 @@
 // One allocation-free runtime report renderer for every execution target.
 use core::fmt::{self, Write};
 
+/// Write untrusted terminal text with the canonical display-only escaping.
+pub fn jet_write_terminal_text(out: &mut dyn fmt::Write, value: &str) -> fmt::Result {
+    for character in value.chars() {
+        match character {
+            '\n' => out.write_str("\\n")?,
+            '\r' => out.write_str("\\r")?,
+            '\t' => out.write_str("\\t")?,
+            character if character.is_control()
+                || matches!(character, '\u{2028}' | '\u{2029}') =>
+            {
+                write!(out, "\\u{{{:04x}}}", character as u32)?;
+            }
+            character => out.write_char(character)?,
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct JetRuntimeDiagnosticRow {
     pub code: &'static str,

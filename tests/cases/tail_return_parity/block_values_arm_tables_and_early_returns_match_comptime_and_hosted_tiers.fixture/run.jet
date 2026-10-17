@@ -1,0 +1,63 @@
+
+fn label(value: Int) -> String Never! {
+    if value == {
+        1 -> { "one" }
+        else -> { "other" }
+    }
+}
+
+fn early(flag: Bool) -> String Never! {
+    if flag { return "early" }
+    "late"
+}
+
+enum Packet {
+    Data(Int)
+    Retry(Int)
+    Empty
+    Ignore(Int)
+}
+
+fn packet_value(packet: Packet) -> Int Never! {
+    if packet == {
+        .Data(10..19) -> { 100 }
+        .Data(value) | .Retry(value) -> {
+            if value == 0 -> return 9
+            if value > 0 -> { value + 1 } else -> { -1 }
+        }
+        .Ignore(_) -> { 0 }
+        .Empty -> { 0 }
+        else -> { -2 }
+    }
+}
+
+EXPECTED_ONE :: prep { label(1) }
+EXPECTED_OTHER :: prep { label(2) }
+EXPECTED_EARLY :: prep { early(true) }
+EXPECTED_LATE :: prep { early(false) }
+EXPECTED_RANGE :: prep { packet_value(Packet.Data(12)) }
+EXPECTED_OR :: prep { packet_value(Packet.Retry(2)) }
+EXPECTED_NESTED_RETURN :: prep { packet_value(Packet.Data(0)) }
+EXPECTED_EMPTY :: prep { packet_value(Packet.Empty) }
+EXPECTED_WILDCARD :: prep { packet_value(Packet.Ignore(17)) }
+
+fn run() {
+    print(EXPECTED_ONE)
+    print(EXPECTED_OTHER)
+    print(EXPECTED_EARLY)
+    print(EXPECTED_LATE)
+    print(label(1))
+    print(label(2))
+    print(early(true))
+    print(early(false))
+    print(EXPECTED_RANGE)
+    print(EXPECTED_OR)
+    print(EXPECTED_NESTED_RETURN)
+    print(EXPECTED_EMPTY)
+    print(EXPECTED_WILDCARD)
+    print(packet_value(Packet.Data(12)))
+    print(packet_value(Packet.Retry(2)))
+    print(packet_value(Packet.Data(0)))
+    print(packet_value(Packet.Empty))
+    print(packet_value(Packet.Ignore(17)))
+}

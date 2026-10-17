@@ -1,0 +1,17 @@
+# Port of tests/pkg.rs:1802-1845; sources/expanded manifest verbatim.
+# Loader carrier assertions mapped to public structure JSON, preserving first ImportEdge selection.
+# JSON schema grounded in Source/CmdStructure.rs267-347; kind name Names.rs117.
+fixture: fixtures/import-denied
+env: NO_COLOR=1
+step: jet inspect structure ui.jet
+exit: nonzero
+stdout: ~ "Structure.ImportEdge" # original predicate
+stdout: ~ "app.ui -> app.db" # original predicate
+stdout: ~ "denied" # original predicate
+stdout: ~ "manifest rule edit" # original predicate
+stderr: ~ "E0619" # original predicate
+step: jet inspect structure ui.jet --json
+exit: nonzero
+json: stdout doc $.structure.facts[?kind="import-edge"][0].subject = "app.ui -> app.db"
+json: stdout doc $.structure.facts[?kind="import-edge"][0].status = "denied"
+json: stdout doc $.structure.facts[?kind="import-edge"][0].gate = "manifest rule edit"

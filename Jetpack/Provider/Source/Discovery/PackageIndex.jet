@@ -9,24 +9,24 @@ DISCOVERY_INDEX_DIR :: prep { "discovery" }
 DISCOVERY_INDEX_FILE :: prep { "index.jsonl" }
 
 // One documented configuration field of an indexed package.
-pub struct PackageOptionField {
-    pub name: String
-    pub default: String
-    pub docs: String
+struct PackageOptionField {
+    name: String
+    default: String
+    docs: String
 }
 
 // One indexed package and what is known about it.
-pub struct PackageIndexEntry {
-    pub source: String
-    pub name: String
-    pub reference: String
-    pub version: String
-    pub platforms: [String]
-    pub docs: String
-    pub provenance: String
-    pub tier: String
-    pub gate_status: String
-    pub options: [PackageOptionField]
+struct PackageIndexEntry {
+    source: String
+    name: String
+    reference: String
+    version: String
+    platforms: [String]
+    docs: String
+    provenance: String
+    tier: String
+    gate_status: String
+    options: [PackageOptionField]
 
     // `source.name`.
     fn display_ref(self) -> String Never! {
@@ -67,8 +67,8 @@ pub struct PackageIndexEntry {
 }
 
 // The local package index, ordered by source then name.
-pub struct PackageIndex {
-    pub packages: [PackageIndexEntry]
+struct PackageIndex {
+    packages: [PackageIndexEntry]
 
     fn empty() -> PackageIndex Never! {
         PackageIndex{packages: [PackageIndexEntry]{}}
@@ -174,13 +174,13 @@ fn env_discovery_score(record: PackageIndexEntry, q: String) -> Int? Never! {
 }
 
 // `.jet/discovery/index.jsonl`.
-pub fn env_discovery_index_path(project_dir: String) -> String Never! {
+fn env_discovery_index_path(project_dir: String) -> String Never! {
     files.join(files.join(pkg_managed_dir(project_dir), DISCOVERY_INDEX_DIR), DISCOVERY_INDEX_FILE)
 }
 
 // The project index, or None when it does not exist. A malformed line is an
 // error naming the file and line.
-pub fn env_discovery_load(project_dir: String) -[FS]> PackageIndex? ProviderReason! {
+fn env_discovery_load(project_dir: String) -[FS]> PackageIndex? ProviderReason! {
     path :: env_discovery_index_path(project_dir)
     if !files.exists(path) -> return Ok(None)
     text :: files.read(path) ?? return Err(ProviderReason{message: "{err}"})
@@ -199,7 +199,7 @@ pub fn env_discovery_load(project_dir: String) -[FS]> PackageIndex? ProviderReas
 }
 
 // Replace the project index under the project lock.
-pub fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderReason! -[FS, Env]> {
+fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderReason! -[FS, Env, Time]> {
     path :: env_discovery_index_path(project_dir)
     project_lock :: env_runtime_project_lock(project_dir, "discovery-index") ?? return Err(ProviderReason{message: "{err}"})
     files.create_dir_all(files.dirname(path)) ?? return Err(ProviderReason{message: "{err}"})
@@ -210,7 +210,7 @@ pub fn env_discovery_write(project_dir: String, index: PackageIndex) ProviderRea
 
 // Declared refs, versioned from an offline fixture or a hangar record when
 // one exists.
-pub fn env_discovery_merge_refs(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) Never! -[FS]> {
+fn env_discovery_merge_refs(index: &PackageIndex, refs: [RefSpec], fixtures: String?, store_entries: [StoreEntry]) Never! -[FS]> {
     loop spec in refs {
         found :: env_discovery_fixture_version(fixtures, spec) ?? env_discovery_store_version(store_entries, spec)
         version :: if found == {
@@ -226,7 +226,7 @@ pub fn env_discovery_merge_refs(index: &PackageIndex, refs: [RefSpec], fixtures:
 }
 
 // Realized hangar records, published under their canonical source spelling.
-pub fn env_discovery_merge_store_entries(index: &PackageIndex, store_entries: [StoreEntry]) Never! {
+fn env_discovery_merge_store_entries(index: &PackageIndex, store_entries: [StoreEntry]) Never! {
     loop entry in store_entries {
         canonical :: pkg_canonical_locked_ref(entry.reference)
         source := ""
@@ -265,7 +265,7 @@ pub fn env_discovery_merge_store_entries(index: &PackageIndex, store_entries: [S
 }
 
 // `Pkg.adapt(...)` adapter packages.
-pub fn env_discovery_merge_adapters(index: &PackageIndex, adapters: [AdapterPlan]) Never! {
+fn env_discovery_merge_adapters(index: &PackageIndex, adapters: [AdapterPlan]) Never! {
     loop adapter in adapters {
         &index.add_package(PackageIndexEntry{
             source: "adapt",
@@ -285,7 +285,7 @@ pub fn env_discovery_merge_adapters(index: &PackageIndex, adapters: [AdapterPlan
 // Registry packages from the project lock, the resolver's source of truth,
 // so `inspect info` never infers a tier from a provider label or a stale
 // discovery record.
-pub fn env_discovery_merge_lock(index: &PackageIndex, lock: LockFile) Never! {
+fn env_discovery_merge_lock(index: &PackageIndex, lock: LockFile) Never! {
     loop package in lock.packages {
         if package.source == {
             .Registry(registry, reference, _, _, _, authority, tier, gate_status) -> {
@@ -308,7 +308,7 @@ pub fn env_discovery_merge_lock(index: &PackageIndex, lock: LockFile) Never! {
 }
 
 // The dev-service fields every indexed package documents.
-pub fn env_discovery_service_option_fields() -> [PackageOptionField] Never! {
+fn env_discovery_service_option_fields() -> [PackageOptionField] Never! {
     [PackageOptionField]{
         PackageOptionField{name: "enable", default: "required", docs: "Turn the service on or off."},
         PackageOptionField{name: "ports", default: "[]", docs: "TCP ports the service listens on."},
@@ -322,13 +322,13 @@ pub fn env_discovery_service_option_fields() -> [PackageOptionField] Never! {
     }
 }
 
-pub fn env_discovery_search_json(records: [PackageIndexEntry]) -> String Never! {
-    items := [DataTree]{}
+fn env_discovery_search_json(records: [PackageIndexEntry]) -> String Never! {
+    items := [Dyn]{}
     loop record in records -> &items.push(env_discovery_record_tree(record))
-    pkg_json_render(DataTree.Object(["packages": DataTree.Array(items)]))
+    pkg_json_render(Dyn.Object(["packages": Dyn.Array(items)]))
 }
 
-pub fn env_discovery_info_json(record: PackageIndexEntry) -> String Never! {
+fn env_discovery_info_json(record: PackageIndexEntry) -> String Never! {
     env_discovery_record_to_json(record)
 }
 
@@ -379,7 +379,7 @@ fn env_discovery_provider_output_path(text: String) -> String? Never! {
     results :: pkg_json_array(value) ?? return None
     if results.len() == 0 -> return None
     first :: pkg_json_object(results[0]) ?? return None
-    outputs :: pkg_json_object(first.get("outputs") ?? DataTree.Null) ?? return None
+    outputs :: pkg_json_object(first.get("outputs") ?? Dyn.Null) ?? return None
     output :: outputs.get("bin") ?? (outputs.get("out") ?? return None)
     pkg_json_text(output)
 }
@@ -443,23 +443,23 @@ fn env_discovery_split_query(query: String) -> (source: String?, name: String) N
     (source: None, name: query)
 }
 
-fn env_discovery_record_tree(record: PackageIndexEntry) -> DataTree Never! {
-    options := [DataTree]{}
+fn env_discovery_record_tree(record: PackageIndexEntry) -> Dyn Never! {
+    options := [Dyn]{}
     loop option in record.options {
-        &options.push(DataTree.Object(["name": DataTree.Text(option.name), "default": DataTree.Text(option.default), "docs": DataTree.Text(option.docs)]))
+        &options.push(Dyn.Object(["name": Dyn.Text(option.name), "default": Dyn.Text(option.default), "docs": Dyn.Text(option.docs)]))
     }
-    DataTree.Object([
-        "source": DataTree.Text(record.source),
-        "name": DataTree.Text(record.name),
-        "reference": DataTree.Text(record.reference),
-        "version": DataTree.Text(record.version),
+    Dyn.Object([
+        "source": Dyn.Text(record.source),
+        "name": Dyn.Text(record.name),
+        "reference": Dyn.Text(record.reference),
+        "version": Dyn.Text(record.version),
         "platforms": pkg_json_texts(record.platforms),
-        "docs": DataTree.Text(record.docs),
-        "provenance": DataTree.Text(record.provenance),
-        "tier": DataTree.Text(record.tier),
-        "gate_status": DataTree.Text(record.gate_status),
-        "maintainer_liveness": DataTree.Text(record.maintainer_liveness()),
-        "options": DataTree.Array(options),
+        "docs": Dyn.Text(record.docs),
+        "provenance": Dyn.Text(record.provenance),
+        "tier": Dyn.Text(record.tier),
+        "gate_status": Dyn.Text(record.gate_status),
+        "maintainer_liveness": Dyn.Text(record.maintainer_liveness()),
+        "options": Dyn.Array(options),
     ])
 }
 
@@ -467,7 +467,7 @@ fn env_discovery_record_to_json(record: PackageIndexEntry) -> String Never! {
     pkg_json_render(env_discovery_record_tree(record))
 }
 
-fn env_discovery_record_from_json(value: DataTree) -> PackageIndexEntry ProviderReason! {
+fn env_discovery_record_from_json(value: Dyn) -> PackageIndexEntry ProviderReason! {
     object :: provider_json_object(value)
     Ok(PackageIndexEntry{
         source: env_discovery_required_text(object, "source"),
@@ -483,18 +483,18 @@ fn env_discovery_record_from_json(value: DataTree) -> PackageIndexEntry Provider
     })
 }
 
-fn env_discovery_required_text(object: [String: DataTree], key: String) -> String ProviderReason! {
+fn env_discovery_required_text(object: [String: Dyn], key: String) -> String ProviderReason! {
     value :: object.get(key) ?? return Err(ProviderReason{message: "missing key `{key}`"})
     provider_json_string(value)
 }
 
-fn env_discovery_optional_text(object: [String: DataTree], key: String, fallback: String) -> String Never! {
+fn env_discovery_optional_text(object: [String: Dyn], key: String, fallback: String) -> String Never! {
     value :: object.get(key) ?? return fallback
     pkg_json_text(value) ?? fallback
 }
 
-fn env_discovery_string_array(value: DataTree?) -> [String] Never! {
-    items :: pkg_json_array(value ?? DataTree.Null) ?? return [String]{}
+fn env_discovery_string_array(value: Dyn?) -> [String] Never! {
+    items :: pkg_json_array(value ?? Dyn.Null) ?? return [String]{}
     out := [String]{}
     loop item in items {
         if pkg_json_text(item) == {
@@ -505,8 +505,8 @@ fn env_discovery_string_array(value: DataTree?) -> [String] Never! {
     out
 }
 
-fn env_discovery_option_array(value: DataTree?) -> [PackageOptionField] Never! {
-    items :: pkg_json_array(value ?? DataTree.Null) ?? return [PackageOptionField]{}
+fn env_discovery_option_array(value: Dyn?) -> [PackageOptionField] Never! {
+    items :: pkg_json_array(value ?? Dyn.Null) ?? return [PackageOptionField]{}
     out := [PackageOptionField]{}
     loop item in items {
         object :: pkg_json_object(item) ?? next

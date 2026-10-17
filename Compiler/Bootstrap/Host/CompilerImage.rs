@@ -599,7 +599,7 @@ fn decode_envelope_prefix(
     })
 }
 
-fn encode_identity(identity: &MirExecutionIdentity) -> Result<Vec<u8>, CompilerImageError> {
+pub(crate) fn encode_identity(identity: &MirExecutionIdentity) -> Result<Vec<u8>, CompilerImageError> {
     let mut writer = CompilerImageMetadataWriter::new();
     writer.write_u16(identity.schema_version);
     let artifact = &identity.artifact;
@@ -682,6 +682,7 @@ fn write_u64_values(
 fn mir_program_field_differences(native: &MirProgram, restored: &MirProgram) -> Vec<String> {
     let MirProgram {
         cffi,
+        native_pack,
         schema_version,
         package_identity,
         facts,
@@ -712,6 +713,7 @@ fn mir_program_field_differences(native: &MirProgram, restored: &MirProgram) -> 
     } = native;
     let mut diff = DebugFieldDiff::default();
     diff.value("cffi".into(), cffi, &restored.cffi);
+    diff.value("native_pack".into(), native_pack, &restored.native_pack);
     diff.value("schema_version".into(), schema_version, &restored.schema_version);
     diff.value("package_identity".into(), package_identity, &restored.package_identity);
     diff.value("facts".into(), facts, &restored.facts);

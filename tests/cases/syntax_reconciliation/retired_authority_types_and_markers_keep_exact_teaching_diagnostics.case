@@ -1,0 +1,21 @@
+# Port of tests/syntax_reconciliation.rs:807-837; exact original sources and predicates.
+# Lexer-success/parser-item subclaims remain compiler-lib where separate from CLI diagnostics.
+fixture: fixtures/retired_authority_types_and_markers_keep_exact_teaching_diagnostics
+step: jet inspect compiler check Ability.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0119"][?what~="`Ability` is retired"] #>= 1 # original correlated code+what existential
+step: jet inspect compiler check Abilities.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0119"][?what~="`Abilities` is retired"] #>= 1 # original correlated code+what existential
+step: jet inspect compiler check Capability.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0119"][?what~="`Capability` is retired"] #>= 1 # original correlated code+what existential
+step: jet inspect compiler check Caps.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0119"][?what~="`Caps` is retired"] #>= 1 # original correlated code+what existential
+step: jet inspect compiler parse marker_Abilities.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0927"][?what~="`#Abilities` is retired"] #>= 1 # original correlated code+what existential
+step: jet inspect compiler parse marker_Caps.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics[?code="E0927"][?what~="`#Caps` is retired"] #>= 1 # original correlated code+what existential

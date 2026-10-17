@@ -1,0 +1,191 @@
+// NetHTTP.rs:2718-2941: UDP provider policy over the native FD72 socket rail.
+// Socket arguments are borrowed canonical Socket56, never host/port records.
+// Each operation preserves the original earliest ambient/socket deadline and
+// scheduler wait ordering; locks are held only by one nonblocking syscall.
+fn net_udp_open(value: I64, operation: I64, error: I64) -> Bool {
+    state :: jet_udp_socket_fd_raw(value)
+    fd_lock(state)
+    closed :: fd_word(state, I64{16}) != I64{0}
+    fd_unlock(state)
+    if closed {
+        _ := net_route_fail_take(NET_ERROR_CLOSED, operation, I64{0}, net_route_message(operation, rt_static_text(" failed: socket is closed")), I64{0}, error)
+        return false
+    }
+    true
+}
+fn net_udp_deadline(value: I64, save: I64) {
+    state :: net_word(value, I64{0})
+    sync_mutex_lock(state + I64{8})
+    milliseconds :: net_word(state, I64{24})
+    sync_mutex_unlock(state + I64{8})
+    if (milliseconds < I64{0}) {
+        // An unset socket timeout does not create an artificial deadline.
+        sync_store(save, if jet_ctx_deadline_present() -> I64{1} else -> I64{0})
+        sync_store(save + I64{8}, jet_ctx_deadline_ms())
+    } else { net_route_deadline_push(milliseconds, save) }
+}
+fn net_udp_wait(state: I64, reading: Bool, operation: I64, scratch: I64, error: I64) -> Bool {
+    remaining :: if jet_ctx_deadline_present() -> jet_deadline_remaining_ms() else -> I64{-1}
+    if (jet_ctx_deadline_present() && remaining <= I64{0}) {
+        _ := net_route_timeout(operation, error)
+        return false
+    }
+    // Match scheduler wait's millisecond rounding without overflowing nanos.
+    timeout :: if (remaining < I64{0}) -> I64{-1} else if (remaining > I64{9223372036854}) -> I64{9223372036854775807} else -> remaining * I64{1000000}
+    ready :: jet_socket_ready_raw(state, if reading -> I64{1} else -> I64{4}, timeout, scratch)
+    if net_route_wait_stop(operation, error) -> return false
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    if (ready < I64{0}) {
+        _ := net_route_errno(operation, I64{0}, net_word(scratch, I64{8}), error)
+        return false
+    }
+    if (ready == I64{0}) {
+        _ := net_route_timeout(operation, error)
+        return false
+    }
+    true
+}
+#Export(c) fn jet_net_udp_bind_addr(address: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("udp bind")
+    text :: net_route_socket_text(address)
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    state :: jet_socket_create_raw(net_word(address, I64{0}), I64{2}, I64{0}, scratch)
+    result := I64{0}
+    if (state != I64{0}) {
+        if (jet_socket_bind_raw(state, address, scratch) >= I64{0}) {
+            net_put(output, I64{0}, jet_udp_socket_from_fd_raw(state))
+            result = I64{1}
+        } else {
+            _ := net_route_errno(operation, text, net_word(scratch, I64{8}), error)
+            jet_fd_drop_raw(state)
+        }
+    } else if (jet_scheduler_native_propagate() == I64{0}) {
+        _ := net_route_errno(operation, text, net_word(scratch, I64{8}), error)
+    }
+    jet_rt_free(scratch, I64{32}, I64{8})
+    jet_rt_string_drop(text)
+    result
+}
+#Export(c) fn jet_net_udp_local_addr(value: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("udp local address")
+    if !net_udp_open(value, operation, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    address :: jet_rt_alloc(I64{56}, I64{8})
+    result := I64{0}
+    if (jet_socket_address_raw(jet_udp_socket_fd_raw(value), false, address, scratch) >= I64{0}) {
+        net_put(output, I64{0}, address)
+        result = I64{1}
+    } else {
+        _ := net_route_errno(operation, I64{0}, net_word(scratch, I64{8}), error)
+        jet_rt_free(address, I64{56}, I64{8})
+    }
+    jet_rt_free(scratch, I64{32}, I64{8})
+    result
+}
+#Export(c) fn jet_net_udp_set_timeout(value: I64, milliseconds: I64, error: I64) -> I64 {
+    operation :: rt_static_text("set udp timeout")
+    if !net_udp_open(value, operation, error) -> return I64{0}
+    // Private Rust i64 parameters are raw milliseconds, unlike Int fields.
+    if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
+    state :: net_word(value, I64{0})
+    sync_mutex_lock(state + I64{8})
+    net_put(state, I64{24}, milliseconds)
+    sync_mutex_unlock(state + I64{8})
+    I64{1}
+}
+fn net_udp_send(value: I64, data: I64, length: I64, address: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("udp send")
+    if !net_udp_open(value, operation, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    net_udp_deadline(value, scratch + I64{32})
+    result := I64{0}
+    loop {
+        written :: jet_socket_send_to_raw(jet_udp_socket_fd_raw(value), data, length, address, scratch)
+        if (written >= I64{0}) {
+            if (written == length) {
+                net_put(output, I64{0}, jet_int_owned_from_i64(written))
+                result = I64{1}
+            } else {
+                text :: net_route_socket_text(address)
+                message :: jet_rt_string_builder_new()
+                jet_rt_string_builder_push(message, rt_static_text("udp send wrote "))
+                rt_text_push_number(message, written)
+                jet_rt_string_builder_push(message, rt_static_text(" of "))
+                rt_text_push_number(message, length)
+                jet_rt_string_builder_push(message, rt_static_text(" datagram bytes"))
+                _ := net_route_fail_take(NET_ERROR_PROTOCOL, operation, text, jet_rt_string_builder_finish(message), I64{0}, error)
+                jet_rt_string_drop(text)
+            }
+            break
+        }
+        code :: net_word(scratch, I64{8})
+        if (code == I64{11} || code == I64{4}) {
+            if !net_udp_wait(jet_udp_socket_fd_raw(value), false, operation, scratch, error) -> break
+        } else {
+            text :: net_route_socket_text(address)
+            _ := net_route_errno(operation, text, code, error)
+            jet_rt_string_drop(text)
+            break
+        }
+    }
+    jet_ctx_pop_deadline(scratch + I64{32})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+#Export(c) fn jet_net_udp_send_bytes_to(value: I64, data: I64, length: I64, address: I64, output: I64, error: I64) -> I64 {
+    net_udp_send(value, data, length, address, output, error)
+}
+#Export(c) fn jet_net_udp_send_to(value: I64, text: I64, address: I64, output: I64, error: I64) -> I64 {
+    length :: rt_text_len(text)
+    if (RT_HOST_U8_STRIDE == I64{1}) -> return net_udp_send(value, rt_text_data(text), length, address, output, error)
+    bytes :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+    at := I64{0}
+    loop at < length {
+        host_u8_put(bytes, at, rt_text_byte(rt_text_data(text) + at))
+        at += I64{1}
+    }
+    result :: net_udp_send(value, bytes, length, address, output, error)
+    jet_rt_free(bytes, length * RT_HOST_U8_STRIDE, I64{8})
+    result
+}
+
+#Export(c) fn jet_net_udp_bind(address: I64, output: I64, error: I64) -> I64 {
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    operation :: rt_static_text("udp bind")
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    if (net_route_resolve_text(address, operation, scratch + I64{32}, scratch + I64{40}, error) == I64{0}) {
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return I64{0}
+    }
+    rows :: net_word(scratch, I64{32})
+    count :: net_word(scratch, I64{40})
+    result := I64{0}
+    code := I64{0}
+    at := I64{0}
+    loop at < count {
+        row :: rows + at * I64{56}
+        state :: jet_socket_create_raw(net_word(row, I64{0}), I64{2}, I64{0}, scratch)
+        if (state != I64{0}) {
+            if (jet_socket_bind_raw(state, row, scratch) >= I64{0}) {
+                net_put(output, I64{0}, jet_udp_socket_from_fd_raw(state))
+                result = I64{1}
+                break
+            }
+            code = net_word(scratch, I64{8})
+            jet_fd_drop_raw(state)
+        } else {
+            code = net_word(scratch, I64{8})
+            if (jet_scheduler_native_propagate() != I64{0}) -> break
+        }
+        at += I64{1}
+    }
+    if (result == I64{0} && jet_scheduler_native_propagate() == I64{0}) {
+        if (count == I64{0}) {
+            _ := net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, address, jet_rt_string_clone(rt_static_text("could not resolve to any addresses")), I64{0}, error)
+        } else { _ := net_route_errno(operation, address, code, error) }
+    }
+    if (count != I64{0}) -> jet_rt_free(rows, count * I64{56}, I64{8})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}

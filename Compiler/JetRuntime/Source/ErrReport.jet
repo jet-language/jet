@@ -1,0 +1,243 @@
+// Outcome.rs:494-673,425-466. Reuses its typed field order and root rendering;
+// no display-text reconstruction. Err88 is borrowed; output E4 is owned.
+fn err_append(out: I64, text: I64) { if (text != I64{0}) -> rt_text_append(out, rt_text_data(text), rt_text_len(text)) }
+fn err_spaces(out: I64, depth: I64) {
+    at := I64{0}
+    loop at < depth {
+        rt_text_push_word(out, I64{8224}, I64{2})
+        at += I64{1}
+    }
+}
+fn err_root(out: I64, error: I64, depth: I64) {
+    if (depth == I64{0}) {
+        code :: rt_text_word(error + ERR_CODE)
+        if (code != I64{0}) {
+            rt_text_push_word(out, I64{25649898748801605}, I64{7}) // Error [
+            err_append(out, code)
+            rt_text_push_word(out, I64{2112093}, I64{3}) // ]:
+        } else { rt_text_push_word(out, I64{9071462425195077}, I64{7}) }
+    } else {
+        err_spaces(out, depth)
+        rt_text_push_word(out, I64{9071406657921379}, I64{7}) // cause:
+    }
+    err_append(out, rt_text_word(error + ERR_MESSAGE))
+    identity :: rt_text_word(error + ERR_IDENTITY)
+    if (identity != I64{0}) {
+        rt_text_push_word(out, I64{2322280091611310112}, I64{8})
+        err_append(out, identity)
+        rt_text_push_scalar(out, I64{41})
+    }
+    cause :: rt_text_word(error + ERR_CAUSE)
+    if (cause != I64{0}) {
+        rt_text_push_scalar(out, I64{10})
+        err_root(out, cause, depth + I64{1})
+    }
+    count :: rt_text_word(error + ERR_CONTEXT)
+    data :: rt_text_word(error + ERR_CONTEXT + I64{16})
+    row := I64{0}
+    loop row < count {
+        frame :: data + row * ERR_CONTEXT_BYTES
+        rt_text_push_scalar(out, I64{10})
+        err_spaces(out, depth + I64{1})
+        rt_text_push_word(out, I64{2338626483652554595}, I64{8})
+        rt_text_push_scalar(out, I64{40})
+        err_append(out, rt_text_word(frame + I64{8}))
+        rt_text_push_scalar(out, I64{58})
+        rt_text_push_number(out, rt_text_word(frame + I64{16}))
+        rt_text_push_word(out, I64{2112041}, I64{3})
+        err_append(out, rt_text_word(frame))
+        row += I64{1}
+    }
+    conversions :: rt_text_word(error + ERR_CONVERSIONS + I64{16})
+    row = I64{0}
+    loop row < rt_text_word(error + ERR_CONVERSIONS) {
+        frame :: conversions + row * ERR_CONVERSION_BYTES
+        rt_text_push_scalar(out, I64{10})
+        err_spaces(out, depth + I64{1})
+        rt_text_push_word(out, I64{7598542776408371043}, I64{8})
+        rt_text_push_word(out, I64{540700271}, I64{4})
+        err_append(out, rt_text_word(frame))
+        rt_text_push_word(out, I64{540945696}, I64{4})
+        err_append(out, rt_text_word(frame + I64{8}))
+        row += I64{1}
+    }
+}
+#Export(c) fn jet_render_err(error: I64) -> I64 {
+    out :: jet_rt_string_builder_new()
+    err_root(out, error, I64{0})
+    out
+}
+fn err_json_null(out: I64) { rt_text_push_word(out, I64{1819047278}, I64{4}) }
+fn err_json_quote(out: I64, text: I64) {
+    rt_text_push_scalar(out, I64{34})
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    loop at < length {
+        scalar :: rt_text_decode(data + at)
+        at += rt_text_width(data + at)
+        if (scalar == I64{34} || scalar == I64{92}) {
+            rt_text_push_scalar(out, I64{92})
+            rt_text_push_scalar(out, scalar)
+        } else if (scalar == I64{10}) {
+            rt_text_push_word(out, I64{28252}, I64{2})
+        } else if (scalar == I64{13}) {
+            rt_text_push_word(out, I64{29276}, I64{2})
+        } else if (scalar == I64{9}) {
+            rt_text_push_word(out, I64{29788}, I64{2})
+        } else if (scalar < I64{32} || (scalar >= I64{127} && scalar <= I64{159})) {
+            // Unicode controls use exactly four lowercase hex digits, C1 too.
+            rt_text_push_word(out, I64{30044}, I64{2})
+            shift := I64{12}
+            loop shift >= (I64{0}) {
+                digit :: (scalar >> shift).bit_and(I64{15})
+                rt_text_push_scalar(out, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
+                shift -= I64{4}
+            }
+        } else { rt_text_push_scalar(out, scalar) }
+    }
+    rt_text_push_scalar(out, I64{34})
+}
+fn err_json_optional(out: I64, text: I64) { if (text == I64{0}) -> err_json_null(out) else -> err_json_quote(out, text) }
+fn err_json_hop(out: I64, hop: I64) {
+    rt_text_push_word(out, I64{7881702179028214395}, I64{8})
+    rt_text_push_word(out, I64{3809893}, I64{3})
+    err_json_quote(out, rt_text_word(hop + HOP_FUNCTION))
+    rt_text_push_word(out, I64{4189022119707157036}, I64{8})
+    err_json_quote(out, rt_text_word(hop + HOP_FILE))
+    rt_text_push_word(out, I64{4189022128297484844}, I64{8})
+    rt_text_push_number(out, rt_text_word(hop + HOP_LINE))
+    rt_text_push_word(out, I64{7957145225219220012}, I64{8})
+    rt_text_push_word(out, I64{14882}, I64{2})
+    rt_text_push_number(out, rt_text_word(hop + HOP_COLUMN))
+    rt_text_push_word(out, I64{4189022154168082988}, I64{8})
+    err_json_quote(out, rt_text_word(hop + HOP_NOTE))
+    rt_text_push_word(out, I64{4189037530150609452}, I64{8})
+    rt_text_push_number(out, rt_text_word(hop + HOP_COUNT))
+    rt_text_push_scalar(out, I64{125})
+}
+fn err_json_details(out: I64, details: I64) {
+    rt_text_push_word(out, I64{7953754356895326843}, I64{8})
+    rt_text_push_word(out, I64{3809908}, I64{3})
+    err_json_quote(out, rt_text_word(details + ERR_DETAILS_VARIANT))
+    rt_text_push_word(out, I64{8314889994848576044}, I64{8})
+    rt_text_push_word(out, I64{8075810}, I64{3})
+    data :: rt_text_word(details + ERR_DETAILS_FIELDS + I64{16})
+    row := I64{0}
+    loop row < rt_text_word(details + ERR_DETAILS_FIELDS) {
+        if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
+        field :: data + row * ERR_FIELD_BYTES
+        err_json_quote(out, rt_text_word(field))
+        rt_text_push_scalar(out, I64{58})
+        err_append(out, rt_text_word(field + I64{8})) // canonical JSON value
+        row += I64{1}
+    }
+    rt_text_push_word(out, I64{7165919078633319549}, I64{8})
+    rt_text_push_word(out, I64{4189031968185474917}, I64{8})
+    if (rt_text_word(details + ERR_DETAILS_HAS_SPAN) == I64{0}) {
+        err_json_null(out)
+    } else {
+        rt_text_push_word(out, I64{2482735057479082619}, I64{8})
+        rt_text_push_scalar(out, I64{58})
+        rt_text_push_number(out, rt_text_word(details + ERR_DETAILS_START))
+        rt_text_push_word(out, I64{16363363393413676}, I64{7})
+        rt_text_push_number(out, rt_text_word(details + ERR_DETAILS_END))
+        rt_text_push_scalar(out, I64{125})
+    }
+    rt_text_push_scalar(out, I64{125})
+}
+fn err_json(out: I64, error: I64, journey: I64) {
+    rt_text_push_word(out, I64{7020378893159965307}, I64{8})
+    rt_text_push_word(out, I64{7290892825680558626}, I64{8})
+    rt_text_push_word(out, I64{2462380692096381554}, I64{8})
+    rt_text_push_word(out, I64{2478500838183757165}, I64{8})
+    rt_text_push_scalar(out, I64{58})
+    err_json_quote(out, rt_text_word(error + ERR_MESSAGE))
+    rt_text_push_word(out, I64{4189022085447885356}, I64{8})
+    err_json_optional(out, rt_text_word(error + ERR_CODE))
+    rt_text_push_word(out, I64{2478514117919580716}, I64{8})
+    rt_text_push_scalar(out, I64{58})
+    cause :: rt_text_word(error + ERR_CAUSE)
+    if (cause == I64{0}) -> err_json_null(out) else -> err_json(out, cause, I64{0})
+    identity :: rt_text_word(error + ERR_IDENTITY)
+    if (identity != I64{0}) {
+        rt_text_push_word(out, I64{6873730465022616108}, I64{8})
+        rt_text_push_word(out, I64{8751735924676977769}, I64{8})
+        rt_text_push_word(out, I64{14882}, I64{2})
+        err_json_quote(out, identity)
+    }
+    row := I64{0}
+    if (rt_text_word(error + ERR_CONTEXT) != I64{0}) {
+        rt_text_push_word(out, I64{8675468274863120940}, I64{8})
+        rt_text_push_word(out, I64{8315172552308055924}, I64{8})
+        rt_text_push_word(out, I64{5978658}, I64{3})
+        data :: rt_text_word(error + ERR_CONTEXT + I64{16})
+        loop row < rt_text_word(error + ERR_CONTEXT) {
+            if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
+            frame :: data + row * ERR_CONTEXT_BYTES
+            rt_text_push_word(out, I64{4189038663854989947}, I64{8})
+            err_json_quote(out, rt_text_word(frame))
+            rt_text_push_word(out, I64{4189022119707157036}, I64{8})
+            err_json_quote(out, rt_text_word(frame + I64{8}))
+            rt_text_push_word(out, I64{4189022128297484844}, I64{8})
+            rt_text_push_number(out, rt_text_word(frame + I64{16}))
+            rt_text_push_scalar(out, I64{125})
+            row += I64{1}
+        }
+        rt_text_push_scalar(out, I64{93})
+    }
+    if (journey != I64{0}) {
+        origin :: rt_text_word(journey + JOURNEY_ORIGIN)
+        if (origin != I64{0}) {
+            rt_text_push_word(out, I64{7956003919315804716}, I64{8})
+            rt_text_push_word(out, I64{14882}, I64{2})
+            err_json_hop(out, origin)
+        }
+        count :: rt_text_word(journey + JOURNEY_HOPS)
+        if (count != I64{0}) {
+            rt_text_push_word(out, I64{7305808869231632940}, I64{8})
+            rt_text_push_word(out, I64{8747519289112619615}, I64{8})
+            rt_text_push_word(out, I64{5978658}, I64{3})
+            data :: rt_text_word(journey + JOURNEY_HOPS + I64{16})
+            row = I64{0}
+            loop row < count {
+                if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
+                err_json_hop(out, rt_text_word(data + row * I64{8}))
+                row += I64{1}
+            }
+            rt_text_push_scalar(out, I64{93})
+        }
+    }
+    if (rt_text_word(error + ERR_CONVERSIONS) != I64{0}) {
+        rt_text_push_word(out, I64{8243124909658808876}, I64{8})
+        rt_text_push_word(out, I64{8316292946000308595}, I64{8})
+        rt_text_push_word(out, I64{25678142621511540}, I64{7})
+        data :: rt_text_word(error + ERR_CONVERSIONS + I64{16})
+        row = I64{0}
+        loop row < rt_text_word(error + ERR_CONVERSIONS) {
+            if (row != I64{0}) -> rt_text_push_scalar(out, I64{44})
+            frame :: data + row * ERR_CONVERSION_BYTES
+            rt_text_push_word(out, I64{7305808869231633019}, I64{8})
+            rt_text_push_word(out, I64{14882}, I64{2})
+            err_json_quote(out, rt_text_word(frame))
+            rt_text_push_word(out, I64{8387223622006350380}, I64{8})
+            rt_text_push_word(out, I64{14882}, I64{2})
+            err_json_quote(out, rt_text_word(frame + I64{8}))
+            rt_text_push_scalar(out, I64{125})
+            row += I64{1}
+        }
+        rt_text_push_scalar(out, I64{93})
+    }
+    details :: rt_text_word(error + ERR_DETAILS)
+    if (details != I64{0}) {
+        rt_text_push_word(out, I64{7811882181195997740}, I64{8})
+        rt_text_push_word(out, I64{3809907}, I64{3})
+        err_json_details(out, details)
+    }
+    rt_text_push_scalar(out, I64{125})
+}
+#Export(c) fn jet_error_report_json(error: I64, journey: I64) -> I64 {
+    out :: jet_rt_string_builder_new()
+    err_json(out, error, journey)
+    out
+}

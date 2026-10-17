@@ -737,7 +737,7 @@ fn pkg_data_parse_sql_table(statement: String) -> SQLTable DataBindError! {
             else -> {}
         }
         if segment.len() < 2 -> return Err(DataBindError{message: "SQL column needs a name and type"})
-        column :: ~segment[0]
+        column :: segment[0].copy()
         if !pkg_data_sql_is_name(column) -> return Err(DataBindError{message: "SQL column name is invalid"})
         key :: pkg_ascii_lower(column)
         if names.contains(key) -> return Err(DataBindError{message: "SQL has duplicate column {column}"})

@@ -1,0 +1,38 @@
+
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn reader_terminal(reader: &cbor.CBORReader, reason: String) -> Bool {
+    repeated :: reader.next()
+    if repeated == {
+        .Err(error) -> return error.reason == reason
+        .Ok(_) -> return false
+    }
+    return false
+}
+
+fn writer_terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {
+    repeated :: &writer.flush()
+    if repeated == {
+        .Err(error) -> return error.reason == reason
+        .Ok(_) -> return false
+    }
+    return false
+}
+
+fn run() {
+    directory_input :: files.open("{work}") ?? panic("directory open")
+    directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
+    if directory_reader.next() == {
+        .Err(first) -> print(reader_terminal(&directory_reader, first.reason.copy()))
+        .Ok(_) -> print(false)
+    }
+    full_output :: files.create("/dev/full") ?? panic("full open")
+    full_writer := cbor.writer(^full_output) ?? panic("full writer")
+    full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
+    if &full_writer.flush() == {
+        .Err(first) -> print(writer_terminal(&full_writer, first.reason.copy()))
+        .Ok(_) -> print(false)
+    }
+}

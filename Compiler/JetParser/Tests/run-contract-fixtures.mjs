@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Assemble parser contract fixtures with the same L2 sources as selfcheck.
-// Usage: node Compiler/JetParser/Tests/run-contract-fixtures.mjs OUTDIR
+// Usage: node Compiler/JetParser/Tests/run-contract-fixtures.mjs OUTDIR [FIXTURE.jet]
 // Then compile OUTDIR/project/src/compiler.jet with a retained Jet compiler.
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const out = process.argv[2] && resolve(process.argv[2]);
-if (!out) throw new Error("usage: run-contract-fixtures.mjs OUTDIR");
+if (!out) throw new Error("usage: run-contract-fixtures.mjs OUTDIR [FIXTURE.jet]");
 const rungs = join(out, "rungs");
 const assembled = spawnSync(process.execPath, [join(repo, "Tools/agent/stage1/ladder.mjs"), "rungs", repo, rungs], { encoding: "utf8" });
 if (assembled.status !== 0) throw new Error(assembled.stderr || assembled.stdout);
@@ -24,8 +24,10 @@ const rows = source.split("\n").filter((line) => line.startsWith("marker ")).map
   return `${literal(name)}: ${literal(replacement)}`;
 });
 const unit = readFileSync(join(rungs, "L2/project/src/compiler.jet"), "utf8");
-const fixtures = readFileSync(join(repo, "Compiler/JetParser/Tests/ContractFixtures.jet"), "utf8");
-const constants = `\nPC_MARKER_SOURCE :: prep { ${literal(source)} }\nPC_MARKER_STATUS :: prep { [String:String]{${rows.join(",\n")}} }\n`;
+const fixturePath = process.argv[3] ? resolve(repo, process.argv[3]) : join(repo, "Compiler/JetParser/Tests/ContractFixtures.jet");
+const fixtures = readFileSync(fixturePath, "utf8");
+const runtimeSource = readFileSync(join(repo, "tests/fixtures/fmt_import_c_bindings.jet"), "utf8");
+const constants = `\nPC_MARKER_SOURCE :: prep { ${literal(source)} }\nPC_MARKER_STATUS :: prep { [String:String]{${rows.join(",\n")}} }\nPC_FMT_RUNTIME_SOURCE :: prep { ${literal(runtimeSource)} }\n`;
 mkdirSync(join(out, "project/src"), { recursive: true });
 writeFileSync(join(out, "project/src/compiler.jet"), unit + constants + fixtures);
 writeFileSync(join(out, "project/package.jet"), 'name: "parser_contract_fixtures"\nversion: "0.1.0"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n');

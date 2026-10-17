@@ -1,0 +1,9 @@
+# tests/ffi_callbacks_tasks.rs::foreign_task_boundary_rejects_non_sendable_captured_state
+# Original Run-mode rejection and exact code membership/absence; PENDING-SAME-HEAD.
+requires: os:unix
+fixture: foreign_task_boundary_rejects_non_sendable_captured_state.fixture
+env: NO_COLOR=1
+step: jet inspect output main.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1102"] #>= 1
+json: stdout doc $.reports[?code="E3203"] #= 0

@@ -8,7 +8,7 @@ fn pool_worker(token: Int, returned: Sender<Int>) -> Int {
     returned.send(token)
     return token
 }
-pub fn pool_demo() -> [Int] {
+fn pool_demo() -> [Int] {
     (returned, available) :: channel<Int>(capacity: 2)
     returned.send(1)
     returned.send(2)
@@ -16,10 +16,10 @@ pub fn pool_demo() -> [Int] {
     first_token :: available.receive() ?? panic("pool closed")
     first :: task pool_worker(first_token, returned)
     second_token :: available.receive() ?? panic("pool closed")
-    second_returned :: ~returned
+    second_returned :: returned.copy()
     second :: task pool_worker(second_token, second_returned)
     third_token :: available.receive() ?? panic("pool closed")
-    third_returned :: ~returned
+    third_returned :: returned.copy()
     third :: task pool_worker(third_token, third_returned)
 
     leases := [

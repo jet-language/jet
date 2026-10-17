@@ -1,0 +1,15 @@
+# tests/notebook.rs::shared_session_identical_stale_rules_across_clients
+# Verbatim original cell sources and exact public predicates; runtime UNRUN.
+fixture: shared_session_identical_stale_rules_across_clients.fixture
+env: NO_COLOR=1
+step: jet notebook document.jetnb --protocol
+stdin: commands.stdin
+exit: 0
+json: stdout ndjson $[0].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:150-153 FirstParty a result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+json: stdout ndjson $[1].body ^= "status=ok;" # original ed77c235f tests/notebook.rs:147-148,154,165 JupyterAdapter b observable_success requires result.ok(); public bridge crates/jet-repl/src/Notebook/protocol.rs:133-141 maps result.ok() to this body prefix
+stdout.line(1).after_first("text="): ~ "fx" # original ed77c235f tests/notebook.rs:147-148,154,165 b bundle.text_plain.contains("fx"); public bridge crates/jet-repl/src/Notebook/protocol.rs:136,141 renders text_plain after text= without turn/count prefix
+capture: broken_reply stdout ndjson $[2].body
+step: jet run --interpret observable.jet -- "{cap:broken_reply}"
+stdin: null
+exit: 0
+# PENDING-SEAM(notebook-lib): replay_plan(1,Some x::2).expect; any StepKind.ConfirmEffect OR steps.len>=1; apply_rerun JupyterAdapter plan [SkipStale].unwrap; exact FirstParty.stale_ids==CanvasLens.stale_ids==JupyterAdapter.stale_ids==returned stale_jp

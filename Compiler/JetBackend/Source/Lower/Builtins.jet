@@ -1,0 +1,381 @@
+// Collection value builtins lower over the borrowed List header. No host
+// collection handles or new runtime exports are introduced.
+use jet_foundation.[MIRInstruction, MIRPlaceID, MIRPreludeCall, MIRProgram, MIRType, MIRValueID]
+
+fn lower_value_builtin(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    if row.family != .BuiltinMethod || row.module_name != "core.builtin" -> return false
+    symbol :: lower_runtime_symbol(row)
+    if symbol == "jet_list_try_with_capacity" {
+        lower_builtin_try_capacity(p, c, &m, &f, instruction, args)
+        return true
+    }
+    ty :: lower_value_type(c, receiver) ?? return false
+    if row.member == "eq" && symbol == "jet_eq" {
+        if args.len() != 1 -> return false
+        lower_core_equal(p, c, &m, &f, instruction, receiver, args[0])
+        return true
+    }
+    contains :: symbol == "jet_list_contains"
+    search :: symbol == "jet_list_binary_search"
+    sum :: symbol == "jet_list_sum_fixed_f64"
+    extremum :: symbol == "jet_list_max_float" || symbol == "jet_list_min_float"
+    if !contains && !search && !sum && !extremum -> return false
+    elem :: lower_list_element(ty) ?? return false
+    if args.len() != (if contains || search -> 1 else -> 0) -> return false
+    if search && lower_map_key_kind(p, elem) == "" {
+        lower_fail(&m, &f, "List binary_search element has no native Ord")
+        return true
+    }
+    if (sum || extremum) && lower_repr(p, elem) != .FloatBits {
+        lower_fail(&m, &f, "Float collection reduction requires the checked Float carrier")
+        return true
+    }
+    list :: lower_use(&m, &f, receiver) ?? return true
+    values := [LIRValueID]{list}
+    if contains || search {
+        if lower_repr(p, elem) != .Absent -> &values.push(lower_use(&m, &f, args[0]) ?? return true)
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    helper :: if contains -> "builtin.contains" else if search -> "builtin.binary_search" else if sum -> "builtin.sum_fixed_f64" else if symbol == "jet_list_max_float" -> "builtin.max_float" else -> "builtin.min_float"
+    lower_call_helper(&m, &f, helper, ty, values, Val(dst))
+    true
+}
+
+fn lower_helper_contains(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("contains has no checked List element")
+    layouts := [LIRLayout]{lir_layout_pointer()}
+    if lower_repr_layout(lower_repr(p, elem)) == .Val(layout) -> &layouts.push(layout)
+    f := lower_helper_start(&m, glue, layouts, Val(lir_layout_bool()))
+    list :: f.open_params[0].copy()
+    needle :: if layouts.len() == 2 -> Val(f.open_params[1].copy()) else -> None
+    hit :: lower_new_block(&f)
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+    item :: lower_read_at(p, &f, each.address, 0, elem)
+    same :: lower_equal_values(p, &m, &f, elem, item, needle) ?? {
+        lower_seal(&f, LIRTerminator.Unreachable)
+        return lir_builder_finish(f.builder)
+    }
+    next_item :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(hit, [LIRValueID]{}), else_target: lower_target(next_item, [LIRValueID]{})})
+    lower_start(&f, next_item, [LIRValueID]{})
+    lower_each_end(&f, each, [LIRValueID]{})
+    no :: lower_const_flag(&f, 0)
+    lower_seal(&f, LIRTerminator.Return{value: Val(no)})
+    lower_start(&f, hit, [LIRValueID]{})
+    yes :: lower_const_flag(&f, 1)
+    lower_seal(&f, LIRTerminator.Return{value: Val(yes)})
+    lir_builder_finish(f.builder)
+}
+
+// Rust slice.binary_search: a matching duplicate position is unspecified.
+fn lower_helper_binary_search(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("binary_search has no element")
+    needle_layout :: lower_repr_layout(lower_repr(p, elem)) ?? lir_layout_pointer()
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), needle_layout}, Val(lir_layout_pointer()))
+    list :: f.open_params[0].copy()
+    needle :: f.open_params[1].copy()
+    length :: lower_list_word(&f, list, 0)
+    data :: lower_list_data(&f, list)
+    zero :: lower_const(&f, 0)
+    one :: lower_const(&f, 1)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    weigh :: lower_new_block(&f)
+    left_half :: lower_new_block(&f)
+    right_half :: lower_new_block(&f)
+    found :: lower_new_block(&f)
+    absent :: lower_new_block(&f)
+    lo :: lower_word(&f)
+    hi :: lower_word(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero, length})})
+    lower_start(&f, head, [LIRValueID]{lo, hi})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: .Lt, left: lo, right: hi})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(absent, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    distance :: lower_word(&f)
+    half :: lower_word(&f)
+    mid :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: distance, op: .Sub, left: hi, right: lo})
+    lower_emit(&f, LIRInst.Binary{dst: half, op: .Shr, left: distance, right: one})
+    lower_emit(&f, LIRInst.Binary{dst: mid, op: .Add, left: lo, right: half})
+    address :: lower_list_address(&f, data, mid, lower_list_stride(p, elem))
+    item :: lower_read_at(p, &f, address, 0, elem) ?? panic("ordered element has storage")
+    order :: lower_map_key_order(p, &m, &f, elem, item, needle)
+    lower_seal(&f, LIRTerminator.Branch{condition: order.same, then_target: lower_target(found, [LIRValueID]{}), else_target: lower_target(weigh, [LIRValueID]{})})
+    lower_start(&f, weigh, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Branch{condition: order.less, then_target: lower_target(right_half, [LIRValueID]{}), else_target: lower_target(left_half, [LIRValueID]{})})
+    lower_start(&f, left_half, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{lo, mid})})
+    lower_start(&f, right_half, [LIRValueID]{})
+    next_lo :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_lo, op: .Add, left: mid, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_lo, hi})})
+    lower_start(&f, found, [LIRValueID]{})
+    result :: lower_pointer(&f)
+    lower_alloc(&m, &f, result, 8)
+    lower_emit(&f, LIRInst.Store{base: result, offset: 0, value: mid})
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lower_start(&f, absent, [LIRValueID]{})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_float_zero(f: &LowerFunction) -> LIRValueID Never! {
+    zero :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Const{dst: zero, value: 0})
+    zero
+}
+
+// D-FRED1: lane i&7 accumulates in source order, followed by a fixed pair tree.
+fn lower_helper_sum_fixed(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("fixed sum has no element")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_float()))
+    list :: f.open_params[0].copy()
+    lanes :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: lanes, size: 64, align: 8})
+    zero :: lower_float_zero(&f)
+    loop lane in 0..<8 -> lower_emit(&f, LIRInst.Store{base: lanes, offset: lane * 8, value: zero})
+    mask :: lower_const(&f, 7)
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+    lane :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: lane, op: .And, left: each.at, right: mask})
+    slot :: lower_list_address(&f, lanes, lane, 8)
+    total :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Load{dst: total, base: slot, offset: 0})
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? panic("Float has storage")
+    next_total :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    lower_emit(&f, LIRInst.Binary{dst: next_total, op: .Add, left: total, right: item})
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: next_total})
+    lower_each_end(&f, each, [LIRValueID]{})
+    values := [LIRValueID]{}
+    loop index in 0..<8 {
+        value :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Load{dst: value, base: lanes, offset: index * 8})
+        &values.push(value)
+    }
+    loop values.len() > 1 {
+        merged := [LIRValueID]{}
+        loop index in 0..<(values.len() >> 1) {
+            value :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+            lower_emit(&f, LIRInst.Binary{dst: value, op: .Add, left: values[index * 2], right: values[index * 2 + 1]})
+            &merged.push(value)
+        }
+        values = merged
+    }
+    lower_seal(&f, LIRTerminator.Return{value: Val(values[0])})
+    lir_builder_finish(f.builder)
+}
+
+// Float sort order puts all NaNs after numbers; ties keep the last maximum
+// and first minimum (Collections.rs jet_list_{max,min}_float).
+fn lower_helper_float_extremum(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    elem :: lower_list_element(glue.ty) ?? panic("Float extremum has no element")
+    maximum :: glue.helper == "builtin.max_float"
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, Val(lir_layout_pointer()))
+    list :: f.open_params[0].copy()
+    data :: lower_list_data(&f, list)
+    length :: lower_list_word(&f, list, 0)
+    zero :: lower_const(&f, 0)
+    one :: lower_const(&f, 1)
+    empty :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: empty, condition: .Eq, left: length, right: zero})
+    absent :: lower_new_block(&f)
+    present :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: empty, then_target: lower_target(absent, [LIRValueID]{}), else_target: lower_target(present, [LIRValueID]{})})
+    lower_start(&f, absent, [LIRValueID]{})
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Return{value: Val(null)})
+    lower_start(&f, present, [LIRValueID]{})
+    first :: lower_read_at(p, &f, data, 0, elem) ?? panic("Float has storage")
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    keep :: lower_new_block(&f)
+    replace :: lower_new_block(&f)
+    advance :: lower_new_block(&f)
+    at :: lower_word(&f)
+    best :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{one, first})})
+    lower_start(&f, head, [LIRValueID]{at, best})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: .Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    address :: lower_list_address(&f, data, at, lower_list_stride(p, elem))
+    item :: lower_read_at(p, &f, address, 0, elem) ?? panic("Float has storage")
+    left :: best
+    right :: item
+    left_nan :: lower_flag(&f)
+    right_number :: lower_flag(&f)
+    greater :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: left_nan, condition: .Ne, left: left, right: left})
+    lower_emit(&f, LIRInst.Compare{dst: right_number, condition: .Eq, left: right, right: right})
+    lower_emit(&f, LIRInst.Compare{dst: greater, condition: .Gt, left: left, right: right})
+    nan_greater :: lower_flag(&f)
+    lower_logic(&f, nan_greater, true, left_nan, right_number)
+    ordered_greater :: lower_flag(&f)
+    lower_logic(&f, ordered_greater, false, nan_greater, greater)
+    lower_seal(&f, LIRTerminator.Branch{condition: ordered_greater, then_target: lower_target(if maximum -> keep else -> replace, [LIRValueID]{}), else_target: lower_target(if maximum -> replace else -> keep, [LIRValueID]{})})
+    lower_start(&f, keep, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(advance, [LIRValueID]{best})})
+    lower_start(&f, replace, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(advance, [LIRValueID]{item})})
+    selected :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+    lower_start(&f, advance, [LIRValueID]{selected})
+    next_at :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: .Add, left: at, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at, selected})})
+    lower_start(&f, done, [LIRValueID]{})
+    result :: lower_pointer(&f)
+    lower_alloc(&m, &f, result, lower_option_box_size(p, elem))
+    lower_write_at(p, &f, result, 0, best, elem)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_helper_value_builtin(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    if glue.helper == "builtin.try_capacity" -> return lower_helper_try_capacity(p, &m, glue)
+    if glue.helper == "builtin.contains" -> return lower_helper_contains(p, &m, glue)
+    if glue.helper == "builtin.binary_search" -> return lower_helper_binary_search(p, &m, glue)
+    if glue.helper == "builtin.sum_fixed_f64" -> return lower_helper_sum_fixed(p, &m, glue)
+    lower_helper_float_extremum(p, &m, glue)
+}
+
+fn lower_builtin_try_capacity(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, args: [MIRValueID]) Never! {
+    if args.len() != 1 -> return lower_fail(&m, &f, "List.try_with_capacity requires one checked capacity")
+    capacity_ty :: lower_value_type(c, args[0]) ?? return lower_fail(&m, &f, "List.try_with_capacity has no checked capacity type")
+    if !lower_is_exact_int(capacity_ty) -> return lower_fail(&m, &f, "List.try_with_capacity requires an exact Int capacity")
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "List.try_with_capacity has no checked Result")
+    if result_ty.kind == .Result(ok, err) {
+        if lower_list_element(ok) == None || lower_record_handle(p, err) != Val("AllocError") -> return lower_fail(&m, &f, "List.try_with_capacity requires List success and the canonical AllocError record")
+        capacity :: lower_use(&m, &f, args[0]) ?? return
+        dst :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
+        lower_call_helper(&m, &f, "builtin.try_capacity", result_ty, [LIRValueID]{capacity}, Val(dst))
+        if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
+        return
+    }
+    lower_fail(&m, &f, "List.try_with_capacity result is not a Result")
+}
+
+// Collections.rs:914-941 saturates the capacity to I64, then the requested
+// usize product. PortableAlloc.rs:537-539 intentionally clamps the reported
+// bytes to I64.MAX. Compute that clamped product without wrapping, and use
+// the canonical AllocError record constructor rather than a private layout.
+fn lower_helper_try_capacity(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    ok_ty :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("capacity helper has a checked Result")
+    err_ty :: if glue.ty.kind == .Result(_, err) -> err else -> panic("capacity helper has a checked Result")
+    elem :: lower_list_element(ok_ty) ?? panic("capacity helper has a checked List")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_word()}, Val(lir_layout_pointer()))
+    capacity :: f.open_params[0].copy()
+    result :: lower_pointer(&f)
+    // Fatal metadata allocation does not consult or consume the fault rail.
+    lower_alloc(&m, &f, result, lower_result_box_size(p, ok_ty, err_ty))
+    zero :: lower_const(&f, 0)
+    maximum :: lower_const(&f, 9223372036854775807)
+    failed :: lower_new_block(&f)
+    nonnegative :: lower_new_block(&f)
+    normalized :: lower_new_block(&f)
+    negative :: lower_flag(&f)
+    lower_exact_compare(&m, &f, negative, .Lt, capacity, zero)
+    lower_seal(&f, LIRTerminator.Branch{condition: negative, then_target: lower_target(failed, [LIRValueID]{zero}), else_target: lower_target(nonnegative, [LIRValueID]{})})
+    lower_start(&f, nonnegative, [LIRValueID]{})
+    inline_capacity :: lower_inline_test(&f, [LIRValueID]{capacity})
+    large :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: inline_capacity, then_target: lower_target(normalized, [LIRValueID]{capacity}), else_target: lower_target(large, [LIRValueID]{})})
+    lower_start(&f, large, [LIRValueID]{})
+    exact_maximum :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+    lower_exact_int_constant(&m, &f, exact_maximum, 9223372036854775807)
+    above_maximum :: lower_flag(&f)
+    lower_exact_compare(&m, &f, above_maximum, .Gt, capacity, exact_maximum)
+    lower_emit(&f, LIRInst.Drop{value: exact_maximum})
+    clamped :: lower_new_block(&f)
+    fitting :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: above_maximum, then_target: lower_target(clamped, [LIRValueID]{}), else_target: lower_target(fitting, [LIRValueID]{})})
+    lower_start(&f, clamped, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(normalized, [LIRValueID]{maximum})})
+    lower_start(&f, fitting, [LIRValueID]{})
+    native :: lower_word(&f)
+    lower_convert_exact(&m, &f, native, capacity, "jet_int_owned_to_i64", false)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(normalized, [LIRValueID]{native})})
+    cap :: lower_word(&f)
+    lower_start(&f, normalized, [LIRValueID]{cap})
+    unit_element :: lower_repr(p, elem) == .Absent
+    stride :: if unit_element -> 1 else -> lower_list_stride(p, elem)
+    product_limit :: lower_const(&f, 9223372036854775807 /% stride)
+    too_large :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: too_large, condition: .Gt, left: cap, right: product_limit})
+    saturated :: lower_new_block(&f)
+    product :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: too_large, then_target: lower_target(saturated, [LIRValueID]{}), else_target: lower_target(product, [LIRValueID]{})})
+    lower_start(&f, saturated, [LIRValueID]{})
+    ignored_fault :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_fault_should_fail_allocation", [LIRValueID]{}, Val(ignored_fault))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(failed, [LIRValueID]{maximum})})
+    lower_start(&f, product, [LIRValueID]{})
+    stride_value :: lower_const(&f, stride)
+    bytes :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: bytes, op: .Mul, left: cap, right: stride_value})
+    zero_capacity :: lower_flag(&f)
+    if unit_element -> lower_emit(&f, LIRInst.Const{dst: zero_capacity, value: 1})
+    else -> lower_emit(&f, LIRInst.Compare{dst: zero_capacity, condition: .Eq, left: cap, right: zero})
+    empty :: lower_new_block(&f)
+    allocate :: lower_new_block(&f)
+    success :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: zero_capacity, then_target: lower_target(empty, [LIRValueID]{}), else_target: lower_target(allocate, [LIRValueID]{})})
+    lower_start(&f, empty, [LIRValueID]{})
+    fault :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_fault_should_fail_allocation", [LIRValueID]{}, Val(fault))
+    null :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+    lower_seal(&f, LIRTerminator.Branch{condition: fault, then_target: lower_target(failed, [LIRValueID]{bytes}), else_target: lower_target(success, [LIRValueID]{null})})
+    lower_start(&f, allocate, [LIRValueID]{})
+    rounding_limit :: lower_const(&f, 9223372036854775800)
+    bad_layout :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: bad_layout, condition: .Gt, left: bytes, right: rounding_limit})
+    invalid_layout :: lower_new_block(&f)
+    valid_layout :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: bad_layout, then_target: lower_target(invalid_layout, [LIRValueID]{}), else_target: lower_target(valid_layout, [LIRValueID]{})})
+    lower_start(&f, invalid_layout, [LIRValueID]{})
+    ignored_layout_fault :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_fault_should_fail_allocation", [LIRValueID]{}, Val(ignored_layout_fault))
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(failed, [LIRValueID]{bytes})})
+    lower_start(&f, valid_layout, [LIRValueID]{})
+    align :: lower_const(&f, 8)
+    data :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_alloc_try", [LIRValueID]{bytes, align}, Val(data))
+    no_memory :: lower_flag(&f)
+    nil :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: nil, value: 0})
+    lower_emit(&f, LIRInst.Compare{dst: no_memory, condition: .Eq, left: data, right: nil})
+    lower_seal(&f, LIRTerminator.Branch{condition: no_memory, then_target: lower_target(failed, [LIRValueID]{bytes}), else_target: lower_target(success, [LIRValueID]{data})})
+    output_data :: lower_pointer(&f)
+    lower_start(&f, success, [LIRValueID]{output_data})
+    lower_store_word(&f, result, 0, lower_result_selector(true))
+    output :: lower_new_storage(p, &f, ok_ty)
+    lower_emit(&f, LIRInst.Store{base: output, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: output, offset: 8, value: if unit_element -> maximum else -> cap})
+    lower_emit(&f, LIRInst.Store{base: output, offset: 16, value: output_data})
+    lower_write_at(p, &f, result, lower_result_payload_offset(), output, ok_ty)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    requested :: lower_word(&f)
+    lower_start(&f, failed, [LIRValueID]{requested})
+    exact_requested :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+    lower_convert_exact(&m, &f, exact_requested, requested, "jet_int_owned_from_i64", false)
+    allocator :: lower_render_string(&f)
+    allocator_text :: lower_static_text(&m, &f, "List")
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", allocator_text, Val(allocator))
+    error_handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_alloc_error"}, None)
+    lower_call_runtime(&m, &f, "jet_rt_record_new_alloc_error", [LIRValueID]{exact_requested, allocator}, Val(error_handle))
+    lower_emit(&f, LIRInst.Drop{value: exact_requested})
+    lower_emit(&f, LIRInst.Drop{value: allocator})
+    error :: lower_pointer(&f)
+    lower_record_from_runtime(p, &m, &f, err_ty, error_handle, Val(error))
+    lower_store_word(&f, result, 0, lower_result_selector(false))
+    lower_write_at(p, &f, result, lower_result_payload_offset(), error, err_ty)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}

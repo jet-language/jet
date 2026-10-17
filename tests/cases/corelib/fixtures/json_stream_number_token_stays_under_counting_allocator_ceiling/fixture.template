@@ -1,0 +1,46 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {
+    limits := encoding.EncodingLimits.safe()
+    limits.buffer_bytes = 4096
+    limits.max_depth = 1
+    limits.max_item_bytes = 150000
+    limits.max_expansion_bytes = 0
+    input :: files.open("{work}/number.json") ?? panic("open number")
+    reader :: json.reader(^input, limits) ?? panic("create reader")
+    result :: reader.next()
+    if result == {
+        .Ok(_) -> { panic("oversized number allocation accepted") }
+        .Err(first) -> {
+            print(first.reason)
+            again :: reader.next()
+            if again == {
+                .Ok(_) -> { panic("number allocation error not terminal") }
+                .Err(second) -> { print(first.byte_offset == second.byte_offset && first.reason == second.reason) }
+            }
+        }
+    }
+
+    malformed_limits := encoding.EncodingLimits.safe()
+    malformed_limits.buffer_bytes = 4096
+    malformed_limits.max_depth = 1
+    malformed_limits.max_item_bytes = 200000
+    malformed_limits.max_expansion_bytes = 0
+    malformed_input :: files.open("{work}/malformed.json") ?? panic("open malformed number")
+    malformed_reader :: json.reader(^malformed_input, malformed_limits) ?? panic("create malformed reader")
+    malformed_result :: malformed_reader.next()
+    if malformed_result == {
+        .Ok(_) -> { panic("malformed number accepted") }
+        .Err(first) -> {
+            print(first.reason)
+            again :: malformed_reader.next()
+            if again == {
+                .Ok(_) -> { panic("malformed number error not terminal") }
+                .Err(second) -> { print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason) }
+            }
+        }
+    }
+}

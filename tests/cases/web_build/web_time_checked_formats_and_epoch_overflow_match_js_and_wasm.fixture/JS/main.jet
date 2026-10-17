@@ -1,0 +1,38 @@
+#Target(JS)
+use core.time as time
+
+
+fn run() {
+    datetime :: time.datetime(2024, 3, 9, 12, 34, 56)
+    zoned :: time.zoned(datetime, time.utc())
+    if datetime.format_checked("'day' EEEE 'month' MMMM") == {
+        .Ok(value) -> { print("names:ok:{value}") }
+        .Err(_) -> { print("names:err:unexpected") }
+    }
+    if zoned.format_checked("VV XXX") == {
+        .Ok(value) -> { print("zone:ok:{value}") }
+        .Err(_) -> { print("zone:err:unexpected") }
+    }
+    if zoned.format_checked("yyyy|MM|dd|DDD|HH|mm|ss|SSS|SSSSSS|SSSSSSSSS|EEE|EEEE|MMM|MMMM|VV|XXX") == {
+        .Ok(value) -> { print("all-jet:ok:{value}") }
+        .Err(_) -> { print("all-jet:err:unexpected") }
+    }
+    if zoned.format_checked("%%|%A|%a|%B|%b|%Y|%y|%m|%d|%e|%j|%H|%I|%M|%S|%p|%z|%Z|%F|%T|%R|%D|%f") == {
+        .Ok(value) -> { print("all-percent:ok:{value}") }
+        .Err(_) -> { print("all-percent:err:unexpected") }
+    }
+    if datetime.format_checked("%Q") == {
+        .Ok(value) -> { print("token:ok:{value}") }
+        .Err(error) -> { print("token:err:{error.message}") }
+    }
+    if datetime.format_checked("VV") == {
+        .Ok(value) -> { print("missing-zone:ok:{value}") }
+        .Err(error) -> { print("missing-zone:err:{error.message}") }
+    }
+    wide :: time.from_unix_seconds(10000000000000)
+    if wide.to_unix_ns() == {
+        .Ok(value) -> { print("overflow:ok:{value}") }
+        .Err(error) -> { print("overflow:err:{error.reason}") }
+    }
+    return
+}

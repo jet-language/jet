@@ -1,0 +1,164 @@
+use core.files as files
+use core.sys as sys
+
+#Test("await file and dir preserve quoted paths and distinguish predicate failure from optional expiry") {
+    root :: cases_test_root("await-files")
+    source :: "write: 'two words' = \"timeout\"\nawait: file 'two words' = \"timeout\" timeout 1s every 1ms\nmkdir: directory\nawait: dir directory timeout 1s every 1ms\nawait: file missing timeout 2ms every 1ms optional\n"
+    outcome :: cases_test_advanced(root, "ready", source)
+    assert_eq(outcome.verdict.status, "PASS")
+    assert_eq(outcome.run.stdout, "")
+    loop wait in ["await: file missing timeout 2ms every 1ms", "await: dir missing timeout 2ms every 1ms", "write: value = \"wrong\"\nawait: file value = \"right\" timeout 2ms every 1ms"] {
+        result :: cases_test_advanced(root, "deadline", "{wait}\n")
+        assert_eq(result.verdict.status, "FAIL")
+        assert_eq(result.verdict.detail, "await deadline exceeded")
+    }
+    files.remove_all(root) ?? panic("remove await file scratch")
+}
+
+#Test("await partial file predicates require reasons and preserve substring and relational line checks") {
+    root :: cases_test_root("await-partial")
+    ready :: "write: value = \"ready\\nnext\\n\"\nawait: file value ~ \"ready\" timeout 1s every 1ms # fixture readiness marker\nawait: file value lines >= 2 timeout 1s every 1ms # fixture readiness line count\n"
+    assert_eq(cases_test_advanced(root, "ready", ready).verdict.status, "PASS")
+    loop predicate in ["~ \"ready\"", "lines >= 2"] {
+        failed :: "write: value = \"waiting\"\nawait: file value {predicate} timeout 2ms every 1ms # fixture readiness predicate\n"
+        result :: cases_test_advanced(root, "deadline", failed)
+        assert_eq(result.verdict.status, "FAIL")
+        assert_eq(result.verdict.detail, "await deadline exceeded")
+        invalid :: "write: value = \"ready\\nnext\\n\"\nawait: file value {predicate} timeout 1s every 1ms\n"
+        assert_eq(cases_test_advanced(root, "missing-reason", invalid).verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove await partial scratch")
+}
+
+#Test("await entry chooses the first matching entry with all required readable files and exposes its path") {
+    root :: cases_test_root("await-entry")
+    source :: "mkdir: entries/other\nwrite: entries/ready/marker = \"x\"\nwrite: entries/ready/readable = \"y\"\nawait: entry entries with-file \"marker\" readable \"readable\" timeout 1s every 1ms capture selected\nfile: {{cap:selected}}/marker = \"x\"\n"
+    assert_eq(cases_test_advanced(root, "entry", source).verdict.status, "PASS")
+    failed :: "remove: entries\nmkdir: entries/other\nawait: entry entries with-file \"marker\" timeout 2ms every 1ms capture selected\n"
+    assert_eq(cases_test_advanced(root, "no-match", failed).verdict.status, "FAIL")
+    loop invalid in ["await: file ../escape timeout 1s", "await: file value timeout 1s timeout 2s", "await: entry entries capture invalid-name", "await: entry entries", "await: process 1 timeout 1s", "await: dir entries capture selected"] {
+        assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove await entry scratch")
+}
+
+#Test("await process state executable and non-zombie liveness observe real spawned children") {
+    root :: cases_test_root("await-process")
+    source :: "requires: os-name:linux\nsession peer raw: jet -c 'exec sleep 20'\nsignal peer: STOP\nawait: process {{pid:peer}} state in [\"T\",\"t\"] timeout 1s every 1ms\nprocess {{pid:peer}}: alive-nonzombie\nprocess {{pid:peer}}: state not-in [\"Z\"]\nsignal peer: CONT\nawait: process {{pid:peer}} state not-in [\"T\",\"t\"] timeout 1s every 1ms\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit termination is judged by exit\n"
+    assert_eq(cases_test_advanced(root, "states", source).verdict.status, "PASS")
+    executable :: "requires: os-name:linux\nsession peer raw: cat\nawait: process {{pid:peer}} executable = {{tool:cat}} timeout 1s every 1ms\nclose peer\n"
+    assert_eq(cases_test_advanced(root, "executable", executable).verdict.status, "PASS")
+    failed :: "requires: os-name:linux\nawait: process -1 state in [\"T\"] timeout 1s every 1ms\n"
+    assert_eq(cases_test_advanced(root, "missing", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove await process scratch")
+}
+
+#Test("poll repeats a real command and checks conjunctions on one attempt rather than accumulating successes") {
+    root :: cases_test_root("poll-attempts")
+    source :: "poll ready: printf yes until stdout: = \"yes\" && stderr: empty timeout 1s every 1ms\nstep: printf yes\nstdout: == ready\n"
+    assert_eq(cases_test_advanced(root, "ready", source).verdict.status, "PASS")
+    alternating :: "poll ready: jet -c 'if test -f seen; then printf second; else printf first; : > seen; fi' until stdout: = \"first\" && stdout: = \"second\" timeout 20ms every 1ms\n"
+    failed :: cases_test_advanced(root, "same-attempt", alternating)
+    assert_eq(failed.verdict.status, "FAIL")
+    assert(failed.verdict.detail.contains("poll deadline exceeded"))
+    eventual :: "poll ready: jet -c 'if test -f eventual-seen; then printf ready; else : > eventual-seen; printf waiting; fi' until stdout: = \"ready\" timeout 1s every 1ms\n"
+    assert_eq(cases_test_advanced(root, "eventual", eventual).verdict.status, "PASS")
+    loop invalid in ["poll ready: printf yes until stdout: = \"yes\"", "poll ready: printf yes until stdout: = \"yes\" timeout 1s every 0ms", "poll ready: printf yes until stdout: = \"yes\" && timeout 1s every 1ms"] {
+        assert_eq(cases_test_advanced(root, "invalid", "{invalid}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove poll scratch")
+}
+
+#Test("poll explicit exit predicates and quoted conjunctions observe one real command result") {
+    root :: cases_test_root("poll-status")
+    ready :: "poll ready: printf 'ready && complete' until exit: 0 && stdout: ~ \"ready && complete\" timeout 1s every 1ms # readiness substring\n"
+    assert_eq(cases_test_advanced(root, "ready", ready).verdict.status, "PASS")
+    nonzero :: "poll ready: jet -c 'printf ready; exit 7' until exit: 7 && stdout: = \"ready\" timeout 1s every 1ms\n"
+    assert_eq(cases_test_advanced(root, "nonzero", nonzero).verdict.status, "PASS")
+    loop source in ["poll ready: jet -c 'printf ready; exit 7' until exit: 0 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: printf ready until exit: 0 && exit: 7 && stdout: = \"ready\" timeout 20ms every 1ms", "poll ready: jet -c 'if test -f seen; then exit 7; else : > seen; exit 0; fi' until exit: 0 && exit: 7 timeout 20ms every 1ms"] {
+        result :: cases_test_advanced(root, "mismatch", "{source}\n")
+        assert_eq(result.verdict.status, "FAIL")
+        assert(result.verdict.detail.contains("poll deadline exceeded"))
+    }
+    files.remove_all(root) ?? panic("remove poll status scratch")
+}
+
+#Test("poll checked exit predicates retain compiler-error signal deadline and invocation failures") {
+    root :: cases_test_root("poll-status-failures")
+    crashed :: cases_test_advanced(root, "compiler-error", "poll ready: jet -c 'exit 101' until exit: 101 timeout 1s every 1ms\n")
+    assert_eq(crashed.verdict.status, "ERROR")
+    assert_eq(crashed.verdict.detail, "internal compiler error (exit 101)")
+    signalled :: cases_test_advanced(root, "signal", "requires: os:unix\npoll ready: jet -c 'kill -TERM $$' until exit: 0 timeout 1s every 1ms\n")
+    assert_eq(signalled.verdict.status, "ERROR")
+    assert_eq(signalled.verdict.detail, "child terminated by signal")
+    expired :: cases_test_advanced(root, "child-timeout", "poll ready: jet -c 'sleep 20' until exit: 0 timeout 20ms every 1ms\n")
+    assert_eq(expired.verdict.status, "FAIL")
+    assert_eq(expired.verdict.detail, "poll deadline exceeded")
+    missing :: cases_test_advanced(root, "invocation-error", "poll ready: {{work}}/no-such-command until exit: 0 timeout 1s every 1ms\n")
+    assert_eq(missing.verdict.status, "ERROR")
+    assert(missing.verdict.detail.starts_with("spawn:"))
+    files.remove_all(root) ?? panic("remove poll failure scratch")
+}
+
+#Test("process assertions and awaits accept canonical non-zombie forms and reject aliases") {
+    loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
+        form :: kit_steps_process_form(mode) ?? panic("canonical process form")
+        assert_eq(form.mode, mode)
+        assert_eq(kit_steps_parse_case("step: true\nprocess -1: {mode}\n").error, "")
+        assert_eq(kit_steps_parse_case("await: process -1 {mode} timeout 1s every 1ms\n").error, "")
+    }
+    loop mode in ["nonzombie", "non-zombie", "alive-non-zombie", "proc-nonzombie", "proc-readable", "proc-readable-non-zombie"] {
+        assert_eq(kit_steps_process_form(mode), None)
+        assert(kit_steps_parse_case("step: true\nprocess -1: {mode}\n").error != "")
+        assert(kit_steps_parse_case("await: process -1 {mode} timeout 1s every 1ms\n").error != "")
+    }
+}
+
+#Test("both non-zombie forms share real live-child assertions awaits and absent-PID deadlines") {
+    if sys.name() != "linux" -> return
+    root :: cases_test_root("await-nonzombie")
+    loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
+        ready :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nawait: process {{pid:peer}} {mode} timeout 1s every 1ms\nstep: true\nprocess {{pid:peer}}: {mode}\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\n"
+        assert_eq(cases_test_advanced(root, "ready", ready).verdict.status, "PASS")
+        missing :: cases_test_advanced(root, "absent", "requires: os-name:linux\nstep: true\nprocess -1: {mode}\n")
+        assert_eq(missing.verdict.status, "FAIL")
+        assert_eq(missing.verdict.detail, "process state predicate failed")
+        expired :: cases_test_advanced(root, "deadline", "requires: os-name:linux\nawait: process -1 {mode} timeout 2ms every 1ms\n")
+        assert_eq(expired.verdict.status, "FAIL")
+        assert_eq(expired.verdict.detail, "await deadline exceeded")
+    }
+    files.remove_all(root) ?? panic("remove nonzombie await scratch")
+}
+
+#Test("non-zombie conditions select awaits early and attached assertions after their command") {
+    root :: cases_test_root("await-nonzombie-conditions")
+    loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
+        skipped :: "when os-name !{sys.name()}: await: process {{cap:unknown}} {mode} timeout 1s every 1ms\nstep: printf ready\nwhen stdout = \"waiting\": process -1: {mode}\nstdout: = \"ready\"\n"
+        assert_eq(cases_test_advanced(root, "skipped", skipped).verdict.status, "PASS")
+        if sys.name() != "linux" {
+            // Unknown PID remains unresolved only on unsupported hosts.
+            after :: "step: printf before\nstep: printf after\nwhen stdout = \"before\": process {{cap:unknown}}: {mode}\nstdout: = \"after\"\n"
+            assert_eq(cases_test_advanced(root, "after-command-false", after).verdict.status, "PASS")
+            selected :: cases_test_advanced(root, "after-command-true", "step: printf before\nstep: printf after\nwhen stdout = \"after\": process {{cap:unknown}}: {mode}\n")
+            assert_eq(selected.verdict.status, "REFUSED")
+            assert_eq(selected.verdict.detail, "process-state")
+            failed :: cases_test_advanced(root, "command-failure", "step: false\nprocess {{cap:unknown}}: {mode}\n")
+            assert_eq(failed.verdict.status, "FAIL")
+            awaiting :: cases_test_advanced(root, "selected-await", "await: process {{cap:unknown}} {mode} timeout 1s every 1ms\n")
+            assert_eq(awaiting.verdict.status, "REFUSED")
+            assert_eq(awaiting.verdict.detail, "process-state")
+            env :: kit_test_steps_env()
+            plan :: kit_steps_parse_case("await: process {{cap:unknown}} {mode} timeout 1s every 1ms\n")
+            context :: kit_steps_context(plan, "case", env, env.root, env.scratch, root, kit_test_steps_bless())
+            state :: KitStepState{last: kit_steps_action_run(), built: "", built_once: false}
+            direct :: kit_steps_await(plan.steps[0], context, state)
+            assert_eq(direct.verdict.status, "REFUSED")
+            assert_eq(direct.verdict.detail, "process-state")
+            assertion :: KitAssertion{stream: "process", path: "{{cap:unknown}}", mode: mode, value: ""}
+            checked :: kit_steps_process_check(assertion, context, state)
+            assert_eq(checked.status, "REFUSED")
+            assert_eq(checked.detail, "process-state")
+        }
+    }
+    files.remove_all(root) ?? panic("remove nonzombie condition scratch")
+}

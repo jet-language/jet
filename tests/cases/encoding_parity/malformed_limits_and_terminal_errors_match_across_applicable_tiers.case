@@ -1,0 +1,19 @@
+# tests/encoding_parity.rs::malformed_limits_and_terminal_errors_match_across_applicable_tiers
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: malformed_limits_and_terminal_errors_match_across_applicable_tiers.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: has-line "true" # original lines().any exact true
+stdout: ~any "Syntax" "true" # original contains disjunction
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot

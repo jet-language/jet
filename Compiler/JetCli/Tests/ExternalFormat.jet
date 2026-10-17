@@ -1,0 +1,50 @@
+// Assemble with the production compiler/CLI sources, replacing its run entry.
+// Integrator supplies a disk-backed JET_CLI_FMT_TEST_ROOT, not a provider mock.
+use core.files as cli_files
+use core.sys as cli_sys
+use core.process as cli_process
+
+fn external_format_require(ok: Bool, label: String) Never! {
+    if !ok -> panic("external formatter continuation: {label}")
+}
+
+fn run() {
+    base :: cli_sys.get("JET_CLI_FMT_TEST_ROOT") ?? panic("set JET_CLI_FMT_TEST_ROOT to disk-backed scratch")
+    root :: "{base}/fmt-{cli_process.current_pid()}"
+    cli_files.create_dir_all("{root}/staged") ?? panic("create fixture")
+    paths :: [String]{"{root}/a.nix", "{root}/b.nix"}
+    staged :: [String]{"{root}/staged/a.nix", "{root}/staged/b.nix"}
+    before :: [[U8]]{"old\n".bytes(), "same\n".bytes()}
+    cli_files.write_bytes(paths[0], before[0]) ?? panic("first input")
+    cli_files.write_bytes(paths[1], before[1]) ?? panic("second input")
+    cli_files.write(staged[0], "new\n") ?? panic("changed staged output")
+    cli_files.write(staged[1], "same\n") ?? panic("unchanged staged output")
+    checked :: jet_cli_external_fmt_finish(root, paths, staged, before, true, false, false, false)
+    external_format_require(checked.exit_code == 1 && checked.stdout == "a.nix\n" && checked.stderr == "", "check only dirty paths")
+    external_format_require((cli_files.read(paths[0]) ?? panic("read original")) == "old\n", "check does not write")
+    diff :: "--- a.nix\n+++ a.nix\n@@ -1,1 +1,1 @@\n-old\n+new\n"
+    human :: jet_cli_external_fmt_finish(root, paths, staged, before, true, true, false, false)
+    external_format_require(human.stdout == "a.nix\n{diff}" && human.exit_code == 1, "human diff")
+    machine :: jet_cli_external_fmt_finish(root, paths, staged, before, true, true, true, false)
+    expected :: jet_cli_external_fmt_status("dirty", Val([JetCLIStatusValue]{jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text("a.nix")), jet_cli_status_field("diff", jet_cli_status_text(diff))})}))
+    external_format_require(machine.stdout == expected && machine.exit_code == 1, "JSON diff with shared status envelope")
+    binary_diff :: jet_cli_external_fmt_diff("binary.nix", [U8]{255, 10}, [U8]{254, 65, 10})
+    external_format_require(binary_diff == "--- binary.nix\n+++ binary.nix\n@@ -1,1 +1,1 @@\n-�\n+�A\n", "lossy UTF-8 retains invalid input")
+    missing :: [String]{staged[0], "{root}/staged/missing.nix"}
+    failed :: jet_cli_external_fmt_finish(root, paths, missing, before, false, false, false, false)
+    external_format_require(failed.exit_code == 1 && failed.stderr.contains("E1340"), "missing child output")
+    external_format_require((cli_files.read(paths[0]) ?? panic("read original")) == "old\n", "preflight all outputs before any write")
+    written :: jet_cli_external_fmt_finish(root, paths, staged, before, false, false, true, false)
+    external_format_require(written.exit_code == 0 && written.stdout == jet_cli_external_fmt_status("ok", None), "write JSON")
+    external_format_require((cli_files.read(paths[0]) ?? panic("read formatted original")) == "new\n", "writeback actual bytes")
+    clean :: jet_cli_external_fmt_finish(root, paths, staged, [[U8]]{"new\n".bytes(), "same\n".bytes()}, true, true, true, false)
+    external_format_require(clean.exit_code == 0 && clean.stdout == jet_cli_external_fmt_status("ok", None), "clean JSON")
+    // Simulate an original changing into a directory after formatter return:
+    // the first write remains published when a later original is unwritable.
+    cli_files.create_dir_all("{root}/blocked") ?? panic("blocked publication path")
+    cli_files.write(staged[1], "changed\n") ?? panic("second changed output")
+    partial :: jet_cli_external_fmt_finish(root, [String]{paths[0], "{root}/blocked"}, staged, before, false, false, false, false)
+    external_format_require(partial.exit_code == 2 && partial.stderr.contains("E1340"), "later write failure")
+    external_format_require((cli_files.read(paths[0]) ?? panic("read partial write")) == "new\n", "preceding write survives failure")
+    cli_files.rmtree(root).drop("remove formatter fixture")
+}

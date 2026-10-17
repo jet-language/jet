@@ -44,7 +44,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 /// Schema of one item check record (an action record under the item key).
-const ITEM_CHECK_SCHEMA: &str = "jet.item-check/v1";
+const ITEM_CHECK_SCHEMA: &str = "jet.item-check/v2";
 const SECTION_ITEM: u64 = 1;
 
 /// A checked module whose bodies may be reused.
@@ -557,6 +557,9 @@ fn each_span(summary: &mut EffectSummary, visit: &mut dyn FnMut(&mut Span) -> bo
     }
     for obligation in &mut summary.autodiff_obligations {
         go(&mut obligation.span);
+    }
+    for site in &mut summary.shared_sites {
+        go(&mut site.span);
     }
     for call in &mut summary.compute_calls {
         go(&mut call.span);

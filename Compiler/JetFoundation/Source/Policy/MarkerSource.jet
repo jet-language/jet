@@ -1,0 +1,283 @@
+// D-META-ONE1=A: the marker registry is read from Prelude Jet source
+// (crates/jet-foundation/src/Policy/MarkerSource.rs). `Prelude/Markers.jet`
+// holds one `marker Name(params…)` declaration per rule in the ratified
+// D-META-FORM1=A / D-MARKER-SITES1=B form. This reader accepts that one
+// shape and nothing else; a malformed row is a bug in a file that ships with
+// the compiler, so it panics with the offending line.
+
+// `RuleSite::ALL` names, in order.
+MARKER_SOURCE_SITES :: [String]{
+    "Package", "File", "Module", "Function", "Method", "Block", "Statement", "Expression", "Type",
+    "Impl", "Declaration", "Constant", "Field", "Variant", "Parameter", "Test", "Operation", "Text",
+}
+
+MARKER_SOURCE_SCOPES :: [String]{"Organization", "Package", "Module", "Function", "Block"}
+
+MARKER_SOURCE_RESOLUTIONS :: [String]{"SiteBound", "Override", "Merge", "Tighten"}
+
+// Tracks bracket depth and string literals so a separator inside either is
+// never mistaken for a top-level one.
+struct MarkerSourceScan {
+    depth: Int
+    in_string: Bool
+    escaped: Bool
+}
+
+// `Type{default}` split on its outer braces.
+struct MarkerSourceDefault {
+    type_text: String
+    default: String
+}
+
+fn marker_source_slice(text: String, start: Int, end: Int) -> String Never! {
+    bytes :: text.bytes()
+    if start >= end -> return ""
+    String.from_bytes(bytes[start..<end]) ?? ""
+}
+
+// True when this byte sits at top level and outside a string.
+fn marker_source_scan_step(scan: &MarkerSourceScan, byte: Int) -> Bool Never! {
+    if scan.in_string {
+        if {
+            scan.escaped -> scan.escaped = false
+            byte == 92 -> scan.escaped = true
+            byte == 34 -> scan.in_string = false
+            else -> {}
+        }
+        return false
+    }
+    if {
+        byte == 34 -> {
+            scan.in_string = true
+            return false
+        }
+        byte == 91 || byte == 40 || byte == 123 -> {
+            scan.depth += 1
+            return false
+        }
+        byte == 93 || byte == 41 || byte == 125 -> {
+            scan.depth -= 1
+            return false
+        }
+        else -> {}
+    }
+    scan.depth == 0
+}
+
+// Comma-separated entries at nesting depth zero, outside string literals.
+fn marker_source_split_top_level(text: String) -> [String] Never! {
+    entries := [String]{}
+    start := 0
+    scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+    loop (index, byte) in text.bytes() {
+        value :: Int.from_u8(byte)
+        if marker_source_scan_step(&scan, value) && value == 44 {
+            &entries.push(marker_source_slice(text, start, index).trim())
+            start = index + 1
+        }
+    }
+    last :: marker_source_slice(text, start, text.len()).trim()
+    if last.len() > 0 -> &entries.push(last)
+    entries
+}
+
+// Split `Type{default}` on its outer braces. Braces inside the default belong
+// to the value, as do commas and braces inside strings.
+fn marker_source_split_default(value: String) -> MarkerSourceDefault? Never! {
+    bytes :: value.bytes()
+    scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+    loop (index, byte) in bytes {
+        current :: Int.from_u8(byte)
+        if scan.depth == 0 && !scan.in_string && current == 123 {
+            default_scan := MarkerSourceScan{depth: 0, in_string: false, escaped: false}
+            loop end in index..<bytes.len() {
+                inner :: Int.from_u8(bytes[end])
+                marker_source_scan_step(&default_scan, inner)
+                if inner == 125 && default_scan.depth == 0 && !default_scan.in_string {
+                    if marker_source_slice(value, end + 1, bytes.len()).trim().len() == 0 {
+                        return Val(MarkerSourceDefault{
+                            type_text: marker_source_slice(value, 0, index).trim(),
+                            default: marker_source_slice(value, index + 1, end).trim(),
+                        })
+                    }
+                    break
+                }
+            }
+            break
+        }
+        marker_source_scan_step(&scan, current)
+    }
+    None
+}
+
+// The entries of a `[…]` value.
+fn marker_source_list(value: String) -> [String] Never! {
+    if !value.starts_with("[") || !value.ends_with("]") || value.len() < 2 -> panic("expected a `[…]` list, found `{value}`")
+    marker_source_split_top_level(marker_source_slice(value, 1, value.len() - 1))
+}
+
+fn marker_source_flag(value: String, line: String) -> Bool Never! {
+    if value == {
+        "true" -> return true
+        "false" -> return false
+        else -> panic("a marker fact reads `true` or `false`, found `{value}` in {line}")
+    }
+}
+
+fn marker_source_unquote(value: String, line: String) -> String Never! {
+    if !value.starts_with("\"") || !value.ends_with("\"") || value.len() < 2 -> panic("expected a quoted value, found `{value}` in {line}")
+    inner :: marker_source_slice(value, 1, value.len() - 1).bytes()
+    out := [U8]{}
+    escaped := false
+    loop byte in inner {
+        if escaped {
+            &out.push(byte)
+            escaped = false
+            next
+        }
+        if Int.from_u8(byte) == 92 {
+            escaped = true
+            next
+        }
+        &out.push(byte)
+    }
+    String.from_bytes(out) ?? panic("a marker fact quote is not UTF-8 in {line}")
+}
+
+fn marker_source_unprefixed(written: String) -> String Never! {
+    if written.starts_with(".") -> return marker_source_slice(written, 1, written.len())
+    written.copy()
+}
+
+fn marker_source_site(written: String, line: String) -> String Never! {
+    name :: marker_source_unprefixed(written)
+    if !MARKER_SOURCE_SITES.contains(name) -> panic("`{written}` is not a marker site, in {line}")
+    name
+}
+
+fn marker_source_scope(written: String, line: String) -> String Never! {
+    name :: marker_source_unprefixed(written)
+    if !MARKER_SOURCE_SCOPES.contains(name) -> panic("`{name}` is not a policy scope, in {line}")
+    name
+}
+
+fn marker_source_resolution(written: String, line: String) -> String Never! {
+    name :: marker_source_unprefixed(written)
+    if !MARKER_SOURCE_RESOLUTIONS.contains(name) -> panic("`{name}` is not a resolution, in {line}")
+    name
+}
+
+// D-RULEARG-TYPES1=A: a written parameter type names a typed argument shape
+// or a closed `core.compiler.lang` menu, read as an identifier from it.
+// `PolicySetting` entries are `key = value`, so it binds as a free value.
+fn marker_source_arg_type(source_type: String) -> TAppliedRuleArgKind Never! {
+    if source_type == {
+        "Value" | "PolicySetting" -> TAppliedRuleArgKind.Any
+        "String" -> TAppliedRuleArgKind.String
+        "Path" -> TAppliedRuleArgKind.Path
+        "Ident" -> TAppliedRuleArgKind.Ident
+        "Bool" -> TAppliedRuleArgKind.Bool
+        "Int" -> TAppliedRuleArgKind.Int
+        "Duration | String" -> TAppliedRuleArgKind.DurationOrString
+        "[Effect]" -> TAppliedRuleArgKind.EffectRoots
+        else -> TAppliedRuleArgKind.Ident
+    }
+}
+
+fn marker_source_byte_index(text: String, byte: Int) -> Int? Never! {
+    loop (index, value) in text.bytes() {
+        if Int.from_u8(value) == byte -> return Val(index)
+    }
+    None
+}
+
+fn marker_source_last_byte_index(text: String, byte: Int) -> Int? Never! {
+    found := Int?{None}
+    loop (index, value) in text.bytes() {
+        if Int.from_u8(value) == byte -> found = Val(index)
+    }
+    found
+}
+
+fn marker_source_declaration(line: String) -> TAppliedRule Never! {
+    rest :: marker_source_slice(line, 7, line.len()).trim()
+    open :: marker_source_byte_index(rest, 40) ?? panic("marker declaration without a parameter list: {line}")
+    close :: marker_source_last_byte_index(rest, 41) ?? panic("marker declaration without a closing `)`: {line}")
+    name :: marker_source_slice(rest, 0, open).trim()
+    params := [TAppliedRuleParameter]{}
+    variadic := TAppliedRuleArgKind?{None}
+    variadic_source_type := String?{None}
+    sites := [String]{}
+    scopes := [String]{}
+    repeatable := false
+    owns_menu := false
+    inherits := false
+    resolution := "SiteBound"
+    companion_site := TAppliedRuleCompanionSite?{None}
+    status := TAppliedRuleStatus.Active
+    loop entry in marker_source_split_top_level(marker_source_slice(rest, open + 1, close)) {
+        colon :: marker_source_byte_index(entry, 58) ?? panic("marker parameter without `:` in {line}: {entry}")
+        label :: marker_source_slice(entry, 0, colon).trim()
+        value :: marker_source_slice(entry, colon + 1, entry.len()).trim()
+        if label.starts_with("$") {
+            fact :: marker_source_slice(label, 1, label.len())
+            if fact == {
+                "sites" -> sites = loop item in marker_source_list(value) -> marker_source_site(item, line)
+                "scopes" -> scopes = loop item in marker_source_list(value) -> marker_source_scope(item, line)
+                "repeatable" -> repeatable = marker_source_flag(value, line)
+                "owns_menu" -> owns_menu = marker_source_flag(value, line)
+                "inherits" -> inherits = marker_source_flag(value, line)
+                "resolution" -> resolution = marker_source_resolution(value, line)
+                "companion" -> {
+                    parts :: marker_source_list(value)
+                    if parts.len() != 2 -> panic("`$companion` reads `[Rule, .Site]` in {line}")
+                    companion_site = Val(TAppliedRuleCompanionSite{rule: parts[0], site: marker_source_site(parts[1], line)})
+                }
+                "retired" -> status = TAppliedRuleStatus.Retired{replacement: marker_source_unquote(value, line)}
+                else -> panic("unknown marker fact `{label}` in {line}")
+            }
+            next
+        }
+        type_text := value
+        default := String?{None}
+        if marker_source_split_default(value) == .Val(split) {
+            type_text = split.type_text
+            default = Val(split.default)
+        }
+        if type_text.starts_with("...") {
+            element :: marker_source_slice(type_text, 3, type_text.len()).trim()
+            variadic = Val(marker_source_arg_type(element))
+            variadic_source_type = Val(element)
+            next
+        }
+        &params.push(TAppliedRuleParameter{
+            name: label,
+            kind: marker_source_arg_type(type_text),
+            source_type: type_text,
+            default_source: default,
+        })
+    }
+    TAppliedRule{
+        name: name,
+        signature: TAppliedRuleSignature{params: params, variadic: variadic, variadic_source_type: variadic_source_type},
+        policy_scopes: scopes,
+        sites: sites,
+        repeatable: repeatable,
+        owns_menu: owns_menu,
+        companion_site: companion_site,
+        status: status,
+        inherits: inherits,
+        resolution: resolution,
+    }
+}
+
+// Every `marker` declaration in `source`, the text of Prelude/Markers.jet
+// (MarkerSource.rs `read`), in source order.
+fn marker_source_read(source: String) -> [TAppliedRule] Never! {
+    rows := [TAppliedRule]{}
+    loop raw in source.split("\n") {
+        line :: raw.trim()
+        if line.starts_with("marker ") -> &rows.push(marker_source_declaration(line))
+    }
+    rows
+}

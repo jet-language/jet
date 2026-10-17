@@ -1,0 +1,202 @@
+// CmdExpand.rs memory/layout/origin lenses: render only compiler-owned facts.
+use jet_driver.[JetDriverDocModule]
+use jet_foundation.[TComptimeValue, Span, Diagnostic, Type, ast_comptime_value_show, diagnostic_from_registry, diagnostic_registry_row, diagnostic_line_at, diagnostic_column_at, type_name]
+use jet_sema.[SemaMemoryProjection, sema_user_template_ct_value]
+
+fn jet_cli_expand_checked_show(value: TComptimeValue) -> String Never! {
+    checked :: sema_user_template_ct_value(value) ?? panic("checked reflection value has no canonical AST value")
+    ast_comptime_value_show(checked)
+}
+fn jet_cli_expand_checked_json(value: TComptimeValue) -> JetCLIStatusValue Never! {
+    if value == {
+        .Int(number) -> if number >= 0 -> jet_cli_status_int(number) else -> jet_cli_status_text("{number}")
+        .Bool(flag) -> jet_cli_status_bool(flag)
+        .String(text) -> jet_cli_status_text(text)
+        .Present(inner) -> jet_cli_expand_checked_json(inner)
+        .Failed(.Clean(_)) -> JetCLIStatusValue.Null
+        .Enum(owner, variant, _) -> if owner == "Option" && variant == "None" -> JetCLIStatusValue.Null else -> jet_cli_status_text(jet_cli_expand_checked_show(value))
+        .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_expand_checked_json(entry))
+        .Struct(_, fields) -> jet_cli_status_object(loop field in fields -> jet_cli_status_field(field.name, jet_cli_expand_checked_json(field.value)))
+        else -> jet_cli_status_text(jet_cli_expand_checked_show(value))
+    }
+}
+fn jet_cli_expand_checked_field(value: TComptimeValue, name: String) -> TComptimeValue? Never! {
+    if value == .Struct(_, fields) {
+        loop field in fields { if field.name == name -> return Val(field.value) }
+    }
+    None
+}
+fn jet_cli_expand_checked_display(value: TComptimeValue?) -> String Never! {
+    checked :: value ?? return "unknown"
+    if checked == {
+        .String(text) -> text
+        .Int(number) -> "{number}"
+        .Failed(.Clean(_)) -> "unknown"
+        .Enum(owner, variant, _) -> if owner == "Option" && variant == "None" -> "unknown" else -> jet_cli_expand_checked_show(checked)
+        else -> jet_cli_expand_checked_show(checked)
+    }
+}
+fn jet_cli_expand_location(fields: &[JetCLIStatusField], modules: [JetDriverDocModule], source: String, span: Span) Never! {
+    if jet_cli_expand_source(modules, source) == .Val(text) {
+        &fields.push(jet_cli_status_field("line", jet_cli_status_int(diagnostic_line_at(text, span.start))))
+        &fields.push(jet_cli_status_field("column", jet_cli_status_int(diagnostic_column_at(text, span.start))))
+    }
+}
+fn jet_cli_expand_memory_status(projection: SemaMemoryProjection?) -> (text: String, value: JetCLIStatusValue) Never! {
+    if projection == {
+        .Val(.Proven) -> (text: "proven", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("proven"))}))
+        .Val(.Violated(path, operation)) -> (text: "violated by {operation} through {path.join(" -> ")}", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("violated")), jet_cli_status_field("operation", jet_cli_status_text(operation)), jet_cli_status_field("call_path", jet_cli_status_array(loop name in path -> jet_cli_status_text(name)))}))
+        .Val(.OpenWorld(path, reason)) -> (text: "open through {path.join(" -> ")}: {reason}", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("open_world")), jet_cli_status_field("reason", jet_cli_status_text(reason)), jet_cli_status_field("call_path", jet_cli_status_array(loop name in path -> jet_cli_status_text(name)))}))
+        .None -> (text: "not projected", value: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("kind", jet_cli_status_text("not_projected"))}))
+    }
+}
+fn jet_cli_expand_memory(modules: [JetDriverDocModule], index: JetCLISemIndex) -> [JetCLIExpandFact] Never! {
+    // Every DocModule shares this one checked graph; never duplicate its rows.
+    storage :: loop unit in modules { if unit.memory_facts == .Val(value) -> break value } ?? return [JetCLIExpandFact]{}
+    permit :: storage.guard_read()
+    projections := [(root: String, fact: String):Int]{}
+    loop (position, row) in permit.value.projections -> projections[(root: row.root, fact: row.fact)] = position
+    facts := [JetCLIExpandFact]{}
+    loop declaration in permit.value.declarations {
+        loop root in declaration.roots {
+            projection :: if projections.get((root: root, fact: declaration.fact)) == .Val(position) -> Val(permit.value.projections[position].projection) else -> SemaMemoryProjection?{None}
+            status :: jet_cli_expand_memory_status(projection)
+            fields := [JetCLIStatusField]{
+                jet_cli_status_field("fact", jet_cli_status_text(declaration.fact)),
+                jet_cli_status_field("root", jet_cli_status_text(root)),
+                jet_cli_status_field("source", jet_cli_status_text(declaration.source)),
+                jet_cli_status_field("span", jet_cli_expand_span(declaration.span, jet_cli_expand_source(modules, declaration.source))),
+                jet_cli_status_field("provenance", jet_cli_status_text(declaration.provenance)),
+                jet_cli_status_field("status", status.value),
+            }
+            jet_cli_expand_location(&fields, modules, declaration.source, declaration.span)
+            &facts.push(JetCLIExpandFact{source: declaration.source, offset: declaration.span.start, name: root, text: "{root}: {declaration.fact} — {status.text} ({declaration.provenance})", value: jet_cli_status_object(fields)})
+        }
+    }
+    loop position in 1..<facts.len() {
+        row :: facts[position].copy()
+        destination := position
+        loop destination > 0 && facts[destination - 1].text > row.text {
+            facts[destination] = facts[destination - 1]
+            destination -= 1
+        }
+        facts[destination] = row
+    }
+    facts
+}
+fn jet_cli_expand_layout_missing(value: TComptimeValue, names: [String]) -> Bool Never! {
+    loop name in names {
+        field :: jet_cli_expand_checked_field(value, name) ?? return true
+        if field == .Failed(.Clean(_)) -> return true
+        if field == .Enum(owner, variant, _) && owner == "Option" && variant == "None" -> return true
+    }
+    false
+}
+fn jet_cli_expand_layout_unavailable(layout: TComptimeValue) -> Bool Never! {
+    if jet_cli_expand_layout_missing(layout, [String]{"size", "alignment", "stride"}) -> return true
+    fields :: jet_cli_expand_checked_field(layout, "fields") ?? return true
+    if fields == .List(values) {
+        loop field in values { if jet_cli_expand_layout_missing(field, [String]{"offset", "size"}) -> return true }
+    }
+    false
+}
+fn jet_cli_expand_layout_diagnostic() -> Diagnostic Never! {
+    row :: diagnostic_registry_row("E0959") ?? panic("layout byte facts diagnostic is not registered")
+    what :: row.what.replace("{{type}}", "LayoutInfo").replace("{{member}}", "size")
+    diagnostic_from_registry("E0959", None, what, row.why, row.fix)
+}
+fn jet_cli_expand_layout_bytes(layout: TComptimeValue) -> JetCLIStatusValue Never! {
+    if !jet_cli_expand_layout_unavailable(layout) -> return jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text("available"))})
+    diagnostic :: jet_cli_expand_layout_diagnostic()
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("status", jet_cli_status_text("unavailable")),
+        jet_cli_status_field("diagnostic", jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("code", jet_cli_status_text(diagnostic.code)),
+            jet_cli_status_field("what", jet_cli_status_text(diagnostic.what)),
+            jet_cli_status_field("why", jet_cli_status_text(diagnostic.why)),
+            jet_cli_status_field("fix", jet_cli_status_text(diagnostic.fix)),
+        })),
+    })
+}
+fn jet_cli_expand_layout_text(layout: TComptimeValue) -> String Never! {
+    header_parts := [String]{}
+    loop name in ([String]{"kind", "size", "alignment", "stride", "requested_alignment", "effective_alignment", "target", "guarantee", "source"}) {
+        &header_parts.push("{name}={jet_cli_expand_checked_display(jet_cli_expand_checked_field(layout, name))}")
+    }
+    fields := [String]{}
+    if jet_cli_expand_checked_field(layout, "fields") == .Val(.List(values)) {
+        loop field in values {
+            name :: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "name"))
+            ty :: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "ty"))
+            offset :: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "offset"))
+            size :: jet_cli_expand_checked_display(jet_cli_expand_checked_field(field, "size"))
+            &fields.push("{name}:{ty}(offset={offset},size={size})")
+        }
+    }
+    status := ""
+    if jet_cli_expand_layout_unavailable(layout) {
+        diagnostic :: jet_cli_expand_layout_diagnostic()
+        status = " byte_facts=unavailable[{diagnostic.code}] {diagnostic.what}; Why: {diagnostic.why}; Fix: {diagnostic.fix}; More: jet-lang.dev/e/{diagnostic.code}"
+    }
+    "{header_parts.join(" ")}{status} fields=[{fields.join(",")}]"
+}
+fn jet_cli_expand_layout(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+    facts := [JetCLIExpandFact]{}
+    loop unit in modules {
+        loop row in unit.layout_facts {
+            line :: diagnostic_line_at(unit.source, row.span.start)
+            column :: diagnostic_column_at(unit.source, row.span.start)
+            value :: jet_cli_status_object([JetCLIStatusField]{
+                jet_cli_status_field("type", jet_cli_status_text(row.name)),
+                jet_cli_status_field("source", jet_cli_status_text(unit.path)),
+                jet_cli_status_field("span", jet_cli_expand_span(row.span, Val(unit.source))),
+                jet_cli_status_field("layout", jet_cli_expand_checked_json(row.value)),
+                jet_cli_status_field("byte_facts", jet_cli_expand_layout_bytes(row.value)),
+            })
+            &facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: row.name, text: "{unit.path}:{line}:{column}   {row.name}.@layout   {jet_cli_expand_layout_text(row.value)}", value: value})
+        }
+    }
+    jet_cli_expand_sort_facts(&facts)
+    facts
+}
+fn jet_cli_expand_origin_receiver(source: String, span: Span) -> String Never! {
+    if span.start < 0 || span.end < span.start || span.end > source.len() -> return "value"
+    text :: source.slice(span.start, span.end).trim()
+    if text.ends_with(".@origin") {
+        receiver :: text.slice(0, text.len() - ".@origin".len()).trim()
+        if receiver != "" -> return receiver
+    }
+    if text == "@origin" {
+        words :: jet_cli_find_words(source.slice(0, span.start))
+        if words.len() > 0 {
+            word :: words[words.len() - 1]
+            receiver :: if word.ends_with(".") -> word.slice(0, word.len() - 1) else -> word
+            if receiver != "" -> return receiver
+        }
+    }
+    "value"
+}
+fn jet_cli_expand_origin(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+    facts := [JetCLIExpandFact]{}
+    fact_type :: type_name(Type.Option{inner: Type.Named{name: "OriginInfo"}})
+    loop unit in modules {
+        loop function in unit.functions {
+            loop row in function.origin_facts {
+                receiver :: row.receiver ?? jet_cli_expand_origin_receiver(unit.source, row.span)
+                line :: diagnostic_line_at(unit.source, row.span.start)
+                column :: diagnostic_column_at(unit.source, row.span.start)
+                value :: jet_cli_status_object([JetCLIStatusField]{
+                    jet_cli_status_field("receiver", jet_cli_status_text(receiver)),
+                    jet_cli_status_field("fact", jet_cli_status_text("@origin")),
+                    jet_cli_status_field("type", jet_cli_status_text(fact_type)),
+                    jet_cli_status_field("source", jet_cli_status_text(unit.path)),
+                    jet_cli_status_field("span", jet_cli_expand_span(row.span, Val(unit.source))),
+                    jet_cli_status_field("value", jet_cli_expand_checked_json(row.value)),
+                })
+                &facts.push(JetCLIExpandFact{source: unit.path, offset: row.span.start, name: receiver, text: "{unit.path}:{line}:{column}   {receiver}.@origin   {fact_type}={jet_cli_expand_checked_show(row.value)}", value: value})
+            }
+        }
+    }
+    jet_cli_expand_sort_facts(&facts)
+    facts
+}

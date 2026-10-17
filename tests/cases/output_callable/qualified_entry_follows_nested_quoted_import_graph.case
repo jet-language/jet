@@ -1,0 +1,17 @@
+# Port of tests/output_callable.rs::qualified_entry_follows_nested_quoted_import_graph; original sources and predicates.
+# ORACLE-LITERAL; PENDING-SAME-HEAD (heavy lane paused); no reference capture blessed.
+# Generated Rust symbol-text retires; public nested/re-exported callable facts and runtime output remain.
+fixture: qualified_entry_follows_nested_quoted_import_graph.fixture
+env: NO_COLOR=1
+step: jet inspect output main.jet nested --json
+exit: 0
+json: stdout doc $.output.entry = "run"
+json: stdout doc $.output.callable_identity $= "::run" # original predicate/public projection
+json: stdout doc $.output.source_path $= "src/command.jet" # original predicate/public projection
+step: jet inspect output main.jet reexported --json
+exit: 0
+json: stdout doc $.output.entry = "run"
+json: stdout doc $.output.source_path $= "src/cli.jet" # original predicate/public projection
+step: jet run --interpret main.jet
+exit: 0
+stdout: = qualified_entry_follows_nested_quoted_import_graph.out

@@ -1,0 +1,17 @@
+
+use core.data as data
+
+fn run() {
+    if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
+        .Ok(_) -> print("unexpected ok")
+        .Err(error) -> print("{error}")
+    }
+    compensated :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic("compensated")
+    print(compensated[2])
+    if data.rolling_mean([Float.MAX, Float.MAX], 2) == {
+        .Ok(_) -> print("unexpected overflow ok")
+        .Err(error) -> print("{error}")
+    }
+    zero :: data.rolling_mean([-0.0, -0.0], 2) ?? panic("zero")
+    print(zero[1])
+}

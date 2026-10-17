@@ -1,0 +1,23 @@
+# Port of tests/jetpack_services.rs:1372-1430. PENDING-GRAMMAR(batch-four).
+requires: os-name:linux
+fixture: production_supervisor_stops_descendants_after_leader_exit.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH={work}/bin:{env:PATH}
+env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+mkdir: root
+mkdir: home
+copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+mkdir: state
+chmod: bin/systemd-run 755
+chmod: bin/systemctl 755
+step: jetpack services up --no-color
+await: file .jet/services/fixture/data/child.pid lines >= 1 timeout 5s every 50ms # original ed77c235f tests/jetpack_services.rs:1398 wait_for_file_lines helper610-625 counts lines >=1 with 5s deadline and 50ms sleep
+capture: child = text file.trim .jet/services/fixture/data/child.pid
+cap:child: is-u32 # original ed77c235f tests/jetpack_services.rs:1399-1403 child PID trim then parse::<u32>().unwrap
+process {cap:child}: alive-nonzombie
+append: .jet/services/fixture/data/exit.flag "exit\n"
+await: file .jet/services/fixture/lifecycle ~ "phase=failed" timeout 5s every 50ms # original ed77c235f tests/jetpack_services.rs:1410 wait_for_file_contains helper658-672 tests phase=failed with 5s deadline and 50ms sleep
+repeat while process {cap:child} alive-nonzombie timeout 3s every 25ms fail "supervisor left a descendant alive after leader exit"
+end repeat
+await: file .jet/services/fixture/pid absent timeout 5s every 50ms

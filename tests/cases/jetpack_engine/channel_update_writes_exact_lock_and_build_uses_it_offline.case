@@ -1,0 +1,55 @@
+# HAND-PORT tests/jetpack_engine.rs:5351-5418 channel_update_writes_exact_lock_and_build_uses_it_offline
+# PENDING-SEAM(hangar-verified-fixture): exact assertions; no runtime parity claim.
+fixture: channel_update_writes_exact_lock_and_build_uses_it_offline.fixture
+refused: hangar-verified-fixture
+# }
+# 
+# pub fn realized_fixtures(committed: &Path, root: &Path) -> PathBuf {
+#     let fixtures = root.join("realized-fixtures");
+#     if fixtures.is_dir() {
+#         return fixtures;
+#     }
+#     fs::create_dir_all(&fixtures).unwrap();
+#     for entry in fs::read_dir(committed).unwrap() {
+#         let entry = entry.unwrap();
+#         let name = entry.file_name();
+#         let source = entry.path();
+#         let destination = fixtures.join(&name);
+#         if source.extension().and_then(|ext| ext.to_str()) != Some("json") {
+#             fs::copy(source, destination).unwrap();
+#             continue;
+#         }
+#         let stem = source.file_stem().unwrap().to_string_lossy();
+#         let staging = root.join("example-fixture-outputs").join(stem.as_ref());
+#         fs::create_dir_all(&staging).unwrap();
+#         fs::write(staging.join("payload"), stem.as_bytes()).unwrap();
+#         let output = seed_hangar_object(root, &staging);
+#         let mut json = fs::read_to_string(source).unwrap();
+#         let key = json.find("\"out\"").unwrap();
+#         let colon = key + json[key..].find(':').unwrap() + 1;
+#         let value_start = colon + json[colon..].find('"').unwrap();
+#         let value_end = value_start + 1 + json[value_start + 1..].find('"').unwrap() + 1;
+#         json.replace_range(
+#             value_start..value_end,
+#             &format!("{:?}", output.to_string_lossy()),
+#         );
+#         fs::write(destination, json).unwrap();
+#     }
+#     fixtures
+# }
+# 
+env: JETPACK_ROOT={work}/root
+mkdir: root
+step: jetpack update --no-color --yes --fixtures {work}/fixtures
+cwd: project
+exit: 0
+stderr: ~ "Download 240 MB" # original predicate
+file: project/.jet/lock ~ "[[source_channel]]" # original predicate
+file: project/.jet/lock ~ "channel = \"latest\"" # original predicate
+file: project/.jet/lock ~ "exact = \"github:acme/tools#v1.2.0\"" # original predicate
+# Missing setup: original realized_fixtures(&fixtures,&root) produces fixtures-realized only after sealing/admitting authentic fixture outputs.
+step: jetpack build --no-color --offline
+cwd: project
+env: JETPACK_FIXTURES={work}/fixtures-realized
+exit: 0
+

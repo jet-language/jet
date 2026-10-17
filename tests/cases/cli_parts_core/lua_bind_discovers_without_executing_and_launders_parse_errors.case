@@ -1,0 +1,15 @@
+# Port of tests/cli_parts/core.rs:211-252; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+fixture: fixtures/lua_static
+requires: tool:luac
+step: jet inspect bind lua {work}/static.lua --pkg static_ops
+exit: 0
+file: .jet/bindings/lua/static_ops.jet ~ "pub fn visible(" # original predicate
+file: .jet/bindings/lua/static_ops.jet !~ "pub fn fake(" # original predicate
+file: .jet/bindings/lua/static_ops.jet !~ "pub fn hidden(" # original predicate
+step: jet inspect bind lua {work}/invalid.lua --pkg bad
+exit: 1
+stderr: ~ "Error [E3208]" # original predicate
+stderr: !~ "invalid.lua:" # original predicate
+stderr: !~ "near 'end'" # original predicate

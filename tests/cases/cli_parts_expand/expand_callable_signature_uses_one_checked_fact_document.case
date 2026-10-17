@@ -1,0 +1,21 @@
+# Port of tests/cli_parts/expand.rs:408-470; exact original sources and predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): text split/filter, cap comparisons, zero-key JSON.
+step: jet inspect expand --facts callable-signature {root}/Examples/features/callable/callable_policies.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "load_user [fn:" # original predicate
+stdout: ~ "label{\"user\"}: String" # original predicate
+stdout: ~ "policies=[trace(\"users.load\")]" # original predicate
+stdout: ~ "failure=String" # original predicate
+stdout: ~ "implicit default !Err" # original predicate
+stdout: !~ "label: label{\"user\"}: String" # original predicate
+step: jet inspect expand --facts callable-signature --json {root}/Examples/features/callable/callable_policies.jet
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $ valid # original predicate: JSON parses
+stdout: ~ "\"selection\":\"callable-signature\"" # original predicate
+stdout: ~ "\"policies\":[\"trace(\\\"users.load\\\")\"]" # original predicate
+stdout: ~ "\"default\":\"\\\"user\\\"\"" # original predicate
+stdout: ~ "\"failure_contract\"" # original predicate
+stdout: ~ "\"failure_source\":\"implicit default !Err\"" # original predicate

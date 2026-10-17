@@ -1,0 +1,60 @@
+// Plain native values only; no service authority/channel/task lifecycle here.
+// Services.rs:882-885, ServiceAuthority.rs:105-109 own field semantics.
+#Export(c) fn jet_rt_record_new_jet_service_state_store(path: I64) -> I64 {
+    result :: jet_rt_alloc(SERVICE_STORE_BYTES, I64{8})
+    encoding_store(result + SERVICE_STORE_PATH, jet_rt_string_clone(path))
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_service_state_store(value: I64) -> I64 { jet_rt_record_new_jet_service_state_store(encoding_word(value + SERVICE_STORE_PATH)) }
+#Export(c) fn jet_rt_handle_drop_jet_service_state_store(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(encoding_word(value + SERVICE_STORE_PATH))
+    jet_rt_free(value, SERVICE_STORE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_service_state_store(a: I64, b: I64) -> Bool { jet_rt_string_eq(encoding_word(a + SERVICE_STORE_PATH), encoding_word(b + SERVICE_STORE_PATH)) }
+#Export(c) fn jet_rt_record_get_jet_service_state_store_path(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + SERVICE_STORE_PATH)) }
+#Export(c) fn jet_rt_handle_show_jet_service_state_store(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{6009318582405719379}, I64{8})
+    rt_text_push_word(target, I64{8245937344271901044}, I64{8})
+    rt_text_push_word(target, I64{10341}, I64{2})
+    jet_rt_string_builder_push(target, encoding_word(value + SERVICE_STORE_PATH))
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_service_state_store(value: I64) -> I64 { jet_rt_handle_show_jet_service_state_store(value) }
+#Export(c) fn jet_rt_record_new_jet_service_runtime(store: I64, retention: I64) -> I64 {
+    // CAbiRoutes.rs:11319-11320 native(m1): canonical checked narrowing.
+    // Int.jet jet_int_owned_to_i64 owns the native-index-range stop, not a new trap.
+    raw :: jet_int_owned_to_i64(retention)
+    result :: jet_rt_alloc(SERVICE_RUNTIME_BYTES, I64{8})
+    encoding_store(result + SERVICE_RUNTIME_STORE, jet_rt_string_clone(store))
+    encoding_store(result + SERVICE_RUNTIME_RETENTION, raw)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_service_runtime(value: I64) -> I64 {
+    result :: jet_rt_alloc(SERVICE_RUNTIME_BYTES, I64{8})
+    encoding_store(result + SERVICE_RUNTIME_STORE, jet_rt_string_clone(encoding_word(value + SERVICE_RUNTIME_STORE)))
+    encoding_store(result + SERVICE_RUNTIME_RETENTION, encoding_word(value + SERVICE_RUNTIME_RETENTION))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_service_runtime(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(encoding_word(value + SERVICE_RUNTIME_STORE))
+    jet_rt_free(value, SERVICE_RUNTIME_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_record_get_jet_service_runtime_store(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + SERVICE_RUNTIME_STORE)) }
+#Export(c) fn jet_rt_record_get_jet_service_runtime_retention_ms(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + SERVICE_RUNTIME_RETENTION)) }
+#Export(c) fn jet_rt_handle_show_jet_service_runtime(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{5937260988367791443}, I64{8})
+    rt_text_push_word(target, I64{8297993834025217653}, I64{8})
+    rt_text_push_word(target, I64{263695003508}, I64{5})
+    jet_rt_string_builder_push(target, encoding_word(value + SERVICE_RUNTIME_STORE))
+    rt_text_push_word(target, I64{8389754706430402604}, I64{8})
+    rt_text_push_word(target, I64{17296887169052521}, I64{7})
+    rt_text_push_number(target, encoding_word(value + SERVICE_RUNTIME_RETENTION))
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_service_runtime(value: I64) -> I64 { jet_rt_handle_show_jet_service_runtime(value) }

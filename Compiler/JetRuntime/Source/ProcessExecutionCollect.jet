@@ -1,0 +1,283 @@
+// Plain ProcessSpec collector/lifecycle on the existing Child72 syscall seam.
+// ExecutionChild128 and launch/receipt metadata are owned by ProcessExecutionRoutes.
+// stop120 bits: requested=1, closed=2, explicit wait=4, group swept=8.
+fn process_execution_flags_add(child: I64, flag: I64) {
+    loop {
+        before :: sync_load(child + I64{120})
+        if (sync_cas(child + I64{120}, before, before.bit_or(flag)) == before) -> return
+    }
+}
+fn process_execution_first_error(child: I64, operation: I64, path: I64, cause: I64) {
+    sync_mutex_lock(child)
+    if (fd_word(child, I64{56}) == I64{0}) {
+        _ := host_io_other_take(operation, process_optional_text_clone(path), cause, child + I64{56})
+    } else { jet_rt_string_drop(cause) }
+    sync_mutex_unlock(child)
+}
+fn process_execution_sweep(child: I64) {
+    result :: host_call(I64{62}, -fd_word(process_execution_native(child), I64{8}), I64{9}, I64{0})
+    if (result < I64{0} && result != I64{-3}) -> process_execution_first_error(child, HOST_IO_OP_CLOSE, rt_static_text("process"), host_errno_cause(-result))
+    process_execution_flags_add(child, I64{8})
+}
+fn process_execution_reap_stopped(child: I64) {
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    result :: jet_process_wait_raw(process_execution_native(child), false, scratch, scratch + I64{8})
+    if (result < I64{0}) -> process_execution_first_error(child, HOST_IO_OP_CLOSE, rt_static_text("process"), host_errno_cause(fd_word(scratch, I64{16})))
+    jet_rt_free(scratch, I64{40}, I64{8})
+}
+fn process_execution_await_cleanup(child: I64) {
+    loop sync_load(child + I64{40}) == (I64{0}) {
+        _ := sync_wait(child + I64{40}, I64{0}, sync_deadline(I64{1000000}))
+    }
+}
+fn process_execution_stop(child: I64) {
+    process_execution_flags_add(child, I64{1})
+    // Cleanup runs even after scheduler stop delivery, without re-entering the
+    // public authority/cancellation boundary.
+    process_execution_sweep(child)
+}
+fn process_execution_release(child: I64) {
+    if (sync_add(child + I64{8}, I64{-1}) != I64{1}) -> return
+    jet_process_drop_raw(process_execution_native(child))
+    jet_rt_handle_drop_process_spec(fd_word(child, I64{24}))
+    jet_rt_handle_drop_process_receipt(fd_word(child, I64{48}))
+    jet_rt_handle_drop_io_error(fd_word(child, I64{56}))
+    jet_rt_string_drop(fd_word(child, I64{80}))
+    jet_rt_string_drop(fd_word(child, I64{88}))
+    jet_rt_free(child, I64{128}, I64{8})
+}
+#Export(c) fn jet_rt_handle_clone_process_child(child: I64) -> I64 {
+    _ := sync_add(child + I64{8}, I64{1})
+    child
+}
+#Export(c) fn jet_rt_handle_eq_process_child(a: I64, b: I64) -> Bool { a == b }
+#Export(c) fn jet_rt_handle_drop_process_child(child: I64) {
+    if (child == I64{0}) -> return
+    sync_mutex_lock(child)
+    worker :: fd_word(child, I64{32}) != I64{0}
+    last :: fd_word(child, I64{8}) == (if worker -> I64{2} else -> I64{1})
+    detached :: fd_word(fd_word(child, I64{24}), PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
+    unfinished :: sync_load(child + I64{40}) == I64{0}
+    sync_mutex_unlock(child)
+    // Never hold the child mutex while joining: the collector publishes its
+    // receipt under that lock before releasing its independent reference.
+    if (last && !detached && unfinished) {
+        process_execution_stop(child)
+        if worker -> process_execution_await_cleanup(child) else -> process_execution_reap_stopped(child)
+    }
+    process_execution_release(child)
+}
+fn process_execution_collect_start(child: I64, err: I64) -> Bool {
+    sync_mutex_lock(child)
+    if (fd_word(child, I64{32}) != I64{0}) {
+        sync_mutex_unlock(child)
+        return true
+    }
+    _ := sync_add(child + I64{8}, I64{1})
+    fd_put(child, I64{32}, I64{1})
+    handle :: thread_spawn(rt_process_execution_worker_address(), child)
+    if (handle < I64{0}) {
+        fd_put(child, I64{32}, I64{0})
+        sync_mutex_unlock(child)
+        process_execution_stop(child)
+        process_execution_reap_stopped(child)
+        process_execution_release(child)
+        _ := process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_RESOLVE, host_errno_cause(-handle), err)
+        return false
+    }
+    _ := thread_detach(handle)
+    sync_mutex_unlock(child)
+    true
+}
+fn process_execution_capture(child: I64, native: I64, stream: I64, scratch: I64) -> Bool {
+    offset :: spawn_stream_offset(native, stream)
+    number :: fd_word(native, offset)
+    if (number < I64{0}) -> return true
+    spec :: fd_word(child, I64{24})
+    limit :: fd_word(spec, PROCESS_SPEC_OUTPUT_LIMIT)
+    loop {
+        count :: host_call(I64{0}, number, scratch, I64{8192})
+        if (count == I64{-4}) -> next
+        if (count == I64{-11}) -> return false
+        if (count < I64{0} && !(offset == I64{56} && count == I64{-5})) {
+            process_execution_first_error(child, HOST_IO_OP_READ, if (stream == I64{1}) -> rt_static_text("process stdout") else -> rt_static_text("process stderr"), host_errno_cause(-count))
+            process_execution_stop(child)
+        }
+        if (count <= I64{0}) {
+            sync_mutex_lock(native)
+            spawn_close(fd_word(native, offset))
+            fd_put(native, offset, I64{-1})
+            sync_mutex_unlock(native)
+            return true
+        }
+        kept := count
+        if (limit != I64{0}) {
+            maximum :: fd_word(limit, I64{0})
+            remaining :: maximum - fd_word(child, I64{96})
+            if (kept > remaining) { kept = if (remaining < I64{0}) -> I64{0} else -> remaining }
+            if (kept != count) {
+                fd_put(child, I64{112}, I64{1})
+                process_execution_stop(child)
+            }
+        }
+        sync_mutex_lock(child)
+        rt_text_append(fd_word(child, if (stream == I64{1}) -> I64{80} else -> I64{88}), scratch, kept)
+        fd_put(child, I64{96}, fd_word(child, I64{96}) + kept)
+        sync_mutex_unlock(child)
+        return false
+    }
+}
+#Export(c) fn jet_rt_process_execution_worker(child: I64) -> I64 {
+    native :: process_execution_native(child)
+    spec :: fd_word(child, I64{24})
+    scratch :: jet_rt_alloc(I64{8256}, I64{8})
+    stream := I64{1}
+    loop stream <= (I64{2}) {
+        number :: fd_word(native, spawn_stream_offset(native, stream))
+        if (number >= I64{0}) {
+            flags :: host_call(I64{72}, number, I64{3}, I64{0})
+            result :: if (flags < I64{0}) -> flags else -> host_call(I64{72}, number, I64{4}, flags.bit_or(I64{2048}))
+            if (result < I64{0}) {
+                process_execution_first_error(child, HOST_IO_OP_READ, if (stream == I64{1}) -> rt_static_text("process stdout") else -> rt_static_text("process stderr"), host_errno_cause(-result))
+                process_execution_stop(child)
+                // Do not enter a blocking read after nonblocking setup failed.
+                sync_mutex_lock(native)
+                offset :: spawn_stream_offset(native, stream)
+                spawn_close(fd_word(native, offset))
+                fd_put(native, offset, I64{-1})
+                sync_mutex_unlock(native)
+            }
+        }
+        stream += I64{1}
+    }
+    exited := false
+    output_done := false
+    errors_done := false
+    status := I64{0}
+    resource_limit := I64{-1}
+    loop {
+        if !output_done -> output_done = process_execution_capture(child, native, I64{1}, scratch)
+        if !errors_done -> errors_done = process_execution_capture(child, native, I64{2}, scratch)
+        if !exited {
+            if (resource_limit < I64{0}) {
+                resource_limit = process_execution_live_limit(child, scratch)
+                if (resource_limit >= I64{0}) -> process_execution_stop(child)
+            }
+            result :: jet_process_wait_raw(native, true, scratch + I64{8192}, scratch + I64{8200})
+            if (result > I64{0}) {
+                status = fd_word(scratch, I64{8192})
+                exited = true
+            }
+            if (result < I64{0}) {
+                process_execution_first_error(child, HOST_IO_OP_CLOSE, rt_static_text("process"), host_errno_cause(fd_word(scratch, I64{8208})))
+                process_execution_stop(child)
+                exited = true
+            }
+        }
+        timeout :: fd_word(spec, PROCESS_SPEC_TIMEOUT)
+        if (!exited && timeout != I64{0} && fd_word(timeout, I64{0}) >= I64{0} && (process_execution_now() - fd_word(child, I64{72})) /% I64{1000000} >= fd_word(timeout, I64{0})) {
+            fd_put(child, I64{104}, I64{1})
+            process_execution_stop(child)
+        }
+        detached :: fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
+        contained :: !detached || sync_load(child + I64{120}).bit_and(I64{4}) != I64{0}
+        if (exited && contained && sync_load(child + I64{120}).bit_and(I64{8}) == I64{0}) {
+            process_execution_sweep(child)
+        }
+        if (exited && output_done && errors_done) -> break
+        _ := sync_wait(child + I64{40}, I64{0}, sync_deadline(I64{1000000}))
+    }
+    sync_mutex_lock(native)
+    spawn_close(fd_word(native, I64{32}))
+    fd_put(native, I64{32}, I64{-1})
+    sync_mutex_unlock(native)
+    sync_mutex_lock(child)
+    if !process_execution_validate_output(child, scratch + I64{8232}) {
+        jet_rt_handle_drop_io_error(fd_word(child, I64{56}))
+        fd_put(child, I64{56}, fd_word(scratch, I64{8232}))
+    }
+    if (fd_word(child, I64{112}) != I64{0} && fd_word(child, I64{56}) == I64{0}) -> fd_put(child, I64{56}, jet_rt_record_new_io_error_resource_limit(PROCESS_RESOURCE_OUTPUT))
+    if (resource_limit >= I64{0} && fd_word(child, I64{56}) == I64{0}) -> fd_put(child, I64{56}, jet_rt_record_new_io_error_resource_limit(resource_limit))
+    if (status.bit_and(I64{127}) == I64{24} && fd_word(spec, PROCESS_SPEC_CPU_TIME_LIMIT) != I64{0} && fd_word(child, I64{56}) == I64{0}) -> fd_put(child, I64{56}, jet_rt_record_new_io_error_resource_limit(PROCESS_RESOURCE_CPU_TIME))
+    if (fd_word(child, I64{56}) == I64{0}) -> fd_put(child, I64{48}, process_execution_receipt(child, status))
+    sync_store(child + I64{40}, I64{1})
+    sync_wake(child + I64{40}, I64{2147483647})
+    sync_mutex_unlock(child)
+    jet_rt_free(scratch, I64{8256}, I64{8})
+    process_execution_release(child)
+    I64{0}
+}
+fn process_execution_wait(child: I64, ok: I64, err: I64) -> I64 {
+    flags :: sync_load(child + I64{120})
+    if (flags.bit_and(I64{2}) != I64{0} && flags.bit_and(I64{4}) == I64{0}) {
+        return compiler_fs_error(HOST_IO_KIND_CLOSED, HOST_IO_OP_CLOSE, rt_static_text("process"), I64{0}, jet_rt_string_clone(rt_static_text("process child wait result is unavailable")), err)
+    }
+    process_execution_flags_add(child, I64{4})
+    if !process_execution_collect_start(child, err) -> return I64{0}
+    // Each aliased waiter owns its single-parker slot; polling remains the
+    // seed's 10ms scheduler wait rather than sharing notification state.
+    park :: sync_park_new()
+    loop sync_load(child + I64{40}) == (I64{0}) {
+        if (scheduler_yield(rt_static_text("process wait"), park, I64{10000000}) != I64{0}) {
+            process_execution_stop(child)
+            process_execution_await_cleanup(child)
+            sync_park_drop(park)
+            return I64{0}
+        }
+    }
+    sync_park_drop(park)
+    // Detached spawn/drop does not sweep descendants. Explicit wait does.
+    if (sync_load(child + I64{120}).bit_and(I64{8}) == I64{0}) -> process_execution_sweep(child)
+    sync_mutex_lock(child)
+    error :: fd_word(child, I64{56})
+    if (error != I64{0}) {
+        fd_put(err, I64{0}, jet_rt_handle_clone_io_error(error))
+        sync_mutex_unlock(child)
+        return I64{0}
+    }
+    fd_put(ok, I64{0}, jet_rt_handle_clone_process_receipt(fd_word(child, I64{48})))
+    sync_mutex_unlock(child)
+    I64{1}
+}
+#Export(c) fn jet_process_child_exited(child: I64, ok: I64, err: I64) -> I64 {
+    if (sync_load(child + I64{120}).bit_and(I64{2}) != I64{0}) {
+        #Unsafe("ok is the canonical writable Bool output slot") { os_store_u8(ok, I64{1}) }
+        return I64{1}
+    }
+    scratch :: jet_rt_alloc(I64{40}, I64{8})
+    result :: jet_process_wait_raw(process_execution_native(child), true, scratch, scratch + I64{8})
+    code :: fd_word(scratch, I64{16})
+    jet_rt_free(scratch, I64{40}, I64{8})
+    if (result < I64{0}) -> return process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_CLOSE, host_errno_cause(code), err)
+    #Unsafe("ok lends exactly the C ABI Bool byte") { os_store_u8(ok, if (result > I64{0}) -> I64{1} else -> I64{0}) }
+    I64{1}
+}
+fn process_execution_signal(child: I64, signal: I64, err: I64) -> I64 {
+    native :: process_execution_native(child)
+    if (sync_load(child + I64{120}).bit_and(I64{2}) != I64{0}) -> return I64{1}
+    if (fd_word(native, I64{16}) == I64{1}) -> return I64{1}
+    result :: host_call(I64{62}, -fd_word(native, I64{8}), signal, I64{0})
+    if (result < I64{0}) -> return process_execution_error(fd_word(child, I64{24}), HOST_IO_OP_CLOSE, host_errno_cause(-result), err)
+    I64{1}
+}
+#Export(c) fn jet_process_child_kill(child: I64, err: I64) -> I64 { process_execution_signal(child, I64{9}, err) }
+#Export(c) fn jet_process_child_terminate(child: I64, err: I64) -> I64 { process_execution_signal(child, I64{15}, err) }
+#Export(c) fn jet_process_child_interrupt(child: I64, err: I64) -> I64 { process_execution_signal(child, I64{2}, err) }
+#Export(c) fn jet_process_child_close(child: I64) {
+    process_execution_flags_add(child, I64{2})
+    detached :: fd_word(fd_word(child, I64{24}), PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
+    if (!detached && sync_load(child + I64{40}) == I64{0}) {
+        process_execution_stop(child)
+        if (fd_word(child, I64{32}) != I64{0}) {
+            process_execution_await_cleanup(child)
+        } else {
+            process_execution_reap_stopped(child)
+            sync_store(child + I64{40}, I64{1})
+        }
+    }
+    native :: process_execution_native(child)
+    sync_mutex_lock(native)
+    spawn_close(fd_word(native, I64{32}))
+    fd_put(native, I64{32}, I64{-1})
+    sync_mutex_unlock(native)
+}

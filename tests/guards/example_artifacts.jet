@@ -1,0 +1,31 @@
+use core.files as artifact_files
+use core.sys as artifact_sys
+// KNOWN-FAILING #4815: original Rust law also rejects the committed executable bridges/native/build.sh.
+
+// Port of tests/example_artifacts.rs:8-64: don't follow directory symlinks.
+fn s3_artifact_check_directory(path: String) -[FS, Env]> {
+    entries :: artifact_files.list_dir(path) ?? panic("cannot read examples directory {path}")
+    loop entry in entries {
+        kind :: artifact_files.stat(entry.path) ?? panic("cannot inspect example {entry.path}")
+        if kind.is_dir && !kind.is_symlink {
+            assert(entry.name != "build", "generated build directory under examples: {entry.path}")
+            s3_artifact_check_directory(entry.path)
+            next
+        }
+        assert(!entry.name.ends_with(".rs"), "generated Rust under examples: {entry.path}")
+        if artifact_sys.family() == "unix" {
+            // Rust metadata follows a symlink for the executable-mode check only.
+            target :: artifact_files.canonicalize(entry.path) ?? next
+            metadata :: artifact_files.stat(target) ?? next
+            executable :: (metadata.mode & 0o111) != 0
+            assert(!executable, "generated executable under examples: {entry.path}")
+        } else {
+            executable :: entry.name.ends_with(".exe") || entry.name.ends_with(".dll") || entry.name.ends_with(".com")
+            assert(!executable, "generated executable under examples: {entry.path}")
+        }
+    }
+}
+
+#Test("examples_contain_no_build_artifacts") {
+    s3_artifact_check_directory("Examples")
+}

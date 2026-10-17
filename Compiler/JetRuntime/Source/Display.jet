@@ -1,0 +1,307 @@
+// Native display values own the one E4 {ptr,len,cap} UTF-8 carrier.
+// Generic fmt_display/debug/show are type-directed calls in Lower/Display.jet,
+// not erased C functions: their scalar leaves are the exports below.
+// Rust core flt2dec Dragon supplies the shortest digits. Today's JetDisplay,
+// JetShow and JetDebug for f64 all use Rust's Debug spelling (Values.rs):
+// .0 for integral decimals, and exponent notation outside [1e-4, 1e16).
+fn display_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized aligned word in an E4 header, exact-Int node or owned formatter workspace") {
+        return os_load_i64(address)
+    }
+}
+
+fn display_store(address: I64, value: I64) {
+    #Unsafe("writes an aligned word in an exclusively owned formatter workspace or fresh E4 header") {
+        os_store_i64(address, value)
+    }
+}
+
+fn display_byte(address: I64) -> I64 {
+    #Unsafe("reads one initialized byte in an owned formatter digit buffer or borrowed exact-Int limb") {
+        return os_load_u8(address)
+    }
+}
+
+fn display_put(address: I64, value: I64) {
+    #Unsafe("writes one byte in an exclusively owned formatter buffer; value is in 0..255") {
+        os_store_u8(address, value)
+    }
+}
+
+fn display_new(length: I64) -> I64 {
+    data :: if (length == I64{0}) -> I64{1} else -> jet_rt_alloc(length, I64{1})
+    text :: jet_rt_alloc(I64{24}, I64{8})
+    display_store(text, data)
+    display_store(text + I64{8}, length)
+    display_store(text + I64{16}, length)
+    text
+}
+
+fn display_literal(word: I64, length: I64) -> I64 {
+    text :: display_new(length)
+    data :: display_word(text)
+    value := word
+    i := I64{0}
+    loop i < length {
+        display_put(data + i, value.bit_and(I64{255}))
+        value >>= I64{8}
+        i += I64{1}
+    }
+    text
+}
+
+// Both work in the negative domain: even i64::MIN has an exact magnitude
+// there. `%` and `/%` floor, so a nonpositive n uses the truncated `%%` digit
+// and divides by -10 before negating (-7 /% -10 is 0), as Int.jet does.
+fn display_integer_length(value: I64) -> I64 Never! {
+    n := if (value > I64{0}) -> -value else -> value
+    length := I64{1}
+    loop n <= (I64{-10}) {
+        n = -(n /% I64{-10})
+        length += I64{1}
+    }
+    length
+}
+
+fn display_integer_digits(data: I64, end: I64, value: I64, width: I64) {
+    n := if (value > I64{0}) -> -value else -> value
+    i := end
+    loop i > end - width {
+        i -= I64{1}
+        display_put(data + i, I64{48} - n %% I64{10})
+        n = -(n /% I64{-10})
+    }
+}
+
+#Export(c) fn jet_rt_i64_to_string(value: I64) -> I64 {
+    digits :: display_integer_length(value)
+    length :: digits + (if (value < I64{0}) -> I64{1} else -> I64{0})
+    text :: display_new(length)
+    data :: display_word(text)
+    display_integer_digits(data, length, value, digits)
+    if (value < I64{0}) { display_put(data, I64{45}) }
+    text
+}
+
+// C's u64 and i64 have identical word ABI. Split an unsigned word before
+// division: half is always nonnegative and quotient fits signed i64. This
+// needs neither exact Int nor a checked U64->I64 conversion helper.
+#Export(c) fn jet_rt_u64_to_string(value: I64) -> I64 {
+    half :: (value >> I64{1}).bit_and(I64{9223372036854775807})
+    quotient :: half /% I64{5}
+    remainder :: (half % I64{5}) * I64{2} + (value.bit_and(I64{1}))
+    if (quotient == I64{0}) { return display_literal(I64{48} + remainder, I64{1}) }
+    length :: display_integer_length(quotient) + I64{1}
+    text :: display_new(length)
+    data :: display_word(text)
+    display_integer_digits(data, length - I64{1}, quotient, length - I64{1})
+    display_put(data + length - I64{1}, I64{48} + remainder)
+    text
+}
+
+#Export(c) fn jet_rt_bool_to_string(value: U8) -> I64 {
+    if (value != U8{0}) { display_literal(I64{1702195828}, I64{4}) } else {
+        display_literal(I64{435728179558}, I64{5})
+    }
+}
+
+#Export(c) fn jet_rt_char_to_string(value: I64) -> I64 {
+    scalar := value
+    if (scalar < I64{0} || scalar > I64{1114111} || (scalar >= I64{55296} && scalar <= I64{57343})) {
+        scalar = I64{65533}
+    }
+    length :: if {
+        scalar < (I64{128}) -> I64{1}
+        scalar < (I64{2048}) -> I64{2}
+        scalar < (I64{65536}) -> I64{3}
+        else -> I64{4}
+    }
+    text :: display_new(length)
+    data :: display_word(text)
+    if (length == I64{1}) { display_put(data, scalar) } else {
+        rest := scalar
+        i := length
+        loop i > (I64{1}) {
+            i -= I64{1}
+            display_put(data + i, I64{128}.bit_or((rest.bit_and(I64{63}))))
+            rest >>= I64{6}
+        }
+        prefix :: if (length == I64{2}) -> I64{192} else if (length == I64{3}) -> I64{224} else -> I64{240}
+        display_put(data, prefix.bit_or(rest))
+    }
+    text
+}
+
+// The approved exact-Int carrier uses base-1e9 u32 limbs, least significant
+// first. A boxed word has tag bit62; its aligned 48-byte node stores sign@16,
+// limb pointer@24, len@32. Formatting only borrows that node and its limbs.
+fn display_int_limb(data: I64, index: I64) -> I64 {
+    at :: data + index * I64{4}
+    display_byte(at).bit_or((display_byte(at + I64{1}) << I64{8})).bit_or((display_byte(at + I64{2}) << I64{16})).bit_or((display_byte(at + I64{3}) << I64{24}))
+}
+
+#Export(c) fn jet_rt_int_to_string(value: I64) -> I64 {
+    if ((value >> I64{62}) == I64{0} || (value >> I64{62}) == I64{-1}) {
+        return jet_rt_i64_to_string(value)
+    }
+    node :: value.bit_and(I64{4611686018427387903})
+    negative :: display_word(node + I64{16}) != I64{0}
+    limbs :: display_word(node + I64{24})
+    count :: display_word(node + I64{32})
+    // Canonical boxes are nonzero with an initialized most-significant limb.
+    top :: display_int_limb(limbs, count - I64{1})
+    leading :: display_integer_length(top)
+    length :: (count - I64{1}) * I64{9} + leading + (if negative -> I64{1} else -> I64{0})
+    text :: display_new(length)
+    data :: display_word(text)
+    if negative -> display_put(data, I64{45})
+    i := I64{0}
+    end := length
+    loop i < count - (I64{1}) {
+        display_integer_digits(data, end, display_int_limb(limbs, i), I64{9})
+        end -= I64{9}
+        i += I64{1}
+    }
+    display_integer_digits(data, end, top, leading)
+    text
+}
+
+fn display_float_decimal(raw: I64, digits: I64, count: I64, exponent: I64, debug: Bool) -> I64 {
+    negative :: raw < I64{0}
+    fraction := if exponent < count -> count - exponent else -> I64{0}
+    if (debug && fraction < I64{1}) { fraction = I64{1} }
+    integer :: if (exponent > I64{0}) -> exponent else -> I64{1}
+    length :: integer + fraction + (if (fraction > I64{0}) -> I64{1} else -> I64{0}) + (if negative -> I64{1} else -> I64{0})
+    text :: display_new(length)
+    data :: display_word(text)
+    at := I64{0}
+    if negative {
+        display_put(data, I64{45})
+        at += I64{1}
+    }
+    i := I64{0}
+    loop i < integer {
+        digit := I64{48}
+        if (exponent > I64{0} && i < count) { digit = display_byte(digits + i) }
+        display_put(data + at, digit)
+        at += I64{1}
+        i += I64{1}
+    }
+    if (fraction > I64{0}) {
+        display_put(data + at, I64{46})
+        at += I64{1}
+        i = I64{0}
+        loop i < fraction {
+            source :: exponent + i
+            digit := I64{48}
+            if (source >= I64{0} && source < count) { digit = display_byte(digits + source) }
+            display_put(data + at, digit)
+            at += I64{1}
+            i += I64{1}
+        }
+    }
+    text
+}
+
+fn display_float_exponential(raw: I64, digits: I64, count: I64, exponent: I64) -> I64 {
+    power :: exponent - I64{1}
+    width :: display_integer_length(power)
+    length :: count + (if (count > I64{1}) -> I64{1} else -> I64{0}) + I64{1} + width + (if (power < I64{0}) -> I64{1} else -> I64{0}) + (if (raw < I64{0}) -> I64{1} else -> I64{0})
+    text :: display_new(length)
+    data :: display_word(text)
+    at := I64{0}
+    if (raw < I64{0}) {
+        display_put(data, I64{45})
+        at += I64{1}
+    }
+    display_put(data + at, display_byte(digits))
+    at += I64{1}
+    if (count > I64{1}) {
+        display_put(data + at, I64{46})
+        at += I64{1}
+        i := I64{1}
+        loop i < count {
+            display_put(data + at, display_byte(digits + i))
+            at += I64{1}
+            i += I64{1}
+        }
+    }
+    display_put(data + at, I64{101})
+    at += I64{1}
+    if (power < I64{0}) { display_put(data + at, I64{45}) }
+    display_integer_digits(data, length, power, width)
+    text
+}
+
+fn display_float(value: Float, debug: Bool) -> I64 {
+    raw :: rt_f64_bits(value)
+    magnitude :: raw.bit_and(I64{9223372036854775807})
+    if ((magnitude >> I64{52}) == I64{2047}) {
+        if ((magnitude.bit_and(I64{4503599627370495})) != I64{0}) {
+            return display_literal(I64{5136718}, I64{3})
+        }
+        if (raw < I64{0}) { return display_literal(I64{1718511917}, I64{4}) }
+        return display_literal(I64{6712937}, I64{3})
+    }
+    if (magnitude == I64{0}) {
+        if debug {
+            if (raw < I64{0}) { return display_literal(I64{808333357}, I64{4}) }
+            return display_literal(I64{3157552}, I64{3})
+        }
+        if (raw < I64{0}) { return display_literal(I64{12333}, I64{2}) }
+        return display_literal(I64{48}, I64{1})
+    }
+    // Eight bounded Big32x40 slots, 24 digit bytes, and two result words.
+    // This sole temporary allocation is released on both rendering paths.
+    scratch :: jet_rt_alloc(I64{2688}, I64{8})
+    float_shortest(scratch, magnitude)
+    count :: display_word(scratch + I64{2656})
+    exponent :: display_word(scratch + I64{2664})
+    digits :: scratch + I64{2624}
+    text :: if {
+        (debug && (magnitude < I64{4547007122018943789} || magnitude >= I64{4846369599423283200})) -> display_float_exponential(raw, digits, count, exponent)
+        else -> display_float_decimal(raw, digits, count, exponent, debug)
+    }
+    jet_rt_free(scratch, I64{2688}, I64{8})
+    text
+}
+
+#Export(c) fn jet_rt_float_to_string(value: Float) -> I64 { display_float(value, true) }
+
+#Export(c) fn jet_rt_float_debug(value: Float) -> I64 { display_float(value, true) }
+
+// Raw binary32 ABI: upper bits are ignored; both exports return owned E4 text.
+// Rust f32 Display is fixed decimal without a mandatory .0; Debug preserves
+// .0 and uses scientific notation outside [f32(1e-4), f32(1e16)).
+fn display_float32(bits: I64, debug: Bool) -> I64 {
+    magnitude :: bits.bit_and(I64{2147483647})
+    raw :: (bits.bit_and(I64{4294967295})) << I64{32}
+    if ((magnitude >> I64{23}) == I64{255}) {
+        if ((magnitude.bit_and(I64{8388607})) != I64{0}) { return display_literal(I64{5136718}, I64{3}) }
+        if (raw < I64{0}) { return display_literal(I64{1718511917}, I64{4}) }
+        return display_literal(I64{6712937}, I64{3})
+    }
+    if (magnitude == I64{0}) {
+        if debug {
+            if (raw < I64{0}) { return display_literal(I64{808333357}, I64{4}) }
+            return display_literal(I64{3157552}, I64{3})
+        }
+        if (raw < I64{0}) { return display_literal(I64{12333}, I64{2}) }
+        return display_literal(I64{48}, I64{1})
+    }
+    scratch :: jet_rt_alloc(I64{2688}, I64{8})
+    float32_shortest(scratch, magnitude)
+    count :: display_word(scratch + I64{2656})
+    exponent :: display_word(scratch + I64{2664})
+    digits :: scratch + I64{2624}
+    text :: if {
+        (debug && (magnitude < I64{953267991} || magnitude >= I64{1510874058})) -> display_float_exponential(raw, digits, count, exponent)
+        else -> display_float_decimal(raw, digits, count, exponent, debug)
+    }
+    jet_rt_free(scratch, I64{2688}, I64{8})
+    text
+}
+
+#Export(c) fn jet_rt_float32_to_string(bits: I64) -> I64 { display_float32(bits, false) }
+
+#Export(c) fn jet_rt_float32_debug(bits: I64) -> I64 { display_float32(bits, true) }

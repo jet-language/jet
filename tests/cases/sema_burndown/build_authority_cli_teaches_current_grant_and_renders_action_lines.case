@@ -1,0 +1,15 @@
+# tests/sema_burndown.rs::build_authority_cli_teaches_current_grant_and_renders_action_lines
+# Source and every denied/granted teaching/rendering assertion unchanged.
+fixture: build_authority_cli_teaches_current_grant_and_renders_action_lines.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/store
+step: jet build {work}/build_action_failed.jet
+exit: != 0
+stderr: ~ "E3503"
+stderr: ~ "--allow=Exec"
+stderr: !~ "--allow-exec"
+step: jet build {work}/build_action_failed.jet --allow=Exec
+exit: != 0
+stderr: ~ "E3505"
+stderr: ~ "first\nsecond\n"
+stderr: !~ "first\\nsecond"

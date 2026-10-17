@@ -3,6 +3,49 @@ use crate::AST::{Expr, Func, Item, Pattern, Stmt};
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn comptime_nominal_fact_binding_uses_selected_target_and_lexical_shadowing() {
+    let source = "#Layout(c)\nstruct TargetPointer { pointer: *Int }\nenum Choice {\n One\n Two\n}\n";
+    let (tokens, diagnostics) = crate::Lexer::lex(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, source).unwrap();
+    let mut cx = build_cx_items(
+        &program.items, source, "target-facts.jet", None, &std::sync::Arc::default(), "2026",
+    );
+    cx.local_type_identities.insert("pointer.TargetPointer".into(), "TargetPointer".into());
+    let requested = [
+        ("TargetPointer".into(), "$layout".into()),
+        ("pointer.TargetPointer".into(), "$layout".into()),
+        ("TargetPointer".into(), "$name".into()),
+        ("TargetPointer".into(), "$fields".into()),
+        ("Choice".into(), "$layout".into()),
+    ].into_iter().collect();
+    let target = jet_foundation::Layout::TargetLayout::from_triple("wasm32-unknown-unknown");
+    bind_fragment_type_facts(&mut cx, &program.items, &requested, &target);
+    let layout = &cx.comptime_type_facts["TargetPointer"]["$layout"];
+    let CtValue::Struct { fields, .. } = layout else { panic!("layout carrier") };
+    assert!(fields.iter().any(|(name, value)| {
+        name == "size" && matches!(value, CtValue::Present(inner) if **inner == CtValue::Int(4))
+    }), "{layout:?}");
+    assert!(fields.iter().any(|(name, value)| {
+        name == "target" && *value == CtValue::Str(target.triple.clone())
+    }), "{layout:?}");
+    assert_eq!(cx.comptime_type_facts["pointer.TargetPointer"]["$layout"], *layout);
+    assert!(cx.comptime_type_facts["Choice"].contains_key("$layout"));
+    assert_eq!(cx.comptime_type_facts["TargetPointer"]["$name"], CtValue::Str("TargetPointer".into()));
+    assert!(matches!(cx.comptime_type_facts["TargetPointer"]["$fields"], CtValue::List(_)));
+
+    let span = crate::Diagnostics::Span::new(0, 0);
+    let subject = Expr::Field(Box::new(Expr::Ident("TargetPointer".into(), span)), "$layout".into(), span);
+    let mut env = LowerEnv::new("helper".into());
+    let lowered = lower::lower_expr(&subject, &cx, &mut env);
+    assert!(matches!(lowered.kind, TExprKind::CtLit(_)));
+    env.bind("TargetPointer", TLocal::user("TargetPointer"), Some(Type::Named("TypeInfo".into())));
+    let shadowed = lower::lower_expr(&subject, &cx, &mut env);
+    assert!(matches!(shadowed.kind, TExprKind::Field { recv, .. }
+        if matches!(recv.kind, TExprKind::Local(_))));
+}
+
+#[test]
 fn fact_channel_prefers_exact_literal_bounds_over_carrier_range() {
     let expr = TExpr {
         ty: crate::AST::Type::InlineRange {
@@ -228,16 +271,13 @@ fn compiler_fact_pattern_fold_does_not_claim_user_enums() {
     );
 }
 
-/// Like `covers`, but runs the FULL front end (sema) on `src` first, so
-/// sema-filled facts — notably a comptime LOCAL's evaluated `b.ct` value
-/// (S57/M9.5) — are present before gating. Builds a single-module bundle the
-/// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
-/// then runs `tir_covers` on the sema-enriched function.
-fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
+/// Parse a fixture before checking so multi-module probes can assemble their
+/// entire source graph before Sema synthesizes checked declarations.
+fn unchecked_bundle(src: &str) -> crate::AST::ProgramBundle {
     let (toks, lex_diags) = crate::Lexer::lex(src);
     assert!(lex_diags.is_empty(), "lex errors: {lex_diags:?}");
     let mut prog = crate::Parser::parse(&toks).expect("parse failed");
-    let mut bundle = crate::AST::ProgramBundle {
+    let bundle = crate::AST::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::from("."),
         modules: vec![crate::AST::LoadedModule {
@@ -249,8 +289,8 @@ fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            core_identifier_demand: crate::Lexer::core_identifier_demand(&toks),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
@@ -277,6 +317,19 @@ fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
         build_facts: Default::default(),
         edition: "2027".to_string(),
     };
+    bundle
+}
+
+/// Like `covers`, but runs the FULL front end (sema) on `src` first, so
+/// sema-filled facts — notably a comptime LOCAL's evaluated `b.ct` value
+/// (S57/M9.5) — are present before gating. Builds a single-module bundle the
+/// same way `lib.rs::check_for_eval` does, asserts sema accepted the program,
+/// then runs `tir_covers` on the sema-enriched function.
+pub(in crate::Codegen) fn checked_bundle(src: &str) -> (
+    crate::AST::ProgramBundle,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
+) {
+    let mut bundle = unchecked_bundle(src);
     // Full-front-end helpers reach comptime eval of `Val`/`None` and struct
     // literals. That path lives in TIR eval and is installed at the four
     // production funnels; a unit test that calls `check_bundle` directly is
@@ -286,30 +339,83 @@ fn checked_bundle(src: &str) -> crate::AST::ProgramBundle {
     // Coverage and lowering helpers check named functions, not a runnable
     // program. `CompileMode::Run` demands `fn run` (E0101) and is the
     // wrong door for a fragment whose entry is `opt`/`build`/`ch`.
-    let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Check);
+    let (diags, _facts, nominals) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Check);
     assert!(
         !diags
             .iter()
             .any(|d| d.severity == crate::Diagnostics::Severity::Error),
         "sema errors: {diags:?}"
     );
-    bundle
+    (bundle, nominals)
+}
+
+#[test]
+fn generated_comparable_calls_keep_exact_owners_when_template_spans_overlap() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = concat!(
+            "#Comparable\n",
+            "enum First { One Two }\n",
+            "#Comparable\n",
+            "enum Second { One Two }\n",
+            "fn used(a: First, b: First) -> Bool Never! { a < b }\n",
+            "fn run() {}\n",
+        );
+        let (bundle, _nominals) = checked_bundle(source);
+        let first_identity = bundle.name_ledger
+            .declared_identity(bundle.entry, "First.compare")
+            .expect("First's executable compare declaration");
+        let used = bundle.modules[bundle.entry].items.iter().find_map(|item| {
+            match item {
+                Item::Func(function) if function.name == "used" => Some(function),
+                _ => None,
+            }
+        }).expect("checked used function");
+        let mut checked_targets = Vec::new();
+        for statement in &used.body {
+            statement.for_each_expr(&mut |expression: &Expr| {
+                if let Expr::MethodCall { checked_callee: Some(identity), .. } = expression {
+                    checked_targets.push(identity.clone());
+                }
+            });
+        }
+        assert!(checked_targets.iter().any(|identity| identity == first_identity));
+        let functions = CostFunctionIndex::new(&bundle);
+        let (first_body, _) = functions.get(bundle.entry, "First.compare").expect("First body");
+        let (second_body, _) = functions.get(bundle.entry, "Second.compare").expect("Second body");
+        assert_eq!(first_body.name_span, second_body.name_span);
+        assert!(!std::ptr::eq(first_body, second_body));
+
+        let callables = cost_callables(&bundle, None);
+        let index = CostCallableIndex::new(&bundle, &callables);
+        let first = index.named(bundle.entry, Some("First"), "compare").expect("First index");
+        let second = index.named(bundle.entry, Some("Second"), "compare").expect("Second index");
+        assert_ne!(first, second);
+        let edges = checked_core_source_call_edges(&bundle, &callables, &index);
+        let caller = index.named(bundle.entry, None, "used").expect("used index");
+        assert!(edges.contains(&(caller, first)));
+        assert!(!edges.contains(&(caller, second)));
+
+        let mut reachable = vec![false; callables.len()];
+        reachable[first] = true;
+        let core_modules = HashSet::from([bundle.entry]);
+        let bodies = reachable_core_source_bodies(&callables, &core_modules, &reachable);
+        assert!(should_lower_imported_core_body(
+            &core_modules, &bodies, bundle.entry, Some("First"), "compare",
+        ));
+        assert!(!should_lower_imported_core_body(
+            &core_modules, &bodies, bundle.entry, Some("Second"), "compare",
+        ));
+    });
 }
 
 /// Compiler worker required; see `covers`.
 fn covers_after_sema(src: &str, fn_name: &str) -> bool {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let mut cx = build_cx_items(
-            &module.items,
-            src,
-            "test.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
-        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
+        let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
+            &crate::Codegen::Context::BundleCodegenFacts::new(&bundle));
         let f = module
             .items
             .iter()
@@ -324,17 +430,11 @@ fn covers_after_sema(src: &str, fn_name: &str) -> bool {
 
 fn refusal_after_sema(src: &str, fn_name: &str) -> String {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let mut cx = build_cx_items(
-            &module.items,
-            src,
-            "test.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
-        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
+        let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
+            &crate::Codegen::Context::BundleCodegenFacts::new(&bundle));
         let f = module
             .items
             .iter()
@@ -355,17 +455,11 @@ fn refusal_after_sema(src: &str, fn_name: &str) -> String {
 /// Compiler worker required; see `covers`.
 fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
-        let mut cx = build_cx_items(
-            &module.items,
-            src,
-            "test.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
-        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry);
+        let mut cx = build_cx_items(&module.items, src, "test.jet", None, &std::sync::Arc::default(), &bundle.edition);
+        crate::Codegen::Context::populate_cx_from_bundle(&mut cx, &bundle, bundle.entry,
+            &crate::Codegen::Context::BundleCodegenFacts::new(&bundle));
         let f = module
             .items
             .iter()
@@ -380,7 +474,7 @@ fn lower_after_sema(src: &str, fn_name: &str) -> TFunc {
 
 
 #[test]
-fn loaded_core_source_signatures_include_transitive_files_calls() {
+fn loaded_core_source_signatures_preserve_implicit_error_carriers() {
     fn loaded_module(alias: &str, source: &str) -> crate::AST::LoadedModule {
         let (tokens, diagnostics) = crate::Lexer::lex(source);
         assert!(diagnostics.is_empty(), "lex errors: {diagnostics:?}");
@@ -389,13 +483,13 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
             path: std::path::PathBuf::from(format!("{alias}.jet")),
             display: format!("{alias}.jet"),
             source: source.to_string(),
+            core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
             alias: alias.to_string(),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -414,10 +508,19 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
         loaded_module(files_path.alias, "use core.files as files"),
         loaded_module(
             files.alias,
-            "pub fn read_lines(path: String) -> [String] { [String]{} }\n\
-             pub fn write_lines(path: String, lines: [String]) {}",
+            "fn read_lines(path: String) -> [String] { [String]{} }\n\
+             fn write_lines(path: String, lines: [String]) {}",
         ),
     ];
+    let mut name_ledger = crate::AST::NameLedger::default();
+    for (index, module) in modules.iter().enumerate() {
+        name_ledger.set_module(
+            index,
+            module.alias.clone(),
+            module.display.clone(),
+            "signature-fixture".to_string(),
+        );
+    }
     let bundle = crate::AST::ProgramBundle {
         entry: 0,
         project_root: std::path::PathBuf::new(),
@@ -428,7 +531,7 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
         ffi_callback_fns: HashSet::new(),
         cffi: crate::AST::CFfi::default(),
         comptime_inputs: Vec::new(),
-        name_ledger: crate::AST::NameLedger::default(),
+        name_ledger,
         layer_ceiling: None,
         inferred_layer: crate::Syntax::RuntimeLayer::Core,
         web_partitions: HashMap::new(),
@@ -449,7 +552,9 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
     assert!(matches!(&read.params[0].1, crate::AST::Type::String));
     assert!(matches!(
         read.return_type.as_ref(),
-        Some(crate::AST::Type::List(inner)) if matches!(inner.as_ref(), crate::AST::Type::String)
+        Some(crate::AST::Type::Result { ok, err })
+            if matches!(ok.as_ref(), crate::AST::Type::List(inner) if matches!(inner.as_ref(), crate::AST::Type::String))
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "Err")
     ));
     let write = signatures
         .get(&("core.files".to_string(), "write_lines".to_string()))
@@ -460,7 +565,12 @@ fn loaded_core_source_signatures_include_transitive_files_calls() {
         &write.params[1].1,
         crate::AST::Type::List(inner) if matches!(inner.as_ref(), crate::AST::Type::String)
     ));
-    assert!(write.return_type.is_none());
+    assert!(matches!(
+        write.return_type.as_ref(),
+        Some(crate::AST::Type::Result { ok, err })
+            if matches!(ok.as_ref(), crate::AST::Type::Named(name) if name == "Unit")
+                && matches!(err.as_ref(), crate::AST::Type::Named(name) if name == "Err")
+    ));
 }
 
 #[test]
@@ -472,16 +582,9 @@ fn default_parameter_call_sites_are_tir_covered() {
             env!("CARGO_MANIFEST_DIR"),
             "/../../Examples/features/basics/default_refs.jet"
         ));
-        let bundle = checked_bundle(source);
+        let (bundle, _nominals) = checked_bundle(source);
         let module = &bundle.modules[bundle.entry];
-        let cx = build_cx_items(
-            &module.items,
-            source,
-            "default_refs.jet",
-            None,
-            &HashMap::new(),
-            &bundle.edition,
-        );
+        let cx = build_cx_items(&module.items, source, "default_refs.jet", None, &std::sync::Arc::default(), &bundle.edition);
         let function = module
             .items
             .iter()
@@ -498,7 +601,7 @@ fn default_parameter_call_sites_are_tir_covered() {
 #[test]
 fn explicit_run_is_lowered_as_the_canonical_run_function() {
     let source = "fn run() { print(\"script\") }\nfn helper() {}\n";
-    let bundle = checked_bundle(source);
+    let (bundle, _nominals) = checked_bundle(source);
     let module = &bundle.modules[bundle.entry];
     assert!(module.script_body.is_empty());
     let runs = module
@@ -1476,6 +1579,7 @@ fn covers_user_method_shadowing_builtin_name() {
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
     let mut locals = HashSet::new();
     locals.insert("b".to_string());
@@ -1629,7 +1733,7 @@ fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
             .expect("Core source path suffix")
     );
     method.name = identity.clone();
-    let mut checked_nominals = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
+    let mut checked_nominals = crate::AST::MirFragmentNominalFacts::default();
     checked_nominals
         .foreign_modules
         .insert(identity.clone(), source.alias.to_string());
@@ -1679,28 +1783,191 @@ fn compiler_owned_core_enum_rows_reuse_checked_source_payloads() {
 }
 
 #[test]
-fn compiler_owned_default_err_is_a_struct_row() {
+fn implicit_trait_error_retains_prelude_owner_and_runs() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+trait ExecutionHost { fn execute(self, fail: Bool) -> Int }
+#Error
+enum DomainError { Failed }
+trait AuthoredHost { fn execute(self) -> Int DomainError! }
+struct Host {}
+impl Host.ExecutionHost {
+    fn execute(self, fail: Bool) -> Int {
+        if fail { return Err("execution failed") }
+        return Ok(7)
+    }
+}
+fn run() Never! {
+    host :: Host{}
+    if host.execute(false) == {
+        .Ok(value) -> { assert(value == 7) }
+        .Err(_) -> { panic("successful execution failed") }
+    }
+    if host.execute(true) == {
+        .Ok(_) -> { panic("failure disappeared") }
+        .Err(_) -> {}
+    }
+}
+"#);
+        let identity = nominals[bundle.entry].compiler_owned_default_err_identity.as_deref()
+            .expect("trait default error must retain its original checked Prelude owner");
+        let declarations = super::tir_to_mir_types::lower_tir_declarations(
+            &bundle, &nominals, &BTreeMap::new(), &BTreeMap::new(), &BTreeMap::new(),
+        );
+        let method = &declarations.traits.iter().find(|row| row.name == "ExecutionHost")
+            .expect("authored trait row").methods[0];
+        assert!(matches!(&method.failure, super::TFailureCarrier::Result { error: Type::Named(name), .. }
+            if name == identity), "implicit trait failure must not acquire a second bare Err identity");
+        assert!(matches!(&method.return_type, Type::Result { err, .. }
+            if matches!(err.as_ref(), Type::Named(name) if name == identity)));
+        let authored = &declarations.traits.iter().find(|row| row.name == "AuthoredHost")
+            .expect("explicit error trait row").methods[0];
+        let super::TFailureCarrier::Result { error, .. } = &authored.failure else {
+            panic!("authored explicit failure must remain a Result");
+        };
+        assert!(matches!(error, Type::Named(name) if name.ends_with("::DomainError")));
+        assert_ne!(error, &Type::Named(identity.to_owned()));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("canonical trait failures must retain checked MIR");
+        mir.validate().expect("trait failure MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("trait-default-error-proof"))
+            .join(format!("checked-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("trait_default_error.rs");
+        let executable = directory.join(format!("trait_default_error{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=trait_default_error", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("trait default error proof requires rustc");
+        assert!(compiled.status.success(), "default trait and impl error carriers must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("trait default error proof must run");
+        assert!(executed.status.success(), "both success and canonical default failure must execute:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn unchecked_declarations_do_not_synthesize_default_err() {
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &[], "", &jet_foundation::Layout::TargetLayout::host(),
+    );
+    assert!(!declarations.type_defs.iter().any(|row|
+        matches!(row.compiler_builtin, Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr))));
+}
+
+#[test]
+fn checked_default_err_retains_original_identity_and_private_metadata() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle("fn run() {}\n");
+        let identity = nominals[bundle.entry].compiler_owned_default_err_identity.as_deref()
+            .expect("original Prelude Err declaration identity");
+        let owner = bundle.name_ledger.nominal_module(identity)
+            .expect("the original declaration has a checked source owner");
+        assert_ne!(owner, bundle.entry, "the Prelude is not injected into the entry owner");
+        assert_eq!(bundle.modules[owner].path,
+            std::path::Path::new("jet:canonical-prelude/Prelude/Errors.jet"));
+        assert_eq!(bundle.name_ledger.module(owner).unwrap().package, "jet:canonical-prelude");
+        assert_eq!(bundle.name_ledger.module(owner).unwrap().path, "Prelude/Errors.jet");
+        assert_eq!(nominals.len(), bundle.modules.len());
+        let original = bundle.modules[owner].items.iter().find_map(|item| match item {
+            Item::Struct(definition) if definition.compiler_builtin_error
+                && definition.name == crate::Syntax::TYPE_ERR => Some(definition),
+            _ => None,
+        }).expect("original Prelude Err in its checked source context");
+        assert_eq!(original.fields.len(), 4);
+        let original_metadata = &original.fields[3];
+        assert!(!original_metadata.is_pub && !original_metadata.is_package_pub);
+        let Some(Expr::StructLit { type_name, import_ns, fields, .. }) =
+            original_metadata.default.as_deref()
+        else {
+            panic!("the original metadata default must be inferred in place");
+        };
+        assert_eq!(type_name, "__jet_ErrorMetadata");
+        assert!(import_ns.is_none());
+        assert_eq!(fields.iter().map(|(name, _, _)| name.as_str()).collect::<Vec<_>>(),
+            ["typed_identity", "context_frames", "conversion_history", "details"]);
+        let metadata_identity = bundle.name_ledger.declared_identity(owner, type_name)
+            .expect("the default references the original supplier declaration");
+        assert!(nominals[owner].structs.contains_key(metadata_identity));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("original checked Err lowers");
+        let row = mir.types.iter().find(|row| row.key == identity)
+            .expect("original Err identity in MIR");
+        assert!(matches!(row.compiler_builtin,
+            Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr)));
+        let jet_foundation::MIR::MirTypeDefKind::Struct { fields, .. } = &row.kind else {
+            panic!("original Err must remain a struct");
+        };
+        assert_eq!(fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+            ["message", "code", "cause", "__jet___memo_error_metadata"]);
+        let metadata = &fields[3];
+        assert!(!metadata.public && !metadata.package_public);
+        assert!(metadata.has_default);
+    });
+}
+
+#[test]
+fn compiler_owned_realtime_and_unit_provenance_rows_are_complete() {
     let declarations = super::tir_to_mir_types::lower_declarations_from_items(
         &[],
         "",
         &jet_foundation::Layout::TargetLayout::host(),
     );
-    let err = declarations
+    let receipt = declarations
         .type_defs
         .iter()
-        .find(|ty| ty.key == crate::Syntax::TYPE_ERR)
-        .expect("default Err must be a compiler-owned type row");
-    let kind = format!("{:?}", err.kind);
-    assert!(
-        kind.starts_with("Struct"),
-        "default Err must be a struct, got {kind}"
+        .find(|row| row.key == "RealtimeReceipt")
+        .expect("realtime field reads need a checked owner row");
+    let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &receipt.kind else {
+        panic!("RealtimeReceipt must be a record");
+    };
+    assert_eq!(
+        fields.iter().map(|field| field.name.as_str()).collect::<Vec<_>>(),
+        [
+            "requested_rate_hz", "requested_frames", "completed_callbacks",
+            "completed_frames", "missed", "max_lateness_ns", "start_identity",
+            "end_identity",
+        ]
     );
-    for field in ["message", "code", "cause"] {
-        assert!(
-            kind.contains(field),
-            "default Err missing field {field} in {kind}"
-        );
-    }
+    assert!(fields.iter().all(|field| field.ty == Type::Int));
+    let provenance = declarations
+        .type_defs
+        .iter()
+        .find(|row| row.key == "UnitScaleProvenanceKind")
+        .expect("typed reflection enum values need a checked declaration row");
+    let super::tir_to_mir_types::TirTypeDefKind::Enum { variants, .. } = &provenance.kind else {
+        panic!("UnitScaleProvenanceKind must be an enum");
+    };
+    assert_eq!(
+        variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(),
+        ["Rational", "SymbolicPi", "Conventional", "Measured"]
+    );
 }
 #[test]
 fn compiler_owned_core_ui_registry_has_nominal_rows() {
@@ -1747,14 +2014,259 @@ fn mir_lowers_default_err_return() {
     // "missing checked MIR owner type".
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "fn f(x: Int) -> Int Err! {\n if x == 0 {\n return Err(\"bad\")\n }\n return Ok(x)\n}\nfn run() {}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        super::lower_checked_mir_program_for(&bundle, request)
+        super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("default Err return failed to lower to MIR: {err:?}"));
+    });
+}
+
+#[test]
+fn imported_error_conversions_lower_once_with_checked_mir_targets() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let mut bundle = unchecked_bundle("fn run() {}\n");
+        // The same shipped IOError -> Err conversion is exercised independently
+        // by two imported modules, like Core destructor and ordinary helper paths.
+        for alias in ["first", "second"] {
+            let source = concat!(
+                "fn cleanup(error: IOError) IOError! { Err(error) }\n",
+                "fn close(error: IOError) { _ :: cleanup(error) }\n",
+            );
+            let (tokens, diagnostics) = crate::Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let mut program = crate::Parser::parse(&tokens).expect("imported fixture parses");
+            bundle.modules.push(crate::AST::LoadedModule {
+                path: std::path::PathBuf::from(format!("{alias}.jet")),
+                display: format!("{alias}.jet"),
+                alias: alias.to_string(),
+                source: source.to_string(),
+                imports: std::mem::take(&mut program.imports),
+                items: std::mem::take(&mut program.items),
+                script_body: std::mem::take(&mut program.script_body),
+                block_spans: std::mem::take(&mut program.block_spans),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
+                web_target_ceiling: program.web_target_ceiling,
+                no_prelude: program.no_prelude,
+                default_target: program.default_target,
+                html_path: program.html_path,
+                policy_declarations: program.policy_declarations,
+                user_policy_declarations: program.user_policy_declarations,
+                rule_facts: std::mem::take(&mut program.rule_facts),
+            });
+        }
+        let source = concat!(
+            "use first\nuse second\n",
+            "fn first_case(error: IOError) { first.close(error) }\n",
+            "fn second_case(error: IOError) { second.close(error) }\n",
+            "fn run() {}\n",
+        );
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("entry fixture parses");
+        let entry = &mut bundle.modules[bundle.entry];
+        entry.source = source.to_string();
+        entry.imports = std::mem::take(&mut program.imports);
+        entry.items = std::mem::take(&mut program.items);
+        entry.block_spans = std::mem::take(&mut program.block_spans);
+        entry.core_identifier_demand = crate::Lexer::core_identifier_demand(&tokens);
+        for (index, module) in bundle.modules.iter().enumerate() {
+            bundle.name_ledger.set_module(
+                index, module.alias.clone(), module.display.clone(), "errconv-fixture".to_string(),
+            );
+        }
+        for (index, import) in bundle.modules[0].imports.iter().enumerate() {
+            bundle.name_ledger.record_import_target(0, import.span, index + 1);
+        }
+        crate::Codegen::MIREval::install_mir_bridge();
+        let (diagnostics, _, nominals) = crate::Sema::check_bundle_with_effect_facts(
+            &mut bundle, crate::Sema::CompileMode::Check,
+        );
+        assert!(
+            diagnostics.iter().all(|diagnostic| {
+                diagnostic.severity != crate::Diagnostics::Severity::Error
+            }),
+            "{diagnostics:?}",
+        );
+        let conversion = crate::Sema::error_conv_fn_name("IOError", "Err");
+        assert_eq!(
+            bundle.modules.iter().filter(|module| {
+                module.items.iter().any(|item| matches!(
+                    item, Item::ErrorConv(value)
+                        if crate::Sema::error_conv_fn_name(&value.from_ty, &value.to_ty) == conversion
+                ))
+            }).count(),
+            2,
+            "both modules must exercise the shipped conversion",
+        );
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("imported typed propagation must have a checked MIR target");
+        mir.validate().expect("imported conversion MIR is valid");
+        assert_eq!(
+            mir.functions.iter().filter(|function| function.name == conversion).count(),
+            1,
+            "one canonical conversion target serves both modules",
+        );
+    });
+}
+
+#[test]
+fn checked_c_record_raw_pointers_prepare_without_native_repr_ice() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = "struct Opaque { values: [Int] }\n\
+                      #Layout(c)\nstruct PointerRecord { pointer: *Int, opaque: *Opaque }\n\
+                      fn run() {}\n";
+        let (bundle, _) = checked_bundle(source);
+        let record = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+            Item::Struct(record) if record.name == "PointerRecord" => Some(record),
+            _ => None,
+        }).expect("checked pointer record");
+        assert!(
+            record.layout.as_ref().is_some_and(crate::AST::StructLayout::is_c),
+            "the regression must exercise an actual checked C-layout record",
+        );
+        // Preparation collects native record definitions before noticing that
+        // this fixture needs no foreign bridge. No Cargo or rustc runs here.
+        assert!(jet_pkg_model::FFI::prepare(&bundle)
+            .expect("checked raw pointer fields must have a native Rust representation")
+            .is_none());
+    });
+}
+
+#[test]
+fn fresh_noncopy_shared_construction_moves_payload_and_keeps_identity() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+trait RawInput { fn read(self) -[]> Int Never! }
+struct InputValue { value: Int }
+impl InputValue.RawInput { fn read(self) -[]> Int Never! { self.value } }
+struct InputStorage { transport: RawInput }
+struct SharedInput {
+    storage: Shared<InputStorage>
+    fn read(self) -> Int Never! {
+        permit :: self.storage.guard_read()
+        permit.value.transport.read()
+    }
+}
+fn share_input(transport: ^RawInput) -> SharedInput Never! {
+    SharedInput{storage: shared InputStorage{transport: ^transport}}
+}
+fn share_moved(storage: ^InputStorage) -> SharedInput Never! {
+    SharedInput{storage: shared storage}
+}
+fn new_storage(transport: ^RawInput) -> InputStorage Never! {
+    InputStorage{transport: ^transport}
+}
+fn share_call(transport: ^RawInput) -> SharedInput Never! {
+    SharedInput{storage: shared new_storage(^transport)}
+}
+fn run() {
+    input :: share_input(InputValue{value: 7})
+    cloned :: input.copy()
+    assert(input.storage.same(cloned.storage))
+    assert(input.read() == 7 && cloned.read() == 7)
+    storage := InputStorage{transport: InputValue{value: 11}}
+    moved :: share_moved(^storage)
+    assert(moved.read() == 11)
+    called :: share_call(InputValue{value: 13})
+    assert(called.read() == 13)
+    text :: "retained"
+    text_cell :: shared text.copy()
+    assert(text == "retained")
+    permit :: text_cell.guard_read()
+    assert(permit.value == "retained")
+}
+"#);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("fresh and moved shared payloads lower to checked MIR");
+        mir.validate().expect("shared payload transfers have valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let constructors = rust.lines().filter(|line| {
+            line.contains("JetShared::<") && line.contains("InputStorage") && line.contains("::new(")
+        }).collect::<Vec<_>>();
+        assert_eq!(constructors.len(), 3, "all three owning constructor paths must be exercised");
+        assert!(constructors.iter().all(|line| !line.contains(".clone()")),
+            "noncopy shared payloads must transfer, not clone: {constructors:?}");
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("shared-payload-proof"))
+            .join(format!("fresh-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("shared_payload.rs");
+        let executable = directory.join(format!("shared_payload{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=shared_payload", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("shared payload codegen proof requires rustc");
+        assert!(compiled.status.success(),
+            "shared noncopy payloads must compile:\n{}", String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("shared payload codegen proof must run");
+        assert!(executed.status.success(),
+            "shared provider identity and borrowed text must survive:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn native_stop_producer_checks_entry_calls_loops_and_panic_cleanup() {
+    use jet_foundation::MIR::{MirPollKind, MirTerminator};
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(
+            "fn child(x: Int) -> Int { if x == 0 -> panic(\"boom\")\n x }\n\
+             fn run() { name :: \"owned\"\n n := 0\n loop n < 2 { print(child(n))\n n += 1 }\n print(name) }\n",
+        );
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (native, _) = super::lower_checked_native_mir_program_for(&bundle, &nominals, request.clone()).unwrap();
+        native.validate().unwrap();
+        let mut checks = 0;
+        let mut propagates = 0;
+        let mut stopped = 0;
+        for function in &native.functions {
+            for block in &function.blocks {
+                match block.terminator {
+                    MirTerminator::Poll { kind: MirPollKind::Check, .. } => checks += 1,
+                    MirTerminator::Poll { kind: MirPollKind::Propagate, .. } => propagates += 1,
+                    MirTerminator::Stopped => stopped += 1,
+                    _ => {}
+                }
+            }
+        }
+        assert!(checks >= 3, "two entries and one loop header");
+        assert!(propagates >= 3, "child, print and checked panic");
+        assert!(stopped > 0);
+        let (aot, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request).unwrap();
+        assert!(aot.functions.iter().flat_map(|function| &function.blocks).all(|block| {
+            !matches!(block.terminator, MirTerminator::Poll { .. } | MirTerminator::Stopped)
+        }));
     });
 }
 /// #4318 §4: lower `src`, returning per-function loop-cursor counts and the
@@ -1782,15 +2294,122 @@ fn stable_loop_probe(src: &str) -> (HashMap<String, usize>, usize) {
     (cursors, non_scalar_clone_count(&rust))
 }
 
+/// #4882: reflection's typed kind must own a checked declaration even though
+/// it has no native runtime carrier. Keep the reflected record and its enum
+/// constant intact, then exercise the ordinary artifact enum emitter.
+#[test]
+fn unit_scale_provenance_reflection_emits_checked_enum_declaration() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+#UnitFamily(Length, dimension) { meter }
+UNIT_SCALE :: prep { Meter.$unit_scale_provenance }
+fn scale_kind() -> UnitScaleProvenanceKind { UNIT_SCALE.kind }
+fn run() { print(scale_kind() == .Rational) }
+"#;
+        let (bundle, nominals) = checked_bundle(source);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("reflection kind must lower with its canonical nominal row");
+        mir.validate().expect("reflection MIR must be valid");
+        let definitions = mir
+            .types
+            .iter()
+            .filter(|row| row.key == "UnitScaleProvenanceKind")
+            .collect::<Vec<_>>();
+        assert_eq!(definitions.len(), 1, "one canonical reflection enum owner");
+        let jet_foundation::MIR::MirTypeDefKind::Enum { variants, .. } =
+            &definitions[0].kind
+        else {
+            panic!("reflection kind must be a checked enum");
+        };
+        let expected = ["Rational", "SymbolicPi", "Conventional", "Measured"];
+        assert_eq!(
+            variants.iter().map(|variant| variant.name.as_str()).collect::<Vec<_>>(),
+            expected
+        );
+        assert!(
+            mir.functions.iter().flat_map(|function| &function.blocks)
+                .flat_map(|block| &block.instructions)
+                .any(|instruction| matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::EnumIs { owner, variant, .. }
+                        if *owner == definitions[0].id && variant == "Rational"
+                )),
+            "the typed comparison must retain the reflection enum's canonical owner"
+        );
+        let sema_variants = crate::Sema::core_fact_kind_variants("UnitScaleProvenanceKind")
+            .expect("canonical reflection sema menu");
+        assert_eq!(sema_variants.len(), expected.len());
+        for variant in variants {
+            assert!(matches!(variant.payload, jet_foundation::MIR::MirVariantPayload::Unit));
+            assert!(matches!(
+                sema_variants.get(&variant.name),
+                Some((_, crate::AST::VariantPayload::Unit))
+            ));
+        }
+        let reflected = mir
+            .constants
+            .iter()
+            .find(|constant| constant.name == "UNIT_SCALE")
+            .expect("the reflected constant must not be stripped");
+        let jet_foundation::MIR::MirConstant::Struct { type_name, fields } = &reflected.value
+        else {
+            panic!("the reflected provenance must remain a typed record");
+        };
+        assert_eq!(type_name, "UnitScaleProvenanceInfo");
+        assert_eq!(
+            fields.iter().map(|(name, _)| name.as_str()).collect::<HashSet<_>>(),
+            HashSet::from(["kind", "value", "source", "uncertainty"])
+        );
+        let kind = fields.iter().find(|(name, _)| name == "kind").unwrap();
+        assert!(matches!(
+            &kind.1,
+            jet_foundation::MIR::MirConstant::Enum { type_name, variant, args }
+                if type_name == "UnitScaleProvenanceKind" && variant == "Rational" && args.is_empty()
+        ));
+        assert!(!super::tir_to_mir_types::is_compiler_owned_type("UnitScaleProvenanceKind"));
+        let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
+        execution.emit_types = true;
+        execution.emit_runtime = false;
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        );
+        // Declarations use canonical path mangling; flat tags use name mangling.
+        assert!(
+            rust.contains(&format!(
+                "pub enum {} {{",
+                crate::Codegen::mangle_path("UnitScaleProvenanceKind")
+            )),
+            "{rust}"
+        );
+        for variant in expected {
+            assert!(
+                rust.contains(&format!("    {},", crate::Codegen::mangle(variant))),
+                "{rust}"
+            );
+        }
+    });
+}
+
 /// Lower `src` to validated MIR and emit its Rust (runtime and types left out).
 fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
-    let bundle = checked_bundle(src);
+    let (bundle, _nominals) = checked_bundle(src);
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, request)
+    let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
         .unwrap_or_else(|err| panic!("probe failed to lower: {err:?}"));
     mir.validate()
         .unwrap_or_else(|err| panic!("probe failed validation: {err}"));
@@ -1809,31 +2428,249 @@ fn emitted_rust(src: &str) -> (jet_foundation::MIR::MirProgram, String) {
     (mir, rust)
 }
 
+#[test]
+fn never_helper_call_values_consume_checked_failure_carrier() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (mir, rust) = emitted_rust(r#"
+fn channel_key(bounded: Bool) -> String Never! {
+    bytes :: if bounded -> [U8]{U8{0}, U8{98}} else -> [U8]{U8{0}, U8{110}}
+    String.from_bytes(bytes) ?? panic("invalid channel key")
+}
+fn run() {
+    unbounded :: channel_key(false)
+    bounded :: channel_key(true)
+    print(unbounded)
+    print(bounded)
+}
+"#);
+        let run = mir.functions.iter().find(|function| function.name == "run")
+            .expect("entry function");
+        let mut stores = 0;
+        for instruction in run.blocks.iter().flat_map(|block| &block.instructions) {
+            if let jet_foundation::MIR::MirOperation::WritePlace { place, value } = instruction.operation {
+                let destination = run.places.iter().find(|row| row.id == place).unwrap();
+                if matches!(destination.ty.kind, jet_foundation::MIR::MirTypeKind::String) {
+                    let (_, source, _, _) = run.values.iter().find(|row| row.0 == value).unwrap();
+                    assert!(matches!(source.kind, jet_foundation::MIR::MirTypeKind::String),
+                        "Never! call value retained a failure carrier: {rust}");
+                    stores += 1;
+                }
+            }
+        }
+        assert_eq!(stores, 2, "both Never! helper calls must store plain text");
+    });
+}
+
+#[test]
+fn recursive_noncopy_enum_write_views_keep_boolean_phi_carriers_plain() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(include_str!(
+            "../../../../../tests/ui/compiler_host_owner_write_view.jet"
+        ));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("recursive noncopy enum write views lower to MIR");
+        mir.validate().expect("recursive noncopy enum write views have valid MIR");
+        let mut boolean_phis = 0;
+        for function in &mir.functions {
+            for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+                let jet_foundation::MIR::MirOperation::Phi { incoming } = &instruction.operation else {
+                    continue;
+                };
+                let Some(result) = instruction.result else { continue };
+                let (_, result_ty, _, _) = function.values.iter().find(|value| value.0 == result)
+                    .expect("Phi result has a checked value row");
+                if !matches!(result_ty.kind, jet_foundation::MIR::MirTypeKind::Bool) {
+                    continue;
+                }
+                boolean_phis += 1;
+                for (_, incoming) in incoming {
+                    let (_, ty, _, ownership) = function.values.iter().find(|value| value.0 == *incoming)
+                        .expect("Phi input has a checked value row");
+                    assert!(matches!(ty.kind, jet_foundation::MIR::MirTypeKind::Bool),
+                        "boolean Phi kept a Never! failure carrier: {ty:?}");
+                    assert_eq!(ownership.drop, jet_foundation::MIR::MirDropKind::None);
+                }
+            }
+        }
+        assert!(boolean_phis > 0, "the recursive write-view fixture must exercise boolean joins");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("noncopy-write-view-proof"))
+            .join(format!("recursive-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("noncopy_write_view.rs");
+        let executable = directory.join(format!("noncopy_write_view{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=noncopy_write_view", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("recursive write-view codegen proof requires rustc");
+        assert!(compiled.status.success(),
+            "recursive noncopy enum write views must compile:\n{}\nMIR run: {:#?}",
+            String::from_utf8_lossy(&compiled.stderr),
+            mir.functions.iter().find(|function| function.key.ends_with("::test.jet::run")));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("recursive write-view codegen proof must run");
+        assert!(executed.status.success(),
+            "nested adoption must preserve owner identity and reject duplicate aliases:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+/// The `filter_map` over owned text of `Examples/features/collections/
+/// builtin_routes.jet`, with a default-`Err` failure in its callee.
+const OWNED_TEXT_FILTER_MAP: &str = r#"
+fn parse_int(s: String) -> Int Err! {
+    n :: Int.parse(s) ?? return Err("not a number: {s}")
+    return Ok(n)
+}
+
+fn run() {
+    words :: [String]{"1", "two", "3"}
+    print("filter_map: {words.filter_map((w: String) -> parse_int(w)).to_list()}")
+}
+"#;
+
+/// A Read String callback input is `&str` in its callable carrier, in the
+/// closure that fills the carrier, and in the executable callable body.
+#[test]
+fn owned_text_filter_map_callback_agrees_on_the_read_text_abi() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(OWNED_TEXT_FILTER_MAP);
+        assert!(
+            rust.contains("dyn FnMut(&str) -> JetOutcome<"),
+            "the callable carrier takes the read text view:\n{rust}"
+        );
+        assert!(
+            rust.contains("move |__jet_w: &str|"),
+            "the closure filling the carrier declares the carrier's input:\n{rust}"
+        );
+        assert!(
+            !rust.contains("__jet_w: &String") && !rust.contains("__jet_s: &String"),
+            "a concrete Read String formal never takes `&String`:\n{rust}"
+        );
+        assert!(
+            rust.contains("(__jet_w: &str) -> JetOutcome<")
+                && rust.contains("(__jet_s: &str) -> JetOutcome<"),
+            "the callable body and its callee take the read text view:\n{rust}"
+        );
+    });
+}
+
+/// Every default `Err` construction fills the declared private metadata
+/// field from its checked Prelude default; none is a shortened record.
+#[test]
+fn default_err_construction_retains_memoized_error_metadata() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(OWNED_TEXT_FILTER_MAP);
+        let mut constructions = 0;
+        for (at, _) in rust.match_indices("cErr { __jet_message:") {
+            let line = rust[at..].lines().next().expect("constructor line");
+            assert!(
+                line.contains("__jet___memo_error_metadata:"),
+                "default Err construction dropped its metadata field: {line}\n{rust}"
+            );
+            constructions += 1;
+        }
+        assert!(constructions > 0, "`Err(\"…\")` constructs the default error:\n{rust}");
+    });
+}
+
+#[test]
+fn native_owned_core_argument_materializes_a_read_parameter() {
+    // Compiler worker required; see `covers`.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            r#"
+use core.ui as ui
+fn boxed(children: [UINode]) -> UINode Never! { ui.box(children) }
+fn run() { print(boxed([ui.text("child")]).label) }
+"#,
+        );
+        let call_at = rust.find("jet_ui_box(").expect("native box call");
+        let call = rust[call_at..].lines().next().expect("native call line");
+        // The host owns its children while Jet's wrapper only reads them. If the
+        // argument is an SSA slot, its copy must be initialized before that use;
+        // a direct-place rendering is also valid and needs no intermediate slot.
+        if let Some(read_at) = call.find(".as_ref().expect(\"MIR value\")") {
+            let prefix = &call[..read_at];
+            let slot_at = prefix.rfind("_v").expect("native argument slot");
+            let slot = &prefix[slot_at..];
+            assert!(
+                rust[..call_at].contains(&format!("{slot} = Some(")),
+                "owned native argument reads an uninitialized slot: {call}\n{rust}"
+            );
+        }
+    });
+}
+
 /// `.clone()` calls in emitted Rust whose receiver is not a scalar: index
 /// arithmetic clones `JetInt` values and bools, which are not the copies a
-/// loop-source probe measures (the list snapshot).
+/// loop-source probe measures (the list snapshot). Scalars are the `let`
+/// bindings and function parameters of such a type (a parameter through its
+/// borrow); the receiver is the binding the clone reads, through any
+/// parentheses, dereference and slot unwrapping
+/// (`(_v3.as_ref().expect("MIR value")).clone()` reads `_v3`).
 fn non_scalar_clone_count(rust: &str) -> usize {
+    let scalar = |ty: &str| {
+        let ty = ty.trim_start().trim_start_matches('&');
+        ty.contains("JetInt") || ty.starts_with("bool") || ty.starts_with("Option<bool>")
+    };
     let mut scalars = std::collections::HashSet::new();
     for line in rust.lines() {
-        let Some(rest) = line.trim_start().strip_prefix("let ") else {
-            continue;
-        };
-        let rest = rest.strip_prefix("mut ").unwrap_or(rest);
-        let Some((name, ty)) = rest.split_once(':') else {
-            continue;
-        };
-        let ty = ty.trim_start();
-        if ty.contains("JetInt") || ty.starts_with("bool") || ty.starts_with("Option<bool>") {
-            scalars.insert(name.trim());
+        let line = line.trim_start();
+        if let Some(rest) = line.strip_prefix("let ") {
+            let rest = rest.strip_prefix("mut ").unwrap_or(rest);
+            if let Some((name, ty)) = rest.split_once(':') {
+                if scalar(ty) {
+                    scalars.insert(name.trim());
+                }
+            }
+        } else if line.starts_with("fn ") || line.starts_with("pub fn ") {
+            let Some((_, params)) = line.split_once('(') else {
+                continue;
+            };
+            let params = params.rsplit_once(')').map_or(params, |(params, _)| params);
+            for param in params.split(", ") {
+                if let Some((name, ty)) = param.split_once(':') {
+                    if scalar(ty) {
+                        scalars.insert(name.trim().trim_start_matches("mut "));
+                    }
+                }
+            }
         }
     }
     rust.match_indices(".clone()")
         .filter(|(at, _)| {
-            let prefix = &rust[..*at];
-            let prefix = prefix
-                .strip_suffix(".as_ref().expect(\"MIR local\")")
-                .or_else(|| prefix.strip_suffix(".as_ref().expect(\"MIR value\")"))
-                .unwrap_or(prefix);
+            let mut prefix = &rust[..*at];
+            loop {
+                let stripped = prefix
+                    .strip_suffix(')')
+                    .filter(|inner| !inner.ends_with('('))
+                    .filter(|inner| !inner.ends_with("\"MIR local\"") && !inner.ends_with("\"MIR value\""))
+                    .or_else(|| prefix.strip_suffix(".as_ref().expect(\"MIR local\")"))
+                    .or_else(|| prefix.strip_suffix(".as_ref().expect(\"MIR value\")"));
+                match stripped {
+                    Some(inner) => prefix = inner,
+                    None => break,
+                }
+            }
             let start = prefix
                 .rfind(|c: char| !(c.is_alphanumeric() || c == '_'))
                 .map_or(0, |index| index + 1);
@@ -1852,6 +2689,147 @@ fn emitted_fn_body<'a>(rust: &'a str, name: &str) -> &'a str {
 }
 
 #[test]
+fn copy_borrow_primitive_place_reads_are_bitwise() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn select(flag: Bool, n: I32) -> I32 {\n yes := flag\n value := n\n if yes -> return value\n return 0\n}\nfn run() {}\n");
+        let body = emitted_fn_body(&rust, "select");
+        assert_eq!(body.matches(".clone()").count(), 0, "primitive place reads must be bitwise:\n{body}");
+        println!("copy_borrow primitive clones={}", body.matches(".clone()").count());
+    });
+}
+
+#[test]
+fn copy_borrow_read_text_abi_and_owned_sink() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn length(text: String) -> Int { text.len() }\nfn forward(text: String) -> Int { length(text) }\nfn owned(text: String) -> String { text.copy() }\nfn run() {}\n");
+        let forward = emitted_fn_body(&rust, "forward");
+        assert!(forward.contains("__jet_text: &str"), "Read text must lend its contents:\n{forward}");
+        assert_eq!(non_scalar_clone_count(forward) + forward.matches(".to_owned()").count(), 0, "forwarding must not materialize text:\n{forward}");
+        let owned = emitted_fn_body(&rust, "owned");
+        let owned_copies = owned.matches(".to_owned()").count() + owned.matches(".clone()").count() + owned.matches("jet_string_copy(").count();
+        assert_eq!(owned_copies, 1, "an explicit owned return materializes once:\n{owned}");
+        println!("copy_borrow forward copies=0 owned_return copies=1");
+    });
+}
+#[test]
+fn copy_borrow_trim_view_to_string_read_never_copies() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            "fn lend(right: String) -> Int { right.len() }\n\
+             fn authority(raw: String) -> Int {\n\
+                 right :: raw.trim()\n\
+                 lend(right)\n\
+             }\n\
+             fn run() {}\n",
+        );
+        let body = emitted_fn_body(&rust, "authority");
+        assert_eq!(body.matches("jet_string_view_copy").count(), 0,
+            "a trim view lent to a String Read formal is already &str:\n{body}");
+        assert_eq!(non_scalar_clone_count(body) + body.matches(".to_owned()").count(), 0,
+            "the borrowed call must not materialize the view by another spelling:\n{body}");
+        println!("copy_borrow trim_view_read copies=0 view_copies=0");
+    });
+}
+
+
+#[test]
+fn copy_borrow_all_runtime_kernel_signatures_compile() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        use jet_foundation::MIR::MirRuntimePartId as Part;
+        let (mut mir, _) = emitted_rust(r#"
+use core.auth
+fn length(text: String) -> Int { text.len() }
+fn owned(text: String) -> String { text.copy() }
+fn inspect<T>(_value: T) -> Int { 7 }
+fn generic(text: String) -> Int { inspect(text) }
+fn apply(callback: fn(String) -> Int, text: String) -> Int { callback(text) }
+fn verify(issuer: String) {
+    token :: #Credential "invalid"
+    key :: [U8]{0, 1, 2}
+    _claims :: auth.verify_jwt(token, key: key, audience: "gateway", issuer: issuer, clock_skew: 0ms) ?? {
+        print(false)
+        return
+    }
+    print(true)
+}
+fn run() {
+    raw := " a "
+    right :: raw.trim()
+    print(length(right))
+    print(owned(right))
+    print(generic(right))
+    print(inspect(right))
+    print(apply(length, right))
+    reader :: (value: String) -> (length(value) + raw.len())
+    print(apply(reader, right))
+    values :: ["a", "b", "a"]
+    mapping :: [String:Int]{"a": 3}
+    print(values.contains(right))
+    print(values.index_of(right) ?? -1)
+    print(values.count(right))
+    print(mapping.has_key(right))
+    print(mapping.get(right) ?? -1)
+    verify("partner")
+}
+"#);
+        let artifact = mir.artifacts.first_mut().expect("probe has an artifact");
+        artifact.runtime_parts.extend([
+            Part::Gc, Part::Event, Part::Realtime, Part::EmbeddedHardware,
+            Part::Ui, Part::Devtools, Part::Gtk, Part::Apps, Part::Email,
+            Part::Game, Part::Files, Part::Interrupt, Part::FsRuntime,
+            Part::Process, Part::Crypto, Part::Math, Part::Encoding,
+            Part::Data, Part::Fmt, Part::DataFmt, Part::Compute, Part::Http,
+            Part::WebSocket, Part::Browser, Part::Args, Part::Reflect,
+            Part::AuthSession, Part::Sync, Part::Services,
+            Part::Mod,
+        ]);
+        let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact.id);
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution,
+            },
+        );
+        let directory = std::env::temp_dir().join(format!("jet_copy_borrow_kernels_{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("runtime.rs");
+        std::fs::write(&source, &rust).unwrap();
+        if let Some(output) = std::env::var_os("COPY_BORROW_KERNEL_SOURCE") {
+            std::fs::write(output, &rust).unwrap();
+        }
+        let output = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-type=lib", "--emit=metadata", "-Awarnings"])
+            .arg(&source).arg("-o").arg(directory.join("runtime.rmeta"))
+            .output().expect("kernel signature proof requires rustc");
+        assert!(output.status.success(), "all runtime kernels must agree on the Read ABI:\n{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn copy_borrow_text_interpolation_appends_a_borrow() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust("fn wrap(text: String) -> String {\n \"<{text}>\"\n}\nfn run() {}\n");
+        let body = emitted_fn_body(&rust, "wrap");
+        assert!(!body.contains("jet_show"), "a text hole must not allocate its display:\n{body}");
+        assert!(!body.contains("jet_fmt_display"), "a text hole must not materialize its display:\n{body}");
+        assert!(!body.contains(".clone()"), "a text hole must borrow its text:\n{body}");
+        assert!(body.contains("__jet_string.push_str(&(*__jet_text))"), "text must append directly:\n{body}");
+        println!("copy_borrow text clones={} displays={} shows={}", body.matches(".clone()").count(), body.matches("jet_fmt_display").count(), body.matches("jet_show").count());
+        let (_, local_rust) = emitted_rust("fn local_wrap(text: String) -> String {\n local := text\n result :: \"<{local}>\"\n result\n}\nfn run() {}\n");
+        let local = emitted_fn_body(&local_rust, "local_uwrap");
+        assert_eq!(local.matches(".clone()").count() + local.matches(".to_owned()").count(), 1, "only the explicit local snapshot may copy:\n{local}");
+        let (_, debug_rust) = emitted_rust("fn debug_wrap(text: String) -> String {\n \"{text:Debug}\"\n}\nfn run() {}\n");
+        let debug = emitted_fn_body(&debug_rust, "debug_uwrap");
+        assert!(debug.contains("jet_fmt_debug"), "Debug text must keep its checked formatting:\n{debug}");
+    });
+}
+
+
+#[test]
 fn borrowed_builtin_arguments_are_never_copied() {
     // #4318: `contains` and `get` only read their argument (the Rust kernels
     // borrow it), so the argument place is borrowed at the call; `push`
@@ -1868,7 +2846,7 @@ fn borrowed_builtin_arguments_are_never_copied() {
         }
         let keep = emitted_fn_body(&rust, "keep_uvalue");
         assert_eq!(
-            keep.matches(".clone()").count(),
+            keep.matches(".clone()").count() + keep.matches(".to_owned()").count(),
             1,
             "a stored builtin argument is copied exactly once:\n{keep}"
         );
@@ -1876,15 +2854,93 @@ fn borrowed_builtin_arguments_are_never_copied() {
 }
 
 #[test]
+fn borrowed_core_provider_arguments_are_never_copied() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_, rust) = emitted_rust(
+            "use core as core\nfn style_text(value: String) -> String {\n core.term.style(value, \"bold\")\n}\nfn run() {}\n",
+        );
+        let body = emitted_fn_body(&rust, "style_utext");
+        assert!(!body.contains(".clone()"), "Core read argument was copied:\n{body}");
+    });
+}
+
+#[test]
+fn single_module_entry_qualified_calls_resolve() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle("fn helper() {}\nfn run() { helper()\nreturn\n}\n");
+        assert!(bundle.name_ledger.namespace_siblings(bundle.entry).next().is_none());
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let mut program = super::lower_checked_tir_program_for(&bundle, &nominals, request)
+            .expect("lower single-module entry");
+        let prefix = program.entry_call_alias.as_ref().expect("recorded entry alias").1.clone();
+        let run = program.funcs.iter_mut().find(|function| function.name == "run")
+            .expect("entry run");
+        let call = run.body.iter_mut().find_map(|statement| match statement {
+            TStmt::ExprStmt(TExpr { kind: TExprKind::Call { name, .. }, .. }) => Some(name),
+            TStmt::ExprStmt(TExpr { kind: TExprKind::Try { inner, .. }, .. }) => {
+                match &mut inner.kind {
+                    TExprKind::Call { name, .. } => Some(name),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }).expect("helper call");
+        *call = format!("{prefix}{}", crate::Codegen::mangle("helper"));
+        super::mir::lower_tir_to_mir(program).expect("resolve canonical entry-qualified helper");
+    });
+}
+
+#[test]
+fn mir_lowering_invariant_reports_file_module_and_original_span() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle("fn run() {}\n");
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        for expression_failure in [false, true] {
+            let mut program = super::lower_checked_tir_program_for(&bundle, &nominals, request.clone())
+                .expect("lower checked fixture");
+            let function = program.funcs.iter_mut().find(|function| function.name == "run")
+                .expect("fixture run");
+            let origin = format!("{} (module {}), run", function.source_file, function.module);
+            // A provider-template offset need not lie inside the owning source.
+            let span = crate::Diagnostics::Span::new(2117, 2120);
+            let construct = "distinct raw without its checked base type".to_string();
+            function.body = vec![if expression_failure {
+                TStmt::ExprStmt(TExpr {
+                    ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
+                    kind: TExprKind::InvariantViolation { construct, span },
+                })
+            } else {
+                TStmt::InvariantViolation { construct, span }
+            }];
+            let error = super::mir::lower_tir_to_mir(program).expect_err("mutated TIR must fail");
+            assert_eq!(error.span, span);
+            assert_eq!(error.to_string(), format!(
+                "checked TIR cannot lower to MIR at 2117..2120: {origin}: distinct raw without its checked base type"
+            ));
+        }
+    });
+}
+
+#[test]
 fn mir_walks_stable_loop_sources_in_place() {
-    // #4318 §4: a loop whose body never mentions its source walks the list
-    // in place (no cursor, no snapshot copy); the same loop whose body does
-    // mention the source keeps the snapshot. Each pair of programs differs
-    // only in where the `_ := <source>.len()` statement sits, so the emitted
+    // #4318 §4: a loop whose body leaves its source unchanged walks the list
+    // in place (no cursor, no snapshot copy), whether the body never mentions
+    // the source or only reads it; the same reading loop with an early exit
+    // (where a read may become the source's moving last use) keeps the
+    // snapshot. Each program differs only in the statements placed in the
+    // loop body and after the loop, so the emitted
     // copy counts compare the loop lowering alone. The source is a `:=`
     // binding, which `fold_pure_calls` leaves alone, so its length is not a
     // folded constant. A field source (`bag.names`, which sema wraps in a
-    // share copy) walks the same way as a local.
+    // share copy) walks the same way as a local or fixed list.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let program = |setup: &str, source: &str, inside: &str, after: &str| {
             format!(
@@ -1915,22 +2971,185 @@ fn run() {{
         for (setup, source) in [
             ("names := make_names(3)", "names"),
             ("bag := Bag{names: make_names(3)}", "bag.names"),
+            // A fixed list walks over its literal length (#4566 slice 2).
+            ("fixed := [String#3]{\"a\", \"b\", \"c\"}", "fixed"),
         ] {
             let mention = format!("_ := {source}.len()");
+            let exit = format!("{mention}\n        if n > 1000 -> break");
             let (stable_cursors, stable_clones) =
                 stable_loop_probe(&program(setup, source, "", &mention));
-            let (snapshot_cursors, snapshot_clones) =
+            let (read_cursors, read_clones) =
                 stable_loop_probe(&program(setup, source, &mention, ""));
+            let (snapshot_cursors, snapshot_clones) =
+                stable_loop_probe(&program(setup, source, &exit, ""));
             eprintln!(
-                "stable loop source `{source}`: non-scalar .clone() {snapshot_clones} (body mentions source) -> {stable_clones} (stable); cursors {snapshot_cursors:?} -> {stable_cursors:?}"
+                "stable loop source `{source}`: non-scalar .clone() {snapshot_clones} (body reads source, may exit) -> {read_clones} (body reads source) / {stable_clones} (body never mentions it); cursors {snapshot_cursors:?} -> {read_cursors:?} / {stable_cursors:?}"
             );
             assert_eq!(stable_cursors.get("run"), Some(&0), "`{source}`: {stable_cursors:?}");
+            assert_eq!(read_cursors.get("run"), Some(&0), "`{source}`: {read_cursors:?}");
             assert_eq!(snapshot_cursors.get("run"), Some(&1), "`{source}`: {snapshot_cursors:?}");
             assert!(
-                stable_clones < snapshot_clones,
-                "`{source}`: stable walk emitted {stable_clones} clones, snapshot {snapshot_clones}"
+                read_clones < snapshot_clones,
+                "`{source}`: read-only walk emitted {read_clones} clones, snapshot {snapshot_clones}"
             );
         }
+    });
+}
+/// D-COPY-DEFAULT1=A (#3714): `^place.field` in a value position (binding,
+/// result, field initializer) is the exact move of that field. It lowers to
+/// a `MovePlace` of the projected field, never a `ReadPlace` copy, so the
+/// emitted Rust takes the field out of its owner instead of cloning it.
+#[test]
+fn exact_field_move_marks_lower_to_field_moves_not_copies() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let program = |mark: &str| {
+            format!(
+                "\
+struct Graph {{
+    names: [String]
+    size: Int
+}}
+struct Run {{
+    graph: Graph
+    values: [String]
+}}
+fn make_run() -> Run {{
+    return Run{{graph: Graph{{names: [\"a\", \"b\"], size: 2}}, values: [\"v\"]}}
+}}
+fn hop_binding(run: ^Run) -> Graph {{
+    graph := {mark}run.graph
+    print(run.values.len())
+    return graph
+}}
+fn hop_nested_local() -> Int {{
+    run := make_run()
+    names := {mark}run.graph.names
+    print(run.values.len())
+    return names.len()
+}}
+fn hop_result(run: ^Run) -> [String] {{
+    return {mark}run.values
+}}
+fn hop_initializer(run: ^Run) -> Run {{
+    return Run{{graph: {mark}run.graph, values: [String]{{}}}}
+}}
+fn run() {{
+    print(hop_binding(make_run()).size)
+    print(hop_nested_local())
+    print(hop_result(make_run()).len())
+    print(hop_initializer(make_run()).graph.size)
+}}
+"
+            )
+        };
+        let field_moves = |mir: &jet_foundation::MIR::MirProgram, name: &str| {
+            let function = mir
+                .functions
+                .iter()
+                .find(|function| function.name == name)
+                .unwrap_or_else(|| panic!("no `{name}` function"));
+            function
+                .blocks
+                .iter()
+                .flat_map(|block| &block.instructions)
+                .filter(|instruction| match instruction.operation {
+                    jet_foundation::MIR::MirOperation::MovePlace { place } => function
+                        .places
+                        .iter()
+                        .any(|row| row.id == place && !row.projections.is_empty()),
+                    _ => false,
+                })
+                .count()
+        };
+        let (moved_mir, moved_rust) = emitted_rust(&program("^"));
+        let (_, read_rust) = emitted_rust(&program(""));
+        for name in ["hop_binding", "hop_nested_local", "hop_result", "hop_initializer"] {
+            assert_eq!(
+                field_moves(&moved_mir, name),
+                1,
+                "`{name}`: the marked field is one projected MovePlace"
+            );
+        }
+        for field in ["__jet_graph", "__jet_names", "__jet_values"] {
+            let clone = format!("{field}).clone()");
+            assert!(
+                !moved_rust.contains(&clone),
+                "a moved `{field}` must not be cloned:\n{moved_rust}"
+            );
+        }
+        let moved_clones = non_scalar_clone_count(&moved_rust);
+        let read_clones = non_scalar_clone_count(&read_rust);
+        eprintln!("exact field moves: non-scalar .clone() {read_clones} (unmarked) -> {moved_clones} (marked)");
+        assert!(
+            moved_clones < read_clones,
+            "marked field moves emitted {moved_clones} clones, unmarked reads {read_clones}"
+        );
+    });
+}
+
+#[test]
+fn split_feeding_only_join_fuses_in_place() {
+    // #4566 slice 6: `text.split(sep).join(joiner)` splits and joins the
+    // source in place; a split iterator with another consumer keeps the
+    // iterator.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn fused(text: String) -> String {\n    return text.split(\",\").join(\";\")\n}\n\nfn kept(seed: String) -> Int {\n    text := seed\n    n := 0\n    loop piece in text.split(\",\") {\n        n += piece.len()\n        text = \"x\"\n    }\n    return n\n}\n\nfn run() {\n    print(fused(\"a,b\"))\n    print(kept(\"a,b\"))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        let fused = emitted_fn_body(&rust, "fused");
+        assert!(
+            fused.contains("jet_string_split_join(") && !fused.contains("jet_iter_string_split("),
+            "a split feeding only a join must fuse:\n{fused}"
+        );
+        let kept = emitted_fn_body(&rust, "kept");
+        assert!(
+            kept.contains("jet_iter_string_split(") && !kept.contains("jet_loop_split_init("),
+            "a loop over a split of a source its body changes keeps the iterator:\n{kept}"
+        );
+    });
+}
+#[test]
+fn split_feeding_a_loop_iterates_views() {
+    // #4566 slice 6: a loop over the split of a source nothing can change
+    // while it runs (a read parameter, an immutable local) walks the pieces
+    // as views of the borrowed source; the source is never copied.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn views_count(text: String) -> Int {\n    n := 0\n    loop piece in text.split(\",\") -> n += piece.len()\n    return n\n}\n\nfn views_words(seed: String) -> Int {\n    text :: \"{seed}, tail\"\n    out := [String]{}\n    loop piece in text.split(\", \") -> &out.push(piece)\n    return out.len()\n}\n\nfn run() {\n    print(views_count(\"a,bb,ccc\"))\n    print(views_words(\"x, y\"))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        for name in ["views_ucount", "views_uwords"] {
+            let body = emitted_fn_body(&rust, name);
+            assert!(
+                body.contains("jet_loop_split_init(")
+                    && !body.contains("jet_iter_string_split(")
+                    && !body.contains("jet_loop_iter_init("),
+                "a loop over a stable source's split must walk views:\n{body}"
+            );
+        }
+    });
+}
+#[test]
+fn eager_adapters_inline_callbacks_and_fuse_pure_stages() {
+    // #4566 slice 5: eager list adapters borrow their source and take plain
+    // closures; a map chain whose later callbacks are pure and total runs as
+    // one pass, while a later callback that can stop (a division by a
+    // non-literal) keeps the passes apart.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn adapters_fused(xs: [Int], r: Int) -> [Int] {\n    return xs.map(x -> x * 3 + r).filter(x -> x % 2 == 0).map(x -> x + 1)\n}\n\nfn adapters_kept(xs: [Int], r: Int) -> [Int] {\n    return xs.map(x -> x + 1).filter(x -> x / r > 1)\n}\n\nfn run() {\n    print(adapters_fused([1, 2, 3], 1))\n    print(adapters_kept([1, 2, 3], 1))\n}\n";
+        let (_, rust) = emitted_rust(src);
+        let chain = emitted_fn_body(&rust, "adapters_ufused");
+        assert!(
+            chain.contains("jet_list_map_chain(")
+                && !chain.contains("jet_list_filter(")
+                && !chain.contains("RefCell"),
+            "a pure map/filter/map chain must fuse over plain closures:\n{chain}"
+        );
+        let split = emitted_fn_body(&rust, "adapters_ukept");
+        assert!(
+            split.contains("jet_list_map(")
+                && split.contains("jet_list_filter(")
+                && !split.contains("jet_list_map_chain(")
+                && !split.contains("RefCell"),
+            "a filter that can stop keeps its own pass, still over plain closures:\n{split}"
+        );
     });
 }
 #[test]
@@ -1953,13 +3172,13 @@ struct Box<T> {
 fn boxed(item: Box<Int>) -> Int Err! { return item.get() }
 fn run() {}
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("full-carrier ownership fixture failed to lower: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("full-carrier ownership fixture failed validation: {err}"));
@@ -2148,13 +3367,13 @@ fn canonical_device(device: String) -> String? {
 }
 fn run() {}
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("canonical_device failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("canonical_device MIR failed validation: {err}"));
@@ -2199,17 +3418,17 @@ fn net_err(op: String, addr: String, message: String) -> NetError {
     })
 }
 fn dns_err(name: String) -> NetError {
-    return NetError.DNS(NetDnsError.NotFound(name))
+    return NetError.DNS(NetDNSError.NotFound(name))
 }
 fn run() {}
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("NetError construction failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("NetError MIR failed validation: {err}"));
@@ -2260,8 +3479,8 @@ fn run() {}
         let net_dns_error = mir
             .types
             .iter()
-            .find(|ty| ty.key == "NetDnsError")
-            .expect("compiler-owned NetDnsError type row");
+            .find(|ty| ty.key == "NetDNSError")
+            .expect("compiler-owned NetDNSError type row");
         let detail = mir
             .types
             .iter()
@@ -2312,7 +3531,7 @@ fn run() {}
             ..
         } = &net_dns_error.kind
         else {
-            panic!("NetDnsError must be an enum row");
+            panic!("NetDNSError must be an enum row");
         };
         assert_eq!(
             net_dns_variants
@@ -2356,13 +3575,13 @@ fn mir_is_finite_selects_math_runtime_part() {
     // `MirRuntimePartId` spellings, so AOT never emitted MathLibPure.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "fn checked(x: Float) -> Bool {\n return x.is_finite()\n}\nfn run() { print(checked(1.0)) }\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("is_finite failed to lower to MIR: {err:?}"));
         assert!(
             mir.artifacts.iter().any(|artifact| artifact
@@ -2380,19 +3599,188 @@ fn mir_is_finite_selects_math_runtime_part() {
 }
 
 #[test]
-fn mir_lowers_user_struct_and_instance_method() {
-    // Compiler-generated Display/Equatable bodies and user getters all name
-    // the TIR local `self`. Binding it as MIR parameter 0 is what lets a
-    // user struct construct, print a field, and call an instance method.
+fn mir_debug_trace_selects_eprint_runtime_part() {
+    // D-DBG1=A: `debug(value)` writes through the shared `core.term.eprint`
+    // row without a `core.term` import. The trace must still select the
+    // runtime part that defines `jet_std_io_eprint`, or AOT names a Prelude
+    // function it never emitted (rustc E0425).
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let src = "pub struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
-        let bundle = checked_bundle(src);
+        let src = "fn run() {\n x :: debug(1)\n print(x)\n}\n";
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
+            .unwrap_or_else(|err| panic!("debug trace failed to lower to MIR: {err:?}"));
+        assert!(
+            mir.artifacts.iter().any(|artifact| artifact
+                .runtime_parts
+                .contains(&jet_foundation::MIR::MirRuntimePartId::FsRuntime)),
+            "debug(value) must select the FsRuntime part so AOT emits jet_std_io_eprint"
+        );
+    });
+}
+
+#[test]
+fn mir_map_slice_routes_to_the_prelude_kernel() {
+    // `Map.slice(keys)` must name a function the Rust Prelude defines.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn run() {\n m :: [String:Int]{\"a\": 1, \"b\": 2}\n s :: m.slice([\"a\"])\n print(s.len())\n}\n";
+        let (bundle, _nominals) = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
+            .unwrap_or_else(|err| panic!("Map.slice failed to lower to MIR: {err:?}"));
+        let symbol = "jet_map_slice_keys_kernel";
+        assert!(
+            mir.prelude_calls.iter().any(|row| row.symbol.name() == symbol),
+            "Map.slice must intern the Prelude symbol {symbol}"
+        );
+        let collections = include_str!("../../Prelude/Core/Collections.rs");
+        assert!(
+            collections.contains(format!("fn {symbol}<").as_str()),
+            "the Rust Prelude must define {symbol}"
+        );
+    });
+}
+
+#[test]
+fn mir_math_arithmetic_results_use_typed_kernels() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = include_str!("../../../../../Examples/features/lowlevel/vector_result_values.jet");
+        let (bundle, _nominals) = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
+            .unwrap_or_else(|err| panic!("math arithmetic failed to lower: {err:?}"));
+        for symbol in [
+            "jet_math_Vec3_add",
+            "jet_math_Vec3_sub",
+            "jet_math_Vec3_hadamard_mul",
+            "jet_math_Mat3_transform",
+            "jet_math_Vec3_dot",
+            "jet_math_Vec3_cross",
+            "jet_math_Vec3_length",
+        ] {
+            assert!(mir.prelude_calls.iter().any(|row| row.symbol.name() == symbol),
+                "math result operations must use the typed kernel {symbol}");
+        }
+    });
+}
+
+#[test]
+fn mir_read_union_injection_does_not_move_member_places() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = include_str!("../../../../../Examples/features/types/union_parameter_values.jet");
+        let (bundle, _nominals) = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
+            .unwrap_or_else(|err| panic!("union read injection failed to lower: {err:?}"));
+        let mut injections = 0;
+        for function in &mir.functions {
+            for block in &function.blocks {
+                for instruction in &block.instructions {
+                    if let jet_foundation::MIR::MirOperation::Call { args, .. } = &instruction.operation {
+                        for arg in args.iter().filter(|arg| arg.widen_to_union.is_some()) {
+                            injections += 1;
+                            assert_eq!(arg.access, jet_foundation::MIR::MirAccess::Read);
+                            assert!(arg.place.is_none(), "the carrier is not the member's place");
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(injections, 7);
+    });
+}
+
+#[test]
+fn mir_partial_f32_swizzle_widens_lanes_and_writes_have_setters() {
+    // D-SWIZZLE1: `F32x4.xy` is a `Vec2`, whose lanes are `Float`; each `F32`
+    // lane read is widened before the `Vec2` constructor. A write swizzle
+    // stores through `jet_math_<Type>_lane_set`, which LinalgFns must define
+    // for every swizzleable type.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "fn run() {\n lanes :: F32x4(1.0, 2.0, 3.0, 4.0)\n pair :: Vec2{lanes.xy}\n print(pair.to_array())\n pos := Vec3(10.0, 20.0, 30.0)\n pos.xy = Vec2(0.0, 0.0)\n print(pos.to_array())\n}\n";
+        let (bundle, _nominals) = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
+            .unwrap_or_else(|err| panic!("swizzle failed to lower to MIR: {err:?}"));
+        let run = mir
+            .functions
+            .iter()
+            .find(|function| function.name == "run" || function.name.ends_with("::run"))
+            .expect("run lowers to MIR");
+        let widened = run
+            .blocks
+            .iter()
+            .flat_map(|block| block.instructions.iter())
+            .filter(|instruction| {
+                matches!(
+                    &instruction.operation,
+                    jet_foundation::MIR::MirOperation::Convert {
+                        conversion: jet_foundation::MIR::MirConversion::NumericCast,
+                        target,
+                        ..
+                    } if target.is_float()
+                )
+            })
+            .count();
+        assert!(
+            widened >= 2,
+            "each F32 lane of `lanes.xy` widens to the Vec2 scalar (found {widened})"
+        );
+        assert!(
+            mir.prelude_calls
+                .iter()
+                .any(|row| row.symbol.name() == "jet_math_Vec3_lane_set"),
+            "a Vec3 write swizzle stores through jet_math_Vec3_lane_set"
+        );
+        let linalg = include_str!("../../Prelude/CoreLib/Top/LinalgFns.rs");
+        for name in crate::Syntax::SIMD_LANE_TYPE_NAMES
+            .iter()
+            .copied()
+            .chain(["Vec2", "Vec3", "Vec4"])
+            .filter(|name| crate::Sema::is_swizzleable_math_type(name))
+        {
+            assert!(
+                linalg.contains(format!("jet_math_{name}_lane_set").as_str()),
+                "LinalgFns is missing the lane setter for swizzleable {name}"
+            );
+        }
+    });
+}
+
+#[test]
+fn mir_lowers_user_struct_and_instance_method() {
+    // Compiler-generated Display/Equatable bodies and user getters all name
+    // the TIR local `self`. Binding it as MIR parameter 0 is what lets a
+    // user struct construct, print a field, and call an instance method.
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let src = "struct Gauge {\n n: Int\n}\nfn Gauge.value(self) -> Int { self.n }\nfn run() {\n v :: Gauge{ n: 1 }\n print(\"{v.value()}\")\n}\n";
+        let (bundle, _nominals) = checked_bundle(src);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("user struct method failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("user struct MIR failed validate: {err}"));
@@ -2447,13 +3835,13 @@ fn run() {
     print(\"{first_value}:{second_value}\")
 }
 ";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("indexed same-name methods failed: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("indexed same-name MIR failed validate: {err}"));
@@ -2499,13 +3887,13 @@ fn mir_lowers_computed_field_getter_onto_inherent_impl() {
     // and AOT panics unless an impl row names them.
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
         let src = "struct Stats {\n n: Int\n doubled: Int -> n * 2\n}\nfn run() {\n s :: Stats{ n: 1 }\n print(\"{s.doubled}\")\n}\n";
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let request = jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let (mir, _) = super::lower_checked_mir_program_for(&bundle, request)
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &_nominals, request)
             .unwrap_or_else(|err| panic!("computed field failed to lower to MIR: {err:?}"));
         mir.validate()
             .unwrap_or_else(|err| panic!("computed field MIR failed validate: {err}"));
@@ -2513,9 +3901,7 @@ fn mir_lowers_computed_field_getter_onto_inherent_impl() {
             .functions
             .iter()
             .find(|function| {
-                function.name == "Stats::doubled"
-                    || function.name.ends_with("::doubled")
-                    || function.name == "doubled"
+                function.name.ends_with(&Syntax::computed_field_getter_name("doubled"))
             })
             .expect("computed field getter doubled");
         match &method.form {
@@ -2603,7 +3989,7 @@ fn covers_map_builtin_methods() {
     // add/len/keys/values/has_key/clear on a map-typed param. Run the full
     // front end so this coverage proof cannot drift onto a list-only or
     // otherwise invalid method spelling that sema would reject before TIR.
-    let src = "fn f(m: [String:Int]) -> Int {\n m2 := ~m\n old := &m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n &m2.clear()\n return n\n}\nfn run() {}\n";
+    let src = "fn f(m: [String:Int]) -> Int {\n m2 := m.copy()\n old := &m2.add(\"k\", 1) ?? 0\n n := m2.len()\n ks := m2.keys()\n vs := m2.values()\n ck := m2.has_key(\"a\")\n &m2.clear()\n return n\n}\nfn run() {}\n";
     assert!(covers_after_sema(src, "f"));
 }
 
@@ -2927,12 +4313,8 @@ fn covers_named_fn_value_binding() {
 
 #[test]
 fn covers_fn_field_struct_value_type() {
-    // c109 Phase 27: a struct with a FUNCTION-typed field is a covered VALUE type — the
-    // fn-typed field renders to `Box<dyn Fn(...)>` and needs no clone/deref decision at
-    // the field site (sema-independent — `build_cx` populates `struct_fields`). (The
-    // full construction + `w.step(4)` fn-field CALL is sema-dependent — `recv_type ==
-    // Some("Worker")` is a sema fact — so it is proven by the TIR feature
-    // integration targets + byte-parity.)
+    // Function-typed fields are covered value types. Calls through them are
+    // normalized by sema to the same checked route as `.call(...)`.
     let src = "struct Worker { step: fn(Int) -> Int }\nfn f() {}";
     let (toks, _) = crate::Lexer::lex(src);
     let prog = crate::Parser::parse(&toks).expect("parse");
@@ -2941,12 +4323,6 @@ fn covers_fn_field_struct_value_type() {
         &Type::Named("Worker".to_string()),
         &cx
     ));
-    // The fn-field-call shape resolves the field's Fn type from a covered struct's
-    // `struct_fields` (the `recv_type` half is supplied by the TIR feature
-    // integration targets).
-    assert!(fn_field_call_ty("step", &Some("Worker".to_string()), &cx).is_some());
-    // A non-existent / non-Fn field is not a fn-field call.
-    assert!(fn_field_call_ty("missing", &Some("Worker".to_string()), &cx).is_none());
 }
 
 #[test]
@@ -3248,21 +4624,21 @@ fn core_closure_calls_covered() {
 
 #[test]
 fn covers_json_construction_and_collection() {
-    // D-ENC-DYN1=A+: dynamic `DataTree` construction (`DataTree.Text`/
-    // `DataTree.Bool`/`DataTree.Array`/`DataTree.Null`) + a `[DataTree]` list value
-    // type. A fn that builds and returns `DataTree` values routes (the dynamic value
+    // D-ENC-DYN1=A+: dynamic `Dyn` construction (`Dyn.Text`/
+    // `Dyn.Bool`/`Dyn.Array`/`Dyn.Null`) + a `[Dyn]` list value
+    // type. A fn that builds and returns `Dyn` values routes (the dynamic value
     // type is a covered foreign value type;
     // construction is the `JSONLit` shape). The if-let MATCHING + index-assign need
-    // full sema (the `DataTree` pattern / `IndexKind`), proven by the TIR feature
+    // full sema (the `Dyn` pattern / `IndexKind`), proven by the TIR feature
     // integration targets + the whole-suite byte-parity diff; here we gate the
     // sema-independent construction.
     let src = "\
-fn build() -> DataTree {
+fn build() -> Dyn {
     items := []
-    items.push(DataTree.Text(\"jet\"))
-    items.push(DataTree.Bool(true))
-    items.push(DataTree.Null)
-    return DataTree.Array(items)
+    items.push(Dyn.Text(\"jet\"))
+    items.push(Dyn.Bool(true))
+    items.push(Dyn.Null)
+    return Dyn.Array(items)
 }
 ";
     assert!(covers(src, "build"));
@@ -3270,12 +4646,12 @@ fn build() -> DataTree {
 
 #[test]
 fn covers_json_value_param_and_array() {
-    // A `DataTree` param + list value type + `DataTree.Array` construction.
+    // A `Dyn` param + list value type + `Dyn.Array` construction.
     let src = "\
-fn wrap(x: DataTree) -> DataTree {
+fn wrap(x: Dyn) -> Dyn {
     items := []
     items.push(x)
-    return DataTree.Array(items)
+    return Dyn.Array(items)
 }
 ";
     assert!(covers(src, "wrap"));
@@ -3396,7 +4772,7 @@ struct PR {
     note: String?
 }
 fn mk(p: String) -> PR {
-    return PR{file_path: ~p, note: None}
+    return PR{file_path: p.copy(), note: None}
 }
 fn run() {}
 ";
@@ -3500,7 +4876,7 @@ fn maybe_shape(s: Shape) -> Shape? {
 
 #[test]
 fn covers_trait_object_param() {
-    // c109 Phase 30: a TRAIT-OBJECT param (`s: Shape` → `&Box<dyn __jet_Shape>`). The
+    // A Read trait-object param (`s: Shape`) lends `&dyn __jet_Shape`.
     // param type is admitted (`is_covered_trait_object_ty`); a body with no method
     // call is structurally in-subset (the dynamic-dispatch shape needs sema's
     // `recv_type`, proven by the TIR feature integration targets + parity). An
@@ -3514,6 +4890,36 @@ fn takes_shape(s: Shape) {
 }
 ";
     assert!(covers(src, "takes_shape"));
+}
+
+#[test]
+fn owned_trait_literal_preserves_original_generic_child() {
+    let lowered = lower_after_sema(
+        r#"
+trait Shape { fn area(self) -> Int }
+struct GenericShape<T> { value: T }
+impl GenericShape.Shape { fn area(self) -> Int { 7 } }
+fn make() {
+    shapes :: [Shape]{GenericShape<Int>{value: 7}}
+}
+"#,
+        "make",
+    );
+    let init = lowered.body.iter().find_map(|statement| match statement {
+        TStmt::Let { name, init, .. } if name == "shapes" => Some(init),
+        _ => None,
+    }).expect("trait list binding");
+    let TExprKind::ListLit(elements) = &init.kind else { panic!("expected literal list") };
+    let [element] = elements.as_slice() else { panic!("expected one trait value") };
+    let TExprKind::TraitBox { value, target } = &element.kind else {
+        panic!("owned trait coercion must use the canonical wrapper");
+    };
+    assert_eq!(target, &element.ty);
+    assert!(matches!(target, Type::TraitObject(bounds) if bounds.len() == 1));
+    assert!(matches!(&value.ty, Type::Apply { name, args }
+        if name.rsplit("::").next() == Some("GenericShape") && args == &[Type::Int]));
+    assert!(matches!(&value.kind, TExprKind::StructLit { fields, .. }
+        if fields.len() == 1 && fields[0].0 == "value"));
 }
 
 #[test]
@@ -3733,7 +5139,7 @@ fn run() {
 
 fn auto_facts_after_sema(src: &str, fn_name: &str) -> Option<crate::AST::AutoVectorizationFacts> {
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        let bundle = checked_bundle(src);
+        let (bundle, _nominals) = checked_bundle(src);
         let module = &bundle.modules[bundle.entry];
         let function = module
             .items
@@ -3801,6 +5207,250 @@ fn run() {
         .map(|(name, _)| name.as_str())
         .collect::<Vec<_>>();
     assert_eq!(names, ["z", "a"]);
+}
+
+/// Removing metadata-based group normalization must not widen ordinary
+/// expression-bodied tasks or literal siblings to Result elements.
+#[test]
+fn task_group_expression_branches_keep_scalar_elements() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn work() -> Int { 7 }
+fn run() {
+    values :: task.all {work(), work()} ?? []
+    raced :: task.race {work(), 1} ?? 0
+    first :: task.any {work(), 2} ?? 0
+    print(values[0], raced, first)
+}
+"#;
+        let (mir, _) = emitted_rust(source);
+        let mut groups = 0;
+        for call in &mir.prelude_calls {
+            if !matches!(
+                call.symbol.name(),
+                "jet_std::jet_task_all" | "jet_std::jet_task_race" | "jet_std::jet_task_any"
+            ) {
+                continue;
+            }
+            let success = match &call.fallibility {
+                jet_foundation::MIR::MirCallFallibility::Failure(
+                    jet_foundation::MIR::MirFailureCarrier::Result { success, .. },
+                ) => success,
+                _ => panic!("a task group must retain its waiting failure carrier"),
+            };
+            use jet_foundation::MIR::MirTypeKind;
+            match &success.kind {
+                MirTypeKind::List(element) => assert!(matches!(element.kind, MirTypeKind::Int)),
+                other => assert!(matches!(other, MirTypeKind::Int)),
+            }
+            groups += 1;
+        }
+        assert_eq!(
+            groups, 3,
+            "all, race, and any must preserve the scalar element"
+        );
+    });
+}
+
+#[test]
+fn optional_never_return_keeps_optional_match_subject() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn first_even(xs: [Int]) -> Int? Never! {
+    loop x in xs {
+        if x % 2 == 0 -> return Val(x)
+    }
+    None
+}
+fn run() {
+    if first_even([Int]{7, 8}) == {
+        Val(found) -> print("found {found}")
+        None -> print("none")
+    }
+}
+"#;
+        let (mir, _) = emitted_rust(source);
+        let function = mir.functions.iter().find(|function| function.name == "first_even")
+            .expect("first_even MIR function");
+        assert!(matches!(
+            &function.return_type.kind,
+            jet_foundation::MIR::MirTypeKind::Option(inner)
+                if matches!(inner.kind, jet_foundation::MIR::MirTypeKind::Int)
+        ));
+    });
+}
+
+/// I3: all/race/any add a TaskFailure rail around the checked worker element,
+/// rather than guessing a flattening route from the element's Result shape.
+#[test]
+fn task_groups_preserve_checked_worker_results() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn report() -> String Never! { "done" }
+#Error
+enum WorkerError { Bad }
+fn fallible_report() -> String WorkerError! { Ok("done") }
+fn fail() -> String WorkerError! { Err(WorkerError.Bad) }
+fn run() {
+    values :: task.all {{ report() }, { report() }} ?? panic("all failed")
+    named :: task.all {z: { report() }, a: { report() }} ?? panic("named all failed")
+    raced :: task.race {{ report() }, { report() }} ?? panic("race failed")
+    first :: task.any {{ report() }, { report() }} ?? panic("any failed")
+    expression_values :: task.all {fallible_report(), fallible_report()} ?? panic("all failed")
+    expression_raced :: task.race {fallible_report(), fallible_report()} ?? panic("race failed")
+    expression_first :: task.any {fallible_report(), fallible_report()} ?? panic("any failed")
+    print(values[0] ?? panic("worker failed"))
+    print(named.z ?? panic("worker failed"))
+    print(raced ?? panic("worker failed"))
+    print(first ?? panic("worker failed"))
+    print(expression_values[0] ?? panic("worker failed"))
+    print(expression_raced ?? panic("worker failed"))
+    print(expression_first ?? panic("worker failed"))
+    worker :: task fail()
+    joined :: ^worker.join() ?? panic("join failed")
+    print(joined ?? "worker failed")
+}
+"#;
+        let (mir, rust) = emitted_rust(source);
+        let mut groups = 0;
+        for call in &mir.prelude_calls {
+            let name = call.symbol.name();
+            if !matches!(
+                name,
+                "jet_std::jet_task_all" | "jet_std::jet_task_race" | "jet_std::jet_task_any"
+            ) {
+                continue;
+            }
+            let success = match &call.fallibility {
+                jet_foundation::MIR::MirCallFallibility::Failure(
+                    jet_foundation::MIR::MirFailureCarrier::Result { success, .. },
+                ) => success,
+                _ => panic!("a task group must retain its waiting failure carrier"),
+            };
+            use jet_foundation::MIR::MirTypeKind;
+            match &success.kind {
+                MirTypeKind::List(element) => {
+                    assert!(matches!(element.kind, MirTypeKind::Result { .. }));
+                }
+                MirTypeKind::Tuple(fields) => {
+                    assert!(fields
+                        .iter()
+                        .all(|(_, field)| matches!(field.kind, MirTypeKind::Result { .. })));
+                }
+                other => assert!(matches!(other, MirTypeKind::Result { .. })),
+            }
+            groups += 1;
+        }
+        assert_eq!(
+            groups, 7,
+            "block and expression workers must retain Result elements on direct routes"
+        );
+        for name in [
+            "jet_task_all_result",
+            "jet_task_race_result",
+            "jet_task_any_result",
+            "jet_task_join_result",
+        ] {
+            assert!(!rust.contains(name), "{rust}");
+        }
+    });
+}
+
+/// #4790 / I3: a task lambda must retain sema's Never error carrier when
+/// stored in a typed task list, not inherit its enclosing callable's Err.
+#[test]
+fn task_lambda_never_carrier_matches_typed_list() {
+    let source = r#"
+fn report() -> String Never! { "done" }
+fn run() {
+    workers := [Task<String Never!>]{}
+    task.group group {
+        worker :: task { report() }
+        &workers.push(^worker)
+        loop pending in workers {
+            joined :: ^pending.join() ?? panic("join failed")
+            print(joined ?? panic("infallible worker"))
+        }
+    }
+}
+"#;
+    let (bundle, _nominals) = checked_bundle(source);
+    let run = bundle.modules[bundle.entry].items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "run" => Some(function),
+        _ => None,
+    }).expect("checked run function");
+    let checked_list = run.body.iter().find_map(|stmt| match stmt {
+        Stmt::Val(binding) if binding.name == "workers" => binding.ty.as_ref(),
+        _ => None,
+    }).expect("sema's checked workers type");
+    let Type::List(checked_task) = checked_list else {
+        panic!("workers must be a checked task list");
+    };
+    let tir = lower_after_sema(source, "run");
+    fn check(stmts: &[TStmt], checked_task: &Type) -> usize {
+        let mut found = 0;
+        for stmt in stmts {
+            match stmt {
+                TStmt::Let { init, .. } => {
+                    if let TExprKind::CoreClosureCall {
+                        kind: TCoreClosureKind::Spawn { executable, .. },
+                    } = &init.kind
+                    {
+                        let Type::Apply { name, args } = checked_task else {
+                            panic!("sema must establish the Task element");
+                        };
+                        assert_eq!(name, "Task");
+                        assert_eq!(args.len(), 1);
+                        assert_eq!(executable.ret.as_ref(), Some(&args[0]));
+                        assert_eq!(&init.ty, checked_task);
+                        found += 1;
+                    }
+                }
+                TStmt::TaskGroup { body, .. } => found += check(body, checked_task),
+                _ => {}
+            }
+        }
+        found
+    }
+    assert_eq!(check(&tir.body, checked_task), 1);
+}
+
+/// #4790: a recursive Group helper must join the checked worker element
+/// without flattening the inner Never result retained by Rust sema.
+#[test]
+fn recursive_task_explicit_join_preserves_checked_carrier() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = r#"
+fn report() Never! {}
+fn start(group: Group, remaining: Int) Never! {
+    if remaining == 0 -> return
+    worker :: task report()
+    start(group, remaining - 1)
+    joined :: ^worker.join() ?? panic("join failed")
+    joined ?? panic("infallible worker")
+}
+fn run() {
+    task.group group {
+        start(group, 2)
+    }
+}
+"#;
+        let (mir, rust) = emitted_rust(source);
+        let direct_join = mir.prelude_calls.iter().find(|call| {
+            call.symbol.name() == "jet_std::JetTask::join"
+        }).expect("checked join must retain the Task element");
+        let join_success = match &direct_join.fallibility {
+            jet_foundation::MIR::MirCallFallibility::Failure(
+                jet_foundation::MIR::MirFailureCarrier::Result { success, .. },
+            ) => success,
+            _ => panic!("checked join must have a Result carrier"),
+        };
+        assert!(matches!(
+            &join_success.kind,
+            jet_foundation::MIR::MirTypeKind::Result { .. }
+        ), "sema retains the worker Result inside the join Result");
+        assert!(!rust.contains("jet_std::jet_task_join_result"), "{rust}");
+    });
 }
 
 #[test]
@@ -4172,7 +5822,6 @@ fn optimizer_fact_test_func(body: Vec<TStmt>, is_scalar: bool) -> TFunc {
         effects: TEffectFacts::default(),
         target_applicability: TTargetApplicability {
             rust_aot: true,
-            cranelift: true,
             interpreter: true,
             web: true,
         },
@@ -4258,4 +5907,673 @@ fn optimizer_fact_channel_absence_keeps_conservative_defaults() {
     assert!(!facts.no_cross_iteration_deps);
     assert!(facts.comptime_value.is_none());
     assert!(facts.cost.is_none());
+}
+
+#[test]
+fn geometry_method_binders_are_the_checked_operand_facts() {
+    use super::tir_to_mir_expr::geometry_checked_transform_type_args as binders;
+    let named = |name: &str| Type::Named(name.to_string());
+    let stock = Type::Apply { name: "Transform".into(), args: vec![named("Screen"), named("World")] };
+    let next = TExpr { ty: Type::Apply { name: "Transform".into(), args: vec![named("World"), named("Device")] }, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&stock, "then", &[next]), Some(vec![named("Device")]));
+    let point_type = Type::Apply { name: "Point2".into(), args: vec![Type::Float, named("Screen")] };
+    let point = TExpr { ty: point_type.clone(), kind: TExprKind::IntLit(0, None) };
+    for method in ["point", "point_at_depth", "ray"] {
+        assert_eq!(binders(&stock, method, &[point.clone()]), Some(vec![point_type.clone()]));
+    }
+    let narrow = Type::Apply { name: "Transform2".into(), args: vec![Type::Float32, named("Screen"), named("World")] };
+    let next = TExpr { ty: Type::Apply { name: "Transform2".into(), args: vec![Type::Float32, named("World"), named("View")] }, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&narrow, "then", &[next]), Some(vec![named("View")]));
+    let held = Type::Apply { name: "Transform2".into(), args: vec![Type::Float, named("Screen"), named("World")] };
+    assert_eq!(binders(&held, "inverse", &[]), None);
+    let cross = TExpr { ty: held, kind: TExprKind::IntLit(0, None) };
+    assert_eq!(binders(&stock, "then", &[cross]), None);
+}
+
+#[test]
+fn never_helper_recursive_enum_prep_consumes_payload_carrier() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        checked_bundle(r#"
+enum Ty {
+    Int
+    Named(name: String)
+    List(element: Ty)
+    Result(ok: Ty, err: Ty)
+}
+enum Op { ParseInt }
+enum Route { Builtin(operation: Op) }
+struct Row { ty: Ty, route: Route }
+fn named() -> Ty Never! { Ty.Named{name: "ParseError"} }
+fn row(ty: Ty, route: Route) -> Row Never! { Row{ty: ty, route: route} }
+ROWS :: prep { [Row]{row(Ty.Result{ok: Ty.Int, err: named()}, Route.Builtin{operation: Op.ParseInt})} }
+fn run() Never! {}
+"#);
+    });
+}
+
+#[test]
+fn finite_value_loop_native_shadows_compile_and_run_on_empty_range() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+fn run() Never! {
+    absent :: loop value in 0..<0 { break value } ?? -1
+    if absent != -1 -> panic("finite loop exhaustion changed")
+    present :: loop value in 3..<4 { break value } ?? -1
+    if present != 3 -> panic("finite loop break value changed")
+}
+"#);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("finite value loops lower to MIR");
+        mir.validate().expect("finite value loops have valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("finite-value-loop-proof"))
+            .join(format!("native-shadows-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("finite_value_loop.rs");
+        let executable = directory.join(format!("finite_value_loop{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=finite_value_loop", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("finite value-loop codegen proof requires rustc");
+        assert!(compiled.status.success(),
+            "finite value-loop native shadows must be declared under their emitted names:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("finite value-loop codegen proof must run");
+        assert!(executed.status.success(),
+            "empty-range fallback and nonempty break must preserve their values:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn nested_pure_closure_never_carriers_compile_and_run() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source_text = include_str!("../../../../../Examples/features/basics/closure_capture_snapshot.jet");
+        let (bundle, nominals) = checked_bundle(source_text);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("nested pure closures lower to MIR");
+        mir.validate().expect("nested pure closure MIR is valid");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("nested-pure-closure-proof"))
+            .join(format!("never-carriers-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("nested_pure_closure.rs");
+        let executable = directory.join(format!("nested_pure_closure{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=nested_pure_closure", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("nested pure closure proof requires rustc");
+        assert!(compiled.status.success(),
+            "nested pure closure carriers must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("nested pure closure proof must run");
+        assert!(executed.status.success(),
+            "nested pure closure execution must succeed:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout),
+            include_str!("../../../../../Examples/features/expected/basics/closure_capture_snapshot.out"),
+            "mutable live borrows, frozen captures and nested success values remain distinct");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn taking_result_subject_coverage_checks_and_runs_the_call_once() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(include_str!(
+            "../../../../../Compiler/JetSema/Tests/ErrArmFlowFixtures.jet"
+        ));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("taking Result subjects lower to MIR");
+        mir.validate().expect("taking Result subjects have valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("taking-result-subject-proof"))
+            .join(format!("once-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("taking_result_subject.rs");
+        let executable = directory.join(format!("taking_result_subject{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=taking_result_subject", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("taking Result subject proof requires rustc");
+        assert!(compiled.status.success(),
+            "taking Result subject must compile without a repeated move:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("taking Result subject proof must run");
+        assert!(executed.status.success(),
+            "taking Result subject must retain one call and one owner transfer:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout), "0\n4\n0\n4\n");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn compiler_hash_string_builder_binds_and_reuses_its_return_slot() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let hash_source = include_str!("../../../../../Compiler/JetFoundation/Source/Hash/SHA256.jet");
+        let start = hash_source.find("fn mir_sha256_hex_digit(").unwrap();
+        let end = hash_source.find("fn mir_sha256_hex(value:").unwrap();
+        let source_text = format!("{}\n{}", &hash_source[start..end], r#"
+fn run() Never! {
+    output := mir_sha256_hex_bytes([U8{0}, U8{255}, U8{16}])
+    if output != "00ff10" -> panic("initial return slot result is wrong")
+    output = mir_sha256_hex_bytes([U8]{})
+    if output != "" -> panic("empty refill retained old bytes")
+    output = mir_sha256_hex_bytes([U8{1}])
+    if output != "01" -> panic("refill after empty result is wrong")
+    print("return slot ok")
+}
+"#);
+        let (bundle, nominals) = checked_bundle(&source_text);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("compiler hash string builder lowers to MIR");
+        mir.validate().expect("compiler hash string builder has valid MIR");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        assert!(rust.contains("__jet_into"), "proof must exercise caller-owned return storage");
+        assert!(!rust.contains("__jet_return_reuse"), "return reuse markers must be bound before compaction");
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("compiler-return-slot-proof"))
+            .join(format!("hash-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("compiler_return_slot.rs");
+        let executable = directory.join(format!("compiler_return_slot{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=compiler_return_slot", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("compiler return-slot proof requires rustc");
+        assert!(compiled.status.success(), "compiler return slots must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("compiler return-slot proof must run");
+        assert!(executed.status.success(), "compiler return-slot refills must run:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout), "return slot ok\n");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn core_owner_stream_records_keep_source_nominals() {
+    let source = jet_foundation::CoreModuleExports::core_source_module("core.term")
+        .expect("Core terminal source module");
+    let body = jet_sema::CoreSources::core_source_text(source.module).unwrap();
+    let source_for_parse = jet_pkg_model::Package::mask_inline_package_source(body).unwrap().0;
+    let (tokens, diagnostics) = crate::Lexer::lex_generated(&source_for_parse);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, &source_for_parse).unwrap();
+    let items: Vec<_> = program.items.into_iter().filter(|item| matches!(
+        item, Item::Struct(definition)
+            if matches!(definition.name.as_str(), "Stdout" | "Stderr" | "StdinHandle")
+    )).collect();
+    assert_eq!(items.len(), 3, "all source-owned stream records are exercised");
+    let module = "<corelib>/Core/term::Core/term/term.jet";
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &items, module, &jet_foundation::Layout::TargetLayout::host(),
+    );
+    for leaf in ["Stdout", "Stderr", "StdinHandle"] {
+        let key = format!("{module}::{leaf}");
+        let row = declarations.type_defs.iter().find(|row| row.key == key)
+            .unwrap_or_else(|| panic!("source record owner was discarded: {key}"));
+        let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+            panic!("{key} must retain its source record shape");
+        };
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].name, "fd");
+        assert_eq!(fields[0].ty, Type::Int);
+        let lowered = super::tir_to_mir_types::lower_type(&Type::Named(key.clone()));
+        let jet_foundation::MIR::MirTypeKind::Apply { name, .. } = &lowered.kind else {
+            panic!("{key} must remain nominal");
+        };
+        assert_eq!(name.name, key, "source stream identity must not collapse to a Prelude carrier");
+    }
+}
+
+#[test]
+fn core_owner_range_error_has_canonical_reason_record() {
+    let declarations = super::tir_to_mir_types::lower_declarations_from_items(
+        &[], "", &jet_foundation::Layout::TargetLayout::host(),
+    );
+    let row = declarations.type_defs.iter().find(|row| row.key == "RangeError")
+        .expect("checked Core-only RangeError constructors need a canonical record owner");
+    let super::tir_to_mir_types::TirTypeDefKind::Struct { fields, .. } = &row.kind else {
+        panic!("RangeError must retain its canonical record shape");
+    };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name, "reason");
+    assert_eq!(fields[0].ty, crate::Sema::core_struct_field_type("RangeError", "reason", &[]).unwrap());
+    assert_eq!(fields[0].ty, Type::String);
+}
+
+#[test]
+fn core_owner_qualified_guard_and_streams_compile_and_run() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(include_str!(
+            "../../../../../Compiler/JetCodegen/Tests/CoreOwnerGuardFixtures.jet"
+        ));
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("qualified guard and stream calls must lower to checked MIR");
+        mir.validate().expect("qualified guard and stream MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("core-owner-proof"))
+            .join(format!("qualified-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("core_owner_guard.rs");
+        let executable = directory.join(format!("core_owner_guard{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=core_owner_guard", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("qualified guard proof requires rustc");
+        assert!(compiled.status.success(), "qualified guard and stream code must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("qualified guard proof must run");
+        assert!(executed.status.success(), "qualified guard and streams must run:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        assert_eq!(String::from_utf8_lossy(&executed.stdout), "body\nstdout owner\nguard\n");
+        assert_eq!(String::from_utf8_lossy(&executed.stderr), "stderr owner\n");
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn owned_debug_adapters_preserve_checked_move_bodies() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (bundle, nominals) = checked_bundle(r#"
+struct DNSRecord { text: String }
+impl DNSRecord.Debug { fn debug(^self) -> String { self.text } }
+struct HTTPRecord { text: String }
+impl HTTPRecord.Debug { fn debug(^self) -> String { self.text } }
+struct IORecord { text: String }
+impl IORecord.Debug { fn debug(^self) -> String { self.text } }
+#Debug
+struct DebugRow { record: DNSRecord }
+fn run() {
+    dns :: DNSRecord{text: "dns"}
+    http :: HTTPRecord{text: "http"}
+    io :: IORecord{text: "io"}
+    assert("{dns:Debug}" == "dns")
+    assert("{http:Debug}" == "http")
+    assert("{io:Debug}" == "io")
+    assert(dns.text == "dns")
+    assert(http.text == "http")
+    assert(io.text == "io")
+    row :: DebugRow{record: dns.copy()}
+    assert("{row:Debug}".contains("dns"))
+    assert(row.record.text == "dns")
+}
+"#);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("owned Debug bodies must retain checked MIR");
+        mir.validate().expect("owned Debug MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        assert!(rust.contains("fn jet_debug(&self) -> String"));
+        assert!(rust.contains("<Self as Clone>::clone(self)"));
+        assert!(rust.contains("fn __jet_owned_debug_"));
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("owned-debug-proof"))
+            .join(format!("checked-move-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("owned_debug.rs");
+        let executable = directory.join(format!("owned_debug{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=owned_debug", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("owned Debug adapter proof requires rustc");
+        assert!(compiled.status.success(), "owned Debug adapters must compile:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("owned Debug adapter proof must run");
+        assert!(executed.status.success(), "formatting must preserve the written consuming body and its caller:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn comptime_program_handoff_reinitializes_moved_environment_fields() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let checker = include_str!("../../../../../Compiler/JetSema/Source/Sema/CheckProgram.jet");
+        let stage = &checker[checker.find("fn sema_collect_comptime_declarations(").unwrap()..];
+        let start = stage.find("    initial_program := SemaProgramTables{").unwrap();
+        let end = stage[start..].find("    module_state ::").unwrap() + start;
+        // Execute the actual extraction/reset code, not an independently fixed
+        // fixture: losing any reset in the compiler must fail this native proof.
+        let transfer = &stage[start..end];
+        let prefix = r#"
+struct SemaRegistrationGraph { name: String }
+struct TTypeDef { name: String }
+struct SemaScopeEnvironment {
+    registration_graph: SemaRegistrationGraph?
+    checked_types: [TTypeDef]
+    checked_type_rows: [String:Int]
+    checked_type_name_slots: [String:Int]
+    checked_type_name_rows: [[Int]]
+    boxed_edges: [String:[String]]
+    publication: String
+}
+struct SemaProgramTables {
+    registration_graph: SemaRegistrationGraph?
+    checked_types: [TTypeDef]
+    checked_type_rows: [String:Int]
+    checked_type_name_slots: [String:Int]
+    checked_type_name_rows: [[Int]]
+    boxed_edges: [String:[String]]
+}
+fn handoff(environment: ^SemaScopeEnvironment, program: ^SemaProgramTables) Never! {
+    if environment.registration_graph == .Val(_) { panic("environment retained the graph") }
+    assert(environment.checked_types.len() == 0)
+    assert(environment.checked_type_rows.len() == 0)
+    assert(environment.checked_type_name_slots.len() == 0)
+    assert(environment.checked_type_name_rows.len() == 0)
+    assert(environment.boxed_edges.len() == 0)
+    assert(environment.publication == "publication")
+    if program.registration_graph == .Val(graph) {
+        assert(graph.name == "registered")
+    } else { panic("program lost the graph") }
+    assert(program.checked_types[0].name == "Checked")
+    assert(program.checked_type_rows.get("Checked") == Val(3))
+    assert(program.checked_type_name_slots.get("Checked") == Val(4))
+    assert(program.checked_type_name_rows[0][0] == 5)
+    assert(program.boxed_edges["Checked"][0] == "Edge")
+}
+fn run() Never! {
+    initial_environment := SemaScopeEnvironment{
+        registration_graph: Val(SemaRegistrationGraph{name: "registered"}),
+        checked_types: [TTypeDef]{TTypeDef{name: "Checked"}},
+        checked_type_rows: [String:Int]{"Checked": 3},
+        checked_type_name_slots: [String:Int]{"Checked": 4},
+        checked_type_name_rows: [[Int]]{[Int]{5}},
+        boxed_edges: [String:[String]]{"Checked": [String]{"Edge"}},
+        publication: "publication",
+    }
+"#;
+        let source_text = format!("{prefix}\n{transfer}\n    handoff(^initial_environment, ^initial_program)\n}}\n");
+        let (bundle, nominals) = checked_bundle(&source_text);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, artifact) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("complete comptime owners must pass global MIR optimization");
+        mir.validate().expect("comptime table handoff MIR must validate");
+        let rust = crate::Codegen::MIRRust::emit_mir_program(
+            &mir,
+            &crate::Codegen::MIRRust::MirRustConfig {
+                target: jet_foundation::Layout::TargetLayout::host(),
+                target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
+                root_prefix: String::new(),
+                execution: crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
+            },
+        );
+        let deps = std::env::current_exe().unwrap().parent().unwrap().to_path_buf();
+        let directory = std::env::var_os("JET_TEST_SCRATCH_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| deps.join("comptime-table-handoff-proof"))
+            .join(format!("checked-owners-{}", std::process::id()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let source = directory.join("comptime_table_handoff.rs");
+        let executable = directory.join(format!("comptime_table_handoff{}", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&source, &rust).unwrap();
+        let compiled = std::process::Command::new("rustc")
+            .args(["--edition=2021", "--crate-name=comptime_table_handoff", "-Awarnings"])
+            .arg(&source).arg("-o").arg(&executable)
+            .output().expect("comptime owner handoff proof requires rustc");
+        assert!(compiled.status.success(), "comptime owners must compile after field reinitialization:\n{}",
+            String::from_utf8_lossy(&compiled.stderr));
+        let executed = std::process::Command::new(&executable)
+            .output().expect("comptime owner handoff proof must run");
+        assert!(executed.status.success(), "the moved tables and retained publication must survive handoff:\n{}",
+            String::from_utf8_lossy(&executed.stderr));
+        std::fs::remove_dir_all(directory).unwrap();
+    });
+}
+
+#[test]
+fn global_cli_registry_constants_optimize_once() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let source = format!("{}\nfn run() {{ print(JET_CLI_COMMANDS.len()) }}\n", include_str!(
+            "../../../../../Compiler/JetFoundation/Source/Registry/CLICommands.jet"
+        ));
+        let (bundle, nominals) = checked_bundle(&source);
+        let request = jet_foundation::MIR::MirArtifactRequest::new(
+            jet_foundation::MIR::MirArtifactTarget::RustAot,
+            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+            jet_foundation::MIR::MirArtifactBuildMode::Dev,
+        );
+        let (mir, _) = super::lower_checked_mir_program_for(&bundle, &nominals, request)
+            .expect("the canonical CLI table must pass global MIR optimization");
+        mir.validate().expect("canonical CLI constants must have unique MIR identities");
+        for name in ["JET_CLI_COMMANDS", "JET_CLI_HANDLERS", "JET_CLI_FLAGS"] {
+            assert_eq!(mir.constants.iter().filter(|constant| constant.name == name).count(), 1,
+                "{name} must have exactly one runtime declaration");
+        }
+    });
+}
+
+/// A record that holds a trait object has no Rust `Clone` (sema
+/// `is_cloneable`, native `clone: false`). When a match's last arm binds the
+/// payloads of such a subject and nothing reads the subject afterwards, the
+/// MIR last-use pass hands that arm a `Move` of the subject even though an
+/// earlier arm binds another variant's payload, so the arm takes the subject
+/// apart instead of cloning a payload out of it.
+#[test]
+fn later_match_arm_takes_noncloneable_payloads() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (mir, rust) = emitted_rust(r#"
+trait Sink {
+    fn note(self, text: String) -> Int
+}
+struct Quiet {
+    level: Int
+}
+impl Quiet.Sink {
+    fn note(self, text: String) -> Int {
+        self.level + text.len()
+    }
+}
+struct Config {
+    fuel: Int
+    sink: Sink?
+}
+struct Report {
+    config: Config
+    names: [String]
+}
+enum Outcome {
+    Done(report: Report, label: String)
+    Refused(message: String)
+}
+fn make_outcome(fuel: Int) -> Outcome {
+    if fuel > 3 -> return Outcome.Refused{message: "no"}
+    Outcome.Done{report: Report{config: Config{fuel: fuel, sink: Val(Quiet{level: fuel})}, names: [String]{"a"}}, label: "ok"}
+}
+fn outcome_size(fuel: Int) -> Int {
+    out := 0
+    outcome :: make_outcome(fuel)
+    if outcome == {
+        .Refused(message) -> out = message.len()
+        .Done(report, label) -> {
+            out = report.names.len() + label.len() + report.config.fuel
+        }
+    }
+    out
+}
+fn run() {
+    print(outcome_size(2))
+}
+"#);
+        let function = mir.functions.iter().find(|function| function.name == "outcome_size")
+            .expect("outcome_size function");
+        let takes = function.blocks.iter().flat_map(|block| &block.instructions)
+            .filter(|instruction| matches!(instruction.operation, jet_foundation::MIR::MirOperation::Move { .. }))
+            .filter(|instruction| function.blocks.iter().flat_map(|block| &block.instructions).any(|user| {
+                matches!(&user.operation, jet_foundation::MIR::MirOperation::EnumPayload { subject, variant, .. }
+                    if Some(*subject) == instruction.result && variant == "Done")
+            }))
+            .count();
+        assert_eq!(takes, 1, "the `.Done` arm must bind from a Move of its subject:\n{rust}");
+        assert!(
+            !rust.contains("__jet_report: payload, .. } => payload.clone()"),
+            "a non-Clone payload must be taken, not cloned:\n{rust}"
+        );
+    });
+}
+
+/// A `Result` match whose `.Ok` arm comes first: the arm chain re-tests the
+/// arm's own test value after it, so the `.Err` probe is not reachable from
+/// the `.Ok` arm and the non-Clone success payload is taken, not cloned.
+#[test]
+fn first_result_arm_takes_noncloneable_payload() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        let (_mir, rust) = emitted_rust(r#"
+trait Sink {
+    fn note(self, text: String) -> Int
+}
+struct Quiet {
+    level: Int
+}
+impl Quiet.Sink {
+    fn note(self, text: String) -> Int {
+        self.level + text.len()
+    }
+}
+struct Config {
+    fuel: Int
+    sink: Sink?
+}
+#Error
+struct ProbeError {
+    message: String
+}
+fn checked_config(fuel: Int) -> Config ProbeError! {
+    if fuel < 0 -> return Err(ProbeError{message: "negative"})
+    Ok(Config{fuel: fuel, sink: Val(Quiet{level: fuel})})
+}
+fn config_fuel(fuel: Int) -> Int ProbeError! {
+    config :: if checked_config(fuel) == {
+        .Ok(found) -> found
+        .Err(error) -> {
+            return Err(error)
+        }
+    }
+    Ok(config.fuel)
+}
+fn run() {
+    print(config_fuel(2) ?? 0)
+}
+"#);
+        let start = rust.find("config_ufuel(").expect("config_fuel emitted");
+        let body = &rust[start..];
+        let body = &body[..body.find("\n}\n").unwrap_or(body.len())];
+        assert!(
+            !body.contains("Ok(value) => value.clone()"),
+            "the `.Ok` arm must take its non-Clone payload:\n{body}"
+        );
+    });
 }

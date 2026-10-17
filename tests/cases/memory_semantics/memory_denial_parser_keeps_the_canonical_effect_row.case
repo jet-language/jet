@@ -1,0 +1,9 @@
+# PORT tests/memory_semantics.rs:22-53.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Split: ; compiler-lib LEDGER-ONLY parsed run declared_effects exact ordered [!Mem.Alloc], no public parser raw declared_effects vector; positive bounded denial parser diagnostic fully executable; no exact AST/ApiFreeze/unit-kernel public projection in CmdInspect; archive includes original parse_family/check helpers
+fixture: memory_denial_parser_keeps_the_canonical_effect_row.fixture
+step: jet fmt main.jet
+exit: 0
+step: jet fmt positive.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0119"][?fix~="!Mem.Alloc(above: 1)"] #>= 1

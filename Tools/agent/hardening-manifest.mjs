@@ -13,7 +13,7 @@ import {
 
 export const SURFACE_SCHEMA = "jet.hardening.surface.v1";
 export const SURFACE_SCHEMA_VERSION = 1;
-export const TIERS = Object.freeze(["aot", "jet_run", "interpreter"]);
+export const TIERS = Object.freeze(["aot", "interpreter"]);
 export const DEFAULT_MANIFEST_PATH = ".jet/hardening-manifest.json";
 export const CAPABILITY_RELATION_SCHEMA = "jet.capability.relation.v1";
 export const CAPABILITY_RELATION_VERSION = 1;
@@ -80,7 +80,6 @@ const CAPABILITY_PATHS = Object.freeze({
 });
 const CAPABILITY_MODE_ORDER = Object.freeze([
   "aot",
-  "jet_run",
   "interpreter",
   "cli",
   "editor",
@@ -111,8 +110,7 @@ const PATHS = Object.freeze({
 });
 const ROUTE_FILES = Object.freeze({
   aot: ["crates/jet-codegen/src/Codegen/TIR/emit/core_calls.rs", "crates/jet-codegen/src/Codegen/TIR/emit/helpers.rs"],
-  jet_run: ["crates/jet-jit/src/jit/lower_ctx.rs", "crates/jet-jit/src/jit/runtime_host.rs", "crates/jet-jit/src/jit/types_meta.rs"],
-  interpreter: ["crates/jet-jit/src/ambient_interp.rs", "crates/jet-jit/src/enc_stream/mod.rs", "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs", "crates/jet-comptime/src/Comptime/CorePureParity.rs"],
+  interpreter: ["crates/jet-evalhost/src/ambient_interp.rs", "crates/jet-evalhost/src/enc_stream/mod.rs", "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs", "crates/jet-comptime/src/Comptime/CorePureParity.rs"],
 });
 const VALID_STATUSES = new Set(["covered", "missing", "unrouted", "invalid", "excluded", "invalid-exclusion"]);
 const SHA256_PATTERN = /^sha256:[0-9a-f]{64}$/;
@@ -1255,7 +1253,7 @@ function candidateFixtureComposition(candidate, dependencies) {
     stage_evidence,
     supported_program_acceptance: {
       status: "passed",
-      modes: ["aot", "jet_run", "interpreter"].map((mode) => ({
+      modes: ["aot", "interpreter"].map((mode) => ({
         mode,
         status: "passed",
         accepted: true,
@@ -1269,7 +1267,7 @@ function candidateFixtureComposition(candidate, dependencies) {
     correct_rejection: {
       status: "passed",
       accepted: false,
-      modes: ["aot", "jet_run", "interpreter"].map((mode) => ({
+      modes: ["aot", "interpreter"].map((mode) => ({
         mode,
         status: "passed",
         accepted: false,
@@ -1606,7 +1604,6 @@ function parseCoreCallRegistry(callsSource, path = PATHS.calls) {
         module,
         member,
         aot_direct: !/\.without_direct_aot\s*\(\s*\)/.test(block),
-        jit_direct: !/\.without_direct_jit\s*\(\s*\)/.test(block),
         interpreter_explicit: /\.with_(?:pure_route|interpreter_route)\s*\(/.test(block),
         evidence: [rowEvidence(path, callsSource, event.start, "CoreCallRecord::new", stable_id)],
       });
@@ -2154,12 +2151,10 @@ function routeFactsFromSources(
 
   const genericLookups = {
     aot: routeSourceEvidence(root, ROUTE_FILES.aot, /(?:crate::)?Syntax::core_call\s*\(\s*module\s*,\s*method\s*\)/, "aot-core-call-dispatch", "__route__"),
-    jet_run: routeSourceEvidence(root, ROUTE_FILES.jet_run, /jet_foundation::Syntax::core_call\s*\(\s*module\s*,\s*method\s*\)/, "jet-run-core-call-dispatch", "__route__"),
     interpreter: routeSourceEvidence(root, ROUTE_FILES.interpreter, /jet_foundation::Syntax::core_call\s*\(\s*module\s*,\s*method\s*\)/, "interpreter-core-call-dispatch", "__route__"),
   };
   const routeSupports = {
     aot: (entry) => entry?.aot_direct !== false,
-    jet_run: (entry) => entry?.jit_direct !== false,
     interpreter: (entry) => entry?.interpreter_explicit === true,
   };
 
@@ -2228,7 +2223,6 @@ function routeFactsFromSources(
 
   const shapePatterns = {
     aot: /core_struct_field_rust_name\s*\(/,
-    jet_run: /core_struct_field_(?:type|names|index|layout)\s*\(/,
     interpreter: /TExprKind::Field|struct_field_types/,
   };
   for (const tier of TIERS) {
@@ -3069,7 +3063,6 @@ export function buildCapabilityRelation({
     consumers: {
       inspect: { relation: "manifest.capability_relation.rows", identity: "row_id", evidence: "row.evidence" },
       hardening: { relation: "manifest.capability_relation.rows", identity: "row_id", evidence: "row.evidence" },
-      learner: { relation: "manifest.capability_relation.rows", projection: "jet-learning-census-v1.records" },
       release: { relation: "manifest.capability_relation.rows", candidate: "row.candidate_identity" },
     },
     revision_rule: "source_snapshot_hash and every source_identity digest must match before evidence is current",
@@ -3913,8 +3906,7 @@ function hostileFixtures() {
     fields: [{ type: "Widget", field: "value" }],
     types: ["core.test.Widget"],
     routes: {
-      aot: [{ stable_id: "module:core.test.call", route: "aot:fixture" }],
-      jet_run: [{ stable_id: "receiver:Widget.read", route: "jet_run:fixture" }],
+      aot: [{ stable_id: "module:core.test.call", route: "aot:fixture" }, { stable_id: "receiver:Widget.read", route: "aot:fixture" }],
       interpreter: [{ stable_id: "field:Widget.value", route: "interpreter:fixture" }],
     },
     seeds: new Map([[
@@ -4111,6 +4103,7 @@ function candidateBuild(args) {
 
 function main(args) {
   if (args.includes("--candidate-build")) return candidateBuild(args);
+  if (args.includes("--hostile-fixtures")) return hostileFixtures();
   if (args.includes("--candidate-negative-controls")) {
     console.log(canonicalJson(runCandidateNegativeControls()));
     return 0;
@@ -4130,6 +4123,7 @@ function main(args) {
     console.log(`candidate: ${candidate.candidate_identity.id}; ${candidate.status.toUpperCase()}`);
     return 0;
   }
+  const checkAt = args.indexOf("--check");
   if (checkAt >= 0) {
     const path = args[checkAt + 1];
     if (!path || path.startsWith("--")) fail("--check requires a path");

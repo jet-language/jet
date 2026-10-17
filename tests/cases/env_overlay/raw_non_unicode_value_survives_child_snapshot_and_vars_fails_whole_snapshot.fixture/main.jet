@@ -1,0 +1,12 @@
+
+use core.sys as env
+use core.process as process
+
+fn run() {
+    child :: process.run(["./raw_probe"]) ?? panic("raw child failed")
+    print(child.output)
+    if env.vars() == {
+        .Ok(_) -> { print("unexpected vars success") }
+        .Err(e) -> { print(e) }
+    }
+}

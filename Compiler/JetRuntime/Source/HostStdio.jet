@@ -1,0 +1,146 @@
+// Raw process-stream transport. Core wrappers own IO.Write/IO.Flush faults;
+// runtime print/panic bypass those wrappers by design. Stream tokens have no
+// mutable payload: like Closed, word 1 is a permanent non-null zero-size token.
+#Export(c) fn jet_std_io_stdout() -> I64 { I64{1} }
+
+#Export(c) fn jet_std_io_stderr() -> I64 { I64{1} }
+
+#Export(c) fn jet_rt_handle_drop_jet_stdout(value: I64) {}
+
+#Export(c) fn jet_rt_handle_drop_jet_stderr(value: I64) {}
+
+#Export(c) fn jet_std_io_stdout_write(token: I64, text: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_text_failure(text, false, false, false), HOST_IO_OP_WRITE, false, error)
+}
+
+// The LF enters the same stream buffer without a temporary String.
+#Export(c) fn jet_std_io_stdout_write_line(token: I64, text: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_text_failure(text, true, false, false), HOST_IO_OP_WRITE, false, error)
+}
+
+#Export(c) fn jet_std_io_stdout_write_bytes(token: I64, bytes: I64, length: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_bytes_failure(bytes, length, false, false), HOST_IO_OP_WRITE, false, error)
+}
+
+#Export(c) fn jet_std_io_stdout_flush(token: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_flush_failure(false), HOST_IO_OP_FLUSH, false, error)
+}
+
+#Export(c) fn jet_std_io_stdout_is_tty(token: I64) -> Bool { host_is_tty(I64{1}) }
+
+#Export(c) fn jet_std_io_stderr_write(token: I64, text: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_text_failure(text, false, true, false), HOST_IO_OP_WRITE, true, error)
+}
+
+// writev borrows a stack LF, never an allocated line String.
+#Export(c) fn jet_std_io_stderr_write_line(token: I64, text: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_text_failure(text, true, true, false), HOST_IO_OP_WRITE, true, error)
+}
+
+#Export(c) fn jet_std_io_stderr_write_bytes(token: I64, bytes: I64, length: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_bytes_failure(bytes, length, true, false), HOST_IO_OP_WRITE, true, error)
+}
+
+// stderr has no pending buffer and therefore no fsync operation. Draining
+// stdout preserves the same stdout-before-stderr ordering as stderr writes.
+#Export(c) fn jet_std_io_stderr_flush(token: I64, error: I64) -> I64 {
+    host_stdio_result(host_stdio_flush_failure(true), HOST_IO_OP_FLUSH, true, error)
+}
+
+#Export(c) fn jet_std_io_stderr_is_tty(token: I64) -> Bool { host_is_tty(I64{2}) }
+
+// Core source wrappers own error selection and fault checks. Raw leaves
+// share one stream failure (0, -errno or HOST_WRITE_ZERO) per operation and
+// differ only in how they report it.
+fn host_stdio_text_failure(text: I64, newline: Bool, stderr: Bool, flush: Bool) -> I64 {
+    #Unsafe("text lends an E4 header and its bytes for this synchronous write; writev borrows its own stack LF") {
+        bytes :: os_load_i64(text)
+        length :: os_load_i64(wrapping(text + I64{8}))
+        if !stderr -> return host_stdout_write(bytes, length, newline, flush)
+        if newline -> return host_stderr_line(bytes, length)
+        return host_stderr_write(bytes, length)
+    }
+}
+
+// `bytes` lends `length` packed (RT_HOST_U8_STRIDE) U8 elements.
+fn host_stdio_bytes_failure(bytes: I64, length: I64, stderr: Bool, flush: Bool) -> I64 {
+    if stderr -> return host_stderr_write(bytes, length)
+    host_stdout_write(bytes, length, false, flush)
+}
+
+// stderr has no pending buffer; its flush drains stdout ahead of it.
+fn host_stdio_flush_failure(stderr: Bool) -> I64 {
+    if stderr -> return host_stderr_write(I64{0}, I64{0})
+    host_lock()
+    failure :: host_stdout_flush_locked()
+    host_unlock()
+    failure
+}
+
+// Kernel errno and a separate WriteZero fact, for runtime-internal callers.
+fn host_stdio_facts(failure: I64, errno: I64, write_zero: I64) {
+    #Unsafe("the caller lends the tuple's exact-Int word and Bool byte outputs") {
+        os_store_i64(errno, if (failure < I64{0} && failure != HOST_WRITE_ZERO) -> wrapping(I64{0} - failure) else -> I64{0})
+        os_store_u8(write_zero, if (failure == HOST_WRITE_ZERO) -> I64{1} else -> I64{0})
+    }
+}
+
+// Core term's Option<String> route carrier: 1 and an owned cause in `some`
+// on failure, 0 and `some` untouched on success.
+fn host_stdio_option_cause(failure: I64, some: I64) -> I64 {
+    if (failure == I64{0}) -> return I64{0}
+    #Unsafe("some lends the route's zeroed Text out slot") { os_store_i64(some, host_stdio_cause(failure)) }
+    I64{1}
+}
+
+#Export(c) fn jet_stdio_stdout_write_raw(text: I64, newline: Bool, errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stdio_text_failure(text, newline, false, false), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stdout_bytes_raw(bytes: I64, length: I64, errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stdio_bytes_failure(bytes, length, false, false), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stdout_flush_raw(errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stdio_flush_failure(false), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stderr_write_raw(text: I64, newline: Bool, errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stdio_text_failure(text, newline, true, false), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stderr_bytes_raw(bytes: I64, length: I64, errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stdio_bytes_failure(bytes, length, true, false), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stderr_flush_raw(errno: I64, write_zero: I64) {
+    host_stdio_facts(host_stdio_flush_failure(true), errno, write_zero)
+}
+
+#Export(c) fn jet_stdio_stdout_tty_raw() -> Bool { host_is_tty(I64{1}) }
+#Export(c) fn jet_stdio_stderr_tty_raw() -> Bool { host_is_tty(I64{2}) }
+
+// core.term.__stdio_write/__stdio_bytes/__stdio_flush (Core/term/term.jet
+// stdio_write/stdio_bytes/stdio_flush): the source wrapper decides `flush`.
+#Export(c) fn jet_term_stdio_write_raw(text: I64, newline: Bool, stderr: Bool, flush: Bool, some: I64) -> I64 {
+    host_stdio_option_cause(host_stdio_text_failure(text, newline, stderr, flush), some)
+}
+
+#Export(c) fn jet_term_stdio_bytes_raw(bytes: I64, length: I64, stderr: Bool, flush: Bool, some: I64) -> I64 {
+    host_stdio_option_cause(host_stdio_bytes_failure(bytes, length, stderr, flush), some)
+}
+
+#Export(c) fn jet_term_stdio_flush_raw(stderr: Bool, some: I64) -> I64 {
+    host_stdio_option_cause(host_stdio_flush_failure(stderr), some)
+}
+
+// core.term.__stdout_terminal/__stderr_terminal and __terminal8_*_tty.
+#Export(c) fn jet_term_stdin_is_terminal() -> Bool { host_is_tty(I64{0}) }
+#Export(c) fn jet_term_stdout_is_terminal() -> Bool { host_is_tty(I64{1}) }
+#Export(c) fn jet_term_stderr_is_terminal() -> Bool { host_is_tty(I64{2}) }
+
+#Export(c) fn jet_sys_errno_text_raw(errno: I64) -> I64 {
+    native :: host_i32(errno)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    host_errno_cause(native)
+}

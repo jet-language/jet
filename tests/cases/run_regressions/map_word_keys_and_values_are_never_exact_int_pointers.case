@@ -1,0 +1,18 @@
+# Port of run_regressions.rs:86-93; both run tiers, exact stdout and empty stderr.
+# ORACLE-LITERAL: exact original stdout bytes at run_regressions.rs:90-91; never re-bless.
+# PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each tier).
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+# Original run_tier creates a Scratch root, not its cache/jetpack children.
+mkdir: cache/default
+step: jet run {root}/tests/fixtures/map_word_cells.jet
+env: JET_STORE_DIR={work}/cache/default/cache
+env: JETPACK_ROOT={work}/cache/default/jetpack
+stdout: = map_word_cells.out
+stderr: empty
+mkdir: cache/interpreter
+step: jet run --interpret {root}/tests/fixtures/map_word_cells.jet
+env: JET_STORE_DIR={work}/cache/interpreter/cache
+env: JETPACK_ROOT={work}/cache/interpreter/jetpack
+stdout: = map_word_cells.out
+stderr: empty

@@ -43,7 +43,7 @@ fn store_migration_find_legacy_source(legacy_source: String) -[FS]> String? Stor
 }
 
 // Rust `migrate_legacy_hangar`: true when a legacy Hangar was migrated.
-pub fn store_migrate_legacy_hangar(roots: HangarRoots) -[FS, Env]> Bool StoreError! {
+fn store_migrate_legacy_hangar(roots: HangarRoots) -[FS, Env]> Bool StoreError! {
     if !roots.dev_mode -> return Ok(false)
     destination :: roots.hangar_dir()
     parent :: files.dirname(destination)
@@ -108,12 +108,12 @@ fn store_migration_copy_tree(source: String, destination: String, root: String) 
         loop entry in entries {
             store_migration_copy_tree(entry.path, files.join(destination, entry.name), root)
         }
-        files.set_mode(destination, info.mode & 0o7777)
+        files.set_mode(destination, (info.mode).bit_and(0o7777))
         return
     }
     if info.is_file {
         files.copy2(source, destination)
-        files.set_mode(destination, info.mode & 0o7777)
+        files.set_mode(destination, (info.mode).bit_and(0o7777))
         return
     }
     Err(StoreError.Other("legacy Hangar contains unsupported node `{source}`"))

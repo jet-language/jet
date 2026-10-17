@@ -1,0 +1,322 @@
+// Read-only self-toolchain identity and report, shared by Jetpack and the CLI.
+// Mutation/channel diagnostics remain in JetPin.jet; no second pin reader.
+// ── T1: frozen-forward identity block ──
+
+// The contract-frozen identity of a Package root: canonical `package.jet`
+// keeps `name`, `version`, and `jet` at top level; migration-era `pkg.jet`
+// keeps them inside `payload`. `jet` is the raw channel ref; None is
+// unpinned (the running `jet` is used with no fetch).
+struct JetPinIdentity {
+    payload_name: String
+    payload_version: String
+    jet: String?
+
+    fn empty() -> JetPinIdentity Never! {
+        JetPinIdentity{payload_name: "", payload_version: "", jet: None}
+    }
+}
+
+// Frozen-forward identity pre-parse. Reads only the Package identity
+// fields and tolerates any other key, block, or syntax around them. This
+// grammar is CONTRACT-FROZEN (Docs/spec/spec.md) and must never narrow.
+fn trust_pin_identity_preparse(text: String) -> JetPinIdentity Never! {
+    stripped :: trust_pin_strip_line_comments(text)
+    if trust_pin_top_block_body(stripped, "payload") == .Val(body) {
+        return JetPinIdentity{
+            payload_name: trust_pin_simple_field(body, "name") ?? "",
+            payload_version: trust_pin_simple_field(body, "version") ?? "",
+            jet: trust_pin_simple_field(body, "jet")
+        }
+    }
+    JetPinIdentity{
+        payload_name: trust_pin_top_level_simple_field(stripped, "name") ?? "",
+        payload_version: trust_pin_top_level_simple_field(stripped, "version") ?? "",
+        jet: trust_pin_top_level_simple_field(stripped, "jet")
+    }
+}
+
+// Drop `//` line comments outside string literals; every line keeps a `\n`.
+fn trust_pin_strip_line_comments(text: String) -> String Never! {
+    out := [String]{}
+    loop line in trust_text_lines(text) {
+        raw :: line.bytes()
+        in_string := false
+        cut := raw.len()
+        loop index in 0..<raw.len() {
+            code :: Int.from_u8(raw[index])
+            if code == TRUST_QUOTE {
+                in_string = !in_string
+                next
+            }
+            if code == TRUST_SLASH && !in_string && pkg_bytes_code(raw, index + 1) == TRUST_SLASH {
+                cut = index
+                break
+            }
+        }
+        &out.push("{pkg_bytes_text(raw, 0, cut)}\n")
+    }
+    out.join("")
+}
+
+fn trust_pin_is_ident_start(code: Int) -> Bool Never! {
+    (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == TRUST_UNDERSCORE
+}
+
+fn trust_pin_is_ident_char(code: Int) -> Bool Never! {
+    trust_text_is_alphanumeric(code) || code == TRUST_UNDERSCORE
+}
+
+// The end of the identifier starting at `start`.
+fn trust_pin_ident_end(raw: [U8], start: Int) -> Int Never! {
+    index := start
+    loop index < raw.len() && trust_pin_is_ident_char(Int.from_u8(raw[index])) -> index += 1
+    index
+}
+
+// The body of a depth-0 `key: { ... }` block (brace-matched, strings
+// skipped), or None. Nested occurrences never hijack the read.
+fn trust_pin_top_block_body(text: String, key: String) -> String? Never! {
+    raw :: text.bytes()
+    depth := 0
+    in_string := false
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if in_string {
+            if code == TRUST_QUOTE -> in_string = false
+            index += 1
+            next
+        }
+        if code == TRUST_QUOTE {
+            in_string = true
+            index += 1
+            next
+        }
+        if code == TRUST_OPEN_BRACE || code == TRUST_OPEN_SQUARE {
+            depth += 1
+            index += 1
+            next
+        }
+        if code == TRUST_CLOSE_BRACE || code == TRUST_CLOSE_SQUARE {
+            depth -= 1
+            index += 1
+            next
+        }
+        if depth != 0 || !trust_pin_is_ident_start(code) {
+            index += 1
+            next
+        }
+        start :: index.copy()
+        index = trust_pin_ident_end(raw, start)
+        colon :: trust_text_skip_ascii_space(raw, index)
+        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
+        open :: trust_text_skip_ascii_space(raw, colon + 1)
+        if pkg_bytes_code(raw, open) != TRUST_OPEN_BRACE -> next
+        close :: trust_pin_matching_brace(raw, open)
+        if close < 0 -> return None
+        return Val(pkg_bytes_text(raw, open + 1, close))
+    }
+    None
+}
+
+// The `}` closing the `{` at `open` (strings skipped), or -1.
+fn trust_pin_matching_brace(raw: [U8], open: Int) -> Int Never! {
+    depth := 0
+    in_string := false
+    loop index in open..<raw.len() {
+        code :: Int.from_u8(raw[index])
+        if {
+            in_string -> {
+                if code == TRUST_QUOTE -> in_string = false
+            }
+            code == TRUST_QUOTE -> in_string = true
+            code == TRUST_OPEN_BRACE -> depth += 1
+            code == TRUST_CLOSE_BRACE -> {
+                depth -= 1
+                if depth == 0 -> return index
+            }
+            else -> {}
+        }
+    }
+    -1
+}
+
+// The value of a depth-0 `key: value` entry within a block body, cut at a
+// `,` or line end outside strings and unquoted; None when absent.
+fn trust_pin_simple_field(body: String, key: String) -> String? Never! {
+    raw :: body.bytes()
+    depth := 0
+    in_string := false
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if in_string {
+            if code == TRUST_QUOTE -> in_string = false
+            index += 1
+            next
+        }
+        if code == TRUST_QUOTE {
+            in_string = true
+            index += 1
+            next
+        }
+        if code == TRUST_OPEN_BRACE || code == TRUST_OPEN_SQUARE {
+            depth += 1
+            index += 1
+            next
+        }
+        if code == TRUST_CLOSE_BRACE || code == TRUST_CLOSE_SQUARE {
+            depth -= 1
+            index += 1
+            next
+        }
+        if depth != 0 || !trust_pin_is_ident_start(code) {
+            index += 1
+            next
+        }
+        start :: index.copy()
+        index = trust_pin_ident_end(raw, start)
+        colon :: trust_text_skip_ascii_space(raw, index)
+        if pkg_bytes_text(raw, start, index) != key || pkg_bytes_code(raw, colon) != TRUST_COLON -> next
+        value_start :: colon + 1
+        end := value_start
+        quoted := false
+        loop end < raw.len() {
+            value_code :: Int.from_u8(raw[end])
+            if {
+                quoted -> {
+                    if value_code == TRUST_QUOTE -> quoted = false
+                }
+                value_code == TRUST_QUOTE -> quoted = true
+                value_code == TRUST_COMMA || value_code == TRUST_NEWLINE -> break
+                else -> {}
+            }
+            end += 1
+        }
+        return Val(trust_pin_unquote(pkg_bytes_text(raw, value_start, end)))
+    }
+    None
+}
+
+// A scalar `key: value` at document depth zero; nested output, config, and
+// policy fields cannot impersonate the identity block. Escaped quotes do
+// not close strings here.
+fn trust_pin_top_level_simple_field(text: String, key: String) -> String? Never! {
+    raw :: text.bytes()
+    depth := 0
+    in_string := false
+    index := 0
+    loop index < raw.len() {
+        code :: Int.from_u8(raw[index])
+        if in_string {
+            if code == TRUST_QUOTE && (index == 0 || Int.from_u8(raw[index - 1]) != TRUST_BACKSLASH) -> in_string = false
+            index += 1
+            next
+        }
+        if code == TRUST_QUOTE {
+            in_string = true
+            index += 1
+            next
+        }
+        if code == TRUST_OPEN_BRACE || code == TRUST_OPEN_SQUARE || code == TRUST_OPEN_PAREN {
+            depth += 1
+            index += 1
+            next
+        }
+        if code == TRUST_CLOSE_BRACE || code == TRUST_CLOSE_SQUARE || code == TRUST_CLOSE_PAREN {
+            depth -= 1
+            index += 1
+            next
+        }
+        if depth != 0 || !trust_pin_is_ident_start(code) {
+            index += 1
+            next
+        }
+        start :: index.copy()
+        index = trust_pin_ident_end(raw, start)
+        if pkg_bytes_text(raw, start, index) != key -> next
+        colon :: trust_text_skip_ascii_space(raw, index)
+        if pkg_bytes_code(raw, colon) != TRUST_COLON -> next
+        value_start :: colon + 1
+        end := value_start
+        quoted := false
+        loop end < raw.len() {
+            value_code :: Int.from_u8(raw[end])
+            escaped :: end > value_start && Int.from_u8(raw[end - 1]) == TRUST_BACKSLASH
+            if {
+                value_code == TRUST_QUOTE && (end == value_start || !escaped) -> quoted = !quoted
+                !quoted && (value_code == TRUST_COMMA || value_code == TRUST_NEWLINE) -> break
+                else -> {}
+            }
+            end += 1
+        }
+        return Val(trust_pin_unquote(pkg_bytes_text(raw, value_start, end)))
+    }
+    None
+}
+
+// Trim, drop one trailing `,`, and strip surrounding quotes.
+fn trust_pin_unquote(value: String) -> String Never! {
+    trimmed := value.trim()
+    if trimmed.ends_with(",") -> trimmed = trimmed.removesuffix(",").trim()
+    trust_text_trim_byte(trimmed, TRUST_QUOTE).trim()
+}
+
+// The locked compiler pin: the `[[toolchain]]` whose object id starts with
+// `jet-`, never a co-located bridge build toolchain (`toolchain-<v>`).
+fn trust_pin_locked_toolchain(root: String) -[FS]> LockedToolchain? {
+    lock :: pkg_lock_load(root) ?? return None
+    loop toolchain in lock.toolchains {
+        if toolchain.id.starts_with("jet-") -> return Val(toolchain)
+    }
+    None
+}
+
+// `package.jet`, else migration-era `pkg.jet`.
+fn trust_pin_read_manifest(root: String) -[FS]> String? {
+    package_path :: files.join(root, PACKAGE_FILE)
+    path :: if files.is_file(package_path) -> package_path else -> files.join(root, PAYLOAD_FILE)
+    text :: files.read(path) ?? return None
+    Val(text)
+}
+
+// The executable `jet` inside the toolchain object directory, if present.
+fn trust_pin_realized_binary() -[FS, Env]> String? {
+    dir :: sys.get(TOOLCHAIN_OBJECT_ENV) ?? return None
+    binary :: files.join(dir, BINARY_NAME)
+    if files.is_file(binary) && trust_pin_is_executable(binary) -> return Val(binary)
+    None
+}
+
+fn trust_pin_is_executable(path: String) -[FS, Env]> Bool {
+    if !sys.is_unix() -> return files.is_file(path)
+    metadata :: files.stat(path) ?? return false
+    (metadata.mode.bit_and(73)) != 0
+}
+
+// ── T4: verbs ──
+
+// `jet self toolchain`: a read-only pin, lock, and realization report.
+fn trust_pin_report(root: String) -[FS, Env]> String {
+    manifest :: trust_pin_read_manifest(root)
+    identity :: if manifest == {
+        .Val(text) -> trust_pin_identity_preparse(text)
+        .None -> JetPinIdentity.empty()
+    }
+    pin :: identity.jet ?? return "pin:      (none — unpinned, uses the running jet)\n"
+    out := [String]{"pin:      jet {pin}\n"}
+    if trust_pin_locked_toolchain(root) == {
+        .Val(toolchain) -> {
+            &out.push("locked:   {toolchain.version}\n")
+            &out.push("object:   {toolchain.id}\n")
+            realized :: if trust_pin_realized_binary() != None -> "realized" else -> "not realized"
+            &out.push("state:    {realized}\n")
+        }
+        .None -> {
+            &out.push("locked:   (unresolved — run `jet update jet`)\n")
+            &out.push("state:    not realized\n")
+        }
+    }
+    out.join("")
+}
+

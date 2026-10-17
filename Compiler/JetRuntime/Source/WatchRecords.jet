@@ -1,0 +1,69 @@
+// CommonTypes.rs:640-665 derive Clone/PartialEq; CAbiRoutes.rs:12158-12195.
+#Export(c) fn jet_rt_record_new_watch_event(domain: I64, kind: I64, path: I64, detail: I64, pid: I64, port: I64) -> I64 {
+    if (domain < I64{0} || domain > I64{2} || kind < I64{0} || kind > I64{5}) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    p :: jet_int_owned_to_i64(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    n :: jet_int_owned_to_i64(port)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    value :: jet_rt_alloc(WATCH_EVENT_BYTES, I64{8})
+    data_tree_store(value + WATCH_EVENT_DOMAIN, domain)
+    data_tree_store(value + WATCH_EVENT_KIND, kind)
+    data_tree_store(value + WATCH_EVENT_PATH, jet_rt_string_clone(path))
+    data_tree_store(value + WATCH_EVENT_DETAIL, jet_rt_string_clone(detail))
+    data_tree_store(value + WATCH_EVENT_PID, p)
+    data_tree_store(value + WATCH_EVENT_PORT, n)
+    value
+}
+#Export(c) fn jet_rt_record_get_watch_event_domain(value: I64) -> I64 { data_tree_word(value + WATCH_EVENT_DOMAIN) }
+#Export(c) fn jet_rt_record_get_watch_event_kind(value: I64) -> I64 { data_tree_word(value + WATCH_EVENT_KIND) }
+#Export(c) fn jet_rt_record_get_watch_event_path(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + WATCH_EVENT_PATH)) }
+#Export(c) fn jet_rt_record_get_watch_event_detail(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + WATCH_EVENT_DETAIL)) }
+#Export(c) fn jet_rt_record_get_watch_event_pid(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + WATCH_EVENT_PID)) }
+#Export(c) fn jet_rt_record_get_watch_event_port(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + WATCH_EVENT_PORT)) }
+#Export(c) fn jet_rt_handle_clone_watch_event(value: I64) -> I64 {
+    result :: jet_rt_alloc(WATCH_EVENT_BYTES, I64{8})
+    coll_copy(value, result, WATCH_EVENT_BYTES)
+    data_tree_store(result + WATCH_EVENT_PATH, jet_rt_string_clone(data_tree_word(value + WATCH_EVENT_PATH)))
+    data_tree_store(result + WATCH_EVENT_DETAIL, jet_rt_string_clone(data_tree_word(value + WATCH_EVENT_DETAIL)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_watch_event(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + WATCH_EVENT_PATH))
+    jet_rt_string_drop(data_tree_word(value + WATCH_EVENT_DETAIL))
+    jet_rt_free(value, WATCH_EVENT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_watch_event(left: I64, right: I64) -> Bool {
+    if data_tree_word(left + WATCH_EVENT_DOMAIN) != data_tree_word(right + WATCH_EVENT_DOMAIN) -> return false
+    if data_tree_word(left + WATCH_EVENT_KIND) != data_tree_word(right + WATCH_EVENT_KIND) -> return false
+    if !jet_rt_string_eq(data_tree_word(left + WATCH_EVENT_PATH), data_tree_word(right + WATCH_EVENT_PATH)) -> return false
+    if !jet_rt_string_eq(data_tree_word(left + WATCH_EVENT_DETAIL), data_tree_word(right + WATCH_EVENT_DETAIL)) -> return false
+    if data_tree_word(left + WATCH_EVENT_PID) != data_tree_word(right + WATCH_EVENT_PID) -> return false
+    data_tree_word(left + WATCH_EVENT_PORT) == data_tree_word(right + WATCH_EVENT_PORT)
+}
+// Custom JetShow omits pid/port and does NOT quote/escape path/detail:
+// CommonTypes.rs:6772-6777. Stream into the existing builder, no formatter copy.
+#Export(c) fn jet_rt_handle_show_watch_event(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    rt_text_push_word(result, I64{7311107359730065751}, I64{8})
+    rt_text_push_word(result, I64{7885631563216483438}, I64{8})
+    rt_text_push_word(result, I64{138419267937}, I64{5})
+    domain :: data_tree_word(value + WATCH_EVENT_DOMAIN)
+    if (domain == I64{0}) { rt_text_push_word(result, I64{1701603654}, I64{4}) } else if (domain == I64{1}) { rt_text_push_word(result, I64{32496501618864720}, I64{7}) } else { rt_text_push_word(result, I64{1953656656}, I64{4}) }
+    rt_text_push_word(result, I64{2322278983240720428}, I64{8})
+    kind :: data_tree_word(value + WATCH_EVENT_KIND)
+    if (kind == I64{0}) { rt_text_push_word(result, I64{28259048195715651}, I64{7}) } else if (kind == I64{1}) { rt_text_push_word(result, I64{7234304265016340301}, I64{8}) } else if (kind == I64{2}) { rt_text_push_word(result, I64{28259057021052242}, I64{7}) } else if (kind == I64{3}) { rt_text_push_word(result, I64{491496043077}, I64{5}) } else if (kind == I64{4}) { rt_text_push_word(result, I64{110386907543621}, I64{6}) } else { rt_text_push_word(result, I64{521375147346}, I64{5}) }
+    rt_text_push_word(result, I64{2322283406923145260}, I64{8})
+    jet_rt_string_builder_push(result, data_tree_word(value + WATCH_EVENT_PATH))
+    rt_text_push_word(result, I64{7811882181195997228}, I64{8})
+    rt_text_push_word(result, I64{8250}, I64{2})
+    jet_rt_string_builder_push(result, data_tree_word(value + WATCH_EVENT_DETAIL))
+    rt_text_push_word(result, I64{32032}, I64{2})
+    result
+}
+#Export(c) fn jet_rt_handle_clone_watch_kind(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_watch_kind(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_watch_kind(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }

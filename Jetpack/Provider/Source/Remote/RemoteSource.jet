@@ -4,10 +4,10 @@
 // fetch reads from a `git ls-tree` listing.
 
 // One remote source: the clone URL, the optional revision, and its label.
-pub struct RemoteSource {
-    pub url: String
-    pub rev: String?
-    pub label: String
+struct RemoteSource {
+    url: String
+    rev: String?
+    label: String
 
     // `github:owner/repo[/rev][#rev]` or a git URL (`git://`, `https://`,
     // `ssh://`, `file://`, `git@`), each with an optional `#rev`.
@@ -49,7 +49,7 @@ fn provider_remote_split_ref(upstream: String) -> (base: String, rev: String?) N
 
 // A revision may never be empty, carry control characters, or start with
 // `-` (git option injection).
-pub fn provider_remote_revision_is_safe(revision: String?) -> Bool Never! {
+fn provider_remote_revision_is_safe(revision: String?) -> Bool Never! {
     rev :: revision ?? return true
     provider_remote_text_is_safe(rev) && !rev.starts_with("-")
 }
@@ -79,7 +79,7 @@ fn provider_remote_text_is_safe(value: String) -> Bool Never! {
 
 // The content-addressed checkout of `remote`: `<store parent>/sources/<key>`,
 // keyed by URL and revision.
-pub fn provider_source_cache_dir(store_dir: String, remote: RemoteSource) -> String Never! {
+fn provider_source_cache_dir(store_dir: String, remote: RemoteSource) -> String Never! {
     parent :: files.dirname(store_dir)
     root :: files.join(if parent == "" -> store_dir else -> parent, "sources")
     key :: pkg_sha256_hex("{remote.url}\n{remote.rev ?? "HEAD"}".bytes())
@@ -89,7 +89,7 @@ pub fn provider_source_cache_dir(store_dir: String, remote: RemoteSource) -> Str
 // D-ILE1: infer a package's kind from its source. A staged, non-empty `bin/`
 // or a top-level `fn run` in any `.jet` file means executable; otherwise
 // library. Sources are lexed, so `fn run` in a comment or string never counts.
-pub fn provider_infer_package_kind(dir: String) -[FS]> PackageKind Never! {
+fn provider_infer_package_kind(dir: String) -[FS]> PackageKind Never! {
     has_bin :: if files.list_dir(files.join(dir, "bin")) == {
         .Ok(entries) -> entries.len() > 0
         .Err(_) -> false
@@ -114,8 +114,9 @@ fn provider_dir_has_top_level_run(dir: String) -[FS]> Bool Never! {
 }
 
 // True when `src` declares `fn run` at brace depth 0.
-pub fn provider_file_has_top_level_run(src: String) -> Bool Never! {
-    tokens :: lex(src.bytes()).tokens
+fn provider_file_has_top_level_run(src: String) -> Bool Never! {
+    lexed :: lex(src.bytes())
+    tokens :: lexed.tokens
     depth := 0
     loop index in 0..<tokens.len() {
         kind :: tokens[index].kind
@@ -125,7 +126,7 @@ pub fn provider_file_has_top_level_run(src: String) -> Bool Never! {
             depth -= 1
         } else if kind == TOKEN_KW_FN && depth == 0 && index + 1 < tokens.len() {
             next_token :: tokens[index + 1]
-            if next_token.kind == TOKEN_IDENT && next_token.payload.text == "run" -> return true
+            if next_token.kind == TOKEN_IDENT && token_text(lexed.tables, next_token) == "run" -> return true
         }
     }
     false

@@ -3,7 +3,8 @@
 // Each log record is a JSON object on stderr:
 //   {"level":"info","body":"...","ts":<unix-ms>}
 // When a trace_id is set (log.set_trace_id), it appears as "trace_id":"...".
-// Log level: 0=debug, 1=info, 2=warn, 3=error, 4=critical, 5=fatal. Default is info (1).
+// Jet owns level ordering and its default. This host cell holds a raw code;
+// zero is uninitialized and the source module writes codes 1..6.
 // D-LOGFMT1=A: format 0=auto (TTY→text, else JSON), 1=json, 2=text.
 const JET_LOG_TELEMETRY_SOURCE: &str = "core.log";
 const JET_LOG_TELEMETRY_FILE: &str = "Prelude/CoreLib/Top/Log.rs";
@@ -37,7 +38,7 @@ static JET_LOG_TELEMETRY_METRICS: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| std::sync::Mutex::new(Vec::new()));
 
 thread_local! {
-    static JET_LOG_LEVEL: std::cell::Cell<u8> = std::cell::Cell::new(1);
+    static JET_LOG_LEVEL: std::cell::Cell<i64> = std::cell::Cell::new(0);
     static JET_LOG_DISABLED: std::cell::Cell<bool> = std::cell::Cell::new(false);
     static JET_LOG_FORMAT: std::cell::Cell<u8> = std::cell::Cell::new(0);
     static JET_LOG_SINK_PATH: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
@@ -49,25 +50,31 @@ thread_local! {
     static JET_LOG_NEXT_SPAN: std::cell::Cell<i64> = std::cell::Cell::new(1);
 }
 
-fn jet_log_level_rank(level: &str) -> Option<u8> {
-    match level {
-        "debug" => Some(0),
-        "info" => Some(1),
-        "warn" | "warning" => Some(2),
-        "error" => Some(3),
-        "critical" => Some(4),
-        "fatal" => Some(5),
-        _ => None,
-    }
+// Raw thread-local state operations. Jet chooses every stored value and owns
+// normalization, thresholds, sampling resets, and sink/format policy.
+pub(crate) fn jet_log_level_load() -> i64 {
+    JET_LOG_LEVEL.with(|value| value.get())
 }
-
-fn jet_ring_log_set_level(level: &String) {
-    let n: u8 = jet_log_level_rank(level).unwrap_or(1);
-    JET_LOG_LEVEL.with(|l| l.set(n));
+pub(crate) fn jet_log_level_store(value: i64) {
+    JET_LOG_LEVEL.with(|cell| cell.set(value));
 }
-
-fn jet_ring_log_disable() {
-    JET_LOG_DISABLED.with(|d| d.set(true));
+pub(crate) fn jet_log_disabled_load() -> bool {
+    JET_LOG_DISABLED.with(|value| value.get())
+}
+pub(crate) fn jet_log_disabled_store(value: bool) {
+    JET_LOG_DISABLED.with(|cell| cell.set(value));
+}
+pub(crate) fn jet_log_format_store(value: i64) {
+    JET_LOG_FORMAT.with(|cell| cell.set(value as u8));
+}
+pub(crate) fn jet_log_sink_store(value: &String) {
+    JET_LOG_SINK_PATH.with(|cell| *cell.borrow_mut() = value.clone());
+}
+pub(crate) fn jet_log_sample_store(value: i64) {
+    JET_LOG_SAMPLE_EVERY.with(|cell| cell.set(value));
+}
+pub(crate) fn jet_log_sample_count_store(value: i64) {
+    JET_LOG_SAMPLE_COUNT.with(|cell| cell.set(value));
 }
 
 fn jet_ring_log_flush() {
@@ -87,92 +94,53 @@ fn jet_ring_log_flush() {
     });
 }
 
-fn jet_ring_log_enabled(level: &String) -> bool {
-    if JET_LOG_DISABLED.with(|d| d.get()) {
-        return false;
-    }
-    let Some(rank) = jet_log_level_rank(level) else {
-        return false;
-    };
-    JET_LOG_LEVEL.with(|l| l.get() <= rank)
-}
 
-
-// D-LOGFMT1=A: explicit format override.
-fn jet_ring_log_setup(format: &String) {
-    let n: u8 = match format.as_str() {
-        "json" => 1,
-        "text" => 2,
-        _ => 0,
-    };
-    JET_LOG_FORMAT.with(|f| f.set(n));
-}
-
-fn jet_ring_log_set_sink(kind: &String, path: &String) {
-    let n: u8 = match kind.as_str() {
-        "jsonl" | "json" => 1,
-        "text" => 2,
-        _ => 1,
-    };
-    JET_LOG_FORMAT.with(|f| f.set(n));
-    JET_LOG_SINK_PATH.with(|p| *p.borrow_mut() = path.clone());
-}
-
-fn jet_ring_log_otlp_file(path: &String) {
-    jet_ring_log_set_sink(&"jsonl".to_string(), path);
-}
-
-fn jet_ring_log_sample_every(n: i64) {
-    JET_LOG_SAMPLE_EVERY.with(|s| s.set(n.max(1)));
-    JET_LOG_SAMPLE_COUNT.with(|c| c.set(0));
-}
-
-fn jet_ring_log_field(key: &String, value: &String) -> jet_std::LogField {
+fn jet_ring_log_field(key: &str, value: &str) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
-        value: value.clone(),
+        key: key.to_owned(),
+        value: value.to_owned(),
         kind: "string".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_int(key: &String, value: i64) -> jet_std::LogField {
+fn jet_ring_log_int(key: &str, value: i64) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: value.to_string(),
         kind: "int".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_float(key: &String, value: f64) -> jet_std::LogField {
+fn jet_ring_log_float(key: &str, value: f64) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: value.to_string(),
         kind: "float".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_bool(key: &String, value: bool) -> jet_std::LogField {
+fn jet_ring_log_bool(key: &str, value: bool) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: value.to_string(),
         kind: "bool".to_string(),
         redacted: false,
     }
 }
 
-fn jet_ring_log_redact(key: &String) -> jet_std::LogField {
+fn jet_ring_log_redact(key: &str) -> jet_std::LogField {
     jet_std::LogField {
-        key: key.clone(),
+        key: key.to_owned(),
         value: "[redacted]".to_string(),
         kind: "redacted".to_string(),
         redacted: true,
     }
 }
 
-fn jet_ring_log_counter(name: &String, value: i64) -> jet_std::LogField {
+fn jet_ring_log_counter(name: &str, value: i64) -> jet_std::LogField {
     jet_log_publish_metric(name, value);
     jet_std::LogField {
         key: format!("metric.counter.{}", name),
@@ -182,7 +150,7 @@ fn jet_ring_log_counter(name: &String, value: i64) -> jet_std::LogField {
     }
 }
 
-fn jet_ring_log_span(name: &String) -> jet_std::LogSpan {
+fn jet_ring_log_span(name: &str) -> jet_std::LogSpan {
     let id = JET_LOG_NEXT_SPAN.with(|n| {
         let id = n.get();
         n.set(id + 1);
@@ -190,7 +158,7 @@ fn jet_ring_log_span(name: &String) -> jet_std::LogSpan {
     });
     jet_std::LogSpan {
         id,
-        name: name.clone(),
+        name: name.to_owned(),
     }
 }
 
@@ -345,7 +313,7 @@ fn jet_log_metric_slot(name: &str) -> Option<(bool, u64)> {
     Some((true, 1))
 }
 
-fn jet_log_publish_metric(name: &String, value: i64) {
+fn jet_log_publish_metric(name: &str, value: i64) {
     let name = jet_log_telemetry_text(name);
     if name.is_empty() {
         return;
@@ -799,58 +767,38 @@ fn jet_log_emit(level: &str, msg: &str, fields: &[jet_std::LogField]) {
     }
 }
 
-fn jet_ring_log_debug(msg: &String) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 0 {
-        jet_log_emit("debug", msg, &[]);
-    }
+fn jet_ring_log_debug(msg: &str) {
+    jet_log_emit("debug", msg, &[]);
 }
-fn jet_ring_log_info(msg: &String) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 1 {
-        jet_log_emit("info", msg, &[]);
-    }
+fn jet_ring_log_info(msg: &str) {
+    jet_log_emit("info", msg, &[]);
 }
-fn jet_ring_log_warn(msg: &String) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 2 {
-        jet_log_emit("warn", msg, &[]);
-    }
+fn jet_ring_log_warn(msg: &str) {
+    jet_log_emit("warn", msg, &[]);
 }
-fn jet_ring_log_error(msg: &String) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 3 {
-        jet_log_emit("error", msg, &[]);
-    }
+fn jet_ring_log_error(msg: &str) {
+    jet_log_emit("error", msg, &[]);
 }
-fn jet_ring_log_critical(msg: &String) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 4 {
-        jet_log_emit("critical", msg, &[]);
-    }
+fn jet_ring_log_critical(msg: &str) {
+    jet_log_emit("critical", msg, &[]);
 }
-fn jet_ring_log_fatal(msg: &String) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 5 {
-        jet_log_emit("fatal", msg, &[]);
-    }
+fn jet_ring_log_fatal(msg: &str) {
+    jet_log_emit("fatal", msg, &[]);
     jet_ring_log_flush();
     jet_log_process_exit(1);
 }
 
-fn jet_ring_log_debug_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 0 {
-        jet_log_emit("debug", msg, fields);
-    }
+fn jet_ring_log_debug_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
+    jet_log_emit("debug", msg, fields);
 }
-fn jet_ring_log_info_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 1 {
-        jet_log_emit("info", msg, fields);
-    }
+fn jet_ring_log_info_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
+    jet_log_emit("info", msg, fields);
 }
-fn jet_ring_log_warn_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 2 {
-        jet_log_emit("warn", msg, fields);
-    }
+fn jet_ring_log_warn_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
+    jet_log_emit("warn", msg, fields);
 }
-fn jet_ring_log_error_fields(msg: &String, fields: &Vec<jet_std::LogField>) {
-    if JET_LOG_LEVEL.with(|l| l.get()) <= 3 {
-        jet_log_emit("error", msg, fields);
-    }
+fn jet_ring_log_error_fields(msg: &str, fields: &Vec<jet_std::LogField>) {
+    jet_log_emit("error", msg, fields);
 }
 
 fn unix_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {

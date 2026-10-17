@@ -1,0 +1,26 @@
+
+use core.encoding.json as json
+
+fn run() {
+    Dyn.Text("strict").text() ? value -> print(value) ! _error -> print("strict-error")
+    Dyn.Int(7).text() ? _value -> print("strict-bad") ! _error -> print("strict-error")
+
+    print(Dyn.Text("text").to_text() ?? "none")
+    print(Dyn.Int(-42).to_text() ?? "none")
+    print(Dyn.Float(1.0).to_text() ?? "none")
+    print(Dyn.Bool(false).to_text() ?? "none")
+    print(Dyn.Null.to_text() ?? "none")
+    print(Dyn.Array([Dyn.Int(1)]).to_text() ?? "none")
+    print(Dyn.Object(["a": Dyn.Int(1)]).to_text() ?? "none")
+
+    left :: json.parse("{{\"outer\":{{\"b\":1.0,\"a\":[1,false]}},\"name\":\"x\"}}") ?? panic("left")
+    right :: json.parse("{{\"name\":\"x\",\"outer\":{{\"a\":[1,false],\"b\":1.0}}}}") ?? panic("right")
+    print(left.equal_unordered(right))
+    print(Dyn.Null.equal_unordered(Dyn.Null))
+    print(Dyn.Array([Dyn.Int(1), Dyn.Int(2)]).equal_unordered(Dyn.Array([Dyn.Int(2), Dyn.Int(1)])))
+    print(Dyn.Int(1).equal_unordered(Dyn.Float(1.0)))
+    print(Dyn.Bool(false).equal_unordered(Dyn.Bool(false)))
+    print(Dyn.Text("same").equal_unordered(Dyn.Text("same")))
+    print(Dyn.Text("1").equal_unordered(Dyn.Int(1)))
+    print(Dyn.Float(Float.NAN).equal_unordered(Dyn.Float(Float.NAN)))
+}

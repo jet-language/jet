@@ -38,13 +38,9 @@ const JS_EXECUTION_PRELUDE: &str = concat!(
     "\n",
     include_str!("../Prelude/Core/TypedText.js"),
     "\n",
-    include_str!("../Prelude/Core/Expiring.js"),
-    "\n",
     include_str!("../Prelude/Core/ExactNumbers.js"),
     "\n",
     include_str!("../Prelude/Core/NumericWeb.js"),
-    "\n",
-    include_str!("../Prelude/Core/Measurement.js"),
     "\n",
     include_str!("../Prelude/Core/Shared.js"),
     "\n",
@@ -566,7 +562,7 @@ fn js_runtime_stop_metadata() -> String {
     for row in jet_foundation::Registry::diagnostic_rows()
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         })
     {

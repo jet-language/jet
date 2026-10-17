@@ -1,0 +1,13 @@
+// One imported declaration has one nominal identity in signatures, lists,
+// constructor results, and list method arguments (Core/tui regression #19).
+use core.ui.[Rect]
+
+fn collect(frame: Rect) -> [Rect] Never! {
+    frames := [Rect]{}
+    &frames.push(frame)
+    local_frame :: Rect{x: 0.0, y: 0.0, width: 1.0, height: 1.0}
+    &frames.push(local_frame)
+    frames
+}
+
+fn run() {}

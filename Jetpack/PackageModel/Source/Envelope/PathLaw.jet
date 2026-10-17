@@ -12,10 +12,10 @@ PATH_LAW_RESERVED_NAMES :: prep { [String]{
 
 // Path-law failure (E1299) with a stable code the CLI and tests match on.
 #Error
-pub struct PathLawError {
-    pub code: String
-    pub path: String
-    pub detail: String
+struct PathLawError {
+    code: String
+    path: String
+    detail: String
 
     fn what(self) -> String Never! {
         "store path rejected: `{self.path}`"
@@ -35,13 +35,13 @@ pub struct PathLawError {
 }
 
 // Reject one path component under the native ingest law.
-pub fn pkg_validate_path_component(name: [U8]) PathLawError! {
+fn pkg_validate_path_component(name: [U8]) PathLawError! {
     pkg_validate_path_component_with_mode(name, false)
 }
 
 // Validate one component; Nix admission (`allow_nix_store_symlinks`) accepts
 // exactly Nix's own component law: any byte except `/` and NUL, not `.`/`..`.
-pub fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlinks: Bool) PathLawError! {
+fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlinks: Bool) PathLawError! {
     if name.len() == 0 -> return Err(PathLawError{code: "empty", path: "", detail: "empty path component"})
     if name.contains(U8{0}) -> return Err(PathLawError{code: "nul", path: pkg_lossy_text(name), detail: "NUL byte in path component"})
     if name == ".".bytes() || name == "..".bytes() {
@@ -61,14 +61,14 @@ pub fn pkg_validate_path_component_with_mode(name: [U8], allow_nix_store_symlink
 }
 
 // Validate every component of a relative store path under the native law.
-pub fn pkg_validate_rel_path(rel: String) PathLawError! {
+fn pkg_validate_rel_path(rel: String) PathLawError! {
     pkg_validate_rel_path_with_mode(rel, false)
 }
 
 // Validate a relative store path; the empty path is the output root itself.
 // Like Rust `Path::components`, an interior `.` is skipped while a leading
 // `.` and every `..` are rejected.
-pub fn pkg_validate_rel_path_with_mode(rel: String, allow_nix_store_symlinks: Bool) PathLawError! {
+fn pkg_validate_rel_path_with_mode(rel: String, allow_nix_store_symlinks: Bool) PathLawError! {
     if rel.starts_with("/") -> return Err(PathLawError{code: "absolute", path: rel, detail: "store paths must be relative"})
     parts :: rel.split("/").to_list()
     loop index in 0..<parts.len() {
@@ -84,7 +84,7 @@ pub fn pkg_validate_rel_path_with_mode(rel: String, allow_nix_store_symlinks: Bo
 }
 
 // Reject case-fold collisions among sibling directory entry names.
-pub fn pkg_reject_casefold_collisions(names: [[U8]]) PathLawError! {
+fn pkg_reject_casefold_collisions(names: [[U8]]) PathLawError! {
     folded := [String: [U8]]{}
     loop name in names {
         key :: pkg_hex_bytes(pkg_ascii_fold(name))
@@ -126,7 +126,7 @@ fn pkg_path_law_is_windows_reserved(name: [U8]) -> Bool Never! {
 }
 
 // `String::from_utf8_lossy`: each invalid byte becomes U+FFFD.
-pub fn pkg_lossy_text(bytes: [U8]) -> String Never! {
+fn pkg_lossy_text(bytes: [U8]) -> String Never! {
     whole :: String.from_bytes(bytes) ?? {
         out := [U8]{}
         index := 0
@@ -155,13 +155,13 @@ pub fn pkg_lossy_text(bytes: [U8]) -> String Never! {
 }
 
 // Lowercase hex of `bytes`.
-pub fn pkg_hex_bytes(bytes: [U8]) -> String Never! {
+fn pkg_hex_bytes(bytes: [U8]) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     loop byte in bytes {
         value :: Int.from_u8(byte)
         &out.push(digits[value >> 4])
-        &out.push(digits[value & 15])
+        &out.push(digits[(value).bit_and(15)])
     }
     String.from_bytes(out) ?? ""
 }

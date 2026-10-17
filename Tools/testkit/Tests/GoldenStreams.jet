@@ -1,0 +1,147 @@
+use core.files as files
+use core.sys as sys
+use core.process as process
+
+fn kit_test_golden_bless() -> KitBless {
+    KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+}
+
+fn kit_test_golden_run(stdout: String, stderr: String, code: Int) -> KitRun {
+    KitRun{stdout: stdout, stderr: stderr, code: code, signal: None, timed_out: false, error: ""}
+}
+
+fn kit_test_golden_fixture(name: String) -> String {
+    root :: sys.current_dir() ?? panic("fixture checkout root: {err}")
+    files.join(root, "Tools/testkit/Fixtures/golden/{name}")
+}
+
+fn kit_test_golden_scratch(label: String) -> String {
+    path :: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch/testkit-{process.current_pid()}-{label}")
+    files.create_dir_all(path) ?? panic("self-test scratch: {err}")
+    path
+}
+
+fn kit_test_golden_env(root: String) -> KitEnv {
+    KitEnv{root: root, scratch: root, jet: kit_test_golden_fixture("compiler.sh"), jetpack: "", timeout: 5s, memory_limit: 0}
+}
+
+#Test("golden exact streams pin stdout, error status, and successful stderr") {
+    hello :: kit_test_golden_fixture("hello")
+    error :: kit_test_golden_fixture("error")
+    stderr :: kit_test_golden_fixture("stderr")
+    assert_eq(kit_golden_stream_verdict("case", hello, kit_test_golden_run("hello\n", "", 0), kit_test_golden_bless(), "", "").status, "PASS")
+    mismatch :: kit_golden_stream_verdict("case", hello, kit_test_golden_run("wrong\n", "", 0), kit_test_golden_bless(), "", "")
+    assert_eq(mismatch.status, "FAIL")
+    assert(mismatch.diff.contains("--- expected/"))
+    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "").status, "PASS")
+    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 0), kit_test_golden_bless(), "", "").status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("", "Stop [E3003]: expected stop\n", 1), kit_test_golden_bless(), "", "").status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", error, kit_test_golden_run("unexpected\n", "Stop [E3003]: expected stop\n", 70), kit_test_golden_bless(), "", "").status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", stderr, kit_test_golden_run("hello\n", "notice\n", 0), kit_test_golden_bless(), "", "").status, "PASS")
+    assert_eq(kit_golden_stream_verdict("case", stderr, kit_test_golden_run("hello\n", "wrong\n", 0), kit_test_golden_bless(), "", "").status, "FAIL")
+    assert_eq(kit_golden_stream_verdict("case", kit_test_golden_fixture("missing"), kit_test_golden_run("", "", 0), kit_test_golden_bless(), "", "").status, "FAIL")
+}
+
+#Test("golden failure reports require the exact registered exit oracle") {
+    assert_eq(kit_golden_failure_exit("unknown", "Stop [E3001]: panic\n"), Val(70))
+    assert_eq(kit_golden_failure_exit("unknown", "Runtime fault [R0801]: bad pointer\nexit: 1\n"), None)
+    assert_eq(kit_golden_failure_exit("Examples/features/expected/errors/fatal_exit", "entry report\n"), Val(1))
+    assert_eq(kit_golden_failure_exit("Examples/features/expected/unknown", "unregistered report\n"), None)
+}
+
+#Test("golden driver handles missing stream, compile-only, stdin, stderr and tier split") {
+    root :: kit_test_golden_scratch("driver")
+    project :: "Examples/features/topic"
+    entry :: KitEntry{path: "{project}/hello.jet", expected: "Examples/features/expected/topic/hello", project: project, suite: "golden", mode: ""}
+    kit_exec_write(files.join(root, entry.path), "fn run() {{ print(\"hello\") }}\n")
+    env :: kit_test_golden_env(root)
+    tier :: kit_golden_tiers()[2]
+    missing :: kit_golden_run_entry(entry, tier, env, files.join(root, "missing"), kit_test_golden_bless())
+    assert_eq(missing.verdict.status, "FAIL")
+    assert(missing.verdict.detail.contains("missing expected stream"))
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "requires: os:not-this-host\n")
+    host_skip :: kit_golden_run_entry(entry, tier, env, files.join(root, "host-skip"), kit_test_golden_bless())
+    assert_eq(host_skip.verdict.status, "SKIP-HOST")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "run: none\n")
+    compile_only :: kit_golden_run_entry(entry, tier, env, files.join(root, "compile-only"), kit_test_golden_bless())
+    assert_eq(compile_only.verdict.status, "PASS")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_INPUT=echo\n")
+    kit_exec_write(files.join(root, "{entry.expected}.stdin"), "fed\n")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "fed\n")
+    stdin :: kit_golden_run_entry(entry, tier, env, files.join(root, "stdin"), kit_test_golden_bless())
+    assert_eq(stdin.verdict.status, "PASS")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_WARNING=1\n")
+    warning :: kit_golden_run_entry(entry, tier, env, files.join(root, "warning"), kit_test_golden_bless())
+    assert_eq(warning.verdict.status, "FAIL")
+    assert(warning.verdict.detail.contains("L0507"))
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_ICE=1\n")
+    ice :: kit_golden_run_entry(entry, tier, env, files.join(root, "ice"), kit_test_golden_bless())
+    assert_eq(ice.verdict.status, "ERROR")
+    assert(ice.verdict.detail.contains("internal compiler error (exit 101)"))
+    assert_eq(stdin.run.stdout, "fed\n")
+    files.remove(files.join(root, "{entry.expected}.stdin")) ?? panic("remove input")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
+    kit_exec_write(files.join(root, "{entry.expected}.stderr.out"), "notice\n")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "env: JET_TESTKIT_STDERR=1\n")
+    assert_eq(kit_golden_run_entry(entry, tier, env, files.join(root, "stderr"), kit_test_golden_bless()).verdict.status, "PASS")
+    files.remove(files.join(root, "{entry.expected}.stderr.out")) ?? panic("remove stderr")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "")
+    options := kit_exec_defaults()
+    options.tiers = ["o1", "o2"]
+    context :: KitCtx{options: options, env: env, root: root, scratch: files.join(root, "tiers"), bless: kit_test_golden_bless()}
+    outcomes :: kit_golden_run_suite(entry, context)
+    assert_eq(outcomes.len(), 2)
+    assert_eq(outcomes[0].verdict.status, "PASS")
+    assert_eq(outcomes[1].verdict.status, "FAIL")
+    results := outcomes.map(outcome -> KitCaseResult{suite: "golden", case: entry.path, tier: outcome.tier, status: outcome.verdict.status, detail: outcome.verdict.detail, exit: outcome.run.code})
+    kit_golden_mark_tier_splits(&results)
+    assert(results[0].detail.contains("tier-split"))
+    assert(results[1].detail.contains("tier-split"))
+    files.remove_all(root) ?? panic("remove driver scratch")
+}
+
+#Test("feature discovery stops at projects and package workspace boundaries") {
+    root :: kit_test_golden_scratch("discovery")
+    kit_exec_write(files.join(root, "Examples/features/topic/flat.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "Examples/features/topic/project/run.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "Examples/features/topic/project/helper.jet"), "fn helper() {{}}\n")
+    kit_exec_write(files.join(root, "Examples/features/topic/package/package.jet"), "name: \"library\"\n")
+    kit_exec_write(files.join(root, "Examples/features/topic/package/nested/run.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "Examples/features/topic/workspace/workspace.jet"), "workspace {{}}\n")
+    kit_exec_write(files.join(root, "Examples/features/topic/workspace/member/run.jet"), "fn run() {{}}\n")
+    kit_exec_write(files.join(root, "tests/run/ownership/case.jet"), "fn run() {{}}\n")
+    entries :: kit_golden_discover(root)
+    assert_eq(entries.len(), 3)
+    ids :: entries.map(entry -> entry.path)
+    assert(kit_expect_named(ids, "Examples/features/topic/flat.jet"))
+    assert(kit_expect_named(ids, "Examples/features/topic/project/run.jet"))
+    assert(kit_expect_named(ids, "tests/run/ownership/case.jet"))
+    files.remove_all(root) ?? panic("remove discovery scratch")
+}
+
+#Test("golden known-failing ledger and sidecar classify real mismatches on every tier") {
+    root :: kit_test_golden_scratch("known-failing")
+    project :: "Examples/features/topic"
+    entry :: KitEntry{path: "{project}/hello.jet", expected: "Examples/features/expected/topic/hello", project: project, suite: "golden", mode: ""}
+    kit_exec_write(files.join(root, entry.path), "fn run() {{ print(\"hello\") }}\n")
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "wrong\n")
+    kit_exec_write(files.join(root, "Tools/testkit/known-failing.tsv"), "{project}/hello\t#4867\towned golden mismatch\n")
+    options := kit_exec_defaults()
+    options.tiers = ["o1", "o2"]
+    context :: KitCtx{options: options, env: kit_test_golden_env(root), root: root, scratch: files.join(root, "scratch"), bless: options.bless}
+    failed :: kit_golden_run_suite(entry, context)
+    assert_eq(failed.len(), 2)
+    loop outcome in failed {
+        assert_eq(outcome.verdict.status, "KNOWN-FAILING")
+        assert(outcome.verdict.diff.contains("wrong"))
+        assert(outcome.verdict.detail.contains("#4867"))
+    }
+    kit_exec_write(files.join(root, "{entry.expected}.out"), "hello\n")
+    loop outcome in kit_golden_run_suite(entry, context) -> assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+    kit_exec_write(files.join(root, "{entry.expected}.case"), "# KNOWN-FAILING #4868\n")
+    loop outcome in kit_golden_run_suite(entry, context) {
+        assert_eq(outcome.verdict.status, "UNEXPECTED-PASS")
+        assert(outcome.verdict.detail.contains("#4868"))
+    }
+    files.remove_all(root) ?? panic("remove known-failing golden scratch")
+}

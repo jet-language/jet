@@ -1052,6 +1052,13 @@ impl<'a> TargetLayoutEngine<'a> {
             | Type::Tagged { inner: base, .. }
             | Type::Quantity { base, .. } => self.type_layout_inner(base, seen),
             Type::Named(name) => self.named_type_layout(name, seen),
+            Type::Apply { name, args } if name == Syntax::TYPE_PTR && args.len() == 1 => {
+                Some(ByteLayout {
+                    size: self.target.pointer_size,
+                    alignment: self.target.pointer_alignment,
+                    stride: self.target.pointer_size,
+                })
+            }
             Type::Apply { name, args } if name == Syntax::TYPE_ATOMIC => {
                 self.atomic_layout(args, seen)
             }
@@ -1228,6 +1235,7 @@ mod tests {
     fn structure(layout: StructLayout, fields: Vec<Field>) -> StructDef {
         StructDef {
             span: Span::new(0, 0),
+            compiler_builtin_error: false,
             is_pub: true,
             is_package_pub: false,
             name: "Packet".to_string(),
@@ -1376,5 +1384,72 @@ mod tests {
             })
         );
         assert_eq!(facts.fields[0].size, Some(12));
+    }
+
+    #[test]
+    fn raw_pointer_layout_uses_selected_target_without_pointee_layout() {
+        let mut opaque = structure(StructLayout::C, vec![field("value", Type::Int)]);
+        opaque.name = "Opaque".to_string();
+        opaque.layout = None;
+        let items = [Item::Struct(opaque)];
+        let definition = structure(
+            StructLayout::C,
+            vec![
+                field("tag", Type::IntN { signed: false, bits: 8 }),
+                field(
+                    "pointer",
+                    Type::Apply {
+                        name: crate::Syntax::TYPE_PTR.to_string(),
+                        args: vec![Type::Named("Opaque".to_string())],
+                    },
+                ),
+            ],
+        );
+        for (triple, width) in [
+            ("wasm32-unknown-unknown", 4),
+            ("x86_64-unknown-linux-gnu", 8),
+        ] {
+            let engine = TargetLayoutEngine::new(items.iter(), TargetLayout::from_triple(triple));
+            let facts = engine.struct_facts(&definition);
+            assert_eq!(
+                facts.bytes,
+                Some(ByteLayout {
+                    size: width * 2,
+                    alignment: width,
+                    stride: width * 2,
+                })
+            );
+            assert_eq!(facts.fields[0].offset, Some(0));
+            assert_eq!(facts.fields[0].size, Some(1));
+            assert_eq!(facts.fields[1].offset, Some(width));
+            assert_eq!(facts.fields[1].size, Some(width));
+            assert_eq!(facts.fields[1].alignment, Some(width));
+            assert_eq!(facts.fields[1].stride, Some(width));
+        }
+    }
+
+    #[test]
+    fn malformed_raw_pointer_arity_keeps_physical_facts_absent() {
+        for args in [Vec::new(), vec![Type::Int, Type::Bool]] {
+            let definition = structure(
+                StructLayout::C,
+                vec![field(
+                    "pointer",
+                    Type::Apply {
+                        name: crate::Syntax::TYPE_PTR.to_string(),
+                        args,
+                    },
+                )],
+            );
+            let engine = TargetLayoutEngine::new(
+                std::iter::empty::<&Item>(),
+                TargetLayout::from_triple("x86_64-unknown-linux-gnu"),
+            );
+            let facts = engine.struct_facts(&definition);
+            assert_eq!(facts.bytes, None);
+            assert_eq!(facts.fields[0].size, None);
+            assert_eq!(facts.fields[0].alignment, None);
+            assert_eq!(facts.fields[0].stride, None);
+        }
     }
 }

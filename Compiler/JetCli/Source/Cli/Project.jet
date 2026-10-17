@@ -1,0 +1,115 @@
+// Adapted from origin/port/compiler Compiler/JetDriver/Source/ProjectParts.jet
+// and Source/main.rs run_project_parts. Discovery uses the CLI's canonical
+// authority source walk; parsing uses the driver's inline-package-aware parser.
+use jet_foundation.[ImportKind, Item]
+
+struct JetCLIProjectPart {
+    name: String
+    path: String
+    automatic: Bool
+}
+
+fn jet_cli_project_part_value(name: String, path: String, state: String) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("name", jet_cli_status_text(name)),
+        jet_cli_status_field("path", jet_cli_status_text(path)),
+        jet_cli_status_field("state", jet_cli_status_text(state)),
+    },
+    )
+}
+
+fn jet_cli_project_parts(args: [String], color: Bool, json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    skipped_only :: args.contains("--skipped")
+    root :: cli_files.cwd() ?? "."
+    files := [JetDriverAuthorizedSourceFile]{}
+    if jet_cli_discover_sources(root, &files) == .Val(problem) {
+        return jet_cli_fail("E1334", "couldn't discover source files authority `{root}`", problem, "restore access to the authority metadata and try again", color, JET_DRIVER_EXIT_USER_ERROR)
+    }
+    explicit := [String]{}
+    declarations := [JetCLIProjectPart]{}
+    sources := [String]{}
+    names := [String]{}
+    loop file in files {
+        filename :: jet_cli_file_name(file.relative_path)
+        if filename == "package.jet" || filename == "pkg.jet" || filename == "@run.jet" || filename == "@build.jet" || filename == "@test.jet" || filename == "@dev.jet" {
+            next
+        }
+        program :: jet_cli_parsed_program(file.source) ?? next
+        &sources.push(file.relative_path)
+        loop imported in program.imports {
+            if imported.kind == .Module(name, _) {
+                if name.starts_with("project.") {
+                    leaf :: name.slice(8..<name.len())
+                    if !explicit.contains(leaf) -> &explicit.push(leaf)
+                }
+            }
+        }
+        loop item in program.items {
+            if item == {
+                .Module(declared) -> {
+                    &declarations.push(JetCLIProjectPart{name: declared.name, path: file.relative_path, automatic: declared.auto_discovered})
+                    if !names.contains(declared.name) -> &names.push(declared.name)
+                }
+                .CodeModule(declared) -> {
+                    &declarations.push(JetCLIProjectPart{name: declared.name, path: file.relative_path, automatic: !declared.name.starts_with("_")})
+                    if !names.contains(declared.name) -> &names.push(declared.name)
+                }
+                else -> {}
+            }
+        }
+    }
+    &names.sort()
+    part_values := [JetCLIStatusValue]{}
+    conflict_values := [JetCLIStatusValue]{}
+    output := ""
+    diagnostics := [Diagnostic]{}
+    declared_paths := [String]{}
+    loop declaration in declarations {
+        if !declared_paths.contains(declaration.path) -> &declared_paths.push(declaration.path)
+    }
+    loop name in names {
+        paths := [String]{}
+        loop declaration in declarations {
+            if declaration.name != name -> next
+            &paths.push(declaration.path)
+            state :: if {
+                declaration.automatic -> "automatic"
+                explicit.contains(name) -> "explicit"
+                else -> "skipped"
+            }
+            if skipped_only && state != "skipped" -> next
+            &part_values.push(jet_cli_project_part_value("project.{name}", declaration.path, state))
+            output = "{output}{jet_cli_pad(state, 9)} {jet_cli_pad("project.{name}", 24)} {declaration.path}\n"
+        }
+        if paths.len() > 1 {
+            &conflict_values.push(
+            jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("name", jet_cli_status_text("project.{name}")),
+                jet_cli_status_field("paths", jet_cli_status_texts(paths)),
+            },
+            ),
+            )
+            &diagnostics.push(diagnostic_from_registry("E0606", None, "project module `project.{name}` is declared more than once", "a project module name must resolve to one declaration", "keep one `module {name}` declaration; found {paths.join(", ")}"))
+        }
+    }
+    if !skipped_only {
+        loop path in sources {
+            if declared_paths.contains(path) -> next
+            stem :: if path.ends_with(".jet") -> path.slice(0..<(path.len() - 4)) else -> path
+            name :: "project.{stem.replace("/", ".")}"
+            &part_values.push(jet_cli_project_part_value(name, path, "automatic"))
+            output = "{output}{jet_cli_pad("automatic", 9)} {jet_cli_pad(name, 24)} {path}\n"
+        }
+    }
+    status :: if diagnostics.len() == 0 -> JET_DRIVER_EXIT_OK else -> JET_DRIVER_EXIT_USER_ERROR
+    if json {
+        fields :: [JetCLIStatusField]{
+            jet_cli_status_field("parts", jet_cli_status_array(part_values)),
+            jet_cli_status_field("conflicts", jet_cli_status_array(conflict_values)),
+        }
+        return jet_cli_done("{jet_cli_status_render("inspect.parts", true, fields)}\n", "", status)
+    }
+    jet_cli_done(output, diagnostic_render_all("", "", diagnostics, false), status)
+}

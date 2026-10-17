@@ -1,0 +1,56 @@
+// Frozen public signature inputs to package pins (Sema::ApiFreeze).
+// The digest is canonical TEXT, not a second hash: Lock folds it into SHA256.
+struct PackageCapabilitySnapshot {
+    package: String
+    signatures: [String]
+}
+fn pkg_capability_snapshot_parse(raw: String) -> PackageCapabilitySnapshot? Never! {
+    version := Int?{None}
+    package := String?{None}
+    published := String?{None}
+    signatures := [String]{}
+    loop raw_line in diagnostic_text_lines(raw) {
+        line :: raw_line.trim()
+        if line == "" -> next
+        if {
+            line.starts_with("api_version = ") -> version = Val(pkg_lock_parse_unsigned(line.removeprefix("api_version = "), 4294967295) ?? return None)
+            line.starts_with("package = ") -> package = Val(line.removeprefix("package = "))
+            line.starts_with("published_version = ") -> published = Val(line.removeprefix("published_version = "))
+            line.starts_with("fn ") -> {
+                rest :: line.removeprefix("fn ")
+                name := rest
+                loop marker in ([String]{"<", "("}) {
+                    if name.split_once(marker) == .Val(pair) -> name = pair.before
+                }
+                if name.trim() == "" -> return None
+                &signatures.push(line)
+            }
+            else -> return None
+        }
+    }
+    if version == None || published == None -> return None
+    name :: package ?? return None
+    &signatures.sort()
+    Val(PackageCapabilitySnapshot{package: name, signatures: signatures})
+}
+fn pkg_capability_snapshot_text(snapshots: [PackageCapabilitySnapshot]) -> String Never! {
+    ordered := snapshots
+    &ordered.sort_by((left: PackageCapabilitySnapshot, right: PackageCapabilitySnapshot) -> left.package <=> right.package)
+    parts := [String]{}
+    loop snapshot in ordered -> &parts.push("{snapshot.package}\n{snapshot.signatures.join("\n")}")
+    parts.join("\n--\n")
+}
+fn pkg_project_capability_digest(project_root: String) -[FS, Env]> String Never! {
+    directory :: sys.get("JET_API_CACHE_DIR") ?? files.join(project_root, ".jet/cache/api")
+    entries := files.list_dir(directory) ?? return ""
+    &entries.sort_by((left: files.DirEntry, right: files.DirEntry) -> left.name <=> right.name)
+    snapshots := [PackageCapabilitySnapshot]{}
+    loop entry in entries {
+        if !entry.name.ends_with(".api") -> next
+        bytes :: foundation_read_file_nofollow_at_root(directory, entry.name, PKG_MAX_LOCK_BYTES) ?? next
+        raw :: String.from_bytes(bytes) ?? next
+        snapshot :: pkg_capability_snapshot_parse(raw) ?? next
+        &snapshots.push(snapshot)
+    }
+    pkg_capability_snapshot_text(snapshots)
+}

@@ -35,8 +35,8 @@ fn is_foreign_member_list(imp: &ImportDecl) -> bool {
         && !foreign_imports_after_frontend(imp).is_empty()
 }
 
-/// Look up the pre-resolved module index for an import. Returns `None` for
-/// core modules, C imports, and unqualified imports (they have no file target).
+/// Look up the canonical module index recorded by the frontend for this
+/// declaration, including selective imports from sealed Core source parts.
 #[inline]
 fn resolve_target(bundle: &ProgramBundle, module_idx: usize, imp: &ImportDecl) -> Option<usize> {
     bundle.name_ledger.import_target(module_idx, imp.span)
@@ -133,13 +133,22 @@ pub(crate) fn foreign_list_targets_in_scope(
         .unwrap_or_default()
 }
 
-fn file_import_target(bundle: &ProgramBundle, module_idx: usize, alias: &str) -> Option<usize> {
-    bundle.modules[module_idx]
-        .imports
-        .iter()
-        .filter(|imp| !matches!(imp.kind, ImportKind::Unqualified { .. }))
-        .filter(|imp| imp.import_alias() == alias)
-        .find_map(|imp| resolve_target(bundle, module_idx, imp))
+fn selective_import_target(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    imp: &ImportDecl,
+) -> Option<usize> {
+    resolve_target(bundle, module_idx, imp).or_else(|| {
+        // Inline-module imports can refer to an enclosing file's namespace.
+        // That namespace already has a checked ledger identity as well.
+        let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
+            return None;
+        };
+        bundle
+            .name_ledger
+            .alias(module_idx, module_alias)
+            .and_then(|alias| alias.target_module)
+    })
 }
 
 fn inline_code_module_named(bundle: &ProgramBundle, module_idx: usize, name: &str) -> bool {
@@ -738,13 +747,13 @@ fn unqualified_file_module_targets(
     let module = &bundle.modules[module_idx];
     let mut targets = Vec::new();
     for imp in &module.imports {
-        let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
+        let ImportKind::Unqualified { .. } = &imp.kind else {
             continue;
         };
         if is_foreign_member_list(imp) {
             continue;
         }
-        let Some(parent) = file_import_target(bundle, module_idx, module_alias) else {
+        let Some(parent) = selective_import_target(bundle, module_idx, imp) else {
             continue;
         };
         for binding in imp.walk_bindings() {
@@ -805,7 +814,7 @@ pub(crate) fn reexport_call_map(
                 continue;
             }
             let real_idx =
-                file_import_target(bundle, target_idx, module_alias).unwrap_or_else(|| {
+                selective_import_target(bundle, target_idx, reimp).unwrap_or_else(|| {
                     unreachable!(
                         "re-export target missing after sema: module={} alias={module_alias}",
                         target_idx
@@ -840,7 +849,7 @@ pub(crate) fn reexport_call_map(
             {
                 continue;
             }
-            let real_idx = file_import_target(bundle, module_idx, module_alias)
+            let real_idx = selective_import_target(bundle, module_idx, reimp)
                 .unwrap_or_else(|| {
                     unreachable!(
                         "inline re-export target missing after sema: module={} alias={module_alias}",
@@ -958,7 +967,7 @@ pub(crate) fn unqualified_import_maps(
                 inline_map.insert(local, target);
             } else if let Some(target) = alias
                 .and_then(|name| name.target_module)
-                .or_else(|| file_import_target(bundle, module_idx, module_alias))
+                .or_else(|| selective_import_target(bundle, module_idx, imp))
             {
                 let real_name = alias
                     .and_then(|name| {
@@ -1042,7 +1051,7 @@ pub(crate) fn inline_import_maps(
             } else if imp.core_module_path().is_none()
                 && crate::AST::core_list_prefix(module_alias).is_none()
             {
-                let target = file_import_target(bundle, module_idx, module_alias);
+                let target = selective_import_target(bundle, module_idx, imp);
                 let target = target.unwrap_or_else(|| {
                     unreachable!(
                         "inline unqualified import target missing after sema: module={} alias={module_alias}",
@@ -1432,12 +1441,19 @@ pub(crate) fn namespace_member_owner(bundle: &ProgramBundle, target: usize, name
 /// Build signature/return entries for selective imports whose target is a file
 /// module. The local key is the spelling used in the body; the second key is
 /// the target's declared function name. This is needed for both top-level and
-/// inline-module `use mod.[item]` calls.
+/// inline-module `use mod.[item]` calls. A generic target also carries its
+/// declaring module and type-parameter order (#4609).
 fn unqualified_file_function_entries(
     bundle: &ProgramBundle,
     module_idx: usize,
     imports: &[ImportDecl],
-) -> Vec<(String, String, Vec<(AccessConvention, Type)>, Option<Type>)> {
+) -> Vec<(
+    String,
+    String,
+    Vec<(AccessConvention, Type)>,
+    Option<Type>,
+    Option<ImportedGenericFunction>,
+)> {
     let mut entries = Vec::new();
     for imp in imports {
         let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
@@ -1457,7 +1473,7 @@ fn unqualified_file_function_entries(
         }) {
             continue;
         }
-        let Some(target) = file_import_target(bundle, module_idx, module_alias) else {
+        let Some(target) = selective_import_target(bundle, module_idx, imp) else {
             if is_foreign_member_list(imp)
                 || crate::AST::core_list_prefix(module_alias).is_some()
                 || inline_code_module_named(bundle, module_idx, module_alias)
@@ -1506,6 +1522,7 @@ fn unqualified_file_function_entries(
                                 })
                                 .collect(),
                             function.return_type.clone(),
+                            None,
                         ));
                         continue;
                     }
@@ -1562,6 +1579,7 @@ fn unqualified_file_function_entries(
                     .return_type
                     .as_ref()
                     .map(|ty| qualify_imported_call_type(bundle, target, "", ty)),
+                imported_generic_function(bundle, target, function),
             ));
         }
     }
@@ -1576,6 +1594,7 @@ pub(crate) struct NestedFileCall {
     function: String,
     params: Vec<(AccessConvention, Type)>,
     ret: Option<Type>,
+    generic: Option<ImportedGenericFunction>,
 }
 
 /// Resolve the dotted free calls `module_idx` actually makes. Only names that
@@ -1629,6 +1648,7 @@ pub(crate) fn nested_file_calls(bundle: &ProgramBundle, module_idx: usize) -> Ve
                 function: function.name.clone(),
                 params,
                 ret,
+                generic: imported_generic_function(bundle, target, function),
             });
         }
     }
@@ -1651,12 +1671,11 @@ pub(crate) fn core_source_sig_map(
             let Item::Func(function) = item else {
                 continue;
             };
-            if !function.is_pub
-                || !jet_foundation::CoreModuleExports::core_source_owns(
-                    source.module,
-                    &function.name,
-                )
-            {
+            // A SourceOwned declaration can name a different checked export.
+            // Index exported functions, not just public Core member spellings:
+            // `take` may target `__take_bytes` without exporting another Core API.
+            if !function.is_pub && !crate::Syntax::CORE_CALLS.iter()
+                .any(|row| row.targets_source_function(source.module, &function.name)) {
                 continue;
             }
             let params = function
@@ -1674,10 +1693,12 @@ pub(crate) fn core_source_sig_map(
                     )
                 })
                 .collect();
-            let return_type = function
-                .return_type
-                .as_ref()
-                .map(|ty| qualify_imported_call_type(bundle, target, source.alias, ty));
+            let return_type = Some(qualify_imported_call_type(
+                bundle,
+                target,
+                source.alias,
+                &function.callable_value_return_type(),
+            ));
             map.insert(
                 (source.module.to_string(), function.name.clone()),
                 super::CoreSourceFunctionSignature {
@@ -1732,9 +1753,12 @@ pub(crate) fn core_source_sig_map(
                         )
                     })
                     .collect();
-                let return_type = function.return_type.as_ref().map(|ty| {
-                    qualify_imported_call_type(bundle, target, part.source.alias, ty)
-                });
+                let return_type = Some(qualify_imported_call_type(
+                    bundle,
+                    target,
+                    part.source.alias,
+                    &function.callable_value_return_type(),
+                ));
                 map.insert(
                     (part.source.module.to_string(), function.name.clone()),
                     super::CoreSourceFunctionSignature {
@@ -1754,12 +1778,42 @@ pub(crate) fn core_source_sig_map(
     map
 }
 
+/// One generic function of another source module that this module calls:
+/// its declaring module identity and type-parameter order (#4609).
+#[derive(Clone)]
+pub(crate) struct ImportedGenericFunction {
+    pub(crate) module_identity: String,
+    pub(crate) type_params: Vec<String>,
+}
+
+pub(crate) fn imported_generic_function(
+    bundle: &ProgramBundle,
+    target: usize,
+    function: &crate::AST::Func,
+) -> Option<ImportedGenericFunction> {
+    (!function.type_params.is_empty()).then(|| ImportedGenericFunction {
+        module_identity: crate::Codegen::Context::module_identity(bundle, target),
+        type_params: function
+            .type_params
+            .iter()
+            .map(|param| param.name.clone())
+            .collect(),
+    })
+}
+
+/// The parameter conventions and types of every cross-module call target,
+/// keyed `(import alias or local name, function)`, and the generic targets
+/// among them under the same keys.
 pub(crate) fn import_sig_map(
     bundle: &ProgramBundle,
     module_idx: usize,
     nested: &[NestedFileCall],
-) -> HashMap<(String, String), Vec<(AccessConvention, Type)>> {
+) -> (
+    HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    HashMap<(String, String), ImportedGenericFunction>,
+) {
     let mut map = HashMap::new();
+    let mut generics = HashMap::new();
     let module = &bundle.modules[module_idx];
     for imp in &module.imports {
         for (alias, target) in foreign_list_targets(bundle, module_idx, imp) {
@@ -1806,6 +1860,9 @@ pub(crate) fn import_sig_map(
         for item in &bundle.modules[target].items {
             match item {
                 Item::Func(f) if bundle.name_ledger.visible(module_idx, target, &f.name) => {
+                    if let Some(generic) = imported_generic_function(bundle, target, f) {
+                        generics.insert((alias.clone(), f.name.clone()), generic);
+                    }
                     map.insert(
                         (alias.clone(), f.name.clone()),
                         f.params
@@ -1846,16 +1903,22 @@ pub(crate) fn import_sig_map(
             }
         }
     }
-    for (local, original, params, _) in
+    for (local, original, params, _, generic) in
         unqualified_file_function_entries(bundle, module_idx, &module.imports)
     {
+        if let Some(generic) = generic {
+            generics.insert((local.clone(), original.clone()), generic);
+        }
         map.insert((local, original), params);
     }
     for item in &module.items {
         if let Item::CodeModule(cm) = item {
-            for (local, original, params, _) in
+            for (local, original, params, _, generic) in
                 unqualified_file_function_entries(bundle, module_idx, &cm.imports)
             {
+                if let Some(generic) = generic {
+                    generics.insert((local.clone(), original.clone()), generic);
+                }
                 map.insert((local, original), params);
             }
         }
@@ -1867,6 +1930,9 @@ pub(crate) fn import_sig_map(
                     .name_ledger
                     .visible(module_idx, target, &function.name)
                 {
+                    if let Some(generic) = imported_generic_function(bundle, target, function) {
+                        generics.insert((local.clone(), function.name.clone()), generic);
+                    }
                     map.insert(
                         (local.clone(), function.name.clone()),
                         function
@@ -1890,14 +1956,16 @@ pub(crate) fn import_sig_map(
         }
     }
     for call in nested {
-        map.insert(
-            (call.name.clone(), call.function.clone()),
-            call.params.clone(),
-        );
+        let key = (call.name.clone(), call.function.clone());
+        if let Some(generic) = &call.generic {
+            generics.insert(key.clone(), generic.clone());
+        }
+        map.insert(key, call.params.clone());
     }
     // D-MOD4: re-exported items (`pub use sub.Item`) must carry the *real*
     // function's parameter conventions under the re-exporting alias, or calls
     // through the re-export would pass by value where a borrow is expected.
+
     for ((alias, item), (real_mod, real_fn)) in reexport_call_map(bundle, module_idx) {
         let stem = crate::Syntax::generated_suffix(&real_mod);
         if let Some((real_idx, real)) = bundle
@@ -1911,6 +1979,9 @@ pub(crate) fn import_sig_map(
                     if f.name == real_fn
                         && bundle.name_ledger.visible(module_idx, real_idx, &f.name)
                     {
+                        if let Some(generic) = imported_generic_function(bundle, real_idx, f) {
+                            generics.insert((alias.clone(), item.clone()), generic);
+                        }
                         map.insert(
                             (alias.clone(), item.clone()),
                             f.params
@@ -1933,7 +2004,7 @@ pub(crate) fn import_sig_map(
             }
         }
     }
-    map
+    (map, generics)
 }
 
 /// c109 Phase 14: build a map from `(import alias, function)` → the function's return
@@ -1998,14 +2069,14 @@ pub(crate) fn import_ret_map(
             }
         }
     }
-    for (local, original, _, ret) in
+    for (local, original, _, ret, _) in
         unqualified_file_function_entries(bundle, module_idx, &module.imports)
     {
         map.insert((local, original), ret);
     }
     for item in &module.items {
         if let Item::CodeModule(cm) = item {
-            for (local, original, _, ret) in
+            for (local, original, _, ret, _) in
                 unqualified_file_function_entries(bundle, module_idx, &cm.imports)
             {
                 map.insert((local, original), ret);

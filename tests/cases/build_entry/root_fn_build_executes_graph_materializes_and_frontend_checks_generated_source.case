@@ -1,0 +1,26 @@
+# Port of tests/build_entry.rs:158-296; public acceptance/files and exact private BuildRun subclaims split.
+# PENDING-SAME-HEAD. No invented metrics/graph projection.
+fixture: fixtures/root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source
+mkdir: build
+copy: preserve build/legacy-output
+mkdir: .jet-build
+copy: preserve .jet-build/legacy-output
+mkdir: src/.jet
+copy: preserve src/.jet/legacy-output
+requires: tool:sh
+step: jet build main.jet --allow-exec --allow-fs
+exit: 0
+file: build/legacy-output = fixtures/root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source/preserve
+entries: build = 1
+file: .jet-build/legacy-output = fixtures/root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source/preserve
+entries: .jet-build = 1
+file: src/.jet/legacy-output = fixtures/root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source/preserve
+entries: src/.jet = 1
+file: .jet/generated/app/stamp.txt = fixtures/root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source/stamped
+file: .jet/generated/main/generated_message.jet exists
+file: .jet/lock ~ ".jet/generated/main/generated_message.jet" # original lock path contains
+step: jet build main.jet --allow-exec --allow-fs
+exit: 0
+step: jet inspect explain-build stamp main.jet --json
+exit: 0
+stdout: ~ "\"label\":\"stamp\"" # original contains label predicate

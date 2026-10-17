@@ -7,14 +7,14 @@ struct Email {
     addr: String
 }
 
-// `encode` must return `DataTree`, not `String`.
+// `encode` must return `Dyn`, not `String`.
 impl Email.Encode {
-    fn encode(self) -> String { ~self.addr }
+    fn encode(self) -> String { self.addr.copy() }
 }
 
 // `decode` is static — a `self` receiver is not part of its shape.
 impl Email.Decode {
-    fn decode(self, tree: DataTree) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
+    fn decode(self, tree: Dyn) -> Email [FieldError]! { return Ok(Email{addr: "x"}) }
 }
 
 fn run() { print("ok") }

@@ -1,0 +1,17 @@
+# HAND-PORT tests/web_build.rs:5421-5444 web_wasm_event_callback_bridge_roundtrip
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_wasm_event_callback_bridge_roundtrip.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "await bridge_double(21n)" # original JavaScript/runtime predicate
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_wasm_event_callback_bridge_roundtrip.stdout.expected

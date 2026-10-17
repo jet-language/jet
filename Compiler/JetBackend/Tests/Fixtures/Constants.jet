@@ -1,0 +1,461 @@
+// Immutable constant trees and repeated Global reads, without constant folding
+// of field reads or ownership operations in the native lowering fixture.
+use jet_foundation.[
+    MIRBinaryOp,
+    MIRConstant,
+    mir_integer_constant,
+    MIRConstantDef,
+    MIRConstantID,
+    MIRConstEnumArg,
+    MIRConstField,
+    MIRCopyFact,
+    MIRAccess, MIRConstKey, MIRConstMapEntry, MIRIndexKind,
+    MIRPanicLoc, MIRPanicContext, MIRPanicLocal, MIRPreludeCall, MIRPreludeABI, MIRPreludeFamily,
+    MIRConstReport,
+    MIRDropKind,
+    MIRField,
+    MIRFunction,
+    MIRFunctionID,
+    MIRModuleID,
+    MIROperation,
+    MIRProgram,
+    MIRTerminator,
+    MIRType,
+    MIRTypeDef,
+    MIRTypeDefKind,
+    MIRTypeKind,
+    MIRValueID,
+    MIRVariant,
+    MIRVariantPayload,
+    MIRVisibility,
+    mir_field_id,
+    mir_type_from_kind,
+    mir_type_id, mir_copy_ownership,
+]
+
+fn fx_constant_int(value: Int) -> MIRConstant Never! {
+    mir_integer_constant(value, None, None)
+}
+
+fn fx_constant_record(n: Int, label: String) -> MIRConstant Never! {
+    // Constant field order deliberately differs from physical storage order.
+    MIRConstant.Struct{type_name: "ConstRecord", fields: [MIRConstField]{
+        MIRConstField{name: "label", value: MIRConstant.String{value: label}},
+        MIRConstField{name: "unit", value: MIRConstant.Unit},
+        MIRConstField{name: "n", value: fx_constant_int(n)},
+    }}
+}
+
+fn fx_constant_computed() -> MIRField Never! {
+    field := fx_field("ConstRecord", "computed", fx_string())
+    field.computed = true
+    field
+}
+
+fn fx_constant_print_record(b: &FxBuilder, record: MIRValueID) Never! {
+    n :: fx_copy(&b, fx_int(), MIROperation.Field{base: record, field: mir_field_id("ConstRecord.n")})
+    label :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Field{base: record, field: mir_field_id("ConstRecord.label")})
+    fx_print(&b, n)
+    fx_print(&b, label)
+}
+
+// struct ConstRecord { n: Int, computed: String -> "ignored", unit: Unit, label: String }
+// struct ConstOuter { record: ConstRecord, flag: Bool, letter: Char, number: Float }
+// enum ConstChoice { Empty = 1, Pair(record: ConstRecord, count: Int), Text(String) }
+// const fixture.saved: ConstRecord = ConstRecord{n: 31, unit: Unit, label: "global"}
+// fn run() {
+//     a :: ConstOuter{record: ConstRecord{n: 7, unit: Unit, label: "tree"}, flag: true, letter: 'Q', number: 1.5}
+//     print(a.record.n); print(a.record.label); print(a.flag); print(a.letter); print(a.number == 1.5)
+//     b :: ConstChoice.Pair(count: 9, record: ConstRecord{n: 8, unit: Unit, label: "enum"})
+//     print(b == .Empty); print(b == .Pair); print(b.Pair.record.n); print(b.Pair.record.label); print(b.Pair.count)
+//     text :: ConstChoice.Text("single"); print(text.Text)
+//     opt :: Val(ConstRecord{n: 11, unit: Unit, label: "option"}); print(opt.Val.n); print(opt.Val.label)
+//     ok :: Ok(ConstRecord{n: 12, unit: Unit, label: "ok"}); print(ok is Ok); print(ok.Ok.n); print(ok.Ok.label)
+//     err :: Err("told"); print(err is Ok); print(err.Err)
+//     unit :: Val(Unit); print(unit is Val)
+//     first :: fixture.saved; print(first.n); print(first.label); drop(first)
+//     second :: saved; print(second.n); print(second.label)
+// }
+// expect-stdout constants: "7\ntree\ntrue\nQ\ntrue\nfalse\ntrue\n8\nenum\n9\nsingle\n11\noption\ntrue\n12\nok\nfalse\ntold\ntrue\n31\nglobal\n31\nglobal\n"
+// expect-static-only constants
+fn fx_constants() -> MIRProgram Never! {
+    record :: fx_named("ConstRecord")
+    outer :: fx_named("ConstOuter")
+    choice :: fx_named("ConstChoice")
+    char_ty :: mir_type_from_kind(MIRTypeKind.Char)
+    float_ty :: mir_type_from_kind(MIRTypeKind.Float)
+    option_record :: mir_type_from_kind(MIRTypeKind.Option{inner: record})
+    result_record :: mir_type_from_kind(MIRTypeKind.Result{ok: record, err: fx_string()})
+    option_unit :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_unit()})
+    types :: [MIRTypeDef]{
+        fx_type_def("ConstRecord", MIRTypeDefKind.Struct{fields: [MIRField]{
+            fx_field("ConstRecord", "n", fx_int()), fx_constant_computed(),
+            fx_field("ConstRecord", "unit", fx_unit()), fx_field("ConstRecord", "label", fx_string()),
+        }, methods: [MIRFunctionID]{}}),
+        fx_type_def("ConstOuter", MIRTypeDefKind.Struct{fields: [MIRField]{
+            fx_field("ConstOuter", "record", record), fx_field("ConstOuter", "flag", fx_bool()),
+            fx_field("ConstOuter", "letter", char_ty), fx_field("ConstOuter", "number", float_ty),
+        }, methods: [MIRFunctionID]{}}),
+        fx_type_def("ConstChoice", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "Empty", wire_name: "Empty", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: Val(1)},
+            fx_variant("Pair", MIRVariantPayload.Named{fields: [MIRField]{fx_field("ConstChoice.Pair", "record", record), fx_field("ConstChoice.Pair", "count", fx_int())}}),
+            fx_variant("Text", MIRVariantPayload.Single{value: fx_string()}),
+        }, methods: [MIRFunctionID]{}}),
+    }
+    r := fx_builder()
+    a :: fx_owned(&r, outer, MIROperation.Constant{value: MIRConstant.Struct{type_name: "ConstOuter", fields: [MIRConstField]{
+        MIRConstField{name: "number", value: MIRConstant.Float{value: 1.5, f32: false, spelling: None}},
+        MIRConstField{name: "letter", value: MIRConstant.Char{value: 81}},
+        MIRConstField{name: "flag", value: MIRConstant.Bool{value: true}},
+        MIRConstField{name: "record", value: fx_constant_record(7, "tree")},
+    }}})
+    inner :: fx_value(&r, record, fx_borrow(), MIROperation.Field{base: a, field: mir_field_id("ConstOuter.record")})
+    fx_constant_print_record(&r, inner)
+    flag :: fx_copy(&r, fx_bool(), MIROperation.Field{base: a, field: mir_field_id("ConstOuter.flag")})
+    fx_print(&r, flag)
+    letter :: fx_copy(&r, char_ty, MIROperation.Field{base: a, field: mir_field_id("ConstOuter.letter")})
+    fx_print(&r, letter)
+    number :: fx_copy(&r, float_ty, MIROperation.Field{base: a, field: mir_field_id("ConstOuter.number")})
+    expected_number :: fx_copy(&r, float_ty, MIROperation.Constant{value: MIRConstant.Float{value: 1.5, f32: false, spelling: None}})
+    equal_number :: fx_compare(&r, MIRBinaryOp.Eq, number, expected_number)
+    fx_print(&r, equal_number)
+    fx_do(&r, MIROperation.Drop{value: a, kind: MIRDropKind.Value})
+    b :: fx_owned(&r, choice, MIROperation.Constant{value: MIRConstant.Enum{type_name: "ConstChoice", variant: "Pair", args: [MIRConstEnumArg]{
+        MIRConstEnumArg{name: Val("count"), value: fx_constant_int(9)},
+        MIRConstEnumArg{name: Val("record"), value: fx_constant_record(8, "enum")},
+    }}})
+    empty :: fx_copy(&r, fx_bool(), MIROperation.EnumIs{subject: b, owner: mir_type_id("ConstChoice"), variant: "Empty"})
+    pair :: fx_copy(&r, fx_bool(), MIROperation.EnumIs{subject: b, owner: mir_type_id("ConstChoice"), variant: "Pair"})
+    fx_print(&r, empty)
+    fx_print(&r, pair)
+    payload :: fx_value(&r, record, fx_borrow(), MIROperation.EnumPayload{subject: b, owner: mir_type_id("ConstChoice"), variant: "Pair", index: 0})
+    fx_constant_print_record(&r, payload)
+    count :: fx_copy(&r, fx_int(), MIROperation.EnumPayload{subject: b, owner: mir_type_id("ConstChoice"), variant: "Pair", index: 1})
+    fx_print(&r, count)
+    fx_do(&r, MIROperation.Drop{value: b, kind: MIRDropKind.Value})
+    text :: fx_owned(&r, choice, MIROperation.Constant{value: MIRConstant.Enum{type_name: "ConstChoice", variant: "Text", args: [MIRConstEnumArg]{MIRConstEnumArg{name: None, value: MIRConstant.String{value: "single"}}}}})
+    text_value :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.EnumPayload{subject: text, owner: mir_type_id("ConstChoice"), variant: "Text", index: 0})
+    fx_print(&r, text_value)
+    fx_do(&r, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+    opt :: fx_owned(&r, option_record, MIROperation.Constant{value: MIRConstant.Present{value: fx_constant_record(11, "option")}})
+    opt_value :: fx_value(&r, record, fx_borrow(), MIROperation.OptionValue{subject: opt})
+    fx_constant_print_record(&r, opt_value)
+    fx_do(&r, MIROperation.Drop{value: opt, kind: MIRDropKind.Value})
+    ok :: fx_owned(&r, result_record, MIROperation.Constant{value: MIRConstant.Present{value: fx_constant_record(12, "ok")}})
+    is_ok :: fx_copy(&r, fx_bool(), MIROperation.ResultIsOk{subject: ok})
+    fx_print(&r, is_ok)
+    ok_value :: fx_value(&r, record, fx_borrow(), MIROperation.ResultValue{subject: ok, ok: true})
+    fx_constant_print_record(&r, ok_value)
+    fx_do(&r, MIROperation.Drop{value: ok, kind: MIRDropKind.Value})
+    err :: fx_owned(&r, result_record, MIROperation.Constant{value: MIRConstant.Failed{report: MIRConstReport.Told{value: MIRConstant.String{value: "told"}}}})
+    err_is_ok :: fx_copy(&r, fx_bool(), MIROperation.ResultIsOk{subject: err})
+    fx_print(&r, err_is_ok)
+    err_value :: fx_value(&r, fx_string(), fx_borrow(), MIROperation.ResultValue{subject: err, ok: false})
+    fx_print(&r, err_value)
+    fx_do(&r, MIROperation.Drop{value: err, kind: MIRDropKind.Value})
+    unit :: fx_owned(&r, option_unit, MIROperation.Constant{value: MIRConstant.Present{value: MIRConstant.Unit}})
+    unit_present :: fx_copy(&r, fx_bool(), MIROperation.OptionIsSome{subject: unit})
+    fx_print(&r, unit_present)
+    fx_do(&r, MIROperation.Drop{value: unit, kind: MIRDropKind.Value})
+    first :: fx_owned(&r, record, MIROperation.Global{name: "fixture.saved"})
+    fx_constant_print_record(&r, first)
+    fx_do(&r, MIROperation.Drop{value: first, kind: MIRDropKind.Value})
+    second :: fx_owned(&r, record, MIROperation.Global{name: "saved"})
+    fx_constant_print_record(&r, second)
+    fx_do(&r, MIROperation.Drop{value: second, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    program := fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
+    program.constants = [MIRConstantDef]{MIRConstantDef{
+        id: MIRConstantID{value: 1}, module_id: MIRModuleID{value: 0}, key: "fixture.saved", name: "saved",
+        span: fx_span(), visibility: MIRVisibility.Private, ty: record, is_storage: false,
+        value: fx_constant_record(31, "global"),
+    }}
+    program
+}
+
+// enum ConstTag { First = 1, Second }
+// fn run() { value :: ConstTag.Second; print(value == .First); print(value == .Second) }
+// expect-stdout constants-tags: "false\ntrue\n"
+fn fx_constants_tags() -> MIRProgram Never! {
+    tag_type :: fx_named("ConstTag")
+    types :: [MIRTypeDef]{fx_type_def("ConstTag", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        MIRVariant{name: "First", wire_name: "First", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: Val(1)},
+        fx_variant("Second", MIRVariantPayload.Unit),
+    }, methods: [MIRFunctionID]{}})}
+    r := fx_builder()
+    value :: fx_copy(&r, tag_type, MIROperation.Constant{value: MIRConstant.Enum{type_name: "ConstTag", variant: "Second", args: [MIRConstEnumArg]{}}})
+    first :: fx_copy(&r, fx_bool(), MIROperation.EnumIs{subject: value, owner: mir_type_id("ConstTag"), variant: "First"})
+    second :: fx_copy(&r, fx_bool(), MIROperation.EnumIs{subject: value, owner: mir_type_id("ConstTag"), variant: "Second"})
+    fx_print(&r, first)
+    fx_print(&r, second)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
+}
+
+// enum ConstChain { End, More(head: Int, tail: ConstChain), One(ConstChain) }
+// fn run() {
+//     a :: ConstChain.One(ConstChain.More(head: 42, tail: .End))
+//     print(a.One.More.head); print(a.One.More.tail == .End)
+//     b :: a.clone(); drop(a)
+//     print(b.One.More.head); print(b.One.More.tail == .End)
+// }
+// expect-stdout constants-boxed: "42\ntrue\n42\ntrue\n"
+fn fx_constants_boxed() -> MIRProgram Never! {
+    chain :: fx_named("ConstChain")
+    definition := fx_type_def("ConstChain", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+        fx_variant("End", MIRVariantPayload.Unit),
+        fx_variant("More", MIRVariantPayload.Named{fields: [MIRField]{
+            fx_field("ConstChain.More", "head", fx_int()),
+            fx_field("ConstChain.More", "tail", chain),
+        }}),
+        fx_variant("One", MIRVariantPayload.Single{value: chain}),
+    }, methods: [MIRFunctionID]{}})
+    definition.boxed_edges = [String]{"More.tail", "One"}
+    types :: [MIRTypeDef]{definition}
+    r := fx_builder()
+    a :: fx_owned(&r, chain, MIROperation.Constant{value: MIRConstant.Enum{
+        type_name: "ConstChain", variant: "One", args: [MIRConstEnumArg]{MIRConstEnumArg{name: None, value: MIRConstant.Enum{
+            type_name: "ConstChain", variant: "More", args: [MIRConstEnumArg]{
+                MIRConstEnumArg{name: Val("tail"), value: MIRConstant.Enum{type_name: "ConstChain", variant: "End", args: [MIRConstEnumArg]{}}},
+                MIRConstEnumArg{name: Val("head"), value: fx_constant_int(42)},
+            },
+        }}},
+    }})
+    fx_constant_print_chain(&r, a)
+    b :: fx_owned(&r, chain, MIROperation.Copy{value: a, fact: MIRCopyFact.Explicit})
+    fx_do(&r, MIROperation.Drop{value: a, kind: MIRDropKind.Value})
+    fx_constant_print_chain(&r, b)
+    fx_do(&r, MIROperation.Drop{value: b, kind: MIRDropKind.Value})
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, ^types)
+}
+
+fn fx_constant_print_chain(b: &FxBuilder, owner: MIRValueID) Never! {
+    chain :: fx_named("ConstChain")
+    more :: fx_value(&b, chain, fx_borrow(), MIROperation.EnumPayload{subject: owner, owner: mir_type_id("ConstChain"), variant: "One", index: 0})
+    head :: fx_copy(&b, fx_int(), MIROperation.EnumPayload{subject: more, owner: mir_type_id("ConstChain"), variant: "More", index: 0})
+    tail :: fx_value(&b, chain, fx_borrow(), MIROperation.EnumPayload{subject: more, owner: mir_type_id("ConstChain"), variant: "More", index: 1})
+    is_end :: fx_copy(&b, fx_bool(), MIROperation.EnumIs{subject: tail, owner: mir_type_id("ConstChain"), variant: "End"})
+    fx_print(&b, head)
+    fx_print(&b, is_end)
+}
+
+// struct ConstHolder { head: Int, tail: ConstChain } with `tail` a declared
+// recursive edge: a Struct constant stores it through its own wrapper box,
+// as the ordinary constructor does (StructLiteral.jet), in a tree and frozen.
+// fn run() {
+//     a :: ConstHolder{head: 7, tail: .End}; print(a.head); print(a.tail == .End)
+//     b :: a.clone(); drop(a); print(b.head); print(b.tail == .End); drop(b)
+//     print(HOLDER.head); print(HOLDER.tail == .End)   // HOLDER: head 8
+// }
+// expect-stdout constants-boxed-struct: "7\ntrue\n7\ntrue\n8\ntrue\n"
+fn fx_constants_boxed_struct() -> MIRProgram Never! {
+    chain_definition :: fx_constants_boxed().types[0]
+    holder :: fx_named("ConstHolder")
+    holder_definition := fx_type_def("ConstHolder", MIRTypeDefKind.Struct{fields: [MIRField]{
+        fx_field("ConstHolder", "head", fx_int()),
+        fx_field("ConstHolder", "tail", fx_named("ConstChain")),
+    }, methods: [MIRFunctionID]{}})
+    holder_definition.boxed_edges = [String]{"tail"}
+    r := fx_builder()
+    a :: fx_owned(&r, holder, MIROperation.Constant{value: fx_constant_holder(7)})
+    fx_constant_print_holder(&r, a)
+    b :: fx_owned(&r, holder, MIROperation.Copy{value: a, fact: MIRCopyFact.Explicit})
+    fx_do(&r, MIROperation.Drop{value: a, kind: MIRDropKind.Value})
+    fx_constant_print_holder(&r, b)
+    fx_do(&r, MIROperation.Drop{value: b, kind: MIRDropKind.Value})
+    frozen :: fx_value(&r, holder, fx_borrow(), MIROperation.Global{name: "fixture.holder"})
+    fx_constant_print_holder(&r, frozen)
+    fx_block(&r, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", r, fx_unit())}, [MIRTypeDef]{chain_definition, holder_definition})
+    p.constants = [MIRConstantDef]{fx_static_definition("holder", holder, fx_constant_holder(8))}
+    p
+}
+
+fn fx_constant_holder(head: Int) -> MIRConstant Never! {
+    MIRConstant.Struct{type_name: "ConstHolder", fields: [MIRConstField]{
+        MIRConstField{name: "tail", value: MIRConstant.Enum{type_name: "ConstChain", variant: "End", args: [MIRConstEnumArg]{}}},
+        MIRConstField{name: "head", value: fx_constant_int(head)},
+    }}
+}
+
+fn fx_constant_print_holder(b: &FxBuilder, owner: MIRValueID) Never! {
+    head :: fx_copy(&b, fx_int(), MIROperation.Field{base: owner, field: mir_field_id("ConstHolder.head")})
+    tail :: fx_value(&b, fx_named("ConstChain"), fx_borrow(), MIROperation.Field{base: owner, field: mir_field_id("ConstHolder.tail")})
+    is_end :: fx_copy(&b, fx_bool(), MIROperation.EnumIs{subject: tail, owner: mir_type_id("ConstChain"), variant: "End"})
+    fx_print(&b, head)
+    fx_print(&b, is_end)
+}
+
+fn fx_f32_constant_bits_checks() -> Bool Never! {
+    samples :: [Float]{0.0, -0.0, 1.0, -1.5, 1.000000059604644775390625, 1.000000178813934326171875, 7.006492321624085e-46, 1.401298464324817e-45, 3.4028234663852886e38, 3.4028235677973366e38}
+    expected :: [Int]{0, 2147483648, 1065353216, 3217031168, 1065353216, 1065353218, 0, 1, 2139095039, 2139095040}
+    loop (index, sample) in samples {
+        if lower_float_constant_bits(sample, true) != expected[index] -> return false
+    }
+    positive_infinity :: math.from_bits(9218868437227405312)
+    if lower_float_constant_bits(positive_infinity, true) != 2139095040 -> return false
+    quiet_nan :: math.from_bits(9221120237041090560)
+    if lower_float_constant_bits(quiet_nan, true) != 2143289344 -> return false
+    lower_float_constant_bits(1.5, false) == math.to_bits(1.5)
+}
+
+// expect-stdout f32-constants: "1.5\n1.5\n1.5\n1.5\n"
+// expect-runtime-only f32-constants: raw binary32 display plus local, tree, List and static storage
+fn fx_f32_constants() -> MIRProgram Never! {
+    scalar :: mir_type_from_kind(MIRTypeKind.Float32)
+    record :: fx_named("F32ConstantRecord")
+    list_ty :: fx_list_type(scalar)
+    constant :: MIRConstant.Float{value: 1.5, f32: true, spelling: None}
+    b := fx_builder()
+    place :: fx_local(&b, "saved", scalar, mir_copy_ownership())
+    literal :: fx_copy(&b, scalar, MIROperation.Constant{value: constant})
+    fx_do(&b, MIROperation.WritePlace{place: place, value: literal})
+    local :: fx_copy(&b, scalar, MIROperation.ReadPlace{place: place})
+    fx_print(&b, local)
+    tree :: fx_owned(&b, record, MIROperation.Constant{value: MIRConstant.Struct{type_name: "F32ConstantRecord", fields: [MIRConstField]{MIRConstField{name: "number", value: constant}}}})
+    member :: fx_copy(&b, scalar, MIROperation.Field{base: tree, field: mir_field_id("F32ConstantRecord.number")})
+    fx_print(&b, member)
+    list :: fx_owned(&b, list_ty, MIROperation.Constant{value: MIRConstant.List{values: [MIRConstant]{constant}}})
+    zero :: fx_int_const(&b, 0)
+    item :: fx_list_index(&b, list, zero, scalar, false)
+    fx_print(&b, item)
+    global :: fx_copy(&b, scalar, MIROperation.Global{name: "fixture.f32"})
+    fx_print(&b, global)
+    fx_do(&b, MIROperation.Drop{value: tree, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: list, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    program := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{fx_type_def("F32ConstantRecord", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("F32ConstantRecord", "number", scalar)}, methods: [MIRFunctionID]{}})})
+    program.constants = [MIRConstantDef]{MIRConstantDef{id: MIRConstantID{value: 901}, module_id: MIRModuleID{value: 0}, key: "fixture.f32", name: "f32", span: fx_span(), visibility: MIRVisibility.Private, ty: scalar, is_storage: false, value: constant}}
+    program
+}
+
+// Compact MIR Bytes preserves binary values, not UTF-8 text. The odd-length
+// buffer, nested empty List and owned copy exercise packed loads and drops.
+// expect-stdout constants-bytes: "9\n0\n128\n255\n255\ntrue\n27\n"
+// expect-static-only constants-bytes
+fn fx_constants_bytes() -> MIRProgram Never! {
+    b := fx_builder()
+    byte :: fx_narrow(false, 8)
+    bytes :: fx_list_type(byte)
+    input :: fx_owned(&b, bytes, MIROperation.Constant{value: MIRConstant.Bytes{value: [U8]{U8{0}, U8{128}, U8{255}, U8{1}, U8{2}, U8{3}, U8{4}, U8{5}, U8{255}}}})
+    length :: fx_list_method(&b, "len", input, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, length)
+    zero :: fx_int_const(&b, 0)
+    one :: fx_int_const(&b, 1)
+    last :: fx_int_const(&b, 8)
+    first :: fx_list_index(&b, input, zero, byte, false)
+    fx_print(&b, first)
+    second :: fx_list_index(&b, input, one, byte, false)
+    fx_print(&b, second)
+    final_byte :: fx_list_index(&b, input, last, byte, false)
+    fx_print(&b, final_byte)
+    copied :: fx_owned(&b, bytes, MIROperation.Copy{value: input, fact: MIRCopyFact.Explicit})
+    fx_do(&b, MIROperation.Drop{value: input, kind: MIRDropKind.Value})
+    copied_last :: fx_list_index(&b, copied, last, byte, false)
+    fx_print(&b, copied_last)
+    fx_do(&b, MIROperation.Drop{value: copied, kind: MIRDropKind.Value})
+    nested :: fx_owned(&b, fx_list_type(bytes), MIROperation.Constant{value: MIRConstant.List{values: [MIRConstant]{
+        MIRConstant.Bytes{value: [U8]{}}, MIRConstant.Bytes{value: [U8]{U8{27}}},
+    }}})
+    empty :: fx_list_index(&b, nested, zero, bytes, false)
+    is_empty :: fx_list_method(&b, "is_empty", empty, None, [MIRValueID]{}, fx_bool(), false)
+    fx_print(&b, is_empty)
+    nonempty :: fx_list_index(&b, nested, one, bytes, false)
+    nested_first :: fx_list_index(&b, nonempty, zero, byte, false)
+    fx_print(&b, nested_first)
+    fx_do(&b, MIROperation.Drop{value: nested, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_list_program(b)
+}
+
+// PC_MARKER_STATUS in JetParser's contract harness is a prep-folded
+// [String:String]. Deliberately unordered and duplicated entries exercise the
+// canonical Map insertion semantics, not an assumed serialized order.
+fn fx_constant_marker_status() -> MIRConstant Never! {
+    MIRConstant.Map{entries: [MIRConstMapEntry]{
+        MIRConstMapEntry{key: MIRConstKey.String{value: "z.jet"}, value: MIRConstant.String{value: "old"}},
+        MIRConstMapEntry{key: MIRConstKey.String{value: "a.jet"}, value: MIRConstant.String{value: "PASS"}},
+        MIRConstMapEntry{key: MIRConstKey.String{value: "z.jet"}, value: MIRConstant.String{value: "FAIL"}},
+        MIRConstMapEntry{key: MIRConstKey.String{value: "m.jet"}, value: MIRConstant.String{value: "PASS"}},
+    }}
+}
+
+fn fx_constant_marker_type() -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Map{key: fx_string(), value: fx_string()})
+}
+
+fn fx_constant_map_key_read(b: &FxBuilder, map: MIRValueID, key: MIRValueID) Never! {
+    value :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Index{
+        call: fx_prelude_id("core.list", "get"), base: map, index: key,
+        kind: MIRIndexKind.Map, access: MIRAccess.Read,
+        location: MIRPanicLoc{file: fx_source_file(), line: 1, column: 0},
+        context: MIRPanicContext{function: "run", source_line: "status[key]", caret: 1, locals: [MIRPanicLocal]{}},
+    })
+    fx_print(&b, value)
+}
+
+fn fx_constant_map_read(b: &FxBuilder, map: MIRValueID, name: String) Never! {
+    key :: fx_strings_literal(&b, name)
+    fx_constant_map_key_read(&b, map, key)
+    fx_do(&b, MIROperation.Drop{value: key, kind: MIRDropKind.Value})
+}
+
+fn fx_constant_map_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    len := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "len", "jet_map_len", 1, MIRPreludeABI.Value)
+    len.signature.borrow_mask[0] = true
+    p.prelude_calls = [MIRPreludeCall]{len, fx_prelude(MIRPreludeFamily.StaticPrelude, "core.list", "get", "jet_list_get", 4, MIRPreludeABI.Value)}
+    p
+}
+
+// expect-stdout constants-map: "3\nPASS\nFAIL\nFAIL\n0\n"
+// expect-static-only constants-map
+fn fx_constants_map() -> MIRProgram Never! {
+    b := fx_builder()
+    map_ty :: fx_constant_marker_type()
+    map :: fx_owned(&b, map_ty, MIROperation.Constant{value: fx_constant_marker_status()})
+    length :: fx_list_method(&b, "len", map, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, length)
+    fx_constant_map_read(&b, map, "a.jet")
+    fx_constant_map_read(&b, map, "z.jet")
+    copied :: fx_owned(&b, map_ty, MIROperation.Copy{value: map, fact: MIRCopyFact.Explicit})
+    fx_do(&b, MIROperation.Drop{value: map, kind: MIRDropKind.Value})
+    fx_constant_map_read(&b, copied, "z.jet")
+    fx_do(&b, MIROperation.Drop{value: copied, kind: MIRDropKind.Value})
+    empty :: fx_owned(&b, map_ty, MIROperation.Constant{value: MIRConstant.Map{entries: [MIRConstMapEntry]{}}})
+    empty_length :: fx_list_method(&b, "len", empty, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, empty_length)
+    fx_do(&b, MIROperation.Drop{value: empty, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_constant_map_program(b)
+}
+
+// MIRConstKey has no width; high U64 keys therefore arrive as decimal BigInt.
+// Both literal and frozen builders must recover the checked unsigned ordering.
+// expect-stdout constants-map-u64: "ZERO\nHIGH\nMAX\nZERO\nHIGH\nMAX\n"
+// expect-static-only constants-map-u64
+fn fx_constants_map_u64() -> MIRProgram Never! {
+    b := fx_builder()
+    map_ty :: mir_type_from_kind(MIRTypeKind.Map{key: fx_narrow(false, 64), value: fx_string()})
+    constant :: MIRConstant.Map{entries: [MIRConstMapEntry]{
+        MIRConstMapEntry{key: MIRConstKey.BigInt{decimal: "18446744073709551615"}, value: MIRConstant.String{value: "MAX"}},
+        MIRConstMapEntry{key: MIRConstKey.Int{value: 0}, value: MIRConstant.String{value: "ZERO"}},
+        MIRConstMapEntry{key: MIRConstKey.BigInt{decimal: "9223372036854775808"}, value: MIRConstant.String{value: "HIGH"}},
+    }}
+    literal :: fx_owned(&b, map_ty, MIROperation.Constant{value: constant})
+    global :: fx_owned(&b, map_ty, MIROperation.Global{name: "fixture.unsigned_status"})
+    keys :: [MIRValueID]{
+        fx_narrow_const(&b, false, 64, 0),
+        fx_narrow_const(&b, false, 64, 9223372036854775808),
+        fx_narrow_const(&b, false, 64, 18446744073709551615),
+    }
+    loop map in ([MIRValueID]{literal, global}) {
+        loop key in keys -> fx_constant_map_key_read(&b, map, key)
+        fx_do(&b, MIROperation.Drop{value: map, kind: MIRDropKind.Value})
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_constant_map_program(b)
+    p.constants = [MIRConstantDef]{fx_static_definition("unsigned_status", map_ty, constant)}
+    p
+}

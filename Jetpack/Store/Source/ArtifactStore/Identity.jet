@@ -7,7 +7,7 @@
 // The artifact store's one failure carrier. `message` keeps the exact text of
 // the Rust `StoreError` Display implementation.
 #Error
-pub enum ArtifactStoreError {
+enum ArtifactStoreError {
     IO(IOError)
     Config(String)
     InvalidDigest(String)
@@ -47,8 +47,8 @@ pub enum ArtifactStoreError {
 impl IOError -> ArtifactStoreError { ArtifactStoreError.IO(self) }
 
 // A canonical SHA-256 digest used by every local artifact namespace.
-pub struct ArtifactDigest {
-    bytes: [U8]
+struct ArtifactDigest {
+    priv bytes: [U8]
 
     fn hash(bytes: [U8]) -> ArtifactDigest Never! {
         ArtifactDigest{bytes: store_artifact_sha256(bytes)}
@@ -61,7 +61,7 @@ pub struct ArtifactDigest {
         loop index in 0..<32 {
             high :: store_artifact_hex_value(raw[index * 2]) ?? return Err(ArtifactStoreError.InvalidDigest(value))
             low :: store_artifact_hex_value(raw[index * 2 + 1]) ?? return Err(ArtifactStoreError.InvalidDigest(value))
-            &digest.push(U8{(high << 4) | low})
+            &digest.push(U8{((high << 4)).bit_or(low)})
         }
         Ok(ArtifactDigest{bytes: digest})
     }
@@ -74,9 +74,9 @@ pub struct ArtifactDigest {
     }
 }
 
-// SHA-256 of `bytes` through the compiler's canonical hash.
+// SHA-256 of `bytes` through Core's public canonical SHA-256 implementation.
 fn store_artifact_sha256(bytes: [U8]) -> [U8] Never! {
-    mir_sha256_bytes(bytes)
+    crypto.sha256(bytes).as_bytes()
 }
 
 fn store_artifact_hex_value(byte: U8) -> Int? Never! {
@@ -91,9 +91,9 @@ fn store_artifact_hex_value(byte: U8) -> Int? Never! {
 
 // A verified immutable blob reference. The length is part of the handle so a
 // caller cannot accidentally consume a digest with a different payload size.
-pub struct ObjectHandle {
-    digest_value: ArtifactDigest
-    length_value: Int
+struct ObjectHandle {
+    priv digest_value: ArtifactDigest
+    priv length_value: Int
 
     fn new(digest: ArtifactDigest, length: Int) -> ObjectHandle Never! {
         ObjectHandle{digest_value: digest, length_value: length}
@@ -116,8 +116,8 @@ pub struct ObjectHandle {
 // A typed action-cache key. Action records are immutable per key and carry a
 // second digest in their envelope so replacement with another valid record is
 // still detected as corruption.
-pub struct ActionHandle {
-    key_value: ArtifactDigest
+struct ActionHandle {
+    priv key_value: ArtifactDigest
 
     fn new(key: ArtifactDigest) -> ActionHandle Never! { ActionHandle{key_value: key} }
 
@@ -131,8 +131,8 @@ pub struct ActionHandle {
 }
 
 // A validated `lto/<namespace>/` directory name.
-pub struct LTONamespace {
-    name_value: String
+struct LTONamespace {
+    priv name_value: String
 
     fn new(value: String) -> LTONamespace ArtifactStoreError! {
         store_artifact_validate_component(value, "LTO namespace")
@@ -143,7 +143,7 @@ pub struct LTONamespace {
 }
 
 // An artifact that a live build lease pins from pruning.
-pub enum LeaseTarget {
+enum LeaseTarget {
     Blob(ObjectHandle)
     Action(ActionHandle)
     LTO(namespace: LTONamespace, object: ObjectHandle)
@@ -166,7 +166,7 @@ pub enum LeaseTarget {
 }
 
 // The kind of one stored entry, in listing order.
-pub enum ArtifactEntryKind {
+enum ArtifactEntryKind {
     Blob
     Action
     LTO
@@ -182,7 +182,7 @@ pub enum ArtifactEntryKind {
 
 // The storage identity of one entry: its namespace and hex key. Ordered by
 // kind, then namespace, then key (the Rust derived `Ord`).
-pub enum ArtifactEntryKey {
+enum ArtifactEntryKey {
     Blob(String)
     Action(String)
     LTO(namespace: String, key: String)

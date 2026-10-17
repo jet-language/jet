@@ -1,0 +1,79 @@
+// CommonTypes.rs:35-60, Open.rs:88-102; CAbiRoutes.rs:12055-12114.
+// Rust cols/rows are i64, not exact-Int owners. Narrow only at constructors;
+// getters return fresh exact Int owners, while clone/eq/drop use raw words.
+fn ui_carrier_terminal_size_new(cols: I64, rows: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_TERMINAL_SIZE_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_TERMINAL_SIZE_COLS, cols)
+    ui_carrier_store(result + UI_CARRIER_TERMINAL_SIZE_ROWS, rows)
+    result
+}
+#Export(c) fn jet_rt_record_new_terminal_size(m0: I64, m1: I64) -> I64 {
+    cols :: jet_int_owned_to_i64(m0)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    rows :: jet_int_owned_to_i64(m1)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ui_carrier_terminal_size_new(cols, rows)
+}
+#Export(c) fn jet_rt_handle_clone_terminal_size(value: I64) -> I64 {
+    ui_carrier_terminal_size_new(ui_carrier_word(value + UI_CARRIER_TERMINAL_SIZE_COLS), ui_carrier_word(value + UI_CARRIER_TERMINAL_SIZE_ROWS))
+}
+#Export(c) fn jet_rt_handle_drop_terminal_size(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TERMINAL_SIZE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_terminal_size(a: I64, b: I64) -> Bool {
+    ui_carrier_word(a + UI_CARRIER_TERMINAL_SIZE_COLS) == ui_carrier_word(b + UI_CARRIER_TERMINAL_SIZE_COLS) && ui_carrier_word(a + UI_CARRIER_TERMINAL_SIZE_ROWS) == ui_carrier_word(b + UI_CARRIER_TERMINAL_SIZE_ROWS)
+}
+#Export(c) fn jet_rt_record_get_terminal_size_cols(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_CARRIER_TERMINAL_SIZE_COLS)) }
+#Export(c) fn jet_rt_record_get_terminal_size_rows(value: I64) -> I64 { jet_int_owned_from_i64(ui_carrier_word(value + UI_CARRIER_TERMINAL_SIZE_ROWS)) }
+
+// CAbiRoutes.rs:12069 consumes its boxed Size before checking Mode. Copy raw
+// words and free that input before tag rejection, matching the seed ownership.
+// Policy stores Size inline, not a second heap owner (RJ13 layout approval).
+fn ui_carrier_terminal_policy_new(cols: I64, rows: I64, mode: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_TERMINAL_POLICY_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_TERMINAL_POLICY_SIZE + UI_CARRIER_TERMINAL_SIZE_COLS, cols)
+    ui_carrier_store(result + UI_CARRIER_TERMINAL_POLICY_SIZE + UI_CARRIER_TERMINAL_SIZE_ROWS, rows)
+    ui_carrier_store(result + UI_CARRIER_TERMINAL_POLICY_MODE, mode)
+    result
+}
+#Export(c) fn jet_rt_record_new_terminal_policy(m0: I64, m1: I64) -> I64 {
+    cols :: ui_carrier_word(m0 + UI_CARRIER_TERMINAL_SIZE_COLS)
+    rows :: ui_carrier_word(m0 + UI_CARRIER_TERMINAL_SIZE_ROWS)
+    jet_rt_handle_drop_terminal_size(m0)
+    mode :: ui_carrier_checked_tag(m1, I64{2})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    ui_carrier_terminal_policy_new(cols, rows, mode)
+}
+#Export(c) fn jet_rt_handle_clone_terminal_policy(value: I64) -> I64 {
+    ui_carrier_terminal_policy_new(ui_carrier_word(value + UI_CARRIER_TERMINAL_POLICY_SIZE + UI_CARRIER_TERMINAL_SIZE_COLS), ui_carrier_word(value + UI_CARRIER_TERMINAL_POLICY_SIZE + UI_CARRIER_TERMINAL_SIZE_ROWS), ui_carrier_word(value + UI_CARRIER_TERMINAL_POLICY_MODE))
+}
+#Export(c) fn jet_rt_handle_drop_terminal_policy(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TERMINAL_POLICY_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_terminal_policy(a: I64, b: I64) -> Bool {
+    jet_rt_handle_eq_terminal_size(a + UI_CARRIER_TERMINAL_POLICY_SIZE, b + UI_CARRIER_TERMINAL_POLICY_SIZE) && ui_carrier_word(a + UI_CARRIER_TERMINAL_POLICY_MODE) == ui_carrier_word(b + UI_CARRIER_TERMINAL_POLICY_MODE)
+}
+#Export(c) fn jet_rt_record_get_terminal_policy_size(value: I64) -> I64 { jet_rt_handle_clone_terminal_size(value + UI_CARRIER_TERMINAL_POLICY_SIZE) }
+#Export(c) fn jet_rt_record_get_terminal_policy_mode(value: I64) -> I64 { ui_carrier_word(value + UI_CARRIER_TERMINAL_POLICY_MODE) }
+
+#Export(c) fn jet_rt_record_new_text_width(m0: I64, m1: I64) -> I64 {
+    ambiguous :: ui_carrier_checked_tag(m0, I64{2})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    controls :: ui_carrier_checked_tag(m1, I64{2})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(UI_CARRIER_TEXT_WIDTH_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_TEXT_WIDTH_AMBIGUOUS, ambiguous)
+    ui_carrier_store(result + UI_CARRIER_TEXT_WIDTH_CONTROLS, controls)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_text_width(value: I64) -> I64 {
+    jet_rt_record_new_text_width(ui_carrier_word(value + UI_CARRIER_TEXT_WIDTH_AMBIGUOUS), ui_carrier_word(value + UI_CARRIER_TEXT_WIDTH_CONTROLS))
+}
+#Export(c) fn jet_rt_handle_drop_text_width(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TEXT_WIDTH_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_text_width(a: I64, b: I64) -> Bool {
+    ui_carrier_word(a + UI_CARRIER_TEXT_WIDTH_AMBIGUOUS) == ui_carrier_word(b + UI_CARRIER_TEXT_WIDTH_AMBIGUOUS) && ui_carrier_word(a + UI_CARRIER_TEXT_WIDTH_CONTROLS) == ui_carrier_word(b + UI_CARRIER_TEXT_WIDTH_CONTROLS)
+}
+#Export(c) fn jet_rt_record_get_text_width_ambiguous(value: I64) -> I64 { ui_carrier_word(value + UI_CARRIER_TEXT_WIDTH_AMBIGUOUS) }
+#Export(c) fn jet_rt_record_get_text_width_controls(value: I64) -> I64 { ui_carrier_word(value + UI_CARRIER_TEXT_WIDTH_CONTROLS) }

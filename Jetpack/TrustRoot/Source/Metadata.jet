@@ -2,8 +2,10 @@
 // root/targets/snapshot/timestamp documents, the offline keyring, the
 // persistent trusted-root bootstrap pin, and the publication-safe public
 // trust keys.
+// Public-manifest encoding uses the existing InvalidPublisher error channel;
+// a serialization failure never hands partial JSON to the publisher.
 
-pub enum MetadataRole {
+enum MetadataRole {
     Root
     Targets
     Snapshot
@@ -24,9 +26,9 @@ pub enum MetadataRole {
     }
 }
 
-pub struct RoleKeys {
-    pub key_ids: [String]
-    pub threshold: Int
+struct RoleKeys {
+    key_ids: [String]
+    threshold: Int
 
     fn new(key_ids: [String], threshold: Int) -> RoleKeys TrustRootError! {
         if threshold == 0 -> return Err(TrustRootError.InvalidThreshold{detail: "threshold must be >= 1"})
@@ -40,12 +42,12 @@ pub struct RoleKeys {
     }
 }
 
-pub struct Delegation {
-    pub name: String
-    pub role: RoleKeys
+struct Delegation {
+    name: String
+    role: RoleKeys
     // Path prefixes this delegation may sign (TUF path bounds).
-    pub path_prefixes: [String]
-    pub terminating: Bool
+    path_prefixes: [String]
+    terminating: Bool
 
     fn allows_path(self, path: String) -> Bool Never! {
         loop prefix in self.path_prefixes {
@@ -57,60 +59,60 @@ pub struct Delegation {
 
 // Root metadata. `roles` is keyed by role label; `public_key_ids` maps each
 // public key id to its algorithm (secret material stays offline).
-pub struct TUFRootMetadata {
-    pub version: Int
-    pub expires_unix: Int
-    pub consistent_snapshot: Bool
-    pub roles: [String: RoleKeys]
-    pub delegations: [Delegation]
-    pub public_key_ids: [String: String]
+struct TUFRootMetadata {
+    version: Int
+    expires_unix: Int
+    consistent_snapshot: Bool
+    roles: [String: RoleKeys]
+    delegations: [Delegation]
+    public_key_ids: [String: String]
 
     fn role(self, role: MetadataRole) -> RoleKeys? Never! {
         self.roles.get(role.label())
     }
 }
 
-pub struct TargetMeta {
-    pub length: Int
-    pub hashes: [String: String]
-    pub custom: [String: String]
+struct TargetMeta {
+    length: Int
+    hashes: [String: String]
+    custom: [String: String]
 }
 
-pub struct TargetsMetadata {
-    pub version: Int
-    pub expires_unix: Int
-    pub targets: [String: TargetMeta]
+struct TargetsMetadata {
+    version: Int
+    expires_unix: Int
+    targets: [String: TargetMeta]
 }
 
-pub struct SnapshotMetaEntry {
-    pub version: Int
-    pub length: Int
-    pub hashes: [String: String]
+struct SnapshotMetaEntry {
+    version: Int
+    length: Int
+    hashes: [String: String]
 }
 
-pub struct SnapshotMetadata {
-    pub version: Int
-    pub expires_unix: Int
+struct SnapshotMetadata {
+    version: Int
+    expires_unix: Int
     // role name -> version, length, and hashes of that role's signed bytes.
-    pub meta: [String: SnapshotMetaEntry]
+    meta: [String: SnapshotMetaEntry]
 }
 
-pub struct TimestampMetadata {
-    pub version: Int
-    pub expires_unix: Int
-    pub snapshot: SnapshotMetaEntry
+struct TimestampMetadata {
+    version: Int
+    expires_unix: Int
+    snapshot: SnapshotMetaEntry
 }
 
-pub struct SignedMetadata<T> {
-    pub signed: T
-    pub signatures: [TrustSignature]
+struct SignedMetadata<T> {
+    signed: T
+    signatures: [TrustSignature]
 }
 
-pub struct TrustRootPolicy {
-    pub max_metadata_bytes: Int
-    pub max_clock_skew_secs: Int
+struct TrustRootPolicy {
+    max_metadata_bytes: Int
+    max_clock_skew_secs: Int
     // When set, the local clock must stay within skew of this trusted time.
-    pub trusted_unix: Int?
+    trusted_unix: Int?
 
     fn default() -> TrustRootPolicy Never! {
         TrustRootPolicy{max_metadata_bytes: TRUST_DEFAULT_MAX_METADATA_BYTES, max_clock_skew_secs: TRUST_DEFAULT_MAX_CLOCK_SKEW_SECS, trusted_unix: None}
@@ -118,8 +120,8 @@ pub struct TrustRootPolicy {
 }
 
 // Offline keyring for role signing and verification (never a helper).
-pub struct Keyring {
-    keys: [String: TrustKey]
+struct Keyring {
+    priv keys: [String: TrustKey]
 
     fn empty() -> Keyring Never! {
         Keyring{keys: [String: TrustKey]{}}
@@ -146,10 +148,10 @@ pub struct Keyring {
 }
 
 // The persistent trusted-root bootstrap pin under a Jetpack root.
-pub struct RootBootstrap {
-    pub pin_digest: String
-    pub root_version: Int
-    pub consistent_snapshot: Bool
+struct RootBootstrap {
+    pin_digest: String
+    root_version: Int
+    consistent_snapshot: Bool
 
     fn path(roots_dir: String) -> String Never! {
         files.join(files.join(roots_dir, "trust"), "root.bootstrap")
@@ -195,11 +197,11 @@ pub struct RootBootstrap {
 
 // A public endpoint key in the exact NixIndex trust-file format. Distinct
 // from `TrustKey`, which holds an HMAC secret and is never published.
-pub struct PublicTrustKey {
-    pub role: String
-    pub key_id: String
-    pub algorithm: String
-    pub public_key: String
+struct PublicTrustKey {
+    role: String
+    key_id: String
+    algorithm: String
+    public_key: String
 
     // One `key-id:base64-public-key` line; the key decodes to 32 bytes.
     fn from_nix_line(role: String, value: String) -> PublicTrustKey TrustRootError! {
@@ -242,7 +244,7 @@ fn trust_is_test_public_key_id(key_id: String) -> Bool Never! {
 // The public trust-root manifest the site publishes. It records the local
 // bootstrap pin when one exists but never a `TrustKey` secret; an empty key
 // list is intentional while the production key ceremony is pending.
-pub fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
+fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, keys: [PublicTrustKey]) -> String TrustRootError! {
     if domain == "" || trust_has_control(domain) || trust_has_inner_space(domain) -> return Err(TrustRootError.InvalidKey{detail: "public trust manifest domain is empty or contains whitespace"})
     sorted := keys
     &sorted.sort_by(key -> key.role)
@@ -252,33 +254,34 @@ pub fn trust_public_trust_manifest(domain: String, bootstrap: RootBootstrap?, ke
     status :: if sorted.len() == 0 -> "awaiting-key-ceremony" else -> "prepared"
     root :: if bootstrap == {
         .Val(pin) -> {
-            fields := [String: DataTree]{}
-            fields["protocol"] = DataTree.Text("jet-tuf-root-v1")
-            fields["digest"] = DataTree.Text(pin.pin_digest)
-            fields["version"] = DataTree.Int(pin.root_version)
-            fields["consistent_snapshot"] = DataTree.Bool(pin.consistent_snapshot)
-            DataTree.Object(fields)
+            fields := [String: Dyn]{}
+            fields["protocol"] = Dyn.Text("jet-tuf-root-v1")
+            fields["digest"] = Dyn.Text(pin.pin_digest)
+            fields["version"] = Dyn.Int(pin.root_version)
+            fields["consistent_snapshot"] = Dyn.Bool(pin.consistent_snapshot)
+            Dyn.Object(fields)
         }
-        .None -> DataTree.Null
+        .None -> Dyn.Null
     }
-    rendered := [DataTree]{}
+    rendered := [Dyn]{}
     loop key in sorted {
-        fields := [String: DataTree]{}
-        fields["role"] = DataTree.Text(key.role)
-        fields["path"] = DataTree.Text(key.path_for_publication())
-        fields["key_id"] = DataTree.Text(key.key_id)
-        fields["algorithm"] = DataTree.Text(key.algorithm)
-        fields["public_key"] = DataTree.Text(key.public_key)
-        &rendered.push(DataTree.Object(fields))
+        fields := [String: Dyn]{}
+        fields["role"] = Dyn.Text(key.role)
+        fields["path"] = Dyn.Text(key.path_for_publication())
+        fields["key_id"] = Dyn.Text(key.key_id)
+        fields["algorithm"] = Dyn.Text(key.algorithm)
+        fields["public_key"] = Dyn.Text(key.public_key)
+        &rendered.push(Dyn.Object(fields))
     }
-    manifest := [String: DataTree]{}
-    manifest["schema"] = DataTree.Int(1)
-    manifest["domain"] = DataTree.Text(~domain)
-    manifest["status"] = DataTree.Text(status)
+    manifest := [String: Dyn]{}
+    manifest["schema"] = Dyn.Int(1)
+    manifest["domain"] = Dyn.Text(domain.copy())
+    manifest["status"] = Dyn.Text(status)
     manifest["root"] = root
-    manifest["keys"] = DataTree.Array(rendered)
-    manifest["rotation"] = DataTree.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
-    Ok("{json.to_string(DataTree.Object(manifest))}\n")
+    manifest["keys"] = Dyn.Array(rendered)
+    manifest["rotation"] = Dyn.Text("offline threshold root rotation; publish a new manifest only after the old root verifies the new root")
+    text :: json.to_string(Dyn.Object(manifest)) ?? return Err(TrustRootError.InvalidPublisher{detail: err.reason})
+    Ok("{text}\n")
 }
 
 // Rust `str::parse::<u64>`: ASCII digits only, no sign.

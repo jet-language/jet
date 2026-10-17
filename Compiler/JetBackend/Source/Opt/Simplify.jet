@@ -1,0 +1,805 @@
+// O1 scalar simplification of one LIR function (Compiler/JetBackend/Docs/O1.md):
+// copy and move propagation, constant folding, algebraic identities, branch
+// folding, unreachable-block removal, empty-block threading, straight-line
+// block merging and dead-code elimination, repeated until nothing changes
+// (bounded). The result is a valid LIR function: every remaining value is
+// defined once and the value table is renumbered densely.
+//
+// Folding follows the LIR operator definitions in LIR.jet exactly: integer
+// words are 64-bit two's complement, and a fold that would need wrapping (an
+// exact result outside the signed 64-bit range) is left to the machine.
+// Float operations are never folded (signed zeros, NaN payloads).
+
+OPT_I64_MIN :: prep { -9223372036854775808 }
+OPT_I64_MAX :: prep { 9223372036854775807 }
+
+// Per-value facts of one sweep: `alias[v]` is the value v was replaced by
+// (-1 for none); `known[v]` marks a value defined by Const with `consts[v]`.
+struct OptFacts {
+    alias: [Int]
+    known: [Bool]
+    consts: [Int]
+}
+
+fn opt_facts(count: Int) -> OptFacts Never! {
+    facts := OptFacts{alias: [Int]{}, known: [Bool]{}, consts: [Int]{}}
+    loop _ in 0..<count {
+        &facts.alias.push(-1)
+        &facts.known.push(false)
+        &facts.consts.push(0)
+    }
+    facts
+}
+
+fn opt_root(facts: OptFacts, value: Int) -> Int Never! {
+    at := value
+    loop facts.alias[at] >= 0 -> at = facts.alias[at]
+    at
+}
+
+fn opt_id(facts: OptFacts, value: LIRValueID) -> LIRValueID Never! {
+    LIRValueID{value: opt_root(facts, value.value)}
+}
+
+fn opt_ids(facts: OptFacts, values: [LIRValueID]) -> [LIRValueID] Never! {
+    out := [LIRValueID]{}
+    loop value in values -> &out.push(opt_id(facts, value))
+    out
+}
+
+fn opt_target(facts: OptFacts, target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    LIRJumpTarget{block: target.block, args: opt_ids(facts, target.args)}
+}
+
+// `inst` with every use replaced by its alias root.
+fn opt_rename_inst(facts: OptFacts, inst: LIRInst) -> LIRInst Never! {
+    if inst == {
+        .Const(_, _) -> inst
+        .Binary(dst, op, left, right) -> LIRInst.Binary{dst: dst, op: op, left: opt_id(facts, left), right: opt_id(facts, right)}
+        .Compare(dst, condition, left, right) -> LIRInst.Compare{dst: dst, condition: condition, left: opt_id(facts, left), right: opt_id(facts, right)}
+        .Move(dst, src) -> LIRInst.Move{dst: dst, src: opt_id(facts, src)}
+        // Consuming conversion: retain the destination's new drop obligation.
+        .Reown(dst, src) -> LIRInst.Reown{dst: dst, src: opt_id(facts, src)}
+        .Copy(dst, src) -> LIRInst.Copy{dst: dst, src: opt_id(facts, src)}
+        // Pure, but never an alias: the destination may change ABI class.
+        .Bitcast(dst, src) -> LIRInst.Bitcast{dst: dst, src: opt_id(facts, src)}
+        .Call(dst, signature, callee, args) -> {
+            renamed :: if callee == {
+                .Value(target) -> LIRCallee.Value{value: opt_id(facts, target)}
+                else -> callee
+            }
+            LIRInst.Call{dst: dst, signature: signature, callee: renamed, args: opt_ids(facts, args)}
+        }
+        .InlineAsm(dst, args, regs, result, code) -> LIRInst.InlineAsm{dst: dst, args: opt_ids(facts, args), regs: regs, result: result, code: code}
+        .Drop(value) -> LIRInst.Drop{value: opt_id(facts, value)}
+        .Overflows(dst, op, left, right) -> LIRInst.Overflows{dst: dst, op: op, left: opt_id(facts, left), right: opt_id(facts, right)}
+        .Load(dst, base, offset) -> LIRInst.Load{dst: dst, base: opt_id(facts, base), offset: offset}
+        .PointerAdd(dst, base, offset) -> LIRInst.PointerAdd{dst: dst, base: opt_id(facts, base), offset: opt_id(facts, offset)}
+        .Store(base, offset, value) -> LIRInst.Store{base: opt_id(facts, base), offset: offset, value: opt_id(facts, value)}
+        .DataAddress(_, _) -> inst
+        .FunctionAddress(_, _) -> inst
+        .Convert(dst, src) -> LIRInst.Convert{dst: dst, src: opt_id(facts, src)}
+        .StackSlot(_, _, _) -> inst
+    }
+}
+
+fn opt_rename_terminator(facts: OptFacts, terminator: LIRTerminator) -> LIRTerminator Never! {
+    if terminator == {
+        .Jump(target) -> LIRTerminator.Jump{target: opt_target(facts, target)}
+        .Branch(condition, then_target, else_target) -> LIRTerminator.Branch{condition: opt_id(facts, condition), then_target: opt_target(facts, then_target), else_target: opt_target(facts, else_target)}
+        .Return(value) -> {
+            if value == .Val(returned) -> return LIRTerminator.Return{value: Val(opt_id(facts, returned))}
+            terminator
+        }
+        .Unreachable -> terminator
+    }
+}
+
+fn opt_fits(value: Int) -> Bool Never! {
+    value >= OPT_I64_MIN && value <= OPT_I64_MAX
+}
+
+// Truncating signed division of two words; None when the machine traps
+// (zero divisor) or the quotient leaves the word (MIN / -1).
+fn opt_div(left: Int, right: Int) -> Int? {
+    if right == 0 -> return None
+    if left == OPT_I64_MIN && right == -1 -> return None
+    magnitude :: (if left < 0 -> 0 - left else -> left) /% (if right < 0 -> 0 - right else -> right)
+    if (left < 0) != (right < 0) -> return Val(0 - magnitude)
+    Val(magnitude)
+}
+
+// The folded word of `left op right`, or None when it is not folded.
+fn opt_fold_binary(op: LIRBinaryOp, left: Int, right: Int) -> Int? {
+    if op == {
+        .Add | .UAdd -> {
+            sum :: left + right
+            if opt_fits(sum) -> return Val(sum)
+            None
+        }
+        .Sub | .USub -> {
+            difference :: left - right
+            if opt_fits(difference) -> return Val(difference)
+            None
+        }
+        .Mul | .UMul -> {
+            product :: left * right
+            if opt_fits(product) -> return Val(product)
+            None
+        }
+        .Div -> opt_div(left, right)
+        .Rem -> {
+            quotient :: opt_div(left, right) ?? return None
+            Val(left - quotient * right)
+        }
+        .UDiv -> {
+            if left < 0 || right <= 0 -> return None
+            Val(left /% right)
+        }
+        .URem -> {
+            if left < 0 || right <= 0 -> return None
+            Val(left - (left /% right) * right)
+        }
+        .And -> Val(left.bit_and(right))
+        .Or -> Val(left.bit_or(right))
+        .Xor -> Val(left.bit_xor(right))
+        .Shl -> {
+            if right < 0 || right > 63 -> return None
+            shifted :: left << right
+            if opt_fits(shifted) -> return Val(shifted)
+            None
+        }
+        .Shr -> {
+            if right < 0 || right > 63 -> return None
+            Val(left >> right)
+        }
+        .UShr -> {
+            if right < 0 || right > 63 || left < 0 -> return None
+            Val(left >> right)
+        }
+    }
+}
+
+// Whether `left op right` overflows, as Overflows defines it; None when not folded.
+fn opt_fold_overflows(op: LIRBinaryOp, left: Int, right: Int) -> Bool? {
+    if op == {
+        .Add -> Val(!opt_fits(left + right))
+        .Sub -> Val(!opt_fits(left - right))
+        .Mul -> Val(!opt_fits(left * right))
+        .UAdd -> {
+            if left < 0 || right < 0 -> return None
+            // Both below 2^63: the unsigned sum stays below 2^64.
+            Val(false)
+        }
+        .USub -> {
+            if left < 0 || right < 0 -> return None
+            Val(left < right)
+        }
+        .UMul -> {
+            if left < 0 || right < 0 -> return None
+            // Both below 2^63; the unsigned product overflows from 2^64 on.
+            Val(left * right > 2 * OPT_I64_MAX + 1)
+        }
+        else -> None
+    }
+}
+
+// Unsigned order of two words given as signed values.
+fn opt_unsigned_less(left: Int, right: Int) -> Bool Never! {
+    if (left < 0) == (right < 0) -> return left < right
+    right < 0
+}
+
+fn opt_fold_compare(condition: LIRCondition, left: Int, right: Int) -> Bool Never! {
+    if condition == {
+        .Eq -> left == right
+        .Ne -> left != right
+        .Lt -> left < right
+        .Le -> left <= right
+        .Gt -> left > right
+        .Ge -> left >= right
+        .ULt -> opt_unsigned_less(left, right)
+        .ULe -> !opt_unsigned_less(right, left)
+        .UGt -> opt_unsigned_less(right, left)
+        .UGe -> !opt_unsigned_less(left, right)
+    }
+}
+
+fn opt_is_word(function: LIRFunction, value: LIRValueID) -> Bool Never! {
+    function.values[value.value].layout == lir_layout_word()
+}
+
+fn opt_bool(flag: Bool) -> Int Never! { if flag -> 1 else -> 0 }
+
+// What one instruction becomes after folding: the instruction to keep (None to
+// drop it) plus, when dropped, the value its result is replaced by.
+struct OptRewrite {
+    inst: LIRInst?
+    replaced_by: Int
+}
+
+fn opt_keep(inst: LIRInst) -> OptRewrite Never! { OptRewrite{inst: Val(inst), replaced_by: -1} }
+
+fn opt_replace(by: LIRValueID) -> OptRewrite Never! { OptRewrite{inst: None, replaced_by: by.value} }
+
+fn opt_const(dst: LIRValueID, value: Int) -> OptRewrite Never! { opt_keep(LIRInst.Const{dst: dst, value: value}) }
+
+// Integer identities on word operands (never Float: `x + 0.0` is not `x`).
+fn opt_identity(facts: OptFacts, dst: LIRValueID, op: LIRBinaryOp, left: LIRValueID, right: LIRValueID) -> OptRewrite? {
+    right_known :: facts.known[right.value]
+    left_known :: facts.known[left.value]
+    r :: facts.consts[right.value]
+    l :: facts.consts[left.value]
+    if op == {
+        .Add | .UAdd | .Or | .Xor -> {
+            if right_known && r == 0 -> return Val(opt_replace(left))
+            if left_known && l == 0 -> return Val(opt_replace(right))
+        }
+        .Sub | .USub | .Shl | .Shr | .UShr -> {
+            if right_known && r == 0 -> return Val(opt_replace(left))
+        }
+        .Mul | .UMul -> {
+            if right_known && r == 1 -> return Val(opt_replace(left))
+            if left_known && l == 1 -> return Val(opt_replace(right))
+            if (right_known && r == 0) || (left_known && l == 0) -> return Val(opt_const(dst, 0))
+        }
+        .And -> {
+            if right_known && r == -1 -> return Val(opt_replace(left))
+            if left_known && l == -1 -> return Val(opt_replace(right))
+            if (right_known && r == 0) || (left_known && l == 0) -> return Val(opt_const(dst, 0))
+        }
+        .Div | .UDiv -> {
+            if right_known && r == 1 -> return Val(opt_replace(left))
+        }
+        else -> {}
+    }
+    if left == right {
+        if op == .Sub || op == .USub || op == .Xor -> return Val(opt_const(dst, 0))
+        if op == .And || op == .Or -> return Val(opt_replace(left))
+    }
+    None
+}
+
+// The defining instruction of every value (block index and instruction index; -1 for parameters).
+struct OptDefs {
+    insts: [LIRInst?]
+}
+
+fn opt_defs(function: LIRFunction) -> OptDefs Never! {
+    insts := [LIRInst?]{}
+    loop _ in function.values -> &insts.push(None)
+    loop block in function.blocks {
+        loop inst in block.insts {
+            if lir_inst_def(inst) == .Val(dst) -> insts[dst.value] = Val(inst)
+        }
+    }
+    OptDefs{insts: insts}
+}
+
+// `Compare(Ge|Lt, Or(x, c), 0)` with a non-negative constant c tests the sign
+// of x alone: or-ing a word whose sign bit is clear never changes the sign.
+// Exact Int lowering builds this shape for the inline test of a variable and
+// a constant operand.
+fn opt_sign_test(facts: OptFacts, defs: OptDefs, function: LIRFunction, dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) -> OptRewrite? {
+    if condition != .Ge && condition != .Lt -> return None
+    if !facts.known[right.value] || facts.consts[right.value] != 0 -> return None
+    if !opt_is_word(function, left) -> return None
+    definition :: defs.insts[left.value] ?? return None
+    if definition == .Binary(_, op, a, b) {
+        if op != .Or -> return None
+        if facts.known[b.value] && facts.consts[b.value] >= 0 -> return Val(opt_keep(LIRInst.Compare{dst: dst, condition: condition, left: opt_id(facts, a), right: right}))
+        if facts.known[a.value] && facts.consts[a.value] >= 0 -> return Val(opt_keep(LIRInst.Compare{dst: dst, condition: condition, left: opt_id(facts, b), right: right}))
+    }
+    None
+}
+
+fn opt_rewrite(facts: OptFacts, defs: OptDefs, function: LIRFunction, inst: LIRInst) -> OptRewrite Never! {
+    if inst == {
+        .Move(_, src) -> return opt_replace(src)
+        .Copy(_, src) -> return opt_replace(src)
+        .Binary(dst, op, left, right) -> {
+            if !opt_is_word(function, dst) -> return opt_keep(inst)
+            if facts.known[left.value] && facts.known[right.value] {
+                if opt_fold_binary(op, facts.consts[left.value], facts.consts[right.value]) == .Val(value) -> return opt_const(dst, value)
+            }
+            if opt_identity(facts, dst, op, left, right) == .Val(rewrite) -> return rewrite
+            opt_keep(inst)
+        }
+        .Compare(dst, condition, left, right) -> {
+            layout :: function.values[left.value].layout
+            if layout.class == .Float -> return opt_keep(inst)
+            if facts.known[left.value] && facts.known[right.value] -> return opt_const(dst, opt_bool(opt_fold_compare(condition, facts.consts[left.value], facts.consts[right.value])))
+            if left == right && layout.class != .Float {
+                if condition == .Eq || condition == .Le || condition == .Ge || condition == .ULe || condition == .UGe -> return opt_const(dst, 1)
+                return opt_const(dst, 0)
+            }
+            if opt_sign_test(facts, defs, function, dst, condition, left, right) == .Val(rewrite) -> return rewrite
+            opt_keep(inst)
+        }
+        .Overflows(dst, op, left, right) -> {
+            if facts.known[left.value] && facts.known[right.value] {
+                if opt_fold_overflows(op, facts.consts[left.value], facts.consts[right.value]) == .Val(flag) -> return opt_const(dst, opt_bool(flag))
+            }
+            if facts.known[right.value] && facts.consts[right.value] == 0 && (op == .Add || op == .Sub || op == .UAdd || op == .USub) -> return opt_const(dst, 0)
+            opt_keep(inst)
+        }
+        else -> opt_keep(inst)
+    }
+}
+
+// One folding sweep over every block in order. Returns whether anything changed.
+fn opt_fold_sweep(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
+    changed := false
+    defs :: opt_defs(function)
+    blocks := [LIRBlock]{}
+    loop block in function.blocks {
+        insts := [LIRInst]{}
+        lines := [Int]{}
+        loop (index, original) in block.insts {
+            inst :: opt_rename_inst(facts, original)
+            if inst != original -> changed = true
+            rewrite :: opt_rewrite(facts, defs, function, inst)
+            if rewrite.inst == .Val(kept) {
+                if kept != inst -> changed = true
+                if kept == .Const(dst, value) {
+                    facts.known[dst.value] = true
+                    facts.consts[dst.value] = value
+                }
+                &insts.push(kept)
+                &lines.push(opt_debug_line(block, index))
+            } else {
+                changed = true
+                if lir_inst_def(inst) == .Val(dst) -> facts.alias[dst.value] = opt_root(facts, rewrite.replaced_by)
+            }
+        }
+        terminator := opt_rename_terminator(facts, block.terminator)
+        if terminator == .Branch(condition, then_target, else_target) {
+            if facts.known[condition.value] {
+                terminator = LIRTerminator.Jump{target: if facts.consts[condition.value] != 0 -> then_target else -> else_target}
+            } else {
+                if then_target == else_target -> terminator = LIRTerminator.Jump{target: then_target}
+            }
+        }
+        if terminator != block.terminator -> changed = true
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: terminator, lines: lines})
+    }
+    function.blocks = blocks
+    changed
+}
+
+// Block id -> index in `function.blocks`.
+fn opt_block_rows(function: LIRFunction) -> [Int:Int] Never! {
+    rows := [Int:Int]{}
+    loop (index, block) in function.blocks {
+        if rows.get(block.id.value) == None -> &rows.add(block.id.value, index).drop("block ids are unique (LIR lint)")
+    }
+    rows
+}
+
+// Keep the blocks reachable from the entry, in their order.
+fn opt_drop_unreachable(function: &LIRFunction) -> Bool Never! {
+    rows :: opt_block_rows(function)
+    reached := [Bool]{}
+    loop _ in function.blocks -> &reached.push(false)
+    reached[0] = true
+    pending := [Int]{0}
+    cursor := 0
+    loop cursor < pending.len() {
+        current :: pending[cursor].copy()
+        cursor += 1
+        loop target in lir_terminator_targets(function.blocks[current].terminator) {
+            row :: rows.get(target.block.value) ?? -1
+            if row >= 0 && !reached[row] {
+                reached[row] = true
+                &pending.push(row)
+            }
+        }
+    }
+    if pending.len() == function.blocks.len() -> return false
+    kept := [LIRBlock]{}
+    loop (index, block) in function.blocks {
+        if reached[index] -> &kept.push(block)
+    }
+    function.blocks = kept
+    true
+}
+
+fn opt_predecessor_counts(function: LIRFunction, rows: [Int:Int]) -> [Int] Never! {
+    counts := [Int]{}
+    loop _ in function.blocks -> &counts.push(0)
+    loop block in function.blocks {
+        loop target in lir_terminator_targets(block.terminator) {
+            row :: rows.get(target.block.value) ?? -1
+            if row >= 0 -> counts[row] = counts[row] + 1
+        }
+    }
+    counts
+}
+
+// An edge into a block with no instructions that only jumps on goes straight
+// to that block's target; its parameters become the edge's own arguments.
+// A value the empty block passes through dominates it, hence every
+// predecessor's jump as well. A parameter of the empty block that any other
+// block reads directly (the empty block dominates the reader) refuses the
+// bypass: that read would lose its definition (`outside`, opt_outside_uses).
+fn opt_thread_target(function: LIRFunction, rows: [Int:Int], outside: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    row :: rows.get(target.block.value) ?? return target.copy()
+    if row == 0 -> return target.copy()
+    hop :: function.blocks[row]
+    if hop.insts.len() != 0 -> return target.copy()
+    loop param in hop.params { if outside[param.value] -> return target.copy() }
+    if hop.terminator == .Jump(onward) {
+        if onward.block == hop.id -> return target.copy()
+        args := [LIRValueID]{}
+        loop arg in onward.args {
+            mapped := arg
+            loop (position, param) in hop.params {
+                if param == arg -> mapped = target.args[position]
+            }
+            &args.push(mapped)
+        }
+        return LIRJumpTarget{block: onward.block, args: args}
+    }
+    target.copy()
+}
+
+// Values read by an instruction or terminator of a block other than the one
+// whose parameter they are (every non-parameter use counts).
+fn opt_outside_uses(function: LIRFunction) -> [Bool] Never! {
+    owner := [Int]{}
+    outside := [Bool]{}
+    loop _ in function.values {
+        &owner.push(-1)
+        &outside.push(false)
+    }
+    loop (index, block) in function.blocks {
+        loop param in block.params -> owner[param.value] = index
+    }
+    loop (index, block) in function.blocks {
+        loop inst in block.insts {
+            loop used in lir_inst_uses(inst) { if owner[used.value] != index -> outside[used.value] = true }
+        }
+        loop used in lir_terminator_uses(block.terminator) { if owner[used.value] != index -> outside[used.value] = true }
+    }
+    outside
+}
+
+fn opt_thread(function: &LIRFunction) -> Bool Never! {
+    rows :: opt_block_rows(function)
+    outside :: opt_outside_uses(function)
+    changed := false
+    blocks := [LIRBlock]{}
+    loop block in function.blocks {
+        terminator :: if block.terminator == {
+            .Jump(target) -> LIRTerminator.Jump{target: opt_thread_target(function, rows, outside, target)}
+            .Branch(condition, then_target, else_target) -> {
+                then_next :: opt_thread_target(function, rows, outside, then_target)
+                else_next :: opt_thread_target(function, rows, outside, else_target)
+                if then_next == else_next -> LIRTerminator.Jump{target: then_next} else -> LIRTerminator.Branch{condition: condition, then_target: then_next, else_target: else_next}
+            }
+            else -> block.terminator
+        }
+        if terminator != block.terminator -> changed = true
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines})
+    }
+    function.blocks = blocks
+    changed
+}
+
+// A block that jumps to a block with no other predecessor absorbs it: the
+// successor's parameters become aliases of the jump's arguments.
+fn opt_merge(function: &LIRFunction, facts: &OptFacts) -> Bool Never! {
+    changed := false
+    loop {
+        rows :: opt_block_rows(function)
+        counts :: opt_predecessor_counts(function, rows)
+        merged := false
+        loop (index, block) in function.blocks {
+            if merged -> break
+            if block.terminator == .Jump(target) {
+                row :: rows.get(target.block.value) ?? -1
+                if row > 0 && row != index && counts[row] == 1 {
+                    successor :: function.blocks[row]
+                    loop (position, param) in successor.params -> facts.alias[param.value] = opt_root(facts, target.args[position].value)
+                    insts := block.insts
+                    loop inst in successor.insts -> &insts.push(inst)
+                    lines := [Int]{}
+                    loop at in 0..<block.insts.len() -> &lines.push(opt_debug_line(block, at))
+                    loop at in 0..<(successor.insts.len() + 1) -> &lines.push(opt_debug_line(successor, at))
+                    function.blocks[index] = LIRBlock{id: block.id, params: block.params, insts: insts, terminator: successor.terminator, lines: lines}
+                    kept := [LIRBlock]{}
+                    loop (other, candidate) in function.blocks {
+                        if other != row -> &kept.push(candidate)
+                    }
+                    function.blocks = kept
+                    merged = true
+                }
+            }
+        }
+        if !merged -> break
+        changed = true
+    }
+    changed
+}
+
+fn opt_inst_has_effect(inst: LIRInst) -> Bool Never! {
+    if inst == {
+        .Call(_, _, _, _) | .InlineAsm(_, _, _, _, _) -> true
+        .Drop(_) -> true
+        .Store(_, _, _) -> true
+        .Reown(_, _) -> true
+        else -> false
+    }
+}
+
+// Remove instructions whose results nothing uses and parameters no live use
+// reads (with their arguments on every incoming edge; entry parameters stay).
+fn opt_dead_code(function: &LIRFunction) -> Bool Never! {
+    live := [Bool]{}
+    loop _ in function.values -> &live.push(false)
+    rows :: opt_block_rows(function)
+    defs :: opt_defs(function)
+    loop param in function.blocks[0].params -> live[param.value] = true
+    pending := [Int]{}
+    loop block in function.blocks {
+        loop inst in block.insts {
+            if opt_inst_has_effect(inst) {
+                loop used in lir_inst_uses(inst) {
+                    if !live[used.value] {
+                        live[used.value] = true
+                        &pending.push(used.value)
+                    }
+                }
+            }
+        }
+        if block.terminator == {
+            .Branch(condition, _, _) -> {
+                if !live[condition.value] {
+                    live[condition.value] = true
+                    &pending.push(condition.value)
+                }
+            }
+            .Return(value) -> {
+                if value == .Val(returned) {
+                    if !live[returned.value] {
+                        live[returned.value] = true
+                        &pending.push(returned.value)
+                    }
+                }
+            }
+            else -> {}
+        }
+    }
+    // Parameter p of block b at `position`: every edge into b makes its
+    // argument at `position` live once p is.
+    param_block := [Int]{}
+    param_position := [Int]{}
+    loop _ in function.values {
+        &param_block.push(-1)
+        &param_position.push(-1)
+    }
+    loop (index, block) in function.blocks {
+        loop (position, param) in block.params {
+            param_block[param.value] = index
+            param_position[param.value] = position
+        }
+    }
+    incoming := [[LIRJumpTarget]]{}
+    loop _ in function.blocks -> &incoming.push([LIRJumpTarget]{})
+    loop block in function.blocks {
+        loop target in lir_terminator_targets(block.terminator) {
+            row :: rows.get(target.block.value) ?? -1
+            if row >= 0 -> &incoming[row].push(target)
+        }
+    }
+    cursor := 0
+    loop cursor < pending.len() {
+        value :: pending[cursor].copy()
+        cursor += 1
+        if defs.insts[value] == .Val(definition) {
+            loop used in lir_inst_uses(definition) {
+                if !live[used.value] {
+                    live[used.value] = true
+                    &pending.push(used.value)
+                }
+            }
+        }
+        if param_block[value] >= 0 {
+            loop edge in incoming[param_block[value]] {
+                arg :: edge.args[param_position[value]]
+                if !live[arg.value] {
+                    live[arg.value] = true
+                    &pending.push(arg.value)
+                }
+            }
+        }
+    }
+    changed := false
+    blocks := [LIRBlock]{}
+    loop (index, block) in function.blocks {
+        params := [LIRValueID]{}
+        loop param in block.params {
+            if index == 0 || live[param.value] {
+                &params.push(param)
+            } else {
+                changed = true
+            }
+        }
+        insts := [LIRInst]{}
+        lines := [Int]{}
+        loop (at, inst) in block.insts {
+            keep := opt_inst_has_effect(inst)
+            if !keep {
+                if lir_inst_def(inst) == .Val(dst) -> keep = live[dst.value]
+            }
+            if keep {
+                &insts.push(inst)
+                &lines.push(opt_debug_line(block, at))
+            } else {
+                changed = true
+            }
+        }
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: block.terminator, lines: lines})
+    }
+    // Drop the arguments of removed parameters on every edge.
+    rewired := [LIRBlock]{}
+    loop block in blocks {
+        terminator :: if block.terminator == {
+            .Jump(target) -> LIRTerminator.Jump{target: opt_live_args(function, rows, live, target)}
+            .Branch(condition, then_target, else_target) -> LIRTerminator.Branch{condition: condition, then_target: opt_live_args(function, rows, live, then_target), else_target: opt_live_args(function, rows, live, else_target)}
+            else -> block.terminator
+        }
+        &rewired.push(LIRBlock{id: block.id, params: block.params, insts: block.insts, terminator: terminator, lines: block.lines})
+    }
+    function.blocks = rewired
+    changed
+}
+
+// `target` without the arguments of its block's dead parameters; `function`
+// still holds the parameter lists from before the removal.
+fn opt_live_args(function: LIRFunction, rows: [Int:Int], live: [Bool], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    row :: rows.get(target.block.value) ?? return target.copy()
+    if row == 0 -> return target.copy()
+    args := [LIRValueID]{}
+    loop (position, param) in function.blocks[row].params {
+        if live[param.value] -> &args.push(target.args[position])
+    }
+    LIRJumpTarget{block: target.block, args: args}
+}
+
+// Renumber the defined values densely, in their old order.
+fn opt_compact(function: LIRFunction) -> LIRFunction Never! {
+    defined := [Bool]{}
+    loop _ in function.values -> &defined.push(false)
+    loop block in function.blocks {
+        loop param in block.params -> defined[param.value] = true
+        loop inst in block.insts {
+            if lir_inst_def(inst) == .Val(dst) -> defined[dst.value] = true
+        }
+    }
+    map := [Int]{}
+    loop _ in function.values -> &map.push(-1)
+    values := [LIRValue]{}
+    loop (index, value) in function.values {
+        if defined[index] {
+            id :: LIRValueID{value: values.len()}
+            &values.push(LIRValue{id: id, layout: value.layout, drop: value.drop, jet_type: value.jet_type})
+            map[index] = id.value
+        }
+    }
+    blocks := [LIRBlock]{}
+    loop block in function.blocks {
+        params := [LIRValueID]{}
+        loop param in block.params -> &params.push(opt_n(map, param))
+        insts := [LIRInst]{}
+        loop inst in block.insts -> &insts.push(opt_renumber_inst(map, inst))
+        &blocks.push(LIRBlock{id: block.id, params: params, insts: insts, terminator: opt_renumber_terminator(map, block.terminator), lines: block.lines})
+    }
+    debug := function.debug
+    bindings := [LIRDebugBinding]{}
+    loop binding in debug.bindings {
+        if map[binding.value.value] >= 0 -> &bindings.push(LIRDebugBinding{variable: binding.variable, value: opt_n(map, binding.value)})
+    }
+    debug.bindings = bindings
+    LIRFunction{id: function.id, name: function.name, signature: function.signature, values: values, blocks: blocks, debug: debug}
+}
+
+fn opt_n(map: [Int], value: LIRValueID) -> LIRValueID Never! { LIRValueID{value: map[value.value]} }
+
+fn opt_ns(map: [Int], values: [LIRValueID]) -> [LIRValueID] Never! {
+    out := [LIRValueID]{}
+    loop value in values -> &out.push(opt_n(map, value))
+    out
+}
+
+fn opt_renumber_inst(map: [Int], inst: LIRInst) -> LIRInst Never! {
+    if inst == {
+        .Const(dst, value) -> LIRInst.Const{dst: opt_n(map, dst), value: value}
+        .Binary(dst, op, left, right) -> LIRInst.Binary{dst: opt_n(map, dst), op: op, left: opt_n(map, left), right: opt_n(map, right)}
+        .Compare(dst, condition, left, right) -> LIRInst.Compare{dst: opt_n(map, dst), condition: condition, left: opt_n(map, left), right: opt_n(map, right)}
+        .Move(dst, src) -> LIRInst.Move{dst: opt_n(map, dst), src: opt_n(map, src)}
+        .Reown(dst, src) -> LIRInst.Reown{dst: opt_n(map, dst), src: opt_n(map, src)}
+        .Copy(dst, src) -> LIRInst.Copy{dst: opt_n(map, dst), src: opt_n(map, src)}
+        .Bitcast(dst, src) -> LIRInst.Bitcast{dst: opt_n(map, dst), src: opt_n(map, src)}
+        .Call(dst, signature, callee, args) -> {
+            result :: if dst == .Val(value) -> Val(opt_n(map, value)) else -> None
+            renamed :: if callee == {
+                .Value(target) -> LIRCallee.Value{value: opt_n(map, target)}
+                else -> callee
+            }
+            LIRInst.Call{dst: result, signature: signature, callee: renamed, args: opt_ns(map, args)}
+        }
+        .InlineAsm(dst, args, regs, result, code) -> {
+            output :: if dst == .Val(value) -> Val(opt_n(map, value)) else -> None
+            LIRInst.InlineAsm{dst: output, args: opt_ns(map, args), regs: regs, result: result, code: code}
+        }
+        .Drop(value) -> LIRInst.Drop{value: opt_n(map, value)}
+        .Overflows(dst, op, left, right) -> LIRInst.Overflows{dst: opt_n(map, dst), op: op, left: opt_n(map, left), right: opt_n(map, right)}
+        .Load(dst, base, offset) -> LIRInst.Load{dst: opt_n(map, dst), base: opt_n(map, base), offset: offset}
+        .PointerAdd(dst, base, offset) -> LIRInst.PointerAdd{dst: opt_n(map, dst), base: opt_n(map, base), offset: opt_n(map, offset)}
+        .Store(base, offset, value) -> LIRInst.Store{base: opt_n(map, base), offset: offset, value: opt_n(map, value)}
+        .DataAddress(dst, data) -> LIRInst.DataAddress{dst: opt_n(map, dst), data: data}
+        .FunctionAddress(dst, target) -> LIRInst.FunctionAddress{dst: opt_n(map, dst), function: target}
+        .Convert(dst, src) -> LIRInst.Convert{dst: opt_n(map, dst), src: opt_n(map, src)}
+        .StackSlot(dst, size, align) -> LIRInst.StackSlot{dst: opt_n(map, dst), size: size, align: align}
+    }
+}
+
+fn opt_renumber_target(map: [Int], target: LIRJumpTarget) -> LIRJumpTarget Never! {
+    LIRJumpTarget{block: target.block, args: opt_ns(map, target.args)}
+}
+
+fn opt_renumber_terminator(map: [Int], terminator: LIRTerminator) -> LIRTerminator Never! {
+    if terminator == {
+        .Jump(target) -> LIRTerminator.Jump{target: opt_renumber_target(map, target)}
+        .Branch(condition, then_target, else_target) -> LIRTerminator.Branch{condition: opt_n(map, condition), then_target: opt_renumber_target(map, then_target), else_target: opt_renumber_target(map, else_target)}
+        .Return(value) -> {
+            if value == .Val(returned) -> return LIRTerminator.Return{value: Val(opt_n(map, returned))}
+            terminator
+        }
+        .Unreachable -> terminator
+    }
+}
+
+OPT_SIMPLIFY_ROUNDS :: prep { 8 }
+
+// Simplify one function to a fixed point (at most OPT_SIMPLIFY_ROUNDS rounds).
+fn lir_simplify_function(original: LIRFunction) -> LIRFunction Never! {
+    function := original
+    facts := opt_facts(function.values.len())
+    loop _ in 0..<OPT_SIMPLIFY_ROUNDS {
+        changed := opt_fold_sweep(&function, &facts)
+        if opt_drop_unreachable(&function) -> changed = true
+        // Threading reads uses: name every use by its alias root first, so a
+        // downstream read of an empty block's parameter is seen even through
+        // an alias the sweep has not renamed yet.
+        opt_rename_all(&function, facts)
+        if opt_thread(&function) -> changed = true
+        if opt_drop_unreachable(&function) -> changed = true
+        if opt_merge(&function, &facts) -> changed = true
+        if !changed -> break
+    }
+    // A sweep that removed a definition renamed only the uses after it, and
+    // merging adds aliases: rename every use once more (renaming alone creates
+    // no aliases and folds no branch) before liveness.
+    opt_rename_all(&function, facts)
+    loop _ in 0..<OPT_SIMPLIFY_ROUNDS {
+        if !opt_dead_code(&function) -> break
+    }
+    opt_compact(function)
+}
+
+fn opt_rename_all(function: &LIRFunction, facts: OptFacts) Never! {
+    blocks := [LIRBlock]{}
+    loop block in function.blocks {
+        insts := [LIRInst]{}
+        loop inst in block.insts -> &insts.push(opt_rename_inst(facts, inst))
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: opt_rename_terminator(facts, block.terminator), lines: block.lines})
+    }
+    function.blocks = blocks
+    bindings := [LIRDebugBinding]{}
+    loop binding in function.debug.bindings -> &bindings.push(LIRDebugBinding{variable: binding.variable, value: LIRValueID{value: opt_root(facts, binding.value.value)}})
+    function.debug.bindings = bindings
+}

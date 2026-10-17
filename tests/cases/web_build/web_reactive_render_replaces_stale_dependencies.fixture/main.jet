@@ -1,0 +1,15 @@
+#Target(Web)
+use core.reactive as reactive
+use core.ui as ui
+
+fn run() {
+    choose_left := reactive.signal(true)
+    left := reactive.signal(1)
+    right := reactive.signal(10)
+    ui.reactive_render(() -> {
+        if choose_left.get() { print(left.get()) } else { print(right.get()) }
+    })
+    &choose_left.set(false)
+    &left.set(2)
+    &right.set(11)
+}

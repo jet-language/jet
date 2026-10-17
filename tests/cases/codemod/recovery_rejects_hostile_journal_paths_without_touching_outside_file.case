@@ -1,0 +1,12 @@
+# HAND-PORT tests/codemod.rs:850-888 recovery_rejects_hostile_journal_paths_without_touching_outside_file
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: recovery_rejects_hostile_journal_paths_without_touching_outside_file.fixture
+env: NO_COLOR=1
+write: project/.jet/codemods/transaction.journal journal.template
+step: jet inspect codemod rename.codemod.json --dry-run
+cwd: project
+exit: nonzero
+stderr: ~ "escapes retained project" # original predicate
+file: outside.jet = recovery_rejects_hostile_journal_paths_without_touching_outside_file.outside.expected
+file: project/.jet/codemods/transaction.journal exists
+

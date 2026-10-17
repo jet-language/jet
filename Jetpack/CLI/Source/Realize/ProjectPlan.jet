@@ -6,25 +6,25 @@
 
 // The refs to realize, the table that resolves their named sources, and the
 // prompt label for the resulting shell.
-pub struct RunPlan {
+struct RunPlan {
     // Canonical project root for project-relative lifecycle files, so nested
     // hook commands never resolve `.env` against a caller's subdirectory.
-    pub project_root: String
-    pub refs: [RefSpec]
-    pub adapters: [AdapterPlan]
-    pub table: SourceTable
-    pub label: String
-    pub prompt_path: PromptPathMode
-    pub prompt_strip: PromptStripMode
+    project_root: String
+    refs: [RefSpec]
+    adapters: [AdapterPlan]
+    table: SourceTable
+    label: String
+    prompt_path: PromptPathMode
+    prompt_strip: PromptStripMode
     // U12: dev-supervised `services:` entries the typed surface declared;
     // empty for the Phase-1 directive surface.
-    pub dev_services: [DevServicePlan]
+    dev_services: [DevServicePlan]
     // D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: the selected typed
     // `secrets:` map. Trust sees the redacted declaration identity.
-    pub secrets: [SecretSpec]
+    secrets: [SecretSpec]
     // Typed lifecycle, preset, and language-pack facts shared by activation,
     // lifecycle hooks, and service commands.
-    pub environment: EnvironmentFacts
+    environment: EnvironmentFacts
 
     // A plan with no packages over `table`: job-only projects, `-p`-only
     // shells, `use`, and the foreign-flake projection start here.
@@ -53,16 +53,16 @@ pub struct RunPlan {
 // Environment and workspace commands run from a project subdirectory keep
 // this one root so planning, trust, dotenv composition, managed state, and
 // explicit refs share the same project identity.
-pub fn cli_project_env_root(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
+fn cli_project_env_root(cache: &WorkspaceDeclarationCache, start: String) -[IO, FS, Env, Exec, Time.Wait]> String Never! {
     cli_project_root(&cache, start)
 }
 
 // Build a plan from the project `env.jet` (the no-explicit-ref path).
-pub fn cli_load_project_plan(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+fn cli_load_project_plan(cache: &WorkspaceDeclarationCache, theme: Theme) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cli_load_project_plan_with_selections(&cache, theme, None, None)
 }
 
-pub fn cli_load_project_plan_with_selections(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
+fn cli_load_project_plan_with_selections(cache: &WorkspaceDeclarationCache, theme: Theme, requested_preset: String?, requested_environment: String?) -[IO, FS, Env, Exec, Time.Wait]> RunPlan CLIError! {
     cwd :: cli_current_dir()
     if cli_reject_retired_jetpack_toml(cwd) == .Val(code) -> return Err(CLIError.Reported(code))
     dir :: cli_project_env_root(&cache, cwd)

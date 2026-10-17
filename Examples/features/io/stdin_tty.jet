@@ -1,0 +1,15 @@
+// D-CORE-STDIN-TTY1=A: every standard stream answers whether it is a
+// terminal. A program prompts only when a person can answer; under a pipe
+// (as in this golden run) standard input is not a terminal.
+package {
+    name: "stdin_tty"
+    authority: { holds: { allow: [IO] } }
+}
+
+use core.term as io
+
+fn run() {
+    input :: io.stdin()
+    print("stdin tty: {input.is_tty()}")
+    print("stdout tty: {io.stdout().is_tty()}")
+}

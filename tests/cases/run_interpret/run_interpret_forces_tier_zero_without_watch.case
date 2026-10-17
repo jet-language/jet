@@ -1,0 +1,16 @@
+# Port of tests/run_interpret.rs::run_interpret_forces_tier_zero_without_watch (12-63); sources copied verbatim from original Rust literals/templates.
+# PENDING-SAME-HEAD; no runtime or snapshot receipt claimed.
+fixture: fixtures/run_interpret_forces_tier_zero_without_watch
+write: main.jet fixtures/run_interpret_forces_tier_zero_without_watch/main.template
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+exit: 0
+stdout: nonempty # original predicate: explicit nonempty assertion
+stdout: = "run-interpreter-{pid}\n"
+step forced: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/run-cache
+env: NO_COLOR=1
+exit: 0
+stdout: nonempty # original predicate
+stdout: == default

@@ -1,0 +1,156 @@
+// Authority.rs:8-54 + JetStd/MappedFile.rs:196-324. One process registry of
+// canonical path keys and live mapping counts, guarded by the runtime mutex.
+// Map56: reserved0, FD72 owner8, owned original path16, owned canonical key24,
+// read-only mapped pointer32, length40, reserved48. The registry lease is held
+// until AFTER unmap/unlock/close. Empty maps hold the same descriptor and lease.
+compiler_mapped_root := I64{0}
+// runtime-init: 4
+#Export(c) fn jet_rt_compiler_mapped_init() {
+    if (compiler_mapped_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(root, I64{16})
+    compiler_mapped_root = root
+}
+fn compiler_mapped_key(path: I64) -> I64 {
+    at := I64{0}
+    loop at < rt_text_len(path) {
+        if (rt_text_byte(rt_text_data(path) + at) == I64{0}) -> return jet_rt_string_clone(path)
+        at += I64{1}
+    }
+    // Failed canonicalize falls back to the ORIGINAL spelling (not absolute or
+    // lexical normalization), exactly as Authority.rs's PathBuf fallback does.
+    name :: fd_c_path(path)
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    bytes :: jet_process_path_canonicalize_raw(name, scratch, scratch + I64{8}, scratch + I64{16})
+    fd_c_path_drop(name, path)
+    result :: if (bytes == I64{0}) -> jet_rt_string_clone(path) else -> rt_text_lossy(bytes, rt_text_word(scratch))
+    if (bytes != I64{0}) -> jet_rt_free(bytes, rt_text_word(scratch + I64{8}), I64{1})
+    jet_rt_free(scratch, I64{48}, I64{8})
+    result
+}
+// Registry Node24: next0, owned key8, live count16. Only the root lock reads it.
+fn compiler_mapped_find(key: I64) -> I64 {
+    node := rt_text_word(compiler_mapped_root + I64{8})
+    loop node != (I64{0}) {
+        if jet_rt_string_eq(rt_text_word(node + I64{8}), key) -> return node
+        node = rt_text_word(node)
+    }
+    I64{0}
+}
+fn compiler_mapped_register(key: I64) {
+    root :: compiler_mapped_root
+    sync_mutex_lock(root)
+    node := compiler_mapped_find(key)
+    if (node == I64{0}) {
+        node = jet_rt_alloc(I64{24}, I64{8})
+        rt_text_store(node, rt_text_word(root + I64{8}))
+        rt_text_store(node + I64{8}, jet_rt_string_clone(key))
+        rt_text_store(node + I64{16}, I64{0})
+        rt_text_store(root + I64{8}, node)
+    }
+    rt_text_store(node + I64{16}, rt_text_word(node + I64{16}) + I64{1})
+    sync_mutex_unlock(root)
+}
+fn compiler_mapped_unregister(key: I64) {
+    root :: compiler_mapped_root
+    sync_mutex_lock(root)
+    link := root + I64{8}
+    loop rt_text_word(link) != (I64{0}) {
+        node :: rt_text_word(link)
+        if jet_rt_string_eq(rt_text_word(node + I64{8}), key) {
+            count :: rt_text_word(node + I64{16})
+            if (count > I64{1}) { rt_text_store(node + I64{16}, count - I64{1}) } else {
+                rt_text_store(link, rt_text_word(node))
+                jet_rt_string_drop(rt_text_word(node + I64{8}))
+                jet_rt_free(node, I64{24}, I64{8})
+            }
+            break
+        }
+        link = node
+    }
+    sync_mutex_unlock(root)
+}
+#Export(c) fn jet_std_files_writer_refusal(path: I64, some: I64) -> I64 {
+    key :: compiler_mapped_key(path)
+    root :: compiler_mapped_root
+    sync_mutex_lock(root)
+    live :: compiler_mapped_find(key) != I64{0}
+    sync_mutex_unlock(root)
+    jet_rt_string_drop(key)
+    if !live -> return I64{0}
+    _ := host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("file is mapped read-only")), some)
+    I64{1}
+}
+#Export(c) fn jet_std_files_map(path: I64, output: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{160}, I64{8})
+    errno :: scratch + I64{128}
+    file :: jet_fd_open_raw(path, I64{1}, I64{0}, errno)
+    if (file == I64{0}) {
+        code :: rt_text_word(errno + I64{8})
+        jet_rt_free(scratch, I64{160}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
+    }
+    jet_fd_stat_raw(file, scratch, errno)
+    failure := if (rt_text_word(errno) == I64{0}) -> I64{0} else -> -rt_text_word(errno + I64{8})
+    length :: rt_text_word(scratch + I64{56})
+    if (failure == I64{0} && length < I64{0}) {
+        jet_fd_drop_raw(file)
+        jet_rt_free(scratch, I64{160}, I64{8})
+        return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_clone(rt_static_text("mapped file is too large for a byte view")), error)
+    }
+    locked := false
+    if (failure == I64{0}) {
+        jet_fd_lock_raw(file, I64{5}, errno)
+        failure = if (rt_text_word(errno) == I64{0}) -> I64{0} else -> -rt_text_word(errno + I64{8})
+        locked = failure == I64{0}
+    }
+    pointer := I64{1}
+    key := I64{0}
+    if (failure == I64{0}) {
+        key = compiler_mapped_key(path)
+        if (length != I64{0}) {
+            #Unsafe("the owned readable file lends its descriptor; mmap creates exactly length read-only private bytes; the map owner alone unmaps them") {
+                pointer = os_syscall_i64(I64{9}, I64{0}, length, I64{1}, I64{2}, jet_fd_number_raw(file), I64{0})
+            }
+            if (pointer < I64{0} && pointer >= I64{-4095}) -> failure = pointer
+        }
+    }
+    if (failure < I64{0}) {
+        if locked -> jet_fd_lock_raw(file, I64{8}, errno)
+        jet_fd_drop_raw(file)
+        if (key != I64{0}) -> jet_rt_string_drop(key)
+        jet_rt_free(scratch, I64{160}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
+    }
+    compiler_mapped_register(key)
+    map :: jet_rt_alloc(I64{56}, I64{8})
+    rt_text_store(map, I64{0})
+    rt_text_store(map + I64{8}, file)
+    rt_text_store(map + I64{16}, jet_rt_string_clone(path))
+    rt_text_store(map + I64{24}, key)
+    rt_text_store(map + I64{32}, pointer)
+    rt_text_store(map + I64{40}, length)
+    rt_text_store(map + I64{48}, I64{0})
+    jet_rt_free(scratch, I64{160}, I64{8})
+    rt_text_store(output, map)
+    I64{1}
+}
+#Export(c) fn jet_rt_handle_drop_jet_mapped_file(map: I64) {
+    if (map == I64{0}) -> return
+    // MappedFile is affine; borrowed byte views keep its checked owner alive.
+    file :: rt_text_word(map + I64{8})
+    length :: rt_text_word(map + I64{40})
+    if (length != I64{0}) -> _ := host_call(I64{11}, rt_text_word(map + I64{32}), length, I64{0})
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    jet_fd_lock_raw(file, I64{8}, scratch)
+    jet_rt_free(scratch, I64{32}, I64{8})
+    jet_fd_drop_raw(file)
+    compiler_mapped_unregister(rt_text_word(map + I64{24}))
+    jet_rt_string_drop(rt_text_word(map + I64{16}))
+    jet_rt_string_drop(rt_text_word(map + I64{24}))
+    jet_rt_free(map, I64{56}, I64{8})
+}
+#Export(c) fn jet_std_fs_map_len(map: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(map + I64{40})) }
+#Export(c) fn jet_std_fs_map_is_empty(map: I64) -> Bool { rt_text_word(map + I64{40}) == I64{0} }
+#Export(c) fn jet_rt_record_get_jet_mapped_file_path(map: I64) -> I64 { jet_rt_string_clone(rt_text_word(map + I64{16})) }

@@ -9,7 +9,7 @@
 // influence selection only through explicit `variant_map` entries.
 
 // Dependency / build graph role (Nix-style build/host/target).
-pub enum VariantRole {
+enum VariantRole {
     Build
     Host
     Target
@@ -32,7 +32,7 @@ pub enum VariantRole {
     }
 }
 
-pub enum VariantOS {
+enum VariantOS {
     Linux
     MacOS
     Windows
@@ -59,7 +59,7 @@ pub enum VariantOS {
     }
 }
 
-pub enum VariantArch {
+enum VariantArch {
     X64
     Aarch64
 
@@ -83,7 +83,7 @@ pub enum VariantArch {
     }
 }
 
-pub enum VariantLibc {
+enum VariantLibc {
     Gnu
     Musl
     Msvc
@@ -117,7 +117,7 @@ pub enum VariantLibc {
     }
 }
 
-pub enum VariantLinkage {
+enum VariantLinkage {
     Shared
     Static
 
@@ -137,7 +137,7 @@ pub enum VariantLinkage {
     }
 }
 
-pub enum VariantABI {
+enum VariantABI {
     Sysv
     Ms
     Unknown
@@ -167,7 +167,7 @@ pub enum VariantABI {
     }
 }
 
-pub enum ArtifactKind {
+enum ArtifactKind {
     Library
     Executable
     Object
@@ -207,7 +207,7 @@ pub enum ArtifactKind {
 
 // The axes in tie-break order, plus the provider-fact tie that no mapped
 // axis separates.
-pub enum VariantAxis {
+enum VariantAxis {
     Role
     OS
     Arch
@@ -250,15 +250,15 @@ pub enum VariantAxis {
 
 // Closed typed variant (D-JPK-VARIANT1=D). `features` is a set: kept sorted
 // and unique so equal sets compare equal.
-pub struct PackageVariant {
-    pub role: VariantRole
-    pub os: VariantOS
-    pub arch: VariantArch
-    pub libc: VariantLibc
-    pub linkage: VariantLinkage
-    pub abi: VariantABI
-    pub artifact: ArtifactKind
-    pub features: [String]
+struct PackageVariant {
+    role: VariantRole
+    os: VariantOS
+    arch: VariantArch
+    libc: VariantLibc
+    linkage: VariantLinkage
+    abi: VariantABI
+    artifact: ArtifactKind
+    features: [String]
 
     // Total defaults from the requesting context: its platform, Host role,
     // shared linkage, library artifact, no features.
@@ -266,7 +266,7 @@ pub struct PackageVariant {
         os :: VariantOS.from_platform_os(platform.os)
         PackageVariant{
             role: VariantRole.Host,
-            os: ~os,
+            os: os.copy(),
             arch: VariantArch.from_platform_arch(platform.arch),
             libc: VariantLibc.default_for(os),
             linkage: VariantLinkage.Shared,
@@ -280,7 +280,7 @@ pub struct PackageVariant {
     fn cross_target(os: VariantOS, arch: VariantArch, libc: VariantLibc) -> PackageVariant Never! {
         PackageVariant{
             role: VariantRole.Target,
-            os: ~os,
+            os: os.copy(),
             arch: arch,
             libc: libc,
             linkage: VariantLinkage.Shared,
@@ -428,10 +428,10 @@ pub struct PackageVariant {
 
 // A candidate offered by a package producer, with namespaced provider facts
 // that never influence native selection unless mapped.
-pub struct VariantCandidate {
-    pub label: String
-    pub variant: PackageVariant
-    pub provider_facts: [String: String]
+struct VariantCandidate {
+    label: String
+    variant: PackageVariant
+    provider_facts: [String: String]
 
     fn new(label: String, variant: PackageVariant) -> VariantCandidate Never! {
         VariantCandidate{label: label, variant: variant, provider_facts: [String: String]{}}
@@ -477,14 +477,14 @@ pub struct VariantCandidate {
 
 // Explicit mapping from a provider fact key onto a closed axis value.
 // Without a map, provider facts are ignored during selection.
-pub struct VariantMapEntry {
-    pub provider_key: String
-    pub axis: String
-    pub value: String
+struct VariantMapEntry {
+    provider_key: String
+    axis: String
+    value: String
 }
 
 #Error
-pub enum VariantSelectError {
+enum VariantSelectError {
     NoMatch(need: PackageVariant, candidate_count: Int)
     Ambiguous(need: PackageVariant, axis: VariantAxis, labels: [String])
 }

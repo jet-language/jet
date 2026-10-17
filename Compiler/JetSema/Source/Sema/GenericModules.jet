@@ -69,13 +69,15 @@ struct SemaGenericModuleNode {
     edges: [SemaGenericModuleEdge]
 }
 
-// `inputs` carries each module's program as written: by now every valid
-// alias in `graph` is an expanded instance (`sema_generic_modules_expand`).
-pub fn sema_generic_modules_check(graph: &SemaRegistrationGraph, inputs: [SemaRegistrationModuleInput]) {
+// `inputs` carries the programs as written of the modules that declare a
+// module alias or a generic module (sema_generic_modules_written); every
+// other module has nothing to check. By now every valid alias in `graph` is
+// an expanded instance (`sema_generic_modules_expand`).
+fn sema_generic_modules_check(graph: &SemaRegistrationGraph, inputs: [SemaRegistrationModuleInput]) {
     per_module :: sema_generic_modules_collect(graph, inputs)
     loop (module_index, diagnostics) in per_module {
         loop diagnostic in diagnostics {
-            &graph.diagnostics.push(sema_diagnostic_with_source_location(~diagnostic, graph.modules[module_index].source_segments))
+            &graph.diagnostics.push(sema_diagnostic_with_source_location(diagnostic.copy(), graph.modules[module_index].source_segments))
         }
     }
 }
@@ -85,21 +87,19 @@ fn sema_generic_modules_collect(graph: SemaRegistrationGraph, inputs: [SemaRegis
     // value parameter reports once however often the template is used.
     templates_by_module := [[SemaGenericModuleTemplate]]{}
     output := [[Diagnostic]]{}
-    loop module_row in graph.modules {
-        check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
+    loop module_row_index in 0..<graph.modules.len() {
+        check := SemaGenericModuleCheck{module_identity: graph.modules[module_row_index].module_identity, diagnostics: [Diagnostic]{}, seen: [String:Bool]{}}
         templates := [SemaGenericModuleTemplate]{}
-        if sema_genmod_written_input(inputs, module_row.module_identity) == {
-            .Val(index) -> templates = sema_genmod_collect_templates(inputs[index].program.items, &check)
-            .None -> templates = sema_genmod_collect_templates(module_row.program.items, &check)
+        if sema_genmod_written_input(inputs, graph.modules[module_row_index].module_identity) == .Val(index) {
+            templates = sema_genmod_collect_templates(inputs[index].program.items, &check)
         }
         &templates_by_module.push(templates)
         &output.push(check.diagnostics)
     }
     loop (module_index, module_row) in graph.modules {
         check := SemaGenericModuleCheck{module_identity: module_row.module_identity, diagnostics: output[module_index], seen: [String:Bool]{}}
-        if sema_genmod_written_input(inputs, module_row.module_identity) == {
-            .Val(index) -> sema_genmod_check_module(graph, module_row, inputs[index].program.items, templates_by_module, &check)
-            .None -> sema_genmod_check_module(graph, module_row, module_row.program.items, templates_by_module, &check)
+        if sema_genmod_written_input(inputs, module_row.module_identity) == .Val(index) {
+            sema_genmod_check_module(graph, module_row, inputs[index].program.items, templates_by_module, &check)
         }
         output[module_index] = check.diagnostics
     }
@@ -112,6 +112,28 @@ fn sema_genmod_written_input(inputs: [SemaRegistrationModuleInput], module_ident
         if inputs[index].module_identity == module_identity -> return Val(index)
     }
     None
+}
+
+// The inputs whose programs as written declare a module alias or a generic
+// module, taken before registration moves every program into its row.
+fn sema_generic_modules_written(inputs: [SemaRegistrationModuleInput]) -> [SemaRegistrationModuleInput] {
+    written := [SemaRegistrationModuleInput]{}
+    loop input in inputs {
+        // copy: the alias check reads these programs as written after
+        // registration moves every input's program into its row.
+        if sema_genmod_declares_modules(input.program.items) -> &written.push(input.copy())
+    }
+    ^written
+}
+
+fn sema_genmod_declares_modules(items: [Item]) -> Bool {
+    loop item in items {
+        if item == {
+            .ModuleAlias(_) | .GenericModule(_) -> return true
+            else -> {}
+        }
+    }
+    false
 }
 
 fn sema_genmod_collect_templates(written: [Item], check: &SemaGenericModuleCheck) -> [SemaGenericModuleTemplate] {
@@ -137,13 +159,13 @@ fn sema_genmod_check_module(graph: SemaRegistrationGraph, module_row: SemaRegist
     // template was refused by import registration (E0609); its aliases stay
     // silent rather than also reporting an unknown template.
     denied := [String:Bool]{}
-    loop import in module_row.imports {
-        if import.declaration.kind == .Unqualified(_, _, imported, _, _) {
-            target_index :: sema_registration_module_index(graph, import.target_module_identity) ?? next
+    loop import_index in 0..<module_row.imports.len() {
+        if module_row.imports[import_index].declaration.kind == .Unqualified(_, _, imported, _, _) {
+            target_index :: sema_registration_module_index(graph, module_row.imports[import_index].target_module_identity) ?? next
             loop entry in imported {
                 source :: sema_genmod_find_template(templates_by_module[target_index], entry.original) ?? next
                 bound_local := String?{None}
-                loop binding in import.bindings {
+                loop binding in module_row.imports[import_index].bindings {
                     if binding.original == entry.original -> bound_local = Val(binding.local)
                 }
                 if bound_local == {
@@ -775,15 +797,15 @@ fn sema_genmod_visit(node: String, nodes: [SemaGenericModuleNode], state: &[Stri
 // A template an alias can name: a local `module cache<K>` or one imported
 // with `use defs.box`. The key names the defining module, so equal
 // applications of one template share one instance.
-pub struct SemaGenericModuleSource {
-    pub local: String
-    pub key: String
-    pub definition: GenericModuleDef
+struct SemaGenericModuleSource {
+    local: String
+    key: String
+    definition: GenericModuleDef
     // An imported template's defining-module declarations: each instance
     // carries them under its own member names.
-    pub source_items: [Item]
+    source_items: [Item]
     // Closed constants of the defining module.
-    pub source_values: [String:Expr]
+    source_values: [String:Expr]
 }
 
 struct SemaGenericModuleBinding {
@@ -799,21 +821,51 @@ struct SemaGenericModuleExpansion {
     declarations: [Item]
 }
 
+// Rows `sema_generic_modules_imported` reads, built once per graph: edge rows
+// by source module identity and the rows of inputs that declare a template,
+// by module identity, each in ascending order. A per-module scan of every
+// edge and every input made registration modules × (edges + inputs).
+struct SemaGenericModuleIndex {
+    edge_slots: [String:Int]
+    edge_rows: [[Int]]
+    template_slots: [String:Int]
+    template_rows: [[Int]]
+}
+
+fn sema_generic_modules_bucket_add(slots: &[String:Int], rows: &[[Int]], key: String, row: Int) Never! {
+    if slots.get(key) == .Val(slot) {
+        &rows[slot].push(row)
+        return
+    }
+    slots[key] = rows.len()
+    &rows.push([Int]{row})
+}
+
+fn sema_generic_modules_index(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge]) -> SemaGenericModuleIndex Never! {
+    index := SemaGenericModuleIndex{edge_slots: [String:Int]{}, edge_rows: [[Int]]{}, template_slots: [String:Int]{}, template_rows: [[Int]]{}}
+    loop (row, edge) in edges -> sema_generic_modules_bucket_add(&index.edge_slots, &index.edge_rows, edge.source_module_identity, row)
+    loop (row, input) in inputs {
+        has_template := false
+        loop item in input.program.items {
+            if item == .GenericModule(_) -> has_template = true
+        }
+        if has_template -> sema_generic_modules_bucket_add(&index.template_slots, &index.template_rows, input.module_identity, row)
+    }
+    index
+}
+
 // Templates `module_identity` imports by name, from each loaded import edge.
 // A private template binds nothing; import registration reports it (E0609).
-pub fn sema_generic_modules_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], module_identity: String) -> [SemaGenericModuleSource] {
+fn sema_generic_modules_imported(inputs: [SemaRegistrationModuleInput], edges: [SemaRegistrationImportEdge], index: SemaGenericModuleIndex, module_identity: String) -> [SemaGenericModuleSource] {
     sources := [SemaGenericModuleSource]{}
-    loop edge in edges {
-        if edge.source_module_identity != module_identity -> next
+    edge_slot :: index.edge_slots.get(module_identity) ?? return sources
+    loop edge_row in index.edge_rows[edge_slot] {
+        edge :: edges[edge_row]
         if edge.declaration.kind == .Unqualified(_, _, imported, _, _) {
-            loop input in inputs {
-                if input.module_identity != edge.target_module_identity -> next
+            template_slot :: index.template_slots.get(edge.target_module_identity) ?? next
+            loop input_row in index.template_rows[template_slot] {
+                input :: inputs[input_row]
                 items :: input.program.items
-                has_template := false
-                loop item in items {
-                    if item == .GenericModule(_) -> has_template = true
-                }
-                if !has_template -> next
                 enums :: sema_genmod_enums(items, [GenericModuleDef]{})
                 values :: sema_genmod_folded_consts(items, [String:Expr]{}, enums)
                 loop entry in imported {
@@ -845,7 +897,7 @@ fn sema_genmod_definition_items(items: [Item]) -> [Item] {
 
 // Expands `program`'s module aliases in place; a program without one is left
 // untouched (not copied).
-pub fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
+fn sema_generic_modules_expand(program: &Program, module_identity: String, imported: [SemaGenericModuleSource]) {
     rewritten :: sema_generic_modules_rewritten_items(program, module_identity, imported) ?? return
     program.items = rewritten
 }
@@ -1054,7 +1106,7 @@ fn sema_genmod_value_name(alias: String, name: String) -> String {
     loop end > 0 && Int.from_u8(bytes[end - 1]) == 95 {
         end -= 1
     }
-    trimmed :: String.from_bytes(bytes[0..<end]) ?? ~alias
+    trimmed :: String.from_bytes(bytes[0..<end]) ?? alias.copy()
     "{trimmed}_{sema_inline_trim_leading_underscores(name)}"
 }
 
@@ -1217,7 +1269,7 @@ fn sema_genmod_folded_consts(items: [Item], inherited: [String:Expr], enums: [St
 fn sema_genmod_fold(expression: Expr, values: [String:Expr], enums: [String:Bool]) -> Expr? {
     if expression == {
         .Int(number, span, _, _) -> Val(Expr.Int{value: number, span: span, width: None, raw: None})
-        .Bool(_, _) | .Char(_, _) -> Val(~expression)
+        .Bool(_, _) | .Char(_, _) -> Val(expression.copy())
         .Str(_, span) -> {
             text :: sema_genmod_text(expression) ?? return None
             Val(Expr.Str{parts: [StrPart]{StrPart.Lit{text: text}}, span: span})

@@ -3,15 +3,15 @@ struct Pair<T> {
     second: T
 }
 
-fn make_pair<T>(a: T, b: T) -> Pair<T> { {first: ~a, second: ~b} }
+fn make_pair<T>(a: T, b: T) -> Pair<T> { {first: a.copy(), second: b.copy()} }
 
 struct Stack<T> {
     items: [T]
 }
 
 fn push<T>(s: Stack<T>, item: T) -> Stack<T> {
-    dup := ~s
-    &dup.items.push(~item)
+    dup := s.copy()
+    &dup.items.push(item.copy())
     return dup
 }
 

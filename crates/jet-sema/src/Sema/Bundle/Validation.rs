@@ -16,15 +16,131 @@ pub(crate) use CoreUsage::{
     collect_core_stmts, collect_used_core, expand_core_reachable_closure,
 };
 
+/// Reports pushed while one module is processed belong to that module. A
+/// non-entry module's located reports carry it as their origin, so they render
+/// against its own file instead of at a byte offset of the entry file.
+
+pub(crate) fn attach_module_origin(
+    module: &crate::AST::LoadedModule,
+    is_entry: bool,
+    diags: &mut [Diagnostic],
+) {
+    let unowned = |diagnostic: &Diagnostic| diagnostic.origin().is_none() && diagnostic.span.is_some();
+    if is_entry || !diags.iter().any(|diagnostic| unowned(diagnostic)) {
+        return;
+    }
+    let origin = std::sync::Arc::new(jet_foundation::Diagnostics::DiagnosticOrigin::new(
+        module.display.clone(),
+        module.path.to_string_lossy().into_owned(),
+        module.source.clone(),
+    ));
+    for diagnostic in diags {
+        if unowned(&*diagnostic) {
+            diagnostic.set_origin(origin.clone());
+        }
+    }
+}
+/// Transparent aliases must terminate before any signature or body expands them.
+/// Walk declaration identities, not instantiated argument spellings: a growing
+/// cycle such as `A<T> :: A<[T]>` is still the same cycle.
+pub(crate) fn validate_type_alias_cycles(
+    bundle: &ProgramBundle,
+    ledger: &jet_foundation::Names::NameLedger,
+) -> Vec<Diagnostic> {
+    fn key(ledger: &jet_foundation::Names::NameLedger, module: usize, name: &str) -> Option<String> {
+        ledger.canonical_path(module, name).or_else(|| {
+            let (namespace, leaf) = name.rsplit_once('.').or_else(|| name.rsplit_once("::"))?;
+            let owner = ledger.alias(module, namespace)?.target_module?;
+            ledger.declaration_path(owner, leaf).map(str::to_owned)
+        })
+    }
+    fn names<'a>(ty: &'a Type, out: &mut Vec<&'a str>) {
+        match ty {
+            Type::Named(name) => out.push(name),
+            Type::Apply { name, args } => {
+                out.push(name);
+                for arg in args { names(arg, out); }
+            }
+            Type::List(inner) | Type::Shared(inner) | Type::Option(inner)
+            | Type::FixedList { elem: inner, .. } | Type::InlineRange { base: inner, .. }
+            | Type::Tagged { inner, .. } | Type::Quantity { base: inner, .. } => names(inner, out),
+            Type::Map { key, value, .. } | Type::Result { ok: key, err: value } => {
+                names(key, out);
+                names(value, out);
+            }
+            Type::Tuple(fields) => for (_, field) in fields { names(field, out); },
+            Type::Union(members) => for member in members { names(member, out); },
+            Type::Fn { params, ret, .. } => {
+                for param in params { names(param, out); }
+                if let Some(ret) = ret { names(ret, out); }
+            }
+            _ => {}
+        }
+    }
+    fn visit(
+        at: usize, edges: &[Vec<usize>], marks: &mut [u8], path: &mut Vec<usize>,
+        aliases: &[(usize, &crate::AST::TypeAliasDef)], bundle: &ProgramBundle,
+        diags: &mut Vec<Diagnostic>,
+    ) {
+        marks[at] = 1;
+        path.push(at);
+        for &next in &edges[at] {
+            if marks[next] == 0 {
+                visit(next, edges, marks, path, aliases, bundle, diags);
+            } else if marks[next] == 1 {
+                let start = path.iter().position(|&row| row == next).expect("active alias is on the path");
+                let chain = path[start..].iter().copied().chain(std::iter::once(next))
+                    .map(|row| aliases[row].1.name.as_str()).collect::<Vec<_>>().join(" -> ");
+                let (module, alias) = aliases[at];
+                let mut diagnostic = Diagnostic::error(
+                    "E0394", format!("type alias cycle: {chain}"),
+                    "transparent type aliases must expand to a non-alias type".to_string(),
+                    "break the cycle by making one target a concrete type".to_string(),
+                    Some(alias.target_span),
+                );
+                attach_module_origin(&bundle.modules[module], module == bundle.entry, std::slice::from_mut(&mut diagnostic));
+                diags.push(diagnostic);
+            }
+        }
+        path.pop();
+        marks[at] = 2;
+    }
+    let aliases = bundle.modules.iter().enumerate().flat_map(|(module, row)| {
+        row.items.iter().filter_map(move |item| match item {
+            Item::TypeAlias(alias) => Some((module, alias)),
+            _ => None,
+        })
+    }).collect::<Vec<_>>();
+    let positions = aliases.iter().enumerate().filter_map(|(at, (module, alias))| {
+        key(ledger, *module, &alias.name).map(|key| (key, at))
+    }).collect::<HashMap<_, _>>();
+    let mut edges = Vec::with_capacity(aliases.len());
+    for (module, alias) in &aliases {
+        let mut references = Vec::new();
+        names(&alias.target, &mut references);
+        edges.push(references.into_iter().filter(|name| !alias.type_params.iter().any(|param| param.name == *name))
+            .filter_map(|name| key(ledger, *module, name).and_then(|key| positions.get(&key).copied()))
+            .collect::<Vec<_>>());
+    }
+    let mut marks = vec![0; aliases.len()];
+    let mut path = Vec::new();
+    let mut diags = Vec::new();
+    for at in 0..aliases.len() {
+        if marks[at] == 0 { visit(at, &edges, &mut marks, &mut path, &aliases, bundle, &mut diags); }
+    }
+    diags
+}
+
 pub(crate) fn uses_raw_protocol_return(
     trait_name: Option<&str>,
     implementation_generated: bool,
     function_generated: bool,
 ) -> bool {
     // D-FAILURE-FOUNDATION1: these traits are raw Rust protocol ABIs (String,
-    // bool, Ordering, DataTree, and same-type arithmetic) — never the implicit
-    // Outcome carrier. A wrapped body would violate the protocol signature for
-    // user and derived impls alike (rustc E0053/E0308 behind I2).
+    // bool, Ordering, Dyn, same-type arithmetic, and the D-ITER-HOOK
+    // `Iterable.iter` cursor) — never the implicit Outcome carrier. A wrapped
+    // body would violate the protocol signature for user and derived impls
+    // alike (rustc E0053/E0308 behind I2).
     trait_name.is_some_and(|name| {
         matches!(
             name,
@@ -38,6 +154,7 @@ pub(crate) fn uses_raw_protocol_return(
                 | crate::Generics::SUB
                 | crate::Generics::MUL
                 | crate::Generics::DIV
+                | crate::Syntax::TRAIT_ITERABLE
         )
     }) || implementation_generated && function_generated
 }
@@ -123,6 +240,9 @@ pub(super) fn qualified_effect_facts(
             }
             for obligation in &mut summary.autodiff_obligations {
                 obligation.target = resolve_edge(&obligation.target);
+            }
+            for site in &mut summary.shared_sites {
+                site.initializer = resolve_edge(&site.initializer);
             }
             for fact in &mut summary.discarded_results {
                 fact.callee = resolve_edge(&fact.callee);
@@ -383,7 +503,7 @@ fn is_encoding_surface_type(name: &str) -> bool {
     let base = name.rsplit('.').next().unwrap_or(name);
     matches!(
         base,
-        "DataTree"
+        "Dyn"
             | "EncodingFormat"
             | "DataJoin"
             | "Query"
@@ -1127,6 +1247,7 @@ fn error_conversion_function(ec: &mut crate::AST::ErrorConvDef) -> Func {
                         variadic: false,
                         variadic_bound_list: None,
                         declared_view_from_names: None,
+                        footprint: Default::default(),
                         public_label: None,
                         zone: crate::AST::ParamZone::Either,
                     }],
@@ -1298,11 +1419,8 @@ fn collect_body_jobs<'m>(
                     // typed derive body can fill a method hole with `T`, and
                     // the generated `impl Type.Trait` must have the same
                     // scope as a hand-written trait impl.
-                    m.type_params = if own_params.is_empty() {
-                        owner_params.cloned().unwrap_or_default()
-                    } else {
-                        own_params.clone()
-                    };
+                    m.type_params =
+                        method_type_param_scope(owner_params.map_or(&[], Vec::as_slice), &own_params);
                     let raw_protocol_return =
                         uses_raw_protocol_function_return(trait_name.as_deref(), false, m);
                     jobs.push(BodyJob {
@@ -1387,6 +1505,20 @@ fn collect_body_jobs<'m>(
     jobs
 }
 
+// Match Jet's sema_function_merge_generic_params: enclosing parameters first,
+// except names shadowed by the method; then the method's own parameters.
+fn method_type_param_scope(
+    owner_params: &[crate::AST::TypeParam],
+    own_params: &[crate::AST::TypeParam],
+) -> Vec<crate::AST::TypeParam> {
+    owner_params
+        .iter()
+        .filter(|outer| !own_params.iter().any(|inner| inner.name == outer.name))
+        .chain(own_params)
+        .cloned()
+        .collect()
+}
+
 /// The method jobs of one struct or enum: its own methods, then the methods
 /// of its nested trait impls. Trait impls nested in a type are real method
 /// bodies too. They inherit the type's generic parameters, just as the Rust
@@ -1403,9 +1535,7 @@ fn push_owner_method_jobs<'m>(
 ) {
     for m in methods.iter_mut() {
         let own_params = std::mem::take(&mut m.type_params);
-        if own_params.is_empty() {
-            m.type_params = owner_params.to_vec();
-        }
+        m.type_params = method_type_param_scope(owner_params, &own_params);
         jobs.push(BodyJob {
             owner: Some(owner.to_string()),
             raw_protocol_return: false,
@@ -1424,11 +1554,7 @@ fn push_owner_method_jobs<'m>(
         let generated_anchor = compiler_generated.then_some(block.trait_span);
         for m in block.methods.iter_mut() {
             let own_params = std::mem::take(&mut m.type_params);
-            m.type_params = if own_params.is_empty() {
-                owner_params.to_vec()
-            } else {
-                own_params.clone()
-            };
+            m.type_params = method_type_param_scope(owner_params, &own_params);
             // Generated serde methods temporarily carry inherited, inferred
             // bounds solely for sema. Their Rust generics belong on the
             // enclosing impl, not on the method.
@@ -1775,6 +1901,9 @@ pub(crate) fn check_module_bodies(
     // for every body below, so structural type answers (clone, send, view,
     // heap) are remembered across bindings and functions of this module.
     let _nominal_memo = st.registry.open_nominal_memo();
+    // Every comptime evaluation in these bodies shares one projection of
+    // this module's fragment context.
+    let _fragment_context = crate::Sema::CheckerCore::open_fragment_context_memo(st);
     let mut diags = Vec::new();
     let (ct_funcs, ct_externs, ct_globals) = comptime_context_from_items(&module.items);
     let invalid_serde_impls = invalid_serde_derive_impls(&module.items, &st.trait_reg);
@@ -1798,6 +1927,28 @@ pub(crate) fn check_module_bodies(
         no_prelude: module.no_prelude,
     };
     let checked_ct_funcs = stage_comptime_functions(&cx, &module.items, &ct_funcs, name_ledger);
+    if st.compiler_builtin_error_owner == Some(module_idx) {
+        // Declared defaults are checked in their original supplier context,
+        // before that module is published as immutable nominal facts.
+        let mut checker = checker_for_module(
+            module_idx, states, plugin_interfaces, devtools_registry, effect_facts,
+            &ct_funcs, &checked_ct_funcs, &st.items, &ct_externs, &ct_base_dir,
+            &ct_globals, no_os, gates, module.no_prelude, name_ledger, None, false, false,
+        );
+        for item in &mut module.items {
+            let Item::Struct(definition) = item else { continue };
+            if !definition.compiler_builtin_error { continue }
+            for field in &mut definition.fields {
+                let Some(value) = field.default.as_deref_mut() else { continue };
+                checker.expected_type = Some(field.ty.clone());
+                if let Some(actual) = checker.infer(value) {
+                    let span = value.span();
+                    checker.check_struct_field_assignable(&field.name, &field.ty, &actual, value, span);
+                }
+            }
+        }
+        diags.extend(checker.diags);
+    }
     // D-MEM-VIEWRET1=B: resolve callable view summaries before the real body
     // pass so declaration order cannot affect a public owner contract. Each
     // iteration checks pristine clones and publishes only the canonical fact;
@@ -2031,9 +2182,7 @@ pub(crate) fn check_module_bodies(
                 continue;
             }
             if let Some(signature) = st
-                .trait_reg
-                .traits
-                .get(&key.0)
+                .trait_reg.trait_info(&key.0)
                 .and_then(|info| info.methods.get(&key.1))
             {
                 let _ = signature.return_view_provenance.set(contract);
@@ -2045,6 +2194,12 @@ pub(crate) fn check_module_bodies(
         previous_round = Some(round);
     }
     let cache_allowed = view_jobs.is_empty();
+    // D-METHOD-FOOTPRINT1=A: method field footprints are body facts solved
+    // across sibling methods, so they are settled before any body is checked.
+    diags.extend(super::super::Footprint::infer_module_footprints(
+        &mut module.items,
+        &st.registry,
+    ));
     let module_key = module.display.clone();
     let mut checked_ct_funcs = checked_ct_funcs;
     let mut pass = MainBodyPass {
@@ -2146,9 +2301,7 @@ pub(crate) fn check_module_bodies(
     }
     for ((trait_name, method_name), (provenance, _)) in trait_view_contracts {
         if let Some(signature) = st
-            .trait_reg
-            .traits
-            .get(&trait_name)
+            .trait_reg.trait_info(&trait_name)
             .and_then(|info| info.methods.get(&method_name))
         {
             // Prefer a declared `from` on the trait method when present.
@@ -2168,9 +2321,7 @@ pub(crate) fn check_module_bodies(
                 continue;
             };
             if let Some(signature) = st
-                .trait_reg
-                .traits
-                .get(&trait_def.name)
+                .trait_reg.trait_info(&trait_def.name)
                 .and_then(|info| info.methods.get(&method.name))
             {
                 let _ = signature.return_view_provenance.set(declared.clone());
@@ -2244,6 +2395,7 @@ pub(crate) fn check_module_bodies(
                 variadic: false,
                 variadic_bound_list: None,
                 declared_view_from_names: None,
+                footprint: Default::default(),
             });
             wrapper
                 .params

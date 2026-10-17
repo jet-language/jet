@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/commands.rs:740-778; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# PENDING-GRAMMAR: file negative substring.
+fixture: fixtures/r_static
+requires: tool:Rscript
+step: jet inspect bind r {work}/static.R --pkg static_ops
+exit: 0
+file: .jet/bindings/r/static_ops.jet ~ "pub fn outer(" # original predicate
+file: .jet/bindings/r/static_ops.jet !~ "pub fn fake(" # original predicate
+file: .jet/bindings/r/static_ops.jet !~ "pub fn also_fake(" # original predicate
+file: .jet/bindings/r/static_ops.jet !~ "pub fn nested(" # original predicate

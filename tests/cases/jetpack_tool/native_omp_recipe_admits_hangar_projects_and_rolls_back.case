@@ -1,0 +1,40 @@
+# Port of tests/jetpack_tool.rs:576-702; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+copy: omp-1.0.0 fx/omp-1.0.0
+copy: native-1.0.0.json fx/jetpackage-omp.json
+step: jetpack tool install omp@releases#auto --no-color --offline --fixtures {work}/fx 
+cwd: project
+exit: 0
+step: {work}/home/.jet/bin/omp
+exit: any # original invocation status was not asserted
+stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_one.out
+file: home/.jet/tools/manifest.json ~ "\"provider\":\"jetpackage\"" # original contains predicate
+file: home/.jet/tools/manifest.json ~ "github:can1357/oh-my-pi" | ~ "can1357/oh-my-pi" # original disjunction
+file: home/.jet/tools/manifest.json ~ "\"tier\":\"#auto\"" # original contains predicate
+capture: store = text file.after_first("\"store_root\": \"").split("\"", 0) home/.jet/tools/generations/1/meta.json
+cap:store: ^= "{work}/root" # original prefix
+file: home/.jet/tools/generations/1/meta.json !~ "/nix/store/" # original contains negation
+step: jet test native-metadata.jet
+env: TOOL_STORE={cap:store}
+exit: 0
+copy: omp-2.0.0 fx/omp-2.0.0
+copy: native-2.0.0.json fx/jetpackage-omp.json
+copy: channels fx/channels.txt
+step: jetpack profile build tools --no-color --fixtures {work}/fx
+cwd: project
+exit: 0
+step: {work}/home/.jet/bin/omp
+exit: any # original invocation status was not asserted
+stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_two.out
+step: jetpack profile rollback tools --no-color
+cwd: project
+exit: 0
+step: {work}/home/.jet/bin/omp
+exit: any # original invocation status was not asserted
+stdout.trim: = fixtures/native_omp_recipe_admits_hangar_projects_and_rolls_back/omp_version_one.out

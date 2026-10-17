@@ -5,7 +5,7 @@
 
 // A C string-literal body: quote, backslash, and the common control escapes;
 // other bytes outside printable ASCII become three-digit octal escapes.
-pub fn pkg_binder_c_escape(value: String) -> String Never! {
+fn pkg_binder_c_escape(value: String) -> String Never! {
     out := [String]{}
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
@@ -28,7 +28,7 @@ pub fn pkg_binder_c_escape(value: String) -> String Never! {
 
 // Fill `@@name@@` holes in a raw template. Values are inserted verbatim and
 // never rescanned, so a path that happens to spell a hole stays literal.
-pub fn pkg_binder_fill_template(template: String, slots: [String: String]) -> String Never! {
+fn pkg_binder_fill_template(template: String, slots: [String: String]) -> String Never! {
     parts :: template.split("@@").to_list()
     out := [String]{}
     loop index in 0..<parts.len() {
@@ -43,7 +43,7 @@ pub fn pkg_binder_fill_template(template: String, slots: [String: String]) -> St
 
 // The SHA-256 of the binder identity preimage: every part, NUL-separated
 // (`b"jet-<lang>-bind-v1\0" + source + b"\0" + ...`).
-pub fn pkg_binder_identity_digest(parts: [String]) -> String Never! {
+fn pkg_binder_identity_digest(parts: [String]) -> String Never! {
     identity := [U8]{}
     loop index in 0..<parts.len() {
         if index > 0 -> &identity.push(U8{0})
@@ -53,25 +53,25 @@ pub fn pkg_binder_identity_digest(parts: [String]) -> String Never! {
 }
 
 // Rust `{:?}` of an identifier-shaped string.
-pub fn pkg_binder_debug_quote(value: String) -> String Never! {
+fn pkg_binder_debug_quote(value: String) -> String Never! {
     "\"{value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 }
 
 // The detail after the last `separator`, or the whole line (`rsplit_once`).
-pub fn pkg_binder_after_last(line: String, separator: String) -> String Never! {
+fn pkg_binder_after_last(line: String, separator: String) -> String Never! {
     at :: pkg_binder_rfind(line, separator)
-    if at < 0 -> return ~line
+    if at < 0 -> return line.copy()
     pkg_binder_tail(line, at + separator.bytes().len())
 }
 
 // Whether the host has the POSIX process supervisor the worker bridges need
 // (Rust `cfg!(unix)`).
-pub fn pkg_binder_host_is_unix() -[Env]> Bool {
+fn pkg_binder_host_is_unix() -[Env]> Bool {
     sys.family() == "unix"
 }
 
 // The host operating system in the binder's shared-library vocabulary.
-pub enum BinderHostOS {
+enum BinderHostOS {
     Linux
     MacOS
     Windows
@@ -112,13 +112,13 @@ pub enum BinderHostOS {
 }
 
 // The registered descriptor for `language`; `label` names it in the error.
-pub fn pkg_binder_descriptor_for(language: ForeignLanguage, label: String) -> BinderDescriptor ForeignBindError! {
+fn pkg_binder_descriptor_for(language: ForeignLanguage, label: String) -> BinderDescriptor ForeignBindError! {
     descriptor :: pkg_binder_descriptor(language) ?? return Err(ForeignBindError.Source("{label} binder descriptor is not registered"))
     Ok(descriptor)
 }
 
 // Append the standard boundary record for one built archive.
-pub fn pkg_binder_append_artifact_boundary(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
+fn pkg_binder_append_artifact_boundary(provenance: &String, language: ForeignLanguage, label: String, lib: String, source: String, archive: String, toolchain: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
     descriptor :: pkg_binder_descriptor_for(language, label)
     if pkg_bridge_append_boundary_for_artifact(&provenance, descriptor, lib, source, archive, toolchain) == {
         .Ok(_) -> {}
@@ -127,13 +127,13 @@ pub fn pkg_binder_append_artifact_boundary(provenance: &String, language: Foreig
 }
 
 // `cc=<identity>;ar=<identity>` for a toolchain record.
-pub fn pkg_binder_cc_ar_identity() -[FS, Env, Exec, Time.Wait]> String {
+fn pkg_binder_cc_ar_identity() -[FS, Env, Exec, Time.Wait]> String {
     "cc={pkg_bridge_tool_identity("cc")};ar={pkg_bridge_tool_identity("ar")}"
 }
 
 // The first `tool` on PATH, canonicalized (the persistent and Pascal
 // binders' `tool_path`); a path that cannot be resolved counts as missing.
-pub fn pkg_binder_resolved_tool_path(tool: String) -[FS, Env]> String? Never! {
+fn pkg_binder_resolved_tool_path(tool: String) -[FS, Env]> String? Never! {
     found :: pkg_bridge_tool_path(tool) ?? return None
     resolved :: files.canonicalize(found) ?? return None
     Val(resolved)
@@ -141,7 +141,7 @@ pub fn pkg_binder_resolved_tool_path(tool: String) -[FS, Env]> String? Never! {
 
 // The runtime prefix two directories above the canonical `tool` path
 // (`<prefix>/bin/<tool>`), or None when it cannot be resolved.
-pub fn pkg_binder_tool_root(tool: String) -[FS, Env]> String? Never! {
+fn pkg_binder_tool_root(tool: String) -[FS, Env]> String? Never! {
     exe :: files.canonicalize(tool) ?? return None
     bin :: files.dirname(exe)
     if bin == "" || bin == exe -> return None
@@ -152,7 +152,7 @@ pub fn pkg_binder_tool_root(tool: String) -[FS, Env]> String? Never! {
 
 // A failing tool's detail: the first non-empty stderr line after its last
 // `: `, at most 160 characters (the Lua, Tcl, and JVM binders' laundering).
-pub fn pkg_binder_launder_last_detail(bytes: [U8]) -> String Never! {
+fn pkg_binder_launder_last_detail(bytes: [U8]) -> String Never! {
     loop line in pkg_binder_lines(String.from_bytes_lossy(bytes)) {
         trimmed :: line.trim()
         if trimmed != "" -> return pkg_binder_take_chars(pkg_binder_after_last(trimmed, ": "), 160)
@@ -162,14 +162,14 @@ pub fn pkg_binder_launder_last_detail(bytes: [U8]) -> String Never! {
 
 // Run one build tool; a failing status is `ToolFailed` with the laundered
 // stderr detail. Returns the captured output on success.
-pub fn pkg_binder_run_reporting_detail(argv: [String], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
+fn pkg_binder_run_reporting_detail(argv: [String], tool: String, action: String) -[Exec, Time.Wait]> BinderToolOutput ForeignBindError! {
     output :: pkg_binder_capture(argv, None, tool, action)
     if !output.success -> return Err(ForeignBindError.ToolFailed{tool: tool, action: action, detail: pkg_binder_launder_last_detail(output.stderr)})
     Ok(output)
 }
 
 // Whether the host uses 64-bit pointers (Rust `size_of::<usize>() == 8`).
-pub fn pkg_binder_host_is_64_bit() -[Env]> Bool {
+fn pkg_binder_host_is_64_bit() -[Env]> Bool {
     if pkg_ascii_lower(sys.arch()) == {
         "x86_64" | "amd64" | "x64" | "aarch64" | "arm64" | "riscv64" | "ppc64" | "ppc64le" | "powerpc64" | "powerpc64le" | "s390x" | "loongarch64" | "mips64" | "mips64el" | "sparc64" | "wasm64" -> true
         else -> false
@@ -177,21 +177,21 @@ pub fn pkg_binder_host_is_64_bit() -[Env]> Bool {
 }
 
 // A scalar-sidecar binding (Python, JavaScript) also names its worker script.
-pub struct ScalarBindResult {
-    pub source: String
-    pub bound: [String]
-    pub archive: String
-    pub worker: String
-    pub provenance: String
+struct ScalarBindResult {
+    source: String
+    bound: [String]
+    archive: String
+    worker: String
+    provenance: String
 }
 
 // The scalar sidecar reports its failures as binding-source errors.
-pub fn pkg_binder_scalar_bridge_error(error: ForeignBridgeError) -> ForeignBindError Never! {
+fn pkg_binder_scalar_bridge_error(error: ForeignBridgeError) -> ForeignBindError Never! {
     ForeignBindError.Source(error.message)
 }
 
 // Read a declared source file as text; `context` names it in a failure.
-pub fn pkg_binder_read_text(path: String, context: String) -[FS]> String ForeignBindError! {
+fn pkg_binder_read_text(path: String, context: String) -[FS]> String ForeignBindError! {
     if files.read(path) == {
         .Ok(text) -> Ok(text)
         .Err(error) -> Err(ForeignBindError.IO("{context}: {error}"))
@@ -199,7 +199,7 @@ pub fn pkg_binder_read_text(path: String, context: String) -[FS]> String Foreign
 }
 
 // The quoted scalar-kind rows a sidecar worker's `KINDS` table lists.
-pub fn pkg_binder_scalar_kind(scalar: ForeignScalar) -> String Never! {
+fn pkg_binder_scalar_kind(scalar: ForeignScalar) -> String Never! {
     if scalar == {
         .Int -> "int"
         .Float -> "float"

@@ -1,5 +1,7 @@
-// D-SYNC1=A / D-DBPOLICY1=A: shipped CRDT and closed row-policy boundaries.
+// D-SYNC1=A / D-DBPOLICY-CHECK1=A: shipped CRDT values and the database row
+// policy check.
 use core.sync as sync
+use core.db as db
 use app
 
 fn run() {
@@ -35,10 +37,10 @@ fn run() {
     print("map-get:{map_value}")
     print(sync.list_show(l))
 
-    policy :: sync.policy_new("tickets", "owner == user") ?? return
-    print(sync.policy_show(policy))
-    print("allow:{sync.policy_allows(policy, "alice", "alice")}")
-    print("deny:{sync.policy_allows(policy, "alice", "bob")}")
+    policy :: db.policy("tickets", "owner == user") ?? return
+    print(db.policy_show(policy))
+    print("allow:{db.policy_allows(policy, user: "alice", owner: "alice")}")
+    print("deny:{db.policy_allows(policy, user: "alice", owner: "bob")}")
 
     print(app.sync(sync.text_show(merged), over: "sess-1"))
 }

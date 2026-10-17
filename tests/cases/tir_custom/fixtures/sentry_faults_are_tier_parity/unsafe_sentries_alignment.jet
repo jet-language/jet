@@ -1,0 +1,8 @@
+use core.mem
+fn run() {
+    cell :: (x: 1, y: 2)
+    #Unsafe("the tuple storage is live but this raw Int is misaligned") {
+        pointer :: mem.Ptr<Int>.from_addr(mem.address_of(cell) + 1)
+        print(pointer.*)
+    }
+}

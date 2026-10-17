@@ -1,0 +1,139 @@
+// The one machine status object every `--json` command writes
+// (crates/jet-foundation/src/Report.rs `StatusValue`, `StatusFields`,
+// `StatusEnvelope::json`, `render_status`, `report_json_string`). Producers
+// build typed values; only this file turns them into JSON bytes.
+
+JET_CLI_STATUS_SCHEMA :: "jet.status/v1"
+
+// A typed JSON value accepted as an action-specific status field; `Float`
+// holds a number already rendered as JSON text.
+enum JetCLIStatusValue {
+    Null
+    Bool(value: Bool)
+    Integer(value: Int)
+    Float(text: String)
+    Text(value: String)
+    Array(values: [JetCLIStatusValue])
+    Object(fields: [JetCLIStatusField])
+}
+
+// One ordered, uniquely named field of a status object.
+struct JetCLIStatusField {
+    name: String
+    value: JetCLIStatusValue
+}
+
+fn jet_cli_status_field(name: String, value: JetCLIStatusValue) -> JetCLIStatusField Never! {
+    JetCLIStatusField{name: name, value: value}
+}
+
+fn jet_cli_status_text(value: String) -> JetCLIStatusValue Never! {
+    JetCLIStatusValue.Text{value: value}
+}
+
+fn jet_cli_status_bool(value: Bool) -> JetCLIStatusValue Never! {
+    JetCLIStatusValue.Bool{value: value}
+}
+
+fn jet_cli_status_int(value: Int) -> JetCLIStatusValue Never! {
+    JetCLIStatusValue.Integer{value: value}
+}
+
+fn jet_cli_status_object(fields: [JetCLIStatusField]) -> JetCLIStatusValue Never! {
+    JetCLIStatusValue.Object{fields: fields}
+}
+
+fn jet_cli_status_array(values: [JetCLIStatusValue]) -> JetCLIStatusValue Never! {
+    JetCLIStatusValue.Array{values: values}
+}
+
+// An array of strings.
+fn jet_cli_status_texts(values: [String]) -> JetCLIStatusValue Never! {
+    items :: loop value in values -> JetCLIStatusValue.Text{value: value}
+    JetCLIStatusValue.Array{values: items}
+}
+
+// `None` -> `null`, else the string.
+fn jet_cli_status_optional_text(value: String?) -> JetCLIStatusValue Never! {
+    text :: value ?? return JetCLIStatusValue.Null
+    JetCLIStatusValue.Text{value: text}
+}
+
+fn jet_cli_status_hex_digit(value: Int) -> String Never! {
+    if value < 10 -> return String.from_bytes([U8{48 + value}]) ?? "0"
+    String.from_bytes([U8{87 + value}]) ?? "0"
+}
+
+// Report.rs `report_json_string`: quote and escape one string. Every escaped
+// character is ASCII, so the scan runs over bytes and copies the unescaped
+// runs (UTF-8 sequences included) verbatim.
+fn jet_cli_json_string(value: String) -> String Never! {
+    bytes :: value.bytes()
+    output := "\""
+    segment_start := 0
+    index := 0
+    loop index < bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        escape :: if byte == {
+            34 -> "\\\""
+            92 -> "\\\\"
+            10 -> "\\n"
+            13 -> "\\r"
+            9 -> "\\t"
+            8 -> "\\b"
+            12 -> "\\f"
+            else -> if byte < 32 -> "\\u00{jet_cli_status_hex_digit((byte >> 4).bit_and(15))}{jet_cli_status_hex_digit(byte.bit_and(15))}" else -> ""
+        }
+        if escape.len() > 0 {
+            if segment_start < index {
+                chunk :: String.from_bytes(bytes[segment_start..index - 1]) ?? ""
+                output = "{output}{chunk}"
+            }
+            output = "{output}{escape}"
+            segment_start = index + 1
+        }
+        index += 1
+    }
+    if segment_start < bytes.len() {
+        chunk :: String.from_bytes(bytes[segment_start..bytes.len() - 1]) ?? ""
+        output = "{output}{chunk}"
+    }
+    "{output}\""
+}
+
+// `StatusValue::json`.
+fn jet_cli_status_json(value: JetCLIStatusValue) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Integer(number) -> "{number}"
+        .Float(text) -> text.copy()
+        .Text(text) -> jet_cli_json_string(text)
+        .Array(values) -> {
+            rendered :: loop item in values -> jet_cli_status_json(item)
+            "[{rendered.join(",")}]"
+        }
+        .Object(fields) -> "{{{jet_cli_status_fields_json(fields)}}}"
+    }
+}
+
+// `StatusFields::json`: `"name":value` pairs joined by commas.
+fn jet_cli_status_fields_json(fields: [JetCLIStatusField]) -> String Never! {
+    rendered :: loop field in fields -> "{jet_cli_json_string(field.name)}:{jet_cli_status_json(field.value)}"
+    rendered.join(",")
+}
+
+// `render_status` / `StatusEnvelope::json` with no report children:
+// `{"schema":"jet.status/v1","action":…,"ok":…,"reports":[],…fields}`.
+fn jet_cli_status_render(action: String, ok: Bool, fields: [JetCLIStatusField]) -> String Never! {
+    jet_cli_status_render_with_reports(action, ok, [String]{}, fields)
+}
+
+// `StatusEnvelope::json` with already rendered report children.
+fn jet_cli_status_render_with_reports(action: String, ok: Bool, reports: [String], fields: [JetCLIStatusField]) -> String Never! {
+    flag :: if ok -> "true" else -> "false"
+    out := "{{\"schema\":{jet_cli_json_string(JET_CLI_STATUS_SCHEMA)},\"action\":{jet_cli_json_string(action)},\"ok\":{flag},\"reports\":[{reports.join(",")}]"
+    rendered :: jet_cli_status_fields_json(fields)
+    if rendered.len() > 0 -> out = "{out},{rendered}"
+    "{out}}}"
+}

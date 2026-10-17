@@ -1,0 +1,48 @@
+// CommonTypes423-427 derives recursive Clone and fields-then-line equality.
+// CSVGlueABI owns CSV offsets; List24 allocation/access primitives are shared.
+#Export(c) fn jet_rt_handle_clone_csv_row(value: I64) -> I64 {
+    fields :: data_tree_word(value + CSV_ROW_FIELDS)
+    length :: data_tree_word(fields + DATA_SEQUENCE_LENGTH)
+    source :: data_tree_word(fields + DATA_SEQUENCE_DATA)
+    copied :: data_sequence_new(length, CSV_FIELD_STRIDE)
+    target :: data_tree_word(copied + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        data_tree_store(target + at * CSV_FIELD_STRIDE, jet_rt_string_clone(data_tree_word(source + at * CSV_FIELD_STRIDE)))
+        at += I64{1}
+    }
+    data_tree_store(copied + DATA_SEQUENCE_LENGTH, length)
+    result :: jet_rt_alloc(CSV_ROW_BYTES, I64{8})
+    data_tree_store(result + CSV_ROW_FIELDS, copied)
+    data_tree_store(result + CSV_ROW_LINE, data_tree_word(value + CSV_ROW_LINE))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_csv_row(value: I64) {
+    if (value == I64{0}) -> return
+    fields :: data_tree_word(value + CSV_ROW_FIELDS)
+    length :: data_tree_word(fields + DATA_SEQUENCE_LENGTH)
+    capacity :: data_tree_word(fields + DATA_SEQUENCE_CAPACITY)
+    data :: data_tree_word(fields + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        jet_rt_string_drop(data_tree_word(data + at * CSV_FIELD_STRIDE))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * CSV_FIELD_STRIDE, I64{8})
+    jet_rt_free(fields, DATA_SEQUENCE_BYTES, I64{8})
+    jet_rt_free(value, CSV_ROW_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_csv_row(left: I64, right: I64) -> Bool {
+    a :: data_tree_word(left + CSV_ROW_FIELDS)
+    b :: data_tree_word(right + CSV_ROW_FIELDS)
+    length :: data_tree_word(a + DATA_SEQUENCE_LENGTH)
+    if length != data_tree_word(b + DATA_SEQUENCE_LENGTH) -> return false
+    first :: data_tree_word(a + DATA_SEQUENCE_DATA)
+    second :: data_tree_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if !jet_rt_string_eq(data_tree_word(first + at * CSV_FIELD_STRIDE), data_tree_word(second + at * CSV_FIELD_STRIDE)) -> return false
+        at += I64{1}
+    }
+    data_tree_word(left + CSV_ROW_LINE) == data_tree_word(right + CSV_ROW_LINE)
+}

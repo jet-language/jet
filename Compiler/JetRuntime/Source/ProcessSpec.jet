@@ -1,0 +1,299 @@
+// Spec136 is a native private value carrier, not Rust or HostSpawn Spec216.
+// CAbiRoutes builders BORROW parent/inputs and return an independent clone.
+// DataABI owns offsets; TextDebug and UiCarriersBasic own nested codecs.
+fn process_raw_box(value: I64) -> I64 {
+    result :: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    encoding_store(result, value)
+    result
+}
+fn process_optional_raw_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> I64{0} else -> encoding_enum_clone(value)
+}
+fn process_optional_text_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> I64{0} else -> jet_rt_string_clone(value)
+}
+fn process_optional_text_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    jet_rt_string_eq(a, b)
+}
+fn process_optional_raw_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    encoding_enum_eq(a, b)
+}
+fn process_text_list_clone(value: I64, pairs: Bool) -> I64 {
+    if !pairs {
+        result :: jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})
+        data_text_list_copy_into(value, result)
+        return result
+    }
+    length :: encoding_word(value + DATA_SEQUENCE_LENGTH)
+    stride :: DATA_TREE_ENTRY_BYTES
+    result :: data_sequence_new(length, stride)
+    source :: encoding_word(value + DATA_SEQUENCE_DATA)
+    target :: encoding_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length * stride {
+        encoding_store(target + at, jet_rt_string_clone(encoding_word(source + at)))
+        at += DATA_TREE_ELEMENT_BYTES
+    }
+    encoding_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+fn process_text_list_drop(value: I64, pairs: Bool) {
+    if !pairs {
+        coll_text_list_drop(value, true)
+    } else {
+        length :: encoding_word(value + DATA_SEQUENCE_LENGTH)
+        data :: encoding_word(value + DATA_SEQUENCE_DATA)
+        at := I64{0}
+        loop at < length * DATA_TREE_ENTRY_BYTES {
+            jet_rt_string_drop(encoding_word(data + at))
+            at += DATA_TREE_ELEMENT_BYTES
+        }
+        capacity :: encoding_word(value + DATA_SEQUENCE_CAPACITY)
+        if (capacity != I64{0}) -> jet_rt_free(data, capacity * DATA_TREE_ENTRY_BYTES, I64{8})
+    }
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+fn process_text_list_eq(a: I64, b: I64, pairs: Bool) -> Bool {
+    length :: encoding_word(a + DATA_SEQUENCE_LENGTH)
+    if length != encoding_word(b + DATA_SEQUENCE_LENGTH) -> return false
+    stride :: if pairs -> DATA_TREE_ENTRY_BYTES else -> DATA_TREE_ELEMENT_BYTES
+    left :: encoding_word(a + DATA_SEQUENCE_DATA)
+    right :: encoding_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length * stride {
+        if !jet_rt_string_eq(encoding_word(left + at), encoding_word(right + at)) -> return false
+        at += DATA_TREE_ELEMENT_BYTES
+    }
+    true
+}
+fn process_text_list_push(list: I64, text: I64) {
+    slot :: data_sequence_reserve(list, DATA_TREE_ELEMENT_BYTES)
+    encoding_store(slot, jet_rt_string_clone(text))
+    encoding_store(list + DATA_SEQUENCE_LENGTH, encoding_word(list + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+#Export(c) fn jet_rt_handle_clone_process_spec(value: I64) -> I64 {
+    result :: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
+    coll_copy(value, result, PROCESS_SPEC_BYTES)
+    // Field helpers lend Bool bytes, so ignore padding and normalize clone words.
+    encoding_store(result + PROCESS_SPEC_ENV_CLEAR, if ((encoding_word(value + PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(result + PROCESS_SPEC_DETACHED, if ((encoding_word(value + PROCESS_SPEC_DETACHED).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(result + PROCESS_SPEC_CMD, process_text_list_clone(encoding_word(value + PROCESS_SPEC_CMD), false))
+    encoding_store(result + PROCESS_SPEC_CWD, process_optional_text_clone(encoding_word(value + PROCESS_SPEC_CWD)))
+    encoding_store(result + PROCESS_SPEC_ENV_SET, process_text_list_clone(encoding_word(value + PROCESS_SPEC_ENV_SET), true))
+    encoding_store(result + PROCESS_SPEC_ENV_REMOVE, process_text_list_clone(encoding_word(value + PROCESS_SPEC_ENV_REMOVE), false))
+    encoding_store(result + PROCESS_SPEC_STDIN, process_optional_raw_clone(encoding_word(value + PROCESS_SPEC_STDIN)))
+    field := PROCESS_SPEC_TIMEOUT
+    loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
+        encoding_store(result + field, process_optional_raw_clone(encoding_word(value + field)))
+        field += DATA_TREE_ELEMENT_BYTES
+    }
+    terminal :: encoding_word(value + PROCESS_SPEC_TERMINAL)
+    encoding_store(result + PROCESS_SPEC_TERMINAL, if (terminal == I64{0}) -> I64{0} else -> jet_rt_handle_clone_terminal_policy(terminal))
+    encoding_store(result + PROCESS_SPEC_POLICY_WIRE, process_optional_text_clone(encoding_word(value + PROCESS_SPEC_POLICY_WIRE)))
+    encoding_store(result + PROCESS_SPEC_DIRECTORIES, spawn_dirs_clone(encoding_word(value + PROCESS_SPEC_DIRECTORIES)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_process_spec(value: I64) {
+    if (value == I64{0}) -> return
+    process_text_list_drop(encoding_word(value + PROCESS_SPEC_CMD), false)
+    jet_rt_string_drop(encoding_word(value + PROCESS_SPEC_CWD))
+    process_text_list_drop(encoding_word(value + PROCESS_SPEC_ENV_SET), true)
+    process_text_list_drop(encoding_word(value + PROCESS_SPEC_ENV_REMOVE), false)
+    encoding_enum_drop(encoding_word(value + PROCESS_SPEC_STDIN))
+    field := PROCESS_SPEC_TIMEOUT
+    loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
+        encoding_enum_drop(encoding_word(value + field))
+        field += DATA_TREE_ELEMENT_BYTES
+    }
+    jet_rt_handle_drop_terminal_policy(encoding_word(value + PROCESS_SPEC_TERMINAL))
+    jet_rt_string_drop(encoding_word(value + PROCESS_SPEC_POLICY_WIRE))
+    directories :: encoding_word(value + PROCESS_SPEC_DIRECTORIES)
+    if directories != (I64{0}) {
+        index := I64{0}
+        loop index < encoding_word(directories) {
+            jet_fd_drop_raw(encoding_word(encoding_word(directories + I64{16}) + index * I64{24}))
+            index += I64{1}
+        }
+        spawn_list_free(directories, I64{24})
+    }
+    jet_rt_free(value, PROCESS_SPEC_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_process_spec(a: I64, b: I64) -> Bool {
+    if !process_text_list_eq(encoding_word(a + PROCESS_SPEC_CMD), encoding_word(b + PROCESS_SPEC_CMD), false) -> return false
+    if !process_optional_text_eq(encoding_word(a + PROCESS_SPEC_CWD), encoding_word(b + PROCESS_SPEC_CWD)) -> return false
+    if (encoding_word(a + PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255})) != (encoding_word(b + PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255})) -> return false
+    if !process_text_list_eq(encoding_word(a + PROCESS_SPEC_ENV_SET), encoding_word(b + PROCESS_SPEC_ENV_SET), true) -> return false
+    if !process_text_list_eq(encoding_word(a + PROCESS_SPEC_ENV_REMOVE), encoding_word(b + PROCESS_SPEC_ENV_REMOVE), false) -> return false
+    if !process_optional_raw_eq(encoding_word(a + PROCESS_SPEC_STDIN), encoding_word(b + PROCESS_SPEC_STDIN)) -> return false
+    if encoding_word(a + PROCESS_SPEC_STDOUT) != encoding_word(b + PROCESS_SPEC_STDOUT) -> return false
+    if encoding_word(a + PROCESS_SPEC_STDERR) != encoding_word(b + PROCESS_SPEC_STDERR) -> return false
+    field := PROCESS_SPEC_TIMEOUT
+    loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
+        if !process_optional_raw_eq(encoding_word(a + field), encoding_word(b + field)) -> return false
+        field += DATA_TREE_ELEMENT_BYTES
+    }
+    if (encoding_word(a + PROCESS_SPEC_DETACHED).bit_and(I64{255})) != (encoding_word(b + PROCESS_SPEC_DETACHED).bit_and(I64{255})) -> return false
+    left :: encoding_word(a + PROCESS_SPEC_TERMINAL)
+    right :: encoding_word(b + PROCESS_SPEC_TERMINAL)
+    if (left == I64{0} || right == I64{0}) {
+        if left != right -> return false
+    } else if !jet_rt_handle_eq_terminal_policy(left, right) -> return false
+    if !process_optional_text_eq(encoding_word(a + PROCESS_SPEC_POLICY_WIRE), encoding_word(b + PROCESS_SPEC_POLICY_WIRE)) -> return false
+    left_directories :: encoding_word(a + PROCESS_SPEC_DIRECTORIES)
+    right_directories :: encoding_word(b + PROCESS_SPEC_DIRECTORIES)
+    left_count :: if left_directories == (I64{0}) -> { I64{0} } else -> { encoding_word(left_directories) }
+    right_count :: if right_directories == (I64{0}) -> { I64{0} } else -> { encoding_word(right_directories) }
+    if left_count != right_count -> return false
+    if left_count == (I64{0}) -> return true
+    left_data :: encoding_word(left_directories + I64{16})
+    right_data :: encoding_word(right_directories + I64{16})
+    offset := I64{0}
+    loop offset < left_count * (I64{24}) {
+        if encoding_word(left_data + offset) != encoding_word(right_data + offset) -> return false
+        offset += I64{8}
+    }
+    true
+}
+#Export(c) fn jet_rt_handle_field_process_spec_env_clear(value: I64) -> I64 { value + PROCESS_SPEC_ENV_CLEAR }
+#Export(c) fn jet_rt_handle_field_process_spec_detached(value: I64) -> I64 { value + PROCESS_SPEC_DETACHED }
+#Export(c) fn jet_rt_handle_show_process_spec(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    rt_text_push_word(result, I64{6013276806766883408}, I64{8}) // ProcessS
+    rt_text_push_word(result, I64{391519626608}, I64{5}) // pec([
+    cmd :: encoding_word(value + PROCESS_SPEC_CMD)
+    data :: encoding_word(cmd + DATA_SEQUENCE_DATA)
+    length :: encoding_word(cmd + DATA_SEQUENCE_LENGTH)
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) -> rt_text_push_word(result, I64{8236}, I64{2})
+        rt_text_push_rust_debug_str(result, encoding_word(data + at * DATA_TREE_ELEMENT_BYTES))
+        at += I64{1}
+    }
+    rt_text_push_word(result, I64{10589}, I64{2}) // ])
+    jet_rt_string_builder_finish(result)
+}
+// Real pure-data producer, consumes an already-owned native List<Text> holder.
+fn jet_std_process_cmd_owned(cmd: I64) -> I64 {
+    result :: jet_rt_alloc(PROCESS_SPEC_BYTES, I64{8})
+    coll_zero(result, PROCESS_SPEC_BYTES)
+    encoding_store(result + PROCESS_SPEC_CMD, cmd)
+    encoding_store(result + PROCESS_SPEC_ENV_SET, data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
+    encoding_store(result + PROCESS_SPEC_ENV_REMOVE, data_sequence_new(I64{0}, DATA_TREE_ELEMENT_BYTES))
+    encoding_store(result + PROCESS_SPEC_STDOUT, PROCESS_STREAM_CAPTURE)
+    encoding_store(result + PROCESS_SPEC_STDERR, PROCESS_STREAM_CAPTURE)
+    encoding_store(result + PROCESS_SPEC_OUTPUT_LIMIT, process_raw_box(PROCESS_SPEC_DEFAULT_OUTPUT_LIMIT))
+    result
+}
+#Export(c) fn jet_std_process_cmd(data: I64, length: I64) -> I64 {
+    // CAbiRoutes.rs:26-29 list_in treats null data or nonpositive length as empty.
+    count :: if (length <= I64{0} || data == I64{0}) -> I64{0} else -> length
+    cmd :: data_sequence_new(count, DATA_TREE_ELEMENT_BYTES)
+    at := I64{0}
+    loop at < count {
+        process_text_list_push(cmd, encoding_word(data + at * DATA_TREE_ELEMENT_BYTES))
+        at += I64{1}
+    }
+    jet_std_process_cmd_owned(cmd)
+}
+#Export(c) fn jet_process_spec_arg(value: I64, extra: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    process_text_list_push(encoding_word(result + PROCESS_SPEC_CMD), extra)
+    result
+}
+#Export(c) fn jet_process_spec_args_extend(value: I64, data: I64, length: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    if (data == I64{0}) -> return result
+    cmd :: encoding_word(result + PROCESS_SPEC_CMD)
+    at := I64{0}
+    loop at < length {
+        process_text_list_push(cmd, encoding_word(data + at * DATA_TREE_ELEMENT_BYTES))
+        at += I64{1}
+    }
+    result
+}
+#Export(c) fn jet_process_spec_cwd(value: I64, cwd: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    jet_rt_string_drop(encoding_word(result + PROCESS_SPEC_CWD))
+    encoding_store(result + PROCESS_SPEC_CWD, jet_rt_string_clone(cwd))
+    result
+}
+#Export(c) fn jet_process_spec_env(value: I64, name: I64, text: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    list :: encoding_word(result + PROCESS_SPEC_ENV_SET)
+    slot :: data_sequence_reserve(list, DATA_TREE_ENTRY_BYTES)
+    encoding_store(slot + DATA_TREE_ENTRY_KEY, jet_rt_string_clone(name))
+    encoding_store(slot + DATA_TREE_ENTRY_VALUE, jet_rt_string_clone(text))
+    encoding_store(list + DATA_SEQUENCE_LENGTH, encoding_word(list + DATA_SEQUENCE_LENGTH) + I64{1})
+    result
+}
+#Export(c) fn jet_process_spec_env_remove(value: I64, name: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    process_text_list_push(encoding_word(result + PROCESS_SPEC_ENV_REMOVE), name)
+    result
+}
+#Export(c) fn jet_process_spec_env_clear(value: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    encoding_store(result + PROCESS_SPEC_ENV_CLEAR, I64{1})
+    result
+}
+#Export(c) fn jet_process_spec_detached(value: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    encoding_store(result + PROCESS_SPEC_DETACHED, I64{1})
+    result
+}
+fn process_spec_raw_replace(value: I64, field: I64, raw: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    encoding_enum_drop(encoding_word(result + field))
+    encoding_store(result + field, process_raw_box(raw))
+    result
+}
+fn jet_process_limit_i64(value: I64) -> I64 {
+    if int_negative(value) -> return I64{0}
+    if !int_fits(value, U64{9223372036854775807}) -> return I64{9223372036854775807}
+    int_word(value)
+}
+#Export(c) fn jet_process_spec_output_limit(value: I64, limit: I64) -> I64 { process_spec_raw_replace(value, PROCESS_SPEC_OUTPUT_LIMIT, jet_process_limit_i64(limit)) }
+#Export(c) fn jet_process_spec_memory_limit(value: I64, limit: I64) -> I64 { process_spec_raw_replace(value, PROCESS_SPEC_MEMORY_LIMIT, jet_process_limit_i64(limit)) }
+#Export(c) fn jet_process_spec_open_file_limit(value: I64, limit: I64) -> I64 { process_spec_raw_replace(value, PROCESS_SPEC_OPEN_FILE_LIMIT, jet_process_limit_i64(limit)) }
+fn process_spec_mode(value: I64, mode: I64, field: I64) -> I64 {
+    // Frozen CAbiRoutes range_stop, not exact Int native() conversion.
+    if (mode < PROCESS_STREAM_STREAM || mode > PROCESS_STREAM_CAPTURE) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    if (field == PROCESS_SPEC_STDIN) -> return process_spec_raw_replace(value, field, mode)
+    result :: jet_rt_handle_clone_process_spec(value)
+    encoding_store(result + field, mode)
+    result
+}
+#Export(c) fn jet_process_spec_stdin(value: I64, mode: I64) -> I64 { process_spec_mode(value, mode, PROCESS_SPEC_STDIN) }
+#Export(c) fn jet_process_spec_stdout(value: I64, mode: I64) -> I64 { process_spec_mode(value, mode, PROCESS_SPEC_STDOUT) }
+#Export(c) fn jet_process_spec_stderr(value: I64, mode: I64) -> I64 { process_spec_mode(value, mode, PROCESS_SPEC_STDERR) }
+#Export(c) fn jet_process_spec_terminal(value: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    jet_rt_handle_drop_terminal_policy(encoding_word(result + PROCESS_SPEC_TERMINAL))
+    // TerminalDefault.rs:7-8 + CommonTypes.rs:62-67, Cooked=1.
+    encoding_store(result + PROCESS_SPEC_TERMINAL, ui_carrier_terminal_policy_new(I64{80}, I64{24}, I64{1}))
+    result
+}
+#Export(c) fn jet_process_spec_terminal_with_policy(value: I64, policy: I64) -> I64 {
+    result :: jet_rt_handle_clone_process_spec(value)
+    jet_rt_handle_drop_terminal_policy(encoding_word(result + PROCESS_SPEC_TERMINAL))
+    encoding_store(result + PROCESS_SPEC_TERMINAL, jet_rt_handle_clone_terminal_policy(policy))
+    result
+}
+// Canonical TimeGlueABI borrowed Duration8; no second Duration codec/owner.
+fn duration_ns(value: I64) -> I64 { time_glue_word(value + TIME_DURATION_NS) }
+fn process_duration_millis(value: I64) -> I64 {
+    // CommonTypes.rs:2847-2848 truncates towards zero before Process.rs max(0).
+    millis :: duration_ns(value) /% I64{1000000}
+    if (millis < I64{0}) -> I64{0} else -> millis
+}
+#Export(c) fn jet_process_spec_timeout(value: I64, timeout: I64) -> I64 {
+    process_spec_raw_replace(value, PROCESS_SPEC_TIMEOUT, process_duration_millis(timeout))
+}
+#Export(c) fn jet_process_spec_cpu_time_limit(value: I64, timeout: I64) -> I64 {
+    process_spec_raw_replace(value, PROCESS_SPEC_CPU_TIME_LIMIT, process_duration_millis(timeout))
+}

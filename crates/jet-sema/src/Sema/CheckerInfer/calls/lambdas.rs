@@ -103,21 +103,23 @@ impl<'a> Checker<'a> {
 
         let mut param_types = Vec::new();
         for (i, p) in lam.params.iter_mut().enumerate() {
-            let pty = if let Some(ty) = &p.ty {
-                self.check_declared_type(ty, p.ty_span.unwrap_or(p.name_span));
+            let pty = if let Some(ty) = p.ty.take() {
+                let ty = self.resolve_type(ty);
+                self.check_declared_type(&ty, p.ty_span.unwrap_or(p.name_span));
+                p.ty = Some(ty.clone());
                 if let Some(required) = exp_params.and_then(|params| params.get(i)) {
-                    if !lambda_slot_matches(required, ty) {
+                    if !lambda_slot_matches(required, &ty) {
                         self.diags.push(Diagnostic::error(
                             "E0113",
                             format!("this lambda parameter should be {}, not {}", required.show(), ty.show()),
                             "a written lambda parameter type must equal the expected parameter type".to_string(),
-                            type_fix_hint(required, ty),
+                            type_fix_hint(required, &ty),
                             p.ty_span.or(Some(p.name_span)),
                         ));
                         return None;
                     }
                 }
-                ty.clone()
+                ty
             } else if let Some(ep) = exp_params.and_then(|ps| ps.get(i)) {
                 ep.clone()
             } else {
@@ -180,7 +182,7 @@ impl<'a> Checker<'a> {
             if self.is_known_enum(name) {
                 continue;
             }
-            if self.lookup(name).is_none() && !self.consts.contains_key(name) {
+            if self.lookup(name).is_none() && self.const_type(name).is_none() {
                 self.unknown_name(name, lam.span);
             }
         }
@@ -257,7 +259,7 @@ impl<'a> Checker<'a> {
                 let cap = self
                     .lookup(name)
                     .map(|i| (i.ty.clone(), i.param_conv))
-                    .or_else(|| self.consts.get(name).map(|t| (t.clone(), None)));
+                    .or_else(|| self.const_type(name).map(|t| (t.clone(), None)));
                 let Some((cap_ty, cap_conv)) = cap else {
                     continue;
                 };
@@ -269,7 +271,7 @@ impl<'a> Checker<'a> {
                             .unwrap_or_else(|| {
                                 self.funcs.contains_key(name)
                                     || self.unqualified.contains_key(name)
-                                    || self.unqualified_file.contains_key(name)
+                                    || self.has_file_function(name)
                             });
                         if callback_safe {
                             None
@@ -530,6 +532,8 @@ impl<'a> Checker<'a> {
         }
 
         self.push_scope();
+        let lambda_scope_depth = self.scope_depth();
+        let saved_lambda_scope_floor = std::mem::replace(&mut self.lambda_scope_floor, lambda_scope_depth);
         let saved_param_names = std::mem::replace(
             &mut self.current_param_names,
             lam.params.iter().map(|param| param.name.clone()).collect(),
@@ -604,6 +608,7 @@ impl<'a> Checker<'a> {
         let saved_ret = self.ret.clone();
         let saved_failure_carrier_inference = self.failure_carrier_inference;
         let saved_failure_carrier = self.failure_carrier.clone();
+        let saved_failure_carrier_success = self.failure_carrier_success.clone();
         let saved_statement_expr_inference = self.statement_expr_inference;
         self.failure_carrier_inference = infer_failure_carrier;
         self.failure_carrier = None;
@@ -612,6 +617,17 @@ impl<'a> Checker<'a> {
             self.ret = None;
         } else if let Some(ret) = &effective_ret {
             self.ret = Some(ret.clone());
+        }
+        // An inferring callback leaves `ret` open for its carrier, but its
+        // explicit `return` still owes the expected success row. An inline
+        // loop body keeps the enclosing callback's row, as it keeps its
+        // `return` target.
+        if !inline_loop {
+            self.failure_carrier_success = if infer_failure_carrier {
+                effective_ret.clone()
+            } else {
+                None
+            };
         }
         let saved_in_lambda_body = self.in_lambda_body;
         let saved_inferred_mut_captures = std::mem::take(&mut self.inferred_lambda_mut_captures);
@@ -651,6 +667,13 @@ impl<'a> Checker<'a> {
                 lam.meta.loop_label.as_ref().map(|(name, _)| name.clone()),
             ));
         }
+        // D-CALLSITE-MARK1=A: captures already moved before the body runs, so
+        // a `^` take inside the body is told apart from an earlier move.
+        let moved_before_body: HashSet<String> = read_caps
+            .iter()
+            .filter(|name| self.flow.moved.get(*name).is_some())
+            .cloned()
+            .collect();
         let mut body_ret = match &mut lam.body {
             LambdaBody::Expr(e) => {
                 if self.is_task_spawn {
@@ -703,9 +726,9 @@ impl<'a> Checker<'a> {
                     self.flow.reachable = reachable;
                     Some(expected.clone())
                 } else {
-                    // The body may never run (a spawned task, a callback), so
-                    // a `return` inside it is a conditional return of the
-                    // enclosing function, not an unconditional one (card #2006).
+                    // The body may never run (a spawned task, a callback).
+                    // Its `return` exits the lambda (D-TAIL-RETURN1), so
+                    // checking it must preserve the enclosing reachability.
                     // An open value callback is checked once as a statement
                     // block for declarations/flow, then its tail is inferred
                     // as the callback value below. Drop only that first-pass
@@ -761,12 +784,12 @@ impl<'a> Checker<'a> {
                         for s in stmts.iter_mut().rev() {
                             match s {
                                 Stmt::Return(Some(e), _) => {
-                                    self.rewind_moves_in_span(e.span());
+                                    self.rewind_moves_in_span(tail_source_extent(e, lam.span.end));
                                     last_ret = self.infer(e);
                                     break;
                                 }
                                 Stmt::Expr(e) => {
-                                    self.rewind_moves_in_span(e.span());
+                                    self.rewind_moves_in_span(tail_source_extent(e, lam.span.end));
                                     last_ret = self.infer_fallible_stmt(e);
                                     break;
                                 }
@@ -837,6 +860,24 @@ impl<'a> Checker<'a> {
             }
             body_ret = Some(result_ty);
         }
+        // D-CALLSITE-MARK1=A: a `^` on a captured name inside the body moves
+        // it into the lambda; the lambda can then run once. Immediately
+        // evaluated loop carriers run exactly once already.
+        if !inline_loop && !collecting_loop && !result_loop {
+            let mut taken: Vec<&String> = read_caps
+                .iter()
+                .filter(|name| {
+                    !param_names.contains(*name)
+                        && !take_set.contains(*name)
+                        && !moved_before_body.contains(*name)
+                        && self.flow.moved.get(*name).is_some()
+                })
+                .collect();
+            taken.sort();
+            if let Some(name) = taken.first() {
+                self.once_lambda_sites.insert(lam.span, (*name).clone());
+            }
+        }
 
         // An open return row uses `None` for a valueless function, as TIR
         // lowering and the self-hosted checker do. The statement checker
@@ -872,9 +913,11 @@ impl<'a> Checker<'a> {
         lam.meta.fallible_propagation = self.task_body_propagates || self.failure_carrier.is_some();
         self.task_body_propagates = saved_task_body_propagates;
         self.in_lambda_body = saved_in_lambda_body;
+        self.lambda_scope_floor = saved_lambda_scope_floor;
         self.ret = saved_ret;
         self.expected_type = saved_expected;
         self.failure_carrier = saved_failure_carrier;
+        self.failure_carrier_success = saved_failure_carrier_success;
         self.failure_carrier_inference = saved_failure_carrier_inference;
         self.statement_expr_inference = saved_statement_expr_inference;
         self.txn_depth = saved_txn_depth;
@@ -1042,7 +1085,26 @@ impl<'a> Checker<'a> {
         } else {
             body_ret
         };
-        lam.meta.fallible_carrier = if lam.meta.fallible_propagation {
+        // A concrete, unconstrained lambda has already had its own body
+        // checked. Do not reintroduce the default Err rail when its binding
+        // is called: no propagated failure means the rail is Never.
+        let ret_ty = if !expected_callable && !inline_loop && !lam.meta.fallible_propagation {
+            ret_ty.map(|ret| {
+                if matches!(ret.without_user_tags(), Type::Result { .. } | Type::Option(_))
+                    || ret.is_never()
+                {
+                    ret
+                } else {
+                    Type::Result {
+                        ok: Box::new(ret),
+                        err: Box::new(Type::Named(Syntax::TYPE_NEVER.to_string())),
+                    }
+                }
+            })
+        } else {
+            ret_ty
+        };
+        lam.meta.fallible_carrier = if lam.meta.fallible_propagation || (!expected_callable && !inline_loop) {
             inferred_fallible_ret.or_else(|| {
                 ret_ty.as_ref().and_then(|ty| {
                     matches!(ty, Type::Result { .. } | Type::Option(_)).then(|| ty.clone())
@@ -1103,6 +1165,31 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// The source extent of a callback tail for move rewinding: from the tail's
+/// leftmost token to the end of the lambda. `Expr::span` names a method call
+/// by its method token, so the receiver a `.join()` consumes sits before that
+/// span; widen to the leftmost receiver, operand, or wrapped value so the
+/// rewind covers every move the first walk made in the tail.
+fn tail_source_extent(expr: &Expr, lambda_end: usize) -> crate::Diagnostics::Span {
+    fn leftmost_start(expr: &Expr) -> usize {
+        let inner = match expr {
+            Expr::MethodCall { receiver, .. } => Some(receiver),
+            Expr::Try(inner, ..)
+            | Expr::Paren(inner, _)
+            | Expr::Place(inner, _, _)
+            | Expr::Copy(inner, _)
+            | Expr::Field(inner, _, _)
+            | Expr::Binary(_, inner, _, _) => Some(inner),
+            Expr::OrFallback { value, .. } => Some(value),
+            Expr::Index { base, .. } => Some(base),
+            _ => None,
+        };
+        let own = expr.span().start;
+        inner.map_or(own, |inner| own.min(leftmost_start(inner)))
+    }
+    let span = expr.span();
+    crate::Diagnostics::Span::new(leftmost_start(expr).min(span.start), span.end.max(lambda_end))
+}
 
 fn is_unit_type(ty: &Type) -> bool {
     matches!(ty, Type::Named(name) if name == Syntax::INTERNAL_UNIT_TYPE)
@@ -1256,6 +1343,7 @@ fn rewrite_collect_yields(stmts: &mut [Stmt], target: &str) {
                     resolved_ret: Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string())),
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 });
             }
             Stmt::Loop { body, .. }

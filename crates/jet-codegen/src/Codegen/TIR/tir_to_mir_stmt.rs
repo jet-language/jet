@@ -14,8 +14,9 @@ use crate::Codegen::TIR::{
 use jet_foundation::CanonicalPass;
 use jet_foundation::MIR::{
     MirAccess, MirBinaryDispatch, MirBlockId, MirCallSignature, MirConstant, MirDropKind,
-    MirIndexKind, MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily, MirScopeId,
-    MirScopeKind, MirSemanticOp, MirSymbol, MirTerminator, MirTestScopeMember, MirValueId,
+    MirIndexKind, MirLoopSourceKind, MirOperation, MirPreludeAbi, MirPreludeFamily,
+    MirScopeId, MirScopeKind, MirSemanticOp, MirSymbol, MirTerminator, MirTestScopeMember,
+    MirValueId, MirPollKind,
 };
 
 /// Lower a sequence of checked TIR statements in the current MIR block.
@@ -101,11 +102,13 @@ pub(super) fn lower_stmt(ctx: &mut LowerCtx, stmt: &TStmt) -> Result<(), LowerEr
                 )),
                 // D-SHAPE-PLACE1=A: `w := &list[a..b]` aliases the range
                 // window place, so `w[i] = x` lands in the owner's storage.
+                // D-MEMPROVENANCE2: `w :: &view[a..b]` over a write view
+                // aliases the narrower range of the same owner place.
                 TExprKind::BuiltinMethod {
                     recv,
                     op: TBuiltinOp::ViewMutNew { .. },
                     ..
-                } if matches!(recv.ty.without_user_tags(), Type::List(_)) => {
+                } if super::tir_to_mir_expr::write_window_receiver(&recv.ty) => {
                     super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Write)?
                         .map(|place| (place, true))
                 }
@@ -951,7 +954,6 @@ fn lower_split_view(
                     ),
                 ],
                 extra: None,
-                as_trait: None,
             },
         };
         let view = TExpr {
@@ -966,6 +968,20 @@ fn lower_split_view(
                 args: vec![range_expr],
             },
         };
+        // D-SHAPE-PLACE1=A (#4707): a constant-bound write window aliases the
+        // owner's range place, exactly as `w :: &list[a..b]` does, so writes
+        // through it land in the owner on every tier instead of in a view
+        // value the interpreter holds by copy.
+        if write {
+            if let Some(place) =
+                super::tir_to_mir_expr::lower_receiver_place(ctx, &view, MirAccess::Write)?
+            {
+                let local = TLocal::user(name).as_mutable();
+                ctx.window_aliases.insert(local.name.clone());
+                ctx.bind_local_alias(&local, ty, place, true)?;
+                return Ok(());
+            }
+        }
         lower_expr(ctx, &view)?
     };
     let local = if write {
@@ -1068,6 +1084,7 @@ fn lower_tuple_destructure(
             MirOperation::WritePlace { place, value },
         )?;
     }
+    ctx.finish_owned_destructure(temp_place, &init.ty, binds)?;
     Ok(())
 }
 
@@ -1079,7 +1096,34 @@ fn lower_struct_destructure(
     move_fields: bool,
     binds: &[(String, String)],
 ) -> Result<(), LowerError> {
-    let subject = if move_fields {
+    let keeps_close_owner = if move_fields {
+        false
+    } else {
+        let ty = ctx.mir_type(&init.ty)?;
+        ctx.scope_end_close(&ty).is_some()
+    };
+    let subject = if keeps_close_owner {
+        let place = if let Some(place) =
+            super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Read)?
+        {
+            place
+        } else {
+            let value = lower_expr(ctx, init)?;
+            let temp = TLocal::generated(tmp);
+            let place = ctx.bind_local(&temp, init.ty.clone(), true, false, false)?;
+            ctx.emit(
+                "stmt.struct.close-owner.write",
+                None,
+                MirOperation::WritePlace { place, value },
+            )?;
+            ctx.place_for_local(&temp, MirAccess::Read)?
+        };
+        ctx.emit(
+            "stmt.struct.close-owner.read",
+            Some(init.ty.clone()),
+            MirOperation::ReadPlace(place),
+        )?
+    } else if move_fields {
         if let Some(place) =
             super::tir_to_mir_expr::lower_receiver_place(ctx, init, MirAccess::Move)?
         {
@@ -1155,6 +1199,7 @@ fn lower_struct_destructure(
             MirOperation::WritePlace { place, value },
         )?;
     }
+    ctx.finish_owned_destructure(temp_place, &init.ty, binds)?;
     Ok(())
 }
 
@@ -1448,6 +1493,7 @@ fn lower_swizzle_assign(
 /// canonical-pass input of the `lower_stmts` call it stands for.
 struct IfChainLink {
     join: MirBlockId,
+    then_reaches_join: bool,
     else_scope: Option<(MirScopeId, Option<(String, String)>)>,
 }
 
@@ -1481,7 +1527,8 @@ fn lower_if<'a>(
             lower_stmts(ctx, then_body)?;
             ctx.exit_scope(scope)?;
         }
-        if !ctx.is_terminated() {
+        let then_reaches_join = !ctx.is_terminated();
+        if then_reaches_join {
             ctx.terminate(MirTerminator::Jump { target: join });
         }
 
@@ -1500,6 +1547,7 @@ fn lower_if<'a>(
                 if !ctx.is_terminated() {
                     links.push(IfChainLink {
                         join,
+                        then_reaches_join,
                         else_scope: Some((scope, before)),
                     });
                     cond = next_cond;
@@ -1515,6 +1563,7 @@ fn lower_if<'a>(
         }
         links.push(IfChainLink {
             join,
+            then_reaches_join,
             else_scope: None,
         });
         break;
@@ -1524,10 +1573,16 @@ fn lower_if<'a>(
             record_lowered_statements(ctx, before);
             ctx.exit_scope(scope)?;
         }
-        if !ctx.is_terminated() {
+        let else_reaches_join = !ctx.is_terminated();
+        if else_reaches_join {
             ctx.terminate(MirTerminator::Jump { target: link.join });
         }
         ctx.switch_to(link.join);
+        if !link.then_reaches_join && !else_reaches_join {
+            ctx.terminate(MirTerminator::Unreachable {
+                reason: "both if arms terminate".to_string(),
+            });
+        }
     }
     Ok(())
 }
@@ -1645,6 +1700,7 @@ fn lower_loop_with_exit(
     let exit = ctx.new_block(ctx.span(), "loop.exit")?;
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(header);
+    ctx.emit_poll(MirPollKind::Check, false)?;
     ctx.terminate(MirTerminator::Jump { target: body_block });
     ctx.switch_to(body_block);
     ctx.push_loop(label.map(str::to_string), exit, header);
@@ -1670,6 +1726,7 @@ fn lower_while(
     let exit = ctx.new_block(ctx.span(), "while.exit")?;
     ctx.terminate(MirTerminator::Jump { target: header });
     ctx.switch_to(header);
+    ctx.emit_poll(MirPollKind::Check, false)?;
     let condition = lower_expr(ctx, cond)?;
     ctx.terminate(MirTerminator::Branch {
         condition,
@@ -1725,6 +1782,7 @@ fn lower_counted_loop(
         ctx.terminate(MirTerminator::Jump { target: step_block });
     }
     ctx.switch_to(step_block);
+    ctx.emit_poll(MirPollKind::Check, false)?;
     if let Some(step) = step {
         lower_stmt(ctx, step)?;
     }
@@ -1867,6 +1925,7 @@ fn lower_range_loop(
         ctx.terminate(MirTerminator::Jump { target: advance });
     }
     ctx.switch_to(advance);
+    ctx.emit_poll(MirPollKind::Check, false)?;
     if iterator {
         ctx.emit(
             "range.iter-advance",
@@ -1939,10 +1998,18 @@ fn read_list_walk(
     if method_kind.is_some() || step.is_some() || by_value || columnar {
         return Ok(None);
     }
-    let Type::List(element) = collection.ty.without_user_tags() else {
-        return Ok(None);
+    // A fixed list walks the same way over its static length; one whose
+    // length is not a literal keeps the iterator.
+    let (element, fixed_len) = match collection.ty.without_user_tags() {
+        Type::List(element) => ((**element).clone(), None),
+        Type::FixedList { elem, len } => {
+            match len.literal_value().and_then(|len| i64::try_from(len).ok()) {
+                Some(len) => ((**elem).clone(), Some(len)),
+                None => return Ok(None),
+            }
+        }
+        _ => return Ok(None),
     };
-    let element = (**element).clone();
     if ctx.read_window_place(collection)?.is_none()
         && !(source_stable && ctx.stable_source_place(collection)?.is_some())
     {
@@ -1996,10 +2063,13 @@ fn read_list_walk(
         },
         end: TExpr {
             ty: Type::Int,
-            kind: TExprKind::BuiltinMethod {
-                recv: Box::new(list),
-                op: TBuiltinOp::LenList,
-                args: Vec::new(),
+            kind: match fixed_len {
+                Some(len) => TExprKind::IntLit(len, None),
+                None => TExprKind::BuiltinMethod {
+                    recv: Box::new(list),
+                    op: TBuiltinOp::LenList,
+                    args: Vec::new(),
+                },
             },
         },
         step: None,
@@ -2215,6 +2285,7 @@ fn lower_for_in(
         ctx.terminate(MirTerminator::Jump { target: advance });
     }
     ctx.switch_to(advance);
+    ctx.emit_poll(MirPollKind::Check, false)?;
     ctx.emit(
         "for-in.advance",
         None,
@@ -2363,7 +2434,10 @@ fn lower_enum_match(
             },
         )?;
     }
+    let saved_lookup_head = ctx.pattern_lookup_head.replace(ctx.current);
+    let saved_lookup_caches = std::mem::take(&mut ctx.pattern_lookup_caches);
     let join = ctx.new_block(ctx.span(), "match.join")?;
+    let mut has_join_edge = false;
     let otherwise = ctx.new_block(ctx.span(), "match.otherwise")?;
     let mut tests = Vec::with_capacity(arms.len());
     let mut bodies = Vec::with_capacity(arms.len());
@@ -2407,6 +2481,7 @@ fn lower_enum_match(
         ctx.pop_lexical_frame()?;
         if !ctx.is_terminated() {
             ctx.terminate(MirTerminator::Jump { target: join });
+            has_join_edge = true;
         }
     }
     ctx.switch_to(otherwise);
@@ -2425,8 +2500,16 @@ fn lower_enum_match(
     ctx.pop_lexical_frame()?;
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });
+        has_join_edge = true;
     }
     ctx.switch_to(join);
+    if !has_join_edge {
+        ctx.terminate(MirTerminator::Unreachable {
+            reason: "all checked pattern-match paths terminate".to_string(),
+        });
+    }
+    ctx.pattern_lookup_head = saved_lookup_head;
+    ctx.pattern_lookup_caches = saved_lookup_caches;
     Ok(())
 }
 
@@ -2813,11 +2896,19 @@ fn lower_scope_member_body(
     body: &[TStmt],
     expect_fail: bool,
 ) -> Result<(), LowerError> {
+    let native_exit = if expect_fail && ctx.can_emit_propagate() {
+        let exit = ctx.new_block(ctx.span(), "scope-member.exit")?;
+        ctx.set_scope_fact(scope, "native_test_exit", exit.0.to_string())?;
+        Some(exit)
+    } else { None };
     let body_entry = ctx.current_block();
     let body_block_start = ctx.blocks.len();
     lower_stmts(ctx, body)?;
     emit_scope_exits_on_early_paths(ctx, scope, body_entry, body_block_start)?;
-    let exit = ctx.new_block(ctx.span(), "scope-member.exit")?;
+    let exit = match native_exit {
+        Some(exit) => exit,
+        None => ctx.new_block(ctx.span(), "scope-member.exit")?,
+    };
     let join = ctx.new_block(ctx.span(), "scope-member.join")?;
     // An `.expect_fail` body that ends in an unconditional stop (`panic(…)`)
     // jumps to its exit after the stop. The stop never returns, so the jump
@@ -2830,6 +2921,10 @@ fn lower_scope_member_body(
         ctx.terminate(MirTerminator::Jump { target: exit });
     }
     ctx.switch_to(exit);
+    if native_exit.is_some() {
+        ctx.emit_native_test_scope_call("jet_rt_test_catch_boundary", "catch_boundary", scope,
+            Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_string()))?;
+    }
     ctx.exit_scope(scope)?;
     if !ctx.is_terminated() {
         ctx.terminate(MirTerminator::Jump { target: join });

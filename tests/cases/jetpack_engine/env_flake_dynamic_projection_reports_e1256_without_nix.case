@@ -1,0 +1,12 @@
+# HAND-PORT tests/jetpack_engine.rs:6222-6240 env_flake_dynamic_projection_reports_e1256_without_nix
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: env_flake_dynamic_projection_reports_e1256_without_nix.fixture
+env: NO_COLOR=1
+mkdir: project
+step: jetpack env --flake --trust --no-color
+cwd: project
+env: PATH=
+exit: 1
+stderr: ~ "E1256" # original contains predicate
+stderr: !~ "couldn't run `nix`" # original negative contains predicate
+

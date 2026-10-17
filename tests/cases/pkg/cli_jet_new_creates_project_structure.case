@@ -1,0 +1,41 @@
+# Port of tests/pkg.rs:5172-5279; source mutations copied verbatim; literal outputs from5217/5262.
+# PENDING-GRAMMAR(batch-four): mkdir; file predicates/cwd are approved kit operations.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet new myapp
+exit: 0
+file: myapp/package.jet is-file
+file: myapp/run.jet is-file
+file: myapp/run.jet ~ "fn run()" # original predicate
+file: myapp/run.jet !~ "#CLI" # original predicate
+file: myapp/run.jet !~ "core.ui" # original predicate
+file: myapp/.gitignore is-file
+step: jet run
+cwd: myapp
+exit: 0
+stdout: = hello-world.out
+step: jet check
+cwd: myapp
+exit: 0
+copy: {root}/tests/cases/pkg/fixtures/sources/edited.txt myapp/run.jet
+step: jet test
+cwd: myapp
+exit: 0
+copy: {root}/tests/cases/pkg/fixtures/sources/unknown-scaffold.txt myapp/run.jet
+step: jet check
+cwd: myapp
+exit: nonzero
+stderr: ~ "Error [" # original predicate
+copy: {root}/tests/cases/pkg/fixtures/sources/edited.txt myapp/run.jet
+step: jet run --profile=debug
+cwd: myapp
+exit: 0
+stdout: = edited.out
+step: jet dev --watch=off
+cwd: myapp
+exit: 0
+stdout: = edited.out
+step: jet update jet
+cwd: myapp
+exit: 0
+file: myapp/.jet/lock is-file

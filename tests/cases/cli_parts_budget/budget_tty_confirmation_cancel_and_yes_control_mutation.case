@@ -1,0 +1,72 @@
+# Port of tests/cli_parts/budget.rs:1071-1116.
+# PENDING-SAME-HEAD: no runtime reference run.
+# PENDING-GRAMMAR(batch-four): pending predicate and step forms remain explicit.
+# PENDING-SEAM(pty)
+refused: pty
+fixture: fixtures/tty
+requires: os:unix
+step: jet budget update --baseline ci/linux --bootstrap --reason "initial evidence"
+cwd: no
+pty: true
+stdin: no.stdin
+exit: 0
+stdout: ~ "Apply? [y/N]" # original predicate
+stdout: ~ "plan cancelled; no baseline changed" # original predicate
+file: no/.jet absent
+step: jet budget update --baseline ci/linux --bootstrap --reason "initial evidence"
+cwd: yes
+pty: true
+stdin: yes.stdin
+exit: 0
+stdout: ~ "Apply? [y/N]" # original predicate
+stdout: count "+ report " = 1 # original predicate
+stdout: count "~ baseline " = 1 # original predicate
+file: yes/.jet/perf/baselines/names/ci/linux.json is-file
+entries: yes/.jet/perf/reports >= 1 # original predicate
+# Original source and EVERY assertion retained verbatim below; the named missing oracle prevents PASS.
+# #[test]
+# #[cfg(unix)]
+# fn budget_tty_confirmation_cancel_and_yes_control_mutation() {
+#     let cancelled = budget_project("budget_tty_no", 10);
+#     let (code, transcript) = run_budget_update_pty(&cancelled, b"n\n");
+#     assert_eq!(code, 0, "{transcript}");
+#     assert!(transcript.contains("Apply? [y/N]"), "{transcript}");
+#     assert!(
+#         transcript.contains("plan cancelled; no baseline changed"),
+#         "{transcript}"
+#     );
+#     assert!(
+#         !cancelled.join(".jet").exists(),
+#         "TTY cancel mutated workspace"
+#     );
+# 
+#     let applied = budget_project("budget_tty_yes", 10);
+#     let (code, transcript) = run_budget_update_pty(&applied, b"yes\n");
+#     assert_eq!(code, 0, "{transcript}");
+#     assert!(transcript.contains("Apply? [y/N]"), "{transcript}");
+#     assert_eq!(
+#         transcript.matches("+ report ").count(),
+#         1,
+#         "plan/apply duplicated report row: {transcript}"
+#     );
+#     assert_eq!(
+#         transcript.matches("~ baseline ").count(),
+#         1,
+#         "plan/apply duplicated baseline row: {transcript}"
+#     );
+#     assert!(
+#         applied
+#             .join(".jet/perf/baselines/names/ci/linux.json")
+#             .is_file(),
+#         "TTY yes did not apply"
+#     );
+#     assert!(
+#         applied
+#             .join(".jet/perf/reports")
+#             .read_dir()
+#             .unwrap()
+#             .next()
+#             .is_some(),
+#         "TTY yes omitted report artifact"
+#     );
+# }

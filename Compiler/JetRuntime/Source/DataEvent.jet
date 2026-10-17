@@ -1,0 +1,102 @@
+// Native DataEvent hand carrier; DataABI.jet owns all tags and offsets.
+// Rust CommonTypes.rs:282-295 derives Clone/PartialEq; CAbiRoutes.rs:8730-8835
+// defines ctor/getter ownership. Bytes borrows on get and consumes on new.
+fn data_event_word(address: I64) -> I64 {
+    #Unsafe("address borrows an initialized word in a live native DataEvent or List") { return os_load_i64(address) }
+}
+fn data_event_store(address: I64, value: I64) {
+    #Unsafe("address owns a writable word in a native DataEvent") { os_store_i64(address, value) }
+}
+fn data_event_new(kind: I64, payload: I64) -> I64 {
+    event :: jet_rt_alloc(DATA_EVENT_BYTES, I64{8})
+    data_event_store(event + DATA_EVENT_TAG, kind)
+    data_event_store(event + DATA_EVENT_PAYLOAD, payload)
+    event
+}
+fn data_event_payload(event: I64, kind: I64) -> I64 {
+    if data_event_word(event + DATA_EVENT_TAG) != kind {
+        rt_record_variant_panic()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    data_event_word(event + DATA_EVENT_PAYLOAD)
+}
+fn data_event_text(kind: I64) -> Bool {
+    kind == DATA_EVENT_NUMBER || kind == DATA_EVENT_TEXT || kind == DATA_EVENT_KEY
+}
+#Export(c) fn jet_rt_handle_clone_data_event(event: I64) -> I64 {
+    kind :: data_event_word(event + DATA_EVENT_TAG)
+    payload := data_event_word(event + DATA_EVENT_PAYLOAD)
+    if data_event_text(kind) { payload = jet_rt_string_clone(payload) } else if kind == DATA_EVENT_BYTE_LIST { payload = data_sequence_clone(payload, DATA_TREE_BYTE_LIST) }
+    data_event_new(kind, payload)
+}
+#Export(c) fn jet_rt_handle_drop_data_event(event: I64) {
+    if (event == I64{0}) -> return
+    kind :: data_event_word(event + DATA_EVENT_TAG)
+    payload :: data_event_word(event + DATA_EVENT_PAYLOAD)
+    if data_event_text(kind) { jet_rt_string_drop(payload) } else if kind == DATA_EVENT_BYTE_LIST { data_sequence_drop(payload, DATA_TREE_BYTE_LIST) }
+    jet_rt_free(event, DATA_EVENT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_data_event(left: I64, right: I64) -> Bool {
+    kind :: data_event_word(left + DATA_EVENT_TAG)
+    if kind != data_event_word(right + DATA_EVENT_TAG) -> return false
+    a :: data_event_word(left + DATA_EVENT_PAYLOAD)
+    b :: data_event_word(right + DATA_EVENT_PAYLOAD)
+    if (kind == DATA_EVENT_BOOL || kind == DATA_EVENT_INT) -> return a == b
+    if kind == DATA_EVENT_FLOAT -> return rt_f64_from_bits(a) == rt_f64_from_bits(b)
+    if data_event_text(kind) -> return jet_rt_string_eq(a, b)
+    if kind != DATA_EVENT_BYTE_LIST -> return true
+    length :: data_event_word(a + DATA_SEQUENCE_LENGTH)
+    if length != data_event_word(b + DATA_SEQUENCE_LENGTH) -> return false
+    ap :: data_event_word(a + DATA_SEQUENCE_DATA)
+    bp :: data_event_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if host_u8_get(ap, at) != host_u8_get(bp, at) -> return false
+        at += I64{1}
+    }
+    true
+}
+#Export(c) fn jet_rt_record_tag_data_event(event: I64) -> I64 { data_event_word(event + DATA_EVENT_TAG) }
+#Export(c) fn jet_rt_record_new_data_event_null() -> I64 { data_event_new(DATA_EVENT_NULL, I64{0}) }
+#Export(c) fn jet_rt_record_new_data_event_bool(value: U8) -> I64 { data_event_new(DATA_EVENT_BOOL, if (value == U8{0}) -> I64{0} else -> I64{1}) }
+#Export(c) fn jet_rt_record_new_data_event_int(value: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    data_event_new(DATA_EVENT_INT, raw)
+}
+#Export(c) fn jet_rt_record_new_data_event_float(value: Float) -> I64 { data_event_new(DATA_EVENT_FLOAT, rt_f64_bits(value)) }
+#Export(c) fn jet_rt_record_new_data_event_number(value: I64) -> I64 { data_event_new(DATA_EVENT_NUMBER, jet_rt_string_clone(value)) }
+#Export(c) fn jet_rt_record_new_data_event_text(value: I64) -> I64 { data_event_new(DATA_EVENT_TEXT, jet_rt_string_clone(value)) }
+#Export(c) fn jet_rt_record_new_data_event_bytes(value: I64) -> I64 { data_event_new(DATA_EVENT_BYTE_LIST, value) }
+#Export(c) fn jet_rt_record_new_data_event_array_start() -> I64 { data_event_new(DATA_EVENT_ARRAY_START, I64{0}) }
+#Export(c) fn jet_rt_record_new_data_event_array_end() -> I64 { data_event_new(DATA_EVENT_ARRAY_END, I64{0}) }
+#Export(c) fn jet_rt_record_new_data_event_object_start() -> I64 { data_event_new(DATA_EVENT_OBJECT_START, I64{0}) }
+#Export(c) fn jet_rt_record_new_data_event_key(value: I64) -> I64 { data_event_new(DATA_EVENT_KEY, jet_rt_string_clone(value)) }
+#Export(c) fn jet_rt_record_new_data_event_object_end() -> I64 { data_event_new(DATA_EVENT_OBJECT_END, I64{0}) }
+#Export(c) fn jet_rt_record_get_data_event_bool(event: I64) -> Bool { data_event_payload(event, DATA_EVENT_BOOL) != I64{0} }
+#Export(c) fn jet_rt_record_get_data_event_int(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_INT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_int_owned_from_i64(payload)
+}
+#Export(c) fn jet_rt_record_get_data_event_float(event: I64) -> Float {
+    payload :: data_event_payload(event, DATA_EVENT_FLOAT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
+    rt_f64_from_bits(payload)
+}
+#Export(c) fn jet_rt_record_get_data_event_number(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_NUMBER)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}
+#Export(c) fn jet_rt_record_get_data_event_text(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_TEXT)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}
+#Export(c) fn jet_rt_record_get_data_event_bytes(event: I64) -> I64 { data_event_payload(event, DATA_EVENT_BYTE_LIST) }
+#Export(c) fn jet_rt_record_get_data_event_key(event: I64) -> I64 {
+    payload :: data_event_payload(event, DATA_EVENT_KEY)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_rt_string_clone(payload)
+}

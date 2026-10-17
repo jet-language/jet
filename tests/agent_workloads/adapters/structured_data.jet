@@ -24,7 +24,7 @@ struct Report {
 fn summarize(batch: Batch) -> Report {
     services := [String]{}
     loop event in batch.events {
-        if !services.contains(event.service) -> &services.push(~event.service)
+        if !services.contains(event.service) -> &services.push(event.service.copy())
     }
     &services.sort()
     summaries := [Summary]{}

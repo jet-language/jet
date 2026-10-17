@@ -9,39 +9,62 @@ C_MAX_MEASURE :: 4096
 C_MAX_VIRTUAL_EXTENT :: 9223372036854775807
 
 
-pub struct WebVirtualWindow {
-    pub total_count: Int
-    pub scroll_offset: Int
-    pub viewport_size: Int
-    pub estimated_item_size: Int
-    pub overscan: Int
-    pub start: Int
-    pub end: Int
-    pub total_size: Int
-    pub measured_count: Int
+struct WebVirtualWindow {
+    total_count: Int
+    scroll_offset: Int
+    viewport_size: Int
+    estimated_item_size: Int
+    overscan: Int
+    start: Int
+    end: Int
+    total_size: Int
+    measured_count: Int
 }
 
-pub struct WebVirtualPlan {
-    pub total_count: Int
-    pub scroll_offset: Int
-    pub viewport_width: Int
-    pub viewport_height: Int
-    pub estimated_item_size: Int
-    pub overscan: Int
-    pub start: Int
-    pub end: Int
-    pub total_size: Int
-    pub measured_count: Int
-    pub anchor_index: Int
-    pub anchor_offset: Int
+impl WebVirtualWindow {
+    fn visible_count(self) -> Int Never! { sat_sub(self.end, self.start) }
+    fn is_empty(self) -> Bool Never! { self.start >= self.end }
+    fn contains(self, index: Int) -> Bool Never! { index >= self.start && index < self.end }
+    fn range(self) -> (start: Int, end: Int) Never! { (start: self.start, end: self.end) }
+    fn within_frame_budget(self, maximum: Int) -> Bool Never! {
+        self.visible_count() <= if maximum < 0 -> 0 else -> maximum
+    }
+    fn with_measurement(self, index: Int, size: Int) -> WebVirtualWindow Never! {
+        if index < 0 || index >= self.total_count || size <= 0 -> return self
+        count :: sat_add(self.measured_count, 1)
+        total :: sat_add(sat_mul(self.estimated_item_size, self.measured_count), size)
+        estimate := if count == 0 || (total == -9223372036854775808 && count == -1) -> self.estimated_item_size else -> total /% count
+        if estimate < 1 -> estimate = 1
+        updated := window(self.total_count, self.scroll_offset, self.viewport_size, estimate, self.overscan)
+        updated.measured_count = if count < 0 -> 0 else -> count
+        updated
+    }
+    fn facts_json(self) -> String Never! {
+        "{{\"total_count\":{self.total_count},\"scroll_offset\":{self.scroll_offset},\"viewport_size\":{self.viewport_size},\"estimated_item_size\":{self.estimated_item_size},\"overscan\":{self.overscan},\"start\":{self.start},\"end\":{self.end},\"total_size\":{self.total_size},\"measured_count\":{self.measured_count}}}"
+    }
 }
 
-pub struct WebVirtualPlanViewport {
-    pub plan: WebVirtualPlan
+struct WebVirtualPlan {
+    total_count: Int
+    scroll_offset: Int
+    viewport_width: Int
+    viewport_height: Int
+    estimated_item_size: Int
+    overscan: Int
+    start: Int
+    end: Int
+    total_size: Int
+    measured_count: Int
+    anchor_index: Int
+    anchor_offset: Int
+}
+
+struct WebVirtualPlanViewport {
+    plan: WebVirtualPlan
 }
 
 /// Build one bounded virtual range.
-pub fn window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimated_item_size: Int, overscan: Int) -> WebVirtualWindow Never! {
+fn window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimated_item_size: Int, overscan: Int) -> WebVirtualWindow Never! {
     total := bounded_nonnegative(total_count)
     view := bounded_nonnegative(viewport_size)
     est := estimated_item_size
@@ -52,7 +75,6 @@ pub fn window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimate
     if over > C_MAX_VISIBLE -> over = C_MAX_VISIBLE
     total_size := bounded_mul(total, est)
     max_off := total_size - view
-    if max_off < 0 -> max_off = 0
     off := scroll_offset
     if off < 0 -> off = 0
     if off > max_off -> off = max_off
@@ -65,18 +87,16 @@ pub fn window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimate
         visible = bounded_add(view, est - 1) /% est
         if visible > C_MAX_VISIBLE -> visible = C_MAX_VISIBLE
     }
-    last := bounded_add(first, visible)
+    last := sat_add(first, visible)
     if last > total -> last = total
-    start := first - over
-    if start < 0 -> start = 0
-    end := bounded_add(last, over)
+    start := sat_sub(first, over)
+    end := sat_add(last, over)
     if end > total -> end = total
-    if end - start > C_MAX_VISIBLE {
-        start = first - (C_MAX_VISIBLE /% 2)
+    if sat_sub(end, start) > C_MAX_VISIBLE {
+        start = sat_sub(first, C_MAX_VISIBLE /% 2)
 
-        if start < 0 -> start = 0
         if start > total -> start = total
-        end = bounded_add(start, C_MAX_VISIBLE)
+        end = sat_add(start, C_MAX_VISIBLE)
         if end > total -> end = total
     }
     {
@@ -92,7 +112,7 @@ pub fn window(total_count: Int, scroll_offset: Int, viewport_size: Int, estimate
     }
 }
 
-pub fn window_measured(total_count: Int, scroll_offset: Int, viewport_size: Int, fallback_item_size: Int, overscan: Int, measurements: [Int]) -> WebVirtualWindow Never! {
+fn window_measured(total_count: Int, scroll_offset: Int, viewport_size: Int, fallback_item_size: Int, overscan: Int, measurements: [Int]) -> WebVirtualWindow Never! {
     sum := 0
     count := 0
     loop s in measurements {
@@ -123,13 +143,13 @@ pub fn window_measured(total_count: Int, scroll_offset: Int, viewport_size: Int,
 }
 
 
-pub fn slice<T>(rows: [T], w: WebVirtualWindow) -> [T] Never! {
+fn slice<T>(rows: [T], w: WebVirtualWindow) -> [T] Never! {
     start := w.start
     if start < 0 -> start = 0
     if start > rows.len() -> start = rows.len()
     end := w.end
-    if end < start -> end = start
-    if end > rows.len() -> end = rows.len()
+    if end < w.start -> end = w.start
+    if end < 0 || end > rows.len() -> end = rows.len()
     if end - start > C_MAX_VISIBLE -> end = start + C_MAX_VISIBLE
     if end > rows.len() -> end = rows.len()
     out := [T]{}
@@ -137,47 +157,46 @@ pub fn slice<T>(rows: [T], w: WebVirtualWindow) -> [T] Never! {
     out
 }
 
-pub fn indices(w: WebVirtualWindow) -> [Int] Never! {
+fn indices(w: WebVirtualWindow) -> [Int] Never! {
     out := [Int]{}
     start := w.start
-    if start < 0 -> start = 0
     if start >= w.end -> return out
     end := w.end
-    limit := bounded_add(start, C_MAX_VISIBLE)
+    limit := sat_add(start, C_MAX_VISIBLE)
     if end > limit -> end = limit
     loop i in start..<end -> &out.push(i)
     out
 }
 
-pub fn plan(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, estimated_item_size: Int, overscan: Int) -> WebVirtualPlan Never! {
+fn plan(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, estimated_item_size: Int, overscan: Int) -> WebVirtualPlan Never! {
     w :: window(total_count, scroll_offset, viewport_height, estimated_item_size, overscan)
     WebVirtualPlan{total_count: w.total_count, scroll_offset: w.scroll_offset, viewport_width: max0(viewport_width), viewport_height: w.viewport_size, estimated_item_size: w.estimated_item_size, overscan: w.overscan, start: w.start, end: w.end, total_size: w.total_size, measured_count: 0, anchor_index: w.start, anchor_offset: 0}
 }
 
-pub fn plan_measured(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, fallback_item_size: Int, overscan: Int, measurements: [Int]) -> WebVirtualPlan Never! {
+fn plan_measured(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, fallback_item_size: Int, overscan: Int, measurements: [Int]) -> WebVirtualPlan Never! {
     w :: window_measured(total_count, scroll_offset, viewport_height, fallback_item_size, overscan, measurements)
     WebVirtualPlan{total_count: w.total_count, scroll_offset: w.scroll_offset, viewport_width: max0(viewport_width), viewport_height: w.viewport_size, estimated_item_size: w.estimated_item_size, overscan: w.overscan, start: w.start, end: w.end, total_size: w.total_size, measured_count: w.measured_count, anchor_index: w.start, anchor_offset: 0}
 }
 
-pub fn plan_from_sizes(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, fallback_item_size: Int, overscan: Int, sizes: [Int]) -> WebVirtualPlan Never! {
+fn plan_from_sizes(total_count: Int, scroll_offset: Int, viewport_width: Int, viewport_height: Int, fallback_item_size: Int, overscan: Int, sizes: [Int]) -> WebVirtualPlan Never! {
     plan_measured(total_count, scroll_offset, viewport_width, viewport_height, fallback_item_size, overscan, sizes)
 }
 
-pub fn plan_slice<T>(rows: [T], p: WebVirtualPlan) -> [T] Never! {
+fn plan_slice<T>(rows: [T], p: WebVirtualPlan) -> [T] Never! {
     w := WebVirtualWindow{total_count: p.total_count, scroll_offset: p.scroll_offset, viewport_size: p.viewport_height, estimated_item_size: p.estimated_item_size, overscan: p.overscan, start: p.start, end: p.end, total_size: p.total_size, measured_count: p.measured_count}
     slice<T>(rows, w)
 }
 
-pub fn plan_indices(p: WebVirtualPlan) -> [Int] Never! {
+fn plan_indices(p: WebVirtualPlan) -> [Int] Never! {
     w := WebVirtualWindow{total_count: p.total_count, scroll_offset: p.scroll_offset, viewport_size: p.viewport_height, estimated_item_size: p.estimated_item_size, overscan: p.overscan, start: p.start, end: p.end, total_size: p.total_size, measured_count: p.measured_count}
     indices(w)
 }
 
-pub fn plan_viewport(p: WebVirtualPlan) -> WebVirtualPlanViewport Never! { {plan: p} }
+fn plan_viewport(p: WebVirtualPlan) -> WebVirtualPlanViewport Never! { {plan: p} }
 
-pub fn plan_measure(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan Never! {
-    if index < 0 || index >= p.total_count || size <= 0 || size > C_MAX_VIRTUAL_EXTENT -> return ~p
-    if p.measured_count >= C_MAX_MEASURE -> return ~p
+fn plan_measure(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan Never! {
+    if index < 0 || index >= p.total_count || size <= 0 || size > C_MAX_VIRTUAL_EXTENT -> return p.copy()
+    if p.measured_count >= C_MAX_MEASURE -> return p.copy()
     count := p.measured_count + 1
     total := bounded_add(bounded_mul(p.estimated_item_size, p.measured_count), size)
     est := total /% count
@@ -186,9 +205,9 @@ pub fn plan_measure(p: WebVirtualPlan, index: Int, size: Int) -> WebVirtualPlan 
     WebVirtualPlan{total_count: w.total_count, scroll_offset: w.scroll_offset, viewport_width: p.viewport_width, viewport_height: w.viewport_size, estimated_item_size: est, overscan: w.overscan, start: w.start, end: w.end, total_size: w.total_size, measured_count: count, anchor_index: p.anchor_index, anchor_offset: p.anchor_offset}
 }
 
-pub fn plan_viewport_state(v: WebVirtualPlanViewport) -> WebVirtualPlan Never! { v.plan }
+fn plan_viewport_state(v: WebVirtualPlanViewport) -> WebVirtualPlan Never! { v.plan }
 
-pub fn plan_scroll_to(v: &WebVirtualPlanViewport, scroll_offset: Int) Never! {
+fn plan_scroll_to(v: &WebVirtualPlanViewport, scroll_offset: Int) Never! {
     w :: window(v.plan.total_count, scroll_offset, v.plan.viewport_height, v.plan.estimated_item_size, v.plan.overscan)
     v.plan.scroll_offset = w.scroll_offset
     v.plan.start = w.start
@@ -198,7 +217,7 @@ pub fn plan_scroll_to(v: &WebVirtualPlanViewport, scroll_offset: Int) Never! {
     v.plan.anchor_offset = 0
 }
 
-pub fn plan_resize(v: &WebVirtualPlanViewport, viewport_width: Int, viewport_height: Int) Never! {
+fn plan_resize(v: &WebVirtualPlanViewport, viewport_width: Int, viewport_height: Int) Never! {
     v.plan.viewport_width = max0(viewport_width)
     v.plan.viewport_height = max0(viewport_height)
     w :: window(v.plan.total_count, v.plan.scroll_offset, v.plan.viewport_height, v.plan.estimated_item_size, v.plan.overscan)
@@ -207,11 +226,11 @@ pub fn plan_resize(v: &WebVirtualPlanViewport, viewport_width: Int, viewport_hei
     v.plan.total_size = w.total_size
 }
 
-pub fn plan_viewport_measure(v: &WebVirtualPlanViewport, index: Int, size: Int) Never! {
+fn plan_viewport_measure(v: &WebVirtualPlanViewport, index: Int, size: Int) Never! {
     v.plan = plan_measure(v.plan, index, size)
 }
 
-pub fn plan_facts(p: WebVirtualPlan) -> String Never! {
+fn plan_facts(p: WebVirtualPlan) -> String Never! {
     vis := p.end - p.start
     if vis < 0 -> vis = 0
     "{{\"total_count\":{p.total_count},\"start\":{p.start},\"end\":{p.end},\"visible\":{vis},\"estimated_item_size\":{p.estimated_item_size}}}"
@@ -238,4 +257,76 @@ fn bounded_mul(a: Int, b: Int) -> Int {
     if a <= 0 || b <= 0 -> return 0
     if a > C_MAX_VIRTUAL_EXTENT /% b -> return C_MAX_VIRTUAL_EXTENT
     a * b
+}
+
+// All fields have the shipped i64 domain. Saturation is signed, not a clamp
+// to zero: notably an oversized viewport can produce negative layout indices.
+fn sat_add(a: Int, b: Int) -> Int Never! {
+    if b > 0 && a > 9223372036854775807 - b -> return 9223372036854775807
+    if b < 0 && a < -9223372036854775808 - b -> return -9223372036854775808
+    a + b
+}
+
+fn sat_sub(a: Int, b: Int) -> Int Never! {
+    if b > 0 && a < -9223372036854775808 + b -> return -9223372036854775808
+    if b < 0 && a > 9223372036854775807 + b -> return 9223372036854775807
+    a - b
+}
+
+fn sat_mul(a: Int, b: Int) -> Int Never! {
+    if a == 0 || b == 0 -> return 0
+    if a > 0 {
+        if b > 0 && a > 9223372036854775807 /% b -> return 9223372036854775807
+        if b < 0 && b < -9223372036854775808 /% a -> return -9223372036854775808
+    } else {
+        if b > 0 && a < -9223372036854775808 /% b -> return -9223372036854775808
+        if b < 0 && a < 9223372036854775807 /% b -> return 9223372036854775807
+    }
+    a * b
+}
+
+#Test("virtual window facts") {
+    w :: window(100, 60, 40, 20, 1)
+    assert(w.facts_json() == "{{\"total_count\":100,\"scroll_offset\":60,\"viewport_size\":40,\"estimated_item_size\":20,\"overscan\":1,\"start\":2,\"end\":6,\"total_size\":2000,\"measured_count\":0}}")
+}
+
+#Test("empty virtual window facts") {
+    w :: window(-1, -1, -1, 0, -1)
+    assert(w.facts_json() == "{{\"total_count\":0,\"scroll_offset\":0,\"viewport_size\":0,\"estimated_item_size\":1,\"overscan\":0,\"start\":0,\"end\":0,\"total_size\":0,\"measured_count\":0}}")
+}
+
+#Test("measured virtual window estimate") {
+    w :: window_measured(100, 0, 30, 10, 0, [Int]{0, -1, 10, 20})
+    assert(w.estimated_item_size == 15 && w.measured_count == 2 && w.start == 0 && w.end == 2 && w.total_size == 1500)
+}
+
+#Test("virtual window slice bounds") {
+    w :: window(5, 20, 20, 10, 0)
+    rows :: slice<Int>([Int]{10, 11, 12, 13, 14}, w)
+    positions :: indices(w)
+    assert(rows.len() == 2 && rows[0] == 12 && rows[1] == 13 && positions.len() == 2 && positions[0] == 2 && positions[1] == 3)
+}
+
+#Test("virtual window receiver methods preserve signed saturation") {
+    w :: WebVirtualWindow{total_count: 10, scroll_offset: 0, viewport_size: 20, estimated_item_size: 10, overscan: 0, start: -9223372036854775808, end: 9223372036854775807, total_size: 100, measured_count: 0}
+    assert_eq(w.visible_count(), 9223372036854775807)
+    assert(!w.is_empty())
+    assert(w.contains(0))
+    assert_eq(w.range(), (start: -9223372036854775808, end: 9223372036854775807))
+    assert(!w.within_frame_budget(-1))
+    unchanged :: w.with_measurement(-1, 1)
+    assert_eq(unchanged.start, w.start)
+    measured :: w.with_measurement(0, 20)
+    assert_eq(measured.measured_count, 1)
+    assert_eq(measured.estimated_item_size, 20)
+    assert_eq(sat_mul(-9223372036854775808, -1), 9223372036854775807)
+}
+
+#Test("virtual geometry preserves oversized viewport and negative overscan range") {
+    w :: window(1, 0, 100, 10, 1)
+    assert_eq(w.scroll_offset, -90)
+    assert_eq(w.start, -10)
+    assert_eq(w.end, 1)
+    assert_eq(indices(w).len(), 11)
+    assert_eq(slice<Int>([Int]{7}, w), [Int]{7})
 }

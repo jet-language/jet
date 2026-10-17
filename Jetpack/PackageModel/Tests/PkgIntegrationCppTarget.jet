@@ -1,0 +1,81 @@
+// Exact tests/polyglot_systems.rs:204-368; fake host tools are ORIGINAL test inputs.
+fn pkg_integration_cpp_clang(log: String, canonical: String) -> String {
+    ast :: "{{\"kind\":\"TranslationUnitDecl\",\"inner\":[{{\"kind\":\"FunctionDecl\",\"name\":\"probe\",\"loc\":{{\"file\":\"{canonical}\"}},\"type\":{{\"qualType\":\"long (long)\"}},\"inner\":[{{\"kind\":\"ParmVarDecl\",\"name\":\"value\",\"type\":{{\"qualType\":\"long\"}}}}]}}]}}"
+    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake clang 1'; exit 0; fi\ncase \"$*\" in\n  *-ast-dump=json*) printf '%s\\n' '{ast}'; exit 0 ;;\nesac\nprevious=''\noutput=''\nfor argument in \"$@\"; do\n  if [ \"$previous\" = \"-o\" ]; then output=\"$argument\"; fi\n  previous=\"$argument\"\ndone\n: > \"$output\"\n"
+}
+fn pkg_integration_cpp_ar(log: String, version: Int) -> String {
+    "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{log}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake ar {version}'; exit 0; fi\n: > \"$2\"\n"
+}
+fn pkg_integration_cpp_proof(commands: String) -> String {
+    loop line in commands.lines() { if line.contains("-shared") -> return line }
+    panic("original find shared proof must succeed")
+}
+#Test("cpp_binder_uses_selected_target_tools_runtime_and_cache_identity") {
+    if sys.family() != "unix" -> return
+    scratch :: files.temp_dir("jet_cpp_target_tools") ?? panic("scratch")
+    root :: scratch.path
+    target :: "aarch64-apple-darwin"
+    header :: files.join(root, "probe.hpp")
+    files.write(header, "long probe(long value);\n") ?? panic("header")
+    canonical :: files.canonicalize(header) ?? panic("canonical header")
+    clang_log :: files.join(root, "clang.log")
+    ar_log :: files.join(root, "ar.log")
+    clang :: files.join(root, "fake-clang++")
+    ar :: files.join(root, "fake-ar")
+    files.write(clang, pkg_integration_cpp_clang(clang_log, canonical)) ?? panic("clang")
+    files.write(ar, pkg_integration_cpp_ar(ar_log, 1)) ?? panic("archiver")
+    files.chmod(clang, 0o755) ?? panic("clang mode")
+    files.chmod(ar, 0o755) ?? panic("ar mode")
+    cache :: files.join(root, ".jet/bindings/cpp")
+    options :: CppBindOptions{lib: "probe", target: target, clang: clang, archiver: ar, include_dirs: [String]{}, library_dirs: [String]{}, libraries: [String]{}, namespaces: [String]{}, templates: [CppTemplateInstantiation]{}}
+    _ :: pkg_cpp_bind(header, cache, options) ?? panic("bind")
+    commands :: files.read(clang_log) ?? panic("clang log")
+    assert(commands.contains("-target aarch64-apple-darwin"))
+    assert(commands.contains("-Wl,-undefined,error"))
+    assert(commands.contains("proof.dylib"))
+    assert((files.read(ar_log) ?? panic("ar log")).contains("rcs"))
+    link :: files.read(files.join(cache, "probe.link")) ?? panic("link")
+    assert(link.contains("target\taarch64-apple-darwin"))
+    assert(link.contains("l\tc++"))
+    flags :: pkg_cffi_resolve_link_for_target("jet_cpp_probe", root, target) ?? panic("resolve link")
+    assert(flags.link_names.contains("c++"))
+    assert(!flags.link_names.contains("stdc++"))
+    shared :: files.join(root, "same-input")
+    files.create_dir(shared) ?? panic("shared input")
+    include_options := options
+    include_options.include_dirs = [String]{shared}
+    library_options := options
+    library_options.library_dirs = [String]{shared}
+    assert(pkg_cpp_cache_identity_for_test(header, include_options, target) != pkg_cpp_cache_identity_for_test(header, library_options, target))
+    files.write(clang_log, "") ?? panic("clear clang log")
+    include_result :: pkg_cpp_bind(header, cache, include_options) ?? panic("include bind")
+    include_proof :: pkg_integration_cpp_proof(files.read(clang_log) ?? panic("log"))
+    assert(!include_proof.contains("-L {shared}"))
+    files.write(clang_log, "") ?? panic("clear clang log")
+    library_result :: pkg_cpp_bind(header, cache, library_options) ?? panic("library bind")
+    assert(files.dirname(include_result.archive) != files.dirname(library_result.archive))
+    library_proof :: pkg_integration_cpp_proof(files.read(clang_log) ?? panic("log"))
+    assert(library_proof.contains("-L {shared}"))
+    first :: pkg_cpp_cache_identity_for_test(header, options, target)
+    files.write(ar, pkg_integration_cpp_ar(ar_log, 2)) ?? panic("change ar version")
+    second :: pkg_cpp_cache_identity_for_test(header, options, target)
+    assert(first != second)
+}
+#Test("cpp_link_metadata_requires_exact_selected_target") {
+    scratch :: files.temp_dir("jet_cpp_link_target") ?? panic("scratch")
+    root :: scratch.path
+    dir :: files.join(root, ".jet/bindings/cpp")
+    files.create_dir_all(dir) ?? panic("binding dir")
+    files.write(files.join(dir, "libjet_cpp_probe.a"), "archive") ?? panic("archive")
+    metadata :: files.join(dir, "probe.link")
+    invalid :: [String]{"l\tc++\n", "target\tx86_64-unknown-linux-gnu\nl\tc++\n", "target\taarch64-apple-darwin\ntarget\taarch64-apple-darwin\nl\tc++\n", "target aarch64-apple-darwin\nl\tc++\n"}
+    loop text in invalid {
+        files.write(metadata, text) ?? panic("metadata")
+        if pkg_cffi_resolve_link_for_target("jet_cpp_probe", root, "aarch64-apple-darwin") == {
+            .Ok(_) -> panic("invalid selected target metadata accepted")
+            .Err(_) -> {}
+        }
+    }
+    files.write(metadata, "target\taarch64-apple-darwin\nl\tc++\n") ?? panic("valid metadata")
+    _ :: pkg_cffi_resolve_link_for_target("jet_cpp_probe", root, "aarch64-apple-darwin") ?? panic("valid selected target metadata rejected")
+}

@@ -1,0 +1,27 @@
+// HostServices.rs:1101-1104,1143-1147 derive Clone/PartialEq: no
+// from_bits normalization (every raw u8 bit survives), owned root text.
+#Export(c) fn jet_rt_handle_clone_jet_ui_fs_rights(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value).bit_and(I64{255})) }
+#Export(c) fn jet_rt_handle_drop_jet_ui_fs_rights(value: I64) { ui_carrier_scalar_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_ui_fs_rights(a: I64, b: I64) -> Bool { (ui_carrier_word(a).bit_and(I64{255})) == (ui_carrier_word(b).bit_and(I64{255})) }
+fn ui_fs_grant_copy(value: I64, result: I64) {
+    ui_carrier_store(result + UI_CARRIER_FS_GRANT_ROOT, jet_rt_string_clone(ui_carrier_word(value + UI_CARRIER_FS_GRANT_ROOT)))
+    ui_carrier_store(result + UI_CARRIER_FS_GRANT_RIGHTS, ui_carrier_word(value + UI_CARRIER_FS_GRANT_RIGHTS).bit_and(I64{255}))
+}
+fn ui_fs_grant_fields_drop(value: I64) {
+    jet_rt_string_drop(ui_carrier_word(value + UI_CARRIER_FS_GRANT_ROOT))
+}
+#Export(c) fn jet_rt_handle_clone_jet_ui_fs_grant(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_FS_GRANT_BYTES, I64{8})
+    ui_fs_grant_copy(value, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_ui_fs_grant(value: I64) {
+    if (value == I64{0}) -> return
+    ui_fs_grant_fields_drop(value)
+    jet_rt_free(value, UI_CARRIER_FS_GRANT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ui_fs_grant(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(a + UI_CARRIER_FS_GRANT_ROOT), ui_carrier_word(b + UI_CARRIER_FS_GRANT_ROOT)) && jet_rt_handle_eq_jet_ui_fs_rights(a + UI_CARRIER_FS_GRANT_RIGHTS, b + UI_CARRIER_FS_GRANT_RIGHTS)
+}
+#Export(c) fn jet_rt_handle_field_jet_ui_fs_grant_root(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_CARRIER_FS_GRANT_ROOT), out) }
+#Export(c) fn jet_rt_handle_field_jet_ui_fs_grant_rights(value: I64) -> I64 { value + UI_CARRIER_FS_GRANT_RIGHTS }

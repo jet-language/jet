@@ -1,0 +1,8 @@
+# HAND-PORT tests/compiler_api.rs:1179-1191 an_unselected_runtime_named_build_cannot_use_the_compiler_api
+# PENDING-SAME-HEAD runtimeGap=original-assert; PENDING-GRAMMAR, no historical failure captures blessed.
+# All original public predicates retained.
+fixture: an_unselected_runtime_named_build_cannot_use_the_compiler_api.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0956"] #>= 1

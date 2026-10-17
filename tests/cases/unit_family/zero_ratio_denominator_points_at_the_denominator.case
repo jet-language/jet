@@ -1,0 +1,7 @@
+# PORT tests/unit_family.rs:373-388.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: zero_ratio_denominator_points_at_the_denominator.fixture
+step: jet fmt main.jet --json
+exit: nonzero
+json: machine doc $.reports[?what~="denominator is zero"] #>= 1
+json: machine doc $.reports[?what~="denominator is zero"][0].span = {"start":68,"end":69}

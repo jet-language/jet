@@ -1,0 +1,16 @@
+
+use core.http.client as http
+
+fn run() {
+    if http.get("http://{cap:addr}/oversized") == {
+        .Ok(_) -> print("simple accepted")
+        .Err(_) -> print("simple rejected")
+        else -> print("simple unexpected")
+    }
+    request :: http.request("GET", "http://{cap:addr}/oversized")
+    if request.send() == {
+        .Ok(_) -> print("request accepted")
+        .Err(_) -> print("request rejected")
+        else -> print("request unexpected")
+    }
+}

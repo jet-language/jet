@@ -28,18 +28,16 @@ fn merge_sequence(sequence: [String], key: String) -> [String] {
     index := 0
     loop index < sequence.len() {
         current :: sequence.get(index) ?? ""
-        if index + 1 < sequence.len() {
-            next :: sequence.get(index + 1) ?? ""
-            if pair_key(current, next) == key {
+        next :: sequence.get(index + 1) ?? ""
+        if {
+            index + 1 < sequence.len() && pair_key(current, next) == key -> {
                 &result.push(merged)
                 index += 2
-            } else {
+            }
+            else -> {
                 &result.push(current)
                 index += 1
             }
-        } else {
-            &result.push(current)
-            index += 1
         }
     }
     return result
@@ -98,15 +96,15 @@ fn corpus_fixture() -> String {
     repeats :: target /% seed_bytes
     body :: seed.repeat(repeats)
     remaining :: target - text.byte_count(body)
-    return body + "x".repeat(remaining)
+    return "{body}{"x".repeat(remaining)}"
 }
 
 fn write_log_fixture(path: Path) -> Int {
     base :: "INFO request user_id=1\nWARN request user_id=2\nERROR request user_id=42\n"
     base_bytes :: text.byte_count(base)
     block_size :: 1000
-    padding :: "X".repeat(block_size - base_bytes - 1) + "\n"
-    block :: base + padding
+    padding :: "{"X".repeat(block_size - base_bytes - 1)}\n"
+    block :: "{base}{padding}"
     if text.byte_count(block) != block_size -> panic("log fixture block size")
     blocks :: 100_000
     files.write(path, block.repeat(blocks)) ?? panic("write 100 MB log fixture")
@@ -122,8 +120,8 @@ fn scan_logs(path: Path) -> ScanResult {
     match_count := 0
     loop line in mapped.lines() {
         line_count += 1
-        value :: String.from_bytes(~line) ?? panic("decode mapped log line")
-        if pattern.is_match(value) -> match_count += 1
+        value :: String.from_bytes(line.copy()) ?? panic("decode mapped log line")
+        if re.is_match(pattern, value) -> match_count += 1
     }
     return ScanResult{
         bytes: mapped.len(),

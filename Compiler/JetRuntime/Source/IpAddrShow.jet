@@ -1,0 +1,80 @@
+// Native IP24 owner comes from canonical HostNetAddress18eb2f82f (Host409730d54).
+// Family word0 is 4/6; network-order octets are packed bytes8..23, not List<U8>.
+// NetHTTP.rs:204-206,573-576 delegates Show to std::net::IpAddr.to_string().
+// rustc1.97.1 library/core/src/net/ip_addr.rs:1121-1126,1184-1191,
+// 1995-2000,2136-2195: decimal v4; mapped ::ffff:dotted; otherwise shortest
+// lowercase hex, earliest longest zero span only if length>1 (compat stays hex).
+fn ip_show_segment(value: I64, index: I64) -> I64 {
+    at :: value + I64{8} + index * I64{2}
+    (rt_text_byte(at) << I64{8}).bit_or(rt_text_byte(at + I64{1}))
+}
+fn ip_show_v4(target: I64, value: I64, offset: I64) {
+    at := I64{0}
+    loop at < (I64{4}) {
+        if (at != I64{0}) -> rt_text_push_scalar(target, I64{46})
+        rt_text_push_number(target, rt_text_byte(value + I64{8} + offset + at))
+        at += I64{1}
+    }
+}
+fn ip_show_hex(target: I64, segment: I64) {
+    shift := I64{12}
+    loop shift > (I64{0}) && (segment >> shift) == (I64{0}) -> shift -= I64{4}
+    loop {
+        digit :: (segment >> shift).bit_and(I64{15})
+        rt_text_push_scalar(target, if (digit < I64{10}) -> I64{48} + digit else -> I64{87} + digit)
+        if (shift == I64{0}) -> break
+        shift -= I64{4}
+    }
+}
+// Append into a caller-owned builder without allocating a temporary Text.
+fn ip_show_into(result: I64, value: I64) {
+    if (rt_text_word(value) == I64{4}) {
+        ip_show_v4(result, value, I64{0})
+        return
+    }
+    // Native x64 aligned word loads identify the mapped prefix without a
+    // scratch array or a separate scan: octets0..9 zero, octets10..11 ff ff.
+    if (rt_text_word(value + I64{8}) == I64{0} && (rt_text_word(value + I64{16}).bit_and(I64{4294967295})) == I64{4294901760}) {
+        rt_text_push_word(result, I64{14906}, I64{2})
+        rt_text_push_word(result, I64{1717986918}, I64{4})
+        rt_text_push_scalar(result, I64{58})
+        ip_show_v4(result, value, I64{12})
+        return
+    }
+    best_start := I64{-1}
+    best_length := I64{0}
+    current_start := I64{0}
+    current_length := I64{0}
+    at := I64{0}
+    loop at < (I64{8}) {
+        if (ip_show_segment(value, at) == I64{0}) {
+            if (current_length == I64{0}) -> current_start = at
+            current_length += I64{1}
+            if (current_length > best_length) {
+                best_start = current_start
+                best_length = current_length
+            }
+        } else { current_length = I64{0} }
+        at += I64{1}
+    }
+    if (best_length < I64{2}) {
+        best_start = I64{-1}
+        best_length = I64{0}
+    }
+    at = I64{0}
+    loop at < (I64{8}) {
+        if (at == best_start) {
+            rt_text_push_word(result, I64{14906}, I64{2})
+            at += best_length
+        } else {
+            if (at != I64{0} && at != best_start + best_length) -> rt_text_push_scalar(result, I64{58})
+            ip_show_hex(result, ip_show_segment(value, at))
+            at += I64{1}
+        }
+    }
+}
+#Export(c) fn jet_rt_handle_show_jet_ip_addr(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    ip_show_into(result, value)
+    jet_rt_string_builder_finish(result)
+}

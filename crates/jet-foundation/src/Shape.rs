@@ -537,8 +537,8 @@ pub struct ShapeProjectedField {
     pub source_name: String,
     /// Name consumed by the selected projection.
     pub name: String,
-    /// Canonical JSON/DataTree decoder key for the same source field. A
-    /// non-JSON projection uses this when it materializes a DataTree for the
+    /// Canonical JSON/Dyn decoder key for the same source field. A
+    /// non-JSON projection uses this when it materializes a Dyn for the
     /// shared `Decode` implementation.
     pub decode_name: String,
     pub ty: ShapeType,

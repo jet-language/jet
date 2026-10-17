@@ -45,25 +45,25 @@ fn provider_cpan_parse_search(repository: String, distribution: String, raw: Str
 
 // One MetaCPAN release: its identity, SHA-256, and runtime `requires`
 // dependencies (`perl` itself excluded).
-fn provider_cpan_parse_release(repository: String, value: DataTree) -> RegistryPackage RegistryError! {
+fn provider_cpan_parse_release(repository: String, value: Dyn) -> RegistryPackage RegistryError! {
     package_name :: provider_script_json_string(value, "distribution")
     version :: provider_script_json_string(value, "version")
     url :: provider_script_json_string(value, "download_url")
     checksum :: provider_script_json_string(value, "checksum_sha256")
-    if !ScriptRegistryKind.Cpan.valid_name(package_name) || !provider_script_safe_piece(version, "+_-.") || !provider_registry_valid_hex(checksum, 64) {
+    if !(ScriptRegistryKind.Cpan).valid_name(package_name) || !provider_script_safe_piece(version, "+_-.") || !provider_registry_valid_hex(checksum, 64) {
         return Err(RegistryError.Reason("MetaCPAN release identity is unsafe or unhashed"))
     }
     dependencies := [RegistryDependency]{}
     if provider_script_json_field(value, "dependency") == {
         .Val(listed) -> {
-            items :: pkg_json_array(listed) ?? [DataTree]{}
+            items :: pkg_json_array(listed) ?? [Dyn]{}
             loop item in items {
                 relationship :: provider_script_json_string(item, "relationship")
                 phase :: provider_script_json_string(item, "phase")
                 if relationship != "requires" || phase != "runtime" -> next
                 dependency_name :: provider_script_json_string(item, "module")
                 if dependency_name == "perl" -> next
-                if !ScriptRegistryKind.Cpan.valid_name(dependency_name) -> return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
+                if !(ScriptRegistryKind.Cpan).valid_name(dependency_name) -> return Err(RegistryError.Reason("unsafe CPAN dependency `{dependency_name}`"))
                 minimum := "0"
                 if provider_script_json_field(item, "version") == {
                     .Val(written) -> {

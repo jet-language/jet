@@ -8,31 +8,31 @@
 // `CRecordDefinitions`.
 
 // The checked program as the bridge reads it (Rust `ProgramBundle`).
-pub struct RustBridgeProgram {
-    pub modules: [RustBridgeModule]
+struct RustBridgeProgram {
+    modules: [RustBridgeModule]
     // Index of the entry module in `modules`.
-    pub entry: Int
+    entry: Int
     // Core surfaces the program reaches (`module::item` or bare module rows).
-    pub used_core: [String]
-    pub project_root: String
+    used_core: [String]
+    project_root: String
     // The checked package declaration's authority needs (D-PLUGIN-AUTHORITY1).
-    pub authority_needs: [String]
+    authority_needs: [String]
     // Gathered C-FFI artifacts.
-    pub cffi: CFFI
+    cffi: CFFI
 }
 
 // One loaded module of the checked program.
-pub struct RustBridgeModule {
-    pub alias: String
-    pub path: String
-    pub items: [Item]
+struct RustBridgeModule {
+    alias: String
+    path: String
+    items: [Item]
 }
 
 // Why the hidden bridge could not be prepared or built. Every refusal is a
 // user-facing diagnostic row.
 #Error
-pub struct RustBridgeError {
-    pub diagnostics: [Diagnostic]
+struct RustBridgeError {
+    diagnostics: [Diagnostic]
 }
 
 // A plain bridge failure (E0704), the Rust `tool_error`.
@@ -49,26 +49,26 @@ impl ForeignBridgeError -> RustBridgeError {
 }
 
 // One foreign function collected from the import graph.
-pub struct ExternEntry {
-    pub jet_name: String
-    pub rust_path: String
-    pub wrapper_name: String
-    pub params: [(convention: AccessConvention, ty: Type)]
-    pub param_names: [String]
-    pub return_type: Type?
-    pub crate_spec: String
+struct ExternEntry {
+    jet_name: String
+    rust_path: String
+    wrapper_name: String
+    params: [(convention: AccessConvention, ty: Type)]
+    param_names: [String]
+    return_type: Type?
+    crate_spec: String
     // Human-facing hint for E0705 (`extern` line context).
-    pub line_hint: String
-    pub inline: InlineEntry?
+    line_hint: String
+    inline: InlineEntry?
     // The declaration names a native C symbol assembled by CFFI.
-    pub c_abi: Bool
+    c_abi: Bool
     // Compiler-generated CBind declarations use the descriptor ABI.
-    pub generated: Bool
+    generated: Bool
     // The entry originates in a C module rather than an `extern rust` block.
-    pub c_module: Bool
+    c_module: Bool
     // D-FFI-CAP1: the sibling foreign function that consumes a returned
     // handle, when the declaration carries `#Close(close)`.
-    pub close: String?
+    close: String?
 
     fn has_list(self) -> Bool Never! {
         loop param in self.params {
@@ -91,37 +91,37 @@ pub struct ExternEntry {
     }
 }
 
-pub struct InlineEntry {
-    pub lang: String
-    pub source: String
-    pub param_names: [String]
+struct InlineEntry {
+    lang: String
+    source: String
+    param_names: [String]
     // Sema-normalized assembly target/output/clobber facts.
-    pub asm_contract: InlineAsmContract?
+    asm_contract: InlineAsmContract?
 }
 
 // Built FFI bridge artifact paths for rustc linking (jet_foundation::AST::FfiLink).
-pub struct FFILink {
-    pub crate_name: String
+struct FFILink {
+    crate_name: String
     // Content-addressed identity of the bridge inputs.
-    pub cache_identity: String
+    cache_identity: String
     // Queryable provenance sidecar for the published bridge artifacts.
-    pub provenance_path: String
-    pub rlib_path: String
+    provenance_path: String
+    rlib_path: String
     // Shared library with `*_cabi` trampolines for the resident JIT.
-    pub cdylib_path: String
+    cdylib_path: String
     // Selected-target runtime dependencies emitted by Cargo.
-    pub target_deps_dir: String
+    target_deps_dir: String
     // Host artifacts rustc needs while loading target metadata (proc macros).
-    pub host_deps_dir: String
+    host_deps_dir: String
     // The `jet-crypto-helper` binary, present only for crypto bridges.
-    pub helper_bin_path: String?
+    helper_bin_path: String?
     // U13 (D-JPK-SECRETCRYPTO1): the `jet-secrets-helper` binary, present
     // only for secrets bridges.
-    pub secrets_helper_bin_path: String?
+    secrets_helper_bin_path: String?
     // Opaque C handle facts captured by the bridge input.
-    pub handle_facts: [FFIHandleFact]
+    handle_facts: [FFIHandleFact]
     // Explicit native link closure captured by the bridge input.
-    pub link_closure: FFILinkClosure
+    link_closure: FFILinkClosure
 
     // Cargo's dependency search paths, target artifacts first, no duplicates.
     fn dependency_dirs(self) -> [String] Never! {
@@ -159,12 +159,12 @@ struct CRecordDecl {
 
 // Checked `#[repr(C)]` record declarations used by the uniform native
 // trampoline.
-pub struct CRecordDefinitions {
-    source: String
-    names: [String: String]
-    aliases: [String: Type]
-    records: [CRecordDecl]
-    handle_names: [String]
+struct CRecordDefinitions {
+    priv source: String
+    priv names: [String: String]
+    priv aliases: [String: Type]
+    priv records: [CRecordDecl]
+    priv handle_names: [String]
 
     fn empty() -> CRecordDefinitions Never! {
         CRecordDefinitions{source: "", names: [String: String]{}, aliases: [String: Type]{}, records: [CRecordDecl]{}, handle_names: [String]{}}
@@ -273,7 +273,7 @@ fn pkg_ffi_builtin_rust_name(name: String) -> String? Never! {
 // Rust identifier for a canonical Jet path (`jet_foundation::Names::mangle_path`,
 // `Syntax::generated_path`): alphanumerics stay, `_ . : / \ -` take a
 // one-letter escape, every other byte a fixed-width hex escape.
-pub fn pkg_ffi_mangle_path(name: String) -> String Never! {
+fn pkg_ffi_mangle_path(name: String) -> String Never! {
     encoded := [U8]{}
     loop byte in name.bytes() {
         code :: Int.from_u8(byte)
@@ -292,13 +292,13 @@ pub fn pkg_ffi_mangle_path(name: String) -> String Never! {
 fn pkg_ffi_path_escape(code: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     if code == {
-        95 -> "u"
-        46 -> "d"
-        58 -> "c"
-        47 -> "s"
-        92 -> "b"
-        45 -> "h"
-        else -> "x{String.from_bytes([U8]{digits[code >> 4], digits[code & 15]}) ?? ""}"
+        95 -> { return "u" }
+        46 -> { return "d" }
+        58 -> { return "c" }
+        47 -> { return "s" }
+        92 -> { return "b" }
+        45 -> { return "h" }
+        else -> { return "x{String.from_bytes([U8]{digits[code >> 4], digits[code.bit_and(15)]}) ?? ""}" }
     }
 }
 
@@ -319,8 +319,9 @@ fn pkg_ffi_close_name(close: NamedSpan?) -> String? Never! {
     Val(value.name)
 }
 
-// Gather every foreign function across all modules.
-pub fn pkg_ffi_collect_externs(program: RustBridgeProgram) -> [ExternEntry] Never! {
+// Gather every foreign function across all modules. Inline assembly carries
+// its operand contract checked for `target`, the bridge's selected triple.
+fn pkg_ffi_collect_externs(program: RustBridgeProgram, target: String) -> [ExternEntry] Never! {
     out := [ExternEntry]{}
     loop program_module in program.modules {
         items :: program_module.items
@@ -330,7 +331,7 @@ pub fn pkg_ffi_collect_externs(program: RustBridgeProgram) -> [ExternEntry] Neve
                     functions :: block.functions
                     loop function in functions -> &out.push(pkg_ffi_extern_entry(function, block))
                 }
-                .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, &out)
+                .Func(function) -> pkg_ffi_collect_function(function, program_module.alias, target, &out)
                 .CModule(c_module) -> pkg_ffi_collect_c_module(c_module, &out)
                 else -> {}
             }
@@ -340,7 +341,7 @@ pub fn pkg_ffi_collect_externs(program: RustBridgeProgram) -> [ExternEntry] Neve
 }
 
 // A per-callable `#Import(c)` guest import or an inline `#FFI` body.
-fn pkg_ffi_collect_function(function: Func, owner: String, out: &[ExternEntry]) Never! {
+fn pkg_ffi_collect_function(function: Func, owner: String, target: String, out: &[ExternEntry]) Never! {
     if sema_guest_import_function_signature(function) == .Val(import) {
         names := [String]{}
         loop index in 0..<import.params.len() -> &names.push("arg{index}")
@@ -371,12 +372,21 @@ fn pkg_ffi_collect_function(function: Func, owner: String, out: &[ExternEntry]) 
         return_type: function.return_type,
         crate_spec: "std",
         line_hint: "`#FFI({inline.lang}) fn {function.name}`",
-        inline: Val(InlineEntry{lang: inline.lang, source: inline.source, param_names: pkg_ffi_param_names(function.params), asm_contract: inline.asm_contract}),
+        inline: Val(InlineEntry{lang: inline.lang, source: inline.source, param_names: pkg_ffi_param_names(function.params), asm_contract: pkg_ffi_inline_asm_contract(function, target)}),
         c_abi: false,
         generated: false,
         c_module: false,
         close: None
     })
+}
+
+// The Foundation-checked operand contract (one implementation with sema); an
+// incomplete contract stays None, which the target diagnostic refuses.
+fn pkg_ffi_inline_asm_contract(function: Func, target: String) -> InlineAsmContract? Never! {
+    if inline_assembly_contract(function, target) == {
+        .Checked(contract) -> return Val(contract)
+        else -> return None
+    }
 }
 
 // The hidden crate carries every checked C row. Primitive and handle rows use
@@ -541,7 +551,7 @@ fn pkg_ffi_inline_asm_entry_diagnostic(asm: ExternEntry, inline: InlineEntry, ta
     contract :: inline.asm_contract ?? return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked assembly contract", "assembly output and clobbers must be normalized by sema before native bridge generation", "fix the inline assembly operand contract and re-run sema"))
     if inline.param_names != asm.param_names || inline.param_names.len() != asm.params.len() -> return Val(pkg_ffi_asm_error("{asm.line_hint} has a stale assembly parameter map", "the native bridge must consume the sema-checked parameter order and names", "re-run sema so the inline assembly contract is normalized for this declaration"))
     if contract.target != target -> return Val(pkg_ffi_asm_error("{asm.line_hint} was checked for `{contract.target}`, not selected target `{target}`", "inline assembly is validated and compiled for the driver's selected target, not the host architecture", "select the checked target or provide an assembly body for the selected target"))
-    if !sema_inline_assembly_target_supported(target) -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no audited inline-assembly register set for target `{target}`", "inline assembly needs a target-specific register namespace before native bridge generation", "select a supported native target or provide a target-specific assembly body"))
+    if !inline_assembly_target_supported(target) -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no audited inline-assembly register set for target `{target}`", "inline assembly needs a target-specific register namespace before native bridge generation", "select a supported native target or provide a target-specific assembly body"))
     returns_value := false
     if asm.return_type == .Val(ty) -> returns_value = pkg_ffi_inline_rust_type(ty) != "()"
     if contract.output == None && returns_value -> return Val(pkg_ffi_asm_error("{asm.line_hint} has no checked output destination", "a value-returning assembly body must identify its result with the sema-checked output operand", "mark one named output or explicit target register with `; -> return`"))
@@ -555,7 +565,7 @@ fn pkg_ffi_inline_asm_entry_diagnostic(asm: ExternEntry, inline: InlineEntry, ta
     clobbers :: contract.clobbers
     loop clobber in clobbers {
         normalized :: pkg_ffi_normalize_register(clobber)
-        if !sema_inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
+        if !inline_assembly_register_known(target, normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} names clobber register `{clobber}`, which is not valid for target `{target}`", "fixed assembly clobbers are checked against the selected target namespace", "use a register valid for the selected target"))
         if seen_clobbers.contains(normalized) -> return Val(pkg_ffi_asm_error("{asm.line_hint} repeats clobber register `{clobber}`", "the checked assembly contract must contain each discarded output exactly once", "remove duplicate names from `; clobbers …`"))
         &seen_clobbers.push(normalized)
         if output_register == .Val(result_register) {
@@ -568,7 +578,7 @@ fn pkg_ffi_inline_asm_entry_diagnostic(asm: ExternEntry, inline: InlineEntry, ta
 fn pkg_ffi_asm_output_problem(asm: ExternEntry, output: InlineAsmOutput, target: String) -> Diagnostic? Never! {
     if output == {
         .Parameter(index) -> if index >= asm.params.len() -> Val(pkg_ffi_asm_error("{asm.line_hint} names output parameter index {index}, but the function has {asm.params.len()} parameters", "the checked output operand must refer to a declared Jet parameter", "use a named parameter in the `; -> return` anchor")) else -> None
-        .Register(register) -> if sema_inline_assembly_register_known(target, register) -> None else -> Val(pkg_ffi_asm_error("{asm.line_hint} names register `{register}`, which is not valid for target `{target}`", "fixed assembly registers are checked against the selected target namespace", "use a register valid for the selected target"))
+        .Register(register) -> if inline_assembly_register_known(target, register) -> None else -> Val(pkg_ffi_asm_error("{asm.line_hint} names register `{register}`, which is not valid for target `{target}`", "fixed assembly registers are checked against the selected target namespace", "use a register valid for the selected target"))
     }
 }
 
@@ -579,7 +589,7 @@ fn pkg_ffi_foreign_language_for_entry(entry: ExternEntry) -> ForeignLanguage? Ne
     if entry.c_abi {
         // COM type-library binders use the reserved bridge prefix on every
         // generated symbol; the descriptor survives the shared C bridge.
-        if entry.rust_path.starts_with(ForeignLanguage.Com.bridge_prefix()) -> return Val(ForeignLanguage.Com)
+        if entry.rust_path.starts_with((ForeignLanguage.Com).bridge_prefix()) -> return Val(ForeignLanguage.Com)
         return Val(ForeignLanguage.C)
     }
     lang :: entry.inline_lang() ?? return Val(ForeignLanguage.Rust)
@@ -610,7 +620,7 @@ fn pkg_ffi_foreign_descriptor_stamps(entries: [ExternEntry]) -> [String] Never! 
 // The entries' languages in declaration order (the Rust `BTreeSet` order).
 fn pkg_ffi_entry_languages(entries: [ExternEntry]) -> [ForeignLanguage] Never! {
     languages := [ForeignLanguage]{}
-    loop language in ForeignLanguage.all() {
+    loop language in ForeignLanguage.registered() {
         loop entry in entries {
             if pkg_ffi_foreign_language_for_entry(entry) == .Val(entry_language) {
                 if entry_language == language {
@@ -717,7 +727,7 @@ fn pkg_ffi_collect_crate_deps(entries: [ExternEntry]) -> [String: String] Never!
 }
 
 // `std` is `None`; `name@version` is the pair.
-pub fn pkg_ffi_parse_crate_spec(spec: String) -> (name: String, version: String)? Never! {
+fn pkg_ffi_parse_crate_spec(spec: String) -> (name: String, version: String)? Never! {
     if spec == "std" -> return None
     parts :: spec.split_once("@") ?? return None
     if parts.before == "" || parts.after == "" -> return None

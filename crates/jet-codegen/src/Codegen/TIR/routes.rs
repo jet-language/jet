@@ -8,7 +8,7 @@
 #![allow(dead_code)]
 use super::{
     ListRemoveMode, LowerError, TBuiltinOp, TClosureOp, TFailureCarrier, TGcEditKind, THandleOp,
-    THelperKind, TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
+    TNumericOp, TPreludeRoute, TRoutePlan, TTryConvert, TTypedTextForm,
     TTypedTextInterpKind,
 };
 use crate::AST::{BinOp, Type};
@@ -131,7 +131,7 @@ fn prelude(
             max_arity,
             borrow_mask: borrow_mask.to_vec(),
         },
-        effect,
+        effect: jet_foundation::Effects::prelude_route_effect(module, member).or(effect),
         fallibility: carrier.clone(),
         abi,
         authority: None,
@@ -185,14 +185,15 @@ fn collection_closure_route(
         ))
     })?;
     let (module, member, symbol, arity, borrow_mask) = match (op, kind) {
-        (Map, "list") => ("core.list", "map", "jet_list_map", 2, &[false, false][..]),
+        // #4566 slice 5: the eager list map kernels borrow their source.
+        (Map, "list") => ("core.list", "map", "jet_list_map", 2, &[true, false][..]),
         (Map, "iter") => ("core.iter", "map", "jet_iter_map", 2, &[false, false][..]),
         (MapMut, "list") => (
             "core.list",
             "map_mut",
             "jet_list_map_mut",
             2,
-            &[false, false][..],
+            &[true, false][..],
         ),
         (MapMut, "iter") => (
             "core.iter",
@@ -1198,19 +1199,20 @@ fn task_route(receiver: &Type, carrier: &TFailureCarrier) -> Result<TRoutePlan, 
     let task_value = args
         .first()
         .ok_or_else(|| route_error("checked task join is missing its value type"))?;
-    // `Task<Result<T, E>>` is the private carrier used by fallible task
-    // bodies. The shared Prelude helper removes that carrier before exposing
-    // the public `Result<T, TaskFailure>` join surface.
-    let symbol = if matches!(task_value, Type::Result { .. }) {
-        "jet_std::jet_task_join_result"
-    } else {
-        "jet_std::JetTask::join"
+    let TFailureCarrier::Result { success, .. } = carrier else {
+        return Err(route_error("checked task join has no result carrier"));
     };
+    // A join retains the checked Task element, including any worker outcome.
+    if success != task_value {
+        return Err(route_error(
+            "checked task join result disagrees with its task element",
+        ));
+    }
     Ok(prelude(
         MirPreludeFamily::HandleMethod,
         "core.tasks",
         "join",
-        symbol,
+        "jet_std::JetTask::join",
         1,
         1,
         &[false],
@@ -1391,6 +1393,15 @@ impl THandleOp {
                 Some(Effect::FS),
                 carrier,
             ),
+            FileReaderRead => h(
+                "file_reader.read",
+                "jet_std_file_reader_read",
+                2,
+                2,
+                &[true, false],
+                Some(Effect::FS),
+                carrier,
+            ),
             FileReaderPath => h(
                 "file_reader.path",
                 "jet_std_file_reader_path",
@@ -1457,6 +1468,24 @@ impl THandleOp {
             FileWriterFlush => h(
                 "file_writer.flush",
                 "jet_std_file_writer_flush",
+                1,
+                1,
+                &[true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterWriteAll => h(
+                "file_writer.write_all",
+                "jet_std_file_writer_write_all",
+                2,
+                2,
+                &[true, true],
+                Some(Effect::FS),
+                carrier,
+            ),
+            FileWriterFsync => h(
+                "file_writer.fsync",
+                "jet_std_file_writer_fsync",
                 1,
                 1,
                 &[true],
@@ -1544,15 +1573,6 @@ impl THandleOp {
                 Some(Effect::IO),
                 carrier,
             ),
-            CSVReaderNext => h(
-                "csv_reader.next",
-                "jet_enc_csv_reader_next",
-                1,
-                1,
-                &[true],
-                Some(Effect::IO),
-                carrier,
-            ),
             DataStreamNext => h(
                 "data_stream.next",
                 "jet_data_stream_next",
@@ -1628,33 +1648,6 @@ impl THandleOp {
             XMLWriterFinish => h(
                 "xml_writer.finish",
                 "jet_enc_xml_writer_finish",
-                1,
-                1,
-                &[true],
-                Some(Effect::IO),
-                carrier,
-            ),
-            CSVWriterWrite => h(
-                "csv_writer.write",
-                "jet_enc_csv_writer_write",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::IO),
-                carrier,
-            ),
-            CSVWriterFlush => h(
-                "csv_writer.flush",
-                "jet_enc_csv_writer_flush",
-                1,
-                1,
-                &[true],
-                Some(Effect::IO),
-                carrier,
-            ),
-            CSVWriterFinish => h(
-                "csv_writer.finish",
-                "jet_enc_csv_writer_finish",
                 1,
                 1,
                 &[true],
@@ -1803,42 +1796,6 @@ impl THandleOp {
                 1,
                 &[true],
                 None,
-                carrier,
-            ),
-            ClockNow => h(
-                "clock.now",
-                "jet_clock_now",
-                1,
-                1,
-                &[true],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockTick => h(
-                "clock.tick",
-                "jet_clock_tick",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockAdvance => h(
-                "clock.advance",
-                "jet_clock_advance",
-                2,
-                2,
-                &[true, false],
-                Some(Effect::Time),
-                carrier,
-            ),
-            ClockWait => h(
-                "clock.wait",
-                "jet_clock_wait",
-                2,
-                2,
-                &[true, true],
-                Some(Effect::Time),
                 carrier,
             ),
             WorldNow => h(
@@ -2046,87 +2003,6 @@ impl THandleOp {
                 2,
                 &[true, false],
                 Some(Effect::Rand),
-                carrier,
-            ),
-            FakeLocale => h(
-                "fake.locale",
-                "jet_fake_locale",
-                2,
-                2,
-                &[true, true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeName => h(
-                "fake.name",
-                "jet_fake_name",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeEmail => h(
-                "fake.email",
-                "jet_fake_email",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeHost => h(
-                "fake.host",
-                "jet_fake_host",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            FakeAddress => h(
-                "fake.address",
-                "jet_fake_address",
-                1,
-                1,
-                &[true],
-                Some(Effect::Rand),
-                carrier,
-            ),
-            SolverNew => h(
-                "solver.new",
-                "jet_solver_new",
-                1,
-                1,
-                &[false],
-                None,
-                carrier,
-            ),
-            SolverRequire => h(
-                "solver.require",
-                "jet_solver_require",
-                2,
-                2,
-                &[true, false],
-                None,
-                carrier,
-            ),
-            SolverFailureCount => h(
-                "solver.failure_count",
-                "jet_solver_failure_count",
-                1,
-                1,
-                &[true],
-                None,
-                carrier,
-            ),
-            SolverStatus => h(
-                "solver.status",
-                "jet_solver_status",
-                1,
-                1,
-                &[true],
-                None,
                 carrier,
             ),
             GameSceneNew => h(
@@ -3032,23 +2908,6 @@ impl THandleOp {
                 Some(Effect::Exec),
                 carrier,
             ),
-            ExpiringMethod { method } => match method.as_str() {
-                "get" => h(
-                    "expiring.get",
-                    "jet_expiring_get",
-                    2,
-                    2,
-                    &[true, true],
-                    Some(Effect::Time),
-                    carrier,
-                ),
-                "is_valid" => primitive(),
-                _ => {
-                    return Err(route_error(format!(
-                        "unknown checked ExpiringValue method `{method}`"
-                    )));
-                }
-            },
             HTTPServerMethod { kind, method } if kind == "WsConn" => match method.as_str() {
                 "send_text" => h(
                     "ws.send_text",
@@ -3154,33 +3013,6 @@ impl THandleOp {
             HTTPClientMethod { kind, method } => http_client_request_route(kind, method, carrier)?,
             HTTPServerMethod { .. } | EmailMethod { .. } => primitive(),
             RegexMethod { kind, method } => regex_route(kind, method, carrier)?,
-            UrlMimeMethod { kind, method } => url_mime_route(kind, method, carrier)?,
-            SketchMethod { sketch, method } => {
-                let (arity, borrow_mask): (usize, &[bool]) =
-                    match (sketch.as_str(), method.as_str()) {
-                        ("HyperLogLog", "add") | ("CountMinSketch", "add" | "count") => {
-                            (2, &[true, true])
-                        }
-                        ("HyperLogLog", "count") | ("ReservoirSampler", "sample") => (1, &[true]),
-                        ("TDigest", "add" | "quantile") | ("ReservoirSampler", "add") => {
-                            (2, &[true, false])
-                        }
-                        _ => {
-                            return Err(route_error(format!(
-                                "unknown checked sketch method `{sketch}.{method}`"
-                            )));
-                        }
-                    };
-                h(
-                    &format!("{sketch}.{method}"),
-                    &format!("Jet{sketch}::{method}"),
-                    arity,
-                    arity,
-                    borrow_mask,
-                    None,
-                    carrier,
-                )
-            }
             CivilTimeMethod { kind, method } => civil_time_route(kind, method, carrier)?,
             ProcessSpecMethod { method, args_len } => match (method.as_str(), *args_len) {
                 ("cwd", 1) => h(
@@ -4111,15 +3943,18 @@ impl THandleOp {
             | HTTPRespField(_)
             | HTTPRespHeader
             | ArgsSpecHelp
-            | DataTreeField
-            | DataTreeAt
-            | DataTreeInt
-            | DataTreeText
-            | DataTreeBool
-            | DataTreeFloat
-            | DataTreeToText
-            | DataTreeEqualUnordered
-            | DataTreeDecode(_)
+            | DynIndexKey { .. } | DynIndexAt { .. } | DynGetKey | DynGetAt
+            | DynHas | DynKeys | DynRemove | DynLen { .. }
+            | DynBinary { .. } | DynCompare { .. } | DynSetPath { .. }
+            | DynField
+            | DynAt
+            | DynInt
+            | DynText
+            | DynBool
+            | DynFloat
+            | DynToText
+            | DynEqualUnordered
+            | DynDecode(_)
             | SerdeEncode
             | JSONField
             | JSONAt
@@ -4180,19 +4015,6 @@ impl THandleOp {
                 &[false],
                 Some(Effect::DB),
                 carrier,
-            ),
-            MeasurementMethod { method } => measurement_route(method, carrier)?,
-            WebVirtualWindowFacts => prelude(
-                MirPreludeFamily::HandleMethod,
-                "core.web.virtual",
-                "facts_json",
-                "jet_web_virtual_window_facts",
-                1,
-                1,
-                &[true],
-                None,
-                carrier,
-                MirPreludeAbi::Value,
             ),
             AppMethod { method, args_len } => app_route(method, *args_len, carrier),
             DevServerMethod { method } => devserver_route(method, carrier),
@@ -4595,64 +4417,6 @@ fn regex_route(
     ))
 }
 
-/// D-URL1=A: checked MIME projections. `URL` is the `core.net.url` record, so
-/// its documented methods lower through the declaration, never a handle row.
-fn url_mime_route(
-    kind: &str,
-    method: &str,
-    carrier: &TFailureCarrier,
-) -> Result<TRoutePlan, LowerError> {
-    let (symbol, borrow_mask): (&str, &[bool]) = match (kind, method) {
-        ("MIME", "media_type") => ("jet_std::JetMIME::media_type", &[true][..]),
-        ("MIME", "subtype") => ("jet_std::JetMIME::subtype", &[true][..]),
-        ("MIME", "essence") => ("jet_std::JetMIME::essence", &[true][..]),
-        ("MIME", "params") => ("jet_std::JetMIME::params", &[true][..]),
-        ("MIME", "to_string") => ("jet_std::JetMIME::to_string_value", &[true][..]),
-        ("MIME", "param") => ("jet_std::JetMIME::param", &[true, true][..]),
-        _ => {
-            return Err(route_error(format!(
-                "unknown checked URL/MIME method `{kind}.{method}`"
-            )));
-        }
-    };
-    let member = format!("{kind}.{method}");
-    Ok(h(
-        &member,
-        symbol,
-        borrow_mask.len(),
-        borrow_mask.len(),
-        borrow_mask,
-        None,
-        carrier,
-    ))
-}
-
-fn measurement_route(method: &str, carrier: &TFailureCarrier) -> Result<TRoutePlan, LowerError> {
-    let (symbol, borrow_mask): (&str, &[bool]) = match method {
-        "value" => ("jet_std::JetMeasurement::value", &[true][..]),
-        "uncertainty" => ("jet_std::JetMeasurement::uncertainty", &[true][..]),
-        "add" => ("jet_std::JetMeasurement::add", &[true, false][..]),
-        "sub" => ("jet_std::JetMeasurement::sub", &[true, false][..]),
-        "mul" => ("jet_std::JetMeasurement::mul", &[true, false][..]),
-        "div" => ("jet_std::JetMeasurement::div", &[true, false][..]),
-        "sqrt" => ("jet_std::JetMeasurement::sqrt", &[true][..]),
-        _ => {
-            return Err(route_error(format!(
-                "unknown checked measurement method `{method}`"
-            )));
-        }
-    };
-    let member = format!("Measurement.{method}");
-    Ok(h(
-        &member,
-        symbol,
-        borrow_mask.len(),
-        borrow_mask.len(),
-        borrow_mask,
-        None,
-        carrier,
-    ))
-}
 
 fn reactive_method_route(
     receiver: &Type,
@@ -4904,7 +4668,7 @@ fn builtin_collection_route(
             row("contains", "jet_list_contains", 2, &[true, true])
         }
         (TBuiltinOp::Contains, Type::Named(name)) if name == "Range" => {
-            row("contains", "jet_range_contains", 2, &[true, false])
+            row("contains", "jet_range_value_contains", 2, &[true, false])
         }
         (TBuiltinOp::Contains, Type::InlineRange { .. }) => {
             row("contains", "jet_range_contains", 2, &[true, false])
@@ -4940,7 +4704,7 @@ fn builtin_collection_route(
             row("map_has_key", "jet_map_has_key", 2, &[true, true])
         }
         (TBuiltinOp::ContainsKey, Type::Apply { name, .. }) if name == crate::Syntax::TYPE_LRU => {
-            row("lru_has", "jet_lru_has", 2, &[true, false])
+            row("lru_has", "jet_lru_has", 2, &[true, true])
         }
         (TBuiltinOp::LenList, Type::Apply { name, .. }) if name == "Set" => {
             row("len", "jet_set_len", 1, &[true])
@@ -5466,6 +5230,15 @@ impl TBuiltinOp {
                 1,
                 1,
                 &[true],
+                Some(Effect::Mem),
+                carrier,
+            ),
+            SwapList => b(
+                "list_swap",
+                "jet_list_swap",
+                3,
+                3,
+                &[true, false, false],
                 Some(Effect::Mem),
                 carrier,
             ),
@@ -6103,7 +5876,7 @@ impl TBuiltinOp {
                 "jet_lru_get",
                 2,
                 2,
-                &[true, false],
+                &[true, true],
                 Some(Effect::Mem),
                 carrier,
             ),
@@ -6254,7 +6027,6 @@ impl TBuiltinOp {
                 None,
                 carrier,
             ),
-            BitSetCopy => b("bitset_copy", "jet_bits_copy", 1, 1, &[true], None, carrier),
             ViewNew { .. } => b(
                 "view_new",
                 "jet_view_new",
@@ -6462,7 +6234,7 @@ impl TBuiltinOp {
             ),
             MapSliceKeys { .. } => b(
                 "map_slice",
-                "jet_map_slice",
+                "jet_map_slice_keys_kernel",
                 2,
                 2,
                 &[true, false],
@@ -6667,14 +6439,12 @@ impl TBuiltinOp {
             | IterLastIndexOf
             | IterAverage { .. }
             | IterCompare
-            | ListCopy
             | ListUnion
             | ListIntersection
             | ListDifference
             | ListRandom
             | SetCopy
             | SetCapacity
-            | MapCopy
             | MapNew
             | Zip { .. }
             | OptionZip { .. }
@@ -6869,7 +6639,7 @@ fn byte_buffer_method_route(
     let arity = match method {
         "len" | "is_empty" | "clear" | "position" | "eof" | "rewind" | "flush" | "close"
         | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim" | "trim_start"
-        | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title" | "clone" | "copy"
+        | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title" | "clone"
         | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii" => 1,
         "get" | "seek" | "read_bytes" | "read_string" | "contains" | "starts_with"
         | "ends_with" | "index_of" | "last_index_of" | "split" | "partition" | "join" | "equal"
@@ -6879,15 +6649,25 @@ fn byte_buffer_method_route(
     };
     let member = format!("byte_buffer_{method}");
     let symbol = format!("JetByteBuffer::{method}");
+    let mut borrow_mask = vec![true; arity];
+    if byte_buffer_native_int_operand(method) {
+        borrow_mask[1] = false;
+    }
     Ok(b(
         &member,
         &symbol,
         arity,
         arity,
-        &vec![true; arity],
+        &borrow_mask,
         Some(Effect::Mem),
         carrier,
     ))
+}
+
+/// ByteBuffer methods whose operand is an index or count the kernel takes as
+/// the native `i64` word (by value, narrowed from the exact Int).
+pub(super) fn byte_buffer_native_int_operand(method: &str) -> bool {
+    matches!(method, "get" | "seek" | "read_bytes" | "read_string")
 }
 
 fn byte_buffer_write_route(
@@ -6901,7 +6681,9 @@ fn byte_buffer_write_route(
         &symbol,
         2,
         2,
-        &[true, false],
+        // `write`/`write_bytes` borrow their `&Vec<u8>`; the scalar
+        // `write_<kind>` forms take their value.
+        &[true, matches!(method, "write" | "write_bytes")],
         Some(Effect::Mem),
         carrier,
     ))
@@ -6946,7 +6728,6 @@ pub(super) fn string_method_route(
         "strip" => ("strip", "jet_text_parse_strip", 1),
         "lstrip" => ("lstrip", "jet_text_parse_lstrip", 1),
         "rstrip" => ("rstrip", "jet_text_parse_rstrip", 1),
-        "copy" => ("copy", "jet_string_copy", 1),
         "replace" => ("replace", "jet_string_replace", 3),
         "count_bytes" => ("count_bytes", "jet_string_count_bytes", 1),
         "last_index_of" => ("last_index_of", "jet_unicode_last_index_of", 2),
@@ -7271,7 +7052,7 @@ fn runtime(
             max_arity,
             borrow_mask: borrow_mask.to_vec(),
         },
-        effect,
+        effect: jet_foundation::Effects::prelude_route_effect(module, member).or(effect),
         fallibility: carrier.clone(),
         authority: None,
         abi,
@@ -7915,32 +7696,6 @@ pub(super) fn shared_guard_split_route(
     )
 }
 
-/// Select one of the checked clock helper kernels. The legacy helper spelling
-/// is retained only by the old renderer; MIR sees this closed set.
-pub(super) fn helper_route(
-    helper: THelperKind,
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    let (member, symbol, arity, mask) = match helper {
-        THelperKind::ClockNew => ("clock_new", "jet_std_clock_new", 1, vec![false]),
-        THelperKind::ClockSystem => ("clock_system", "jet_std_clock_system", 0, Vec::new()),
-    };
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.clock",
-        member,
-        symbol,
-        arity,
-        arity,
-        &mask,
-        None,
-        carrier,
-        MirPreludeAbi::Value,
-        "clock helper",
-    )
-}
 
 pub(super) fn memo_stats_route(
     result: &Type,
@@ -8020,7 +7775,13 @@ pub(super) fn core_closure_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
+    // D-REACTCORE1: the `#Reactive { … }` statement form has no handle to own
+    // its effect, so it roots the observer (`jet_reactive_scope`); the
+    // `reactive.effect(..)` expression returns its lifecycle handle.
+    let rooted_effect = matches!(
+        result,
+        Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE
+    );
     let (module, member, symbol, arity, borrow_mask) = match &kind {
         MirCoreClosureKind::Spawn if grouped_spawn => (
             "core.tasks",
@@ -8070,6 +7831,13 @@ pub(super) fn core_closure_route(
             "core.reactive",
             "derived",
             "jet_std::JetDerived::new",
+            1,
+            vec![false],
+        ),
+        MirCoreClosureKind::ReactiveEffect if rooted_effect => (
+            "core.reactive",
+            "scope",
+            "jet_std::jet_reactive_scope",
             1,
             vec![false],
         ),
@@ -8466,7 +8234,12 @@ pub(super) fn math_builtin_route(
     }
     let _ = result;
     let symbol = format!("jet_math_{type_name}_{func}");
-    let borrow_mask = vec![false; arity];
+    // LinalgFns binary kernels borrow the left operand and take the right
+    // operand by value (`fn(&Mat3, Vec3)`); the route matches that ABI.
+    let mut borrow_mask = vec![false; arity];
+    if arity == 2 && matches!(func, "add" | "sub" | "mul" | "div" | "hadamard_mul" | "transform" | "matmul") {
+        borrow_mask[0] = true;
+    }
     prelude_route_row(
         MirPreludeFamily::MathBuiltin,
         type_name,
@@ -8556,19 +8329,7 @@ pub(super) fn precise_builtin_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
-    // Measurement is a typed Prelude carrier, not a decimal-like numeric
-    // implementation. Keep its existing AOT/JIT method symbol and use the
-    // shared PreciseBuiltin route shape for the source constructor.
-    let symbol = if type_name == "Measurement" && func == "new" {
-        "jet_std::JetMeasurement::new".to_string()
-    } else {
-        // The shared Prelude spells every precise-numeric entry point as
-        // `jet_<type>_<func>` (`Prelude/CoreLib/Top/MathRandomTime.rs`:
-        // `jet_decimal_from_str(&String)`, `jet_decimal_add(&a, &b)`,
-        // `jet_fraction_from_parts(i64, i64)`). Constructors take their
-        // parts by value, `from_str` and every method borrow.
-        format!("jet_{}_{func}", type_name.to_ascii_lowercase())
-    };
+    let symbol = format!("jet_{}_{func}", type_name.to_ascii_lowercase());
     let by_value =
         matches!(func, "new" | "from_parts") || (func.starts_with("from_") && func != "from_str");
     let borrow_mask = vec![!by_value; arity];
@@ -8627,27 +8388,6 @@ pub(super) fn ambient_input_route(
         "ambient input",
     )
 }
-/// Convert one checked runtime entry vector into the canonical typed map.
-pub(super) fn data_entries_to_map_route(
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.collections",
-        "entries_to_map",
-        "jet_data_entries_to_map",
-        1,
-        1,
-        &[false],
-        None,
-        carrier,
-        MirPreludeAbi::Value,
-        "map entries conversion",
-    )
-}
-
 pub(super) fn todo_route(
     result: &Type,
     _carrier: &TFailureCarrier,
@@ -8829,7 +8569,7 @@ pub(super) fn static_prelude_route(
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
     let _ = result;
-    let effect = (module == "::JetAtomic" && member == "try_new").then_some(Effect::Mem);
+    let effect = jet_foundation::Effects::prelude_route_effect(module, member);
     let arity = borrow_mask.len();
     let symbol = match (module, member) {
         ("::JetAuthority", "from_rights") => "jet_authority_from_rights".to_string(),
@@ -9269,23 +9009,6 @@ pub(super) fn distinct_conversion_route(
     }
 }
 
-fn is_measurement_type(ty: &Type) -> bool {
-    matches!(
-        ty.without_user_tags(),
-        Type::Apply { name, args }
-            if name == "Measurement"
-                && args.len() == 1
-                && matches!(args[0].without_user_tags(), Type::Float)
-    )
-}
-
-fn is_measured_conversion_result(ty: &Type) -> bool {
-    match ty.without_user_tags() {
-        Type::Option(inner) => is_measurement_type(inner),
-        Type::Result { ok, .. } => is_measurement_type(ok),
-        _ => false,
-    }
-}
 
 pub(super) fn unit_conversion_route(
     destination: &str,
@@ -9296,10 +9019,9 @@ pub(super) fn unit_conversion_route(
     result: &Type,
     carrier: &TFailureCarrier,
 ) -> Result<TPreludeRoute, LowerError> {
-    let _ = (destination, scale, offset);
-    let measured = relative_uncertainty.is_some() && is_measured_conversion_result(result);
-    match (rounding, measured) {
-        (None, false) => prelude_route_row(
+    let _ = (destination, scale, offset, relative_uncertainty, result);
+    match rounding {
+        None => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_exact",
@@ -9312,20 +9034,7 @@ pub(super) fn unit_conversion_route(
             MirPreludeAbi::Value,
             "exact unit conversion",
         ),
-        (None, true) => prelude_route_row(
-            MirPreludeFamily::StaticPrelude,
-            "core.units",
-            "conversion_exact_measurement",
-            "jet_std::jet_unit_conversion_exact_measurement",
-            6,
-            6,
-            &[false, true, true, true, true, false],
-            None,
-            carrier,
-            MirPreludeAbi::Value,
-            "exact measured unit conversion",
-        ),
-        (Some(_), false) => prelude_route_row(
+        Some(_) => prelude_route_row(
             MirPreludeFamily::StaticPrelude,
             "core.units",
             "conversion_rounded",
@@ -9337,19 +9046,6 @@ pub(super) fn unit_conversion_route(
             carrier,
             MirPreludeAbi::Value,
             "rounded unit conversion",
-        ),
-        (Some(_), true) => prelude_route_row(
-            MirPreludeFamily::StaticPrelude,
-            "core.units",
-            "conversion_rounded_measurement",
-            "jet_std::jet_unit_conversion_rounded_measurement",
-            8,
-            8,
-            &[false, true, true, true, true, false, false, false],
-            None,
-            carrier,
-            MirPreludeAbi::Value,
-            "rounded measured unit conversion",
         ),
     }
 }
@@ -9518,12 +9214,9 @@ pub(super) fn typed_text_interp_route(
             2,
             vec![true, false],
         ),
-        TTypedTextInterpKind::URL => (
-            "url_literal",
-            "jet_std::jet_typed_url_literal",
-            2,
-            vec![true, false],
-        ),
+        TTypedTextInterpKind::URL => {
+            return Err(route_error("URL recipes must call core.net.url.literal"));
+        }
         TTypedTextInterpKind::Path => (
             "path_literal",
             "jet_typed_path_literal",
@@ -9574,33 +9267,6 @@ pub(super) fn expect_snapshot_route(
     )
 }
 
-/// Select the generic expiring-value constructor. `secret` chooses the
-/// capability-bearing wrapper while the element type remains a MIR type arg.
-pub(super) fn expiring_route(
-    secret: bool,
-    result: &Type,
-    carrier: &TFailureCarrier,
-) -> Result<TPreludeRoute, LowerError> {
-    let _ = result;
-    let (member, symbol) = if secret {
-        ("secret_new", "jet_expiring_secret_new")
-    } else {
-        ("new", "jet_expiring_new")
-    };
-    prelude_route_row(
-        MirPreludeFamily::StaticPrelude,
-        "core.expiring",
-        member,
-        symbol,
-        3,
-        3,
-        &[false, true, true],
-        Some(Effect::Time),
-        carrier,
-        MirPreludeAbi::Value,
-        "expiring constructor",
-    )
-}
 
 /// C callback construction has one runtime operand: the lowered closure.
 /// Extern symbol and return type stay as structured metadata on the MIR op.
@@ -9896,19 +9562,6 @@ pub(super) fn host_method_route(
             _ => {
                 return Err(route_error(format!(
                     "unknown checked CellEditGuard host method `{method}`"
-                )));
-            }
-        },
-        Type::Apply { name, .. } if name == "ExpiringSecret" => match method {
-            "with" => (
-                "ExpiringSecret.with",
-                "jet_expiring_secret_with",
-                2,
-                &[true, false],
-            ),
-            _ => {
-                return Err(route_error(format!(
-                    "unknown checked ExpiringSecret host method `{method}`"
                 )));
             }
         },

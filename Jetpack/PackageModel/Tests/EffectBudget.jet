@@ -11,8 +11,8 @@ fn pkg_test_effect_program() -> EffectBudgetProgram Never! {
     EffectBudgetProgram{
         entry: 0,
         modules: [EffectBudgetModule]{
-            EffectBudgetModule{path: "/workspace/app/run.jet", alias: "run", function_keys: [String]{"run"}, imports: [EffectBudgetImport]{}, has_build_entry: false},
-            EffectBudgetModule{path: "/workspace/deps/email/src/crypto.jet", alias: "crypto", function_keys: [String]{"migrate_v1", "seal", "unused"}, imports: [EffectBudgetImport]{}, has_build_entry: false}
+            EffectBudgetModule{path: "/workspace/app/run.jet", alias: "run", function_keys: [String]{"run"}, function_spans: [String: Span]{"run": Span{start: 3, end: 6}}, imports: [EffectBudgetImport]{}, has_build_entry: false},
+            EffectBudgetModule{path: "/workspace/deps/email/src/crypto.jet", alias: "crypto", function_keys: [String]{"migrate_v1", "seal", "unused"}, function_spans: [String: Span]{"migrate_v1": Span{start: 3, end: 13}, "seal": Span{start: 22, end: 26}, "unused": Span{start: 35, end: 41}}, imports: [EffectBudgetImport]{}, has_build_entry: false}
         },
         dep_roots: [String: String]{"email": "/workspace/deps/email"},
         selected_output: None
@@ -53,7 +53,7 @@ fn pkg_test_budget_manifest(allow: [String]) -> PackageFacts Never! {
 }
 
 fn pkg_test_package_effects(name: String, effects: [String], sites: [String: String], panic_sites: [String], span: Span?) -> PackageEffects Never! {
-    PackageEffects{name: name, effects: effects, effect_sites: sites, panic_sites: panic_sites, boundary_span: span}
+    PackageEffects{name: name, effects: effects, effect_sites: sites, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: panic_sites, boundary_span: span}
 }
 
 #Test("package budget ignores an unreachable loaded rand helper") {
@@ -75,6 +75,19 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
         if diagnostic.what.contains("`email`") && diagnostic.what.contains("Rand") -> found = true
     }
     assert(found)
+}
+
+#Test("package budget preserves the authored effect witness location") {
+    solved := pkg_test_effect_solved()
+    solved["run::run"] = [String]{"Rand"}
+    entries :: pkg_compute_package_effects(pkg_test_effect_program(), solved, pkg_test_effect_summaries(true))
+    diagnostics :: pkg_effect_enforce(entries, pkg_test_budget_manifest([String]{"IO"}))
+    assert_eq(diagnostics.len(), 2)
+    loop diagnostic in diagnostics {
+        assert_eq(diagnostic.span, Val(Span{start: 22, end: 26}))
+        assert_eq(diagnostic.source_path, Val("/workspace/deps/email/src/crypto.jet"))
+        assert(diagnostic.what.contains("crypto::seal"))
+    }
 }
 
 #Test("effect budget authority block is the E1220 source") {
@@ -127,7 +140,7 @@ fn pkg_test_package_effects(name: String, effects: [String], sites: [String: Str
         "callbacks::apply_twice": pkg_test_effect_summary([String]{}, [String]{}, true)
     }
     assert_eq(pkg_effect_summary_line_for_entry(summaries, "run"), "effects: IO")
-    assert(pkg_effect_summary_json_for_entry(summaries, "run").contains("\"action\":\"build.effects\""))
+    assert((pkg_effect_summary_json_for_entry(summaries, "run") ?? panic("render effects")).contains("\"action\":\"build.effects\""))
 }
 
 #Test("application projection keeps required granted denied and authority distinct") {

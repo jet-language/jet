@@ -65,13 +65,21 @@ fn assert_compiles(name: &str, src: &str) {
 }
 
 #[test]
+fn refutable_variant_guard_retains_its_checked_owner() {
+    assert_compiles(
+        "refutable_variant_owner",
+        include_str!("ice_regressions/refutable_variant_owner.jet"),
+    );
+}
+
+#[test]
 fn b1_json_text_clones_borrowed_view_param() {
     assert_compiles(
         "b1_json_text_view",
         r#"
 use core.encoding.json as json
 fn wrap(x: String) -[]> String {
-    j :: JSON.Text(~x)
+    j :: JSON.Text(x.copy())
     return json.to_string(j)
 }
 fn run() {
@@ -203,46 +211,46 @@ fn b8_value_if_fallible_arms_keep_one_value_type() {
     assert_compiles(
         "b8_value_if_bool_never",
         r#"
-fn next(value: DataTree) -> Bool Never! { return true }
-fn value_if_bool_never(value: DataTree) -> Bool Never! {
+fn next(value: Dyn) -> Bool Never! { return true }
+fn value_if_bool_never(value: Dyn) -> Bool Never! {
     return if value == {
         .Null -> false
-        else -> next(~value)
+        else -> next(value.copy())
     }
 }
 fn run() {
-    print(value_if_bool_never(DataTree.Null))
+    print(value_if_bool_never(Dyn.Null))
 }
 "#,
     );
     assert_compiles(
         "b8_value_if_string_err",
         r#"
-fn next(value: DataTree) -> String { return "next" }
-fn value_if_string_err(value: DataTree) -> String {
+fn next(value: Dyn) -> String { return "next" }
+fn value_if_string_err(value: Dyn) -> String {
     return if value == {
         .Null -> "null"
-        else -> next(~value)
+        else -> next(value.copy())
     }
 }
 fn run() {
-    print(value_if_string_err(DataTree.Null))
+    print(value_if_string_err(Dyn.Null))
 }
 "#,
     );
     assert_compiles(
         "b8_value_if_list_err",
         r#"
-fn next(value: DataTree) -> [String] { return [String]{} }
-fn value_if_list_err(value: DataTree) -> [String] {
+fn next(value: Dyn) -> [String] { return [String]{} }
+fn value_if_list_err(value: Dyn) -> [String] {
     empty := [String]{}
     return if value == {
-        .Text(text) -> next(DataTree.Text(~text))
+        .Text(text) -> next(Dyn.Text(~text))
         else -> empty
     }
 }
 fn run() {
-    print(value_if_list_err(DataTree.Null))
+    print(value_if_list_err(Dyn.Null))
 }
 "#,
     );
@@ -312,7 +320,7 @@ fn run(args: Args) {
     for (trait_name, method_name, return_type) in [
         ("__jet_Equatable", "equal", "bool"),
         ("__jet_Comparable", "compare", "__jet_Ordering"),
-        ("__jet_Encode", "jet_encode", "jet_std::DataTree"),
+        ("__jet_Encode", "jet_encode", "jet_std::Dyn"),
     ] {
         let marker = format!("{trait_name} for __jet_");
         let mut found = false;

@@ -13,6 +13,7 @@ use jet_foundation.[
     FleetField,
     FleetFieldValue,
     FleetLit,
+    Func,
     GenericModuleDef,
     GenericModuleParam,
     HostEntry,
@@ -67,12 +68,12 @@ use jet_lexer.[
 
 fn parser_module_dashed_name(state: &JetParserState, context: String) -> NamedSpan {
     first :: parser_expect_name(&state, context)
-    name := first.payload.decoded
+    name := parser_value(state, first)
     end := first.span
     loop parser_current_kind(&state) == TOKEN_MINUS && parser_kind_at(&state, 1) == TOKEN_IDENT {
         parser_bump(&state)
         part :: parser_bump(&state)
-        name = "{name}-{part.payload.decoded}"
+        name = "{name}-{parser_value(state, part)}"
         end = part.span
     }
     NamedSpan{name: name, span: parser_cover(first.span, end)}
@@ -105,7 +106,8 @@ fn parser_module_config_body_ahead(state: &JetParserState) -> Bool Never! {
     if first.kind != TOKEN_IDENT -> return false
     if parser_kind_at(&state, 2) == TOKEN_DOT -> return true
     if parser_kind_at(&state, 2) != TOKEN_COLON -> return false
-    first.payload.decoded == "sources" || first.payload.decoded == "imports" || first.payload.decoded == "members"
+    head :: parser_value(state, first)
+    head == "sources" || head == "imports" || head == "members"
 }
 
 fn parser_module_error(state: &JetParserState, code: String, span: Span, what: String, why: String, fix: String) {
@@ -148,19 +150,19 @@ fn parser_parse_module_decl_after_name(state: &JetParserState, modifiers: Parsed
             parser_report_ineligible_state_section(&state, section, "module")
             next
         }
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parsed_sources :: parser_module_sources(&state)
             loop source in parsed_sources -> &sources.push(source)
             next
         }
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parser_bump(&state)
             parser_bump(&state)
             &imports.push(parser_parse_expression(&state, 1, 0).expr)
             if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
             next
         }
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "members" && parser_kind_at(&state, 1) == TOKEN_COLON {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "members" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parser_bump(&state)
             parser_bump(&state)
             &members.push(parser_parse_expression(&state, 1, 0).expr)
@@ -181,9 +183,10 @@ fn parser_parse_module_decl_after_name(state: &JetParserState, modifiers: Parsed
 
 fn parser_parse_module_contribution(state: &JetParserState) -> Contribution {
     namespace_token :: parser_expect_name(&state, "for a namespace contribution")
-    namespace := parser_module_namespace(namespace_token.payload.decoded)
+    namespace_name :: parser_value(state, namespace_token)
+    namespace := parser_module_namespace(namespace_name)
     if namespace == None {
-        parser_module_error(&state, "E0960", namespace_token.span, "`{namespace_token.payload.decoded}` is not a module namespace", "namespace contributions use env, system, image, fleet, vmtest, or profile", "start the contribution with a supported namespace")
+        parser_module_error(&state, "E0960", namespace_token.span, "`{namespace_name}` is not a module namespace", "namespace contributions use env, system, image, fleet, vmtest, or profile", "start the contribution with a supported namespace")
         namespace = Val(Namespace.Env)
     }
     namespace_value :: namespace ?? Namespace.Env
@@ -221,7 +224,7 @@ fn parser_module_contribution_end(value: ContribValue) -> Span {
 fn parser_parse_module_system_lit(state: &JetParserState) -> SystemLit {
     explicit_type := Span?{None}
     record_start := parser_current(&state).span
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "System" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "System" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
         explicit :: parser_bump(&state)
         explicit_type = Val(explicit.span)
         record_start = explicit.span
@@ -241,7 +244,7 @@ fn parser_parse_module_system_lit(state: &JetParserState) -> SystemLit {
 fn parser_parse_module_image_lit(state: &JetParserState) -> ImageLit {
     explicit_type := Span?{None}
     record_start := parser_current(&state).span
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Image" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "Image" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
         explicit :: parser_bump(&state)
         explicit_type = Val(explicit.span)
         record_start = explicit.span
@@ -261,7 +264,7 @@ fn parser_parse_module_image_lit(state: &JetParserState) -> ImageLit {
 fn parser_parse_module_fleet_lit(state: &JetParserState) -> FleetLit {
     explicit_type := Span?{None}
     record_start := parser_current(&state).span
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Fleet" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "Fleet" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
         explicit :: parser_bump(&state)
         explicit_type = Val(explicit.span)
         record_start = explicit.span
@@ -281,7 +284,7 @@ fn parser_parse_module_fleet_lit(state: &JetParserState) -> FleetLit {
 fn parser_parse_module_vmtest_lit(state: &JetParserState) -> VMTestLit {
     explicit_type := Span?{None}
     record_start := parser_current(&state).span
-    if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "VmTest" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+    if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "VmTest" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
         explicit :: parser_bump(&state)
         explicit_type = Val(explicit.span)
         record_start = explicit.span
@@ -330,7 +333,126 @@ fn parser_parse_code_module_after_name(state: &JetParserState, modifiers: Parsed
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after module declarations")
-    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(body), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+    Item.CodeModule{value: CodeModule{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, body: Val(parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub)), imports: imports, web_target: None, instance_identity: None, span: parser_cover(start, close.span)}}
+}
+
+// D-VIS-MODULE1 (Rust `Parser::apply_module_visibility`): every declaration
+// inside a `priv module` takes the module's privacy. A `priv module` is usable
+// only by its enclosing module, a `priv(package) module` by its package; every
+// other declaration is public. Fields keep their own `priv`; a nested module
+// keeps its own flags while its body takes the narrower privacy. A public
+// module leaves its body as parsed (its nested modules were narrowed when built).
+fn parser_module_body_visibility(body: ^[Item], is_pub: Bool, is_package_pub: Bool) -> [Item] Never! {
+    if is_pub && !is_package_pub -> return ^body
+    narrowed := [Item]{}
+    loop item in body {
+        if item == {
+            .CodeModule(definition) -> {
+                updated := definition
+                package :: parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
+                if definition.body == .Val(inner) -> updated.body = Val(parser_module_body_visibility(inner.copy(), false, package))
+                &narrowed.push(Item.CodeModule{value: updated})
+            }
+            .GenericModule(definition) -> {
+                updated := definition
+                updated.body = parser_module_body_visibility(definition.body.copy(), false, parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub))
+                &narrowed.push(Item.GenericModule{value: updated})
+            }
+            .ModuleAlias(definition) -> {
+                updated := definition
+                updated.is_pub = false
+                updated.is_package_pub = parser_narrowed_package(definition.is_pub, definition.is_package_pub, is_package_pub)
+                &narrowed.push(Item.ModuleAlias{value: updated})
+            }
+            .Func(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Func{value: updated})
+            }
+            .Struct(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
+                &narrowed.push(Item.Struct{value: updated})
+            }
+            .Enum(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
+                &narrowed.push(Item.Enum{value: updated})
+            }
+            .Impl(definition) -> {
+                updated := definition
+                updated.methods = parser_methods_visibility(definition.methods, is_pub, is_package_pub)
+                &narrowed.push(Item.Impl{value: updated})
+            }
+            .Distinct(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Distinct{value: updated})
+            }
+            .TypeAlias(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.TypeAlias{value: updated})
+            }
+            .UnitFamily(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.UnitFamily{value: updated})
+            }
+            .Trait(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Trait{value: updated})
+            }
+            .Tag(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Tag{value: updated})
+            }
+            .Const(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.Const{value: updated})
+            }
+            .ProtocolDecl(definition) -> {
+                updated := definition
+                updated.is_pub = is_pub
+                updated.is_package_pub = is_package_pub
+                &narrowed.push(Item.ProtocolDecl{value: updated})
+            }
+            else -> &narrowed.push(item)
+        }
+    }
+    narrowed
+}
+
+// Inside a non-public module (plain `priv` unless `outer_package`), a nested
+// module is package-private only when neither it nor its enclosing module is
+// plain `priv`.
+fn parser_narrowed_package(own_pub: Bool, own_package: Bool, outer_package: Bool) -> Bool Never! {
+    outer_package && (own_pub || own_package)
+}
+
+fn parser_methods_visibility(methods: [Func], is_pub: Bool, is_package_pub: Bool) -> [Func] Never! {
+    updated := [Func]{}
+    loop method in methods {
+        narrowed := method
+        narrowed.is_pub = is_pub
+        narrowed.is_package_pub = is_package_pub
+        &updated.push(narrowed)
+    }
+    updated
 }
 
 // A code-module body holds top-level items only; a leading `@` is a
@@ -342,7 +464,8 @@ fn parser_report_module_member(state: &JetParserState) {
         parser_add_fatal_code(&state, "E0063", token.span, "applied rules use `#`, not `@`", "`#` marks attributes, instructions, and properties; prefix `@` marks compile-time names and fact reads, while infix `@` stays a package-source separator (D-VERDICT-732-1, amended by D-ONCE-AT1=D)", "replace the leading `@` with `#`")
         return
     }
-    parser_add_error(&state, token.span, "expected a function, struct, enum, or other item inside a module, found {parser_describe_token(token)}", "an inline code module body may only contain top-level items", "example: `pub fn double(n: Int) -> Int {{ return n * 2 }}`")
+    found :: parser_describe_token(state, token)
+    parser_add_error(&state, token.span, "expected a function, struct, enum, or other item inside a module, found {found}", "an inline code module body may only contain top-level items", "example: `fn double(n: Int) -> Int {{ return n * 2 }}`")
 }
 
 fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
@@ -361,7 +484,7 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
                 parsed :: parser_parse_type(&state, 0)
                 bound = Val(parsed.ty)
             }
-            &params.push(GenericModuleParam.Type{name: parameter.payload.decoded, name_span: parameter.span, bound: bound})
+            &params.push(GenericModuleParam.Type{name: parser_value(state, parameter), name_span: parameter.span, bound: bound})
             if parser_type_close_here(&state) -> break
             if parser_current_kind(&state) != TOKEN_COMMA {
                 parser_add_error_here(&state, "expected `,` between generic module type parameters", "generic module type parameters are comma-separated", "add a comma or close the type parameter list")
@@ -381,7 +504,7 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
             parameter :: parser_expect_name(&state, "for a generic module value parameter")
             parser_expect(&state, TOKEN_COLON, "after a generic module value parameter name")
             annotation :: parser_parse_type(&state, 0)
-            &params.push(GenericModuleParam.Value{name: parameter.payload.decoded, name_span: parameter.span, ty: annotation.ty})
+            &params.push(GenericModuleParam.Value{name: parser_value(state, parameter), name_span: parameter.span, ty: annotation.ty})
             if parser_current_kind(&state) == TOKEN_RPAREN -> break
             if parser_current_kind(&state) != TOKEN_COMMA {
                 parser_add_error_here(&state, "expected `,` between generic module value parameters", "generic module value parameters are comma-separated", "add a comma or close the value parameter list")
@@ -408,7 +531,7 @@ fn parser_parse_generic_module_after_name(state: &JetParserState, modifiers: Par
         if state.position == before -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after the generic module body")
-    Item.GenericModule{value: GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: body, span: parser_cover(start, close.span)}}
+    Item.GenericModule{value: GenericModuleDef{name: name_head.name, name_span: name_head.span, is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, params: params, imports: imports, body: parser_module_body_visibility(^body, modifiers.is_pub, modifiers.is_package_pub), span: parser_cover(start, close.span)}}
 }
 
 fn parser_parse_module_alias_after_name(state: &JetParserState, modifiers: ParsedItemModifiers, start: Span, name_head: NamedSpan) -> Item {
@@ -486,12 +609,12 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
     loop parser_current_kind(&state) != TOKEN_RBRACE && parser_current_kind(&state) != TOKEN_EOF {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE -> break
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "sources" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parsed_sources :: parser_module_sources(&state)
             loop source in parsed_sources -> &sources.push(source)
             next
         }
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "imports" && parser_kind_at(&state, 1) == TOKEN_COLON {
             parser_bump(&state)
             parser_bump(&state)
             &imports.push(parser_parse_expression(&state, 1, 0).expr)
@@ -502,12 +625,13 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
             .Env -> {
                 field :: parser_expect_name(&state, "for an environment field")
                 parser_expect(&state, TOKEN_COLON, "after an environment field")
-                if field.payload.decoded == {
+                field_name :: parser_value(state, field)
+                if field_name == {
                     "services" -> {
                         parsed_services :: parser_module_services_map(&state)
                         loop service in parsed_services -> &env_services.push(service)
                     }
-                    else -> &env_fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+                    else -> &env_fields.push(NamedExpr{name: field_name, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
                 }
             }
             .System -> &system_fields.push(parser_module_system_field(&state))
@@ -517,12 +641,13 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
             .Profile -> {
                 field :: parser_expect_name(&state, "for a profile field")
                 parser_expect(&state, TOKEN_COLON, "after a profile field")
-                &profile_fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+                field_name :: parser_value(state, field)
+                &profile_fields.push(NamedExpr{name: field_name, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
             }
             else -> {
                 field :: parser_expect_name(&state, "for a performance field")
                 parser_expect(&state, TOKEN_COLON, "after a performance field")
-                if field.payload.decoded == {
+                if parser_value(state, field) == {
                     "budgets" -> {
                         parsed :: parser_module_perf_budgets(&state)
                         perf_budgets = parsed.budgets
@@ -563,16 +688,16 @@ fn parser_parse_role_module(state: &JetParserState, modifiers: ParsedItemModifie
     Item.Module{value: ModuleDecl{name: "{namespace_head.name}.{role.name}", name_span: parser_cover(namespace_head.span, role.span), auto_discovered: !parser_module_name_starts_with_underscore(namespace_head.name), sources: sources, imports: imports, members: [Expr]{}, contributions: [Contribution]{contribution}, span: parser_cover(start, close.span)}}
 }
 
-pub struct ModulePerfBudgets {
-    pub budgets: [BudgetDecl]
-    pub span: Span
+struct ModulePerfBudgets {
+    budgets: [BudgetDecl]
+    span: Span
 }
 
 fn parser_module_perf_budgets(state: &JetParserState) -> ModulePerfBudgets {
     open :: parser_expect(&state, TOKEN_LBRACKET, "`[` before performance budgets")
     budgets := [BudgetDecl]{}
     if {
-        parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Budget" && parser_kind_at(&state, 1) == TOKEN_RBRACKET -> {
+        parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "Budget" && parser_kind_at(&state, 1) == TOKEN_RBRACKET -> {
             parser_bump(&state)
             parser_expect(&state, TOKEN_RBRACKET, "`]` after the typed budget list head")
             parser_expect(&state, TOKEN_LBRACE, "`{{` after the typed budget list head")
@@ -599,7 +724,7 @@ fn parser_module_perf_budgets(state: &JetParserState) -> ModulePerfBudgets {
 fn parser_module_perf_budget_entry(state: &JetParserState, require_head: Bool) -> BudgetDecl {
     start := parser_current(&state).span
     if {
-        parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Budget" -> {
+        parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "Budget" -> {
             head :: parser_bump(&state)
             start = head.span
         }
@@ -614,7 +739,7 @@ fn parser_module_perf_budget_entry(state: &JetParserState, require_head: Bool) -
         field :: parser_expect_name(&state, "for a budget field")
         parser_expect(&state, TOKEN_COLON, "after a budget field")
         value :: parser_parse_expression(&state, 1, 0)
-        &fields.push(BudgetField{name: field.payload.decoded, name_span: field.span, value: value.expr, span: parser_cover(field.span, value.span)})
+        &fields.push(BudgetField{name: parser_value(state, field), name_span: field.span, value: value.expr, span: parser_cover(field.span, value.span)})
         if {
             parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
             parser_current_kind(&state) != TOKEN_RBRACE -> {
@@ -627,9 +752,9 @@ fn parser_module_perf_budget_entry(state: &JetParserState, require_head: Bool) -
     BudgetDecl{fields: fields, span: parser_cover(start, close.span)}
 }
 
-pub struct ModulePerfWorkloads {
-    pub workloads: [CompileWorkloadDecl]
-    pub span: Span
+struct ModulePerfWorkloads {
+    workloads: [CompileWorkloadDecl]
+    span: Span
 }
 
 fn parser_module_perf_workloads(state: &JetParserState) -> ModulePerfWorkloads {
@@ -660,7 +785,7 @@ fn parser_module_perf_workload_entry(state: &JetParserState, name: Token) -> Com
         field :: parser_expect_name(&state, "for a compiler workload field")
         parser_expect(&state, TOKEN_COLON, "after a compiler workload field")
         value :: parser_parse_expression(&state, 1, 0)
-        if field.payload.decoded == {
+        if parser_value(state, field) == {
             "target" -> {
                 if target != None -> parser_module_error(&state, "E2903", field.span, "a compile workload repeats `target`", "each edit workload has one target", "keep one `target:` field")
                 target = Val(value.expr)
@@ -674,14 +799,14 @@ fn parser_module_perf_workload_entry(state: &JetParserState, name: Token) -> Com
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after compiler workload fields")
-    if head.payload.decoded != "CompilerWorkload" || variant.payload.decoded != "Edit" {
+    if parser_value(state, head) != "CompilerWorkload" || parser_value(state, variant) != "Edit" {
         parser_module_error(&state, "E2903", parser_cover(head.span, variant.span), "unknown compiler workload variant", "performance probes currently use CompilerWorkload.Edit", "write `CompilerWorkload.Edit{{ target: ..., patch: ... }}`")
     }
     target_value :: target ?? Expr.Unit{span: name.span}
     patch_value :: patch ?? Expr.Unit{span: name.span}
     if target == None -> parser_module_error(&state, "E2903", name.span, "a compile workload is missing `target`", "each edit workload names the measured target", "add `target: \"cli\"`")
     if patch == None -> parser_module_error(&state, "E2903", name.span, "a compile workload is missing `patch`", "each edit workload names a deterministic source patch", "add `patch: \"path/to.patch\"`")
-    CompileWorkloadDecl{name: name.payload.decoded, name_span: name.span, target: target_value, patch: patch_value, span: parser_cover(name.span, close.span)}
+    CompileWorkloadDecl{name: parser_value(state, name), name_span: name.span, target: target_value, patch: patch_value, span: parser_cover(name.span, close.span)}
 }
 
 fn parser_module_name_starts_with_underscore(name: String) -> Bool Never! {
@@ -707,7 +832,7 @@ fn parser_module_sources(state: &JetParserState) -> [SourceDecl] {
         if end.end <= begin.start {
             parser_add_error(&state, begin, "a source needs a reference", "sources map names to provider references", "write `name: target@provider`")
         }
-        &sources.push(SourceDecl{name: name.payload.decoded, name_span: name.span, ref_span: parser_cover(begin, end), span: parser_cover(name.span, end)})
+        &sources.push(SourceDecl{name: parser_value(state, name), name_span: name.span, ref_span: parser_cover(begin, end), span: parser_cover(name.span, end)})
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
     }
     parser_expect(&state, TOKEN_RBRACE, "`}}` after sources")
@@ -719,13 +844,13 @@ fn parser_module_platform_value(state: &JetParserState) -> (os: String, arch: St
     os_token :: parser_expect_name(&state, "for a platform name")
     parser_expect(&state, TOKEN_DOT, "between a platform and architecture")
     arch_token :: parser_expect_name(&state, "for an architecture name")
-    (os: os_token.payload.decoded, arch: arch_token.payload.decoded, span: parser_cover(os_token.span, arch_token.span))
+    (os: parser_value(state, os_token), arch: parser_value(state, arch_token), span: parser_cover(os_token.span, arch_token.span))
 }
 
 fn parser_module_system_field(state: &JetParserState) -> SystemField {
     name :: parser_expect_name(&state, "for a system field")
     parser_expect(&state, TOKEN_COLON, "after a system field")
-    value :: if name.payload.decoded == {
+    value :: if parser_value(state, name) == {
         "target" -> {
             platform :: parser_module_platform_value(&state)
             SystemFieldValue.Platform{os: platform.os, arch: platform.arch, span: platform.span}
@@ -736,7 +861,7 @@ fn parser_module_system_field(state: &JetParserState) -> SystemField {
         else -> SystemFieldValue.Other{value: parser_parse_expression(&state, 1, 0).expr}
     }
     end :: parser_module_system_value_end(value, name.span)
-    SystemField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+    SystemField{name: parser_value(state, name), name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
 fn parser_module_system_value_end(value: SystemFieldValue, fallback: Span) -> Span {
@@ -759,7 +884,7 @@ fn parser_module_services_map(state: &JetParserState) -> [ServiceEntry] {
         parser_expect(&state, TOKEN_COLON, "after a service name")
         explicit_type := Span?{None}
         service_start := parser_current(&state).span
-        if parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "Service" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
+        if parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "Service" && parser_kind_at(&state, 1) == TOKEN_LBRACE {
             explicit :: parser_bump(&state)
             explicit_type = Val(explicit.span)
             service_start = explicit.span
@@ -771,7 +896,8 @@ fn parser_module_services_map(state: &JetParserState) -> [ServiceEntry] {
             if parser_current_kind(&state) == TOKEN_RBRACE -> break
             field :: parser_expect_name(&state, "for a service field")
             parser_expect(&state, TOKEN_COLON, "after a service field")
-            &fields.push(NamedExpr{name: field.payload.decoded, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
+            field_name :: parser_value(state, field)
+            &fields.push(NamedExpr{name: field_name, name_span: field.span, value: parser_parse_expression(&state, 1, 0).expr})
             if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
         }
         close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after service fields")
@@ -787,12 +913,12 @@ fn parser_module_options_list(state: &JetParserState) -> [OptionEntry] {
     entries := [OptionEntry]{}
     loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
         key :: parser_expect_name(&state, "for an option key")
-        name := key.payload.decoded
+        name := parser_value(state, key)
         end := key.span
         loop parser_current_kind(&state) == TOKEN_DOT {
             parser_bump(&state)
             part :: parser_expect_name(&state, "after `.` in an option key")
-            name = "{name}.{part.payload.decoded}"
+            name = "{name}.{parser_value(state, part)}"
             end = part.span
         }
         parser_expect(&state, TOKEN_COLON, "after an option key")
@@ -808,12 +934,12 @@ fn parser_module_options_list(state: &JetParserState) -> [OptionEntry] {
 fn parser_module_image_field(state: &JetParserState) -> ImageField {
     name :: parser_expect_name(&state, "for an image field")
     parser_expect(&state, TOKEN_COLON, "after an image field")
-    value :: if name.payload.decoded == {
+    value :: if parser_value(state, name) == {
         "from" -> {
             source :: parser_expect_name(&state, "for an image source namespace")
             parser_expect(&state, TOKEN_DOT, "after an image source namespace")
             target :: parser_module_dashed_name(&state, "for an image source name")
-            from :: if source.payload.decoded == {
+            from :: if parser_value(state, source) == {
                 "system" -> ImageFromRef.System{name: target.name}
                 "packages" -> ImageFromRef.Package{name: target.name}
                 "env" -> ImageFromRef.Environment{name: target.name}
@@ -826,7 +952,7 @@ fn parser_module_image_field(state: &JetParserState) -> ImageField {
         }
         "format" -> {
             word :: parser_expect_name(&state, "for an image format")
-            ImageFieldValue.Format{word: word.payload.decoded, span: word.span}
+            ImageFieldValue.Format{word: parser_value(state, word), span: word.span}
         }
         "target" -> {
             platform :: parser_module_platform_value(&state)
@@ -840,28 +966,28 @@ fn parser_module_image_field(state: &JetParserState) -> ImageField {
         .Platform(_, _, span) -> span
         .Other(expr) -> expr_span(expr)
     }
-    ImageField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+    ImageField{name: parser_value(state, name), name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
 fn parser_module_fleet_field(state: &JetParserState) -> FleetField {
     name :: parser_expect_name(&state, "for a fleet field")
     parser_expect(&state, TOKEN_COLON, "after a fleet field")
-    value :: if name.payload.decoded == {
+    value :: if parser_value(state, name) == {
         "hosts" -> FleetFieldValue.Hosts{entries: parser_module_hosts_map(&state)}
         else -> FleetFieldValue.Other{value: parser_parse_expression(&state, 1, 0).expr}
     }
     end :: if value == { .Hosts(entries) -> { if entries.len() == 0 -> name.span else -> entries[entries.len() - 1].span } .Other(expr) -> expr_span(expr) }
-    FleetField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+    FleetField{name: parser_value(state, name), name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
 fn parser_module_vmtest_field(state: &JetParserState) -> VMTestField {
     name :: parser_expect_name(&state, "for a VM-test field")
     parser_expect(&state, TOKEN_COLON, "after a VM-test field")
-    value :: if name.payload.decoded == {
+    value :: if parser_value(state, name) == {
         "hosts" -> VMTestFieldValue.Hosts{entries: parser_module_hosts_map(&state)}
         "run" -> {
             start :: parser_expect_name(&state, "for `test` before a VM-test body")
-            if start.payload.decoded != "test" {
+            if parser_value(state, start) != "test" {
                 parser_module_error(&state, "E0960", start.span, "VM-test run body starts with `test`", "the run field is a checked VM test body", "write `run: test {{ ... }}")
             }
             open :: parser_expect(&state, TOKEN_LBRACE, "`{{` after VM-test `run: test`")
@@ -887,7 +1013,7 @@ fn parser_module_vmtest_field(state: &JetParserState) -> VMTestField {
         .Run(span) -> span
         .Other(expr) -> expr_span(expr)
     }
-    VMTestField{name: name.payload.decoded, name_span: name.span, value: value, span: parser_cover(name.span, end)}
+    VMTestField{name: parser_value(state, name), name_span: name.span, value: value, span: parser_cover(name.span, end)}
 }
 
 fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
@@ -899,7 +1025,7 @@ fn parser_module_hosts_map(state: &JetParserState) -> [HostEntry] {
         host :: parser_module_dashed_name(&state, "for a host name")
         parser_expect(&state, TOKEN_COLON, "after a host name")
         system :: parser_expect_name(&state, "for `system` in a host entry")
-        if system.payload.decoded != "system" -> parser_module_error(&state, "E0960", system.span, "a host entry must reference a system", "fleet hosts resolve through `system.<name>`", "write `host: system.machine`")
+        if parser_value(state, system) != "system" -> parser_module_error(&state, "E0960", system.span, "a host entry must reference a system", "fleet hosts resolve through `system.<name>`", "write `host: system.machine`")
         parser_expect(&state, TOKEN_DOT, "after `system` in a host entry")
         target :: parser_module_dashed_name(&state, "for a host system name")
         overrides := Span?{None}

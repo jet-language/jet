@@ -9,7 +9,7 @@ use std::fs;
 
 use tir_support::{
     build_and_run, build_and_run_full, build_and_run_full_with_cfg, build_and_run_multi, compile,
-    have_rustc, interpreter_run, jit_run,
+    have_rustc, default_run,
 };
 
 /// D-BOUND-HEAD1=A: one typed-head hole law across AOT, `jet run`, and the
@@ -225,9 +225,33 @@ fn run() {
     print(double(21))
 }
 ";
+    let compiled = jet::compile(src).expect("typed Todo lowers its contextual arguments");
+    assert!(
+        compiled.rust.contains("5u32, \"Int\")"),
+        "Todo must carry its source line and checked Jet type: {}",
+        compiled.rust
+    );
     let (code, stdout) = build_and_run("tir_todo", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "42\n");
+}
+
+#[test]
+fn static_split_builder_preserves_owned_halves_across_tiers() {
+    let source = r#"
+fn run() {
+    values :: [1, 2, 3, 4]
+    halves :: values.split(2)
+    print(halves.left)
+    print(halves.right)
+    print(values)
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "static_split_builder",
+        source,
+        "[1, 2]\n[3, 4]\n[1, 2, 3, 4]\n",
+    );
 }
 
 /// c109 Phase 23: default parameter values (S61/D-NARG-D2). Sema fills omitted trailing
@@ -380,6 +404,36 @@ fn run() { _ :: invoke(factory, (value: Bool) -> 1) }
     );
 }
 
+#[test]
+fn nested_callable_containers_ignore_declaration_call_metadata() {
+    let src = r#"
+fn lower(value: String) -> String { value.copy() }
+fn run() {
+    handlers :: [String:fn(String) -> String]{"lower": lower}
+    nested :: [[String:fn(String) -> String]]{^handlers}
+    handler :: nested[0].get("lower").or_err("missing handler")
+    _ :: handler("HI")
+}
+"#;
+    jet::compile(src).expect("named function metadata must not distinguish nested value slots");
+}
+
+#[test]
+fn nested_callable_containers_keep_required_public_labels() {
+    let src = r#"
+fn plain(value: Bool) -> Int { 1 }
+fn run() {
+    handlers :: [String:fn(*, force: Bool) -> Int]{"plain": plain}
+}
+"#;
+    let diagnostics = jet::compile(src)
+        .expect_err("container storage must not erase required callable labels");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0108"),
+        "expected E0108 for the nested callable-contract mismatch: {diagnostics:#?}"
+    );
+}
+
 /// c109 Phase 23: distinct types (D-DIST1/D-DIST3). Destination conversion
 /// `Name.from_kind(x)` → newtype
 /// `__jet_Name(x)`; `.raw()` → `(recv).0`; `#Numeric` distinct `+`/`==` use the native
@@ -451,7 +505,7 @@ Label :: distinct String
 #UnitFamily(Currency) { usd }
 
 fn checked_user(value: U64) -> UserID String! { return UserID.from_u64(value) }
-fn pass_user(value: UserID String!) -> UserID String! { return ~value }
+fn pass_user(value: UserID String!) -> UserID String! { return value.copy() }
 
 fn run() {
     fallback :: UserID.from_int(0)
@@ -503,7 +557,7 @@ fn checked(raw: Int) -> Severity String! {
     return Ok(Severity.from_int(raw))
 }
 
-fn pass_checked(value: Severity String!) -> Severity String! { return ~value }
+fn pass_checked(value: Severity String!) -> Severity String! { return value.copy() }
 fn direct() -> Severity { return Severity.from_u8(8) }
 
 fn run() {
@@ -574,8 +628,8 @@ fn generated_run_function<'a>(rust: &'a str) -> &'a str {
 
 fn assert_contract_breach_tiers(name: &str, src: &str, marker: &str, line: u32) {
     let (aot_code, aot_stdout, aot_stderr) = build_and_run_full("jet_contract_tiers", name, src);
-    let (jit_code, jit_stdout, jit_stderr) = jit_run(name, src);
-    let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(name, src);
+    let (jit_code, jit_stdout, jit_stderr) = default_run(name, src);
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) = default_run(name, src);
     let (release_code, release_stdout, release_stderr) =
         build_and_run_full_with_cfg("jet_contract_release", name, src, "jet_release");
 
@@ -733,7 +787,7 @@ fn run() {
 
 /// c109 Phase 23: named tuples (S73/D-SG7). A tuple literal `(x: 1, y: 2)` → a generated
 /// `JetTup_<hash>` struct lit (canonical field order); field access `p.x` → `(p).__jet_x`;
-/// destructure `(a, b) :: ~p` → the borrow-temp + per-field `.clone()` form;
+/// destructure `(a, b) :: p.copy()` → the borrow-temp + per-field `.clone()` form;
 /// equality is native. The tuple type passes/returns byte-identically.
 #[test]
 fn named_tuples() {
@@ -748,7 +802,7 @@ fn run() {
     p :: (x: 1, y: 2)
     q :: (y: 3, x: 4)
     same_shape :: (p == q)
-    (a, b) :: ~p
+    (a, b) :: p.copy()
     print(\"{p.x} {p.y} {a} {b} {same_shape}\")
     pair :: bounds()
     print(\"{pair.min} {pair.max}\")
@@ -891,18 +945,18 @@ fn foreign_enum_matching_and_payload() {
     // the foreign-LOCAL `NoteType`; the entry matches the foreign `NoteType` via a local
     // `Query`'s `Kind(NoteType)` payload + constructs `NoteType.User` cross-module.
     let note = "\
-pub enum NoteType { User Feedback Project Reference }
-pub struct Note {
-    pub name: String
-    pub note_type: NoteType
-    pub parent: String?
+enum NoteType { User Feedback Project Reference }
+struct Note {
+    name: String
+    note_type: NoteType
+    parent: String?
 }
 
-pub fn make_note(name: ^String, t: ^NoteType) -> Note {
+fn make_note(name: ^String, t: ^NoteType) -> Note {
     return Note{name: name, note_type: t, parent: None}
 }
 pub fn kind_str(n: Note) -> String {
-    k :: ~n.note_type
+    k :: n.note_type.copy()
     if k == {
         .User -> { return \"user\" }
         .Feedback -> { return \"feedback\" }
@@ -922,7 +976,7 @@ fn classify(raw: String) -> Query {
     if raw == \"user\" {
         return Query.Kind(NoteType.User)
     }
-    return Query.Tag(~raw)
+    return Query.Tag(raw.copy())
 }
 fn describe(n: Note, q: ^Query) -> String {
     if q == {
@@ -947,10 +1001,10 @@ fn run() {
     assert_eq!(stdout, "kind:user\ntag:design\n");
 }
 
-/// D-SHAPE3b: Result spellings stay contextual identifiers, and dotted
-/// Optional-looking names remain ordinary variants on user enums.
+/// D-SHAPE3b: Ok remains an ordinary function name and dotted Result/Optional
+/// names remain user variants; S80 owns the global Err type and constructor.
 #[test]
-fn result_names_do_not_reserve_user_functions_or_variants() {
+fn result_variants_and_user_ok_function_remain_ordinary() {
     if !have_rustc() {
         return;
     }
@@ -965,13 +1019,13 @@ fn Ok(value: Int) -> Int {
     return (value + 10)
 }
 
-fn Err(value: Int) -> Int {
+fn user_err(value: Int) -> Int {
     return (value + 20)
 }
 
 fn run() {
     print(Ok(1))
-    print(Err(2))
+    print(user_err(2))
     wrapped :: Wrapped.Val(7)
     if wrapped == {
         .Val(value) -> { print(value) }

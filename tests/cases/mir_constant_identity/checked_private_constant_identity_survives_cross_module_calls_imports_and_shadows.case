@@ -1,0 +1,42 @@
+# tests/mir_constant_identity.rs::checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows
+# Sources, stdout/stderr, native trace, typed private diagnostic and actual web entry result all preserved.
+# MIR definition-key/global set7 exact original helper remains PENDING-SEAM(compiler-lib), scratch/TestSlice1d/mir-constant-original.rs.
+# volatile: current tir_support/mod.rs895-913 and run_without_tier_trace214-225 have identical argv/env yet conflicting trace/empty stderr assertions; preserve both PENDING-SAME-HEAD, no red claimed.
+fixture: checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.fixture
+env: NO_COLOR=1
+step: jet check {work}/private/main.jet --json
+exit: 1
+json: stdout doc $.reports[?code="E0605"][?what~="PAYLOAD"] #>= 1
+step: jet build --release main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.out
+stderr: empty
+step: jet run main.jet
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+exit: 0
+stdout: = checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.out
+stderr: any-line words-prefix [".::main.jet::run", "tier1", "native"] # original ed77c235f tests/mir_constant_identity.rs:443-450 any trace line begins with these three split_whitespace fields
+step: jet run main.jet
+env: JET_STORE_DIR={work}/cache-no-trace-0
+env: JETPACK_ROOT={work}/jetpack-no-trace-0
+exit: 0
+stdout: = checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.out
+stderr: empty
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache-no-trace-1
+env: JETPACK_ROOT={work}/jetpack-no-trace-1
+exit: 0
+stdout: = checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.out
+stderr: empty
+step: jet build --target=web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+copy: web-entry.mjs .jet/build/web-entry.mjs
+step: node web-entry.mjs
+cwd: .jet/build
+exit: 0
+stdout: = checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows.out
+stderr: empty

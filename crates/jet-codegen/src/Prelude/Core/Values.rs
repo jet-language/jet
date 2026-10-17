@@ -1,5 +1,10 @@
 trait JetShow {
     fn jet_show(&self) -> String;
+    /// Append the shown text to `out`. Text pipelines (`join`) write each
+    /// item through this; a `String` appends itself without a copy.
+    fn jet_show_into(&self, out: &mut String) {
+        out.push_str(&self.jet_show());
+    }
     /// D-FAIL-CARRIER1=A: is this the carrier's clean report? The optional view
     /// answers yes, so `?T` prints its payload bare and its absence as `null`;
     /// every failure report answers no, so `T !E` prints its verdict.
@@ -76,6 +81,13 @@ impl JetRange {
     fn structural_text(&self) -> String {
         jet_range_structural_text(self.start, self.end, self.exclusive)
     }
+}
+/// The checked `Range.contains` route (`jet_range_value_contains`): the
+/// receiver is the range value and the probe is an exact `Int`, which is
+/// never inside an `i64` range when it exceeds the host word.
+#[allow(dead_code)]
+fn jet_range_value_contains(range: &JetRange, value: jet_foundation::Numeric::JetInt) -> bool {
+    value.to_i64().is_some_and(|value| range.contains(&value))
 }
 impl JetShow for JetRange {
     fn jet_show(&self) -> String {
@@ -272,6 +284,9 @@ impl JetShow for String {
     fn jet_show(&self) -> String {
         self.clone()
     }
+    fn jet_show_into(&self, out: &mut String) {
+        out.push_str(self);
+    }
 }
 impl JetDisplay for String {
     fn jet_display(&self) -> String {
@@ -328,6 +343,14 @@ impl __jet_Equatable for AllocError {
         self == rhs
     }
 }
+// `JetErr` carries the original Prelude `Err`; its derived `Equatable` is the
+// carrier's own equality. One home here: a program impl would be an orphan
+// in a split runtime/program build.
+impl __jet_Equatable for JetErr {
+    fn equal(&self, rhs: &Self) -> bool {
+        self == rhs
+    }
+}
 
 // D-MEM1 stage S5: a string view (`s.trim()`/`.after()`/`.before()` bound to a
 // local, see `jet_string_*_view` below) is a genuine `&str` in generated Rust —
@@ -348,7 +371,9 @@ impl JetDebug for str {
         format!("{self:?}")
     }
 }
-impl<T: JetShow> JetShow for &T {
+// `?Sized`, as for JetDisplay/JetDebug (TextValues.rs): a Core-layer text
+// value is `&'static str`, so a nested `&str` (`String?` field) must render.
+impl<T: JetShow + ?Sized> JetShow for &T {
     fn jet_show(&self) -> String {
         (**self).jet_show()
     }
@@ -540,30 +565,5 @@ struct JetExpired;
 impl JetShow for JetExpired {
     fn jet_show(&self) -> String {
         "Expired".to_string()
-    }
-}
-#[derive(Clone, Debug)]
-struct JetExpiring<T: Clone> {
-    value: T,
-    deadline_ms: i64,
-}
-impl<T: Clone> JetExpiring<T> {
-    fn new(value: T, deadline_ms: i64) -> Self {
-        JetExpiring { value, deadline_ms }
-    }
-    fn get(&self, now_ms: i64) -> Result<T, JetExpired> {
-        if now_ms > self.deadline_ms {
-            Err(JetExpired)
-        } else {
-            Ok(self.value.clone())
-        }
-    }
-    fn is_valid(&self, now_ms: i64) -> bool {
-        now_ms <= self.deadline_ms
-    }
-}
-impl<T: Clone + JetShow> JetShow for JetExpiring<T> {
-    fn jet_show(&self) -> String {
-        format!("Expiring(deadline={})", self.deadline_ms)
     }
 }

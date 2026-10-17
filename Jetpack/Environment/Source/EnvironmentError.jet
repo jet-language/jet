@@ -5,7 +5,7 @@
 // payload so `jet overlay` diagnostics render the same bytes.
 
 #Error
-pub enum EnvironmentError {
+enum EnvironmentError {
     IO(IOError)
     InvalidData(String)
     InvalidInput(String)
@@ -17,6 +17,7 @@ pub enum EnvironmentError {
     Transition(String)
     ManagedFile(String)
     Activation(String)
+    Gate(PackageGateError)
 
     fn message(self) -> String Never! {
         if self == {
@@ -31,6 +32,7 @@ pub enum EnvironmentError {
             .Transition(text) -> text
             .ManagedFile(text) -> text
             .Activation(text) -> text
+            .Gate(error) -> error.message()
         }
     }
 

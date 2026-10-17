@@ -1,0 +1,15 @@
+# Port of build_entry.rs::criterion9_programmable_build_cli_human_and_json_reports_match.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+fixture: fixtures/duplicate-target
+step: jet build main.jet
+exit: nonzero
+stderr: ~ Error [E3502]: build plan is invalid: target name `app` is registered twice # Original human BuildError message assertion.
+stderr: ~ More: jet-lang.dev/e/E3502 # Original diagnostic URL assertion.
+step: jet build main.jet --json
+exit: nonzero
+json: stderr doc $.code = "E3502"
+json: stderr doc $.what = "build plan is invalid: target name `app` is registered twice"
+# Exact what preserves original human/JSON message relation without accepting unrelated prose.
+json: stderr doc $.build_error.typed_identity = "BuildError::DuplicateTargetName"
+json: stderr doc $.build_error.details.variant = "DuplicateTargetName"
+json: stderr doc $.build_error.details.fields.value = "app"

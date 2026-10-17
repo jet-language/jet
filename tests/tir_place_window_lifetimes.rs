@@ -5,7 +5,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use tir_support::{assert_tiers_agree, build_and_run, compile, interpreter_run};
+use tir_support::{assert_tiers_agree, build_and_run, compile, default_run};
 
 const STACK_SOURCE: &str = r###"
 use core.mem
@@ -111,7 +111,7 @@ fn borrowed_window_stays_caller_owned() {
     );
     assert!(!rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of"));
     let (interpreter_code, interpreter_out, interpreter_err) =
-        interpreter_run("tir_place_window_borrowed_runtime", BORROWED_SOURCE);
+        default_run("tir_place_window_borrowed_runtime", BORROWED_SOURCE);
     assert_eq!(interpreter_code, 0, "interpreter stderr: {interpreter_err}");
     assert_eq!(interpreter_out, "23\n23\n");
     let (aot_code, aot_out) =
@@ -230,8 +230,8 @@ fn run() {
     record :: split(header, payload)
     kind :: record.kind
     body :: record.body
-    print(~kind)
-    print(~body)
+    print(kind.copy())
+    print(body.copy())
 }
 "###;
 

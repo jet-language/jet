@@ -1,0 +1,28 @@
+# HAND-PORT tests/http_client_law.rs:1929-2106 h2_upload_streams_data_frames_before_body_eof
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# PUBLIC COMPANION: exact H2 negotiation/preface/settings, ping ACKs, DATA count40960/end bit/16KiB seen, status-free original first body max8 Some(ok) and HTTP2; real FIFO first8KiB x/accepted5s/remainder32KiB y. Full original bridge send_with_stream_parts callback repeatedly fills min64KiB until body EOF and raw client lifetime retained in runtime-http-internals ledger; public Body.reader reads once and is not claimed equivalent. Real mkfifo + lead-approved SETUP-only dd byte pipe; replaces no transport assertions; core-files-raw-write ledger note; no runtime/reference proof.
+requires: tool:mkfifo
+requires: tool:dd
+fixture: h2_upload_streams_data_frames_before_body_eof.fixture
+env: NO_COLOR=1
+step: mkfifo {work}/upload.fifo
+exit: 0
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: writer/main.jet writer/source.template
+step: jet build writer/main.jet
+exit: 0
+spawn writer: built
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+wait: peer
+exit: 0
+wait: writer
+exit: 0

@@ -1,0 +1,89 @@
+use core.files as files
+
+// A case is a public-CLI scenario, not a program entry. Descend through
+// groups and fixture directories alike; only .case files are entries.
+fn kit_cases_collect(root: String, directory: String) -> [KitEntry] {
+    entries := [KitEntry]{}
+    if !files.exists(files.join(root, directory)) -> return entries
+    children :: files.list_dir(files.join(root, directory)) ?? panic("discover cases {directory}: {err}")
+    loop child in children {
+        if child.name.starts_with(".") -> next
+        shown :: files.join(directory, child.name)
+        if child.is_dir {
+            loop entry in kit_cases_collect(root, shown) -> &entries.push(entry)
+        } else if child.name.ends_with(".case") {
+            &entries.push(KitEntry{path: shown, expected: shown, project: directory, suite: "cases", mode: ""})
+        }
+    }
+    entries
+}
+
+// Owner-retired Rust scenarios are outside the current case corpus, not host
+// skips or CLI filters. The same committed list seals the registry manifest.
+fn kit_cases_retired(root: String) -> [String] {
+    source :: kit_exec_optional(files.join(root, "Tools/testkit/retired-with-rust.tsv")) ?? ""
+    retired := [String]{}
+    loop raw in source.split("\n") {
+        line :: raw.trim()
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        assert(fields.len() == 2 && fields[1] != "", "retired case rows need an exact ID and reason")
+        if fields[0].starts_with("tests/cases/") && fields[1].starts_with("Retired with Rust:") -> &retired.push(fields[0])
+    }
+    retired
+}
+
+fn kit_cases_discover(context: KitCtx) -> [KitEntry] {
+    retired :: kit_cases_retired(context.root)
+    entries := kit_cases_collect(context.root, "tests/cases").filter(entry -> !kit_expect_named(retired, entry.path))
+    &entries.sort_by(entry -> entry.path)
+    entries
+}
+
+fn kit_cases_run(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
+    source :: files.read(files.join(context.root, entry.path)) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "read case: {err}"), run: kit_exec_failed("{err}")}]
+    plan :: kit_steps_parse_case(source)
+    exact_id :: context.options.cases != "" || context.options.filter == entry.path || kit_expect_named(context.options.bless.ids, entry.path)
+    if plan.error == "" && plan.opt_in != "" && !context.options.opt_in && !exact_id -> return [KitOutcome{verdict: kit_expect_verdict("OPT-IN", plan.opt_in), run: kit_steps_action_run()}]
+    work :: files.join(context.scratch, "work")
+    files.create_dir_all(work) ?? return [KitOutcome{verdict: kit_expect_verdict("ERROR", "case work: {err}"), run: kit_exec_failed("{err}")}]
+    // Steps owns the single grammar, host requirements, fixture state staging,
+    // token expansion, process policy, assertions and snapshot blessing.
+    // CLI scenarios run once, independent of the golden tier selection.
+    steps :: kit_steps_context(plan, entry.path, context.env, work, context.scratch,
+        files.join(context.root, entry.project), context.bless)
+    [kit_cases_known_verdict(kit_steps_execute(steps, kit_steps_hooks()), kit_cases_known_failure(entry, context.root, source))]
+}
+
+// An annotation changes the verdict, not execution or the underlying receipt.
+// Header ownership wins over the central ledger for the same case.
+fn kit_cases_known_failure(entry: KitEntry, root: String, source: String) -> String {
+    prefix :: "# KNOWN-FAILING "
+    loop raw in source.split("\n") {
+        line :: raw.trim().copy()
+        if line.starts_with(prefix) -> return kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()).trim()
+    }
+    ledger :: kit_exec_optional(files.join(root, "Tools/testkit/known-failing.tsv")) ?? ""
+    loop raw in ledger.split("\n") {
+        line :: raw.trim().copy()
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() != 3 -> next
+        id :: fields[0]
+        if entry.path == id || entry.path == ("{id}.jet") || entry.path == ("{id}/run.jet") -> return "{fields[1]} {fields[2]}"
+    }
+    ""
+}
+
+fn kit_cases_known_verdict(outcome: KitOutcome, annotation: String) -> KitOutcome {
+    result := outcome
+    if annotation == "" -> return result
+    if result.verdict.status == "FAIL" {
+        result.verdict.status = "KNOWN-FAILING"
+        result.verdict.detail = "{annotation}: {result.verdict.detail}"
+    } else if result.verdict.status == "PASS" {
+        result.verdict.status = "UNEXPECTED-PASS"
+        result.verdict.detail = "{annotation}: remove stale known-failing annotation"
+    }
+    result
+}

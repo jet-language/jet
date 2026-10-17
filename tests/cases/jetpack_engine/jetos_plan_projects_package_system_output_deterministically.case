@@ -1,0 +1,25 @@
+# HAND-PORT tests/jetpack_engine.rs:9704-9770 jetos_plan_projects_package_system_output_deterministically
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: jetos_plan_projects_package_system_output_deterministically.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step first: jet os plan workstation --json --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 0
+step: jet os plan workstation --json --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 0
+stdout: == first
+stdout.strip_ascii_whitespace: ~ "\"host\":\"workstation\"" # original contains predicate
+stdout.strip_ascii_whitespace: ~ "\"target\":\"linux.x64\"" # original contains predicate
+stdout.strip_ascii_whitespace: ~ "\"graph_identity\":\"" # original contains predicate
+stdout.strip_ascii_whitespace: ~ "\"ref\":\"ripgrep@nixpkgs\"" # original contains predicate
+stdout.strip_ascii_whitespace: ~ "\"name\":\"ssh\"" # original contains predicate
+stdout.strip_ascii_whitespace: ~ "\"fields\":[{\"key\":\"ports\",\"value\":\"[22]\"}]" # original contains predicate
+stdout.strip_ascii_whitespace: ~ "\"key\":\"network.hostName\"" # original contains predicate
+file: project/jet-root/systems/generations absent
+

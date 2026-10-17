@@ -1,0 +1,27 @@
+# PORT tests/web_app.rs::web_app_dev_forced_interpreter_serves_callbacks; request helper63-95 ported verbatim algorithm.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no run/reference proof.
+mkdir: client
+copy: {root}/tests/cases/web_app/fixtures/request.jet client/request.jet
+spawn server: jet dev {root}/Examples/features/web/web_app.jet --interpret --port={free-port:app}
+env: JET_APP_PORT={free-port:app}
+step: jet run client/request.jet
+env: S6_WEB_PORT={free-port:app}
+env: S6_WEB_METHOD=GET
+env: S6_WEB_PATH=/
+env: S6_WEB_RESPONSE={work}/page.http
+exit: 0
+file: page.http ^= "HTTP/1.1 200" # Original starts_with.
+file: page.http ~ "<title>Home</title>" # Original contains predicate.
+file: page.http ~ "jet-dev-server-functions" # Original contains predicate.
+file: page.http ~ "hello from csr" # Original contains predicate.
+step: jet run client/request.jet
+env: S6_WEB_PORT={free-port:app}
+env: S6_WEB_METHOD=POST
+env: S6_WEB_PATH=/actions/save
+env: S6_WEB_RESPONSE={work}/action.http
+exit: 0
+file: action.http ^= "HTTP/1.1 200" # Original starts_with.
+file.after_first("\r\n\r\n"): action.http = "\"saved\""
+signal server: KILL
+wait: server
+exit: any # Original ServerChild drop kill/wait ignores status.

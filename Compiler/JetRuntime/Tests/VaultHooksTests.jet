@@ -1,0 +1,8 @@
+// Hook absence is the real provider fallback state, not an authorization grant.
+// The transport calls this before init and again after explicit hook clearing.
+#Export(c) fn jet_rt_vault_test_hooks_defaults_fixture(preview: I64, fault: I64, root: I64) {
+    if (jet_rt_vault_test_authorize(preview) != I64{-1}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if (jet_rt_vault_test_trust_path() != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    if jet_rt_vault_test_fault(fault) -> jet_rt_unreachable(I64{0}, I64{0})
+    jet_rt_vault_test_pause_after_backup(root)
+}

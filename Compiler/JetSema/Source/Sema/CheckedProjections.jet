@@ -1,0 +1,57 @@
+// Read-only projections of canonical checked reflection and prepared values.
+use jet_foundation.[Item, Span, TargetLayoutEngine, TComptimeValue, TComptimeReport, TComptimeField, TOriginProjection, Expr, Type]
+struct SemaLayoutProjectionRow {
+    name: String
+    span: Span
+    value: TComptimeValue
+}
+fn sema_checked_layout_items(items: [Item], engine: TargetLayoutEngine, module_identity: String, rows: &[SemaLayoutProjectionRow]) Never! {
+    loop item in items {
+        if item == {
+            .Struct(definition) -> &rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_struct_layout(definition, engine, module_identity)})
+            .Enum(definition) -> &rows.push(SemaLayoutProjectionRow{name: definition.name, span: definition.name_span, value: sema_comptime_reflection_enum_layout(definition, engine, module_identity)})
+            .CodeModule(definition) -> if definition.body == .Val(body) -> sema_checked_layout_items(body, engine, module_identity, &rows)
+            .GenericModule(definition) -> sema_checked_layout_items(definition.body, engine, module_identity, &rows)
+            else -> {}
+        }
+    }
+}
+fn sema_checked_layout_projections(items: [Item], engine: TargetLayoutEngine, module_identity: String) -> [SemaLayoutProjectionRow] Never! {
+    rows := [SemaLayoutProjectionRow]{}
+    sema_checked_layout_items(items, engine, module_identity, &rows)
+    rows
+}
+fn sema_origin_optional_int(value: Int?) -> TComptimeValue Never! {
+    if value == .Val(number) -> TComptimeValue.Present{value: TComptimeValue.Int{value: number}} else -> TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Int}}}
+}
+// Rust CheckerInfer Origin / Comptime::build_origin_option: moved/untracked
+// locals answer None; a readable tracked origin retains its actual source site.
+fn sema_fact_local_origin(origin: SemaOriginFact?) -> TComptimeValue Never! {
+    fact :: origin ?? return TComptimeValue.Failed{report: TComptimeReport.Clean{ty: Type.Option{inner: Type.Named{name: "OriginInfo"}}}}
+    TComptimeValue.Present{value: TComptimeValue.Struct{type_name: "OriginInfo", fields: [TComptimeField]{
+        TComptimeField{name: "tracked", value: TComptimeValue.Bool{value: true}},
+        TComptimeField{name: "source", value: TComptimeValue.Present{value: TComptimeValue.String{value: fact.source}}},
+        TComptimeField{name: "line", value: sema_origin_optional_int(fact.line)},
+        TComptimeField{name: "column", value: sema_origin_optional_int(fact.column)},
+        TComptimeField{name: "ambiguity", value: TComptimeValue.Bool{value: false}},
+    }}}
+}
+fn sema_origin_unwrap(expression: Expr) -> Expr Never! {
+    if expression == {
+        .Paren(inner, _) | .Copy(inner, _) | .Place(inner, _, _) -> sema_origin_unwrap(inner)
+        else -> expression
+    }
+}
+fn sema_origin_prepared_projection(expression: Expr, ty: Type, value: TComptimeValue, context: &SemaCheckContext) Never! {
+    if ty != (Type.Option{inner: Type.Named{name: "OriginInfo"}}) -> return
+    init :: sema_origin_unwrap(expression)
+    if init == {
+        .Field(base, member, span) -> {
+            if sema_fact_read_kind(member) != Val("Origin") -> return
+            receiver :: if sema_origin_unwrap(base) == .Ident(name, _) -> name else -> "value"
+            &context.origin_facts.push(TOriginProjection{receiver: Val(receiver), span: span, value: value})
+        }
+        .ComptimeName(_, span, _) -> &context.origin_facts.push(TOriginProjection{receiver: None, span: span, value: value})
+        else -> {}
+    }
+}

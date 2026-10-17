@@ -19,7 +19,7 @@ use jet::REPL::Notebook::{
     self, CellKind, ClientKind, JetNotebook, Kernel, KernelIdentity, NotebookAppInput,
     NotebookAppSchema,
 };
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{parse_json, quote as json_str};
 const MAX_REQUEST_HEADERS: usize = 64 * 1024;
 const MAX_REQUEST_BODY: usize = 8 * 1024 * 1024;
@@ -105,14 +105,14 @@ pub(crate) fn run_local_app(
 
 fn fail_preflight(message: &str, json: bool) -> ! {
     let structured = match parse_json(message) {
-        Ok(DataTree::Object(fields)) => {
+        Ok(Dyn::Object(fields)) => {
             let text = |key: &str| {
                 fields.iter().find_map(|(field, value)| {
                     if field != key {
                         return None;
                     }
                     match value {
-                        DataTree::Text(value) | DataTree::TypedText(value) => Some(value.clone()),
+                        Dyn::Text(value) => Some(value.clone()),
                         _ => None,
                     }
                 })
@@ -373,12 +373,12 @@ fn values_as_controls(
         .collect()
 }
 
-fn required_string(fields: &[(String, DataTree)], key: &str) -> Result<String, String> {
+fn required_string(fields: &[(String, Dyn)], key: &str) -> Result<String, String> {
     match fields
         .iter()
         .find_map(|(field, value)| (field == key).then_some(value))
     {
-        Some(DataTree::Text(value)) | Some(DataTree::TypedText(value)) => Ok(value.clone()),
+        Some(Dyn::Text(value)) => Ok(value.clone()),
         _ => Err(format!("local-app identity field `{key}` is not text")),
     }
 }
@@ -1029,14 +1029,14 @@ fn reconnect_message(host: &mut AppHost, id: &str, body: &str) -> Result<String,
 
 fn parse_values(body: &str) -> Result<BTreeMap<String, String>, String> {
     let value = parse_json(body).map_err(|_| "local-app call body is not valid JSON".to_string())?;
-    let DataTree::Object(root) = value else {
+    let Dyn::Object(root) = value else {
         return Err("local-app call body must be a JSON object".into());
     };
     let values = match root
         .iter()
         .find_map(|(field, value)| (field == "values").then_some(value))
     {
-        Some(DataTree::Object(values)) => values,
+        Some(Dyn::Object(values)) => values,
         Some(_) => return Err("local-app call `values` must be a JSON object".into()),
         None => return Ok(BTreeMap::new()),
     };
@@ -1044,13 +1044,13 @@ fn parse_values(body: &str) -> Result<BTreeMap<String, String>, String> {
         .iter()
         .map(|(name, value)| {
             let value = match value {
-                DataTree::Text(value) | DataTree::TypedText(value) => value.clone(),
-                DataTree::Bool(value) => value.to_string(),
-                DataTree::Int(value) => value.to_string(),
-                DataTree::Float(value) => value.to_string(),
-                DataTree::Number(value) => value.clone(),
-                DataTree::Null => "null".into(),
-                DataTree::Array(_) | DataTree::Object(_) | DataTree::Bytes(_) => {
+                Dyn::Text(value) => value.clone(),
+                Dyn::Bool(value) => value.to_string(),
+                Dyn::Int(value) => value.to_string(),
+                Dyn::Float(value) => value.to_string(),
+                Dyn::Number(value) => value.clone(),
+                Dyn::Null => "null".into(),
+                Dyn::Array(_) | Dyn::Object(_) | Dyn::Bytes(_) | Dyn::DateTime(_) => {
                     return Err(format!("local-app control `{name}` must be a scalar Jet literal"))
                 }
             };
@@ -1330,7 +1330,7 @@ fn error_json(code: &str, message: &str) -> String {
 
 fn checked_error_json(code: &str, message: &str) -> String {
     match parse_json(message) {
-        Ok(DataTree::Object(_)) => format!("{{\"ok\":false,\"error\":{message}}}"),
+        Ok(Dyn::Object(_)) => format!("{{\"ok\":false,\"error\":{message}}}"),
         _ => error_json(code, message),
     }
 }

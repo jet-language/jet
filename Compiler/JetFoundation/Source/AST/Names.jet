@@ -1,0 +1,120 @@
+// Interned spellings (SP08a). A lexed source keeps one `NameTable`: every
+// distinct spelling is stored once and named by a dense `Name` id, so tokens
+// carry ids instead of Strings and equal spellings compare as equal ids.
+// Ids are assigned in first-seen order, so one source always gets the same
+// ids. Text is resolved only where a String is needed (`name_text`).
+//
+// Lookup is an open-addressing hash over the spelling bytes (FNV-1a), so a
+// source range interns without building a String first.
+
+struct Name {
+    id: U32
+}
+
+struct NameTable {
+    // The spelling of each id, resolved without decoding bytes again.
+    texts: [String]
+    // Every spelling's bytes, back to back; id `n` ends at `ends[n]` and
+    // starts where id `n - 1` ends.
+    bytes: [U8]
+    ends: [Int]
+    // Open-addressing slots: 0 is empty, otherwise the id plus one.
+    slots: [Int]
+    mask: Int
+}
+
+NAME_TABLE_INITIAL_SLOTS :: 1024
+
+// A table whose id 0 is the empty spelling (`name_empty`).
+fn name_table() -> NameTable Never! {
+    slots := [Int]{}
+    loop _ in 0..<NAME_TABLE_INITIAL_SLOTS -> &slots.push(0)
+    table := NameTable{texts: [String]{}, bytes: [U8]{}, ends: [Int]{}, slots: slots, mask: NAME_TABLE_INITIAL_SLOTS - 1}
+    name_intern_bytes(&table, [U8]{}, 0, 0)
+    table
+}
+
+// The empty spelling; every `name_table()` interns it first.
+fn name_empty() -> Name Never! {
+    Name{id: U32{0}}
+}
+
+fn name_index(name: Name) -> Int Never! {
+    Int.from_u32(name.id)
+}
+
+fn name_text(table: NameTable, name: Name) -> String Never! {
+    table.texts[Int.from_u32(name.id)]
+}
+
+fn name_count(table: NameTable) -> Int Never! {
+    table.texts.len()
+}
+
+fn name_start(table: NameTable, id: Int) -> Int Never! {
+    if id == 0 -> 0 else -> table.ends[id - 1]
+}
+
+fn name_hash(bytes: [U8], start: Int, end: Int) -> Int Never! {
+    hash := U32{0x811c9dc5}
+    loop index in start..<end -> hash = (hash.bit_xor(U32.from_u8(bytes[index]))).wrapping_mul(U32{0x01000193})
+    Int.from_u32(hash)
+}
+
+fn name_bytes_equal(table: NameTable, id: Int, bytes: [U8], start: Int, end: Int) -> Bool Never! {
+    first :: name_start(table, id)
+    if table.ends[id] - first != end - start -> return false
+    loop offset in 0..<(end - start) {
+        if table.bytes[first + offset] != bytes[start + offset] -> return false
+    }
+    true
+}
+
+// The id of `bytes[start..<end]`, interning it when it is new. A spelling
+// that is not UTF-8 resolves to "" but keeps its own id.
+fn name_intern_bytes(table: &NameTable, bytes: [U8], start: Int, end: Int) -> Name Never! {
+    slot := name_hash(bytes, start, end).bit_and(table.mask)
+    loop table.slots[slot] != 0 {
+        id :: table.slots[slot] - 1
+        if name_bytes_equal(table, id, bytes, start, end) -> return Name{id: U32{id}}
+        slot = (slot + 1).bit_and(table.mask)
+    }
+    id :: table.texts.len()
+    loop index in start..<end -> &table.bytes.push(bytes[index])
+    &table.ends.push(table.bytes.len())
+    &table.texts.push(String.from_bytes(bytes.slice(start, end)) ?? "")
+    table.slots[slot] = id + 1
+    if (id + 1) * 2 > table.mask -> name_table_grow(&table)
+    Name{id: U32{id}}
+}
+
+// The id of `text` when the table holds it; never interns.
+fn name_find(table: NameTable, text: String) -> Name? Never! {
+    bytes :: text.bytes()
+    slot := name_hash(bytes, 0, bytes.len()).bit_and(table.mask)
+    loop table.slots[slot] != 0 {
+        id :: table.slots[slot] - 1
+        if name_bytes_equal(table, id, bytes, 0, bytes.len()) -> return Val(Name{id: U32{id}})
+        slot = (slot + 1).bit_and(table.mask)
+    }
+    None
+}
+
+fn name_intern(table: &NameTable, text: String) -> Name Never! {
+    bytes :: text.bytes()
+    name_intern_bytes(&table, bytes, 0, bytes.len())
+}
+
+fn name_table_grow(table: &NameTable) Never! {
+    capacity :: (table.mask + 1) * 2
+    mask :: capacity - 1
+    slots := [Int]{}
+    loop _ in 0..<capacity -> &slots.push(0)
+    loop id in 0..<table.texts.len() {
+        slot := name_hash(table.bytes, name_start(table, id), table.ends[id]).bit_and(mask)
+        loop slots[slot] != 0 -> slot = (slot + 1).bit_and(mask)
+        slots[slot] = id + 1
+    }
+    table.slots = ^slots
+    table.mask = mask
+}

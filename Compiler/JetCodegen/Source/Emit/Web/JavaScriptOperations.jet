@@ -30,6 +30,7 @@ fn jet_web_js_core_symbol(ctx: &JetWebEmitContext, symbol: CoreCallSymbol) -> St
     if symbol == {
         .Prelude(name) -> jet_web_js_symbol(&ctx, MIRSymbol.Prelude{name: name})
         .Rust(name) -> jet_web_js_symbol(&ctx, MIRSymbol.Runtime{name: name})
+        .SourceOwned -> panic("source-owned Core declaration reached Web emission")
     }
 }
 
@@ -37,7 +38,6 @@ fn jet_web_js_data_symbol(name: String) -> Bool Never! {
     names :: [String]{
         "jet_data_count", "jet_data_query", "jet_data_track", "jet_data_query_tracked",
         "jet_data_track_insert", "jet_data_track_replace", "jet_data_track_remove",
-        "jet_data_load", "jet_data_loader_load", "jet_data_loader_load_default",
         "jet_data_loader_file", "jet_data_loader_file_member", "jet_data_loader_url",
         "jet_data_loader_database", "jet_data_loader_value", "jet_data_loader_snapshot",
         "jet_data_loader_bind", "jet_data_loader_bind_text", "jet_data_loader_cancel",
@@ -51,8 +51,8 @@ fn jet_web_js_data_symbol(name: String) -> Bool Never! {
         "jet_data_query_max", "jet_data_query_inner_join", "jet_data_query_left_join",
         "jet_data_query_group_by", "jet_data_query_watch", "jet_data_watch_get",
         "jet_data_watch_status", "jet_data_watch_cancel", "jet_data_group_count_query",
-        "jet_data_group_sum_query", "jet_data_group_mean_query", "jet_data_status",
-        "jet_data_require_bridge", "jet_data_csv_reader", "jet_data_json_reader",
+        "jet_data_group_sum_query", "jet_data_group_mean_query",
+        "jet_data_csv_reader", "jet_data_json_reader",
     }
     names.contains(name) || name.starts_with("jet_data.loader.")
 }
@@ -61,6 +61,7 @@ fn jet_web_js_core_data_symbol(symbol: CoreCallSymbol) -> Bool Never! {
     if symbol == {
         .Prelude(name) -> jet_web_js_data_symbol(name)
         .Rust(_) -> false
+        .SourceOwned -> panic("source-owned Core declaration reached Web emission")
     }
 }
 
@@ -69,6 +70,7 @@ fn jet_web_js_core_call_expression(ctx: &JetWebEmitContext, function: MIRFunctio
         jet_web_fail(&ctx, JetWebEmitFailureKind.MissingCoreCall, "E0003", "MIR Core call has no registry row", "checked Core calls must preserve a canonical Core ABI row", Val(function.span))
         return "undefined"
     }
+    if core_row.symbol == CoreCallSymbol.SourceOwned -> panic("source-owned Core declaration reached Web emission")
     if !jet_web_js_validate_type_args(&ctx, type_args) -> return "undefined"
     if core_row.arity > args.len() || core_row.max_arity < args.len() || core_row.borrow_mask.len() != args.len() {
         jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Core call arity does not match its checked ABI", "the Core-call row and operation payload must agree exactly", Val(function.span))
@@ -354,6 +356,12 @@ fn jet_web_js_operation(ctx: &JetWebEmitContext, function: MIRFunction, operatio
         .BuildMap(entries) -> {
             rendered :: loop entry in entries -> "[{jet_web_js_move(entry.key)}, {jet_web_js_move(entry.value)}]"
             "new Map([{rendered.join(", ")}])"
+        }
+        .MapLookup(map, key, cache) -> {
+            read_cache :: jet_web_js_place_expression(&ctx, function, cache)
+            lookup :: "jet_pattern_map_lookup({jet_web_js_place_expression(&ctx, function, map)}, {jet_web_js_value(key)})"
+            store :: jet_web_js_write_place(&ctx, function, cache, "{{ tag: \"Ok\", values: [lookup] }}")
+            "(() => {{ const cached = {read_cache}; if (cached?.tag === \"Ok\") return cached.values[0]; const lookup = {lookup}; void ({store}); return lookup; }})()"
         }
         .EnumIs(subject, owner, variant) -> {
             if !jet_web_js_enum_variant_valid(&ctx, owner, variant, None) -> "undefined" else -> "{jet_web_js_value(subject)}?.tag === {jet_web_js_quote(variant)}"

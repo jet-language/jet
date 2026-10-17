@@ -1,0 +1,48 @@
+
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(MeasureTag, base: tick) { tick }
+#UnitFamily(Temperature, dimension, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+
+fn run() {
+    length :: 3meter
+    quantity :: 2
+    right_int_binding :: length * quantity
+    left_int_binding :: quantity * length
+    float_quantity :: Float.from_int(quantity)
+    right_float_binding :: length * float_quantity
+    left_float_binding :: float_quantity * length
+    signed_quantity :: I32{2}
+    narrow_signed_quantity :: I8{2}
+    unsigned_quantity :: U8{2}
+    float32_quantity :: F32{2.0}
+    right_i32_binding :: length * signed_quantity
+    right_i8_binding :: length * narrow_signed_quantity
+    left_u8_binding :: unsigned_quantity * length
+    right_f32_binding :: length / float32_quantity
+    right_int :: length * 2
+    left_int :: 2 * length
+    quotient :: length / 2
+    right_decimal :: length * 1.5
+    left_decimal :: 1.5 * length
+    negative :: length * -2
+    zero :: length * 0
+    overflow :: length * 1.0e308
+    zero_division :: length / 0
+    tick_value :: 4tick
+    tick_scaled :: tick_value * 2
+    delta :: CelsiusDelta.from_float(Float{5.0})
+    delta_right :: delta * 2
+    delta_left :: 2 * delta
+    delta_quotient :: delta / 2
+    print("{(right_int_binding.raw())} {(left_int_binding.raw())}")
+    print("{(right_float_binding.raw())} {(left_float_binding.raw())}")
+    print("{(right_i32_binding.raw())} {(right_i8_binding.raw())} {(left_u8_binding.raw())} {(right_f32_binding.raw())}")
+    print("{(right_int.raw())} {(left_int.raw())} {(quotient.raw())}")
+    print("{(right_decimal.raw())} {(left_decimal.raw())} {(negative.raw())}")
+    print("{(zero.raw())} {(overflow.raw())} {(zero_division.raw())}")
+    print("{(delta_right.raw())} {(delta_left.raw())} {(delta_quotient.raw())}")
+    print("{(tick_scaled.raw())}")
+}

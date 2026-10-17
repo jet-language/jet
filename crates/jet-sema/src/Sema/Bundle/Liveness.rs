@@ -111,6 +111,16 @@ pub(super) fn check_liveness(
 ) -> Vec<Diagnostic> {
     let mut candidates = Vec::new();
     record_materialized_comptime_alias_uses(bundle, ledger);
+    // Qualified marker heads read their import just like a qualified call.
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for marker in super::super::CheckerMarkers::markers_in(&module.items)
+            .chain(module.rule_facts.iter().map(|fact| &fact.marker))
+        {
+            if let Some(span) = super::super::MarkerModules::marker_import_span(bundle, module_idx, marker) {
+                ledger.record_alias_use(module_idx, span);
+            }
+        }
+    }
     {
         let ledger = &*ledger;
         let index = LivenessIndex::new(bundle, ledger);
@@ -152,7 +162,8 @@ pub(super) fn check_liveness(
 /// from an earlier evaluation, bypassing `eval_comptime_items`'s callback after
 /// `clear_sema_facts`; the original expression still owns the semantic alias
 /// reads, so feed it through the same identity recorder before liveness projects
-/// warnings.
+/// warnings. Written marker arguments are compile-time expressions too and go
+/// through the same recorder.
 fn record_materialized_comptime_alias_uses(bundle: &ProgramBundle, ledger: &mut NameLedger) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         // Every local import name a `prep` initializer can read: Core and
@@ -193,6 +204,19 @@ fn record_materialized_comptime_alias_uses(bundle: &ProgramBundle, ledger: &mut 
                 &imports,
                 &globals,
             );
+        }
+        // A marker argument such as `#Target(lang.Target.Web)` reads its
+        // import alias as written; the checked marker keeps only the leaf.
+        for application in &module.rule_facts {
+            for argument in application.marker.expr_args() {
+                crate::Sema::record_comptime_import_alias_uses(
+                    ledger,
+                    module_idx,
+                    argument,
+                    &imports,
+                    &globals,
+                );
+            }
         }
     }
 }
@@ -461,12 +485,6 @@ fn private_function_used(
         .map(|function| function.span);
     // D-MOD-CYCLE1=A: a package is one namespace, so a call from another
     // file of the same package reaches a private function too.
-    let siblings = ledger
-        .namespace_siblings(declaration.module)
-        .into_iter()
-        .filter_map(|sibling| bundle.modules.get(sibling))
-        .map(|module| module.display.as_str())
-        .collect::<Vec<_>>();
     index
         .references_to(target_path, declaration.span)
         .iter()
@@ -476,7 +494,8 @@ fn private_function_used(
                     !function_span
                         .is_some_and(|span| site.start >= span.start && site.end <= span.end)
                 } else {
-                    siblings.contains(&site.source)
+                    index.modules.get(site.source)
+                        .is_some_and(|&source| ledger.same_namespace(declaration.module, source))
                 }
         })
 }

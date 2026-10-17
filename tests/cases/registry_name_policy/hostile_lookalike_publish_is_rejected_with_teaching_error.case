@@ -1,0 +1,44 @@
+# Port of tests/registry_name_policy.rs:94-124; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: hostile_lookalike_publish_is_rejected_with_teaching_error.fixture
+env: NO_COLOR=1
+step: git init --bare registry.git
+exit: any # original predicate; seed helper asserts only successful process creation
+step: git --git-dir registry.git symbolic-ref HEAD refs/heads/main
+exit: any # original predicate; seed helper asserts only successful process creation
+step: git clone file://{work}/registry.git {work}/seed
+mkdir: seed/index/librewolf
+copy: entry.jsonl seed/index/librewolf/librewolf.jsonl
+step: git config user.email test@jet.test
+cwd: seed
+step: git config user.name "Jet Test"
+cwd: seed
+step: git add .
+cwd: seed
+step: git commit -m "seed package name"
+cwd: seed
+step: git push origin HEAD:main
+cwd: seed
+remove: seed
+step: git init -b main
+cwd: project
+step: git config user.email test@jet.test
+cwd: project
+step: git config user.name "Jet Test"
+cwd: project
+step: git add .
+cwd: project
+step: git commit -m "initial package"
+cwd: project
+mkdir: cache
+mkdir: store
+step: jet registry publish --no-sign --quiet
+cwd: project
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_PACKAGE_KEYS_DIR={work}/keys
+exit: nonzero
+stderr: = ../../cli/registry_name_policy.txt
+stderr: !~ "energy" # original predicate
+stderr: !~ "registry source artifact" # original predicate

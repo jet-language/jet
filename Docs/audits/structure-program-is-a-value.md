@@ -127,7 +127,7 @@ The one new spelling is the marker every library author needs and no Jet user ha
 ```jet
 // proposed: any package, any pub item — same machinery Core uses
 #Deprecated(since: "1.2", use: "parse")
-pub fn decode(bytes: [Byte]) => Config ? [FieldError] { ... }
+fn decode(bytes: [Byte]) => Config ? [FieldError] { ... }
 ```
 
 A consumer calling `decode` gets one warning carrying the replacement — a typed edit, not archaeology. `jet fix` can apply it when the replacement is a plain rename. The mechanism is not new: the marker registry is one Jet file the compiler reads (Prelude/Markers.jet, "law zero"), and the L2001/E2002 warning path is live today — it fires for `cbor.encode`/`cbor.decode` from a hardcoded table that exists **twice** (canonical in jet-pkg-model Manifest.rs:110-141, mirrored in Sema/Edition.rs:34 with a "keep in sync" comment). What gets **deleted**: both copies, in one change, per the greenfield law — Core's two rows become ordinary `#Deprecated` markers, eating the compiler's own dogfood. ApiFreeze stays as the enforcement half: removing the item later is the same named-delta error it is today.
@@ -181,7 +181,7 @@ The corpus law makes an underivable second copy a build failure — for the comp
 
 ```jet
 // crates/jet-codegen/src/Prelude/Units.jet:604 — today
-pub #UnitFamily(Resistance, dimension: Mass * Length * Length / Time / Time / Time / Current / Current, base: ohm) {
+#UnitFamily(Resistance, dimension: Mass * Length * Length / Time / Time / Time / Current / Current, base: ohm) {
     ohm
     quectoohm(scale: 1/1000000000000000000000000000000)
     rontoohm(scale: 1/1000000000000000000000000000)
@@ -192,7 +192,7 @@ pub #UnitFamily(Resistance, dimension: Mass * Length * Length / Time / Time / Ti
 
 ```jet
 // proposed: the same family, the prefix table said once
-pub #UnitFamily(Resistance, dimension: Mass * Length * Length / Time / Time / Time / Current / Current, base: ohm) {
+#UnitFamily(Resistance, dimension: Mass * Length * Length / Time / Time / Time / Current / Current, base: ohm) {
     ohm
     @loop p in si.prefixes { unit("{p.name}ohm", scale: p.scale) }
 }
@@ -242,7 +242,7 @@ The same growing program, today and after. A small service that started as a scr
 use core.files as files                     // dead since the refactor; nothing will ever say so
 
 #Policy(trace("api.config"))                // shipped today (D-CALLPOLICY1=E)
-pub fn config(req: HTTPRequest) => HTTPResponse {
+fn config(req: HTTPRequest) => HTTPResponse {
     cfg :: store.decode(files.read("cfg.cbor") ?? []) ?? default_config()
     //          └ decode is the abandoned API; the comment in store.jet is the only warning
     return http_server.response(200, cfg.render())
@@ -262,15 +262,15 @@ policy: .{ lints: .{ deny: [unused_import] } }        // team wall: dead imports
 ```jet
 // app/store.jet — the library retires an API the way Core retires cbor.encode
 #Deprecated(since: "1.2", use: "parse")
-pub fn decode(bytes: [Byte]) => Config ? [FieldError] { ... }
+fn decode(bytes: [Byte]) => Config ? [FieldError] { ... }
 
-pub fn parse(bytes: [Byte]) => Config ? [FieldError] { ... }
+fn parse(bytes: [Byte]) => Config ? [FieldError] { ... }
 ```
 
 ```jet
 // app/api.jet — same function; the compiler now says what the wiki used to
 #Policy(trace("api.config"))
-pub fn config(req: HTTPRequest) => HTTPResponse {
+fn config(req: HTTPRequest) => HTTPResponse {
     cfg :: store.parse(files.read("cfg.cbor") ?? []) ?? default_config()
     //          └ the compiler said: `decode` is retiring since 1.2 — use `parse` (one typed edit)
     //          └ and: `use core.files` from app.api breaks boundaries[0] (route through store)

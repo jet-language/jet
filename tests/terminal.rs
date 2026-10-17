@@ -1,6 +1,6 @@
 //! Cross-tier differential for the shared terminal Prelude path: default
-//! `jet run`, AOT (`--release`), and the interpreter must answer the same, on a
-//! PTY and off it, and must end when the input stream is closed.
+//! `jet run` and AOT (`--release`) must answer the same, on a PTY and off it,
+//! and must end when the input stream is closed.
 
 #![cfg(unix)]
 
@@ -24,75 +24,6 @@ fn answers() -> &'static common::ExampleStdin {
     common::example_stdin("io/terminal_parity").expect("io/terminal_parity has stdin answers")
 }
 
-/// A differential means nothing until we know which tier answered. The resident
-/// tier has to compile `run` itself: a silent deopt would let tier0 answer for
-/// every "tier" under test, and the transcripts would then agree for the wrong
-/// reason.
-fn assert_resident_tier_compiles_run() {
-    let mut bundle = jet::Loader::load_entry(EXAMPLE).expect("terminal_parity loads");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    assert!(
-        !diags
-            .iter()
-            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
-        "terminal_parity must check: {diags:?}"
-    );
-    let plan = common::cranelift_tier_plan(&bundle);
-    assert!(
-        !plan.whole_interp,
-        "the whole program deopted to the interpreter: {plan:?}"
-    );
-    assert!(
-        plan.native.contains("run"),
-        "`run` must select the native tier; native={:?} deopt={:?}",
-        plan.native,
-        plan.deopt
-    );
-}
-
-/// The same proof against a real default `jet run`: the tier rows must name a
-/// natively compiled function and no deopt. Stdin is fed so the run completes,
-/// and the trace lands on stderr, so this run stays out of the stream-order
-/// comparison below.
-fn assert_default_run_traces_native_tier() {
-    // A warm run cache would answer from a published artifact and print no tier
-    // rows, which would read as "no deopt" without proving anything. Point the
-    // cache at a fresh directory so this run plans its tiers.
-    let cache = std::env::temp_dir().join(format!(
-        "jet_terminal_parity_trace_cache_{}",
-        std::process::id()
-    ));
-    let _ = fs::remove_dir_all(&cache);
-    let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--quiet", "--trace-tiers", EXAMPLE])
-        .env("NO_COLOR", "1")
-        .env("JET_RUN_CACHE_DIR", &cache)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("traced jet run must start");
-    child
-        .stdin
-        .take()
-        .expect("traced stdin")
-        .write_all(answers().piped.as_bytes())
-        .expect("write traced answers");
-    let output = child.wait_with_output().expect("collect tier trace");
-    let trace = String::from_utf8_lossy(&output.stderr).into_owned();
-    let _ = fs::remove_dir_all(&cache);
-    assert!(output.status.success(), "traced run failed: {trace}");
-    assert!(
-        trace.contains("tier1 native"),
-        "no function reached the native tier: {trace}"
-    );
-    assert!(
-        !trace.contains("tier0 interp"),
-        "default `jet run` silently deopted: {trace}"
-    );
-    assert!(!trace.contains("E0956"), "{trace}");
-}
-
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -103,7 +34,6 @@ fn run_pty(mode: &str) -> String {
     let profile = match mode {
         "default" => "",
         "release" => " --release",
-        "interpret" => " --interpret",
         _ => panic!("unknown PTY mode: {mode}"),
     };
     let shell_line = format!("stty rows 24 cols 100; exec {jet} run --quiet{profile} {example}");
@@ -142,7 +72,6 @@ fn run_non_pty(mode: &str) -> NonPtyOutput {
     match mode {
         "default" => {}
         "release" => args.push("--release"),
-        "interpret" => args.push("--interpret"),
         _ => panic!("unknown non-PTY mode: {mode}"),
     }
     args.push(EXAMPLE);
@@ -165,7 +94,6 @@ fn run_non_pty_merged(mode: &str) -> String {
     match mode {
         "default" => {}
         "release" => args.push("--release"),
-        "interpret" => args.push("--interpret"),
         _ => panic!("unknown merged non-PTY mode: {mode}"),
     }
     args.push(example);
@@ -224,14 +152,11 @@ fn marker_positions(transcript: &str) -> Vec<usize> {
 
 #[test]
 fn terminal_parity_uses_tty_prompt_and_progress_order() {
-    assert_resident_tier_compiles_run();
     let default = run_pty("default");
     let release = run_pty("release");
-    let interpreter = run_pty("interpret");
     let normalized = |transcript: &str| transcript.replace('\r', "");
     assert_eq!(normalized(&default), normalized(&release));
-    assert_eq!(normalized(&default), normalized(&interpreter));
-    for transcript in [&default, &release, &interpreter] {
+    for transcript in [&default, &release] {
         let positions = marker_positions(transcript);
         assert!(
             positions.windows(2).all(|pair| pair[0] < pair[1]),
@@ -250,15 +175,13 @@ fn terminal_parity_uses_tty_prompt_and_progress_order() {
 
 #[test]
 fn terminal_parity_matches_non_tty_golden_and_stream_order() {
-    assert_resident_tier_compiles_run();
-    assert_default_run_traces_native_tier();
     let expected_stdout = include_str!("../Examples/features/expected/io/terminal_parity.out");
     let expected_stderr =
         include_str!("../Examples/features/expected/io/terminal_parity.stderr.out");
     let mut expected_merged = expected_stdout.to_string();
     expected_merged.push_str(expected_stderr);
 
-    for mode in ["default", "release", "interpret"] {
+    for mode in ["default", "release"] {
         let output = run_non_pty(mode);
         assert_eq!(
             output.stdout, expected_stdout,
@@ -278,7 +201,7 @@ fn terminal_parity_matches_non_tty_golden_and_stream_order() {
 
 #[test]
 fn stdin_lines_emit_before_eof_and_stop_at_blank() {
-    for mode in ["default", "release", "interpret"] {
+    for mode in ["default", "release"] {
         let scratch = common::Scratch::new("stdin-lines-live");
         let source = scratch.path.join("sentinel.jet");
         fs::write(
@@ -305,7 +228,6 @@ fn run() {
         command.args(["run", "--quiet"]);
         match mode {
             "release" => { command.arg("--release"); }
-            "interpret" => { command.arg("--interpret"); }
             _ => {}
         }
         let mut child = command
@@ -383,11 +305,12 @@ fn stdout_write_bytes_is_byte_exact_and_ordered_with_print() {
             &source,
             r#"use core.term as term
 fn run() {
-    out :: term.stdout()
+    out := term.stdout()
     print("a")
-    out.write_bytes([U8]{0x42, 0x4D, 0xFF, 0x00, 0x80, 13, 10}) ?? panic("write")
-    out.write_bytes([U8]{0xC3}) ?? panic("write")
-    term.stdout().write_bytes([U8]{0x28}) ?? panic("write")
+    &out.write_bytes([U8]{0x42, 0x4D, 0xFF, 0x00, 0x80, 13, 10}) ?? panic("write")
+    &out.write_bytes([U8]{0xC3}) ?? panic("write")
+    again := term.stdout()
+    &again.write_bytes([U8]{0x28}) ?? panic("write")
     print("z")
 }
 "#,
@@ -439,7 +362,6 @@ fn run_without_input(mode: &str) -> ClosedInputRun {
     match mode {
         "default" => {}
         "release" => args.push("--release"),
-        "interpret" => args.push("--interpret"),
         _ => panic!("unknown closed-input mode: {mode}"),
     }
     args.push(EXAMPLE);
@@ -526,9 +448,8 @@ fn expected_closed_input_stdout() -> String {
 /// names itself.
 #[test]
 fn terminal_parity_ends_on_closed_input_on_every_tier() {
-    assert_resident_tier_compiles_run();
     let expected = expected_closed_input_stdout();
-    for mode in ["default", "release", "interpret"] {
+    for mode in ["default", "release"] {
         let run = run_without_input(mode);
         assert!(
             !run.timed_out,

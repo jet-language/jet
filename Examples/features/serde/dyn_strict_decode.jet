@@ -1,0 +1,24 @@
+// Text is not a scalar, except in source-owned text cells such as CSV.
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.yaml as yaml
+use core.encoding.csv as csv
+
+#Codable
+struct Scalars { count: Int, ratio: Float, active: Bool }
+
+fn run() {
+    json.decode<Int>("\"42\"") ? _value -> print("bad") ! _error -> print("json Int rejected")
+    json.decode<Float>("\"1.5\"") ? _value -> print("bad") ! _error -> print("json Float rejected")
+    json.decode<Bool>("\"true\"") ? _value -> print("bad") ! _error -> print("json Bool rejected")
+    toml.decode<Scalars>("count = \"42\"\nratio = 1.5\nactive = true") ? _value -> print("bad") ! _error -> print("toml rejected")
+    yaml.decode<Scalars>("count: 42\nratio: \"1.5\"\nactive: true") ? _value -> print("bad") ! _error -> print("yaml rejected")
+    rows :: csv.decode<Scalars>("count,ratio,active\n42,1.5,true") ?? panic("CSV cells")
+    print("{rows[0].count}|{rows[0].ratio}|{rows[0].active}")
+    // A CSV decode must not leak its cell mode into the next JSON decode.
+    json.decode<Int>("\"42\"") ? _value -> print("bad") ! _error -> print("scope restored")
+    json.decode<I64>("9223372036854775808") ? _value -> print("bad") ! _error -> print("I64 range rejected")
+    json.decode<Float>("1e400") ? _value -> print("bad") ! _error -> print("Float range rejected")
+    tree :: json.parse("1e400") ?? panic("unread number")
+    print(json.to_string(tree))
+}

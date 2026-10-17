@@ -75,7 +75,7 @@ fn run() {
 fn origin_facts_clear_through_scrub_gate() {
     let src = r#"
 use core.files as files
-#Scrub(Input) fn clean(raw: #Input String) -> String { return ~raw }
+#Scrub(Input) fn clean(raw: #Input String) -> String { return raw.copy() }
 fn run() {
     raw :: files.read("payload.txt") ?? return Err("test")
     safe :: clean(raw)
@@ -421,7 +421,7 @@ fn run() {
 #[test]
 fn bare_sanitizer_pub_fn_is_e0059() {
     let src = r#"
-sanitizer pub fn clean(raw: #Input String) -> String { return raw.split(" ")[0] }
+sanitizer fn clean(raw: #Input String) -> String { return raw.split(" ")[0] }
 fn run() {
     print(clean("a b c"))
 }
@@ -526,133 +526,21 @@ fn run() {
 
 #[allow(dead_code)]
 mod auth_session_boundary {
-    // Exercise the shared Prelude seam directly; AOT, JIT, and comptime include it.
-    fn jet_crypto_entropy_bytes(length: usize) -> Result<Vec<u8>, ()> {
-        Ok(vec![0; length])
-    }
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
+    // The shared Prelude seam keeps only the store cell and `app.auth`; the
+    // Session carrier and every session, magic-link and OAuth policy test live
+    // in Core/auth/auth.jet.
     include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
 
     #[test]
-    fn magic_link_rejects_oversized_dns_labels() {
-        let valid = format!("user@{}.example", "a".repeat(63));
-        let invalid = format!("user@{}.example", "a".repeat(64));
-
-        assert!(jet_auth_delivery_capability(&valid).is_some());
-        assert!(
-            jet_auth_delivery_capability(&invalid).is_none(),
-            "a delivery identity with a 64-byte DNS label must be rejected"
-        );
-        assert!(jet_auth_register_user(invalid.clone(), "hash".to_string()).is_ok());
-        assert!(
-            jet_auth_magic_link_issue(invalid, 0, 1_000).is_err(),
-            "registered users with invalid delivery identities must not receive magic links"
-        );
+    fn auth_store_cell_replaces_only_the_bytes_it_read() {
+        auth_runtime_reset();
+        assert!(jet_auth_store_load().is_empty());
+        assert!(jet_auth_store_replace(&Vec::new(), vec![1, 2]));
+        assert!(!jet_auth_store_replace(&Vec::new(), vec![3]));
+        assert_eq!(jet_auth_store_load(), vec![1, 2]);
+        auth_runtime_reset();
+        assert!(jet_auth_store_load().is_empty());
     }
-
-    #[test]
-    fn session_show_redacts_bearer_and_oauth_fails_closed() {
-        let session = JetAuthSession {
-            id: "sess-live-bearer".to_string(),
-            user_id: "alice".to_string(),
-            expires_at: 42,
-            cookie: "jet_session=sess-live-bearer".to_string(),
-        };
-        let shown = jet_auth_session_show(&session);
-        assert_eq!(
-            shown,
-            "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)"
-        );
-        assert!(!shown.contains("sess-live-bearer"));
-        let debug = format!("{session:?}");
-        assert!(!debug.contains("sess-live-bearer"));
-        assert!(!debug.contains("jet_session=sess-live-bearer"));
-        assert!(debug.contains("<redacted>"));
-        assert!(jet_auth_oauth_begin("google".to_string()).is_err());
-        assert!(jet_auth_oauth_finish(
-            "state".to_string(),
-            "attacker".to_string(),
-            0,
-            1_000
-        )
-        .is_err());
-    }
-    #[test]
-    fn oauth_assertion_requires_provider_proof_and_state_nonce() {
-        fn b64url(bytes: &[u8]) -> String {
-            const ALPHABET: &[u8; 64] =
-                b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-            let mut out = String::new();
-            let mut index = 0;
-            while index < bytes.len() {
-                let first = bytes[index] as usize;
-                let second = bytes.get(index + 1).copied().unwrap_or(0) as usize;
-                let third = bytes.get(index + 2).copied().unwrap_or(0) as usize;
-                out.push(ALPHABET[first >> 2] as char);
-                out.push(ALPHABET[((first & 3) << 4) | (second >> 4)] as char);
-                if index + 1 < bytes.len() {
-                    out.push(ALPHABET[((second & 15) << 2) | (third >> 6)] as char);
-                }
-                if index + 2 < bytes.len() {
-                    out.push(ALPHABET[third & 63] as char);
-                }
-                index += 3;
-            }
-            out
-        }
-
-        let entry = JetAuthOAuthState {
-            state: "oauth-state".to_string(),
-            provider: "google".to_string(),
-            nonce: "nonce-value".to_string(),
-            expires_at: 1_700_000_060_000,
-        };
-        let secret = b"01234567890123456789012345678901".to_vec();
-        let header = b64url(br#"{"alg":"HS256","typ":"JWT"}"#);
-        let payload = b64url(
-            br#"{"iss":"google","aud":"google","sub":"alice","nonce":"nonce-value","exp":1700000100,"iat":1700000000}"#,
-        );
-        let signing_input = format!("{header}.{payload}");
-        let signature = b64url(&jet_hmac_sha256(&secret, signing_input.as_bytes()));
-        let assertion = format!("{signing_input}.{signature}");
-
-        assert_eq!(
-            jet_auth_oauth_verify(
-                &entry,
-                &assertion,
-                1_700_000_000_000,
-                &secret,
-                "google",
-                "google",
-            )
-            .unwrap(),
-            "alice"
-        );
-        let mut tampered = assertion.clone();
-        tampered.pop();
-        tampered.push('A');
-        assert!(jet_auth_oauth_verify(
-            &entry,
-            &tampered,
-            1_700_000_000_000,
-            &secret,
-            "google",
-            "google",
-        )
-        .is_err());
-        let mut wrong_nonce = entry.clone();
-        wrong_nonce.nonce = "other".to_string();
-        assert!(jet_auth_oauth_verify(
-            &wrong_nonce,
-            &assertion,
-            1_700_000_000_000,
-            &secret,
-            "google",
-            "google",
-        )
-        .is_err());
-    }
-
 }
 
 /// A clean value (no taint) at `print` is fine — no E0722.

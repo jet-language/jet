@@ -114,7 +114,7 @@ fn nominal_has_encode_impl(program: &MirProgram, ty: &MirType) -> bool {
         })
 }
 
-/// The resource ABI carries guest failures as the canonical Component/DataTree
+/// The resource ABI carries guest failures as the canonical Component/Dyn
 /// payload. This gate mirrors the encoders that the generated Rust artifact
 /// can actually call; it is deliberately independent from lifecycle statuses.
 fn resource_error_is_projectable(
@@ -679,7 +679,7 @@ fn {read}(value: JetComponent) -> Result<String, String> {{
     String::from_utf8(bytes.to_vec()).map_err(|_| "component input is not UTF-8".to_string())
 }}
 
-fn {return_value}(value: jet_std::DataTree) -> JetComponent {{
+fn {return_value}(value: jet_std::Dyn) -> JetComponent {{
     let text = jet_std::render_json(&value, false, 0);
     let bytes = text.into_bytes().into_boxed_slice();
     let len = bytes.len();
@@ -692,9 +692,9 @@ fn {error_value}<T: __jet_Encode>(value: &T) -> JetComponent {{
 }}
 
 fn {error}(message: &str) -> JetComponent {{
-    {return_value}(jet_std::DataTree::Object(vec![
-        ("ok".to_string(), jet_std::DataTree::Bool(false)),
-        ("error".to_string(), jet_std::DataTree::Text(message.to_string())),
+    {return_value}(jet_std::Dyn::Object(vec![
+        ("ok".to_string(), jet_std::Dyn::Bool(false)),
+        ("error".to_string(), jet_std::Dyn::Text(message.to_string())),
     ]))
 }}
 
@@ -764,11 +764,11 @@ fn render_component_wrapper(program: &MirProgram, export: &RichExport) -> String
     let parse_values = if export.component.params.is_empty() {
         "let __jet_values = Vec::new();".to_string()
     } else {
-        "let __jet_values = match __jet_tree { jet_std::DataTree::Array(values) => values, _ => return Err(\"component input must be a JSON array\".to_string()) };".to_string()
+        "let __jet_values = match __jet_tree { jet_std::Dyn::Array(values) => values, _ => return Err(\"component input must be a JSON array\".to_string()) };".to_string()
     };
     let call = if matches!(&export.failure, MirFailureCarrier::Result { .. }) {
         format!(
-            "match {}({}) {{ Ok(value) => value, Err(error) => return Ok({return_value}(jet_std::DataTree::Object(vec![(\"ok\".to_string(), jet_std::DataTree::Bool(false)), (\"error\".to_string(), error.jet_encode())]))), }}",
+            "match {}({}) {{ Ok(value) => value, Err(error) => return Ok({return_value}(jet_std::Dyn::Object(vec![(\"ok\".to_string(), jet_std::Dyn::Bool(false)), (\"error\".to_string(), error.jet_encode())]))), }}",
             export.callee,
             args.join(", "),
             return_value = return_value,
@@ -784,14 +784,14 @@ fn render_component_wrapper(program: &MirProgram, export: &RichExport) -> String
 pub extern "C" fn {wrapper}(input: JetComponent) -> JetComponent {{
     let run = || -> Result<JetComponent, String> {{
         let text = {read}(input)?;
-        let __jet_tree = jet_std::parse_json_typed_datatree(&text)
+        let __jet_tree = jet_std::parse_json_dyn(&text)
             .map_err(|_| "component input is not valid JSON".to_string())?;
         {parse_values}
         {locals}
         let __jet_value = {call};
         let __jet_tree = __jet_value.jet_encode();
-        Ok({return_value}(jet_std::DataTree::Object(vec![
-            ("ok".to_string(), jet_std::DataTree::Bool(true)),
+        Ok({return_value}(jet_std::Dyn::Object(vec![
+            ("ok".to_string(), jet_std::Dyn::Bool(true)),
             ("value".to_string(), __jet_tree),
         ])))
     }};
@@ -943,7 +943,7 @@ fn build_projections(
             };
             if resource_error_unsupported {
                 unsupported.push(
-                    "typed resource protocol omitted: checked outcome error has no lossless JetComponent/DataTree encoding"
+                    "typed resource protocol omitted: checked outcome error has no lossless JetComponent/Dyn encoding"
                         .to_string(),
                 );
             } else if resource_plan.is_none() {
@@ -961,7 +961,7 @@ fn build_projections(
                 integer_ranges: "Jet Int is exact; fixed-width I64 adapters check bounds before entry and return overflow".into(),
                 encoding: "UTF-8 pointer+length; no NUL truncation; invalid pairs are rejected".into(),
                 enums: "tagged discriminants use canonical Encode in supported Outcome error carriers; enum value parameters/results without a checked descriptor are explicit unsupported".into(),
-                errors: "lifecycle status values remain distinct from lossless guest Outcome payloads in JetComponent/DataTree; panic, exception, and cancellation do not cross the C ABI".into(),
+                errors: "lifecycle status values remain distinct from lossless guest Outcome payloads in JetComponent/Dyn; panic, exception, and cancellation do not cross the C ABI".into(),
                 runtime_roots: match language {
                     "go" => "cgo call-scoped roots + runtime.KeepAlive; retained host pointers require an explicit cgo.Handle".into(),
                     "python" => "active interpreter/ctypes roots; in-process embed is explicit, and context-manager cleanup is available".into(),
@@ -971,7 +971,7 @@ fn build_projections(
                 resource_lifetime: if resource_plan.is_some() {
                     "replace/close increments generation; stale view returns ExpiredView before dereference; close is exactly once".into()
                 } else if resource_error_unsupported {
-                    "checked owner/view protocol found but omitted because its Outcome error has no lossless JetComponent/DataTree encoding".into()
+                    "checked owner/view protocol found but omitted because its Outcome error has no lossless JetComponent/Dyn encoding".into()
                 } else {
                     "no resource handle protocol emitted because checked operation roles were absent or ambiguous".into()
                 },

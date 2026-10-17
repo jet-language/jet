@@ -1,0 +1,49 @@
+use core.files as files
+
+#Test("JSON valid accepts any single document and rejects invalid text without adding a type constraint") {
+    root :: cases_test_root("values-json-valid")
+    loop document in ["null", "true", "1", "1.5", "\"text\"", "[]", "{{}}"] {
+        source :: "step: printf '%s' '{document}'\njson: stdout doc $ valid # original predicate\n"
+        assert_eq(cases_test_advanced(root, "valid", source).verdict.status, "PASS")
+    }
+    loop document in ["", "not JSON", "{{", "1 2", "[1,]"] {
+        source :: "step: printf '%s' '{document}'\njson: stdout doc $ valid # original predicate\n"
+        assert_eq(cases_test_advanced(root, "invalid", source).verdict.status, "FAIL")
+    }
+    loop assertion in ["json: stdout doc $ valid", "json: stdout ndjson $ valid # original predicate", "json: stdout doc $.a valid # original predicate"] {
+        assert_eq(cases_test_advanced(root, "grammar", "step: printf null\n{assertion}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove JSON valid scratch")
+}
+
+#Test("replacement unquoted source expands while quoted source and every destination stay literal") {
+    root :: cases_test_root("values-replacements")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "root.out"), "$ROOT/path\n")
+    kit_exec_write(files.join(directory, "wrong.out"), "wrong\n")
+    loop from in ["{{work}}", "\"{{work}}\""] {
+        source :: "normalize: replace {from} \"$ROOT\"\nstep: printf \"{{work}}/path\\n\"\nstdout: = root.out\n"
+        assert_eq(cases_test_advanced(root, "source", source).verdict.status, "PASS")
+        wrong :: "normalize: replace {from} \"$ROOT\"\nstep: printf \"{{work}}/path\\n\"\nstdout: = wrong.out\n"
+        assert_eq(cases_test_advanced(root, "wrong", wrong).verdict.status, "FAIL")
+    }
+    kit_exec_write(files.join(directory, "literal.in"), "{{cap:missing}}")
+    kit_exec_write(files.join(directory, "literal.out"), "{{cap:missing}}")
+    kit_exec_write(files.join(directory, "x.out"), "X")
+    destination :: "normalize: replace \"TOKEN\" \"{{cap:missing}}\"\nstep: printf TOKEN\nstdout: = literal.out\n"
+    assert_eq(cases_test_advanced(root, "literal-destination", destination).verdict.status, "PASS")
+    literal_source :: "step: cat\nstdin: literal.in\nnormalize: replace \"{{cap:missing}}\" \"X\"\nstdout: = x.out\n"
+    assert_eq(cases_test_advanced(root, "literal-source", literal_source).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove replacement scratch")
+}
+
+#Test("empty text captures remain available while optional bytes cannot masquerade as empty text") {
+    root :: cases_test_root("values-typed-captures")
+    empty :: "step: printf ''\ncapture: empty = text stdout\nstep: printf '%s' {{cap:empty}}\nstdout: empty\n"
+    assert_eq(cases_test_advanced(root, "empty-text", empty).verdict.status, "PASS")
+    missing :: "capture: missing = opt-bytes file absent\nfile: absent same-as {{cap:missing}}\n"
+    assert_eq(cases_test_advanced(root, "optional-none", missing).verdict.status, "PASS")
+    wrong :: "capture: missing = opt-bytes file absent\nstep: printf '%s' {{cap:missing}}\n"
+    assert_eq(cases_test_advanced(root, "byte-token", wrong).verdict.status, "ERROR")
+    files.remove_all(root) ?? panic("remove typed capture scratch")
+}

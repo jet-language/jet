@@ -1,0 +1,10 @@
+# HAND-PORT tests/fact_reads.rs:216-231 retired_origin_method_is_rejected_for_every_tracked_value_type
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original exact code count + all matching reports exact what/fix (or same-diagnostic conjunction), no dropped universal predicate.
+fixture: retired_origin_method_is_rejected_for_every_tracked_value_type.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0311"] #= 2
+json: stdout doc $.reports[?code="E0311"][?what!="`.origin()` is retired for tracked values"] #= 0
+json: stdout doc $.reports[?code="E0311"][?fix!="read `value.$origin` in comptime code"] #= 0

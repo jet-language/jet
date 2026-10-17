@@ -1,0 +1,8 @@
+Error [E1102]: `window` cannot cross a parallel worker boundary — it is a view that does not live long enough
+  --> parallel_adapters_reject_unsafe_boundaries_before_codegen_2.jet:5:38
+    |
+  5 |     ignored :: [1, 2, 3].para_filter((n: Int) -> window.contains(n))
+    |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ Why: A view is a borrow, not an owned value; this concurrent boundary moves owned values between workers
+ Fix: Copy plain owned data into the worker, or keep this operation sequential
+More: jet-lang.dev/e/E1102

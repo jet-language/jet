@@ -1,0 +1,95 @@
+// Compiler invocation preserves the callee's checked signature and failure
+// carrier, unlike executable entry normalization. Hidden aggregate output
+// pointers are forwarded unchanged. Each compiler image is invoked serially.
+use jet_foundation.[MIRFunction, MIRProgram]
+
+fn lower_callable_init(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature_id :: m.mir_signatures[glue.function].copy()
+    signature :: m.signatures[signature_id.value].copy()
+    f := lower_helper_start(&m, glue, signature.params, signature.result)
+    params :: f.open_params.copy()
+    // The loader gives module data writable, non-executable pages. This flag
+    // avoids re-allocating runtime-owned statics on repeated compiler calls;
+    // lower_callable_fini clears it when it releases them.
+    flag_data :: m.static_live ?? panic("callable initialization has no static-live cell")
+    flag_address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: flag_address, data: flag_data})
+    initialized :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Load{dst: initialized, base: flag_address, offset: 0})
+    initialize :: lower_new_block(&f)
+    invoke :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: initialized, then_target: lower_target(invoke, [LIRValueID]{}), else_target: lower_target(initialize, [LIRValueID]{})})
+    lower_start(&f, initialize, [LIRValueID]{})
+    lower_static_fixups(p, &m, &f)
+    ready :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Const{dst: ready, value: 1})
+    lower_emit(&f, LIRInst.Store{base: flag_address, offset: 0, value: ready})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(invoke, [LIRValueID]{})})
+    lower_start(&f, invoke, [LIRValueID]{})
+    result := LIRValueID?{None}
+    if signature.result == .Val(layout) -> result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
+    lower_emit(&f, LIRInst.Call{dst: result, signature: signature_id, callee: LIRCallee.Function{id: LIRFunctionID{value: glue.function}}, args: params})
+    lower_seal(&f, LIRTerminator.Return{value: result})
+    lir_builder_finish(f.builder)
+}
+
+// Image lifetime owns runtime-built frozen trees; finalization is idempotent.
+fn lower_callable_fini(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{}, None)
+    flag_data :: m.static_live ?? panic("callable finalization has no static-live cell")
+    flag_address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.DataAddress{dst: flag_address, data: flag_data})
+    initialized :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Load{dst: initialized, base: flag_address, offset: 0})
+    release :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: initialized, then_target: lower_target(release, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, release, [LIRValueID]{})
+    cleared :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Const{dst: cleared, value: 0})
+    lower_emit(&f, LIRInst.Store{base: flag_address, offset: 0, value: cleared})
+    lower_static_release(p, &m, &f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_has_narrow_params(source: MIRFunction) -> Bool Never! {
+    loop param in source.params {
+        if lower_narrow_bits(param.ty) > 0 -> return true
+    }
+    false
+}
+
+// A C export's entry. System V leaves the bits above an I8/U8/I16/U16/I32/U32
+// argument unspecified, while native code keeps every narrow integer sign- or
+// zero-extended in its word (Numeric.jet). The entry normalizes those
+// arguments once, then calls the checked callable (through its static
+// initializer when the callable has one).
+fn lower_export_entry(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    signature_id :: m.mir_signatures[glue.function].copy()
+    signature :: m.signatures[signature_id.value].copy()
+    source :: lower_row_source(p, m, glue.function)
+    f := lower_helper_start(&m, glue, signature.params, signature.result)
+    params :: f.open_params.copy()
+    args := [LIRValueID]{}
+    loop (position, value) in params {
+        ty :: source.params[position].ty
+        bits :: lower_narrow_bits(ty)
+        if bits == 0 {
+            &args.push(value)
+            next
+        }
+        normalized :: lower_word(&f)
+        lower_narrow_wrap(&f, normalized, value, lower_narrow_signed(ty), bits)
+        &args.push(normalized)
+    }
+    callee := LIRFunctionID{value: glue.function}
+    if m.glue_rows.get(lower_glue_row_key("h:callable.init", "{glue.function}")) == .Val(row) -> callee = m.glue[row].id
+    result := LIRValueID?{None}
+    if signature.result == .Val(layout) -> result = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
+    lower_emit(&f, LIRInst.Call{dst: result, signature: signature_id, callee: LIRCallee.Function{id: callee}, args: args})
+    lower_seal(&f, LIRTerminator.Return{value: result})
+    lir_builder_finish(f.builder)
+}

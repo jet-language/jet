@@ -2,6 +2,7 @@
 // Ordinary local names resolve through SemaScopeTable. Registration may pass a
 // specialized SemaCallDirectTarget for imported, overloaded, or Core routes.
 use jet_foundation.[
+    AccessConvention,
     BinOp,
     Call,
     CallArg,
@@ -15,6 +16,7 @@ use jet_foundation.[
     Span,
     StrPart,
     SymbolKind,
+    TCoreClosureKind,
     TContract,
     TExpr,
     TExprKind,
@@ -28,24 +30,25 @@ use jet_foundation.[
     Type,
     core_call,
     core_call_typed_signature,
+    diagnostic_registry_row,
     diagnostic_with_edit,
     expr_span,
     tir_generated_local,
     type_name,
 ]
 
-pub struct SemaDirectSpecialCheck {
-    pub handled: Bool
-    pub value: TExpr?
+struct SemaDirectSpecialCheck {
+    handled: Bool
+    value: TExpr?
 }
 
 fn sema_call_special_diagnostic(name: String, span: Span) -> Diagnostic {
     sema_error("E1005", span, "`{name}` must wrap a single integer `+`, `-`, `*`, or `/`", "the overflow opt-ins apply to one arithmetic operation on whole numbers", "write it around one operation, e.g. `{name}(a + b)`")
 }
 
-fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_special_diagnostic(call.name, call.name_span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
@@ -55,13 +58,13 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
         if sema_call_is_overflow_operation(op) -> operation = Val(op)
     }
     operation_value :: operation ?? {
-        _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_special_diagnostic(call.name, call.name_span))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     gate :: sema_call_direct_gate(call.name, scopes) ?? return SemaDirectSpecialCheck{handled: false, value: None}
     gate_scope :: sema_call_enter_gate(&scopes, gate)
-    checked_argument :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_argument :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_call_leave_gate(&scopes, gate_scope)
     argument_value :: checked_argument ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_expr_is_integer(argument_value.ty) {
@@ -85,20 +88,20 @@ fn sema_call_check_special_overflow(call: Call, expected: Type?, environment: Se
     line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
     policy :: argument.flags.arithmetic_policy
     result_ty :: if call.name == "checked" -> Type.Option{inner: lhs_value.ty} else -> lhs_value.ty
-    value :: sema_tir_expr(result_ty, TExprKind.OverflowOpt{prefix: call.name, operation: sema_call_overflow_operation_name(operation_value), line: line, policy: policy, lhs: lhs_value, rhs: rhs_value}, call.name_span)
-    checked :: sema_expr_expected(value, expected, environment, &diagnostics)
+    value :: sema_tir_node(result_ty, TExprKind.OverflowOpt{prefix: call.name, operation: sema_call_overflow_operation_name(operation_value), line: line, policy: policy, lhs: lhs_value, rhs: rhs_value}, call.name_span)
+    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked}
 }
 
-fn sema_call_check_special_approx(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_special_approx(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 1 {
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_error("E0104", call.name_span, "`approx` takes one whole number", "`approx(value)` accepts possible precision loss at one integer-to-float crossing", "write `approx(value)`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     gate :: sema_call_direct_gate(call.name, scopes) ?? return SemaDirectSpecialCheck{handled: false, value: None}
     scope :: sema_call_enter_gate(&scopes, gate)
-    checked_argument :: sema_check_expression(call.args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    checked_argument :: sema_check_expression(call.args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     sema_call_leave_gate(&scopes, scope)
     argument :: checked_argument ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if !sema_expr_is_integer(argument.ty) {
@@ -114,40 +117,40 @@ fn sema_call_check_special_approx(call: Call, expected: Type?, environment: Sema
     }
     line :: sema_source_line_at(environment.source_segments, call.name_span) ?? 0
     converted :: sema_expr_numeric_conversion(argument, target, call.name_span, line) ?? argument
-    checked :: sema_expr_expected(converted, expected, environment, &diagnostics)
+    checked :: sema_expr_expected(converted, expected, environment, program, &diagnostics)
     SemaDirectSpecialCheck{handled: true, value: checked}
 }
 
 // Rust `is_debuggable` (D-ATTR4=A): the values `debug(value)` can show in
 // their Debug form. A nominal needs a registered or auto-derived `Debug`.
-fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_call_reflection_secret_bearing(ty) -> return false
     if ty == {
         .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Quantity(_, _) -> true
-        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_call_debug_traceable(inner, environment)
-        .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment) && sema_call_debug_traceable(err, environment)
+        .Option(inner) | .List(inner) | .FixedList(inner, _) | .Tagged(_, inner) | .InlineRange(inner, _, _) -> sema_call_debug_traceable(inner, environment, program)
+        .Result(ok, err) | .Map(ok, _, err) -> sema_call_debug_traceable(ok, environment, program) && sema_call_debug_traceable(err, environment, program)
         .Named(name) -> {
             if sema_call_reflection_leaf_name(name) == "Unit" || sema_call_reflection_core_shown(name) || sema_call_reflection_leaf_name(name) == "Err" -> return true
-            if environment.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
-            sema_call_debug_implemented(ty, environment)
+            if program.registration_graph == .Val(graph) && sema_registration_unit_fact_for_type(graph, ty) != None -> return true
+            sema_call_debug_implemented(ty, environment, program)
         }
         .Apply(name, args) -> {
             if sema_call_reflection_leaf_name(name) == "KeyRef" -> return true
-            if !sema_call_debug_implemented(ty, environment) -> return false
+            if !sema_call_debug_implemented(ty, environment, program) -> return false
             loop argument in args {
-                if !sema_call_debug_traceable(argument, environment) -> return false
+                if !sema_call_debug_traceable(argument, environment, program) -> return false
             }
             true
         }
         .Tuple(fields) -> {
             loop field in fields {
-                if !sema_call_debug_traceable(field.ty, environment) -> return false
+                if !sema_call_debug_traceable(field.ty, environment, program) -> return false
             }
             true
         }
         .Union(members) -> {
             loop member in members {
-                if !sema_call_debug_traceable(member, environment) -> return false
+                if !sema_call_debug_traceable(member, environment, program) -> return false
             }
             true
         }
@@ -156,22 +159,35 @@ fn sema_call_debug_traceable(ty: Type, environment: SemaScopeEnvironment) -> Boo
 }
 
 // A registered `Debug` implementation or bound, or the auto-derived one.
-fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
-    if sema_comparability_implements(environment, ty, "Debug") -> return true
-    graph :: environment.registration_graph ?? return false
-    name :: sema_type_graph_base_name(ty) ?? return false
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
-    if resolved.symbol.kind != SymbolKind.Type -> return false
-    module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
-    row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
-    // Matched in place: a pattern on the indexed path copies the whole item.
-    nominal :: graph.modules[row.module_index].nominals[row.row]
-    if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug
-    false
+fn sema_call_debug_implemented(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if sema_comparability_implements(environment, program, ty, "Debug") -> return true
+    if program.registration_graph == .Val(graph) {
+        name :: sema_type_graph_base_name(ty) ?? return false
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, name) ?? return false
+        if resolved.symbol.kind != SymbolKind.Type -> return false
+        module_index :: sema_registration_module_index(graph, resolved.target_module_identity) ?? return false
+        row :: sema_type_graph_nominal_row(graph, resolved.symbol.id.key) ?? return false
+        // Matched in place: a pattern on the indexed path copies the whole item.
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.source == .SourceAST(item) -> return sema_type_metadata_auto_derives(item, graph.modules[module_index].declared_trait_impls).debug
+        return false
+    } else {
+        return false
+    }
+}
+
+// Rust `infer_method_call` (D-AUTODERIVE1): `.debug()` with no arguments is
+// the Debug protocol method on every debuggable receiver, auto-derived or
+// handwritten alike; it is the same Debug text `{value:Debug}` renders.
+fn sema_call_try_debug_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if method != "debug" || args.len() != 0 || type_args.len() != 0 || !sema_call_debug_traceable(receiver_value.ty, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    text :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Interpolation{value: receiver_value, format: TStrFormat.Debug}}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(text, expected, environment, program, &diagnostics)}
 }
 
 // The `file.jet:LINE` site of a trace (Rust `check_debug_trace`).
-fn sema_call_debug_site(call: Call, environment: SemaScopeEnvironment) -> String Never! {
+fn sema_call_debug_site(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
     path :: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, call.name_span)
     parts :: path.split("/").to_list()
     file :: if parts.len() > 0 && parts[parts.len() - 1] != "" -> parts[parts.len() - 1] else -> path
@@ -184,7 +200,7 @@ fn sema_call_debug_site(call: Call, environment: SemaScopeEnvironment) -> String
 fn sema_call_debug_expression_text(text: String) -> String Never! {
     lines := [String]{}
     loop line in text.split("\n").to_list() {
-        trimmed :: ~line.trim()
+        trimmed :: line.trim().copy()
         if trimmed != "" -> &lines.push(trimmed)
     }
     lines.join(" ")
@@ -195,16 +211,16 @@ fn sema_call_debug_expression_text(text: String) -> String Never! {
 // `core.term.eprint` row, and yields the value unchanged. The trace adds no
 // effect. A shipped artifact or a release-profile build rejects it (E3405)
 // with an edit that keeps the traced expression exactly as written.
-fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
-    if sema_module_no_prelude(environment) -> return SemaDirectSpecialCheck{handled: false, value: None}
+fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.args.len() != 1 || call.args[0].label != None || call.args[0].spread {
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_error("E0104", call.name_span, "`debug` takes exactly one value", "`debug(value)` shows one value and returns it unchanged", "write `debug(value)`"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    checked :: sema_check_expression(call.args[0].expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    checked :: sema_check_expression(call.args[0].expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
     value_span :: expr_span(call.args[0].expr)
-    if !sema_call_debug_traceable(checked.ty, environment) {
+    if !sema_call_debug_traceable(checked.ty, environment, program) {
         &diagnostics.push(sema_error("E0112", value_span, "`debug` can't show {sema_type_show(checked.ty)}", "`debug` writes the value's Debug form", "implement `Debug`, or trace a debuggable part of the value"))
     }
     authored := String?{None}
@@ -216,8 +232,8 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
             break
         }
     }
-    site :: sema_call_debug_site(call, environment)
-    if environment.registration_graph == .Val(graph) && sema_build_facts_reject_debug_traces(graph.build_facts) {
+    site :: sema_call_debug_site(call, environment, program)
+    if program.registration_graph == .Val(graph) && sema_build_facts_reject_debug_traces(graph.build_facts) {
         diagnostic :: sema_error("E3405", call.name_span, "A `debug` trace is left at `{site}`.", "`debug(value)` is a development trace: it prints while you run, test, or interpret a program and adds no effect, so a shipped artifact (`jet build`) or a release-profile build must not contain it.", "Remove the `debug(…)` wrapper and keep the expression; `jet fix` applies this edit.")
         if unwrap == .Val(edit) -> &diagnostics.push(diagnostic_with_edit(diagnostic, edit)) else -> &diagnostics.push(diagnostic)
     }
@@ -225,13 +241,13 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     traced := checked
     if !sema_call_is_scalar(checked.ty) {
         if checked.kind == {
-            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_expr(checked.ty, TExprKind.Clone{value: checked, fact: MIRCopyFact.Materialize}, checked.span)
+            .Local(_) | .Field(_, _) | .Index(_, _, _, _, _, _) -> traced = sema_tir_node(checked.ty, TExprKind.Clone{value: checked, fact: MIRCopyFact.Materialize}, checked.span)
             else -> {}
         }
     }
     local :: tir_generated_local("__jet_debug_trace_{call.name_span.start}", call.name_span)
-    read :: sema_tir_expr(checked.ty, TExprKind.Local{local: local}, call.name_span)
-    line :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
+    read :: sema_tir_node(checked.ty, TExprKind.Local{local: local}, call.name_span)
+    line :: sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "[debug] {site} {expression_text} = "}, TStrPart.Interpolation{value: read, format: TStrFormat.Debug}}}, call.name_span)
     record :: core_call("core.term", "eprint") ?? {
         &diagnostics.push(sema_error("E0906", call.name_span, "the canonical `core.term.eprint` route for `debug` is unavailable", "the development trace writes through the registered Core stderr row", "restore the registered `core.term.eprint` route"))
         return SemaDirectSpecialCheck{handled: true, value: None}
@@ -240,22 +256,22 @@ fn sema_call_check_special_debug(call: Call, expected: Type?, environment: SemaS
     // The trace adds no effect: its stderr write is a known-pure call site, so
     // pure (`-[]>`) and memoized functions keep their rows (Rust sema records
     // no effect for `debug`).
-    if !sema_effect_record_intrinsic_effects(environment, &scopes, &context, "debug", call.name_span, [EffectRowEntry]{}, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    write :: sema_tir_expr(unit, TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, data_plan: None, fallibility: TFailureCarrier.Infallible}, call.name_span)
+    if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "debug", call.name_span, [EffectRowEntry]{}, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    write :: sema_tir_node(unit, TExprKind.CoreCall{record: record, args: [TExpr]{line}, source_span: call.name_span, type_args: [Type]{}, widen_to_vec: [Bool]{false}, data_plan: None, fallibility: TFailureCarrier.Infallible}, call.name_span)
     body :: [TStmt]{
         TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: traced, gc_promotion: None, gc_transferred: false, span: call.name_span},
         TStmt.ExprStmt{value: write, span: call.name_span},
         TStmt.ExprStmt{value: read, span: call.name_span},
     }
-    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(checked.ty, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
-pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
-        "wrapping" | "saturating" | "checked" -> sema_call_check_special_overflow(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        "approx" -> sema_call_check_special_approx(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        "debug" -> sema_call_check_special_debug(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        "wrapping" | "saturating" | "checked" -> sema_call_check_special_overflow(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "approx" -> sema_call_check_special_approx(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "debug" -> sema_call_check_special_debug(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
 }
@@ -266,22 +282,158 @@ pub fn sema_call_try_knowledge_builtin(call: Call, expected: Type?, environment:
 // (CheckerInfer/calls/direct_calls.rs, CheckerItems.rs check_*_call). A user
 // function or local of the same name shadows every row. `#NoPrelude`
 // print/input refusal (E0429) runs before this dispatcher.
-pub fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_ambient_prelude(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if !sema_call_gate_is_unshadowed(call.name, scopes) -> return SemaDirectSpecialCheck{handled: false, value: None}
     if call.name == {
-        "print" -> sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        "input" -> sema_call_check_ambient_input(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        "panic" -> sema_call_check_ambient_panic(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        "assert" -> sema_call_check_ambient_assert(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        "assert_eq" -> sema_call_check_ambient_assert_eq(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        else -> SemaDirectSpecialCheck{handled: false, value: None}
+        "channel" -> sema_call_check_channel(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "freeze" -> sema_call_check_freeze(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "print" -> sema_call_check_ambient_print(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "input" -> sema_call_check_ambient_input(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "panic" -> sema_call_check_ambient_panic(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "assert" -> sema_call_check_ambient_assert(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "assert_eq" -> sema_call_check_ambient_assert_eq(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        // The readable prelude's `pub use core.term.[eprint]` (Rust opens it
+        // as a `core.term` item import unless the file is `#NoPrelude`).
+        "eprint" -> {
+            if sema_module_no_prelude(environment, program) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            if core_call("core.term", "eprint") == .Val(record) -> return sema_call_check_term_eprint(record, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            // A source-owned `core.term.eprint` is called as the item import
+            // the prelude opens: its checked source declaration is the target.
+            module_identity :: sema_call_core_module_identity(environment, program, "core.term") ?? return SemaDirectSpecialCheck{handled: false, value: None}
+            target :: sema_call_core_source_target(environment, program, module_identity, "eprint", call.type_args, call.name_span, false, &diagnostics) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+            scopes.ownership_call_depth += 1
+            value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            scopes.ownership_call_depth -= 1
+            SemaDirectSpecialCheck{handled: true, value: value}
+        }
+        "Decimal" -> sema_call_check_value_constructor(call, "Decimal", [Type]{Type.String}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "Complex" -> sema_call_check_value_constructor(call, "Complex", [Type]{Type.Float, Type.Float}, false, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        else -> {
+            if !sema_expr_is_math_type_name(call.name) -> return SemaDirectSpecialCheck{handled: false, value: None}
+            components := [Type]{}
+            loop _ in 0..<sema_call_math_arity(call.name) -> &components.push(sema_call_math_scalar_type(call.name))
+            sema_call_check_value_constructor(call, call.name, components, true, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
     }
+}
+
+// D-SHAPE-RESOURCE2=A (Rust `check_call_inner`): `close(^value)` is ambient
+// sugar for the sole nominal `Close.close(^self)` protocol, ahead of every
+// declared function. It takes exactly one resource through the move marker,
+// whose type must implement `Close`, and produces nothing.
+fn sema_call_check_ambient_close(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    if call.args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", call.name_span, "`close` takes exactly one resource, got {call.args.len()}", "`close` consumes one value through its nominal `Close` implementation and the move marker `^`", "write `close(^resource)` with the move marker `^`"))
+        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return None
+    }
+    argument :: call.args[0]
+    value :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    if argument.convention != AccessConvention.Move {
+        &diagnostics.push(sema_error("E0201", argument.span, "`close` takes ownership of its resource", "`Close.close(^self)` is consuming through the move marker `^`, so cleanup runs on exactly one owner", "write `close(^resource)` with the move marker `^`"))
+        return None
+    }
+    if program.registration_graph == .Val(graph) {
+        satisfies_close :: sema_type_bound_satisfied_with_generics(graph, value.ty, "Close", environment.module_identity, context.generic_params) ?? return None
+        if !satisfies_close {
+            shown :: type_name(value.ty)
+            &diagnostics.push(sema_error("E0905", expr_span(argument.expr), "`{shown}` isn't `Close`", "`{shown}` would need to implement `Close` before it can be used here", "write `impl {shown}: Close {{ … }}` with every required method"))
+            return None
+        }
+    }
+    if !sema_stmt_move_direct(argument.expr, &state, scopes, "`close`", &diagnostics) -> return None
+    Val(sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Close{value: value}, call.name_span))
+}
+
+// D-SIMD2 / D-LINALG1: the scalar slots of a built-in math value type's
+// positional constructor (Rust `math_arity`): a lane type's lane count, a
+// vector's dimension, a square matrix's N*N column-major components.
+fn sema_call_math_arity(name: String) -> Int Never! {
+    if name == {
+        "Vec2" -> return 2
+        "Vec3" -> return 3
+        "Vec4" -> return 4
+        "Mat3" -> return 9
+        "Mat4" -> return 16
+        else -> {}
+    }
+    lanes :: name.split("x").to_list()
+    if lanes.len() != 2 -> return 0
+    Int.parse(lanes[1]) ?? 0
+}
+
+// Rust `math_scalar_ty`: a lane type's component width; linear-algebra types
+// are Float.
+fn sema_call_math_scalar_type(name: String) -> Type Never! {
+    if name.starts_with("F32x") -> return Type.Float32
+    if name.starts_with("I8x") -> return Type.IntN{signed: true, bits: 8}
+    if name.starts_with("I16x") -> return Type.IntN{signed: true, bits: 16}
+    if name.starts_with("I32x") -> return Type.IntN{signed: true, bits: 32}
+    if name.starts_with("I64x") -> return Type.IntN{signed: true, bits: 64}
+    if name.starts_with("U8x") -> return Type.IntN{signed: false, bits: 8}
+    if name.starts_with("U16x") -> return Type.IntN{signed: false, bits: 16}
+    if name.starts_with("U32x") -> return Type.IntN{signed: false, bits: 32}
+    if name.starts_with("U64x") -> return Type.IntN{signed: false, bits: 64}
+    Type.Float
+}
+
+// `Decimal("12.34")` (D-DECIMAL1), `Complex(re, im)` (D-TYPE2-IMAG1=A) and
+// `Vec3(x, y, z)`-style math constructors (D-SIMD2 / D-LINALG1): each argument
+// is checked against its component type in order and the call becomes the
+// type's precise or math builtin, as Rust TIR lowering builds it.
+fn sema_call_check_value_constructor(call: Call, type_name_value: String, components: [Type], math: Bool, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() != components.len() {
+        what := if {
+            type_name_value == "Decimal" -> "`Decimal` takes exactly one argument, got {call.args.len()}"
+            type_name_value == "Complex" -> "`Complex` takes exactly two arguments, got {call.args.len()}"
+            else -> "`{type_name_value}` takes exactly {components.len()} component{if components.len() == 1 -> "" else -> "s"}, got {call.args.len()}"
+        }
+        why := if {
+            type_name_value == "Decimal" -> "`Decimal` parses an exact base-10 decimal from a `String`"
+            type_name_value == "Complex" -> "`Complex` takes the real part first and the imaginary part second"
+            else -> "`{type_name_value}` is a built-in {if type_name_value.starts_with("Vec") || type_name_value.starts_with("Mat") -> "linear-algebra" else -> "SIMD lane"} type — construct it from its {components.len()} components"
+        }
+        fix := if {
+            type_name_value == "Decimal" -> "write `Decimal(\"12.34\")`"
+            type_name_value == "Complex" -> "write `Complex(real, imaginary)`"
+            else -> {
+                slots := [String]{}
+                loop _ in components -> &slots.push("…")
+                "write `{type_name_value}({slots.join(", ")})`"
+            }
+        }
+        &diagnostics.push(sema_error("E0103", call.name_span, what, why, fix))
+        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    values := [TExpr]{}
+    complete := true
+    loop index in 0..<components.len() {
+        component :: components[index]
+        checked :: sema_check_expression(call.args[index].expr, Val(component), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+            complete = false
+            next
+        }
+        coerced :: sema_expr_expected(checked, Val(component), environment, program, &diagnostics) ?? {
+            complete = false
+            next
+        }
+        &values.push(coerced)
+    }
+    if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
+    result_ty :: Type.Named{name: type_name_value}
+    kind :: if {
+        math -> TExprKind.MathBuiltin{type_name: type_name_value, function: "new", args: values}
+        type_name_value == "Decimal" -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_str", args: values}
+        else -> TExprKind.PreciseBuiltin{type_name: type_name_value, function: "from_parts", args: values}
+    }
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected_owned(sema_tir_expr(result_ty, kind, call.name_span), expected, environment, program, &diagnostics)}
 }
 
 // An ambient row's IO effect, recorded as its call-site fact so the effect
 // solve sees a known call instead of an unresolved one.
-fn sema_call_ambient_record_io(api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
-    sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, SemaCallFacts{
+fn sema_call_ambient_record_io(api: String, result_type: Type, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+    sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, SemaCallFacts{
         return_type: result_type,
         failure_carrier: sema_call_failure_carrier(Val(result_type)),
         effect_bound: Val([EffectRowEntry]{EffectRowEntry{name: "IO", span: span}}),
@@ -291,11 +443,11 @@ fn sema_call_ambient_record_io(api: String, result_type: Type, span: Span, envir
 }
 
 // Rust `is_printable || is_displayable`, plus Unit and Never.
-fn sema_call_ambient_printable(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_call_ambient_printable(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == .Named(name) {
         if name == "Unit" || name == "Never" -> return true
     }
-    sema_expression_typed_literal_printable(ty, environment) || sema_expression_displayable(ty, environment)
+    sema_expression_typed_literal_printable(ty, environment, program) || sema_expression_displayable(ty, environment, program)
 }
 
 fn sema_call_ambient_print_refusal(ty: Type, span: Span) -> Diagnostic Never! {
@@ -319,43 +471,44 @@ fn sema_call_ambient_print_refusal(ty: Type, span: Span) -> Diagnostic Never! {
 
 // Variadic `print`: every argument is checked on its own and prints its own
 // line, one `Print` per argument in order (Rust `print_values`).
-fn sema_call_check_ambient_print(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_ambient_print(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() == 0 {
         &diagnostics.push(sema_error("E0103", call.name_span, "`print` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. print(\"hello\")"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
     values := [TExpr]{}
     complete := true
-    loop argument in call.args {
-        checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+    loop argument_index in 0..<call.args.len() {
+        checked :: sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
             complete = false
             next
         }
-        if !sema_call_ambient_printable(checked.ty, environment) {
-            &diagnostics.push(sema_call_ambient_print_refusal(checked.ty, expr_span(argument.expr)))
+        if !sema_call_ambient_printable(checked.ty, environment, program) {
+            &diagnostics.push(sema_call_ambient_print_refusal(checked.ty, expr_span(call.args[argument_index].expr)))
             complete = false
             next
         }
-        &values.push(checked)
+        formatted :: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        &values.push(formatted)
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     unit :: Type.Named{name: "Unit"}
-    if !sema_call_ambient_record_io("print", unit, call.name_span, environment, &scopes, &context, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    if values.len() == 1 -> return SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(unit, TExprKind.Print{value: values[0]}, call.name_span))}
+    if !sema_call_ambient_record_io("print", unit, call.name_span, environment, program, &scopes, &context, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    if values.len() == 1 -> return SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(unit, TExprKind.Print{value: values[0]}, call.name_span))}
     body := [TStmt]{}
     prints := [TStmt]{}
     loop index in 0..<values.len() {
         local :: tir_generated_local("__jet_print_arg_{call.name_span.start}_{index}", call.name_span)
         &body.push(TStmt.Let{local: local, let_ty: TLetTy.Inferred, init: values[index], gc_promotion: None, gc_transferred: false, span: call.name_span})
-        read :: sema_tir_expr(values[index].ty, TExprKind.Local{local: local}, call.name_span)
-        &prints.push(TStmt.ExprStmt{value: sema_tir_expr(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span})
+        read :: sema_tir_node(values[index].ty, TExprKind.Local{local: local}, call.name_span)
+        &prints.push(TStmt.ExprStmt{value: sema_tir_node(unit, TExprKind.Print{value: read}, call.name_span), span: call.name_span})
     }
     loop statement in prints -> &body.push(statement)
-    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_expr(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
+    SemaDirectSpecialCheck{handled: true, value: Val(sema_tir_node(unit, TExprKind.InlineBlock{body: body}, call.name_span))}
 }
 
 // `input(prompt?)` reads one line: `Result<String, IOError>`, like `io.input`.
-fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := true
     if call.args.len() > 1 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`input` expects 1 argument, got {call.args.len()}", "every argument must match a standard library function parameter", "check the call to `input`"))
@@ -363,15 +516,15 @@ fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaS
     }
     prompt := TExpr?{None}
     if call.args.len() > 0 {
-        checked := sema_check_expression(call.args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked := sema_check_expression(call.args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if checked == None -> complete = false
         prompt = checked
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     result :: Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}
-    if !sema_call_ambient_record_io("input", result, call.name_span, environment, &scopes, &context, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    value := sema_tir_expr(result, TExprKind.AmbientInput{prompt: prompt}, call.name_span)
-    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, &diagnostics)}
+    if !sema_call_ambient_record_io("input", result, call.name_span, environment, program, &scopes, &context, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    value := sema_tir_node(result, TExprKind.AmbientInput{prompt: prompt}, call.name_span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 
 // Rust core_call.rs `("core.term", "eprint")` / `("core.term", "input")`:
@@ -379,16 +532,16 @@ fn sema_call_check_ambient_input(call: Call, expected: Type?, environment: SemaS
 // printable argument joins, one per line, into the row's single stderr write
 // (Rust TIR `join_print_args`); `input` takes an optional String prompt and
 // returns `Result<String, IOError>`.
-fn sema_call_try_term_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_try_term_core_call(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if record.module_name != "core.term" -> return SemaDirectSpecialCheck{handled: false, value: None}
     if record.member == {
-        "eprint" -> sema_call_check_term_eprint(record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        "input" -> sema_call_check_term_input(record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        "eprint" -> sema_call_check_term_eprint(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        "input" -> sema_call_check_term_input(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         else -> SemaDirectSpecialCheck{handled: false, value: None}
     }
 }
 
-fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := true
     if args.len() == 0 {
         &diagnostics.push(sema_error("E0103", span, "`eprint` needs at least one thing to print", "printing nothing isn't meaningful", "e.g. io.eprint(\"warning\")"))
@@ -397,25 +550,26 @@ fn sema_call_check_term_eprint(record: CoreCallRecord, args: [CallArg], span: Sp
     unit :: Type.Named{name: "Unit"}
     parts := [TStrPart]{}
     loop argument in args {
-        checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+        checked :: sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
             complete = false
             next
         }
-        if !sema_expression_typed_literal_printable(checked.ty, environment) && checked.ty != unit {
+        if !sema_expression_typed_literal_printable(checked.ty, environment, program) && checked.ty != unit {
             &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "{sema_type_show(checked.ty)} can't be printed yet", "`io.eprint` prints the same values as `print`, but writes to stderr", "print one of its fields, or make it a printable type"))
             complete = false
             next
         }
         if parts.len() > 0 -> &parts.push(TStrPart.Literal{text: "\n"})
-        &parts.push(TStrPart.Interpolation{value: checked, format: TStrFormat.Display})
+        formatted :: if checked.ty == (Type.Apply{name: "Measurement", args: [Type]{Type.Float}}) -> sema_expression_measurement_source_call("__measurement_show", [TExpr]{checked}, Type.String, checked.span, environment, program) ?? return SemaDirectSpecialCheck{handled: true, value: None} else -> checked
+        &parts.push(TStrPart.Interpolation{value: formatted, format: TStrFormat.Display})
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
-    if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
-    joined :: sema_tir_expr(Type.String, TExprKind.StrLit{parts: parts}, span)
-    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, None, unit, TFailureCarrier.Infallible, expected, environment, &diagnostics)}
+    if !sema_call_core_record_effects(record, span, [Type]{}, unit, TFailureCarrier.Infallible, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    joined :: sema_tir_node(Type.String, TExprKind.StrLit{parts: parts}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_call_core_tir(record, [TExpr]{joined}, span, [Type]{}, [Bool]{false}, None, unit, TFailureCarrier.Infallible, expected, environment, program, &diagnostics)}
 }
 
-fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := true
     if args.len() > 1 {
         &diagnostics.push(sema_error("E0104", span, "`input` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `input`"))
@@ -423,31 +577,31 @@ fn sema_call_check_term_input(record: CoreCallRecord, args: [CallArg], span: Spa
     }
     values := [TExpr]{}
     if args.len() > 0 {
-        checked := sema_check_expression(args[0].expr, Val(Type.String), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked := sema_check_expression(args[0].expr, Val(Type.String), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if checked == .Val(value) -> &values.push(value) else -> complete = false
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     result :: Type.Result{ok: Type.String, err: Type.Named{name: "IOError"}}
     failure :: sema_call_failure_carrier(Val(result))
-    if !sema_call_core_record_effects(record, span, [Type]{}, result, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
+    if !sema_call_core_record_effects(record, span, [Type]{}, result, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, program, &diagnostics) -> return SemaDirectSpecialCheck{handled: true, value: None}
     widen_to_vec :: loop _ in values -> false
-    value :: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, None, result, failure, None, environment, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, context, &diagnostics)}
+    value :: sema_call_core_tir(record, values, span, [Type]{}, widen_to_vec, None, result, failure, None, environment, program, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    SemaDirectSpecialCheck{handled: true, value: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics)}
 }
 
 // `panic(message)` stops with one String message; the stop is a `Never`
 // value and its `__jet_panic__` reachability edge comes from the TIR walk.
-fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := call.args.len() == 1
     if !complete -> &diagnostics.push(sema_error("E0103", call.name_span, "`panic` needs exactly one message", "a panic report needs something to show the user", "e.g. panic(\"something went wrong\")"))
     message := TExpr?{None}
-    loop argument in call.args {
-        checked :: sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
+    loop argument_index in 0..<call.args.len() {
+        checked :: sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? {
             complete = false
             next
         }
         if checked.ty != Type.String {
-            &diagnostics.push(sema_error("E0112", expr_span(argument.expr), "`panic` needs text, but this is {sema_type_show(checked.ty)}", "the panic message is shown to the user as text", "put the message in quotes"))
+            &diagnostics.push(sema_error("E0112", expr_span(call.args[argument_index].expr), "`panic` needs text, but this is {sema_type_show(checked.ty)}", "the panic message is shown to the user as text", "put the message in quotes"))
             complete = false
             next
         }
@@ -455,18 +609,18 @@ fn sema_call_check_ambient_panic(call: Call, environment: SemaScopeEnvironment, 
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     text :: message ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    location := sema_expression_panic_location(environment, call.name_span)
-    stop := sema_tir_expr(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: text}, location: location, always_stops: true}, call.name_span)
+    location := sema_expression_panic_location(environment, program, scopes, call.name_span)
+    stop := sema_tir_node(Type.Named{name: "Never"}, TExprKind.RequireStop{kind: TRequireKind.Panic{msg: text}, location: location, always_stops: true}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
 // `assert(condition)` / `assert(condition, message)`.
-fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     complete := call.args.len() == 1 || call.args.len() == 2
     if !complete -> &diagnostics.push(sema_error("E0103", call.name_span, "`assert` needs one condition, or a condition and a message", "assert checks a yes/no condition and stops when it's false", "e.g. assert(x > 0) or assert(x > 0, \"x must be positive\")"))
     condition := TExpr?{None}
     if call.args.len() > 0 {
-        checked := sema_check_expression(call.args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked := sema_check_expression(call.args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if checked == .Val(value) {
             if value.ty != Type.Bool {
                 &diagnostics.push(sema_error("E0110", expr_span(call.args[0].expr), "`assert` needs {sema_type_show(Type.Bool)}, but this is {sema_type_show(value.ty)}", "the condition must be true or false", "compare values first, e.g. `x > 0`"))
@@ -479,7 +633,7 @@ fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment,
     }
     message := TExpr?{None}
     if call.args.len() > 1 {
-        checked := sema_check_expression(call.args[1].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        checked := sema_check_expression(call.args[1].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if checked == .Val(value) {
             if value.ty != Type.String {
                 &diagnostics.push(sema_error("E0112", expr_span(call.args[1].expr), "`assert` message must be text, but this is {sema_type_show(value.ty)}", "the optional message is shown when the condition is false", "put the message in quotes"))
@@ -492,107 +646,147 @@ fn sema_call_check_ambient_assert(call: Call, environment: SemaScopeEnvironment,
     }
     if !complete -> return SemaDirectSpecialCheck{handled: true, value: None}
     checked_condition :: condition ?? return SemaDirectSpecialCheck{handled: true, value: None}
-    location := sema_expression_panic_location(environment, call.name_span)
-    stop := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.Require{cond: checked_condition, msg: message}, location: location, always_stops: false}, call.name_span)
+    location := sema_expression_panic_location(environment, program, scopes, call.name_span)
+    stop := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.Require{cond: checked_condition, msg: message}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
 }
 
 // `assert_eq(got, expected)`: both sides one Equatable type; the right side
 // takes the left's type as its expected type, as `==` does.
-fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+fn sema_call_check_ambient_assert_eq(call: Call, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
     if call.args.len() != 2 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`assert_eq` needs exactly two values to compare", "assert_eq checks that two values are equal", "e.g. assert_eq(got, expected)"))
-        loop argument in call.args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    left := sema_check_expression(call.args[0].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    left := sema_check_expression(call.args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     right_expected := Type?{None}
     if left == .Val(value) -> right_expected = Val(value.ty)
-    right := sema_check_expression(call.args[1].expr, right_expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    right := sema_check_expression(call.args[1].expr, right_expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     left_value :: left ?? return SemaDirectSpecialCheck{handled: true, value: None}
     right_value :: right ?? return SemaDirectSpecialCheck{handled: true, value: None}
     if left_value.ty != right_value.ty {
         &diagnostics.push(sema_error("E0108", call.name_span, "`assert_eq` compared {sema_type_show(left_value.ty)} and {sema_type_show(right_value.ty)}, which don't match", "both sides must be the same type to compare them", "convert one side, or compare fields that have the same type"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    if !sema_type_equatable(environment, left_value.ty) {
+    if !sema_type_equatable(environment, program, left_value.ty) {
         &diagnostics.push(sema_error("E0312", call.name_span, "`assert_eq` can't compare values of type `{sema_type_show(left_value.ty)}`", "this type doesn't support `==`", "compare fields individually, or use a different check"))
         return SemaDirectSpecialCheck{handled: true, value: None}
     }
-    location := sema_expression_panic_location(environment, call.name_span)
-    stop := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
+    location := sema_expression_panic_location(environment, program, scopes, call.name_span)
+    stop := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.RequireStop{kind: TRequireKind.RequireEq{left: left_value, right: right_value}, location: location, always_stops: false}, call.name_span)
     SemaDirectSpecialCheck{handled: true, value: Val(stop)}
+}
+
+// Rust core_call.rs `("core.mem.scope", "guard")` (D-DEFER1 option B): the
+// compiler-owned guard has no registry row. Its one zero-parameter cleanup
+// lambda becomes the `ScopeGuard` whose scope-end drop runs it.
+fn sema_call_try_scope_guard(module_name: String, member: String, alias: String, alias_span: Span, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if module_name != "core.mem.scope" || member != "guard" -> return SemaDirectSpecialCheck{handled: false, value: None}
+    imported :: sema_call_core_import_target(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    if !sema_call_core_record_import_reference(environment, program, scopes, imported, alias_span, &context) -> return SemaDirectSpecialCheck{handled: false, value: None}
+    if args.len() != 1 {
+        &diagnostics.push(sema_error("E0104", span, "`guard` expects 1 argument, got {args.len()}", "every argument must match a standard library function parameter", "check the call to `guard`"))
+        loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    callback_type :: Type.Fn{params: [Type]{}, ret: Val(Type.Named{name: "Unit"}), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
+    callback :: sema_check_expression(args[0].expr, Val(callback_type), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    cleanup :: if callback.kind == {.Lambda(value) -> Val(value) else -> None} ?? {
+        &diagnostics.push(sema_error("E0112", expr_span(args[0].expr), "`scope.guard` needs a lambda, not {sema_type_show(callback.ty)}", "a scope guard runs a cleanup lambda when the binding goes out of scope", "write `scope.guard(() -> {{ cleanup_code }})`"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    arity :: cleanup.param_types.len()
+    if arity != 0 {
+        &diagnostics.push(sema_error("E0104", expr_span(args[0].expr), "`scope.guard` needs a zero-parameter lambda, got {arity} parameter{if arity == 1 -> "" else -> "s"}", "the guard body takes no arguments — it captures what it needs via closure", "write `scope.guard(() -> {{ cleanup_code }})` with no parameters"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    value :: sema_tir_node(Type.Named{name: "ScopeGuard"}, TExprKind.CoreClosureCall{kind: TCoreClosureKind.Guard{executable: cleanup}}, span)
+    SemaDirectSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
 }
 // Core registry rows are selected by the caller's canonical route.  These
 // source-owned projections run before the generic fixed-row producer; an
 // unhandled projection deliberately leaves the row for that producer.
-pub fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    // The compiler query checker has a source-owned lowerer only for the
-    // compiler API.  Build graph rows stay on the fixed Core path until their
-    // caller-approved lowering exists; no runtime-shaped fallback is invented.
-    if record.module_name == "core.compiler" && sema_compiler_services_call_contract(record.module_name, record.member) != None {
-        compiler_allowed := scopes.comptime_execution_depth > 0
-        check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+fn sema_call_try_core_direct_record(record: CoreCallRecord, args: [CallArg], type_args: [Type], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+    // Both compiler facts and active build-plan graphs use the checked
+    // compile-time service path. Receipt diff remains ordinary Core source.
+    if (record.module_name == "core.compiler" || (record.module_name == "core.build" && record.member == "graph")) && sema_compiler_services_call_contract(record.module_name, record.member) != None {
+        compiler_allowed := scopes.comptime_execution_depth > 0 || environment.function_name == "build"
+        check := sema_compiler_services_check_call(record.module_name, record.member, args, span, compiler_allowed, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if !check.recognized -> return SemaDirectSpecialCheck{handled: true, value: None}
         if !check.arguments_complete -> return SemaDirectSpecialCheck{handled: true, value: None}
-        value := sema_compiler_services_lower_core_call(check, span, expected, environment, &scopes, &context, &diagnostics)
+        value := sema_compiler_services_lower_core_call(check, span, expected, environment, program, &scopes, &context, &diagnostics)
         return SemaDirectSpecialCheck{handled: true, value: value}
     }
 
-    term := sema_call_try_term_core_call(record, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    term := sema_call_try_term_core_call(record, args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if term.handled -> return term
 
-    models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    models := sema_call_try_compute_models_core_call(record, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if models.handled -> return SemaDirectSpecialCheck{handled: true, value: models.value}
 
-    reactive := sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    reactive := sema_call_try_reactive_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if reactive.handled -> return reactive
 
-    data := sema_call_try_data_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    data := sema_call_try_data_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if data.handled -> return data
 
-    http := sema_call_try_http_core_call(record, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    http := sema_call_try_http_core_call(record, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if http.handled -> return http
 
-    service := sema_call_try_service_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    service := sema_call_try_service_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if service.handled -> return service
 
-    ui := sema_call_try_ui_core_call(record.module_name, record.member, args, type_args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    ui := sema_call_try_ui_core_call(record.module_name, record.member, args, type_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if ui.handled -> return ui
 
     SemaDirectSpecialCheck{handled: false, value: None}
 }
-pub fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
-    if !call.name.contains(".") -> return SemaDirectSpecialCheck{handled: false, value: None}
-    parts := call.name.split(".").to_list()
-    if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
-    alias := parts[0]
-    member := parts[1]
-    module_name :: sema_call_core_import_module(environment, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
-    if sema_call_core_variadic_print(environment, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+fn sema_call_try_core_direct_call(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck Never! {
+    alias := call.name
+    member := ""
+    if call.name.contains(".") {
+        parts := call.name.split(".").to_list()
+        if parts.len() != 2 -> return SemaDirectSpecialCheck{handled: false, value: None}
+        alias = parts[0]
+        member = parts[1]
+    } else {
+        // A Core host-leaf item import (`use core.files.[__host_path_join]`,
+        // registered as a Foreign symbol: no Jet declaration) is called by
+        // its local name; its member is the imported item.
+        visible :: sema_scope_resolve_index(scopes, call.name) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+        if scopes.bindings[visible].symbol.kind != SymbolKind.Foreign -> return SemaDirectSpecialCheck{handled: false, value: None}
+        imported :: sema_call_core_import_target(environment, program, call.name) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+        member = imported.item ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    }
+    module_name :: sema_call_core_import_module(environment, program, alias) ?? return SemaDirectSpecialCheck{handled: false, value: None}
+    guard := sema_call_try_scope_guard(module_name, member, alias, call.name_span, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if guard.handled -> return guard
+    if sema_call_core_variadic_print(environment, program, scopes, alias, member, call.args.len(), call.name_span, &context) -> return sema_call_check_ambient_print(call, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     expected_type_arg_count := 0
     if core_call_typed_signature(module_name, member, call.args.len()) == {
         .Val(signature) -> expected_type_arg_count = signature.type_parameters.len()
         .None -> {}
     }
     diagnostics_before := diagnostics.len()
-    route := sema_call_core_resolve_import_route(environment, scopes, alias, member, call.type_args, expected_type_arg_count, true, call.args.len(), call.name_span, call.name_span, &context, &diagnostics)
+    route := sema_call_core_resolve_import_route(environment, program, scopes, alias, member, call.type_args, expected_type_arg_count, true, call.args.len(), sema_call_core_first_is_move(call.args), call.name_span, call.name_span, &context, &diagnostics)
     route_value :: route ?? {
         if diagnostics.len() != diagnostics_before -> return SemaDirectSpecialCheck{handled: true, value: None}
         return SemaDirectSpecialCheck{handled: false, value: None}
     }
     if route_value == {
+        .SharedSite(lifetime) -> { return SemaDirectSpecialCheck{handled: true, value: sema_call_core_global_shared(lifetime, member, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)} }
         .Source(target) -> {
             scopes.ownership_call_depth += 1
-            value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            value := sema_call_core_check_source_owned(target, call.name, call.type_args, call.args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1
             return SemaDirectSpecialCheck{handled: true, value: value}
         }
         .Core(record) -> {
-            special := sema_call_try_core_direct_record(record, call.args, call.type_args, call.name_span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            special := sema_call_try_core_direct_record(record, call.args, call.type_args, call.name_span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             if special.handled -> return special
             scopes.ownership_call_depth += 1
-            value := sema_call_core_check_fixed(environment, module_name, member, call.type_args, call.args, call.name_span, expected, &scopes, &state, &tail_store, &context, &diagnostics)
+            value := sema_call_core_check_fixed(environment, program, module_name, member, call.type_args, call.args, call.name_span, expected, &scopes, &state, &tail_store, &context, &diagnostics)
             scopes.ownership_call_depth -= 1
             return SemaDirectSpecialCheck{handled: true, value: value}
         }
@@ -623,14 +817,14 @@ fn sema_call_default_err_result(expected: Type?) -> Type? {
 // This predicate is intentionally keyed to the dedicated compiler binding.
 // A source/imported function or type named Err remains the ordinary resolver
 // winner, matching native shadowing behavior.
-pub fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
+fn sema_call_default_err_candidate(call: Call, expected: Type?, scopes: SemaScopeTable) -> Bool Never! {
     if call.name != "Err" -> return false
     index :: sema_scope_resolve_index(scopes, call.name) ?? return false
     sema_scope_binding_is_compiler_builtin(scopes.bindings[index], "Err")
 }
 
-fn sema_call_default_err_invalid_argument(argument: CallArg, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+fn sema_call_default_err_invalid_argument(argument: CallArg, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
 fn sema_call_default_err_optional(value: Expr?, value_span: Span?, span: Span) -> Expr {
@@ -643,19 +837,19 @@ fn sema_call_default_err_optional(value: Expr?, value_span: Span?, span: Span) -
     }
 }
 
-fn sema_call_default_err_contextual_result(call: Call, result: Type, ok: Type, err: Type, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_default_err_contextual_result(call: Call, result: Type, ok: Type, err: Type, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if call.args.len() != 1 || call.args[0].label != None -> return None
-    payload :: sema_check_expression(call.args[0].expr, Val(err), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    compatible :: sema_call_type_assignable(err, payload.ty, environment) ?? return None
+    payload :: sema_check_expression(call.args[0].expr, Val(err), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    compatible :: sema_call_type_assignable(err, payload.ty, environment, program) ?? return None
     if !compatible {
         &diagnostics.push(sema_type_mismatch(err, payload.ty, expr_span(call.args[0].expr)))
         return None
     }
-    value :: sema_tir_expr(result, TExprKind.Err{value: payload}, sema_call_default_err_span(call))
-    sema_expr_expected(value, Val(result), environment, &diagnostics)
+    value :: sema_tir_node(result, TExprKind.Err{value: payload}, sema_call_default_err_span(call))
+    sema_expr_expected(value, Val(result), environment, program, &diagnostics)
 }
 
-fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     span :: sema_call_default_err_span(call)
     if call.args.len() < 1 || call.args.len() > 3 {
         &diagnostics.push(sema_error("E0104", call.name_span, "`Err` takes a message and optional `code:` and `cause:`, got {call.args.len()} arguments", "the default error stores one message, one optional code, and one optional cause", "write `Err(\"message\")`, then add `code:` or `cause:` labels if needed"))
@@ -682,7 +876,7 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
                 if {
                     code != None -> {
                         &diagnostics.push(sema_error("E0765", label_span, "`code:` is written twice in this call to `Err`", "each constructor label sets one field", "remove the second `code:` argument"))
-                        sema_call_default_err_invalid_argument(argument, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                        sema_call_default_err_invalid_argument(argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                     }
                     else -> {
                         code = Val(argument.expr)
@@ -694,7 +888,7 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
                 if {
                     cause != None -> {
                         &diagnostics.push(sema_error("E0765", label_span, "`cause:` is written twice in this call to `Err`", "each constructor label sets one field", "remove the second `cause:` argument"))
-                        sema_call_default_err_invalid_argument(argument, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                        sema_call_default_err_invalid_argument(argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
                     }
                     else -> {
                         cause = Val(argument.expr)
@@ -705,11 +899,11 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
             label_name != None -> {
                 label :: label_name ?? ""
                 &diagnostics.push(sema_error("E0764", label_span, "`Err` has no parameter labelled `{label}`", "the optional labels are `code:` and `cause:`", "use `code:` or `cause:`, or remove the argument"))
-                sema_call_default_err_invalid_argument(argument, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                sema_call_default_err_invalid_argument(argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             else -> {
                 &diagnostics.push(sema_error("E0769", argument.span, "optional `Err` arguments need labels", "`code:` and `cause:` can appear in either order only because their labels identify them", "add `code:` or `cause:` before this argument"))
-                sema_call_default_err_invalid_argument(argument, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                sema_call_default_err_invalid_argument(argument, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
         }
     }
@@ -720,24 +914,24 @@ fn sema_call_default_err_constructor(call: Call, expected: Type?, wrap_result: B
         ExprField{name: "cause", name_span: span, value: sema_call_default_err_optional(cause, cause_span, span)},
     }
     struct_expr :: Expr.StructLit{type_name: "Err", type_args: [Type]{}, import_ns: None, as_trait: None, fields: fields, inferred: false, span: span}
-    payload :: sema_check_expression(struct_expr, Val(Type.Named{name: "Err"}), environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    payload :: sema_check_expression(struct_expr, Val(Type.Named{name: "Err"}), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
     if !wrap_result -> return Val(payload)
     result_value :: sema_call_default_err_result(expected) ?? Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Err"}}
     return if result_value == {
         .Result(ok, err) -> {
-            compatible :: sema_call_type_assignable(err, payload.ty, environment) ?? return None
+            compatible :: sema_call_type_assignable(err, payload.ty, environment, program) ?? return None
             if !compatible {
                 &diagnostics.push(sema_type_mismatch(err, payload.ty, span))
                 return None
             }
-            value :: sema_tir_expr(Type.Result{ok: ok, err: err}, TExprKind.Err{value: payload}, span)
-            sema_expr_expected(value, expected, environment, &diagnostics)
+            value :: sema_tir_node(Type.Result{ok: ok, err: err}, TExprKind.Err{value: payload}, span)
+            sema_expr_expected(value, expected, environment, program, &diagnostics)
         }
         else -> Val(payload)
     }
 }
 
-pub fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_check_default_err(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     result :: sema_call_default_err_result(expected)
     if result == .Val(result_value) {
         // #3708: an `Err(...)` that builds a carrier is a failure source of
@@ -746,21 +940,21 @@ pub fn sema_call_check_default_err(call: Call, expected: Type?, environment: Sem
         &context.failure_edges.push("")
         if result_value == .Result(ok, err) {
             if err != (Type.Named{name: "Err"}) && call.args.len() == 1 && call.args[0].label == None {
-                return sema_call_default_err_contextual_result(call, result_value, ok, err, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+                return sema_call_default_err_contextual_result(call, result_value, ok, err, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             }
             // D-FAIL-INFER-UNION1=A: record what this `Err` sends down the
             // default route before the ordinary check below.
-            if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, &scopes, state, &tail_store, &context)
+            if err == (Type.Named{name: "Err"}) -> sema_failure_union_record_err(call, environment, program, &scopes, &state, &tail_store, &context)
         }
     }
     wrap :: result != None
-    value :: sema_call_default_err_constructor(call, expected, wrap, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
-    sema_expr_expected(value, expected, environment, &diagnostics)
+    value :: sema_call_default_err_constructor(call, expected, wrap, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+    sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
-fn sema_call_local_default_values(target: SemaCallDirectTarget, binding: SemaCallBinding, environment: SemaScopeEnvironment, scopes: &SemaScopeTable) -> [SemaCallDefaultValue]? {
+fn sema_call_local_default_values(target: SemaCallDirectTarget, binding: SemaCallBinding, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable) -> [SemaCallDefaultValue]? {
     if binding.default_refs.len() == 0 -> return Val([SemaCallDefaultValue]{})
-    declaration :: sema_scope_resolve_declaration(environment, target.symbol.id) ?? return None
+    declaration :: sema_scope_resolve_declaration(environment, program, target.symbol.id) ?? return None
     func :: if declaration == {
         .Func(value) -> value
         else -> {
@@ -783,8 +977,8 @@ fn sema_call_local_default_values(target: SemaCallDirectTarget, binding: SemaCal
 }
 
 struct SemaCallInferenceFacts {
-    pub parameter_types: [Type]
-    pub argument_types: [Type]
+    parameter_types: [Type]
+    argument_types: [Type]
 }
 
 fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {
@@ -796,7 +990,7 @@ fn sema_call_inference_needs_context(expr: Expr) -> Bool Never! {
     }
 }
 
-fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
+fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> SemaCallInferenceFacts Never! {
     parameter_types := [Type]{}
     argument_types := [Type]{}
     loop index in 0..<args.len() {
@@ -804,7 +998,7 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
         if slot >= 0 && slot < params.len() {
             if sema_call_argument_parameter_type(params[slot], args[index]) == .Val(required) && !sema_call_inference_needs_context(args[index].expr) {
                 probe_diagnostics := [Diagnostic]{}
-                value :: sema_probe_expression(args[index].expr, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics)
+                value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
                 if value == .Val(checked) {
                     &parameter_types.push(required)
                     &argument_types.push(checked.ty)
@@ -819,7 +1013,7 @@ fn sema_call_collect_inference_facts(params: [SemaCallParam], binding: SemaCallB
 // written as `fn(..) -> U E!` with the failure its body really has. The lambda
 // is probed on its own; a body that cannot fail, or one that cannot be typed
 // before the other type parameters are known, binds `E` to `Never`.
-fn sema_call_lambda_failure_facts(facts: &SemaCallInferenceFacts, generic_params: [SemaInferenceTypeParam], params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) Never! {
+fn sema_call_lambda_failure_facts(facts: &SemaCallInferenceFacts, generic_params: [SemaInferenceTypeParam], params: [SemaCallParam], binding: SemaCallBinding, args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) Never! {
     loop index in 0..<args.len() {
         slot :: if index < binding.slots.len() -> binding.slots[index] else -> -1
         if sema_call_inference_needs_context(args[index].expr) && slot >= 0 && slot < params.len() {
@@ -835,7 +1029,7 @@ fn sema_call_lambda_failure_facts(facts: &SemaCallInferenceFacts, generic_params
                                 if generic {
                                     failure := Type.Named{name: "Never"}
                                     probe_diagnostics := [Diagnostic]{}
-                                    value :: sema_probe_expression(args[index].expr, None, environment, &scopes, state, &tail_store, &context, &probe_diagnostics)
+                                    value :: sema_probe_expression(args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics)
                                     if value == .Val(checked) {
                                         if checked.ty == .Fn(_, lambda_ret, _, _, _, _) {
                                             if lambda_ret == .Val(lambda_value) {
@@ -855,19 +1049,19 @@ fn sema_call_lambda_failure_facts(facts: &SemaCallInferenceFacts, generic_params
     }
 }
 
-fn sema_call_direct_target_abi(target: SemaCallDirectTarget, environment: SemaScopeEnvironment) -> SemaRegistrationCallableABI? {
-    if environment.registration_graph == .Val(graph) {
+fn sema_call_direct_target_abi(target: SemaCallDirectTarget, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationCallableABI? {
+    if program.registration_graph == .Val(graph) {
         abi := sema_registration_callable_abi(graph, target.symbol.id)
         if abi != None -> return abi
     }
-    declaration :: sema_scope_resolve_declaration(environment, target.symbol.id) ?? return None
+    declaration :: sema_scope_resolve_declaration(environment, program, target.symbol.id) ?? return None
     if declaration == {
         .Func(func) -> Val(sema_registration_callable_abi_for_func(func))
         else -> None
     }
 }
 
-fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
     candidate := target
     params := sema_call_params_from_type(candidate.signature) ?? {
         &diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))
@@ -877,9 +1071,25 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     args := call.args
     binding := sema_call_bind_direct(call.name, candidate.signature, &args, call.name_span, &diagnostics) ?? return None
     if candidate.generic_params.len() > 0 && candidate.generic_substitutions.len() != candidate.generic_params.len() {
-        inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
-        sema_call_lambda_failure_facts(&inferred_facts, candidate.generic_params, params, binding, source_args, environment, &scopes, &state, &tail_store, &context)
-        inferred :: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, &scopes, call.name_span, &diagnostics) ?? return None
+        inferred_facts := sema_call_collect_inference_facts(params, binding, source_args, environment, program, &scopes, &state, &tail_store, &context)
+        sema_call_lambda_failure_facts(&inferred_facts, candidate.generic_params, params, binding, source_args, environment, program, &scopes, &state, &tail_store, &context)
+        if sema_call_http_source_json_target(candidate, environment, program) {
+            loop parameter in candidate.generic_params {
+                loop bound in parameter.bounds {
+                    if bound != "Encode" -> next
+                    loop index in 0..<inferred_facts.parameter_types.len() {
+                        if inferred_facts.parameter_types[index] == (Type.Named{name: parameter.name}) {
+                            body_type :: inferred_facts.argument_types[index]
+                            if !sema_serde_type_is_admissible(environment, program, body_type, SemaSerdeDirection.Encode) {
+                                sema_call_http_check_serde(SemaSerdeDirection.Encode, body_type, expr_span(source_args[index].expr), environment, program, &diagnostics)
+                                return None
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        inferred :: sema_call_infer_direct_target_from_types(candidate, inferred_facts.parameter_types, inferred_facts.argument_types, expected, environment, program, &scopes, call.name_span, &diagnostics) ?? return None
         candidate = inferred
         params = sema_call_params_from_type(candidate.signature) ?? {
             &diagnostics.push(sema_call_not_callable(call.name, candidate.signature, call.name_span))
@@ -893,7 +1103,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
     resolved_defaults := defaults
     if binding.default_refs.len() > 0 {
         if resolved_defaults.len() == 0 {
-            if environment.registration_graph == {
+            if program.registration_graph == {
                 .Val(graph) -> {
                     registered_defaults :: sema_call_registration_defaults(graph, binding) ?? {
                         &diagnostics.push(sema_error("E0906", call.name_span, "a default argument for this call could not be resolved", "registered callable defaults retain their graph identity and source location", "make the bound default available to Registration before checking this call"))
@@ -902,7 +1112,7 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
                     resolved_defaults = registered_defaults
                 }
                 else -> {
-                    local_defaults :: sema_call_local_default_values(candidate, binding, environment, &scopes) ?? {
+                    local_defaults :: sema_call_local_default_values(candidate, binding, environment, program, &scopes) ?? {
                         &diagnostics.push(sema_error("E0906", call.name_span, "a default argument for this call could not be resolved", "callable defaults retain their owning declaration and source identity", "make the owning declaration available to Registration before checking this call"))
                         return None
                     }
@@ -913,60 +1123,141 @@ fn sema_call_direct_checked_from_target(state: &SemaOwnershipState, target: Sema
         resolved :: sema_call_materialize_defaults(params, binding, &args, resolved_defaults, call.name_span, &diagnostics) ?? return None
         resolved_binding = resolved
     }
-    abi :: sema_call_direct_target_abi(candidate, environment)
-    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
+    abi :: sema_call_direct_target_abi(candidate, environment, program)
+    (lowered, pins) := sema_call_check_bound_arguments_owned(&state, call.name, params, abi, true, resolved_binding, &args, environment, program, &scopes, &tail_store, &context, call.name_span, &diagnostics) ?? return None
     result_type_raw :: sema_call_signature_return(candidate.signature) ?? return None
-    result_type :: sema_call_resolved_type(result_type_raw, environment)
+    result_type :: sema_call_resolved_type(result_type_raw, environment, program)
     contract_bindings := [TStmt]{}
     contract_nodes := [TContract]{}
     // The callee's declaration is copied only when it has `pre` clauses.
     contract_callee := Func?{None}
-    if sema_contract_function_has_pre(environment, candidate.symbol.id) -> contract_callee = sema_contract_function_for_symbol(environment, candidate.symbol.id)
+    if sema_contract_function_has_pre(environment, program, candidate.symbol.id) -> contract_callee = sema_contract_function_for_symbol(environment, program, candidate.symbol.id)
     if contract_callee == .Val(contract) {
-        slots :: loop source_index in 0..<resolved_binding.sources.len() -> sema_call_bound_slot(resolved_binding, resolved_binding.sources[source_index], args[source_index])
-        checked_contract :: sema_contract_check_call(contract, &lowered, slots, call.name_span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+        slots :: loop slot in 0..<params.len() -> slot
+        checked_contract :: sema_contract_check_call(contract, &lowered, slots, call.name_span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
         contract_bindings = checked_contract.bindings
         contract_nodes = checked_contract.contracts
     }
-    call_value :: sema_tir_expr(result_type, TExprKind.Call{callee: candidate.symbol.id, type_args: candidate.type_args, args: lowered}, call.name_span)
+    policy_diagnostic_count :: diagnostics.len()
+    policy_value :: sema_policy_direct_value(candidate, call.name_span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if sema_has_error_since(diagnostics, policy_diagnostic_count) -> return None
+    call_value :: if policy_value == .Val(callee) -> sema_tir_node(result_type, TExprKind.IndirectCall{callee: callee, type_args: candidate.type_args, args: lowered, signature: candidate.signature}, call.name_span) else -> sema_tir_node(result_type, TExprKind.Call{callee: candidate.symbol.id, type_args: candidate.type_args, args: lowered}, call.name_span)
     contracted :: if {
         contract_nodes.len() > 0 -> {
             wrapped := contract_bindings
             loop contract in contract_nodes -> &wrapped.push(TStmt.Contract{contract: contract})
             &wrapped.push(TStmt.ExprStmt{value: call_value, span: call.name_span})
-            sema_tir_expr(result_type, TExprKind.InlineBlock{body: wrapped}, call.name_span)
+            sema_tir_node(result_type, TExprKind.InlineBlock{body: wrapped}, call.name_span)
         }
         else -> call_value
     }
     value :: sema_call_with_binder_pins(^pins, ^contracted, call.name_span)
-    checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return None
+    checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return None
     facts :: sema_call_facts(candidate.signature, candidate.type_args, resolved_binding) ?? return None
     return_view_facts :: sema_call_return_view_facts(candidate.signature, None, args, resolved_binding, scopes, &state, call.name_span)
     Val(SemaCallChecked{value: checked, binding: resolved_binding, facts: facts, return_view_facts: return_view_facts})
 }
 
-pub fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
-    sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics)
+fn sema_call_check_direct_target_owned(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaCallChecked? {
+    sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics)
 }
 
-pub fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    checked :: sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
+fn sema_call_check_direct_target(state: &SemaOwnershipState, target: SemaCallDirectTarget, call: Call, defaults: [SemaCallDefaultValue], expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    checked :: sema_call_direct_checked_from_target(&state, target, call, defaults, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
     Val(checked.value)
 }
 
-pub fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    special :: sema_call_try_knowledge_builtin(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+fn sema_call_check_direct(state: &SemaOwnershipState, call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    // Rust direct_calls teaching forms precede ordinary name resolution,
+    // including a same-spelled lexical binding. Still infer every argument.
+    if call.name == "getenv" || call.name == "async" || call.name == "await" {
+        if call.name == "getenv" {
+            &diagnostics.push(sema_error("E0039", call.name_span, "`getenv` is written `env.get` in Jet", "environment access lives in the `core.sys` module", "import `core.sys as env` and call `env.get(name)`"))
+        } else {
+            &diagnostics.push(sema_error("E0040", call.name_span, "`{call.name}` is not in Jet; use the `task` keyword instead", "Jet uses blocking tasks and channels, not async/await — simpler and race-free", "write `task your_work()` or `task {{ … }}`"))
+        }
+        loop argument_index in 0..<call.args.len() {
+            _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        return None
+    }
+    if call.name == "measurement" && sema_scope_resolve_index(scopes, call.name) == None {
+        labeled :: call.args.len() == 2 && call.args[0].label == None && (if call.args[1].label == { .Val(label) -> label.name == "uncertainty" else -> false })
+        if !labeled {
+            loop argument_index in 0..<call.args.len() -> _ := sema_check_expression(call.args[argument_index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+            &diagnostics.push(sema_error("E0104", call.name_span, "`measurement` needs a value and labeled uncertainty", "a measured value enters the exactness plane at one explicit constructor", "write `measurement(value, uncertainty: standard_uncertainty)`"))
+            return None
+        }
+        values := [TExpr]{}
+        loop argument_index in 0..<call.args.len() {
+            value :: sema_check_expression(call.args[argument_index].expr, Val(Type.Float), environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return None
+            if !sema_ownership_check_call_receiver(&state, call.args[argument_index].expr, AccessConvention.Read, scopes, call.args[argument_index].span, &diagnostics) -> return None
+            &values.push(value)
+        }
+        result :: Type.Apply{name: "Measurement", args: [Type]{Type.Float}}
+        value :: sema_expression_measurement_source_call("__measurement_new", values, result, call.name_span, environment, program) ?? return None
+        return sema_expr_expected_owned(^value, expected, environment, program, &diagnostics)
+    }
+    // D-STRUCT-POLICY1=A (Rust check_call_inner `apply`): an unshadowed
+    // `apply(policy..., f)` wraps `f` in its user policy chain.
+    policy :: sema_policy_try_apply(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if policy.handled -> return policy.value
+    special :: sema_call_try_knowledge_builtin(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     if special.handled -> return special.value
     if sema_call_default_err_candidate(call, expected, scopes) {
-        return sema_call_check_default_err(call, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        return sema_call_check_default_err(call, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
-    target :: sema_call_resolve_direct(call.name, call.type_args, environment, &scopes, call.name_span, &diagnostics) ?? return None
-    checked :: sema_call_direct_checked_from_target(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, &scopes, &tail_store, &context, &diagnostics) ?? return None
+    target :: sema_call_resolve_direct(call.name, call.type_args, environment, program, &scopes, call.name_span, &diagnostics) ?? return None
+    checked :: sema_call_direct_checked_from_target(&state, target, call, [SemaCallDefaultValue]{}, expected, environment, program, &scopes, &tail_store, &context, &diagnostics) ?? return None
     if call.name == "assert_eq" && sema_call_gate_is_unshadowed(call.name, scopes) {
         if checked.value.kind == .Call(_, _, arguments) {
-            if !sema_comparability_check_assert_eq(arguments, call.name_span, environment, &diagnostics) -> return None
+            if !sema_comparability_check_assert_eq(arguments, call.name_span, environment, program, &diagnostics) -> return None
         }
     }
     Val(checked.value)
 }
 
+
+fn sema_call_check_freeze(call: Call, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaDirectSpecialCheck {
+    if call.args.len() != 1 {
+        sema_stream_handle_infer_args(call.args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        &diagnostics.push(sema_error("E0104", call.name_span, "`freeze` takes exactly one value, got {call.args.len()}", "`freeze(x)` creates one deeply immutable owned snapshot for a crossing", "write `freeze(value)` with exactly one value"))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    source := call.args[0].expr
+    previous_borrow := context.borrow_ctx
+    previous_string_view_read := context.allow_string_view_read
+    context.borrow_ctx = true
+    context.allow_string_view_read = true
+    checked_source := sema_check_expression(source, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    context.borrow_ctx = previous_borrow
+    context.allow_string_view_read = previous_string_view_read
+    checked :: checked_source ?? return SemaDirectSpecialCheck{handled: true, value: None}
+    string_view := sema_expr_copy_string_view(source, &scopes)
+    facts := sema_copy_classify(checked.ty, SemaCopyIntent.Clone, environment, program, context.generic_params, string_view)
+    problem := sema_ownership_crossing_problem(facts.target, SemaSendCrossing.FrozenSnapshot, true, environment, program, scopes, context)
+    reason := String?{None}
+    if problem == .Val(found) && found.kind == SemaSendProblemKind.SharedMutation -> reason = Val(sema_ownership_crossing_describe(found))
+    if reason == None && facts.resource -> reason = Val("a resource has one cleanup owner and cannot be duplicated into a snapshot")
+    if reason == None && (!facts.complete || !facts.cloneable) -> reason = Val("the value contains a resource, function, trait value, or mutable view that Jet cannot duplicate")
+    if reason == .Val(explanation) {
+        row :: diagnostic_registry_row("E1114") ?? panic("E1114 has no registry row")
+        what := row.what.replace("{{ty}}", type_name(checked.ty)).replace("{{reason}}", explanation)
+        &diagnostics.push(sema_error("E1114", expr_span(source), what, row.why, row.fix))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    if problem == .Val(found) {
+        &diagnostics.push(sema_ownership_crossing_diagnostic("this frozen value", facts.target, found, SemaSendCrossing.TaskCapture, expr_span(source)))
+        return SemaDirectSpecialCheck{handled: true, value: None}
+    }
+    already_frozen := sema_ownership_frozen_expr_site(state, source, scopes) != None
+    result := checked
+    if !already_frozen {
+        if sema_copy_memory_operation(facts) != None || sema_copy_effect_name(facts) != None -> &context.copy_events.push(SemaCopyEvent{span: call.name_span, facts: facts})
+        kind := if facts.materializes_view -> TExprKind.MaterializeView{value: checked} else -> TExprKind.Clone{value: checked, fact: MIRCopyFact.Explicit}
+        result = sema_tir_expr(facts.target, kind, call.name_span)
+    }
+    &state.freeze_sites.push(SemaOwnershipFreezeSite{span: call.name_span, line: sema_source_line_at(environment.source_segments, call.name_span) ?? 1, column: sema_source_column_at(environment.source_segments, call.name_span) ?? 1})
+    checked_result := sema_expression_call_expected(result, expected, environment, program, context, &diagnostics)
+    SemaDirectSpecialCheck{handled: true, value: checked_result}
+}

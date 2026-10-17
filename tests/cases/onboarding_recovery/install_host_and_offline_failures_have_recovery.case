@@ -1,0 +1,14 @@
+# Port of tests/onboarding_recovery.rs:280-339. PENDING-SAME-HEAD / batch-four grammar.
+# Exact original source, algorithmic setup and literal stdout predicates.
+env: NO_COLOR=1
+# Document substring subclaims are tests/guards/onboarding_recovery.jet#install_host_and_offline_failures_have_recovery_documents.
+mkdir: missing_tools
+step: jet self doctor
+cwd: missing_tools
+env: PATH={work}/missing_tools
+exit: nonzero
+stdout: ~ "rustc: not found on PATH" # original contains predicate
+stdout: ~ "Fix: install Rust" # original contains predicate
+stdout: ~ "registry: skipped (offline; pass --online to check)" # original contains predicate
+stdout: ~ "Warning [L2101]" # original contains predicate
+stdout: ~ "run `jet self doctor` again" # original contains predicate

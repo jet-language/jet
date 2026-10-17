@@ -19,6 +19,7 @@ pub(super) use super::super::TextLite::IoErrorOperation;
 pub(super) use super::time_deadline_kernel;
 #[path = "../CorePureParity.rs"]
 mod core_pure_parity;
+pub use core_pure_parity::dyn_datetime_value;
 
 /// The foundation row decides whether a plain Core call may use the pure
 /// comptime evaluator. Unknown rows remain available for the typed/internal
@@ -207,11 +208,12 @@ use self::random::ambient_random_kernel;
 /// synchronous adapter call. Outside the scope, MathRandomFns keeps its
 /// ordinary thread-local stream.
 pub fn with_world_rng_provider<T>(
-    next: fn() -> Option<u64>,
     seed: fn(i64) -> bool,
+    state: fn() -> Option<u64>,
+    try_update: fn(u64, u64) -> Option<bool>,
     callback: impl FnOnce() -> T,
 ) -> T {
-    ambient_random_kernel::with_world_rng_provider(next, seed, callback)
+    ambient_random_kernel::with_world_rng_provider(seed, state, try_update, callback)
 }
 
 
@@ -246,93 +248,88 @@ mod log_kernel {
         eprintln!("{}", line);
     }
 
-    fn jet_log_process_exit(code: i64) {
+    pub(super) fn jet_log_process_exit(code: i64) {
         std::process::exit(code as i32);
     }
 
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Log.rs");
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7LogRaw.rs");
 
     pub(super) fn set_trace_id(id: &str) {
         super::log_state::jet_ring_log_set_trace_id(id);
     }
 
-    pub(super) fn debug(message: &String) {
+    pub(super) fn debug(message: &str) {
         jet_ring_log_debug(message);
     }
 
-    pub(super) fn info(message: &String) {
+    pub(super) fn info(message: &str) {
         jet_ring_log_info(message);
     }
 
-    pub(super) fn warn(message: &String) {
+    pub(super) fn warn(message: &str) {
         jet_ring_log_warn(message);
     }
 
-    pub(super) fn error(message: &String) {
+    pub(super) fn error(message: &str) {
         jet_ring_log_error(message);
     }
 
-    pub(super) fn critical(message: &String) {
+    pub(super) fn critical(message: &str) {
         jet_ring_log_critical(message);
     }
 
-    pub(super) fn fatal(message: &String) {
+    pub(super) fn fatal(message: &str) {
         jet_ring_log_fatal(message);
     }
 
-    pub(super) fn disable() {
-        jet_ring_log_disable();
-    }
 
     pub(super) fn flush() {
         jet_ring_log_flush();
     }
 
-    pub(super) fn enabled(level: &String) -> bool {
-        jet_ring_log_enabled(level)
-    }
 
-    pub(super) fn field(key: &String, value: &String) -> jet_std::LogField {
+    pub(super) fn field(key: &str, value: &str) -> jet_std::LogField {
         jet_ring_log_field(key, value)
     }
 
-    pub(super) fn int(key: &String, value: i64) -> jet_std::LogField {
+    pub(super) fn int(key: &str, value: i64) -> jet_std::LogField {
         jet_ring_log_int(key, value)
     }
 
-    pub(super) fn float(key: &String, value: f64) -> jet_std::LogField {
+    pub(super) fn float(key: &str, value: f64) -> jet_std::LogField {
         jet_ring_log_float(key, value)
     }
 
-    pub(super) fn bool_field(key: &String, value: bool) -> jet_std::LogField {
+    pub(super) fn bool_field(key: &str, value: bool) -> jet_std::LogField {
         jet_ring_log_bool(key, value)
     }
 
-    pub(super) fn redact(key: &String) -> jet_std::LogField {
+    pub(super) fn redact(key: &str) -> jet_std::LogField {
         jet_ring_log_redact(key)
     }
 
-    pub(super) fn counter(name: &String, value: i64) -> jet_std::LogField {
+    pub(super) fn counter(name: &str, value: i64) -> jet_std::LogField {
         jet_ring_log_counter(name, value)
     }
 
-    pub(super) fn info_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn info_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_info_fields(message, fields);
     }
 
-    pub(super) fn warn_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn warn_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_warn_fields(message, fields);
     }
 
-    pub(super) fn error_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn error_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_error_fields(message, fields);
     }
 
-    pub(super) fn debug_fields(message: &String, fields: &Vec<jet_std::LogField>) {
+    pub(super) fn debug_fields(message: &str, fields: &Vec<jet_std::LogField>) {
         jet_ring_log_debug_fields(message, fields);
     }
 
-    pub(super) fn span(name: &String) -> jet_std::LogSpan {
+    pub(super) fn span(name: &str) -> jet_std::LogSpan {
         jet_ring_log_span(name)
     }
 
@@ -343,26 +340,42 @@ mod log_kernel {
     pub(super) fn close(span: &jet_std::LogSpan) {
         jet_ring_log_close(span);
     }
-
-    pub(super) fn set_sink(kind: &String, path: &String) {
-        jet_ring_log_set_sink(kind, path);
+    pub(super) fn metric_publish(name: &String, value: i64) {
+        jet_log_publish_metric(name, value);
     }
 
-    pub(super) fn sample_every(value: i64) {
-        jet_ring_log_sample_every(value);
-    }
+}
 
-    pub(super) fn otlp_file(path: &String) {
-        jet_ring_log_otlp_file(path);
-    }
+mod browser_fs_kernel {
+    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs");
+}
 
-    pub(super) fn set_level(level: &String) {
-        jet_ring_log_set_level(level);
+fn apply_browser_fs_leaf(method: &str, args: &[CtValue], span: Span) -> Option<Result<CtValue, Diagnostic>> {
+    if !matches!(method, "__path_join" | "__html_path" | "__read_text" | "__is_file" | "__file_size" | "__modified_ms") {
+        return None;
     }
-
-    pub(super) fn setup(format: &String) {
-        jet_ring_log_setup(format);
-    }
+    let text = |index| match args.get(index) {
+        Some(CtValue::Str(value)) => Ok(value),
+        _ => Err(unsupported("browser filesystem leaf expects String arguments", span)),
+    };
+    Some((|| Ok(match method {
+        "__path_join" => CtValue::Str(browser_fs_kernel::jet_browser_path_join_raw(text(0)?, text(1)?)),
+        "__html_path" => CtValue::Str(browser_fs_kernel::jet_browser_html_path_raw(text(0)?)),
+        "__is_file" => CtValue::Bool(browser_fs_kernel::jet_browser_is_file_raw(text(0)?)),
+        "__read_text" => browser_fs_kernel::jet_browser_read_text_raw(text(0)?)
+            .map(|value| CtValue::Present(Box::new(CtValue::Str(value))))
+            .unwrap_or_else(|| CtValue::absent(Type::String)),
+        "__file_size" | "__modified_ms" => {
+            let value = if method == "__file_size" {
+                browser_fs_kernel::jet_browser_file_size_raw(text(0)?)
+            } else {
+                browser_fs_kernel::jet_browser_modified_ms_raw(text(0)?)
+            };
+            value.map(|value| CtValue::Present(Box::new(CtValue::Int(value))))
+                .unwrap_or_else(|| CtValue::absent(Type::Int))
+        },
+        _ => unreachable!("browser filesystem leaf was selected above"),
+    }))())
 }
 /// Set the shared Prelude log trace context for the MIR evaluator.
 ///
@@ -382,9 +395,6 @@ mod math_lib_pure {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/MathLibPure.rs");
 }
 
-mod encoding_base_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/EncodingBase.rs");
-}
 
 mod encoding_error_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
@@ -402,80 +412,6 @@ mod seeded_random_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/SeededRandom.rs");
 }
 
-mod fake_data_kernel {
-    pub(crate) mod jet_std {
-        #[derive(Clone, Debug, PartialEq)]
-        pub(crate) struct Fake {
-            pub(crate) state: u64,
-            pub(crate) locale: u8,
-        }
-    }
-
-    use super::seeded_random_kernel::jet_seeded_rng_int;
-    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs");
-}
-
-pub fn apply_fake_method(
-    recv: &mut CtValue,
-    method: &str,
-    args: &[CtValue],
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = recv else {
-        return Err(unsupported("Fake receiver", span));
-    };
-    if type_name != crate::Syntax::FAKE_TYPE {
-        return Err(unsupported("Fake receiver", span));
-    }
-    let state = fields
-        .iter()
-        .find_map(|(name, value)| match (name.as_str(), value) {
-            ("state", CtValue::Int(value)) => Some(*value as u64),
-            _ => None,
-        })
-        .unwrap_or(0);
-    let locale = fields
-        .iter()
-        .find_map(|(name, value)| match (name.as_str(), value) {
-            ("locale", CtValue::Int(value)) => Some(*value as u8),
-            _ => None,
-        })
-        .unwrap_or(0);
-    let mut fake = fake_data_kernel::jet_std::Fake { state, locale };
-    let result = match method {
-        "locale" => {
-            let locale = as_string(
-                args.first()
-                    .ok_or_else(|| unsupported("Fake.locale argument", span))?,
-                span,
-            )?
-            .to_string();
-            let next = fake_data_kernel::jet_fake_locale(&fake, &locale);
-            CtValue::Struct {
-                type_name: crate::Syntax::FAKE_TYPE.to_string(),
-                fields: vec![
-                    ("state".to_string(), CtValue::Int(next.state as i64)),
-                    ("locale".to_string(), CtValue::Int(next.locale as i64)),
-                ],
-            }
-        }
-        "name" => CtValue::Str(fake_data_kernel::jet_fake_name(&mut fake)),
-        "email" => CtValue::Str(fake_data_kernel::jet_fake_email(&mut fake)),
-        "host" => CtValue::Str(fake_data_kernel::jet_fake_host(&mut fake)),
-        "address" => CtValue::Str(fake_data_kernel::jet_fake_address(&mut fake)),
-        _ => return Err(unsupported("this Fake method", span)),
-    };
-    if method != "locale" {
-        *recv = CtValue::Struct {
-            type_name: crate::Syntax::FAKE_TYPE.to_string(),
-            fields: vec![
-                ("state".to_string(), CtValue::Int(fake.state as i64)),
-                ("locale".to_string(), CtValue::Int(fake.locale as i64)),
-            ],
-        };
-    }
-    Ok(result)
-}
 
 mod net_pure_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/NetPure.rs");
@@ -504,30 +440,17 @@ mod mime_kernel {
     include!("../../../../jet-codegen/src/Prelude/CoreLib/JetStd/Mime.rs");
 }
 
-mod solver_kernel {
-    pub(crate) mod jet_std {
-        #[derive(Clone)]
-        pub(crate) struct Solver {
-            pub(crate) seed: i64,
-            pub(crate) checked: i64,
-            pub(crate) failures: i64,
-        }
-    }
 
-    include!("../../../../jet-codegen/src/Prelude/CoreLib/Top/Solver.rs");
-}
-
-mod sketch_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/Sketch.rs");
-}
 
 mod time_kernel {
+    use super::time_deadline_kernel::jet_time_wall_override_ms;
     fn jet_scheduler_world_now_ms() -> Option<i64> {
         None
     }
     pub(crate) use jet_foundation::Monotonic::jet_time_monotonic_now_ns;
     include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
     include!("../../../../jet-codegen/src/Prelude/Core/Time.rs");
+    include!("../../../../jet-codegen/src/Prelude/Core/TimeFacts.rs");
 }
 mod raylib_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Raylib.rs");
@@ -593,9 +516,6 @@ pub(super) mod duration_kernel {
     include!("../../../../jet-codegen/src/Prelude/Core/Duration.rs");
 }
 
-mod measurement_kernel {
-    include!("../../../../jet-codegen/src/Prelude/Core/Measurement.rs");
-}
 
 // #1657 / I9: the one `core.data` statistics, bar-plot and bridge-status
 // kernel. This is the exact source AOT embeds and the Cranelift JIT host
@@ -629,6 +549,13 @@ mod data_kernel {
         /// encoding-backed errors live in `DataFlow.rs`, not in this file.
         #[derive(Clone, Debug, PartialEq, Eq)]
         pub(crate) struct EncodingError;
+
+        #[derive(Clone, Debug, PartialEq, Eq)]
+        pub(crate) struct EncodingCause {
+            pub(crate) kind: String,
+            pub(crate) os_code: JetOutcome<i64, JetAbsent>,
+            pub(crate) message: String,
+        }
 
         #[derive(Clone, Debug)]
         pub(crate) struct DataError {
@@ -760,25 +687,7 @@ pub fn apply_core_pure_method(
     core_pure_parity::evaluate_method(recv, method, args, span)
 }
 
-pub fn sketch_add(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    core_pure_parity::sketch_add(recv, args, span)
-}
 
-pub(in super::super) fn solver_require(
-    recv: &CtValue,
-    args: &[CtValue],
-    span: Span,
-) -> Option<Result<(CtValue, CtValue), Diagnostic>> {
-    core_pure_parity::solver_require(recv, args, span)
-}
-
-pub(in super::super) fn solver_new(args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
-    core_pure_parity::solver_new(args, span)
-}
 
 pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
     core_pure_parity::display(value)
@@ -787,7 +696,6 @@ pub fn display_core_pure_value(value: &CtValue) -> Option<String> {
 pub(in super::super) use regex::apply_regex_method;
 pub use regex::eval_regex_replace_all_with;
 
-const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // D-FIDELITY-API1=A: this signal must behave like the AOT binary's
 // process-global static (fresh default per program run, persists across
 // reads/writes within one run). This compiler process hosts many concurrent
@@ -798,7 +706,7 @@ const PERF_DEFAULT_FIDELITY_BITS: u32 = 1.0f32.to_bits();
 // process-wide static had) while preserving the existing single-thread
 // persistence a REPL session or dev run relies on.
 thread_local! {
-    static PERF_FIDELITY: Cell<u32> = const { Cell::new(PERF_DEFAULT_FIDELITY_BITS) };
+    static PERF_FIDELITY: Cell<i64> = const { Cell::new(0) };
 }
 
 // ---------------------------------------------------------------------------
@@ -889,21 +797,7 @@ fn core_math_float_clamp(
     }
 }
 
-fn hex_encode(bytes: Vec<u8>) -> String {
-    encoding_base_kernel::jet_std_hex_encode(&bytes)
-}
 
-fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
-    encoding_base_kernel::jet_std_hex_decode(&s.to_string())
-}
-
-fn base64_encode(bytes: Vec<u8>) -> String {
-    encoding_base_kernel::jet_std_b64_encode(&bytes)
-}
-
-fn base32_encode(bytes: &[u8]) -> String {
-    encoding_base_kernel::jet_std_base32_encode(&bytes.to_vec())
-}
 
 /// Core modules the REPL interpreter cannot run (native FFI / threads / HTTP stack).
 fn repl_native_only_module(module: &str) -> Option<&'static str> {
@@ -1143,15 +1037,6 @@ fn apply_raylib_core_call(
             let _ = as_int(one(0)?, span)?;
             Ok(CtValue::Unit)
         }
-        "color" => Ok(CtValue::Struct {
-            type_name: "RaylibColor".to_string(),
-            fields: vec![
-                ("r".to_string(), CtValue::Int(as_int(one(0)?, span)?)),
-                ("g".to_string(), CtValue::Int(as_int(one(1)?, span)?)),
-                ("b".to_string(), CtValue::Int(as_int(one(2)?, span)?)),
-                ("a".to_string(), CtValue::Int(as_int(one(3)?, span)?)),
-            ],
-        }),
         "gamepad_down" => {
             let gamepad = as_int(one(0)?, span)?;
             let button = as_string(one(1)?, span)?;
@@ -1169,26 +1054,6 @@ fn apply_raylib_core_call(
                 .filter(|value| *value >= 0)
                 .and_then(|_| raylib_kernel::jet_raylib_axis_code(axis));
             Ok(CtValue::Float(CtFloat::f64(0.0)))
-        }
-        "load_sound" => Ok(CtValue::Struct {
-            type_name: "RaylibSound".to_string(),
-            fields: vec![(
-                "path".to_string(),
-                CtValue::Str(as_string(one(0)?, span)?.to_string()),
-            )],
-        }),
-        "play_sound" => {
-            let CtValue::Struct { type_name, fields } = one(0)? else {
-                return Err(unsupported("expected a RaylibSound", span));
-            };
-            if type_name != "RaylibSound" {
-                return Err(unsupported("expected a RaylibSound", span));
-            }
-            let path = match raylib_field(fields, "path") {
-                Some(CtValue::Str(path)) => path,
-                _ => return Err(unsupported("malformed RaylibSound", span)),
-            };
-            Ok(CtValue::Bool(!path.is_empty()))
         }
         "load_texture_atlas" => Ok(raylib_atlas_value(
             raylib_kernel::jet_raylib_load_texture_atlas_spec(as_string(one(0)?, span)?),

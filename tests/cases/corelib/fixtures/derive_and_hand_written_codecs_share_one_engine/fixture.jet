@@ -1,0 +1,32 @@
+
+use core.encoding.json as json
+
+#Codable
+struct DerivedEmail { address: String }
+
+struct HandEmail { address: String }
+impl HandEmail.Encode {
+    fn encode(self) -> Dyn { Dyn.Object(["address": Dyn.Text(self.address.copy())]) }
+}
+impl HandEmail.Decode {
+    fn decode(tree: Dyn) -> HandEmail [FieldError]! {
+        field :: &tree.field("address") ?? Dyn.Text("")
+        address :: field.text() ?? ""
+        return Ok(HandEmail{ address: address })
+    }
+}
+
+fn run() {
+    derived :: DerivedEmail{ address: "ada@jet" }
+    hand :: HandEmail{ address: "ada@jet" }
+    derived_wire :: json.to_string(derived)
+    hand_wire :: json.to_string(hand)
+    derived_bytes :: derived_wire.bytes()
+    hand_bytes :: hand_wire.bytes()
+    assert(derived_bytes == hand_bytes)
+    derived_back :: json.decode<DerivedEmail>(hand_wire) ?? panic("derived decode")
+    hand_back :: json.decode<HandEmail>(derived_wire) ?? panic("hand decode")
+    assert(derived_back.address == hand_back.address)
+    print(derived_bytes == hand_bytes)
+    print(derived_back.address == hand_back.address)
+}

@@ -1,0 +1,13 @@
+// Generic types, inherent methods and free functions keep their declaring file.
+struct Slot<T> { value: T }
+impl Slot {
+    fn get(self) -> T { self.value }
+}
+
+// This source-defined Pool is not the Core allocator with the same leaf name.
+struct Pool<T> { items: [T] }
+fn pool_copy<T>(pool: Pool<T>) -> Pool<T> { pool.copy() }
+fn pool_len<T>(pool: Pool<T>) -> Int { pool.items.len() }
+
+fn identity<T>(value: T) -> T { value }
+fn wrap<T>(value: T) -> Slot<T> { Slot<T>{value: value} }

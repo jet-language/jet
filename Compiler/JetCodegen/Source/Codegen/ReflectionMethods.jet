@@ -39,16 +39,16 @@ fn jet_codegen_reflection_host_method(receiver: Type, method: String, arg_count:
     jet_codegen_reflection_method_supported(owner, method, arg_count)
 }
 
-fn jet_codegen_lower_reflection_host_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
+fn jet_codegen_lower_reflection_host_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, method: String, args: [TExpr]) -> MIRValueID {
     owner :: jet_codegen_reflection_owner(receiver.ty) ?? panic("checked reflection host method has no nominal receiver")
     if !jet_codegen_reflection_method_supported(owner, method, args.len()) -> panic("checked reflection host method has no canonical route")
-    receiver_arg := jet_codegen_method_receiver_arg(&builder, receiver, MIRAccess.Read)
+    receiver_arg := jet_codegen_method_receiver_arg(&builder, program, receiver, MIRAccess.Read)
     lowered := [MIRCallArg]{receiver_arg}
     loop argument in args {
-        value := jet_codegen_lower_expr(&builder, argument)
+        value := jet_codegen_lower_expr(&builder, program, argument)
         &lowered.push(jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None))
     }
     member := "{owner}.{method}"
-    route := jet_codegen_intern_route(&builder, MIRPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", lowered.len(), [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: route}, args: lowered, type_args: [MIRType]{}})
+    route := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.StaticPrelude, "core.host", member, "jet_comptime_host_method", lowered.len(), [Bool]{true, false}, None, jet_codegen_failure_carrier_for_type(expression.ty), MIRPreludeABI.Value)
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Call{callee: MIRCallee.Prelude{call: route}, args: lowered, type_args: [MIRType]{}})
 }

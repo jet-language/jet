@@ -1,0 +1,12 @@
+# HAND-PORT tests/env_overlay.rs:499-518 old_edition_invalid_set_uses_exact_runtime_error
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original AOT-only matrix and exact source/output/error predicates; mutation pipe-pressure value is exactly96*1024 x bytes.
+fixture: old_edition_invalid_set_uses_exact_runtime_error.fixture
+env: NO_COLOR=1
+step: jet build invalid.jet
+exit: 0
+step: built
+cwd: .
+exit: 70
+stderr: ~ "panic: core.sys.set: invalid environment variable name" # original contains predicate
+stderr: ~ "invalid.jet:5 in run" # original call-site predicate

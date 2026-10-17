@@ -3,26 +3,26 @@
 // Native closure: held directory authority #3593, DNS pins #3595, process
 // #3594; the complete signed/offline Fetch journey remains #4262/#3597.
 
-pub fn publication_registry_cache_component(name: String) -> String Never! {
+fn publication_registry_cache_component(name: String) -> String Never! {
     safe := name != "" && name != "." && name != ".."
     loop byte in name.bytes() {
         code :: Int.from_u8(byte)
         if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code == 45 || code == 95 || code == 46) -> safe = false
     }
-    if safe -> ~name else -> "registry-{pkg_sha256_hex(name.bytes())}"
+    if safe -> name.copy() else -> "registry-{pkg_sha256_hex(name.bytes())}"
 }
-pub fn publication_index_repo_path(registry: PublicationRegistryConfig) -[Env]> String Never! {
+fn publication_index_repo_path(registry: PublicationRegistryConfig) -[Env]> String Never! {
     configured :: sys.get("JET_REGISTRY_CACHE_DIR") ?? ""
     base :: if configured != "" -> configured else -> files.join(files.join(sys.get("HOME") ?? ".", ".jet"), "registry-index")
     files.join(base, publication_registry_cache_component(registry.name))
 }
-pub fn publication_registry_cache_lock_name(name: String) -> String Never! {
+fn publication_registry_cache_lock_name(name: String) -> String Never! {
     ".{publication_registry_cache_component(name)}.cache-lock"
 }
-pub fn publication_registry_clone_stage_name(name: String, kind: String, suffix: String) -> String Never! {
+fn publication_registry_clone_stage_name(name: String, kind: String, suffix: String) -> String Never! {
     ".{publication_registry_cache_component(name)}.{kind}-{suffix}"
 }
-pub fn publication_registry_unique_suffix() -[Env, Time]> String Never! {
+fn publication_registry_unique_suffix() -[Env, Time]> String Never! {
     nanos :: time.unix_ns()
     "{sys.pid()}-{if nanos < 0 -> 0 else -> nanos}"
 }
@@ -31,20 +31,20 @@ fn publication_registry_cache_error(registry: PublicationRegistryConfig, detail:
 }
 // The expected identity is the ORIGINAL configured URL, not the transport's
 // IP-substituted URL. A failed git command never supplies a trustworthy origin.
-pub fn publication_registry_origin_matches(url: String, success: Bool, origin: String) -> Bool Never! {
+fn publication_registry_origin_matches(url: String, success: Bool, origin: String) -> Bool Never! {
     success && origin.trim() == url
 }
 // Main's Registry.rs tandem correction: pin Git's NETWORK request using a
 // per-command rewrite, but record the configured URL as the clone's origin.
 // HTTP/SSH already pin through the hardened transport ProcessSpec.
-pub fn publication_registry_clone_arguments(url: String, pinned: String, path: String) -> [String] Never! {
+fn publication_registry_clone_arguments(url: String, pinned: String, path: String) -> [String] Never! {
     args := [String]{}
     if pinned != url -> &args.push("-c")
     if pinned != url -> &args.push("url.{pinned}.insteadOf={url}")
     &args.push("clone")
     &args.push("--")
-    &args.push(~url)
-    &args.push(~path)
+    &args.push(url.copy())
+    &args.push(path.copy())
     args
 }
 
@@ -69,7 +69,7 @@ fn publication_acquire_registry_lock(parent: String, name: String, delay_ms: Int
             .Err(error) -> if error == {
                 .AlreadyExists(_) -> {
                     if files.stat(path) == .Ok(info) {
-                        if time.unix_ns() - info.modified.unix_ns > 300000000000 {
+                        if time.unix_ns() - (info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {
                             authority.remove(name).drop("best-effort stale registry marker reclamation")
                             next
                         }
@@ -182,7 +182,7 @@ fn publication_ensure_index_clone_locked(registry: PublicationRegistryConfig, di
     publication_clone_registry_to(registry, parent, path, transport)
     publication_install_registry_clone(registry, dir, parent, path, existing)
 }
-pub fn publication_ensure_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Time, Time.Wait, Exec, Net]> String PublicationDiagnosticError! {
+fn publication_ensure_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Time, Time.Wait, Exec, Net]> String PublicationDiagnosticError! {
     // Required validated transport: pre-DNS Endpoint is NOT an authority.
     // Canonical transport closure is intentionally gated #3595, never faked.
     transport :: publication_validate_registry_transport(registry)
@@ -202,7 +202,7 @@ pub fn publication_ensure_index_clone(registry: PublicationRegistryConfig) -[FS,
         }
     }
 }
-pub fn publication_ensure_local_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Exec, Net, Time.Wait]> String PublicationDiagnosticError! {
+fn publication_ensure_local_index_clone(registry: PublicationRegistryConfig) -[FS, Env, Exec, Net, Time.Wait]> String PublicationDiagnosticError! {
     transport :: publication_validate_registry_transport(registry)
     dir :: publication_index_repo_path(registry)
     if !publication_validate_existing_index_clone(registry, dir, transport) -> return Err(publication_registry_cache_error(registry, "the local registry cache is unavailable; locked mode never downloads a new index"))

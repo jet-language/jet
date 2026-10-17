@@ -1,10 +1,10 @@
 // Program-level adapters emitted between type rows and functions. Ports
-// MIRRust emit_period_anchor_impls, emit_link_closure and
-// emit_callback_trampolines: Date/LocalDate/DateTime unions implement the
-// runtime period-anchor trait, every link unit the selected artifact reaches is
-// declared once in dependency order, and every CCallback adapter reachable from
-// selected functions exports one `#[no_mangle]` trampoline.
+// MIRRust emit_link_closure and emit_callback_trampolines: every link unit
+// the selected artifact reaches is declared once in dependency order, and
+// every CCallback adapter reachable from selected functions exports one
+// `#[no_mangle]` trampoline.
 use jet_foundation.[
+    name_mangle,
     MIRCallbackAdapter,
     MIRFunction,
     MIRFunctionForm,
@@ -12,65 +12,9 @@ use jet_foundation.[
     MIRLinkUnitID,
     MIRPreludeCallID,
     MIRType,
-    MIRVariant,
     mir_type_is_unit,
     mir_type_same_checked_type,
 ]
-
-fn jet_rust_emit_period_anchor_payload(variant: MIRVariant) -> String Never! {
-    if variant.payload == {
-        .Single(value) -> {
-            if value.kind == {
-                .Apply(name, _) -> return name.name
-                else -> {}
-            }
-        }
-        else -> {}
-    }
-    ""
-}
-
-// A three-variant enum whose single payloads are exactly Date, LocalDate and
-// DateTime (in any order) is a period anchor union.
-fn jet_rust_emit_is_period_anchor(variants: [MIRVariant]) -> Bool Never! {
-    if variants.len() != 3 -> return false
-    has_date := false
-    has_local_date := false
-    has_date_time := false
-    loop variant in variants {
-        nominal :: jet_rust_emit_period_anchor_payload(variant)
-        if {
-            nominal == "Date" -> has_date = true
-            nominal == "LocalDate" -> has_local_date = true
-            nominal == "DateTime" -> has_date_time = true
-            else -> return false
-        }
-    }
-    has_date && has_local_date && has_date_time
-}
-
-fn jet_rust_emit_period_anchor_impls(ctx: &JetRustEmitContext, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
-    loop definition in ctx.program.types {
-        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
-        if definition.kind == {
-            .Enum(variants, _) -> {
-                if jet_rust_emit_is_period_anchor(variants) {
-                    name :: jet_rust_emit_type_name(&ctx, definition.id)
-                    &lines.push("impl {root}JetPeriodAnchor for {name} {{")
-                    &lines.push("    fn period_total_in(&self, period: &{root}JetPeriod, unit: &String) -> f64 {{")
-                    &lines.push("        match self {{")
-                    loop variant in variants -> &lines.push("            {name}::{jet_rust_emit_variant_name(&ctx, definition.id, variant.name)}(anchor) => anchor.period_total_in(period, unit),")
-                    &lines.push("        }}")
-                    &lines.push("    }}")
-                    &lines.push("}}")
-                    &lines.push("")
-                }
-            }
-            else -> {}
-        }
-    }
-}
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_link_closure
 fn jet_rust_emit_link_closure(ctx: &JetRustEmitContext, lines: &[String]) Never! {
@@ -108,7 +52,7 @@ fn jet_rust_emit_link_unit(ctx: &JetRustEmitContext, id: MIRLinkUnitID, position
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::callback_ids
 fn jet_rust_emit_sort_callback_ids(values: [U64]) -> [U64] Never! {
-    sorted := ~values
+    sorted := values.copy()
     width := 1
     loop width < sorted.len() {
         merged := [U64]{}
@@ -185,7 +129,7 @@ fn jet_rust_emit_callback_ids(ctx: &JetRustEmitContext) -> [U64] Never! {
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::callback_boundary_symbol
 fn jet_rust_emit_callback_boundary_symbol(ctx: &JetRustEmitContext, callback_id: U64, index: JetRustEmitCallbackIndex) -> String Never! {
     if index.conflicts.get(callback_id) == .Val(function_position) {
-        span :: ~ctx.program.functions[function_position].span
+        span :: ctx.program.functions[function_position].span.copy()
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback uses multiple boundary Prelude routes", "one callback adapter crosses the host boundary through one checked Prelude route", Val(span))
         return "unreachable!"
     }
@@ -214,7 +158,7 @@ fn jet_rust_emit_callback_return_agrees(target: MIRFunction, callback: MIRCallba
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::emit_callback_trampolines
 fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]) Never! {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     index :: jet_rust_emit_callback_index(&ctx)
     positions := [U64:Int]{}
     // The former scan selected the last adapter for duplicate identities.
@@ -225,7 +169,7 @@ fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR callback identity has no adapter row", "every CCallback operation names one checked callback adapter", None)
             return
         }
-        callback :: ~ctx.program.callbacks[position]
+        callback :: ctx.program.callbacks[position].copy()
         if callback.symbol.len() == 0 || (symbols.get(callback.symbol) ?? false) {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback symbol is empty or emitted more than once", "each callback adapter exports one unique non-empty symbol", None)
             return
@@ -235,7 +179,7 @@ fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR artifact references a missing function row", "entry, command, job, and export rows must resolve to one checked function", None)
             return
         }
-        target_span :: ~ctx.program.functions[target_position].span
+        target_span :: ctx.program.functions[target_position].span.copy()
         if ctx.program.functions[target_position].form != MIRFunctionForm.TopLevel || (!callback.managed && ctx.program.functions[target_position].capture_params.len() > 0) || !jet_rust_emit_module_selected(ctx, ctx.program.functions[target_position].module_id) || !jet_rust_emit_function_target_enabled(ctx.config, ctx.program.functions[target_position]) {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR callback target is not a selected capture-free top-level callable", "callback trampolines call selected top-level functions whose captures the adapter can represent", Val(target_span))
             return
@@ -271,7 +215,7 @@ fn jet_rust_emit_callback_trampolines(ctx: &JetRustEmitContext, lines: &[String]
         params := [String]{}
         args := [String]{}
         loop parameter in callback.params {
-            name :: jet_rust_emit_mangle(parameter.name)
+            name :: name_mangle(parameter.name)
             &params.push("{name}: {jet_rust_emit_callable_param_type(&ctx, parameter.ty, parameter.access)}")
             &args.push(name)
         }

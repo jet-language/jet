@@ -856,6 +856,12 @@ export function generatedCoreRecordRows(root) {
   const skipped = [];
   const fieldTable = fieldRows(oracle, skipped);
   const literals = literalRows(oracle, skipped);
+  const coreOnlyDeclaration = oracle.source.match(/const CORE_ONLY_RECORD_LITERALS: &\[&str\] = &\[([^\]]*)\];/);
+  if (!coreOnlyDeclaration) throw new Error("CoreRecordRows: missing literal visibility data");
+  const coreOnly = new Set([...coreOnlyDeclaration[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]));
+  for (const name of coreOnly) {
+    if (!literals.some((record) => record.type === name)) throw new Error(`CoreRecordRows: core-only literal ${name} has no shape`);
+  }
   if (!oracle.constructableFallback) skipped.push("core_struct_field: the constructable-field fallback arm is missing");
   for (const record of literals) {
     for (const field of record.fields) fieldTable.add([record.type], [field.name], field.ty);
@@ -875,17 +881,17 @@ export function generatedCoreRecordRows(root) {
     "// Field rows are the Rust `core_struct_field` oracle in first-match order;",
     "// literal rows are `core_constructable_fields`, in declaration order.",
     "",
-    "pub CORE_RECORD_FIELD_ROWS :: [CoreRecordFieldRow]{",
+    "CORE_RECORD_FIELD_ROWS :: [CoreRecordFieldRow]{",
   ];
   for (const row of fields) {
     lines.push(`    CoreRecordFieldRow{owner: ${jetString(row.type)}, field: ${jetString(row.field)}, ty: ${row.ty}},`);
   }
-  lines.push("}", "", "pub CORE_RECORD_LITERAL_ROWS :: [CoreRecordLiteralRow]{");
+  lines.push("}", "", "CORE_RECORD_LITERAL_ROWS :: [CoreRecordLiteralRow]{");
   for (const record of literals) {
     const fieldsText = record.fields
       .map((field) => `TypeTupleField{name: ${jetString(field.name)}, ty: ${field.ty}}`)
       .join(", ");
-    lines.push(`    CoreRecordLiteralRow{owner: ${jetString(record.type)}, fields: [TypeTupleField]{${fieldsText}}},`);
+    lines.push(`    CoreRecordLiteralRow{owner: ${jetString(record.type)}, fields: [TypeTupleField]{${fieldsText}}, core_only: ${coreOnly.has(record.type)}},`);
   }
   lines.push("}", "// END GENERATED CORE RECORD ROWS", "");
   return lines.join("\n");

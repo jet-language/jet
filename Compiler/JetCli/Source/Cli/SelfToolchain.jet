@@ -1,0 +1,18 @@
+// Source/main.rs run_toolchain/require_manifest_root. Root selection is the
+// checked package authority, not receipt/repository selection or a text scan.
+use core.files as cli_files
+use jet_foundation.diagnostic_render_all
+
+
+fn jet_cli_self_toolchain(json: Bool) -[FS, Env]> JetCLIPlan Never! {
+    cwd :: cli_files.cwd() ?? "."
+    cache := WorkspaceDeclarationCache.new()
+    root := String?{None}
+    if jet_cli_find_package_root_checked(&cache, cwd) == {
+        .Ok(found) -> root = found
+        .Err(error) -> return jet_cli_done("", diagnostic_render_all(JET_CLI_PACKAGE_FILE, "", [error.diagnostic], false), JET_DRIVER_EXIT_USER_ERROR)
+    }
+    if root == .Val(path) -> return jet_cli_renderable(trust_pin_report(path), json)
+    if jet_cli_find_stale_manifest(&cache, cwd) == .Val(report) -> return jet_cli_done("", diagnostic_render_all("", "", [report], false), JET_DRIVER_EXIT_USER_ERROR)
+    jet_cli_done("", "error: `jet self toolchain` needs a project — no `package.jet` found here or above\n", JET_DRIVER_EXIT_USER_ERROR)
+}

@@ -1,0 +1,15 @@
+# tests/notebook.rs::jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss
+# Verbatim original cell sources and exact public predicates; runtime UNRUN.
+fixture: jetnb_cache_merge_ipynb_and_jet_export_never_hide_loss.fixture
+env: NO_COLOR=1
+step: jet notebook document.jetnb --protocol
+stdin: commands.stdin
+exit: 0
+json: file merged.jetnb doc $.cells[?kind="markdown"] #>= 1
+json: file merged.jetnb doc $.cells[?id="shared"][0].source = "answer :: 7"
+json: stdout ndjson $[2].body ~ "quarantined" # original ed77c235f tests/notebook.rs:317 import_loss.items has a quarantined marker; public bridge crates/jet-repl/src/Notebook/document.rs:74-82 renders only loss items verbatim after its header, protocol.rs:293-300 returns rendered loss in body
+json: file imported.jetnb doc $.cells[0].id = "keep-me"
+json: file imported.jetnb doc $.cells[0].output.bundle.quarantined = true
+# PENDING-SEAM(notebook-lib): JetNotebook.new env-doc; original store_output(c1,MimeBundle text answer : Int ::42/mime[]/quarantinedfalse/widgetNone/origins[]/messages[],count1,None).unwrap; visible_output Some; direct nb.cells[0].source=answer::7 -> visible_output None
+# PENDING-SEAM(notebook-lib): merge_by_id(nb,theirs) direct pure record call after authorized-cache source edit, same minted c1 id; merge Markdown presence/source7 publiccounterpart executable; exact direct in-memory record/cache provenance retained here
+# PENDING-SEAM(notebook-lib): source reset answer::42; store_output exact text42/count2/emptyMime+None; save/load direct loaded.cells.len1; export_ipynb.unwrap loss.render contains export loss OR omitted, ipynb contains nbformat AND actualc1; export_jet loss.render contains stated-loss OR loss.items.len>=2, jet_src contains answer; CLI exports counts not returned bytes/loss.items and cannot author direct synthetic authorized output cache

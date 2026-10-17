@@ -1,0 +1,32 @@
+# tests/terminal.rs::stdin_lines_emit_before_eof_and_stop_at_blank
+# Exact original helper/source predicates; PENDING-SAME-HEAD; runtime UNRUN.
+requires: os:unix
+fixture: stdin_lines_emit_before_eof_and_stop_at_blank.fixture
+env: NO_COLOR=1
+session default raw: jet run --quiet sentinel.jet
+stdout: file {work}/default.stdout
+stderr: file {work}/default.stderr
+send default: "a\n"
+await: file default.stdout = "a\n" timeout 120s every 10ms
+send default: "b\nc\n\nremainder\n"
+wait default timeout 10s
+exit: 0
+file: default.stdout = stdin_lines_emit_before_eof_and_stop_at_blank.out
+session release raw: jet run --quiet --release sentinel.jet
+stdout: file {work}/release.stdout
+stderr: file {work}/release.stderr
+send release: "a\n"
+await: file release.stdout = "a\n" timeout 120s every 10ms
+send release: "b\nc\n\nremainder\n"
+wait release timeout 10s
+exit: 0
+file: release.stdout = stdin_lines_emit_before_eof_and_stop_at_blank.out
+session interpret raw: jet run --quiet --interpret sentinel.jet
+stdout: file {work}/interpret.stdout
+stderr: file {work}/interpret.stderr
+send interpret: "a\n"
+await: file interpret.stdout = "a\n" timeout 120s every 10ms
+send interpret: "b\nc\n\nremainder\n"
+wait interpret timeout 10s
+exit: 0
+file: interpret.stdout = stdin_lines_emit_before_eof_and_stop_at_blank.out

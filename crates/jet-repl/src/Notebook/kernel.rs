@@ -658,7 +658,6 @@ impl Kernel {
 
     pub fn request_interrupt(&mut self) {
         self.interrupt_requested = true;
-        crate::Comptime::note_repl_interrupt();
     }
 
     pub fn push_stdin(&mut self, line: impl Into<String>) {
@@ -757,7 +756,6 @@ impl Kernel {
         let queued_input = self.policy.pending_input();
         let started = Instant::now();
         let mut authorizer = self.policy.authorizer(None);
-        crate::Comptime::begin_repl_interruptible_turn();
         let eval = evaluate_step_with_items(
             &mut self.session,
             &source,
@@ -765,7 +763,6 @@ impl Kernel {
             &mut authorizer,
             true,
         );
-        crate::Comptime::end_repl_interruptible_turn();
         if self.policy.pending_input() < queued_input {
             self.stdin_queue.remove(0);
         }
@@ -1345,12 +1342,7 @@ fn bundle_for_eval(eval: &EvalResult) -> MimeBundle {
     // output plus any echoed value or diagnostic. Keep it intact so a client
     // cannot lose a print event when the turn also carries a value.
     let text = match eval.text.trim_end() {
-        "" => eval
-            .value
-            .as_ref()
-            .filter(|value| !matches!(value, crate::Comptime::CtValue::Unit))
-            .map(crate::display_value)
-            .unwrap_or_default(),
+        "" => eval.value.as_ref().map(crate::echo_text).unwrap_or_default(),
         text => text.to_string(),
     };
     let mut mime = vec![("text/plain".to_string(), text.clone())];
@@ -1380,29 +1372,40 @@ fn bundle_for_eval(eval: &EvalResult) -> MimeBundle {
     }
 }
 
-fn table_mime(value: &crate::Comptime::CtValue) -> Option<String> {
-    let crate::Comptime::CtValue::List(rows) = value else {
+/// A list of records renders as a table, read from the value's
+/// type-directed JSON (`[{"field": …}, …]`).
+fn table_mime(value: &crate::Executor::TurnValue) -> Option<String> {
+    use jet_foundation::Dyn::Dyn;
+    let tree = jet_foundation::JSON::parse(value.json.as_deref()?).ok()?;
+    let Dyn::Array(rows) = tree else {
         return None;
     };
-    let first = rows.first()?;
-    let crate::Comptime::CtValue::Struct { fields, .. } = first else {
+    let Dyn::Object(first) = rows.first()? else {
         return None;
+    };
+    let cell = |value: &Dyn| match value {
+        Dyn::Text(text) | Dyn::Number(text) => text.clone(),
+        Dyn::Int(number) => number.to_string(),
+        Dyn::Float(number) => number.to_string(),
+        Dyn::Bool(flag) => flag.to_string(),
+        Dyn::Null => "null".to_string(),
+        other => format!("{other:?}"),
     };
     let mut html = String::from("<table><thead><tr>");
-    for (name, _) in fields {
+    for (name, _) in first {
         html.push_str("<th>");
         html.push_str(&html_escape(name));
         html.push_str("</th>");
     }
     html.push_str("</tr></thead><tbody>");
-    for row in rows {
-        let crate::Comptime::CtValue::Struct { fields, .. } = row else {
+    for row in &rows {
+        let Dyn::Object(fields) = row else {
             continue;
         };
         html.push_str("<tr>");
         for (_, value) in fields {
             html.push_str("<td>");
-            html.push_str(&html_escape(&crate::display_value(value)));
+            html.push_str(&html_escape(&cell(value)));
             html.push_str("</td>");
         }
         html.push_str("</tr>");

@@ -5,7 +5,7 @@
 
 // One `package_overlay` semantic lock record per overlay package, with a
 // rationale per provenance fact explaining why it was chosen.
-pub fn env_overlay_semantic_records(policy: OverlayPolicy, owner: String, platform: String) -> [SemanticRecord] OverlayError! {
+fn env_overlay_semantic_records(policy: OverlayPolicy, owner: String, platform: String) -> [SemanticRecord] OverlayError! {
     records := [SemanticRecord]{}
     loop overlay in policy.overlays {
         loop package in overlay.packages {
@@ -98,7 +98,7 @@ fn env_overlay_fact_fields(resolved: ResolvedPackageOverride, overlay: String) -
 }
 
 // `(overlay, package)` -> policy fingerprint, for exact invalidation diffs.
-pub fn env_overlay_policy_fingerprints(policy: OverlayPolicy) -> [OverlayFingerprint] OverlayError! {
+fn env_overlay_policy_fingerprints(policy: OverlayPolicy) -> [OverlayFingerprint] OverlayError! {
     out := [OverlayFingerprint]{}
     loop overlay in policy.overlays {
         loop package in overlay.packages {
@@ -110,13 +110,13 @@ pub fn env_overlay_policy_fingerprints(policy: OverlayPolicy) -> [OverlayFingerp
 }
 
 // Diff two overlay policies into exact action invalidations (E4-JP13).
-pub fn env_overlay_invalidations_against(before: OverlayPolicy, after: OverlayPolicy, actions_by_package: [String: [String]]) -> [OverlayInvalidation] OverlayError! {
+fn env_overlay_invalidations_against(before: OverlayPolicy, after: OverlayPolicy, actions_by_package: [String: [String]]) -> [OverlayInvalidation] OverlayError! {
     Ok(trust_overlay_invalidations(env_overlay_policy_fingerprints(before), env_overlay_policy_fingerprints(after), actions_by_package))
 }
 
 // Add an overlay block to `existing` workspace source (before its closing
 // `}`), or draft a fresh `module workspace` when there is none.
-pub fn env_draft_overlay_source(existing: String?, overlay: String, package: String, patch: String?, provider: String?, channel: String?, allow_unfree: Bool) -> String Never! {
+fn env_draft_overlay_source(existing: String?, overlay: String, package: String, patch: String?, provider: String?, channel: String?, allow_unfree: Bool) -> String Never! {
     block :: env_overlay_draft_block(overlay, package, patch, provider, channel, allow_unfree)
     if existing == .Val(src) {
         if pkg_overlay_find_workspace_body_start(src) != None {

@@ -1,0 +1,57 @@
+# Port of tests/cli_parts/core.rs:293-466; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+# ORACLE-DERIVED core.rs:321-324: format "{:<11}  [ship] Say hello from a shipped project job\n{:<11}  [dev] Seed local data (every 5min)\n{:<11}  [internal]\n"; literal arguments ["greet","seed_data","inspect_job"], left-align width11 then two spaces.
+# ORACLE-LITERAL core.rs:464.
+fixture: fixtures/jobs
+step: jet jobs
+cwd: project
+exit: 0
+stdout: = jobs-list.out
+step: jet run run.jet -- missing
+cwd: project
+exit: nonzero
+stderr: ~ "E1294" # original predicate
+stderr: ~ "declared jobs: greet, seed_data, inspect_job" # original predicate
+step: jet build --release run.jet
+cwd: project
+exit: 0
+stdout: ~ "stripped 2 dev job(s): seed_data, inspect_job (mark #Job(.Ship) to include)" # original predicate
+step: built greet
+cwd: project
+exit: 0
+stdout: ~ "hello from job" # original predicate
+step: built seed_data
+cwd: project
+exit: nonzero
+stderr: ~ "E1294" # original predicate
+stderr: ~ "no job named `seed_data`" # original predicate
+stderr: ~ "declared jobs: greet" # original predicate
+stderr: !~ "seed_data, inspect_job" # original predicate
+step: jet help
+exit: 0
+stdout: ~ "jet jobs" # original predicate
+mkdir: outside
+step outside_jobs: jet jobs
+cwd: outside
+exit: any # original predicate: only equality with run checked
+step: jet run
+cwd: outside
+exit: == outside_jobs # original predicate
+stderr: == outside_jobs
+copy: {root}/Examples/features/packages/monorepo workspace
+copy: workspace/packages/hello/hello.jet original-hello.jet
+write: job-suffix.txt workspace-job-suffix.template
+concat: workspace/packages/hello/hello.jet original-hello.jet job-suffix.txt
+step: jet jobs
+cwd: workspace
+exit: 2
+stderr: ~ "`jet jobs` is ambiguous" # original predicate
+stderr: ~ "hello" # original predicate
+stderr: ~ "ranker" # original predicate
+stderr: ~ "jet jobs -p <member>" # original predicate
+stderr: !~ "jet run" # original predicate
+step: jet jobs -p hello
+cwd: workspace
+exit: 0
+stdout: = workspace-job.out

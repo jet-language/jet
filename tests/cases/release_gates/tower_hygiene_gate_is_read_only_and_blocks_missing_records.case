@@ -1,0 +1,70 @@
+# Port of tests/release_gates.rs::tower_hygiene_gate_is_read_only_and_blocks_missing_records; all original predicates, runtime UNRUN.
+mkdir: Docs/spec
+mkdir: tower
+write: tower/tower.json = "{\n  \"meta\": {\"version\": 4, \"project\": \"fixture\", \"currentEpoch\": null, \"nextNum\": 1, \"rev\": 0, \"ui\": {\"toggled\": []}},\n  \"epochs\": [{\"id\": \"e1\", \"name\": \"Epoch 1\", \"goal\": \"\", \"status\": \"active\"}],\n  \"milestones\": [],\n  \"cards\": [],\n  \"decisions\": [{\"id\": \"D-OK1\", \"status\": \"ratified\", \"outcome\": \"A\"}],\n  \"questions\": [],\n  \"ideas\": [],\n  \"papercuts\": [],\n  \"events\": []\n}\n"
+write: tower/history.json = "{\"version\": 1, \"decisions\": [], \"cards\": [], \"events\": []}\n"
+write: tower/read-only-marker.txt = "must not change\n"
+write: Docs/spec/ok.md = "D-OK1\n"
+copy: tower/tower.json tower-before
+copy: tower/history.json history-before
+copy: tower/read-only-marker.txt marker-before
+step success: bash {root}/Tools/ci/tower-hygiene-gate.sh
+cwd: {root}
+env: TOWER_DATA={work}/tower
+env: JET_TOWER_LINT_SCOPE={work}/Docs
+env: JET_TOWER_HYGIENE_REPORT={work}/success.txt
+unset: JET_TEST_SHARD
+exit: 0
+file: success.txt ~ "status=pass" # Original success report.contains.
+file: success.txt ~ "read_only=pass" # Original success report.contains.
+file: success.txt ~ "lint_exit=0" # Original success report.contains.
+file: success.txt ~ "lint_repeat_exit=0" # Original success report.contains.
+file: success.txt ~ "lint_json=pass" # Original success report.contains.
+file: success.txt ~ "lint_repeat_json=pass" # Original success report.contains.
+file: success.txt ~ "candidate_commit=" # Original success report.contains.
+file: success.txt ~ "runner_os=" # Original success report.contains.
+file: success.txt ~ "node=v" # Original success report.contains.
+file: success.txt ~ "scope_input=" # Original success report.contains.
+file: tower/tower.json == tower-before
+file: tower/history.json == history-before
+file: tower/read-only-marker.txt == marker-before
+write: Docs/spec/bad.md = "D-MISSING1\n"
+step failure: bash {root}/Tools/ci/tower-hygiene-gate.sh
+cwd: {root}
+env: TOWER_DATA={work}/tower
+env: JET_TOWER_LINT_SCOPE={work}/Docs
+env: JET_TOWER_HYGIENE_REPORT={work}/failure.txt
+unset: JET_TEST_SHARD
+exit: nonzero
+file: failure.txt ~ "status=fail" # Original failure report.contains.
+file: failure.txt ~ "lint_exit=1" # Original failure report.contains.
+file: failure.txt ~ "lint_repeat_exit=1" # Original failure report.contains.
+file: failure.txt ~ "spec-decision-ref-missing" # Original failure report.contains.
+file: failure.txt ~ "D-MISSING1" # Original failure report.contains.
+file: tower/tower.json == tower-before
+file: tower/history.json == history-before
+file: tower/read-only-marker.txt == marker-before
+mkdir: outside
+step traversal: bash {root}/Tools/ci/tower-hygiene-gate.sh
+cwd: {root}
+env: TOWER_DATA={work}/tower
+env: JET_TOWER_LINT_SCOPE={work}/Docs
+env: JET_TOWER_HYGIENE_REPORT={work}/outside/../tower/traversal.txt
+unset: JET_TEST_SHARD
+exit: nonzero
+file: tower/traversal.txt absent
+mkdir: tower/tower.json.lock
+write: tower/tower.json.lock/info.json = "{\"pid\": 1, \"at\": 0}\n"
+step locked: bash {root}/Tools/ci/tower-hygiene-gate.sh
+cwd: {root}
+env: TOWER_DATA={work}/tower
+env: JET_TOWER_LINT_SCOPE={work}/Docs
+env: JET_TOWER_HYGIENE_REPORT={work}/locked.txt
+unset: JET_TEST_SHARD
+exit: nonzero
+file: locked.txt ~ "read_only=blocked" # Original locked report.contains.
+file: locked.txt ~ "lint_exit=not-run" # Original locked report.contains.
+file: locked.txt ~ "write lock" # Original locked report.contains.
+remove: tower/tower.json.lock
+file: {root}/Tools/agent/verify-full.sh ~ "Tools/ci/tower-hygiene-gate.sh" # Original integration source.contains.
+

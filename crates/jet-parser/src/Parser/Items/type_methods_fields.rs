@@ -140,7 +140,12 @@ impl<'a> Parser<'a> {
         while matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+        // D-VIS-MODULE1: methods are public like every declaration; a retired
+        // `pub` is reported and deleted.
+        if matches!(self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
+        }
+        let (is_pub, is_package_pub) = (true, false);
         // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A:
         // `prep` marks a build-time method directly before the ordinary
         // `fn` keyword. Keep it on the AST instead of folding it into purity;
@@ -189,7 +194,8 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn field(&mut self) -> Result<Field, Diagnostic> {
-        let (is_pub, is_package_pub) = self.parse_pub_qualifier();
+        let is_pub = self.parse_field_visibility();
+        let is_package_pub = false;
         let (name, name_span) = self.expect_ident("for a field name")?;
         // D-META-STAGE1=B: the compile-time mark rides the name, so
         // `@word` now lexes as one identifier. A field never carries it —
@@ -258,6 +264,7 @@ impl<'a> Parser<'a> {
         let target = self.expr()?;
         for marker in &markers {
             self.bind_rule_fact(
+                &marker.name,
                 marker.name_span,
                 Some(name_span),
                 crate::Policy::RuleSite::Field,
@@ -276,8 +283,7 @@ impl<'a> Parser<'a> {
     /// binding's `#Persist` falls through to the E0145 teaching diagnostic
     /// in `Statements.rs` instead).
     pub(in crate::Parser) fn at_persist_binding(&self) -> bool {
-        matches!(&self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PERSIST)
+        self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_PERSIST)
     }
 
     /// D-CONSTMARK1: true at `#Static` / `#Inline` (or retired lowercase)

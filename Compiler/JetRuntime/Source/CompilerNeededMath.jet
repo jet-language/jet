@@ -1,0 +1,100 @@
+// Native compiler math routes, parity: Jet-only (Rust frozen).
+// MathRandomFns.rs and MathLibPure.rs delegate these operations to f64's
+// platform intrinsics/libm. Import that same C operation, never approximate
+// transcendental functions or unfuse mul_add. The runtime link supplies libm.
+#Import(c) fn compiler_math_acos(x: Float) -> Float = "acos"
+#Import(c) fn compiler_math_acosh(x: Float) -> Float = "acosh"
+#Import(c) fn compiler_math_asin(x: Float) -> Float = "asin"
+#Import(c) fn compiler_math_asinh(x: Float) -> Float = "asinh"
+#Import(c) fn compiler_math_atan(x: Float) -> Float = "atan"
+#Import(c) fn compiler_math_atan2(y: Float, x: Float) -> Float = "atan2"
+#Import(c) fn compiler_math_atanh(x: Float) -> Float = "atanh"
+#Import(c) fn compiler_math_cbrt(x: Float) -> Float = "cbrt"
+#Import(c) fn compiler_math_ceil(x: Float) -> Float = "ceil"
+#Import(c) fn compiler_math_cos(x: Float) -> Float = "cos"
+#Import(c) fn compiler_math_cosh(x: Float) -> Float = "cosh"
+#Import(c) fn compiler_math_exp(x: Float) -> Float = "exp"
+#Import(c) fn compiler_math_exp_m1(x: Float) -> Float = "expm1"
+#Import(c) fn compiler_math_exp2(x: Float) -> Float = "exp2"
+#Import(c) fn compiler_math_floor(x: Float) -> Float = "floor"
+#Import(c) fn compiler_math_fma(a: Float, b: Float, c: Float) -> Float = "fma"
+#Import(c) fn compiler_math_fmod(x: Float, y: Float) -> Float = "fmod"
+#Import(c) fn compiler_math_hypot(x: Float, y: Float) -> Float = "hypot"
+#Import(c) fn compiler_math_ln(x: Float) -> Float = "log"
+#Import(c) fn compiler_math_ln_1p(x: Float) -> Float = "log1p"
+#Import(c) fn compiler_math_log10(x: Float) -> Float = "log10"
+#Import(c) fn compiler_math_log2(x: Float) -> Float = "log2"
+#Import(c) fn compiler_math_sin(x: Float) -> Float = "sin"
+#Import(c) fn compiler_math_sinh(x: Float) -> Float = "sinh"
+#Import(c) fn compiler_math_sqrt(x: Float) -> Float = "sqrt"
+#Import(c) fn compiler_math_tan(x: Float) -> Float = "tan"
+#Import(c) fn compiler_math_tanh(x: Float) -> Float = "tanh"
+#Import(c) fn compiler_math_trunc(x: Float) -> Float = "trunc"
+
+#Export(c) fn jet_std_math_acos(x: Float) -> Float { compiler_math_acos(x) }
+#Export(c) fn jet_std_math_acosh(x: Float) -> Float { compiler_math_acosh(x) }
+#Export(c) fn jet_std_math_asin(x: Float) -> Float { compiler_math_asin(x) }
+#Export(c) fn jet_std_math_asinh(x: Float) -> Float { compiler_math_asinh(x) }
+#Export(c) fn jet_std_math_atan(x: Float) -> Float { compiler_math_atan(x) }
+#Export(c) fn jet_std_math_atan2(y: Float, x: Float) -> Float { compiler_math_atan2(y, x) }
+#Export(c) fn jet_std_math_atanh(x: Float) -> Float { compiler_math_atanh(x) }
+#Export(c) fn jet_std_math_cbrt(x: Float) -> Float { compiler_math_cbrt(x) }
+#Export(c) fn jet_std_math_ceil(x: Float) -> Float { compiler_math_ceil(x) }
+#Export(c) fn jet_std_math_cos(x: Float) -> Float { compiler_math_cos(x) }
+#Export(c) fn jet_std_math_cosh(x: Float) -> Float { compiler_math_cosh(x) }
+#Export(c) fn jet_std_math_exp(x: Float) -> Float { compiler_math_exp(x) }
+#Export(c) fn jet_std_math_exp_m1(x: Float) -> Float { compiler_math_exp_m1(x) }
+#Export(c) fn jet_std_math_exp2(x: Float) -> Float { compiler_math_exp2(x) }
+#Export(c) fn jet_std_math_floor(x: Float) -> Float { compiler_math_floor(x) }
+#Export(c) fn jet_std_math_fma(a: Float, b: Float, c: Float) -> Float { compiler_math_fma(a, b, c) }
+#Export(c) fn jet_std_math_fmod(x: Float, y: Float) -> Float { compiler_math_fmod(x, y) }
+#Export(c) fn jet_std_math_hypot(x: Float, y: Float) -> Float { compiler_math_hypot(x, y) }
+#Export(c) fn jet_std_math_ln(x: Float) -> Float { compiler_math_ln(x) }
+#Export(c) fn jet_std_math_ln_1p(x: Float) -> Float { compiler_math_ln_1p(x) }
+#Export(c) fn jet_std_math_log10(x: Float) -> Float { compiler_math_log10(x) }
+#Export(c) fn jet_std_math_log2(x: Float) -> Float { compiler_math_log2(x) }
+#Export(c) fn jet_std_math_sin(x: Float) -> Float { compiler_math_sin(x) }
+#Export(c) fn jet_std_math_sinh(x: Float) -> Float { compiler_math_sinh(x) }
+#Export(c) fn jet_std_math_sqrt(x: Float) -> Float { compiler_math_sqrt(x) }
+#Export(c) fn jet_std_math_tan(x: Float) -> Float { compiler_math_tan(x) }
+#Export(c) fn jet_std_math_tanh(x: Float) -> Float { compiler_math_tanh(x) }
+#Export(c) fn jet_std_math_trunc(x: Float) -> Float { compiler_math_trunc(x) }
+
+// abs is a sign-bit clear, including -0 and signaling NaN payloads.
+#Export(c) fn jet_std_math_abs_f64(x: Float) -> Float {
+    rt_f64_from_bits(rt_f64_bits(x).bit_and(I64{9223372036854775807}))
+}
+#Export(c) fn jet_std_math_is_nan(x: Float) -> Bool {
+    (rt_f64_bits(x).bit_and(I64{9223372036854775807})) > I64{9218868437227405312}
+}
+#Export(c) fn jet_std_math_is_infinite(x: Float) -> Bool {
+    (rt_f64_bits(x).bit_and(I64{9223372036854775807})) == I64{9218868437227405312}
+}
+#Export(c) fn jet_std_math_is_finite(x: Float) -> Bool {
+    (rt_f64_bits(x).bit_and(I64{9223372036854775807})) < I64{9218868437227405312}
+}
+// MathLibPure.rs partial_cmp: equal zeros; all NaNs equal and after numbers.
+#Export(c) fn jet_std_math_cmp(a: Float, b: Float) -> I64 {
+    if (a < b) -> return I64{-1}
+    if (a == b) -> return I64{0}
+    if (a > b) -> return I64{1}
+    if jet_std_math_is_nan(a) {
+        return if jet_std_math_is_nan(b) -> I64{0} else -> I64{1}
+    }
+    I64{-1}
+}
+// FloatBits.jet supplies the already-audited native LIR bitcast intrinsic.
+// Native Word inputs are exact Int carriers. int_word is the existing
+// allocation-free wrapping-u64 projection, matching evaluator wrapping_bits.
+#Export(c) fn jet_std_math_from_bits(bits: I64) -> Float {
+    raw :: if int_inline(bits) -> bits else -> int_word(bits)
+    rt_f64_from_bits(raw)
+}
+#Export(c) fn jet_std_math_to_bits(x: Float) -> I64 { jet_int_owned_from_i64(rt_f64_bits(x)) }
+// Rust f64::sin_cos evaluates the separate sin/cos calls, in that tuple order.
+#Export(c) fn jet_std_math_sin_cos(x: Float, sine: I64, cosine: I64) {
+    s :: compiler_math_sin(x)
+    c :: compiler_math_cos(x)
+    rt_text_store(sine, rt_f64_bits(s))
+    rt_text_store(cosine, rt_f64_bits(c))
+}

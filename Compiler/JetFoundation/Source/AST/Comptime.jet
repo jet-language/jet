@@ -1,11 +1,11 @@
 // Compile-time values retained on AST nodes and semantic projections.
 
-pub enum CtFloat {
+enum CtFloat {
     F32(value: Float)
     F64(value: Float)
 }
 
-pub enum CtValue {
+enum CtValue {
     Int(value: Int)
     Float(value: CtFloat)
     Bool(value: Bool)
@@ -23,40 +23,41 @@ pub enum CtValue {
     Closure(value: ClosureData)
 }
 
-pub struct CtMapEntry {
-    pub key: CtKey
-    pub value: CtValue
+struct CtMapEntry {
+    key: CtKey
+    value: CtValue
 }
 
-pub struct NamedCtValue {
-    pub name: String
-    pub value: CtValue
+struct NamedCtValue {
+    name: String
+    value: CtValue
 }
 
-pub struct CtEnumArg {
-    pub label: String?
-    pub value: CtValue
+struct CtEnumArg {
+    label: String?
+    value: CtValue
 }
 
-pub enum CtReport {
+enum CtReport {
     Clean(ty: Type)
     Told(value: CtValue)
 }
 
-pub struct ClosureData {
-    pub lambda: Lambda
-    pub captured: [NamedCtValue]
-    pub return_type: Type?
-    pub opaque: CtOpaque?
+struct ClosureData {
+    lambda: Lambda
+    captured: [NamedCtValue]
+    return_type: Type?
+    opaque: CtOpaque?
 }
 
-pub struct CtOpaque {
-    pub kind: String
-    pub identity: String
+struct CtOpaque {
+    kind: String
+    identity: String
 }
 
-pub enum CtKey {
+enum CtKey {
     Int(value: Int)
+    BigInt(decimal: String)
     Str(value: String)
     Bool(value: Bool)
     Char(value: Char)
@@ -65,34 +66,74 @@ pub enum CtKey {
     Enum(type_name: String, variant: String)
 }
 
-pub struct NamedCtKey {
-    pub name: String
-    pub value: CtKey
+struct NamedCtKey {
+    name: String
+    value: CtKey
 }
 
-pub enum FailureContract {
+enum FailureContract {
     Default(success: Type, error: Type)
     Optional(success: Type)
     DeclaredNever
     Explicit(success: Type, error: Type)
     Converted(success: Type, source: Type, target: Type)
     ProvenUnreachable(success: Type)
+    // #3708: no contract was written and sema proved the failure set empty;
+    // the `ProvenUnreachable` carrier with inferred provenance.
+    InferredNever(success: Type)
+    // D-FAIL-INFER-UNION1=A: no contract was written and sema inferred the
+    // typed failures (one member or their union) that reach the function.
+    Inferred(success: Type, error: Type)
+}
+
+// Rust `FailureContract::from_return_type`: the contract a written return
+// type declares.
+fn failure_contract_from_return_type(return_type: Type?) -> FailureContract Never! {
+    declared :: return_type ?? return FailureContract.Default{success: Type.Named{name: "Unit"}, error: Type.Named{name: "Err"}}
+    if declared == {
+        .Named(name) -> if name == "Never" -> return FailureContract.DeclaredNever
+        .Result(ok, err) -> {
+            if err == .Named(name) && name == "Never" -> return FailureContract.ProvenUnreachable{success: ok}
+            return FailureContract.Explicit{success: ok, error: err}
+        }
+        .Option(success) -> return FailureContract.Optional{success: success}
+        else -> {}
+    }
+    FailureContract.Default{success: declared, error: Type.Named{name: "Err"}}
+}
+
+// Rust `Func::failure_contract`: sema projects a solved contract onto the
+// declaration with no written span, so a span-less `T Never!` is the
+// inferred-empty set and a span-less typed error is an inferred union. The
+// defaulted `run` keeps its span-less `Err!` as an explicit contract.
+fn failure_contract_of_function(return_type: Type?, return_type_span: Span?) -> FailureContract Never! {
+    contract :: failure_contract_from_return_type(return_type)
+    if return_type_span != None -> return contract
+    if contract == {
+        .ProvenUnreachable(success) -> return FailureContract.InferredNever{success: success}
+        .Explicit(success, error) -> {
+            if error == .Named(name) && name == "Err" -> return contract
+            return FailureContract.Inferred{success: success, error: error}
+        }
+        else -> {}
+    }
+    contract
 }
 
 // The failure route a callable exposes to its callers.
-pub fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
+fn failure_contract_effective_type(contract: FailureContract) -> Type Never! {
     if contract == {
         .DeclaredNever -> Type.Named{name: "Never"}
-        .Default(success, error) | .Explicit(success, error) -> Type.Result{ok: success, err: error}
+        .Default(success, error) | .Explicit(success, error) | .Inferred(success, error) -> Type.Result{ok: success, err: error}
         .Optional(success) -> Type.Option{inner: success}
         .Converted(success, _, target) -> Type.Result{ok: success, err: target}
-        .ProvenUnreachable(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
+        .ProvenUnreachable(success) | .InferredNever(success) -> Type.Result{ok: success, err: Type.Named{name: "Never"}}
     }
 }
 
 // Stable tooling projection of where the effective failure route came from;
 // consumers read this fact instead of reconstructing it from the rendered type.
-pub fn failure_contract_source(contract: FailureContract) -> String Never! {
+fn failure_contract_source(contract: FailureContract) -> String Never! {
     if contract == {
         .Default(_, _) -> "implicit default !Err"
         .Optional(_) -> "optional success"
@@ -100,12 +141,14 @@ pub fn failure_contract_source(contract: FailureContract) -> String Never! {
         .Converted(_, source, target) -> "converted {type_name(source)} -> {type_name(target)}"
         .DeclaredNever -> "declared Never return"
         .ProvenUnreachable(_) -> "explicit !Never (proven unreachable)"
+        .InferredNever(_) -> "inferred: none"
+        .Inferred(_, error) -> "inferred: {type_name(error)}"
     }
 }
 
-pub fn ast_comptime_key_type(key: CtKey) -> Type Never! {
+fn ast_comptime_key_type(key: CtKey) -> Type Never! {
     if key == {
-        .Int(_) -> Type.Int
+        .Int(_) | .BigInt(_) -> Type.Int
         .Str(_) -> Type.String
         .Bool(_) -> Type.Bool
         .Char(_) -> Type.Char
@@ -118,7 +161,7 @@ pub fn ast_comptime_key_type(key: CtKey) -> Type Never! {
     }
 }
 
-pub fn ast_comptime_value_type(value: CtValue) -> Type Never! {
+fn ast_comptime_value_type(value: CtValue) -> Type Never! {
     if value == {
         .Int(_) | .BigInt(_) -> Type.Int
         .Float(number) -> if number == {
@@ -145,4 +188,572 @@ pub fn ast_comptime_value_type(value: CtValue) -> Type Never! {
         .Unit -> Type.Named{name: "Unit"}
         .Closure(_) -> Type.Fn{params: [Type]{}, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
     }
+}
+
+// One named site an expression walk visits: a call's name or an identifier
+// read, with its source span.
+struct ComptimeNameSite {
+    name: String
+    span: Span
+}
+
+// Rust jet-comptime `walk_calls`: every direct `Call` name in an expression
+// tree, in visit order (shallow over lambda and `#Impure` bodies, crossing
+// `prep` blocks; `WalkOpts::PLAIN`).
+fn comptime_walk_calls(expr: Expr) -> [ComptimeNameSite] Never! {
+    sites := [ComptimeNameSite]{}
+    ast_comptime_walk_expr(expr, true, &sites)
+    sites
+}
+
+// Rust jet-comptime `walk_identifiers`: every identifier an expression reads.
+// A syntax walk only: function and type names are identifiers too, so a
+// consumer filters the names against its own declarations.
+fn comptime_walk_identifiers(expr: Expr) -> [ComptimeNameSite] Never! {
+    sites := [ComptimeNameSite]{}
+    ast_comptime_walk_expr(expr, false, &sites)
+    sites
+}
+
+// Rust `walk_expr_nodes` under `WalkOpts::PLAIN`; `calls` picks the visited
+// node kind (Call names, else Ident reads).
+fn ast_comptime_walk_expr(expr: Expr, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+    if expr == {
+        .Ident(name, span) -> {
+            if !calls -> &sites.push(ComptimeNameSite{name: name, span: span})
+        }
+        .Call(call) -> {
+            if calls -> &sites.push(ComptimeNameSite{name: call.name, span: call.name_span})
+            loop arg in call.args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+        }
+        .Str(parts, _) -> {
+            loop part in parts {
+                if part == .Interp(inner, _) -> ast_comptime_walk_expr(inner, calls, &sites)
+            }
+        }
+        .ListLit(items, _) -> loop item in items -> ast_comptime_walk_expr(item, calls, &sites)
+        .CompareChain(operands, _, _, _) -> loop item in operands -> ast_comptime_walk_expr(item, calls, &sites)
+        .MemberSpread(base, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
+        .Spread(inner, _) | .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _) | .Place(inner, _, _) | .Field(inner, _, _) | .Tainted(inner, _, _) | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _) -> ast_comptime_walk_expr(inner, calls, &sites)
+        .Try(inner, _, _, note) -> {
+            ast_comptime_walk_expr(inner, calls, &sites)
+            if note == .Val(context) -> ast_comptime_walk_expr(context, calls, &sites)
+        }
+        .OptField(base, _, _, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
+        .Range(start, end, _, _) -> {
+            ast_comptime_walk_expr(start, calls, &sites)
+            ast_comptime_walk_expr(end, calls, &sites)
+        }
+        .MapLit(entries, _) -> {
+            loop entry in entries {
+                ast_comptime_walk_expr(entry.key, calls, &sites)
+                ast_comptime_walk_expr(entry.value, calls, &sites)
+            }
+        }
+        .Index(base, index, _, _) -> {
+            ast_comptime_walk_expr(base, calls, &sites)
+            ast_comptime_walk_expr(index, calls, &sites)
+        }
+        .Slice(base, start, end, range, _) -> {
+            ast_comptime_walk_expr(base, calls, &sites)
+            if range == .Val(whole) {
+                ast_comptime_walk_expr(whole, calls, &sites)
+            } else {
+                ast_comptime_walk_expr(start, calls, &sites)
+                ast_comptime_walk_expr(end, calls, &sites)
+            }
+        }
+        .Binary(_, left, right, _) -> {
+            ast_comptime_walk_expr(left, calls, &sites)
+            ast_comptime_walk_expr(right, calls, &sites)
+        }
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) -> {
+            ast_comptime_walk_expr(receiver, calls, &sites)
+            loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+        .TypedLit(_, body, _) -> {
+            if body == {
+                .Fields(fields) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+                .Elements(elements) -> loop element in elements -> ast_comptime_walk_expr(element, calls, &sites)
+                .Entries(entries) -> {
+                    loop entry in entries {
+                        ast_comptime_walk_expr(entry.key, calls, &sites)
+                        ast_comptime_walk_expr(entry.value, calls, &sites)
+                    }
+                }
+                .Value(value) -> ast_comptime_walk_expr(value, calls, &sites)
+                .ByteText(_) | .Empty -> {}
+            }
+        }
+        .EnumLit(_, _, _, args, _, _) -> {
+            loop arg in args {
+                if arg == {
+                    .Positional(value) -> ast_comptime_walk_expr(value, calls, &sites)
+                    .Named(_, value) -> ast_comptime_walk_expr(value, calls, &sites)
+                }
+            }
+        }
+        .PatternTest(subject, pattern, _) -> {
+            ast_comptime_walk_expr(subject, calls, &sites)
+            ast_comptime_walk_pattern(pattern, calls, &sites)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            ast_comptime_walk_expr(value, calls, &sites)
+            if fallback == {
+                .Value(inner) -> ast_comptime_walk_expr(inner, calls, &sites)
+                .Return(returned, _) -> {
+                    if returned == .Val(inner) -> ast_comptime_walk_expr(inner, calls, &sites)
+                }
+                .Block(body, tail, _) -> {
+                    ast_comptime_walk_stmts(body, calls, &sites)
+                    if tail == .Val(inner) -> ast_comptime_walk_expr(inner, calls, &sites)
+                }
+                .Panic(_, args) -> loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+                else -> {}
+            }
+        }
+        .If(cond, then_body, then_value, else_body, else_value, _) -> {
+            ast_comptime_walk_expr(cond, calls, &sites)
+            ast_comptime_walk_stmts(then_body, calls, &sites)
+            ast_comptime_walk_expr(then_value, calls, &sites)
+            ast_comptime_walk_stmts(else_body, calls, &sites)
+            ast_comptime_walk_expr(else_value, calls, &sites)
+        }
+        .TupleLit(fields, _, _) -> loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+        .CallValue(callee, args, _) -> {
+            ast_comptime_walk_expr(callee, calls, &sites)
+            loop arg in args -> ast_comptime_walk_expr(arg.expr, calls, &sites)
+        }
+        .PtrFromAddr(_, _, _, addr, _) -> ast_comptime_walk_expr(addr, calls, &sites)
+        // Lambda bodies are suppressed under PLAIN; literals, `OptMethodCall`
+        // (absent from the Rust walk) and compile-time names have no children.
+        else -> {}
+    }
+}
+
+fn ast_comptime_walk_pattern(pattern: Pattern, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+    if pattern == {
+        .Or(alternatives, _) -> loop alternative in alternatives -> ast_comptime_walk_pattern(alternative, calls, &sites)
+        .Struct(fields, _, _, _) -> {
+            loop field in fields {
+                if field == .Value(_, _, value) -> ast_comptime_walk_expr(value, calls, &sites)
+                if field == .Nested(_, _, inner) -> ast_comptime_walk_pattern(inner, calls, &sites)
+            }
+        }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots -> ast_comptime_walk_pattern_slot(slot, calls, &sites)
+        .Map(entries, _, _) -> loop entry in entries {
+            ast_comptime_walk_expr(entry.key, calls, &sites)
+            ast_comptime_walk_pattern_slot(entry.slot, calls, &sites)
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> ast_comptime_walk_pattern(nested, calls, &sites)
+        }
+        else -> {}
+    }
+}
+
+fn ast_comptime_walk_pattern_slot(slot: PatSlot, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+    if slot == {
+        .Value(value) -> ast_comptime_walk_expr(value, calls, &sites)
+        .Nested(inner) -> ast_comptime_walk_pattern(inner, calls, &sites)
+        .Named(_, _, inner) -> ast_comptime_walk_pattern_slot(inner, calls, &sites)
+        else -> {}
+    }
+}
+
+fn ast_comptime_walk_stmts(body: [Stmt], calls: Bool, sites: &[ComptimeNameSite]) Never! {
+    loop statement in body -> ast_comptime_walk_stmt(statement, calls, &sites)
+}
+
+// Rust `walk_stmt_expr_nodes` under `WalkOpts::PLAIN`: `#Impure` and
+// `#AssumeDet` bodies and switched-off statements are skipped; `prep`
+// blocks are crossed.
+fn ast_comptime_walk_stmt(statement: Stmt, calls: Bool, sites: &[ComptimeNameSite]) Never! {
+    if statement == {
+        .Expr(value) | .DeferClose(value, _) | .Yield(value, _) | .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> ast_comptime_walk_expr(value, calls, &sites)
+        .Val(binding) -> ast_comptime_walk_expr(binding.init, calls, &sites)
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Index(base, index, _, _) -> {
+                    ast_comptime_walk_expr(base, calls, &sites)
+                    ast_comptime_walk_expr(index, calls, &sites)
+                }
+                .Field(base, _, _) -> ast_comptime_walk_expr(base, calls, &sites)
+                .Local(_, _) -> {}
+            }
+            ast_comptime_walk_expr(value, calls, &sites)
+        }
+        .Return(returned, _) -> {
+            if returned == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
+        }
+        .While(cond, body, _, _, _) -> {
+            ast_comptime_walk_expr(cond, calls, &sites)
+            ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    ast_comptime_walk_expr(start, calls, &sites)
+                    ast_comptime_walk_expr(end, calls, &sites)
+                    if step == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
+                }
+                .In(collection, step) -> {
+                    ast_comptime_walk_expr(collection, calls, &sites)
+                    if step == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
+                }
+            }
+            ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            ast_comptime_walk_expr(subject, calls, &sites)
+            loop arm in arms {
+                ast_comptime_walk_expr(arm.cond, calls, &sites)
+                ast_comptime_walk_stmts(arm.body, calls, &sites)
+            }
+            if else_body == .Val(body) -> ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .CountedLoop(init, cond, step, body, _, _, _) -> {
+            ast_comptime_walk_expr(init.init, calls, &sites)
+            ast_comptime_walk_expr(cond, calls, &sites)
+            if step == .Val(value) -> ast_comptime_walk_stmt(value, calls, &sites)
+            ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .Unsafe(_, audit, body, _) -> {
+            if audit == .Val(value) -> ast_comptime_walk_expr(value, calls, &sites)
+            ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .ComptimeIf(cond, _, then_body, else_body, _, _) -> {
+            ast_comptime_walk_expr(cond, calls, &sites)
+            ast_comptime_walk_stmts(then_body, calls, &sites)
+            if else_body == .Val(body) -> ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .ContextBlock(fields, body, _) -> {
+            loop field in fields -> ast_comptime_walk_expr(field.value, calls, &sites)
+            ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
+            loop arg in args -> ast_comptime_walk_expr(arg, calls, &sites)
+            ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .ComptimeBlock(body, _, _) -> ast_comptime_walk_stmts(body, calls, &sites)
+        .Switched(marker, body, _) -> {
+            if marker.name != "Off" -> ast_comptime_walk_stmts(body, calls, &sites)
+        }
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .TaskGroup(_, _, _, body, _) | .Layout(_, _, body, _) | .AuthorityScope(_, _, _, body, _) | .Live(body, _) | .Transact(_, _, body, _, _) -> ast_comptime_walk_stmts(body, calls, &sites)
+        // `#Impure` and `#AssumeDet` bodies are suppressed under PLAIN.
+        else -> {}
+    }
+}
+
+// Rust `CtKey::from_value`: the deterministic scalar or record key a value
+// names, or None for a value that cannot key a map.
+fn ast_comptime_key_from_value(value: CtValue) -> CtKey? Never! {
+    if value == {
+        .Int(number) -> Val(ast_comptime_integer_key(number))
+        .BigInt(decimal) -> {
+            number :: Int.parse(decimal) ?? return None
+            Val(ast_comptime_integer_key(number))
+        }
+        .Str(text) -> Val(CtKey.Str{value: text})
+        .Bool(flag) -> Val(CtKey.Bool{value: flag})
+        .Char(code) -> Val(CtKey.Char{value: code})
+        .Struct(type_name, fields) -> {
+            keys := [NamedCtKey]{}
+            loop field in fields {
+                if ast_comptime_memo_storage_name(field.name) -> next
+                key :: ast_comptime_key_from_value(field.value) ?? return None
+                &keys.push(NamedCtKey{name: field.name, value: key})
+            }
+            if type_name == "tuple" || type_name.starts_with("JetTup_") || type_name.starts_with("(") -> return Val(CtKey.Tuple{fields: keys})
+            Val(CtKey.Struct{type_name: type_name, fields: keys})
+        }
+        .Enum(type_name, variant, args) -> {
+            if type_name == "" || args.len() != 0 -> return None
+            Val(CtKey.Enum{type_name: type_name, variant: variant})
+        }
+        else -> None
+    }
+}
+
+fn ast_comptime_integer_key(number: Int) -> CtKey Never! {
+    if mir_integer_constant(number, None, None) == {
+        .Int(value, _, _) -> CtKey.Int{value: value}
+        .BigInt(decimal) -> CtKey.BigInt{decimal: decimal}
+        else -> panic("integer key materialization is not an integer")
+    }
+}
+
+// Rust `CtKey::to_value`.
+fn ast_comptime_key_to_value(key: CtKey) -> CtValue Never! {
+    if key == {
+        .Int(number) -> CtValue.Int{value: number}
+        .BigInt(decimal) -> CtValue.BigInt{value: decimal}
+        .Str(text) -> CtValue.Str{value: text}
+        .Bool(flag) -> CtValue.Bool{value: flag}
+        .Char(code) -> CtValue.Char{value: code}
+        .Tuple(fields) -> CtValue.Struct{type_name: "tuple", fields: ast_comptime_key_field_values(fields)}
+        .Struct(type_name, fields) -> CtValue.Struct{type_name: type_name, fields: ast_comptime_key_field_values(fields)}
+        .Enum(type_name, variant) -> CtValue.Enum{type_name: type_name, variant: variant, args: [CtEnumArg]{}}
+    }
+}
+
+fn ast_comptime_key_field_values(fields: [NamedCtKey]) -> [NamedCtValue] Never! {
+    values := [NamedCtValue]{}
+    loop field in fields -> &values.push(NamedCtValue{name: field.name, value: ast_comptime_key_to_value(field.value)})
+    values
+}
+
+// Rust `Ord for CtKey` (Prelude MapKey `jet_map_key_cmp` over the key's
+// carrier): kind rank Int, String, Bool, Char, Record; records compare their
+// field values in order, then by length; an enum key is its variant text.
+// Negative, zero, or positive as `left` sorts before, with, or after `right`.
+fn ast_comptime_key_compare(left: CtKey, right: CtKey) -> Int Never! {
+    left_rank :: ast_comptime_key_rank(left)
+    right_rank :: ast_comptime_key_rank(right)
+    if left_rank != right_rank -> return if left_rank < right_rank -> -1 else -> 1
+    if left_rank == 5 {
+        left_fields :: ast_comptime_key_record(left)
+        right_fields :: ast_comptime_key_record(right)
+        loop index in 0..<left_fields.len() {
+            if index >= right_fields.len() -> return 1
+            order :: ast_comptime_key_compare(left_fields[index].value, right_fields[index].value)
+            if order != 0 -> return order
+        }
+        return if left_fields.len() < right_fields.len() -> -1 else -> 0
+    }
+    if left == .Int(left_number) {
+        if right == .Int(right_number) -> return if left_number < right_number -> -1 else -> if left_number > right_number -> 1 else -> 0
+        if right == .BigInt(decimal) -> return if decimal.starts_with("-") -> 1 else -> -1
+    }
+    if left == .BigInt(decimal) {
+        if right == .BigInt(right_decimal) -> return mir_big_integer_key_compare(decimal, right_decimal)
+        if right == .Int(_) -> return if decimal.starts_with("-") -> -1 else -> 1
+    }
+    if left == .Bool(left_flag) {
+        if right == .Bool(right_flag) -> return if left_flag == right_flag -> 0 else -> if left_flag -> 1 else -> -1
+    }
+    if left == .Char(left_code) {
+        if right == .Char(right_code) -> return ast_comptime_bytes_compare("{left_code}".bytes(), "{right_code}".bytes())
+    }
+    ast_comptime_bytes_compare(ast_comptime_key_text(left).bytes(), ast_comptime_key_text(right).bytes())
+}
+
+
+fn ast_comptime_key_rank(key: CtKey) -> Int Never! {
+    if key == {
+        .Int(_) | .BigInt(_) -> 0
+        .Str(_) | .Enum(_, _) -> 2
+        .Bool(_) -> 3
+        .Char(_) -> 4
+        .Tuple(_) | .Struct(_, _) -> 5
+    }
+}
+
+fn ast_comptime_key_record(key: CtKey) -> [NamedCtKey] Never! {
+    if key == {
+        .Tuple(fields) | .Struct(_, fields) -> fields
+        else -> [NamedCtKey]{}
+    }
+}
+
+fn ast_comptime_key_text(key: CtKey) -> String Never! {
+    if key == {
+        .Str(text) -> text
+        .Enum(_, variant) -> variant
+        else -> ""
+    }
+}
+
+// Rust `str::cmp`: lexicographic over the UTF-8 bytes.
+fn ast_comptime_bytes_compare(left: [U8], right: [U8]) -> Int Never! {
+    loop index in 0..<left.len() {
+        if index >= right.len() -> return 1
+        if left[index] != right[index] -> return if left[index] < right[index] -> -1 else -> 1
+    }
+    if left.len() < right.len() -> return -1
+    0
+}
+
+// Rust `Syntax::is_memo_storage_name`: generated memo storage fields.
+fn ast_comptime_memo_storage_name(field: String) -> Bool Never! {
+    field.starts_with("__jet___memo_")
+}
+
+// Rust `CtValue::jet_show`: the Display rendering `print` and string
+// interpolation give a compile-time value. Nominal values render the
+// compiled program's derived Rust `{:?}` spelling (I2).
+fn ast_comptime_value_show(value: CtValue) -> String Never! {
+    if value == {
+        .Int(number) -> "{number}"
+        .Float(number) -> ast_comptime_float_text(number)
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Char(code) -> "{code}"
+        .Str(text) -> text
+        .BigInt(decimal) -> decimal
+        .Bytes(bytes) -> ast_comptime_bytes_list(bytes)
+        .List(values) -> {
+            parts :: loop item in values -> ast_comptime_value_show(item)
+            "[{parts.join(", ")}]"
+        }
+        .Map(entries) -> {
+            parts :: loop entry in entries -> "{ast_comptime_value_show(ast_comptime_key_to_value(entry.key))}: {ast_comptime_value_show(entry.value)}"
+            "[{parts.join(", ")}]"
+        }
+        .Present(inner) -> ast_comptime_value_show(inner)
+        .Failed(report) -> if report == {
+            .Clean(_) -> "null"
+            .Told(_) -> "err"
+        }
+        .Struct(_, _) -> ast_comptime_value_debug(value)
+        .Enum(type_name, variant, args) -> {
+            if type_name == "Loadable" -> return ast_comptime_loadable(variant, args, false)
+            ast_comptime_value_debug(value)
+        }
+        .Unit -> ""
+        .Closure(_) -> "<closure>"
+    }
+}
+
+// Rust `CtValue::debug_rust`: the `{:?}` spelling of the compiled program's
+// derived `Debug`, used for values nested in a nominal.
+fn ast_comptime_value_debug(value: CtValue) -> String Never! {
+    if value == {
+        .Int(number) -> "{number}"
+        .Float(number) -> ast_comptime_float_text(number)
+        .Bool(flag) -> if flag -> "true" else -> "false"
+        .Char(code) -> "'{ast_comptime_debug_escape("{code}", true)}'"
+        .Str(text) -> "\"{ast_comptime_debug_escape(text, false)}\""
+        .BigInt(decimal) -> decimal
+        .Bytes(bytes) -> ast_comptime_bytes_list(bytes)
+        .List(values) -> {
+            parts :: loop item in values -> ast_comptime_value_debug(item)
+            "[{parts.join(", ")}]"
+        }
+        .Map(entries) -> {
+            parts :: loop entry in entries -> "{ast_comptime_value_debug(ast_comptime_key_to_value(entry.key))}: {ast_comptime_value_debug(entry.value)}"
+            ["{{", parts.join(", "), "}}"].join("")
+        }
+        .Present(inner) -> "Ok({ast_comptime_value_debug(inner)})"
+        .Failed(report) -> if report == {
+            .Clean(_) -> "Err(JetAbsent)"
+            .Told(inner) -> "Err({ast_comptime_value_debug(inner)})"
+        }
+        .Struct(type_name, fields) -> {
+            mangled :: ast_comptime_generated_path(ast_comptime_generated_suffix(type_name))
+            parts := [String]{}
+            loop field in fields {
+                if ast_comptime_memo_storage_name(field.name) -> next
+                &parts.push("{ast_comptime_generated_name(ast_comptime_generated_suffix(field.name))}: {ast_comptime_value_debug(field.value)}")
+            }
+            if parts.len() == 0 -> return mangled
+            "{mangled} {{ {parts.join(", ")} }}"
+        }
+        .Enum(type_name, variant, args) -> {
+            if type_name == "Loadable" -> return ast_comptime_loadable(variant, args, true)
+            mangled :: ast_comptime_generated_path(variant)
+            if args.len() == 0 -> return mangled
+            labeled := true
+            loop arg in args {
+                if arg.label == None -> labeled = false
+            }
+            if labeled {
+                parts := [String]{}
+                loop arg in args {
+                    label :: arg.label ?? ""
+                    &parts.push("{label}: {ast_comptime_value_debug(arg.value)}")
+                }
+                return "{mangled} {{ {parts.join(", ")} }}"
+            }
+            parts :: loop arg in args -> ast_comptime_value_debug(arg.value)
+            "{mangled}({parts.join(", ")})"
+        }
+        .Unit -> "()"
+        .Closure(_) -> "<closure>"
+    }
+}
+
+// `Loadable` renders its source variant names (Rust `jet_show`/`debug_rust`).
+fn ast_comptime_loadable(variant: String, args: [CtEnumArg], debug: Bool) -> String Never! {
+    if (variant == "Loaded" || variant == "Failed") && args.len() > 0 {
+        inner :: if debug -> ast_comptime_value_debug(args[0].value) else -> ast_comptime_value_show(args[0].value)
+        return "{variant}({inner})"
+    }
+    variant.copy()
+}
+
+// Rust `CtFloat::render` (`{:?}`), which Jet's Float interpolation matches.
+fn ast_comptime_float_text(number: CtFloat) -> String Never! {
+    if number == {
+        .F32(value) -> "{value}"
+        .F64(value) -> "{value}"
+    }
+}
+
+fn ast_comptime_bytes_list(bytes: [U8]) -> String Never! {
+    parts :: loop byte in bytes -> "{Int.from_u8(byte)}"
+    "[{parts.join(", ")}]"
+}
+
+// Rust `{:?}` escaping inside a quoted string (`"`) or char (`'`) literal.
+fn ast_comptime_debug_escape(text: String, in_char: Bool) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        escaped :: if {
+            byte == (U8{92}) -> U8{92}
+            byte == (U8{10}) -> U8{110}
+            byte == (U8{13}) -> U8{114}
+            byte == (U8{9}) -> U8{116}
+            byte == (U8{34}) && !in_char -> U8{34}
+            byte == (U8{39}) && in_char -> U8{39}
+            else -> U8{0}
+        }
+        if escaped == (U8{0}) {
+            &out.push(byte)
+        } else {
+            &out.push(U8{92})
+            &out.push(escaped)
+        }
+    }
+    String.from_bytes(out) ?? text
+}
+
+// Rust `Syntax::GENERATED_NAME_PREFIX` names: `generated_name` prefixes a
+// plain name once, `generated_suffix` drops the prefix, and `generated_path`
+// encodes a path identity as one injective Rust identifier suffix.
+fn ast_comptime_generated_name(name: String) -> String Never! {
+    if name.starts_with("__jet_") -> return name.copy()
+    "__jet_{name}"
+}
+
+fn ast_comptime_generated_suffix(name: String) -> String Never! {
+    name.removeprefix("__jet_")
+}
+
+fn ast_comptime_generated_path(name: String) -> String Never! {
+    hex :: "0123456789abcdef".bytes()
+    out := "__jet_".bytes()
+    loop byte in name.bytes() {
+        alphanumeric :: (byte >= (U8{48}) && byte <= (U8{57})) || (byte >= (U8{65}) && byte <= (U8{90})) || (byte >= (U8{97}) && byte <= (U8{122}))
+        if alphanumeric {
+            &out.push(byte)
+            next
+        }
+        &out.push(U8{95})
+        if {
+            byte == (U8{95}) -> &out.push(U8{117})
+            byte == (U8{46}) -> &out.push(U8{100})
+            byte == (U8{58}) -> &out.push(U8{99})
+            byte == (U8{47}) -> &out.push(U8{115})
+            byte == (U8{92}) -> &out.push(U8{98})
+            byte == (U8{45}) -> &out.push(U8{104})
+            else -> {
+                code :: Int.from_u8(byte)
+                &out.push(U8{120})
+                &out.push(hex[code /% 16])
+                &out.push(hex[code % 16])
+            }
+        }
+    }
+    String.from_bytes(out) ?? name
 }

@@ -4,8 +4,8 @@
 
 // A rejected environment fact, carrying its exact user-facing message.
 #Error
-pub struct EnvironmentFactError {
-    pub message: String
+struct EnvironmentFactError {
+    message: String
 
     fn new(message: String) -> EnvironmentFactError Never! {
         EnvironmentFactError{message: message}
@@ -19,7 +19,7 @@ ENVMODEL_DEFAULT_DEBOUNCE_MS :: prep { 250 }
 
 // ── Presets ──
 
-pub fn envmodel_presets_from_value(value: CtValue) -> [PresetSpec] EnvironmentFactError! {
+fn envmodel_presets_from_value(value: CtValue) -> [PresetSpec] EnvironmentFactError! {
     presets := [PresetSpec]{}
     loop entry in envmodel_preset_entries(value) -> &presets.push(envmodel_preset_from_value(entry.name, entry.value))
     Ok(presets)
@@ -88,7 +88,7 @@ fn envmodel_checked_struct_fields_named(value: CtValue, scope: String) -> [Strin
 
 // ── Languages ──
 
-pub fn envmodel_languages_from_value(value: CtValue) -> [LanguageSpec] EnvironmentFactError! {
+fn envmodel_languages_from_value(value: CtValue) -> [LanguageSpec] EnvironmentFactError! {
     selections := [LanguageSpec]{}
     if value == {
         .Map(entries) -> {
@@ -218,7 +218,7 @@ fn envmodel_language_token(value: CtValue, field: String) -> String EnvironmentF
 
 // Apply one lifecycle field to `lifecycle`. Returns false when `name` is not a
 // lifecycle field.
-pub fn envmodel_lifecycle_from_field(lifecycle: &EnvironmentLifecycle, name: String, value: CtValue) -> Bool EnvironmentFactError! {
+fn envmodel_lifecycle_from_field(lifecycle: &EnvironmentLifecycle, name: String, value: CtValue) -> Bool EnvironmentFactError! {
     if name == {
         ENV_FIELD_FORMATTER -> lifecycle.formatter = Val(envmodel_formatter_from_value(value))
         "dotenv" -> lifecycle.dotenv = envmodel_dotenv_from_value(value)
@@ -238,7 +238,7 @@ pub fn envmodel_lifecycle_from_field(lifecycle: &EnvironmentLifecycle, name: Str
 // Parse the one-package D-ECO12 formatter fact. `pkgs.nixfmt` is the ratified
 // spelling; `nixpkgs.nixfmt` and an explicit `name@source` remain the same
 // typed package references used by `packages:`.
-pub fn envmodel_formatter_from_value(value: CtValue) -> FormatterSpec EnvironmentFactError! {
+fn envmodel_formatter_from_value(value: CtValue) -> FormatterSpec EnvironmentFactError! {
     raw :: envmodel_string_value(value) ?? return Err(EnvironmentFactError.new("formatter must be one typed package reference"))
     normalized :: if raw.starts_with("pkgs.") -> "nixpkgs.{raw.removeprefix("pkgs.")}" else -> raw
     packages :: Pkg.parse_list(normalized)
@@ -261,7 +261,7 @@ fn envmodel_git_hooks_path_from_value(value: CtValue) -> String EnvironmentFactE
 // Parse both `dotenv: [".env"]` and the expert record form
 // `dotenv: Dotenv{ file: ".env", allow: ["PORT"], secrets: ["TOKEN"] }`. The
 // shape is closed and validated; the result is ordered by file.
-pub fn envmodel_dotenv_from_value(value: CtValue) -> [DotenvSpec] EnvironmentFactError! {
+fn envmodel_dotenv_from_value(value: CtValue) -> [DotenvSpec] EnvironmentFactError! {
     values :: if value == {
         .Str(_) | .Struct(_, _) -> [CtValue]{value}
         .List(items) -> items
@@ -319,31 +319,6 @@ fn envmodel_validate_dotenv_spec(spec: DotenvSpec) EnvironmentFactError! {
     }
 }
 
-// Open a declared dotenv file below a pinned project authority and return the
-// bytes read from that same descriptor. The caller must consume these snapshot
-// bytes rather than reopen the project pathname.
-pub fn envmodel_checked_dotenv_snapshot(root: String, relative: String) -[FS]> [U8] EnvironmentFactError! {
-    if !envmodel_normal_project_path(relative) {
-        return Err(EnvironmentFactError.new("dotenv path must be a normal project-relative path"))
-    }
-    resolver :: if AuthorityResolver.open(root) == {
-        .Ok(opened) -> opened
-        .Err(error) -> { return Err(EnvironmentFactError.new(error.message())) }
-    }
-    file :: if resolver.checked_file(relative) == {
-        .Ok(checked) -> checked
-        .Err(error) -> { return Err(EnvironmentFactError.new(error.message())) }
-    }
-    // D-CORE-FILESTAT1: the opened descriptor's link count.
-    info :: if file.handle.stat() == {
-        .Ok(stat) -> stat
-        .Err(error) -> { return Err(EnvironmentFactError.new("couldn't inspect dotenv file authority: {error}")) }
-    }
-    if info.links > 1 -> return Err(EnvironmentFactError.new("dotenv file must not be a hard link to another path"))
-    if resolver.revalidate_file(file) == .Err(error) -> return Err(EnvironmentFactError.new(error.message()))
-    Ok(file.bytes)
-}
-
 // Dotenv record fields: de-duplicated and restricted to `file`, `allow`, and
 // `secrets`.
 fn envmodel_checked_dotenv_fields(value: CtValue) -> [String: CtValue] EnvironmentFactError! {
@@ -373,7 +348,7 @@ fn envmodel_dotenv_names(value: CtValue) -> [String] EnvironmentFactError! {
 }
 
 // `[A-Za-z_][A-Za-z0-9_]*`
-pub fn envmodel_valid_env_name(name: String) -> Bool Never! {
+fn envmodel_valid_env_name(name: String) -> Bool Never! {
     raw :: name.bytes()
     if raw.len() == 0 -> return false
     first :: Int.from_u8(raw[0])

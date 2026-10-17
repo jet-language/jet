@@ -1,0 +1,10 @@
+# Original tests/semindex.rs:1382-1437; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_dossier_stitches_scattered_members.fixture
+step: jet inspect semindex dossier_scattered.jet --json
+json: stdout doc $.semindex.members[?owner="Widget"][?name="title"][?signature="title: String"] #>= 1
+json: stdout doc $.semindex.members[?owner="Widget"][?name="label"][?signature~="fn label() -> String"] #>= 1
+json: stdout doc $.semindex.members[?owner="Widget"][?name="size"][?signature~="fn size() -> Int"] #>= 1
+json: stdout doc $.semindex.members[?owner="Widget"][?name="render"][?signature~="fn render() -> String"] #>= 1
+json: stdout doc $.semindex.members[?owner="Widget"][?origin.kind="trait_impl"] #>= 1
+json: stdout doc $.semindex.members[?owner="Widget"][?origin.kind="inherent_impl"] #>= 1

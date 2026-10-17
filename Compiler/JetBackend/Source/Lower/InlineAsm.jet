@@ -1,0 +1,77 @@
+// MIR retains the checked foreign language and UTF-8 source span, not the
+// template. Recover only the triple-quoted body within that exact span.
+use jet_foundation.[MIRFunction, MIRProgram]
+
+fn lower_asm_source(p: MIRProgram, m: LowerModule, function: MIRFunction) -> String? Never! {
+    row :: m.source_rows.get(function.source_file.value) ?? return None
+    bytes :: p.source_files[row].source.bytes()
+    start :: function.span.start
+    end :: function.span.end
+    if start < 0 || end < start || end > bytes.len() -> return None
+    open := -1
+    at := start
+    loop at + 2 < end {
+        if bytes[at] == (U8{34}) && bytes[at + 1] == (U8{34}) && bytes[at + 2] == (U8{34}) {
+            if open < 0 {
+                open = at + 3
+                at += 3
+                next
+            }
+            return Val(String.from_bytes(bytes.slice(open, at)) ?? return None)
+        }
+        at += 1
+    }
+    None
+}
+
+fn lower_asm_inline_int(m: &LowerModule, f: &LowerFunction, value: LIRValueID) Never! {
+    shift62 :: lower_const(&f, 62)
+    shift63 :: lower_const(&f, 63)
+    top62 :: lower_numeric_binary(&f, LIRBinaryOp.Shr, value, shift62)
+    top63 :: lower_numeric_binary(&f, LIRBinaryOp.Shr, value, shift63)
+    failed :: lower_numeric_compare(&f, LIRCondition.Ne, top62, top63)
+    lower_check(&m, &f, failed, "jet_rt_panic_overflow")
+}
+
+fn lower_asm_function(p: MIRProgram, m: &LowerModule, f: &LowerFunction, function: MIRFunction) Never! {
+    source :: lower_asm_source(p, m, function) ?? return lower_fail(&m, &f, "inline asm: missing triple-quoted body within the checked source span")
+    names := [String]{}
+    args := [LIRValueID]{}
+    loop param in function.params {
+        layout :: lower_repr_layout(lower_repr(p, param.ty)) ?? return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine word")
+        if layout != lir_layout_word() && layout != lir_layout_pointer() {
+            return lower_fail(&m, &f, "inline asm: parameter {param.name} is not a machine word")
+        }
+        if param.access == .Write {
+            return lower_fail(&m, &f, "inline asm: write parameters are unsupported")
+        }
+        &names.push(param.name)
+        &args.push(lower_new_value(&f, layout, LIRDrop.Trivial, param.ty.identity))
+    }
+    result_layout :: lower_repr_layout(lower_repr(p, function.return_type))
+    if result_layout == .Val(layout) {
+        if layout != lir_layout_word() && layout != lir_layout_pointer() {
+            return lower_fail(&m, &f, "inline asm: result is not a machine word")
+        }
+    } else if lower_repr(p, function.return_type) != .Absent {
+        return lower_fail(&m, &f, "inline asm: unsupported result")
+    }
+    assembled :: x64_assemble_template(source, names, result_layout != None)
+    if assembled.error == .Val(reason) -> return lower_fail(&m, &f, reason)
+    dst := LIRValueID?{None}
+    if result_layout == .Val(layout) {
+        dst = Val(lower_new_value(&f, layout, LIRDrop.Trivial, function.return_type.identity))
+    }
+    block :: lower_new_block(&f)
+    lower_start(&f, block, args)
+    loop (i, param) in function.params {
+        if lower_convert_type(param.ty).kind == .Int -> lower_asm_inline_int(&m, &f, args[i])
+    }
+    lower_emit(&f, LIRInst.InlineAsm{dst: dst, args: args, regs: assembled.regs, result: assembled.result, code: assembled.code})
+    if dst == .Val(output) {
+        if lower_convert_type(function.return_type).kind == .Int {
+            lower_asm_inline_int(&m, &f, output)
+        }
+    }
+    lower_seal(&f, LIRTerminator.Return{value: dst})
+}

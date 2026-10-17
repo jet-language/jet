@@ -1,0 +1,120 @@
+# Port of tests/polyglot_systems.rs:1079-1098 (c) and all original helpers381-1076.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# Direct needs_native/session_result(s,c)/Finished/program-finished/42: ledger-only PENDING-SEAM(debug-lib), no CLI substitute.
+requires: os:unix
+fixture: mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.fixture
+write: c/package.jet mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.package.template
+step: jet run observe/tools.jet
+exit: 0
+capture: cc stdout doc $.cc
+capture: ar stdout doc $.ar
+capture: clang stdout doc $.clang
+capture: strip stdout doc $.strip
+capture: nm stdout doc $.nm
+capture: javac stdout doc $.javac
+capture: node stdout doc $.node
+capture: python3 stdout doc $.python3
+capture: java_home stdout doc $.java_home
+capture: libjvm stdout doc $.libjvm
+capture: strip_flag stdout doc $.strip_flag
+file: {cap:libjvm} is-file # original JAVA_HOME embedded runtime assertion542-547
+step: {cap:cc} -std=c11 -fPIC -c -pthread counter.c -o counter.o
+cwd: c
+env: NO_COLOR=1
+exit: 0
+step: {cap:ar} rcs libcounter.a counter.o
+cwd: c
+env: NO_COLOR=1
+exit: 0
+step: jet inspect bind counter.h --pkg counter
+cwd: c
+env: NO_COLOR=1
+exit: 0
+file: c/.jet/bindings/c/counter.jet ~ "jet-ffi-descriptor=" # original ed77c235f tests/polyglot_systems.rs:748-751 generated C cache contains descriptor
+file: c/.jet/bindings/c/counter.provenance ~ "schema=jet-ffi-bridge-provenance-v1\n" # original common provenance
+file: c/.jet/bindings/c/counter.provenance line ^= "identity=" # original any line starts identity
+file: c/.jet/bindings/c/counter.provenance ~ "linked-archive=" # original ed77c235f tests/polyglot_systems.rs:756 C provenance contains linked archive
+file: c/.jet/bindings/c/counter.provenance ~ "linked-archive-sha256=" # original ed77c235f tests/polyglot_systems.rs:757 C provenance contains linked archive digest
+file: c/.jet/bindings/c/counter.hash is-file
+copy: c/libcounter.a archive.before
+append: c/libcounter.a "\u0000" # original changed_archive.push(0)
+step: jet run run.jet
+cwd: c
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+copy: archive.before c/libcounter.a
+step: jet check run.jet
+cwd: c
+env: NO_COLOR=1
+exit: 0
+step: jet build --profile=debug run.jet
+cwd: c
+env: NO_COLOR=1
+exit: 0
+step: jet test --coverage --profile=debug run.jet
+cwd: c
+env: NO_COLOR=1
+exit: 0
+stdout+stderr: ~ "coverage:" # original coverage report
+step: jet run --profile=debug run.jet
+cwd: c
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.out
+step: jet perf run run.jet --profile=debug --out {work}/c/profile.jettrace
+cwd: c
+env: NO_COLOR=1
+exit: 0
+file: c/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; C call768
+file: c/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; C call768
+file: c/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; C call768
+file: c/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; C call768
+step: jet perf view profile.jettrace --json
+cwd: c
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original ed77c235f tests/polyglot_systems.rs:680 shared workflow view contains kind; C call768
+stdout: ~ "\"flamegraph\":" # original ed77c235f tests/polyglot_systems.rs:681 shared workflow view contains flamegraph; C call768
+step: {cap:strip} {cap:strip_flag} libcounter.a
+cwd: c
+env: NO_COLOR=1
+exit: 0
+step: jet inspect bind counter.h --pkg counter
+cwd: c
+env: NO_COLOR=1
+exit: 0
+step: jet run --profile=release run.jet
+cwd: c
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.out
+capture: before = text file c/.jet/bindings/c/counter.jet
+capture: stale = text file.replace_first("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-") c/.jet/bindings/c/counter.jet
+cap:stale: != "{cap:before}" # original replacen changes the cached descriptor
+write: c/.jet/bindings/c/counter.jet = "{cap:stale}"
+step: jet check run.jet
+cwd: c
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+step: jet inspect bind counter.h --pkg counter
+cwd: c
+env: NO_COLOR=1
+exit: 0
+step: jet run --profile=debug run.jet
+cwd: c
+env: NO_COLOR=1
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.out
+step: jet inspect bind broken.h --pkg broken
+cwd: c
+env: NO_COLOR=1
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+file: c/.jet/bindings/c/broken.jet absent
+write: c/broken.h mixed_repo_edit_test_debug_profile_and_recovery_workflows.c.repaired.template
+step: jet inspect bind broken.h --pkg broken
+cwd: c
+env: NO_COLOR=1
+exit: 0

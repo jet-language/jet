@@ -1,0 +1,23 @@
+# Port of tests/cffi.rs:3145-3248; separate worker roots and shared bridge-cache key retained.
+# ORACLE-LITERAL stdout tests/cffi.rs:3193. Native staticlib mode preserves one helper artifact per key.
+# PENDING-GRAMMAR(batch2 spawn/wait, batch4 filtered entries/sole-entry capture); runtime PENDING-SAME-HEAD.
+requires: tool:cargo
+fixture: concurrent-bridge.fixture
+env: NO_COLOR=1
+env: JET_FFI_CACHE_DIR={work}/ffi-cache
+mkdir: ffi-cache
+spawn worker0: jet run --profile=debug main.jet
+cwd: w0
+spawn worker1: jet run --profile=debug main.jet
+cwd: w1
+wait: worker0
+exit: 0
+stdout: = base64.out
+wait: worker1
+exit: 0
+stdout: = base64.out
+entries: ffi-cache kind dir name != "deps" = 1 # original predicate
+capture: key = sole-entry ffi-cache kind dir name != "deps"
+file: {cap:key}/.build-lock absent
+entries: ffi-cache/deps recursive name ^= "libjet_ffi_" name $= ".a" parent = "release" = 1 # native staticlib counterpart of original one-rlib predicate
+entries: ffi-cache/deps recursive name ^= "jet_ffi_" name $= ".sha256" = 1 # original predicate

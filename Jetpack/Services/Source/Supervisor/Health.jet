@@ -7,7 +7,7 @@ SERVICES_HEALTH_POLL_MS :: prep { 300 }
 SERVICES_NO_PROBE_STABILITY_MS :: prep { 300 }
 
 // A `services health` result for one service.
-pub enum ServiceHealth {
+enum ServiceHealth {
     Disabled
     NotRunning
     Healthy
@@ -24,11 +24,11 @@ pub enum ServiceHealth {
 }
 
 // One-shot readiness check; it neither waits nor retries.
-pub fn services_health_one(project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
+fn services_health_one(project_dir: String, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
     services_health_one_with_env(project_dir, None, plan)
 }
 
-pub fn services_health_one_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
+fn services_health_one_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan) -[FS, Env, Exec, Net, Time, Time.Wait]> ServiceHealth Never! {
     if services_validate_service_name(plan.name) == .Err(_) -> return ServiceHealth.NotRunning
     if !plan.enable -> return ServiceHealth.Disabled
     dir :: services_service_dir(project_dir, plan.name)
@@ -106,12 +106,12 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
     if host == "" || host.contains("[") || host.contains("]") -> return false
     address :: net.socket_addr_parse("{host}:{port}") ?? return false
     stream :: net.tcp_connect_timeout(address, SERVICES_PROBE_CONNECT_MS) ?? return false
-    net.set_read_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
-    net.set_write_timeout(stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
+    net.set_read_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a read timeout still reads once")
+    net.set_write_timeout(&stream, SERVICES_PROBE_CONNECT_MS).drop("a probe without a write timeout still writes once")
     crlf :: "{env_shell_control(13)}\n"
     request :: "GET /{path} HTTP/1.1{crlf}Host: {host}{crlf}Connection: close{crlf}{crlf}"
-    net.tcp_write_all_bytes(stream, request.bytes()) ?? return false
-    bytes :: net.tcp_read_bytes(stream, 1024) ?? return false
+    net.tcp_write_all_bytes(&stream, request.bytes()) ?? return false
+    bytes :: net.tcp_read_bytes(&stream, 1024) ?? return false
     response :: String.from_bytes_lossy(bytes)
     if !response.starts_with("HTTP/") -> return false
     words :: trust_text_words(response.removeprefix("HTTP/"))
@@ -124,11 +124,11 @@ fn services_probe_http(url: String, expected_status: Int?) -[Net, Time.Wait]> Bo
 
 // Poll readiness until it passes or `timeout` elapses; false on timeout
 // (the caller renders E1261).
-pub fn services_wait_healthy(project_dir: String, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+fn services_wait_healthy(project_dir: String, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     services_wait_healthy_with_env(project_dir, None, plan, timeout)
 }
 
-pub fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
+fn services_wait_healthy_with_env(project_dir: String, env: ShellEnv?, plan: DevServicePlan, timeout: Duration) -[FS, Env, Exec, Net, Time, Time.Wait]> Bool Never! {
     if !plan.enable -> return true
     // With no readiness probe and no port, a service is healthy only after
     // it stays alive for one bounded window, so a fast exit that a detached

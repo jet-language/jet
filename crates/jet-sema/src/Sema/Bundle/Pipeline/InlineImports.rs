@@ -206,24 +206,10 @@ pub(super) fn resolve_inline_module_imports(
                                 ));
                                 None
                             } else {
-                                if !name_ledger.exported(idx, &mangled) {
-                                    diags.push(Diagnostic::error(
-                                        "E0609",
-                                        format!("`{orig}` is private in module `{module_alias}`"),
-                                        "only public items can be brought into scope with use"
-                                            .to_string(),
-                                        format!(
-                                            "add pub before fn {orig} in module {module_alias}"
-                                        ),
-                                        Some(module_alias_span),
-                                    ));
-                                    None
-                                } else {
-                                    Some(Target::Inline {
-                                        alias: module_alias.to_string(),
-                                        mangled,
-                                    })
-                                }
+                                Some(Target::Inline {
+                                    alias: module_alias.to_string(),
+                                    mangled,
+                                })
                             }
                         } else if let Some(core_prefix) =
                             crate::AST::core_list_prefix(&module_alias)
@@ -290,15 +276,9 @@ pub(super) fn resolve_inline_module_imports(
                                 diags.push(Diagnostic::error(
                                     "E0609",
                                     format!("`{orig}` is private in module `{module_alias}`"),
-                                    "only public items can be brought into scope with use"
+                                    "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)"
                                         .to_string(),
-                                    if is_function {
-                                        format!("add pub before fn {orig} in the imported file")
-                                    } else {
-                                        format!(
-                                            "add pub before the declaration of {orig} in the imported file"
-                                        )
-                                    },
+                                    "import it from inside its enclosing module, or remove `priv` from its module".to_string(),
                                     Some(module_alias_span),
                                 ));
                                 None

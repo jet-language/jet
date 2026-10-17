@@ -15,22 +15,22 @@ store_admission_failure := 0
 // A verified object supplied by a format adapter. The adapter owns how the
 // bytes were fetched and hashed; the transaction owns their durable
 // publication.
-pub struct AdmissionObject {
-    pub source: String
-    pub digest: String
-    pub bytes: Int
-    pub allow_semantic_xattrs: Bool
-    pub repair_corrupt: Bool
+struct AdmissionObject {
+    source: String
+    digest: String
+    bytes: Int
+    allow_semantic_xattrs: Bool
+    repair_corrupt: Bool
 }
 
 // A format-specific receipt whose atomic publication is shared with package
 // receipts. Nix builds the closure receipt bytes; Hangar publishes them.
-pub struct AdmissionReceipt {
-    pub digest: String
-    pub bytes: [U8]
+struct AdmissionReceipt {
+    digest: String
+    bytes: [U8]
 }
 
-pub enum AdmissionFailurePoint {
+enum AdmissionFailurePoint {
     AfterObjectPublication
     AfterReceiptPublication
     AfterClosureRegistration
@@ -54,13 +54,13 @@ pub enum AdmissionFailurePoint {
 
 // Arm the injected failure for the admissions that follow; returns the
 // previous setting for `store_end_admission_failure`.
-pub fn store_begin_admission_failure(point: AdmissionFailurePoint) -> Int Never! {
+fn store_begin_admission_failure(point: AdmissionFailurePoint) -> Int Never! {
     previous :: store_admission_failure
     store_admission_failure = point.tag()
     previous
 }
 
-pub fn store_end_admission_failure(previous: Int) Never! {
+fn store_end_admission_failure(previous: Int) Never! {
     store_admission_failure = previous
 }
 
@@ -79,14 +79,14 @@ struct PublishedObject {
     created: Bool
 }
 
-pub struct AdmissionTransaction {
-    verification: StoreVerification
-    roots: HangarRoots
-    stage: String
-    objects: [AdmissionObject]
-    published: [PublishedObject]
-    receipts: [String]
-    committed: Bool
+struct AdmissionTransaction {
+    priv verification: StoreVerification
+    priv roots: HangarRoots
+    priv stage: String
+    priv objects: [AdmissionObject]
+    priv published: [PublishedObject]
+    priv receipts: [String]
+    priv committed: Bool
 
     fn new(verification: &StoreVerification, roots: HangarRoots) -> AdmissionTransaction StoreError! {
         hangar :: roots.hangar_dir()
@@ -98,7 +98,7 @@ pub struct AdmissionTransaction {
             store_transaction_sequence = store_transaction_sequence + 1
             candidate :: files.join(stage_parent, "admission-{process.current_pid()}-{sequence}")
             if files.create_dir(candidate) == {
-                .Ok(_) -> return Ok(AdmissionTransaction{verification: ~verification, roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
+                .Ok(_) -> return Ok(AdmissionTransaction{verification: verification.copy(), roots: roots, stage: candidate, objects: [AdmissionObject]{}, published: [PublishedObject]{}, receipts: [String]{}, committed: false})
                 .Err(error) -> {
                     if !StoreError.IO(error).is_already_exists() -> return Err(StoreError.IO(error))
                 }
@@ -165,7 +165,7 @@ pub struct AdmissionTransaction {
     }
 
     fn commit_steps(&self, entries: &[StoreEntry], extra_receipts: [AdmissionReceipt], excluded: String?, mode: RegistrationMode, fresh_action_key: String?) -> Bool StoreError! {
-        verification := ~self.verification
+        verification := self.verification.copy()
         &self.publish_objects(excluded)
         store_injected_failure(AdmissionFailurePoint.AfterObjectPublication)
         receipts_dir :: files.join(self.roots.hangar_dir(), STORE_RECEIPTS_DIR)
@@ -210,7 +210,7 @@ pub struct AdmissionTransaction {
     }
 
     fn publish_objects(&self, excluded: String?) StoreError! {
-        verification := ~self.verification
+        verification := self.verification.copy()
         objects_dir :: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         store_ensure_real_directory(objects_dir, "Hangar object pool")
         incoming := 0
@@ -242,7 +242,7 @@ pub struct AdmissionTransaction {
     }
 
     fn object_is_verified(self, destination: String, object: AdmissionObject) -> Bool StoreError! {
-        verification := ~self.verification
+        verification := self.verification.copy()
         if files.stat(destination) == {
             .Ok(_) -> {
                 actual :: store_verified_output_hash_persistent(&verification, destination, Val(self.roots.hangar_dir()), object.allow_semantic_xattrs) ?? return Ok(false)
@@ -266,7 +266,7 @@ pub struct AdmissionTransaction {
     }
 
     fn publish_object(&self, index: Int) StoreError! {
-        verification := ~self.verification
+        verification := self.verification.copy()
         object :: self.objects[index]
         objects_dir :: files.join(self.roots.hangar_dir(), STORE_OBJECTS_DIR)
         destination :: files.join(objects_dir, object.digest)
@@ -390,7 +390,7 @@ pub struct AdmissionTransaction {
     // Undo every publication step in reverse order. Rust ran this from
     // `Drop` for an uncommitted transaction.
     fn rollback(&self) Never! {
-        verification := ~self.verification
+        verification := self.verification.copy()
         if self.committed -> return
         index := self.published.len() - 1
         loop index >= 0 {
@@ -492,7 +492,7 @@ fn store_transaction_remove_node(path: String) StoreError! {
 // Remove only abandoned children from a staging directory. The directory
 // itself must be a real directory; a symlink is a path-escape repair stop,
 // not permission to walk or remove the target it names.
-pub fn store_sweep_abandoned_directory(path: String, label: String) -> Int StoreError! {
+fn store_sweep_abandoned_directory(path: String, label: String) -> Int StoreError! {
     metadata :: if files.stat(path) == {
         .Ok(metadata) -> metadata
         .Err(error) -> {

@@ -5,6 +5,17 @@ use std::process::Command;
 
 mod common;
 
+#[test]
+fn query_plan_private_nominal_cannot_be_named_by_user_code() {
+    for source in [
+        "use core.data.[__TablePlan]\nfn run() {}\n",
+        "use core.data as data\nfn hidden(value: data.__TablePlan) {}\nfn run() {}\n",
+        "fn hidden(value: __TablePlan) {}\nfn run() {}\n",
+    ] {
+        assert!(jet::compile(source).is_err(), "private plan nominal escaped: {source}");
+    }
+}
+
 fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
     let path = dir.join(format!("{name}.jet"));
     fs::write(&path, src).unwrap();
@@ -162,7 +173,7 @@ fn run() {
         "NonFinite rolling_mean, index 1: numeric input must be finite\n0.3333333333333333\nOverflow sum: finite overflow while summing\n0.0\n"
     );
     let path = dir.join("rolling_nonfinite.jet");
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,

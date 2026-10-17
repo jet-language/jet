@@ -1,0 +1,19 @@
+requires: os:windows
+# Port of tests/jetpack_tool.rs:1030-1082; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/windows_logical_alias_executes_native_exe_with_exact_arguments_and_exit
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: root/hangar/provider-fixture-native/bin
+step: jet run copy-cmd.jet -- {work}
+exit: 0
+step: jetpack tool install native@nixpkgs --no-color --offline --fixtures {work}/fx --as native-alias
+cwd: project
+exit: 0
+file: home/.jet/bin/native-alias.exe is-file
+step: native-alias /d /s /c "if \"a&b\"==\"a&b\" (exit /b 23) else (exit /b 9)"
+env: PATH={work}/home/.jet/bin;{env:PATH}
+exit: 23

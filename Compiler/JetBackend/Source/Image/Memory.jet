@@ -7,33 +7,46 @@
 //     jmp qword [rip + 2]; int3; int3; <8-byte slot>
 //
 // whose slot holds the address of the compiled runtime's C-ABI export of that
-// name. The block is 16-byte aligned throughout, so every slot is 8-byte
-// aligned and can later be swapped with one store.
+// name. The block's absolute origin must meet `align`; every import slot is
+// then 8-byte aligned and can later be swapped with one store.
 //
 // Loading (the host primitive, in the loading process):
-// 1. map `text.len()` bytes read+write and copy `text` in;
-// 2. write the address of `imports[i]` into the word at `slots[i]`;
-// 3. flip the mapping to read+execute (it is never writable and executable
-//    at once);
-// 4. run `jet_rt_main(base + entry)`, which sets up the runtime, runs the
-//    entry and returns the exit status.
+// 1. map `text.len()` bytes read+write at an `align`-aligned origin and copy
+//    `text` in (over-map and trim whole pages when align exceeds a page);
+// 2. rebase every data pointer in `relocs` to base+target, and write the address
+//    of `imports[i]` into the word at `slots[i]`;
+// 3. flip the code pages to read+execute; data stays read+write on disjoint
+//    pages (no page is ever writable and executable at once);
+// 4. run `jet_rt_main(base + entry)` for a program entry, or invoke the typed
+//    call adapter for a compiler function.
 
-pub struct X64MemoryImage {
-    pub text: [U8]
+struct X64MemoryImage {
+    text: [U8]
+    // Required alignment of the mapping's absolute origin.
+    align: Int
     // Offset of the entry function in `text`.
-    pub entry: Int
+    entry: Int
+    // Optional zero-argument Unit finalizer, run before unmapping.
+    finalizer: Int?
+    // Code offsets indexed by the module's LIR function IDs.
+    functions: [Int]{[Int]{}}
+    // Pinned Core symbols are registered after linking, before loading.
+    exports: [String:Int]{[String:Int]{}}
+    // First data byte, page-aligned when data exists; text.len() otherwise.
+    data_offset: Int
     // imports[i] names a runtime symbol; slots[i] is the offset in `text` of
     // the little-endian word that must hold its address.
-    pub imports: [String]
-    pub slots: [Int]
-    pub errors: [String]
+    imports: [String]
+    slots: [Int]
+    relocs: [X64ImageDataReloc]
+    errors: [String]
 }
 
 // Offset of the address slot inside an import stub.
 X64_IMPORT_SLOT_AT :: prep { 8 }
 
 fn x64_memory_image_failure(errors: [String]) -> X64MemoryImage Never! {
-    X64MemoryImage{text: [U8]{}, entry: -1, imports: [String]{}, slots: [Int]{}, errors: errors}
+    X64MemoryImage{text: [U8]{}, align: X64_FUNCTION_ALIGN, entry: -1, finalizer: None, data_offset: 0, imports: [String]{}, slots: [Int]{}, relocs: [X64ImageDataReloc]{}, errors: errors}
 }
 
 fn x64_import_stub(symbol: String) -> X64CompiledFunction Never! {
@@ -49,12 +62,24 @@ fn x64_import_stub(symbol: String) -> X64CompiledFunction Never! {
 
 // Compile `program` into an in-memory image whose entry is `entry`, which
 // takes no parameters and returns nothing.
-pub fn x64_memory_image(program: LIRModule, entry: LIRFunctionID) -> X64MemoryImage Never! {
+fn x64_memory_image(program: LIRModule, entry: LIRFunctionID) -> X64MemoryImage Never! {
     if entry.value < 0 || entry.value >= program.functions.len() -> return x64_memory_image_failure([String]{"entry function {entry.value} is not in the module"})
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? return x64_memory_image_failure([String]{"entry function has no signature"})
     returns_nothing := false
     if signature.result == None -> returns_nothing = true
     if signature.params.len() != 0 || !returns_nothing -> return x64_memory_image_failure([String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"})
+    x64_memory_function_image(program, entry, None)
+}
+
+// Compile a function with its checked System V signature. Invocation must use
+// an adapter that obeys that signature, never the program's jet_rt_main boundary.
+fn x64_memory_function_image(program: LIRModule, entry: LIRFunctionID, finalizer: LIRFunctionID?) -> X64MemoryImage Never! {
+    if entry.value < 0 || entry.value >= program.functions.len() -> return x64_memory_image_failure([String]{"entry function {entry.value} is not in the module"})
+    if finalizer == .Val(id) {
+        if id.value < 0 || id.value >= program.functions.len() -> return x64_memory_image_failure([String]{"finalizer function {id.value} is not in the module"})
+        signature :: lir_signature(program, program.functions[id.value].signature) ?? return x64_memory_image_failure([String]{"finalizer function has no signature"})
+        if signature.params.len() != 0 || signature.result != None -> return x64_memory_image_failure([String]{"finalizer must take no parameters and return nothing"})
+    }
     compiled :: x64_compile_module(program)
     if compiled.errors.len() > 0 -> return x64_memory_image_failure(compiled.errors)
 
@@ -76,13 +101,23 @@ pub fn x64_memory_image(program: LIRModule, entry: LIRFunctionID) -> X64MemoryIm
     }
     stubs := [X64CompiledFunction]{}
     loop symbol in imports -> &stubs.push(x64_import_stub(symbol))
-    linked :: x64_link_text(compiled.functions, stubs, program.data)
+    linked :: x64_link_text(compiled.functions, stubs, program.data, true)
     if linked.errors.len() > 0 -> return x64_memory_image_failure(linked.errors)
 
     entry_at := -1
     loop (index, function) in compiled.functions { if function.id == entry -> entry_at = linked.offsets[index] }
     if entry_at < 0 -> return x64_memory_image_failure([String]{"entry function {entry.value} was not compiled"})
+    finalizer_at := Int?{None}
+    if finalizer == .Val(id) {
+        loop (index, function) in compiled.functions {
+            if function.id == id -> finalizer_at = Val(linked.offsets[index])
+        }
+        if finalizer_at == None -> return x64_memory_image_failure([String]{"finalizer function {id.value} was not compiled"})
+    }
     slots := [Int]{}
     loop at in linked.runtime_offsets -> &slots.push(at + X64_IMPORT_SLOT_AT)
-    X64MemoryImage{text: linked.text, entry: entry_at, imports: imports, slots: slots, errors: [String]{}}
+    function_offsets := [Int]{}
+    loop _ in 0..<program.functions.len() -> &function_offsets.push(-1)
+    loop (index, function) in compiled.functions -> function_offsets[function.id.value] = linked.offsets[index]
+    X64MemoryImage{text: linked.text, align: linked.align, entry: entry_at, finalizer: finalizer_at, functions: function_offsets, data_offset: linked.data_offset, imports: imports, slots: slots, relocs: linked.data_relocs, errors: [String]{}}
 }

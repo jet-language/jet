@@ -1,0 +1,28 @@
+use core.files as files
+use core.text as text
+
+// tests/http_client_law.rs:597-617. The PSL is product data, not a Rust-law scan.
+#Test("vendored_public_suffix_snapshot_is_compact_and_keeps_rule_kinds") {
+    data :: files.read("crates/jet-pkg-model/src/Prelude/public_suffix_list.dat") ?? panic("PSL snapshot")
+    assert_eq(data.bytes().len(), 144039)
+    assert_eq(data.lines().len(), 1)
+    assert(text.is_ascii(data))
+    words := [String]{}
+    current := [String]{}
+    loop scalar in data.chars() {
+        rendered :: "{scalar}"
+        if text.is_whitespace(rendered) {
+            if current.len() > 0 {
+                &words.push(current.join(""))
+                current = [String]{}
+            }
+        } else {
+            &current.push(rendered)
+        }
+    }
+    if current.len() > 0 -> &words.push(current.join(""))
+    required :: [String]{"com", "co.uk", "*.ck", "!www.ck", "github.io", "xn--55qx5d.cn"}
+    loop rule in required {
+        assert(words.contains(rule), "PSL snapshot lost {rule}")
+    }
+}

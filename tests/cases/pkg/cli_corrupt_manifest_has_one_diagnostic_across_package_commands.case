@@ -1,0 +1,17 @@
+# Port of tests/pkg.rs:5786-5834; source/helper-expanded manifests verbatim.
+# PENDING-GRAMMAR(batch-four): first-line prefix selection+label equality, mkdir.
+# Select FIRST Error E1206 line, not first overall line or the whole stderr.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/manifests/corrupt.txt package.jet
+copy: {root}/tests/cases/pkg/fixtures/sources/hi.txt run.jet
+copy: {root}/tests/cases/pkg/fixtures/dependency/mylib/package.jet mylib/package.jet
+step fetch: jet fetch
+exit: nonzero
+stderr: first-line ^= "Error [E1206]:" # original predicate: none fails
+step: jet build run.jet
+exit: nonzero
+stderr: first-line ^= "Error [E1206]:" == fetch # original predicate
+step: jet add mylib --path ./mylib
+exit: nonzero
+stderr: first-line ^= "Error [E1206]:" == fetch # original predicate

@@ -1,11 +1,13 @@
+// D-FAIL-CONV2=A only supplies conversions for the Core error family.
+#Error
 enum MyError {
     NotFound
 }
 
 fn inner() -> Int MyError! { Ok(1) }
 
-fn outer() -> Int {
-    x :: inner()?
+fn outer() -> Int Err! {
+    x :: inner()
     return Ok(x)
 }
 

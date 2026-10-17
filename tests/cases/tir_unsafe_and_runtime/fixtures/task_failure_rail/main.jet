@@ -1,0 +1,81 @@
+
+use core.time as time
+
+fn boom() -> Int {
+    panic("boom")
+    return 0
+}
+fn deadline() -> Int {
+    #Context(deadline: 0) {
+        time.sleep(1ms)
+    }
+    return 0
+}
+fn panic_rail() {
+    task.group workers {
+        failed :: task boom()
+        if failed.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong panic variant") }
+        }
+    }
+}
+fn all_rail() {
+    task.group workers {
+        if (task.all { boom(), 2 }) == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong all variant") }
+        }
+    }
+}
+fn deadline_rail() {
+    task.group workers {
+        expired :: task deadline()
+        if expired.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong deadline variant") }
+        }
+    }
+}
+fn cancel_rail() {
+    task.group workers {
+        cancelled :: task {
+            time.sleep(1000ms)
+        }
+        cancelled.cancel()
+        if cancelled.join() == {
+            .Err(error) -> {
+                if error == {
+                    .Panicked(reason) -> { print("panic:{reason}") }
+                    .DeadlineBlown -> { print("deadline") }
+                    .Cancelled -> { print("cancelled") }
+                }
+            }
+            .Ok(_) -> { print("wrong cancel variant") }
+        }
+    }
+}
+fn run() {
+    panic_rail()
+    all_rail()
+    deadline_rail()
+    cancel_rail()
+}

@@ -1,0 +1,53 @@
+trait Owner {
+    fn identity(self) -> Int Never!
+}
+struct TokenOwner { token: Int }
+impl TokenOwner.Owner {
+    fn identity(self) -> Int Never! { self.token }
+}
+struct Carrier { owner: Owner, adopted: Bool }
+enum HostValue {
+    Leaf(carrier: Carrier)
+    List(values: [HostValue])
+}
+fn leaf(token: Int) -> HostValue Never! {
+    HostValue.Leaf{carrier: Carrier{owner: TokenOwner{token: token}, adopted: false}}
+}
+fn adopt(value: &HostValue, path: [Int], position: Int) -> Bool Never! {
+    if position >= path.len() {
+        if &value == .Leaf(carrier) {
+            if carrier.adopted -> return false
+            carrier.adopted = true
+            return true
+        }
+        return false
+    }
+    if &value == .List(values) {
+        index :: path[position]
+        if index < 0 || index >= values.len() -> return false
+        return adopt(&values[index], path, position + 1)
+    }
+    false
+}
+fn adopted(value: HostValue, token: Int) -> Bool Never! {
+    if value == .Leaf(carrier) -> return carrier.adopted && carrier.owner.identity() == token
+    false
+}
+fn run() {
+    root := HostValue.List{values: [HostValue]{leaf(10), HostValue.List{values: [HostValue]{leaf(20), leaf(30)}}}}
+    if !adopt(&root, [Int]{1, 0}, 0) -> panic("nested owner adoption failed")
+    if adopt(&root, [Int]{1, 0}, 0) -> panic("owner alias adopted twice")
+    if adopt(&root, [Int]{9}, 0) -> panic("invalid path adopted an owner")
+    if root == {
+        .List(values) -> {
+            if adopted(values[0], 10) -> panic("sibling owner changed")
+            if values[1] == {
+                .List(children) -> {
+                    if !adopted(children[0], 20) || adopted(children[1], 30) -> panic("nested owner identity changed")
+                }
+                else -> panic("nested aggregate changed")
+            }
+        }
+        else -> panic("root aggregate changed")
+    }
+}

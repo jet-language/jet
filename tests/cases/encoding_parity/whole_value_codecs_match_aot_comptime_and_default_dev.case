@@ -1,0 +1,40 @@
+# tests/encoding_parity.rs::whole_value_codecs_match_aot_comptime_and_default_dev
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: whole_value_codecs_match_aot_comptime_and_default_dev.fixture
+capture: source = text file.replace("@DIR@", "{work}/ct") ct/source.template
+write: ct/run.jet = "{cap:source}"
+step: jet build ct/run.jet
+exit: 0
+step ct_aot: built
+cwd: ct
+exit: 0
+stdout: lines >= 2 # original lines.len() >= 2
+for line stdout of ct_aot as r
+capture: firsthalf = text cap:r.split("|", 0)
+cap:r.after_first("|"): = "{cap:firsthalf}" # original ed77c235f tests/encoding_parity.rs:188-195 split_once then comptime half equals runtime half
+end for
+step: jet check ct/run.jet --json
+exit: 0
+json: stdout doc $.reports #= 0
+capture: source_runtime = text file.replace("@DIR@", "{work}/runtime") runtime/source.template
+write: runtime/run.jet = "{cap:source_runtime}"
+step: jet build runtime/run.jet
+exit: 0
+step runtime_aot: built
+cwd: runtime
+exit: 0
+step runtime_dev: jet run runtime/run.jet
+stdin: null
+exit: == runtime_aot
+stdout: == runtime_aot
+stderr: == runtime_aot
+step: jet run --interpret runtime/run.jet
+stdin: null
+exit: any # original helper either checks only stdout or permits the named interpreter gap
+# Exact named_encoding_dev_gap predicate at encoding_parity.rs:209-231; no interpreter parity claim in that branch.
+when !(stderr ~ "E0956" && stderr ~any "ResourceNew" "ResourceTake" "handle `" "FileReader" "FileWriter" "JSONReader" "JSONWriter" "CSVReader" "CSVWriter" "XMLReader" "XMLWriter" "CBORReader" "CBORWriter" "JSONLReader" "JSONLWriter") && !(stderr ~ "E0953" && stderr ~any "stopped the build" "panic")
+exit: == runtime_aot
+stdout: == runtime_aot
+end when

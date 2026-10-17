@@ -4,9 +4,12 @@ use jet_foundation.[
     TExpr,
     TFunc,
     TFuncKind,
+    TStmt,
+    TLambda,
     tir_expr_children,
     tir_stmt_children,
 ]
+use jet_foundation.[Span, TExprKind, TStrPart, Type]
 
 fn jet_codegen_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
     if kind == {
@@ -15,13 +18,128 @@ fn jet_codegen_core_reach_is_top_level(kind: TFuncKind) -> Bool Never! {
     }
 }
 
+// Source-owned selector policy. Both reachability and expression lowering
+// use this map, so the exact helper emitted by a selector is rooted.
+fn jet_codegen_string_format_member(ty: Type, format: TStrFormat) -> String? Never! {
+    integer :: jet_codegen_string_format_integer(ty)
+    if format == {
+        .Display | .Debug -> None
+        .Pretty -> Val("pretty")
+        .Fixed(_) -> Val(if integer -> "fixed_int" else -> "decimal")
+        .Grouped(_) -> Val(if integer -> "grouped_int_fixed" else -> "grouped")
+        .Hex(_) -> Val(if integer -> "hex" else -> "hex_decimal")
+        .Bin -> Val(if integer -> "bin" else -> "bin_decimal")
+        .Oct -> Val(if integer -> "oct" else -> "oct_decimal")
+        .Sci(_) -> Val("sci")
+        .Percent(_) -> Val("percent")
+        .Pad(_, _) -> Val("pad")
+        .PadLeft(_, _) -> Val("pad_left")
+        .Unit(_) -> Val("quantity")
+    }
+}
+
+// Whether a checked source path names the Core file `relative` (`Core/...`).
+// A Core unit outside the entry root keeps its canonical or `<corelib>/`
+// prefixed path (`jet_driver_display_path`), so `relative` is its suffix.
+fn jet_codegen_core_source_path(path: String, relative: String) -> Bool Never! {
+    path == relative || path.ends_with("/{relative}")
+}
+
+fn jet_codegen_string_format_source(function: TFunc) -> Bool Never! {
+    function.module_identity.starts_with("<corelib>/") && jet_codegen_core_source_path(function.source_file, "Core/text/fmt.jet") && jet_codegen_core_reach_is_top_level(function.kind)
+}
+
+fn jet_codegen_precise_source_family(name: String, owner: String, prefix: String) -> Bool Never! {
+    if !name.starts_with(prefix) -> return false
+    helper :: jet_codegen_precise_source_helper(owner, name.slice(prefix.len(), name.len())) ?? return false
+    helper == name
+}
+
+// Rust `is_core_precise_source_target`: a precise operation (Int.abs and the
+// Fraction, Decimal and Complex registry; Float has no source helper) lowers
+// to its `Core/math/math.jet` helper by name (`jet_codegen_lower_precise_builtin`)
+// from sites with no keyed call: registered `core.math.fraction`/`decimal`
+// constructors, constants and synthesized operations. That closed registry is
+// rooted, not every `__` helper in the file.
+fn jet_codegen_precise_source_name(name: String) -> Bool Never! {
+    if (jet_codegen_precise_source_helper("Int", "abs") ?? "") == name -> return true
+    jet_codegen_precise_source_family(name, "Fraction", "__fraction_") || jet_codegen_precise_source_family(name, "Decimal", "__decimal_") || jet_codegen_precise_source_family(name, "Complex", "__complex_")
+}
+
+fn jet_codegen_precise_source_target(function: TFunc) -> Bool Never! {
+    function.module_identity.starts_with("<corelib>/") && jet_codegen_core_source_path(function.source_file, "Core/math/math.jet") && jet_codegen_core_reach_is_top_level(function.kind) && jet_codegen_precise_source_name(function.name)
+}
+
 fn jet_codegen_core_reach_add(keys: &[String], key: String) Never! {
     if key != "" -> &keys.push(key)
 }
 
+fn jet_codegen_core_reach_lambda_keys(value: TLambda, functions: [TFunc], keys: &[String]) Never! {
+    if value.executable == {
+        .Block(body) | .SharedBlock(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+        else -> {}
+    }
+}
+
+// Implicit process loops have no keyed TExpr.Call. Resolve the authored Core
+// helper from the checked function inventory, then retain its dependencies
+// with the ordinary reachability walk. Both streams share cursor mechanics.
+fn jet_codegen_core_reach_one_stmt_keys(statement: TStmt, functions: [TFunc], keys: &[String]) Never! {
+        if statement == {
+            .ForIn(_, _, _, _, collection, _, method, _, _, _, body, _) -> {
+                if method == .Val(kind) && kind == .LinesProcessStream {
+                    // Each nominal arm owns its binder; boolean alternatives
+                    // do not introduce one shared value into their result.
+                    name :: if collection.ty == {
+                        .Named(value) -> value
+                        .Apply(value, _) -> value
+                        else -> ""
+                    }
+                    member :: if name == "ProcessStdoutStream" || name.ends_with("::ProcessStdoutStream") -> "__stdout_next_line" else if name == "ProcessStderrStream" || name.ends_with("::ProcessStderrStream") -> "__stderr_next_line" else -> ""
+                    loop helper in functions {
+                        if member != "" && helper.name == member && helper.module_identity.starts_with("<corelib>/Core/process::") -> jet_codegen_core_reach_add(&keys, helper.key)
+                    }
+                }
+                jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .ContractScope(_, body, _, _, _) | .TaskGroup(_, _, body, _) | .Loop(_, body, _) | .While(_, _, body, _) | .ForRange(_, _, _, _, _, _, body, _, _) | .Range(_, _, _, _, _, _, _, _, body, _) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            .Inline(body, _) | .DebugOnly(body, _) | .Impure(body, _) | .Region(body, _) | .Live(body, _) | .Shield(body, _) | .UnsafeBlock(_, body, _) | .SentryPolicy(_, body, _) | .Layout(_, _, body, _) | .ContextBlock(_, body, _) | .ScopeMember(_, body, _) | .Transact(_, _, _, body, _) | .Unsafe(_, body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            .RefutableBind(_, _, body, _) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            .If(_, then_body, else_body, _, _) -> {
+                jet_codegen_core_reach_stmt_keys(then_body, functions, &keys)
+                if else_body == .Val(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .CountedLoop(_, init, _, step, _, body, _) -> {
+                jet_codegen_core_reach_one_stmt_keys(init, functions, &keys)
+                if step == .Val(value) -> jet_codegen_core_reach_one_stmt_keys(value, functions, &keys)
+                jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .Match(_, arms, _, _) -> loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+            .EnumMatch(_, _, arms, else_body, _, _) -> {
+                loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+                if else_body == .Val(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .MixedSwitch(_, _, arms, else_body, _) -> {
+                loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+                if else_body == .Val(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .RangeSwitch(_, arms, body, _) -> {
+                loop arm in arms -> jet_codegen_core_reach_stmt_keys(arm.body, functions, &keys)
+                jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+            }
+            .Reactive(value, _) -> jet_codegen_core_reach_lambda_keys(value, functions, &keys)
+            .GCEdit(_, _, _, _, _, edited, _) -> jet_codegen_core_reach_one_stmt_keys(edited, functions, &keys)
+            else -> {}
+        }
+}
+
+fn jet_codegen_core_reach_stmt_keys(statements: [TStmt], functions: [TFunc], keys: &[String]) Never! {
+    loop statement in statements -> jet_codegen_core_reach_one_stmt_keys(statement, functions, &keys)
+}
+
 // The function keys one checked expression names directly. Children are
 // walked by the caller.
-fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
+fn jet_codegen_core_reach_expr_keys(expression: TExpr, functions: [TFunc], keys: &[String], fmt_keys: [String:String]) Never! {
     if expression.kind == {
         .Call(callee, _, args) -> {
             jet_codegen_core_reach_add(&keys, callee.key)
@@ -57,14 +175,33 @@ fn jet_codegen_core_reach_expr_keys(expression: TExpr, keys: &[String]) Never! {
         }
         // A function named as a value checks as a constant reference.
         .ConstRef(symbol) -> jet_codegen_core_reach_add(&keys, symbol.key)
+        // Interpolation selectors call their source formatter by name
+        // (`jet_codegen_lower_string_format_value`), with no keyed call.
+        .StrLit(parts) -> {
+            loop part in parts {
+                if part == .Interpolation(value, format) {
+                    member :: jet_codegen_string_format_member(value.ty, format) ?? next
+                    key :: fmt_keys.get(member) ?? next
+                    jet_codegen_core_reach_add(&keys, key)
+                }
+            }
+        }
+        .InlineBlock(body) -> jet_codegen_core_reach_stmt_keys(body, functions, &keys)
+        .Lambda(value) | .LambdaValue(value) -> jet_codegen_core_reach_lambda_keys(value, functions, &keys)
+        .IfExpr(_, then_body, _, else_body, _) | .ResultHandler(_, _, then_body, _, _, else_body, _, _) -> {
+            jet_codegen_core_reach_stmt_keys(then_body, functions, &keys)
+            jet_codegen_core_reach_stmt_keys(else_body, functions, &keys)
+        }
+        .GlobalShared(initializer, _) -> jet_codegen_core_reach_add(&keys, initializer.key)
         else -> {}
     }
 }
 
 // Every function key one checked function body names, including its
 // parameter defaults, which call sites lower from the callee.
-fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
+fn jet_codegen_core_reach_function_keys(function: TFunc, functions: [TFunc], fmt_keys: [String:String]) -> [String] Never! {
     keys := [String]{}
+    jet_codegen_core_reach_stmt_keys(function.body, functions, &keys)
     pending := [TExpr]{}
     loop parameter in function.params {
         if parameter.default == Val(value) -> &pending.push(value)
@@ -74,19 +211,79 @@ fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
     }
     loop pending.len() > 0 {
         expression :: &pending.pop() ?? return keys
-        jet_codegen_core_reach_expr_keys(expression, &keys)
+        jet_codegen_core_reach_expr_keys(expression, functions, &keys, fmt_keys)
         loop child in tir_expr_children(expression) -> &pending.push(child)
     }
     keys
 }
 
+// The `Core/math/math.jet` helper one checked expression lowers to by name
+// (`jet_codegen_lower_precise_builtin`): a precise operation, `Int.abs`, or a
+// registered `core.math.fraction`/`decimal` constructor.
+fn jet_codegen_precise_expr_helper(expression: TExpr) -> String? Never! {
+    if expression.kind == {
+        .PreciseBuiltin(owner, operation, _) -> jet_codegen_precise_source_helper(owner, operation)
+        .MathBuiltin(owner, operation, _) -> if owner == "Int" -> jet_codegen_precise_source_helper(owner, operation) else -> None
+        .CoreCall(record, _, _, _, _, _, _) -> {
+            canonical :: jet_codegen_canonical_core_record(record)
+            if canonical.module_name != "core.math" -> return None
+            if canonical.member == "fraction" -> return jet_codegen_precise_source_helper("Fraction", "new")
+            if canonical.member == "decimal" -> return jet_codegen_precise_source_helper("Decimal", "from_str")
+            None
+        }
+        else -> None
+    }
+}
+
+// The distinct precise source helpers a checked body and its root expressions
+// lower to by name. A comptime closure holds only explicitly called functions,
+// so it adds these (`jet_driver_comptime_function_closure`).
+fn jet_codegen_precise_helper_names(roots: [TExpr], body: [TStmt]) -> [String] Never! {
+    names := [String]{}
+    pending := [TExpr]{}
+    loop root in roots -> &pending.push(root)
+    loop statement in body {
+        loop child in tir_stmt_children(statement) -> &pending.push(child)
+    }
+    loop pending.len() > 0 {
+        expression :: &pending.pop() ?? return names
+        helper :: jet_codegen_precise_expr_helper(expression)
+        if helper == .Val(name) {
+            if !names.contains(name) -> &names.push(name)
+        }
+        loop child in tir_expr_children(expression) -> &pending.push(child)
+    }
+    names
+}
+
+// Reachability precedes concrete instance lowering. A checked generic/operator
+// target keeps its declaration, without stripping the owner's own arguments.
+fn jet_codegen_core_reach_template_key(key: String) -> String Never! {
+    bytes :: key.bytes()
+    if bytes.len() == 0 || Int.from_u8(bytes[bytes.len() - 1]) != 62 -> return key.copy()
+    depth := 0
+    position := bytes.len() - 1
+    loop position >= 0 {
+        byte :: Int.from_u8(bytes[position])
+        if byte == 62 -> depth += 1
+        if byte == 60 {
+            depth -= 1
+            if depth == 0 -> return key.slice(0, position)
+        }
+        position -= 1
+    }
+    key.copy()
+}
+
 // Which checked functions to lower: one flag per row of `functions`, read in
 // place (never copied). Only rows flagged in `candidates` take part: every
-// candidate outside `core_module_identities` (user code and compiler-private
-// Core parts) is a root, and a top-level Core source candidate is kept only
-// when a kept body names it. Authored Core methods stay rooted because Codegen
-// resolves their implicit uses (`close`, `display`, index hooks, trait
-// dispatch) by owner type rather than by a key in the caller's body. A
+// candidate outside `core_module_identities` (user code) is a root, and a
+// top-level Core source candidate, including a compiler-private part's
+// receiver function, is kept only when a kept body names it. Authored Core
+// methods stay rooted because Codegen resolves their implicit uses (`close`,
+// `display`, index hooks, trait dispatch) by owner type rather than by a key
+// in the caller's body. The closed precise-operation source registry
+// (`jet_codegen_precise_source_target`) is rooted as in Rust. A
 // compiler-generated Core method (`TFunc.synthetic`: a Prelude/Derives.jet
 // `Equatable`/`Comparable` body) is not a root: as in
 // Rust `reachable_core_source_callables`, it is kept only when a kept body
@@ -94,25 +291,27 @@ fn jet_codegen_core_reach_function_keys(function: TFunc) -> [String] Never! {
 // unreached derive then loses its impl row (Rust `lower_impl_rows`), so no
 // impl is emitted for a runtime-backed Core carrier (`Cursor` -> `JetCursor`,
 // `URL`/`MIME` -> `jet_std`).
-pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core_module_identities: [String]) -> [Bool] {
+fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], core_module_identities: [String]) -> [Bool] {
     if core_module_identities.len() == 0 -> return candidates
     by_key := [String:Int]{}
     reachable := [Bool]{}
     pending := [Int]{}
+    fmt_keys := [String:String]{}
     loop (index, function) in functions {
         if !candidates[index] {
             &reachable.push(false)
             next
         }
         _ := &by_key.add(function.key, index)
-        rooted :: !core_module_identities.contains(function.module_identity) || (!jet_codegen_core_reach_is_top_level(function.kind) && !function.synthetic)
+        if jet_codegen_string_format_source(function) -> fmt_keys[function.name] = function.key
+        rooted :: !core_module_identities.contains(function.module_identity) || (!jet_codegen_core_reach_is_top_level(function.kind) && !function.synthetic) || jet_codegen_precise_source_target(function)
         &reachable.push(rooted)
         if rooted -> &pending.push(index)
     }
     loop pending.len() > 0 {
         caller :: &pending.pop() ?? { break }
-        loop key in jet_codegen_core_reach_function_keys(functions[caller]) {
-            target :: by_key.get(key) ?? next
+        loop key in jet_codegen_core_reach_function_keys(functions[caller], functions, fmt_keys) {
+            target :: by_key.get(key) ?? by_key.get(jet_codegen_core_reach_template_key(key)) ?? next
             if !reachable[target] {
                 reachable[target] = true
                 &pending.push(target)
@@ -120,4 +319,27 @@ pub fn jet_codegen_reachable_core_rows(functions: [TFunc], candidates: ^[Bool], 
         }
     }
     reachable
+}
+
+#Test("Precise reachability roots the closed source registry at any Core path") {
+    assert(jet_codegen_precise_source_name("abs"))
+    assert(jet_codegen_precise_source_name("__fraction_new"))
+    assert(jet_codegen_precise_source_name("__decimal_to_fraction"))
+    assert(jet_codegen_precise_source_name("__complex_abs"))
+    assert(!jet_codegen_precise_source_name("__decimal_normalized"))
+    assert(!jet_codegen_precise_source_name("__fraction_"))
+    assert(jet_codegen_core_source_path("Core/math/math.jet", "Core/math/math.jet"))
+    assert(jet_codegen_core_source_path("/toolchain/Core/math/math.jet", "Core/math/math.jet"))
+    assert(jet_codegen_core_source_path("<corelib>/Core/text/fmt.jet", "Core/text/fmt.jet"))
+    assert(!jet_codegen_core_source_path("/toolchain/MyCore/text/fmt.jet", "Core/text/fmt.jet"))
+}
+
+#Test("A comptime closure finds the precise helper a nested literal lowers to") {
+    spelling :: TExpr{ty: Type.String, kind: TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: "9007199254740992.0"}}}, span: Span{start: 0, end: 1}, integer_bounds: None, cost: None}
+    decimal :: TExpr{ty: Type.Named{name: "Decimal"}, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "from_str", args: [TExpr]{spelling}}, span: Span{start: 0, end: 1}, integer_bounds: None, cost: None}
+    converted :: TExpr{ty: Type.Float, kind: TExprKind.PreciseBuiltin{type_name: "Decimal", function: "to_float", args: [TExpr]{decimal}}, span: Span{start: 0, end: 1}, integer_bounds: None, cost: None}
+    names :: jet_codegen_precise_helper_names([TExpr]{converted}, [TStmt]{})
+    assert_eq(names.len(), 2)
+    assert(names.contains("__decimal_to_float"))
+    assert(names.contains("__decimal_from_str"))
 }

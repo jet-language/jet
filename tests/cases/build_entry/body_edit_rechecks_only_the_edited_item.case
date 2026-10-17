@@ -1,0 +1,17 @@
+# Port of build_entry.rs::body_edit_rechecks_only_the_edited_item.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+fixture: fixtures/item-reuse
+env: JET_STORE_DIR={work}/store
+step: jet check lib.jet
+step first: jet inspect explain-build lib.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="package"][?subject="pkg:."][*].why_ran ~ "items: 0 reused, 6 checked" # Original item-detail prefix after the items marker.
+copy: body-edit.txt shapes.jet
+step warm: jet check lib.jet
+stderr: ~ L0104 # Original diagnostic containment assertion.
+step second: jet inspect explain-build lib.jet --json
+env: JET_STORE_DIR={work}/store
+json: stdout doc $.nodes[?kind="package"][?subject="pkg:."][*].why_ran ~ "items: 5 reused, 1 checked [fn:area]" # Original item-detail prefix after the items marker.
+step: jet check lib.jet
+env: JET_STORE_DIR={work}/fresh-store
+stderr: == warm

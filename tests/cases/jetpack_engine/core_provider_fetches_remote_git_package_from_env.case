@@ -1,0 +1,35 @@
+# HAND-PORT tests/jetpack_engine.rs:7967-8051 core_provider_fetches_remote_git_package_from_env
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: core_provider_fetches_remote_git_package_from_env.fixture
+env: NO_COLOR=1
+requires: tool:git
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: chmod: remote/pkgs/hello/bin/hello 755
+step: git init
+cwd: remote
+exit: 0
+step: git config user.email jetpack@example.invalid
+cwd: remote
+exit: 0
+step: git config user.name "Jet Test"
+cwd: remote
+exit: 0
+step: git add .
+cwd: remote
+exit: 0
+step: git commit -m init
+cwd: remote
+exit: 0
+write: project/env.jet env.template
+step: jetpack run --no-color -- hello
+cwd: project
+exit: 0
+stdout.trim: = core_provider_fetches_remote_git_package_from_env.expected # original ed77c235f tests/jetpack_engine.rs:8030-8033 stdout.trim equals hello from remote jet-pkgs
+file: root/sources is-dir
+step: jetpack build --no-color --offline
+cwd: project
+unset: JETPACK_FIXTURES
+exit: 0
+

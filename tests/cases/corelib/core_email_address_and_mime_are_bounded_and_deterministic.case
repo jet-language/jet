@@ -1,0 +1,10 @@
+# Port of tests/corelib_parts/platform_email.rs::core_email_address_and_mime_are_bounded_and_deterministic; original source unchanged.
+# PENDING-GRAMMAR: whole-stream starts_with prefix.
+fixture: fixtures/core_email_address_and_mime_are_bounded_and_deterministic
+step: jet build fixture.jet
+step: built
+stdout: ^= "address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n" # original predicate: starts_with
+step: jet run fixture.jet
+stdout: ^= "address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n" # original predicate: starts_with
+step: jet run --interpret fixture.jet
+stdout: ^= "address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n" # original predicate: starts_with

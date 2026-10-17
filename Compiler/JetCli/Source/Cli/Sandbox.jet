@@ -1,0 +1,168 @@
+// `jet build --target=sandbox <file>` (D-PLUGIN1=B, D-PLUGIN-VERSION1=A,
+// D-DEP-WASM1=A): the Jet host of Source/CmdCompile.rs's sandbox branch and
+// `write_plugin_artifacts`. The compile checks the export surface (E1260)
+// and diffs it against the frozen interface (E1257); this host reads and
+// stores that interface under `.jet/cache/api` (crates/jet-sema ApiFreeze.rs
+// `api_cache_dir`, `load_snapshot`, `save_snapshot`), hands the guest the
+// repository TZif zones, and builds the WASM Component with rustc wasm32 and
+// `wasm-tools` (a missing or failing tool is E1259, never a crash).
+use core.files as cli_files
+use core.process as cli_process
+use core.sys as cli_sys
+use jet_codegen.JetWebTimezoneAsset
+
+// ApiFreeze.rs `api_cache_dir`: the override directory, else
+// `<project root>/.jet/cache/api`.
+JET_CLI_API_CACHE_DIR_ENV :: "JET_API_CACHE_DIR"
+// Codegen/Web.rs `web_tzdb_files`: the repository TZif tree, below the toolchain root.
+JET_CLI_TZDB_PATH :: "Core/time/tzdb"
+// The frozen-snapshot namespace of sandbox interfaces (PluginExport.rs `snapshot_package_key`).
+JET_CLI_SANDBOX_SNAPSHOT_PREFIX :: "plugin__"
+
+enum JetCLISandboxZones {
+    Loaded(zones: [JetWebTimezoneAsset])
+    Failed(output: JetDriverVerbOutput)
+}
+
+fn jet_cli_sandbox_api_dir(root: String) -[Env]> String Never! {
+    if cli_sys.get(JET_CLI_API_CACHE_DIR_ENV) == .Val(directory) {
+        if directory != "" -> return directory
+    }
+    jet_cli_authority_path(root, ".jet/cache/api")
+}
+
+// Every `plugin__*.api` snapshot text under `api_dir`, by file name; the
+// compile picks the one its resolved export name owns.
+fn jet_cli_sandbox_frozen_interfaces(api_dir: String) -[FS]> [String] Never! {
+    texts := [String]{}
+    // Core lists a directory's entries already sorted by name (D-LSDIR1).
+    listing :: cli_files.list_dir(api_dir) ?? return texts
+    loop entry in listing {
+        if !entry.name.starts_with(JET_CLI_SANDBOX_SNAPSHOT_PREFIX) || !entry.name.ends_with(".api") -> next
+        text :: cli_files.read(jet_cli_authority_path(api_dir, entry.name)) ?? next
+        &texts.push(text)
+    }
+    texts
+}
+
+// The relative paths of the regular files under `root`, depth first;
+// symbolic links are skipped as `web_tzdb_files` skips them.
+fn jet_cli_sandbox_tzdb_walk(root: String, relative: String, paths: &[String]) -[FS]> String? Never! {
+    directory :: if relative == "" -> root else -> jet_cli_authority_path(root, relative)
+    listing :: cli_files.list_dir(directory) ?? return Val("cannot list `{directory}`: {err}")
+    loop entry in listing {
+        child :: if relative == "" -> entry.name else -> "{relative}/{entry.name}"
+        path :: jet_cli_authority_path(root, child)
+        if cli_files.is_symlink(path) -> next
+        if cli_files.is_dir(path) {
+            if jet_cli_sandbox_tzdb_walk(root, child, &paths) == .Val(problem) -> return Val(problem)
+            next
+        }
+        if cli_files.is_file(path) -> &paths.push(child)
+    }
+    None
+}
+
+// Codegen/Web.rs `web_tzdb_files`: every TZif file of the repository zone
+// tree, named by its `/`-joined relative path and sorted by name. A sandbox
+// has no host filesystem, so its guest embeds them.
+fn jet_cli_sandbox_zones(color: Bool) -[FS, Env]> JetCLISandboxZones Never! {
+    fix :: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/`"
+    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLISandboxZones.Failed{output: jet_cli_build_failed("`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the time zone data a sandbox embeds can't be found", jet_cli_why("E2105"), fix, color)}
+    root :: jet_cli_authority_path(toolchain, JET_CLI_TZDB_PATH)
+    paths := [String]{}
+    if jet_cli_sandbox_tzdb_walk(root, "", &paths) == .Val(problem) {
+        return JetCLISandboxZones.Failed{output: jet_cli_build_failed("can't read the time zone data a sandbox embeds: {problem}", jet_cli_why("E2105"), fix, color)}
+    }
+    &paths.sort()
+    zones := [JetWebTimezoneAsset]{}
+    loop relative in paths {
+        path :: jet_cli_authority_path(root, relative)
+        bytes :: cli_files.read_bytes(path) ?? return JetCLISandboxZones.Failed{output: jet_cli_build_failed("can't read the time zone file `{path}`: {err}", jet_cli_why("E2105"), fix, color)}
+        if bytes.len() < 4 || bytes[0] != 84 || bytes[1] != 90 || bytes[2] != 105 || bytes[3] != 102 -> next
+        &zones.push(JetWebTimezoneAsset{name: relative, bytes: bytes})
+    }
+    JetCLISandboxZones.Loaded{zones: zones}
+}
+
+// Manifest.rs `e1259`: a missing or failing external tool, named.
+fn jet_cli_sandbox_tool_failure(detail: String, color: Bool) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{
+        stdout: "",
+        stderr: jet_cli_report("E1259", "couldn't build the sandbox's WASM Component", detail, "make sure `rustc` supports `--target wasm32-unknown-unknown` and `wasm-tools` is on PATH (both ship in the project's `nix develop` shell)", color),
+        exit_code: JET_DRIVER_EXIT_USER_ERROR,
+    }
+}
+
+// Source/CmdCompile.rs `write_plugin_artifacts`: `<name>_wit/world.wit` and
+// `<name>_plugin.rs`, rustc wasm32 to `<name>_core.wasm`, then `wasm-tools
+// component embed` (`<name>_embedded.wasm`) and `component new` lift it into
+// the typed `<name>.wasm` Component. rustc rejecting the generated guest is
+// an internal compiler error; every other failure is E1259.
+fn jet_cli_sandbox_write(file: String, artifacts: JetPluginArtifacts, build_dir: String, color: Bool, quiet: Bool) -[FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    cli_files.create_dir_all(build_dir) ?? return jet_cli_sandbox_tool_failure("couldn't create the {build_dir} folder: {err}", color)
+    name :: jet_cli_stem(file)
+    wit_dir :: "{build_dir}/{name}_wit"
+    cli_files.create_dir_all(wit_dir) ?? return jet_cli_sandbox_tool_failure("couldn't create {wit_dir}: {err}", color)
+    wit_path :: "{wit_dir}/world.wit"
+    guest_path :: "{build_dir}/{name}_plugin.rs"
+    core_path :: "{build_dir}/{name}_core.wasm"
+    embedded_path :: "{build_dir}/{name}_embedded.wasm"
+    component_path :: "{build_dir}/{name}.wasm"
+    cli_files.write(wit_path, artifacts.wit) ?? return jet_cli_sandbox_tool_failure("couldn't write {wit_path}: {err}", color)
+    cli_files.write(guest_path, artifacts.guest_rust) ?? return jet_cli_sandbox_tool_failure("couldn't write {guest_path}: {err}", color)
+    rustc :: [String]{
+        "rustc", "--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O",
+        "--crate-name", jet_cli_crate_name("{name}_plugin"),
+        guest_path, "-o", core_path,
+    }
+    compiled :: cli_process.cmd(rustc).run() ?? return jet_cli_sandbox_tool_failure("couldn't run `rustc --target wasm32-unknown-unknown` ({err}) — is the wasm32-unknown-unknown target installed?", color)
+    if !compiled.success {
+        log_path :: "{build_dir}/{name}_plugin.rustc.log"
+        cli_files.write(log_path, compiled.errors) ?? return jet_cli_ice("rustc rejected the sandbox guest generated for `{file}`")
+        return jet_cli_ice("rustc rejected the sandbox guest generated for `{file}`; its report is in {log_path}")
+    }
+    embed :: [String]{"wasm-tools", "component", "embed", wit_dir, "--world", artifacts.world_name, core_path, "-o", embedded_path}
+    embedded :: cli_process.cmd(embed).run() ?? return jet_cli_sandbox_tool_failure("couldn't run `wasm-tools` ({err}) — install it (ships in the project's `nix develop` shell) or add it to PATH", color)
+    if !embedded.success -> return jet_cli_sandbox_tool_failure("`wasm-tools component embed` failed\n{embedded.errors}", color)
+    lift :: [String]{"wasm-tools", "component", "new", embedded_path, "-o", component_path}
+    lifted :: cli_process.cmd(lift).run() ?? return jet_cli_sandbox_tool_failure("couldn't run `wasm-tools` ({err})", color)
+    if !lifted.success -> return jet_cli_sandbox_tool_failure("`wasm-tools component new` failed\n{lifted.errors}", color)
+    note :: if quiet -> "" else -> "note: `--target=sandbox` wrote `{wit_path}`, `{guest_path}`, `{core_path}`, `{component_path}`\n"
+    JetDriverVerbOutput{stdout: "", stderr: note, exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// A sandbox compile with no errors: store its interface as the new frozen
+// baseline (PluginExport.rs `check_and_freeze_version` ignores a failed
+// save, so a read-only cache never fails the build), then build the guest.
+fn jet_cli_sandbox_result(file: String, source: String, color: Bool, quiet: Bool, api_dir: String, result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot) -[Env, FS, Exec, Time.Wait]> JetDriverVerbOutput Never! {
+    errors :: jet_driver_present_diagnostics(jet_cli_errors(result.diagnostics), snapshot, result.generated_source_files)
+    if errors.len() > 0 {
+        return JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    if !result.complete -> return jet_cli_ice("the Jet compiler stopped before finishing `{file}`")
+    sandbox :: result.sandbox ?? return jet_cli_ice("missing sandbox codegen output")
+    cli_files.create_dir_all(api_dir).drop("a sandbox's frozen interface is refreshed by its next build")
+    cli_files.write(jet_cli_authority_path(api_dir, "{sandbox.snapshot_package}.api"), sandbox.snapshot_text).drop("a sandbox's frozen interface is refreshed by its next build")
+    jet_cli_sandbox_write(file, sandbox.artifacts, "{snapshot.roots[0].canonical_path}/.jet/build", color, quiet)
+}
+
+// `jet build --target=sandbox <file>`.
+fn jet_cli_compile_sandbox(file: String, source: String, color: Bool, quiet: Bool, threads: Int?) -> JetDriverVerbOutput {
+    anchor :: cli_files.realpath(file) ?? return jet_cli_build_failed("can't securely read the file `{file}`", jet_cli_why("E2105"), "check the spelling, or run jet from the folder that contains it", color)
+    api_dir :: jet_cli_sandbox_api_dir(jet_cli_source_root(anchor))
+    zones := [JetWebTimezoneAsset]{}
+    if jet_cli_sandbox_zones(color) == {
+        .Loaded(loaded) -> zones = loaded
+        .Failed(failure) -> return failure
+    }
+    target :: JetDriverCompileTarget.Sandbox{export_name: None, frozen_interfaces: jet_cli_sandbox_frozen_interfaces(api_dir), timezone_data: zones}
+    output := JetDriverVerbOutput{stdout: "", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    compiled :: jet_cli_compile_for_target(file, file, [JetCLIOverlay]{}, color, true, threads, JetDriverCompileMode.Program, target, None)
+    if compiled == {
+        .Refused(refusal) -> output = refusal.copy()
+        .Compiled(result, snapshot) -> output = jet_cli_sandbox_result(file, source, color, quiet, api_dir, result, snapshot)
+    }
+    output
+}

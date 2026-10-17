@@ -1,0 +1,26 @@
+// Source/CmdDevTools.rs `print_explanation` and `run_explain`.
+// Diagnostic essays reuse the existing Foundation registry/renderer.
+use jet_foundation.[DiagnosticExplanation, diagnostic_explanation, diagnostic_explanation_render]
+
+fn jet_cli_explanation_output(explanation: DiagnosticExplanation, color: Bool, json: Bool) -> JetCLIPlan Never! {
+    if !json -> return jet_cli_renderable(diagnostic_explanation_render(explanation, color), false)
+    fields :: [JetCLIStatusField]{
+        jet_cli_status_field("code", jet_cli_status_text(explanation.code)),
+        jet_cli_status_field("stage", jet_cli_status_text(explanation.stage)),
+        jet_cli_status_field("what", jet_cli_status_text(explanation.what ?? explanation.meaning)),
+        jet_cli_status_field("why", jet_cli_status_optional_text(explanation.why)),
+        jet_cli_status_field("fix", jet_cli_status_optional_text(explanation.fix)),
+        jet_cli_status_field("example", jet_cli_status_optional_text(explanation.example)),
+    }
+    jet_cli_done("{jet_cli_status_render("explain", true, fields)}\n", "", 0)
+}
+
+// None means this is not a diagnostic-registry query: the caller continues
+// through its syntax/policy/build-fact lookup rather than inventing a row.
+fn jet_cli_explain_diagnostic(args: [String], color: Bool, json: Bool) -> JetCLIPlan? Never! {
+    if args.len() < 2 {
+        return Val(jet_cli_done("", "usage: jet explain <CODE|FACT> [file]\n       jet explain marker <file>:<line> <policy-key>\n", JET_DRIVER_EXIT_USAGE))
+    }
+    explanation :: diagnostic_explanation(args[1]) ?? return None
+    Val(jet_cli_explanation_output(explanation, color, json))
+}

@@ -1,0 +1,21 @@
+# PORT tests/effects.rs:390-418.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: active_panic_remains_a_tier_stop.fixture
+step: jet run main.jet
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+exit: 70
+stdout: empty
+stderr: ~ "panic: active" # original ed77c235f tests/effects.rs:414 contains predicate
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+exit: 70
+stdout: empty
+stderr: ~ "panic: active" # original ed77c235f tests/effects.rs:414 contains predicate
+step: jet build --profile=debug main.jet
+exit: 0
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "panic: active" # original ed77c235f tests/effects.rs:414 contains predicate

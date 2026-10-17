@@ -1,0 +1,8 @@
+# Port of tests/corelib_parts/system.rs::importing_all_core_modules_without_calls_stays_hello_world_sized; guest sources preserved verbatim.
+# PENDING-GRAMMAR(batch-four): exact original binary-size bound.
+fixture: fixtures/importing_all_core_modules_without_calls_stays_hello_world_sized
+mkdir: .jet/build
+step: jet build --small hello.jet
+capture: hello = size file .jet/build/hello
+step: jet build --small core_import_only.jet
+file: .jet/build/core_import_only size <= {cap:hello}+4096

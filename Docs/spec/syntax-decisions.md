@@ -20,8 +20,12 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | --- | --- | --- |
 | `::` | immutable binding | `D-BIND1` |
 | `:=` | mutable binding | `D-BIND1` |
+| `x.copy()` | the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991 | `D-COPY-WORD1=A` |
 | `#` | attached marker; #[A, B] stacks | `D-VERDICT-732-1; D-MARK-STACK1` |
 | `.expect_fail(message: "text")` | test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring | `D-TEST-STOPMSG1=A` |
+| `marker Name = #[A, B]` | fixed named marker-group declaration; expands at each use without hiding gates or refusals | `D-MARKER-GROUP1=A` |
+| `#module.Marker / #[module.Marker, Other]` | library marker through the import's local name; pub exports its declaration | `D-MARKER-MODULE1=A` |
+| `#Inline / #Scalar / #Kernel / #Static` | separate callable promise, scalar hint, kernel proof and constant storage rules | `D-CODEGEN-HINTS1=A` |
 | `#DevPanel` | exported typed devtools panel marker | `D-DX-PLUGIN1=D` |
 | `web.form(Model, action: handler)` | struct-derived headless form with progressive action | `D-DX-FORM1` |
 | `#Layout(c, align(N)) / #Layout(c, align(target, N))` | C layout with portable or target-supported explicit alignment | `D-PLACE1=A; D-LAYOUT-ALIGN1=A` |
@@ -50,6 +54,7 @@ Do not hand-edit these rows. Add or change a spelling in Syntax.rs, recording it
 | `?` | optional type mark after its type (`T?`) | `D-TYPE-SUFFIX1=A` |
 | `??` | fallback | `D-RESULT-DECON2` |
 | `&place.method(…) / ^place.method(…)` | receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement | `D-CAP-RECEIVER1=D` |
+| `&self.field / &self.[a, b]` | stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[` | `D-METHOD-FOOTPRINT1=A; D-SPREAD1=A` |
 | `T{expr}` | field default | `D-DEFAULT-SHAPE1` |
 | `Name{"…"}` | checked text head | `S8; D-CHECKED-TEXT1` |
 | `.{ … }` | typed anonymous value | `D-POLICY-WORD1` |
@@ -174,6 +179,46 @@ Retired free namespaces have no aliases or re-exports, and there is no
 **D-CORE-USELIST1=A — Bracketed grouped use** *(ratified 2026-08-06)*: grouped imports use `use path.[a as x, b]`. A missing
 `as` uses the final path segment. Braces and wildcards are not grouped-import
 syntax.
+The compiler's checked-build projections select Core graph record types with
+`use core.build.[BuildGraphFile]` and `use core.build.[BuildGraphNode]`.
+Imported Core record types retain their source-owned associated methods:
+`EncodingError.new(...)` through a grouped import, or
+`encoding.EncodingError.new(...)`, resolves the record's method rather
+than a module member called `new`. The same declaration-owned lookup applies
+to an ordinary imported module's `alias.Type.method(...)`, including sealed
+Core source parts; qualification does not turn a type into a runtime field.
+Declared field types resolve qualified and grouped-import names in their
+declarer's scope before generic substitution. A bare value and a qualified
+field spelling for the same declaration share one nominal identity.
+Explicit `Err(payload)` checks that same declaration identity against its
+failure slot, including native Core results whose error type uses the leaf
+spelling; qualification alone cannot make a forwarded failure incompatible.
+Source-owned Core enum unit and payload cases resolve the enum's declaring
+registry before module-item lookup. Native Core enums use their canonical
+variant tables as well: grouped `EnvError.InvalidValue` and qualified
+`sys.EnvError.InvalidValue` name the case, not a `core.sys` module item.
+Catalog-backed native cases such as `EventConfigError.InvalidCapacity`
+retain the catalog's native type leaf, including under a local import
+alias; unit fields and constructor calls share that case lookup.
+Within compiler-owned Core source, an import of a sealed part's catalog
+alias also joins the transitive source closure, even if that part's public
+owner was not imported. This does not expose private aliases to user code.
+Grouped selection of a sealed catalog part also resolves directly through its
+catalog identity, independently of any renamed module import. Qualified types
+inside imported signatures and fields resolve in the declaring module's import
+scope. Native private carriers remain nameable only in their owning Core scope;
+this admission does not create a source declaration or a public export.
+The same owner-only rule admits native enum menus such as
+`__TreeStateAdapter` when no source enum is declared. Compiler-owned
+`TaskFailure` uses its canonical enum menu, and `Expired{}` uses its empty
+record shape. Source-owned methods (including `Clock.now`) take precedence
+over same-spelled native method tables.
+Retained Core-call parameters follow ordinary ownership: existing places
+need `^`, but a fresh call or explicit copy result transfers unmarked.
+A qualified nominal head selects the declaration in that module, even when
+its leaf name matches a builtin trait such as `Writer`. A qualified reference
+back to the current module's type denotes the same nominal as its local name;
+it does not introduce a second crypto or builtin identity.
 
 **D-SOLVER-LIB1 — Explicit solver library**: `core.compute.solve` ships a finite
 solver API with explicit `Solver` state, deterministic insertion-order
@@ -213,6 +258,15 @@ Fields, including fields reached through list elements, support text append;
 direct indexed compound updates remain E0164 (copy, update, then store).
 User-record compound arithmetic requires the same operator hook as its binary
 form; without that hook sema reports E0360, before any execution tier runs.
+Operator implementation identity includes the left type, trait, and right type
+(D-OPMIX1). Hooks with different right types are distinct trait instantiations,
+not ordinary method-name overloads. Binary operators and explicit calls such as
+`value.mul(rhs)` select the same operand-pair hook; repeating one pair is E0908.
+Fields and ordinary methods still share the hook's member namespace: a field or
+ordinary `mul` beside a `Mul` hook is E0105, regardless of declaration order.
+Dot-call RHS inference and ownership checking happen once. Untyped decimal
+operands select their default exact Decimal pair (`price.mul(1.5)`); ordinary
+method parameters may still contextualize a decimal literal as Float.
 
 **D-INCR1 — Increment/decrement** *(retired 2026-09-28, owner decision, card
 #3727)*: `++` and `--` are not Jet operators. `x += 1` / `x -= 1` (S17) is the
@@ -304,6 +358,8 @@ work belongs inside `fn run`. Loose top-level statements are E0621, and an
 imported file with loose statements is E0620. Notebook and REPL adapters may
 construct an explicit `fn run` for their submitted fragment. `fn dev`,
 `fn build`, and `#Test` declarations remain legal beside module globals.
+The maintained example corpus enforces this same explicit-entry law: an
+ordinary `fn run` is not optional teaching ceremony.
 
 **D-CLI-POS1=A — positional by default, `#Flag` to opt out** *(ratified
 2026-07-23, card #748)*: on a `#CLI` struct, required value fields fill from
@@ -394,6 +450,9 @@ writes a return or error type. Its arrow always starts the body, so
 Return and error types come from the expected callable parameter or slot.
 For an explicit full interface, use a named `fn`; typed local bindings are
 not an escape hatch (D-BIND-BARE1/D-BIND-TYPE2). E0399 teaches this boundary.
+Calls resolve a lexical value binding before a same-named file function,
+including when the binding is a lambda. This does not relax the no-shadowing
+rule for two bindings within one function.
 
 See the executable [lambda interface example](../../Examples/features/callable/lambda_interface.jet).
 
@@ -410,6 +469,10 @@ Values accepted by Jet's ordinary copy law are copied at closure creation, so
 the source binding remains available. Owned values that cannot be copied move.
 Mutable and borrowed captures remain subject to sema's ownership checks. No
 `take(...)` capture prefix or preparatory copy binding is required.
+The native send-safe callable ABI remains reusable `Fn + Sync`: mutable
+environments are lent under one invocation lock, while read-only environments
+need no lock. A checked consuming capture is held in an owned optional slot
+and transferred once, rather than moving directly out of a Rust `Fn` closure.
 
 **D-CALLVALUE1=B — function values use `.call(...)`** *(ratified
 2026-08-05)*: a direct named or method call keeps its ordinary spelling
@@ -530,12 +593,11 @@ D-ONELINE-BODY1=B's typed `fn f() T -> expr`; the earlier general-pipe
 proposal (D-SUGAR2), superseded by D-SHAPE-PIPE1=C.
 
 **D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow** *(ratified
-2026-07-15, card #552; amended by D-BITOREXPR1=A)*: single `|` remains legal
-in alternative-list grammar, including structural or-patterns and choice arms,
-and is also the value-position bitwise OR operator. Jet assigns no general flow
-meaning to a bar. Reusable flows use ordinary calls, named intermediate
-values, and ordinary named composition helpers. `||` and the separately
-ratified `|=` compound assignment keep their existing meanings.
+2026-07-15, card #552; amended by D-SIGIL-ALGEBRA1=B)*: single `|` belongs
+to alternative-list grammar, including structural or-patterns and choice arms.
+Jet assigns no general flow meaning to a bar. Reusable flows use ordinary calls,
+named intermediate values, and ordinary named composition helpers. `||` keeps
+its Boolean meaning; integer OR is `value.bit_or(other)`.
 
 ### Control flow
 
@@ -544,6 +606,10 @@ D-ONELINE-BODY1=B)*: curly braces `{ }` give every multi-statement or scoped
 effect `if`, `else`, and `loop` body a visible parse boundary. A legal one-line
 effect body uses `->` followed by one statement. Arrow arm bodies remain
 expressions. Braces do not determine whether a construct returns a value.
+A final `else` after a braced statement `if` also has a braced body.
+Core's CBOR decoder keeps its final unsupported-simple-value `else`
+braced after the multi-statement floating-point branch.
+An `else if` link can use either body shape; expression arm bodies are separate.
 
 **S19 — Loops** *(D-LOOP-HEADER2=A, D-LOOP-ADVANCE2=A,
 D-LOOPEVAL1=A, D-COMPREHENSION1=A, D-LOOP-COMMA1=A, amended by
@@ -564,6 +630,13 @@ left to right; a dynamic nonpositive stride raises E0123 before the first pull.
 Stride N visits source indexes 0, N, 2N; exhaustion while advancing is normal.
 `in` joins a source binding to its source. Commas separate later loop header
 clauses. Semicolons remain statement boundaries only.
+
+For a typed-literal source, bind the literal first:
+`channels :: [Int]{0, 2, 4}`, then `loop channel in channels -> channel`.
+Both current parsers reject an unparenthesized typed head directly in the
+source slot (`loop channel in [Int]{0, 2, 4} -> channel`). This is current
+grammar guidance, not a ratification of additional loop-header syntax.
+
 **D-LOOP-HEADER3=D**: the old three-slot C-style counter (`loop i := 0, i < n, i += 1`)
 is retired with teaching diagnostic E0376; prefer `loop i in 0..<n` or a range step rule.
 **D-LOOPREAD1=A** *(ratified 2026-09-04, card #2896)* leaves this syntax
@@ -588,6 +661,9 @@ existing iterator adapters.
 
 Every statement-position loop header may use `-> statement`; the statement's
 value is discarded. A finite loop in value position keeps the collection arrow.
+A mutable binding of a collected loop value parenthesizes its right-hand side:
+`values := (loop item in items -> item.value)`. This keeps the collection
+mutable without spelling a mutable compile-time loop name (`E0988`).
 
 **S22 / S72 — Ranges**: `1..10` is **inclusive**. Source-loop stride is the
 optional third clause (`loop i in 0..10, 2`); `step` has no loop role.
@@ -595,6 +671,17 @@ optional third clause (`loop i in 0..10, 2`); `step` has no loop role.
 `a >= b`). Prefer `loop (i, item) in xs` or `loop i in xs.indexes()` for index loops;
 the compiler teaches when inclusive `0..xs.len()` indexes the same `xs`.
 D-ITER1's pipeline adapter is `indexed()` (renamed from `enumerate`).
+**D-RANGE-BACKWARD1=A** *(ratified 2026-10-06)*: a minus step counts down. A
+range loop `a..b, -k` visits `a`, `a - k`, `a - 2k`, … while the value stays
+`>= b`, so it includes `b` when it lands on it (`10..0, -3` visits 10, 7, 4,
+1); with `..<` it stops before `b`. A zero step stays E0123. When both ends
+are written numbers, a range whose ends and step count in opposite
+directions is check error E0170 with a fix edit: `10..1` gets `, -1`,
+`10..0, 2` gets `-2`, and `0..10, -1` gets `1`. A stored Range value or slice
+bound with written ends in the wrong order (`5..<2`) is the same E0170 and is
+taught to write the smaller end first. Computed ends are never an error:
+`0..n - 1` with `n == 0` runs zero times. One rule on every tier and in the
+compile-time evaluator.
 **D-RANGE-VALUE1=A** *(ratified 2026-07-28, card #1298)*: both spellings
 construct one nominal `Range` over `Int`. The value carries whether its end is
 exclusive and exposes `.start`, `.end`, and `.contains(value)`. A Range may be
@@ -604,7 +691,7 @@ Range arm heads and `distinct Int(0..10)` constraints stay literal-only.
 D-SHAPE-PLACE1's retired `.view(range)` method remains retired; bracket slicing
 is the one live range-place surface. A bare place projection such as
 `window :: values[range]` is a no-copy `View`; `&values[range]` is a
-write-through `ViewMut`. Write `~values[range]` when an independent list copy
+write-through `ViewMut`. Write `values[range].copy()` when an independent list copy
 must outlive or detach from the owner.
 The parser keeps a retired `.view(range)` as an ordinary call for the E0214
 teaching diagnostic; it must not split the range into constructor arguments.
@@ -669,6 +756,14 @@ One-line effect and value forms stay quiet. Fmt does not change branch shape.
   `else` is required (E0003), and branch types must match (E0124). A returned
   multiline arm uses `-> { ... }`. The same arm-table spelling works in
   expression position and yields `()` or one unified value type (D-IFDIST1).
+  Without an expected type, an unshadowed positional `Err(payload)` arm can
+  take its Result carrier from a fallible sibling, in either order. The
+  sibling's root retains the carrier for this join; nested calls still use
+  ordinary propagation. Each arm is checked once in its own scope, including
+  payload reads, moves, and scope-end obligations. Explicit expected types
+  and user functions named `Err` retain their ordinary checking paths.
+  The paired checker corpus is
+  `Compiler/JetSema/Tests/checker-gap-operator-cases.json` (root 26).
 - **Dispatch form** — a comparison between subject and `{` is required (bare
   `if subject { arm -> … }` is E0992, auto-fixed). Any of `== != < > <= >=`
   distributes over bare arm atoms (D-IFDIST1=A):
@@ -757,6 +852,37 @@ checking, exhaustiveness, and lowering are those of the positional form. In an
 when the first entry is `..`, `field:`, `field,`, or a lone `field}` followed
 by the body.
 
+**D-PAT-RECORD1=A — literal-shaped recursive patterns.** A struct pattern
+uses its type and field names: `Point{x: 0, y}`; nested payloads use the same
+shape, for example `.Route(Route{origin: Point{x: 0, y}, words: [first, ..rest]})`.
+Field shorthand binds the field's name; `field: pattern` recursively tests the
+field. A trailing `..` permits omitted fields. List patterns use brackets:
+`[]`, `[only]`, and `["add", name, ..rest]`. Without a rest they require the
+exact length; the optional rest is last and may be unnamed (`..`). Fixed lists
+use the same syntax, and statically impossible lengths are rejected.
+
+**D-PAT-MAP1=A — map patterns.** A colon or `?:` after the first bracket
+entry selects a map pattern: `["name": name, "nick"?: nick, ..]`. Keys are
+literals, enum cases, or ALL-CAPS constants of the map's key type. Repeated
+keys are rejected by logical identity, including alternate integer spellings
+and constant aliases. A required entry fails when its key is absent; an
+optional entry supplies `V?` to its subpattern, so `"nick"?: None` tests
+absence and `"nick"?: Val(nick)` tests presence. Without trailing `..` no
+other keys are permitted. `[:]` matches only an empty map; `[]` remains an
+empty-list pattern. A map-shaped head that binds nothing preserves ordinary
+map equality in expression position.
+
+Pattern tables evaluate their subject once, then lazily look up each distinct
+key at most once across their arms. Both presence and absence are cached.
+Slots and list rests are read-only windows onto the subject, not copies of
+its values. A rest window does not modify or take its source list. Ordinary
+ownership escape follows the same materialization rules as other read views.
+Map tables require an `else` arm unless an arm consists solely of irrefutable
+optional entries and permits extra keys with `..`.
+
+Executable examples: `Examples/features/patterns/record_list_patterns.jet`
+and `Examples/features/patterns/map_patterns.jet`.
+
 **D-FLOWTYPE1=A — Optional narrowing after presence checks** *(ratified
 2026-07-24, card #746)*: for a direct immutable local or parameter of type
 `?T`, `x != None` refines `x` to `T` in the true branch; `x == None` refines
@@ -767,12 +893,18 @@ field paths, indexes, aliases, and calls never narrow — bind with
 binding for typed IR; codegen stays mechanical. Documentation teaches the
 `None` check for a direct stable name and the binding pattern for every other
 case.
+Value-match arms retain a live optional sibling's expected type across
+decision-table continuations, including braced `return Err(...)` arms.
+Those non-returning arms do not erase the type needed by bare `None`.
 
 **D-OPT-LIFT1=A — A plain value fills an optional slot** *(ratified
 2026-09-28, card #3685; amends S32 and E0108)*: a value of checked type `T`
 fills a slot whose checked type is `T?`: returns (including `?? return`), call
 arguments, struct fields and enum payloads, list and map items, typed
-bindings, and reassignment of a `T?` place. Callee and generic choices happen
+bindings, and reassignment of a `T?` place. The success payload of an explicit
+`Ok(...)` is also a fixed slot: after `if byte == None -> return Ok(None)`
+refines `byte` to `U8`, `Ok(byte)` fills a declared `U8?` success slot by
+lifting the payload once. Callee and generic choices happen
 first; the lift then adds exactly one `Present`, so it never picks a callee or
 infers a generic, and every tier lowers it exactly like a written `Val(x)`.
 `x == 5` holds only when `x` holds 5 and `x != 5` is its opposite; only
@@ -782,6 +914,12 @@ stay E0309, and `Val(x)` stays where nothing expects an optional
 `Val(...)`" row is retired. `jet fmt --simplify` drops a redundant `Val(x)` in
 a `-> T?` return when the payload is a name, field path, or `Bool`/`Char`
 literal.
+
+In an equality RHS, `Val(v)` with a bare name introduces the S31 binding even
+if that name is already in scope (ordinary no-shadowing checks still apply).
+`Val(true)`, `Val(object.field)`, and `Val(compute(value))` are constructor
+values instead. `!=` introduces no binding. Dispatch-arm and nested
+leading-dot patterns retain their own pattern grammar.
 
 **D-ENUMDOT1 / D-ENUMDOT2 — Leading-dot variants**: match-arm patterns require a
 leading dot (`.Circle(r)`, `.Empty`); bare `Circle(r)` / `Empty` is E0367.
@@ -803,11 +941,17 @@ leading-dot patterns.
 destructure structs, tuples, and lists:
 
 ```jet
-.{ id, severity: sev } :: incident      // struct: bind id, rename severity
-.{ kind, .. } :: event                  // partial needs mandatory `..` (E0326)
-(x, y) :: point                         // named tuple, canonical order
+{ id, severity: sev } :: incident       // struct: bind id, rename severity
+{ kind, .. } :: event                   // partial needs mandatory `..` (E0326)
+(y, x) :: point                         // tuple: bind members by name, in any order
+{ x: a, y: b } :: point                 // tuple: rename members explicitly
 [a, b] :: xs                            // list, runtime length check (E0315)
 ```
+
+Tuple parentheses bind only member names, never positions. A name that is not
+a member (including `_`) is E0314; use a dotless `{ member: local }` pattern
+to rename. A partial tuple record pattern requires `..` (E0326). Two-binding
+loops, such as `loop (i, item) in xs`, are unchanged.
 
 Redundant `..` on a full pattern is E0327. Nesting one level. Refutable
 statement tests use subject-first `subject == pattern ?? route` (D-CHOOSE-TEST1=A);
@@ -848,10 +992,33 @@ use `filter_map`/`try_collect` (D-FAILCOMP1). S25 comparison distribution is
 **S13 — Logic & comparison**: `&&` `||` `!`; `==` `!=` `<` `>` `<=` `>=`.
 Word forms are not operators.
 
-**D-BITOREXPR1=A** *(ratified 2026-08-28, card #2299)*: value-position `|`
-is bitwise OR. It binds tighter than comparisons and remains distinct from
-type-position `|`, which is the anonymous-union separator under D-UNIONTYPE1.
-The existing `|=` compound assignment remains separate.
+**D-SIGIL-ALGEBRA1=B — Words for bit arithmetic and power** *(ratified
+2026-10-04, card #4141)*: every integer type has `bit_and(other)`,
+`bit_or(other)`, `bit_xor(other)` and `bit_not()`. Power is `value.pow(exponent)`
+on Int and Float. These methods lower through the existing numeric operations
+and shared Prelude, with the same integer-width, exactness, overflow-policy
+and D-EXPNEG1 negative-exponent rules. Shifts remain `<<` and `>>`. Prefix
+`&` and `^` retain their ownership meanings; copying is `.copy()` (D-COPY-WORD1),
+and `!` negates Bool only.
+A written negative Int exponent (including a parenthesized negative numeral)
+selects Fraction; positive literals and negative zero remain Int. An exponent
+whose sign is dynamic remains Int and uses the shared runtime negative-power stop.
+Retired infix arithmetic and compounds produce E0398 naming the method, with
+a precedence-preserving structured repair. Updates explicitly assign the
+method result back. `core.math.xor` and `core.math.pow` are removed.
+Generated Jet observers use these methods too: the MIR wire writer extracts
+its hexadecimal byte nibbles with `.bit_and(15)`, not retired infix arithmetic.
+
+Migration tooling: `Tools/agent/migrate-bit-operators.mjs --check` reports value
+operators in Compiler, Core, Jetpack, Tools/testkit, and Examples; `--write`
+rewrites clean files only, with per-area receipts and dirty-owner handoffs in
+`~/.cache/jet-dev/scratch/BitOpsMigration/`. `--self-test` covers precedence and
+non-value grammar. Arithmetic `&`, `|`, and `~|` become `bit_and`, `bit_or`, and
+`bit_xor`; arithmetic `^` becomes `pow`. Historical Rust-origin `^` sites require
+individual semantic review: bit mixing becomes `bit_xor`, not `pow`. Ownership
+marks, pattern/type alternatives, effect rows, strings, prep/templates, foreign
+bodies, and generator templates are not migration inputs. Compound updates
+assign the method result back explicitly.
 
 **D-CHAINCMP1 — Chained comparisons**: `0 <= sev < 10` desugars to
 `0 <= sev && sev < 10`, middle operand evaluated once. Same-direction chains
@@ -900,7 +1067,7 @@ code may opt in per operation with `wrapping(…)` / `saturating(…)` /
 
 **D-WRAP-SCOPE1=A** *(owner outcome, card #2171)*: `#Arithmetic(.Checked | .Wrapping |
 .Saturating)` is the one lexical policy for fixed-width `+`, `-`, `*`, unary
-negation, and `^`. It may attach to a function, method, or block; the
+negation, and `pow`. It may attach to a function, method, or block; the
 innermost block wins, and a declaration policy does not cross a call boundary.
 `.Checked` is the explicit spelling of the default. Division, remainder,
 shifts, conversions, indexing, slicing, bounds, and exact `Int` keep their
@@ -967,10 +1134,17 @@ ban.
 **S45 — Generic functions & types**: `fn largest<T: Comparable>(…)`,
 `struct Pair<T> { }`; multi-trait bounds are lists `<T: [A, B]>`
 (D-VARARGBOUND1). No `where`. **D-LIB2**: associated types + default method
-bodies; no higher-kinded types.
+bodies; no higher-kinded types. Method headers and bodies see the owner's
+generic parameters followed by the method's own parameters. A method parameter
+with the same name shadows the owner parameter; checking that lexical scope
+does not alter the method's declared generic signature.
 
 **S73 — Tuples**: named members only — `p :: (x: 1, y: 2)`, `p.x`, type
 position `(min: Int, max: Int)`. No positional tuples, no `.0`.
+Named tuple identity uses fields sorted by name at construction, irrespective of
+source spelling order. Synthesized Core signatures obey the same invariant,
+including tuples nested in containers, callbacks, and failure domains; assignment
+does not repair or suppress a mismatched identity.
 
 **S76 / D-FIXARR1 — Fixed-size lists**: `[T#N]` is a compile-time-length
 refinement of `[T]`, lowered to a **real stack array**. `::` + literal
@@ -983,6 +1157,9 @@ D-LIT-DOT1=B)*: named struct and typed-literal heads touch their braces:
 dot remains only for enum unit/payload selectors such as `.Tls13` and
 `.Password{ username: u }`. Dotted literal heads are E0320. Every field
 exactly once, any order; flush style `Point{x: 3.0, y: 4.0}` (S29-FLUSH).
+Qualified generic heads retain their arguments too:
+`library.Record<T>{ field: expr }` has the same construction meaning as
+`Record<T>{ field: expr }`; the adjacent `<…>{` is not a comparison chain.
 `{}` constructs an empty inferred value.
 **D-DOTCTOR3=A** *(ratified 2026-07-24, amended by D-LIT-DOT1=B)*: the same
 `Type{ body }` head is
@@ -1015,6 +1192,23 @@ is the three-element list; `[[Int]]{xs}` is a one-element list when
 `xs: [Int]` and the whole value when `xs: [[Int]]`; `[String:Int]{m}` is the
 map `m`. Spreads (`...xs`) and inferred-head bodies (`{ … }`, `.{ … }`) always
 use element notation.
+For a scalar conversion, the head is the result type; a nonliteral body is
+checked in its own type before conversion. Thus `Int{I64{value}}` produces an
+`Int`, and `U8{value %% 256}` keeps the inner arithmetic in `Int` rather than
+forcing `256` into a byte operand.
+Literal bodies remain range-checked (`U8{256}` and `I8{-129}` are E1003).
+Machine-float heads contextualize bare or signed decimal literals, not compound
+arithmetic; a Float value passed to `F32{value}` explicitly converts to F32.
+
+A scalar head does not silently narrow a `Float` into `Int`: `Int{decimal}`
+is E0112 when `decimal: Float`. Use `Int.from_float(decimal)` with its ordinary
+failure handling for truncation, or `math.round(decimal)` for nearest-integer
+rounding (ties away from zero).
+
+A scalar head does not silently narrow a `Float` into `Int`: `Int{decimal}`
+is E0112 when `decimal: Float`. Use `Int.from_float(decimal)` with its ordinary
+failure handling for truncation, or `math.round(decimal)` for nearest-integer
+rounding (ties away from zero).
 
 **S30 — Enums**:
 
@@ -1036,7 +1230,12 @@ one concept on every type. `#Comparable` and `#Printable` derive from fields
 on structs and enums, and re-expose the base capability on distinct types.
 Distinct-only `#Numeric` exposes `+ - * /` and ordering for the same type
 (E0138); `#CodableAsBase` exposes base coding.
-`Usd + Eur` stays a type error; `.raw()` strips. **D-RANGETYPE1 — range-constrained
+A marker-led declaration such as `#Numeric Meters :: distinct Float` attaches
+the marker to the distinct type, not to a module constant; an intervening
+newline does not change that attachment.
+`Usd + Eur` stays a type error; `.raw()` strips to the declaring type's base,
+including when the distinct type is imported. Nominal names in that base keep
+their declaring-module identity. **D-RANGETYPE1 — range-constrained
 types**: `distinct Int(0..10)` and inline `Int(0..10)` are `Int` values
 provably within bounds; literal
 conversion checks at compile time (E0135 out of bounds), runtime conversion
@@ -1212,6 +1411,11 @@ and resident execution use the same conversion mechanism. For an unknown
 unrestricted `Float`-backed value, only an identity scale and offset proves
 exact finite conversion over the complete source domain; integral coefficients
 alone are not proof.
+At the native boundary, the emitters unwrap a source unit's Float storage,
+borrow the exact rational metadata, map the checked mode to the shared kernel's
+rounding enum, and narrow `digits` through the checked exact-Int adapter. Kernel
+success values regain the destination unit identity; reason text stays in the
+checked String failure carrier.
 
 Per D-PACKAGE-POLICY-SCOPE1, `policy: .{ explicit_units: true }` in
 `package.jet` restores explicit-only conversion at package scope, and
@@ -1258,6 +1462,12 @@ implementations.
 Alias declarations bind with `::`; the retired `=` spelling emits E0378. The
 canonical executable proof is `Examples/features/types/type_alias.jet` with
 `Examples/features/expected/types/type_alias.out`.
+Aliases preserve the target's construction syntax: an alias of a struct
+constructs the struct, including substituted generic field types. A parameter
+the target never names is accepted and its argument is discarded
+(`alias P<T> :: Point` makes `P<Int>` mean `Point`). Alias expansion must
+terminate; E0394 reports a cyclic declaration chain before signature or
+expression checking can recurse through it.
 
 **D-INTBIG1=A** *(ratified 2026-08-05, card #1436; amends D-NUMOPS1)*:
 `Int` is the exact arbitrary-precision whole-number default. Small values use a
@@ -1329,7 +1539,10 @@ index then item; one-binding stays item-only. `xs.indexes()` yields every valid
 `Int` index.
 
 **S39 — Indexing**: `xs[i]` / `m[k]` stop with a friendly report on
-OOB/missing key; `xs.get(i) -> (?T)` safe access; `m[k] = v` inserts.
+OOB/missing key; `xs.get(i) -> (?T)` safe access; `m[k] = v` inserts. `Dyn`
+follows the same rule (D-DATATREE-PATH1=A): `d[key]` reads an object member,
+`d[i]` an array item, `d.get(key)` / `d.get(i)` give `Dyn?`, and writes on a
+mutable binding insert or replace without creating missing containers.
 
 **D-INDEXOF1=A — `index_of` searches by value** *(ratified 2026-10-01, card
 #4010; owner: "d-indexof1 by value, A")*: `[T].index_of(item: T) -> Int?` and
@@ -1383,11 +1596,18 @@ Every form stays lazy and has the same AOT, dev/JIT, and interpreter meaning.
 **D-COLLBREADTH1 / D-ITERTOOLS1=A**: `Set<T: [Hash, Eq]>`,
 `Rank<T>`, ring-buffer `Queue<T>`, `PriorityQueue<T>`, `Cache<K,V>`,
 `Tally<T>`, `Bits`, and `Bytes` in Core (E0506). `[K:V]` is the default
-ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**:
-`DataTree` is the single dynamic value
-(`.Object/.Array/.Int/.Float/.Text/.Bool/.Null`); `JSON`/`TOML`/`YAML`/`CSV`
+ordered map spelling; specialized map names stay reserved. **D-ENC-DYN1**
+(amended by D-INFER-PRIVATE1=A and the owner's 2026-10-02 direction): `Dyn` is
+the single dynamic value, closed to
+`.Null/.Bool/.Int/.Float/.Text/.Bytes/.DateTime/.Array/.Object`;
+`JSON`/`TOML`/`YAML`/`CSV`
 are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 `View<T>` library type (D-DYNARRAY1).
+
+The private encoding, configuration-object, and browser-command backing
+signatures also carry `Dyn`, including ordered object-entry values and
+borrowed object/byte views; the bootstrap checker and native Jet signature
+registry must agree on that nominal type.
 
 ### Strings & literals
 
@@ -1396,6 +1616,10 @@ are aliases over it. **Declined**: `[..]T` spelling — zero-copy comes as
 D-ONCE-HASH1=B).
 
 **S20 — Escapes**: `\n` `\t` `\"` `\\`; literal braces `{{` `}}`.
+TOML inline-table fixtures escape their data braces this way, so the
+contents are parsed as TOML rather than Jet interpolation expressions.
+Character literals additionally accept `\'` for the apostrophe delimiter;
+this character-only escape does not extend quoted-text escapes.
 
 **S41 — Char & string length**: `Char` built-in, `'a'` literals; `s.len()`
 counts Unicode scalars; `loop c in s.chars()`; no `s[i]` (E0503).
@@ -1600,6 +1824,8 @@ readings. `fn run()` is fallible by default; an expert may pin `fn run() !E`.
 Returned default errors print one report frame and exit non-zero. Cross-type
 `?` conversion uses declared `impl Source -> Target`; the retired
 default-conversion trait, helper, and compiler arm are deleted by D-FAIL-CONV1.
+Compiler-synthesized default-error records pass the ordinary record checker,
+including Prelude-owned private field defaults; they are not a parallel layout.
 
 **D-ERRCTX1 — Error context** *(amended by D-FAIL-CTX1)*: contextual `?(text)`
 carries a lazy string note. Every fallible call joins the failure journey
@@ -1731,10 +1957,20 @@ retires S80's arrow-and-unit form.
 **D-FAIL-BIND1=A — `err` is ambient inside a fallible fallback** *(ratified
 2026-08-06, card #1535; amended by D-ERR-DECON1=A)*: inside a `??` fallback
 for a fallible value, `err` names the report. It is in scope only in that
-fallback. Optional fallbacks reject `err`. No lambda, binder, or parentheses
-are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
+fallback. Optional fallbacks reject `err`, including the shared fallback of
+`Result<Option<T>, E>`: `Ok(None)` owns no failure report. Handle its Result
+and Option routes separately when the failure handler needs `err`. No lambda,
+binder, or parentheses are added. The `?? (next)` value form in D-ORRETURN-CANON1 is unchanged;
 D-ERR-DECON1 owns the one bare-value-or-diverging-tail rule for fallback
 blocks.
+
+The consumer retains a direct call's carrier through parentheses and access
+marks (`&reader.next()`), without pre-propagating that call. A mixed carrier
+that must preserve absence while mapping its report uses a three-state
+`.Val(value)` / `.None` / `.Err(error)` table (D-OUTCOME-SHAPE1=A), rather
+than naming `err` in the shared `??` fallback. Internal compiler-call report
+types need not be public `Error` domains to be handled by such a table;
+written failure contracts still undergo their declaration-time validation.
 
 **D-ERR-DECON1=A — one `??` block tail** *(ratified 2026-08-19, card #2041)*:
 the existing fallback operator gains no new token or parallel mechanism. A
@@ -1800,9 +2036,15 @@ use math.[sin, cos as c]         // grouped + aliased selective import
 ```
 
 Two-step dot access; `use math.*` wildcard rejected (E0612, D-GLOBIMPORT1).
-Re-export is `pub use` (D-MOD4); a directory module's summary file is
+Re-export is `pub use` (D-MOD4, ballot pending; see S18); a directory module's summary file is
 `module.jet`. Ambiguous module resolution E0606/E0607. `import` is not a
 keyword.
+
+Types declared in different modules retain distinct checked identities even
+when their leaf names are equal. Import aliases select the declaring module;
+lowering consumes that resolved identity, never a bundle-wide leaf-name search.
+The executable witness is
+[`same_type_names`](../../Examples/features/modules/same_type_names/run.jet).
 
 `.[ ]` has one prefix-member law. In expression position, entries remain
 members and produce their values (`point.[x, y]`); after `use`, entries produce
@@ -1817,11 +2059,30 @@ namespace like any other, so `use` and `pub use` are legal inside
 `module name { }`. They resolve in the enclosing file's scope and bind only
 inside that body.
 
-**S18 — Visibility** *(D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: private by
-default; `pub` exports. `#PubFile` flips a file to public-by-default with
-`priv` marking exceptions (E0412–E0418). `pub(package)` exposes to the same
-package/workspace only (other `pub(...)` forms E0411). Cross-file private
-access E0605/E0609.
+**S18 — Visibility** *(D-VIS-MODULE1, owner directive 2026-10-07, card #4723;
+supersedes D-MOD3, D-VISDEFAULT2, D-PUBPKG1)*: everything is public by default,
+and declarations never carry a visibility marker. The only visibility keyword is
+`priv`, and it marks only two things:
+
+- a module: `priv module name { … }` or the file-module form `priv module name`.
+  Its contents are usable only by the enclosing module and that module's other
+  children. `priv(package) module` makes them usable by every module of the same
+  package and invisible to other packages (other `priv(…)` qualifiers: E0414).
+- a struct field: `priv value: T` is readable and writable only by code in the
+  type's own module (and its children). Invariant carriers such as secrets,
+  native handles and validated values use it.
+
+Removed forms are compile errors whose fix deletes the marker: `pub` and
+`pub(…)` on a declaration, method or field (E0411), `private` (E0412), `priv`
+on any other declaration (E0413), `pub:`/`priv:` section labels (E0415),
+`priv(package)` on a field (E0417), and `#PubFile` (E0418). Reaching into a
+`priv module` or a `priv` field from outside is E0605/E0609. There is no
+package-level privacy yet (it will come through the manifest).
+`Tools/agent/vis-cutover.mjs` migrates source written for the retired model.
+
+Re-export (`pub use`) is not decided: it stays the only `pub` form until the
+re-export ballot is ratified (the owner leans toward imports being public by
+default with `priv use` keeping one local).
 
 **U3 / D-SHAPE-MODULEINTERNAL1=A — Module declarations and internal discovery**
 *(ratified 2026-07-15, card #602)*: `module name { … }` is the single outermost
@@ -1971,6 +2232,12 @@ spellings — inside the type body (`impl Serialize { … }`) or top-level
 attaches traits; `::` exists only inside `extern rust` path strings. Orphan
 rule applies. v1: signatures plus D-LIB2's associated types and default
 bodies.
+Checked implementation ABIs substitute the impl's `Self` and associated
+aliases before comparing parameter and result types with the trait declaration.
+The substitution applies inside containers, callable signatures, and the
+success/error payloads of failure carriers; parameter names, access modes, and
+carrier kinds stay exact. A trait method's key retains its declaring module,
+while its method name is the source leaf used by implementations.
 
 **S48 — Dynamic dispatch**: a trait name in type position (`[Shape]`,
 `fn f(s: Shape)`) means automatic boxing + dynamic dispatch; `<T: Shape>`
@@ -1993,6 +2260,10 @@ A missing trait follows the package default. Positive markers generate only
 when fields qualify. Negative markers affect only compiler generation. A
 hand-written implementation wins over the package default and either sign.
 Traits that are not structurally derivable remain explicit-only.
+For structural equality, a generic argument is constrained by `Equatable`
+when it occurs in a stored field. A phantom parameter does not introduce
+a value to compare and does not itself require `Equatable`; computed fields
+do not contribute stored state.
 
 `Debug` remains the dev-facing lens; `#Redact` carries the secrets story.
 Explicit opt-in markers for the other derive families remain
@@ -2006,6 +2277,9 @@ user-facing — a single explicit method `fn display(self) -> String`, no
 default (E0915, L0520). Bare `self` gives read access (D-MEM1), not ownership:
 printing and interpolation `{}` borrow the value and leave it available;
 `display(^self)` and `display(&self)` do not match this contract.
+`#Error` marks an error type; it does not synthesize `Display`. Source-owned
+Core errors register their explicit formatting implementations through the
+same trait registry as user types, without a duplicate builtin implementation.
 `Debug` is dev-facing and auto-derived; `{value:Debug}` selects it;
 `#Redact` on a field renders `"[redacted]"` (D-DEBUG-REDACT).
 
@@ -2013,6 +2287,13 @@ printing and interpolation `{}` borrow the value and leave it available;
 `.each`/`.to_list()` and `.get`/`.set`; experts implement
 `Iterable`+`Iterator` for `loop x in mytype` and `Index`/`IndexMut` for
 bracket syntax. Built-in `[T]`/`Map` keep native paths.
+
+**D-OP-CALL1=A — No call hook** *(ratified 2026-10-06)*: parentheses call
+functions, lambdas, function values, and enum cases only; no trait makes a
+value of another type callable. Calling a value binding whose type is not a
+function is E0803, which names the value, its type, and the methods that
+type has, and suggests a method call. A struct that should act as a
+function hands out a lambda through a method it writes (`triple.as_fn()`).
 
 **D-ROLLBACK-TRAIT**: `trait Rollback { type Snapshot; fn snapshot(self) Snapshot;
 fn restore(&self, snap: Snapshot) }`; restore total; the
@@ -2109,6 +2390,49 @@ the same row.
 share one `#[A, B]` list. A one-item list or adjacent bare stack is E0999 with
 the canonical rewrite. `jet fmt` performs that rewrite and preserves order.
 Scoped block rules do not stack.
+
+**D-MARKER-GROUP1=A — Fixed named marker groups**: `marker Fast =
+#[Inline(.Always), Scalar]` names two or more fixed applications. Use it as
+`#Fast` or as a member of an ordinary application list. A group has no
+parameters; its declaration is not a callable marker signature. Fewer than
+two members is E0999. Gates, refusals, retired markers, unknown members and
+other named groups are E0400: audit-sensitive authority must stay visible at
+the use, and groups are not a second policy language. Argument types and legal
+sites are checked at each use, and overlap with another group or a directly
+written member follows the ordinary E0999 duplicate rule. The formatter
+preserves the authored declaration and group use rather than printing expanded
+members.
+Expansion preserves ordinary file projections: a file-scoped member such as
+`NoPrelude` applies the same file flag as its direct spelling. Grouping does not
+widen legal sites; mixing module and file marker sites remains the same E0355
+rejection as an ordinary written list.
+
+**D-MARKER-MODULE1=A — Markers belong to modules**: marker identity is its
+declaring module and declaration, not a process-wide short name. A module may
+write its own marker bare. An imported marker always uses the import's local
+name: `use core.http.server as web` followed by `#web.Get(...)`. Nested exports
+retain their path, such as `#library.inner.LibraryNote`. Bare imported markers teach
+E0085; an ambiguous qualified path is E0086. Unknown names remain E0927 and
+private exports remain E0605. Group members resolve lexically in the group's
+declaring module, so a caller's marker or alias cannot capture them. A public
+group containing a private member is E0605; publishing a group cannot leak
+module-private authority.
+Qualified members of fixed groups count as import uses in their declaring
+scope, even when a caller receives the expanded member's local spelling.
+Nested scopes use their nearest declaration or import alias. Once an import
+alias binds a qualified head, a missing member is an error in that module,
+not permission to retry an outer alias with the same name.
+
+**D-CODEGEN-HINTS1=A — Distinct codegen and storage controls**: keep `Inline`,
+`Scalar`, `Kernel` and `Static` separate; no fused marker replaces them.
+`#Inline` is a soft inlining hint and `#Inline(.Always)` is the checked inline
+promise, with E0917/E0918/E0919 for failed promises. `#Scalar` selects scalar
+codegen rather than changing inlining. `#Kernel(.parallel)` requests the
+checked worker-boundary proof, rather than merely suggesting optimization.
+`#Static` gives a constant stable-address storage, not an optimization mode.
+Each independent intent remains readable and independently checked; an
+ordinary fixed group may bundle applications without inventing a new fused
+semantic rule.
 
 **D-INLINE-PARAM1=A — One inline rule** *(ratified 2026-07-23, card #762)*:
 `#Inline` is the soft function hint and `#Inline(Always)` is the checked
@@ -2372,9 +2696,9 @@ stays a verb — no third sigil (D-CAP2). Dereference is **postfix `p.*`**
 keywords (E0056/E0057 retired by D-S14-PAUSE; E0058 retired earlier by
 D-MEM1/S3).
 
-*Supersession (D-SHAPE-COPY1=A, ratified 2026-07-15):* `copy x` is
-historical text in this frozen entry, not current syntax. The current copy
-form is `~x`; the retired `copy` word produces E0991.
+*Supersession (D-COPY-WORD1=A, confirmed by D-COPY-MOVE-SPELL1=A):* `copy x`
+and `~x` are historical text in this frozen entry, not current syntax. The
+current copy form is `x.copy()`; the retired forms teach E0991 and E0941.
 
 *History:* D-CAP7's original text (pre-2026-07-03) had a third visible
 parameter sigil `~T` (edit/mutate), a fourth `*T` in parameter position, and
@@ -2405,12 +2729,12 @@ keeps its write-lend or take meaning, so the lambda captures that binding by
 write lend or by take, never as a hidden consuming move (card #2758).
 Passing an unmarked parameter is allocation-free and
 never elevates; a body write requires `&`, while consuming ownership requires
-`^`. `~` has only the copy meaning assigned by D-SHAPE-COPY1. Raw `&T`
+`^`. Copying is the method `.copy()` (D-COPY-WORD1). Raw `&T`
 reference returns and fields remain deleted (D-REF-SHORTHAND1/2 and
 E0207/E0427); safe stored and returned views use D-MEM-VIEWRET1's named
 `View<T>`/`ViewMut<T>` boundary instead. L0201
 deleted — moves of named bindings are always written `^`; temporaries pass
-freely; `~x` (D-SHAPE-COPY1) is the one copy spelling. Named escape hatches
+freely; `x.copy()` (D-COPY-WORD1) is the one copy spelling. Named escape hatches
 `Shared<T>`, `Pool<T>`/`Id<T>`; scoped memory facts now use `Mem.*` effect
 denials (the old `no_alloc` spelling is tombstoned).
 **S1 shipped (2026-07-04)**: `&` is the write sigil, `~` is gone from the
@@ -2472,6 +2796,24 @@ D-CAP7/D-CAP8/D-CAP4-5-6/D-REF-SHORTHAND1/2 supersession notes, stale
 `~`/`.clone()`/`api:` sweep across docs/reference. S9 (final verification
 gate) remains.
 
+**D-COPY-WORD1=A — the one copy is the method `x.copy()`** *(ratified
+2026-10-06)*: amends D-SHAPE-COPY1=A's spelling only. A deliberate copy is the
+compiler-owned method `x.copy()`. The parser reads it as an ordinary method
+call; sema decides by name resolution: on a value receiver it is the copy,
+resolved before ordinary method lookup so no type can redefine it, and on a
+receiver that names a type (`Recipe.copy()`) it stays an associated call. It
+chains without parentheses (`input.copy().rotate()`). The prefix `~x` is a
+retired mark: E0941 teaches it and its Safe fix writes `x.copy()`. The
+entries below keep their historical `~x` text.
+The Jet checker routes the zero-argument, non-generic value call through its
+copy classifier before receiver-method lookup. Its `ExplicitCopy`, `Clone`
+and materialized-view TIR products use the existing MIR copy lowering; there
+is no separate runtime `.copy()` method-dispatch path.
+Interpolation holes contain ordinary expressions, so copies inside a hole
+also use `.copy()`; literal string text remains unchanged. The compiler's
+machine-name mangler materializes its sliced byte view with `.copy()` before
+constructing the interpolated owned String.
+
 **D-SHAPE-COPY1=A — the one copy sigil, `~x`** *(ratified 2026-07-15,
 card #535)*: supersedes D-CAP2/S4's `copy x` word. `~x` is a prefix-verb
 expression producing an independent duplicate, legal in any position;
@@ -2506,9 +2848,9 @@ mark, matching the fresh-argument rule; read calls stay unmarked. Sema checks
 each mark against the resolved receiver
 convention of user methods, trait dispatch, and builtin receivers: E0224
 (missing), E0225 (extra), E0226 (wrong mark), each with a machine-applicable
-fix. A line that starts with `&name` or `^name` begins a new statement; a
-continued bitwise-and or power line keeps a space after its operator, which
-`jet fmt` always emits. `~` copy grouping and `&place` window lifetimes are
+fix. A line that starts with `&name` or `^name` begins a new statement.
+Arithmetic uses named bit methods and `pow` (D-SIGIL-ALGEBRA1=B).
+`~` copy grouping and `&place` window lifetimes are
 unchanged; calls through a stored write window mark the window name. Lookup,
 evaluation order, one place evaluation, two-phase builtin borrowing, and move
 checks are unchanged. Rationale: one value-side mark position for receivers,
@@ -2519,10 +2861,12 @@ arguments, and windows, with no new tokens.
 card #3714)*: an unmarked last use of a name moves with no mark, in every
 position. `^place` is the programmer's optional exact move in every value
 position — `ys := ^xs`, `Box{xs: ^xs}`, `[[Int]]{^xs}`, `ys = ^xs`, a `^xs`
-result — and any later use of `xs` is E0121 naming the move. `^` before a fresh
+result, or `consume(^owner.field)` — and any later use of the moved place is
+E0121 naming the move. A field move leaves disjoint fields usable and drops
+the owner's remaining fields without copying the moved field. `^` before a fresh
 value (a literal or call result) is E0225, before a collection element is
 E0225 (the element stays in its collection), and on borrowed storage is E0201.
-`ys :: xs` of a place stays a read view and `~xs` stays an independent copy.
+`ys :: xs` of a place stays a read view and `xs.copy()` stays an independent copy.
 A taking receiver call on a whole local at its last use needs no `^`
 (`ticket.redeem()`); a take on a field or on a local read again later still
 needs `^`, and a writing call always needs `&` (E0224). An unmarked use that
@@ -2533,6 +2877,15 @@ one-pass iterators, consume duties, tasks) and code under `copies: .Explicit`
 keep E0121 on the later use. A share is materialized as a copy at the share
 site today; copy on first write and inferred kept parameters complete the
 model in later cards.
+
+**D-PARAM-CONST1=A — read is Jet's const** *(ratified 2026-10-06)*: Jet has
+no `const` or frozen parameter mark. An unmarked parameter is deep,
+call-long, no-copy read access: nobody, including the caller, changes the
+value during the call, and the promise cannot be cast away. `freeze(x)` stays
+the way to make a value immutable for good. Editor hover prints each
+parameter's promise in words (`xs: read: nobody changes this during the
+call`), and a write through a read parameter names the fix as the
+parameter's `&` mark (`xs: &[Int]`), never a `:=` binding.
 
 **D-MEM-VIEWRET1=B — stored and returned safe views** *(ratified 2026-07-15,
 card #643)*: `View<T>` and `ViewMut<T>` may cross a return or field boundary.
@@ -2564,6 +2917,32 @@ and aggregate per-slot `from (text: primary | fallback)` ship in the same ruling
 through the deref'd receiver; the same write in a read method is E0205 with a
 "write the receiver as `&self`" fix at the assignment.
 
+**D-METHOD-FOOTPRINT1=A — method field footprints** *(ratified 2026-10-06,
+card #3645)*: sema infers each method's receiver footprint, the record
+fields its body reads or changes through `self` (calls to sibling methods
+on `self` add their footprints; any other use of a whole `self` is the
+whole record). An expert may state the footprint on the receiver with the
+ratified member spread, `&self.log` or `&self.[log, hits]`; the stated set
+must name stored fields and cover the body (E0231), and callers see the
+stated set. Public methods publish the footprint in the API snapshot as
+`; footprint = self.[a, b]`, so a change is a reported API change. Letting
+a call `&s.m()` run beside a live view of a field outside `m`'s footprint
+waits on the native emitter keeping disjoint field borrows of one local
+across statements; until then calls still count as touching the whole
+receiver.
+
+**D-LINK-ITEM1=A — kept links point at objects** *(ratified 2026-10-06,
+card #3645)*: a link (`@`, D-MEMREF1) used only within a brief, checker-bounded
+range may point at a list item; while it is live the list cannot grow,
+shrink, or relocate (E0212, as for views today). A link the checker cannot
+bound to such a range, such as one stored in a field, must point at an object:
+the list is written `[@Node]` so each item is its own counted object
+(D-MEMREF-LIFE1). A stored link into an item of `[Node]` is a compile error
+whose structured fix changes the element type to `[@Node]`; `[T]` itself
+never changes layout and pays no runtime cost. The rule covers list items,
+map values, string ranges, enum payloads inside lists, and nested lists. It
+is not built yet: it attaches to the D-MEMREF1 link build.
+
 **S63 / D-SHAPE-RESOURCE1=A / D-SHAPE-RESOURCE2=A — resource cleanup**
 *(amended 2026-07-15, cards #557/#647; supersedes D-DEFERKW1/D-SUGAR5's
 no-`defer` ruling)*: automatic scope-end cleanup remains
@@ -2580,6 +2959,15 @@ There is no general deferred statement or block: `defer action()` and
 `defer { ... }` are E0003. The resource expression is one directly moved local;
 ordinary close-call resolution proves that `close(^resource)` is valid, and the
 normal move checker rejects any later use, immediate close, or second defer.
+Checked instantiated owned fields and List/Option payloads retain their
+ordinary `Close` cleanup (#4792). A partial field move leaves cleanup only
+for the remaining initialized fields; moving the payload transfers its duty.
+Only the consuming receiver's storage in its own `Close` body is structural
+cleanup: another local of the same nominal type still closes normally.
+The Rust printer and MIREval implement this as seed/verification seams that
+die at cutover; native execution uses Jet-owned Lower cleanup glue.
+Their immutable cleanup facts are cached per program/type, and partial-move
+parity witnesses use owned payloads rather than Copy-only records.
 
 **S53 — Concurrency** *(historical record, superseded by D-CONC-SPAWN1=D)*:
 tasks/channels were once planned around `tasks.spawn` and handle-list
@@ -2590,9 +2978,10 @@ combinators. The current surface is one `task` word with nested
 borrowed view is a compile error; **D-ASYNCRT1** M:N green threads, no
 `async`/`await` coloring (gated on scheduler work). **D-TUPLE-DESTRUCT1**
 *(ratified/implemented 2026-07-04)*: `channel<T>()` returns
-`(Sender<T>, Receiver<T>)` directly — no combined "Channel" handle, no
-`.sender()` method. Destructure with the existing tuple form:
-`(tx, rx) :: channel<T>()`; a second sender is `~tx`. A
+`(sender: Sender<T>, receiver: Receiver<T>)` directly — no combined "Channel"
+handle, no `.sender()` method. Bind by member name with
+`(sender, receiver) :: channel<T>()`, or rename with
+`{ sender: tx, receiver: rx } :: channel<T>()`; a second sender is `~tx`. A
 `Receiver<T>` is a plain endpoint for a readiness arm table.
 
 **D-CONC-UNIT1=A — one substrate for state, duty, and reach** *(ratified
@@ -2712,7 +3101,11 @@ positional branches is one parse error (E1117), with no successful lowering.
 `.Cancelled`, `.DeadlineBlown`, and `.Panicked(reason)`. `task.all` uses the
 same rail: positional form returns its ordered list and named form its
 anonymous tuple/record. A joined child panic becomes `.Panicked(reason)`;
-it does not kill the process. `trace()`, `exception()`, `TaskOutcome`, and
+it does not kill the process. The reason uses the canonical task identity and
+child stop message, not its rendered diagnostic or source-location report;
+wrong-variant getters and
+numeric stops follow this same task-publication boundary. `trace()`,
+`exception()`, `TaskOutcome`, and
 `TaskStatus` are deleted from the task-handle surface. D-SERVICE1 retains
 `TaskOutcome` and `TaskStatus` as typed service-workflow facts; that domain API
 is not `TaskHandle.outcome()` or `TaskHandle.status()` and does not restore
@@ -2770,6 +3163,12 @@ D-EFFTREE1 and D-AUTHORITY-ROOTS1: a root may be dotted into an open leaf path
 (`FS.Read`) and ancestor matching is subsumption; old flat FFI language roots
 are retired. `effect <Name>` user declarations remain reserved, unminted.
 
+**D-AUTH-AMBIENT2=A — Waiting is deny-only**: the exact `Time.Wait` leaf
+remains an inferred reachability fact and can be prohibited with
+`-[!Time.Wait]>`, but never needs a positive callable bound or authority
+grant. `Time` and its other leaves retain their ordinary positive bounds.
+This applies to Rust bootstrap and native Jet effect-bound checks alike.
+
 **D-EFFTREE1 — Effect tree** *(ratified 2026-07-03, card #181)*: the
 D-EFF4/5 names are tree roots; a signature/`#Abilities`/`-[!…]>` entry may
 be a dotted path rooted at one (`FS.Read`, `Net.HTTP.Get`) — root closed
@@ -2813,10 +3212,10 @@ used through dynamic dispatch keeps its declared upper-bound contract.
 fn twice(n: Int) -> Int { n * 2 }
 // inferred []: pure
 
-pub fn load(path: String) -> String { core.files.read(path) }
+fn load(path: String) -> String { core.files.read(path) }
 // API snapshot: load -[FS.Read]> String
 
-pub fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
+fn bounded(path: String) String -[FS.Read]> { core.files.read(path) }
 fn hash(text: String) Int -[]> { text.length() }
 
 trait Renderer { fn render(self) Image -[GPU]> }
@@ -2976,6 +3375,10 @@ hash-checked inputs such as `embed_file(path) -> String`,
 enter `.jet/lock`. Ambient effects are Tier 2 and keep the explicit
 `#Impure("reason")` plus the `--gate impure=allow` gate. **D-STRPARSE1**:
 comptime evaluation may pass through `Result`/`Option` for pure parse paths.
+Preparation uses the checked call's result carrier. Before AST return facts
+are materialized, a concrete Core surface signature supplies that result only
+when every checked argument matches its parameter type; it must not substitute
+the default overload's result for another floating-point width.
 
 **D-CTEFFECT1 — Comptime effect tiers**: Tier 0 pure always-on; Tier 1
 hashed-reproducible recorded into `.jet/lock` (`@embed`, `find`,
@@ -3256,6 +3659,11 @@ the portable ceiling but still requires a positive power of two supported by
 the selected target. Effective alignment is the maximum of the requested and
 natural alignments; C field order and padding rules remain unchanged, with
 trailing size and stride padded to the effective alignment.
+Native C-layout storage does not by itself create a foreign boundary. A
+physical Copy wire mirror is emitted only for types reachable from an
+applicable C signature, including nested records and enum payloads. Thus a
+native aligned record may contain safe atomic cells without requiring those
+cells to have a by-value C representation.
 
 **D-ATOMIC-WIDTH1=A — One exact atomic value family** *(ratified)*:
 `Atomic<T>` is safe Core for `Bool`, `I32`, `U32`, `I64`, `Int`, and `U64`.
@@ -3267,6 +3675,9 @@ ordinary operations are sequentially consistent, while `publish` and
 `observe` are the intent-named release/acquire pair. No method accepts a
 memory-order argument or exposes a relaxed operation. Unsupported targets
 reject the declaration rather than silently using a lock fallback.
+These operations borrow the cell in its checked place. A borrow-only MIR read
+and its synthetic cleanup do not materialize or destroy a second cell; an
+explicit consuming or copying operation keeps its separate ownership meaning.
 
 **D-LAYOUT-ALIGN1=A — Portable and target alignment modes** *(ratified)*:
 `align(N)` is the portable profile rule; `align(target, N)` is source-local
@@ -3296,11 +3707,13 @@ Prelude-backed mechanism on every applicable tier. Reductions keep their
 left-to-right scalar fold order for bit-identical results; raw target
 intrinsics remain behind `#Unsafe`.
 
-**D-JIT1 / D-JIT2 / D-JITDEP1 — JIT tier**: production is AOT; the Cranelift
-JIT is the dev-loop tier-1 over the interpreter tier-0, behind the
-`JitBackend` seam, in its own `jet-jit/` crate (`Source/` stays std-only).
-**D-DEVMODE1 hard rule**: dev-runtime output must be byte-identical to the
-release build — divergence is a release blocker.
+**D-EXEC2=A — JIT retired** *(ratified, card #4134; supersedes D-JIT1 /
+D-JIT2 / D-JITDEP1)*: the Cranelift JIT and its crate are removed. `jet run`
+and `jet dev` use the normal build path and execute the result; `jet dev`
+rebuilds and restarts on every save. The comptime evaluator stays for
+compile-time code only. Native in-memory O0 replaces the build-and-execute
+loop when it lands. **D-DEVMODE1 hard rule**: dev-runtime output must be
+byte-identical to the release build — divergence is a release blocker.
 
 **D-PLUGIN1 / D-DEP-WASM1**, naming amended by **D-ONCE-SANDBOX1=A**:
 `target: sandbox` compiles to a sandboxed WASM module (wasmtime + Component
@@ -3623,7 +4036,7 @@ the D-FFI-PY1 precedent):**
   IDispatch fallback behind `#Unsafe`; the Office/VBA estate becomes
   automatable and migratable; its effect clause is `-[FFI.Com]>`.
   **D-FFI-PWSH1=A** — `pwsh.*` sidecar
-  PowerShell 7+ worker; cmdlet objects cross as `DataTree`; pipelines
+  PowerShell 7+ worker; cmdlet objects cross as `Dyn`; pipelines
   callable; its effect clause is `-[FFI.PowerShell]>`. **D-FFI-DART1=A** — dual surface: `dart.*` library binder
   (dart_api_dl) plus the Flutter embedding path (Jet compute compiled to
   C-ABI, callable from Flutter apps); interop floor for the mobile
@@ -3744,9 +4157,10 @@ jetpack providers resolved by `<lib>: <lang>@"ref"` — fetched into the
 hangar, vendored + hash-pinned, obeying U29 offline, U21 channels, U28
 no-daemon, U24 provenance, U23 honest fallback; hash-verified on arrival.
 **D-PLUGIN-EXPORT1 (=A, shipped c81)**: a `plugin` target's exported surface
-is the top-level `pub fn` items of its entry file, each with one homogeneous
-`Int`, `Float`, `Bool`, or `Text`
-(E1260) in v1, named by the manifest `export:` field (defaults to the package
+is the top-level `pub fn` items of its entry file; each parameter and the
+result is `Int`, `Float`, `Bool`, `Text`, or a recursively closed `#Codable`
+Component shape, independently per position (E1260; owner ruling 2026-10-09
+superseded the v1 homogeneous-scalar rule), named by the manifest `export:` field (defaults to the package
 name) and frozen via `Sema::ApiFreeze`'s pub-metadata semver snapshot
 (re-grounded off the retired D-CAP4 `api: stable` machinery, which D-MEM1/S2
 deleted — same intent, the still-live mechanism); the `.wit` world is
@@ -3914,8 +4328,8 @@ D-ENC-YAML1)*: one format-agnostic data model. `#Codable` (≡
 field-walk, not S56 reflection. Formats are adapters in **`core.encoding`**
 (`core.encoding.{json,csv,toml,yaml}`); encode verbs `to_string` /
 `to_string_pretty`; typed decode `decode<T>` (target inferable from the
-binding type; bare `decode(s)` yields dynamic `DataTree`). Hand-impl surface:
-`encode`/`decode` verbs over `DataTree`
+binding type; bare `decode(s)` yields dynamic `Dyn`). Hand-impl surface:
+`encode`/`decode` verbs over `Dyn`
 (`.Null/.Bool/.Int/.Float/.Text/.Array/.Object`); accumulated `[FieldError]`
 values with `{ path, reason }`; encode infallible. Field markers (`#` plane):
 `#Rename("x")`, `#Skip`, declaration defaults `field: T{expr}`, `#Flatten`,
@@ -3931,7 +4345,7 @@ YAML parser is std-only, YAML 1.2 core incl. anchors.
 **D-SERDE2 = A** *(ratified 2026-07-11, card #131; error contract amended by
 D-VALIDATE-DECODE1)*: the hand-writable codec
 surface is a first-class `Encode`/`Decode` protocol — a type implements
-  `encode(self) DataTree` and `decode(tree: DataTree) T ![FieldError]` to own
+  `encode(self) Dyn` and `decode(tree: Dyn) T ![FieldError]` to own
   its wire form (e.g. a validated newtype serializing as a
 bare string). The built-in `#Codable`/`#Encode`/`#Decode` derives become
 ordinary derives that contribute the same checked Jet items and enter sema
@@ -3940,14 +4354,31 @@ Ratifying this also fixes cross-module `decode<T>` (derive output
 previously referenced entry-file-local paths).
 
 **D-SERDE13 = B / D-SERDE14 = A / D-SERDE15 = A** *(ratified 2026-07-11, card
-#131)*: the value tree's one user-facing name is **`DataTree`** — the retired `Data`
-spelling becomes a teaching error pointing at `DataTree` (no alias,
+#131)*: the value tree's one user-facing name is **`Dyn`** — the retired `Data`
+spelling becomes a teaching error pointing at `Dyn` (no alias,
 I8); tree accessors (`.field`/`.at`/`.int`/`.text`/…) return `T ![FieldError]`
 everywhere. `.field` and `.at` fill `path` from the segment they read; scalar
 accessors leave it empty and a containing decoder uses `FieldError.under`, so
 `?` chains inside a hand `decode` remain direct; hand-built object
-nodes take the map literal — `DataTree.Object({ "name": v, … })` —
-insertion-ordered, and the pair-list form is not accepted.
+nodes take the map literal — `Dyn.Object({ "name": v, … })` —
+insertion-ordered. *Amended by D-DATATREE-ORDER1 = A:* `Dyn.Object` also
+accepts the ordered pair list `[(key: String, value: Dyn)]` for
+programmatic building (list order is kept), and a `[String: Dyn]` Map
+value contributes its sorted iteration order.
+
+**D-DATATREE-ORDER1 = A** *(ratified 2026-10-05)*: a `Dyn` object keeps its
+fields in arrival order; ordinary Maps stay sorted. The `Object` payload is the
+ordered pair list `[(key: String, value: Dyn)]` on every tier, so
+`if tree == .Object(fields)` binds that list and `.field(name)` scans it.
+Parsers build the pair list and reject a repeated name (strict JSON, TOML
+including inline tables, YAML, text-key CBOR) with a temporary key set;
+`json.parse_allow_duplicates` keeps the later value at the first name's
+position. Canonical writers (`json.canonical`, canonical CBOR) sort a borrowed
+view and never change the object. `==` compares objects field by field in
+order; `equal_unordered` ignores field order. A Map filled by `add` in one
+function and then passed to `Dyn.Object` draws a warning whose
+machine-applicable fix builds the pair list instead, and `jet fix` rewrites a
+direct `==`/`!=` between `Dyn` values to `equal_unordered`.
 
 **D-SERDE16 = A** *(ratified 2026-07-11, card #131)*: decode an arbitrary
 subtree through its target's public protocol with `tree.decode<T>()`. The
@@ -3956,13 +4387,41 @@ spelling works uniformly for primitives, user types, `List`, `Option`, and
 `Decode` implementation is E0905 before codegen. No compiler-only helper,
 hidden alias, alternate codec, or fallback exists.
 
-**D-DATATREE-ERGO1 = A** *(ratified 2026-08-30, card #2380)*: `DataTree`
+**D-DATATREE-ERGO1 = A** *(ratified 2026-08-30, card #2380)*: `Dyn`
 provides `to_text()` for scalar text, integer, float, and boolean leaves,
 returning `None` for `Null` and containers; the strict `.text()` accessor is
 unchanged. `equal_unordered(other)` ignores object insertion order, preserves
 array order, keeps `Int` and `Float` distinct, and never equates `NaN`. No
-`DataTree.truthy()` operation is added; domain-specific truthiness remains
+`Dyn.truthy()` operation is added; domain-specific truthiness remains
 explicit at its call site.
+
+**D-INFER-PRIVATE1 = A** *(ratified 2026-10-02, card #4306)*: `Dyn` replaces
+`Dyn` as the one dynamic data value; there is no `Dyn` spelling. It
+keeps every former feature (every codec, pointer, patch, canonical bytes,
+events, typed encode and decode) and holds data only: no functions, handles,
+or arbitrary structs (D-ANY-JAI1 stands). Its cases are `Null`, `Bool`, `Int`,
+`Float`, `Text`, `Bytes([U8])`, `DateTime(ZonedDateTime)` (an instant with a
+fixed UTC offset), `Array([Dyn])`, and `Object`, an insertion-ordered object
+whose literal is the map literal (D-SERDE15). On a mutable binding `row.price =
+2.5` adds or replaces a field and `row.price` reads one; a missing field stops
+with the S39 report and `row.get("price")` gives `Dyn?`. `Int`, `Float`,
+`String`, `Bool`, `[U8]`, `DateTime`, `ZonedDateTime`, and lists and maps of
+these wrap automatically where a `Dyn` is expected; other `Encode` values go in
+with `Dyn.from(value)`, and E0172 names the fix. `decode<T>()` returns `T
+[FieldError]!`. `+ - * /` with a `Dyn` operand give `Dyn`, checked while
+running: `Int` mixed with `Float` gives `Float`, `/` always gives `Float`, and
+any other mismatch stops naming both kinds. `==`/`!=` compare contents and keep
+`Int` and `Float` distinct; `< <= > >=` mix numbers, compare `Text` and `Bytes`
+in order and `DateTime` by instant, and stop on other kinds. A `Dyn` is never a
+condition (E0170). Its own members are `get`, `has`, `keys`, `remove`, `len`,
+`decode`, `to_text`, `field`, `at`, `int`, `float`, `text`, `bool`,
+`equal_unordered`, and `encode`; a field with one of those names is reached
+with `row["len"]` (E0171). Printing shows a value's `to_text()` and containers
+as compact JSON. Codecs: CBOR carries `Bytes` as byte strings and `DateTime` as
+tag 0 (tag 1 also decodes); TOML carries offset date-times natively; YAML uses
+`!!binary` and timestamps; JSON, JSONL, CSV, and XML write base64 and RFC 3339
+text, which typed decode into `[U8]`, `DateTime`, and `ZonedDateTime` accepts.
+`time.zone("+05:30")` gives the fixed-offset zone a `DateTime` case carries.
 
 **CLI & IO**: builder-spec arg parsing `args.spec().flag(…).option(…)
 .positional(…)` with generated `--help` (D-ARGS1). `io.stdin()` handle with
@@ -4120,7 +4579,7 @@ index, not a substitute for that law.
   `<selector>._domainkey.<domain>`. SPF and DMARC remain DNS policy. Multiple
   identities use separate named Mailers; there is no per-message override.
 - **D-ENCSTREAM1=A**: each `core.encoding` codec has one adapter identity with
-  whole-value and reader/writer modes over the shared `DataTree`
+  whole-value and reader/writer modes over the shared `Dyn`
   and `Codable` machinery. Reader/writer access is a mode of that adapter, never a second
   codec library.
 
@@ -4130,18 +4589,18 @@ index, not a substitute for that law.
   `^files.FileWriter`, take shared `EncodingLimits.safe()`, and return
   `EncodingError`; readers provide `next(&self)`, writers `write(&self)`,
   `flush(&self)`, and required idempotent `finish(&self)`. Items are `DataEvent`
-  for JSON/CBOR, `DataTree` for JSONL, `CSVRow` for CSV readers and `[String]`
+  for JSON/CBOR, `Dyn` for JSONL, `CSVRow` for CSV readers and `[String]`
   for CSV writers, and D-ENCXML1's exact
-  tagged `DataTree` event algebra for XML. Blocking calls provide backpressure; no
+  tagged `Dyn` event algebra for XML. Blocking calls provide backpressure; no
   hidden task, queue, partial-success state, or `WouldBlock` exists. Clean EOF
   follows complete structural/trailing-input validation; the first terminal
   error is cloned forever. `EncodingLimits` owns buffer/depth/item/total/entity
   expansion bounds and all constructors validate fields before IO. Shared
   `EncodingError` records format, kind, zero-based byte offset, optional
-  one-based line/column, DataTree path, reason, and handle-free IO cause. Whole and
+  one-based line/column, Dyn path, reason, and handle-free IO cause. Whole and
   stream paths share parser, value tree, errors, limits, canonical bytes, and
   bounded-memory law, summarized across primitives in the [Bounded buffering law](spec.md#bounded-buffering-law).
-  Shipped `json.events(DataTree) -> String` is unchanged;
+  Shipped `json.events(Dyn) -> String` is unchanged;
   pull events exist only through `json.reader` until an edition migration.
 
   **D-ROWS1=A** fixes the existing CSV engine as the one whole-value and
@@ -4155,7 +4614,7 @@ index, not a substitute for that law.
   multiline records and records after CRLF. `csv.parse` and `csv.reader`
   expose the same options and engine; `csv.reader.next()` returns `CSVRow`.
 
-  **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`DataTree` XML
+  **D-ENCXML1=A** selects one lossless namespace-aware ordinary-`Dyn` XML
   algebra, not an `XmlDocument` or `XMLEvent` type. XML 1.0 Fifth Edition plus
   Namespaces 1.0 is the floor. `parse` accepts Unicode/UTF-8 declarations;
   `parse_bytes` additionally detects UTF-8 BOM and UTF-16 LE/BE BOM. The closed
@@ -4188,10 +4647,10 @@ index, not a substitute for that law.
   and audits hashing/signing fixtures. No 2027 legacy branch exists.
 
   **D-ENCBIN1=A / D-ENC-CBOR-SURFACE1=A** select RFC 8949 CBOR. The only whole
-  surface is `parse([U8], options) -> DataTree`, `decode<T: Codable>`, `to_bytes`,
+  surface is `parse([U8], options) -> Dyn`, `decode<T: Codable>`, `to_bytes`,
   and `to_bytes_canonical`; `parse` and byte verbs return closed `CBORError`,
   while typed `decode<T>` returns the ratified `[FieldError]` list. `[U8]` uses native
-  byte strings through typed Codable; untyped `DataTree` rejects byte strings,
+  byte strings through typed Codable; untyped `Dyn` rejects byte strings,
   tags, bignums, non-text/duplicate map keys, and unsupported values rather than
   coercing. `CBOROptions` bounds depth/items/input and live allocation and may
   require canonical input. Canonical output is RFC 8949 section 4.2.1 Core:
@@ -4199,7 +4658,7 @@ index, not a substitute for that law.
   zero, and pure bytewise lexicographic complete encoded-key order. Canonical
   validation checks original bytes. Ordinary output is preferred interoperable
   CBOR, not a cross-version hash promise. Edition 2026 keeps shipped
-  `encode(DataTree)`/`DataTree`-returning `decode`; edition 2027 migrates to the ratified
+  `encode(Dyn)`/`Dyn`-returning `decode`; edition 2027 migrates to the ratified
   names, edition 2028 removes forwarding entries, and `jet fix` owns rewrites.
 
   **D-ENCBASE-STRICT1=A** makes edition-2027 base64/base64url/base32 decoding
@@ -4270,6 +4729,8 @@ index, not a substitute for that law.
   `IOContext` has `operation: IOOperation`, `resource: ?String`,
   `os_code: ?Int`, and `cause: ?String`. `IOOperation` is exactly `Read`,
   `Write`, `Flush`, `Connect`, `Accept`, `Close`, `Resolve`, or `Codec`.
+  The compiler-owned `IOContext` and `IOOperation` annotation spellings are
+  available inside Core source only; this does not add public Core exports.
   Clean EOF remains an empty successful read; zero limits are
   `InvalidInput(.Read)`. Native file/network errors preserve stable kind,
   operation, resource, OS code, and owned cause. Display stays concise; no
@@ -4440,7 +4901,9 @@ hex/base64 + `core.uuid` v4/v7 (D-UUIDENC1).
 **D-CRYPTO-ENVELOPE2=A — recipient JETC v2 files** *(ratified by owner,
 card #302)*: safe file crypto is
 `crypto.file_seal([X25519PublicKey], Path, Path)` and
-`crypto.file_open(&X25519SecretKey, Path, Path)`. Both stream bounded,
+`crypto.file_open(&X25519SecretKey, Path, Path)`. The identity is a shared/read
+borrow (a bare parameter in Jet); both APIs return unit success with
+`FileCryptoError!` in current D-TYPE-SUFFIX1 syntax. Both stream bounded,
 authenticated 1 MiB chunks through the canonical recipient JETC v2 format;
 sealing snapshots and revalidates the source before its four independent RNG
 requests, and neither operation overwrites or exposes partial output. Safe open
@@ -5093,6 +5556,14 @@ deps: {
 }
 ```
 
+**D-JPK-DISPATCH1=B — engine process boundary** *(ratified 2026-07-02,
+Tower decision D-JPK-DISPATCH1, card c03cwakt)*: engine verbs execute the
+`jetpack` binary by name instead of linking the package manager into the
+compiler. The seam forwards the original argument vector and preserves exit
+codes, JSON diagnostics, and version-skew handling. The engine's hidden
+protocol dispatcher is a raw process boundary, not a `#CLI` teaching entry;
+this does not change the typed CLI recipe for user-facing fixed-shape programs.
+
 **U30 / D-JPK-TOOLCHAIN1 — Toolchain pin**: `package.jet` carries a top-level
 `jet:` field pinning the toolchain (channel semantics per D-JPK-CHANNEL1;
 `.jet/lock` records the exact version). A jet whose version differs realizes
@@ -5239,51 +5710,10 @@ a difference in supported features/functionality between JIT and AOT.” D-AOT-C
 (below) decided the remaining AOT mechanism; it does not create a third
 product lens or a feature/functionality split.
 
-**D-AOT-CRANELIFT1=B — Cranelift emits the fast AOT debug profile** *(ratified
-2026-07-16, card #666)*: on supported targets, `jet build --profile=debug`
-lowers the same sema-approved executable TIR through Cranelift to object code
-and links, with no generated Rust and no rustc. Unsupported targets fall back
-to rustc opt-level 0 and report that fallback in `jet explain build`; they
-never lose features or silently change optimization intent. Optimized AOT
-(`jet build`, `--release`) keeps the rustc backend. Both backends face R12
-differential tests; behavior and diagnostics are identical, only wait time
-differs.
-
-```text
-$ jet run hello.jet    # fast: opt-level 0         ~150 ms (illustrative)
-$ jet dev  hello.jet   # fast: opt-level 0         ~150 ms (illustrative)
-$ jet build hello.jet  # optimized: -O + thin-LTO  ~450 ms (illustrative)
-
-$ jet build --profile=debug hello.jet   # fast build of a build artifact
-$ jet run   --release       hello.jet   # optimized one-off run
-```
-
-*Owner ruling 2026-09-30 (card #3953):* every non-release native `jet build`
-(the default, `fast` and `debug` profiles) takes the Cranelift backend;
-`--release`, `hardened`, `ci`, `small`, no-OS and named profiles keep
-rustc/LLVM. The dev executable is a copy of the prebuilt `jet-aot-rt` runner
-with the program's Cranelift image appended (the same lowering and warm-module
-format `jet run` uses), so no rustc, C compiler or linker runs. The runner
-verifies the image's checksum and runtime build identity before running it and
-maps code writable, then read+execute, never both. A program the image cannot
-carry (native FFI, C links, CLI-decoded entries, interpreter-tier functions,
-compile-time state beyond strings, the checked type registry and closure
-targets, or code whose function numbering a reload cannot reproduce) builds
-with rustc and prints `[build] note: building with rustc because <cause>`,
-naming the one rule the program broke. The backend is part of the native
-cache key. A Cranelift build generates no Rust (`.jet/build/<stem>.rs` is
-written only when rustc runs), probes no rustc or linker for its key, and
-caches only the image: a cache hit appends the stored image to a copy of the
-runner, and an unchanged rebuild recognizes the existing executable by its
-length and image trailer (the image's SHA-256) instead of hashing it. The
-rustc executable built after a refusal is cached under the Cranelift key
-extended with the rustc and linker identity. Once lowered, functions compile
-to machine code on all host threads (`jet run` too) and are defined in
-lowering order, so the image is byte-identical to a one-thread compile. Each
-compiled function is also stored by its Cranelift incremental-cache key (the
-function's IR with callee names abstracted, the target and its flags) and the
-`jet` build identity; a later build of any program reuses it for a function
-with the same key, so an edit recompiles only the functions whose IR changed.
+**D-AOT-CRANELIFT1=B** *(ratified 2026-07-16, card #666; retired by
+D-EXEC2=A)*: the Cranelift debug-AOT backend and its card #3953 dev-image
+runner are removed with the JIT. Every native `jet build`, including the
+default, `fast`, and `debug` profiles, emits Rust and builds with rustc/LLVM.
 
 **Migrations** *(D-MIGRATE1, D-MIGRATE2A–F)*: `#PublishedSchema` types
 snapshot field layout; a breaking change without a migration is E0910.
@@ -6423,6 +6853,24 @@ root maps once, is excluded by leading `_`, or is diagnosed. Explicit and
 convention routes collide loudly with both spans. Scaffolds write the opt-in line
 up front; directory presence never changes behavior.
 
+**D-ROUTE-FILES2=A — a page file's words become its address** *(card #4613)*:
+under a `.routes(from:)` root, each folder and file name is read as words
+(underscores, hyphens, lowercase-to-capital changes and acronym ends split
+words; digits stay attached) and written lowercase joined by hyphens, so
+`OrderItems.jet`, `order_items.jet` and `order-items.jet` all answer
+`/order-items`. Other characters, such as the dot in `sitemap.xml`, stay in
+place, lowercased. A terminal stem whose words are exactly `index` or `page`
+answers its folder's address; such folders stay ordinary segments. A whole
+`[Name]` part captures one address part as `:name`, the snake_case word key
+(`[ID]` → `:id`, `[UserID]` → `:user_id`); any other bracket form is E2806.
+A page is the parsed top-level `fn page` declaration, never commented text.
+Two files with the same words give the same address and fail E2807 naming both.
+Addresses are derived once at build time and requests match exactly, with no
+lowercasing or redirects. `jet new route --path /order-items` writes
+`Routes/OrderItems.jet` with the `.routes(from: "Routes")` opt-in. The
+`#Server.Get("/path")` page override waits on the `core.http.server.Get`
+marker (D-HTTP-ROUTE-EXPOSE1), which is not implemented yet.
+
 **D-COMPUTE1=D — one Core compute family**: `core.compute` owns eager,
 fusion, differentiation, placement, and expert device/buffer/stream/kernel work
 under one operation family. Graph/kernel forms are internal executable-TIR
@@ -6706,7 +7154,7 @@ still selects the path, and a word ending in `.jet` always selects a file.
 `.Internal` jobs never reach argv.
 
 In `jet [jet flags] <name> [job args…]`, every word after the job name is
-forwarded unchanged, including flags. Jet flags such as `--interpret`,
+forwarded unchanged, including flags. Jet flags such as `--profile=debug`,
 `--release`, and `-p <member>` precede the name. A `--` immediately after
 the name is the optional separator; a later `--` reaches the job verbatim.
 `jet run <entry> -- <name> …` and built-program job dispatch use the same
@@ -6889,7 +7337,7 @@ whitespace, comments, or the byte-zero `#!/...` launch header may precede it. An
 inline carrier after another top-level declaration, a duplicate carrier, an
 unbalanced carrier, or a carrier beside `package.jet` is rejected with E1360,
 E1361, E1362, or E1363. The word `package` remains contextual rather than a
-lexer keyword, so `pub(package)` keeps its existing visibility meaning.
+lexer keyword, so `priv(package)` keeps its module-visibility meaning.
 
 **D-ECO-SPLITPOLICY1=A — `jet split` extracts and moves closed facts**
 *(ratified 2026-07-15)*: splitting inline Package facts creates the equivalent
@@ -7075,10 +7523,10 @@ The marker vocabulary is written as ordinary Jet source, not as a Rust table.
 
 - `crates/jet-codegen/src/Prelude/Markers.jet` holds one `marker Name(params…)`
   declaration per rule, in the ratified D-META-FORM1=A / D-MARKER-SITES1=B
-  form. A plain parameter
-  is an argument the use site writes; an `@`-marked parameter is a fact about
-  the rule: `@sites`, `@repeatable`, `@owns_menu`, `@inherits`, `@resolution`,
-  `@scopes`, `@companion`, `@retired`.
+  form, with D-DECL-META1=A's `$` metadata sigil. A plain parameter
+  is an argument the use site writes; a `$`-marked parameter is a fact about
+  the rule: `$sites`, `$repeatable`, `$owns_menu`, `$inherits`, `$resolution`,
+  `$scopes`, `$companion`, `$retired`.
 - `crates/jet-codegen/src/Prelude/Effects.jet` holds one `effect Name`
   declaration per effect root.
 - The Rust constants `Policy::APPLIED_RULES` and `Facts::EFFECT_ROOTS` no longer
@@ -7104,7 +7552,7 @@ are defined below. D-HARDENED1 supplies the named hardened profile and its
 foreign-edge checks; runtime sentry behavior remains in the shared Prelude
 seam.
 
-**D-MEM-COPYSEM1=A — a read-only view flowing into a non-view slot means a copy** *(ratified 2026-08-12, card #1889)*: wherever today's checker refuses a read-only view entering a non-view destination — a `String` binding or field, a collection element, a stored capture (string views: E2307; generic views: E2305) — the store now means an owned copy, with the same lowering as an explicit `~` store, on every tier. Declared `View<T>`/`ViewMut<T>` fields and returns are untouched: they keep D-MEM-VIEWRET1=B provenance semantics exactly as ratified; this decision governs only the flows those boundaries already refuse. `ViewMut` flowing into a non-view slot stays an error under its existing codes (E2305/E0212 for generic views) — copying a write-through window would break write-back; nothing about legal ViewMut boundaries changes. `~x` remains the one copy spelling (D-SHAPE-COPY1 untouched); nothing is ever injected into user source. Visibility ladder: `jet audit copies` (site + size per copy), editor ghost hints, `jet fmt --explicit-copies` (invited materializer), and per D-PACKAGE-POLICY-SCOPE1's mirror law the refusal exists at both scopes — `#Policy(copies: .Explicit)` in source and `policy: .{ copies: .Explicit }` in `package.jet` — restoring today's errors with their exact fix text. Amends D-MEM-VIEWRET1's non-view-flow behavior only.
+**D-MEM-COPYSEM1=A — a read-only view flowing into a non-view slot means a copy** *(ratified 2026-08-12, card #1889)*: wherever today's checker refuses a read-only view entering a non-view destination — a `String` binding or field, a collection element, a stored capture (string views: E2307; generic views: E2305) — the store now means an owned copy, with the same lowering as an explicit `.copy()` store, on every tier. Declared `View<T>`/`ViewMut<T>` fields and returns are untouched: they keep D-MEM-VIEWRET1=B provenance semantics exactly as ratified; this decision governs only the flows those boundaries already refuse. `ViewMut` flowing into a non-view slot stays an error under its existing codes (E2305/E0212 for generic views) — copying a write-through window would break write-back; nothing about legal ViewMut boundaries changes. `x.copy()` is the one copy spelling (D-COPY-WORD1); nothing is ever injected into user source. Visibility ladder: `jet audit copies` (site + size per copy), editor ghost hints, `jet fmt --explicit-copies` (invited materializer), and per D-PACKAGE-POLICY-SCOPE1's mirror law the refusal exists at both scopes — `#Policy(copies: .Explicit)` in source and `policy: .{ copies: .Explicit }` in `package.jet` — restoring today's errors with their exact fix text. Amends D-MEM-VIEWRET1's non-view-flow behavior only.
 
 **D-CONC-FREEZE1=A — `freeze` and `^`-captures** *(ratified 2026-08-12, card #1889)*: `freeze(x)` is a prefix verb returning a deeply immutable value; bare task captures of frozen values are legal because no race can exist; writing to a frozen value is a compile error naming the freeze site; freezing twice is the identity. `^x` in a group-child capture consumes the value into the task (existing use-after-move E0121 applies afterward). Baseline corrected per review: D-TASKBORROW1=A already lets lexical `task.group` children borrow readable places where non-overlap is provable, and D-CONC-SHARE1=A already replaces `Shared.read/.edit` closures with `shared expr` plus ordinary field access — `freeze` covers what neither does: sharing past provable non-overlap and past the lexical group, without a lock. E1101's fix menu becomes: give it (`^`), freeze it (`freeze`), or share it (`shared`). Extends D-TASKBORROW1; composes with D-CONC-SHARE1; `Shared`/`Cell` semantics unchanged.
 
@@ -7165,10 +7613,9 @@ D-NAME-REFLECT1=A, D-NAME-SIGIL1=A** *(card #1625)*.
 - **D-NAME-ALIAS1=A** — Core ships one short prelude module. It declares the
   ambient basics and uses `pub use` aliases for the rest of the ratified Core
   tree. The compiler opens it for every file, and `#NoPrelude` still opts out.
-- **D-NAME-FENCE1=A** — `pub` opens an edge, `pub(package)` fences at the
-  package, and `_name` means internal everywhere. `pub module` makes a
-  public-by-default subtree and replaces `#PubFile`; `priv` opts a member of
-  that subtree back to private.
+- **D-NAME-FENCE1** — superseded by D-VIS-MODULE1 (card #4723): declarations
+  are public by default, `priv module` / `priv(package) module` and `priv`
+  fields carry all privacy, and `_name` means internal everywhere.
 - **D-NAME-WALK1=A** — `use` and `pub use` work in module bodies with the same
   meaning as at file top. `.[ ]` always means "these members of that prefix":
   values in expression position and aliases after `use`.
@@ -7196,6 +7643,10 @@ finite-source finding form above. This section records the other outcomes.
   bound names are safe afterward. A test with no route binds nothing. This
   retires S74's pattern-left refutable binding; no pattern-left parser
   path exists.
+  Sema checks an enum guard against the subject's nominal owner, including
+  indexed field subjects; that owner remains attached to the checked pattern
+  across `??` lowering. `patterns/refutable_variant_owner` is the executable
+  regression for the success capture and the diverging miss route.
 - **D-CHOOSE-HEADS1=A** — the table proofs check multi-head coverage and
   overlap: E0307 reports a hole, and the unreachable-arm lint reports a
   shadowed head. The surface does not change; any later table sugar requires a
@@ -7360,7 +7811,7 @@ and the D-FAIL-BREACH1=A wording.
 `dbg`)*: `debug(value)` is an ambient prelude builtin that returns `value`
 unchanged and adds no effect, so it is legal in `-[]>`, `#Memo`, and comptime
 code. In development compiles (`jet run`, `jet dev`, `jet test`,
-`--interpret`, and `--profile=debug`) it writes one stderr line,
+and `--profile=debug`) it writes one stderr line,
 `[debug] file.jet:LINE expr = <Debug form>`; comptime code prints while
 compiling. A shipped artifact (`jet build`, `-o`, a library) or a
 release-profile compile (`--release`, `hardened`) rejects any remaining trace
@@ -7592,8 +8043,10 @@ expected type to the sole final expression. That expression is the block value;
 it is not rewritten into a source `return`. Explicit `return` remains an early
 exit. A semicolon-terminated expression, assignment, declaration, or other
 statement tail produces unit and is diagnosed when a value is required. The
-same law applies to value arm tables and fallback blocks; engines lower the
-checked value through the existing TIR return path.
+same law applies to value arm tables and fallback blocks. A final audited
+`#Unsafe("reason") { … }` region forwards the value expectation to its own
+tail without relaxing the lexical unsafe gate. Engines lower the checked value
+through the existing TIR return path.
 
 **2026-08-20 — D-SIG-SHAPE1=B** *(card #2125)*: the return type sits bare after
 the parameter list, and `->` becomes the one body arrow across the whole
@@ -7643,9 +8096,9 @@ separate lint plane, or external analyzer; it amends no prior decision and
 retires no separate mechanism.
 
 **2026-08-19 — D-STRUCT-LIVE1=A** *(card #2052; ratified 2026-08-19)*:
-Unused imports, bindings, private functions, and unreachable `pub(package)` or
+Unused imports, bindings, unused functions of a `priv module`, and unreachable package-scoped or
 application-target exports are warning verdicts under D-LINTPOLICY1, with
-delete-or-rename-to-`_name` (D-NAME-SIGIL1) as the repair and library `pub`
+delete-or-rename-to-`_name` (D-NAME-SIGIL1) as the repair and library public items
 exempt. It adds no spelling or new suppression mechanism, and amends or retires
 none.
 
@@ -7665,7 +8118,7 @@ with the existing effect vocabulary; it amends no prior source decision.
 
 **2026-08-19 — D-STRUCT-POLICY1=A** *(card #2052; ratified 2026-08-19)*:
 Users may declare nominal package-scoped settings through checked bodies,
-`pub policy audit(topic: String) { wrap(call) { ... } }`, which observe typed
+`policy audit(topic: String) { wrap(call) { ... } }`, which observe typed
 arguments/results and visible effects without editing the wrapped signature.
 It extends D-CALLPOLICY1's setting vocabulary while preserving the `#Policy(...)`
 and `apply(...)` spellings; `policy` and `wrap` are the new declaration words,
@@ -7676,6 +8129,9 @@ an unknown name reports the declaring package. The wrapper body has one checked
 callable value and cannot edit its signature, effects, errors, defaults,
 variadics, or view provenance. Its semantics lower through the shared Prelude
 path on AOT, Cranelift, interpreter/deopt, and applicable web output.
+Direct calls to a `#Policy`-marked function execute its checked chain, including
+ordinary typed/defaulted policy arguments. `apply(policy(...), fn)` replaces
+that declaration chain; `apply(fn)` explicitly selects the unwrapped callable.
 
 **2026-08-19 — D-STRUCT-ONCE1=A** *(card #2052; ratified 2026-08-19)*:
 The existing `@loop` may expand marker bodies, top-level impl items, and
@@ -7707,6 +8163,15 @@ ordinary runtime constant. `#Static NAME :: prep { value }` and
 declaration teaches E0388 with the behavior-preserving edit
 `NAME :: prep { value }`, and a retired `@NAME` read teaches `NAME` (retirement
 row `comptime-constant-mark`); prefix `@` in code now marks a D-MEMREF1 link.
+The supported value block holds exactly one final expression: setup bindings
+must be separate prepared bindings, and validation can be a conditional within
+the final expression. `Core/sys/sys.jet` follows this form for selected-target
+pointer size and `usize_max()`, keeping layout facts inside preparation rather
+than reading them in an ordinary function. Multi-statement value blocks,
+mutable `:= prep` bindings, and expression-nested `prep` still teach E0391.
+Its width validation and maximum calculation form one ordered value `if`
+table inside `prep`, not an adjacent statement `if` or a chain of statement
+`else` bodies. The full-width arm avoids shifting the U64 carrier by 64.
 
 **2026-09-28 — D-PREP-BRANCH1=A, D-PREP-FN1=A, D-CONSTGEN2=A shipped**
 *(card #3662)*: `prep if` and `prep loop` replace `@if` and `@loop` in
@@ -7733,6 +8198,9 @@ with a machine-applicable fix, never an alias. Effect denials
 (`-[!Mem.Alloc]>`, `-[!Panic]>`), `?(text)`, `??`, `!x`, `!=`, patterns, and
 narrowing are unchanged, and carriers, layouts, and runtime are identical.
 Parser, formatter, type display, and diagnostics emit only the suffix form.
+An arrowless unit-fallible header normalizes to Unit success with its written
+error domain. Terminal `Ok()`, `Ok(())`, and `Err(error)` use that carrier,
+including in terminal table arms; ordinary Unit statements still fall through.
 
 **2026-09-30 — D-CALLBACK-ERR1=A shipped** *(card #3708; owner ruling that
 Core declares its failures)*: a type parameter may be a failure domain, so a
@@ -7814,7 +8282,9 @@ handler: fn(Request) -[IO]> Response
 ```
 
 Unit stays `fn run() { }` and `fn announce() -[IO]> { }`. A fallible unit keeps
-the arrowless form. A plain `->` with no type, and `-> Unit`, are illegal.
+the arrowless form; its error contract precedes an optional effect arrow:
+`fn save() IOError! -[FS]> { }` (D-FAIL-UNIT1=A). A plain `->` with no type,
+and `-> Unit`, are illegal.
 Function types read the same way. Control one-liners (`if c -> x`,
 `loop x in xs -> f(x)`, arm tables) and lambdas keep `->` as the body arrow.
 Bare type after the parameter list is a teaching diagnostic (E0068). This
@@ -8339,6 +8809,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-LIB-EXPORT1` | C | `c0pwzvbh` |
 | `D-LIB-NAME1` | A | `c0pwzvbh` |
 | `D-LIB-REUSE1` | B | `c0pwzvbh` |
+| `D-LINK-ITEM1` | A | `c00rqc09` |
 | `D-LINTPOLICY1` | A | `c0qdl0gg` |
 | `D-LISTREMOVE1` | F | `c0mfulbb` |
 | `D-LIT-DOT1` | B | `c0buajsm` |
@@ -8391,6 +8862,7 @@ user-typeable syntax; a row here with no prose above it is still binding.
 | `D-META-STAGE1` | B | `c0jq7pog` |
 | `D-META-USER1` | A | `c0jq7pog` |
 | `D-METADEPTH1` | A | `c0ath783` |
+| `D-METHOD-FOOTPRINT1` | A | `c00rqc09` |
 | `D-MIGRATE-SRC1` | A | `c0xede68` |
 | `D-MODCOMPUTE1` | A | `c0cqh9xs` |
 | `D-MODSEM1` | A | `c0c74q4f` |
@@ -8612,10 +9084,10 @@ structure-program-is-a-value slate. They are ratified law.
   compiler guard; `jet inspect structure` reads the same gate ledger, and all
   rows erase before runtime.
 - **D-STRUCT-LIVE1=A — four liveness verdicts.** Unused imports, unused
-  bindings, unused private functions, and unreachable `pub(package)` or
+  bindings, unused functions of a `priv module`, and unreachable package-scoped or
   application-target exports warn under D-LINTPOLICY1 and never fail by
   default. Delete the name or rename it to the existing `_name` form; library
-  `pub` remains exempt, the first three checks are file-local, and export
+  public items remain exempt, the first three checks are file-local, and export
   reachability uses the package's explicit import graph.
 - **D-STRUCT-LIFE1=A — one lifecycle ladder.** `_name` is internal, `pub _name`
   is soft-public, `pub` is stable, `#Deprecated(since: "1.2", use: "parse")`
@@ -8633,7 +9105,7 @@ structure-program-is-a-value slate. They are ratified law.
   build. Checked `Structure.ImportEdge` rows enter the D-STRUCT-PLANE1 gate
   ledger, then the policy is erased before every execution tier.
 - **D-STRUCT-POLICY1=A — users may author settings.** The declaration form is
-  `pub policy audit(topic: String) { wrap(call) { ... } }`; parameters are
+  `policy audit(topic: String) { wrap(call) { ... } }`; parameters are
   typed/defaulted, the wrapper body receives the callable, observes its
   arguments/results, and adds visible effects without changing its signature.
   The setting is nominal and package-scoped, unknown names identify their
@@ -8867,3 +9339,22 @@ layout.
 time with the Path grammar's diagnostic. **Technical:** Marker signature change in Prelude/Markers.jet
 (D-MARKSIG1): HTML(page: Path). Migration: jet fix rewrites #HTML("x") to #HTML(Path{"x"}).
 
+
+**2026-10-04 — D-SIGIL-ALGEBRA1=B** *(card #4141)*: bit arithmetic and
+power use numeric methods, leaving marks to ownership and outcomes. Amends
+D-EXPOP1, D-XORSPELL1, D-BITNOT1 and D-BITOREXPR1; shifts are unchanged.
+
+
+**2026-10-09 — Core time checker roots:** Loaded Core declaration methods
+take precedence over native method fallbacks. `Clock` retains the source
+ownership introduced with its canonical declaration and lost in the Clock
+branch collapse; restoring that row also prevents native trait seeding.
+This preserves
+the source method's result, receiver convention, and effect row rather than
+substituting the native time contract. The owner-only `__clock_mono_ns` seam
+retains its pure zero-argument `Int` signature; labeled Clock state variants
+construct with `System{started_ns: ..., offset_ms: ...}` (D-LIT-DOT1=B).
+Canonical Core sources may name another Core source's private declarations
+and native carriers without making them public. Source-only functions resolve
+through the loaded declaration and its signature even without a native
+catalog row; native provider rows retain their existing dispatch.

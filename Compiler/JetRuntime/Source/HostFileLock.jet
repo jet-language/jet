@@ -1,0 +1,261 @@
+// FileLockRaw.rs (D-CORE-FILELOCK1=A) Linux transports. Core/files/files.jet
+// owns validation, errors, identity retry and descriptor ownership; these
+// leaves report raw values, errno and the platform tag (1 = Linux).
+// Call24: value0, errno8, platform16. Identity56: device0, inode low8,
+// inode high16, regular24, reparse32, errno40, platform48. Wait40:
+// acquired0, timed_out8, errno16, platform24, deadline_ns32. Words are raw
+// i64; getters return exact Int. JetFileLockOwner is the shared FD72 (Rc<File>):
+// clone retains it, the final drop closes the descriptor without unlinking.
+fn fs_lock_call(value: I64, errno: I64) -> I64 {
+    call :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(call, value)
+    rt_text_store(call + I64{8}, errno)
+    rt_text_store(call + I64{16}, I64{1})
+    call
+}
+
+fn fs_lock_wait(acquired: Bool, timed_out: Bool, errno: I64, deadline: I64) -> I64 {
+    wait :: jet_rt_alloc(I64{40}, I64{8})
+    rt_text_store(wait, if acquired -> I64{1} else -> I64{0})
+    rt_text_store(wait + I64{8}, if timed_out -> I64{1} else -> I64{0})
+    rt_text_store(wait + I64{16}, errno)
+    rt_text_store(wait + I64{24}, I64{1})
+    rt_text_store(wait + I64{32}, deadline)
+    wait
+}
+
+// std's metadata view: device, 64-bit inode split low/high, file type facts.
+// result < 0 is the failed stat's negated errno; no facts (0) is a failure
+// without an OS code, as std reports a path NUL.
+fn fs_lock_identity(result: I64, facts: I64) -> I64 {
+    identity :: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(identity, I64{56})
+    rt_text_store(identity + I64{48}, I64{1})
+    if (result < I64{0} || facts == I64{0}) {
+        rt_text_store(identity + I64{40}, -result)
+        return identity
+    }
+    inode :: rt_text_word(facts + I64{8})
+    kind :: rt_text_word(facts + I64{16}).bit_and(I64{61440})
+    rt_text_store(identity, rt_text_word(facts))
+    rt_text_store(identity + I64{8}, inode.bit_and(I64{4294967295}))
+    rt_text_store(identity + I64{16}, (inode >> I64{32}).bit_and(I64{4294967295}))
+    rt_text_store(identity + I64{24}, if (kind == I64{32768}) -> I64{1} else -> I64{0})
+    rt_text_store(identity + I64{32}, if (kind == I64{40960}) -> I64{1} else -> I64{0})
+    identity
+}
+
+// OpenOptions read+write+create, mode 0o600, O_NOFOLLOW|O_CLOEXEC. std's
+// open retries EINTR; a path NUL is an error without an OS code (errno 0).
+#Export(c) fn jet_fs_lock_open_raw(path: I64) -> I64 {
+    if fs_text_has_nul(path) -> return fs_lock_call(I64{-1}, I64{0})
+    name :: fd_c_path(path)
+    opened := I64{0}
+    loop {
+        opened = host_call(I64{2}, name, I64{655426}, I64{384})
+        if (opened != I64{-4}) -> break
+    }
+    fd_c_path_drop(name, path)
+    if (opened < I64{0}) -> fs_lock_call(I64{-1}, -opened) else -> fs_lock_call(opened, I64{0})
+}
+
+// flock(LOCK_EX|LOCK_NB) once.
+#Export(c) fn jet_fs_lock_try_raw(fd: I64) -> I64 {
+    native :: host_native_int(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    locked :: host_call(I64{73}, native, I64{6}, I64{0})
+    if (locked == I64{0}) -> fs_lock_call(I64{0}, I64{0}) else -> fs_lock_call(I64{-1}, -locked)
+}
+
+// A negative descriptor is the disarmed source guard: nothing to close.
+#Export(c) fn jet_fs_lock_close_raw(fd: I64) -> I64 {
+    native :: host_native_int(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (native < I64{0}) -> return I64{0}
+    closed :: host_call(I64{3}, native, I64{0}, I64{0})
+    jet_int_owned_from_i64(if (closed == I64{0}) -> I64{0} else -> -closed)
+}
+
+#Export(c) fn jet_fs_lock_fd_identity_raw(fd: I64) -> I64 {
+    native :: host_native_int(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    facts :: jet_rt_alloc(I64{128}, I64{8})
+    result := I64{0}
+    #Unsafe("the borrowed lock descriptor and 128 writable stat-fact bytes live through fstat") {
+        result = os_stat_facts_i64(I64{5}, native, facts)
+    }
+    identity :: fs_lock_identity(result, facts)
+    jet_rt_free(facts, I64{128}, I64{8})
+    identity
+}
+
+// symlink_metadata: lstat, never following the final link.
+#Export(c) fn jet_fs_lock_path_identity_raw(path: I64) -> I64 {
+    if fs_text_has_nul(path) -> return fs_lock_identity(I64{0}, I64{0})
+    scratch :: jet_rt_alloc(I64{160}, I64{8})
+    jet_fs_stat_raw(path, false, scratch, scratch + I64{128})
+    result :: if (rt_text_word(scratch + I64{128}) != I64{0}) -> -rt_text_word(scratch + I64{136}) else -> I64{0}
+    identity :: fs_lock_identity(result, scratch)
+    jet_rt_free(scratch, I64{160}, I64{8})
+    identity
+}
+
+fn fs_lock_sleep(nanos: I64) {
+    request :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(request, I64{0})
+    rt_text_store(request + I64{8}, nanos)
+    loop {
+        // std::thread::sleep resumes with the remaining time after EINTR.
+        if (host_call(I64{35}, request, request, I64{0}) != I64{-4}) -> break
+    }
+    jet_rt_free(request, I64{16}, I64{8})
+}
+
+// Timed acquisition on the existing host monotonic sampler (RuntimePolicy.rs
+// 1ms polling capped to the remaining deadline). Zero initializes the
+// deadline once; source reopens after identity changes and carries it back.
+// Unbounded waits block in flock(LOCK_EX); EINTR always retries.
+#Export(c) fn jet_fs_lock_wait_raw(fd: I64, timeout_ns: I64, bounded: Bool, deadline_ns: I64) -> I64 {
+    native :: host_native_int(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    timeout :: host_native_int(timeout_ns)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    carried :: host_native_int(deadline_ns)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    deadline := I64{0}
+    if bounded {
+        if (carried != I64{0}) {
+            deadline = carried
+        } else {
+            sample :: time_host_monotonic_i64()
+            span :: if (timeout > I64{0}) -> timeout else -> I64{0}
+            deadline = if (sample > I64{9223372036854775807} - span) -> I64{9223372036854775807} else -> sample + span
+            if (deadline < I64{1}) -> deadline = I64{1}
+        }
+    }
+    first := carried == I64{0}
+    loop {
+        if (bounded && !first && time_host_monotonic_i64() >= deadline) -> return fs_lock_wait(false, true, I64{0}, deadline)
+        first = false
+        locked :: host_call(I64{73}, native, if bounded -> I64{6} else -> I64{2}, I64{0})
+        if (locked == I64{0}) -> return fs_lock_wait(true, false, I64{0}, deadline)
+        errno :: -locked
+        if (errno == I64{4}) -> next
+        if (!bounded || errno != I64{11}) -> return fs_lock_wait(false, false, errno, deadline)
+        remaining :: deadline - time_host_monotonic_i64()
+        if (remaining <= I64{0}) -> return fs_lock_wait(false, true, I64{0}, deadline)
+        fs_lock_sleep(if (remaining < I64{1000000}) -> remaining else -> I64{1000000})
+    }
+}
+
+// Infallible transfer after the source guard is disarmed.
+#Export(c) fn jet_fs_lock_owner_raw(path: I64, fd: I64) -> I64 {
+    native :: host_native_int(fd)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    fd_new(native, path, false)
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_file_lock_owner(value: I64) { jet_fd_drop_raw(value) }
+#Export(c) fn jet_rt_handle_clone_jet_file_lock_owner(value: I64) -> I64 { jet_fd_retain_raw(value) }
+// Read/clone-only stack Text header borrowed from the immutable owner path.
+#Export(c) fn jet_rt_handle_field_jet_file_lock_owner_path(value: I64, out: I64) { coll_copy(fd_word(value, I64{24}), out, I64{24}) }
+
+fn fs_lock_flag(word: I64) -> Bool { word != I64{0} }
+fn fs_lock_byte(flag: U8) -> I64 { if (flag != U8{0}) -> I64{1} else -> I64{0} }
+
+#Export(c) fn jet_rt_record_new_jet_fs_lock_call(m0: I64, m1: I64, m2: I64) -> I64 {
+    value :: host_native_int(m0)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    errno :: host_native_int(m1)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    platform :: host_native_int(m2)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    call :: fs_lock_call(value, errno)
+    rt_text_store(call + I64{16}, platform)
+    call
+}
+#Export(c) fn jet_rt_record_get_jet_fs_lock_call_value(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_call_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_call_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_handle_clone_jet_fs_lock_call(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{24}, I64{8})
+    coll_copy(value, result, I64{24})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_fs_lock_call(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, I64{24}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_fs_lock_call(left: I64, right: I64) -> Bool { fs_lock_words_eq(left, right, I64{24}) }
+
+fn fs_lock_words_eq(left: I64, right: I64, size: I64) -> Bool {
+    at := I64{0}
+    loop at < size {
+        if (rt_text_word(left + at) != rt_text_word(right + at)) -> return false
+        at += I64{8}
+    }
+    true
+}
+
+#Export(c) fn jet_rt_record_new_jet_fs_lock_identity(m0: I64, m1: I64, m2: I64, m3: U8, m4: U8, m5: I64, m6: I64) -> I64 {
+    device :: host_native_int(m0)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    low :: host_native_int(m1)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    high :: host_native_int(m2)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    errno :: host_native_int(m5)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    platform :: host_native_int(m6)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    identity :: jet_rt_alloc(I64{56}, I64{8})
+    rt_text_store(identity, device)
+    rt_text_store(identity + I64{8}, low)
+    rt_text_store(identity + I64{16}, high)
+    rt_text_store(identity + I64{24}, fs_lock_byte(m3))
+    rt_text_store(identity + I64{32}, fs_lock_byte(m4))
+    rt_text_store(identity + I64{40}, errno)
+    rt_text_store(identity + I64{48}, platform)
+    identity
+}
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_device(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_low(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_high(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_regular(value: I64) -> Bool { fs_lock_flag(rt_text_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_reparse(value: I64) -> Bool { fs_lock_flag(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{40})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_identity_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{48})) }
+#Export(c) fn jet_rt_handle_clone_jet_fs_lock_identity(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{56}, I64{8})
+    coll_copy(value, result, I64{56})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_fs_lock_identity(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, I64{56}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_fs_lock_identity(left: I64, right: I64) -> Bool { fs_lock_words_eq(left, right, I64{56}) }
+
+#Export(c) fn jet_rt_record_new_jet_fs_lock_wait(m0: U8, m1: U8, m2: I64, m3: I64, m4: I64) -> I64 {
+    errno :: host_native_int(m2)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    platform :: host_native_int(m3)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    deadline :: host_native_int(m4)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    wait :: fs_lock_wait(m0 != U8{0}, m1 != U8{0}, errno, deadline)
+    rt_text_store(wait + I64{24}, platform)
+    wait
+}
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_acquired(value: I64) -> Bool { fs_lock_flag(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_timed_out(value: I64) -> Bool { fs_lock_flag(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_errno(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{16})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_platform(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_fs_lock_wait_deadline_ns(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_handle_clone_jet_fs_lock_wait(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{40}, I64{8})
+    coll_copy(value, result, I64{40})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_fs_lock_wait(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, I64{40}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_fs_lock_wait(left: I64, right: I64) -> Bool { fs_lock_words_eq(left, right, I64{40}) }

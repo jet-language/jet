@@ -202,7 +202,7 @@ function executeMode(caseRoot, entry, mode, cacheRoot) {
     JET_ADAPTER_OBSERVATION_PATH: journalPath,
     JET_COMPTIME_EVALUATOR_OBSERVATION_PATH: evaluatorPath,
     JET_COMPTIME_CACHE_OBSERVATION_PATH: cachePath,
-    JET_RUN_CACHE_DIR: join(cacheRoot, "run-cache"),
+    JET_STORE_DIR: join(cacheRoot, "run-cache"),
     JET_DEV_ORACLE_CACHE_DIR: join(cacheRoot, "oracle-cache"),
     JET_TEST_SCRATCH_DIR: cacheRoot,
     LC_ALL: "C",
@@ -275,7 +275,7 @@ function runCanonicalComparison(caseRoot, modeResults, cacheRoot) {
     const command = [RUNNER_PATH, "full", "jet", "test-compare", corpusPath, "--json"];
     const child = spawnSync(resolve(ROOT, RUNNER_PATH), ["full", "jet", "test-compare", corpusPath, "--json"], {
       cwd: caseRoot,
-      env: { ...process.env, JET_TEST_SCRATCH_DIR: cacheRoot, JET_RUN_CACHE_DIR: join(cacheRoot, "comparison-cache"), JET_DEV_ORACLE_CACHE_DIR: join(cacheRoot, "comparison-oracle"), LC_ALL: "C", LANG: "C", NO_COLOR: "1", CLICOLOR: "0" },
+      env: { ...process.env, JET_TEST_SCRATCH_DIR: cacheRoot, JET_STORE_DIR: join(cacheRoot, "comparison-cache"), JET_DEV_ORACLE_CACHE_DIR: join(cacheRoot, "comparison-oracle"), LC_ALL: "C", LANG: "C", NO_COLOR: "1", CLICOLOR: "0" },
       encoding: "utf8",
       timeout: TIMEOUT_MS,
       maxBuffer: 16 * 1024 * 1024,

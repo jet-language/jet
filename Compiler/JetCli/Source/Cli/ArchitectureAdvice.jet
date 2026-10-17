@@ -1,0 +1,245 @@
+// Source/CmdDevTools.rs D-ARCH-ADVICE1: conservative checked call-graph advice.
+// This is inspection evidence, not an invariant or an automatic refactor.
+use jet_foundation.[Span, type_name]
+
+struct JetCLIArchitectureCall {
+    caller_key: String
+    caller_name: String
+    caller_module: String
+    caller_span: Span
+    callee_key: String
+    callee_name: String
+    callee_module: String
+    callee_span: Span
+    callee_return: String?
+    call_span: Span
+}
+
+struct JetCLIArchitectureEvidence {
+    role: String
+    module_path: String
+    span: Span
+}
+
+struct JetCLIArchitectureRow {
+    kind: String
+    subject: String
+    scope: String
+    evidence: [JetCLIArchitectureEvidence]
+    boundaries: [String]
+    uncertainty: [String]
+}
+
+struct JetCLIArchitectureInspection {
+    rows: [JetCLIArchitectureRow]
+    reason: String?
+    check: JetCLIStatusValue?
+}
+
+fn jet_cli_architecture_key(definition: JetCLISemDef) -> String Never! {
+    "{definition.module_path}:{definition.def_span.start}..{definition.def_span.end}"
+}
+
+fn jet_cli_architecture_calls(index: JetCLISemIndex) -> [JetCLIArchitectureCall] Never! {
+    calls := [JetCLIArchitectureCall]{}
+    loop edge in index.calls {
+        caller := JetCLISemDef?{None}
+        short :: edge.caller.split("::").to_list()
+        loop row in index.definitions {
+            definition :: row.def
+            if definition.module_path == edge.module_path && (definition.name == edge.caller || (short.len() > 0 && definition.name == short[short.len() - 1])) {
+                caller = Val(definition)
+                break
+            }
+        }
+        from :: caller ?? next
+        reference := JetCLISemRef?{None}
+        loop candidate in index.references {
+            if candidate.module_path != edge.module_path || candidate.target == None || candidate.span.start > edge.span.end || edge.span.start > candidate.span.end -> next
+            if reference == .Val(best) {
+                if candidate.span.end - candidate.span.start >= best.span.end - best.span.start -> next
+            }
+            reference = Val(candidate)
+        }
+        selected :: reference ?? next
+        target :: selected.target ?? next
+        callee := JetCLISemDef?{None}
+        loop row in index.definitions {
+            definition :: row.def
+            if definition.module_path == target.module_path && definition.def_span == target.def_span {
+                callee = Val(definition)
+                break
+            }
+        }
+        to :: callee ?? next
+        callable :: jet_cli_sem_callable(to) ?? next
+        result :: if callable.return_type == .Val(ty) -> Val(type_name(ty)) else -> String?{None}
+        &calls.push(JetCLIArchitectureCall{caller_key: jet_cli_architecture_key(from), caller_name: from.qualified_name, caller_module: from.module_path, caller_span: from.def_span, callee_key: jet_cli_architecture_key(to), callee_name: to.qualified_name, callee_module: to.module_path, callee_span: to.def_span, callee_return: result, call_span: edge.span})
+    }
+    calls
+}
+
+fn jet_cli_architecture_unique(values: &[String]) Never! {
+    &values.sort()
+    unique := [String]{}
+    loop value in values {
+        if unique.len() == 0 || unique[unique.len() - 1] != value -> &unique.push(value)
+    }
+    values = unique
+}
+
+fn jet_cli_architecture_row(index: JetCLISemIndex, kind: String, subject: String, calls: [JetCLIArchitectureCall], note: String) -> JetCLIArchitectureRow Never! {
+    evidence := [JetCLIArchitectureEvidence]{}
+    evidence_keys := [String]{}
+    boundaries := [String]{}
+    cross_module := false
+    loop call in calls {
+        &boundaries.push("{call.caller_module} -> {call.callee_module}")
+        if call.caller_module != call.callee_module -> cross_module = true
+        entries :: [JetCLIArchitectureEvidence]{
+            JetCLIArchitectureEvidence{role: "caller-definition", module_path: call.caller_module, span: call.caller_span},
+            JetCLIArchitectureEvidence{role: "callee-definition", module_path: call.callee_module, span: call.callee_span},
+            JetCLIArchitectureEvidence{role: "checked-call-site", module_path: call.caller_module, span: call.call_span},
+        }
+        loop entry in entries {
+            key :: "{entry.role}:{entry.module_path}:{entry.span.start}:{entry.span.end}"
+            if !evidence_keys.contains(key) {
+                &evidence_keys.push(key)
+                &evidence.push(entry)
+            }
+        }
+        loop effect_row in index.effects {
+            if effect_row.function != call.caller_name -> next
+            if effect_row.inferred.len() > 0 -> &boundaries.push("effects {call.caller_name}: {effect_row.inferred.join(", ")}")
+            break
+        }
+    }
+    loop position in 1..<evidence.len() {
+        current :: evidence[position].copy()
+        slot := position
+        loop slot > 0 && jet_cli_architecture_evidence_before(current, evidence[slot - 1]) {
+            evidence[slot] = evidence[slot - 1]
+            slot -= 1
+        }
+        evidence[slot] = current
+    }
+    jet_cli_architecture_unique(&boundaries)
+    JetCLIArchitectureRow{kind: kind, subject: subject, scope: if cross_module -> "cross-module" else -> "same-module", evidence: evidence, boundaries: boundaries, uncertainty: [String]{note, "the checked call graph proves references, not a business invariant", "operator review may reject this candidate; no refactor or policy is applied"}}
+}
+
+fn jet_cli_architecture_evidence_before(left: JetCLIArchitectureEvidence, right: JetCLIArchitectureEvidence) -> Bool Never! {
+    if left.module_path != right.module_path -> return left.module_path < right.module_path
+    if left.span.start != right.span.start -> return left.span.start < right.span.start
+    left.role < right.role
+}
+
+fn jet_cli_architecture_rows(index: JetCLISemIndex) -> [JetCLIArchitectureRow] Never! {
+    calls :: jet_cli_architecture_calls(index)
+    callee_keys := [String]{}
+    caller_keys := [String]{}
+    loop call in calls {
+        &callee_keys.push(call.callee_key)
+        &caller_keys.push(call.caller_key)
+    }
+    jet_cli_architecture_unique(&callee_keys)
+    jet_cli_architecture_unique(&caller_keys)
+    rows := [JetCLIArchitectureRow]{}
+    seen := [String]{}
+    loop key in callee_keys {
+        group := [JetCLIArchitectureCall]{}
+        callers := [String]{}
+        loop call in calls {
+            if call.callee_key != key -> next
+            &group.push(call)
+            if !callers.contains(call.caller_key) -> &callers.push(call.caller_key)
+        }
+        if callers.len() < 2 -> next
+        subject :: group[0].callee_name
+        identity :: "shared-callee:{subject}"
+        if seen.contains(identity) -> next
+        &seen.push(identity)
+        &rows.push(jet_cli_architecture_row(index, "shared-callee", subject, group, "one checked callable is consumed by multiple callers; review whether they must preserve one invariant"))
+    }
+    loop key in caller_keys {
+        group := [JetCLIArchitectureCall]{}
+        callees := [String]{}
+        returns := [String]{}
+        loop call in calls {
+            if call.caller_key != key -> next
+            &group.push(call)
+            if !callees.contains(call.callee_key) -> &callees.push(call.callee_key)
+            if call.callee_return == .Val(result) {
+                if !returns.contains(result) -> &returns.push(result)
+            }
+        }
+        if callees.len() < 2 || returns.len() != 1 -> next
+        subject :: group[0].caller_name
+        identity :: "consumer-agreement:{subject}"
+        if seen.contains(identity) -> next
+        &seen.push(identity)
+        &rows.push(jet_cli_architecture_row(index, "consumer-agreement", subject, group, "one checked consumer joins multiple same-result call paths; review whether their results must agree"))
+    }
+    loop position in 1..<rows.len() {
+        current :: rows[position].copy()
+        slot := position
+        loop slot > 0 && jet_cli_architecture_row_before(current, rows[slot - 1]) {
+            rows[slot] = rows[slot - 1]
+            slot -= 1
+        }
+        rows[slot] = current
+    }
+    if rows.len() > 64 -> rows = rows[0..63]
+    rows
+}
+
+fn jet_cli_architecture_row_before(left: JetCLIArchitectureRow, right: JetCLIArchitectureRow) -> Bool Never! {
+    if left.subject != right.subject -> return left.subject < right.subject
+    if left.kind != right.kind -> return left.kind < right.kind
+    left.scope < right.scope
+}
+
+fn jet_cli_architecture_behavior() -> [JetCLIStatusValue] Never! {
+    [JetCLIStatusValue]{
+        jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text("checked_reference_resolution")), jet_cli_status_field("status", jet_cli_status_text("passed")), jet_cli_status_field("detail", jet_cli_status_text("the compiler semantic index resolved the definitions and call sites"))}),
+        jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text("consumer_behavior")), jet_cli_status_field("status", jet_cli_status_text("not_run")), jet_cli_status_field("detail", jet_cli_status_text("this read-only inspection does not execute user code"))}),
+        jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text("cross_mode_agreement")), jet_cli_status_field("status", jet_cli_status_text("unknown")), jet_cli_status_field("detail", jet_cli_status_text("no runtime or change-task receipt was supplied"))}),
+    }
+}
+
+fn jet_cli_architecture_value(inspection: JetCLIArchitectureInspection) -> JetCLIStatusValue Never! {
+    rows := [JetCLIStatusValue]{}
+    loop row in inspection.rows {
+        evidence :: loop entry in row.evidence -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("role", jet_cli_status_text(entry.role)), jet_cli_status_field("module", jet_cli_status_text(entry.module_path)), jet_cli_status_field("span", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(entry.span.start)), jet_cli_status_field("end", jet_cli_status_int(entry.span.end))}))})
+        &rows.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("kind", jet_cli_status_text(row.kind)),
+            jet_cli_status_field("subject", jet_cli_status_text(row.subject)),
+            jet_cli_status_field("scope", jet_cli_status_text(row.scope)),
+            jet_cli_status_field("source_evidence", jet_cli_status_array(evidence)),
+            jet_cli_status_field("affected_boundaries", jet_cli_status_texts(row.boundaries)),
+            jet_cli_status_field("behavioral_checks", jet_cli_status_array(jet_cli_architecture_behavior())),
+            jet_cli_status_field("uncertainty", jet_cli_status_texts(row.uncertainty)),
+            jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject")),
+        }))
+    }
+    fields := [JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text(if inspection.reason == None -> "advisory" else -> "unavailable")), jet_cli_status_field("rows", jet_cli_status_array(rows)), jet_cli_status_field("operator_action", jet_cli_status_text("review_or_reject"))}
+    if inspection.reason == .Val(reason) -> &fields.push(jet_cli_status_field("reason", jet_cli_status_text(reason)))
+    jet_cli_status_object(fields)
+}
+
+fn jet_cli_architecture_text(inspection: JetCLIArchitectureInspection) -> String Never! {
+    output := "architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):\n"
+    if inspection.reason == .Val(reason) {
+        output = "{output}  status: unavailable — {reason}\n"
+    } else if inspection.rows.len() == 0 {
+        output = "{output}  no checked agreement candidate; local complexity is not proof of a cross-boundary invariant\n"
+    } else {
+        loop row in inspection.rows {
+            output = "{output}  {row.kind} `{row.subject}` [{row.scope}]\n"
+            loop evidence in row.evidence -> output = "{output}    evidence: {evidence.role} {evidence.module_path}:{evidence.span.start}..{evidence.span.end}\n"
+            loop boundary in row.boundaries -> output = "{output}    boundary: {boundary}\n"
+            output = "{output}    check: checked_reference_resolution=passed (the compiler semantic index resolved the definitions and call sites)\n    check: consumer_behavior=not_run (this read-only inspection does not execute user code)\n    check: cross_mode_agreement=unknown (no runtime or change-task receipt was supplied)\n"
+            loop uncertainty in row.uncertainty -> output = "{output}    uncertainty: {uncertainty}\n"
+        }
+    }
+    "{output}  measurement: benchmark/change-task not measured; no advantage claim\n"
+}

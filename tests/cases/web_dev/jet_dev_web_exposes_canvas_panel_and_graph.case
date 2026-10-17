@@ -1,0 +1,20 @@
+# Original tests/web_dev.rs:1586-2489; original sources and all predicates.
+# PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw).
+fixture: jet_dev_web_exposes_canvas_panel_and_graph.fixture
+env: S5_ROOT={work}
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+session app raw: jet dev app.jet --target=web --canvas
+stderr: null
+recv app line until ^= "Canvas: " timeout 60s
+capture: canvas = text stdout.strip_prefix_lines("Canvas: ").line(0)
+capture: port = text stdout.strip_prefix_lines("Canvas: ").line(0).split("://",1).split("/",0).after_last(":")
+cap:port: is-u32
+json: cap:port doc $ <= 65535
+stdout: line ^= "App preview: " # original wait_for_ports requires both listeners
+step: jet test claims
+env: S5_PORT={cap:port}
+env: S5_CANVAS={cap:canvas}
+exit: 0
+signal app: KILL
+close app
+exit: any # original KillOnDrop ignores child status

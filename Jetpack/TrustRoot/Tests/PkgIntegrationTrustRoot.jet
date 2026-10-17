@@ -1,0 +1,237 @@
+// tests/jetpack_trust_root.rs integration assertions, not the TrustRoot unit suite.
+// Runtime UNRUN. Exact constants, typed error variants, records, and boundaries.
+
+#Test("trust_publication_exporter_rejects_the_test_index_key") {
+    rejected :: if PublicTrustKey.from_nix_line("index", "jet-test-index-v1:{"A".repeat(43)}=") == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .InvalidKey(detail) -> detail == "test public trust key `jet-test-index-v1` cannot be published"
+            else -> false
+        }
+    }
+    assert(rejected)
+    key :: PublicTrustKey.from_nix_line("index", "official-index-v1:11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=") ?? panic("official public key")
+    manifest :: trust_public_trust_manifest("jet-lang.dev", None, [PublicTrustKey]{key}) ?? panic("manifest")
+    assert(manifest.contains("\"key_id\":\"official-index-v1\""))
+    assert(manifest.contains("\"algorithm\":\"ed25519\""))
+    assert(manifest.contains("nix-index-v1.ed25519.pub"))
+}
+
+#Test("jp6a_bootstrap_threshold_delegation_snapshot_and_identities") {
+    now :: 1710000000
+    scratch :: files.temp_dir("jetpack-trust-root-it") ?? panic("scratch directory")
+    dir :: scratch.path
+    fixture :: trust_fixture_threshold_root(1, now + 86400) ?? panic("fixture root")
+    root :: fixture.root
+    keys :: fixture.keys
+    signed_root :: trust_sign_root(root, [TrustKey]{keys[0], keys[1]}) ?? panic("sign root")
+    pin :: crypto.sha256(trust_canonical_root(root).bytes()).hex()
+    policy := TrustRootPolicy.default()
+    policy.trusted_unix = Val(now)
+    policy.max_clock_skew_secs = 60
+    eng := TrustEngine.bootstrap(signed_root, fixture.keyring, policy, Val(pin), TrustedClock.Fixed(now), Val(dir)) ?? panic("bootstrap")
+    loaded :: RootBootstrap.load(dir) ?? panic("load bootstrap")
+    assert_eq(loaded.pin_digest, pin)
+    assert(loaded.consistent_snapshot)
+    stripped := signed_root
+    stripped.signatures = [TrustSignature]{}
+    assert(if TrustEngine.bootstrap(stripped, eng.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .SignatureStripped(_) -> true
+            else -> false
+        }
+    })
+    rotated := root
+    rotated.version = 2
+    eng.recovery_drill_threshold_minus_one(rotated, [TrustKey]{keys[0]}, TrustedClock.Fixed(now)) ?? panic("recovery drill")
+    rotated.roles = eng.root.roles
+    rotated.public_key_ids = eng.root.public_key_ids
+    rotated.delegations = eng.root.delegations
+    signed_rot :: trust_sign_root(rotated, [TrustKey]{keys[1], keys[2]}) ?? panic("sign rotation")
+    &eng.update_root(signed_rot, TrustedClock.Fixed(now)) ?? panic("rotate root")
+    hashes := [String: String]{}
+    hashes["sha256"] = crypto.sha256("pkg".bytes()).hex()
+    target_map := [String: TargetMeta]{}
+    target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes, custom: [String: String]{}}
+    targets :: TargetsMetadata{version: 3, expires_unix: now + 3600, targets: target_map}
+    signed_t :: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets")
+    &eng.verify_targets(signed_t, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify targets")
+    assert(if &eng.verify_targets(signed_t, Val("other/pkg"), TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .DelegationDenied(_, _) -> true
+            else -> false
+        }
+    })
+    t_canon :: trust_canonical_targets(targets)
+    t_hashes := [String: String]{}
+    t_hashes["sha256"] = crypto.sha256(t_canon.bytes()).hex()
+    meta := [String: SnapshotMetaEntry]{}
+    meta["targets"] = SnapshotMetaEntry{version: 3, length: t_canon.bytes().len(), hashes: t_hashes}
+    snap :: SnapshotMetadata{version: 4, expires_unix: now + 3600, meta}
+    signed_s :: trust_sign_snapshot(snap, [TrustKey]{keys[4]}) ?? panic("sign snapshot")
+    &eng.verify_snapshot(signed_s, t_canon, 3, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
+    s_canon :: trust_canonical_snapshot(snap)
+    s_hashes := [String: String]{}
+    s_hashes["sha256"] = crypto.sha256(s_canon.bytes()).hex()
+    ts :: TimestampMetadata{version: 5, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 4, length: s_canon.bytes().len(), hashes: s_hashes}}
+    &eng.verify_timestamp(trust_sign_timestamp(ts, [TrustKey]{keys[5]}) ?? panic("sign timestamp"), s_canon, 4, TrustedClock.Fixed(now)) ?? panic("verify timestamp")
+    &eng.bind_identity(BoundIdentity.registry("registry.jet-lang.dev")) ?? panic("bind registry")
+    &eng.bind_identity(BoundIdentity.cache_builder("builder.ci")) ?? panic("bind builder")
+    &eng.bind_identity(BoundIdentity.remote_executor("exec.1")) ?? panic("bind executor")
+    &eng.bind_identity(BoundIdentity.publisher("pub.alice", PublisherIdentity.OfflineEd25519{public_key_hex: "ab".repeat(32), key_id: "alice-ed25519"})) ?? panic("bind publisher")
+    assert_eq((eng.identities.get(IdentityKind.Publisher.label()) ?? panic("publisher identity")).name, "pub.alice")
+    assert(if &eng.bind_identity(BoundIdentity.registry("other.registry")) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .IdentityKindMismatch(_, _) -> true
+            else -> false
+        }
+    })
+}
+
+fn pkg_integration_trust_boot(fixture: TrustFixtureRoot, signed_root: SignedMetadata<TUFRootMetadata>, pin: String, now: Int) -> TrustEngine {
+    TrustEngine.bootstrap(signed_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) ?? panic("bootstrap")
+}
+
+#Test("jp6b_compromise_rollback_freeze_and_mix_and_match_fail_closed") {
+    now :: 1710100000
+    scratch :: files.temp_dir("jetpack-trust-root-jp6b") ?? panic("scratch directory")
+    dir :: scratch.path
+    fixture :: trust_fixture_threshold_root(1, now + 86400) ?? panic("fixture root")
+    root :: fixture.root
+    keys :: fixture.keys
+    signed_root :: trust_sign_root(root, [TrustKey]{keys[0], keys[1]}) ?? panic("sign root")
+    pin :: crypto.sha256(trust_canonical_root(root).bytes()).hex()
+    compromised :: TrustKey.generate("compromised-root")
+    forged_root :: trust_sign_root(root, [TrustKey]{keys[0], compromised}) ?? panic("sign forged root")
+    assert(if TrustEngine.bootstrap(forged_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .ThresholdUnmet(role, have, need) -> role == MetadataRole.Root && have == 1 && need == 2
+            else -> false
+        }
+    })
+    replacement := root
+    replacement.version = 2
+    replacement_root :: trust_sign_root(replacement, [TrustKey]{keys[0], keys[1]}) ?? panic("sign replacement root")
+    assert(if TrustEngine.bootstrap(replacement_root, fixture.keyring, TrustRootPolicy.default(), Val(pin), TrustedClock.Fixed(now), None) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .BootstrapPinMismatch(_, _) -> true
+            else -> false
+        }
+    })
+    hashes := [String: String]{}
+    hashes["sha256"] = crypto.sha256("pkg".bytes()).hex()
+    target_map := [String: TargetMeta]{}
+    target_map["jetsrc/pkg"] = TargetMeta{length: 3, hashes, custom: [String: String]{}}
+    targets := TargetsMetadata{version: 1, expires_unix: now + 3600, targets: target_map}
+    signed_targets :: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets")
+    engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    &engine.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify targets v1")
+    targets.version = 2
+    signed_v2 :: trust_sign_targets(targets, [TrustKey]{keys[3]}) ?? panic("sign targets v2")
+    &engine.verify_targets(signed_v2, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify targets v2")
+    old := targets
+    old.version = 1
+    signed_old :: trust_sign_targets(old, [TrustKey]{keys[3]}) ?? panic("sign older targets")
+    assert(if &engine.verify_targets(signed_old, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .Rollback(role, _, _) -> role == MetadataRole.Targets
+            else -> false
+        }
+    })
+    frozen := targets
+    frozen.version = 3
+    frozen.expires_unix = now
+    frozen_engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    assert(if &frozen_engine.verify_targets(trust_sign_targets(frozen, [TrustKey]{keys[3]}) ?? panic("sign frozen targets"), Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .Expired(role, _, _) -> role == MetadataRole.Targets
+            else -> false
+        }
+    })
+    changed_custom := signed_targets
+    custom_target := changed_custom.signed.targets.get("jetsrc/pkg") ?? panic("target")
+    custom_target.custom["provenance"] = "attacker"
+    changed_custom.signed.targets["jetsrc/pkg"] = custom_target
+    changed_custom.signatures = (trust_sign_targets(changed_custom.signed, [TrustKey]{keys[3]}) ?? panic("resign custom metadata")).signatures
+    custom_engine := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    &custom_engine.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify before custom mutation")
+    assert(if &custom_engine.verify_targets(changed_custom, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .ConsistentSnapshotMismatch(_, _) -> true
+            else -> false
+        }
+    })
+    chain := pkg_integration_trust_boot(fixture, signed_root, pin, now)
+    &chain.verify_targets(signed_targets, Val("jetsrc/pkg"), TrustedClock.Fixed(now)) ?? panic("verify chain targets")
+    targets_canonical :: trust_canonical_targets(signed_targets.signed)
+    t_hashes := [String: String]{}
+    t_hashes["sha256"] = crypto.sha256(targets_canonical.bytes()).hex()
+    meta := [String: SnapshotMetaEntry]{}
+    meta["targets"] = SnapshotMetaEntry{version: 1, length: targets_canonical.bytes().len(), hashes: t_hashes}
+    snapshot :: SnapshotMetadata{version: 1, expires_unix: now + 3600, meta}
+    signed_snapshot :: trust_sign_snapshot(snapshot, [TrustKey]{keys[4]}) ?? panic("sign snapshot")
+    &chain.verify_snapshot(signed_snapshot, targets_canonical, 1, TrustedClock.Fixed(now)) ?? panic("verify snapshot")
+    snapshot_canonical :: trust_canonical_snapshot(snapshot)
+    s_hashes := [String: String]{}
+    s_hashes["sha256"] = crypto.sha256(snapshot_canonical.bytes()).hex()
+    timestamp :: TimestampMetadata{version: 1, expires_unix: now + 3600, snapshot: SnapshotMetaEntry{version: 1, length: snapshot_canonical.bytes().len() + 1, hashes: s_hashes}}
+    assert(if &chain.verify_timestamp(trust_sign_timestamp(timestamp, [TrustKey]{keys[5]}) ?? panic("sign bad-length timestamp"), snapshot_canonical, 1, TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .ConsistentSnapshotMismatch(_, _) -> true
+            else -> false
+        }
+    })
+    cache_key :: TrustKey.generate("cache-receipt")
+    provenance :: CacheProvenance{reference: "jetsrc/pkg", source: "git:source", builder: "cache-builder:trusted", action: "sha256:action", output: "sha256:output", platform: "linux.x86_64", sandbox: "sandbox:policy-bound", policy: "sha256:policy"}
+    receipt :: CacheReceipt.issue("public", provenance, 1, now, now + 60, cache_key) ?? panic("issue receipt")
+    receipt.verify(cache_key, TrustedClock.Fixed(now)) ?? panic("verify receipt")
+    assert(receipt.witness != "")
+    trust_allow_cache_witness(dir, "public", receipt.witness) ?? panic("allow witness")
+    assert(trust_is_cache_witness_allowed(dir, "public", receipt.witness) ?? panic("check allowed witness"))
+    untrusted_witness :: if receipt.witness == "stranger" -> "other-stranger" else -> "stranger"
+    assert(!(trust_is_cache_witness_allowed(dir, "public", untrusted_witness) ?? panic("check untrusted witness")))
+    tampered_witness := receipt
+    tampered_witness.witness = untrusted_witness
+    assert(if tampered_witness.verify(cache_key, TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .CacheReceiptInvalid(_) -> true
+            else -> false
+        }
+    })
+    tampered_receipt := receipt
+    tampered_receipt.provenance.output = "sha256:attacker"
+    assert(if tampered_receipt.verify(cache_key, TrustedClock.Fixed(now)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .CacheReceiptInvalid(_) -> true
+            else -> false
+        }
+    })
+    assert(if receipt.verify(cache_key, TrustedClock.Fixed(now + 60)) == {
+        .Ok(_) -> false
+        .Err(error) -> if error == {
+            .CacheReceiptExpired(_, _) -> true
+            else -> false
+        }
+    })
+}
+
+#Test("core_build_hook_requires_the_exact_trust_identity") {
+    scratch :: files.temp_dir("jetpack-core-build-trust-it") ?? panic("scratch directory")
+    dir :: scratch.path
+    store :: files.join(dir, "trust")
+    assert(trust_add_grant(store, TrustGrant{authority: "build", subject: "build-sha256:trusted", scope: "repo"}))
+    hostile_identity :: "build-sha256:trusted\n$(touch core-build-pwned)"
+    assert(trust_gate_build_identity(Theme.plain(), store, hostile_identity, false) != None)
+    assert(!files.exists(files.join(dir, "core-build-pwned")))
+}

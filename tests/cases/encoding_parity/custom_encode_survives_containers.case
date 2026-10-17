@@ -1,0 +1,23 @@
+# tests/encoding_parity.rs::custom_encode_survives_containers
+# ORACLE-LITERAL and exact original tier equality; PENDING-SAME-HEAD, runtime UNRUN.
+# Rust emitter/rustc compile infrastructure retires; native AOT build and execution retained.
+fixture: custom_encode_survives_containers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = custom_encode_survives_containers.out
+step default: jet run run.jet
+stdin: null
+exit: == aot
+stdout: == aot
+stderr: == aot
+step interpret: jet run --interpret run.jet
+stdin: null
+exit: == aot
+stdout: == aot
+stderr: == aot

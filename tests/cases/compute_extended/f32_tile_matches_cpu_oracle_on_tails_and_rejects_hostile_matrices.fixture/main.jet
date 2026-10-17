@@ -1,0 +1,28 @@
+
+use core.compute as compute
+
+fn run() {
+    left :: compute.full([3, 13], 1.0) ?? panic("left")
+    right :: compute.full([13, 7], 2.0) ?? panic("right")
+    scalar :: compute.matmul(left, right) ?? panic("scalar")
+    tiled :: compute.matmul_f32_tile(left, right) ?? panic("tiled")
+    print("scalar:{compute.to_list(scalar)}")
+    print("tiled:{compute.to_list(tiled)}")
+
+    wrong :: compute.full([14, 7], 2.0) ?? panic("wrong")
+    if compute.matmul_f32_tile(left, wrong) == {
+        .Ok(_) -> { print("bad_shape:accepted") }
+        .Err(_) -> { print("bad_shape:rejected") }
+    }
+
+    wide :: compute.full([1, 1], 1e40) ?? panic("wide")
+    if compute.matmul_f32_tile(wide, wide) == {
+        .Ok(_) -> { print("bad_f32:accepted") }
+        .Err(_) -> { print("bad_f32:rejected") }
+    }
+
+    if compute.matrix(9223372036854775807, 2, 0.0) == {
+        .Ok(_) -> { print("overflow:accepted") }
+        .Err(_) -> { print("overflow:rejected") }
+    }
+}

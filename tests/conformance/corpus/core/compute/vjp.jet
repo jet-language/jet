@@ -6,6 +6,6 @@ fn product(left: Tensor, right: Tensor) -> Tensor { compute.mul(left, right) ?? 
 fn run() {
     left :: compute.from_list([2.0]) ?? panic("left")
     right :: compute.from_list([3.0]) ?? panic("right")
-    result :: compute.vjp(product, ~left, ~right)
+    result :: compute.vjp(product, left.copy(), right.copy())
     print(compute.to_list(result.value))
 }

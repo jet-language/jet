@@ -1,0 +1,11 @@
+
+use core.reactive as reactive
+use core.tasks as tasks
+fn run() {
+    base := reactive.signal(1)
+    twice := reactive.computed(() -> (base.get() * 2))
+    (tx, rx) :: channel<Computed<Int>>()
+    tx.send(twice.copy())
+    got :: rx.receive() ?? panic("recv")
+    print(got.get())
+}

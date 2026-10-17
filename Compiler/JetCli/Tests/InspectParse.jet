@@ -1,0 +1,40 @@
+// CLI.rs inspect_threads_preserves_targets_and_options_on_every_plane,
+// inspect_joined_values_do_not_consume_the_target_on_every_plane and
+// inspect_threads_preserves_live_replay_and_scope_errors_on_every_plane
+// (e2b4feaae), on the Jet inspect parser.
+fn inspect_parse_require(ok: Bool, name: String) Never! {
+    if !ok -> panic(name)
+}
+
+fn inspect_parse_target(argv: [String], options: [String], name: String) Never! {
+    if jet_cli_inspect_parse(argv) == {
+        .Parsed(request) -> {
+            inspect_parse_require(request.scope == JetCLIInspectScope.Target{target: "input.jet"}, "{name}: target")
+            inspect_parse_require(request.options == options, "{name}: options")
+        }
+        .Failed(message) -> panic("{name}: {message}")
+    }
+}
+
+fn inspect_parse_error(argv: [String], expected: String) Never! {
+    if jet_cli_inspect_parse(argv) == {
+        .Parsed(_) -> panic("expected `{expected}`")
+        .Failed(message) -> inspect_parse_require(message == expected, "wanted `{expected}`, got `{message}`")
+    }
+}
+
+fn run() Never! {
+    flags :: [String]{"--before", "--color", "--facts", "--gate", "--kind", "--output", "--profile", "--scope", "--set", "--target", "--topic"}
+    loop plane in JET_CLI_INSPECT_PLANES {
+        inspect_parse_target([String]{"inspect", plane, "--threads", "1", "input.jet"}, [String]{"--threads", "1"}, "{plane} --threads 1 before target")
+        inspect_parse_target([String]{"inspect", plane, "input.jet", "--threads", "1"}, [String]{"--threads", "1"}, "{plane} --threads 1 after target")
+        inspect_parse_target([String]{"inspect", plane, "--threads=1", "input.jet"}, [String]{"--threads=1"}, "{plane} --threads=1")
+        loop flag in flags {
+            inspect_parse_target([String]{"inspect", plane, flag, "value", "input.jet"}, [String]{flag, "value"}, "{plane} {flag} value")
+            inspect_parse_target([String]{"inspect", plane, "{flag}=value", "input.jet"}, [String]{"{flag}=value"}, "{plane} {flag}=value")
+        }
+        inspect_parse_error([String]{"inspect", plane, "first.jet", "--threads", "1", "second.jet"}, "inspect accepts at most one file or package target")
+        inspect_parse_error([String]{"inspect", plane, "input.jet", "--threads=1", "--live", "23"}, "inspect accepts a target, `--live PID`, or `--replay ARTIFACT` as one scope")
+        inspect_parse_error([String]{"inspect", plane, "--live", "23", "--threads", "1", "--replay", "saved.json"}, "inspect accepts at most one of `--live PID` or `--replay ARTIFACT`")
+    }
+}

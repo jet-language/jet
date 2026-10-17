@@ -1,104 +1,71 @@
-// Count-min sketch. Width 256, depth 4. Update and query are Jet.
-//
-// `add` updates the counter table in place through a write receiver; `merge`
-// returns a fresh table.  Hashing and merge order are fixed, which keeps
-// estimates stable across execution tiers.
-pub struct CountMin {
-    pub depth: Int
-    pub width: Int
-    pub table: [Int]
+// The shipped width-256/depth-4 count-min sketch. Seeded FNV hashing and
+// unit increments live in Jet; cloning copies the counter value independently.
+use core.data.sketch as sketch
+
+struct CountMinSketch {
+    counters: [Int]
+
+    impl Display {
+        fn display(self) -> String { "CountMinSketch" }
+    }
 }
 
-pub fn new() -> CountMin Never! {
-    table := [Int]{}
-    loop i in 0..<1024 -> &table.push(0)
-    CountMin{depth: 4, width: 256, table: table}
-}
+fn new() -> CountMinSketch Never! { CountMinSketch.new() }
 
-impl CountMin {
-    /// Count `n` occurrences of `key` (one by default).
-    pub fn add(&self, key: String, n: Int{1}) Never! {
-        if !shape_ok(self) {
-            fresh :: new()
-            self.depth = fresh.depth
-            self.width = fresh.width
-            self.table = fresh.table
-        }
-        loop d in 0..<self.depth {
-            idx :: d * self.width + bucket(key, d, self.width)
-            self.table[idx] = self.table[idx] + n
+impl CountMinSketch {
+    fn new() -> CountMinSketch Never! {
+        counters := [Int]{}
+        loop _ in 0..<1024 -> &counters.push(0)
+        CountMinSketch{counters: counters}
+    }
+
+    fn add(&self, key: String) Never! {
+        (first, second) :: hashes(key)
+        loop row in 0..<4 {
+            index :: counter_index(first, second, row)
+            if self.counters[index] < 4294967295 -> self.counters[index] = self.counters[index] + 1
         }
     }
 
-    /// The estimated count for `key`; never below the true count.
-    pub fn count(self, key: String) -> Int Never! { estimate(self, key) }
-}
-
-fn estimate(sketch: CountMin, key: String) -> Int Never! {
-    if !shape_ok(sketch) -> return 0
-    min := 0
-    first := true
-    loop d in 0..<sketch.depth {
-        h :: bucket(key, d, sketch.width)
-        v :: sketch.table[d * sketch.width + h]
-        if first || v < min {
-            min = v
-            first = false
+    fn count(self, key: String) -> Int Never! {
+        (first, second) :: hashes(key)
+        count := self.counters[counter_index(first, second, 0)]
+        loop row in 1..<4 {
+            value :: self.counters[counter_index(first, second, row)]
+            if value < count -> count = value
         }
+        count
     }
-    if first -> return 0
-    min
 }
 
-fn hashd(key: String, d: Int) -> Int {
-    h := 2166136261 + d * 16777619
-    loop b in key.bytes() {
-        // Keep the accumulator in a positive 31-bit domain after every
-        // multiply; this avoids target-dependent signed overflow.
-        h = ((h ~| (b & 255)) * 16777619) & 2147483647
-    }
-    h
+fn hashes(key: String) -> (first: U64, second: U64) Never! {
+    seed :: U64{14695981039346656037}
+    (first: sketch.__fnv1a64(key, seed), second: sketch.__fnv1a64(key, seed.wrapping_add(U64{3735928559})))
 }
 
-fn bucket(key: String, d: Int, width: Int) -> Int {
-    if width <= 0 -> return 0
-    (hashd(key, d) % width + width) % width
+fn counter_index(first: U64, second: U64, row: Int) -> Int Never! {
+    column :: first.wrapping_add(second.wrapping_mul(U64{row + 1})).bit_and(U64{255})
+    row * 256 + Int.from_u64(column)
 }
 
-pub fn merge(a: CountMin, b: CountMin) -> CountMin Never! {
-    // A malformed public value cannot contribute a trustworthy counter.
-    // Preserve the valid side instead of fabricating an empty success.
-    if !shape_ok(a) {
-        if shape_ok(b) -> return ~b
-        return new()
-    }
-    if !shape_ok(b) -> return ~a
-
-    // Matching shapes are the normal path and have exact CMS semantics.
-    // For legacy values with different dimensions, retain the deterministic
-    // overlapping prefix and report the canonical smaller shape through the
-    // returned carrier; callers can keep a fixed shape by using new().
-    depth := a.depth
-    if b.depth < depth -> depth = b.depth
-    width := a.width
-    if b.width < width -> width = b.width
-    table := [Int]{}
-    d := 0
-    loop d < depth {
-        i := 0
-        loop i < width {
-            av :: a.table[d * a.width + i]
-            bv :: b.table[d * b.width + i]
-            &table.push(av + bv)
-            i = i + 1
-        }
-        d = d + 1
-    }
-    CountMin{depth: depth, width: width, table: table}
+/// Merge by adding corresponding counters, as the existing source API does.
+fn merge(a: CountMinSketch, b: CountMinSketch) -> CountMinSketch Never! {
+    counters := a.counters.copy()
+    loop i in 0..<1024 -> counters[i] = counters[i] + b.counters[i]
+    CountMinSketch{counters: counters}
 }
 
-fn shape_ok(sketch: CountMin) -> Bool {
-    if sketch.depth <= 0 || sketch.width <= 0 -> return false
-    if sketch.depth > sketch.table.len() /% sketch.width -> return false
-    sketch.depth * sketch.width == sketch.table.len()
+#Test("CMS retains unit counts, independent clones and additive merge") {
+    cms := new()
+    &cms.add("hello")
+    clone := cms.copy()
+    &clone.add("hello")
+    &clone.add("world")
+    assert_eq(cms.count("hello"), 1)
+    assert_eq(cms.count("world"), 0)
+    assert_eq(clone.count("hello"), 2)
+    assert_eq(cms.count("absent"), 0)
+    combined :: merge(cms, clone)
+    assert_eq(combined.count("hello"), 3)
+    assert_eq(combined.count("world"), 1)
 }

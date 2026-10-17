@@ -119,7 +119,7 @@ pub(crate) fn run_generate(args: &[String], json: bool) {
         ))
     });
     let entry_text = entry.to_string_lossy().into_owned();
-    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
+    let (diagnostics, bundle, _, _checked_nominals) = jet::Driver::check_file_with_effect_facts_for_run_and_entry(
         &entry_text,
         "dev",
         &BTreeMap::new(),
@@ -265,62 +265,40 @@ pub(crate) fn run_generate(args: &[String], json: bool) {
             .strip_prefix(&project)
             .unwrap_or_else(|_| fail("generator entry is outside its project root")),
     );
-    let staged_entry_text = staged_entry.to_string_lossy().into_owned();
-    let run_args = [fact.name.as_str()];
-    let run = jet::Interpreter::run_jit_once_with_args_opts_and_gates_and_settings_with_lints_and_authority_and_entry(
-        &staged_entry_text,
-        &run_args,
-        jet_foundation::Policy::GateSet::default(),
-        &BTreeMap::new(),
-        None,
-        None,
-    );
-    match run.outcome {
-        jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } if exit_code == 0 => {
-            if !machine && !options.quiet {
-                if !stdout.is_empty() {
-                    print!("{stdout}");
-                }
-                if !stderr.is_empty() {
-                    eprint!("{stderr}");
-                }
-            }
+    // D-EXEC2=A: the generator job runs the way every program runs — a child
+    // `jet run` of the staged entry (normal build path, then execute), with
+    // the job name as its program argument and the staged copy as its cwd.
+    let exe = std::env::current_exe()
+        .unwrap_or_else(|error| fail(&format!("couldn't locate the running Jet executable: {error}")));
+    let run = std::process::Command::new(exe)
+        .arg("run")
+        .arg(&staged_entry)
+        .arg("--")
+        .arg(&fact.name)
+        .current_dir(&staging.path)
+        .output()
+        .unwrap_or_else(|error| fail(&format!("couldn't run generator job `{}`: {error}", fact.name)));
+    let stdout = String::from_utf8_lossy(&run.stdout);
+    let stderr = String::from_utf8_lossy(&run.stderr);
+    let exit_code = crate::CmdCompile::child_exit_code(run.status);
+    if exit_code != 0 {
+        let detail = format_run_failure(exit_code, &stdout, &stderr);
+        let receipt = render_receipt(&fact, &inputs, &[], "failed", Some(&detail));
+        publish_failure_receipt_if_apply(
+            options.apply,
+            &project,
+            &receipt_path,
+            &log_path,
+            receipt.as_bytes(),
+        );
+        fail_with_source(&entry, &source, &fact.name, &detail);
+    }
+    if !machine && !options.quiet {
+        if !stdout.is_empty() {
+            print!("{stdout}");
         }
-        jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } => {
-            let detail = format_run_failure(exit_code, &stdout, &stderr);
-            let receipt = render_receipt(&fact, &inputs, &[], "failed", Some(&detail));
-            publish_failure_receipt_if_apply(
-                options.apply,
-                &project,
-                &receipt_path,
-                &log_path,
-                receipt.as_bytes(),
-            );
-            fail_with_source(&entry, &source, &fact.name, &detail);
-        }
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-            let detail = diagnostics
-                .iter()
-                .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.what))
-                .collect::<Vec<_>>()
-                .join("; ");
-            let receipt = render_receipt(&fact, &inputs, &[], "failed", Some(&detail));
-            publish_failure_receipt_if_apply(
-                options.apply,
-                &project,
-                &receipt_path,
-                &log_path,
-                receipt.as_bytes(),
-            );
-            fail_with_source(&entry, &source, &fact.name, &detail);
+        if !stderr.is_empty() {
+            eprint!("{stderr}");
         }
     }
     let after_tree = collect_files(&staging.path);

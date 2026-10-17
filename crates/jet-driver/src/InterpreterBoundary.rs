@@ -15,8 +15,6 @@ use std::collections::{HashMap, HashSet};
 pub enum InterpreterInvocation {
     RunInterpret,
     DevInterpret,
-    RunDefault,
-    DevDefault,
 }
 
 impl InterpreterInvocation {
@@ -24,13 +22,7 @@ impl InterpreterInvocation {
         match self {
             Self::RunInterpret => "jet run --interpret",
             Self::DevInterpret => "jet dev --interpret",
-            Self::RunDefault => "jet run",
-            Self::DevDefault => "jet dev",
         }
-    }
-
-    pub const fn uses_interpreter(self) -> bool {
-        matches!(self, Self::RunInterpret | Self::DevInterpret)
     }
 }
 
@@ -187,11 +179,9 @@ fn native_module_feature(name: &str, debug_impure: bool) -> Option<&'static str>
 /// registry row and evaluator route both declare an executable ambient path.
 fn process_leaf_feature(module: &str, item: &str) -> Option<&'static str> {
     match (module, item) {
-        // Run by the shared evaluator itself: `process.argv` reads the argv
-        // installed for this run and `process.args` projects that same list
-        // through the shared `jet_process_args_view` kernel.
-        // `process.run` is marshalled by the interpreter ambient through the
-        // same Process Prelude as AOT and Cranelift. The authority argument
+        // `process.argv` reads the argv installed for this run; the Jet Core
+        // `process.args` body projects that list. Process execution is marshalled
+        // through the shared Process Prelude. The authority argument
         // is ordinary data at this boundary; sema has already checked it is
         // the named `Authority` carrier.
         ("core.process", "argv" | "args" | "cmd" | "exit" | "run" | "pipeline" | "workspace") => {

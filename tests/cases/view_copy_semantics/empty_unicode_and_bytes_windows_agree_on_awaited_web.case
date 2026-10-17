@@ -1,0 +1,11 @@
+# PORT tests/view_copy_semantics.rs:310-317.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: empty_unicode_and_bytes_windows_agree_on_awaited_web.fixture
+step: jet build --target=web run.jet
+exit: 0
+copy: run.mjs .jet/build/run.mjs
+copy: package.json .jet/build/package.json
+step: node run.mjs
+cwd: .jet/build
+exit: 0
+stdout: = empty_unicode_and_bytes_windows_agree_on_awaited_web.fixture/expected.out

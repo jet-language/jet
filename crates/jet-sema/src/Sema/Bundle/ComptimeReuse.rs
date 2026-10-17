@@ -36,7 +36,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 
 /// Schema of one stored constant value (an action record under its key).
-const COMPTIME_VALUE_SCHEMA: &str = "jet.comptime-value/v1";
+const COMPTIME_VALUE_SCHEMA: &str = "jet.comptime-value/v3";
 const SECTION_VALUE: u64 = 1;
 
 /// The environment of one check's constant evaluations, and the store work
@@ -45,8 +45,8 @@ pub(crate) struct ComptimeReuseEnv {
     store: Arc<dyn PackageRecordStore>,
     /// Compiler identity and check environment every key starts from.
     environment: String,
-    /// Per module: digest of its identity and loaded source.
-    modules: Vec<String>,
+    /// Per evaluating module: ordered source digest of every other module.
+    peer_modules: Vec<String>,
     pending: RefCell<Pending>,
 }
 
@@ -76,7 +76,7 @@ pub(crate) fn environment(bundle: &ProgramBundle) -> Option<ComptimeReuseEnv> {
     {
         hasher.field(&bundle.build_facts.stamp.at);
     }
-    let modules = bundle
+    let modules: Vec<String> = bundle
         .modules
         .iter()
         .map(|module| {
@@ -92,9 +92,36 @@ pub(crate) fn environment(bundle: &ProgramBundle) -> Option<ComptimeReuseEnv> {
     Some(ComptimeReuseEnv {
         store,
         environment: hasher.finish(),
-        modules,
+        peer_modules: peer_module_digests(&modules),
         pending: RefCell::new(Pending::default()),
     })
+}
+
+/// Share ordered prefix/suffix commitments instead of hashing the complete
+/// peer list again for every evaluating module. Neither commitment includes
+/// the evaluating module's source; edits to its unreachable functions remain
+/// eligible for constant-value reuse.
+fn peer_module_digests(modules: &[String]) -> Vec<String> {
+    let empty = KeyHasher::new(COMPTIME_VALUE_SCHEMA).finish();
+    let mut prefixes = Vec::with_capacity(modules.len() + 1);
+    prefixes.push(empty.clone());
+    for module in modules {
+        let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
+        hasher.field(prefixes.last().unwrap()).field(module);
+        prefixes.push(hasher.finish());
+    }
+    let mut suffixes = vec![String::new(); modules.len() + 1];
+    suffixes[modules.len()] = empty;
+    for index in (0..modules.len()).rev() {
+        let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
+        hasher.field(&modules[index]).field(&suffixes[index + 1]);
+        suffixes[index] = hasher.finish();
+    }
+    (0..modules.len()).map(|index| {
+        let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
+        hasher.field(&prefixes[index]).field(&suffixes[index + 1]);
+        hasher.finish()
+    }).collect()
 }
 
 /// Whether `source` may read a build stamp fact: `$build` followed by
@@ -196,11 +223,7 @@ impl<'a> ModuleComptime<'a> {
     ) -> Self {
         let mut hasher = KeyHasher::new(COMPTIME_VALUE_SCHEMA);
         hasher.field(&env.environment).field(&module_idx.to_string()).field(context);
-        for (index, module) in env.modules.iter().enumerate() {
-            if index != module_idx {
-                hasher.field(module);
-            }
-        }
+        hasher.field(&env.peer_modules[module_idx]);
         let mut by_name = HashMap::<&str, Vec<usize>>::new();
         let mut functions = Vec::new();
         let mut seeds = Vec::new();
@@ -299,4 +322,30 @@ fn quoted_names(text: &[u8]) -> Vec<String> {
         at += 1;
     }
     names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::peer_module_digests;
+
+    #[test]
+    fn peer_commitments_exclude_own_source_and_preserve_peer_order() {
+        let original = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+        let before = peer_module_digests(&original);
+        for own in 0..original.len() {
+            let mut edited = original.clone();
+            edited[own].push_str("-body-edit");
+            let after = peer_module_digests(&edited);
+            assert_eq!(before[own], after[own]);
+            for peer in 0..original.len() {
+                if peer != own {
+                    assert_ne!(before[peer], after[peer]);
+                }
+            }
+        }
+        let reordered = peer_module_digests(&["b".to_owned(), "a".to_owned(), "c".to_owned()]);
+        assert_ne!(before[2], reordered[2]);
+        assert!(peer_module_digests(&[]).is_empty());
+        assert_eq!(peer_module_digests(&["a".to_owned()]), peer_module_digests(&["edited".to_owned()]));
+    }
 }

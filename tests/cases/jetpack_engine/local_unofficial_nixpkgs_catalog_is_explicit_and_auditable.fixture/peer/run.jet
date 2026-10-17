@@ -1,0 +1,239 @@
+// Port of tests/support/nix_index_cache_server.rs's signed ripgrep peer.
+// Serves bytes and request counters only: never writes a Hangar or invokes Nix.
+use core.files as files
+use core.net as net
+use core.time as time
+use core.crypto as crypto
+use core.encoding.base64 as base64
+
+PEER_REVISION :: "c8f90650c15282fa8656a041bfbbd2403997a9a7"
+PEER_ROOT :: "/nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ripgrep-15.2.0"
+PEER_LIB :: "/nix/store/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-ripgrep-lib-1.0"
+PEER_RUNTIME :: "/nix/store/cccccccccccccccccccccccccccccccc-ripgrep-runtime-1.0"
+PEER_DRV :: "/nix/store/dddddddddddddddddddddddddddddddd-ripgrep-15.2.0.drv"
+PEER_CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+
+// The staged codec is the existing Jetpack raw-block/XXH64 implementation,
+// copied by the .case, not a second test-specific compression implementation.
+NIX_INDEX_MAX_DECODED_BYTES :: 268435456
+#Error
+enum NixIndexError { Invalid(String) }
+
+fn peer_seed() -> [U8] {
+    seed := [U8]{}
+    loop _ in 0..<32 -> &seed.push(U8{7})
+    seed
+}
+
+fn peer_signature(bytes: [U8]) -> String {
+    key :: crypto.SigningKey.from_bytes(peer_seed()) ?? panic("fixture signing key")
+    base64.encode((crypto.sign(key, bytes) ?? panic("fixture signature")).bytes)
+}
+
+fn peer_sidecar(domain: String, text: String) -> [U8] {
+    signature :: peer_signature("{domain}{text}".bytes())
+    "{{\"schema\":1,\"key_id\":\"fixture-index-signer-v1\",\"algorithm\":\"ed25519\",\"signature\":\"{signature}\"}}".bytes()
+}
+
+fn peer_write(path: String, text: String) {
+    files.create_dir_all(files.dirname(path)) ?? panic("fixture mkdir")
+    files.write(path, text) ?? panic("fixture write")
+}
+
+fn peer_nar_token(out: &[U8], token: [U8]) {
+    nix_push_le(&out, token.len(), 8)
+    loop byte in token -> &out.push(byte)
+    padding :: (8 - token.len() % 8) % 8
+    loop _ in 0..<padding -> &out.push(U8{0})
+}
+
+fn peer_nar_node(out: &[U8], path: String) {
+    peer_nar_token(&out, "(".bytes())
+    peer_nar_token(&out, "type".bytes())
+    info :: files.stat(path) ?? panic("fixture NAR stat")
+    if info.is_dir {
+        peer_nar_token(&out, "directory".bytes())
+        entries := files.list_dir(path) ?? panic("fixture NAR directory")
+        &entries.sort_by(entry -> entry.name)
+        loop entry in entries {
+            peer_nar_token(&out, "entry".bytes())
+            peer_nar_token(&out, "(".bytes())
+            peer_nar_token(&out, "name".bytes())
+            peer_nar_token(&out, entry.name.bytes())
+            peer_nar_token(&out, "node".bytes())
+            peer_nar_node(&out, entry.path)
+            peer_nar_token(&out, ")".bytes())
+        }
+    } else {
+        assert(info.is_file)
+        peer_nar_token(&out, "regular".bytes())
+        if info.mode & 73 != 0 {
+            peer_nar_token(&out, "executable".bytes())
+            peer_nar_token(&out, "".bytes())
+        }
+        peer_nar_token(&out, "contents".bytes())
+        peer_nar_token(&out, files.read_bytes(path) ?? panic("fixture NAR read"))
+    }
+    peer_nar_token(&out, ")".bytes())
+}
+
+fn peer_nar(source: String, kind: String) -> [U8] {
+    if files.exists(source) -> files.remove_all(source) ?? panic("remove NAR source")
+    files.create_dir_all(source) ?? panic("create NAR source")
+    if kind == "root" {
+        path :: files.join(source, "bin/rg")
+        peer_write(path, "#!/bin/sh\necho ripgrep 15.2.0\n")
+        files.chmod(path, 0o755) ?? panic("fixture executable mode")
+    } else if kind == "lib" -> peer_write(files.join(source, "lib/marker"), "library")
+    else -> peer_write(files.join(source, "share/marker"), "runtime")
+    out := [U8]{}
+    peer_nar_token(&out, "nix-archive-1".bytes())
+    peer_nar_node(&out, source)
+    files.remove_all(source) ?? panic("remove encoded NAR source")
+    out
+}
+
+fn peer_nix_base32(bytes: [U8]) -> String {
+    alphabet :: "0123456789abcdfghijklmnpqrsvwxyz".bytes()
+    out := [U8]{}
+    loop index in 0..<52 {
+        bit :: (51 - index) * 5
+        digit := 0
+        loop offset in 0..<5 {
+            target :: bit + offset
+            if target < 256 && (Int.from_u8(bytes[target /% 8]) & (1 << (target % 8))) != 0 -> digit |= 1 << offset
+        }
+        &out.push(alphabet[digit])
+    }
+    String.from_bytes(out) ?? panic("base32 ASCII")
+}
+
+fn peer_narinfo(store_path: String, nar_name: String, nar: [U8], references: [String]) -> [U8] {
+    digest :: crypto.sha256(nar)
+    hash :: "sha256:{digest.hex()}"
+    names := [String]{}
+    loop reference in references -> &names.push(files.basename(reference))
+    fingerprint :: "1;{store_path};sha256:{peer_nix_base32(digest.bytes)};{nar.len()};{references.join(",")}"
+    signature :: peer_signature(fingerprint.bytes())
+    "StorePath: {store_path}\nURL: nar/{nar_name}\nCompression: none\nFileHash: {hash}\nFileSize: {nar.len()}\nNarHash: {hash}\nNarSize: {nar.len()}\nReferences: {names.join(" ")}\nSig: jet-test-cache-v1:{signature}\n".bytes()
+}
+
+fn peer_routes(endpoint: String, root: String, source: String, mode: String, catalog: String) -> [String: [U8]] {
+    now :: time.unix_ns() /% 1000000000
+    assert(now >= 0)
+    released :: if now >= 60 -> now - 60 else -> 0
+    expires :: now + 365 * 24 * 60 * 60
+    index_endpoint :: "{endpoint}/index"
+    decoded :: "{{\"schema\":1,\"channel\":\"nixpkgs-unstable\",\"revision\":\"{PEER_REVISION}\",\"system\":\"x86_64-linux\",\"released_unix\":{released},\"records\":[{{\"attrpath\":[\"ripgrep\"],\"version\":\"15.2.0\",\"drvPath\":\"{PEER_DRV}\",\"outputs\":[{{\"name\":\"out\",\"storePath\":\"{PEER_ROOT}\"}}]}}],\"coverage\":{{\"indexed\":[[\"ripgrep\"]],\"notIndexed\":[]}}}}"
+    index_text :: if mode == "unindexed" -> "{{\"schema\":1,\"channel\":\"nixpkgs-unstable\",\"revision\":\"{PEER_REVISION}\",\"system\":\"x86_64-linux\",\"released_unix\":{released},\"records\":[],\"coverage\":{{\"indexed\":[],\"notIndexed\":[{{\"attrpath\":[\"postgres\"],\"reason\":\"missing-narinfo\"}}]}}}}" else -> decoded
+    compressed :: nix_index_zstd_encode(index_text.bytes())
+    sidecar :: peer_sidecar("jet-nixpkgs-index-v1\n", index_text)
+    digest :: crypto.sha256(compressed).hex()
+    target :: "/index/index-v1/{PEER_REVISION}/x86_64-linux/{digest}.json.zst"
+    manifest :: "{{\"schema\":1,\"channel\":\"nixpkgs-unstable\",\"generation\":1,\"issued_unix\":{released},\"expires_unix\":{expires},\"targets\":[{{\"revision\":\"{PEER_REVISION}\",\"system\":\"x86_64-linux\",\"url\":\"{endpoint}{target}\",\"signature_url\":\"{endpoint}{target}.sig.json\",\"sha256\":\"{digest}\",\"compressed_length\":{compressed.len()},\"decoded_length\":{index_text.bytes().len()},\"record_count\":{if mode == "unindexed" -> 0 else -> 1},\"index_signature_sha256\":\"{crypto.sha256(sidecar).hex()}\",\"discoverable\":true}}]}}"
+    routes := [String: [U8]]{}
+    routes["/index/v1/nixpkgs-unstable/manifest.json"] = manifest.bytes()
+    routes["/index/v1/nixpkgs-unstable/manifest.json.sig.json"] = peer_sidecar("jet-nixpkgs-channel-manifest-v1\n", manifest)
+    routes[target] = compressed
+    routes["{target}.sig.json"] = sidecar
+    if catalog != "-" {
+        local :: files.join(catalog, "index-v1/{PEER_REVISION}/x86_64-linux/{digest}.json.zst")
+        files.create_dir_all(files.dirname(local)) ?? panic("local catalog")
+        files.write_bytes(local, compressed) ?? panic("local target")
+    }
+    if mode == "corrupt" {
+        bad := sidecar
+        &bad.push(U8{33})
+        routes["{target}.sig.json"] = bad
+    }
+    routes["/nix-cache-info"] = "StoreDir: /nix/store\nWantMassQuery: 1\n".bytes()
+    paths :: [PEER_ROOT, PEER_LIB, PEER_RUNTIME]
+    kinds :: ["root", "lib", "runtime"]
+    loop (i, path) in paths {
+        nar :: peer_nar(source, kinds[i])
+        references :: if i < 2 -> [String]{paths[i + 1]} else -> [String]{}
+        name :: files.basename(path)
+        routes["/{name.slice(0, 32)}.narinfo"] = peer_narinfo(path, "{kinds[i]}.nar", nar, references)
+        routes["/nar/{kinds[i]}.nar"] = nar
+    }
+    key :: crypto.SigningKey.from_bytes(peer_seed()) ?? panic("public fixture key")
+    public_key :: base64.encode(key.public_key().bytes)
+    peer_write(files.join(root, "config/nix-index-v1.endpoint"), "{index_endpoint}\n")
+    peer_write(files.join(root, "trust/nix-index-v1.ed25519.pub"), "fixture-index-signer-v1:{public_key}\n")
+    peer_write(files.join(root, "config/nix-cache-v1.endpoint"), "{endpoint}\n")
+    peer_write(files.join(root, "trust/nix-cache-v1.ed25519.pub"), "jet-test-cache-v1:{public_key}\n")
+    routes
+}
+
+fn peer_object_count(counts: [String: Int], path: String, kind: String) -> Int {
+    name :: files.basename(path)
+    (counts.get("/{name.slice(0, 32)}.narinfo") ?? 0) + (counts.get("/nar/{kind}.nar") ?? 0)
+}
+
+fn peer_control(port: String, path: String) {
+    stream :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect fixture control")
+    net.tcp_write_text(stream, "GET /{path} HTTP/1.1{PEER_CRLF}Host: 127.0.0.1{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write fixture control")
+    bytes := [U8]{}
+    loop {
+        chunk :: net.tcp_read_bytes(stream, 16384) ?? panic("read fixture control")
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+    }
+    net.tcp_close(stream) ?? panic("close fixture control")
+    response :: String.from_bytes(bytes) ?? panic("control response UTF-8")
+    assert(response.starts_with("HTTP/1.1 200 OK{PEER_CRLF}"))
+    start :: response.index("{PEER_CRLF}{PEER_CRLF}") ?? panic("control response header")
+    print(response.slice(start + 4, response.len()))
+}
+
+fn run(args: [String]) {
+    assert(args.len() > 0)
+    if args[0] == "counts" || args[0] == "stop" {
+        assert_eq(args.len(), 2)
+        peer_control(args[1], args[0])
+        return
+    }
+    assert_eq(args.len(), 6)
+    assert_eq(args[0], "serve")
+    root :: args[1]
+    ready :: args[2]
+    source :: args[3]
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("bind Nix fixture peer")
+    address :: net.listener_local_socket_addr(listener) ?? panic("Nix fixture address")
+    port :: net.socket_port(address)
+    routes :: peer_routes("http://127.0.0.1:{port}", root, source, args[4], args[5])
+    // Publish READY only after the listener AND signed fixture config exist.
+    peer_write("{ready}.tmp", "{port}")
+    files.rename("{ready}.tmp", ready) ?? panic("publish fixture READY")
+    counts := [String: Int]{}
+    loop {
+        stream :: net.tcp_accept(listener) ?? panic("accept Nix fixture request")
+        request := [U8]{}
+        first_line := false
+        loop !first_line {
+            chunk :: net.tcp_read_bytes(stream, 16384) ?? panic("read Nix fixture request")
+            assert(chunk.len() > 0)
+            loop byte in chunk {
+                &request.push(byte)
+                if byte == (U8{10}) -> first_line = true
+            }
+        }
+        text :: String.from_bytes(request) ?? ""
+        first :: text.split("\n").to_list()[0].copy()
+        words :: first.split(" ").to_list()
+        target :: if words.len() >= 2 -> words[1].copy() else -> "/"
+        path :: target.split("?").to_list()[0].copy()
+        counts[path] = (counts.get(path) ?? 0) + 1
+        stop :: path == "/stop"
+        body :: if path == "/counts" -> Val("{{\"root\":{peer_object_count(counts, PEER_ROOT, "root")},\"lib\":{peer_object_count(counts, PEER_LIB, "lib")},\"runtime\":{peer_object_count(counts, PEER_RUNTIME, "runtime")}}}".bytes()) else if stop -> Val("".bytes()) else -> routes.get(path)
+        if body == {
+            .Val(bytes) -> {
+                net.tcp_write_text(stream, "HTTP/1.1 200 OK{PEER_CRLF}Content-Length: {bytes.len()}{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture header")
+                net.tcp_write_all_bytes(stream, bytes) ?? panic("write Nix fixture bytes")
+            }
+            .None -> net.tcp_write_text(stream, "HTTP/1.1 503 Service Unavailable{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}") ?? panic("write Nix fixture miss")
+        }
+        net.tcp_close(stream) ?? panic("close Nix fixture request")
+        if stop -> break
+    }
+}

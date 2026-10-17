@@ -6,8 +6,8 @@
 //!
 //! lldb is a runtime TOOL dependency on the user's machine, not an I6 compiler
 //! crate (same posture as nixpkgs for native/system deps) — [`Inferior::available`]
-//! gates every call site so a missing lldb degrades to a clear message pointing at
-//! the step-1 interpreter debugger, never a panic.
+//! gates every call site so a missing lldb produces the native-debugger
+//! availability diagnostic and installation guidance, never an engine fallback.
 //!
 //! Two lldb quirks this module works around, both confirmed against a live
 //! lldb (not just documentation — see the sidequest doc for the trace):
@@ -747,16 +747,24 @@ impl Inferior {
         Ok(())
     }
 
-    /// `frame variable` — every local in the current frame, `(type) name = value`
-    /// per line (parsed by [`Self::parse_typed_locals`]).
+    /// `frame variable -P 1` — every local in the current frame, `(type) name =
+    /// value` per line (parsed by [`Self::parse_typed_locals`]). Pointer depth 1
+    /// shows a borrowed parameter's pointee (MIR passes `&T`), never deeper.
     pub(crate) fn locals(&mut self) -> std::io::Result<String> {
-        self.cmd("frame variable")
+        self.cmd("frame variable -P 1")
     }
 
-    /// `frame variable <name>` — a single local by its JET name (translated to
-    /// the mangled Rust name lldb needs — see [`jet_local_to_rust`]).
+    /// `frame variable -P 1 <name>` — a single local by its JET name (translated
+    /// to the mangled Rust name lldb needs — see [`jet_local_to_rust`]).
     pub(crate) fn print_var(&mut self, jet_name: &str) -> std::io::Result<String> {
-        self.frame_variable(&Self::jet_local_to_rust(jet_name))
+        let expression = Self::jet_local_to_rust(jet_name);
+        if !valid_frame_expression(&expression) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "debugger expression is not a read-only local path",
+            ));
+        }
+        self.cmd(&format!("frame variable -P 1 {expression}"))
     }
 
     pub(crate) fn frame_variable(&mut self, expression: &str) -> std::io::Result<String> {
@@ -1123,13 +1131,32 @@ impl Inferior {
     }
 
     /// Keep native summaries from exposing Rust layout, addresses, paths, or
-    /// optimized-away storage through the default debugger view.
+    /// optimized-away storage through the default debugger view. Generated
+    /// storage is projected first: a MIR local slot (`Option<T>`) shows its
+    /// payload, a borrowed parameter (`T *`, read with `frame variable -P 1`)
+    /// shows its pointee, and an exact `JetInt` shows its inline value.
     pub(crate) fn safe_value(type_name: &str, raw: &str) -> String {
         let raw = raw.trim();
         if matches!(raw, "<optimized out>" | "<unavailable>") {
             return raw.to_string();
         }
-        let safe = match type_name.trim() {
+        let type_name = type_name.trim();
+        if let Some(payload_type) = option_payload_type(type_name) {
+            return option_payload_value(raw)
+                .map(|payload| Self::safe_value(payload_type, payload))
+                .unwrap_or_else(|| "<unavailable>".to_string());
+        }
+        if let Some(pointee_type) = type_name.strip_suffix('*') {
+            return pointee_value(raw)
+                .map(|pointee| Self::safe_value(pointee_type, pointee))
+                .unwrap_or_else(|| "<unavailable>".to_string());
+        }
+        if is_jet_int_type(type_name) {
+            return jet_int_value(raw)
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "<unavailable>".to_string());
+        }
+        let safe = match type_name {
             "bool" | "Bool" => matches!(raw, "true" | "false"),
             "f32" | "f64" | "Float" => raw.parse::<f64>().is_ok(),
             "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "long" | "long long"
@@ -1149,8 +1176,24 @@ impl Inferior {
         }
     }
 
+    /// A MIR local slot that has not been assigned yet (`Option<T>` = `None`)
+    /// is not a Jet binding at this stop; the default projection hides it.
+    pub(crate) fn is_unset_slot(type_name: &str, raw: &str) -> bool {
+        option_payload_type(type_name.trim()).is_some() && raw.trim() == "None"
+    }
+
     pub(crate) fn jet_type_name(raw: &str) -> Option<&'static str> {
-        match raw.trim() {
+        let raw = raw.trim();
+        if let Some(payload_type) = option_payload_type(raw) {
+            return Self::jet_type_name(payload_type);
+        }
+        if let Some(pointee_type) = raw.strip_suffix('*') {
+            return Self::jet_type_name(pointee_type);
+        }
+        if is_jet_int_type(raw) {
+            return Some("Int");
+        }
+        match raw {
             "bool" => Some("Bool"),
             "f32" | "f64" => Some("Float"),
             "int" | "i8" | "i16" | "i32" | "i64" | "isize" | "i128" | "long" | "long long"
@@ -1204,11 +1247,12 @@ impl Inferior {
         Some(rust)
     }
 
-    /// Clean a raw Rust function symbol (`prog::main::h4002…` or
-    /// `prog::__jet_helper::h991…`) down to its Jet name (I2): drop the
-    /// trailing `::h<hash>` rustc appends, take the last path segment, then
-    /// strip the `__jet_` mangling prefix (bare `main` passes through
-    /// unchanged since codegen never mangles it — see `mangle()`).
+    /// Clean a raw Rust function symbol (`prog::__jet__d_c_cx_djet_c_crun::h4002…`
+    /// or `prog::main`) down to its Jet name (I2): drop the trailing
+    /// `::h<hash>` rustc appends, take the last path segment, strip the
+    /// `__jet_` prefix, then decode the MIR link name (`Syntax::generated_path`
+    /// of the canonical identity, e.g. `.::x.jet::run`) to its final item
+    /// segment (`run`). Bare `main` passes through unchanged.
     pub(crate) fn rust_func_to_jet(func: &str) -> String {
         let mut segs: Vec<&str> = func.split("::").collect();
         let looks_like_hash = segs.last().is_some_and(|s| {
@@ -1223,9 +1267,17 @@ impl Inferior {
             .find(|segment| !is_rust_closure(segment))
             .copied()
             .unwrap_or(func);
-        name.strip_prefix(Syntax::GENERATED_NAME_PREFIX)
-            .unwrap_or(name)
-            .to_string()
+        let Some(suffix) = name.strip_prefix(Syntax::GENERATED_NAME_PREFIX) else {
+            return name.to_string();
+        };
+        match Syntax::decode_generated_path_suffix(suffix) {
+            Some(identity) => identity
+                .rsplit("::")
+                .next()
+                .unwrap_or(&identity)
+                .to_string(),
+            None => suffix.to_string(),
+        }
     }
 
     pub(crate) fn safe_jet_func(func: &str) -> String {
@@ -1345,6 +1397,72 @@ fn complete_quoted_literal(s: &str) -> Option<&str> {
         }
     }
     None
+}
+
+/// `T` for a MIR local slot type `core::option::Option<T>`.
+fn option_payload_type(type_name: &str) -> Option<&str> {
+    type_name
+        .strip_prefix("core::option::Option<")
+        .and_then(|rest| rest.strip_suffix('>'))
+        .map(str::trim)
+}
+
+/// The summary of `Some(<payload>)` as LLDB's Rust formatter prints an
+/// `Option` (`Some((1)) { 0 = … }`); the children dump after it is dropped.
+fn option_payload_value(raw: &str) -> Option<&str> {
+    let rest = raw.trim().strip_prefix("Some(")?;
+    let mut depth = 1usize;
+    let mut quoted = false;
+    let mut escaped = false;
+    for (index, c) in rest.char_indices() {
+        if quoted {
+            match (escaped, c) {
+                (true, _) => escaped = false,
+                (false, '\\') => escaped = true,
+                (false, '"') => quoted = false,
+                _ => {}
+            }
+            continue;
+        }
+        match c {
+            '"' => quoted = true,
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[..index].trim());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The pointee of a borrowed parameter printed with `frame variable -P 1`:
+/// `0x… { *__jet_a = { 0 = 1 } }` -> `{ 0 = 1 }`.
+fn pointee_value(raw: &str) -> Option<&str> {
+    let (_, children) = raw.split_once('{')?;
+    let (_, value) = children.split_once(" = ")?;
+    Some(value.trim().strip_suffix('}')?.trim())
+}
+
+fn is_jet_int_type(type_name: &str) -> bool {
+    type_name == "JetInt" || type_name.ends_with("::JetInt")
+}
+
+/// Decode an inline `JetInt` word (`(1)` summary or `{ 0 = 1 }` children):
+/// the top two bits are the sign extension of an inline value; the pointer
+/// tag (a spilled big integer) has no safe one-line view.
+fn jet_int_value(raw: &str) -> Option<i64> {
+    let word = raw
+        .trim_matches(|c: char| c == '(' || c == ')' || c == '{' || c == '}' || c.is_whitespace());
+    let word = word.rsplit(" = ").next()?.trim();
+    let bits = word.parse::<u64>().ok()?;
+    match bits >> 62 {
+        0 | 3 => Some(bits as i64),
+        _ => None,
+    }
 }
 
 fn parse_typed_line(line: &str) -> Option<(&str, &str, &str)> {
@@ -2102,9 +2220,14 @@ mod tests {
             Inferior::rust_func_to_jet("prog::main::h40021039c79c235b"),
             "main"
         );
+        // MIR link names encode the canonical identity (`.::x.jet::add`).
         assert_eq!(
-            Inferior::rust_func_to_jet("prog::__jet_helper::h991a2b3c4d5e6f70"),
-            "helper"
+            Inferior::rust_func_to_jet("prog::__jet__d_c_cx_djet_c_cadd::h991a2b3c4d5e6f70"),
+            "add"
+        );
+        assert_eq!(
+            Inferior::rust_func_to_jet("prog::__jet__d_c_cmy_uapp_djet_c_cmy_uhelper"),
+            "my_helper"
         );
         // No hash suffix and no `::` path (e.g. a libc frame, already past
         // `parse_frame_line`'s own backtick split) — passes through as-is.
@@ -2120,10 +2243,49 @@ mod tests {
             Inferior::safe_jet_func("prog::helper::h4002"),
             "<native frame>"
         );
-        assert_eq!(Inferior::safe_jet_func("prog::__jet_run::h4002"), "run");
         assert_eq!(
-            Inferior::safe_jet_func("prog::__jet_run::{{closure}}::h4002"),
+            Inferior::safe_jet_func("prog::__jet__d_c_cx_djet_c_crun::h4002"),
             "run"
+        );
+        assert_eq!(
+            Inferior::safe_jet_func("prog::__jet__d_c_cx_djet_c_crun::{{closure}}::h4002"),
+            "run"
+        );
+    }
+
+    #[test]
+    fn mir_local_slots_project_their_payload() {
+        let int = "core::option::Option<jet_runtime::jet_foundation_numeric::JetInt>";
+        assert_eq!(Inferior::safe_value(int, "Some((3)) { 0 = { 0 = 3 } }"), "3");
+        assert_eq!(Inferior::jet_type_name(int), Some("Int"));
+        assert!(Inferior::is_unset_slot(int, "None"));
+        assert!(!Inferior::is_unset_slot(int, "Some((3)) { 0 = { 0 = 3 } }"));
+        // A negative inline JetInt is the sign-extended word.
+        assert_eq!(
+            Inferior::safe_value("prog::jet_foundation::Numeric::JetInt", "{ 0 = 18446744073709551615 }"),
+            "-1"
+        );
+        // A spilled big integer (pointer tag) has no safe one-line view.
+        assert_eq!(
+            Inferior::safe_value("JetInt", &format!("({})", (1_u64 << 62) | 8)),
+            "<unavailable>"
+        );
+        let pointer = "jet_runtime::jet_foundation_numeric::JetInt *";
+        assert_eq!(
+            Inferior::safe_value(pointer, "0x00007fffffff1f28 { *__jet_a = { 0 = 1 } }"),
+            "1"
+        );
+        assert_eq!(Inferior::jet_type_name(pointer), Some("Int"));
+        assert_eq!(
+            Inferior::safe_value(
+                "core::option::Option<alloc::string::String>",
+                "Some(\"a (b)\") { 0 = \"a (b)\" }"
+            ),
+            "\"a (b)\""
+        );
+        assert_eq!(
+            Inferior::safe_value("core::option::Option<bool>", "Some(true) { 0 = true }"),
+            "true"
         );
     }
 }

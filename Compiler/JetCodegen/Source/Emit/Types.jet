@@ -1,6 +1,7 @@
 // MIR type, declaration, and constant projections. All names are derived from
 // canonical MIR identities; no source or Rust AST lookup is performed here.
 use jet_foundation.[
+    name_mangle,
     CORE_MODULE_EXPORTS,
     ByteLayout,
     FieldLayoutFacts,
@@ -12,6 +13,7 @@ use jet_foundation.[
     MIRCallablePolicyChain,
     MIRConstKey,
     MIRConstant,
+    mir_integer_constant,
     MIRField,
     MIRFieldID,
     MIRForeignID,
@@ -46,15 +48,48 @@ use jet_foundation.[
     mir_type_id,
     mir_type_is_scalar,
     mir_type_layout,
+    mir_type_nominal_names,
     mir_type_same_checked_type,
     core_enum_variants,
+    core_source_owns_type,
+    core_source_value_hook,
+    mir_source_value_hook,
 ]
 
+// A `ViewMut<T>` is already the `&mut [T]` borrow, so a read parameter of
+// that type crosses by value: behind `&` its writes could not reach the owner
+// (D-MEMPROVENANCE2, #4707; MIRRust callable_parameter_borrowed).
 fn jet_rust_emit_type_is_borrowed(ty: MIRType) -> Bool Never! {
-    if ty.kind == MIRTypeKind.Int -> true else -> !mir_type_is_scalar(ty)
+    if ty.kind == MIRTypeKind.Int -> return true
+    if ty.kind == .Apply(name, args) {
+        if name.name == "ViewMut" && args.len() == 1 -> return false
+    }
+    !mir_type_is_scalar(ty)
+}
+
+fn jet_rust_emit_read_trait_type(ctx: &JetRustEmitContext, ty: MIRType) -> String? Never! {
+    if ty.kind == .TraitObject(bounds) {
+        names :: loop bound in bounds -> jet_rust_emit_trait_name(&ctx, bound.id)
+        return Val("dyn {names.join(" + ")}")
+    }
+    None
+}
+
+// MIRRust read_text_parameter: read text borrows its contents, not its
+// allocation. Core-layer text already uses its static scalar carrier.
+fn jet_rust_emit_read_text_parameter(ctx: &JetRustEmitContext, source: MIRType, access: MIRAccess) -> Bool Never! {
+    if access != MIRAccess.Read || jet_rust_emit_is_core_layer(&ctx) -> return false
+    ty := source
+    if source.identity == .Val(identity) {
+        if jet_rust_emit_type_instance(ctx, identity, true) == .Val(instance) -> ty = instance
+    }
+    ty.kind == MIRTypeKind.String
 }
 
 fn jet_rust_emit_callable_param_type(ctx: &JetRustEmitContext, ty: MIRType, access: MIRAccess) -> String Never! {
+    if access == MIRAccess.Read {
+        if jet_rust_emit_read_trait_type(&ctx, ty) == .Val(borrowed) -> return "&{borrowed}"
+    }
     rendered :: jet_rust_emit_type(&ctx, ty)
     if access == {
         .Write -> "&mut {rendered}"
@@ -121,7 +156,7 @@ fn jet_rust_emit_collect_view_carriers(ctx: &JetRustEmitContext) -> [String:Bool
         grew = false
         loop definition in ctx.program.types {
             if carriers.get(definition.key) != None -> next
-            if jet_rust_emit_runtime_declares_type(&ctx, definition) || jet_rust_emit_is_canonical_core_native_type(definition.key) -> next
+            if jet_rust_emit_runtime_declares_type(&ctx, definition) || jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) -> next
             carries := false
             if definition.kind == {
                 .Struct(fields, _) -> {
@@ -158,24 +193,115 @@ fn jet_rust_emit_collect_view_carriers(ctx: &JetRustEmitContext) -> [String:Bool
     carriers
 }
 
+// MIRRust type_drop_is_plain: dropping a value of `ty` does nothing but free
+// memory: a scalar, a `String`, an owned list/map/option/result/tuple of such
+// values, or a nominal row in `plain`. Handles, shared counts, views,
+// callables, trait objects and tagged carriers are never plain.
+fn jet_rust_emit_type_drop_is_plain(ty: MIRType, plain: [String:Bool]) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Float32 | .Bool | .Char | .String | .IntN(_, _) -> return true
+        .List(inner) | .Option(inner) -> return jet_rust_emit_type_drop_is_plain(inner, plain)
+        .FixedList(elem, _) -> return jet_rust_emit_type_drop_is_plain(elem, plain)
+        .InlineRange(base, _, _) -> return jet_rust_emit_type_drop_is_plain(base, plain)
+        .Quantity(base, _) -> return jet_rust_emit_type_drop_is_plain(base, plain)
+        .Map(key, value) -> return jet_rust_emit_type_drop_is_plain(key, plain) && jet_rust_emit_type_drop_is_plain(value, plain)
+        .Result(ok, err) -> return jet_rust_emit_type_drop_is_plain(ok, plain) && jet_rust_emit_type_drop_is_plain(err, plain)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if !jet_rust_emit_type_drop_is_plain(field.ty, plain) -> return false
+            }
+            return true
+        }
+        .Apply(name, args) -> return args.len() == 0 && (plain.get(name.name) ?? false)
+        else -> return false
+    }
+}
+
+// MIRRust collect_plain_drop_types: the names and keys of program-declared,
+// non-generic, owned type rows whose values own nothing but memory
+// (`jet_rust_emit_type_drop_is_plain` for every stored field and payload).
+// Rows the runtime spells, compiler builtins, Core rows (`<corelib>/`,
+// `core.`, `core::` keys), view carriers, laid-out rows and shared or
+// move-only rows are never plain, and neither is a name or key any such row
+// also uses. The set (the labels mapped to `true`) starts from every eligible
+// row and shrinks to its fixed point, so recursive rows stay plain.
+fn jet_rust_emit_collect_plain_drop_types(ctx: &JetRustEmitContext) -> [String:Bool] Never! {
+    eligible := [Bool]{}
+    tainted := [String:Bool]{}
+    loop definition in ctx.program.types {
+        owned :: definition.ownership == MIROwnershipMode.Copy || definition.ownership == MIROwnershipMode.Owned
+        row_eligible :: !jet_rust_emit_runtime_declares_type(&ctx, definition) && definition.compiler_builtin == None && !definition.key.starts_with("<corelib>/") && !definition.key.starts_with("core.") && !definition.key.starts_with("core::") && definition.generic_params.len() == 0 && definition.layout == None && owned && ctx.view_carriers.get(definition.key) == None
+        &eligible.push(row_eligible)
+        if !row_eligible {
+            tainted[definition.key] = true
+            tainted[definition.name] = true
+        }
+    }
+    plain := [String:Bool]{}
+    loop (index, definition) in ctx.program.types {
+        if !eligible[index] -> next
+        if tainted.get(definition.key) == None -> plain[definition.key] = true
+        if tainted.get(definition.name) == None -> plain[definition.name] = true
+    }
+    shrank := true
+    loop shrank {
+        shrank = false
+        loop definition in ctx.program.types {
+            if !(plain.get(definition.key) ?? false) && !(plain.get(definition.name) ?? false) -> next
+            stays := true
+            if definition.kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields {
+                        if !field.computed && !jet_rust_emit_type_drop_is_plain(field.ty, plain) -> stays = false
+                    }
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(value) -> {
+                                if !jet_rust_emit_type_drop_is_plain(value, plain) -> stays = false
+                            }
+                            .Named(fields) -> {
+                                loop field in fields {
+                                    if !jet_rust_emit_type_drop_is_plain(field.ty, plain) -> stays = false
+                                }
+                            }
+                        }
+                    }
+                }
+                .Distinct(base, _) -> stays = jet_rust_emit_type_drop_is_plain(base, plain)
+                .Alias(target) -> stays = jet_rust_emit_type_drop_is_plain(target, plain)
+                .UnitFamily(_) -> {}
+            }
+            if !stays {
+                plain[definition.key] = false
+                plain[definition.name] = false
+                shrank = true
+            }
+        }
+    }
+    plain
+}
+
 // MIRRust type_def_generics: `<'__jet_view, …>` for a declaration whose type
 // generics render as `generics`, when the declared row holds a view.
 fn jet_rust_emit_type_def_generics(ctx: JetRustEmitContext, definition: MIRTypeDef, generics: String) -> String Never! {
-    if ctx.view_carriers.get(definition.key) == None -> return ~generics
+    if ctx.view_carriers.get(definition.key) == None -> return generics.copy()
     jet_rust_emit_signature_generics([String]{JET_RUST_EMIT_VIEW_LIFETIME}, generics)
 }
 
 // MIRRust type_def_impl_args: the `<'_, …>` arguments an impl header names for
 // a declared row whose type arguments render as `args` (`""` or `<…>`).
 fn jet_rust_emit_type_def_impl_args(ctx: JetRustEmitContext, definition: MIRTypeDef, args: String) -> String Never! {
-    if ctx.view_carriers.get(definition.key) == None -> return ~args
+    if ctx.view_carriers.get(definition.key) == None -> return args.copy()
     jet_rust_emit_signature_generics([String]{"'_"}, args)
 }
 
 // D-MEM-VIEWRET1 (#4392), MIRRust ViewReturnLifetime: the lifetime a callable
 // signature names for the views it returns. `owners` index the rendered
 // parameter types that carry `'__jet_view`; `receiver` tags a Rust `self`.
-pub enum JetRustEmitViewLifetime {
+enum JetRustEmitViewLifetime {
     Elided
     Static
     Named(receiver: Bool, owners: [Int])
@@ -274,37 +400,37 @@ fn jet_rust_emit_view_return_lifetime(ctx: &JetRustEmitContext, return_type: MIR
 
 // `ty` rendered with every `View`/`ViewMut` naming `lifetime`.
 fn jet_rust_emit_type_with_view_lifetime(ctx: &JetRustEmitContext, ty: MIRType, lifetime: String) -> String Never! {
-    previous :: ~ctx.view_lifetime
+    previous :: ctx.view_lifetime.copy()
     ctx.view_lifetime = lifetime
     rendered :: jet_rust_emit_type(&ctx, ty)
     ctx.view_lifetime = previous
     rendered
 }
 
-// MIRRust view_owner_parameter_type: a view owner's own shared or exclusive
-// borrow names `'__jet_view` (`rendered` already names it on every view the
-// owner carries); an exclusive borrow of a view carrier keeps its outer
-// lifetime free, since `&mut` is invariant.
+// Name the data lifetime, not the temporary slot holding a shared view.
+// Owning shared borrows keep it outside; shared-view slots and exclusive
+// view-carrier borrows keep it on the inner data.
 fn jet_rust_emit_view_owner_borrow(rendered: String, carries_view: Bool) -> String Never! {
     if rendered.starts_with("&mut ") {
-        if carries_view -> return ~rendered
+        if carries_view -> return rendered.copy()
         return "&{JET_RUST_EMIT_VIEW_LIFETIME} mut {rendered.slice(5, rendered.len())}"
     }
-    if rendered.starts_with("&'") -> return ~rendered
+    if rendered.starts_with("&'") -> return rendered.copy()
+    if rendered.starts_with("&&'") && !rendered.starts_with("&&'__jet_view mut ") -> return rendered.copy()
     if rendered.starts_with("&") -> return "&{JET_RUST_EMIT_VIEW_LIFETIME} {rendered.slice(1, rendered.len())}"
-    ~rendered
+    rendered.copy()
 }
 
 // A borrowed Rust `self` receiver naming `'__jet_view`.
 fn jet_rust_emit_view_owner_self(receiver: String) -> String Never! {
     if receiver.starts_with("&") -> return "&{JET_RUST_EMIT_VIEW_LIFETIME} {receiver.slice(1, receiver.len())}"
-    ~receiver
+    receiver.copy()
 }
 
 // `<lifetimes…, generics…>` for a signature whose type generics render as
 // `generics` (`""` or `<…>`).
 fn jet_rust_emit_signature_generics(lifetimes: [String], generics: String) -> String Never! {
-    if lifetimes.len() == 0 -> return ~generics
+    if lifetimes.len() == 0 -> return generics.copy()
     if generics.starts_with("<") -> return "<{lifetimes.join(", ")}, {generics.slice(1, generics.len())}"
     "<{lifetimes.join(", ")}>"
 }
@@ -337,7 +463,7 @@ fn jet_rust_emit_type(ctx: &JetRustEmitContext, source: MIRType) -> String Never
         .Shared(inner) -> "{ctx.config.root_prefix}jet_std::JetShared<{jet_rust_emit_type(&ctx, inner)}>"
         .Option(inner) -> "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(&ctx, inner)}, {ctx.config.root_prefix}JetAbsent>"
         .Result(ok, err) -> "{ctx.config.root_prefix}JetOutcome<{jet_rust_emit_type(&ctx, ok)}, {jet_rust_emit_type(&ctx, err)}>"
-        .Fn(signature) -> jet_rust_emit_function_type(&ctx, signature)
+        .Fn(signature) -> jet_rust_emit_function_type(&ctx, signature, jet_rust_emit_own_view_provenance(source, signature))
         .SendFn(params, ret, conventions) -> jet_rust_emit_send_function_type(&ctx, params, ret, conventions)
         .Apply(name, args) -> jet_rust_emit_apply_type(&ctx, name, args)
         .TraitObject(bounds) -> {
@@ -477,7 +603,7 @@ fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) ->
                         if facts.bytes == None || facts.fields.len() != variants.len() -> return None
                         bytes :: facts.bytes ?? ByteLayout{size: 0, alignment: 0, stride: 0}
                         if bytes.size <= 0 || bytes.alignment <= 0 || bytes.stride != bytes.size -> return None
-                        if (bytes.alignment & (bytes.alignment - 1)) != 0 || bytes.size < jet_rust_emit_c_abi_tag_size(enum_tag) -> return None
+                        if ((bytes.alignment).bit_and((bytes.alignment - 1))) != 0 || bytes.size < jet_rust_emit_c_abi_tag_size(enum_tag) -> return None
                         payload_offset := -1
                         seen_discriminants := [Int]{}
                         index := 0
@@ -491,7 +617,7 @@ fn jet_rust_emit_c_abi_enum_definition(ctx: &JetRustEmitContext, ty: MIRType) ->
                             size :: field.size ?? 0
                             alignment :: field.alignment ?? 0
                             stride :: field.stride ?? 0
-                            if size <= 0 || size > bytes.size || alignment <= 0 || stride != size || (alignment & (alignment - 1)) != 0 || offset < 0 || offset > bytes.size - size -> return None
+                            if size <= 0 || size > bytes.size || alignment <= 0 || stride != size || ((alignment).bit_and((alignment - 1))) != 0 || offset < 0 || offset > bytes.size - size -> return None
                             if variant.payload == {
                                 .Unit -> {
                                     if offset != 0 || size != jet_rust_emit_c_abi_tag_size(enum_tag) || alignment != jet_rust_emit_c_abi_tag_size(enum_tag) -> return None
@@ -749,33 +875,138 @@ fn jet_rust_emit_c_abi_type_definition(ctx: &JetRustEmitContext, definition: MIR
     }
 }
 
+// Layout(c) also controls native storage. Wire mirrors are needed only for
+// types reachable from an applicable C boundary, including nested fields.
+fn jet_rust_emit_collect_c_abi_types(ctx: &JetRustEmitContext, ty: MIRType, needed: &[MIRTypeID]) Never! {
+    if ty.kind == {
+        .FixedList(element, _) -> jet_rust_emit_collect_c_abi_types(&ctx, element, &needed)
+        .InlineRange(base, _, _) | .Quantity(base, _) | .Tagged(_, base) -> jet_rust_emit_collect_c_abi_types(&ctx, base, &needed)
+        .Apply(name, args) -> {
+            if args.len() != 0 -> return
+            id :: ty.identity ?? name.id
+            if needed.contains(id) -> return
+            index :: jet_rust_emit_type_index(ctx, id) ?? return
+            &needed.push(id)
+            if ctx.program.types[index].kind == {
+                .Struct(fields, _) -> {
+                    loop field in fields {
+                        if !field.computed -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                    }
+                }
+                .Enum(variants, _) -> {
+                    loop variant in variants {
+                        if variant.payload == {
+                            .Unit -> {}
+                            .Single(value) -> jet_rust_emit_collect_c_abi_types(&ctx, value, &needed)
+                            .Named(fields) -> {
+                                loop field in fields -> jet_rust_emit_collect_c_abi_types(&ctx, field.ty, &needed)
+                            }
+                        }
+                    }
+                }
+                .Alias(target) -> {
+                    target_ty :: target.copy()
+                    jet_rust_emit_collect_c_abi_types(&ctx, target_ty, &needed)
+                }
+                .Distinct(base, _) -> {
+                    base_ty :: base.copy()
+                    jet_rust_emit_collect_c_abi_types(&ctx, base_ty, &needed)
+                }
+                else -> {}
+            }
+        }
+        else -> {}
+    }
+}
+
 fn jet_rust_emit_c_abi_type_definitions(ctx: &JetRustEmitContext, lines: &[String]) Never! {
+    needed := [MIRTypeID]{}
+    loop foreign in ctx.program.foreign {
+        if !jet_rust_emit_module_selected(ctx, foreign.module_id) || !jet_rust_emit_foreign_target_enabled(&ctx, foreign) || foreign.foreign_language != MIRForeignLanguage.C -> next
+        transport :: foreign.callback_transport ?? ""
+        if transport == "managed" || transport == "managed-close" || transport == "emit-task" -> next
+        loop parameter in foreign.params -> jet_rust_emit_collect_c_abi_types(&ctx, parameter.ty, &needed)
+        if foreign.return_type == .Val(value) -> jet_rust_emit_collect_c_abi_types(&ctx, value, &needed)
+    }
     loop definition in ctx.program.types {
         if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
+        if !needed.contains(definition.id) -> next
         start :: lines.len()
         jet_rust_emit_c_abi_type_definition(&ctx, definition, &lines)
         if lines.len() > start -> &lines.push("")
     }
 }
 
-fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MIRType], conventions: [MIRAccess], ret: MIRType?) -> String Never! {
-    rendered := [String]{}
-    index := 0
-    loop param in params {
+// MIRRust callable_type (D-MEMPROVENANCE3=A / #4392): a callable whose
+// returned view borrows from its arguments names that relation as a
+// higher-ranked lifetime on the borrowed owner arguments.
+fn jet_rust_emit_callable_type_parts(ctx: &JetRustEmitContext, params: [MIRType], conventions: [MIRAccess], ret: MIRType?, provenance: [MIRViewProvenanceEntry]?) -> String Never! {
+    accesses := [MIRAccess]{}
+    loop index in 0..<params.len() {
         access := MIRAccess.Read
         if index < conventions.len() -> access = conventions[index]
-        &rendered.push(jet_rust_emit_callable_param_type(&ctx, param, access))
-        index += 1
+        &accesses.push(access)
+    }
+    owners := [Int]{}
+    statics := false
+    view_return := if ret == .Val(ret_ty) -> jet_rust_emit_type_carries_view(ctx, ret_ty) else -> false
+    if view_return {
+        entries :: provenance ?? [MIRViewProvenanceEntry]{}
+        loop entry in entries {
+            loop path in entry.provenance.sources {
+                if path.source == {
+                    .Parameter(index) -> if !jet_rust_emit_int_list_has(owners, index) -> &owners.push(index)
+                    .Static(_, _) -> statics = true
+                    .Receiver -> {}
+                }
+            }
+        }
+        if owners.len() == 0 && !statics {
+            loop index in 0..<params.len() -> &owners.push(index)
+        }
+    }
+    borrowed_owners := [Int]{}
+    loop index in owners {
+        if index < params.len() && (accesses[index] == MIRAccess.Write || (accesses[index] == MIRAccess.Read && jet_rust_emit_type_is_borrowed(params[index]))) -> &borrowed_owners.push(index)
+    }
+    lifetime := ""
+    if borrowed_owners.len() > 0 {
+        lifetime = JET_RUST_EMIT_CALLABLE_VIEW_LIFETIME
+    } else if view_return && statics {
+        lifetime = "'static"
+    }
+    rendered := [String]{}
+    loop (index, param) in params {
+        text := jet_rust_emit_callable_param_type(&ctx, param, accesses[index])
+        if lifetime != "" && jet_rust_emit_int_list_has(borrowed_owners, index) {
+            if text.starts_with("&mut ") {
+                text = "&{lifetime} mut {text.slice(5, text.len())}"
+            } else if text.starts_with("&") {
+                text = "&{lifetime} {text.slice(1, text.len())}"
+            }
+        }
+        &rendered.push(text)
     }
     result := "()"
-    if ret == .Val(ret_ty) -> result = jet_rust_emit_type(&ctx, ret_ty)
-    "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({rendered.join(", ")}) -> {result}>>>>"
+    if ret == .Val(ret_ty) -> result = if lifetime != "" -> jet_rust_emit_type_with_view_lifetime(&ctx, ret_ty, lifetime) else -> jet_rust_emit_type(&ctx, ret_ty)
+    higher_ranked := if lifetime == JET_RUST_EMIT_CALLABLE_VIEW_LIFETIME -> "for<{lifetime}> " else -> ""
+    "std::rc::Rc<std::cell::RefCell<Option<Box<dyn {higher_ranked}FnMut({rendered.join(", ")}) -> {result}>>>>"
 }
 
-fn jet_rust_emit_function_type(ctx: &JetRustEmitContext, signature: MIRFunctionSignature) -> String Never! {
+JET_RUST_EMIT_CALLABLE_VIEW_LIFETIME :: "'__jet_fn"
+
+fn jet_rust_emit_function_type(ctx: &JetRustEmitContext, signature: MIRFunctionSignature, provenance: [MIRViewProvenanceEntry]?) -> String Never! {
     conventions := [MIRAccess]{}
     if signature.call_metadata != None -> conventions = (signature.call_metadata ?? MIRCallMetadata{names: [String]{}, defaults: [Bool]{}, variadic: [Bool]{}, conventions: [MIRAccess]{}, policies: MIRCallablePolicyChain{policies: [MIRCallablePolicy]{}}}).conventions
-    jet_rust_emit_callable_type_parts(&ctx, signature.params, conventions, signature.ret)
+    jet_rust_emit_callable_type_parts(&ctx, signature.params, conventions, signature.ret, provenance)
+}
+
+// MIRRust rust_type: returned-view provenance is not part of callable
+// identity, so the canonical instance row may carry another slot's relation
+// (or none). The Rust lifetime spelling follows the emitted slot's own relation.
+fn jet_rust_emit_own_view_provenance(source: MIRType, canonical: MIRFunctionSignature) -> [MIRViewProvenanceEntry]? Never! {
+    if source.kind == .Fn(own) -> return own.return_view_provenance
+    canonical.return_view_provenance
 }
 
 fn jet_rust_emit_send_function_type(ctx: &JetRustEmitContext, params: [MIRType], ret: MIRType?, conventions: [MIRAccess]) -> String Never! {
@@ -840,11 +1071,13 @@ fn jet_rust_emit_current_generic_parameter(ctx: &JetRustEmitContext, name: MIRNo
 }
 
 fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args: [MIRType]) -> String Never! {
-    if args.len() == 0 && jet_rust_emit_current_generic_parameter(&ctx, name) -> return jet_rust_emit_mangle(name.name)
+    if args.len() == 0 && jet_rust_emit_current_generic_parameter(&ctx, name) -> return name_mangle(name.name)
+    if args.len() == 0 && ctx.current_associated_types.contains(name.name) -> return "Self::{jet_rust_emit_associated_type_name(name.name)}"
     if args.len() == 0 && name.name == "Unit" -> return "()"
     if args.len() == 0 && name.name == "Never" -> return "std::convert::Infallible"
     if args.len() == 0 && name.name == "Stm" -> return "{ctx.config.root_prefix}JetSharedTransaction"
     if args.len() == 0 && name.name == "Transaction" -> return "JetTransaction"
+    if args.len() == 0 && name.name == "<corelib>/Core/net::Core/net/net.jet::__ResolveError" -> return "{ctx.config.root_prefix}Jet__ResolveError"
     // MIRRust rust_type: ScopeGuard is an inference-only carrier, and the loop
     // cursors are Prelude carriers with no MIR declaration row.
     if name.name == "ScopeGuard" -> return "_"
@@ -875,6 +1108,12 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
         lifetime :: if ctx.view_lifetime == "" -> "" else -> "{ctx.view_lifetime} "
         return "&{lifetime}mut [{jet_rust_emit_type(&ctx, args[0])}]"
     }
+    // D-PIN1=A: a checked `Pin<T>` is the caller's tracked write window, the
+    // same exclusive reference Context::rust_type spells.
+    if name.name == "Pin" && args.len() == 1 {
+        lifetime :: if ctx.view_lifetime == "" -> "" else -> "{ctx.view_lifetime} "
+        return "&{lifetime}mut {jet_rust_emit_type(&ctx, args[0])}"
+    }
     if name.name == "Set" && args.len() == 1 -> return "std::collections::HashSet<{jet_rust_emit_type(&ctx, args[0])}>"
     if name.name == "Rank" && args.len() == 1 -> return "std::collections::BTreeSet<{jet_rust_emit_type(&ctx, args[0])}>"
     if name.name == "PriorityQueue" && args.len() == 1 -> return "std::collections::BinaryHeap<{jet_rust_emit_type(&ctx, args[0])}>"
@@ -901,7 +1140,21 @@ fn jet_rust_emit_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args:
     // MIRRust rust_apply_type (D-MEM-VIEWRET1, #4392): a declared type holding
     // a view takes its lifetime first: the signature's view lifetime, else `'_`.
     if ctx.view_carriers.get(name.name) != None -> &rendered.push(if ctx.view_lifetime == "" -> "'_" else -> ctx.view_lifetime)
-    loop arg in args -> &rendered.push(jet_rust_emit_type(&ctx, arg))
+    // A reference to a transparent alias passes only the arguments of the
+    // parameters its Rust declaration keeps (jet_rust_emit_alias_parameter_uses).
+    alias_uses := [Bool]{}
+    if args.len() > 0 {
+        rows :: ctx.type_rows_by_spelling.get(name.name) ?? [Int]{}
+        if rows.len() > 0 {
+            uses :: jet_rust_emit_alias_parameter_uses(ctx.program.types[rows[0]]) ?? [Bool]{}
+            if uses.len() == args.len() -> alias_uses = uses
+        }
+    }
+    loop (index, arg) in args {
+        if alias_uses.len() == 0 || alias_uses[index] {
+            &rendered.push(jet_rust_emit_type(&ctx, arg))
+        }
+    }
     if rendered.len() == 0 -> return head
     "{head}<{rendered.join(", ")}>"
 }
@@ -977,8 +1230,8 @@ fn jet_rust_emit_structural_type_row(ctx: JetRustEmitContext, ty: MIRType) -> In
         .Apply(name, _) -> {
             identity :: ty.identity ?? name.id
             candidates :: [Int?]{
-                ctx.type_index_by_id.get(jet_rust_emit_id_key(identity.value)),
-                ctx.type_index_by_id.get(jet_rust_emit_id_key(name.id.value)),
+                ctx.type_index_by_id.get(identity.value),
+                ctx.type_index_by_id.get(name.id.value),
                 ctx.type_index_by_key.get(name.name),
                 ctx.type_index_by_name.get(name.name),
             }
@@ -997,7 +1250,7 @@ fn jet_rust_emit_structural_type_row(ctx: JetRustEmitContext, ty: MIRType) -> In
 
 fn jet_rust_emit_structural_type_def(ctx: &JetRustEmitContext, ty: MIRType) -> MIRTypeDef? {
     row :: jet_rust_emit_structural_type_row(ctx, ty) ?? return None
-    Val(~ctx.program.types[row])
+    Val(ctx.program.types[row].copy())
 }
 
 fn jet_rust_emit_native_rust_derive_name_for_id(id: MIRTraitID) -> String? {
@@ -1040,14 +1293,14 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
     }
     nominal_id :: target_id ?? return false
     expected_trait_ref :: jet_rust_emit_capability_trait_ref(&ctx, trait_name) ?? return false
-    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(expected_trait_ref.id.value)) ?? [Int]{})
+    rows :: (ctx.impls_by_trait.get(expected_trait_ref.id.value) ?? [Int]{}).copy()
     // Rows are read in place; only a matching row is copied for the target check.
     loop row in rows {
         if ctx.program.impls[row].compiler_generated -> next
         trait_ref :: ctx.program.impls[row].trait_ref ?? next
         if trait_ref.id != expected_trait_ref.id -> next
         if trait_ref.name != expected_trait_ref.name {
-            span :: ~ctx.program.impls[row].span
+            span :: ctx.program.impls[row].span.copy()
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR capability trait name disagrees with its identity", "capability impl selection uses the exact trait ID; names are consistency data only", Val(span))
             return false
         }
@@ -1060,7 +1313,7 @@ fn jet_rust_emit_selected_user_capability_impl(ctx: &JetRustEmitContext, ty: MIR
             }
         }
         if matches {
-            implementation :: ~ctx.program.impls[row]
+            implementation := ctx.program.impls[row].copy()
             if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return true
         }
     }
@@ -1085,7 +1338,7 @@ fn jet_rust_emit_selected_user_impl_named(ctx: &JetRustEmitContext, ty: MIRType,
         .Apply(name, _) -> Val(name.name)
         else -> String?{None}
     }
-    rows :: ~(ctx.impls_by_trait_name.get(trait_name) ?? [Int]{})
+    rows :: (ctx.impls_by_trait_name.get(trait_name) ?? [Int]{}).copy()
     loop row in rows {
         if ctx.program.impls[row].compiler_generated || !jet_rust_emit_module_selected(ctx, ctx.program.impls[row].module_id) -> next
         matches := mir_type_same_checked_type(ctx.program.impls[row].self_type, ty)
@@ -1096,11 +1349,104 @@ fn jet_rust_emit_selected_user_impl_named(ctx: &JetRustEmitContext, ty: MIRType,
             }
         }
         if matches {
-            implementation :: ~ctx.program.impls[row]
+            implementation := ctx.program.impls[row].copy()
             if jet_rust_emit_impl_target_enabled(&ctx, implementation) -> return true
         }
     }
     false
+}
+
+// Derive-capability gate verdicts (jet_rust_emit_derive_capability_gate); a
+// verdict >= 0 is the type row to expand.
+JET_RUST_EMIT_DERIVE_INCAPABLE :: -1
+JET_RUST_EMIT_DERIVE_CAPABLE :: -2
+JET_RUST_EMIT_DERIVE_BY_ARGS :: -3
+
+// The verdict a derive-capability query for the nominal `ty` takes from its
+// own impls and type row, before its fields expand: capable, incapable,
+// decided by its type arguments (no structural row), or its row to expand.
+fn jet_rust_emit_derive_capability_gate(ctx: &JetRustEmitContext, ty: MIRType, trait_name: String) -> Int Never! {
+    if jet_rust_emit_selected_user_capability_impl(&ctx, ty, trait_name) -> return JET_RUST_EMIT_DERIVE_CAPABLE
+    row_index :: jet_rust_emit_structural_type_row(ctx, ty)
+    if row_index == None {
+        if ty.kind == .Apply(name, _) {
+            if name.name == "BrowserTestServer" -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+        }
+        // MIRRust auto_derive_type_ready: a runtime handle implements
+        // neither Printable nor Debug, so a record holding one does
+        // not print structurally.
+        if trait_name == "JetShow" || trait_name == "JetDebug" {
+            loop handle in ctx.program.handles { if jet_rust_emit_same_handle_type(handle.ty, ty) -> return JET_RUST_EMIT_DERIVE_INCAPABLE }
+        }
+        // A runtime carrier answers for `Ord` only through a checked
+        // nominal row; none is assumed.
+        if trait_name == "Ord" -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+        return JET_RUST_EMIT_DERIVE_BY_ARGS
+    }
+    row :: row_index
+    // The same checked private Core hooks that emit the manual implementations
+    // provide capabilities to enclosing rows without promising anything about
+    // Shared, opaque fields, or the carrier's stored representation.
+    operation :: if {
+        trait_name == "Clone" -> "clone"
+        trait_name == "Debug" || trait_name == "JetDebug" -> "debug"
+        trait_name == "JetShow" -> "show"
+        else -> ""
+    }
+    if operation != "" {
+        hook_type_id :: ctx.program.types[row].id.value.copy()
+        hook_key :: ctx.program.types[row].key.copy()
+        hook_span :: ctx.program.types[row].span.copy()
+        if jet_rust_emit_source_hook_function_index(&ctx, hook_type_id, hook_key, hook_span, operation) != None -> return JET_RUST_EMIT_DERIVE_CAPABLE
+    }
+    if trait_name == "Clone" && ctx.program.types[row].ownership == MIROwnershipMode.Move -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+    is_alias :: ctx.program.types[row].kind == .Alias(_)
+    // MIRRust auto_derive_type_ready for the structural show impls:
+    // a nominal field prints through its own generated `JetShow` /
+    // `JetDebug` (its auto-Printable fact / Debug derive) or a
+    // selected user `Printable` / `Debug` impl.
+    if (trait_name == "JetShow" || trait_name == "JetDebug") && !is_alias {
+        if jet_rust_emit_selected_user_impl_named(&ctx, ty, if trait_name == "JetShow" -> "Printable" else -> "Debug") -> return JET_RUST_EMIT_DERIVE_CAPABLE
+        selected :: if trait_name == "JetShow" -> ctx.program.types[row].auto_printable else -> jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Debug")
+        if !selected -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+    } else if !jet_rust_emit_type_derives_allowed(ctx.program.types[row]) {
+        return JET_RUST_EMIT_DERIVE_INCAPABLE
+    }
+    // A nominal field compares through Rust `PartialEq` only when its
+    // own row carries sema's structural `Equatable` derive (a user
+    // `Equatable` impl has no Rust `PartialEq`); it orders through
+    // Rust `Ord` only when the row also carries the structural
+    // `Comparable` derive. An alias is transparent and answers for its
+    // target. A union row is spelled as its synthetic carrier (see
+    // `Union` in jet_rust_emit_type_derive_capability).
+    if (trait_name == "PartialEq" || trait_name == "Ord") && !is_alias {
+        if !jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Equatable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Equatable") || ctx.program.types[row].name.starts_with("__JetUnion_") -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+    }
+    if trait_name == "Ord" && !is_alias {
+        if !jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Comparable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Comparable") -> return JET_RUST_EMIT_DERIVE_INCAPABLE
+    }
+    row
+}
+
+// The gate verdict once per closed nominal query: a source `Apply` with no
+// type arguments resolves to the same `ty` for the same nominal id, name and
+// identity, and the gate reads nothing else of it. A reading that reported a
+// failure is not kept, so every query reports it again.
+fn jet_rust_emit_derive_capability_gate_cached(ctx: &JetRustEmitContext, source: MIRType, ty: MIRType, trait_name: String) -> Int Never! {
+    if source.kind == .Apply(name, args) {
+        if args.len() == 0 {
+            identity := "-"
+            if source.identity == .Val(id) -> identity = "{id.value}"
+            key :: "{trait_name}|{name.id.value}|{identity}|{name.name}"
+            if ctx.derive_capability_gates.get(key) == .Val(cached) -> return cached
+            kept :: ctx.kept_failures.len()
+            failed :: ctx.failure != None
+            gate :: jet_rust_emit_derive_capability_gate(&ctx, ty, trait_name)
+            if ctx.kept_failures.len() == kept && (ctx.failure != None) == failed -> ctx.derive_capability_gates[key] = gate
+            return gate
+        }
+    }
+    jet_rust_emit_derive_capability_gate(&ctx, ty, trait_name)
 }
 
 fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRType, trait_name: String, visiting: &[MIRTypeID], bindings: [String:MIRType], generic_params: [String]) -> Bool Never! {
@@ -1133,7 +1479,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
         .Shared(_) | .Fn(_) | .SendFn(_, _, _) -> trait_name == "Clone"
         // Only Clone, through the clone-box supertrait every trait used as a
         // single-bound object gets (jet_rust_emit_trait_definition).
-        .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && ctx.dyn_clone_traits.get(jet_rust_emit_id_key(bounds[0].id.value)) != None
+        .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && ctx.dyn_clone_traits.get(bounds[0].id.value) != None
         .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> jet_rust_emit_type_derive_capability(&ctx, inner, trait_name, &visiting, bindings, generic_params)
         .Tagged(marker, inner) -> {
             if marker == (MIRTagMarker.Internal{internal_tag: MIRInternalTag.CppCallbackABI}) -> return trait_name != "JetShow" && trait_name != "JetDebug"
@@ -1168,55 +1514,22 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
                 if args.len() == 0 -> return false
                 return jet_rust_emit_type_derive_capability(&ctx, args[0], trait_name, &visiting, bindings, generic_params)
             }
-            if name.name == "ViewMut" {
+            // D-PIN1=A: `Pin<T>` is the same exclusive `&mut T` window.
+            if name.name == "ViewMut" || name.name == "Pin" {
                 if trait_name == "Clone" -> return false
                 if args.len() == 0 -> return false
                 return jet_rust_emit_type_derive_capability(&ctx, args[0], trait_name, &visiting, bindings, generic_params)
             }
-            if jet_rust_emit_selected_user_capability_impl(&ctx, ty, trait_name) -> return true
-            // The row is read in place; only its kind is copied, and only
-            // when this frame expands it (a cache or cycle hit never does).
-            row_index :: jet_rust_emit_structural_type_row(ctx, ty)
-            if row_index == None {
-                // MIRRust auto_derive_type_ready: a runtime handle implements
-                // neither Printable nor Debug, so a record holding one does
-                // not print structurally.
-                if trait_name == "JetShow" || trait_name == "JetDebug" {
-                    loop handle in ctx.program.handles { if jet_rust_emit_same_handle_type(handle.ty, ty) -> return false }
-                }
-                // A runtime carrier answers for `Ord` only through a checked
-                // nominal row; none is assumed.
-                if trait_name == "Ord" -> return false
+            gate :: jet_rust_emit_derive_capability_gate_cached(&ctx, source, ty, trait_name)
+            if gate == JET_RUST_EMIT_DERIVE_INCAPABLE -> return false
+            if gate == JET_RUST_EMIT_DERIVE_CAPABLE -> return true
+            if gate == JET_RUST_EMIT_DERIVE_BY_ARGS {
                 loop arg in args { if !jet_rust_emit_type_derive_capability(&ctx, arg, trait_name, &visiting, bindings, generic_params) -> return false }
                 return true
             }
-            row :: row_index
-            if trait_name == "Clone" && ctx.program.types[row].ownership == MIROwnershipMode.Move -> return false
-            is_alias :: ctx.program.types[row].kind == .Alias(_)
-            // MIRRust auto_derive_type_ready for the structural show impls:
-            // a nominal field prints through its own generated `JetShow` /
-            // `JetDebug` (its auto-Printable fact / Debug derive) or a
-            // selected user `Printable` / `Debug` impl.
-            if (trait_name == "JetShow" || trait_name == "JetDebug") && !is_alias {
-                if jet_rust_emit_selected_user_impl_named(&ctx, ty, if trait_name == "JetShow" -> "Printable" else -> "Debug") -> return true
-                selected :: if trait_name == "JetShow" -> ctx.program.types[row].auto_printable else -> jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Debug")
-                if !selected -> return false
-            } else if !jet_rust_emit_type_derives_allowed(ctx.program.types[row]) {
-                return false
-            }
-            // A nominal field compares through Rust `PartialEq` only when its
-            // own row carries sema's structural `Equatable` derive (a user
-            // `Equatable` impl has no Rust `PartialEq`); it orders through
-            // Rust `Ord` only when the row also carries the structural
-            // `Comparable` derive. An alias is transparent and answers for its
-            // target. A union row is spelled as its synthetic carrier (see
-            // `Union` above).
-            if (trait_name == "PartialEq" || trait_name == "Ord") && !is_alias {
-                if !jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Equatable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Equatable") || ctx.program.types[row].name.starts_with("__JetUnion_") -> return false
-            }
-            if trait_name == "Ord" && !is_alias {
-                if !jet_rust_emit_type_def_derives_trait(ctx, ctx.program.types[row], "Comparable") || jet_rust_emit_selected_user_impl_named(&ctx, ty, "Comparable") -> return false
-            }
+            // The row is read in place; only its kind is copied, and only
+            // when this frame expands it (a cache or cycle hit never does).
+            row :: gate
             row_id :: ctx.program.types[row].id
             if visiting.contains(row_id) {
                 position := 0
@@ -1235,7 +1548,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             // an incapable one drops them. Without this, every row of a
             // recursive type family re-expanded the whole family per query.
             cacheable :: args.len() == 0 && ctx.program.types[row].generic_params.len() == 0 && bindings.len() == 0 && generic_params.len() == 0
-            cache_key :: "{trait_name}:{jet_rust_emit_id_key(row_id.value)}"
+            cache_key :: "{trait_name}:{row_id.value}"
             if cacheable {
                 if ctx.derive_capability_cache.get(cache_key) == .Val(cached) -> return cached
             }
@@ -1245,7 +1558,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
             ctx.derive_capability_cycle_floor = JET_RUST_EMIT_NO_CYCLE_FLOOR
             next_bindings := bindings
             next_generic_params := generic_params
-            row_generic_params :: ~ctx.program.types[row].generic_params
+            row_generic_params :: ctx.program.types[row].generic_params.copy()
             loop parameter in row_generic_params -> &next_generic_params.push(parameter.name)
             index := 0
             loop parameter in row_generic_params {
@@ -1253,7 +1566,7 @@ fn jet_rust_emit_type_derive_capability(ctx: &JetRustEmitContext, source: MIRTyp
                 index += 1
             }
             &visiting.push(row_id)
-            kind :: ~ctx.program.types[row].kind
+            kind :: ctx.program.types[row].kind.copy()
             result :: if kind == {
                 .Struct(fields, _) -> {
                     capable := true
@@ -1320,7 +1633,7 @@ fn jet_rust_emit_generic_params(ctx: &JetRustEmitContext, params: [MIRGenericPar
     loop param in params {
         bounds := [String]{}
         loop bound in param.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
-        if bounds.len() == 0 -> &rendered.push(jet_rust_emit_mangle(param.name)) else -> &rendered.push("{jet_rust_emit_mangle(param.name)}: {bounds.join(" + ")}")
+        if bounds.len() == 0 -> &rendered.push(name_mangle(param.name)) else -> &rendered.push("{name_mangle(param.name)}: {bounds.join(" + ")}")
     }
     "<{rendered.join(", ")}>"
 }
@@ -1486,9 +1799,9 @@ fn jet_rust_emit_validate_derived_trait(ctx: &JetRustEmitContext, definition: MI
     }
     implementation := MIRImplDef?{None}
     // Only the impls of this trait, in program order (first match wins as before).
-    rows :: ~(ctx.impls_by_trait.get(jet_rust_emit_id_key(trait_id.value)) ?? [Int]{})
+    rows :: (ctx.impls_by_trait.get(trait_id.value) ?? [Int]{}).copy()
     loop row in rows {
-        candidate :: ~ctx.program.impls[row]
+        candidate :: ctx.program.impls[row].copy()
         if jet_rust_emit_derived_impl_matches_type(candidate, definition, trait_id, trait_key) && jet_rust_emit_impl_target_enabled(&ctx, candidate) {
             implementation = Val(candidate)
             break
@@ -1518,9 +1831,11 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MIRType
     debug_capable :: derives_allowed && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "Debug")
     clone_user_impl :: jet_rust_emit_type_derive_user_impl(&ctx, definition, "Clone")
     debug_user_impl :: jet_rust_emit_type_derive_user_impl(&ctx, definition, "Debug")
+    clone_source_hook :: jet_rust_emit_source_hook_function_index(&ctx, definition.id.value, definition.key, definition.span, "clone") != None
+    debug_source_hook :: jet_rust_emit_source_hook_function_index(&ctx, definition.id.value, definition.key, definition.span, "debug") != None
     derives := [String]{}
-    if clone_capable && !clone_user_impl -> &derives.push("Clone")
-    if debug_capable && !debug_user_impl -> &derives.push("Debug")
+    if clone_capable && !clone_user_impl && !clone_source_hook -> &derives.push("Clone")
+    if debug_capable && !debug_user_impl && !debug_source_hook -> &derives.push("Debug")
     loop trait_id in definition.derives {
         trait_row := MIRTraitDef?{None}
         duplicate_trait_row := false
@@ -1557,14 +1872,15 @@ fn jet_rust_emit_type_derive_names(ctx: &JetRustEmitContext, definition: MIRType
             next
         }
         name :: derive_name
-        if name == "Clone" && !clone_capable && !clone_user_impl {
+        if name == "Clone" && !clone_capable && !clone_user_impl && !clone_source_hook {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Clone without a checked Rust Clone capability", "all stored fields and recursive nominal payloads must support Clone and ownership must not be Move", Val(definition.span))
         }
-        // An automatic Debug selection whose fields cannot all print is not
-        // derived (MIRRust auto_derive_type_ready); only Clone is a hard fact.
+        if name == "Debug" && !debug_capable && !debug_user_impl && !debug_source_hook {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "MIR type derives Debug without a checked Rust Debug capability", "stored fields, a selected user implementation, or a checked Core source hook must provide Debug", Val(definition.span))
+        }
         capability := derives_allowed
-        if name == "Clone" -> capability = clone_capable && !clone_user_impl
-        if name == "Debug" -> capability = debug_capable && !debug_user_impl
+        if name == "Clone" -> capability = clone_capable && !clone_user_impl && !clone_source_hook
+        if name == "Debug" -> capability = debug_capable && !debug_user_impl && !debug_source_hook
         if capability && !derives.contains(name) -> &derives.push(name)
     }
     // Sema's structural `Comparable` derive (beside its structural
@@ -1605,7 +1921,7 @@ fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MIRGe
         bounds := [String]{}
         loop bound in parameter.bounds -> &bounds.push(jet_rust_emit_trait_name(&ctx, bound.id))
         &bounds.push("Clone")
-        &rendered.push("{jet_rust_emit_mangle(parameter.name)}: {bounds.join(" + ")}")
+        &rendered.push("{name_mangle(parameter.name)}: {bounds.join(" + ")}")
     }
     "<{rendered.join(", ")}>"
 }
@@ -1613,7 +1929,7 @@ fn jet_rust_emit_columnar_impl_generics(ctx: &JetRustEmitContext, params: [MIRGe
 fn jet_rust_emit_columnar_generic_args(params: [MIRGenericParam]) -> String Never! {
     if params.len() == 0 -> return ""
     rendered := [String]{}
-    loop parameter in params -> &rendered.push(jet_rust_emit_mangle(parameter.name))
+    loop parameter in params -> &rendered.push(name_mangle(parameter.name))
     "<{rendered.join(", ")}>"
 }
 
@@ -1644,6 +1960,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
     loop field in usable {
         &lines.push("    {jet_rust_emit_field_name(&ctx, field.id)}({jet_rust_emit_type(&ctx, field.ty)}),")
     }
+    if ctx.record_phantoms.get(definition.id.value) == .Val(marker) -> &lines.push("    __jet_generic_phantom({marker}),")
     &lines.push("}}")
     &lines.push("#[allow(dead_code, unreachable_patterns)]")
     &lines.push("impl{impl_generics} {cell_type} {{")
@@ -1686,6 +2003,7 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
         &lines.push("                _ => unreachable!(\"columnar row is narrower than its column set\"),")
         &lines.push("            }},")
     }
+    if ctx.record_phantoms.get(definition.id.value) != None -> &lines.push("            {jet_rust_emit_record_phantom_initializer(&ctx, definition.id)}")
     &lines.push("        }}")
     &lines.push("    }}")
     &lines.push("}}")
@@ -1693,32 +2011,43 @@ fn jet_rust_emit_columnar_row_adapter(ctx: &JetRustEmitContext, definition: MIRT
 
 // tir_to_mir_types COMPILER_OWNED_ENUMS / COMPILER_OWNED_CORE_RECORDS /
 // COMPILER_OWNED_MATH_RECORDS / COMPILER_OWNED_GEOMETRY_RECORDS: the leaves
-// whose rows the cached runtime or Prelude declares once.
+// whose rows the cached runtime or Prelude declares once (core records without
+// a carrier are declared per program; see used_carrierless_core_records).
 JET_RUST_EMIT_COMPILER_OWNED_ENUMS :: prep { [String]{
     "Overflow", "FailurePolicy", "HookPolicy", "HookOutcome", "HookDecision", "DispatchState", "Ordering", "RemoveBy", "TaskFailure", "TaskOutcome",
     "TaskStatus", "DeliveryState", "IOError", "Key", "IOOperation", "ProcessResourceLimit", "ProcessStreamMode", "TerminalMode", "DurationUnit", "FontStyle",
-    "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataTree", "DataEvent",
-    "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDnsError", "NetError",
-    "NetShutdown", "WatchDomain", "WatchKind", "NetReadyInterest", "WsError",
+    "GlyphShaper", "WebFormValueType", "WebFormControl", "DataLoaderKind", "DataErrorKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "Dyn", "DataEvent",
+    "XMLCanonicalMode", "EmailError", "SMTPSecurity", "RecipientPolicy", "SMTPAuth", "TLSTrust", "TLSVersion", "TLSClientTrust", "NetDNSError", "NetError",
+    "NetShutdown", "WatchDomain", "WatchKind", "LateEventDisposition", "NetReadyInterest", "WsError",
     "PluginLimit", "PluginError",
 } }
-JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
+// tir_to_mir_types COMPILER_OWNED_CORE_RECORDS.
+JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS :: prep { [String]{
+    // TextError (jet_std Open.rs) joins RangeError: JetCodegen declares it as a
+    // compiler-owned Core record row, so the runtime crate, not the emitted
+    // program, owns its Rust definition.
+    "PluginFrame", "PluginFault", "RangeError", "TextError",
+    "__ResolveError",
     "IOContext", "NetErrorDetail", "AsyncPolicy", "CSVRow", "DataLineOptions", "DataLimits", "DataSourceIdentity", "DataAuthority", "DataError", "EncodingCause",
-    "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "Claims", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
+    "EncodingError", "EncodingLimits", "DataProvenance", "DataSchema", "DataSnapshotIdentity", "DataLoaderStatus", "WebFormFieldSpec", "WebFormFieldState", "WebTableState",
+    "CBOROptions", "CBORError", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLCanonical", "XMLError",
     "WebTablePage", "WebVirtualPlan", "MemoStats", "GameScene", "GameFrame", "GameAssets", "GameInputMap", "GameInputSnapshot", "GameBackend", "GameReplay",
     "GameImage", "GameSound", "TestSuite", "TestComparison", "ProcessReceipt", "ProcessPlan", "ProcessChild", "TerminalSize", "TerminalPolicy", "Address",
-    "Message", "Attachment", "RecipientReport", "SendReport", "Limits", "Mailer", "Envelope", "DKIMConfig", "SMTPConfig", "XMLCanonical",
+    "Message", "Attachment", "RecipientReport", "SendReport", "Limits", "Mailer", "Envelope", "DKIMConfig", "SMTPConfig", "RealtimeReceipt", "XMLCanonical",
+    "__EmailAddressView", "__EmailAttachmentView", "__EmailMessageView",
     "Size", "UINode", "JSONWriter", "JSONReader", "JSONLWriter", "JSONLReader", "DirEntry", "WalkEntry", "TempDir", "TempFile",
-    "FileLock", "WatchEvent", "Stat", "DataColumn", "DataStatus", "FontFace", "Glyph", "GlyphRun", "UIFileFilter", "UIFSGrant",
+    "FileLock", "WatchEvent", "DataColumn", "DataStatus", "FontFace", "Glyph", "GlyphRun", "UIFileFilter", "UIFSGrant",
     "UIGrantedPath", "UIFileDialogRequest", "UIFileDialogSelection", "UIClipboardText", "UIClipboardWrite", "UITextRange", "UIIMEComposition", "UIIMEEvent", "UIDragEvent", "UIShortcut",
     "UIShortcutBinding", "UIAccessibility", "TypeInfo", "LayoutInfo", "LayoutField", "MarkerInfo", "MarkerArgInfo", "StateInfo", "StateRef", "TransitionInfo",
     "FactInfo", "FactValue", "MeasureInfo", "ExactnessInfo", "LayoutFact", "ClassificationInfo", "NominalInfo", "ObligationParamInfo", "ObligationInfo", "SendabilityInfo",
     "MovednessInfo", "ViewProvenanceInfo", "AttributionInfo", "OriginInfo", "UnitScaleProvenanceInfo", "MaturityInfo", "DimensionInfo", "DimensionAxis", "FunctionInfo", "ArithmeticOperationInfo",
     "PackageInfo", "EffectInfo", "MethodInfo", "FieldInfo", "TypeParamInfo", "SourceSpan", "TLSPeerIdentity", "TLSCertificate", "ModGrant",
+} }
+JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
     "F32x4", "F64x2", "Vec2", "Vec3", "Vec4",
     "Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint", "ScreenDelta", "WorldDelta", "ViewDelta",
     "CameraDelta", "DeviceDelta", "Ray2", "Transform", "Transform2",
-    "Measurement", "Err", "VJPRun", "Group", "DataJoin", "DataSnapshot", "DataPivotCell", "DataSummary", "FieldError", "AllocError",
+    "Err", "VJPRun", "Group", "DataJoin", "DataSnapshot", "DataPivotCell", "DataSummary", "FieldError", "AllocError",
     "KeyRef", "MutationPlan", "VaultWrite", "Rotation", "Range",
     "PluginFrame", "PluginFault",
 } }
@@ -1726,8 +2055,9 @@ JET_RUST_EMIT_COMPILER_OWNED_RECORDS :: prep { [String]{
 // tir_to_mir_types is_compiler_owned_type: a registered compiler-owned enum or
 // Core runtime record/carrier, classified by its Core source leaf.
 fn jet_rust_emit_compiler_owned_type(key: String) -> Bool Never! {
+    if core_source_owns_type(key) -> return false
     leaf :: jet_rust_emit_core_source_type_leaf(key)
-    if JET_RUST_EMIT_COMPILER_OWNED_ENUMS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_RECORDS.contains(leaf) -> return true
+    if JET_RUST_EMIT_COMPILER_OWNED_ENUMS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS.contains(leaf) || JET_RUST_EMIT_COMPILER_OWNED_RECORDS.contains(leaf) -> return true
     if core_enum_variants(leaf) != None && (!key.starts_with("<corelib>/") || jet_rust_emit_core_rust_type_name(key) != None) -> return true
     if jet_rust_emit_core_email_type_name(leaf) != None || jet_rust_emit_core_crypto_rust_type_name(leaf) != None -> return true
     if (jet_rust_emit_core_rust_type_name(leaf) ?? "") == "JetMappedFile" -> return true
@@ -1741,26 +2071,198 @@ fn jet_rust_emit_runtime_declares_type(ctx: &JetRustEmitContext, definition: MIR
     definition.compiler_builtin != None || jet_rust_emit_handle_for_definition(&ctx, definition) != None || jet_rust_emit_compiler_owned_type(definition.key)
 }
 
+// MIRRust runtime_carrier_trait_impl: an impl of a runtime-owned trait on a
+// carrier the runtime or Prelude declares (Core `UIAriaRole` is
+// `JetUiAriaRole`, `Rect` is `JetRect`, the original Prelude `Err` is
+// `JetErr`) breaks Rust's orphan rule in the program (E0117), so it is not
+// emitted and its uses take the runtime's own impl or the structural
+// fallback instead.
+fn jet_rust_emit_runtime_carrier_trait_impl(ctx: &JetRustEmitContext, implementation: MIRImplDef) -> Bool Never! {
+    trait_ref :: implementation.trait_ref ?? return false
+    if trait_ref.name == "Rollback" || !jet_rust_emit_compiler_owned_trait(trait_ref.name) -> return false
+    if implementation.self_type.kind == {
+        .Apply(_, _) -> {}
+        else -> return false
+    }
+    definition :: jet_rust_emit_structural_type_def(&ctx, implementation.self_type) ?? return false
+    jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) || definition.compiler_builtin == (Val(MIRCompilerBuiltin.DefaultErr))
+}
+
+// Discover absent declaration parameters once, using the canonical MIR type
+// walker. Native/runtime records keep their existing externally-owned layout.
+fn jet_rust_emit_record_phantoms(ctx: &JetRustEmitContext) -> [U64:String] Never! {
+    markers := [U64:String]{}
+    loop definition in ctx.program.types {
+        if definition.generic_params.len() == 0 || !jet_rust_emit_declares_type_definition(&ctx, definition) || jet_rust_emit_has_native_type_projection(ctx, definition.key) -> next
+        if definition.kind == {
+            .Struct(fields, _) -> {
+                names := [String]{}
+                loop field in fields {
+                    if !field.computed -> mir_type_nominal_names(field.ty, &names)
+                }
+                absent := [String]{}
+                loop parameter in definition.generic_params {
+                    if !names.contains(parameter.name) -> &absent.push(name_mangle(parameter.name))
+                }
+                if absent.len() > 0 -> &markers.add(definition.id.value, "core::marker::PhantomData<({absent.join(", ")},)>").drop("type identities are unique")
+            }
+            else -> {}
+        }
+    }
+    markers
+}
+
+fn jet_rust_emit_record_phantom_initializer(ctx: &JetRustEmitContext, id: MIRTypeID) -> String Never! {
+    if ctx.record_phantoms.get(id.value) != None -> "__jet_generic_phantom: core::marker::PhantomData, " else -> ""
+}
+
+fn jet_rust_emit_record_type_phantom_initializer(ctx: &JetRustEmitContext, ty: MIRType) -> String Never! {
+    definition :: jet_rust_emit_structural_type_def(&ctx, ty) ?? return ""
+    jet_rust_emit_record_phantom_initializer(&ctx, definition.id)
+}
+
+fn jet_rust_emit_record_named_phantom_initializer(ctx: &JetRustEmitContext, name: String) -> String Never! {
+    rows :: ctx.type_rows_by_spelling.get(name) ?? return ""
+    if rows.len() == 0 -> return ""
+    id :: MIRTypeID{value: ctx.program.types[rows[0]].id.value}
+    jet_rust_emit_record_phantom_initializer(&ctx, id)
+}
+
+// MIRRust alias_parameter_uses: Rust rejects an alias parameter its target
+// never names (E0091), while a transparent Jet alias may ignore an argument
+// (`alias P<T> :: Point`). The Rust alias keeps only the parameters its target
+// names; references drop the arguments at the same positions. None for every
+// non-alias row.
+fn jet_rust_emit_alias_parameter_uses(definition: MIRTypeDef) -> [Bool]? Never! {
+    if definition.kind == {
+        .Alias(target) -> {
+            names := [String]{}
+            mir_type_nominal_names(target, &names)
+            uses := [Bool]{}
+            loop parameter in definition.generic_params {
+                &uses.push(names.contains(parameter.name))
+            }
+            return Val(uses)
+        }
+        else -> return None
+    }
+}
+
+// A transparent alias declares only the parameters its target names.
+fn jet_rust_emit_declared_generic_params(definition: MIRTypeDef) -> [MIRGenericParam] Never! {
+    uses :: jet_rust_emit_alias_parameter_uses(definition) ?? return definition.generic_params.copy()
+    kept := [MIRGenericParam]{}
+    loop (index, parameter) in definition.generic_params {
+        if uses[index] -> &kept.push(parameter)
+    }
+    kept
+}
+
 // MIRRust declares_type_def: type rows whose Rust declaration this artifact
 // emits; canonical Core native carriers already have their Prelude spelling.
 fn jet_rust_emit_declares_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef) -> Bool Never! {
-    !jet_rust_emit_runtime_declares_type(&ctx, definition) && !jet_rust_emit_is_canonical_core_native_type(definition.key)
+    !jet_rust_emit_runtime_declares_type(&ctx, definition) && !jet_rust_emit_is_canonical_core_native_type(ctx, definition.key)
 }
 
-fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, lines: &[String]) Never! {
-    if jet_rust_emit_runtime_declares_type(&ctx, definition) -> return
-    // MIRRust: a canonical Core native carrier is declared by the Prelude; only the
-    // web-query status enums still take their structural show impls here.
-    if jet_rust_emit_is_canonical_core_native_type(definition.key) {
-        if jet_codegen_auto_derives_core_web_query_enum(definition.key) {
-            debug_native := false
-            loop trait_id in definition.derives {
-                loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_native = true }
-            }
-            loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: definition.auto_printable, debug: debug_native}) -> &lines.push(line)
+// MIRRust used_carrierless_core_records: compiler-owned Core records without a
+// runtime or Prelude carrier (the reflection rows `StateInfo`, `OriginInfo`,
+// `DimensionInfo`, ...) are spelled by their mangled MIR key, so each program
+// declares the ones it reaches: from function signatures, locals, values,
+// constants and the rows this artifact declares, closed over the records' own
+// fields. `type_instances` cannot gate this: it lists every declared row.
+fn jet_rust_emit_used_carrierless_core_records(ctx: &JetRustEmitContext) -> [U64:Bool] Never! {
+    used := [U64:Bool]{}
+    carrierless := [MIRTypeDef]{}
+    loop definition in ctx.program.types {
+        if definition.kind == {
+            .Struct(_, _) -> {}
+            else -> next
         }
-        return
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) -> next
+        if !JET_RUST_EMIT_COMPILER_OWNED_CORE_RECORDS.contains(jet_rust_emit_core_source_type_leaf(definition.key)) -> next
+        if jet_rust_emit_has_native_type_projection(ctx, definition.key) || jet_rust_emit_handle_for_definition(&ctx, definition) != None -> next
+        &carrierless.push(definition)
     }
+    if carrierless.len() == 0 -> return used
+    names := [String]{}
+    loop function in ctx.program.functions {
+        loop param in function.params -> mir_type_nominal_names(param.ty, &names)
+        mir_type_nominal_names(function.return_type, &names)
+        loop local in function.locals -> mir_type_nominal_names(local.ty, &names)
+        loop value in function.values -> mir_type_nominal_names(value.ty, &names)
+    }
+    loop constant in ctx.program.constants -> mir_type_nominal_names(constant.ty, &names)
+    loop definition in ctx.program.types {
+        if !jet_rust_emit_module_selected(ctx, definition.module_id) || !jet_rust_emit_declares_type_definition(&ctx, definition) -> next
+        if definition.kind == {
+            .Struct(fields, _) -> { loop field in fields -> mir_type_nominal_names(field.ty, &names) }
+            .Enum(variants, _) -> {
+                loop variant in variants {
+                    if variant.payload == {
+                        .Unit -> {}
+                        .Single(ty) -> mir_type_nominal_names(ty, &names)
+                        .Named(fields) -> { loop field in fields -> mir_type_nominal_names(field.ty, &names) }
+                    }
+                }
+            }
+            .Distinct(base, _) -> mir_type_nominal_names(base, &names)
+            .Alias(target) -> mir_type_nominal_names(target, &names)
+            .UnitFamily(_) -> {}
+        }
+    }
+    seen := [String:Bool]{}
+    loop names.len() > 0 {
+        name :: &names.pop() ?? { break }
+        if seen.get(name) != None -> next
+        seen[name] = true
+        loop definition in carrierless {
+            if (definition.key != name && definition.name != name) || used.get(definition.id.value) != None -> next
+            used[definition.id.value] = true
+            if definition.kind == .Struct(fields, _) {
+                loop field in fields -> mir_type_nominal_names(field.ty, &names)
+            }
+        }
+    }
+    used
+}
+
+fn jet_rust_emit_source_hook_function_index(ctx: &JetRustEmitContext, type_id: Int, key: String, span: Span, operation: String) -> Int? Never! {
+    _ := core_source_value_hook(key, operation) ?? return None
+    instance :: ctx.type_instance_first.get(type_id) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook has no checked type instance", key, Val(span))
+        return None
+    }
+    id :: mir_source_value_hook(ctx.program, ctx.program.type_instances[instance], operation) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "source value hook is missing or ambiguous", key, Val(span))
+        return None
+    }
+    row :: jet_rust_emit_function_index(ctx, id) ?? {
+        jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "source value hook function is unavailable", key, Val(span))
+        return None
+    }
+    Val(row)
+}
+
+fn jet_rust_emit_source_hook_invocation(ctx: &JetRustEmitContext, definition: MIRTypeDef, operation: String) -> String? Never! {
+    row :: jet_rust_emit_source_hook_function_index(&ctx, definition.id.value, definition.key, definition.span, operation) ?? return None
+    function :: ctx.program.functions[row]
+    symbol :: jet_rust_emit_inherent_method_symbol(function.name)
+    invocation :: "self.{symbol}()"
+    if function.return_type.kind == .Result(_, error) {
+        if error.kind == .Apply(name, args) {
+            if name.name == "Never" && args.len() == 0 -> return Val("match {invocation} {{ Ok(value) => value, Err(never) => match never {{}} }}")
+        }
+    } else {
+        return Val(invocation)
+    }
+    jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidSchema, "E0003", "source value hook has an unsupported checked failure carrier", definition.key, Val(definition.span))
+    None
+}
+
+fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDef, carrierless_record: Bool, lines: &[String]) Never! {
+    if !carrierless_record && jet_rust_emit_runtime_declares_type(&ctx, definition) -> return
+    // MIRRust: a canonical Core native carrier is declared by the Prelude.
+    if jet_rust_emit_is_canonical_core_native_type(ctx, definition.key) -> return
     previous_generic_params := ctx.current_generic_params
     ctx.current_generic_params = jet_rust_emit_merge_generic_params(previous_generic_params, definition.generic_params)
     jet_rust_emit_layout_attributes(&ctx, definition, &lines)
@@ -1775,9 +2277,9 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
     // MIRRust emit_type_def (D-MEM-VIEWRET1, #4392): a row holding a view
     // declares the lifetime its stored views (and nested view-carrying rows)
     // name.
-    type_generics :: jet_rust_emit_generic_params(&ctx, definition.generic_params)
+    type_generics :: jet_rust_emit_generic_params(&ctx, jet_rust_emit_declared_generic_params(definition))
     generics :: jet_rust_emit_type_def_generics(ctx, definition, type_generics)
-    outer_view_lifetime :: ~ctx.view_lifetime
+    outer_view_lifetime :: ctx.view_lifetime.copy()
     ctx.view_lifetime = if ctx.view_carriers.get(definition.key) != None -> JET_RUST_EMIT_VIEW_LIFETIME else -> ""
     if definition.kind == {
         .Struct(fields, _) -> {
@@ -1789,6 +2291,7 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
                     &lines.push("    {jet_rust_emit_field_declaration(&ctx, field, boxed)},")
                 }
             }
+            if ctx.record_phantoms.get(definition.id.value) == .Val(marker) -> &lines.push("    pub __jet_generic_phantom: {marker},")
             &lines.push("}}")
             &lines.push("")
         }
@@ -1835,18 +2338,33 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
         }
         .UnitFamily(members) -> {
             &lines.push("{visibility_name}enum {name}{generics} {{")
-            loop member in members -> &lines.push("    {jet_rust_emit_mangle(member)},")
+            loop member in members -> &lines.push("    {name_mangle(member)},")
             &lines.push("}}")
             &lines.push("")
         }
     }
     ctx.view_lifetime = outer_view_lifetime
+    source_show :: jet_rust_emit_source_hook_invocation(&ctx, definition, "show")
+    source_debug :: jet_rust_emit_source_hook_invocation(&ctx, definition, "debug")
+    if source_show != None || source_debug != None {
+        args :: jet_rust_emit_type_def_impl_args(ctx, definition, jet_rust_emit_columnar_generic_args(definition.generic_params))
+        if source_show == .Val(symbol) {
+            &lines.push("impl{generics} JetShow for {name}{args} {{ fn jet_show(&self) -> String {{ {symbol} }} }}")
+            if !jet_rust_emit_type_derive_user_impl(&ctx, definition, "Display") {
+                &lines.push("impl{generics} JetDisplay for {name}{args} {{ fn jet_display(&self) -> String {{ {symbol} }} }}")
+            }
+        }
+        if source_debug == .Val(symbol) {
+            &lines.push("impl{generics} JetDebug for {name}{args} {{ fn jet_debug(&self) -> String {{ {symbol} }} }}")
+            &lines.push("impl{generics} std::fmt::Debug for {name}{args} {{ fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {{ f.write_str(&({symbol})) }} }}")
+        }
+    }
     debug_derived := false
     loop trait_id in definition.derives {
         loop row in jet_rust_emit_trait_rows(ctx, trait_id) { if row.id == trait_id && row.name == "Debug" -> debug_derived = true }
     }
-    debug_derived = debug_derived && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetDebug")
-    printable :: definition.auto_printable && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetShow")
+    debug_derived = debug_derived && core_source_value_hook(definition.key, "debug") == None && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetDebug")
+    printable :: definition.auto_printable && core_source_value_hook(definition.key, "show") == None && jet_rust_emit_type_definition_derive_capability(&ctx, definition, "JetShow")
     loop line in jet_codegen_auto_derive_lines(&ctx, definition, JetCodegenAutoDeriveFacts{type_id: definition.id, printable: printable, debug: debug_derived}) -> &lines.push(line)
     if definition.layout != None {
         layout :: definition.layout ?? MIRStructLayout.C
@@ -1863,6 +2381,9 @@ fn jet_rust_emit_type_definition(ctx: &JetRustEmitContext, definition: MIRTypeDe
             else -> {}
         }
     }
+    if jet_rust_emit_source_hook_invocation(&ctx, definition, "clone") == .Val(invocation) {
+        &lines.push("impl Clone for {name} {{ fn clone(&self) -> Self {{ {invocation} }} }}")
+    }
     ctx.current_generic_params = previous_generic_params
 }
 
@@ -1875,7 +2396,7 @@ fn jet_rust_emit_named_type(ctx: &JetRustEmitContext, raw: String) -> String Nev
 // The first row spelled `owner` (key or leaf name, program order) declaring
 // struct field `raw`. Rows come from the spelling index and are read in place.
 fn jet_rust_emit_named_field(ctx: &JetRustEmitContext, owner: String, raw: String) -> String Never! {
-    rows :: ~(ctx.type_rows_by_spelling.get(owner) ?? [Int]{})
+    rows :: (ctx.type_rows_by_spelling.get(owner) ?? [Int]{}).copy()
     field_id := MIRFieldID?{None}
     loop row in rows {
         if ctx.program.types[row].kind == {
@@ -1943,10 +2464,10 @@ fn jet_rust_emit_shape_name_map(ctx: &JetRustEmitContext, target: MIRType, proje
 // Slot 0 selects a map key or result success, slot 1 a map value or error.
 fn jet_rust_emit_constant_inner_type(ty: MIRType, slot: Int) -> MIRType Never! {
     if ty.kind == {
-        .List(inner) | .FixedList(inner, _) | .Option(inner) -> ~inner
-        .Map(key, value) -> if slot == 0 -> ~key else -> ~value
-        .Result(ok, err) -> if slot == 0 -> ~ok else -> ~err
-        else -> ~ty
+        .List(inner) | .FixedList(inner, _) | .Option(inner) -> inner.copy()
+        .Map(key, value) -> if slot == 0 -> key.copy() else -> value.copy()
+        .Result(ok, err) -> if slot == 0 -> ok.copy() else -> err.copy()
+        else -> ty.copy()
     }
 }
 
@@ -1957,15 +2478,15 @@ fn jet_rust_emit_constant_inner_type(ty: MIRType, slot: Int) -> MIRType Never! {
 fn jet_rust_emit_constant_type_definition(ctx: &JetRustEmitContext, type_name: String, ty: MIRType) -> MIRTypeDef? {
     candidates := [MIRType]{ty}
     if ty.kind == {
-        .Option(inner) -> &candidates.push(~inner)
+        .Option(inner) -> &candidates.push(inner.copy())
         .Result(ok, err) -> {
-            &candidates.push(~ok)
-            &candidates.push(~err)
+            &candidates.push(ok.copy())
+            &candidates.push(err.copy())
         }
         else -> {}
     }
     // Every row whose key or leaf name is `type_name`, in program order.
-    rows :: ~(ctx.type_rows_by_spelling.get(type_name) ?? [Int]{})
+    rows :: (ctx.type_rows_by_spelling.get(type_name) ?? [Int]{}).copy()
     loop candidate in candidates {
         if candidate.kind == .Apply(name, _) {
             loop row in rows {
@@ -1990,7 +2511,7 @@ fn jet_rust_emit_constant_type_definition(ctx: &JetRustEmitContext, type_name: S
 // declarations share the display name, else the source spelling.
 fn jet_rust_emit_constant_owner(ctx: &JetRustEmitContext, type_name: String, definition: MIRTypeDef?) -> String Never! {
     resolved :: definition ?? return type_name
-    rows :: ~(ctx.type_rows_by_spelling.get(resolved.name) ?? [Int]{})
+    rows :: (ctx.type_rows_by_spelling.get(resolved.name) ?? [Int]{}).copy()
     shared := 0
     loop row in rows {
         if ctx.program.types[row].name == resolved.name -> shared += 1
@@ -2004,7 +2525,7 @@ fn jet_rust_emit_constant_bound_type(ctx: &JetRustEmitContext, definition: MIRTy
     if ty.kind == .Apply(_, args) {
         if args.len() > 0 && definition.generic_params.len() > 0 -> return jet_rust_emit_partial_substitute_type(&ctx, declared, definition.generic_params, args)
     }
-    ~declared
+    declared.copy()
 }
 
 fn jet_rust_emit_constant_field_type(ctx: &JetRustEmitContext, definition: MIRTypeDef?, field_name: String, fallback: MIRType) -> MIRType Never! {
@@ -2013,7 +2534,7 @@ fn jet_rust_emit_constant_field_type(ctx: &JetRustEmitContext, definition: MIRTy
             loop field in fields { if field.name == field_name -> return jet_rust_emit_constant_bound_type(&ctx, resolved, field.ty, fallback) }
         }
     }
-    ~fallback
+    fallback.copy()
 }
 
 fn jet_rust_emit_constant_payload_type(ctx: &JetRustEmitContext, definition: MIRTypeDef?, variant: String, index: Int, name: String?, fallback: MIRType) -> MIRType Never! {
@@ -2033,7 +2554,7 @@ fn jet_rust_emit_constant_payload_type(ctx: &JetRustEmitContext, definition: MIR
             }
         }
     }
-    ~fallback
+    fallback.copy()
 }
 
 // MIRRust boxed_edges: a recursive field or payload edge is stored in a Box,
@@ -2055,7 +2576,7 @@ fn jet_rust_emit_constant_payload_field(ctx: &JetRustEmitContext, definition: MI
             }
         }
     }
-    if jet_rust_emit_has_native_type_projection(type_name) -> ~field_name else -> jet_rust_emit_mangle(field_name)
+    if jet_rust_emit_has_native_type_projection(ctx, type_name) -> field_name.copy() else -> name_mangle(field_name)
 }
 
 // MIRRust Fraction constant: one exact-Int part of an intrinsic ratio.
@@ -2113,6 +2634,7 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             "vec![{rendered.join(", ")}]"
         }
         .Unit -> "()"
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .BigInt(value) -> {
             if ty.kind == {
                 .IntN(signed, bits) -> return "{value}{if signed -> "i" else -> "u"}{bits}"
@@ -2139,7 +2661,8 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             rendered := [String]{}
             loop entry in entries {
                 key :: if entry.key == {
-                    .Int(literal) -> if typed -> jet_rust_emit_constant(&ctx, MIRConstant.Int{value: literal, width: None, spelling: None}, key_ty) else -> jet_rust_emit_const_key(&ctx, entry.key)
+                    .Int(literal) -> if typed -> jet_rust_emit_constant(&ctx, mir_integer_constant(literal, None, None), key_ty) else -> jet_rust_emit_const_key(&ctx, entry.key)
+                    .BigInt(decimal) -> if typed -> jet_rust_emit_constant(&ctx, MIRConstant.BigInt{decimal: decimal}, key_ty) else -> jet_rust_emit_const_key(&ctx, entry.key)
                     else -> jet_rust_emit_const_key(&ctx, entry.key)
                 }
                 &rendered.push("({key}, {jet_rust_emit_constant(&ctx, entry.value, value_ty)})")
@@ -2152,17 +2675,20 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
             // MIRRust constant: an intrinsic Fraction with no declaration row
             // takes the native constructor over its exact-Int parts.
             if definition == None && type_name == "Fraction" && ctx.type_by_name.get(type_name) == None {
-                return "{ctx.config.root_prefix}jet_fraction_from_parts({jet_rust_emit_fraction_part(&ctx, fields, "numerator")}, {jet_rust_emit_fraction_part(&ctx, fields, "denominator")})"
+                return "{ctx.config.root_prefix}jet_fraction_from_parts({jet_rust_emit_fraction_part(&ctx, fields, "num_value")}, {jet_rust_emit_fraction_part(&ctx, fields, "den_value")})"
             }
             owner :: jet_rust_emit_constant_owner(&ctx, type_name, definition)
             rendered := [String]{}
             loop field in fields {
                 field_ty :: jet_rust_emit_constant_field_type(&ctx, definition, field.name, ty)
                 value := jet_rust_emit_constant(&ctx, field.value, field_ty)
+                if definition == .Val(resolved) && jet_rust_emit_has_native_type_projection(ctx, resolved.key) {
+                    if jet_rust_emit_native_int_input(&ctx, value, field_ty, None) == .Val(narrowed) -> value = narrowed
+                }
                 if jet_rust_emit_constant_edge_boxed(definition, field.name) -> value = "Box::new({value})"
                 &rendered.push("{jet_rust_emit_named_field(&ctx, owner, field.name)}: {value}")
             }
-            "{jet_rust_emit_named_type(&ctx, owner)} {{ {rendered.join(", ")} }}"
+            "{jet_rust_emit_named_type(&ctx, owner)} {{ {jet_rust_emit_record_named_phantom_initializer(&ctx, owner)}{rendered.join(", ")} }}"
         }
         // MIRRust typed_enum_constant: named payloads keep their field names,
         // positional payloads stay positional; boxed edges allocate.
@@ -2205,6 +2731,7 @@ fn jet_rust_emit_constant(ctx: &JetRustEmitContext, constant: MIRConstant, ty: M
 fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String Never! {
     if key == {
         .Int(value) -> "{value}"
+        .BigInt(decimal) -> jet_rust_emit_constant(&ctx, MIRConstant.BigInt{decimal: decimal}, mir_type_from_kind(MIRTypeKind.Int))
         .String(value) -> if jet_rust_emit_is_core_layer(&ctx) -> jet_rust_emit_quote(value) else -> "{jet_rust_emit_quote(value)}.to_string()"
         .Bool(value) -> if value -> "true" else -> "false"
         .Char(value) -> jet_rust_emit_char_literal(value)
@@ -2214,12 +2741,12 @@ fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String
             "({values.join(", ")})"
         }
         .Struct(type_name, fields) -> {
-            native :: jet_rust_emit_has_native_type_projection(type_name)
+            native :: jet_rust_emit_has_native_type_projection(ctx, type_name)
             values := [String]{}
-            loop field in fields -> &values.push("{if native -> field.name else -> jet_rust_emit_mangle(field.name)}: {jet_rust_emit_const_key(&ctx, field.key)}")
-            "{jet_rust_emit_named_type(&ctx, type_name)} {{ {values.join(", ")} }}"
+            loop field in fields -> &values.push("{if native -> field.name else -> name_mangle(field.name)}: {jet_rust_emit_const_key(&ctx, field.key)}")
+            "{jet_rust_emit_named_type(&ctx, type_name)} {{ {jet_rust_emit_record_named_phantom_initializer(&ctx, type_name)}{values.join(", ")} }}"
         }
-        .Enum(type_name, variant) -> "{jet_rust_emit_named_type(&ctx, type_name)}::{if jet_rust_emit_has_native_type_projection(type_name) -> variant else -> jet_rust_emit_mangle_variant(variant)}"
+        .Enum(type_name, variant) -> "{jet_rust_emit_named_type(&ctx, type_name)}::{if jet_rust_emit_has_native_type_projection(ctx, type_name) -> variant else -> jet_rust_emit_mangle_variant(variant)}"
     }
 }
 
@@ -2229,7 +2756,7 @@ fn jet_rust_emit_const_key(ctx: &JetRustEmitContext, key: MIRConstKey) -> String
 // Context.rs core_source_type_leaf: a canonical `<corelib>/...::Leaf` identity reduces
 // to its leaf; any other spelling stays intact.
 fn jet_rust_emit_core_source_type_leaf(name: String) -> String Never! {
-    if !name.starts_with("<corelib>/") -> return ~name
+    if !name.starts_with("<corelib>/") -> return name.copy()
     parts :: name.split("::").to_list()
     parts[parts.len() - 1]
 }
@@ -2239,7 +2766,7 @@ fn jet_rust_emit_core_source_type_leaf(name: String) -> String Never! {
 fn jet_rust_emit_core_qualified_leaf(name: String) -> String? {
     separator :: if name.contains("::") -> "::" else -> "."
     parts :: name.split(separator).to_list()
-    if parts.len() < 2 -> return Val(~name)
+    if parts.len() < 2 -> return Val(name.copy())
     if !name.starts_with("core.") && !name.starts_with("core::") -> return None
     Val(parts[parts.len() - 1])
 }
@@ -2248,7 +2775,7 @@ fn jet_rust_emit_core_qualified_leaf(name: String) -> String? {
 fn jet_rust_emit_qualified_leaf_under(name: String, owners: [String]) -> String? {
     separator :: if name.contains("::") -> "::" else -> "."
     parts :: name.split(separator).to_list()
-    if parts.len() < 2 -> return Val(~name)
+    if parts.len() < 2 -> return Val(name.copy())
     leaf :: parts[parts.len() - 1]
     loop owner in owners {
         expected :: "{owner}{separator}{leaf}"
@@ -2257,18 +2784,8 @@ fn jet_rust_emit_qualified_leaf_under(name: String, owners: [String]) -> String?
     None
 }
 
-fn jet_rust_emit_source_owned_core_shape(name: String) -> Bool Never! {
-    if name.starts_with("<corelib>/Core/compute::") -> return true
-    if !name.starts_with("<corelib>/") -> return false
-    leaf :: jet_rust_emit_core_source_type_leaf(name)
-    net_shapes :: [String]{"SocketAddr", "UDPSocket", "UDPPacket", "UnixStream", "UnixListener", "SRVRecord"}
-    if name.starts_with("<corelib>/Core/net::") && net_shapes.contains(leaf) -> return true
-    if name.starts_with("<corelib>/Core/net/tls::") && (leaf == "TLSCertificate" || leaf == "TLSPeerIdentity") -> return true
-    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQuery" || leaf == "WebQueryState" || leaf == "WebMutationState")
-}
-
 fn jet_rust_emit_core_native_probe_name(name: String) -> String Never! {
-    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || jet_rust_emit_source_owned_core_shape(name) -> return ~name
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || core_source_owns_type(name) -> return name.copy()
     jet_rust_emit_core_source_type_leaf(name)
 }
 
@@ -2310,7 +2827,8 @@ fn jet_rust_emit_net_handle_type_name(name: String) -> String? {
         "TLSCertificate" -> Val("JetTLSCertificate")
         "NetError" -> Val("JetNetError")
         "NetErrorDetail" -> Val("JetNetErrorDetail")
-        "NetDnsError" -> Val("JetNetDnsError")
+        "__ResolveError" -> Val("Jet__ResolveError")
+        "NetDNSError" -> Val("JetNetDNSError")
         "NetShutdown" -> Val("JetNetShutdown")
         "NetReadyInterest" -> Val("JetNetReadyInterest")
         "NetReady" -> Val("JetNetReady")
@@ -2351,12 +2869,16 @@ fn jet_rust_emit_net_handle_type_name(name: String) -> String? {
 fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
     plot :: [String]{"JetDataPlotMark", "JetDataPlotChannel", "JetDataPlotAggregate", "JetDataPlotFilterOp", "JetDataPlotValue", "JetDataPlotScaleKind", "JetDataPlotDomain", "JetDataPlotLegendPosition", "JetDataPlotFacetKind", "JetDataPlotInteraction", "JetDataPlotBackend", "JetDataPlotSupport", "JetDataPlotErrorKind", "JetDataPlotRenderFormat", "JetDataPlotField", "JetDataPlotSchema", "JetDataPlotSourceFacts", "JetDataPlotEncoding", "JetDataPlotScale", "JetDataPlotAxis", "JetDataPlotLegend", "JetDataPlotFacet", "JetDataPlotLayer", "JetDataPlotAccessibility", "JetDataPlotLayout", "JetDataPlotCapability", "JetDataPlotError", "JetDataPlotPlan", "JetDataPlotSelectedRow", "JetDataPlotInspection", "JetDataPlotRender", "JetDataPlotProjection", "JetDataPlotColumn", "JetDataPlot"}
     time :: [String]{"JetDate", "JetInstant", "JetLocalTime", "JetDateTime", "JetPeriod", "JetZone", "JetZonedDateTime"}
-    if plot.contains(name) || time.contains(name) -> return Val(~name)
+    if plot.contains(name) || time.contains(name) -> return Val(name.copy())
     found :: if name == {
+        "__TablePlan" -> Val("JetTablePlan")
         "MemoStats" -> Val("JetMemoStats")
         "Authority" -> Val("JetAuthority")
         "DeterministicWorld" -> Val("JetDeterministicWorld")
         "Err" -> Val("JetErr")
+        // The allocation-failure record is declared once at the Prelude root;
+        // every Rust projection spells it `AllocError`.
+        "AllocError" -> Val("AllocError")
         "Transaction" -> Val("JetTransaction")
         "Counter" -> Val("JetCounter")
         "OrderedMap" -> Val("JetOrderedMap")
@@ -2366,6 +2888,7 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "Loadable" -> Val("JetLoadable")
         "Range" -> Val("JetRange")
         "Iter" -> Val("JetIter")
+        "Complex" -> Val("JetComplex")
         "Point" -> Val("JetPoint")
         "Size" -> Val("JetSize")
         "Rect" -> Val("JetRect")
@@ -2382,13 +2905,9 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "NullBackend" -> Val("JetNullBackend")
         "TUIBackend" -> Val("JetTuiBackend")
         "GtkBackend" -> Val("JetGtkBackend")
-        "Session" -> Val("JetAuthSession")
         "Auth" -> Val("JetAuthApp")
+        "LiveQuery" -> Val("JetLiveQuery")
         "RowPolicy" -> Val("JetRowPolicy")
-        "HyperLogLog" -> Val("JetHyperLogLog")
-        "TDigest" -> Val("JetTDigest")
-        "CountMinSketch" -> Val("JetCountMinSketch")
-        "ReservoirSampler" -> Val("JetReservoirSampler")
         "WebMutationStatus" -> Val("JetWebMutationStatus")
         "WebMutationState" -> Val("JetWebMutationState")
         "WebQueryStatus" -> Val("JetWebQueryStatus")
@@ -2431,11 +2950,19 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
         "WebTableRow" -> Val("JetWebTableRow")
         "WebTablePage" -> Val("JetWebTablePage")
         "WebTable" -> Val("JetWebTable")
-        "WebVirtualViewport" -> Val("JetWebVirtualViewport")
-        "WebVirtualWindow" -> Val("JetWebVirtualWindow")
         "WebVirtualPlan" -> Val("JetWebVirtualPlan")
         "WebVirtualPlanViewport" -> Val("JetWebVirtualPlanViewport")
         "Atomic" -> Val("JetAtomic")
+        "__EvidenceRead" -> Val("JetTestingEvidenceRead")
+        "__TempFacts" -> Val("JetTestingTempFacts")
+        "__TempPath" -> Val("JetTestingTempPath")
+        "__TempRemove" -> Val("JetTestingTempRemove")
+        "__TempCreate" -> Val("JetTestingTempCreate")
+        "__JetcRaw" -> Val("JetCryptoJetcRaw")
+        "__JetcStat" -> Val("JetCryptoJetcStat")
+        "__LockCall" -> Val("jet_std::JetFsLockCall")
+        "__LockIdentity" -> Val("jet_std::JetFsLockIdentity")
+        "__LockWait" -> Val("jet_std::JetFsLockWait")
         else -> String?{None}
     }
     if found != None -> return found
@@ -2446,20 +2973,24 @@ fn jet_rust_emit_root_prelude_type_name(name: String) -> String? {
 // Context.rs core_rust_type_name: the `jet_std::` carriers of registered Core owners.
 fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
     if raw.starts_with("<corelib>/Core/sync::") && raw.ends_with("::RowPolicy") -> return None
+    if core_source_owns_type(raw) -> return None
     name :: jet_rust_emit_core_qualified_leaf(jet_rust_emit_core_source_type_leaf(raw)) ?? return None
-    if name == "DataTree" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("DataTree")
+    if name == "Dyn" || name == "JSON" || name == "TOML" || name == "YAML" || name == "CSV" -> return Val("Dyn")
     if jet_rust_emit_job_queue_type_name(name) == .Val(queue) -> return Val(queue)
     lanes :: [String]{"F32x4", "F64x2", "F32x8", "F64x4", "I8x16", "I16x8", "I32x4", "I64x2", "U8x16", "U16x8", "U32x4", "U64x2", "I8x32", "I16x16", "I32x8", "I64x4", "U8x32", "U16x16", "U32x8", "U64x4", "Vec2", "Vec3", "Vec4", "Mat3", "Mat4"}
-    if lanes.contains(name) -> return Val(~name)
+    if lanes.contains(name) -> return Val(name.copy())
     coords :: [String]{"Point2", "Delta2", "ScreenPoint", "WorldPoint", "ViewPoint", "CameraPoint", "DevicePoint", "ScreenDelta", "WorldDelta", "ViewDelta", "CameraDelta", "DeviceDelta"}
     if coords.contains(name) -> return Val("JetCoord2")
     // Carriers whose Rust name equals the Jet name.
-    if name == "PluginFrame" || name == "PluginFault" || name == "PluginLimit" || name == "PluginError" -> return Val(~name)
-    same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "RNG", "Fake", "Solver", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibSound", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
-    if same.contains(name) -> return Val(~name)
+    if name == "PluginFrame" || name == "PluginFault" || name == "PluginLimit" || name == "PluginError" -> return Val(name.copy())
+    if name == "__QueryRead" -> return Val(name.copy())
+    same :: [String]{"IOError", "IOContext", "IOOperation", "ProcessResourceLimit", "EnvError", "UTF8Error", "ProcessPlan", "ProcessSpec", "ProcessChild", "ProcessStreamMode", "TerminalPolicy", "TerminalSize", "TerminalMode", "TerminalSession", "TextWidth", "TextWidthAmbiguous", "TextWidthControls", "TextError", "DataGroupedQuery", "DataJoin", "TestSuite", "Clock", "Duration", "DurationUnit", "RangeError", "DataLoaderKind", "DataFormat", "DataFreshness", "DataInvalidationCause", "DataAuthority", "DataSourceIdentity", "DataProvenance", "DataSnapshotIdentity", "DataLoaderStatus", "DataLoader", "DataSnapshot", "RegexFlags", "Closed", "DirEntry", "Stat", "WalkEntry", "WatchEvent", "WatchDomain", "WatchKind", "WatchHandle", "WatchSet", "TempDir", "TempFile", "FileLock", "DataLineOptions", "DataColumn", "DataStatus", "DataSummary", "DataLimits", "DataError", "DataErrorKind", "DataPivotCell", "DataStream", "DataTracked", "DataWatch", "DataWatchStatus", "LogField", "LogSpan", "EncodingLimits", "EncodingError", "EncodingCause", "EncodingFormat", "EncodingErrorKind", "FieldError", "CBOROptions", "CBORError", "CBORErrorKind", "XMLLimits", "XMLParseOptions", "XMLRenderOptions", "XMLEncoding", "XMLLexicalPolicy", "XMLCanonical", "XMLCanonicalMode", "XMLError", "XMLReason", "XMLEntityPolicy", "DataEvent", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "CSVRow", "XMLReader", "XMLWriter", "DBValue", "DBError", "RaylibWindow", "RaylibColor", "RaylibTextureAtlas", "SQL", "HTML", "Sh"}
+    if same.contains(name) -> return Val(name.copy())
     if name == {
         "ProcessResult" | "ProcessReceipt" -> Val("ProcessReceipt")
         "Query" -> Val("DataQuery")
+        // D-DET1: the source `RNG` handle's Prelude carrier is `jet_std::Rng`.
+        "RNG" -> Val("Rng")
         "Group" -> Val("GroupValue")
         "SharedGuard" -> Val("JetSharedGuard")
         "Signal" -> Val("JetSignal")
@@ -2484,15 +3015,6 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
         "EventConfigError" -> Val("JetEventConfigError")
         "TestComparison" -> Val("JetTestComparison")
         "LateEventDisposition" -> Val("JetLateEventDisposition")
-        "Instant" -> Val("JetInstant")
-        "Date" | "LocalDate" -> Val("JetDate")
-        "LocalTime" -> Val("JetLocalTime")
-        "DateTime" -> Val("JetDateTime")
-        "Period" -> Val("JetPeriod")
-        "Zone" -> Val("JetZone")
-        "ZonedDateTime" -> Val("JetZonedDateTime")
-        "URL" -> Val("JetURL")
-        "MIME" -> Val("JetMIME")
         "Regex" -> Val("JetRegex")
         "Match" -> Val("JetRegexMatch")
         "Decimal" -> Val("JetDecimal")
@@ -2514,7 +3036,7 @@ fn jet_rust_emit_core_rust_type_name(raw: String) -> String? {
 
 // Context.rs file_handle_rust_type: top-level Prelude handles (not `jet_std`).
 fn jet_rust_emit_file_handle_type_name(raw: String) -> String? {
-    name :: if raw.starts_with("<corelib>/Core/files::Core/files/files.jet::") || raw.starts_with("<corelib>/Core/term::Core/term/term.jet::") -> jet_rust_emit_core_source_type_leaf(raw) else -> ~raw
+    name :: if raw.starts_with("<corelib>/Core/files::Core/files/files.jet::") || raw.starts_with("<corelib>/Core/term::Core/term/term.jet::") -> jet_rust_emit_core_source_type_leaf(raw) else -> raw.copy()
     if name == {
         "FileReader" -> Val("JetFileReader")
         "FileWriter" -> Val("JetFileWriter")
@@ -2569,6 +3091,26 @@ fn jet_rust_emit_service_handle_type_name(name: String) -> String? {
         "DeliveryEvent" -> Val("JetDeliveryEvent")
         "TaskOutcome" -> Val("JetTaskOutcome")
         "TaskStatus" -> Val("JetTaskStatus")
+        // Private allocation transports, dies at cutover; native Services cites.
+        "__TreeWorker" -> Val("JetServiceWorker") // Services.rs:954
+        "__TreeGroup" -> Val("JetServiceGroup") // Services.rs:955
+        "__TreeStateAdapter" -> Val("JetServiceStateAdapter") // Services.rs:957
+        "__TreeStateAuthority" -> Val("JetServiceStateAuthority") // Services.rs:958
+        "__TreeWorkflowState" -> Val("JetServiceWorkflow") // Services.rs:966
+        "__TreeTaskGroup" -> Val("JetServiceTreeTaskGroup") // Services.rs:970
+        "__TreeSupervisorState" -> Val("JetServiceTreeSupervisorState") // Services.rs:971
+        "__DeliveryFacts" -> Val("JetServiceDeliveryFacts")
+        "__DeliveryRecord" -> Val("JetServiceDeliveryRecord")
+        "__EndpointMailbox" -> Val("JetServiceEndpointMailbox")
+        "__MailboxRead" -> Val("JetServiceMailboxRead")
+        // Worker policy transports; exact native shapes, mechanical, dies at cutover.
+        "__WorkerMailbox" -> Val("JetServiceMailbox") // Services.rs:758-762
+        "__WorkerChannel" -> Val("JetServiceWorkerChannel") // Services.rs:761, exact Arc type alias
+        "__WorkerHandler" -> Val("JetServiceWorkerHandler") // Services.rs:821
+        "__WorkerStatus" -> Val("JetServiceSupervisorStatus") // Services.rs:123-130
+        "__WorkerTopologyKind" -> Val("JetServiceTopologyKind") // Services.rs:134-137
+        "__WorkerTopologyState" -> Val("JetDevtoolsTopologySupervisorState") // DevtoolsTopologyPanel.rs:62-70
+        "__WorkerRestartReason" -> Val("JetDevtoolsTopologyRestartReason") // DevtoolsTopologyPanel.rs:282-288
         else -> None
     }
 }
@@ -2603,16 +3145,16 @@ fn jet_rust_emit_binary_text_handle_type_name(name: String) -> String? {
 
 fn jet_rust_emit_core_email_type_name(raw: String) -> String? {
     prefix :: "<corelib>/Core/email::Core/email/email.jet::"
-    name :: if raw.starts_with(prefix) -> jet_rust_emit_core_source_type_leaf(raw) else -> ~raw
+    name :: if raw.starts_with(prefix) -> jet_rust_emit_core_source_type_leaf(raw) else -> raw.copy()
     leaf :: jet_rust_emit_qualified_leaf_under(name, [String]{"email", "core.email", "core::email"}) ?? return None
     if leaf == "EmailError" -> return Val("Error")
-    carriers :: [String]{"Address", "Message", "Attachment", "Envelope", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer"}
+    carriers :: [String]{"Address", "Message", "Attachment", "Envelope", "__EmailAddressView", "__EmailAttachmentView", "__EmailMessageView", "SMTPSecurity", "RecipientPolicy", "RecipientReport", "SendReport", "Limits", "SMTPAuth", "TLSTrust", "DKIMConfig", "SMTPConfig", "Mailer"}
     if carriers.contains(leaf) -> return Val(leaf)
     None
 }
 
 fn jet_rust_emit_core_crypto_rust_type_name(raw: String) -> String? {
-    name := ~raw
+    name := raw.copy()
     if raw.starts_with("<corelib>/Core/crypto::Core/crypto/crypto.jet::") || raw.starts_with("<corelib>/Core/crypto::Core/crypto/expert.jet::") -> name = jet_rust_emit_core_source_type_leaf(raw)
     leaf :: jet_rust_emit_qualified_leaf_under(name, [String]{"crypto", "core.crypto", "core::crypto"}) ?? return None
     if leaf == {
@@ -2623,13 +3165,26 @@ fn jet_rust_emit_core_crypto_rust_type_name(raw: String) -> String? {
     }
 }
 
-fn jet_rust_emit_core_ui_type_name(name: String) -> String? {
+// Resolve Core UI exports to their Prelude carrier, using cached membership.
+fn jet_rust_emit_core_ui_type_name(ctx: JetRustEmitContext, name: String) -> String? {
+    if ctx.core_ui_type_names.get(name) == None -> return None
+    if jet_rust_emit_root_prelude_type_name(name) == .Val(prelude) -> return Val(prelude)
+    word := if name.starts_with("UI") -> "Ui{name.slice(2, name.len())}" else -> name.copy()
+    word = word.replace("IME", "Ime").replace("FS", "Fs")
+    if word.ends_with("ID") -> return Val("Jet{word.slice(0, word.len() - 2)}Id")
+    Val("Jet{word}")
+}
+
+fn jet_rust_emit_core_ui_type_names() -> [String:Bool] Never! {
     result_aliases :: [String]{"UIServiceResult", "UIFileFilterResult", "UIFSGrantResult", "UIShortcutResult", "UiShortcutBindingResult", "UIAccessibilityResult", "UIFileDialogResult", "UIClipboardTextResult", "UIClipboardWriteResult", "UIIMEResult", "UIDragResult", "UIShortcutDispatchResult", "UIAccessibilityNodeResult", "UIAccessibilityAttachResult", "UIAccessibilityProjectionResult"}
-    if result_aliases.contains(name) -> return None
+    names := [String:Bool]{}
     loop row in CORE_MODULE_EXPORTS {
-        if (row.module_name == "core.ui" || row.module_name == "core.ui.host") && row.type_exports.contains(name) -> return Val(~name)
+        if row.module_name != "core.ui" && row.module_name != "core.ui.host" -> next
+        loop name in row.type_exports {
+            if !result_aliases.contains(name) -> names[name] = true
+        }
     }
-    None
+    names
 }
 
 fn jet_rust_emit_history_type_name(name: String) -> String? {
@@ -2642,17 +3197,17 @@ fn jet_rust_emit_history_type_name(name: String) -> String? {
 // MIRRust has_native_type_projection: the declaration is a Prelude carrier, so the
 // program spells the native Rust type (raw field and variant names) and never
 // declares it.
-fn jet_rust_emit_has_native_type_projection(name: String) -> Bool Never! {
-    if jet_rust_emit_source_owned_core_shape(name) -> return false
+fn jet_rust_emit_has_native_type_projection(ctx: JetRustEmitContext, name: String) -> Bool Never! {
+    if core_source_owns_type(name) -> return false
     probe :: jet_rust_emit_core_native_probe_name(name)
-    if jet_rust_emit_core_rust_type_name(name) != None || jet_rust_emit_root_prelude_type_name(probe) != None || jet_rust_emit_core_ui_type_name(probe) != None -> return true
+    if jet_rust_emit_core_rust_type_name(name) != None || jet_rust_emit_root_prelude_type_name(probe) != None || jet_rust_emit_core_ui_type_name(ctx, probe) != None -> return true
     if jet_rust_emit_compute_handle_type_name(probe) != None || jet_rust_emit_service_handle_type_name(probe) != None || jet_rust_emit_alloc_handle_type_name(probe) != None -> return true
     if jet_rust_emit_file_handle_type_name(name) != None || jet_rust_emit_reflect_handle_type_name(probe) != None || jet_rust_emit_binary_text_handle_type_name(probe) != None -> return true
     jet_rust_emit_core_email_type_name(name) != None || jet_rust_emit_core_crypto_rust_type_name(name) != None
 }
 
-fn jet_rust_emit_is_canonical_core_native_type(name: String) -> Bool Never! {
-    name.starts_with("<corelib>/") && jet_rust_emit_has_native_type_projection(name)
+fn jet_rust_emit_is_canonical_core_native_type(ctx: JetRustEmitContext, name: String) -> Bool Never! {
+    name.starts_with("<corelib>/") && jet_rust_emit_has_native_type_projection(ctx, name)
 }
 
 // MIRRust collect_type_fields: the vault ffi records keep raw field names too.
@@ -2680,13 +3235,17 @@ fn jet_rust_emit_ffi_crate() -> String Never! { "jet_ffi" }
 // MIRRust rust_apply_type, the Prelude-carrier arms between the cursor carriers and
 // the declared nominal lookup. None means the name is an ordinary declared nominal.
 fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef, args: [MIRType]) -> String? {
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     native_name :: jet_rust_emit_core_native_probe_name(name.name)
     user_declared :: ctx.type_by_name.get(name.name) != None
+    if name.name == "ViewIter" && args.len() == 1 -> return Val("{root}JetViewIter<'_, {jet_rust_emit_type(&ctx, args[0])}>")
+    // Coordinate spaces and units are sema-only phantom facts.
+    if (native_name == "Point2" || native_name == "Delta2") && args.len() == 2 -> return Val("{root}JetCoord2")
+    if (native_name == "Transform" || native_name == "Transform2") && (args.len() == 2 || args.len() == 3) -> return Val("{root}JetTransform2")
+    if native_name == "Ray2" && args.len() == 3 -> return Val("{root}JetRay2")
     if name.name == "Tally" && args.len() == 1 -> return Val("std::collections::HashMap<{jet_rust_emit_type(&ctx, args[0])}, usize>")
     if name.name == "Queue" && args.len() == 1 -> return Val("std::collections::VecDeque<{jet_rust_emit_type(&ctx, args[0])}>")
     if args.len() == 0 && name.name == "Group" -> return Val("{root}jet_std::JetTaskGroup")
-    if name.name == "Instant" -> return Val(jet_rust_emit_root_prelude_type(&ctx, "JetInstant", args))
     if name.name == "RealtimeStream" -> return Val("{root}jet_std::JetRealtimeStream")
     if name.name == "RealtimeReceipt" -> return Val("{root}jet_std::JetRealtimeReceipt")
     if (name.name == "Cell" || name.name == "CellReadGuard" || name.name == "CellEditGuard") && args.len() == 1 {
@@ -2713,15 +3272,12 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
         }
         return Val("{jet_rust_emit_ffi_crate()}::{rust}<{jet_rust_emit_type(&ctx, args[0])}>")
     }
-    if name.name == "ExpiringSecret" && args.len() == 1 -> return Val("JetExpiringSecret<{jet_rust_emit_type(&ctx, args[0])}>")
-    if name.name == "ExpiringValue" && args.len() == 1 -> return Val("JetExpiring<{jet_rust_emit_type(&ctx, args[0])}>")
     if jet_rust_emit_core_email_type_name(name.name) == .Val(email) {
-        if (email == "SMTPAuth" || email == "DKIMConfig" || email == "SMTPConfig") && args.len() == 0 -> return Val("{root}jet_email::{email}<{jet_rust_emit_ffi_crate()}::Secret>")
+        if (email == "SMTPAuth" || email == "DkimConfig" || email == "SMTPConfig") && args.len() == 0 -> return Val("{root}jet_email::{email}<{jet_rust_emit_ffi_crate()}::Secret>")
         return Val(jet_rust_emit_root_prelude_type(&ctx, "jet_email::{email}", args))
     }
-    if jet_rust_emit_core_ui_type_name(native_name) == .Val(ui) -> return Val(jet_rust_emit_root_prelude_type(&ctx, "Jet{ui}", args))
+    if jet_rust_emit_core_ui_type_name(ctx, native_name) == .Val(ui) -> return Val(jet_rust_emit_root_prelude_type(&ctx, ui, args))
     if name.name == "HTML" && args.len() == 0 -> return Val("String")
-    if name.name == "Measurement" && args.len() == 1 -> return Val("{root}jet_std::JetMeasurement<{jet_rust_emit_type(&ctx, args[0])}>")
     if jet_rust_emit_root_prelude_type_name(native_name) == .Val(prelude) -> return Val(jet_rust_emit_root_prelude_type(&ctx, prelude, args))
     if jet_rust_emit_history_type_name(name.name) == .Val(history) {
         carrier :: "crate::jet_testing_history_foundation::{history}"
@@ -2743,6 +3299,7 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     }
     if name.name == "DataStream" && args.len() > 0 -> return Val("{root}jet_std::DataStream")
     if jet_rust_emit_core_rust_type_name(name.name) == .Val(core_name) {
+        if core_name == "String" -> return Val("String")
         if core_name == "JetRowPolicy" || core_name == "JetTaskFailure" -> return Val(jet_rust_emit_root_prelude_type(&ctx, core_name, args))
         if jet_rust_emit_root_prelude_type_name(core_name) == .Val(root_name) -> return Val(jet_rust_emit_root_prelude_type(&ctx, root_name, args))
         return Val(jet_rust_emit_root_prelude_type(&ctx, "jet_std::{core_name}", args))
@@ -2756,6 +3313,22 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     // MIRRust nominal_name: the crypto carriers and any remaining native projection.
     if jet_rust_emit_core_crypto_rust_type_name(name.name) == .Val(crypto) -> return Val("{jet_rust_emit_ffi_crate()}::{crypto}")
     if name.name == "Condition" && !user_declared -> return Val("{root}jet_std::JetCondition")
+    // Prelude carriers Context::rust_type spells without a declaration row
+    // (D-TTLVAL1=A, D-COLLBREADTH1=A, D-SHARED-CYCLE1=C); a user type wins.
+    if !user_declared {
+        if name.name == "Expired" && args.len() == 0 -> return Val("JetExpired")
+        if name.name == "Cache" && args.len() == 2 -> return Val("JetCache<{jet_rust_emit_type(&ctx, args[0])}, {jet_rust_emit_type(&ctx, args[1])}>")
+        if name.name == "Shared.Weak" && args.len() == 1 -> return Val("{root}jet_std::JetSharedWeak<{jet_rust_emit_type(&ctx, args[0])}>")
+    }
+    // MIRRust rust_apply_type: Prelude carriers Context::rust_type spells
+    // without a declaration row; a user type wins.
+    if !user_declared {
+        if name.name == "SharedRevisionError" && args.len() == 0 -> return Val("{root}jet_std::JetSharedRevisionError")
+        if name.name == "SharedSnapshot" && args.len() == 2 -> return Val("{root}jet_std::JetSharedSnapshot<{jet_rust_emit_type(&ctx, args[0])}, {jet_rust_emit_type(&ctx, args[1])}>")
+        if name.name == "ComputeViewMut" && args.len() <= 1 -> return Val("{root}JetComputeViewMut<'_>")
+        if name.name == "TransformError" && args.len() == 0 -> return Val("{root}JetErr")
+        if name.name == "BrowserTestServer" && args.len() == 0 -> return Val("{root}JetBrowserTestServer")
+    }
     if !user_declared {
         layout :: if name.name == {
             "HVar" | "VVar" | "LengthVar" -> Val("jet_layout::LinExpr")
@@ -2768,4 +3341,20 @@ fn jet_rust_emit_native_apply_type(ctx: &JetRustEmitContext, name: MIRNominalRef
     if name.name == "KeyStatus" -> return Val("{jet_rust_emit_ffi_crate()}::JetVaultKeyStatus")
     if name.name == "VaultError" -> return Val("{jet_rust_emit_ffi_crate()}::JetVaultError")
     None
+}
+
+#Test("worker policy private transports match the existing native shapes") {
+    pairs :: [(name: String, rust: String)]{
+        (name: "__WorkerMailbox", rust: "JetServiceMailbox"),
+        (name: "__WorkerChannel", rust: "JetServiceWorkerChannel"),
+        (name: "__WorkerHandler", rust: "JetServiceWorkerHandler"),
+        (name: "__WorkerStatus", rust: "JetServiceSupervisorStatus"),
+        (name: "__WorkerTopologyKind", rust: "JetServiceTopologyKind"),
+        (name: "__WorkerTopologyState", rust: "JetDevtoolsTopologySupervisorState"),
+        (name: "__WorkerRestartReason", rust: "JetDevtoolsTopologyRestartReason")
+    }
+    loop pair in pairs -> assert(if jet_rust_emit_service_handle_type_name(pair.name) == {
+        .Val(value) -> value == pair.rust
+        else -> false
+    })
 }

@@ -298,13 +298,20 @@ fn rule_allows_fact(
     crate::Policy::rule_allows_with_companions(&application.marker.name, site, companions)
 }
 
+type StaticMarkerKey<'a> = (crate::Diagnostics::Span, &'a str, Option<(usize, crate::Diagnostics::Span)>);
+type StaticMarkerProducts<'a> = HashMap<StaticMarkerKey<'a>, ValidatedRuleArguments>;
+
+fn static_marker_key(marker: &Marker) -> StaticMarkerKey<'_> {
+    (marker.name_span, &marker.name, marker.declaration)
+}
+
 fn materialize_static_marker_values(
     items: &mut [Item],
-    validated: &HashMap<usize, ValidatedRuleArguments>,
-    invalid: &HashSet<usize>,
+    validated: &StaticMarkerProducts<'_>,
+    invalid: &HashSet<StaticMarkerKey<'_>>,
 ) {
-    fn apply(marker: &mut Marker, validated: &HashMap<usize, ValidatedRuleArguments>) {
-        let Some(arguments) = validated.get(&marker.name_span.start) else {
+    fn apply(marker: &mut Marker, validated: &StaticMarkerProducts<'_>) {
+        let Some(arguments) = validated.get(&static_marker_key(marker)) else {
             // Some function markers carry a parser-seeded compile-time fact.
             // Keep it when the static-rule pass has no replacement value.
             return;
@@ -313,10 +320,10 @@ fn materialize_static_marker_values(
     }
     fn apply_all(
         markers: &mut Vec<Marker>,
-        validated: &HashMap<usize, ValidatedRuleArguments>,
-        invalid: &HashSet<usize>,
+        validated: &StaticMarkerProducts<'_>,
+        invalid: &HashSet<StaticMarkerKey<'_>>,
     ) {
-        markers.retain(|marker| !invalid.contains(&marker.name_span.start));
+        markers.retain(|marker| !invalid.contains(&static_marker_key(marker)));
         for marker in markers {
             apply(marker, validated);
         }
@@ -360,6 +367,10 @@ fn materialize_static_marker_values(
                     apply_all(&mut function.markers, validated, invalid);
                 }
             }
+            Item::CodeModule(module) => {
+                if let Some(body) = &mut module.body { materialize_static_marker_values(body, validated, invalid); }
+            }
+            Item::GenericModule(module) => materialize_static_marker_values(&mut module.body, validated, invalid),
             _ => {}
         }
     }
@@ -487,6 +498,7 @@ pub(crate) fn resolve_static_rule_products(
         facts.push(crate::AST::AppliedRuleApplication {
             marker: Marker {
                 name: name.to_string(),
+                declaration: None,
                 negated: false,
                 name_span: span,
                 args,
@@ -580,7 +592,7 @@ pub(crate) fn resolve_static_rule_products(
             Ok(arguments) => arguments,
             Err(diagnostic) => {
                 push_diagnostic_once(diags, diagnostic);
-                invalid.insert(marker.name_span.start);
+                invalid.insert(static_marker_key(marker));
                 continue;
             }
         };
@@ -600,7 +612,7 @@ pub(crate) fn resolve_static_rule_products(
         if let Some(text) = static_text {
             static_strings.push((marker.name.clone(), marker.span, text));
         }
-        validated.insert(marker.name_span.start, arguments);
+        validated.insert(static_marker_key(marker), arguments);
     }
     materialize_static_marker_values(&mut module.items, &validated, &invalid);
     materialize_test_faults(&mut module.items, diags);
@@ -732,12 +744,12 @@ pub(crate) fn resolve_static_rule_products(
 /// harness receives only this checked boolean and never interprets marker text.
 fn materialize_test_expected_fail(
     items: &mut [Item],
-    validated: &HashMap<usize, ValidatedRuleArguments>,
+    validated: &StaticMarkerProducts<'_>,
 ) {
     for item in items {
         let Item::Test(test) = item else { continue };
         test.expected_fail = validated
-            .get(&test.marker_name_span.start)
+            .get(&(test.span, Syntax::KW_TEST, None))
             .and_then(|arguments| arguments.constant_for_parameter(2))
             .and_then(|value| match value {
                 crate::Comptime::CtValue::Bool(value) => Some(*value),
@@ -789,7 +801,7 @@ impl<'a> crate::Sema::Checker<'a> {
                         format!("unknown callable policy setting `{}`", call.name),
                         "a callable policy name must be a compiler-owned setting or a public policy declared in this package"
                             .to_string(),
-                        format!("declare `pub policy {}(...) {{ wrap(call) {{ … }} }}" , call.name),
+                        format!("declare `policy {}(...) {{ wrap(call) {{ … }} }}" , call.name),
                         Some(call.name_span),
                     )
                     .with_detail(format!("{package_detail}\nmodule: {}", self.module_path)),
@@ -1018,7 +1030,7 @@ fn is_lazy_memo_iter(ty: &crate::AST::Type) -> bool {
 /// (`f.serde_markers` / `v.serde_markers`, which keep their `Marker`s whole;
 /// only `#Redact` is pulled out into `f.redact` upstream). One walk, so a new
 /// marker position is checked the moment it is read.
-fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
+pub(crate) fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
     items.iter().flat_map(|item| {
         let (type_markers, member_markers): (&[Marker], Vec<&Marker>) = match item {
             Item::Struct(s) => {
@@ -1065,6 +1077,8 @@ fn markers_in(items: &[Item]) -> impl Iterator<Item = &Marker> {
                 &[],
                 i.methods.iter().flat_map(|f| f.markers.iter()).collect(),
             ),
+            Item::CodeModule(module) => (&[], module.body.as_deref().map(|body| markers_in(body).collect()).unwrap_or_default()),
+            Item::GenericModule(module) => (&[], markers_in(&module.body).collect()),
             _ => (&[], Vec::new()),
         };
         type_markers.iter().chain(member_markers)
@@ -1187,7 +1201,7 @@ pub(crate) fn check_marker_vocabulary(
             .filter(|fact| fact.target.is_some())
             .map(|fact| &fact.marker),
     ) {
-        if !seen.insert(marker.name_span.start) {
+        if !seen.insert((marker.name_span.start, marker.name.as_str(), marker.declaration)) {
             continue;
         }
         // A retired row already received its teaching diagnostic in the
@@ -1200,7 +1214,7 @@ pub(crate) fn check_marker_vocabulary(
         }
         let marker_site = rule_facts
             .iter()
-            .find(|fact| fact.marker.name_span == marker.name_span)
+            .find(|fact| static_marker_key(&fact.marker) == static_marker_key(marker))
             .and_then(|fact| fact.site);
         // D-ADOPT-GUEST1=A: these existing decision-ID spellings are sema's
         // guest boundary, not Prelude marker rules. Only the exact C form at
@@ -1217,7 +1231,7 @@ pub(crate) fn check_marker_vocabulary(
         }
         // A name known on the OTHER plane already got E0062/E0063 from the
         // parser's shared marker reader — never double-report.
-        if !vocabulary.knows(&marker.name) {
+        if !vocabulary.knows(&marker.name) && vocabulary.declaration_for(marker).is_none() {
             diagnostics.push(vocabulary.unknown(&marker.name, marker.name_span));
             continue;
         }
@@ -1230,12 +1244,12 @@ pub(crate) fn check_marker_vocabulary(
         }
         if let Some(site) = rule_facts
             .iter()
-            .find(|fact| fact.marker.name_span == marker.name_span)
+            .find(|fact| static_marker_key(&fact.marker) == static_marker_key(marker))
             .and_then(|fact| fact.site)
         {
             let application = rule_facts
                 .iter()
-                .find(|fact| fact.marker.name_span == marker.name_span)
+                .find(|fact| static_marker_key(&fact.marker) == static_marker_key(marker))
                 .expect("marker fact found by site lookup");
             // A visible `derive T.Name { … }` provider is the open half of
             // the vocabulary. Its `#Name` request is legal at the provider's
@@ -1265,10 +1279,10 @@ pub(crate) fn check_declared_rule_facts(
     vocabulary: &crate::Policy::MarkerVocabulary,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
-    let mut seen: HashMap<(Option<crate::Diagnostics::Span>, String), crate::Diagnostics::Span> =
+    let mut seen: HashMap<(Option<crate::Diagnostics::Span>, Option<(usize, crate::Diagnostics::Span)>), crate::Diagnostics::Span> =
         HashMap::new();
     for application in facts {
-        let Some(declaration) = vocabulary.declaration(&application.marker.name) else {
+        let Some(declaration) = vocabulary.declaration_for(&application.marker) else {
             // D-ADOPT-GUEST1=A: the guest C-FFI boundary markers
             // (`#Import(c)` fn, `#Import module`) are sema's guest surface,
             // not Prelude marker rules, exactly as `check_marker_vocabulary`
@@ -1296,6 +1310,15 @@ pub(crate) fn check_declared_rule_facts(
             }
             continue;
         };
+        if declaration.group.is_some() {
+            // A bare valid group is consumed by parser replay. Any surviving
+            // application supplied a call boundary (even an empty `()`), which
+            // a fixed, parameter-free group does not accept.
+            diagnostics.push(Diagnostic::error("E0930", format!("fixed marker group `#{}` accepts no argument list", application.marker.name),
+                "a named group carries its members' fixed arguments in its declaration".into(),
+                "remove the parentheses and apply the group by name".into(), Some(application.marker.span)));
+            continue;
+        }
         if !declared_rule_arguments_match(&application.marker, declaration) {
             diagnostics.push(declared_rule_argument_shape_error(
                 &application.marker.name,
@@ -1321,7 +1344,7 @@ pub(crate) fn check_declared_rule_facts(
             ));
         }
         if !declared_rule_repeatable(declaration) {
-            let key = (application.target, application.marker.name.clone());
+            let key = (application.target, vocabulary.declaration_identity_for(&application.marker));
             if let Some(previous) = seen.insert(key, application.marker.span) {
                 diagnostics.push(
                     crate::Policy::marker_repeated_error(

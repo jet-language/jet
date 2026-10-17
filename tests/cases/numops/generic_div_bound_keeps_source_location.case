@@ -1,0 +1,12 @@
+# HAND-PORT tests/numops.rs:57-80 generic_div_bound_keeps_source_location
+# PENDING-SAME-HEAD runtimeGap=original-assert; PENDING-GRAMMAR; original assertions, no historical failing captures.
+# Original exit70, reason, exact original Jet operator filename:line and no synthetic location.
+fixture: generic_div_bound_keeps_source_location.fixture
+env: NO_COLOR=1
+step: jet build --profile=debug generic_int_div_zero.jet
+exit: 0
+step: built
+exit: 70
+stderr: ~ "dividing by zero" # original predicate
+stderr: ~ "generic_int_div_zero.jet:1" # original source location
+stderr: !~ "<built-in Div>" # original predicate

@@ -20,6 +20,7 @@ use jet_foundation.[
     THandleOp,
     TMethodRef,
     Type,
+    core_source_owns_type,
     symbol_id,
     tir_call_arg_copy_fact,
 ]
@@ -48,6 +49,7 @@ fn sema_stream_handle_param(name: String, ty: Type, convention: AccessConvention
 fn sema_stream_handle_owner(ty: Type) -> String? {
     if ty == {
         .Named(name) | .Apply(name, _) -> {
+            if core_source_owns_type(name) -> return None
             loop owner in ([String]{"MappedFile", "FileScope", "FileReader", "FileWriter", "TempDir", "TempFile", "FileLock", "StdinHandle", "Stdout", "Stderr", "JSONReader", "JSONWriter", "JSONLReader", "JSONLWriter", "CSVReader", "CSVWriter", "XMLReader", "XMLWriter", "CBORReader", "CBORWriter", "Reader", "Cursor", "Path"}) {
                 // The built-in `Path` has no declaring module: a canonical
                 // `<module>::Path` is a different record (`core.files.path`).
@@ -71,19 +73,21 @@ fn sema_stream_handle_owner_module(owner: String) -> String Never! {
     ""
 }
 
-fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_stream_handle_is_canonical(ty: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     actual :: sema_stream_handle_owner(ty) ?? return false
     if actual != owner -> return false
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return true
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
-    if resolved == .Val(row) {
-        owner_module := sema_stream_handle_owner_module(owner)
-        // A declared or imported type named like a module-less built-in
-        // (`Path`) shadows it; the two never share an identity.
-        return row.symbol.kind == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, row.symbol.module_name) ?? "") == owner_module
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
+        if resolved == .Val(row) {
+            owner_module := sema_stream_handle_owner_module(owner)
+            // A declared or imported type named like a module-less built-in
+            // (`Path`) shadows it; the two never share an identity.
+            return row.symbol.kind == SymbolKind.Type && owner_module != "" && (sema_registration_module_name(graph, row.symbol.module_name) ?? "") == owner_module
+        }
+        return true
+    } else {
+        return true
     }
-    true
 }
 
 fn sema_stream_handle_result(ok: Type, error: Type) -> Type Never! {
@@ -98,67 +102,87 @@ fn sema_stream_handle_encoding_error() -> Type Never! {
     Type.Named{name: "EncodingError"}
 }
 
-fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpec? {
+// `effect_name` is Rust's exact handle-method row: `method_calls.rs` records
+// only `receiver_effect_leaf` (`Time.Wait` on the blocking file, stdout and
+// channel methods) for these receivers. Authority is checked where the
+// handle is acquired (`files.open`, `term.stdout`), not on each method.
+fn sema_stream_handle_spec(owner: String, method: String, receiver_type: Type) -> SemaStreamHandleSpec? {
     unit := Type.Named{name: "Unit"}
     string := Type.String
     io := sema_stream_handle_io_error()
     encoding := sema_stream_handle_encoding_error()
     u8 := Type.IntN{signed: false, bits: 8}
     bytes := Type.List{element: u8}
+    if owner == "Sender" || owner == "Receiver" {
+        element :: if receiver_type == {
+            .Apply(_, type_args) -> if type_args.len() == 1 -> type_args[0] else -> Type.Int
+            else -> Type.Int
+        }
+        if method == "close" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelClose, result_type: unit, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if owner == "Sender" {
+            if method == "send" -> return Val(SemaStreamHandleSpec{operation: THandleOp.SenderSend, result_type: unit, params: [SemaCallParam]{sema_stream_handle_param("value", element, AccessConvention.Move)}, receiver_convention: AccessConvention.Read, effect_name: "Time.Wait"})
+            return None
+        }
+        if method == "receive" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelReceive, result_type: Type.Result{ok: element, err: Type.Named{name: "Closed"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "Time.Wait"})
+        if method == "try_receive" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelTryReceive, result_type: Type.Option{inner: element}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_timer" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsTimer, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_interval" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsInterval, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_cancelled" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsCancelled, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "is_ready" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelIsReady, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "delay_ms" -> return Val(SemaStreamHandleSpec{operation: THandleOp.ChannelDelayMs, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        return None
+    }
     if owner == "MappedFile" {
-        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
+        if method == "window" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindow, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "window_len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileWindowLen, result_type: sema_stream_handle_result(Type.Apply{name: "View", args: [Type]{u8}}, io), params: [SemaCallParam]{sema_stream_handle_param("offset", Type.Int, AccessConvention.Read), sema_stream_handle_param("length", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "lines" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLines, result_type: Type.Apply{name: "ViewIter", args: [Type]{Type.Apply{name: "View", args: [Type]{u8}}}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "len" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileLen, result_type: Type.Int, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "is_empty" -> return Val(SemaStreamHandleSpec{operation: THandleOp.MappedFileIsEmpty, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
     if owner == "FileReader" {
-        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
+        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "read" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileReaderRead, result_type: sema_stream_handle_result(bytes, io), params: [SemaCallParam]{sema_stream_handle_param("max", Type.Int, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
     }
     if owner == "FileWriter" {
-        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "FS"})
+        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "write_all" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterWriteAll, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "fsync" -> return Val(SemaStreamHandleSpec{operation: THandleOp.FileWriterFsync, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
     }
     if owner == "StdinHandle" {
-        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.StdinReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "read_line" -> return Val(SemaStreamHandleSpec{operation: THandleOp.StdinReadLine, result_type: sema_stream_handle_result(Type.Option{inner: string}, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
     if owner == "Stdout" || owner == "Stderr" {
         stdout := owner == "Stdout"
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWrite else -> THandleOp.StderrWrite, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteLine else -> THandleOp.StderrWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "write_bytes" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteBytes else -> THandleOp.StderrWriteBytes, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutFlush else -> THandleOp.StderrFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "is_tty" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutIsTTY else -> THandleOp.StderrIsTTY, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWrite else -> THandleOp.StderrWrite, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "write_line" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteLine else -> THandleOp.StderrWriteLine, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("text", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "write_bytes" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutWriteBytes else -> THandleOp.StderrWriteBytes, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutFlush else -> THandleOp.StderrFlush, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "Time.Wait"})
+        if method == "is_tty" -> return Val(SemaStreamHandleSpec{operation: if stdout -> THandleOp.StdoutIsTTY else -> THandleOp.StderrIsTTY, result_type: Type.Bool, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
-    if owner == "JSONReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "JSONReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "JSONWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
-    if owner == "JSONLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataTree"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "JSONLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "JSONLWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "DataTree"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.JSONLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
-    if owner == "CSVReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CSVReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "CSVRow"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-    if owner == "CSVWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CSVWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("row", Type.List{element: string}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CSVWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CSVWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-    }
-    if owner == "XMLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataTree"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "XMLReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "Dyn"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "XMLWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "DataTree"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("tree", Type.Named{name: "Dyn"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.XMLWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
-    if owner == "CBORReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+    if owner == "CBORReader" && method == "next" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORReaderNext, result_type: sema_stream_handle_result(Type.Option{inner: Type.Named{name: "DataEvent"}}, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     if owner == "CBORWriter" {
-        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
-        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: "IO"})
+        if method == "write" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterWrite, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{sema_stream_handle_param("event", Type.Named{name: "DataEvent"}, AccessConvention.Move)}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "flush" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFlush, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
+        if method == "finish" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CBORWriterFinish, result_type: sema_stream_handle_result(unit, encoding), params: [SemaCallParam]{}, receiver_convention: AccessConvention.Write, effect_name: ""})
     }
     if owner == "Path" {
         if method == "join" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathJoin, result_type: Type.Named{name: "Path"}, params: [SemaCallParam]{sema_stream_handle_param("other", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
@@ -168,8 +192,8 @@ fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpe
         if method == "normalize" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathNormalize, result_type: Type.Named{name: "Path"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "is_within" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathIsWithin, result_type: Type.Bool, params: [SemaCallParam]{sema_stream_handle_param("other", Type.Named{name: "Path"}, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
         if method == "to_string" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathToString, result_type: string, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
-        if method == "write_atomic" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWriteAtomic, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
-        if method == "walk" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWalk, result_type: Type.List{element: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: "FS"})
+        if method == "write_atomic" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWriteAtomic, result_type: sema_stream_handle_result(unit, io), params: [SemaCallParam]{sema_stream_handle_param("bytes", bytes, AccessConvention.Read)}, receiver_convention: AccessConvention.Read, effect_name: ""})
+        if method == "walk" -> return Val(SemaStreamHandleSpec{operation: THandleOp.PathWalk, result_type: Type.List{element: Type.Named{name: "Path"}}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, effect_name: ""})
     }
     if owner == "Cursor" {
         if method == "take_until" -> return Val(SemaStreamHandleSpec{operation: THandleOp.CursorTakeUntil, result_type: sema_stream_handle_result(string, Type.String), params: [SemaCallParam]{sema_stream_handle_param("delimiter", string, AccessConvention.Read)}, receiver_convention: AccessConvention.Write, effect_name: ""})
@@ -205,14 +229,23 @@ fn sema_stream_handle_spec(owner: String, method: String) -> SemaStreamHandleSpe
 }
 
 fn sema_stream_handle_known_wrong_direction(owner: String, method: String) -> Bool Never! {
-    (owner == "FileReader" && (method == "write_line" || method == "flush")) || (owner == "FileWriter" && (method == "lines" || method == "read_line"))
+    (owner == "FileReader" && (method == "write_line" || method == "flush" || method == "write_all" || method == "fsync" || method == "set_mode")) || (owner == "FileWriter" && (method == "lines" || method == "read_line" || method == "read"))
 }
 
-fn sema_stream_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+// Rust `file_handle_method_return` (method_calls.rs E2-M7) types the methods
+// of these handles without recording a receiver convention, so an unmarked
+// `reader.read(n)` or `writer.write_all(bytes)` needs no `&`, and a written
+// mark has no convention to be checked against. `Stdout`/`Stderr` dispatch
+// to their `&self` source methods instead.
+fn sema_stream_handle_reports_no_receiver_convention(owner: String) -> Bool Never! {
+    owner == "MappedFile" || owner == "FileScope" || owner == "FileReader" || owner == "FileWriter" || owner == "StdinHandle"
 }
 
-fn sema_stream_handle_effect_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_stream_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+}
+
+fn sema_stream_handle_effect_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String, diagnostics: &[Diagnostic]) -> Bool Never! {
     entries := [EffectRowEntry]{}
     if effect_name != "" -> &entries.push(EffectRowEntry{name: effect_name, span: span})
     facts := SemaCallFacts{
@@ -222,13 +255,13 @@ fn sema_stream_handle_effect_fact(environment: SemaScopeEnvironment, scopes: &Se
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
     }
-    sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
+    sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_stream_handle_fixed_list_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_stream_handle_fixed_list_assignable(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if required == {
         .List(element) -> if offered == {
-            .FixedList(fixed_element, _) -> sema_call_type_assignable(element, fixed_element, environment) ?? false
+            .FixedList(fixed_element, _) -> sema_call_type_assignable(element, fixed_element, environment, program) ?? false
             else -> false
         }
         else -> false
@@ -242,10 +275,10 @@ fn sema_stream_handle_integer_width(ty: Type) -> Bool Never! {
     }
 }
 
-fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
+fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args: [CallArg], receiver_expr: Expr?, receiver_value: TExpr?, receiver_convention: AccessConvention, shift_argument: Int, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
     checked_args := args
     binding :: sema_call_bind_args(callee, params, &checked_args, span, &diagnostics) ?? {
-        sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return None
     }
     if !sema_call_validate_binding(callee, params, binding, checked_args, span, &diagnostics) -> return None
@@ -254,8 +287,8 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
         slot :: sema_call_bound_slot(binding, binding.sources[index], checked_args[index])
         if slot < 0 || slot >= params.len() -> return None
         required_declared :: sema_call_parameter_type(params[slot]) ?? return None
-        required := sema_call_resolved_type(required_declared, environment)
-        value :: if shift_argument == index -> sema_check_expression(checked_args[index].expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(checked_args[index].expr, Val(required), environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        required := sema_call_resolved_type(required_declared, environment, program)
+        value :: if shift_argument == index -> sema_check_expression(checked_args[index].expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) else -> sema_check_expression(checked_args[index].expr, Val(required), environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         checked :: value ?? return None
         if shift_argument == index {
             if checked.ty == .IntN(_, _) {
@@ -268,8 +301,8 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
                 next
             }
         }
-        compatible := sema_call_type_assignable(required_declared, checked.ty, environment) ?? false
-        if !compatible && sema_stream_handle_fixed_list_assignable(required_declared, checked.ty, environment) -> compatible = true
+        compatible := sema_call_type_assignable(required_declared, checked.ty, environment, program) ?? false
+        if !compatible && sema_stream_handle_fixed_list_assignable(required_declared, checked.ty, environment, program) -> compatible = true
         if !compatible {
             &diagnostics.push(sema_type_mismatch(required, checked.ty, checked_args[index].span))
             return None
@@ -286,15 +319,15 @@ fn sema_stream_handle_checked_args(callee: String, params: [SemaCallParam], args
     }
     if !ownership.accepted || !ownership.complete -> return None
     loop index in 0..<values.len() {
-        if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> values[index] = sema_tir_expr(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, values[index].span)
+        if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> values[index] = sema_tir_node(values[index].ty, TExprKind.Clone{value: values[index], fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, values[index].span)
     }
     Val(values)
 }
 
-fn sema_stream_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
-    checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(environment, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+fn sema_stream_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
@@ -303,51 +336,53 @@ fn sema_stream_handle_method_ref(owner: String, method: String) -> TMethodRef Ne
     TMethodRef{symbol: symbol_id(SymbolKind.Function, owner_module, owner, method), name: method, mangled: false, trait_owner: None, operator_identity: None}
 }
 
-fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+fn sema_stream_handle_lines_value(receiver: TExpr, owner: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
     result_type := if owner == "FileReader" -> Type.Named{name: "FileLines"} else -> Type.Named{name: "StdinLines"}
-    value := sema_tir_expr(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
-    checked :: sema_expr_expected(value, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    effect_name := if owner == "FileReader" -> "FS" else -> "IO"
-    if !sema_stream_handle_effect_fact(environment, &scopes, &context, "{owner}.lines", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    value := sema_tir_node(result_type, TExprKind.MethodCall{receiver: receiver, method: sema_stream_handle_method_ref(owner, "lines"), type_args: [Type]{}, args: [TCallArg]{}}, span)
+    checked :: sema_expr_expected(value, expected, environment, program, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    // Rust `receiver_effect_leaf`: `FileReader.lines` waits; `StdinHandle`
+    // records no handle effect.
+    effect_name := if owner == "FileReader" -> "Time.Wait" else -> ""
+    if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.lines", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-fn sema_stream_file_scope_read(receiver: Expr, receiver_value: TExpr, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    if args.len() != 1 {
-        sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
-        &diagnostics.push(sema_call_arity_diagnostic("FileScope.read", 1, args.len(), false, span))
-        return SemaMethodSpecialCheck{handled: true, value: None}
-    }
-    record :: sema_call_core_receiver_record(receiver_value.ty, "read", args.len() + 1, span, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    parameter_access := sema_call_core_access(record, 1) ?? AccessConvention.Read
-    params := [SemaCallParam]{sema_stream_handle_param("path", Type.String, parameter_access)}
-    typed_args :: sema_stream_handle_checked_args("FileScope.read", params, args, Val(receiver), receiver_value, sema_call_core_access(record, 0) ?? AccessConvention.Read, -1, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    result_type := sema_stream_handle_result(Type.String, sema_stream_handle_io_error())
-    failure := sema_call_failure_carrier(Val(result_type))
-    core_args := [TExpr]{receiver_value}
-    loop argument in typed_args -> &core_args.push(argument)
-    if !sema_call_core_record_effects(record, span, [Type]{}, result_type, failure, [FunctionDefaultRef]{}, &scopes, &context, environment, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
-    value :: sema_call_core_tir(record, core_args, span, [Type]{}, [Bool]{false, false}, None, result_type, failure, expected, environment, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    SemaMethodSpecialCheck{handled: true, value: Val(value)}
-}
 
 
 // Called before ordinary method lookup for canonical Core handle types.
-pub fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     owner :: sema_stream_handle_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
-    if owner == "FileScope" && method == "read" -> return sema_stream_file_scope_read(receiver, receiver_value, args, span, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+    if !sema_stream_handle_is_canonical(receiver_value.ty, owner, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    source_member := if owner == "FileScope" && method == "read" -> "scoped_read" else if owner == "FileReader" && method == "read_line" -> "__reader_read_line" else -> ""
+    if source_member != "" {
+        identity :: sema_call_core_module_identity(environment, program, "core.files") ?? {
+            &diagnostics.push(sema_error("E0003", span, "filesystem source module is not loaded", "receiver policy requires Core/files/files.jet", "load the registered Core source module"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        target :: sema_call_core_source_target(environment, program, identity, source_member, [Type]{}, span, true, &diagnostics) ?? {
+            &diagnostics.push(sema_error("E0003", span, "filesystem source receiver target is missing", "receiver policy requires its canonical source function", "load the registered Core source function"))
+            return SemaMethodSpecialCheck{handled: true, value: None}
+        }
+        access :: if owner == "FileReader" -> AccessConvention.Write else -> AccessConvention.Read
+        source_args := [CallArg]{CallArg{convention: access, expr: receiver, span: span, flags: ast_empty_call_arg_flags(), label: None, spread: false}}
+        loop argument in args -> &source_args.push(argument)
+        scopes.ownership_call_depth += 1
+        value := sema_call_core_check_source_owned(target, "{owner}.{method}", [Type]{}, source_args, span, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        scopes.ownership_call_depth -= 1
+        return SemaMethodSpecialCheck{handled: true, value: value}
+    }
     if (owner == "FileReader" && method == "lines") || (owner == "StdinHandle" && method == "lines") {
         if args.len() != 0 {
-            sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+            sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
             &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", 0, args.len(), false, span))
             return SemaMethodSpecialCheck{handled: true, value: None}
         }
         _ := sema_ownership_check_call_receiver(&state, receiver, AccessConvention.Read, scopes, span, &diagnostics)
-        return sema_stream_handle_lines_value(receiver_value, owner, span, expected, environment, &scopes, &context, &diagnostics)
+        if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
+        return sema_stream_handle_lines_value(receiver_value, owner, span, expected, environment, program, &scopes, &context, &diagnostics)
     }
     if sema_stream_handle_known_wrong_direction(owner, method) {
-        sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         if {
             owner == "FileReader" -> {
                 &diagnostics.push(sema_error("E2501", span, "`{method}` is not available on a read-only file handle", "`files.open` returns a read-only handle; it can only read lines or bytes", "use `files.create` or `files.append` to get a writable handle"))
@@ -358,35 +393,39 @@ pub fn sema_call_try_stream_handle_method(receiver: Expr, receiver_value: TExpr,
         }
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    spec :: sema_stream_handle_spec(owner, method) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    spec :: sema_stream_handle_spec(owner, method, receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     if args.len() != spec.params.len() {
-        sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", spec.params.len(), args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
     shift_argument := if owner == "Reader" && (method == "seek" || method == "skip" || method == "take") -> 0 else -> -1
-    typed_args :: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
+    checked_args :: sema_stream_handle_checked_args("{owner}.{method}", spec.params, args, Val(receiver), receiver_value, spec.receiver_convention, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    if sema_stream_handle_reports_no_receiver_convention(owner) -> sema_receiver_mark_forget(&state, receiver)
+    typed_args :: checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    sema_stream_handle_finish(receiver_value, spec.operation, typed_args, spec.result_type, spec.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
-fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_stream_handle_static_owner_is_canonical(owner: String, scopes: &SemaScopeTable, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     index :: sema_scope_resolve_index(scopes, owner) ?? return true
     symbol :: scopes.bindings[index].symbol
     if symbol.kind != SymbolKind.Type -> return false
     owner_module := sema_stream_handle_owner_module(owner)
     if owner_module == "" -> return false
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return false
-    (sema_registration_module_name(graph, symbol.module_name) ?? "") == owner_module
+    if program.registration_graph == .Val(graph) {
+        return (sema_registration_module_name(graph, symbol.module_name) ?? "") == owner_module
+    } else {
+        return false
+    }
 }
 
 // Static reserved constructors. Callers must still prefer a shadowing user type.
-pub fn sema_call_try_stream_handle_static(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+fn sema_call_try_stream_handle_static(owner: String, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
     known := (owner == "Path" && (method == "from" || method == "home")) || (owner == "Reader" && method == "over") || (owner == "Cursor" && method == "over")
-    if !known || !sema_stream_handle_static_owner_is_canonical(owner, &scopes, environment) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    if !known || !sema_stream_handle_static_owner_is_canonical(owner, &scopes, environment, program) -> return SemaMethodSpecialCheck{handled: false, value: None}
     expected_count := if method == "home" -> 0 else -> 1
     if args.len() != expected_count {
-        sema_stream_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_stream_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         &diagnostics.push(sema_call_arity_diagnostic("{owner}.{method}", expected_count, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
@@ -427,37 +466,39 @@ pub fn sema_call_try_stream_handle_static(owner: String, method: String, args: [
             operation = THandleOp.ReaderOver{owned: owned_reader}
         }
     }
-    typed_args :: sema_stream_handle_checked_args("{owner}.{method}", params, ownership_args, None, None, AccessConvention.Read, shift_argument, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    typed_args :: sema_stream_handle_checked_args("{owner}.{method}", params, ownership_args, None, None, AccessConvention.Read, shift_argument, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
     values := typed_args
     if owner == "Reader" && owned_reader && values.len() == 1 {
         if values[0].kind == {
             .Move(_) -> {}
-            else -> values[0] = sema_tir_expr(values[0].ty, TExprKind.Move{value: values[0]}, values[0].span)
+            else -> values[0] = sema_tir_node(values[0].ty, TExprKind.Move{value: values[0]}, values[0].span)
         }
     }
-    unit_receiver := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
-    checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_stream_handle_effect_fact(environment, &scopes, &context, "{owner}.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+    unit_receiver := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: unit_receiver, operation: operation, args: values}, span)
+    checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.{method}", span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
-fn sema_stream_handle_registered_owner(owner: String, environment: SemaScopeEnvironment) -> Symbol? {
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return None
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner)
-    if resolved == .Val(row) && row.symbol.kind == SymbolKind.Type -> return Val(row.symbol)
-    None
+fn sema_stream_handle_registered_owner(owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Symbol? {
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, owner)
+        if resolved == .Val(row) && row.symbol.kind == SymbolKind.Type -> return Val(row.symbol)
+        return None
+    } else {
+        return None
+    }
 }
 
 // Core's file handles and temporary filesystem objects expose a checked
 // `path` projection; reader/writer paths lower through their typed handle ops.
-pub fn sema_call_try_core_file_path_field(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_call_try_core_file_path_field(base: TExpr, member: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if member != "path" -> return None
     owner :: sema_stream_handle_owner(base.ty) ?? return None
     if owner != "FileReader" && owner != "FileWriter" && owner != "TempDir" && owner != "TempFile" && owner != "FileLock" -> return None
-    if !sema_stream_handle_is_canonical(base.ty, owner, environment) -> return None
-    owner_symbol := sema_stream_handle_registered_owner(owner, environment)
+    if !sema_stream_handle_is_canonical(base.ty, owner, environment, program) -> return None
+    owner_symbol := sema_stream_handle_registered_owner(owner, environment, program)
     owner_id := if owner_symbol == .Val(symbol) -> symbol.id else -> symbol_id(SymbolKind.Type, sema_stream_handle_owner_module(owner), "", owner)
     owner_module := sema_stream_handle_owner_module(owner)
     field_id := symbol_id(SymbolKind.Field, owner_module, owner_id.key, member)
@@ -465,14 +506,14 @@ pub fn sema_call_try_core_file_path_field(base: TExpr, member: String, span: Spa
     &context.name_references.push(SemaNameReferenceFact{span: span, symbol: field_symbol, kind: "field"})
     reference := TFieldRef{owner: Val(owner_id), field: field_id, name: member, ty: Type.String, boxed: false}
     value := if {
-        owner == "FileReader" -> sema_tir_expr(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileReaderPath, args: [TExpr]{}}, span)
-        owner == "FileWriter" -> sema_tir_expr(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileWriterPath, args: [TExpr]{}}, span)
-        else -> sema_tir_expr(Type.String, TExprKind.Field{receiver: base, field: reference}, span)
+        owner == "FileReader" -> sema_tir_node(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileReaderPath, args: [TExpr]{}}, span)
+        owner == "FileWriter" -> sema_tir_node(Type.String, TExprKind.HandleMethod{receiver: base, operation: THandleOp.FileWriterPath, args: [TExpr]{}}, span)
+        else -> sema_tir_node(Type.String, TExprKind.Field{receiver: base, field: reference}, span)
     }
     if owner == "FileReader" || owner == "FileWriter" {
-        if !sema_stream_handle_effect_fact(environment, &scopes, &context, "{owner}.path", span, Type.String, "", &diagnostics) -> return None
+        if !sema_stream_handle_effect_fact(environment, program, &scopes, &context, "{owner}.path", span, Type.String, "", &diagnostics) -> return None
     }
-    sema_expr_expected(value, expected, environment, &diagnostics)
+    sema_expr_expected(value, expected, environment, program, &diagnostics)
 }
 
 fn sema_stream_handle_fact_has_effect(context: &SemaCheckContext, span: Span, effect_name: String) -> Bool Never! {
@@ -489,15 +530,15 @@ fn sema_stream_handle_fact_has_effect(context: &SemaCheckContext, span: Span, ef
 
 // Statement checking calls this at the collection expression's span for
 // special stream sources that do not have an intrinsic method-call node.
-pub fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForInMethod, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_call_stream_record_for_in_fact(collection: TExpr, method_kind: TForInMethod, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_name := if method_kind == {
-        .LinesFile -> "FS"
-        .LinesStdin -> "IO"
+        .LinesFile -> "Time.Wait"
+        .LinesStdin -> ""
         .LinesProcessStream -> "Exec"
         .ChannelReceiver -> ""
-        .EncodingReader(_) -> "IO"
+        .EncodingReader(_) -> ""
         else -> { return true }
     }
     if sema_stream_handle_fact_has_effect(&context, collection.span, effect_name) -> return true
-    sema_stream_handle_effect_fact(environment, &scopes, &context, "ForIn.stream", collection.span, collection.ty, effect_name, &diagnostics)
+    sema_stream_handle_effect_fact(environment, program, &scopes, &context, "ForIn.stream", collection.span, collection.ty, effect_name, &diagnostics)
 }

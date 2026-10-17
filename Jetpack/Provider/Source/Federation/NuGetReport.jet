@@ -59,8 +59,8 @@ impl ProviderFactReport {
                 facts.version = root_version ?? ""
             }
             references.len() == 1 -> {
-                facts.name = ~references[0].name
-                facts.version = ~references[0].version
+                facts.name = references[0].name.copy()
+                facts.version = references[0].version.copy()
             }
             else -> {
                 facts.name = "nuget-lock"
@@ -86,7 +86,7 @@ impl ProviderFactReport {
         multiple_references :: !has_root && references.len() > 1
         facts.dependencies = if {
             dependency_values.len() > 0 -> dependency_values
-            multiple_references -> ~reference_values
+            multiple_references -> reference_values.copy()
             else -> [String]{}
         }
         reference_keys :: [String]{"Condition", "PrivateAssets", "IncludeAssets", "ExcludeAssets"}

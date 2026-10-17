@@ -1,0 +1,25 @@
+# HAND-PORT tests/time_format_tiers.rs:5 checked_time_format_grammar_and_diagnostics_match_across_tiers
+# PENDING-KIT; no historical failure captures blessed.
+# Exact original default/interpret/aot exit/stdout/stderr relational agreement; separate stores, rustc guard erased.
+fixture: checked_time_format_grammar_and_diagnostics_match_across_tiers.fixture
+env: NO_COLOR=1
+# ORACLE-LITERAL tests/time_format_tiers.rs original expected output bytes.
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_ROOT={work}/jetpack-default
+exit: 0
+stdout: = checked_time_format_grammar_and_diagnostics_match_across_tiers.stdout.expected
+step interpret: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache-interpret
+env: JETPACK_ROOT={work}/jetpack-interpret
+exit: 0
+stdout: = checked_time_format_grammar_and_diagnostics_match_across_tiers.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+env: JET_STORE_DIR={work}/cache-aot
+env: JETPACK_ROOT={work}/jetpack-aot
+exit: 0
+step aot: built
+exit: 0
+stdout: = checked_time_format_grammar_and_diagnostics_match_across_tiers.stdout.expected
+stderr: == default

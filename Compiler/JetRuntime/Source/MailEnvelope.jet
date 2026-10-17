@@ -1,0 +1,13 @@
+// Email.rs:144-148; native Envelope40 owns inline Address16 and Address List24.
+MAIL_ENVELOPE_BYTES :: prep { I64{40} }
+fn mail_envelope_copy_into(value: I64, target: I64) {
+    mail_address_copy_into(value, target)
+    mail_address_list_copy_into(value + MAIL_ADDRESS_BYTES, target + MAIL_ADDRESS_BYTES)
+}
+fn mail_envelope_drop_fields(value: I64) {
+    mail_address_drop_fields(value)
+    mail_address_list_drop_fields(value + MAIL_ADDRESS_BYTES)
+}
+fn mail_envelope_eq(left: I64, right: I64) -> Bool {
+    mail_address_eq(left, right) && mail_address_list_eq(left + MAIL_ADDRESS_BYTES, right + MAIL_ADDRESS_BYTES)
+}

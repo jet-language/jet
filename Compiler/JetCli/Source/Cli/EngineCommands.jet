@@ -1,0 +1,24 @@
+// Source/main.rs engine front doors. Keep the original argv, including the
+// standalone `--` and opaque downstream flags; InspectB owns the one engine
+// protocol/stdio/exit-status mechanism.
+fn jet_cli_engine_commands(command: String, raw: [String]) -> JetCLIPlan? Never! {
+    if command == {
+        "env" -> {
+            forwarded := [String]{"env"}
+            removed := false
+            loop argument in raw {
+                if !removed && argument == "env" {
+                    removed = true
+                    next
+                }
+                &forwarded.push(argument)
+            }
+            return Val(JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: command, argv: forwarded}})
+        }
+        "shared-store" | "trust" | "image" | "os" | "search" | "clean" -> {
+            return Val(JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: command, argv: raw}})
+        }
+        else -> {}
+    }
+    None
+}

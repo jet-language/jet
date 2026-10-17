@@ -1,0 +1,17 @@
+Error [E0111]: `read` was made with `::`, so it can't be changed
+  --> named_write_window_calls_keep_alias_and_read_view_checks_2.jet:9:11
+    |
+  9 |     bump(&read)
+    |           ^^^^
+ Why: `bump` will change this value, so it must be mutable (`:=`)
+ Fix: Declare it with `read := ...`
+More: jet-lang.dev/e/E0111
+
+Error [E0212]: `values[…]` cannot be passed with write access while `read` is still looking into it
+  --> named_write_window_calls_keep_alias_and_read_view_checks_2.jet:9:11
+    |
+  9 |     bump(&read)
+    |           ^^^^
+ Why: `read` is a live read view into `values[…]`; changing or moving the owner could invalidate that view
+ Fix: Finish using `read` before changing `values[…]`, narrow the view's scope, or make an owned copy
+More: jet-lang.dev/e/E0212

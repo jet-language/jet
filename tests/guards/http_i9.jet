@@ -1,0 +1,27 @@
+use core.files as files
+use core.text.parse as parse
+
+// Port of tests/http_i9.rs:9-35; retain the source parser's body-bound ordering
+// and one-copy byte projection laws, without inspecting generated Rust.
+#Test("source_http_parsers_bound_body_before_one_copy_projection") {
+    source :: files.read("Core/http/http.jet") ?? panic("read source HTTP parsers")
+    names :: [String]{"parse_request", "parse_response"}
+    loop name in names {
+        parser_parts :: source.split("pub fn {name}(").to_list()
+        assert(parser_parts.len() > 1, "missing source parser {name}")
+        parser_tail :: parser_parts[1].to_string()
+        body_parts :: parser_tail.split("\npub fn ").to_list()
+        body :: body_parts[0].to_string()
+        cap :: parse.find(body, "if raw.len() - split > C_MAX_BODY_BYTES")
+        projection :: parse.find(body, "body_raw :: slice_b(raw, split, raw.len())")
+        assert(cap >= 0, "{name}: body cap must use the input length")
+        assert(projection >= 0, "{name}: missing body projection")
+        assert(cap < projection, "{name} must reject before copying the body")
+    }
+    slice_parts :: source.split("fn slice_b(").to_list()
+    assert(slice_parts.len() > 1, "missing byte projection")
+    slice :: slice_parts[1].to_string()
+    assert(slice.contains("raw.slice(start, end)"))
+    assert(!slice.contains("push("), "projection must not grow a second list")
+    assert(!slice.contains("~out"), "projection must not copy the result again")
+}

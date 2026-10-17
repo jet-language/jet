@@ -1,0 +1,17 @@
+# tests/project_check.rs::extension_optional_check_replays_receipt at tests/project_check.rs:511; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: extension_optional_check_replays_receipt.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step first: jet check --verbose src/cli/main
+cwd: {work}/frozen_dogfood
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+step second: jet check --verbose src/cli/main
+cwd: {work}/frozen_dogfood
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stdout: == first
+stderr: ~ "ok: check current" # original predicate

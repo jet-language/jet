@@ -1,0 +1,36 @@
+
+use core.time as time
+
+
+fn run() {
+    exact :: time.from_unix_nanoseconds(1710502245123456789)
+    negative :: time.from_unix_nanoseconds(-1710502245123456789)
+    too_large :: time.from_unix_seconds(10000000000000)
+
+    print("seconds:{exact.to_unix_s()}")
+    if exact.to_unix_us() == {
+        .Ok(number) -> { print("microseconds:ok:{number}") }
+        .Err(_) -> { print("microseconds:err:unexpected") }
+    }
+    if exact.to_unix_ns() == {
+        .Ok(number) -> { print("nanoseconds:ok:{number}") }
+        .Err(_) -> { print("nanoseconds:err:unexpected") }
+    }
+    if negative.to_unix_us() == {
+        .Ok(number) -> { print("negative-microseconds:ok:{number}") }
+        .Err(_) -> { print("negative-microseconds:err:unexpected") }
+    }
+    if negative.to_unix_ns() == {
+        .Ok(number) -> { print("negative-nanoseconds:ok:{number}") }
+        .Err(_) -> { print("negative-nanoseconds:err:unexpected") }
+    }
+    if too_large.to_unix_us() == {
+        .Ok(number) -> { print("overflow-microseconds:ok:{number}") }
+        .Err(error) -> { print("overflow-microseconds:err:{error:Debug}") }
+    }
+    if too_large.to_unix_ns() == {
+        .Ok(number) -> { print("overflow-nanoseconds:ok:{number}") }
+        .Err(error) -> { print("overflow-nanoseconds:err:{error:Debug}") }
+    }
+    return
+}

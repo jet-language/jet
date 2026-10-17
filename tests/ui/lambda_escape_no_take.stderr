@@ -1,12 +1,12 @@
 Error [E0121]: `item` was consumed by an escaping lambda, so it can't be used here
-  --> lambda_escape_no_take.jet:14:10
+  --> tests/ui/lambda_escape_no_take.jet:14:10
     |
  14 |     sink(item)
     |          ^^^^
-  --> lambda_escape_no_take.jet:11:10
+  --> tests/ui/lambda_escape_no_take.jet:11:10
     |
  11 |     f :: () -> {
     |          ^^^^^^^ `item` moved to an escaping lambda here
  Why: After a value moves somewhere else, its old name no longer gives access to it
- Fix: Stop using `item` after the move, or give an escaping lambda a copy with `~item` where it moved.
+ Fix: Stop using `item` after the move, or give an escaping lambda a copy with `item.copy()` where it moved.
 More: jet-lang.dev/e/E0121

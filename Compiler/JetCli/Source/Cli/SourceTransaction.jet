@@ -1,0 +1,427 @@
+// Source/CmdCodemod/Transaction.rs: held multi-file source publication and
+// byte-exact schema-2 recovery. A journal is durable before the first rename.
+use core.encoding.hex as cli_transaction_hex
+
+JET_CLI_TRANSACTION_MAX_BYTES :: 67108864
+
+struct JetCLISourceChange {
+    path: String
+    before: [U8]
+    after: [U8]
+}
+
+struct JetCLITransactionRecord {
+    change: JetCLISourceChange
+    name: String
+    temp: String
+    destination_id: cli_files.FileID
+    temp_id: cli_files.FileID
+    mode: Int
+    parent: JetCLIRootedDirectory?
+
+    fn stat(self, project: JetCLIRootedDirectory, name: String) -[FS]> cli_files.Stat JetCLIReadError! {
+        if self.parent == .Val(parent) -> return parent.transaction_stat(name)
+        project.transaction_stat(name)
+    }
+
+    fn read(self, project: JetCLIRootedDirectory) -[FS, Time.Wait]> [U8] JetCLIReadError! {
+        bytes :: if self.parent == .Val(parent) -> parent.read(self.name, JET_CLI_TRANSACTION_MAX_BYTES) else -> project.read(self.name, JET_CLI_TRANSACTION_MAX_BYTES)
+        content :: bytes ?? return Err(jet_cli_read_error("transaction destination disappeared: {self.change.path}"))
+        Ok(content)
+    }
+
+    fn stage(self, project: JetCLIRootedDirectory, bytes: [U8]) -[FS, Env, Time.Wait]> String JetCLIReadError! {
+        if self.parent == .Val(parent) -> return parent.stage(self.name, bytes, Val(self.mode))
+        project.stage(self.name, bytes, Val(self.mode))
+    }
+
+    fn publish(self, project: JetCLIRootedDirectory, temp: String, destination_id: cli_files.FileID, temp_id: cli_files.FileID) JetCLIReadError! -[FS]> {
+        if self.parent == .Val(parent) -> return parent.publish_staged(temp, self.name, destination_id, temp_id)
+        project.publish_staged(temp, self.name, destination_id, temp_id)
+    }
+
+    fn discard(self, project: JetCLIRootedDirectory) JetCLIReadError! -[FS]> {
+        // Absence after publication is expected; an existing staged name must
+        // still have the identity recorded before any byte is removed.
+        present :: if self.parent == .Val(parent) -> parent.member_present(self.temp) else -> project.member_present(self.temp)
+        if !present -> return
+        info :: self.stat(project, self.temp)
+        if info.id != self.temp_id -> return Err(jet_cli_read_error("staged transaction identity changed; journal preserved"))
+        if self.parent == .Val(parent) {
+            _ :: parent.remove(self.temp)
+        } else {
+            _ :: project.remove(self.temp)
+        }
+    }
+}
+
+fn jet_cli_transaction_relative(root: String, path: String) -> [String] JetCLIReadError! {
+    relative :: if root == "/" && path.starts_with("/") -> path.slice(1, path.len()) else if path.starts_with("{root}/") -> path.slice(root.len() + 1, path.len()) else -> {
+        return Err(jet_cli_read_error("transaction path escapes the project root: {path}"))
+    }
+    parts := [String]{}
+    loop part in relative.split("/") {
+        jet_cli_rooted_validate_name(part)
+        &parts.push(part)
+    }
+    if parts.len() == 0 -> return Err(jet_cli_read_error("transaction path has no file name"))
+    Ok(parts)
+}
+
+fn jet_cli_transaction_record(project: JetCLIRootedDirectory, change: JetCLISourceChange) -[FS]> JetCLITransactionRecord JetCLIReadError! {
+    parts := jet_cli_transaction_relative(project.path, change.path)
+    name :: &parts.pop() ?? return Err(jet_cli_read_error("transaction path has no file name"))
+    parent := JetCLIRootedDirectory?{None}
+    info := cli_files.Stat?{None}
+    if parts.len() != 0 {
+        held :: project.descendant(parts, false)
+        info = Val(held.transaction_stat(name))
+        parent = Val(held)
+    } else {
+        info = Val(project.transaction_stat(name))
+    }
+    stat :: info ?? return Err(jet_cli_read_error("transaction destination has no identity"))
+    Ok(JetCLITransactionRecord{change: change, name: name, temp: "", destination_id: stat.id, temp_id: stat.id, mode: stat.mode, parent: parent})
+}
+
+fn jet_cli_transaction_id_json(id: cli_files.FileID) -> String Never! {
+    "[{id.device},{id.inode}]"
+}
+
+fn jet_cli_transaction_journal(tx: String, completed: Int, records: [JetCLITransactionRecord], log_path: String, log: [U8]) -> [U8] Never! {
+    rows := [String]{}
+    loop record in records {
+        parent :: jet_cli_parent(record.change.path) ?? ""
+        temp :: jet_cli_rooted_join(parent, record.temp)
+        path_json :: foundation_json_quote(record.change.path)
+        temp_json :: foundation_json_quote(temp)
+        before :: cli_transaction_hex.encode(record.change.before)
+        after :: cli_transaction_hex.encode(record.change.after)
+        destination_id :: jet_cli_transaction_id_json(record.destination_id)
+        temp_id :: jet_cli_transaction_id_json(record.temp_id)
+        &rows.push("{{\"path\":{path_json},\"temp\":{temp_json},\"before\":\"{before}\",\"after\":\"{after}\",\"destination_id\":{destination_id},\"temp_id\":{temp_id}}}")
+    }
+    tx_json :: foundation_json_quote(tx)
+    log_json :: foundation_json_quote(log_path)
+    log_hex :: cli_transaction_hex.encode(log)
+    files :: rows.join(",")
+    "{{\"schema\":2,\"tx\":{tx_json},\"completed\":{completed},\"log_path\":{log_json},\"log\":\"{log_hex}\",\"files\":[{files}]}}\n".bytes()
+}
+
+fn jet_cli_transaction_identity(value: JetCLIStatusValue, name: String) -> cli_files.FileID JetCLIReadError! {
+    parts :: jet_cli_status_list(jet_cli_status_get(value, name)) ?? return Err(jet_cli_read_error("recovery journal is missing {name}"))
+    if parts.len() != 2 -> return Err(jet_cli_read_error("recovery journal identity must have two integers"))
+    device :: jet_cli_status_integer(Val(parts[0])) ?? return Err(jet_cli_read_error("recovery journal device is invalid"))
+    inode :: jet_cli_status_integer(Val(parts[1])) ?? return Err(jet_cli_read_error("recovery journal inode is invalid"))
+    Ok(cli_files.FileID{device: device, inode: inode})
+}
+
+fn jet_cli_transaction_text(value: JetCLIStatusValue, name: String) -> String JetCLIReadError! {
+    Ok(jet_cli_status_string(jet_cli_status_get(value, name)) ?? return Err(jet_cli_read_error("recovery journal is missing {name}")))
+}
+
+fn jet_cli_transaction_bytes(value: JetCLIStatusValue, name: String) -> [U8] JetCLIReadError! {
+    text :: jet_cli_transaction_text(value, name)
+    Ok(cli_transaction_hex.decode(text) ?? return Err(jet_cli_read_error("invalid byte encoding in recovery journal: {err.reason}")))
+}
+
+fn jet_cli_transaction_recover(project: JetCLIRootedDirectory, journal: JetCLIRootedDirectory) JetCLIReadError! -[FS, Env, Time.Wait]> {
+    bytes :: journal.read("transaction.journal", JET_CLI_TRANSACTION_MAX_BYTES)
+    raw :: bytes ?? return
+    _ :: journal.transaction_stat("transaction.journal")
+    text :: String.from_bytes(raw) ?? return Err(jet_cli_read_error("recovery journal is not UTF-8"))
+    value :: jet_cli_status_value_parse(text) ?? return Err(jet_cli_read_error("invalid recovery journal"))
+    if jet_cli_status_integer(jet_cli_status_get(value, "schema")) != Val(2) -> return Err(jet_cli_read_error("unsupported recovery journal schema; journal preserved"))
+    log_path :: jet_cli_transaction_text(value, "log_path")
+    log_name :: jet_cli_file_name(log_path)
+    jet_cli_rooted_validate_name(log_name)
+    if log_path != jet_cli_rooted_join(journal.path, log_name) || !log_name.ends_with(".log.json") -> return Err(jet_cli_read_error("recovery journal log path escapes retained codemod directory; journal preserved"))
+    log :: jet_cli_transaction_bytes(value, "log")
+    values :: jet_cli_status_list(jet_cli_status_get(value, "files")) ?? return Err(jet_cli_read_error("invalid recovery journal files"))
+    if values.len() == 0 -> return Err(jet_cli_read_error("recovery journal has no file changes"))
+    records := [JetCLITransactionRecord]{}
+    identities := [String: Bool]{}
+    all_after := true
+    loop row in values {
+        path :: jet_cli_transaction_text(row, "path")
+        temp_path :: jet_cli_transaction_text(row, "temp")
+        before :: jet_cli_transaction_bytes(row, "before")
+        after :: jet_cli_transaction_bytes(row, "after")
+        record := jet_cli_transaction_record(project, JetCLISourceChange{path: path, before: before, after: after})
+        record.destination_id = jet_cli_transaction_identity(row, "destination_id")
+        record.temp_id = jet_cli_transaction_identity(row, "temp_id")
+        record.temp = jet_cli_file_name(temp_path)
+        jet_cli_rooted_validate_name(record.temp)
+        if jet_cli_parent(temp_path) != jet_cli_parent(path) -> return Err(jet_cli_read_error("recovery temporary escapes destination parent; journal preserved"))
+        current_id :: record.stat(project, record.name).id
+        if current_id != record.destination_id && current_id != record.temp_id -> return Err(jet_cli_read_error("recovery destination identity changed; journal preserved"))
+        identity :: jet_cli_transaction_id_json(current_id)
+        if identities.get(identity) != None -> return Err(jet_cli_read_error("recovery destinations alias the same file; journal preserved"))
+        identities[identity] = true
+        current :: record.read(project)
+        if current != after -> all_after = false
+        if current != before && current != after -> return Err(jet_cli_read_error("codemod recovery found concurrent drift; journal preserved: {path}"))
+        &records.push(record)
+    }
+    if all_after {
+        _ :: journal.publish_immutable(log_name, log, Val(0o600), JET_CLI_TRANSACTION_MAX_BYTES)
+    } else {
+        loop record in records {
+            current :: record.read(project)
+            if current == record.change.before -> next
+            destination_id :: record.stat(project, record.name).id
+            temp :: record.stage(project, record.change.before)
+            temp_id :: record.stat(project, temp).id
+            record.publish(project, temp, destination_id, temp_id)
+        }
+    }
+    loop record in records -> record.discard(project)
+    _ :: journal.remove("transaction.journal")
+}
+
+fn jet_cli_transaction_commit_locked(project: JetCLIRootedDirectory, journal: JetCLIRootedDirectory, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Exec, Time]> String JetCLIReadError! {
+    jet_cli_rooted_validate_name(log_name)
+    if !log_name.ends_with(".log.json") -> return Err(jet_cli_read_error("codemod replay log name must end in .log.json"))
+    if changes.len() == 0 -> return Err(jet_cli_read_error("codemod has no file edits"))
+    if journal.read(log_name, JET_CLI_TRANSACTION_MAX_BYTES) != None -> return Err(jet_cli_read_error("codemod replay log already exists"))
+    records := [JetCLITransactionRecord]{}
+    identities := [String: Bool]{}
+    loop change in changes {
+        record := jet_cli_transaction_record(project, change) ?? {
+            loop previous in records -> previous.discard(project)
+            return Err(err)
+        }
+        identity :: jet_cli_transaction_id_json(record.destination_id)
+        if identities.get(identity) != None {
+            loop previous in records -> previous.discard(project)
+            return Err(jet_cli_read_error("codemod destinations alias the same file"))
+        }
+        identities[identity] = true
+        if record.read(project) != change.before {
+            loop previous in records -> previous.discard(project)
+            return Err(jet_cli_read_error("observed drift for `{change.path}` before commit; no files written"))
+        }
+        record.temp = record.stage(project, change.after) ?? {
+            loop previous in records -> previous.discard(project)
+            return Err(err)
+        }
+        record.temp_id = record.stat(project, record.temp).id
+        &records.push(record)
+    }
+    tx :: "{cli_process.current_pid()}-{cli_time.unix_ns()}"
+    log_path :: jet_cli_rooted_join(journal.path, log_name)
+    first :: jet_cli_transaction_journal(tx, 0, records, log_path, log)
+    journal.replace("transaction.journal", first, Val(0o600)) ?? {
+        loop record in records -> record.discard(project)
+        return Err(err)
+    }
+    if cli_sys.get("JET_CODEMOD_CRASH_AFTER_JOURNAL") == .Val(trigger) && trigger == "1" -> cli_process.exit(87)
+    loop (index, record) in records {
+        if record.read(project) != record.change.before -> return Err(jet_cli_read_error("observed drift before rename; journal preserved: {record.change.path}"))
+        record.publish(project, record.temp, record.destination_id, record.temp_id) ?? {
+            // Recovery restores only exact before/after states and retains the
+            // journal on drift; never clobber an unrelated writer on rollback.
+            jet_cli_transaction_recover(project, journal) ?? return Err(jet_cli_read_error("transaction failed: {err.message}; recovery failed and journal retained"))
+            return Err(jet_cli_read_error("codemod rename failed; transaction recovered"))
+        }
+        updated :: jet_cli_transaction_journal(tx, index + 1, records, log_path, log)
+        journal.replace("transaction.journal", updated, Val(0o600))
+        if cli_sys.get("JET_CODEMOD_CRASH_AFTER_RENAME") == .Val(trigger) && trigger == "{index + 1}" -> cli_process.exit(86)
+    }
+    _ :: journal.publish_immutable(log_name, log, Val(0o600), JET_CLI_TRANSACTION_MAX_BYTES)
+    _ :: journal.remove("transaction.journal")
+    Ok(log_path)
+}
+
+fn jet_cli_commit_source_changes(root: String, changes: [JetCLISourceChange], log_name: String, log: [U8]) -[FS, Env, Exec, Time]> String JetCLIReadError! {
+    project :: JetCLIRootedDirectory.open(root, [String]{}, false)
+    journal :: project.descendant([String]{".jet", "codemods"}, true)
+    lock :: journal.transaction_lock()
+    jet_cli_transaction_recover(project, journal)
+    jet_cli_transaction_commit_locked(project, journal, changes, log_name, log)
+}
+
+fn jet_cli_fix_optional_json(text: String?) -> String Never! {
+    if text == .Val(value) -> return foundation_json_quote(value)
+    "null"
+}
+
+fn jet_cli_source_hash(bytes: [U8]) -> String Never! {
+    "sha256-{receipt_crypto.sha256(bytes).hex()}"
+}
+
+fn jet_cli_fix_operation_json(operation: JetCLISemOp, changes: [JetCLISourceChange]) -> String Never! {
+    targets := [String]{}
+    loop target in operation.targets {
+        stable :: foundation_json_quote(target.stable_id)
+        before :: foundation_json_quote(target.before)
+        after :: foundation_json_quote(target.after)
+        kind :: foundation_json_quote(target.kind)
+        module_path :: foundation_json_quote(target.module_path)
+        &targets.push("{{\"stable_id\":{stable},\"before\":{before},\"after\":{after},\"kind\":{kind},\"module_path\":{module_path}}}")
+    }
+    files := [String]{}
+    loop change in changes {
+        path :: foundation_json_quote(change.path)
+        before :: jet_cli_source_hash(change.before)
+        after :: jet_cli_source_hash(change.after)
+        &files.push("{{\"path\":{path},\"before_hash\":\"{before}\",\"after_hash\":\"{after}\"}}")
+    }
+    kind :: foundation_json_quote(operation.kind)
+    rule :: jet_cli_fix_optional_json(operation.rule_id)
+    from :: jet_cli_fix_optional_json(operation.from)
+    to :: jet_cli_fix_optional_json(operation.to)
+    node :: jet_cli_fix_optional_json(operation.node)
+    pattern :: jet_cli_fix_optional_json(operation.match_template)
+    replacement :: jet_cli_fix_optional_json(operation.replace_template)
+    target_json :: targets.join(",")
+    file_json :: files.join(",")
+    "{{\"kind\":{kind},\"rule_id\":{rule},\"from\":{from},\"to\":{to},\"node\":{node},\"match\":{pattern},\"replace\":{replacement},\"targets\":[{target_json}],\"files\":[{file_json}]}}"
+}
+
+fn jet_cli_fix_log(root: String, name: String, changes: [JetCLISourceChange], operations: [JetCLISemOp]) -> [U8] Never! {
+    rows := [String]{}
+    loop change in changes {
+        path :: foundation_json_quote(change.path)
+        before_hash :: jet_cli_source_hash(change.before)
+        after_hash :: jet_cli_source_hash(change.after)
+        before_bytes :: cli_transaction_hex.encode(change.before)
+        after_bytes :: cli_transaction_hex.encode(change.after)
+        &rows.push("{{\"path\":{path},\"before_hash\":\"{before_hash}\",\"after_hash\":\"{after_hash}\",\"before_bytes\":\"{before_bytes}\",\"after_bytes\":\"{after_bytes}\"}}")
+    }
+    ops :: loop operation in operations -> jet_cli_fix_operation_json(operation, changes)
+    name_json :: foundation_json_quote(name)
+    root_json :: foundation_json_quote(root)
+    op_json :: ops.join(",\n    ")
+    row_json :: rows.join(",\n    ")
+    "{{\n  \"schema\": 2,\n  \"operation\": \"fix\",\n  \"name\": {name_json},\n  \"project\": {root_json},\n  \"semantic_ops\": [\n    {op_json}\n  ],\n  \"files\": [\n    {row_json}\n  ]\n}}\n".bytes()
+}
+
+fn jet_cli_fix_rewrite(before: [U8], after: [U8]) -> [JetCLISemOp] Never! {
+    if before == after -> return [JetCLISemOp]{}
+    // The Rust producer only attaches textual rewrite intent to UTF-8.
+    _ :: String.from_bytes(before) ?? return [JetCLISemOp]{}
+    _ :: String.from_bytes(after) ?? return [JetCLISemOp]{}
+    prefix := 0
+    loop prefix < before.len() && prefix < after.len() && before[prefix] == after[prefix] -> prefix += 1
+    loop prefix > 0 && (!jet_cli_memory_boundary(before, prefix) || !jet_cli_memory_boundary(after, prefix)) -> prefix -= 1
+    before_end := before.len()
+    after_end := after.len()
+    loop before_end > prefix && after_end > prefix && before[before_end - 1] == after[after_end - 1] {
+        before_end -= 1
+        after_end -= 1
+    }
+    loop before_end > prefix && !jet_cli_memory_boundary(before, before_end) -> before_end -= 1
+    loop after_end > prefix && !jet_cli_memory_boundary(after, after_end) -> after_end -= 1
+    from :: String.from_bytes(before.slice(prefix, before_end)) ?? panic("validated rewrite boundary")
+    to :: String.from_bytes(after.slice(prefix, after_end)) ?? panic("validated rewrite boundary")
+    [JetCLISemOp]{JetCLISemOp{kind: "rewrite", rule_id: Val("jet-fix"), from: Val(from), to: Val(to), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{}, files: [JetCLISemOpFile]{}}}
+}
+
+fn jet_cli_fix_name(stem: String) -> String Never! {
+    parts := [String]{}
+    loop character in stem.chars() {
+        text :: "{character}"
+        &parts.push(if text.is_alphabetic() || text.is_numeric() || text == "-" || text == "_" -> text else -> "_")
+    }
+    sanitized :: parts.join("")
+    if sanitized == "" -> return "codemod"
+    sanitized
+}
+
+fn jet_cli_commit_fix(file: String, before: [U8], staged: [U8], semantic_ops: [JetCLISemOp]?) -[FS, Env, Exec, Time, IO, FFI.C, FFI.Asm, Net]> String JetCLIReadError! {
+    path :: cli_files.realpath(file) ?? return Err(jet_cli_read_error("could not canonicalize fix target `{file}`: {jet_cli_io_error_text(err)}"))
+    parent :: jet_cli_parent(path) ?? return Err(jet_cli_read_error("fix target has no parent directory"))
+    cache := WorkspaceDeclarationCache.new()
+    // Absence selects the standalone-file root; a failed manifest observation
+    // is distinct and must not be flattened into that fallback.
+    found :: if jet_cli_find_package_root_checked(&cache, parent) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(jet_cli_read_error(error.diagnostic.what)) }
+    }
+    root := found ?? parent
+    if found == None {
+        ancestor := parent
+        loop {
+            relative :: if path.starts_with("{ancestor}/") -> path.slice(ancestor.len() + 1, path.len()) else -> ""
+            if relative.starts_with("Examples/") || relative.starts_with("tests/ui/") {
+                root = ancestor
+                break
+            }
+            ancestor = jet_cli_parent(ancestor) ?? break
+        }
+    }
+    project :: JetCLIRootedDirectory.open(root, [String]{}, false)
+    journal :: project.descendant([String]{".jet", "codemods"}, true)
+    lock :: journal.transaction_lock()
+    jet_cli_transaction_recover(project, journal)
+    filename :: jet_cli_file_name(path)
+    dot :: filename.rfind(".")
+    stem :: if dot > 0 -> filename.slice(0, dot) else -> filename
+    base :: "Fix-{jet_cli_fix_name(stem)}"
+    suffix := 0
+    name := base
+    loop journal.member_present("{name}.log.json") {
+        suffix += 1
+        name = "{base}-{suffix}"
+    }
+    operations := if semantic_ops == .Val(provided) -> provided else -> jet_cli_fix_semantic_ops(path, before, staged)
+    if operations.len() == 0 -> operations = jet_cli_fix_rewrite(before, staged)
+    changes :: [JetCLISourceChange]{JetCLISourceChange{path: path, before: before, after: staged}}
+    log :: jet_cli_fix_log(root, name, changes, operations)
+    jet_cli_transaction_commit_locked(project, journal, changes, "{name}.log.json", log)
+}
+
+fn jet_cli_transaction_known_fields(value: JetCLIStatusValue, allowed: [String], label: String) JetCLIReadError! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if !allowed.contains(field.name) -> return Err(jet_cli_read_error("unknown {label} field `{field.name}`"))
+        }
+        return
+    }
+    Err(jet_cli_read_error("{label} must be an object"))
+}
+
+fn jet_cli_undo_source_changes(root: String, log_name: String) -[FS, Env, Exec, Time]> String JetCLIReadError! {
+    jet_cli_rooted_validate_name(log_name)
+    if !log_name.ends_with(".log.json") -> return Err(jet_cli_read_error("replay log name must end in .log.json"))
+    project :: JetCLIRootedDirectory.open(root, [String]{}, false)
+    journal :: project.descendant([String]{".jet", "codemods"}, false)
+    lock :: journal.transaction_lock()
+    jet_cli_transaction_recover(project, journal)
+    log_id :: journal.transaction_stat(log_name).id
+    bytes :: journal.read(log_name, JET_CLI_TRANSACTION_MAX_BYTES)
+    raw :: bytes ?? return Err(jet_cli_read_error("replay log does not exist"))
+    text :: String.from_bytes(raw) ?? return Err(jet_cli_read_error("replay log is not UTF-8"))
+    value :: jet_cli_status_value_parse(text) ?? return Err(jet_cli_read_error("invalid replay log JSON"))
+    jet_cli_transaction_known_fields(value, [String]{"schema", "operation", "name", "project", "semantic_ops", "files"}, "schema 2 replay log")
+    if jet_cli_status_integer(jet_cli_status_get(value, "schema")) != Val(2) -> return Err(jet_cli_read_error("unsupported codemod log schema"))
+    operation :: jet_cli_status_string(jet_cli_status_get(value, "operation")) ?? "codemod"
+    if operation != "codemod" && operation != "fix" -> return Err(jet_cli_read_error("unsupported replay log operation `{operation}`"))
+    name :: jet_cli_transaction_text(value, "name")
+    declared :: jet_cli_transaction_text(value, "project")
+    if declared != root -> return Err(jet_cli_read_error("replay log project does not match its .jet/codemods location"))
+    values :: jet_cli_status_list(jet_cli_status_get(value, "files")) ?? return Err(jet_cli_read_error("replay log files must be an array"))
+    changes := [JetCLISourceChange]{}
+    loop row in values {
+        jet_cli_transaction_known_fields(row, [String]{"path", "before_hash", "after_hash", "before_bytes", "after_bytes"}, "replay log file")
+        path :: jet_cli_transaction_text(row, "path")
+        before :: jet_cli_transaction_bytes(row, "before_bytes")
+        after :: jet_cli_transaction_bytes(row, "after_bytes")
+        before_hash :: jet_cli_transaction_text(row, "before_hash")
+        after_hash :: jet_cli_transaction_text(row, "after_hash")
+        if jet_cli_source_hash(before) != before_hash || jet_cli_source_hash(after) != after_hash -> return Err(jet_cli_read_error("replay log byte hash mismatch for `{path}`"))
+        change :: JetCLISourceChange{path: path, before: after, after: before}
+        record :: jet_cli_transaction_record(project, change)
+        if record.destination_id == log_id -> return Err(jet_cli_read_error("replay log and destinations contain a file-ID alias"))
+        if record.read(project) != after -> return Err(jet_cli_read_error("checkpoint mismatch for `{path}`; refusing undo; zero files written"))
+        &changes.push(change)
+    }
+    undo_name :: "{log_name.slice(0, log_name.len() - 5)}.undo.log.json"
+    marker_name :: foundation_json_quote("{name}-undo")
+    marker :: "{{\"schema\":2,\"name\":{marker_name},\"files\":[]}}\n".bytes()
+    _ :: jet_cli_transaction_commit_locked(project, journal, changes, undo_name, marker)
+    log_path :: jet_cli_rooted_join(journal.path, log_name)
+    Ok("codemod undo `{name}` applied\n  files: {changes.len()}\n  source log: {log_path}\n")
+}

@@ -1,0 +1,14 @@
+# HAND-PORT tests/fmt_round_trip_regressions.rs:154-181 effect_arrows_round_trip_beside_foreign_bodies
+# PENDING-KIT; no runtime/reference proof.
+# Original formatter success and every exact substring presence/absence + byte-identical second formatting fixed-point.
+fixture: effect_arrows_round_trip_beside_foreign_bodies.fixture
+step: jet fmt main.jet
+exit: 0
+file: main.jet ~ "fn probe(value: Int) -> Int = \"probe\"" # original formatter contains
+file: main.jet ~ "fn run() -[IO]> Int" # original formatter contains
+file: main.jet !~ "=[IO]=>" # original formatter absence
+file: main.jet !~ "Int) => Int" # original formatter absence
+copy: main.jet first.jet
+step: jet fmt main.jet
+exit: 0
+file: main.jet == first.jet

@@ -1,0 +1,19 @@
+# Port of run_regressions.rs:120-128; stdout is deliberately unconstrained.
+# PENDING-GRAMMAR: step-scoped env (fresh store and jetpack root for each tier).
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+# Original run_tier creates a Scratch root, not its cache/jetpack children.
+mkdir: cache/default
+step: jet run {root}/tests/fixtures/struct_call_word_failure.jet
+env: JET_STORE_DIR={work}/cache/default/cache
+env: JETPACK_ROOT={work}/cache/default/jetpack
+exit: 70
+# Renderer includes runtime source/location details; original asserts code presence only.
+stderr: ~ E3001 # Original checks only runtime diagnostic code presence.
+mkdir: cache/interpreter
+step: jet run --interpret {root}/tests/fixtures/struct_call_word_failure.jet
+env: JET_STORE_DIR={work}/cache/interpreter/cache
+env: JETPACK_ROOT={work}/cache/interpreter/jetpack
+exit: 70
+# Renderer includes runtime source/location details; original asserts code presence only.
+stderr: ~ E3001 # Original checks only runtime diagnostic code presence.

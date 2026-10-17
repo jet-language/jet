@@ -7,9 +7,9 @@
 // replacement instead.
 
 // The canonical form of a ref read from a persisted manifest or lock.
-pub struct MigratedRef {
-    pub canonical: String
-    pub policy: ChannelPolicy
+struct MigratedRef {
+    canonical: String
+    policy: ChannelPolicy
 
     // Migrate one persisted ref from the retired selector positions.
     fn persisted(input: String) -> MigratedRef Never! {
@@ -23,7 +23,7 @@ pub struct MigratedRef {
         target :: pkg_ref_split_last_selector(halves.before)
         if target.empty_half -> return unchanged
         selector :: pkg_ref_first_selector(source.selector, target.selector, prefix.policy)
-        canonical :: if ~selector == {
+        canonical :: if selector.copy() == {
             .Val(value) -> if value != "" -> "{target.source}{REF_PROVIDER_AT}{source.source}{REF_CHANNEL_MARKER}{value}" else -> "{target.source}{REF_PROVIDER_AT}{source.source}"
             .None -> "{target.source}{REF_PROVIDER_AT}{source.source}"
         }
@@ -142,7 +142,7 @@ fn pkg_ref_rewrite_public_nixpkgs(raw: String) -> String? Never! {
 
 // Canonical ref used in lock and receipt identity. Public nixpkgs spelling
 // remains classifiable during migration, but cannot create a second lock key.
-pub fn pkg_canonical_locked_ref(raw: String) -> String Never! {
+fn pkg_canonical_locked_ref(raw: String) -> String Never! {
     canonical :: MigratedRef.persisted(raw).canonical
     halves :: canonical.cut_last(REF_PROVIDER_AT) ?? return canonical
     source :: pkg_ref_split_selector(halves.after)
@@ -156,7 +156,7 @@ pub fn pkg_canonical_locked_ref(raw: String) -> String Never! {
 
 // The policy encoded in a canonical user ref. Retired prefix input is not
 // accepted here and therefore returns the pinned default.
-pub fn pkg_policy_for_ref(raw: String) -> ChannelPolicy Never! {
+fn pkg_policy_for_ref(raw: String) -> ChannelPolicy Never! {
     source :: raw.trim().cut_last(REF_PROVIDER_AT)?.after ?? return ChannelPolicy.Pinned
     selector :: source.cut_last(REF_CHANNEL_MARKER)?.after ?? return ChannelPolicy.Pinned
     ChannelPolicy.for_selector(selector) ?? ChannelPolicy.Pinned
@@ -164,7 +164,7 @@ pub fn pkg_policy_for_ref(raw: String) -> ChannelPolicy Never! {
 
 // Split an internal provider-first target at its last `#` when that selector
 // is a channel. Exact selectors such as `#v1.2.3` are left untouched.
-pub fn pkg_split_channel_ref(text: String) -> (base: String, channel: ChannelRef?) Never! {
+fn pkg_split_channel_ref(text: String) -> (base: String, channel: ChannelRef?) Never! {
     halves :: text.cut_last("#") ?? return (base: text, channel: None)
     if ChannelRef.parse_selector(halves.after) == {
         .Val(channel) -> (base: halves.before, channel: Val(channel))

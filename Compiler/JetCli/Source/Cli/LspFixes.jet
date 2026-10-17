@@ -1,0 +1,115 @@
+// Source/LSP/Check.rs fix projections shared by CLI fixes and code actions.
+use jet_foundation.[Diagnostic, DiagnosticFixApplicability, DiagnosticFixSafety, TextEdit]
+use jet_parser.[jfmt_retired_interpolation_selector_edits, jfmt_retired_print_family_edits, jfmt_retired_type_edits]
+use jet_driver.jet_driver_apply_edits
+
+struct JetCLIFix {
+    title: String
+    edit: TextEdit
+    applicability: DiagnosticFixApplicability
+    safety: DiagnosticFixSafety
+}
+
+struct JetCLIFixApply {
+    source: String
+    applied: Int
+    deferred: Int
+}
+
+fn jet_cli_fixes_from_diagnostics(diagnostics: [Diagnostic]) -> [JetCLIFix] Never! {
+    fixes := [JetCLIFix]{}
+    loop diagnostic in diagnostics {
+        applicability :: diagnostic.applicability ?? next
+        safety :: diagnostic.safety ?? next
+        if diagnostic.edit == .Val(edit) {
+            &fixes.push(JetCLIFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
+        }
+        if diagnostic.structured == .Val(.SuggestedEdits(edits)) {
+            loop edit in edits {
+                &fixes.push(JetCLIFix{title: diagnostic.fix, edit: edit, applicability: applicability, safety: safety})
+            }
+        }
+    }
+    fixes
+}
+
+fn jet_cli_collect_fixes_from_diagnostics(diagnostics: [Diagnostic], source: String) -> [JetCLIFix] Never! {
+    fixes := jet_cli_fixes_from_diagnostics(diagnostics)
+    loop edit in jfmt_retired_interpolation_selector_edits(source) {
+        &fixes.push(JetCLIFix{title: "rewrite retired interpolation selector with `:` (D-ONCE-HASH1)", edit: edit, applicability: .Safe, safety: .Formatting})
+    }
+    loop edit in jfmt_retired_print_family_edits(source) {
+        &fixes.push(JetCLIFix{title: "rewrite retired print-family spelling (D-ONCE-PRINT1)", edit: edit, applicability: .Safe, safety: .Formatting})
+    }
+    loop edit in jfmt_retired_type_edits(source) {
+        &fixes.push(JetCLIFix{title: "rewrite retired Core container name (D-COLLNAME1=A)", edit: edit, applicability: .Safe, safety: .Formatting})
+    }
+    fixes
+}
+
+fn jet_cli_safe_fixes(fixes: [JetCLIFix]) -> [JetCLIFix] Never! {
+    selected := [JetCLIFix]{}
+    loop fix in fixes {
+        if fix.applicability == .Safe && (fix.safety == .Formatting || fix.safety == .BehaviorPreserving) {
+            &selected.push(fix)
+        }
+    }
+    selected
+}
+
+fn jet_cli_fix_apply_non_overlapping(source: String, fixes: [JetCLIFix]) -> JetCLIFixApply Never! {
+    order := [Int]{}
+    loop index in 0..<fixes.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                take_left := right >= end
+                if !take_left && left < middle {
+                    a :: fixes[order[left]].edit.span
+                    b :: fixes[order[right]].edit.span
+                    take_left = a.start < b.start || (a.start == b.start && a.end >= b.end)
+                }
+                if take_left {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width *= 2
+    }
+    kept := [TextEdit]{}
+    deferred := 0
+    previous := TextEdit?{None}
+    loop index in order {
+        edit :: fixes[index].edit
+        if previous == .Val(last) {
+            if last.span.start == edit.span.start && last.span.end == edit.span.end && last.new_text == edit.new_text {
+                next
+            }
+        }
+        previous = Val(edit)
+        if kept.len() > 0 && edit.span.start < kept[kept.len() - 1].span.end {
+            deferred += 1
+            next
+        }
+        &kept.push(edit)
+    }
+    applied :: kept.len()
+    updated :: if jet_driver_apply_edits(source, kept) == {
+        .Ok(text) -> text
+        .Err(_) -> source
+    }
+    JetCLIFixApply{source: updated, applied: applied, deferred: deferred}
+}

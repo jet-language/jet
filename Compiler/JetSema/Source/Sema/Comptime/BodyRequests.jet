@@ -3,21 +3,219 @@
 // is checked again with that value available.
 use jet_foundation.[
     Expr,
+    CompilerTraceSink,
     Span,
     Type,
 ]
 
-pub fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String Never! {
+fn sema_comptime_body_destination_key(function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{function_key}::body-comptime::{site_span.start}:{site_span.end}::{source_span.start}:{source_span.end}"
 }
 
-pub fn sema_comptime_body_source_key(module_identity: String, function_key: String, source_span: Span, site_span: Span) -> String Never! {
+fn sema_comptime_body_source_key(module_identity: String, function_key: String, source_span: Span, site_span: Span) -> String Never! {
     "{module_identity}::{sema_comptime_body_destination_key(function_key, source_span, site_span)}"
 }
 
-pub fn sema_comptime_body_capture(
+// Module slots keep both identity components separate. Map reads return only
+// Int rows; no lookup materializes an owning map, expression, or staged value.
+fn sema_comptime_index_module_slot(modules: &[String:Int], rows: &[[String:Int]], module_identity: String) -> Int Never! {
+    if modules.get(module_identity) == .Val(slot) -> return slot
+    slot :: rows.len()
+    modules[module_identity] = slot
+    &rows.push([String:Int]{})
+    slot
+}
+
+fn sema_comptime_body_source_index(context: &SemaCheckContext, row: Int) Never! {
+    slot :: sema_comptime_index_module_slot(&context.comptime_body_source_modules, &context.comptime_body_source_rows, context.comptime_body_sources[row].module_identity)
+    if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == None -> context.comptime_body_source_rows[slot][context.comptime_body_sources[row].key] = row
+}
+
+fn sema_comptime_body_sources_index(context: &SemaCheckContext) Never! {
+    context.comptime_body_source_modules = [String:Int]{}
+    context.comptime_body_source_rows = [[String:Int]]{}
+    loop row in 0..<context.comptime_body_sources.len() -> sema_comptime_body_source_index(&context, row)
+}
+
+// Lambda merges append every canonical row, including duplicates, in order.
+// Only capture deduplicates, returning the first existing row.
+fn sema_comptime_body_source_append(context: &SemaCheckContext, source: SemaComptimeBodySource) Never! {
+    &context.comptime_body_sources.push(source)
+}
+
+fn sema_comptime_body_sources_truncate(context: &SemaCheckContext, length: Int) Never! {
+    loop context.comptime_body_sources.len() > length {
+        row :: context.comptime_body_sources.len() - 1
+        slot :: context.comptime_body_source_modules.get(context.comptime_body_sources[row].module_identity) ?? panic("a body source has no module index")
+        if context.comptime_body_source_rows[slot].get(context.comptime_body_sources[row].key) == (Val(row)) -> _ := &context.comptime_body_source_rows[slot].remove(context.comptime_body_sources[row].key)
+        _ := &context.comptime_body_sources.pop()
+    }
+}
+
+fn sema_comptime_body_value_index_row(modules: &[String:Int], first_rows: &[[String:Int]], second_rows: &[[String:Int]], module_identity: String, key: String, row: Int) Never! {
+    slot :: sema_comptime_index_module_slot(&modules, &first_rows, module_identity)
+    if second_rows.len() < first_rows.len() -> &second_rows.push([String:Int]{})
+    if first_rows[slot].get(key) == None -> first_rows[slot][key] = row
+    else if second_rows[slot].get(key) == None -> second_rows[slot][key] = row
+}
+
+// First and second positions settle every ordered prefix. Appending future
+// rows never rewrites either existing position or an earlier row payload.
+fn sema_comptime_body_values_freeze(values: ^[SemaComptimeBodyValue], work: Shared<SemaComptimeBodyWork>?, count_key_bytes: Bool) -> SemaComptimeBodyValues Never! {
+    length :: values.len()
+    modules := [String:Int]{}
+    first_rows := [[String:Int]]{}
+    second_rows := [[String:Int]]{}
+    indexed_rows := 0
+    index_key_utf8_bytes := 0
+    loop row in 0..<length {
+        sema_comptime_body_value_index_row(&modules, &first_rows, &second_rows, values[row].module_identity, values[row].key, row)
+        indexed_rows += 1
+        if count_key_bytes -> index_key_utf8_bytes += values[row].module_identity.count_bytes() + values[row].key.count_bytes()
+    }
+    if work == .Val(cell) {
+        permit := cell.guard_edit()
+        permit.value.publications += 1
+        permit.value.publication_rows += length
+        if length > 0 -> permit.value.index_builds += 1
+        permit.value.indexed_rows += indexed_rows
+        permit.value.index_key_utf8_bytes += index_key_utf8_bytes
+    }
+    if length == 0 -> return SemaComptimeBodyValues{work: work.copy()}
+    SemaComptimeBodyValues{
+        facts: Val(shared SemaComptimeBodyFacts{values: ^values, modules: ^modules, first_rows: ^first_rows, second_rows: ^second_rows, indexed_rows: indexed_rows}),
+        length: length,
+        work: work.copy(),
+    }
+}
+
+// The staging owner's one payload guard closes before diagnostic counters or
+// any caller/evaluator/sink executes. Work is proportional to new item rows.
+fn sema_comptime_body_facts_append_items(facts: Shared<SemaComptimeBodyFacts>, values: [SemaComptimeItemValue], from: Int, expected_length: Int, count_key_bytes: Bool) -> (length: Int, rows: Int, key_utf8_bytes: Int) {
+    permit := facts.guard_edit()
+    if permit.value.values.len() != expected_length -> panic("body publication attempted to append through an old prefix generation")
+    appended := 0
+    key_utf8_bytes := 0
+    loop index in from..<values.len() {
+        if values[index].kind != SemaComptimeItemKind.BodyExpression -> next
+        row :: permit.value.values.len()
+        sema_comptime_body_value_index_row(&permit.value.modules, &permit.value.first_rows, &permit.value.second_rows, values[index].module_identity, values[index].key, row)
+        if count_key_bytes -> key_utf8_bytes += values[index].module_identity.count_bytes() + values[index].key.count_bytes()
+        &permit.value.values.push(sema_comptime_body_value_from_item(values[index]))
+        permit.value.indexed_rows += 1
+        appended += 1
+    }
+    (length: permit.value.values.len(), rows: appended, key_utf8_bytes: key_utf8_bytes)
+}
+
+fn sema_comptime_body_values_append_items(publication: &SemaComptimeBodyValues, values: [SemaComptimeItemValue], from: Int) {
+    new_generation :: if publication.facts == .Val(_) -> false else -> true
+    if new_generation {
+        if publication.length != 0 -> panic("a body prefix lost its facts owner")
+        publication.facts = Val(shared SemaComptimeBodyFacts{values: [SemaComptimeBodyValue]{}, modules: [String:Int]{}, first_rows: [[String:Int]]{}, second_rows: [[String:Int]]{}, indexed_rows: 0})
+    }
+    facts :: publication.facts.copy() ?? panic("body publication has no facts owner")
+    count_key_bytes :: if publication.work == .Val(_) -> true else -> false
+    added :: sema_comptime_body_facts_append_items(facts, values, from, publication.length, count_key_bytes)
+    if added.rows == 0 -> panic("the authenticated body frontier contained no new body row")
+    publication.length = added.length
+    if publication.work == .Val(cell) {
+        permit := cell.guard_edit()
+        permit.value.publications += 1
+        permit.value.publication_rows += added.rows
+        if new_generation -> permit.value.index_builds += 1
+        permit.value.indexed_rows += added.rows
+        permit.value.index_key_utf8_bytes += added.key_utf8_bytes
+    }
+}
+
+fn sema_comptime_body_values_replace(context: &SemaCheckContext, values: ^[SemaComptimeBodyValue]) Never! {
+    context.comptime_body_values = sema_comptime_body_values_freeze(^values, context.comptime_body_values.work, false)
+}
+
+fn sema_comptime_body_values_truncate(context: &SemaCheckContext, length: Int) Never! {
+    if context.comptime_body_values.length > length -> context.comptime_body_values.length = length
+}
+
+fn sema_comptime_body_values_prefix(values: SemaComptimeBodyValues, length: Int) -> SemaComptimeBodyValues Never! {
+    prefix := values.copy()
+    if prefix.length > length -> prefix.length = length
+    ^prefix
+}
+
+// Only the existing function-detail mode owns a diagnostic slot. The slot is
+// distinct from immutable facts and is not a global/cache/semantic mechanism.
+fn sema_comptime_body_work_new(trace_sink: CompilerTraceSink?) -> Shared<SemaComptimeBodyWork>? {
+    if trace_sink == .Val(sink) {
+        if sink.functions() -> return Val(shared SemaComptimeBodyWork{})
+    }
+    None
+}
+
+fn sema_comptime_body_work_count(values: SemaComptimeBodyValues, operation: SemaComptimeBodyWorkOperation) {
+    cell :: values.work ?? return
+    permit := cell.guard_edit()
+    if operation == {
+        .FunctionsStarted -> permit.value.functions_started += 1
+        .CheckPassStarted -> permit.value.check_passes_started += 1
+        .ContextAttached -> permit.value.context_value_carriers_attached += 1
+        .ContextSnapshot -> permit.value.context_value_snapshots += 1
+        .Query -> permit.value.queries += 1
+        .ModuleProbe -> permit.value.module_probes += 1
+        .FirstRowProbe -> permit.value.first_row_probes += 1
+        .SecondRowProbe -> permit.value.second_row_probes += 1
+        .OwnedRowReturned -> permit.value.owned_rows_returned += 1
+    }
+}
+
+// Copy only scalar diagnostic totals; close the read guard before any sink
+// callback can perform host I/O or re-enter an observer.
+fn sema_comptime_body_work_snapshot(cell: Shared<SemaComptimeBodyWork>) -> SemaComptimeBodyWork {
+    permit :: cell.guard_read()
+    permit.value.copy()
+}
+
+// Called after tasks join, by the existing phase owner holding the real sink.
+// One aggregate event per numeric field, never one filesystem write per query.
+fn sema_comptime_body_work_flush(values: SemaComptimeBodyValues, trace_sink: CompilerTraceSink?, phase: String) {
+    cell :: values.work ?? return
+    if trace_sink == .Val(sink) {
+        totals :: sema_comptime_body_work_snapshot(cell)
+        sink.progress("counters.{phase}.ct_value_publications", totals.publications, -1)
+        sink.progress("counters.{phase}.ct_value_publication_rows", totals.publication_rows, -1)
+        sink.progress("counters.{phase}.ct_value_index_builds", totals.index_builds, -1)
+        sink.progress("counters.{phase}.ct_value_index_rows_visited", totals.indexed_rows, -1)
+        sink.progress("counters.{phase}.ct_value_index_key_utf8_bytes", totals.index_key_utf8_bytes, -1)
+        sink.progress("counters.{phase}.ct_value_functions_started", totals.functions_started, -1)
+        sink.progress("counters.{phase}.ct_value_check_passes_started", totals.check_passes_started, -1)
+        sink.progress("counters.{phase}.ct_value_context_value_carriers_attached", totals.context_value_carriers_attached, -1)
+        sink.progress("counters.{phase}.ct_value_context_value_snapshots", totals.context_value_snapshots, -1)
+        sink.progress("counters.{phase}.ct_value_queries", totals.queries, -1)
+        sink.progress("counters.{phase}.ct_value_module_probes", totals.module_probes, -1)
+        sink.progress("counters.{phase}.ct_value_first_row_probes", totals.first_row_probes, -1)
+        sink.progress("counters.{phase}.ct_value_second_row_probes", totals.second_row_probes, -1)
+        sink.progress("counters.{phase}.ct_value_owned_rows_returned", totals.owned_rows_returned, -1)
+    }
+}
+
+// Prefix Debug uses the same canonical list renderer as the original memo.
+// Only an explicitly requested old-prefix memo materializes its visible rows;
+// the ordinary cold session-None route never requests a fingerprint.
+fn sema_comptime_body_values_debug(values: SemaComptimeBodyValues) -> String {
+    if values.length == 0 -> return "{[SemaComptimeBodyValue]{}:Debug}"
+    facts :: values.facts ?? return "{[SemaComptimeBodyValue]{}:Debug}"
+    permit :: facts.guard_read()
+    if values.length < permit.value.values.len() {
+        prefix := [SemaComptimeBodyValue]{}
+        loop row in 0..<values.length -> &prefix.push(permit.value.values[row].copy())
+        return "{prefix:Debug}"
+    }
+    "{permit.value.values:Debug}"
+}
+
+fn sema_comptime_body_capture(
     context: &SemaCheckContext,
-    environment: SemaScopeEnvironment,
+    environment: SemaScopeEnvironment, program: SemaProgramTables,
     scopes: SemaScopeTable,
     name: String,
     expression: Expr,
@@ -27,11 +225,15 @@ pub fn sema_comptime_body_capture(
 ) -> SemaComptimeBodySource Never! {
     function_key := sema_scope_function_owner_key(scopes)
     destination_key := sema_comptime_body_destination_key(function_key, source_span, site_span)
+    key :: "{environment.module_identity}::{destination_key}"
+    if context.comptime_body_source_modules.get(environment.module_identity) == .Val(slot) {
+        if context.comptime_body_source_rows[slot].get(key) == .Val(row) -> return context.comptime_body_sources[row]
+    }
     source := SemaComptimeBodySource{
         module_identity: environment.module_identity,
         function_key: function_key,
         source_file: sema_source_file_at(environment.source_segments, environment.source_file, environment.source_origin, source_span),
-        key: "{environment.module_identity}::{destination_key}",
+        key: key,
         destination_key: destination_key,
         name: name,
         expression: expression,
@@ -42,29 +244,36 @@ pub fn sema_comptime_body_capture(
     loop previous in context.comptime_body_sources {
         if previous.module_identity == source.module_identity && previous.key == source.key -> return previous
     }
-    &context.comptime_body_sources.push(source)
+    sema_comptime_body_source_append(&context, source)
     source
 }
 
-pub fn sema_comptime_body_value_find(
-    values: [SemaComptimeBodyValue],
+fn sema_comptime_body_value_find(
+    context: SemaCheckContext,
     module_identity: String,
     function_key: String,
     source_span: Span,
     site_span: Span,
 ) -> SemaComptimeBodyValue? {
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.Query)
+    if context.comptime_body_values.length == 0 -> return None
+    facts :: context.comptime_body_values.facts ?? return None
+    permit :: facts.guard_read()
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.ModuleProbe)
+    slot :: permit.value.modules.get(module_identity) ?? return None
     key := sema_comptime_body_source_key(module_identity, function_key, source_span, site_span)
-    found := SemaComptimeBodyValue?{None}
-    loop value in values {
-        if value.module_identity == module_identity && value.key == key {
-            if found != None -> return None
-            found = Val(value)
-        }
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.FirstRowProbe)
+    row :: permit.value.first_rows[slot].get(key) ?? return None
+    if row >= context.comptime_body_values.length -> return None
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.SecondRowProbe)
+    if permit.value.second_rows[slot].get(key) == .Val(second) {
+        if second < context.comptime_body_values.length -> return None
     }
-    found
+    sema_comptime_body_work_count(context.comptime_body_values, SemaComptimeBodyWorkOperation.OwnedRowReturned)
+    Val(permit.value.values[row].copy())
 }
 
-pub fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
+fn sema_comptime_body_item_source(source: SemaComptimeBodySource) -> SemaComptimeItemSource Never! {
     SemaComptimeItemSource{
         module_identity: source.module_identity,
         key: source.key,

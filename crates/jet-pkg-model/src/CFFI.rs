@@ -1338,7 +1338,7 @@ fn status_close_adapter(
     lib: &str,
     functions: &mut [ExternFn],
     facts: &[FfiHandleFact],
-) -> Option<(FfiCloseAdapter, Item)> {
+) -> Option<(FfiCloseAdapter, Item, crate::AST::CoreIdentifierDemand)> {
     for fact in facts.iter().filter(|fact| fact.lib == lib) {
         let Some(constructor_idx) = functions.iter().position(|function| {
             function.close.as_ref().is_some_and(|(name, _)| name == &fact.close)
@@ -1396,6 +1396,7 @@ fn status_close_adapter(
                 adapter_function: adapter_name,
             },
             Item::Func(adapter),
+            crate::Lexer::core_identifier_demand(&tokens),
         ));
     }
     None
@@ -1414,6 +1415,7 @@ fn assemble_loaded(
         bindgen: Vec<ExternFn>,
         overlay: Vec<ExternFn>,
         generated_language: Option<ForeignLanguage>,
+        declarations: Vec<Item>,
     }
     let mut surfaces: HashMap<String, LibSurface> = HashMap::new();
     // Preserve first-seen order for stable synthetic module ordering / output.
@@ -1452,6 +1454,7 @@ fn assemble_loaded(
                         bindgen: Vec::new(),
                         overlay: Vec::new(),
                         generated_language: None,
+                        declarations: Vec::new(),
                     })
                 }
             };
@@ -1474,7 +1477,18 @@ fn assemble_loaded(
                 CModuleKind::Extern => surf.overlay.extend(functions),
             }
         }
-        module.items = kept;
+        // A generated library's nominal records and its functions have one
+        // lexical owner. Re-homing only functions leaves imported signatures
+        // referring to types in an unmounted cache module.
+        if let Some(lib) = module.alias.strip_prefix("__c_cache_") {
+            if let Some(surface) = surfaces.get_mut(lib) {
+                surface.declarations.extend(kept);
+            } else {
+                module.items = kept;
+            }
+        } else {
+            module.items = kept;
+        }
     }
 
     if !diags.is_empty() {
@@ -1555,7 +1569,7 @@ fn assemble_loaded(
     for lib in &order {
         // Every key enters `order` only beside its vacant `surfaces` insertion
         // above, and no surface is removed before this ordered merge pass.
-        let Some(surf) = surfaces.get(lib) else {
+        let Some(surf) = surfaces.remove(lib) else {
             continue;
         };
         // Start from bindgen, then let overlay add/override.
@@ -1618,11 +1632,13 @@ fn assemble_loaded(
         cffi.link_closure = FfiLinkClosure::new(direct, transitive);
 
         let mut adapter_items = Vec::new();
-        while let Some((adapter, item)) =
+        let mut core_identifier_demand = crate::AST::CoreIdentifierDemand::default();
+        while let Some((adapter, item, demand)) =
             status_close_adapter(lib, &mut merged, &cffi.handle_facts)
         {
             cffi.close_adapters.push(adapter);
             adapter_items.push(item);
+            core_identifier_demand.merge(demand);
         }
 
         let alias = synthetic_alias(lib);
@@ -1634,19 +1650,20 @@ fn assemble_loaded(
             functions: merged,
             span: Span::new(0, 0),
         };
-        let mut items = vec![Item::CModule(merged_module)];
+        let mut items = surf.declarations;
+        items.push(Item::CModule(merged_module));
         items.extend(adapter_items);
         bundle.modules.push(LoadedModule {
             path: std::path::PathBuf::from(format!("<c.{lib}>")),
             display: format!("c.{lib}"),
             source: String::new(),
+            core_identifier_demand,
             alias,
             imports: Vec::new(),
             items,
             script_body: Vec::new(),
             block_spans: Vec::new(),
             web_target_ceiling: None,
-            pub_file: false,
             no_prelude: false,
             default_target: None,
             html_path: None,
@@ -1698,6 +1715,8 @@ fn assemble_loaded(
                             path: std::path::PathBuf::from(format!("<c.{lib}>")),
                             display: format!("c.{lib}"),
                             source: String::new(),
+                            // This foreign namespace has no declarations or Jet source.
+                            core_identifier_demand: crate::AST::CoreIdentifierDemand::default(),
                             alias: synthetic_alias(&lib),
                             imports: Vec::new(),
                             items: vec![Item::CModule(CModule {
@@ -1710,7 +1729,6 @@ fn assemble_loaded(
                             script_body: Vec::new(),
                             block_spans: Vec::new(),
                             web_target_ceiling: None,
-                            pub_file: false,
                             no_prelude: false,
                             default_target: None,
                             html_path: None,
@@ -1763,21 +1781,21 @@ fn assemble_loaded(
 #[derive(Debug, Clone)]
 pub struct CffiDiagnostic {
     pub file: String,
-    pub source: String,
+    pub source: std::sync::Arc<str>,
     pub diagnostic: Diagnostic,
 }
 
 struct AssemblyOrigins {
-    spans: HashMap<Span, Vec<(String, String)>>,
-    headers: Vec<(String, String)>,
-    duplicate_uses: Vec<(String, String)>,
-    invalid_bindgen: Vec<(String, String)>,
-    incompatible_overrides: Vec<(String, String)>,
+    spans: HashMap<Span, Vec<(String, std::sync::Arc<str>)>>,
+    headers: Vec<(String, std::sync::Arc<str>)>,
+    duplicate_uses: Vec<(String, std::sync::Arc<str>)>,
+    invalid_bindgen: Vec<(String, std::sync::Arc<str>)>,
+    incompatible_overrides: Vec<(String, std::sync::Arc<str>)>,
 }
 
 struct OriginSurface {
-    bindgen: Vec<(ExternFn, (String, String))>,
-    overlay: Vec<(ExternFn, (String, String))>,
+    bindgen: Vec<(ExternFn, (String, std::sync::Arc<str>))>,
+    overlay: Vec<(ExternFn, (String, std::sync::Arc<str>))>,
 }
 
 pub fn assemble_with_provenance(bundle: &mut ProgramBundle) -> Result<CFfi, Vec<CffiDiagnostic>> {
@@ -1871,7 +1889,7 @@ fn map_diagnostics(
                         None
                     }
                 })
-                .unwrap_or_else(|| (fallback_file.clone(), String::new()));
+                .unwrap_or_else(|| (fallback_file.clone(), std::sync::Arc::default()));
             CffiDiagnostic {
                 file: origin.0,
                 source: origin.1,
@@ -1881,7 +1899,7 @@ fn map_diagnostics(
         .collect()
 }
 
-fn take_origin(origins: &[(String, String)], next: &mut usize) -> Option<(String, String)> {
+fn take_origin(origins: &[(String, std::sync::Arc<str>)], next: &mut usize) -> Option<(String, std::sync::Arc<str>)> {
     let origin = origins.get(*next).cloned();
     if origin.is_some() {
         *next += 1;
@@ -1900,9 +1918,9 @@ fn assembly_origins(bundle: &ProgramBundle) -> AssemblyOrigins {
     let mut surfaces: HashMap<String, OriginSurface> = HashMap::new();
     let mut order = Vec::new();
     let mut library_order = Vec::new();
-    let mut header_origins_by_lib: HashMap<String, (String, String)> = HashMap::new();
+    let mut header_origins_by_lib: HashMap<String, (String, std::sync::Arc<str>)> = HashMap::new();
     for module in &bundle.modules {
-        let origin = (module.display.clone(), module.source.clone());
+        let origin = (module.display.clone(), std::sync::Arc::<str>::from(module.source.as_str()));
         let generated_language = generated_cache_language(&module.path.to_string_lossy());
         let generated = generated_language.is_some();
         let mut seen: HashMap<(Option<String>, String), (bool, String)> = HashMap::new();
@@ -2069,6 +2087,7 @@ fn cache_diagnostic_origins(bundle: &ProgramBundle) -> Vec<CffiDiagnostic> {
                     Err(parse_diags) => parse_diags,
                 }
             };
+            let source: std::sync::Arc<str> = source.into();
             Some(
                 diagnostics
                     .into_iter()
@@ -3229,13 +3248,18 @@ fn write_c_binding_provenance_with_boundary(
         ("ar".into(), crate::ForeignBridge::tool_identity("ar")),
     ];
     fields.extend(boundary.provenance_fields());
-    let handle_keys = metadata
+    // One `handle-fact` row per handle, the same repeated-row form the bridge
+    // provenance publisher uses: a stable key is itself a `key=value;...`
+    // record, and a header with several handles must not fold them into one
+    // multi-line value.
+    let mut handle_keys = metadata
         .handle_facts
         .iter()
         .map(FfiHandleFact::stable_key)
-        .collect::<Vec<_>>()
-        .join("\n");
-    fields.push(("handle-facts".into(), handle_keys));
+        .collect::<Vec<_>>();
+    handle_keys.sort();
+    handle_keys.dedup();
+    fields.extend(handle_keys.into_iter().map(|key| ("handle-fact".into(), key)));
     fields.push(("link-closure".into(), metadata.link_closure.stable_key()));
     if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
         fields.push(("dependency".into(), target));
@@ -3334,13 +3358,13 @@ fn load_cache_source(
         path: path.to_path_buf(),
         display,
         source: source.to_string(),
+        core_identifier_demand: crate::Lexer::core_identifier_demand(&toks),
         alias: format!("__c_cache_{lib}"),
         imports: std::mem::take(&mut prog.imports),
         items: std::mem::take(&mut prog.items),
         script_body: std::mem::take(&mut prog.script_body),
         block_spans: std::mem::take(&mut prog.block_spans),
         web_target_ceiling: prog.web_target_ceiling,
-        pub_file: prog.pub_file,
         no_prelude: prog.no_prelude,
         default_target: prog.default_target,
         html_path: prog.html_path.clone(),
@@ -3839,6 +3863,29 @@ pub fn resolve_link_for_target_with_entry(
         }
         return Err(e3201(lib));
     }
+    // Seed verification seam (dies at cutover): Core.db's declared provider
+    // lives in a transitive Core package, not necessarily the entry manifest.
+    // SQLite is the sanctioned bundle on both tiers, never pkg-config/system.
+    if lib == "sqlite3" {
+        if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
+            if target != Syntax::SYSTEM_LIB_TARGET && !target.starts_with(NIXPKGS_TARGET_PREFIX) {
+                return clib_link(lib, &target, project_root);
+            }
+        }
+        let mut candidates = Vec::new();
+        if let Ok(executable) = std::env::current_exe() {
+            if let Some(parent) = executable.parent() {
+                candidates.push(parent.join("jet-runtime/foreign/sqlite3"));
+            }
+        }
+        candidates.push(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/vendor/sqlite3"));
+        for directory in candidates {
+            if directory.join("sqlite3.c").is_file() {
+                return clib_link(lib, &directory.display().to_string(), project_root);
+            }
+        }
+        return Err(e3201(lib));
+    }
     // 1. A declared `<lib>: c@…` dep in the manifest's `deps:` block.
     if let Some(target) = declared_c_dep_for_entry(lib, project_root, entry) {
         return clib_link(lib, &target, project_root);
@@ -3915,13 +3962,140 @@ fn clib_link(lib: &str, target: &str, project_root: &Path) -> Result<LinkFlags, 
         return provision_from_nixpkgs(lib, lib, project_root);
     }
 
-    // Local dir: link from `<path>` with the lib's own name.
+    // Seed/verification seam; dies at cutover. Local source declarations use
+    // the same C toolchain and bundled feature set as the native host.
+    let directory = project_root.join(target);
+    let archive = directory.join(format!("lib{lib}.a"));
+    let realized = if archive.is_file() {
+        directory.clone()
+    } else if directory.is_dir() {
+        compile_local_c_library(lib, &directory, project_root).map_err(|reason| {
+            Diagnostic::error(
+                "E2105",
+                format!("Couldn't compile C dependency `{lib}`."),
+                reason,
+                "Check the declared C source directory and installed C toolchain.".to_string(),
+                None,
+            )
+        })?
+    } else {
+        directory.clone()
+    };
     Ok(LinkFlags {
-        include_dirs: vec![target.to_string()],
-        lib_dirs: vec![target.to_string()],
-        link_names: vec![lib.to_string()],
+        include_dirs: vec![directory.display().to_string()],
+        lib_dirs: vec![realized.display().to_string()],
+        link_names: vec![format!("static={lib}")],
         rpath_dirs: Vec::new(),
     })
+}
+
+// The local c@path provider has no second user-facing recipe syntax.
+fn compile_local_c_library(lib: &str, directory: &Path, root: &Path) -> Result<PathBuf, String> {
+    fn inputs(directory: &Path, paths: &mut Vec<PathBuf>) -> Result<(), String> {
+        for entry in std::fs::read_dir(directory).map_err(|error| error.to_string())? {
+            let path = entry.map_err(|error| error.to_string())?.path();
+            if path.is_dir() {
+                inputs(&path, paths)?;
+            } else if matches!(path.extension().and_then(|value| value.to_str()), Some("c" | "h")) {
+                paths.push(path);
+            }
+        }
+        Ok(())
+    }
+    fn checked(command: &mut Command) -> Result<(), String> {
+        let output = command.output().map_err(|error| error.to_string())?;
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).into_owned())
+        }
+    }
+    let compiler = std::env::var("CC").unwrap_or_else(|_| "cc".into());
+    let archiver = std::env::var("AR").unwrap_or_else(|_| "ar".into());
+    let mut flags = vec![
+        "-std=c11", "-O2", "-fPIC", "-fno-stack-protector",
+        "-fno-asynchronous-unwind-tables", "-fno-unwind-tables", "-D_GNU_SOURCE",
+    ];
+    if lib == "sqlite3" {
+        flags.extend([
+            "-DSQLITE_CORE", "-DSQLITE_DEFAULT_FOREIGN_KEYS=1",
+            "-DSQLITE_ENABLE_API_ARMOR", "-DSQLITE_ENABLE_COLUMN_METADATA",
+            "-DSQLITE_ENABLE_DBSTAT_VTAB", "-DSQLITE_ENABLE_FTS3",
+            "-DSQLITE_ENABLE_FTS3_PARENTHESIS", "-DSQLITE_ENABLE_FTS5",
+            "-DSQLITE_ENABLE_JSON1", "-DSQLITE_ENABLE_LOAD_EXTENSION=1",
+            "-DSQLITE_ENABLE_MEMORY_MANAGEMENT", "-DSQLITE_ENABLE_RTREE",
+            "-DSQLITE_ENABLE_STAT2", "-DSQLITE_ENABLE_STAT4", "-DSQLITE_SOUNDEX",
+            "-DSQLITE_THREADSAFE=1", "-DSQLITE_USE_URI", "-DHAVE_USLEEP=1",
+            "-D_POSIX_THREAD_SAFE_FUNCTIONS", "-DHAVE_ISNAN", "-DHAVE_LOCALTIME_R", "-w",
+        ]);
+    }
+    let target = Command::new(&compiler).arg("-dumpmachine").output().map_err(|error| error.to_string())?;
+    if !target.status.success() {
+        return Err(String::from_utf8_lossy(&target.stderr).into_owned());
+    }
+    let mut paths = Vec::new();
+    inputs(directory, &mut paths)?;
+    paths.sort();
+    let mut identity = crate::ForeignBridge::IdentityBuilder::new("jet-native-c-v1");
+    identity.field("target", &target.stdout);
+    let compiler_path = crate::ForeignBridge::tool_path(&compiler).ok_or_else(|| format!("C compiler `{compiler}` was not found"))?;
+    let archiver_path = crate::ForeignBridge::tool_path(&archiver).ok_or_else(|| format!("C archiver `{archiver}` was not found"))?;
+    identity.field("compiler", &std::fs::read(compiler_path).map_err(|error| error.to_string())?);
+    identity.field("archiver", &std::fs::read(archiver_path).map_err(|error| error.to_string())?);
+    for flag in &flags {
+        identity.field("flag", flag.as_bytes());
+    }
+    let mut sources = Vec::new();
+    for path in paths {
+        let content = std::fs::read(&path).map_err(|error| error.to_string())?;
+        identity.field(&path.strip_prefix(directory).map_err(|error| error.to_string())?.display().to_string(), &content);
+        if path.extension().and_then(|value| value.to_str()) == Some("c") {
+            sources.push(path);
+        }
+    }
+    if sources.is_empty() {
+        return Err(format!("C dependency `{lib}` has neither a static archive nor C sources in {}", directory.display()));
+    }
+    let mut preprocessed = Vec::new();
+    for source in &sources {
+        let output = Command::new(&compiler).args(&flags)
+            .arg(format!("-ffile-prefix-map={}=/jet/c", directory.display()))
+            .arg("-I").arg(directory).arg("-E").arg("-P").arg(source)
+            .output().map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+        }
+        identity.field("preprocessed", &output.stdout);
+        preprocessed.push(output.stdout);
+    }
+    let store = root.join(".jet/clinks/objects").join(identity.finish());
+    let archive = store.join(format!("lib{lib}.a"));
+    let digest_path = store.join(format!("lib{lib}.a.sha256"));
+    if archive.is_file() {
+        let expected = std::fs::read_to_string(&digest_path).unwrap_or_default();
+        if crate::ForeignBridge::sha_file(&archive)? == expected.trim() {
+            return Ok(store);
+        }
+    }
+    let work = store.join(format!("build-{}", std::process::id()));
+    std::fs::create_dir_all(&work).map_err(|error| error.to_string())?;
+    let mut objects = Vec::new();
+    for (index, source) in preprocessed.iter().enumerate() {
+        let staged_source = work.join(format!("{index}.i"));
+        std::fs::write(&staged_source, source).map_err(|error| error.to_string())?;
+        let object = work.join(format!("{index}.o"));
+        checked(Command::new(&compiler).args(&flags)
+            .arg("-c").arg(staged_source).arg("-o").arg(&object))?;
+        objects.push(object);
+    }
+    let staged = work.join(format!("lib{lib}.a"));
+    checked(Command::new(&archiver).arg("rcsD").arg(&staged).args(&objects))?;
+    let digest = crate::ForeignBridge::sha_file(&staged)?;
+    std::fs::rename(&staged, &archive).map_err(|error| error.to_string())?;
+    std::fs::write(work.join("digest"), digest).map_err(|error| error.to_string())?;
+    std::fs::rename(work.join("digest"), &digest_path).map_err(|error| error.to_string())?;
+    std::fs::remove_dir_all(work).map_err(|error| error.to_string())?;
+    Ok(store)
 }
 
 /// `target` prefix selecting an explicit nixpkgs attribute for a C dep.
@@ -4106,6 +4280,55 @@ mod tests {
         assert_eq!(modules.len(), 0);
         assert_eq!(diagnostics.len(), 1);
         assert_eq!(diagnostics[0].code, "E3208");
+    }
+
+    #[test]
+    fn c_binding_provenance_writes_one_handle_fact_row_per_handle() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_c_binding_handle_facts_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let header = root.join("hb.h");
+        let cache = root.join("hb.jet");
+        std::fs::write(&header, "typedef struct hb_blob_t hb_blob_t;\n").unwrap();
+        std::fs::write(&cache, "#Bindgen module c.hb.__bindgen__ {\n}\n").unwrap();
+        let fact = |typedef_name: &str, jet_name: &str, close: &str| FfiHandleFact {
+            lib: "hb".into(),
+            typedef_name: typedef_name.into(),
+            jet_name: jet_name.into(),
+            close: close.into(),
+            close_source: FfiCloseSource::Conventional,
+            thread_safety: FfiThreadSafety::Unspecified,
+        };
+        // Two handles: the retired single `handle-facts` value joined their
+        // `key=value;...` stable keys with a line break and was refused.
+        let facts = vec![
+            fact("hb_font_t", "HbFont", "hb_font_destroy"),
+            fact("hb_blob_t", "HbBlob", "hb_blob_destroy"),
+        ];
+        let closure = FfiLinkClosure::new(vec!["hb".into()], Vec::new());
+        std::fs::write(
+            binding_metadata_path(&cache),
+            render_binding_metadata("hb", &facts, &closure),
+        )
+        .unwrap();
+        let provenance = write_c_binding_provenance(&root, "hb", &header, &cache).unwrap();
+        let record = crate::ForeignBridge::read_provenance(&provenance).unwrap();
+        let mut expected = facts.iter().map(FfiHandleFact::stable_key).collect::<Vec<_>>();
+        expected.sort();
+        assert!(expected.iter().all(|key| key.contains('=')));
+        assert_eq!(record.fields.get("handle-fact"), Some(&expected));
+        assert!(!record.fields.contains_key("handle-facts"));
+        assert_eq!(
+            record.value("link-closure"),
+            Some(closure.stable_key().as_str())
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
 

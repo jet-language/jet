@@ -1,0 +1,58 @@
+# PORT tests/onboarding_matrix.rs:98-206; document/editor claims in tests/guards/onboarding_matrix.jet.
+# Rust-test-source scans at66/81-96 RETIRED; no public behavior is erased.
+# PENDING-GRAMMAR(batch-four): typed file capture scoped literal replace + literal-with-token write; runtime PENDING-SAME-HEAD.
+env: NO_COLOR=1
+step: jet new hello
+exit: 0
+file: hello/package.jet is-file
+file: hello/run.jet is-file
+file: hello/.gitignore is-file
+step: jet ? --color=never
+cwd: hello
+exit: 0
+stdout: ~ "Build & Run" # Original palette predicate rs116.
+stdout: !~ "\u001b" # Original NO_COLOR escape rejection rs118.
+step: jet ? run --color=never
+cwd: hello
+exit: 0
+stdout: ~ "jet run" # Original search predicate rs127.
+stdout: !~ "\u001b" # Original NO_COLOR escape rejection rs129.
+step: jet run
+cwd: hello
+exit: 0
+stdout: = original.out
+step: jet run run.jet
+cwd: hello
+exit: 0
+rename: hello/run.jet hello/run.jet.retired
+step: jet run
+cwd: hello
+exit: nonzero
+stderr: ~ "E2105" # Original missing entry diagnostic rs151.
+stderr: ~ "create `run.jet`" # Original recovery conjunction rs153.
+stderr: ~ "jet run <file.jet>" # Original recovery conjunction rs154.
+rename: hello/run.jet.retired hello/run.jet
+capture: edited = text file.replace("hello, world", "hello from Jet") hello/run.jet
+write: hello/run.jet = "{cap:edited}"
+step: jet check run.jet
+cwd: hello
+exit: 0
+step: jet test run.jet
+cwd: hello
+exit: 0
+step: jet run
+cwd: hello
+exit: 0
+stdout: = edited.out
+capture: invalid = text file.replace("print", "pirnt") hello/run.jet
+write: hello/run.jet = "{cap:invalid}"
+step: jet check run.jet
+cwd: hello
+exit: nonzero
+stderr: ~ "E0102" # Original invalid edit diagnostic rs188.
+stderr: ~ "Fix:" # Original actionable repair rs193.
+write: hello/run.jet = "{cap:edited}"
+step: jet run
+cwd: hello
+exit: 0
+stdout: = edited.out

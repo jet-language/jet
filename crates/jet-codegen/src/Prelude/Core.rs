@@ -4,7 +4,7 @@
 /// execution tier calls these same pure methods.
 pub trait CheckedText {
     type Error;
-    fn check(text: &String) -> Result<(), Self::Error>;
+    fn check(text: &str) -> Result<(), Self::Error>;
     fn encode_hole<T: JetShow>(value: &T) -> String;
 }
 
@@ -258,6 +258,22 @@ impl __jet_Equatable for JetDateTime {
 impl __jet_Comparable for JetDateTime {
     fn compare(&self, rhs: &Self) -> __jet_Ordering {
         jet_time_ordering(self.cmp(rhs))
+    }
+}
+
+// Core watcher's closed unit enums auto-derive `Comparable` in declaration
+// order, and `==` on a type that is both Equatable and Comparable dispatches
+// through `compare`. Their native carriers live in the runtime, so their
+// derived ordering lives here with them (ordinal order, as Derives.jet).
+impl __jet_Comparable for jet_std::WatchDomain {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering((*self as u8).cmp(&(*rhs as u8)))
+    }
+}
+
+impl __jet_Comparable for jet_std::WatchKind {
+    fn compare(&self, rhs: &Self) -> __jet_Ordering {
+        jet_time_ordering((*self as u8).cmp(&(*rhs as u8)))
     }
 }
 
@@ -620,60 +636,16 @@ pub extern "C" fn jet_web_d_fred_f64_free(ptr: u32) {
     });
 }
 
-// D-FIDELITY-API1=A: runtime-global fidelity signal. App code decides policy.
-const JET_PERF_DEFAULT_FIDELITY_BITS: u32 = 1065353216; // 1.0f32 bits
-static JET_PERF_FIDELITY: std::sync::atomic::AtomicU32 =
-    std::sync::atomic::AtomicU32::new(JET_PERF_DEFAULT_FIDELITY_BITS);
-fn jet_perf_fidelity() -> f64 {
-    let bits = JET_PERF_FIDELITY.load(std::sync::atomic::Ordering::SeqCst);
-    f32::from_bits(bits) as f64
+// Raw atomic storage for core.perf. Zero-initialized memory is interpreted by Jet.
+static JET_PERF_BITS: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+fn jet_perf_read_bits() -> i64 {
+    JET_PERF_BITS.load(std::sync::atomic::Ordering::SeqCst) as i64
 }
-fn jet_perf_default_fidelity() -> f64 {
-    f32::from_bits(JET_PERF_DEFAULT_FIDELITY_BITS) as f64
-}
-fn jet_perf_store_fidelity(v: f64) {
-    JET_PERF_FIDELITY.store((v as f32).to_bits(), std::sync::atomic::Ordering::SeqCst);
-}
-fn jet_perf_override_fidelity(v: f64) -> Result<(), String> {
-    if !v.is_finite() || v < 0.0 || v > 1.0 {
-        return Err(format!(
-            "core.perf.Perf.override_fidelity needs 0.0 through 1.0, got {}",
-            v
-        ));
-    }
-    jet_perf_store_fidelity(v);
-    Ok(())
-}
-fn jet_perf_reset_fidelity() {
-    JET_PERF_FIDELITY.store(
-        JET_PERF_DEFAULT_FIDELITY_BITS,
-        std::sync::atomic::Ordering::SeqCst,
-    );
+fn jet_perf_write_bits(bits: i64) {
+    JET_PERF_BITS.store(bits as u64, std::sync::atomic::Ordering::SeqCst);
 }
 
-impl JetShow for JetHyperLogLog {
-    fn jet_show(&self) -> String {
-        format!("HyperLogLog(count={})", self.count())
-    }
-}
-
-impl JetShow for JetTDigest {
-    fn jet_show(&self) -> String {
-        "TDigest".to_string()
-    }
-}
-
-impl JetShow for JetCountMinSketch {
-    fn jet_show(&self) -> String {
-        "CountMinSketch".to_string()
-    }
-}
-
-impl JetShow for JetReservoirSampler {
-    fn jet_show(&self) -> String {
-        format!("ReservoirSampler(n={})", self.parts().2)
-    }
-}
 
 struct JetTestExpectFrame {
     scope: u64,
@@ -690,6 +662,7 @@ struct JetTestingFailure {
 thread_local! {
     pub static JET_IN_SCHEDULER_TASK: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     static JET_INTERRUPT_HANDLER_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+    static JET_RUNTIME_PROCESS_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
     static JET_TEST_EXPECT_FAIL: std::cell::RefCell<Vec<JetTestExpectFrame>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_EXPECT_COMPLETED: std::cell::RefCell<Vec<(u64, String)>> = const { std::cell::RefCell::new(Vec::new()) };
     static JET_TEST_EXPECT_UNMET: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -865,11 +838,13 @@ pub fn jet_test_skip_abort() {
 struct JetStackFrame;
 
 impl Drop for JetStackFrame {
+    #[inline(always)]
     fn drop(&mut self) {
         jet_runtime_stack_leave();
     }
 }
 
+#[inline(always)]
 fn jet_stack_enter(
     file: &str,
     line: u32,
@@ -910,10 +885,49 @@ pub fn jet_interrupt_handler_panic_leave() {
     JET_INTERRUPT_HANDLER_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
 }
 
+// Only a real catcher enables process-root unwinding. Restore the previous
+// depth on every return/unwind, including nested boundaries and host faults.
+struct JetRuntimeProcessBoundary {
+    previous_depth: u32,
+}
+
+impl JetRuntimeProcessBoundary {
+    fn enter() -> Self {
+        let previous_depth = JET_RUNTIME_PROCESS_DEPTH.with(|depth| {
+            let previous = depth.get();
+            depth.set(previous.saturating_add(1));
+            previous
+        });
+        Self { previous_depth }
+    }
+}
+
+impl Drop for JetRuntimeProcessBoundary {
+    fn drop(&mut self) {
+        JET_RUNTIME_PROCESS_DEPTH.with(|depth| depth.set(self.previous_depth));
+    }
+}
+
 fn jet_runtime_should_unwind() -> bool {
     jet_scheduler_in_task()
+        || jet_scheduler_native_task_body_active()
         || jet_interrupt_handler_should_unwind()
+        || jet_runtime_process_should_unwind()
         || JET_TEST_EXPECT_FAIL.with(|frames| !frames.borrow().is_empty())
+}
+
+fn jet_runtime_process_should_unwind() -> bool {
+    #[cfg(jet_native_pack)]
+    if jet_c_abi::stop_domain() == 1 {
+        return true;
+    }
+    JET_RUNTIME_PROCESS_DEPTH.with(|depth| depth.get() != 0)
+}
+
+// Program faults may unwind to the real process catcher. Cancellation never
+// uses this query: an ordinary root keeps its cooperative wait sentinel.
+fn jet_runtime_fault_should_unwind() -> bool {
+    jet_runtime_should_unwind() || jet_runtime_process_should_unwind()
 }
 
 fn jet_interrupt_handler_should_unwind() -> bool {
@@ -922,6 +936,141 @@ fn jet_interrupt_handler_should_unwind() -> bool {
 
 fn jet_scheduler_panic_should_unwind() -> bool {
     jet_runtime_should_unwind()
+}
+
+// Installed only for a native comptime request (Prelude/Core/CAbi.rs
+// `jet_rt_comptime_begin`), never by ordinary runtime execution. Fuel is shared
+// with native callbacks on other threads; each actual native stack has its own
+// depth and source site. Budget exhaustion is a recoverable stop (unified
+// host/stop contract, #4720): these counters only report it, and the C ABI
+// publishes BudgetFuel/BudgetDepth on the task control and returns, so the MIR
+// Propagate after the budget operation takes the stop edge. A runtime panic
+// stays fatal: the request's fatal hook writes the stop record and exits. This
+// file ships without the scheduler, so the stop record and the task control
+// stay with the C ABI.
+static JET_NATIVE_COMPTIME_ACTIVE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static JET_NATIVE_COMPTIME_FUEL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_DEPTH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static JET_NATIVE_COMPTIME_STATUS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+static JET_NATIVE_COMPTIME_FATAL: std::sync::OnceLock<fn(u32, &str) -> !> = std::sync::OnceLock::new();
+thread_local! {
+    static JET_NATIVE_COMPTIME_FRAME: std::cell::Cell<(u64, u64, u64, u64)> = const { std::cell::Cell::new((0, 0, 0, 0)) };
+}
+
+pub(crate) fn jet_native_comptime_active() -> bool {
+    JET_NATIVE_COMPTIME_ACTIVE.load(std::sync::atomic::Ordering::Acquire)
+}
+
+// `fatal` writes a fatal stop's record and exits (jet_native_comptime_fail).
+pub(crate) fn jet_native_comptime_begin(fuel: u64, max_depth: u64, fatal: fn(u32, &str) -> !) -> bool {
+    // The host serves one request at a time and joins native work before end.
+    if jet_native_comptime_active() { return false; }
+    let _ = JET_NATIVE_COMPTIME_FATAL.get_or_init(|| fatal);
+    JET_NATIVE_COMPTIME_FUEL.store(fuel, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_DEPTH.store(max_depth, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_STATUS.store(0, std::sync::atomic::Ordering::Relaxed);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
+    JET_NATIVE_COMPTIME_ACTIVE.store(true, std::sync::atomic::Ordering::Release);
+    true
+}
+
+// JET_VETTED_UNSAFE_BEGIN: jet_native_comptime_channel
+// AUDIT: the native comptime worker's private protocol channel. The compiler
+// starts the worker with descriptor 3 open as its result pipe; the failure path
+// borrows that raw descriptor to duplicate it. Safe Rust cannot name a raw
+// descriptor it did not open. Caller invariant: only a process launched by the
+// compiler's comptime worker protocol calls this, and descriptor 3 stays open
+// for the whole process lifetime. Violating it borrows a closed or unrelated
+// descriptor: the duplicate fails (reported as None) or writes the envelope to
+// the wrong file. Only unix hosts run the worker; wasm guests omit the module.
+#[cfg(all(unix, not(target_arch = "wasm32")))]
+mod jet_native_comptime_channel {
+    use std::os::fd::BorrowedFd;
+
+    /// An owned duplicate of protocol descriptor 3, so dropping the returned
+    /// File never closes the descriptor the compiler reads.
+    pub(crate) fn protocol_channel() -> Option<std::fs::File> {
+        // SAFETY: see the module audit; descriptor 3 is open for the worker's
+        // lifetime and is only borrowed for the duplicate below.
+        let borrowed = unsafe { BorrowedFd::borrow_raw(3) };
+        borrowed.try_clone_to_owned().ok().map(std::fs::File::from)
+    }
+}
+// JET_VETTED_UNSAFE_END: jet_native_comptime_channel
+
+// Writes one stop-record frame to the private channel, after the program's
+// own output.
+pub(crate) fn jet_native_comptime_channel_write(frame: &[u8]) {
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
+    let _ = std::io::stderr().flush();
+    #[cfg(all(unix, not(target_arch = "wasm32")))]
+    if let Some(mut channel) = jet_native_comptime_channel::protocol_channel() {
+        let _ = channel.write_all(frame);
+        let _ = channel.flush();
+    }
+}
+
+// The current thread's comptime frame: (depth, owner row, start, end).
+pub(crate) fn jet_native_comptime_frame() -> (u64, u64, u64, u64) {
+    JET_NATIVE_COMPTIME_FRAME.with(std::cell::Cell::get)
+}
+
+// A fatal comptime stop: status 1 (runtime panic) or 4 (foreign/host panic).
+// Exactly one failing thread hands it to the request's fatal hook, which
+// writes the stop record and exits; the host restarts the child.
+pub(crate) fn jet_native_comptime_fail(status: u32, message: &str) -> ! {
+    if JET_NATIVE_COMPTIME_STATUS.compare_exchange(0, status, std::sync::atomic::Ordering::AcqRel, std::sync::atomic::Ordering::Acquire).is_err() {
+        loop { std::thread::park(); }
+    }
+    if let Some(fatal) = JET_NATIVE_COMPTIME_FATAL.get() { fatal(status, message) }
+    jet_runtime_finalized_exit(if status == 4 { 101 } else { 80 + status as i32 })
+}
+
+// Spends `units` of fuel; true when the request's fuel ran out (the caller
+// publishes the stop and returns).
+pub(crate) fn jet_native_comptime_work(units: u64) -> bool {
+    if !jet_native_comptime_active() { return false; }
+    JET_NATIVE_COMPTIME_FUEL.fetch_update(std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed, |remaining| remaining.checked_sub(units)).is_err()
+}
+
+// After a budget stop every thread's next fuel charge stops too.
+pub(crate) fn jet_native_comptime_spend_all() {
+    JET_NATIVE_COMPTIME_FUEL.store(0, std::sync::atomic::Ordering::Relaxed);
+}
+
+// owner is a dense row in the retained MIRProgram, never an exact-Int ID.
+// True when the request's fuel ran out.
+pub(crate) fn jet_native_comptime_step(owner: u64, start: u64, end: u64) -> bool {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        frame.set((depth, owner, start, end));
+    });
+    jet_native_comptime_work(1)
+}
+
+// True when entering exceeds the request's depth.
+pub(crate) fn jet_native_comptime_enter(owner: u64, start: u64, end: u64) -> bool {
+    if !jet_native_comptime_active() { return false; }
+    let depth = JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, _, _, _) = frame.get();
+        let depth = depth.saturating_add(1);
+        frame.set((depth, owner, start, end));
+        depth
+    });
+    depth > JET_NATIVE_COMPTIME_DEPTH.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+pub(crate) fn jet_native_comptime_leave() {
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| {
+        let (depth, owner, start, end) = frame.get();
+        frame.set((depth.saturating_sub(1), owner, start, end));
+    });
+}
+
+pub(crate) fn jet_native_comptime_end() {
+    JET_NATIVE_COMPTIME_ACTIVE.store(false, std::sync::atomic::Ordering::Release);
+    JET_NATIVE_COMPTIME_FRAME.with(|frame| frame.set((0, 0, 0, 0)));
 }
 
 struct JetRuntimeExit;
@@ -950,17 +1099,19 @@ struct JetRenderedRuntimeStop {
 /// (`Codegen/TIR/eval/exprs.rs` `eval_require_failure`).
 ///
 /// Every intentional unwinding frame keeps the typed report: an `#Interrupt`
-/// handler and `jet test`'s expect-fail region catch the rendered stop, while
-/// scheduler tasks receive the program's message above. The ordinary process
-/// path may cross a boundary that cannot carry an unwind. This matters for
-/// debug native dispatch: its `extern "C"` trampoline is a non-unwinding ABI,
-/// so resuming a panic there aborts before `jet_runtime_boundary` can observe
-/// the report. End that path at the shared process boundary instead.
+/// handler, an expect-fail region, and the ordinary process root catch the
+/// rendered stop, while scheduler tasks receive the program's message above.
+/// Debug dispatch catches inside its non-unwinding C trampoline and transports
+/// the payload back to the Rust caller before resuming lexical cleanup.
 fn jet_runtime_stop_unwind(rendered: String, exit_code: i32, message: &str) -> ! {
+    if jet_native_comptime_active() { jet_native_comptime_fail(1, message); }
+    if jet_scheduler_native_task_body_active() {
+        std::panic::resume_unwind(Box::new(JetNativeTaskPanic(message.to_string())));
+    }
     if jet_scheduler_in_task() {
         std::panic::resume_unwind(Box::new(message.to_string()));
     }
-    if !jet_runtime_should_unwind() {
+    if !jet_runtime_fault_should_unwind() {
         jet_runtime_process_exit(exit_code, Some(&rendered));
     }
     std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
@@ -976,31 +1127,135 @@ struct JetExplicitExit {
     code: i32,
 }
 
+// The debug callable's caller owns this channel. Only std carrier types cross
+// the candidate shared-object boundary: private report TypeIds belong to the
+// producing artifact. Reports keep their already-rendered bytes and exit code;
+// all other payloads (task/cancellation/host faults) keep their original box.
+type JetNativeDispatchUnwind =
+    Option<Result<(Option<String>, i32), Box<dyn std::any::Any + Send>>>;
+
+fn jet_native_dispatch_boundary<T: Default>(
+    stop: &mut JetNativeDispatchUnwind,
+    run: impl FnOnce() -> T,
+) -> T {
+    let _boundary = JetRuntimeProcessBoundary::enter();
+    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
+        Ok(value) => value,
+        Err(payload) => {
+            let payload = match payload.downcast::<JetRuntimeDiagnostic>() {
+                Ok(report) => {
+                    *stop = Some(Ok((Some(report.rendered), report.exit_code)));
+                    return T::default();
+                }
+                Err(payload) => payload,
+            };
+            let payload = match payload.downcast::<JetRenderedRuntimeStop>() {
+                Ok(report) => {
+                    *stop = Some(Ok((Some(report.rendered), report.exit_code)));
+                    return T::default();
+                }
+                Err(payload) => payload,
+            };
+            *stop = Some(match payload.downcast::<JetExplicitExit>() {
+                Ok(exit) => Ok((None, exit.code)),
+                Err(payload) if payload.is::<JetRuntimeExit>() => Ok((None, 70)),
+                Err(payload) => Err(payload),
+            });
+            // This scalar is transport only. The Rust caller must consume the
+            // stop channel before observing it; no foreign callback uses this.
+            T::default()
+        }
+    }
+}
+
+fn jet_native_dispatch_finish<T>(stop: JetNativeDispatchUnwind, value: T) -> T {
+    match stop {
+        None => value,
+        Some(Ok((Some(rendered), exit_code))) => {
+            std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop { rendered, exit_code }))
+        }
+        Some(Ok((None, code))) => {
+            std::panic::resume_unwind(Box::new(JetExplicitExit { code }))
+        }
+        Some(Err(payload)) => std::panic::resume_unwind(payload),
+    }
+}
+
 // Process-edge callbacks live beside the one boundary so a program that does
 // not import core.sys still has a complete entry wrapper. The OS adapter only
 // registers callbacks; it never installs a second native exit path.
 mod jet_runtime_atexit {
-    use std::cell::RefCell;
+    use std::cell::{Cell, RefCell};
 
     thread_local! {
         static HANDLERS: RefCell<Vec<Box<dyn Fn() + 'static>>> = const { RefCell::new(Vec::new()) };
+        // Nonpack process-owned finalization only. Native packs use the Jet
+        // Root's pending record and never use this cell to impersonate a Task.
+        static STOPPING: Cell<bool> = const { Cell::new(false) };
+    }
+
+    pub(super) struct FinalizationScope(bool);
+    impl FinalizationScope {
+        pub(super) fn enter(stopping: bool) -> Self {
+            Self(STOPPING.with(|phase| {
+                let previous = phase.get();
+                phase.set(previous || stopping);
+                previous
+            }))
+        }
+    }
+    impl Drop for FinalizationScope {
+        fn drop(&mut self) {
+            STOPPING.with(|phase| phase.set(self.0));
+        }
     }
 
     pub(super) fn register<F>(handler: F)
     where
         F: Fn() + 'static,
     {
+        if STOPPING.with(Cell::get) || std::thread::panicking() {
+            // The callback body is new work after the stop, but its adopted
+            // captures still belong to this real stopped-cleanup scope.
+            drop(handler);
+            return;
+        }
         HANDLERS.with(|handlers| {
-            let mut handlers = handlers.borrow_mut();
-            super::jet_runtime_register_atexit(&mut handlers, Box::new(handler));
+            super::jet_runtime_register_atexit(&mut handlers.borrow_mut(), Box::new(handler));
         });
     }
 
-    pub(super) fn run() {
-        HANDLERS.with(|handlers| {
-            let mut handlers = handlers.borrow_mut();
-            super::jet_runtime_drain_atexit(&mut handlers, |handler| handler());
-        });
+    pub(super) fn run() -> Option<Box<dyn std::any::Any + Send>> {
+        let mut first_stop = None;
+        loop {
+            // Never retain a RefCell borrow over a callback or capture Drop.
+            let mut pending = HANDLERS.with(|handlers| std::mem::take(&mut *handlers.borrow_mut()));
+            if pending.is_empty() {
+                break;
+            }
+            super::jet_runtime_drain_atexit(&mut pending, |handler| {
+                match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| handler())) {
+                    Ok(()) => {}
+                    Err(payload) => {
+                        if STOPPING.with(|phase| phase.replace(true)) {
+                            super::jet_runtime_abort_stopped_cleanup();
+                        }
+                        first_stop = Some(payload);
+                    }
+                }
+                // Explicit Drop stays inside the same actual finalization
+                // phase, including a first stop raised by this callback.
+                if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(handler))) {
+                    if STOPPING.with(|phase| phase.replace(true)) {
+                        super::jet_runtime_abort_stopped_cleanup();
+                    }
+                    first_stop = Some(payload);
+                }
+            });
+            // Callbacks accepted before a first stop may have appended a later
+            // batch; they remain owed, after the earlier registered handlers.
+        }
+        first_stop
     }
 }
 
@@ -1011,88 +1266,149 @@ where
     jet_runtime_atexit::register(move || handler());
 }
 
-fn jet_std_os_run_atexit() {
-    jet_runtime_atexit::run();
+fn jet_std_os_run_atexit() -> Option<Box<dyn std::any::Any + Send>> {
+    #[cfg(not(jet_native_pack))]
+    { jet_runtime_atexit::run() }
+    #[cfg(jet_native_pack)]
+    {
+        unsafe extern "C" { fn jet_rt_task_exit_handlers(); }
+        // SAFETY: the canonical Jet queue owns callback invocation, capture
+        // cleanup, late-registration gating and its retained pending Root stop.
+        unsafe { jet_rt_task_exit_handlers() };
+        None
+    }
 }
 
 fn jet_runtime_report_parked_tasks() -> Option<i32> {
     let report = jet_observe_parked_tasks_report()?;
-    eprint!("{}", report.rendered);
+    jet_runtime_process_report(Some(&report.rendered));
     Some(report.exit_code)
 }
 
-/// The only native process-exit boundary for generated programs. Lexical
-/// cleanup has already happened while the stop unwound to this point; process
-/// callbacks run here before the final native exit.
-fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
-    jet_std_os_run_atexit();
-    jet_runtime_report_parked_tasks();
-    jet_observe_drain_after_exit();
+/// A second stop during genuine stopped cleanup retains the standard native
+/// destructor double-panic boundary, not a replacement report or success.
+fn jet_runtime_abort_stopped_cleanup() -> ! {
+    eprint!("panic in a destructor during cleanup\n");
+    std::process::abort()
+}
+
+fn jet_runtime_finalize_process(stopping: bool) -> (Option<i32>, Option<Box<dyn std::any::Any + Send>>) {
+    #[cfg(not(jet_native_pack))]
+    let _phase = jet_runtime_atexit::FinalizationScope::enter(stopping);
+    #[cfg(jet_native_pack)]
+    let _ = stopping;
+    let stop = {
+        #[cfg(jet_native_pack)]
+        let _cleanup = jet_c_abi::NativeCleanupScope::enter();
+        jet_std_os_run_atexit()
+    };
+    let parked_exit = {
+        #[cfg(jet_native_pack)]
+        let _cleanup = jet_c_abi::NativeCleanupScope::enter();
+        jet_runtime_report_parked_tasks()
+    };
+    {
+        #[cfg(jet_native_pack)]
+        let _cleanup = jet_c_abi::NativeCleanupScope::enter();
+        jet_observe_drain_after_exit();
+    }
+    (parked_exit, stop)
+}
+
+fn jet_runtime_flush_stdout() {
+    #[cfg(jet_native_pack)]
+    {
+        unsafe extern "C" { fn jet_rt_stdout_flush(); }
+        // SAFETY: the canonical process buffer owns its lock and lifetime.
+        // Before host init the export is a no-op; failed writes retain their
+        // pending suffix, never publish a Stop or enter language callbacks.
+        unsafe { jet_rt_stdout_flush() };
+    }
+}
+
+fn jet_runtime_process_report(report: Option<&str>) {
+    jet_runtime_flush_stdout();
     if let Some(report) = report {
         eprint!("{report}");
     }
+}
+
+// Report paths have already flushed the Jet buffer. Keep the final Rust sink
+// flush/exit tail private so native E4 report ownership can end before exit
+// without flushing the Jet buffer twice.
+fn jet_runtime_terminal_tail(code: i32) -> ! {
     let _ = std::io::Write::flush(&mut std::io::stdout());
     let _ = std::io::Write::flush(&mut std::io::stderr());
     std::process::exit(code)
+}
+
+fn jet_runtime_finalized_exit(code: i32) -> ! {
+    jet_runtime_flush_stdout();
+    jet_runtime_terminal_tail(code)
+}
+
+fn jet_runtime_finalized_stop_exit(code: i32, report: Option<&str>) -> ! {
+    jet_runtime_process_report(report);
+    jet_runtime_terminal_tail(code)
+}
+
+/// Lexical cleanup precedes this one process boundary. Process finalizers run
+/// exactly once before the retained report and the requested native exit.
+fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> ! {
+    let (_, stop) = jet_runtime_finalize_process(true);
+    if let Some(payload) = stop {
+        jet_runtime_deliver_stop(payload, jet_runtime_finalized_stop_exit);
+    }
+    jet_runtime_finalized_stop_exit(code, report)
 }
 
 fn jet_runtime_boundary<F, T>(run: F) -> T
 where
     F: FnOnce() -> T,
 {
+    let _boundary = JetRuntimeProcessBoundary::enter();
     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
         Ok(value) => {
-            jet_std_os_run_atexit();
-            let parked_exit = jet_runtime_report_parked_tasks();
-            jet_observe_drain_after_exit();
-            if let Some(code) = parked_exit {
-                std::process::exit(code);
+            let (parked_exit, stop) = jet_runtime_finalize_process(false);
+            if let Some(payload) = stop {
+                jet_runtime_deliver_stop(payload, jet_runtime_finalized_stop_exit);
             }
+            if let Some(code) = parked_exit {
+                jet_runtime_finalized_exit(code);
+            }
+            jet_runtime_flush_stdout();
             value
         }
-        Err(payload) => {
-            // Only the private foreign-boundary marker below converts a String
-            // payload into a user stop. A rendered runtime report crosses this
-            // boundary as a typed report or private envelope; arbitrary panic
-            // text remains a host/compiler fault.
-            //
-            // This is the one place the marker is read, and it is the only E3001
-            // renderer a shared Prelude source can reach without naming a
-            // registered-row adapter. Its producers are boundaries whose source
-            // is embedded into crates that carry no such adapter: the generated
-            // bridge crate's `ffi_panic` (jet-pkg-model/src/FFI.rs) and the
-            // fail-closed OS entropy shim (Prelude/CoreLib/Top/CryptoEntropy.rs,
-            // which is also embedded verbatim into that bridge). Those sources
-            // must not build a report themselves: the bridge strips Foundation's
-            // `jet_render_runtime_stop` wrapper and never regenerates it, so a
-            // report built there is a call with no definition (I2 — rustc E0425
-            // inside Jet's own generated crate, reported as E0705 against the
-            // user's `extern rust` line).
-            if let Some(message) = payload
-                .downcast_ref::<String>()
-                .and_then(|message| message.strip_prefix("__jet_ffi_runtime__: "))
-            {
-                let report = jet_runtime_stop_report(
-                    "E3001", "", 0, "", "", 1, 1, message, "",
-                );
-                jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
-            }
-            match payload.downcast::<JetRuntimeDiagnostic>() {
-                Ok(report) => {
-                    jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
-                }
-                Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
-                    Ok(report) => {
-                        jet_runtime_process_exit(report.exit_code, Some(&report.rendered));
-                    }
-                    Err(payload) => match payload.downcast::<JetExplicitExit>() {
-                        Ok(exit) => jet_runtime_process_exit(exit.code, None),
-                        Err(payload) if payload.is::<JetRuntimeExit>() => jet_runtime_panic_exit(),
-                        Err(payload) => std::panic::resume_unwind(payload),
-                    },
-                },
-            }
-        }
+        Err(payload) => jet_runtime_deliver_stop(payload, jet_runtime_process_exit),
+    }
+}
+
+/// The generated foreign bridge and entropy shim cannot name registered-row
+/// adapters. Their private marker is converted only by this shared producer;
+/// arbitrary Rust String panics remain host faults.
+fn jet_runtime_foreign_stop_report(payload: &(dyn std::any::Any + Send)) -> Option<JetRuntimeDiagnostic> {
+    let message = payload.downcast_ref::<String>()?
+        .strip_prefix("__jet_ffi_runtime__: ")?;
+    Some(jet_runtime_stop_report("E3001", "", 0, "", "", 1, 1, message, ""))
+}
+
+fn jet_runtime_deliver_stop(
+    payload: Box<dyn std::any::Any + Send>,
+    exit: fn(i32, Option<&str>) -> !,
+) -> ! {
+    if let Some(report) = jet_runtime_foreign_stop_report(&*payload) {
+        exit(report.exit_code, Some(&report.rendered));
+    }
+    match payload.downcast::<JetRuntimeDiagnostic>() {
+        Ok(report) => exit(report.exit_code, Some(&report.rendered)),
+        Err(payload) => match payload.downcast::<JetRenderedRuntimeStop>() {
+            Ok(report) => exit(report.exit_code, Some(&report.rendered)),
+            Err(payload) => match payload.downcast::<JetExplicitExit>() {
+                Ok(request) => exit(request.code, None),
+                Err(payload) if payload.is::<JetRuntimeExit>() => exit(70, None),
+                Err(payload) => std::panic::resume_unwind(payload),
+            },
+        },
     }
 }
 
@@ -1169,12 +1485,12 @@ fn jet_ffi_callback_panic(payload: Box<dyn std::any::Any + Send>) -> ! {
     }
 }
 
-/// A cryptographic random draw is intentionally not replayed by a
-/// deterministic world. Route the canonical AOT Core entry through this
-/// boundary so it cannot silently fall back to operating-system entropy.
-/// A missing or rejected provider is `None`; the Jet wrapper in
-/// `Core/crypto/random.jet` reports it as `CryptoError.Unavailable`.
-fn jet_std_crypto_random_bytes_controlled(n: i64) -> Option<Vec<u8>> {
+/// `core.crypto.random.__os_entropy`: the one host step behind the Jet
+/// `core.crypto.random.bytes` policy (bounds, length check and error meaning
+/// live in `Core/crypto/random.jet`). A cryptographic draw is never replayed by
+/// a deterministic world, so the boundary rejects it there; otherwise this is a
+/// single fail-closed OS CSPRNG fill. A rejected provider is `None`.
+fn jet_random_os_entropy(n: i64) -> Option<Vec<u8>> {
     jet_scheduler_world_reject_uncontrolled("entropy");
     jet_crypto_entropy_bytes(n).ok()
 }
@@ -1249,7 +1565,7 @@ fn jet_entry_report(error: String) -> String {
 
 fn jet_entry_error_exit(error: String) -> ! {
     let report = jet_entry_report(error);
-    eprint!("{report}");
+    jet_runtime_process_report(Some(&report));
     jet_runtime_explicit_exit(1)
 }
 
@@ -1258,7 +1574,7 @@ fn jet_entry_error_exit(error: String) -> ! {
 /// context, conversions, and the source journey cannot be recovered from
 /// `Display` text after the fact.
 fn jet_entry_error_exit_jet(error: JetErr) -> ! {
-    eprint!("{}", jet_error_report(&error).render());
+    jet_runtime_process_report(Some(&jet_error_report(&error).render()));
     jet_runtime_explicit_exit(1)
 }
 
@@ -1288,6 +1604,7 @@ fn jet_service_edge_report_rendered(report: String) -> ! {
         }
     }
     quoted.push('"');
+    jet_runtime_flush_stdout();
     eprintln!("{{\"target\":\"service\",\"report\":{quoted}}}");
     jet_runtime_explicit_exit(1)
 }
@@ -1307,9 +1624,6 @@ fn jet_runtime_panic_exit() -> ! {
 }
 
 fn jet_runtime_stop(code: &'static str, file: &str, line: u32, msg: &str) -> ! {
-    if code == JET_C_INT_RANGE_CODE {
-        jet_entry_error_exit(jet_c_int_range_report());
-    }
     jet_runtime_stop_with_context(code, file, line, "", "", msg)
 }
 
@@ -1319,17 +1633,19 @@ fn jet_scheduler_runtime_stop(msg: &str) -> ! {
 
 fn jet_scheduler_runtime_stop_with_report(report: JetStreamFailure) -> ! {
     jet_test_record_stop(&report.code, &report.message);
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
             rendered: report.rendered,
             exit_code: 70,
         }));
     }
+    jet_runtime_flush_stdout();
     eprint!("{}", report.rendered);
     jet_runtime_exit();
 }
 
 fn jet_runtime_caught_stop(message: &str) {
+    jet_runtime_flush_stdout();
     eprint!("{message}");
     if !message.ends_with('\n') {
         eprintln!();
@@ -1367,7 +1683,7 @@ fn jet_sentry_runtime_stop(
         foreign_component,
         foreign_fenced,
     );
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         jet_stream_record_failure_report(code, detail, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, detail)
@@ -1396,7 +1712,7 @@ fn jet_runtime_stop_with_context(
     let _ = jet_production_failure_receipt_write(code, file, line, fn_name);
     let report =
         jet_runtime_stop_report(code, file, line, fn_name, src_line, 1, 1, msg, "");
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
@@ -1423,12 +1739,15 @@ fn jet_runtime_diagnostic(rendered: String) -> ! {
     if JET_PARA_DEFER_FAILURE.with(|defer| defer.get()) {
         std::panic::resume_unwind(Box::new(JetParaRuntimeFailure::Diagnostic { rendered }));
     }
-    if jet_interrupt_handler_should_unwind() {
+    if jet_interrupt_handler_should_unwind()
+        || (!jet_scheduler_in_task() && jet_runtime_process_should_unwind())
+    {
         std::panic::resume_unwind(Box::new(JetRenderedRuntimeStop {
             rendered,
             exit_code: 70,
         }));
     }
+    jet_runtime_flush_stdout();
     eprintln!("{}", rendered);
     jet_runtime_exit();
 }
@@ -2168,7 +2487,7 @@ fn jet_panic_rich_code(
     let report = jet_runtime_stop_report(
         code, file, line, fn_name, src_line, col, caret_len, msg, locals,
     );
-    if jet_runtime_should_unwind() {
+    if jet_runtime_fault_should_unwind() {
         jet_stream_record_failure_report(code, msg, report.rendered.clone());
     }
     jet_runtime_stop_unwind(report.rendered, report.exit_code, msg)
@@ -2366,11 +2685,6 @@ fn jet_index_vec<T: Clone>(xs: &[T], i: i64, file: &str, line: u32) -> T {
     jet_index_vec_ref(xs, i, file, line).clone()
 }
 #[inline(always)]
-fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T {
-    jet_fixed_list_index(xs.len(), i, |index| &xs[index])
-        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
-}
-#[inline(always)]
 fn jet_index_vec_mut<'a, T>(
     xs: &'a mut [T],
     i: i64,
@@ -2385,6 +2699,21 @@ fn jet_index_vec_set<T>(xs: &mut [T], i: i64, value: T, file: &str, line: u32) {
     let index = jet_fixed_list_index(xs.len(), i, |index| index)
         .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
     xs[index] = value;
+}
+/// #4566: `jet_index_vec_set` into Int storage whose every element is an
+/// inline word (MIRRust `inline_int_storage`): the displaced element owns
+/// no node, so it is overwritten without a release.
+#[inline(always)]
+fn jet_index_int_set_inline(
+    xs: &mut [jet_foundation::Numeric::JetInt],
+    i: i64,
+    value: jet_foundation::Numeric::JetInt,
+    file: &str,
+    line: u32,
+) {
+    let index = jet_fixed_list_index(xs.len(), i, |index| index)
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()));
+    std::mem::forget(std::mem::replace(&mut xs[index], value));
 }
 
 fn jet_unpack_vec<T: Clone>(xs: &[T], want: usize, i: usize, file: &str, line: u32) -> T {
@@ -2471,6 +2800,16 @@ impl<T: Clone> JetSliceRange for Vec<T> {
 }
 
 impl JetSliceRange for String {
+    type Output = String;
+
+    fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
+        jet_string_slice_value(self, range.start, range.end, range.exclusive)
+            .unwrap_or_else(|message| jet_panic(file, line, &message))
+    }
+}
+
+// A string-view (`&str`) local slices the same way as its owner.
+impl JetSliceRange for str {
     type Output = String;
 
     fn slice_range(&self, range: &JetRange, file: &str, line: u32) -> Self::Output {
@@ -2689,12 +3028,65 @@ where
 {
     xs.iter().map(f).collect()
 }
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct JetMap<K, V>(std::sync::Arc<std::collections::BTreeMap<K, V>>);
+/// A Jet map value: copy-on-write ordered storage. Jet maps may hold values
+/// Rust cannot clone (handles, owned callbacks), so mutation never demands
+/// `V: Clone`. Storage becomes shared only through `JetMap::clone` (or a
+/// values view), which needs `K, V: Clone` and records the entry cloner in the
+/// shared allocation; the first mutation of shared storage copies it with that
+/// cloner. A map whose values are not `Clone` is therefore never shared.
+struct JetMap<K, V>(std::sync::Arc<JetMapStore<K, V>>);
+
+struct JetMapStore<K, V> {
+    map: std::collections::BTreeMap<K, V>,
+    cloner: std::sync::OnceLock<fn(&std::collections::BTreeMap<K, V>) -> std::collections::BTreeMap<K, V>>,
+}
+
+impl<K, V> JetMapStore<K, V> {
+    fn new(map: std::collections::BTreeMap<K, V>) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self { map, cloner: std::sync::OnceLock::new() })
+    }
+}
+
+fn jet_map_clone_entries<K: Clone, V: Clone>(
+    map: &std::collections::BTreeMap<K, V>,
+) -> std::collections::BTreeMap<K, V> {
+    map.clone()
+}
 
 impl<K, V> JetMap<K, V> {
     fn new() -> Self {
-        Self(std::sync::Arc::new(std::collections::BTreeMap::new()))
+        Self(JetMapStore::new(std::collections::BTreeMap::new()))
+    }
+
+    fn from_map(map: std::collections::BTreeMap<K, V>) -> Self {
+        Self(JetMapStore::new(map))
+    }
+
+    /// Share the storage, recording how to copy it on a later mutation.
+    fn share(&self) -> std::sync::Arc<JetMapStore<K, V>>
+    where
+        K: Clone,
+        V: Clone,
+    {
+        self.0.cloner.get_or_init(|| jet_map_clone_entries::<K, V>);
+        std::sync::Arc::clone(&self.0)
+    }
+
+    /// Unique mutable storage: shared storage is copied with the cloner its
+    /// sharing recorded. Shared storage without one is a runtime invariant
+    /// breach and stops loudly.
+    fn storage_mut(&mut self) -> &mut std::collections::BTreeMap<K, V> {
+        if std::sync::Arc::get_mut(&mut self.0).is_none() {
+            let cloner = *self
+                .0
+                .cloner
+                .get()
+                .expect("JetMap storage is shared without an entry cloner");
+            self.0 = JetMapStore::new(cloner(&self.0.map));
+        }
+        &mut std::sync::Arc::get_mut(&mut self.0)
+            .expect("JetMap storage is unique after copy-on-write")
+            .map
     }
 }
 impl<K: Ord, V> JetMap<K, V> {
@@ -2703,14 +3095,25 @@ impl<K: Ord, V> JetMap<K, V> {
     }
 }
 
-/// Build a typed Jet map from one already-lowered runtime entry vector.
-///
-/// The checked TIR producer has already evaluated each key and value. This
-/// kernel only commits those pairs to the canonical copy-on-write map.
-#[inline(always)]
-fn jet_data_entries_to_map<K: Ord, V>(entries: Vec<(K, V)>) -> JetMap<K, V> {
-    JetMap::from_pairs(entries)
+impl<K: Clone, V: Clone> Clone for JetMap<K, V> {
+    fn clone(&self) -> Self {
+        Self(self.share())
+    }
 }
+
+impl<K: std::fmt::Debug, V: std::fmt::Debug> std::fmt::Debug for JetMap<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("JetMap").field(&self.0.map).finish()
+    }
+}
+
+impl<K: PartialEq, V: PartialEq> PartialEq for JetMap<K, V> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.map == other.0.map
+    }
+}
+
+impl<K: Eq, V: Eq> Eq for JetMap<K, V> {}
 
 // Codegen lowers map construction from a sequence of pairs to
 // `.into_iter().collect()`, so the map has to be buildable from its own pairs.
@@ -2718,9 +3121,7 @@ fn jet_data_entries_to_map<K: Ord, V>(entries: Vec<(K, V)>) -> JetMap<K, V> {
 // rejected (I2).
 impl<K: Ord, V> FromIterator<(K, V)> for JetMap<K, V> {
     fn from_iter<I: IntoIterator<Item = (K, V)>>(pairs: I) -> Self {
-        Self(std::sync::Arc::new(
-            pairs.into_iter().collect::<std::collections::BTreeMap<K, V>>(),
-        ))
+        Self::from_map(pairs.into_iter().collect::<std::collections::BTreeMap<K, V>>())
     }
 }
 
@@ -2728,13 +3129,13 @@ impl<K, V> std::ops::Deref for JetMap<K, V> {
     type Target = std::collections::BTreeMap<K, V>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.0.map
     }
 }
 
-impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
+impl<K, V> std::ops::DerefMut for JetMap<K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        std::sync::Arc::make_mut(&mut self.0)
+        self.storage_mut()
     }
 }
 
@@ -2742,10 +3143,10 @@ impl<K: Ord + Clone, V: Clone> std::ops::DerefMut for JetMap<K, V> {
 /// keeps the returned borrow inside that region; ordinary `JetMap` mutation
 /// retains copy-on-write semantics everywhere else.
 #[inline(always)]
-fn jet_map_make_mut<K: Ord + Clone, V: Clone>(
+fn jet_map_make_mut<K: Ord, V>(
     m: &mut JetMap<K, V>,
 ) -> &mut std::collections::BTreeMap<K, V> {
-    std::sync::Arc::make_mut(&mut m.0)
+    m.storage_mut()
 }
 
 impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
@@ -2759,14 +3160,14 @@ impl<'a, K: Ord, V> IntoIterator for &'a JetMap<K, V> {
 
 fn jet_map_into_entries<K: Ord + Clone, V: Clone>(m: JetMap<K, V>) -> Vec<(K, V)> {
     match std::sync::Arc::try_unwrap(m.0) {
-        Ok(map) => {
-            let mut entries = Vec::with_capacity(map.len());
-            entries.extend(map);
+        Ok(store) => {
+            let mut entries = Vec::with_capacity(store.map.len());
+            entries.extend(store.map);
             entries
         }
         Err(shared) => {
-            let mut entries = Vec::with_capacity(shared.len());
-            entries.extend(shared.iter().map(|(k, v)| (k.clone(), v.clone())));
+            let mut entries = Vec::with_capacity(shared.map.len());
+            entries.extend(shared.map.iter().map(|(k, v)| (k.clone(), v.clone())));
             entries
         }
     }
@@ -2778,9 +3179,9 @@ enum JetRemoveBy {
     Slot,
 }
 
-fn jet_index_map<M, K: Ord + Clone + JetShow, V: Clone>(
+fn jet_index_map<M, K: Ord + Clone + std::borrow::Borrow<Q>, V: Clone, Q: Ord + JetShow + ?Sized>(
     m: &M,
-    k: &K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -2809,9 +3210,9 @@ where
 /// Borrow one map value without materializing a clone. This is the read-side
 /// counterpart to `jet_index_map_mut`, used when a view receiver is a nested
 /// map/list place whose storage must outlive the borrowed view.
-fn jet_index_map_ref<'a, M, K: Ord + Clone + JetShow + 'a, V>(
+fn jet_index_map_ref<'a, M, K: Ord + Clone + std::borrow::Borrow<Q> + 'a, V, Q: Ord + JetShow + ?Sized>(
     m: &'a M,
-    k: &K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -2837,9 +3238,9 @@ where
     }
 }
 
-fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
+fn jet_index_map_mut<'a, M, K: Ord + Clone + std::borrow::Borrow<Q> + 'a, V, Q: Ord + JetShow + ?Sized>(
     m: &'a mut M,
-    k: K,
+    k: &Q,
     file: &str,
     line: u32,
     fn_name: &str,
@@ -2850,7 +3251,7 @@ fn jet_index_map_mut<'a, M, K: Ord + Clone + JetShow + 'a, V>(
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
-    match m.get_mut(&k) {
+    match m.get_mut(k) {
         Some(value) => value,
         None => jet_panic_rich(
             file,
@@ -2865,7 +3266,7 @@ where
     }
 }
 #[inline(always)]
-fn jet_map_insert<M, K: Ord + Clone, V: Clone>(
+fn jet_map_insert<M, K: Ord, V>(
     m: &mut M,
     k: K,
     v: V,
@@ -2877,7 +3278,7 @@ where
 }
 
 #[inline(always)]
-fn jet_map_add_new<M, K: Ord + Clone, V: Clone>(m: &mut M, k: K, v: V) -> bool
+fn jet_map_add_new<M, K: Ord, V>(m: &mut M, k: K, v: V) -> bool
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
@@ -2903,7 +3304,7 @@ where
 #[inline(always)]
 fn jet_map_update_string<V, F>(
     m: &mut std::collections::BTreeMap<String, V>,
-    key: &String,
+    key: &str,
     f: F,
 )
 where
@@ -2916,7 +3317,7 @@ where
         };
         *existing = next;
     } else {
-        m.insert(key.clone(), f(None));
+        m.insert(key.to_owned(), f(None));
     }
 }
 
@@ -2943,13 +3344,13 @@ impl<V> JetStringBytesMap<V> for std::collections::BTreeMap<String, V> {
     }
 }
 
-impl<V: Clone> JetStringBytesMap<V> for JetMap<String, V> {
+impl<V> JetStringBytesMap<V> for JetMap<String, V> {
     #[inline(always)]
     fn update_bytes<F>(&mut self, bytes: &[u8], f: F) -> Result<(), ()>
     where
         F: FnOnce(Option<&V>) -> V,
     {
-        std::sync::Arc::make_mut(&mut self.0).update_bytes(bytes, f)
+        self.storage_mut().update_bytes(bytes, f)
     }
 }
 
@@ -3193,34 +3594,12 @@ where
     }
     out
 }
-// D-LISTMAP1: the view owns the map's Arc and advances by key. This keeps the
-// iterator `'static` without copying the BTreeMap (or borrowing through a
-// short-lived local Arc). Each pull clones only the yielded item; the map stays
-// shared and untouched until a mutation triggers Arc::make_mut.
-struct JetMapKeys<K, V> {
-    map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
-    last: Option<K>,
-}
-
-impl<K: Ord + Clone, V> Iterator for JetMapKeys<K, V> {
-    type Item = K;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = match self.last.as_ref() {
-            Some(last) => self
-                .map
-                .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
-                .next(),
-            None => self.map.iter().next(),
-        }?;
-        let key = next.0.clone();
-        self.last = Some(key.clone());
-        Some(key)
-    }
-}
-
+// D-LISTMAP1: the values view owns the map's storage and advances by key. This
+// keeps the iterator `'static` without copying the BTreeMap (or borrowing
+// through a short-lived local Arc). Each pull clones only the yielded item; the
+// map stays shared and untouched until a mutation copies it on write.
 struct JetMapValues<K, V> {
-    map: std::sync::Arc<std::collections::BTreeMap<K, V>>,
+    map: std::sync::Arc<JetMapStore<K, V>>,
     last: Option<K>,
 }
 
@@ -3231,9 +3610,10 @@ impl<K: Ord + Clone, V: Clone> Iterator for JetMapValues<K, V> {
         let next = match self.last.as_ref() {
             Some(last) => self
                 .map
+                .map
                 .range((std::ops::Bound::Excluded(last), std::ops::Bound::Unbounded))
                 .next(),
-            None => self.map.iter().next(),
+            None => self.map.map.iter().next(),
         }?;
         let key = next.0.clone();
         let value = next.1.clone();
@@ -3242,16 +3622,15 @@ impl<K: Ord + Clone, V: Clone> Iterator for JetMapValues<K, V> {
     }
 }
 
+/// The keys view snapshots the keys: the values may not be `Clone`, so the
+/// view cannot share storage a later mutation would have to copy.
 fn jet_map_keys<K: Ord + Clone + 'static, V: 'static>(m: &JetMap<K, V>) -> JetIter<K> {
-    JetIter(Box::new(JetMapKeys {
-        map: std::sync::Arc::clone(&m.0),
-        last: None,
-    }))
+    JetIter(Box::new(m.keys().cloned().collect::<Vec<_>>().into_iter()))
 }
 
 fn jet_map_values<K: Ord + Clone + 'static, V: Clone + 'static>(m: &JetMap<K, V>) -> JetIter<V> {
     JetIter(Box::new(JetMapValues {
-        map: std::sync::Arc::clone(&m.0),
+        map: m.share(),
         last: None,
     }))
 }
@@ -3264,14 +3643,18 @@ fn jet_list_remove_value<T: Clone + PartialEq>(
     jet_outcome_of(jet_list_remove_value_kernel(xs, value))
 }
 
+// The out-of-bounds stop names the user's call site, which the MIR adapter
+// passes after the checked operands.
 #[inline(always)]
-fn jet_list_remove_slot<T: Clone>(
+fn jet_list_remove_slot<T>(
     xs: &mut Vec<T>,
     index: i64,
+    file: &str,
+    line: u32,
 ) -> JetOutcome<T, JetAbsent> {
     match jet_list_remove_slot_kernel(xs, index) {
         Ok(value) => Ok(value),
-        Err(message) => jet_arithmetic_stop("<core.collections>", 0, &message),
+        Err(message) => jet_arithmetic_stop(file, line, &message),
     }
 }
 
@@ -3299,7 +3682,20 @@ fn jet_priority_queue_remove_value<T: Ord>(
     jet_priority_queue_remove_value_kernel(pq, value)
 }
 
-fn jet_list_count<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+#[inline(always)]
+fn jet_priority_queue_remove_slot_canonical<T: Ord>(
+    pq: &mut std::collections::BinaryHeap<T>,
+    index: jet_foundation::Numeric::JetInt,
+) -> JetOutcome<T, JetAbsent> {
+    let index = jet_std::jet_int_owned_to_i64(&index)
+        .unwrap_or_else(|error| jet_arithmetic_stop("<core.collections>", 0, &error));
+    match jet_priority_queue_remove_slot_kernel(pq, index, "<core.collections>", 0) {
+        Ok(value) => value,
+        Err(message) => jet_arithmetic_stop("<core.collections>", 0, &message),
+    }
+}
+
+fn jet_list_count<T: PartialEq<U>, U: ?Sized>(xs: &[T], value: &U) -> i64 {
     jet_list_count_kernel(xs, value)
 }
 fn jet_list_count_where<T, F>(xs: &[T], predicate: F) -> i64
@@ -3325,7 +3721,7 @@ fn jet_list_concat<T: Clone>(left: &[T], right: &[T]) -> Vec<T> {
     out.extend(right.iter().cloned());
     out
 }
-fn jet_list_join<T: JetShow>(xs: &[T], separator: &String) -> String {
+fn jet_list_join<T: JetShow>(xs: &[T], separator: &str) -> String {
     xs.iter()
         .map(JetShow::jet_show)
         .collect::<Vec<_>>()
@@ -3350,12 +3746,27 @@ fn jet_fixed_list_concat<
     })
 }
 
-fn jet_char_len(s: &String) -> i64 {
-    s.chars().count() as i64
+/// The scalar count of `s`: its bytes that start a scalar (every byte but a
+/// `0b10xx_xxxx` continuation byte). Each 64-byte block sums into one byte
+/// lane, a branch-free pass the host CPU's vector unit runs.
+fn jet_char_len(s: &str) -> i64 {
+    let mut chunks = s.as_bytes().chunks_exact(64);
+    let mut count = 0_usize;
+    for chunk in &mut chunks {
+        let mut starts = 0_u8;
+        for &byte in chunk {
+            starts += u8::from((byte as i8) >= -0x40);
+        }
+        count += usize::from(starts);
+    }
+    for &byte in chunks.remainder() {
+        count += usize::from((byte as i8) >= -0x40);
+    }
+    count as i64
 }
 // Eager materialize of the same pieces as `jet_iter_string_split` (AOT `String.split`
 // emits the lazy helper; this Vec form remains for hosts that need a list handle).
-fn jet_string_split(s: &String, sep: &str) -> Vec<String> {
+fn jet_string_split(s: &str, sep: &str) -> Vec<String> {
     s.split(sep).map(|x| x.to_string()).collect()
 }
 // D-STR-AFTER1: first-occurrence substring split. `sep` absent -> the whole
@@ -3395,19 +3806,19 @@ fn jet_string_before_view<'a>(s: &'a str, sep: &str) -> &'a str {
 fn jet_string_trim_view(s: &str) -> &str {
     jet_unicode_trim_view(s)
 }
-fn jet_string_lines(s: &String) -> Vec<String> {
+fn jet_string_lines(s: &str) -> Vec<String> {
     s.lines().map(|x| x.to_string()).collect()
 }
-fn jet_string_chars(s: &String) -> Vec<char> {
+fn jet_string_chars(s: &str) -> Vec<char> {
     s.chars().collect()
 }
 // `s.slice(a, b)` excludes the end, like list and byte `.slice` and `a..<b`
 // (owner ruling #4001).
-fn jet_string_slice(s: &String, a: i64, b: i64, file: &str, line: u32) -> String {
+fn jet_string_slice(s: &str, a: i64, b: i64, file: &str, line: u32) -> String {
     jet_string_slice_value(s, a, b, true)
         .unwrap_or_else(|message| jet_panic(file, line, &message))
 }
-fn jet_string_slice_builtin(s: &String, a: i64, b: i64) -> String {
+fn jet_string_slice_builtin(s: &str, a: i64, b: i64) -> String {
     jet_string_slice_value(s, a, b, true)
         .unwrap_or_else(|message| jet_panic("<core.builtin>", 0, &message))
 }
@@ -3490,11 +3901,11 @@ fn jet_map_all<K: Ord, V, F>(m: JetMap<K, V>, mut f: F) -> bool where F: FnMut(&
 }
 fn jet_map_filter<K: Ord + Clone, V: Clone, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, V>
 where F: FnMut(&K, &V) -> bool {
-    JetMap(std::sync::Arc::new(m.iter().filter(|(k,v)| f(k,v)).map(|(k,v)|(k.clone(),v.clone())).collect()))
+    JetMap::from_map(m.iter().filter(|(k,v)| f(k,v)).map(|(k,v)|(k.clone(),v.clone())).collect())
 }
 fn jet_map_map_values<K: Ord + Clone, V, U, F>(m: JetMap<K, V>, mut f: F) -> JetMap<K, U>
 where F: FnMut(&K, &V) -> U {
-    JetMap(std::sync::Arc::new(m.iter().map(|(k,v)|(k.clone(), f(k,v))).collect()))
+    JetMap::from_map(m.iter().map(|(k,v)|(k.clone(), f(k,v))).collect())
 }
 fn jet_map_fold<K: Ord, V, U, F>(m: JetMap<K, V>, init: U, mut f: F) -> U
 where F: FnMut(&U, &K, &V) -> U {
@@ -3530,7 +3941,7 @@ fn jet_map_from_keys_composite<K: Ord + Clone, V: Clone>(
 ) -> JetMap<K, V> {
     jet_map_from_keys_kernel(keys, default)
 }
-fn jet_map_contains_value<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
+fn jet_map_contains_value<K: Ord, V: PartialEq<U>, U: ?Sized>(m: &JetMap<K, V>, needle: &U) -> bool {
     jet_map_contains_value_kernel(m, needle)
 }
 fn jet_map_pop_first<K: Ord + Clone, V: Clone>(m: &mut JetMap<K, V>) -> JetOutcome<V, JetAbsent> {

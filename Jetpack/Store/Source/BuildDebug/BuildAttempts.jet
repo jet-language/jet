@@ -14,45 +14,45 @@ BUILD_DEBUG_SCRATCH_ROOT :: prep { "failed-scratch" }
 BUILD_DEBUG_STAGE_PREFIX :: prep { ".jet-build-stage-" }
 
 // One logged recipe step.
-pub struct StepLog {
-    pub index: Int
-    pub total: Int
-    pub name: String
-    pub command: String
-    pub cwd: String
-    pub status: String
-    pub stdout: String
-    pub stderr: String
+struct StepLog {
+    index: Int
+    total: Int
+    name: String
+    command: String
+    cwd: String
+    status: String
+    stdout: String
+    stderr: String
 
     // The step as persisted: secrets in captured output are redacted.
-    fn to_tree(self) -> DataTree Never! {
-        fields := [String: DataTree]{}
-        fields["index"] = DataTree.Int(self.index)
-        fields["total"] = DataTree.Int(self.total)
-        fields["name"] = DataTree.Text(self.name)
-        fields["command"] = DataTree.Text(self.command)
-        fields["cwd"] = DataTree.Text(self.cwd)
-        fields["status"] = DataTree.Text(self.status)
-        fields["stdout"] = DataTree.Text(recipe_debug_redact(self.stdout))
-        fields["stderr"] = DataTree.Text(recipe_debug_redact(self.stderr))
-        DataTree.Object(fields)
+    fn to_tree(self) -> Dyn Never! {
+        fields := [String: Dyn]{}
+        fields["index"] = Dyn.Int(self.index)
+        fields["total"] = Dyn.Int(self.total)
+        fields["name"] = Dyn.Text(self.name)
+        fields["command"] = Dyn.Text(self.command)
+        fields["cwd"] = Dyn.Text(self.cwd)
+        fields["status"] = Dyn.Text(self.status)
+        fields["stdout"] = Dyn.Text(recipe_debug_redact(self.stdout))
+        fields["stderr"] = Dyn.Text(recipe_debug_redact(self.stderr))
+        Dyn.Object(fields)
     }
 }
 
 // One build attempt (Rust `BuildDebug::Attempt`).
-pub struct BuildAttempt {
-    pub id: String
-    pub package: String
-    pub reference: String
-    pub provider: String
-    pub recipe_hash: String
-    pub source_hash: String
-    pub platform: String
-    pub status: String
-    pub failed_step: Int
-    pub scratch_dir: String
-    pub log_dir: String
-    pub steps: [StepLog]
+struct BuildAttempt {
+    id: String
+    package: String
+    reference: String
+    provider: String
+    recipe_hash: String
+    source_hash: String
+    platform: String
+    status: String
+    failed_step: Int
+    scratch_dir: String
+    log_dir: String
+    steps: [StepLog]
 
     fn new(package: String, reference: String, provider: String, recipe_hash: String, source_hash: String) -[Env, Time]> BuildAttempt Never! {
         now :: time.instant().unix_ns
@@ -131,22 +131,22 @@ pub struct BuildAttempt {
 
     // The persisted JSON document, fields in the Rust order.
     fn to_json(self) -> String Never! {
-        steps := [DataTree]{}
+        steps := [Dyn]{}
         loop step in self.steps -> &steps.push(step.to_tree())
-        fields := [String: DataTree]{}
-        fields["id"] = DataTree.Text(self.id)
-        fields["package"] = DataTree.Text(self.package)
-        fields["reference"] = DataTree.Text(self.reference)
-        fields["provider"] = DataTree.Text(self.provider)
-        fields["recipe_hash"] = DataTree.Text(self.recipe_hash)
-        fields["source_hash"] = DataTree.Text(self.source_hash)
-        fields["platform"] = DataTree.Text(self.platform)
-        fields["status"] = DataTree.Text(self.status)
-        fields["failed_step"] = DataTree.Int(self.failed_step)
-        fields["scratch_dir"] = DataTree.Text(self.scratch_dir)
-        fields["log_dir"] = DataTree.Text(self.log_dir)
-        fields["steps"] = DataTree.Array(steps)
-        pkg_json_render(DataTree.Object(fields))
+        fields := [String: Dyn]{}
+        fields["id"] = Dyn.Text(self.id)
+        fields["package"] = Dyn.Text(self.package)
+        fields["reference"] = Dyn.Text(self.reference)
+        fields["provider"] = Dyn.Text(self.provider)
+        fields["recipe_hash"] = Dyn.Text(self.recipe_hash)
+        fields["source_hash"] = Dyn.Text(self.source_hash)
+        fields["platform"] = Dyn.Text(self.platform)
+        fields["status"] = Dyn.Text(self.status)
+        fields["failed_step"] = Dyn.Int(self.failed_step)
+        fields["scratch_dir"] = Dyn.Text(self.scratch_dir)
+        fields["log_dir"] = Dyn.Text(self.log_dir)
+        fields["steps"] = Dyn.Array(steps)
+        pkg_json_render(Dyn.Object(fields))
     }
 }
 
@@ -170,7 +170,7 @@ fn recipe_debug_stage_scratch(stage: String, dir: String, source: String, output
 
 // Remove only failed-build scratch staging directories a crashed snapshot
 // publication left behind. Published scratch directories stay visible.
-pub fn recipe_recover_build_scratch(hangar_dir: String) -[FS]> Int StoreError! {
+fn recipe_recover_build_scratch(hangar_dir: String) -[FS]> Int StoreError! {
     root :: files.join(hangar_dir, BUILD_DEBUG_SCRATCH_ROOT)
     info :: if files.stat(root) == {
         .Ok(info) -> info
@@ -194,14 +194,14 @@ pub fn recipe_recover_build_scratch(hangar_dir: String) -[FS]> Int StoreError! {
 }
 
 // The package's latest recorded attempt, if any.
-pub fn recipe_debug_latest(hangar_dir: String, package: String) -[FS]> BuildAttempt? StoreError! {
+fn recipe_debug_latest(hangar_dir: String, package: String) -[FS]> BuildAttempt? StoreError! {
     found :: recipe_debug_latest_json(hangar_dir, package)
     text :: found ?? return Ok(None)
     Ok(Val(recipe_debug_parse_attempt(text)))
 }
 
 // The package's latest attempt document, verbatim.
-pub fn recipe_debug_latest_json(hangar_dir: String, package: String) -[FS]> String? StoreError! {
+fn recipe_debug_latest_json(hangar_dir: String, package: String) -[FS]> String? StoreError! {
     path :: files.join(recipe_debug_log_dir(hangar_dir, package), "latest.json")
     info :: if files.stat(path) == {
         .Ok(info) -> info
@@ -217,7 +217,7 @@ pub fn recipe_debug_latest_json(hangar_dir: String, package: String) -[FS]> Stri
 // Promote a failed attempt out of a private reproducibility root before the
 // root is removed. The published scratch tree is copied through a staging
 // directory and the attempt is re-persisted with paths in the user Hangar.
-pub fn recipe_promote_failed_attempt(source_hangar: String, target_hangar: String, package: String) -[FS, Env, Rand]> Bool StoreError! {
+fn recipe_promote_failed_attempt(source_hangar: String, target_hangar: String, package: String) -[FS, Env, Rand]> Bool StoreError! {
     found :: recipe_debug_latest(source_hangar, package)
     attempt := found ?? return Ok(false)
     if attempt.scratch_dir == "" -> return Ok(false)
@@ -250,7 +250,7 @@ fn recipe_debug_promote_stage(stage: String, source_scratch: String, target_scra
 }
 
 // `jet logs` text: a header, then each step's status and trimmed output.
-pub fn recipe_debug_text_logs(attempt: BuildAttempt) -> String Never! {
+fn recipe_debug_text_logs(attempt: BuildAttempt) -> String Never! {
     out := "{attempt.package}  {attempt.status}  {attempt.reference}\n"
     loop step in attempt.steps {
         out = "{out}[step {step.index}/{step.total} {step.name}] {step.status}\n"
@@ -261,7 +261,7 @@ pub fn recipe_debug_text_logs(attempt: BuildAttempt) -> String Never! {
 }
 
 // `jet explain` text for one attempt.
-pub fn recipe_debug_explain(attempt: BuildAttempt) -> String Never! {
+fn recipe_debug_explain(attempt: BuildAttempt) -> String Never! {
     failed := "-"
     loop step in attempt.steps {
         if step.index == attempt.failed_step {
@@ -275,7 +275,7 @@ pub fn recipe_debug_explain(attempt: BuildAttempt) -> String Never! {
 
 // ASCII alphanumerics, `-`, `_` and `.` kept, everything else `_`; an empty,
 // `.` or `..` result becomes `_`.
-pub fn recipe_debug_safe_name(value: String) -> String Never! {
+fn recipe_debug_safe_name(value: String) -> String Never! {
     name := ""
     loop scalar in value.chars() {
         text :: "{scalar}"
@@ -348,14 +348,14 @@ fn recipe_debug_parse_attempt(text: String) -> BuildAttempt StoreError! {
     Ok(attempt)
 }
 
-fn recipe_debug_str_field(object: [String: DataTree], key: String) -> String StoreError! {
+fn recipe_debug_str_field(object: [String: Dyn], key: String) -> String StoreError! {
     value :: object.get(key) ?? return Err(StoreError.InvalidData("missing key `{key}`"))
     text :: pkg_json_text(value) ?? return Err(StoreError.InvalidData("key `{key}` is not a string"))
     Ok(text)
 }
 
 // A non-negative count, or 0 when absent or not a count.
-fn recipe_debug_num_field(object: [String: DataTree], key: String) -> Int Never! {
+fn recipe_debug_num_field(object: [String: Dyn], key: String) -> Int Never! {
     value :: object.get(key) ?? return 0
     if value == {
         .Int(number) -> if number >= 0 -> number else -> 0

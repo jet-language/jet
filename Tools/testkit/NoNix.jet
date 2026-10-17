@@ -1,0 +1,119 @@
+use core.files as files
+use core.sys as sys
+
+// The launcher owns mount syscalls and inherited loader fd 9; all process
+// policy, environment, input, receipts and assertions still belong to Steps.
+fn kit_no_nix_helper(name: String) -> String? {
+    loop directory in ["/run/current-system/sw/bin", "/usr/bin", "/bin"] {
+        path :: files.join(directory, name)
+        if files.is_file(path) -> return Val(path)
+    }
+    None
+}
+
+fn kit_no_nix_required() -> KitVerdict? {
+    if sys.name() != "linux" -> return Val(kit_expect_verdict("SKIP-HOST", "isolate: no-nix requires Linux"))
+    if kit_no_nix_helper("unshare") == None -> return Val(kit_expect_verdict("SKIP-HOST", "isolate: no-nix requires unshare"))
+    None
+}
+
+fn kit_no_nix_matches(bytes: [U8], offset: Int, marker: [U8]) -> Bool {
+    if offset + marker.len() > bytes.len() -> return false
+    loop i in 0..<marker.len() {
+        if bytes[offset + i] != marker[i] -> return false
+    }
+    true
+}
+
+// Match the original harness's NUL-terminated Nix ld-linux interpreter slot.
+// Leave non-Nix and static ELF images alone; a patch never grows the image.
+fn kit_no_nix_patch_bytes(source: [U8]) -> [U8]? {
+    if source.len() < 4 || !kit_no_nix_matches(source, 0, [U8]{127, 69, 76, 70}) -> return None
+    marker :: "/nix/store/".bytes()
+    loader :: "ld-linux".bytes()
+    replacement :: "/proc/self/fd/9".bytes()
+    offset := 0
+    loop offset + marker.len() <= source.len() {
+        if !kit_no_nix_matches(source, offset, marker) {
+            offset += 1
+            next
+        }
+        end := offset
+        loop end < source.len() && source[end] != (U8{0}) -> end += 1
+        found := false
+        loop i in offset..<end {
+            if i + loader.len() <= end && kit_no_nix_matches(source, i, loader) -> found = true
+        }
+        if found {
+            if replacement.len() >= end - offset -> return None
+            result := source
+            loop i in offset..<end -> result[i] = U8{0}
+            loop i in 0..<replacement.len() -> result[offset + i] = replacement[i]
+            return Val(result)
+        }
+        offset = end + 1
+    }
+    None
+}
+
+fn kit_no_nix_patch(source: String, destination: String) -> String Err! {
+    bytes :: files.read_bytes(source) ?? return Err("no-nix read {source}: {err}")
+    if kit_no_nix_patch_bytes(bytes) == {
+        .None -> return Ok("")
+        .Val(patched) -> {
+            files.write_bytes(destination, patched) ?? return Err("no-nix patch {source}: {err}")
+            info :: files.stat(source) ?? return Err("no-nix stat {source}: {err}")
+            files.chmod(destination, info.mode % 512) ?? return Err("no-nix chmod {destination}: {err}")
+            return Ok(destination)
+        }
+    }
+}
+
+fn kit_no_nix_argv(env: KitEnv, argv: [String], scratch: String, network: String) -> [String] Err! {
+    helpers := [String]{}
+    loop name in ["unshare", "mount", "umount", "sh", "mkdir", "ldd", "readlink", "sort", "ln", "true"] {
+        helper :: kit_no_nix_helper(name) ?? return Err("no-nix required namespace helper not installed: {name}")
+        &helpers.push(helper)
+    }
+    bootstrap :: files.join(scratch, "no-nix-bootstrap")
+    files.create_dir_all(bootstrap) ?? return Err("no-nix bootstrap mkdir: {err}")
+    marker :: files.join(bootstrap, "entered")
+    if files.exists(marker) -> files.remove(marker) ?? return Err("no-nix reset child marker: {err}")
+    // This directory belongs to a single sequential kit case. Mounts are only
+    // in the child namespace; bootstrap files are removed with case scratch.
+    images := [String]{}
+    loop i in [0, 1, 3] {
+        image :: kit_no_nix_patch(helpers[i], files.join(bootstrap, "helper-{i}")) ?? return Err(err)
+        &images.push(image)
+    }
+    subject :: if files.is_file(argv[0]) -> argv[0] else -> kit_no_nix_helper(argv[0]) ?? return Err("no-nix step executable not found: {argv[0]}")
+    subjects := [String]{subject}
+    loop binary in [env.jet, env.jetpack] {
+        if binary != "" && !kit_expect_named(subjects, binary) -> &subjects.push(binary)
+    }
+    asset :: files.join(env.root, "Tools/testkit/assets/no-nix.sh")
+    result := [String]{helpers[3], asset, "--outer", bootstrap, helpers[0], "--user", "--map-root-user", "--mount", "--propagation", "private"}
+    if network == "disabled" -> &result.push("--net")
+    &result.push(helpers[3])
+    &result.push(asset)
+    &result.push(bootstrap)
+    loop helper in helpers -> &result.push(helper)
+    loop image in images -> &result.push(image)
+    &result.push("{subjects.len()}")
+    &result.push(sys.get("PATH") ?? "/run/current-system/sw/bin:/usr/bin:/bin")
+    loop (i, binary) in subjects {
+        image :: kit_no_nix_patch(binary, files.join(bootstrap, "subject-{i}")) ?? return Err(err)
+        &result.push(binary)
+        &result.push(image)
+    }
+    magic :: files.read_at(subject, 0, 4) ?? return Err("no-nix subject header: {err}")
+    &result.push(if kit_no_nix_matches(magic, 0, [U8]{127, 69, 76, 70}) -> "elf" else -> "script")
+    &result.push(subject)
+    loop i in 1..<argv.len() -> &result.push(argv[i])
+    Ok(result)
+}
+
+fn kit_no_nix_failure(step: KitStep, run: KitRun) -> KitVerdict? {
+    if step.isolate == "no-nix" && run.stderr.contains("JET_TESTKIT_NO_NIX_SETUP_FAILED") -> return Val(kit_expect_verdict("ERROR", "no-nix namespace setup: {run.stderr}"))
+    None
+}

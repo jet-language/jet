@@ -1,0 +1,19 @@
+
+fn window(asset: [U8], start: Int, width: Int) -> View<U8> from asset {
+    asset[start..<start + width]
+}
+fn longer(left: [U8], right: [U8], width: Int) -> View<U8> from left | right {
+    if left.len() >= right.len() {
+        return left[0..<width]
+    }
+    right[0..<width]
+}
+fn run() {
+    asset :: [U8{1}, U8{2}, U8{3}, U8{4}]
+    short :: [U8{9}]
+    middle :: window(asset, 1, 2)
+    print(middle.len())
+    print(window(asset, 1, 2).len())
+    picked :: longer(short, asset, 1)
+    print(picked[0])
+}

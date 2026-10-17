@@ -1,0 +1,60 @@
+use core.files as s3_marker_files
+
+// Port of tests/marker_declarations.rs:62-149. The full source scan remains;
+// no textual predicate is replaced with a smaller sample or file allowlist.
+fn s3_guard_retired_marker_forms() {
+    allowed :: [String]{"Docs/spec/syntax-decisions.md", "tests/ui/marker_decl_rejected_forms.jet", "tests/ui/marker_decl_rejected_forms.stderr"}
+    ignored :: [String]{".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "node_modules", "target", "build", ".cache", "cache", "dist", "result"}
+    marker_head :: "mark"
+    marker_tail :: "er "
+    marker_word :: "{marker_head}{marker_tail}"
+    on_clause :: " on ["
+    second_list :: ")("
+    checked_head :: "checked"
+    checked_tail :: "_text_head_decl"
+    checked_text_node :: "{checked_head}{checked_tail}"
+    frozen :: "dogfood/tower/tests/parity/fixtures"
+    pending := [String]{""}
+    offenders := [String]{}
+    loop {
+        relative_dir :: &pending.pop() ?? break
+        directory := "."
+        if relative_dir != "" -> directory = "./{relative_dir}"
+        entries :: s3_marker_files.list_dir(directory) ?? next
+        loop entry in entries {
+            relative := entry.name.copy()
+            if relative_dir != "" -> relative = "{relative_dir}/{entry.name}"
+            if relative == frozen || relative.starts_with("{frozen}/") -> next
+            metadata :: s3_marker_files.stat(entry.path) ?? next
+            if metadata.is_symlink -> next
+            if metadata.is_dir {
+                skip := false
+                loop name in ignored {
+                    if entry.name == name -> skip = true
+                }
+                if skip || entry.name.starts_with("target-") || entry.name.starts_with("build-") || entry.name.starts_with("result-") -> next
+                &pending.push(relative)
+                next
+            }
+            if !metadata.is_file -> next
+            skip := false
+            loop path in allowed {
+                if relative == path -> skip = true
+            }
+            if skip -> next
+            source :: s3_marker_files.read(entry.path) ?? next
+            line_number := 0
+            loop line in source.lines() {
+                line_number += 1
+                if (line.contains(marker_word) && (line.contains(on_clause) || line.contains(second_list))) || line.contains(checked_text_node) {
+                    &offenders.push("{relative}:{line_number}: {line}")
+                }
+            }
+        }
+    }
+    assert(offenders.len() == 0, "retired marker declaration forms escaped their fixture/history allowlist: {offenders}")
+}
+
+#Test("retired_marker_declaration_forms_are_confined_to_fixtures_and_history") {
+    s3_guard_retired_marker_forms()
+}

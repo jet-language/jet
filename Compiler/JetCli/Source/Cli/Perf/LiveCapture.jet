@@ -1,0 +1,169 @@
+// LiveInspect.rs: bounded, private, process-identity-checked observation transport.
+// The runtime is the only producer. No process memory, values, credentials or
+// payloads are sampled by this reader.
+use core.files as perf_files
+use core.sys as perf_sys
+use core.time as perf_time
+use core.encoding.json as perf_json
+use core.text as perf_text
+use jet_foundation.[TraceTask, TraceLock, JetSymbolRef]
+
+struct JetCLIPerfRuntimeWindow { elapsed_ns: U64, cpu_ns: U64?, exit: Bool }
+struct JetCLIPerfLive {
+    pid: Int, start_id: String, captured_ms: Int,
+    session_id: String, source_id: String, build_id: String, revision: String, world_id: String,
+    tasks: [JetCLIPerfTask], channels: [JetCLIPerfChannel],
+    arena_allocations: U64, arena_bytes: U64, runtime: JetCLIPerfRuntimeWindow?
+}
+struct JetCLIPerfTask { id: U64, parent: U64, state: String, wait: String, cancelled: Bool }
+struct JetCLIPerfChannel { id: U64, depth: U64, capacity: U64?, send_waiters: U64, recv_waiters: U64, closed: Bool }
+
+fn jet_cli_perf_field(value: Dyn, key: String) -> Dyn JetCLIReadError! {
+    if value == .Object(fields) { loop field in fields { if field.key == key -> return Ok(field.value) } }
+    Err(jet_cli_read_error("observation is missing `{key}`"))
+}
+fn jet_cli_perf_optional(value: Dyn, key: String) -> Dyn? Never! {
+    if value == .Object(fields) { loop field in fields { if field.key == key -> return Val(field.value) } }
+    None
+}
+fn jet_cli_perf_object(value: Dyn, required: [String], optional: [String], label: String) JetCLIReadError! {
+    if value == .Object(fields) {
+        seen := [String:Bool]{}
+        loop field in fields {
+            if seen.has_key(field.key) || (!required.contains(field.key) && !optional.contains(field.key)) -> return Err(jet_cli_read_error("{label} has duplicate or unsafe fields"))
+            seen[field.key] = true
+        }
+        loop key in required { if !seen.has_key(key) -> return Err(jet_cli_read_error("{label} is missing `{key}`")) }
+        return
+    }
+    Err(jet_cli_read_error("{label} must be an object"))
+}
+fn jet_cli_perf_text(value: Dyn) -> String JetCLIReadError! {
+    if value == .Text(text) {
+        if perf_text.has_control(text) -> return Err(jet_cli_read_error("observation text contains control characters"))
+        return Ok(text)
+    }
+    Err(jet_cli_read_error("observation field must be text"))
+}
+fn jet_cli_perf_uint(value: Dyn) -> U64 JetCLIReadError! {
+    if value == .Int(number) { return Ok(U64.from_int(number) ?? return Err(jet_cli_read_error("observation integer must be nonnegative"))) }
+    Err(jet_cli_read_error("observation field must be an unsigned integer"))
+}
+fn jet_cli_perf_bool(value: Dyn) -> Bool JetCLIReadError! {
+    if value == .Bool(flag) -> return Ok(flag)
+    Err(jet_cli_read_error("observation field must be boolean"))
+}
+fn jet_cli_perf_array(value: Dyn) -> [Dyn] JetCLIReadError! {
+    if value == .Array(items) {
+        if items.len() > 4096 -> return Err(jet_cli_read_error("observation exceeds its 4096-item bound"))
+        return Ok(items)
+    }
+    Err(jet_cli_read_error("observation field must be an array"))
+}
+fn jet_cli_perf_optional_uint(value: Dyn) -> U64? JetCLIReadError! {
+    if value == .Null -> return Ok(None)
+    Ok(Val(jet_cli_perf_uint(value)))
+}
+
+// Handles use Core's no-follow final-link policy and fstat the same descriptor.
+// Every retained byte is bounded even if a malicious producer grows the file.
+fn jet_cli_perf_read_private(path: String, limit: Int) -[FS.Read, Env, Time.Wait]> [U8] JetCLIReadError! {
+    entry :: perf_files.lstat(path) ?? return Err(jet_cli_read_error("no live observation is available at `{path}`"))
+    if !entry.is_file || entry.is_symlink -> return Err(jet_cli_read_error("observation is not a regular file"))
+    reader :: perf_files.open(path, links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely open observation `{path}`"))
+    before :: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect observation `{path}`"))
+    if before.id != entry.id -> return Err(jet_cli_read_error("observation changed before its secure open"))
+    if !before.is_file || before.size > limit -> return Err(jet_cli_read_error("observation is not a bounded regular file"))
+    if (before.mode.bit_and(0o077)) != 0 -> return Err(jet_cli_read_error("observation permissions expose runtime state"))
+    if before.owner != Val(perf_sys.getuid()) -> return Err(jet_cli_read_error("observation belongs to another user"))
+    bytes := [U8]{}
+    loop {
+        chunk :: reader.read(jet_cli_table_min(65536, limit + 1 - bytes.len())) ?? return Err(jet_cli_read_error("cannot read observation `{path}`"))
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &bytes.push(byte)
+        if bytes.len() > limit -> return Err(jet_cli_read_error("observation exceeds {limit} bytes"))
+    }
+    after :: reader.stat() ?? return Err(jet_cli_read_error("cannot inspect retained observation"))
+    if after.id != before.id || after.size != bytes.len() -> return Err(jet_cli_read_error("observation changed while it was read"))
+    Ok(bytes)
+}
+fn jet_cli_perf_process_start(pid: Int) -[FS.Read, Time.Wait]> String JetCLIReadError! {
+    if pid <= 0 || pid > 4294967295 -> return Err(jet_cli_read_error("process id must be a nonzero u32"))
+    reader :: perf_files.open("/proc/{pid}/stat") ?? return Err(jet_cli_read_error("cannot verify process {pid} identity"))
+    raw :: reader.read(65537) ?? return Err(jet_cli_read_error("cannot read process identity"))
+    if raw.len() > 65536 -> return Err(jet_cli_read_error("process identity exceeds its bound"))
+    text :: String.from_bytes(raw) ?? return Err(jet_cli_read_error("process identity is not UTF-8"))
+    // The comm field can contain spaces and ')'; only its LAST ') ' closes it.
+    parts :: text.split(") ").to_list()
+    if parts.len() < 2 -> return Err(jet_cli_read_error("process identity stat is malformed"))
+    fields :: jet_cli_find_words(parts[parts.len() - 1])
+    if fields.len() <= 19 -> return Err(jet_cli_read_error("process identity stat is truncated"))
+    start :: fields[19]
+    if start == "" -> return Err(jet_cli_read_error("process identity is empty"))
+    loop byte in start.bytes() { if byte < (U8{48}) || byte > (U8{57}) -> return Err(jet_cli_read_error("process identity is malformed")) }
+    Ok(start)
+}
+fn jet_cli_perf_live_decode(text: String) -> JetCLIPerfLive JetCLIReadError! {
+    root :: perf_json.parse(text) ?? return Err(jet_cli_read_error("live runtime snapshot is not valid JSON"))
+    jet_cli_perf_object(root, [String]{"protocol", "session_id", "source_id", "build_id", "revision", "world_id", "values", "schema_version", "pid", "start_id", "captured_ms", "tasks", "channels", "effects", "resources"}, [String]{"event_observations", "decisions", "runtime"}, "live runtime snapshot")
+    if jet_cli_perf_text(jet_cli_perf_field(root, "protocol")) != "jet.live.v1" || jet_cli_perf_uint(jet_cli_perf_field(root, "schema_version")) != (U64{1}) -> return Err(jet_cli_read_error("unsupported live runtime snapshot protocol/version"))
+    // Validate value identities but deliberately retain no rendered values.
+    loop value in jet_cli_perf_array(jet_cli_perf_field(root, "values")) {
+        jet_cli_perf_object(value, [String]{"value_id", "type_identity", "disposition", "reason"}, [String]{"rendered_value"}, "live value")
+        loop key in ([String]{"value_id", "type_identity", "reason"}) { _ :: jet_cli_perf_text(jet_cli_perf_field(value, key)) }
+        disposition :: jet_cli_perf_text(jet_cli_perf_field(value, "disposition"))
+        if !([String]{"kept", "migrated", "reset", "rejected"}).contains(disposition) -> return Err(jet_cli_read_error("unsupported live value disposition"))
+        if jet_cli_perf_optional(value, "rendered_value") == .Val(rendered) {
+            if rendered == {
+                .Null -> {}
+                .Text(shown) -> {
+                    _ :: jet_cli_perf_text(rendered)
+                    if shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value exceeds its bound"))
+                }
+                else -> { return Err(jet_cli_read_error("observation field must be text")) }
+            }
+        }
+    }
+    tasks := [JetCLIPerfTask]{}
+    loop value in jet_cli_perf_array(jet_cli_perf_field(root, "tasks")) {
+        jet_cli_perf_object(value, [String]{"id", "parent", "state", "wait", "deadline_ms", "cancelled"}, [String]{"label", "spawn_site"}, "live task")
+        deadline :: jet_cli_perf_field(value, "deadline_ms")
+        if deadline == {
+            .Null -> {}
+            .Int(_) -> {}
+            else -> return Err(jet_cli_read_error("task deadline must be a signed integer or null"))
+        }
+        loop key in ([String]{"label", "spawn_site"}) { if jet_cli_perf_optional(value, key) == .Val(label) { _ :: jet_cli_perf_text(label) } }
+        &tasks.push(JetCLIPerfTask{id: jet_cli_perf_uint(jet_cli_perf_field(value, "id")), parent: jet_cli_perf_uint(jet_cli_perf_field(value, "parent")), state: jet_cli_perf_text(jet_cli_perf_field(value, "state")), wait: jet_cli_perf_text(jet_cli_perf_field(value, "wait")), cancelled: jet_cli_perf_bool(jet_cli_perf_field(value, "cancelled"))})
+    }
+    channels := [JetCLIPerfChannel]{}
+    loop value in jet_cli_perf_array(jet_cli_perf_field(root, "channels")) {
+        jet_cli_perf_object(value, [String]{"id", "depth", "capacity", "send_waiters", "recv_waiters", "closed"}, [String]{}, "live channel")
+        &channels.push(JetCLIPerfChannel{id: jet_cli_perf_uint(jet_cli_perf_field(value, "id")), depth: jet_cli_perf_uint(jet_cli_perf_field(value, "depth")), capacity: jet_cli_perf_optional_uint(jet_cli_perf_field(value, "capacity")), send_waiters: jet_cli_perf_uint(jet_cli_perf_field(value, "send_waiters")), recv_waiters: jet_cli_perf_uint(jet_cli_perf_field(value, "recv_waiters")), closed: jet_cli_perf_bool(jet_cli_perf_field(value, "closed"))})
+    }
+    effects :: jet_cli_perf_field(root, "effects")
+    effect_keys :: [String]{"compute", "waiting", "channel", "time", "io"}
+    jet_cli_perf_object(effects, effect_keys, [String]{}, "live effects")
+    loop key in effect_keys { _ :: jet_cli_perf_uint(jet_cli_perf_field(effects, key)) }
+    resources :: jet_cli_perf_field(root, "resources")
+    resource_keys :: [String]{"workers", "running", "queued", "cancelled", "arenas", "arena_allocations", "arena_bytes"}
+    jet_cli_perf_object(resources, resource_keys, [String]{}, "live resources")
+    loop key in resource_keys { _ :: jet_cli_perf_uint(jet_cli_perf_field(resources, key)) }
+    runtime := JetCLIPerfRuntimeWindow?{None}
+    if jet_cli_perf_optional(root, "runtime") == .Val(window) {
+        jet_cli_perf_object(window, [String]{"elapsed_ns", "cpu_ns", "exit"}, [String]{}, "runtime window")
+        runtime = Val(JetCLIPerfRuntimeWindow{elapsed_ns: jet_cli_perf_uint(jet_cli_perf_field(window, "elapsed_ns")), cpu_ns: jet_cli_perf_optional_uint(jet_cli_perf_field(window, "cpu_ns")), exit: jet_cli_perf_bool(jet_cli_perf_field(window, "exit"))})
+    }
+    Ok(JetCLIPerfLive{pid: Int.from_u64(jet_cli_perf_uint(jet_cli_perf_field(root, "pid"))), start_id: jet_cli_perf_text(jet_cli_perf_field(root, "start_id")), captured_ms: Int.from_u64(jet_cli_perf_uint(jet_cli_perf_field(root, "captured_ms"))), session_id: jet_cli_perf_text(jet_cli_perf_field(root, "session_id")), source_id: jet_cli_perf_text(jet_cli_perf_field(root, "source_id")), build_id: jet_cli_perf_text(jet_cli_perf_field(root, "build_id")), revision: jet_cli_perf_text(jet_cli_perf_field(root, "revision")), world_id: jet_cli_perf_text(jet_cli_perf_field(root, "world_id")), tasks: tasks, channels: channels, arena_allocations: jet_cli_perf_uint(jet_cli_perf_field(resources, "arena_allocations")), arena_bytes: jet_cli_perf_uint(jet_cli_perf_field(resources, "arena_bytes")), runtime: runtime})
+}
+fn jet_cli_perf_live_read(pid: Int) -[FS.Read, Env, Time]> JetCLIPerfLive JetCLIReadError! {
+    started :: jet_cli_perf_process_start(pid)
+    path :: perf_files.join(perf_sys.temp_dir(), "jet-observe-{pid}.json")
+    bytes :: jet_cli_perf_read_private(path, 1048576)
+    text :: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("live snapshot is not UTF-8"))
+    live :: jet_cli_perf_live_decode(text)
+    if live.pid != pid || live.start_id != started || jet_cli_perf_process_start(pid) != started -> return Err(jet_cli_read_error("live snapshot does not belong to process {pid}"))
+    now :: perf_time.unix_ns() /% 1000000
+    if now > live.captured_ms && now - live.captured_ms > 2000 -> return Err(jet_cli_read_error("process {pid} is not publishing a live runtime snapshot"))
+    Ok(live)
+}

@@ -1,4 +1,431 @@
 #[test]
+fn process_spec_and_csv_reader_runtime_compiles_and_reads() {
+    let dir = std::env::temp_dir().join(format!(
+        "jet_process_spec_csv_runtime_{}",
+        std::process::id()
+    ));
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("input.csv");
+    fs::write(&input, "left,right\n").unwrap();
+    let source = format!(
+        r#"
+use core.process as process
+use core.encoding.csv as csv
+use core.files as files
+fn run() {{
+    spec := process.cmd([String]{{"jet"}})
+    print(spec.cmd.len())
+    input :: files.open("{path}") ?? panic("open")
+    reader := csv.reader(^input) ?? panic("reader")
+    first :: &reader.next() ?? panic("first")
+    if first == {{
+        Val(row) -> {{
+            print(row.fields[0])
+            print(row.fields[1])
+        }}
+        None -> panic("missing row")
+    }}
+    eof :: &reader.next() ?? panic("eof")
+    print(eof == None)
+    again :: &reader.next() ?? panic("eof again")
+    print(again == None)
+}}
+"#,
+        path = input.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    );
+    // This rustc-compiles the selected runtime as well as the program. The
+    // unconditional CollectionSources CSV adapter must have its native leaf.
+    let (code, stdout, stderr) =
+        build_and_run(&dir, "process_spec_csv_runtime", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "1\nleft\nright\ntrue\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn xml_reader_latches_byte_offset_after_non_ascii_scalar() {
+    let dir = std::env::temp_dir().join(format!("jet_xml_utf8_reader_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let input = dir.join("input.xml");
+    fs::write(&input, "<r>é<a></b></r>").unwrap();
+    let source = format!(r#"
+use core.encoding.xml as xml
+use core.encoding as encoding
+use core.files as files
+fn run() {{
+    input :: files.open("{path}") ?? panic("open")
+    reader := xml.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    loop {{
+        if &reader.next() == {{
+            .Ok(value) -> {{
+                if value == None -> panic("mismatched XML accepted")
+            }}
+            .Err(error) -> {{
+                print(error.byte_offset)
+                print(error.line ?? 0)
+                print(error.column ?? 0)
+                print(error.path)
+                if &reader.next() == {{
+                    .Err(again) -> print(again == error)
+                    else -> panic("terminal XML error not latched")
+                }}
+                break
+            }}
+        }}
+    }}
+}}
+"#, path = input.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\""));
+    let (code, stdout, stderr) = build_and_run(&dir, "xml_utf8_reader", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "8\n1\n8\n$/r/a\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_private_typed_parser_is_not_a_public_core_api() {
+    let source = "use core.encoding.json as json\nfn run() {\n    value :: json.__parse_typed(\"[1]\") ?? panic(\"parse\")\n    print(value)\n}\n";
+    // Bypass only the reserved-name lexical gate, so this test exercises the
+    // semantic privacy boundary even for compiler-generated application code.
+    let dir = std::env::temp_dir().join(format!("jet_json_private_parser_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("private_json_parser.jet");
+    fs::write(&path, source.replace("__parse_typed", "parse")).unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("load JSON source closure");
+    let (tokens, lexical) = jet::Lexer::lex_generated(source);
+    assert!(lexical.is_empty(), "{lexical:?}");
+    let (program, _) = jet::Parser::parse_for_check_with_source(&tokens, source).expect("parse private call");
+    bundle.modules[bundle.entry].items = program.items;
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(
+        diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "E0605" && diagnostic.what.contains("__parse_typed")
+        }),
+        "expected E0605 naming __parse_typed, got: {diagnostics:?}"
+    );
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn typed_data_json_reuses_exact_number_parser() {
+    let dir = std::env::temp_dir().join(format!("jet_data_json_exact_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.data as data
+fn run() {
+    rows :: data.json<Int>("[9007199254740993,1e2,-9007199254740993]") ?? panic("typed data JSON")
+    print(rows[0])
+    print(rows[1])
+    print(rows[2])
+}
+"#;
+    // The planted list_range_slice golden is shared by both compiler halves.
+    // This focused Rust-seed witness exercises the fixed-list classifier.
+    let range_source = include_str!("../../Examples/features/collections/list_range_slice.jet");
+    let (range_code, range_stdout, range_stderr) =
+        build_and_run(&dir, "fixed_range_slice", range_source, &[], None);
+    assert_eq!(range_code, 0, "fixed range stderr: {range_stderr}");
+    assert_eq!(range_stdout, include_str!("../../Examples/features/expected/collections/list_range_slice.out"));
+    assert_eq!(range_stderr, "");
+    let (code, stdout, stderr) = build_and_run(&dir, "data_json_exact", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "9007199254740993\n100\n-9007199254740993\n");
+    assert_eq!(stderr, "");
+    let event_source = include_str!("../../Examples/features/serde/json_number_events.jet");
+    let (event_code, event_stdout, event_stderr) =
+        build_and_run(&dir, "json_number_events", event_source, &[], None);
+    assert_eq!(event_code, 0, "Number event stderr: {event_stderr}");
+    assert_eq!(event_stdout, include_str!("../../Examples/features/expected/serde/json_number_events.out"));
+    assert_eq!(event_stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn cbor_sealed_parser_helpers_resolve_across_source_parts() {
+    use jet_foundation::CoreSourceParts::{
+        core_private_source_part, CORE_ENCODING_CBOR_PARSE_MODULE,
+    };
+    let part = core_private_source_part("core.encoding.cbor").expect("CBOR sealed source part");
+    assert_eq!(part.source.module, CORE_ENCODING_CBOR_PARSE_MODULE);
+    assert_eq!(part.source.path, "Core/encoding/cbor_parse.jet");
+    assert_eq!(part.source.owned_members, &["parse", "narrow_bits"]);
+    assert!(jet_foundation::CoreModuleExports::core_source_module(CORE_ENCODING_CBOR_PARSE_MODULE).is_none());
+    assert!(!jet_foundation::CoreModuleExports::CORE_MODULE_NAMES.contains(&CORE_ENCODING_CBOR_PARSE_MODULE));
+    let dir = std::env::temp_dir().join(format!("jet_cbor_sealed_parts_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.encoding.json as json
+fn run() {
+    encoded :: cbor.to_bytes_canonical(encoding.DataTree.Float(Float{1.5})) ?? panic("encode")
+    print(encoded.len())
+    loop byte in encoded -> print(Int.from_u8(byte))
+    value :: cbor.parse(encoded, cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true}) ?? panic("parse")
+    print(json.to_string(value) ?? panic("JSON encode"))
+    permissive :: cbor.CBOROptions{max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: false}
+    chunked :: cbor.parse([U8]{127, 98, 195, 169, 96, 255}, permissive) ?? panic("indefinite UTF-8")
+    print(json.to_string(chunked) ?? panic("JSON encode"))
+    if cbor.parse([U8]{127, 97, 195, 97, 169, 255}, permissive) == {
+        .Ok(_) -> panic("split UTF-8 scalar accepted")
+        .Err(error) -> {
+            print(error.kind == .Syntax)
+            print(error.byte_offset)
+            print(error.path)
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "cbor_sealed_parts", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "3\n249\n62\n0\n1.5\n\"é\"\ntrue\n1\n$\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jsonl_eof_bare_cr_is_a_nonblank_record() {
+    let dir = std::env::temp_dir().join(format!("jet_jsonl_bare_cr_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.jsonl as jsonl
+use core.encoding as encoding
+use core.encoding.json as json
+fn run() {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
+    print(jsonl.count_rows("{cr}\n"))
+    print(jsonl.count_rows(cr))
+    print(jsonl.count_rows(" \t{cr}"))
+    print(jsonl.count_rows("1\n{cr}"))
+    rows :: jsonl.parse("1{cr}") ?? panic("value ending in bare CR")
+    print(rows.len())
+    if jsonl.parse(cr) == {
+        .Ok(_) -> panic("bare CR skipped")
+        .Err(error) -> {
+            print(error.byte_offset)
+            print(error.path)
+        }
+    }
+    text :: "1\n \t\n{{\"ok\":2}}\n{{\"broken\":]}}\n3"
+    local :: "{{\"broken\":]}}"
+    local_error := encoding.EncodingError?{None}
+    if json.parse(local) == {
+        .Ok(_) -> panic("invalid local record accepted")
+        .Err(error) -> local_error = Val(error)
+    }
+    expected :: local_error ?? panic("missing local syntax error")
+    cursor := jsonl.reader(text)
+    _ :: &cursor.next() ?? panic("first valid row")
+    _ :: &cursor.next() ?? panic("second valid row")
+    if &cursor.next() == {
+        .Ok(_) -> panic("mid-stream syntax error accepted")
+        .Err(error) -> {
+            print(error.format == .JSONL)
+            print(error.kind == expected.kind)
+            print(error.byte_offset == 14 + expected.byte_offset)
+            print(error.line == Val(4))
+            print(error.column == expected.column)
+            print(error.path == "/2/broken")
+            print(error.reason == expected.reason)
+        }
+    }
+    if jsonl.parse(text) == {
+        .Ok(_) -> panic("auto-propagation swallowed syntax error")
+        .Err(error) -> {
+            print(error.byte_offset == 14 + expected.byte_offset)
+            print(error.path == "/2/broken")
+        }
+    }
+}
+"#;
+    let (code, stdout, stderr) = build_and_run(&dir, "jsonl_bare_cr", source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "0\n1\n1\n2\n1\n1\n/0\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn json_object_entry_view_borrows_original_storage_without_allocating() {
+    if !common::have_rustc() { return; }
+    let dir = std::env::temp_dir().join(format!("jet_json_object_borrow_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let source = r#"
+use core.encoding.json as json
+fn run() {
+    tree :: json.parse("{{\"z\":[1,2],\"a\":\"kept\"}}") ?? panic("parse")
+    print(json.to_string(tree) ?? panic("JSON encode"))
+    print(json.canonical(tree) ?? panic("canonical"))
+}
+"#;
+    let path = dir.join("borrow.jet");
+    fs::write(&path, source).unwrap();
+    let shown = path.to_string_lossy();
+    let out = jet::compile_with_path(source, &shown).unwrap_or_else(|diags| {
+        panic!("front end rejected borrow fixture:\n{}", jet::render_diagnostics(&shown, source, &diags))
+    });
+    let renamed = out.rust.replacen("fn jet_raw_object_entries_view(", "fn jet_raw_object_entries_view_inner(", 1);
+    assert_ne!(renamed, out.rust, "borrowed Object raw seam absent from generated runtime");
+    let transferred = renamed.replacen("fn jet_raw_bytes_into_text(", "fn jet_raw_bytes_into_text_inner(", 1);
+    assert_ne!(transferred, renamed, "owned byte/String transfer seam absent");
+    let probe = r#"
+mod object_borrow_probe {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    pub struct Alloc;
+    pub static COUNT: AtomicBool = AtomicBool::new(false);
+    pub static CALLS: AtomicUsize = AtomicUsize::new(0);
+    pub static FREES: AtomicUsize = AtomicUsize::new(0);
+    unsafe impl GlobalAlloc for Alloc {
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.alloc(layout) }
+        }
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if COUNT.load(Ordering::SeqCst) { FREES.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.dealloc(ptr, layout) }
+        }
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, size: usize) -> *mut u8 {
+            if COUNT.load(Ordering::SeqCst) { CALLS.fetch_add(1, Ordering::SeqCst); }
+            unsafe { System.realloc(ptr, layout, size) }
+        }
+    }
+}
+#[global_allocator]
+static OBJECT_BORROW_ALLOC: object_borrow_probe::Alloc = object_borrow_probe::Alloc;
+fn jet_raw_object_entries_view(value: &jet_std::DataTree) -> &[(String, jet_std::DataTree)] {
+    use std::sync::atomic::Ordering;
+    object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+    object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+    let view = jet_raw_object_entries_view_inner(value);
+    object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+    assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+    let jet_std::DataTree::Object(entries) = value else { panic!("not Object") };
+    assert_eq!(view.as_ptr(), entries.as_ptr());
+    // Seed/verification equivalence: both calls use the canonical shared
+    // validator; compare the acceptance set AND exact failure messages.
+    let compare_utf8 = |bytes: Vec<u8>| {
+        let validation = jet_string_validate_utf8(&bytes);
+        let decoding = jet_string_from_bytes(&bytes).map(|_| ()).map_err(|error| error.message);
+        assert_eq!(validation, decoding, "UTF-8 bytes {bytes:?}");
+    };
+    compare_utf8(Vec::new());
+    for first in 0..=255 {
+        compare_utf8(vec![first]);
+        for second in 0..=255 { compare_utf8(vec![first, second]); }
+    }
+    for bytes in [
+        vec![224,160,128], vec![237,159,191], vec![239,191,191],
+        vec![240,144,128,128], vec![244,143,191,191],
+        vec![224,159,191], vec![237,160,128], vec![240,143,191,191],
+        vec![244,144,128,128], vec![245,128,128,128],
+        vec![224,160], vec![240,144,128],
+        vec![65,194,32], vec![65,224,160,32],
+    ] { compare_utf8(bytes); }
+    for bytes in [Vec::new(), vec![0, 127, 255]] {
+        let pointer = bytes.as_ptr();
+        let length = bytes.len();
+        let owner = jet_std::DataTree::Bytes(bytes);
+        object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+        object_borrow_probe::FREES.store(0, Ordering::SeqCst);
+        object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+        {
+            let bytes_view = jet_raw_bytes_view(&owner);
+            assert_eq!(bytes_view.as_ptr(), pointer);
+            assert_eq!(bytes_view.len(), length);
+            if length != 0 { assert_eq!(bytes_view[2], 255); }
+        }
+        assert_eq!(object_borrow_probe::FREES.load(Ordering::SeqCst), 0);
+        assert_eq!(jet_raw_bytes_view(&owner).as_ptr(), pointer);
+        drop(owner);
+        object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+        assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+        assert_eq!(object_borrow_probe::FREES.load(Ordering::SeqCst), usize::from(length != 0));
+    }
+    assert_eq!(view.len(), entries.len());
+    view
+}
+fn jet_raw_bytes_into_text(bytes: Vec<u8>) -> String {
+    use std::sync::atomic::Ordering;
+    let original = bytes.as_ptr();
+    object_borrow_probe::CALLS.store(0, Ordering::SeqCst);
+    object_borrow_probe::COUNT.store(true, Ordering::SeqCst);
+    let text = jet_raw_bytes_into_text_inner(bytes);
+    let text_pointer = text.as_ptr();
+    let roundtrip = jet_raw_text_into_bytes(text);
+    let byte_pointer = roundtrip.as_ptr();
+    let text = jet_raw_bytes_into_text_inner(roundtrip);
+    object_borrow_probe::COUNT.store(false, Ordering::SeqCst);
+    assert_eq!(object_borrow_probe::CALLS.load(Ordering::SeqCst), 0);
+    assert_eq!(original, text_pointer);
+    assert_eq!(original, byte_pointer);
+    assert_eq!(original, text.as_ptr());
+    text
+}
+"#;
+    let generated = transferred.replacen("#![allow(warnings)]", "", 1);
+    let rust = format!("#![allow(warnings)]\n{probe}\n{generated}");
+    let rs = dir.join("borrow.rs");
+    let bin = dir.join("borrow");
+    let mut command = Command::new("rustc");
+    let _runtime_lease = common::add_generated_rust(&mut command, &rs, &rust, false, &[]);
+    let compile = command.arg("-o").arg(&bin).output().unwrap();
+    assert!(compile.status.success(), "borrow probe rustc:\n{}", String::from_utf8_lossy(&compile.stderr));
+    let run = Command::new(&bin).current_dir(&dir).output().unwrap();
+    assert!(run.status.success(), "borrow probe runtime:\n{}", String::from_utf8_lossy(&run.stderr));
+    assert_eq!(String::from_utf8_lossy(&run.stdout), "{\"z\":[1,2],\"a\":\"kept\"}\n{\"a\":\"kept\",\"z\":[1,2]}\n");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn text_and_file_readers_keep_distinct_checked_layouts() {
+    let dir = std::env::temp_dir().join(format!("jet_encoding_reader_layout_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("value.json");
+    fs::write(&path, "null").unwrap();
+    let path_text = path.to_string_lossy().replace('\\', "\\\\");
+    let source = format!(
+        r#"
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn keep_file_reader(value: ^json.JSONReader) -> json.JSONReader {{ value }}
+
+fn run() {{
+    text := json.reader("null")
+    _ :: &text.next() ?? panic("text event")
+    print("text event")
+
+    duplicates := json.reader_allow_duplicates("{{{{\"x\":1,\"x\":2}}}}")
+    loop _ in 0..<6 {{
+        _ :: &duplicates.next() ?? panic("duplicate event")
+    }}
+    print("duplicate events")
+
+    records := jsonl.reader("null\ntrue\n")
+    first :: &records.next() ?? panic("first record")
+    print(json.canonical(first) ?? panic("canonical first"))
+    second :: &records.next() ?? panic("second record")
+    print(json.canonical(second) ?? panic("canonical second"))
+
+    input :: files.open("{path_text}") ?? panic("open")
+    file :: json.reader(^input) ?? panic("file reader")
+    kept := keep_file_reader(^file)
+    _ :: &kept.next() ?? panic("file event")
+    print("file event")
+}}
+"#
+    );
+    let (code, stdout, stderr) = build_and_run(&dir, "encoding_reader_layout", &source, &[], None);
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(stdout, "text event\nduplicate events\nnull\ntrue\nfile event\n");
+    assert_eq!(stderr, "");
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn encoding_stream_foundation_types_are_real_jet_values() {
     let dir = std::env::temp_dir().join(format!("jet_encoding_foundation_{}", std::process::id()));
     fs::create_dir_all(&dir).unwrap();
@@ -318,7 +745,7 @@ fn run() {{
     record_limits.max_total_bytes = Val(5)
     record_output :: files.create("{jsonl}") ?? panic("create record")
     record_writer :: jsonl.writer(^record_output, record_limits) ?? panic("record writer")
-    record_result :: record_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("abcd")]))
+    record_result :: record_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("abcd")]))
     if record_result == {{
         .Ok(_) -> {{ print("record-limit-missed") }}
         .Err(first) -> {{
@@ -329,7 +756,7 @@ fn run() {{
 
     nonfinite_output :: files.create("{nonfinite}") ?? panic("create nonfinite")
     nonfinite_writer :: jsonl.writer(^nonfinite_output) ?? panic("nonfinite writer")
-    nonfinite_result :: nonfinite_writer.write(DataTree.Array([DataTree.Int(1), DataTree.Float(0.0 / 0.0)]))
+    nonfinite_result :: nonfinite_writer.write(Dyn.Array([Dyn.Int(1), Dyn.Float(0.0 / 0.0)]))
     if nonfinite_result == {{ .Ok(_) -> {{ print("nonfinite-missed") }} .Err(_) -> {{ print(true) }} }}
 }}
 "#
@@ -345,7 +772,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("json_stream_atomic.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -395,9 +822,9 @@ fn run() {{
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
 
-    data := DataTree.Object([
-        "z": DataTree.Array([DataTree.Int(1), DataTree.Object(["b": DataTree.Int(2), "a": DataTree.Text("x")])]),
-        "a": DataTree.Bool(true),
+    data := Dyn.Object([
+        "z": Dyn.Array([Dyn.Int(1), Dyn.Object(["b": Dyn.Int(2), "a": Dyn.Text("x")])]),
+        "a": Dyn.Bool(true),
     ])
     print(json.canonical(data) ?? panic("value is not canonical JSON"))
 
@@ -659,12 +1086,12 @@ use core.files as files
 fn run() {{
     output :: files.create("{output}") ?? panic("create")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("alpha")) ?? panic("write")
-    writer.write(DataTree.Array([DataTree.Int(1), DataTree.Text("beta")])) ?? panic("write")
+    writer.write(Dyn.Text("alpha")) ?? panic("write")
+    writer.write(Dyn.Array([Dyn.Int(1), Dyn.Text("beta")])) ?? panic("write")
     &writer.flush() ?? panic("flush")
     writer.finish() ?? panic("finish")
     writer.finish() ?? panic("finish twice")
-    after_finish :: writer.write(DataTree.Null)
+    after_finish :: writer.write(Dyn.Null)
     if after_finish == {{
         .Ok(_) -> {{ print("write-after-finish-missed") }}
         .Err(first) -> {{
@@ -686,8 +1113,8 @@ fn run() {{
     second_result :: reader.next() ?? panic("second")
     if second_result == {{
         Val(value) -> {{
-            first :: value.at(0) ?? DataTree.Int(-1)
-            second :: value.at(1) ?? DataTree.Text("bad")
+            first :: value.at(0) ?? Dyn.Int(-1)
+            second :: value.at(1) ?? Dyn.Text("bad")
             print(first.int() ?? -1)
             print(second.text() ?? "bad")
         }}
@@ -721,7 +1148,7 @@ fn run() {{
     limits.max_item_bytes = 2
     limited_output :: files.create("{limited}") ?? panic("limited create")
     limited_writer :: jsonl.writer(^limited_output, limits) ?? panic("limited writer")
-    limited_result :: limited_writer.write(DataTree.Text("three"))
+    limited_result :: limited_writer.write(Dyn.Text("three"))
     if limited_result == {{
         .Ok(_) -> {{ print("limit-missed") }}
         .Err(first) -> {{
@@ -813,7 +1240,7 @@ fn run() {{
     valid_record :: valid_reader.next() ?? panic("valid next")
     if valid_record == {{
         Val(value) -> {{
-            last :: value.at(31) ?? DataTree.Int(-1)
+            last :: value.at(31) ?? Dyn.Int(-1)
             print(last.int() ?? -1)
         }}
         None -> {{ print("valid-missing") }}
@@ -965,7 +1392,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("json_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1138,7 +1565,7 @@ use core.files as files
 fn write_unfinished(path: String) {{
     output :: files.create(path) ?? panic("create partial")
     writer :: jsonl.writer(^output) ?? panic("writer")
-    writer.write(DataTree.Text("alpha")) ?? panic("record")
+    writer.write(Dyn.Text("alpha")) ?? panic("record")
     &writer.flush() ?? panic("flush")
     // no finish — Drop must leave the record LF unwritten (incomplete wire)
 }}
@@ -1151,7 +1578,7 @@ fn run() {{
     // Same-path recreate: Drop must have released the unfinished writer handle.
     reopen_out :: files.create("{partial}") ?? panic("same-path recreate after Drop")
     reopen_writer :: jsonl.writer(^reopen_out) ?? panic("reopen writer")
-    reopen_writer.write(DataTree.Null) ?? panic("reopen write")
+    reopen_writer.write(Dyn.Null) ?? panic("reopen write")
     reopen_writer.finish() ?? panic("reopen finish")
     finished :: files.read("{partial}") ?? panic("same-path read after finish")
     print(finished == "null\n")
@@ -1198,7 +1625,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("jsonl_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1293,7 +1720,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("csv_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1309,7 +1736,7 @@ fn xml_stream_drop_and_codec_heap_ceiling_are_enforced() {
     fs::create_dir_all(&dir).unwrap();
     let partial_path = dir.join("partial.xml");
     let heap_path = dir.join("heap.xml");
-    // Attribute text under max_item_bytes; raw_bytes→Array<Int> DataTree slots
+    // Attribute text under max_item_bytes; raw_bytes→Array<Int> Dyn slots
     // charge past the shared codec heap ceiling (same counting allocator).
     // Keep modest: ByteLexer retains per-scalar units, so 128KiB hung the suite.
     let attr = "x".repeat(8_192);
@@ -1322,42 +1749,42 @@ use core.encoding as encoding
 use core.encoding.xml as xml
 use core.files as files
 
-fn xml_name(local: String) -> DataTree {{
-    return DataTree.Object([
-        "raw": DataTree.Text(~local),
-        "prefix": DataTree.Null,
-        "local": DataTree.Text(~local),
-        "namespace_uri": DataTree.Null,
+fn xml_name(local: String) -> Dyn {{
+    return Dyn.Object([
+        "raw": Dyn.Text(~local),
+        "prefix": Dyn.Null,
+        "local": Dyn.Text(~local),
+        "namespace_uri": Dyn.Null,
     ])
 }}
 
-fn document_start() -> DataTree {{
-    return DataTree.Object([
-        "$xml_event": DataTree.Text("document_start"),
-        "encoding": DataTree.Null,
-        "bom": DataTree.Array([]),
+fn document_start() -> Dyn {{
+    return Dyn.Object([
+        "$xml_event": Dyn.Text("document_start"),
+        "encoding": Dyn.Null,
+        "bom": Dyn.Array([]),
     ])
 }}
 
-fn document_end() -> DataTree {{
-    return DataTree.Object(["$xml_event": DataTree.Text("document_end")])
+fn document_end() -> Dyn {{
+    return Dyn.Object(["$xml_event": Dyn.Text("document_end")])
 }}
 
-fn element_start(empty_style: String) -> DataTree {{
-    return DataTree.Object([
-        "$xml_event": DataTree.Text("element_start"),
+fn element_start(empty_style: String) -> Dyn {{
+    return Dyn.Object([
+        "$xml_event": Dyn.Text("element_start"),
         "name": xml_name("r"),
-        "namespaces": DataTree.Array([]),
-        "attributes": DataTree.Array([]),
-        "empty_style": DataTree.Text(~empty_style),
-        "open_lexical": DataTree.Object([
-            "raw_text": DataTree.Null,
-            "raw_bytes": DataTree.Null,
-            "semantic": DataTree.Object([
+        "namespaces": Dyn.Array([]),
+        "attributes": Dyn.Array([]),
+        "empty_style": Dyn.Text(~empty_style),
+        "open_lexical": Dyn.Object([
+            "raw_text": Dyn.Null,
+            "raw_bytes": Dyn.Null,
+            "semantic": Dyn.Object([
                 "name": xml_name("r"),
-                "namespaces": DataTree.Array([]),
-                "attributes": DataTree.Array([]),
-                "empty_style": DataTree.Text(~empty_style),
+                "namespaces": Dyn.Array([]),
+                "attributes": Dyn.Array([]),
+                "empty_style": Dyn.Text(~empty_style),
             ]),
         ]),
     ])
@@ -1432,7 +1859,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("xml_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1531,7 +1958,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("cbor_stream_drop_heap.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1773,7 +2200,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("csv_stream.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -1833,7 +2260,7 @@ fn run() {{
     float_writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("negative zero write")
     float_writer.write(encoding.DataEvent.ArrayEnd) ?? panic("float array end")
     float_writer.finish() ?? panic("float finish")
-    whole_tree :: DataTree.Object(["b": DataTree.Text("xy"), "a": DataTree.Int(1)])
+    whole_tree :: Dyn.Object(["b": Dyn.Text("xy"), "a": Dyn.Int(1)])
     expected_whole :: [U8]{{ 162, 97, 97, 1, 97, 98, 98, 120, 121 }}
     print((cbor.to_bytes_canonical(whole_tree) ?? panic("whole encode")) == expected_whole)
     after :: writer.write(encoding.DataEvent.Null)
@@ -1931,7 +2358,7 @@ fn run() {{
     assert_eq!(stderr, "");
     let dev_path = dir.join("cbor_stream.jet");
     fs::write(&dev_path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -2013,7 +2440,7 @@ fn run() {{
     if tight_first == {{
         .Ok(_) -> panic("combined key/chunk budget missed")
         .Err(first) -> {{
-            print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, ~first.reason))
+            print(first.path == "$[\"a\"]" && first.byte_offset == 6 && reader_terminal(&tight_reader, first.reason.copy()))
         }}
     }}
 
@@ -2041,7 +2468,7 @@ fn run() {{
     duplicate_first :: duplicate_reader.next()
     if duplicate_first == {{
         .Err(first) -> {{
-            print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, ~first.reason))
+            print(first.byte_offset == 4 && first.path == "$" && reader_terminal(&duplicate_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2072,7 +2499,7 @@ fn run() {{
     int_reader := cbor.reader(^int_input) ?? panic("int reader")
     if int_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 2 && reader_terminal(&int_reader, ~first.reason))
+            print(first.byte_offset == 2 && reader_terminal(&int_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2081,7 +2508,7 @@ fn run() {{
     float_reader := cbor.reader(^float_input) ?? panic("float reader")
     if float_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 3 && reader_terminal(&float_reader, ~first.reason))
+            print(first.byte_offset == 3 && reader_terminal(&float_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2090,7 +2517,7 @@ fn run() {{
     indef_reader := cbor.reader(^indef_input) ?? panic("indef reader")
     if indef_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 3 && reader_terminal(&indef_reader, ~first.reason))
+            print(first.byte_offset == 3 && reader_terminal(&indef_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2100,7 +2527,7 @@ fn run() {{
     trailing_root :: trailing_reader.next() ?? panic("root")
     if trailing_reader.next() == {{
         .Err(first) -> {{
-            print(first.byte_offset == 1 && reader_terminal(&trailing_reader, ~first.reason))
+            print(first.byte_offset == 1 && reader_terminal(&trailing_reader, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2132,7 +2559,7 @@ fn run() {{
     array_fail_writer.write(encoding.DataEvent.Null) ?? panic("array fail null")
     if array_fail_writer.write(encoding.DataEvent.ArrayEnd) == {{
         .Err(first) -> {{
-            print(writer_terminal(&array_fail_writer, ~first.reason))
+            print(writer_terminal(&array_fail_writer, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2165,7 +2592,7 @@ fn run() {{
     incomplete_writer.flush() ?? panic("incomplete flush")
     if incomplete_writer.finish() == {{
         .Err(first) -> {{
-            print(writer_terminal(&incomplete_writer, ~first.reason))
+            print(writer_terminal(&incomplete_writer, first.reason.copy()))
         }}
         .Ok(_) -> print(false)
     }}
@@ -2236,7 +2663,7 @@ fn run() {{
     if rejected_writer.write(encoding.DataEvent.Null) == {{
         .Err(first) -> {{
             print(first.reason == "max_item_bytes 7 exceeded")
-            print(terminal(&rejected_writer, ~first.reason))
+            print(terminal(&rejected_writer, first.reason.copy()))
         }}
         .Ok(_) -> {{
             print(false)
@@ -2286,14 +2713,14 @@ fn run() {{
     directory_input :: files.open("{directory}") ?? panic("directory open")
     directory_reader := cbor.reader(^directory_input) ?? panic("directory reader")
     if directory_reader.next() == {{
-        .Err(first) -> print(reader_terminal(&directory_reader, ~first.reason))
+        .Err(first) -> print(reader_terminal(&directory_reader, first.reason.copy()))
         .Ok(_) -> print(false)
     }}
     full_output :: files.create("/dev/full") ?? panic("full open")
     full_writer := cbor.writer(^full_output) ?? panic("full writer")
     full_writer.write(encoding.DataEvent.Null) ?? panic("full buffered write")
     if &full_writer.flush() == {{
-        .Err(first) -> print(writer_terminal(&full_writer, ~first.reason))
+        .Err(first) -> print(writer_terminal(&full_writer, first.reason.copy()))
         .Ok(_) -> print(false)
     }}
 }}
@@ -2302,7 +2729,7 @@ fn run() {{
     assert_eq!((code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
     let path = dir.join("cbor_io.jet");
     fs::write(&path, &source).unwrap();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!((exit_code, stdout.as_str(), stderr.as_str()), (0, "true\ntrue\n", ""));
         }
@@ -2355,7 +2782,7 @@ fn run() {
         require_canonical: true,
     }
     // 0x18 0x01 is valid CBOR for 1, but not shortest/Core deterministic.
-    rejected := cbor.parse([24, 1], strict) ?? DataTree.Int(-1)
+    rejected := cbor.parse([24, 1], strict) ?? Dyn.Int(-1)
     print(rejected.int() ?? -2)
     strict_decode := cbor.CBOROptions{
         max_depth: 256,
@@ -2382,17 +2809,15 @@ fn run() {
     let path = dir.join("cbor_whole.jet");
     fs::write(&path, source).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).expect("CBOR fixture loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics
             .iter()
             .all(|diag| !matches!(diag.severity, jet::Diagnostics::Severity::Error)),
         "CBOR fixture must type-check: {diagnostics:?}"
     );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("CBOR fixture must compile for resident JIT");
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,
@@ -2402,22 +2827,10 @@ fn run() {
                 (exit_code, dev_stdout, dev_stderr),
                 (0, stdout.clone(), String::new())
             );
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "CBOR whole-value fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "CBOR whole-value fixture must not silently deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "CBOR whole-value fixture must not fall back"
-            );
         }
         other => panic!("CBOR whole-value default-dev failed: {other:?}"),
     }
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: interpreter_stdout,
             stderr: interpreter_stderr,
@@ -2445,19 +2858,19 @@ use core.encoding.cbor as cbor
 
 fn run() {
     strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
-    if cbor.parse([249, 62, 0], ~strict) == {
+    if cbor.parse([249, 62, 0], strict.copy()) == {
         .Ok(value) -> print(value.float() ?? -1.0)
         .Err(_) -> print(-2.0)
     }
-    if cbor.parse([250, 63, 192, 0, 0], ~strict) == {
+    if cbor.parse([250, 63, 192, 0, 0], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
     }
-    if cbor.parse([249, 126, 1], ~strict) == {
+    if cbor.parse([249, 126, 1], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
     }
-    if cbor.parse([249, 126, 0], ~strict) == {
+    if cbor.parse([249, 126, 0], strict.copy()) == {
         .Ok(_) -> print(true)
         .Err(_) -> print(false)
     }
@@ -2501,11 +2914,11 @@ fn run() {
     print(packet.data)
 
     strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1073741824, require_canonical: true }
-    if cbor.parse([159, 1, 255], ~strict) == {
+    if cbor.parse([159, 1, 255], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 0 && e.path == "$" && e.reason == "indefinite-length CBOR is not Core deterministic")
     }
-    if cbor.parse([129, 127, 97, 120, 255], ~strict) == {
+    if cbor.parse([129, 127, 97, 120, 255], strict.copy()) == {
         .Ok(_) -> print(false)
         .Err(e) -> print(e.byte_offset == 1 && e.path == "$[0]")
     }
@@ -2625,7 +3038,7 @@ fn run() {
     print(accepted([191, 97, 107, 1, 255]))
 
     // Truncation at each structural layer, reserved heads, invalid text,
-    // closed DataTree byte identity, duplicate/non-text keys, tags/simple
+    // closed Dyn byte identity, duplicate/non-text keys, tags/simple
     // values, stray breaks, trailing roots, and signed-range overflow.
     print(rejected(empty, 0, "$", "CBOR value is missing"))
     print(rejected([28], 0, "$", "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
@@ -2663,7 +3076,7 @@ fn run() {
 
     let path = dir.join("cbor_whole_corpus.jet");
     fs::write(&path, source).unwrap();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,
@@ -2687,19 +3100,19 @@ use core.encoding.cbor as cbor
 
 fn run() {
     options := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
-    value := cbor.parse([130, 97, 120, 97, 121], ~options) ?? panic("definite parse")
-    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], ~options) ?? panic("indefinite parse")
+    value := cbor.parse([130, 97, 120, 97, 121], options.copy()) ?? panic("definite parse")
+    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], options.copy()) ?? panic("indefinite parse")
     if cbor.parse([130, 97, 120], options) == {
         .Ok(_) -> panic("truncated array accepted")
         .Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
     }
 
     roomy := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
-    if cbor.parse([129, 130, 97, 120], ~roomy) == {
+    if cbor.parse([129, 130, 97, 120], roomy.copy()) == {
         .Ok(_) -> panic("nested truncation accepted")
         .Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
     }
-    if cbor.parse([162, 97, 97, 1, 97, 97, 2], ~roomy) == {
+    if cbor.parse([162, 97, 97, 1, 97, 97, 2], roomy.copy()) == {
         .Ok(_) -> panic("duplicate key accepted")
         .Err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
     }
@@ -2761,7 +3174,7 @@ mod jet_cbor_alloc_probe {
 }
 #[global_allocator]
 static JET_CBOR_ALLOC: jet_cbor_alloc_probe::CountingAlloc = jet_cbor_alloc_probe::CountingAlloc;
-fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<jet_std::DataTree, jet_std::CBORError> {
+fn jet_enc_cbor_parse(bytes: &Vec<u8>, options: jet_std::CBOROptions) -> Result<jet_std::Dyn, jet_std::CBORError> {
     let ceiling = options.max_bytes as usize;
     jet_cbor_alloc_probe::begin();
     let result = jet_enc_cbor_parse_inner(bytes, options);

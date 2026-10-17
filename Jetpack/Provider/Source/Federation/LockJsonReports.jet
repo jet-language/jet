@@ -20,7 +20,7 @@ impl ProviderFactReport {
     // A NuGet JSON lock or assets file: `dependencies`, `libraries`,
     // `targets`, and `projectFileDependencyGroups`, plus an optional root
     // package identity.
-    fn nuget_json_document(object: [String: DataTree]) -> ProviderFactReport Never! {
+    fn nuget_json_document(object: [String: Dyn]) -> ProviderFactReport Never! {
         packages := [NuGetLockPackage]{}
         dependency_values := [String]{}
         losses := [String]{}
@@ -173,7 +173,7 @@ impl ProviderFactReport {
         root_name := provider_graph_json_first_string(object, [String]{"id", "name"})
         root_version := provider_graph_json_string(object, "version")
         if root_name == None || root_version == None {
-            nested :: pkg_json_object(object.get("package") ?? DataTree.Null) ?? [String: DataTree]{}
+            nested :: pkg_json_object(object.get("package") ?? Dyn.Null) ?? [String: Dyn]{}
             root_name = provider_graph_json_first_string(nested, [String]{"id", "name"})
             root_version = provider_graph_json_string(nested, "version")
         }
@@ -219,7 +219,7 @@ impl ProviderFactReport {
             }
         }
         facts.license = provider_graph_json_first_string(object, [String]{"licenseExpression", "license", "licenseUrl"}) ?? ""
-        if pkg_json_object(object.get("dependencies") ?? DataTree.Null) == {
+        if pkg_json_object(object.get("dependencies") ?? Dyn.Null) == {
             .Val(dependencies) -> {
                 frameworks := [String]{}
                 loop framework in dependencies.keys().to_list() -> &frameworks.push("framework:{framework}")
@@ -244,7 +244,7 @@ impl ProviderFactReport {
     }
 
     // A Conan JSON package record or graph lock.
-    fn conan_json_document(object: [String: DataTree]) -> ProviderFactReport Never! {
+    fn conan_json_document(object: [String: Dyn]) -> ProviderFactReport Never! {
         losses := [String]{}
         conflicts := [String]{}
         facts := MetadataFacts.empty(ProviderFamily.Conan, provider_graph_json_string(object, "name") ?? "")
@@ -298,9 +298,9 @@ impl ProviderFactReport {
         loop dependency in provider_conan_json_dependencies(&facts, object.get("build_requires"), "build", &losses) -> &build_dependencies.push(dependency)
         facts.build_dependencies = build_dependencies
         graph_value :: provider_graph_either(object.get("graph_lock"), object.get("graph"))
-        graph_object :: pkg_json_object(graph_value ?? DataTree.Null) ?? [String: DataTree]{}
-        graph_nodes := pkg_json_object(graph_object.get("nodes") ?? DataTree.Null)
-        if graph_nodes == None -> graph_nodes = pkg_json_object(object.get("nodes") ?? DataTree.Null)
+        graph_object :: pkg_json_object(graph_value ?? Dyn.Null) ?? [String: Dyn]{}
+        graph_nodes := pkg_json_object(graph_object.get("nodes") ?? Dyn.Null)
+        if graph_nodes == None -> graph_nodes = pkg_json_object(object.get("nodes") ?? Dyn.Null)
         if graph_nodes == {
             .Val(nodes) -> {
                 node_identities := [ConanNodeIdentity]{}
@@ -374,7 +374,7 @@ impl ProviderFactReport {
 
 // The dependency refs of a Conan `requires`-style array, each recorded as a
 // typed fact under `kind`.
-fn provider_conan_json_dependencies(facts: &MetadataFacts, value: DataTree?, kind: String, losses: &[String]) -> [String] Never! {
+fn provider_conan_json_dependencies(facts: &MetadataFacts, value: Dyn?, kind: String, losses: &[String]) -> [String] Never! {
     declared :: value ?? return [String]{}
     items :: pkg_json_array(declared) ?? {
         &losses.push("Conan `{kind}` dependencies must be an array")

@@ -250,12 +250,12 @@ fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
 use c.{abi} as abi
 use core.encoding.json as json
 
-pub struct Session {{
+struct Session {{
     value: Int
 }}
 
 #Error
-pub enum PowerShellError {{
+enum PowerShellError {{
     NotRunning
     Timeout
     Cancelled
@@ -275,15 +275,15 @@ pub enum PowerShellError {{
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) {}
+fn close(session: ^Session) {}
 
-pub fn open() -> Session PowerShellError! {
+fn open() -> Session PowerShellError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PowerShellError.NotRunning)
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
 "#,
     );
@@ -291,7 +291,7 @@ pub fn cancel(session: Session) { abi.cancel(session.value) }
         let call = format!("abi.{}", function.jet);
         out.push_str(&format!(
             r#"pub fn {}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PowerShellError! {{
-    raw :: {}(session.value, json.to_string(input), deadline_ms)
+    raw :: {}(session.value, json.to_string(input) ?? return Err(PowerShellError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }}
@@ -609,9 +609,9 @@ mod tests {
         );
         let jet = super::render_jet("ops", &functions);
         let worker = super::render_worker(&functions);
-        assert!(jet.contains("pub fn get_stateful("));
+        assert!(jet.contains("\nfn get_stateful("));
         assert!(jet.contains("fn open() -> Int ="));
-        assert!(jet.contains("pub fn open() -> Session PowerShellError! {"));
+        assert!(jet.contains("fn open() -> Session PowerShellError! {"));
         assert!(jet.contains("Session{ value: handle }"));
         assert!(!jet.contains("=>"));
         assert!(!jet.contains("Session.{"));

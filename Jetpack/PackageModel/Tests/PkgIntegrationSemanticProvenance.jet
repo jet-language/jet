@@ -1,0 +1,57 @@
+// tests/jetpack_semantic_lock.rs:57-122. Existing typed manifest + Lock API.
+// Rust ProvenanceRequirement::None is Jet Unrequired; no semantic weakening.
+#Test("provenance policy none logged attested and roundtrip") {
+    spellings :: [String]{"none", "logged", "attested"}
+    expected :: [ProvenanceRequirement]{ProvenanceRequirement.Unrequired, ProvenanceRequirement.Logged, ProvenanceRequirement.Attested}
+    loop index in 0..<spellings.len() {
+        facts :: PackageFacts.parse("name: \"app\"\nversion: \"0.1.0\"\nauthority: {{ trust: {{ require: {spellings[index]} }} }}\n", "test") ?? panic("authority requirement parse")
+        trust :: facts.authority.trust ?? panic("trust")
+        assert_eq(trust.require, Val(expected[index]))
+    }
+    lock := pkg_lock_parse(`version = 1
+
+[[package]]
+name = "textkit"
+version = "1.2.0"
+source = { path = "textkit" }
+fingerprint = "fp-textkit"
+content-hash = "sha256-locked"
+dependencies = []
+
+[root]
+dependencies = ["textkit"]
+`) ?? panic("provenance fixture parse")
+    if pkg_lock_enforce_provenance_requirement(lock, ProvenanceRequirement.Unrequired) == {
+        .Ok(_) -> {}
+        .Err(_) -> panic("none must accept")
+    }
+    logged_rejected :: if pkg_lock_enforce_provenance_requirement(lock, ProvenanceRequirement.Logged) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+    assert(logged_rejected)
+    provenance := DependencyProvenance{transparency: Val("registry log #48122"), publisher: Val("ed25519:ak3f \"textkit team\""), build: None}
+    lock.packages[0].provenance = Val(provenance)
+    lock.packages[0].envelope = Val(LockEnvelope{output_hash: "sha256-output", platform: "x86_64-linux", signature: "", provenance: "provider-built", catalog_tier: "", catalog_trust: ""})
+    if pkg_lock_enforce_provenance_requirement(lock, ProvenanceRequirement.Logged) == {
+        .Ok(_) -> {}
+        .Err(_) -> panic("logged must accept recorded transparency")
+    }
+    attested_rejected :: if pkg_lock_enforce_provenance_requirement(lock, ProvenanceRequirement.Attested) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+    assert(attested_rejected, "generic envelope provenance is not an attestation")
+    provenance.build = Val("slsa v1.0")
+    lock.packages[0].provenance = Val(provenance)
+    if pkg_lock_enforce_provenance_requirement(lock, ProvenanceRequirement.Attested) == {
+        .Ok(_) -> {}
+        .Err(_) -> panic("attested must accept build attestation")
+    }
+    encoded :: pkg_lock_write(lock)
+    assert(encoded.contains("provenance-transparency = \"registry log #48122\""))
+    assert(encoded.contains("provenance-publisher = \"ed25519:ak3f \\\"textkit team\\\"\""))
+    assert(encoded.contains("provenance-build = \"slsa v1.0\""))
+    round_trip :: pkg_lock_parse(encoded) ?? panic("provenance roundtrip")
+    assert_eq(round_trip.packages[0].provenance, lock.packages[0].provenance)
+}

@@ -1,0 +1,10 @@
+// A capacity computed at run time below 1 stops with E3001 on every tier;
+// it is never clamped to one slot. (A literal below 1 is the compile error E0395.)
+fn capacity_from(count: Int) -> Int { count - 1 }
+
+fn run() {
+    print("building a channel with capacity {capacity_from(1)}")
+    (tx, _rx) :: channel<Int>(capacity: capacity_from(1))
+    tx.send(1)
+    print("unreachable: the channel was built")
+}

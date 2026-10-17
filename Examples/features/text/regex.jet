@@ -1,66 +1,71 @@
-// D-REGEXENGINE1: core.regex — std-only linear regex (no ReDoS), no hidden
-// bridge crate.
+// D-REGEXENGINE1: one Unicode VM and Regex/Match surface for free calls and
+// methods, numbered expansion, explicit flags, and character-index spans.
 use core.regex as re
 
 fn run() {
     text :: "order 42 shipped to zip 90210"
-    print(re.is_match(Regex{"\d+"}, text))
-    print(re.is_match(Regex{"[a-z]+"}, "hello123"))
-    print(re.full_match(Regex{"[a-z]+"}, "hello123"))
-    nums :: re.find_all(Regex{"\d+"}, text)
+    digits :: re.compile("\\d+") ?? panic("digits")
+    letters :: re.compile("[a-z]+") ?? panic("letters")
+    shipment :: re.compile("(\\d+) shipped") ?? panic("shipment")
+    single_a :: re.compile("a") ?? panic("literal a")
+    spaces :: re.compile("\\s+") ?? panic("spaces")
+    empty :: re.compile("") ?? panic("empty pattern")
+    print(re.is_match(digits, text))
+    print(re.is_match(letters, "hello123"))
+    print(re.full_match(letters, "hello123"))
+    nums :: re.find_all(digits, text)
     print(nums[0])
     print(nums.len())
-    m :: re.match(Regex{"(\d+) shipped"}, text)
+    m :: re.match(shipment, text)
     if m == .Val(mat) {
-        print(mat.group(0) ?? "none")
-        print(mat.group(1) ?? "none")
+        print(mat.text)
+        print(mat.groups[0])
     }
-    print(re.replace(Regex{"\d+"}, "#", text))
-    print(re.replace(Regex{"a"}, "x", "a-a-a"))
-    print(re.replace_first(Regex{"a"}, "x", "a-a-a"))
-    print(re.split(Regex{"\s+"}, text).len())
-    print(Regex{"\d+"}.is_match(text))
-    print(Regex{"[a-z]+"}.is_match("hello123"))
-    print(Regex{"[a-z]+"}.full_match("hello123"))
+    print(re.replace(digits, text, "#"))
+    print(re.replace(single_a, "a-a-a", "x"))
+    print(re.replace_first(single_a, "a-a-a", "x"))
+    print(re.split(spaces, text).len())
+    print(re.is_match(digits, text))
+    print(re.is_match(letters, "hello123"))
+    print(re.full_match(letters, "hello123"))
 
     flag_set :: re.flags(true, true, false)
-    rx :: re.compile_with("(?<word>[a-z]+)", flag_set) ?? return
-    print(rx.matches("Ada lovelace").len())
-    first_named :: rx.match("Ada lovelace")
-    if first_named == .Val(mat) {
-        print(mat.name("word") ?? "none")
-        print(mat.start())
-        print(mat.end())
-        print(mat.named_captures().len())
+    rx :: re.compile_with("([a-z]+)", flag_set) ?? panic("flagged words")
+    print(re.matches(rx, "Ada lovelace").len())
+    first_word :: re.match(rx, "Ada lovelace")
+    if first_word == .Val(mat) {
+        print(mat.groups[0])
+        print(mat.start)
+        print(mat.end)
+        print(mat.groups.len() < 2)
     }
-    word :: re.compile("\\w+") ?? return
-    print(word.replace_all_with("a b", (m: Match) -> "hit"))
-    sep :: re.compile(",\\s*") ?? return
-    print(sep.split_limit("a, b, c", 2)[1])
-    print(rx.pattern())
-    print(rx.source())
-    print(rx.flags())
-    print(rx.names().len())
-    print(rx.count("Ada lovelace"))
+    word :: re.compile("\\w+") ?? panic("words")
+    print(re.replace(word, "a b", "hit"))
+    pair :: re.match(re.compile("(\\w+) (\\w+)") ?? panic("pair"), "a b") ?? panic("pair match")
+    print(re.expand(pair, "$2 $1"))
+    sep :: re.compile(",\\s*") ?? panic("separator")
+    print(re.split_limit(sep, "a, b, c", 2)[1])
+    print(rx.pattern)
+    print(re.join(rx))
+    print(rx.flags)
+    print(re.matches(rx, "Ada lovelace").len())
     print(re.escape("a+b?"))
-    print(re.replace(Regex{""}, "x", "aé"))
+    print(re.replace(empty, "aé", "x"))
 
-    zero_width :: re.split(Regex{""}, "abc")
+    zero_width :: re.split(empty, "abc")
     print(zero_width.len())
-    print(re.split(Regex{"[\t-\r ]+"}, "a\tb\nc d").len())
+    print(re.split(re.compile("[\\t-\\r ]+") ?? panic("ASCII whitespace"), "a\tb\nc d").len())
     print(zero_width[1])
     print(zero_width[2])
     print(zero_width[3])
 
-    unicode_match :: re.match(Regex{"(é)"}, "aé")
+    unicode_match :: re.match(re.compile("(é)") ?? panic("Unicode capture"), "aé")
     if unicode_match == .Val(mat) {
         print(mat.start())
         print(mat.end())
-        print(mat.group_start(1) ?? -1)
-        print(mat.group_end(1) ?? -1)
     }
 
-    print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
-    absolute_end :: re.compile_with("a$", re.flags(false, true, false)) ?? return
-    print(absolute_end.is_match("a\nb"))
+    print(re.is_match(re.compile("(a+)+$") ?? panic("hostile pattern"), "aaaaaaaaaaaaaaaaaaaaX"))
+    line_end :: re.compile_with("a$", re.flags(false, true, false)) ?? panic("multiline end")
+    print(re.is_match(line_end, "a\nb"))
 }

@@ -12,8 +12,8 @@
 //!      (read-only) to `self.<field>`" scoping, made real by substitution
 //!      instead of a synthetic scope, so both sema and codegen resolve it
 //!      through the ordinary `self.field` path (no new lowering path, I3);
-//!   3. synthesize a `fn <field>(self) T -> { return <rewritten expr>; }`
-//!      method per computed field and append it to `s.methods`, so it flows
+//!   3. synthesize a reserved compiler-owned getter per computed field and
+//!      append it to `s.methods`, without occupying the user method namespace,
 //!      through the *exact* same registration / body-checking / TIR codegen
 //!      pipeline as a hand-written method (S62 delegation-method precedent).
 //!      Codegen (`Codegen::Context`/`Codegen::TIR::lower`) marks the field
@@ -29,8 +29,8 @@ use super::*;
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::Syntax;
 use crate::AST::{
-    AccessConvention, EnumLitArg, Expr, Field, Func, Item, OrFallback, Param, Pattern, Stmt,
-    StrPart, StructDef, StructPatField, Type,
+    AccessConvention, EnumLitArg, Expr, Field, Func, Item, OrFallback, Param, Stmt, StrPart,
+    StructDef, Type,
 };
 use std::collections::{HashMap, HashSet};
 
@@ -58,6 +58,11 @@ pub(crate) fn process_computed_fields(items: &mut Vec<Item>, diags: &mut Vec<Dia
         rewrite_computed_field_bodies(s);
         for f in &s.fields {
             let Some(_) = &f.computed else { continue };
+            if s.methods.iter().any(|method| method.compiler_generated
+                && Syntax::computed_field_getter_field(&method.name) == Some(f.name.as_str()))
+            {
+                continue;
+            }
             // A field caught in a cycle still gets a synthesized getter (so
             // the rest of the pipeline sees a consistent struct) — the E0338
             // diagnostic already aborts the compile before codegen runs.
@@ -339,13 +344,7 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
             subject, pattern, ..
         } => {
             rewrite_field_refs(subject, names, receiver);
-            if let Pattern::Struct { fields, .. } = pattern {
-                for field in fields {
-                    if let StructPatField::Value { value, .. } = field {
-                        rewrite_field_refs(value, names, receiver);
-                    }
-                }
-            }
+            pattern.for_each_value_expr_mut(&mut |value| rewrite_field_refs(value, names, receiver));
         }
         Expr::Str(parts, _) => {
             for p in parts {
@@ -380,7 +379,7 @@ pub(crate) fn rewrite_field_refs(expr: &mut Expr, names: &HashSet<String>, recei
     }
 }
 
-/// Step 3: `fn <field>(self) T -> { return <rewritten expr>; }`, built the
+/// Step 3: a reserved getter for the rewritten field expression, built the
 /// same way `Registration::synthesize_delegation_method` builds an S62
 /// forwarding method — a full `Func` with a placeholder self type (`S27`:
 /// sema fills in the owner type from `owner_type` when it checks the body),
@@ -401,6 +400,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
         public_label: None,
         zone: crate::AST::ParamZone::Either,
     };
@@ -411,7 +411,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         is_comptime: false,
         is_package_pub: f.is_package_pub,
         external_type: None,
-        name: f.name.clone(),
+        name: Syntax::computed_field_getter_name(&f.name),
         name_span: span,
         meta: None,
         type_params: vec![],
@@ -460,7 +460,7 @@ fn synthesize_computed_field_getter(f: &Field) -> Func {
         // getter: it is an internal method, not a second user-facing memo
         // site, and method lowering has no function-result cache.
         markers: Vec::new(),
-        compiler_generated: false,
+        compiler_generated: true,
         body: vec![Stmt::Return(Some(body_expr), span)],
     }
 }

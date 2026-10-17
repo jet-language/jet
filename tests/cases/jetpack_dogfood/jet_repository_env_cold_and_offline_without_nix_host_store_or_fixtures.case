@@ -1,0 +1,76 @@
+# Port of tests/jetpack_dogfood.rs:24-186, exact live public assertions; runtime UNRUN/PENDING-SAME-HEAD.
+# Lead ruling: Rust cargo build --locked --offline --bin jet and coordinated Cargo target setup RETIRE;
+# admitted native {jet} is the real binary under test. Native tool probe source is verbatim, not a snapshot.
+# Existing no-nix isolation owns the REAL mount/network namespace, never an environment-only proxy.
+# Package-tests staging seam: the producer oracle is Jetpack/CLI/Tests/PkgIntegrationDogfood.jet.
+opt-in: live signed-cache downloads and real compiler build; requires a bounded coordinated dogfood root and target
+requires: os:linux
+requires: tool:unshare
+fixture: jet_repository_env_cold_and_offline_without_nix_host_store_or_fixtures.fixture
+# Original clean child environment; Cargo build-only variables removed with the Rust bootstrap.
+env: PATH=
+env: HOME={work}/home
+env: TMPDIR={work}/tmp
+env: JETPACK_ROOT={work}/store
+env: JETPACK_NIX_FALLBACK_POLICY=deny
+env: NO_COLOR=1
+step: jet run {work}/setup.jet {work} {root} {jet}
+exit: 0
+step: jetpack update default --env compiler --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev
+cwd: project
+env-clear: true
+isolate: no-nix network=enabled
+exit: 0
+step online-tools: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev -- bash -eu {work}/tools.sh
+cwd: project
+env-clear: true
+isolate: no-nix network=enabled
+exit: 0
+stdout: $= "JETPACK_NATIVE_TOOLS_OK\n" # original ed77c235f tests/jetpack_dogfood.rs:157 ends_with predicate
+step online-smoke: jetpack env --env compiler --trust --yes --local-nix-catalog {root}/crates/jetpack/catalogs/jet-dev -- {jet} run Examples/features/basics/hello.jet
+cwd: project
+env-clear: true
+isolate: no-nix network=enabled
+exit: 0
+stdout.trim: = "hello, world" # original ed77c235f tests/jetpack_dogfood.rs:169 online compiler smoke stdout.trim equality
+step online-producers: jet test {root}/Jetpack/CLI/Tests/PkgIntegrationDogfood.jet --filter jet_repository_env_cold_and_offline_live_producer_facts
+cwd: project
+env-clear: true
+env: JET_TEST_DOGFOOD_PROJECT={work}/project
+env: JET_TEST_DOGFOOD_STORE={work}/store
+isolate: no-nix network=enabled
+exit: 0
+step: jetpack hangar du --json
+cwd: project
+env-clear: true
+isolate: no-nix network=enabled
+exit: 0
+file: project/.jet/lock exists
+copy: project/.jet/lock locked-authority
+mkdir: replaced-catalog
+step offline-tools: jetpack env --env compiler --trust --yes --offline --local-nix-catalog {work}/replaced-catalog -- bash -eu {work}/tools.sh
+cwd: project
+env-clear: true
+isolate: no-nix network=disabled
+exit: 0
+stdout: $= "JETPACK_NATIVE_TOOLS_OK\n" # original ed77c235f tests/jetpack_dogfood.rs:157 ends_with predicate
+step offline-smoke: jetpack env --env compiler --trust --yes --offline --local-nix-catalog {work}/replaced-catalog -- {jet} run Examples/features/basics/hello.jet
+cwd: project
+env-clear: true
+isolate: no-nix network=disabled
+exit: 0
+stdout.trim: = "hello, world" # original ed77c235f tests/jetpack_dogfood.rs:169 and78-79 offline compiler smoke stdout.trim equality
+step offline-producers: jet test {root}/Jetpack/CLI/Tests/PkgIntegrationDogfood.jet --filter jet_repository_env_cold_and_offline_live_producer_facts
+cwd: project
+env-clear: true
+env: JET_TEST_DOGFOOD_PROJECT={work}/project
+env: JET_TEST_DOGFOOD_STORE={work}/store
+isolate: no-nix network=disabled
+exit: 0
+step: jetpack hangar du --json
+cwd: project
+env-clear: true
+isolate: no-nix network=disabled
+exit: 0
+file: project/.jet/lock == locked-authority
+file: home/.jet/trust absent

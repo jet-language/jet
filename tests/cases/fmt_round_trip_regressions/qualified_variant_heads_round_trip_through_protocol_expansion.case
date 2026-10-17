@@ -1,0 +1,21 @@
+# HAND-PORT tests/fmt_round_trip_regressions.rs:1-19 qualified_variant_heads_round_trip_through_protocol_expansion
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original literal/protocol source, both formatter fixed-point identities and original protocol compile success.
+fixture: qualified_variant_heads_round_trip_through_protocol_expansion.fixture
+env: NO_COLOR=1
+step: jet fmt literal.jet
+exit: 0
+file: literal.jet ~ "Payment.Client{_token: 0}" # original contains predicate
+file: literal.jet !~ "Payment.Client.{" # original absence predicate
+copy: literal.jet literal.once
+step: jet fmt literal.jet
+exit: 0
+file: literal.jet == literal.once
+step: jet fmt protocol.jet
+exit: 0
+copy: protocol.jet protocol.once
+step: jet fmt protocol.jet
+exit: 0
+file: protocol.jet == protocol.once
+step: jet check protocol.jet
+exit: 0

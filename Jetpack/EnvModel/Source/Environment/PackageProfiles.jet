@@ -8,65 +8,65 @@ ENVMODEL_RESOLVER_BUDGET_NAME :: prep { "__jet_resolver_budget__:" }
 // One source-backed package-generation declaration. This is deliberately
 // separate from `PresetSpec`, which is the environment-shell preset surface
 // and may select host/user variables.
-pub struct PackageProfileSpec {
-    pub name: String{""}
-    pub extends: [String]{[String]{}}
+struct PackageProfileSpec {
+    name: String{""}
+    extends: [String]{[String]{}}
     // Canonical package refs as written by the shared package-sugar parser.
-    pub packages: [String]{[String]{}}
+    packages: [String]{[String]{}}
     // Exact path -> selected provider identity, from the ratified collision
     // map. The provider is checked against realized contenders later.
-    pub collisions: [String: String]{[String: String]{}}
+    collisions: [String: String]{[String: String]{}}
     // Source modules that contributed this equal declaration.
-    pub sources: [String]{[String]{}}
+    sources: [String]{[String]{}}
 }
 
 // One package ref after generation composition. `declared_by` keeps source
 // generation identity when equal package facts are de-duplicated.
-pub struct PackageProfilePackage {
-    pub raw: String{""}
-    pub declared_by: [String]{[String]{}}
+struct PackageProfilePackage {
+    raw: String{""}
+    declared_by: [String]{[String]{}}
 }
 
 // One resolved generation view. It is still source-backed; generation
 // publication and activation consume this exact object later.
-pub struct ResolvedPackageProfile {
-    pub name: String{""}
-    pub selected_profiles: [String]{[String]{}}
-    pub applied: [String]{[String]{}}
-    pub packages: [PackageProfilePackage]{[PackageProfilePackage]{}}
-    pub collisions: [String: String]{[String: String]{}}
-    pub sources: [String]{[String]{}}
+struct ResolvedPackageProfile {
+    name: String{""}
+    selected_profiles: [String]{[String]{}}
+    applied: [String]{[String]{}}
+    packages: [PackageProfilePackage]{[PackageProfilePackage]{}}
+    collisions: [String: String]{[String: String]{}}
+    sources: [String]{[String]{}}
 }
 
 // One resolved package fact with both the source spelling and the
 // realization identity that a lock, explain view, or generation writer must
 // preserve.
-pub struct PackageProfileFact {
-    pub raw: String
-    pub target: String
-    pub source: String
-    pub upstream: String?{None}
-    pub provider: String
-    pub channel: String?{None}
-    pub declared_by: [String]{[String]{}}
+struct PackageProfileFact {
+    raw: String
+    target: String
+    source: String
+    upstream: String?{None}
+    provider: String
+    channel: String?{None}
+    declared_by: [String]{[String]{}}
     // The provider identity, selector, typed facts, and native provenance
     // carried with this package. Consumers must not reconstruct it from `raw`
     // after planning.
-    pub provider_facts: ProviderFacts
+    provider_facts: ProviderFacts
 }
 
 // The read-only, source-backed generation plan. Realization and activation
 // may consume this plan later; they must not reconstruct package identity
 // from the display string.
-pub struct PackageProfilePlan {
-    pub name: String{""}
-    pub selected_profiles: [String]{[String]{}}
-    pub applied: [String]{[String]{}}
-    pub packages: [PackageProfileFact]{[PackageProfileFact]{}}
-    pub collisions: [String: String]{[String: String]{}}
-    pub sources: [String]{[String]{}}
-    pub fingerprint: String{""}
-    pub provider_facts: [String: ProviderFacts]{[String: ProviderFacts]{}}
+struct PackageProfilePlan {
+    name: String{""}
+    selected_profiles: [String]{[String]{}}
+    applied: [String]{[String]{}}
+    packages: [PackageProfileFact]{[PackageProfileFact]{}}
+    collisions: [String: String]{[String: String]{}}
+    sources: [String]{[String]{}}
+    fingerprint: String{""}
+    provider_facts: [String: ProviderFacts]{[String: ProviderFacts]{}}
 
     // Seal the plan: its canonical length-prefixed identity and the per-ref
     // provider facts index.
@@ -104,7 +104,7 @@ fn envmodel_fingerprint_line(key: String, value: String) -> String Never! {
 }
 
 #Error
-pub enum PackageProfileError {
+enum PackageProfileError {
     Missing(String)
     Cycle([String])
     Conflict(String)
@@ -129,8 +129,8 @@ fn envmodel_resolver_budget_error() -> PackageProfileError Never! {
 ENVMODEL_PROFILE_ENTERED :: prep { 1 }
 ENVMODEL_PROFILE_FINISHED :: prep { 2 }
 
-pub struct PackageProfileSet {
-    pub profiles: [String: PackageProfileSpec]{[String: PackageProfileSpec]{}}
+struct PackageProfileSet {
+    profiles: [String: PackageProfileSpec]{[String: PackageProfileSpec]{}}
 
     // An equal re-declaration merges its source modules; different facts
     // under one name conflict.
@@ -180,7 +180,7 @@ pub struct PackageProfileSet {
             &frame_next.push(0)
             loop frame_names.len() > 0 {
                 top :: frame_names.len() - 1
-                current :: frame_names[top]
+                current :: frame_names[top].copy()
                 if state.get(current) == None {
                     if self.profiles.get(current) == None -> return Err(PackageProfileError.Missing(current))
                     if state.len() >= ENVMODEL_MAX_RESOLVER_NODES -> return Err(envmodel_resolver_budget_error())
@@ -188,7 +188,7 @@ pub struct PackageProfileSet {
                     &stack.push(current)
                 }
                 profile :: self.profiles[current]
-                parent_index :: frame_next[top]
+                parent_index :: frame_next[top].copy()
                 frame_next[top] = parent_index + 1
                 if parent_index >= profile.extends.len() {
                     _ := &frame_names.pop()

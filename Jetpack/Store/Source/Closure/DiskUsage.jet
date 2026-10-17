@@ -3,39 +3,39 @@
 // closures; physical allocation is counted once per filesystem identity
 // (`FileId`, D-CORE-FILESTAT1) and never inferred from logical length.
 
-pub struct DuEntry {
-    pub id: String
-    pub unique_bytes: Int?
-    pub shared_bytes: Int?
+struct DuEntry {
+    id: String
+    unique_bytes: Int?
+    shared_bytes: Int?
     // True when the A4 provenance shows a first-party source build.
-    pub source_built: Bool
+    source_built: Bool
 }
 
-pub struct DuReport {
-    pub objects: Int
-    pub packages: Int
-    pub built: Int
-    pub unique_bytes: Int?
-    pub shared_bytes: Int?
-    pub closure_physical_bytes: Int?
-    pub entries: [DuEntry]
+struct DuReport {
+    objects: Int
+    packages: Int
+    built: Int
+    unique_bytes: Int?
+    shared_bytes: Int?
+    closure_physical_bytes: Int?
+    entries: [DuEntry]
 }
 
-pub struct MachineDuEntry {
-    pub root: String
-    pub hangar: String
-    pub bytes: Int
+struct MachineDuEntry {
+    root: String
+    hangar: String
+    bytes: Int
 }
 
-pub struct MachineDuPool {
-    pub path: String
-    pub bytes: Int
+struct MachineDuPool {
+    path: String
+    bytes: Int
 }
 
-pub struct MachineDuReport {
-    pub shared_cas: MachineDuPool?
-    pub roots: [MachineDuEntry]
-    pub total_bytes: Int
+struct MachineDuReport {
+    shared_cas: MachineDuPool?
+    roots: [MachineDuEntry]
+    total_bytes: Int
 }
 
 struct PhysicalMeasurement {
@@ -50,7 +50,7 @@ struct PhysicalNode {
     owners: [String]
 }
 
-pub fn store_du(verification: &StoreVerification, roots: HangarRoots) -> DuReport StoreError! {
+fn store_du(verification: &StoreVerification, roots: HangarRoots) -> DuReport StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     // Do not migrate here: a damaged metadata path must be compared with the
     // committed journal, not promoted into a new projection.
@@ -69,7 +69,7 @@ pub fn store_du(verification: &StoreVerification, roots: HangarRoots) -> DuRepor
     object_owners := [String: [String]]{}
     loop entry in entries {
         record :: graph.records.get(entry.id) ?? return Err(StoreError.InvalidData("closure graph has no package record for `{entry.id}`"))
-        expected_outputs := ~entry.named_outputs
+        expected_outputs := entry.named_outputs.copy()
         expected_outputs["out"] = entry.envelope.output_hash
         if record.primary != entry.envelope.output_hash || record.outputs != expected_outputs {
             return Err(StoreError.InvalidData("closure graph outputs for `{entry.id}` disagree with its metadata projection"))
@@ -140,7 +140,7 @@ fn store_du_checked_add(total: Int, bytes: Int, message: String) -> Int StoreErr
 // Report the physical Hangar footprint across every discovered machine
 // root. One identity set spans all roots, so cross-root hardlinks are
 // counted once.
-pub fn store_du_all() -> MachineDuReport StoreError! {
+fn store_du_all() -> MachineDuReport StoreError! {
     seen := [FileID: Bool]{}
     shared_cas_path :: pkg_shared_cas_dir()
     shared_cas :: if files.stat(shared_cas_path) == {
@@ -230,7 +230,7 @@ fn store_measure_physical_walk(digest: String, path: String, owners: [String], n
     bytes :: metadata.size_on_disk
     node := nodes.get(key) ?? PhysicalNode{bytes: bytes, owners: [String]{}}
     if node.bytes != bytes -> return Err(StoreError.InvalidData("filesystem allocation changed while measuring `{path}`"))
-    all_owners := ~node.owners
+    all_owners := node.owners.copy()
     loop owner in owners -> &all_owners.push(owner)
     node.owners = store_sorted_unique(all_owners)
     nodes[key] = node
@@ -244,7 +244,7 @@ fn store_measure_physical_walk(digest: String, path: String, owners: [String], n
 }
 
 // Total bytes on disk of a local output tree or regular-file root.
-pub fn store_dir_size(path: String) -> Int Never! {
+fn store_dir_size(path: String) -> Int Never! {
     metadata :: files.stat(path) ?? return 0
     if metadata.is_symlink -> return 0
     if metadata.is_file -> return metadata.size

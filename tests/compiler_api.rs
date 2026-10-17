@@ -141,13 +141,13 @@ fn reserved_in_diagnostic_teaches_postfix_member_carve_out() {
 }
 
 #[test]
-fn single_bar_is_bitwise_or() {
+fn named_bitwise_or_parses() {
     let parsed = jet::Compiler::parse_source(
-        "fn run() {\n    left :: 1\n    right :: 2\n    value :: left | right\n}\n",
+        "fn run() {\n    left :: 1\n    right :: 2\n    value :: left.bit_or(right)\n}\n",
     );
     assert!(
         parsed.diagnostics.is_empty(),
-        "D-BITOREXPR1=A admits value `|` as bitwise OR: {:?}",
+        "D-SIGIL-ALGEBRA1=B admits named bitwise OR: {:?}",
         parsed.diagnostics
     );
 }
@@ -411,22 +411,127 @@ fn compiler_cli_mirrors_each_read_only_operation_exactly() {
 
 #[test]
 fn compiler_api_is_compile_time_only() {
+    for operation in [
+        "lex", "parse", "check", "source_map",
+        "manifest", "package", "lock", "profiles",
+    ] {
+        let arguments = match operation {
+            "lex" | "parse" | "source_map" => "`fn run() {}`",
+            "check" => "compiler.parse(`fn run() {}`) ?? return",
+            _ => "",
+        };
+        let source = format!(
+            "use core.compiler as compiler\nfn run() {{ compiler.{operation}({arguments}) }}\n"
+        );
+        let diagnostics = jet::compile(&source)
+            .expect_err("the compiler API must not become a runtime capability");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+            "{operation}: expected compile-time-only diagnostic, got {diagnostics:?}"
+        );
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.what.contains("compile-time only")),
+            "{operation}: diagnostic must teach the phase boundary: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn compiler_queries_precede_source_facades_for_module_and_nested_aliases() {
+    // The loaded Core facade deliberately panics for ordinary source calls.
+    // These must use the compiler-owned contracts and evaluator instead.
+    for (import, prefix) in [
+        ("use core.compiler as compiler", "compiler"),
+        ("use core.compiler as facts", "facts"),
+        ("use core as root", "root.compiler"),
+    ] {
+        let source = format!(
+            "{import}\n\
+             LEXED :: prep {{ {prefix}.lex(`fn run() {{}}`) ?? panic(\"lex\") }}\n\
+             PARSED :: prep {{ {prefix}.parse(`fn run() {{}}`) ?? panic(\"parse\") }}\n\
+             CHECKED :: prep {{ {prefix}.check(PARSED) ?? panic(\"check\") }}\n\
+             MAPPED :: prep {{ {prefix}.source_map(`fn run() {{}}`) ?? panic(\"map\") }}\n\
+             fn run() {{ print(\"compiler queries\") }}\n"
+        );
+        jet::compile(&source).unwrap_or_else(|diagnostics| {
+            panic!("{prefix}: compiler query must precede loaded source facade: {diagnostics:?}")
+        });
+    }
+}
+
+#[test]
+fn compiler_query_phase_boundary_is_preserved_for_aliases() {
+    for (import, prefix) in [
+        ("use core.compiler as compiler", "compiler"),
+        ("use core.compiler as facts", "facts"),
+        ("use core as root", "root.compiler"),
+    ] {
+        for (operation, arguments) in [
+            ("lex", "`fn run() {}`"),
+            ("parse", "`fn run() {}`"),
+            ("check", "\"not a syntax tree\""),
+            ("source_map", "`fn run() {}`"),
+            ("manifest", ""),
+            ("package", ""),
+            ("lock", ""),
+            ("profiles", ""),
+        ] {
+            let source = format!(
+                "{import}\nfn run() {{ {prefix}.{operation}({arguments}) }}\n"
+            );
+            let diagnostics = jet::compile(&source)
+                .expect_err("compiler queries must remain compile-time only");
+            assert!(
+                diagnostics.iter().any(|diagnostic| diagnostic.code == "E0956"),
+                "{prefix}.{operation}: expected phase diagnostic: {diagnostics:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn compiler_query_alias_shadowing_keeps_ordinary_name_resolution() {
     let diagnostics = jet::compile(
-        "use core.compiler as compiler\nfn run() { compiler.lex(\"fn run() {{}}\") }\n",
+        "use core.compiler as compiler\nfn run() {\n    compiler :: 1\n    print(compiler.lex(\"source\"))\n}\n",
     )
-    .expect_err("the compiler API must not become a runtime capability");
+    .expect_err("a local value is not a compiler module");
     assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.code == "E0956"),
-        "expected compile-time-only diagnostic, got {diagnostics:?}"
+        diagnostics.iter().all(|diagnostic| diagnostic.code != "E0956"),
+        "a shadowed alias must not enter the compiler query hook: {diagnostics:?}"
     );
-    assert!(
-        diagnostics
-            .iter()
-            .any(|diagnostic| diagnostic.what.contains("compile-time only")),
-        "diagnostic must teach the phase boundary: {diagnostics:?}"
-    );
+}
+
+#[test]
+fn compiler_query_argument_types_are_checked_before_evaluation() {
+    for (operation, argument) in [
+        ("lex", "true"),
+        ("parse", "1"),
+        ("check", "\"not a syntax tree\""),
+        ("source_map", "false"),
+    ] {
+        let source = format!(
+            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}({argument}) }}\nfn run() {{}}\n"
+        );
+        let diagnostics = jet::compile(&source).expect_err("query input must have its canonical type");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+            "{operation}: expected argument type diagnostic: {diagnostics:?}"
+        );
+    }
+}
+
+#[test]
+fn compiler_package_query_extra_arguments_are_rejected_at_checking() {
+    for operation in ["manifest", "package", "lock", "profiles"] {
+        let source = format!(
+            "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}(\"extra\") }}\nfn run() {{}}\n"
+        );
+        let diagnostics = jet::compile(&source).expect_err("package queries take no arguments");
+        assert!(
+            diagnostics.iter().any(|diagnostic| diagnostic.code == "E0104"),
+            "{operation}: expected arity diagnostic: {diagnostics:?}"
+        );
+    }
 }
 
 #[test]
@@ -528,7 +633,7 @@ deps: {
     .expect("write package manifest fixture");
     fs::write(
         root.join("config/build.jet"),
-        r#"pub build :: Config{
+        r#"build :: Config{
     outputs: { app: Executable{ entry: run } }
 }
 "#,
@@ -691,7 +796,7 @@ configs: ["config/build.jet"]
         fs::create_dir_all(root.join("config")).expect("create carrier fixture");
         fs::write(
             root.join("config/build.jet"),
-            "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+            "build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
         )
         .expect("write carrier config");
     }
@@ -742,7 +847,7 @@ fn run() {}
     let config = root.join("config/build.jet");
     fs::write(
         &config,
-        "pub build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
+        "build :: Config{ outputs: { app: Executable{ entry: run } } }\n",
     )
     .expect("write first package config");
     let (first_result, first_inputs) =
@@ -751,7 +856,7 @@ fn run() {}
 
     fs::write(
         &config,
-        "pub build :: Config{ outputs: { app: Executable{ entry: check } } }\n",
+        "build :: Config{ outputs: { app: Executable{ entry: check } } }\n",
     )
     .expect("write changed package config");
     let (second_result, second_inputs) =
@@ -976,7 +1081,7 @@ fn package_api_example_checks_and_runs_through_the_shared_evaluator() {
         );
     }
 
-    for args in [vec!["run"], vec!["run", "--interpret"]] {
+    for args in [vec!["run"]] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(&args)
             .current_dir(&root)

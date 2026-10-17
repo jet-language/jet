@@ -1,0 +1,22 @@
+# Port of tests/corelib_parts/net.rs::card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter; guest sources preserved verbatim.
+# KNOWN-FAILING #4810: original stale lowercase Fix syntax preserved against the checked-in snapshot.
+# ORACLE-LITERAL: net.rs:1243.
+fixture: fixtures/card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter
+step: jet check fixture.jet --json --verbose
+json: stdout doc $.reports[?code="L0520"] #= 1 # original exactly one migration lint
+file: fixture.jet ~ "IOError.Other(IOContext" # original ordinary IOError witness
+file: fixture.jet ~ "print(\"{error}\")" # original bare Display witness
+file: migration.stderr ~ "Warning [L0520] (display_migration): \u0060IOError\u0060 has no \u0060Display\u0060 impl" # original checked-in snapshot predicate
+file: migration.stderr ~ "Why: Display is the user-facing interpolation hook; Debug is for \u0060{value:Debug}\u0060" # original checked-in snapshot predicate
+file: migration.stderr ~ "Fix: add \u0060impl IOError.Display { fn display(self) -> String { … } }\u0060" # original stale fix predicate, never blessed
+file: build_entry.warn ~ "MissingDisplay" # original neighbor witness
+file: build_entry.warn !~ "BuildError" # original exclusion
+step: jet build fixture.jet
+step: built
+stdout: = card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter.out
+step: jet run fixture.jet
+stdout: = card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter.out
+stderr: empty
+step: jet run --interpret fixture.jet
+stdout: = card_2417_ioerror_fixture_matches_aot_default_jit_and_interpreter.out
+stderr: empty

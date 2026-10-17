@@ -1,7 +1,7 @@
 package {
     name: "serde_encoding_json_stream"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] } }
 }
 // D-ENCSTREAM-SURFACE1=A: bounded JSON reader/writer lifecycle.
 use core.encoding as encoding
@@ -12,7 +12,7 @@ use core.testing as testing
 fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     out :: files.create(path) ?? return Err(err)
     // D-APILABEL1=A: skip the `limits` default and name only the policy that changes.
-    writer :: json.writer(^out, canonical: true) ?? return Err(err)
+    writer := json.writer(^out, canonical: true) ?? return Err(err)
     &writer.write(encoding.DataEvent.ObjectStart) ?? return Err(err)
     &writer.write(encoding.DataEvent.Key("b")) ?? return Err(err)
     &writer.write(encoding.DataEvent.Int(2)) ?? return Err(err)
@@ -20,7 +20,7 @@ fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     &writer.write(encoding.DataEvent.Int(1)) ?? return Err(err)
     &writer.write(encoding.DataEvent.ObjectEnd) ?? return Err(err)
     &writer.flush() ?? return Err(err)
-    writer.finish() ?? return Err(err)
+    &writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
@@ -29,10 +29,12 @@ fn run() (EncodingError | IOError)! {
     path :: Path.from(testing.temp_dir("encoding-json-stream")).join("catalog.json")
     write_catalog(path) ?? return
     input :: files.open(path) ?? return
-    reader :: json.reader(^input) ?? return
+    reader := json.reader(^input) ?? return
     read_count := 0
-    loop event in reader {
-        if event == {
+    loop {
+        item :: &reader.next() ?? return Err(err)
+        value :: item ?? break
+        if value == {
             .ObjectStart -> { print("event:ObjectStart") }
             .Key(key) && key == "b" -> { print("event:Key:b") }
             .Int(value) && value == 2 -> { print("event:Int:2") }
@@ -47,7 +49,7 @@ fn run() (EncodingError | IOError)! {
     }
     print("read-count:{read_count}")
     print("eof")
-    text :: files.read(path) ?? return
+    text :: files.read(path.to_string()) ?? return
     print(text)
     files.remove(path) ?? return
 }

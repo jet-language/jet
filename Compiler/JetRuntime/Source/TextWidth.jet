@@ -1,0 +1,167 @@
+// Native String padding routes (core.builtin.ljust/rjust/center): Text.rs
+// jet_text_pad_start/_end/center over D-TEXTWIDTH1=B portable-default display
+// width. Graphemes are the borrowed JetTextGraphemeViewIter windows (Text.rs
+// 472-555), carrying only the regional-indicator run between windows; no
+// grapheme text or scalar vector is allocated.
+
+// End offset of the extended grapheme cluster starting at start (< length),
+// and the regional-indicator run the next window continues from.
+fn text_grapheme_next(data: I64, length: I64, start: I64, carried: I64) -> (end: I64, ri: I64) {
+    first :: rt_text_decode(data + start)
+    at := start + rt_text_width(data + start)
+    previous := first
+    ri := if (unicode_grapheme_class(first) == I64{6}) -> wrapping(carried + I64{1}) else -> I64{0}
+    saw_pic := unicode_is_extended_pictographic(first)
+    incb_pending := unicode_incb_class(first) == I64{2}
+    incb_linker := false
+    loop at < length {
+        current :: rt_text_decode(data + at)
+        pc :: unicode_grapheme_class(previous)
+        cc :: unicode_grapheme_class(current)
+        incb :: unicode_incb_class(current)
+        breaks :: if {
+            (pc == I64{5} && saw_pic && unicode_is_extended_pictographic(current)) -> false
+            (pc == I64{6} && cc == I64{6}) -> ri % I64{2} == I64{0}
+            (incb_pending && incb_linker && incb == I64{2}) -> false
+            else -> text_grapheme_break_classes(pc, cc)
+        }
+        if breaks -> return (end: at, ri: ri)
+        previous = current
+        at += rt_text_width(data + at)
+        ri = if (cc == I64{6}) -> wrapping(ri + I64{1}) else -> I64{0}
+        if (cc != I64{4} && cc != I64{5}) -> saw_pic = unicode_is_extended_pictographic(current)
+        // InCB Extend (3) keeps the pending conjunct state unchanged.
+        if (incb == I64{2}) {
+            incb_pending = true
+            incb_linker = false
+        } else if (incb == I64{1}) {
+            if incb_pending -> incb_linker = true
+        } else if (incb != I64{3}) {
+            incb_pending = false
+            incb_linker = false
+        }
+    }
+    (end: at, ri: ri)
+}
+
+// Text.rs jet_text_grapheme_break_classes (GB3-GB9b/GB999) over the pinned
+// Grapheme_Cluster_Break tags: 1 CR, 2 LF, 3 Control, 4 Extend, 5 ZWJ, 6 RI,
+// 7 Prepend, 8 SpacingMark, 9 L, 10 V, 11 T, 12 LV, 13 LVT.
+fn text_grapheme_break_classes(pc: I64, cc: I64) -> Bool {
+    if (pc == I64{1} && cc == I64{2}) -> return false
+    if (pc == I64{1} || pc == I64{2} || pc == I64{3}) -> return true
+    if (cc == I64{1} || cc == I64{2} || cc == I64{3}) -> return true
+    if (pc == I64{9} && (cc == I64{9} || cc == I64{10} || cc == I64{12} || cc == I64{13})) -> return false
+    if ((pc == I64{12} || pc == I64{10}) && (cc == I64{10} || cc == I64{11})) -> return false
+    if ((pc == I64{13} || pc == I64{11}) && cc == I64{11}) -> return false
+    if (cc == I64{4} || cc == I64{5} || cc == I64{8}) -> return false
+    if (pc == I64{7}) -> return false
+    true
+}
+
+// Text.rs jet_text_cluster_width(cluster, false, false): a Control base is
+// zero; keycaps, RI pairs, VS16 emoji and any wide/emoji-presentation scalar
+// are two; an all-zero-width cluster is zero; anything else is one.
+fn text_cluster_width(data: I64, start: I64, end: I64) -> I64 {
+    if (start >= end) -> return I64{0}
+    base :: rt_text_decode(data + start)
+    if unicode_is_control(base) -> return I64{0}
+    count := I64{0}
+    second := I64{-1}
+    third := I64{-1}
+    variation := false
+    emoji := false
+    wide := false
+    visible := false
+    at := start
+    loop at < end {
+        cp :: rt_text_decode(data + at)
+        if (count == I64{1}) -> second = cp
+        if (count == I64{2}) -> third = cp
+        count += I64{1}
+        if (cp == I64{65039}) -> variation = true
+        if unicode_is_emoji(cp) -> emoji = true
+        if (unicode_is_east_asian_wide(cp) || unicode_is_emoji_presentation(cp)) -> wide = true
+        if !unicode_is_zero_width(cp) -> visible = true
+        at += rt_text_width(data + at)
+    }
+    keycap_base :: (base >= I64{48} && base <= I64{57}) || base == I64{35} || base == I64{42}
+    keycap :: keycap_base && ((count == I64{2} && second == I64{8419}) || (count == I64{3} && second == I64{65039} && third == I64{8419}))
+    ri_pair :: unicode_grapheme_class(base) == I64{6} && count >= I64{2} && unicode_grapheme_class(second) == I64{6}
+    if (keycap || ri_pair || (variation && emoji) || wide) -> return I64{2}
+    if !visible -> return I64{0}
+    I64{1}
+}
+
+// Text.rs jet_text_display_width_default: summed cluster widths.
+fn text_display_width(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    total := I64{0}
+    at := I64{0}
+    ri := I64{0}
+    loop at < length {
+        window :: text_grapheme_next(data, length, at, ri)
+        total += text_cluster_width(data, at, window.end)
+        ri = window.ri
+        at = window.end
+    }
+    total
+}
+
+// Text.rs jet_text_fill_columns: whole copies of fill's first grapheme, then
+// spaces; an empty fill or a zero-width/too-wide unit fills with spaces.
+fn text_fill_columns(target: I64, fill: I64, columns: I64) {
+    n :: if (columns < I64{0}) -> I64{0} else -> columns
+    data :: rt_text_data(fill)
+    length :: rt_text_len(fill)
+    if (length == I64{0}) {
+        text_push_repeat_byte(target, I64{32}, n)
+        return
+    }
+    unit :: text_grapheme_next(data, length, I64{0}, I64{0}).end
+    unit_width :: text_cluster_width(data, I64{0}, unit)
+    if (unit_width <= I64{0} || unit_width > n) {
+        text_push_repeat_byte(target, I64{32}, n)
+        return
+    }
+    repeats :: n /% unit_width
+    remainder :: n - repeats * unit_width
+    if (repeats > (I64{9223372036854775807} - remainder) /% unit) {
+        rt_text_capacity_stop()
+        return
+    }
+    used :: rt_text_len(target)
+    if (rt_text_reserve_extra(target, rt_text_data(target), used, repeats * unit + remainder) == I64{0}) -> return
+    at := I64{0}
+    loop at < repeats {
+        rt_text_append(target, data, unit)
+        at += I64{1}
+    }
+    text_push_repeat_byte(target, I64{32}, remainder)
+}
+
+// side: 0 pad_start (fill before), 1 pad_end (fill after), 2 center (floor
+// half before). The exact Int width must fit i64, as Text.rs requires.
+fn text_pad(value: I64, width: I64, fill: I64, side: I64) -> I64 {
+    if !text_route_fits(width) {
+        text_route_panic(rt_static_text("text padding width does not fit native i64"))
+        return I64{0}
+    }
+    gap := wrapping(text_route_native(width) - text_display_width(value))
+    if (gap < I64{0}) -> gap = I64{0}
+    before :: if {
+        (side == I64{0}) -> gap
+        (side == I64{2}) -> gap /% I64{2}
+        else -> I64{0}
+    }
+    result :: rt_text_builder_with_capacity(rt_text_len(value))
+    text_fill_columns(result, fill, before)
+    rt_text_append(result, rt_text_data(value), rt_text_len(value))
+    text_fill_columns(result, fill, gap - before)
+    result
+}
+
+#Export(c) fn jet_text_pad_start_ref(value: I64, width: I64, fill: I64) -> I64 { text_pad(value, width, fill, I64{0}) }
+#Export(c) fn jet_text_pad_end_ref(value: I64, width: I64, fill: I64) -> I64 { text_pad(value, width, fill, I64{1}) }
+#Export(c) fn jet_text_center_ref(value: I64, width: I64, fill: I64) -> I64 { text_pad(value, width, fill, I64{2}) }

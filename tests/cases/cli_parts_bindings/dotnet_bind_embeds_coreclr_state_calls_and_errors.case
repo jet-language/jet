@@ -1,0 +1,13 @@
+# Port of tests/cli_parts/bindings.rs:809-866; sources copied verbatim.
+# PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
+# PENDING-GRAMMAR: is-file.
+fixture: fixtures/dotnet_counter
+step: jet inspect bind cs {work}/Counter.cs --pkg counter
+exit: 0
+file: .jet/bindings/cs/libjet_cs_counter.a is-file
+file: .jet/bindings/cs/counter.dotnet/JetBinding.dll is-file
+file: .jet/bindings/cs/counter.provenance is-file
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = dotnet_bind_embeds_coreclr_state_calls_and_errors.out
+stderr: !~ "hidden managed detail" # original predicate

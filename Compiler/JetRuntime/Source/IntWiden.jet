@@ -1,0 +1,52 @@
+// Canonical CommonTypes.rs JetBigInt::checked_widen / jet_int_checked_widen,
+// and NumericConversion.rs::jet_numeric_checked_widen_parts. The route is
+// Word, Flag, borrowed E4 Text, Word -> Float; the line retains trap_line's
+// u32 policy. Reuse the fixed-width widening report, including E3010/exit70.
+// Boxed magnitudes remain exact base-1e9 limbs until their precision is known.
+#Export(c) fn jet_int_checked_widen(value: I64, target_f32: Bool, file: I64, line: I64) -> Float {
+    if int_inline(value) -> return jet_numeric_checked_widen_at(value, true, target_f32, file, line)
+    precision :: if target_f32 -> I64{24} else -> I64{53}
+    // A private copy is necessary for binary division of borrowed decimal
+    // limbs. One pass supplies bit_width, trailing zeros and the top bits;
+    // unlike the reference's separate scans, no second workspace is needed.
+    node :: int_copy(value, I64{0})
+    significant := I64{0}
+    trailing := I64{0}
+    seen_one := false
+    top := I64{0}
+    loop !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) {
+        bit :: int_div_small(node, I64{2})
+        if !seen_one {
+            if {
+                (bit == I64{0}) -> trailing += I64{1}
+                else -> seen_one = true
+            }
+        }
+        if {
+            significant < precision -> top = top.bit_or(bit << significant)
+            else -> top = (top >> I64{1}).bit_or((bit << (precision - I64{1})))
+        }
+        significant += I64{1}
+    }
+    int_free_node(node)
+    // With exactness established, bit_width <=128/1024 is equivalent to
+    // the reference's finite F32/F64 check: the largest accepted mantissa
+    // at those widths is exactly the corresponding maximum finite value.
+    maximum_bits :: if target_f32 -> I64{128} else -> I64{1024}
+    if (significant > maximum_bits || (significant > precision && trailing < significant - precision)) {
+        numeric_widen_stop(file, line)
+        loop { jet_rt_unreachable(I64{0}, I64{0}) }
+    }
+    // Only an exact <=24/53-bit significand crosses the machine conversion.
+    // Binary scaling is exact and stays finite, so F32's returned f64 value
+    // matches the canonical f32->f64 projection without a rounding fallback.
+    result := Float{top}
+    shift := significant - precision
+    scale := Float{2.0}
+    loop shift > (I64{0}) {
+        if ((shift.bit_and(I64{1})) != I64{0}) { result *= scale }
+        shift >>= I64{1}
+        if (shift != I64{0}) { scale *= scale }
+    }
+    return if int_negative(value) && seen_one -> -result else -> result
+}

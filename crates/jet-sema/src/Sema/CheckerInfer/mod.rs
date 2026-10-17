@@ -4,6 +4,23 @@ pub(crate) use super::*;
 use crate::Syntax;
 use crate::AST::Type;
 
+/// A constructor payload is a value slot, not a callable parameter. Preserve
+/// its written access mark in the expression before discarding CallArg metadata.
+fn enum_literal_call_arg(arg: &mut crate::AST::CallArg) -> crate::AST::EnumLitArg {
+    use crate::AST::{AccessConvention, EnumLitArg, Expr, PlaceAccess};
+    let value = std::mem::replace(&mut arg.expr, Expr::Absent(arg.span));
+    let access = match arg.convention {
+        AccessConvention::Read => None,
+        AccessConvention::Write => Some(PlaceAccess::Write),
+        AccessConvention::Move => Some(PlaceAccess::Take),
+    };
+    arg.convention = AccessConvention::Read;
+    EnumLitArg::Positional(match access {
+        Some(access) => Expr::Place(Box::new(value), access, arg.span),
+        None => value,
+    })
+}
+
 /// One inclusive interval fact used by every integer proof in sema.
 ///
 /// Widths, user refinements, literal checks, and fixed-list indexes all ask

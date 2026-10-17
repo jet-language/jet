@@ -1,0 +1,13 @@
+
+use core.http.client as http
+use core.http as message
+use core.files as files
+fn run() {
+    input :: files.open("{work}/upload.fifo") ?? panic("open")
+    body :: message.Body.reader(^input, 98304) ?? panic("reader")
+    // Default redirect_limit (>0) must tee POST so 307 can replay the body.
+    req :: http.request("POST", "http://{cap:addr}/from").body(body)
+    resp :: req.send() ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}

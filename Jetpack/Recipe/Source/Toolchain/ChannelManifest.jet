@@ -22,52 +22,52 @@ TOOLCHAIN_MAX_CLOCK_SKEW_SECONDS :: prep { 300 }
 TOOLCHAIN_MAX_MANIFEST_AGE_SECONDS :: prep { 2592000 }
 
 // What one `jet self update` invocation asks for.
-pub struct ToolchainUpdateOptions {
-    pub endpoint: String
-    pub channel: String
-    pub platform: String
-    pub trust_key: String
-    pub dry_run: Bool
-    pub apply: Bool
+struct ToolchainUpdateOptions {
+    endpoint: String
+    channel: String
+    platform: String
+    trust_key: String
+    dry_run: Bool
+    apply: Bool
     // Permit an explicitly selected local file endpoint without signature
     // sidecars. Never applies to HTTP(S) endpoints.
-    pub allow_unofficial: Bool
+    allow_unofficial: Bool
     // The running client's version: a channel cannot raise this floor, and a
     // toolchain cannot move backwards.
-    pub running_version: String
+    running_version: String
     // Per-channel/platform monotonic state, written only after a successful
     // activation.
-    pub state_path: String
+    state_path: String
 }
 
 // The trust tier a verified plan came from.
-pub enum ToolchainUpdateTrust {
+enum ToolchainUpdateTrust {
     Signed
     UnofficialKeyless
 }
 
 // A fully verified update candidate.
-pub struct ToolchainUpdatePlan {
-    pub endpoint: String
-    pub channel: String
-    pub version: String
-    pub platform: String
-    pub artifact_path: String
-    pub artifact_url: String
-    pub sha256: String
-    pub size: Int
-    pub key_id: String?
-    pub trust: ToolchainUpdateTrust
-    pub sequence: Int
-    pub published_at: Int
-    pub expires_at: Int
-    pub min_version: String
+struct ToolchainUpdatePlan {
+    endpoint: String
+    channel: String
+    version: String
+    platform: String
+    artifact_path: String
+    artifact_url: String
+    sha256: String
+    size: Int
+    key_id: String?
+    trust: ToolchainUpdateTrust
+    sequence: Int
+    published_at: Int
+    expires_at: Int
+    min_version: String
 }
 
-pub struct ToolchainUpdateResult {
-    pub plan: ToolchainUpdatePlan
-    pub applied: Bool
-    pub deferred: Bool
+struct ToolchainUpdateResult {
+    plan: ToolchainUpdatePlan
+    applied: Bool
+    deferred: Bool
 }
 
 // The channel manifest document.
@@ -134,18 +134,18 @@ struct ToolchainChannelManifest {
 
     // The one canonical encoding, fields in contract order, newline-terminated.
     fn canonical(self) -> String Never! {
-        artifacts := [DataTree]{}
+        artifacts := [Dyn]{}
         loop artifact in self.artifacts -> &artifacts.push(artifact.to_tree())
-        fields := [String: DataTree]{}
-        fields["schema"] = DataTree.Int(self.schema)
-        fields["channel"] = DataTree.Text(self.channel)
-        fields["version"] = DataTree.Text(self.version)
-        fields["sequence"] = DataTree.Int(self.sequence)
-        fields["published_at"] = DataTree.Int(self.published_at)
-        fields["expires_at"] = DataTree.Int(self.expires_at)
-        fields["min_version"] = DataTree.Text(self.min_version)
-        fields["artifacts"] = DataTree.Array(artifacts)
-        "{pkg_json_render(DataTree.Object(fields))}\n"
+        fields := [String: Dyn]{}
+        fields["schema"] = Dyn.Int(self.schema)
+        fields["channel"] = Dyn.Text(self.channel)
+        fields["version"] = Dyn.Text(self.version)
+        fields["sequence"] = Dyn.Int(self.sequence)
+        fields["published_at"] = Dyn.Int(self.published_at)
+        fields["expires_at"] = Dyn.Int(self.expires_at)
+        fields["min_version"] = Dyn.Text(self.min_version)
+        fields["artifacts"] = Dyn.Array(artifacts)
+        "{pkg_json_render(Dyn.Object(fields))}\n"
     }
 }
 
@@ -157,7 +157,7 @@ struct ToolchainArtifact {
     size: Int
     signature: String
 
-    fn parse(value: DataTree) -> ToolchainArtifact RecipeError! {
+    fn parse(value: Dyn) -> ToolchainArtifact RecipeError! {
         fields :: recipe_update_object(value, "toolchain artifact")
         recipe_update_reject_unknown(fields, [String]{"target", "path", "sha256", "size", "signature"})
         Ok(ToolchainArtifact{
@@ -169,14 +169,14 @@ struct ToolchainArtifact {
         })
     }
 
-    fn to_tree(self) -> DataTree Never! {
-        fields := [String: DataTree]{}
-        fields["target"] = DataTree.Text(self.target)
-        fields["path"] = DataTree.Text(self.path)
-        fields["sha256"] = DataTree.Text(self.sha256)
-        fields["size"] = DataTree.Int(self.size)
-        fields["signature"] = DataTree.Text(self.signature)
-        DataTree.Object(fields)
+    fn to_tree(self) -> Dyn Never! {
+        fields := [String: Dyn]{}
+        fields["target"] = Dyn.Text(self.target)
+        fields["path"] = Dyn.Text(self.path)
+        fields["sha256"] = Dyn.Text(self.sha256)
+        fields["size"] = Dyn.Int(self.size)
+        fields["signature"] = Dyn.Text(self.signature)
+        Dyn.Object(fields)
     }
 }
 
@@ -203,12 +203,12 @@ struct ToolchainSignatureSidecar {
 
     // The canonical sidecar encoding (no trailing newline).
     fn canonical(self) -> String Never! {
-        fields := [String: DataTree]{}
-        fields["schema"] = DataTree.Int(self.schema)
-        fields["key_id"] = DataTree.Text(self.key_id)
-        fields["algorithm"] = DataTree.Text(self.algorithm)
-        fields["signature"] = DataTree.Text(self.signature)
-        pkg_json_render(DataTree.Object(fields))
+        fields := [String: Dyn]{}
+        fields["schema"] = Dyn.Int(self.schema)
+        fields["key_id"] = Dyn.Text(self.key_id)
+        fields["algorithm"] = Dyn.Text(self.algorithm)
+        fields["signature"] = Dyn.Text(self.signature)
+        pkg_json_render(Dyn.Object(fields))
     }
 }
 
@@ -248,14 +248,14 @@ struct ToolchainUpdateState {
 
     // The canonical state encoding, newline-terminated.
     fn canonical(self) -> String Never! {
-        fields := [String: DataTree]{}
-        fields["schema"] = DataTree.Int(self.schema)
-        fields["channel"] = DataTree.Text(self.channel)
-        fields["platform"] = DataTree.Text(self.platform)
-        fields["sequence"] = DataTree.Int(self.sequence)
-        fields["version"] = DataTree.Text(self.version)
-        fields["sha256"] = DataTree.Text(self.sha256)
-        "{pkg_json_render(DataTree.Object(fields))}\n"
+        fields := [String: Dyn]{}
+        fields["schema"] = Dyn.Int(self.schema)
+        fields["channel"] = Dyn.Text(self.channel)
+        fields["platform"] = Dyn.Text(self.platform)
+        fields["sequence"] = Dyn.Int(self.sequence)
+        fields["version"] = Dyn.Text(self.version)
+        fields["sha256"] = Dyn.Text(self.sha256)
+        "{pkg_json_render(Dyn.Object(fields))}\n"
     }
 }
 
@@ -461,37 +461,37 @@ fn recipe_update_verify_signature(trusted: ToolchainTrustedKey, domain: String, 
 
 // A JSON document for the update protocol: duplicate keys refused, numbers
 // kept exact (non-integers never satisfy an integer field).
-fn recipe_update_parse_json(text: String, label: String) -> DataTree RecipeError! {
+fn recipe_update_parse_json(text: String, label: String) -> Dyn RecipeError! {
     if json.parse(text) == {
         .Ok(tree) -> Ok(tree)
         .Err(error) -> Err(RecipeError.Update("parse {label}: {error.reason}"))
     }
 }
 
-fn recipe_update_object(value: DataTree, label: String) -> [String: DataTree] RecipeError! {
+fn recipe_update_object(value: Dyn, label: String) -> [String: Dyn] RecipeError! {
     pkg_json_object(value) ?? return Err(RecipeError.Update("{label} must be an object"))
 }
 
-fn recipe_update_array(value: DataTree, label: String) -> [DataTree] RecipeError! {
+fn recipe_update_array(value: Dyn, label: String) -> [Dyn] RecipeError! {
     pkg_json_array(value) ?? return Err(RecipeError.Update("{label} must be an array"))
 }
 
-fn recipe_update_field(fields: [String: DataTree], name: String) -> DataTree RecipeError! {
+fn recipe_update_field(fields: [String: Dyn], name: String) -> Dyn RecipeError! {
     fields.get(name) ?? return Err(RecipeError.Update("missing toolchain field {name}"))
 }
 
 // The first field outside `allowed`, in document order, is refused.
-fn recipe_update_reject_unknown(fields: [String: DataTree], allowed: [String]) RecipeError! {
+fn recipe_update_reject_unknown(fields: [String: Dyn], allowed: [String]) RecipeError! {
     loop entry in fields {
         if !allowed.contains(entry.key) -> return Err(RecipeError.Update("unknown toolchain field {entry.key}"))
     }
 }
 
-fn recipe_update_text(value: DataTree, label: String) -> String RecipeError! {
+fn recipe_update_text(value: Dyn, label: String) -> String RecipeError! {
     pkg_json_text(value) ?? return Err(RecipeError.Update("{label} must be text"))
 }
 
-fn recipe_update_integer(value: DataTree, label: String) -> Int RecipeError! {
+fn recipe_update_integer(value: Dyn, label: String) -> Int RecipeError! {
     if value == {
         .Int(number) -> {
             if number < 0 -> return Err(RecipeError.Update("{label} must be a non-negative integer"))
@@ -532,7 +532,7 @@ fn recipe_update_validate_digest(value: String, label: String) RecipeError! {
 }
 
 // The target spelling the default release channel uses on this host.
-pub fn recipe_toolchain_default_target() -[Env]> String Never! {
+fn recipe_toolchain_default_target() -[Env]> String Never! {
     host :: PlatformKey.host()
     if host.envelope_key() == {
         "x86_64-linux" -> "x86_64-unknown-linux-gnu"

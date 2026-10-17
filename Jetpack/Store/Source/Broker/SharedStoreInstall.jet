@@ -7,11 +7,11 @@
 // per-user Hangar.
 
 // The installed broker's four absolute paths.
-pub struct SharedStoreConfig {
-    pub socket: String
-    pub shared_root: String
-    pub trust_key: String
-    pub grants: String
+struct SharedStoreConfig {
+    socket: String
+    shared_root: String
+    trust_key: String
+    grants: String
 
     // Descriptor field order.
     fn fields(self) -> [BrokerField] Never! {
@@ -29,10 +29,10 @@ pub struct SharedStoreConfig {
     }
 }
 
-pub struct SharedStoreInstallReport {
-    pub config: String
-    pub socket_unit: String?
-    pub service_unit: String?
+struct SharedStoreInstallReport {
+    config: String
+    socket_unit: String?
+    service_unit: String?
 }
 
 struct BrokerLayout {
@@ -139,7 +139,7 @@ fn store_broker_owner_uid(path: String) -> Int StoreError! {
 
 // Rust `shared_store_config`: an installed administrator descriptor wins; a
 // malformed one is never ignored. Otherwise the caller's private broker.
-pub fn store_shared_store_config(roots: HangarRoots) -> SharedStoreConfig? StoreError! {
+fn store_shared_store_config(roots: HangarRoots) -> SharedStoreConfig? StoreError! {
     layout :: store_broker_layout(roots)
     if !layout.admin {
         if store_broker_read_config(store_broker_admin_layout()) == {
@@ -168,7 +168,7 @@ fn store_broker_read_config(layout: BrokerLayout) -> SharedStoreConfig? StoreErr
 }
 
 // The descriptor text: magic, then `key=hex(path)` lines.
-pub fn store_broker_parse_config(text: String) -> SharedStoreConfig StoreError! {
+fn store_broker_parse_config(text: String) -> SharedStoreConfig StoreError! {
     lines :: store_text_lines(text)
     if lines.len() == 0 || lines[0] != STORE_BROKER_CONFIG_MAGIC -> return Err(store_broker_invalid("shared-store config has an unknown format"))
     fields := [String: String]{}
@@ -209,7 +209,7 @@ fn store_broker_render_config(config: SharedStoreConfig) -> String StoreError! {
 // Rust `install_shared_store`: the administrator descriptor and the
 // socket-activation units. No resident daemon exists; systemd starts the
 // one-request service on demand.
-pub fn store_install_shared_store(roots: HangarRoots) -> SharedStoreInstallReport StoreError! {
+fn store_install_shared_store(roots: HangarRoots) -> SharedStoreInstallReport StoreError! {
     if !store_broker_is_effective_root() {
         return Err(store_broker_invalid("shared-store install requires administrator authority; run `sudo jetpack hangar shared install`"))
     }
@@ -264,7 +264,7 @@ fn store_broker_socket_unit_text(config: SharedStoreConfig, admin: Bool) -> Stri
 // Rust `admin_service_unit_text`. StateDirectory creates the root and each
 // nested write target before systemd applies the filesystem namespace;
 // ReadWritePaths does not create missing mount points.
-pub fn store_broker_admin_service_unit_text(executable: String, config: SharedStoreConfig) -> String Never! {
+fn store_broker_admin_service_unit_text(executable: String, config: SharedStoreConfig) -> String Never! {
     state_directories :: "jet/shared-store/root jet/shared-store/root/.incoming jet/shared-store/root/hangar jet/shared-store/root/.locks"
     writable := [String]{}
     members :: [String]{".incoming", "hangar", ".locks"}
@@ -355,7 +355,7 @@ fn store_broker_validate_managed_directory(path: String, label: String) StoreErr
 fn store_broker_require_private_mode_followed(path: String, label: String) StoreError! {
     if sys.family() == "windows" -> return
     info :: files.stat(files.canonicalize(path))
-    if info.mode & 0o077 != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
+    if (info.mode).bit_and(0o077) != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
 }
 
 // Rust `user_systemd_unit_dir`: `$XDG_CONFIG_HOME` or `$HOME/.config`.
@@ -395,7 +395,7 @@ fn store_broker_ensure_admin_public_dir(path: String) StoreError! {
         store_broker_require_admin_dir(path)
         if sys.family() != "windows" {
             info :: files.stat(path)
-            if info.mode & 0o005 != 0o005 -> store_broker_set_mode(path, 0o755)
+            if (info.mode).bit_and(0o005) != 0o005 -> store_broker_set_mode(path, 0o755)
         }
     } else {
         store_broker_set_mode(path, 0o755)
@@ -407,14 +407,14 @@ fn store_broker_require_admin_dir(path: String) StoreError! {
     if sys.family() == "windows" -> return
     info :: files.stat(path)
     if (info.owner ?? -1) != 0 -> return Err(store_broker_invalid("shared-store administrator directory is not root-owned"))
-    if info.mode & 0o022 != 0 -> return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
+    if (info.mode).bit_and(0o022) != 0 -> return Err(store_broker_invalid("shared-store administrator directory is writable by another user"))
 }
 
 fn store_broker_require_admin_public_dir(path: String) StoreError! {
     store_broker_require_admin_dir(path)
     if sys.family() == "windows" -> return
     info :: files.stat(path)
-    if info.mode & 0o005 != 0o005 -> return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
+    if (info.mode).bit_and(0o005) != 0o005 -> return Err(store_broker_invalid("shared-store administrator directory is not traversable by enrolled users"))
 }
 
 fn store_broker_validate_admin_directory(path: String, label: String) StoreError! {
@@ -435,7 +435,7 @@ fn store_broker_ensure_private_dir(path: String) StoreError! {
     store_broker_ensure_real_dir(path)
     if sys.family() == "windows" -> return
     info :: files.stat(path)
-    if info.mode & 0o077 != 0 {
+    if (info.mode).bit_and(0o077) != 0 {
         if existed -> return Err(store_broker_invalid("shared-store directory has insecure permissions"))
         files.set_mode(path, 0o700)
     }
@@ -444,7 +444,7 @@ fn store_broker_ensure_private_dir(path: String) StoreError! {
 fn store_broker_require_private_mode(path: String, label: String) StoreError! {
     if sys.family() == "windows" -> return
     info :: files.stat(path)
-    if info.mode & 0o077 != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
+    if (info.mode).bit_and(0o077) != 0 -> return Err(store_broker_invalid("{label} has insecure permissions"))
 }
 
 fn store_broker_set_private_mode(path: String) StoreError! {
@@ -455,7 +455,7 @@ fn store_broker_set_private_mode(path: String) StoreError! {
 fn store_broker_require_safe_descriptor(path: String, label: String) StoreError! {
     info :: files.stat(path)
     if info.is_symlink || !info.is_file -> return Err(store_broker_invalid("{label} is not a regular file"))
-    if sys.family() != "windows" && info.mode & 0o022 != 0 -> return Err(store_broker_invalid("{label} is writable by another user"))
+    if sys.family() != "windows" && (info.mode).bit_and(0o022) != 0 -> return Err(store_broker_invalid("{label} is writable by another user"))
 }
 
 fn store_broker_require_admin_descriptor(path: String) StoreError! {

@@ -1,0 +1,47 @@
+// D-PAT-RECORD1=A: the pattern has the shape of the value it reads.
+struct Point {
+    x: Int
+    y: Int
+}
+struct Route {
+    origin: Point
+    words: [String]
+}
+enum Message {
+    Route(Route)
+    Empty
+}
+
+fn command(words: [String]) -> String {
+    if words == {
+        [] -> "usage"
+        ["add", name, ..rest] -> "add {name}, {rest.len()} extra"
+        [only] -> "single {only}"
+        [cmd, ..] -> "unknown {cmd}"
+    }
+}
+
+fn describe(message: Message) -> String {
+    if message == {
+        .Route(Route{origin: Point{x: 0, y}, words: [first, ..rest]}) -> "axis {y}: {first}, {rest.len()} remaining"
+        .Route(Route{origin: Point{x, y}, words: []}) -> "empty at {x},{y}"
+        .Route(_) -> "other route"
+        .Empty -> "empty message"
+    }
+}
+
+fn run() {
+    print(command([String]{}))
+    print(command(["add", "jet", "fast", "safe"]))
+    print(command(["help"]))
+    print(command(["delete", "jet"]))
+    print(describe(Message.Route(Route{origin: Point{x: 0, y: 4}, words: ["go", "north"]})))
+    print(describe(Message.Route(Route{origin: Point{x: 3, y: 2}, words: []})))
+    print(describe(Message.Route(Route{origin: Point{x: 3, y: 2}, words: ["go"]})))
+    print(describe(Message.Empty))
+    point :: Point{x: 0, y: 7}
+    if point == Point{x: 0, y} -> print("axis {y}")
+    words :: ["first", "second", "third"]
+    if words == [first, ..rest] -> print("{first}: {rest[0]} {rest[1]}")
+    print(words.len())
+}

@@ -20,8 +20,12 @@ pub struct LexicalEntry {
 pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
     LexicalEntry { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
+    LexicalEntry { spelling: "x.copy()", meaning: "the one deliberate copy: a compiler-owned method returning an independent owned value; the retired prefix `~x` teaches E0941 and the retired `copy x` word E0991", decision: "D-COPY-WORD1=A" },
     LexicalEntry { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
     LexicalEntry { spelling: ".expect_fail(message: \"text\")", meaning: "test region requires a stop with an optional E30xx code and non-empty case-sensitive raw-message substring", decision: "D-TEST-STOPMSG1=A" },
+    LexicalEntry { spelling: "marker Name = #[A, B]", meaning: "fixed named marker-group declaration; expands at each use without hiding gates or refusals", decision: "D-MARKER-GROUP1=A" },
+    LexicalEntry { spelling: "#module.Marker / #[module.Marker, Other]", meaning: "library marker through the import's local name; pub exports its declaration", decision: "D-MARKER-MODULE1=A" },
+    LexicalEntry { spelling: "#Inline / #Scalar / #Kernel / #Static", meaning: "separate callable promise, scalar hint, kernel proof and constant storage rules", decision: "D-CODEGEN-HINTS1=A" },
     LexicalEntry { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },
     LexicalEntry { spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action", decision: "D-DX-FORM1" },
     LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
@@ -50,12 +54,16 @@ pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
     LexicalEntry { spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A" },
     LexicalEntry { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
     LexicalEntry { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
+    LexicalEntry { spelling: "&self.field / &self.[a, b]", meaning: "stated receiver field footprint: the record fields a method may read or change, checked against its body (E0231) and published in the API snapshot; reuses member spread `.[`", decision: "D-METHOD-FOOTPRINT1=A; D-SPREAD1=A" },
     LexicalEntry { spelling: "T{expr}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
     LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
     LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
     LexicalEntry { spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1" },
     LexicalEntry { spelling: "\"\"\"", meaning: "multi-line string; only spaces or tabs on the delimiter lines (raw foreign bodies excepted)", decision: "D-SG5; D-TRIPLE-DELIM1=A; D-FFI-RAWBODY1=A" },
     LexicalEntry { spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1" },
+    LexicalEntry { spelling: "Type{field: pattern, ..}", meaning: "named struct pattern; fields bind or test nested shapes", decision: "D-PAT-RECORD1=A" },
+    LexicalEntry { spelling: "[first, ..rest]", meaning: "list pattern with a read-only zero-copy rest window; exact without the rest marker", decision: "D-PAT-RECORD1=A" },
+    LexicalEntry { spelling: "[key: pattern, key?: optional, ..]", meaning: "map pattern; required and optional keys, exact unless it ends with rest", decision: "D-PAT-MAP1=A" },
     LexicalEntry { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
     LexicalEntry { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },
     LexicalEntry { spelling: "_name", meaning: "ordinary identifier", decision: "" },
@@ -103,7 +111,7 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // (`$sites: [Site]`, `$repeatable: true`); no clause form and no second keyword
 // enter the grammar. Every row states its safe direction and its gate words
 // (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
-// Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
+// Marker-plane reconciliation anchors: MARKER_NO_PRELUDE, MARKER_TARGET,
 // MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_FX (#FX),
 // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
 // below; keep this root file mentioning them so I7 audits can check one
@@ -230,6 +238,8 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // D-SPREAD1=A reuses `.[` (OP_MEMBER_SPREAD) for member spread
 // `prefix.[a, b, c]` → `[prefix.a, prefix.b, prefix.c]`. Call fan-out stays
 // removed (D-VERDICT-1324-1).
+// D-METHOD-FOOTPRINT1=A reuses `.` and the member spread `.[` on a method
+// receiver: `&self.log` / `&self.[log, hits]` states the receiver footprint.
 // D-SHAPE-RESOURCE2=A adds contextual `defer` only at statement head in the
 // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
 // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
@@ -392,11 +402,11 @@ pub const MARKER_ALIGN_LEGACY: &str = "Align";
 // is `T?` (returns, arguments, fields, list/map items, typed bindings,
 // reassignment) and `x == 5` compares a `?T` with a present `T`; sema adds
 // one `Present`. The full rule lives on `LIT_VALUE` in `Syntax/core_surface.rs`.
-// D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
-// position as TYPE_UNION_SEP. `T !(E1 | E2)` parses as `T !(E1 | E2)`.
-// D-BITOREXPR1=A (ratified 2026-08-28, card #2299) admits the same token in
-// value position as bitwise OR. It binds tighter than comparisons; type
-// position remains the union grammar above.
+// D-UNIONTYPE1=A reuses `|` in type position as TYPE_UNION_SEP.
+// D-SIGIL-ALGEBRA1=B (ratified 2026-10-04, card #4141) reserves marks for
+// ownership and outcomes: &, |, ~| and ^ arithmetic, their compounds, and
+// integer ! are retired with E0398 method repairs. Integer arithmetic uses
+// bit_and, bit_or, bit_xor, bit_not and pow; Float uses pow. Shifts stay.
 // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
 // `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
 // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
@@ -952,6 +962,20 @@ mod dictionary;
 pub use dictionary::*;
 mod predicates;
 pub use predicates::*;
+
+const COMPUTED_FIELD_GETTER_STEM: &str = "__computed_";
+
+/// Compiler-owned computed-field functions never occupy a user method name.
+/// Use the existing reserved machine-name lane, shared by all getter callers.
+pub fn computed_field_getter_name(field: &str) -> String {
+    format!("{GENERATED_NAME_PREFIX}{COMPUTED_FIELD_GETTER_STEM}{field}")
+}
+
+/// Recover the source field addressed by a compiler-owned computed getter.
+pub fn computed_field_getter_field(name: &str) -> Option<&str> {
+    name.strip_prefix(GENERATED_NAME_PREFIX)?
+        .strip_prefix(COMPUTED_FIELD_GETTER_STEM)
+}
 
 /// D-FIELDMEMO1=A: compiler-owned storage for one marked computed field.
 /// Keep this name in the syntax module so every engine addresses the same

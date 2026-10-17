@@ -1,0 +1,474 @@
+// RFC8032 Ed25519. Shared fixed-limb field ops and complete Edwards addition.
+// Base/scalar multiplication scans all 256 bits with mask swaps, never
+// Core/crypto's bigint/secret-branch implementation. Helpers borrow exclusive
+// caller workspace; entry points wipe all scratch, no allocation/messagecopy.
+fn rt_ed25519_x(limb: I64) -> I64 {
+    if {
+        (limb == I64{0}) -> I64{0xd51a}
+        (limb == I64{1}) -> I64{0x8f25}
+        (limb == I64{2}) -> I64{0x2d60}
+        (limb == I64{3}) -> I64{0xc956}
+        (limb == I64{4}) -> I64{0xa7b2}
+        (limb == I64{5}) -> I64{0x9525}
+        (limb == I64{6}) -> I64{0xc760}
+        (limb == I64{7}) -> I64{0x692c}
+        (limb == I64{8}) -> I64{0xdc5c}
+        (limb == I64{9}) -> I64{0xfdd6}
+        (limb == I64{10}) -> I64{0xe231}
+        (limb == I64{11}) -> I64{0xc0a4}
+        (limb == I64{12}) -> I64{0x53fe}
+        (limb == I64{13}) -> I64{0xcd6e}
+        (limb == I64{14}) -> I64{0x36d3}
+        else -> I64{0x2169}
+    }
+}
+fn rt_ed25519_d2(limb: I64) -> I64 {
+    if {
+        (limb == I64{0}) -> I64{0xf159}
+        (limb == I64{1}) -> I64{0x26b2}
+        (limb == I64{2}) -> I64{0x9b94}
+        (limb == I64{3}) -> I64{0xebd6}
+        (limb == I64{4}) -> I64{0xb156}
+        (limb == I64{5}) -> I64{0x8283}
+        (limb == I64{6}) -> I64{0x149a}
+        (limb == I64{7}) -> I64{0x00e0}
+        (limb == I64{8}) -> I64{0xd130}
+        (limb == I64{9}) -> I64{0xeef3}
+        (limb == I64{10}) -> I64{0x80f2}
+        (limb == I64{11}) -> I64{0x198e}
+        (limb == I64{12}) -> I64{0xfce7}
+        (limb == I64{13}) -> I64{0x56df}
+        (limb == I64{14}) -> I64{0xd9dc}
+        else -> I64{0x2406}
+    }
+}
+fn rt_ed25519_add(p: I64, q: I64, scratch: I64, d2: I64, work: I64) {
+    a :: scratch
+    b :: scratch + I64{128}
+    c :: scratch + I64{256}
+    d :: scratch + I64{384}
+    e :: scratch + I64{512}
+    f :: scratch + I64{640}
+    g :: scratch + I64{768}
+    h :: scratch + I64{896}
+    rt_x25519_sub(a, p + I64{128}, p)
+    rt_x25519_sub(b, q + I64{128}, q)
+    rt_x25519_mul(a, a, b, work)
+    rt_x25519_add(b, p, p + I64{128})
+    rt_x25519_add(c, q, q + I64{128})
+    rt_x25519_mul(b, b, c, work)
+    rt_x25519_mul(c, p + I64{384}, q + I64{384}, work)
+    rt_x25519_mul(c, c, d2, work)
+    rt_x25519_mul(d, p + I64{256}, q + I64{256}, work)
+    rt_x25519_add(d, d, d)
+    rt_x25519_sub(e, b, a)
+    rt_x25519_sub(f, d, c)
+    rt_x25519_add(g, d, c)
+    rt_x25519_add(h, b, a)
+    rt_x25519_mul(p, e, f, work)
+    rt_x25519_mul(p + I64{128}, h, g, work)
+    rt_x25519_mul(p + I64{256}, g, f, work)
+    rt_x25519_mul(p + I64{384}, e, h, work)
+}
+fn rt_ed25519_swap(p: I64, q: I64, bit: I64) {
+    rt_x25519_swap(p, q, bit)
+    rt_x25519_swap(p + I64{128}, q + I64{128}, bit)
+    rt_x25519_swap(p + I64{256}, q + I64{256}, bit)
+    rt_x25519_swap(p + I64{384}, q + I64{384}, bit)
+}
+fn rt_ed25519_d2_init(d2: I64) {
+    i := I64{0}
+    loop i < (I64{16}) {
+        rt_text_store(d2 + i * I64{8}, rt_ed25519_d2(i))
+        i += I64{1}
+    }
+}
+fn rt_ed25519_base(q: I64, work: I64) {
+    rt_crypto_wipe(q, I64{512})
+    i := I64{0}
+    loop i < (I64{16}) {
+        rt_text_store(q + i * I64{8}, rt_ed25519_x(i))
+        rt_text_store(q + I64{128} + i * I64{8}, I64{0x6666})
+        i += I64{1}
+    }
+    rt_text_store(q + I64{128}, I64{0x6658})
+    rt_text_store(q + I64{256}, I64{1})
+    rt_x25519_mul(q + I64{384}, q, q + I64{128}, work)
+}
+// p/q are distinct owned point512 spans; q is consumed, scalar32 is borrowed.
+fn rt_ed25519_mul(p: I64, q: I64, scalar: I64, temporaries: I64, d2: I64, work: I64) {
+    rt_crypto_wipe(p, I64{512})
+    rt_text_store(p + I64{128}, I64{1})
+    rt_text_store(p + I64{256}, I64{1})
+    i := I64{255}
+    loop {
+        if (i < I64{0}) -> break
+        bit :: (rt_text_byte(scalar + i / I64{8}) >> (i % I64{8})).bit_and(I64{1})
+        rt_ed25519_swap(p, q, bit)
+        rt_ed25519_add(q, p, temporaries, d2, work)
+        rt_ed25519_add(p, p, temporaries, d2, work)
+        rt_ed25519_swap(p, q, bit)
+        i -= I64{1}
+    }
+}
+// Packing consumes p's affine coordinates; all spans are disjoint.
+fn rt_ed25519_pack(output: I64, p: I64, inverse: I64, work: I64, reduced: I64, packed_x: I64) {
+    rt_x25519_copy(inverse, p + I64{256})
+    i := I64{253}
+    loop {
+        if (i < I64{0}) -> break
+        rt_x25519_mul(inverse, inverse, inverse, work)
+        if (i != I64{2} && i != I64{4}) -> rt_x25519_mul(inverse, inverse, p + I64{256}, work)
+        i -= I64{1}
+    }
+    rt_x25519_mul(p, p, inverse, work)
+    rt_x25519_mul(p + I64{128}, p + I64{128}, inverse, work)
+    rt_x25519_pack(packed_x, p, reduced)
+    rt_x25519_pack(output, p + I64{128}, reduced)
+    rt_text_put(output + I64{31}, rt_text_byte(output + I64{31}).bit_or(((rt_text_byte(packed_x).bit_and(I64{1})) << I64{7})))
+}
+// Borrowed seed32/output32, disjoint caller scratch4096 aligned8, wiped.
+fn rt_crypto_ed25519_public(seed: I64, output: I64, scratch: I64) {
+    hash :: scratch + I64{704}
+    rt_crypto_sha512(seed, I64{32}, hash, scratch)
+    rt_text_put(hash, rt_text_byte(hash).bit_and(I64{248}))
+    rt_text_put(hash + I64{31}, (rt_text_byte(hash + I64{31}).bit_and(I64{63})).bit_or(I64{64}))
+    p :: scratch + I64{768}
+    q :: scratch + I64{1280}
+    temporaries :: scratch + I64{1792}
+    work :: scratch + I64{2816}
+    d2 :: scratch + I64{3072}
+    rt_ed25519_d2_init(d2)
+    rt_ed25519_base(q, work)
+    rt_ed25519_mul(p, q, hash, temporaries, d2, work)
+    rt_ed25519_pack(output, p, temporaries, work, scratch + I64{3200}, scratch + I64{3328})
+    rt_crypto_wipe(scratch, I64{4096})
+}
+// TweetNaCl's radix256 scalar reduction modulo the Ed25519 group order.
+// Intermediate convolution/reduction bounds fit signed I64; indices and
+// carry loops are fixed, including all 32 secret scalar bytes.
+fn rt_ed25519_l(index: I64) -> I64 {
+    if {
+        (index == I64{0}) -> I64{0xed}
+        (index == I64{1}) -> I64{0xd3}
+        (index == I64{2}) -> I64{0xf5}
+        (index == I64{3}) -> I64{0x5c}
+        (index == I64{4}) -> I64{0x1a}
+        (index == I64{5}) -> I64{0x63}
+        (index == I64{6}) -> I64{0x12}
+        (index == I64{7}) -> I64{0x58}
+        (index == I64{8}) -> I64{0xd6}
+        (index == I64{9}) -> I64{0x9c}
+        (index == I64{10}) -> I64{0xf7}
+        (index == I64{11}) -> I64{0xa2}
+        (index == I64{12}) -> I64{0xde}
+        (index == I64{13}) -> I64{0xf9}
+        (index == I64{14}) -> I64{0xde}
+        (index == I64{15}) -> I64{0x14}
+        (index == I64{31}) -> I64{0x10}
+        else -> I64{0}
+    }
+}
+fn rt_ed25519_mod_l(output: I64, x: I64) {
+    i := I64{63}
+    loop {
+        if (i < I64{32}) -> break
+        high :: rt_text_word(x + i * I64{8})
+        carry := I64{0}
+        start :: i - I64{32}
+        end :: i - I64{12}
+        j := start
+        loop j < end {
+            value :: rt_text_word(x + j * I64{8}) + carry - I64{16} * high * rt_ed25519_l(j - start)
+            carry = (value + I64{128}) >> I64{8}
+            rt_text_store(x + j * I64{8}, value - (carry << I64{8}))
+            j += I64{1}
+        }
+        rt_text_store(x + j * I64{8}, rt_text_word(x + j * I64{8}) + carry)
+        rt_text_store(x + i * I64{8}, I64{0})
+        i -= I64{1}
+    }
+    top :: rt_text_word(x + I64{248}) >> I64{4}
+    carry := I64{0}
+    j := I64{0}
+    loop j < (I64{32}) {
+        value :: rt_text_word(x + j * I64{8}) + carry - top * rt_ed25519_l(j)
+        carry = value >> I64{8}
+        rt_text_store(x + j * I64{8}, value.bit_and(I64{255}))
+        j += I64{1}
+    }
+    j = I64{0}
+    loop j < (I64{32}) {
+        rt_text_store(x + j * I64{8}, rt_text_word(x + j * I64{8}) - carry * rt_ed25519_l(j))
+        j += I64{1}
+    }
+    i = I64{0}
+    loop i < (I64{32}) {
+        value :: rt_text_word(x + i * I64{8})
+        next :: x + (i + I64{1}) * I64{8}
+        rt_text_store(next, rt_text_word(next) + (value >> I64{8}))
+        rt_text_put(output + i, value.bit_and(I64{255}))
+        i += I64{1}
+    }
+}
+fn rt_ed25519_reduce(hash: I64, x: I64) {
+    i := I64{0}
+    loop i < (I64{64}) {
+        rt_text_store(x + i * I64{8}, rt_text_byte(hash + i))
+        i += I64{1}
+    }
+    rt_crypto_wipe(hash, I64{64})
+    rt_ed25519_mod_l(hash, x)
+}
+// Borrowed seed32/message, disjoint signature64 and exclusive aligned4832.
+// SHA512 expansion once, deterministic nonce, fixed-limb S=r+k*a modL.
+fn rt_crypto_ed25519_sign(seed: I64, message: I64, length: I64, signature: I64, scratch: I64) {
+    h :: scratch + I64{4096}
+    r :: scratch + I64{4160}
+    k :: scratch + I64{4224}
+    public_key :: scratch + I64{4288}
+    x :: scratch + I64{4320}
+    p :: scratch + I64{768}
+    q :: scratch + I64{1280}
+    temporaries :: scratch + I64{1792}
+    work :: scratch + I64{2816}
+    d2 :: scratch + I64{3072}
+    reduced :: scratch + I64{3200}
+    packed_x :: scratch + I64{3328}
+    rt_crypto_sha512(seed, I64{32}, h, scratch)
+    rt_text_put(h, rt_text_byte(h).bit_and(I64{248}))
+    rt_text_put(h + I64{31}, (rt_text_byte(h + I64{31}).bit_and(I64{63})).bit_or(I64{64}))
+    rt_ed25519_d2_init(d2)
+    rt_ed25519_base(q, work)
+    rt_ed25519_mul(p, q, h, temporaries, d2, work)
+    rt_ed25519_pack(public_key, p, temporaries, work, reduced, packed_x)
+    rt_crypto_sha512_parts3(h + I64{32}, I64{32}, message, length, I64{1}, I64{0}, r, scratch)
+    rt_ed25519_reduce(r, x)
+    rt_ed25519_base(q, work)
+    rt_ed25519_mul(p, q, r, temporaries, d2, work)
+    rt_ed25519_pack(signature, p, temporaries, work, reduced, packed_x)
+    rt_crypto_sha512_parts3(signature, I64{32}, public_key, I64{32}, message, length, k, scratch)
+    rt_ed25519_reduce(k, x)
+    rt_crypto_wipe(x, I64{512})
+    i := I64{0}
+    loop i < (I64{32}) {
+        rt_text_store(x + i * I64{8}, rt_text_byte(r + i))
+        i += I64{1}
+    }
+    i = I64{0}
+    loop i < (I64{32}) {
+        ki :: rt_text_byte(k + i)
+        j := I64{0}
+        loop j < (I64{32}) {
+            at :: x + (i + j) * I64{8}
+            rt_text_store(at, rt_text_word(at) + ki * rt_text_byte(h + j))
+            j += I64{1}
+        }
+        i += I64{1}
+    }
+    rt_ed25519_mod_l(signature + I64{32}, x)
+    rt_crypto_wipe(scratch, I64{4832})
+}
+fn rt_ed25519_d(index: I64) -> I64 {
+    if {
+        (index == I64{0}) -> I64{0x78a3}
+        (index == I64{1}) -> I64{0x1359}
+        (index == I64{2}) -> I64{0x4dca}
+        (index == I64{3}) -> I64{0x75eb}
+        (index == I64{4}) -> I64{0xd8ab}
+        (index == I64{5}) -> I64{0x4141}
+        (index == I64{6}) -> I64{0x0a4d}
+        (index == I64{7}) -> I64{0x0070}
+        (index == I64{8}) -> I64{0xe898}
+        (index == I64{9}) -> I64{0x7779}
+        (index == I64{10}) -> I64{0x4079}
+        (index == I64{11}) -> I64{0x8cc7}
+        (index == I64{12}) -> I64{0xfe73}
+        (index == I64{13}) -> I64{0x2b6f}
+        (index == I64{14}) -> I64{0x6cee}
+        else -> I64{0x5203}
+    }
+}
+fn rt_ed25519_sqrt_i(index: I64) -> I64 {
+    if {
+        (index == I64{0}) -> I64{0xa0b0}
+        (index == I64{1}) -> I64{0x4a0e}
+        (index == I64{2}) -> I64{0x1b27}
+        (index == I64{3}) -> I64{0xc4ee}
+        (index == I64{4}) -> I64{0xe478}
+        (index == I64{5}) -> I64{0xad2f}
+        (index == I64{6}) -> I64{0x1806}
+        (index == I64{7}) -> I64{0x2f43}
+        (index == I64{8}) -> I64{0xd7a7}
+        (index == I64{9}) -> I64{0x3dfb}
+        (index == I64{10}) -> I64{0x0099}
+        (index == I64{11}) -> I64{0x2b4d}
+        (index == I64{12}) -> I64{0xdf0b}
+        (index == I64{13}) -> I64{0x4fc1}
+        (index == I64{14}) -> I64{0x2480}
+        else -> I64{0x2b83}
+    }
+}
+fn rt_ed25519_decode_constants(scratch: I64) {
+    rt_ed25519_d2_init(scratch + I64{3072})
+    i := I64{0}
+    loop i < (I64{16}) {
+        rt_text_store(scratch + I64{4608} + i * I64{8}, rt_ed25519_d(i))
+        rt_text_store(scratch + I64{4736} + i * I64{8}, rt_ed25519_sqrt_i(i))
+        i += I64{1}
+    }
+}
+fn rt_ed25519_field_equal(a: I64, b: I64, scratch: I64) -> Bool {
+    rt_x25519_pack(scratch + I64{4960}, a, scratch + I64{3200})
+    rt_x25519_pack(scratch + I64{4992}, b, scratch + I64{3200})
+    return rt_crypto_equal(scratch + I64{4960}, scratch + I64{4992}, I64{32})
+}
+fn rt_ed25519_pow2523(output: I64, base: I64, temporary: I64, work: I64) {
+    rt_x25519_copy(temporary, base)
+    i := I64{250}
+    loop {
+        if (i < I64{0}) -> break
+        rt_x25519_mul(temporary, temporary, temporary, work)
+        if (i != I64{1}) -> rt_x25519_mul(temporary, temporary, base, work)
+        i -= I64{1}
+    }
+    rt_x25519_copy(output, temporary)
+}
+// Decompress to -A, preserving the original compressed bytes for the hash.
+// This intentionally matches dalek's ZIP215-permissive public-key decode:
+// do not add a y<p or negative-zero encoding rejection.
+fn rt_ed25519_decode(point: I64, bytes: I64, scratch: I64) -> Bool {
+    rt_crypto_wipe(point, I64{512})
+    rt_text_store(point + I64{256}, I64{1})
+    i := I64{0}
+    loop i < (I64{16}) {
+        rt_text_store(point + I64{128} + i * I64{8}, rt_text_byte(bytes + i * I64{2}).bit_or((rt_text_byte(bytes + i * I64{2} + I64{1}) << I64{8})))
+        i += I64{1}
+    }
+    rt_text_store(point + I64{248}, rt_text_word(point + I64{248}).bit_and(I64{32767}))
+    t :: scratch + I64{1792}
+    num :: scratch + I64{1920}
+    den :: scratch + I64{2048}
+    den2 :: scratch + I64{2176}
+    den4 :: scratch + I64{2304}
+    den6 :: scratch + I64{2432}
+    chk :: scratch + I64{2560}
+    work :: scratch + I64{2816}
+    rt_x25519_mul(num, point + I64{128}, point + I64{128}, work)
+    rt_x25519_mul(den, num, scratch + I64{4608}, work)
+    rt_x25519_sub(num, num, point + I64{256})
+    rt_x25519_add(den, point + I64{256}, den)
+    rt_x25519_mul(den2, den, den, work)
+    rt_x25519_mul(den4, den2, den2, work)
+    rt_x25519_mul(den6, den4, den2, work)
+    rt_x25519_mul(t, den6, num, work)
+    rt_x25519_mul(t, t, den, work)
+    rt_ed25519_pow2523(t, t, chk, work)
+    rt_x25519_mul(t, t, num, work)
+    rt_x25519_mul(t, t, den, work)
+    rt_x25519_mul(t, t, den, work)
+    rt_x25519_mul(point, t, den, work)
+    rt_x25519_mul(chk, point, point, work)
+    rt_x25519_mul(chk, chk, den, work)
+    if !rt_ed25519_field_equal(chk, num, scratch) -> rt_x25519_mul(point, point, scratch + I64{4736}, work)
+    rt_x25519_mul(chk, point, point, work)
+    rt_x25519_mul(chk, chk, den, work)
+    if !rt_ed25519_field_equal(chk, num, scratch) -> return false
+    rt_x25519_pack(scratch + I64{3328}, point, scratch + I64{3200})
+    if ((rt_text_byte(scratch + I64{3328}).bit_and(I64{1})) == (rt_text_byte(bytes + I64{31}) >> I64{7})) {
+        i = I64{0}
+        loop i < (I64{16}) {
+            rt_text_store(point + i * I64{8}, I64{0} - rt_text_word(point + i * I64{8}))
+            i += I64{1}
+        }
+    }
+    rt_x25519_mul(point + I64{384}, point, point + I64{128}, work)
+    return true
+}
+// Verification inputs are public. Test 8P==identity, not torsion-freeness.
+fn rt_ed25519_small_order(point: I64, scratch: I64) -> Bool {
+    clone :: scratch + I64{4096}
+    rt_text_bytes_copy(clone, point, I64{512})
+    i := I64{0}
+    loop i < (I64{3}) {
+        rt_ed25519_add(clone, clone, scratch + I64{1792}, scratch + I64{3072}, scratch + I64{2816})
+        i += I64{1}
+    }
+    packed :: scratch + I64{4928}
+    rt_ed25519_pack(packed, clone, scratch + I64{1792}, scratch + I64{2816}, scratch + I64{3200}, scratch + I64{3328})
+    diff := rt_text_byte(packed).bit_xor(I64{1})
+    i = I64{1}
+    loop i < (I64{32}) {
+        diff = diff.bit_or(rt_text_byte(packed + i))
+        i += I64{1}
+    }
+    return diff == I64{0}
+}
+fn rt_ed25519_scalar_canonical(scalar: I64) -> Bool {
+    i := I64{31}
+    loop {
+        if (i < I64{0}) -> break
+        byte :: rt_text_byte(scalar + i)
+        limit :: rt_ed25519_l(i)
+        if (byte < limit) -> return true
+        if (byte > limit) -> return false
+        i -= I64{1}
+    }
+    return false
+}
+// Core's VerifyKey.from_bytes error policy uses decode separately from verify.
+// Borrowed public_key32 and exclusive aligned5472, always wiped.
+fn rt_crypto_ed25519_key_valid(public_key: I64, scratch: I64) -> Bool {
+    rt_ed25519_decode_constants(scratch)
+    ok :: rt_ed25519_decode(scratch + I64{1280}, public_key, scratch)
+    rt_crypto_wipe(scratch, I64{5472})
+    return ok
+}
+// EXACT dalek2.2.0 ordinary/strict paths, not an unasked stricter protocol:
+// both S<L, hash ORIGINAL R||A||message, compare canonical [S]B-[k]A bytes.
+// Strict additionally rejects small-order A/R; mixed-order A remains allowed.
+// Borrowed public_key32/message/signature64; exclusive aligned5472 wiped.
+fn rt_crypto_ed25519_verify(public_key: I64, message: I64, length: I64, signature: I64, strict: Bool, scratch: I64) -> Bool {
+    if !rt_ed25519_scalar_canonical(signature + I64{32}) {
+        rt_crypto_wipe(scratch, I64{5472})
+        return false
+    }
+    rt_ed25519_decode_constants(scratch)
+    p :: scratch + I64{768}
+    q :: scratch + I64{1280}
+    if !rt_ed25519_decode(q, public_key, scratch) {
+        rt_crypto_wipe(scratch, I64{5472})
+        return false
+    }
+    if strict {
+        if rt_ed25519_small_order(q, scratch) {
+            rt_crypto_wipe(scratch, I64{5472})
+            return false
+        }
+        if !rt_ed25519_decode(p, signature, scratch) {
+            rt_crypto_wipe(scratch, I64{5472})
+            return false
+        }
+        if rt_ed25519_small_order(p, scratch) {
+            rt_crypto_wipe(scratch, I64{5472})
+            return false
+        }
+    }
+    k :: scratch + I64{4864}
+    rt_crypto_sha512_parts3(signature, I64{32}, public_key, I64{32}, message, length, k, scratch)
+    rt_ed25519_reduce(k, scratch + I64{4960})
+    temporaries :: scratch + I64{1792}
+    work :: scratch + I64{2816}
+    d2 :: scratch + I64{3072}
+    rt_ed25519_mul(p, q, k, temporaries, d2, work)
+    left :: scratch + I64{4096}
+    rt_text_bytes_copy(left, p, I64{512})
+    rt_ed25519_base(q, work)
+    rt_ed25519_mul(p, q, signature + I64{32}, temporaries, d2, work)
+    rt_ed25519_add(p, left, temporaries, d2, work)
+    expected :: scratch + I64{4928}
+    rt_ed25519_pack(expected, p, temporaries, work, scratch + I64{3200}, scratch + I64{3328})
+    ok :: rt_crypto_equal(signature, expected, I64{32})
+    rt_crypto_wipe(scratch, I64{5472})
+    return ok
+}

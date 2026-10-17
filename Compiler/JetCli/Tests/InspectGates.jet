@@ -1,0 +1,49 @@
+// CmdGates.rs consumer contracts over real canonical GateLedger rows.
+use jet_foundation.[GateLedger, GateKind, GateOperation, Span, gate_ledger_push, gate_ledger_sort]
+use jet_driver.JetDriverSourceQueryModule
+
+fn run() Never! {
+    if jet_cli_gates_entry(["--kind", "unsafe", "--scope=source", "--gate", "unsafe", "run.jet"]) != (Val("run.jet")) -> panic("raw gate entry grammar")
+    if jet_cli_gates_entry(["--kind", "unsafe"]) != None -> panic("option value became an entry")
+    ledger := GateLedger{}
+    jet_cli_gate_append_invocation(&ledger, ["--allow", "IO", "--allow=IO", "--force", "--offline", "--target=x86_64", "--profile", "dev"])
+    // Distinct --allow spellings each have two rows; the repeated same fact
+    // deduplicates in the canonical ledger, never in a CLI substitute.
+    if ledger.rows.len() != 8 -> panic("invocation authority writer rows")
+    gate_ledger_sort(&ledger)
+    human :: jet_cli_gates_report(ledger, [], None, Val("security"), false)
+    if !human.starts_with("gates: 8\n") || !human.contains("--allow IO  invocation authority grant status=recorded") -> panic("invocation human projection")
+    session :: jet_cli_gates_report(ledger, [], None, Val("session"), true)
+    if !session.contains("\"counts\":{{\"session_flag\":1}}") || session.contains("\"kind\":\"build_flag\"") -> panic("domain/scope selection")
+    empty :: jet_cli_gates_report(ledger, [], Val(GateKind.Unsafe), None, true)
+    if !empty.contains("\"entries\":[],\"counts\":{{}}") -> panic("empty JSON ledger")
+    if jet_cli_gates_report(GateLedger{}, [], None, None, false) != "gates: 0\n" -> panic("empty human ledger")
+
+    large := GateLedger{}
+    loop index in 0..<17 -> gate_ledger_push(&large, jet_cli_gate_external(GateKind.PrecisionDemotion, "expression", "run.jet", "approx {index}", "demotion", ["run.jet"]))
+    if jet_cli_gates_report(large, [], None, None, false) != "gates: 17\n  precision_demotion: 17 entries\n" -> panic("large non-security collapse")
+    secure := GateLedger{}
+    loop index in 0..<17 -> gate_ledger_push(&secure, jet_cli_gate_external(GateKind.TrustGrant, "trust", "trust", "hash {index}", "trusted project hash", ["trust"]))
+    detail :: jet_cli_gates_report(secure, [], None, None, false)
+    if detail.contains("17 entries") || !detail.contains("hash 16  trusted project hash status=recorded") -> panic("security groups must never collapse")
+    trust :: jet_cli_gate_trust_entries("/home/.jet/trust", [TrustRecord]{TrustRecord.Hash{hash: "abc"}, TrustRecord.Pattern{pattern: "/project/*"}, TrustRecord.Grant(TrustGrant{authority: "unknown", subject: "value:with:colons", scope: "repo"}), TrustRecord.Raw{line: "raw"}, TrustRecord.Hash{hash: "abc"}})
+    if trust.len() != 5 || trust[2].subject != "unknown:value:with:colons" || trust[2].scope != "repo" || trust[3].detail != "raw trust record" -> panic("typed trust records preserved")
+    trusted := GateLedger{}
+    loop row in trust -> gate_ledger_push(&trusted, row)
+    if trusted.rows.len() != 4 -> panic("canonical trust duplicate coalescing")
+
+    source :: "// é🙂\nfn run() {{}}\n"
+    modules :: [JetDriverSourceQueryModule]{JetDriverSourceQueryModule{module_identity: "run", package_identity: "app", path: "run.jet", physical_path: "/app/run.jet", source: source, program: ast_program()}}
+    span :: Span{start: 10, end: 12}
+    entry := jet_cli_gate_external(GateKind.Unsafe, "source", "run.jet", "#Unsafe", "mode=GateOnly", ["run.jet:10..12"])
+    entry.span = Val(span)
+    entry.reason = Val("boundary")
+    entry.status = Val("missing")
+    entry.operations = [GateOperation]{GateOperation{kind: "raw_pointer", span: span, required: ["no_alias"], asserted: [], discharged: false}}
+    scoped := GateLedger{}
+    gate_ledger_push(&scoped, ^entry)
+    machine :: jet_cli_gates_report(scoped, modules, None, Val("run.jet"), true)
+    if !machine.contains("\"location\":{{\"start\":{{\"line\":2,\"column\":1}}") || !machine.contains("\"discharged\":false") || !machine.contains("\"reason\":\"boundary\"") -> panic("source location/operation facts")
+    if !machine.contains("\"span\":{{\"start\":10,\"end\":12}}") -> panic("byte span retained")
+    if !machine.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.gates\",\"ok\":true,\"reports\":[]") || !machine.ends_with("\n") -> panic("shared status envelope")
+}

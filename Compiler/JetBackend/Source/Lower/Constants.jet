@@ -1,0 +1,426 @@
+// Literal constants use exactly the runtime constructor layouts and build
+// owned trees. Module Global constants borrow frozen data in Statics.jet.
+use jet_foundation.[
+    MIRConstant,
+    MIRConstantDef,
+    MIRConstEnumArg,
+    MIRConstField,
+    MIRConstKey,
+    MIRConstMapEntry,
+    mir_integer_constant,
+    MIRInstruction,
+    MIRProgram,
+    MIRType,
+    MIRTypeDef,
+]
+use core.math as math
+
+fn lower_constant_field(fields: [MIRConstField], name: String) -> MIRConstant? Never! {
+    loop field in fields {
+        if field.name == name -> return Val(field.value)
+    }
+    None
+}
+
+// A Struct constant's member. Sema's folded interval facts
+// (Comptime/Reflection.jet sema_comptime_reflection_range) are the closed
+// Range{start, end}: the absent `exclusive` member is false.
+fn lower_constant_member(fields: [MIRConstField], type_name: String, name: String) -> MIRConstant? Never! {
+    found :: lower_constant_field(fields, name)
+    if found == None && type_name == "Range" && name == "exclusive" -> return Val(MIRConstant.Bool{value: false})
+    found
+}
+
+fn lower_constant_arg(args: [MIRConstEnumArg], name: String) -> MIRConstant? Never! {
+    loop arg in args {
+        if arg.name == .Val(label) {
+            if label == name -> return Val(arg.value)
+        }
+    }
+    None
+}
+
+fn lower_constant_owner(definition: MIRTypeDef, ty: MIRType, name: String) -> Bool Never! {
+    if name == definition.key || name == definition.name -> return true
+    if ty.kind == .Apply(nominal, _) -> return name == nominal.name
+    false
+}
+
+// Unit has no machine value, including inside an allocated aggregate. An
+// inline member's bytes are copied into the parent, just as lower_store_value.
+fn lower_constant_store(p: MIRProgram, m: &LowerModule, f: &LowerFunction, boxed: LIRValueID, offset: Int, ty: MIRType, constant: MIRConstant) Never! {
+    value :: lower_constant_tree(p, &m, &f, ty, constant) ?? return
+    lower_write_at(p, &f, boxed, offset, value, ty)
+}
+
+// Bytes is the compact MIR spelling of a packed U8 List, not a String.
+fn lower_constant_bytes_type(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    aggregate :: lower_inline_type(p, ty) ?? return false
+    is_seq :: if aggregate.kind == { .List(_) | .FixedList(_, _) -> true else -> false }
+    if !is_seq -> return false
+    elem :: lower_list_element(aggregate) ?? return false
+    lower_narrow_bits(elem) == 8 && !lower_narrow_signed(elem)
+}
+
+// Keys share the typed constant constructors used for ordinary values.
+fn lower_constant_key(key: MIRConstKey) -> MIRConstant Never! {
+    if key == {
+        .Int(value) -> mir_integer_constant(value, None, None)
+        .BigInt(decimal) -> MIRConstant.BigInt{decimal: decimal}
+        .String(value) -> MIRConstant.String{value: value}
+        .Bool(value) -> MIRConstant.Bool{value: value}
+        .Char(value) -> MIRConstant.Char{value: value}
+        .Tuple(fields) -> {
+            values := [MIRConstField]{}
+            loop field in fields -> &values.push(MIRConstField{name: field.name, value: lower_constant_key(field.key)})
+            MIRConstant.Struct{type_name: "Tuple", fields: values}
+        }
+        .Struct(name, fields) -> {
+            values := [MIRConstField]{}
+            loop field in fields -> &values.push(MIRConstField{name: field.name, value: lower_constant_key(field.key)})
+            MIRConstant.Struct{type_name: name, fields: values}
+        }
+        .Enum(name, variant) -> MIRConstant.Enum{type_name: name, variant: variant, args: [MIRConstEnumArg]{}}
+    }
+}
+
+// The same insertion ABI as BuildMap orders keys and retires duplicates.
+// A constant knows its maximum count, so its buffer is allocated only once.
+fn lower_constant_map_fill(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, ty: MIRType, entries: [MIRConstMapEntry]) Never! {
+    shape :: lower_map_shape(p, ty) ?? return lower_fail(&m, &f, "Map constant without a Map type is not lowered at O0 yet")
+    zero :: lower_const(&f, 0)
+    cap :: lower_const(&f, entries.len())
+    data :: lower_pointer(&f)
+    if entries.len() == 0 -> lower_emit(&f, LIRInst.Const{dst: data, value: 0})
+    else -> lower_alloc(&m, &f, data, shape.stride * entries.len())
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: cap})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    loop entry in entries {
+        key :: lower_constant_tree(p, &m, &f, shape.key, lower_constant_key(entry.key)) ?? return
+        value :: lower_constant_tree(p, &m, &f, shape.value, entry.value) ?? return
+        lower_call_helper(&m, &f, "map.set", ty, [LIRValueID]{dst, key, value}, None)
+    }
+}
+
+// An exact Int constant: an inline word, or beyond the inline range a runtime
+// big integer, built at use from the word (jet_int_owned_from_i64, as the
+// exact conversion of Convert.jet) or from its decimal text.
+fn lower_exact_int_constant(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, value: Int) Never! {
+    if lower_int_inline(value) -> return lower_emit(&f, LIRInst.Const{dst: dst, value: value})
+    raw :: lower_const(&f, value)
+    lower_call_runtime(&m, &f, "jet_int_owned_from_i64", [LIRValueID]{raw}, Val(dst))
+}
+
+fn lower_big_int_constant(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, decimal: String) Never! {
+    args :: lower_static_text(&m, &f, decimal)
+    lower_call_runtime(&m, &f, "jet_rt_int_from_static", args, Val(dst))
+}
+
+// Untyped MIR map keys retain large U64s as decimal BigInt. Their checked
+// destination recovers the machine-word bit pattern, not an exact-Int owner.
+fn lower_constant_u64_bits(decimal: String) -> Int Never! {
+    value :: Int.parse(decimal) ?? panic("checked U64 constant is not decimal")
+    lower_wide_word(value)
+}
+
+// Pack a checked machine-float literal into its native carrier. Binary32 is
+// an unsigned low-word payload, rounded once from the MIR's binary64 value.
+// Integer rounding keeps ties-to-even, subnormals and signed zero independent
+// of the compiler host's floating-point environment.
+fn lower_float_constant_bits(value: Float, f32: Bool) -> Int Never! {
+    bits :: math.to_bits(value)
+    if !f32 -> return bits
+    sign :: (bits >> 32).bit_and(2147483648)
+    exponent :: (bits >> 52).bit_and(2047)
+    fraction :: bits.bit_and(4503599627370495)
+    if exponent == 2047 {
+        if fraction == 0 -> return sign.bit_or(2139095040)
+        return sign.bit_or(2139095040).bit_or((fraction >> 29)).bit_or(4194304)
+    }
+    if exponent == 0 -> return sign
+    power := exponent - 1023
+    if power > 127 -> return sign.bit_or(2139095040)
+    if power < -150 -> return sign
+    significand :: fraction.bit_or(4503599627370496)
+    shift :: if power < -126 -> -power - 97 else -> 29
+    rounded := significand >> shift
+    remainder :: significand.bit_and(((1 << shift) - 1))
+    halfway :: 1 << (shift - 1)
+    if remainder > halfway || (remainder == halfway && (rounded.bit_and(1)) != 0) -> rounded += 1
+    if power < -126 -> return sign.bit_or(rounded)
+    if rounded == 16777216 {
+        rounded = rounded >> 1
+        power += 1
+    }
+    if power > 127 -> return sign.bit_or(2139095040)
+    sign.bit_or(((power + 127) << 23)).bit_or((rounded.bit_and(8388607)))
+}
+
+fn lower_constant_tree(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, constant: MIRConstant) -> LIRValueID? {
+    lower_constant_tree_value(p, &m, &f, ty, constant, None)
+}
+
+fn lower_constant_tree_value(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, constant: MIRConstant, result: LIRValueID?) -> LIRValueID? {
+    if ty.kind == {
+        .Tagged(_, inner) -> return lower_constant_tree_value(p, &m, &f, inner, constant, result)
+        .InlineRange(base, _, _) -> return lower_constant_tree_value(p, &m, &f, base, constant, result)
+        .Quantity(base, _) -> return lower_constant_tree_value(p, &m, &f, base, constant, result)
+        .Apply(_, _) -> {
+            if lower_type_def(p, ty) == .Val(definition) {
+                if definition.kind == {
+                    .Alias(target) -> return lower_constant_tree_value(p, &m, &f, target, constant, result)
+                    .Distinct(base, _) -> return lower_constant_tree_value(p, &m, &f, base, constant, result)
+                    else -> {}
+                }
+            }
+        }
+        else -> {}
+    }
+    if constant == .Unit -> return None
+    repr :: lower_repr(p, ty)
+    if repr == .Unsupported(reason) {
+        lower_fail(&m, &f, "{reason} is not lowered at O0 yet")
+        return None
+    }
+    layout :: lower_repr_layout(repr) ?? return None
+    // Reuse an instruction's ownership-typed destination when supplied. Nested
+    // values transfer to the parent's slots and are dropped only by its glue.
+    dst :: result ?? lower_new_value(&f, layout, lower_drop(&m, repr, true), ty.identity)
+    if lower_wide_signed(p, ty) != None {
+        if constant == {
+            .Int(value, _, _) -> lower_wide_constant(p, &f, dst, ty, value)
+            .BigInt(decimal) -> lower_wide_constant_decimal(p, &f, dst, ty, decimal)
+            else -> {
+                lower_fail(&m, &f, "wide integer constant has noninteger payload")
+                return None
+            }
+        }
+        return Val(dst)
+    }
+    if constant == {
+        .Int(value, _, _) -> {
+            if lower_is_exact_int(ty) -> lower_exact_int_constant(&m, &f, dst, value)
+            else -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
+        }
+        .BigInt(decimal) -> {
+            if lower_is_unsigned_word(ty) {
+                lower_emit(&f, LIRInst.Const{dst: dst, value: lower_constant_u64_bits(decimal)})
+                return Val(dst)
+            }
+            if !lower_is_exact_int(ty) {
+                lower_fail(&m, &f, "BigInt constant of a non-Int type is not lowered at O0 yet")
+                return None
+            }
+            lower_big_int_constant(&m, &f, dst, decimal)
+        }
+        .Bool(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: if value -> 1 else -> 0})
+        .Char(value) -> lower_emit(&f, LIRInst.Const{dst: dst, value: value})
+        .Float(value, f32, _) -> lower_emit(&f, LIRInst.Const{dst: dst, value: lower_float_constant_bits(value, f32)})
+        .String(value) -> {
+            args :: lower_static_text(&m, &f, value)
+            lower_call_runtime(&m, &f, "jet_rt_string_from_static", args, Val(dst))
+        }
+        .Struct(name, fields) -> {
+            if ty.kind == .Tuple(_) {
+                lower_storage_into(p, &f, dst, ty)
+                loop member in lower_inline_members(p, ty) {
+                    value :: lower_constant_field(fields, member.name) ?? {
+                        lower_fail(&m, &f, "Tuple constant without field {member.name} is not lowered at O0 yet")
+                        return None
+                    }
+                    lower_constant_store(p, &m, &f, dst, member.offset, member.ty, value)
+                    if f.failed -> return None
+                }
+                return Val(dst)
+            }
+            definition :: lower_type_def(p, ty) ?? {
+                lower_fail(&m, &f, "Struct constant {name} without a definition is not lowered at O0 yet")
+                return None
+            }
+            if !lower_constant_owner(definition, ty, name) {
+                lower_fail(&m, &f, "Struct constant {name} as {definition.name} is not lowered at O0 yet")
+                return None
+            }
+            declared :: if definition.kind == .Struct(rows, _) -> lower_stored_fields(rows) else -> {
+                lower_fail(&m, &f, "Struct constant {name} with a non-struct type is not lowered at O0 yet")
+                return None
+            }
+            lower_storage_into(p, &f, dst, ty)
+            // MIRRust.rs:typed_struct_constant (:29305): look up by name,
+            // not constant order, and omit computed members entirely. A
+            // recursive edge (:29309) adds its separate wrapper box, as the
+            // ordinary constructor does (StructLiteral.jet).
+            loop field in declared {
+                value :: lower_constant_member(fields, name, field.name) ?? {
+                    lower_fail(&m, &f, "Struct constant {name} without field {field.name} is not lowered at O0 yet")
+                    return None
+                }
+                found :: lower_struct_field(p, ty, field.id) ?? return None
+                lower_constant_payload(p, &m, &f, dst, LowerPayloadInfo{offset: found.offset, ty: found.ty, boxed: found.boxed}, value)
+                if f.failed -> return None
+            }
+        }
+        .Enum(name, variant, args) -> {
+            definition :: lower_type_def(p, ty) ?? {
+                lower_fail(&m, &f, "Enum constant {name} without a definition is not lowered at O0 yet")
+                return None
+            }
+            if !lower_constant_owner(definition, ty, name) {
+                lower_fail(&m, &f, "Enum constant {name} as {definition.name} is not lowered at O0 yet")
+                return None
+            }
+            found :: lower_variant(definition, variant) ?? {
+                lower_fail(&m, &f, "Enum constant {name}.{variant} without a variant is not lowered at O0 yet")
+                return None
+            }
+            selector :: lower_discriminant(found.index)
+            if repr == .Discriminant {
+                lower_emit(&f, LIRInst.Const{dst: dst, value: selector})
+            } else {
+                lower_alloc(&m, &f, dst, lower_enum_box_size(p, definition))
+                lower_store_word(&f, dst, 0, selector)
+                if found.variant.payload == {
+                    .Unit -> {}
+                    .Single(inner) -> {
+                        if args.len() != 1 || args[0].name != None {
+                            lower_fail(&m, &f, "Enum constant {name}.{variant} without one positional payload is not lowered at O0 yet")
+                            return None
+                        }
+                        info :: lower_enum_payload_info(p, definition, found.variant, 0) ?? return None
+                        lower_constant_payload(p, &m, &f, dst, info, args[0].value)
+                    }
+                    .Named(fields) -> {
+                        // MIRRust.rs:typed_enum_constant (:29425): named
+                        // payloads are matched to declaration fields by label.
+                        loop (index, field) in fields {
+                            if field.computed -> next
+                            value :: lower_constant_arg(args, field.name) ?? {
+                                lower_fail(&m, &f, "Enum constant {name}.{variant} without field {field.name} is not lowered at O0 yet")
+                                return None
+                            }
+                            info :: lower_enum_payload_info(p, definition, found.variant, index) ?? return None
+                            lower_constant_payload(p, &m, &f, dst, info, value)
+                            if f.failed -> return None
+                        }
+                    }
+                }
+            }
+        }
+        .Present(value) -> {
+            // MIRRust.rs:constant_for_type (:29473-29484): Present is Ok
+            // for both Option and Result, but their native boxes differ.
+            if ty.kind == {
+                .Option(inner) -> {
+                    lower_alloc(&m, &f, dst, lower_option_box_size(p, inner))
+                    lower_constant_store(p, &m, &f, dst, 0, inner, value)
+                }
+                .Result(ok, err) -> {
+                    lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
+                    lower_store_word(&f, dst, 0, lower_result_selector(true))
+                    lower_constant_store(p, &m, &f, dst, lower_result_payload_offset(), ok, value)
+                }
+                else -> {
+                    lower_fail(&m, &f, "Present constant without an Option or Result type is not lowered at O0 yet")
+                    return None
+                }
+            }
+        }
+        .List(values) -> {
+            // The header and element buffer lower_build_list makes.
+            elem :: lower_list_element(ty) ?? {
+                lower_fail(&m, &f, "List constant without a List type is not lowered at O0 yet")
+                return None
+            }
+            stride :: lower_list_stride(p, elem)
+            lower_storage_into(p, &f, dst, ty)
+            count :: lower_const(&f, values.len())
+            lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: count})
+            lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: count})
+            data :: lower_pointer(&f)
+            if values.len() == 0 {
+                lower_emit(&f, LIRInst.Const{dst: data, value: 0})
+            } else {
+                lower_alloc(&m, &f, data, stride * values.len())
+            }
+            lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+            loop (index, value) in values {
+                lower_constant_store(p, &m, &f, data, stride * index, elem, value)
+                if f.failed -> return None
+            }
+        }
+        .Map(entries) -> {
+            lower_storage_into(p, &f, dst, ty)
+            lower_constant_map_fill(p, &m, &f, dst, ty, entries)
+            if f.failed -> return None
+        }
+        .Bytes(values) -> {
+            if !lower_constant_bytes_type(p, ty) {
+                lower_fail(&m, &f, "Bytes constant without a U8 List type is not lowered at O0 yet")
+                return None
+            }
+            lower_storage_into(p, &f, dst, ty)
+            if values.len() == 0 {
+                zero :: lower_const(&f, 0)
+                loop offset in ([Int]{0, 8, 16}) -> lower_emit(&f, LIRInst.Store{base: dst, offset: offset, value: zero})
+            } else {
+                // Share the frozen representation and the packed List clone
+                // loop. Unicode tables must not expand to one LIR store per byte.
+                frozen :: lower_static_tree(p, &m, &f, ty, constant) ?? return None
+                data :: frozen.data ?? return None
+                source :: lower_pointer(&f)
+                lower_emit(&f, LIRInst.DataAddress{dst: source, data: data})
+                lower_inline_clone(p, &m, &f, source, dst, ty)
+            }
+        }
+        .Failed(report) -> {
+            if ty.kind == .Result(ok, err) && report == .Told(value) {
+                lower_alloc(&m, &f, dst, lower_result_box_size(p, ok, err))
+                lower_store_word(&f, dst, 0, lower_result_selector(false))
+                lower_constant_store(p, &m, &f, dst, lower_result_payload_offset(), err, value)
+            } else if lower_option_inner(ty) != None && report == .Clean(_) {
+                // A clean failure of an Option is None (MIRRust.rs constant_for_type).
+                lower_emit(&f, LIRInst.Const{dst: dst, value: 0})
+            } else {
+                lower_fail(&m, &f, "Failed constant without a Result Told payload is not lowered at O0 yet")
+                return None
+            }
+        }
+        else -> {
+            lower_fail(&m, &f, "this constant form is not lowered at O0 yet")
+            return None
+        }
+    }
+    if f.failed -> return None
+    Val(dst)
+}
+
+fn lower_constant_into(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, constant: MIRConstant, dst: LIRValueID) Never! {
+    ty :: lower_checked_type(c, instruction) ?? return
+    _ := lower_constant_tree_value(p, &m, &f, ty, constant, Val(dst))
+}
+
+fn lower_global_definition(p: MIRProgram, name: String) -> MIRConstantDef? Never! {
+    // A fully qualified key wins over a coincidentally matching short name.
+    loop constant in p.constants {
+        if constant.key == name -> return Val(constant)
+    }
+    loop constant in p.constants {
+        if constant.name == name -> return Val(constant)
+    }
+    None
+}
+
+// MIRRust.rs:typed_enum_constant (:29399, :29430): a declared recursive
+// edge adds a wrapper allocation, distinct from the child's own value.
+fn lower_constant_payload(p: MIRProgram, m: &LowerModule, f: &LowerFunction, dst: LIRValueID, info: LowerPayloadInfo, constant: MIRConstant) Never! {
+    if info.boxed {
+        wrapper :: lower_pointer(&f)
+        lower_alloc(&m, &f, wrapper, lower_option_box_size(p, info.ty))
+        lower_constant_store(p, &m, &f, wrapper, 0, info.ty, constant)
+        if f.failed -> return
+        lower_emit(&f, LIRInst.Store{base: dst, offset: info.offset, value: wrapper})
+    } else {
+        lower_constant_store(p, &m, &f, dst, info.offset, info.ty, constant)
+    }
+}

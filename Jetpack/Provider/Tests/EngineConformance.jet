@@ -1,0 +1,193 @@
+// Exact engine conformance claims; PENDING-SEAM(package-tests), no runtime proof claimed.
+
+// ported from jetpack_engine.rs:2035-2075
+#Test("jet_registry_dependency_roles_features_and_constraints_round_trip") {
+    native :: "{{\"name\":\"rolekit\",\"version\":\"1.0.0\",\"content_hash\":\"sha256-rolekit\",\"dependencies\":{{\"runtime\":\"^1.0\"}},\"build_dependencies\":{{\"cc\":{{\"require\":\"^1.0\",\"strict\":true}}}},\"dev_dependencies\":{{\"insta\":\"^1.0\"}},\"optional_dependencies\":{{\"trace\":\"^1.0\"}},\"peer_dependencies\":{{\"host\":\"^2.0\"}},\"features\":{{\"default\":[\"trace\"]}},\"constraints\":{{\"runtime\":{{\"prefer\":\"1.0.1\",\"reject\":[\"1.0.2\"],\"strict\":true}}}}}}"
+    report :: provider_normalize_document(ProviderFamily.JetRegistry, native)
+    provider_test_valid(report, "registry dependency metadata must be lossless")
+    keys :: [String]{"provider.registry.dependency-role.build", "provider.registry.dependency.build.cc", "provider.registry.features", "provider.registry.constraints"}
+    loop key in keys {
+        assert(report.facts.typed.has_key(key))
+    }
+    lock :: report.lock_record("engine-test", "rolekit@jet-registry#version=1.0.0", "x86_64-linux") ?? panic("registry provider lock")
+    facts :: provider_test_locked_facts(lock)
+    assert_eq(facts.native_document, native)
+    assert(facts.facts.has_key("provider.registry.dependency-role.build"))
+    assert(facts.facts.has_key("provider.registry.constraints"))
+}
+
+// ported from jetpack_engine.rs:2077-2134
+#Test("provider_conformance_nuget_conan_vcpkg_uses_shared_production_carrier") {
+    if true { // Independent original NuGet matrix entry.
+        native :: "<package><metadata><id>widget</id><version>1.2.3</version><licenseExpression>MIT</licenseExpression><repository type=\"git\" url=\"https://example.invalid/widget\" /></metadata></package>"
+        report :: provider_normalize_document(ProviderFamily.NuGet, native)
+        provider_test_valid(report, "lossless provider report")
+        lock :: report.lock_record("engine-test", "widget@nuget#version=1.2.3", "x86_64-linux") ?? panic("provider lock")
+        facts :: provider_test_locked_facts(lock)
+        assert_eq(facts.native_document, native)
+        assert_eq(facts.qualified_reference(), "widget@nuget#version=1.2.3")
+        assert(provider_test_has(report.shared_facts().explain_lines(), [String]{"provider"}))
+    }
+    if true { // Independent original Conan matrix entry.
+        native :: "name = \"widget\"\nversion = \"1.2.3\"\nlicense = \"MIT\"\ndef requirements(self):\n    self.requires(\"zlib/1.3.1\")\n"
+        report :: provider_normalize_document(ProviderFamily.Conan, native)
+        provider_test_valid(report, "lossless provider report")
+        lock :: report.lock_record("engine-test", "widget@conan#version=1.2.3", "x86_64-linux") ?? panic("provider lock")
+        facts :: provider_test_locked_facts(lock)
+        assert_eq(facts.native_document, native)
+        assert_eq(facts.qualified_reference(), "widget@conan#version=1.2.3")
+        assert(provider_test_has(report.shared_facts().explain_lines(), [String]{"provider"}))
+    }
+    if true { // Independent original Vcpkg matrix entry.
+        native :: "{{\"name\":\"widget\",\"version-string\":\"1.2.3\",\"license\":\"MIT\",\"dependencies\":[{{\"name\":\"zlib\",\"version>=\":\"1.3.0\",\"features\":[\"core\"]}}],\"features\":{{\"tools\":[\"fmt\"]}}}}"
+        report :: provider_normalize_document(ProviderFamily.Vcpkg, native)
+        provider_test_valid(report, "lossless provider report")
+        lock :: report.lock_record("engine-test", "widget@vcpkg#version=1.2.3", "x86_64-linux") ?? panic("provider lock")
+        facts :: provider_test_locked_facts(lock)
+        assert_eq(facts.native_document, native)
+        assert_eq(facts.qualified_reference(), "widget@vcpkg#version=1.2.3")
+        assert(provider_test_has(report.shared_facts().explain_lines(), [String]{"provider"}))
+    }
+    malformed :: provider_normalize_document(ProviderFamily.Vcpkg, "{{\"name\":\"widget\",\"version\":\"1.0.0\",\"version-string\":\"1.1.0\",\"dependencies\":[{{\"features\":[\"core\"]}}]}}")
+    provider_test_invalid(malformed)
+    assert(provider_test_has(malformed.losses, [String]{"no non-empty `name`"}))
+    assert(provider_test_has(malformed.conflicts, [String]{"conflicting version fields"}))
+}
+
+// ported from jetpack_engine.rs:2136-2218
+#Test("provider_conformance_homebrew_github_binary_uses_shared_production_carrier") {
+    if true { // Independent original Homebrew matrix entry.
+        native :: "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.1\"}},\"tap\":\"homebrew/core\",\"dependencies\":[\"oniguruma\"],\"source\":{{\"url\":\"https://example.invalid/jq.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"bottle\":{{\"stable\":{{\"files\":{{\"x86_64_linux\":{{\"url\":\"https://example.invalid/jq.bottle.tar.gz\",\"sha256\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"}}}}}}}},\"relocatable\":true,\"test\":\"system \\\"#{{bin}}/jq\\\"\"}}"
+        report :: provider_normalize_document(ProviderFamily.Homebrew, native)
+        provider_test_valid(report, "lossless provider report")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, native)
+        assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
+        assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
+        lock :: report.lock_record("engine-test", "jq#version=1.7.1@homebrew", "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        assert_eq(provider_test_locked_facts(lock), shared)
+        assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
+    }
+    if true { // Independent original GitHub matrix entry.
+        native :: "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"target_commitish\":\"0123456789abcdef0123456789abcdef01234567\",\"repository\":{{\"full_name\":\"acme/tool\"}},\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"digest\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"browser_download_url\":\"https://example.invalid/tool\"}}],\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"advisories\":[\"CVE-0000-0000\"]}}"
+        report :: provider_normalize_document(ProviderFamily.Github, native)
+        provider_test_valid(report, "lossless provider report")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, native)
+        assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
+        assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
+        lock :: report.lock_record("engine-test", "tool@github#version=v1.2.3", "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        assert_eq(provider_test_locked_facts(lock), shared)
+        assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
+    }
+    if true { // Independent original Binary matrix entry.
+        native :: "{{\"name\":\"tool\",\"hash\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"platforms\":[\"x86_64-linux\"],\"url\":\"https://example.invalid/tool\",\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"provenance\":{{\"builder\":\"ci\"}},\"sbom\":{{\"format\":\"spdx\"}},\"variants\":{{\"debug\":{{\"features\":[\"trace\"]}}}}}}"
+        report :: provider_normalize_document(ProviderFamily.Binary, native)
+        provider_test_valid(report, "lossless provider report")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, native)
+        assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
+        assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
+        lock :: report.lock_record("engine-test", "tool#digest=sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef@binary", "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        assert_eq(provider_test_locked_facts(lock), shared)
+        assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
+    }
+    homebrew_report :: provider_normalize_document(ProviderFamily.Homebrew, "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.1\"}},\"tap\":\"homebrew/core\",\"dependencies\":[\"oniguruma\"],\"source\":{{\"url\":\"https://example.invalid/jq.tar.gz\",\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"bottle\":{{\"stable\":{{\"files\":{{\"x86_64_linux\":{{\"url\":\"https://example.invalid/jq.bottle.tar.gz\",\"sha256\":\"abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789\"}}}}}}}},\"relocatable\":true,\"test\":\"system \\\"#{{bin}}/jq\\\"\"}}")
+    assert(homebrew_report.facts.typed.has_key("provider.homebrew.bottle.x86_64_linux.sha256"))
+    github_report :: provider_normalize_document(ProviderFamily.Github, "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"target_commitish\":\"0123456789abcdef0123456789abcdef01234567\",\"repository\":{{\"full_name\":\"acme/tool\"}},\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"digest\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"browser_download_url\":\"https://example.invalid/tool\"}}],\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"advisories\":[\"CVE-0000-0000\"]}}")
+    assert(github_report.facts.typed.has_key("provider.github.revision"))
+    assert(github_report.shared_facts().facts.has_key("provider.github.asset.tool-linux.browser_download_url"))
+    binary_report :: provider_normalize_document(ProviderFamily.Binary, "{{\"name\":\"tool\",\"hash\":\"sha256-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"platforms\":[\"x86_64-linux\"],\"url\":\"https://example.invalid/tool\",\"signature\":{{\"key\":\"pk\",\"value\":\"sig\"}},\"provenance\":{{\"builder\":\"ci\"}},\"sbom\":{{\"format\":\"spdx\"}},\"variants\":{{\"debug\":{{\"features\":[\"trace\"]}}}}}}")
+    assert(binary_report.shared_facts().facts.has_key("provider.binary.provenance"))
+}
+
+// ported from jetpack_engine.rs:2220-2270
+#Test("provider_conformance_homebrew_github_binary_reports_loss_and_conflict_without_defaults") {
+    homebrew :: provider_normalize_document(ProviderFamily.Homebrew, "{{\"name\":\"jq\",\"version\":\"1.7.1\",\"versions\":{{\"stable\":\"1.7.2\"}}}}")
+    assert(provider_test_has(homebrew.conflicts, [String]{"conflicting version"}))
+    provider_test_invalid(homebrew)
+    shared_homebrew :: homebrew.shared_facts()
+    matched := false
+    loop conflict in shared_homebrew.conflicts {
+        if conflict.right.contains("conflicting version") && conflict.left != conflict.right -> matched = true
+    }
+    assert(matched)
+    github :: provider_normalize_document(ProviderFamily.Github, "{{\"name\":\"tool\",\"tag_name\":\"v1.2.3\",\"assets\":[{{\"name\":\"tool-linux\",\"platform\":\"x86_64-linux\",\"browser_download_url\":\"https://example.invalid/tool\"}}]}}")
+    assert(provider_test_has(github.losses, [String]{"no content digest"}))
+    provider_test_invalid(github)
+    matched_github := false
+    loop loss in github.shared_facts().losses {
+        if loss.reason.contains("no content digest") -> matched_github = true
+    }
+    assert(matched_github)
+    binary :: provider_normalize_document(ProviderFamily.Binary, "{{\"name\":\"tool\",\"hash\":\"sha256-aa\"}}")
+    assert(provider_test_has(binary.losses, [String]{"not an exact digest"}))
+    assert(provider_test_has(binary.losses, [String]{"no target platform"}))
+    provider_test_invalid(binary)
+    matched_binary := false
+    loop loss in binary.shared_facts().losses {
+        if loss.reason.contains("exact version, revision, or digest") -> matched_binary = true
+    }
+    assert(matched_binary)
+}
+
+// ported from jetpack_engine.rs:5880-5939
+#Test("provider_conformance_pypi_swiftpm_maven_round_trips_the_production_carrier") {
+    if true { // Independent original PyPI matrix entry.
+        native :: "{{\"info\":{{\"name\":\"sample-pkg\",\"version\":\"2.4.1\",\"license\":\"MIT\",\"requires_python\":\">=3.10\",\"requires_dist\":[\"httpx>=0.27\"],\"classifiers\":[\"Programming Language :: Python :: 3\"]}},\"urls\":[{{\"filename\":\"sample_pkg-2.4.1.tar.gz\",\"digests\":{{\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}},\"yanked\":false}}],\"vulnerabilities\":[{{\"id\":\"PYSEC-0000\"}}]}}"
+        report :: provider_normalize_document(ProviderFamily.PyPI, native)
+        provider_test_valid(report, "lossless provider report")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, native)
+        assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
+        assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
+        lock :: report.lock_record("app", shared.reference, "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        assert_eq(provider_test_locked_facts(lock), shared)
+        assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
+    }
+    if true { // Independent original SwiftPM matrix entry.
+        native :: "{{\"version\":1,\"pins\":[{{\"package\":\"swift-log\",\"repositoryURL\":\"https://github.com/apple/swift-log.git\",\"state\":{{\"revision\":\"0123456789abcdef0123456789abcdef01234567\",\"version\":\"1.5.4\"}}}}]}}"
+        report :: provider_normalize_document(ProviderFamily.SwiftPM, native)
+        provider_test_valid(report, "lossless provider report")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, native)
+        assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
+        assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
+        lock :: report.lock_record("app", shared.reference, "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        assert_eq(provider_test_locked_facts(lock), shared)
+        assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
+    }
+    if true { // Independent original Maven matrix entry.
+        native :: "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n  <artifactId>sample</artifactId>\n  <version>1.2.3</version>\n  <packaging>jar</packaging>\n  <licenses><license><name>Apache-2.0</name><url>https://www.apache.org/licenses/LICENSE-2.0</url></license></licenses>\n  <dependencies><dependency><groupId>org.example</groupId><artifactId>dep</artifactId><version>3.0.0</version><scope>test</scope></dependency></dependencies>\n  <build><plugins><plugin><artifactId>maven-compiler-plugin</artifactId><version>3.13.0</version><goals><goal>compile</goal></goals></plugin></plugins></build>\n  <profiles><profile><id>linux</id><activation><os><name>Linux</name></os></activation></profile></profiles>\n  <scm><url>https://example.invalid/sample</url></scm>\n</project>"
+        report :: provider_normalize_document(ProviderFamily.Maven, native)
+        provider_test_valid(report, "lossless provider report")
+        shared :: report.shared_facts()
+        assert_eq(shared.native_document, native)
+        assert(provider_test_has(shared.explain_lines(), [String]{"native", "retained"}))
+        assert_eq(ProviderFacts.from_json(report.export_json()) ?? panic("export uses shared carrier"), shared)
+        lock :: report.lock_record("app", shared.reference, "x86_64-linux") ?? panic("provider lock uses shared carrier")
+        assert_eq(provider_test_locked_facts(lock), shared)
+        assert_eq(lock.future_fields.get("provider-facts-digest") ?? panic("provider facts digest"), shared.digest())
+    }
+}
+
+// ported from jetpack_engine.rs:5941-5987
+#Test("provider_conformance_reports_loss_and_conflict_without_defaults") {
+    missing_version :: provider_normalize_document(ProviderFamily.PyPI, "{{\"info\":{{\"name\":\"sample-pkg\"}},\"urls\":[]}}")
+    assert(provider_test_has(missing_version.losses, [String]{"exact version"}))
+    provider_test_invalid(missing_version)
+    matched := false
+    loop loss in missing_version.shared_facts().losses {
+        if loss.reason.contains("exact version") -> matched = true
+    }
+    assert(matched)
+    branch_only :: provider_normalize_document(ProviderFamily.SwiftPM, "{{\"version\":1,\"pins\":[{{\"package\":\"swift-log\",\"state\":{{\"branch\":\"main\"}}}}]}}")
+    assert(provider_test_has(branch_only.losses, [String]{"exact revision"}))
+    provider_test_invalid(branch_only)
+    conflict :: provider_normalize_document(ProviderFamily.Maven, "<project><groupId>com.example</groupId><artifactId>sample</artifactId><version>1.0.0</version><version>2.0.0</version></project>")
+    assert(provider_test_has(conflict.conflicts, [String]{"conflicting version"}))
+    provider_test_invalid(conflict)
+    unsupported_xml :: provider_normalize_document(ProviderFamily.Maven, "<m:project xmlns:m=\"urn:example\"><m:artifactId>sample</m:artifactId></m:project>")
+    assert(provider_test_has(unsupported_xml.losses, [String]{"namespaced XML"}))
+    provider_test_invalid(unsupported_xml)
+}

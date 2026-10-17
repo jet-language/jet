@@ -121,6 +121,7 @@ tower message done <id> --by owner
 tower papercut add --by me --text "jet-env swallowed stderr" [--card '#12']  # recurring tooling friction only (hit twice, or deterministic for everyone); never blocked by a card lane
 tower papercut resolve <id> --by owner        # owner clears a handled papercut
 tower decision add --file ballot.json --by me # or --file - for stdin, --draft if unfinished
+tower decision list --open --drafts          # agent review: include drafts, hidden from owner views
 tower card update '#12' --phase done --log "criteria met" --by orchestrator
 tower card release '#12' --by me              # if you stop without finishing
 tower card release '#12' --by me --handoff "parser done, sema left, watch X"  # required if the card is `building`
@@ -288,6 +289,7 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 | Guard | Trigger | Error | Escape |
 |---|---|---|---|
 | Ballot-ready | missing required fields, profile authority, ordered full-ballot reviews, complete recommendation rationale, or plain-language density limits | `E_BALLOT` | `--draft`, rewrite, then `decision update <id> --ready` |
+| Draft verdict | Ratification (even owner/quoted) or a verdict superseding a draft | `E_DRAFT` | Finish fresh-reader review and validation with zero gaps, then `decision update <id> --ready --by me`; no owner bypass |
 | Owner-only ratify | `decision ratify` by a non-owner, for a non-acceptance ballot | `E_OWNER_ONLY` | `--quote "owner's words"` |
 | Owner acceptance provenance | Any generic ratify, clearance, quote, or batch attempt on `D-ACCEPT-*` | `E_ACCEPTANCE_OWNER_UI` | Owner uses the dedicated verification UI with its same-origin session and one-time challenge |
 | Frozen lane | any write to a `frozen` card | `E_OWNER_LANE` | none — owner moves it out with `tower card update --phase ... --by owner` |
@@ -298,9 +300,11 @@ closeout token, criteria, command, and evidence. D-TWRGUARD1=C.
 | Closure progression | any claim or brief while an active card has all criteria settled and no open gate | `E_CLOSE_READY` | close, reopen, or block the closure-ready card |
 | Milestone closeout | closeout begins before linked cards are done, or milestone verify lacks its token or verified criteria | `E_MILESTONE` | finish and close cards, freeze source, open token, run review |
 
-`tower verdict '#N' --outcome "..." [--title "…"] --by owner` records an
-owner ruling as an already-ratified decision (never a mere log note) and is
-owner-only with no `--quote` escape — it IS the owner speaking.
+`tower verdict '#N' --outcome "..." --supersedes D-ID [--title "…"] --by owner`
+records an owner ruling as an already-ratified decision (never a mere log note)
+and is owner-only with no `--quote` escape — it IS the owner speaking. The
+superseded ballot must not be a draft. Drafts remain hidden from every owner
+ballot list, card panel, count, and Now view until they are marked ready.
 
 Ratifying a `group: "syntax"` decision auto-appends the standard
 post-ratification chores to the card's `criteria[]`: Syntax.rs entry
@@ -345,7 +349,7 @@ POST /api/decision/add|update|delete   (add: {draft}; update: {ready})
 POST /api/clearance {decisionId,outcome,comment,quote}  (generic ballots only; quote = on-behalf-of)
 POST /api/acceptance/challenge {decisionId,outcome}     (owner UI, same-origin session-bound, short TTL)
 POST /api/acceptance/resolve {challenge,decisionId,outcome,comment}  (single-use)
-POST /api/verdict {id,outcome,title}                    (owner-only; mints a ratified decision)
+POST /api/verdict {id,outcome,title,supersedes}         (owner-only; superseded ballot must not be draft)
 POST /api/question/add|answer|delete
 POST /api/message/add {cardId,text}
 POST /api/message/done {id}                    (owner-only)

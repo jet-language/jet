@@ -1,0 +1,25 @@
+# Port of tests/fmt_project.rs:932-960 plus helper847-929.
+# Ordered audit location list: exactly two extracted rows, boundary-delimited sites, original order.
+# PENDING-GRAMMAR and PENDING-SAME-HEAD. No oracle invented.
+fixture: explicit-probe-p31.fixture
+step baseline: jet run {work}/probe.jet
+exit: 0
+step: jet audit {work}/probe.jet
+exit: 0
+stdout: count "{work}/probe.jet:" = 2 # original predicate
+stdout: line ^= "  {work}/probe.jet:7:16 " # original predicate
+stdout: line ^= "  {work}/probe.jet:16:37 " # original predicate
+stdout: before "probe.jet:7:16 " "probe.jet:16:37 " # original predicate
+step: jet fmt --explicit-copies {work}/probe.jet
+exit: 0
+file: probe.jet ~ "User{name: ~name" # original predicate
+file: probe.jet ~ "tags: ~names}" # original predicate
+file: probe.jet !~ "struct ~" # original predicate
+file: probe.jet count "~" = 2 # original predicate
+copy: probe.jet rewritten.txt
+concat: probe.jet policy.header rewritten.txt
+step: jet check {work}/probe.jet
+exit: 0
+step: jet run {work}/probe.jet
+exit: 0
+stdout: == baseline

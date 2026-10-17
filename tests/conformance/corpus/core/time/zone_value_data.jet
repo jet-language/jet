@@ -1,0 +1,36 @@
+// core-conformance: core.time.zone
+// core-conformance: core.time.parse_zoned
+// Expectations observed from the seed Time.rs civil/TZif oracle.
+use core.time as time
+
+fn check_zones() -[Env, FS.Read]> {
+    aliases :: [String]{"UTC", "Etc/UTC", "Z"}
+    loop name in aliases {
+        zone :: time.zone(name) ?? panic("UTC zone")
+        assert_eq(zone.name(), "UTC")
+        assert_eq(zone.next_transition(0) ?? -1, -1)
+        assert_eq(zone.previous_transition(0) ?? -1, -1)
+    }
+    zone :: time.zone("America/New_York") ?? panic("New York zone")
+    winter :: time.parse_zoned("2024-01-15T12:00:00-05:00[America/New_York]") ?? panic("winter")
+    summer :: time.parse_zoned("2024-07-15T12:00:00-04:00[America/New_York]") ?? panic("summer")
+    assert_eq(winter.format_rfc9557(), "2024-01-15T12:00:00-05:00[America/New_York]")
+    assert_eq(winter.offset_seconds(), -18000)
+    assert_eq(summer.format_rfc9557(), "2024-07-15T12:00:00-04:00[America/New_York]")
+    assert_eq(summer.offset_seconds(), -14400)
+    assert_eq(zone.next_transition(1705323600) ?? -1, 1710054000)
+    assert_eq(zone.previous_transition(1721059200) ?? -1, 1710054000)
+    duplicate :: zone.copy()
+    assert_eq(duplicate.next_transition(1705323600), zone.next_transition(1705323600))
+    utc :: time.parse_zoned("2024-03-01T12:00:00+00:00[UTC]") ?? panic("UTC parse")
+    assert_eq(utc.format_rfc9557(), "2024-03-01T12:00:00Z[UTC]")
+}
+
+fn run() {
+    check_zones()
+    print("zone value data: UTC aliases, winter, summer, transitions")
+}
+
+#Test("immutable zone tables need only environment and filesystem read effects") {
+    check_zones()
+}

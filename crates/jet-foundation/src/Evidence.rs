@@ -713,6 +713,15 @@ impl EvidenceRecord {
     pub fn set_facet(&mut self, facet: EvidenceFacet) {
         self.facet = facet;
     }
+
+    /// A runtime observation retained by the property harness, rather than an
+    /// uncaught producer stop. The diagnostic and failed outcome stay intact.
+    pub fn is_caught_property_case(&self) -> bool {
+        matches!(self.kind, EvidenceKind::Runtime | EvidenceKind::Contract)
+            && self.attachments.iter().any(|attachment| {
+                attachment.name == "caught_by" && attachment.value == "property_case"
+            })
+    }
     pub fn with_derivation(mut self, derivation: &DerivationRecord) -> Self {
         self.derivation = Some(derivation.reference());
         self
@@ -774,6 +783,10 @@ impl EvidenceRecord {
             self.count,
             &self.detail,
         );
+        if self.is_caught_property_case() {
+            self.identity.evidence_id =
+                stable_token(&[&self.identity.evidence_id, "caught_by", "property_case"]);
+        }
         self
     }
 
@@ -1302,6 +1315,7 @@ impl From<EvidenceExpectationError> for EvidenceMergeError {
 std::thread_local! {
     static TEST_EXPECTATION: std::cell::Cell<EvidenceExpectation> =
         const { std::cell::Cell::new(EvidenceExpectation::Ordinary) };
+    static TEST_PROPERTY_CASE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
 /// Keep evidence from one test attached to its declared expectation, including
@@ -1322,6 +1336,20 @@ pub fn jet_evidence_with_expectation<R>(expected_failure: bool, run: impl FnOnce
     run()
 }
 
+/// Attach raw observations to the property case that catches their stop.
+/// Restore the context on unwind as well, so a later ordinary test cannot
+/// inherit the property's capture boundary.
+pub fn jet_evidence_with_property_case<R>(run: impl FnOnce() -> R) -> R {
+    struct Restore(bool);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_PROPERTY_CASE.with(|current| current.set(self.0));
+        }
+    }
+    let _restore = Restore(TEST_PROPERTY_CASE.with(|current| current.replace(true)));
+    run()
+}
+
 
 pub fn write_record_from_codes(
     path: &std::path::Path,
@@ -1337,6 +1365,18 @@ pub fn write_record_from_codes(
         record
             .set_expectation(TEST_EXPECTATION.with(|expectation| expectation.get()))
             .map_err(|error| error.to_string())?;
+    }
+    if matches!(record.kind, EvidenceKind::Runtime | EvidenceKind::Contract)
+        && TEST_PROPERTY_CASE.with(std::cell::Cell::get)
+    {
+        record
+            .attachments
+            .push(EvidenceAttachment::new("caught_by", "property_case"));
+        // The same site can stop in both a sampled case and an ordinary test.
+        // Those observations have different capture provenance, so they must
+        // remain distinct records rather than conflict during report merging.
+        record.identity.evidence_id =
+            stable_token(&[&record.identity.evidence_id, "caught_by", "property_case"]);
     }
     let derivation = record.checked_derivation();
     record.set_derivation(&derivation);
@@ -1862,13 +1902,16 @@ fn decode_diagnostics(
     for _ in 0..count {
         let code = read_string(bytes, at)?;
         let message = read_string(bytes, at)?;
-        let source = if read_byte(bytes, at)? == 1 {
-            let line = read_u32(bytes, at)?;
-            let column = read_u32(bytes, at)?;
-            let path = read_string(bytes, at)?;
-            Some(EvidenceSource::new(path, line, column))
-        } else {
-            None
+        // Optional source markers follow the same strict 0/1 law as other fields.
+        let source = match read_byte(bytes, at)? {
+            0 => None,
+            1 => {
+                let line = read_u32(bytes, at)?;
+                let column = read_u32(bytes, at)?;
+                let path = read_string(bytes, at)?;
+                Some(EvidenceSource::new(path, line, column))
+            }
+            marker => return Err(format!("unknown evidence diagnostic source marker {marker}")),
         };
         values.push(EvidenceDiagnostic::new(code, message, source));
     }
@@ -2329,5 +2372,27 @@ mod tests {
         assert_eq!(rows[0].source.line, 1);
         assert_eq!(rows[1].source.line, 2);
         assert!(rows[0].name().contains("jet-test"));
+    }
+
+    #[test]
+    fn diagnostic_source_marker_refuses_unknown_values() {
+        for marker in [0, 1, 2, 255] {
+            let mut bytes = Vec::new();
+            write_collection_len(&mut bytes, 1).unwrap();
+            write_string(&mut bytes, "E0001").unwrap();
+            write_string(&mut bytes, "message").unwrap();
+            bytes.push(marker);
+            if marker == 1 {
+                bytes.extend_from_slice(&3u32.to_be_bytes());
+                bytes.extend_from_slice(&4u32.to_be_bytes());
+                write_string(&mut bytes, "source.jet").unwrap();
+            }
+            let result = decode_diagnostics(&bytes, &mut 0);
+            match marker {
+                0 => assert!(result.unwrap()[0].source.is_none()),
+                1 => assert_eq!(result.unwrap()[0].source, Some(EvidenceSource::new("source.jet", 3, 4))),
+                _ => assert_eq!(result.unwrap_err(), format!("unknown evidence diagnostic source marker {marker}")),
+            }
+        }
     }
 }

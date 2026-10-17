@@ -1,0 +1,45 @@
+// Email.rs:156-164 derives Clone and ordered PartialEq; CAbiRoutes.rs:11668-11705.
+#Export(c) fn jet_rt_record_new_limits(line_bytes: I64, lines: I64, capabilities: I64, recipients: I64, message_bytes: I64, auth_bytes: I64) -> I64 {
+    a :: jet_int_owned_to_i64(line_bytes)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    b :: jet_int_owned_to_i64(lines)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    c :: jet_int_owned_to_i64(capabilities)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    d :: jet_int_owned_to_i64(recipients)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    e :: jet_int_owned_to_i64(message_bytes)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    f :: jet_int_owned_to_i64(auth_bytes)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    value :: jet_rt_alloc(MAIL_LIMITS_BYTES, I64{8})
+    data_tree_store(value + MAIL_LIMITS_REPLY_LINE_BYTES, a)
+    data_tree_store(value + MAIL_LIMITS_REPLY_LINES, b)
+    data_tree_store(value + MAIL_LIMITS_CAPABILITIES, c)
+    data_tree_store(value + MAIL_LIMITS_RECIPIENTS, d)
+    data_tree_store(value + MAIL_LIMITS_MESSAGE_BYTES, e)
+    data_tree_store(value + MAIL_LIMITS_AUTH_CHALLENGE_BYTES, f)
+    value
+}
+#Export(c) fn jet_rt_record_get_limits_max_reply_line_bytes(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MAIL_LIMITS_REPLY_LINE_BYTES)) }
+#Export(c) fn jet_rt_record_get_limits_max_reply_lines(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MAIL_LIMITS_REPLY_LINES)) }
+#Export(c) fn jet_rt_record_get_limits_max_capabilities(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MAIL_LIMITS_CAPABILITIES)) }
+#Export(c) fn jet_rt_record_get_limits_max_recipients(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MAIL_LIMITS_RECIPIENTS)) }
+#Export(c) fn jet_rt_record_get_limits_max_message_bytes(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MAIL_LIMITS_MESSAGE_BYTES)) }
+#Export(c) fn jet_rt_record_get_limits_max_auth_challenge_bytes(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MAIL_LIMITS_AUTH_CHALLENGE_BYTES)) }
+#Export(c) fn jet_rt_handle_clone_limits(value: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_LIMITS_BYTES, I64{8})
+    coll_copy(value, result, MAIL_LIMITS_BYTES)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_limits(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, MAIL_LIMITS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_limits(left: I64, right: I64) -> Bool {
+    offset := I64{0}
+    loop offset < MAIL_LIMITS_BYTES {
+        if data_tree_word(left + offset) != data_tree_word(right + offset) -> return false
+        offset += I64{8}
+    }
+    true
+}

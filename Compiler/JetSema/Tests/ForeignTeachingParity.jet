@@ -1,0 +1,27 @@
+// Production parser/checker teaching spans, including native Field's whole
+// path versus the canonical Rust member span. No diagnostic substitutes.
+fn foreign_teaching_expect(source: String, code: String, spelling: String) {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("foreign teaching fixture must parse")
+    checked :: check_program(parsed.program, "foreign_teaching", "foreign_teaching.jet", [SemaSourceSegment]{})
+    found := 0
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity != DIAGNOSTIC_ERROR -> next
+        if diagnostic.code != code -> panic("unexpected foreign teaching code: {diagnostic.code}: {diagnostic.what}")
+        if code == "E0040" && diagnostic.fix != "write `task your_work()` or `task {{ … }}`" -> panic("task teaching lost its literal block braces")
+        span :: diagnostic.span ?? panic("foreign teaching has no span")
+        if source.slice(span.start, span.end) != spelling -> panic("foreign teaching marked the wrong source token")
+        found += 1
+    }
+    if found != 1 -> panic("foreign teaching did not refuse exactly one site")
+}
+
+fn run() {
+    foreign_teaching_expect("fn run() {{ getenv(\"HOME\") }}", "E0039", "getenv")
+    foreign_teaching_expect("fn run() {{ value :: os.environ }}", "E0039", "environ")
+    foreign_teaching_expect("fn run() {{ async(42) }}", "E0040", "async")
+    foreign_teaching_expect("fn run() {{ await(42) }}", "E0040", "await")
+    // Rust diagnoses the foreign field spelling even when the root exists.
+    foreign_teaching_expect("fn run() {{ os :: 1\nvalue :: os.environ }}", "E0039", "environ")
+    print("foreign teaching parity: passed")
+}

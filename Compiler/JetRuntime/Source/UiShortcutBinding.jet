@@ -1,0 +1,55 @@
+// Seed runtime.rs131792-131821 / HostServices.rs1543-1572; #4825.
+// NodeId is seed-owned String, not a Core-shaped node/signal carrier.
+fn ui_shortcut_binding_copy(value: I64, result: I64) {
+    ui_shortcut_copy(value + UI_SHORTCUT_BINDING_SHORTCUT, result + UI_SHORTCUT_BINDING_SHORTCUT)
+    ui_carrier_store(result + UI_SHORTCUT_BINDING_ACTION, jet_rt_string_clone(ui_carrier_word(value + UI_SHORTCUT_BINDING_ACTION)))
+    ui_carrier_store(result + UI_SHORTCUT_BINDING_NODE, ui_optional_text_clone(ui_carrier_word(value + UI_SHORTCUT_BINDING_NODE)))
+}
+fn ui_shortcut_binding_fields_drop(value: I64) {
+    ui_shortcut_fields_drop(value + UI_SHORTCUT_BINDING_SHORTCUT)
+    jet_rt_string_drop(ui_carrier_word(value + UI_SHORTCUT_BINDING_ACTION))
+    ui_optional_text_drop(ui_carrier_word(value + UI_SHORTCUT_BINDING_NODE))
+}
+fn ui_shortcut_binding_clone(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_SHORTCUT_BINDING_BYTES, I64{8})
+    ui_shortcut_binding_copy(value, result)
+    result
+}
+fn ui_shortcut_binding_drop(value: I64) {
+    if (value == I64{0}) -> return
+    ui_shortcut_binding_fields_drop(value)
+    jet_rt_free(value, UI_SHORTCUT_BINDING_BYTES, I64{8})
+}
+fn ui_shortcut_binding_eq(a: I64, b: I64) -> Bool {
+    jet_rt_handle_eq_jet_ui_shortcut(a + UI_SHORTCUT_BINDING_SHORTCUT, b + UI_SHORTCUT_BINDING_SHORTCUT) && jet_rt_string_eq(ui_carrier_word(a + UI_SHORTCUT_BINDING_ACTION), ui_carrier_word(b + UI_SHORTCUT_BINDING_ACTION)) && ui_optional_text_eq(ui_carrier_word(a + UI_SHORTCUT_BINDING_NODE), ui_carrier_word(b + UI_SHORTCUT_BINDING_NODE))
+}
+fn ui_shortcut_dispatch_kind(value: I64) -> I64 {
+    kind :: ui_carrier_word(value + UI_SHORTCUT_DISPATCH_KIND)
+    if (kind != I64{0} && kind != I64{1}) -> rt_record_variant_panic()
+    kind
+}
+fn ui_shortcut_dispatch_clone(value: I64) -> I64 {
+    kind :: ui_shortcut_dispatch_kind(value)
+    result :: jet_rt_alloc(UI_SHORTCUT_DISPATCH_BYTES, I64{8})
+    ui_carrier_store(result + UI_SHORTCUT_DISPATCH_KIND, kind)
+    if {
+        (kind == I64{0}) -> ui_shortcut_binding_copy(value + UI_SHORTCUT_DISPATCH_BINDING, result + UI_SHORTCUT_DISPATCH_BINDING)
+        else -> {
+            ui_carrier_store(result + UI_SHORTCUT_DISPATCH_BINDING + UI_SHORTCUT_KEY, I64{0})
+            ui_carrier_store(result + UI_SHORTCUT_DISPATCH_BINDING + UI_SHORTCUT_MODIFIERS, I64{0})
+            ui_carrier_store(result + UI_SHORTCUT_DISPATCH_BINDING + UI_SHORTCUT_BINDING_ACTION, I64{0})
+            ui_carrier_store(result + UI_SHORTCUT_DISPATCH_BINDING + UI_SHORTCUT_BINDING_NODE, I64{0})
+        }
+    }
+    result
+}
+fn ui_shortcut_dispatch_drop(value: I64) {
+    if (value == I64{0}) -> return
+    if (ui_shortcut_dispatch_kind(value) == I64{0}) -> ui_shortcut_binding_fields_drop(value + UI_SHORTCUT_DISPATCH_BINDING)
+    jet_rt_free(value, UI_SHORTCUT_DISPATCH_BYTES, I64{8})
+}
+fn ui_shortcut_dispatch_eq(a: I64, b: I64) -> Bool {
+    kind :: ui_shortcut_dispatch_kind(a)
+    if (kind != ui_shortcut_dispatch_kind(b)) -> return false
+    kind == I64{1} || ui_shortcut_binding_eq(a + UI_SHORTCUT_DISPATCH_BINDING, b + UI_SHORTCUT_DISPATCH_BINDING)
+}

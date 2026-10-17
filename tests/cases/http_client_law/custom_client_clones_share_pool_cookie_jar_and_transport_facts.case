@@ -1,0 +1,19 @@
+# HAND-PORT tests/http_client_law.rs:619-718 custom_client_clones_share_pool_cookie_jar_and_transport_facts
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Public original real pooled-socket cookie presence+expired/SameSiteNone/Host absences, exact response bodies/protocol/nonempty remote address/empty redirects/seven timings/reused=true. Private raw policy clone handles/root-drop/client-drop and exact per-read None/Some sequences remain runtime-http-internals/raw-http-body-handle ledger, full original batch2 archive; not a full runtime-pass claim.
+fixture: custom_client_clones_share_pool_cookie_jar_and_transport_facts.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = custom_client_clones_share_pool_cookie_jar_and_transport_facts.stdout.expected
+wait: peer
+exit: 0

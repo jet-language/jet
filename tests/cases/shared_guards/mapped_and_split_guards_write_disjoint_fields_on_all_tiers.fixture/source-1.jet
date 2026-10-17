@@ -1,0 +1,31 @@
+
+struct Pair {
+    left: Int,
+    right: Int,
+}
+
+fn map_left(handle: Shared<Pair>) {
+    guard :: handle.guard_edit()
+    mapped := ^guard.map(value -> value.left)
+    mapped.value += 10
+}
+
+fn split_pair(handle: Shared<Pair>) {
+    guard :: handle.guard_edit()
+    (left, right) := ^guard.split(
+        value -> value.left,
+        value -> value.right
+    )
+    left.value += 1
+    right.value += 2
+}
+
+fn run() {
+    mapped := shared Pair{ left: 1, right: 2 }
+    map_left(mapped)
+    print(mapped.left + mapped.right)
+
+    split := shared Pair{ left: 3, right: 4 }
+    split_pair(split)
+    print(split.left + split.right)
+}

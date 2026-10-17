@@ -1,0 +1,9 @@
+# Port of tests/library_outputs.rs:615-669; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+requires: tool:wasm-tools
+fixture: ../../../Examples/features/packages/library_loadable
+copy: {root}/tests/cases/library_outputs/component_build_load_and_foreign_call_are_one_surface.fixture/package.jet package.jet
+step: jet build --target=sandbox library.jet
+file: .jet/build/library.wasm is-file
+step: jet run component_host.jet
+stdout: = component_build_load_and_foreign_call_are_one_surface.out

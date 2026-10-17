@@ -1,0 +1,21 @@
+use core.files as s2_inline_surface_files
+
+// PORT subclaims of tests/inline_package.rs:290-314; Rust spelling laws retire.
+// Plain helper keeps every assertion in author-check's checked body (#4790).
+fn s2_inline_package_canonical_surface_has_one_generated_shape() {
+    decision :: s2_inline_surface_files.read("Docs/spec/syntax-decisions.md") ?? panic("read inline Package decision")
+    assert(decision.contains("D-ECO-INLINEPACKAGE1=A — one optional leading inline"))
+    tree :: s2_inline_surface_files.read("Tools/editors/tree-sitter/grammar.js") ?? panic("read tree-sitter grammar")
+    assert(tree.contains("source_file: ($) => seq(optional($.inline_package), repeat($._item))"))
+    assert(tree.contains("inline_package: ($) => seq(\"package\", $.record_literal)"))
+    vscode :: s2_inline_surface_files.read("Tools/editors/vscode/syntaxes/jet.tmLanguage.json") ?? panic("read VSCode syntax")
+    assert(vscode.contains("D-ECO-INLINEPACKAGE1=A"))
+    textmate :: s2_inline_surface_files.read("Tools/editors/jet.tmGrammar") ?? panic("read TextMate syntax")
+    assert(textmate.contains("D-ECO-INLINEPACKAGE1=A"))
+    zed :: s2_inline_surface_files.read("Tools/editors/zed/languages/jet/highlights.scm") ?? panic("read Zed syntax")
+    assert(zed.contains("(inline_package \"package\" @keyword)"))
+}
+
+#Test("inline_package_canonical_surface_has_one_generated_shape") {
+    s2_inline_package_canonical_surface_has_one_generated_shape()
+}

@@ -1,0 +1,272 @@
+// Core/HumanOutput.rs:368-429/562-621 and FSIoEnvOsTesting.rs:426-473.
+// Iterator-owned opaque State64: total0 (-1 unknown), owned description8,
+// owned format16, HOST Instant seconds24/nanos32, unsigned count40,
+// displayed48, finished56. Only these leaves dereference/free the state.
+fn progress_bound(text: I64) -> I64 {
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    count := I64{0}
+    loop at < length {
+        if (count >= I64{256}) -> break
+        at += rt_text_width(data + at)
+        count += I64{1}
+    }
+    rt_text_copy(data, at)
+}
+
+fn progress_strip_ansi(text: I64) -> I64 {
+    output :: jet_rt_string_builder_new()
+    data :: rt_text_data(text)
+    at := I64{0}
+    state := I64{0}
+    loop at < rt_text_len(text) {
+        width :: rt_text_width(data + at)
+        character :: rt_text_decode(data + at)
+        if {
+            (state == I64{0}) -> {
+                if {
+                    (character == I64{27}) -> { state = I64{1} }
+                    else -> rt_text_append(output, data + at, width)
+                }
+            }
+            (state == I64{1}) -> {
+                state = if {
+                    (character == I64{91}) -> I64{2}
+                    (character == I64{93}) -> I64{3}
+                    else -> I64{0}
+                }
+            }
+            (state == I64{2}) -> {
+                if (character >= I64{64} && character <= I64{126}) -> state = I64{0}
+            }
+            (state == I64{3}) -> {
+                if {
+                    (character == I64{7}) -> { state = I64{0} }
+                    (character == I64{27}) -> { state = I64{4} }
+                }
+            }
+            else -> { state = if (character == I64{92}) -> I64{0} else -> I64{3} }
+        }
+        at += width
+    }
+    output
+}
+
+fn progress_unsigned_float(word: I64) -> Float {
+    if (word >= I64{0}) -> return Float{word}
+    // Round-to-odd before the signed cast preserves the low sticky bit, so
+    // a U64 halfway case followed by bit0=1 cannot be double-rounded down.
+    Float{((word >> I64{1}).bit_and(I64{9223372036854775807})).bit_or((word.bit_and(I64{1})))} * Float{2}
+}
+
+fn progress_unsigned_text(word: I64) -> I64 {
+    if (word >= I64{0}) -> return jet_rt_i64_to_string(word)
+    output :: jet_rt_string_builder_new()
+    // unsigned /10 implemented from the signed-safe half, preserving U64.MAX.
+    half :: (word >> I64{1}).bit_and(I64{9223372036854775807})
+    quotient :: half /% I64{5}
+    remainder :: (half % I64{5}) * I64{2} + (word.bit_and(I64{1}))
+    rt_text_push_number(output, quotient)
+    rt_text_push_word(output, I64{48} + remainder, I64{1})
+    output
+}
+
+// Rust {:.2} rounds the exact binary value ties-to-even, not value*100 in
+// floating point (which would introduce a second rounding at half boundaries).
+fn progress_fixed2(value: Float, suffix: I64) -> I64 {
+    bits :: rt_f64_bits(value)
+    binary :: (bits >> I64{52}).bit_and(I64{2047})
+    mantissa :: (bits.bit_and(I64{4503599627370495})).bit_or((if (binary == I64{0}) -> I64{0} else -> I64{4503599627370496}))
+    shift :: if (binary == I64{0}) -> I64{-1074} else -> binary - I64{1075}
+    numerator :: jet_int_mul(mantissa, I64{100})
+    rounded := I64{0}
+    if {
+        (shift >= I64{0}) -> {
+            rounded = jet_int_shl(numerator, shift, I64{0}, I64{0}, I64{0})
+        }
+        // mantissa*100 < 2^60: every smaller binary value rounds to zero.
+        (shift > I64{-61}) -> {
+            places :: -shift
+            quotient :: jet_int_shr(numerator, places, I64{0}, I64{0}, I64{0})
+            restored :: jet_int_shl(quotient, places, I64{0}, I64{0}, I64{0})
+            remainder :: jet_int_sub(numerator, restored)
+            half :: jet_int_shl(I64{1}, places - I64{1}, I64{0}, I64{0}, I64{0})
+            order :: jet_int_compare(remainder, half)
+            odd :: jet_int_rem(quotient, I64{2}, I64{0}, I64{0}, I64{0})
+            rounded = if (order > I64{0} || (order == I64{0} && odd != I64{0})) -> jet_int_add(quotient, I64{1}) else -> jet_rt_int_clone(quotient)
+            jet_rt_int_drop(odd)
+            jet_rt_int_drop(half)
+            jet_rt_int_drop(remainder)
+            jet_rt_int_drop(restored)
+            jet_rt_int_drop(quotient)
+        }
+    }
+    jet_rt_int_drop(numerator)
+    digits :: jet_rt_int_to_string(rounded)
+    jet_rt_int_drop(rounded)
+    length :: rt_text_len(digits)
+    output :: jet_rt_string_builder_new()
+    if {
+        (length <= I64{2}) -> {
+            rt_text_push_word(output, I64{11824}, I64{2}) // 0.
+            if (length == I64{1}) -> rt_text_push_word(output, I64{48}, I64{1})
+            rt_text_append(output, rt_text_data(digits), length)
+        }
+        else -> {
+            rt_text_append(output, rt_text_data(digits), length - I64{2})
+            rt_text_push_word(output, I64{46}, I64{1})
+            rt_text_append(output, rt_text_data(digits) + length - I64{2}, I64{2})
+        }
+    }
+    rt_text_append(output, rt_text_data(suffix), rt_text_len(suffix))
+    jet_rt_string_drop(digits)
+    output
+}
+
+fn progress_substitute(template: I64, key: I64, value: I64) -> I64 {
+    output :: jet_string_replace(template, key, value)
+    jet_rt_string_drop(template)
+    jet_rt_string_drop(value)
+    output
+}
+
+fn progress_render(description: I64, format: I64, count: I64, total: I64, elapsed: Float, color: Bool) -> I64 {
+    template :: if (rt_text_len(format) == I64{0}) -> rt_static_text("{{description}} {{percent}}% {{count}}/{{total}} elapsed {{elapsed}} remaining {{remaining}} rate {{rate}}") else -> format
+    rendered := progress_bound(template)
+    rendered = progress_substitute(rendered, rt_static_text("{{description}}"), progress_bound(description))
+    percent := jet_rt_string_clone(rt_static_text("?"))
+    if (total >= I64{0}) {
+        jet_rt_string_drop(percent)
+        if (total == I64{0}) -> percent = jet_rt_i64_to_string(I64{100})
+        else {
+            count_int :: jet_int_owned_from_i64(count)
+            scaled :: jet_int_mul(count_int, I64{100})
+            total_int :: jet_int_owned_from_i64(total)
+            quotient :: jet_int_div(scaled, total_int, I64{0}, I64{0}, I64{0})
+            percent = jet_rt_int_to_string(quotient)
+            jet_rt_int_drop(quotient)
+            jet_rt_int_drop(total_int)
+            jet_rt_int_drop(scaled)
+            jet_rt_int_drop(count_int)
+        }
+    }
+    rendered = progress_substitute(rendered, rt_static_text("{{percent}}"), percent)
+    rendered = progress_substitute(rendered, rt_static_text("{{count}}"), progress_unsigned_text(count))
+    rendered = progress_substitute(rendered, rt_static_text("{{total}}"), if (total < I64{0}) -> jet_rt_string_clone(rt_static_text("?")) else -> jet_rt_i64_to_string(total))
+    rendered = progress_substitute(rendered, rt_static_text("{{elapsed}}"), progress_fixed2(elapsed, rt_static_text("s")))
+    remaining :: if {
+        (total >= I64{0} && count >= total) -> jet_rt_string_clone(rt_static_text("0.00s"))
+        (total >= I64{0} && count > I64{0}) -> progress_fixed2(elapsed * Float{total - count} / Float{count}, rt_static_text("s"))
+        else -> jet_rt_string_clone(rt_static_text("?"))
+    }
+    rendered = progress_substitute(rendered, rt_static_text("{{remaining}}"), remaining)
+    rate :: if (elapsed > Float{0.0}) -> progress_fixed2(progress_unsigned_float(count) / elapsed, rt_static_text("/s")) else -> jet_rt_string_clone(rt_static_text("?/s"))
+    rendered = progress_substitute(rendered, rt_static_text("{{rate}}"), rate)
+    bounded :: progress_bound(rendered)
+    jet_rt_string_drop(rendered)
+    if color -> return bounded
+    stripped :: progress_strip_ansi(bounded)
+    jet_rt_string_drop(bounded)
+    stripped
+}
+
+fn progress_enabled() -> Bool {
+    if !host_is_tty(I64{2}) -> return false
+    value :: host_environment_value(rt_static_text("JET_MACHINE_OUTPUT"))
+    if (value == I64{0}) -> return true
+    // Raw var_os equality: invalid UTF-8 never aliases the ASCII value "1".
+    rt_text_byte(value) != I64{49} || rt_text_byte(value + I64{1}) != I64{0}
+}
+
+fn progress_fail(error: I64) {
+    message :: jet_rt_handle_debug_io_error(error)
+    jet_rt_handle_drop_io_error(error)
+    jet_panic(rt_static_text("<progress>"), I64{0}, message)
+    jet_rt_string_drop(message)
+}
+
+fn progress_write(text: I64, newline: Bool) -> Bool {
+    if !progress_enabled() -> return true
+    operation := HOST_IO_OP_WRITE
+    cause := I64{0}
+    if {
+        jet_fault_should_fail(rt_static_text("IO.Write")) -> {
+            cause = jet_rt_string_clone(rt_static_text("fault injected: IO.Write"))
+        }
+        jet_fault_should_fail(rt_static_text("IO.Flush")) -> {
+            operation = HOST_IO_OP_FLUSH
+            cause = jet_rt_string_clone(rt_static_text("fault injected: IO.Flush"))
+        }
+    }
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    if {
+        (cause != I64{0}) -> {
+            _ := host_io_other_take(operation, host_stderr_name(), cause, slot)
+        }
+        else -> {
+            frame :: jet_rt_string_builder_new()
+            if !newline -> rt_text_push_word(frame, I64{13}, I64{1})
+            rt_text_append(frame, rt_text_data(text), rt_text_len(text))
+            if newline -> rt_text_push_word(frame, I64{10}, I64{1})
+            failure :: host_stderr_write(rt_text_data(frame), rt_text_len(frame))
+            jet_rt_string_drop(frame)
+            if (host_stdio_result(failure, HOST_IO_OP_FLUSH, true, slot) != I64{0}) {
+                jet_rt_free(slot, I64{8}, I64{8})
+                return true
+            }
+        }
+    }
+    error :: rt_text_word(slot)
+    jet_rt_free(slot, I64{8}, I64{8})
+    progress_fail(error)
+    false
+}
+
+#Export(c) fn jet_rt_progress_state_new(description: I64, format: I64, total: I64) -> I64 {
+    state :: jet_rt_alloc(I64{64}, I64{8})
+    thread_zero(state, I64{64})
+    rt_text_store(state, if (total < I64{0}) -> I64{-1} else -> total)
+    rt_text_store(state + I64{8}, jet_rt_string_clone(description))
+    rt_text_store(state + I64{16}, jet_rt_string_clone(format))
+    instant :: time_clock_read(I64{1})
+    rt_text_store(state + I64{24}, sync_load(instant))
+    rt_text_store(state + I64{32}, sync_load(instant + I64{8}))
+    state
+}
+
+#Export(c) fn jet_rt_progress_state_finish(state: I64) {
+    if (rt_text_word(state + I64{56}) != I64{0}) -> return
+    rt_text_store(state + I64{56}, I64{1})
+    if (rt_text_word(state + I64{48}) != I64{0}) -> _ := progress_write(rt_static_text(""), true)
+}
+
+#Export(c) fn jet_rt_progress_state_advance(state: I64) {
+    if (rt_text_word(state + I64{56}) != I64{0}) -> return
+    previous :: rt_text_word(state + I64{40})
+    count := if (previous == I64{-1}) -> previous else -> wrapping(previous + I64{1})
+    total :: rt_text_word(state)
+    if (total >= I64{0} && world_unsigned_before(total, count)) -> count = total
+    rt_text_store(state + I64{40}, count)
+    instant :: time_clock_read(I64{1})
+    seconds := sync_load(instant) - rt_text_word(state + I64{24})
+    nanos := sync_load(instant + I64{8}) - rt_text_word(state + I64{32})
+    if (nanos < I64{0}) {
+        seconds -= I64{1}
+        nanos += I64{1000000000}
+    }
+    elapsed :: if (seconds < I64{0}) -> Float{0.0} else -> Float{seconds} + Float{nanos} / Float{1000000000}
+    text :: progress_render(rt_text_word(state + I64{8}), rt_text_word(state + I64{16}), count, total, elapsed, terminal_color_enabled())
+    emitted :: progress_write(text, false)
+    jet_rt_string_drop(text)
+    if !emitted -> return
+    rt_text_store(state + I64{48}, I64{1})
+    if (total >= I64{0} && count == total) -> jet_rt_progress_state_finish(state)
+}
+
+#Export(c) fn jet_rt_progress_state_drop(state: I64) {
+    jet_rt_progress_state_finish(state)
+    jet_rt_string_drop(rt_text_word(state + I64{8}))
+    jet_rt_string_drop(rt_text_word(state + I64{16}))
+    jet_rt_free(state, I64{64}, I64{8})
+}

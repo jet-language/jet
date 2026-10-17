@@ -73,8 +73,8 @@ fn bad(rows: [Int], graph: Graph) {
         &chunks.push("x" + text)
         copy := graph
         field_copy := graph.rows
-        whole := ~rows
-        &copies.push(~graph)
+        whole := rows.copy()
+        &copies.push(graph.copy())
         _ := scan(rows, row)
     }
 }

@@ -33,9 +33,9 @@ fn check_at(src: &str, root: &str) -> (ProgramBundle, Vec<Diagnostic>) {
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             source: src.into(),
+            core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -104,14 +104,17 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
         modules.push(LoadedModule {
             path: PathBuf::from(path),
             display: (*path).into(),
-            alias: path.trim_end_matches(".jet").into(),
+            alias: path.strip_prefix("<corelib>/")
+                .and_then(|path| jet_foundation::CoreModuleExports::core_source_modules()
+                    .iter().find(|source| source.path == path))
+                .map_or_else(|| path.trim_end_matches(".jet").into(), |source| source.alias.into()),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             source: (*src).into(),
+            core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -147,6 +150,346 @@ fn check_modules(sources: &[(&str, &str, &[(&str, usize)])]) -> (ProgramBundle, 
     (bundle, diagnostics)
 }
 
+#[test]
+fn imported_core_record_associated_methods_precede_module_calls() {
+    let core = r#"
+#[Error]
+struct EncodingError { reason: String }
+impl EncodingError {
+    fn new(reason: String) -> EncodingError Never! {
+        EncodingError{reason: reason}
+    }
+}
+"#;
+    for source in [
+        "use core.encoding.[EncodingError]\nfn make() -> EncodingError Never! { EncodingError.new(\"invalid\") }\nfn run() {}\n",
+        "use core.encoding as encoding\nfn make() -> encoding.EncodingError Never! { encoding.EncodingError.new(\"invalid\") }\nfn run() {}\n",
+    ] {
+        let (_, diagnostics) = check_modules(&[
+            ("<corelib>/Core/encoding/encoding.jet", core, &[]),
+            ("pkg-a/src/main.jet", source, &[]),
+        ]);
+        assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    }
+}
+
+#[test]
+fn source_owned_core_enum_imports_precede_module_calls() {
+    let core = "#Error enum EnvError { InvalidValue(String), Unavailable }\n";
+    for source in [
+        "use core.sys.[EnvError]\n\
+fn invalid() -> EnvError Never! { EnvError.InvalidValue(\"invalid\") }\n\
+fn absent() -> EnvError Never! { EnvError.Unavailable }\nfn run() {}\n",
+        "use core.sys as sys\n\
+fn invalid() -> sys.EnvError Never! { sys.EnvError.InvalidValue(\"invalid\") }\n\
+fn absent() -> sys.EnvError Never! { sys.EnvError.Unavailable }\nfn run() {}\n",
+    ] {
+        let (_, diagnostics) = check_modules(&[
+            ("<corelib>/Core/sys.jet", core, &[]),
+            ("pkg-a/src/main.jet", source, &[]),
+        ]);
+        assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    }
+}
+
+#[test]
+fn native_core_enum_imports_use_their_variant_registry() {
+    for source in [
+        "use core.sys.[EnvError]\n\
+fn run() {\n\
+    name :: EnvError.InvalidName\n\
+    value :: EnvError.InvalidValue\n\
+    unicode :: EnvError.NonUnicode\n\
+}\n",
+        "use core.sys as sys\n\
+fn run() {\n\
+    name :: sys.EnvError.InvalidName\n\
+    value :: sys.EnvError.InvalidValue\n\
+    unicode :: sys.EnvError.NonUnicode\n\
+}\n",
+        "use core.event.[EventConfigError as ConfigError]\n\
+fn run() {\n\
+    error :: ConfigError.InvalidCapacity\n\
+    called :: ConfigError.InvalidCapacity()\n\
+}\n",
+        "use core.event as event\n\
+fn run() { error :: event.EventConfigError.InvalidCapacity }\n",
+    ] {
+        let (_, diagnostics) = check(source);
+        assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    }
+    let (_, diagnostics) = check(
+        "use core.sys.[EnvError]\nfn run() { error :: EnvError.NotACase }\n",
+    );
+    assert!(!error_codes(&diagnostics).is_empty(), "unknown variants must fail");
+}
+
+#[test]
+fn native_core_enum_cases_in_embedded_source_keep_the_native_leaf() {
+    let source = "use core.event.[EventConfigError]\n\
+fn failure() -> EventConfigError Never! { EventConfigError.InvalidCapacity }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/event/event.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn arrowless_unit_failure_signature_checks_five_line_carrier_body() {
+    let source = "#Error enum MyError { X }\n\
+fn f(bad: Bool) MyError! {\n\
+    if bad -> return Err(MyError.X)\n\
+    Ok(())\n\
+}\n";
+    let (bundle, diagnostics) = check(source);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let function = bundle.modules[0].items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "f" => Some(function),
+        _ => None,
+    }).unwrap();
+    assert!(matches!(
+        function.return_type.as_ref(),
+        Some(Type::Result { ok, err })
+            if **ok == Type::Named("Unit".into()) && err.name().ends_with("MyError")
+    ));
+    assert!(matches!(
+        function.body.last(),
+        Some(jet_sema::AST::Stmt::Return(Some(jet_sema::AST::Expr::Ok(..)), _))
+    ));
+}
+
+#[test]
+fn arrowless_unit_failure_keeps_imported_core_error_identity() {
+    let core = "#Error struct EncodingError { reason: String }\n";
+    let source = "use core.encoding.[EncodingError]\n\
+fn fail(error: EncodingError) EncodingError! { Err(error) }\n\
+fn forward(error: EncodingError) EncodingError! {\n\
+    fail(error) ?? return Err(err)\n\
+    Ok(())\n\
+}\n\
+fn run() {}\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/encoding/encoding.jet", core, &[]),
+        ("pkg-a/src/main.jet", source, &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn io_context_annotations_remain_core_only() {
+    let source = "fn context() -> IOContext Never! {\n\
+    IOContext{operation: IOOperation.Read, resource: None, os_code: None, cause: None}\n\
+}\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/files/files.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let (_, diagnostics) = check(source);
+    assert!(error_codes(&diagnostics).contains(&"E0119"), "{diagnostics:?}");
+}
+
+#[test]
+fn core_source_decimal_decl_and_display_impl_replace_builtin_name() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet",
+         "struct Decimal { value: Int }\nimpl Decimal.Display { fn display(self) -> String Never! { \"decimal\" } }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "Core Decimal errors: {errors:?}");
+}
+
+#[test]
+fn core_data_error_display_is_source_owned_and_duplicates_still_fail() {
+    let core = "#[Equatable, Error]\nstruct DataError { reason: String }\n\
+impl DataError.Display { fn display(self) -> String { self.reason.copy() } }\n";
+    let user = "use core.data\nfn show(error: data.DataError) -> String { \"{error}\" }\nfn run() {}\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/data/data.jet", core, &[]),
+        ("pkg-a/src/main.jet", user, &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let duplicate = format!("{core}\nimpl DataError.Display {{ fn display(self) -> String {{ \"duplicate\" }} }}\n");
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/data/data.jet", &duplicate, &[]),
+        ("pkg-a/src/main.jet", user, &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+}
+
+#[test]
+fn qualified_writer_nominal_wins_over_builtin_trait() {
+    let provider = "pub struct Writer { prefix: String }\n\
+pub fn make() -> Writer { Writer{prefix: \"written\"} }\n";
+    let user = "use \"writer.jet\" as jetc\n\
+fn prefix(writer: jetc.Writer) -> String { writer.prefix.copy() }\n\
+fn run() { print(prefix(jetc.make())) }\n";
+    let (bundle, diagnostics) = check_modules(&[
+        ("pkg-a/src/writer.jet", provider, &[]),
+        ("pkg-a/src/main.jet", user, &[("jetc", 0)]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let function = bundle.modules[1].items.iter().find_map(|item| match item {
+        Item::Func(function) if function.name == "prefix" => Some(function),
+        _ => None,
+    }).unwrap();
+    assert!(matches!(&function.params[0].ty, Type::Named(name) if name.ends_with("::Writer")));
+}
+
+#[test]
+fn core_crypto_qualified_self_import_matches_local_secret_fields() {
+    let crypto = "use core.crypto\nuse \"jetc.jet\" as jetc\n\
+struct Secret { label: Int }\n\
+fn verify(reader: jetc.Reader) -> Int {\n\
+    key: Secret = reader.key\n\
+    key.label\n\
+}\n";
+    let jetc = "use core.crypto\npub struct Reader { key: crypto.Secret }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/crypto/crypto.jet", crypto, &[("jetc", 1)]),
+        ("<corelib>/Core/crypto/jetc.jet", jetc, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn unrelated_core_module_cannot_redefine_decimal() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/time/time.jet", "struct Decimal { value: Int }\n", &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0106"), "{diagnostics:?}");
+}
+
+#[test]
+fn core_source_mixed_operator_displaces_seed_but_duplicate_source_impl_still_fails() {
+    let source = "struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Vec3 Never! { rhs } }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(!diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+    let duplicate = format!("{source}\nimpl Float.Div(Vec3) {{ fn div(self, rhs: Vec3) -> Vec3 Never! {{ rhs }} }}\n");
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet", &duplicate, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(diagnostics.iter().any(|d| d.code == "E0908"), "{diagnostics:?}");
+}
+
+#[test]
+fn imported_core_primitive_left_operator_uses_source_result() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/math.jet",
+         "struct Vec3 { x: Float }\nimpl Float.Div(Vec3) { fn div(self, rhs: Vec3) -> Int Never! { 17 } }\n",
+         &[]),
+        ("pkg-a/src/main.jet",
+         "use core.math.[Vec3]\nfn answer(left: Float, right: Vec3) -> Int Never! { left / right }\nfn dot(left: Float, right: Vec3) -> Int Never! { left.div(right) }\nfn run() {}\n",
+         &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "source result was shadowed by a seed row: {errors:?}");
+}
+
+#[test]
+fn core_rng_private_method_resolves_inside_own_impl() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/math/random.jet",
+         "struct RNG { state: Int }\nimpl RNG { fn float_open(self) -> Float Never! { 0.5 } fn sample(self) -> Float Never! { self.float_open() } }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    let errors: Vec<_> = diagnostics.iter().filter(|d| d.severity == Severity::Error).collect();
+    assert!(errors.is_empty(), "private source RNG method errors: {errors:?}");
+}
+
+#[test]
+fn io_operation_annotations_are_core_only() {
+    let source = "fn retain(operation: IOOperation) -> IOOperation Never! { operation }\n";
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/term/term.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "Core IOOperation: {diagnostics:?}");
+    let (_, diagnostics) = check("fn retain(operation: IOOperation) {}\nfn run() {}\n");
+    assert_eq!(error_codes(&diagnostics), ["E0119"], "{diagnostics:?}");
+}
+
+#[test]
+fn core_io_operation_copy_metadata_agrees_with_its_runtime_carrier() {
+    let source = r#"
+#Policy(copies: .Explicit)
+fn context(operation: IOOperation) -> IOContext Never! {
+    IOContext{operation: operation.copy(), resource: None, os_code: None, cause: None}
+}
+fn retain(operation: IOOperation) -> IOOperation Never! { operation.copy() }
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/term/term.jet", source, &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+    let (_, diagnostics) = check("fn retain(operation: IOOperation) -> IOOperation Never! { operation.copy() }\nfn run() {}\n");
+    assert!(error_codes(&diagnostics).contains(&"E0119"), "{diagnostics:?}");
+}
+
+#[test]
+fn an_imported_returned_view_stays_borrowed_when_captured_by_a_sort_callback() {
+    let helper = "fn window(values: [(key: String, value: Int)]) -> View<(key: String, value: Int)> from values { values[0..<values.len()] }\n";
+    let source = r#"
+use helper as windows
+fn run() {
+    values := [(key: "b", value: 2), (key: "a", value: 1)]
+    entries :: windows.window(values)
+    indices := [0, 1]
+    &indices.sort_by((left: Int, right: Int) -> entries[left].key <=> entries[right].key)
+    loop index in indices {
+        print(entries[index].key)
+        print(entries[index].value)
+    }
+}
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("pkg-a/src/helper.jet", helper, &[]),
+        ("pkg-a/src/main.jet", source, &[("windows", 0)]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:?}");
+}
+
+#[test]
+fn opaque_core_impl_methods_displace_only_their_builtin_names() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/tasks/tasks.jet",
+         "impl Condition { fn notify_one(self) Never! {} fn notify_all(self) Never! {} }\nfn own(condition: Condition) Never! { condition.notify_one() }\n",
+         &[]),
+        ("<corelib>/Core/rt/rt.jet",
+         "impl RealtimeStream { fn is_cancelled(self) -> Bool Never! { true } }\n",
+         &[]),
+        ("pkg-a/src/main.jet",
+         "use core.tasks as tasks\nuse core.rt as rt\nfn notify(condition: Condition) Never! { condition.notify_all() }\nfn observe(stream: RealtimeStream) -> Bool Never! { stream.is_cancelled() }\nfn other(text: String) -> Int Never! { text.len() }\nfn run() {}\n",
+         &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "opaque Core methods: {diagnostics:?}");
+}
+
+#[test]
+fn source_only_core_qualified_calls_resolve_inside_and_across_core_modules() {
+    let (_, diagnostics) = check_modules(&[
+        ("<corelib>/Core/sys/sys.jet",
+         "fn usize_max() -> U64 Never! { U64{255} }\nfn own() -> U64 Never! { core.sys.usize_max() }\n",
+         &[]),
+        ("<corelib>/Core/tui/tui.jet",
+         "fn foreign() -> U64 Never! { core.sys.usize_max() }\n",
+         &[]),
+        ("pkg-a/src/main.jet", "fn run() {}\n", &[]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "qualified Core source calls: {diagnostics:?}");
+}
+
 fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
     diags
         .iter()
@@ -156,11 +499,42 @@ fn error_codes(diags: &[Diagnostic]) -> Vec<&str> {
 }
 
 #[test]
+fn dyn_surface_wraps_reads_writes_and_numeric_operands() {
+    let (_, diagnostics) = check(r#"
+use core.encoding.[Dyn]
+fn make() -> Dyn {
+    row := Dyn.object()
+    row.user = ["name": "Ada", "active": true]
+    row["values"] = [1, 2.5]
+    row["values"][0] = 4
+    return row.user
+}
+fn arithmetic(d: Dyn) -> Dyn -> 2.5 + (d * 3)
+fn optional(d: Dyn) -> Dyn? -> d.get("missing")
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn dyn_condition_member_and_automatic_wrap_have_dedicated_diagnostics() {
+    for (source, code) in [
+        ("use core.encoding.[Dyn]\nfn bad(d: Dyn) -> Bool -> if d -> true else -> false", "E0170"),
+        ("use core.encoding.[Dyn]\nfn bad(d: Dyn) -> Dyn -> d.len", "E0171"),
+        ("use core.encoding.[Dyn]\nstruct Record { n: Int }\nfn bad(v: Record) -> Dyn -> v", "E0172"),
+        ("use core.encoding.[Dyn]\nfn bad(d: Dyn) -> Dyn -> d[true]", "E0505"),
+    ] {
+        let (_, diagnostics) = check(source);
+        assert!(error_codes(&diagnostics).contains(&code), "{code}: {diagnostics:#?}");
+    }
+}
+
+
+#[test]
 fn equivalent_instances_are_interned_and_project_one_nominal_identity() {
     let src = r#"
 module boxed<T>(size: Int) {
     struct Box { value: T }
-    fn identity(value: Box) -> Box { return ~value }
+    fn identity(value: Box) -> Box { return value.copy() }
 }
 module other<T>(size: Int) { struct Box { value: T } }
 module first :: boxed<Int>(3)
@@ -169,11 +543,11 @@ module forward :: equivalent
 module different_type :: boxed<String>(3)
 module different_value :: boxed<Int>(4)
 module different_template :: other<Int>(3)
-fn accepts_first(value: first.Box) -> first.Box { return ~value }
-fn accepts_projection(value: equivalent.Box) -> first.Box { return ~value }
-fn accepts_chain(value: forward.Box) -> first.Box { return ~value }
-fn accepts_surface(value: first.Box) -> first.Box { return ~value }
-fn accepts_forward_surface(value: forward.Box) -> first.Box { return ~value }
+fn accepts_first(value: first.Box) -> first.Box { return value.copy() }
+fn accepts_projection(value: equivalent.Box) -> first.Box { return value.copy() }
+fn accepts_chain(value: forward.Box) -> first.Box { return value.copy() }
+fn accepts_surface(value: first.Box) -> first.Box { return value.copy() }
+fn accepts_forward_surface(value: forward.Box) -> first.Box { return value.copy() }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check(src);
@@ -283,13 +657,13 @@ fn run() {}
 #[test]
 fn imported_template_is_interned_once_across_consumers() {
     let template = r#"
-pub module boxed<T>(size: Int) { pub struct Box { value: T } }
-pub module other<T>(size: Int) { pub struct Box { value: T } }
+module boxed<T>(size: Int) { struct Box { value: T } }
+module other<T>(size: Int) { struct Box { value: T } }
 "#;
     let first = r#"
 use "./templates" as templates
 use templates.[boxed]
-pub module first :: boxed<Int>(3)
+module first :: boxed<Int>(3)
 fn run() {}
 "#;
     let second = r#"
@@ -298,7 +672,7 @@ use templates.[boxed, other]
 module second :: boxed<Int>(3)
 module different_arg :: boxed<Int>(4)
 module different_template :: other<Int>(3)
-fn accepts_projection(value: second.Box) -> first.Box { return ~value }
+fn accepts_projection(value: second.Box) -> first.Box { return value.copy() }
 fn run() {}
 "#;
     let (bundle, diagnostics) = check_modules(&[
@@ -332,25 +706,25 @@ fn run() {}
 #[test]
 fn imported_struct_returns_expose_all_fields_but_scalars_keep_e0302() {
     let provider = r#"
-pub struct IngestResult {
-    pub provider: String
-    pub name: String
-    pub version: String
-    pub reference: String
-    pub source: String
-    pub expected_hash: String
+struct IngestResult {
+    provider: String
+    name: String
+    version: String
+    reference: String
+    source: String
+    expected_hash: String
 }
 
-pub struct RealizeResult {
-    pub provider: String
-    pub name: String
-    pub version: String
-    pub reference: String
-    pub source: String
-    pub expected_hash: String
+struct RealizeResult {
+    provider: String
+    name: String
+    version: String
+    reference: String
+    source: String
+    expected_hash: String
 }
 
-pub fn ingest() -> IngestResult {
+fn ingest() -> IngestResult {
     return IngestResult{
         provider: "local",
         name: "demo",
@@ -361,7 +735,7 @@ pub fn ingest() -> IngestResult {
     }
 }
 
-pub fn realize() -> RealizeResult {
+fn realize() -> RealizeResult {
     return RealizeResult{
         provider: "local",
         name: "demo",
@@ -406,15 +780,15 @@ fn run() {
 #[test]
 fn imported_module_alias_preserves_local_struct_fields() {
     let records = r#"
-pub struct Record {
-    pub value: String
+struct Record {
+    value: String
 }
 
-pub fn inspect(record: Record) -> String {
+fn inspect(record: Record) -> String {
     return record.value
 }
 
-pub fn make() -> Record {
+fn make() -> Record {
     return Record{value: "ok"}
 }
 "#;
@@ -553,7 +927,7 @@ fn trait_impl_and_error_conversion_are_specialized_as_one_local_identity_graph()
     let src = r#"
 module laws<T> {
     tag Audited { deny: [Net] }
-    fn audited(value: #Audited T) -> #Audited T { return ~value }
+    fn audited(value: #Audited T) -> #Audited T { return value.copy() }
     trait Reveal {
         type Output
         fn reveal(self) -> T
@@ -675,7 +1049,7 @@ fn nested_generic_alias_closes_over_outer_type_and_value_arguments() {
     let (bundle, diagnostics) = check(
         r#"
 module outer<T>(count: Int) {
-    module inner<U> { pub fn keep(value: T, other: U) -> T { return ~value } }
+    module inner<U> { pub fn keep(value: T, other: U) -> T { return value.copy() } }
     module fixed :: inner<Int>
     module forward :: fixed
 }
@@ -733,11 +1107,11 @@ fn ordinary_nested_module_recursively_expands_generic_aliases() {
         r#"
 module outer<T>(count: Int) {
     module plain {
-        module inner<U> { pub fn total(value: U) -> Int { return count } }
+        module inner<U> { fn total(value: U) -> Int { return count } }
         module closed :: inner<T>
-        pub fn result(value: T) -> Int { return closed.total(value) }
+        fn result(value: T) -> Int { return closed.total(value) }
     }
-    pub fn result(value: T) -> Int { return plain.result(value) }
+    fn result(value: T) -> Int { return plain.result(value) }
 }
 module selected :: outer<Int>(6)
 fn run() { print(selected.result(1)) }
@@ -891,8 +1265,8 @@ fn run() {
 fn selective_alias_ledger_keeps_local_binding_span() {
     let src = r#"
 module util {
-    pub fn double(x: Int) -> Int { x * 2 }
-    pub fn triple(x: Int) -> Int { x * 3 }
+    fn double(x: Int) -> Int { x * 2 }
+    fn triple(x: Int) -> Int { x * 3 }
 }
 use util.[double as d, triple as t]
 fn run() { print(d(5)) }
@@ -911,4 +1285,95 @@ fn run() { print(d(5)) }
         .find(|diagnostic| diagnostic.code == "L0103" && diagnostic.what.contains("t"))
         .expect("unused selective alias lint");
     assert_eq!(lint.span, Some(expected_span));
+}
+
+#[test]
+fn imported_signatures_keep_nested_record_owners_and_generic_parameters() {
+    let provider = r#"
+struct Handle {}
+struct Feature { value: Int }
+struct Box<T> { value: T }
+fn open() -> Handle Never! { Handle{} }
+fn inspect(handle: Handle, features: [Feature]) -> Int Never! { features.len() }
+fn boxed<T>(value: T) -> Box<T> Never! { Box<T>{value: value} }
+"#;
+    let consumer = r#"
+use provider as native
+fn accept(handle: native.Handle) -> Int Never! {
+    native.inspect(handle, [native.Feature{value: 7}])
+}
+fn run() {
+    print(accept(native.open()))
+    box :: native.boxed(9)
+    print(box.value)
+}
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("provider.jet", provider, &[]),
+        ("consumer.jet", consumer, &[("native", 0)]),
+    ]);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn imported_signature_does_not_equate_same_shaped_local_record() {
+    let provider = r#"
+struct Feature { value: Int }
+fn inspect(features: [Feature]) -> Int Never! { features.len() }
+"#;
+    let consumer = r#"
+use provider as native
+struct Feature { value: Int }
+fn run() { print(native.inspect([Feature{value: 7}])) }
+"#;
+    let (_, diagnostics) = check_modules(&[
+        ("provider.jet", provider, &[]),
+        ("consumer.jet", consumer, &[("native", 0)]),
+    ]);
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0112"),
+        "nominal owners must remain distinct: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn generic_owner_identity_calls_bind_nested_parameters() {
+    let (_, diagnostics) = check(r#"
+struct Boxed<T> { value: T }
+fn wrapped<T>(box: Boxed<T>) -> T Never! { box.value.copy() }
+fn relay<T>(box: Boxed<T>) -> T Never! { wrapped(box) }
+fn list_len<T>(values: [T]) -> Int Never! { values.len() }
+fn relay_list<T>(values: [T]) -> Int Never! { list_len(values) }
+fn run() { print(relay(Boxed<Int>{value: 7})) }
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn generic_owner_enum_constructors_preserve_arguments_and_payloads() {
+    let (_, diagnostics) = check(r#"
+enum Packet<T> {
+    Empty
+    Value(value: T)
+}
+fn packet<U>(value: U) -> Packet<U> Never! { Packet<U>.Value{value: value} }
+fn empty<U>() -> Packet<U> Never! { Packet<U>.Empty{} }
+fn contextual(value: Int) -> Packet<Int> Never! { Packet.Value{value: value} }
+fn run() {
+    packet :: packet(7)
+    empty :: empty<Int>()
+    other :: contextual(8)
+}
+"#);
+    assert!(error_codes(&diagnostics).is_empty(), "{diagnostics:#?}");
+}
+
+#[test]
+fn generic_owner_enum_constructor_rejects_wrong_payload() {
+    let (_, diagnostics) = check(r#"
+enum Packet<T> { Value(value: T) }
+fn packet() -> Packet<Int> Never! { Packet<Int>.Value{value: "wrong"} }
+fn run() {}
+"#);
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0108"), "{diagnostics:#?}");
 }

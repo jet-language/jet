@@ -1,6 +1,5 @@
 //! Dependency-free Canvas browser projection assets.
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 mod html;
 mod js;

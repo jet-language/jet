@@ -1,0 +1,127 @@
+// The checked default Err (the Prelude row carrying the DefaultErr builtin,
+// keyed by its canonical prelude identity, with the private memoized metadata
+// field) is the runtime's own JetErr in an ordinary program lowering, as Rust
+// emits it: constructed through jet_rt_record_new_jet_err, displayed through
+// jet_rt_handle_display_jet_err (its message), its public fields read from
+// the Err88 handle, and released by jet_rt_handle_drop_jet_err. It is never a
+// generic struct shell rendered field by field, and every operand its
+// construction consumes (the inline metadata default included) is released
+// through its own drop, so the module lints clean.
+//
+// fn errconv() { e :: Err("outer", code: "E_STORE", cause: Err("inner")) }
+// fn run() { e :: Err("boom"); print("{e}"); print(e.message); errconv() }
+use jet_foundation.[MIRCompilerBuiltin]
+use jet_backend.[LIRCallee, LIRInst, LIRLowering, lir_lint_module, lir_lower_entry]
+
+fn fx_default_err_key() -> String Never! { "jet:canonical-prelude/Prelude/Errors.jet::Err" }
+
+// One `Err(message, code, cause)` with its checked metadata default.
+fn fx_default_err_build(b: &FxBuilder, text: String, code: MIRValueID, cause: MIRValueID) -> MIRValueID Never! {
+    key :: fx_default_err_key()
+    text_option :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    message :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: text}})
+    identity :: fx_owned(&b, text_option, MIROperation.Absent)
+    metadata :: fx_owned(&b, fx_named("__jet_ErrorMetadata"), MIROperation.Struct{type_id: mir_type_id("__jet_ErrorMetadata"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("__jet_ErrorMetadata.typed_identity"), value: identity}}})
+    fx_owned(&b, fx_named(key), MIROperation.Struct{type_id: mir_type_id(key), fields: [MIRFieldValue]{
+        MIRFieldValue{field: mir_field_id("{key}.message"), value: message},
+        MIRFieldValue{field: mir_field_id("{key}.code"), value: code},
+        MIRFieldValue{field: mir_field_id("{key}.cause"), value: cause},
+        MIRFieldValue{field: mir_field_id("{key}.__jet___memo_error_metadata"), value: metadata},
+    }})
+}
+
+fn fx_default_err_program() -> MIRProgram Never! {
+    key :: fx_default_err_key()
+    err_ty :: fx_named(key)
+    text_option :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()})
+    cause_option :: mir_type_from_kind(MIRTypeKind.Option{inner: err_ty})
+    metadata_ty :: fx_named("__jet_ErrorMetadata")
+    metadata_def :: fx_type_def("__jet_ErrorMetadata", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("__jet_ErrorMetadata", "typed_identity", text_option)}, methods: [MIRFunctionID]{}})
+    metadata_field := fx_field(key, "__jet___memo_error_metadata", metadata_ty)
+    metadata_field.public = false
+    metadata_field.package_public = false
+    metadata_field.has_default = true
+    err_def := fx_type_def(key, MIRTypeDefKind.Struct{fields: [MIRField]{
+        fx_field(key, "message", fx_string()),
+        fx_field(key, "code", text_option),
+        fx_field(key, "cause", cause_option),
+        metadata_field,
+    }, methods: [MIRFunctionID]{}})
+    err_def.compiler_builtin = Val(MIRCompilerBuiltin.DefaultErr)
+    // errconv: a converted Err with a code and an Err cause, then released.
+    v := fx_builder()
+    inner_code :: fx_owned(&v, text_option, MIROperation.Absent)
+    inner_cause :: fx_owned(&v, cause_option, MIROperation.Absent)
+    inner :: fx_default_err_build(&v, "inner", inner_code, inner_cause)
+    code_text :: fx_owned(&v, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "E_STORE"}})
+    code :: fx_owned(&v, text_option, MIROperation.Present{value: code_text})
+    cause :: fx_owned(&v, cause_option, MIROperation.Present{value: inner})
+    outer :: fx_default_err_build(&v, "outer", code, cause)
+    fx_do(&v, MIROperation.Drop{value: outer, kind: MIRDropKind.Value})
+    fx_block(&v, 0, MIRTerminator.Return{value: None})
+    errconv :: fx_function("errconv", v, fx_unit())
+    b := fx_builder()
+    absent_code :: fx_owned(&b, text_option, MIROperation.Absent)
+    absent_cause :: fx_owned(&b, cause_option, MIROperation.Absent)
+    error :: fx_default_err_build(&b, "boom", absent_code, absent_cause)
+    fx_render_interpolation(&b, error, MIRStringFormat.Display)
+    read :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Field{base: error, field: mir_field_id("{key}.message")})
+    fx_print(&b, read)
+    fx_do(&b, MIROperation.Drop{value: error, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Call{callee: MIRCallee.User{function: errconv.id}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    types := [MIRTypeDef]{err_def, metadata_def}
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit()), errconv}, ^types)
+}
+
+fn fx_default_err_runtime_calls(lowered: LIRLowering, symbol: String) -> Int Never! {
+    calls := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Call(_, _, callee, _) {
+                    if callee == .Runtime(name) && name == symbol -> calls += 1
+                }
+            }
+        }
+    }
+    calls
+}
+
+// Drops of a value whose drop glue is the runtime JetErr release.
+fn fx_default_err_handle_drops(lowered: LIRLowering) -> Int Never! {
+    drops := 0
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Drop(value) {
+                    if function.values[value.value].drop == .Runtime(symbol) && symbol == "jet_rt_handle_drop_jet_err" -> drops += 1
+                }
+            }
+        }
+    }
+    drops
+}
+
+fn fx_default_err_checks() -> Bool Never! {
+    lowered :: lir_lower_entry(fx_default_err_program(), mir_function_id("run"))
+    loop issue in lowered.issues -> print("default-err: {issue.function}: {issue.message}")
+    if lowered.issues.len() != 0 -> return false
+    lint :: lir_lint_module(lowered.lir)
+    loop message in lint -> print("default-err lint: {message}")
+    if lint.len() != 0 -> return false
+    clean := true
+    if fx_default_err_runtime_calls(lowered, "jet_rt_record_new_jet_err") != 3 {
+        print("default-err: the three Err constructions are not the runtime JetErr")
+        clean = false
+    }
+    if fx_default_err_runtime_calls(lowered, "jet_rt_handle_display_jet_err") != 1 {
+        print("default-err: an interpolated default Err does not render through JetErr's Display (its message)")
+        clean = false
+    }
+    if fx_default_err_handle_drops(lowered) < 2 {
+        print("default-err: a dropped default Err is not released through jet_rt_handle_drop_jet_err")
+        clean = false
+    }
+    clean
+}

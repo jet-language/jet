@@ -90,7 +90,7 @@ fn jet_rust_emit_is_unit_ratio_parameter(ctx: &JetRustEmitContext, function: MIR
                     .Convert(_, parameters, _, conversion) -> {
                         if conversion == {
                             .Prelude(call, _, _) -> {
-                                if ctx.prelude_call_last.get(jet_rust_emit_id_key(call.value)) == .Val(position) {
+                                if ctx.prelude_call_last.get(call.value) == .Val(position) {
                                     if ctx.program.prelude_calls[position].member.starts_with("conversion_") {
                                         loop index in 0..<parameters.len() {
                                             if index >= 4 -> break
@@ -133,7 +133,15 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
         // MIRRust emit_instruction: a reference binding's move into a drop
         // copies nothing, and the read it binds is borrowed by its write.
         if jet_rust_emit_ref_binding_drop(&ctx, function, value) != None -> return lines
+        if jet_rust_emit_nonowning_drop_value(&ctx, function, value) || jet_rust_emit_unused_place_read(&ctx, function, value) -> return lines
         if ctx.ref_bindings.payloads.get(value.value) != None || ctx.ref_bindings.collections.get(value.value) != None -> return lines
+        // MIRRust emit_instruction (#4566 slices 5 and 6): a split whose
+        // only consumer, a join, splits and joins the source in place; an
+        // inlined adapter callback is built at its adapter; a fused adapter
+        // runs inside its consumer; a views split loop reads its operands
+        // at the loop cursor.
+        if jet_rust_emit_fused_split_join(ctx, function, value).len() == 2 -> return lines
+        if jet_rust_emit_inline_callback(ctx, function, value) != None || jet_rust_emit_fused_adapter_receiver(ctx, function, value) || jet_rust_emit_split_loop_collection(ctx, function, value) -> return lines
         if jet_rust_emit_partial_projection_only(&ctx, function, value) -> return lines
         if jet_rust_emit_inspected_only(&ctx, function, value) -> return lines
         // MIRRust direct_borrow_projection: a shared-guard deref or guard
@@ -142,6 +150,9 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
         // MIRRust emit_instruction: a Parameter/Capture result names its
         // retained place; an unread binding stores no entry copy.
         if jet_rust_emit_unread_binding(&ctx, function, instruction, value) -> return lines
+        // MIRRust emit_instruction (#4566): the read and concatenation of an
+        // in-place append, or a static literal its consumer spells in place.
+        if jet_rust_emit_string_append_part(ctx, value) -> return lines
     }
     // MIRRust: a HostBorrowCallback is a one-use boundary adapter its consuming
     // call inlines; an ordinary owned callable slot would erase the borrowed ABI.
@@ -161,6 +172,22 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
     }
     if instruction.operation == {
         .WritePlace(place, value) | .ReplacePlace(place, value) -> {
+            // MIRRust emit_instruction (#4566): `place += text` grows the
+            // place's own buffer, and `place = ""` empties it in place.
+            if instruction.operation == .WritePlace(_, _) {
+                if ctx.move_facts.clears.get("{value.value}") != None {
+                    row :: jet_rust_emit_append_place_row(ctx, function, place) ?? panic("checked string clear place is missing")
+                    &lines.push("({jet_rust_emit_place_base(&ctx, function, row.base, true, row.projections)}).clear();")
+                    return lines
+                }
+            }
+            if instruction.operation == .WritePlace(_, _) {
+                if ctx.move_facts.appends.get("{value.value}") == .Val(append) {
+                    row :: jet_rust_emit_append_place_row(ctx, function, append.place) ?? panic("checked string append place is missing")
+                    &lines.push("({jet_rust_emit_place_base(&ctx, function, row.base, true, row.projections)}).push_str({jet_rust_emit_string_add_operand(ctx, append.text)});")
+                    return lines
+                }
+            }
             // MIRRust emit_instruction: a reference binding borrows the read
             // it binds in place.
             if ctx.ref_bindings.payloads.get(value.value) != None {
@@ -241,20 +268,20 @@ fn jet_rust_emit_instruction(ctx: &JetRustEmitContext, function: MIRFunction, in
 // edge is `continue` of its header's loop. Any other CFG keeps the dispatch
 // loop.
 struct JetRustEmitCFGPlan {
-    pub structured: Bool
-    pub phis: Bool
+    structured: Bool
+    phis: Bool
     // Block id value -> true when the block's phi reads the predecessor.
-    pub phi_targets: [U64:Bool]
-    pub entry: Int
+    phi_targets: [U64:Bool]
+    entry: Int
     // MIR block id value -> position in `function.blocks`.
-    pub positions: [U64:Int]
+    positions: [U64:Int]
     // Reverse postorder number per position; -1 for an unreachable block.
-    pub order: [Int]
-    pub headers: [Bool]
-    pub merges: [Bool]
+    order: [Int]
+    headers: [Bool]
+    merges: [Bool]
     // The merge blocks each position immediately dominates, latest first.
-    pub follows: [[Int]]
-    pub debug: [Bool]
+    follows: [[Int]]
+    debug: [Bool]
 }
 
 fn jet_rust_emit_cfg_reverse_postorder(successors: [[Int]], entry: Int) -> [Int] Never! {
@@ -266,8 +293,8 @@ fn jet_rust_emit_cfg_reverse_postorder(successors: [[Int]], entry: Int) -> [Int]
     visited[entry] = true
     loop stack.len() > 0 {
         top :: stack.len() - 1
-        node :: ~stack[top]
-        next_edge :: ~cursors[top]
+        node :: stack[top].copy()
+        next_edge :: cursors[top].copy()
         if next_edge < successors[node].len() {
             cursors[top] = next_edge + 1
             child :: successors[node][next_edge]
@@ -446,6 +473,203 @@ fn jet_rust_emit_cfg_edge_inlines(plan: JetRustEmitCFGPlan, source: MIRBlockID, 
     plan.order[target_position] > plan.order[source_position] && !plan.merges[target_position]
 }
 
+// The local `place` names whole, if any.
+fn jet_rust_emit_int_sum_walk_local(function: MIRFunction, index: JetRustEmitBodyIndex, place: MIRPlaceID) -> MIRLocalID? Never! {
+    row :: index.place_rows.get(place.value) ?? return None
+    if function.places[row].projections.len() > 0 -> return None
+    if function.places[row].base == .Local(local) -> return Val(local)
+    None
+}
+
+// MIRRust int_sum_walk (#4566): the native sum `jet_int_sum_walk(cursor, acc,
+// xs)` printed just before the loop the block at `position` heads, when that
+// loop is the exact Int range walk `loop i in a..<b { acc = acc + xs[i] }`
+// over an unchanged list: the header only tests the range cursor, one body
+// block reads the element and adds it to a whole exact Int local, and one
+// latch only advances the cursor. The helper commits the exact sum of a prefix
+// of the walk and moves the cursor past it, so the loop runs only the rest.
+// The loop's index local and values live in the body alone, so skipping
+// iterations changes nothing else.
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::int_sum_walk
+fn jet_rust_emit_int_sum_walk(ctx: &JetRustEmitContext, function: MIRFunction, position: Int) -> String? Never! {
+    index :: ctx.body_index
+    header :: function.blocks[position]
+    if header.instructions.len() != 1 || position >= index.predecessors.len() || index.predecessors[position].len() != 2 -> return None
+    test :: header.instructions[0]
+    cursor := MIRValueID?{None}
+    if test.operation == .LoopRangeHasNext(_, tested) -> cursor = Val(tested)
+    walked_cursor :: cursor ?? return None
+    body_id := MIRBlockID?{None}
+    if header.terminator == .Branch(condition, then_target, _) {
+        if test.result == (Val(condition)) -> body_id = Val(then_target)
+    }
+    body_target :: body_id ?? return None
+    body_position :: index.block_positions.get(body_target.value) ?? return None
+    body :: function.blocks[body_position]
+    latch_id := MIRBlockID?{None}
+    if body.terminator == .Jump(target) -> latch_id = Val(target)
+    latch_target :: latch_id ?? return None
+    latch_position :: index.block_positions.get(latch_target.value) ?? return None
+    latch :: function.blocks[latch_position]
+    if latch.instructions.len() != 1 -> return None
+    advances := false
+    if latch.instructions[0].operation == .LoopRangeAdvance(_, advanced) -> advances = advanced == walked_cursor
+    back := false
+    if latch.terminator == .Jump(target) -> back = target == header.id
+    if !advances || !back -> return None
+    if index.predecessors[body_position].len() != 1 || index.predecessors[body_position][0] != position -> return None
+    if index.predecessors[latch_position].len() != 1 || index.predecessors[latch_position][0] != body_position -> return None
+    if index.predecessors[position][0] != latch_position && index.predecessors[position][1] != latch_position -> return None
+    // The body: the cursor value, optionally kept in the index local and read
+    // back, the reads of `acc` and `xs[index]`, their sum, and the write of
+    // `acc`, in any order the lowering chose.
+    value := MIRValueID?{None}
+    read_values := [MIRValueID]{}
+    read_places := [MIRPlaceID]{}
+    sum := MIRValueID?{None}
+    sum_left := MIRValueID?{None}
+    sum_right := MIRValueID?{None}
+    write_places := [MIRPlaceID]{}
+    write_values := [MIRValueID]{}
+    loop instruction in body.instructions {
+        if instruction.operation == {
+            .LoopRangeValue(_, read) -> {
+                result :: instruction.result ?? return None
+                if read != walked_cursor || value != None -> return None
+                value = Val(result)
+            }
+            .ReadPlace(place) -> {
+                result :: instruction.result ?? return None
+                &read_values.push(result)
+                &read_places.push(place)
+            }
+            .Binary(op, _, _, left, right) -> {
+                result :: instruction.result ?? return None
+                if op != MIRBinaryOp.Add || sum != None -> return None
+                sum = Val(result)
+                sum_left = Val(left)
+                sum_right = Val(right)
+            }
+            .WritePlace(place, written) -> {
+                &write_places.push(place)
+                &write_values.push(written)
+            }
+            else -> return None
+        }
+    }
+    cursor_value :: value ?? return None
+    total :: sum ?? return None
+    left :: sum_left ?? return None
+    right :: sum_right ?? return None
+    index_local := MIRLocalID?{None}
+    acc_place := MIRPlaceID?{None}
+    loop at in 0..<write_places.len() {
+        local :: jet_rust_emit_int_sum_walk_local(function, index, write_places[at]) ?? return None
+        if write_values[at] == cursor_value && index_local == None {
+            index_local = Val(local)
+        } else if write_values[at] == total && acc_place == None {
+            acc_place = Val(write_places[at])
+        } else {
+            return None
+        }
+    }
+    acc :: acc_place ?? return None
+    acc_local :: jet_rust_emit_int_sum_walk_local(function, index, acc) ?? return None
+    index_read := MIRValueID?{None}
+    acc_read := MIRValueID?{None}
+    element := MIRValueID?{None}
+    element_place := MIRPlaceID?{None}
+    loop at in 0..<read_places.len() {
+        local :: jet_rust_emit_int_sum_walk_local(function, index, read_places[at])
+        if local != None && local == index_local && index_read == None {
+            index_read = Val(read_values[at])
+        } else if local == (Val(acc_local)) && acc_read == None {
+            acc_read = Val(read_values[at])
+        } else if element == None {
+            element = Val(read_values[at])
+            element_place = Val(read_places[at])
+        } else {
+            return None
+        }
+    }
+    accumulated :: acc_read ?? return None
+    read_element :: element ?? return None
+    read_place :: element_place ?? return None
+    if !(left == accumulated && right == read_element) && !(left == read_element && right == accumulated) -> return None
+    // The index is the cursor value, directly or through the index local.
+    walked := cursor_value
+    if index_local != None {
+        walked = index_read ?? return None
+    } else if index_read != None {
+        return None
+    }
+    row_position :: index.place_rows.get(read_place.value) ?? return None
+    row :: function.places[row_position]
+    acc_position :: index.place_rows.get(acc.value) ?? return None
+    acc_row :: function.places[acc_position]
+    if row.projections.len() == 0 -> return None
+    indexed := false
+    if row.projections[row.projections.len() - 1] == .Index(kind, at, _, _, _, _, _) -> indexed = (kind == MIRIndexKind.List || kind == MIRIndexKind.FixedListProof) && at == walked
+    if !indexed || row.ty.kind != MIRTypeKind.Int || acc_row.ty.kind != MIRTypeKind.Int -> return None
+    based := false
+    if row.base == {
+        .Local(local) -> based = local != acc_local
+        .Parameter(_) -> based = true
+        else -> {}
+    }
+    if !based -> return None
+    prefix := [MIRProjection]{}
+    loop at in 0..<row.projections.len() - 1 {
+        if row.projections[at] == {
+            .Field(_, _) | .Deref(_) -> &prefix.push(row.projections[at])
+            else -> return None
+        }
+    }
+    if ctx.ref_bindings.locals.get(acc_local.value) != None -> return None
+    // Every body value feeds the next body instruction only.
+    accumulated_slot :: index.use_slots.get(accumulated.value) ?? return None
+    element_slot :: index.use_slots.get(read_element.value) ?? return None
+    total_slot :: index.use_slots.get(total.value) ?? return None
+    if index.uses[accumulated_slot].len() != 1 || index.uses[element_slot].len() != 1 || index.uses[total_slot].len() != 1 -> return None
+    // The cursor value and the index read are used in the body alone.
+    confined := [MIRValueID]{cursor_value}
+    if index_read == .Val(read) -> &confined.push(read)
+    loop confined_value in confined {
+        slot :: index.use_slots.get(confined_value.value) ?? next
+        loop user in index.uses[slot] {
+            if user.block != body_position -> return None
+        }
+    }
+    // The index local is written and read in the body alone, so the
+    // iterations the helper skips leave nothing observable in it.
+    if index_local == .Val(walked_local) {
+        if index.escaped_locals.get(walked_local.value) != None -> return None
+        write_slot :: index.write_slots.get(walked_local.value) ?? -1
+        if write_slot >= 0 {
+            loop write in index.local_writes[write_slot] {
+                if write.block != body_position -> return None
+            }
+        }
+        loop block_position in 0..<function.blocks.len() {
+            if block_position == body_position -> next
+            loop instruction in function.blocks[block_position].instructions {
+                named := MIRPlaceID?{None}
+                if instruction.operation == {
+                    .ReadPlace(place) | .MovePlace(place) | .WritePlace(place, _) | .ReplacePlace(place, _) | .AddressOf(place, _) | .RawAddressOf(place) -> named = Val(place)
+                    else -> {}
+                }
+                place_id :: named ?? next
+                place_row :: index.place_rows.get(place_id.value) ?? next
+                if function.places[place_row].base == (MIRPlaceBase.Local{local: walked_local}) -> return None
+            }
+        }
+    }
+    cursor_text :: jet_rust_emit_value_reference(ctx, walked_cursor, true)
+    acc_text :: jet_rust_emit_place_base(&ctx, function, acc_row.base, true, [MIRProjection]{})
+    list_text :: jet_rust_emit_place_base(&ctx, function, row.base, false, prefix)
+    Val("{ctx.config.root_prefix}jet_int_sum_walk({cursor_text}, &mut ({acc_text}), &({list_text})[..])")
+}
+
 // Expands `start` depth-first into Rust lines. A Tree is one dominator
 // subtree: the block, the merge blocks it immediately dominates (Within), and
 // for a loop header the loop around them. An Edge is the control transfer:
@@ -464,6 +688,7 @@ fn jet_rust_emit_cfg_run(ctx: &JetRustEmitContext, function: MIRFunction, plan: 
             .Tree(position, indent) -> {
                 if indent.len() > JET_RUST_EMIT_MAX_STRUCTURED_INDENT -> return false
                 if plan.headers[position] {
+                    if jet_rust_emit_int_sum_walk(&ctx, function, position) == .Val(walk) -> &expanded.push(jet_rust_emit_cfg_line("{indent}{walk};"))
                     &expanded.push(jet_rust_emit_cfg_line("{indent}'jet_loop_{function.blocks[position].id.value}: loop {{"))
                     &expanded.push(JetRustEmitCFGItem.Within{position: position, follow: 0, indent: "{indent}    "})
                     &expanded.push(jet_rust_emit_cfg_line("{indent}}}"))
@@ -565,6 +790,7 @@ fn jet_rust_emit_handle_drop(ctx: &JetRustEmitContext, function: MIRFunction, mo
 fn jet_rust_emit_drop_place(ctx: &JetRustEmitContext, function: MIRFunction, place: MIRPlaceID, span: Span) -> String Never! {
     loop row in function.places {
         if row.id == place {
+            if jet_rust_emit_is_nonowning_reference_type(row.ty) -> return "()"
             partial :: jet_rust_emit_partial_drop(&ctx, function, place)
             if partial == .Val(partial_drop) -> return partial_drop
             uninit_drop :: jet_rust_emit_uninit_fixed_drop_place(function, place)
@@ -708,6 +934,8 @@ fn jet_rust_emit_terminator(ctx: &JetRustEmitContext, function: MIRFunction, pla
             &items.push(jet_rust_emit_cfg_edge(block_id, target, indent))
         }
         .Unreachable(reason) -> &items.push(jet_rust_emit_cfg_line("{indent}unreachable!({jet_rust_emit_quote(reason)});"))
+        // Stop points are produced only for the native execution host (MIR Stops.jet), after the optimizer.
+        .Poll(_, _, _) | .Stopped -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.InvalidControlFlow, "E0003", "MIR stop point reached the Rust emitter", "stop points are produced only for native host compilations", None)
     }
 }
 
@@ -778,7 +1006,7 @@ fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: Je
     active := plan.debug[position]
     expects_fail :: ctx.expected_test_exits.len() > 0
     if expects_fail -> &items.push(jet_rust_emit_cfg_line("{indent}let __jet_scope_step = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {{"))
-    loop instruction in block.instructions {
+    loop (index, instruction) in block.instructions {
         skip := false
         if instruction.operation == {
             .ScopeEnter(scope, _) -> {
@@ -807,6 +1035,10 @@ fn jet_rust_emit_block(ctx: &JetRustEmitContext, function: MIRFunction, plan: Je
             else -> {
             loop line in instruction_lines -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
             }
+        }
+        // MIRRust emit_block_instructions (#4566): loop capacity hints.
+        if !active {
+            loop line in jet_rust_emit_loop_reserves(&ctx, function, block.id, index) -> &items.push(jet_rust_emit_cfg_line("{indent}{line}"))
         }
     }
     if expects_fail {

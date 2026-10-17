@@ -1,0 +1,21 @@
+# Port of tests/cli_parts/expand.rs:586-633; exact original sources and predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): text split/filter, cap comparisons, zero-key JSON.
+step: jet inspect expand --facts templates {root}/Examples/features/reflection/derive_loop.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "marker #AddMarkerFields on Point" # original predicate
+stdout: ~ "impl Point" # original predicate
+stdout: ~ "field_x" # original predicate
+stdout: ~ "field_y" # original predicate
+stdout: ~ "generated" # original predicate
+stdout: ~ "measurement #Test(case 1)" # original predicate
+stdout: ~ "measurement #Test(case 2)" # original predicate
+step: jet inspect expand --facts templates --json {root}/Examples/features/reflection/derive_loop.jet
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $ valid # original predicate: JSON parses
+stdout: ~ "\"selection\":\"templates\"" # original predicate
+stdout: ~ "\"origin\":\"prep loop (closed comptime source)\"" # original predicate
+stdout: ~ "\"name\":\"case 1\"" # original predicate
+stdout: ~ "\"name\":\"case 2\"" # original predicate

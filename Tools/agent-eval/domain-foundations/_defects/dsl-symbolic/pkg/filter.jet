@@ -1,16 +1,17 @@
 use core.encoding.json as json
 
-fn price(item: DataTree) -> Int? {
-    if item == .Object(fields) {
-        if fields.get("price") == .Val(price_tree) -> return Val(price_tree.int() ?? 0)
+fn price(item: Dyn) -> Int? {
+    if item == .Object(_) {
+        price_tree :: &item.field("price") ?? return None
+        return Val(price_tree.int() ?? 0)
     }
     return None
 }
 
-fn select_prices(data: DataTree) -> [Int] {
+fn select_prices(data: Dyn) -> [Int] {
     prices := [Int]{}
-    if data == .Object(root) {
-        rows :: root["items"]
+    if data == .Object(_) {
+        rows :: &data.field("items") ?? Dyn.Null
         if rows == .Array(items) {
             loop item in items {
                 p :: price(item)
@@ -21,8 +22,8 @@ fn select_prices(data: DataTree) -> [Int] {
     return prices
 }
 
-pub fn sample() -> [Int] {
+fn sample() -> [Int] {
     raw :: "{{\"items\":[{{\"price\":3}},{{\"price\":8}},{{\"name\":\"free\"}}]}}"
-    data :: json.parse(raw) ?? DataTree.Null
+    data :: json.parse(raw) ?? Dyn.Null
     return select_prices(data)
 }

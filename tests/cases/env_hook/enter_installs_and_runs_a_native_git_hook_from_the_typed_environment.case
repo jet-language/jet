@@ -1,0 +1,22 @@
+# Port of tests/env_hook.rs:811-902; every original Git setup and projection predicate retained.
+# ORACLE-LITERAL .git-hook-ran: tests/env_hook.rs:898-900 (exact 3 bytes).
+# ORACLE-DERIVED path: tests/env_hook.rs:870-872; canonical scratch/scripts/githooks -> {work}.
+# PENDING-GRAMMAR: trim, tool/env tokens. Runtime verification PENDING-SAME-HEAD.
+requires: os:unix
+requires: tool:git
+fixture: native-git-hook.fixture
+env: PATH={env:PATH}
+step: git init --quiet
+exit: 0
+step: git config user.name 'Jet Test'
+exit: 0
+step: git config user.email jet-test@example.invalid
+exit: 0
+step: git add tracked.txt
+exit: 0
+step: jetpack env --trust --no-color -- git config --get core.hooksPath
+exit: 0
+stdout.trim: = native-git-hook-path.out # original predicate
+step: jetpack env --trust --no-color -- git commit -m hook
+exit: 0
+file: .git-hook-ran = ran.out

@@ -1,0 +1,27 @@
+# Port of tests/inline_range_tiers.rs:80-83. AUTHORED PENDING-SAME-HEAD. Sources verbatim.
+# ORACLE-LITERAL: original literals or original included golden, not captures.
+fixture: fixtures/inline_range_example_matches_aot_default_run_and_interpreter
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+mkdir: release
+step release: jet run --release main.jet
+env: JET_STORE_DIR={work}/release/cache
+env: JETPACK_ROOT={work}/release/jetpack
+exit: 0
+stdout: = inline_range_example_matches_aot_default_run_and_interpreter.out
+mkdir: default
+step default: jet run  main.jet
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+exit: 0
+stdout: = inline_range_example_matches_aot_default_run_and_interpreter.out
+stdout: == release
+exit: == release
+mkdir: interpret
+step interpret: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/interpret/cache
+env: JETPACK_ROOT={work}/interpret/jetpack
+exit: 0
+stdout: = inline_range_example_matches_aot_default_run_and_interpreter.out
+stdout: == release
+exit: == release

@@ -11,11 +11,71 @@ use crate::Sema::Diagnostics::{
 use crate::Sema::{Checker, LocalInfo};
 use crate::Syntax;
 use std::collections::{HashMap, HashSet, VecDeque};
-fn core_source_target(modules: &[crate::Sema::ModuleState], module: &str) -> Option<usize> {
+fn core_source_target(names: &jet_foundation::Names::NameLedger, module: &str) -> Option<usize> {
     let source = jet_foundation::CoreModuleExports::core_source_module(module)?;
-    modules
-        .iter()
-        .position(|state| state.module_alias == source.alias)
+    names.module_by_alias(source.alias)
+}
+
+struct FragmentNominalIndex<'a> {
+    modules: &'a [crate::Sema::ModuleState],
+    names: &'a jet_foundation::Names::NameLedger,
+    /// The module whose items a comptime fragment lowers in place. The
+    /// fragment declares that module's nominals under their source names, so
+    /// they keep that spelling; every other nominal is its canonical identity.
+    fragment_module: Option<usize>,
+}
+
+impl FragmentNominalIndex<'_> {
+    fn get(&self, owner: usize, name: &str) -> Option<&str> {
+        let state = self.modules.get(owner)?;
+        // A checked local type (including an alias) takes precedence over
+        // the implicit original Prelude declarations.
+        if self.names.declaration(owner, name).is_some_and(|declaration| declaration.kind == "type") {
+            return match state.registry.types.get(name)? {
+                crate::Sema::TypeDef::Struct { .. } | crate::Sema::TypeDef::Enum { .. } =>
+                    self.names.declared_identity(owner, name),
+                _ => None,
+            };
+        }
+        let owner = if let Some(error_owner) = state.compiler_builtin_error_owner {
+            if crate::Sema::Prelude::error_prelude_program().ok().is_some_and(|program|
+                program.items.iter().any(|item| matches!(item,
+                    crate::AST::Item::Struct(definition) if definition.name == name)))
+            {
+                error_owner
+            } else {
+                owner
+            }
+        } else {
+            owner
+        };
+        match self.modules.get(owner)?.registry.types.get(name)? {
+            crate::Sema::TypeDef::Struct { .. } | crate::Sema::TypeDef::Enum { .. } =>
+                self.names.declared_identity(owner, name),
+            _ => None,
+        }
+    }
+
+    fn contains(&self, identity: &str) -> bool {
+        let Some(owner) = self.names.nominal_module(identity) else { return false };
+        let Some((_, name)) = identity.rsplit_once("::") else { return false };
+        self.get(owner, name) == Some(identity)
+    }
+
+    /// How the fragment spells a canonical identity: the bare source name for
+    /// a nominal its own module declares, the identity otherwise.
+    fn spelling<'b>(&self, identity: &'b str) -> &'b str {
+        let Some(module) = self.fragment_module else { return identity };
+        match identity.rsplit_once("::") {
+            Some((_, leaf)) if self.get(module, leaf) == Some(identity) => leaf,
+            _ => identity,
+        }
+    }
+
+    fn module_names(&self, owner: usize) -> impl Iterator<Item = (&str, &str)> {
+        self.names.module_declarations(owner).filter_map(move |declaration|
+            self.get(owner, &declaration.name).map(|identity| (declaration.name.as_str(), identity)))
+    }
 }
 
 fn canonical_fragment_name(
@@ -23,44 +83,60 @@ fn canonical_fragment_name(
     name: &str,
     modules: &[crate::Sema::ModuleState],
     source_paths: &jet_foundation::Names::NameLedger,
-    struct_identities: &HashMap<(usize, String), String>,
-    known_identities: &HashSet<String>,
+    struct_identities: &FragmentNominalIndex<'_>,
 ) -> Option<String> {
-    if known_identities.contains(name) {
-        return Some(name.to_string());
+    let identity = fragment_identity(owner, name, modules, source_paths, struct_identities)?;
+    let spelling = struct_identities.spelling(&identity);
+    if spelling.len() < identity.len() {
+        return Some(spelling.to_owned());
+    }
+    Some(identity)
+}
+
+fn fragment_identity(
+    owner: usize,
+    name: &str,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &jet_foundation::Names::NameLedger,
+    struct_identities: &FragmentNominalIndex<'_>,
+) -> Option<String> {
+    if struct_identities.contains(name) {
+        return Some(name.to_owned());
     }
     if let Some(identity) = source_paths.canonical_source_path(owner, name) {
-        if known_identities.contains(&identity) {
-            return Some(identity);
-        }
+        if struct_identities.contains(&identity) { return Some(identity) }
     }
     if let Some((namespace, leaf)) = name.rsplit_once('.') {
         let state = modules.get(owner)?;
-        let target = state.imports.get(namespace).copied().or_else(|| {
-            state
-                .core_imports
-                .get(namespace)
-                .and_then(|module| core_source_target(modules, module))
-        });
+        let target = state.imports.get(namespace).copied().or_else(|| state.core_imports
+            .get(namespace).and_then(|module| core_source_target(source_paths, module)));
         if let Some(target) = target {
-            if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
-                return Some(identity.clone());
+            let target = source_paths.namespace_owner(target, leaf).unwrap_or(target);
+            if let Some(identity) = struct_identities.get(target, leaf) {
+                return Some(identity.to_owned());
             }
         }
     }
     if let Some(state) = modules.get(owner) {
         if let Some(original) = state.core_item_imports.get(name) {
-            let module = state.core_imports.get(name)?;
-            let target = core_source_target(modules, module)?;
-            let leaf = original
-                .rsplit_once('.')
-                .map_or(original.as_str(), |(_, leaf)| leaf);
-            if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
-                return Some(identity.clone());
+            let target = core_source_target(source_paths, state.core_imports.get(name)?)?;
+            let leaf = original.rsplit_once('.').map_or(original.as_str(), |(_, leaf)| leaf);
+            if let Some(identity) = struct_identities.get(target, leaf) {
+                return Some(identity.to_owned());
+            }
+        }
+        if let Some(error_owner) = state.compiler_builtin_error_owner {
+            if crate::Sema::Prelude::error_prelude_program().ok().is_some_and(|program| {
+                program.items.iter().any(|item| matches!(item,
+                    crate::AST::Item::Struct(definition) if definition.name == name))
+            }) {
+                return struct_identities.get(error_owner, name).map(str::to_owned);
             }
         }
     }
-    struct_identities.get(&(owner, name.to_string())).cloned()
+    let owner = source_paths.generated_type_owner(name)
+        .or_else(|| source_paths.namespace_owner(owner, name)).unwrap_or(owner);
+    struct_identities.get(owner, name).map(str::to_owned)
 }
 
 fn canonical_fragment_type(
@@ -68,117 +144,34 @@ fn canonical_fragment_type(
     owner: usize,
     modules: &[crate::Sema::ModuleState],
     source_paths: &jet_foundation::Names::NameLedger,
-    struct_identities: &HashMap<(usize, String), String>,
-    known_identities: &HashSet<String>,
+    struct_identities: &FragmentNominalIndex<'_>,
 ) -> Type {
     let map_name = |name: &str| {
-        canonical_fragment_name(
-            owner,
-            name,
-            modules,
-            source_paths,
-            struct_identities,
-            known_identities,
-        )
+        canonical_fragment_name(owner, name, modules, source_paths, struct_identities)
+    };
+    let canonical = |ty: &Type| {
+        canonical_fragment_type(ty, owner, modules, source_paths, struct_identities)
     };
     match ty {
         Type::Named(name) => map_name(name).map_or_else(|| ty.clone(), Type::Named),
-        Type::List(inner) => Type::List(Box::new(canonical_fragment_type(
-            inner,
-            owner,
-            modules,
-            source_paths,
-            struct_identities,
-            known_identities,
-        ))),
-        Type::Map {
-            key,
-            key_span,
-            value,
-        } => Type::Map {
-            key: Box::new(canonical_fragment_type(
-                key,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
+        Type::List(inner) => Type::List(Box::new(canonical(inner))),
+        Type::Map { key, key_span, value } => Type::Map {
+            key: Box::new(canonical(key)),
             key_span: *key_span,
-            value: Box::new(canonical_fragment_type(
-                value,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
+            value: Box::new(canonical(value)),
         },
-        Type::Shared(inner) => Type::Shared(Box::new(canonical_fragment_type(
-            inner,
-            owner,
-            modules,
-            source_paths,
-            struct_identities,
-            known_identities,
-        ))),
-        Type::Option(inner) => Type::Option(Box::new(canonical_fragment_type(
-            inner,
-            owner,
-            modules,
-            source_paths,
-            struct_identities,
-            known_identities,
-        ))),
+        Type::Shared(inner) => Type::Shared(Box::new(canonical(inner))),
+        Type::Option(inner) => Type::Option(Box::new(canonical(inner))),
         Type::Result { ok, err } => Type::Result {
-            ok: Box::new(canonical_fragment_type(
-                ok,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
-            err: Box::new(canonical_fragment_type(
-                err,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
+            ok: Box::new(canonical(ok)),
+            err: Box::new(canonical(err)),
         },
         Type::Fn {
-            params,
-            ret,
-            effect_bound,
-            param_contract,
-            call_metadata,
+            params, ret, effect_bound, param_contract, call_metadata,
             return_view_provenance,
         } => Type::Fn {
-            params: params
-                .iter()
-                .map(|param| {
-                    canonical_fragment_type(
-                        param,
-                        owner,
-                        modules,
-                        source_paths,
-                        struct_identities,
-                        known_identities,
-                    )
-                })
-                .collect(),
-            ret: ret.as_ref().map(|ret| {
-                Box::new(canonical_fragment_type(
-                    ret,
-                    owner,
-                    modules,
-                    source_paths,
-                    struct_identities,
-                    known_identities,
-                ))
-            }),
+            params: params.iter().map(canonical).collect(),
+            ret: ret.as_ref().map(|ret| Box::new(canonical(ret))),
             effect_bound: effect_bound.clone(),
             param_contract: param_contract.clone(),
             call_metadata: call_metadata.clone(),
@@ -186,97 +179,23 @@ fn canonical_fragment_type(
         },
         Type::Apply { name, args } => Type::Apply {
             name: map_name(name).unwrap_or_else(|| name.clone()),
-            args: args
-                .iter()
-                .map(|arg| {
-                    canonical_fragment_type(
-                        arg,
-                        owner,
-                        modules,
-                        source_paths,
-                        struct_identities,
-                        known_identities,
-                    )
-                })
-                .collect(),
+            args: args.iter().map(canonical).collect(),
         },
-        Type::Tuple(fields) => Type::Tuple(
-            fields
-                .iter()
-                .map(|(name, field)| {
-                    (
-                        name.clone(),
-                        Box::new(canonical_fragment_type(
-                            field,
-                            owner,
-                            modules,
-                            source_paths,
-                            struct_identities,
-                            known_identities,
-                        )),
-                    )
-                })
-                .collect(),
-        ),
+        Type::Tuple(fields) => Type::Tuple(fields.iter()
+            .map(|(name, ty)| (name.clone(), Box::new(canonical(ty)))).collect()),
         Type::FixedList { elem, len } => Type::FixedList {
-            elem: Box::new(canonical_fragment_type(
-                elem,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
-            len: len.clone(),
+            elem: Box::new(canonical(elem)), len: len.clone(),
         },
         Type::InlineRange { base, lo, hi } => Type::InlineRange {
-            base: Box::new(canonical_fragment_type(
-                base,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
-            lo: *lo,
-            hi: *hi,
+            base: Box::new(canonical(base)), lo: *lo, hi: *hi,
         },
         Type::Tagged { marker, inner } => Type::Tagged {
-            marker: marker.clone(),
-            inner: Box::new(canonical_fragment_type(
-                inner,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
+            marker: marker.clone(), inner: Box::new(canonical(inner)),
         },
         Type::Union(members) => crate::AST::canonicalize_union(
-            members
-                .iter()
-                .map(|member| {
-                    canonical_fragment_type(
-                        member,
-                        owner,
-                        modules,
-                        source_paths,
-                        struct_identities,
-                        known_identities,
-                    )
-                })
-                .collect(),
-        ),
+            members.iter().map(canonical).collect()),
         Type::Quantity { base, dimension } => Type::Quantity {
-            base: Box::new(canonical_fragment_type(
-                base,
-                owner,
-                modules,
-                source_paths,
-                struct_identities,
-                known_identities,
-            )),
-            dimension: dimension.clone(),
+            base: Box::new(canonical(base)), dimension: dimension.clone(),
         },
         _ => ty.clone(),
     }
@@ -289,56 +208,38 @@ fn fragment_signature(
     owner: usize,
     modules: &[crate::Sema::ModuleState],
     source_paths: &jet_foundation::Names::NameLedger,
-    struct_identities: &HashMap<(usize, String), String>,
-    known_identities: &HashSet<String>,
-) -> crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
+    struct_identities: &FragmentNominalIndex<'_>,
+) -> crate::AST::MirFragmentCoreSourceSignature {
     let canonical = |ty: &Type| {
-        canonical_fragment_type(
-            ty,
-            owner,
-            modules,
-            source_paths,
-            struct_identities,
-            known_identities,
-        )
+        canonical_fragment_type(ty, owner, modules, source_paths, struct_identities)
     };
-    crate::Comptime::MirBridge::MirFragmentCoreSourceSignature {
-        type_params: function
-            .type_params
-            .iter()
-            .map(|param| param.name.clone())
-            .collect(),
-        params: function
-            .params
-            .iter()
-            .map(|param| {
-                let ty = if param.variadic {
-                    Type::List(Box::new(param.ty.clone()))
-                } else {
-                    param.ty.clone()
-                };
-                (param.convention, canonical(&ty))
-            })
-            .collect(),
-        return_type: function.return_type.as_ref().map(|ty| canonical(ty)),
+    crate::AST::MirFragmentCoreSourceSignature {
+        type_params: function.type_params.iter().map(|param| param.name.clone()).collect(),
+        params: function.params.iter().map(|param| {
+            let ty = canonical(&param.ty);
+            let ty = if param.variadic { Type::List(Box::new(ty)) } else { ty };
+            (param.convention, ty)
+        }).collect(),
+        return_type: function.return_type.as_ref().map(canonical),
+        value_return_type: canonical(&function.callable_value_return_type()),
     }
 }
 
 /// Signatures of every cross-module call module `owner` can spell, keyed by
 /// (source alias or local name, function name).
 type FragmentImportSignatures =
-    HashMap<(String, String), crate::Comptime::MirBridge::MirFragmentCoreSourceSignature>;
+    HashMap<(String, String), crate::AST::MirFragmentCoreSourceSignature>;
 
-/// The user-module call surface of module `owner` for a comptime fragment:
-/// its `use` aliases and member-imported functions keyed to the loaded source
-/// rows (a user module's row key is its loader alias), and the declared
-/// signatures of those callees. Core modules keep their own Core route.
+/// The module-import call surface of module `owner` for a comptime fragment:
+/// its `use` aliases and member-imported functions keyed to the loaded
+/// non-Core-row targets (user modules and Core runtime units, keyed by loader
+/// alias), and the declared signatures of those callees. Public Core modules
+/// keep their own Core route.
 fn fragment_module_imports(
     owner: usize,
     modules: &[crate::Sema::ModuleState],
     source_paths: &jet_foundation::Names::NameLedger,
-    struct_identities: &HashMap<(usize, String), String>,
-    known_identities: &HashSet<String>,
+    struct_identities: &FragmentNominalIndex<'_>,
 ) -> (
     HashMap<String, String>,
     HashMap<String, (String, String)>,
@@ -351,86 +252,103 @@ fn fragment_module_imports(
         return (module_imports, imported_functions, signatures);
     };
     let user_module = |target: usize| {
-        modules.get(target).filter(|target_state| {
+        modules.get(target).filter(|state| {
             jet_foundation::CoreModuleExports::core_source_module_by_alias(
-                &target_state.module_alias,
-            )
-            .is_none()
+                &state.module_alias).is_none()
         })
     };
     let signature = |function: &crate::AST::Func, target: usize| {
-        fragment_signature(
-            function,
-            target,
-            modules,
-            source_paths,
-            struct_identities,
-            known_identities,
-        )
+        fragment_signature(function, target, modules, source_paths, struct_identities)
     };
     for (alias, &target) in &state.imports {
-        let Some(target_state) = user_module(target) else {
-            continue;
-        };
+        let Some(target_state) = user_module(target) else { continue };
         module_imports.insert(alias.clone(), target_state.module_alias.clone());
         for item in &target_state.items {
             if let crate::AST::Item::Func(function) = item {
-                signatures.insert(
-                    (alias.clone(), function.name.clone()),
-                    signature(function, target),
-                );
+                signatures.insert((alias.clone(), function.name.clone()), signature(function, target));
             }
         }
     }
     for (local, (name, target)) in &state.unqualified_file {
-        let Some(target_state) = user_module(*target) else {
-            continue;
-        };
+        let Some(target_state) = user_module(*target) else { continue };
         let Some(function) = target_state.items.iter().find_map(|item| match item {
             crate::AST::Item::Func(function) if function.name == *name => Some(function),
             _ => None,
-        }) else {
-            continue;
-        };
-        imported_functions.insert(
-            local.clone(),
-            (target_state.module_alias.clone(), name.clone()),
-        );
+        }) else { continue };
+        imported_functions.insert(local.clone(), (target_state.module_alias.clone(), name.clone()));
         signatures.insert((local.clone(), name.clone()), signature(function, *target));
+    }
+    // Project only mentioned namespace functions and qualified function values.
+    let mut collect_namespace_function = |expression: &Expr| {
+        let (namespace, leaf) = match expression {
+            Expr::Call(call) => call.name.rsplit_once('.')
+                .map_or((None, call.name.as_str()), |(alias, name)| (Some(alias), name)),
+            Expr::Ident(name, _) => (None, name.as_str()),
+            Expr::Field(receiver, name, _)
+            | Expr::MethodCall { receiver, method: name, .. } => {
+                let Expr::Ident(alias, _) = receiver.as_ref() else { return };
+                (Some(alias.as_str()), name.as_str())
+            }
+            _ => return,
+        };
+        let target = match namespace {
+            Some(alias) => match state.imports.get(alias) { Some(&target) => target, None => return },
+            None => owner,
+        };
+        let defining = source_paths.namespace_owner(target, leaf).unwrap_or(target);
+        if namespace.is_none() && defining == owner { return }
+        let Some(defining_state) = user_module(defining) else { return };
+        let Some(function) = defining_state.items.iter().find_map(|item| match item {
+            crate::AST::Item::Func(function) if function.name == leaf => Some(function),
+            _ => None,
+        }) else { return };
+        let local = namespace.map_or_else(|| leaf.to_owned(), |alias| format!("{alias}.{leaf}"));
+        if imported_functions.contains_key(&local) { return }
+        signatures.insert((namespace.unwrap_or(&local).to_owned(), leaf.to_owned()),
+            signature(function, defining));
+        imported_functions.insert(local, (defining_state.module_alias.clone(), leaf.to_owned()));
+    };
+    for item in &state.items {
+        match item {
+            crate::AST::Item::Func(function) => {
+                for statement in &function.body { statement.for_each_expr(&mut collect_namespace_function); }
+                for clause in function.pre.iter().chain(&function.post) {
+                    clause.cond.for_each_expr(&mut collect_namespace_function);
+                    clause.message_expr.for_each_expr(&mut collect_namespace_function);
+                }
+                for param in &function.params {
+                    if let Some(default) = &param.default { default.for_each_expr(&mut collect_namespace_function); }
+                }
+            }
+            crate::AST::Item::Const(constant) => constant.value.for_each_expr(&mut collect_namespace_function),
+            _ => {}
+        }
     }
     (module_imports, imported_functions, signatures)
 }
 
 /// Every type spelling a body of user module `owner` can write, to its
 /// canonical identity: its own declarations, member-imported types,
-/// `alias.Type` through its imports, and the identities themselves.
+/// `alias.Type` through its imports. Already-canonical names remain unchanged.
 fn fragment_module_nominals(
     owner: usize,
     modules: &[crate::Sema::ModuleState],
     source_paths: &jet_foundation::Names::NameLedger,
-    struct_identities: &HashMap<(usize, String), String>,
-    known_identities: &HashSet<String>,
+    struct_identities: &FragmentNominalIndex<'_>,
 ) -> HashMap<String, String> {
-    let mut identities = known_identities
-        .iter()
-        .map(|identity| (identity.clone(), identity.clone()))
-        .collect::<HashMap<_, _>>();
+    // Canonical keys need no self→self projection: leaving a canonical name
+    // unchanged is already the reader's default.
+    let mut identities = HashMap::new();
     for (source, path) in source_paths.canonical_paths(owner) {
-        if known_identities.contains(&path) {
-            identities.insert(source, path);
-        }
+        if struct_identities.contains(&path) { identities.insert(source, path); }
     }
-    for ((module, leaf), identity) in struct_identities {
-        if *module == owner {
-            identities.insert(leaf.clone(), identity.clone());
-        }
+    for (leaf, identity) in struct_identities.module_names(owner) {
+        identities.insert(leaf.to_owned(), identity.to_owned());
     }
     if let Some(state) = modules.get(owner) {
         for (alias, &target) in &state.imports {
-            for ((module, leaf), identity) in struct_identities {
-                if *module == target {
-                    identities.insert(format!("{alias}.{leaf}"), identity.clone());
-                }
+            for (leaf, identity) in struct_identities.module_names(target) {
+                identities.insert(format!("{alias}.{leaf}"), identity.to_owned());
             }
         }
     }
@@ -577,7 +495,7 @@ impl<'a> Checker<'a> {
             let cap_ty = self
                 .lookup(capture)
                 .map(|info| info.ty.clone())
-                .or_else(|| self.consts.get(capture).cloned());
+                .or_else(|| self.const_type(capture).cloned());
             let Some(cap_ty) = cap_ty else {
                 continue;
             };
@@ -601,45 +519,337 @@ impl<'a> Checker<'a> {
     /// share that context.
     pub(super) fn checked_comptime_nominals(
         &self,
-    ) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
+    ) -> Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>> {
         let modules = self.modules?;
+        if let Some(facts) = modules.get(self.module_idx)?.checked_nominals.as_ref() {
+            return Some(std::sync::Arc::clone(facts));
+        }
         checked_comptime_nominals_for_context(modules, self.module_idx, self.name_ledger)
     }
 }
+/// A comptime projection one `ModuleState` remembers. It is closed (`None`)
+/// unless a [`FragmentMemoScope`] opened it, and a scope is opened only while
+/// its caller holds the module states shared and the name ledger's lookup
+/// tables final (body checking), so a remembered projection cannot go stale.
+/// A cloned state starts closed.
+pub(crate) struct FragmentMemo<T>(std::sync::Mutex<Option<Option<std::sync::Arc<T>>>>);
+
+impl<T> Default for FragmentMemo<T> {
+    fn default() -> Self {
+        Self(std::sync::Mutex::new(None))
+    }
+}
+
+impl<T> Clone for FragmentMemo<T> {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+impl<T> FragmentMemo<T> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Option<Option<std::sync::Arc<T>>>> {
+        self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The remembered projection, or a fresh one that an open memo keeps.
+    /// An open memo stays locked while projecting, so parallel bodies of one
+    /// module project it once.
+    fn get_or_project(&self, project: impl FnOnce() -> T) -> std::sync::Arc<T> {
+        let mut memo = self.lock();
+        match &mut *memo {
+            Some(Some(value)) => std::sync::Arc::clone(value),
+            Some(slot) => std::sync::Arc::clone(slot.insert(std::sync::Arc::new(project()))),
+            None => {
+                drop(memo);
+                std::sync::Arc::new(project())
+            }
+        }
+    }
+}
+
+/// Keeps the memos it opened open, and closes them when dropped. A memo
+/// already open belongs to an outer scope.
+pub(crate) struct FragmentMemoScope<'m, T> {
+    opened: Vec<&'m FragmentMemo<T>>,
+}
+
+impl<'m, T> FragmentMemoScope<'m, T> {
+    fn open(memos: impl IntoIterator<Item = &'m FragmentMemo<T>>) -> Self {
+        let opened = memos.into_iter().filter(|memo| {
+            let mut memo = memo.lock();
+            let closed = memo.is_none();
+            if closed {
+                *memo = Some(None);
+            }
+            closed
+        }).collect();
+        Self { opened }
+    }
+}
+
+impl<T> Drop for FragmentMemoScope<'_, T> {
+    fn drop(&mut self) {
+        for memo in &self.opened {
+            *memo.lock() = None;
+        }
+    }
+}
+
+/// Share each module's loaded-callee projection across every evaluating
+/// module of one body-checking pass, which holds `states` shared and the
+/// name ledger's lookup tables final.
+pub(crate) fn open_fragment_module_memos(
+    states: &[crate::Sema::ModuleState],
+) -> FragmentMemoScope<'_, FragmentModuleRows> {
+    FragmentMemoScope::open(states.iter().map(|state| &state.fragment_rows))
+}
+
+/// Share one module's evaluating-context projection across its bodies while
+/// they are checked. It is closed afterwards: only this module reads it.
+pub(crate) fn open_fragment_context_memo(
+    state: &crate::Sema::ModuleState,
+) -> FragmentMemoScope<'_, crate::AST::MirFragmentNominalFacts> {
+    FragmentMemoScope::open([&state.fragment_facts])
+}
+
+/// A checked nominal row a loaded module exports to comptime fragments.
+enum FragmentNominalRow {
+    Enum(crate::AST::EnumDef),
+    Struct(crate::AST::StructDef),
+}
+
+/// One module's projection as a module a comptime fragment loads: its source
+/// row and the nominal rows it exports, by canonical identity. It does not
+/// depend on the evaluating module, so every context shares it.
+pub(crate) struct FragmentModuleRows {
+    row_key: String,
+    body: std::sync::Arc<crate::AST::MirFragmentCoreSourceModule>,
+    core_source_sigs: Vec<((String, String), crate::AST::MirFragmentCoreSourceSignature)>,
+    nominals: Vec<(String, FragmentNominalRow)>,
+}
+
+fn project_fragment_module(
+    target: usize,
+    state: &crate::Sema::ModuleState,
+    modules: &[crate::Sema::ModuleState],
+    source_paths: &jet_foundation::Names::NameLedger,
+    struct_identities: &FragmentNominalIndex<'_>,
+) -> FragmentModuleRows {
+    let source_module =
+        jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
+    let mut body = crate::AST::MirFragmentCoreSourceModule {
+        alias: state.module_alias.clone(),
+        module_identity: source_paths
+            .module_identity(target)
+            .unwrap_or_else(|| state.module_path.clone()),
+        core_imports: state.core_imports.clone(),
+        functions: HashMap::new(),
+        function_signatures: HashMap::new(),
+        constants: Vec::new(),
+        module_imports: HashMap::new(),
+        imported_functions: HashMap::new(),
+        import_signatures: HashMap::new(),
+        nominal_identities: HashMap::new(),
+    };
+    let mut core_source_sigs = Vec::new();
+    for item in &state.items {
+        let function = match item {
+            crate::AST::Item::Func(function) => function,
+            crate::AST::Item::Const(constant) => {
+                body.constants.push(constant.clone());
+                continue;
+            }
+            _ => continue,
+        };
+        body.functions.insert(function.name.clone(), function.clone());
+        let signature = fragment_signature(function, target, modules, source_paths, struct_identities);
+        body.function_signatures.insert(function.name.clone(), signature.clone());
+        let Some(source) = source_module else {
+            continue;
+        };
+        let registered_target = crate::Syntax::CORE_CALLS.iter()
+            .any(|row| row.targets_source_function(source.module, &function.name));
+        if !registered_target && (!function.is_pub
+            || !jet_foundation::CoreModuleExports::core_source_owns(source.module, &function.name)) {
+            continue;
+        }
+        core_source_sigs.push(((source.module.to_string(), function.name.clone()), signature));
+    }
+    // A Core row is keyed by its Core module path; a user file module's
+    // row by its loader alias, the name its import aliases resolve to.
+    let row_key = match source_module {
+        Some(source) => source.module.to_string(),
+        None => {
+            let (module_imports, imported_functions, import_signatures) =
+                fragment_module_imports(target, modules, source_paths, struct_identities);
+            body.module_imports = module_imports;
+            body.imported_functions = imported_functions;
+            body.import_signatures = import_signatures;
+            body.nominal_identities =
+                fragment_module_nominals(target, modules, source_paths, struct_identities);
+            state.module_alias.clone()
+        }
+    };
+    // A Core module exposes only its public leaves; every nominal of a
+    // user module is declared, since its demanded bodies may name a
+    // private type.
+    let source_leaf_visible = |name: &str| {
+        source_module.is_none_or(|source| {
+            jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
+        })
+    };
+    let canonicalize = |ty: &mut Type| {
+        *ty = canonical_fragment_type(ty, target, modules, source_paths, struct_identities);
+    };
+    let mut nominals = Vec::new();
+    for item in &state.items {
+        let name = match item {
+            crate::AST::Item::Enum(def) => &def.name,
+            crate::AST::Item::Struct(def) => &def.name,
+            _ => continue,
+        };
+        if !source_leaf_visible(name) && !matches!(item,
+            crate::AST::Item::Struct(definition) if definition.compiler_builtin_error)
+        {
+            continue;
+        }
+        let Some(identity) = struct_identities.get(target, name).map(str::to_owned) else {
+            continue;
+        };
+        let row = match item {
+            crate::AST::Item::Enum(def) => {
+                let mut row = enum_row_without_members(def);
+                row.name = identity.clone();
+                for variant in &mut row.variants {
+                    match &mut variant.payload {
+                        crate::AST::VariantPayload::Unit => {}
+                        crate::AST::VariantPayload::Single(ty, _) => canonicalize(ty),
+                        crate::AST::VariantPayload::Named(fields) => {
+                            for field in fields {
+                                canonicalize(&mut field.ty);
+                            }
+                        }
+                    }
+                }
+                FragmentNominalRow::Enum(row)
+            }
+            crate::AST::Item::Struct(def) => {
+                let mut row = struct_row_without_members(def);
+                row.name = identity.clone();
+                for field in &mut row.fields {
+                    canonicalize(&mut field.ty);
+                }
+                FragmentNominalRow::Struct(row)
+            }
+            _ => continue,
+        };
+        nominals.push((identity, row));
+    }
+    FragmentModuleRows { row_key, body: std::sync::Arc::new(body), core_source_sigs, nominals }
+}
+
+/// Project every evaluating context under one loaded-module memo scope.
+/// Without this scope, each context deep-copies the same reachable function
+/// bodies before retaining them in its facts: memory grows with contexts times
+/// reachable AST size instead of one shared body projection per loaded module.
+pub(crate) fn checked_comptime_nominals_for_modules(
+    modules: &[crate::Sema::ModuleState],
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]> {
+    let _modules = open_fragment_module_memos(modules);
+    modules.iter().enumerate().map(|(module_idx, _)| {
+        checked_comptime_nominals_for_context(modules, module_idx, name_ledger)
+            .expect("module index came from the checked states")
+    }).collect()
+}
+
 /// Project the checked nominal/import rows needed by an isolated comptime
 /// fragment before a `Checker` exists for the current module. Derive and
 /// marker expansion runs at that earlier bundle phase, but it must carry the
-/// same declaration identities that body checking later supplies.
+/// same declaration identities that body checking later supplies. While body
+/// checking holds the memos open, each module projects its context once and
+/// each loaded module its rows once, shared by every evaluation.
 pub(crate) fn checked_comptime_nominals_for_context(
     modules: &[crate::Sema::ModuleState],
     module_idx: usize,
     name_ledger: &jet_foundation::Names::NameLedger,
-) -> Option<crate::Comptime::MirBridge::MirFragmentNominalFacts> {
+) -> Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>> {
     let current = modules.get(module_idx)?;
-    let reexports = &current.reexports;
-    let mut struct_identities = HashMap::new();
-    let mut known_identities = HashSet::new();
-    for (owner, state) in modules.iter().enumerate() {
-        for item in &state.items {
-            let name = match item {
-                crate::AST::Item::Struct(def) => &def.name,
-                crate::AST::Item::Enum(def) => &def.name,
-                _ => continue,
-            };
-            let Some(identity) = name_ledger.nominal_identity(owner, name) else {
-                continue;
-            };
-            struct_identities.insert((owner, name.clone()), identity.clone());
-            known_identities.insert(identity);
-        }
+    Some(current.fragment_facts.get_or_project(|| {
+        let mut facts = project_comptime_nominals(modules, module_idx, current, name_ledger);
+        facts.name_ledger = name_ledger.body_snapshot();
+        facts
+    }))
+}
+
+/// A struct row for fragment facts: every field but its methods, trait impls
+/// and derives, which the facts never carry. Built field by field so those
+/// members (whole function bodies) are never deep-cloned only to be cleared;
+/// exhaustive destructuring keeps a new field from being silently dropped.
+fn struct_row_without_members(def: &crate::AST::StructDef) -> crate::AST::StructDef {
+    let crate::AST::StructDef {
+        span, compiler_builtin_error, is_pub, is_package_pub, name, name_span, type_params, fields, state,
+        methods: _, cli_bindings, trait_impls: _, derives: _, auto_derive_default, is_published_schema,
+        published_schema_span, is_single_use, single_use_span, is_must_use, must_use_span, layout, layout_span,
+        serde_markers, type_markers, validate_block, validate_span,
+    } = def;
+    crate::AST::StructDef {
+        span: span.clone(), compiler_builtin_error: *compiler_builtin_error, is_pub: *is_pub,
+        is_package_pub: *is_package_pub, name: name.clone(), name_span: name_span.clone(),
+        type_params: type_params.clone(), fields: fields.clone(), state: state.clone(), methods: Vec::new(),
+        cli_bindings: cli_bindings.clone(), trait_impls: Vec::new(), derives: Vec::new(),
+        auto_derive_default: *auto_derive_default, is_published_schema: *is_published_schema,
+        published_schema_span: published_schema_span.clone(), is_single_use: *is_single_use,
+        single_use_span: single_use_span.clone(), is_must_use: *is_must_use, must_use_span: must_use_span.clone(),
+        layout: layout.clone(), layout_span: layout_span.clone(), serde_markers: serde_markers.clone(),
+        type_markers: type_markers.clone(), validate_block: validate_block.clone(), validate_span: validate_span.clone(),
     }
+}
+
+/// An enum row for fragment facts: every field but its methods, trait impls
+/// and derives (see struct_row_without_members).
+fn enum_row_without_members(def: &crate::AST::EnumDef) -> crate::AST::EnumDef {
+    let crate::AST::EnumDef {
+        span, is_pub, is_package_pub, name, name_span, type_params, variants, methods: _, trait_impls: _,
+        derives: _, auto_derive_default, is_single_use, single_use_span, is_must_use, must_use_span,
+        serde_markers, type_markers, groups,
+    } = def;
+    crate::AST::EnumDef {
+        span: span.clone(), is_pub: *is_pub, is_package_pub: *is_package_pub, name: name.clone(),
+        name_span: name_span.clone(), type_params: type_params.clone(), variants: variants.clone(),
+        methods: Vec::new(), trait_impls: Vec::new(), derives: Vec::new(), auto_derive_default: *auto_derive_default,
+        is_single_use: *is_single_use, single_use_span: single_use_span.clone(), is_must_use: *is_must_use,
+        must_use_span: must_use_span.clone(), serde_markers: serde_markers.clone(), type_markers: type_markers.clone(),
+        groups: groups.clone(),
+    }
+}
+
+fn project_comptime_nominals(
+    modules: &[crate::Sema::ModuleState],
+    module_idx: usize,
+    current: &crate::Sema::ModuleState,
+    name_ledger: &jet_foundation::Names::NameLedger,
+) -> crate::AST::MirFragmentNominalFacts {
+    let reexports = &current.reexports;
+    let struct_identities = FragmentNominalIndex { modules, names: name_ledger, fragment_module: None };
+    // The fragment lowers this module's own functions beside its own items,
+    // so their signatures spell its nominals as those items declare them.
+    let fragment_identities = FragmentNominalIndex { fragment_module: Some(module_idx), ..struct_identities };
 
     // Resolve source keys on demand, rather than enumerate every module's
     // package aliases anew for each isolated comptime context.
     let source_paths = name_ledger;
 
+    let error_owner = current.compiler_builtin_error_owner;
     let mut queue = VecDeque::new();
     let mut queued = HashSet::new();
+    queued.insert(module_idx);
+    queue.push_back(module_idx);
+    if let Some(error_owner) = current.compiler_builtin_error_owner {
+        if queued.insert(error_owner) {
+            queue.push_back(error_owner);
+        }
+    }
     for &target in current.imports.values() {
         if queued.insert(target) {
             queue.push_back(target);
@@ -656,7 +866,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
     for module in current.core_imports.values() {
-        if let Some(target) = core_source_target(modules, module) {
+        if let Some(target) = core_source_target(source_paths, module) {
             if queued.insert(target) {
                 queue.push_back(target);
             }
@@ -672,15 +882,47 @@ pub(crate) fn checked_comptime_nominals_for_context(
             queue.push_back(sibling);
         }
     }
+    if let Some(owner) = error_owner {
+        if queued.insert(owner) {
+            queue.push_back(owner);
+        }
+    }
 
-    let mut facts = crate::Comptime::MirBridge::MirFragmentNominalFacts::default();
+    let mut facts = crate::AST::MirFragmentNominalFacts {
+        module_idx,
+        module_identity: name_ledger.module_identity(module_idx)
+            .unwrap_or_else(|| current.module_path.clone()),
+        compiler_owned_default_err_identity: current.compiler_builtin_error_owner
+            .and_then(|owner| name_ledger.declared_identity(owner, crate::Syntax::TYPE_ERR).map(str::to_owned)),
+        ..Default::default()
+    };
+    let function_signatures = std::sync::Arc::make_mut(&mut facts.function_signatures);
     for item in &current.items {
+        if let crate::AST::Item::Func(function) = item {
+            function_signatures.insert(function.name.clone(),
+                fragment_signature(function, module_idx, modules, source_paths, &fragment_identities));
+        }
         if let crate::AST::Item::Enum(def) = item {
-            let mut row = def.clone();
-            row.methods.clear();
-            row.trait_impls.clear();
-            row.derives.clear();
+            let row = enum_row_without_members(def);
             facts.enums.insert(row.name.clone(), row);
+        }
+        if let crate::AST::Item::Struct(def) = item {
+            let Some(identity) = struct_identities.get(module_idx, &def.name).map(str::to_owned) else {
+                continue;
+            };
+            let mut row = struct_row_without_members(def);
+            row.name = identity.clone();
+            for field in &mut row.fields {
+                field.ty = canonical_fragment_type(
+                    &field.ty,
+                    module_idx,
+                    modules,
+                    &source_paths,
+                    &struct_identities,
+                );
+            }
+            facts.foreign_modules.insert(identity.clone(), current.module_alias.clone());
+            facts.structs.insert(identity.clone(), row);
         }
     }
     for (alias, &target) in &current.imports {
@@ -691,7 +933,7 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
     for (alias, module) in &current.core_imports {
-        if let Some(target) = core_source_target(modules, module) {
+        if let Some(target) = core_source_target(source_paths, module) {
             if let Some(state) = modules.get(target) {
                 facts
                     .import_modules
@@ -700,10 +942,19 @@ pub(crate) fn checked_comptime_nominals_for_context(
         }
     }
 
+    let mut bodies = HashMap::new();
+    let mut visited_namespaces = HashSet::new();
     while let Some(target) = queue.pop_front() {
         let Some(state) = modules.get(target) else {
             continue;
         };
+        if let Some(namespace) = name_ledger.module_namespace(target) {
+            if visited_namespaces.insert(namespace) {
+                for sibling in name_ledger.namespace_siblings(target) {
+                    if queued.insert(sibling) { queue.push_back(sibling); }
+                }
+            }
+        }
         let nested_targets = state
             .imports
             .values()
@@ -716,178 +967,45 @@ pub(crate) fn checked_comptime_nominals_for_context(
             }
         }
         for module in state.core_imports.values() {
-            if let Some(nested) = core_source_target(modules, module) {
+            if let Some(nested) = core_source_target(source_paths, module) {
                 if queued.insert(nested) {
                     queue.push_back(nested);
                 }
             }
         }
+        let rows = state.fragment_rows.get_or_project(|| {
+            project_fragment_module(target, state, modules, source_paths, &struct_identities)
+        });
+        facts.core_source_sigs.extend(rows.core_source_sigs.iter().cloned());
+        bodies.insert(rows.row_key.clone(), std::sync::Arc::clone(&rows.body));
         if target == module_idx {
-            continue;
-        }
-        let source_module =
-            jet_foundation::CoreModuleExports::core_source_module_by_alias(&state.module_alias);
-        let mut body_module = crate::Comptime::MirBridge::MirFragmentCoreSourceModule {
-            alias: state.module_alias.clone(),
-            module_identity: name_ledger
-                .module_identity(target)
-                .unwrap_or_else(|| state.module_path.clone()),
-            core_imports: state.core_imports.clone(),
-            functions: HashMap::new(),
-            constants: Vec::new(),
-            module_imports: HashMap::new(),
-            imported_functions: HashMap::new(),
-            import_signatures: HashMap::new(),
-            nominal_identities: HashMap::new(),
-        };
-        for item in &state.items {
-            let function = match item {
-                crate::AST::Item::Func(function) => function,
-                crate::AST::Item::Const(constant) => {
-                    body_module.constants.push(constant.clone());
-                    continue;
-                }
-                _ => continue,
-            };
-            body_module
-                .functions
-                .insert(function.name.clone(), function.clone());
-            let Some(source) = source_module else {
-                continue;
-            };
-            if !function.is_pub
-                || !jet_foundation::CoreModuleExports::core_source_owns(
-                    source.module,
-                    &function.name,
-                )
-            {
-                continue;
-            }
-            facts.core_source_sigs.insert(
-                (source.module.to_string(), function.name.clone()),
-                fragment_signature(
-                    function,
-                    target,
-                    modules,
-                    &source_paths,
-                    &struct_identities,
-                    &known_identities,
-                ),
-            );
-        }
-        // A Core row is keyed by its Core module path; a user file module's
-        // row by its loader alias, the name its import aliases resolve to.
-        let row_key = match source_module {
-            Some(source) => source.module.to_string(),
-            None => {
-                let (module_imports, imported_functions, import_signatures) =
-                    fragment_module_imports(
-                        target,
-                        modules,
-                        &source_paths,
-                        &struct_identities,
-                        &known_identities,
-                    );
-                body_module.module_imports = module_imports;
-                body_module.imported_functions = imported_functions;
-                body_module.import_signatures = import_signatures;
-                body_module.nominal_identities = fragment_module_nominals(
-                    target,
-                    modules,
-                    &source_paths,
-                    &struct_identities,
-                    &known_identities,
-                );
-                state.module_alias.clone()
-            }
-        };
-        std::sync::Arc::make_mut(&mut facts.core_source_bodies).insert(row_key, body_module);
-        // A Core module exposes only its public leaves; every nominal of a
-        // user module is declared, since its demanded bodies may name a
-        // private type.
-        let source_leaf_visible = |name: &str| {
-            source_module.is_none_or(|source| {
-                jet_foundation::CoreModuleExports::core_leaf_kind(source.module, name).is_some()
-            })
-        };
-        for item in &state.items {
-            if let crate::AST::Item::Enum(def) = item {
-                if !source_leaf_visible(&def.name) {
-                    continue;
-                }
-                let Some(identity) = struct_identities.get(&(target, def.name.clone())).cloned()
-                else {
-                    continue;
-                };
-                let mut row = def.clone();
-                row.name = identity.clone();
-                row.methods.clear();
-                row.trait_impls.clear();
-                row.derives.clear();
-                for variant in &mut row.variants {
-                    let canonicalize = |ty: &mut Type| {
-                        *ty = canonical_fragment_type(
-                            ty,
-                            target,
-                            modules,
-                            &source_paths,
-                            &struct_identities,
-                            &known_identities,
-                        );
-                    };
-                    match &mut variant.payload {
-                        crate::AST::VariantPayload::Unit => {}
-                        crate::AST::VariantPayload::Single(ty, _) => canonicalize(ty),
-                        crate::AST::VariantPayload::Named(fields) => {
-                            for field in fields {
-                                canonicalize(&mut field.ty);
-                            }
-                        }
+            // The original Prelude supplier publishes its own checked struct
+            // rows (private fields and declared defaults included) with its
+            // facts; every other module's own rows stay in its item set.
+            if current.compiler_builtin_error_owner == Some(module_idx) {
+                for (identity, row) in &rows.nominals {
+                    if let FragmentNominalRow::Struct(def) = row {
+                        facts.structs.entry(identity.clone()).or_insert_with(|| def.clone());
                     }
                 }
-                facts
-                    .foreign_modules
-                    .insert(identity.clone(), state.module_alias.clone());
-                facts.enums.entry(identity).or_insert(row);
-                continue;
             }
-            let crate::AST::Item::Struct(def) = item else {
-                continue;
-            };
-            if !source_leaf_visible(&def.name) {
-                continue;
+            continue;
+        }
+        for (identity, row) in &rows.nominals {
+            facts.foreign_modules.insert(identity.clone(), state.module_alias.clone());
+            match row {
+                FragmentNominalRow::Enum(def) => {
+                    facts.enums.entry(identity.clone()).or_insert_with(|| def.clone());
+                }
+                FragmentNominalRow::Struct(def) => {
+                    facts.structs.entry(identity.clone()).or_insert_with(|| def.clone());
+                }
             }
-            let Some(identity) = struct_identities.get(&(target, def.name.clone())).cloned() else {
-                continue;
-            };
-            let mut row = def.clone();
-            row.name = identity.clone();
-            row.methods.clear();
-            row.trait_impls.clear();
-            row.derives.clear();
-            for field in &mut row.fields {
-                field.ty = canonical_fragment_type(
-                    &field.ty,
-                    target,
-                    modules,
-                    &source_paths,
-                    &struct_identities,
-                    &known_identities,
-                );
-            }
-            facts
-                .foreign_modules
-                .insert(identity.clone(), state.module_alias.clone());
-            facts.structs.entry(identity).or_insert(row);
         }
     }
-    let (_, imported_functions, import_signatures) = fragment_module_imports(
-        module_idx,
-        modules,
-        &source_paths,
-        &struct_identities,
-        &known_identities,
-    );
+    facts.core_source_bodies = std::sync::Arc::new(bodies);
+    let (_, imported_functions, import_signatures) =
+        fragment_module_imports(module_idx, modules, source_paths, &struct_identities);
     facts.imported_functions = imported_functions;
     facts.import_signatures = import_signatures;
 
@@ -902,24 +1020,40 @@ pub(crate) fn checked_comptime_nominals_for_context(
             facts.nominal_identities.insert(source, path);
         }
     }
+    if let Some(owner) = current.compiler_builtin_error_owner.filter(|owner| *owner != module_idx) {
+        if let Ok(program) = crate::Sema::Prelude::error_prelude_program() {
+            for item in &program.items {
+                let crate::AST::Item::Struct(definition) = item else { continue };
+                if name_ledger.declaration(module_idx, &definition.name)
+                    .is_some_and(|declaration| declaration.kind == "type")
+                {
+                    continue;
+                }
+                if let Some(identity) = name_ledger.declared_identity(owner, &definition.name) {
+                    facts.nominal_identities.entry(definition.name.clone())
+                        .or_insert_with(|| identity.to_owned());
+                }
+            }
+        }
+    }
     for (alias, &target) in &current.imports {
-        for ((owner, leaf), identity) in &struct_identities {
-            if *owner == target && foreign_identities.contains(identity) {
+        for (leaf, identity) in struct_identities.module_names(target) {
+            if foreign_identities.contains(identity) {
                 facts
                     .nominal_identities
-                    .insert(format!("{alias}.{leaf}"), identity.clone());
+                    .insert(format!("{alias}.{leaf}"), identity.to_owned());
             }
         }
     }
     for (alias, module) in &current.core_imports {
-        let Some(target) = core_source_target(modules, module) else {
+        let Some(target) = core_source_target(source_paths, module) else {
             continue;
         };
-        for ((owner, leaf), identity) in &struct_identities {
-            if *owner == target && foreign_identities.contains(identity) {
+        for (leaf, identity) in struct_identities.module_names(target) {
+            if foreign_identities.contains(identity) {
                 facts
                     .nominal_identities
-                    .insert(format!("{alias}.{leaf}"), identity.clone());
+                    .insert(format!("{alias}.{leaf}"), identity.to_owned());
             }
         }
     }
@@ -927,26 +1061,26 @@ pub(crate) fn checked_comptime_nominals_for_context(
         let Some(module) = current.core_imports.get(local) else {
             continue;
         };
-        let Some(target) = core_source_target(modules, module) else {
+        let Some(target) = core_source_target(source_paths, module) else {
             continue;
         };
         let leaf = original
             .rsplit_once('.')
             .map_or(original.as_str(), |(_, leaf)| leaf);
-        if let Some(identity) = struct_identities.get(&(target, leaf.to_string())) {
+        if let Some(identity) = struct_identities.get(target, leaf) {
             if foreign_identities.contains(identity) {
                 facts
                     .nominal_identities
-                    .insert(local.clone(), identity.clone());
+                    .insert(local.clone(), identity.to_owned());
             }
         }
     }
     for (local, (original, target)) in &current.unqualified_file {
-        if let Some(identity) = struct_identities.get(&(*target, original.clone())) {
+        if let Some(identity) = struct_identities.get(*target, original) {
             if foreign_identities.contains(identity) {
                 facts
                     .nominal_identities
-                    .insert(local.clone(), identity.clone());
+                    .insert(local.clone(), identity.to_owned());
             }
         }
     }
@@ -954,33 +1088,33 @@ pub(crate) fn checked_comptime_nominals_for_context(
         let Some(state) = modules.get(sibling) else {
             continue;
         };
-        for item in &state.items {
+        for item in state.nominal_items() {
             let name = match item {
                 crate::AST::Item::Struct(def) => &def.name,
                 crate::AST::Item::Enum(def) => &def.name,
                 _ => continue,
             };
-            if let Some(identity) = struct_identities.get(&(sibling, name.clone())) {
+            if let Some(identity) = struct_identities.get(sibling, name) {
                 if foreign_identities.contains(identity) {
                     facts
                         .nominal_identities
                         .entry(name.clone())
-                        .or_insert_with(|| identity.clone());
+                        .or_insert_with(|| identity.to_owned());
                 }
             }
         }
     }
     for (local, (original, target)) in reexports {
-        if let Some(identity) = struct_identities.get(&(*target, original.clone())) {
+        if let Some(identity) = struct_identities.get(*target, original) {
             if foreign_identities.contains(identity) {
                 facts
                     .nominal_identities
-                    .insert(local.clone(), identity.clone());
+                    .insert(local.clone(), identity.to_owned());
             }
         }
     }
 
-    Some(facts)
+    facts
 }
 
 fn direct_fixed_constructor(expr: &Expr) -> bool {
@@ -1475,8 +1609,10 @@ impl<'a> Checker<'a> {
             }
             return;
         };
-
         self.check_diverging_fallback(&mut fallback, &subject_ty, span);
+        // A refutable binding stores the checked subject type, not a capture
+        // type. Lowering must carry this nominal owner into its TPattern.
+        b.ty = Some(subject_ty);
         // Rejected text/byte holes have no binding fact. Do not install a
         // recovery declaration over the value E0118 already protects.
         let text_or_byte_holes =
@@ -1494,7 +1630,7 @@ impl<'a> Checker<'a> {
             if text_or_byte_holes
                 && !bindings.contains_key(name.local_name())
                 && (self.lookup(name.local_name()).is_some()
-                    || self.consts.contains_key(name.local_name()))
+                    || self.const_type(name.local_name()).is_some())
             {
                 continue;
             }
@@ -1593,15 +1729,14 @@ impl<'a> Checker<'a> {
                             "this function has read access only and does not own the value"
                                 .to_string(),
                             format!(
-                                "copy it instead: `{} {} {}{}`",
+                                "copy it instead: `{} {} {}`",
                                 b.name,
                                 if b.mutable {
                                     Syntax::SIGIL_BIND_MUT
                                 } else {
                                     Syntax::SIGIL_BIND_IMMUT
                                 },
-                                Syntax::SIGIL_COPY,
-                                n
+                                Syntax::copy_call(n)
                             ),
                             Some(*nspan),
                         );
@@ -1776,6 +1911,15 @@ impl<'a> Checker<'a> {
                         if self.registry.distinct_range(type_name).is_some()
                 )
         );
+        // A checked-text runtime boundary deliberately exposes its Result
+        // for ordinary .Ok/.Err matching, just like a range admission.
+        let checked_text_constructor = matches!(
+            b.init.without_parens(),
+            Expr::MethodCall { receiver, method, .. }
+                if method == "from"
+                    && matches!(receiver.without_parens(), Expr::Ident(name, _)
+                        if self.is_checked_text_type_name(name))
+        );
         // D-MEM-COPYSEM1: a value-if is not a maximal place. When it feeds a
         // non-view binding, its arm tails occupy the same owning destination
         // as the conditional result; route them through `infer_owning_value`.
@@ -1785,7 +1929,7 @@ impl<'a> Checker<'a> {
                 b.ty.as_ref(),
                 Some(Type::Apply { name, .. }) if name == "View" || name == "ViewMut"
             );
-        let mut it = if distinct_range_constructor {
+        let mut it = if distinct_range_constructor || checked_text_constructor {
             self.infer_without_auto_propagation(&mut b.init)
         } else if b.mutable || owning_if_value {
             self.infer_owning_value(&mut b.init)
@@ -1912,6 +2056,9 @@ impl<'a> Checker<'a> {
         }
 
         if let Expr::Lambda(lam) = &b.init {
+            if let Some(capture) = self.once_lambda_sites.get(&lam.span).cloned() {
+                self.once_lambdas.insert(b.name_span, capture);
+            }
             if lam.meta.escapes {
                 for name in &lam.meta.mut_captures {
                     self.lambda_mut_borrow_stack
@@ -1951,10 +2098,11 @@ impl<'a> Checker<'a> {
         // is that earlier error's cascade: poison this binding as well, so
         // later uses of it stay silent instead of reporting `Unknown`.
         let init_read_invalid = self.invalid_binding_reads != invalid_reads_before_init;
-        let init_type_unusable = (b.ty.is_none()
+        let mut init_type_unusable = (b.ty.is_none()
             && it.is_none()
             && (init_has_error || init_read_invalid))
-            || (init_has_error && initializer_type_error);
+            || (init_has_error && initializer_type_error)
+            || (b.is_comptime && init_read_invalid);
         if b.ty.is_none() && it.is_none() && !init_has_error && !init_read_invalid {
             if let Expr::MethodCall {
                 method,
@@ -1965,10 +2113,10 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0116",
                     format!("`.{method}()` doesn't hand back a value"),
-                    "a call is a value only when its function declares a result after the parameter list"
+                    "a call is a value only when its function declares a return type after `->`"
                         .to_string(),
                     format!(
-                        "put `{method}` on its own line, or declare a result after the parameter list"
+                        "put `{method}` on its own line, or declare it as `fn {method}(…) -> Type {{ … }}`"
                     ),
                     Some(*method_span),
                 ));
@@ -2075,10 +2223,12 @@ impl<'a> Checker<'a> {
         }
         if !self.defer_ct_evaluation
             && b.is_comptime
+            && !init_type_unusable
             && !crate::Comptime::check_build_time_io(&b.init, self.ct_base_dir, &mut self.diags)
         {
             // D-CTIO1: the path law already reported against the call.
-        } else if !self.defer_ct_evaluation && b.is_comptime {
+            init_type_unusable = true;
+        } else if !self.defer_ct_evaluation && b.is_comptime && !init_type_unusable {
             let is_patch_binding =
                 matches!(&final_ty, Type::Named(name) if name.ends_with(".Patch"));
             let globals = self.current_ct_globals().into_owned();
@@ -2129,7 +2279,13 @@ impl<'a> Checker<'a> {
                     // D-CTEFFECT1 Tier-1: accumulate embed inputs for .jet/lock.
                     self.ct_embed_inputs.extend(inputs);
                 }
-                Err(d) => self.diags.push(d),
+                Err(d) => {
+                    // The checked type still exists, but this binding has no
+                    // compile-time value. Keep the original evaluation failure
+                    // and poison dependent reads before another fragment runs.
+                    init_type_unusable = true;
+                    self.diags.push(d);
+                }
             }
         }
         if b.name == "_" {
@@ -2180,7 +2336,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or_else(|| {
                         self.funcs.contains_key(name)
                             || self.unqualified.contains_key(name)
-                            || self.unqualified_file.contains_key(name)
+                            || self.has_file_function(name)
                     })
             } else if let Some(lambda) = interrupt_callback_lambda(&b.init) {
                 self.lambda_interrupt_sendable(lambda, &final_ty)

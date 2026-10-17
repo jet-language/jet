@@ -7,7 +7,7 @@
 
 // Materialize the bundled battery `slug` under
 // `<store parent>/sources/batteries/<slug>-<key>` and return that directory.
-pub fn env_battery_materialize_package(store_dir: String, slug: String) -[FS, Rand]> String ProviderReason! {
+fn env_battery_materialize_package(store_dir: String, slug: String) -[FS, Rand]> String ProviderReason! {
     package := BatteryPackage?{None}
     loop candidate in env_battery_packages() {
         if package == None && candidate.slug == slug -> package = Val(candidate)
@@ -127,7 +127,7 @@ fn env_battery_verify_directory(directory: String, relative: String, package: Ba
         file :: expected ?? return Err(ProviderReason{message: "embedded battery cache contains an unexpected file: {entry.path}"})
         bytes :: files.read_bytes(entry.path) ?? return Err(ProviderReason{message: "could not read embedded battery cache file {entry.path}: {err}"})
         if bytes != file.bytes -> return Err(ProviderReason{message: "embedded battery cache bytes do not match bundled `{file.path}`"})
-        mode :: if sys.is_windows() -> BATTERIES_FILE_MODE else -> info.mode & 0o7777
+        mode :: if sys.is_windows() -> BATTERIES_FILE_MODE else -> (info.mode).bit_and(0o7777)
         if mode != file.mode -> return Err(ProviderReason{message: "embedded battery cache mode does not match bundled `{file.path}`"})
         if !seen.contains(relative_name) -> &seen.push(relative_name)
     }

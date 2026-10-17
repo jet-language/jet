@@ -36,7 +36,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
             info :: files.stat(entry.path) ?? panic("stat stage")
             assert(info.is_file && !info.is_symlink)
             assert_eq(info.links, 1)
-            assert_eq(info.mode & 0o777, 0o600)
+            assert_eq((info.mode).bit_and(0o777), 0o600)
         }
     }
     assert_eq(stages, 1, "validation must run after a complete stage exists")
@@ -52,8 +52,8 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     assert(original.id != published.id)
     assert_eq(files.read(path) ?? panic("read published"), "replacement")
     assert_eq(published.links, 1)
-    assert_eq(published.mode & 0o777, 0o600)
-    assert_eq((files.stat(files.join(root, "nested")) ?? panic("stat parent")).mode & 0o777, 0o700)
+    assert_eq((published.mode).bit_and(0o777), 0o600)
+    assert_eq(((files.stat(files.join(root, "nested")) ?? panic("stat parent")).mode).bit_and(0o777), 0o700)
     foundation_publication_test_no_temporary(files.join(root, "nested/deeper"))
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -84,7 +84,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     source :: foundation_open_file_authority(root, "input.jet") ?? panic("hold input")
     if source.read_bounded(7) == {
         .Ok(_) -> panic("oversize rooted read must refuse")
-        .Err(error) -> assert_eq(error, IOError.InvalidInput(foundation_io_context(.Read, "input.jet", "file exceeds its read bound")))
+        .Err(error) -> assert_eq(error, IOError.InvalidInput(IOContext{operation: .Read, resource: Val("input.jet"), os_code: None, cause: Val("file exceeds its read bound")}))
     }
     assert_eq(source.read_bounded(8) ?? panic("rooted exact-bound read"), "original".bytes())
     files.remove_all(root) ?? panic("cleanup")
@@ -97,11 +97,14 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     expected :: files.stat(path) ?? panic("stat original")
     validate :: () -> {
         foundation_publication_test_staged(root, "edited")
-        return Err(IOError.Other(foundation_io_context(.Write, path, "held source rejected")))
+        return Err(IOError.Other(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("held source rejected")}))
     }
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(validate)) == {
         .Ok(_) -> panic("validation refusal must prevent rename")
-        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Write, path, "held source rejected")))
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
+            assert_eq(error.error, IOError.Other(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("held source rejected")}))
+        }
     }
     assert_eq(files.read(path) ?? panic("read original"), "original")
     assert_eq((files.stat(path) ?? panic("stat original after refusal")).id, expected.id)
@@ -113,7 +116,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     root :: foundation_publication_test_root("absent-refusal")
     validate :: () -> {
         foundation_publication_test_staged(root, "edited")
-        return Err(IOError.Other(foundation_io_context(.Write, root, "held source rejected")))
+        return Err(IOError.Other(IOContext{operation: .Write, resource: Val(root), os_code: None, cause: Val("held source rejected")}))
     }
     foundation_publication_test_reject(root, "input.jet", Val(validate))
     assert(!files.exists(files.join(root, "input.jet")))
@@ -178,7 +181,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     }
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(validate)) == {
         .Ok(_) -> panic("a mutated held source must not publish")
-        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Read, path, "file authority input changed while it was held")))
+        .Err(error) -> assert_eq(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file authority input changed while it was held")}))
     }
     assert_eq(files.read(path) ?? panic("read concurrent edit"), "concurrent unrelated source edit")
     assert_eq((files.stat(path) ?? panic("stat mutated source")).id, original.id)
@@ -202,7 +205,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     }
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(validate)) == {
         .Ok(_) -> panic("a replaced source must not approve publication")
-        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Read, source_path, "file authority input moved while it was held")))
+        .Err(error) -> assert_eq(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(source_path), os_code: None, cause: Val("file authority input moved while it was held")}))
     }
     assert_eq(files.read(destination) ?? panic("read old destination"), "old destination")
     foundation_publication_test_no_temporary(root)
@@ -223,7 +226,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     assert_eq((files.stat(backup) ?? panic("stat backup")).id, original.id)
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(() -> source.revalidate())) == {
         .Ok(_) -> panic("a source renamed away must not publish at its old path")
-        .Err(error) -> if error == {
+        .Err(error) -> if error.error == {
             .NotFound(_) -> {}
             else -> panic("the renamed-away source path must be refused as missing: {error}")
         }
@@ -245,7 +248,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     files.write(path, "original") ?? panic("write same-byte replacement")
     if foundation_write_file_nofollow_at_root(root, "input.jet", "edited".bytes(), Val(() -> source.revalidate())) == {
         .Ok(_) -> panic("a replacement at the source path must not publish")
-        .Err(error) -> assert_eq(error, IOError.Other(foundation_io_context(.Read, path, "file authority input moved while it was held")))
+        .Err(error) -> assert_eq(error.error, IOError.Other(IOContext{operation: .Read, resource: Val(path), os_code: None, cause: Val("file authority input moved while it was held")}))
     }
     assert_eq(files.read(path) ?? panic("read replacement"), "original")
     assert((files.stat(path) ?? panic("stat replacement")).id != original.id)
@@ -351,7 +354,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     validate :: () -> { panic("hardlinked stage must be refused before validation") }
     if foundation_stage_and_rename(directories, parent, writer, ".jet-lock-hardlinked-stage", "input.jet", "edited".bytes(), Val(expected.id), Val(validate)) == {
         .Ok(_) -> panic("hardlinked stage must not publish")
-        .Err(error) -> assert_eq(error, IOError.PermissionDenied(foundation_io_context(.Write, ".jet-lock-hardlinked-stage", "file authority temporary has multiple hard links")))
+        .Err(error) -> assert_eq(error, IOError.PermissionDenied(IOContext{operation: .Write, resource: Val(".jet-lock-hardlinked-stage"), os_code: None, cause: Val("file authority temporary has multiple hard links")}))
     }
     assert_eq(files.read(path) ?? panic("read original"), "original")
     assert_eq((files.stat(path) ?? panic("stat original after refusal")).id, expected.id)
@@ -488,7 +491,10 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     files.write(path, "old") ?? panic("old seed")
     policy :: FoundationPublicationPolicy{create: .CreateNew}
     if foundation_write_file_nofollow_at_root(root, "seed", "new".bytes(), None, policy) == {
-        .Err(error) -> assert(error == .AlreadyExists(_))
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.InspectDestination)
+            assert(error.error == .AlreadyExists(_))
+        }
         .Ok(_) -> panic("create-new clobbered old seed")
     }
     assert_eq(files.read(path) ?? panic("old seed read"), "old")
@@ -504,13 +510,13 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
         loop entry in entries {
             if entry.name.starts_with(".jet-lock-") {
                 stages += 1
-                assert_eq((files.stat(entry.path) ?? panic("staged mode")).mode & 4095, 420)
+                assert_eq(((files.stat(entry.path) ?? panic("staged mode")).mode).bit_and(4095), 420)
             }
         }
         assert_eq(stages, 1)
     }
     foundation_write_file_nofollow_at_root(root, "key.pub", "public".bytes(), Val(validate), policy) ?? panic("public publish")
-    assert_eq((files.stat(files.join(root, "key.pub")) ?? panic("public mode")).mode & 4095, 420)
+    assert_eq(((files.stat(files.join(root, "key.pub")) ?? panic("public mode")).mode).bit_and(4095), 420)
     foundation_publication_test_no_temporary(root)
     files.remove_all(root) ?? panic("cleanup")
 }
@@ -629,9 +635,9 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     files.create_dir_all(existing) ?? panic("existing directory")
     files.set_mode(existing, 0o750) ?? panic("existing mode")
     held :: foundation_open_or_create_directory(parent, "existing") ?? panic("open existing")
-    assert_eq((held.stat() ?? panic("existing held metadata")).mode & 0o777, 0o750)
+    assert_eq(((held.stat() ?? panic("existing held metadata")).mode).bit_and(0o777), 0o750)
     created :: foundation_open_or_create_directory(parent, "created") ?? panic("create protected child")
-    assert_eq((created.stat() ?? panic("created held metadata")).mode & 0o777, 0o700)
+    assert_eq(((created.stat() ?? panic("created held metadata")).mode).bit_and(0o777), 0o700)
     assert_eq((created.stat() ?? panic("created identity")).id, (files.stat(files.join(root, "created")) ?? panic("bound identity")).id)
     files.write(files.join(root, "ordinary"), "sentinel") ?? panic("ordinary collision")
     files.symlink(existing, files.join(root, "linked")) ?? panic("link collision")
@@ -644,7 +650,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     }
     assert_eq(files.read(files.join(root, "ordinary")) ?? panic("collision preserved"), "sentinel")
     assert((files.stat(files.join(root, "linked")) ?? panic("link preserved")).is_symlink)
-    assert_eq((files.stat(existing) ?? panic("referent mode")).mode & 0o777, 0o750)
+    assert_eq(((files.stat(existing) ?? panic("referent mode")).mode).bit_and(0o777), 0o750)
     files.remove_all(root) ?? panic("cleanup")
 }
 
@@ -653,7 +659,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     path :: files.join(root, "input")
     files.write(path, "original") ?? panic("original")
     original :: files.stat(path) ?? panic("original identity")
-    primary :: IOError.Other(foundation_io_context(.Write, path, "primary validation refusal"))
+    primary :: IOError.Other(IOContext{operation: .Write, resource: Val(path), os_code: None, cause: Val("primary validation refusal")})
     validate :: () -> {
         foundation_publication_test_staged(root, "edited")
         entries :: files.list_dir(root)
@@ -668,7 +674,10 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     }
     if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), Val(validate)) == {
         .Ok(_) -> panic("validation failure published")
-        .Err(error) -> assert_eq(error, primary)
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
+            assert_eq(error.error, primary)
+        }
     }
     assert_eq(files.read(path) ?? panic("original bytes"), "original")
     assert_eq((files.stat(path) ?? panic("original retained")).id, original.id)
@@ -686,7 +695,7 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
 
 #Test("publication cleanup of an already removed stage preserves the primary error") {
     root :: foundation_publication_test_root("authority-cleanup-missing")
-    primary :: IOError.Other(foundation_io_context(.Write, root, "primary missing-stage refusal"))
+    primary :: IOError.Other(IOContext{operation: .Write, resource: Val(root), os_code: None, cause: Val("primary missing-stage refusal")})
     validate :: () -> {
         foundation_publication_test_staged(root, "edited")
         entries :: files.list_dir(root)
@@ -697,7 +706,10 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     }
     if foundation_write_file_nofollow_at_root(root, "input", "edited".bytes(), Val(validate)) == {
         .Ok(_) -> panic("validation failure published")
-        .Err(error) -> assert_eq(error, primary)
+        .Err(error) -> {
+            assert_eq(error.phase, FoundationPublicationPhase.ValidateSource)
+            assert_eq(error.error, primary)
+        }
     }
     assert(!files.exists(files.join(root, "input")))
     foundation_publication_test_no_temporary(root)
@@ -747,7 +759,8 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     chunk_sizes :: [Int]{1, 7, 63, 64, 65}
     loop length in lengths {
         bytes :: loop index in 0..<length -> U8{index % 251}
-        expected :: mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
+        view :: bytes[0..<bytes.len()]
+        expected :: mir_sha256_hex_bytes(mir_sha256_bytes(view))
         loop chunk_size in chunk_sizes {
             hasher := StreamingSHA256.new()
             offset := 0
@@ -768,5 +781,15 @@ fn foundation_publication_test_staged(root: String, expected: String) Never! -[F
     &hasher.update([U8]{97})
     &hasher.update([U8]{})
     &hasher.update([U8]{98, 99})
-    assert_eq(hasher.finalize(), mir_sha256_bytes("abc".bytes()))
+    bytes :: "abc".bytes()
+    view :: bytes[0..<bytes.len()]
+    assert_eq(hasher.finalize(), mir_sha256_bytes(view))
+}
+
+#Test("canonical SHA256 hashes only the retained input window") {
+    bytes :: "xabcx".bytes()
+    middle :: bytes[1..<4]
+    empty :: bytes[2..<2]
+    assert_eq(mir_sha256_hex_bytes(mir_sha256_bytes(middle)), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    assert_eq(mir_sha256_hex_bytes(mir_sha256_bytes(empty)), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
 }

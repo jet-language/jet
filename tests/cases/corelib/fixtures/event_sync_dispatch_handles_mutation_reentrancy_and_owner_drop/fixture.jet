@@ -1,0 +1,65 @@
+
+use core.event as event
+
+fn run() {
+    scope :: event.scope()
+    ev :: event.new<Int>()
+    late :: ev.on(scope, (n) -> { print("late {n}") })
+    ev.on_priority(scope, 10, (n) -> {
+        print("killer {n}")
+        late.unsubscribe()
+    })
+    print(&ev.emit(1).summary())
+    print("listeners={ev.listener_count()}")
+
+    additions :: event.scope()
+    growing :: event.new<Int>()
+    growing.on(additions, (n) -> {
+        print("root {n}")
+        _ :: growing.on(additions, (m: Int) -> { print("added {m}") })
+    })
+    print(&growing.emit(1).summary())
+    print(&growing.emit(2).summary())
+
+    nested_scope :: event.scope()
+    nested :: event.new<Int>()
+    nested.once(nested_scope, (n) -> {
+        print("once {n}")
+        if n == 1 { &nested.emit(2) }
+    })
+    print(&nested.emit(1).summary())
+    print("nested-listeners={nested.listener_count()}")
+
+    owned :: event.new<Int>()
+    if true {
+        owner :: event.scope()
+        owned.on(owner, (n) -> { print("leaked {n}") })
+    }
+    print(&owned.emit(9).summary())
+
+    cancelled :: event.scope()
+    stopped :: event.new<Int>()
+    cancelled.cancel()
+    stopped_sub :: stopped.on(cancelled, (n) -> { print("cancelled event {n}") })
+    print("cancelled-active={stopped_sub.is_active()}")
+    print(&stopped.emit(10).summary())
+    stopped_hook :: event.hook<Int, String>("base")
+    stopped_hook.on(cancelled, (n) -> "cancelled hook {n}")
+    print(stopped_hook.run(10, "fallback"))
+
+    order_scope :: event.scope()
+    ordered :: event.new<Int>()
+    ordered.on_priority(order_scope, 5, (n) -> { print("first {n}") })
+    ordered.on_priority(order_scope, 5, (n) -> { print("second {n}") })
+    ordered.on(order_scope, (n) -> { print("low {n}") })
+    print(&ordered.emit(3).summary())
+
+    depth_scope :: event.scope()
+    depth :: event.new<Int>()
+    depth.on_priority(depth_scope, 5, (n) -> {
+        print("enter {n}")
+        if n == 1 { print(&depth.emit(2).summary()) }
+    })
+    depth.on(depth_scope, (n) -> { print("leave {n}") })
+    print(&depth.emit(1).summary())
+}

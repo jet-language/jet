@@ -413,7 +413,7 @@ fn write_big_fixture(dir: &Path) -> BigFixtureFacts {
         for function in first..first + BIG_FUNCTIONS_PER_MODULE {
             writeln!(
                 &mut source,
-                "pub fn function_{function:03}() Int -[]> {{ return 1 }}\n"
+                "fn function_{function:03}() Int -[]> {{ return 1 }}\n"
             )
             .unwrap();
         }

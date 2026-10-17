@@ -1,0 +1,14 @@
+# Port of tests/cli_parts/surface.rs:2610-2653; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/eval
+step: jet eval {work}/printer.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "hi" # original predicate
+stdout: ~ "()" # original predicate
+step: jet eval {work}/printer.jet --json
+env: NO_COLOR=1
+exit: 0
+stdout: !~ "hi" # original predicate
+stderr: ~ "hi" # original predicate

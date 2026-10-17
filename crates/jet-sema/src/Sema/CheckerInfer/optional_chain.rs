@@ -66,6 +66,7 @@ impl<'a> Checker<'a> {
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         };
 
         // Probe the receiver and the call once to learn the lift. The probe's

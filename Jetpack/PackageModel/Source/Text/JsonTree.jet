@@ -1,79 +1,55 @@
-// DataTree accessors shared by the PackageModel codecs. Parsing and
+// Dyn accessors shared by the PackageModel codecs. Parsing and
 // rendering are Core's (`json`); these only read one shape out of a tree.
+use core.encoding.json as pkg_json_tree_core
 
-// The Rust `DataTree` accessor failures the reference embeds in its errors.
-PKG_JSON_NOT_OBJECT :: prep { "expected a DataTree object" }
-PKG_JSON_NOT_ARRAY :: prep { "expected a DataTree array" }
-PKG_JSON_NOT_STRING :: prep { "expected a DataTree string" }
+// The Rust `Dyn` accessor failures the reference embeds in its errors.
+PKG_JSON_NOT_OBJECT :: prep { "expected a Dyn object" }
+PKG_JSON_NOT_ARRAY :: prep { "expected a Dyn array" }
+PKG_JSON_NOT_STRING :: prep { "expected a Dyn string" }
 
-fn pkg_json_object(value: DataTree) -> [String: DataTree]? Never! {
+fn pkg_json_object(value: Dyn) -> [String: Dyn]? Never! {
     if value == {
-        .Object(fields) -> Val(fields)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(fields) -> {
+            members := [String: Dyn]{}
+            loop pair in fields -> members[pair.key] = pair.value
+            Val(members)
+        }
         else -> None
     }
 }
 
-fn pkg_json_array(value: DataTree) -> [DataTree]? Never! {
+fn pkg_json_array(value: Dyn) -> [Dyn]? Never! {
     if value == {
         .Array(items) -> Val(items)
         else -> None
     }
 }
 
-fn pkg_json_text(value: DataTree) -> String? Never! {
+fn pkg_json_text(value: Dyn) -> String? Never! {
     if value == {
         .Text(text) -> Val(text)
         else -> None
     }
 }
 
-fn pkg_json_bool(value: DataTree) -> Bool? Never! {
+fn pkg_json_bool(value: Dyn) -> Bool? Never! {
     if value == {
         .Bool(flag) -> Val(flag)
         else -> None
     }
 }
 
-// Compact JSON with object keys in insertion order.
-fn pkg_json_render(value: DataTree) -> String Never! {
-    json.to_string(value)
+// Compact JSON with object keys in insertion order. Parsed file trees and
+// Jetpack-owned facts exclude nonfinite numbers and unsupported native values;
+// an encoding failure here breaches that invariant, not a recoverable document.
+fn pkg_json_render(value: Dyn) -> String Never! {
+    pkg_json_tree_core.to_string(value) ?? panic("Jetpack rendered a value JSON can't encode: {err.kind:Debug}")
 }
 
 // A string array of `values`.
-fn pkg_json_texts(values: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop value in values -> &items.push(DataTree.Text(value))
-    DataTree.Array(items)
-}
-
-// jet_foundation::JSON protocol bounds: nesting depth and default message
-// size (`MAX_JSON_DEPTH`, `MAX_PROTOCOL_MESSAGE_BYTES`).
-PKG_JSON_MAX_DEPTH :: prep { 64 }
-PKG_JSON_MAX_PROTOCOL_BYTES :: prep { 1048576 }
-
-// A bounded parse: the tree, or the reference's failure text.
-pub enum PkgJSONDocument {
-    Parsed(DataTree)
-    Failed(String)
-}
-
-// Rust `JSON::parse`: at most 1 MiB and 64 nesting levels.
-fn pkg_json_parse_protocol(text: String) -> PkgJSONDocument Never! {
-    if text.bytes().len() > PKG_JSON_MAX_PROTOCOL_BYTES -> return PkgJSONDocument.Failed("JSON input exceeds the 1 MiB limit")
-    pkg_json_parse_bounded(text, PKG_JSON_MAX_PROTOCOL_BYTES)
-}
-
-// Rust `JSON::parse_json_with_limit`: at most `max_bytes` and 64 nesting
-// levels, through Core's caller-chosen limits (D-CORE-JSONLIMIT1=A).
-fn pkg_json_parse_bounded(text: String, max_bytes: Int) -> PkgJSONDocument Never! {
-    limits := encoding.EncodingLimits.safe()
-    limits.max_total_bytes = Val(max_bytes)
-    limits.max_depth = PKG_JSON_MAX_DEPTH
-    if json.parse(text, limits: limits) == {
-        .Ok(tree) -> PkgJSONDocument.Parsed(tree)
-        .Err(error) -> {
-            if error.kind == encoding.EncodingErrorKind.Limit -> return PkgJSONDocument.Failed("JSON exceeds maximum nesting depth")
-            PkgJSONDocument.Failed(error.reason)
-        }
-    }
+fn pkg_json_texts(values: [String]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop value in values -> &items.push(Dyn.Text(value))
+    Dyn.Array(items)
 }

@@ -797,12 +797,13 @@ fn print_canvas_hint(file: &str, mode: OutputMode, printed: &mut bool) {
     *printed = true;
 }
 
-/// `jet dev <file>` — the E2-M4 watch/interpret loop (D-DEV4), extended by c77
-/// with three-mode routing (D-DEVMODE1=A) and hot-swap/restart (D-HOTSWAP1=B).
-/// Re-checks and re-runs on dependency-aware invalidation (#439 / E3-UL6),
-/// streaming output. The per-iteration work lives in
-/// `jet::Interpreter::dev_iteration` (so it can be golden-tested); this is the
-/// thin std-only watcher around the shared `WatchSession` engine (I6: no
+/// `jet dev <file>` — the E2-M4 watch loop (D-DEV4) with three-mode routing
+/// (D-DEVMODE1=A). D-EXEC2=A: every generation is the ordinary `jet run` of
+/// the same invocation (normal build path, then execute), restarted on each
+/// dependency-aware invalidation (#439 / E3-UL6). Only Canvas hosts the
+/// program in process through the evaluator, whose per-iteration work lives
+/// in `jet::Interpreter::dev_iteration` (so it can be golden-tested); this is
+/// the thin std-only watcher around the shared `WatchSession` engine (I6: no
 /// `notify` crate).
 pub(crate) fn run_dev(
     file: &str,
@@ -811,7 +812,6 @@ pub(crate) fn run_dev(
     policy: WatchPolicy,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
-    use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
     program_args: &[&String],
@@ -822,10 +822,13 @@ pub(crate) fn run_dev(
     app_port: Option<u16>,
 ) {
     crate::CmdCompile::require_project_environment("dev", Path::new(file), mode);
+    if !canvas {
+        run_dev_restart(file, entry_fn, policy, mode);
+    }
     let mut runtime_args = Vec::with_capacity(program_args.len() + 1);
     runtime_args.push(file.to_string());
     runtime_args.extend(program_args.iter().map(|arg| (*arg).clone()));
-    jet_jit::with_program_args(&runtime_args, || {
+    jet_evalhost::with_program_args(&runtime_args, || {
         run_dev_inner(
             file,
             entry_fn,
@@ -833,7 +836,6 @@ pub(crate) fn run_dev(
             policy,
             gates,
             mode,
-            use_interpreter,
             profile,
             setting_overrides,
             program_args,
@@ -846,12 +848,132 @@ pub(crate) fn run_dev(
     });
 }
 
+/// The argv of one restart generation: this same invocation with the
+/// watch-only flags removed. Ordinarily the command word becomes `run`, so the
+/// child resolves the same entry, member, profile, settings, and program
+/// arguments as the session that started it. A package `dev` command override
+/// is not a `jet run` entry: its generation is a one-shot `jet dev` of the
+/// resolved override file, so every generation runs the dev callable.
+fn dev_restart_argv(mut args: impl Iterator<Item = String>, dev_override: Option<&str>) -> Vec<String> {
+    let mut argv = Vec::new();
+    let mut command_seen = false;
+    let mut target_seen = false;
+    let mut separate_value = false;
+    let finish_dev_override = |argv: &mut Vec<String>, target_seen: bool| {
+        if let Some(file) = dev_override {
+            if !target_seen {
+                argv.push(file.to_string());
+            }
+            argv.push("--watch=off".to_string());
+        }
+    };
+    while let Some(arg) = args.next() {
+        if separate_value {
+            separate_value = false;
+            argv.push(arg);
+            continue;
+        }
+        if arg == "--" {
+            finish_dev_override(&mut argv, target_seen);
+            argv.push(arg);
+            argv.extend(args);
+            return argv;
+        }
+        if !command_seen && (arg == "dev" || arg == "run") {
+            command_seen = true;
+            argv.push(if dev_override.is_some() { "dev" } else { "run" }.to_string());
+            continue;
+        }
+        let watch_only = arg == "--watch"
+            || arg.starts_with("--watch=")
+            || matches!(arg.as_str(), "--restart" | "--swap" | "--try-anyway" | "--no-capture");
+        if watch_only {
+            continue;
+        }
+        if crate::CmdCompile::takes_separate_run_value(&arg) {
+            separate_value = !arg.contains('=');
+            argv.push(arg);
+            continue;
+        }
+        if command_seen && !target_seen && !arg.starts_with('-') {
+            target_seen = true;
+            argv.push(dev_override.map_or(arg, str::to_string));
+            continue;
+        }
+        argv.push(arg);
+    }
+    finish_dev_override(&mut argv, target_seen);
+    argv
+}
+
+/// D-EXEC2=A: the default `jet dev` / `jet run --watch` engine. Each
+/// generation is a child `jet run` (normal build path + execute); an
+/// invalidation stops the running program and starts the next generation.
+fn run_dev_restart(file: &str, entry_fn: Option<&str>, policy: WatchPolicy, mode: OutputMode) -> ! {
+    let exe = std::env::current_exe().unwrap_or_else(|error| {
+        crate::cli_error!("E2105", "couldn't locate the running Jet executable: {error}");
+        exit(ExitCodes::USER_ERROR);
+    });
+    let dev_override = (entry_fn == Some("dev")).then_some(file);
+    let argv = dev_restart_argv(std::env::args().skip(1), dev_override);
+    let start = || {
+        Command::new(&exe).args(&argv).spawn().unwrap_or_else(|error| {
+            crate::cli_error!("E2105", "couldn't run the program: {error}");
+            exit(ExitCodes::USER_ERROR);
+        })
+    };
+    if policy == WatchPolicy::Once {
+        let status = start().wait().unwrap_or_else(|error| {
+            crate::cli_error!("E2105", "couldn't run the program: {error}");
+            exit(ExitCodes::USER_ERROR);
+        });
+        exit(crate::CmdCompile::child_exit_code(status));
+    }
+    // Open the watcher before the first generation so an edit made while it
+    // builds is an invalidation, not the baseline.
+    let path = Path::new(file);
+    let mut watch = match jet_devserver::WatchSession::open(path) {
+        Ok(watch) => watch,
+        Err(diagnostic) => {
+            eprint!(
+                "{}",
+                jet::render_all_colored(file, "", &[diagnostic], mode.color_stderr())
+            );
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    register_dev_watch_paths(&mut watch, path);
+    let mut child = Some(start());
+    loop {
+        if let Some(running) = child.as_mut() {
+            if matches!(running.try_wait(), Ok(Some(_))) {
+                child = None;
+            }
+        }
+        if let Some(receipt) = watch.poll() {
+            let _ = watch.acknowledge(&receipt);
+            if !receipt.change_kinds.iter().all(|kind| *kind == "stale") {
+                if let Some(mut running) = child.take() {
+                    let _ = running.kill();
+                    let _ = running.wait();
+                }
+                if !mode.quiet && !mode.json {
+                    println!("\n— {} changed, re-running —", file);
+                }
+                child = Some(start());
+            }
+        }
+        std::thread::sleep(Duration::from_millis(
+            jet_devserver::WATCH_POLL_INTERVAL_MS.max(25),
+        ));
+    }
+}
+
 fn run_dev_iteration_with_entry(
     file: &str,
     entry_fn: Option<&str>,
     program_args: &[&String],
     try_anyway: bool,
-    use_interpreter: bool,
     gates: jet::Policy::GateSet,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
@@ -864,7 +986,6 @@ fn run_dev_iteration_with_entry(
         file,
         &args,
         try_anyway,
-        use_interpreter,
         gates,
         profile,
         setting_overrides,
@@ -942,7 +1063,6 @@ fn execute_native_project_rebuild(
     try_anyway: bool,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
-    use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
@@ -968,13 +1088,11 @@ fn execute_native_project_rebuild(
         try_anyway,
         gates,
         mode,
-        use_interpreter,
         profile,
         setting_overrides,
     );
     if rebuilt_snapshot.is_none() {
         jet_foundation::Persist::shared_replace(persist_before_rebuild);
-        jet_jit::discard_hot_swap_plan();
     }
     *prev_snapshot = rebuilt_snapshot.or(previous_snapshot);
     *game_controls_enabled = prev_snapshot.as_ref().is_some_and(|snapshot| {
@@ -1048,7 +1166,6 @@ fn run_dev_inner(
     policy: WatchPolicy,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
-    use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
     program_args: &[&String],
@@ -1108,9 +1225,9 @@ fn run_dev_inner(
 
     // The dev loop re-prints the run's output and nothing else reads it, so the
     // program owns the process's streams. Without this a piped `jet dev` showed
-    // nothing at all for a program that prints and keeps running, because both
-    // in-process tiers held the bytes until the run ended.
-    jet_jit::set_program_owns_streams();
+    // nothing at all for a program that prints and keeps running, because the
+    // evaluator held the bytes until the run ended.
+    jet_evalhost::set_program_owns_streams();
 
     let record = start_dev_capture(
         file,
@@ -1129,7 +1246,6 @@ fn run_dev_inner(
             entry_fn,
             program_args,
             try_anyway,
-            use_interpreter,
             gates,
             profile,
             setting_overrides,
@@ -1219,7 +1335,7 @@ fn run_dev_inner(
     // by `dev_incremental_reload_enabled`. A failed seed is discarded; the
     // normal edit path will report the actual diagnostics for that source.
     let prime_incremental_cache = |cache: &mut jet::Sema::IncrementalSemaCache| {
-        let (diags, bundle, _) =
+        let (diags, bundle, _, _) =
             jet::Driver::check_file_with_effect_facts_incremental(file, None, false, cache);
         let has_errors = diags
             .iter()
@@ -1238,7 +1354,6 @@ fn run_dev_inner(
         try_anyway,
         gates,
         mode,
-        use_interpreter,
         profile,
         setting_overrides,
     );
@@ -1360,7 +1475,6 @@ fn run_dev_inner(
                         try_anyway,
                         gates,
                         mode,
-                        use_interpreter,
                         profile,
                         setting_overrides,
                         &release_policy,
@@ -1430,7 +1544,6 @@ fn run_dev_inner(
                         try_anyway,
                         gates,
                         mode,
-                        use_interpreter,
                         profile,
                         setting_overrides,
                     );
@@ -1575,7 +1688,6 @@ fn run_dev_inner(
                 snapshot,
                 file,
                 try_anyway,
-                use_interpreter,
                 mode,
                 &release_policy,
                 &mut clock,
@@ -1606,7 +1718,6 @@ fn run_dev_inner(
                 prev_snapshot.as_ref(),
                 gates,
                 mode,
-                use_interpreter,
                 profile,
                 &release_policy,
                 setting_overrides,
@@ -1636,7 +1747,6 @@ fn run_dev_inner(
                 .unwrap_or_default();
             if next.is_none() {
                 jet_foundation::Persist::shared_replace(persist_before_change.clone());
-                jet_jit::discard_hot_swap_plan();
             }
             if let Err(reason) =
                 publish_game_asset_watch_events(file, receipt.game_dev_entries(), dev_job_now_ms())
@@ -1723,7 +1833,6 @@ fn run_dev_inner(
                         }
                         Err((prior, reason)) => {
                             jet_foundation::Persist::shared_replace(persist_before_change.clone());
-                            jet_jit::discard_hot_swap_plan();
                             if let Err(publication) = apply_game_watch_facts(
                                 &mut game_dev_session,
                                 &game_facts,
@@ -1752,7 +1861,6 @@ fn run_dev_inner(
                 }
                 Err(reason) => {
                     jet_foundation::Persist::shared_replace(persist_before_change);
-                    jet_jit::discard_hot_swap_plan();
                     if let Err(publication) = apply_game_watch_facts(
                         &mut game_dev_session,
                         &game_facts,
@@ -1813,7 +1921,6 @@ fn run_dev_inner(
                     try_anyway,
                     gates,
                     mode,
-                    use_interpreter,
                     profile,
                     setting_overrides,
                     &release_policy,
@@ -1937,7 +2044,7 @@ fn next_dev_job_wake(snapshot: Option<&jet::CheckedMirSnapshot>) -> Option<Durat
 
 /// D-SCHEDULE1 (ratified 2026-07-11, card #505): the `jet dev` consumer of
 /// schedule-as-code — check every `#Job #Every(…)` fn in `snapshot.bundle`
-/// against `clock`, and run whichever are due through the same interpreter tier
+/// against `clock`, and run whichever are due through the same evaluator
 /// the rest of the dev loop uses (`jet::Interpreter::run_named_job`). This is
 /// the dev-loop tier only (D-DEV3); the service runtime (D-SERVICE1) and a
 /// jetos timer projection are the production/OS consumers of the identical
@@ -1947,7 +2054,6 @@ fn run_due_jobs(
     snapshot: &jet::CheckedMirSnapshot,
     file: &str,
     try_anyway: bool,
-    use_interpreter: bool,
     mode: OutputMode,
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
     clock: &mut JobClock,
@@ -1961,19 +2067,9 @@ fn run_due_jobs(
         if !mode.quiet {
             println!("\n— due job `{}` —", name);
         }
-        let invocation = if use_interpreter {
-            jet::Interpreter::InterpreterInvocation::DevInterpret
-        } else {
-            jet::Interpreter::InterpreterInvocation::DevDefault
-        };
         let job_id = format!("{name}#{}", NEXT_DEV_JOB_ID.fetch_add(1, Ordering::Relaxed));
         let queue = name.clone();
-        let worker = if use_interpreter {
-            "dev-interpreter"
-        } else {
-            "dev-cranelift"
-        }
-        .to_string();
+        let worker = "dev-interpreter".to_string();
         let enqueued_at_ms = dev_job_now_ms();
         publish_dev_job_fact(
             resident_session,
@@ -2013,7 +2109,6 @@ fn run_due_jobs(
             &name,
             &[],
             try_anyway,
-            invocation,
             release_policy,
         ) {
             jet::Interpreter::RunOutcome::Ran {
@@ -2151,13 +2246,13 @@ fn publish_dev_job_fact(
 /// timezone-aware calendars out to "the runtime API or jetos timers"; this
 /// is the lightweight dev-loop convenience tier, not that.
 pub(crate) struct JobClock {
-    inner: jet_jit::Job::JetJobClock,
+    inner: jet_evalhost::Job::JetJobClock,
 }
 
 impl JobClock {
     pub(crate) fn new() -> Self {
         JobClock {
-            inner: jet_jit::Job::JetJobClock::new(),
+            inner: jet_evalhost::Job::JetJobClock::new(),
         }
     }
 
@@ -2168,7 +2263,7 @@ impl JobClock {
             .iter()
             .map(|(name, schedule)| (name.as_str(), prelude_schedule(*schedule)))
             .collect::<Vec<_>>();
-        jet_jit::Job::jet_job_schedule_due(&mut self.inner, &schedules)
+        jet_evalhost::Job::jet_job_schedule_due(&mut self.inner, &schedules)
     }
 
     /// The testable core of `due`: `unix_secs` is injected so the day/window
@@ -2187,13 +2282,13 @@ impl JobClock {
     }
 }
 
-fn prelude_schedule(schedule: jet::AST::EverySchedule) -> jet_jit::Job::JetJobSchedule {
+fn prelude_schedule(schedule: jet::AST::EverySchedule) -> jet_evalhost::Job::JetJobSchedule {
     match schedule {
         jet::AST::EverySchedule::Duration { nanos } => {
-            jet_jit::Job::JetJobSchedule::Duration { nanos }
+            jet_evalhost::Job::JetJobSchedule::Duration { nanos }
         }
         jet::AST::EverySchedule::WallClockTime { hour, minute } => {
-            jet_jit::Job::JetJobSchedule::WallClockTime { hour, minute }
+            jet_evalhost::Job::JetJobSchedule::WallClockTime { hour, minute }
         }
     }
 }
@@ -2237,7 +2332,7 @@ fn load_and_check_dev_change(
     mode: OutputMode,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
+) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>)> {
     let mut new_bundle = match jet::Loader::load_entry(file) {
         Ok(mut b) => {
             if let Err(diags) =
@@ -2262,7 +2357,7 @@ fn load_and_check_dev_change(
         jet::Driver::swap_entry_point(&mut new_bundle, entry_fn);
     }
 
-    let (diags, effect_facts) = jet::Sema::check_bundle_gates_with_effect_facts(
+    let (diags, effect_facts, checked_nominals) = jet::Sema::check_bundle_gates_with_effect_facts(
         &mut new_bundle,
         jet::Sema::CompileMode::Run,
         gates,
@@ -2279,7 +2374,7 @@ fn load_and_check_dev_change(
         return None;
     }
     render_dev_lints(file, mode, &diags);
-    Some((new_bundle, effect_facts))
+    Some((new_bundle, effect_facts, checked_nominals))
 }
 
 /// Handle one detected file change: pick swap vs rerun vs restart and render.
@@ -2294,7 +2389,6 @@ fn render_dev_change(
     prev: Option<&jet::CheckedMirSnapshot>,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
-    use_interpreter: bool,
     profile: &str,
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
     setting_overrides: &BTreeMap<String, String>,
@@ -2324,7 +2418,7 @@ fn render_dev_change(
             .map(|module| module.display.clone())
             .unwrap_or_else(|| file.to_string());
         let source = fs::read_to_string(file).unwrap_or_default();
-        let (diags, bundle, facts, decision) = jet::Driver::check_file_with_hot_swap_incremental(
+        let (diags, bundle, facts, checked_nominals, decision) = jet::Driver::check_file_with_hot_swap_incremental(
             &old.bundle,
             file,
             Some((Path::new(file), source.as_str())),
@@ -2364,7 +2458,7 @@ fn render_dev_change(
         if safe_for_run {
             render_dev_lints(file, mode, &diags);
             incremental_decision = decision;
-            bundle.map(|bundle| (bundle, facts))
+            bundle.map(|bundle| (bundle, facts, checked_nominals))
         } else {
             incremental_cache.clear();
             None
@@ -2372,7 +2466,7 @@ fn render_dev_change(
     } else {
         None
     };
-    let (new_bundle, effect_facts) = match incrementally_checked {
+    let (new_bundle, effect_facts, checked_nominals) = match incrementally_checked {
         Some(checked) => checked,
         None => load_and_check_dev_change(
             file,
@@ -2392,14 +2486,14 @@ fn render_dev_change(
         WatchPolicy::Auto => true,
     };
 
-    let artifact_target = if use_interpreter {
-        jet_foundation::MIR::MirArtifactTarget::Interpreter
-    } else {
-        jet_foundation::MIR::MirArtifactTarget::Cranelift
-    };
     let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
         &new_bundle,
-        dev_artifact_request(&new_bundle, artifact_target, profile),
+        &checked_nominals,
+        dev_artifact_request(
+            &new_bundle,
+            jet_foundation::MIR::MirArtifactTarget::Interpreter,
+            profile,
+        ),
     );
 
     if resident {
@@ -2430,96 +2524,18 @@ fn render_dev_change(
                         };
                         *game_facts_out = facts.clone();
                         let decision = decision.with_change_facts(facts);
-                        let reuse_current = !use_interpreter
-                            && decision.is_compatible()
-                            && decision.changed.is_empty()
-                            && decision.changed_functions.is_empty()
-                            && decision.rechecked().is_empty()
-                            && decision.schema_migrations().is_empty()
-                            && decision.change_facts().is_empty();
                         if let Some(host) = devtools_host {
                             let _ = host.publish_hot_swap_decision(&decision);
                         }
-                        let persist_before_migration = (!use_interpreter
-                            && !decision.schema_migrations().is_empty())
-                        .then(jet_foundation::Persist::shared_clone);
-                        let migrated_in_place = if decision.is_compatible() {
-                            if !use_interpreter {
-                                if let Err(reason) = jet_jit::apply_hot_swap(&decision) {
-                                    if !mode.json {
-                                        eprintln!(
-                                            "[hot-swap] {} — adapter preparation failed: {}",
-                                            module_name, reason
-                                        );
-                                    }
-                                    return None;
-                                }
-                            }
-                            false
-                        } else if !use_interpreter && !decision.schema_migrations().is_empty() {
-                            match jet_jit::apply_hot_swap_with_program(
-                                &mir,
-                                artifact,
-                                &decision,
-                                release_policy,
-                            ) {
-                                Ok(receipts) => {
-                                    if !receipts.is_empty() && !mode.quiet && !mode.json {
-                                        let migrated = receipts
-                                            .iter()
-                                            .filter(|receipt| !receipt.migrated.is_empty())
-                                            .count();
-                                        println!(
-                                            "[hot-swap] migrated {} published-schema value(s)",
-                                            migrated
-                                        );
-                                    }
-                                    true
-                                }
-                                Err(reason) => {
-                                    if !mode.json {
-                                        eprintln!(
-                                            "[hot-swap] {} — schema migration rejected: {}",
-                                            module_name, reason
-                                        );
-                                    }
-                                    return None;
-                                }
-                            }
+                        let swap_ok = if decision.is_compatible() {
+                            run_resident_swap(&mir, artifact, try_anyway, &module_name, file, mode, release_policy)
                         } else {
-                            false
-                        };
-                        let swap_ok = if decision.is_compatible() || migrated_in_place {
-                            run_resident_swap(
-                                &mir,
-                                artifact,
-                                try_anyway,
-                                &module_name,
-                                file,
-                                mode,
-                                use_interpreter,
-                                reuse_current,
-                                release_policy,
-                            )
-                        } else {
-                            run_resident_restart(
-                                &mir,
-                                artifact,
-                                try_anyway,
-                                file,
-                                mode,
-                                use_interpreter,
-                                release_policy,
-                            )
+                            run_resident_restart(&mir, artifact, try_anyway, file, mode, release_policy)
                         };
                         if !swap_ok {
-                            if let Some(store) = persist_before_migration {
-                                jet_foundation::Persist::shared_replace(store);
-                                jet_jit::discard_hot_swap_plan();
-                            }
                             return None;
                         }
-                        render_hot_swap_decision(&decision, mode, migrated_in_place);
+                        render_hot_swap_decision(&decision, mode);
                     }
                     Err(diags) => {
                         let src = fs::read_to_string(file).unwrap_or_default();
@@ -2539,7 +2555,6 @@ fn render_dev_change(
                     try_anyway,
                     file,
                     mode,
-                    use_interpreter,
                     release_policy,
                 ) {
                     return None;
@@ -2567,16 +2582,11 @@ fn render_dev_change(
         let mut args = Vec::with_capacity(runtime_args.len() + 1);
         args.push(selected.map_or_else(|| file.to_string(), |name| format!("{file} {name}")));
         args.extend(runtime_args.iter().map(|arg| (*arg).to_string()));
-        let outcome = jet_jit::with_program_args(&args, || {
+        let outcome = jet_evalhost::with_program_args(&args, || {
             jet::Interpreter::dev_run_snapshot(
                 &mir,
                 artifact,
                 try_anyway,
-                if use_interpreter {
-                    jet::Interpreter::InterpreterInvocation::DevInterpret
-                } else {
-                    jet::Interpreter::InterpreterInvocation::DevDefault
-                },
                 release_policy,
             )
         });
@@ -2589,6 +2599,7 @@ fn render_dev_change(
     Some(jet::CheckedMirSnapshot {
         bundle: new_bundle,
         facts: effect_facts,
+        checked_nominals,
         mir,
         artifact,
     })
@@ -2794,11 +2805,7 @@ fn publish_game_launch_profile(
         .publish_devtools_event_typed(event)
         .map(|_| ())
 }
-fn render_hot_swap_decision(
-    decision: &jet_foundation::HotSwap::HotSwapDecision,
-    mode: OutputMode,
-    migrated_in_place: bool,
-) {
+fn render_hot_swap_decision(decision: &jet_foundation::HotSwap::HotSwapDecision, mode: OutputMode) {
     if mode.quiet || mode.json {
         return;
     }
@@ -2827,13 +2834,6 @@ fn render_hot_swap_decision(
             changed,
             list(true)
         );
-    } else if migrated_in_place {
-        println!(
-            "saved {}  migrated in place  swapped {}  kept {}",
-            decision.module,
-            changed,
-            list(true)
-        );
     } else {
         let reason = decision
             .compatibility
@@ -2848,7 +2848,7 @@ fn render_hot_swap_decision(
         );
     }
 }
-/// Hot-swap via the strict Cranelift backend (`--interpret` uses tier-0).
+/// Hot-swap the resident evaluator session.
 fn run_resident_swap(
     program: &jet_foundation::MIR::MirProgram,
     artifact: jet_foundation::MIR::MirArtifactId,
@@ -2856,28 +2856,11 @@ fn run_resident_swap(
     module_name: &str,
     file: &str,
     mode: OutputMode,
-    use_interpreter: bool,
-    reuse_current: bool,
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
 ) -> bool {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
-    use jet_jit::CraneliftBackend;
-
-    let outcome = if reuse_current {
-        jet_jit::run_resident_current().map_err(|reason| {
-            vec![jet::Diagnostics::Diagnostic::runtime_host_fault(
-                String::new(),
-                reason,
-            )]
-        })
-    } else if use_interpreter {
-        let mut b = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
-        b.hot_swap(module_name, program, artifact, try_anyway, release_policy)
-    } else {
-        let mut b = CraneliftBackend::new();
-        b.hot_swap(module_name, program, artifact, try_anyway, release_policy)
-    };
-    match outcome {
+    let mut backend = InterpreterBackend;
+    match backend.hot_swap(module_name, program, artifact, try_anyway, release_policy) {
         Ok(o) => {
             render_outcome(o, file, mode);
             true
@@ -2891,26 +2874,18 @@ fn run_resident_swap(
     }
 }
 
-
-/// Clean restart via the strict Cranelift backend.
+/// Clean restart of the resident evaluator session.
 fn run_resident_restart(
     program: &jet_foundation::MIR::MirProgram,
     artifact: jet_foundation::MIR::MirArtifactId,
     try_anyway: bool,
     file: &str,
     mode: OutputMode,
-    use_interpreter: bool,
     release_policy: &jet::Package::ReleaseDevtoolsPolicy,
 ) -> bool {
     use jet::JitBackend::{InterpreterBackend, JitBackend};
-    use jet_jit::CraneliftBackend;
-    let outcome = if use_interpreter {
-        let mut b = InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
-        b.restart(program, artifact, try_anyway, release_policy)
-    } else {
-        let mut b = CraneliftBackend::new();
-        b.restart(program, artifact, try_anyway, release_policy)
-    };
+    let mut backend = InterpreterBackend;
+    let outcome = backend.restart(program, artifact, try_anyway, release_policy);
     let ok = matches!(&outcome, jet::Interpreter::RunOutcome::Ran { .. });
     render_outcome(outcome, file, mode);
     ok
@@ -2957,7 +2932,6 @@ fn render_dev_iteration(
     try_anyway: bool,
     gates: jet::Policy::GateSet,
     mode: OutputMode,
-    use_interpreter: bool,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Option<jet::CheckedMirSnapshot> {
@@ -2967,7 +2941,6 @@ fn render_dev_iteration(
         entry_fn,
         program_args,
         try_anyway,
-        use_interpreter,
         gates,
         profile,
         setting_overrides,
@@ -4143,7 +4116,7 @@ pub(crate) fn run_explain_web_graph(args: &[String], mode: OutputMode) {
             .join(path)
     };
     let entry = abs.display().to_string();
-    let (diags, _bundle, facts) = jet::Driver::check_file_with_effect_facts(&entry, None, false);
+    let (diags, _bundle, facts, _nominals) = jet::Driver::check_file_with_effect_facts(&entry, None, false);
     let Some(graph) = facts.web_app.as_ref() else {
         if diags
             .iter()
@@ -4318,9 +4291,9 @@ pub(crate) fn run_explain_cost(
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let report = match jet::Codegen::TIR::cost_report(&projection.bundle) {
+    let report = match jet::Codegen::TIR::cost_report(&projection.bundle, &projection.checked_nominals) {
         Ok(report) => report,
-        Err(error) => exit_cost_projection_error(file, &error),
+        Err(error) => exit_cost_projection_fault(&error),
     };
     if mode.json {
         let sites = StatusValue::array(report.sites.iter().map(|site| {
@@ -4363,26 +4336,11 @@ pub(crate) fn run_explain_cost(
 
 const COST_TIER: &str = "shared-tir";
 
-pub(crate) fn exit_cost_projection_error(
-    file: &str,
-    error: &jet::Codegen::TIR::TCostReportError,
-) -> ! {
-    let fix = match error {
-        jet::Codegen::TIR::TCostReportError::Incomplete { surfaces } => format!(
-            "report the missing checked specialization for {} with this source file; its cost cannot be proved until the compiler lowers that specialization",
-            surfaces.join("; ")
-        ),
-        jet::Codegen::TIR::TCostReportError::Lowering { .. } => {
-            "report this checked-TIR lowering failure with the source file".to_string()
-        }
-    };
-    crate::cli_error!(
-        @full "E2104",
-        format!("cost projection for `{file}` failed"),
-        error.message(),
-        fix
-    );
-    exit(ExitCodes::USER_ERROR);
+/// A sema-checked program whose typed TIR cannot carry a complete cost
+/// projection is a compiler fault, not a user error: report it as an internal
+/// error (exit 101) instead of a user diagnostic.
+pub(crate) fn exit_cost_projection_fault(error: &jet::Codegen::TIR::TCostReportError) -> ! {
+    emit_internal_fault("", &error.message())
 }
 
 fn source_line(source: &str, span: jet::Diagnostics::Span) -> usize {
@@ -6500,7 +6458,7 @@ fn dart_bind_error(path: &str, why: &str) -> ! {
 }
 
 /// D-FFI-PWSH1=A: validate named script functions, then generate a persistent
-/// PowerShell worker whose object pipeline crosses as canonical DataTree.
+/// PowerShell worker whose object pipeline crosses as canonical Dyn.
 fn run_powershell_bind(args: &[&String]) {
     let usage = || {
         eprintln!(
@@ -8175,7 +8133,7 @@ pub(crate) fn run_eval(file: &str, pure_required: bool, mode: OutputMode) {
             // value, in the order the program produced it.
             if mode.json {
                 eprint!("{printed}");
-                println!("{}", render_eval_json(&value));
+                print_eval_json(&value);
             } else {
                 print!("{printed}");
                 if let Some(value) = render_eval_value(&value) {
@@ -8205,11 +8163,31 @@ fn render_eval_value(value: &jet::CtValue) -> Option<String> {
 /// line rather than a file, so a caret can point into the argument text.
 const EVAL_EXPRESSION_LABEL: &str = "<eval>";
 
-fn render_eval_json(value: &jet::CtValue) -> String {
-    let value = StatusValue::parse(&value.to_json()).expect("evaluated value must be valid JSON");
-    StatusEnvelope::new("eval", true)
+fn render_eval_json(value: &jet::CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
+    let encoded = value.to_json()?;
+    let value = StatusValue::parse(&encoded).expect("successful comptime encoding must be valid JSON");
+    Ok(StatusEnvelope::new("eval", true)
         .with_field("value", value)
-        .json()
+        .json())
+}
+
+fn print_eval_json(value: &jet::CtValue) {
+    match render_eval_json(value) {
+        Ok(rendered) => println!("{rendered}"),
+        Err(error) => {
+            let fields = StatusFields::new()
+                .with("format", error.format.as_str())
+                .with("kind", format!("{:?}", error.kind))
+                .with("byte_offset", error.byte_offset)
+                .with("line", error.line.map(StatusValue::from).unwrap_or(StatusValue::Null))
+                .with("column", error.column.map(StatusValue::from).unwrap_or(StatusValue::Null))
+                .with("path", error.path)
+                .with("reason", error.reason)
+                .with("cause", StatusValue::Null);
+            println!("{}", StatusEnvelope::new("eval", false).with_field("error", StatusValue::object(fields)).json());
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
 }
 
 /// S60 / D-PURE1: `jet eval "<expression>"` — the expression form of the same
@@ -8231,23 +8209,37 @@ pub(crate) fn run_eval_expression(source: &str, mode: OutputMode) {
     let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     match jet::REPL::eval_once(source, &base_dir, jet::REPL::ReplFlags::default()) {
         Ok(evaluated) => {
-            // An input that only binds or declares has no value of its own;
-            // render it as Unit, the same way a `run()` that hands nothing
-            // back renders in the file form. One canonical rendering.
-            let value = evaluated.value.unwrap_or(jet::CtValue::Unit);
+            // Native turns already carry checked Display text and typed JSON.
+            // A declaration-only input retains the file form's Unit rendering.
             if mode.json {
                 eprint!("{}{}", evaluated.stdout, evaluated.stderr);
-                println!("{}", render_eval_json(&value));
+                let value = evaluated.value.as_ref().map(|value| {
+                    StatusValue::parse(&value.json).expect("executor typed JSON must be valid JSON")
+                }).unwrap_or(StatusValue::Null);
+                println!("{}", StatusEnvelope::new("eval", true).with_field("value", value).json());
             } else {
                 print!("{}", evaluated.stdout);
                 eprint!("{}", evaluated.stderr);
-                println!("{}", value.render_pretty());
+                match evaluated.value {
+                    Some(value) if value.ty.as_deref() == Some("String") => println!("{}", jet::Diagnostics::json_str(&value.shown)),
+                    Some(value) => println!("{}", value.shown),
+                    None => println!("()"),
+                }
             }
         }
-        Err(diags) => {
+        Err(error) => {
+            if mode.json {
+                eprint!("{}", error.stdout);
+            } else {
+                print!("{}", error.stdout);
+            }
+            eprint!("{}", error.stderr);
+            if let Some(report) = error.report {
+                eprint!("{report}");
+            }
             eprint!(
                 "{}",
-                jet::render_all_colored(EVAL_EXPRESSION_LABEL, source, &diags, mode.color_stderr())
+                jet::render_all_colored(EVAL_EXPRESSION_LABEL, source, &error.diagnostics, mode.color_stderr())
             );
             exit(ExitCodes::USER_ERROR);
         }
@@ -8282,8 +8274,10 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let (diagnostics, bundle, _facts) =
+    let check_span = jet_driver::Trace::span("sema.check");
+    let (diagnostics, bundle, _facts, checked_nominals) =
         jet::Driver::check_file_with_effect_facts_for_run(file, "dev", &BTreeMap::new());
+    drop(check_span);
     let (errors, lints): (Vec<_>, Vec<_>) = diagnostics
         .into_iter()
         .partition(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error);
@@ -8317,19 +8311,26 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
                 bundle.build_facts.target_triple.clone(),
             )
         };
+        let mut lower_span = jet_driver::Trace::span("lower");
         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
             bundle,
+            &checked_nominals,
             jet_foundation::MIR::MirArtifactRequest::new(
                 jet_foundation::MIR::MirArtifactTarget::RustAot,
                 jet_foundation::MIR::MirArtifactKind::NativeExecutable,
                 jet_foundation::MIR::MirArtifactBuildMode::Dev,
             ),
         );
+        lower_span.items(mir.functions.len());
+        drop(lower_span);
+        let digest_span = jet_driver::Trace::span("mir.digest");
         let mir_digest = jet_foundation::MIR::mir_program_digest(&mir);
+        drop(digest_span);
         let mut execution = jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
         execution.emit_metadata = emit_metadata;
         execution.semantic_digest = emit_metadata.then_some(mir_digest);
-        jet::Codegen::MIRRust::emit_mir_program(
+        let mut emit_span = jet_driver::Trace::span("emit");
+        let rust = jet::Codegen::MIRRust::emit_mir_program(
             &mir,
             &jet::Codegen::MIRRust::MirRustConfig {
                 target,
@@ -8337,7 +8338,9 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
                 root_prefix: String::new(),
                 execution,
             },
-        )
+        );
+        emit_span.items(mir.functions.len());
+        rust
     });
     print!("{rust}");
 }
@@ -8347,9 +8350,10 @@ pub(crate) fn run_emit_rust(file: &str, mode: OutputMode, emit_metadata: bool) {
 /// only.
 pub(crate) fn cost_diagnostics(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     sema_diagnostics: &[jet::Diagnostics::Diagnostic],
 ) -> Result<Vec<jet::Diagnostics::Diagnostic>, jet::Codegen::TIR::TCostReportError> {
-    let report = jet::Codegen::TIR::cost_report(bundle)?;
+    let report = jet::Codegen::TIR::cost_report(bundle, checked_nominals)?;
     Ok(cost_diagnostics_from_report(&report, sema_diagnostics))
 }
 
@@ -8422,10 +8426,11 @@ fn dedup_cost_diagnostics(diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>) {
 
 pub(crate) fn merge_cost_diagnostics(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     diagnostics: &mut Vec<jet::Diagnostics::Diagnostic>,
 ) -> Result<(), jet::Codegen::TIR::TCostReportError> {
     dedup_cost_diagnostics(diagnostics);
-    let cost_diagnostics = cost_diagnostics(bundle, diagnostics)?;
+    let cost_diagnostics = cost_diagnostics(bundle, checked_nominals, diagnostics)?;
     for diagnostic in cost_diagnostics {
         if !diagnostics
             .iter()
@@ -8458,9 +8463,9 @@ pub(crate) fn run_lint_cost(file: &str, mode: OutputMode) {
             exit(ExitCodes::USER_ERROR);
         }
     };
-    let lints = match cost_diagnostics(&projection.bundle, &projection.diagnostics) {
+    let lints = match cost_diagnostics(&projection.bundle, &projection.checked_nominals, &projection.diagnostics) {
         Ok(lints) => lints,
-        Err(error) => exit_cost_projection_error(file, &error),
+        Err(error) => exit_cost_projection_fault(&error),
     };
     if lints.is_empty() {
         if mode.json {
@@ -9714,6 +9719,36 @@ mod schedule_tests {
             clock.due_at(&jobs, day1_in_window),
             vec!["nightly".to_string()],
             "must fire again the next day's matching window"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dev_restart_tests {
+    use super::dev_restart_argv;
+
+    fn argv(args: &[&str], dev_override: Option<&str>) -> Vec<String> {
+        dev_restart_argv(args.iter().map(|arg| arg.to_string()), dev_override)
+    }
+
+    #[test]
+    fn ordinary_generation_is_jet_run_without_watch_flags() {
+        assert_eq!(
+            argv(&["dev", "app.jet", "--watch", "--profile", "fast", "--", "--watch"], None),
+            ["run", "app.jet", "--profile", "fast", "--", "--watch"]
+        );
+        assert_eq!(argv(&["run", "--watch=on", "-p", "web"], None), ["run", "-p", "web"]);
+    }
+
+    #[test]
+    fn dev_override_generation_runs_the_override_file_once() {
+        assert_eq!(
+            argv(&["--json", "dev", "--profile", "fast"], Some("/pkg/dev.jet")),
+            ["--json", "dev", "--profile", "fast", "/pkg/dev.jet", "--watch=off"]
+        );
+        assert_eq!(
+            argv(&["dev", "pkg", "--", "a"], Some("/pkg/dev.jet")),
+            ["dev", "/pkg/dev.jet", "--watch=off", "--", "a"]
         );
     }
 }

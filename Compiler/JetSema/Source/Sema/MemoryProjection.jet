@@ -1,0 +1,40 @@
+// Rust MemoryFacts::project_memory_fact. These rows are retained by the same
+// Sema solve that checks E0921; consumers must never repeat the analysis.
+use jet_foundation.[Span]
+enum SemaMemoryProjection {
+    Proven
+    Violated(call_path: [String], operation: String)
+    OpenWorld(call_path: [String], reason: String)
+}
+struct SemaMemoryFactDeclaration {
+    fact: String
+    roots: [String]
+    span: Span
+    source: String
+    provenance: String
+}
+struct SemaMemoryProjectionRow {
+    root: String
+    fact: String
+    projection: SemaMemoryProjection
+}
+struct SemaCheckedMemoryFacts {
+    declarations: [SemaMemoryFactDeclaration]
+    projections: [SemaMemoryProjectionRow]
+}
+struct SemaMemoryProjectionFacts {
+    declarations: [SemaMemoryFactDeclaration]
+    projections: [SemaMemoryProjectionRow]
+}
+fn sema_effect_memory_projection(finding: SemaMemoryFinding) -> SemaMemoryProjection Never! {
+    if finding.event == .Val(event) -> return SemaMemoryProjection.Violated{call_path: finding.path, operation: event.operation}
+    open :: finding.open ?? panic("memory finding has neither an operation nor open dispatch")
+    SemaMemoryProjection.OpenWorld{call_path: finding.path, reason: open.reason}
+}
+fn sema_effect_memory_publish(nodes: [SemaEffectNode], root: Int, denial: EffectRowEntry, projection: SemaMemoryProjection, facts: &SemaMemoryProjectionFacts) Never! {
+    fact :: sema_effect_memory_fact(denial.name) ?? return
+    source :: nodes[root].source_display
+    key :: nodes[root].display_key
+    &facts.declarations.push(SemaMemoryFactDeclaration{fact: fact, roots: [String]{key}, span: denial.span, source: source, provenance: "signature denial `-[!{denial.name}]>` in {source}"})
+    &facts.projections.push(SemaMemoryProjectionRow{root: key, fact: fact, projection: projection})
+}

@@ -1,0 +1,53 @@
+use core.files as files
+
+fn s5_version(port: Int) -> String {
+    response :: s5_web_get(port, "/__jet_dev_version", None) ?? panic("GET version")
+    String.from_bytes_lossy(response.body).trim().copy()
+}
+
+fn s5_changed(port: Int, baseline: String, timeout_ms: Int) -> String {
+    started :: time.start()
+    loop {
+        if s5_web_get(port, "/__jet_dev_version", None) == .Val(response) {
+            if response.status == 200 {
+                version :: String.from_bytes_lossy(response.body).trim().copy()
+                if version != baseline && !version.is_empty() -> return version
+            }
+        }
+        assert(time.elapsed(started).ns <= timeout_ms * 1000000, "version never changed")
+        time.sleep(time.duration_ms(100))
+    }
+}
+
+fn s5_root() -> String { sys.get("S5_ROOT") ?? panic("root") }
+
+#Test("original static generator input and source watcher") {
+    port :: s5_web_port()
+    s5_web_wait_up(port, 20000)
+    response :: s5_web_get(port, "/", None) ?? panic("GET index")
+    assert_eq(response.status, 200)
+    html :: String.from_bytes_lossy(response.body)
+    assert(html.contains("<h1>first headline</h1>"))
+    assert(html.contains("__jet_dev_status"))
+    wasm :: s5_web_get(port, "/widget.wasm", None) ?? panic("GET wasm")
+    assert_eq(wasm.status, 200)
+    assert_eq(wasm.content_type, "application/wasm")
+    assert_eq(wasm.body, [U8]{0, 97, 115, 109})
+    baseline :: s5_version(port)
+    files.write(files.join(s5_root(), "content.txt"), "second headline") ?? panic("edit input")
+    after_input :: s5_changed(port, baseline, 20000)
+    assert(after_input != baseline)
+    after :: s5_web_get(port, "/", None) ?? panic("index after input edit")
+    assert(String.from_bytes_lossy(after.body).contains("<h1>second headline</h1>"))
+    source_path :: files.join(s5_root(), "generate.jet")
+    source :: files.read(source_path) ?? panic("read source")
+    needle :: String.from_bytes([U8]{60,104,49,62,123,104,101,97,100,108,105,110,101,125,60,47,104,49,62}) ?? panic("needle")
+    replacement :: String.from_bytes([U8]{60,104,49,62,115,111,117,114,99,101,32,101,100,105,116,58,32,123,104,101,97,100,108,105,110,101,125,60,47,104,49,62}) ?? panic("replacement")
+    edited :: source.replace(needle, replacement)
+    assert(edited != source)
+    files.write(source_path, edited) ?? panic("edit source")
+    after_source :: s5_changed(port, after_input, 20000)
+    assert(after_source != after_input)
+    final :: s5_web_get(port, "/", None) ?? panic("index after source edit")
+    assert(String.from_bytes_lossy(final.body).contains("<h1>source edit: second headline</h1>"))
+}

@@ -1,0 +1,17 @@
+# HAND-PORT tests/web_build.rs:2087-2127 web_js_matches_binds_subject_once
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates and exact runtime oracles retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_js_matches_binds_subject_once.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js count "const __jet___match_subject = toggle;" = 1 # original exact occurrence count
+file: .jet/build/app.js count "(__jet___match_subject)" = 1 # original exact occurrence count
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = web_js_matches_binds_subject_once.stdout.expected

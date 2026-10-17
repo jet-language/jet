@@ -1,0 +1,142 @@
+use core.files as audit_files
+use core.text.parse as audit_parse
+use core.process as audit_process
+use core.encoding.json as audit_json
+
+// Same shared UTF-8 byte-span/Unicode word recipes as corpus_policy.jet:35-40,742-774.
+// Kept private because this fixture is a standalone CLI program, not a public API.
+fn policy_slice_bytes(text: String, start: Int, end: Int) -> String {
+    raw :: text.bytes()
+    assert(start >= 0 && end >= start && end <= raw.len(), "valid corpus byte span")
+    if start == end -> return ""
+    String.from_bytes(raw[start..(end - 1)]) ?? panic("corpus byte span must end on UTF-8 boundaries")
+}
+fn policy_space_width(bytes: [U8], index: Int) -> Int {
+    first :: Int.from_u8(bytes[index])
+    if first == 32 || (first >= 9 && first <= 13) -> return 1
+    if index + 1 >= bytes.len() -> return 0
+    second :: Int.from_u8(bytes[index + 1])
+    if first == 194 && (second == 133 || second == 160) -> return 2
+    if index + 2 >= bytes.len() -> return 0
+    third :: Int.from_u8(bytes[index + 2])
+    if first == 225 && second == 154 && third == 128 -> return 3
+    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if first == 226 && second == 129 && third == 159 -> return 3
+    if first == 227 && second == 128 && third == 128 -> return 3
+    0
+}
+fn policy_split_whitespace(text: String) -> [String] {
+    bytes :: text.bytes()
+    words := [String]{}
+    index := 0
+    start := -1
+    loop index < bytes.len() {
+        width :: policy_space_width(bytes, index)
+        if width > 0 {
+            if start >= 0 -> &words.push(policy_slice_bytes(text, start, index))
+            start = -1
+            index += width
+        } else {
+            if start < 0 -> start = index
+            index += 1
+        }
+    }
+    if start >= 0 -> &words.push(policy_slice_bytes(text, start, bytes.len()))
+    words
+}
+
+// tests/truthfulness.rs:1911-1928. Strip one leading/trailing pipe, not all pipes.
+fn audit_table_cells(raw: String) -> [String] {
+    line := raw.trim()
+    if line.starts_with("|") -> line = policy_slice_bytes(line, 1, line.bytes().len())
+    if line.ends_with("|") -> line = policy_slice_bytes(line, 0, line.bytes().len() - 1)
+    result := [String]{}
+    loop cell in audit_parse.split(line, "|") -> &result.push(cell.trim())
+    result
+}
+fn audit_card_refs(cell: String) -> [String] {
+    result := [String]{}
+    loop token in policy_split_whitespace(cell) {
+        raw :: token.bytes()
+        if raw.len() <= 1 || raw[0] != (U8{35}) -> next
+        digits := true
+        loop i in 1..<raw.len() {
+            if raw[i] < (U8{48}) || raw[i] > (U8{57}) -> digits = false
+        }
+        if digits -> &result.push(token)
+    }
+    result
+}
+fn audit_card_number(card: String) -> Int {
+    // Rust parse::<i64>() rejects overflow; do not wrap an oversized card reference.
+    number := 0
+    raw :: card.bytes()
+    loop i in 1..<raw.len() {
+        digit :: Int.from_u8(raw[i]) - 48
+        assert(number <= (9223372036854775807 - digit) / 10, "audit card reference must contain a numeric card ID")
+        number = number * 10 + digit
+    }
+    number
+}
+
+// Exact table and real Node Tower predicates from tests/truthfulness.rs:1771-1908.
+fn run() {
+    text :: audit_files.read("Docs/audits/cli-diagnostics-accessibility.md") ?? panic("CLI accessibility audit is readable")
+    lines :: text.lines()
+    expected :: [String]{"id", "surface", "screen_reader", "state", "card"}
+    header := -1
+    loop i in 0..<lines.len() {
+        if audit_table_cells(lines[i]) == expected {
+            header = i
+            break
+        }
+    }
+    assert(header >= 0, "accessibility audit must have the machine-readable findings header")
+    assert(header + 1 < lines.len(), "accessibility findings table needs a separator row")
+    separator :: audit_table_cells(lines[header + 1])
+    assert_eq(separator.len(), expected.len(), "accessibility findings table separator must match its five columns")
+    loop cell in separator -> assert_eq(cell, "---", "accessibility findings table needs a Markdown separator for every column")
+    rows := [[String]]{}
+    finding_ids := [String]{}
+    loop i in (header + 2)..<lines.len() {
+        line :: lines[i]
+        if !line.trim_start().starts_with("|") -> break
+        cells :: audit_table_cells(line)
+        assert_eq(cells.len(), expected.len(), "accessibility findings row must have id, surface, screen_reader, state, and card: {line}")
+        loop j in 0..<expected.len() -> assert(!cells[j].is_empty(), "accessibility finding {expected[j]} must not be empty: {line}")
+        assert(!finding_ids.contains(cells[0]), "accessibility finding IDs must be unique: {cells[0]}")
+        &finding_ids.push(cells[0])
+        assert(cells[3] == "pass" || cells[3] == "gap" || cells[3] == "not-proven", "accessibility finding {cells[0]} has an unknown state: {cells[3]}")
+        &rows.push(cells)
+    }
+    assert(!rows.is_empty(), "accessibility audit must list at least one finding")
+    loop row in rows {
+        if audit_parse.lower(row[3].trim()) == "pass" {
+            assert_eq(row[4], "—", "passing accessibility finding {row[0]} must not name a Tower card")
+            next
+        }
+        cards :: audit_card_refs(row[4])
+        assert(!cards.is_empty(), "non-pass accessibility finding {row[0]} must name a live Tower card")
+        unique_cards := [String]{}
+        loop card in cards {
+            assert(!unique_cards.contains(card), "accessibility finding {row[0]} must list each Tower card once: {card}")
+            &unique_cards.push(card)
+            output :: audit_process.cmd([String]{"node", "Tools/tower/tower.mjs", "card", "show", card, "--json"}).run() ?? panic("Tower card lookup must run")
+            assert(output.success, "accessibility finding {row[0]} names missing Tower card {card}:\n{output.errors}")
+            report :: audit_json.parse(output.output.trim()) ?? panic("Tower lookup for {row[0]} returned invalid JSON: {output.output}")
+            value :: audit_json.pointer(report, "/num") ?? panic("Tower card JSON must contain a numeric num")
+            // The original JSON::json_int also truncates Float with an i64 cast.
+            resolved :: if value == {
+                .Int(number) -> number
+                .Float(number) -> number.to_int()
+                else -> panic("Tower card JSON must contain a numeric num")
+            }
+            expected_num :: audit_card_number(card)
+            assert_eq(resolved, expected_num, "Tower lookup for {row[0]} resolved {card} as card {resolved}, not {expected_num}: {output.output}")
+        }
+    }
+    laws :: [String]{"D-REPORT-LAW1=A", "D-REPORT-HOME1=A", "D-REPORT-MACHINE1=A", "D-REPORT-EDITOR1=A", "`jet.report/v2`"}
+    loop law in laws {
+        assert(text.contains(law), "accessibility audit must name the canonical report law {law}")
+    }
+}

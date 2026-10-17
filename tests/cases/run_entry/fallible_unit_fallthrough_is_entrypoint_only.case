@@ -1,0 +1,8 @@
+# HAND-PORT tests/run_entry.rs:693-708 fallible_unit_fallthrough_is_entrypoint_only
+# PENDING-SAME-HEAD runtimeGap=original-assert; PENDING-GRAMMAR, no historical failure captures blessed.
+# All original public predicates retained.
+fixture: fallible_unit_fallthrough_is_entrypoint_only.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0114"] #>= 1

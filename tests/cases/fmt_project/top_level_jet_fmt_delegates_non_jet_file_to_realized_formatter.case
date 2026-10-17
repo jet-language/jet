@@ -1,0 +1,13 @@
+# Port of tests/fmt_project.rs:73-134. Original formatter package and shell bytes retained.
+# ORACLE-LITERAL file: tests/fmt_project.rs:133 (formatted + newline).
+# PENDING-GRAMMAR: copy from tool token, write template, PATH token. Runtime PENDING-SAME-HEAD.
+requires: os:unix
+fixture: realized-formatter.fixture
+copy: {jetpack} tools/jetpack
+write: env.jet realized-formatter.env.template
+env: JETPACK_ROOT={work}/root
+env: JETPACK_SHARED_CAS={work}/shared-cas
+env: PATH={work}/tools:{env:PATH}
+step: jet fmt --lang nix --trust --offline --no-color
+exit: 0
+file: flake.nix = formatted.out

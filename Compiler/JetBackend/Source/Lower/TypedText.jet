@@ -1,0 +1,434 @@
+// Checked typed-text heads (MIR TypedTextInterp). The text is assembled here
+// the way crates/jet-codegen/src/Prelude/TypedText.rs interpolates it: each
+// literal as written, each hole shown (JetShow) and encoded by the head's law.
+// `HTML{...}` escapes untrusted holes and is the text itself; `Path{...}`
+// percent-encodes each hole as one component and builds the value through the
+// jet_path_from route (jet_typed_path_literal); `DateTime{...}` parses the
+// text through the jet_time_parse_rfc3339 route (jet_typed_datetime_literal).
+// SQL, Sh and URL preserve their structured values through CAbiTypedText.rs
+// adapters over the same kernels; they are never flattened into String holes.
+use jet_foundation.[MIRCallArg, MIRInstruction, MIRProgram, MIRType, MIRTypeKind, MIRTypedHeadKind, MIRValueID, mir_type_display_name, mir_type_from_kind]
+
+fn lower_typed_text_kind_name(kind: MIRTypedHeadKind) -> String Never! {
+    if kind == {
+        .SQL -> "SQL"
+        .HTML -> "HTML"
+        .Sh -> "Sh"
+        .URL -> "URL"
+        .Path -> "Path"
+        .DateTime -> "DateTime"
+    }
+}
+
+fn lower_typed_text_interp(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, kind: MIRTypedHeadKind, literals: [String], holes: [MIRValueID], trusted_html: [Bool]) Never! {
+    what :: "semantic operation TypedTextInterp {lower_typed_text_kind_name(kind)}"
+    if kind == .SQL || kind == .Sh || kind == .URL -> return lower_typed_structured(p, c, &m, &f, instruction, kind, literals, holes)
+    if literals.len() != holes.len() + 1 || trusted_html.len() != holes.len() -> return lower_fail(&m, &f, "{what} has inconsistent literal, hole and trust counts")
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "{what} has no checked result type")
+    route_symbol :: if kind == .Path -> "jet_path_from" else -> "jet_time_parse_rfc3339"
+    if kind == .HTML {
+        if !lower_text_type(result_ty) -> return lower_fail(&m, &f, "{what} result type {mir_type_display_name(result_ty)} is not lowered at O0 yet")
+    } else {
+        runtime :: if kind == .Path -> "JetPath" else -> "JetDateTime"
+        if !lower_route_carrier_matches(p, result_ty, LowerRouteCarrier.Handle{name: runtime}) -> return lower_fail(&m, &f, "{what} result type {mir_type_display_name(result_ty)} does not match its runtime route")
+        if lower_runtime_route(route_symbol) == None -> return lower_fail(&m, &f, "{what} has no runtime C-ABI route ({route_symbol})")
+    }
+    text_ty :: mir_type_from_kind(MIRTypeKind.String)
+    builder :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_new", [LIRValueID]{}, Val(builder))
+    loop (index, literal) in literals {
+        if literal != "" -> lower_render_static(&m, &f, builder, literal)
+        if index >= holes.len() -> next
+        hole :: holes[index]
+        ty :: lower_value_type(c, hole) ?? return lower_fail(&m, &f, "{what} hole {index} has no checked type")
+        if kind == .HTML && trusted_html[index] {
+            // A trusted hole is checked HTML: its markup goes in unescaped.
+            if !lower_text_type(ty) -> return lower_fail(&m, &f, "{what} trusted hole of type {mir_type_display_name(ty)} is not lowered at O0 yet")
+            markup :: lower_use(&m, &f, hole) ?? return
+            lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, markup}, None)
+            next
+        }
+        operand :: if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, hole)
+        shown :: lower_render_value(p, &m, &f, ty, operand, LowerRenderMode.Show) ?? return
+        if kind == {
+            .HTML -> lower_call_helper(&m, &f, "text.html_escape", text_ty, [LIRValueID]{builder, shown.value}, None)
+            .Path -> lower_call_helper(&m, &f, "text.path_component", text_ty, [LIRValueID]{builder, shown.value}, None)
+            else -> lower_call_runtime(&m, &f, "jet_rt_string_builder_push", [LIRValueID]{builder, shown.value}, None)
+        }
+        if shown.owned -> lower_emit(&f, LIRInst.Drop{value: shown.value})
+    }
+    if kind == .HTML {
+        dst :: lower_result(p, c, &m, &f, instruction)
+        if f.failed -> return
+        text :: dst ?? lower_render_string(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+        if dst == None -> lower_emit(&f, LIRInst.Drop{value: text})
+        return
+    }
+    text :: lower_render_string(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_finish", [LIRValueID]{builder}, Val(text))
+    route :: lower_runtime_route(route_symbol) ?? return
+    if kind == .Path {
+        // The route borrows the text and returns the Path handle.
+        lower_route_result(p, c, &m, &f, instruction, route, [LIRValueID]{text}, what, route_symbol, [String]{})
+        if f.failed -> return
+        return lower_emit(&f, LIRInst.Drop{value: text})
+    }
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if f.failed -> return
+    out :: lower_route_tagged_call(&m, &f, route.export, [LIRValueID]{text}, 2)
+    lower_emit(&f, LIRInst.Drop{value: text})
+    zero :: lower_const(&f, 0)
+    parsed :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: parsed, condition: LIRCondition.Ne, left: out.word, right: zero})
+    success :: lower_new_block(&f)
+    failure :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: parsed, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+    // Sema accepted only heads that parse (D-BOUND-HEAD1=A), as
+    // jet_typed_datetime_literal's unreachable arm states.
+    lower_start(&f, failure, [LIRValueID]{})
+    reason :: lower_static_text(&m, &f, "sema accepted an invalid DateTime typed head")
+    lower_noreturn_call(&m, &f, "jet_rt_unreachable", reason)
+    lower_start(&f, success, [LIRValueID]{})
+    if dst == .Val(kept) {
+        lower_emit(&f, LIRInst.Load{dst: kept, base: out.slot, offset: 0})
+        return
+    }
+    unused :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_jet_date_time"}, None)
+    lower_emit(&f, LIRInst.Load{dst: unused, base: out.slot, offset: 0})
+    lower_emit(&f, LIRInst.Drop{value: unused})
+}
+
+// One byte of `data` at `at`, zero-extended to a word (LIR loads a byte only
+// into a one-byte value, which never widens by itself).
+fn lower_text_byte(f: &LowerFunction, data: LIRValueID, at: LIRValueID) -> LIRValueID Never! {
+    address :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: address, base: data, offset: at})
+    byte :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Load{dst: byte, base: address, offset: 0})
+    slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 8, align: 8})
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: slot, offset: 0, value: byte})
+    word :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: word, base: slot, offset: 0})
+    word
+}
+
+// Branch to `yes` when `lo <= value <= hi`, else to `no`.
+fn lower_text_byte_between(f: &LowerFunction, value: LIRValueID, lo: Int, hi: Int, yes: LIRBlockID, no: LIRBlockID) Never! {
+    upper :: lower_new_block(&f)
+    low :: lower_const(&f, lo)
+    above :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: above, condition: LIRCondition.Ge, left: value, right: low})
+    lower_seal(&f, LIRTerminator.Branch{condition: above, then_target: lower_target(upper, [LIRValueID]{}), else_target: lower_target(no, [LIRValueID]{})})
+    lower_start(&f, upper, [LIRValueID]{})
+    high :: lower_const(&f, hi)
+    below :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: below, condition: LIRCondition.Le, left: value, right: high})
+    lower_seal(&f, LIRTerminator.Branch{condition: below, then_target: lower_target(yes, [LIRValueID]{}), else_target: lower_target(no, [LIRValueID]{})})
+}
+
+// Branch to `yes` when `value == byte`; otherwise continue in a new open block.
+fn lower_text_byte_is(f: &LowerFunction, value: LIRValueID, byte: Int, yes: LIRBlockID) Never! {
+    other :: lower_new_block(&f)
+    expected :: lower_const(&f, byte)
+    same :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: same, condition: LIRCondition.Eq, left: value, right: expected})
+    lower_seal(&f, LIRTerminator.Branch{condition: same, then_target: lower_target(yes, [LIRValueID]{}), else_target: lower_target(other, [LIRValueID]{})})
+    lower_start(&f, other, [LIRValueID]{})
+}
+
+// "text.html_escape" (builder, String) and "text.path_component" (builder,
+// String): push the borrowed text's bytes to the builder, encoded as
+// TypedText.rs jet_typed_html_escape (`&<>"'` as entities) or
+// encode_path_component (bytes outside ALPHA / DIGIT / `-._~` as uppercase
+// %XX; a whole `.` or `..` as %2E escapes, so it is never a traversal).
+// The escaped bytes are ASCII, so a byte walk keeps every other UTF-8
+// sequence intact.
+fn lower_helper_typed_text_escape(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    html :: glue.helper == "text.html_escape"
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_pointer()}, None)
+    builder :: f.open_params[0].copy()
+    text :: f.open_params[1].copy()
+    data :: lower_pointer(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_data", [LIRValueID]{text}, Val(data))
+    length :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_byte_len", [LIRValueID]{text}, Val(length))
+    zero :: lower_const(&f, 0)
+    // Path only: whether the text is exactly `.` or `..` (one or two bytes,
+    // first and last a dot).
+    dots := lower_const_flag(&f, 0)
+    if !html {
+        dots_check :: lower_new_block(&f)
+        dots_last :: lower_new_block(&f)
+        dots_done :: lower_new_block(&f)
+        no :: lower_const_flag(&f, 0)
+        yes :: lower_const_flag(&f, 1)
+        one :: lower_const(&f, 1)
+        short_enough :: lower_flag(&f)
+        two :: lower_const(&f, 2)
+        nonempty :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: nonempty, condition: LIRCondition.Ge, left: length, right: one})
+        lower_emit(&f, LIRInst.Compare{dst: short_enough, condition: LIRCondition.Le, left: length, right: two})
+        sized :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Binary{dst: sized, op: LIRBinaryOp.And, left: nonempty, right: short_enough})
+        lower_seal(&f, LIRTerminator.Branch{condition: sized, then_target: lower_target(dots_check, [LIRValueID]{}), else_target: lower_target(dots_done, [LIRValueID]{no})})
+        lower_start(&f, dots_check, [LIRValueID]{})
+        dot :: lower_const(&f, 46)
+        first :: lower_text_byte(&f, data, zero)
+        first_dot :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: first_dot, condition: LIRCondition.Eq, left: first, right: dot})
+        lower_seal(&f, LIRTerminator.Branch{condition: first_dot, then_target: lower_target(dots_last, [LIRValueID]{}), else_target: lower_target(dots_done, [LIRValueID]{no})})
+        lower_start(&f, dots_last, [LIRValueID]{})
+        last_at :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: last_at, op: LIRBinaryOp.Sub, left: length, right: one})
+        last :: lower_text_byte(&f, data, last_at)
+        last_dot :: lower_flag(&f)
+        lower_emit(&f, LIRInst.Compare{dst: last_dot, condition: LIRCondition.Eq, left: last, right: dot})
+        lower_seal(&f, LIRTerminator.Branch{condition: last_dot, then_target: lower_target(dots_done, [LIRValueID]{yes}), else_target: lower_target(dots_done, [LIRValueID]{no})})
+        joined :: lower_flag(&f)
+        lower_start(&f, dots_done, [LIRValueID]{joined})
+        dots = joined
+    }
+    at :: lower_word(&f)
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    raw :: lower_new_block(&f)
+    step :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{zero})})
+    lower_start(&f, head, [LIRValueID]{at})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: at, right: length})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    byte :: lower_text_byte(&f, data, at)
+    if html {
+        codes :: [Int]{38, 60, 62, 34, 39}
+        entities :: [String]{"&amp;", "&lt;", "&gt;", "&quot;", "&#39;"}
+        targets := [LIRBlockID]{}
+        loop code in codes {
+            target :: lower_new_block(&f)
+            &targets.push(target)
+            lower_text_byte_is(&f, byte, code, target)
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(raw, [LIRValueID]{})})
+        loop (index, entity) in entities {
+            lower_start(&f, targets[index], [LIRValueID]{})
+            lower_render_static(&m, &f, builder, entity)
+            lower_seal(&f, LIRTerminator.Jump{target: lower_target(step, [LIRValueID]{})})
+        }
+    } else {
+        encode :: lower_new_block(&f)
+        dot_block :: lower_new_block(&f)
+        upper_check :: lower_new_block(&f)
+        lower_check :: lower_new_block(&f)
+        lower_text_byte_between(&f, byte, 48, 57, raw, upper_check)
+        lower_start(&f, upper_check, [LIRValueID]{})
+        lower_text_byte_between(&f, byte, 65, 90, raw, lower_check)
+        lower_start(&f, lower_check, [LIRValueID]{})
+        marks :: lower_new_block(&f)
+        lower_text_byte_between(&f, byte, 97, 122, raw, marks)
+        lower_start(&f, marks, [LIRValueID]{})
+        lower_text_byte_is(&f, byte, 45, raw)
+        lower_text_byte_is(&f, byte, 95, raw)
+        lower_text_byte_is(&f, byte, 126, raw)
+        lower_text_byte_is(&f, byte, 46, dot_block)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(encode, [LIRValueID]{})})
+        // A dot is unreserved unless the whole text is `.` or `..`.
+        lower_start(&f, dot_block, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Branch{condition: dots, then_target: lower_target(encode, [LIRValueID]{}), else_target: lower_target(raw, [LIRValueID]{})})
+        lower_start(&f, encode, [LIRValueID]{})
+        lower_render_static(&m, &f, builder, "%")
+        hex :: lower_static_text(&m, &f, "0123456789ABCDEF")
+        one :: lower_const(&f, 1)
+        four :: lower_const(&f, 4)
+        fifteen :: lower_const(&f, 15)
+        high :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: high, op: LIRBinaryOp.UShr, left: byte, right: four})
+        low :: lower_word(&f)
+        lower_emit(&f, LIRInst.Binary{dst: low, op: LIRBinaryOp.And, left: byte, right: fifteen})
+        nibbles :: [LIRValueID]{high, low}
+        loop nibble in nibbles {
+            digit :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.PointerAdd{dst: digit, base: hex[0], offset: nibble})
+            lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", [LIRValueID]{builder, digit, one}, None)
+        }
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(step, [LIRValueID]{})})
+    }
+    lower_start(&f, raw, [LIRValueID]{})
+    source :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.PointerAdd{dst: source, base: data, offset: at})
+    width :: lower_const(&f, 1)
+    lower_call_runtime(&m, &f, "jet_rt_string_builder_push_static", [LIRValueID]{builder, source, width}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(step, [LIRValueID]{})})
+    lower_start(&f, step, [LIRValueID]{})
+    next_at :: lower_word(&f)
+    increment :: lower_const(&f, 1)
+    lower_emit(&f, LIRInst.Binary{dst: next_at, op: LIRBinaryOp.Add, left: at, right: increment})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_at})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_typed_nominal(ty: MIRType, target: String) -> Bool Never! {
+    if ty.kind == .Apply(name, args) -> return name.name == target && args.len() == 0
+    false
+}
+
+// Carrier buffers are frame slots. Literal handles are borrowed by the runtime,
+// hole handles are transferred; the structured runtime kernel owns its result.
+fn lower_typed_buffer(f: &LowerFunction, count: Int) -> LIRValueID Never! {
+    dst :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: dst, size: if count == 0 -> 8 else -> count * 8, align: 8})
+    dst
+}
+
+fn lower_typed_sql_hole(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, hole: MIRValueID) -> LIRValueID? {
+    ty :: lower_value_type(c, hole) ?? return None
+    source :: if lower_repr(p, ty) == .Absent -> None else -> lower_use(&m, &f, hole)
+    dst :: lower_pointer(&f)
+    if lower_typed_nominal(ty, "DBValue") {
+        value :: source ?? return None
+        lower_clone_into(p, &m, &f, value, dst, ty)
+        return Val(dst)
+    }
+    symbol := ""
+    if ty.kind == {
+        .Int -> symbol = "jet_rt_typed_sql_exact_int"
+        .IntN(_, _) -> symbol = "jet_rt_typed_sql_int"
+        .Float -> symbol = "jet_rt_typed_sql_float"
+        .Bool -> symbol = "jet_rt_typed_sql_bool"
+        else -> {}
+    }
+    if symbol != "" {
+        value :: source ?? return None
+        lower_call_runtime(&m, &f, symbol, [LIRValueID]{value}, Val(dst))
+        return Val(dst)
+    }
+    if ty.kind == .Float32 {
+        value :: source ?? return None
+        wide :: lower_new_value(&f, lir_layout_float(), LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Convert{dst: wide, src: value})
+        lower_call_runtime(&m, &f, "jet_rt_typed_sql_float", [LIRValueID]{wide}, Val(dst))
+        return Val(dst)
+    }
+    if ty.kind == .List(elem) && elem.kind == .IntN(signed, bits) && !signed && bits == 8 {
+        list :: source ?? return None
+        data :: lower_list_data(&f, list)
+        count :: lower_list_word(&f, list, 0)
+        lower_call_runtime(&m, &f, "jet_rt_typed_sql_blob", [LIRValueID]{data, count}, Val(dst))
+        return Val(dst)
+    }
+    shown :: lower_render_value(p, &m, &f, ty, source, LowerRenderMode.Show) ?? return None
+    text := shown.value
+    if !shown.owned {
+        text = lower_render_string(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{shown.value}, Val(text))
+    }
+    lower_call_runtime(&m, &f, "jet_rt_typed_sql_text", [LIRValueID]{text}, Val(dst))
+    Val(dst)
+}
+
+fn lower_typed_structured(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, kind: MIRTypedHeadKind, literals: [String], holes: [MIRValueID]) Never! {
+    what :: "TypedTextInterp {lower_typed_text_kind_name(kind)}"
+    if literals.len() != holes.len() + 1 -> return lower_fail(&m, &f, "{what} has inconsistent literal and hole counts")
+    ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "{what} has no checked type")
+    if kind == .SQL && !lower_typed_nominal(ty, "SQL") -> return lower_fail(&m, &f, "{what} result is not SQL")
+    if kind == .Sh && lower_list_element(ty) == None -> return lower_fail(&m, &f, "{what} result is not argv")
+    if kind == .URL && !lower_route_carrier_matches(p, ty, LowerRouteCarrier.Handle{name: "JetURL"}) -> return lower_fail(&m, &f, "{what} result is not the URL runtime carrier")
+    lit :: lower_typed_buffer(&f, literals.len() * 2)
+    values :: lower_typed_buffer(&f, holes.len())
+    loop (index, text) in literals {
+        value :: lower_static_text(&m, &f, text)
+        lower_emit(&f, LIRInst.Store{base: lit, offset: index * 16, value: value[0]})
+        lower_emit(&f, LIRInst.Store{base: lit, offset: index * 16 + 8, value: value[1]})
+    }
+    loop (index, hole) in holes {
+        value := LIRValueID?{None}
+        if kind == .SQL {
+            value = lower_typed_sql_hole(p, c, &m, &f, hole)
+        } else {
+            hole_ty :: lower_value_type(c, hole) ?? return lower_fail(&m, &f, "{what} hole has no checked type")
+            source :: if lower_repr(p, hole_ty) == .Absent -> None else -> lower_use(&m, &f, hole)
+            shown :: lower_render_value(p, &m, &f, hole_ty, source, LowerRenderMode.Show) ?? return
+            owned := shown.value
+            if !shown.owned {
+                owned = lower_render_string(&f)
+                lower_call_runtime(&m, &f, "jet_rt_string_clone", [LIRValueID]{shown.value}, Val(owned))
+            }
+            value = Val(owned)
+        }
+        kept :: value ?? return
+        lower_emit(&f, LIRInst.Store{base: values, offset: index * 8, value: kept})
+    }
+    lit_count :: lower_const(&f, literals.len())
+    hole_count :: lower_const(&f, holes.len())
+    args := [LIRValueID]{lit, lit_count, values, hole_count}
+    kept :: lower_result(p, c, &m, &f, instruction)
+    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return lower_fail(&m, &f, "{what} has no result carrier")
+    dst :: kept ?? lower_new_value(&f, layout, LIRDrop.Trivial, ty.identity)
+    if kind == .Sh {
+        lower_storage_into(p, &f, dst, ty)
+        &args.push(dst)
+        lower_call_runtime(&m, &f, "jet_rt_typed_sh", args, None)
+    } else {
+        lower_call_runtime(&m, &f, if kind == .SQL -> "jet_rt_typed_sql" else -> "jet_rt_typed_url", args, Val(dst))
+    }
+    if kept == None -> lower_map_drop_value(p, &m, &f, dst, ty)
+}
+
+fn lower_typed_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, symbol: String, args: [MIRCallArg]) -> Bool Never! {
+    if symbol != "jet_typed_sql_template" && symbol != "jet_typed_sql_params" && symbol != "jet_typed_sql_raw" && symbol != "jet_typed_sh_raw" -> return false
+    if args.len() != 1 {
+        lower_fail(&m, &f, "typed text route {symbol} has no single checked argument")
+        return true
+    }
+    value :: lower_use(&m, &f, args[0].value) ?? return true
+    ty :: lower_value_type(c, args[0].value) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    if symbol == "jet_typed_sql_template" || symbol == "jet_typed_sql_params" {
+        if !lower_typed_nominal(ty, "SQL") {
+            lower_fail(&m, &f, "typed SQL accessor has no SQL carrier")
+            return true
+        }
+        if symbol == "jet_typed_sql_template" {
+            lower_call_runtime(&m, &f, "jet_rt_typed_sql_template", [LIRValueID]{value}, Val(dst))
+        } else {
+            result_ty :: lower_checked_type(c, instruction) ?? return true
+            elem :: lower_list_element(result_ty) ?? return true
+            if !lower_typed_nominal(elem, "DBValue") || !lower_repr_is_handle(lower_repr(p, elem)) {
+                lower_fail(&m, &f, "typed SQL params have no DBValue runtime carrier")
+                return true
+            }
+            lower_storage_into(p, &f, dst, result_ty)
+            lower_call_runtime(&m, &f, "jet_rt_typed_sql_params", [LIRValueID]{value, dst}, None)
+        }
+        return true
+    }
+    if !lower_text_type(ty) {
+        lower_fail(&m, &f, "typed raw text argument has no String carrier")
+        return true
+    }
+    lit :: lower_typed_buffer(&f, 2)
+    holes :: lower_typed_buffer(&f, 0)
+    data :: lower_pointer(&f)
+    length :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_data", [LIRValueID]{value}, Val(data))
+    lower_call_runtime(&m, &f, "jet_rt_string_byte_len", [LIRValueID]{value}, Val(length))
+    lower_emit(&f, LIRInst.Store{base: lit, offset: 0, value: data})
+    lower_emit(&f, LIRInst.Store{base: lit, offset: 8, value: length})
+    one :: lower_const(&f, 1)
+    zero :: lower_const(&f, 0)
+    if symbol == "jet_typed_sh_raw" {
+        result_ty :: lower_checked_type(c, instruction) ?? return true
+        lower_storage_into(p, &f, dst, result_ty)
+        lower_call_runtime(&m, &f, "jet_rt_typed_sh", [LIRValueID]{lit, one, holes, zero, dst}, None)
+    } else {
+        lower_call_runtime(&m, &f, "jet_rt_typed_sql", [LIRValueID]{lit, one, holes, zero}, Val(dst))
+    }
+    true
+}

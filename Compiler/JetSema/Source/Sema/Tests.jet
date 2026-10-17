@@ -5,26 +5,61 @@ use jet_foundation.[
     TFunc,
     TFuncKind,
     TestDef,
+    Type,
     ast_func,
     tir_test_artifact_key,
+    type_name,
 ]
 
-pub struct SemaTestFunctionCheckResult {
-    pub function: TFunc?
-    pub call_facts: [SemaCallSiteFact]
-    pub comptime_requests: [SemaComptimeRequest]
-    pub name_references: [SemaNameReferenceFact]
-    pub diagnostics: [Diagnostic]
-    pub exact_int_reachable: Bool
-    pub copy_events: [SemaCopyEvent]
-    pub complete: Bool
+// D-TEST1 (Rust BodyCheck.rs `property_param_generatable`): the parameter
+// types the property-test runner can synthesize inputs for: the scalar value
+// types plus `[T]`, `T?` and fixed lists of a generatable element.
+fn sema_property_param_generatable(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .Float32 | .IntN(_, _) | .InlineRange(_, _, _) -> true
+        .List(inner) -> sema_property_param_generatable(inner)
+        .Option(inner) -> sema_property_param_generatable(inner)
+        .FixedList(elem, _) -> sema_property_param_generatable(elem)
+        else -> false
+    }
 }
 
-pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, module_scopes: SemaScopeTable) -> SemaTestFunctionCheckResult {
+// E0613 (Rust `property_param_unsupported`): one row per parameter of a
+// parameterized `#Test fn` whose type has no automatic generator, reported
+// before the test body's own diagnostics.
+fn sema_property_param_diagnostics(test: TestDef) -> [Diagnostic] Never! {
+    diagnostics := [Diagnostic]{}
+    loop parameter in test.params {
+        if sema_property_param_generatable(parameter.ty) -> next
+        &diagnostics.push(sema_error(
+            "E0613",
+            parameter.ty_span,
+            "a property test can't generate values of type `{type_name(parameter.ty)}`",
+            "a parameterized `#Test fn` is a property test (D-TEST1): Jet generates inputs from each parameter's type, but this type has no built-in generator",
+            "use a generatable type (Int, Float, Bool, String, Char, a sized integer, or a list/optional of those), or write a plain `#Test \"name\" {{ … }}` block and construct the value yourself",
+        ))
+    }
+    diagnostics
+}
+
+struct SemaTestFunctionCheckResult {
+    function: TFunc?
+    call_facts: [SemaCallSiteFact]
+    comptime_requests: [SemaComptimeRequest]
+    name_references: [SemaNameReferenceFact]
+    diagnostics: [Diagnostic]
+    exact_int_reachable: Bool
+    copy_events: [SemaCopyEvent]
+    complete: Bool
+}
+
+fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment, program: SemaProgramTables, module_scopes: SemaScopeTable, host_hooks: SemaHostHookAccess?) -> SemaTestFunctionCheckResult {
     key := tir_test_artifact_key(environment.module_identity, test)
     owner_id := SymbolID{key: key}
     scopes := sema_scope_snapshot(module_scopes)
-    temporary_name := "__jet_test_{test.span.start}_{test.span.end}"
+    // Rust Validation.rs names the synthetic body `__test_<name>`; a runtime
+    // stop inside the test reports that name (`in __test_<name>`).
+    temporary_name := "__test_{test.name ?? "anonymous"}"
     synthetic := ast_func(temporary_name, test.name_span, test.span)
     synthetic.params = test.params
     synthetic.body = test.body
@@ -53,8 +88,9 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
     comptime_requests := [SemaComptimeRequest]{}
     name_references := [SemaNameReferenceFact]{}
     diagnostics := [Diagnostic]{}
-    check_environment := environment
-    checked := sema_function_check(synthetic, owner_id, TFuncKind.TopLevel, false, &check_environment, &scopes, &diagnostics, &call_facts, &comptime_requests, &name_references)
+    // The synthetic has no own generic parameters: its merged environment is
+    // unchanged. The canonical read checker scopes and restores its name.
+    checked := sema_function_check_shared(synthetic, owner_id, TFuncKind.TopLevel, false, environment, program, &scopes, host_hooks, &diagnostics, &call_facts, &comptime_requests, &name_references)
     function := TFunc?{None}
     if checked.value == .Val(value) {
         updated_value := value
@@ -73,7 +109,7 @@ pub fn sema_check_test_function(test: TestDef, environment: SemaScopeEnvironment
         name_references: name_references,
         diagnostics: diagnostics,
         exact_int_reachable: checked.exact_int_reachable,
-        copy_events: ~checked.copy_events,
+        copy_events: checked.copy_events.copy(),
         complete: checked.complete,
     }
 }

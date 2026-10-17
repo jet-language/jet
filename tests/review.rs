@@ -1110,8 +1110,8 @@ fn review_with_checked_dependency_reports_complete_provenance() {
     let source = "use \"./dep\" as dep\n\nfn run() {\n    dep.call()\n}\n";
     let base = project(&root, "base", "", source);
     let head = project(&root, "head", "", source);
-    write(&base.join("dep.jet"), "pub fn call() {\n}\n");
-    write(&head.join("dep.jet"), "pub fn call() {\n}\n");
+    write(&base.join("dep.jet"), "fn call() {\n}\n");
+    write(&head.join("dep.jet"), "fn call() {\n}\n");
     let base_receipt = root.join("base.jetproof");
     let head_receipt = root.join("head.jetproof");
     write(
@@ -1262,11 +1262,11 @@ fn review_diagnostics_mode_keeps_changed_dependency_unknown() {
     );
     write(
         &base.join("dep.jet"),
-        "module dep {\n    pub fn call() {\n        missing()\n    }\n}\n",
+        "module dep {\n    fn call() {\n        missing()\n    }\n}\n",
     );
     write(
         &head.join("dep.jet"),
-        "module dep {\n    pub fn call() {\n        missing()\n    }\n}\n// dependency changed\n",
+        "module dep {\n    fn call() {\n        missing()\n    }\n}\n// dependency changed\n",
     );
 
     let output = diagnostic_review_command(&base, &head);

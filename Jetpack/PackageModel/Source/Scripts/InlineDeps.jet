@@ -16,19 +16,19 @@
 PKG_INLINE_DEPS_FIXTURES_ENV :: prep { "JET_INLINE_DEPS_FIXTURES" }
 
 // One `use pkg#version;` ref collected from a manifest-less script.
-pub struct InlineDep {
-    pub name: String
-    pub selector: String
-    pub span: Span
+struct InlineDep {
+    name: String
+    selector: String
+    span: Span
 }
 
 // Every inline dependency ref among a parsed program's top-level imports.
-pub fn pkg_inline_deps_collect(program: Program) -> [InlineDep] Never! {
+fn pkg_inline_deps_collect(program: Program) -> [InlineDep] Never! {
     pkg_inline_deps_collect_from_imports(program.imports)
 }
 
 // Only a single-segment module import carries an inline version.
-pub fn pkg_inline_deps_collect_from_imports(imports: [ImportDecl]) -> [InlineDep] Never! {
+fn pkg_inline_deps_collect_from_imports(imports: [ImportDecl]) -> [InlineDep] Never! {
     out := [InlineDep]{}
     loop decl in imports {
         version :: decl.inline_version ?? next
@@ -43,7 +43,7 @@ pub fn pkg_inline_deps_collect_from_imports(imports: [ImportDecl]) -> [InlineDep
 // A selector is pinned when it names an exact three-part version (`1.4.2`).
 // Anything looser (`1.4`, `1`, `latest`, `*`) is L0203: fine to write, but
 // not reproducible without `jet fetch --lock`.
-pub fn pkg_inline_deps_is_pinned(selector: String) -> Bool Never! {
+fn pkg_inline_deps_is_pinned(selector: String) -> Bool Never! {
     parts :: pkg_inline_deps_numeric_version(selector) ?? return false
     parts.len() == 3
 }
@@ -52,21 +52,21 @@ pub fn pkg_inline_deps_is_pinned(selector: String) -> Bool Never! {
 // lock, a package lift, or a build cache. The selector is kept apart from
 // the selected version: changing a loose selector is a semantic change even
 // when it selects the same source today.
-pub struct ScriptDependencyIdentity {
-    pub name: String
-    pub selector: String
-    pub resolved_version: String
-    pub content_hash: String
+struct ScriptDependencyIdentity {
+    name: String
+    selector: String
+    resolved_version: String
+    content_hash: String
 }
 
 // The facts that identify a prepared script result. Paths and ambient
 // process state are absent: only recorded source/dependency content plus
 // the selected toolchain and target can authorize reuse.
-pub struct ScriptCacheIdentity {
-    pub source_hash: String
-    pub dependencies: [ScriptDependencyIdentity]
-    pub toolchain: String
-    pub target: String
+struct ScriptCacheIdentity {
+    source_hash: String
+    dependencies: [ScriptDependencyIdentity]
+    toolchain: String
+    target: String
 
     // Dependencies are held in (name, selector, resolved_version,
     // content_hash) order so the identity is order independent.
@@ -101,7 +101,7 @@ pub struct ScriptCacheIdentity {
 // The identity of a resolved script, computed without reading or running
 // any dependency source, so callers can recompute it after a source edit
 // and reject a stale prepared result before execution.
-pub fn pkg_inline_deps_cache_identity(source_hash: String, dependencies: [InlineDepResolved], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
+fn pkg_inline_deps_cache_identity(source_hash: String, dependencies: [InlineDepResolved], toolchain: String, target: String) -> ScriptCacheIdentity Never! {
     identities := [ScriptDependencyIdentity]{}
     loop dependency in dependencies -> &identities.push(dependency.dependency_identity())
     ScriptCacheIdentity.new(source_hash, identities, toolchain, target)
@@ -109,12 +109,12 @@ pub fn pkg_inline_deps_cache_identity(source_hash: String, dependencies: [Inline
 
 // A resolved inline dependency: `dir` is the module search root that
 // satisfies it.
-pub struct InlineDepResolved {
-    pub name: String
-    pub selector: String
-    pub resolved_version: String
-    pub dir: String
-    pub content_hash: String
+struct InlineDepResolved {
+    name: String
+    selector: String
+    resolved_version: String
+    dir: String
+    content_hash: String
 
     // The portable dependency identity. `dir` is not part of it: the same
     // prepared source identifies the same way after a clone moves.
@@ -125,7 +125,7 @@ pub struct InlineDepResolved {
 
 // Why an inline dependency did not resolve (E1253's reason half).
 #Error
-pub enum InlineDepUnresolved {
+enum InlineDepUnresolved {
     // The import name would escape the local dependency root.
     InvalidName
     // The selector is not the supported dotted numeric form.
@@ -152,7 +152,7 @@ pub enum InlineDepUnresolved {
 // copy, then (when set) `JET_INLINE_DEPS_FIXTURES`, hashing the selected
 // tree. The project-local source is authoritative: when it has the package
 // but not a matching version, no later root is consulted.
-pub fn pkg_inline_deps_resolve(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepResolved InlineDepUnresolved! {
+fn pkg_inline_deps_resolve(dep: InlineDep, script_dir: String) -[FS, Env]> InlineDepResolved InlineDepUnresolved! {
     if !pkg_inline_deps_valid_package_name(dep.name) -> return Err(InlineDepUnresolved.InvalidName)
     if pkg_inline_deps_numeric_version(dep.selector) == None -> return Err(InlineDepUnresolved.InvalidSelector)
     roots := [String]{files.join(files.join(script_dir, ".jet"), "inline-deps")}
@@ -232,8 +232,16 @@ fn pkg_inline_deps_best_match(selector: String, candidates: [(version: String, d
     Val(matches[matches.len() - 1])
 }
 
+// The same numeric matching law for one admitted version, without a
+// temporary candidate list or sorting at the driver's import seam.
+fn pkg_inline_deps_version_matches(selector: String, version: String) -> Bool Never! {
+    selector_parts :: pkg_inline_deps_numeric_version(selector) ?? return false
+    version_parts :: pkg_inline_deps_numeric_version(version) ?? return false
+    if selector_parts.len() == 3 -> version_parts == selector_parts else -> version_parts.len() == 3 && pkg_inline_deps_has_prefix(version_parts, selector_parts)
+}
+
 // Whether `parts` begins with every element of `prefix`.
-fn pkg_inline_deps_has_prefix(parts: [Int], prefix: [Int]) -> Bool Never! {
+fn pkg_inline_deps_has_prefix(parts: [U64], prefix: [U64]) -> Bool Never! {
     loop index in 0..<prefix.len() {
         if index >= parts.len() || parts[index] != prefix[index] -> return false
     }
@@ -241,21 +249,29 @@ fn pkg_inline_deps_has_prefix(parts: [Int], prefix: [Int]) -> Bool Never! {
 }
 
 // One numeric component of a version key, 0 when absent or malformed.
-fn pkg_inline_deps_version_part(version: String, index: Int) -> Int Never! {
-    parts :: pkg_inline_deps_numeric_version(version) ?? return 0
-    if index >= parts.len() -> return 0
+fn pkg_inline_deps_version_part(version: String, index: Int) -> U64 Never! {
+    parts :: pkg_inline_deps_numeric_version(version) ?? return U64{0}
+    if index >= parts.len() -> return U64{0}
     parts[index]
 }
 
-// A dotted numeric version of one to three parts without leading zeros.
-fn pkg_inline_deps_numeric_version(value: String) -> [Int]? Never! {
+// Rust ScriptDeps::numeric_version uses the full unsigned 64-bit domain.
+fn pkg_inline_deps_numeric_version(value: String) -> [U64]? Never! {
     parts :: value.split(".").to_list()
     if parts.len() < 1 || parts.len() > 3 -> return None
-    out := [Int]{}
+    out := [U64]{}
     loop part in parts {
         if part == "" || (part.bytes().len() > 1 && part.starts_with("0")) -> return None
-        if part.starts_with("+") -> return None
-        &out.push(pkg_lock_parse_unsigned(part, 9223372036854775807) ?? return None)
+        digits :: if part.starts_with("+") -> part.slice(1..<part.len()) else -> part
+        if digits == "" -> return None
+        number := U64{0}
+        loop byte in digits.bytes() {
+            if byte < (U8{48}) || byte > (U8{57}) -> return None
+            digit :: U64.from_u8(byte - U8{48})
+            if number > (U64{1844674407370955161}) || (number == (U64{1844674407370955161}) && digit > (U64{5})) -> return None
+            number = number * U64{10} + digit
+        }
+        &out.push(number)
     }
     Val(out)
 }
@@ -278,13 +294,13 @@ fn pkg_inline_deps_framed(bytes: &[U8], value: String) Never! {
 }
 
 fn pkg_inline_deps_framed_count(bytes: &[U8], count: Int) Never! {
-    loop shift in FOUNDATION_U64_SHIFTS -> &bytes.push(U8{(count >> shift) & 255})
+    loop shift in FOUNDATION_U64_SHIFTS -> &bytes.push(U8{((count >> shift)).bit_and(255)})
 }
 
 // E1253 (D-JPK-SCRIPTDEP1=A): an inline `use pkg#version;` ref that cannot
 // be resolved: unknown package, unreachable or unsafe source tree, or no
 // version satisfies the selector.
-pub fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnostic Never! {
+fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Diagnostic Never! {
     explanation :: if reason == {
         .InvalidName -> (why: "`{dep.name}` is not a safe local package name.", fix: "use a single package name without path separators.")
         .InvalidSelector -> (why: "`{dep.selector}` is not a supported dotted numeric version selector.", fix: "use `major`, `major.minor`, or `major.minor.patch`.")
@@ -297,12 +313,12 @@ pub fn pkg_inline_deps_e1253(dep: InlineDep, reason: InlineDepUnresolved) -> Dia
 
 // L0203 (D-JPK-SCRIPTDEP1=A): an inline dependency with a loose selector
 // (anything but an exact `major.minor.patch`).
-pub fn pkg_inline_deps_l0203_unpinned(dep: InlineDep) -> Diagnostic Never! {
+fn pkg_inline_deps_l0203_unpinned(dep: InlineDep) -> Diagnostic Never! {
     pkg_diagnostic_from_row("L0203", [(name: String, value: String)]{(name: "name", value: dep.name), (name: "selector", value: dep.selector)}, Val(dep.span))
 }
 
 // SHA-256 of a script file's bytes as `sha256-<hex>`: the `content_hash`
 // shape `jet fetch --lock` and `jet run` use to detect an edited script.
-pub fn pkg_inline_deps_file_hash(path: String) -[FS]> String IOError! {
+fn pkg_inline_deps_file_hash(path: String) -[FS]> String IOError! {
     Ok("sha256-{foundation_sha256_file_hex(path)}")
 }

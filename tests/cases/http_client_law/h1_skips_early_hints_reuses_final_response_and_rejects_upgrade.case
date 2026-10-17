@@ -1,0 +1,23 @@
+# HAND-PORT tests/http_client_law.rs:377-425 h1_skips_early_hints_reuses_final_response_and_rejects_upgrade
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Two original concurrent peers/listeners with exact103+200/final200/101 bytes, same-socket reuse prefixes, both joins and exact unsupported-protocol result.
+# Peer is a REAL Jet Core.net fixture, re-expressing only original Rust harness setup/assertions; original client template verbatim after format expansion.
+# No original stderr equality predicate (stderr was only panic context). Original AOT-only matrix retained.
+fixture: h1_skips_early_hints_reuses_final_response_and_rejects_upgrade.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+await: file upgrade_addr.txt timeout 30s
+capture: upgrade_addr = text file upgrade_addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step client: built
+exit: 0
+stdout: = h1_skips_early_hints_reuses_final_response_and_rejects_upgrade.stdout.expected
+wait: peer
+exit: 0

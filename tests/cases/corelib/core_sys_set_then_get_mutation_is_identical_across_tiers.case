@@ -1,0 +1,13 @@
+# Port of tests/corelib_parts/system.rs::core_sys_set_then_get_mutation_is_identical_across_tiers; guest sources preserved verbatim.
+# ORACLE-LITERAL: system.rs:498; original process-unique env key uses kit PID token.
+fixture: fixtures/core_sys_set_then_get_mutation_is_identical_across_tiers
+write: fixture.jet fixture.template
+step default: jet run fixture.jet
+stdout: = core_sys_set_then_get_mutation_is_identical_across_tiers.out
+step: jet run --interpret fixture.jet
+stdout: = core_sys_set_then_get_mutation_is_identical_across_tiers.out
+stderr: == default
+step: jet build fixture.jet
+step: built
+stdout: = core_sys_set_then_get_mutation_is_identical_across_tiers.out
+stderr: == default

@@ -1,0 +1,27 @@
+
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    policy :: db.policy("blobs", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "alice")
+    _created :: db.migrate(scoped, "blobs-v1", [
+        SQL{"CREATE TABLE blobs (payload BLOB, explicit_payload BLOB)"}
+    ]) ?? panic("create")
+    payload :: [U8]{0, 1, 2, 127, 128, 255}
+    explicit_payload :: [U8]{0, 1, 2, 127, 128, 255}
+    bound :: DBValue.Blob(explicit_payload)
+    _inserted :: scoped.execute(
+        SQL{"INSERT INTO blobs (payload, explicit_payload) VALUES ({payload}, {bound})"}
+    ) ?? panic("insert")
+    row :: scoped.query_one(
+        SQL{"SELECT payload, explicit_payload FROM blobs"}
+    ) ?? panic("query")
+    direct :: db.row_value(row, "payload") ?? panic("direct row value")
+    explicit :: db.row_value(row, "explicit_payload") ?? panic("explicit row value")
+    direct_bytes :: direct.blob() ?? panic("direct blob")
+    explicit_bytes :: explicit.blob() ?? panic("explicit blob")
+    print("direct:{direct_bytes}")
+    print("explicit:{explicit_bytes}")
+    print("equal:{direct_bytes == payload && explicit_bytes == explicit_payload}")
+}

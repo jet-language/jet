@@ -18,7 +18,7 @@ NIX_INDEX_SYSTEMS :: prep { [String]{"x86_64-linux", "aarch64-linux", "x86_64-da
 NIX_INDEX_COVERAGE_REASONS :: prep { [String]{"evaluation-failed", "unsupported-value", "unsupported-system", "no-channel-build", "missing-narinfo", "missing-version", "missing-primary-output", "policy-excluded"} }
 
 #Error
-pub enum NixIndexError {
+enum NixIndexError {
     Invalid(String)
     NotIndexed(attrpath: [String], channel: String, revision: String, system: String, reason: String)
     Offline(String)
@@ -42,20 +42,20 @@ pub enum NixIndexError {
     }
 }
 
-pub struct NixIndexKey {
-    pub channel: String
-    pub revision: String
-    pub system: String
-    pub attrpath: [String]
+struct NixIndexKey {
+    channel: String
+    revision: String
+    system: String
+    attrpath: [String]
 }
 
 // One indexed package: its attribute path, version, derivation and named
 // output store paths (key-ordered).
-pub struct NixIndexRecord {
-    pub attrpath: [String]
-    pub version: String
-    pub drv_path: String
-    pub outputs: [String: String]
+struct NixIndexRecord {
+    attrpath: [String]
+    version: String
+    drv_path: String
+    outputs: [String: String]
 
     fn canonical_json(self) -> String Never! {
         pkg_json_render(NixIndexRecordWire.from_record(self).tree())
@@ -64,22 +64,22 @@ pub struct NixIndexRecord {
 
 // A local, unsigned Jetpack-native recipe. It is a document separate from the
 // nixpkgs mapping, so a native artifact never looks Nix-backed.
-pub struct NixNativeRecipe {
-    pub name: String
-    pub version: String
-    pub kind: String
-    pub url: String
-    pub sha256: String
-    pub bin: String
+struct NixNativeRecipe {
+    name: String
+    version: String
+    kind: String
+    url: String
+    sha256: String
+    bin: String
 
-    fn tree(self) -> DataTree Never! {
-        DataTree.Object([
-            "name": DataTree.Text(self.name),
-            "version": DataTree.Text(self.version),
-            "kind": DataTree.Text(self.kind),
-            "url": DataTree.Text(self.url),
-            "sha256": DataTree.Text(self.sha256),
-            "bin": DataTree.Text(self.bin),
+    fn tree(self) -> Dyn Never! {
+        Dyn.Object([
+            "name": Dyn.Text(self.name),
+            "version": Dyn.Text(self.version),
+            "kind": Dyn.Text(self.kind),
+            "url": Dyn.Text(self.url),
+            "sha256": Dyn.Text(self.sha256),
+            "bin": Dyn.Text(self.bin),
         ])
     }
 
@@ -89,37 +89,37 @@ pub struct NixNativeRecipe {
 }
 
 // What a resolved record was verified against.
-pub struct NixIndexProof {
-    pub schema: Int
-    pub channel: String
-    pub revision: String
-    pub system: String
-    pub attrpath: [String]
-    pub manifest_generation: Int
-    pub manifest_sha256: String
-    pub index_sha256: String
-    pub record_sha256: String
-    pub jet_key_id: String
-    pub jet_signature: String
+struct NixIndexProof {
+    schema: Int
+    channel: String
+    revision: String
+    system: String
+    attrpath: [String]
+    manifest_generation: Int
+    manifest_sha256: String
+    index_sha256: String
+    record_sha256: String
+    jet_key_id: String
+    jet_signature: String
 
     fn canonical_json(self) -> String Never! {
-        pkg_json_render(DataTree.Object([
-            "schema": DataTree.Int(self.schema),
-            "channel": DataTree.Text(self.channel),
-            "revision": DataTree.Text(self.revision),
-            "system": DataTree.Text(self.system),
+        pkg_json_render(Dyn.Object([
+            "schema": Dyn.Int(self.schema),
+            "channel": Dyn.Text(self.channel),
+            "revision": Dyn.Text(self.revision),
+            "system": Dyn.Text(self.system),
             "attrpath": pkg_json_texts(self.attrpath),
-            "manifest_generation": DataTree.Int(self.manifest_generation),
-            "manifest_sha256": DataTree.Text(self.manifest_sha256),
-            "index_sha256": DataTree.Text(self.index_sha256),
-            "record_sha256": DataTree.Text(self.record_sha256),
-            "jet_key_id": DataTree.Text(self.jet_key_id),
-            "jet_signature": DataTree.Text(self.jet_signature),
+            "manifest_generation": Dyn.Int(self.manifest_generation),
+            "manifest_sha256": Dyn.Text(self.manifest_sha256),
+            "index_sha256": Dyn.Text(self.index_sha256),
+            "record_sha256": Dyn.Text(self.record_sha256),
+            "jet_key_id": Dyn.Text(self.jet_key_id),
+            "jet_signature": Dyn.Text(self.jet_signature),
         ]))
     }
 }
 
-pub enum NixIndexTrustTier {
+enum NixIndexTrustTier {
     OfficialSigned
     LocalUnofficial
 
@@ -145,26 +145,26 @@ pub enum NixIndexTrustTier {
     }
 }
 
-pub struct NixVerifiedIndexRecord {
-    pub record: NixIndexRecord
-    pub proof: NixIndexProof
-    pub trust: NixIndexTrustTier
+struct NixVerifiedIndexRecord {
+    record: NixIndexRecord
+    proof: NixIndexProof
+    trust: NixIndexTrustTier
 }
 
-pub struct NixIndexOutputWire {
-    pub name: String
-    pub store_path: String
+struct NixIndexOutputWire {
+    name: String
+    store_path: String
 
-    fn tree(self) -> DataTree Never! {
-        DataTree.Object(["name": DataTree.Text(self.name), "storePath": DataTree.Text(self.store_path)])
+    fn tree(self) -> Dyn Never! {
+        Dyn.Object(["name": Dyn.Text(self.name), "storePath": Dyn.Text(self.store_path)])
     }
 }
 
-pub struct NixIndexRecordWire {
-    pub attrpath: [String]
-    pub version: String
-    pub drv_path: String
-    pub outputs: [NixIndexOutputWire]
+struct NixIndexRecordWire {
+    attrpath: [String]
+    version: String
+    drv_path: String
+    outputs: [NixIndexOutputWire]
 
     fn from_record(record: NixIndexRecord) -> NixIndexRecordWire Never! {
         outputs := [NixIndexOutputWire]{}
@@ -179,47 +179,47 @@ pub struct NixIndexRecordWire {
         NixIndexRecord{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs: nixeval_key_ordered(outputs)}
     }
 
-    fn tree(self) -> DataTree Never! {
-        outputs := [DataTree]{}
+    fn tree(self) -> Dyn Never! {
+        outputs := [Dyn]{}
         loop output in self.outputs -> &outputs.push(output.tree())
-        DataTree.Object([
+        Dyn.Object([
             "attrpath": pkg_json_texts(self.attrpath),
-            "version": DataTree.Text(self.version),
-            "drvPath": DataTree.Text(self.drv_path),
-            "outputs": DataTree.Array(outputs),
+            "version": Dyn.Text(self.version),
+            "drvPath": Dyn.Text(self.drv_path),
+            "outputs": Dyn.Array(outputs),
         ])
     }
 
     // This record with its outputs in name order.
     fn sorted(self) -> NixIndexRecordWire Never! {
-        outputs := ~self.outputs
+        outputs := self.outputs.copy()
         &outputs.sort_by((left: NixIndexOutputWire, right: NixIndexOutputWire) -> left.name <=> right.name)
         NixIndexRecordWire{attrpath: self.attrpath, version: self.version, drv_path: self.drv_path, outputs}
     }
 }
 
-pub struct NixIndexCoverageMiss {
-    pub attrpath: [String]
-    pub reason: String
+struct NixIndexCoverageMiss {
+    attrpath: [String]
+    reason: String
 
-    fn tree(self) -> DataTree Never! {
-        DataTree.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": DataTree.Text(self.reason)])
+    fn tree(self) -> Dyn Never! {
+        Dyn.Object(["attrpath": pkg_json_texts(self.attrpath), "reason": Dyn.Text(self.reason)])
     }
 }
 
-pub struct NixIndexCoverage {
-    pub indexed: [[String]]
-    pub not_indexed: [NixIndexCoverageMiss]
+struct NixIndexCoverage {
+    indexed: [[String]]
+    not_indexed: [NixIndexCoverageMiss]
 }
 
-pub struct NixIndexDocument {
-    pub schema: Int
-    pub channel: String
-    pub revision: String
-    pub system: String
-    pub released_unix: Int
-    pub records: [NixIndexRecordWire]
-    pub coverage: NixIndexCoverage
+struct NixIndexDocument {
+    schema: Int
+    channel: String
+    revision: String
+    system: String
+    released_unix: Int
+    records: [NixIndexRecordWire]
+    coverage: NixIndexCoverage
 
     // Strict parse: known fields only, then validation, then byte equality
     // with the canonical re-encoding.
@@ -298,24 +298,24 @@ pub struct NixIndexDocument {
         records := [NixIndexRecordWire]{}
         loop record in self.records -> &records.push(record.sorted())
         &records.sort_by((left: NixIndexRecordWire, right: NixIndexRecordWire) -> nix_index_attrpath_order(left.attrpath, right.attrpath))
-        indexed := ~self.coverage.indexed
+        indexed := self.coverage.indexed.copy()
         &indexed.sort_by((left: [String], right: [String]) -> nix_index_attrpath_order(left, right))
-        misses := ~self.coverage.not_indexed
+        misses := self.coverage.not_indexed.copy()
         &misses.sort_by((left: NixIndexCoverageMiss, right: NixIndexCoverageMiss) -> nix_index_attrpath_order(left.attrpath, right.attrpath).then(left.reason <=> right.reason))
-        record_trees := [DataTree]{}
+        record_trees := [Dyn]{}
         loop record in records -> &record_trees.push(record.tree())
-        indexed_trees := [DataTree]{}
+        indexed_trees := [Dyn]{}
         loop attrpath in indexed -> &indexed_trees.push(pkg_json_texts(attrpath))
-        miss_trees := [DataTree]{}
+        miss_trees := [Dyn]{}
         loop miss in misses -> &miss_trees.push(miss.tree())
-        Ok(pkg_json_render(DataTree.Object([
-            "schema": DataTree.Int(self.schema),
-            "channel": DataTree.Text(self.channel),
-            "revision": DataTree.Text(self.revision),
-            "system": DataTree.Text(self.system),
-            "released_unix": DataTree.Int(self.released_unix),
-            "records": DataTree.Array(record_trees),
-            "coverage": DataTree.Object(["indexed": DataTree.Array(indexed_trees), "notIndexed": DataTree.Array(miss_trees)]),
+        Ok(pkg_json_render(Dyn.Object([
+            "schema": Dyn.Int(self.schema),
+            "channel": Dyn.Text(self.channel),
+            "revision": Dyn.Text(self.revision),
+            "system": Dyn.Text(self.system),
+            "released_unix": Dyn.Int(self.released_unix),
+            "records": Dyn.Array(record_trees),
+            "coverage": Dyn.Object(["indexed": Dyn.Array(indexed_trees), "notIndexed": Dyn.Array(miss_trees)]),
         ])).bytes())
     }
 
@@ -339,11 +339,11 @@ pub struct NixIndexDocument {
     }
 }
 
-pub struct NixIndexSignature {
-    pub schema: Int
-    pub key_id: String
-    pub algorithm: String
-    pub signature: String
+struct NixIndexSignature {
+    schema: Int
+    key_id: String
+    algorithm: String
+    signature: String
 
     fn parse(bytes: [U8]) -> NixIndexSignature NixIndexError! {
         text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index signature is not UTF-8"))
@@ -361,53 +361,53 @@ pub struct NixIndexSignature {
     }
 
     fn canonical_bytes(self) -> [U8] Never! {
-        pkg_json_render(DataTree.Object([
-            "schema": DataTree.Int(self.schema),
-            "key_id": DataTree.Text(self.key_id),
-            "algorithm": DataTree.Text(self.algorithm),
-            "signature": DataTree.Text(self.signature),
+        pkg_json_render(Dyn.Object([
+            "schema": Dyn.Int(self.schema),
+            "key_id": Dyn.Text(self.key_id),
+            "algorithm": Dyn.Text(self.algorithm),
+            "signature": Dyn.Text(self.signature),
         ])).bytes()
     }
 }
 
 // One signed channel target: where the compressed index and its signature
 // sidecar live and what they must measure.
-pub struct NixIndexManifestTarget {
-    pub revision: String
-    pub system: String
-    pub url: String
-    pub signature_url: String
-    pub sha256: String
-    pub compressed_length: Int
-    pub decoded_length: Int
-    pub record_count: Int
+struct NixIndexManifestTarget {
+    revision: String
+    system: String
+    url: String
+    signature_url: String
+    sha256: String
+    compressed_length: Int
+    decoded_length: Int
+    record_count: Int
     // The manifest's `index_signature_sha256`.
-    pub signature_sha256: String
-    pub discoverable: Bool
+    signature_sha256: String
+    discoverable: Bool
 
-    fn tree(self) -> DataTree Never! {
-        DataTree.Object([
-            "revision": DataTree.Text(self.revision),
-            "system": DataTree.Text(self.system),
-            "url": DataTree.Text(self.url),
-            "signature_url": DataTree.Text(self.signature_url),
-            "sha256": DataTree.Text(self.sha256),
-            "compressed_length": DataTree.Int(self.compressed_length),
-            "decoded_length": DataTree.Int(self.decoded_length),
-            "record_count": DataTree.Int(self.record_count),
-            "index_signature_sha256": DataTree.Text(self.signature_sha256),
-            "discoverable": DataTree.Bool(self.discoverable),
+    fn tree(self) -> Dyn Never! {
+        Dyn.Object([
+            "revision": Dyn.Text(self.revision),
+            "system": Dyn.Text(self.system),
+            "url": Dyn.Text(self.url),
+            "signature_url": Dyn.Text(self.signature_url),
+            "sha256": Dyn.Text(self.sha256),
+            "compressed_length": Dyn.Int(self.compressed_length),
+            "decoded_length": Dyn.Int(self.decoded_length),
+            "record_count": Dyn.Int(self.record_count),
+            "index_signature_sha256": Dyn.Text(self.signature_sha256),
+            "discoverable": Dyn.Bool(self.discoverable),
         ])
     }
 }
 
-pub struct NixIndexChannelManifest {
-    pub schema: Int
-    pub channel: String
-    pub generation: Int
-    pub issued_unix: Int
-    pub expires_unix: Int
-    pub targets: [NixIndexManifestTarget]
+struct NixIndexChannelManifest {
+    schema: Int
+    channel: String
+    generation: Int
+    issued_unix: Int
+    expires_unix: Int
+    targets: [NixIndexManifestTarget]
 
     fn parse(bytes: [U8]) -> NixIndexChannelManifest NixIndexError! {
         text :: String.from_bytes(bytes) ?? return Err(NixIndexError.Invalid("nix index manifest is not UTF-8"))
@@ -453,17 +453,17 @@ pub struct NixIndexChannelManifest {
 
     fn canonical_bytes(self) -> [U8] NixIndexError! {
         self.validate()
-        targets := ~self.targets
+        targets := self.targets.copy()
         &targets.sort_by((left: NixIndexManifestTarget, right: NixIndexManifestTarget) -> (left.revision <=> right.revision).then(left.system <=> right.system))
-        trees := [DataTree]{}
+        trees := [Dyn]{}
         loop target in targets -> &trees.push(target.tree())
-        Ok(pkg_json_render(DataTree.Object([
-            "schema": DataTree.Int(self.schema),
-            "channel": DataTree.Text(self.channel),
-            "generation": DataTree.Int(self.generation),
-            "issued_unix": DataTree.Int(self.issued_unix),
-            "expires_unix": DataTree.Int(self.expires_unix),
-            "targets": DataTree.Array(trees),
+        Ok(pkg_json_render(Dyn.Object([
+            "schema": Dyn.Int(self.schema),
+            "channel": Dyn.Text(self.channel),
+            "generation": Dyn.Int(self.generation),
+            "issued_unix": Dyn.Int(self.issued_unix),
+            "expires_unix": Dyn.Int(self.expires_unix),
+            "targets": Dyn.Array(trees),
         ])).bytes())
     }
 
@@ -476,7 +476,7 @@ pub struct NixIndexChannelManifest {
 }
 
 // The canonical bytes of a local native recipe catalog.
-pub fn nix_index_canonical_local_native_recipes(bytes: [U8]) -> [U8] NixIndexError! {
+fn nix_index_canonical_local_native_recipes(bytes: [U8]) -> [U8] NixIndexError! {
     recipes :: nix_index_parse_local_native_recipes(bytes)
     Ok(nix_index_canonical_native_recipes_bytes(recipes))
 }
@@ -503,7 +503,7 @@ fn nix_index_parse_local_native_recipes(bytes: [U8]) -> [NixNativeRecipe] NixInd
     Ok(recipes)
 }
 
-fn nix_index_parse_native_recipe(value: DataTree) -> NixNativeRecipe NixIndexError! {
+fn nix_index_parse_native_recipe(value: Dyn) -> NixNativeRecipe NixIndexError! {
     map :: nix_index_object(value, "local unofficial native recipe")
     nix_index_reject_unknown(map, [String]{"name", "version", "kind", "url", "sha256", "bin"})
     recipe :: NixNativeRecipe{
@@ -548,14 +548,14 @@ fn nix_index_validate_native_recipe_url(url: String) NixIndexError! {
 }
 
 fn nix_index_canonical_native_recipes_bytes(recipes: [NixNativeRecipe]) -> [U8] Never! {
-    sorted := ~recipes
+    sorted := recipes.copy()
     &sorted.sort_by((left: NixNativeRecipe, right: NixNativeRecipe) -> (left.name <=> right.name).then(left.version <=> right.version))
-    trees := [DataTree]{}
+    trees := [Dyn]{}
     loop recipe in sorted -> &trees.push(recipe.tree())
-    pkg_json_render(DataTree.Object(["schema": DataTree.Int(1), "recipes": DataTree.Array(trees)])).bytes()
+    pkg_json_render(Dyn.Object(["schema": Dyn.Int(1), "recipes": Dyn.Array(trees)])).bytes()
 }
 
-fn nix_index_parse_records(value: DataTree) -> [NixIndexRecordWire] NixIndexError! {
+fn nix_index_parse_records(value: Dyn) -> [NixIndexRecordWire] NixIndexError! {
     values :: nix_index_value_array(value, "records")
     if values.len() > NIX_INDEX_MAX_RECORDS -> return Err(NixIndexError.Invalid("nix index has too many records"))
     records := [NixIndexRecordWire]{}
@@ -563,7 +563,7 @@ fn nix_index_parse_records(value: DataTree) -> [NixIndexRecordWire] NixIndexErro
     Ok(records)
 }
 
-fn nix_index_parse_record(value: DataTree) -> NixIndexRecordWire NixIndexError! {
+fn nix_index_parse_record(value: Dyn) -> NixIndexRecordWire NixIndexError! {
     map :: nix_index_object(value, "nix index record")
     nix_index_reject_unknown(map, [String]{"attrpath", "version", "drvPath", "outputs"})
     outputs := [NixIndexOutputWire]{}
@@ -577,13 +577,13 @@ fn nix_index_parse_record(value: DataTree) -> NixIndexRecordWire NixIndexError! 
     })
 }
 
-fn nix_index_parse_output(value: DataTree) -> NixIndexOutputWire NixIndexError! {
+fn nix_index_parse_output(value: Dyn) -> NixIndexOutputWire NixIndexError! {
     map :: nix_index_object(value, "nix index output")
     nix_index_reject_unknown(map, [String]{"name", "storePath"})
     Ok(NixIndexOutputWire{name: nix_index_string_field(map, "name"), store_path: nix_index_string_field(map, "storePath")})
 }
 
-fn nix_index_parse_coverage(value: DataTree) -> NixIndexCoverage NixIndexError! {
+fn nix_index_parse_coverage(value: Dyn) -> NixIndexCoverage NixIndexError! {
     map :: nix_index_object(value, "nix index coverage")
     nix_index_reject_unknown(map, [String]{"indexed", "notIndexed"})
     indexed := [[String]]{}
@@ -599,14 +599,14 @@ fn nix_index_parse_coverage(value: DataTree) -> NixIndexCoverage NixIndexError! 
     Ok(NixIndexCoverage{indexed, not_indexed})
 }
 
-fn nix_index_parse_attrpath(value: DataTree) -> [String] NixIndexError! {
+fn nix_index_parse_attrpath(value: Dyn) -> [String] NixIndexError! {
     attrpath := [String]{}
     segments :: nix_index_value_array(value, "attrpath")
     loop segment in segments -> &attrpath.push(nix_index_string_value(segment, "attrpath segment"))
     Ok(attrpath)
 }
 
-fn nix_index_parse_manifest_target(value: DataTree) -> NixIndexManifestTarget NixIndexError! {
+fn nix_index_parse_manifest_target(value: Dyn) -> NixIndexManifestTarget NixIndexError! {
     map :: nix_index_object(value, "nix index manifest target")
     nix_index_reject_unknown(map, [String]{"revision", "system", "url", "signature_url", "sha256", "compressed_length", "decoded_length", "record_count", "index_signature_sha256", "discoverable"})
     Ok(NixIndexManifestTarget{
@@ -682,7 +682,7 @@ fn nix_index_is_loopback_host(authority: String) -> Bool Never! {
 }
 
 // Strict JSON under the index's own size bound.
-fn nix_index_parse_json(text: String, context: String) -> DataTree NixIndexError! {
+fn nix_index_parse_json(text: String, context: String) -> Dyn NixIndexError! {
     if json.parse(text, limits: nix_index_json_limits()) == {
         .Ok(value) -> return Ok(value)
         .Err(error) -> {
@@ -723,33 +723,33 @@ fn nix_index_attrpath_order(left: [String], right: [String]) -> Ordering Never! 
     left.len() <=> right.len()
 }
 
-fn nix_index_object(value: DataTree, label: String) -> [String: DataTree] NixIndexError! {
+fn nix_index_object(value: Dyn, label: String) -> [String: Dyn] NixIndexError! {
     map :: pkg_json_object(value) ?? return Err(NixIndexError.Invalid("{label} must be an object"))
     Ok(map)
 }
 
-fn nix_index_field(map: [String: DataTree], name: String) -> DataTree NixIndexError! {
+fn nix_index_field(map: [String: Dyn], name: String) -> Dyn NixIndexError! {
     value :: map.get(name) ?? return Err(NixIndexError.Invalid("nix index is missing `{name}`"))
     Ok(value)
 }
 
-fn nix_index_reject_unknown(map: [String: DataTree], known: [String]) NixIndexError! {
+fn nix_index_reject_unknown(map: [String: Dyn], known: [String]) NixIndexError! {
     loop entry in map {
         if !known.contains(entry.key) -> return Err(NixIndexError.Invalid("nix index has unknown field `{entry.key}`"))
     }
 }
 
-fn nix_index_string_value(value: DataTree, label: String) -> String NixIndexError! {
+fn nix_index_string_value(value: Dyn, label: String) -> String NixIndexError! {
     text :: pkg_json_text(value) ?? return Err(NixIndexError.Invalid("{label} must be a string"))
     Ok(text)
 }
 
-fn nix_index_string_field(map: [String: DataTree], name: String) -> String NixIndexError! {
+fn nix_index_string_field(map: [String: Dyn], name: String) -> String NixIndexError! {
     nix_index_string_value(nix_index_field(map, name), name)
 }
 
 // A JSON integer in the unsigned 64-bit range.
-fn nix_index_u64_value(value: DataTree, label: String) -> Int NixIndexError! {
+fn nix_index_u64_value(value: Dyn, label: String) -> Int NixIndexError! {
     if value == {
         .Int(number) -> {
             if number < 0 -> return Err(NixIndexError.Invalid("{label} must be an unsigned integer"))
@@ -761,21 +761,21 @@ fn nix_index_u64_value(value: DataTree, label: String) -> Int NixIndexError! {
     }
 }
 
-fn nix_index_u64_field(map: [String: DataTree], name: String) -> Int NixIndexError! {
+fn nix_index_u64_field(map: [String: Dyn], name: String) -> Int NixIndexError! {
     nix_index_u64_value(nix_index_field(map, name), name)
 }
 
-fn nix_index_bool_field(map: [String: DataTree], name: String) -> Bool NixIndexError! {
+fn nix_index_bool_field(map: [String: Dyn], name: String) -> Bool NixIndexError! {
     flag :: pkg_json_bool(nix_index_field(map, name)) ?? return Err(NixIndexError.Invalid("{name} must be a boolean"))
     Ok(flag)
 }
 
-fn nix_index_value_array(value: DataTree, label: String) -> [DataTree] NixIndexError! {
+fn nix_index_value_array(value: Dyn, label: String) -> [Dyn] NixIndexError! {
     items :: pkg_json_array(value) ?? return Err(NixIndexError.Invalid("{label} must be an array"))
     Ok(items)
 }
 
-fn nix_index_array_field(map: [String: DataTree], name: String) -> [DataTree] NixIndexError! {
+fn nix_index_array_field(map: [String: Dyn], name: String) -> [Dyn] NixIndexError! {
     nix_index_value_array(nix_index_field(map, name), name)
 }
 

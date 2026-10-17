@@ -1,0 +1,86 @@
+// D-PLACE1: mirror Core/Atomic.rs:238-246, one aligned inline AtomicU64.
+// Caller owns the place; no allocation, refcount, source Clone or side table.
+// Core/Atomic.rs:325-437 fixes SeqCst (there is no source ordering argument).
+// x86-64: aligned MOV load (OS/Linux.jet:287-292), XCHG store (:457-467),
+// LOCK CMPXCHG (:301-315) and LOCK XADD (:444-455) are the SC mapping.
+// Private init may use plain MOV; store/publish MUST NOT use release-only MOV.
+// Int is a separate exact lane: never pass its tagged owner to these exports.
+
+fn atomic_bool_bits(value: I64) -> I64 { if (value != I64{0}) -> I64{1} else -> I64{0} }
+fn atomic_u32_bits(value: I64) -> I64 { value.bit_and(I64{4294967295}) }
+fn atomic_i32_value(value: I64) -> I64 { (value << I64{32}) >> I64{32} }
+
+fn atomic_word_init(place: I64, value: I64) {
+    #Unsafe("place is caller-owned aligned8 private unpublished storage for one atomic word") {
+        os_store_i64(place, value)
+    }
+}
+fn atomic_word_load(place: I64) -> I64 {
+    #Unsafe("place borrows one aligned8 live atomic word; x86 aligned MOV is the SeqCst load mapping") {
+        return os_load_i64(place)
+    }
+}
+fn atomic_word_store(place: I64, value: I64) {
+    #Unsafe("place borrows one aligned8 live atomic word; XCHG is the full-barrier SeqCst store mapping") {
+        _ := os_swap_i64(place, value)
+    }
+}
+fn atomic_word_cas(place: I64, expected: I64, replacement: I64) -> Bool {
+    #Unsafe("place borrows one aligned8 live atomic word; LOCK CMPXCHG orders success and failure SeqCst") {
+        return os_cas_i64(place, expected, replacement) == expected
+    }
+}
+fn atomic_word_add(place: I64, delta: I64) -> I64 {
+    #Unsafe("place borrows one aligned8 live atomic word; LOCK XADD returns the previous wrapping64 value SeqCst") {
+        return os_fetch_add_i64(place, delta)
+    }
+}
+// Core/Atomic.rs:111-116 and :199-210: 32-bit publications are ALWAYS zero
+// extended, even after wrap. A 64-bit XADD would leave a carry in upper32,
+// making later scalar-equal CMPXCHG fail. Keep the seed's canonical word.
+fn atomic32_add(place: I64, delta: I64) -> I64 {
+    loop {
+        previous :: atomic_word_load(place)
+        next_value :: atomic_u32_bits(wrapping(previous + delta))
+        if atomic_word_cas(place, previous, next_value) -> return previous
+    }
+}
+
+#Export(c) fn jet_rt_atomic_bool_init(place: I64, value: I64) { atomic_word_init(place, atomic_bool_bits(value)) }
+#Export(c) fn jet_rt_atomic_bool_load(place: I64) -> I64 { atomic_bool_bits(atomic_word_load(place)) }
+#Export(c) fn jet_rt_atomic_bool_store(place: I64, value: I64) { atomic_word_store(place, atomic_bool_bits(value)) }
+#Export(c) fn jet_rt_atomic_bool_compare_exchange(place: I64, expected: I64, replacement: I64) -> Bool {
+    atomic_word_cas(place, atomic_bool_bits(expected), atomic_bool_bits(replacement))
+}
+
+#Export(c) fn jet_rt_atomic_i32_init(place: I64, value: I64) { atomic_word_init(place, atomic_u32_bits(value)) }
+#Export(c) fn jet_rt_atomic_i32_load(place: I64) -> I64 { atomic_i32_value(atomic_word_load(place)) }
+#Export(c) fn jet_rt_atomic_i32_store(place: I64, value: I64) { atomic_word_store(place, atomic_u32_bits(value)) }
+#Export(c) fn jet_rt_atomic_i32_add(place: I64, delta: I64) -> I64 { atomic_i32_value(atomic32_add(place, delta)) }
+#Export(c) fn jet_rt_atomic_i32_compare_exchange(place: I64, expected: I64, replacement: I64) -> Bool {
+    atomic_word_cas(place, atomic_u32_bits(expected), atomic_u32_bits(replacement))
+}
+
+#Export(c) fn jet_rt_atomic_u32_init(place: I64, value: I64) { atomic_word_init(place, atomic_u32_bits(value)) }
+#Export(c) fn jet_rt_atomic_u32_load(place: I64) -> I64 { atomic_u32_bits(atomic_word_load(place)) }
+#Export(c) fn jet_rt_atomic_u32_store(place: I64, value: I64) { atomic_word_store(place, atomic_u32_bits(value)) }
+#Export(c) fn jet_rt_atomic_u32_add(place: I64, delta: I64) -> I64 { atomic_u32_bits(atomic32_add(place, delta)) }
+#Export(c) fn jet_rt_atomic_u32_compare_exchange(place: I64, expected: I64, replacement: I64) -> Bool {
+    atomic_word_cas(place, atomic_u32_bits(expected), atomic_u32_bits(replacement))
+}
+
+#Export(c) fn jet_rt_atomic_i64_init(place: I64, value: I64) { atomic_word_init(place, value) }
+#Export(c) fn jet_rt_atomic_i64_load(place: I64) -> I64 { atomic_word_load(place) }
+#Export(c) fn jet_rt_atomic_i64_store(place: I64, value: I64) { atomic_word_store(place, value) }
+#Export(c) fn jet_rt_atomic_i64_add(place: I64, delta: I64) -> I64 { atomic_word_add(place, delta) }
+#Export(c) fn jet_rt_atomic_i64_compare_exchange(place: I64, expected: I64, replacement: I64) -> Bool {
+    atomic_word_cas(place, expected, replacement)
+}
+
+#Export(c) fn jet_rt_atomic_u64_init(place: I64, value: I64) { atomic_word_init(place, value) }
+#Export(c) fn jet_rt_atomic_u64_load(place: I64) -> I64 { atomic_word_load(place) }
+#Export(c) fn jet_rt_atomic_u64_store(place: I64, value: I64) { atomic_word_store(place, value) }
+#Export(c) fn jet_rt_atomic_u64_add(place: I64, delta: I64) -> I64 { atomic_word_add(place, delta) }
+#Export(c) fn jet_rt_atomic_u64_compare_exchange(place: I64, expected: I64, replacement: I64) -> Bool {
+    atomic_word_cas(place, expected, replacement)
+}

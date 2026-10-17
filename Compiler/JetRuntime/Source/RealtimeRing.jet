@@ -1,0 +1,70 @@
+// Realtime.rs:21-98: bounded two-slot SPSC ring, allocation only owner-side.
+// Fields and samples use Sync's x86 acquire/release aligned word operations.
+#Export(c) fn jet_rt_native_realtime_ring_new(frames: I64) -> I64 {
+    if (frames <= I64{0}) {
+        realtime_raise(scheduler_msg_rt_ring_frames())
+        return I64{0}
+    }
+    if (frames > I64{1152921504606846975}) {
+        realtime_raise(scheduler_msg_rt_capacity())
+        return I64{0}
+    }
+    ring :: jet_rt_alloc(RT_RING_BYTES, I64{8})
+    thread_zero(ring, RT_RING_BYTES)
+    sync_store(ring + RT_RING_FRAMES, frames)
+    first :: jet_rt_alloc(frames * I64{8}, I64{8})
+    second :: jet_rt_alloc(frames * I64{8}, I64{8})
+    thread_zero(first, frames * I64{8})
+    thread_zero(second, frames * I64{8})
+    sync_store(ring + RT_RING_FIRST, first)
+    sync_store(ring + RT_RING_SECOND, second)
+    ring
+}
+fn realtime_ring_slot(ring: I64, sequence: I64) -> I64 {
+    sync_load(ring + (if ((sequence.bit_and(I64{1})) == I64{0}) -> RT_RING_FIRST else -> RT_RING_SECOND))
+}
+fn realtime_ring_publish(ring: I64, data: I64, length: I64, zeroed: Bool) -> Bool {
+    sequence :: sync_load(ring + RT_RING_WRITE)
+    read_sequence :: sync_load(ring + RT_RING_READ)
+    if !alloc_unsigned_less(wrapping(sequence - read_sequence), I64{2}) -> return false
+    frames :: sync_load(ring + RT_RING_FRAMES)
+    if (!zeroed && frames != length) -> return false
+    slot :: realtime_ring_slot(ring, sequence)
+    index := I64{0}
+    loop index < frames {
+        sync_store(slot + index * I64{8}, if zeroed -> I64{0} else -> sync_load(data + index * I64{8}))
+        index += I64{1}
+    }
+    sync_store(ring + RT_RING_WRITE, wrapping(sequence + I64{1}))
+    true
+}
+#Export(c) fn jet_rt_native_realtime_ring_publish_zeroed(ring: I64) -> Bool {
+    realtime_ring_publish(ring, I64{0}, I64{0}, true)
+}
+#Export(c) fn jet_rt_native_realtime_ring_publish(ring: I64, data: I64, length: I64) -> Bool {
+    realtime_ring_publish(ring, data, length, false)
+}
+// Successful pop owns its new Float buffer; false leaves both out slots alone.
+#Export(c) fn jet_rt_native_realtime_ring_pop(ring: I64, data_out: I64, length_out: I64) -> Bool {
+    sequence :: sync_load(ring + RT_RING_READ)
+    if (sequence == sync_load(ring + RT_RING_WRITE)) -> return false
+    frames :: sync_load(ring + RT_RING_FRAMES)
+    slot :: realtime_ring_slot(ring, sequence)
+    data :: jet_rt_alloc(frames * I64{8}, I64{8})
+    index := I64{0}
+    loop index < frames {
+        sync_store(data + index * I64{8}, sync_load(slot + index * I64{8}))
+        index += I64{1}
+    }
+    sync_store(ring + RT_RING_READ, wrapping(sequence + I64{1}))
+    sync_store(data_out, data)
+    sync_store(length_out, frames)
+    true
+}
+#Export(c) fn jet_rt_handle_drop_jet_realtime_sample_ring(ring: I64) {
+    if (ring == I64{0}) -> return
+    bytes :: sync_load(ring + RT_RING_FRAMES) * I64{8}
+    jet_rt_free(sync_load(ring + RT_RING_FIRST), bytes, I64{8})
+    jet_rt_free(sync_load(ring + RT_RING_SECOND), bytes, I64{8})
+    jet_rt_free(ring, RT_RING_BYTES, I64{8})
+}

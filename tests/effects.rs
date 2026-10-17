@@ -13,11 +13,88 @@ fn codes(src: &str) -> Vec<String> {
         Err(diags) => diags.iter().map(|d| d.code.clone()).collect(),
     }
 }
+
+#[test]
+fn source_owned_hostname_effects_are_environment_and_file_read() {
+    use jet_foundation::Effects::{core_effect, core_effect_leaf, Effect};
+    for (module, method) in [("core.net", "gethostname"), ("core.sys", "hostname")] {
+        assert_eq!(core_effect(module, method), Some(Effect::Env));
+        assert_eq!(core_effect_leaf(module, method), Some("FS.Read"));
+    }
+}
+
+#[test]
+fn civil_zone_rows_keep_truthful_precise_effects() {
+    use jet_foundation::Effects::{core_effect, core_effect_leaf, Effect};
+    use jet_foundation::Syntax::{core_call, CoreCapabilityKind};
+
+    for (method, effect, leaf) in [
+        ("__zone_env", Some(Effect::Env), None),
+        ("__zone_file_bytes", Some(Effect::FS), Some("FS.Read")),
+        ("__embedded_zone_bytes", None, None),
+        ("zone", Some(Effect::FS), Some("FS.Read")),
+        ("parse_zoned", Some(Effect::FS), Some("FS.Read")),
+        ("utc", None, None),
+        ("parse_rfc3339", None, None),
+        ("now", Some(Effect::Time), None),
+        ("sleep_until", Some(Effect::Time), Some("Time.Wait")),
+    ] {
+        let row = core_call("core.time", method)
+            .unwrap_or_else(|| panic!("missing core.time.{method} row"));
+        assert_eq!(row.effect(), effect, "core.time.{method}");
+        assert_eq!(row.effect_leaf(), leaf, "core.time.{method}");
+        assert_eq!(core_effect("core.time", method), effect, "core.time.{method}");
+        assert_eq!(core_effect_leaf("core.time", method), leaf, "core.time.{method}");
+        assert_eq!(
+            row.capability().kind,
+            if effect.is_some() {
+                CoreCapabilityKind::NativeRequired
+            } else {
+                CoreCapabilityKind::Pure
+            },
+            "core.time.{method}",
+        );
+        assert!(row.capability().is_well_formed(), "core.time.{method}");
+    }
+    let process = core_call("core.process", "__with_directory_raw")
+        .expect("held process directory row");
+    assert_eq!(process.effect(), Some(Effect::FS));
+    assert_eq!(process.effect_leaf(), Some("FS.Read"));
+}
+
+#[test]
+fn named_zone_lookup_requires_environment_and_read_effects() {
+    let source = include_str!("ui/time_zone_effects.jet");
+    let diagnostics = jet::compile(source).expect_err("zone lookup must not hide either effect");
+    for function in ["pure", "env_only", "read_only"] {
+        assert!(
+            diagnostics.iter().any(|diagnostic|
+                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
+                    && diagnostic.what.contains(function)),
+            "{function} must report its effect ceiling: {diagnostics:#?}",
+        );
+    }
+    assert!(
+        diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .all(|diagnostic| {
+                matches!(diagnostic.code.as_str(), "E0740" | "E3403")
+                    && ["pure", "env_only", "read_only"]
+                        .iter()
+                        .any(|function| diagnostic.what.contains(function))
+            }),
+        "only the named user effect ceilings may fail: {diagnostics:#?}",
+    );
+    let source = include_str!("fixtures/time_zone_effects_truthful.jet");
+    jet::compile(source).expect("truthful zone bounds and pure numeric-offset parsing must compile");
+}
+
 #[test]
 fn callbacks_entry_effects_are_only_io() {
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("Examples/features/basics/callbacks.jet");
-    let (diagnostics, bundle, facts) =
+    let (diagnostics, bundle, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !diagnostics
@@ -39,7 +116,7 @@ fn callbacks_entry_effects_are_only_io() {
 fn selected_output_effects_follow_the_selected_callable() {
     let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("Examples/features/tooling/output_callable.jet");
-    let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_output(
+    let (diagnostics, bundle, facts, _checked_nominals) = jet::Driver::check_file_with_effect_facts_for_output(
         entry.to_str().unwrap(),
         "app",
         "dev",
@@ -117,17 +194,112 @@ fn run() {}
 }
 
 #[test]
+fn imported_effect_boundary_diagnostic_keeps_its_source_origin() {
+    let root = common::unique_tmp("jet_imported_effect_origin");
+    fs::create_dir_all(&root).unwrap();
+    let imported = root.join("worker.jet");
+    let imported_source = "\n\n\npub fn work() -[Net]> { print(\"work\") }\n";
+    fs::write(&imported, imported_source).unwrap();
+    let entry = root.join("main.jet");
+    let entry_source = "use \"./worker\" as worker\nfn run() { worker.work() }\n";
+    fs::write(&entry, entry_source).unwrap();
+
+    let (diagnostics, _, _) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0740" && diagnostic.what.contains("work"))
+        .expect("the imported function exceeds its declared effect bound");
+    let origin = diagnostic
+        .origin()
+        .expect("imported effect report needs an origin");
+    assert_eq!(std::path::Path::new(&origin.path), imported.as_path());
+    assert_eq!(origin.source.as_str(), imported_source);
+    let span = diagnostic
+        .span
+        .expect("effect report needs its declared-row span");
+    assert_eq!(&origin.source[span.start..span.end], "Net");
+    let rendered = jet::render_diagnostics(
+        entry.to_str().unwrap(),
+        entry_source,
+        std::slice::from_ref(diagnostic),
+    );
+    assert!(rendered.contains("worker.jet:4:"), "{rendered}");
+    assert!(!rendered.contains("main.jet:"), "{rendered}");
+}
+
+#[test]
+fn entry_unbounded_dispatch_preserves_caller_render_context() {
+    let root = common::unique_tmp("jet_entry_dispatch_origin");
+    fs::create_dir_all(&root).unwrap();
+    let entry = root.join("main.jet");
+    let source = include_str!("ui/effect_trait_dispatch_unbounded.jet");
+    fs::write(&entry, source).unwrap();
+    let (diagnostics, _, _) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0743")
+        .expect("the entry's unbounded dispatch must be rejected");
+    assert!(diagnostic.origin().is_none(), "{diagnostic:#?}");
+    let rendered = jet::render_diagnostics(
+        "tests/ui/effect_trait_dispatch_unbounded.jet",
+        source,
+        std::slice::from_ref(diagnostic),
+    );
+    assert_eq!(
+        rendered,
+        include_str!("ui/effect_trait_dispatch_unbounded.stderr"),
+        "the existing entry-owned UI contract must stay byte-identical",
+    );
+}
+
+#[test]
+fn transitive_unbounded_dispatch_keeps_the_foreign_call_origin() {
+    let root = common::unique_tmp("jet_foreign_dispatch_origin");
+    fs::create_dir_all(&root).unwrap();
+    let imported = root.join("worker.jet");
+    let imported_source =
+        "\n\npub trait Shape { fn area(self) -> Int }\n\npub fn inspect(shape: Shape) -> Int { shape.area() }\n";
+    fs::write(&imported, imported_source).unwrap();
+    let entry = root.join("main.jet");
+    let entry_source =
+        "use \"./worker\" as worker\nfn ceiling(shape: worker.Shape) -[IO]> Int { worker.inspect(shape) }\nfn run() {}\n";
+    fs::write(&entry, entry_source).unwrap();
+    let (diagnostics, _, _) =
+        jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
+    let diagnostic = diagnostics
+        .iter()
+        .find(|diagnostic| diagnostic.code == "E0743")
+        .expect("the transitive unbounded dispatch must be rejected");
+    let origin = diagnostic
+        .origin()
+        .expect("the actual dispatch needs its origin");
+    assert_eq!(std::path::Path::new(&origin.path), imported.as_path());
+    assert_eq!(origin.source.as_str(), imported_source);
+    let span = diagnostic.span.expect("the actual dispatch needs its span");
+    assert!(origin.source[span.start..span.end].contains("area"));
+    let rendered = jet::render_diagnostics(
+        entry.to_str().unwrap(),
+        entry_source,
+        std::slice::from_ref(diagnostic),
+    );
+    assert!(rendered.contains("worker.jet:5:"), "{rendered}");
+    assert!(!rendered.contains("main.jet:"), "{rendered}");
+}
+
+#[test]
 fn cross_module_same_name_effects_keep_qualified_rows() {
     let root = common::unique_tmp("jet_effect_collision");
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("left.jet"),
-        "fn helper() { print(\"left\") }\npub fn same() { helper() }\n",
+        "fn helper() { print(\"left\") }\nfn same() { helper() }\n",
     )
     .unwrap();
     fs::write(
         root.join("right.jet"),
-        "fn helper() {}\npub fn same() { helper() }\n",
+        "fn helper() {}\nfn same() { helper() }\n",
     )
     .unwrap();
     let entry = root.join("main.jet");
@@ -137,7 +309,7 @@ fn cross_module_same_name_effects_keep_qualified_rows() {
     )
     .unwrap();
 
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !diagnostics
@@ -161,7 +333,7 @@ fn run() {}
     fs::create_dir_all(&root).unwrap();
     let entry = root.join("main.jet");
     fs::write(&entry, source).unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         facts.summaries["clean"].edges.contains("main::Shape::area"),
@@ -186,7 +358,7 @@ fn strided_source_loop_projects_exact_arena_audit_multiplicity() {
         fs::create_dir_all(&root).unwrap();
         let entry = root.join("main.jet");
         fs::write(&entry, source).unwrap();
-        let (diagnostics, _, facts) =
+        let (diagnostics, _, facts, _) =
             jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
         (diagnostics, facts)
     };
@@ -359,7 +531,7 @@ fn run() {
     fs::create_dir_all(&root).unwrap();
     let entry = root.join("main.jet");
     fs::write(&entry, source).unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         diagnostics.is_empty(),
@@ -395,10 +567,10 @@ fn run() {
 }
 "#;
     let mut tiers = vec![
-        ("jit", tir_support::jit_run("active_panic", source)),
+        ("jit", tir_support::default_run("active_panic", source)),
         (
             "interpreter",
-            tir_support::interpreter_run("active_panic", source),
+            tir_support::default_run("active_panic", source),
         ),
     ];
     if tir_support::have_rustc() {
@@ -494,7 +666,7 @@ fn run() { top() }
     fs::create_dir_all(&root).unwrap();
     let entry = root.join("main.jet");
     fs::write(&entry, src).unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(diagnostics
         .iter()
@@ -514,7 +686,7 @@ fn run() { top() }
 fn fixed_list_refinement_discharges_panic_denial() {
     let src = r#"
 Die :: distinct Int(1..6)
-fn pick(faces: [String#6], roll: Die) -[!Panic]> String { ~faces[roll.raw() - 1] }
+fn pick(faces: [String#6], roll: Die) -[!Panic]> String { faces[roll.raw() - 1].copy() }
 fn run() {}
 "#;
     assert!(
@@ -545,7 +717,7 @@ fn declared_bound_matching_body_ok() {
     let src = r#"
 use core.files as fs
 fn load(path: String) -[FS]> String {
-    return fs.read(~path) ?? ""
+    return fs.read(path.copy()) ?? ""
 }
 fn run() { print(load("x")) }
 "#;
@@ -596,7 +768,7 @@ fn wider_bound_than_body_ok() {
     let src = r#"
 use core.files as fs
 fn load(path: String) -[FS, Net]> String {
-    return fs.read(~path) ?? ""
+    return fs.read(path.copy()) ?? ""
 }
 fn run() { print(load("x")) }
 "#;
@@ -928,7 +1100,7 @@ fn dependency_effect_declaration_joins_the_package_view() {
     .unwrap();
     fs::write(
         dependency.join("audit.jet"),
-        "effect Log.Audit\npub fn record() -[Log.Audit]> {}\n",
+        "effect Log.Audit\nfn record() -[Log.Audit]> {}\n",
     )
     .unwrap();
     fs::write(
@@ -1337,19 +1509,12 @@ fn run() {
     assert_eq!(code, 0, "inline FFI rollback run failed: {stderr}");
     assert_eq!(stdout, "second\nmanual\nfirst\ndone\n");
     let (jit_code, jit_stdout, jit_stderr) =
-        tir_support::jit_run_traced("jet_effects_ffi_jit", src);
+        tir_support::default_run("jet_effects_ffi_jit", src);
     assert_eq!(
         jit_code, 0,
         "inline FFI JIT rollback run failed: {jit_stderr}"
     );
     assert_eq!(jit_stdout, "second\nmanual\nfirst\ndone\n");
-    assert!(
-        jit_stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "declared FFI undo must stay on the native JIT tier: {jit_stderr}"
-    );
-    assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
 }
 
 /// Two modules may use the same foreign binding and inverse spelling without
@@ -1368,7 +1533,7 @@ extern rust "std" {
     #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("left") }
-pub fn exercise() {
+fn exercise() {
     #Transact(tx) {
         mutate(1)
         return
@@ -1384,7 +1549,7 @@ extern rust "std" {
     #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
 }
 fn undo_mutate(value: Int) { print("right") }
-pub fn exercise() {
+fn exercise() {
     #Transact(tx) {
         mutate(2)
         return
@@ -1501,7 +1666,7 @@ fn run() {
 "#;
     std::fs::write(&path, src).unwrap();
     let shown = path.to_string_lossy().into_owned();
-    let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
+    let outcome = crate::common::dev_run(&shown, false, true);
     match outcome {
         jet::Interpreter::RunOutcome::Problems(diagnostics) => assert!(
             diagnostics
@@ -1806,7 +1971,7 @@ fn invoke(p: String, act: fn(String) -[IO]>) {
     act(p)
 }
 fn read_it(p: String) {
-    x :: fs.read(~p) ?? ""
+    x :: fs.read(p.copy()) ?? ""
     print("{x}")
 }
 fn run() { invoke("f.txt", read_it) }

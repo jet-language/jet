@@ -15,9 +15,11 @@ fn run() (Closed | IOError | NetError | RangeError | TaskFailure)! {
     local :: net.listener_local_socket_addr(listener) ?? panic("local address")
     print("tcp-listen:{net.socket_host(local)}")
     (ready_tx, ready_rx) :: channel<String>()
+    addr_text :: net.socket_to_string(local)
     tcp_task :: task {
-        ready_tx.send(net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("local address")))
-        stream :: &listener.accept() ?? panic("accept")
+        server := ^listener
+        ready_tx.send(^addr_text)
+        stream :: &server.accept() ?? panic("accept")
         msg :: stream.read_text(8192) ?? panic("read")
         stream.write_all("tcp:{msg}".bytes()) ?? panic("write")
     }

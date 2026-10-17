@@ -1,0 +1,62 @@
+// CmdPerf.rs::source_functions / sampled_source_profile. The canonical parser
+// supplies byte spans. Observation counts are not function invocation counts.
+use jet_driver.[jet_driver_inline_package, jet_driver_mask_inline_package]
+use jet_foundation.[Span, TraceProfile, TraceProfileRow, TraceProfileSource, trace_profile_unsupported, SourceIdentity, mir_sha256_hex]
+
+struct JetCLIPerfSource { identity: SourceIdentity, run_span: Span?, text: String }
+fn jet_cli_perf_source(path: String, text: String) -> JetCLIPerfSource Never! {
+    identity := SourceIdentity{path: path, sha256: mir_sha256_hex(text), symbols: [(name: String, kind: String)]{}}
+    block :: jet_driver_inline_package(text)
+    if block.error != None -> return JetCLIPerfSource{identity: identity, run_span: None, text: text}
+    masked :: jet_driver_mask_inline_package(text, block)
+    program :: jet_cli_parsed_program(masked) ?? return JetCLIPerfSource{identity: identity, run_span: None, text: text}
+    run_span := Span?{None}
+    loop item in program.items {
+        if item == .Func(function) {
+            &identity.symbols.push((name: function.name, kind: "fn"))
+            if function.name == "run" -> run_span = Val(function.span)
+        }
+    }
+    JetCLIPerfSource{identity: identity, run_span: run_span, text: text}
+}
+fn jet_cli_perf_source_position(text: String, offset: Int) -> (line: U64, column: U64) JetCLIReadError! {
+    bytes :: text.bytes()
+    if offset < 0 || offset > bytes.len() -> return Err(jet_cli_read_error("parser source span lies outside its source bytes"))
+    if offset < bytes.len() && bytes[offset] >= (U8{128}) && bytes[offset] < (U8{192}) -> return Err(jet_cli_read_error("parser source span splits a UTF-8 scalar"))
+    line := U64{1}
+    column := U64{1}
+    loop index in 0..<offset {
+        byte :: bytes[index]
+        if byte == (U8{10}) {
+            line += U64{1}
+            column = U64{1}
+        } else if byte < (U8{128}) || byte >= (U8{192}) -> column += U64{1}
+    }
+    Ok((line: line, column: column))
+}
+fn jet_cli_perf_source_profile(source: JetCLIPerfSource, wall_samples: U64, cpu_samples: U64, truncated: Bool) -> TraceProfile JetCLIReadError! {
+    span :: source.run_span ?? return Ok(trace_profile_unsupported("checked source attribution requires a parseable top-level `run` function"))
+    if span.end <= span.start -> return Err(jet_cli_read_error("source sampling span is empty"))
+    start :: jet_cli_perf_source_position(source.text, span.start)
+    end :: jet_cli_perf_source_position(source.text, span.end)
+    location :: TraceProfileSource{path: source.identity.path, sha256: source.identity.sha256, start_line: start.line, start_column: start.column, end_line: end.line, end_column: end.column}
+    symbol :: JetSymbolRef{path: source.identity.path, name: "run"}
+    rows := [TraceProfileRow]{}
+    wall_count :: if wall_samples < (U64{4096}) -> wall_samples else -> U64{4096}
+    cpu_count :: if cpu_samples < (U64{4096}) -> cpu_samples else -> U64{4096}
+    if wall_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "wall", execution_count: None, sample_count: wall_count, sample_weight: wall_count, source: location, symbol: symbol})
+    if cpu_samples > (U64{0}) -> &rows.push(TraceProfileRow{clock: "cpu", execution_count: None, sample_count: cpu_count, sample_weight: cpu_count, source: location, symbol: symbol})
+    limited :: truncated || wall_samples > U64{4096} || cpu_samples > U64{4096}
+    status :: if limited -> "truncated" else if rows.len() == 0 -> "no_samples" else -> "captured"
+    coverage :: if rows.len() == 0 && !limited -> "none" else -> "partial"
+    reason :: if rows.len() == 0 -> "no supported observations were captured" else -> "only the checked top-level entrypoint is source-attributed; invocation counts are not inferred"
+    Ok(TraceProfile{method: "sampling", status: status, coverage: coverage, rows: rows, row_limit: U64{4096}, rows_truncated: limited, overhead_ns: None, overhead_status: "not_measured", overhead_reason: "a matched unprofiled run was not captured", reason: reason, window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"})
+}
+fn jet_cli_perf_window(profile: &TraceProfile, window: JetCLIPerfRuntimeWindow?) Never! {
+    if window == .Val(observed) {
+        profile.window_status = if observed.exit -> "exit" else -> "live"
+        profile.window_wall_ns = Val(observed.elapsed_ns)
+        profile.window_cpu_ns = observed.cpu_ns
+        profile.window_reason = "runtime-published monotonic run window"
+    }
+}

@@ -2,11 +2,11 @@
 // not a universal proof.
 use core.testing as testing
 
-fn reference(value: DataTree) -> DataTree { ~value }
-fn candidate(value: DataTree) -> DataTree { ~value }
+fn reference(value: Dyn) -> Dyn { value.copy() }
+fn candidate(value: Dyn) -> Dyn { value.copy() }
 
 fn run() {
-    cases :: [DataTree]{DataTree.Int(1), DataTree.Int(2)}
+    cases :: [Dyn]{Dyn.Int(1), Dyn.Int(2)}
     comparison :: testing.compare(cases, reference, candidate, "typed_equality")
     print(testing.status(comparison))
     print(testing.assert_equal(comparison))

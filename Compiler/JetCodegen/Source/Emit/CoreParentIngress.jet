@@ -1,0 +1,105 @@
+// Bind the seed's tiny transport to the current factory's checked Source ABI.
+// No symbol, boxed edge, access convention or type is guessed by the host.
+use jet_foundation.[MIRAccess, MIRFunction, MIRTypeDef]
+
+fn jet_rust_core_parent_type(ctx: JetRustEmitContext, manifest: JetRustEmitManifest, name: String) -> MIRTypeDef? Never! {
+    selected := MIRTypeDef?{None}
+    loop definition in ctx.program.types {
+        if definition.name != name -> next
+        if selected != None -> return None
+        loop row in manifest.type_metadata {
+            if row.ty == definition.id -> selected = Val(definition)
+        }
+    }
+    selected
+}
+
+fn jet_rust_core_parent_field(manifest: JetRustEmitManifest, definition: MIRTypeDef, name: String) -> String? Never! {
+    selected := String?{None}
+    loop row in manifest.field_metadata {
+        if row.owner != definition.id || row.source_name != name -> next
+        if selected != None -> return None
+        selected = Val(row.symbol)
+    }
+    selected
+}
+
+fn jet_rust_core_parent_call(ctx: JetRustEmitContext, manifest: JetRustEmitManifest, name: String, arguments: [String]) -> String? Never! {
+    selected := JetRustEmitCallableMetadata?{None}
+    loop row in manifest.callable_metadata {
+        if row.source_name != name -> next
+        if selected != None -> return None
+        selected = Val(row)
+    }
+    row :: selected ?? return None
+    if row.parameter_types.len() != arguments.len() || row.parameter_access.len() != arguments.len() -> return None
+    function := MIRFunction?{None}
+    loop candidate in ctx.program.functions { if candidate.id == row.function -> function = Val(candidate) }
+    checked :: function ?? return None
+    if checked.capture_params.len() != 0 || !checked.target_applicability.rust_aot || checked.failure != .Infallible -> return None
+    passed := [String]{}
+    loop index in 0..<arguments.len() {
+        value := arguments[index]
+        if row.parameter_types[index].starts_with("&") {
+            value = if row.parameter_access[index] == MIRAccess.Write -> "&mut {value}" else -> "&{value}"
+        }
+        &passed.push(value)
+    }
+    Val("{row.symbol}({passed.join(", ")})")
+}
+
+fn jet_rust_core_parent_initializer_field(manifest: JetRustEmitManifest, definition: MIRTypeDef, name: String, value: String) -> String? Never! {
+    symbol :: jet_rust_core_parent_field(manifest, definition, name) ?? return None
+    owned :: if definition.boxed_edges.contains(name) -> "Box::new({value})" else -> value
+    Val("{symbol}: {owned}")
+}
+
+fn jet_rust_emit_core_parent_ingress(ctx: &JetRustEmitContext, manifest: JetRustEmitManifest) -> String? Never! {
+    if ctx.config.target != "rust_aot" -> return Val("")
+    // Only the private bootstrap source owns this root. A user function that
+    // happens to share its spelling must not receive private host glue.
+    factory := MIRFunction?{None}
+    loop function in ctx.program.functions {
+        if function.name != "jet_bootstrap_compile" -> next
+        loop file in ctx.program.source_files {
+            if file.id == function.source_file && jet_rust_core_parent_source_is_private(file.path, file.source) {
+                if factory != None -> return None
+                factory = Val(function)
+            }
+        }
+    }
+    if factory == None -> return Val("")
+    host :: jet_rust_core_parent_type(ctx, manifest, "JetDriverCoreSourceParentHost") ?? return None
+    runtime :: jet_rust_core_parent_type(ctx, manifest, "CoreSharedParentRuntime") ?? return None
+    request :: jet_rust_core_parent_type(ctx, manifest, "JetDriverCompileRequest") ?? return None
+    getter :: jet_rust_core_parent_type(ctx, manifest, "CoreSharedParentGetterResult") ?? return None
+    host_type :: manifest.type_symbols.get(host.id.value) ?? return None
+    request_type :: manifest.type_symbols.get(request.id.value) ?? return None
+    getter_type :: manifest.type_symbols.get(getter.id.value) ?? return None
+    runtime_type :: manifest.type_symbols.get(runtime.id.value) ?? return None
+    rows_field :: jet_rust_core_parent_field(manifest, request, "core_sources") ?? return None
+    original_field :: jet_rust_core_parent_field(manifest, host, "original_rows") ?? return None
+    receipt_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "receipt_identity", "__jet_receipt_identity") ?? return None
+    library_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "library_identity", "__jet_library_identity") ?? return None
+    symbols_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "symbols", "__jet_symbols") ?? return None
+    abis_field :: jet_rust_core_parent_initializer_field(manifest, runtime, "export_abis", "__jet_export_abis") ?? return None
+    symbols_type := String?{None}
+    if runtime.kind == .Struct(fields, _) {
+        loop field in fields { if field.name == "symbols" -> symbols_type = Val(jet_rust_emit_type(&ctx, field.ty)) }
+    }
+    native_symbols :: symbols_type ?? return None
+    new_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_parent_new", [String]{"__jet_original_rows", "__jet_runtime"}) ?? return None
+    request_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_request", [String]{"__jet_request", "__jet_host.{original_field}"}) ?? return None
+    prepare_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_prepare", [String]{"__jet_recipe_request"}) ?? return None
+    attach_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_attach", [String]{"__jet_host", "__jet_prepared"}) ?? return None
+    getter_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_getter", [String]{"__jet_host", "__jet_site_key"}) ?? return None
+    abis_decode_call :: jet_rust_core_parent_call(ctx, manifest, "jet_bootstrap_core_runtime_abis", [String]{"__jet_export_abi"}) ?? return None
+    Val(jet_rust_emit_core_parent_seed(JetRustCoreParentSeedBindings{
+        host_type: host_type, request_type: request_type, getter_type: getter_type,
+        symbols_type: native_symbols, int_from_address: "{ctx.config.root_prefix}JetInt::from_i64(__jet_address)",
+        runtime_initializer: "{runtime_type} {{ {receipt_field}, {library_field}, {symbols_field}, {abis_field} }}",
+        request_rows_field: rows_field,
+        new_call: new_call, request_call: request_call, prepare_call: prepare_call,
+        attach_call: attach_call, getter_call: getter_call, abis_decode_call: abis_decode_call,
+    }))
+}

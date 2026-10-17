@@ -46,7 +46,7 @@ fn sema_authority_exprs_escape(values: [Expr], handle: String) -> Span? {
 fn sema_authority_expr_escape(expr: Expr, handle: String) -> Span? {
     if expr == {
         .Ident(name, span) -> if name == handle -> Val(span) else -> None
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_authority_bare(receiver, handle) -> return sema_authority_args_escape(args, handle, false)
             found :: sema_authority_expr_escape(receiver, handle)
             if found != None -> return found
@@ -288,7 +288,7 @@ fn sema_authority_chain_rooted(expr: Expr, handle: String, aliases: [String]) ->
     if expr == {
         .Ident(name, _) -> name == handle || sema_authority_contains(aliases, name)
         .Paren(inner, _) -> sema_authority_chain_rooted(inner, handle, aliases)
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
         else -> false
     }
 }
@@ -296,7 +296,7 @@ fn sema_authority_chain_rooted(expr: Expr, handle: String, aliases: [String]) ->
 fn sema_authority_narrowing_chain(expr: Expr, handle: String, aliases: [String]) -> Bool Never! {
     if expr == {
         .Paren(inner, _) -> sema_authority_narrowing_chain(inner, handle, aliases)
-        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _, _) -> (method == "with" || method == "without") && sema_authority_chain_rooted(receiver, handle, aliases)
         else -> false
     }
 }
@@ -313,7 +313,7 @@ fn sema_authority_value_escape(expr: Expr, handle: String, aliases: [String]) ->
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found :: sema_authority_value_escape(receiver, handle, aliases)
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
@@ -368,7 +368,7 @@ fn sema_authority_call_argument_escape(expr: Expr, handle: String, aliases: [Str
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             found :: sema_authority_call_argument_escape(receiver, handle, aliases)
             if found != None -> return found
             sema_authority_value_args_escape(args, handle, aliases)
@@ -492,7 +492,7 @@ fn sema_authority_region_caps_valid(caps: [NamedSpan]) -> Bool Never! {
 // pass checks each lowered region (the `TStmt.Region` with the same span)
 // against its caps (E0712). A region with an invalid cap is skipped, like
 // Rust's `bad` cap set: the cap diagnostic is the real problem to fix.
-pub fn sema_authority_fx_regions(statements: [Stmt]) -> [SemaEffectFxRegion] {
+fn sema_authority_fx_regions(statements: [Stmt]) -> [SemaEffectFxRegion] {
     regions := [SemaEffectFxRegion]{}
     sema_authority_collect_fx_regions(statements, &regions)
     regions
@@ -620,13 +620,13 @@ fn sema_authority_check_items(items: [Item], diagnostics: &[Diagnostic]) {
 
 // E0711 over every source module. Returns true when a diagnostic was
 // reported.
-pub fn sema_effect_check_authority_handles(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_effect_check_authority_handles(graph: SemaRegistrationGraph, diagnostics: &[Diagnostic]) -> Bool {
     found := false
-    loop source_module in graph.modules {
+    loop source_module_index in 0..<graph.modules.len() {
         start :: diagnostics.len()
-        sema_authority_check_items(source_module.program.items, &diagnostics)
+        sema_authority_check_items(graph.modules[source_module_index].program.items, &diagnostics)
         if diagnostics.len() > start {
-            sema_attach_diagnostic_source_locations(&diagnostics, start, source_module.source_segments)
+            sema_attach_diagnostic_source_locations(&diagnostics, start, graph.modules[source_module_index].source_segments)
             found = true
         }
     }

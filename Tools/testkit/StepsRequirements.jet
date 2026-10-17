@@ -1,0 +1,95 @@
+use core.sys as sys
+use core.process as process
+
+fn kit_steps_host_name() -> String {
+    name :: sys.name()
+    if name == "darwin" || name == "osx" -> return "macos"
+    name
+}
+
+fn kit_steps_host_arch() -> String {
+    arch :: sys.arch()
+    if arch == "amd64" || arch == "x64" -> return "x86_64"
+    if arch == "arm64" -> return "aarch64"
+    if arch == "x86" -> return "x86"
+    arch
+}
+
+fn kit_steps_host_matches(actual: String, choices: String) -> Bool {
+    negative :: choices.starts_with("!")
+    names :: if negative -> kit_steps_byte_slice(choices, 1, choices.count_bytes()) else -> choices
+    matched := false
+    loop name in names.split("|") {
+        if name == actual -> matched = true
+    }
+    matched != negative
+}
+
+fn kit_steps_tools_all(text: String) -> Bool {
+    names :: text.trim().copy()
+    if names == "" -> return false
+    loop name in names.split("+") {
+        if process.which(name.trim().copy()) == None -> return false
+    }
+    true
+}
+
+fn kit_steps_probe(text: String, env: KitEnv, work: String, scratch: String) -> Bool {
+    tokens :: kit_steps_tokens(text) ?? return false
+    if tokens.len() == 0 -> return false
+    argv := [String]{}
+    boundary := tokens.len()
+    loop (index, token) in tokens {
+        if token.text == "json" || token.text == "stdout:" {
+            boundary = index
+            break
+        }
+        &argv.push(kit_steps_expand(token.text, env, work, scratch, ""))
+    }
+    if argv.len() == 0 -> return false
+    if argv[0] == "jet" -> argv[0] = env.jet
+    if argv[0] == "jetpack" -> argv[0] = env.jetpack
+    result :: kit_exec_invoke(env, argv, work, scratch, "") ?? return false
+    if result.code != 0 || kit_exec_process_failure(result) != None -> return false
+    if boundary == tokens.len() -> return true
+    if tokens[boundary].text == "json" {
+        if tokens.len() < boundary + 4 || tokens[boundary + 2].text != "=" -> return false
+        literal :: kit_steps_byte_slice(text, tokens[boundary + 3].start, text.count_bytes()).trim().copy()
+        return kit_steps_json_test(result.stdout, "doc", tokens[boundary + 1].text, "=", literal) == None
+    }
+    assertion :: kit_steps_stream_assertion("stdout", kit_steps_byte_slice(text, tokens[boundary].end, text.count_bytes())) ?? return false
+    state :: KitStepState{last: result, built: "", built_once: false}
+    plan :: kit_steps_parse("")
+    bless :: KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+    context :: kit_steps_context(plan, "probe", env, work, scratch, work, bless)
+    verdict :: kit_steps_check_assertion(assertion, context, state, "", false) ?? return false
+    verdict.status == "PASS"
+}
+
+fn kit_steps_probes_all(text: String, env: KitEnv, work: String, scratch: String) -> Bool {
+    // Separators must be unquoted standalone tokens; quoted shell source is opaque.
+    tokens :: kit_steps_tokens(text) ?? return false
+    start := 0
+    loop token in tokens {
+        if token.text == "+" && kit_steps_byte_slice(text, token.start, token.end) == "+" {
+            if !kit_steps_probe(kit_steps_byte_slice(text, start, token.start).trim().copy(), env, work, scratch) -> return false
+            start = token.end
+        }
+    }
+    kit_steps_probe(kit_steps_byte_slice(text, start, text.count_bytes()).trim().copy(), env, work, scratch)
+}
+
+fn kit_steps_capability_any(text: String, probes: Bool, env: KitEnv, work: String, scratch: String) -> Bool {
+    tokens :: kit_steps_tokens(text) ?? return false
+    start := 0
+    loop token in tokens {
+        if token.text == "|" && kit_steps_byte_slice(text, token.start, token.end) == "|" {
+            alternative :: kit_steps_byte_slice(text, start, token.start).trim().copy()
+            passed :: if probes -> kit_steps_probes_all(alternative, env, work, scratch) else -> kit_steps_tools_all(alternative)
+            if passed -> return true
+            start = token.end
+        }
+    }
+    alternative :: kit_steps_byte_slice(text, start, text.count_bytes()).trim().copy()
+    if probes -> kit_steps_probes_all(alternative, env, work, scratch) else -> kit_steps_tools_all(alternative)
+}

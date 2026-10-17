@@ -1,0 +1,33 @@
+// JSON.rs::parse_json: the Foundation protocol boundary is 1 MiB and
+// 64 containers, with i64 integers. Core owns the parser; this boundary
+// validates the narrower protocol domain, as in origin/port/compiler's
+// foundation_parse_protocol_json_with_limit, without a second parser.
+use core.encoding.json as protocol_json
+
+fn foundation_parse_protocol_json(text: String) -> Dyn? Never! {
+    if text.bytes().len() > 1048576 -> return None
+    value :: protocol_json.parse(text) ?? return None
+    if !foundation_protocol_json_valid(value, 0) -> return None
+    Val(value)
+}
+
+fn foundation_protocol_json_valid(value: Dyn, depth: Int) -> Bool Never! {
+    if value == {
+        .Int(number) -> number >= -9223372036854775808 && number <= 9223372036854775807
+        .Array(values) -> {
+            if depth >= 64 -> return false
+            loop child in values {
+                if !foundation_protocol_json_valid(child, depth + 1) -> return false
+            }
+            true
+        }
+        .Object(fields) -> {
+            if depth >= 64 -> return false
+            loop entry in fields {
+                if !foundation_protocol_json_valid(entry.value, depth + 1) -> return false
+            }
+            true
+        }
+        else -> true
+    }
+}

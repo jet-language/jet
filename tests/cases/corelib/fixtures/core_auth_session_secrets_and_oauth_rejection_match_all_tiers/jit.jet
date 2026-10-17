@@ -1,0 +1,16 @@
+use core.auth as auth
+
+fn run() {
+    auth.register_user("tier-jit", "hash") ?? panic("register")
+    session :: auth.password_login("tier-jit", "hash", 1_700_000_000_000, 3_600_000) ?? panic("login")
+    shown :: auth.session_show(session)
+    if shown.contains("sess-") -> print("show-leaked") else -> print("show-safe")
+    if auth.oauth_begin("google") == {
+        .Ok(_) -> print("oauth-accepted")
+        .Err(_) -> print("oauth-rejected")
+    }
+    if auth.oauth_finish("state", "attacker", 1_700_000_000_000, 3_600_000) == {
+        .Ok(_) -> print("oauth-finish-accepted")
+        .Err(_) -> print("oauth-finish-rejected")
+    }
+}

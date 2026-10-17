@@ -13,9 +13,9 @@
 
 // A package value (`Pkg`, §5) with its source identity preserved, so
 // de-duplication keeps `default.ripgrep` distinct from `unstable.ripgrep`.
-pub struct Pkg {
-    pub source: String
-    pub name: String
+struct Pkg {
+    source: String
+    name: String
 
     fn new(source: String, name: String) -> Pkg Never! {
         Pkg{source: source, name: name}
@@ -73,7 +73,7 @@ pub struct Pkg {
 
 // Why a merge could not be reconciled (§6 conflict diagnostics).
 #Error
-pub enum MergeError {
+enum MergeError {
     // Two `sources` declarations share a name but resolve to different refs.
     SourceConflict(name: String, a: String, b: String)
     // A fact setting failed the canonical contribution law.
@@ -107,7 +107,7 @@ fn pkg_merge_split_top_level(body: String) -> [String] Never! {
 
 // Merge `sources` maps by key: identical refs de-duplicate; the same name with
 // different refs is a conflict (§6). Each map is read in key order.
-pub fn pkg_merge_sources(contribs: [[String: String]]) -> [String: String] MergeError! {
+fn pkg_merge_sources(contribs: [[String: String]]) -> [String: String] MergeError! {
     out := [String: String]{}
     loop map in contribs {
         loop name in pkg_merge_sorted_names(map) {
@@ -131,7 +131,7 @@ fn pkg_merge_sorted_names(map: [String: String]) -> [String] Never! {
 
 // Concatenate package lists, de-duplicate while preserving source identity,
 // and keep first-seen order (§6).
-pub fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] Never! {
+fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] Never! {
     out := [Pkg]{}
     loop list in lists {
         loop pkg in list {
@@ -145,21 +145,21 @@ pub fn pkg_merge_packages(lists: [[Pkg]]) -> [Pkg] Never! {
 // `env.dev`). Package lists combine; fact settings reconcile through the
 // canonical contribution law. Each writer already carries its layer, scope,
 // span, and source.
-pub struct EntryContribution {
-    pub packages: [Pkg]{[Pkg]{}}
-    pub settings: [String: [FactContribution]]{[String: [FactContribution]]{}}
+struct EntryContribution {
+    packages: [Pkg]{[Pkg]{}}
+    settings: [String: [FactContribution]]{[String: [FactContribution]]{}}
 }
 
 // A fully merged namespace entry: deduped packages + resolved text facts.
-pub struct MergedEntry {
-    pub packages: [Pkg]{[Pkg]{}}
-    pub settings: [String: String]{[String: String]{}}
+struct MergedEntry {
+    packages: [Pkg]{[Pkg]{}}
+    settings: [String: String]{[String: String]{}}
 }
 
 // Merge several contributions to one namespace entry: packages combine and
 // de-duplicate, fact settings reconcile through the one resolver (§6). Only
 // text facts surface as settings.
-pub fn pkg_merge_entry(contribs: [EntryContribution]) -> MergedEntry MergeError! {
+fn pkg_merge_entry(contribs: [EntryContribution]) -> MergedEntry MergeError! {
     lists := [[Pkg]]{}
     loop contribution in contribs -> &lists.push(contribution.packages)
     by_key := [String: [FactContribution]]{}

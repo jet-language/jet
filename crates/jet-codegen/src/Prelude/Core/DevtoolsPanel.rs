@@ -103,6 +103,20 @@ pub fn jet_devtools_publish<Value>(
         jet_devtools_panel_json_escape(&panel),
         jet_devtools_panel_json_escape(&field),
     );
+    jet_devtools_publish_payload(source, entity, fields, field, value);
+}
+
+// Source constructs identities and the exact field envelope. Reuse the
+// original validated typed payload/event and the one global sink.
+pub fn jet_devtools_publish_payload<Value>(
+    source: String,
+    entity: String,
+    fields: String,
+    field: String,
+    value: Value,
+) where
+    Value: JetDevtoolsPublishValue,
+{
     let payload = JetDevtoolsPayload::one(field, value.into_jet_devtools_value());
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

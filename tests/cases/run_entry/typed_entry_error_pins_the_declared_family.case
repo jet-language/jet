@@ -1,0 +1,23 @@
+# HAND-PORT tests/run_entry.rs:491-550 typed_entry_error_pins_the_declared_family
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original compile-success, quiet CLI1/AOT1/forced-interpreter1, empty stdout and exact Missing newline; only Rust type-name scan retires.
+fixture: typed_entry_error_pins_the_declared_family.fixture
+env: NO_COLOR=1
+step: jet check main.jet
+exit: 0
+step: jet run --quiet main.jet
+exit: 1
+stdout: empty
+stderr: = typed_entry_error_pins_the_declared_family.stderr.expected
+when tool rustc
+step: jet build --profile=debug main.jet
+exit: 0
+step: built
+exit: 1
+stdout: empty
+stderr: = typed_entry_error_pins_the_declared_family.stderr.expected
+end when
+step: jet run --interpret main.jet
+exit: 1
+stdout: empty
+stderr: = typed_entry_error_pins_the_declared_family.stderr.expected

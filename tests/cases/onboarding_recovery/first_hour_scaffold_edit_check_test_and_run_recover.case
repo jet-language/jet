@@ -1,0 +1,50 @@
+# Port of tests/onboarding_recovery.rs:39-138. PENDING-SAME-HEAD / batch-four grammar.
+# Exact original source, algorithmic setup and literal stdout predicates.
+fixture: fixtures/first_hour_scaffold_edit_check_test_and_run_recover
+env: NO_COLOR=1
+# SETUP-PORT of onboarding_recovery.rs90-102,130: exact String replacements; no assertions moved into helper.
+step: jet new hello
+exit: 0
+file: hello/package.jet is-file
+file: hello/run.jet is-file
+file: hello/.gitignore is-file
+file: hello/package.jet ~ "authority: { holds: { allow: [IO, Mem.Alloc] } }" # original manifest predicate
+file: hello/run.jet ~ "fn run()" # original scaffold predicate
+file: hello/run.jet !~ "#CLI" # original scaffold predicate
+step: jet run
+cwd: hello
+exit: 0
+stdout: = first_hour_scaffold_edit_check_test_and_run_recover.initial.out
+step: jet run run.jet
+cwd: hello
+exit: 0
+stdout: = first_hour_scaffold_edit_check_test_and_run_recover.initial.out
+step: jet check run.jet
+cwd: hello
+exit: 0
+step: jet test run.jet
+cwd: hello
+exit: 0
+step: jet run setup.jet -- {work}/hello/run.jet {work}/edited.txt 0
+exit: 0
+step: jet run
+cwd: hello
+exit: 0
+stdout: = first_hour_scaffold_edit_check_test_and_run_recover.edited.out
+step: jet run setup.jet -- {work}/hello/run.jet {work}/edited.txt 1
+exit: 0
+step: jet check run.jet
+cwd: hello
+exit: nonzero
+stderr: ~ "E0102" # original contains predicate
+stderr: ~ "Fix:" # original contains predicate
+step: jet explain E0102
+cwd: hello
+exit: 0
+stdout: ~ "E0102" # original contains predicate
+step: jet run setup.jet -- {work}/hello/run.jet {work}/edited.txt 2
+exit: 0
+step: jet run
+cwd: hello
+exit: 0
+stdout: = first_hour_scaffold_edit_check_test_and_run_recover.edited.out

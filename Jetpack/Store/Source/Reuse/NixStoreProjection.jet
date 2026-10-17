@@ -6,16 +6,16 @@
 // a rootless user namespace.
 
 // One projected object: its logical store path, Hangar digest, and source.
-pub struct NixStoreProjection {
-    pub logical: String
-    pub digest: String
-    pub primary: Bool
-    pub source: String
+struct NixStoreProjection {
+    logical: String
+    digest: String
+    primary: Bool
+    source: String
 }
 
 // Nix entries by every output digest they own, each list in id order.
-pub struct NixProjectionIndex {
-    by_digest: [String: [StoreEntry]]
+struct NixProjectionIndex {
+    priv by_digest: [String: [StoreEntry]]
 
     fn from_entries(entries: [StoreEntry]) -> NixProjectionIndex Never! {
         by_digest := [String: [StoreEntry]]{}
@@ -97,7 +97,7 @@ fn store_nix_store_projection_for_entry_index(roots: HangarRoots, entry: StoreEn
 
 // Rust `nix_store_projection_for_entry`: the closure record in the Hangar
 // graph names every transitive runtime object.
-pub fn store_nix_store_projection_for_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
+fn store_nix_store_projection_for_entry(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, snapshot_root: String) -> [NixStoreProjection] StoreError! {
     if entry.producer_record == "" -> return Ok([NixStoreProjection]{})
     producer :: ProducerRecord.decode(entry.producer_record) ?? return Err(StoreError.Other("cache entry `{entry.id}` has an invalid producer record: {err.message()}"))
     if producer.provider != "nix" -> return Ok([NixStoreProjection]{})

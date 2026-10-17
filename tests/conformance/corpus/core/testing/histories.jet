@@ -1,18 +1,18 @@
 // core-conformance: core.testing.histories
 use core.testing as api
 
-fn reference_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn reference_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn candidate_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn candidate_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { value.copy() }
 
 fn run() {
-    comparison :: api.histories<DataTree>(
+    comparison :: api.histories<Dyn>(
         seed: 1,
         cases: 1,
         strategy: None,

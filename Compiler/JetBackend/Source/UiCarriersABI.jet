@@ -1,0 +1,28 @@
+// Canonical native-private UI scalar/record carriers, not Rust or MIR layouts.
+// Lower-facing Node/Accessibility/Shortcut layouts reuse the separate UiABI.jet
+// precedent (94c3238e1,78f5f6471); do not reinterpret Node storage through these.
+UI_CARRIER_SCALAR_BYTES :: prep { I64{8} }
+UI_CARRIER_TERMINAL_SIZE_BYTES :: prep { I64{16} }
+UI_CARRIER_TERMINAL_SIZE_COLS :: prep { I64{0} } // Rust i64, CommonTypes.rs:37.
+UI_CARRIER_TERMINAL_SIZE_ROWS :: prep { I64{8} } // Rust i64, CommonTypes.rs:38.
+// Rust TerminalPolicy owns TerminalSize by value (CommonTypes.rs:57-59).
+// Embedded Size@0 is byte-identical to the 16-byte TerminalSize carrier.
+// Ctor consumes/frees its input Size once; getter owns a fresh Size allocation.
+UI_CARRIER_TERMINAL_POLICY_BYTES :: prep { I64{24} }
+UI_CARRIER_TERMINAL_POLICY_SIZE :: prep { I64{0} }
+UI_CARRIER_TERMINAL_POLICY_MODE :: prep { I64{16} }
+UI_CARRIER_TEXT_WIDTH_BYTES :: prep { I64{16} }
+UI_CARRIER_TEXT_WIDTH_AMBIGUOUS :: prep { I64{0} }
+UI_CARRIER_TEXT_WIDTH_CONTROLS :: prep { I64{8} }
+UI_CARRIER_BROWSER_PROFILE_BYTES :: prep { I64{16} }
+UI_CARRIER_BROWSER_PROFILE_NAME :: prep { I64{0} }
+UI_CARRIER_BROWSER_PROFILE_VERSION :: prep { I64{8} }
+UI_CARRIER_BROWSER_TIMEOUT_BYTES :: prep { I64{8} }
+UI_CARRIER_BROWSER_TIMEOUT_MS :: prep { I64{0} } // Rust i64, Browser.rs:111.
+UI_CARRIER_BROWSER_LOCKED_BYTES :: prep { I64{48} }
+UI_CARRIER_BROWSER_LOCKED_ENGINE :: prep { I64{0} }
+UI_CARRIER_BROWSER_LOCKED_VERSION :: prep { I64{8} }
+UI_CARRIER_BROWSER_LOCKED_BINARY :: prep { I64{16} }
+UI_CARRIER_BROWSER_LOCKED_PROTOCOL :: prep { I64{24} }
+UI_CARRIER_BROWSER_LOCKED_SIZE :: prep { I64{32} } // Rust i64, Browser.rs:105.
+UI_CARRIER_BROWSER_LOCKED_HASH :: prep { I64{40} }

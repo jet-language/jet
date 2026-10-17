@@ -15,8 +15,8 @@ FOREIGN_BOUNDARY_OBLIGATIONS :: prep { [String]{"abi", "layout", "width", "align
 // Why a bridge identity, boundary row, provenance record, or sidecar build
 // was refused. The message is the reference diagnostic text.
 #Error
-pub struct ForeignBridgeError {
-    pub message: String
+struct ForeignBridgeError {
+    message: String
 }
 
 fn pkg_bridge_error(message: String) -> ForeignBridgeError Never! {
@@ -24,8 +24,8 @@ fn pkg_bridge_error(message: String) -> ForeignBridgeError Never! {
 }
 
 // A deterministic content-addressed identity record.
-pub struct ForeignIdentityBuilder {
-    bytes: [U8]
+struct ForeignIdentityBuilder {
+    priv bytes: [U8]
 
     // Start an identity record with its schema as the first field.
     fn new(schema: String) -> ForeignIdentityBuilder Never! {
@@ -51,7 +51,7 @@ pub struct ForeignIdentityBuilder {
 }
 
 fn pkg_bridge_push_u64_le(bytes: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &bytes.push(U8{(value >> (index * 8)) & 255})
+    loop index in 0..<8 -> &bytes.push(U8{((value >> (index * 8))).bit_and(255)})
 }
 
 // `[1]` / `[0]`: the one-byte boolean identity field.
@@ -63,13 +63,13 @@ fn pkg_bridge_flag(value: Bool) -> [U8] Never! {
 // checked overlay, generator, implementation, toolchain, and target are named
 // separately: a path or version alone cannot keep a cached replacement honest
 // when the bytes behind it change.
-pub struct ForeignBoundaryIdentity {
-    pub source: String
-    pub overlay: String
-    pub generator: String
-    pub implementation: String
-    pub toolchain: String
-    pub target: String
+struct ForeignBoundaryIdentity {
+    source: String
+    overlay: String
+    generator: String
+    implementation: String
+    toolchain: String
+    target: String
 
     fn new(source: String, overlay: String, generator: String, implementation: String, toolchain: String, target: String) -> ForeignBoundaryIdentity Never! {
         ForeignBoundaryIdentity{source: source, overlay: overlay, generator: generator, implementation: implementation, toolchain: toolchain, target: target}
@@ -115,13 +115,13 @@ pub struct ForeignBoundaryIdentity {
 // `None` means the producer did not establish the list; `Val([])` is an
 // established empty list, so missing callback/dependency analysis cannot be
 // mistaken for "there were none".
-pub struct ForeignArtifactCoverage {
-    pub loaded_artifact: String
-    pub transitive_dependencies: [String]?
-    pub reachable_callbacks: [String]?
-    pub compiler_flags: [String]?
-    pub target: String
-    pub generator: String
+struct ForeignArtifactCoverage {
+    loaded_artifact: String
+    transitive_dependencies: [String]?
+    reachable_callbacks: [String]?
+    compiler_flags: [String]?
+    target: String
+    generator: String
 
     fn new(loaded_artifact: String, target: String, generator: String) -> ForeignArtifactCoverage Never! {
         ForeignArtifactCoverage{loaded_artifact: loaded_artifact, transitive_dependencies: None, reachable_callbacks: None, compiler_flags: None, target: target, generator: generator}
@@ -162,12 +162,12 @@ pub struct ForeignArtifactCoverage {
 }
 
 // One obligation row in the canonical foreign boundary contract.
-pub struct ForeignObligationEvidence {
-    pub obligation: String
-    pub basis: FFIEvidenceBasis
-    pub checker: String
-    pub assumptions: [String]
-    pub coverage_digest: String
+struct ForeignObligationEvidence {
+    obligation: String
+    basis: FFIEvidenceBasis
+    checker: String
+    assumptions: [String]
+    coverage_digest: String
 
     fn new(obligation: String, basis: FFIEvidenceBasis, checker: String, assumptions: [String], coverage: ForeignArtifactCoverage) -> ForeignObligationEvidence Never! {
         ForeignObligationEvidence{obligation: obligation, basis: basis, checker: checker, assumptions: pkg_bridge_sorted_strings(assumptions), coverage_digest: coverage.digest()}

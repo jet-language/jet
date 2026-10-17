@@ -257,6 +257,33 @@ if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected W
     let _ = fs::remove_dir_all(dir);
 }
 
+#[test]
+fn dyn_exact_int_and_strict_json_match_web_js_and_wasm_goldens() {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln!("note: skipping Dyn web parity test (need rustc + node)");
+        return;
+    }
+    for stem in ["dyn_exact_int", "json_coerce", "json_duplicate_keys"] {
+        let shown = format!("Examples/features/serde/{stem}.jet");
+        let source = fs::read_to_string(&shown).unwrap();
+        let expected = fs::read_to_string(format!("Examples/features/expected/serde/{stem}.out")).unwrap();
+        let dir = build_web_fixture(stem, &source, &shown);
+        assert_eq!(run_web_app(&dir), expected, "{stem} JS output changed");
+        let harness = r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"#;
+        assert_eq!(
+            run_node_harness(&dir, "dyn_rules_wasm_harness.mjs", harness),
+            expected,
+            "{stem} Wasm output changed",
+        );
+        let _ = fs::remove_dir_all(dir);
+    }
+}
+
 /// D-CONC-ALLNAMED1=A: the web adapters preserve heterogeneous named fields
 /// when the first authored branch yields after the second branch. The nested
 /// task makes that reverse completion observable in JavaScript; Wasm uses its
@@ -2207,10 +2234,10 @@ fn web_js_whole_numbers_stay_exact_above_two_to_the_fifty_three() {
     let src = r#"#Target(JS)
 fn run() {
     print(7 / 2)
-    print(2 ^ 60)
-    print(3 ^ 39)
-    print(2 ^ 60 > 2 ^ 53)
-    wide := 2 ^ 60
+    print((2).pow(60))
+    print((3).pow(39))
+    print((2).pow(60) > (2).pow(53))
+    wide := (2).pow(60)
     print(wide + 1)
     print(wide /% 10)
 }
@@ -3244,11 +3271,11 @@ fn run() {
         ),
         (
             "default JIT",
-            tir_support::jit_run("web_two_hop_journey", source),
+            tir_support::default_run("web_two_hop_journey", source),
         ),
         (
             "interpreter",
-            tir_support::interpreter_run("web_two_hop_journey", source),
+            tir_support::default_run("web_two_hop_journey", source),
         ),
     ];
     for (tier, (code, stdout, stderr)) in native_runs {
@@ -3495,11 +3522,11 @@ fn web_inline_modules_keep_qualified_function_identity() {
     let src = r#"#Target(Web)
 module left {
     #Target(JS)
-    pub fn value() -> Int { return 1 }
+    fn value() -> Int { return 1 }
 }
 module right {
     #Target(JS)
-    pub fn value() -> Int { return 2 }
+    fn value() -> Int { return 2 }
 }
 #Target(JS)
 fn run() { print(left.value() + right.value()) }
@@ -3529,8 +3556,8 @@ fn web_wasm_inline_modules_emit_distinct_qualified_calls() {
         return;
     }
     let src = r#"#Target(Web)
-module left { pub fn value() -> Int { return 1 } }
-module right { pub fn value() -> Int { return 2 } }
+module left { fn value() -> Int { return 1 } }
+module right { fn value() -> Int { return 2 } }
 #WasmExport
 fn total() -> Int { return left.value() + right.value() }
 #Target(JS)
@@ -3577,11 +3604,11 @@ fn web_file_modules_keep_qualified_js_function_identity() {
             ),
             (
                 "left.jet",
-                "#Target(JS)\npub fn value() -> Int { return 1 }\n",
+                "#Target(JS)\nfn value() -> Int { return 1 }\n",
             ),
             (
                 "right.jet",
-                "#Target(JS)\npub fn value() -> Int { return 2 }\n",
+                "#Target(JS)\nfn value() -> Int { return 2 }\n",
             ),
         ],
     );
@@ -3611,8 +3638,8 @@ fn web_file_modules_emit_distinct_qualified_wasm_calls() {
                 "main.jet",
                 "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#WasmExport\nfn total() -> Int { return left.value() + right.value() }\n#Target(JS)\nfn run() { print(total()) }\n",
             ),
-            ("left.jet", "pub fn value() -> Int { return 1 }\n"),
-            ("right.jet", "pub fn value() -> Int { return 2 }\n"),
+            ("left.jet", "fn value() -> Int { return 1 }\n"),
+            ("right.jet", "fn value() -> Int { return 2 }\n"),
         ],
     );
     let wasm = fs::read_to_string(dir.join("build/app_wasm.rs")).unwrap();
@@ -3651,7 +3678,7 @@ fn web_file_module_wasm_export_uses_qualified_bridge() {
             ),
             (
                 "math.jet",
-                "#WasmExport\npub fn value() -[]> Int { return 7 }\n",
+                "#WasmExport\nfn value() -[]> Int { return 7 }\n",
             ),
         ],
     );
@@ -3694,11 +3721,11 @@ fn web_file_module_same_leaf_partitions_ignore_load_order() {
                 ("main.jet", &main),
                 (
                     "left.jet",
-                    "#Target(JS)\nfn helper() -[]> Int { return 1 }\n#Target(JS)\npub fn value() -[]> Int { return helper() }\n",
+                    "#Target(JS)\nfn helper() -[]> Int { return 1 }\n#Target(JS)\nfn value() -[]> Int { return helper() }\n",
                 ),
                 (
                     "right.jet",
-                    "fn helper() -[]> Int { return 2 }\n#WasmExport\npub fn value() -[]> Int { return helper() }\n",
+                    "fn helper() -[]> Int { return 2 }\n#WasmExport\nfn value() -[]> Int { return helper() }\n",
                 ),
             ],
         );
@@ -3732,7 +3759,7 @@ fn module_local_run_cannot_hijack_web_entrypoint() {
         return;
     }
     let src = r#"#Target(Web)
-module helper { pub fn run() -[]> Int { return 7 } }
+module helper { fn run() -[]> Int { return 7 } }
 #Target(JS)
 fn run() { print("top-level") }
 "#;
@@ -3766,7 +3793,7 @@ fn web_missing_return_is_a_preflight_diagnostic() {
 #[test]
 fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
     let src =
-        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) -[]> [Float] { return ~xs }\nfn run() {}\n";
+        "#Target(Web)\n#WasmExport\nfn echo(xs: [Float]) -[]> [Float] { return xs.copy() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_wasm_abi.jet")
         .expect_err("unsupported Wasm ABI must be rejected before emission");
     assert!(
@@ -3777,7 +3804,7 @@ fn wasm_unsupported_export_abi_is_a_preflight_diagnostic() {
 
 #[test]
 fn wasm_unsupported_internal_abi_is_a_preflight_diagnostic() {
-    let src = "#Target(Web)\nfn helper(xs: [Float]) -[]> [Float] { return ~xs }\nfn run() {}\n";
+    let src = "#Target(Web)\nfn helper(xs: [Float]) -[]> [Float] { return xs.copy() }\nfn run() {}\n";
     let diags = jet::compile_web_with_path(src, "tests/fixtures/web_bad_internal_wasm_abi.jet")
         .expect_err("unsupported internal Wasm ABI must be rejected before emission");
     assert!(
@@ -3820,7 +3847,7 @@ fn run() { print(summarize(4)) }
         "TIR print was not emitted:\n{wasm}"
     );
     assert!(
-        wasm.contains("__jet_text: &String") || wasm.contains("__jet_text: String"),
+        wasm.contains("__jet_text: &str") || wasm.contains("__jet_text: String"),
         "internal String parameter was rejected:\n{wasm}"
     );
 }
@@ -4263,7 +4290,7 @@ fn web_trace_map_keeps_qualified_handler_identity() {
 use core.web as web
 module handlers {
     #Target(JS)
-    pub fn init() { web.on("#new-task", "input", (ev) -> {}) }
+    fn init() { web.on("#new-task", "input", (ev) -> {}) }
 }
 #Target(JS)
 fn init() { handlers.init() }
@@ -4426,7 +4453,7 @@ fn web_grouped_use_list_wasm_bridge_roundtrip() {
 use core.math.[abs, min, max, clamp]
 
 #WasmExport
-pub fn compute() -[]> Int {
+fn compute() -[]> Int {
     return abs(-8) + min(9, 4) + max(0, 0) + clamp(0, 0, 0)
 }
 
@@ -4880,7 +4907,7 @@ fn web_wasm_fixed_int_list_rejects_forged_ownership() {
     }
     let src = r#"
 #WasmExport
-fn echo_fixed(xs: [I64]) -> [I64] { ~xs }
+fn echo_fixed(xs: [I64]) -> [I64] { xs.copy() }
 
 #Target(JS)
 fn run() {
@@ -5641,4 +5668,49 @@ console.log("ok");
     );
     assert_eq!(String::from_utf8_lossy(&node.stdout), "ok\n");
     let _ = fs::remove_dir_all(&root);
+}
+
+fn assert_ratified_pattern_web_golden(stem: &str, target: &str) {
+    assert!(
+        have_tool("rustc") && have_tool("node"),
+        "ratified pattern Web receipts require rustc and node"
+    );
+    let shown = format!("Examples/features/patterns/{stem}.jet");
+    let source = format!("#Target({target})\n{}", fs::read_to_string(&shown).unwrap());
+    let expected = fs::read_to_string(format!(
+        "Examples/features/expected/patterns/{stem}.out"
+    )).unwrap();
+    let dir = build_web_fixture(&format!("{stem}_{target}"), &source, &shown);
+    let actual = if target == "JS" {
+        run_web_app(&dir)
+    } else {
+        run_node_harness(&dir, "ratified_patterns_wasm.mjs", r#"
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"#)
+    };
+    assert_eq!(actual, expected, "{stem} changed meaning on {target}");
+    fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn ratified_record_list_patterns_web_js_golden() {
+    assert_ratified_pattern_web_golden("record_list_patterns", "JS");
+}
+
+#[test]
+fn ratified_record_list_patterns_web_wasm_golden() {
+    assert_ratified_pattern_web_golden("record_list_patterns", "Wasm");
+}
+
+#[test]
+fn ratified_map_patterns_web_js_golden() {
+    assert_ratified_pattern_web_golden("map_patterns", "JS");
+}
+
+#[test]
+fn ratified_map_patterns_web_wasm_golden() {
+    assert_ratified_pattern_web_golden("map_patterns", "Wasm");
 }

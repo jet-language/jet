@@ -1,0 +1,23 @@
+# PORT tests/review.rs::review_receipt_fixture_matrix_tracks_gained_lost_changed_retained_and_authority_widening; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_receipt_fixture_matrix_tracks_gained_lost_changed_retained_and_authority_widening.fixture
+step: jet review {work}/m0/base/run.jet {work}/m0/head/run.jet --base-receipt {work}/m0/base.jetproof --receipt {work}/m0/head.jetproof --json
+exit: 0
+# Original matrix matrix-gained-lost.
+stdout: ~ "\"gained\":1" # Original contains predicate.
+stdout: ~ "\"lost\":1" # Original contains predicate.
+stdout: ~ "\"changed\":1" # Original contains predicate.
+stdout: ~ "\"retained\":1" # Original contains predicate.
+stdout: ~ "\"verdict\":\"proof lost\"" # Original contains predicate.
+step: jet review {work}/m1/base/run.jet {work}/m1/head/run.jet --base-receipt {work}/m1/base.jetproof --receipt {work}/m1/head.jetproof --json
+exit: 0
+# Original matrix matrix-authority-retained.
+stdout: ~ "\"status\":\"widened\"" # Original contains predicate.
+stdout: ~ "\"lost\":0" # Original contains predicate.
+stdout: ~ "\"verdict\":\"authority widened\"" # Original contains predicate.
+step: jet review {work}/m2/base/run.jet {work}/m2/head/run.jet --base-receipt {work}/m2/base.jetproof --receipt {work}/m2/head.jetproof --json
+exit: 0
+# Original matrix matrix-authority-lost.
+stdout: ~ "\"status\":\"widened\"" # Original contains predicate.
+stdout: ~ "\"lost\":1" # Original contains predicate.
+stdout: ~ "\"verdict\":\"authority widened and proof lost\"" # Original contains predicate.

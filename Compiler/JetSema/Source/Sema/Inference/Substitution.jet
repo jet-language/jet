@@ -28,89 +28,158 @@ fn sema_inference_binding_type(name: String, bindings: [SemaInferenceBinding], s
     None
 }
 
+// `seen` holds the parameter names being expanded on this path. A binding
+// whose value mentions its own name (a callee `T` bound to the caller's
+// `List<T>`) keeps that inner name as written, as Rust's single-pass
+// `substitute_type` does, instead of expanding it again without end.
 fn sema_inference_substitute_type_inner(ty: Type, bindings: [SemaInferenceBinding], seen: [String]) -> Type Never! {
     if ty == {
         .Named(name) -> {
-            value :: sema_inference_binding_type(name, bindings, seen) ?? return ty
-            if type_identity_equal(value, ty) -> return ~ty
-            sema_inference_substitute_type_inner(value, bindings, seen)
+            expanding :: loop seen_name in seen {
+                if seen_name == name -> break true
+            } ?? false
+            if expanding -> return ty.copy()
+            value :: sema_inference_binding_type(name, bindings, seen) ?? return ty.copy()
+            if type_identity_equal(value, ty) -> return ty.copy()
+            next_seen := seen
+            &next_seen.push(name)
+            sema_inference_substitute_type_inner(value, bindings, next_seen)
         }
-        .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, [String]{})}
-        .Map(key, key_span, value) -> Type.Map{key: sema_inference_substitute_type_inner(key, bindings, [String]{}), key_span: key_span, value: sema_inference_substitute_type_inner(value, bindings, [String]{})}
-        .Shared(inner) -> Type.Shared{inner: sema_inference_substitute_type_inner(inner, bindings, [String]{})}
-        .Option(inner) -> Type.Option{inner: sema_inference_substitute_type_inner(inner, bindings, [String]{})}
-        .Result(ok, err) -> Type.Result{ok: sema_inference_substitute_type_inner(ok, bindings, [String]{}), err: sema_inference_substitute_type_inner(err, bindings, [String]{})}
+        .List(inner) -> Type.List{element: sema_inference_substitute_type_inner(inner, bindings, seen)}
+        .Map(key, key_span, value) -> Type.Map{key: sema_inference_substitute_type_inner(key, bindings, seen), key_span: key_span, value: sema_inference_substitute_type_inner(value, bindings, seen)}
+        .Shared(inner) -> Type.Shared{inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
+        .Option(inner) -> Type.Option{inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
+        .Result(ok, err) -> Type.Result{ok: sema_inference_substitute_type_inner(ok, bindings, seen), err: sema_inference_substitute_type_inner(err, bindings, seen)}
         .Fn(params, ret, effects, contract, metadata, provenance) -> {
-            normalized :: loop param in params -> sema_inference_substitute_type_inner(param, bindings, [String]{})
-            normalized_ret :: if ret == .Val(declared) -> Val(sema_inference_substitute_type_inner(declared, bindings, [String]{})) else -> None
+            normalized :: loop param in params -> sema_inference_substitute_type_inner(param, bindings, seen)
+            normalized_ret :: if ret == .Val(declared) -> Val(sema_inference_substitute_type_inner(declared, bindings, seen)) else -> None
             Type.Fn{params: normalized, ret: normalized_ret, effect_bound: effects, param_contract: contract, call_metadata: metadata, return_view_provenance: provenance}
         }
         .Apply(name, args) -> {
-            normalized :: loop arg in args -> sema_inference_substitute_type_inner(arg, bindings, [String]{})
+            normalized :: loop arg in args -> sema_inference_substitute_type_inner(arg, bindings, seen)
             Type.Apply{name: name, args: normalized}
         }
         .Tuple(fields) -> {
-            normalized :: loop field in fields -> TypeTupleField{name: field.name, ty: sema_inference_substitute_type_inner(field.ty, bindings, [String]{})}
+            normalized :: loop field in fields -> TypeTupleField{name: field.name, ty: sema_inference_substitute_type_inner(field.ty, bindings, seen)}
             Type.Tuple{fields: normalized}
         }
-        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, [String]{}), len: length}
-        .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inference_substitute_type_inner(base, bindings, [String]{}), lo: lo, hi: hi}
-        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_inference_substitute_type_inner(inner, bindings, [String]{})}
+        .FixedList(element, length) -> Type.FixedList{elem: sema_inference_substitute_type_inner(element, bindings, seen), len: length}
+        .InlineRange(base, lo, hi) -> Type.InlineRange{base: sema_inference_substitute_type_inner(base, bindings, seen), lo: lo, hi: hi}
+        .Tagged(marker, inner) -> Type.Tagged{marker: marker, inner: sema_inference_substitute_type_inner(inner, bindings, seen)}
         .Union(members) -> {
-            normalized :: loop member in members -> sema_inference_substitute_type_inner(member, bindings, [String]{})
+            normalized :: loop member in members -> sema_inference_substitute_type_inner(member, bindings, seen)
             Type.Union{members: normalized}
         }
-        .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, [String]{}), dimension: dimension}
+        .Quantity(base, dimension) -> Type.Quantity{base: sema_inference_substitute_type_inner(base, bindings, seen), dimension: dimension}
         else -> ty
     }
 }
 
-pub fn sema_inference_substitute_type_bindings(ty: Type, bindings: [SemaInferenceBinding]) -> Type Never! {
+fn sema_inference_substitute_type_bindings(ty: Type, bindings: [SemaInferenceBinding]) -> Type Never! {
+    // copy: a type no binding changes is the input itself; one copy replaces
+    // the rebuild that copied every part of it.
+    if bindings.len() == 0 || !sema_inference_type_changes(ty, bindings) -> return ty.copy()
     sema_inference_substitute_type_inner(ty, bindings, [String]{})
 }
 
-pub fn sema_inference_substitute_type(ty: Type, names: [String], actuals: [Type]) -> Type Never! {
+// Whether substituting `bindings` into `ty` changes it: some named part has a
+// binding that is not that name itself (the cases where
+// sema_inference_substitute_type_inner rewrites instead of keeping the part).
+fn sema_inference_type_changes(ty: Type, bindings: [SemaInferenceBinding]) -> Bool Never! {
+    if ty == {
+        .Named(name) -> {
+            value :: sema_inference_binding_type(name, bindings, [String]{}) ?? return false
+            return !type_identity_equal(value, ty)
+        }
+        .List(inner) -> return sema_inference_type_changes(inner, bindings)
+        .Shared(inner) -> return sema_inference_type_changes(inner, bindings)
+        .Option(inner) -> return sema_inference_type_changes(inner, bindings)
+        .Tagged(_, inner) -> return sema_inference_type_changes(inner, bindings)
+        .Map(key, _, value) -> return sema_inference_type_changes(key, bindings) || sema_inference_type_changes(value, bindings)
+        .Result(ok, err) -> return sema_inference_type_changes(ok, bindings) || sema_inference_type_changes(err, bindings)
+        .Fn(params, ret, _, _, _, _) -> {
+            loop index in 0..<params.len() {
+                if sema_inference_type_changes(params[index], bindings) -> return true
+            }
+            if ret == .Val(declared) -> return sema_inference_type_changes(declared, bindings)
+            return false
+        }
+        .Apply(_, args) -> {
+            loop index in 0..<args.len() {
+                if sema_inference_type_changes(args[index], bindings) -> return true
+            }
+            return false
+        }
+        .Tuple(fields) -> {
+            loop index in 0..<fields.len() {
+                if sema_inference_type_changes(fields[index].ty, bindings) -> return true
+            }
+            return false
+        }
+        .FixedList(element, _) -> return sema_inference_type_changes(element, bindings)
+        .InlineRange(base, _, _) -> return sema_inference_type_changes(base, bindings)
+        .Quantity(base, _) -> return sema_inference_type_changes(base, bindings)
+        .Union(members) -> {
+            loop index in 0..<members.len() {
+                if sema_inference_type_changes(members[index], bindings) -> return true
+            }
+            return false
+        }
+        else -> return false
+    }
+}
+
+fn sema_inference_substitute_type(ty: Type, names: [String], actuals: [Type]) -> Type Never! {
     bindings :: loop index in 0..<names.len() if index < actuals.len() -> SemaInferenceBinding{name: names[index], ty: actuals[index], source: "specialization"}
     sema_inference_substitute_type_bindings(ty, bindings)
 }
 
-pub fn sema_inference_type_contains_param(ty: Type, name: String, bindings: [SemaInferenceBinding]) -> Bool Never! {
-    normalized :: sema_inference_substitute_type_bindings(ty, bindings)
-    if normalized == {
+// Whether `ty`, with the bindings applied once, still mentions the parameter
+// `name`. Substitution already follows binding chains, so the substituted
+// type is walked as written: substituting its parts again would re-expand a
+// name a binding keeps as written (`shared(T?{…})` inside `fn f<T>` binds the
+// builtin's `T` to the caller's `T?`) and never stop, which Rust's single-pass
+// `substitute_type` never does.
+fn sema_inference_type_contains_param(ty: Type, name: String, bindings: [SemaInferenceBinding]) -> Bool Never! {
+    sema_inference_type_mentions_param(sema_inference_substitute_type_bindings(ty, bindings), name)
+}
+
+fn sema_inference_type_mentions_param(ty: Type, name: String) -> Bool Never! {
+    if ty == {
         .Named(found) -> found == name
-        .List(inner) -> sema_inference_type_contains_param(inner, name, bindings)
-        .Map(key, _, value) -> sema_inference_type_contains_param(key, name, bindings) || sema_inference_type_contains_param(value, name, bindings)
-        .Shared(inner) -> sema_inference_type_contains_param(inner, name, bindings)
-        .Option(inner) -> sema_inference_type_contains_param(inner, name, bindings)
-        .Result(ok, err) -> sema_inference_type_contains_param(ok, name, bindings) || sema_inference_type_contains_param(err, name, bindings)
+        .List(inner) -> sema_inference_type_mentions_param(inner, name)
+        .Map(key, _, value) -> sema_inference_type_mentions_param(key, name) || sema_inference_type_mentions_param(value, name)
+        .Shared(inner) -> sema_inference_type_mentions_param(inner, name)
+        .Option(inner) -> sema_inference_type_mentions_param(inner, name)
+        .Result(ok, err) -> sema_inference_type_mentions_param(ok, name) || sema_inference_type_mentions_param(err, name)
         .Fn(params, ret, _, _, _, _) -> {
             loop param in params {
-                if sema_inference_type_contains_param(param, name, bindings) -> return true
+                if sema_inference_type_mentions_param(param, name) -> return true
             }
-            if ret == .Val(declared) -> sema_inference_type_contains_param(declared, name, bindings) else -> false
+            if ret == .Val(declared) -> sema_inference_type_mentions_param(declared, name) else -> false
         }
         .Apply(_, args) -> {
             loop arg in args {
-                if sema_inference_type_contains_param(arg, name, bindings) -> return true
+                if sema_inference_type_mentions_param(arg, name) -> return true
             }
             false
         }
         .Tuple(fields) -> {
             loop field in fields {
-                if sema_inference_type_contains_param(field.ty, name, bindings) -> return true
+                if sema_inference_type_mentions_param(field.ty, name) -> return true
             }
             false
         }
-        .FixedList(element, _) -> sema_inference_type_contains_param(element, name, bindings)
-        .InlineRange(base, _, _) -> sema_inference_type_contains_param(base, name, bindings)
-        .Tagged(_, inner) -> sema_inference_type_contains_param(inner, name, bindings)
+        .FixedList(element, _) -> sema_inference_type_mentions_param(element, name)
+        .InlineRange(base, _, _) -> sema_inference_type_mentions_param(base, name)
+        .Tagged(_, inner) -> sema_inference_type_mentions_param(inner, name)
         .Union(members) -> {
             loop member in members {
-                if sema_inference_type_contains_param(member, name, bindings) -> return true
+                if sema_inference_type_mentions_param(member, name) -> return true
             }
             false
         }
-        .Quantity(base, _) -> sema_inference_type_contains_param(base, name, bindings)
+        .Quantity(base, _) -> sema_inference_type_mentions_param(base, name)
         else -> false
     }
 }

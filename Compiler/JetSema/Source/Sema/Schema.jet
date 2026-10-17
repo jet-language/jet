@@ -1,0 +1,71 @@
+// D-MIGRATE1/2: canonical published-schema wire snapshot (Rust Schema.rs).
+use jet_foundation.[StructDef, type_name]
+
+SNAPSHOT_VERSION :: U32{1}
+struct SnapshotField {
+    name: String
+    ty: String
+}
+#Error
+struct SchemaSnapshotError { message: String }
+struct SchemaSnapshot {
+    schema_version: U32
+    type_name: String
+    published_version: String
+    squashed_before: String?
+    fields: [SnapshotField]
+
+    fn write(self) -> String Never! {
+        fragments := [String]{"schema_version = {self.schema_version}\ntype = {self.type_name}\npublished_version = {self.published_version}\n"}
+        if self.squashed_before == .Val(before) -> &fragments.push("squashed_before = {before}\n")
+        loop field in self.fields -> &fragments.push("field {field.name}: {field.ty}\n")
+        fragments.join("")
+    }
+
+    fn parse(raw: String) -> SchemaSnapshot SchemaSnapshotError! {
+        schema_version := U32?{None}
+        name := String?{None}
+        published := String?{None}
+        before := String?{None}
+        fields := [SnapshotField]{}
+        loop untrimmed in raw.split("\n") {
+            line :: untrimmed.trim()
+            if line == "" -> next
+            if {
+                line.starts_with("schema_version = ") -> {
+                    rest :: line.removeprefix("schema_version = ")
+                    bytes :: rest.bytes()
+                    index := if rest.starts_with("+") -> 1 else -> 0
+                    number := 0
+                    if index == bytes.len() -> return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
+                    loop index < bytes.len() {
+                        digit :: Int.from_u8(bytes[index]) - 48
+                        if digit < 0 || digit > 9 || number > 429496729 || (number == 429496729 && digit > 5) -> return Err(SchemaSnapshotError{message: "invalid schema_version: {rest}"})
+                        number = number * 10 + digit
+                        index += 1
+                    }
+                    schema_version = Val(U32{number})
+                }
+                line.starts_with("type = ") -> name = Val(line.removeprefix("type = "))
+                line.starts_with("published_version = ") -> published = Val(line.removeprefix("published_version = "))
+                line.starts_with("squashed_before = ") -> before = Val(line.removeprefix("squashed_before = "))
+                line.starts_with("field ") -> {
+                    rest :: line.removeprefix("field ")
+                    colon :: rest.find(":")
+                    if colon < 0 -> return Err(SchemaSnapshotError{message: "malformed field line: {line}"})
+                    &fields.push(SnapshotField{name: rest.slice(0, colon).trim(), ty: rest.slice(colon + 1, rest.len()).trim()})
+                }
+                else -> return Err(SchemaSnapshotError{message: "unknown line in schema snapshot: {line}"})
+            }
+        }
+        version :: schema_version ?? return Err(SchemaSnapshotError{message: "missing schema_version"})
+        type_name :: name ?? return Err(SchemaSnapshotError{message: "missing type"})
+        published_version :: published ?? return Err(SchemaSnapshotError{message: "missing published_version"})
+        Ok(SchemaSnapshot{schema_version: version, type_name: type_name, published_version: published_version, squashed_before: before, fields: fields})
+    }
+}
+
+fn snapshot_from_struct(definition: StructDef, version: String) -> SchemaSnapshot Never! {
+    fields :: loop field_index in 0..<definition.fields.len() -> SnapshotField{name: definition.fields[field_index].name, ty: type_name(definition.fields[field_index].ty)}
+    SchemaSnapshot{schema_version: SNAPSHOT_VERSION, type_name: definition.name, published_version: version, squashed_before: None, fields: fields}
+}

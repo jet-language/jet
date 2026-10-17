@@ -1,0 +1,13 @@
+Jet Design Rule Test - Answers
+
+1: The value's debt is unsettled (owed a use); it cannot be dropped. Fixes: use the value, or call `.drop("reason")` which is a gate.
+
+2: The task owes a join or detach; it may not be dropped. Fixes: join or detach from the task.
+
+3: The Txn owes a transition to Committed or RolledBack but remains in Open; it may not be dropped and cannot return without settling the debt.
+
+4: Call `.drop("reason")` on it, which is a gate.
+
+5: `jet inspect gates` lists every gate, including all places where `.drop()` was called to walk away from debts.
+
+6: The ticket owes exactly one consume; consuming it twice violates the constraint—error.

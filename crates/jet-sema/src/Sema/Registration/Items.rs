@@ -177,7 +177,7 @@ pub(crate) fn register_distinct(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&d.name) {
+    if registry.reserves_type_name(&d.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", d.name),
@@ -255,7 +255,7 @@ pub(crate) fn register_distinct(
     }
 }
 
-/// D-TYPEALIAS1 / D-ALIAS-OP1=B: register `alias Name<T> :: …` — generic shortcuts only.
+/// D-VIS-REEXPORT1 / D-ALIAS-BIND2: bare nominal aliases preserve their target's identity.
 pub(crate) fn register_type_alias(
     a: &crate::AST::TypeAliasDef,
     registry: &mut TypeRegistry,
@@ -263,7 +263,7 @@ pub(crate) fn register_type_alias(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&a.name) {
+    if registry.reserves_type_name(&a.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", a.name),
@@ -281,7 +281,7 @@ pub(crate) fn register_type_alias(
         ));
         return;
     }
-    if a.type_params.is_empty() {
+    if a.type_params.is_empty() && !matches!(&a.target, Type::Named(_)) {
         diags.push(crate::Generics::e0324(a.name_span));
         return;
     }
@@ -521,45 +521,39 @@ pub(crate) fn eval_comptime_items(
         // the files a module's constants read first (`comptime_module_order`)
         // and mirrors each value onto its module's comptime state; seed those
         // values here unless this module declares the name itself.
-        let declared_here: HashSet<String> = items
-            .iter()
-            .filter_map(|item| match item {
-                Item::Const(constant) => Some(constant.name.clone()),
-                Item::Func(function) => Some(function.name.clone()),
+        if items.iter().any(|item| matches!(item,
+            Item::Const(constant) if const_evaluated_at_build(constant) && constant.ct.is_none()))
+        {
+            let declared_here: HashSet<&str> = items.iter().filter_map(|item| match item {
+                Item::Const(constant) => Some(constant.name.as_str()),
+                Item::Func(function) => Some(function.name.as_str()),
                 _ => None,
-            })
-            .collect();
-        let mut sibling_values = Vec::new();
-        for sibling in name_ledger.namespace_siblings(module_idx) {
-            for item in &states[sibling].items {
-                let Item::Const(constant) = item else {
-                    continue;
-                };
-                if let (Some(value), Some(ty)) = (&constant.ct, &constant.ty) {
-                    if !declared_here.contains(&constant.name) {
-                        sibling_values.push((constant.name.clone(), ty.clone(), value.clone()));
+            }).collect();
+            for sibling in name_ledger.namespace_siblings(module_idx) {
+                for index in 0..states[sibling].items.len() {
+                    let Item::Const(constant) = &states[sibling].items[index] else { continue };
+                    if declared_here.contains(constant.name.as_str())
+                        || globals.contains_key(&constant.name)
+                    {
+                        continue;
                     }
+                    let (Some(value), Some(ty)) = (&constant.ct, &constant.ty) else { continue };
+                    let (name, ty, value) = (constant.name.clone(), ty.clone(), value.clone());
+                    states[module_idx].consts.insert(name.clone(), ty);
+                    if let Some(env) = reuse {
+                        global_digests.insert(name.clone(), env.value_digest(&value));
+                    }
+                    globals.insert(name, value);
                 }
             }
         }
-        for (name, ty, value) in sibling_values {
-            if globals.contains_key(&name) {
-                continue;
-            }
-            states[module_idx].consts.insert(name.clone(), ty);
-            if let Some(env) = reuse {
-                global_digests.insert(name.clone(), env.value_digest(&value));
-            }
-            globals.insert(name, value);
-        }
         for index in 0..items.len() {
-            let (name, value, known, known_ty, module_value) = match &items[index] {
+            let (name, value, known, known_ty) = match &items[index] {
                 Item::Const(c) if const_evaluated_at_build(c) => (
                     c.name.clone(),
                     c.value.clone(),
                     c.ct.clone(),
                     c.ty.clone(),
-                    !c.is_comptime,
                 ),
                 _ => continue,
             };
@@ -747,13 +741,10 @@ pub(crate) fn eval_comptime_items(
                         &globals,
                     );
 
-                    // A literal module constant keeps its checked type, so
-                    // `U8{5}` and an empty `[Rgb]{}` stay exact. For a
-                    // comptime binding, `v.jet_type()` reads the element type
-                    // off the value's first element; a fixed-return-type
-                    // builtin whose result is empty prefers its known static
-                    // return type.
-                    let ty = match checked_ty.filter(|_| module_value) {
+                    // Evaluation values erase numeric widths and cannot infer
+                    // empty collection elements. Keep the initializer's checked
+                    // type for prep bindings as well as ordinary constants.
+                    let ty = match checked_ty {
                         Some(ty) => ty,
                         None => comptime_builtin_fixed_return_type(&value, core_imports, &v)
                             .unwrap_or_else(|| v.jet_type()),
@@ -1628,7 +1619,33 @@ fn module_scalar_const_type(c: &crate::AST::ConstDef) -> Option<Type> {
         {
             Some(Type::String)
         }
+        Expr::TypedLit { .. } => module_typed_scalar_const_type(c),
         _ => supported_module_array_type(c),
+    }
+}
+
+// D-BIND-BARE1 puts a scalar's type on its literal, not on the binding.
+// Classify only literal operands here; the existing checked evaluator proves
+// the conversion/range and retains its type before CtValue erases widths.
+fn module_typed_scalar_const_type(c: &crate::AST::ConstDef) -> Option<Type> {
+    let Expr::TypedLit { head: Some(ty), body, .. } = &c.value else { return None };
+    if !matches!(ty, Type::Int | Type::IntN { .. } | Type::Float | Type::Float32 | Type::Bool) {
+        return None;
+    }
+    let value = match body {
+        crate::AST::TypedLitBody::Value(value) => value.as_ref(),
+        crate::AST::TypedLitBody::Elements(values) if values.len() == 1 => &values[0],
+        _ => return None,
+    };
+    module_scalar_literal(value).then(|| ty.clone())
+}
+
+fn module_scalar_literal(value: &Expr) -> bool {
+    match value {
+        Expr::Int(..) | Expr::Float(..) | Expr::Bool(..) => true,
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => matches!(inner.as_ref(), Expr::Int(..) | Expr::Float(..)),
+        Expr::Paren(inner, _) => module_scalar_literal(inner),
+        _ => false,
     }
 }
 
@@ -1649,7 +1666,7 @@ fn module_value_const(c: &crate::AST::ConstDef) -> bool {
 /// Evaluated before type registration: comptime bindings and literal module
 /// constants share the one compile-time evaluator.
 pub(crate) fn const_evaluated_at_build(c: &crate::AST::ConstDef) -> bool {
-    c.is_comptime || module_value_const(c)
+    c.is_comptime || module_typed_scalar_const_type(c).is_some() || module_value_const(c)
 }
 
 /// Literal data only: no calls, operators, or name reads. An uppercase
@@ -1714,7 +1731,7 @@ pub(crate) fn register_struct(
     consts: &HashMap<String, Type>,
     target: &jet_foundation::Layout::TargetLayout,
 ) {
-    if is_reserved_type(&s.name) {
+    if registry.reserves_type_name(&s.name) && !s.compiler_builtin_error {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", s.name),
@@ -1732,6 +1749,26 @@ pub(crate) fn register_struct(
         ));
         return;
     }
+    register_struct_fields(s, registry, diags, target);
+}
+
+/// Only the original parsed Prelude supplier registers through this entry.
+/// Stored fields and declared defaults use the ordinary registration body.
+pub(crate) fn register_builtin_error_struct(
+    s: &StructDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
+    register_struct_fields(s, registry, diags, target);
+}
+
+fn register_struct_fields(
+    s: &StructDef,
+    registry: &mut TypeRegistry,
+    diags: &mut Vec<Diagnostic>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
     validate_layout_alignment(s, target, diags);
     let mut field_names = HashSet::new();
     let mut fields = Vec::new();
@@ -1939,10 +1976,10 @@ pub(crate) fn check_strong_shared_cycles(
     struct_ids.sort();
 
     for owner in struct_ids {
-        let Some(fields) = graph.structs.get(&owner).cloned() else {
+        let Some(fields) = graph.structs.get(&owner).copied() else {
             continue;
         };
-        for (fname, fspan, fty) in &fields {
+        for (fname, fspan, fty) in fields {
             if let Some(through) =
                 graph.strong_shared_cycle_witness(&owner, owner.module, fty, &mut Vec::new())
             {
@@ -1969,7 +2006,7 @@ pub(crate) fn check_strong_shared_cycles(
 struct StrongSharedCycleGraph<'a> {
     states: &'a [ModuleState],
     name_ledger: &'a NameLedger,
-    structs: HashMap<StructId, Vec<(String, Span, Type)>>,
+    structs: HashMap<StructId, &'a [(String, Span, Type)]>,
     reaches: HashMap<(StructId, StructId), bool>,
 }
 
@@ -1994,7 +2031,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
         for (module, state) in states.iter().enumerate() {
             for (name, def) in &state.registry.types {
                 if let TypeDef::Struct { fields, .. } = def {
-                    structs.insert(StructId::new(module, name), fields.clone());
+                    structs.insert(StructId::new(module, name), fields.as_slice());
                 }
             }
         }
@@ -2023,6 +2060,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
                     .alias(from_module, namespace)
                     .and_then(|alias| alias.target_module)
             })?;
+        let owner = self.name_ledger.namespace_owner(owner, name).unwrap_or(owner);
         let key = self.struct_key(owner, name)?;
         self.name_ledger
             .visible(from_module, owner, name)
@@ -2032,6 +2070,11 @@ impl<'a> StrongSharedCycleGraph<'a> {
     fn resolve_struct(&self, from_module: usize, name: &str) -> Option<StructId> {
         if let Some(key) = self.struct_key(from_module, name) {
             return Some(key);
+        }
+        if let Some(owner) = self.name_ledger.namespace_owner(from_module, name)
+            .or_else(|| self.name_ledger.generated_type_owner(name))
+        {
+            if let Some(key) = self.struct_key(owner, name) { return Some(key) }
         }
 
         if let Some((namespace, leaf)) = name.rsplit_once("::") {
@@ -2064,14 +2107,15 @@ impl<'a> StrongSharedCycleGraph<'a> {
         }
 
         let mut found = None;
-        for key in self.structs.keys().filter(|key| key.name == name) {
+        for declaration in self.name_ledger.declarations_named(name) {
+            let Some(key) = self.struct_key(declaration.module, name) else { continue };
             if !self.name_ledger.visible(from_module, key.module, name) {
                 continue;
             }
-            if found.as_ref().is_some_and(|previous| previous != key) {
+            if found.as_ref().is_some_and(|previous| previous != &key) {
                 return None;
             }
-            found = Some(key.clone());
+            found = Some(key);
         }
         found
     }
@@ -2124,7 +2168,7 @@ impl<'a> StrongSharedCycleGraph<'a> {
                     return None;
                 }
                 stack.push(target.clone());
-                let fields = self.structs.get(&target).cloned();
+                let fields = self.structs.get(&target).copied();
                 let hit = fields.as_deref().and_then(|fields| {
                     fields.iter().find_map(|(_, _, fty)| {
                         self.strong_shared_cycle_witness(owner, target.module, fty, stack)
@@ -2167,11 +2211,11 @@ impl<'a> StrongSharedCycleGraph<'a> {
                     // the owner through a later sibling edge in this walk.
                     return (false, true);
                 }
-                let fields = self.structs.get(&target).cloned();
+                let fields = self.structs.get(&target).copied();
                 let mut reaches = false;
                 let mut cycle_cut = false;
                 if let Some(fields) = fields {
-                    for (_, _, fty) in &fields {
+                    for (_, _, fty) in fields {
                         let (hit, cut) =
                             self.payload_can_reach_owner_inner(owner, target.module, fty, active);
                         cycle_cut |= cut;
@@ -2257,7 +2301,7 @@ pub(crate) fn register_enum(
     funcs: &HashMap<String, FuncSig>,
     consts: &HashMap<String, Type>,
 ) {
-    if is_reserved_type(&e.name) {
+    if registry.reserves_type_name(&e.name) {
         diags.push(Diagnostic::error(
             "E0106",
             format!("the name `{}` is built in and can't be redefined", e.name),
@@ -2400,25 +2444,28 @@ fn register_type_methods_inner(
     error_on_duplicate: bool,
 ) {
     for item in items {
-        let (type_name, methods, field_names) = match item {
+        let (type_name, methods) = match item {
             Item::Struct(s) => (
                 s.name.as_str(),
-                s.methods
-                    .iter()
-                    .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                s.methods.iter().map(|method| (method, None, None))
+                    .chain(s.trait_impls.iter().flat_map(|block| block.methods.iter()
+                        .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
-                registry.field_names(&s.name),
             ),
             Item::Enum(e) => (
                 e.name.as_str(),
-                e.methods
-                    .iter()
-                    .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()))
+                e.methods.iter().map(|method| (method, None, None))
+                    .chain(e.trait_impls.iter().flat_map(|block| block.methods.iter()
+                        .map(move |method| (method, Some(block.trait_name.as_str()), block.operator_rhs.as_ref()))))
                     .collect::<Vec<_>>(),
-                Vec::new(),
             ),
             _ => continue,
         };
+        for (method, trait_name, rhs) in &methods {
+            if let Some(key) = operator_signature_key(type_name, *trait_name, &method.name, *rhs) {
+                registry.operator_signatures.entry(key).or_insert_with(|| func_to_method_sig(method));
+            }
+        }
         let Some(type_def) = registry.types.get_mut(type_name) else {
             continue;
         };
@@ -2426,9 +2473,62 @@ fn register_type_methods_inner(
             TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
             TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
         };
-        for m in methods {
-            if field_names.iter().any(|f| f == &m.name) {
-                diags.push(method_field_clash(&m.name, type_name, m.name_span));
+        for (m, trait_name, _) in &methods {
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
+            }
+            if trait_name.is_some_and(is_operator_trait) {
+                if methods.iter().any(|(other, other_trait, _)| {
+                    other.name == m.name && !other_trait.is_some_and(is_operator_trait)
+                }) {
+                    diags.push(method_defined_twice(&m.name, type_name, m.name_span, false));
+                }
+                continue;
             }
             if methods_map.contains_key(&m.name) {
                 if !error_on_duplicate {
@@ -2484,22 +2584,38 @@ pub(crate) fn register_impl_methods(
 ) {
     for item in items {
         let Item::Impl(i) = item else { continue };
-        if !registry.contains(&i.type_name) {
+        if i.trait_name.as_deref().is_some_and(is_operator_trait) {
+            for method in &i.methods {
+                if registry.method(&i.type_name, &method.name).is_some() {
+                    diags.push(method_defined_twice(&method.name, &i.type_name, method.name_span, false));
+                }
+                let key = operator_signature_key(&i.type_name, i.trait_name.as_deref(), &method.name, i.operator_rhs.as_ref()).unwrap();
+                registry.operator_signatures.entry(key).or_insert_with(|| func_to_method_sig(method));
+            }
             continue;
         }
-        let field_names = registry.field_names(&i.type_name);
-        let Some(type_def) = registry.types.get_mut(&i.type_name) else {
+        if !registry.contains(&i.type_name) && !registry.source_owns_impl(&i.type_name) {
             continue;
-        };
-        let methods_map = match type_def {
-            TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
-            TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+        }
+        let hook_signatures = &registry.operator_signatures;
+        let methods_map = if registry.source_owns_impl(&i.type_name) {
+            registry.opaque_methods.entry(i.type_name.clone()).or_default()
+        } else {
+            let Some(type_def) = registry.types.get_mut(&i.type_name) else {
+                continue;
+            };
+            match type_def {
+                TypeDef::Struct { methods, .. } | TypeDef::Enum { methods, .. } => methods,
+                TypeDef::Distinct { .. } | TypeDef::Alias { .. } => continue,
+            }
         };
         for m in &i.methods {
-            if field_names.iter().any(|f| f == &m.name) {
-                diags.push(method_field_clash(&m.name, &i.type_name, m.name_span));
-            }
-            if methods_map.contains_key(&m.name) {
+            let hook_name_clash = hook_signatures.keys().any(|key| {
+                let Some((owner, tail)) = key.split_once("::") else { return false; };
+                let Some((_, method_rhs)) = tail.split_once("::") else { return false; };
+                owner == i.type_name && method_rhs.split_once('<').is_some_and(|(name, _)| name == m.name)
+            });
+            if methods_map.contains_key(&m.name) || hook_name_clash {
                 let is_ctor = m.self_param().is_none();
                 diags.push(method_defined_twice(
                     &m.name,
@@ -2551,11 +2667,11 @@ pub(crate) fn register_impl_methods(
 /// checker remains authoritative for arity, arguments, mutation, and failure.
 pub(crate) fn core_string_source_method<'a>(
     modules: &'a [ModuleState],
+    name_ledger: &NameLedger,
     method: &str,
 ) -> Option<&'a Func> {
-    let module = modules.iter().find(|module| {
-        module.module_alias == jet_foundation::CoreSourceParts::CORE_TEXT_STRING_ALIAS
-    })?;
+    let owner = name_ledger.module_by_alias(jet_foundation::CoreSourceParts::CORE_TEXT_STRING_ALIAS)?;
+    let module = modules.get(owner)?;
     let function = module.items.iter().find_map(|item| match item {
         Item::Func(function)
             if !function.is_pub && function.name == method && function.params.first().is_some() =>

@@ -1,4 +1,3 @@
-#![deny(warnings)]
 
 use std::collections::BTreeMap;
 

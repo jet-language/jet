@@ -1,0 +1,26 @@
+
+use core.time as time
+
+fn slow_three() -> Int {
+    time.sleep(25ms)
+    return 3
+}
+
+fn slow_six() -> Int {
+    time.sleep(25ms)
+    return 6
+}
+
+fn run() {
+    handle :: task 7
+    handle.pause()
+    handle.resume()
+    print(handle.join() ?? 0)
+    task.group workers(limit: 2) {
+        child :: task 9
+        print(child.join() ?? 0)
+    }
+    print((task.all { 1, 2 }) ?? [])
+    print((task.race { slow_three(), 4 }) ?? 0)
+    print((task.any { slow_six(), 5 }) ?? 0)
+}

@@ -1,0 +1,115 @@
+// CmdInspect.rs run_inspect_live / run_decisions_live and LiveInspect::render.
+// Every output comes from the validated retained snapshot, never source guesses.
+use jet_foundation.[MIRDecisionIdentity, MIRDecisionRow, MIRDecisionKind, MIRDecisionDisposition, Span, stable_id]
+use jet_optimizer.mir_decision_ledger_from_rows
+
+fn jet_cli_live_text(snapshot: JetCLILiveSnapshot) -> String Never! {
+    event_lines := snapshot.events
+    if event_lines == None && snapshot.raw_events == .Val(_) {
+        event_lines = Val(jet_cli_live_event_render(snapshot.raw_events) ?? return "jet inspect live · invalid snapshot: {err.message}\n")
+    }
+    out := "jet inspect live · pid {snapshot.pid}\nprotocol={snapshot.protocol} session={snapshot.session_id} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id}\n\ntask tree\n"
+    if snapshot.tasks.len() == 0 -> out = "{out}  (no live tasks)\n"
+    loop live_task in snapshot.tasks {
+        deadline :: if live_task.deadline_ms == .Val(value) -> "{value}" else -> "-"
+        wait :: if live_task.wait == "" -> "-" else -> live_task.wait
+        out = "{out}  task {jet_cli_inspect_pad("{live_task.id}", 5)} parent {jet_cli_inspect_pad("{live_task.parent}", 5)} {jet_cli_inspect_pad(live_task.state, 8)} wait={wait} deadline={deadline} cancelled={live_task.cancelled}\n"
+    }
+    out = "{out}\nchannels\n"
+    if snapshot.channels.len() == 0 -> out = "{out}  (no live channels)\n"
+    loop channel in snapshot.channels {
+        capacity :: if channel.capacity == .Val(value) -> "{value}" else -> "∞"
+        out = "{out}  channel {jet_cli_inspect_pad("{channel.id}", 5)} depth {channel.depth}/{capacity} blocked send={channel.send_waiters} recv={channel.recv_waiters} closed={channel.closed}\n"
+    }
+    effects :: snapshot.effects
+    resources :: snapshot.resources
+    out = "{out}\neffects: compute={effects.get("compute") ?? 0} waiting={effects.get("waiting") ?? 0} channel={effects.get("channel") ?? 0} time={effects.get("time") ?? 0} io={effects.get("io") ?? 0}\nresources: workers={resources.get("workers") ?? 0} running={resources.get("running") ?? 0} queued={resources.get("queued") ?? 0} cancelled={resources.get("cancelled") ?? 0} arenas={resources.get("arenas") ?? 0} arena_allocations={resources.get("arena_allocations") ?? 0} arena_bytes={resources.get("arena_bytes") ?? 0}\n\nvalues\n"
+    if snapshot.values.len() == 0 -> out = "{out}  (no live value decisions)\n"
+    loop value in snapshot.values {
+        reason :: if value.reason == "" -> "" else -> " reason={value.reason}"
+        rendered :: if value.rendered_value == .Val(shown) -> " value={shown}" else -> ""
+        out = "{out}  {value.value_id} type={value.type_identity} {value.disposition}{reason}{rendered}\n"
+    }
+    if event_lines == .Val(events) {
+        out = "{out}\nevents\n"
+        if events == "" {
+            out = "{out}  (no runtime event observations)\n"
+        } else {
+            loop line in events.split("\n") -> out = "{out}  {line}\n"
+        }
+    }
+    out
+}
+fn jet_cli_live_identity_fields(snapshot: JetCLILiveSnapshot) -> [JetCLIStatusField] Never! {
+    [JetCLIStatusField]{
+        jet_cli_status_field("scope", jet_cli_status_text("live")), jet_cli_status_field("pid", jet_cli_status_int(snapshot.pid)),
+        jet_cli_status_field("protocol", jet_cli_status_text(snapshot.protocol)), jet_cli_status_field("session_id", jet_cli_status_text(snapshot.session_id)),
+        jet_cli_status_field("source_id", jet_cli_status_text(snapshot.source_id)), jet_cli_status_field("build_id", jet_cli_status_text(snapshot.build_id)),
+        jet_cli_status_field("revision", jet_cli_status_text(snapshot.revision)), jet_cli_status_field("world_id", jet_cli_status_text(snapshot.world_id)),
+    }
+}
+fn jet_cli_live_json_report(snapshot: JetCLILiveSnapshot, plane: String) -> String Never! {
+    values := [JetCLIStatusValue]{}
+    grouped := [String:[String]]{}
+    names := [String]{}
+    loop value in snapshot.values {
+        &values.push(jet_cli_status_object([
+            jet_cli_status_field("value_id", jet_cli_status_text(value.value_id)), jet_cli_status_field("type_identity", jet_cli_status_text(value.type_identity)),
+            jet_cli_status_field("disposition", jet_cli_status_text(value.disposition)), jet_cli_status_field("reason", jet_cli_status_text(value.reason)),
+            jet_cli_status_field("rendered_value", if value.rendered_value == .Val(shown) -> jet_cli_status_text(shown) else -> JetCLIStatusValue.Null),
+        ]))
+        if !grouped.has_key(value.type_identity) -> &names.push(value.type_identity)
+        ids := grouped.get(value.type_identity) ?? [String]{}
+        &ids.push(value.value_id)
+        grouped[value.type_identity] = ids
+    }
+    &names.sort()
+    shapes := [JetCLIStatusValue]{}
+    loop name in names {
+        ids :: grouped.get(name) ?? [String]{}
+        &shapes.push(jet_cli_status_object([jet_cli_status_field("type_identity", jet_cli_status_text(name)), jet_cli_status_field("value_ids", jet_cli_status_array(ids.map(id -> jet_cli_status_text(id))))]))
+    }
+    fields := [JetCLIStatusField]{jet_cli_status_field("plane", jet_cli_status_text(plane))}
+    &fields.extend(jet_cli_live_identity_fields(snapshot))
+    &fields.push(jet_cli_status_field("values", jet_cli_status_array(values)))
+    &fields.push(jet_cli_status_field("shapes", jet_cli_status_array(shapes)))
+    "{jet_cli_status_render("inspect.{plane}", true, fields)}\n"
+}
+fn jet_cli_live_unavailable_ledger(snapshot: JetCLILiveSnapshot) -> MIRDecisionLedger Never! {
+    identity :: MIRDecisionIdentity{source: snapshot.source_id, configuration: snapshot.build_id, profile: "live", target: snapshot.world_id, implementation: snapshot.protocol, artifact: "pid:{snapshot.pid}", run: snapshot.revision}
+    reason :: "the live runtime produced no compiler decision ledger for this run"
+    row :: MIRDecisionRow{id: stable_id("mir-decision", "tier|unavailable|0|0|0|live-decision-ledger|{reason}"), kind: MIRDecisionKind.Tier, disposition: MIRDecisionDisposition.Unavailable, function: None, function_name: "", span: Span{start: 0, end: 0}, rule: "live-decision-ledger", reason: reason, producer: "live.inspect", evidence: "runtime-snapshot", edit: None, derivation: None, identity: None, evidence_method: None, derivation_disposition: None}
+    mir_decision_ledger_from_rows(identity, [MIRDecisionRow]{row})
+}
+fn jet_cli_live_decisions_report(snapshot: JetCLILiveSnapshot, json: Bool) -> String Never! {
+    status :: if snapshot.decisions == None -> "unavailable" else -> "current"
+    ledger :: snapshot.decisions ?? jet_cli_live_unavailable_ledger(snapshot)
+    if !json {
+        text := "decisions: scope=live pid={snapshot.pid} source={snapshot.source_id} build={snapshot.build_id} revision={snapshot.revision} world={snapshot.world_id} record_status={status} retention=bounded redaction=transport-safe\n"
+        loop row in ledger.rows {
+            reference :: if row.derivation == .Val(value) -> value.id else -> "unavailable"
+            disposition :: if row.derivation_disposition == .Val(value) -> jet_cli_optimization_derivation(value) else -> "unknown"
+            text = "{text}decision kind={jet_cli_optimization_kind(row.kind)} disposition={jet_cli_optimization_disposition(row.disposition)} derivation_disposition={disposition} derivation_ref={reference} reason={row.reason} producer={row.producer}\n"
+        }
+        return text
+    }
+    rows := [JetCLIStatusValue]{}
+    counts := [String:Int]{}
+    loop row in ledger.rows {
+        &rows.push(jet_cli_optimization_decision(row))
+        kind :: jet_cli_optimization_kind(row.kind)
+        counts[kind] = (counts.get(kind) ?? 0) + 1
+    }
+    kinds := [JetCLIStatusField]{}
+    loop kind in ([String]{"tier", "inline", "vectorize", "parallel", "copy", "bounds", "deopt", "unreachable", "loop-invariant"}) {
+        count :: counts.get(kind) ?? 0
+        &kinds.push(jet_cli_status_field(kind, jet_cli_status_object([jet_cli_status_field("status", jet_cli_status_text(if count == 0 -> "not-applicable" else -> "present")), jet_cli_status_field("rows", jet_cli_status_int(count))])))
+    }
+    fields := jet_cli_live_identity_fields(snapshot)
+    &fields.push(jet_cli_status_field("record_status", jet_cli_status_text(status)))
+    &fields.push(jet_cli_status_field("retention", jet_cli_status_text("bounded")))
+    &fields.push(jet_cli_status_field("redaction", jet_cli_status_text("transport-safe")))
+    &fields.push(jet_cli_status_field("rows", jet_cli_status_array(rows)))
+    &fields.push(jet_cli_status_field("kinds", jet_cli_status_object(kinds)))
+    "{jet_cli_status_render("inspect.decisions", true, fields)}\n"
+}

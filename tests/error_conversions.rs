@@ -390,7 +390,7 @@ fn width(bytes: [U8]) -> Int Never! { bytes.len() }
 
 fn load() -> Int TargetErr! {
     raw :: fetch()
-    owned :: ~raw
+    owned :: raw.copy()
     size :: owned.len() + 1
     doubled :: size * 2
     if width(owned) != doubled -> return Ok(1)

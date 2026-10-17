@@ -90,7 +90,7 @@ foreign export surface. This is the **D-LIB-REUSE1=B** case.
 
 Under **D-LIB-EXPORT1=C**, a `Library` build can produce a native static or
 shared library, a C header, and generated bindings for each language named by
-the package. The entry module's `pub` items form the exported surface. The
+the package. The entry module's public items (everything outside a `priv module`) form the exported surface. The
 API-freeze check is the single source for the header, bindings, and version
 check. Supported binding names are selected by the library backend rather than
 invented by a host build.
@@ -119,7 +119,7 @@ convention at this edge does not make Jet's internal layout stable.
 
 Under **D-LIB-DYNTRUST1=A**, a loadable `Library` produces a `.jetlib` file
 pinned to one compiler identity. Its header records the host-native target, ABI
-version, library name, checked top-level `pub fn` export table, and payload
+version, library name, checked top-level function export table, and payload
 length. The loaded library declares its effects like any package; the host
 states a grant at the load site. A library asking for more is refused before it
 is mapped.

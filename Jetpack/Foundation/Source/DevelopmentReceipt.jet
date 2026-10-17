@@ -4,39 +4,39 @@
 
 JET_DEVELOPMENT_RECEIPT_HEADER :: prep { "jet-development-receipt-v1" }
 // Rust Prelude/DevelopmentReceipt.rs:80-90: one production-receipt environment protocol.
-pub JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_DIRECTORY" }
-pub JET_DEVELOPMENT_RECEIPT_ENTRY_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_ENTRY" }
-pub JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST" }
-pub JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST" }
-pub JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST" }
-pub JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT" }
-pub JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST" }
-pub JET_DEVELOPMENT_RECEIPT_TARGET_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_TARGET" }
-pub JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST" }
+JET_DEVELOPMENT_RECEIPT_DIRECTORY_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_DIRECTORY" }
+JET_DEVELOPMENT_RECEIPT_ENTRY_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_ENTRY" }
+JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_SOURCE_DIGEST" }
+JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_CLOSURE_DIGEST" }
+JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_DIGEST" }
+JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT" }
+JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_INPUT_COUNT_DIGEST" }
+JET_DEVELOPMENT_RECEIPT_TARGET_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_TARGET" }
+JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST_ENV :: prep { "JET_DEVELOPMENT_RECEIPT_TARGET_DIGEST" }
 
-pub struct JetDevelopmentReceiptInput {
-    pub name: String
-    pub digest: String
+struct JetDevelopmentReceiptInput {
+    name: String
+    digest: String
 }
 
-pub struct JetDevelopmentReceiptPath {
-    pub code: String
-    pub file: String
-    pub line: Int
-    pub function: String
+struct JetDevelopmentReceiptPath {
+    code: String
+    file: String
+    line: Int
+    function: String
 }
 
-pub struct JetDevelopmentReceipt {
-    pub act: String
-    pub locked_closure: String
-    pub inputs: [JetDevelopmentReceiptInput]
-    pub planned_action: String
-    pub outputs: [JetDevelopmentReceiptInput]
-    pub activation_proof: String
-    pub parent_generation: String
-    pub witness: String
-    pub outcome: String
-    pub failure_path: JetDevelopmentReceiptPath?
+struct JetDevelopmentReceipt {
+    act: String
+    locked_closure: String
+    inputs: [JetDevelopmentReceiptInput]
+    planned_action: String
+    outputs: [JetDevelopmentReceiptInput]
+    activation_proof: String
+    parent_generation: String
+    witness: String
+    outcome: String
+    failure_path: JetDevelopmentReceiptPath?
 
     fn render(self) -> String Never! {
         out := "{JET_DEVELOPMENT_RECEIPT_HEADER}\n"
@@ -78,12 +78,12 @@ pub struct JetDevelopmentReceipt {
 }
 
 // The shared symbol hosts use to serialize a receipt.
-pub fn jet_development_receipt_render(receipt: JetDevelopmentReceipt) -> String Never! {
+fn jet_development_receipt_render(receipt: JetDevelopmentReceipt) -> String Never! {
     receipt.render()
 }
 
 // Whether `value` is a `sha256-<64 lowercase hex>` content address.
-pub fn jet_receipt_is_content_address(value: String) -> Bool Never! {
+fn jet_receipt_is_content_address(value: String) -> Bool Never! {
     if !value.starts_with("sha256-") -> return false
     digits :: value.removeprefix("sha256-").bytes()
     if digits.len() != 64 -> return false
@@ -96,7 +96,7 @@ pub fn jet_receipt_is_content_address(value: String) -> Bool Never! {
 
 // Inputs ordered by (name, digest).
 fn jet_receipt_sorted_pairs(values: [JetDevelopmentReceiptInput]) -> [JetDevelopmentReceiptInput] Never! {
-    sorted := ~values
+    sorted := values.copy()
     &sorted.sort_by((left: JetDevelopmentReceiptInput, right: JetDevelopmentReceiptInput) -> (left.name <=> right.name).then(left.digest <=> right.digest))
     sorted
 }
@@ -112,7 +112,7 @@ fn jet_receipt_hex(value: String) -> String Never! {
     loop byte in value.bytes() {
         code :: Int.from_u8(byte)
         &out.push(digits[code >> 4])
-        &out.push(digits[code & 15])
+        &out.push(digits[(code).bit_and(15)])
     }
     String.from_bytes(out) ?? ""
 }
@@ -122,7 +122,7 @@ fn jet_receipt_frame(out: &[U8], value: String) Never! {
     bytes :: value.bytes()
     shift := 56
     loop shift >= 0 {
-        &out.push(U8{(bytes.len() >> shift) & 255})
+        &out.push(U8{((bytes.len() >> shift)).bit_and(255)})
         shift -= 8
     }
     loop byte in bytes -> &out.push(byte)

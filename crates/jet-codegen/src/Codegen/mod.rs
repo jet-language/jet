@@ -338,7 +338,6 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/ColumnList.rs"),
     include_str!("../Prelude/Core/UnicodeString.rs"),
     include_str!("../Prelude/Core/Ascii.rs"),
-    include_str!("../Prelude/Core/ProcessArgs.rs"),
     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
     // execution tier; the evaluator and JIT include this same source.
     include_str!("../Prelude/Core/StringConcat.rs"),
@@ -350,13 +349,11 @@ const PRELUDE_PARTS: &[&str] = &[
     include_str!("../Prelude/Core/RangeBounds.rs"),
     include_str!("../Prelude/Core/InlineRange.rs"),
     include_str!("../Prelude/Core/Disjoint.rs"),
-    include_str!("../Prelude/Core/ExpiringSecret.rs"),
     include_str!("../Prelude/Core/SetAlgebra.rs"),
     include_str!("../Prelude/Core/Duration.rs"),
-    include_str!("../Prelude/Core/Measurement.rs"),
     include_str!("../Prelude/Core/TimeMonotonic.rs"),
+    include_str!("../Prelude/Core/TimeFacts.rs"),
     include_str!("../Prelude/Core/Time.rs"),
-    include_str!("../Prelude/Core/Sketch.rs"),
     include_str!("../Prelude/Core/Contracts.rs"),
     include_str!("../Prelude/Core/MapKey.rs"),
     include_str!("../Prelude/Core/RuntimeStack.rs"),
@@ -373,6 +370,7 @@ const PRELUDE_PARTS: &[&str] = &[
     RESOURCE_FACTS_PRELUDE,
     include_str!("../../../jet-foundation/src/Evidence.rs"),
     include_str!("../Prelude/Core/TestEvidence.rs"),
+    include_str!("../Prelude/Core/NativeTaskBody.rs"),
     include_str!("../Prelude/Core.rs"),
     include_str!("../Prelude/Core/ViewAccess.rs"),
     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
@@ -391,6 +389,7 @@ const PRELUDE_PARTS: &[&str] = &[
     // no Prelude tree to read from.
     include_str!("../Prelude/Core/FSIgnore.rs"),
     include_str!("../Prelude/Core/FSWalk.rs"),
+    include_str!("../Prelude/Core/FSWalk8Raw.rs"),
     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
     include_str!("../Prelude/Core/CollectionFailure.rs"),
     include_str!("../Prelude/Core/SortKernel.rs"),
@@ -445,6 +444,57 @@ const HOST_DEVTOOLS_NATIVE_END: &str = "// JET_HOST_DEVTOOLS_NATIVE_END";
 enum EmbeddedPreludePartSource {
     Static(&'static str),
     Outcome,
+    EncodingJson,
+}
+
+fn push_embedded_encoding_json(out: &mut String) {
+    let embedded_source = include_str!("../../../jet-foundation/src/EncodingJson.rs")
+        .replace("crate::Outcome::", "crate::");
+    let mut source = embedded_source.as_str();
+    out.push_str("\nmod jet_encoding_json {\n");
+    for (marker, body) in [
+        (
+            "include!(\"../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs\");",
+            include_str!("../Prelude/CoreLib/JetStd/EncodingTypes.rs"),
+        ),
+        (
+            "include!(\"../../jet-codegen/src/Prelude/Core/EncodingError.rs\");",
+            include_str!("../Prelude/Core/EncodingError.rs"),
+        ),
+    ] {
+        let (before, after) = source.split_once(marker)
+            .expect("EncodingJson host include marker must exist");
+        out.push_str(before);
+        out.push_str(body);
+        source = after;
+    }
+    out.push_str(source);
+    out.push_str("\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n");
+}
+
+fn push_nested_foundation_import(out: &mut String, source: &str, marker: &str) {
+    let (before, after) = source.split_once(marker)
+        .expect("nested Foundation kernel module marker must exist");
+    out.push_str(before);
+    out.push_str(marker);
+    out.push_str("        use crate::jet_foundation;\n");
+    out.push_str(after);
+}
+
+#[cfg(test)]
+mod encoding_json_embedding_tests {
+    #[test]
+    fn embedded_json_uses_the_canonical_inline_error_abi() {
+        let mut source = String::new();
+        super::push_embedded_encoding_json(&mut source);
+        assert!(!source.contains("include!("));
+        assert!(!source.contains("crate::Outcome::"));
+        assert_eq!(source.matches("pub enum EncodingFormat {").count(), 1);
+        assert_eq!(source.matches("pub struct EncodingError {").count(), 1);
+        assert_eq!(source.matches("fn jet_encoding_error_kernel_show(").count(), 1);
+        assert!(source.contains("pub fn json_unsupported(reason: impl Into<String>)"));
+        assert!(source.contains("pub fn render_json(j: &Dyn, pretty: bool, depth: usize)"));
+    }
 }
 
 struct EmbeddedPreludePart {
@@ -493,11 +543,7 @@ const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
     EmbeddedPreludePart {
         name: "encoding_json",
         dependencies: &["encoding_errors", "json_number"],
-        source: EmbeddedPreludePartSource::Static(concat!(
-            "\nmod jet_encoding_json {\n",
-            include_str!("../../../jet-foundation/src/EncodingJson.rs"),
-            "\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n"
-        )),
+        source: EmbeddedPreludePartSource::EncodingJson,
     },
     EmbeddedPreludePart {
         name: "outcome",
@@ -561,7 +607,7 @@ const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
         )),
     },
     // Checked Arrow file-reader registration depends on the C-data carrier
-    // above and uses the generated crate's DataTree/ArrowData facades.
+    // above and uses the generated crate's Dyn/ArrowData facades.
     EmbeddedPreludePart {
         name: "arrow_file_reader",
         dependencies: &["arrow_data"],
@@ -573,6 +619,18 @@ const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
             include_str!("../../../jet-foundation/src/ArrowFileReader.rs"),
             "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_file_reader\n",
         )),
+    },
+    // JetStd fragments share this dependency rule with crate-root fragments.
+    // CommonTypes' fields must keep their owners even without a direct Core call.
+    EmbeddedPreludePart {
+        name: "jet_std_common_types",
+        dependencies: &["jet_std_file_handles"],
+        source: EmbeddedPreludePartSource::Static(JETSTD_COMMON_TYPES_PRELUDE),
+    },
+    EmbeddedPreludePart {
+        name: "jet_std_file_handles",
+        dependencies: &[],
+        source: EmbeddedPreludePartSource::Static(FILE_HANDLES_PRELUDE),
     },
 ];
 
@@ -607,7 +665,7 @@ const FOUNDATION_PLACEMENTS: &[(&str, FoundationPlacement)] = &[
     ("EncodingErrors", FoundationPlacement::Module("jet_encoding_errors")),
     ("JSONNumber", FoundationPlacement::Module("jet_json_number")),
     ("EncodingJson", FoundationPlacement::Module("jet_encoding_json")),
-    ("DataTree", FoundationPlacement::Module("jet_foundation_datatree")),
+    ("Dyn", FoundationPlacement::Module("jet_foundation_dyn")),
     ("ArrowData", FoundationPlacement::Module("jet_arrow_data")),
     (
         "ArrowFileReader",
@@ -617,6 +675,7 @@ const FOUNDATION_PLACEMENTS: &[(&str, FoundationPlacement)] = &[
     ("SHA256", FoundationPlacement::Module("SHA256")),
     ("PerformanceBudget", FoundationPlacement::Module("PerformanceBudget")),
     ("Numeric", FoundationPlacement::Module("jet_foundation_numeric")),
+    ("Monotonic", FoundationPlacement::Root),
     ("Facts", FoundationPlacement::Module("Facts")),
     ("ResourceSchedule", FoundationPlacement::Module("ResourceSchedule")),
     (
@@ -653,6 +712,7 @@ fn push_foundation_facade(out: &mut String, include_arrow: bool) {
         };
         out.push_str(&format!("    pub mod {module} {{ pub use {target}::*; }}\n"));
     }
+    out.push_str("    pub mod base_encoding_strict { pub use crate::jet_base_encoding_strict::*; }\n");
     out.push_str("}\n");
 }
 
@@ -773,6 +833,8 @@ fn push_embedded_devtools(out: &mut String) {
 }
 
 fn push_game_devtools_control_prelude(out: &mut String) {
+    // Native callbacks and relay functions are already emitted from
+    // DevtoolsNative.rs at Prelude root, not inside this control DTO module.
     let source = include_str!("../../../jet-foundation/src/DevtoolsControl.rs")
         .replace("crate::Devtools::", "super::");
     out.push_str("\nmod jet_devtools_control {\n");
@@ -781,15 +843,13 @@ fn push_game_devtools_control_prelude(out: &mut String) {
     out.push_str(
         "pub use jet_devtools_control::{\
 JetDevtoolsCommand, JetDevtoolsCommandReceipt, JetDevtoolsGameControlKind,\
-JetDevtoolsGameControlRequest, JetDevtoolsGameControlCallbackGuard,\
-jet_devtools_install_game_control_callback, jet_devtools_clear_commands,\
+JetDevtoolsGameControlRequest, jet_devtools_clear_commands,\
 jet_devtools_enqueue_command, jet_devtools_requeue_command_front,\
 jet_devtools_command_count, jet_devtools_poll_command,\
 jet_devtools_poll_database_explain, jet_devtools_enqueue_game_control,\
 jet_devtools_poll_game_control, jet_devtools_record_command_receipt,\
 jet_devtools_update_command_receipt, jet_devtools_poll_command_receipt,\
-jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts,\
-jet_devtools_take_game_control_relays, jet_devtools_clear_game_control_relays};\n",
+jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts};\n",
     );
 }
 fn push_game_debug_policy_const(out: &mut String, policy: &ReleaseDevtoolsPolicy) {
@@ -818,8 +878,12 @@ fn push_prelude_part(out: &mut String, name: &str, emitted: &mut HashSet<&'stati
         push_prelude_part(out, dependency, emitted);
     }
     match &part.source {
+        EmbeddedPreludePartSource::Static(source) if *source == FILE_HANDLES_PRELUDE => {
+            push_nested_foundation_import(out, source, "mod jet_file_lock_native {\n");
+        }
         EmbeddedPreludePartSource::Static(source) => out.push_str(source),
         EmbeddedPreludePartSource::Outcome => push_embedded_outcome(out),
+        EmbeddedPreludePartSource::EncodingJson => push_embedded_encoding_json(out),
     }
 }
 
@@ -830,7 +894,7 @@ fn runtime_diagnostic_projection() -> String {
     let rows = jet_foundation::Registry::diagnostic_rows()
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         });
     let mut out = String::from(
@@ -893,7 +957,7 @@ fn portable_runtime_diagnostic_projection() -> String {
     let rows = jet_foundation::Registry::diagnostic_rows()
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         });
     let mut out = String::from(
@@ -1013,6 +1077,23 @@ fn push_cached_runtime_traits(out: &mut String) {
     out.push_str(
         "pub trait __jet_Iterable: Sized {\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}\n",
     );
+    // D-ITER-HOOK: the native loop bridge for a user `Iterable`. MIR emits one
+    // `JetLoopSource` impl per Iterable owner that forwards here; `iter` runs
+    // once and each `Iterator.next` absence ends the loop.
+    out.push_str(concat!(
+        "pub struct JetIterableLoop<I>(I);\n",
+        "impl<I: __jet_Iterator> Iterator for JetIterableLoop<I>\nwhere\n    I::__jet_Item: 'static,\n{\n",
+        "    type Item = JetLoopAny;\n",
+        "    fn next(&mut self) -> Option<JetLoopAny> {\n",
+        "        __jet_Iterator::next(&mut self.0).ok().map(|value| Box::new(value) as JetLoopAny)\n",
+        "    }\n}\n",
+        "pub fn jet_iterable_loop_source<C>(collection: C, source_kind: JetLoopSourceKind, by_value: bool) -> Box<dyn Iterator<Item = JetLoopAny>>\n",
+        "where\n    C: __jet_Iterable,\n    C::__jet_Iter: __jet_Iterator + 'static,\n    <C::__jet_Iter as __jet_Iterator>::__jet_Item: 'static,\n{\n",
+        "    match source_kind {\n",
+        "        JetLoopSourceKind::Iterable { .. } if by_value => Box::new(JetIterableLoop(__jet_Iterable::iter(collection))),\n",
+        "        _ => jet_loop_source_error(source_kind),\n",
+        "    }\n}\n",
+    ));
     // D-SHAPE-RESOURCE2=A: `Close.close(^self)` is the consuming, infallible
     // cleanup capability that `defer close(^resource)` invokes.
     out.push_str("pub trait __jet_Close: Sized {\n    fn close(self);\n}\n");
@@ -1030,6 +1111,11 @@ const ORDERING_ENUM: &str = concat!(
 );
 const COMPARABLE_TRAIT: &str =
     "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";
+
+// Core source (`Core/font/font.jet`) compares the native `FontStyle` carrier
+// with `==`, which MIR lowers through `__jet_Comparable`. HostServices.rs is
+// also included by hosts without the trait, so the impl lives beside its push.
+const FONT_STYLE_COMPARABLE: &str = "impl __jet_Comparable for JetFontStyle { fn compare(&self, rhs: &Self) -> __jet_Ordering { match (*self as u8).cmp(&(*rhs as u8)) { std::cmp::Ordering::Less => __jet_Ordering::__jet_Less, std::cmp::Ordering::Equal => __jet_Ordering::__jet_Equal, std::cmp::Ordering::Greater => __jet_Ordering::__jet_Greater } } }\n";
 
 fn push_comparable_primitive_impls(out: &mut String) {
     for ty in COMPARABLE_PRIMITIVES {
@@ -1278,6 +1364,14 @@ struct JetTestOutcome {
     property_cases: Option<u64>,
 }
 
+// One unit outcome constructor for Rust-emitted and native callback harnesses.
+fn jet_test_unit_outcome(name: String, expected_failure: bool, result: Result<(), String>) -> JetTestOutcome {
+    let stdout = jet_test_take_output();
+    let (failed, stderr) = match result { Ok(()) => (false, String::new()), Err(error) => (true, error) };
+    let skipped = jet_test_take_whole_skip();
+    JetTestOutcome { name, ok: skipped || (failed == expected_failure), expected_failure, skipped, stdout, stderr, property_cases: None }
+}
+
 fn jet_test_filter() -> Option<String> {
     std::env::var("JET_TEST_FILTER")
         .ok()
@@ -1486,6 +1580,7 @@ where
     }
     jet_test_expect_fail_abort();
     jet_test_timeout_abort();
+    jet_global_shared_reset_attempt();
     jet_testing_clear_failure();
     result
 }
@@ -1511,11 +1606,13 @@ fn jet_test_contract_eligibility<P>(eligible: P) -> Result<bool, String>
 where
     P: FnOnce() -> JetOutcome<bool, JetErr>,
 {
-    match std::panic::catch_unwind(std::panic::AssertUnwindSafe(eligible)) {
-        Ok(Ok(eligible)) => Ok(eligible),
-        Ok(Err(error)) => Err(format!("{:?}", error)),
-        Err(payload) => jet_test_panic_error(payload).map(|()| true),
-    }
+    jet_evidence_with_property_case(|| {
+        match std::panic::catch_unwind(std::panic::AssertUnwindSafe(eligible)) {
+            Ok(Ok(eligible)) => Ok(eligible),
+            Ok(Err(error)) => Err(format!("{:?}", error)),
+            Err(payload) => jet_test_panic_error(payload).map(|()| true),
+        }
+    })
 }
 
 fn jet_test_run_property<F>(
@@ -1525,25 +1622,9 @@ fn jet_test_run_property<F>(
 where
     F: FnOnce() -> Result<(), String>,
 {
-    jet_test_run(expected_failure, run).map(|()| JetPropertyCaseResult::Accepted)
-}
-/// D-E3-1905: the test child is an AOT binary. The release profile is encoded
-/// at compile time so `jet test --release --trace-tiers` proves which binary
-/// was built, without claiming that the test harness used a JIT or interpreter.
-fn jet_test_trace_tier() {
-    if std::env::var_os("JET_TEST_TRACE_TIERS").is_none() {
-        return;
-    }
-    let line = if cfg!(jet_release) {
-        "tier aot profile=release"
-    } else {
-        "tier aot profile=default"
-    };
-    if std::env::var_os("JET_TEST_JSON").is_some() {
-        eprintln!("{line}");
-    } else {
-        println!("{line}");
-    }
+    jet_evidence_with_property_case(|| {
+        jet_test_run(expected_failure, run).map(|()| JetPropertyCaseResult::Accepted)
+    })
 }
 /// Deterministic splitmix64 step, used by `jet test --shuffle` to reorder tests.
 /// Independent of `JetRng`/`PROP_PRELUDE` (that runtime is only emitted when the
@@ -1832,21 +1913,22 @@ fn jet_prop_trace_sample(engine: &str, case_index: u64, seed: u64, input: &str) 
 /// contiguous — those files are one audited compiler/runtime kernel. Optional
 /// fragments are selected from `bundle.used_core`. Package-owned Core behavior
 /// may use an explicit ABI bridge, but never falls back to this path.
-/// The DataTree carrier is owned by Foundation. Keep its source verbatim in a
+/// The Dyn carrier is owned by Foundation. Keep its source verbatim in a
 /// private generated module, expose the protocol path expected by Foundation
 /// encoding kernels, and let `jet_std` re-export that same type below.
-const DATATREE_FOUNDATION_ROOT: &str = concat!(
+const DYN_FOUNDATION_ROOT: &str = concat!(
     "\n// D-SERDE2: the generated Prelude uses Foundation's canonical carrier.\n",
-    "mod jet_foundation_datatree {\n",
-    include_str!("../../../jet-foundation/src/DataTree.rs"),
+    "use jet_foundation::Numeric;\n",
+    "mod jet_foundation_dyn {\n",
+    include_str!("../../../jet-foundation/src/Dyn.rs"),
     "\n}\n",
-    "#[allow(non_snake_case)]\nmod DataTree {\n",
-    "    pub use crate::jet_foundation_datatree::DataTree;\n",
+    "#[allow(non_snake_case)]\nmod Dyn {\n",
+    "    pub use crate::jet_foundation_dyn::{Dyn, DynDateTime};\n",
     "}\n",
 );
 
-const DATATREE_PRELUDE_REEXPORT: &str =
-    "\npub use crate::DataTree::DataTree;\n";
+const DYN_PRELUDE_REEXPORT: &str =
+    "\npub use crate::Dyn::Dyn;\n";
 
 const RESOURCE_FACTS_PRELUDE: &str = concat!(
     "\n#[allow(non_snake_case, unused_imports)]\nmod ResourceSchedule {\n",
@@ -1905,6 +1987,15 @@ const JETSTD_FFI_CALLBACKS_PRELUDE: &str = concat!(
     include_str!("../Prelude/CoreLib/JetStd/FfiCallbacks.rs"),
     "\n// JET_VETTED_UNSAFE_END: jet_std_ffi_callbacks\n",
 );
+// #3593: held directories, *at(2) opens, identity stat, rename modes, and
+// extended attributes. AOT and the interpreter include this one file.
+const FILE_HANDLES_PRELUDE: &str = concat!(
+    include_str!("../Prelude/CoreLib/JetStd/FileHandles.rs"),
+    "\n",
+    include_str!("../Prelude/CoreLib/JetStd/Files1Raw.rs"),
+    "\n",
+    include_str!("../Prelude/CoreLib/JetStd/FileLockRaw.rs"),
+);
 const SHARED_ROUTES_PRELUDE: &str =
     include_str!("../Prelude/CoreLib/Top/SharedRoutes.rs");
 
@@ -1928,17 +2019,18 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     "\n}\n",
     include_str!("../Prelude/CoreLib/JetStd/DBPluginWire.rs"),
     include_str!("../Prelude/CoreLib/JetStd/WireOrder.rs"),
-    include_str!("../Prelude/CoreLib/JetStd/DataTreeKind.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DynKind.rs"),
     // D-VALIDATE-DECODE1=B: keep the canonical FieldError rendering beside
-    // DataTree's JetShow/JetDisplay implementations in the same JetStd scope.
+    // Dyn's JetShow/JetDisplay implementations in the same JetStd scope.
     include_str!("../Prelude/Core/FieldError.rs"),
     // D-VALIDATE-DECODE1=B: the accumulated decode/validate failure has one
     // rendering. Splice it beside the type so `impl JetShow for FieldError`
     // below, the Cranelift host, and the TIR evaluator cannot drift (I9).
-    DATATREE_PRELUDE_REEXPORT,
-    include_str!("../Prelude/CoreLib/JetStd/DataTree.rs"),
+    DYN_PRELUDE_REEXPORT,
+    include_str!("../Prelude/CoreLib/JetStd/Dyn.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/DynRuntime.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TestingComparison.rs"),
-    "\njet_datatree_decode_helpers!();\n",
+    "\njet_dyn_decode_helpers!();\n",
     // `EncodingStream.rs` validates exact JSON number tokens through
     // `jet_std::validate_json_number`. The root `jet_json_number` module holds
     // the one implementation; name it here so the generated program, the JIT
@@ -1952,11 +2044,11 @@ const CORELIB_KERNEL_PARTS: &[&str] = &[
     // D-FFI-CALLBACK2=A: generated callback registrations share one managed
     // ownership/ACK/quiescence runtime with the AOT and fixture paths.
     JETSTD_FFI_CALLBACKS_PRELUDE,
-    // The DataTree renderer below and TOML.rs (`super::quote_json`) quote
+    // The Dyn renderer below and TOML.rs (`super::quote_json`) quote
     // through the Foundation JSON kernel. The host that splices these files
     // imports the entry beside them (jet-jit/src/Encoding.rs does the same).
     "\nuse crate::jet_encoding_json::quote_json;\n",
-    include_str!("../Prelude/CoreLib/JetStd/JSONDataTree.rs"),
+    include_str!("../Prelude/CoreLib/JetStd/JSONDyn.rs"),
     include_str!("../Prelude/CoreLib/JetStd/TOML.rs"),
     include_str!("../Prelude/CoreLib/JetStd/YAML.rs"),
     SHARED_ROUTES_PRELUDE,
@@ -2273,9 +2365,6 @@ pub(crate) fn runtime_parts_for_used_core(
     if matches(&["core.reflect", "core.compiler.lang"]) {
         parts.insert(Part::Reflect);
     }
-    if matches(&["core.auth"]) || parts.contains(&Part::Crypto) {
-        parts.insert(Part::AuthTokens);
-    }
     if matches(&["core.auth", "app", "core.web"]) {
         parts.insert(Part::AuthSession);
     }
@@ -2330,6 +2419,7 @@ fn push_corelib_prelude_for_test_harness_with_forces(
     out.push_str(TESTING_SHARED_PRELUDE);
     out.push_str(TEST_PRELUDE);
     out.push_str(PROP_PRELUDE);
+    out.push_str(include_str!("../Prelude/Core/CAbiTest.rs"));
 }
 
 fn push_corelib_prelude_inner(
@@ -2551,6 +2641,7 @@ fn core_runtime_body_for_with_policy(
     if needs_ui_host {
         body.push_str(&canonical_font_prelude());
         body.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        body.push_str(FONT_STYLE_COMPARABLE);
     }
     if needs_ui_surface {
         body.push_str("\nmod jet_tui_kernel {\n");
@@ -3134,6 +3225,7 @@ pub(crate) fn push_full_corelib_prelude_with_policy(
     if runtime_parts.contains(&MirRuntimePartId::Ui) {
         out.push_str(&canonical_font_prelude());
         out.push_str(include_str!("../Prelude/Core/HostServices.rs"));
+        out.push_str(FONT_STYLE_COMPARABLE);
         out.push_str("\nmod jet_tui_kernel {\n");
         out.push_str(TUI_KERNEL_PRELUDE);
         out.push_str("\n}\n");
@@ -3219,10 +3311,13 @@ fn push_typed_core_optional_parts(
             out.push_str(include_str!("../Prelude/CoreLib/Top/TestingShared.rs"));
         }
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        out.push_str(include_str!("../Prelude/Core/Terminal8Raw.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileIo.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileValues.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
@@ -3286,6 +3381,8 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     if runtime_parts.contains(&MirRuntimePartId::Browser) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7ReportRaw.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::Args) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
@@ -3294,9 +3391,6 @@ impl JetDbRequestScope { fn enter(_: Option<String>) -> Self { Self } }\n",
     }
     if runtime_parts.contains(&MirRuntimePartId::Reflect) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
-    }
-    if runtime_parts.contains(&MirRuntimePartId::AuthTokens) {
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
     }
     if runtime_parts.contains(&MirRuntimePartId::AuthSession) {
         out.push_str(include_str!("../Prelude/CoreLib/Top/AuthSession.rs"));
@@ -3374,6 +3468,7 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
         || runtime_parts.contains(&MirRuntimePartId::Apps)
     {
         out.push_str(LIVEQUERY_PRELUDE);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs"));
     }
     if !runtime_parts.contains(&MirRuntimePartId::Apps) {
         return;
@@ -3384,10 +3479,14 @@ fn push_typed_app_preludes(out: &mut String, runtime_parts: &BTreeSet<MirRuntime
     out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_QUERY_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_FORMS_PRELUDE_RAW));
+    out.push_str(WEB_FORMS_RENDER_PRELUDE);
     out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
     out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7WebRaw.rs"));
     out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
+    out.push_str(DEVSERVER_PRELUDE);
+    out.push_str(APP_PRELUDE);
 }
 
 
@@ -3506,10 +3605,10 @@ fn push_corelib_prelude_body(
     // the unconditional JetStd data carrier, while LiveQuery remains optional.
     out.push_str(LIVE_LIFECYCLE_PRELUDE);
     // Foundation EncodingJson/JSON/diagnostic kernels import
-    // `crate::DataTree::DataTree`; emit the canonical carrier at crate root
+    // `crate::Dyn::Dyn`; emit the canonical carrier at crate root
     // before the JetStd brace chain begins. JetStd re-exports this same type
-    // through DATATREE_PRELUDE_REEXPORT below.
-    out.push_str(DATATREE_FOUNDATION_ROOT);
+    // through DYN_PRELUDE_REEXPORT below.
+    out.push_str(DYN_FOUNDATION_ROOT);
     // D-SIMD1/D-SIMD2/D-SIMD3 / I9: MathTaskMem's fixed-array lane values
     // call this root-level kernel. JIT and TIR/comptime include the same
     // source directly and marshal their resident carriers into its slice API.
@@ -3596,6 +3695,10 @@ fn push_corelib_prelude_body(
         {
             continue;
         }
+        if *part == JETSTD_COMMON_TYPES_PRELUDE {
+            push_prelude_dependency_closure(out, &["jet_std_common_types"]);
+            continue;
+        }
         // The Source Shared interop region names the resident JIT's
         // `jet_jit::SourceSharedInterop` protocol, which a generated program
         // does not link. jet-jit and jet-comptime cut the same marked region.
@@ -3604,12 +3707,17 @@ fn push_corelib_prelude_body(
         } else {
             std::borrow::Cow::Borrowed(*part)
         };
-        // Host crates include UrlMime.rs directly, so it includes its sibling
-        // MIME kernel. AOT already embeds that kernel as the preceding part.
-        out.push_str(
-            part.strip_prefix("    include!(\"Mime.rs\");\n\n")
-                .unwrap_or(&part),
-        );
+        let part = part
+            .strip_prefix("    include!(\"Mime.rs\");\n\n")
+            .unwrap_or(&part);
+        // Nested host kernels must import the generated Foundation facade:
+        // unlike a Cargo dependency, that crate-root module is not in the
+        // Rust 2018 extern prelude.
+        if part == include_str!("../Prelude/CoreLib/JetStd/YAML.rs") {
+            push_nested_foundation_import(out, part, "    pub mod yaml {\n");
+        } else {
+            out.push_str(part);
+        }
     }
     // Typed query plans are shared semantic facts. Keep the root-level
     // definitions available to JetStd's Query carrier even when no optional
@@ -3634,20 +3742,43 @@ fn push_corelib_prelude_body(
     // Flat fragments outside `mod jet_std` name it unqualified.
     out.push_str("\npub use crate::jet_std::JetTaskGroupRuntime;\n");
     // D-SERDE-ACCESS=B: the Foundation carrier's accessors are a trait in the
-    // kernel's `DataTree.rs`; flat user code calls them by method syntax.
-    out.push_str("\npub use crate::jet_std::JetDataTreeAccess;\n");
+    // kernel's `Dyn.rs`; flat user code calls them by method syntax.
+    out.push_str("\npub use crate::jet_std::JetDynAccess;\n");
     // CommonTypes' exact-Int formatting adapters are always emitted.
     out.push_str(include_str!("../Prelude/Core/Fmt.rs"));
     out.push_str(include_str!("../Prelude/Core/FmtAot.rs"));
-    // D-EXEC1: the C-ABI export surface the Jet-native backend links. It
-    // adapts carriers only; every export calls the Prelude function above.
+    // D-EXEC1: the C-ABI carrier surface (handle, byte-slice and allocator
+    // adapters) shared by every program; every export calls the Prelude
+    // function above. The Jet-native backend's full runtime additionally needs
+    // CAbiIter.rs, CAbiTask.rs and the generated CAbiRoutes.rs, whose adapters
+    // name optional modules (jet_email, jet_math_*, ...) that a program only
+    // gets when it uses them. They are never part of a generated Rust program:
+    // Compiler/JetBackend/Tests/prepare-call-runtime.mjs --allparts appends
+    // them to an all-parts runtime crate (mirrors Emit/RuntimePrefix.jet).
+    // Canonical native metadata is shared by the retained-child host and by
+    // the full native runtime; all-parts assembly must not invent a mirror.
+    out.push_str(
+        "\n// JET_VETTED_UNSAFE_BEGIN: jet_native_meta\n\
+         // AUDIT: image-bound native metadata owns the canonical nine-word\n\
+         // descriptor layout and copies only admitted live metadata pointers.\n",
+    );
+    out.push_str(include_str!("../Prelude/Core/NativeMeta.rs"));
+    out.push_str("\n// JET_VETTED_UNSAFE_END: jet_native_meta\n");
     out.push_str(
         "\n// JET_VETTED_UNSAFE_BEGIN: jet_c_abi\n\
          // AUDIT: D-EXEC1 keeps the raw handle, byte-slice and allocator\n\
          // adapters of the Jet-native backend's runtime ABI in this module.\n",
     );
+    // The AOT C-ABI seed adapters need the same generated physical headers,
+    // but not native-backend wrappers over optional source-owned net records.
+    let host_carriers = include_str!("../Prelude/Core/CAbiHost.rs")
+        .split_once("    unsafe extern \"C\" {\n")
+        .expect("host carrier declarations must precede extern functions").0;
+    out.push_str(host_carriers);
+    out.push_str("\n}\n");
     out.push_str(include_str!("../Prelude/Core/CAbi.rs"));
     out.push_str("\n// JET_VETTED_UNSAFE_END: jet_c_abi\n");
+    out.push_str(include_str!("../Prelude/Core/CAbiSession.rs"));
     // Card #1751: the one 80x24 terminal default, read by CommonTypes.rs's
     // TerminalPolicy::default (in the kernel closure above) and by
     // ProcessPty.rs's PtyConfig::default when process/PTY support is emitted.
@@ -3773,7 +3904,6 @@ fn push_corelib_prelude_body(
     );
     let needs_args = core_usage_matches(used_core, &["core.args"]);
     let needs_reflect = core_usage_matches(used_core, &["core.reflect", "core.compiler.lang"]);
-    let needs_auth_tokens = core_usage_matches(used_core, &["core.auth"]) || needs_crypto;
     let needs_auth_session = core_usage_matches(used_core, &["core.auth", "app", "core.web"]);
     let needs_sync = core_usage_matches(used_core, &["core.sync", "app", "core.web", "core.db"]);
     let needs_services = core_usage_matches(used_core, &["core.service"]);
@@ -3826,6 +3956,7 @@ fn push_corelib_prelude_body(
     out.push_str("fn jet_log_process_exit(code: i64) { std::process::exit(code as i32); }\n");
     out.push_str(include_str!("../Prelude/Core/LogState.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/Log.rs"));
+    out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LogRaw.rs"));
     out.push_str(include_str!(
         "../Prelude/CoreLib/Top/RingCsvLogTimeCrypto.rs"
     ));
@@ -3841,7 +3972,6 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/NetPure.rs"));
     out.push_str(include_str!("../Prelude/Core/NetError.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/NetHTTP.rs"));
-    out.push_str(include_str!("../Prelude/CoreLib/Top/Solver.rs"));
     // Scheduler waits always call the deadline raiser, and FakeData below
     // always uses the seeded stream. They are kernel dependencies, not
     // conditional math surface.
@@ -3849,7 +3979,6 @@ fn push_corelib_prelude_body(
     out.push_str(include_str!("../Prelude/Core/StringBytes.rs"));
     out.push_str(include_str!("../Prelude/Core/TimeInstant.rs"));
     out.push_str(include_str!("../Prelude/CoreLib/Top/MathRandomTime.rs"));
-    out.push_str(include_str!("../Prelude/CoreLib/Top/FakeData.rs"));
 
     if needs_email {
         out.push_str(include_str!("../Prelude/CoreLib/Email.rs"));
@@ -3950,12 +4079,15 @@ fn push_corelib_prelude_body(
         // #1480: split out of FSIoEnvOsTesting.rs so the JIT host can
         // `include!` this exact source (I9 — single Prelude source of truth).
         out.push_str(include_str!("../Prelude/CoreLib/Top/IoLineStream.rs"));
+        out.push_str(include_str!("../Prelude/Core/Terminal8Raw.rs"));
         // D-CONFIG-ENV1 / I9: source overlay and dotenv parsing are one
         // Prelude fragment for AOT and the interpreter ambient adapter.
         out.push_str(include_str!("../Prelude/Core/EnvConfig.rs"));
         out.push_str(include_str!("../Prelude/Core/EnvProjection.rs"));
         out.push_str(include_str!("../Prelude/Core/FSOps.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FileStream.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileIo.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CryptoFileValues.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSRuntimeOps.rs"));
         out.push_str(include_str!("../Prelude/Core/StdinReader.rs"));
         out.push_str(include_str!("../Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"));
@@ -4037,6 +4169,8 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     if needs_browser {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Browser.rs"));
         out.push_str(include_str!("../Prelude/BrowserTest.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7BrowserRaw.rs"));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7ReportRaw.rs"));
     }
     if needs_args {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Args.rs"));
@@ -4045,10 +4179,6 @@ impl JetDbRequestScope {{ fn enter(_: Option<String>) -> Self {{ Self }} }}\n",
     }
     if needs_reflect {
         out.push_str(include_str!("../Prelude/CoreLib/Top/Reflect.rs"));
-    }
-    if needs_auth_tokens {
-        // D-AUTH2=A: JWT/PASETO verify prelude.
-        out.push_str(include_str!("../Prelude/CoreLib/Top/Auth.rs"));
     }
     if needs_auth_session {
         // D-AUTH1=A: sessions + `app.auth` prelude.
@@ -4112,6 +4242,7 @@ const CORE_EMBEDDED_HARDWARE_HOST_BEGIN: &str =
 const CORE_FIXED_ARITHMETIC_PRELUDE_RAW: &str =
     include_str!("../Prelude/Core/FixedArithmetic.rs");
 const CORE_POWER_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Power.rs");
+const INLINE_LIST_PRELUDE: &str = include_str!("../Prelude/InlineList.rs");
 const CORE_DIVISION_PRELUDE_RAW: &str = include_str!("../Prelude/Core/Division.rs");
 const PORTABLE_CORE_PRELUDE_RAW: &str = include_str!("../Prelude/PortableCore.rs");
 const TARGET_ADAPTERS_PRELUDE_RAW: &str = include_str!("../Prelude/TargetAdapters.rs");
@@ -4168,6 +4299,7 @@ const WEB_ROUTER_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebRou
 const OPENAPI_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/OpenAPI.rs");
 const WEB_QUERY_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebQuery.rs");
 const WEB_FORMS_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebForms.rs");
+const WEB_FORMS_RENDER_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/WebFormsRender.rs");
 const WEB_TABLE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebTable.rs");
 const WEB_VIRTUAL_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebVirtual.rs");
 const WEB_STORE_PRELUDE_RAW: &str = include_str!("../Prelude/CoreLib/Top/WebStore.rs");
@@ -4176,7 +4308,10 @@ const WEBSERVERFN_PRELUDE_RAW: &str =
 const ENCODING_TRAITS_PRELUDE_RAW: &str =
     include_str!("../Prelude/CoreLib/Top/EncodingTraits.rs");
 /// D-ALLOC1/D-ALLOC-C/D-ALLOC-D (ratified 2026-06-19): allocator runtime helpers.
-const MEM_PRELUDE: &str = include_str!("../Prelude/Mem.rs");
+const MEM_PRELUDE: &str = concat!(
+    include_str!("../Prelude/Core/ForeignBytes.rs"),
+    include_str!("../Prelude/Mem.rs"),
+);
 /// D-MEM-SENTRY1: the one sentry kernel is shared verbatim with foundation.
 const MEM_SENTRY_PRELUDE: &str = include_str!("../../../jet-foundation/src/MemSentry.rs");
 const UNINIT_PRELUDE: &str = include_str!("../Prelude/Uninit.rs");
@@ -4220,6 +4355,7 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
     }
     if needs_live {
         out.push_str(LIVEQUERY_PRELUDE);
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs"));
     }
     if needs_web_suite {
         out.push_str(&flat_prelude_body(CORE_WEB_PENDING_PRELUDE_RAW));
@@ -4227,9 +4363,11 @@ fn push_app_preludes(out: &mut String, used_core: &std::collections::HashSet<Str
         out.push_str(&flat_prelude_body(OPENAPI_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_QUERY_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_FORMS_PRELUDE_RAW));
+        out.push_str(WEB_FORMS_RENDER_PRELUDE);
         out.push_str(&flat_prelude_body(WEB_TABLE_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_VIRTUAL_PRELUDE_RAW));
         out.push_str(&flat_prelude_body(WEB_STORE_PRELUDE_RAW));
+        out.push_str(include_str!("../Prelude/CoreLib/Top/CoreSlice7WebRaw.rs"));
         out.push_str(&flat_prelude_body(WEBSERVERFN_PRELUDE_RAW));
     }
 }
@@ -4239,10 +4377,12 @@ fn push_mem_prelude(out: &mut String) {
     out.push_str("mod jet_uninit_semantics {\n");
     out.push_str(UNINIT_PRELUDE);
     out.push_str("\n}\n");
-    out.push_str("mod jet_mem {\n    mod jet_sentry {\n");
+    out.push_str("mod jet_mem {\n    use crate::jet_foundation;\n    mod jet_sentry {\n");
     out.push_str(MEM_SENTRY_PRELUDE);
     out.push_str("\n    }\n");
     out.push_str(MEM_PRELUDE);
+    // #4566 slice 8: the inline-list storage behind `JetInlineList`.
+    out.push_str(INLINE_LIST_PRELUDE);
     out.push_str("\n}\n");
 }
 
@@ -4374,14 +4514,19 @@ fn data_plot_prelude_body() -> String {
 
 /// One flat fragment's source as the assembler emits it: its own imports removed,
 /// because `FLAT_PRELUDE_IMPORTS` declares them for the whole module instead.
-/// DataQuery.rs include!s SqlQuery.rs relative to the Prelude tree. AOT pastes
-/// that source into build/.work.*, where the nested include cannot resolve.
-/// Inline the kernel so rustc never sees a Prelude-relative path.
+/// DataQuery.rs includes SQL and CSV-read kernels relative to the Prelude tree.
+/// AOT pastes that source into build/.work.*, where nested includes cannot resolve.
+/// Inline both kernels so rustc never sees a Prelude-relative path.
 fn data_query_prelude_source() -> String {
-    include_str!("../Prelude/CoreLib/Top/DataQuery.rs").replace(
-        "    include!(\"../../Core/SqlQuery.rs\");\n",
-        include_str!("../Prelude/Core/SqlQuery.rs"),
-    )
+    include_str!("../Prelude/CoreLib/Top/DataQuery.rs")
+        .replace(
+            "    include!(\"../../Core/SqlQuery.rs\");\n",
+            include_str!("../Prelude/Core/SqlQuery.rs"),
+        )
+        .replace(
+            "include!(\"../../Core/CsvQueryRead.rs\");\n",
+            include_str!("../Prelude/Core/CsvQueryRead.rs"),
+        )
 }
 
 fn flat_prelude_body(source: &str) -> String {
@@ -4641,6 +4786,32 @@ mod tests {
     use crate::Sema::CompileMode;
 
     #[test]
+    fn emitted_mem_has_one_private_byte_carrier_implementation() {
+        let mut source = String::new();
+        push_mem_prelude(&mut source);
+        for name in [
+            "jet_string_data",
+            "jet_string_byte_len",
+            "jet_foreign_bytes_len",
+            "jet_bytes_pack",
+            "jet_bytes_pack_iter",
+            "jet_bytes_free",
+            "jet_bytes_unpack",
+        ] {
+            assert_eq!(source.matches(&format!("fn {name}(")).count(), 1, "{name}");
+        }
+        assert!(source.contains("pub fn jet_bytes_pack(value: &[u8])"));
+    }
+
+    #[test]
+    fn emitted_data_query_inlines_both_relative_kernels() {
+        let source = data_query_prelude_source();
+        assert!(!source.contains("include!(\"../../Core/"));
+        assert_eq!(source.matches("fn jet_data_query_read_bounded(").count(), 1);
+        assert!(source.contains("fn parse_sql_query("));
+    }
+
+    #[test]
     fn aot_ffi_host_installs_bridge_reporter() {
         let link = FfiLink {
             crate_name: "jet_ffi_fixture".into(),
@@ -4693,6 +4864,21 @@ mod tests {
         let mut bundle = checked_generic_bundle("fn run() {}", "core-fingerprint");
         bundle.used_core = used_core.clone();
         corelib_emission_fingerprint(&bundle, test_harness)
+    }
+
+    #[test]
+    fn typed_apps_runtime_emits_native_application_and_dev_server_templates() {
+        let mut source = String::new();
+        push_typed_app_preludes(&mut source, &BTreeSet::from([MirRuntimePartId::Apps]));
+        assert!(source.contains("pub struct JetApp {"));
+        assert!(source.contains("pub struct JetWebPage {"));
+        assert!(source.contains("pub struct JetDevServer {"));
+        assert!(source.contains("pub fn jet_app() -> JetApp"));
+
+        let mut sync = String::new();
+        push_typed_app_preludes(&mut sync, &BTreeSet::from([MirRuntimePartId::Sync]));
+        assert!(!sync.contains("pub struct JetApp {"));
+        assert!(!sync.contains("pub struct JetDevServer {"));
     }
 
 
@@ -4870,10 +5056,17 @@ mod tests {
                 !emitted.contains(filesystem_source),
                 "a non-filesystem closure must not pull in FSRuntimeOps"
             );
+            assert!(
+                !emitted.contains("fn jet_fs_directory_fd_raw")
+                    && !emitted.contains("fn jet_process_attach_held_directories"),
+                "retained descriptor carriers must not select filesystem operations"
+            );
             for owner in [
                 "pub struct JetTempDirOwner",
                 "pub struct JetTempFileOwner",
                 "pub struct JetFileLockOwner",
+                "pub(crate) struct JetProcessDirectory",
+                "impl PartialEq for JetProcessDirectory",
             ] {
                 assert_eq!(
                     emitted.matches(owner).count(),
@@ -4965,6 +5158,40 @@ mod tests {
         );
     }
 
+    #[test]
+    fn common_types_keep_field_dependencies_without_filesystem_calls() {
+        let text_only = HashSet::from(["core.text::len".to_string()]);
+        let mut out = String::new();
+        push_corelib_prelude_with_policy(
+            &mut out,
+            &text_only,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
+        assert!(out.contains(JETSTD_COMMON_TYPES_PRELUDE));
+        assert_eq!(out.matches("mod jet_file_lock_native {\n").count(), 1);
+        assert!(out.contains("mod jet_file_lock_native {\n        use crate::jet_foundation;\n"));
+        assert!(
+            !out.contains(MAPPED_FILE_PRELUDE),
+            "unreferenced optional mapping must remain outside the text closure"
+        );
+    }
+
+    #[test]
+    fn mapped_file_keeps_one_file_handle_dependency() {
+        let files = HashSet::from(["core.files::open".to_string()]);
+        let mut out = String::new();
+        push_corelib_prelude_with_policy(
+            &mut out,
+            &files,
+            false,
+            &ReleaseDevtoolsPolicy::development(),
+        );
+        assert!(out.contains(MAPPED_FILE_PRELUDE));
+        assert_eq!(out.matches("mod jet_file_lock_native {\n").count(), 1);
+        assert_eq!(out.matches("pub(crate) struct JetFsLockCall {").count(), 1);
+    }
+
 
 
 
@@ -4990,13 +5217,13 @@ mod tests {
                 path: PathBuf::from(root).join("main.jet"),
                 display: "main.jet".into(),
                 source: src.into(),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
                 alias: "main".into(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),
                 script_body: std::mem::take(&mut program.script_body),
                 block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling,
-                pub_file: program.pub_file,
                 no_prelude: program.no_prelude,
                 default_target: program.default_target,
                 html_path: program.html_path,
@@ -5023,7 +5250,7 @@ mod tests {
             build_facts: Default::default(),
             edition: "2027".to_string(),
         };
-        let (diagnostics, facts) =
+        let (diagnostics, facts, _nominals) =
             crate::Sema::check_bundle_with_effect_facts(&mut bundle, CompileMode::Run);
         assert!(
             !diagnostics

@@ -1,7 +1,7 @@
-// D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `~x` — the one copy sigil.
+// D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `x.copy()` — the one copy sigil.
 // Produces a fresh, independent value from a named binding; a temporary, so
 // it never needs `^` and never trips E0209 (unlike passing `x` itself to a
-// move param). `.clone()` is not user-typable Jet syntax — `~x` is the only
+// move param when `x` is used again). `.clone()` is not user-typable Jet syntax — `x.copy()` is the only
 // spelling.
 struct Ticket {
     id: Int
@@ -9,7 +9,7 @@ struct Ticket {
 }
 
 // D-MEM-COPYSEM1=A: a read-only view entering an owned return slot is copied
-// automatically through the same semantic path as `~`. `~` remains the one
+// automatically through the same semantic path as `.copy()`. `.copy()` remains the one
 // explicit spelling when the boundary is intentional in source.
 fn implicit_domain() -> String {
     email := "nate@jet-lang.dev"
@@ -27,16 +27,16 @@ fn archive(t: ^Ticket) -> String { t.label }
 
 fn run() {
     name :: "vault"
-    saved :: ~name
+    saved :: name.copy()
     print(name)
     print(saved)
     n :: 5
-    m :: ~n
+    m :: n.copy()
     print(n)
     print(m)
     print(implicit_domain())
     print(implicit_window()[1])
     t :: Ticket{id: 1, label: "root"}
-    print(archive(~t))
+    print(archive(t.copy()))
     print(t.label)
 }

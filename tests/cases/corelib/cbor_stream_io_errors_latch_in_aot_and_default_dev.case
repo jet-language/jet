@@ -1,0 +1,12 @@
+# Port of tests/corelib_parts/encoding_streams.rs::cbor_stream_io_errors_latch_in_aot_and_default_dev; guest source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/encoding_streams.rs:2302.
+requires: os-name:linux
+fixture: fixtures/cbor_stream_io_errors_latch_in_aot_and_default_dev
+write: guest.jet fixtures/cbor_stream_io_errors_latch_in_aot_and_default_dev/fixture.template
+step aot: jet build guest.jet
+step aot_run: built
+stdout: = cbor_stream_io_errors_latch_in_aot_and_default_dev.out
+stderr: empty
+step: jet run guest.jet
+stdout: = cbor_stream_io_errors_latch_in_aot_and_default_dev.out
+stderr: empty

@@ -27,3 +27,31 @@
     signed :: [String: String]{"nix.index.tier": "official-signed", "nix.index.signature-chain": "present"}
     assert_eq(store_why_trust_projection("nix", signed).grade, "signed")
 }
+
+#Test("store explanation preserves real producer provenance") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    ingested :: store_test_ingest_fixture(&verification, roots, "explain-producer", [String: String]{"out": "explain"}, [String]{})
+    producer :: ProducerRecord.decode(ingested.entry.producer_record) ?? panic("real producer")
+    reports := [ExplainReport]{}
+    projected :: store_explain_provider_projection(ingested.entry, &reports) ?? panic("producer projection")
+    assert_eq(projected.provider, producer.provider)
+    assert_eq(projected.immutable_source, producer.immutable_source)
+    assert_eq(projected.source_digest, producer.source_digest)
+    assert_eq(projected.native_document, ingested.entry.producer_record)
+    store_test_drop_roots(roots)
+}
+
+#Test("store explanation reports exact truncated producer loss") {
+    verification := StoreVerification.new()
+    roots :: store_test_temp_roots()
+    ingested :: store_test_ingest_fixture(&verification, roots, "explain-truncated-producer", [String: String]{"out": "explain"}, [String]{})
+    damaged := ingested.entry.copy()
+    damaged.producer_record = "truncated"
+    reports := [ExplainReport]{}
+    assert_eq(store_explain_provider_projection(damaged, &reports), None)
+    assert_eq(reports.len(), 1)
+    assert_eq(reports[0].kind, "loss")
+    assert_eq(reports[0].message, "producer provenance is unavailable: producer record is truncated")
+    store_test_drop_roots(roots)
+}

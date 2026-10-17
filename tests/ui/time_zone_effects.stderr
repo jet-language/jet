@@ -1,0 +1,32 @@
+Error [E0740]: `env_only` uses the effect `FS.Read`, which its signature doesn't allow
+  --> tests/ui/time_zone_effects.jet:5:29
+    |
+  5 | fn env_only(name: String) -[Env]> Zone TimeError! { time.zone(name) }
+    |                             ^^^
+ Why: The signature declares `-[Env]>`, so the body may only use those; `FS.Read` is outside that set
+ Fix: Add `FS.Read` to the effect list, or stop using it in `env_only`
+ Denial: invocation
+ Call chain: env_only
+More: jet-lang.dev/e/E0740
+
+Error [E0740]: `read_only` uses the effect `Env`, which its signature doesn't allow
+  --> tests/ui/time_zone_effects.jet:6:30
+    |
+  6 | fn read_only(name: String) -[FS.Read]> ZonedDateTime TimeError! { time.parse_zoned(name) }
+    |                              ^^^^^^^
+ Why: The signature declares `-[FS.Read]>`, so the body may only use those; `Env` is outside that set
+ Fix: Add `Env` to the effect list, or stop using it in `read_only`
+ Denial: invocation
+ Call chain: read_only
+More: jet-lang.dev/e/E0740
+
+Error [E3401]: `pure` calls the impure function `core_time::zone`
+  --> tests/ui/time_zone_effects.jet:4:51
+    |
+  4 | fn pure(name: String) -[]> Zone TimeError! { time.zone(name) }
+    |                                                   ^^^^
+ Why: `core_time::zone` is impure, but `pure` declares `-[]>`
+ Fix: Remove the call from `pure`, or drop the `-[]>` bound from `pure` so its effects are inferred
+ Denial: pure
+ Call chain: pure → core_time::zone
+More: jet-lang.dev/e/E3401

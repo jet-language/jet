@@ -1,0 +1,16 @@
+# PORT tests/repl.rs:2843-2876, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+env: FORCE_COLOR=1
+unset: NO_COLOR
+limit: time=8
+pty-send: "value :: \"hi\"" after 200ms
+pty-send: "\u0003" after 150ms
+exit: 0
+stdout: ~ "\u001b[" # Original substring predicate rs2869.
+stdout: ~any "\u001b[1;96m" "\u001b[32m" # Original ANSI color disjunction rs2873.

@@ -1,0 +1,25 @@
+fn widen(red: U8) -> I64 {
+    return I64.from_u8(red)
+}
+fn narrow(channel: I32) -> U8 {
+    return U8.from_i32(channel) ?? 255
+}
+fn to_real(x: Int) -> Float {
+    return Float.from_int(x)
+}
+fn truncate(x: Float) -> U8 {
+    return U8.from_float(x) ?? 255
+}
+fn narrow_float(x: Float) -> F32 Err! {
+    return F32.from_float(x)
+}
+fn run() {
+    print(widen(255))
+    print(narrow(100))
+    print(narrow(100000))
+    print(to_real(3))
+    print(truncate(42.9))
+    print(truncate(300.0))
+    print(narrow_float(2.0) ?? F32.from_int(0))
+    print(narrow_float(1e100) ?? F32.from_int(-1))
+}

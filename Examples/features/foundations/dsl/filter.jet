@@ -1,4 +1,6 @@
-pub enum Step {
+use core.text.parse as text_parse
+
+enum Step {
     Identity
     Field(String)
     Each
@@ -10,31 +12,31 @@ fn parse_stage(source: String) -> [Step]? {
     if stage == "." -> return Val([Step]{Step.Identity})
 
     if stage.starts_with("select(") && stage.ends_with(")") {
-        body :: stage.remove_prefix("select(").remove_suffix(")").trim()
+        body :: text_parse.strip_suffix(text_parse.strip_prefix(stage, "select("), ")").trim()
         words :: body.split(" ").to_list()
         if words.len() != 3 -> return None
         path :: words[0].trim()
         if !path.starts_with(".") || path.len() < 2 -> return None
         if words[1].trim() != ">=" -> return None
         limit :: Int.parse(words[2].trim()) ?? return None
-        field :: path.remove_prefix(".")
+        field :: text_parse.strip_prefix(path, ".")
         return Val([Step]{Step.AtLeast{field: field, limit: limit}})
     }
 
     if stage.ends_with("[]") {
-        path :: stage.remove_suffix("[]").trim()
+        path :: text_parse.strip_suffix(stage, "[]").trim()
         if !path.starts_with(".") || path.len() < 2 -> return None
-        field :: path.remove_prefix(".")
+        field :: text_parse.strip_prefix(path, ".")
         return Val([Step]{Step.Field(field), Step.Each})
     }
 
     if stage.starts_with(".") && stage.len() > 1 {
-        return Val([Step]{Step.Field(stage.remove_prefix("."))})
+        return Val([Step]{Step.Field(text_parse.strip_prefix(stage, "."))})
     }
     return None
 }
 
-pub fn parse(source: String) -> [Step]? {
+fn parse(source: String) -> [Step]? {
     steps := [Step]{}
     stages :: source.split("|").to_list()
     if stages.len() == 0 -> return None
@@ -46,20 +48,22 @@ pub fn parse(source: String) -> [Step]? {
     return Val(steps)
 }
 
-fn field(value: DataTree, name: String) -> DataTree? {
+fn field(value: Dyn, name: String) -> Dyn? {
     if value == .Object(entries) {
-        if entries.get(~name) == .Val(found) -> return Val(found)
+        loop pair in entries {
+            if pair.key == name -> return Val(pair.value)
+        }
     }
     return None
 }
 
-fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
-    output := [DataTree]{}
+fn apply_step(values: [Dyn], step: Step) -> [Dyn] {
+    output := [Dyn]{}
     loop value in values {
         if step == {
             .Identity -> { &output.push(value) }
             .Field(name) -> {
-                if field(~value, ~name) == .Val(found) -> &output.push(found)
+                if field(value.copy(), name.copy()) == .Val(found) -> &output.push(found)
             }
             .Each -> {
                 if value == .Array(items) {
@@ -67,7 +71,7 @@ fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
                 }
             }
             .AtLeast(name, limit) -> {
-                if field(~value, ~name) == .Val(found) {
+                if field(value.copy(), name.copy()) == .Val(found) {
                     score :: found.int() ?? Int.MIN
                     if score >= limit -> &output.push(value)
                 }
@@ -77,9 +81,9 @@ fn apply_step(values: [DataTree], step: Step) -> [DataTree] {
     return output
 }
 
-pub fn run(data: DataTree, query: String) -> [DataTree]? {
+fn run(data: Dyn, query: String) -> [Dyn]? {
     steps :: parse(query) ?? return None
-    values := [DataTree]{data}
+    values := [Dyn]{data}
     loop step in steps -> values = apply_step(values, step)
     return Val(values)
 }

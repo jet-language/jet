@@ -1,0 +1,27 @@
+
+struct Inner { note: String? }
+struct Envelope {
+    inner: Inner
+
+    fn borrowed(self) -> String {
+        if self.inner.note == Val(value) { return value }
+        return "none"
+    }
+
+    fn owned(^self) -> String {
+        if self.inner.note == Val(value) { return value }
+        return "none"
+    }
+}
+fn owned_local_nested_field_remains_reusable() {
+    local := Envelope{ inner: Inner{ note: Val("local") } }
+    if local.inner.note == Val(value) { print(value) }
+    if local.inner.note == Val(value) { print(value) }
+}
+fn run() {
+    borrowed := Envelope{ inner: Inner{ note: Val("borrowed") } }
+    print(borrowed.borrowed())
+    owned := Envelope{ inner: Inner{ note: Val("owned") } }
+    print(owned.owned())
+    owned_local_nested_field_remains_reusable()
+}

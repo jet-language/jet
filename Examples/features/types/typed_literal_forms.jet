@@ -3,6 +3,9 @@
 // of the type and converts only the way a parameter of that type would, such as
 // the checked `Int` to `Float` widening (#3739).
 // Run with `jet run Examples/features/types/typed_literal_forms.jet`.
+use core.math as math
+use core.time.[DateTime]
+
 fn fetch_rows() -> Int { 7 }
 
 fn run() {
@@ -22,6 +25,10 @@ fn run() {
     // One-expression body: already an Int, so it is the whole value.
     count :: Int{fetch_rows()}
     print("{count}")
+    // A Float is not an Int body. Name the rounding or checked conversion.
+    fraction :: Float{1.5}
+    print(math.round(fraction))
+    print(Int.from_float(fraction) ?? panic("finite conversion"))
     // Nested list: inner bodies may be typed or plain list forms.
     grid :: [[U8]]{{1, 0}, [0, 1]}
     print("{grid[0][0]} {grid[0][1]} {grid[1][0]} {grid[1][1]}")

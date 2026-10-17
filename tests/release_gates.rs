@@ -698,17 +698,18 @@ fn ci_test_shards_use_the_committed_weight_table() {
 
 #[test]
 fn verify_full_default_run_covers_whole_workspace() {
-    // The unsharded default path (no JET_TEST_SHARD set) is what local/manual
-    // `Tools/agent/verify-full.sh` runs use; it must cover the complete
-    // inventory via plain `cargo test --workspace` rather than the old
-    // default-members-only `cargo test`.
+    // Unsharded verification enumerates the whole workspace just like shards,
+    // but collects independent compile/run failures per target and retains
+    // library doctests instead of letting one workspace build hide siblings.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let verify = fs::read_to_string(root.join("Tools/agent/verify-full.sh"))
         .expect("read Tools/agent/verify-full.sh");
     assert!(
-        verify.contains("cargo test --workspace \"$@\""),
-        "the unsharded default path must run `cargo test --workspace`, not the \
-         default-members-only `cargo test`"
+        verify.contains("compiled_targets")
+            && verify.contains("cargo test \"${target_args[@]}\" --no-run --no-fail-fast")
+            && verify.contains("cargo test \"${target_args[@]}\" --no-fail-fast")
+            && verify.contains("--doc --no-fail-fast"),
+        "full verification must independently compile/run every workspace target and its doctests"
     );
     assert!(
         verify.contains("Tools/ci/test-shards.sh"),
@@ -719,6 +720,26 @@ fn verify_full_default_run_covers_whole_workspace() {
     assert!(verify.contains("test-target inventory is nondeterministic"));
     assert!(verify.contains("CARGO_BUILD_JOBS"));
     assert!(!verify.contains("tmp_parent=\"${JET_VERIFY_TMPDIR:-/tmp}\""));
+    assert!(verify.contains("verify-full-summary.tsv"));
+    assert!(verify.contains("--corpus all --keep-going"));
+    assert!(!verify.contains("cargo test --keep-going"));
+}
+
+#[test]
+fn verify_full_collects_independent_failures_without_executing_invalid_artifacts() {
+    let out = Command::new("node")
+        .current_dir(root())
+        .arg("Tools/agent/verify-full-collect-regression.mjs")
+        .output()
+        .expect("run bounded verify-full fixture regression (no compiler builds)");
+    assert!(
+        out.status.success(),
+        "verify-full collector regression failed:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout)
+        .contains("CHECK OK: durable verify-full collect-all runner (13 scenarios)"));
 }
 
 #[test]
@@ -730,10 +751,10 @@ fn warning_free_policy_is_strict_and_curated() {
         "the production test path must inherit the warning wall"
     );
 
-    let jit = fs::read_to_string(root().join("crates/jet-jit/src/lib.rs"))
-        .expect("read jet-jit lint policy");
+    let evalhost = fs::read_to_string(root().join("crates/jet-evalhost/src/lib.rs"))
+        .expect("read jet-evalhost lint policy");
     assert!(
-        jit.contains("#![expect(") && jit.contains("reason = \"#804:"),
+        evalhost.contains("#![expect(") && evalhost.contains("reason = \"#804:"),
         "intentional Rust lint exceptions must use card-referenced #[expect]"
     );
 }

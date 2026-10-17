@@ -66,7 +66,7 @@ pub(super) fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
         CtValue::Float(f) => f.render(),
         CtValue::Bool(b) => b.to_string(),
         CtValue::Unit | CtValue::Failed(CtReport::Clean(_)) => String::new(),
-        other => other.to_json(),
+        other => crate::Comptime::JSONInterp::display_ct_json(other),
     };
     let mut rows = vec![header.clone()];
     for item in items {
@@ -93,25 +93,26 @@ pub(super) fn csv_rows_from_records(v: &CtValue) -> Option<Vec<Vec<String>>> {
     Some(rows)
 }
 
-/// D-BOUND-HEAD1=A: the `core.net.url.URL` record in `Core/net/url.jet` field
-/// order, projected by the URL kernel exactly as AOT's `JetURL::from_url_parts`
-/// and the JIT typed head, so every tier carries one URL layout.
+/// Compiler raw pure-call projection. Executable URL construction is a checked
+/// source call; its private recipes are empty for values made by this kernel.
 pub(crate) fn url_parts_to_ct(u: &super::super::super::UrlLite::UrlParts) -> CtValue {
     let (port, port_explicit) = u.core_port();
     let text = |value: &Option<String>| CtValue::Str(value.clone().unwrap_or_default());
     CtValue::Struct {
         type_name: "URL".to_string(),
         fields: vec![
-            ("scheme".to_string(), CtValue::Str(u.scheme.clone())),
+            ("scheme_text".to_string(), CtValue::Str(u.scheme.clone())),
             ("user_text".to_string(), text(&u.username)),
             ("password_text".to_string(), text(&u.password)),
-            ("host".to_string(), text(&u.host)),
-            ("port".to_string(), CtValue::Int(port)),
+            ("host_text".to_string(), text(&u.host)),
+            ("port_value".to_string(), CtValue::Int(port)),
             ("port_explicit".to_string(), CtValue::Bool(port_explicit)),
-            ("path".to_string(), CtValue::Str(u.path.clone())),
-            ("query".to_string(), CtValue::Str(u.query())),
-            ("fragment".to_string(), text(&u.fragment)),
+            ("path_text".to_string(), CtValue::Str(u.path.clone())),
+            ("query_text".to_string(), CtValue::Str(u.query())),
+            ("fragment_text".to_string(), text(&u.fragment)),
             ("raw".to_string(), CtValue::Str(u.to_string_value())),
+            ("host_recipe".to_string(), CtValue::List(Vec::new())),
+            ("path_recipe".to_string(), CtValue::List(Vec::new())),
         ],
     }
 }
@@ -153,21 +154,21 @@ pub(crate) fn url_parts_from_ct(
     if type_name != "URL" {
         return Err(unsupported("malformed URL value", span));
     }
-    let CtValue::Int(port) = url_record_field(fields, "port", span)? else {
-        return Err(unsupported("malformed URL port", span));
+    let CtValue::Int(port) = url_record_field(fields, "port_value", span)? else {
+        return Err(unsupported("malformed URL port_value", span));
     };
     let CtValue::Bool(port_explicit) = url_record_field(fields, "port_explicit", span)? else {
         return Err(unsupported("malformed URL port_explicit", span));
     };
     Ok(super::super::super::UrlLite::from_core_record(
-        url_record_text(fields, "scheme", span)?,
+        url_record_text(fields, "scheme_text", span)?,
         url_record_text(fields, "user_text", span)?,
         url_record_text(fields, "password_text", span)?,
-        url_record_text(fields, "host", span)?,
+        url_record_text(fields, "host_text", span)?,
         *port,
         *port_explicit,
-        url_record_text(fields, "path", span)?,
-        url_record_text(fields, "query", span)?,
-        url_record_text(fields, "fragment", span)?,
+        url_record_text(fields, "path_text", span)?,
+        url_record_text(fields, "query_text", span)?,
+        url_record_text(fields, "fragment_text", span)?,
     ))
 }

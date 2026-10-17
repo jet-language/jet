@@ -1,0 +1,381 @@
+// Rust TargetMachine.rs tests:4595-4777,4800-4813; Driver/mod.rs:976-1002.
+fn target_test_valid_machine() -> MIRTargetMachine Never! {
+    machine := jet_target_machine_bare_metal("board.sensor_v1", "thumbv7em-none-eabihf", "0.0.1")
+    machine.memory = [MIRMemoryRegion]{
+        jet_target_memory_region_new("flash", 0x08000000, MIRByteSize{bytes: 524288}, .Flash, .Rx),
+        jet_target_memory_region_new("ram", 0x20000000, MIRByteSize{bytes: 131072}, .Ram, .Rw),
+        jet_target_memory_region_new("gpio", 0x40020000, MIRByteSize{bytes: 1024}, .MMIO, .Rw),
+    }
+    machine.allocator = .Fixed{region: "ram", size: MIRByteSize{bytes: 16384}}
+    machine.panic = .Abort
+    machine.mmio = .Provider{provider: target_test_provider("test.mmio", "sha256:test-mmio")}
+    machine.wall_clock = .NoClock
+    machine.monotonic_clock = .Provider{provider: target_test_provider("test.monotonic", "sha256:test-monotonic")}
+    machine.zone_data = .NoClock
+    machine.sleep = .Provider{provider: target_test_provider("test.sleep", "sha256:test-sleep")}
+    machine.entropy = .NoEntropy
+    machine.scheduler = .NoScheduler
+    machine.byte_sink = .NoByteSink
+    machine.startup = .Generated{provider: target_test_provider("test.startup", "sha256:test-startup")}
+    machine
+}
+fn target_test_provider(name: String, hash: String) -> MIRProviderContract Never! {
+    MIRProviderContract{provider: name, sha256: hash, provenance: "provider:{name}",
+        abi: jet_target_abi_c(), limits: MIRProviderLimits{max_request_bytes: None, max_response_bytes: None, max_calls: None}}
+}
+#Test("target_capability_facts_validate_provider_contracts") {
+    machine := target_test_valid_machine()
+    assert(jet_target_machine_provides_capability(machine, .MMIO))
+    assert(jet_target_machine_provides_capability(machine, .TimeMonotonic))
+    assert(!jet_target_machine_provides_capability(machine, .TimeWall))
+    assert(!jet_target_machine_provides_capability(machine, .Entropy))
+    usage := jet_target_machine_use_default()
+    usage.required_capabilities = [MIRTargetCapability]{.TimeMonotonic, .TimeWall}
+    assert(jet_target_machine_validate(machine, usage).contains(.MissingTargetCapability{capability: "Time.Wall"}))
+    machine.mmio = .Provider{provider: target_test_provider("", "not-a-digest")}
+    assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).contains(.InvalidProviderContract{capability: "Target.MMIO", provider: "", sha256: "not-a-digest"}))
+}
+#Test("hosted_default_keeps_full_runtime") {
+    machine :: jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
+    usage := jet_target_machine_use_default()
+    usage.core_apis = [String]{"core.files", "core.http.client"}
+    usage.heap_required = true
+    assert_eq(jet_target_max_runtime_layer(machine), MIRRuntimeLayer.Std)
+    assert(jet_target_machine_validate(machine, usage).is_empty())
+}
+#Test("hosted_counting_allocator_is_typed_and_auditable") {
+    machine := jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.0.1")
+    machine.allocator = .Counting{cap: Val(MIRByteSize{bytes: 2147483648})}
+    assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).is_empty())
+    assert_eq(jet_target_allocator_json(machine.allocator), "{{\"kind\":\"counting\",\"wraps\":\"system\",\"cap_bytes\":2147483648}}")
+}
+#Test("no_os_machine_rejects_hosted_counting_wrapper") {
+    machine := target_test_valid_machine()
+    machine.allocator = .Counting{cap: None}
+    assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).contains(.HostedAllocatorRequiresOS))
+}
+#Test("valid_no_os_machine_passes") {
+    usage := jet_target_machine_use_default()
+    usage.stack_bytes = 4096
+    usage.static_ram_bytes = 8192
+    usage.heap_required = true
+    usage.core_apis = [String]{"core.encoding.json"}
+    usage.mmio = [MIRMMIOAccess]{MIRMMIOAccess{address: 0x40020000, size: MIRByteSize{bytes: 4}, unsafe_gate: Val(MIRTargetUnsafeGate{reason: "GPIO register write"})}}
+    assert(jet_target_machine_validate(target_test_valid_machine(), usage).is_empty())
+}
+#Test("validation_reports_missing_required_no_os_facts_in_rust_push_order") {
+    errors :: jet_target_machine_validate(jet_target_machine_bare_metal("", "", "0.0.1"), jet_target_machine_use_default())
+    assert_eq(errors, [MIRTargetMachineError]{.MissingTargetTriple, .MissingAllocatorPolicy, .MissingPanicPolicy,
+        .MissingMemoryKind{kind: .Flash}, .MissingMemoryKind{kind: .Ram}, .MissingTargetCapability{capability: "Target.MMIO"},
+        .MissingTargetCapability{capability: "Time.Wall"}, .MissingTargetCapability{capability: "Time.Monotonic"}, .MissingTargetCapability{capability: "Time.ZoneData"},
+        .MissingTargetCapability{capability: "Time.Sleep"}, .MissingTargetCapability{capability: "Rand.Entropy"}, .MissingTargetCapability{capability: "Target.Scheduler"},
+        .MissingTargetCapability{capability: "Target.Startup"}, .MissingTargetCapability{capability: "IO.Read"}, .MissingTargetCapability{capability: "IO.Write"}, .MissingTargetCapability{capability: "Panic.Report"}})
+}
+#Test("validation_reports_ram_heap_core_and_mmio_errors") {
+    machine := target_test_valid_machine()
+    machine.allocator = .NoAllocator
+    usage := jet_target_machine_use_default()
+    usage.stack_bytes = 98304
+    usage.static_ram_bytes = 65536
+    usage.heap_required = true
+    usage.core_apis = [String]{"core.files"}
+    usage.mmio = [MIRMMIOAccess]{MIRMMIOAccess{address: 0x50000000, size: MIRByteSize{bytes: 4}, unsafe_gate: None}}
+    errors :: jet_target_machine_validate(machine, usage)
+    assert(errors.contains(.RamOverflow{used_bytes: 163840, ram_bytes: 131072}))
+    assert(errors.contains(.HeapRequiresAllocator))
+    assert(errors.contains(.CoreAPIUnavailable{api: "core.files", required: .Std, available: .Core}))
+    assert(errors.contains(.MMIOOutsideRegion{address: 0x50000000, size_bytes: 4}))
+    assert(errors.contains(.MMIOMissingUnsafeGate{address: 0x50000000}))
+}
+#Test("memory_linker_allocator_bounds_and_order") {
+    machine := target_test_valid_machine()
+    machine.memory = [MIRMemoryRegion]{
+        jet_target_memory_region_new("same", 8, MIRByteSize{bytes: 8}, .Ram, .Rw),
+        jet_target_memory_region_new("same", 8, MIRByteSize{bytes: 0}, .Flash, .Rx),
+        jet_target_memory_region_new("overflow", 18446744073709551615, MIRByteSize{bytes: 1}, .Reserved, .R),
+    }
+    errors := [MIRTargetMachineError]{}
+    jet_target_validate_memory_regions(machine.memory, &errors)
+    assert_eq(errors, [MIRTargetMachineError]{.EmptyMemoryRegion{name: "same"}, .DuplicateMemoryRegion{name: "same"}, .MemoryAddressOverflow{name: "overflow"}, .OverlappingMemoryRegions{first: "same", second: "same"}})
+    errors = [MIRTargetMachineError]{}
+    jet_target_validate_linker(.File{path: " \n", sha256: "sha256:"}, true, &errors)
+    assert_eq(errors, [MIRTargetMachineError]{.LinkerFileMissingPath, .LinkerFileMissingHash{path: " \n"}})
+    jet_target_validate_linker(.Unspecified, true, &errors)
+    assert(errors.contains(.MissingLinkerInput))
+    machine.allocator = .Fixed{region: "absent", size: MIRByteSize{bytes: 1}}
+    errors = [MIRTargetMachineError]{}
+    jet_target_validate_allocator(machine, &errors)
+    assert_eq(errors, [MIRTargetMachineError]{.AllocatorRegionUnknown{region: "absent"}})
+    machine.allocator = .Fixed{region: "same", size: MIRByteSize{bytes: 9}}
+    errors = [MIRTargetMachineError]{}
+    jet_target_validate_allocator(machine, &errors)
+    assert_eq(errors, [MIRTargetMachineError]{.AllocatorRegionTooSmall{region: "same", requested_bytes: 9, available_bytes: 8}})
+    machine.allocator = .Fixed{region: "overflow", size: MIRByteSize{bytes: 0}}
+    errors = [MIRTargetMachineError]{}
+    jet_target_validate_allocator(machine, &errors)
+    assert_eq(errors, [MIRTargetMachineError]{.AllocatorRegionNotRam{region: "overflow"}})
+}
+#Test("provider_startup_limits_and_unique_capability_failures") {
+    machine := target_test_valid_machine()
+    machine.startup_entry = " "
+    machine.startup_vectors = ""
+    machine.startup_abi.version = "bad version"
+    usage := jet_target_machine_use_default()
+    usage.required_capabilities = [MIRTargetCapability]{.TimeWall, .TimeWall}
+    errors :: jet_target_machine_validate(machine, usage)
+    assert_eq(errors, [MIRTargetMachineError]{.MissingTargetCapability{capability: "Time.Wall"}, .MissingTargetCapability{capability: "Target.Startup"}, .InvalidProviderContract{capability: "Target.Startup", provider: "test.startup", sha256: "sha256:test-startup"}})
+    provider := target_test_provider("test", "sha256:x")
+    assert(jet_target_provider_valid(provider))
+    provider.sha256 = "sha256:x y"
+    assert(!jet_target_provider_valid(provider))
+    provider.sha256 = "sha256:x"
+    provider.limits.max_calls = Val(0)
+    assert(!jet_target_provider_valid(provider))
+    provider.limits.max_calls = Val(1)
+    provider.abi.calling_convention = "C\t"
+    assert(!jet_target_provider_valid(provider))
+}
+#Test("ram_saturates_mmio_half_open_range_and_gate_order") {
+    machine := target_test_valid_machine()
+    usage := jet_target_machine_use_default()
+    usage.stack_bytes = 18446744073709551615
+    usage.static_ram_bytes = 1
+    usage.mmio = [MIRMMIOAccess]{MIRMMIOAccess{address: 0x40020400, size: MIRByteSize{bytes: 0}, unsafe_gate: Val(MIRTargetUnsafeGate{reason: " "})}, MIRMMIOAccess{address: 18446744073709551615, size: MIRByteSize{bytes: 1}, unsafe_gate: None}}
+    errors := [MIRTargetMachineError]{}
+    jet_target_validate_ram_budget(machine, usage, &errors)
+    jet_target_validate_mmio(machine, usage, &errors)
+    assert_eq(errors, [MIRTargetMachineError]{.RamOverflow{used_bytes: 18446744073709551615, ram_bytes: 131072}, .MMIOEmptyUnsafeReason{address: 0x40020400}, .MMIOOutsideRegion{address: 18446744073709551615, size_bytes: 1}, .MMIOMissingUnsafeGate{address: 18446744073709551615}})
+}
+#Test("from_core_apis_sorts_dedups_and_derives_capabilities") {
+    usage :: jet_target_machine_use_from_core_apis([String]{"core.time::sleep", "core.term", "core.mem::Atomic", "core.time::sleep", "core.crypto.uuid"})
+    assert_eq(usage.core_apis, [String]{"core.crypto.uuid", "core.mem::Atomic", "core.term", "core.time::sleep"})
+    assert_eq(usage.required_capabilities, [MIRTargetCapability]{.Entropy, .Atomic64, .IORead, .IOWrite, .TimeSleep})
+    assert(usage.heap_required)
+    assert(jet_target_capabilities_for_core_usage("core.time::duration").is_empty())
+    assert_eq(jet_target_capabilities_for_core_usage("core.time::elapsed"), [MIRTargetCapability]{.TimeMonotonic})
+    assert_eq(jet_target_capabilities_for_core_usage("core.time::zone"), [MIRTargetCapability]{.TimeZoneData})
+    assert_eq(jet_target_capabilities_for_core_usage("core.time::now"), [MIRTargetCapability]{.TimeWall})
+}
+#Test("named_wasm_profiles_have_distinct_provider_identities") {
+    browser :: jet_target_machine_wasm_browser("0.0.1")
+    wasi :: jet_target_machine_wasm_wasi("0.0.1")
+    no_os :: jet_target_machine_wasm_no_os("0.0.1")
+    assert_eq(jet_target_environment_identity(browser), "browser")
+    assert_eq(jet_target_environment_identity(wasi), "wasi")
+    assert_eq(jet_target_environment_identity(no_os), "no-os")
+    assert_eq(jet_target_max_runtime_layer(browser), MIRRuntimeLayer.Std)
+    assert_eq(jet_target_max_runtime_layer(wasi), MIRRuntimeLayer.Std)
+    assert_eq(jet_target_max_runtime_layer(no_os), MIRRuntimeLayer.Core)
+    assert(jet_target_provider_identity(browser) != jet_target_provider_identity(wasi))
+    assert(jet_target_provider_identity(browser) != jet_target_provider_identity(no_os))
+    assert(jet_target_provider_identity(wasi) != jet_target_provider_identity(no_os))
+}
+// Rust-computed oracle: CLI-37/identity_oracle.py extracts unmodified Rust
+// TargetMachine::provider_identity, board constructors, and Layout.rs facts;
+// rustc CARGO_PKG_VERSION=0.0.1, Rust SHA256.rs. No Jet values fed to the oracle.
+#Test("every_canonical_profile_matches_rust_provider_identity_and_layout") {
+    names :: JET_DRIVER_TARGET_MACHINE_NAMES
+    identities :: [String]{"91827d8e6430e513281c1200b53ff3ec3bef6829af294db02f8299258b9f814a", "a3176d68cdb96a507ab6427d4997aaecb088baa891ad126260737503029e1d4f", "1caa69c38f4fa8fa2c04f9ebe057830c1df020d90e78ae2d69b917f5b418c18d", "5c4637bc8753186471f3c7aa0c338957df243b7bc6f79eb2567f08a88e8ab05c", "d1f16e8bda37e80c3b9156b08516f0eac1a03a8db686d82c451eaa17f6420474", "576249bc8759bb94fecd9179640c856a4b362ae72ff5de3d60e39b4bcb3a3333"}
+    layouts :: [String]{"91a97cc8bacffd938bb13162c2d3e4c0bc8db6dff133b96de5c84e5b922ae1cd", "efd3d02a0853cad8c076a0fa6c46ffd0c1612f49ebaf16c3ad599889ec5d0752", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "4967f3046b6afcb4470ab962221dd242835cbe81133eea0c2a95dd24c129bf19", "bea44dc183a1d2224200f3a5a8da632f45499e75718a56aecb3544086db39004", "b6d20f41f9c6b9bd94c3239ffcda1a15252d2054e88e04c0626a301c2e81f8d4"}
+    loop index in 0..<names.len() {
+        machine :: jet_driver_target_machine_by_name(names[index], "0.0.1") ?? panic("canonical target missing")
+        assert_eq(machine.name, names[index])
+        assert(jet_target_machine_validate(machine, jet_target_machine_use_default()).is_empty())
+        assert_eq(jet_target_provider_identity(machine), "target-providers-v1:{identities[index]}")
+        assert_eq(jet_target_layout_cache_identity(machine.layout), "layout-facts-v2:{layouts[index]}")
+    }
+    aliases :: [String]{"firmware", "sensor", "virt"}
+    loop alias in aliases {
+        machine :: jet_driver_target_machine_by_name(alias, "0.0.1") ?? panic("alias missing")
+        canonical :: if alias == "virt" -> "board.virt_aarch64" else -> "board.sensor_v1"
+        assert_eq(machine.name, canonical)
+    }
+    assert_eq(jet_driver_target_machine_by_name("unknown", "0.0.1"), None)
+    assert_eq(jet_driver_target_machine_by_name("sensor ", "0.0.1"), None)
+}
+
+// All 61 Rust enum variants, including variants produced by later hardware
+// and firmware callers. Literal expectations are Rust derive(Debug) spelling.
+#Test("every_target_machine_error_has_exact_rust_debug_text") {
+    assert_eq(jet_target_machine_error_debug(.MissingTargetTriple), "MissingTargetTriple")
+    assert_eq(jet_target_machine_error_debug(.MissingMemoryKind{kind: .MMIO}), "MissingMemoryKind {{ kind: Mmio }}")
+    assert_eq(jet_target_machine_error_debug(.DuplicateMemoryRegion{name: "a"}), "DuplicateMemoryRegion {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.EmptyMemoryRegion{name: "a"}), "EmptyMemoryRegion {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.MemoryAddressOverflow{name: "a"}), "MemoryAddressOverflow {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.OverlappingMemoryRegions{first: "a", second: "b"}), "OverlappingMemoryRegions {{ first: \"a\", second: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.MissingLinkerInput), "MissingLinkerInput")
+    assert_eq(jet_target_machine_error_debug(.LinkerFileMissingPath), "LinkerFileMissingPath")
+    assert_eq(jet_target_machine_error_debug(.LinkerFileMissingHash{path: "a"}), "LinkerFileMissingHash {{ path: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.MissingAllocatorPolicy), "MissingAllocatorPolicy")
+    assert_eq(jet_target_machine_error_debug(.AllocatorRegionUnknown{region: "a"}), "AllocatorRegionUnknown {{ region: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.AllocatorRegionNotRam{region: "a"}), "AllocatorRegionNotRam {{ region: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.AllocatorRegionTooSmall{region: "a", requested_bytes: 2, available_bytes: 1}), "AllocatorRegionTooSmall {{ region: \"a\", requested_bytes: 2, available_bytes: 1 }}")
+    assert_eq(jet_target_machine_error_debug(.HostedAllocatorRequiresOS), "HostedAllocatorRequiresOs")
+    assert_eq(jet_target_machine_error_debug(.MissingPanicPolicy), "MissingPanicPolicy")
+    assert_eq(jet_target_machine_error_debug(.MissingTargetCapability{capability: "a"}), "MissingTargetCapability {{ capability: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.HostedCapabilityRequiresOS{capability: "a"}), "HostedCapabilityRequiresOs {{ capability: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.InvalidProviderContract{capability: "a", provider: "b", sha256: "c"}), "InvalidProviderContract {{ capability: \"a\", provider: \"b\", sha256: \"c\" }}")
+    assert_eq(jet_target_machine_error_debug(.RamOverflow{used_bytes: 2, ram_bytes: 1}), "RamOverflow {{ used_bytes: 2, ram_bytes: 1 }}")
+    assert_eq(jet_target_machine_error_debug(.HeapRequiresAllocator), "HeapRequiresAllocator")
+    assert_eq(jet_target_machine_error_debug(.CoreAPIUnavailable{api: "a", required: .Alloc, available: .Core}), "CoreApiUnavailable {{ api: \"a\", required: Alloc, available: Core }}")
+    assert_eq(jet_target_machine_error_debug(.MMIOOutsideRegion{address: 1, size_bytes: 2}), "MmioOutsideRegion {{ address: 1, size_bytes: 2 }}")
+    assert_eq(jet_target_machine_error_debug(.MMIOMissingUnsafeGate{address: 1}), "MmioMissingUnsafeGate {{ address: 1 }}")
+    assert_eq(jet_target_machine_error_debug(.MMIOEmptyUnsafeReason{address: 1}), "MmioEmptyUnsafeReason {{ address: 1 }}")
+    assert_eq(jet_target_machine_error_debug(.HostedHasNoLinkerScript), "HostedHasNoLinkerScript")
+    assert_eq(jet_target_machine_error_debug(.HostedHasNoStartup), "HostedHasNoStartup")
+    assert_eq(jet_target_machine_error_debug(.UnsupportedStartupTriple{triple: "a"}), "UnsupportedStartupTriple {{ triple: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.ExecutionTierUnsupported{tier: "a", machine: "b"}), "ExecutionTierUnsupported {{ tier: \"a\", machine: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.FirmwareToolchainMissing{tool: "a"}), "FirmwareToolchainMissing {{ tool: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.FirmwareBuildFailed{detail: "a"}), "FirmwareBuildFailed {{ detail: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.SizeBudgetExceeded{report: MIRSizeBudgetReport{artifact_bytes: 1, flash_bytes: 2, flash_ok: true, ram_bytes: 3, ram_used_bytes: 4, ram_ok: false}}), "SizeBudgetExceeded {{ report: SizeBudgetReport {{ artifact_bytes: 1, flash_bytes: 2, flash_ok: true, ram_bytes: 3, ram_used_bytes: 4, ram_ok: false }} }}")
+    assert_eq(jet_target_machine_error_debug(.HardwareFactsMissingSVD), "HardwareFactsMissingSvd")
+    assert_eq(jet_target_machine_error_debug(.InvalidHardwareSVD{source: "a", sha256: "b"}), "InvalidHardwareSvd {{ source: \"a\", sha256: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.HardwareFactEmptyName{kind: "a"}), "HardwareFactEmptyName {{ kind: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.DuplicateRegisterBlock{name: "a"}), "DuplicateRegisterBlock {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterBlockEmpty{name: "a"}), "RegisterBlockEmpty {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterBlockAddressOverflow{name: "a"}), "RegisterBlockAddressOverflow {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterBlockOutsideRegion{name: "a", address: 1, size_bytes: 2}), "RegisterBlockOutsideRegion {{ name: \"a\", address: 1, size_bytes: 2 }}")
+    assert_eq(jet_target_machine_error_debug(.DuplicateRegister{block: "a", register: "b"}), "DuplicateRegister {{ block: \"a\", register: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterAddressOverflow{block: "a", register: "b"}), "RegisterAddressOverflow {{ block: \"a\", register: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterOutsideBlock{block: "a", register: "b"}), "RegisterOutsideBlock {{ block: \"a\", register: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.UnknownRegisterBlock{block: "a"}), "UnknownRegisterBlock {{ block: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.UnknownRegister{block: "a", register: "b"}), "UnknownRegister {{ block: \"a\", register: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterWidthMismatch{block: "a", register: "b", expected: .U8, actual: .U64}), "RegisterWidthMismatch {{ block: \"a\", register: \"b\", expected: U8, actual: U64 }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterReadDenied{block: "a", register: "b"}), "RegisterReadDenied {{ block: \"a\", register: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.RegisterWriteDenied{block: "a", register: "b"}), "RegisterWriteDenied {{ block: \"a\", register: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.DuplicateInterrupt{name: "a"}), "DuplicateInterrupt {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.DuplicateInterruptVector{vector: 1}), "DuplicateInterruptVector {{ vector: 1 }}")
+    assert_eq(jet_target_machine_error_debug(.InvalidInterruptEffect{interrupt: "a", effect_name: "b"}), "InvalidInterruptEffect {{ interrupt: \"a\", effect: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.UnknownInterrupt{interrupt: "a"}), "UnknownInterrupt {{ interrupt: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.InterruptEffectForbidden{interrupt: "a", handler: "b", effect_name: "c"}), "InterruptEffectForbidden {{ interrupt: \"a\", handler: \"b\", effect: \"c\" }}")
+    assert_eq(jet_target_machine_error_debug(.InterruptHandlerUnbounded{interrupt: "a", handler: "b"}), "InterruptHandlerUnbounded {{ interrupt: \"a\", handler: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.DuplicateDMAChannel{name: "a"}), "DuplicateDmaChannel {{ name: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.DuplicateDMAChannelNumber{channel: 1}), "DuplicateDmaChannelNumber {{ channel: 1 }}")
+    assert_eq(jet_target_machine_error_debug(.DMATransferSizeZero{channel: "a"}), "DmaTransferSizeZero {{ channel: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.UnknownDMAChannel{channel: "a"}), "UnknownDmaChannel {{ channel: \"a\" }}")
+    assert_eq(jet_target_machine_error_debug(.DMAOwnershipMismatch{channel: "a", buffer: "b", expected: .CPU, actual: .Device}), "DmaOwnershipMismatch {{ channel: \"a\", buffer: \"b\", expected: Cpu, actual: Device }}")
+    assert_eq(jet_target_machine_error_debug(.DMAStartWhileInFlight{channel: "a", buffer: "b"}), "DmaStartWhileInFlight {{ channel: \"a\", buffer: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.DMAWaitWithoutTransfer{channel: "a", buffer: "b"}), "DmaWaitWithoutTransfer {{ channel: \"a\", buffer: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.DMABufferUnavailable{channel: "a", buffer: "b"}), "DmaBufferUnavailable {{ channel: \"a\", buffer: \"b\" }}")
+    assert_eq(jet_target_machine_error_debug(.DMAWaitChannelMismatch{channel: "a", buffer: "b"}), "DmaWaitChannelMismatch {{ channel: \"a\", buffer: \"b\" }}")
+    assert_eq(jet_target_machine_errors_debug([MIRTargetMachineError]{.FirmwareBuildFailed{detail: "a\n\"\\\t"}, .MissingTargetTriple}), "[FirmwareBuildFailed {{ detail: \"a\\n\\\"\\\\\\t\" }}, MissingTargetTriple]")
+    assert_eq(jet_target_machine_errors_debug([MIRTargetMachineError]{}), "[]")
+}
+
+// Rust TargetHardwareFacts::validate_into: every push site and precedence.
+#Test("hardware_validation_preserves_all_fact_errors_in_order") {
+    hardware := jet_target_hardware_empty()
+    hardware.svd = Val(MIRSVDProvenance{source: "", sha256: "invalid"})
+    empty :: MIRTargetRegisterFact{name: "", offset: 18446744073709551615, width: .U64, access: .ReadWrite, volatile: true}
+    outside :: MIRTargetRegisterFact{name: "", offset: 0, width: .U32, access: .ReadWrite, volatile: true}
+    hardware.register_blocks = [MIRTargetRegisterBlockFact]{
+        MIRTargetRegisterBlockFact{name: "", base: 18446744073709551615, size: MIRByteSize{bytes: 1}, registers: [MIRTargetRegisterFact]{empty, outside}},
+        MIRTargetRegisterBlockFact{name: "", base: 0, size: MIRByteSize{bytes: 0}, registers: [MIRTargetRegisterFact]{}},
+    }
+    hardware.interrupts = [MIRTargetInterruptFact]{
+        MIRTargetInterruptFact{name: "", vector: 1, forbidden_effects: [String]{"bogus", "FS.Read"}, bounded: true},
+        MIRTargetInterruptFact{name: "", vector: 1, forbidden_effects: [String]{}, bounded: false},
+    }
+    hardware.dma_channels = [MIRTargetDMAChannelFact]{
+        MIRTargetDMAChannelFact{name: "", channel: 1, transfer_width: .U8, ownership: .Borrowed, max_transfer_bytes: Val(0)},
+        MIRTargetDMAChannelFact{name: "", channel: 1, transfer_width: .U8, ownership: .Transfer, max_transfer_bytes: None},
+    }
+    errors :: jet_target_hardware_validate(hardware, [MIRMemoryRegion]{})
+    assert_eq(errors, [MIRTargetMachineError]{
+        .InvalidHardwareSVD{source: "", sha256: "invalid"}, .HardwareFactEmptyName{kind: "register block"},
+        .RegisterBlockAddressOverflow{name: ""}, .HardwareFactEmptyName{kind: "register in ``"},
+        .RegisterAddressOverflow{block: "", register: ""}, .HardwareFactEmptyName{kind: "register in ``"},
+        .DuplicateRegister{block: "", register: ""}, .RegisterOutsideBlock{block: "", register: ""},
+        .HardwareFactEmptyName{kind: "register block"}, .DuplicateRegisterBlock{name: ""}, .RegisterBlockEmpty{name: ""},
+        .RegisterBlockOutsideRegion{name: "", address: 0, size_bytes: 0},
+        .HardwareFactEmptyName{kind: "interrupt"}, .InvalidInterruptEffect{interrupt: "", effect_name: "bogus"},
+        .HardwareFactEmptyName{kind: "interrupt"}, .DuplicateInterrupt{name: ""}, .DuplicateInterruptVector{vector: 1},
+        .HardwareFactEmptyName{kind: "DMA channel"}, .DMATransferSizeZero{channel: ""},
+        .HardwareFactEmptyName{kind: "DMA channel"}, .DuplicateDMAChannel{name: ""}, .DuplicateDMAChannelNumber{channel: 1},
+    })
+}
+
+#Test("hosted_boundary_policies_and_panic_sink_preserve_unique_order") {
+    machine := jet_target_machine_wasm_no_os("0.0.1")
+    machine.mmio = .HostedDefault
+    machine.wall_clock = .HostedDefault
+    machine.monotonic_clock = .HostedDefault
+    machine.zone_data = .HostedDefault
+    machine.sleep = .HostedDefault
+    machine.entropy = .HostedDefault
+    machine.scheduler = .HostedDefault
+    machine.startup = .HostedDefault
+    machine.byte_sink = .HostedDefault
+    errors :: jet_target_machine_validate(machine, jet_target_machine_use_default())
+    assert_eq(errors, [MIRTargetMachineError]{
+        .HostedCapabilityRequiresOS{capability: "Target.MMIO"}, .HostedCapabilityRequiresOS{capability: "Time.Wall"},
+        .HostedCapabilityRequiresOS{capability: "Time.Monotonic"}, .HostedCapabilityRequiresOS{capability: "Time.ZoneData"},
+        .HostedCapabilityRequiresOS{capability: "Time.Sleep"}, .HostedCapabilityRequiresOS{capability: "Rand.Entropy"},
+        .HostedCapabilityRequiresOS{capability: "Target.Scheduler"}, .HostedCapabilityRequiresOS{capability: "Target.Startup"},
+        .HostedCapabilityRequiresOS{capability: "IO.Read"}, .HostedCapabilityRequiresOS{capability: "IO.Write"}, .HostedCapabilityRequiresOS{capability: "Panic.Report"},
+    })
+    machine = jet_target_machine_wasm_no_os("0.0.1")
+    invalid :: target_test_provider("", "invalid")
+    machine.panic = .Report{provider: invalid}
+    machine.byte_sink = .Provider{read: Val(invalid), write: Val(invalid), report: None}
+    usage := jet_target_machine_use_default()
+    usage.required_capabilities = [MIRTargetCapability]{.PanicReport, .PanicReport}
+    assert_eq(jet_target_machine_validate(machine, usage), [MIRTargetMachineError]{
+        .InvalidProviderContract{capability: "Panic.Report", provider: "", sha256: "invalid"},
+        .InvalidProviderContract{capability: "IO.Read", provider: "", sha256: "invalid"},
+        .InvalidProviderContract{capability: "IO.Write", provider: "", sha256: "invalid"},
+        .MissingTargetCapability{capability: "Panic.Report"},
+    })
+}
+
+#Test("whitespace_and_split_once_match_rust_unicode_boundaries") {
+    spaces :: [String]{"\t", "\n", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", " ", "　"}
+    loop space in spaces -> assert(!jet_target_no_whitespace("a{space}b"))
+    ascii :: [Int]{9, 10, 11, 12, 13, 32}
+    loop code in ascii {
+        space :: String.from_bytes([U8]{U8{code}}) ?? panic("ASCII whitespace")
+        assert(!jet_target_no_whitespace(space))
+    }
+    assert(!jet_target_no_whitespace(String.from_bytes([U8]{194, 133}) ?? panic("NEL")))
+    assert(!jet_target_no_whitespace(String.from_bytes([U8]{226, 128, 168}) ?? panic("LS")))
+    assert(!jet_target_no_whitespace(String.from_bytes([U8]{226, 128, 169}) ?? panic("PS")))
+    assert(jet_target_no_whitespace("ä字😀"))
+    assert(jet_target_no_whitespace("​"))
+    assert_eq(jet_target_capabilities_for_core_usage("core.time::sleep::extra"), [MIRTargetCapability]{.TimeWall})
+    assert(jet_target_capabilities_for_core_usage("core.mem::Atomic::extra").is_empty())
+    assert(jet_target_capabilities_for_core_usage("").is_empty())
+}
+
+// Rust SvdProvenance::is_valid is deliberately weaker than ProviderContract.
+#Test("svd_digest_and_effect_set_keep_their_distinct_rust_contracts") {
+    hardware := jet_target_hardware_empty()
+    hardware.svd = Val(MIRSVDProvenance{source: "vendor.svd", sha256: "sha256:a b"})
+    assert(jet_target_hardware_validate(hardware, [MIRMemoryRegion]{}).is_empty())
+    assert(!jet_target_provider_valid(target_test_provider("provider", "sha256:a b")))
+    hardware.interrupts = [MIRTargetInterruptFact]{
+        MIRTargetInterruptFact{name: "IRQ", vector: 1, forbidden_effects: [String]{"z-invalid", "a-invalid", "z-invalid"}, bounded: true},
+    }
+    assert_eq(jet_target_hardware_validate(hardware, [MIRMemoryRegion]{}), [MIRTargetMachineError]{
+        .InvalidInterruptEffect{interrupt: "IRQ", effect_name: "a-invalid"},
+        .InvalidInterruptEffect{interrupt: "IRQ", effect_name: "z-invalid"},
+    })
+}
+
+// Main/Pip CLI-37 ruling: sum RAM facts exactly; Rust's u64 accumulator
+// wrapping is a latent defect (tandem Rust u128 fix belongs to integration).
+// Used bytes still saturate at u64::MAX, so a greater RAM total cannot overflow
+// the RAM budget. In particular MAX + 2 must not become a one-byte budget.
+#Test("ram_region_totals_above_u64_max_keep_the_true_budget") {
+    machine := jet_target_machine_wasm_no_os("0.0.1")
+    machine.memory = [MIRMemoryRegion]{
+        jet_target_memory_region_new("flash", 0, MIRByteSize{bytes: 1}, .Flash, .Rx),
+        jet_target_memory_region_new("ram.first", 0, MIRByteSize{bytes: 18446744073709551615}, .Ram, .Rw),
+        jet_target_memory_region_new("ram.second", 0, MIRByteSize{bytes: 2}, .Ram, .Rw),
+    }
+    usage := jet_target_machine_use_default()
+    usage.stack_bytes = 18446744073709551615
+    usage.static_ram_bytes = 1
+    errors := [MIRTargetMachineError]{}
+    jet_target_validate_ram_budget(machine, usage, &errors)
+    assert(errors.is_empty())
+}

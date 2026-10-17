@@ -19,7 +19,7 @@ use jet::ExitCodes;
 use jet::RecordIndex::{
     RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
 };
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::Report::{
     render_status, render_status_with_reports, StatusEnvelope, StatusFields, StatusValue,
 };
@@ -244,7 +244,7 @@ fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
     }
     let header = std::str::from_utf8(&bytes[16..header_end])
         .map_err(|_| "replay artifact header is not UTF-8".to_string())?;
-    let DataTree::Object(fields) =
+    let Dyn::Object(fields) =
         parse_json(header).map_err(|_| "replay artifact header is not valid JSON".to_string())?
     else {
         return Err("replay artifact header is not a JSON object".into());
@@ -540,35 +540,6 @@ fn finish_recorded_artifacts(
     }
 }
 
-fn try_recorded_run(
-    file: &str,
-    program_args: &[&str],
-    capture: &crate::ProveReplay::NamedCapture,
-    record_name: Option<&str>,
-    production_receipt: Option<&crate::ProductionReceipt::Context>,
-    mode: OutputMode,
-) -> bool {
-    let Ok(execution) = jet::Debug::record_run(file, program_args) else {
-        return false;
-    };
-    emit_run_output(&execution.stdout, &execution.stderr);
-    crate::ProveReplay::finish_named_capture_with_run(
-        capture,
-        execution.exit_code,
-        mode.json,
-        &execution.run,
-    )
-    .unwrap_or_else(|status| exit(status));
-    if let Some(name) = record_name {
-        index_named_capture(capture, name, RecordCapture::Safe)
-            .unwrap_or_else(|error| fail_record_index(error));
-    }
-    if let Some(context) = production_receipt {
-        index_production_receipt(context).unwrap_or_else(|error| fail_record_index(error));
-    }
-    exit(execution.exit_code);
-}
-
 fn render_internal_fault(what: &str) -> String {
     jet::Diagnostics::render_ice_report(what, "", false)
 }
@@ -578,15 +549,6 @@ fn emit_internal_fault(stdout: &str, what: &str, mode: OutputMode) -> ! {
     let _ = std::io::stdout().flush();
     write_mode_diagnostic(mode, &render_internal_fault(what));
     exit(ExitCodes::ICE);
-}
-
-fn exit_if_internal_fault(diagnostics: &[jet::Diagnostics::Diagnostic], mode: OutputMode) {
-    if let Some((stdout, what)) = diagnostics
-        .iter()
-        .find_map(jet::Diagnostics::Diagnostic::runtime_host_fault_parts)
-    {
-        emit_internal_fault(stdout, what, mode);
-    }
 }
 
 /// The one home for turning a finished child process into this process's exit
@@ -601,7 +563,7 @@ pub(crate) fn child_exit_code(status: std::process::ExitStatus) -> i32 {
 fn vector_build_projection(
     file: &str,
 ) -> Vec<(String, usize, usize, String, String, String, String)> {
-    let (diagnostics, bundle, _) = jet::Driver::check_file_with_effect_facts(file, None, false);
+    let (diagnostics, bundle, _, checked_nominals) = jet::Driver::check_file_with_effect_facts(file, None, false);
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
@@ -613,6 +575,7 @@ fn vector_build_projection(
     };
     let (mir, _) = jet::lower_checked_semantic_mir_program_for(
         &bundle,
+        &checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -1149,7 +1112,7 @@ fn resolve_run_authority_before_execution(
             "the checked source closure is empty".to_string(),
         );
     }
-    let (diagnostics, bundle, facts) = jet::run_compiler_work(|| {
+    let (diagnostics, bundle, facts, _nominals) = jet::run_compiler_work(|| {
         jet::Driver::check_file_with_effect_facts_for_run_and_entry_with_source_closure(
             file,
             &source_closure,
@@ -1649,7 +1612,7 @@ fn authority_confirmation_prompt(file: &str, undecided: &jet::Sema::EffectSet) -
 }
 
 /// Apply the complete application effect policy before any native adapter can
-/// execute. This is shared by AOT, JIT, and interpreter paths; the only tier
+/// execute. This is shared by AOT and interpreter paths; the only tier
 /// input is the checked semantic effect view.
 fn apply_native_effect_policy(
     cmd: &str,
@@ -2601,7 +2564,7 @@ fn delegated_run_arguments(raw: &[String], start: &Path) -> Vec<String> {
     child
 }
 
-fn takes_separate_run_value(argument: &str) -> bool {
+pub(crate) fn takes_separate_run_value(argument: &str) -> bool {
     matches!(
         argument,
         "-p" | "--fixtures"
@@ -2717,7 +2680,6 @@ pub(crate) struct NativeExecutionRequest<'a> {
     pub(crate) mode: OutputMode,
     pub(crate) output_profile: Option<&'a jet_cli::OutputProfile::OutputProfile>,
     pub(crate) record: Option<&'a str>,
-    pub(crate) interpret: bool,
     pub(crate) entry_fn: Option<&'a str>,
     pub(crate) check_project_scope: bool,
     pub(crate) package_scope: bool,
@@ -2725,56 +2687,7 @@ pub(crate) struct NativeExecutionRequest<'a> {
     pub(crate) source_overlay: Option<(&'a Path, &'a str)>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum NativeEngine {
-    Interpreter,
-    Jit,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct NativeTier {
-    /// The canonical execution-tier fact. Engine choice is independent from
-    /// the build profile and is kept only as a dispatch adapter below.
-    execution: jet::TargetMachine::ExecutionTier,
-    engine: Option<NativeEngine>,
-}
-
-impl NativeTier {
-    fn aot() -> Self {
-        Self {
-            execution: jet::TargetMachine::ExecutionTier::Aot,
-            engine: None,
-        }
-    }
-
-    fn dev(engine: NativeEngine) -> Self {
-        Self {
-            execution: jet::TargetMachine::ExecutionTier::Dev,
-            engine: Some(engine),
-        }
-    }
-
-    fn jit() -> Self {
-        Self {
-            execution: jet::TargetMachine::ExecutionTier::Jit,
-            engine: Some(NativeEngine::Jit),
-        }
-    }
-
-    fn is_engine(self) -> bool {
-        self.engine.is_some()
-    }
-
-    /// Project the selected tier and independent profile into the one typed
-    /// build-fact snapshot consumed by artifact/cache/query projections.
-    fn project(self, facts: &mut jet_foundation::Facts::BuildFactSnapshot, profile: &BuildProfile) {
-        facts.profile = profile.budget_name().to_string();
-        facts.target_dossier.tier_identity = self.execution.as_str().to_string();
-    }
-}
-
 enum NativeRunResult {
-    Engine(jet::Interpreter::RunOutcome),
     Child(std::process::ExitStatus),
     Exit(i32),
     LaunchError(String),
@@ -2811,69 +2724,6 @@ fn select_native_profile(
     }
 }
 
-fn select_native_tier(
-    command: &str,
-    file: &str,
-    mode: OutputMode,
-    interpret: bool,
-    target: Option<&str>,
-    output: Option<&str>,
-    remote_builder: Option<&str>,
-    emit_rust: bool,
-    emit_generated: bool,
-    small: bool,
-    no_os: bool,
-    sbom: bool,
-    profile: &BuildProfile,
-    selects_build_entry: bool,
-    is_web: bool,
-    is_plugin: bool,
-    src: &str,
-) -> NativeTier {
-    if command != "run" {
-        return NativeTier::aot();
-    }
-    if interpret {
-        let incompatible = target.is_some()
-            || output.is_some()
-            || remote_builder.is_some()
-            || emit_rust
-            || emit_generated
-            || small
-            || no_os
-            || sbom;
-        if incompatible {
-            let diagnostic = jet::Diagnostics::Diagnostic::error(
-                "E2102",
-                "`--interpret` cannot be combined with build or artifact flags".to_string(),
-                "`--interpret` selects the interpreter engine; the build profile remains an independent fact"
-                    .to_string(),
-                "run `jet run --interpret [--release|--profile <name>] <file.jet>` without artifact flags"
-                    .to_string(),
-                None,
-            );
-            report_problems(mode, file, src, &[diagnostic]);
-            exit(ExitCodes::USAGE);
-        }
-        return NativeTier::dev(NativeEngine::Interpreter);
-    }
-    if matches!(profile, BuildProfile::Fast)
-        && target.is_none()
-        && output.is_none()
-        && !emit_rust
-        && !small
-        && !no_os
-        && !sbom
-        && !is_web
-        && !is_plugin
-        && !selects_build_entry
-    {
-        NativeTier::jit()
-    } else {
-        NativeTier::aot()
-    }
-}
-
 fn render_native_lints(
     file: &str,
     src: &str,
@@ -2883,24 +2733,6 @@ fn render_native_lints(
     let lints = crate::CmdDevTools::visible_lints(lints);
     if !lints.is_empty() {
         report_problems(mode, file, src, &lints);
-    }
-}
-
-fn finalize_tier_trace_sidecar(mode: OutputMode) {
-    let aggregate = jet_jit::take_trace_aggregate();
-    let Some(path) = std::env::var_os("JET_TRACE_TIERS_PATH") else {
-        return;
-    };
-    let path = PathBuf::from(path);
-    if let Err(error) = jet_jit::write_trace_sidecar(&path, &aggregate) {
-        write_mode_diagnostic(
-            mode,
-            &format!(
-                "couldn't write compiler-owned tier trace `{}`: {}\n",
-                path.display(),
-                error
-            ),
-        );
     }
 }
 
@@ -2914,30 +2746,8 @@ fn finish_native_run(
     lints: &[jet::Diagnostics::Diagnostic],
     result: NativeRunResult,
 ) -> ! {
-    finalize_tier_trace_sidecar(mode);
     render_native_lints(file, src, mode, lints);
     match result {
-        NativeRunResult::Engine(jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        }) => {
-            emit_run_output(&stdout, &stderr);
-            finish_recorded_artifacts(record, record_name, production_receipt, exit_code, mode);
-            exit(exit_code);
-        }
-        NativeRunResult::Engine(jet::Interpreter::RunOutcome::Problems(diags)) => {
-            exit_if_internal_fault(&diags, mode);
-            report_problems(mode, file, src, &diags);
-            finish_recorded_artifacts(
-                record,
-                record_name,
-                production_receipt,
-                ExitCodes::USER_ERROR,
-                mode,
-            );
-            exit(ExitCodes::USER_ERROR);
-        }
         NativeRunResult::Child(status) => {
             let exit_code = child_exit_code(status);
             finish_recorded_artifacts(record, record_name, production_receipt, exit_code, mode);
@@ -2960,99 +2770,77 @@ fn finish_native_run(
         }
     }
 }
-
-fn run_native_lens(
-    tier: NativeTier,
-    file: &str,
-    src: &str,
-    gates: jet::Policy::GateSet,
-    setting_overrides: &BTreeMap<String, String>,
-    profile: &BuildProfile,
-    entry_fn: Option<&str>,
-    program_args: &[&String],
-    mode: OutputMode,
-    record: Option<&crate::ProveReplay::NamedCapture>,
-    record_name: Option<&str>,
-    production_receipt: Option<&crate::ProductionReceipt::Context>,
-    package_manifest: &mut Option<(PathBuf, jet::Package::PackageFacts)>,
-    source_closure: &[(PathBuf, String)],
-    source_snapshot: Option<&crate::Store::AuthorityFileSnapshot>,
+/// Private child entry of the REPL/eval session executor (#4720, D-EXEC2).
+/// The parent sends a framed turn program on stdin; `rights` carries only
+/// invocation `--allow=`/`--deny=` rows, never a source pathname.
+pub(crate) fn run_native_source_from_stdin(rights: &[String]) -> ! {
+    let mut allow = Vec::new();
+    let mut deny = Vec::new();
+    for row in rights {
+        let (target, value) = if let Some(value) = row.strip_prefix("--allow=") {
+            (&mut allow, value)
+        } else if let Some(value) = row.strip_prefix("--deny=") {
+            (&mut deny, value)
+        } else {
+            crate::cli_error!("E2104", "unknown REPL child argument `{}`", row);
+            exit(ExitCodes::USAGE);
+        };
+        for right in value.split(',').map(str::trim).filter(|right| !right.is_empty()) {
+            match jet_foundation::Authority::parse_right(right) {
+                Some(canonical) => target.push(canonical),
+                None => {
+                    crate::cli_error!("E2104", "unknown authority right `{}`", right);
+                    exit(ExitCodes::USAGE);
+                }
+            }
+        }
+    }
+    // `<byte length>\n<source>`; the bytes after the source stay on stdin
+    // for the program's own `input()` calls.
+    let source = match read_framed_repl_source() {
+        Ok(source) => source,
+        Err(error) => {
+            crate::cli_error!("E2105", "couldn't read REPL source: {}", error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    };
+    let authority = (!allow.is_empty() || !deny.is_empty()).then(|| {
+        jet_foundation::Authority::ApplicationAuthority::from_policy(
+            Some(&allow),
+            Some(&deny),
+            "jet repl invocation policy",
+        )
+    });
+    run_native_source_execution(&source, authority.as_ref())
+}
+/// Read exactly the framed source without buffering past it, so the rest of
+/// stdin belongs to the program.
+fn read_framed_repl_source() -> std::io::Result<String> {
+    let mut stdin = std::io::stdin().lock();
+    let mut header = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        stdin.read_exact(&mut byte)?;
+        if byte[0] == b'\n' {
+            break;
+        }
+        header.push(byte[0]);
+    }
+    let length: usize = std::str::from_utf8(&header)
+        .ok()
+        .and_then(|text| text.trim().parse().ok())
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "missing source length header")
+        })?;
+    let mut source = vec![0u8; length];
+    stdin.read_exact(&mut source)?;
+    String::from_utf8(source)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+}
+fn run_native_source_execution(
+    source: &str,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> ! {
-    let application_authority = resolve_run_authority_before_execution(
-        file,
-        src,
-        mode,
-        profile.budget_name(),
-        setting_overrides,
-        entry_fn,
-        package_manifest,
-        source_closure,
-        source_snapshot,
-        invocation_authority,
-    );
-
-    let args = program_args
-        .iter()
-        .map(|arg| arg.as_str())
-        .collect::<Vec<_>>();
-    if let Some(capture) = record {
-        try_recorded_run(file, &args, capture, record_name, production_receipt, mode);
-    }
-
-    // The adapters marshal checked facts and runtime arguments. The workflow
-    // above owns authority; the completion seam below owns all output, lint,
-    // diagnostic, and capture handling.
-    jet_jit::set_program_owns_streams();
-    let run = match tier.engine {
-        Some(NativeEngine::Interpreter) => {
-            jet::Interpreter::run_interpreter_once_with_source_closure(
-                file,
-                source_closure,
-                &args,
-                gates,
-                profile.budget_name(),
-                setting_overrides,
-                application_authority.as_ref(),
-                entry_fn,
-                jet::Interpreter::InterpreterInvocation::RunInterpret,
-            )
-        }
-        Some(NativeEngine::Jit) => jet::Interpreter::run_jit_once_with_source_closure(
-            file,
-            source_closure,
-            &args,
-            gates,
-            profile.budget_name(),
-            setting_overrides,
-            application_authority.as_ref(),
-            entry_fn,
-        ),
-        None => unreachable!("AOT does not use the engine lens"),
-    };
-    let lints = run.lints;
-    finish_native_run(
-        file,
-        src,
-        mode,
-        record,
-        record_name,
-        production_receipt,
-        &lints,
-        NativeRunResult::Engine(run.outcome),
-    )
-}
-/// Private child entry used by the REPL. The parent sends the exact session
-/// snapshot on stdin; this path never admits a source pathname.
-pub(crate) fn run_native_source_from_stdin() -> ! {
-    let mut source = String::new();
-    if let Err(error) = std::io::stdin().read_to_string(&mut source) {
-        crate::cli_error!("E2105", "couldn't read REPL source: {}", error);
-        exit(ExitCodes::USER_ERROR);
-    }
-    run_native_source_execution(&source)
-}
-fn run_native_source_execution(source: &str) -> ! {
     let file_path = std::env::temp_dir().join("__jet_repl_run_stdin.jet");
     let file = file_path.to_string_lossy().into_owned();
     let empty_strings: Vec<String> = Vec::new();
@@ -3068,7 +2856,7 @@ fn run_native_source_execution(source: &str) -> ! {
         no_os: false,
         gates: jet::Policy::GateSet::default(),
         build_grants: &empty_strings,
-        invocation_authority: None,
+        invocation_authority,
         remote_builder: None,
         locked: false,
         target: None,
@@ -3082,13 +2870,12 @@ fn run_native_source_execution(source: &str) -> ! {
         output: None,
         program_args: &empty_args,
         mode: OutputMode {
-            json: false,
-            color: jet::Diagnostics::ColorChoice::Auto,
+            json: true,
+            color: jet::Diagnostics::ColorChoice::Never,
             quiet: false,
         },
         output_profile: None,
         record: None,
-        interpret: false,
         entry_fn: None,
         check_project_scope: false,
         package_scope: true,
@@ -3125,14 +2912,9 @@ fn generated_rust_path(artifact_path: &Path, file: &str) -> PathBuf {
         .join(format!("{}.rs", stem(file)))
 }
 
-/// Restore the cached native executable for `key` to `out`. A Cranelift key
-/// (#3953) stores only the dev image, which is appended to this `jet`'s runner.
-fn restore_native_artifact(store: &Store, key: &str, out: &Path, cranelift: bool) -> bool {
-    if cranelift {
-        crate::DevAot::restore(store, key, out)
-    } else {
-        matches!(store.restore_file(key, out), Ok(ArtifactRestore::Hit { .. }))
-    }
+/// Restore the cached native executable for `key` to `out`.
+fn restore_native_artifact(store: &Store, key: &str, out: &Path) -> bool {
+    matches!(store.restore_file(key, out), Ok(ArtifactRestore::Hit { .. }))
 }
 
 /// Replay one recorded plain native `jet build`. The recorded artifact and
@@ -3155,36 +2937,25 @@ fn replay_build_receipt(
         return false;
     };
     let artifact_path = build_artifact_path(project_root, file, None);
-    let current = if let Some(identity) = record.facts.get("dev_output") {
-        // #3953: a Cranelift executable is the runner of this `jet` plus the
-        // image its trailer names by digest. One whose length and trailer
-        // match stays untouched; otherwise the stored image is appended to a
-        // fresh runner copy. No executable-sized hash runs.
-        let output_current =
-            || crate::DevAot::output_identity(&artifact_path).as_deref() == Some(identity.as_str());
-        output_current()
-            || (crate::DevAot::restore(store, key, &artifact_path) && output_current())
-    } else {
-        let Some(rust_sha256) = record.facts.get("rust_sha256") else {
-            return false;
-        };
-        let rust_current = fs::read(generated_rust_path(&artifact_path, file))
-            .is_ok_and(|bytes| jet::SHA256::sha256_hex(&bytes) == *rust_sha256);
-        // An artifact already holding the stored bytes stays untouched; anything
-        // else is restored from the store or the Receipt is not answerable.
-        rust_current
-            && match store.lookup_artifact(key) {
-                Ok(jet_store::ArtifactLookup::Hit(artifact)) => {
-                    fs::read(&artifact_path).is_ok_and(|bytes| {
-                        jet_store::ObjectHandle::from_bytes(&bytes) == artifact.object
-                    }) || matches!(
-                        store.restore_file(key, &artifact_path),
-                        Ok(ArtifactRestore::Hit { .. })
-                    )
-                }
-                _ => false,
-            }
+    let Some(rust_sha256) = record.facts.get("rust_sha256") else {
+        return false;
     };
+    let rust_current = fs::read(generated_rust_path(&artifact_path, file))
+        .is_ok_and(|bytes| jet::SHA256::sha256_hex(&bytes) == *rust_sha256);
+    // An artifact already holding the stored bytes stays untouched; anything
+    // else is restored from the store or the Receipt is not answerable.
+    let current = rust_current
+        && match store.lookup_artifact(key) {
+            Ok(jet_store::ArtifactLookup::Hit(artifact)) => {
+                fs::read(&artifact_path).is_ok_and(|bytes| {
+                    jet_store::ObjectHandle::from_bytes(&bytes) == artifact.object
+                }) || matches!(
+                    store.restore_file(key, &artifact_path),
+                    Ok(ArtifactRestore::Hit { .. })
+                )
+            }
+            _ => false,
+        };
     if !current {
         return false;
     }
@@ -3304,15 +3075,7 @@ pub(crate) fn run_native_execution(request: NativeExecutionRequest<'_>) {
     // `core.compiler` package views. Install the one ambient bridge before
     // entering any Driver path; otherwise `jet run` bypasses the public
     // frontend wrapper and the canonical evaluator rejects those calls.
-    let trace_tiers = jet_jit::trace_tiers_enabled();
-    jet::with_compiler_stack(|| {
-        // `--trace-tiers` is parsed on the CLI thread, while the compiler
-        // stack may run the request on its worker. Carry this thread-local
-        // execution setting across that boundary before the nested runtime
-        // lens captures and publishes its trace.
-        jet_jit::set_trace_tiers(trace_tiers);
-        run_native_execution_inner(request)
-    })
+    jet::with_compiler_stack(|| run_native_execution_inner(request))
 }
 fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     let NativeExecutionRequest {
@@ -3341,7 +3104,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
         mode,
         output_profile,
         record: record_name,
-        interpret: force_interpreter,
         entry_fn,
         check_project_scope,
         package_scope,
@@ -3597,10 +3359,11 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             .map(|projection| projection.diagnostics.clone())
             .unwrap_or_default();
         if let Some(projection) = checked.as_ref() {
-            if let Err(error) =
-                crate::CmdDevTools::merge_cost_diagnostics(&projection.bundle, &mut all_diags)
+            if let Err(error) = crate::CmdDevTools::merge_cost_diagnostics(
+                &projection.bundle, &projection.checked_nominals, &mut all_diags,
+            )
             {
-                crate::CmdDevTools::exit_cost_projection_error(file, &error);
+                crate::CmdDevTools::exit_cost_projection_fault(&error);
             }
         }
         let has_errors = all_diags
@@ -3705,50 +3468,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             &src,
             package_manifest.as_ref().map(|(root, _)| root.as_path()),
         );
-
-    // D-ONCE-TIER1=A / D-LENS-RUN1: native runs choose one adapter here. The
-    // interpreter and strict Cranelift adapters share authority and completion
-    // through `run_native_lens`; all other requests continue to the AOT path.
-    let tier = select_native_tier(
-        cmd,
-        file,
-        mode,
-        force_interpreter,
-        cross_target,
-        output_name,
-        remote_builder,
-        emit_rust,
-        emit_generated,
-        small,
-        no_os,
-        sbom,
-        &profile,
-        selects_build_entry,
-        is_web,
-        is_plugin,
-        &src,
-    );
-    if tier.is_engine() {
-        run_native_lens(
-            tier,
-            file,
-            &src,
-            gates,
-            setting_overrides,
-            &profile,
-            entry_fn,
-            program_args,
-            mode,
-            record.as_ref(),
-            record_name,
-            production_receipt.as_ref(),
-            &mut package_manifest,
-            &source_closure,
-            source_snapshot.as_ref(),
-            invocation_authority,
-        );
-    }
-
     // D-BUILDNORM1=A (Tower #85): compute the content-cache key from the
     // program's canonical *pre-sema* AST, up front. `mode_tag` keeps the native
     // codegen shapes (plain, no-OS, and audited gates) in separate key spaces.
@@ -3762,13 +3481,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     } else {
         "run"
     };
-    // #3953: dev profiles build through Cranelift; release-class, size, no-OS
-    // and audited-gate builds keep rustc/LLVM. The backend is part of the key.
-    let cranelift_dev = profile.cranelift_backend() && !no_os && gates.is_empty();
     let cache_profile_tag = format!(
-        "{profile_tag};{};aot-target=native;backend={}",
+        "{profile_tag};{};aot-target=native",
         setting_overrides_tag(setting_overrides),
-        if cranelift_dev { "cranelift" } else { "rustc" }
     );
     // `jet run` needs its key *before* the front end: a hit below replays the
     // cached binary without loading the program at all. `jet build` stays on
@@ -3788,7 +3503,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             profile.budget_name(),
             &cache_profile_tag,
             mode_tag,
-            NativeKeyBackend::for_build(cranelift_dev),
+            native_toolchain_identity(),
             invocation_authority,
         )
     } else {
@@ -3832,7 +3547,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             let out = bin_path(&project_root, file);
             if native_store
                 .as_ref()
-                .is_some_and(|store| restore_native_artifact(store, key, &out, cranelift_dev))
+                .is_some_and(|store| restore_native_artifact(store, key, &out))
             {
                 let _application_authority = resolve_run_authority_before_execution(
                     file,
@@ -4017,46 +3732,10 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             build_front_end.as_ref(),
             &cache_profile_tag,
             mode_tag,
-            NativeKeyBackend::for_build(cranelift_dev),
+            native_toolchain_identity(),
             invocation_authority,
         );
     }
-    // D-EFFBUDGET1's summary is a projection of the checked program, so project
-    // it from the front end above rather than running a third one for it. Taken
-    // before the compile consumes the bundle; printed in its original place.
-    //
-    // `emitted_program`, not `runtime_program`: when a `fn build` is selected
-    // the emitted program is the planned bundle (with generated modules), and
-    // the historic check-only pass ran after the build, so only a build that
-    // never planned may reuse this bundle and still print the same summary.
-    let reused_package_effects = build_front_end.as_ref().and_then(|prepared| {
-        let program = prepared.emitted_program()?;
-        let facts = prepared.effect_facts();
-        let (projection, delegations) = native_effect_projection(
-            program,
-            &facts.summaries,
-            entry_fn,
-            package_manifest.as_ref().map(|(_, manifest)| manifest),
-        );
-        Some((
-            jet::EffectBudget::compute_package_effects(program, &facts.solved, &facts.summaries),
-            facts.fact_registry.clone(),
-            jet::EffectBudget::summary_line_for_program_with_authority(
-                program,
-                &facts.summaries,
-                entry_fn.unwrap_or("run"),
-                package_manifest.as_ref().map(|(_, manifest)| manifest),
-            ),
-            jet::EffectBudget::summary_json_for_program_with_authority(
-                program,
-                &facts.summaries,
-                entry_fn.unwrap_or("run"),
-                package_manifest.as_ref().map(|(_, manifest)| manifest),
-            ),
-            projection,
-            delegations,
-        ))
-    });
     // S59: same story for the C link flags — resolve them from the one loaded
     // program instead of reopening and re-parsing it. E3201 still surfaces from
     // its original place, after the compile succeeds.
@@ -4094,7 +3773,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     {
         native_key.as_ref().is_some_and(|key| {
             native_store.as_ref().is_some_and(|store| {
-                restore_native_artifact(store, key, &bin_path(&project_root, file), cranelift_dev)
+                restore_native_artifact(store, key, &bin_path(&project_root, file))
             })
         })
     } else {
@@ -4108,7 +3787,9 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     #[allow(unused_assignments)]
     let mut visible_lints: Vec<jet::Diagnostics::Diagnostic> = Vec::new();
     let execution_lints: Vec<jet::Diagnostics::Diagnostic>;
-    let mut checked_runtime: Option<jet::AST::ProgramBundle> = None;
+    let mut checked_runtime: Option<jet::Driver::CheckedSourceBundle> = None;
+    // Rust emission only needs the transferred graph/facts, not another source snapshot.
+    let mut retained_effect_source = None;
     let mut programmable_build_target: Option<String> = None;
     progress.major("Generating", "native code");
 
@@ -4229,9 +3910,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             invocation_authority,
             cmd == "build",
         ) {
-            Ok(output) => {
+            Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                if emit_rust {
+                    retained_effect_source = output.runtime.take().zip(output.runtime_effect_facts.take());
+                } else {
+                    checked_runtime = output.take_checked_runtime();
+                }
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4258,9 +3943,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             invocation_authority,
             cmd == "build",
         ) {
-            Ok(output) => {
+            Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                if emit_rust {
+                    retained_effect_source = output.runtime.take().zip(output.runtime_effect_facts.take());
+                } else {
+                    checked_runtime = output.take_checked_runtime();
+                }
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4283,19 +3972,17 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             package_scope,
             build_override,
             entry_fn,
-            // #3953: a Cranelift dev build generates no Rust up front; the
-            // native build generates it only if Cranelift refuses the program.
-            cmd == "build"
-                && cranelift_dev
-                && !emit_rust
-                && !selects_build_entry
-                && target_machine.is_none(),
+            false,
             invocation_authority,
             cmd == "build",
         ) {
-            Ok(output) => {
+            Ok(mut output) => {
                 programmable_build_target = programmable_build_target_name(&output);
-                checked_runtime = (!emit_rust).then_some(output.runtime).flatten();
+                if emit_rust {
+                    retained_effect_source = output.runtime.take().zip(output.runtime_effect_facts.take());
+                } else {
+                    checked_runtime = output.take_checked_runtime();
+                }
                 Ok(output.compile)
             }
             Err(diags) => Err(diags),
@@ -4413,10 +4100,12 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     };
     let game_runtime = checked_runtime
         .as_ref()
-        .is_some_and(program_uses_game_runtime)
+        .is_some_and(|checked| program_uses_game_runtime(&checked.bundle))
         || src.contains("core.game");
     if let Some(bundle) = checked_runtime.as_mut() {
-        tier.project(&mut bundle.build_facts, &profile);
+        bundle.bundle.build_facts.profile = profile.budget_name().to_string();
+        bundle.bundle.build_facts.target_dossier.tier_identity =
+            jet::TargetMachine::ExecutionTier::Aot.as_str().to_string();
     }
     inject_game_crash_reporter_bootstrap(&mut rust_code, game_runtime);
     progress.minor("generated Rust", &format!("{} bytes", rust_code.len()));
@@ -4434,9 +4123,44 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
     // build Receipt so a replay prints the one this terminal asks for.
     let mut recorded_effects: Option<(String, String)> = None;
     if cmd == "build" || cmd == "run" {
-        // #2083: reuse the fixpoint the build front end already solved. Only
-        // the paths that never ran it — a plain `jet run`, a library or named
-        // output, a package build entry — still pay a check-only pass here.
+        // #2083: project only after compilation transfers the checked graph.
+        // Witness sources borrow that graph through authority enforcement.
+        let effect_source = checked_runtime
+            .as_ref()
+            .map(|checked| (&checked.bundle, &checked.effect_facts))
+            .or_else(|| retained_effect_source.as_ref().map(|(bundle, facts)| (bundle, facts)))
+            .or_else(|| {
+                build_front_end.as_ref().and_then(|prepared| {
+                    Some((prepared.emitted_program()?, prepared.effect_facts()))
+                })
+            });
+        let reused_package_effects = effect_source.map(|(program, facts)| {
+            let (projection, delegations) = native_effect_projection(
+                program,
+                &facts.summaries,
+                entry_fn,
+                package_manifest.as_ref().map(|(_, manifest)| manifest),
+            );
+            (
+                jet::EffectBudget::compute_package_effects(program, &facts.solved, &facts.summaries),
+                facts.fact_registry.clone(),
+                jet::EffectBudget::summary_line_for_program_with_authority(
+                    program,
+                    &facts.summaries,
+                    entry_fn.unwrap_or("run"),
+                    package_manifest.as_ref().map(|(_, manifest)| manifest),
+                ),
+                jet::EffectBudget::summary_json_for_program_with_authority(
+                    program,
+                    &facts.summaries,
+                    entry_fn.unwrap_or("run"),
+                    package_manifest.as_ref().map(|(_, manifest)| manifest),
+                ),
+                projection,
+                delegations,
+            )
+        });
+        let fallback_effect_bundle;
         let effect_view = match reused_package_effects {
             Some(view) => Some(view),
             None => {
@@ -4467,7 +4191,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                         ),
                     }
                 };
-                let (diagnostics, bundle, facts) = checked;
+                let (diagnostics, bundle, facts, _nominals) = checked;
                 if diagnostics
                     .iter()
                     .any(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
@@ -4475,7 +4199,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     report_problems(mode, file, &src, &diagnostics);
                     exit(ExitCodes::USER_ERROR);
                 }
-                let Some(bundle) = bundle else {
+                let Some(checked_effect_bundle) = bundle else {
                     let diagnostic = jet::Diagnostics::Diagnostic::error(
                         "E2105",
                         "could not obtain the checked effect view".to_string(),
@@ -4487,6 +4211,8 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                     report_problems(mode, file, &src, &[diagnostic]);
                     exit(ExitCodes::USER_ERROR);
                 };
+                fallback_effect_bundle = checked_effect_bundle;
+                let bundle = &fallback_effect_bundle;
                 let (projection, delegations) = native_effect_projection(
                     &bundle,
                     &facts.summaries,
@@ -4545,13 +4271,13 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 (checked_runtime.as_mut(), application_authority.as_ref())
             {
                 let required_effects = bundle
-                    .package_guarantees
+                    .bundle.package_guarantees
                     .application_authority
                     .required_effects
                     .clone();
                 let mut applied = application_authority.clone();
                 applied.required_effects = required_effects;
-                bundle.package_guarantees.application_authority = applied;
+                bundle.bundle.package_guarantees.application_authority = applied;
             }
             let effect_summary = jet::EffectBudget::render_effect_projection_line(&projection);
             // Program stdout stays the program's (U7 / D-DEVMODE1). The
@@ -4677,7 +4403,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 native_cache_hit,
                 native_key.clone(),
                 target_machine,
-                cranelift_dev,
             );
             print_release_job_summary(&src, release_profile, mode);
             progress.major("Verifying", "build budgets");
@@ -4695,7 +4420,7 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
             // The checked program answers whether any gate applies; only a
             // program that declares one pays the gates' own front-end check.
             let build_gated = checked_runtime.as_ref().map_or(true, |bundle| {
-                crate::CmdBudget::has_build_gates(bundle, budget_target, &budget_profile)
+                crate::CmdBudget::has_build_gates(&bundle.bundle, budget_target, &budget_profile)
             });
             if build_gated
                 && crate::CmdBudget::run_build_gates(
@@ -4723,28 +4448,11 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                         &src,
                         package_manifest.as_ref().map(|(root, _)| root.as_path()),
                     );
-                if let Some(inputs) = plain.then(|| receipt.sealed_inputs(bundle)).flatten() {
-                    // #3953: a Cranelift executable is recognized by its
-                    // length and image trailer; a rustc one by its generated
-                    // Rust, stored under the rustc key when Cranelift refused.
+                if let Some(inputs) = plain.then(|| receipt.sealed_inputs(&bundle.bundle)).flatten() {
                     let mut facts = BTreeMap::new();
-                    match crate::DevAot::output_identity(&artifact_path) {
-                        Some(identity) => {
-                            facts.insert("native_key".to_string(), key.clone());
-                            facts.insert("dev_output".to_string(), identity);
-                        }
-                        None => {
-                            let artifact_key = if cranelift_dev {
-                                rustc_fallback_cache_key(key)
-                            } else {
-                                key.clone()
-                            };
-                            facts.insert("native_key".to_string(), artifact_key);
-                            let rust = fs::read(generated_rust_path(&artifact_path, file))
-                                .unwrap_or_default();
-                            facts.insert("rust_sha256".to_string(), jet::SHA256::sha256_hex(&rust));
-                        }
-                    }
+                    facts.insert("native_key".to_string(), key.clone());
+                    let rust = fs::read(generated_rust_path(&artifact_path, file)).unwrap_or_default();
+                    facts.insert("rust_sha256".to_string(), jet::SHA256::sha256_hex(&rust));
                     // The closure the Receipt seals decides whether a gate
                     // applies, so a replay of an ungated build skips them.
                     if !build_gated {
@@ -4835,7 +4543,6 @@ fn run_native_execution_inner(request: NativeExecutionRequest<'_>) {
                 false,
                 native_key.clone(),
                 target_machine,
-                cranelift_dev,
             );
             print_release_job_summary(&src, release_profile, mode);
             if cross_target.is_some() {
@@ -6247,12 +5954,11 @@ fn test_result_cache_key(path: &Path, opts: &TestRunOpts, package: bool) -> Opti
     append_test_cache_field(&mut identity, native_identity.as_bytes());
 
     let options = format!(
-        "show_default={};coverage={};release={};profile={:?};trace_tiers={};filter={:?};shuffle={:?};serial={};measure={};docs={};browser={:?};browser_retries={:?};browser_reporter={:?};browser_ui={};browser_visual={};browser_trace={};",
+        "show_default={};coverage={};release={};profile={:?};filter={:?};shuffle={:?};serial={};measure={};docs={};browser={:?};browser_retries={:?};browser_reporter={:?};browser_ui={};browser_visual={};browser_trace={};",
         opts.show_default,
         opts.coverage,
         opts.release,
         opts.profile,
-        opts.trace_tiers,
         opts.filter,
         opts.shuffle_seed,
         opts.serial,
@@ -6489,16 +6195,16 @@ fn harness_test_cases(stdout: &str) -> Result<Option<Vec<HarnessTestCase>>, Stri
                 .get("ok")
                 .map_err(|error| format!("test `{name}` has no result: {error}"))?
             {
-                DataTree::Bool(ok) => *ok,
+                Dyn::Bool(ok) => *ok,
                 _ => return Err(format!("test `{name}` has a non-boolean result")),
             };
             let expected_failure = match test.get_opt("expectedFailure") {
-                Some(DataTree::Bool(expected_failure)) => *expected_failure,
+                Some(Dyn::Bool(expected_failure)) => *expected_failure,
                 None => false,
                 _ => return Err(format!("test `{name}` has a non-boolean expectation")),
             };
             let skipped = match test.get_opt("skipped") {
-                Some(DataTree::Bool(skipped)) => *skipped,
+                Some(Dyn::Bool(skipped)) => *skipped,
                 None => false,
                 _ => return Err(format!("test `{name}` has a non-boolean skip flag")),
             };
@@ -6827,10 +6533,11 @@ fn persist_evidence_report_for_inputs_with_retention(
         .map_err(|error| format!("could not read the current directory: {error}"))?;
     let project_root = jet::Loader::selected_project_root(&cwd)
         .map_err(|diagnostic| format!("could not resolve evidence project root: {diagnostic:?}"))?;
+    let bytes = report.encode()?;
+    let artifact_id = jet::SHA256::sha256_hex(&bytes);
     let path = project_root
         .join(".jet/evidence")
-        .join(format!("{report_id}.json"));
-    let bytes = report.encode()?;
+        .join(format!("{artifact_id}.json"));
     let size = write_test_evidence_bytes(&path, &bytes)?;
     let identity = RecordIdentity::new(
         target_inputs_sha256.to_string(),
@@ -6841,7 +6548,7 @@ fn persist_evidence_report_for_inputs_with_retention(
         &project_root,
         identity,
         RecordKind::Evidence,
-        report_id.to_string(),
+        artifact_id,
         path,
         size,
         RecordCapture::Safe,
@@ -7053,7 +6760,7 @@ fn canonical_test_json(stdout: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find(|(name, _)| name == key)
@@ -7061,12 +6768,12 @@ fn object_field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a D
 }
 
 fn is_canonical_test_report(candidate: &str) -> bool {
-    let Ok(DataTree::Object(object)) = parse_json(candidate) else {
+    let Ok(Dyn::Object(object)) = parse_json(candidate) else {
         return false;
     };
     let schema = object_field(&object, "schema").and_then(|value| value.as_str().ok());
     matches!(schema, Some("jet.test.v1" | "jet-test-v1"))
-        && matches!(object_field(&object, "tests"), Some(DataTree::Array(_)))
+        && matches!(object_field(&object, "tests"), Some(Dyn::Array(_)))
 }
 fn canonical_status_json(stdout: &str) -> Option<String> {
     let whole = stdout.trim();
@@ -7082,7 +6789,7 @@ fn canonical_status_json(stdout: &str) -> Option<String> {
 }
 
 fn is_canonical_status_report(candidate: &str) -> bool {
-    let Ok(DataTree::Object(object)) = parse_json(candidate) else {
+    let Ok(Dyn::Object(object)) = parse_json(candidate) else {
         return false;
     };
     matches!(
@@ -7142,8 +6849,6 @@ pub(crate) struct TestRunOpts {
     pub(crate) profile: Option<String>,
     /// CLI build-setting contributions shared with the checked test target.
     pub(crate) setting_overrides: BTreeMap<String, String>,
-    /// `--trace-tiers`: print the harness execution tier marker.
-    pub(crate) trace_tiers: bool,
     /// `--filter=<substr>`: only run tests whose name contains it.
     pub(crate) filter: Option<String>,
     /// `--shuffle` / `--shuffle=<seed>`: reorder tests before running (order-
@@ -7208,7 +6913,6 @@ impl TestRunOpts {
                 "--update-snapshots" | "-u" => opts.update_snapshots = true,
                 "--coverage" => opts.coverage = true,
                 "--release" => opts.release = true,
-                "--trace-tiers" => opts.trace_tiers = true,
                 "--serial" => opts.serial = true,
                 "--grade" => {
                     let value = test_run_option_value(argv, &mut index, name, inline);
@@ -7520,7 +7224,7 @@ fn run_generated_test(path: &str, opts: TestRunOpts, mode: OutputMode) -> ! {
 
 
 /// `jet test [--watch] [--fresh] [--docs] [--where=<expr>]
-/// [--capture=<failed|all|none>] [--release] [--trace-tiers] [--coverage]
+/// [--capture=<failed|all|none>] [--release] [--coverage]
 /// [--filter=<substr>] [--shuffle[=<seed>]] [--serial]`.
 /// A finite run is quiet for passing tests and stores only test results in the
 /// result cache; native build artifacts remain in the ordinary build cache.
@@ -7606,20 +7310,15 @@ pub(crate) fn run_test_opts(path: &str, opts: TestRunOpts, mode: OutputMode) {
     });
 }
 
-/// Bare `jet test` inside a package (spec S43): every source file the package
-/// compiles is a test target, not only the resolved entry file. The member set
-/// comes from the driver's project scan — the same authority-checked
-/// enumeration `jet project parts` reports — so discovery covers exactly what
-/// the package compiles instead of walking the filesystem a second time.
-/// Members with neither `#Test` blocks nor doctests are skipped instead of
-/// failing; a member that fails to parse still reports its real compile error.
-/// When nothing in the package was testable, the resolved entry runs on the
-/// ordinary file path so its own report (E0601, or E2105 for a missing entry)
-/// is the one the user sees, exactly once.
+/// Run the package's aggregated test harness once (spec S43), using the first
+/// test-bearing member as its entry. The driver's checked project scan supplies
+/// the member set, including modules the resolved command entry does not import.
+/// Doctests remain file-local and run once for each member. An empty package
+/// falls through to the entry's ordinary E0601 (or missing-entry E2105) report.
 pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode) {
     require_project_environment("test", root, mode);
     let entry = crate::find_project_entry(root);
-    let mut ran = 0usize;
+    let mut ran = false;
     let mut any_fail = false;
     // D-CMDOVERRIDE1=A: one package-scoped `fn test` owns the whole command.
     // The package authority reports duplicate command functions before this
@@ -7639,35 +7338,49 @@ pub(crate) fn run_test_package(root: &Path, opts: TestRunOpts, mode: OutputMode)
             });
         }
     }
-    if entry.is_file() {
-        match run_test_target(&entry, &opts, mode, true) {
-            TestTargetOutcome::Override(ok) => exit(if ok {
-                ExitCodes::OK
-            } else {
-                ExitCodes::USER_ERROR
-            }),
-            TestTargetOutcome::Ran(ok) => {
-                ran += 1;
+    let members = jet::ProjectParts::source_files(root);
+    let harness_target = if opts.docs {
+        None
+    } else {
+        std::iter::once(&entry).chain(members.iter()).find(|target| {
+            target.is_file()
+                && !is_reserved_target_file(target)
+                && (jet::has_test_blocks(&target.to_string_lossy())
+                    || jet::has_test_contracts(&target.to_string_lossy()))
+        })
+    };
+    if let Some(target) = harness_target {
+        match run_test_target(target, &opts, mode, true) {
+            TestTargetOutcome::Ran(ok) | TestTargetOutcome::Override(ok) => {
+                ran = true;
                 any_fail = !ok;
             }
             TestTargetOutcome::NoTests => {}
         }
     }
-    for target in jet::ProjectParts::source_files(root) {
-        if target == entry || is_reserved_target_file(&target) {
+    // The harness already includes every package member's #Test/contract
+    // claims. Only file-local doctests remain; re-running a member's harness
+    // would repeat the whole package's test set (#4838).
+    let mut docs_opts = opts.clone();
+    docs_opts.docs = true;
+    for target in std::iter::once(&entry)
+        .chain(members.iter().filter(|target| *target != &entry))
+    {
+        if Some(target) == harness_target
+            || !target.is_file()
+            || is_reserved_target_file(target)
+        {
             continue;
         }
-        match run_test_target(&target, &opts, mode, true) {
-            // A member's own `fn test` override is that file's harness choice;
-            // only the entry's override speaks for the whole package.
+        match run_test_target(target, &docs_opts, mode, true) {
             TestTargetOutcome::Ran(ok) | TestTargetOutcome::Override(ok) => {
-                ran += 1;
+                ran = true;
                 any_fail |= !ok;
             }
             TestTargetOutcome::NoTests => {}
         }
     }
-    if ran == 0 {
+    if !ran {
         run_test_opts(&entry.to_string_lossy(), opts, mode);
     }
     exit(if any_fail {
@@ -7735,8 +7448,8 @@ fn run_test_file(path: &Path, opts: &TestRunOpts, mode: OutputMode) -> bool {
     )
 }
 
-/// Run one test target. `package` marks bare-`jet test` package members, whose
-/// empty files are skipped rather than reported.
+/// Run one test target. `package` skips an empty package member instead of
+/// reporting E0601; the package runner invokes its aggregate harness only once.
 fn run_test_target(
     path: &Path,
     opts: &TestRunOpts,
@@ -7910,11 +7623,9 @@ fn run_test_target(
 
     if !override_entry {
         if package {
-            // Package mode walks every member: one with no `#Test` blocks or
-            // contract-bearing callables contributes nothing to the run,
-            // which is not the error an empty named target is. A member that
-            // fails to load answers `true` here, so its real compile error still
-            // surfaces below instead of being silently skipped.
+            // A package with no #Test blocks or contract-bearing callables
+            // contributes only doctests. Load failures answer true here, so
+            // normal compilation still reports the real diagnostic.
             if !jet::has_test_blocks(&shown) && !jet::has_test_contracts(&shown) {
                 return if has_doctests {
                     TestTargetOutcome::Ran(finish_doctest_report())
@@ -8131,9 +7842,6 @@ fn run_test_target(
     if opts.serial {
         cmd.env("JET_TEST_SERIAL", "1");
     }
-    if opts.trace_tiers {
-        cmd.env("JET_TEST_TRACE_TIERS", "1");
-    }
     if opts.measure {
         cmd.env("JET_TEST_MEASURE", "1");
     }
@@ -8327,17 +8035,17 @@ fn test_watch_failure_names(stdout: &str, stderr: &str) -> Vec<String> {
     names
 }
 
-fn is_canonical_test_value(value: &DataTree) -> bool {
-    let DataTree::Object(object) = value else {
+fn is_canonical_test_value(value: &Dyn) -> bool {
+    let Dyn::Object(object) = value else {
         return false;
     };
     let schema = object_field(object, "schema").and_then(|value| value.as_str().ok());
     matches!(schema, Some("jet.test.v1" | "jet-test-v1"))
-        && matches!(object_field(object, "tests"), Some(DataTree::Array(_)))
+        && matches!(object_field(object, "tests"), Some(Dyn::Array(_)))
 }
 
-fn is_canonical_status_value(value: &DataTree) -> bool {
-    let DataTree::Object(object) = value else {
+fn is_canonical_status_value(value: &Dyn) -> bool {
+    let Dyn::Object(object) = value else {
         return false;
     };
     matches!(
@@ -8347,21 +8055,21 @@ fn is_canonical_status_value(value: &DataTree) -> bool {
 }
 
 fn append_status_report_failures(
-    value: &DataTree,
+    value: &Dyn,
     names: &mut Vec<String>,
     seen: &mut BTreeSet<String>,
 ) {
-    let DataTree::Object(object) = value else {
+    let Dyn::Object(object) = value else {
         return;
     };
-    let Some(DataTree::Object(evidence)) = object_field(object, "evidence") else {
+    let Some(Dyn::Object(evidence)) = object_field(object, "evidence") else {
         return;
     };
-    let Some(DataTree::Array(records)) = object_field(evidence, "evidence") else {
+    let Some(Dyn::Array(records)) = object_field(evidence, "evidence") else {
         return;
     };
     for record in records {
-        let DataTree::Object(record) = record else {
+        let Dyn::Object(record) = record else {
             continue;
         };
         let Some(name) = object_field(record, "claim").and_then(|value| value.as_str().ok()) else {
@@ -8381,18 +8089,18 @@ fn append_status_report_failures(
 }
 
 fn append_test_report_failures(
-    value: &DataTree,
+    value: &Dyn,
     names: &mut Vec<String>,
     seen: &mut BTreeSet<String>,
 ) {
-    let DataTree::Object(object) = value else {
+    let Dyn::Object(object) = value else {
         return;
     };
-    let Some(DataTree::Array(tests)) = object_field(object, "tests") else {
+    let Some(Dyn::Array(tests)) = object_field(object, "tests") else {
         return;
     };
     for test in tests {
-        let DataTree::Object(test) = test else {
+        let Dyn::Object(test) = test else {
             continue;
         };
         let Some(name) = object_field(test, "name").and_then(|value| value.as_str().ok()) else {
@@ -8400,12 +8108,12 @@ fn append_test_report_failures(
         };
         let failed = object_field(test, "ok")
             .and_then(|value| match value {
-                DataTree::Bool(ok) => Some(!ok),
+                Dyn::Bool(ok) => Some(!ok),
                 _ => None,
             })
             .or_else(|| {
                 object_field(test, "passed").and_then(|value| match value {
-                    DataTree::Bool(passed) => Some(!passed),
+                    Dyn::Bool(passed) => Some(!passed),
                     _ => None,
                 })
             })
@@ -8448,9 +8156,6 @@ fn append_test_watch_flags(command: &mut Command, opts: &TestRunOpts, filter: Op
     }
     for (key, value) in &opts.setting_overrides {
         command.arg(format!("--set={key}={value}"));
-    }
-    if opts.trace_tiers {
-        command.arg("--trace-tiers");
     }
     if let Some(engines) = opts.browser_engines.as_deref() {
         command.arg(format!("--browser={engines}"));
@@ -9551,8 +9256,8 @@ fn format_source_for_fmt(
         && Path::new(origin).is_file()
         && !is_typed_package_source(src, origin)
     {
-        // Sema spans point into the source as read. Insert copy verbs before
-        // any package-target migration can change those offsets.
+        // Sema spans point into the source as read. Insert the copy calls
+        // before any package-target migration can change those offsets.
         let mut source = src.to_string();
         let mut bundle = jet::Loader::load_entry(origin)?;
         let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Check);
@@ -9562,9 +9267,13 @@ fn format_source_for_fmt(
         {
             return Err(diagnostics);
         }
-        for span in implicit_copy_spans(&bundle, origin).into_iter().rev() {
-            if span.start <= source.len() {
-                source.insert_str(span.start, jet::Syntax::SIGIL_COPY);
+        // D-COPY-WORD1=A: an implicit copy site is a place (a name, field or
+        // index chain) whose span ends where the place ends, so the explicit
+        // form appends `.copy()` there. Spans arrive last-first.
+        let copy_call = format!(".{}()", jet::Syntax::METHOD_COPY);
+        for span in implicit_copy_spans(&bundle, origin) {
+            if span.end <= source.len() {
+                source.insert_str(span.end, &copy_call);
                 copy_marks_inserted = true;
             }
         }
@@ -9733,8 +9442,6 @@ fn is_typed_package_source(src: &str, origin: &str) -> bool {
     }
     let trimmed = src.trim_start();
     let value = trimmed
-        .strip_prefix("pub ")
-        .unwrap_or(trimmed)
         .split_once("::")
         .map(|(_, value)| value.trim_start())
         .or_else(|| trimmed.strip_prefix("Config").map(str::trim_start));
@@ -11038,50 +10745,6 @@ fn native_toolchain_identity() -> &'static str {
     NATIVE_TOOLCHAIN_IDENTITY.as_str()
 }
 
-/// #3953: identity of the Cranelift dev backend. The image is compiled by this
-/// compiler's own Cranelift lowering and appended to the runner build it names,
-/// so no rustc, C compiler or linker is probed for it.
-static DEV_AOT_TOOLCHAIN_IDENTITY: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "abi={NATIVE_CACHE_COMPILER_ABI}\u{1}build={}\u{1}version={}\u{1}semindex={}\u{1}backend=cranelift\u{1}runner={}",
-        env!("JET_COMPILER_BUILD_ID"),
-        jet::Manifest::COMPILER_VERSION,
-        jet_semindex::SCHEMA_VERSION,
-        env!("JET_RUNNER_BUILD_ID"),
-    )
-});
-
-/// The backend a native cache key describes (#3953).
-#[derive(Clone, Copy)]
-enum NativeKeyBackend<'a> {
-    /// rustc/LLVM under this toolchain identity; the emitted Rust runtime and
-    /// Core closure are part of the key.
-    Rustc(&'a str),
-    /// The Cranelift dev image: this compiler and its runner build.
-    Cranelift,
-}
-
-impl NativeKeyBackend<'static> {
-    fn for_build(cranelift: bool) -> Self {
-        if cranelift {
-            Self::Cranelift
-        } else {
-            Self::Rustc(native_toolchain_identity())
-        }
-    }
-}
-
-/// #3953: the key of the rustc executable built when Cranelift refuses a
-/// program whose key describes the Cranelift backend. The Cranelift key covers
-/// the program and this compiler; the rustc and linker identity is added here,
-/// so it is probed only when rustc actually runs.
-fn rustc_fallback_cache_key(cranelift_key: &str) -> String {
-    let mut bytes = b"jet-native-rustc-fallback-v1\0".to_vec();
-    append_cache_field(&mut bytes, cranelift_key);
-    append_cache_field(&mut bytes, native_toolchain_identity());
-    jet::SHA256::sha256_hex(&bytes)
-}
-
 fn dependency_interface_fingerprint(bundle: &jet::AST::ProgramBundle) -> String {
     let mut interfaces = Vec::new();
     for (dependency, root) in &bundle.dep_roots {
@@ -11178,7 +10841,7 @@ fn native_cache_key_with_source_closure(
     profile: &str,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     let overlays = source_closure
@@ -11190,7 +10853,7 @@ fn native_cache_key_with_source_closure(
         profile,
         profile_tag,
         mode_tag,
-        backend,
+        toolchain_identity,
         &overlays,
         invocation_authority,
     )
@@ -11208,7 +10871,7 @@ fn native_cache_key_with_toolchain(
         profile,
         profile_tag,
         mode_tag,
-        NativeKeyBackend::Rustc(toolchain_identity),
+        toolchain_identity,
         &[],
         invocation_authority,
     )
@@ -11219,7 +10882,7 @@ fn native_cache_key_with_toolchain_and_overlays(
     profile: &str,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     overlays: &[(&Path, &str)],
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
@@ -11266,7 +10929,7 @@ fn native_cache_key_with_toolchain_and_overlays(
         &bundle,
         profile_tag,
         mode_tag,
-        backend,
+        toolchain_identity,
         invocation_authority,
     )
 }
@@ -11276,7 +10939,7 @@ fn native_cache_key_for_prepared_build(
     prepared: Option<&jet::Driver::PreparedBuildFrontEnd>,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     let Some(program) = prepared.and_then(|prepared| prepared.emitted_program()) else {
@@ -11288,7 +10951,7 @@ fn native_cache_key_for_prepared_build(
         program,
         profile_tag,
         mode_tag,
-        backend,
+        toolchain_identity,
         invocation_authority,
     )
 }
@@ -11302,7 +10965,7 @@ fn native_cache_key_for_prepared_build(
 /// source edit racing the build, a fact snapshot taken twice, a differing sema
 /// mode) would have stored a binary under a key describing a different program.
 /// The inputs are canonical AST, instance identities, dependency interfaces,
-/// runtime/Core fingerprints (rustc backend), bridge identity, manifest,
+/// runtime/Core fingerprints, bridge identity, manifest,
 /// toolchain, profile, and recorded compile-time package inputs.
 
 fn native_cache_key_for_program(
@@ -11310,7 +10973,7 @@ fn native_cache_key_for_program(
     bundle: &jet::AST::ProgramBundle,
     profile_tag: &str,
     mode_tag: &str,
-    backend: NativeKeyBackend<'_>,
+    toolchain_identity: &str,
     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
 ) -> Option<String> {
     debug_native_cache_event(format!(
@@ -11325,27 +10988,13 @@ fn native_cache_key_for_program(
         debug_native_cache_event("program-key-none prove-fresh");
         return None;
     }
-    // #3953: the Rust runtime and Core closure are rustc inputs. A Cranelift
-    // image runs on the runner its toolchain identity names, and its Core
-    // closure is compiled by this compiler, so neither is emitted to be hashed.
-    let (toolchain_identity, runtime_fingerprint, corelib_fingerprint) = match backend {
-        NativeKeyBackend::Rustc(toolchain_identity) => {
-            let devtools_policy =
-                jet::Driver::release_devtools_policy_for_bundle(bundle, profile_tag);
-            (
-                toolchain_identity,
-                jet::Codegen::cached_runtime_fingerprint_with_policy(&devtools_policy),
-                jet::Codegen::corelib_emission_fingerprint_with_policy(
-                    bundle,
-                    mode_tag.starts_with("test"),
-                    &devtools_policy,
-                ),
-            )
-        }
-        NativeKeyBackend::Cranelift => {
-            (DEV_AOT_TOOLCHAIN_IDENTITY.as_str(), String::new(), String::new())
-        }
-    };
+    let devtools_policy = jet::Driver::release_devtools_policy_for_bundle(bundle, profile_tag);
+    let runtime_fingerprint = jet::Codegen::cached_runtime_fingerprint_with_policy(&devtools_policy);
+    let corelib_fingerprint = jet::Codegen::corelib_emission_fingerprint_with_policy(
+        bundle,
+        mode_tag.starts_with("test"),
+        &devtools_policy,
+    );
     if !native_cacheable_program(bundle) {
         return None;
     }
@@ -13068,26 +12717,26 @@ mod foreign_build_import {
         Ok((path, candidate, digest))
     }
 
-    fn tree_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
+    fn tree_field<'a>(tree: &'a Dyn, key: &str) -> Result<&'a Dyn, Failure> {
         tree.get(key)
             .map_err(|error| Failure::internal(format!("candidate {error}")))
     }
 
-    fn tree_string(tree: &DataTree, key: &str) -> Result<String, Failure> {
+    fn tree_string(tree: &Dyn, key: &str) -> Result<String, Failure> {
         tree_field(tree, key)?
             .as_str()
             .map(str::to_string)
             .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
     }
 
-    fn tree_array<'a>(tree: &'a DataTree, key: &str) -> Result<&'a [DataTree], Failure> {
+    fn tree_array<'a>(tree: &'a Dyn, key: &str) -> Result<&'a [Dyn], Failure> {
         tree_field(tree, key)?
             .as_array()
             .map(Vec::as_slice)
             .map_err(|error| Failure::internal(format!("candidate `{key}` {error}")))
     }
 
-    fn tree_object_field<'a>(tree: &'a DataTree, key: &str) -> Result<&'a DataTree, Failure> {
+    fn tree_object_field<'a>(tree: &'a Dyn, key: &str) -> Result<&'a Dyn, Failure> {
         let fields = tree
             .as_object()
             .map_err(|error| Failure::internal(format!("candidate object {error}")))?;
@@ -13097,7 +12746,7 @@ mod foreign_build_import {
             .ok_or_else(|| Failure::internal(format!("candidate missing `{key}`")))
     }
 
-    fn candidate_inputs(tree: &DataTree) -> Result<Vec<(String, String)>, Failure> {
+    fn candidate_inputs(tree: &Dyn) -> Result<Vec<(String, String)>, Failure> {
         tree_array(tree, "inputs")?
             .iter()
             .map(|entry| {
@@ -13119,7 +12768,7 @@ mod foreign_build_import {
             .collect()
     }
 
-    fn candidate_strings(tree: &DataTree, key: &str) -> Result<Vec<String>, Failure> {
+    fn candidate_strings(tree: &Dyn, key: &str) -> Result<Vec<String>, Failure> {
         tree_array(tree, key)?
             .iter()
             .map(|value| {
@@ -13130,7 +12779,7 @@ mod foreign_build_import {
             })
             .collect()
     }
-    fn candidate_pairs(tree: &DataTree, key: &str) -> Result<Vec<(String, String)>, Failure> {
+    fn candidate_pairs(tree: &Dyn, key: &str) -> Result<Vec<(String, String)>, Failure> {
         tree_array(tree, key)?
             .iter()
             .map(|entry| {
@@ -13156,7 +12805,7 @@ mod foreign_build_import {
         root: &Path,
         request: &Request,
         expected_digest: Option<&str>,
-    ) -> Result<(DataTree, String, PathBuf), Failure> {
+    ) -> Result<(Dyn, String, PathBuf), Failure> {
         let path = candidate_path(root, &format!("{}:{}", request.kind, request.build_dir));
         let metadata = fs::symlink_metadata(&path).map_err(|error| {
             Failure::user(format!(
@@ -13203,7 +12852,7 @@ mod foreign_build_import {
         Ok((tree, actual, path))
     }
 
-    fn verify_inputs(root: &Path, tree: &DataTree) -> Result<(), Failure> {
+    fn verify_inputs(root: &Path, tree: &Dyn) -> Result<(), Failure> {
         for (relative, expected) in candidate_inputs(tree)? {
             let bytes = read_regular(root, &relative).map_err(|error| match error {
                 Failure::User(message) => Failure::user(format!(
@@ -14532,7 +14181,7 @@ fn build_library(
 fn build_inner(
     file: &str,
     rust_code: &str,
-    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+    runtime_checked: Option<&jet::Driver::CheckedSourceBundle>,
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
@@ -14550,9 +14199,12 @@ fn build_inner(
     // such as `embed_file` or explicit C links. `build` also rejects cross-target
     cache_key: Option<String>,
     target_machine: Option<&jet::TargetMachine::TargetMachine>,
-    // #3953: the caller selected the Cranelift dev backend for this build.
-    dev_aot: bool,
+    // `jet debug`: where to publish the exact Rust text rustc compiled (the
+    // program after the runtime split, or the inline monolith), so the native
+    // debugger's line map agrees with the binary's DWARF lines.
+    compiled_source: Option<&Path>,
 ) {
+    let runtime_bundle = runtime_checked.map(|checked| &checked.bundle);
     // D-BUILD2: `jet build -v` makes the hidden Jet→Rust→native bridge honest.
     // Step labels are deterministic so they can be golden-tested.
     let step = |msg: String| {
@@ -14604,79 +14256,6 @@ fn build_inner(
         write_mode_diagnostic(mode, &format!("{message}\n"));
         exit(ExitCodes::USER_ERROR);
     });
-    // #3953: dev profiles build through Cranelift: this `jet`'s runner with
-    // the compiled image appended, and no Rust, rustc or linker. The cache
-    // holds only the image. A refusal falls back to rustc below with a note
-    // that names the reason.
-    let mut cache_key = cache_key;
-    if dev_aot {
-        if let Some(bundle) = runtime_bundle.filter(|_| {
-            ffi.is_none()
-                && clinks.is_empty()
-                && cross_target.is_none()
-                && target_machine.is_none()
-                && web.is_none()
-                && plugin.is_none()
-        }) {
-            if let (Some(key), Some(store)) = (&cache_key, native_store.as_ref()) {
-                if crate::DevAot::restore(store, key, &bin) {
-                    step("cache hit -> reused cached image".to_string());
-                    persist_build_record(
-                        native_store.as_ref(),
-                        &project_root,
-                        &record_program,
-                        &compiler_nodes,
-                        &packages,
-                        previous_record.as_ref(),
-                        true,
-                        0.0,
-                        0.0,
-                    );
-                    return;
-                }
-            }
-            let started = Instant::now();
-            step(format!("cranelift  -> {}", bin.display()));
-            match crate::DevAot::build(bundle, profile.budget_name(), &bin, native_store.as_ref()) {
-                Ok(image) => {
-                    if let (Some(key), Some(store)) = (&cache_key, native_store.as_ref()) {
-                        if let Err(error) = store.publish_bytes(key, &image, false) {
-                            crate::cli_error!("E2105", "couldn't store build cache artifact: {error}");
-                            exit(ExitCodes::USER_ERROR);
-                        }
-                        step("cache store -> saved image for next time".to_string());
-                    }
-                    persist_build_record(
-                        native_store.as_ref(),
-                        &project_root,
-                        &record_program,
-                        &compiler_nodes,
-                        &packages,
-                        previous_record.as_ref(),
-                        false,
-                        started.elapsed().as_secs_f64() * 1000.0,
-                        0.0,
-                    );
-                    return;
-                }
-                Err(reason) => {
-                    if !mode.json {
-                        write_mode_status(
-                            mode,
-                            &format!("[build] note: building with rustc because {reason}\n"),
-                        );
-                    }
-                }
-            }
-        }
-        // The key describes the Cranelift backend; the rustc executable is
-        // stored apart, under that key plus the rustc and linker identity.
-        cache_key = cache_key.map(|key| rustc_fallback_cache_key(&key));
-    }
-    // A Cranelift-selected build skipped Rust generation. rustc needs it only
-    // when its executable is not cached; it is generated below, after the
-    // cache lookup.
-    let rust_deferred = dev_aot && rust_code.is_empty() && runtime_bundle.is_some();
     let rs_name = format!("{}.rs", stem(file));
     let rs_path = output_authority.path_for(&rs_name).unwrap_or_else(|error| {
         let message = format!("error: invalid web Rust output `{rs_name}`: {error}");
@@ -14957,25 +14536,6 @@ fn build_inner(
             step("cache bypassed (C-linked build)".to_string());
         }
     }
-    let generated_rust;
-    let rust_code = match runtime_bundle.filter(|_| rust_deferred) {
-        Some(bundle) => {
-            let mut rust =
-                jet::Driver::emit_native_rust_for_checked_bundle(bundle, profile.budget_name(), ffi);
-            inject_game_crash_reporter_bootstrap(&mut rust, program_uses_game_runtime(bundle));
-            output_authority
-                .replace_file(&rs_name, rust.as_bytes())
-                .unwrap_or_else(|error| {
-                    write_mode_diagnostic(
-                        mode,
-                        &format!("error: couldn't write {}: {}\n", rs_path.display(), error),
-                    );
-                });
-            generated_rust = rust;
-            generated_rust.as_str()
-        }
-        None => rust_code,
-    };
 
     step(format!(
         "rustc      {} -> {}",
@@ -15181,16 +14741,18 @@ fn build_inner(
     // rustc invocation that performs backend code generation and linking.
     let rustc_started = Instant::now();
     let mut out = run_rustc(&prepared_runtime);
+    let mut compiled_split = prepared_runtime.is_split();
     // I5 fail-open: linking the cached runtime rlib is an optimization, so it may
     // cost a compile but must never cost a working build. If the thin crate is
     // rejected — a runtime item the exporter left private, an impl the split
     // moved away from its type — rebuild the exact inline monolith and report on
     // that instead. `jet build` of correct Jet cannot regress into an I2 banner.
-    if !out.status.success() && prepared_runtime.is_split() {
+    if !out.status.success() && compiled_split {
         if verbose {
             step("runtime cache bypassed (split crate rejected — inline retry)".to_string());
         }
         out = run_rustc(&jet_store::runtime::PreparedRuntime::inline(rust_code));
+        compiled_split = false;
     }
 
     if !out.status.success() {
@@ -15260,6 +14822,14 @@ fn build_inner(
         exit(ExitCodes::ICE);
     }
 
+    if let Some(path) = compiled_source {
+        let compiled = if compiled_split { prepared_runtime.rust() } else { rust_code };
+        if let Err(error) = fs::write(path, compiled) {
+            let _ = fs::remove_dir_all(&work);
+            crate::cli_error!("E2105", "couldn't write {}: {}", path.display(), error);
+            exit(ExitCodes::USER_ERROR);
+        }
+    }
     step(format!("link       -> {}", bin.display()));
 
     // Store into the content cache from the private path first, so the cache
@@ -15304,7 +14874,7 @@ fn build_inner(
 pub(crate) fn build(
     file: &str,
     rust_code: &str,
-    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+    runtime_checked: Option<&jet::Driver::CheckedSourceBundle>,
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
@@ -15320,7 +14890,7 @@ pub(crate) fn build(
     build_inner(
         file,
         rust_code,
-        runtime_bundle,
+        runtime_checked,
         bin,
         profile,
         ffi,
@@ -15333,14 +14903,14 @@ pub(crate) fn build(
         restored_cache,
         cache_key,
         None,
-        false,
+        None,
     );
 }
 
 pub(crate) fn build_target_machine(
     file: &str,
     rust_code: &str,
-    runtime_bundle: Option<&jet::AST::ProgramBundle>,
+    runtime_checked: Option<&jet::Driver::CheckedSourceBundle>,
     bin: PathBuf,
     profile: BuildProfile,
     ffi: Option<&jet::FFI::FfiLink>,
@@ -15353,12 +14923,11 @@ pub(crate) fn build_target_machine(
     restored_cache: bool,
     cache_key: Option<String>,
     target_machine: Option<&jet::TargetMachine::TargetMachine>,
-    dev_aot: bool,
 ) {
     build_inner(
         file,
         rust_code,
-        runtime_bundle,
+        runtime_checked,
         bin,
         profile,
         ffi,
@@ -15371,7 +14940,7 @@ pub(crate) fn build_target_machine(
         restored_cache,
         cache_key,
         target_machine,
-        dev_aot,
+        None,
     );
 }
 
@@ -15448,42 +15017,53 @@ fn persist_build_record(
     let _ = store.publish_last_build_record(workspace_root, &record_key, &record);
 }
 
-/// D-DBG3 step 2 (dap-debugger): build + launch the native lldb-backed `jet
-/// debug` backend — a debug-profile build whose checked MIR source carries
-/// the line-map metadata consumed by `crates/jet-debug/src/Inferior.rs`, then
-/// either the `(jet)` terminal session or the DAP server (`--dap`) drives it.
-/// Returns the process exit code.
-pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
+/// A debug-profile native build of `file` for the lldb-backed `jet debug`
+/// backend: the binary, the generated Rust's basename (lldb's `-f` matches by
+/// basename) and text, and the Jet source. Problems are reported here.
+struct NativeDebugBuild {
+    bin: PathBuf,
+    rust_file: String,
+    rust: String,
+    src: String,
+}
+
+/// D-DBG3 step 2 (dap-debugger): a debug-profile build whose checked MIR
+/// source carries the line-map metadata consumed by
+/// `crates/jet-debug/src/Inferior.rs`. Returns the exit code on failure.
+fn build_debug_native(file: &str, mode: OutputMode) -> Result<NativeDebugBuild, i32> {
     let src = match fs::read_to_string(file) {
         Ok(s) => s,
         Err(_) => {
             crate::cli_error!("E2105", "can't find the file `{}`", file);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let project_root = match jet::build_project_root(file) {
         Ok(root) => root,
         Err(diagnostics) => {
             report_problems(mode, file, &src, &diagnostics);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let out = match jet::compile_for_debug(file) {
         Ok(o) => o,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let clinks = match jet::resolve_c_links(file) {
         Ok(a) => a,
         Err(diags) => {
             report_problems(mode, file, &src, &diags);
-            return ExitCodes::USER_ERROR;
+            return Err(ExitCodes::USER_ERROR);
         }
     };
     let bin = build_output_root(&project_root).join(format!("{}_dbg", stem(file)));
-    build(
+    // The runtime split compiles a thinner program than the generated text;
+    // the line map must be built from the exact text rustc saw.
+    let compiled_source = bin.with_extension("rs");
+    build_inner(
         file,
         &out.rust,
         None,
@@ -15499,16 +15079,52 @@ pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: Ou
         false,
         // `jet debug` builds carry a line-map and launch interactively; not cached.
         None,
+        None,
+        Some(&compiled_source),
     );
-    // `build()` always writes the generated Rust to `.jet/build/<stem>.rs` (the
-    // debug binary path is the only caller-chosen path) — lldb's `-f` flag
-    // matches by basename, so this is what `Inferior::set_breakpoint` needs.
-    let rust_file = format!("{}.rs", stem(file));
+    let rust = match fs::read_to_string(&compiled_source) {
+        Ok(rust) => rust,
+        Err(error) => {
+            crate::cli_error!("E2105", "couldn't read {}: {}", compiled_source.display(), error);
+            return Err(ExitCodes::USER_ERROR);
+        }
+    };
+    // rustc compiles `<stem>.rs` in its private work dir; lldb's `-f` flag
+    // matches that basename (`Inferior::set_breakpoint`).
+    Ok(NativeDebugBuild {
+        bin,
+        rust_file: format!("{}.rs", stem(file)),
+        rust,
+        src,
+    })
+}
+
+/// Build + launch the native lldb-backed `jet debug` backend: the `(jet)`
+/// terminal session, or the DAP server (`--dap`). Returns the exit code.
+pub(crate) fn run_debug_native(file: &str, raw_frames: bool, dap: bool, mode: OutputMode) -> i32 {
+    let built = match build_debug_native(file, mode) {
+        Ok(built) => built,
+        Err(status) => return status,
+    };
     if dap {
-        jet::Debug::run_dap(&bin, &rust_file, &out.rust, file, &src)
+        jet::Debug::run_dap(&built.bin, &built.rust_file, &built.rust, file, &built.src)
     } else {
-        jet::Debug::run_native(&bin, &rust_file, &out.rust, file, &src, raw_frames)
+        jet::Debug::run_native(&built.bin, &built.rust_file, &built.rust, file, &built.src, raw_frames)
     }
+}
+
+/// D-DX-DEBUGBACK1=A: `jet debug --record=NAME` builds the same debug binary
+/// and records one complete native run of it as the replay history.
+pub(crate) fn record_debug_native(
+    file: &str,
+    mode: OutputMode,
+) -> Result<jet::Debug::RecordedExecution, i32> {
+    let built = build_debug_native(file, mode)?;
+    jet::Debug::record_native(&built.bin, &built.rust_file, &built.rust, file, &built.src)
+        .map_err(|message| {
+            crate::cli_error!("E2203", "{}", message);
+            ExitCodes::USER_ERROR
+        })
 }
 
 /// Scan a failed rustc/linker stderr for a missing C library and return its
@@ -15674,6 +15290,16 @@ mod profile_tests {
     }
 
     #[test]
+    fn only_native_o2_aligns_hot_loops() {
+        let flag = "llvm-args=-align-loops=64";
+        assert!(BuildProfile::Release.config().rustc_args_for_target(false, true).iter().any(|arg| arg == flag));
+        for profile in [BuildProfile::Fast, BuildProfile::Default, BuildProfile::Debug] {
+            assert!(!profile.config().rustc_args_for_target(false, true).iter().any(|arg| arg == flag));
+        }
+        assert!(!BuildProfile::Release.config().rustc_args_for_target(false, false).iter().any(|arg| arg == flag));
+    }
+
+    #[test]
     fn fast_and_optimized_defaults_have_distinct_cache_identity() {
         assert_ne!(
             BuildProfile::Fast.cache_tag(),
@@ -15692,7 +15318,7 @@ mod missing_c_lib_tests {
         child_exit_code, missing_c_lib, missing_linker, native_cache_key,
         native_cache_key_for_prepared_build, native_cache_key_for_program,
         native_cache_key_with_toolchain, native_cache_salt, native_cache_salt_with_schema,
-        render_internal_fault, NativeKeyBackend,
+        render_internal_fault,
     };
 
     struct ScratchProject(std::path::PathBuf);
@@ -15758,7 +15384,7 @@ mod missing_c_lib_tests {
                 &bundle,
                 "default",
                 "run",
-                NativeKeyBackend::Rustc("comptime-input-test-toolchain"),
+                "comptime-input-test-toolchain",
                 None,
             )
             .expect("consumed-input cache key")
@@ -16125,7 +15751,7 @@ mod missing_c_lib_tests {
                 Some(&exact),
                 "dev",
                 "run",
-                NativeKeyBackend::Cranelift,
+                "prepared-cache-test-toolchain",
                 None,
             )
                 .is_some(),
@@ -16149,7 +15775,7 @@ mod missing_c_lib_tests {
                 Some(&package),
                 "dev",
                 "run",
-                NativeKeyBackend::Cranelift,
+                "prepared-cache-test-toolchain",
                 None,
             ),
             None,
@@ -16162,7 +15788,7 @@ mod missing_c_lib_tests {
     ) {
         let project = ScratchProject::new();
         let main = "use defs.box\nmodule defs\n\nmodule selected :: box<Int>(3)\nfn run() { print(selected.value()) }\n";
-        let dependency = "pub module box<T>(n: Int) { pub fn value() -> Int { return n } }\n";
+        let dependency = "module box<T>(n: Int) { fn value() -> Int { return n } }\n";
         let manifest_v1 = "name: \"cache-proof\"\nversion: \"1.0.0\"\n";
         project.write("main.jet", main);
         project.write("defs.jet", dependency);
@@ -16220,7 +15846,7 @@ mod missing_c_lib_tests {
         project.write("main.jet", main);
         project.write(
             "defs.jet",
-            "pub module box<T>(n: Int) { pub fn value() -> Int { return n + 1 } }\n",
+            "module box<T>(n: Int) { fn value() -> Int { return n + 1 } }\n",
         );
         let dependency_body = native_cache_key(&project.main(), "dev", "default", "run", None)
             .expect("dependency cache key");
@@ -16297,13 +15923,13 @@ mod missing_c_lib_tests {
         project.write("main.jet", "fn run() { print(1) }\n");
         project.write(
             "config/release.jet",
-            "pub release :: Config.{ version: \"1\" }\n",
+            "release :: Config.{ version: \"1\" }\n",
         );
         let base = project.native_cache_key_with_input("config/release.jet");
 
         project.write(
             "config/release.jet",
-            "// changed config\npub release :: Config.{ version: \"1\" }\n",
+            "// changed config\nrelease :: Config.{ version: \"1\" }\n",
         );
         let changed = project.native_cache_key_with_input("config/release.jet");
 
@@ -16352,14 +15978,14 @@ mod missing_c_lib_tests {
     fn driver_brands_runtime_host_fault_without_rust_text() {
         let diagnostic = jet::Diagnostics::Diagnostic::runtime_host_fault(
             "before\n".to_string(),
-            "the JIT runtime helper failed".to_string(),
+            "the runtime helper failed".to_string(),
         );
         let (stdout, what) = diagnostic
             .runtime_host_fault_parts()
             .expect("typed runtime host fault");
         let report = render_internal_fault(what);
         assert_eq!(stdout, "before\n");
-        assert!(report.starts_with("internal compiler error: the JIT runtime helper failed\n"));
+        assert!(report.starts_with("internal compiler error: the runtime helper failed\n"));
         assert!(report.contains("This is a bug in jet, NOT in your program."));
         assert!(!report.contains("thread 'main' panicked"));
         assert!(!report.contains("runtime_host.rs"));
@@ -16474,3 +16100,7 @@ mod web_rustc_incremental_session_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+#[cfg(test)]
+#[path = "IOErrorComponentObservation.rs"]
+mod io_error_component_observation;

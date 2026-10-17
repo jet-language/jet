@@ -11,14 +11,14 @@ CFFI_NIXPKGS_TARGET_PREFIX :: prep { "nixpkgs:" }
 CFFI_ALWAYS_LINKED_LIBC :: prep { [String]{"c", "m", "pthread", "dl", "rt", "util"} }
 
 // Native-library link inputs for rustc.
-pub struct LinkFlags {
-    pub include_dirs: [String]
-    pub lib_dirs: [String]
+struct LinkFlags {
+    include_dirs: [String]
+    lib_dirs: [String]
     // Names passed to `-l` (e.g. `raylib`).
-    pub link_names: [String]
+    link_names: [String]
     // Dirs baked into the binary's runtime search path (`-Wl,-rpath`), so a
     // shared library realized into `/nix/store` is found at run time.
-    pub rpath_dirs: [String]
+    rpath_dirs: [String]
 
     fn empty() -> LinkFlags Never! {
         LinkFlags{include_dirs: [String]{}, lib_dirs: [String]{}, link_names: [String]{}, rpath_dirs: [String]{}}
@@ -32,27 +32,27 @@ fn pkg_cffi_e3201(lib: String) -> Diagnostic Never! {
 
 // E3209: resolution produced `-l<name>` but the linker could not find it.
 // A missing system library is a user or system problem, not an ICE.
-pub fn pkg_cffi_e3209(lib: String) -> Diagnostic Never! {
+fn pkg_cffi_e3209(lib: String) -> Diagnostic Never! {
     diagnostic_from_registry("E3209", None, "The linker couldn't find C library `{lib}`.", "Your program links against `{lib}`, but the linker reported `cannot find -l{lib}` — the library isn't on the link search path.", "Declare it in `deps:` so Jet provisions it: `{lib}: {DEP_PROVIDER_C}{REF_PROVIDER_AT}{SYSTEM_LIB_TARGET}` (host pkg-config, else fetched from nixpkgs), or `{lib}: {DEP_PROVIDER_C}@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.")
 }
 
 // E3210: a declared C dep could not be provisioned from nixpkgs.
-pub fn pkg_cffi_e3210(lib: String, attr: String, reason: String) -> Diagnostic Never! {
+fn pkg_cffi_e3210(lib: String, attr: String, reason: String) -> Diagnostic Never! {
     diagnostic_from_registry("E3210", None, "Couldn't fetch C library `{lib}` from nixpkgs.", "`{lib}: {DEP_PROVIDER_C}{REF_PROVIDER_AT}{SYSTEM_LIB_TARGET}` asked Jet to provision `nixpkgs#{attr}`, but `nix build` failed: {reason}", "Check the attr exists (`nix build nixpkgs#{attr}`), or point at a local build with `{lib}: {DEP_PROVIDER_C}@\"<path>\"`, or install it and use `{SYSTEM_LIB_TARGET}`.")
 }
 
 // Linker arguments for every C library this program uses, ready to append
 // to a `rustc` command; any unresolved library is an E3201.
-pub fn pkg_cffi_rustc_link_args(cffi: CFFI, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
+fn pkg_cffi_rustc_link_args(cffi: CFFI, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
     pkg_cffi_rustc_link_args_for_target_with_entry(cffi, project_root, pkg_ffi_host_target(), None)
 }
 
-pub fn pkg_cffi_rustc_link_args_for_target(cffi: CFFI, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
+fn pkg_cffi_rustc_link_args_for_target(cffi: CFFI, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
     pkg_cffi_rustc_link_args_for_target_with_entry(cffi, project_root, target, None)
 }
 
 // Link arguments using an optional entry source for an inline package.
-pub fn pkg_cffi_rustc_link_args_for_target_with_entry(cffi: CFFI, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
+fn pkg_cffi_rustc_link_args_for_target_with_entry(cffi: CFFI, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> [String] CFFIError! {
     args := [String]{}
     diagnostics := [Diagnostic]{}
     direct := cffi.link_closure.direct
@@ -104,18 +104,18 @@ fn pkg_cffi_append_link_flags(args: &[String], flags: LinkFlags) Never! {
 }
 
 // Link flags for one library on the host target.
-pub fn pkg_cffi_resolve_link(lib: String, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
+fn pkg_cffi_resolve_link(lib: String, project_root: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
     pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, pkg_ffi_host_target(), None)
 }
 
-pub fn pkg_cffi_resolve_link_for_target(lib: String, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
+fn pkg_cffi_resolve_link_for_target(lib: String, project_root: String, target: String) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
     pkg_cffi_resolve_link_for_target_with_entry(lib, project_root, target, None)
 }
 
 // The foreign language whose generated bridge prefix names `lib`, among the
 // families that link a generated archive.
 fn pkg_cffi_generated_link_language(lib: String) -> ForeignLanguage? Never! {
-    loop language in ForeignLanguage.all() {
+    loop language in ForeignLanguage.registered() {
         if language == {
             .C | .Rust | .Swift -> next
             else -> {}
@@ -127,7 +127,7 @@ fn pkg_cffi_generated_link_language(lib: String) -> ForeignLanguage? Never! {
 
 // Link flags for one library: a generated foreign binding's own archive, a
 // declared `c@…` dependency, else pkg-config, else E3201.
-pub fn pkg_cffi_resolve_link_for_target_with_entry(lib: String, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
+fn pkg_cffi_resolve_link_for_target_with_entry(lib: String, project_root: String, target: String, entry: String?) -[FS, Env, Exec, Time, Time.Wait]> LinkFlags CFFIError! {
     if pkg_cffi_generated_link_language(lib) == .Val(language) {
         actual :: lib.removeprefix(language.bridge_prefix())
         dir :: files.join(files.join(project_root, SOURCE_ROOT_DIR), language.bindings_subdir())
@@ -400,7 +400,7 @@ fn pkg_cffi_pkg_config_link(lib: String) -[Exec, Time.Wait]> PkgConfigOutcome Ne
 
 // Parse a pkg-config flag line into link flags; a line without `-l` links
 // the library by its own name.
-pub fn pkg_cffi_parse_pkg_config(text: String, lib: String) -> LinkFlags Never! {
+fn pkg_cffi_parse_pkg_config(text: String, lib: String) -> LinkFlags Never! {
     flags := LinkFlags.empty()
     loop token in pkg_cffi_whitespace_tokens(text) {
         if {

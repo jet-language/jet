@@ -1,0 +1,70 @@
+// Shared diagnostics decoder over scalar octets. Storage access stays in
+// the existing READ caller; these functions create no carrier or borrow.
+fn diagnostic_is_continuation(value: Int) -> Bool Never! {
+    value >= 128 && value <= 191
+}
+
+fn foundation_utf8_lead_width(first: Int) -> Int Never! {
+    if {
+        first < 0 -> 0
+        first < 128 -> 1
+        first >= 194 && first <= 223 -> 2
+        first >= 224 && first <= 239 -> 3
+        first >= 240 && first <= 244 -> 4
+        else -> 1
+    }
+}
+
+// Check one continuation against the current lead-width candidate. Callers
+// stop after width becomes one, preserving the existing lazy byte accesses.
+fn foundation_utf8_width(width: Int, continuation: Int) -> Int Never! {
+    if width <= 1 -> return width
+    if !diagnostic_is_continuation(continuation) -> return 1
+    width
+}
+
+// width is the result of the same shared width decoder above. This is the
+// existing Render arithmetic, not a normalization or replacement policy.
+fn foundation_utf8_codepoint(first: Int, second: Int, third: Int, fourth: Int, width: Int) -> Int Never! {
+    if {
+        width == 2 -> (first - 192) * 64 + second - 128
+        width == 3 -> (first - 224) * 4096 + (second - 128) * 64 + third - 128
+        width == 4 -> (first - 240) * 262144 + (second - 128) * 4096 + (third - 128) * 64 + fourth - 128
+        else -> first
+    }
+}
+
+// Compiler-internal READ operations on an already supplied byte array.
+// These helpers do not project a String, materialize a view, or grant access
+// to a Core private leaf. The caller keeps the source alive and unchanged.
+// A String.bytes() argument still copies before entering these helpers.
+
+fn foundation_read_bytes_len(source: [U8]) -> Int Never! {
+    source.len()
+}
+
+// The caller supplies a valid byte index. Ordinary array indexing retains
+// the existing checked bounds contract; no sentinel or clamping is added.
+fn foundation_read_bytes_at(source: [U8], index: Int) -> Int Never! {
+    Int.from_u8(source[index])
+}
+
+// The caller supplies a scalar boundary below the extent of valid UTF-8.
+// End-of-input is checked by the caller, not represented by a new scalar.
+// Use the existing diagnostics decoder, including its next-byte calculation,
+// rather than a second UTF-8 algorithm or a temporary scalar String.
+fn foundation_read_bytes_scalar_at(source: [U8], index: Int) -> (codepoint: Int, next_byte: Int) Never! {
+    width :: diagnostic_utf8_width(source, index)
+    (codepoint: diagnostic_codepoint_at(source, index, width), next_byte: index + width)
+}
+
+// The caller supplies 0 <= start <= end <= source.len() and lends a distinct
+// owned output. Only the final output may grow; there is no range slice or
+// intermediate list. The normal output owner retains its existing drop duty.
+fn foundation_append_read_bytes(out: &[U8], source: [U8], start: Int, end: Int) Never! {
+    index := start
+    loop index < end {
+        &out.push(source[index])
+        index += 1
+    }
+}

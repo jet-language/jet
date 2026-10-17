@@ -1,0 +1,12 @@
+// SETUP-PORT tests/jetpack_tool.rs:1037-1050; System32 bytes, original JSON template.
+use core.files
+use core.sys
+use core.encoding.json
+fn run(root: String) {
+    system :: sys.get("SystemRoot") ?? panic("SystemRoot")
+    dest :: root + "/root/hangar/provider-fixture-native"
+    files.copyfile(system + "/System32/cmd.exe", dest + "/bin/cmd.exe")
+    quoted :: json.to_string(Dyn.Text(dest))
+    template :: files.read("windows.template")
+    files.write_all(root + "/fx/nixpkgs-native.json", template.replace("OUTPUT_PATH", quoted))
+}

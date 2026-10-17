@@ -1,0 +1,18 @@
+# Port of tests/process_sessions.rs:34-83; source verbatim after original format expansion.
+# PENDING-SEAM(term-is-terminal): subject must prove both stdin and stdout are TTYs before reporting readiness.
+# Core term width/height fallback cannot replace original std::io::IsTerminal checks (session_fixture.rs:58-78).
+# All original assertions retained below; they are NOT reported as exercised or passing.
+refused: PENDING-SEAM(term-is-terminal)
+fixture: subjects
+step: jet build session_fixture.jet
+exit: 0
+copy: .jet/build/session_fixture session_fixture
+write: run.jet native_fixture_terminal_bytes_resize_and_closed_stream.source
+step: jet build run.jet
+exit: 0
+step: built
+exit: 0
+stdout: ^= "true\ntrue\ntrue\n" # original predicate
+stdout: ~ "\u001b[31mcontrol\u001b[0m" # original ANSI byte predicate
+stdout: ~ "size:30x100" # original resize predicate
+stdout: $= "closed:error\n" # original closed-stream predicate

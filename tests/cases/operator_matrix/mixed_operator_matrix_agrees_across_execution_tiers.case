@@ -1,0 +1,22 @@
+# tests/operator_matrix.rs::mixed_operator_matrix_agrees_across_execution_tiers
+# Original fixtures and exact assertions; PENDING-SAME-HEAD, runtime UNRUN.
+fixture: mixed_operator_matrix_agrees_across_execution_tiers.fixture
+env: NO_COLOR=1
+copy: {root}/Examples/features/operators/mixed_types.jet run.jet
+step: jet run run.jet
+stdin: null
+exit: 0
+stdout: = {root}/Examples/features/expected/operators/mixed_types.out
+step: jet build --release run.jet
+exit: 0
+step: built
+exit: 0
+stdout: = {root}/Examples/features/expected/operators/mixed_types.out
+step: jet run --interpret run.jet
+stdin: null
+exit: 0
+stdout: = {root}/Examples/features/expected/operators/mixed_types.out
+step: jet run run.jet
+stdin: null
+exit: 0
+stdout: = {root}/Examples/features/expected/operators/mixed_types.out

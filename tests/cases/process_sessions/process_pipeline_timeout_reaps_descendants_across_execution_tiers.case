@@ -1,0 +1,33 @@
+# Port of tests/process_sessions.rs:314-371; source verbatim after original format expansion.
+# ORACLE-LITERAL; PENDING-SAME-HEAD; original cfg(unix); have_rustc guard erased.
+requires: os:unix
+requires: tool:cat
+requires: tool:kill
+fixture: subjects
+step: jet build session_fixture.jet
+exit: 0
+copy: .jet/build/session_fixture session_fixture
+write: run.jet process_pipeline_timeout_reaps_descendants_across_execution_tiers.source
+step default: jet run run.jet
+exit: 0
+stdout: = process_pipeline_timeout_reaps_descendants_across_execution_tiers.out
+step: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default
+# The original pid_file writer emits decimal PID bytes without a newline; trim is an identity here.
+capture: pid = text file aot.pid
+repeat while process {cap:pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:pid} survived timeout"
+end repeat
+capture: pid = text file jit.pid
+repeat while process {cap:pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:pid} survived timeout"
+end repeat
+capture: pid = text file interp.pid
+repeat while process {cap:pid} alive timeout 2s every 10ms fail "pipeline descendant {cap:pid} survived timeout"
+end repeat

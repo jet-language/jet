@@ -1,0 +1,72 @@
+// Actual Core typed error -> evaluator failed value -> structured diagnostic.
+// This fixture does not claim that an unavailable host service was executed.
+use core.build.[BuildSessionPolicy, BuildSessionError, build_session_new, build_session_error_projection, build_session_error_diag, build_session_error_json_text, build_key_debug_text, build_session_impure]
+use jet_foundation.Span
+fn build_services_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("BuildServices: {message}")
+}
+fn run() {
+    policy :: BuildSessionPolicy{legacy_denied: None, plugins_denied: None, plugin_grants: [String:[String]]{}}
+    session :: build_session_new(91, "fixture", "compiler", policy)
+    state :: session.storage.guard_read().value
+    errors :: [BuildSessionError]{
+        .EmptyTargetName, .EmptyActionName, .EmptyToolchainName, .EmptySigningIdentityName, .EmptyProbeName,
+        .DuplicateTargetName{value: "target"}, .DuplicateActionName{value: "action"}, .CompilerPackageDependencyMissing{package: "pkg", dependency: "dep"},
+        .DuplicateToolchainName{value: "tool"}, .DuplicateSigningIdentityName{value: "sign"}, .DuplicateProbeName{value: "probe"},
+        .EmptyPath, .InvalidPath{value: "../bad"}, .EmptyToolchainTriple{value: "tool"}, .EmptyIdentityField{value: "identity"},
+        .MissingLockedProvenance{value: "probe"}, .EmptyProbeField{value: "probe"}, .EmptyActionArgv{value: "action"}, .EmptyEnvName{value: "action"},
+        .UndeclaredEnvName{action: "action", key: "KEY"}, .CachedActionWithoutOutputs{value: "action"}, .PhonyActionWithoutCaps{value: "action"}, .PhonyActionWithOutputs{value: "action"},
+        .DuplicateActionOutput{action: "action", output: "output"}, .DuplicateBuildOutput{output: "output", first_action: "first", second_action: "second"},
+        .UnknownTarget{id: 3}, .UnknownAction{id: 4}, .UnknownToolchain{id: 5}, .UnknownSigningIdentity{id: 6}, .UnknownProbe{id: 7},
+        .LegacyWrapperWithoutInputs{kind: "make"}, .LegacyWrapperWithoutOutputs{kind: "make"}, .LegacyWrapperWithoutCaps{kind: "make"},
+        .LegacyWrapperCommandMismatch{wrapper: "make", actual: "other"}, .LegacyProjectFileMissing{kind: "make"}, .LegacyProjectFileInvalid{value: "Makefile"},
+        .PolicyDenied{subject: "plugin", allowed: false, reason: "denied", required_caps: []}, .EmptyPluginField{value: "plugin"}, .InvalidPluginDigest{value: "digest"}, .PackagedPlugin{value: "reason"},
+        .PluginVersionMismatch{plugin: "plugin", expected: "1", actual: "2"}, .EmptyGeneratedModuleField{value: "module"}, .InvalidGeneratedModulePath{value: "path"},
+        .DuplicateGeneratedModuleName{value: "module"}, .DuplicateGeneratedModulePath{value: "path"}, .GeneratedModuleCycle{name: "module", path: "path"},
+        .TargetDependencyCycle{nodes: [String]{"a", "b", "a"}}, .ActionDependencyCycle{nodes: [String]{"c", "d", "c"}},
+    }
+    variants :: [String]{
+        "EmptyTargetName", "EmptyActionName", "EmptyToolchainName", "EmptySigningIdentityName", "EmptyProbeName",
+        "DuplicateTargetName", "DuplicateActionName", "CompilerPackageDependencyMissing", "DuplicateToolchainName", "DuplicateSigningIdentityName", "DuplicateProbeName",
+        "EmptyPath", "InvalidPath", "EmptyToolchainTriple", "EmptyIdentityField", "MissingLockedProvenance", "EmptyProbeField", "EmptyActionArgv", "EmptyEnvName",
+        "UndeclaredEnvName", "CachedActionWithoutOutputs", "PhonyActionWithoutCaps", "PhonyActionWithOutputs", "DuplicateActionOutput", "DuplicateBuildOutput",
+        "UnknownTarget", "UnknownAction", "UnknownToolchain", "UnknownSigningIdentity", "UnknownProbe",
+        "LegacyWrapperWithoutInputs", "LegacyWrapperWithoutOutputs", "LegacyWrapperWithoutCaps", "LegacyWrapperCommandMismatch", "LegacyProjectFileMissing", "LegacyProjectFileInvalid",
+        "PolicyDenied", "EmptyPluginField", "InvalidPluginDigest", "PackagedPlugin", "PluginVersionMismatch", "EmptyGeneratedModuleField", "InvalidGeneratedModulePath",
+        "DuplicateGeneratedModuleName", "DuplicateGeneratedModulePath", "GeneratedModuleCycle", "TargetDependencyCycle", "ActionDependencyCycle",
+    }
+    build_services_require(errors.len() == 48 && errors.len() == variants.len(), "closed BuildError census")
+    loop (index, error) in errors {
+        projection :: build_session_error_projection(error)
+        build_services_require(projection.variant == variants[index], "variant identity")
+        diagnostic := build_session_error_diag(state, error)
+        diagnostic.start = 12
+        diagnostic.end = 34
+        failed :: jet_eval_build_failed_value(diagnostic) ?? panic("typed error lost failure value")
+        recovered :: jet_eval_build_failed_diagnostic(failed, Span{start: 0, end: 0}) ?? panic("typed error lost retained details")
+        original_span :: recovered.span ?? panic("original source span missing")
+        build_services_require(original_span.start == 12 && original_span.end == 34, "original source span")
+        if recovered.structured == .Val(.BuildError(report)) {
+            identity :: report.typed_identity ?? panic("structured identity missing")
+            code :: report.code ?? panic("structured code missing")
+            build_services_require(report.message == projection.text && identity == "BuildError::{variants[index]}" && code == "E3502", "structured identity")
+            details :: report.details ?? panic("typed error lost structured fields")
+            build_services_require(details.variant == variants[index] && details.fields.len() == projection.fields.len(), "structured variant fields")
+            loop (position, field) in details.fields {
+                build_services_require(field.name == projection.fields[position].name && field.value == projection.fields[position].value, "lossless JSON field")
+            }
+        } else { panic("typed error lost structured report") }
+    }
+    build_services_require(build_session_error_projection(.EmptyActionArgv{value: "compile"}).text == "EmptyActionArgv(\"compile\")", "Rust Debug default")
+    build_services_require(build_session_error_projection(.UnknownAction{id: 17}).text == "UnknownAction(ActionId(17))", "nominal ID Debug")
+    build_services_require(build_session_error_projection(.DuplicateTargetName{value: "app"}).text == "target name `app` is registered twice", "named target text")
+    build_services_require(build_session_error_projection(.TargetDependencyCycle{nodes: [String]{"a", "b", "a"}}).fields[0].value == "[\"a\",\"b\",\"a\"]", "cycle is structured ordered nodes")
+    build_services_require(build_session_error_json_text("quote\"\\\n\t") == "\"quote\\\"\\\\\\n\\t\"", "JSON field escaping")
+    build_services_require(build_key_debug_text("é") == "\"é\"", "printable Unicode Debug")
+    build_services_require(build_key_debug_text("é") == "\"e\\u{{301}}\"", "grapheme extender uses canonical Rust Debug table")
+    control :: String.from_bytes([U8]{U8{1}, U8{127}}) ?? panic("ASCII controls are UTF8")
+    build_services_require(build_key_debug_text(control) == "\"\\u{{1}}\\u{{7f}}\"", "control Debug uses lowercase hex")
+    gate :: build_session_impure(state, "action")
+    if gate == .Failure(error) -> build_services_require(jet_eval_build_failed_value(error) == None, "gate failure is not a fabricated BuildError")
+    else -> panic("Impure gate lost refusal")
+}

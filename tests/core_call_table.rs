@@ -207,13 +207,13 @@ fn core_projection_is_complete_both_directions() {
             "named route {module}.{member} is not ambient"
         );
     }
-    let ambient = read("crates/jet-jit/src/ambient_interp.rs");
+    let ambient = read("crates/jet-evalhost/src/ambient_interp.rs");
     assert!(
         ambient.contains("fn ambient_core_call_keys")
             && ambient.contains("core_call_ambient_routes()"),
         "ambient dispatcher does not export the canonical route set"
     );
-    let enc_stream = read("crates/jet-jit/src/enc_stream/mod.rs");
+    let enc_stream = read("crates/jet-evalhost/src/enc_stream/mod.rs");
     assert!(
         enc_stream.contains("const AMBIENT_CORE_CALLS")
             && enc_stream.contains("fn ambient_core_call_keys"),
@@ -374,15 +374,12 @@ fn one_fake_record_projects_without_a_consumer_arm() {
         .expect("a data-only Core row must be visible through the generic lookup");
     assert_eq!(row.signature.arity, 0);
     assert_eq!(row.symbol.name(), "jet_fake_only");
-    let candidates = row.jit_symbol_candidates();
-    assert!(candidates.contains(&"jet_fake_only".to_string()));
-    assert!(candidates.contains(&"jet_jit_fake_only".to_string()));
     assert_eq!(
         jet_foundation::Syntax::core_call_projection_in(
             FAKE,
             "core.fake",
             "only",
-            jet_foundation::Syntax::CoreCallCoverage::JIT,
+            jet_foundation::Syntax::CoreCallCoverage::AOT,
             0,
         ),
         Ok(row)
@@ -391,6 +388,44 @@ fn one_fake_record_projects_without_a_consumer_arm() {
         jet_foundation::Syntax::core_call_in(FAKE, "core.fake", "missing"),
         None
     );
+}
+
+#[test]
+fn source_owned_metadata_admits_sema_and_rejects_every_executable_projection() {
+    use jet_foundation::Syntax::{
+        core_call_projection_in, core_call_table_violations, CoreCallCoverage,
+        CoreCallInterpreterRoute, CoreCallProjectionError, CoreCallRecord, CoreCallSymbol,
+    };
+    const ROWS: &[CoreCallRecord] = &[
+        CoreCallRecord::source_owned("core.ui.host", "shortcut", &[true, false])
+            .with_ui_capabilities(&["UI.Shortcuts"]),
+    ];
+    let row = &ROWS[0];
+    let original = CoreCallRecord::new(
+        "core.ui.host", "shortcut", "jet_ui_host_shortcut", true, &[true, false],
+    ).with_ui_capabilities(&["UI.Shortcuts"]);
+    assert_eq!(row.symbol, CoreCallSymbol::SourceOwned);
+    assert_eq!(row.signature, original.signature);
+    assert_eq!(row.effect, original.effect);
+    assert_eq!(row.capability, original.capability);
+    assert_eq!(row.ui_capabilities, original.ui_capabilities);
+    assert_eq!(row.interpreter_route, CoreCallInterpreterRoute::None);
+    assert!(!row.has_direct_symbol());
+    assert!(core_call_table_violations(ROWS).is_empty());
+    assert_eq!(
+        core_call_projection_in(ROWS, "core.ui.host", "shortcut", CoreCallCoverage::SEMA, 2),
+        Ok(row),
+    );
+    for projection in [
+        CoreCallCoverage::TIR_SUBSET, CoreCallCoverage::TIR_EVAL,
+        CoreCallCoverage::AOT, CoreCallCoverage::INTERPRETER, CoreCallCoverage::COMPTIME,
+    ] {
+        assert_eq!(
+            core_call_projection_in(ROWS, "core.ui.host", "shortcut", projection, 2),
+            Err(CoreCallProjectionError::Uncovered { projection }),
+        );
+    }
+    assert!(std::panic::catch_unwind(|| row.symbol.name()).is_err());
 }
 
 #[test]
@@ -409,9 +444,9 @@ fn coverage_guard_rejects_a_missing_tier_projection() {
     assert_eq!(
         jet_foundation::Syntax::core_call_coverage_violations(
             SEMA_ONLY,
-            jet_foundation::Syntax::CoreCallCoverage::JIT,
+            jet_foundation::Syntax::CoreCallCoverage::AOT,
         ),
-        vec!["core.fake.sema_only missing projection 0x40".to_string()]
+        vec!["core.fake.sema_only missing projection 0x08".to_string()]
     );
     assert!(jet_foundation::Syntax::CoreCallCoverage::from_bits(
         jet_foundation::Syntax::CoreCallCoverage::KNOWN
@@ -426,11 +461,11 @@ fn coverage_guard_rejects_a_missing_tier_projection() {
             SEMA_ONLY,
             "core.fake",
             "sema_only",
-            jet_foundation::Syntax::CoreCallCoverage::JIT,
+            jet_foundation::Syntax::CoreCallCoverage::AOT,
             0,
         ),
         Err(jet_foundation::Syntax::CoreCallProjectionError::Uncovered {
-            projection: jet_foundation::Syntax::CoreCallCoverage::JIT,
+            projection: jet_foundation::Syntax::CoreCallCoverage::AOT,
         })
     );
 }
@@ -546,25 +581,7 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
         "TIR evaluation no longer reads the Core-call record"
     );
 
-    let jit = read("crates/jet-jit/src/jit/lower_ctx.rs");
-    assert!(
-        jit.contains("jet_foundation::Syntax::core_call(module, method)"),
-        "JIT lowering no longer reads the Core-call record"
-    );
-    assert!(
-        jit.contains("lower_recorded_core_call") && jit.contains("self.host.lookup(&symbol)"),
-        "JIT lowering has no table-driven direct host projection"
-    );
-    assert!(
-        jit.contains("CoreCallCoverage::JIT"),
-        "JIT lowering no longer uses the row projection guard"
-    );
-    assert!(
-        read("crates/jet-jit/src/lib.rs").contains("pub(crate) fn lookup(&self, symbol: &str)"),
-        "JIT host declarations do not expose their generated symbol lookup"
-    );
-
-    let ambient = read("crates/jet-jit/src/ambient_interp.rs");
+    let ambient = read("crates/jet-evalhost/src/ambient_interp.rs");
     assert!(
         ambient.contains("jet_foundation::Syntax::core_call(module, method)"),
         "the interpreter ambient adapter no longer reads the Core-call record"
@@ -588,13 +605,13 @@ fn sema_tir_and_comptime_route_plain_calls_through_the_record() {
 #[test]
 fn plain_row_guards_reject_second_tables_and_missing_projection_hooks() {
     let table = read("crates/jet-foundation/src/Syntax/core_calls.rs");
-    assert!(table.contains("pub const CORE_CALLS"));
+    assert!(table.contains("pub static CORE_CALLS"));
     assert!(table.contains("pub struct CoreCallSignature"));
     assert!(table.contains("pub struct CoreCallCoverage"));
     assert!(table.contains("pub fn core_call_projection"));
     assert!(table.contains("pub fn core_call_mismatch"));
     assert!(table.contains("pub fallibility: CoreCallFallibility"));
-    assert!(table.contains("jit_direct: bool"));
+    assert!(table.contains("pub aot_direct: bool"));
     assert!(table.contains("receiver_types: &'static [&'static str]"));
 
     for path in [
@@ -602,8 +619,7 @@ fn plain_row_guards_reject_second_tables_and_missing_projection_hooks() {
         "crates/jet-codegen/src/Codegen/TIR/subset/core_calls.rs",
         "crates/jet-codegen/src/Codegen/TIR/eval/exprs.rs",
         "crates/jet-comptime/src/Comptime/Methods/core_calls.rs",
-        "crates/jet-jit/src/jit/lower_ctx.rs",
-        "crates/jet-jit/src/ambient_interp.rs",
+        "crates/jet-evalhost/src/ambient_interp.rs",
     ] {
         let source = read(path);
         assert!(
@@ -617,7 +633,6 @@ fn plain_row_guards_reject_second_tables_and_missing_projection_hooks() {
 fn receiver_and_plain_consumer_sets_have_one_table_home() {
     let table = read("crates/jet-foundation/src/Syntax/core_calls.rs");
     let parity = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
-    let jit = read("crates/jet-jit/src/jit/lower_ctx.rs");
 
     assert!(
         table.contains("pub fn core_receiver_method"),
@@ -626,14 +641,6 @@ fn receiver_and_plain_consumer_sets_have_one_table_home() {
     assert!(
         parity.contains("core_receiver_method(type_name, method)"),
         "receiver evaluator has a hand-kept membership gate"
-    );
-    assert!(
-        jit.contains("fn lower_recorded_core_call") && jit.contains("jit_symbol_candidates()"),
-        "JIT has no row-driven receiver/plain projection seam"
-    );
-    assert!(
-        !jit.contains("if module == \"core.log\"") && !jit.contains("if module == \"core.files\""),
-        "JIT retained a per-module Core-call dispatch table"
     );
 
     // Exercise the mismatch detector itself with both directions. This keeps

@@ -111,11 +111,11 @@ fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -
     watch :: time.start()
     loop requests.len() < expected_requests && time.elapsed(watch).ns < 20000000000 {
         stream :: net.tcp_accept(listener) ?? next
-        net.set_read_timeout(stream, 2000) ?? panic("set registry read timeout")
+        net.set_read_timeout(&stream, 2000) ?? panic("set registry read timeout")
         request := [U8]{}
         header_end := -1
         loop header_end < 0 {
-            chunk :: net.tcp_read_bytes(stream, 4096) ?? panic("read registry request")
+            chunk :: net.tcp_read_bytes(&stream, 4096) ?? panic("read registry request")
             if chunk.len() == 0 -> break
             &request.extend(chunk)
             header_end = (cli_test_bytes_position(request, "{cli_test_crlf()}{cli_test_crlf()}".bytes()) ?? -5) + 4
@@ -136,7 +136,7 @@ fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -
             }
         }
         loop request.len() < header_end + content_length {
-            chunk :: net.tcp_read_bytes(stream, 4096) ?? panic("read registry body")
+            chunk :: net.tcp_read_bytes(&stream, 4096) ?? panic("read registry body")
             if chunk.len() == 0 -> break
             &request.extend(chunk)
         }
@@ -157,8 +157,8 @@ fn cli_test_registry_server(listener: net.TCPListener, expected_requests: Int) -
         }
         crlf :: cli_test_crlf()
         response :: "HTTP/1.1 {status} Test{crlf}{extra_headers}Content-Length: 0{crlf}Connection: close{crlf}{crlf}"
-        net.tcp_write_all_bytes(stream, response.bytes()) ?? panic("write registry response")
-        net.tcp_close(stream).drop("the registry response is complete")
+        net.tcp_write_all_bytes(&stream, response.bytes()) ?? panic("write registry response")
+        net.tcp_close(&stream).drop("the registry response is complete")
     }
     requests
 }

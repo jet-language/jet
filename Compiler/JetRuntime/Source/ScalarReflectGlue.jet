@@ -1,0 +1,191 @@
+// ScalarReflectABI owns private native offsets. Existing ReflectOf Lower calls
+// (8ea460c24/1bd5abce0) stay unchanged; constructors consume nested handles.
+fn scalar_reflect_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized aligned word in a live scalar/reflection carrier") { return os_load_i64(address) }
+}
+fn scalar_reflect_store(address: I64, value: I64) {
+    #Unsafe("owns a writable aligned word in a native scalar/reflection carrier") { os_store_i64(address, value) }
+}
+fn scalar_reflect_clone(value: I64, bytes: I64) -> I64 {
+    result :: jet_rt_alloc(bytes, I64{8})
+    coll_copy(value, result, bytes)
+    result
+}
+fn scalar_reflect_drop(value: I64, bytes: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, bytes, I64{8})
+}
+fn scalar_range_exclusive(value: I64) -> Bool { (scalar_reflect_word(value + SCALAR_RANGE_EXCLUSIVE).bit_and(I64{255})) != I64{0} }
+#Export(c) fn jet_rt_record_new_jet_range(start: I64, end: I64, exclusive: U8) -> I64 {
+    a :: jet_int_owned_to_i64(start)
+    b :: jet_int_owned_to_i64(end)
+    result :: jet_rt_alloc(SCALAR_RANGE_BYTES, I64{8})
+    scalar_reflect_store(result + SCALAR_RANGE_START, a)
+    scalar_reflect_store(result + SCALAR_RANGE_END, b)
+    scalar_reflect_store(result + SCALAR_RANGE_EXCLUSIVE, if (exclusive == U8{0}) -> I64{0} else -> I64{1})
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_range(value: I64) -> I64 {
+    result :: scalar_reflect_clone(value, SCALAR_RANGE_BYTES)
+    scalar_reflect_store(result + SCALAR_RANGE_EXCLUSIVE, if scalar_range_exclusive(value) -> I64{1} else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_range(value: I64) { scalar_reflect_drop(value, SCALAR_RANGE_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_range(left: I64, right: I64) -> Bool {
+    scalar_reflect_word(left + SCALAR_RANGE_START) == scalar_reflect_word(right + SCALAR_RANGE_START) &&
+        scalar_reflect_word(left + SCALAR_RANGE_END) == scalar_reflect_word(right + SCALAR_RANGE_END) &&
+        scalar_range_exclusive(left) == scalar_range_exclusive(right)
+}
+#Export(c) fn jet_rt_record_get_jet_range_start(value: I64) -> I64 { jet_int_owned_from_i64(scalar_reflect_word(value + SCALAR_RANGE_START)) }
+#Export(c) fn jet_rt_record_get_jet_range_end(value: I64) -> I64 { jet_int_owned_from_i64(scalar_reflect_word(value + SCALAR_RANGE_END)) }
+#Export(c) fn jet_rt_record_get_jet_range_exclusive(value: I64) -> Bool { scalar_range_exclusive(value) }
+#Export(c) fn jet_rt_handle_show_jet_range(value: I64) -> I64 {
+    // Values76-106 -> RangeBounds70-71 -> StructuralDebug91-120/310-319.
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{2340500051248177490}, I64{8})
+    rt_text_push_word(target, I64{9071471064347763}, I64{7}) // "Range { start: "
+    rt_text_push_number(target, scalar_reflect_word(value + SCALAR_RANGE_START))
+    rt_text_push_word(target, I64{9071402278002732}, I64{7}) // ", end: "
+    rt_text_push_number(target, scalar_reflect_word(value + SCALAR_RANGE_END))
+    rt_text_push_word(target, I64{8319675061114314796}, I64{8})
+    rt_text_push_word(target, I64{138418681449}, I64{5}) // ", exclusive: "
+    if scalar_range_exclusive(value) { rt_text_push_word(target, I64{1702195828}, I64{4}) } else { rt_text_push_word(target, I64{435728179558}, I64{5}) }
+    rt_text_push_word(target, I64{32032}, I64{2}) // " }"
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_range(value: I64) -> I64 { jet_rt_handle_show_jet_range(value) }
+#Export(c) fn jet_rt_handle_debug_jet_range(value: I64) -> I64 { jet_rt_handle_show_jet_range(value) }
+#Export(c) fn jet_rt_record_new_solver(seed: I64, checked: I64, failures: I64) -> I64 {
+    a :: jet_int_owned_to_i64(seed)
+    b :: jet_int_owned_to_i64(checked)
+    c :: jet_int_owned_to_i64(failures)
+    result :: jet_rt_alloc(SCALAR_SOLVER_BYTES, I64{8})
+    scalar_reflect_store(result + SCALAR_SOLVER_SEED, a)
+    scalar_reflect_store(result + SCALAR_SOLVER_CHECKED, b)
+    scalar_reflect_store(result + SCALAR_SOLVER_FAILURES, c)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_solver(value: I64) -> I64 { scalar_reflect_clone(value, SCALAR_SOLVER_BYTES) }
+#Export(c) fn jet_rt_handle_drop_solver(value: I64) { scalar_reflect_drop(value, SCALAR_SOLVER_BYTES) }
+#Export(c) fn jet_rt_handle_eq_solver(left: I64, right: I64) -> Bool {
+    scalar_reflect_word(left + SCALAR_SOLVER_SEED) == scalar_reflect_word(right + SCALAR_SOLVER_SEED) &&
+        scalar_reflect_word(left + SCALAR_SOLVER_CHECKED) == scalar_reflect_word(right + SCALAR_SOLVER_CHECKED) &&
+        scalar_reflect_word(left + SCALAR_SOLVER_FAILURES) == scalar_reflect_word(right + SCALAR_SOLVER_FAILURES)
+}
+#Export(c) fn jet_rt_record_get_solver_seed(value: I64) -> I64 { jet_int_owned_from_i64(scalar_reflect_word(value + SCALAR_SOLVER_SEED)) }
+#Export(c) fn jet_rt_record_get_solver_checked(value: I64) -> I64 { jet_int_owned_from_i64(scalar_reflect_word(value + SCALAR_SOLVER_CHECKED)) }
+#Export(c) fn jet_rt_record_get_solver_failures(value: I64) -> I64 { jet_int_owned_from_i64(scalar_reflect_word(value + SCALAR_SOLVER_FAILURES)) }
+#Export(c) fn jet_rt_handle_show_solver(value: I64) -> I64 {
+    // CommonTypes6822-6828, Show only; no display/debug API invented.
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{8872217046023958355}, I64{8})
+    rt_text_push_word(target, I64{9071402127029024}, I64{7}) // "Solver { seed: "
+    rt_text_push_number(target, scalar_reflect_word(value + SCALAR_SOLVER_SEED))
+    rt_text_push_word(target, I64{7308044107532935212}, I64{8})
+    rt_text_push_word(target, I64{2112100}, I64{3}) // ", checked: "
+    rt_text_push_number(target, scalar_reflect_word(value + SCALAR_SOLVER_CHECKED))
+    rt_text_push_word(target, I64{8247617492460380204}, I64{8})
+    rt_text_push_word(target, I64{540701541}, I64{4}) // ", failures: "
+    rt_text_push_number(target, scalar_reflect_word(value + SCALAR_SOLVER_FAILURES))
+    rt_text_push_word(target, I64{32032}, I64{2})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_record_seq_list_rec_jet_reflect_field_new(capacity: I64) -> I64 { data_sequence_new(capacity, REFLECT_SEQUENCE_STRIDE) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_reflect_field_len(sequence: I64) -> I64 { scalar_reflect_word(sequence + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_reflect_field_get(sequence: I64, index: I64) -> I64 {
+    // CAbi8422-8423 lends the element, never clones or transfers it.
+    length :: scalar_reflect_word(sequence + DATA_SEQUENCE_LENGTH)
+    if (index < I64{0} || index >= length) -> rt_seq_index_oob_stop(length, index)
+    data :: scalar_reflect_word(sequence + DATA_SEQUENCE_DATA)
+    scalar_reflect_word(data + index * REFLECT_SEQUENCE_STRIDE)
+}
+#Export(c) fn jet_rt_record_seq_list_rec_jet_reflect_field_push(sequence: I64, field: I64) {
+    slot :: data_sequence_reserve(sequence, REFLECT_SEQUENCE_STRIDE)
+    scalar_reflect_store(slot, field) // consumes owned Field exactly once
+    scalar_reflect_store(sequence + DATA_SEQUENCE_LENGTH, scalar_reflect_word(sequence + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+fn reflect_sequence_clone(sequence: I64) -> I64 {
+    length :: scalar_reflect_word(sequence + DATA_SEQUENCE_LENGTH)
+    result :: jet_rt_record_seq_list_rec_jet_reflect_field_new(length)
+    data :: scalar_reflect_word(sequence + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        field :: jet_rt_handle_clone_jet_reflect_field(scalar_reflect_word(data + at * REFLECT_SEQUENCE_STRIDE))
+        jet_rt_record_seq_list_rec_jet_reflect_field_push(result, field)
+        at += I64{1}
+    }
+    result
+}
+fn reflect_sequence_drop(sequence: I64) {
+    length :: scalar_reflect_word(sequence + DATA_SEQUENCE_LENGTH)
+    capacity :: scalar_reflect_word(sequence + DATA_SEQUENCE_CAPACITY)
+    data :: scalar_reflect_word(sequence + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        jet_rt_handle_drop_jet_reflect_field(scalar_reflect_word(data + at * REFLECT_SEQUENCE_STRIDE))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * REFLECT_SEQUENCE_STRIDE, I64{8})
+    jet_rt_free(sequence, DATA_SEQUENCE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_record_new_jet_reflect_value(type_name: I64, path: I64, display: I64, fields: I64) -> I64 {
+    result :: jet_rt_alloc(REFLECT_VALUE_BYTES, I64{8})
+    scalar_reflect_store(result + REFLECT_VALUE_TYPE, jet_rt_string_clone(type_name))
+    scalar_reflect_store(result + REFLECT_VALUE_PATH, jet_rt_string_clone(path))
+    scalar_reflect_store(result + REFLECT_VALUE_DISPLAY, jet_rt_string_clone(display))
+    scalar_reflect_store(result + REFLECT_VALUE_FIELDS, fields) // consumes List
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_reflect_value(value: I64) -> I64 {
+    fields :: reflect_sequence_clone(scalar_reflect_word(value + REFLECT_VALUE_FIELDS))
+    jet_rt_record_new_jet_reflect_value(scalar_reflect_word(value + REFLECT_VALUE_TYPE), scalar_reflect_word(value + REFLECT_VALUE_PATH), scalar_reflect_word(value + REFLECT_VALUE_DISPLAY), fields)
+}
+#Export(c) fn jet_rt_handle_drop_jet_reflect_value(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(scalar_reflect_word(value + REFLECT_VALUE_TYPE))
+    jet_rt_string_drop(scalar_reflect_word(value + REFLECT_VALUE_PATH))
+    jet_rt_string_drop(scalar_reflect_word(value + REFLECT_VALUE_DISPLAY))
+    reflect_sequence_drop(scalar_reflect_word(value + REFLECT_VALUE_FIELDS))
+    jet_rt_free(value, REFLECT_VALUE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_record_get_jet_reflect_value_type_name(value: I64) -> I64 { jet_rt_string_clone(scalar_reflect_word(value + REFLECT_VALUE_TYPE)) }
+#Export(c) fn jet_rt_record_get_jet_reflect_value_path(value: I64) -> I64 { jet_rt_string_clone(scalar_reflect_word(value + REFLECT_VALUE_PATH)) }
+#Export(c) fn jet_rt_record_get_jet_reflect_value_display(value: I64) -> I64 { jet_rt_string_clone(scalar_reflect_word(value + REFLECT_VALUE_DISPLAY)) }
+#Export(c) fn jet_rt_record_get_jet_reflect_value_fields(value: I64) -> I64 { scalar_reflect_word(value + REFLECT_VALUE_FIELDS) }
+#Export(c) fn jet_rt_handle_show_jet_reflect_value(value: I64) -> I64 {
+    // Reflect56-59: Value(type_name), not its display text or nested fields.
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{44416226845014}, I64{6})
+    jet_rt_string_builder_push(target, scalar_reflect_word(value + REFLECT_VALUE_TYPE))
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_reflect_value(value: I64) -> I64 { jet_rt_record_get_jet_reflect_value_display(value) }
+#Export(c) fn jet_rt_record_new_jet_reflect_field(name: I64, value: I64) -> I64 {
+    result :: jet_rt_alloc(REFLECT_FIELD_BYTES, I64{8})
+    scalar_reflect_store(result + REFLECT_FIELD_NAME, jet_rt_string_clone(name))
+    scalar_reflect_store(result + REFLECT_FIELD_VALUE, value) // consumes Value
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_reflect_field(field: I64) -> I64 {
+    value :: jet_rt_handle_clone_jet_reflect_value(scalar_reflect_word(field + REFLECT_FIELD_VALUE))
+    jet_rt_record_new_jet_reflect_field(scalar_reflect_word(field + REFLECT_FIELD_NAME), value)
+}
+#Export(c) fn jet_rt_handle_drop_jet_reflect_field(field: I64) {
+    if (field == I64{0}) -> return
+    jet_rt_string_drop(scalar_reflect_word(field + REFLECT_FIELD_NAME))
+    jet_rt_handle_drop_jet_reflect_value(scalar_reflect_word(field + REFLECT_FIELD_VALUE))
+    jet_rt_free(field, REFLECT_FIELD_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_record_get_jet_reflect_field_name(field: I64) -> I64 { jet_rt_string_clone(scalar_reflect_word(field + REFLECT_FIELD_NAME)) }
+#Export(c) fn jet_rt_record_get_jet_reflect_field_value(field: I64) -> I64 { jet_rt_handle_clone_jet_reflect_value(scalar_reflect_word(field + REFLECT_FIELD_VALUE)) }
+#Export(c) fn jet_rt_handle_show_jet_reflect_field(field: I64) -> I64 {
+    // Reflect66-69: Field(name: value.display), not value.show.
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{44411780426054}, I64{6})
+    jet_rt_string_builder_push(target, scalar_reflect_word(field + REFLECT_FIELD_NAME))
+    rt_text_push_word(target, I64{8250}, I64{2})
+    value :: scalar_reflect_word(field + REFLECT_FIELD_VALUE)
+    jet_rt_string_builder_push(target, scalar_reflect_word(value + REFLECT_VALUE_DISPLAY))
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}

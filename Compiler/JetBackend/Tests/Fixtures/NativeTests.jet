@@ -1,0 +1,42 @@
+// Checked roots include output checks without treating them as unit bodies.
+use jet_foundation.[MIRFunction, MIRFunctionID, MIRTestCase, MIRTestID, MIRParam, MIROutputCheck, MIROutputCheckID, MIROperation, MIRConstant, MIRTerminator, MIRTypeDef, MIRProgram, mir_function_id]
+use jet_backend.[lir_lower_tests, LIRInst, LIRCallee]
+
+fn fx_native_test_program() -> MIRProgram Never! {
+    body := fx_builder()
+    fx_block(&body, 0, MIRTerminator.Return{value: None})
+    check := fx_builder()
+    ok :: fx_owned(&check, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    fx_block(&check, 0, MIRTerminator.Return{value: Val(ok)})
+    program := fx_program([MIRFunction]{fx_function("test_body", body, fx_unit()), fx_function("output_check", check, fx_bool())}, ^[MIRTypeDef]{})
+    program.tests = [MIRTestCase]{MIRTestCase{
+        id: MIRTestID{value: 1}, function: mir_function_id("test_body"), name: "body", span: fx_span(),
+        kind: .Unit, contract_generated: false, eligibility: None, parameters: [MIRParam]{},
+        faults: [String]{}, expected_failure: false, generation_unavailable_reason: None,
+    }}
+    program
+}
+
+#Test("native output callbacks share roots but not unit outcome identities") {
+    program :: fx_native_test_program()
+    check :: MIROutputCheck{id: MIROutputCheckID{value: 2}, name: "check", function: mir_function_id("output_check")}
+    lowered :: lir_lower_tests(program, [MIRFunctionID]{mir_function_id("test_body")}, [MIROutputCheck]{check}, true)
+    loop issue in lowered.issues -> eprint("{issue.function}: {issue.message}")
+    assert_eq(lowered.issues.len(), 0)
+    assert_eq(lowered.callables.len(), 1)
+    main :: lowered.entry ?? panic("native harness has an entry")
+    check_calls := 0
+    loop function in lowered.lir.functions {
+        if function.id != main -> next
+        loop block in function.blocks {
+            loop instruction in block.insts {
+                if instruction == .Call(_, _, .Function(id), _) {
+                    loop target in lowered.lir.functions {
+                        if target.id == id && target.name == "output_check" -> check_calls += 1
+                    }
+                }
+            }
+        }
+    }
+    assert_eq(check_calls, 1)
+}

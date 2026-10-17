@@ -1,0 +1,27 @@
+# Port of tests/env_hook.rs::export_failed_reload_keeps_the_previous_activation.
+# The deliberately malformed replacement is the original bytes, not a parse target.
+# The captured CLI-emitted assignment is sourced unchanged; no hash computation/helper.
+# PENDING-GRAMMAR: capture/write, tool token and step unset.
+requires: tool:bash
+fixture: activation-reload.fixture
+env: PATH=/usr/bin:/bin
+step: jetpack env export bash
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_DIR
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+capture: hash stdout line ^= "export JETPACK_ENV_HASH=" # original activation_hash field
+write: hash.env hash.template
+copy: broken.env env.jet
+step: {tool:bash} --noprofile --norc -c 'source hash.env && exec "$1" env export bash' reexport {jetpack}
+env: JETPACK_ENV_DIR={work}
+unset: JET_ENV_DISABLE
+unset: JETPACK_ENV
+unset: JETPACK_ENV_HASH
+unset: JETPACK_ENV_OLD_PATH
+unset: JETPACK_REF
+exit: 0
+stdout: empty

@@ -1,0 +1,51 @@
+use core.net as net
+use core.http as http
+use core.http.client as client
+use core.files as files
+use core.text.parse as txt
+
+fn http_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+fn http_read(stream: net.TCPStream) -> String {
+    net.set_read_timeout(stream, 5000) ?? panic("read timeout")
+    String.from_bytes(net.tcp_read_bytes(stream, 4096) ?? panic("read request")) ?? panic("request UTF-8")
+}
+fn http_reply(stream: net.TCPStream, file: String) {
+    bytes :: files.read_bytes(file) ?? panic("response bytes")
+    net.tcp_write_all_bytes(stream, bytes) ?? panic("write response")
+    net.tcp_close(stream) ?? panic("drop peer stream")
+}
+fn check_repeated_headers() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    peer :: task {
+        stream :: net.tcp_accept(listener) ?? panic("accept")
+        request :: http_read(stream)
+        warnings := ""
+        loop line in request.lines() {
+            if txt.lower(line).starts_with("warning:") {
+                if warnings != "" -> warnings += "\n"
+                warnings += line
+            }
+        }
+        first :: txt.find(warnings, "one")
+        second :: txt.find(warnings, "two")
+        assert(first >= 0 && second >= 0 && first < second, "original repeated Warning order")
+        header :: files.read_bytes("response.bin") ?? panic("response")
+        net.tcp_write_all_bytes(stream, header) ?? panic("write response header")
+        net.tcp_write_all_bytes(stream, [U8]{255, 0}) ?? panic("write original binary body")
+        net.tcp_close(stream) ?? panic("drop peer")
+    }
+    response :: client.request("GET", "http://{address}/").header("Warning", "one").header("Warning", "two").send() ?? panic("request")
+    bytes :: response.body().bytes(8) ?? panic("body")
+    assert(bytes == [U8]{255, 0}, "original raw body bytes")
+    selected := [String]{}
+    loop field in response.headers.fields {
+        if field.name == "x-a" || field.name == "x-b" || field.name == "set-cookie" {
+            &selected.push(field.name)
+            &selected.push(field.value)
+        }
+    }
+    assert(selected == ["x-a", "one", "x-b", "middle", "x-a", "two", "set-cookie", "a=1", "set-cookie", "b=2"], "original exact interleaved response headers")
+    peer.join() ?? panic("peer")
+}
+#Test("core_http_client_preserves_repeated_headers_over_a_socket") { check_repeated_headers() }

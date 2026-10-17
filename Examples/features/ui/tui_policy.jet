@@ -1,0 +1,38 @@
+package {
+    name: "ui_tui_policy"
+    version: "0.1.0"
+    authority: { holds: { allow: [IO, Mem.Alloc] } }
+}
+
+use core.tui as tui
+use core.ui as ui
+
+fn run() {
+    if tui.color_ansi16(-20) == {
+        .ANSI16(index) -> print(index)
+        else -> panic("ANSI16 constructor changed variant")
+    }
+    if tui.color_rgb(-1, 128, 999) == {
+        .RGB(red, green, blue) -> print("{red},{green},{blue}")
+        else -> panic("RGB constructor changed variant")
+    }
+    s :: tui.style_underline(tui.style_dim(tui.style_bold(tui.style(), true), true), true)
+    print("{s.bold},{s.dim},{s.underline}")
+    state :: tui.list_state_offset(tui.list_state_select(tui.list_state(), -4), 12)
+    print("{tui.list_state_selected(state)},{state.offset}")
+    area :: ui.rect(2.0, 3.0, 100.0, 20.0)
+    frames :: tui.layout(area, tui.horizontal(), [tui.TUIConstraint]{tui.length(20.0), tui.fill(1.0), tui.fill(3.0)})
+    loop frame in frames -> print("{frame.x},{frame.width}")
+    if tui.key_event_modifiers("A", -1) == {
+        .Key(code, modifiers) -> print("{code},{modifiers}")
+        else -> panic("key constructor changed variant")
+    }
+    if tui.fill(1.5) == {
+        .Fill(weight) -> print(weight)
+        else -> panic("fill constructor changed variant")
+    }
+    if tui.percent(200.0) == {
+        .Percent(value) -> print(value)
+        else -> panic("percent constructor changed variant")
+    }
+}

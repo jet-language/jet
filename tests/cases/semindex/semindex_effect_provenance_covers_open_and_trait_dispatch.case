@@ -1,0 +1,12 @@
+# Original tests/semindex.rs:1246-1275; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_effect_provenance_covers_open_and_trait_dispatch.fixture
+step: jet inspect semindex effect_provenance_origins.jet --json
+json: stdout doc $.semindex.effects[?function="apply"][0].maximal = false
+json: stdout doc $.semindex.effects[?function="apply"][0].inferred = []
+json: stdout doc $.semindex.effects[?function="apply"][0].provenance = []
+json: stdout doc $.semindex.effects[?function="stored"][0].maximal = true
+json: stdout doc $.semindex.effects[?function="stored"][0].provenance #== $.semindex.effects[?function="stored"][0].inferred
+json: each $.semindex.effects[?function="stored"][0].provenance[*] as r: stdout doc {r}.spans #>= 1
+json: stdout doc $.semindex.effects[?function="dynamic"][0].provenance[?effect="IO"][0].call_path #= 2
+json: stdout doc $.semindex.effects[?function="dynamic"][0].provenance[?effect="IO"][0].spans #= 2

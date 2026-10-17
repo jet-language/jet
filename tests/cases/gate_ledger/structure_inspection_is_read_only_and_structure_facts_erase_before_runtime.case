@@ -1,0 +1,24 @@
+# Port of tests/gate_ledger.rs:425-477; existing source/dependency reused verbatim.
+# Generated-Rust equality and forbidden Rust-text checks RETIRED with the Rust emitter.
+step run_before: jet run {root}/Examples/features/tooling/structure_plane.jet
+exit: 0
+step release_before: jet run --release {root}/Examples/features/tooling/structure_plane.jet
+exit: 0
+step: jet inspect structure {root}/Examples/features/tooling/structure_plane.jet
+exit: 0
+stdout: ~ "import-edge" # original predicate
+stdout: ~ "lifecycle" # original predicate
+stdout: ~ "liveness" # original predicate
+stdout: ~ "provenance" # original predicate
+step: jet inspect structure --json {root}/Examples/features/tooling/structure_plane.jet
+exit: 0
+stdout: ~ "import-edge" # original predicate
+stdout: ~ "lifecycle" # original predicate
+stdout: ~ "liveness" # original predicate
+stdout: ~ "\"provenance\"" # original predicate
+step: jet run {root}/Examples/features/tooling/structure_plane.jet
+exit: 0
+stdout: == run_before
+step: jet run --release {root}/Examples/features/tooling/structure_plane.jet
+exit: 0
+stdout: == release_before

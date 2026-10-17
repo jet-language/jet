@@ -1,0 +1,15 @@
+# HAND-PORT tests/jetpack_engine.rs:5594-5635 automatic_channel_refresh_moves_again_after_manifest_writeback
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: automatic_channel_refresh_moves_again_after_manifest_writeback.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+step: jetpack build --no-color --yes --fixtures {work}/fixtures
+cwd: project
+exit: 0
+write: fixtures/channels.txt new-channel.template
+step: jetpack build --no-color --yes --fixtures {work}/fixtures
+cwd: project
+exit: 0
+file: project/.jet/lock ~ "exact = \"nixpkgs:omp#1.2.4\"" # original predicate
+file: project/env.jet ~ "omp@nixpkgs#auto" # original predicate
+

@@ -1,0 +1,20 @@
+// Canonical boundary availability is not an execution receipt. SolSema4's
+// opt-in producer selects these gaps; the CLI never invents operation IDs.
+use jet_foundation.[CanonicalPassBoundaryGap]
+
+fn jet_cli_canonical_route_gap_values(gaps: [CanonicalPassBoundaryGap]) -> [JetCLIStatusValue] Never! {
+    values := [JetCLIStatusValue]{}
+    loop gap in gaps {
+        &values.push(jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("operation_id", jet_cli_status_text(gap.operation_id)),
+            jet_cli_status_field("status", jet_cli_status_text(gap.status)),
+        }))
+    }
+    values
+}
+
+fn jet_cli_canonical_route_gap_text(gaps: [CanonicalPassBoundaryGap]) -> String Never! {
+    text := ""
+    loop gap in gaps -> text = "{text}canonical route {gap.operation_id}: {gap.status}\n"
+    text
+}

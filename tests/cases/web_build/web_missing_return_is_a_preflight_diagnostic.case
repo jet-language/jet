@@ -1,0 +1,8 @@
+# HAND-PORT tests/web_build.rs:3758-3764 web_missing_return_is_a_preflight_diagnostic
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original build rejection and exact same-diagnostic predicates, unchanged sources.
+fixture: web_missing_return_is_a_preflight_diagnostic.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0114"] #>= 1

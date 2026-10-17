@@ -1,0 +1,28 @@
+# tests/encoding_parity.rs::typed_csv_encode_matches_aot_and_default_dev
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: typed_csv_encode_matches_aot_and_default_dev.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: ~ "item,qty\npen,3\nink,5" # original contains
+stdout: ~ "typed-len: 20" # original contains
+stdout: ~ "rows: name,score\nada,9" # original contains
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: any # original helper either checks only stdout or permits the named interpreter gap
+# Exact named_encoding_dev_gap predicate at encoding_parity.rs:209-231; no interpreter parity claim in that branch.
+when !(stderr ~ "E0956" && stderr ~any "ResourceNew" "ResourceTake" "handle `" "FileReader" "FileWriter" "JSONReader" "JSONWriter" "CSVReader" "CSVWriter" "XMLReader" "XMLWriter" "CBORReader" "CBORWriter" "JSONLReader" "JSONLWriter") && !(stderr ~ "E0953" && stderr ~any "stopped the build" "panic")
+exit: == probe_aot
+stdout: == probe_aot
+end when

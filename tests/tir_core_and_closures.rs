@@ -13,6 +13,109 @@ use tir_support::{
     assert_tiers_agree, build_and_run, build_and_run_full_with_cfg, build_and_run_multi, have_rustc,
 };
 
+
+/// #4790 / I2: the task lambda's checked Never carrier must survive a typed
+/// list boundary. Joining unwraps the task failure and then the worker result.
+#[test]
+fn task_lambda_never_carrier_typed_list_builds_and_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+fn report() -> String Never! { "done" }
+fn run() {
+    workers := [Task<String Never!>]{}
+    task.group group {
+        &workers.push(task { report() })
+        loop pending in workers {
+            joined :: ^pending.join() ?? panic("join failed")
+            print(joined ?? panic("infallible worker"))
+        }
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("task_lambda_never_carrier_typed_list", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "done\n");
+}
+
+#[test]
+fn recursive_task_explicit_joins_build_and_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+fn report() Never! {}
+fn start(group: Group, remaining: Int) Never! {
+    if remaining == 0 -> return
+    worker :: task report()
+    start(group, remaining - 1)
+    joined :: ^worker.join() ?? panic("join failed")
+    joined ?? panic("infallible worker")
+}
+fn run() {
+    task.group group {
+        start(group, 2)
+    }
+    print("joined")
+}
+"#;
+    let (code, stdout) = build_and_run("recursive_task_explicit_joins", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "joined\n");
+}
+
+/// A worker's ordinary error remains an inner Result, not TaskFailure.Panicked.
+/// Successful workers likewise retain their Never carrier through every group.
+#[test]
+fn task_groups_preserve_worker_results_builds_and_runs() {
+    if !have_rustc() {
+        return;
+    }
+    let source = r#"
+#Error
+enum WorkerError { Bad }
+fn report() -> String Never! { "done" }
+fn fail() -> String WorkerError! { Err(WorkerError.Bad) }
+fn run() {
+    values :: task.all {{ report() }, { report() }} ?? panic("all failed")
+    print(values[0] ?? panic("infallible worker"))
+    print(values[1] ?? panic("infallible worker"))
+    named :: task.all {z: { report() }, a: { report() }} ?? panic("named all failed")
+    print(named.z ?? panic("infallible worker"))
+    print(named.a ?? panic("infallible worker"))
+    raced :: task.race {{ report() }, { report() }} ?? panic("race failed")
+    print(raced ?? panic("infallible worker"))
+    first :: task.any {{ report() }, { report() }} ?? panic("any failed")
+    print(first ?? panic("infallible worker"))
+    failures :: task.all {{ fail() }, { fail() }} ?? panic("worker error became a waiting failure")
+    loop result in failures {
+        if result == {
+            .Err(error) -> {
+                if error == {
+                    .Bad -> print("worker error")
+                }
+            }
+            .Ok(_) -> panic("worker error was lost")
+        }
+    }
+    worker :: task fail()
+    joined :: ^worker.join() ?? panic("worker error became a waiting failure")
+    if joined == {
+        .Err(error) -> {
+            if error == {
+                .Bad -> print("joined worker error")
+            }
+        }
+        .Ok(_) -> panic("joined worker error was lost")
+    }
+}
+"#;
+    let (code, stdout) = build_and_run("task_groups_preserve_worker_results", source);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "done\ndone\ndone\ndone\ndone\ndone\nworker error\nworker error\njoined worker error\n");
+}
+
 /// c109 Phase 10: core/stdlib module calls route through the TIR. `math.*`,
 /// `Path.join`, and `crypto.sha256` are type-monomorphic (in `core_fixed_sig`),
 /// so `calc`/`make_path`/`hash`/`main` are all covered. The call forms
@@ -96,7 +199,7 @@ fn core_files_read_with_fallback() {
     let src = "\
 use core.files as fs
 fn read_or(p: String) -> String {
-    return (fs.read(~p) ?? \"missing\")
+    return (fs.read(p.copy()) ?? \"missing\")
 }
 fn run() {
     print(read_or(\"/no/such/file/at/all/xyzzy\"))
@@ -154,18 +257,11 @@ fn core_files_absolute_path_read_matches_every_tier() {
     let fixture_root = cache_root.join("phase1");
     stage_jetpack_phase1(&fixture_source, &fixture_root);
     let mut outputs = Vec::new();
-    for (mode, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (mode, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
-        }
-        if interpret {
-            command.arg("--interpret");
         }
         let output = command
             .arg("dogfood/jetpack")
@@ -466,7 +562,7 @@ fn parallel_collection_adapters_work_in_imported_modules() {
             ),
             (
                 "worker.jet",
-                "pub fn double_all(values: [Int]) -> [Int] {\n    return values.para_map((n: Int) -> n * 2)\n}\n",
+                "fn double_all(values: [Int]) -> [Int] {\n    return values.para_map((n: Int) -> n * 2)\n}\n",
             ),
         ],
     );
@@ -1067,7 +1163,7 @@ fn handle_methods_file_writer() {
 use core.files as files
 use core.files as fs
 fn write_file(path: String, text: String) -> Int {{
-    w := files.create(~path) ?? return 0
+    w := files.create(path.copy()) ?? return 0
     _r :: w.write_line(text)
     _f :: w.flush()
     return 1
@@ -1123,6 +1219,10 @@ fn run() {
 #[test]
 fn closure_capture_reads_current_storage_and_reuses_owned_copy() {
     let src = r#"
+fn make_owned_read() -[..E]> fn() -> Int -[..E]> {
+    text :: "snapshot"
+    return () -> text.len()
+}
 fn run() {
     first := 41
     first_read :: () -> first
@@ -1137,12 +1237,24 @@ fn run() {
     current_items :: [current_read]
     print(current_items[0].call())
     print(current)
+
+    text := "first"
+    text_read :: () -> text.len()
+    text_items :: [text_read]
+    text = "changed text"
+    print(text_items[0].call())
+    print(text_items[0].call())
+    print(text.len())
+    // The creator frame is gone; the materialized Read capture owns storage.
+    returned :: make_owned_read()
+    print(returned.call())
+    print(returned.call())
 }
 "#;
     assert_tiers_agree(
         "tir_closure_capture_current_storage",
         src,
-        "41\n41\n1\n7\n7\n",
+        "41\n41\n1\n7\n7\n5\n5\n12\n8\n8\n",
     );
 }
 
@@ -1387,7 +1499,7 @@ fn run() {
 }
 
 /// Card #2877: explicit-copy policy rejects a plain read in an owning arm
-/// with the same `~` fix used by other owning destinations.
+/// with the same `.copy()` fix used by other owning destinations.
 #[test]
 fn card_2877_if_arm_explicit_copy_requires_tilde() {
     let src = "\

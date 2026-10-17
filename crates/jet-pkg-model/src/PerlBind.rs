@@ -333,7 +333,7 @@ fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
         let name = &function.jet;
         out.push_str(&format!("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n"));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\npub fn open() -[FFI.Perl]> Session PerlError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\nstruct Session {{ value: Int }}\n#Error\nenum PerlError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\nfn close(^session: Session) -[FFI.Perl]> {{ abi.close(session.value) }}\n\nfn open() -[FFI.Perl]> Session PerlError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(PerlError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\nfn cancel(session: Session) -[FFI.Perl]> {{ abi.cancel(session.value) }}\n\n"));
     out.push_str(&crate::Bindgen::render_decode_response(
         "PerlError",
         crate::Bindgen::DecoderProtocol::StandardEnvelope,
@@ -342,7 +342,7 @@ fn render_jet(lib: &str, functions: &[BoundFunction]) -> String {
         let name = &function.jet;
         out.push_str(&format!(
             r#"pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -[FFI.Perl]> DataTree PerlError! {{
-    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)
+    raw :: abi.{name}(session.value, json.to_string(input) ?? return Err(PerlError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }}
@@ -502,8 +502,8 @@ mod tests {
             ("Sleep", "sleep"),
             ("Transform", "transform"),
         ] {
-            assert!(jet.contains(&format!("pub fn {projected}(")));
-            assert!(!jet.contains(&format!("pub fn {foreign}(")));
+            assert!(jet.contains(&format!("\nfn {projected}(")));
+            assert!(!jet.contains(&format!("\nfn {foreign}(")));
             assert!(worker.contains(&format!("'{foreign}' => 1")));
         }
     }

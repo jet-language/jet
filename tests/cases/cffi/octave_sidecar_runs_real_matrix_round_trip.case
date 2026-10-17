@@ -1,0 +1,20 @@
+# Port of tests/cffi.rs::octave_sidecar_runs_real_matrix_round_trip.
+# PENDING-GRAMMAR: alternative-tool requirement/token and count assertions (TestLead1 ruling).
+# PENDING-SAME-HEAD: HISTORICAL dev-595e0dca3 run exited1, E-TYPE-PREFIX at run.jet:13:1.
+# The committed example oracle is reused verbatim; do not bless a replacement.
+requires: tool:octave-cli|octave
+fixture: octave_sidecar_runs_real_matrix_round_trip.fixture
+step: {tool:octave-cli|octave} --version
+exit: 0
+step: jet inspect bind octave scale.m --pkg scale
+exit: 0
+file: .jet/bindings/octave/scale.jet ~ "Tensor" # original predicate
+file: .jet/bindings/octave/scale.jet ~ "FFI.Octave" # original predicate
+file: .jet/bindings/octave/scale.jet count "fn decode_response(" = 1 # original predicate
+file: .jet/bindings/octave/scale.jet count "raw :: abi.scale(" = 1 # original predicate
+file: .jet/bindings/octave/scale.jet count "decode_response(raw, code)" = 1 # original predicate
+step: jet run run.jet
+exit: 0
+stdout: = ../../../Examples/interop/octave/expected.out
+file: .jet/bindings/octave/scale.provenance ~ "transport=json" # original predicate
+file: .jet/bindings/octave/scale.provenance ~ "shape=rank-2" # original predicate

@@ -1,0 +1,23 @@
+use core.files as s3_sema_corpus_files
+
+// Port of tests/sema_soundness_parts/metadata.rs:29-44 and support.rs:38-54.
+// SEMA_SOUNDNESS_CASE routing is a Rust harness law retired with that harness;
+// the floor always counts the complete fixed corpus, never a replay subset.
+fn s3_guard_full_corpus_count() {
+    total := 0
+    categories :: [String]{"valid", "invalid", "differential"}
+    loop kind in categories {
+        entries :: s3_sema_corpus_files.list_dir("tests/fuzz/sema/{kind}") ?? panic("cannot read sema corpus {kind}")
+        count := 0
+        loop entry in entries {
+            if entry.name != ".jet" && entry.name.ends_with(".jet") -> count += 1
+        }
+        assert(count > 0, "empty sema soundness corpus: {kind}")
+        total += count
+    }
+    assert(total >= 250, "sema soundness corpus has {total} fixed cases; requires at least 250")
+}
+
+#Test("full_corpus_meets_minimum_case_count") {
+    s3_guard_full_corpus_count()
+}

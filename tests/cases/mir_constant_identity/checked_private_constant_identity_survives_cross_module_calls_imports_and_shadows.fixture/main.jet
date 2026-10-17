@@ -1,0 +1,33 @@
+
+use alpha.alias_value_list as imported_alpha_values
+use beta.[import_value_list as imported_beta_values]
+module alpha
+module beta
+
+struct PublicValuesBox {
+    alias_values: [U8]
+}
+
+fn int_head(values: [Int]) -> Int {
+    return values[0]
+}
+
+fn byte_head(values: [U8]) -> U8 {
+    return values[0]
+}
+
+fn module_prefix_shadow(beta: PublicValuesBox) -> U8 {
+    return beta.alias_values[0]
+}
+
+fn run() {
+    print(alpha.token_at(0))
+    print(alpha.payload_at(0))
+    print(beta.token_at(0))
+    print(beta.payload_at(0))
+    print(int_head(imported_alpha_values()))
+    print(byte_head(imported_beta_values()))
+    print(byte_head(beta.alias_value_list()))
+    print(alpha.shadowed([99]))
+    print(module_prefix_shadow(PublicValuesBox{alias_values: [U8]{7}}))
+}

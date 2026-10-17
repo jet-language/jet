@@ -1,0 +1,25 @@
+use core.game as game
+
+module perf.game {
+    budgets: [
+        Budget.{
+    name: "draws",
+    scope: .Scene("main"),
+    metric: .DrawCalls(.P99),
+    provider: .SceneProbe("main"),
+    comparison: .AbsoluteFrom("local/main"),
+    limit: .AtMost(10),
+    enforcement: .Warn,
+},
+    ]
+}
+
+fn run() {
+    scene := game.Scene.new("main")
+    counter := 0
+    scene.on_frame((frame) -> {
+        counter = counter + 1
+    })
+    transcript :: game.run(scene)
+    print(transcript)
+}

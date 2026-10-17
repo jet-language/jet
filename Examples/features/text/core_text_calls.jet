@@ -13,6 +13,17 @@ fn run() {
     print(fmt.oct(10))
     print(fmt.pad("x", 3, "."))
     print(fmt.sci(Float{123.4}, 2))
+    fixed :: -123456789012345678901234567890
+    grouped :: 123456789012345678901234567890
+    if "{fixed:Fixed(2)}" != "-123456789012345678901234567890.00" {
+        panic("fixed exact Int")
+    }
+    if "{grouped:Grouped(1)}" != "123,456,789,012,345,678,901,234,567,890.0" {
+        panic("grouped exact Int")
+    }
+    if fmt.hex(255, 4) != "00ff" -> panic("hex exact Int")
+    if fmt.bin(-10) != "-1010" -> panic("bin exact Int")
+    if fmt.oct(10) != "12" -> panic("oct exact Int")
     loop grapheme in text.grapheme_views("áb") -> print(grapheme)
     print(text.graphemes("áb").len())
     print(text.is_whitespace(" "))

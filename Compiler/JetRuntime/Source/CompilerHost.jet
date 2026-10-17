@@ -1,0 +1,168 @@
+// Compiler-private process receipt fact: Process.rs:417-449's bounded status
+// history survives the child owner, but is populated only by a successful wait.
+compiler_host_root := I64{0}
+// runtime-init: 4
+#Export(c) fn jet_rt_compiler_host_init() {
+    if (compiler_host_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{1048}, I64{8})
+    thread_zero(root, I64{1048})
+    compiler_host_root = root
+}
+fn compiler_process_record_exit_status(pid: I64, status: I64) {
+    root :: compiler_host_root
+    sync_mutex_lock(root)
+    next_slot :: rt_text_word(root + I64{8})
+    slot :: root + I64{24} + next_slot * I64{16}
+    rt_text_store(slot, pid)
+    rt_text_store(slot + I64{8}, status)
+    rt_text_store(root + I64{8}, (next_slot + I64{1}) % I64{64})
+    count :: rt_text_word(root + I64{16})
+    if (count < I64{64}) -> rt_text_store(root + I64{16}, count + I64{1})
+    sync_mutex_unlock(root)
+}
+fn compiler_process_signal_name(signal: I64) -> I64 {
+    if {
+        (signal == I64{1}) -> rt_static_text("SIGHUP")
+        (signal == I64{2}) -> rt_static_text("SIGINT")
+        (signal == I64{3}) -> rt_static_text("SIGQUIT")
+        (signal == I64{4}) -> rt_static_text("SIGILL")
+        (signal == I64{5}) -> rt_static_text("SIGTRAP")
+        (signal == I64{6}) -> rt_static_text("SIGABRT")
+        (signal == I64{7}) -> rt_static_text("SIGBUS")
+        (signal == I64{8}) -> rt_static_text("SIGFPE")
+        (signal == I64{9}) -> rt_static_text("SIGKILL")
+        (signal == I64{10}) -> rt_static_text("SIGUSR1")
+        (signal == I64{11}) -> rt_static_text("SIGSEGV")
+        (signal == I64{12}) -> rt_static_text("SIGUSR2")
+        (signal == I64{13}) -> rt_static_text("SIGPIPE")
+        (signal == I64{14}) -> rt_static_text("SIGALRM")
+        (signal == I64{15}) -> rt_static_text("SIGTERM")
+        (signal == I64{16}) -> rt_static_text("SIGSTKFLT")
+        (signal == I64{17}) -> rt_static_text("SIGCHLD")
+        (signal == I64{18}) -> rt_static_text("SIGCONT")
+        (signal == I64{19}) -> rt_static_text("SIGSTOP")
+        (signal == I64{20}) -> rt_static_text("SIGTSTP")
+        (signal == I64{21}) -> rt_static_text("SIGTTIN")
+        (signal == I64{22}) -> rt_static_text("SIGTTOU")
+        (signal == I64{23}) -> rt_static_text("SIGURG")
+        (signal == I64{24}) -> rt_static_text("SIGXCPU")
+        (signal == I64{25}) -> rt_static_text("SIGXFSZ")
+        (signal == I64{26}) -> rt_static_text("SIGVTALRM")
+        (signal == I64{27}) -> rt_static_text("SIGPROF")
+        (signal == I64{28}) -> rt_static_text("SIGWINCH")
+        (signal == I64{29}) -> rt_static_text("SIGIO")
+        (signal == I64{30}) -> rt_static_text("SIGPWR")
+        (signal == I64{31}) -> rt_static_text("SIGSYS")
+        else -> I64{0}
+    }
+}
+fn compiler_process_status_text(status: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    low :: status.bit_and(I64{127})
+    if (low == I64{0}) {
+        jet_rt_string_builder_push(text, rt_static_text("exit status: "))
+        rt_text_push_number(text, (status >> I64{8}).bit_and(I64{255}))
+    } else if (status == I64{65535}) {
+        jet_rt_string_builder_push(text, rt_static_text("continued (WIFCONTINUED)"))
+    } else {
+        stopped :: (status.bit_and(I64{255})) == I64{127}
+        signal :: if stopped -> (status >> I64{8}).bit_and(I64{255}) else -> low
+        jet_rt_string_builder_push(text, if stopped -> rt_static_text("stopped (not terminated) by signal: ") else -> rt_static_text("signal: "))
+        rt_text_push_number(text, signal)
+        name :: compiler_process_signal_name(signal)
+        if (name != I64{0}) {
+            jet_rt_string_builder_push(text, rt_static_text(" ("))
+            jet_rt_string_builder_push(text, name)
+            rt_text_push_word(text, I64{41}, I64{1})
+        }
+        if (!stopped && (status.bit_and(I64{128})) != I64{0}) -> jet_rt_string_builder_push(text, rt_static_text(" (core dumped)"))
+    }
+    jet_rt_string_builder_finish(text)
+}
+#Export(c) fn jet_process_exit_status_raw(pid: I64, some: I64) -> I64 {
+    native :: host_native_int(pid)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    root :: compiler_host_root
+    sync_mutex_lock(root)
+    count :: rt_text_word(root + I64{16})
+    next_slot :: rt_text_word(root + I64{8})
+    at := I64{0}
+    found := false
+    status := I64{0}
+    loop at < count {
+        slot :: root + I64{24} + ((next_slot + I64{63} - at) % I64{64}) * I64{16}
+        if (rt_text_word(slot) == native) {
+            status = rt_text_word(slot + I64{8})
+            found = true
+            break
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(root)
+    if !found -> return I64{0}
+    rt_text_store(some, compiler_process_status_text(status))
+    I64{1}
+}
+// These match std::env::consts for this pack's Linux x86-64 OS seed; they are
+// the build target identity, not uname's machine/release or the compiler target.
+#Export(c) fn jet_std_os_name() -> I64 { jet_rt_string_clone(rt_static_text("linux")) }
+#Export(c) fn jet_std_os_arch() -> I64 { jet_rt_string_clone(rt_static_text("x86_64")) }
+// PlatformFamily.rs:3 std::env::consts::FAMILY of the Linux build target.
+#Export(c) fn jet_std_os_family() -> I64 { jet_rt_string_clone(rt_static_text("unix")) }
+
+// OsExtra.rs jet_sys_executable_raw: std::env::current_exe on Linux reads the
+// /proc/self/exe link, decoded lossily; any failure is None. The native
+// compiler locates its jet-runtime pack beside this path.
+#Export(c) fn jet_sys_executable_raw(some: I64) -> I64 {
+    path :: rt_static_text("/proc/self/exe")
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    capacity := I64{256}
+    loop {
+        bytes :: jet_rt_alloc(capacity, I64{8})
+        count :: jet_fs_readlink_raw(path, bytes, capacity, scratch)
+        if (count < I64{0}) {
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return I64{0}
+        }
+        if (count < capacity) {
+            rt_text_store(some, rt_text_lossy(bytes, count))
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return I64{1}
+        }
+        jet_rt_free(bytes, capacity, I64{8})
+        capacity *= I64{2}
+    }
+}
+
+// OsExtra.rs jet_sys_current_dir_raw: std::env::current_dir is getcwd(3),
+// decoded lossily; the error is the io::Error text "<message> (os error N)".
+// The raw syscall reports an unreachable directory as a non-absolute path,
+// which getcwd(3) refuses with ENOENT.
+#Export(c) fn jet_sys_current_dir_raw(ok: I64, err: I64) -> I64 {
+    capacity := I64{512}
+    loop {
+        bytes :: jet_rt_alloc(capacity, I64{8})
+        result :: host_call(I64{79}, bytes, capacity, I64{0})
+        failure := I64{0}
+        if (result > I64{0}) {
+            if (rt_text_byte(bytes) == I64{47}) {
+                rt_text_store(ok, rt_text_lossy(bytes, result - I64{1}))
+                jet_rt_free(bytes, capacity, I64{8})
+                return I64{1}
+            }
+            failure = I64{2}
+        } else {
+            failure = -result
+        }
+        jet_rt_free(bytes, capacity, I64{8})
+        if (failure != I64{34}) {
+            text :: jet_rt_string_builder_new()
+            host_errno_cause_append(text, failure)
+            rt_text_store(err, jet_rt_string_builder_finish(text))
+            return I64{0}
+        }
+        capacity *= I64{2}
+    }
+}

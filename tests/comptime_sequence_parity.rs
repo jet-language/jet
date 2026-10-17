@@ -3,7 +3,7 @@
 use std::fs;
 use std::process::Command;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use jet::REPL::run_transcript;
 
 mod common;
@@ -25,7 +25,7 @@ fn parallel_adapters_match_forced_interpreter_and_default_jit_dev() {
     fs::write(&path, source).unwrap();
     let expected = "[2, 4, 6, 8]\n[2, 4]\n[1, 3]\n[2, 4]\n10\n";
     for (tier, use_interpreter) in [("forced-interpreter", true), ("default-jit-dev", false)] {
-        match dev_iteration(path.to_str().unwrap(), false, use_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, use_interpreter) {
             RunOutcome::Ran {
                 stdout,
                 stderr,

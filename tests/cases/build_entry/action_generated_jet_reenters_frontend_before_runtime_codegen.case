@@ -1,0 +1,7 @@
+# Port of tests/build_entry.rs:2020-2049; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/action_generated_jet_reenters_frontend_before_runtime_codegen
+step: jet build main.jet --allow-exec --allow-fs --json
+exit: nonzero
+json: machine doc $.reports[?what~="generated action `bad-gen`"] #>= 1 # original any diagnostic.what contains
+file: .jet/generated/main/bad.jet absent

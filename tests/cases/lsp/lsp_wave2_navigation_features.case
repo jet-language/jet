@@ -1,0 +1,43 @@
+# Port of tests/lsp.rs:2750-2832; source bytes copied verbatim.
+# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_wave2_navigation_features/0.json
+recv lsp
+stdout: ~ "workspaceSymbolProvider" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "foldingRangeProvider" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "documentHighlightProvider" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "selectionRangeProvider" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave2_navigation_features/1.json
+send lsp: messages/lsp_wave2_navigation_features/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave2_navigation_features/3.json
+recv lsp
+stdout: ~ "\"name\":\"add\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"kind\":12" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"location\"" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave2_navigation_features/4.json
+recv lsp
+stdout: ~ "\"kind\":\"comment\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"startLine\":0" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"endLine\":1" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"kind\":\"region\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"startLine\":3" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"endLine\":6" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave2_navigation_features/5.json
+recv lsp
+stdout: ~ "\"kind\":3" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"kind\":2" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"range\"" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave2_navigation_features/6.json
+recv lsp
+stdout: ~ "\"parent\"" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"start\":{\"line\":9,\"character\":13}" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "\"end\":{\"line\":9,\"character\":16}" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_wave2_navigation_features/7.json
+recv lsp
+stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+close lsp
+# Original transcript only waited; it did not assert process status.
+exit: any

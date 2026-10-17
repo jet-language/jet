@@ -1,0 +1,248 @@
+// Layout.rs308-561: dense two-phase primal simplex, EPS/Bland unchanged.
+// One scratch allocation. Persistent rows are borrowed (no redundant clone);
+// only synthetic edit specs are constructed. Extras: kind, first, second.
+// kind0 slack;1 surplus+artificial;2 artificial;3 error pair.
+fn layout_minimize(table: I64, basis: I64, cost: I64, barred: I64, objective: I64, n: I64, m: I64) -> Float {
+    width :: (n + I64{1}) * I64{8}
+    coll_zero(objective, width)
+    coll_copy(cost, objective, n * I64{8})
+    i := I64{0}
+    loop i < m {
+        weight :: layout_float(cost + layout_word(basis + i * I64{8}) * I64{8})
+        if (layout_abs(weight) > LAYOUT_EPS) {
+            k := I64{0}
+            loop k <= n {
+                out :: objective + k * I64{8}
+                layout_float_put(out, layout_float(out) - weight * layout_float(table + i * width + k * I64{8}))
+                k += I64{1}
+            }
+        }
+        i += I64{1}
+    }
+    loop {
+        enter := I64{0}
+        loop enter < n {
+            if (layout_word(barred + enter * I64{8}) == I64{0} && layout_float(objective + enter * I64{8}) < -LAYOUT_EPS) { break }
+            enter += I64{1}
+        }
+        if (enter == n) { break }
+        leave := I64{-1}
+        best := rt_f64_from_bits(I64{9218868437227405312})
+        i = I64{0}
+        loop i < m {
+            coefficient :: layout_float(table + i * width + enter * I64{8})
+            if (coefficient > LAYOUT_EPS) {
+                ratio :: layout_float(table + i * width + n * I64{8}) / coefficient
+                better :: ratio < best - LAYOUT_EPS
+                tied :: layout_abs(ratio - best) <= LAYOUT_EPS
+                if better || (tied && (leave == I64{-1} || layout_word(basis + i * I64{8}) < layout_word(basis + leave * I64{8}))) {
+                    best = ratio
+                    leave = i
+                }
+            }
+            i += I64{1}
+        }
+        if (leave == I64{-1}) { break } // seed unbounded behavior
+        pivot_row :: table + leave * width
+        pivot :: layout_float(pivot_row + enter * I64{8})
+        k := I64{0}
+        loop k <= n {
+            cell :: pivot_row + k * I64{8}
+            layout_float_put(cell, layout_float(cell) / pivot)
+            k += I64{1}
+        }
+        i = I64{0}
+        loop i < m {
+            if (i != leave) {
+                row :: table + i * width
+                factor :: layout_float(row + enter * I64{8})
+                if (layout_abs(factor) > LAYOUT_EPS) {
+                    k = I64{0}
+                    loop k <= n {
+                        cell :: row + k * I64{8}
+                        layout_float_put(cell, layout_float(cell) - factor * layout_float(pivot_row + k * I64{8}))
+                        k += I64{1}
+                    }
+                }
+            }
+            i += I64{1}
+        }
+        factor :: layout_float(objective + enter * I64{8})
+        if (layout_abs(factor) > LAYOUT_EPS) {
+            k = I64{0}
+            loop k <= n {
+                cell :: objective + k * I64{8}
+                layout_float_put(cell, layout_float(cell) - factor * layout_float(pivot_row + k * I64{8}))
+                k += I64{1}
+            }
+        }
+        layout_put(basis + leave * I64{8}, enter)
+    }
+    -layout_float(objective + n * I64{8})
+}
+fn layout_solution_zero(inner: I64, variables: I64) {
+    header :: inner + I64{88}
+    // Reuse capacity across dirty resolves; never allocate for an unchanged size.
+    layout_put(header, I64{0})
+    at := I64{0}
+    loop at < variables {
+        layout_float_put(data_sequence_reserve(header, I64{8}), Float{0.0})
+        layout_list_publish(header)
+        at += I64{1}
+    }
+}
+fn layout_conflict_push(inner: I64, label: I64) {
+    header :: inner + I64{112}
+    layout_put(data_sequence_reserve(header, I64{8}), jet_rt_string_clone(label))
+    layout_list_publish(header)
+}
+fn layout_solve(inner: I64) {
+    variables :: layout_word(inner + I64{16})
+    rows :: inner + I64{40}
+    edits :: inner + I64{64}
+    permanent :: layout_word(rows)
+    edit_count :: layout_word(edits)
+    m :: permanent + edit_count
+    layout_conflicts_clear(inner)
+    layout_solution_zero(inner, variables)
+    if (m == I64{0}) -> return
+    n := variables + edit_count * I64{2}
+    i := I64{0}
+    loop i < permanent {
+        row :: layout_word(rows + I64{16}) + i * LAYOUT_ROW_BYTES
+        if (layout_word(row + I64{280}) != I64{0} || layout_word(row + I64{272}) == I64{1}) {
+            n += I64{2}
+        } else { n += I64{1} }
+        i += I64{1}
+    }
+    width :: (n + I64{1}) * I64{8}
+    // All arithmetic uses checked I64 operations, so capacity overflow stops.
+    bytes :: m * I64{40} + edit_count * LAYOUT_ROW_BYTES + m * width + n * I64{16} + width
+    scratch :: jet_rt_alloc(bytes, I64{8})
+    coll_zero(scratch, bytes)
+    specs :: scratch
+    edit_specs :: specs + m * I64{8}
+    extras :: edit_specs + edit_count * LAYOUT_ROW_BYTES
+    table :: extras + m * I64{24}
+    basis :: table + m * width
+    cost :: basis + m * I64{8}
+    barred :: cost + n * I64{8}
+    objective :: barred + n * I64{8}
+    i = I64{0}
+    loop i < permanent {
+        layout_put(specs + i * I64{8}, layout_word(rows + I64{16}) + i * LAYOUT_ROW_BYTES)
+        i += I64{1}
+    }
+    i = I64{0}
+    loop i < edit_count {
+        source :: layout_word(edits + I64{16}) + i * I64{16}
+        row :: edit_specs + i * LAYOUT_ROW_BYTES
+        index :: layout_word(source)
+        layout_put(row, index)
+        layout_float_put(row + I64{8}, Float{1.0})
+        layout_put(row + I64{256}, I64{1})
+        layout_float_put(row + I64{264}, layout_float(source + I64{8}))
+        layout_put(row + I64{272}, I64{2})
+        layout_put(row + I64{280}, I64{2})
+        // Soft rows never appear in conflict labels; no unused label allocation.
+        layout_normalize(row)
+        layout_put(specs + (permanent + i) * I64{8}, row)
+        i += I64{1}
+    }
+    next := variables
+    any_artificial := false
+    i = I64{0}
+    loop i < m {
+        spec :: layout_word(specs + i * I64{8})
+        extra :: extras + i * I64{24}
+        row :: table + i * width
+        required :: layout_word(spec + I64{280}) == I64{0}
+        op :: layout_word(spec + I64{272})
+        kind :: if !required -> I64{3} else -> op
+        layout_put(extra, kind)
+        layout_put(extra + I64{8}, next)
+        term := I64{0}
+        loop term < layout_word(spec + I64{256}) {
+            source :: spec + term * I64{16}
+            cell :: row + layout_word(source) * I64{8}
+            layout_float_put(cell, layout_float(cell) + layout_float(source + I64{8}))
+            term += I64{1}
+        }
+        layout_float_put(row + n * I64{8}, layout_float(spec + I64{264}))
+        if (kind == I64{0}) {
+            layout_float_put(row + next * I64{8}, Float{1.0})
+            layout_put(basis + i * I64{8}, next)
+            next += I64{1}
+        } else if (kind == I64{2}) {
+            layout_float_put(row + next * I64{8}, Float{1.0})
+            layout_put(basis + i * I64{8}, next)
+            layout_float_put(cost + next * I64{8}, Float{1.0})
+            any_artificial = true
+            next += I64{1}
+        } else {
+            second :: next + I64{1}
+            layout_put(extra + I64{16}, second)
+            layout_float_put(row + next * I64{8}, Float{-1.0})
+            layout_float_put(row + second * I64{8}, Float{1.0})
+            layout_put(basis + i * I64{8}, second)
+            if (kind == I64{1}) {
+                layout_float_put(cost + second * I64{8}, Float{1.0})
+                any_artificial = true
+            }
+            next += I64{2}
+        }
+        i += I64{1}
+    }
+    if any_artificial {
+        phase1 :: layout_minimize(table, basis, cost, barred, objective, n, m)
+        if (phase1 > Float{0.00001}) {
+            i = I64{0}
+            loop i < m {
+                extra :: extras + i * I64{24}
+                kind :: layout_word(extra)
+                artificial :: if (kind == I64{1}) -> layout_word(extra + I64{16}) else -> layout_word(extra + I64{8})
+                if ((kind == I64{1} || kind == I64{2}) && layout_word(basis + i * I64{8}) == artificial && layout_float(table + i * width + n * I64{8}) > LAYOUT_EPS) {
+                    layout_conflict_push(inner, layout_word(layout_word(specs + i * I64{8}) + I64{288}))
+                }
+                i += I64{1}
+            }
+            if (layout_word(inner + I64{112}) == I64{0}) {
+                fallback :: jet_rt_string_builder_new()
+                layout_append_literal(fallback, I64{7})
+                layout_conflict_push(inner, fallback)
+                jet_rt_string_drop(fallback)
+            }
+            layout_put(inner + I64{144}, I64{1})
+            jet_rt_free(scratch, bytes, I64{8})
+            return
+        }
+    }
+    coll_zero(cost, n * I64{8})
+    i = I64{0}
+    loop i < m {
+        spec :: layout_word(specs + i * I64{8})
+        extra :: extras + i * I64{24}
+        kind :: layout_word(extra)
+        first :: layout_word(extra + I64{8})
+        second :: layout_word(extra + I64{16})
+        if (kind == I64{1}) { layout_put(barred + second * I64{8}, I64{1}) }
+        if (kind == I64{2}) { layout_put(barred + first * I64{8}, I64{1}) }
+        if (kind == I64{3}) {
+            strength :: layout_word(spec + I64{280})
+            weight :: if (strength == I64{1}) -> Float{1000000.0} else if (strength == I64{2}) -> Float{1000.0} else -> Float{1.0}
+            op :: layout_word(spec + I64{272})
+            if (op != I64{1}) { layout_float_put(cost + first * I64{8}, weight) }
+            if (op != I64{0}) { layout_float_put(cost + second * I64{8}, weight) }
+        }
+        i += I64{1}
+    }
+    _ := layout_minimize(table, basis, cost, barred, objective, n, m)
+    solution :: layout_word(inner + I64{104})
+    i = I64{0}
+    loop i < m {
+        column :: layout_word(basis + i * I64{8})
+        if (column < variables) { layout_float_put(solution + column * I64{8}, layout_float(table + i * width + n * I64{8})) }
+        i += I64{1}
+    }
+    jet_rt_free(scratch, bytes, I64{8})
+}

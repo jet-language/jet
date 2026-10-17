@@ -1,0 +1,474 @@
+// Observe.rs native task/channel registry. It records only identities and
+// wait/resource facts, never a task payload, channel element or environment.
+// Root136: mutex0/next-task8/next-channel16/tasks24/task-count32/channels40/
+// workers48/queued56/exit-reported64/writer72/event-sequence80/events88/
+// event-tail96/event-count104/values112/value-count120/ledger128.
+// Task88: next0/id8/parent16/site24/label32/state40/wait48/deadline-present56/
+// deadline64/cancelled72/control80. Channel64: next0/id8/depth16/bounded24/
+// capacity32/send40/recv48/closed56.
+observe_root := I64{0}
+observe_task_key := I64{0}
+
+// runtime-init: 4
+#Export(c) fn jet_rt_observe_init() {
+    if (observe_root != I64{0}) -> return
+    observe_root = jet_rt_alloc(I64{136}, I64{8})
+    thread_zero(observe_root, I64{136})
+    sync_store(observe_root + I64{8}, I64{2})
+    sync_store(observe_root + I64{16}, I64{1})
+    sync_store(observe_root + I64{80}, I64{1})
+    observe_task_key = jet_rt_tls_key_new(I64{0})
+}
+
+fn observe_current_task() -> I64 {
+    current :: jet_rt_tls_get(observe_task_key)
+    if (current == I64{0}) -> I64{1} else -> current
+}
+
+fn observe_task_find(id: I64) -> I64 {
+    node := sync_load(observe_root + I64{24})
+    loop node != (I64{0}) {
+        if (sync_load(node + I64{8}) == id) -> return node
+        node = sync_load(node)
+    }
+    I64{0}
+}
+
+fn observe_channel_find(id: I64) -> I64 {
+    node := sync_load(observe_root + I64{40})
+    loop node != (I64{0}) {
+        if (sync_load(node + I64{8}) == id) -> return node
+        node = sync_load(node)
+    }
+    I64{0}
+}
+
+fn observe_decimal_unsigned(builder: I64, word: I64) {
+    quotient := I64{0}
+    remainder := I64{0}
+    if (word < I64{0}) {
+        low :: word.bit_and(I64{9223372036854775807})
+        quotient = low /% I64{10} + I64{922337203685477580}
+        remainder = low % I64{10} + I64{8}
+        if (remainder >= I64{10}) {
+            quotient += I64{1}
+            remainder -= I64{10}
+        }
+    } else {
+        quotient = word /% I64{10}
+        remainder = word % I64{10}
+    }
+    if (quotient != I64{0}) -> observe_decimal_unsigned(builder, quotient)
+    rt_text_push_scalar(builder, I64{48} + remainder)
+}
+
+fn observe_decimal_signed(builder: I64, word: I64) {
+    if (word < I64{0}) {
+        rt_text_push_scalar(builder, I64{45})
+        observe_decimal_unsigned(builder, wrapping(I64{0} - word))
+    } else {
+        observe_decimal_unsigned(builder, word)
+    }
+}
+
+// Rust chars().take(160), including multibyte scalars, not a byte truncation.
+fn observe_bounded(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    at := I64{0}
+    scalars := I64{0}
+    loop at < length && scalars < (I64{160}) {
+        at += rt_text_width(data + at)
+        scalars += I64{1}
+    }
+    rt_text_copy(data, at)
+}
+
+fn observe_nonblank(value: I64) -> Bool {
+    if (value == I64{0}) -> return false
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    at := I64{0}
+    loop at < length {
+        if !unicode_is_white_space(rt_text_decode(data + at)) -> return true
+        at += rt_text_width(data + at)
+    }
+    false
+}
+
+// Observe's existing escape contract: quote/slash escaped, all Unicode Cc
+// controls replaced by space, and at most 160 input scalars are rendered.
+fn observe_escape(builder: I64, value: I64) {
+    if (value == I64{0}) -> return
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    at := I64{0}
+    scalars := I64{0}
+    loop at < length && scalars < (I64{160}) {
+        cp :: rt_text_decode(data + at)
+        if {
+            (cp == I64{34} || cp == I64{92}) -> {
+                rt_text_push_scalar(builder, I64{92})
+                rt_text_push_scalar(builder, cp)
+            }
+            (cp < I64{32} || (cp >= I64{127} && cp <= I64{159})) -> rt_text_push_scalar(builder, I64{32})
+            else -> rt_text_push_scalar(builder, cp)
+        }
+        at += rt_text_width(data + at)
+        scalars += I64{1}
+    }
+}
+
+fn observe_task_node_drop(node: I64) {
+    label :: sync_load(node + I64{32})
+    wait :: sync_load(node + I64{48})
+    if (label != I64{0}) -> jet_rt_string_drop(label)
+    if (wait != I64{0}) -> jet_rt_string_drop(wait)
+    scheduler_control_drop(sync_load(node + I64{80}))
+    jet_rt_free(node, I64{88}, I64{8})
+}
+
+#Export(c) fn jet_rt_observe_task_register(control: I64, site: I64, label: I64) -> I64 {
+    parent :: observe_current_task()
+    id :: sync_add(observe_root + I64{8}, I64{1})
+    sync_mutex_lock(observe_root)
+    if (sync_load(observe_root + I64{32}) >= I64{4096}) {
+        sync_mutex_unlock(observe_root)
+        return I64{0}
+    }
+    text := I64{0}
+    if observe_nonblank(label) {
+        text = observe_bounded(label)
+    } else {
+        text = jet_rt_string_builder_new()
+        observe_msg_task_label(text)
+        observe_decimal_unsigned(text, site)
+    }
+    node :: jet_rt_alloc(I64{88}, I64{8})
+    thread_zero(node, I64{88})
+    scheduler_control_retain(control)
+    sync_store(node, sync_load(observe_root + I64{24}))
+    sync_store(node + I64{8}, id)
+    sync_store(node + I64{16}, parent)
+    sync_store(node + I64{24}, site)
+    sync_store(node + I64{32}, text)
+    sync_store(node + I64{80}, control)
+    sync_store(observe_root + I64{24}, node)
+    _ := sync_add(observe_root + I64{32}, I64{1})
+    sync_mutex_unlock(observe_root)
+    id
+}
+
+#Export(c) fn jet_rt_observe_task_enter(id: I64) {
+    if (id == I64{0}) -> return
+    jet_rt_tls_set(observe_task_key, id)
+    sync_mutex_lock(observe_root)
+    node :: observe_task_find(id)
+    if (node != I64{0}) -> sync_store(node + I64{40}, I64{1})
+    sync_mutex_unlock(observe_root)
+}
+
+#Export(c) fn jet_rt_observe_task_finish(id: I64) {
+    if (id == I64{0}) -> return
+    sync_mutex_lock(observe_root)
+    link := observe_root + I64{24}
+    node := sync_load(link)
+    loop node != (I64{0}) {
+        if (sync_load(node + I64{8}) == id) {
+            sync_store(link, sync_load(node))
+            _ := sync_add(observe_root + I64{32}, I64{-1})
+            sync_mutex_unlock(observe_root)
+            // Final control cleanup can reenter the registry; never drop it
+            // while the registry mutex is held.
+            observe_task_node_drop(node)
+            return
+        }
+        link = node
+        node = sync_load(node)
+    }
+    sync_mutex_unlock(observe_root)
+}
+
+#Export(c) fn jet_rt_observe_task_control(id: I64, state: I64, cancelled: I64) {
+    sync_mutex_lock(observe_root)
+    node :: observe_task_find(id)
+    if (node != I64{0}) {
+        if (state == I64{1} || state == I64{3}) -> sync_store(node + I64{40}, state)
+        if (cancelled >= I64{0}) -> sync_store(node + I64{72}, if (cancelled != I64{0}) -> I64{1} else -> I64{0})
+    }
+    sync_mutex_unlock(observe_root)
+}
+
+#Export(c) fn jet_rt_observe_task_wait(state: I64, wait: I64, present: I64, remaining: I64) {
+    if (state < I64{0} || state > I64{3}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
+    }
+    sync_mutex_lock(observe_root)
+    node :: observe_task_find(observe_current_task())
+    old := I64{0}
+    if (node != I64{0}) {
+        old = sync_load(node + I64{48})
+        sync_store(node + I64{40}, state)
+        sync_store(node + I64{48}, observe_bounded(wait))
+        sync_store(node + I64{56}, if (present != I64{0}) -> I64{1} else -> I64{0})
+        sync_store(node + I64{64}, remaining)
+    }
+    sync_mutex_unlock(observe_root)
+    if (old != I64{0}) -> jet_rt_string_drop(old)
+}
+
+#Export(c) fn jet_rt_observe_task_identity(id: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    sync_mutex_lock(observe_root)
+    node :: observe_task_find(id)
+    if {
+        (node == I64{0}) -> {
+            observe_msg_task_fallback(text)
+            observe_decimal_unsigned(text, id)
+        }
+        else -> {
+            observe_escape(text, sync_load(node + I64{32}))
+            observe_msg_site(text)
+            observe_decimal_unsigned(text, sync_load(node + I64{24}))
+            observe_msg_close_site(text)
+        }
+    }
+    sync_mutex_unlock(observe_root)
+    text
+}
+
+#Export(c) fn jet_rt_observe_has_parked_tasks() -> Bool {
+    sync_mutex_lock(observe_root)
+    node := sync_load(observe_root + I64{24})
+    loop node != (I64{0}) {
+        if (sync_load(node + I64{40}) == I64{2}) {
+            sync_mutex_unlock(observe_root)
+            return true
+        }
+        node = sync_load(node)
+    }
+    sync_mutex_unlock(observe_root)
+    false
+}
+
+// IDs are usize in the reference; comparing their signed storage would put
+// high-bit IDs before low IDs. Heap-sort the borrowed pointers under the lock.
+fn observe_task_later(left: I64, right: I64) -> Bool {
+    a :: sync_load(left + I64{8})
+    b :: sync_load(right + I64{8})
+    if (a < I64{0}) != (b < I64{0}) -> return a < I64{0}
+    a > b
+}
+
+fn observe_task_sift(array: I64, count: I64, root: I64) {
+    at := root
+    loop at < count /% (I64{2}) {
+        child := at * I64{2} + I64{1}
+        if child + (I64{1}) < count && observe_task_later(sync_load(array + (child + I64{1}) * I64{8}), sync_load(array + child * I64{8})) -> child += I64{1}
+        value :: sync_load(array + at * I64{8})
+        other :: sync_load(array + child * I64{8})
+        if !observe_task_later(other, value) -> return
+        sync_store(array + at * I64{8}, other)
+        sync_store(array + child * I64{8}, value)
+        at = child
+    }
+}
+
+fn observe_parked_details(details: I64) -> I64 {
+    sync_mutex_lock(observe_root)
+    count := I64{0}
+    node := sync_load(observe_root + I64{24})
+    loop node != (I64{0}) {
+        if sync_load(node + I64{40}) == (I64{2}) -> count += I64{1}
+        node = sync_load(node)
+    }
+    if count == (I64{0}) {
+        sync_mutex_unlock(observe_root)
+        return I64{0}
+    }
+    array :: jet_rt_alloc(count * I64{8}, I64{8})
+    at := I64{0}
+    node = sync_load(observe_root + I64{24})
+    loop node != (I64{0}) {
+        if sync_load(node + I64{40}) == (I64{2}) {
+            sync_store(array + at * I64{8}, node)
+            at += I64{1}
+        }
+        node = sync_load(node)
+    }
+    at = count /% I64{2}
+    loop at > (I64{0}) {
+        at -= I64{1}
+        observe_task_sift(array, count, at)
+    }
+    at = count
+    loop at > (I64{1}) {
+        at -= I64{1}
+        first :: sync_load(array)
+        sync_store(array, sync_load(array + at * I64{8}))
+        sync_store(array + at * I64{8}, first)
+        observe_task_sift(array, at, I64{0})
+    }
+    entry :: jet_rt_string_builder_new()
+    omitted := I64{0}
+    at = I64{0}
+    loop at < count {
+        node = sync_load(array + at * I64{8})
+        // Reuse the owned entry allocation; the bounded exit path does not
+        // clone task strings or allocate a fresh entry for each parked task.
+        rt_text_store(entry + I64{8}, I64{0})
+        observe_msg_entry(entry)
+        observe_escape(entry, sync_load(node + I64{32}))
+        observe_msg_report_site(entry)
+        observe_decimal_unsigned(entry, sync_load(node + I64{24}))
+        observe_msg_report_state(entry)
+        observe_msg_blocked(entry)
+        observe_msg_report_wait(entry)
+        wait :: sync_load(node + I64{48})
+        if wait == (I64{0}) || rt_text_len(wait) == (I64{0}) -> observe_msg_unknown(entry) else -> observe_escape(entry, wait)
+        if {
+            rt_text_len(details) + rt_text_len(entry) > (I64{65408}) -> omitted += I64{1}
+            else -> rt_text_append(details, rt_text_data(entry), rt_text_len(entry))
+        }
+        at += I64{1}
+    }
+    sync_mutex_unlock(observe_root)
+    jet_rt_free(array, count * I64{8}, I64{8})
+    jet_rt_string_drop(entry)
+    if omitted != (I64{0}) {
+        observe_msg_omitted_head(details)
+        observe_decimal_unsigned(details, omitted)
+        observe_msg_omitted_tail(details)
+    }
+    count
+}
+
+fn observe_has_live_child() -> Bool {
+    sync_mutex_lock(observe_root)
+    node := sync_load(observe_root + I64{24})
+    loop node != (I64{0}) {
+        if sync_load(node + I64{8}) != (I64{1}) {
+            sync_mutex_unlock(observe_root)
+            return true
+        }
+        node = sync_load(node)
+    }
+    sync_mutex_unlock(observe_root)
+    false
+}
+
+fn observe_cancel_live_tasks() {
+    sync_mutex_lock(observe_root)
+    capacity :: sync_load(observe_root + I64{32})
+    if capacity == (I64{0}) {
+        sync_mutex_unlock(observe_root)
+        return
+    }
+    controls :: jet_rt_alloc(capacity * I64{8}, I64{8})
+    count := I64{0}
+    node := sync_load(observe_root + I64{24})
+    loop node != (I64{0}) {
+        control :: sync_load(node + I64{80})
+        if sync_load(node + I64{8}) != (I64{1}) && control != (I64{0}) {
+            scheduler_control_retain(control)
+            sync_store(controls + count * I64{8}, control)
+            count += I64{1}
+        }
+        node = sync_load(node)
+    }
+    sync_mutex_unlock(observe_root)
+    at := I64{0}
+    loop at < count {
+        control :: sync_load(controls + at * I64{8})
+        // Cancellation reenters Observe, so never call it with the lock held.
+        scheduler_control_cancel(control)
+        scheduler_control_drop(control)
+        at += I64{1}
+    }
+    jet_rt_free(controls, capacity * I64{8}, I64{8})
+}
+
+// Presence0 leaves both distinct writable eight-byte outputs uninitialized.
+// Presence1 transfers one E4 String owner and the registered stop status70.
+#Export(c) fn jet_rt_observe_parked_tasks_report(rendered_out: I64, exit_code_out: I64) -> I64 {
+    if observe_root == (I64{0}) -> return I64{0}
+    if sync_swap(observe_root + I64{64}, I64{1}) != (I64{0}) -> return I64{0}
+    observe_publish_exit()
+    details :: jet_rt_string_builder_new()
+    count := observe_parked_details(details)
+    attempt := I64{0}
+    loop count == (I64{0}) && attempt < (I64{25}) {
+        if !observe_has_live_child() {
+            jet_rt_string_drop(details)
+            return I64{0}
+        }
+        // OS observation delay, not a scheduler wait: it must not alter the
+        // exiting task's wait state or deliver its pending cancellation.
+        _ := sync_wait(observe_root + I64{64}, I64{1}, sync_deadline(I64{1000000}))
+        count = observe_parked_details(details)
+        attempt += I64{1}
+    }
+    observe_cancel_live_tasks()
+    if count == (I64{0}) {
+        jet_rt_string_drop(details)
+        return I64{0}
+    }
+    report :: jet_rt_string_builder_new()
+    observe_msg_report_head(report)
+    rt_text_append(report, rt_text_data(details), rt_text_len(details))
+    observe_msg_report_tail(report)
+    jet_rt_string_drop(details)
+    sync_store(rendered_out, report)
+    sync_store(exit_code_out, I64{70})
+    I64{1}
+}
+
+#Export(c) fn jet_rt_observe_pool(workers: I64, queued_delta: I64) {
+    if (workers >= I64{0}) -> sync_store(observe_root + I64{48}, workers)
+    if (queued_delta != I64{0}) -> _ := sync_add(observe_root + I64{56}, queued_delta)
+}
+
+#Export(c) fn jet_rt_observe_channel_new(bounded: I64, capacity: I64) -> I64 {
+    id :: sync_add(observe_root + I64{16}, I64{1})
+    node :: jet_rt_alloc(I64{64}, I64{8})
+    thread_zero(node, I64{64})
+    sync_store(node + I64{8}, id)
+    sync_store(node + I64{24}, if (bounded != I64{0}) -> I64{1} else -> I64{0})
+    sync_store(node + I64{32}, capacity)
+    sync_mutex_lock(observe_root)
+    sync_store(node, sync_load(observe_root + I64{40}))
+    sync_store(observe_root + I64{40}, node)
+    sync_mutex_unlock(observe_root)
+    id
+}
+
+#Export(c) fn jet_rt_observe_channel_update(id: I64, depth: I64, send_waiters: I64, recv_waiters: I64, closed: I64) {
+    sync_mutex_lock(observe_root)
+    node :: observe_channel_find(id)
+    if (node != I64{0}) {
+        sync_store(node + I64{16}, depth)
+        sync_store(node + I64{40}, send_waiters)
+        sync_store(node + I64{48}, recv_waiters)
+        sync_store(node + I64{56}, if (closed != I64{0}) -> I64{1} else -> I64{0})
+    }
+    sync_mutex_unlock(observe_root)
+}
+
+#Export(c) fn jet_rt_observe_channel_drop(id: I64) {
+    sync_mutex_lock(observe_root)
+    link := observe_root + I64{40}
+    node := sync_load(link)
+    loop node != (I64{0}) {
+        if (sync_load(node + I64{8}) == id) {
+            sync_store(link, sync_load(node))
+            sync_mutex_unlock(observe_root)
+            jet_rt_free(node, I64{64}, I64{8})
+            return
+        }
+        link = node
+        node = sync_load(node)
+    }
+    sync_mutex_unlock(observe_root)
+}

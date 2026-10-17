@@ -1,0 +1,19 @@
+# Port of env_dev_trust.rs:530-567; original source and predicates retained.
+# PENDING-GRAMMAR: capture/write are TestW3b batch-two keys.
+fixture: fixtures/dev-with-package
+mkdir: root
+mkdir: home
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack hangar ingest {work}/fastfetch --name fastfetch --json
+exit: 0
+capture: digest stdout doc $.output_hash
+step: jetpack hangar verify {cap:digest} --json
+exit: 0
+write: fixtures/nixpkgs-fastfetch.json nixpkgs-fastfetch.template
+step: jetpack config trust add "{work}*" --no-color
+exit: 0
+step: jetpack dev --no-color --offline
+exit: 0
+stdout: ~ DEV-RAN

@@ -1,0 +1,11 @@
+# Port of tests/build_entry.rs:3147-3172; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/module_directory_entry_requires_run_jet_not_main_jet
+step: jet build run.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0603"] #>= 1
+json: machine doc $.reports[?code="E0603"][0].what = "can't find a module named `tool`"
+json: machine doc $.reports[?code="E0603"][0].why = "search from the project root for `tool.jet`, or `tool/tool/tool.jet` / `run.jet`"
+json: machine doc $.reports[?code="E0603"][0].fix = "add `tool.jet` under this project, or fix the `use` name"
+json: machine doc $.reports[?code="E0603"][0].why ~ "run.jet" # original contains
+json: machine doc $.reports[?code="E0603"][0].why !~ "main.jet" # original negation

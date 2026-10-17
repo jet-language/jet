@@ -1,0 +1,53 @@
+// tests/fixtures/crypto_bridge_entropy.rs:393-415. PORT+PENDING-SEAM(runtime-crypto-internals). Runtime UNRUN.
+// CryptoError payloads retire under D-CRYPTO-ERRFAM1=A; public tag mappings cite Core at assertion sites.
+use core.crypto as crypto
+use core.crypto.expert as expert
+use core.files as files
+fn filled(value: Int, count: Int) -> [U8] {
+    out := [U8]{}
+    loop _ in 0..<count -> &out.push((U8{value}))
+    out
+}
+fn cut(bytes: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    loop i in start..<end -> &out.push(bytes[i])
+    out
+}
+fn hex(text: String) -> [U8] {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop i in 0..<(raw.len() /% 2) {
+        a :: Int.from_u8(raw[2 * i])
+        b :: Int.from_u8(raw[2 * i + 1])
+        high :: if a <= 57 -> a - 48 else -> a - 87
+        low :: if b <= 57 -> b - 48 else -> b - 87
+        &out.push((U8{high * 16 + low}))
+    }
+    out
+}
+fn little(bytes: [U8], at: Int, width: Int) -> Int {
+    out := 0
+    loop i in 0..<width -> out = out | (Int.from_u8(bytes[at + i]) << (8 * i))
+    out
+}
+fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
+    loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)) & 255})
+}
+#Test("typed_recipient_envelopes_are_canonical_and_fail_closed") {
+    alice :: crypto.X25519SecretKey.new_random() ?? panic("alice")
+    bob :: crypto.X25519SecretKey.new_random() ?? panic("bob")
+    wrong :: crypto.X25519SecretKey.new_random() ?? panic("wrong")
+    plain :: "purpose-bound payload".bytes()
+    aad :: "tenant-7".bytes()
+    sealed :: crypto.seal([bob.public_key(), alice.public_key()], plain, aad) ?? panic("seal")
+    bytes :: crypto.sealed_bytes(sealed)
+    assert_eq(cut(bytes, 0, 4), "JETV".bytes())
+    assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, aad) ?? panic("open"), plain)
+    // Core/crypto/crypto.jet447,477 public tag OpenFailed.
+    assert_eq(crypto.open(wrong, crypto.Sealed{bytes: bytes.copy()}, aad), Err(crypto.CryptoError.OpenFailed))
+    assert_eq(crypto.open(alice, crypto.Sealed{bytes: bytes.copy()}, "wrong".bytes()), Err(crypto.CryptoError.OpenFailed))
+    tampered := bytes.copy()
+    last :: tampered.len() - 1
+    tampered[last] = (U8{Int.from_u8(tampered[last]) ~| 1})
+    assert_eq(crypto.open(alice, crypto.Sealed{bytes: tampered}, aad), Err(crypto.CryptoError.OpenFailed))
+}

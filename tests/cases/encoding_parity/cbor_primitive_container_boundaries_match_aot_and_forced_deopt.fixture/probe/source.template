@@ -1,0 +1,55 @@
+
+use core.encoding.cbor as cbor
+use core.text as text
+
+#CodableAsBase
+Severity :: distinct Int(0..10)
+
+fn invalid_i8_rejected() -[]> Bool {
+    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return false ! _error -> return true
+}
+
+fn invalid_u32_rejected() -[]> Bool {
+    cbor.decode<U32>([U8]{ 0x20 }) ? _value -> return false ! _error -> return true
+}
+
+fn invalid_f32_rejected() -[]> Bool {
+    cbor.decode<F32>([U8]{ 0xfb, 0x7f, 0xef, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff }) ? _value -> return false ! _error -> return true
+}
+
+fn invalid_fixed_rejected() -[]> Bool {
+    cbor.decode<[Int#2]>([U8]{ 0x81, 0x01 }) ? _value -> return false ! _error -> return true
+}
+
+fn invalid_range_rejected() -[]> Bool {
+    cbor.decode<Severity>([U8]{ 0x0b }) ? _value -> return false ! _error -> return true
+}
+
+fn invalid_i8_error() -[]> String {
+    cbor.decode<I8>([U8]{ 0x18, 0x80 }) ? _value -> return "accepted" ! error -> return error[0].reason
+}
+
+fn invalid_u8_error() -[]> String {
+    cbor.decode<U8>([U8]{ 0x19, 0x01, 0x00 }) ? _value -> return "accepted" ! error -> return error[0].reason
+}
+
+fn invalid_fixed_bytes_error() -[]> String {
+    cbor.decode<[U8#2]>([U8]{ 0x41, 0xde }) ? _value -> return "accepted" ! error -> return error[0].reason
+}
+
+fn forced_deopt() -[]> String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    signed := cbor.decode<I8>((cbor.to_bytes_canonical(I8{ -8 }) ?? panic("i8 encode")).copy()) ?? panic("i8 decode")
+    unsigned := cbor.decode<U32>((cbor.to_bytes_canonical(U32{ 4000000000 }) ?? panic("u32 encode")).copy()) ?? panic("u32 decode")
+    narrow := cbor.decode<F32>((cbor.to_bytes_canonical(F32{ 1.5 }) ?? panic("f32 encode")).copy()) ?? panic("f32 decode")
+    pair := cbor.decode<[Int#2]>((cbor.to_bytes_canonical([Int#2]{ 1, 2 }) ?? panic("fixed encode")).copy()) ?? panic("fixed decode")
+    bytes := cbor.decode<[U8#2]>((cbor.to_bytes_canonical([U8#2]{ 222, 173 }) ?? panic("bytes encode")).copy()) ?? panic("bytes decode")
+    tree := cbor.decode<Dyn>((cbor.to_bytes_canonical(Dyn.Object(["n": Dyn.Int(7)])) ?? panic("tree encode")).copy()) ?? panic("tree decode")
+    severity := cbor.decode<Severity>((cbor.to_bytes_canonical(Severity.from_int(7)) ?? panic("range encode")).copy()) ?? panic("range decode")
+    tree_n := (&tree.field("n") ?? panic("tree field")).int() ?? panic("tree int")
+    return "{signed}|{unsigned}|{narrow}|{pair[0]},{pair[1]}|{bytes[0]},{bytes[1]}|{tree_n}|{severity.raw()}|{invalid_i8_rejected()}|{invalid_u32_rejected()}|{invalid_f32_rejected()}|{invalid_fixed_rejected()}|{invalid_range_rejected()}|{invalid_i8_error()}|{invalid_u8_error()}|{invalid_fixed_bytes_error()}"
+}
+
+fn run() {
+    print(forced_deopt())
+}

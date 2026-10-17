@@ -1,0 +1,249 @@
+// age v1 Bech32 (NOT Bech32m) keys and canonical unpadded RFC4648 base64.
+// Internal byte spans; callers supply exact output capacity. Encoding uses no
+// secret-indexed alphabet access or secret-dependent branch. Parser checks
+// encoding syntax, lengths and trailing bits before a protocol uses a key.
+fn rt_age_equal_mask(a: I64, b: I64) -> I64 {
+    d :: a.bit_xor(b)
+    ((d.bit_or((I64{0} - d))) >> I64{63}).bit_xor(I64{-1})
+}
+fn rt_age_b64_char(v: I64) -> I64 {
+    a :: (v - I64{26}) >> I64{63}
+    b :: ((v - I64{52}) >> I64{63}).bit_and((a.bit_xor(I64{-1})))
+    c :: ((v - I64{62}) >> I64{63}).bit_and((((v - I64{52}) >> I64{63}).bit_xor(I64{-1})))
+    ((v + I64{65}).bit_and(a)).bit_or(((v + I64{71}).bit_and(b))).bit_or(((v - I64{4}).bit_and(c))).bit_or((I64{43}.bit_and(rt_age_equal_mask(v, I64{62})))).bit_or((I64{47}.bit_and(rt_age_equal_mask(v, I64{63}))))
+}
+fn rt_age_b64_value(c: I64) -> I64 {
+    if (c >= I64{65} && c <= I64{90}) -> return c - I64{65}
+    if (c >= I64{97} && c <= I64{122}) -> return c - I64{71}
+    if (c >= I64{48} && c <= I64{57}) -> return c + I64{4}
+    if (c == I64{43}) -> return I64{62}
+    if (c == I64{47}) -> return I64{63}
+    I64{-1}
+}
+fn rt_age_b64_encode(input: I64, length: I64, output: I64) -> I64 {
+    acc := I64{0}
+    bits := I64{0}
+    at := I64{0}
+    i := I64{0}
+    loop i < length {
+        acc = ((acc << I64{8}).bit_or(rt_text_byte(input + i))).bit_and(I64{65535})
+        bits += I64{8}
+        loop {
+            if (bits < I64{6}) -> break
+            bits -= I64{6}
+            rt_text_put(output + at, rt_age_b64_char((acc >> bits).bit_and(I64{63})))
+            at += I64{1}
+        }
+        i += I64{1}
+    }
+    if (bits > I64{0}) {
+        rt_text_put(output + at, rt_age_b64_char((acc << (I64{6} - bits)).bit_and(I64{63})))
+        at += I64{1}
+    }
+    at
+}
+// Return byte count or -1; no padding accepted, unused low bits MUST be zero.
+fn rt_age_b64_decode(input: I64, length: I64, output: I64, capacity: I64) -> I64 {
+    if (length < I64{0} || length % I64{4} == I64{1}) -> return I64{-1}
+    acc := I64{0}
+    bits := I64{0}
+    at := I64{0}
+    i := I64{0}
+    loop i < length {
+        v :: rt_age_b64_value(rt_text_byte(input + i))
+        if (v < I64{0}) -> return I64{-1}
+        acc = ((acc << I64{6}).bit_or(v)).bit_and(I64{65535})
+        bits += I64{6}
+        if (bits >= I64{8}) {
+            bits -= I64{8}
+            if (at >= capacity) -> return I64{-1}
+            rt_text_put(output + at, (acc >> bits).bit_and(I64{255}))
+            at += I64{1}
+        }
+        i += I64{1}
+    }
+    if ((acc.bit_and(((I64{1} << bits) - I64{1}))) != I64{0}) -> return I64{-1}
+    at
+}
+fn rt_age_bech_char_public(i: I64) -> I64 {
+    if {
+        (i == I64{0}) -> I64{113}
+        (i == I64{1}) -> I64{112}
+        (i == I64{2}) -> I64{122}
+        (i == I64{3}) -> I64{114}
+        (i == I64{4}) -> I64{121}
+        (i == I64{5}) -> I64{57}
+        (i == I64{6}) -> I64{120}
+        (i == I64{7}) -> I64{56}
+        (i == I64{8}) -> I64{103}
+        (i == I64{9}) -> I64{102}
+        (i == I64{10}) -> I64{50}
+        (i == I64{11}) -> I64{116}
+        (i == I64{12}) -> I64{118}
+        (i == I64{13}) -> I64{100}
+        (i == I64{14}) -> I64{119}
+        (i == I64{15}) -> I64{48}
+        (i == I64{16}) -> I64{115}
+        (i == I64{17}) -> I64{51}
+        (i == I64{18}) -> I64{106}
+        (i == I64{19}) -> I64{110}
+        (i == I64{20}) -> I64{53}
+        (i == I64{21}) -> I64{52}
+        (i == I64{22}) -> I64{107}
+        (i == I64{23}) -> I64{104}
+        (i == I64{24}) -> I64{99}
+        (i == I64{25}) -> I64{101}
+        (i == I64{26}) -> I64{54}
+        (i == I64{27}) -> I64{109}
+        (i == I64{28}) -> I64{117}
+        (i == I64{29}) -> I64{97}
+        (i == I64{30}) -> I64{55}
+        else -> I64{108}
+    }
+}
+fn rt_age_bech_char(value: I64) -> I64 {
+    selected := I64{0}
+    i := I64{0}
+    loop {
+        if (i >= I64{32}) -> break
+        selected = selected.bit_or((rt_age_bech_char_public(i).bit_and(rt_age_equal_mask(value, i))))
+        i += I64{1}
+    }
+    selected
+}
+fn rt_age_bech_value(character: I64) -> I64 {
+    i := I64{0}
+    loop {
+        if (i >= I64{32}) -> return I64{-1}
+        if (character == rt_age_bech_char_public(i)) -> return i
+        i += I64{1}
+    }
+}
+fn rt_age_hrp(i: I64) -> I64 {
+    if {
+        (i == I64{0}) -> I64{97}
+        (i == I64{1}) -> I64{103}
+        (i == I64{2}) -> I64{101}
+        (i == I64{4}) -> I64{115}
+        (i == I64{5} || i == I64{8} || i == I64{12}) -> I64{101}
+        (i == I64{6}) -> I64{99}
+        (i == I64{7}) -> I64{114}
+        (i == I64{9}) -> I64{116}
+        (i == I64{11}) -> I64{107}
+        (i == I64{13}) -> I64{121}
+        else -> I64{45}
+    }
+}
+fn rt_age_polymod(chk: I64, value: I64) -> I64 {
+    top :: chk >> I64{25}
+    next := ((chk.bit_and(I64{0x1ffffff})) << I64{5}).bit_xor(value)
+    next = next.bit_xor(I64{0x3b6a57b2}.bit_and((I64{0} - (top.bit_and(I64{1})))))
+    next = next.bit_xor(I64{0x26508e6d}.bit_and((I64{0} - ((top >> I64{1}).bit_and(I64{1})))))
+    next = next.bit_xor(I64{0x1ea119fa}.bit_and((I64{0} - ((top >> I64{2}).bit_and(I64{1})))))
+    next = next.bit_xor(I64{0x3d4233dd}.bit_and((I64{0} - ((top >> I64{3}).bit_and(I64{1})))))
+    next.bit_xor(I64{0x2a1462b3}.bit_and((I64{0} - ((top >> I64{4}).bit_and(I64{1})))))
+}
+fn rt_age_hrp_checksum(hrp_len: I64) -> I64 {
+    chk := I64{1}
+    i := I64{0}
+    loop i < hrp_len {
+        chk = rt_age_polymod(chk, rt_age_hrp(i) >> I64{5})
+        i += I64{1}
+    }
+    chk = rt_age_polymod(chk, I64{0})
+    i = I64{0}
+    loop i < hrp_len {
+        chk = rt_age_polymod(chk, rt_age_hrp(i).bit_and(I64{31}))
+        i += I64{1}
+    }
+    chk
+}
+fn rt_age_key_encode(key: I64, identity: Bool, output: I64) -> I64 {
+    hrp_len :: if identity -> I64{15} else -> I64{3}
+    i := I64{0}
+    loop i < hrp_len {
+        c :: rt_age_hrp(i)
+        rt_text_put(output + i, if identity -> c - (I64{32}.bit_and((((c - I64{97}) >> I64{63}).bit_xor(I64{-1})))) else -> c)
+        i += I64{1}
+    }
+    rt_text_put(output + hrp_len, I64{49})
+    chk := rt_age_hrp_checksum(hrp_len)
+    group := I64{0}
+    loop {
+        if (group >= I64{52}) -> break
+        v := I64{0}
+        j := I64{0}
+        loop {
+            if (j >= I64{5}) -> break
+            bit :: group * I64{5} + j
+            v = v << I64{1}
+            if (bit < I64{256}) -> v = v.bit_or(((rt_text_byte(key + bit / I64{8}) >> (I64{7} - bit % I64{8})).bit_and(I64{1})))
+            j += I64{1}
+        }
+        c :: rt_age_bech_char(v)
+        rt_text_put(output + hrp_len + I64{1} + group, if identity -> c - (I64{32}.bit_and((((c - I64{97}) >> I64{63}).bit_xor(I64{-1})))) else -> c)
+        chk = rt_age_polymod(chk, v)
+        group += I64{1}
+    }
+    i = I64{0}
+    loop {
+        if (i >= I64{6}) -> break
+        chk = rt_age_polymod(chk, I64{0})
+        i += I64{1}
+    }
+    chk = chk.bit_xor(I64{1})
+    i = I64{0}
+    loop {
+        if (i >= I64{6}) -> break
+        c :: rt_age_bech_char((chk >> (I64{25} - i * I64{5})).bit_and(I64{31}))
+        rt_text_put(output + hrp_len + I64{53} + i, if identity -> c - (I64{32}.bit_and((((c - I64{97}) >> I64{63}).bit_xor(I64{-1})))) else -> c)
+        i += I64{1}
+    }
+    hrp_len + I64{59}
+}
+fn rt_age_key_decode(input: I64, length: I64, identity: Bool, output: I64) -> Bool {
+    hrp_len :: if identity -> I64{15} else -> I64{3}
+    if (length != hrp_len + I64{59}) -> return false
+    lower := false
+    upper := false
+    i := I64{0}
+    loop i < length {
+        c :: rt_text_byte(input + i)
+        if (c >= I64{65} && c <= I64{90}) -> upper = true
+        if (c >= I64{97} && c <= I64{122}) -> lower = true
+        i += I64{1}
+    }
+    if (upper && lower) -> return false
+    i = I64{0}
+    loop i < hrp_len {
+        c := rt_text_byte(input + i)
+        if (upper && c >= I64{65} && c <= I64{90}) -> c += I64{32}
+        if (c != rt_age_hrp(i)) -> return false
+        i += I64{1}
+    }
+    if (rt_text_byte(input + hrp_len) != I64{49}) -> return false
+    chk := rt_age_hrp_checksum(hrp_len)
+    acc := I64{0}
+    bits := I64{0}
+    at := I64{0}
+    i = I64{0}
+    loop {
+        if (i >= I64{58}) -> break
+        c := rt_text_byte(input + hrp_len + I64{1} + i)
+        if (upper && c >= I64{65} && c <= I64{90}) -> c += I64{32}
+        v :: rt_age_bech_value(c)
+        if (v < I64{0}) -> return false
+        chk = rt_age_polymod(chk, v)
+        if (i < I64{52}) {
+            acc = ((acc << I64{5}).bit_or(v)).bit_and(I64{65535})
+            bits += I64{5}
+            if (bits >= I64{8}) {
+                bits -= I64{8}
+                rt_text_put(output + at, (acc >> bits).bit_and(I64{255}))
+                at += I64{1}
+            }
+        }
+        i += I64{1}
+    }
+    chk == I64{1} && at == I64{32} && (acc.bit_and(I64{15})) == I64{0}
+}

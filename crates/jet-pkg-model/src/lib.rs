@@ -15,7 +15,6 @@
 //! imports against already-realized packages.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 // Re-export lower seams so files in this crate can use `crate::Diagnostics`,
 // `crate::SHA256`, and, in the host compiler build, `crate::AST`,

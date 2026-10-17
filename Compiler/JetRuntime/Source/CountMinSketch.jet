@@ -1,0 +1,74 @@
+// Native4112 shared CMS owner: refs0, mutex8, packed U32 rows16.
+// CR4 card #4828 D-SKETCH-CLONE1: preserve seed Arc<Mutex> sharing, NOT snapshots.
+// Sketch.rs:3-18,125-168; Core.rs:666-670. ONE lock for each row operation.
+fn cms_u32(address: I64) -> I64 {
+    rt_text_byte(address).bit_or((rt_text_byte(address + I64{1}) << I64{8})).bit_or((rt_text_byte(address + I64{2}) << I64{16})).bit_or((rt_text_byte(address + I64{3}) << I64{24}))
+}
+fn cms_put_u32(address: I64, value: I64) {
+    #Unsafe("caller holds this native CMS mutex and owns the initialized four-byte counter") {
+        os_store_u8(address, value.bit_and(I64{255}))
+        os_store_u8(address + I64{1}, (value >> I64{8}).bit_and(I64{255}))
+        os_store_u8(address + I64{2}, (value >> I64{16}).bit_and(I64{255}))
+        os_store_u8(address + I64{3}, (value >> I64{24}).bit_and(I64{255}))
+    }
+}
+fn cms_hash(text: I64, initial: I64) -> I64 {
+    hash := initial
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    loop at < length {
+        hash = wrapping((hash.bit_xor(rt_text_byte(data + at))) * I64{1099511628211})
+        at += I64{1}
+    }
+    hash
+}
+#Export(c) fn jet_count_min_sketch_new() -> I64 {
+    value :: jet_rt_alloc(CMS_BYTES, I64{8})
+    thread_zero(value, CMS_BYTES)
+    sync_store(value + CMS_REFS, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_count_min_sketch(value: I64) -> I64 {
+    _ := sync_add(value + CMS_REFS, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_drop_jet_count_min_sketch(value: I64) {
+    if (value == I64{0}) -> return
+    if (sync_add(value + CMS_REFS, I64{-1}) == I64{1}) -> jet_rt_free(value, CMS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_show_jet_count_min_sketch(_value: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    rt_text_push_word(text, I64{7955975379191426883}, I64{8})
+    rt_text_push_word(text, I64{114776363854675}, I64{6})
+    jet_rt_string_builder_finish(text)
+}
+#Export(c) fn jet_rt_native_cms_add(value: I64, text: I64) {
+    first :: cms_hash(text, I64{-3750763034362895579})
+    second :: cms_hash(text, I64{-3750763030626967020})
+    sync_mutex_lock(value + CMS_MUTEX)
+    row := I64{0}
+    loop row < CMS_ROWS {
+        column :: wrapping(first + wrapping(second * (row + I64{1}))).bit_and(I64{255})
+        address :: value + CMS_DATA + (row * CMS_COLUMNS + column) * CMS_COUNTER_BYTES
+        count :: cms_u32(address)
+        if (count < I64{4294967295}) -> cms_put_u32(address, count + I64{1})
+        row += I64{1}
+    }
+    sync_mutex_unlock(value + CMS_MUTEX)
+}
+#Export(c) fn jet_rt_native_cms_count(value: I64, text: I64) -> I64 {
+    first :: cms_hash(text, I64{-3750763034362895579})
+    second :: cms_hash(text, I64{-3750763030626967020})
+    sync_mutex_lock(value + CMS_MUTEX)
+    least := I64{4294967295}
+    row := I64{0}
+    loop row < CMS_ROWS {
+        column :: wrapping(first + wrapping(second * (row + I64{1}))).bit_and(I64{255})
+        count :: cms_u32(value + CMS_DATA + (row * CMS_COLUMNS + column) * CMS_COUNTER_BYTES)
+        if (count < least) -> least = count
+        row += I64{1}
+    }
+    sync_mutex_unlock(value + CMS_MUTEX)
+    jet_int_owned_from_i64(least)
+}

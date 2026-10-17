@@ -1,0 +1,43 @@
+# HAND-PORT tests/jetpack_engine.rs:3169-3227 unreadable_and_wrong_kind_outputs_leave_no_store_entry
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: unreadable_and_wrong_kind_outputs_leave_no_store_entry.fixture
+env: NO_COLOR=1
+requires: os:unix
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+mkdir: root/unreadable
+chmod: root/unreadable 000
+when !dir-readable root/unreadable: write: fixtures/nixpkgs-greet.json unreadable.template
+when !dir-readable root/unreadable: step: jetpack build greet@nixpkgs --no-color --offline
+when !dir-readable root/unreadable: exit: nonzero
+when !dir-readable root/unreadable: env: JETPACK_FIXTURES={work}/fixtures
+when !dir-readable root/unreadable: stderr: ~ "Error [E1315]:" # original contains predicate
+when !dir-readable root/unreadable: stderr: ~ "Permission denied" # original contains predicate
+when !dir-readable root/unreadable: when dir-readable root/hangar: entries: root/hangar name ^= "greet-" = 0
+when !dir-readable root/unreadable: when dir-readable root/hangar/closure-db/journal: entries: root/hangar/closure-db/journal ext = "txn" = 0
+when !dir-readable root/unreadable: when dir-readable root/hangar/objects: entries: root/hangar/objects = 0
+when !dir-readable root/unreadable: when dir-readable root/leases: entries: root/leases = 0
+when !dir-readable root/unreadable: when dir-readable root/hangar: entries: root/hangar recursive name = "nix-gc-root" = 0
+chmod: root/unreadable 700
+spawn peer: jet run {work}/socket-peer.jet
+await: file ready
+capture: socket = text file socket.path
+write: fixtures/nixpkgs-greet.json socket.template
+step: jetpack build greet@nixpkgs --no-color --offline
+env: JETPACK_FIXTURES={work}/fixtures
+exit: nonzero
+stderr: ~ "Error [E1315]:" # original contains predicate
+stderr: ~ "unsupported special file" # original contains predicate
+when dir-readable root/hangar: entries: root/hangar name ^= "greet-" = 0
+when dir-readable root/hangar/closure-db/journal: entries: root/hangar/closure-db/journal ext = "txn" = 0
+when dir-readable root/hangar/objects: entries: root/hangar/objects = 0
+when dir-readable root/leases: entries: root/leases = 0
+when dir-readable root/hangar: entries: root/hangar recursive name = "nix-gc-root" = 0
+write: stop stop.template
+wait: peer
+exit: 0
+step: jet run {work}/socket-peer.jet -- cleanup
+exit: 0
+

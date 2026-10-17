@@ -48,18 +48,18 @@ fn sema_cell_guard_report(what: String, span: Span, diagnostics: &[Diagnostic]) 
 
 fn sema_cell_guard_constructs_value(expr: Expr) -> Bool Never! {
     if expr == {
-        .ListLit(_, _) | .MapLit(_, _) | .TupleLit(_, _, _) | .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _) | .CallValue(_, _, _) | .StructLit(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _) | .Present(_, _) | .Ok(_, _) | .Err(_, _) -> true
+        .ListLit(_, _) | .MapLit(_, _) | .TupleLit(_, _, _) | .Call(_) | .MethodCall(_, _, _, _, _, _, _, _, _, _, _) | .CallValue(_, _, _) | .StructLit(_, _, _, _, _, _, _) | .EnumLit(_, _, _, _, _, _) | .Present(_, _) | .Ok(_, _) | .Err(_, _) -> true
         else -> false
     }
 }
 
 // Rust `infer`: an expression that builds a value whose type stores a guard.
-pub fn sema_cell_guard_check_construct(expr: Expr, ty: Type, diagnostics: &[Diagnostic]) {
+fn sema_cell_guard_check_construct(expr: Expr, ty: Type, diagnostics: &[Diagnostic]) {
     if !sema_cell_guard_constructs_value(expr) || !sema_cell_guard_storage_unsupported(ty) -> return
     sema_cell_guard_report("a Cell guard cannot be stored inside `{type_name(ty)}`", expr_span(expr), &diagnostics)
 }
 
 // Rust `check_lambda` captures: a lambda would carry the loan with it.
-pub fn sema_cell_guard_check_capture(name: String, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
+fn sema_cell_guard_check_capture(name: String, ty: Type, span: Span, diagnostics: &[Diagnostic]) {
     if sema_cell_guard_contained(ty) -> sema_cell_guard_report("Cell guard `{name}` cannot be captured by a lambda", span, &diagnostics)
 }

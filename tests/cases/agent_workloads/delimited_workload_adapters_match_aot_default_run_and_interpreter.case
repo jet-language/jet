@@ -1,0 +1,260 @@
+# HAND-PORT tests/agent_workloads.rs:2213-2278 delimited_workload_adapters_match_aot_default_run_and_interpreter
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original fixed five task/input pairs and3tiers; exact package/source/adapters/argv/env/deadline/output limit and all15 stdout/empty stderr predicates. Expected bytes copied from checked-in originals; no snapshots generated.
+fixture: delimited_workload_adapters_match_aot_default_run_and_interpreter.fixture
+env: NO_COLOR=1
+mkdir: browser-automation-preflight-aot
+copy: browser_automation_preflight.jet browser-automation-preflight-aot/browser_automation_preflight.jet
+copy: package.source browser-automation-preflight-aot/package.jet
+step browser_automation_preflight_aot: jet run --release browser_automation_preflight.jet -- {root}/tests/agent_workloads/inputs/browser/preflight.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=browser-automation-preflight
+cwd: browser-automation-preflight-aot
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.browser-automation-preflight.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: browser-automation-preflight-aot/package.jet
+remove: browser-automation-preflight-aot/browser_automation_preflight.jet
+remove: browser-automation-preflight-aot
+mkdir: browser-automation-preflight-default
+copy: browser_automation_preflight.jet browser-automation-preflight-default/browser_automation_preflight.jet
+copy: package.source browser-automation-preflight-default/package.jet
+step browser_automation_preflight_default: jet run browser_automation_preflight.jet -- {root}/tests/agent_workloads/inputs/browser/preflight.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=browser-automation-preflight
+cwd: browser-automation-preflight-default
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.browser-automation-preflight.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: browser-automation-preflight-default/package.jet
+remove: browser-automation-preflight-default/browser_automation_preflight.jet
+remove: browser-automation-preflight-default
+mkdir: browser-automation-preflight-interpret
+copy: browser_automation_preflight.jet browser-automation-preflight-interpret/browser_automation_preflight.jet
+copy: package.source browser-automation-preflight-interpret/package.jet
+step browser_automation_preflight_interpret: jet run --interpret browser_automation_preflight.jet -- {root}/tests/agent_workloads/inputs/browser/preflight.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=browser-automation-preflight
+cwd: browser-automation-preflight-interpret
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.browser-automation-preflight.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: browser-automation-preflight-interpret/package.jet
+remove: browser-automation-preflight-interpret/browser_automation_preflight.jet
+remove: browser-automation-preflight-interpret
+mkdir: database-access-aot
+copy: database_access.jet database-access-aot/database_access.jet
+copy: package.source database-access-aot/package.jet
+step database_access_aot: jet run --release database_access.jet -- {root}/tests/agent_workloads/inputs/database/records.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=database-access
+cwd: database-access-aot
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.database-access.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: database-access-aot/package.jet
+remove: database-access-aot/database_access.jet
+remove: database-access-aot
+mkdir: database-access-default
+copy: database_access.jet database-access-default/database_access.jet
+copy: package.source database-access-default/package.jet
+step database_access_default: jet run database_access.jet -- {root}/tests/agent_workloads/inputs/database/records.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=database-access
+cwd: database-access-default
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.database-access.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: database-access-default/package.jet
+remove: database-access-default/database_access.jet
+remove: database-access-default
+mkdir: database-access-interpret
+copy: database_access.jet database-access-interpret/database_access.jet
+copy: package.source database-access-interpret/package.jet
+step database_access_interpret: jet run --interpret database_access.jet -- {root}/tests/agent_workloads/inputs/database/records.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=database-access
+cwd: database-access-interpret
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.database-access.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: database-access-interpret/package.jet
+remove: database-access-interpret/database_access.jet
+remove: database-access-interpret
+mkdir: desktop-interaction-focus-aot
+copy: desktop_interaction_focus.jet desktop-interaction-focus-aot/desktop_interaction_focus.jet
+copy: package.source desktop-interaction-focus-aot/package.jet
+step desktop_interaction_focus_aot: jet run --release desktop_interaction_focus.jet -- {root}/tests/agent_workloads/inputs/desktop/focus.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=desktop-interaction-focus
+cwd: desktop-interaction-focus-aot
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.desktop-interaction-focus.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: desktop-interaction-focus-aot/package.jet
+remove: desktop-interaction-focus-aot/desktop_interaction_focus.jet
+remove: desktop-interaction-focus-aot
+mkdir: desktop-interaction-focus-default
+copy: desktop_interaction_focus.jet desktop-interaction-focus-default/desktop_interaction_focus.jet
+copy: package.source desktop-interaction-focus-default/package.jet
+step desktop_interaction_focus_default: jet run desktop_interaction_focus.jet -- {root}/tests/agent_workloads/inputs/desktop/focus.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=desktop-interaction-focus
+cwd: desktop-interaction-focus-default
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.desktop-interaction-focus.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: desktop-interaction-focus-default/package.jet
+remove: desktop-interaction-focus-default/desktop_interaction_focus.jet
+remove: desktop-interaction-focus-default
+mkdir: desktop-interaction-focus-interpret
+copy: desktop_interaction_focus.jet desktop-interaction-focus-interpret/desktop_interaction_focus.jet
+copy: package.source desktop-interaction-focus-interpret/package.jet
+step desktop_interaction_focus_interpret: jet run --interpret desktop_interaction_focus.jet -- {root}/tests/agent_workloads/inputs/desktop/focus.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=desktop-interaction-focus
+cwd: desktop-interaction-focus-interpret
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.desktop-interaction-focus.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: desktop-interaction-focus-interpret/package.jet
+remove: desktop-interaction-focus-interpret/desktop_interaction_focus.jet
+remove: desktop-interaction-focus-interpret
+mkdir: incident-report-success-aot
+copy: incident_report.jet incident-report-success-aot/incident_report.jet
+copy: package.source incident-report-success-aot/package.jet
+step incident_report_success_aot: jet run --release incident_report.jet -- {root}/tests/agent_workloads/inputs/incidents/success.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=incident-report-success
+cwd: incident-report-success-aot
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.incident-report-success.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: incident-report-success-aot/package.jet
+remove: incident-report-success-aot/incident_report.jet
+remove: incident-report-success-aot
+mkdir: incident-report-success-default
+copy: incident_report.jet incident-report-success-default/incident_report.jet
+copy: package.source incident-report-success-default/package.jet
+step incident_report_success_default: jet run incident_report.jet -- {root}/tests/agent_workloads/inputs/incidents/success.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=incident-report-success
+cwd: incident-report-success-default
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.incident-report-success.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: incident-report-success-default/package.jet
+remove: incident-report-success-default/incident_report.jet
+remove: incident-report-success-default
+mkdir: incident-report-success-interpret
+copy: incident_report.jet incident-report-success-interpret/incident_report.jet
+copy: package.source incident-report-success-interpret/package.jet
+step incident_report_success_interpret: jet run --interpret incident_report.jet -- {root}/tests/agent_workloads/inputs/incidents/success.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=incident-report-success
+cwd: incident-report-success-interpret
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.incident-report-success.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: incident-report-success-interpret/package.jet
+remove: incident-report-success-interpret/incident_report.jet
+remove: incident-report-success-interpret
+mkdir: process-batch-success-aot
+copy: process_batch.jet process-batch-success-aot/process_batch.jet
+copy: package.source process-batch-success-aot/package.jet
+step process_batch_success_aot: jet run --release process_batch.jet -- {root}/tests/agent_workloads/inputs/processes/success.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=process-batch-success
+cwd: process-batch-success-aot
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.process-batch-success.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: process-batch-success-aot/package.jet
+remove: process-batch-success-aot/process_batch.jet
+remove: process-batch-success-aot
+mkdir: process-batch-success-default
+copy: process_batch.jet process-batch-success-default/process_batch.jet
+copy: package.source process-batch-success-default/package.jet
+step process_batch_success_default: jet run process_batch.jet -- {root}/tests/agent_workloads/inputs/processes/success.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=process-batch-success
+cwd: process-batch-success-default
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.process-batch-success.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: process-batch-success-default/package.jet
+remove: process-batch-success-default/process_batch.jet
+remove: process-batch-success-default
+mkdir: process-batch-success-interpret
+copy: process_batch.jet process-batch-success-interpret/process_batch.jet
+copy: package.source process-batch-success-interpret/package.jet
+step process_batch_success_interpret: jet run --interpret process_batch.jet -- {root}/tests/agent_workloads/inputs/processes/success.tsv
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK=process-batch-success
+cwd: process-batch-success-interpret
+limit: time=120
+exit: 0
+stdout: = delimited_workload_adapters_match_aot_default_run_and_interpreter.process-batch-success.expected
+stderr: empty
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2263 !limit_exceeded with combined output bytes <= 1_048_576
+remove: process-batch-success-interpret/package.jet
+remove: process-batch-success-interpret/process_batch.jet
+remove: process-batch-success-interpret

@@ -1,0 +1,953 @@
+// Consumer-neutral semantic symbol facts (crates/jet-semindex/src/Symbols.rs
+// `build_semantic_symbol_index` and `language_symbols`): every definition of
+// the checked semantic index as one symbol with its identity, canonical
+// name, owner, kind, signature, and `///` summary and examples, plus the
+// language catalog (built-in types, typed compiler facts, keywords, built-in
+// methods, and numeric conversions). Consumers choose presentation only;
+// they never rebuild signatures or identity. The REPL/LSP visibility and
+// completion lookups have no Jet consumer and are not part of this port.
+// Source names and canonical identities project the checked name ledger.
+use jet_driver.[
+    JetDriverDocModule,
+]
+use jet_foundation.[
+    BUILTIN_NUMERIC_SOURCES,
+    ImportDecl,
+    Item,
+    Span,
+    Type,
+    builtin_static_rows,
+    expr_span,
+    failure_contract_effective_type,
+    failure_contract_source,
+    type_name,
+    name_ledger_display_path,
+    name_ledger_display_path_at,
+    name_ledger_canonical_path,
+]
+use jet_sema.[
+    sema_registration_unit_family_type_names,
+]
+
+// Symbols.rs `SemanticSymbolKind`.
+enum JetCLISymbolKind {
+    Module
+    Function
+    Type
+    Member
+    Constant
+    Local
+    Parameter
+    Keyword
+}
+
+// Symbols.rs `SemanticProvenance` (the session and command-registry rows
+// belong to the REPL).
+enum JetCLISymbolProvenance {
+    Source(module_path: String)
+    Builtin(module_name: String)
+}
+
+// Symbols.rs `SemanticLexicalScope`.
+struct JetCLISymbolScope {
+    identity: String
+    structural_parent: Int
+    structural_slot: String
+    span: Span
+    depth: Int
+    declaration_offset: Int
+}
+
+// Symbols.rs `SemanticSymbol`.
+struct JetCLISymbol {
+    identity: String
+    name: String
+    qualified_name: String
+    owner: String?
+    module_path: String
+    kind: JetCLISymbolKind
+    signature: String
+    summary: String
+    examples: [String]
+    provenance: JetCLISymbolProvenance
+    span: Span?
+    lexical_scope: JetCLISymbolScope?
+}
+
+// One Symbols.rs `BUILTIN_METHODS` row; `example` is "" when it has none.
+struct JetCLISymbolBuiltin {
+    qualified_name: String
+    signature: String
+    summary: String
+    example: String
+}
+
+JET_CLI_SYMBOL_BUILTIN_METHODS :: [JetCLISymbolBuiltin]{
+    JetCLISymbolBuiltin{qualified_name: "Duration.milliseconds", signature: "Duration.milliseconds(value: Int | Float) -> Duration RangeError!", summary: "Checked runtime duration in milliseconds.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Duration.seconds", signature: "Duration.seconds(value: Int | Float) -> Duration RangeError!", summary: "Checked runtime duration in seconds.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Duration.minutes", signature: "Duration.minutes(value: Int | Float) -> Duration RangeError!", summary: "Checked runtime duration in minutes.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Clock.system", signature: "Clock.system() -> Clock #(Time)", summary: "Explicit monotonic production clock.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Duration.hours", signature: "Duration.hours(value: Int | Float) -> Duration RangeError!", summary: "Checked runtime duration in hours.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Duration.in", signature: "Duration.in(unit: DurationUnit) -> Int RangeError!", summary: "Reads a checked whole duration unit.", example: "duration.in(.Milliseconds)"},
+    JetCLISymbolBuiltin{qualified_name: "List.len", signature: "List.len() -> Int", summary: "Number of items.", example: "items.len()"},
+    JetCLISymbolBuiltin{qualified_name: "List.is_empty", signature: "List.is_empty() -> Bool", summary: "True when there are no items.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.push", signature: "List.push(item: T)", summary: "Appends an item to the end.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.pop", signature: "List.pop() -> ?T", summary: "Removes and returns the last item, if any.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.get", signature: "List.get(i: Int) -> T?", summary: "The item at index i, if in bounds.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.first", signature: "List.first() -> ?T", summary: "The first item, if any.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.last", signature: "List.last() -> ?T", summary: "The last item, if any.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.contains", signature: "List.contains(item: T) -> Bool", summary: "True when item appears in the list.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.index_of", signature: "List.index_of(item: T) -> Int?", summary: "Index of the first matching item, if any.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.join", signature: "List.join(sep: String) -> String", summary: "Joins string items with sep.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.sum", signature: "List.sum() -> T", summary: "Sum of all items.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.product", signature: "List.product() -> T", summary: "Product of all items.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.min", signature: "List.min() -> ?T", summary: "The smallest item, if any.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.max", signature: "List.max() -> ?T", summary: "The largest item, if any.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.map", signature: "List.map(f: fn(T) -> R) -> [R]", summary: "Transforms each item with f.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.filter", signature: "List.filter(f: fn(T) -> Bool) -> List<T>", summary: "Keeps items where f(item) is true.", example: "items.filter(fn (item: T) Bool {{ return true }})"},
+    JetCLISymbolBuiltin{qualified_name: "List.filter_map", signature: "List.filter_map(f: fn(T) -> ?V) -> [V]", summary: "Maps then drops failures — keeps only successes.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.each", signature: "List.each(f: fn(T))", summary: "Runs f once per item, for its side effects.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.find", signature: "List.find(f: fn(T) -> Bool) -> ?T", summary: "The first item where f(item) is true, if any.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.any", signature: "List.any(f: fn(T) -> Bool) -> Bool", summary: "True if f is true for at least one item.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.all", signature: "List.all(f: fn(T) -> Bool) -> Bool", summary: "True if f is true for every item.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.sort_by", signature: "List.sort_by(key: fn(T) -> K)", summary: "Sorts in place by the key f extracts.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.sort_by_desc", signature: "List.sort_by_desc(key: fn(T) -> K)", summary: "Sorts in place by the key f extracts, descending.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.reduce", signature: "List.reduce(init: R, f: fn(R, T) -> R) -> R", summary: "Folds items into one value, starting from init.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.fold", signature: "List.fold(init: R, f: fn(R, T) -> R) -> R", summary: "Folds items into one value, starting from init.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.reverse", signature: "List.reverse()", summary: "Reverses the list in place.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.sort", signature: "List.sort()", summary: "Sorts the list in place.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.sort_desc", signature: "List.sort_desc()", summary: "Sorts the list in place, descending.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.clear", signature: "List.clear()", summary: "Removes every item.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.insert", signature: "List.insert(i: Int, item: T)", summary: "Inserts item at index i.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.remove", signature: "List.remove(value: T, by: RemoveBy{{.Val}}) -> T?", summary: "Removes the first equal value; `.Slot` selects positional removal.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.count", signature: "List.count(value: T) -> Int", summary: "Counts items equal to value.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.extend", signature: "List.extend(other: [T])", summary: "Appends every item from other in order.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.concat", signature: "List.concat(other: [T]) -> [T]", summary: "Returns this list followed by other.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.enumerate", signature: "List.enumerate() -> [(idx: Int, item: T)]", summary: "Pairs each item with its index.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "List.zip", signature: "List.zip(other: [U]) -> [(a: T, b: U)]", summary: "Pairs items from two lists positionally.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.len", signature: "Map.len() -> Int", summary: "Number of entries.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.is_empty", signature: "Map.is_empty() -> Bool", summary: "True when there are no entries.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.get", signature: "Map.get(key: K) -> V?", summary: "Value for key, if present.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.insert", signature: "Map.insert(key: K, value: V)", summary: "Inserts or overwrites the value for key.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.remove", signature: "Map.remove(key: K) -> V?", summary: "Removes and returns the value for key, if present.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.contains_key", signature: "Map.contains_key(key: K) -> Bool", summary: "True when key has an entry.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.keys", signature: "Map.keys() -> Iter<K>", summary: "Lazily yields every key in map order.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.values", signature: "Map.values() -> Iter<V>", summary: "Lazily yields every value in map order.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "Map.each", signature: "Map.each(f: fn(K, V))", summary: "Runs f once per entry.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.len", signature: "String.len() -> Int", summary: "Number of characters.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.is_empty", signature: "String.is_empty() -> Bool", summary: "True when the string is empty.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.contains", signature: "String.contains(s: String) -> Bool", summary: "True when s appears in the string.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.starts_with", signature: "String.starts_with(s: String) -> Bool", summary: "True when the string starts with s.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.ends_with", signature: "String.ends_with(s: String) -> Bool", summary: "True when the string ends with s.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.trim", signature: "String.trim() -> String", summary: "Removes leading/trailing whitespace.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.to_upper", signature: "String.to_upper() -> String", summary: "Uppercased copy.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.to_lower", signature: "String.to_lower() -> String", summary: "Lowercased copy.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.split", signature: "String.split(sep: String) -> [String]", summary: "Splits on every occurrence of sep.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.lines", signature: "String.lines() -> [String]", summary: "Splits into lines.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.chars", signature: "String.chars() -> [Char]", summary: "Every character, in order.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.replace", signature: "String.replace(from: String, to: String) -> String", summary: "Replaces every occurrence of from with to.", example: ""},
+    JetCLISymbolBuiltin{qualified_name: "String.repeat", signature: "String.repeat(n: Int) -> String", summary: "Concatenates n copies of the string.", example: ""},
+}
+
+// The numeric conversion owners the language catalog lists.
+JET_CLI_SYMBOL_NUMERIC_TARGETS :: [String]{"I8", "I16", "I32", "I64", "Int", "U8", "U16", "U32", "U64", "F32", "F64", "Float"}
+
+fn jet_cli_symbol_builtin(identity: String, name: String, qualified_name: String, owner: String?, module_name: String, kind: JetCLISymbolKind, signature: String, summary: String, examples: [String]) -> JetCLISymbol Never! {
+    JetCLISymbol{
+        identity: identity,
+        name: name,
+        qualified_name: qualified_name,
+        owner: owner,
+        module_path: module_name,
+        kind: kind,
+        signature: signature,
+        summary: summary,
+        examples: examples,
+        provenance: JetCLISymbolProvenance.Builtin{module_name: module_name},
+        span: None,
+        lexical_scope: None,
+    }
+}
+
+// The checked return of `owner.method(value)` (Collections.rs
+// `numeric_conversion_return` and its precise rows), or `None`.
+fn jet_cli_symbol_conversion_return(owner: String, method: String) -> Type? Never! {
+    rows :: builtin_static_rows(owner, method)
+    if rows.len() == 0 -> return None
+    Val(rows[0].return_type)
+}
+
+fn jet_cli_symbol_is_result(ty: Type?) -> Bool Never! {
+    value :: ty ?? return false
+    if value == .Result(_, _) -> return true
+    false
+}
+
+// Symbols.rs `language_symbols`. The one typed compiler fact with a public
+// read type (Types.rs `CompilerFact::from_member` over Syntax
+// `fact_read_members`) is `$origin`.
+fn jet_cli_language_symbols() -> [JetCLISymbol] Never! {
+    symbols := [JetCLISymbol]{}
+    no_examples :: [String]{}
+    loop ty in JET_CLI_TYPE_LIST {
+        &symbols.push(jet_cli_symbol_builtin("builtin:type:{ty}", ty, ty, None, "core", JetCLISymbolKind.Type, "type {ty}", "Built-in Jet type.", no_examples))
+    }
+    &symbols.push(jet_cli_symbol_builtin("builtin:fact:$origin", "$origin", "$origin", None, "compiler", JetCLISymbolKind.Member, "$origin: OriginInfo?", "Compiler-owned typed fact.", no_examples))
+    loop keyword in JET_CLI_KEYWORD_LIST {
+        &symbols.push(jet_cli_symbol_builtin("builtin:keyword:{keyword}", keyword, keyword, None, "syntax", JetCLISymbolKind.Keyword, keyword, "Jet keyword.", no_examples))
+    }
+    loop row in JET_CLI_SYMBOL_BUILTIN_METHODS {
+        parts :: row.qualified_name.split(".").to_list()
+        examples :: if row.example == "" -> [String]{} else -> [String]{row.example}
+        &symbols.push(jet_cli_symbol_builtin("builtin:method:{row.qualified_name}", parts[1], row.qualified_name, Val(parts[0]), "core.collections", JetCLISymbolKind.Member, row.signature, row.summary, examples))
+    }
+    &symbols.push(jet_cli_symbol_builtin("builtin:method:Int.parse", "parse", "Int.parse", Val("Int"), "core.numeric", JetCLISymbolKind.Member, "Int.parse(text: String) -> Int ParseError!", "Parses text as an Int.", [String]{"Int.parse(text)"}))
+    &symbols.push(jet_cli_symbol_builtin("builtin:method:Float.parse", "parse", "Float.parse", Val("Float"), "core.numeric", JetCLISymbolKind.Member, "Float.parse(text: String) -> Float ParseError!", "Parses text as a Float.", [String]{"Float.parse(text)"}))
+    loop source in BUILTIN_NUMERIC_SOURCES {
+        loop target in JET_CLI_SYMBOL_NUMERIC_TARGETS {
+            ret :: jet_cli_symbol_conversion_return(target, source.method) ?? next
+            result :: if jet_cli_symbol_is_result(Val(ret)) -> "{target} !String" else -> target
+            qualified_name :: "{target}.{source.method}"
+            &symbols.push(jet_cli_symbol_builtin("builtin:method:{qualified_name}", source.method, qualified_name, Val(target), "core.numeric", JetCLISymbolKind.Member, "{target}.{source.method}(value: {source.source}) -> {result}", "Converts {source.source} to {target}.", no_examples))
+        }
+    }
+    symbols
+}
+
+// Symbols.rs `SemanticSymbolIndex::sort`: qualified name, module, identity.
+fn jet_cli_symbol_before(left: JetCLISymbol, right: JetCLISymbol) -> Bool Never! {
+    if left.qualified_name != right.qualified_name -> return left.qualified_name < right.qualified_name
+    if left.module_path != right.module_path -> return left.module_path < right.module_path
+    left.identity < right.identity
+}
+
+// Symbols.rs `SemanticSymbolIndex::new` (`push` keeps the last row of one
+// identity).
+fn jet_cli_symbol_index(symbols: [JetCLISymbol]) -> [JetCLISymbol] Never! {
+    unique := [JetCLISymbol]{}
+    positions := [String: Int]{}
+    loop symbol in symbols {
+        existing :: positions.get(symbol.identity)
+        if existing == .Val(position) -> unique[position] = symbol
+        if existing == None {
+            positions[symbol.identity] = unique.len()
+            &unique.push(symbol)
+        }
+    }
+    loop index in 1..<unique.len() {
+        value :: unique[index].copy()
+        position := index
+        loop position > 0 && jet_cli_symbol_before(value, unique[position - 1]) {
+            unique[position] = unique[position - 1]
+            position -= 1
+        }
+        unique[position] = value
+    }
+    unique
+}
+
+// Rust `Type::is_numeric`: an integer or float type, through a tag.
+fn jet_cli_symbol_is_numeric(ty: Type) -> Bool Never! {
+    if ty == {
+        .Int | .Float | .Float32 -> return true
+        .IntN(_, _) -> return true
+        .Tagged(_, inner) -> return jet_cli_symbol_is_numeric(inner)
+        else -> {}
+    }
+    false
+}
+
+fn jet_cli_symbol_is_upper(byte: U8) -> Bool Never! {
+    code :: Int.from_u8(byte)
+    code >= 65 && code <= 90
+}
+
+fn jet_cli_symbol_is_lower_or_digit(byte: U8) -> Bool Never! {
+    code :: Int.from_u8(byte)
+    (code >= 97 && code <= 122) || (code >= 48 && code <= 57)
+}
+
+// Syntax.rs `canonical_name_case(_, Snake)` (D-ACRO-CASE1=A: the mechanical
+// acronym split, `HTTPServer` -> `http_server`).
+fn jet_cli_symbol_snake(name: String) -> String Never! {
+    bytes :: name.bytes()
+    out := [U8]{}
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if !jet_cli_symbol_is_upper(byte) {
+            &out.push(byte)
+            next
+        }
+        if index > 0 && bytes[index - 1] != (U8{95}) {
+            previous :: bytes[index - 1]
+            next_code :: if index + 1 < bytes.len() -> Int.from_u8(bytes[index + 1]) else -> 0
+            acronym_end :: jet_cli_symbol_is_upper(previous) && next_code >= 97 && next_code <= 122
+            if jet_cli_symbol_is_lower_or_digit(previous) || acronym_end -> &out.push(U8{95})
+        }
+        &out.push(U8.from_int(Int.from_u8(byte) + 32) ?? byte)
+    }
+    String.from_bytes(out) ?? name
+}
+
+// Syntax.rs `conversion_method_for_source`.
+fn jet_cli_symbol_conversion_method(source: String) -> String Never! {
+    loop row in BUILTIN_NUMERIC_SOURCES {
+        if row.source == source -> return row.method
+    }
+    "from_{jet_cli_symbol_snake(source)}"
+}
+
+// Symbols.rs `type_leaf`.
+fn jet_cli_symbol_type_leaf(name: String) -> String Never! {
+    parts :: name.split(".").to_list()
+    parts[parts.len() - 1]
+}
+
+// Symbols.rs `checked_text_error`: the `Error` an `impl CheckedText for
+// owner` names, searched through inline and generic module bodies.
+fn jet_cli_symbol_checked_text_error(items: [Item], owner: String) -> String? Never! {
+    loop item in items {
+        if item == {
+            .Impl(implementation) -> {
+                if jet_cli_symbol_type_leaf(implementation.type_name) == owner && (implementation.trait_name ?? "") == "CheckedText" {
+                    loop entry in implementation.assoc_type_impls {
+                        if entry.name == "Error" -> return Val(type_name(entry.ty))
+                    }
+                }
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    if jet_cli_symbol_checked_text_error(body, owner) == .Val(error) -> return Val(error)
+                }
+            }
+            .GenericModule(generic) -> {
+                if jet_cli_symbol_checked_text_error(generic.body, owner) == .Val(error) -> return Val(error)
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+// The conversion methods one distinct declares and the source each reads.
+struct JetCLISymbolConversion {
+    method: String
+    source: String
+}
+
+// Symbols.rs `distinct_conversion_symbols`.
+fn jet_cli_symbol_distinct_conversions(owner: String, base: Type, ranged: Bool, checked_text_error: String?, module_path: String, scope_identity: String, span: Span, lexical_scope: JetCLISymbolScope?, symbols: &[JetCLISymbol]) Never! {
+    conversions := [JetCLISymbolConversion]{}
+    base_name :: type_name(base)
+    if jet_cli_symbol_is_numeric(base) {
+        loop row in BUILTIN_NUMERIC_SOURCES -> &conversions.push(JetCLISymbolConversion{method: row.method, source: row.source})
+    }
+    if !jet_cli_symbol_is_numeric(base) -> &conversions.push(JetCLISymbolConversion{method: jet_cli_symbol_conversion_method(base_name), source: base_name})
+    loop conversion in conversions {
+        fallible :: checked_text_error != None || ranged || jet_cli_symbol_is_result(jet_cli_symbol_conversion_return(base_name, conversion.method))
+        qualified_name :: "{owner}.{conversion.method}"
+        failure :: if fallible -> " !String" else -> ""
+        signature := "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}{failure}"
+        summary := "Converts {conversion.source} to {owner}."
+        if checked_text_error == .Val(error) {
+            signature = "{owner}.{conversion.method}(value: {conversion.source}) -> {owner}\nfailure: {error} (CheckedText)"
+            summary = "Validates {conversion.source} through {owner}.CheckedText."
+        }
+        &symbols.push(JetCLISymbol{
+            identity: "source:method:{scope_identity}:{qualified_name}",
+            name: conversion.method,
+            qualified_name: qualified_name,
+            owner: Val(owner),
+            module_path: module_path,
+            kind: JetCLISymbolKind.Member,
+            signature: signature,
+            summary: summary,
+            examples: [String]{},
+            provenance: JetCLISymbolProvenance.Source{module_path: module_path},
+            span: Val(span),
+            lexical_scope: lexical_scope,
+        })
+    }
+}
+
+// The semindex module definition declared at `name_span`, if any.
+fn jet_cli_symbol_module_def(index: JetCLISemIndex, module_path: String, name_span: Span) -> String? Never! {
+    loop definition in index.definitions {
+        def :: definition.def
+        if def.module_path == module_path && def.def_span.start == name_span.start && def.def_span.end == name_span.end && def.kind == .Module -> return Val(def.identity)
+    }
+    None
+}
+
+// Symbols.rs `inline_module_scope`: the lexical scope of an inline module.
+fn jet_cli_symbol_module_scope(index: JetCLISemIndex, module_path: String, name: String, name_span: Span, span: Span, parent_identity: String, parent_scope: JetCLISymbolScope?) -> JetCLISymbolScope Never! {
+    identity :: jet_cli_symbol_module_def(index, module_path, name_span) ?? "module:{parent_identity}::{name}"
+    structural_parent := 0
+    loop node in index.nodes {
+        if node.module_path == module_path && node.span.start == span.start && node.span.end == span.end && node.class == "item" {
+            structural_parent = node.id
+            break
+        }
+    }
+    depth :: if parent_scope == .Val(parent) -> parent.depth + 1 else -> 1
+    JetCLISymbolScope{identity: identity, structural_parent: structural_parent, structural_slot: "items", span: span, depth: depth, declaration_offset: name_span.start}
+}
+
+// Symbols.rs `collect_distinct_conversion_symbols`.
+fn jet_cli_symbol_collect_conversions(index: JetCLISemIndex, items: [Item], module_path: String, scope_identity: String, lexical_scope: JetCLISymbolScope?, symbols: &[JetCLISymbol]) Never! {
+    loop item in items {
+        if item == {
+            .Distinct(definition) -> jet_cli_symbol_distinct_conversions(definition.name, definition.base, definition.range != None, jet_cli_symbol_checked_text_error(items, definition.name), module_path, scope_identity, definition.name_span, lexical_scope, &symbols)
+            .UnitFamily(family) -> {
+                // Canonical Time is the one fixed-carrier family that mints no
+                // distinct (`UnitFamilyDef::distinct_defs`).
+                canonical_time :: family.family == "Time" && (family.resolved_owner ?? "") == "core.units"
+                if !canonical_time {
+                    loop named in sema_registration_unit_family_type_names(family) {
+                        jet_cli_symbol_distinct_conversions(named.name, Type.Float, false, None, module_path, scope_identity, named.span, lexical_scope, &symbols)
+                    }
+                }
+            }
+            .CodeModule(code_module) -> {
+                if code_module.body == .Val(body) {
+                    scope :: jet_cli_symbol_module_scope(index, module_path, code_module.name, code_module.name_span, code_module.span, scope_identity, lexical_scope)
+                    jet_cli_symbol_collect_conversions(index, body, module_path, scope.identity, Val(scope), &symbols)
+                }
+            }
+            else -> {}
+        }
+    }
+}
+
+// Symbols.rs `is_lexical_slot`.
+fn jet_cli_symbol_is_lexical_slot(slot: String) -> Bool Never! {
+    slot == "body" || slot.ends_with("_body") || slot.ends_with("_bodies")
+}
+
+// The smallest node enclosing `start..end` (optionally item nodes only);
+// among equal sizes, the earliest structural node (Symbols.rs
+// `smallest_enclosing`).
+fn jet_cli_symbol_smallest(nodes: [JetCLISemNode], start: Int, end: Int, items_only: Bool) -> Int? Never! {
+    best := Int?{None}
+    best_size := 0
+    loop node in nodes {
+        if items_only && node.class != "item" -> next
+        if node.span.start > start || end > node.span.end -> next
+        size :: if node.span.end > node.span.start -> node.span.end - node.span.start else -> 0
+        if best == .Val(current) {
+            if size > best_size || (size == best_size && node.id >= current) -> next
+        }
+        best = Val(node.id)
+        best_size = size
+    }
+    best
+}
+
+// Symbols.rs `LexicalScopeIndex`: each local's and parameter's lexical
+// scope, answered from the module's structural nodes in start order (a node
+// that ends before one definition can never enclose a later one).
+struct JetCLISymbolScopes {
+    enclosing: [String: Int]
+    enclosing_item: [String: Int]
+    first_lexical_child: [String: Int]
+    boundaries: [String: Span]
+    nodes_by_id: [String: JetCLISemNode]
+}
+
+fn jet_cli_symbol_scope_key(module_path: String, start: Int, end: Int) -> String Never! {
+    "{module_path}\n{start}\n{end}"
+}
+
+fn jet_cli_symbol_scopes(index: JetCLISemIndex) -> JetCLISymbolScopes Never! {
+    scopes := JetCLISymbolScopes{enclosing: [String: Int]{}, enclosing_item: [String: Int]{}, first_lexical_child: [String: Int]{}, boundaries: [String: Span]{}, nodes_by_id: [String: JetCLISemNode]{}}
+    module_paths := [String]{}
+    queries := [String: [Span]]{}
+    loop definition in index.definitions {
+        def :: definition.def
+        if def.kind == {
+            .Local(_, _) | .Param(_) -> {
+                if queries.get(def.module_path) == None {
+                    &module_paths.push(def.module_path)
+                    queries[def.module_path] = [Span]{}
+                }
+                spans := queries.get(def.module_path) ?? [Span]{}
+                &spans.push(def.def_span)
+                queries[def.module_path] = spans
+            }
+            else -> {}
+        }
+    }
+    module_nodes := [String: [JetCLISemNode]]{}
+    loop node in index.nodes {
+        scopes.nodes_by_id["{node.module_path}\n{node.id}"] = node
+        if queries.get(node.module_path) == None -> next
+        list := module_nodes.get(node.module_path) ?? [JetCLISemNode]{}
+        &list.push(node)
+        module_nodes[node.module_path] = list
+        if node.parent == .Val(parent) {
+            child_key :: "{node.module_path}\n{parent}"
+            if jet_cli_symbol_is_lexical_slot(node.slot) && scopes.first_lexical_child.get(child_key) == None -> scopes.first_lexical_child[child_key] = node.id
+        }
+    }
+    loop boundary in index.slot_boundaries {
+        key :: "{boundary.module_path}\n{boundary.parent}\n{boundary.slot}"
+        if scopes.boundaries.get(key) == None -> scopes.boundaries[key] = boundary.span
+    }
+    loop module_path in module_paths {
+        spans := queries.get(module_path) ?? [Span]{}
+        loop index_value in 1..<spans.len() {
+            value :: spans[index_value]
+            position := index_value
+            loop position > 0 && (spans[position - 1].start > value.start || (spans[position - 1].start == value.start && spans[position - 1].end > value.end)) {
+                spans[position] = spans[position - 1]
+                position -= 1
+            }
+            spans[position] = value
+        }
+        nodes := module_nodes.get(module_path) ?? [JetCLISemNode]{}
+        loop index_value in 1..<nodes.len() {
+            value :: nodes[index_value]
+            position := index_value
+            loop position > 0 && nodes[position - 1].span.start > value.span.start {
+                nodes[position] = nodes[position - 1]
+                position -= 1
+            }
+            nodes[position] = value
+        }
+        next_node := 0
+        active := [JetCLISemNode]{}
+        loop span in spans {
+            loop next_node < nodes.len() && nodes[next_node].span.start <= span.start {
+                &active.push(nodes[next_node])
+                next_node += 1
+            }
+            kept := [JetCLISemNode]{}
+            loop node in active {
+                if node.span.end >= span.start -> &kept.push(node)
+            }
+            active = kept
+            candidates :: if span.end < span.start -> nodes else -> active
+            key :: jet_cli_symbol_scope_key(module_path, span.start, span.end)
+            if jet_cli_symbol_smallest(candidates, span.start, span.end, false) == .Val(found) -> scopes.enclosing[key] = found
+            if jet_cli_symbol_smallest(candidates, span.start, span.end, true) == .Val(found) -> scopes.enclosing_item[key] = found
+        }
+    }
+    scopes
+}
+
+// `LexicalScopeIndex::scope`.
+fn jet_cli_symbol_scope(scopes: JetCLISymbolScopes, module_path: String, def_span: Span, is_param: Bool) -> JetCLISymbolScope? Never! {
+    key :: jet_cli_symbol_scope_key(module_path, def_span.start, def_span.end)
+    initial :: scopes.enclosing.get(key) ?? return None
+    innermost_parent := Int?{None}
+    innermost_slot := ""
+    if scopes.first_lexical_child.get("{module_path}\n{initial}") == .Val(child) {
+        child_node :: scopes.nodes_by_id.get("{module_path}\n{child}") ?? return None
+        innermost_parent = Val(initial)
+        innermost_slot = child_node.slot
+    }
+    depth := if innermost_parent == None -> 0 else -> 1
+    current := initial
+    loop {
+        node :: scopes.nodes_by_id.get("{module_path}\n{current}") ?? return None
+        if jet_cli_symbol_is_lexical_slot(node.slot) {
+            depth += 1
+            if innermost_parent == None {
+                parent_id :: node.parent ?? return None
+                innermost_parent = Val(parent_id)
+                innermost_slot = node.slot
+            }
+        }
+        parent :: node.parent ?? break
+        current = parent
+    }
+    if innermost_parent == None {
+        item :: scopes.enclosing_item.get(key) ?? return None
+        innermost_parent = Val(item)
+        innermost_slot = "body"
+    }
+    parent :: innermost_parent ?? return None
+    span :: scopes.boundaries.get("{module_path}\n{parent}\n{innermost_slot}") ?? return None
+    shown_depth :: if depth < 1 -> 1 else -> depth
+    offset :: if is_param -> 0 else -> def_span.start
+    Val(JetCLISymbolScope{identity: "scope:{module_path}:{parent}:{innermost_slot}", structural_parent: parent, structural_slot: innermost_slot, span: span, depth: shown_depth, declaration_offset: offset})
+}
+
+// The kind and signature of one definition (Symbols.rs `semantic_shape`).
+struct JetCLISymbolShape {
+    kind: JetCLISymbolKind
+    signature: String
+}
+
+fn jet_cli_symbol_shape(name: String, kind: JetCLISemKind, owner: String?) -> JetCLISymbolShape Never! {
+    shape := JetCLISymbolShape{kind: JetCLISymbolKind.Type, signature: ""}
+    if kind == {
+        .Module -> shape = JetCLISymbolShape{kind: JetCLISymbolKind.Module, signature: "module {name}"}
+        .Function(callable) -> {
+            params :: jet_cli_sem_parameter_parts(callable.params).join(", ")
+            prefix :: if owner == .Val(owner_name) -> "{owner_name}.{name}" else -> "fn {name}"
+            // D-SIG-AFTER1=A: the effect ceiling splits the one arrow; Panic
+            // and Mem are deny-only and never shown in a positive ceiling.
+            shown := [String]{}
+            if callable.effects == .Val(row) {
+                loop entry in row {
+                    root :: entry.name.split(".").to_list()[0]
+                    if root != "Panic" && root != "Mem" -> &shown.push(entry.name)
+                }
+            }
+            result := ""
+            if callable.failure_contract == .Val(contract) {
+                result = type_name(failure_contract_effective_type(contract))
+            } else if callable.return_type == .Val(ret) {
+                result = type_name(ret)
+            }
+            ceiling := ""
+            if callable.effect_via == .Val(via) {
+                ceiling = " -[via {via.name}]>"
+            } else if shown.len() > 0 {
+                ceiling = " -[{shown.join(", ")}]>"
+            }
+            suffix := ""
+            if ceiling != "" {
+                suffix = if result == "" -> ceiling else -> "{ceiling} {result}"
+            } else if result != "" {
+                suffix = " -> {result}"
+            }
+            failure := ""
+            if callable.failure_contract == .Val(contract) {
+                failure = "{type_name(failure_contract_effective_type(contract))} ({failure_contract_source(contract)})"
+            } else {
+                reason :: if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
+                failure = "unavailable ({reason})"
+            }
+            shape = JetCLISymbolShape{kind: JetCLISymbolKind.Function, signature: "{prefix}({params}){suffix}\nfailure: {failure}"}
+        }
+        .Struct(fields, _) -> {
+            shown :: loop field in fields -> "{field.name}: {type_name(field.ty)}"
+            shape.signature = "struct {name} {{ {shown.join(", ")} }}"
+        }
+        .Enum(variants, _) -> shape.signature = "enum {name} {{ {variants.join(", ")} }}"
+        .Trait -> shape.signature = "trait {name}"
+        .Tag -> shape.signature = "tag {name}"
+        .Type(_) -> shape.signature = "type {name}"
+        .Const -> shape = JetCLISymbolShape{kind: JetCLISymbolKind.Constant, signature: "const {name}"}
+        .EnumVariant(parent) -> shape = JetCLISymbolShape{kind: JetCLISymbolKind.Member, signature: "{parent}.{name}"}
+        .Field(ty, parent) -> shape = JetCLISymbolShape{kind: JetCLISymbolKind.Member, signature: "{parent}.{name}: {type_name(ty)}"}
+        .Local(_, ty) -> {
+            shown :: if ty == .Val(value) -> type_name(value) else -> "value"
+            shape = JetCLISymbolShape{kind: JetCLISymbolKind.Local, signature: "{name}: {shown}"}
+        }
+        .Param(ty) -> shape = JetCLISymbolShape{kind: JetCLISymbolKind.Parameter, signature: "{name}: {type_name(ty)}"}
+    }
+    shape
+}
+
+// Symbols.rs `marker_expr_source`.
+fn jet_cli_symbol_expr_source(source: String, span: Span) -> String Never! {
+    bytes :: source.bytes()
+    if span.start < 0 || span.end > bytes.len() || span.start >= span.end -> return "…"
+    text :: jet_cli_doc_text(bytes, span.start, span.end).trim()
+    if text == "" -> return "…"
+    text
+}
+
+// Symbols.rs `marker_declaration_signature` (D-MARKER-SITES1=B).
+fn jet_cli_symbol_marker_signature(modules: [JetDriverDocModule], def: JetCLISemDef) -> String? Never! {
+    if !def.identity.starts_with("rule:") -> return None
+    loop doc_module in modules {
+        if doc_module.path != def.module_path && doc_module.alias != def.module_path -> next
+        loop item in doc_module.items {
+            if item == .MarkerDecl(declaration) {
+                if declaration.name != def.name || declaration.name_span.start != def.def_span.start || declaration.name_span.end != def.def_span.end -> next
+                params := [String]{}
+                loop parameter in declaration.params {
+                    if parameter.ty == .Val(ty) {
+                        variadic :: if parameter.variadic -> "..." else -> ""
+                        default := ""
+                        if parameter.value == .Val(value) -> default = "{{{jet_cli_symbol_expr_source(doc_module.source, expr_span(value))}}}"
+                        &params.push("{parameter.name}: {variadic}{type_name(ty)}{default}")
+                    } else {
+                        value := "…"
+                        if parameter.value == .Val(expression) -> value = jet_cli_symbol_expr_source(doc_module.source, expr_span(expression))
+                        &params.push("{parameter.name}: {value}")
+                    }
+                }
+                return Val("marker {declaration.name}({params.join(", ")})")
+            }
+        }
+        return None
+    }
+    None
+}
+
+// Symbols.rs `render_trait_contracts`.
+fn jet_cli_symbol_trait_contracts(contracts: [JetCLISemTraitContract], declaration: Bool) -> String Never! {
+    prefix :: if declaration -> "contract" else -> "implements"
+    rendered := [String]{}
+    loop contract in contracts {
+        lines := [String]{"{prefix} {contract.trait_name}"}
+        loop entry in contract.associated_types {
+            if entry.ty == .Val(ty) {
+                &lines.push("  type {entry.name} = {ty}")
+            } else {
+                &lines.push("  type {entry.name}")
+            }
+        }
+        loop method in contract.methods -> &lines.push("  {method}")
+        &rendered.push(lines.join("\n"))
+    }
+    rendered.join("\n")
+}
+
+// Symbols.rs `source_docs`: the `///` lines directly above the
+// declaration line, as the first non-empty summary and `Example:` lines.
+fn jet_cli_symbol_source_docs(source: String, def_start: Int) -> JetCLIDocComment Never! {
+    bytes :: source.bytes()
+    prefix_end :: if def_start < bytes.len() -> def_start else -> bytes.len()
+    before_end := -1
+    loop index in 0..<prefix_end {
+        if bytes[index] == (U8{10}) -> before_end = index
+    }
+    before :: if before_end < 0 -> "" else -> jet_cli_doc_text(bytes, 0, before_end)
+    lines :: jet_cli_doc_lines(before)
+    collected := [String]{}
+    position := lines.len() - 1
+    loop position >= 0 {
+        doc :: jet_cli_doc_strip_prefix(lines[position].trim(), "///") ?? break
+        &collected.push(doc.trim())
+        position -= 1
+    }
+    comment := JetCLIDocComment{summary: "", examples: [String]{}}
+    position = collected.len() - 1
+    loop position >= 0 {
+        line :: collected[position]
+        if jet_cli_doc_strip_prefix(line, "Example:") == .Val(example) {
+            &comment.examples.push(example.trim())
+        } else if comment.summary == "" && line != "" {
+            comment.summary = line
+        }
+        position -= 1
+    }
+    comment
+}
+
+// Symbols.rs `import_identity`.
+fn jet_cli_symbol_import_identity(module_path: String, scope: JetCLISymbolScope?, suffix: String) -> String Never! {
+    if scope == .Val(lexical) -> return "import:{module_path}::{lexical.identity}::{suffix}"
+    "import:{module_path}::{suffix}"
+}
+
+// The name ledger's `alias_identity` for a binding declared at `span`
+// (SemIndexBuild.jet `jet_cli_sem_import_alias_defs`).
+fn jet_cli_symbol_alias_identity(module_path: String, span: Span) -> String? Never! {
+    if span.start >= span.end -> return None
+    Val("import:{module_path}::{span.start}..{span.end}")
+}
+
+// The module an unqualified import's alias names (Symbols.rs
+// `collect_import_symbols`): its `File` or `Module` import.
+fn jet_cli_symbol_imported_module(modules: [JetDriverDocModule], doc_module: JetDriverDocModule, imports: [ImportDecl], module_alias: String) -> String? Never! {
+    candidates := imports
+    loop import in doc_module.imports -> &candidates.push(import)
+    loop candidate in candidates {
+        if candidate.alias != module_alias -> next
+        if candidate.kind == {
+            .File(path, _) -> {
+                parent :: jet_cli_parent(doc_module.path) ?? "."
+                relative :: "{parent}/{path}.jet"
+                stem :: jet_cli_symbol_type_leaf(path)
+                loop other in modules {
+                    parts :: other.path.split("/").to_list()
+                    file :: parts[parts.len() - 1]
+                    if other.path == relative || file == ("{stem}.jet") -> return Val(other.path)
+                }
+                return None
+            }
+            .Module(name, _) -> {
+                loop other in modules {
+                    if other.alias == name -> return Val(other.path)
+                }
+                return None
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+// Symbols.rs `collect_import_symbols`.
+fn jet_cli_symbol_collect_imports(symbols: &[JetCLISymbol], modules: [JetDriverDocModule], doc_module: JetDriverDocModule, imports: [ImportDecl], scope: JetCLISymbolScope?) Never! {
+    loop import in imports {
+        if import.kind == {
+            .Unqualified(module_alias, _, items, items_span, _) -> {
+                imported :: jet_cli_symbol_imported_module(modules, doc_module, imports, module_alias)
+                loop (item_index, imported_item) in items {
+                    local :: imported_item.alias ?? imported_item.original
+                    local_span :: if item_index < import.local_spans.len() -> import.local_spans[item_index] else -> items_span
+                    symbol := JetCLISymbol{
+                        identity: "",
+                        name: local,
+                        qualified_name: local,
+                        owner: None,
+                        module_path: doc_module.path,
+                        kind: JetCLISymbolKind.Local,
+                        signature: local,
+                        summary: "Imported from {module_alias}.",
+                        examples: [String]{},
+                        provenance: JetCLISymbolProvenance.Source{module_path: doc_module.path},
+                        span: Val(items_span),
+                        lexical_scope: scope,
+                    }
+                    if imported == .Val(imported_path) {
+                        loop candidate in symbols {
+                            if candidate.module_path == imported_path && candidate.name == imported_item.original {
+                                symbol = candidate
+                                break
+                            }
+                        }
+                    }
+                    symbol.identity = jet_cli_symbol_alias_identity(doc_module.path, local_span) ?? jet_cli_symbol_import_identity(doc_module.path, scope, "{module_alias}.{imported_item.original}::{local}")
+                    symbol.name = local
+                    symbol.qualified_name = local
+                    symbol.owner = None
+                    symbol.module_path = doc_module.path
+                    symbol.provenance = JetCLISymbolProvenance.Source{module_path: doc_module.path}
+                    symbol.span = Val(items_span)
+                    symbol.lexical_scope = scope
+                    &symbols.push(symbol)
+                }
+            }
+            else -> {
+                alias_name :: import.alias
+                &symbols.push(JetCLISymbol{
+                    identity: jet_cli_symbol_alias_identity(doc_module.path, import.alias_span) ?? jet_cli_symbol_import_identity(doc_module.path, scope, alias_name),
+                    name: alias_name,
+                    qualified_name: alias_name,
+                    owner: None,
+                    module_path: doc_module.path,
+                    kind: JetCLISymbolKind.Module,
+                    signature: "use {alias_name}",
+                    summary: "Imported module.",
+                    examples: [String]{},
+                    provenance: JetCLISymbolProvenance.Source{module_path: doc_module.path},
+                    span: Val(import.alias_span),
+                    lexical_scope: scope,
+                })
+            }
+        }
+    }
+}
+
+// Symbols.rs `collect_inline_import_symbols`.
+fn jet_cli_symbol_collect_inline_imports(index: JetCLISemIndex, symbols: &[JetCLISymbol], modules: [JetDriverDocModule], doc_module: JetDriverDocModule, items: [Item], parent_scope: JetCLISymbolScope?) Never! {
+    loop item in items {
+        if item == .CodeModule(code_module) {
+            parent_identity :: if parent_scope == .Val(parent) -> parent.identity else -> "module:{doc_module.path}"
+            scope :: jet_cli_symbol_module_scope(index, doc_module.path, code_module.name, code_module.name_span, code_module.span, parent_identity, parent_scope)
+            jet_cli_symbol_collect_imports(&symbols, modules, doc_module, code_module.imports, Val(scope))
+            if code_module.body == .Val(body) -> jet_cli_symbol_collect_inline_imports(index, &symbols, modules, doc_module, body, Val(scope))
+        }
+    }
+}
+
+fn jet_cli_symbol_display(modules: [JetDriverDocModule], module_path: String, name: String) -> String Never! {
+    loop doc_module in modules {
+        if doc_module.path != module_path && doc_module.alias != module_path -> next
+        storage :: doc_module.name_ledger ?? return name
+        permit :: storage.guard_read()
+        return name_ledger_display_path(permit.value, doc_module.name_module_index, name, Val(doc_module.name_module_index)) ?? name
+    }
+    name.copy()
+}
+
+fn jet_cli_symbol_canonical_name(modules: [JetDriverDocModule], module_path: String, name: String, owner: String?, span: Span) -> String Never! {
+    fallback :: if owner == .Val(value) -> "{value}.{name}" else -> name
+    loop doc_module in modules {
+        if doc_module.path != module_path && doc_module.alias != module_path -> next
+        storage :: doc_module.name_ledger ?? return fallback
+        permit :: storage.guard_read()
+        module_index :: doc_module.name_module_index
+        if name_ledger_display_path_at(permit.value, module_index, span, name, owner, Val(module_index)) == .Val(path) -> return path
+        if owner == .Val(value) {
+            path :: name_ledger_display_path(permit.value, module_index, value, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, value) ?? value)
+            return "{path}.{name}"
+        }
+        return name_ledger_display_path(permit.value, module_index, name, Val(module_index)) ?? (name_ledger_canonical_path(permit.value, module_index, name) ?? name)
+    }
+    fallback
+}
+
+// Symbols.rs `build_semantic_symbol_index`: the language catalog plus every
+// definition of the checked index and every import binding, sorted.
+fn jet_cli_build_symbols(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLISymbol] Never! {
+    symbols := jet_cli_language_symbols()
+    loop doc_module in modules {
+        jet_cli_symbol_collect_conversions(index, doc_module.items, doc_module.path, "module:{doc_module.path}", None, &symbols)
+    }
+    owners := [String: String]{}
+    origin_traits := [String: String]{}
+    loop member in index.members {
+        if owners.get(member.identity) == None {
+            owners[member.identity] = member.owner
+            if member.origin == "trait_impl" || member.origin == "trait_requirement" -> origin_traits[member.identity] = member.origin_trait
+        }
+    }
+    sources := [String: String]{}
+    loop doc_module in modules -> sources[doc_module.path] = doc_module.source
+    scopes :: jet_cli_symbol_scopes(index)
+    loop definition in index.definitions {
+        def :: definition.def
+        if def.identity.starts_with("import:") -> next
+        owner := owners.get(def.identity)
+        if owner == None {
+            if def.kind == {
+                .Field(_, parent) -> owner = Val(parent)
+                .EnumVariant(parent) -> owner = Val(parent)
+                else -> {}
+            }
+        }
+        display_name :: jet_cli_symbol_display(modules, def.module_path, def.name)
+        display_owner := owner
+        if owner == .Val(value) -> display_owner = Val(jet_cli_symbol_display(modules, def.module_path, value))
+        qualified_name :: jet_cli_symbol_canonical_name(modules, def.module_path, def.name, owner, def.def_span)
+        shape :: jet_cli_symbol_shape(display_name, def.kind, display_owner)
+        signature := shape.signature
+        if jet_cli_symbol_marker_signature(modules, def) == .Val(marker) -> signature = marker
+        if definition.nominal_base == .Val(base) -> signature = "type {display_name} :: distinct {jet_cli_symbol_display(modules, def.module_path, base)}"
+        if definition.trait_contracts.len() > 0 {
+            signature = "{signature}\n{jet_cli_symbol_trait_contracts(definition.trait_contracts, def.kind == .Trait)}"
+        }
+        if origin_traits.get(def.identity) == .Val(trait_name) -> signature = "{signature}\ntrait: {trait_name}"
+        docs := JetCLIDocComment{summary: "", examples: [String]{}}
+        if sources.get(def.module_path) == .Val(source) -> docs = jet_cli_symbol_source_docs(source, def.def_span.start)
+        scope := JetCLISymbolScope?{None}
+        if def.kind == {
+            .Local(mutable, _) -> {
+                if docs.summary == "" -> docs.summary = if mutable -> "mutable binding" else -> "immutable binding"
+                scope = jet_cli_symbol_scope(scopes, def.module_path, def.def_span, false)
+            }
+            .Param(_) -> scope = jet_cli_symbol_scope(scopes, def.module_path, def.def_span, true)
+            else -> {}
+        }
+        identity :: if scope != None -> "{def.identity}@{def.def_span.start}" else -> def.identity
+        &symbols.push(JetCLISymbol{
+            identity: identity,
+            name: def.name,
+            qualified_name: qualified_name,
+            owner: display_owner,
+            module_path: def.module_path,
+            kind: shape.kind,
+            signature: signature,
+            summary: docs.summary,
+            examples: docs.examples,
+            provenance: JetCLISymbolProvenance.Source{module_path: def.module_path},
+            span: Val(def.def_span),
+            lexical_scope: scope,
+        })
+    }
+    loop doc_module in modules {
+        jet_cli_symbol_collect_imports(&symbols, modules, doc_module, doc_module.imports, None)
+        jet_cli_symbol_collect_inline_imports(index, &symbols, modules, doc_module, doc_module.items, None)
+    }
+    jet_cli_symbol_index(symbols)
+}

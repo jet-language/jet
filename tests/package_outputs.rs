@@ -162,7 +162,6 @@ fn nested_outputs_entry_invokes_leaf_on_every_run_tier() {
     let mut outputs = Vec::new();
     for args in [
         vec!["run"],
-        vec!["run", "--interpret"],
         vec!["run", "--release"],
     ] {
         let out = Command::new(jet_bin())
@@ -223,13 +222,12 @@ fn package_output_selects_non_run_callable_for_run_dev_and_effects() {
     .unwrap();
     fs::write(
         scratch.join("entry.jet"),
-        "fn run() { print(\"wrong callable\") }\npub fn launch() {}\n",
+        "fn run() { print(\"wrong callable\") }\nfn launch() {}\n",
     )
     .unwrap();
 
     for args in [
         vec!["run"],
-        vec!["run", "--interpret"],
         vec!["dev", "--watch=off"],
     ] {
         let output = Command::new(jet_bin())
@@ -281,7 +279,7 @@ fn entry_wrapper_uses_the_full_nested_import_qualification_chain() {
     fs::write(&entry, "use \"runner\" as runner\n").unwrap();
     fs::write(scratch.join("runner.jet"), "use \"bridge\" as bridge\n").unwrap();
     fs::write(scratch.join("bridge.jet"), "use \"leaf\" as app\n").unwrap();
-    fs::write(scratch.join("leaf.jet"), "pub fn leaf() {}\n").unwrap();
+    fs::write(scratch.join("leaf.jet"), "fn leaf() {}\n").unwrap();
 
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).expect("chain should load");
     jet::Driver::swap_entry_point(&mut bundle, "leaf");
@@ -328,7 +326,6 @@ fn package_default_output_alias_invokes_nested_leaf_from_path_and_cwd() {
 
     for mode in [
         vec!["run"],
-        vec!["run", "--interpret"],
         vec!["run", "--release"],
     ] {
         for (label, cwd, target) in [
@@ -445,7 +442,7 @@ fn manifest_output_resolves_nested_main_file_across_run_and_build() {
     .expect("write package manifest");
     fs::write(
         scratch.join("src/cli/main.jet"),
-        "pub fn cli_run() {\n    print(\"nested-main\")\n}\n",
+        "fn cli_run() {\n    print(\"nested-main\")\n}\n",
     )
     .expect("write nested package entry");
 
@@ -554,7 +551,7 @@ fn typed_settings_preserves_tier_parity_and_cli_override() {
     let dir = typed_settings_dir();
     let expected = typed_settings_output("on");
 
-    for args in [vec!["run"], vec!["run", "--interpret"]] {
+    for args in [vec!["run"]] {
         let output = Command::new(jet_bin())
             .args(&args)
             .current_dir(&dir)

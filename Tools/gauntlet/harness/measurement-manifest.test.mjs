@@ -203,41 +203,6 @@ function repoSourcePath(relative) {
   return resolved;
 }
 
-function passedTierTrace() {
-  const rows = [{ function: "fixture", tier: "native", reason: null, millis: 0.001 }];
-  return {
-    status: "passed",
-    channel: "compiler_owned_sidecar",
-    rows,
-    native_rows: 1,
-    interp_rows: 0,
-    whole_program_deopt: false,
-    invocations: [{
-      command: ["jet", "run", "run.jet", "--"],
-      exit_code: 0,
-      rows,
-      native_rows: 1,
-      interp_rows: 0,
-      whole_program_deopt: false,
-    }],
-  };
-}
-
-test("run-tier validation rejects untrusted or mixed trace evidence", () => {
-  const missing = scoreboardFixture();
-  delete missing.result.jet_tiers.run.trace;
-  assert.ok(validateResultShape(missing.result).some((issue) => issue.includes("native tier trace")));
-
-  const mixed = scoreboardFixture();
-  mixed.result.jet_tiers.run.trace.interp_rows = 1;
-  mixed.result.jet_tiers.run.trace.invocations[0].interp_rows = 1;
-  assert.ok(validateResultShape(mixed.result).some((issue) => issue.includes("native tier trace")));
-
-  const untrusted = scoreboardFixture();
-  untrusted.result.jet_tiers.run.trace.channel = "combined_stderr";
-  assert.ok(validateResultShape(untrusted.result).some((issue) => issue.includes("native tier trace")));
-});
-
 test("scoreboard applies the Rust noise band to every Rust rail", () => {
   assert.equal(ratioVerdict(0.99, "rust"), "win");
   assert.equal(ratioVerdict(1, "rust"), "parity");
@@ -477,7 +442,7 @@ function scoreboardFixture({ lossMetrics = [], missingMetrics = [], includeNode 
   };
   const tiers = {
     aot: { status: "ok", verification: { status: "passed", kind: "byte_exact_stdout" }, metrics: rawMetrics("jet") },
-    run: { status: "ok", verification: { status: "passed", kind: "byte_exact_stdout" }, metrics: rawMetrics("jet"), trace: passedTierTrace() },
+    run: { status: "ok", verification: { status: "passed", kind: "byte_exact_stdout" }, metrics: rawMetrics("jet") },
     dev: { status: "unavailable", metrics: {} },
   };
   const result = {
@@ -500,21 +465,6 @@ function scoreboardFixture({ lossMetrics = [], missingMetrics = [], includeNode 
     manifest: { corpus: { allowed_uncovered_cells: [] }, loss_owners: {} },
   };
 }
-
-test("successful run tiers require compiler-owned native trace evidence", () => {
-  const missing = scoreboardFixture();
-  delete missing.result.jet_tiers.run.trace;
-  assert.ok(validateResultShape(missing.result).some((issue) => issue.includes("native tier trace")));
-
-  const mixed = scoreboardFixture();
-  mixed.result.jet_tiers.run.trace.interp_rows = 1;
-  mixed.result.jet_tiers.run.trace.invocations[0].interp_rows = 1;
-  assert.ok(validateResultShape(mixed.result).some((issue) => issue.includes("native tier trace")));
-
-  const untrusted = scoreboardFixture();
-  untrusted.result.jet_tiers.run.trace.channel = "combined_stderr";
-  assert.ok(validateResultShape(untrusted.result).some((issue) => issue.includes("native tier trace")));
-});
 
 
 function fixturePublication(fixture, scoreboard) {

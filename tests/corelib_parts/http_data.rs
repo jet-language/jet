@@ -18,10 +18,10 @@ fn run() {
     sender :: email.address("sender@example.com") ?? panic("sender")
     visible :: email.address("visible@example.net") ?? panic("visible")
     hidden :: email.address("hidden@example.org") ?? panic("hidden")
-    message :: email.message(~sender, [~visible], [~hidden], "subject", "body", HTML{""}, [Attachment]{}) ?? panic("message")
-    original_bytes :: email.serialize(~message) ?? panic("serialize original")
+    message :: email.message(sender.copy(), [visible.copy()], [hidden.copy()], "subject", "body", HTML{""}, [Attachment]{}) ?? panic("message")
+    original_bytes :: email.serialize(message.copy()) ?? panic("serialize original")
     default_envelope :: message.envelope()
-    envelope :: email.envelope(sender, [~hidden]) ?? panic("envelope")
+    envelope :: email.envelope(sender, [hidden.copy()]) ?? panic("envelope")
     replaced :: message.with_envelope(envelope) ?? panic("replace")
     bytes :: email.serialize(replaced) ?? panic("serialize")
     start_tls :: email.SMTPSecurity.StartTLS
@@ -70,7 +70,7 @@ fn run() {
     assert_eq!(stdout, "true\ntrue\ntrue\n2\ntrue\nsmtp.example.com\n1\nmatched\ntls-error\ntrue\n");
     let file = dir.join("email_policy.jet");
     fs::write(&file, src).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout: dev_stdout, stderr: dev_stderr, exit_code } => {
             assert_eq!((exit_code, dev_stdout, dev_stderr), (0, stdout, String::new()));
         }
@@ -94,7 +94,7 @@ fn run() {
 "#,
     );
     assert!(
-        out.rust.contains(".to_string_value()"),
+        out.rust.contains(".__jet_to_string()"),
         "typed URL should render to String at HTTP boundary:\n{}",
         out.rust
     );
@@ -1111,11 +1111,11 @@ fn run() {
     let source = dir.join("data_group_collision.jet");
     fs::write(&source, src).unwrap();
     let jit = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--trace-tiers", source.to_str().unwrap()])
+        .args(["run", source.to_str().unwrap()])
         .current_dir(&dir)
         .env("NO_COLOR", "1")
         .env("JET_STORE_DIR", dir.join("jit-cache"))
-        .env("JET_RUN_CACHE_DIR", dir.join("jit-run-cache"))
+        .env("JET_STORE_DIR", dir.join("jit-run-cache"))
         .output()
         .unwrap();
     assert!(
@@ -1125,7 +1125,7 @@ fn run() {
     );
     assert_eq!(String::from_utf8_lossy(&jit.stdout), stdout);
 
-    match jet::Interpreter::dev_iteration(source.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(source.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: dev_stdout,
             stderr: dev_stderr,
@@ -1473,5 +1473,45 @@ fn io_prompt_helpers_validate_choices_and_refuse_non_tty_secrets() {
         );
     }
 
+    let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn checked_sql_query_keeps_ordered_scalar_bindings() {
+    if !common::have_rustc() {
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("jet_checked_query_bindings_{}", std::process::id()));
+    fs::create_dir_all(&dir).unwrap();
+    let (code, stdout, stderr) = build_and_run(
+        &dir,
+        "checked_bindings",
+        r#"
+use core.encoding.csv as csv
+use core.files as files
+use core.testing as testing
+#Codable
+struct Row { name: String, amount: Int }
+fn run() {
+    rows :: [Row]{Row{name: "ordinary", amount: 40}, Row{name: "x' OR amount > 0", amount: 80}}
+    threshold :: 50
+    selected :: rows.query(SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("numeric query")
+    print(selected.len())
+    needle :: "x' OR amount > 0"
+    exact :: rows.query(SQL{"SELECT * FROM rows WHERE name = {needle}"}).collect() ?? panic("text query")
+    print(exact.len())
+    print(exact[0].amount)
+    root :: testing.temp_dir("checked-query-bindings")
+    path :: Path.from(root).join("rows.csv").to_string()
+    files.write(path, "name,amount\nordinary,40\nother,80\n") ?? panic("fixture")
+    file_rows :: csv.query<Row>(path, SQL{"SELECT * FROM rows WHERE amount > {threshold}"}).collect() ?? panic("file query")
+    print(file_rows.len())
+}
+"#,
+        &[],
+        None,
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "1\n1\n80\n1\n");
     let _ = fs::remove_dir_all(&dir);
 }

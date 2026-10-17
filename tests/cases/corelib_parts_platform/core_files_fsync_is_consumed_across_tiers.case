@@ -1,0 +1,16 @@
+# Port of corelib_parts/platform.rs:335-397. ORACLE-LITERAL lines389/394, not captured/re-blessed.
+# Fresh {work} has no journal before the first run; later runs remove the prior journal as the original does.
+# PENDING-GRAMMAR: remove, file exact equality, stream label equality.
+fixture: fixtures/core_files_fsync_is_consumed_across_tiers
+step default: jet run {work}/fsync.jet
+stdout: = core_files_fsync_is_consumed_across_tiers.out
+remove: owned/closure.journal
+step: jet run --interpret {work}/fsync.jet
+stdout: = core_files_fsync_is_consumed_across_tiers.out
+stdout: == default # Original interpreter/default equality.
+remove: owned/closure.journal
+step: jet run --release {work}/fsync.jet
+stdout: = core_files_fsync_is_consumed_across_tiers.out
+stdout: == default # Original release/default equality.
+file: owned/closure.journal exists
+file: owned/closure.journal = core_files_fsync_is_consumed_across_tiers.journal.out

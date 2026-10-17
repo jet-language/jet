@@ -1,0 +1,76 @@
+#Target(Web)
+enum Toggle { On Off }
+
+#Target(JS)
+fn make_result(flag: Bool) -> Int Err! {
+    if flag -> return Ok(7)
+    return Err("x")
+}
+#Target(JS)
+fn make_opt(flag: Bool) -> Int? {
+    if flag -> return .Val(3)
+    return .None
+}
+#Target(JS)
+fn classify(flag: Bool) -> Int {
+    if make_result(flag) == {
+        .Ok(n) -> return n
+        .Err(_) -> return -1
+    }
+}
+#Target(JS)
+fn maybe(flag: Bool) -> Int {
+    x :: make_opt(flag)
+    if x == .None { return 0 }
+    if x == .Val(n) { return n }
+    return -1
+}
+#Target(JS)
+fn js_make_toggle(flag: Bool) -> Toggle {
+    if flag { return .On }
+    return .Off
+}
+#Target(JS)
+fn js_matches_and(flag: Bool) -> Int {
+    x :: make_opt(flag)
+    toggle :: js_make_toggle(flag)
+    if x == .Val(n) && toggle == .On && flag { return n }
+    return 0
+}
+#Target(Wasm)
+fn wasm_make_result(flag: Bool) -> Int Err! {
+    if flag -> return Ok(7)
+    return Err("x")
+}
+#Target(Wasm)
+fn wasm_make_opt(flag: Bool) -> Int? {
+    if flag -> return .Val(3)
+    return .None
+}
+#WasmExport
+fn wasm_classify(flag: Bool) -> Int {
+    if wasm_make_result(flag) == {
+        .Ok(n) -> return n
+        .Err(_) -> return -1
+    }
+}
+#WasmExport
+fn wasm_maybe(flag: Bool) -> Int {
+    x :: wasm_make_opt(flag)
+    if x == .None { return 0 }
+    if x == .Val(n) { return n }
+    return -1
+}
+#Target(Wasm)
+fn wasm_make_toggle(flag: Bool) -> Toggle {
+    if flag { return .On }
+    return .Off
+}
+#WasmExport
+fn wasm_matches_and(flag: Bool) -> Int {
+    x :: wasm_make_opt(flag)
+    toggle :: wasm_make_toggle(flag)
+    if x == .Val(n) && toggle == .On && flag { return n }
+    return 0
+}
+fn run() {}

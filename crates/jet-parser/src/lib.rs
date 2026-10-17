@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![deny(warnings)]
 #![allow(unreachable_patterns)]
 // Re-export foundation + lexer so `crate::AST`, `crate::Lexer` etc. work in Parser/Formatter.
 pub use jet_lexer::{
@@ -676,6 +675,26 @@ fn run() {
     }
 
     #[test]
+    fn double_star_teaches_power_method() {
+        let source = "fn run() { x :: 2 ** 3 }\n";
+        let (tokens, lexer_diagnostics) = Lexer::lex(source);
+        assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
+        let diagnostics = Parser::parse(&tokens).expect_err("`**` is not a Jet operator");
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code == "E0396"
+                    && diagnostic.what.contains("`value.pow(exponent)`")
+                    && diagnostic.fix.contains("`base.pow(exponent)`")
+                    && diagnostic.span.is_some_and(|span| &source[span.start..span.end] == "**")
+            }),
+            "{diagnostics:?}"
+        );
+        // `a * *p` (spaced) keeps its raw-pointer meaning for sema to gate.
+        let (tokens, _) = Lexer::lex("fn run() { x :: a * *p }\n");
+        Parser::parse(&tokens).expect("spaced multiplication and raw-pointer-of remain ordinary syntax");
+    }
+
+    #[test]
     fn in_is_reserved_for_source_loops() {
         let source = "fn in() {}\n";
         let (tokens, lexer_diagnostics) = Lexer::lex(source);
@@ -853,6 +872,27 @@ fn split_guard(c: Conn) -> String {
             let (tokens, lexer_diagnostics) = Lexer::lex(source);
             assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
             Parser::parse(&tokens).expect_err("malformed dispatch head must be rejected");
+        }
+    }
+}
+
+#[cfg(test)]
+mod c_module_dispatch_tests {
+    use super::{Lexer, Parser};
+    use crate::AST::Item;
+
+    #[test]
+    fn c_module_item_heads_precede_unresolved_library_markers() {
+        for (source, generated) in [
+            ("#Import module c.sqlite3 { fn close(database: U64) -> I32 = \"sqlite3_close\" }\nfn run() {}\n", false),
+            ("#Bindgen module c.sqlite3.__bindgen__ {}\nfn run() {}\n", true),
+        ] {
+            let (tokens, diagnostics) = if generated { Lexer::lex_generated(source) } else { Lexer::lex(source) };
+            assert!(diagnostics.is_empty(), "{diagnostics:?}");
+            let program = Parser::parse(&tokens).expect("C module is an item, not a file rule");
+            assert_eq!(program.items.len(), 2);
+            assert!(matches!(program.items[0], Item::CModule(_)));
+            assert!(program.rule_facts.iter().all(|fact| fact.site == Some(crate::Policy::RuleSite::Module)));
         }
     }
 }

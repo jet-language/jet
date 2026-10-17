@@ -1,0 +1,10 @@
+
+use core.files as fs
+fn run() {
+    #Transact(tx) {
+        print("reversible work")
+        tx.on_commit(() -> {
+            fs.write("x", "done") ?? panic("write failed")
+        })
+    }
+}

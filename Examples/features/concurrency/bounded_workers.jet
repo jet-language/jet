@@ -1,6 +1,6 @@
 package {
     name: "bounded_workers"
-    authority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }
+    authority: { holds: { allow: [IO, Mem.Alloc, Time] } }
 }
 
 use core.time as time
@@ -19,7 +19,7 @@ fn run() {
     // A capacity-one buffer accepts the first value. The second sender waits
     // until the receiver drains that slot.
     (sender, values) :: channel<Int>(capacity: 1)
-    second_sender :: ~sender
+    second_sender :: sender.copy()
     (done_sender, done) :: channel<Int>(capacity: 8)
     sender.send(10)
     second :: task {
@@ -40,9 +40,9 @@ fn run() {
     (token_sender, tokens) :: channel<Int>(capacity: 2)
     token_sender.send(1)
     token_sender.send(2)
-    token_sender_two :: ~token_sender
-    token_sender_three :: ~token_sender
-    token_sender_four :: ~token_sender
+    token_sender_two :: token_sender.copy()
+    token_sender_three :: token_sender.copy()
+    token_sender_four :: token_sender.copy()
     token_one :: tokens.receive() ?? panic("token channel closed")
     first :: task use_slot(token_one, token_sender)
     token_two :: tokens.receive() ?? panic("token channel closed")

@@ -1,0 +1,215 @@
+// Shared D-SHAPE-CASE1 / D-ACRO-CASE1 identifier spelling. Moved intact from
+// JetSema so parser recovery and semantic fixes use one canonical algorithm.
+// Existing compiler spellings are retained; there is no compatibility copy.
+use core.text as unicode
+enum SemaNameCase {
+    Pascal
+    Snake
+    Screaming
+}
+
+fn sema_casing_ascii_code(scalar: String) -> Int Never! {
+    bytes :: scalar.bytes()
+    if bytes.len() != 1 -> return -1
+    Int.from_u8(bytes[0])
+}
+
+fn sema_casing_is_upper(scalar: String) -> Bool {
+    code :: sema_casing_ascii_code(scalar)
+    if code >= 0 -> return code >= 65 && code <= 90
+    unicode.upper(scalar) == scalar && unicode.lower(scalar) != scalar
+}
+
+fn sema_casing_is_lower(scalar: String) -> Bool {
+    code :: sema_casing_ascii_code(scalar)
+    if code >= 0 -> return code >= 97 && code <= 122
+    unicode.lower(scalar) == scalar && unicode.upper(scalar) != scalar
+}
+
+fn sema_casing_is_alphabetic(scalar: String) -> Bool {
+    code :: sema_casing_ascii_code(scalar)
+    if code >= 0 -> return (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    unicode.is_alphabetic(scalar)
+}
+
+fn sema_casing_is_alphanumeric(scalar: String) -> Bool {
+    code :: sema_casing_ascii_code(scalar)
+    if code >= 0 -> return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+    unicode.is_alphabetic(scalar) || unicode.is_numeric(scalar)
+}
+
+fn sema_casing_drop_first_byte(text: String) -> String Never! {
+    bytes :: text.bytes()
+    String.from_bytes(bytes.slice(1, bytes.len())) ?? ""
+}
+
+fn sema_casing_trim_leading_underscores(text: String) -> String Never! {
+    body := text
+    loop body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
+    body
+}
+
+fn sema_casing_join(scalars: [String], start: Int, end: Int) -> String Never! {
+    out := ""
+    loop index in start..<end -> out = "{out}{scalars[index]}"
+    out
+}
+
+// The ASCII reading of sema_casing_has_case, straight from the name's bytes
+// (no per-scalar strings); None when the name is not all ASCII.
+fn sema_casing_ascii_has_case(name: String, case: SemaNameCase) -> Bool? Never! {
+    bytes :: name.bytes()
+    count :: bytes.len()
+    loop index in 0..<count {
+        if Int.from_u8(bytes[index]) >= 128 -> return None
+    }
+    if name == "_" -> return Val(true)
+    start := 0
+    if count > 0 && Int.from_u8(bytes[0]) == 95 -> start = 1
+    if start >= count || Int.from_u8(bytes[start]) == 95 || Int.from_u8(bytes[count - 1]) == 95 -> return Val(false)
+    rest :: start + 1
+    loop index in rest..<count {
+        if Int.from_u8(bytes[index]) == 95 && Int.from_u8(bytes[index - 1]) == 95 -> return Val(false)
+    }
+    first :: Int.from_u8(bytes[start])
+    upper :: first >= 65 && first <= 90
+    lower :: first >= 97 && first <= 122
+    if case == {
+        .Pascal -> {
+            if !upper -> return Val(false)
+            loop index in rest..<count {
+                code :: Int.from_u8(bytes[index])
+                if !((code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)) -> return Val(false)
+            }
+        }
+        .Snake -> {
+            if !lower -> return Val(false)
+            loop index in rest..<count {
+                code :: Int.from_u8(bytes[index])
+                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 97 && code <= 122)) -> return Val(false)
+            }
+        }
+        .Screaming -> {
+            if !upper -> return Val(false)
+            loop index in rest..<count {
+                code :: Int.from_u8(bytes[index])
+                if !(code == 95 || (code >= 48 && code <= 57) || (code >= 65 && code <= 90)) -> return Val(false)
+            }
+        }
+    }
+    Val(true)
+}
+
+fn sema_casing_has_case(name: String, case: SemaNameCase) -> Bool {
+    if sema_casing_ascii_has_case(name, case) == .Val(ascii) -> return ascii
+    if name == "_" -> return true
+    body := name
+    if body.starts_with("_") -> body = sema_casing_drop_first_byte(body)
+    if body == "" || body.starts_with("_") || body.ends_with("_") || body.contains("__") -> return false
+    scalars :: unicode.scalars(body)
+    first :: scalars[0]
+    if case == {
+        .Pascal -> {
+            if !(sema_casing_is_upper(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_lower(first))) -> return false
+            loop index in 1..<scalars.len() {
+                if !sema_casing_is_alphanumeric(scalars[index]) -> return false
+            }
+        }
+        .Snake -> {
+            if !(sema_casing_is_lower(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_upper(first))) -> return false
+            loop index in 1..<scalars.len() {
+                scalar :: scalars[index]
+                if scalar != "_" && !(sema_casing_is_alphanumeric(scalar) && !sema_casing_is_upper(scalar)) -> return false
+            }
+        }
+        .Screaming -> {
+            if !(sema_casing_is_upper(first) || (sema_casing_is_alphabetic(first) && !sema_casing_is_lower(first))) -> return false
+            loop index in 1..<scalars.len() {
+                scalar :: scalars[index]
+                if scalar != "_" && !(sema_casing_is_alphanumeric(scalar) && !sema_casing_is_lower(scalar)) -> return false
+            }
+        }
+    }
+    true
+}
+
+// D-ACRO-CASE1=A mechanical word split. Underscore is a hard boundary; a
+// capital run followed by lowercase yields its last capital to the next word
+// (`HTTPHeader` -> `HTTP` + `Header`).
+fn sema_casing_split_words(name: String) -> [String] {
+    words := [String]{}
+    loop segment in name.split("_") {
+        if segment == "" -> next
+        scalars :: unicode.scalars(segment)
+        start := 0
+        index := 0
+        loop index < scalars.len() {
+            if {
+                sema_casing_is_upper(scalars[index]) -> {
+                    run_start := index
+                    loop index < scalars.len() && sema_casing_is_upper(scalars[index]) -> index += 1
+                    if {
+                        index < scalars.len() && sema_casing_is_lower(scalars[index]) && index - run_start > 1 -> {
+                            last_capital :: index - 1
+                            if last_capital > start -> &words.push(sema_casing_join(scalars, start, last_capital))
+                            start = last_capital
+                            loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
+                            &words.push(sema_casing_join(scalars, start, index))
+                            start = index
+                        }
+                        index < scalars.len() && sema_casing_is_lower(scalars[index]) -> {
+                            if run_start > start -> &words.push(sema_casing_join(scalars, start, run_start))
+                            start = run_start
+                            loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
+                            &words.push(sema_casing_join(scalars, start, index))
+                            start = index
+                        }
+                    }
+                }
+                else -> {
+                    loop index < scalars.len() && !sema_casing_is_upper(scalars[index]) -> index += 1
+                    if index > start {
+                        &words.push(sema_casing_join(scalars, start, index))
+                        start = index
+                    }
+                }
+            }
+        }
+        if start < scalars.len() -> &words.push(sema_casing_join(scalars, start, scalars.len()))
+    }
+    words
+}
+
+fn sema_casing_snake_words(name: String) -> String {
+    if name.contains("_") {
+        already_lower := true
+        loop scalar in unicode.scalars(name) {
+            if sema_casing_is_upper(scalar) -> already_lower = false
+        }
+        if already_lower -> return name.copy()
+    }
+    words := [String]{}
+    loop word in sema_casing_split_words(name) -> &words.push(unicode.lower(word))
+    words.join("_")
+}
+
+fn sema_casing_pascal_words(name: String) -> String {
+    out := ""
+    loop segment in name.split("_") {
+        if segment == "" -> next
+        scalars :: unicode.scalars(segment)
+        out = "{out}{unicode.upper(scalars[0])}{sema_casing_join(scalars, 1, scalars.len())}"
+    }
+    out
+}
+
+fn sema_casing_canonical(name: String, case: SemaNameCase) -> String {
+    leading :: if name.starts_with("_") -> "_" else -> ""
+    body :: sema_casing_trim_leading_underscores(name)
+    out :: if case == {
+        .Pascal -> sema_casing_pascal_words(body)
+        .Snake -> sema_casing_snake_words(body)
+        .Screaming -> unicode.upper(sema_casing_snake_words(body))
+    }
+    "{leading}{out}"
+}

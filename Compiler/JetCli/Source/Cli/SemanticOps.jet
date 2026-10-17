@@ -1,0 +1,189 @@
+// crates/jet-semindex/src/SemanticOps.rs: persisted, checkpoint-bound
+// semantic intent. Hand edits never manufacture a rename receipt.
+use core.files as cli_files
+use core.encoding.json as cli_sem_json
+use jet_driver.JetDriverCompileMode
+
+struct JetCLISemOpTarget {
+    stable_id: String
+    before: String
+    after: String
+    kind: String
+    module_path: String
+}
+
+struct JetCLISemOpFile {
+    path: String
+    before_hash: String
+    after_hash: String
+}
+
+struct JetCLISemOp {
+    kind: String
+    rule_id: String?
+    from: String?
+    to: String?
+    node: String?
+    match_template: String?
+    replace_template: String?
+    targets: [JetCLISemOpTarget]
+    files: [JetCLISemOpFile]
+}
+
+fn jet_cli_sem_json_field(value: Dyn, name: String) -> Dyn? Never! {
+    if value == .Object(fields) {
+        loop field in fields {
+            if field.key == name -> return Val(field.value)
+        }
+    }
+    None
+}
+
+fn jet_cli_sem_json_text(value: Dyn, name: String) -> String? Never! {
+    field :: jet_cli_sem_json_field(value, name) ?? return None
+    if field == .Text(text) -> return Val(text)
+    None
+}
+
+fn jet_cli_sem_json_array(value: Dyn, name: String) -> [Dyn]? Never! {
+    field :: jet_cli_sem_json_field(value, name) ?? return None
+    if field == .Array(items) -> return Val(items)
+    None
+}
+
+fn jet_cli_sem_same_hash(recorded: String, current: String) -> Bool Never! {
+    prefixed_current :: "sha256-{current}"
+    prefixed_recorded :: "sha256-{recorded}"
+    recorded == current || recorded == prefixed_current || current == prefixed_recorded
+}
+
+fn jet_cli_sem_normalize(path: String) -> String {
+    cli_files.realpath(path) ?? if path.starts_with("/") -> path else -> "{cli_files.cwd() ?? "."}/{path}"
+}
+
+fn jet_cli_sem_parse_op(value: Dyn, files: [JetCLISemOpFile]) -> JetCLISemOp? Never! {
+    kind :: jet_cli_sem_json_text(value, "kind") ?? return None
+    targets := [JetCLISemOpTarget]{}
+    loop row in (jet_cli_sem_json_array(value, "targets") ?? [Dyn]{}) {
+        stable :: jet_cli_sem_json_text(row, "stable_id") ?? next
+        before :: jet_cli_sem_json_text(row, "before") ?? next
+        after :: jet_cli_sem_json_text(row, "after") ?? next
+        target_kind :: jet_cli_sem_json_text(row, "kind") ?? next
+        path :: jet_cli_sem_json_text(row, "module_path") ?? next
+        &targets.push(JetCLISemOpTarget{stable_id: stable, before: before, after: after, kind: target_kind, module_path: path})
+    }
+    Val(JetCLISemOp{kind: kind, rule_id: jet_cli_sem_json_text(value, "rule_id"), from: jet_cli_sem_json_text(value, "from"), to: jet_cli_sem_json_text(value, "to"), node: jet_cli_sem_json_text(value, "node"), match_template: jet_cli_sem_json_text(value, "match"), replace_template: jet_cli_sem_json_text(value, "replace"), targets: targets, files: files})
+}
+
+fn jet_cli_sem_ops_for_file(raw: String, source_hash: String) -> [JetCLISemOp] {
+    path :: jet_cli_sem_normalize(raw)
+    directory := jet_cli_parent(path)
+    output := [JetCLISemOp]{}
+    loop {
+        root :: directory ?? break
+        receipts :: "{root}/.jet/codemods"
+        names := [String]{}
+        loop entry in (cli_files.list_dir(receipts) ?? [cli_files.DirEntry]{}) -> &names.push(entry.name)
+        &names.sort()
+        loop name in names {
+            receipt :: "{receipts}/{name}"
+            if !name.ends_with(".log.json") || !cli_files.is_file(receipt) -> next
+            text :: cli_files.read(receipt) ?? next
+            value :: cli_sem_json.parse(text) ?? next
+            rows :: jet_cli_sem_json_array(value, "files") ?? next
+            files := [JetCLISemOpFile]{}
+            matches := false
+            loop row in rows {
+                file_path :: jet_cli_sem_json_text(row, "path") ?? next
+                before :: jet_cli_sem_json_text(row, "before_hash") ?? next
+                after :: jet_cli_sem_json_text(row, "after_hash") ?? next
+                normalized :: jet_cli_sem_normalize(if file_path.starts_with("/") -> file_path else -> "{root}/{file_path}")
+                &files.push(JetCLISemOpFile{path: normalized, before_hash: before, after_hash: after})
+                if normalized == path && (jet_cli_sem_same_hash(before, source_hash) || jet_cli_sem_same_hash(after, source_hash)) {
+                    matches = true
+                }
+            }
+            if !matches -> next
+            loop row in (jet_cli_sem_json_array(value, "semantic_ops") ?? [Dyn]{}) {
+                if jet_cli_sem_parse_op(row, files) == .Val(operation) -> &output.push(operation)
+            }
+        }
+        directory = jet_cli_parent(root)
+    }
+    output
+}
+
+fn jet_cli_sem_op_transition(operation: JetCLISemOp, paths: [String], before: String, after: String) -> Bool {
+    loop file in operation.files {
+        if !jet_cli_sem_same_hash(file.before_hash, before) || !jet_cli_sem_same_hash(file.after_hash, after) {
+            next
+        }
+        loop path in paths {
+            if jet_cli_sem_normalize(file.path) == jet_cli_sem_normalize(path) -> return true
+        }
+    }
+    false
+}
+
+fn jet_cli_sem_op_value(operation: JetCLISemOp) -> JetCLIStatusValue Never! {
+    jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(operation.kind)),
+        jet_cli_status_field("rule_id", jet_cli_status_optional_text(operation.rule_id)),
+        jet_cli_status_field("from", jet_cli_status_optional_text(operation.from)),
+        jet_cli_status_field("to", jet_cli_status_optional_text(operation.to)),
+        jet_cli_status_field("node", jet_cli_status_optional_text(operation.node)),
+        jet_cli_status_field("match", jet_cli_status_optional_text(operation.match_template)),
+        jet_cli_status_field("replace", jet_cli_status_optional_text(operation.replace_template)),
+    },
+    )
+}
+
+// SemanticOps.rs semantic_rename_ops: only the tool's checked before/after
+// snapshots can record rename intent; ordinary review never infers a receipt.
+fn jet_cli_semantic_rename_ops(before: [JetCLISemDefinitionFact], after: [JetCLISemDefinitionFact]) -> [JetCLISemOp] Never! {
+    used := [Int]{}
+    operations := [JetCLISemOp]{}
+    loop (old_index, old) in before {
+        candidates := [Int]{}
+        loop (new_index, candidate) in after {
+            if !used.contains(new_index) && old.kind == candidate.kind && old.module_path == candidate.module_path && old.signature_id == candidate.signature_id && old.name != candidate.name {
+                &candidates.push(new_index)
+            }
+        }
+        if candidates.len() != 1 -> next
+        index :: candidates[0]
+        candidate :: after[index]
+        reverse := 0
+        loop (other_index, other) in before {
+            if other_index == old_index || (other.kind == candidate.kind && other.module_path == candidate.module_path && other.signature_id == candidate.signature_id && other.name != candidate.name) -> reverse += 1
+        }
+        if reverse != 1 -> next
+        &used.push(index)
+        target :: JetCLISemOpTarget{stable_id: old.stable_id, before: old.human_identity, after: candidate.human_identity, kind: candidate.kind, module_path: candidate.module_path}
+        &operations.push(JetCLISemOp{kind: "rename", rule_id: Val("jet-fix"), from: Val(old.name), to: Val(candidate.name), node: None, match_template: None, replace_template: None, targets: [JetCLISemOpTarget]{target}, files: [JetCLISemOpFile]{}})
+    }
+    operations
+}
+
+// A refused/invalid structural check has no rename authority. Rust's fix
+// receipt then records the exact changed byte region instead.
+fn jet_cli_fix_definition_facts(file: String, source: String) -> [JetCLISemDefinitionFact]? {
+    compiled :: jet_cli_compile_entry(file, false, false, None, JetDriverCompileMode.Doc, Val(source), None) ?? return None
+    if compiled == {
+        .Refused(_) -> return None
+        .Compiled(result, _) -> {
+            if !result.complete || result.internal_problem != None || jet_cli_errors(result.diagnostics).len() > 0 -> return None
+            index :: jet_cli_checked_semindex(result) ?? return None
+            return Val(index.definition_facts)
+        }
+    }
+}
+
+fn jet_cli_fix_semantic_ops(file: String, before: [U8], after: [U8]) -> [JetCLISemOp] {
+    old :: String.from_bytes(before) ?? return [JetCLISemOp]{}
+    new :: String.from_bytes(after) ?? return [JetCLISemOp]{}
+    old_facts :: jet_cli_fix_definition_facts(file, old) ?? return [JetCLISemOp]{}
+    new_facts :: jet_cli_fix_definition_facts(file, new) ?? return [JetCLISemOp]{}
+    jet_cli_semantic_rename_ops(old_facts, new_facts)
+}

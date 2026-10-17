@@ -1,0 +1,112 @@
+// Original test ALGORITHM port: browser.rs133-211 and support.rs37-72.
+// A real TCP client; no mock server, relay file, retries, redirects, or blessed snapshot.
+use core.net as net
+use core.time as time
+use core.files as files
+use core.sys as sys
+
+struct S6BrowserReply {
+    status: Int
+    body: String
+}
+
+fn s6_browser_env(name: String) -> String {
+    sys.get(name) ?? panic("missing client phase variable {name}")
+}
+
+fn s6_browser_request(port: String, method: String, path: String, body: String) -> S6BrowserReply? {
+    stream :: net.tcp_connect("127.0.0.1:{port}") ?? return None
+    net.set_read_timeout(stream, 5000) ?? return None
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    request :: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Content-Type: application/x-www-form-urlencoded{crlf}Content-Length: {body.bytes().len()}{crlf}Connection: close{crlf}{crlf}{body}"
+    stream.write_all(request.bytes()) ?? return None
+    raw := [U8]{}
+    loop {
+        chunk :: net.tcp_read_bytes(stream, 8192) ?? return None
+        if chunk.len() == 0 -> break
+        loop byte in chunk -> &raw.push(byte)
+    }
+    response :: String.from_bytes(raw) ?? return None
+    framed :: response.split_once("{crlf}{crlf}") ?? return None
+    headers :: framed.before.lines().to_list()
+    if headers.len() == 0 -> return None
+    words :: headers[0].split_whitespace().to_list()
+    if words.len() < 2 -> return None
+    status :: words[1].to_int() ?? return None
+    if status < 0 || status > 65535 -> return None
+    Val(S6BrowserReply{status: status, body: framed.after.copy()})
+}
+
+fn s6_browser_nonce(html: String) -> String? {
+    rest :: html.split_once("jetPerfNonce = \"") ?? return None
+    nonce :: rest.after.split_once("\"") ?? return None
+    Val(nonce.before.copy())
+}
+
+fn s6_browser_wait(port: String, path: String, condition: String, previous: String) -> String {
+    started :: time.instant()
+    loop {
+        reply :: s6_browser_request(port, "GET", path, "")
+        if reply == {
+            .Val(value) -> {
+                if value.status == 200 {
+                    body :: value.body.copy()
+                    accepted := false
+                    if condition == "any" -> accepted = true
+                    if condition == "nonempty" -> accepted = body.trim().copy() != ""
+                    if condition == "different" -> accepted = body != previous
+                    if condition == "nonce" -> accepted = s6_browser_nonce(body) != None
+                    if condition == "new_nonce" {
+                        nonce :: s6_browser_nonce(body)
+                        if nonce == {
+                            .Val(next) -> accepted = next != previous
+                            .None -> { _ := 0 }
+                        }
+                    }
+                    if accepted -> return body
+                }
+            }
+            .None -> { _ := 0 }
+        }
+        assert(time.instant() - started < 30s, "GET {path} did not reach expected state")
+        time.sleep(25ms)
+    }
+}
+
+#Test("real devserver browser lifecycle polling and nonce authentication") {
+    port :: s6_browser_env("S6_BROWSER_PORT")
+    phase :: s6_browser_env("S6_BROWSER_PHASE")
+    event :: "class=event&symbol=handlers__init%24handler0&start_ns=10&duration_ns=5&clock_ns=15"
+    if phase == "initial" {
+        html :: s6_browser_wait(port, "/", "any", "")
+        assert(!html.contains("__jetPerfNow"), "normal jet dev timed browser work")
+        assert(!html.contains("/__jet_perf_browser"), "normal jet dev emitted perf beacon")
+        version :: s6_browser_wait(port, "/__jet_dev_version", "nonempty", "")
+        files.write("initial.version", version) ?? panic("record initial version")
+    } else if phase == "attached" {
+        html :: s6_browser_wait(port, "/", "nonce", "")
+        nonce :: s6_browser_nonce(html) ?? panic("attached browser nonce")
+        assert(html.contains("self.__jetPerfNow"))
+        assert(html.contains("navigator.sendBeacon(\"/__jet_perf_browser?nonce=\""))
+        reply :: s6_browser_request(port, "POST", "/__jet_perf_browser?nonce={nonce}", event) ?? panic("beacon POST")
+        assert(reply.status == 204)
+        files.write("attached.nonce", nonce) ?? panic("record attached nonce")
+    } else if phase == "active" {
+        previous :: files.read("initial.version") ?? panic("initial version")
+        active :: s6_browser_wait(port, "/__jet_dev_version", "different", previous)
+        files.write("active.version", active) ?? panic("record active version")
+    } else if phase == "rebuilt" {
+        active :: files.read("active.version") ?? panic("active version")
+        previous_nonce :: files.read("attached.nonce") ?? panic("attached nonce")
+        rebuilt :: s6_browser_wait(port, "/__jet_dev_version", "different", active)
+        assert(rebuilt != active)
+        html :: s6_browser_wait(port, "/", "new_nonce", previous_nonce)
+        nonce :: s6_browser_nonce(html) ?? panic("rebuilt browser nonce")
+        stale :: s6_browser_request(port, "POST", "/__jet_perf_browser?nonce={previous_nonce}", event) ?? panic("stale beacon POST")
+        assert(stale.status == 403)
+        accepted :: s6_browser_request(port, "POST", "/__jet_perf_browser?nonce={nonce}", event) ?? panic("rebuilt beacon POST")
+        assert(accepted.status == 204)
+    } else {
+        panic("unknown client phase {phase}")
+    }
+}

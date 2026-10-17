@@ -1,0 +1,174 @@
+==================
+Functions, bindings and calls
+==================
+
+#Doc("adds a fee")
+pub fn add_fee<T: Numeric>(cents: Int, fee: T) -> Int Err! -[IO]> {
+    total := cents + fee
+    limit :: prep { 1000 }
+    print("total={total}")
+    return total.clamp(0, limit)
+}
+
+---
+
+(source_file
+  (attribute)
+  (paren_expr
+    (string_literal
+      (string_content)))
+  (function_def
+    name: (identifier)
+    type_parameters: (type_parameters
+      (type_identifier)
+      (type_identifier))
+    parameters: (parameters
+      (label
+        name: (identifier))
+      (primitive_type)
+      (label
+        name: (identifier))
+      (type_identifier))
+    (primitive_type)
+    (primitive_type)
+    (effect_row
+      (type_identifier))
+    body: (block
+      (binding
+        name: (identifier))
+      (identifier)
+      (identifier)
+      (binding
+        name: (identifier))
+      (keyword)
+      (block
+        (number_literal))
+      (call_expr
+        function: (identifier)
+        arguments: (arguments
+          (string_literal
+            (string_content)
+            (interpolation
+              (identifier)))))
+      (identifier)
+      (method_call_expr
+        method: (identifier)
+        arguments: (arguments
+          (number_literal)
+          (identifier))))))
+
+==================
+Types, variants and value tables
+==================
+
+struct Point {
+    x: Float
+    tags: [String: Int]
+}
+
+enum Shape {
+    Circle(radius: Float)
+    Square
+}
+
+fn area(shape: Shape) -> Float {
+    if shape == {
+        .Circle(r) -> 3.14 * r * r
+        .Square -> 1.0
+    }
+}
+
+---
+
+(source_file
+  (struct_def
+    name: (type_identifier)
+    body: (block
+      (label
+        name: (identifier))
+      (primitive_type)
+      (label
+        name: (identifier))
+      (map_type
+        (primitive_type)
+        (primitive_type))))
+  (enum_def
+    name: (type_identifier)
+    body: (block
+      (constructor
+        type: (type_identifier)
+        arguments: (arguments
+          (label
+            name: (identifier))
+          (primitive_type)))
+      (type_identifier)))
+  (function_def
+    name: (identifier)
+    parameters: (parameters
+      (label
+        name: (identifier))
+      (type_identifier))
+    (primitive_type)
+    body: (block
+      (identifier)
+      (block
+        (variant
+          name: (type_identifier))
+        (paren_expr
+          (identifier))
+        (number_literal)
+        (identifier)
+        (identifier)
+        (variant
+          name: (type_identifier))
+        (number_literal)))))
+
+==================
+Strings, raw text and contextual words
+==================
+
+use core.files as fs
+
+state Pending {}
+
+fn run() {
+    banner :: """
+    Hello {name}
+    """
+    raw :: ``C:\path\{x}``
+    defer fs.close()
+    next
+}
+
+---
+
+(source_file
+  (identifier)
+  (member_expr
+    field: (identifier))
+  (keyword)
+  (identifier)
+  (decl_head
+    keyword: (identifier)
+    name: (type_identifier))
+  (block)
+  (function_def
+    name: (identifier)
+    parameters: (parameters)
+    body: (block
+      (binding
+        name: (identifier))
+      (multiline_string
+        (string_content)
+        (interpolation
+          (identifier))
+        (string_content))
+      (binding
+        name: (identifier))
+      (raw_string)
+      (control_keyword)
+      (identifier)
+      (method_call_expr
+        method: (identifier)
+        arguments: (arguments))
+      (control_keyword))))

@@ -1,0 +1,235 @@
+// String operations borrow opaque runtime handles in both hosted and static images.
+use jet_foundation.[
+    MIRFieldID,
+    MIRInstruction,
+    MIRPlaceID,
+    MIRPreludeABI,
+    MIRPreludeCall,
+    MIRPreludeFamily,
+    MIRProgram,
+    MIRType,
+    MIRValueID,
+    mir_symbol_name,
+]
+
+fn lower_string_compare(m: &LowerModule, f: &LowerFunction, dst: LIRValueID, condition: LIRCondition, left: LIRValueID, right: LIRValueID) Never! {
+    order :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_string_compare", [LIRValueID]{left, right}, Val(order))
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: dst, condition: condition, left: order, right: zero})
+}
+
+fn lower_string_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .String -> true
+        .Tagged(_, inner) -> lower_string_type(inner)
+        .InlineRange(inner, _, _) -> lower_string_type(inner)
+        .Quantity(inner, _) -> lower_string_type(inner)
+        else -> lower_string_nominal(ty)
+    }
+}
+
+// A `View<str>` (MIRRust.rs is_string_view_type: a borrowed `&str` window
+// into its owner's text) is an owned String handle holding the window's text.
+// Its kernels' owned twins (lower_route_symbol) return the same text, and a
+// window is only read (shown, compared, measured, materialized by `Copy`), so
+// the copy is unobservable; it costs one allocation the zero-copy window
+// avoids.
+fn lower_string_view(ty: MIRType) -> Bool Never! {
+    if ty.kind == .Apply(name, args) {
+        if name.name != "View" || args.len() != 1 -> return false
+        if args[0].kind == .Apply(inner, inner_args) -> return inner.name == "str" && inner_args.len() == 0
+    }
+    false
+}
+
+// The built-in `HTML` (escaped markup) is a String underneath, as MIRRust.rs
+// rust_apply_type spells it.
+fn lower_html_text(ty: MIRType) -> Bool Never! {
+    if ty.kind == .Apply(name, args) -> return name.name == "HTML" && args.len() == 0
+    false
+}
+
+// A nominal held as an owned String handle: a `View<str>` or an `HTML`.
+fn lower_string_nominal(ty: MIRType) -> Bool Never! {
+    lower_string_view(ty) || lower_html_text(ty)
+}
+
+// Text that crosses as a String handle: a String, a `View<str>` or an `HTML`.
+fn lower_text_type(ty: MIRType) -> Bool Never! {
+    ty.kind == .String || lower_string_nominal(ty)
+}
+
+// The runtime kernel a Prelude row's call runs: a `&str` view kernel runs
+// its owned twin, since a `View<str>` is an owned String (lower_string_view).
+fn lower_route_symbol(row: MIRPreludeCall) -> String Never! {
+    symbol :: mir_symbol_name(row.symbol)
+    if symbol == "jet_string_after_view" -> return "jet_string_after"
+    if symbol == "jet_string_before_view" -> return "jet_string_before"
+    if symbol == "jet_string_trim_view" || symbol == "jet_unicode_trim_view" -> return "jet_unicode_trim"
+    symbol
+}
+
+fn lower_string_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, receiver_place: MIRPlaceID?, args: [MIRValueID], aggregate_fields: [MIRFieldID]?) -> Bool Never! {
+    receiver_ty :: lower_value_type(c, receiver) ?? return false
+    if !lower_string_type(receiver_ty) || row.family != .BuiltinMethod -> return false
+    symbol :: mir_symbol_name(row.symbol)
+    // String.equal has the same borrowed equality as `==`, under core.compare.
+    is_equal :: row.module_name == "core.compare" && row.member == "eq" && symbol == "jet_eq"
+    if !is_equal && row.module_name != "core.builtin" -> return false
+    if row.member == "string_cut_last" || row.member == "string_split_once" -> return lower_string_cut(p, c, &m, &f, instruction, row, receiver, args, aggregate_fields)
+    is_len :: (row.member == "len" || row.member == "len_string") && symbol == "jet_char_len"
+    is_bytes :: row.member == "count_bytes" && symbol == "jet_string_count_bytes"
+    is_empty :: row.member == "is_empty" && symbol == "jet_string_is_empty"
+    is_contains :: row.member == "contains" && symbol == "jet_string_contains"
+    is_prefix :: row.member == "string_starts_with" && symbol == "jet_string_starts_with"
+    is_suffix :: row.member == "string_ends_with" && symbol == "jet_string_ends_with"
+    if !is_len && !is_bytes && !is_empty && !is_contains && !is_prefix && !is_suffix && !is_equal -> return false
+    arity :: if is_len || is_bytes || is_empty -> 1 else -> 2
+    if row.abi != .Value || row.signature.arity != arity || args.len() != arity - 1 || aggregate_fields != None {
+        lower_fail(&m, &f, "this String builtin method shape is not lowered at O0 yet")
+        return true
+    }
+    result_ty :: instruction.ty ?? {
+        lower_fail(&m, &f, "a String builtin method without a result is not lowered at O0 yet")
+        return true
+    }
+    // count_bytes checks as Int (BuiltinMethods.jet registry row); the native
+    // byte length converts to it below, as MIRRust adapts the i64 kernel.
+    bytes_ok :: lower_repr(p, result_ty) == .Word || lower_is_exact_int(result_ty)
+    if (is_len && !lower_is_exact_int(result_ty)) || (is_bytes && !bytes_ok) || (!is_len && !is_bytes && result_ty.kind != .Bool) {
+        lower_fail(&m, &f, "this String builtin method result type is not lowered at O0 yet")
+        return true
+    }
+    lowered := [LIRValueID]{}
+    value :: lower_use(&m, &f, receiver) ?? return true
+    &lowered.push(value)
+    loop arg in args {
+        ty :: lower_value_type(c, arg) ?? {
+            lower_fail(&m, &f, "a String builtin method argument without a checked type is not lowered at O0 yet")
+            return true
+        }
+        if !lower_string_type(ty) {
+            lower_fail(&m, &f, "this String builtin method argument type is not lowered at O0 yet")
+            return true
+        }
+        arg_value :: lower_use(&m, &f, arg) ?? return true
+        &lowered.push(arg_value)
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    if is_bytes {
+        // Collections.rs jet_string_count_bytes: the UTF-8 byte length.
+        native :: lower_word(&f)
+        lower_call_runtime(&m, &f, "jet_rt_string_byte_len", lowered, Val(native))
+        if lower_is_exact_int(result_ty) {
+            lower_convert_exact(&m, &f, dst, native, "jet_int_owned_from_i64", false)
+        } else {
+            lower_emit(&f, LIRInst.Move{dst: dst, src: native})
+        }
+        return true
+    }
+    // Rust MIRRust.rs:26912-26916 adapts jet_char_len's native integer to Int.
+    // A scalar count cannot exceed the allocated String's inline-range byte length.
+    lower_call_runtime(&m, &f, if is_equal -> "jet_rt_string_eq" else -> symbol, lowered, Val(dst))
+    true
+}
+
+// `text.split_once(sep)` / `text.cut_last(sep)` (UnicodeString.rs
+// jet_unicode_split_once / jet_unicode_cut_last): the text before and after
+// the first / last occurrence of `sep`, None when there is none. The shared
+// Text adapters make the same find / rfind cut: jet_text_parse_split_once
+// reports whether it found one; jet_text_parse_rfind's -1 is the miss, and
+// jet_text_parse_rpartition then cuts at that same last occurrence.
+fn lower_string_cut(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID], aggregate_fields: [MIRFieldID]?) -> Bool Never! {
+    last :: row.member == "string_cut_last"
+    unsupported :: "builtin method {row.member} of this shape is not lowered at O0 yet"
+    if args.len() != 1 || aggregate_fields != None || row.abi != .Value {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    inner :: lower_option_inner(result_ty) ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    members :: lower_inline_members(p, inner)
+    separator_ty :: lower_value_type(c, args[0]) ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    if !lower_is_inline(p, inner) || members.len() != 2 || !lower_text_type(members[0].ty) || !lower_text_type(members[1].ty) || !lower_string_type(separator_ty) {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    cut :: lower_runtime_route(if last -> "jet_text_parse_rpartition" else -> "jet_text_parse_split_once") ?? {
+        lower_fail(&m, &f, unsupported)
+        return true
+    }
+    text :: lower_use(&m, &f, receiver) ?? return true
+    separator :: lower_use(&m, &f, args[0]) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return true
+    no_args :: [LIRValueID]{}
+    found_block :: lower_new_block(&f)
+    missing :: lower_new_block(&f)
+    merge :: lower_new_block(&f)
+    zero :: lower_const(&f, 0)
+    slot :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: slot, size: 24, align: 8})
+    loop index in 0..<3 -> lower_emit(&f, LIRInst.Store{base: slot, offset: 8 * index, value: zero})
+    cut_args := [LIRValueID]{text, separator}
+    loop index in 0..<3 -> &cut_args.push(lower_address(&f, slot, 8 * index))
+    found :: lower_flag(&f)
+    if last {
+        finder :: lower_runtime_route("jet_text_parse_rfind") ?? {
+            lower_fail(&m, &f, unsupported)
+            return true
+        }
+        at :: lower_word(&f)
+        lower_call_runtime(&m, &f, finder.export, [LIRValueID]{text, separator}, Val(at))
+        lower_emit(&f, LIRInst.Compare{dst: found, condition: LIRCondition.Ge, left: at, right: zero})
+        lower_seal(&f, LIRTerminator.Branch{condition: found, then_target: lower_target(found_block, no_args), else_target: lower_target(missing, no_args)})
+        lower_start(&f, found_block, no_args)
+        lower_call_runtime(&m, &f, cut.export, cut_args, None)
+        middle :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: middle, base: slot, offset: 8})
+        lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{middle}, None)
+    } else {
+        lower_call_runtime(&m, &f, cut.export, cut_args, None)
+        flag :: lower_word(&f)
+        lower_emit(&f, LIRInst.Load{dst: flag, base: slot, offset: 0})
+        lower_emit(&f, LIRInst.Compare{dst: found, condition: LIRCondition.Ne, left: flag, right: zero})
+        lower_seal(&f, LIRTerminator.Branch{condition: found, then_target: lower_target(found_block, no_args), else_target: lower_target(missing, no_args)})
+        lower_start(&f, missing, no_args)
+        loop index in 1..<3 {
+            part :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.Load{dst: part, base: slot, offset: 8 * index})
+            lower_call_runtime(&m, &f, "jet_rt_string_drop", [LIRValueID]{part}, None)
+        }
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{null})})
+        lower_start(&f, found_block, no_args)
+    }
+    // Some((before, after)): the box holds the inline tuple at offset 0.
+    head :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: head, base: slot, offset: if last -> 0 else -> 8})
+    tail :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: tail, base: slot, offset: 16})
+    box :: lower_pointer(&f)
+    lower_alloc(&m, &f, box, lower_option_box_size(p, inner))
+    lower_emit(&f, LIRInst.Store{base: box, offset: members[0].offset, value: head})
+    lower_emit(&f, LIRInst.Store{base: box, offset: members[1].offset, value: tail})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{box})})
+    if last {
+        lower_start(&f, missing, no_args)
+        null :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Const{dst: null, value: 0})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{null})})
+    }
+    lower_start(&f, merge, [LIRValueID]{dst})
+    true
+}
+

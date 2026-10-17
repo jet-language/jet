@@ -1,0 +1,22 @@
+use core.encoding.json as json
+
+#Codable
+struct ListReport {
+    schema: String
+    status: String
+}
+
+impl ListReport {
+    fn label(self) -> String { self.status }
+}
+
+fn list_json(status: String) -> String {
+    return json.to_string(ListReport{schema: "jet.report/v1", status: status})
+}
+
+fn mk() -> ListReport { ListReport{schema: "jet.report/v1", status: "ok"} }
+
+fn round_trip(wire: String) -> String {
+    report :: json.decode<ListReport>(wire) ?? panic("declaring module decode")
+    return report.status
+}

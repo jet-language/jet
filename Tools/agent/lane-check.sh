@@ -19,6 +19,8 @@
 # Usage:
 #   Tools/agent/lane-check.sh                 # whole workspace, all targets
 #   Tools/agent/lane-check.sh -p jet-sema     # one crate while iterating
+#   Tools/agent/lane-check.sh --runtime-generators <allparts.rs>
+#     Runtime-only freshness gate (no Cargo); invoke through cheap.sh.
 #
 # Reading the output: errors are grouped by file. An error in a file YOU did not
 # touch belongs to another worker editing the same checkout — report it in your
@@ -27,11 +29,31 @@ set -uo pipefail
 
 cd "$(dirname "$0")/../.." || exit 1
 
+if [ "${1:-}" = "--runtime-generators" ]; then
+  if [ "$#" -ne 2 ]; then
+    echo "usage: lane-check.sh --runtime-generators <allparts.rs>" >&2
+    exit 64
+  fi
+  Tools/agent/jet-env node Tools/agent/gen-runtime.mjs "$2" --check
+  code=$?
+  if [ "$code" -eq 0 ]; then echo "CHECK OK"
+  else echo "CHECK FAILED — runtime generators exited $code"
+  fi
+  exit "$code"
+fi
+
 # The default run also checks the feature-gated bootstrap host
 # (Compiler/Bootstrap/Host), so drift against the Jet compiler fails here (#3874).
 if [ "$#" -eq 0 ]; then
   set -- --workspace --all-targets --features jet/compiler-bootstrap-host
 fi
+
+# Independent Cargo targets must all report their errors in one check.
+keep_going=0
+for arg in "$@"; do
+  if [ "$arg" = --keep-going ]; then keep_going=1; break; fi
+done
+if [ "$keep_going" -eq 0 ]; then set -- --keep-going "$@"; fi
 
 # /tmp is RAM-backed here, and a check can fork rustc: keep scratch on disk and
 # skip incremental artifacts, which reached 24G in one target dir.
@@ -64,8 +86,13 @@ run_check() {
   timeout 1800 Tools/agent/jet-env cargo check "$@" >"$tmp" 2>&1
 }
 
-tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+tmp="$(mktemp "$scratch/jet-lane-check.XXXXXX")"
+# Keep the complete stream even when the caller interrupts the check. A
+# missing .rc after SIGKILL means incomplete evidence, never success.
+trap 'status=$?; printf "%s\n" "$status" > "$tmp.rc"; printf "lane-check: complete Cargo log: %s\n" "$tmp" >&2' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Take any free slot; if every slot is busy, block on slot 1 rather than spin.
 code=0
@@ -100,6 +127,7 @@ for (let i = 0; i < lines.length; i += 1) {
   const head = lines[i];
   let where = "";
   for (let j = i + 1; j < Math.min(i + 6, lines.length); j += 1) {
+    if (/^error(\[|:)/.test(lines[j])) break;
     const m = lines[j].match(/^\s*-->\s+(\S+)/);
     if (m) { where = m[1]; break; }
   }
@@ -111,24 +139,24 @@ if (errors.length === 0 && code === 0) {
 }
 if (errors.length === 0) {
   console.log(`CHECK FAILED — cargo check exited ${code} without a compiler diagnostic`);
-  console.log(text.slice(-1600));
+  process.stdout.write(text);
   process.exit(0);
 }
 const byFile = new Map();
 for (const e of errors) {
-  const key = e.where || "(no location)";
+  const key = e.where.replace(/:\d+:\d+$/, "") || "(no location)";
   if (!byFile.has(key)) byFile.set(key, []);
-  byFile.get(key).push(e.head);
+  byFile.get(key).push(e);
 }
 console.log(`CHECK FAILED — ${errors.length} error(s) in ${byFile.size} file(s)`);
-for (const [file, heads] of byFile) {
+for (const [file, entries] of byFile) {
   console.log(`\n${file}`);
-  for (const h of [...new Set(heads)].slice(0, 6)) console.log(`  ${h}`);
+  for (const e of entries) console.log(`  ${e.where ? `${e.where}: ` : ""}${e.head}`);
 }
-const first = errors[0].head;
-const at = text.indexOf(first);
-console.log("\n--- first error in full ---");
-console.log(text.slice(at, at + 1600));
+console.log("\n--- complete compiler output ---");
+process.stdout.write(text);
 NODE
+report_code=$?
+if [ "$code" -eq 0 ] && [ "$report_code" -ne 0 ]; then code="$report_code"; fi
 
 exit "$code"

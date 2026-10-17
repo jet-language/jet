@@ -1,0 +1,102 @@
+use core.files as files
+use core.sys as sys
+use core.process as process
+
+#Test("no-nix modifier parses only on its process step and defaults to no network") {
+    root :: cases_test_root("no-nix-grammar")
+    cases_test_source(root, "modes", "step: jetpack env\nisolate: no-nix\nstep: jetpack env\nisolate: no-nix network=enabled\nstep: jetpack env\nisolate: no-nix network=disabled\nstep: jetpack env\n")
+    plan :: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("modes").path)) ?? panic("read case"))
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[0].isolate, "no-nix")
+    assert_eq(plan.steps[0].isolate_network, "disabled")
+    assert_eq(plan.steps[1].isolate_network, "enabled")
+    assert_eq(plan.steps[2].isolate_network, "disabled")
+    assert_eq(plan.steps[3].isolate, "")
+    loop (i, source) in ["isolate: no-nix\n", "step: jetpack env\nisolate: other\n", "step: jetpack env\nisolate: no-nix enabled\n", "step: jetpack env\nisolate: no-nix network=other\n", "step: jetpack env\nisolate: no-nix network=enabled extra\n", "step: jetpack env\nisolate: no-nix\nisolate: no-nix\n", "copy: a b\nisolate: no-nix\n", "remove: a\nisolate: no-nix\n"] {
+        cases_test_source(root, "bad-{i}", source)
+        invalid :: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("bad-{i}").path)) ?? panic("read invalid case"))
+        assert(invalid.error != "")
+    }
+    files.remove_all(root) ?? panic("remove no-nix grammar scratch")
+}
+
+#Test("no-nix launcher reexec preserves argv stdin environment cwd and both network modes") {
+    if kit_no_nix_required() != None -> return
+    root :: cases_test_root("no-nix-reexec")
+    asset :: files.join(files.cwd() ?? panic("cwd"), "Tools/testkit/assets/no-nix.sh")
+    kit_exec_copy_file(asset, files.join(root, "Tools/testkit/assets/no-nix.sh"))
+    kit_exec_write(files.join(root, "tests/cases/group/input.stdin"), "two words\n")
+    kit_exec_write(files.join(root, "tests/cases/group/expected.out"), "two words|value|argument with spaces\n")
+    pid :: process.current_pid()
+    loop name in ["enabled", "disabled"] {
+        relation :: if name == "enabled" -> "test" else -> "! test"
+        cases_test_source(root, name, "env: TOKEN=value\nstep: jetpack -c 'set -eu; test ! -e /nix/store; {relation} /proc/self/ns/net -ef /proc/{pid}/ns/net; read line; echo \"$line|$TOKEN|$1\"' scenario 'argument with spaces'\nisolate: no-nix network={name}\nstdin: input.stdin\nstdout: = expected.out\nstderr: empty\n")
+        context :: cases_test_context(root, files.join(root, "scratch-{name}"))
+        outcome :: kit_cases_run(cases_test_entry(name), context)[0]
+        assert_eq(outcome.verdict.status, "PASS")
+        assert_eq(outcome.run.code, 0)
+    }
+    files.remove_all(root) ?? panic("remove no-nix reexec scratch")
+}
+
+#Test("no-nix preparation derives wrapper flags and preserves ELF image size and mode") {
+    if kit_no_nix_required() != None -> return
+    root :: cases_test_root("no-nix-elf")
+    cases_test_source(root, "image", "step: jetpack env\nisolate: no-nix network=disabled\n")
+    plan :: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("image").path)) ?? panic("read image case"))
+    context :: cases_test_context(root, root)
+    step :: plan.steps[0]
+    argv :: kit_no_nix_argv(context.env, [context.env.jetpack, "env"], root, step.isolate_network) ?? panic("{err}")
+    assert(kit_expect_named(argv, "--user"))
+    assert(kit_expect_named(argv, "--map-root-user"))
+    assert(kit_expect_named(argv, "--mount"))
+    assert(kit_expect_named(argv, "private"))
+    assert(kit_expect_named(argv, "--net"))
+    bytes := [U8]{127, 69, 76, 70}
+    loop byte in "/nix/store/not-loader".bytes() -> &bytes.push(byte)
+    &bytes.push(U8{0})
+    interpreter_offset :: bytes.len()
+    loop byte in "/nix/store/aaaaaaaa-glibc/lib/ld-linux-x86-64.so.2".bytes() -> &bytes.push(byte)
+    &bytes.push(U8{0})
+    loop byte in "tail".bytes() -> &bytes.push(byte)
+    source :: files.join(root, "image")
+    destination :: files.join(root, "patched")
+    files.write_bytes(source, bytes) ?? panic("write ELF")
+    files.chmod(source, 0o751) ?? panic("chmod ELF")
+    assert_eq(kit_no_nix_patch(source, destination) ?? panic("{err}"), destination)
+    patched :: files.read_bytes(destination) ?? panic("read patched ELF")
+    assert_eq(patched.len(), bytes.len())
+    assert_eq((files.stat(destination) ?? panic("stat patch")).mode % 512, 0o751)
+    assert(kit_no_nix_matches(patched, interpreter_offset, "/proc/self/fd/9".bytes()))
+    files.remove_all(root) ?? panic("remove no-nix ELF scratch")
+}
+
+#Test("env-clear drops host and kit base values before explicit case and step overlays") {
+    root :: cases_test_root("env-clear")
+    cases_test_source(root, "cleared", "env: KEEP=case\nstep: jet -c 'set -eu; test -z \"${{HOME+x}}\"; test -z \"${{NO_COLOR+x}}\"; printf \"%s|%s|%s\" \"$KEEP\" \"$TOKEN\" \"$1\"' scenario {{env:HOME|fallback}}\nenv-clear: true\nenv: TOKEN=step\nstdout: = cleared.out\nstep: jet -c 'printf %s \"$NO_COLOR\"'\nstdout: = inherited.out\n")
+    kit_exec_write(files.join(root, "tests/cases/group/cleared.out"), "case|step|fallback")
+    kit_exec_write(files.join(root, "tests/cases/group/inherited.out"), "1")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("cleared"), context)[0].verdict.status, "PASS")
+    loop (i, source) in ["env-clear: true\n", "step: jet -c true\nenv-clear: false\n", "step: jet -c true\nenv-clear: true\nenv-clear: true\n", "copy: a b\nenv-clear: true\n"] {
+        cases_test_source(root, "clear-bad-{i}", source)
+        assert(kit_steps_parse_case(files.read(files.join(root, cases_test_entry("clear-bad-{i}").path)) ?? panic("read invalid clear case")).error != "")
+    }
+    files.remove_all(root) ?? panic("remove env-clear scratch")
+}
+
+#Test("spawn uses the shared cleared environment and wait retains the child policy") {
+    root :: cases_test_root("env-clear-spawn")
+    kit_exec_write(files.join(root, "tests/cases/group/cleared.out"), "step|fallback")
+    cases_test_source(root, "child", "env: TOKEN=case\nspawn child: jet -c 'set -eu; test -z \"${{HOME+x}}\"; test -z \"${{NO_COLOR+x}}\"; printf \"%s|%s\" \"$TOKEN\" \"$1\"' scenario {{env:HOME|fallback}}\nenv-clear: true\nenv: TOKEN=step\nwait: child\nstdout: = cleared.out\nstderr: empty\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("child"), context)[0].verdict.status, "PASS")
+    loop action in ["copy: a b", "remove: a", "concat: a b", "write: a b", "inventory before: .", "step: printf x\ncapture: x stdout doc $", "spawn child: printf x\nwait: child"] {
+        loop modifier in ["env-clear: true", "isolate: no-nix"] {
+            cases_test_source(root, "invalid-action", "{action}\n{modifier}\n")
+            plan :: kit_steps_parse_case(files.read(files.join(root, cases_test_entry("invalid-action").path)) ?? panic("read modifier case"))
+            assert(plan.error != "")
+        }
+    }
+    files.remove_all(root) ?? panic("remove spawn environment scratch")
+}

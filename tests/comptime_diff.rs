@@ -27,11 +27,10 @@ const CASES: &[&str] = &[
     "(0 - 17) % 5",
     "(0 - 17) / 5",
     "1 << 10",
-    "255 & 15",
-    // D-BITOREXPR1=A: value-position `|` is bitwise OR; `|=` remains covered
-    // by tests/numops.rs.
-    "12 | 10",
-    "6 ^ 3",
+    "(255).bit_and(15)",
+    // D-SIGIL-ALGEBRA1=B: named integer arithmetic matches runtime.
+    "(12).bit_or(10)",
+    "(6).pow(3)",
     "1000000 * 1000000",
     // Float rounding + S21 "always a decimal" display
     "Float{3.0} / Float{2.0}",
@@ -76,6 +75,8 @@ const CASES: &[&str] = &[
     "[\"b\": 2, \"a\": 1, \"c\": 3].values().to_list()",
     "\"a,b,c\".split(\",\").skip(1).first()",
     "[2: \"two\", 1: \"one\"].keys().to_list()",
+    "[18446744073709551615: \"large\", -9223372036854775809: \"negative\", 0: \"zero\"].keys().to_list()",
+    "[18446744073709551615: \"large\"].get(9223372036854775807 + 9223372036854775808)",
     "Rank.from([1, 2, 3]).intersection(Rank.from([2, 3, 4])).to_list()",
     "Rank.from([1, 2, 3]).difference(Rank.from([2, 3, 4])).to_list()",
     "Rank.from([1, 2, 3]).symmetric_difference(Rank.from([2, 3, 4])).to_list()",
@@ -94,7 +95,7 @@ const CASES: &[&str] = &[
     "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
     "(100 - 1).to_string()",
     "(7 * 6).to_string()",
-    "(2 ^ 200).to_string()",
+    "(2).pow(200).to_string()",
     "(0 - 3).to_string()",
 ];
 
@@ -214,10 +215,10 @@ const MODULE_CASES: &[&str] = &[
     "use core.encoding.toml as toml\nCOMPTIME_VALUE :: prep { toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"[a]\\nx = 1\\n\\n[[a.b]]\\ny = 2\\n\\n[[a.b]]\\ny = 3\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.toml as toml\nCOMPTIME_VALUE :: prep { toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: toml.to_string(toml.parse(\"x = 1.5\\ny = [1, 2, 3]\\nz = {{ a = 1, b = 2 }}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.yaml as yaml\nCOMPTIME_VALUE :: prep { yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: yaml.to_string(yaml.parse(\"a: &x 1\\nb: *x\\nc:\\n  - 1\\n  - 2\\nd: |\\n  hello\\n  world\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) }\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) ?? panic(\"xml render\") }\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) ?? panic(\"xml render\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\nCOMPTIME_VALUE :: prep { hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) }\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nCOMPTIME_VALUE :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\")) }\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
-    "use core.encoding.jsonl as jsonl\nCOMPTIME_VALUE :: prep { jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nCOMPTIME_VALUE :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"JSON encode\") }\n\nfn run() {\n    r :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"bad\")) ?? panic(\"JSON encode\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
+    "use core.encoding.jsonl as jsonl\nCOMPTIME_VALUE :: prep { (jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")) ?? panic(\"JSONL encode\")).replace(\"\\n\", \"|\") }\n\nfn run() {\n    r :: (jsonl.to_string(jsonl.parse(\"{{\\\"a\\\":1}}\\n{{\\\"b\\\":2}}\\n\") ?? panic(\"bad\")) ?? panic(\"JSONL encode\")).replace(\"\\n\", \"|\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n",
     // D-JSONCANON1: edition 2027 `json.canonical` is fallible (`String ?
     // encoding.EncodingError`); `run()` is infallible, so the ratified
     // migration form is the panic fallback, not `?` propagation.
@@ -455,7 +456,7 @@ fn comptime_exact_int_matches_runtime() {
                     | "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()"
                     | "(100 - 1).to_string()"
                     | "(7 * 6).to_string()"
-                    | "(2 ^ 200).to_string()"
+                    | "(2).pow(200).to_string()"
                     | "(0 - 3).to_string()"
             )
         })
@@ -467,13 +468,30 @@ fn comptime_exact_int_matches_runtime() {
             "(999999999999999999999999999999 + 999999999999999999999999999999).to_string()",
             "(100 - 1).to_string()",
             "(7 * 6).to_string()",
-            "(2 ^ 200).to_string()",
+            "(2).pow(200).to_string()",
             "(0 - 3).to_string()",
         ],
         "exact Int differential cases must stay exact"
     );
     for (i, expr) in cases {
         check_comptime_case(i, expr);
+    }
+}
+
+#[test]
+fn comptime_arbitrary_precision_map_keys_match_runtime() {
+    if !have_rustc() {
+        eprintln!("note: rustc not found; skipping exact Int map-key differential");
+        return;
+    }
+    let cases = CASES
+        .iter()
+        .enumerate()
+        .filter(|(_, expr)| expr.starts_with("[18446744073709551615:"))
+        .collect::<Vec<_>>();
+    assert_eq!(cases.len(), 2, "exact Int map-key witnesses must stay focused");
+    for (index, expression) in cases {
+        check_comptime_case(index, expression);
     }
 }
 
@@ -827,7 +845,7 @@ fn xml_rich_whole_value_matches_comptime_and_runtime() {
         eprintln!("note: rustc not found; skipping rich XML comptime differential");
         return;
     }
-    let src = "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) }\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) ?? panic(\"xml render\") }\n\nfn run() {\n    r :: xml.to_string(xml.parse(\"<r xmlns=\\\"urn:r\\\" xmlns:p=\\\"urn:p\\\" p:a=\\\"x&amp;y\\\">a&amp;<!--c--><![CDATA[<x>]]><?go now?><p:c/></r>\") ?? panic(\"bad\")) ?? panic(\"xml render\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2004, "rich lossless XML whole-value round-trip", src);
 }
 
@@ -837,7 +855,7 @@ fn xml_parse_options_match_comptime_and_runtime() {
         eprintln!("note: rustc not found; skipping XML options comptime differential");
         return;
     }
-    let src = "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\")) }\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\"))\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
+    let src = "use core.encoding.xml as xml\nCOMPTIME_VALUE :: prep { xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\")) ?? panic(\"xml render\") }\n\nfn run() {\n    r :: xml.to_string(xml.parse_with(\"<r><a/></r>\", xml.XMLParseOptions.safe()) ?? panic(\"bad\")) ?? panic(\"xml render\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2005, "typed XML options", src);
 }
 
@@ -891,7 +909,7 @@ fn xml_hostile_error_matches_comptime_and_runtime() {
     }
     let src = r#"use core.encoding.xml as xml
 
-fn show(result: DataTree XMLError!) -> String {
+fn show(result: Dyn XMLError!) -> String {
     if result == {
         .Ok(_) -> return "ok"
         .Err(e) -> {
@@ -921,7 +939,7 @@ fn cbor_generic_whole_decode_matches_comptime_and_aot() {
     // D-ENC-CBOR-SURFACE1 / #296: current generic whole-value decode,
     // including normal-mode indefinite containers and preferred Float16,
     // is one R12 semantic path at comptime and AOT. This intentionally does
-    // not exercise the retired untyped `decode(DataTree)` compatibility arm.
+    // not exercise the retired untyped `decode(Dyn)` compatibility arm.
     let src = "use core.encoding.cbor as cbor\nCOMPTIME_VALUE :: prep { cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\") }\n\nfn run() {\n    r :: cbor.decode<[Float]>([159, 249, 62, 0, 249, 64, 0, 255]) ?? panic(\"bad\")\n    print(\"{COMPTIME_VALUE}\")\n    print(\"{r}\")\n}\n";
     check_comptime_src(2000, "generic CBOR indefinite Float16 decode", src);
 }
@@ -932,7 +950,19 @@ fn cbor_current_whole_encode_parse_matches_comptime_and_aot() {
         eprintln!("note: rustc not found; skipping current CBOR whole-value differential");
         return;
     }
-    let src = "use core.encoding.json as json\nuse core.encoding.cbor as cbor\nuse core.encoding.hex as hex\nENCODED :: prep { hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) }\nPARSED :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\")) }\n\nfn run() {\n    r :: hex.encode(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3],\\\"c\\\":-7}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\"))\n    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse(\"{{\\\"a\\\":1,\\\"b\\\":[1,2,3]}}\") ?? panic(\"bad json\")) ?? panic(\"bad cbor\")) ?? panic(\"bad parse\"))\n    print(\"{ENCODED}|{PARSED}\")\n    print(\"{r}|{p}\")\n}\n";
+    let src = r#"use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+ENCODED :: prep { hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor")) }
+PARSED :: prep { json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse")) ?? panic("JSON encode") }
+
+fn run() {
+    r :: hex.encode(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3],\"c\":-7}}") ?? panic("bad json")) ?? panic("bad cbor"))
+    p :: json.to_string(cbor.parse(cbor.to_bytes(json.parse("{{\"a\":1,\"b\":[1,2,3]}}") ?? panic("bad json")) ?? panic("bad cbor")) ?? panic("bad parse")) ?? panic("JSON encode")
+    print("{ENCODED}|{PARSED}")
+    print("{r}|{p}")
+}
+"#;
     check_comptime_src(2001, "current CBOR to_bytes and parse", src);
 }
 
@@ -1061,12 +1091,20 @@ fn run() {
     actual_items := show_items(items_wire)
     actual_bytes := show_bytes(items_wire)
     actual_alloc := show_alloc(items_wire)
-    print("{EXPECTED_MALFORMED}~{EXPECTED_TRUNCATED}~{EXPECTED_NONCANONICAL}~{EXPECTED_UNSUPPORTED}~{EXPECTED_MISMATCH}~{EXPECTED_DEPTH}~{EXPECTED_ITEMS}~{EXPECTED_BYTES}~{EXPECTED_ALLOC}")
-    print("{actual_malformed}~{actual_truncated}~{actual_noncanonical}~{actual_unsupported}~{actual_mismatch}~{actual_depth}~{actual_items}~{actual_bytes}~{actual_alloc}")
+    print("{EXPECTED_MALFORMED}{EXPECTED_TRUNCATED}.copy(){EXPECTED_NONCANONICAL}.copy(){EXPECTED_UNSUPPORTED}.copy(){EXPECTED_MISMATCH}.copy(){EXPECTED_DEPTH}.copy(){EXPECTED_ITEMS}.copy(){EXPECTED_BYTES}.copy(){EXPECTED_ALLOC}.copy()")
+    print("{actual_malformed}{actual_truncated}.copy(){actual_noncanonical}.copy(){actual_unsupported}.copy(){actual_mismatch}.copy(){actual_depth}.copy(){actual_items}.copy(){actual_bytes}.copy(){actual_alloc}.copy()")
 }
 "#;
     check_comptime_src(2003, "CBOR options and hostile error projection", src);
 }
+
+#[test]
+fn string_count_comptime_and_runtime_use_the_builtin_kernel() {
+    let stdout = compile_and_run(include_str!("fixtures/string_count_comptime.jet"));
+    let expected = "[2, 2, 1, 2, 1, 1, 0, 0, 0, 0, 0]";
+    assert_eq!(stdout.lines().collect::<Vec<_>>(), vec![expected, expected]);
+}
+
 #[test]
 fn local_comptime_is_literal_data() {
     let stdout = compile_and_run(
@@ -1131,6 +1169,51 @@ fn run() {
         stdout.lines().collect::<Vec<_>>(),
         vec!["7", "7", "seven", "seven", "true", "true"]
     );
+}
+
+#[test]
+fn prep_rows_built_through_own_module_calls_match_runtime() {
+    // The stage-zero `CORE_CALLS` shape: a `prep` list of records whose
+    // builder takes a record from a same-module call, then writes its fields.
+    // The call's return and the parameter types must name the module's own
+    // record rows, or MIR lowering misses the owner type (E0956).
+    let src = r#"
+struct Cov { bits: Int }
+
+enum Route {
+    NoRoute
+    Typed
+}
+
+struct Rec {
+    member: String
+    coverage: Cov
+    route: Route
+}
+
+fn rec_new(member: String) -> Rec Never! {
+    Rec{member: member, coverage: Cov{bits: 1}, route: Route.Typed}
+}
+
+fn rec_with_coverage(member: String, coverage: Cov) -> Rec Never! {
+    row := rec_new(member)
+    row.coverage = coverage
+    row.route = Route.NoRoute
+    row
+}
+
+ROWS :: prep { [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) } }
+
+fn run() {
+    rows :: [Rec]{ rec_new("a"), rec_with_coverage("b", Cov{bits: 2}) }
+    print("{ROWS[1].member} {ROWS[1].coverage.bits} {ROWS[1].route == Route.NoRoute}")
+    print("{rows[1].member} {rows[1].coverage.bits} {rows[1].route == Route.NoRoute}")
+}
+"#;
+    jet::compile(src).expect("prep rows built through same-module calls must fold");
+    if have_rustc() {
+        assert_eq!(compile_and_run(src), "b 2 true\nb 2 true\n");
+    }
 }
 
 #[test]

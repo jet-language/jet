@@ -1,0 +1,30 @@
+// Direct classifier ports of tests/workspace.rs:192-267.
+#Test("dot_form_classified_when_source_is_declared") {
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mono", upstream: "github:acme/monorepo", via: ProviderKind.Nix}})
+    spec :: RefSpec.classify_in("mono.ranker", table) ?? panic("dot form classifies")
+    assert_eq(spec.source, RefSource.Named("mono"))
+    assert_eq(spec.package, "ranker")
+}
+
+#Test("source_form_still_works") {
+    table :: SourceTable.from_decls([NamedSourceDecl]{NamedSourceDecl{name: "mono", upstream: "github:acme/monorepo", via: ProviderKind.Nix}})
+    spec :: RefSpec.classify_in("ranker@mono", table) ?? panic("source form classifies")
+    named :: if spec.source == {
+        .Named(_) -> true
+        else -> false
+    }
+    assert(named)
+    assert_eq(spec.package, "ranker")
+}
+
+#Test("bare_package_with_dot_defaults_to_jetpack") {
+    spec :: RefSpec.classify_in("unknown.pkg", SourceTable.empty()) ?? panic("undeclared dotted package")
+    assert_eq(spec.source, RefSource.Jetpack)
+    assert_eq(spec.package, "unknown.pkg")
+}
+
+#Test("unknown_workspace_member_is_e1231") {
+    index :: WorkspaceIndex.from_members([WorkspaceMember]{WorkspaceMember{name: "logging", path: "infra/logging"}})
+    error :: pkg_test_workspace_error("loggger", index)
+    assert_eq(error.code(), Val("E1231"))
+}

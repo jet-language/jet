@@ -1,5 +1,6 @@
 // Public parser entry points preserve lexer diagnostics and original byte spans.
 use jet_foundation.[
+    AppliedRuleApplication,
     DebugTraceSite,
     Diagnostic,
     DiagnosticFixApplicability,
@@ -8,8 +9,10 @@ use jet_foundation.[
     ImportDecl,
     Item,
     Marker,
+    Name,
     ParseResult,
     Program,
+    RuleSite,
     Span,
     TextEdit,
     WebBucket,
@@ -17,6 +20,9 @@ use jet_foundation.[
     diagnostic_from_registry,
     diagnostic_with_edit_grade,
     expr_span,
+    name_count,
+    name_find,
+    name_index,
 ]
 use jet_lexer.[
     Lexed,
@@ -53,28 +59,68 @@ use jet_lexer.[
     TOKEN_RPAREN,
     TOKEN_SEMI,
     Token,
+    TokenTables,
     lex,
     lex_generated,
+    token_decoded,
 ]
 
-pub fn parse_source(source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lex(source), source, parser_line_starts(source))
+fn parse_source(source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lex(source), source, parser_line_starts(source), false)
 }
 
 // Embedded Core library sources are vetted stdlib internals: they may spell
 // the reserved `__name` namespace (Rust `Lexer::lex_generated`). Only the
 // loader's embedded-Core path parses this way; a user file never does.
-pub fn parse_generated_source(source: [U8]) -> ParseResult {
-    parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source))
+fn parse_generated_source(source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lex_generated(source), source, parser_line_starts(source), false)
 }
 
-pub fn parse_lexed(lexed: Lexed) -> ParseResult {
-    parser_parse_lexed_lines(lexed, [U8]{}, [Int]{})
+fn parse_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+    lexed := lex(source)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, &lexed.tables, groups)
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
 }
 
-fn parser_parse_lexed_lines(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+fn parse_generated_source_with_marker_groups(source: [U8], groups: [NamedMarkerGroupTokens]) -> ParseResult {
+    lexed := lex_generated(source)
+    lexed.tokens = expand_named_marker_groups(lexed.tokens, &lexed.tables, groups)
+    parser_parse_lexed_lines(lexed, source, parser_line_starts(source), false)
+}
+
+fn parse_lexed(lexed: Lexed) -> ParseResult {
+    parser_parse_lexed_lines(lexed.copy(), [U8]{}, [Int]{}, false)
+}
+
+// Parse just the supplied token slice with its aggregate source available for
+// canonical source-dependent diagnostics. REPL turns never reparse old tokens.
+fn parse_lexed_with_source(lexed: Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+    parser_parse_lexed_lines(lexed.copy(), source, line_starts, false)
+}
+
+// parse_lexed_with_source for a caller that is done with its tokens: they
+// move into the parser instead of being copied.
+fn parse_lexed_owned_with_source(lexed: ^Lexed, source: [U8], line_starts: [Int]) -> ParseResult {
+    parser_parse_lexed_lines(^lexed, source, line_starts, false)
+}
+
+// Parse a Jetpack config surface (Rust `parse_config_with_source`): the
+// config lexer keeps `$NAME` as one identifier token, which this parser reads
+// as the typed environment read (D-ONCE-DOLLAR1=B); `source` stays available
+// for config values whose spelling is not a general Jet expression.
+fn parse_config_with_source(lexed: Lexed, source: [U8]) -> ParseResult {
+    parser_parse_lexed_lines(lexed.copy(), source, parser_line_starts(source), true)
+}
+
+// The lexed tokens move into the parser state (field moves reset the field,
+// so no token list is copied on the way).
+fn parser_parse_lexed_lines(input: ^Lexed, source: [U8], line_starts: [Int], allow_environment_reads: Bool) -> ParseResult {
+    lexed := ^input
     source_end :: if lexed.tokens.len() > 0 -> lexed.tokens[lexed.tokens.len() - 1].span.start else -> 0
-    parser_parse_prepared(parser_prepare_tokens(lexed.tokens), lexed.diagnostics, source_end, line_starts, source)
+    tokens := ^lexed.tokens
+    lexed.tokens = [Token]{}
+    prepared := parser_prepare_tokens(^tokens, &lexed.tables)
+    parser_parse_prepared(^prepared, lexed.diagnostics, source_end, line_starts, source, allow_environment_reads, ^lexed.tables)
 }
 
 fn parser_line_starts(source: [U8]) -> [Int] Never! {
@@ -85,7 +131,7 @@ fn parser_line_starts(source: [U8]) -> [Int] Never! {
     starts
 }
 
-pub fn parse_tokens(tokens: [Token]) -> ParseResult {
+fn parse_tokens(tokens: [Token], tables: TokenTables) -> ParseResult {
     source_end :: if {
         tokens.len() > 0 -> {
             last :: tokens[tokens.len() - 1]
@@ -93,26 +139,35 @@ pub fn parse_tokens(tokens: [Token]) -> ParseResult {
         }
         else -> 0
     }
-    parser_parse_prepared(parser_prepare_tokens(tokens), [Diagnostic]{}, source_end, [Int]{}, [U8]{})
+    owned_tables := tables.copy()
+    prepared := parser_prepare_tokens(tokens.copy(), &owned_tables)
+    parser_parse_prepared(^prepared, [Diagnostic]{}, source_end, [Int]{}, [U8]{}, false, ^owned_tables)
 }
 
 // D-EACH1=C: fence expansion runs before parsing. A fence error stops the
 // parse like any token-level rejection: no partially expanded AST is built.
-fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8]) -> ParseResult {
+fn parser_parse_prepared(input: ^ParserFenceExpansion, lexer_diagnostics: [Diagnostic], source_end: Int, line_starts: [Int], source: [U8], allow_environment_reads: Bool, tables: ^TokenTables) -> ParseResult {
+    prepared := ^input
     if prepared.diagnostics.len() > 0 {
         diagnostics := [Diagnostic]{}
         loop diagnostic in lexer_diagnostics -> &diagnostics.push(diagnostic)
         loop diagnostic in prepared.diagnostics -> &diagnostics.push(diagnostic)
         return ParseResult{program: ast_program(), diagnostics: diagnostics}
     }
-    state := JetParserState{tokens: prepared.tokens, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, source: source}
+    tokens := ^prepared.tokens
+    prepared.tokens = [Token]{}
+    state := JetParserState{tokens: ^tokens, tables: [TokenTables]{^tables}, position: 0, diagnostics: lexer_diagnostics, source_end: source_end, block_spans: [Span]{}, pending_type_gt: false, pending_type_gt_span: Span{start: source_end, end: source_end}, result_handler_depth: 0, statement_start: -1, line_starts: line_starts, sources: [[U8]]{source}, allow_environment_reads: allow_environment_reads}
     program := parser_parse_program(&state)
     program.block_spans = state.block_spans
     program.else_arms = state.else_arms
     loop declaration in state.block_policy_declarations -> &program.policy_declarations.push(declaration)
+    loop application in state.statement_rules {
+        &program.applied_rules.push(application)
+        &program.rule_facts.push(application)
+    }
     program.fenced_statements = prepared.fenced_statements
-    program.used_import_names = parser_used_import_names(state.tokens, program.imports, program.items)
-    program.debug_sites = parser_debug_trace_sites(state.tokens, source)
+    program.used_import_names = parser_used_import_names(state.tokens, state.tables[0], program.imports, program.items)
+    program.debug_sites = parser_debug_trace_sites(state.tokens, state.tables[0], source)
     ParseResult{program: program, diagnostics: state.diagnostics}
 }
 
@@ -121,8 +176,8 @@ fn parser_parse_prepared(prepared: ParserFenceExpansion, lexer_diagnostics: [Dia
 // root of a member import (`b` in `use b.[f]`) reads that name as well. A
 // body-less `module name` is the file import the loader binds for it (D-MOD1).
 // Rust: none (Jet-only pass)
-fn parser_used_import_names(tokens: [Token], imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
-    candidates := [String:Bool]{}
+fn parser_used_import_names(tokens: [Token], tables: TokenTables, imports: [ImportDecl], program_items: [Item]) -> [String] Never! {
+    candidates := [String]{}
     used := [String]{}
     used_names := [String:Bool]{}
     import_spans := [Span]{}
@@ -136,22 +191,35 @@ fn parser_used_import_names(tokens: [Token], imports: [ImportDecl], program_item
                 }
                 loop item in items {
                     parts :: item.original.split(".").to_list()
-                    &candidates.add(item.alias ?? parts[parts.len() - 1], true).drop("candidate names may repeat")
+                    &candidates.push(item.alias ?? parts[parts.len() - 1])
                 }
             }
-            else -> &candidates.add(declaration.alias, true).drop("candidate names may repeat")
+            else -> &candidates.push(declaration.alias)
         }
     }
     loop item in program_items {
         if item == .CodeModule(definition) {
             if definition.body != None -> next
             &import_spans.push(definition.span)
-            &candidates.add(definition.name, true).drop("candidate names may repeat")
+            &candidates.push(definition.name)
         }
     }
     if candidates.len() == 0 -> return used
     indexed_spans :: parser_import_span_index(import_spans)
-    parser_collect_used_import_names(tokens, indexed_spans, candidates, &used_names, &used)
+    // Per name id: whether the name is a candidate, and whether it is used.
+    candidate_ids := [Bool]{}
+    used_ids := [Bool]{}
+    loop _ in 0..<name_count(tables.names) {
+        &candidate_ids.push(false)
+        &used_ids.push(false)
+    }
+    loop candidate in candidates {
+        if name_find(tables.names, candidate) == .Val(name) -> candidate_ids[name_index(name)] = true
+    }
+    loop name in used {
+        if name_find(tables.names, name) == .Val(found) -> used_ids[name_index(found)] = true
+    }
+    parser_collect_used_import_names(tokens, tables, indexed_spans, candidate_ids, &used_ids, &used)
     used
 }
 
@@ -204,16 +272,18 @@ fn parser_inside_import_span(indexed_spans: [Span], span: Span) -> Bool Never! {
 }
 
 // Rust: none (Jet-only pass)
-fn parser_collect_used_import_names(tokens: [Token], indexed_spans: [Span], candidates: [String:Bool], used_names: &[String:Bool], used: &[String]) Never! {
+fn parser_collect_used_import_names(tokens: [Token], tables: TokenTables, indexed_spans: [Span], candidate_ids: [Bool], used_ids: &[Bool], used: &[String]) Never! {
     loop token in tokens {
-        if token.kind == TOKEN_IDENT && candidates.get(token.payload.decoded) != None && used_names.get(token.payload.decoded) == None {
+        id :: name_index(token.decoded)
+        if token.kind == TOKEN_IDENT && id < candidate_ids.len() && candidate_ids[id] && !used_ids[id] {
             if !parser_inside_import_span(indexed_spans, token.span) {
-                &used_names.add(token.payload.decoded, true).drop("checked absent above")
-                &used.push(token.payload.decoded)
+                used_ids[id] = true
+                &used.push(token_decoded(tables, token))
             }
         }
-        loop part in token.payload.string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_used_import_names(part.tokens, indexed_spans, candidates, &used_names, &used)
+        if token.literal < 0 -> next
+        loop part in tables.literals[token.literal].string_parts {
+            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_used_import_names(part.tokens, tables, indexed_spans, candidate_ids, &used_ids, &used)
         }
     }
 }
@@ -222,14 +292,16 @@ fn parser_collect_used_import_names(tokens: [Token], indexed_spans: [Span], cand
 // can name the traced expression and build the E3405 unwrap edit. The text
 // runs from the first token after `(` to the last one before its matching
 // `)`, leaving out a trailing comma. Interpolations are scanned as well.
-fn parser_debug_trace_sites(tokens: [Token], source: [U8]) -> [DebugTraceSite] Never! {
+fn parser_debug_trace_sites(tokens: [Token], tables: TokenTables, source: [U8]) -> [DebugTraceSite] Never! {
     sites := [DebugTraceSite]{}
-    if source.len() > 0 -> parser_collect_debug_trace_sites(tokens, source, &sites)
+    if source.len() == 0 -> return sites
+    debug :: name_find(tables.names, "debug") ?? return sites
+    parser_collect_debug_trace_sites(tokens, tables, debug, source, &sites)
     sites
 }
 
 // Rust: none (Jet-only pass)
-fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[DebugTraceSite]) Never! {
+fn parser_collect_debug_trace_sites(tokens: [Token], tables: TokenTables, debug: Name, source: [U8], sites: &[DebugTraceSite]) Never! {
     closes := [Int]{}
     opens := [Int]{}
     loop index in 0..<tokens.len() {
@@ -242,10 +314,12 @@ fn parser_collect_debug_trace_sites(tokens: [Token], source: [U8], sites: &[Debu
     }
     loop index in 0..<tokens.len() {
         token :: tokens[index]
-        loop part in token.payload.string_parts {
-            if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, source, &sites)
+        if token.literal >= 0 {
+            loop part in tables.literals[token.literal].string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> parser_collect_debug_trace_sites(part.tokens, tables, debug, source, &sites)
+            }
         }
-        if token.kind != TOKEN_IDENT || token.payload.decoded != "debug" || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
+        if token.kind != TOKEN_IDENT || token.decoded != debug || index + 1 >= tokens.len() || tokens[index + 1].kind != TOKEN_LPAREN -> next
         open :: index + 1
         close :: closes[open]
         if close < 0 -> next
@@ -283,6 +357,10 @@ fn parser_parse_program(state: &JetParserState) -> Program {
             parser_foreign_top_word_ahead(&state) -> parser_report_foreign_top_word(&state)
             parser_file_directive_ahead(&state) -> parser_parse_file_directive(&state, &program)
             parser_policy_file_decl_ahead(&state) -> parser_parse_policy_file_decl(&state, &program)
+            parser_unattached_marker_at_end(&state) -> {
+                marker :: parser_parse_marker(&state)
+                &program.rule_facts.push(AppliedRuleApplication{marker: marker, target: None, site: Val(RuleSite.File)})
+            }
             parser_item_ahead(&state) -> {
                 declaration :: parser_parse_item_or_import(&state)
                 if declaration.import == {
@@ -312,7 +390,7 @@ fn parser_parse_program(state: &JetParserState) -> Program {
                 if destructuring {
                     parser_add_error_code(&state, "E0003", start, "module globals bind one name at a time", "a module binding is a named value available to every function in the file", "write `name :: value` or `name := value`")
                     parser_sync_top(&state)
-                } else if state.diagnostics.len() > errors_before {
+                } else if parser_error_since(state, errors_before) {
                     parser_sync_top(&state)
                 } else if item == .Val(value) {
                     &program.items.push(value)
@@ -346,18 +424,44 @@ fn parser_parse_program(state: &JetParserState) -> Program {
 // and `unsafe` (E0031). `unsafe extern rust` keeps its block.
 fn parser_foreign_top_word_ahead(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
-    token.kind == TOKEN_IDENT && (token.payload.decoded == "namespace" || token.payload.decoded == "unsafe")
+    if token.kind != TOKEN_IDENT -> return false
+    word :: parser_value(state, token)
+    word == "namespace" || word == "unsafe"
 }
 
 fn parser_report_foreign_top_word(state: &JetParserState) {
     word :: parser_bump(&state)
-    if word.payload.decoded == "namespace" {
+    if parser_value(state, word) == "namespace" {
         parser_add_error_code(&state, "E0323", word.span, "in-file grouping uses `module name {{ }}`, not `namespace`", "Jet has one spelling for in-file grouping: a named `module` block", "write `module mygroup {{ fn foo() {{ … }} }}` instead")
         parser_sync_top(&state)
         return
     }
     parser_add_error_code(&state, "E0031", word.span, "Jet doesn't use `unsafe` to call Rust crates", "foreign Rust functions live in whole `extern rust` blocks — callers never write `unsafe`", "write: extern rust \"crate@version\" {{ fn name(...) T = \"rust::path\"; }}")
     if parser_current_kind(&state) != TOKEN_KW_EXTERN -> parser_sync_top(&state)
+}
+
+// Imported group heads cannot reveal their file members until the loader has
+// the defining module. Retain an unattached head for that ordinary replay.
+fn parser_unattached_marker_at_end(state: &JetParserState) -> Bool Never! {
+    if parser_current_kind(&state) != TOKEN_HASH -> return false
+    offset := 1
+    if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
+    if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
+    offset += 1
+    loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
+    if parser_kind_at(&state, offset) == TOKEN_LPAREN {
+        depth := 1
+        offset += 1
+        loop depth > 0 {
+            kind :: parser_kind_at(&state, offset)
+            if kind == TOKEN_EOF -> return false
+            if kind == TOKEN_LPAREN -> depth += 1
+            if kind == TOKEN_RPAREN -> depth -= 1
+            offset += 1
+        }
+    }
+    loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
+    parser_kind_at(&state, offset) == TOKEN_EOF
 }
 
 // File rules (D-VISDEFAULT2, D-PRELUDEX1, D-WEBDEFAULT1, D-HTMLPAIR1): bare
@@ -368,8 +472,9 @@ fn parser_file_directive_ahead(state: &JetParserState) -> Bool Never! {
     if parser_kind_at(&state, 1) == TOKEN_LBRACKET -> return parser_file_marker_group_ahead(&state)
     name :: parser_lookahead(&state, 1)
     if name.kind != TOKEN_IDENT -> return false
-    if name.payload.decoded == "PubFile" || name.payload.decoded == "PublicFile" || name.payload.decoded == "NoPrelude" || name.payload.decoded == "HTML" || name.payload.decoded == "Html" -> return true
-    name.payload.decoded == "Target" && (parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state))
+    rule :: parser_value(state, name)
+    if rule == "PubFile" || rule == "PublicFile" || rule == "NoPrelude" || rule == "HTML" || rule == "Html" -> return true
+    rule == "Target" && (parser_target_selects_file_web_at(&state, 1) || !parser_hash_leads_to_item(&state))
 }
 
 fn parser_is_file_rule(name: String) -> Bool Never! {
@@ -385,8 +490,8 @@ fn parser_file_marker_group_ahead(state: &JetParserState) -> Bool Never! {
     loop {
         if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
         name :: parser_lookahead(&state, offset)
-        if name.kind != TOKEN_IDENT || !parser_is_file_rule(name.payload.decoded) -> return false
-        if name.payload.decoded != "Target" || parser_target_selects_file_web_at(&state, offset) -> every_entry_fits_function = false
+        if name.kind != TOKEN_IDENT || !parser_is_file_rule(parser_value(state, name)) -> return false
+        if parser_value(state, name) != "Target" || parser_target_selects_file_web_at(&state, offset) -> every_entry_fits_function = false
         offset += 1
         if parser_kind_at(&state, offset) == TOKEN_LPAREN {
             depth := 0
@@ -411,6 +516,7 @@ fn parser_file_marker_group_ahead(state: &JetParserState) -> Bool Never! {
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     after :: parser_kind_at(&state, offset)
+    if !every_entry_fits_function -> return true
     if after == TOKEN_KW_STRUCT || after == TOKEN_KW_ENUM -> return false
     function_follows :: after == TOKEN_KW_FN || (after == TOKEN_KW_PUB && parser_kind_at(&state, offset + 1) == TOKEN_KW_FN) || parser_prep_verb_ahead(&state, offset, TOKEN_KW_FN) || after == TOKEN_HASH
     !(every_entry_fits_function && function_follows)
@@ -431,7 +537,7 @@ fn parser_target_selects_file_web_at(state: &JetParserState, name_offset: Int) -
         if token.kind != TOKEN_IDENT && token.kind != TOKEN_DOT -> return false
         if token.kind == TOKEN_IDENT {
             previous = last
-            last = token.payload.decoded
+            last = parser_value(state, token)
             count += 1
         }
         offset += 1
@@ -466,17 +572,14 @@ fn parser_parse_file_directive(state: &JetParserState, program: &Program) {
 }
 
 fn parser_apply_file_marker(state: &JetParserState, program: &Program, marker: Marker, single: Bool) {
+    &program.rule_facts.push(AppliedRuleApplication{marker: marker, target: None, site: Val(RuleSite.File)})
     hash :: Span{start: marker.span.start, end: marker.span.start + 1}
     repeat_span :: if single -> hash else -> marker.span
     if marker.name == {
+        // D-VIS-MODULE1: the retired file marker; E0418 deletes it.
         "PubFile" | "PublicFile" -> {
-            if marker.name == "PublicFile" -> parser_add_error_code(&state, "E0418", hash, "write `#PubFile`, not `#PublicFile`", "`#PubFile` flips this file to public-by-default (D-VISDEFAULT2)", "write `#PubFile` at the top of the file")
-            if program.pub_file {
-                parser_report_repeated_file_marker(&state, "PubFile", repeat_span)
-                return
-            }
-            program.pub_file = true
-            state.pub_file_default = true
+            deletion :: parser_deletion_edit(state, marker.span)
+            parser_add_error_code_edit(&state, "E0418", marker.span, "`#PubFile` was removed: every file is public by default", "declarations are public by default, so the file marker has nothing left to flip", "delete the marker", deletion)
         }
         "NoPrelude" -> {
             if program.no_prelude {
@@ -594,27 +697,30 @@ fn parser_report_grouped_target_conflict(state: &JetParserState, marker: Marker)
 fn parser_section_label_ahead(state: &JetParserState) -> Bool Never! {
     if parser_kind_at(&state, 1) != TOKEN_COLON -> return false
     token :: parser_current(&state)
-    token.kind == TOKEN_KW_PUB || token.kind == TOKEN_KW_PRIV || (token.kind == TOKEN_IDENT && token.payload.decoded == "private")
+    token.kind == TOKEN_KW_PUB || token.kind == TOKEN_KW_PRIV || (token.kind == TOKEN_IDENT && parser_value(state, token) == "private")
 }
 
 fn parser_report_section_label(state: &JetParserState) {
     first :: parser_bump(&state)
     colon :: parser_bump(&state)
-    parser_add_error_code(&state, "E0415", parser_cover(first.span, colon.span), "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change whether it exports", "write `#PubFile` once at the top of the file, then mark exceptions with `priv`")
+    label :: parser_cover(first.span, colon.span)
+    deletion :: parser_deletion_edit(state, label)
+    parser_add_error_code_edit(&state, "E0415", label, "section visibility labels like `pub:` / `priv:` are not supported", "moving an item above or below a label would silently change its visibility", "delete the label; group internal declarations in a `priv module`", deletion)
 }
 
 fn parser_item_ahead(state: &JetParserState) -> Bool Never! {
     kind :: parser_current_kind(&state)
     token :: parser_current(&state)
     if {
+        parser_known_ahead_at(&state, 0) -> true
         parser_comptime_const_ahead(&state, 0) -> true
         parser_item_declaration_ahead_at(&state, 0) -> true
         parser_template_loop_ahead(&state) -> true
         parser_is_item_keyword(kind) -> true
         kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME -> true
-        token.kind == TOKEN_IDENT && token.payload.decoded == "alias" -> true
-        token.kind == TOKEN_IDENT && token.payload.decoded == "private" -> parser_foreign_private_ahead(&state)
-        token.kind == TOKEN_IDENT && token.payload.decoded == "sanitizer" -> parser_kind_at(&state, 1) == TOKEN_KW_FN || parser_kind_at(&state, 1) == TOKEN_KW_PUB
+        token.kind == TOKEN_IDENT && parser_value(state, token) == "alias" -> true
+        token.kind == TOKEN_IDENT && parser_value(state, token) == "private" -> parser_foreign_private_ahead(&state)
+        token.kind == TOKEN_IDENT && parser_value(state, token) == "sanitizer" -> parser_kind_at(&state, 1) == TOKEN_KW_FN || parser_kind_at(&state, 1) == TOKEN_KW_PUB
         kind == TOKEN_HASH -> parser_hash_leads_to_item(&state)
         else -> false
     }
@@ -626,6 +732,14 @@ fn parser_is_item_keyword(kind: Int) -> Bool Never! {
 
 fn parser_comptime_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     parser_kind_at(&state, offset) == TOKEN_AT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT && parser_kind_at(&state, offset + 2) == TOKEN_COLON_COLON
+}
+
+// Rust `at_known_lead`: only the unqualified, non-negated retired marker.
+fn parser_known_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
+    parser_kind_at(&state, offset) == TOKEN_HASH &&
+    parser_kind_at(&state, offset + 1) == TOKEN_IDENT &&
+    parser_value_at(&state, offset + 1) == "Known" &&
+    parser_kind_at(&state, offset + 2) != TOKEN_DOT
 }
 
 // D-PREP-SURFACE2=A + owner ruling (2026-09-30): an immutable module binding
@@ -641,11 +755,32 @@ fn parser_constant_name(name: String) -> Bool Never! {
     has_upper
 }
 
+// D-COMPILER-NS1=A / D-META-ROOT3=A: the subjectless compiler fact roots.
+fn parser_fact_root(name: String) -> Bool Never! {
+    name == "$build" || name == "$package" || name == "$phase" || name == "$program"
+}
+
+// Rust `Parser::unknown_fact_root` (D-COMPILER-NS1=A / D-META-ROOT3=A): a `$`
+// word in ordinary expression position that is no fact root. An ALL_CAPS
+// `$NAME` is the config-only environment read (D-ONCE-DOLLAR1=B); any other
+// `$word` is not a compiler fact. Both report the whole word. Fatal, as Rust
+// returns it as the expression's `Err`.
+fn parser_report_unknown_fact_root(state: &JetParserState, name: String, span: Span) {
+    body :: if name.starts_with("$") -> name.slice(1..<name.len()) else -> name
+    if body != "" && parser_constant_name(body) {
+        parser_add_error(&state, span, "`$NAME` is an environment read for config surfaces only", "D-ONCE-DOLLAR1=B reserves `$NAME` for typed environment access in `env.jet` and deploy/config files; ordinary program code does not read the environment with `$`", "move the read to `env.jet` or a deploy/config file, or use an explicit program API for runtime environment access")
+        return
+    }
+    parser_add_error(&state, span, "`{name}` is not a compiler fact", "`$` marks facts the compiler supplies: the roots `$build`, `$package`, `$phase` and `$program`, and `$` members of a type, function or value such as `T.$layout` (D-META-ROOT3=A)", "read a fact root such as `$build.os`, or read the fact on its subject, such as `T.$fields`")
+}
+
 // D-CONSTMARK1: after `#Static` / `#Inline`, a constant binding `NAME :: …`
 // (or a retired `@`-marked name, which E0388 respells) is a declaration.
 fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never! {
     token :: parser_lookahead(&state, offset)
-    token.kind == TOKEN_IDENT && parser_kind_at(&state, offset + 1) == TOKEN_COLON_COLON && (token.payload.decoded.starts_with("@") || parser_constant_name(token.payload.decoded))
+    if token.kind != TOKEN_IDENT || parser_kind_at(&state, offset + 1) != TOKEN_COLON_COLON -> return false
+    name :: parser_value(state, token)
+    name.starts_with("@") || parser_constant_name(name)
 }
 
 // D-PREP-SURFACE2=A: a retired `@`-marked constant read (or a declaration whose
@@ -653,7 +788,7 @@ fn parser_marked_const_ahead(state: &JetParserState, offset: Int) -> Bool Never!
 // respelling, and the parse continues under the plain name so each mention
 // reports once.
 fn parser_retire_const_mark(state: &JetParserState, token: Token) -> String {
-    name :: token.payload.decoded
+    name :: parser_value(state, token)
     if !name.starts_with("@") -> return name
     bytes :: name.bytes()
     // A block-scope name stays an ordinary snake_case local; only a module
@@ -679,13 +814,13 @@ fn parser_retire_const_decl(state: &JetParserState, span: Span, old: String) -> 
 // marked root is a retired metadata query, not a constant.
 fn parser_reads_retired_constant(state: &JetParserState) -> Bool Never! {
     token :: parser_current(&state)
-    name :: token.payload.decoded
+    name :: parser_value(state, token)
     if token.kind != TOKEN_IDENT || !name.starts_with("@") || parser_kind_at(&state, 1) == TOKEN_LPAREN -> return false
     bytes :: name.bytes()
     if parser_constant_name(String.from_bytes(bytes.slice(1, bytes.len())) ?? "") -> return true
     loop index in 0..<state.tokens.len() {
         candidate :: state.tokens[index]
-        if candidate.kind == TOKEN_IDENT && candidate.payload.decoded == name && index + 1 < state.tokens.len() && state.tokens[index + 1].kind == TOKEN_COLON_COLON -> return true
+        if candidate.kind == TOKEN_IDENT && candidate.decoded == token.decoded && index + 1 < state.tokens.len() && state.tokens[index + 1].kind == TOKEN_COLON_COLON -> return true
     }
     false
 }
@@ -717,6 +852,7 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
         if parser_kind_at(&state, offset) == TOKEN_BANG -> offset += 1
         if parser_kind_at(&state, offset) != TOKEN_IDENT -> return false
         offset += 1
+        loop parser_kind_at(&state, offset) == TOKEN_DOT && parser_kind_at(&state, offset + 1) == TOKEN_IDENT -> offset += 2
         if parser_kind_at(&state, offset) == TOKEN_LPAREN {
             nesting := 1
             offset += 1
@@ -733,5 +869,5 @@ fn parser_hash_leads_to_item(state: &JetParserState) -> Bool Never! {
     }
     loop parser_kind_at(&state, offset) == TOKEN_SEMI -> offset += 1
     kind :: parser_kind_at(&state, offset)
-    parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_lookahead(&state, offset).payload.decoded == "alias")
+    parser_item_declaration_ahead_at(&state, offset) || parser_comptime_const_ahead(&state, offset) || parser_marked_const_ahead(&state, offset) || parser_is_item_keyword(kind) || (kind == TOKEN_KW_PUB || kind == TOKEN_KW_PRIV || kind == TOKEN_KW_COMPTIME) || (kind == TOKEN_IDENT && parser_value_at(&state, offset) == "alias")
 }

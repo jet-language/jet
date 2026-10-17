@@ -1,0 +1,25 @@
+
+struct Reservation {
+    state { Pending, Confirmed, CheckedIn }
+    guest: String
+}
+
+impl Reservation {
+    #Transition(_, Pending) fn book(guest: String) -[]> Reservation {
+        return Reservation{ guest: guest.copy() }
+    }
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -[]> Reservation {
+        return self
+    }
+    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) -[]> Reservation {
+        return self
+    }
+    #State(CheckedIn) fn room_key(self) -[]> String {
+        return "key"
+    }
+}
+
+fn run() {
+  r := Reservation.book("a")
+  r = r.check_in()
+}

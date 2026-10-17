@@ -1,0 +1,68 @@
+# HAND-PORT tests/jetpack_engine.rs:3738-3787 use_fails_closed_when_executable_lease_service_key_is_invalid
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
+# #[test]
+# fn use_fails_closed_when_executable_lease_service_key_is_invalid() {
+#     let root = Scratch::new("invalid-executable-lease-key-root");
+#     let fixtures = Scratch::new("invalid-executable-lease-key-fixtures");
+#     write_native_lease_fixture(&fixtures.path);
+#     let service = root.path.join("lease-service");
+#     fs::create_dir_all(&service).unwrap();
+#     fs::write(service.join("auth.key"), [0u8; 31]).unwrap();
+# 
+#     let output = jetpack()
+#         .args([
+#             "use",
+#             "omp@releases#1.0.0",
+#             "-y",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .args([
+#             "--",
+#             "omp",
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(!output.status.success());
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     assert!(stderr.contains("Error [E1315]:"), "stderr: {stderr}");
+#     assert!(stderr.contains("32-byte file"), "stderr: {stderr}");
+#     assert!(!String::from_utf8_lossy(&output.stdout).contains("hello from jetpack"));
+#     // Criterion 4: a failed Store lease publication must remove its private
+#     // container. A bypassed or incomplete cleanup path leaves executable state
+#     // behind even though the child never launched.
+#     assert!(
+#         fs::read_dir(root.path.join("leases"))
+#             .map(|entries| entries.flatten().next().is_none())
+#             .unwrap_or(true),
+#         "failed lease setup left an executable container"
+#     );
+#     let diagnostic = stderr
+#         .find("Error [E1315]:")
+#         .map(|offset| &stderr[offset..])
+#         .expect("lease failure diagnostic");
+#     assert_jetos_stderr_snapshot_trimmed(
+#         "executable_lease_service_key_invalid",
+#         diagnostic,
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack use omp@releases#1.0.0 -y --no-color --offline --fixtures {work}/fixtures -- omp
+cwd: project
+exit: nonzero
+stderr: ~ "Error [E1315]:" # original contains predicate
+stderr: ~ "32-byte file" # original contains predicate
+stdout: !~ "hello from jetpack" # original negative contains predicate
+when dir-readable root/leases: entries: root/leases = 0
+

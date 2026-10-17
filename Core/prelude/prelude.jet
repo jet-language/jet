@@ -9,42 +9,62 @@ package {
     }
 }
 
-// core.prelude contains only total value helpers.  `keep` is the compiler's
-// identity/use-site barrier; every other declaration is an ordinary Jet
-// function with the same value in and value out.
-pub fn keep<T>(value: T) -> T Never! { value }
+// `keep` is the compiler's identity/use-site barrier. The other helpers,
+// including the optional-to-failure view, are ordinary reachable Jet bodies.
+fn keep<T>(value: T) -> T Never! { value }
 
-pub fn identity(value: ^String) -> String Never! { value }
+fn identity(value: ^String) -> String Never! { value }
 
-pub fn always(value: Bool) -> Bool Never! { value }
+fn always(value: Bool) -> Bool Never! { value }
 
-pub fn identity_int(value: Int) -> Int Never! { value }
+fn identity_int(value: Int) -> Int Never! { value }
 
-pub fn identity_float(value: Float) -> Float Never! { value }
+fn identity_float(value: Float) -> Float Never! { value }
 
-pub fn identity_bool(value: Bool) -> Bool Never! { value }
+fn identity_bool(value: Bool) -> Bool Never! { value }
 
-pub fn const_int(value: Int, ignored: Int) -> Int Never! {
+fn const_int(value: Int, ignored: Int) -> Int Never! {
     _ :: ignored
     value
 }
 
-pub fn const_bool(value: Bool, ignored: Bool) -> Bool Never! {
+fn const_bool(value: Bool, ignored: Bool) -> Bool Never! {
     _ :: ignored
     value
 }
 
-pub fn not_bool(value: Bool) -> Bool Never! {
+fn not_bool(value: Bool) -> Bool Never! {
     if value -> return false
     true
 }
 
-pub fn min_int(a: Int, b: Int) -> Int Never! {
+fn min_int(a: Int, b: Int) -> Int Never! {
     if a <= b -> return a
     b
 }
 
-pub fn max_int(a: Int, b: Int) -> Int Never! {
+fn max_int(a: Int, b: Int) -> Int Never! {
     if a >= b -> return a
     b
+}
+
+// D-FAIL-CARRIER1=A: the caller materializes the receiver and then `why`,
+// even when the payload is present. Own those evaluated values, not a later
+// read of the caller's optional. Construct an Err only for clean absence.
+fn option_or_err<T>(value: ^T?, why: ^String) -> T Err! {
+    return if value == {
+        .Val(payload) -> Ok(payload)
+        .None -> Err(why)
+    }
+}
+
+// Compiler-supplied #Receipt facts are not a user-constructible handle.
+// This private source target retains the typed payload and all three checked
+// metadata arguments; the raw store operation uses the existing encoder.
+module receipt {
+    use core as core
+
+    fn attach<T>(value: T, section_name: String, type_name: String, schema_digest: String) Never! {
+        core.prelude.__receipt_attach<T>(value, section_name, type_name, schema_digest)
+    }
 }

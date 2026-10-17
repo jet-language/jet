@@ -1,0 +1,32 @@
+// Direct manifest predicates from tests/release_gates.rs:328-359.
+// The exact rendered E2001 snapshot remains a compiler-lib subclaim.
+#Test("edition_too_new") {
+    raw :: "name: \"wordstats\"\nversion: \"0.1.0\"\nedition: \"2099\"\n"
+    manifest :: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
+    error :: if pkg_check_edition_support(manifest, "package.jet") == {
+        .Ok(_) -> panic("future edition must be rejected")
+        .Err(error) -> error
+    }
+    assert_eq(error.diagnostic.code, "E2001")
+}
+
+#Test("supported_edition_is_accepted") {
+    raw :: "name: \"x\"\nversion: \"0.1.0\"\nedition: \"{pkg_latest_edition()}\"\n"
+    manifest :: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
+    accepted :: if pkg_check_edition_support(manifest, "package.jet") == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    assert(accepted)
+}
+
+#Test("no_edition_field_is_accepted") {
+    raw :: "name: \"x\"\nversion: \"0.1.0\"\n"
+    manifest :: Manifest.parse("package.jet", raw) ?? panic("manifest parses")
+    assert_eq(manifest.package.edition, None)
+    accepted :: if pkg_check_edition_support(manifest, "package.jet") == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+    assert(accepted)
+}

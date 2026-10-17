@@ -3,6 +3,12 @@ use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(not(test))]
+use crate::source_sha256;
+#[cfg(test)]
+#[path = "../src/SHA256.rs"]
+mod source_sha256;
+
 #[derive(Clone, Debug)]
 enum TypeExpr {
     Named(String),
@@ -63,6 +69,187 @@ struct Schema {
     definitions: BTreeMap<String, Definition>,
     aliases: BTreeMap<String, String>,
     wildcards: Vec<(String, String)>,
+}
+
+// Seal the resolved wire graph, not Rust source spelling or Debug output.
+// The generated reader compares this build-time constant before touching tables.
+fn mir_image_layout_seal(
+    schema: &Schema,
+    reachable: &BTreeSet<String>,
+    layout: &CodecLayout<'_>,
+) -> Result<[u8; 32], String> {
+    let mut hash = source_sha256::StreamingSha256::new();
+    hash.update(b"jet.mir.image.layout\0");
+    for names in [layout.interned, layout.cached] {
+        mir_image_seal_len(&mut hash, names.len())?;
+        for name in names {
+            mir_image_seal_string(&mut hash, name)?;
+        }
+    }
+    mir_image_seal_len(&mut hash, layout.framed.len())?;
+    for (name, fields) in layout.framed {
+        mir_image_seal_string(&mut hash, name)?;
+        mir_image_seal_len(&mut hash, fields.len())?;
+        for field in *fields {
+            mir_image_seal_string(&mut hash, field)?;
+        }
+    }
+    mir_image_seal_len(&mut hash, reachable.len())?;
+    for key in reachable {
+        let definition = schema.definitions.get(key)
+            .ok_or_else(|| format!("missing native MIR layout definition `{key}`"))?;
+        mir_image_seal_string(&mut hash, key)?;
+        match &definition.body {
+            Body::Unit => hash.update(&[0]),
+            Body::Alias(ty) => {
+                hash.update(&[1]);
+                mir_image_seal_type(&mut hash, schema, definition, ty)?;
+            }
+            Body::Struct(fields) | Body::Tuple(fields) => {
+                hash.update(&[if matches!(&definition.body, Body::Struct(_)) { 2 } else { 3 }]);
+                mir_image_seal_fields(&mut hash, schema, definition, fields)?;
+            }
+            Body::Enum(variants) => {
+                hash.update(&[4]);
+                mir_image_seal_len(&mut hash, variants.len())?;
+                for variant in variants {
+                    mir_image_seal_string(&mut hash, &variant.name)?;
+                    match &variant.body {
+                        VariantBody::Unit => hash.update(&[0]),
+                        VariantBody::Tuple(types) => {
+                            hash.update(&[1]);
+                            mir_image_seal_len(&mut hash, types.len())?;
+                            for ty in types {
+                                mir_image_seal_type(&mut hash, schema, definition, ty)?;
+                            }
+                        }
+                        VariantBody::Struct(fields) => {
+                            hash.update(&[2]);
+                            mir_image_seal_fields(&mut hash, schema, definition, fields)?;
+                        }
+                        VariantBody::Unsupported(reason) => return Err(format!(
+                            "unsupported native MIR layout variant `{}::{}`: {reason}",
+                            definition.key, variant.name)),
+                    }
+                }
+            }
+        }
+    }
+    Ok(hash.finalize())
+}
+
+fn mir_image_seal_len(hash: &mut source_sha256::StreamingSha256, length: usize) -> Result<(), String> {
+    let length = u64::try_from(length).map_err(|_| "native MIR layout length exceeds u64".to_string())?;
+    hash.update(&length.to_le_bytes());
+    Ok(())
+}
+
+fn mir_image_seal_string(hash: &mut source_sha256::StreamingSha256, value: &str) -> Result<(), String> {
+    mir_image_seal_len(hash, value.len())?;
+    hash.update(value.as_bytes());
+    Ok(())
+}
+
+fn mir_image_seal_fields(
+    hash: &mut source_sha256::StreamingSha256,
+    schema: &Schema,
+    definition: &Definition,
+    fields: &[Field],
+) -> Result<(), String> {
+    mir_image_seal_len(hash, fields.len())?;
+    for field in fields {
+        mir_image_seal_string(hash, &field.name)?;
+        mir_image_seal_type(hash, schema, definition, &field.ty)?;
+    }
+    Ok(())
+}
+
+fn mir_image_seal_type(
+    hash: &mut source_sha256::StreamingSha256,
+    schema: &Schema,
+    definition: &Definition,
+    ty: &TypeExpr,
+) -> Result<(), String> {
+    match ty {
+        TypeExpr::Named(name) => {
+            hash.update(&[0]);
+            if is_builtin(name) {
+                mir_image_seal_string(hash, name)?;
+            } else {
+                mir_image_seal_string(hash, &resolve_type_name(schema, definition, name)?)?;
+            }
+        }
+        TypeExpr::Option(inner) | TypeExpr::Sequence(inner)
+            | TypeExpr::Boxed(inner) | TypeExpr::Arc(inner) => {
+            hash.update(&[match ty {
+                TypeExpr::Option(_) => 1,
+                TypeExpr::Sequence(_) => 2,
+                TypeExpr::Boxed(_) => 3,
+                TypeExpr::Arc(_) => 4,
+                _ => unreachable!(),
+            }]);
+            mir_image_seal_type(hash, schema, definition, inner)?;
+        }
+        TypeExpr::Set(inner, hashed) => {
+            hash.update(&[5, u8::from(*hashed)]);
+            mir_image_seal_type(hash, schema, definition, inner)?;
+        }
+        TypeExpr::Map(key, value, hashed) => {
+            hash.update(&[6, u8::from(*hashed)]);
+            mir_image_seal_type(hash, schema, definition, key)?;
+            mir_image_seal_type(hash, schema, definition, value)?;
+        }
+        TypeExpr::Tuple(types) => {
+            hash.update(&[7]);
+            mir_image_seal_len(hash, types.len())?;
+            for ty in types {
+                mir_image_seal_type(hash, schema, definition, ty)?;
+            }
+        }
+        TypeExpr::Array(inner, length) => {
+            hash.update(&[8]);
+            mir_image_seal_len(hash, *length)?;
+            mir_image_seal_type(hash, schema, definition, inner)?;
+        }
+        TypeExpr::StaticStr => hash.update(&[9]),
+    }
+    Ok(())
+}
+
+fn emit_mir_image_prefix(
+    out: &mut String,
+    schema: &Schema,
+    reachable: &BTreeSet<String>,
+    layout: &CodecLayout<'_>,
+) -> Result<(), String> {
+    let seal = mir_image_layout_seal(schema, reachable, layout)?;
+    writeln!(out, "const MIR_IMAGE_LAYOUT_SEAL: [u8; 32] = {seal:?};")
+        .map_err(|error| error.to_string())?;
+    out.push_str(r#"
+const MIR_IMAGE_MAGIC: &[u8; 8] = b"JETMIR\0\0";
+const MIR_IMAGE_PREFIX_LEN: usize = 8 + 2 + 32;
+fn mir_image_read_prefix(bytes: &[u8], expected_schema: u16) -> Result<usize, String> {
+    let prefix = bytes.get(..MIR_IMAGE_PREFIX_LEN)
+        .ok_or_else(|| "native MIR image prefix is truncated".to_string())?;
+    if &prefix[..8] != MIR_IMAGE_MAGIC {
+        return Err("native MIR image magic does not match the current format".to_string());
+    }
+    let schema = u16::from_le_bytes([prefix[8], prefix[9]]);
+    if schema != expected_schema {
+        return Err(format!("native MIR image schema {schema} does not match current schema {expected_schema}"));
+    }
+    if prefix[10..] != MIR_IMAGE_LAYOUT_SEAL {
+        return Err("native MIR image layout seal does not match the current checked layout".to_string());
+    }
+    Ok(MIR_IMAGE_PREFIX_LEN)
+}
+fn mir_image_write_prefix(bytes: &mut Vec<u8>, schema: u16) {
+    bytes.extend_from_slice(MIR_IMAGE_MAGIC);
+    bytes.extend_from_slice(&schema.to_le_bytes());
+    bytes.extend_from_slice(&MIR_IMAGE_LAYOUT_SEAL);
+}
+"#);
+    Ok(())
 }
 
 pub fn generate(manifest_dir: &Path, out_dir: &Path) {
@@ -1105,7 +1292,7 @@ fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>, layout: &CodecLayou
             }
         }
     }
-    emit_runtime_codec_primitives(&mut out, schema, layout)?;
+    emit_runtime_codec_primitives(&mut out, schema, reachable, layout)?;
     let definitions = reachable
         .iter()
         .map(|key| schema.definitions.get(key).expect("reachable definition").clone())
@@ -1119,14 +1306,13 @@ fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>, layout: &CodecLayou
         .ok_or_else(|| "missing root MirProgram".to_string())?;
     let encode_root = function_name("encode", &root.key);
     let decode_root = function_name("decode", &root.key);
-    // The writer validates before encoding; the reader only decodes. Its
-    // callers bind the bytes to an integrity seal (the compiler-image
-    // checksum, verified when the image file is written into a build) or
-    // validate again when they re-encode, so restore does not re-run
-    // whole-program validation.
+    // The writer validates before encoding. Both readers reject a foreign
+    // schema/layout before table allocation, independently of the outer image
+    // checksum. Restore does not repeat whole-program validation; signatures
+    // intentionally leave function-body frames unread.
     writeln!(
         out,
-        "pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut interner = MirProgramImageInterner::default();\n    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\n    {encode_root}(value, &mut writer)?;\n    let body = writer.finish();\n    mir_image_assemble(interner, body)\n}}\n/// The whole program, function bodies included.\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    mir_image_restore(bytes, true)\n}}\n/// Every row and every function signature. Function bodies (blocks, locals,\n/// values, places, scopes and drops) stay unread in the image and are empty\n/// here, and table entries only bodies name are never decoded.\npub fn mir_program_signatures_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    mir_image_restore(bytes, false)\n}}\nfn mir_image_restore(bytes: &[u8], bodies: bool) -> Result<MirProgram, String> {{\n    let (tables, cursor) = mir_image_read_tables(bytes)?;\n    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables, bodies }};\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    Ok(value)\n}}\n"
+        "pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut interner = MirProgramImageInterner::default();\n    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\n    {encode_root}(value, &mut writer)?;\n    let body = writer.finish();\n    mir_image_assemble(interner, body, MIR_SCHEMA_VERSION)\n}}\n/// The whole program, function bodies included.\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    mir_image_restore(bytes, true)\n}}\n/// Every row and every function signature. Function bodies (blocks, locals,\n/// values, places, scopes and drops) stay unread in the image and are empty\n/// here, and table entries only bodies name are never decoded.\npub fn mir_program_signatures_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    mir_image_restore(bytes, false)\n}}\nfn mir_image_restore(bytes: &[u8], bodies: bool) -> Result<MirProgram, String> {{\n    let (tables, cursor) = mir_image_read_tables(bytes, MIR_SCHEMA_VERSION)?;\n    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables, bodies }};\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    if value.schema_version != MIR_SCHEMA_VERSION {{\n        return Err(format!(\"native MIR image payload schema {{}} does not match current schema {{MIR_SCHEMA_VERSION}}\", value.schema_version));\n    }}\n    Ok(value)\n}}\n"
     )
     .map_err(|error| error.to_string())?;
     Ok(out)
@@ -1142,6 +1328,7 @@ fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>, layout: &CodecLayou
 /// The payload is laid out so that a reader maps it and decodes only what it
 /// reaches:
 ///
+/// - a 42-byte magic/schema/checked-layout prefix, rejected before table reads;
 /// - a fixed header of little-endian u64s: the string count, the entry count
 ///   of each interned kind, and the length of the frames section;
 /// - the string table, then one value table per interned kind, each in
@@ -1152,7 +1339,8 @@ fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>, layout: &CodecLayou
 /// - the frames section: the framed fields, each stored out of line and
 ///   named where it belongs by a varint offset and length;
 /// - the body: the root value.
-fn emit_runtime_codec_primitives(out: &mut String, schema: &Schema, layout: &CodecLayout<'_>) -> Result<(), String> {
+fn emit_runtime_codec_primitives(out: &mut String, schema: &Schema, reachable: &BTreeSet<String>, layout: &CodecLayout<'_>) -> Result<(), String> {
+    emit_mir_image_prefix(out, schema, reachable, layout)?;
     let mut cache_fields = String::new();
     let mut cache_init = String::new();
     for key in layout.cached {
@@ -1176,7 +1364,7 @@ fn emit_runtime_codec_primitives(out: &mut String, schema: &Schema, layout: &Cod
     }
     writeln!(
         out,
-        "const MIR_IMAGE_KINDS: usize = {};\nstruct MirProgramImageTables<'a> {{\n    strings: MirProgramImageSection<'a>,\n    kinds: Vec<MirProgramImageSection<'a>>,\n    frames: &'a [u8],\n{cache_fields}}}\nfn mir_image_read_tables(bytes: &[u8]) -> Result<(MirProgramImageTables<'_>, usize), String> {{\n    let mut cursor = 0usize;\n    let string_count = mir_image_fixed_len(bytes, &mut cursor)?;\n    let mut kind_counts = [0usize; MIR_IMAGE_KINDS];\n    for count in &mut kind_counts {{\n        *count = mir_image_fixed_len(bytes, &mut cursor)?;\n    }}\n    let frames_len = mir_image_fixed_len(bytes, &mut cursor)?;\n    let strings = mir_image_section(bytes, &mut cursor, string_count)?;\n    let mut kinds = Vec::with_capacity(MIR_IMAGE_KINDS);\n    for count in kind_counts {{\n        kinds.push(mir_image_section(bytes, &mut cursor, count)?);\n    }}\n    let frames = mir_image_take(bytes, &mut cursor, frames_len)?;\n    let tables = MirProgramImageTables {{\n{cache_init}        strings,\n        kinds,\n        frames,\n    }};\n    Ok((tables, cursor))\n}}",
+        "const MIR_IMAGE_KINDS: usize = {};\nstruct MirProgramImageTables<'a> {{\n    strings: MirProgramImageSection<'a>,\n    kinds: Vec<MirProgramImageSection<'a>>,\n    frames: &'a [u8],\n{cache_fields}}}\nfn mir_image_read_tables(bytes: &[u8], expected_schema: u16) -> Result<(MirProgramImageTables<'_>, usize), String> {{\n    let mut cursor = mir_image_read_prefix(bytes, expected_schema)?;\n    let string_count = mir_image_fixed_len(bytes, &mut cursor)?;\n    let mut kind_counts = [0usize; MIR_IMAGE_KINDS];\n    for count in &mut kind_counts {{\n        *count = mir_image_fixed_len(bytes, &mut cursor)?;\n    }}\n    let frames_len = mir_image_fixed_len(bytes, &mut cursor)?;\n    let strings = mir_image_section(bytes, &mut cursor, string_count)?;\n    let mut kinds = Vec::with_capacity(MIR_IMAGE_KINDS);\n    for count in kind_counts {{\n        kinds.push(mir_image_section(bytes, &mut cursor, count)?);\n    }}\n    let frames = mir_image_take(bytes, &mut cursor, frames_len)?;\n    let tables = MirProgramImageTables {{\n{cache_init}        strings,\n        kinds,\n        frames,\n    }};\n    Ok((tables, cursor))\n}}",
         layout.interned.len()
     )
     .map_err(|error| error.to_string())?;
@@ -1237,15 +1425,16 @@ fn mir_image_push_section(bytes: &mut Vec<u8>, ends: &[u8], blob: &[u8]) {
     bytes.extend_from_slice(ends);
     bytes.extend_from_slice(blob);
 }
-fn mir_image_assemble(interner: MirProgramImageInterner, body: Vec<u8>) -> Result<Vec<u8>, String> {
+fn mir_image_assemble(interner: MirProgramImageInterner, body: Vec<u8>, schema: u16) -> Result<Vec<u8>, String> {
     let tables = 4 * (MIR_IMAGE_KINDS + 1)
         + interner.string_ends.len()
         + interner.string_blob.len()
         + interner.kind_ends.iter().chain(&interner.kind_blobs).map(Vec::len).sum::<usize>();
     let mut bytes = Vec::new();
     bytes
-        .try_reserve_exact(8 * (MIR_IMAGE_KINDS + 2) + tables + interner.frames.len() + body.len())
+        .try_reserve_exact(MIR_IMAGE_PREFIX_LEN + 8 * (MIR_IMAGE_KINDS + 2) + tables + interner.frames.len() + body.len())
         .map_err(|_| "native MIR image is too large to allocate".to_string())?;
+    mir_image_write_prefix(&mut bytes, schema);
     let string_count = u64::try_from(interner.strings.len()).map_err(|_| "native MIR string table exceeds u64".to_string())?;
     bytes.extend_from_slice(&string_count.to_le_bytes());
     for count in interner.kind_counts {
@@ -1413,10 +1602,11 @@ fn mir_image_static_str(value: String) -> Result<&'static str, String> {
     for record in crate::Syntax::CORE_CALLS {
         if record.module == value { return Ok(record.module); }
         if record.member == value { return Ok(record.member); }
-        if record.symbol.name() == value { return Ok(record.symbol.name()); }
+        if let crate::Syntax::CoreCallSymbol::Prelude(name) | crate::Syntax::CoreCallSymbol::Rust(name) = record.symbol {
+            if name == value { return Ok(name); }
+        }
         if let Some(item) = record.receiver_types.iter().copied().find(|item| *item == value) { return Ok(item); }
         if let Some(item) = record.effect_leaf.filter(|item| *item == value) { return Ok(item); }
-        if let Some(item) = record.jit_symbol.filter(|item| *item == value) { return Ok(item); }
         if let Some(marker) = record.marker {
             if marker.member == value { return Ok(marker.member); }
             if marker.since == value { return Ok(marker.since); }
@@ -1436,6 +1626,25 @@ fn mir_image_static_str(value: String) -> Result<&'static str, String> {
     let item: &'static str = Box::leak(value.into_boxed_str());
     unowned.insert(item);
     Ok(item)
+}
+#[test]
+fn mir_image_unknown_static_string_restores_past_source_owned_rows() {
+    assert!(crate::Syntax::CORE_CALLS.iter().any(|record|
+        matches!(record.symbol, crate::Syntax::CoreCallSymbol::SourceOwned)));
+    let value = "__mir_image_fixture_string_absent_from_core_registry__";
+    let mut interner = MirProgramImageInterner::default();
+    let mut writer = MirProgramImageWriter { bytes: Vec::new(), interner: &mut interner };
+    writer.write_string(value).unwrap();
+    let body = writer.finish();
+    // The fixture uses the same sealed schema prefix as a complete MIR image.
+    let bytes = mir_image_assemble(interner, body, MIR_SCHEMA_VERSION).unwrap();
+    let (tables, cursor) = mir_image_read_tables(&bytes, MIR_SCHEMA_VERSION).unwrap();
+    let mut reader = MirProgramImageReader { bytes: &bytes, cursor, tables: &tables, bodies: true };
+    let restored = mir_image_static_str(reader.read_string().unwrap()).unwrap();
+    reader.finish().unwrap();
+    assert_eq!(restored, value);
+    // A second restore must reuse the process-wide interned entry.
+    assert!(std::ptr::eq(restored, mir_image_static_str(value.to_string()).unwrap()));
 }
 "#,
     );
@@ -1914,7 +2123,7 @@ mod tests {
 
     #[test]
     fn character_mask_preserves_lifetimes_and_nested_field_delimiters() {
-        let source = "pub struct Rows { pub rows: &'static [(&'static str, Kind)], pub next: u64 }";
+        let source = "struct Rows { rows: &'static [(&'static str, Kind)], next: u64 }";
         let masked = mask_comments_and_literals(source);
         assert_eq!(masked, source);
         let definitions = parse_definitions(&masked, "crate::Rows", &BTreeMap::new()).unwrap();
@@ -1950,7 +2159,7 @@ mod tests {
     #[test]
     fn recursive_self_type_resolves_to_its_declaring_definition() {
         let definitions = parse_definitions(
-            "pub enum Node { Leaf, Child(Box<Self>) }",
+            "enum Node { Leaf, Child(Box<Self>) }",
             "crate::Graph",
             &BTreeMap::new(),
         ).unwrap();
@@ -1970,7 +2179,7 @@ mod tests {
         let imports = parse_imports(&source, "crate::MIR");
         let definitions = parse_definitions(&source, "crate::MIR", &imports).unwrap();
         let kind_definitions = parse_definitions(
-            "pub type Code = u8; pub struct Kind { pub code: Code }",
+            "type Code = u8; struct Kind { code: Code }",
             "crate::Kinds",
             &BTreeMap::new(),
         )
@@ -2012,9 +2221,9 @@ mod tests {
     #[test]
     fn reachable_alias_only_cycles_are_rejected_without_recursing_forever() {
         let definitions = parse_definitions(
-            "pub type First = Option<Second>;
-             pub type Second = Box<First>;
-             pub struct MirProgram { pub value: First }",
+            "type First = Option<Second>;
+             type Second = Box<First>;
+             struct MirProgram { value: First }",
             "crate::MIR",
             &BTreeMap::new(),
         )
@@ -2053,7 +2262,7 @@ mod tests {
     fn public_paths_follow_reexports_instead_of_private_modules() {
         let mut schema = Schema::default();
         for module in ["crate::AST::details", "crate::Syntax::details"] {
-            let definition = parse_definitions("pub enum Kind { One }", module, &BTreeMap::new()).unwrap().remove(0);
+            let definition = parse_definitions("enum Kind { One }", module, &BTreeMap::new()).unwrap().remove(0);
             schema.definitions.insert(definition.key.clone(), definition);
         }
         parse_public_uses("pub use details::Kind;", "crate::AST", &mut schema);
@@ -2072,6 +2281,67 @@ mod tests {
         assert!(matches!(&variants[1].body, VariantBody::Tuple(fields) if fields.len() == 1));
         assert!(matches!(&variants[2].body, VariantBody::Struct(fields) if fields.len() == 1 && fields[0].name == "value"));
         assert!(matches!(parse_variants("Broken =").unwrap()[0].body, VariantBody::Unsupported(_)));
+    }
+
+    #[test]
+    fn layout_seal_tracks_resolved_fields_variants_and_table_layout() {
+        let imports = BTreeMap::from([("Leaf".to_string(), "crate::Leaf".to_string())]);
+        let definitions = parse_definitions(
+            "pub struct Leaf(pub u64); pub enum Kind { Unit, Data(Leaf) }
+             pub struct Holder { pub head: Leaf, pub kind: Kind, pub body: Vec<Leaf> }",
+            "crate",
+            &imports,
+        ).unwrap();
+        let mut schema = Schema::default();
+        for definition in definitions {
+            schema.definitions.insert(definition.key.clone(), definition);
+        }
+        let reachable = reachable_schema(&schema, "crate::Holder").unwrap();
+        let layout = CodecLayout {
+            interned: &["crate::Leaf", "crate::Kind"],
+            cached: &["crate::Leaf"],
+            framed: &[("crate::Holder", &["body"])],
+        };
+        let original = mir_image_layout_seal(&schema, &reachable, &layout).unwrap();
+        let mut changed = schema.definitions["crate::Holder"].clone();
+        let Body::Struct(fields) = &mut changed.body else { panic!("expected named fields") };
+        // Equivalent import spelling and public reexports are not wire changes.
+        fields[0].ty = TypeExpr::Named("crate::Leaf".to_string());
+        changed.path = "crate::PublicHolder".to_string();
+        schema.definitions.insert(changed.key.clone(), changed.clone());
+        assert_eq!(mir_image_layout_seal(&schema, &reachable, &layout).unwrap(), original);
+        let Body::Struct(fields) = &mut changed.body else { panic!("expected named fields") };
+        fields[0].name = "renamed".to_string();
+        schema.definitions.insert(changed.key.clone(), changed.clone());
+        assert_ne!(mir_image_layout_seal(&schema, &reachable, &layout).unwrap(), original);
+        let Body::Struct(fields) = &mut changed.body else { panic!("expected named fields") };
+        fields[0].name = "head".to_string();
+        fields.swap(0, 1);
+        schema.definitions.insert(changed.key.clone(), changed.clone());
+        assert_ne!(mir_image_layout_seal(&schema, &reachable, &layout).unwrap(), original);
+        let Body::Struct(fields) = &mut changed.body else { panic!("expected named fields") };
+        fields.swap(0, 1);
+        fields[2].ty = TypeExpr::Array(Box::new(TypeExpr::Named("Leaf".to_string())), 2);
+        schema.definitions.insert(changed.key.clone(), changed.clone());
+        assert_ne!(mir_image_layout_seal(&schema, &reachable, &layout).unwrap(), original);
+        let Body::Struct(fields) = &mut changed.body else { panic!("expected named fields") };
+        fields[2].ty = TypeExpr::Sequence(Box::new(TypeExpr::Named("Leaf".to_string())));
+        schema.definitions.insert(changed.key.clone(), changed);
+        let kind = schema.definitions.get_mut("crate::Kind").unwrap();
+        let Body::Enum(variants) = &mut kind.body else { panic!("expected enum") };
+        variants.swap(0, 1);
+        assert_ne!(mir_image_layout_seal(&schema, &reachable, &layout).unwrap(), original);
+        let kind = schema.definitions.get_mut("crate::Kind").unwrap();
+        let Body::Enum(variants) = &mut kind.body else { panic!("expected enum") };
+        variants.swap(0, 1);
+        assert_eq!(mir_image_layout_seal(&schema, &reachable, &layout).unwrap(), original);
+        for alternative in [
+            CodecLayout { interned: &["crate::Kind", "crate::Leaf"], cached: layout.cached, framed: layout.framed },
+            CodecLayout { interned: layout.interned, cached: &[], framed: layout.framed },
+            CodecLayout { interned: layout.interned, cached: layout.cached, framed: &[] },
+        ] {
+            assert_ne!(mir_image_layout_seal(&schema, &reachable, &alternative).unwrap(), original);
+        }
     }
 
     #[test]
@@ -2100,13 +2370,14 @@ mod tests {
         let encode = encode_expression(&ty, "value", "writer", &schema, &reachable, &context).unwrap();
         let decode = decode_expression(&ty, "reader", &schema, &reachable, &context).unwrap();
         let mut primitives = String::new();
-        emit_runtime_codec_primitives(&mut primitives, &schema, &layout).unwrap();
+        emit_runtime_codec_primitives(&mut primitives, &schema, &reachable, &layout).unwrap();
         let primitives = primitives.split("fn mir_image_static_str").next().unwrap();
         let encode_holder = function_name("encode", &holder.key);
         let decode_holder = function_name("decode", &holder.key);
         let source = format!(r#"
 use std::collections::{{BTreeMap, BTreeSet, HashMap}};
 type Value = {spelling};
+const FIXTURE_SCHEMA_VERSION: u16 = 7;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Leaf(pub u64);
 #[derive(Debug, Clone, PartialEq)]
@@ -2125,10 +2396,10 @@ fn image(value: &Value) -> Result<Vec<u8>, String> {{
     let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};
     encode(value, &mut writer)?;
     let body = writer.finish();
-    mir_image_assemble(interner, body)
+    mir_image_assemble(interner, body, FIXTURE_SCHEMA_VERSION)
 }}
 fn restore(bytes: &[u8]) -> Result<Value, String> {{
-    let (tables, cursor) = mir_image_read_tables(bytes)?;
+    let (tables, cursor) = mir_image_read_tables(bytes, FIXTURE_SCHEMA_VERSION)?;
     let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables, bodies: true }};
     let value = decode(&mut reader)?;
     reader.finish()?;
@@ -2139,10 +2410,10 @@ fn holder_image(value: &Holder) -> Result<Vec<u8>, String> {{
     let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};
     {encode_holder}(value, &mut writer)?;
     let body = writer.finish();
-    mir_image_assemble(interner, body)
+    mir_image_assemble(interner, body, FIXTURE_SCHEMA_VERSION)
 }}
 fn holder_restore(bytes: &[u8], bodies: bool) -> Result<Holder, String> {{
-    let (tables, cursor) = mir_image_read_tables(bytes)?;
+    let (tables, cursor) = mir_image_read_tables(bytes, FIXTURE_SCHEMA_VERSION)?;
     let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables, bodies }};
     let value = {decode_holder}(&mut reader)?;
     reader.finish()?;
@@ -2170,7 +2441,7 @@ fn main() {{
     assert!(restore(&bytes[..bytes.len() - 1]).is_err());
     assert!(restore(&bytes[..10]).is_err());
     {{
-        let (tables, _) = mir_image_read_tables(&bytes).unwrap();
+        let (tables, _) = mir_image_read_tables(&bytes, FIXTURE_SCHEMA_VERSION).unwrap();
         let mut overlong = MirProgramImageReader {{ bytes: &[0x80, 0x00], cursor: 0, tables: &tables, bodies: true }};
         assert!(overlong.read_varint().unwrap_err().contains("not canonical"));
     }}
@@ -2189,9 +2460,25 @@ fn main() {{
     assert_eq!(holder_image(&holder_restore(&holder_bytes, true).unwrap()).unwrap(), holder_bytes);
     let signature = Holder {{ head: Leaf(5), body: Vec::new(), tail: "after".to_string() }};
     assert_eq!(holder_restore(&holder_bytes, false).unwrap(), signature);
+    assert_eq!(&holder_bytes[..8], MIR_IMAGE_MAGIC);
+    assert_eq!(&holder_bytes[8..10], &FIXTURE_SCHEMA_VERSION.to_le_bytes());
+    assert_eq!(&holder_bytes[10..MIR_IMAGE_PREFIX_LEN], &MIR_IMAGE_LAYOUT_SEAL);
+    for bodies in [true, false] {{
+        for length in 0..MIR_IMAGE_PREFIX_LEN {{
+            assert!(holder_restore(&holder_bytes[..length], bodies).unwrap_err().contains("prefix is truncated"));
+        }}
+        // Poison table counts as well: a wrong prefix must win before table
+        // decoding/allocation even when no function bodies will be restored.
+        for (offset, diagnostic) in [(0, "magic"), (8, "schema"), (10, "layout seal")] {{
+            let mut foreign = holder_bytes.clone();
+            foreign[offset] ^= 0x01;
+            foreign[MIR_IMAGE_PREFIX_LEN..MIR_IMAGE_PREFIX_LEN + 8].fill(0xff);
+            assert!(holder_restore(&foreign, bodies).unwrap_err().contains(diagnostic));
+        }}
+    }}
     let fixed = |at: usize| u64::from_le_bytes(holder_bytes[at..at + 8].try_into().unwrap()) as usize;
-    let (strings, leaf_count, frames_len) = (fixed(0), fixed(8), fixed(16));
-    let mut frames_at = 24;
+    let (strings, leaf_count, frames_len) = (fixed(MIR_IMAGE_PREFIX_LEN), fixed(MIR_IMAGE_PREFIX_LEN + 8), fixed(MIR_IMAGE_PREFIX_LEN + 16));
+    let mut frames_at = MIR_IMAGE_PREFIX_LEN + 24;
     for count in [strings, leaf_count] {{
         let last = frames_at + 4 * count;
         frames_at += 4 * (count + 1) + u32::from_le_bytes(holder_bytes[last..last + 4].try_into().unwrap()) as usize;

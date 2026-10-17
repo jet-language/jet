@@ -1,14 +1,14 @@
 // In-process Lua binding generator (D-FFI-LUA1=A), ported from
 // jet_pkg_model::LuaBind. Each session owns one embedded Lua state; values
-// cross as JSON DataTrees or as zero-copy table views.
+// cross as JSON Dyns or as zero-copy table views.
 
 // A Lua binding also names the directory holding the embeddable runtime.
-pub struct LuaBindResult {
-    pub source: String
-    pub bound: [String]
-    pub archive: String
-    pub lib_dir: String
-    pub provenance: String
+struct LuaBindResult {
+    source: String
+    bound: [String]
+    archive: String
+    lib_dir: String
+    provenance: String
 }
 
 // The fixed C entry points every Lua binding imports; they drive both the
@@ -36,7 +36,7 @@ enum LuaToken {
 PKG_LUA_TOOL_ACTION :: prep { "rejected the Lua binding input" }
 
 // Bind the named top-level `function name(input)` declarations of `source`.
-pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> LuaBindResult ForeignBindError! {
+fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> LuaBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
     luac :: pkg_bridge_tool_path("luac") ?? return Err(ForeignBindError.ToolMissing("luac"))
     if pkg_binder_run_reporting_detail([String]{luac, "-p", path}, "luac", PKG_LUA_TOOL_ACTION) == {
@@ -65,7 +65,7 @@ pub fn pkg_lua_bind(path: String, source: String, lib: String, cache: String) -[
     pkg_binder_remove_file_quiet(c)
     pkg_binder_remove_file_quiet(object)
     digest :: pkg_binder_identity_digest([String]{"jet-lua-bind-v2", source, root})
-    provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=datatree+table-view\ntable-view=zero-copy\nhook=instructions\n"
+    provenance := "schema=jet-lua-bind-v2\nsha256={digest}\nruntime={root}\nstate=per-session\ntransport=dyn+table-view\ntable-view=zero-copy\nhook=instructions\n"
     pkg_binder_append_artifact_boundary(&provenance, ForeignLanguage.Lua, "Lua", lib, path, archive, "luac={luac};{pkg_binder_cc_ar_identity()}")
     Ok(LuaBindResult{source: pkg_lua_render_jet(abi, functions), bound: functions, archive: archive, lib_dir: lib_dir, provenance: provenance})
 }
@@ -95,7 +95,7 @@ fn pkg_lua_render_jet(abi: String, functions: [String]) -> String Never! {
         &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
         &out.push("    fn {name}_view(handle: Int, deadline_ms: Int) Int = \"{abi}_view_{name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\npub struct TableView {{ session: Int, table: Int }}\n#Error\npub enum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
+    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\nstruct Session {{ value: Int }}\nstruct TableView {{ session: Int, table: Int }}\n#Error\nenum LuaError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\n")
     &out.push(pkg_render_lua_decode_status("LuaError"))
     &out.push(pkg_render_decode_response("LuaError", DecoderProtocol.LuaRawJSON))
     &out.push(PKG_LUA_JET_SESSION)
@@ -104,7 +104,7 @@ fn pkg_lua_render_jet(abi: String, functions: [String]) -> String Never! {
 }
 
 // The generated surface for the binder registry's rendering probe.
-pub fn pkg_lua_render_probe() -> String Never! {
+fn pkg_lua_render_probe() -> String Never! {
     pkg_lua_render_jet("registry", [String]{"probe"})
 }
 
@@ -256,21 +256,21 @@ impl TableView.Close {
     fn close(^self) { abi.view_release(self.session, self.table) }
 }
 
-pub fn open() -> Session LuaError! {
+fn open() -> Session LuaError! {
     handle :: abi.open()
     decode_status(abi.take_error())
     return Ok(Session{ value: handle })
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
-pub fn view_get_int(view: TableView, key: String) -> Int LuaError! {
+fn view_get_int(view: TableView, key: String) -> Int LuaError! {
     value :: abi.view_get_int(view.session, view.table, key)
     decode_status(abi.take_error())
     return Ok(value)
 }
 
-pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
+fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! {
     abi.view_set_int(view.session, view.table, key, value)
     decode_status(abi.take_error())
     return Ok(true)
@@ -279,20 +279,23 @@ pub fn view_set_int(view: TableView, key: String, value: Int) -> Bool LuaError! 
 ``` }
 
 // The three generated entry points per function. Hole: `name`.
-PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: DataTree, deadline_ms: Int) -> DataTree LuaError! {
-    raw :: abi.@@name@@(session.value, json.to_string(input), deadline_ms)
+PKG_LUA_JET_FUNCTION :: prep { ```pub fn @@name@@(session: Session, input: Dyn, deadline_ms: Int) -> Dyn LuaError! {
+    payload :: json.to_string(input) ?? return Err(LuaError.Protocol)
+    raw :: abi.@@name@@(session.value, payload, deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn @@name@@_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
-    tree := json.parse(json.to_string(input)) ?? return Err(LuaError.Protocol)
+fn @@name@@_typed<T: [Encode, Decode]>(session: Session, input: T, deadline_ms: Int) -> T LuaError! {
+    input_json :: json.to_string(input) ?? return Err(LuaError.Protocol)
+    tree := json.parse(input_json) ?? return Err(LuaError.Protocol)
     value := @@name@@(session, tree, deadline_ms)
-    decoded := json.decode<T>(json.to_string(value)) ?? return Err(LuaError.Protocol)
+    output_json :: json.to_string(value) ?? return Err(LuaError.Protocol)
+    decoded := json.decode<T>(output_json) ?? return Err(LuaError.Protocol)
     return Ok(decoded)
 }
 
-pub fn @@name@@_view(session: Session, deadline_ms: Int) -> TableView LuaError! {
+fn @@name@@_view(session: Session, deadline_ms: Int) -> TableView LuaError! {
     table :: abi.@@name@@_view(session.value, deadline_ms)
     decode_status(abi.take_error())
     return Ok(TableView{ session: session.value, table: table })

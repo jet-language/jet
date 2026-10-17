@@ -11,35 +11,35 @@ LUAROCKS_RECIPE_ID :: prep { "luarocks-provider-v1" }
 LUAROCKS_DEFAULT_REPOSITORY :: prep { "https://luarocks.org" }
 
 // One rockspec dependency: a rock and its `(operator, version)` constraints.
-pub struct LuaRocksDependency {
-    pub name: String
-    pub requirements: [(operator: String, wanted: String)]
+struct LuaRocksDependency {
+    name: String
+    requirements: [(operator: String, wanted: String)]
 }
 
 // The rockspec facts the provider installs from.
-pub struct LuaRockspec {
-    pub name: String
-    pub version: String
-    pub source_url: String
+struct LuaRockspec {
+    name: String
+    version: String
+    source_url: String
     // Lowercase SHA-256 of the source archive.
-    pub source_hash: String
+    source_hash: String
     // Sorted by name.
-    pub dependencies: [LuaRocksDependency]
+    dependencies: [LuaRocksDependency]
     // Builtin module name -> relative `.lua` path.
-    pub modules: [String: String]
-    pub platforms: [String]
+    modules: [String: String]
+    platforms: [String]
 }
 
 // A fetched rockspec and source archive of the closure.
-pub struct LuaRocksArtifact {
-    pub spec: LuaRockspec
-    pub rockspec_path: String
-    pub source_path: String
-    pub rockspec_hash: String
-    pub source_hash: String
+struct LuaRocksArtifact {
+    spec: LuaRockspec
+    rockspec_path: String
+    source_path: String
+    rockspec_hash: String
+    source_hash: String
 }
 
-pub struct LuaRocksProvider {
+struct LuaRocksProvider {
     // A locked LuaRocks realization must still match `authority.providers`.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
         project :: ctx.project_dir ?? return
@@ -80,7 +80,7 @@ fn provider_luarocks_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority R
     RegistryAuthority.load(ctx, "luarocks", LUAROCKS_DEFAULT_REPOSITORY, [String]{"luarocks.org", "github.com", "codeload.github.com", "raw.githubusercontent.com"})
 }
 
-pub fn provider_luarocks_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
+fn provider_luarocks_cache_authority(ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
     authority :: provider_luarocks_authority(ctx) ?? return Err(err.into_provider(RegistryErrorKind.LuaRocks))
     Ok(authority)
 }

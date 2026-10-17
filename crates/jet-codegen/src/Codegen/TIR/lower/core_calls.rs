@@ -5,6 +5,7 @@ use crate::Codegen::TIR::TCoreClosureKind;
 use crate::Codegen::TIR::TExpr;
 use crate::Codegen::TIR::TExprKind;
 use crate::Codegen::TIR::TFailureCarrier;
+use crate::Codegen::TIR::TFnValueKind;
 use crate::Codegen::TIR::TJitSpawnLambda;
 use crate::Codegen::TIR::TLambda;
 use crate::Codegen::TIR::clone_env;
@@ -27,6 +28,29 @@ use crate::Codegen::TIR::spawn_label;
 use crate::Codegen::TIR::unit_type;
 use crate::Diagnostics::Span;
 
+// Preparation lowers a checked AST before method-return facts are populated.
+// Reuse a surface contract only when its concrete parameters match this call;
+// a polymorphic overload must still carry its checked result fact.
+pub(super) fn checked_core_return_type(
+    module: &str,
+    method: &str,
+    args: &[TExpr],
+    cx: &Cx,
+) -> Option<Type> {
+    if let Some((_, result)) = crate::Sema::core_call_semantic_signature(module, method) {
+        return Some(result);
+    }
+    let (params, result) = crate::Sema::core_call_surface_signature(module, method)?;
+    if params.len() != args.len()
+        || !params.iter().zip(args).all(|((_, expected), actual)| {
+            cx.expand_type_aliases(expected) == cx.expand_type_aliases(&actual.ty)
+        })
+    {
+        return None;
+    }
+    Some(result.unwrap_or_else(unit_type))
+}
+
 fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     TExpr {
         ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
@@ -43,6 +67,12 @@ fn checked_core_record(
     arity: usize,
     span: Span,
 ) -> Result<&'static crate::Syntax::CoreCallRecord, TExpr> {
+    if let Some(row) = crate::Syntax::core_call(module, method).filter(|row| row.source_member().is_some()) {
+        if row.accepts_arity(arity) {
+            return Ok(row);
+        }
+        return Err(invariant_violation_expr(span, format!("source-owned Core call `{module}.{method}` has the wrong checked arity")));
+    }
     crate::Syntax::core_call_projection(
         module,
         method,
@@ -128,6 +158,9 @@ fn lower_optional_core_arg(
         }
     } else {
         let value = lower_owned_expr(&arg.expr, cx, env);
+        if matches!(value.ty.without_user_tags(), Type::Option(_)) {
+            return value;
+        }
         TExpr {
             ty: option_ty,
             kind: TExprKind::Present(Box::new(value)),
@@ -253,8 +286,8 @@ fn lower_interrupt_callback(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::Lambda(Box::new(tl)),
             })
         }
-        Expr::Ident(name, _) if !env.locals.contains_key(name) && !cx.consts.contains_key(name) => {
-            let Some(ty) = cx.fn_types.get(name).cloned() else {
+        Expr::Ident(name, _) if !env.locals.contains_key(name) && !cx.fact_consts(name).is_some() => {
+            let Some(ty) = cx.fact_fn_types(name).cloned() else {
                 return invariant_violation_expr(
                     expr.span(),
                     "checked interrupt callback is missing its function type",
@@ -372,17 +405,15 @@ pub(crate) fn lower_query_receiver_call(
         .unwrap_or_else(|| lower_expr(receiver, cx, env));
     let row_ty = match receiver.ty.without_user_tags() {
         Type::Apply { name, args }
-            if (name == "Query" && args.len() == 1)
-                || (name == "DataGroupedQuery" && args.len() == 2)
-                || (name == "DataTracked" && args.len() == 2)
-                || (name == "DataWatch" && args.len() == 1) =>
+            if matches!(
+                (crate::Sema::data_nominal_leaf(name), args.len()),
+                (Some("Query" | "DataWatch" | "DataStream"), 1)
+                    | (Some("DataGroupedQuery" | "DataTracked"), 2)
+            ) =>
         {
             Some(args[callback_row_index].clone())
         }
         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
-        Type::Apply { name, args } if name == "DataStream" && args.len() == 1 => {
-            Some(args[0].clone())
-        }
         _ => None,
     };
     let Some(row_ty) = row_ty else {
@@ -411,7 +442,9 @@ pub(crate) fn lower_query_receiver_call(
                 call_args
                     .get(1)
                     .and_then(|other| match other.ty.without_user_tags() {
-                        Type::Apply { name, args } if name == "Query" && args.len() == 1 => {
+                        Type::Apply { name, args }
+                            if crate::Sema::data_nominal_leaf(name) == Some("Query") && args.len() == 1 =>
+                        {
                             Some(args[0].clone())
                         }
                         _ => None,
@@ -480,6 +513,25 @@ pub(crate) fn lower_core_closure_call(
     cx: &Cx,
     env: &mut LowerEnv,
 ) -> Option<TExpr> {
+    if module == "core.mem" {
+        if let Some(lifetime) = jet_foundation::MIR::MirSharedLifetime::core_member(method) {
+            let init = lower_expr(&args[0].expr, cx, env);
+            let TExprKind::FnValue {
+                kind: TFnValueKind::NamedFn { name: Some(initializer), lambda: None },
+            } = init.kind else {
+                return Some(invariant_violation_expr(source_span, "checked Shared initializer has no declaration identity"));
+            };
+            let Type::Fn { ret: Some(ret), .. } = init.ty else {
+                return Some(invariant_violation_expr(source_span, "checked Shared initializer has no return contract"));
+            };
+            let success = match crate::AST::FailureContract::from_return_type(Some(&ret)) {
+                crate::AST::FailureContract::ProvenUnreachable { success }
+                | crate::AST::FailureContract::InferredNever { success } => success,
+                _ => return Some(invariant_violation_expr(source_span, "checked Shared initializer is not infallible")),
+            };
+            return Some(TExpr { ty: success, kind: TExprKind::GlobalShared { initializer, lifetime } });
+        }
+    }
     if module == "core.term" && method == "progress" {
         let Some(first) = args.first() else {
             return Some(invariant_violation_expr(
@@ -1110,8 +1162,8 @@ pub(crate) fn lower_core_closure_call(
                         source_start_column: cx.src_line_col(source_span.start).1 as u32,
                         source_end_line: cx.src_line_col(source_span.end).0 as u32,
                         source_end_column: cx.src_line_col(source_span.end).1 as u32,
-                        build_id: cx.preview_build_id.clone(),
-                        revision: cx.preview_revision.clone(),
+                        build_id: cx.preview_build_id.to_string(),
+                        revision: cx.preview_revision.to_string(),
                     },
                 },
             });

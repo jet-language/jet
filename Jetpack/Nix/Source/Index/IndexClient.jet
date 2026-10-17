@@ -17,11 +17,11 @@ nix_index_temp_sequence := 0
 // Bounded GET of one index URL. The native transport holds one HTTP client
 // whose destination rule pins every host's checked addresses for the
 // client's lifetime; tests supply fixed responses.
-pub struct NixIndexTransport {
-    pub get_bounded: fn(String, Int) -[Net, Time.Wait]> [U8] NixIndexError!
+struct NixIndexTransport {
+    get_bounded: fn(String, Int) -[Net, Time.Wait]> [U8] NixIndexError!
 }
 
-pub enum NixIndexClock {
+enum NixIndexClock {
     System
     Fixed(Int)
 
@@ -33,15 +33,15 @@ pub enum NixIndexClock {
     }
 }
 
-pub struct NixIndexClient {
-    endpoint: String
-    root: String
-    key_id: String
-    public_key: crypto.VerifyKey?
-    local_catalog: Bool
-    offline: Bool
-    clock: NixIndexClock
-    transport: NixIndexTransport
+struct NixIndexClient {
+    priv endpoint: String
+    priv root: String
+    priv key_id: String
+    priv public_key: crypto.VerifyKey?
+    priv local_catalog: Bool
+    priv offline: Bool
+    priv clock: NixIndexClock
+    priv transport: NixIndexTransport
 
     fn from_roots(roots: HangarRoots) -[FS, Env, Net]> NixIndexClient NixIndexError! {
         NixIndexClient.from_roots_with_mode(roots, false)
@@ -421,10 +421,10 @@ pub struct NixIndexClient {
 }
 
 // A manifest with the exact bytes and signature sidecar it was verified from.
-pub struct NixIndexCachedManifest {
-    pub manifest: NixIndexChannelManifest
-    pub bytes: [U8]
-    pub signature_bytes: [U8]
+struct NixIndexCachedManifest {
+    manifest: NixIndexChannelManifest
+    bytes: [U8]
+    signature_bytes: [U8]
 }
 
 // The native transport: HTTPS to checked public addresses, plain HTTP only to

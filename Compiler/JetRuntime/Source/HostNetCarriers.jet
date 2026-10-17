@@ -1,0 +1,149 @@
+// Native network holders, independent of Rust std/Arc/Mutex representations.
+// Stream56: owned FD72*0, reserved8, readShutdown16, writeShutdown24,
+// readTimeoutMs32, writeTimeoutMs40, metadata mutex48. Only FD72.closed16 is
+// the close source of truth. TCP and Unix streams use the same holder shape.
+// Listener8 owns one FD72 reference. TCP clone duplicates the native fd;
+// Unix listener clone retains the shared fd, matching its Rust Arc ownership.
+// UDP8 -> State32(refs0, mutex8, ownedFD72*16, singleTimeoutMs24).
+#Export(c) fn jet_socket_stream_from_fd_raw(state: I64) -> I64 {
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(value, I64{56})
+    net_put(value, I64{0}, state)
+    net_put(value, I64{32}, I64{-1})
+    net_put(value, I64{40}, I64{-1})
+    value
+}
+fn net_stream_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_fd_drop_raw(net_word(value, I64{0}))
+    jet_rt_free(value, I64{56}, I64{8})
+}
+#Export(c) fn jet_rt_handle_drop_jet_tcp_stream(value: I64) { net_stream_drop(value) }
+#Export(c) fn jet_rt_handle_drop_jet_unix_stream(value: I64) { net_stream_drop(value) }
+#Export(c) fn jet_socket_stream_fd_raw(value: I64) -> I64 { net_word(value, I64{0}) }
+#Export(c) fn jet_socket_stream_flags_raw(value: I64) -> I64 {
+    mutex :: wrapping(value + I64{48})
+    sync_mutex_lock(mutex)
+    state :: net_word(value, I64{0})
+    fd_lock(state)
+    flags :: (if (fd_word(state, I64{16}) != I64{0}) -> I64{1} else -> I64{0}).bit_or((net_word(value, I64{16}) << I64{1})).bit_or((net_word(value, I64{24}) << I64{2}))
+    fd_unlock(state)
+    sync_mutex_unlock(mutex)
+    flags
+}
+#Export(c) fn jet_socket_stream_mark_shutdown_raw(value: I64, how: I64) {
+    // Source calls this only after successful shutdown; it owns how validation.
+    mutex :: wrapping(value + I64{48})
+    sync_mutex_lock(mutex)
+    if (how == I64{0} || how == I64{2}) -> net_put(value, I64{16}, I64{1})
+    if (how == I64{1} || how == I64{2}) -> net_put(value, I64{24}, I64{1})
+    sync_mutex_unlock(mutex)
+}
+#Export(c) fn jet_socket_stream_mark_closed_raw(value: I64) {
+    mutex :: wrapping(value + I64{48})
+    sync_mutex_lock(mutex)
+    jet_socket_mark_closed_raw(net_word(value, I64{0}))
+    net_put(value, I64{16}, I64{1})
+    net_put(value, I64{24}, I64{1})
+    sync_mutex_unlock(mutex)
+}
+#Export(c) fn jet_socket_stream_timeout_set_raw(value: I64, directions: I64, milliseconds: I64) {
+    // milliseconds is the route's borrowed exact-Int word, source validated.
+    duration :: host_native_int(milliseconds)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    mutex :: wrapping(value + I64{48})
+    sync_mutex_lock(mutex)
+    if ((directions.bit_and(I64{1})) != I64{0}) -> net_put(value, I64{32}, duration)
+    if ((directions.bit_and(I64{2})) != I64{0}) -> net_put(value, I64{40}, duration)
+    sync_mutex_unlock(mutex)
+}
+#Export(c) fn jet_socket_stream_timeout_get_raw(value: I64, reading: Bool, output: I64) -> I64 {
+    mutex :: wrapping(value + I64{48})
+    sync_mutex_lock(mutex)
+    duration :: net_word(value, if reading -> I64{32} else -> I64{40})
+    sync_mutex_unlock(mutex)
+    if (duration < I64{0}) -> return I64{0}
+    net_put(output, I64{0}, jet_int_owned_from_i64(duration))
+    I64{1}
+}
+
+#Export(c) fn jet_socket_listener_from_fd_raw(state: I64) -> I64 {
+    value :: jet_rt_alloc(I64{8}, I64{8})
+    net_put(value, I64{0}, state)
+    value
+}
+fn net_listener_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_fd_drop_raw(net_word(value, I64{0}))
+    jet_rt_free(value, I64{8}, I64{8})
+}
+#Export(c) fn jet_rt_handle_drop_jet_tcp_listener(value: I64) { net_listener_drop(value) }
+#Export(c) fn jet_rt_handle_drop_jet_unix_listener(value: I64) { net_listener_drop(value) }
+#Export(c) fn jet_socket_listener_fd_raw(value: I64) -> I64 { net_word(value, I64{0}) }
+#Export(c) fn jet_tcp_listener_clone_raw(value: I64, error: I64) -> I64 {
+    state :: jet_fd_dup_raw(net_word(value, I64{0}), error)
+    if (state == I64{0}) -> I64{0} else -> jet_socket_listener_from_fd_raw(state)
+}
+#Export(c) fn jet_rt_handle_clone_jet_unix_listener(value: I64) -> I64 {
+    jet_socket_listener_from_fd_raw(jet_fd_retain_raw(net_word(value, I64{0})))
+}
+
+#Export(c) fn jet_udp_socket_from_fd_raw(fd: I64) -> I64 {
+    state :: jet_rt_alloc(I64{32}, I64{8})
+    net_put(state, I64{0}, I64{1})
+    net_put(state, I64{8}, I64{0})
+    net_put(state, I64{16}, fd)
+    net_put(state, I64{24}, I64{-1})
+    value :: jet_rt_alloc(I64{8}, I64{8})
+    net_put(value, I64{0}, state)
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_udp_socket(value: I64) -> I64 {
+    state :: net_word(value, I64{0})
+    mutex :: wrapping(state + I64{8})
+    sync_mutex_lock(mutex)
+    net_put(state, I64{0}, net_word(state, I64{0}) + I64{1})
+    sync_mutex_unlock(mutex)
+    cloned :: jet_rt_alloc(I64{8}, I64{8})
+    net_put(cloned, I64{0}, state)
+    cloned
+}
+#Export(c) fn jet_rt_handle_drop_jet_udp_socket(value: I64) {
+    if (value == I64{0}) -> return
+    state :: net_word(value, I64{0})
+    mutex :: wrapping(state + I64{8})
+    sync_mutex_lock(mutex)
+    references :: net_word(state, I64{0}) - I64{1}
+    net_put(state, I64{0}, references)
+    sync_mutex_unlock(mutex)
+    jet_rt_free(value, I64{8}, I64{8})
+    if (references == I64{0}) {
+        jet_fd_drop_raw(net_word(state, I64{16}))
+        jet_rt_free(state, I64{32}, I64{8})
+    }
+}
+#Export(c) fn jet_udp_socket_fd_raw(value: I64) -> I64 {
+    net_word(net_word(value, I64{0}), I64{16})
+}
+#Export(c) fn jet_udp_socket_timeout_set_raw(value: I64, milliseconds: I64) {
+    duration :: host_native_int(milliseconds)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    state :: net_word(value, I64{0})
+    mutex :: wrapping(state + I64{8})
+    sync_mutex_lock(mutex)
+    net_put(state, I64{24}, duration)
+    sync_mutex_unlock(mutex)
+}
+#Export(c) fn jet_udp_socket_timeout_get_raw(value: I64, output: I64) -> I64 {
+    state :: net_word(value, I64{0})
+    mutex :: wrapping(state + I64{8})
+    sync_mutex_lock(mutex)
+    duration :: net_word(state, I64{24})
+    sync_mutex_unlock(mutex)
+    if (duration < I64{0}) -> return I64{0}
+    net_put(output, I64{0}, jet_int_owned_from_i64(duration))
+    I64{1}
+}
+#Export(c) fn jet_udp_socket_mark_closed_raw(value: I64) {
+    jet_socket_mark_closed_raw(jet_udp_socket_fd_raw(value))
+}

@@ -1,32 +1,32 @@
 // D-JET-VERBS1=A: the shared command registry owns help, completion and
 // semantic job-name reservation. Rust keeps its copy in foundation
 // (commands) and jet-cli (flags); check-command-table.mjs compares both.
-pub JET_CLI_JOB_INVOCATION_HELP :: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
+JET_CLI_JOB_INVOCATION_HELP :: "\nRun a project job: jet [jet flags] <name> [job args...]\nJet flags go before the job name; every word after it belongs to the job.\n"
 
 // One flag. A `With <cmd>[/<cmd>…]: ` help prefix scopes it to those commands;
 // `--json`, `--quiet`, and `--color` apply to every command.
-pub struct JetCLIFlagSpec {
-    pub long: String
-    pub help: String
+struct JetCLIFlagSpec {
+    long: String
+    help: String
 }
 
 // One dispatcher seam a nested action reaches. `key` names the Rust host's
 // `HandlerKey` variant; `dispatch_word` is the handler word a grouped argv
 // is normalized to unless `keeps_group` keeps the group word in front.
-pub struct JetCLIHandlerSpec {
-    pub key: String
-    pub dispatch_word: String
-    pub keeps_group: Bool
+struct JetCLIHandlerSpec {
+    key: String
+    dispatch_word: String
+    keeps_group: Bool
 }
 
 // One canonical nested spelling under a group (`jet registry publish`).
 // `usage` holds one form per line; `handler` is a `JetCLIHandlerSpec.key`.
-pub struct JetCLIActionSpec {
-    pub name: String
-    pub usage: String
-    pub summary: String
-    pub handler: String
-    pub also_canonical_top_level: Bool
+struct JetCLIActionSpec {
+    name: String
+    usage: String
+    summary: String
+    handler: String
+    also_canonical_top_level: Bool
 }
 
 // One top-level command: a bare leaf (`build`) or a group with nested
@@ -34,17 +34,17 @@ pub struct JetCLIActionSpec {
 // `exhaustive` (groups only) means every subword is modeled by `actions`;
 // `os`, `env`, and `db` expose a wider downstream verb surface.
 // `usage` is the positional shape; None renders the generic `[args]`.
-pub struct JetCLICommandSpec {
-    pub name: String
-    pub summary: String
-    pub headline: Bool
-    pub frequency_rank: Int
-    pub exhaustive: Bool
-    pub usage: String?
-    pub actions: [JetCLIActionSpec]
+struct JetCLICommandSpec {
+    name: String
+    summary: String
+    headline: Bool
+    frequency_rank: Int
+    exhaustive: Bool
+    usage: String?
+    actions: [JetCLIActionSpec]
 }
 
-pub JET_CLI_HANDLERS :: prep { [JetCLIHandlerSpec]{
+JET_CLI_HANDLERS :: prep { [JetCLIHandlerSpec]{
     JetCLIHandlerSpec{key: "Publish", dispatch_word: "publish", keeps_group: false},
     JetCLIHandlerSpec{key: "Yank", dispatch_word: "yank", keeps_group: false},
     JetCLIHandlerSpec{key: "Keygen", dispatch_word: "keygen", keeps_group: false},
@@ -91,7 +91,7 @@ pub JET_CLI_HANDLERS :: prep { [JetCLIHandlerSpec]{
     JetCLIHandlerSpec{key: "Db", dispatch_word: "db", keeps_group: true},
 } }
 
-pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
+JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
     JetCLICommandSpec{
         name: "registry",
         summary: "Publish and manage packages",
@@ -150,7 +150,7 @@ pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
             JetCLIActionSpec{name: "codemod", usage: "codemod <plan.json> --dry-run\ncodemod apply <plan.json> [--yes]\ncodemod undo <log.json>", summary: "Preview or apply code changes", handler: "Codemod", also_canonical_top_level: false},
             JetCLIActionSpec{name: "audit", usage: "audit copies [--json] [<entry.jet>]\naudit memory [--json]\naudit [--advisory-db <path>]", summary: "Inspect implicit copies, exercised memory witnesses, or dependencies", handler: "Audit", also_canonical_top_level: true},
             JetCLIActionSpec{name: "sbom", usage: "sbom [--cyclonedx]", summary: "Create a software bill of materials", handler: "Sbom", also_canonical_top_level: false},
-            JetCLIActionSpec{name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: "Bind", also_canonical_top_level: false},
+            JetCLIActionSpec{name: "bind", usage: "bind <header.h> --pkg <lib>\nbind cpp <header.hpp> --target <triple> --clang <path> --ar <path>", summary: "Generate Jet bindings from a foreign header", handler: "Bind", also_canonical_top_level: true},
             JetCLIActionSpec{name: "logs", usage: "logs <pkg>", summary: "Show recent package build logs", handler: "Logs", also_canonical_top_level: false},
             JetCLIActionSpec{name: "info", usage: "info <source>.<package>", summary: "Show package details", handler: "Info", also_canonical_top_level: false},
             JetCLIActionSpec{name: "outdated", usage: "outdated", summary: "List dependencies with available updates", handler: "Outdated", also_canonical_top_level: false},
@@ -362,15 +362,6 @@ pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         frequency_rank: 6,
         exhaustive: false,
         usage: Val("dev [<file.jet|dir>] [--canvas|--app <function>] [--share <loopback|lan>] [--token <token>] [-- <args>]"),
-        actions: [JetCLIActionSpec]{},
-    },
-    JetCLICommandSpec{
-        name: "learn",
-        summary: "Practice Jet with offline code exercises",
-        headline: false,
-        frequency_rank: 37,
-        exhaustive: false,
-        usage: Val("learn [--check] [--watch|--watch=off] [--json] [--quiet] [--color[=<mode>]]"),
         actions: [JetCLIActionSpec]{},
     },
     JetCLICommandSpec{
@@ -646,7 +637,7 @@ pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         actions: [JetCLIActionSpec]{},
     },
     JetCLICommandSpec{
-        name: "Fold",
+        name: "fold",
         summary: "Reverse a recorded Package source transition",
         headline: false,
         frequency_rank: 62,
@@ -663,7 +654,7 @@ pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
         exhaustive: false,
         usage: None,
         actions: [JetCLIActionSpec]{
-            JetCLIActionSpec{name: "report", usage: "report", summary: "Show values moved into automatic memory management", handler: "GcReport", also_canonical_top_level: true},
+            JetCLIActionSpec{name: "report", usage: "report", summary: "Show values moved into automatic memory management", handler: "GcReport", also_canonical_top_level: false},
         },
     },
     JetCLICommandSpec{
@@ -754,7 +745,7 @@ pub JET_CLI_COMMANDS :: prep { [JetCLICommandSpec]{
     },
 } }
 
-pub JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
+JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--live", help: "With inspect: Process id for a live plane scope"},
     JetCLIFlagSpec{long: "--observe", help: "With run: Expose bounded live runtime facts for attachment"},
     JetCLIFlagSpec{long: "--raw-frames", help: "With debug: Show generated Rust frames and scopes (expert)"},
@@ -787,13 +778,13 @@ pub JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--route", help: "With new: Alias for `--path`"},
     JetCLIFlagSpec{long: "--model", help: "With new: Model name recorded beside the route source"},
     JetCLIFlagSpec{long: "--allow-unofficial", help: "With self-update: Explicitly allow a local keyless channel"},
-    JetCLIFlagSpec{long: "--check", help: "With fmt/learn: Check without changing files (CI gate)"},
+    JetCLIFlagSpec{long: "--check", help: "With fmt: Check without changing files (CI gate)"},
     JetCLIFlagSpec{long: "--lang", help: "With fmt: Delegate non-Jet files to the environment formatter for this language"},
     JetCLIFlagSpec{long: "--restore-role-files", help: "With init: Restore the exact pre-package.jet role files"},
     JetCLIFlagSpec{long: "--diff", help: "With fmt --check: Also print unified diffs for each changed file"},
-    JetCLIFlagSpec{long: "--simplify", help: "With fmt: Rewrite to the simplest ratified spelling"},
+    JetCLIFlagSpec{long: "--simplify", help: "With fmt: Rewrite to the simplest canonical spelling"},
     JetCLIFlagSpec{long: "--changed", help: "With fmt: Format only VCS-changed .jet files (requires git)"},
-    JetCLIFlagSpec{long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `~`"},
+    JetCLIFlagSpec{long: "--explicit-copies", help: "With fmt: Materialize implicit read-view copies as `.copy()`"},
     JetCLIFlagSpec{long: "--skipped", help: "With project parts: Show modules omitted from automatic discovery"},
     JetCLIFlagSpec{long: "--stdin-path", help: "With fmt -: Path label used in diagnostics when reading from stdin"},
     JetCLIFlagSpec{long: "--small", help: "With build/run/jobs: Favor a smaller binary"},
@@ -841,13 +832,11 @@ pub JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--keep", help: "With try: Keep a clean speculative edit"},
     JetCLIFlagSpec{long: "--edition", help: "With fix: Apply edition migration rewrites --edition=<year>"},
     JetCLIFlagSpec{long: "--all", help: "With fix: Apply safety classes beyond formatting and behavior-preserving"},
-    JetCLIFlagSpec{long: "--try-anyway", help: "With dev: Interpret past unsupported features (no guarantees)"},
-    JetCLIFlagSpec{long: "--interpret", help: "With dev/jobs: Force the tier-0 TIR interpreter"},
-    JetCLIFlagSpec{long: "--trace-tiers", help: "With run/dev: Print per-function Cranelift vs interpreter tier selection; with test: print AOT marker"},
+    JetCLIFlagSpec{long: "--try-anyway", help: "With dev --canvas: Evaluate past unsupported features (no guarantees)"},
     JetCLIFlagSpec{long: "--restart", help: "With dev: Always rerun from scratch after a save"},
     JetCLIFlagSpec{long: "--swap", help: "With dev: Hot-swap compatible edits and restart after type changes"},
     JetCLIFlagSpec{long: "--reload", help: "With explain: Explain the checked reload decision for a source or project path"},
-    JetCLIFlagSpec{long: "--watch", help: "With run/dev/learn/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once"},
+    JetCLIFlagSpec{long: "--watch", help: "With run/dev/test/jobs: Re-run on dependency changes; test default off with r=failed, a=all, o=output; jobs accepts --watch[=<on|off>]; --watch=off runs once"},
     JetCLIFlagSpec{long: "--graph", help: "With jobs: Show the checked job dependency graph"},
     JetCLIFlagSpec{long: "--status", help: "With jobs: Show fresh or stale status for declared jobs"},
     JetCLIFlagSpec{long: "--explain", help: "With jobs/package: Explain dependencies, phases, cache identity, and admission facts"},
@@ -978,6 +967,10 @@ pub JET_CLI_FLAGS :: prep { [JetCLIFlagSpec]{
     JetCLIFlagSpec{long: "--set", help: "With build/run/dev/jobs/test: Set one declared package setting as key=value"},
     // D-JOBS1=A: the compiler's thread cap; never the program's own threads.
     JetCLIFlagSpec{long: "--threads", help: "With build/run/check/test/dev/inspect: Use at most N compiler threads (1 = one thread); without it jet picks a safe number of compiler threads"},
+    // Jet-only (owner-directed 2026-10-16): the compiler's streaming trace,
+    // the flag form of JET_TRACE_FILE; the frozen Rust host table never gains
+    // it (Compiler/Bootstrap/check-command-table.mjs).
+    JetCLIFlagSpec{long: "--trace", help: "With build/run/check/test/emit: Stream the compiler's phases and progress to stderr, or to FILE with --trace=FILE"},
     JetCLIFlagSpec{long: "--builder", help: "With build/jobs: Select a previously bound remote builder"},
     // D-A11YGATE1=B (c134 Phase 6): accessibility is an opt-in lint category.
     JetCLIFlagSpec{long: "--a11y", help: "With lint: Check roles, labels, and other accessibility basics"},

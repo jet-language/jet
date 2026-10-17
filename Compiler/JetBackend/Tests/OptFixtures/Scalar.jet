@@ -1,0 +1,273 @@
+// W9 witnesses: literal SSA expectations, plus whole-function refusal checks.
+fn oscalar_slot(b: &LIRFunctionBuilder, size: Int) -> LIRValueID Never! {
+    slot :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.StackSlot{dst: slot, size: size, align: 8})
+    slot
+}
+
+fn oscalar_load(b: &LIRFunctionBuilder, slot: LIRValueID, offset: Int) -> LIRValueID Never! {
+    dst :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Load{dst: dst, base: slot, offset: offset})
+    dst
+}
+
+fn oscalar_store(b: &LIRFunctionBuilder, slot: LIRValueID, offset: Int, value: LIRValueID) Never! {
+    lir_builder_push(&b, LIRInst.Store{base: slot, offset: offset, value: value})
+}
+
+fn oscalar_target(block: Int, args: [LIRValueID]) -> LIRJumpTarget Never! {
+    LIRJumpTarget{block: LIRBlockID{value: block}, args: args}
+}
+
+fn oscalar_check(function: LIRFunction, body: String) -> Bool Never! {
+    ofx_check(function, lir_scalar_replace_function(function), ofx_expected(function, body))
+}
+
+fn oscalar_refuse(function: LIRFunction) -> Bool Never! {
+    ofx_check(function, lir_scalar_replace_function(function), lir_print_module(ofx_module(function)))
+}
+
+fn oscalar_straight(two: Bool) -> Bool Never! {
+    b := ofx_builder(if two -> "scalar-two-fields" else -> "scalar-straight")
+    slot :: oscalar_slot(&b, if two -> 16 else -> 8)
+    x :: ofx_const(&b, 17)
+    oscalar_store(&b, slot, 0, x)
+    y :: if two -> ofx_const(&b, 25) else -> x
+    if two -> oscalar_store(&b, slot, 8, y)
+    a :: oscalar_load(&b, slot, 0)
+    result := a
+    if two {
+        c :: oscalar_load(&b, slot, 8)
+        result = ofx_binary(&b, LIRBinaryOp.Add, a, c)
+    }
+    function :: ofx_finish(&b, [LIRValueID]{}, result)
+    oscalar_check(function, if two -> "  b0():\n    v0: i64 = const 17\n    v1: i64 = const 25\n    v2: i64 = add v0, v1\n    ret v2" else -> "  b0():\n    v0: i64 = const 17\n    ret v0")
+}
+
+fn oscalar_diamond(missing: Bool, reorder: Bool, dead: Bool) -> Bool Never! {
+    b := ofx_builder(if missing -> "scalar-undefined-one-path" else if reorder -> "scalar-diamond-storage-order" else if dead -> "scalar-dead-join" else -> "scalar-diamond")
+    gate :: lir_builder_bool(&b)
+    slot :: oscalar_slot(&b, 8)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{gate}, LIRTerminator.Branch{condition: gate, then_target: oscalar_target(10, [LIRValueID]{}), else_target: oscalar_target(20, [LIRValueID]{})})
+    x :: ofx_const(&b, 17)
+    oscalar_store(&b, slot, 0, x)
+    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{})})
+    y :: ofx_const(&b, 25)
+    if !missing -> oscalar_store(&b, slot, 0, y)
+    lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{})})
+    result :: if dead -> ofx_const(&b, 0) else -> oscalar_load(&b, slot, 0)
+    lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Return{value: Val(result)})
+    function := lir_builder_finish(b)
+    if reorder -> function.blocks = [LIRBlock]{function.blocks[0], function.blocks[3], function.blocks[2], function.blocks[1]}
+    if missing && !dead -> return oscalar_refuse(function)
+    if dead -> return oscalar_check(function, "  b0(v0: i8):\n    br v0, b10(), b20()\n  b10():\n    v1: i64 = const 17\n    jmp b30()\n  b20():\n    v2: i64 = const 25\n    jmp b30()\n  b30():\n    v3: i64 = const 0\n    ret v3")
+    oscalar_check(function, if reorder -> "  b0(v0: i8):\n    br v0, b10(), b20()\n  b30(v3: i64):\n    ret v3\n  b20():\n    v2: i64 = const 25\n    jmp b30(v2)\n  b10():\n    v1: i64 = const 17\n    jmp b30(v1)" else -> "  b0(v0: i8):\n    br v0, b10(), b20()\n  b10():\n    v1: i64 = const 17\n    jmp b30(v1)\n  b20():\n    v2: i64 = const 25\n    jmp b30(v2)\n  b30(v3: i64):\n    ret v3")
+}
+
+fn oscalar_loop(initial: Bool) -> Bool Never! {
+    b := ofx_builder(if initial -> "scalar-loop-carried" else -> "scalar-loop-uninitialized")
+    gate :: lir_builder_bool(&b)
+    slot :: oscalar_slot(&b, 8)
+    zero :: ofx_const(&b, 0)
+    if initial -> oscalar_store(&b, slot, 0, zero)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{gate}, LIRTerminator.Jump{target: oscalar_target(10, [LIRValueID]{})})
+    prior :: oscalar_load(&b, slot, 0)
+    one :: ofx_const(&b, 1)
+    updated :: ofx_binary(&b, LIRBinaryOp.Add, prior, one)
+    oscalar_store(&b, slot, 0, updated)
+    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Branch{condition: gate, then_target: oscalar_target(10, [LIRValueID]{}), else_target: oscalar_target(20, [LIRValueID]{})})
+    result :: oscalar_load(&b, slot, 0)
+    lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Return{value: Val(result)})
+    function :: lir_builder_finish(b)
+    if !initial -> return oscalar_refuse(function)
+    oscalar_check(function, "  b0(v0: i8):\n    v1: i64 = const 0\n    jmp b10(v1)\n  b10(v4: i64):\n    v2: i64 = const 1\n    v3: i64 = add v4, v2\n    br v0, b10(v3), b20()\n  b20():\n    ret v3")
+}
+
+fn oscalar_undefined() -> Bool Never! {
+    b := ofx_builder("scalar-whole-slot-undefined")
+    slot :: oscalar_slot(&b, 16)
+    x :: ofx_const(&b, 17)
+    oscalar_store(&b, slot, 8, x)
+    good :: oscalar_load(&b, slot, 8)
+    bad :: oscalar_load(&b, slot, 0)
+    oscalar_store(&b, slot, 0, x)
+    result :: ofx_binary(&b, LIRBinaryOp.Add, good, bad)
+    oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, result))
+}
+
+fn oscalar_overlap(layout_mismatch: Bool) -> Bool Never! {
+    b := ofx_builder(if layout_mismatch -> "scalar-layout-mismatch" else -> "scalar-overlap")
+    slot :: oscalar_slot(&b, 16)
+    x :: ofx_const(&b, 17)
+    oscalar_store(&b, slot, 0, x)
+    layout :: if layout_mismatch -> lir_layout_float() else -> LIRLayout{size: 8, align: 4, class: LIRABIClass.Integer}
+    loaded :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Load{dst: loaded, base: slot, offset: if layout_mismatch -> 0 else -> 4})
+    oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, loaded))
+}
+
+fn oscalar_escape(pointer_add: Bool) -> Bool Never! {
+    b := ofx_builder(if pointer_add -> "scalar-pointeradd-refused" else -> "scalar-call-escape")
+    slot :: oscalar_slot(&b, 8)
+    x :: ofx_const(&b, 17)
+    oscalar_store(&b, slot, 0, x)
+    if pointer_add {
+        zero :: ofx_const(&b, 0)
+        address :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
+        lir_builder_push(&b, LIRInst.PointerAdd{dst: address, base: slot, offset: zero})
+        loaded :: oscalar_load(&b, address, 0)
+        return oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, loaded))
+    }
+    lir_builder_push(&b, LIRInst.Call{dst: None, signature: LIRSignatureID{value: 1}, callee: LIRCallee.Runtime{symbol: "escape"}, args: [LIRValueID]{slot}})
+    result :: oscalar_load(&b, slot, 0)
+    function :: ofx_finish(&b, [LIRValueID]{}, result)
+    before := ofx_module(function)
+    before.signatures[1].params = [LIRLayout]{lir_layout_pointer()}
+    after := before
+    after.functions = [LIRFunction]{lir_scalar_replace_function(function)}
+    print("=== {function.name} before ===\n{lir_print_module(before)}=== {function.name} after ===\n{lir_print_module(after)}")
+    passed := lir_print_module(before) == lir_print_module(after)
+    loop issue in lir_lint_module(before) {
+        print("FAIL escape input: {issue.message}")
+        passed = false
+    }
+    loop issue in lir_lint_module(after) {
+        print("FAIL escape output: {issue.message}")
+        passed = false
+    }
+    if passed -> print("PASS {function.name}")
+    passed
+}
+
+fn oscalar_drop_field() -> Bool Never! {
+    b := ofx_builder("scalar-drop-field")
+    x :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Runtime{symbol: "drop_field"}, None)
+    slot :: oscalar_slot(&b, 8)
+    oscalar_store(&b, slot, 0, x)
+    loaded :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Runtime{symbol: "drop_field"}, None)
+    lir_builder_push(&b, LIRInst.Load{dst: loaded, base: slot, offset: 0})
+    lir_builder_push(&b, LIRInst.Drop{value: loaded})
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{x}, LIRTerminator.Return{value: None})
+    oscalar_refuse(lir_builder_finish(b))
+}
+
+fn oscalar_consumed(store_source: Bool) -> Bool Never! {
+    b := ofx_builder(if store_source -> "scalar-consumed-store-source" else -> "scalar-consumed-load")
+    x :: lir_builder_word(&b)
+    slot :: oscalar_slot(&b, 8)
+    oscalar_store(&b, slot, 0, x)
+    a :: oscalar_load(&b, slot, 0)
+    moved :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Move{dst: moved, src: if store_source -> x else -> a})
+    result :: oscalar_load(&b, slot, 0)
+    function :: ofx_finish(&b, [LIRValueID]{x}, result)
+    oscalar_check(function, if store_source -> "  b0(v0: i64):\n    v2: i64 = copy v0\n    v1: i64 = move v0\n    ret v2" else -> "  b0(v0: i64):\n    v1: i64 = copy v0\n    v2: i64 = move v1\n    ret v0")
+}
+
+fn oscalar_multi_phi() -> Bool Never! {
+    b := ofx_builder("scalar-two-phis-existing-param")
+    gate :: lir_builder_bool(&b)
+    slot :: oscalar_slot(&b, 16)
+    x :: ofx_const(&b, 17)
+    y :: ofx_const(&b, 25)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{gate}, LIRTerminator.Branch{condition: gate, then_target: oscalar_target(10, [LIRValueID]{}), else_target: oscalar_target(20, [LIRValueID]{})})
+    oscalar_store(&b, slot, 0, x)
+    oscalar_store(&b, slot, 8, y)
+    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{x})})
+    oscalar_store(&b, slot, 0, y)
+    oscalar_store(&b, slot, 8, x)
+    lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{y})})
+    param :: lir_builder_word(&b)
+    a :: oscalar_load(&b, slot, 0)
+    c :: oscalar_load(&b, slot, 8)
+    sum :: ofx_binary(&b, LIRBinaryOp.Add, a, c)
+    result :: ofx_binary(&b, LIRBinaryOp.Add, sum, param)
+    lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{param}, LIRTerminator.Return{value: Val(result)})
+    oscalar_check(lir_builder_finish(b), "  b0(v0: i8):\n    v1: i64 = const 17\n    v2: i64 = const 25\n    br v0, b10(), b20()\n  b10():\n    jmp b30(v1, v1, v2)\n  b20():\n    jmp b30(v2, v2, v1)\n  b30(v3: i64, v6: i64, v7: i64):\n    v4: i64 = add v6, v7\n    v5: i64 = add v4, v3\n    ret v5")
+}
+
+// Simplify may not yet have dropped unreachable rows after inlining. The
+// original has precisely that lint issue; promotion must not add an edge-arity
+// issue on the dead predecessor. Compare both issue lists as well as the LIR.
+fn oscalar_dead_predecessor() -> Bool Never! {
+    b := ofx_builder("scalar-unreachable-predecessor")
+    gate :: lir_builder_bool(&b)
+    slot :: oscalar_slot(&b, 8)
+    lir_builder_seal(&b, LIRBlockID{value: 0}, [LIRValueID]{gate}, LIRTerminator.Branch{condition: gate, then_target: oscalar_target(10, [LIRValueID]{}), else_target: oscalar_target(20, [LIRValueID]{})})
+    x :: ofx_const(&b, 17)
+    oscalar_store(&b, slot, 0, x)
+    lir_builder_seal(&b, LIRBlockID{value: 10}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{})})
+    y :: ofx_const(&b, 25)
+    oscalar_store(&b, slot, 0, y)
+    lir_builder_seal(&b, LIRBlockID{value: 20}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{})})
+    result :: oscalar_load(&b, slot, 0)
+    lir_builder_seal(&b, LIRBlockID{value: 30}, [LIRValueID]{}, LIRTerminator.Return{value: Val(result)})
+    lir_builder_seal(&b, LIRBlockID{value: 40}, [LIRValueID]{}, LIRTerminator.Jump{target: oscalar_target(30, [LIRValueID]{})})
+    before :: ofx_module(lir_builder_finish(b))
+    after := before
+    after.functions = [LIRFunction]{lir_scalar_replace_function(before.functions[0])}
+    print("=== scalar-unreachable-predecessor before ===\n{lir_print_module(before)}=== scalar-unreachable-predecessor after ===\n{lir_print_module(after)}")
+    input_issues :: lir_lint_module(before)
+    output_issues :: lir_lint_module(after)
+    passed := lir_print_module(before) == lir_print_module(after) && input_issues.len() == 1 && output_issues.len() == 1
+    if passed -> passed = input_issues[0].message == "block b40 is unreachable" && output_issues[0].message == input_issues[0].message
+    if passed -> print("PASS scalar-unreachable-predecessor") else -> print("FAIL scalar-unreachable-predecessor")
+    passed
+}
+
+fn oscalar_undefined_edge() -> Bool Never! {
+    rows := [Int:Int]{}
+    &rows.add(10, 0).drop("new row")
+    refused :: opt_scalar_edge(oscalar_target(10, [LIRValueID]{}), rows, [[Int]]{[Int]{0}}, [Int]{-1}) == None
+    if refused -> print("PASS scalar-undefined-edge-guard") else -> print("FAIL scalar-undefined-edge-guard")
+    refused
+}
+
+fn oscalar_subword(size: Int) -> Bool Never! {
+    b := ofx_builder("scalar-i{8 * size}-roundtrip-refused")
+    layout :: LIRLayout{size: size, align: size, class: LIRABIClass.Integer}
+    slot :: oscalar_slot(&b, 8)
+    one :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Const{dst: one, value: 1})
+    source := one
+    // i8 Binary is lint-valid yet need not have normalized upper bits. A
+    // memory roundtrip reads 512 as 0; an alias would incorrectly retain 512.
+    if size == 1 {
+        loop _ in 0..<9 {
+            shifted :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+            lir_builder_push(&b, LIRInst.Binary{dst: shifted, op: LIRBinaryOp.Shl, left: source, right: one})
+            source = shifted
+        }
+    }
+    oscalar_store(&b, slot, 0, source)
+    loaded :: lir_builder_value(&b, layout, LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.Load{dst: loaded, base: slot, offset: 0})
+    oscalar_refuse(ofx_finish(&b, [LIRValueID]{}, loaded))
+}
+
+fn opt_fixtures_scalar() -> Bool Never! {
+    passed := true
+    if !oscalar_straight(false) -> passed = false
+    if !oscalar_straight(true) -> passed = false
+    if !oscalar_diamond(false, false, false) -> passed = false
+    if !oscalar_diamond(false, true, false) -> passed = false
+    if !oscalar_diamond(true, false, false) -> passed = false
+    if !oscalar_diamond(true, false, true) -> passed = false
+    if !oscalar_loop(true) -> passed = false
+    if !oscalar_loop(false) -> passed = false
+    if !oscalar_undefined() -> passed = false
+    if !oscalar_overlap(false) -> passed = false
+    if !oscalar_overlap(true) -> passed = false
+    if !oscalar_escape(false) -> passed = false
+    if !oscalar_escape(true) -> passed = false
+    if !oscalar_drop_field() -> passed = false
+    if !oscalar_consumed(true) -> passed = false
+    if !oscalar_consumed(false) -> passed = false
+    if !oscalar_multi_phi() -> passed = false
+    if !oscalar_dead_predecessor() -> passed = false
+    if !oscalar_undefined_edge() -> passed = false
+    if !oscalar_subword(1) -> passed = false
+    if !oscalar_subword(2) -> passed = false
+    if !oscalar_subword(4) -> passed = false
+    passed
+}

@@ -21,34 +21,37 @@ use jet_foundation.[
     TGCPromotionEdge,
     Type,
     TypedLitBody,
+    policy_scope_name,
+    policy_scope_rank,
+    policy_value_display,
 ]
 
-pub struct SemaFunctionMemoryModuleInput {
-    pub module_identity: String
-    pub package_identity: String
-    pub policy_declarations: [PolicyDeclaration]
+struct SemaFunctionMemoryModuleInput {
+    module_identity: String
+    package_identity: String
+    policy_declarations: [PolicyDeclaration]
 }
 
-pub struct SemaFunctionMemoryFunction {
-    pub module_identity: String
+struct SemaFunctionMemoryFunction {
+    module_identity: String
     // The leaf name of the type that owns a method, "" for a free function.
-    pub owner: String
+    owner: String
     // The declaration as the plan rewrote it. None when no scoped-GC policy
     // reaches it and no other function shares its key: the plan then leaves
     // it exactly as written, so the checker reads its own declaration.
-    pub function: Func?
-    pub diagnostics: [Diagnostic]
-    pub transfer_root: Bool
-    pub complete: Bool
+    function: Func?
+    diagnostics: [Diagnostic]
+    transfer_root: Bool
+    complete: Bool
 }
 
-pub struct SemaFunctionMemoryPlan {
-    pub functions: [SemaFunctionMemoryFunction]
+struct SemaFunctionMemoryPlan {
+    functions: [SemaFunctionMemoryFunction]
     // Row position of the first function per `sema_function_memory_key`, so
     // every body check finds its row without scanning the whole plan.
-    pub positions: [String:Int]
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+    positions: [String:Int]
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
 struct SemaFunctionMemorySource {
@@ -100,45 +103,6 @@ fn sema_function_memory_key(module_identity: String, owner: String, span: Span) 
     "{span.start}:{span.end}:{owner}:{module_identity}"
 }
 
-fn sema_function_memory_policy_scope_rank(scope: PolicyScope) -> Int Never! {
-    if scope == {
-        .Organization -> 0
-        .Package -> 1
-        .Module -> 2
-        .Function -> 3
-        .Block -> 4
-    }
-}
-
-fn sema_function_memory_policy_scope_name(scope: PolicyScope) -> String Never! {
-    if scope == {
-        .Organization -> "organization"
-        .Package -> "package"
-        .Module -> "module"
-        .Function -> "function"
-        .Block -> "block"
-    }
-}
-
-fn sema_function_memory_policy_value_display(value: PolicyValue) -> String Never! {
-    if value == {
-        .Enabled -> "true"
-        .Limit(limit) -> "{limit}"
-        .Forbid -> ".Forbid"
-        .Default -> ".Default"
-        .GateOnly -> ".GateOnly"
-        .Obligations -> ".Obligations"
-        .Relaxed -> ".Relaxed"
-        .PerSite -> ".PerSite"
-        .Track -> ".Track"
-        .Skip -> ".Skip"
-        .Allow -> ".Allow"
-        .On -> ".On"
-        .Off -> ".Off"
-        .Explicit -> ".Explicit"
-    }
-}
-
 fn sema_function_memory_policy_declaration_equal(left: PolicyDeclaration, right: PolicyDeclaration) -> Bool Never! {
     left.key == right.key && left.value == right.value && left.scope == right.scope && left.span.start == right.span.start && left.span.end == right.span.end && left.target == right.target && left.source == right.source
 }
@@ -176,12 +140,12 @@ fn sema_function_memory_policy_error(diagnostics: &[Diagnostic], span: Span) {
 }
 
 fn sema_function_memory_policy_explanation(value: PolicyValue, provenance: [PolicyDeclaration]) -> String Never! {
-    explanation := "gc = {sema_function_memory_policy_value_display(value)}"
+    explanation := "gc = {policy_value_display(value)}"
     index := 0
     loop declaration in provenance {
         status := "shadowed"
         if index + 1 == provenance.len() -> status = "effective"
-        explanation = "{explanation}\n  [{status}] {sema_function_memory_policy_scope_name(declaration.scope)} {sema_function_memory_policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
+        explanation = "{explanation}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
         index += 1
     }
     explanation
@@ -198,7 +162,7 @@ fn sema_function_memory_resolve_policy(declarations: [PolicyDeclaration], diagno
     effective := PolicyValue?{None}
     provenance := [PolicyDeclaration]{}
     loop declaration in ordered {
-        if sema_function_memory_policy_scope_rank(declaration.scope) == 0 {
+        if policy_scope_rank(declaration.scope) == 0 {
             sema_function_memory_policy_error(&diagnostics, declaration.span)
             complete = false
             return None
@@ -247,12 +211,17 @@ fn sema_function_memory_collect_items(items: [Item], module_identity: String, to
                 }
             }
             .Enum(definition) -> {
+                loop function in definition.methods -> sema_function_memory_visit(&walk, module_identity, definition.name, function, false, outer, declarations)
                 loop implementation in definition.trait_impls {
                     loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, definition.name, function, false, outer, declarations)
                 }
             }
             .Impl(implementation) -> {
-                loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, implementation.type_name, function, false, outer, declarations)
+                // An operator hook on a built-in scalar (`impl Float.Mul(Vec3)`)
+                // registers that scalar as its owner type, which has no nominal
+                // base name, so its rows are found under the free-function owner.
+                owner :: if sema_registration_builtin_scalar(implementation.type_name) == None -> implementation.type_name else -> ""
+                loop function in implementation.methods -> sema_function_memory_visit(&walk, module_identity, owner, function, false, outer, declarations)
             }
             .CodeModule(code_module) -> {
                 if code_module.body == .Val(body) -> sema_function_memory_collect_items(body, module_identity, false, outer, declarations, &walk)
@@ -276,12 +245,12 @@ fn sema_function_memory_walk_module(modules: [SemaFunctionMemoryModuleInput], pa
 
 fn sema_function_memory_walk_graph(graph: SemaRegistrationGraph, walk: &SemaFunctionMemoryWalk) -> Int Never! {
     modules := [SemaFunctionMemoryModuleInput]{}
-    loop module_row in graph.modules {
-        &modules.push(SemaFunctionMemoryModuleInput{module_identity: module_row.module_identity, package_identity: module_row.package_identity, policy_declarations: module_row.program.policy_declarations})
+    loop module_row_index in 0..<graph.modules.len() {
+        &modules.push(SemaFunctionMemoryModuleInput{module_identity: graph.modules[module_row_index].module_identity, package_identity: graph.modules[module_row_index].package_identity, policy_declarations: graph.modules[module_row_index].program.policy_declarations})
     }
     limit := 0
-    loop module_row in graph.modules {
-        limit += sema_function_memory_walk_module(modules, module_row.package_identity, module_row.module_identity, module_row.program.policy_declarations, module_row.program.items, &walk)
+    loop module_row_index in 0..<graph.modules.len() {
+        limit += sema_function_memory_walk_module(modules, graph.modules[module_row_index].package_identity, graph.modules[module_row_index].module_identity, graph.modules[module_row_index].program.policy_declarations, graph.modules[module_row_index].program.items, &walk)
     }
     limit
 }
@@ -422,7 +391,7 @@ fn sema_function_memory_boundary_diagnostics(function: Func, promoted: [String])
 // A declaration no scoped-GC policy reaches is not copied into the plan (its
 // row has no function); the walk revisits the items only when a shared key or
 // an E2111 boundary check needs such a declaration after all.
-pub fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPlan {
+fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
     limit :: sema_function_memory_walk_graph(graph, &walk)
     plan := sema_function_memory_plan_new()
@@ -437,7 +406,7 @@ pub fn sema_function_memory_plan_from_graph(graph: SemaRegistrationGraph) -> Sem
     plan
 }
 
-pub fn sema_function_memory_plan_for_program(program: Program, module_identity: String, package_identity: String) -> SemaFunctionMemoryPlan {
+fn sema_function_memory_plan_for_program(program: Program, module_identity: String, package_identity: String) -> SemaFunctionMemoryPlan {
     walk := sema_function_memory_walk_new()
     limit :: sema_function_memory_walk_program(program, module_identity, package_identity, &walk)
     plan := sema_function_memory_plan_new()
@@ -452,7 +421,7 @@ pub fn sema_function_memory_plan_for_program(program: Program, module_identity: 
     plan
 }
 
-pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {
+fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclaration]) -> Bool Never! {
     loop declaration in declarations {
         // `copies: .Explicit` only adds refusals (Ownership/StringViews.jet).
         if declaration.key != PolicyKey.ScopedGC && declaration.key != PolicyKey.Copies -> return true
@@ -462,14 +431,13 @@ pub fn sema_function_memory_has_unsupported_policies(declarations: [PolicyDeclar
 
 // `owner` is the owning type of a method (any spelling; its leaf name is
 // used), or "" for a free function.
-pub fn sema_function_memory_find(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> SemaFunctionMemoryFunction? {
-    position :: plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), span)) ?? return None
-    Val(plan.functions[position])
+fn sema_function_memory_position(plan: SemaFunctionMemoryPlan, module_identity: String, owner: String, span: Span) -> Int? {
+    plan.positions.get(sema_function_memory_key(module_identity, sema_serde_named_leaf(owner), span))
 }
 
 // The owner name a method's memory row is found by: the base name of its
 // owning type, "" for a free function.
-pub fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
+fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
     if kind == {
         .Method(_, owner_type) -> sema_type_graph_base_name(owner_type) ?? ""
         .TraitMethod(_, _, owner_type, _, _) -> sema_type_graph_base_name(owner_type) ?? ""
@@ -477,7 +445,7 @@ pub fn sema_function_memory_owner(kind: TFuncKind) -> String Never! {
     }
 }
 
-pub fn sema_function_memory_tir_promotion(promotion: GCPromotion) -> TGCPromotion Never! {
+fn sema_function_memory_tir_promotion(promotion: GCPromotion) -> TGCPromotion Never! {
     edges := [TGCPromotionEdge]{}
     loop edge in promotion.edges {
         &edges.push(TGCPromotionEdge{binding: edge.binding, slot: edge.slot, group: edge.group})
@@ -568,7 +536,7 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
                     sema_function_memory_sort_and_deduplicate_edges(&filtered_edges)
                     updated_binding.gc_promotion = Val(GCPromotion{
                         span: updated_binding.name_span,
-                        scope: sema_function_memory_policy_scope_name(scope),
+                        scope: policy_scope_name(scope),
                         policy_provenance: policy.explanation,
                         reason: "returned heap graph requires identity beyond its lexical owner",
                         edges: filtered_edges,
@@ -606,7 +574,7 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
                 stmts[index] = Stmt.CountedLoop{init: init, cond: condition, step: step, body: updated_body, span: span, arrow_body: arrow_body, label: label}
             }
             .Switch(subject, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     promoted_return = sema_function_memory_annotate_scope(&arm_body, chain, &diagnostics, &complete) || promoted_return
@@ -614,7 +582,7 @@ fn sema_function_memory_annotate_scope(stmts: &[Stmt], chain: [PolicyDeclaration
                 }
                 updated_else_body := else_body
                 if else_body == .Val(else_statements) {
-                    body := ~else_statements
+                    body := else_statements.copy()
                     promoted_return = sema_function_memory_annotate_scope(&body, chain, &diagnostics, &complete) || promoted_return
                     updated_else_body = Val(body)
                 }
@@ -746,7 +714,7 @@ fn sema_function_memory_collect_expr_idents(expression: Expr, names: &[String]) 
     if expression == {
         .Ident(name, _) -> sema_function_memory_append_name_unique(&names, name)
         .Call(call) -> loop argument in call.args -> sema_function_memory_collect_expr_idents(argument.expr, &names)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
             sema_function_memory_collect_expr_idents(receiver, &names)
             loop argument in args -> sema_function_memory_collect_expr_idents(argument.expr, &names)
         }

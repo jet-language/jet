@@ -45,6 +45,11 @@ impl<'a> Checker<'a> {
             self.infer_owning_value(inner)?
         };
         if let Some((ok_ty, err_ty)) = expected_result {
+            // The success payload is a fixed slot, including after an absent
+            // guard has refined its Optional binding to the plain payload.
+            let payload = self
+                .lift_optional_slot(&ok_ty, &payload, inner.as_mut())
+                .unwrap_or(payload);
             let ok_payload = payload == ok_ty
                 || matches!(&ok_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
             if !ok_payload {
@@ -193,10 +198,22 @@ impl<'a> Checker<'a> {
                     widen_approx: false,
                 };
                 *inner = Box::new(self.default_err_value(call, false));
-                payload = Type::Named(Syntax::TYPE_ERR.to_string());
+                // Preserve the checked message while the canonical record
+                // checker supplies private defaults and validates every field.
+                // Re-inferring it would repeat taking calls and propagation.
+                let Expr::StructLit {
+                    type_name, type_args, import_ns, fields, span, ..
+                } = inner.as_mut() else {
+                    unreachable!("the default error constructor builds a record")
+                };
+                payload = self.check_struct_lit_with_checked_field(
+                    type_name, type_args, import_ns.as_deref(), fields, *span,
+                    Some(("message", &payload)),
+                );
             }
-            let ok_payload = payload == err_ty
-                || matches!(&err_ty, Type::Union(members) if members.iter().any(|m| m == &payload));
+            let ok_payload = self.nominal_type_identity(&payload, &err_ty)
+                || matches!(&err_ty, Type::Union(members) if members.iter()
+                    .any(|member| self.nominal_type_identity(member, &payload)));
             if !ok_payload {
                 self.diags.push(Diagnostic::error(
                     "E0108",
@@ -261,6 +278,11 @@ impl<'a> Checker<'a> {
     }
 
     fn resolve_failure_function(&self, name: &str) -> Option<(usize, String, crate::AST::FuncSig)> {
+        // Failure provenance and the union solver obey the same lexical
+        // precedence as call checking; a local callable is not a file fn.
+        if self.lookup(name).is_some() {
+            return None;
+        }
         if let Some(signature) = self.funcs.get(name) {
             return Some((self.module_idx, name.to_string(), signature.clone()));
         }
@@ -287,9 +309,9 @@ impl<'a> Checker<'a> {
                 return Some(target);
             }
         }
-        if let Some((function, module_idx)) = self.unqualified_file.get(name) {
+        if let Some((function, module_idx)) = self.file_function_binding(name) {
             if let Some(target) =
-                self.resolve_failure_function_in_module(*module_idx, function.clone())
+                self.resolve_failure_function_in_module(module_idx, function)
             {
                 return Some(target);
             }
@@ -347,6 +369,18 @@ impl<'a> Checker<'a> {
     fn failure_call_provenance(&self, inner: &Expr) -> FailureCallProvenance {
         match inner {
             Expr::Call(call) => {
+                if let Some(info) = self.lookup(&call.name) {
+                    let ret = match &info.ty {
+                        Type::Fn { ret, .. } => ret.as_deref(),
+                        _ => None,
+                    };
+                    return FailureCallProvenance {
+                        callee: call.name.clone(),
+                        definition: self.definition_location(self.module_idx, info.def_span)
+                            .unwrap_or_else(|| self.definition_fallback_text()),
+                        contract: crate::AST::FailureContract::from_return_type(ret).source(),
+                    };
+                }
                 let (definition, contract) = self
                     .resolve_failure_function(&call.name)
                     .map(|(owner, name, signature)| {
@@ -427,6 +461,7 @@ impl<'a> Checker<'a> {
                         &module,
                         method,
                         args.len(),
+                        args.first().is_some_and(|arg| arg.convention == AccessConvention::Move),
                     ) {
                         return None;
                     }
@@ -434,7 +469,7 @@ impl<'a> Checker<'a> {
                         .modules?
                         .iter()
                         .position(|candidate| candidate.module_alias == source.alias)?;
-                    self.resolve_failure_function_in_module(source_idx, method.clone())?
+                    self.resolve_failure_function_in_module(source_idx, method.to_string())?
                 } else {
                     let Expr::Ident(alias, _) = receiver.without_parens() else {
                         return None;
@@ -739,7 +774,12 @@ impl<'a> Checker<'a> {
                     // The Ok types (`ret_ok` and `ok`) do NOT need to be equal: `?`
                     // only propagates the error; the unwrapped Ok value may have any
                     // type (it is bound by the caller, not returned unchanged).
-                    Type::Result { err: ret_err, .. } if *ret_err == err => {
+                    // A cross-module callee publishes its canonical error name
+                    // while the caller's contract may spell the same declaration
+                    // bare; both name one nominal type.
+                    Type::Result { err: ret_err, .. }
+                        if *ret_err == err || self.nominal_type_identity(ret_err, &err) =>
+                    {
                         self.task_body_propagates = true;
                         publish_try_call_carrier(inner.as_mut(), || Type::Result {
                             ok: Box::new((*ok).clone()),
@@ -1213,8 +1253,12 @@ impl<'a> Checker<'a> {
         span: Span,
         is_option: &mut bool,
     ) -> Option<Type> {
+        let subject = match value.as_ref().without_parens() {
+            Expr::Place(inner, _, _) => inner.as_ref().without_parens(),
+            subject => subject,
+        };
         let suppress_auto = matches!(
-            value.as_ref().without_parens(),
+            subject,
             Expr::Call(..) | Expr::MethodCall { .. } | Expr::CallValue { .. }
         );
         // A locally handled carrier must not publish callback fallibility. The
@@ -1345,7 +1389,12 @@ impl<'a> Checker<'a> {
         let saved_fallback_has_err = self.fallback_has_err;
         let saved_fallback_is_shape_miss = self.fallback_is_shape_miss;
         self.fallback_is_shape_miss = false;
-        self.fallback_has_err = Some(!*is_option);
+        // A mixed carrier also reaches this fallback on Ok(None). That
+        // route owns no report, so an ambient err is not valid for the
+        // shared fallback; handle Result and Option separately when needed.
+        let mixed_absence = matches!(&val_ty, Type::Result { ok, .. }
+            if matches!(ok.as_ref(), Type::Option(_)));
+        self.fallback_has_err = Some(!*is_option && !mixed_absence);
         let ambient_scope = !*is_option;
         if ambient_scope {
             let err_ty = match &val_ty {
@@ -1490,7 +1539,7 @@ impl<'a> Checker<'a> {
                             .as_ref()
                             .is_some_and(|declared| declared.unwrap_result().is_some()) =>
                     {
-                        let carrier = self.declared_return_type.clone();
+                        let carrier = self.declared_return_type.clone().map(|ty| self.resolve_type(ty));
                         let saved = self.expected_type.clone();
                         self.expected_type = carrier.clone();
                         let et = self.infer(e);
@@ -1549,6 +1598,8 @@ impl<'a> Checker<'a> {
                 if self.loop_depth == 0 {
                     self.diags
                         .push(loop_control_outside(Syntax::KW_NEXT, *kw_span));
+                } else {
+                    self.check_loop_move_backedge(self.loop_depth);
                 }
                 Some(payload)
             }
@@ -1579,6 +1630,9 @@ impl<'a> Checker<'a> {
                             &self.loop_labels,
                             *span,
                         ));
+                } else if let Some(index) = self.loop_value_frames.iter()
+                    .rposition(|frame| frame.label.as_deref() == Some(name)) {
+                    self.check_loop_move_backedge(index + 1);
                 }
                 Some(payload)
             }

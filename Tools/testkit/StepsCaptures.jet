@@ -1,0 +1,337 @@
+use core.files as files
+use core.crypto as crypto
+use core.sys as sys
+
+fn kit_steps_capture_valid(words: [String], original: String) -> Bool {
+    if words.len() < 3 || words[0] == "" -> return false
+    if words[1] == "=" {
+        kind :: words[2]
+        if kind == "first-spawnable" -> return words.len() > 3
+        if kind == "prefixed" {
+            if words.len() < 5 || !kit_steps_subject_valid(words[3]) -> return false
+            loop index in 4..<words.len() {
+                if index % 2 == 1 && words[index] != "|" -> return false
+            }
+            return words.len() % 2 == 1
+        }
+        if kind == "replace-range" -> return words.len() == 8 && words[3] == "file" && kit_steps_relative_path(words[4]) && (Int.parse(words[5]) ?? -1) >= 0 && (Int.parse(words[6]) ?? -1) >= 0
+        if kind == "tree-contents" -> return (words.len() == 4 || (words.len() == 5 && words[4] == "recursive")) && kit_steps_relative_path(words[3])
+        if kind == "concat-files" -> return words.len() == 5 && words[4] == "sorted" && kit_steps_relative_path(words[3])
+        if kind == "entries" || kind == "sole-entry" || kind == "first-entry" || kind == "tree-bytes" {
+            if words.len() < 4 -> return false
+            if kind == "first-entry" -> return (words.len() == 4 || (words.len() == 6 && words[4] == "child-is-file" && kit_steps_relative_path(words[5]))) && kit_steps_relative_path(words[3])
+            if kind == "tree-bytes" -> return words.len() == 4 && kit_steps_relative_path(words[3])
+            return kit_steps_entries_valid(words.slice(3, words.len()))
+        }
+        if kind == "size" || kind == "opt-bytes" || kind == "sha256" || kind == "permissions" -> return words.len() == 5 && words[3] == "file" && kit_steps_relative_path(words[4])
+        if kind == "text" || kind == "lines" {
+            if words.len() < 4 -> return false
+            if !kit_steps_subject_valid(words[3]) -> return false
+            subject :: kit_steps_subject(words[3])
+            if subject == "file" || subject == "file?" -> return words.len() == 5 && kit_steps_relative_path(words[4])
+            return words.len() == 4
+        }
+        return false
+    }
+    if !kit_steps_subject_valid(words[1]) -> return false
+    subject :: kit_steps_subject(words[1])
+    offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
+    if words.len() <= 3 + offset -> return false
+    if offset == 1 && !kit_steps_relative_path(words[2]) -> return false
+    kind :: words[2 + offset]
+    if kind == "doc" || kind == "ndjson" || kind == "toml" -> return words.len() == 4 + offset && kit_steps_json_path(kit_steps_json_preview(words[3 + offset])) != None
+    if kind == "line" -> return words.len() == 5 + offset && words[3 + offset] == "^=" && kit_steps_reason(original)
+    if kind == "after" -> return (words.len() == 4 + offset || (words.len() == 5 + offset && words[4 + offset] == "trim")) && kit_steps_reason(original)
+    false
+}
+
+fn kit_steps_capture_subject(selector: String, path: String, context: KitStepCtx, state: KitStepState) -> String Err! {
+    subject :: kit_steps_subject(selector)
+    text := kit_steps_select_stream(state.last.stdout, state.last.stderr, subject)
+    if subject.starts_with("cap:") -> text = kit_steps_captured_subject(kit_steps_byte_slice(subject, 4, subject.count_bytes()), state.captures) ?? return Err("captured subject unavailable")
+    if subject == "file" || subject == "file?" {
+        location :: kit_steps_work_path(path, context.env, context.work, context.scratch, state.built) ?? return Err("capture file escapes work")
+        if subject == "file?" && !files.exists(location) -> text = ""
+        else -> text = files.read(location) ?? return Err("capture file: {err}")
+    }
+    Ok(kit_steps_transform(text, kit_steps_subject_transform(selector)) ?? return Err("capture subject transform failed"))
+}
+
+fn kit_steps_tree_bytes(directory: String) -> Int Err! {
+    total := 0
+    entries :: files.list_dir(directory) ?? return Err("tree bytes directory: {err}")
+    loop entry in entries {
+        info :: files.stat(entry.path) ?? return Err("tree bytes stat: {err}")
+        if info.is_symlink -> next
+        if info.is_file -> total += info.size
+        else if info.is_dir -> total += kit_steps_tree_bytes(entry.path) ?? return Err(err)
+    }
+    Ok(total)
+}
+
+fn kit_steps_capture_result(value: String) -> KitSubjectResult {
+    KitSubjectResult{value: KitCapturedValue.Text(value), verdict: kit_expect_verdict("PASS", "")}
+}
+
+fn kit_steps_capture_failure(status: String, detail: String) -> KitSubjectResult {
+    KitSubjectResult{verdict: kit_expect_verdict(status, detail)}
+}
+
+// A name may join disjoint branches only for immutable host facts, or for
+// complementary literal tests of the SAME completed named-history producer.
+// Mutable files/env/captures/probes and unnamed streams are not evidence of
+// exclusion. Loop-local declarations disappear at their existing scope end;
+// += never grants permission to redeclare a capture.
+fn kit_steps_capture_guards(plan: KitPlan, before: Int, inline: [String]) -> [String] {
+    guards := [String]{}
+    frames := [Int]{}
+    loop index in 0..<before {
+        step :: plan.steps[index]
+        if step.action == "when" {
+            &frames.push(guards.len())
+            loop condition in step.conditions -> &guards.push(condition)
+            &guards.push(step.argv[0])
+        } else if step.action == "end when" {
+            guards = guards.slice(0, frames[frames.len() - 1])
+            frames = frames.slice(0, frames.len() - 1)
+        }
+    }
+    loop condition in inline -> &guards.push(condition)
+    guards
+}
+
+fn kit_steps_capture_history_owner(plan: KitPlan, subject: String, before: Int) -> Int {
+    label :: if subject.ends_with(".stdout+stderr") -> kit_steps_byte_slice(subject, 0, subject.count_bytes() - 14) else -> kit_steps_relation_label(subject)
+    owner := -1
+    loop index in 0..<before {
+        step :: plan.steps[index]
+        if label != "" && step.label == label && kit_expect_named(["", "wait", "close", "poll"], step.action) -> owner = index
+    }
+    owner
+}
+
+fn kit_steps_capture_guard_disjoint(plan: KitPlan, left: String, left_before: Int, right: String, right_before: Int) -> Bool {
+    a :: kit_steps_tokens(kit_steps_body(left)) ?? return false
+    b :: kit_steps_tokens(kit_steps_body(right)) ?? return false
+    if a.len() != b.len() || a.len() < 2 || a[0].text != b[0].text -> return false
+    if a.len() == 2 && kit_expect_named(["os", "os-name", "arch"], a[0].text) {
+        loop token in [a[1].text, b[1].text] {
+            if token.starts_with("!") || token.contains("|") || token.contains("{{") -> return false
+        }
+        return a[1].text != b[1].text
+    }
+    if a.len() != 3 || !kit_expect_named(["=", "!="], a[1].text) || !kit_expect_named(["=", "!="], b[1].text) || a[1].text == b[1].text || a[2].text != b[2].text || a[2].text.contains("{{") -> return false
+    subject :: a[0].text
+    if !subject.ends_with(".stdout") && !subject.ends_with(".stderr") && !subject.ends_with(".stdout+stderr") -> return false
+    left_raw :: kit_steps_byte_slice(left, a[2].start, a[2].end)
+    right_raw :: kit_steps_byte_slice(right, b[2].start, b[2].end)
+    if (!left_raw.starts_with("\"") && !left_raw.starts_with("'")) || (!right_raw.starts_with("\"") && !right_raw.starts_with("'")) -> return false
+    owner :: kit_steps_capture_history_owner(plan, subject, left_before)
+    owner >= 0 && owner == kit_steps_capture_history_owner(plan, subject, right_before)
+}
+
+fn kit_steps_capture_duplicate_valid(plan: KitPlan, name: String, conditions: [String]) -> Bool {
+    active := [Int]{}
+    scopes := [Int]{}
+    loop (index, step) in plan.steps {
+        if step.action == "for" || step.action == "repeat" -> &scopes.push(active.len())
+        else if step.action == "end for" || step.action == "end repeat" {
+            restored := scopes[scopes.len() - 1]
+            // Aggregates survive loop restoration, including nested loops.
+            // Compact their evidence in place; ordinary locals disappear.
+            loop position in restored..<active.len() {
+                if plan.steps[active[position]].argv[1] != "+=" -> next
+                active[restored] = active[position]
+                restored += 1
+            }
+            active = active.slice(0, restored)
+            scopes = scopes.slice(0, scopes.len() - 1)
+        } else if step.action == "capture" && step.argv[0] == name -> &active.push(index)
+    }
+    if active.len() == 0 -> return false
+    current :: kit_steps_capture_guards(plan, plan.steps.len(), conditions)
+    loop index in active {
+        if plan.steps[index].argv[1] == "+=" -> return false
+        previous :: kit_steps_capture_guards(plan, index, plan.steps[index].conditions)
+        disjoint := false
+        loop left in previous {
+            loop right in current {
+                if kit_steps_capture_guard_disjoint(plan, left, index, right, plan.steps.len()) -> disjoint = true
+            }
+        }
+        if !disjoint -> return false
+    }
+    true
+}
+
+fn kit_steps_captured_subject(name: String, captures: [KitCapture]) -> String? {
+    loop capture in captures {
+        if capture.name != name -> next
+        if capture.value == {
+            .Text(text) -> return Val(text)
+            .Numbers(numbers) -> {
+                values := [String]{}
+                loop number in numbers -> &values.push("{number}")
+                return Val(values.join("\n"))
+            }
+            else -> return None
+        }
+    }
+    None
+}
+
+fn kit_steps_capture_value(words: [String], context: KitStepCtx, state: KitStepState) -> KitSubjectResult {
+    if words[1] == "=" {
+        kind :: words[2]
+        if kind == "first-spawnable" {
+            start := 3
+            loop index in 3..<(words.len() + 1) {
+                if index < words.len() && words[index] != "|" -> next
+                if index == start -> return kit_steps_capture_failure("REFUSED", "empty first-spawnable alternative")
+                argv := words.slice(start, index)
+                if argv[0] == "jet" -> argv[0] = context.env.jet
+                if argv[0] == "jetpack" -> argv[0] = context.env.jetpack
+                overlay :: kit_steps_environment(context.plan, context.env, context.work, context.scratch, state.built)
+                child :: kit_exec_spec(context.env, argv, context.work, context.scratch, overlay).spawn() ?? {
+                    start = index + 1
+                    next
+                }
+                child.stdin.close()
+                _ :: child.wait() ?? return kit_steps_capture_failure("ERROR", "first-spawnable wait: {err}")
+                return kit_steps_capture_result(argv[0])
+            }
+            return KitSubjectResult{value: KitCapturedValue.Absent, verdict: kit_expect_verdict("PASS", "")}
+        }
+        if kind == "prefixed" {
+            source :: kit_steps_capture_subject(words[3], "", context, state) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            loop index in 4..<words.len() {
+                if words[index] == "|" -> next
+                prefix :: words[index]
+                loop line in source.lines() {
+                    if line.starts_with(prefix) -> return kit_steps_capture_result(kit_steps_byte_slice(line, prefix.count_bytes(), line.count_bytes()))
+                }
+            }
+            return kit_steps_capture_failure("FAIL", "capture prefix markers missing")
+        }
+        if kind == "text" || kind == "lines" {
+            source :: kit_steps_capture_subject(words[3], if words.len() == 5 -> words[4] else -> "", context, state) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            if kind == "text" {
+                transform :: kit_steps_subject_transform(words[3])
+                if transform.ends_with("cursor_up_counts") || transform.ends_with("visible_cols") {
+                    numbers := [Int]{}
+                    loop line in kit_steps_rust_lines(source) -> &numbers.push(Int.parse(line) ?? return kit_steps_capture_failure("FAIL", "list transform produced a non-integer"))
+                    return KitSubjectResult{value: KitCapturedValue.Numbers(numbers), verdict: kit_expect_verdict("PASS", "")}
+                }
+            }
+            return kit_steps_capture_result(if kind == "text" -> source else -> "{kit_steps_lines(source)}")
+        }
+        raw :: if kind == "size" || kind == "sha256" || kind == "permissions" || kind == "replace-range" -> words[4] else -> words[3]
+        directory :: kit_steps_work_path(raw, context.env, context.work, context.scratch, state.built) ?? return kit_steps_capture_failure("REFUSED", "capture path escapes work")
+        if kind == "size" {
+            info :: files.stat(directory) ?? return kit_steps_capture_failure("ERROR", "capture size: {err}")
+            return kit_steps_capture_result("{info.size}")
+        }
+        if kind == "sha256" {
+            bytes :: files.read_bytes(directory) ?? return kit_steps_capture_failure("ERROR", "capture digest: {err}")
+            return kit_steps_capture_result(crypto.sha256(bytes).hex())
+        }
+        if kind == "permissions" {
+            info :: files.stat(directory) ?? return kit_steps_capture_failure("ERROR", "capture permissions: {err}")
+            return kit_steps_capture_result(if sys.family() == "windows" -> "{info.readonly}" else -> kit_steps_octal_text(info.mode % 4096))
+        }
+        if kind == "replace-range" {
+            text :: files.read(directory) ?? return kit_steps_capture_failure("ERROR", "replace-range read: {err}")
+            start :: Int.parse(words[5]) ?? -1
+            end :: Int.parse(words[6]) ?? -1
+            if start < 0 || end < start || end > text.len() -> return kit_steps_capture_failure("FAIL", "replace-range invalid span")
+            bytes :: text.bytes()
+            if (start < bytes.len() && Int.from_u8(bytes[start]) >= 128 && Int.from_u8(bytes[start]) < 192) || (end < bytes.len() && Int.from_u8(bytes[end]) >= 128 && Int.from_u8(bytes[end]) < 192) -> return kit_steps_capture_failure("FAIL", "replace-range not on UTF-8 boundaries")
+            return kit_steps_capture_result("{kit_steps_byte_slice(text, 0, start)}{words[7]}{kit_steps_byte_slice(text, end, text.count_bytes())}")
+        }
+        if kind == "tree-contents" {
+            items :: kit_steps_tree_contents(directory, directory, words.len() == 5) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            return KitSubjectResult{value: KitCapturedValue.Tree(items), verdict: kit_expect_verdict("PASS", "")}
+        }
+        if kind == "concat-files" {
+            entries := files.list_dir(directory) ?? return kit_steps_capture_failure("ERROR", "concat-files directory: {err}")
+            &entries.sort_by(entry -> entry.name)
+            combined := ""
+            loop entry in entries {
+                bytes :: files.read_bytes(entry.path) ?? return kit_steps_capture_failure("ERROR", "concat-files read: {err}")
+                combined = "{combined}{kit_steps_utf8_lossy(bytes)}"
+            }
+            return kit_steps_capture_result(combined)
+        }
+        if kind == "tree-bytes" {
+            size :: kit_steps_tree_bytes(directory) ?? return kit_steps_capture_failure("ERROR", "{err}")
+            return kit_steps_capture_result("{size}")
+        }
+        if kind == "first-entry" {
+            entries :: files.list_dir(directory) ?? return kit_steps_capture_failure("ERROR", "first-entry: {err}")
+            loop entry in entries {
+                if words.len() == 6 && !kit_steps_path_is_file(files.join(entry.path, words[5])) -> next
+                return kit_steps_capture_result(entry.path)
+            }
+            return kit_steps_capture_failure("FAIL", "first-entry directory has no matching entry")
+        }
+        paths :: kit_steps_entries(directory, words.slice(3, words.len())) ?? return kit_steps_capture_failure("ERROR", "{err}")
+        if kind == "entries" -> return kit_steps_capture_result("{paths.len()}")
+        if paths.len() != 1 -> return kit_steps_capture_failure("FAIL", "sole-entry needs exactly one match, found {paths.len()}")
+        return kit_steps_capture_result(paths[0])
+    }
+    subject :: kit_steps_subject(words[1])
+    offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
+    source :: kit_steps_capture_subject(words[1], if offset == 1 -> words[2] else -> "", context, state) ?? return kit_steps_capture_failure("ERROR", "{err}")
+    kind :: words[2 + offset]
+    if kind == "line" -> return kit_steps_capture_result(kit_steps_line(source, words[4 + offset], "") ?? return kit_steps_capture_failure("FAIL", "capture prefix line missing"))
+    if kind == "after" {
+        marker :: words[3 + offset]
+        line :: kit_steps_first_line(source, marker) ?? return kit_steps_capture_failure("FAIL", "capture marker line missing")
+        at :: kit_steps_byte_index(line, marker) ?? return kit_steps_capture_failure("FAIL", "capture marker missing")
+        value :: kit_steps_byte_slice(line, at + marker.count_bytes(), line.count_bytes())
+        return kit_steps_capture_result(if words.len() == 5 + offset -> value.trim().copy() else -> value)
+    }
+    kit_steps_capture_result(kit_steps_json_scalar(source, kind, words[3 + offset]) ?? return kit_steps_capture_failure("FAIL", "{err}"))
+}
+
+fn kit_steps_octal_text(value: Int) -> String {
+    if value == 0 -> return "0"
+    number := value
+    result := ""
+    loop number > 0 {
+        result = "{number % 8}{result}"
+        number = number /% 8
+    }
+    result
+}
+
+fn kit_steps_path_is_file(path: String) -> Bool {
+    target :: files.canonicalize(path) ?? return false
+    info :: files.stat(target) ?? return false
+    info.is_file
+}
+
+fn kit_steps_tree_contents(directory: String, root: String, recursive: Bool) -> [KitTreeItem] Err! {
+    result := [KitTreeItem]{}
+    entries :: files.list_dir(directory) ?? return Err("tree-contents directory: {err}")
+    loop entry in entries {
+        info :: files.stat(entry.path) ?? return Err("tree-contents stat: {err}")
+        if info.is_symlink -> next
+        if info.is_file {
+            bytes :: files.read_bytes(entry.path) ?? return Err("tree-contents read: {err}")
+            &result.push(KitTreeItem{path: files.relative(entry.path, root), bytes: bytes})
+        } else if info.is_dir && recursive {
+            nested :: kit_steps_tree_contents(entry.path, root, recursive) ?? return Err(err)
+            loop item in nested -> &result.push(item)
+        }
+    }
+    &result.sort_by(item -> item.path)
+    Ok(result)
+}
+
+fn kit_steps_capture_named(name: String, captures: [KitCapture]) -> KitCapturedValue? {
+    loop capture in captures {
+        if capture.name == name -> return Val(capture.value)
+    }
+    None
+}

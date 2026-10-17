@@ -199,9 +199,14 @@ fn resolve_output_callable(
             } else if let Some(mangled) = state.unqualified.get(name) {
                 record_output_import_use(name_ledger, module_idx, name);
                 (module_idx, name.clone(), mangled.clone())
-            } else if let Some((real, target)) = state.unqualified_file.get(name) {
+            } else if let Some((real, target)) = state.unqualified_file.get(name)
+                .map(|(real, target)| (real.as_str(), *target))
+                .or_else(|| name_ledger.namespace_owner(module_idx, name)
+                    .filter(|&owner| states[owner].funcs.contains_key(name))
+                    .map(|owner| (name.as_str(), owner)))
+            {
                 record_output_import_use(name_ledger, module_idx, name);
-                (*target, real.clone(), real.clone())
+                (target, real.to_owned(), real.to_owned())
             } else {
                 diags.push(output_error(
                     format!("Output entry `{name}` does not resolve to a function"),
@@ -320,9 +325,14 @@ fn resolve_output_callable(
                         resolved = Some((*target, real.clone(), real.clone()));
                     } else if let Some((real, target)) =
                         states[current].unqualified_file.get(member)
+                            .map(|(real, target)| (real.as_str(), *target))
+                            .or_else(|| name_ledger.namespace_owner(current, member)
+                                .filter(|&owner| states[owner].funcs.contains_key(member))
+                                .map(|owner| (member.as_str(), owner)))
                     {
                         record_output_import_use(name_ledger, current, member);
                         if current != module_idx
+                            && states[current].unqualified_file.contains_key(member)
                             && !output_module_alias_visible(
                                 module_idx,
                                 current,
@@ -341,7 +351,7 @@ fn resolve_output_callable(
                             ));
                             return None;
                         }
-                        if !name_ledger.visible(module_idx, *target, real) {
+                        if !name_ledger.visible(module_idx, target, real) {
                             diags.push(output_error(
                                 format!("function `{alias}.{member_path}` is private"),
                                 "an Output can only invoke code visible from its declaring module"
@@ -353,7 +363,7 @@ fn resolve_output_callable(
                             ));
                             return None;
                         }
-                        resolved = Some((*target, real.clone(), real.clone()));
+                        resolved = Some((target, real.to_owned(), real.to_owned()));
                     } else if states[current].funcs.contains_key(member) {
                         if !name_ledger.visible(module_idx, current, member) {
                             diags.push(output_error(

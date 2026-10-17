@@ -1,0 +1,54 @@
+// SETUP-PORT tests/support/jetpack_fixtures.rs:338-360,388-442,623-664.
+// CLI assertions live in tests/cases/jetpack_platform. Env-gated; no public API.
+// #4838: invoke THIS FILE with --filter, never the directory.
+use core.encoding.json as platform_json
+fn store_platform_fixture_meta(verification: &StoreVerification, roots: HangarRoots, id: String, timestamp: Int?) -> String {
+    source :: files.join(roots.root, "hangar-meta-src-{id}")
+    files.create_dir_all(source) ?? panic("metadata source")
+    files.write(files.join(source, "payload"), "fixture payload: {id}") ?? panic("metadata payload")
+    request :: IngestRequest{name: id, version: "1.0", reference: "fixture:{id}", cache_identity: CacheIdentity{source_fingerprint: "sha256-fixture-source-{id}", recipe_fingerprint: "sha256-fixture-recipe-{id}", policy_fingerprint: "policy=fixture", platform: pkg_host_platform()}, references: [String]{}, outputs: [String:String]{"out": source}, signature: "", provenance: "fixture", platform_artifact_kind: ""}
+    entry :: (store_ingest_tree(&verification, roots, request) ?? panic("real ingest")).entry
+    files.remove_all(source) ?? panic("remove source")
+    if timestamp == .Val(value) -> store_test_backdate_last_used_at(&verification, roots, entry.id, value) ?? panic("backdate")
+    files.join(roots.hangar_dir(), entry.id)
+}
+fn store_platform_setup() {
+    work :: sys.get("JET_TEST_PLATFORM_SETUP") ?? return
+    mode :: sys.get("JET_TEST_PLATFORM_MODE") ?? panic("setup mode")
+    roots :: HangarRoots{root: files.join(work, "package-root"), dev_mode: false}
+    verification := StoreVerification.new()
+    if mode == "stale" {
+        object :: store_platform_fixture_meta(&verification, roots, "platform-stale", Val(1))
+        files.write(files.join(work, "fixture-object"), object) ?? panic("publish stale object path")
+        return
+    }
+    fixtures :: files.join(work, "fixtures")
+    staging :: files.join(work, "staging")
+    suffix :: if sys.family() == "windows" -> ".exe" else -> ""
+    binary :: files.join(staging, "bin/jetpack{suffix}")
+    files.create_dir_all(fixtures) ?? panic("fixtures")
+    files.create_dir_all(files.dirname(binary)) ?? panic("bin dir")
+    files.copy(files.join(work, ".jet/build/native{suffix}"), binary) ?? panic("real native fixture")
+    artifact_name :: "omp-native-jetpack-fixture{suffix}"
+    artifact :: files.join(fixtures, artifact_name)
+    files.copy(binary, artifact) ?? panic("artifact")
+    artifact_digest :: foundation_sha256_file_hex(artifact) ?? panic("artifact digest")
+    // Original seed seals a content-addressed output WITHOUT substituting fake metadata.
+    store_seal_local_output(staging) ?? panic("seal native fixture")
+    digest :: pkg_try_output_hash_of(staging) ?? panic("native digest")
+    output :: files.join(files.join(roots.hangar_dir(), "objects"), digest)
+    files.create_dir_all(files.dirname(output)) ?? panic("objects dir")
+    mode_before :: (files.stat(staging) ?? panic("staging permissions")).mode
+    files.chmod(staging, mode_before.bit_or(0o200)) ?? panic("writable staging root")
+    files.rename(staging, output) ?? panic("publish native object")
+    store_seal_local_output(output) ?? panic("seal published output")
+    assert_eq(pkg_try_output_hash_of(output) ?? panic("published digest"), digest, "published fixture must retain its content-addressed identity")
+    files.write(files.join(fixtures, "nixpkgs-native-jetpack.json"), "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-native-jetpack.drv\",\"outputs\":{{\"out\":{platform_json.to_string(Dyn.Text(output))}}}}}]") ?? panic("provider fixture")
+    files.write(files.join(fixtures, "jetpackage-omp.json"), "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{artifact_digest}\",\"artifact\":{platform_json.to_string(Dyn.Text(artifact_name))}}}") ?? panic("release fixture")
+    if mode == "native" -> return
+    object :: store_platform_fixture_meta(&verification, roots, "platform-hostile-good", None)
+    files.write(files.join(work, "fixture-object"), object) ?? panic("publish setup path")
+}
+#Test("S3 platform authentic fixture setup") {
+    store_platform_setup()
+}

@@ -1415,7 +1415,7 @@ fn route_codec(ty: &Type) -> String {
         Type::Int | Type::IntN { .. } => "int".to_string(),
         Type::Float => "float".to_string(),
         Type::Bool => "bool".to_string(),
-        Type::Named(name) if matches!(name.as_str(), "JSON" | "Data") => "json".to_string(),
+        Type::Named(name) if matches!(name.as_str(), "JSON" | "Dyn") => "json".to_string(),
         _ => "string".to_string(),
     }
 }
@@ -1781,7 +1781,7 @@ fn is_resume_type_serializable(ty: &Type, named: &HashSet<String>) -> bool {
         Type::Named(name) => {
             matches!(
                 name.as_str(),
-                "Data" | "JSON" | "Date" | "DateTime" | "Decimal" | "Duration" | "Unit"
+                "Dyn" | "JSON" | "Date" | "DateTime" | "ZonedDateTime" | "Decimal" | "Duration" | "Unit"
             ) || named.contains(name)
         }
         Type::Apply { name, args } => {
@@ -1848,7 +1848,22 @@ fn expand_routes_from(
             ));
             continue;
         }
-        let path = convention_path(rel);
+        let path = match jet_foundation::App::route_file_address(rel) {
+            Ok(path) => path,
+            Err(part) => {
+                diags.push(Diagnostic::error(
+                    "E2806",
+                    format!(
+                        "convention file `{}/{}` has an unsupported bracket part `{part}`",
+                        root.root, rel
+                    ),
+                    "a bracket part must be one whole `[name]` that captures one address part (D-ROUTE-FILES2)".to_string(),
+                    "rename the part to `[name]`, such as `[id]`".to_string(),
+                    Some(Span::new(root.span_start, root.span_end)),
+                ));
+                continue;
+            }
+        };
         let provenance = format!("{}/{}", root.root, rel);
         let handler = convention_handler(rel);
         let render_facts = render_override.map_or_else(AppRenderFacts::default, |mode| {
@@ -1902,45 +1917,27 @@ fn collect_jet_files(root: &Path, dir: &Path, out: &mut Vec<String>) -> std::io:
     Ok(())
 }
 
-fn convention_path(rel: &str) -> String {
-    let stem = Path::new(rel).with_extension("");
-    let mut parts: Vec<&str> = stem.iter().filter_map(|s| s.to_str()).collect();
-    if parts.last().copied() == Some("index") || parts.last().copied() == Some("page") {
-        parts.pop();
-    }
-    if parts.is_empty() {
-        return "/".to_string();
-    }
-    let mut path = String::new();
-    for part in parts {
-        path.push('/');
-        if part.starts_with('[') && part.ends_with(']') {
-            let name = &part[1..part.len() - 1];
-            path.push(':');
-            path.push_str(name);
-        } else {
-            path.push_str(part);
-        }
-    }
-    path
-}
-
 fn convention_handler(rel: &str) -> String {
     rel.trim_end_matches(".jet")
         .replace(['/', '\\', '[', ']'], "_")
 }
 
+/// D-ROUTE-FILES2=A: a page is the parsed top-level `fn page` declaration,
+/// never a text-line prefix, so commented-out text does not count.
 fn convention_has_page(path: &Path) -> bool {
     let Ok(src) = jet_foundation::CheckReads::read_to_string(path) else {
         return false;
     };
-    for line in src.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("fn page") || trimmed.starts_with("pub fn page") {
-            return true;
-        }
+    let (tokens, lex_diagnostics) = crate::Lexer::lex(&src);
+    if !lex_diagnostics.is_empty() {
+        return false;
     }
-    false
+    crate::Parser::parse_with_source(&tokens, &src).is_ok_and(|program| {
+        program
+            .items
+            .iter()
+            .any(|item| matches!(item, Item::Func(function) if function.name == "page"))
+    })
 }
 
 fn const_string_arg(args: &[crate::AST::CallArg], index: usize) -> Option<String> {

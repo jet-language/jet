@@ -1,0 +1,52 @@
+// HTTPMessage.rs:1044-1059 derives Clone/PartialEq over ordered (name,value)
+// entries. Both fields are case-preserving text; equality does not use the
+// case-insensitive lookup policy. CAbiRoutes.rs:2101-2111,7353-7355 own the shell.
+// Carrier is DataABI sequence24, not Rust Vec layout.
+HTTP_HEADER_ENTRY_BYTES :: prep { I64{16} }
+HTTP_HEADER_NAME :: prep { I64{0} }
+HTTP_HEADER_VALUE :: prep { I64{8} }
+#Export(c) fn jet_rt_handle_clone_jet_http_headers(value: I64) -> I64 {
+    length :: data_tree_word(value + DATA_SEQUENCE_LENGTH)
+    result :: data_sequence_new(length, HTTP_HEADER_ENTRY_BYTES)
+    source :: data_tree_word(value + DATA_SEQUENCE_DATA)
+    target :: data_tree_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        input :: source + at * HTTP_HEADER_ENTRY_BYTES
+        output :: target + at * HTTP_HEADER_ENTRY_BYTES
+        data_tree_store(output + HTTP_HEADER_NAME, jet_rt_string_clone(data_tree_word(input + HTTP_HEADER_NAME)))
+        data_tree_store(output + HTTP_HEADER_VALUE, jet_rt_string_clone(data_tree_word(input + HTTP_HEADER_VALUE)))
+        at += I64{1}
+    }
+    data_tree_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_http_headers(value: I64) {
+    if (value == I64{0}) -> return
+    length :: data_tree_word(value + DATA_SEQUENCE_LENGTH)
+    capacity :: data_tree_word(value + DATA_SEQUENCE_CAPACITY)
+    data :: data_tree_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        entry :: data + at * HTTP_HEADER_ENTRY_BYTES
+        jet_rt_string_drop(data_tree_word(entry + HTTP_HEADER_NAME))
+        jet_rt_string_drop(data_tree_word(entry + HTTP_HEADER_VALUE))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * HTTP_HEADER_ENTRY_BYTES, I64{8})
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_http_headers(left: I64, right: I64) -> Bool {
+    length :: data_tree_word(left + DATA_SEQUENCE_LENGTH)
+    if (length != data_tree_word(right + DATA_SEQUENCE_LENGTH)) -> return false
+    a :: data_tree_word(left + DATA_SEQUENCE_DATA)
+    b :: data_tree_word(right + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        offset :: at * HTTP_HEADER_ENTRY_BYTES
+        if !jet_rt_string_eq(data_tree_word(a + offset + HTTP_HEADER_NAME), data_tree_word(b + offset + HTTP_HEADER_NAME)) -> return false
+        if !jet_rt_string_eq(data_tree_word(a + offset + HTTP_HEADER_VALUE), data_tree_word(b + offset + HTTP_HEADER_VALUE)) -> return false
+        at += I64{1}
+    }
+    true
+}

@@ -167,22 +167,23 @@
         })
     }
 
-    fn jet_reactive_transaction_propagate<T: Clone + 'static>(signal: usize, value: &T) {
+    fn jet_reactive_transaction_propagate<T: Clone + 'static>(signal: usize, value: &T) -> bool {
         JET_REACTIVE_TRANSACTION_CONTEXT.with(|contexts| {
             let contexts = contexts.borrow();
             let Some(context) = contexts.iter().rev().find(|context| context.signal == signal)
             else {
-                return;
+                return false;
             };
             let Some(staged) = context.value.downcast_ref::<ReactiveTransactionValue<T>>()
             else {
-                return;
+                return false;
             };
             // SAFETY: nested transactions run synchronously on this thread;
             // their committed value becomes the enclosing transaction's
             // staged value before its callback resumes.
             unsafe { *staged.value.get() = value.clone() };
-        });
+            true
+        })
     }
 
     struct ReactiveTransactionContextGuard {
@@ -273,10 +274,11 @@
             })
         }
         pub fn set(&self, value: T) {
-            // A nested transaction commits into its enclosing transaction's
-            // staged value before observers run. This keeps one read rule for
-            // both ordinary and transaction-local signal reads.
-            jet_reactive_transaction_propagate(self.signal_key(), &value);
+            // A write in a transaction updates only its staged value. The
+            // outermost commit publishes once and notifies observers.
+            if jet_reactive_transaction_propagate(self.signal_key(), &value) {
+                return;
+            }
             let subs = {
                 let mut c = self.cell.write().unwrap_or_else(|e| e.into_inner());
                 c.value = value;
@@ -292,16 +294,27 @@
         }
     }
 
-    /// Run one synchronous signal transaction. Reads of this signal during
-    /// `update` resolve to its staged value; the signal is published exactly
-    /// once after the callback returns.
-    pub fn jet_reactive_transaction<T, F, R>(
+    /// Store callbacks capture rooted signals; they never receive a mutable
+    /// state argument. Keeping the staging pointer private permits reentrant
+    /// reads and writes without lending an aliased `&mut T` to user code.
+    pub fn jet_reactive_transaction_nullary<T, F, R>(
         signal: &JetSignal<T>,
         update: F,
     ) -> (T, R)
     where
         T: Clone + Send + Sync + 'static,
-        F: FnOnce(&mut T) -> R,
+        F: FnOnce() -> R,
+    {
+        jet_reactive_transaction_with(signal, |_| update())
+    }
+
+    fn jet_reactive_transaction_with<T, F, R>(
+        signal: &JetSignal<T>,
+        update: F,
+    ) -> (T, R)
+    where
+        T: Clone + Send + Sync + 'static,
+        F: FnOnce(*mut T) -> R,
     {
         let context = Box::new(ReactiveTransactionValue {
             value: UnsafeCell::new(signal.get()),
@@ -319,7 +332,7 @@
         };
         // SAFETY: the boxed context remains in the thread-local stack until
         // after this synchronous callback and its staged clone are complete.
-        let result = unsafe { update(&mut *(*context_ptr).value.get()) };
+        let result = unsafe { update((*context_ptr).value.get()) };
         let after = unsafe { (&*(*context_ptr).value.get()).clone() };
         drop(context_guard);
         signal.set(after.clone());
@@ -2329,105 +2342,3 @@
         }
     }
 
-    // D-HONESTNUM1=A: Measurement<T> — a value paired with its standard uncertainty.
-    // Arithmetic propagates uncertainty using the standard quadrature rules.
-    // Only `JetMeasurement<f64>` (Float) is exposed to Jet programs.
-    #[derive(Clone, Copy, Debug, PartialEq)]
-    pub struct JetMeasurement<T: Copy> {
-        value: T,
-        uncertainty: T,
-    }
-
-    impl JetMeasurement<f64> {
-        pub fn new(value: f64, uncertainty: f64) -> Self {
-            let (value, uncertainty) = super::jet_measurement_kernel_new(value, uncertainty);
-            JetMeasurement { value, uncertainty }
-        }
-        pub fn from_relative(value: f64, relative_uncertainty: f64) -> Self {
-            let (value, uncertainty) =
-                super::jet_measurement_kernel_from_relative(value, relative_uncertainty);
-            JetMeasurement { value, uncertainty }
-        }
-        pub fn value(&self) -> f64 {
-            self.value
-        }
-        pub fn uncertainty(&self) -> f64 {
-            self.uncertainty
-        }
-        // Addition / subtraction: σ_z = sqrt(σ_a² + σ_b²)
-        pub fn add(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            let (value, uncertainty) = super::jet_measurement_kernel_add(
-                (self.value, self.uncertainty),
-                (other.value, other.uncertainty),
-            );
-            JetMeasurement::new(value, uncertainty)
-        }
-        pub fn sub(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            let (value, uncertainty) = super::jet_measurement_kernel_sub(
-                (self.value, self.uncertainty),
-                (other.value, other.uncertainty),
-            );
-            JetMeasurement::new(value, uncertainty)
-        }
-        // Multiplication: σ_z = sqrt((b·σ_a)² + (a·σ_b)²)
-        pub fn mul(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            let (value, uncertainty) = super::jet_measurement_kernel_mul(
-                (self.value, self.uncertainty),
-                (other.value, other.uncertainty),
-            );
-            JetMeasurement::new(value, uncertainty)
-        }
-        // Division: σ_z = sqrt((σ_a/b)² + (a·σ_b/b²)²)
-        pub fn div(&self, other: JetMeasurement<f64>) -> JetMeasurement<f64> {
-            let (value, uncertainty) = super::jet_measurement_kernel_div(
-                (self.value, self.uncertainty),
-                (other.value, other.uncertainty),
-            );
-            JetMeasurement::new(value, uncertainty)
-        }
-        pub fn sqrt(&self) -> JetMeasurement<f64> {
-            let (value, uncertainty) =
-                super::jet_measurement_kernel_sqrt((self.value, self.uncertainty));
-            JetMeasurement::new(value, uncertainty)
-        }
-    }
-
-    impl super::JetShow for JetMeasurement<f64> {
-        fn jet_show(&self) -> String {
-            super::jet_measurement_kernel_show((self.value, self.uncertainty))
-        }
-    }
-
-    pub fn jet_unit_conversion_exact_measurement(
-        value: f64,
-        scale_num: &str,
-        scale_den: &str,
-        offset_num: &str,
-        offset_den: &str,
-        relative_uncertainty: f64,
-    ) -> Option<JetMeasurement<f64>> {
-        super::jet_unit_conversion_exact(value, scale_num, scale_den, offset_num, offset_den)
-            .map(|value| JetMeasurement::from_relative(value, relative_uncertainty))
-    }
-
-    pub fn jet_unit_conversion_rounded_measurement(
-        value: f64,
-        scale_num: &str,
-        scale_den: &str,
-        offset_num: &str,
-        offset_den: &str,
-        mode: super::UnitRoundingMode,
-        digits: i64,
-        relative_uncertainty: f64,
-    ) -> Result<JetMeasurement<f64>, &'static str> {
-        super::jet_unit_conversion_rounded(
-            value,
-            scale_num,
-            scale_den,
-            offset_num,
-            offset_den,
-            mode,
-            digits,
-        )
-        .map(|value| JetMeasurement::from_relative(value, relative_uncertainty))
-    }

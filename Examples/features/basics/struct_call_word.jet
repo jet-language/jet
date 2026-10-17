@@ -1,13 +1,13 @@
 // Calls in record fields preserve fixed-width bits, not exact-Int pointer tags.
-struct Word { pub value: U64 }
-struct SignedWord { pub value: I64 }
+struct Word { value: U64 }
+struct SignedWord { value: I64 }
 
 fn hash2(namespace: String, identity: String) -> U64 Never! {
     prime :: U64{0x100000001b3}
     hash := U64{0xcbf29ce484222325}
-    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in namespace.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash = hash.wrapping_mul(prime)
-    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash
 }
 
@@ -24,14 +24,14 @@ fn run() {
     wrapper_field :: Word{value: scalar_wrap("Unit")}
     print("direct field: {direct_field.value}")
     print("wrapper field: {wrapper_field.value}")
-    copied :: ~direct_field
+    copied :: direct_field.copy()
     print("copy: {copied.value}")
     assert_eq(copied.value, U64{7299585414513572552})
     assert_eq(direct_field.value, wrapper_field.value)
     unsigned :: Word{value: word_bits()}
     signed :: SignedWord{value: signed_bits()}
-    unsigned_copy :: ~unsigned
-    signed_copy :: ~signed
+    unsigned_copy :: unsigned.copy()
+    signed_copy :: signed.copy()
     print("unsigned: {unsigned_copy.value}")
     print("signed: {signed_copy.value}")
     constant :: Word{value: U64{0xffffffffffffffff}}

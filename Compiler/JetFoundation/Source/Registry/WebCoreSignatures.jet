@@ -5,7 +5,7 @@
 // entries that are physically owned by that native table. Rows use the
 // grammar of `core_sig_row_lookup` (CorePlatformSignatures.jet).
 
-pub fn core_web_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
+fn core_web_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
     rows :: """
 core.data.sketch empty - String
 core.data.sketch merge String,String String
@@ -89,7 +89,7 @@ core.web.table facts WebTable<T> String T
 core.web.table new_keyed String,[T],fn(T;String) WebTable<T> T
 core.web.table column String,String,fn(T;String) WebTableColumn<T> T
 core.web.table with_column WebTable<T>,WebTableColumn<T> WebTable<T> T
-core.web.table with_server_page WebTable<T>,fn(WebTableState;WebTablePage<T>) WebTable<T> T
+core.web.table with_server_page WebTable<T>,fn(WebTableState;Result<WebTablePage<T>,WebTableError>) WebTable<T> T
 core.web.table keys WebTable<T> Result<[String],WebTableError> T
 core.web.table page_state WebTable<T> Result<WebTablePage<T>,WebTableError> T
 core.web.table sort [T],Bool,fn(T;String) [T] T
@@ -129,14 +129,14 @@ core.web.virtual plan_scroll_to WebVirtualPlanViewport,Int Unit
 core.web.virtual plan_resize|plan_viewport_measure WebVirtualPlanViewport,Int,Int Unit
 core.web.store new String,T WebStore<T> T
 core.web.store subscribe WebStore<T>,fn(T;Unit) WebStoreSubscription T
-core.web.store state_signal WebStore<T> String T
+core.web.store state_signal WebStore<T> Signal<T> T
 core.web.store set WebStore<T>,T WebStoreTransaction<T> T
 core.web.store value WebStore<T> T T
-core.web.store signal WebStore<T> String T
+core.web.store signal WebStore<T> Signal<T> T
 core.web.store with_history String,T,Int WebStore<T> T
-core.web.store transaction|update|batch WebStore<T>,String,[String],fn(T;Unit) WebStoreTransaction<T> T
+core.web.store transaction|update|batch WebStore<T>,String,[String],fn(;Unit) WebStoreTransaction<T> T
 core.web.store set_state WebStore<T>,T WebStoreTransaction<T> T
-core.web.store optimistic|patch WebStore<T>,String,[String],fn(T;Unit) WebStorePatch<T> T
+core.web.store optimistic|patch WebStore<T>,String,[String],fn(;Unit) WebStorePatch<T> T
 core.web.store patch_generation WebStorePatch<T> Int T
 core.web.store patch_transaction WebStorePatch<T> WebStoreTransaction<T> T
 core.web.store patch_active WebStorePatch<T> Bool T

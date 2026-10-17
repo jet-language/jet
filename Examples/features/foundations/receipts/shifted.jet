@@ -28,9 +28,9 @@ fn fit() -> RegressionEvidence {
         y3 - (intercept + slope * x3),
         y4 - (intercept + slope * x4),
     }
-    max_residual :: math.max(
-    math.max(math.abs(residuals[0]), math.abs(residuals[1])),
-    math.max(math.abs(residuals[2]), math.abs(residuals[3])),
+    max_residual :: math.max_float(
+    math.max_float(math.abs_float(residuals[0]), math.abs_float(residuals[1])),
+    math.max_float(math.abs_float(residuals[2]), math.abs_float(residuals[3])),
     )
     tolerance :: Float{0.25}
     passed :: max_residual <= tolerance
@@ -48,7 +48,7 @@ fn run() {
     evidence :: fit()
     receipt.attach(evidence)
     print("receipt:shifted")
-    print("evidence:{json.to_string(evidence)}")
+    print("evidence:{json.to_string(evidence) ?? panic("JSON encode")}")
     print("passed:{evidence.passed}")
     if evidence.passed -> panic("shifted regression evidence unexpectedly passed")
 }

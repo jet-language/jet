@@ -1,0 +1,15 @@
+# Port of tests/package_outputs.rs:798-818 incl cycle_diagnostic():759-779.
+fixture: fixtures/cycle
+env: NO_COLOR=1
+step first: jet build run.jet
+exit: nonzero
+stderr.filter(~ "build plan is invalid").line(0): ~ "`alpha` -> `gamma` -> `beta` -> `alpha`" # original ed77c235f tests/package_outputs.rs:759-779 selects the first diagnostic line and805-808 requires the exact cycle chain from736
+step: jet build run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" == first # original predicate
+step: jet build --release run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" == first # original predicate
+step: jet inspect graph run.jet
+exit: nonzero
+stderr: first-line ~ "build plan is invalid" == first # original predicate

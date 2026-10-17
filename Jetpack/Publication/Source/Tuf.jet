@@ -35,9 +35,9 @@ struct PublicationCheckpoint {
     public_key: String
     signature: String
 }
-pub struct PublicationRegistryMetadataFiles {
-    pub paths: [String]
-    pub checkpoint: String
+struct PublicationRegistryMetadataFiles {
+    paths: [String]
+    checkpoint: String
 }
 struct PublicationMetadataFileSnapshot {
     path: String
@@ -46,7 +46,7 @@ struct PublicationMetadataFileSnapshot {
 
 // Rust refresh_registry_metadata: snapshot every destination before the first
 // write; restore all snapshots on ANY later failure, retaining rollback errors.
-pub fn publication_refresh_registry_metadata(repo: String, registry_name: String) -[FS, Env, Time]> PublicationRegistryMetadataFiles PublicationDiagnosticError! {
+fn publication_refresh_registry_metadata(repo: String, registry_name: String) -[FS, Env, Time]> PublicationRegistryMetadataFiles PublicationDiagnosticError! {
     root_key :: publication_read_registry_root_key(registry_name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     grouped :: publication_tuf_all_index_entries(repo) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     if grouped.len() == 0 -> return Err(publication_tuf_metadata_diagnostic("registry index has no package metadata to publish"))
@@ -77,7 +77,7 @@ fn publication_tuf_refresh_transaction(repo: String, registry_name: String, root
     loop record in records -> known[publication_index_to_jsonl(record.entry)] = true
     current := [PublicationIndexEntry]{}
     loop entries in grouped.values() {
-        loop entry in entries -> &current.push(~entry)
+        loop entry in entries -> &current.push(entry.copy())
     }
     &current.sort_by((left: PublicationIndexEntry, right: PublicationIndexEntry) -> (left.name <=> right.name).then(left.version <=> right.version).then(left.yanked <=> right.yanked))
     loop entry in current {
@@ -104,7 +104,7 @@ fn publication_tuf_refresh_transaction(repo: String, registry_name: String, root
     Ok(PublicationRegistryMetadataFiles{paths: paths, checkpoint: checkpoint})
 }
 
-pub fn publication_verify_registry_package(repo: String, registry_name: String, name: String) -[FS, Env, Time]> [PublicationIndexEntry] PublicationDiagnosticError! {
+fn publication_verify_registry_package(repo: String, registry_name: String, name: String) -[FS, Env, Time]> [PublicationIndexEntry] PublicationDiagnosticError! {
     metadata :: publication_tuf_read_sparse_metadata(repo, name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     root_key :: publication_read_registry_root_key(registry_name) ?? return Err(publication_tuf_metadata_diagnostic("{err}"))
     if metadata.public_key != root_key -> return Err(publication_tuf_metadata_diagnostic("registry sparse metadata is signed by an unpinned root key"))
@@ -136,11 +136,10 @@ pub fn publication_verify_registry_package(repo: String, registry_name: String, 
 
 fn publication_tuf_all_index_entries(repo: String) -[FS]> [String: [PublicationIndexEntry]] IOError! {
     root :: files.join(repo, "index")
-    info :: if files.stat(root) == {
-        .Ok(info) -> info
-        .Err(error) -> if error == {
+    info :: files.stat(root) ?? {
+        if err == {
             .NotFound(_) -> return Ok([String: [PublicationIndexEntry]]{})
-            else -> return Err(error)
+            else -> return Err(err)
         }
     }
     if info.is_symlink || !info.is_dir -> return Err(publication_tuf_invalid("registry index root is not a real directory"))
@@ -158,7 +157,7 @@ fn publication_tuf_all_index_entries(repo: String) -[FS]> [String: [PublicationI
 }
 fn publication_tuf_write_sparse_metadata(repo: String, registry_name: String, root_key: String, name: String, entries: [PublicationIndexEntry], referrers: [String: String], checkpoint: String) -[FS, Env, Time]> String IOError! {
     paths :: publication_key_paths(registry_name)
-    sorted := ~entries
+    sorted := entries.copy()
     publication_tuf_validate_entries(name, &sorted)
     publication_tuf_validate_referrers(sorted, referrers)
     unsigned :: publication_tuf_sparse_unsigned(name, sorted, referrers, checkpoint, root_key)
@@ -205,7 +204,7 @@ fn publication_tuf_parse_sparse_metadata(text: String, name: String) -> Publicat
     Ok(PublicationSparseMetadata{name: parsed_name, entries: entries, referrers: referrers, checkpoint: publication_tuf_decode_text(publication_tuf_one_field(fields, "checkpoint")), public_key: publication_tuf_decode_text(publication_tuf_one_field(fields, "public_key")), signature: publication_tuf_one_field(fields, "signature")})
 }
 fn publication_tuf_verify_sparse_metadata(metadata: PublicationSparseMetadata) IOError! {
-    entries := ~metadata.entries
+    entries := metadata.entries.copy()
     publication_tuf_validate_entries(metadata.name, &entries)
     publication_tuf_validate_referrers(entries, metadata.referrers)
     if metadata.public_key.bytes().len() != 64 || !publication_tuf_hex.is_hex(metadata.public_key) || metadata.signature == "" -> return Err(publication_tuf_invalid("registry sparse metadata has no usable signature"))
@@ -246,11 +245,10 @@ fn publication_tuf_validate_referrers(entries: [PublicationIndexEntry], referrer
 
 fn publication_tuf_read_log(repo: String) -[FS, Env]> [PublicationLogRecord] IOError! {
     path :: publication_tuf_transparency_log_path(repo)
-    text :: if publication_tuf_read_bounded(repo, path, PUBLICATION_TUF_MAX_LOG_BYTES, "registry transparency log is too large") == {
-        .Ok(text) -> text
-        .Err(error) -> if error == {
+    text :: publication_tuf_read_bounded(repo, path, PUBLICATION_TUF_MAX_LOG_BYTES, "registry transparency log is too large") ?? {
+        if err == {
             .NotFound(_) -> return Ok([PublicationLogRecord]{})
-            else -> return Err(error)
+            else -> return Err(err)
         }
     }
     publication_tuf_parse_log(text)
@@ -300,9 +298,9 @@ fn publication_tuf_validate_log(records: [PublicationLogRecord]) IOError! {
         identity :: "{record.entry.name.bytes().len()}:{record.entry.name}{record.entry.version}"
         if identities.get(identity) == {
             Val(prior) -> {
-                prior_identity := ~prior
+                prior_identity := prior.copy()
                 prior_identity.yanked = false
-                current_identity := ~record.entry
+                current_identity := record.entry.copy()
                 current_identity.yanked = false
                 if prior_identity != current_identity || prior.yanked || record.operation != "yank" -> return Err(publication_tuf_invalid("registry transparency log reuses or changes an immutable package version"))
                 // Main-approved Rust tandem: remember the terminal yank so a
@@ -424,7 +422,7 @@ fn publication_tuf_with_checkpoint_lock(state: String, action: fn() IOError! -[F
                 else -> return Err(err)
             }
             if files.stat(lock_path) == .Ok(metadata) {
-                if !metadata.is_symlink && metadata.is_file && time.unix_ns() - metadata.modified.unix_ns > 300000000000 {
+                if !metadata.is_symlink && metadata.is_file && time.unix_ns() - (metadata.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")) > 300000000000 {
                     authority.remove(lock_name).drop("stale checkpoint lock reclamation is best-effort; the next attempt re-races")
                     next
                 }
@@ -484,7 +482,7 @@ fn publication_tuf_validate_entries(name: String, entries: &[PublicationIndexEnt
         prior = Val(entry.version)
     }
 }
-pub fn publication_registry_package_metadata_path(repo: String, name: String) -> String IOError! {
+fn publication_registry_package_metadata_path(repo: String, name: String) -> String IOError! {
     _ :: publication_index_entry_path(repo, name)
     Ok(files.join(files.join(repo, "metadata"), "{name}.json"))
 }
@@ -499,11 +497,10 @@ fn publication_tuf_read_bounded(root: String, path: String, limit: Int, oversize
     Ok(text)
 }
 fn publication_tuf_snapshot_file(repo: String, path: String) -[FS, Env]> PublicationMetadataFileSnapshot IOError! {
-    metadata :: if files.stat(path) == {
-        .Ok(metadata) -> metadata
-        .Err(error) -> if error == {
+    metadata :: files.stat(path) ?? {
+        if err == {
             .NotFound(_) -> return Ok(PublicationMetadataFileSnapshot{path: path, bytes: None})
-            else -> return Err(error)
+            else -> return Err(err)
         }
     }
     if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("registry metadata path is not a regular file"))
@@ -524,11 +521,10 @@ fn publication_tuf_restore_snapshot(repo: String, snapshot: PublicationMetadataF
     if snapshot.bytes == {
         Val(bytes) -> publication_tuf_atomic_write(repo, snapshot.path, bytes)
         None -> {
-            metadata :: if files.stat(snapshot.path) == {
-                .Ok(metadata) -> metadata
-                .Err(error) -> if error == {
+            metadata :: files.stat(snapshot.path) ?? {
+                if err == {
                     .NotFound(_) -> return
-                    else -> return Err(error)
+                    else -> return Err(err)
                 }
             }
             if metadata.is_symlink || !metadata.is_file -> return Err(publication_tuf_invalid("registry metadata rollback destination is not a regular file"))
@@ -547,7 +543,7 @@ fn publication_tuf_atomic_write(root: String, path: String, bytes: [U8]) IOError
     if files.stat(parent) == .Ok(metadata) {
         if metadata.is_symlink || !metadata.is_dir -> return Err(publication_tuf_invalid("registry metadata parent is not a real directory"))
     }
-    foundation_write_file_nofollow_at_root(root, files.relative(path, root), bytes, None)
+    foundation_write_file_nofollow_at_root(root, files.relative(path, root), bytes, None) ?? return Err(err.error)
 }
 // Rust line: no partial append on unsafe keys/values. The boolean core keeps
 // unsigned construction's intentional ignored refusal without another encoder.

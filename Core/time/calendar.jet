@@ -17,17 +17,13 @@ FRIDAY :: 4
 SATURDAY :: 5
 
 SUNDAY :: 6
-fn floor_div(a: Int, b: Int) -> Int {
-    q := a /% b
-    r :: a %% b
-    if r != 0 && ((r < 0) != (b < 0)) -> q = q - 1
-    q
-}
+// `/%` already rounds toward negative infinity.
+fn floor_div(a: Int, b: Int) -> Int { a /% b }
 
 
-pub fn isleap(year: Int) -> Bool Never! { time.is_leap_year(year) }
+fn isleap(year: Int) -> Bool Never! { time.is_leap_year(year) }
 
-pub fn leapdays(y1: Int, y2: Int) -> Int Never! {
+fn leapdays(y1: Int, y2: Int) -> Int Never! {
     a := y1
     b := y2
     if b < a {
@@ -56,29 +52,27 @@ fn floor_before(value: Int, divisor: Int) -> Int {
     }
     floor_div(value - 1, divisor)
 }
-pub fn weekday(year: Int, month: Int, day: Int) -> Int Never! {
+fn weekday(year: Int, month: Int, day: Int) -> Int Never! {
     // Sakamoto: 0 = Sunday. Convert to Monday = 0.
     y := year
     m := month
     if m < 1 -> m = 1
     if m > 12 -> m = 12
-    t := [Int]{0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
-    if m < 3 -> y = y - 1
+    t :: [Int]{0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4}
+    if month < 3 -> y = y - 1
     sun0 := (y + floor_div(y, 4) - floor_div(y, 100) + floor_div(y, 400) + t[m - 1] + day) %% 7
     if sun0 < 0 -> sun0 = sun0 + 7
     (sun0 + 6) %% 7
 
 }
-pub fn monthrange(year: Int, month: Int) -> (days: Int, weekday: Int) Never! {
+fn monthrange(year: Int, month: Int) -> (days: Int, weekday: Int) Never! {
     days :: time.days_in_month(year, month)
-    if days == 0 -> return (days: 0, weekday: 0)
     (days: days, weekday: weekday(year, month, 1))
 }
 
-pub fn monthcalendar(year: Int, month: Int) -> [[Int]] Never! { monthcalendar_start(year, month, 0) }
-pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] Never! {
+fn monthcalendar(year: Int, month: Int) -> [[Int]] Never! { monthcalendar_start(year, month, 0) }
+fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] Never! {
     range :: monthrange(year, month)
-    if range.days == 0 -> return [[Int]]{}
     first := firstweekday %% 7
     if first < 0 -> first = first + 7
     start := (range.weekday - first) %% 7
@@ -103,7 +97,7 @@ pub fn monthcalendar_start(year: Int, month: Int, firstweekday: Int) -> [[Int]] 
 }
 
 
-pub fn yearcalendar(year: Int) -> [[[Int]]] Never! {
+fn yearcalendar(year: Int) -> [[[Int]]] Never! {
     months := [[[Int]]]{}
     m := 1
     loop m <= 12 {
@@ -113,7 +107,7 @@ pub fn yearcalendar(year: Int) -> [[[Int]]] Never! {
     months
 }
 
-pub fn day_name(weekday: Int) -> String Never! {
+fn day_name(weekday: Int) -> String Never! {
     i := weekday
     if i < 0 -> i = 0
     if i > 6 -> i = 6
@@ -128,7 +122,7 @@ pub fn day_name(weekday: Int) -> String Never! {
     }
 }
 
-pub fn day_abbr(weekday: Int) -> String Never! {
+fn day_abbr(weekday: Int) -> String Never! {
     i := weekday
     if i < 0 -> i = 0
     if i > 6 -> i = 6
@@ -143,7 +137,7 @@ pub fn day_abbr(weekday: Int) -> String Never! {
     }
 }
 
-pub fn month_name(month: Int) -> String Never! {
+fn month_name(month: Int) -> String Never! {
     i := month
     if i < 1 -> i = 1
     if i > 12 -> i = 12
@@ -163,7 +157,7 @@ pub fn month_name(month: Int) -> String Never! {
     }
 }
 
-pub fn month_abbr(month: Int) -> String Never! {
+fn month_abbr(month: Int) -> String Never! {
     i := month
     if i < 1 -> i = 1
     if i > 12 -> i = 12
@@ -183,7 +177,7 @@ pub fn month_abbr(month: Int) -> String Never! {
     }
 }
 
-pub fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
+fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
     w := width
     if w < 1 -> w = 1
     first := firstweekday %% 7
@@ -198,7 +192,7 @@ pub fn weekheader(width: Int, firstweekday: Int) -> [String] Never! {
     out
 }
 
-pub fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
+fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
     w := width
     if w < 2 -> w = 2
     title :: "{month_name(month)} {year}"
@@ -213,7 +207,7 @@ pub fn formatmonth(year: Int, month: Int, width: Int) -> String Never! {
     out
 }
 
-pub fn formatyear(year: Int) -> String Never! {
+fn formatyear(year: Int) -> String Never! {
     out := ""
     m := 1
     loop m <= 12 {
@@ -223,27 +217,38 @@ pub fn formatyear(year: Int) -> String Never! {
     out
 }
 
-pub fn timegm(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int Never! {
-    dt :: time.datetime(year, month, day, hour, minute, second)
-    time.unix_seconds(dt)
+fn timegm(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> Int Never! {
+    m :: constrain(month, 1, 12)
+    d :: constrain(day, 1, time.days_in_month(year, m))
+    y :: year - 1
+    offsets :: [Int]{0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334}
+    days := 365 * y + floor_div(y, 4) - floor_div(y, 100) + floor_div(y, 400) + offsets[m - 1] + d - 1
+    if m > 2 && isleap(year) -> days = days + 1
+    // 719162 is the civil day number of 1970-01-01. The epoch carrier
+    // saturates the day product before adding the constrained time of day.
+    base :: constrain((days - 719162) * 86400, -9223372036854775808, 9223372036854775807)
+    seconds :: constrain(hour, 0, 23) * 3600 + constrain(minute, 0, 59) * 60 + constrain(second, 0, 59)
+    timestamp := constrain(base + seconds, -9223372036854775808, 9223372036854775807)
+    if hour == 23 && minute == 59 && second == 60 -> timestamp = constrain(timestamp + 1, -9223372036854775808, 9223372036854775807)
+    timestamp
 }
 
 
 fn clip(text: String, width: Int) -> String {
     raw :: text.bytes()
-    if raw.len() <= width -> return pad(text, width)
+    if raw.len() <= width -> return pad_end(text, width)
     out := [U8]{}
     i := 0
     loop i < width {
         &out.push(raw[i])
         i = i + 1
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn pad(text: String, width: Int) -> String {
     raw :: text.bytes()
-    if raw.len() >= width -> return ~text
+    if raw.len() >= width -> return text.copy()
     out := text
     n := width - raw.len()
     loop n > 0 {
@@ -255,7 +260,7 @@ fn pad(text: String, width: Int) -> String {
 
 fn center(text: String, width: Int) -> String {
     raw :: text.bytes()
-    if raw.len() >= width -> return ~text
+    if raw.len() >= width -> return clip(text, width)
     left := (width - raw.len()) /% 2
     right := width - raw.len() - left
     out := ""
@@ -283,3 +288,51 @@ fn join_row(cells: [String], width: Int) -> String {
     out
 }
 
+
+fn constrain(value: Int, low: Int, high: Int) -> Int Never! {
+    if value < low -> return low
+    if value > high -> return high
+    value
+}
+
+fn pad_end(text: String, width: Int) -> String Never! {
+    out := text
+    n := width - text.bytes().len()
+    loop n > 0 {
+        out = "{out} "
+        n = n - 1
+    }
+    out
+}
+
+#Test("Calendar keeps signed leap intervals and unconstrained month weekdays") {
+    assert(isleap(-400))
+    assert(!isleap(-100))
+    assert(leapdays(1996, 2005) == 3)
+    assert(leapdays(2005, 1996) == 3)
+    assert(weekday(2024, 2, 1) == 3)
+    assert(monthrange(2024, 0).days == 30)
+    assert(monthrange(2024, 13).days == 30)
+    assert(monthcalendar_start(2024, 2, -1)[0][4] == 1)
+    assert(yearcalendar(2024).len() == 12)
+}
+
+#Test("Calendar names clamp and headers pad on the right") {
+    assert(day_name(-1) == "Monday")
+    assert(day_abbr(99) == "Sun")
+    assert(month_name(0) == "January")
+    assert(month_abbr(99) == "Dec")
+    assert(weekheader(5, -1)[0] == "Sun  ")
+    assert(weekheader(1, 0)[0] == "M")
+    assert(formatmonth(2024, 2, 2).starts_with("   February 2024    \nMo Tu We Th Fr Sa Su\n"))
+    assert(formatyear(2024).starts_with(formatmonth(2024, 1, 3)))
+}
+
+#Test("Calendar UTC epoch clamps civil fields and preserves leap labels") {
+    assert(timegm(1970, 1, 1, 0, 0, 0) == 0)
+    assert(timegm(1969, 12, 31, 23, 59, 59) == -1)
+    assert(timegm(1970, 0, 0, -1, -1, -1) == 0)
+    assert(timegm(1970, 1, 1, 23, 59, 60) == 86400)
+    assert(timegm(1970, 1, 1, 23, 58, 60) == 86339)
+    assert(timegm(2000, 2, 30, 0, 0, 0) == 951782400)
+}

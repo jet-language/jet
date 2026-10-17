@@ -1,0 +1,39 @@
+// Exact tests/fact_reads.rs:442-456,498-533. Existing PackageModel lock APIs.
+#Test("checked_in_lock_stamp_is_a_byte_stable_golden") {
+    root :: files.tmpdir("s4-stamp-golden-") ?? panic("scratch")
+    files.create_dir_all(files.join(root, ".jet")) ?? panic("managed dir")
+    golden :: "version = 1\n\n[build.stamp]\ngit = \"abc123-dirty\"\ndirty = true\ntoolchain = \"1.0.0\"\nat = \"2026-08-13T12:34:56.000000000Z\"\n\n[root]\ndependencies = []\n"
+    files.write(files.join(root, UNIFIED_LOCK_FILE), golden) ?? panic("seed")
+    lock :: pkg_lock_parse(golden) ?? panic("parse")
+    assert_eq(pkg_lock_write(lock), golden)
+    stamp :: pkg_lock_build_stamp(root, true) ?? panic("locked replay")
+    assert_eq(stamp.at, "2026-08-13T12:34:56.000000000Z")
+    assert_eq(stamp.git, Val("abc123-dirty"))
+    assert(stamp.dirty)
+    assert_eq(stamp.toolchain, "1.0.0")
+    files.remove_all(root).drop("cleanup")
+}
+#Test("lock_stamp_is_captured_once_and_replayed_without_a_clock") {
+    root :: files.tmpdir("s4-stamp-replay-") ?? panic("scratch")
+    generated :: [ComptimeInput]{ComptimeInput{path: ".jet/generated/main.jet", hash: "sha256-fixed"}}
+    first :: BuildStamp{git: Val("fixed-revision"), dirty: false, toolchain: "1.0.0", at: "2026-08-13T12:34:56.000000000Z"}
+    pkg_lock_record_generated_inputs(root, generated, false, first) ?? panic("record first")
+    before :: files.read_bytes(files.join(root, UNIFIED_LOCK_FILE)) ?? panic("before")
+    changed :: BuildStamp{git: Val("different-revision"), dirty: true, toolchain: "different-toolchain", at: "2099-01-01T00:00:00.000000000Z"}
+    pkg_lock_record_generated_inputs(root, generated, false, changed) ?? panic("record changed")
+    after :: files.read_bytes(files.join(root, UNIFIED_LOCK_FILE)) ?? panic("after")
+    assert_eq(before, after)
+    assert_eq(pkg_lock_build_stamp(root, true) ?? panic("locked replay"), first)
+    hostile :: files.tmpdir("s4-stamp-missing-") ?? panic("scratch")
+    files.create_dir_all(files.join(hostile, ".jet")) ?? panic("managed dir")
+    files.write(files.join(hostile, UNIFIED_LOCK_FILE), "version = 1\n") ?? panic("seed missing")
+    if pkg_lock_build_stamp(hostile, true) == {
+        .Ok(_) -> panic("missing stamp must fail locked")
+        .Err(error) -> if error == {
+            .Invalid(detail) -> assert(detail.contains("[build.stamp]"))
+            else -> panic("missing stamp error lost detail")
+        }
+    }
+    files.remove_all(root).drop("cleanup")
+    files.remove_all(hostile).drop("cleanup")
+}

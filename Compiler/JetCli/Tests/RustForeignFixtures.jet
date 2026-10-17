@@ -1,0 +1,24 @@
+// Calls the actual host's pure contracts; process and filesystem operations
+// are checked as part of the assembled unit but are not simulated or spawned.
+fn run() {
+    facts :: rust_foreign_fixture_facts("b64encode")
+    plan :: jet_driver_rust_foreign_plan(facts, "rustc\nfixture-toolchain", JET_DRIVER_RUST_FOREIGN_TARGET, "direct=;transitive=") ?? panic("helper plan")
+    no_crate :: jet_cli_rust_foreign_cargo_error(plan, "error: no matching package named base64 found", "/fixture/cache", true)
+    assert(no_crate.code == "E0704")
+    signature :: jet_cli_rust_foreign_cargo_error(plan, "error[E0308]: mismatched types", "/fixture/cache", true)
+    assert(signature.code == "E0705")
+    metadata_error :: jet_cli_rust_foreign_cargo_error(plan, "error[E0308]: mismatched types", "/fixture/cache", false)
+    assert(metadata_error.code == "E0704")
+    plain :: jet_cli_rust_foreign_metadata("{{\"packages\":[{{\"name\":\"base64\",\"targets\":[{{\"kind\":[\"lib\"]}}]}}]}}", plan.crate_name) ?? panic("metadata")
+    assert(!plain)
+    code :: jet_cli_rust_foreign_metadata("{{\"packages\":[{{\"name\":\"dep\",\"targets\":[{{\"kind\":[\"custom-build\"]}}]}}]}}", plan.crate_name) ?? panic("metadata")
+    assert(code)
+    assert(jet_cli_rust_foreign_metadata("{{\"packages\":1}}", plan.crate_name) == .Err(_))
+    digest :: jet_cli_rust_foreign_digest("abc".bytes())
+    assert(digest == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+    provenance :: jet_cli_rust_foreign_provenance(plan, "/fixture/cache", "rustc\nfixture-toolchain", "direct=;transitive=", digest, false) ?? panic("provenance")
+    assert(provenance.lines().len() == 20)
+    assert(provenance.contains("native_helper_artifact_mode=jet-native-rust-staticlib-v1"))
+    assert(jet_cli_rust_foreign_provenance(plan, "bad\nidentity=forged", "rustc", "closure", digest, false) == .Err(_))
+    print("FFI host fixtures passed")
+}

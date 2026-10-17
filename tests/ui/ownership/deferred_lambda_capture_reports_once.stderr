@@ -1,0 +1,17 @@
+Error [E0120]: `value` was not moved here, so it cannot be returned as-is
+  --> deferred_lambda_capture_reports_once.jet:2:44
+    |
+  2 | fn see(value: String) -[]> String { return value }
+    |                                            ^^^^^
+ Why: This function has read access only and does not own the value
+ Fix: Return a copy: `return value.copy()` — or take ownership with the move marker `^`: `value: ^String`. To return borrowed data, declare `-> View<T> from value` and return a view derived from `value`
+More: jet-lang.dev/e/E0120
+
+Error [E0204]: `value` is being changed in this call, so it can't be used again here
+  --> deferred_lambda_capture_reports_once.jet:9:28
+    |
+  9 |     both(&value, () -> see(value))
+    |                            ^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&value`) only once, or copy first with `~value`
+More: jet-lang.dev/e/E0204

@@ -1,0 +1,10 @@
+# Port of jetpack_tasks.rs::jet_jobs_after_runs_predecessors_and_scalar_args.
+fixture: fixtures/after
+step: jet run {work}/main.jet -- populate --label ci
+stdout: = populate.out
+step: jet run {work}/main.jet -- migrate --to 004
+stdout: = migrate.out
+step: jet run {work}/main.jet -- populate --bogus
+exit: 2
+stdout: !~ migrate # original predicate
+stderr: ~ E1331 # original predicate

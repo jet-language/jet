@@ -1,0 +1,11 @@
+
+use core.process as process
+
+fn run() {
+    timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+    result :: process.pipeline([
+        process.cmd(["{work}/slow.sh"]).timeout(timeout),
+        process.cmd(["cat"])
+    ]) ?? panic("pipeline failed")
+    print(result.timed_out)
+}

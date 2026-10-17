@@ -11,6 +11,7 @@ use jet_foundation.[
     ParamZone,
     Span,
     SymbolKind,
+    TBuiltinOp,
     TExpr,
     TExprKind,
     THandleOp,
@@ -19,12 +20,12 @@ use jet_foundation.[
 ]
 
 struct SemaNetworkHandleSpec {
-    pub operation: THandleOp
-    pub result_type: Type
-    pub params: [SemaCallParam]
-    pub receiver_convention: AccessConvention
-    pub callback_non_escaping: Bool
-    pub effect_name: String?
+    operation: THandleOp
+    result_type: Type
+    params: [SemaCallParam]
+    receiver_convention: AccessConvention
+    callback_non_escaping: Bool
+    effect_name: String?
 }
 
 fn sema_network_handle_parameter(name: String, label: String, ty: Type, zone: ParamZone) -> SemaCallParam Never! {
@@ -87,9 +88,12 @@ fn sema_network_handle_u8_list() -> Type Never! {
     Type.List{element: Type.IntN{signed: false, bits: 8}}
 }
 
+// Rust `net_method_return` infers a handle method's arguments without an
+// access convention: the readiness interest and the shutdown direction are
+// read, never taken from the caller.
 fn sema_network_handle_ready_params() -> [SemaCallParam] Never! {
     [SemaCallParam]{
-        sema_network_handle_argument_move("interest", Type.Named{name: "NetReadyInterest"}),
+        sema_network_handle_argument("interest", Type.Named{name: "NetReadyInterest"}),
         sema_network_handle_deadline(),
     }
 }
@@ -118,7 +122,7 @@ fn sema_network_handle_spec_for(owner: String, method: String, argc: Int) -> Sem
         if method == "write_all" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteAllBytesDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("bytes", bytes), sema_network_handle_deadline()}, AccessConvention.Read))
         if method == "write_text" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteText, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("text", string)}, AccessConvention.Read))
         if method == "write_text" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamWriteTextDeadline, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("text", string), sema_network_handle_deadline()}, AccessConvention.Read))
-        if method == "shutdown" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamShutdown, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument_move("how", Type.Named{name: "NetShutdown"})}, AccessConvention.Read))
+        if method == "shutdown" && argc == 1 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamShutdown, sema_network_handle_net_result(unit), [SemaCallParam]{sema_network_handle_argument("how", Type.Named{name: "NetShutdown"})}, AccessConvention.Read))
         if method == "ready" && argc == 2 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamReady, sema_network_handle_net_result(Type.Named{name: "NetReady"}), sema_network_handle_ready_params(), AccessConvention.Read))
         if method == "peer_addr" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamPeerAddr, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
         if method == "local_addr" && argc == 0 -> return Val(sema_network_handle_spec(THandleOp.TCPStreamLocalAddr, sema_network_handle_net_result(string), [SemaCallParam]{}, AccessConvention.Read))
@@ -186,7 +190,7 @@ fn sema_network_handle_spec_for(owner: String, method: String, argc: Int) -> Sem
     None
 }
 
-pub fn sema_network_handle_known_method(owner: String, method: String) -> Bool Never! {
+fn sema_network_handle_known_method(owner: String, method: String) -> Bool Never! {
     if owner == "TCPListener" -> return method == "accept" || method == "local_addr"
     if owner == "TCPStream" -> return method == "read" || method == "read_text" || method == "write" || method == "write_all" || method == "write_text" || method == "shutdown" || method == "ready" || method == "peer_addr" || method == "local_addr" || method == "close"
     if owner == "UDPSocket" -> return method == "ready" || method == "close" || method == "receive" || method == "send_to"
@@ -215,20 +219,36 @@ fn sema_network_handle_nominal_owner(ty: Type) -> String? {
     }
 }
 
-fn sema_network_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment) -> Bool Never! {
-    actual :: sema_network_handle_nominal_owner(receiver_type) ?? return false
-    if actual != owner -> return false
-    expected_module := sema_network_handle_owner_module(owner)
-    if expected_module == "" -> return false
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return true
-    resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
-    if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
-    false
+// Rust `core_net_handle_dispatch_name`: the canonical `core.net` TCP handle
+// identities and their bare spellings project onto the method table.
+fn sema_network_handle_dispatch_name(name: String) -> String? Never! {
+    if name == "TCPStream" || name == "<corelib>/Core/net::Core/net/net.jet::TCPStream" -> return Val("TCPStream")
+    if name == "TCPListener" || name == "<corelib>/Core/net::Core/net/net.jet::TCPListener" -> return Val("TCPListener")
+    None
 }
 
-fn sema_network_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
-    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+// Rust `net_method_return` claims a receiver by its type name alone: the
+// handle owners are Core leaf types with no source declaration, so the bare
+// spelling (or the canonical `core.net` TCP identity) is the Core handle. A
+// bare name the module itself resolves names the Core owner only when that
+// declaration belongs to the owner's Core module.
+fn sema_network_handle_is_canonical(receiver_type: Type, owner: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    actual :: sema_network_handle_nominal_owner(receiver_type) ?? return false
+    if actual != owner {
+        mapped :: sema_network_handle_dispatch_name(actual) ?? return false
+        return mapped == owner
+    }
+    expected_module := sema_network_handle_owner_module(owner)
+    if expected_module == "" -> return false
+    if program.registration_graph == .Val(graph) {
+        resolved :: sema_type_graph_lookup_symbol(graph, environment.module_identity, actual)
+        if resolved == .Val(symbol) -> return symbol.symbol.kind == SymbolKind.Type && (sema_registration_module_name(graph, symbol.symbol.module_name) ?? "") == expected_module
+    }
+    true
+}
+
+fn sema_network_handle_infer_args(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) Never! {
+    loop argument in args -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
 }
 
 fn sema_network_handle_expected_arity(owner: String, method: String) -> String Never! {
@@ -276,7 +296,7 @@ fn sema_network_handle_arity_diagnostic(owner: String, method: String, argc: Int
     &diagnostics.push(sema_error("E0104", span, "`{owner}.{method}` expects {expected} arguments, got {argc}", "the core networking handle has a fixed checked signature", "pass the arguments and deadline labels for this method's documented form"))
 }
 
-fn sema_network_handle_effect_fact(environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String?, diagnostics: &[Diagnostic]) -> Bool Never! {
+fn sema_network_handle_effect_fact(environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, api: String, span: Span, result_type: Type, effect_name: String?, diagnostics: &[Diagnostic]) -> Bool Never! {
     effect_row := [EffectRowEntry]?{None}
     if effect_name == .Val(name) {
         entries := [EffectRowEntry]{}
@@ -290,18 +310,18 @@ fn sema_network_handle_effect_fact(environment: SemaScopeEnvironment, scopes: &S
         type_args: [Type]{},
         default_refs: [FunctionDefaultRef]{},
     }
-    sema_effect_record_intrinsic_fact(environment, &scopes, &context, api, span, facts, &diagnostics)
+    sema_effect_record_intrinsic_fact(environment, program, &scopes, &context, api, span, facts, &diagnostics)
 }
 
-fn sema_network_handle_checked_args(method: String, params: [SemaCallParam], args: [CallArg], receiver: Expr?, receiver_convention: AccessConvention, callback_non_escaping: Bool, span: Span, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
+fn sema_network_handle_checked_args(method: String, params: [SemaCallParam], args: [CallArg], receiver: Expr?, receiver_convention: AccessConvention, callback_non_escaping: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> [TExpr]? {
     checked_args := args
     binding :: sema_call_bind_args(method, params, &checked_args, span, &diagnostics) ?? {
-        sema_network_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         return None
     }
     saved_lambda_escapes := context.lambda_escapes
     if callback_non_escaping -> context.lambda_escapes = Val(false)
-    typed_optional := sema_call_typecheck_bound_arguments(method, params, None, false, binding, &checked_args, environment, &scopes, &state, &tail_store, &context, span, &diagnostics, true)
+    typed_optional := sema_call_typecheck_bound_arguments(method, params, None, false, binding, &checked_args, environment, program, &scopes, &state, &tail_store, &context, span, &diagnostics, true)
     context.lambda_escapes = saved_lambda_escapes
     typed :: typed_optional ?? return None
     ownership :: if receiver == {
@@ -315,7 +335,7 @@ fn sema_network_handle_checked_args(method: String, params: [SemaCallParam], arg
         loop index in 0..<typed.values.len() {
             if typed.slots[index] == slot {
                 value := typed.values[index]
-                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_expr(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, value.span)
+                if index < checked_args.len() && (checked_args[index].flags.implicit_clone || checked_args[index].flags.shared_auto_clone) -> value = sema_tir_node(value.ty, TExprKind.Clone{value: value, fact: tir_call_arg_copy_fact(checked_args[index].flags.shared_auto_clone)}, value.span)
                 &values.push(value)
                 found = true
                 break
@@ -326,34 +346,68 @@ fn sema_network_handle_checked_args(method: String, params: [SemaCallParam], arg
     Val(values)
 }
 
-fn sema_network_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String?, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
-    value := sema_tir_expr(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
-    checked :: sema_expression_call_expected(value, expected, environment, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    if !sema_network_handle_effect_fact(environment, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+fn sema_network_handle_finish(receiver: TExpr, operation: THandleOp, args: [TExpr], result_type: Type, effect_name: String?, api: String, span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck Never! {
+    value := sema_tir_node(result_type, TExprKind.HandleMethod{receiver: receiver, operation: operation, args: args}, span)
+    checked :: sema_expression_call_expected(value, expected, environment, program, context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if !sema_network_handle_effect_fact(environment, program, &scopes, &context, api, span, result_type, effect_name, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
     SemaMethodSpecialCheck{handled: true, value: Val(checked)}
 }
 
 // Called before ordinary method candidate lookup with the already checked
-// receiver. A route is claimed only for the exact registered Core owner.
-pub fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    owner :: sema_network_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
-    if !sema_network_handle_is_canonical(receiver_value.ty, owner, environment) || !sema_network_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
+// receiver. A route is claimed only for a Core handle owner
+// (sema_network_handle_is_canonical).
+fn sema_call_try_network_handle_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    actual :: sema_network_handle_nominal_owner(receiver_value.ty) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+    owner :: sema_network_handle_dispatch_name(actual) ?? actual
+    if !sema_network_handle_is_canonical(receiver_value.ty, owner, environment, program) || !sema_network_handle_known_method(owner, method) -> return SemaMethodSpecialCheck{handled: false, value: None}
     spec := sema_network_handle_spec_for(owner, method, args.len())
     if spec == None {
-        sema_network_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         sema_network_handle_arity_diagnostic(owner, method, args.len(), span, &diagnostics)
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    signature :: spec ?? SemaNetworkHandleSpec{operation: THandleOp.TCPStreamRead, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: None}
-    typed_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, signature.callback_non_escaping, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
+    signature := spec ?? SemaNetworkHandleSpec{operation: THandleOp.TCPStreamRead, result_type: Type.Named{name: "Unit"}, params: [SemaCallParam]{}, receiver_convention: AccessConvention.Read, callback_non_escaping: false, effect_name: None}
+    // Rust `net_method_return` infers `TCPStream.write`'s data, so a `String`
+    // is written as its UTF-8 bytes (`send(&stream, text)`), as `[U8]` is.
+    text_write :: owner == "TCPStream" && method == "write" && sema_network_handle_text_argument(args, environment, program, &scopes, &state, &tail_store, &context)
+    if text_write -> signature.params = sema_network_handle_text_params(signature.params)
+    checked_args :: sema_network_handle_checked_args(method, signature.params, args, Val(receiver), signature.receiver_convention, signature.callback_non_escaping, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+    // Rust `net_method_return` types the network handle methods without
+    // recording a receiver convention, so a written mark (`&stream.write(…)`)
+    // has nothing to be compared with.
+    sema_receiver_mark_forget(&state, receiver)
+    typed_args := checked_args ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    if text_write {
+        text :: typed_args[0]
+        // The conversion is compiler-built: Rust infers the data type and
+        // records no effect for it. Record that empty row, so the effect
+        // walk does not read the fact-less `.bytes()` as an unknown callee.
+        if !sema_effect_record_intrinsic_effects(environment, program, &scopes, &context, "String.bytes", text.span, [EffectRowEntry]{}, &diagnostics) -> return SemaMethodSpecialCheck{handled: true, value: None}
+        typed_args[0] = sema_tir_node(sema_network_handle_u8_list(), TExprKind.BuiltinMethod{receiver: text, operation: TBuiltinOp.Bytes{owned: false}, args: [TExpr]{}}, text.span)
+    }
+    sema_network_handle_finish(receiver_value, signature.operation, typed_args, signature.result_type, signature.effect_name, "{owner}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }
 
-fn sema_network_tls_static_target(receiver: Expr, method: String, environment: SemaScopeEnvironment) -> String? {
+// Whether the first positional argument checks as a `String` on its own.
+fn sema_network_handle_text_argument(args: [CallArg], environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+    if args.len() == 0 || args[0].label != None -> return false
+    probe_diagnostics := [Diagnostic]{}
+    probed :: sema_probe_expression(args[0].expr, None, environment, program, &scopes, &state, &tail_store, &context, &probe_diagnostics) ?? return false
+    sema_expr_unwrap_tag(probed.ty) == Type.String
+}
+
+// The `write` parameters with the data slot typed `String`.
+fn sema_network_handle_text_params(params: [SemaCallParam]) -> [SemaCallParam] Never! {
+    result := params.copy()
+    if result.len() > 0 -> result[0].ty = Val(Type.String)
+    result
+}
+
+fn sema_network_tls_static_target(receiver: Expr, method: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> String? {
     if receiver == {
         .Field(base, leaf, _) -> {
             is_tls_module := if base == {
-                .Ident(alias, _) -> sema_expr_core_import_module(environment, alias) == (Val("core.net.tls"))
+                .Ident(alias, _) -> sema_expr_core_import_module(environment, program, alias) == (Val("core.net.tls"))
                 else -> false
             }
             if is_tls_module {
@@ -367,8 +421,8 @@ fn sema_network_tls_static_target(receiver: Expr, method: String, environment: S
     None
 }
 
-pub fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
-    target :: sema_network_tls_static_target(receiver, method, environment) ?? return SemaMethodSpecialCheck{handled: false, value: None}
+fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    target :: sema_network_tls_static_target(receiver, method, environment, program) ?? return SemaMethodSpecialCheck{handled: false, value: None}
     result_type := Type.Named{name: "TLSClientConfig"}
     operation := THandleOp.TLSClientConfigDefault
     params := [SemaCallParam]{}
@@ -385,7 +439,7 @@ pub fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [C
         &params.push(sema_network_handle_parameter("private_key", "private_key", sema_network_handle_u8_list(), ParamZone.LabelOnly))
     }
     if (target == "ClientConfig" && args.len() != 0) || (target == "RootCertificates" && args.len() != 1) || (target == "ClientIdentity" && args.len() != 2) {
-        sema_network_handle_infer_args(args, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        sema_network_handle_infer_args(args, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
         expected_count := if {
             target == "ClientConfig" -> 0
             target == "RootCertificates" -> 1
@@ -394,7 +448,7 @@ pub fn sema_call_try_network_tls_static(receiver: Expr, method: String, args: [C
         &diagnostics.push(sema_call_arity_diagnostic("{target}.{method}", expected_count, args.len(), false, span))
         return SemaMethodSpecialCheck{handled: true, value: None}
     }
-    typed_args :: sema_network_handle_checked_args("{target}.{method}", params, args, None, AccessConvention.Read, false, span, environment, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
-    unit_receiver := sema_tir_expr(Type.Named{name: "Unit"}, TExprKind.Unit, span)
-    sema_network_handle_finish(unit_receiver, operation, typed_args, result_type, effect_name, "core.net.tls.{target}.{method}", span, expected, environment, &scopes, &context, &diagnostics)
+    typed_args :: sema_network_handle_checked_args("{target}.{method}", params, args, None, AccessConvention.Read, false, span, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return SemaMethodSpecialCheck{handled: true, value: None}
+    unit_receiver := sema_tir_node(Type.Named{name: "Unit"}, TExprKind.Unit, span)
+    sema_network_handle_finish(unit_receiver, operation, typed_args, result_type, effect_name, "core.net.tls.{target}.{method}", span, expected, environment, program, &scopes, &context, &diagnostics)
 }

@@ -1,0 +1,40 @@
+// HTTPClient.rs409-411/419 precise raw error mappings; original three raw-client instances and request/read phases.
+use core.http.client as http
+fn run() {
+    client0 :: http.Client.new().protocols(true, false, true)
+    if client0.send(http.request("GET", "http://{cap:addr}/h2")) == {
+        .Err(error) -> {
+            if error == {
+                .InvalidHeader -> print("InvalidHeader")
+                else -> panic("expected InvalidHeader")
+            }
+        }
+        else -> panic("expected send error")
+    }
+    client1 :: http.Client.new().protocols(true, false, true)
+    if client1.send(http.request("GET", "http://{cap:addr}/h2")) == {
+        .Err(error) -> {
+            if error == {
+                .Protocol(_) -> print("Protocol")
+                else -> panic("expected Protocol")
+            }
+        }
+        else -> panic("expected send error")
+    }
+    client2 :: http.Client.new().protocols(true, false, true)
+    response :: client2.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("third send")
+    saw_error := false
+    loop chunk in response.body().chunks(64) {
+        if chunk == {
+            .Ok(_) -> panic("original FIRST read must fail")
+            .Err(error) -> {
+                if error == {
+                    .InvalidFraming -> { print("InvalidFraming"); saw_error = true }
+                    else -> panic("expected InvalidFraming")
+                }
+                break
+            }
+        }
+    }
+    if !saw_error -> panic("original FIRST read must not be EOF")
+}

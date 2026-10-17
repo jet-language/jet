@@ -1,0 +1,7 @@
+# Original tests/gate_law.rs:50-56; source and predicates preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+fixture: lint_gate_keeps_the_source_reason.fixture
+step: jet inspect gates main.jet --json
+exit: 0
+json: stdout doc $.gates.entries[?kind="lint_allow"][0].reason = "reviewed source reason"
+json: stdout doc $.gates.entries[?kind="lint_allow"][0].status = "recorded"

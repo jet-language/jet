@@ -1,0 +1,14 @@
+# Port of tests/diagnostic_gate.rs::retired_marker_fails_build_and_default_run (223-275).
+# PENDING-GRAMMAR and PENDING-SAME-HEAD: original assertions; no runtime snapshot.
+fixture: retired.fixture
+env: NO_COLOR=1
+step: jet build retired.jet
+exit: nonzero
+stderr+stdout: ~ E0927 # original predicate
+stderr+stdout: ~ retired # original predicate
+stderr+stdout: ~ [E0927] # original predicate
+step: jet run retired.jet
+exit: nonzero
+stderr+stdout: ~ E0927 # original predicate
+stderr+stdout: ~ retired # original predicate
+stderr+stdout: ~ [E0927] # original predicate

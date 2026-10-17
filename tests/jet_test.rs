@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use std::ops::Deref;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse_json;
 
 mod common;
@@ -646,7 +646,7 @@ fn release_test_uses_aot_tier_marker() {
     let example = root.join("Examples/features/tooling/property_tests.jet");
     let cwd = isolated_test_package("jet_release_property");
     let out = Command::new(&jet)
-        .args(["test", "--release", "--trace-tiers", "--show-default", "--capture=all"])
+        .args(["test", "--release", "--show-default", "--capture=all"])
         .arg(&example)
         .current_dir(&cwd.path)
         .output()
@@ -767,47 +767,47 @@ fn property_distribution(samples: &[PropertySample]) -> [usize; 4] {
     counts
 }
 
-fn report_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+fn report_field<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
     value
         .get(key)
         .unwrap_or_else(|error| panic!("missing JSON field `{key}`: {error}"))
 }
 
-fn report_object<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+fn report_object<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
     let field = report_field(value, key);
-    if !matches!(field, DataTree::Object(_)) {
+    if !matches!(field, Dyn::Object(_)) {
         panic!("JSON field `{key}` must be an object: {field:?}");
     }
     field
 }
 
-fn report_array<'a>(value: &'a DataTree, key: &str) -> &'a [DataTree] {
+fn report_array<'a>(value: &'a Dyn, key: &str) -> &'a [Dyn] {
     report_field(value, key)
         .as_array()
         .unwrap_or_else(|error| panic!("JSON field `{key}` must be an array: {error}"))
 }
 
-fn report_text(value: &DataTree) -> &str {
+fn report_text(value: &Dyn) -> &str {
     value
         .as_str()
         .unwrap_or_else(|error| panic!("JSON field must be text: {error}"))
 }
 
-fn report_int(value: &DataTree) -> i64 {
+fn report_int(value: &Dyn) -> i64 {
     match value {
-        DataTree::Int(value) => *value,
-        DataTree::Number(value) => value
+        Dyn::Int(value) => value.to_i64().expect("JSON field integer is in range"),
+        Dyn::Number(value) => value
             .parse()
             .unwrap_or_else(|_| panic!("JSON field must be an integer: {value}")),
         _ => panic!("JSON field must be an integer: {value:?}"),
     }
 }
 
-fn report_float(value: &DataTree) -> f64 {
+fn report_float(value: &Dyn) -> f64 {
     match value {
-        DataTree::Float(value) => *value,
-        DataTree::Int(value) => *value as f64,
-        DataTree::Number(value) => value
+        Dyn::Float(value) => *value,
+        Dyn::Int(value) => value.to_f64(),
+        Dyn::Number(value) => value
             .parse()
             .unwrap_or_else(|_| panic!("JSON field must be numeric: {value}")),
         _ => panic!("JSON field must be numeric: {value:?}"),
@@ -1275,11 +1275,11 @@ fn jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json() {
     };
     assert!(matches!(
         report_field(function_state("used"), "covered"),
-        DataTree::Bool(true)
+        Dyn::Bool(true)
     ));
     assert!(matches!(
         report_field(function_state("unused"), "covered"),
-        DataTree::Bool(false)
+        Dyn::Bool(false)
     ));
     assert_eq!(branches.len(), 2, "test-harness branches must not count as source coverage");
     let outcome = |name: &str| {
@@ -1366,10 +1366,6 @@ fn jet_new_creates_project() {
     assert_eq!(jet_ok_outside_core(&jet, &dir, &["run"]), "hello, world\n");
     assert_eq!(
         jet_ok_outside_core(&jet, &dir, &["run", "run.jet"]),
-        "hello, world\n"
-    );
-    assert_eq!(
-        jet_ok_outside_core(&jet, &dir, &["run", "--interpret"]),
         "hello, world\n"
     );
     if have_rustc() {
@@ -1570,10 +1566,15 @@ fn bare_jet_test_discovers_tests_in_every_package_module() {
         stdout,
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        stdout.contains("double returns twice the input: pass"),
-        "the sibling module's test never ran:\n{}",
-        stdout
+    assert_eq!(
+        stdout.matches("double returns twice the input: pass").count(),
+        1,
+        "the sibling module's test must run exactly once:\n{stdout}"
+    );
+    assert_eq!(
+        stdout.matches("1 passed, 0 failed, 0 skipped").count(),
+        1,
+        "bare package testing must emit one aggregate summary:\n{stdout}"
     );
     let _ = fs::remove_dir_all(&dir);
 }
@@ -1589,6 +1590,11 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
     fs::write(
         dir.join("math.jet"),
         "#Test(\"mixed package test\") {\n    assert(true)\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("checks.jet"),
+        "#Test(\"sibling package test\") {\n    assert(true)\n}\n",
     )
     .unwrap();
     let out = Command::new(&jet)
@@ -1608,15 +1614,74 @@ fn jet_test_package_directory_aggregates_mixed_modules() {
         out.status.success(),
         "mixed package directory failed:\nstdout: {stdout}\nstderr: {stderr}"
     );
-    assert!(
-        stdout.contains("mixed package test: pass"),
-        "test-bearing module never ran:\n{stdout}"
+    for name in ["mixed package test", "sibling package test"] {
+        assert_eq!(
+            stdout.matches(&format!("{name}: pass")).count(),
+            1,
+            "each unique package test must run exactly once:\n{stdout}"
+        );
+    }
+    assert_eq!(
+        stdout.matches(": pass\n").count(),
+        2,
+        "the run count must equal the two unique #Test blocks:\n{stdout}"
+    );
+    assert_eq!(
+        stdout.matches("2 passed, 0 failed, 0 skipped").count(),
+        1,
+        "package testing must emit one aggregate summary:\n{stdout}"
     );
     assert!(
         !stderr.contains("E0601"),
         "test-free package modules must not emit E0601:\n{stderr}"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn jet_test_package_runs_member_doctests_once() {
+    let jet = jet_bin();
+    if !have_rustc() || !jet.exists() {
+        return;
+    }
+    let dir = bare_package_project("package_doctests", &jet);
+    let documented = "/// ```jet\n/// assert_eq(1 + 1, 2)\n/// ```\nfn documented() {}\n";
+    fs::write(
+        dir.join("math.jet"),
+        format!("{documented}\n#Test(\"documented package test\") {{ assert(true) }}\n"),
+    )
+    .unwrap();
+    fs::write(dir.join("notes.jet"), documented.replace("documented", "notes")).unwrap();
+    for docs_only in [false, true] {
+        let mut command = Command::new(&jet);
+        command.args(["test", "--show-default", "--capture=all", "--fresh", "--serial"]);
+        if docs_only {
+            command.arg("--docs");
+        }
+        let out = command
+            .arg(dir.to_str().unwrap())
+            .env("NO_COLOR", "1")
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            out.status.success(),
+            "package doctests (docs_only={docs_only}) failed:\nstdout: {stdout}\nstderr: {stderr}"
+        );
+        let combined = format!("{stdout}{stderr}");
+        assert_eq!(
+            combined.matches("doctest at").count(),
+            2,
+            "each member's doctest must run exactly once:\n{combined}"
+        );
+        assert_eq!(
+            stdout.matches("documented package test: pass").count(),
+            usize::from(!docs_only),
+            "ordinary tests run once, except with --docs:\n{stdout}"
+        );
+    }
 }
 
 #[test]

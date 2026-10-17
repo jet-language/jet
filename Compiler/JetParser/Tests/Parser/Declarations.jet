@@ -1,0 +1,211 @@
+fn marker_test_decl(source: String) -> MarkerDecl {
+    program :: parser_test_program(source)
+    loop item in program.items { if item == .MarkerDecl(value) -> return value }
+    panic("expected marker declaration")
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:897
+#Test("ratified_named_parameter_form_parses_with_an_at_marked_fact") {
+    decl :: marker_test_decl(`marker Inline(mode: InlineMode, $sites: [.Function, .Method, .Constant])
+fn run() {}
+`)
+    assert_eq(decl.name, "Inline")
+    assert_eq(decl.params.len(), 2)
+    assert_eq(decl.params[0].name, "mode")
+    assert_eq(decl.params[1].name, "$sites")
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:919
+#Test("empty_and_every_published_site_value_parse_in_the_same_list") {
+    assert(marker_test_decl(`marker NoParameters()
+fn run() {}
+`).params.is_empty())
+    empty :: marker_test_decl(`marker Empty($sites: [], $repeatable: false)
+fn run() {}
+`)
+    assert_eq(empty.params.len(), 2)
+    loop param in empty.params {
+        assert(param.ty == None)
+        assert(param.value != None)
+    }
+    many :: marker_test_decl(`marker Many($sites: [.Type, .Field], $repeatable: true, $inherits: false, $scopes: [.Type, .Field], $resolution: .Merge)
+fn run() {}
+`)
+    assert_eq(many.params.len(), 5)
+    loop param in many.params {
+        assert(param.ty == None)
+        assert(param.value != None)
+    }
+    loop site in MARKER_SOURCE_SITES -> _ :: marker_test_decl("marker Uses($sites: [.{site}])\nfn run() {{}}\n")
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:981
+#Test("fact_declaration_parses_its_law_columns") {
+    program :: parser_test_program(`fact Exactness($holds: .Value, $safe: .Gain, $gates: [approx, raw], $decision: "D-TEST")
+fn run() {}
+`)
+    program.items[0] == .FactDecl(decl) ?? panic("fact declaration")
+    assert_eq(decl.name, "Exactness")
+    names := [String]{}
+    loop param in decl.params {
+        &names.push(param.name)
+        assert(param.ty == None && param.value != None)
+    }
+    assert_eq(names, [String]{"$holds", "$safe", "$gates", "$decision"})
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1013
+#Test("former_text_contract_is_rejected") {
+    diagnostics :: parser_test_errors(`
+marker Selector on [.Text] {
+    check @body
+    hole @value
+}
+fn run() {}
+`)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E0381")
+    assert(diagnostics[0].what.contains("retired"))
+    assert(diagnostics[0].fix.contains("$sites"))
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1037 (stale on dev: Rust panics at1065 on $sites after the $ cutover)
+#Test("a_fact_about_the_rule_is_one_more_named_parameter") {
+    decl :: marker_test_decl(`marker Pre(condition: String, message: String, $sites: [.Function, .Method], $repeatable: true)
+fn run() {}
+`)
+    names := [String]{}
+    loop param in decl.params -> &names.push(param.name)
+    assert_eq(names, [String]{"condition", "message", "$sites", "$repeatable"})
+    loop param in decl.params {
+        // The Rust assertion still checks '@' after the '$' cutover. The law
+        // checks the metadata sigil actually used by this source.
+        if param.name.starts_with("$") {
+            assert(param.ty == None && param.value != None)
+        } else { assert(param.ty != None) }
+    }
+    assert_eq(MARKER_SOURCE_SITES.len(), 18)
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1078 (stale on dev: Rust expects @ in a fix that actually teaches $sites)
+#Test("rejected_spellings_each_teach_the_ratified_named_parameter_form") {
+    diagnostics :: parser_test_errors(`
+marker Inline(mode: String) on [.Function]
+
+marker Pre(condition: String)(sites: [.Function])
+
+fn run() {}
+`)
+    assert_eq(diagnostics.len(), 2)
+    loop diagnostic in diagnostics {
+        assert_eq(diagnostic.code, "E0381")
+        assert(diagnostic.fix.contains("$"))
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1108
+#Test("nested_state_section_is_stored_on_struct_not_as_an_item") {
+    program :: parser_test_program(`struct Door {
+    state { Open, Closed }
+    value: Int
+}
+fn run() {}
+`)
+    program.items[0] == .Struct(definition) ?? panic("struct")
+    state :: definition.state ?? panic("struct-owned state set")
+    names := [String]{}
+    loop name in state.states -> &names.push(name.name)
+    assert_eq(names, [String]{"Open", "Closed"})
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1129
+#Test("top_level_state_companion_is_rejected_with_a_spanned_rewrite") {
+    source :: `state Door { Open, Closed }
+struct Door { value: Int }
+fn run() {}
+`
+    diagnostics :: parser_test_errors(source)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E0157")
+    assert(diagnostics[0].span != None)
+    assert(diagnostics[0].fix.contains("struct Door"))
+    assert(diagnostics[0].fix.contains("state {{ Open, Closed }}"))
+    assert(!jfmt_check_parse_accepts(diagnostics))
+    formatted :: jet_format_source(source, false)
+    assert(!formatted.ok)
+    assert_eq(formatted.diagnostics.len(), 1)
+    assert_eq(formatted.diagnostics[0].code, "E0157")
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1152
+#Test("inline_code_module_companion_uses_the_same_rewrite") {
+    source :: `module ledger { state Order { Draft, Confirmed } }
+`
+    diagnostic :: parser_test_diagnostic(parser_test_errors(source), "E0157")
+    assert(diagnostic.fix.contains("struct Order"))
+    assert(diagnostic.fix.contains("state {{ Draft, Confirmed }}"))
+    formatted :: jet_format_source(source, false)
+    assert(!formatted.ok)
+    _ :: parser_test_diagnostic(formatted.diagnostics, "E0157")
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1178
+#Test("ineligible_state_section_uses_one_registered_parser_diagnostic") {
+    loop testcase in [
+        (source: `enum Door { state { Open } }
+fn run() {}
+`, owner: "enum"),
+        (source: `trait Door { state { Open } }
+fn run() {}
+`, owner: "trait"),
+        (source: `alias Door :: state { Open }
+fn run() {}
+`, owner: "alias"),
+        (source: `impl Door { state { Open } }
+fn run() {}
+`, owner: "impl"),
+        (source: `module Door { state { Open } }
+fn run() {}
+`, owner: "module"),
+        (source: `module Door<T> { state { Open } }
+fn run() {}
+`, owner: "module"),
+        (source: `fn run() { value :: { state { Open } } }
+`, owner: "anonymous shape"),
+        (source: `impl Source -> Target { state { Open } }
+fn run() {}
+`, owner: "impl")
+    ] {
+        source :: testcase.source
+        owner :: testcase.owner
+        diagnostics :: parser_test_errors(source)
+        assert_eq(diagnostics.len(), 1)
+        assert_eq(diagnostics[0].code, "E0158")
+        assert(diagnostics[0].what.contains(owner))
+        start :: parser_test_find(source, "state {{")
+        finish :: start + parser_test_find(source.slice(start, source.len()), "}}") + 1
+        assert_eq(diagnostics[0].span, Val(Span{start: start, end: finish}))
+    }
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/states_protocols.rs:1212
+#Test("repeated_state_section_points_at_the_second_section") {
+    source :: `struct Door { state { Ready } state { Open } }
+fn run() {}
+`
+    diagnostic :: parser_test_diagnostic(parser_test_errors(source), "E0168")
+    start :: parser_test_rfind(source, "state {{")
+    finish :: start + parser_test_find(source.slice(start, source.len()), "}}") + 1
+    assert_eq(diagnostic.span, Val(Span{start: start, end: finish}))
+}
+
+// Rust: crates/jet-parser/tests/sigil_algebra.rs
+#Test("distinct_markers_select_the_type_site_before_module_bindings") {
+    loop source in ([String]{"#Numeric Meters :: distinct Float", "#Numeric\nMeters :: distinct Float"}) {
+        program :: parser_test_program(source)
+        program.items[0] == .Distinct(declaration) ?? panic("marked distinct type")
+        assert_eq(declaration.name, "Meters")
+        assert_eq(declaration.type_markers.len(), 1)
+        assert_eq(declaration.type_markers[0].name, "Numeric")
+    }
+}

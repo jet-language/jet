@@ -1,11 +1,5 @@
-// Locked, credential-free recipe fetches, ported from jetpack::Recipe
-// (`do_fetch` and its URL and digest checks).
-//
-// A locked fetch caches by content hash under a held no-follow directory and
-// is offline-satisfiable on a re-build (D-JPK-OFFLINE1). `file://` sources are
-// read directly; a remote scheme needs a transport the caller injects when it
-// already holds network capability. URL userinfo and credential query or
-// fragment fields are refused before any transport sees them (E1236).
+// Retained recipe transport/provenance carriers and pure URL/digest checks.
+// The hosted runner refuses before graph admission; no fetch step is executed.
 
 RECIPE_MAX_READ_BYTES :: prep { 536870912 }
 
@@ -20,88 +14,14 @@ RECIPE_CREDENTIAL_KEYS :: prep { [String]{
 RECIPE_CREDENTIAL_SUFFIXES :: prep { [String]{"_token", "_secret", "_credential", "_signature", "_password", "_api_key"} }
 
 // A caller-injected remote transport: given a URL, the fetched bytes.
-pub struct RecipeTransport {
-    pub fetch: fn(String) -[Net]> [U8] RecipeError!
+struct RecipeTransport {
+    fetch: fn(String) -[Net]> [U8] RecipeError!
 }
 
 // A locked source fetch recorded for `.jet/lock` provenance.
-pub struct FetchRecord {
-    pub url: String
-    pub sha256: String
-}
-
-// Perform one locked fetch step into the content-addressed fetch cache.
-fn recipe_do_fetch(url: String, sha256: String, ctx: RecipeBuildContext, transport: RecipeTransport?, report: &RunReport) RecipeDiagnostic! -[FS, Env, Net, Rand]> {
-    if recipe_credentialed_fetch_url(url) -> return Err(RecipeDiagnostic.e1236_credentialed_url())
-    // A locked fetch must carry a path-safe, canonical SHA-256 key (checked in
-    // validate too, defensively). An unchecked lock value never selects a
-    // cache path.
-    if !recipe_valid_sha256(sha256) -> return Err(RecipeDiagnostic.e1236_invalid_hash(url, sha256))
-    cache_root :: if PinnedRecipeDirectory.open_or_create(ctx.fetch_cache) == {
-        .Ok(root) -> root
-        .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, "opening fetch cache: {error.message()}")) }
-    }
-    cached :: files.join(cache_root.path(), sha256)
-    if recipe_read_file_nofollow(cached, RECIPE_MAX_READ_BYTES) == {
-        .Ok(cached_bytes) -> {
-            // Offline-satisfiable only after re-verifying the immutable key. A
-            // corrupt or stale cache entry never becomes trusted input.
-            if pkg_sha256_hex(cached_bytes) == sha256 {
-                &report.fetches.push(FetchRecord{url, sha256})
-                report.add_effect("net.fetch")
-                return
-            }
-            if cache_root.remove_name(sha256) == {
-                .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "removing invalid cache entry: {error.message()}"))
-                else -> {}
-            }
-        }
-        .Err(error) -> {
-            if !error.is_not_found() -> return Err(RecipeDiagnostic.e1236_fetch(url, "reading cache: {error.message()}"))
-        }
-    }
-    // Not cached: acquire the bytes. `file://` is offline-safe.
-    bytes :: if {
-        url.starts_with("file://") -> {
-            if recipe_read_file_nofollow(url.removeprefix("file://"), RECIPE_MAX_READ_BYTES) == {
-                .Ok(read) -> read
-                .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, error.message())) }
-            }
-        }
-        // A network fetch under `--offline` with no cache hit is ungranted.
-        ctx.offline -> { return Err(RecipeDiagnostic.e1236_offline(url)) }
-        transport != None -> {
-            remote :: transport ?? return Err(RecipeDiagnostic.e1236_no_transport(url))
-            if remote.fetch(url) == {
-                .Ok(fetched) -> fetched
-                .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, error.message())) }
-            }
-        }
-        // No transport injected for a remote scheme: the build seam holds no
-        // network capability. The caller must vendor or mirror the source.
-        else -> { return Err(RecipeDiagnostic.e1236_no_transport(url)) }
-    }
-    if bytes.len() > RECIPE_MAX_READ_BYTES -> return Err(RecipeDiagnostic.e1236_fetch(url, "fetched content exceeds its size limit"))
-    // Verify the locked hash before the bytes are ever used.
-    got :: pkg_sha256_hex(bytes)
-    if got != sha256 -> return Err(RecipeDiagnostic.e1236_mismatch(url, sha256, got))
-    temporary_name :: if cache_root.fresh_name("jet-fetch") == {
-        .Ok(name) -> name
-        .Err(error) -> { return Err(RecipeDiagnostic.e1236_fetch(url, "allocating cache staging: {error.message()}")) }
-    }
-    if cache_root.publish_new_file(temporary_name, sha256, bytes) == {
-        .Err(error) -> {
-            _ :: cache_root.remove_name(temporary_name)
-            return Err(RecipeDiagnostic.e1236_fetch(url, "publishing cache: {error.message()}"))
-        }
-        else -> {}
-    }
-    if cache_root.sync() == {
-        .Err(error) -> return Err(RecipeDiagnostic.e1236_fetch(url, "syncing fetch cache: {error.message()}"))
-        else -> {}
-    }
-    &report.fetches.push(FetchRecord{url, sha256})
-    report.add_effect("net.fetch")
+struct FetchRecord {
+    url: String
+    sha256: String
 }
 
 // Exactly 64 ASCII hexadecimal characters.

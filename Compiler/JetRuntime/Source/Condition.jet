@@ -1,0 +1,232 @@
+// SharedProtocol.rs:1408-1494,1572-1591,1603-1652 and MathTaskMem.rs:2991-3033.
+// Condition48: refs0 mutex8 FIFOhead16/tail24 epoch32 pending40.
+// Registration48: next0 embedded ParkSlot8..31 epoch32 stale40.
+// Registrations and wakes are protected by the condition mutex; a parker
+// removes its registration under that mutex before freeing its embedded slot.
+// Notify-one selects FIFO; notify-all drains. A notification with no waiter is
+// counted and consumed by a later registration, not discarded.
+#Export(c) fn jet_rt_native_condition_new() -> I64 {
+    condition :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(condition, I64{48})
+    sync_store(condition, I64{1})
+    condition
+}
+
+#Export(c) fn jet_rt_native_condition_clone(condition: I64) -> I64 {
+    _ := sync_add(condition, I64{1})
+    condition
+}
+
+#Export(c) fn jet_rt_native_condition_drop(condition: I64) {
+    if sync_add(condition, I64{-1}) == (I64{1}) -> jet_rt_free(condition, I64{48}, I64{8})
+}
+
+fn condition_register(condition: I64, node: I64) {
+    sync_mutex_lock(condition + I64{8})
+    sync_store(node, I64{0})
+    sync_store(node + I64{8}, I64{0})
+    sync_store(node + I64{32}, sync_load(condition + I64{32}))
+    pending :: sync_load(condition + I64{40})
+    sync_store(node + I64{40}, if pending != (I64{0}) -> I64{1} else -> I64{0})
+    if pending != (I64{0}) -> _ := sync_add(condition + I64{40}, I64{-1})
+    tail :: sync_load(condition + I64{24})
+    if {
+        tail == (I64{0}) -> sync_store(condition + I64{16}, node)
+        else -> sync_store(tail, node)
+    }
+    sync_store(condition + I64{24}, node)
+    sync_mutex_unlock(condition + I64{8})
+}
+
+fn condition_unregister(condition: I64, node: I64) {
+    sync_mutex_lock(condition + I64{8})
+    link := condition + I64{16}
+    previous := I64{0}
+    loop sync_load(link) != (I64{0}) {
+        current :: sync_load(link)
+        if current == node {
+            sync_store(link, sync_load(node))
+            if sync_load(condition + I64{24}) == node -> sync_store(condition + I64{24}, previous)
+            break
+        }
+        previous = current
+        link = current
+    }
+    sync_mutex_unlock(condition + I64{8})
+}
+
+#Export(c) fn jet_rt_native_condition_notify_one(condition: I64) {
+    sync_mutex_lock(condition + I64{8})
+    _ := sync_add(condition + I64{32}, I64{1})
+    node :: sync_load(condition + I64{16})
+    if {
+        node == (I64{0}) -> { _ := sync_add(condition + I64{40}, I64{1}) }
+        else -> {
+            following :: sync_load(node)
+            sync_store(condition + I64{16}, following)
+            if following == (I64{0}) -> sync_store(condition + I64{24}, I64{0})
+            sync_park_wake(node + I64{8})
+        }
+    }
+    sync_mutex_unlock(condition + I64{8})
+}
+
+#Export(c) fn jet_rt_native_condition_notify_all(condition: I64) {
+    sync_mutex_lock(condition + I64{8})
+    _ := sync_add(condition + I64{32}, I64{1})
+    node := sync_load(condition + I64{16})
+    sync_store(condition + I64{16}, I64{0})
+    sync_store(condition + I64{24}, I64{0})
+    if node == (I64{0}) -> _ := sync_add(condition + I64{40}, I64{1})
+    loop node != (I64{0}) {
+        following :: sync_load(node)
+        sync_park_wake(node + I64{8})
+        node = following
+    }
+    sync_mutex_unlock(condition + I64{8})
+}
+
+// Direct E4 fragments for the exact reference messages; no Core String ABI.
+fn condition_text(kind: I64) -> I64 {
+    text :: scheduler_text_new(if kind == (I64{0}) -> I64{36} else -> if kind == (I64{1}) -> I64{24} else -> I64{16})
+    buffer :: sync_load(text)
+    if {
+        kind == (I64{0}) -> {
+            sync_store(buffer, I64{8388346206432206945})
+            sync_store(buffer + I64{8}, I64{8388342945227370345})
+            sync_store(buffer + I64{16}, I64{6998720695968820768})
+            sync_store(buffer + I64{24}, I64{7431067381166055534})
+            sync_store(buffer + I64{32}, I64{1685217653})
+        }
+        kind == (I64{1}) -> {
+            sync_store(buffer, I64{8028075806769966947})
+            sync_store(buffer + I64{8}, I64{7142837004965191790})
+            sync_store(buffer + I64{16}, I64{7234307589253852769})
+        }
+        else -> {
+            sync_store(buffer, I64{7142819395883067475})
+            sync_store(buffer + I64{8}, I64{7957695015292268143})
+        }
+    }
+    text
+}
+
+fn condition_interrupted() -> Bool {
+    // Scheduler.rs:2001-2007: shield cancellation, but not expired deadlines.
+    (scheduler_task_cancelled() && !scheduler_shielded()) || (jet_ctx_deadline_present() && jet_deadline_remaining_ms() <= I64{0})
+}
+
+fn condition_reacquire(cell: I64) -> Bool {
+    mutex :: cell + I64{8}
+    sync_mutex_lock(mutex)
+    _ := sync_add(cell + I64{40}, I64{1})
+    loop {
+        if condition_interrupted() {
+            _ := sync_add(cell + I64{40}, I64{-1})
+            sync_cond_notify_all(cell + I64{16})
+            sync_mutex_unlock(mutex)
+            return false
+        }
+        if sync_load(cell + I64{32}) == (I64{0}) && sync_load(cell + I64{24}) == (I64{0}) {
+            _ := sync_add(cell + I64{40}, I64{-1})
+            sync_store(cell + I64{32}, I64{1})
+            sync_mutex_unlock(mutex)
+            return true
+        }
+        scheduler_blocking_wait_enter()
+        _ := sync_cond_wait(cell + I64{16}, mutex, sync_deadline(I64{10000000}))
+        scheduler_blocking_wait_leave()
+    }
+}
+
+// guard_slot is the caller's owned, mutable 8-byte token, NOT a cell address.
+// Held=cell (alloc80/align8), unheld=cell|1. The owner remains until guard drop.
+// The callback is synchronous (env,payload,out)->status, Bool output ONE byte.
+// failure_out borrows 8 bytes as predicate scratch; it becomes an initialized
+// owned E4 String pointer only on status1. Status0 is Ok(Unit); a stop leaves
+// no initialized String owner and must propagate before the caller reads it.
+#Export(c) fn jet_rt_native_shared_guard_wait(guard_slot: I64, editable: I64, condition: I64, env: I64, invoke: I64, failure_out: I64) -> I64 {
+    guard :: sync_load(guard_slot)
+    if !shared_guard_held(guard) {
+        shared_guard_invalid()
+        return jet_rt_session_propagate()
+    }
+    if editable == (I64{0}) {
+        sync_store(failure_out, condition_text(I64{0}))
+        return I64{1}
+    }
+    cell :: shared_guard_cell(guard)
+    _ := jet_rt_native_condition_clone(condition)
+    node := I64{0}
+    reason := I64{0}
+    result := I64{0}
+    loop {
+        callback :: coll_call3(invoke, env, sync_load(cell + I64{64}), failure_out)
+        status :: jet_rt_session_propagate()
+        if callback != (I64{0}) || status != (I64{0}) {
+            result = if status != (I64{0}) -> status else -> callback
+            break
+        }
+        if trap_byte(failure_out) != (I64{0}) -> break
+        if node == (I64{0}) {
+            node = jet_rt_alloc(I64{48}, I64{8})
+            thread_zero(node, I64{48})
+            reason = condition_text(I64{2})
+        }
+        condition_register(condition, node)
+        notified :: sync_load(node + I64{40}) != I64{0} || sync_load(node + I64{32}) != sync_load(condition + I64{32})
+        sync_store(guard_slot, cell.bit_or(I64{1}))
+        shared_release(cell, true)
+        if !notified -> _ := scheduler_yield(reason, node + I64{8}, I64{-1})
+        // Drop registration BEFORE reacquiring, as cleanup.finish1572-1577.
+        condition_unregister(condition, node)
+        reacquired :: condition_reacquire(cell)
+        if reacquired -> sync_store(guard_slot, cell)
+        resumed :: jet_rt_session_propagate()
+        if resumed != (I64{0}) {
+            result = resumed
+            break
+        }
+        if !reacquired {
+            sync_store(failure_out, condition_text(I64{1}))
+            result = I64{1}
+            break
+        }
+    }
+    if node != (I64{0}) -> jet_rt_free(node, I64{48}, I64{8})
+    if reason != (I64{0}) -> jet_rt_string_drop(reason)
+    jet_rt_native_condition_drop(condition)
+    result
+}
+
+// MathTaskMem.rs:2987-3032 / SharedProtocol wait-once handoff: registration
+// precedes releasing the held edit permit; cleanup removes the same node
+// before reacquisition. Source, not this leaf, owns the predicate loop.
+#Export(c) fn jet_rt_shared_guard_wait_once(guard: I64, condition: I64) -> I64 {
+    if !jet_rt_shared_guard_held(guard) || sync_load(guard + I64{8}) == (I64{0}) {
+        shared_guard_invalid()
+        return jet_rt_session_propagate()
+    }
+    _ := jet_rt_native_condition_clone(condition)
+    node :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(node, I64{48})
+    reason :: condition_text(I64{2})
+    condition_register(condition, node)
+    notified :: sync_load(node + I64{40}) != I64{0} || sync_load(node + I64{32}) != sync_load(condition + I64{32})
+    jet_rt_shared_guard_publish_and_release(guard)
+    // A publication stop must still remove/free its registration and leave the
+    // guard unheld. Never park or reacquire through an already delivered stop.
+    status := jet_rt_session_propagate()
+    if status == (I64{0}) && !notified -> _ := scheduler_yield(reason, node + I64{8}, I64{-1})
+    condition_unregister(condition, node)
+    jet_rt_free(node, I64{48}, I64{8})
+    jet_rt_string_drop(reason)
+    jet_rt_native_condition_drop(condition)
+    status = jet_rt_session_propagate()
+    if status != (I64{0}) -> return status
+    if !jet_rt_shared_guard_reacquire_and_refresh(guard, I64{0}) {
+        status = jet_rt_session_propagate()
+        return if status != (I64{0}) -> status else -> I64{1}
+    }
+    I64{0}
+}

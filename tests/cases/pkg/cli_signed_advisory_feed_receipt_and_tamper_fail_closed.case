@@ -1,0 +1,104 @@
+# PORT tests/pkg.rs::cli_signed_advisory_feed_receipt_and_tamper_fail_closed; original helpers172-293 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+fixture: cli_signed_advisory_feed_receipt_and_tamper_fail_closed.fixture
+refused: package-tests
+# have_cargo was toolchain availability; erased, never a skip.
+mkdir: project/.jet
+step: jet test {root}/Jetpack/Publication/Tests/PkgIntegrationHandAdvisorySetup.jet --filter "S6 hand signed advisory setup"
+env: JET_KEYS_DIR={work}/keys
+env: S6_HAND_ROOT={work}
+exit: 0
+copy: lock.txt project/.jet/lock
+capture: publicKey = text file public-key.txt
+capture: acceptedDigest = text file accepted-digest.txt
+write: project/.jet/advisory-trust trust-1-plain.txt
+copy: clean.db project/.jet/advisories.db
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "feed sequence 1 verified" # Original contains predicate.
+stdout: ~ "no advisories found" # Original contains predicate.
+remove: project/.jet/advisory-trust
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+env: JET_ADVISORY_PUBLIC_KEY={cap:publicKey}
+exit: 1
+stderr: ~ "advisory trust root" # Original contains predicate.
+write: project/.jet/advisory-trust trust-1-plain.txt
+copy: weakened.db project/.jet/advisories.db
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "weaker than the 24-hour default" # Original contains predicate.
+stderr: = ../../../tests/cli/advisory_weakened_maturity_e2610.txt
+copy: clean.db project/.jet/advisories.db
+write: project/.jet/advisory-trust trust-2-plain.txt
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "rolled back" # Original contains predicate.
+write: project/.jet/advisory-trust trust-1-revoked_key.txt
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "revoked" # Original contains predicate.
+write: project/.jet/advisory-trust trust-1-plain.txt
+write: project/.jet/advisory-trust trust-1-accepted_digest.txt
+copy: fork.db project/.jet/advisories.db
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "forked" # Original contains predicate.
+write: project/.jet/advisory-trust trust-1-plain.txt
+copy: stale.db project/.jet/advisories.db
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "stale or expired" # Original contains predicate.
+write: project/.jet/advisory-trust trust-1-plain.txt
+copy: clean.db project/.jet/advisories.db
+copy: immature.db project/.jet/advisories.db
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 1
+stderr: = ../../../tests/cli/audit_maturity_e2609.txt
+copy: exception-package.txt project/package.jet
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "source policy exception applied: id=JSA-2026-0001" # Original contains predicate.
+copy: project/package.jet original-exception-manifest.txt
+copy: plain-package.txt project/package.jet
+copy: excepted.db project/.jet/advisories.db
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "no advisories found" # Original contains predicate.
+copy: tampered.db project/.jet/advisories.db
+step: jet inspect audit
+cwd: {work}/project
+env: JET_ADVISORY_NOW=200
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "Error [E2610]:" # Original contains predicate.
+stderr: = ../../../tests/cli/audit_tampered_e2610.txt

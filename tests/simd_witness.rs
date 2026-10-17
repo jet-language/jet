@@ -10,7 +10,7 @@ use jet_foundation::MIR::{
     MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget,
     MirOptimizationDecision,
 };
-use tir_support::{build_and_run_full, have_rustc, interpreter_run, jit_run};
+use tir_support::{build_and_run_full, have_rustc, default_run};
 
 const SOURCE: &str = r#"
 fn auto(values: [Float#4]) -> [Float#4] {
@@ -48,17 +48,18 @@ fn lower_checked(source: &str) -> jet_foundation::MIR::MirProgram {
     let entry = root.join("main.jet");
     std::fs::write(&entry, source).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
     let request = MirArtifactRequest::new(
-        MirArtifactTarget::Cranelift,
+        MirArtifactTarget::Interpreter,
         MirArtifactKind::NativeExecutable,
         MirArtifactBuildMode::Dev,
     );
-    jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+    jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, &nominals, request)
         .expect("witness lowers through canonical MIR")
         .0
 }
@@ -244,11 +245,11 @@ fn default_float_loop_is_packed_and_scalar_marker_is_a_hard_opt_out() {
 #[test]
 fn default_and_scalar_float_witnesses_print_identical_values_on_every_tier() {
     let expected = "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n";
-    let (jit_code, jit_stdout, jit_stderr) = jit_run("simd_default_scalar", SOURCE);
+    let (jit_code, jit_stdout, jit_stderr) = default_run("simd_default_scalar", SOURCE);
     assert_eq!(jit_code, 0, "default run failed: {jit_stderr}");
     assert_eq!(jit_stdout, expected);
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("simd_default_scalar", SOURCE);
+        default_run("simd_default_scalar", SOURCE);
     assert_eq!(interpreter_code, jit_code, "interpreter failed: {interpreter_stderr}");
     assert_eq!(interpreter_stdout, expected);
     if have_rustc() {

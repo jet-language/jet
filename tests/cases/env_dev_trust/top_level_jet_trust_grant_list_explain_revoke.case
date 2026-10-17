@@ -1,0 +1,18 @@
+# Port of tests/env_dev_trust.rs:601-678; PENDING-GRAMMAR: trim equality.
+mkdir: home
+env: HOME={work}/home
+step: jet trust grant acme/web@github:postgres.service --scope repo --color=never
+exit: 0
+step: jet trust list --json --color=never
+exit: 0
+stdout: ~ "\"authority\":\"service\"" # original predicate
+stdout: ~ "\"subject\":\"acme/web@github:postgres.service\"" # original predicate
+stdout: ~ "\"scope\":\"repo\"" # original predicate
+step: jet trust explain service:acme/web@github:postgres.service --color=never
+exit: 0
+stderr: ~ "exact authority: service" # original predicate
+step: jet trust revoke service:acme/web@github:postgres.service --color=never
+exit: 0
+step: jet trust list --json --color=never
+exit: 0
+stdout.trim: = grants-empty.out # original predicate: stdout.trim() == literal; ORACLE-LITERAL env_dev_trust.rs:676

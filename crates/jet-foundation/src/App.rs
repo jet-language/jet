@@ -384,6 +384,111 @@ pub struct AppRoutesFrom {
     pub span_end: usize,
 }
 
+/// D-ROUTE-FILES2=A: the address of a page file at `rel` (relative to its
+/// `.routes(from:)` root). Each folder and file name is read as words,
+/// lowercased, and joined by hyphens; a terminal stem whose words are exactly
+/// `index` or `page` answers its folder's address; a whole `[Name]` part
+/// captures one address part as `:name`, the snake_case word key. `Err` names
+/// a bracket part that is not one whole `[name]`. Builds and scaffolds share
+/// this one law; request matching stays exact.
+pub fn route_file_address(rel: &str) -> Result<String, String> {
+    let stem = rel.strip_suffix(".jet").unwrap_or(rel);
+    let mut parts: Vec<&str> = stem.split('/').filter(|part| !part.is_empty()).collect();
+    if parts
+        .last()
+        .is_some_and(|last| matches!(route_file_words(last).as_str(), "index" | "page"))
+    {
+        parts.pop();
+    }
+    if parts.is_empty() {
+        return Ok("/".to_string());
+    }
+    let mut path = String::new();
+    for part in parts {
+        path.push('/');
+        if part.contains(['[', ']']) {
+            let name = part
+                .strip_prefix('[')
+                .and_then(|inner| inner.strip_suffix(']'))
+                .filter(|name| {
+                    !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_')
+                })
+                .ok_or_else(|| part.to_string())?;
+            path.push(':');
+            path.push_str(&route_file_param_key(name));
+        } else {
+            path.push_str(&route_file_words(part));
+        }
+    }
+    Ok(path)
+}
+
+/// `[UserID]` → `user_id`: the shared word split, lowercased, joined by `_`.
+pub fn route_file_param_key(name: &str) -> String {
+    crate::Syntax::split_pascal_words(name)
+        .iter()
+        .map(|word| word.to_lowercase())
+        .collect::<Vec<_>>()
+        .join("_")
+}
+
+/// One path component's words, lowercased and joined by hyphens. Underscores,
+/// hyphens, lowercase-to-capital changes and acronym ends split words; digits
+/// stay attached (`UTF8Codec` → `utf8-codec`). Any other character, such as
+/// the dot in `sitemap.xml`, stays in place.
+pub fn route_file_words(component: &str) -> String {
+    let mut out = String::with_capacity(component.len() + 4);
+    let mut run_start = 0;
+    let flush = |run: &str, out: &mut String| {
+        let words = run
+            .split('-')
+            .flat_map(crate::Syntax::split_pascal_words)
+            .map(|word| word.to_lowercase())
+            .collect::<Vec<_>>();
+        out.push_str(&words.join("-"));
+    };
+    for (index, ch) in component.char_indices() {
+        if !(ch.is_alphanumeric() || ch == '_' || ch == '-') {
+            flush(&component[run_start..index], &mut out);
+            out.extend(ch.to_lowercase());
+            run_start = index + ch.len_utf8();
+        }
+    }
+    flush(&component[run_start..], &mut out);
+    out
+}
+
+#[cfg(test)]
+mod route_file_tests {
+    use super::route_file_address;
+
+    #[test]
+    fn route_file_names_map_to_lowercase_hyphen_addresses() {
+        for (rel, expected) in [
+            ("index.jet", "/"),
+            ("Index.jet", "/"),
+            ("page.jet", "/"),
+            ("Page.jet", "/"),
+            ("Orders/Index.jet", "/orders"),
+            ("Index/Report.jet", "/index/report"),
+            ("OrderItems.jet", "/order-items"),
+            ("order_items.jet", "/order-items"),
+            ("order-items.jet", "/order-items"),
+            ("UTF8Codec.jet", "/utf8-codec"),
+            ("HTTP_APIClient.jet", "/http-api-client"),
+            ("sitemap.xml.jet", "/sitemap.xml"),
+            ("Orders/[id].jet", "/orders/:id"),
+            ("Orders/[ID].jet", "/orders/:id"),
+            ("Users/[UserID]/Settings.jet", "/users/:user_id/settings"),
+        ] {
+            assert_eq!(route_file_address(rel).as_deref(), Ok(expected), "{rel}");
+        }
+        for rel in ["Docs/[...slug].jet", "Docs/[[lang]].jet", "Posts/post-[id].jet", "[].jet"] {
+            assert!(route_file_address(rel).is_err(), "{rel}");
+        }
+    }
+}
+
 /// Whole-app security / asset / split / cache / a11y / adapter facts.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AppPolicy {

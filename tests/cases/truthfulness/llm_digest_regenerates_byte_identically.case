@@ -1,0 +1,29 @@
+# Port of tests/truthfulness.rs:130-241. ORACLE-LITERAL registry rows and machine contract.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four): dynamic topic iteration and outer accumulator.
+step full: jet inspect digest
+exit: 0
+stderr: empty
+stdout: ~ "- fn" # original registry-row predicate
+stdout: ~ "- module" # original registry-row predicate
+stdout: ~ "active\tUnsafe\tmarker Unsafe" # original registry-row predicate
+stdout: ~ "E0001\tactive\tjet" # original registry-row predicate
+stdout: ~ "core.term\tReader, Writer" # original registry-row predicate
+step: jet inspect digest --json
+exit: 0
+json: stdout doc $.schema = "jet.status/v1"
+json: stdout doc $.action = "inspect.digest"
+capture: machine_digest stdout doc $.digest.value
+cap:machine_digest: == full.stdout
+step topics: jet inspect digest --list-topics
+exit: 0
+stdout: has-line "core.time" # original inventory any exact topic
+stdout: has-line "diagnostics" # original inventory any exact topic
+for line stdout of topics as t
+step: jet inspect digest --topic {t}
+exit: 0
+capture: joined += text stdout
+end for
+cap:joined: == full.stdout
+step: jet inspect digest --topic diagnostcs
+exit: nonzero
+stderr: ~ "diagnostics" # original nearest-topic suggestion predicate

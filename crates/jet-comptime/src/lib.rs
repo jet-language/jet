@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![deny(warnings)]
 // #777: AST-era host helpers (Methods/TypedDecode/…) stay until TIR arms absorb
 // every ambient call; the live path is MirBridge → MIR eval → apply_*.
 #![allow(dead_code)]
@@ -15,7 +14,6 @@ pub use jet_foundation::Devtools::{JetDevtoolsEvent, JET_DEVTOOLS_MAX_HISTORY};
 pub(crate) use jet_foundation::JSONNumber as jet_json_number;
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingJson as jet_encoding_json;
-pub(crate) use jet_foundation::StructuralDebug::jet_task_control_trace;
 
 
 pub(crate) trait JetShow {

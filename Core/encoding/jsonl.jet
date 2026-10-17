@@ -9,109 +9,143 @@
 // from the start of the text, and `path` starts with the record index among
 // non-blank records (`/2/name`).
 //
-// `parse`, `first`, `count_rows`, and `reader(text)` work on a `String` the
-// caller already holds, so the whole text is in memory; `reader(text)` only
-// defers the per-record parse. Bounded incremental reading from a file is the
-// `EncodingLimits` reader over `^files.FileReader` (encoding-decisions.md,
-// D-ENCSTREAM-SURFACE1=A), which buffers one record at a time.
+// `parse`, `first`, `count_rows`, and `reader(text)` operate on text the caller
+// already holds. The bounded file reader consumes a `^files.FileReader`.
 //
 // `to_string` writes one compact JSON value per record and a trailing newline so
 // concatenation of documents stays a valid JSONL stream. There is no pretty
 // form; pretty JSON contains newlines and would break the line protocol.
-use core.encoding.[DataTree, EncodingError, EncodingFormat]
+use core.encoding.[Dyn, EncodingError, EncodingFormat, EncodingLimits]
 use core.encoding.json as json
+use __core_encoding_stream as stream
+use core.files.[FileWriter]
 
-/// Parse every non-empty record as JSON. Allocates one `DataTree` per record.
-pub fn parse(text: String) -> [DataTree] EncodingError! {
-    rows := [DataTree]{}
-    index := 0
-    loop record in records_of(text) {
-        if is_blank(record.text) -> next
-        &rows.push(parse_record(record, index))
-        index += 1
+/// Bounded JSONL output uses the native-shipped delayed-LF policy in Jet.
+struct JSONLWriter {
+    output: stream.JSONLinesPush
+    fn write(&self, value: ^Dyn) EncodingError! -[IO]> { &self.output.write(^value) }
+    fn flush(&self) EncodingError! -[IO]> { &self.output.flush() }
+    fn finish(&self) EncodingError! -[IO]> { &self.output.finish() }
+}
+
+fn writer(target: ^FileWriter, limits: EncodingLimits{EncodingLimits.safe()}) -[FS]> JSONLWriter EncodingError! {
+    output :: stream.jsonl_writer(^target, limits) ?? return Err(err)
+    Ok(JSONLWriter{output: ^output})
+}
+
+/// Parse every non-empty record as JSON. Allocates one `Dyn` per record.
+fn parse(text: String) -> [Dyn] EncodingError! {
+    rows := [Dyn]{}
+    cursor := reader(text)
+    loop {
+        row :: &cursor.next()
+        if row == None -> break
+        &rows.push(row)
     }
     Ok(rows)
 }
 
 /// Compact JSONL text. Always ends with a newline when `rows` is non-empty.
-pub fn to_string(rows: [DataTree]) -> String Never! {
-    out := ""
-    loop row in rows -> out = "{out}{json.to_string(row)}\n"
-    out
+fn to_string(rows: [Dyn]) -> String EncodingError! {
+    out := [U8]{}
+    record_index := 0
+    loop row in rows {
+        text :: json.to_string(row) ?? return Err(record_error(err, JSONLRecord{text: "", line: record_index + 1, offset: out.len()}, record_index))
+        loop index in 0..<text.count_bytes() -> &out.push(stream.byte_at(text, index))
+        &out.push(U8{10})
+        record_index += 1
+    }
+    text :: stream.text_from_bytes(^out) ?? return Err(EncodingError.new(EncodingFormat.JSONL, .State, 0, None, None, "", "JSONL renderer produced invalid UTF-8"))
+    Ok(text)
 }
 
-pub struct JSONLReader {
-    pub rows: [String]
-    pub lines: [Int]
-    pub offsets: [Int]
-    pub index: Int
-    pub records_read: Int
+struct JSONLReader {
+    text: String
+    offset: Int
+    line: Int
+    records_read: Int
 
-    /// The next non-blank record, or `None` after the last one.
-    pub fn next(&self) -> DataTree? EncodingError! {
-        loop self.index < self.rows.len() {
-            record :: JSONLRecord{text: self.rows[self.index], line: self.lines[self.index], offset: self.offsets[self.index]}
-            self.index += 1
+    fn next(&self) -> Dyn? EncodingError! {
+        loop {
+            record :: &self.next_record() ?? return Ok(None)
             if is_blank(record.text) -> next
             value :: parse_record(record, self.records_read)
             self.records_read += 1
             return Val(value)
         }
-        Ok(None)
     }
 }
 
-pub struct JSONLWriter {
-    pub parts: [String]
-
-    pub fn write(&self, value: DataTree) Never! { &self.parts.push(json.to_string(value)) }
-
-    pub fn to_string(self) -> String Never! {
-        out := ""
-        loop row in self.parts -> out = "{out}{row}\n"
-        out
+impl JSONLReader {
+    fn next_record(&self) -> JSONLRecord? Never! {
+        if self.offset >= self.text.count_bytes() -> return None
+        start :: self.offset
+        line :: self.line
+        bytes := [U8]{}
+        terminated := false
+        loop self.offset < self.text.count_bytes() {
+            byte :: stream.byte_at(self.text, self.offset)
+            self.offset += 1
+            if byte == (U8{10}) {
+                self.line += 1
+                terminated = true
+                break
+            }
+            &bytes.push(byte)
+        }
+        if terminated && bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
+        Val(JSONLRecord{text: stream.text_from_bytes(^bytes) ?? "", line: line, offset: start})
     }
 }
 
-pub fn reader(text: String) -> JSONLReader Never! {
-    rows := [String]{}
-    lines := [Int]{}
-    offsets := [Int]{}
-    loop record in records_of(text) {
-        &rows.push(record.text)
-        &lines.push(record.line)
-        &offsets.push(record.offset)
-    }
-    {rows: rows, lines: lines, offsets: offsets, index: 0, records_read: 0}
+fn reader(text: String) -> JSONLReader Never! {
+    JSONLReader{text: text, offset: 0, line: 1, records_read: 0}
 }
 
-pub fn writer() -> JSONLWriter Never! { {parts: [String]{}} }
 
-pub fn loads(text: String) -> [DataTree] EncodingError! { parse(text) }
+fn loads(text: String) -> [Dyn] EncodingError! { parse(text) }
 
-pub fn dumps(rows: [DataTree]) -> String Never! { to_string(rows) }
+fn dumps(rows: [Dyn]) -> String EncodingError! { to_string(rows) }
 
-pub fn count_rows(text: String) -> Int Never! {
+fn count_rows(text: String) -> Int Never! {
     n := 0
-    loop record in records_of(text) {
-        if !is_blank(record.text) -> n += 1
+    nonblank := false
+    loop index in 0..<text.count_bytes() {
+        byte :: stream.byte_at(text, index)
+        if byte == (U8{10}) {
+            if nonblank -> n += 1
+            nonblank = false
+        } else if byte != (U8{32}) && byte != (U8{9}) {
+            trailing_cr :: byte == (U8{13}) && index + 1 < text.count_bytes() && stream.byte_at(text, index + 1) == (U8{10})
+            if !trailing_cr -> nonblank = true
+        }
     }
+    if nonblank -> n += 1
     n
 }
 
-pub fn append_line(text: String, value: DataTree) -> String Never! {
-    if text.bytes().len() == 0 -> return "{json.to_string(value)}\n"
-    last :: text.bytes()[text.bytes().len() - 1]
-    if last == (U8{10}) -> return "{text}{json.to_string(value)}\n"
-    "{text}\n{json.to_string(value)}\n"
+fn append_line(text: String, value: Dyn) -> String EncodingError! {
+    needs_lf :: text.count_bytes() > 0 && stream.byte_at(text, text.count_bytes() - 1) != (U8{10})
+    encoded :: json.to_string(value) ?? {
+        offset := text.count_bytes()
+        line := 1
+        loop index in 0..<text.count_bytes() {
+            if stream.byte_at(text, index) == (U8{10}) -> line += 1
+        }
+        if needs_lf {
+            offset += 1
+            line += 1
+        }
+        return Err(record_error(err, JSONLRecord{text: "", line: line, offset: offset}, count_rows(text)))
+    }
+    if text.count_bytes() == 0 -> return Ok("{encoded}\n")
+    if !needs_lf -> return Ok("{text}{encoded}\n")
+    Ok("{text}\n{encoded}\n")
 }
 
-pub fn first(text: String) -> DataTree? EncodingError! {
-    loop record in records_of(text) {
-        if is_blank(record.text) -> next
-        return Val(parse_record(record, 0))
-    }
-    Ok(None)
+fn first(text: String) -> Dyn? EncodingError! {
+    cursor := reader(text)
+    &cursor.next()
 }
 
 // One line of the stream: its text without the line ending, its 1-based line
@@ -122,7 +156,7 @@ struct JSONLRecord {
     offset: Int
 }
 
-fn parse_record(record: JSONLRecord, index: Int) -> DataTree EncodingError! {
+fn parse_record(record: JSONLRecord, index: Int) -> Dyn EncodingError! {
     value :: json.parse(record.text) ?? return Err(record_error(err, record, index))
     Ok(value)
 }
@@ -130,7 +164,7 @@ fn parse_record(record: JSONLRecord, index: Int) -> DataTree EncodingError! {
 // Re-anchor a record-local JSON error to the stream.
 fn record_error(error: EncodingError, record: JSONLRecord, index: Int) -> EncodingError Never! {
     inner := error.path
-    if inner == "/" -> inner = ""
+    if inner == "/" || inner == "$" -> inner = ""
     {
         format: EncodingFormat.JSONL,
         kind: error.kind,
@@ -145,34 +179,80 @@ fn record_error(error: EncodingError, record: JSONLRecord, index: Int) -> Encodi
 
 fn is_blank(text: String) -> Bool Never! {
     if text.len() == 0 -> return true
-    loop b in text.bytes() {
+    loop index in 0..<text.count_bytes() {
+        b :: stream.byte_at(text, index)
         n :: b
         if n != 32 && n != 9 -> return false
     }
     true
 }
 
-fn records_of(text: String) -> [JSONLRecord] Never! {
-    records := [JSONLRecord]{}
-    raw :: text.bytes()
-    buf := [U8]{}
-    line := 1
-    start := 0
-    loop i in 0..<raw.len() {
-        b :: raw[i]
-        if b != (U8{10}) {
-            &buf.push(b)
-            next
+
+#Test("JSONL text cursor skips blank records and retains record order") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
+    cursor := reader("\t{cr}\n{{\"z\":1,\"a\":2}}{cr}\n \n3")
+    first :: &cursor.next() ?? panic("first record")
+    if first == .Val(row) -> assert_eq(json.to_string(row) ?? panic("encode first record"), "{{\"z\":1,\"a\":2}}") else -> panic("missing row")
+    second :: &cursor.next() ?? panic("second record")
+    assert_eq(second, Val(Dyn.Int(3)))
+    assert_eq(&cursor.next() ?? panic("EOF"), None)
+    assert_eq(count_rows("\t{cr}\n{{\"z\":1}}{cr}\n \n3"), 2)
+}
+
+#Test("JSONL anchors a record-local parse error to the whole text") {
+    if parse(" \n1\n[}}\n") == {
+        .Ok(_) -> panic("invalid record accepted")
+        .Err(error) -> {
+            assert(error.format == .JSONL)
+            assert_eq(error.line, Val(3))
+            assert(error.path.starts_with("/1"))
         }
-        if buf.len() > 0 && buf[buf.len() - 1] == (U8{13}) -> _ :: &buf.pop()
-        &records.push(JSONLRecord{text: String.from_bytes(buf) ?? "", line: line, offset: start})
-        buf = [U8]{}
-        line += 1
-        start = i + 1
     }
-    if start < raw.len() {
-        if buf.len() > 0 && buf[buf.len() - 1] == (U8{13}) -> _ :: &buf.pop()
-        &records.push(JSONLRecord{text: String.from_bytes(buf) ?? "", line: line, offset: start})
+}
+
+#Test("JSONL only strips CR from LF-terminated records") {
+    cr :: String.from_bytes([U8]{13}) ?? panic("CR text")
+    assert_eq(count_rows("{cr}\n"), 0)
+    assert_eq(count_rows(cr), 1)
+    assert_eq(count_rows(" \t{cr}"), 1)
+    assert_eq(count_rows("1\n{cr}"), 2)
+    cursor := reader("1{cr}")
+    assert_eq(&cursor.next() ?? panic("JSON value with trailing whitespace"), Val(Dyn.Int(1)))
+    assert_eq(&cursor.next() ?? panic("EOF"), None)
+    if parse(cr) == .Err(error) {
+        assert_eq(error.byte_offset, 1)
+        assert_eq(error.line, Val(1))
+        assert_eq(error.path, "/0")
+    } else { panic("bare CR was skipped as a blank record") }
+}
+
+#Test("JSONL text errors preserve record locations without a dollar suffix") {
+    bad :: Dyn.Float(Float.NAN)
+    if to_string([Dyn]{bad}) == {
+        .Ok(_) -> panic("first non-finite row accepted")
+        .Err(error) -> {
+            assert(error.format == .JSONL)
+            assert(error.kind == .Unsupported)
+            assert_eq(error.reason, "JSON cannot encode a non-finite Float")
+            assert_eq(error.path, "/0")
+            assert_eq(error.byte_offset, 0)
+            assert_eq(error.line, Val(1))
+        }
     }
-    records
+    if dumps([Dyn]{Dyn.Int(12), bad}) == {
+        .Ok(_) -> panic("second non-finite row accepted")
+        .Err(error) -> {
+            assert_eq(error.path, "/1")
+            assert_eq(error.byte_offset, 3)
+            assert_eq(error.line, Val(2))
+        }
+    }
+    if append_line("\n12", bad) == {
+        .Ok(_) -> panic("non-finite appended row accepted")
+        .Err(error) -> {
+            assert_eq(error.path, "/1")
+            assert_eq(error.byte_offset, 4)
+            assert_eq(error.line, Val(3))
+        }
+    }
 }

@@ -1,0 +1,156 @@
+// Unactivated private native startup supplier: not included or published.
+// The paired NORMAL checked Source out-record must qualify these storage fields:
+// columns U64 @0; term List<U8> LEN @8, CAP @16, DATA @24; size32/align8.
+// Its initialized empty owner is borrowed exclusively for this synchronous call.
+fn host_output_utf8(value: I64, length: I64) -> Bool {
+    at := I64{0}
+    loop at < length {
+        width :: rt_text_valid_width(wrapping(value + at), length - at, I64{1})
+        if (width < I64{0}) -> return false
+        at = wrapping(at + width)
+    }
+    true
+}
+
+// std::str::parse::<usize> on the canonical x64 host: no whitespace trim.
+// A successful ASCII digit walk also establishes UTF8 without a copy.
+fn host_output_columns(value: I64, output: I64) -> Bool {
+    if (value == I64{0}) -> return false
+    at := I64{0}
+    width := U64{0}
+    #Unsafe("value borrows a complete immutable startup NUL string; output lends one writable U64 word") {
+        if (os_load_u8(value) == I64{43}) -> at = I64{1}
+        if (os_load_u8(wrapping(value + at)) == I64{0}) -> return false
+        loop {
+            byte :: os_load_u8(wrapping(value + at))
+            if (byte == I64{0}) -> break
+            if (byte < I64{48} || byte > I64{57}) -> return false
+            digit :: U64{byte - I64{48}}
+            if (width > U64{1844674407370955161} || (width == U64{1844674407370955161} && digit > U64{5})) -> return false
+            width = width * U64{10} + digit
+            at = wrapping(at + I64{1})
+        }
+        if (width == U64{0}) -> return false
+        os_store_i64(output, iter_signed(width))
+    }
+    true
+}
+
+// Validate the WHOLE selected raw locale before returning any false fact.
+// ASCII followed by invalid UTF8 must yield true, not an early ASCII match.
+fn host_output_unicode(value: I64) -> Bool {
+    if (value == I64{0}) -> return true
+    length :: host_startup_byte_length(value)
+    at := I64{0}
+    ascii_state := I64{0}
+    ascii_found := false
+    short_word := I64{0}
+    #Unsafe("value borrows length immutable captured startup bytes; no pointer escapes") {
+        loop at < length {
+            width :: rt_text_valid_width(wrapping(value + at), length - at, I64{1})
+            if (width < I64{0}) -> return true
+            if (width == I64{1}) {
+                byte :: os_load_u8(wrapping(value + at))
+                upper :: if (byte >= I64{97} && byte <= I64{122}) -> byte - I64{32} else -> byte
+                if (length <= I64{5}) -> short_word = short_word.bit_or((upper << (at * I64{8})))
+                if (!ascii_found) {
+                    expected := I64{73}
+                    if (ascii_state == I64{0}) -> expected = I64{65}
+                    if (ascii_state == I64{1}) -> expected = I64{83}
+                    if (ascii_state == I64{2}) -> expected = I64{67}
+                    if (upper == expected) {
+                        ascii_state = ascii_state + I64{1}
+                    } else {
+                        ascii_state = if (upper == I64{65}) -> I64{1} else -> I64{0}
+                    }
+                    if (ascii_state == I64{5}) -> ascii_found = true
+                }
+            } else {
+                ascii_state = I64{0}
+            }
+            at = wrapping(at + width)
+        }
+    }
+    posix :: I64{80}.bit_or((I64{79} << I64{8})).bit_or((I64{83} << I64{16})).bit_or((I64{73} << I64{24})).bit_or((I64{88} << I64{32}))
+    !ascii_found && !(length == I64{1} && short_word == I64{67}) && !(length == I64{5} && short_word == posix)
+}
+
+// Caller holds the actual Host lock. The two words occupy only 16 bytes of
+// the existing TCGETS scratch @32. Keys have actual constant lengths <=11;
+// no E4 header, String owner, key allocation or second environment map exists.
+fn host_output_environment_key(scratch: I64, first: I64, second: I64, length: I64) -> I64 {
+    #Unsafe("the held Host lock lends 16 writable bytes of its existing ioctl scratch; the canonical lookup retains no key pointer") {
+        os_store_i64(scratch, first)
+        os_store_i64(wrapping(scratch + I64{8}), second)
+    }
+    host_environment_value_bytes(scratch, length)
+}
+
+// Flags: stdout1,stderr2,noColor4,forceColor8,unicode16,columnsSome32,termSome64.
+// Private Source export only; no frozen export-list modification or inclusion.
+#Export(c) fn jet_cli_host_startup_output_facts_raw(output: I64) -> I64 {
+    #Unsafe("output exclusively borrows the paired initialized empty Source out-record; no owner is overwritten") {
+        os_store_i64(output, I64{0})
+        os_store_i64(wrapping(output + I64{8}), I64{0})
+        os_store_i64(wrapping(output + I64{16}), I64{0})
+        os_store_i64(wrapping(output + I64{24}), I64{0})
+    }
+    if (host_argc == I64{-1}) {
+        host_arguments_refused()
+        // Captured refusal is not all-false success. Paired Foreign Propagate
+        // executes BEFORE reading flags/out-fields or constructing any facts.
+        return I64{0}
+    }
+    flags := I64{0}
+    if host_is_tty(I64{1}) -> flags = flags.bit_or(I64{1})
+    if host_is_tty(I64{2}) -> flags = flags.bit_or(I64{2})
+    term := I64{0}
+    no_color := I64{0}
+    force_color := I64{0}
+    columns := I64{0}
+    lc_all := I64{0}
+    lc_ctype := I64{0}
+    lang := I64{0}
+    host_lock()
+    #Unsafe("Host startup already initialized its process-lifetime mapping; the held lock owns ioctl scratch32..47 and FIRST raw lookup only borrows the immutable captured index") {
+        scratch :: wrapping(host_root + I64{32})
+        term = host_output_environment_key(scratch, I64{1297237332}, I64{0}, I64{4})
+        no_color = host_output_environment_key(scratch, I64{5931043137586679630}, I64{0}, I64{8})
+        force_color = host_output_environment_key(scratch, I64{5711513503522770758}, I64{5394252}, I64{11})
+        columns = host_output_environment_key(scratch, I64{23448517117497155}, I64{0}, I64{7})
+        lc_all = host_output_environment_key(scratch, I64{83890397987660}, I64{0}, I64{6})
+        lc_ctype = host_output_environment_key(scratch, I64{4994590205196321612}, I64{0}, I64{8})
+        lang = host_output_environment_key(scratch, I64{1196310860}, I64{0}, I64{4})
+    }
+    host_unlock()
+    // No failure/report/decode/allocation occurs while the Host lock is held.
+    if (no_color != I64{0}) -> flags = flags.bit_or(I64{4})
+    if (force_color != I64{0}) -> flags = flags.bit_or(I64{8})
+    if host_output_columns(columns, output) -> flags = flags.bit_or(I64{32})
+    locale := lc_all
+    if (locale == I64{0}) -> locale = lc_ctype
+    if (locale == I64{0}) -> locale = lang
+    if host_output_unicode(locale) -> flags = flags.bit_or(I64{16})
+    if (term != I64{0}) {
+        length :: host_startup_byte_length(term)
+        if (length > I64{0} && host_output_utf8(term, length)) {
+            // U8 elements are packed bytes; the canonical List buffer still
+            // uses alignment8. Reuse the actual allocator's layout predicate
+            // and refusal before any allocation/copy/publication. A captured
+            // refusal must reach the paired Foreign Propagate before decode.
+            if !alloc_layout_valid(length, I64{8}) {
+                rt_trap_invalid_box_layout()
+                return I64{0}
+            }
+            data :: alloc_required_valid(length, I64{8})
+            rt_text_bytes_copy(data, term, length)
+            #Unsafe("the paired Source owner receives the sole native U8 buffer with exact LEN/CAP/DATA; no raw pointer is cast into a List value") {
+                os_store_i64(wrapping(output + I64{8}), length)
+                os_store_i64(wrapping(output + I64{16}), length)
+                os_store_i64(wrapping(output + I64{24}), data)
+            }
+            flags = flags.bit_or(I64{64})
+        }
+    }
+    flags
+}

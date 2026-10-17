@@ -1,0 +1,9 @@
+# Port of tests/cli_parts/commands.rs:389-411; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+fixture: fixtures/perl_broken
+requires: tool:perl
+step: jet inspect bind perl {work}/broken.pl --pkg broken
+exit: nonzero
+stderr: = perl_bind_launders_parse_failure_as_e3208.stderr
+stderr: !~ "syntax error at" # original predicate
+stderr: !~ "broken.pl line" # original predicate

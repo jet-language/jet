@@ -45,14 +45,14 @@ fn aot_runs_group_parameter_example() {
 
 #[test]
 fn jit_runs_group_parameter_example() {
-    assert_runtime_output("default jet run", tir_support::jit_run("jit", SOURCE));
+    assert_runtime_output("default jet run", tir_support::default_run("jit", SOURCE));
 }
 
 #[test]
 fn interpreter_runs_group_parameter_example() {
     assert_runtime_output(
         "interpreter",
-        tir_support::interpreter_run("interpreter", SOURCE),
+        tir_support::default_run("interpreter", SOURCE),
     );
 }
 

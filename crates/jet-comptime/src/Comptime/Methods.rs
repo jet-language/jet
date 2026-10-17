@@ -10,9 +10,11 @@ mod pool;
 mod repl_process;
 #[path = "Methods/time_deadline.rs"]
 mod time_deadline_kernel;
+pub(super) use time_deadline_kernel::jet_time_wall_override_ms;
 
 pub(crate) use core_calls::as_string;
 pub(crate) use core_calls::data_plot_rt;
+pub use core_calls::dyn_datetime_value;
 pub use core_calls::{
     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
     apply_core_call_without_ambient_with_type, apply_core_call_without_ambient_with_type_args,
@@ -21,29 +23,26 @@ pub use core_calls::{
     apply_data_line_call, apply_history_rng_method, apply_impure_core_call,
     apply_impure_core_call_with_type, apply_impure_core_call_with_type_args,
     apply_raylib_ambient_core_call, data_status_rows, history_callback_fingerprint,
-    history_command_schema_from_mir, set_trace_id, sketch_add, with_world_rng_provider,
+    history_command_schema_from_mir, set_trace_id, with_world_rng_provider,
     HistoryCommandSchema,
 };
 pub(crate) use core_calls::eval_data_describe;
-pub(super) use core_calls::{apply_regex_method, as_float, solver_require};
+pub(super) use core_calls::{apply_regex_method, as_float};
 // I9: the MIR evaluator calls this fake-data kernel too, so it
 // must be reachable from outside this crate. One kernel, every tier.
-pub use core_calls::apply_fake_method;
 /// Public host entry for the MIR evaluator (#777).
 pub use core_calls::{
     display_core_pure_value, eval_regex_replace_all_with, jet_crypto_zeroize,
 };
 pub(crate) use core_calls::{
-    eval_data_pivot_sum, evaluate_typed_datetime_literal, url_parts_to_ct,
+    eval_data_pivot_sum, evaluate_typed_datetime_literal,
     validate_datetime_literal,
 };
 /// Public for MirBridge `Rng.shuffle(&list)` write-back (#777).
 pub use dispatch::apply_seeded_rng_method;
 pub use dispatch::apply_seeded_rng_method_with_type;
 pub(crate) use dispatch::{arg_string_literal, check_literal_embed_path, embed_path_err};
-pub(super) use dispatch::{
-    invoke_standalone_closure, invoke_standalone_closure_mut, invoke_standalone_closure_mut_args,
-};
+pub(super) use dispatch::{invoke_standalone_closure, invoke_standalone_closure_mut_args};
 pub use dispatch::{
     eval_build_embed, eval_build_time_io, eval_locked_find, eval_net_fetch, is_tier2_core_call,
     project_rejection, vault_comptime_denied,

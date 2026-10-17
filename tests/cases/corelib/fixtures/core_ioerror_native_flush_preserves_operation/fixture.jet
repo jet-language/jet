@@ -1,0 +1,16 @@
+
+use core.files as files
+
+fn run() {
+    output := files.create("/dev/full") ?? panic("open")
+    output.write_line("buffered") ?? panic("buffer")
+    if &output.flush() == {
+        .Ok(_) -> panic("flush succeeded")
+        .Err(error) -> {
+            if error == {
+                .Other(context) -> print(if context.operation == .Flush -> "flush" else -> "wrong-flush-operation")
+                else -> { print("wrong-flush-kind") }
+            }
+        }
+    }
+}

@@ -101,11 +101,11 @@ set_default_target_dir() {
 set_default_target_dir "$repo"
 check_target_dir "$repo"
 
-# Select sccache for a cold tree after the shell has made it available.
-# Agent commands keep incremental compilation disabled in either cache mode;
-# the orchestrator's lock-serialized build targets opt in with
-# JET_CARGO_INCREMENTAL=1 (one writer per target, pruned between builds).
-# JET_NO_SCCACHE=1 opts out of sccache.
+# Cache wrappers are caller-selected; a missing debug directory does not imply
+# that sccache is wanted (release builds and immutable exports lack it too).
+# JET_NO_SCCACHE=1 disables wrappers imported by direnv/nix as well.
+# Agent commands keep incremental compilation disabled; lock-serialized build
+# targets opt in with JET_CARGO_INCREMENTAL=1.
 ensure_command_resources() {
   # Apply after direnv/nix as well: shell imports may replace the caller's
   # environment. A machine-wide Cargo/test fan-out can exhaust shared RAM.
@@ -123,13 +123,8 @@ ensure_command_resources() {
 }
 
 cache_mode_env() {
-  # $1 = checkout root (baked in by the caller — the nix-develop transplant
-  # below has no access to this script's variables at runtime).
-  if [ -z "${JET_NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && [ "${JET_CARGO_INCREMENTAL:-0}" != 1 ]; then
-    tgt="${CARGO_TARGET_DIR:-$1/target}"
-    if [ ! -d "$tgt/debug" ] && command -v sccache >/dev/null 2>&1; then
-      export RUSTC_WRAPPER=sccache
-    fi
+  if [ "${JET_NO_SCCACHE:-0}" = 1 ]; then
+    unset RUSTC_WRAPPER RUSTC_WORKSPACE_WRAPPER
   fi
 }
 
@@ -169,4 +164,9 @@ else
   mkdir -p "$cache_dir"
   shell_args=(--profile "$cached_shell" "${repo}#${flake_shell}")
 fi
-exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "$(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_command_resources); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_command_resources; exec $joined"
+# The shell hook derives JET_ROOT from its working directory (git toplevel,
+# else $PWD) and runs "$JET_ROOT/Tools/agent/clean-nix-tmp.sh", so enter the
+# shell from this checkout and return to the caller's directory for the command.
+caller_dir="$PWD"
+cd -- "$repo"
+exec nix develop "${shell_args[@]}" -c bash --noprofile --norc -c "cd -- $(printf %q "$caller_dir") || exit 64; $(declare -f check_target_dir set_default_target_dir cache_mode_env ensure_command_resources); set_default_target_dir $(printf %q "$repo"); check_target_dir $(printf %q "$repo"); cache_mode_env $(printf %q "$repo"); ensure_command_resources; exec $joined"

@@ -38,16 +38,16 @@ fn terminal_test_env(name: String, value: String?) {
     saved_force_color :: sys.get("FORCE_COLOR")
     terminal_test_env("NO_COLOR", Val(""))
     terminal_test_env("FORCE_COLOR", None)
-    assert(ColorChoice.Always.resolve(false))
+    assert((ColorChoice.Always).resolve(false))
     terminal_test_env("NO_COLOR", None)
     terminal_test_env("FORCE_COLOR", Val("1"))
-    assert(!ColorChoice.Never.resolve(true))
+    assert(!(ColorChoice.Never).resolve(true))
     terminal_test_env("NO_COLOR", Val(""))
-    assert(!ColorChoice.Auto.resolve(true))
+    assert(!(ColorChoice.Auto).resolve(true))
     terminal_test_env("NO_COLOR", None)
-    assert(ColorChoice.Auto.resolve(false))
+    assert((ColorChoice.Auto).resolve(false))
     terminal_test_env("FORCE_COLOR", None)
-    assert(ColorChoice.Auto.resolve(true))
+    assert((ColorChoice.Auto).resolve(true))
     terminal_test_env("NO_COLOR", saved_no_color)
     terminal_test_env("FORCE_COLOR", saved_force_color)
 }
@@ -98,7 +98,7 @@ fn terminal_test_env(name: String, value: String?) {
 #Test("terminal confirm apply without yes on a non tty is plan only") {
     // A piped stdin must refuse to apply and never wait for a prompt
     // (D-FE-CLI1 non-TTY rule); an attached terminal is not exercised.
-    if !term.stdin().is_terminal() -> assert(!Theme.plain().confirm_apply(false))
+    if !term.stdin().is_tty() -> assert(!Theme.plain().confirm_apply(false))
 }
 
 #Test("terminal live region is non tty when color is off") {

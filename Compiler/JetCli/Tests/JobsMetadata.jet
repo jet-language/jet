@@ -1,0 +1,69 @@
+// Pure renderer assertions are controlled metadata, not checked/run evidence.
+// The entry-selection assertion instead calls the actual completed checker once.
+use jet_foundation.[Func, Item, Span, StringMapEntry, JobRegistry, ast_func, ast_job_metadata]
+use jet_driver.[JetDriverCompileMode, JetDriverAuthorizedSourceSnapshot, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceFile, JetDriverCoreSource, jet_driver_checked_projection]
+
+fn jobs_metadata_function(name: String, internal: Bool) -> Func Never! {
+    span :: Span{start: 0, end: 0}
+    function := ast_func(name, span, span)
+    function.is_job = true
+    metadata := ast_job_metadata()
+    metadata.scope = if internal -> .Internal else -> .Ship
+    metadata.after = [String]{"pre"}
+    metadata.inputs = [String]{"src"}
+    metadata.outputs = [String]{"out"}
+    metadata.packages = [String]{"dep"}
+    metadata.cwd = Val("sub")
+    metadata.skip = Val(.Always("because"))
+    metadata.cache = .Shared
+    metadata.parallel = Val(2)
+    metadata.limits = [StringMapEntry]{StringMapEntry{key: "z", value: "2"}, StringMapEntry{key: "a", value: "1"}}
+    function.job_metadata = Val(metadata)
+    function
+}
+fn jobs_metadata_actual_entry() {
+    root :: "/jobs-metadata-fixture"
+    identity :: "jobs-metadata-fixture"
+    source :: "use helper.[helper_job]\n#Job\nfn own_job() {{}}\nfn main() {{}}\n"
+    helper :: "#Job\npub fn helper_job() {{}}\n"
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: root,
+            identity: identity,
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{
+                JetDriverAuthorizedSourceFile{path: "{root}/main.jet", relative_path: "main.jet", identity: identity, source: source},
+                JetDriverAuthorizedSourceFile{path: "{root}/helper.jet", relative_path: "helper.jet", identity: identity, source: helper},
+            },
+            foreign_cache_files: [],
+        }},
+        entry_root_identity: identity,
+        entry_path: "{root}/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, None, JetDriverCompileMode.Check)
+    request.schema_snapshots = Val([String:jet_sema.SchemaSnapshot]{})
+    projection :: jet_driver_checked_projection(^request)
+    assert(projection.compile.complete && projection.compile.internal_problem == None)
+    registry :: jet_cli_jobs_metadata_registry(projection) ?? panic("actual successful entry projection")
+    assert(registry.completion_words().join(" ") == "own_job")
+    assert(registry.find("helper_job") == None)
+}
+fn run() {
+    registry :: JobRegistry.from_items([Item]{.Func(jobs_metadata_function("Visible", false)), .Func(jobs_metadata_function("Hidden", true))})
+    visible_json :: `{"schema":"jet.status/v1","action":"jobs","ok":true,"reports":[],"jobs":[{"name":"Visible","scope":"ship","doc":null,"arguments":[],"schedule":null,"after":["pre"],"inputs":["src"],"outputs":["out"],"packages":["dep"],"cwd":"sub","skip":{"kind":"always","reason":"because"},"cache":"shared","limits":{"a":"1","z":"2"},"parallel":2}]}`
+    assert(jet_cli_jobs_metadata_json(registry) == "{visible_json}\n")
+    rows :: registry.jobs()
+    assert(jet_cli_job_metadata_detail(rows[0]) == "(after pre) (inputs src) (outputs out) (packages dep) (cwd sub) (skip always (because)) (cache shared) (limits a=1, z=2) (parallel 2)")
+    empty :: JobRegistry.from_items([Item]{})
+    empty_json :: `{"schema":"jet.status/v1","action":"jobs","ok":true,"reports":[],"jobs":[]}`
+    assert(jet_cli_jobs_metadata_json(empty) == "{empty_json}\n")
+    span :: Span{start: 0, end: 0}
+    limits_only := ast_func("limits", span, span)
+    limits_only.is_job = true
+    policy := ast_job_metadata()
+    policy.limits = [StringMapEntry]{StringMapEntry{key: "a", value: "1"}}
+    limits_only.job_metadata = Val(policy)
+    limited :: JobRegistry.from_items([Item]{.Func(limits_only)})
+    assert(jet_cli_job_metadata_detail(limited.jobs()[0]) == " (limits a=1) (parallel 1)")
+    jobs_metadata_actual_entry()
+}

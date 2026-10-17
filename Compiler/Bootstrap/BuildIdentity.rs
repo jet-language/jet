@@ -28,7 +28,7 @@ pub const COMPILER_SOURCES: &[&str] = &[
     "crates/jet-queries",
     "crates/jet-semindex",
     "crates/jet-impact",
-    "crates/jet-jit",
+    "crates/jet-evalhost",
     "crates/jet-rt",
     "crates/jet-repl",
     "crates/jet-debug",

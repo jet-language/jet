@@ -1,0 +1,28 @@
+
+use core.encoding.cbor as cbor
+
+fn run() {
+    strict := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 1024, require_canonical: true }
+    if cbor.parse([249, 62, 0], strict.copy()) == {
+        .Ok(value) -> print(value.float() ?? -1.0)
+        .Err(_) -> print(-2.0)
+    }
+    if cbor.parse([250, 63, 192, 0, 0], strict.copy()) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR Float does not use its preferred shortest encoding")
+    }
+    if cbor.parse([249, 126, 1], strict.copy()) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR NaN is not the canonical 0xf97e00 encoding")
+    }
+    if cbor.parse([249, 126, 0], strict.copy()) == {
+        .Ok(_) -> print(true)
+        .Err(_) -> print(false)
+    }
+
+    tiny := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 3, require_canonical: false }
+    if cbor.parse([130, 1, 2], tiny) == {
+        .Ok(_) -> print(false)
+        .Err(e) -> print(e.byte_offset == 0 && e.reason == "CBOR array allocation exceeds max_bytes 3")
+    }
+}

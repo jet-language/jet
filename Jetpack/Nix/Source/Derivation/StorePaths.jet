@@ -8,7 +8,8 @@ NIX_STORE_PATH_DIGEST_CHARS :: prep { 32 }
 NIX_COMPRESSED_HASH_BYTES :: prep { 20 }
 
 fn nix_sha256_digest(bytes: [U8]) -> [U8] Never! {
-    mir_sha256_bytes(bytes) ?? panic("SHA-256 indexed outside its padded blocks")
+    view :: bytes[0..<bytes.len()]
+    mir_sha256_bytes(view)
 }
 
 fn nix_hex(bytes: [U8]) -> String Never! {
@@ -16,7 +17,7 @@ fn nix_hex(bytes: [U8]) -> String Never! {
 }
 
 // Nix32 of `bytes`, emitted from the most significant 5-bit group down.
-pub fn nix_nix32_encode(bytes: [U8]) -> String Never! {
+fn nix_nix32_encode(bytes: [U8]) -> String Never! {
     if bytes.len() == 0 -> return ""
     alphabet :: NIX_NIX32_ALPHABET.bytes()
     length :: (bytes.len() * 8 - 1) /% 5 + 1
@@ -27,8 +28,8 @@ pub fn nix_nix32_encode(bytes: [U8]) -> String Never! {
         index :: bit /% 8
         shift :: bit % 8
         value := Int.from_u8(bytes[index]) >> shift
-        if index < bytes.len() - 1 -> value |= Int.from_u8(bytes[index + 1]) << (8 - shift)
-        &out.push(alphabet[value & 31])
+        if index < bytes.len() - 1 -> value = (value).bit_or(Int.from_u8(bytes[index + 1]) << (8 - shift))
+        &out.push(alphabet[(value).bit_and(31)])
         group -= 1
     }
     String.from_bytes(out) ?? panic("Nix32 alphabet is ASCII")
@@ -36,7 +37,7 @@ pub fn nix_nix32_encode(bytes: [U8]) -> String Never! {
 
 // Raw bytes of Nix32 `text` (length ceil(chars * 5 / 8); a high group that
 // carries no bits past the last byte adds no padding byte, as in Nix).
-pub fn nix_nix32_decode(text: String) -> [U8] NixError! {
+fn nix_nix32_decode(text: String) -> [U8] NixError! {
     scalars := [String]{}
     loop scalar in text.chars() -> &scalars.push("{scalar}")
     folded := [Int]{}
@@ -49,11 +50,11 @@ pub fn nix_nix32_decode(text: String) -> [U8] NixError! {
         index :: bit /% 8
         shift :: bit % 8
         loop folded.len() <= index -> &folded.push(0)
-        folded[index] = folded[index] | ((digit << shift) & 255)
+        folded[index] = (folded[index]).bit_or((((digit << shift)).bit_and(255)))
         carry :: digit >> (8 - shift)
         if carry != 0 {
             loop folded.len() <= index + 1 -> &folded.push(0)
-            folded[index + 1] = folded[index + 1] | carry
+            folded[index + 1] = (folded[index + 1]).bit_or(carry)
         }
     }
     out := [U8]{}
@@ -79,12 +80,12 @@ fn nix_is_nix32_byte(byte: U8) -> Bool Never! {
 }
 
 // XOR-fold `hash` down to `size` bytes (Nix `compressHash`).
-pub fn nix_compress_hash(hash: [U8], size: Int) -> [U8] Never! {
+fn nix_compress_hash(hash: [U8], size: Int) -> [U8] Never! {
     folded := [Int]{}
     loop _ in 0..<size -> &folded.push(0)
     loop index in 0..<hash.len() {
         slot :: index % size
-        folded[slot] = folded[slot] ~| Int.from_u8(hash[index])
+        folded[slot] = (folded[slot]).bit_xor(Int.from_u8(hash[index]))
     }
     out := [U8]{}
     loop value in folded -> &out.push(U8{value})
@@ -93,26 +94,26 @@ pub fn nix_compress_hash(hash: [U8], size: Int) -> [U8] Never! {
 
 // `makeStorePath(type, "sha256:"+hex, name)`:
 // `{store}/{nix32(compress(sha256(fingerprint), 20))}-{name}`.
-pub fn nix_make_store_path(store_dir: String, type_text: String, hash_with_algo: String, name: String) -> String Never! {
+fn nix_make_store_path(store_dir: String, type_text: String, hash_with_algo: String, name: String) -> String Never! {
     fingerprint :: "{type_text}:{hash_with_algo}:{store_dir}:{name}"
     digest :: nix_compress_hash(nix_sha256_digest(fingerprint.bytes()), NIX_COMPRESSED_HASH_BYTES)
     "{store_dir}/{nix_nix32_encode(digest)}-{name}"
 }
 
 // `drvName`, or `drvName-output` when the output is not `out`.
-pub fn nix_output_path_name(drv_name: String, output_name: String) -> String Never! {
-    if output_name == "out" -> return ~drv_name
+fn nix_output_path_name(drv_name: String, output_name: String) -> String Never! {
+    if output_name == "out" -> return drv_name.copy()
     "{drv_name}-{output_name}"
 }
 
 // Input-addressed output path from a `hashDerivationModulo` digest.
-pub fn nix_make_output_path(store_dir: String, output_id: String, modulo_hash: [U8], drv_name: String) -> String Never! {
+fn nix_make_output_path(store_dir: String, output_id: String, modulo_hash: [U8], drv_name: String) -> String Never! {
     nix_make_store_path(store_dir, "output:{output_id}", "sha256:{nix_hex(modulo_hash)}", nix_output_path_name(drv_name, output_id))
 }
 
 // Fixed-output path (`makeFixedOutputPath`); `method_algo` is the ATerm form
 // (`sha256`, `r:sha256`, `sha512`, `r:sha512`, ...).
-pub fn nix_make_fixed_output_path(store_dir: String, name: String, method_algo: String, hash_hex: String) -> String Never! {
+fn nix_make_fixed_output_path(store_dir: String, name: String, method_algo: String, hash_hex: String) -> String Never! {
     if method_algo == "r:sha256" -> return nix_make_store_path(store_dir, "source", "sha256:{hash_hex}", name)
     // flat, non-SHA-256 NAR and git: sha256("fixed:out:" + methodAlgo + ":" + hex + ":")
     digest :: nix_sha256_digest("fixed:out:{method_algo}:{hash_hex}:".bytes())
@@ -121,8 +122,8 @@ pub fn nix_make_fixed_output_path(store_dir: String, name: String, method_algo: 
 
 // Text-method content-addressed path (derivations): type `text{:ref}*` over
 // the sorted references.
-pub fn nix_make_text_path(store_dir: String, name: String, contents: [U8], references: [String]) -> String Never! {
-    sorted := ~references
+fn nix_make_text_path(store_dir: String, name: String, contents: [U8], references: [String]) -> String Never! {
+    sorted := references.copy()
     &sorted.sort()
     type_text := "text"
     loop reference in sorted -> type_text = "{type_text}:{reference}"
@@ -130,21 +131,21 @@ pub fn nix_make_text_path(store_dir: String, name: String, contents: [U8], refer
 }
 
 // The name after `<digest>-` in a store path's basename (keeps `.drv`).
-pub fn nix_store_path_name(store_path: String) -> String NixError! {
+fn nix_store_path_name(store_path: String) -> String NixError! {
     base :: store_path.cut_last("/")?.after ?? store_path
     parts :: base.split_once("-") ?? return Err(NixError.DrvPath("not a store path basename: {base}"))
     Ok(parts.after)
 }
 
 // A derivation's name: its store path name without the `.drv` suffix.
-pub fn nix_drv_name_from_path(drv_path: String) -> String NixError! {
+fn nix_drv_name_from_path(drv_path: String) -> String NixError! {
     name :: nix_store_path_name(drv_path)
     Ok(name.removesuffix(".drv"))
 }
 
 // Sorted, unique `{store_dir}/{nix32 digest}-{name}` references found in
 // `bytes`; the name runs over printable bytes other than quotes.
-pub fn nix_scan_store_path_digests(store_dir: String, bytes: [U8]) -> [String] Never! {
+fn nix_scan_store_path_digests(store_dir: String, bytes: [U8]) -> [String] Never! {
     prefix :: "{store_dir}/".bytes()
     found := [String]{}
     index := 0
@@ -192,7 +193,7 @@ fn nix_debug_scalar(scalar: String) -> String Never! {
 }
 
 fn nix_debug_control(scalar: String, code: Int) -> String Never! {
-    if code >= 32 && code != 127 -> return ~scalar
+    if code >= 32 && code != 127 -> return scalar.copy()
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     if code >= 16 -> &out.push(digits[code /% 16])

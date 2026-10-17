@@ -1,4 +1,11 @@
+use core.text.fmt as fmt
+
 #UnitFamily(Length, dimension, base: meter) { meter }
+
+// Same-named user functions must not capture an implicit Core selector.
+fn decimal(n: Float, frac: Int) -> String { "wrong decimal" }
+
+fn pretty(value: String) -> String { "wrong pretty" }
 
 struct Point {
     x: Int
@@ -24,4 +31,18 @@ fn run() {
     print("oct {count:Oct}")
     print("unit-name {distance:Unit(name)}")
     print("unit-bare {distance:Unit(bare)}")
+    big :: -123456789012345678901234567890
+    if "{big:Fixed(2)}" != "-123456789012345678901234567890.00" -> panic("selector exact fixed")
+    if "{big:Grouped(1)}" != "-123,456,789,012,345,678,901,234,567,890.0" {
+        panic("selector exact grouped")
+    }
+    narrow :: I64{1234}
+    if "{narrow:Fixed(2)}" != "1234.00" -> panic("selector fixed-width integer")
+    if "{narrow:Hex(8)}" != "000004d2" -> panic("selector fixed-width radix")
+    if "{narrow:Bin}" != "10011010010" -> panic("selector fixed-width bin")
+    if "{narrow:Oct}" != "2322" -> panic("selector fixed-width oct")
+    if "{count:Pad(6, ".")}" != "1234.." -> panic("selector scalar pad")
+    if "{count:PadLeft(6, ".")}" != "..1234" -> panic("selector scalar left pad")
+    if "{point:Pretty}" != fmt.pretty("{point:Debug}") -> panic("selector structural pretty")
+    if "{ratio:Fixed(2)}" != fmt.decimal(ratio, 2) -> panic("selector source decimal")
 }

@@ -1,0 +1,20 @@
+# HAND-PORT tests/jetpack_engine.rs:7740-7799 core_cargo_build_requires_exact_trust_before_running_build_script
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: core_cargo_build_requires_exact_trust_before_running_build_script.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+write: project/env.jet env.template
+write: jet-pkgs/build.rs build.template
+step: jetpack build --no-color
+cwd: project
+env: HOME={work}/home
+env: JETPACK_FAKE_SANDBOX=unavailable
+env: PATH=/usr/bin:/bin
+exit: nonzero
+stderr: ~ "E1255" # original contains predicate
+file: host-marker absent
+when dir-readable root/hangar: entries: root/hangar recursive kind file name = "meta.json" = 0
+

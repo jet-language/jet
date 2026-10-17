@@ -1,0 +1,24 @@
+# HAND-PORT tests/web_build.rs:2129-2196 web_time_checked_formats_and_epoch_overflow_match_js_and_wasm
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates and exact runtime oracles retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_time_checked_formats_and_epoch_overflow_match_js_and_wasm.fixture
+env: NO_COLOR=1
+step: jet build --target web JS/main.jet
+exit: 0
+file: JS/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: JS/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: JS/.jet/build/app.wasm is-file
+step: node app.js
+cwd: JS/.jet/build
+exit: 0
+stdout: = web_time_checked_formats_and_epoch_overflow_match_js_and_wasm.stdout.expected
+step: jet build --target web Wasm/main.jet
+exit: 0
+file: Wasm/.jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: Wasm/.jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: Wasm/.jet/build/app.wasm is-file
+step: node app.js
+cwd: Wasm/.jet/build
+exit: 0
+stdout: = web_time_checked_formats_and_epoch_overflow_match_js_and_wasm.stdout.expected

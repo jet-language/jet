@@ -25,8 +25,8 @@ impl ProviderFactReport {
                 "requires_python" -> &facts.add_typed_text("provider.pypi.variant.requires_python", value)
                 "project_url" | "home_page" | "download_url" | "author" | "author_email" | "maintainer" | "maintainer_email" -> &facts.add_typed_text("provider.pypi.source.{normalized}.{index}", value)
                 "classifier" -> {
-                    if value.starts_with("Operating System ::") || value.starts_with("Platform ::") -> &facts.platforms.push(~value)
-                    if facts.license == "" && value.starts_with("License ::") -> facts.license = ~value
+                    if value.starts_with("Operating System ::") || value.starts_with("Platform ::") -> &facts.platforms.push(value.copy())
+                    if facts.license == "" && value.starts_with("License ::") -> facts.license = value.copy()
                     &facts.add_typed_text("provider.pypi.variant.classifier.{index}", value)
                 }
                 "provides_extra" -> &facts.add_typed_text("provider.pypi.variant.extra.{index}", value)

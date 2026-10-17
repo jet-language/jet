@@ -1,6 +1,6 @@
 # jetc versus the Rust reference
 Owner rule: jetc/Rust **<= 1**; `SLOWER` means the rule is not met.
-`python3 Tools/perf/jetc-vs-rust/bench.py` runs hello and 256 functions from the existing scaling generator.
+`python3 Tools/perf/jetc-vs-rust/bench.py` runs hello and the 256-function `small-fns` corpus of the scaling generator.
 `--all` adds 512 functions; `empty` measures the startup floor; `murmur3` is a separate Example compatibility probe.
 Each compiler reads the same private source snapshot; projects retain their original package manifests.
 Use `--jetc ~/.cache/jet-dev/loop/jetc0 --jetc ~/.cache/jet-dev/loop7/jetc0` to compare builds.

@@ -1,0 +1,29 @@
+
+module complete<T>(count: Int, label: String) {
+    #Meta(category: label)
+    VALUE :: prep { count }
+    COMPTIME_VALUE :: prep { count + 1 }
+    tag Marked { deny: [Net] }
+    trait Reveal { fn reveal(self) -> T }
+    struct Wrapped { value: T }
+    enum Maybe { Empty Value(T) }
+    impl Wrapped.Reveal { fn reveal(self) -> T { return self.value } }
+    enum SourceErr { Bad(T) }
+    enum TargetErr { Wrapped(SourceErr) }
+    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    #Target(OS.Linux)
+    impl Wrapped { fn linux_value(self) -> T { return self.value } }
+    module plain { fn value() -> Int { return count } }
+    module nested<U> { fn keep(value: U) -> U { return value.copy() } }
+    module nested_use :: nested<T>
+    #Meta(category: label)
+    fn marked(value: ^#Marked T) -> #Marked T {
+        #Meta(category: label)
+        local := T{ value }
+        return local
+    }
+    #Test fn identity(value: T) { expect(count == count) }
+    #Test("complete") { .measure { assert(label == label) } }
+}
+module complete_use :: complete<Int>(3, "generic module")
+fn run() {}

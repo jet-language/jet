@@ -1,0 +1,13 @@
+
+use core.net as net
+
+fn run() {
+    server :: net.udp_bind("127.0.0.1:0") ?? panic("server bind")
+    client :: net.udp_bind("127.0.0.1:0") ?? panic("client bind")
+    address :: net.udp_local_addr(server) ?? panic("server address")
+    budget :: Duration.seconds(1) ?? panic("deadline")
+    payload :: [U8]{ 0, 255, 1, 2, 3 }
+    sent :: client.send_to(payload, address, deadline: budget) ?? panic("send")
+    packet :: server.receive(3, deadline: budget) ?? panic("receive")
+    print("{sent}:{net.udp_packet_bytes(packet)}:{net.udp_packet_original_len(packet)}:{net.udp_packet_truncated(packet)}")
+}

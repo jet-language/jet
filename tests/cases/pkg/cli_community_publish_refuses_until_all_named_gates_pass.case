@@ -1,0 +1,36 @@
+# PORT tests/pkg.rs::cli_community_publish_refuses_until_all_named_gates_pass; original helpers172-293 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+fixture: cli_community_publish_refuses_until_all_named_gates_pass.fixture
+requires: tool:git
+mkdir: store
+step: git init --bare {work}/registry.git
+exit: any # Original helper status unasserted.
+step: git init -b main
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git config user.email test@jet.test
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git config user.name "Jet Test"
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git add .
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: git commit -m init
+cwd: {work}/proj
+exit: any # Original helper status unasserted.
+step: jet registry publish --no-sign
+cwd: {work}/proj
+env: JET_REGISTRY_URL=file://{work}/registry.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+env: JET_KEYS_DIR={work}/keys
+env: JET_REGISTRY_TIER=community
+exit: nonzero
+stderr: ~ "#935" # Original contains predicate.
+stderr: ~ "#431" # Original contains predicate.
+stderr: ~ "#1912" # Original contains predicate.
+stderr: ~ "#1913" # Original contains predicate.
+step: git --git-dir {work}/registry.git show HEAD:index/communitykit/communitykit.jsonl
+exit: nonzero

@@ -1,0 +1,13 @@
+# HAND-PORT tests/jetpack_engine.rs:1704-1722 package_generation_plan_reports_inheritance_cycles
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: package_generation_plan_reports_inheritance_cycles.fixture
+env: NO_COLOR=1
+mkdir: project
+mkdir: project/jet-root
+step: jetpack profile plan a --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 2
+stderr: ~ "E1332" # original contains predicate
+stderr: ~ "inheritance cycle" # original contains predicate
+

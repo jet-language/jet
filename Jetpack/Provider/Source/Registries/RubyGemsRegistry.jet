@@ -55,7 +55,7 @@ fn provider_rubygems_parse_info(repository: String, name: String, raw: String) -
                         .None -> ">= 0"
                     }
                     if dependency_name == "ruby" || dependency_name == "rubygems" -> next
-                    if !ScriptRegistryKind.RubyGems.valid_name(dependency_name) -> return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
+                    if !(ScriptRegistryKind.RubyGems).valid_name(dependency_name) -> return Err(RegistryError.Reason("gem `{name}` has unsafe dependency `{dependency_name}`"))
                     &dependencies.push(RegistryDependency{name: dependency_name, requirement: requirement.replace("&", ",")})
                 }
             }

@@ -49,8 +49,8 @@ fn jet_eval_encoding_hex_digit(value: Int, upper: Bool) -> U8 Never! {
 }
 
 fn jet_eval_encoding_push_hex_pair(out: &[U8], value: Int, upper: Bool) Never! {
-    &out.push(jet_eval_encoding_hex_digit((value >> 4) & 15, upper))
-    &out.push(jet_eval_encoding_hex_digit(value & 15, upper))
+    &out.push(jet_eval_encoding_hex_digit(((value >> 4)).bit_and(15), upper))
+    &out.push(jet_eval_encoding_hex_digit((value).bit_and(15), upper))
 }
 
 fn jet_eval_encoding_hex_pair(value: Int, upper: Bool) -> String Never! {
@@ -117,7 +117,7 @@ fn jet_eval_encoding_hex_dump(bytes: [U8]) -> String {
     out := [U8]{}
     offset := 0
     loop offset < bytes.len() {
-        loop shift in 0..<8 -> &out.push(jet_eval_encoding_hex_digit((offset >> (28 - shift * 4)) & 15, false))
+        loop shift in 0..<8 -> &out.push(jet_eval_encoding_hex_digit(((offset >> (28 - shift * 4))).bit_and(15), false))
         &out.push(U8{32})
         &out.push(U8{32})
         loop index in 0..<16 {
@@ -148,14 +148,14 @@ fn jet_eval_encoding_hex_dump(bytes: [U8]) -> String {
 }
 
 fn jet_eval_encoding_crc_hqx(bytes: [U8], value: Int) -> Int Never! {
-    crc := value & 65535
+    crc := (value).bit_and(65535)
     loop byte in bytes {
-        crc = crc ~| (Int.from_u8(byte) << 8)
+        crc = (crc).bit_xor((Int.from_u8(byte) << 8))
         loop _ in 0..<8 {
-            if (crc & 32768) != 0 {
-                crc = ((crc << 1) ~| 4129) & 65535
+            if ((crc).bit_and(32768)) != 0 {
+                crc = ((((crc << 1)).bit_xor(4129))).bit_and(65535)
             } else {
-                crc = (crc << 1) & 65535
+                crc = ((crc << 1)).bit_and(65535)
             }
         }
     }
@@ -165,16 +165,16 @@ fn jet_eval_encoding_crc_hqx(bytes: [U8], value: Int) -> Int Never! {
 fn jet_eval_encoding_crc32(bytes: [U8]) -> Int Never! {
     crc := 4294967295
     loop byte in bytes {
-        crc = crc ~| Int.from_u8(byte)
+        crc = (crc).bit_xor(Int.from_u8(byte))
         loop _ in 0..<8 {
-            if (crc & 1) != 0 {
-                crc = (crc >> 1) ~| 3988292384
+            if ((crc).bit_and(1)) != 0 {
+                crc = ((crc >> 1)).bit_xor(3988292384)
             } else {
                 crc = crc >> 1
             }
         }
     }
-    (crc ~| 4294967295) & 4294967295
+    (((crc).bit_xor(4294967295))).bit_and(4294967295)
 }
 
 fn jet_eval_encoding_b64_encode(bytes: [U8]) -> String {
@@ -186,11 +186,11 @@ fn jet_eval_encoding_b64_encode(bytes: [U8]) -> String {
         b0 :: Int.from_u8(bytes[index])
         b1 :: if remain > 1 -> Int.from_u8(bytes[index + 1]) else -> 0
         b2 :: if remain > 2 -> Int.from_u8(bytes[index + 2]) else -> 0
-        n :: (b0 << 16) | (b1 << 8) | b2
+        n :: (((b0 << 16)).bit_or((b1 << 8))).bit_or(b2)
         &out.push(alphabet[n >> 18])
-        &out.push(alphabet[(n >> 12) & 63])
-        third :: if remain > 1 -> alphabet[(n >> 6) & 63] else -> U8{61}
-        fourth :: if remain > 2 -> alphabet[n & 63] else -> U8{61}
+        &out.push(alphabet[((n >> 12)).bit_and(63)])
+        third :: if remain > 1 -> alphabet[((n >> 6)).bit_and(63)] else -> U8{61}
+        fourth :: if remain > 2 -> alphabet[(n).bit_and(63)] else -> U8{61}
         &out.push(third)
         &out.push(fourth)
         index += 3
@@ -230,7 +230,7 @@ fn jet_eval_encoding_b64url_encode(bytes: [U8], padded: Bool) -> String {
 
 fn jet_eval_encoding_b64_pad(text: String) -> String Never! {
     remainder :: text.bytes().len() %% 4
-    padded := ~text
+    padded := text.copy()
     if remainder == 0 -> return padded
     loop _ in 0..<(4 - remainder) -> padded = "{padded}="
     padded
@@ -249,17 +249,17 @@ fn jet_eval_encoding_base32_encode(bytes: [U8], alphabet_text: String) -> String
     buffer := 0
     bits := 0
     loop byte in bytes {
-        buffer = (buffer << 8) | Int.from_u8(byte)
+        buffer = ((buffer << 8)).bit_or(Int.from_u8(byte))
         bits += 8
         loop bits >= 5 {
-            &out.push(alphabet[(buffer >> (bits - 5)) & 31])
+            &out.push(alphabet[((buffer >> (bits - 5))).bit_and(31)])
             bits -= 5
         }
         // Only the unread low bits matter; dropping the rest keeps the
         // buffer bounded like the host's 32-bit register.
-        buffer = buffer & ((1 << bits) - 1)
+        buffer = (buffer).bit_and(((1 << bits) - 1))
     }
-    if bits > 0 -> &out.push(alphabet[(buffer << (5 - bits)) & 31])
+    if bits > 0 -> &out.push(alphabet[((buffer << (5 - bits))).bit_and(31)])
     loop out.len() %% 8 != 0 -> &out.push(U8{61})
     jet_eval_encoding_text(out)
 }
@@ -397,13 +397,13 @@ fn jet_eval_encoding_strict_quanta(kind: String, scanned: JetEvalEncodingScan, a
     bits := 0
     index := 0
     loop value in scanned.symbols {
-        buffer = (buffer << width) | value
+        buffer = ((buffer << width)).bit_or(value)
         bits += width
         loop bits >= 8 {
             bits -= 8
-            &out.push(U8{(buffer >> bits) & 255})
+            &out.push(U8{((buffer >> bits)).bit_and(255)})
         }
-        buffer = buffer & ((1 << bits) - 1)
+        buffer = (buffer).bit_and(((1 << bits) - 1))
         if index + 1 == symbol_count && bits > 0 && buffer != 0 -> return jet_eval_encoding_strict_error(kind, scanned.origins[index], "non-zero unused bits")
         index += 1
     }
@@ -442,13 +442,13 @@ fn jet_eval_encoding_compat_aot(raw: [U8]) -> [U8]? {
     loop index < input.len() {
         a :: jet_eval_encoding_std_b64_digit(input[index]) ?? return None
         b :: jet_eval_encoding_std_b64_digit(input[index + 1]) ?? return None
-        &out.push(U8{((a << 2) | (b >> 4)) & 255})
+        &out.push(U8{((((a << 2)).bit_or((b >> 4)))).bit_and(255)})
         if input[index + 2] != 61 {
             c :: jet_eval_encoding_std_b64_digit(input[index + 2]) ?? return None
-            &out.push(U8{((b << 4) | (c >> 2)) & 255})
+            &out.push(U8{((((b << 4)).bit_or((c >> 2)))).bit_and(255)})
             if input[index + 3] != 61 {
                 d :: jet_eval_encoding_std_b64_digit(input[index + 3]) ?? return None
-                &out.push(U8{((c << 6) | d) & 255})
+                &out.push(U8{((((c << 6)).bit_or(d))).bit_and(255)})
             }
         }
         index += 4
@@ -471,9 +471,9 @@ fn jet_eval_encoding_compat_comptime(raw: [U8]) -> [U8]? {
             &digits.push(digit)
         }
         second :: if digits.len() > 1 -> digits[1] else -> 0
-        &out.push(U8{((digits[0] << 2) | (second >> 4)) & 255})
-        if digits.len() > 2 -> &out.push(U8{((digits[1] << 4) | (digits[2] >> 2)) & 255})
-        if digits.len() > 3 -> &out.push(U8{((digits[2] << 6) | digits[3]) & 255})
+        &out.push(U8{((((digits[0] << 2)).bit_or((second >> 4)))).bit_and(255)})
+        if digits.len() > 2 -> &out.push(U8{((((digits[1] << 4)).bit_or((digits[2] >> 2)))).bit_and(255)})
+        if digits.len() > 3 -> &out.push(U8{((((digits[2] << 6)).bit_or(digits[3]))).bit_and(255)})
         index += 4
     }
     Val(out)
@@ -532,13 +532,13 @@ fn jet_eval_encoding_compat_base32(text: String) -> JetEvalEncodingDecode {
         byte :: Int.from_u8(raw[offset])
         if jet_eval_encoding_ascii_space(byte) || byte == 61 -> next
         value :: jet_eval_encoding_b32_digit(byte, true) ?? return jet_eval_encoding_err("invalid base32 at byte {offset}: byte 0x{jet_eval_encoding_hex_pair(byte, true)} is not in the base32 alphabet")
-        buffer = (buffer << 5) | value
+        buffer = ((buffer << 5)).bit_or(value)
         bits += 5
         if bits >= 8 {
-            &out.push(U8{(buffer >> (bits - 8)) & 255})
+            &out.push(U8{((buffer >> (bits - 8))).bit_and(255)})
             bits -= 8
         }
-        buffer = buffer & ((1 << bits) - 1)
+        buffer = (buffer).bit_and(((1 << bits) - 1))
     }
     jet_eval_encoding_ok(out)
 }
@@ -697,7 +697,7 @@ fn jet_eval_route_core_encoding_text(key: String, data: [TComptimeValue], editio
 // program's package edition (D-ENCBASE-STRICT1).
 fn jet_eval_route_core_encoding(row: MIRCoreCall, data: [TComptimeValue], fallibility: MIRCallFallibility, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     key :: "{row.module_name}.{row.member}"
-    edition :: ~machine.program.facts.edition
+    edition :: machine.program.facts.edition.copy()
     if data.len() > 0 && data[0] == .String(_) -> return jet_eval_route_core_encoding_text(key, data, edition, fallibility, &machine, span)
     bytes :: jet_eval_encoding_bytes_arg(data, 0, &machine, span) ?? return None
     output := jet_eval_encoding_string_value("")

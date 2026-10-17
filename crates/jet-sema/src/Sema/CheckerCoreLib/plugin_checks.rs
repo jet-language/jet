@@ -23,7 +23,7 @@ impl<'a> Checker<'a> {
             Type::Named(name) | Type::Apply { name, .. } => {
                 !matches!(
                     name.as_str(),
-                    "DataTree"
+                    "Dyn"
                         | "JSON"
                         | "Authority"
                         | "Secret"

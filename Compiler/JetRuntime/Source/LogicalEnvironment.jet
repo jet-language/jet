@@ -1,0 +1,170 @@
+// EnvInit.rs:6-35 owns one OnceLock<RwLock<JetEnvEntries>>. Native main
+// captures startup before threads, then seeds this one logical cell. The
+// immutable startup byte index is not changed by logical writes.
+// Shared's existing reader/writer protocol occupies bytes 0..79; once is @80.
+// The cell uses @56=head and @64=tail. Each owned entry is
+// [next, compact key bytes, key length, compact value bytes, value length].
+logical_env_root := I64{0}
+
+fn logical_environment_copy(bytes: I64, length: I64) -> I64 {
+    if (length == I64{0}) { return I64{0} }
+    owned :: jet_rt_alloc(length, I64{1})
+    rt_text_bytes_copy(owned, bytes, length)
+    owned
+}
+
+fn logical_environment_find(bytes: I64, length: I64) -> I64 {
+    entry := rt_text_word(logical_env_root + I64{56})
+    loop entry != (I64{0}) {
+        if (rt_text_word(entry + I64{16}) == length && rt_text_equal_bytes(rt_text_word(entry + I64{8}), bytes, length)) { return entry }
+        entry = rt_text_word(entry)
+    }
+    I64{0}
+}
+
+fn logical_environment_remove(entry: I64) {
+    previous := I64{0}
+    current := rt_text_word(logical_env_root + I64{56})
+    loop current != entry {
+        previous = current
+        current = rt_text_word(current)
+    }
+    next_entry :: rt_text_word(entry)
+    if (previous == I64{0}) -> rt_text_store(logical_env_root + I64{56}, next_entry)
+    else -> rt_text_store(previous, next_entry)
+    if (rt_text_word(logical_env_root + I64{64}) == entry) -> rt_text_store(logical_env_root + I64{64}, previous)
+    jet_rt_free(rt_text_word(entry + I64{8}), rt_text_word(entry + I64{16}), I64{1})
+    jet_rt_free(rt_text_word(entry + I64{24}), rt_text_word(entry + I64{32}), I64{1})
+    jet_rt_free(entry, I64{40}, I64{8})
+}
+
+fn logical_environment_append(key: I64, key_length: I64, value: I64, value_length: I64) {
+    // Rust removes an existing match, then pushes the new pair at the end.
+    old :: logical_environment_find(key, key_length)
+    if (old != I64{0}) -> logical_environment_remove(old)
+    entry :: jet_rt_alloc(I64{40}, I64{8})
+    rt_text_store(entry, I64{0})
+    rt_text_store(entry + I64{8}, logical_environment_copy(key, key_length))
+    rt_text_store(entry + I64{16}, key_length)
+    rt_text_store(entry + I64{24}, logical_environment_copy(value, value_length))
+    rt_text_store(entry + I64{32}, value_length)
+    tail :: rt_text_word(logical_env_root + I64{64})
+    if (tail == I64{0}) -> rt_text_store(logical_env_root + I64{56}, entry)
+    else -> rt_text_store(tail, entry)
+    rt_text_store(logical_env_root + I64{64}, entry)
+}
+
+fn logical_environment_seed() {
+    if !(sync_once_enter(logical_env_root + I64{80})) {
+        return
+    }
+    index := I64{0}
+    loop index < host_env_length {
+        row :: wrapping(host_env_rows + index * I64{24})
+        key :: rt_text_word(row)
+        value :: wrapping(key + rt_text_word(row + I64{16}))
+        logical_environment_append(key, rt_text_word(row + I64{8}), value, host_startup_byte_length(value))
+        index = wrapping(index + I64{1})
+    }
+    sync_once_complete(logical_env_root + I64{80})
+}
+
+// Called only by the single-threaded host argument registration, before its
+// published argc lets user code enter. No global-address intrinsic is needed.
+fn logical_environment_startup() {
+    logical_env_root = jet_rt_alloc(I64{88}, I64{8})
+    thread_zero(logical_env_root, I64{88})
+    logical_environment_seed()
+}
+
+#Export(c) fn jet_rt_logical_env_seed() {
+    host_arguments_require()
+    logical_environment_seed()
+}
+
+// FSIoEnvOsTesting.rs:569-570 is Option<String>, not Result: absent and a
+// present non-Unicode value both return None. Raw OS lookup preserves bytes.
+#Export(c) fn jet_rt_logical_env_get(key: I64) -> I64 {
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, false)
+    entry :: logical_environment_find(rt_text_data(key), rt_text_len(key))
+    result := I64{0}
+    if (entry != I64{0}) {
+        bytes :: rt_text_word(entry + I64{24})
+        length :: rt_text_word(entry + I64{32})
+        at := I64{0}
+        valid := true
+        loop at < length {
+            width :: rt_text_valid_width(bytes + at, length - at, I64{1})
+            if (width < I64{0}) {
+                valid = false
+                break
+            }
+            at = wrapping(at + width)
+        }
+        if valid -> result = rt_text_copy(bytes, length)
+    }
+    shared_release(logical_env_root, false)
+    result
+}
+
+// Presence: 0 absent / 1 present. Both outputs are always initialized. Present
+// empty is (1,0,0); nonempty bytes transfer one allocation, length/align=1.
+#Export(c) fn jet_rt_logical_env_get_os(key: I64, data_out: I64, len_out: I64) -> I64 {
+    jet_rt_logical_env_seed()
+    rt_text_store(data_out, I64{0})
+    rt_text_store(len_out, I64{0})
+    shared_acquire(logical_env_root, false)
+    entry :: logical_environment_find(rt_text_data(key), rt_text_len(key))
+    present := I64{0}
+    if (entry != I64{0}) {
+        length :: rt_text_word(entry + I64{32})
+        rt_text_store(data_out, logical_environment_copy(rt_text_word(entry + I64{24}), length))
+        rt_text_store(len_out, length)
+        present = I64{1}
+    }
+    shared_release(logical_env_root, false)
+    present
+}
+
+fn logical_environment_valid_name(name: I64) -> Bool {
+    length :: rt_text_len(name)
+    if (length == I64{0}) { return false }
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(rt_text_data(name) + at)
+        if (byte == I64{0} || byte == I64{61}) { return false }
+        at = wrapping(at + I64{1})
+    }
+    true
+}
+
+// Status: 0 success, -1 InvalidName, -2 InvalidValue; no OS environment write.
+#Export(c) fn jet_rt_logical_env_set(key: I64, value: I64) -> I64 {
+    if !(logical_environment_valid_name(key)) { return I64{-1} }
+    at := I64{0}
+    loop at < rt_text_len(value) {
+        if (rt_text_byte(rt_text_data(value) + at) == I64{0}) { return I64{-2} }
+        at = wrapping(at + I64{1})
+    }
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, true)
+    logical_environment_append(rt_text_data(key), rt_text_len(key), rt_text_data(value), rt_text_len(value))
+    shared_release(logical_env_root, true)
+    I64{0}
+}
+
+// Status: 0 absent, 1 removed, -1 InvalidName.
+#Export(c) fn jet_rt_logical_env_unset(key: I64) -> I64 {
+    if !(logical_environment_valid_name(key)) { return I64{-1} }
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, true)
+    entry :: logical_environment_find(rt_text_data(key), rt_text_len(key))
+    removed := I64{0}
+    if (entry != I64{0}) {
+        logical_environment_remove(entry)
+        removed = I64{1}
+    }
+    shared_release(logical_env_root, true)
+    removed
+}

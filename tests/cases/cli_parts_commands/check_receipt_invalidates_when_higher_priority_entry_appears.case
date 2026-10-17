@@ -1,0 +1,21 @@
+# Port of tests/cli_parts/commands.rs:145-197; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# PENDING-GRAMMAR: step unset/write.
+fixture: fixtures/entry_candidate
+env: JET_RECEIPT_DIR={work}/.jet/receipts
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check --verbose
+unset: JET_RECEIPT_BYPASS
+exit: 0
+step: jet check --verbose
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: ~ "ok: check current" # original predicate
+write: run.jet new-entry.template
+step: jet check --verbose
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stderr: !~ "ok: check current" # original predicate
+stderr: ~ "receipt: check invalidated" # original predicate
+stderr: ~ "input changed" # original predicate

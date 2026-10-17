@@ -1,0 +1,23 @@
+# Port of tests/cli_parts/surface.rs:2501-2533; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+# KNOWN-FAILING #4813: original fix_bare_usage.txt is absent across all refs; no invented/blessed snapshot.
+step: jet fix
+env: NO_COLOR=1
+exit: 2
+stderr: = fix_bare_usage.txt
+step: jet fix
+env: NO_COLOR=1
+exit: 2
+stderr: !~ "Welcome to" # original predicate
+stderr: ~ "jet fix" # original predicate
+step: jet lint
+env: NO_COLOR=1
+exit: 2
+stderr: !~ "Welcome to" # original predicate
+stderr: ~ "jet lint" # original predicate
+step: jet fuzz
+env: NO_COLOR=1
+exit: 2
+stderr: !~ "Welcome to" # original predicate
+stderr: ~ "jet fuzz" # original predicate

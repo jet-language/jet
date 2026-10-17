@@ -1,12 +1,12 @@
 // #1180: one argv executor, one explicit Exec authority, one receipt.
 package {
     name: "agent_executor"
-    authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [Exec, IO, Mem.Alloc, Time.Wait] } }
 }
 
 use core.process as process
 
-fn run() -[Exec, Time.Wait]> {
+fn run() -[Exec, IO, Time.Wait]> {
     policy :: Authority.from_rights(["Exec:printf"])
     spec :: process.cmd(["printf", "agent-safe"])
         .stdout(.Capture)

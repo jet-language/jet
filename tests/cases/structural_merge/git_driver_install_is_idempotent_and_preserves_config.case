@@ -1,0 +1,14 @@
+# PORT tests/structural_merge.rs::git_driver_install_is_idempotent_and_preserves_config
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+requires: tool:git
+step: git init
+exit: 0
+step: git config merge.jetstruct.name stale
+exit: 0
+step: jet merge install-driver --repo {work}
+exit: 0
+step: jet merge install-driver --repo {work}
+exit: 0
+file: .git/config ~ "[core]" # Original contains predicate.
+file: .git/config count "[merge \"jetstruct\"]" = 1 # original ed77c235f tests/structural_merge.rs:357 config.matches count
+file: .gitattributes count "*.jet merge=jetstruct" = 1 # original ed77c235f tests/structural_merge.rs:359 attrs.matches count

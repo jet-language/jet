@@ -1,0 +1,20 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    b.generate("generated_message") {
+        fn generated_message() -> String { return "built" }
+    }
+    #Impure("write declared build output") {
+        stamp :: b.action(
+            "stamp",
+            [],
+            [".jet/generated/app/stamp.txt"],
+            ["sh", "-c", "printf stamped > .jet/generated/app/stamp.txt"],
+            ["Exec", "FS"]
+        )
+        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+
+fn run() { print("ok") }

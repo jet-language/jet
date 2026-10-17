@@ -1,0 +1,64 @@
+# HAND-PORT tests/agent_workloads.rs:2156-2211 structured_data_database_http_production_paths_handle_success_and_hostile_inputs
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# LIVE original manifest reader/header/all13fields/version/relative path predicates, exact6membership selection/count (duplicates legal), original package/adapters/argv/env120s/1MiB output, exact current expected bytes/input SHA unchanged, precise public scratch whitelist including optional .rs file/no symlinks. Capture when membership approved TestLead1; every assertion remains .case.
+fixture: structured_data_database_http_production_paths_handle_success_and_hostile_inputs.fixture
+env: NO_COLOR=1
+copy: {root}/tests/agent_workloads/manifest.tsv manifest.tsv
+file.line(0): manifest.tsv = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards" # original ed77c235f tests/agent_workloads.rs:625-632 first Rust line equals HEADER
+for line file.after_first("\n").filter(!= "") manifest.tsv as r
+write: row.txt = "{r}"
+file.append("_").replace("\t", "\n"): row.txt lines = 13 # original ed77c235f tests/agent_workloads.rs:636-637 tab-split exactly13 fields; sentinel preserves empty final field
+capture: version = text file.split("\t", 0) row.txt
+cap:version: = "1"
+capture: id = text file.split("\t", 1) row.txt
+capture: input = text file.split("\t", 5) row.txt
+capture: expected_path = text file.split("\t", 6) row.txt
+cap:input: nonempty # original ed77c235f tests/agent_workloads.rs:535-541,639 input corpus path rejects empty
+cap:input: !~ ":" # original corpus relative-path colon rejection
+cap:input.replace("\\", "/").append("/marker").replace("/", "\n"): each-line where != "" && != "." && != ".." # original ed77c235f tests/agent_workloads.rs:539-541,639 every slash/backslash-split input component excludes empty/dot/parent
+cap:expected_path: nonempty # original ed77c235f tests/agent_workloads.rs:535-541,640 expected corpus path rejects empty
+cap:expected_path: !~ ":" # original corpus relative-path colon rejection
+cap:expected_path.replace("\\", "/").append("/marker").replace("/", "\n"): each-line where != "" && != "." && != ".." # original ed77c235f tests/agent_workloads.rs:539-541,640 every slash/backslash-split expected component excludes empty/dot/parent
+when cap:id in ["structured-data-transform","structured-data-hostile","database-access","database-hostile","http-api","http-hostile"]
+when cap:id in ["structured-data-transform","structured-data-hostile"]: write: selected.txt = "structured_data"
+when cap:id in ["database-access","database-hostile"]: write: selected.txt = "database_access"
+when cap:id in ["http-api","http-hostile"]: write: selected.txt = "http_api"
+capture: stem = text file selected.txt
+mkdir: run
+copy: sources/{cap:stem}.jet run/{cap:stem}.jet
+copy: package.source run/package.jet
+copy: {root}/tests/agent_workloads/{cap:expected_path} expected.out
+capture: expected = text file expected.out
+copy: {root}/tests/agent_workloads/{cap:input} input.before
+capture: input_sha = sha256 file input.before
+step: jet run --release {cap:stem}.jet -- {root}/tests/agent_workloads/{cap:input}
+env: JET_RECEIPT_BYPASS=1
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2189 !limit_exceeded with combined output bytes <= 1_048_576
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+file: input.after sha256 = "{cap:input_sha}"
+remove: run/package.jet
+remove: run/{cap:stem}.jet
+file: run/.jet is-dir
+file: run/.jet not-symlink
+file: run/.jet/build is-dir
+file: run/.jet/build not-symlink
+file: run/.jet/build/{cap:stem} is-file
+entries: run name != ".jet" = 0
+entries: run/.jet name != "build" = 0
+entries: run/.jet/build name != "{cap:stem}" name != "{cap:stem}.rs" = 0
+for file run/.jet/build as artifact
+file: {artifact.path} is-file
+file: {artifact.path} not-symlink
+end for
+capture: checked += text "x\n"
+remove: run
+end when
+end for
+cap:checked: lines = 6 # original ed77c235f tests/agent_workloads.rs:2159-2166,2207-2210 checked count equals six selected task IDs

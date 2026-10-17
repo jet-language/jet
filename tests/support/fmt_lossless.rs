@@ -143,13 +143,6 @@ const UI_PARSE_INVALID: &[&str] = &[
     "tests/ui/positional_tuple.jet",
     "tests/ui/project_module_invalid/broken.jet",
     "tests/ui/protocol_bad_endpoint.jet",
-    "tests/ui/pub_file_duplicate_marker.jet",
-    "tests/ui/pub_file_priv_without_marker.jet",
-    "tests/ui/pub_file_private_teaching.jet",
-    "tests/ui/pub_file_pub_priv_conflict.jet",
-    "tests/ui/pub_file_publicfile_teaching.jet",
-    "tests/ui/pub_file_redundant_pub.jet",
-    "tests/ui/pub_file_section_label.jet",
     "tests/ui/pub_package_bad_qualifier.jet",
     "tests/ui/qq_block_fallback.jet",
     "tests/ui/quantity_unknown_kind.jet",
@@ -449,7 +442,7 @@ fn file_chunk_category(chunk: &[Token]) -> usize {
         [TokKind::Hash, TokKind::Ident(name), ..]
             if matches!(
                 name.as_str(),
-                jet::Syntax::MARKER_PUB_FILE | jet::Syntax::MARKER_NO_PRELUDE
+                jet::Syntax::MARKER_NO_PRELUDE
             ) =>
         {
             0
@@ -1899,13 +1892,13 @@ fn canonical_rewrite_rules_are_explicit_and_narrow() {
         ),
         (
             "union order rule requires a type annotation",
-            "fn run() { value :: left | right }\n",
-            "fn run() { value :: right | left }\n",
+            "fn run() { value :: left.bit_or(right) }\n",
+            "fn run() { value :: right.bit_or(left) }\n",
         ),
         (
             "union order rule rejects struct field values",
-            "fn run() { p :: Point{x: left | right} }\n",
-            "fn run() { p :: Point{x: right | left} }\n",
+            "fn run() { p :: Point{x: left.bit_or(right)} }\n",
+            "fn run() { p :: Point{x: right.bit_or(left)} }\n",
         ),
         (
             "union order rule rejects dotted member replacement",

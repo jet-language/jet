@@ -9,19 +9,19 @@ struct Score {
 
 fn run() {
     session :: ops.open() ?? panic("R open failed")
-    input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "vector": DataTree.Array([DataTree.Int(1), DataTree.Int(2)]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
-    print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("first call failed")) ?? panic("value is not canonical JSON"))
-    print(json.canonical(ops.transform(session, ~input, 5000) ?? panic("second call failed")) ?? panic("value is not canonical JSON"))
-    print(json.canonical(ops.double_values(session, DataTree.Array([DataTree.Int(2), DataTree.Int(4)]), 5000) ?? panic("vector call failed")) ?? panic("value is not canonical JSON"))
+    input :: Dyn.Object(["nested": Dyn.Object(["ok": Dyn.Bool(true)]), "vector": Dyn.Array([Dyn.Int(1), Dyn.Int(2)]), "scalar": Dyn.Float(3.5), "nothing": Dyn.Null])
+    print(json.canonical(ops.transform(session, input.copy(), 5000) ?? panic("first call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.transform(session, input.copy(), 5000) ?? panic("second call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.double_values(session, Dyn.Array([Dyn.Int(2), Dyn.Int(4)]), 5000) ?? panic("vector call failed")) ?? panic("value is not canonical JSON"))
     scores :: [Score]{{label: "a", score: 1.5}, {label: "b", score: 2.0}}
     scaled :: ops.scale_table_table<Score>(session, scores, 5000) ?? panic("list call failed")
     loop row in scaled -> print("{row.label}:{row.score}")
-    svg :: ops.plot_scores_plot(session, DataTree.Object(["values": DataTree.Array([DataTree.Int(2), DataTree.Int(5), DataTree.Int(3)])]), 5000) ?? panic("plot call failed")
+    svg :: ops.plot_scores_plot(session, Dyn.Object(["values": Dyn.Array([Dyn.Int(2), Dyn.Int(5), Dyn.Int(3)])]), 5000) ?? panic("plot call failed")
     print(svg.starts_with("<svg "))
     print(svg.contains("Jet and R") || svg.contains("glyph-"))
-    failed :: ops.fail_call(session, DataTree.Null, 5000) ?? DataTree.Text("failed")
+    failed :: ops.fail_call(session, Dyn.Null, 5000) ?? Dyn.Text("failed")
     print(json.canonical(failed) ?? panic("value is not canonical JSON"))
-    timed :: ops.sleep_call(session, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
+    timed :: ops.sleep_call(session, Dyn.Int(1), 100) ?? Dyn.Text("timeout")
     print(json.canonical(timed) ?? panic("value is not canonical JSON"))
     ops.close(^session)
 }

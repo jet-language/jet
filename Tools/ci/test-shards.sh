@@ -1,26 +1,19 @@
 #!/usr/bin/env bash
-# #211 (D-CI1=A): complete cargo test-target inventory, sharded across CI jobs.
+# Native test-suite inventory, sharded across CI jobs.
 #
-# Enumerates every cargo test target in the workspace from `cargo metadata`
-# (lib/bin/test kinds — the only kinds that can hold `#[test]` fns) and
-# assigns each one to a shard. Nothing here names a test file or package, so a
-# new test target lands in a shard automatically on the next run — it can never
-# silently fall out of every shard the way the old default-members-only
-# `cargo test` silently skipped every workspace crate except ".", "jet-driver",
-# "jetpack-bin", "jetos".
+# The complete native suite set is fixed here: golden, ui, cases, registries.
+# Each suite is one row of the inventory; the runner that executes a suite owns
+# its contents. A new suite must be added to `suites` below, which is the single
+# place that decides what CI can shard.
 #
-# #2075: the assignment is weighted, not round-robin. A Cargo target is atomic,
-# so a 45-minute `golden` stayed a 45-minute shard while five other jobs idled —
-# round-robin balances the COUNT of targets and ignores their cost. This script
-# reads measured seconds from `Tools/ci/test-weights.tsv` and passes the rows to
-# the shared weighted LPT engine. Corpus gates use that same engine with stem
-# weights, so there is one sharding notion (I8).
+# Assignment goes through the shared weighted LPT engine (weighted-shards.sh).
+# Suites have no measured cost yet, so every suite carries DEFAULT_WEIGHT and the
+# split is an even count. Measured per-suite seconds, when recorded, slot in as
+# the weight column without changing the engine.
 #
-# Output: one cargo-test argument line per selected target, e.g.
-#   -p jet-lexer --lib
-#   -p jet --test golden
-# Callers loop over stdout and run `cargo test $line` per line. The shared
-# engine's stderr summary reports predicted load and spread.
+# Output: one suite ID per line, sorted, for the selected shard. Callers loop
+# over stdout and run each suite. The engine's stderr summary reports predicted
+# load and spread.
 set -euo pipefail
 
 if [ "$#" -ne 2 ]; then
@@ -48,80 +41,20 @@ fi
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$repo"
 
-# Seconds charged to a target with no measured row. Deliberately small: an
-# unmeasured target is assumed cheap, so one unmeasured monster shows up as a
-# skewed real CI run (visible, fixable by measuring it) rather than as a
-# guessed weight nobody ever revisits.
+# Seconds charged to a suite with no measured cost.
 DEFAULT_WEIGHT=30
-weights_file="Tools/ci/test-weights.tsv"
 
-# Sorted, deterministic full inventory: "<package>\t<kind>\t<target-name>".
-# A plain assignment from a `set -o pipefail` pipeline (not `< <(...)`
-# process substitution, whose failure `mapfile` would silently swallow) so a
-# `cargo metadata`/jq failure aborts the script instead of reporting a
-# quietly-empty inventory.
-raw_targets="$(
-  cargo metadata --no-deps --format-version 1 |
-    jq -r '.packages[] | .name as $pkg | .targets[]
-      | select(.kind[0] == "lib" or .kind[0] == "bin" or .kind[0] == "test")
-      | "\($pkg)\t\(.kind[0])\t\(.name)"' |
-    sort -u
-)"
-if [ -z "$raw_targets" ]; then
-  echo "error: cargo metadata | jq reported zero lib/bin/test targets — the workspace always has some; treating this as a hard failure, not an empty shard" >&2
-  exit 1
-fi
-mapfile -t all_targets <<<"$raw_targets"
+suites=(golden ui cases registries)
 
-# The weight table, keyed by the exact inventory row. A malformed row is a hard
-# failure: a silently ignored weight is a shard split that lies about its cost.
-declare -A weight=()
-if [ -f "$weights_file" ]; then
-  line_number=0
-  while IFS= read -r line || [ -n "$line" ]; do
-    line_number=$((line_number + 1))
-    case "$line" in
-      ''|'#'*) continue ;;
-    esac
-    IFS=$'\t' read -r w_pkg w_kind w_name w_secs w_extra <<<"$line"
-    if [ -z "$w_pkg" ] || [ -z "$w_kind" ] || [ -z "$w_name" ] || [ -n "$w_extra" ]; then
-      echo "error: $weights_file:$line_number must be '<package>\t<kind>\t<target>\t<seconds>'" >&2
-      exit 65
-    fi
-    case "$w_secs" in
-      ''|*[!0-9]*) echo "error: $weights_file:$line_number has non-integer seconds '$w_secs'" >&2; exit 65 ;;
-    esac
-    key="$w_pkg"$'\t'"$w_kind"$'\t'"$w_name"
-    if [ -n "${weight[$key]+set}" ]; then
-      echo "error: $weights_file:$line_number repeats '$w_pkg $w_kind $w_name'" >&2
-      exit 65
-    fi
-    weight["$key"]="$w_secs"
-  done <"$weights_file"
-fi
-
-# Shared #2075 weighted LPT assignment. The item field keeps all remaining
-# tabs, so the cargo inventory row stays lossless until it is decoded below.
-selected_rows="$(
-  for row in "${all_targets[@]}"; do
-    printf '%s\t%s\n' "${weight[$row]:-$DEFAULT_WEIGHT}" "$row"
+# Shared weighted LPT assignment: one "<weight>\t<suite>" row per suite.
+selected="$(
+  for suite in "${suites[@]}"; do
+    printf '%s\t%s\n' "$DEFAULT_WEIGHT" "$suite"
   done | bash "$repo/Tools/ci/weighted-shards.sh" "$shard_index" "$shard_count"
 )"
 
-selected_lines=()
-if [ -n "$selected_rows" ]; then
-  while IFS= read -r row; do
-    IFS=$'\t' read -r pkg kind name <<<"$row"
-    case "$kind" in
-      lib) selected_lines+=("-p $pkg --lib") ;;
-      bin) selected_lines+=("-p $pkg --bin $name") ;;
-      test) selected_lines+=("-p $pkg --test $name") ;;
-    esac
-  done <<<"$selected_rows"
-fi
-
 # Emitted sorted: the shard's contents are a set, and a stable order keeps two
 # runs of the same shard diffable.
-if [ "${#selected_lines[@]}" -gt 0 ]; then
-  printf '%s\n' "${selected_lines[@]}" | sort
+if [ -n "$selected" ]; then
+  printf '%s\n' "$selected" | sort
 fi

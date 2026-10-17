@@ -1,0 +1,31 @@
+// tests/gate_law.rs65-75: KNOWN-FAILING #4843, real pre-write refusal law.
+// Exact root argument and typed gate diagnostics restored by the #4843 owner.
+// No API invented here; this uses the original writer contracts at cutover.
+// PENDING-SAME-HEAD nested package-test admission.
+
+fn s5_trust_gate_diagnostics(error: PackageGateError) {
+    found := false
+    loop diagnostic in error.diagnostics {
+        if diagnostic.code == "E3415" && diagnostic.what.contains("trust_grant") && diagnostic.what.contains("package.jet") -> found = true
+    }
+    assert(found)
+}
+
+#Test("trust writers refuse before touching the store") {
+    root :: trust_test_gate_dir("s5-gate-law")
+    files.write(files.join(root, "package.jet"), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ trust_grant: .Forbid }}\n") ?? panic("original package policy")
+    store :: files.join(root, "trust")
+    grant :: trust_parse_grant_selector("build:audited", "repo") ?? panic("original grant selector")
+    results :: [
+        trust_add_grant(store, root, grant),
+        trust_grant_hash(store, root, "audited"),
+        trust_add_pattern(store, root, "/reviewed/*")
+    ]
+    loop result in results {
+        if result == {
+            .Err(error) -> s5_trust_gate_diagnostics(error)
+            .Ok(_) -> panic("trust writer must refuse")
+        }
+    }
+    assert(!files.exists(store))
+}

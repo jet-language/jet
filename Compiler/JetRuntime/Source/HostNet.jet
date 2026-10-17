@@ -1,0 +1,47 @@
+// Core.net.__ResolveError's one C carrier: 32 bytes, alignment 8.
+// [kind exact-Int word @0, has_os_code word @8, os_code exact-Int word @16,
+// owned E4 message @24]. Int words retain/release through canonical L4,
+// never by interpreting a spilled Int pointer as its numeric i64 value.
+// Core owns kind selection and resolve policy; these are ownership adapters.
+#Export(c) fn jet_rt_record_new_jet_resolve_error(kind: I64, has_os_code: I64, os_code: I64, message: I64) -> I64 {
+    value :: jet_rt_alloc(I64{32}, I64{8})
+    #Unsafe("value exclusively owns four initialized words; inputs lend exact Int owners and a valid E4 message") {
+        os_store_i64(value, jet_rt_int_clone(kind))
+        os_store_i64(wrapping(value + I64{8}), if ((has_os_code.bit_and(I64{255})) != I64{0}) -> I64{1} else -> I64{0})
+        os_store_i64(wrapping(value + I64{16}), jet_rt_int_clone(os_code))
+        os_store_i64(wrapping(value + I64{24}), jet_rt_string_clone(message))
+    }
+    value
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_resolve_error(value: I64) -> I64 {
+    #Unsafe("value lends the complete immutable carrier and all three owned children") {
+        return jet_rt_record_new_jet_resolve_error(os_load_i64(value), os_load_i64(wrapping(value + I64{8})), os_load_i64(wrapping(value + I64{16})), os_load_i64(wrapping(value + I64{24})))
+    }
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_resolve_error(value: I64) {
+    if (value == I64{0}) -> return
+    #Unsafe("value transfers its 32-byte header, two independently retained Int words and owned E4 message") {
+        jet_rt_int_drop(os_load_i64(value))
+        jet_rt_int_drop(os_load_i64(wrapping(value + I64{16})))
+        jet_rt_string_drop(os_load_i64(wrapping(value + I64{24})))
+    }
+    jet_rt_free(value, I64{32}, I64{8})
+}
+
+#Export(c) fn jet_rt_record_get_jet_resolve_error_kind(value: I64) -> I64 {
+    #Unsafe("value lends the immutable carrier; return retains its exact Int field") { return jet_rt_int_clone(os_load_i64(value)) }
+}
+
+#Export(c) fn jet_rt_record_get_jet_resolve_error_has_os_code(value: I64) -> Bool {
+    #Unsafe("value lends the initialized presence word") { return os_load_i64(wrapping(value + I64{8})) != I64{0} }
+}
+
+#Export(c) fn jet_rt_record_get_jet_resolve_error_os_code(value: I64) -> I64 {
+    #Unsafe("value lends the immutable carrier; return retains its exact Int field") { return jet_rt_int_clone(os_load_i64(wrapping(value + I64{16}))) }
+}
+
+#Export(c) fn jet_rt_record_get_jet_resolve_error_message(value: I64) -> I64 {
+    #Unsafe("value lends the immutable carrier; return deep-clones its owned E4 message") { return jet_rt_string_clone(os_load_i64(wrapping(value + I64{24}))) }
+}

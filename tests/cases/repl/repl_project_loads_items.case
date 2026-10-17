@@ -1,0 +1,22 @@
+# PORT tests/repl.rs:1181-1218; all original predicates, verbatim input literals.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Startup non-overlap: crates/jet-repl/src/Render.rs24-37,41-61,67-74; cooked mirror lib.rs2469-2470.
+fixture: repl_project_loads_items.fixture
+mkdir: project
+copy: helper.jet project/helper.jet
+step: jet repl --project {work}/project
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_project_loads_items.fixture/input0.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "13 : Int" # original predicate
+stdout: !~ "E0102" # original predicate
+stderr: !~ "E0102" # original predicate
+stdout: !~ "error [E0107]" # original predicate
+stderr: !~ "error [E0107]" # original predicate
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_project_loads_items.fixture/input1.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "error" # original predicate

@@ -1,0 +1,113 @@
+// Private UiABI carriers, seed HostServices.rs:74-76,1242-1246 and
+// WebTable.rs:51-120. Ordered E4 lists reuse DataPlot's canonical provider.
+#Export(c) fn jet_rt_handle_clone_jet_ui_capability_facts(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value).bit_and(I64{255})) }
+#Export(c) fn jet_rt_handle_drop_jet_ui_capability_facts(value: I64) { ui_carrier_scalar_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_ui_capability_facts(a: I64, b: I64) -> Bool { (ui_carrier_word(a).bit_and(I64{255})) == (ui_carrier_word(b).bit_and(I64{255})) }
+#Export(c) fn jet_rt_handle_clone_jet_ui_file_filter(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_FILE_FILTER_BYTES, I64{8})
+    ui_carrier_store(result + UI_FILE_FILTER_LABEL, jet_rt_string_clone(ui_carrier_word(value + UI_FILE_FILTER_LABEL)))
+    ui_carrier_store(result + UI_FILE_FILTER_EXTENSIONS, data_plot_texts_clone(ui_carrier_word(value + UI_FILE_FILTER_EXTENSIONS)))
+    ui_carrier_store(result + UI_FILE_FILTER_MIME_TYPES, data_plot_texts_clone(ui_carrier_word(value + UI_FILE_FILTER_MIME_TYPES)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_ui_file_filter(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_FILE_FILTER_LABEL))
+    data_plot_texts_drop(ui_carrier_word(value + UI_FILE_FILTER_EXTENSIONS))
+    data_plot_texts_drop(ui_carrier_word(value + UI_FILE_FILTER_MIME_TYPES))
+    jet_rt_free(value, UI_FILE_FILTER_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ui_file_filter(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(a + UI_FILE_FILTER_LABEL), ui_carrier_word(b + UI_FILE_FILTER_LABEL)) && data_plot_texts_eq(ui_carrier_word(a + UI_FILE_FILTER_EXTENSIONS), ui_carrier_word(b + UI_FILE_FILTER_EXTENSIONS)) && data_plot_texts_eq(ui_carrier_word(a + UI_FILE_FILTER_MIME_TYPES), ui_carrier_word(b + UI_FILE_FILTER_MIME_TYPES))
+}
+#Export(c) fn jet_rt_handle_field_jet_ui_file_filter_label(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_FILE_FILTER_LABEL), out) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_ui_file_filter_new(capacity: I64) -> I64 { data_sequence_new(capacity, UI_FILE_FILTER_CHILD_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_ui_file_filter_len(value: I64) -> I64 { ui_carrier_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_ui_file_filter_get(value: I64, index: I64) -> I64 { ui_carrier_word(data_sequence_slot(value, index, UI_FILE_FILTER_CHILD_BYTES)) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_ui_file_filter_push(value: I64, item: I64) {
+    ui_carrier_store(data_sequence_reserve(value, UI_FILE_FILTER_CHILD_BYTES), item)
+    ui_carrier_store(value + DATA_SEQUENCE_LENGTH, ui_carrier_word(value + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+// Seed CAbiRoutes.rs:11604-11605 borrows column and checks raw ordinal.
+#Export(c) fn jet_rt_record_new_jet_web_table_sort(column: I64, direction: I64) -> I64 {
+    text :: jet_rt_string_clone(column)
+    ordinal :: ui_carrier_checked_tag(direction, I64{2})
+    result :: jet_rt_alloc(UI_TABLE_SORT_BYTES, I64{8})
+    ui_carrier_store(result + UI_TABLE_SORT_COLUMN, text)
+    ui_carrier_store(result + UI_TABLE_SORT_DIRECTION, ordinal)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_web_table_sort(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_TABLE_SORT_BYTES, I64{8})
+    ui_carrier_store(result + UI_TABLE_SORT_COLUMN, jet_rt_string_clone(ui_carrier_word(value + UI_TABLE_SORT_COLUMN)))
+    ui_carrier_store(result + UI_TABLE_SORT_DIRECTION, ui_carrier_word(value + UI_TABLE_SORT_DIRECTION))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_web_table_sort(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_TABLE_SORT_COLUMN))
+    jet_rt_free(value, UI_TABLE_SORT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_web_table_sort(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(a + UI_TABLE_SORT_COLUMN), ui_carrier_word(b + UI_TABLE_SORT_COLUMN)) && ui_carrier_word(a + UI_TABLE_SORT_DIRECTION) == ui_carrier_word(b + UI_TABLE_SORT_DIRECTION)
+}
+#Export(c) fn jet_rt_record_get_jet_web_table_sort_column(value: I64) -> I64 { jet_rt_string_clone(ui_carrier_word(value + UI_TABLE_SORT_COLUMN)) }
+#Export(c) fn jet_rt_record_get_jet_web_table_sort_direction(value: I64) -> I64 { ui_carrier_word(value + UI_TABLE_SORT_DIRECTION) }
+#Export(c) fn jet_rt_handle_clone_jet_web_table_status(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_web_table_status(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_web_table_status(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
+// Internal Filter16 owns both text fields; no extra public API is invented.
+fn ui_table_filter_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(UI_TABLE_FILTER_BYTES, I64{8})
+    ui_carrier_store(result + UI_TABLE_FILTER_COLUMN, jet_rt_string_clone(ui_carrier_word(value + UI_TABLE_FILTER_COLUMN)))
+    ui_carrier_store(result + UI_TABLE_FILTER_VALUE, jet_rt_string_clone(ui_carrier_word(value + UI_TABLE_FILTER_VALUE)))
+    result
+}
+fn ui_table_filter_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_TABLE_FILTER_COLUMN))
+    jet_rt_string_drop(ui_carrier_word(value + UI_TABLE_FILTER_VALUE))
+    jet_rt_free(value, UI_TABLE_FILTER_BYTES, I64{8})
+}
+fn ui_table_filter_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    jet_rt_string_eq(ui_carrier_word(a + UI_TABLE_FILTER_COLUMN), ui_carrier_word(b + UI_TABLE_FILTER_COLUMN)) && jet_rt_string_eq(ui_carrier_word(a + UI_TABLE_FILTER_VALUE), ui_carrier_word(b + UI_TABLE_FILTER_VALUE))
+}
+#Export(c) fn jet_rt_handle_clone_jet_web_table_state(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_TABLE_STATE_BYTES, I64{8})
+    sort :: ui_carrier_word(value + UI_TABLE_STATE_SORT)
+    ui_carrier_store(result + UI_TABLE_STATE_SORT, if (sort == I64{0}) -> I64{0} else -> jet_rt_handle_clone_jet_web_table_sort(sort))
+    ui_carrier_store(result + UI_TABLE_STATE_FILTER, ui_table_filter_clone(ui_carrier_word(value + UI_TABLE_STATE_FILTER)))
+    ui_carrier_store(result + UI_TABLE_STATE_PAGE_INDEX, ui_carrier_word(value + UI_TABLE_STATE_PAGE_INDEX))
+    ui_carrier_store(result + UI_TABLE_STATE_PAGE_SIZE, ui_carrier_word(value + UI_TABLE_STATE_PAGE_SIZE))
+    ui_carrier_store(result + UI_TABLE_STATE_SELECTED_KEYS, data_plot_texts_clone(ui_carrier_word(value + UI_TABLE_STATE_SELECTED_KEYS)))
+    ui_carrier_store(result + UI_TABLE_STATE_SELECTION_ANCHOR, ui_optional_text_clone(ui_carrier_word(value + UI_TABLE_STATE_SELECTION_ANCHOR)))
+    ui_carrier_store(result + UI_TABLE_STATE_FOCUS_KEY, ui_optional_text_clone(ui_carrier_word(value + UI_TABLE_STATE_FOCUS_KEY)))
+    ui_carrier_store(result + UI_TABLE_STATE_PAGE_MODE, ui_carrier_word(value + UI_TABLE_STATE_PAGE_MODE))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_web_table_state(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_handle_drop_jet_web_table_sort(ui_carrier_word(value + UI_TABLE_STATE_SORT))
+    ui_table_filter_drop(ui_carrier_word(value + UI_TABLE_STATE_FILTER))
+    data_plot_texts_drop(ui_carrier_word(value + UI_TABLE_STATE_SELECTED_KEYS))
+    ui_optional_text_drop(ui_carrier_word(value + UI_TABLE_STATE_SELECTION_ANCHOR))
+    ui_optional_text_drop(ui_carrier_word(value + UI_TABLE_STATE_FOCUS_KEY))
+    jet_rt_free(value, UI_TABLE_STATE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_web_table_state(a: I64, b: I64) -> Bool {
+    x :: ui_carrier_word(a + UI_TABLE_STATE_SORT)
+    y :: ui_carrier_word(b + UI_TABLE_STATE_SORT)
+    if {
+        (x == I64{0} || y == I64{0}) -> { if (x != y) -> return false }
+        else -> { if !jet_rt_handle_eq_jet_web_table_sort(x, y) -> return false }
+    }
+    if !ui_table_filter_eq(ui_carrier_word(a + UI_TABLE_STATE_FILTER), ui_carrier_word(b + UI_TABLE_STATE_FILTER)) -> return false
+    if (ui_carrier_word(a + UI_TABLE_STATE_PAGE_INDEX) != ui_carrier_word(b + UI_TABLE_STATE_PAGE_INDEX)) -> return false
+    if (ui_carrier_word(a + UI_TABLE_STATE_PAGE_SIZE) != ui_carrier_word(b + UI_TABLE_STATE_PAGE_SIZE)) -> return false
+    if !data_plot_texts_eq(ui_carrier_word(a + UI_TABLE_STATE_SELECTED_KEYS), ui_carrier_word(b + UI_TABLE_STATE_SELECTED_KEYS)) -> return false
+    if !ui_optional_text_eq(ui_carrier_word(a + UI_TABLE_STATE_SELECTION_ANCHOR), ui_carrier_word(b + UI_TABLE_STATE_SELECTION_ANCHOR)) -> return false
+    if !ui_optional_text_eq(ui_carrier_word(a + UI_TABLE_STATE_FOCUS_KEY), ui_carrier_word(b + UI_TABLE_STATE_FOCUS_KEY)) -> return false
+    ui_carrier_word(a + UI_TABLE_STATE_PAGE_MODE) == ui_carrier_word(b + UI_TABLE_STATE_PAGE_MODE)
+}

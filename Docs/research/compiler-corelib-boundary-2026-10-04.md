@@ -215,6 +215,18 @@ The 2026-09-28 inventory for #3690 classifies the Rust as follows (file
   second compiler reaching parity with the first on that split. It is not a
   missing Core feature.
 
+**Source-owned implementation targets.** A canonical `SourceOwned` Core row
+may carry `with_source_target("implementation")`. Public signatures, effects,
+authority, overload admission and operand normalization remain the declaration's
+facts; the resulting checked operands call the implementation's ordinary Jet
+function, not a host dispatcher. Signature projection and codegen indexing admit
+a registered private target (for example `take` → `__take_bytes`) without adding
+it to Core exports or permitting ordinary private imports. Receiver rows retain
+their facts with `with_source_owned()` and name a fully qualified target such as
+`core.jobs.__enqueue`. Neither target metadata on a host-owned row nor a missing
+checked implementation enables a fallback host route. Typed JSON's sealed
+compiler-owned Decode projection remains separate from this forwarding.
+
 ### 2.6 What forces a compiler release today
 
 | Change | Why the compiler binary must change |

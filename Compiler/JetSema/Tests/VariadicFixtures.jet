@@ -1,0 +1,134 @@
+// Assemble with production Bootstrap sources, replacing the CLI entry.
+// The fixtures exercise the Jet checker; no reference front end supplies facts.
+use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+use jet_cli.[jet_cli_compile_file]
+use jet_foundation.[DIAGNOSTIC_ERROR, MIRCallArg, MIRCopyFact, MIRProgram]
+
+fn variadic_fixture_reject(file: String, code: String) {
+    checked :: jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> {
+            if !refusal.stderr.contains(code) -> panic("{file}: refusal lost {code}")
+            return
+        }
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR && diagnostic.code == code -> return
+            }
+            panic("{file}: expected checked refusal {code}")
+        }
+    }
+}
+
+fn variadic_fixture_arity(args: [MIRCallArg], arity: Int) {
+    if args.len() != arity -> panic("variadic call did not reach fixed checked arity")
+    loop (index, argument) in args {
+        if argument.spread -> panic("raw spread escaped checked argument packing")
+        if argument.binder_slot != Val(index) -> panic("variadic call lost its physical binder slot")
+    }
+}
+
+fn variadic_fixture_mir(program: MIRProgram, require_coercions: Bool, require_indirect: Bool) {
+    variadic_calls := 0
+    trait_calls := 0
+    indirect_calls := 0
+    boxes := 0
+    materializations := 0
+    loop function in program.functions {
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.operation == {
+                    .TraitBox(_, _) -> boxes += 1
+                    .Copy(_, fact) -> if fact == MIRCopyFact.ViewMaterialize -> materializations += 1
+                    .IndirectCall(callee, args, _) -> {
+                        loop fact in function.values {
+                            if fact.id.value != callee.value -> next
+                            if fact.ty.kind == .Fn(signature) {
+                                if signature.call_metadata == .Val(metadata) {
+                                    variadic := false
+                                    loop flag in metadata.variadic {
+                                        if flag -> variadic = true
+                                    }
+                                    if variadic {
+                                        variadic_fixture_arity(args, signature.params.len())
+                                        indirect_calls += 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .Call(callee, args, _) -> {
+                        target := if callee == {
+                            .User(id) | .Associated(id, _) | .Method(id, _) -> Val(id)
+                            else -> None
+                        }
+                        if target == .Val(id) {
+                            loop declaration in program.functions {
+                                if declaration.id.value != id.value -> next
+                                variadic := false
+                                loop parameter in declaration.params {
+                                    if parameter.variadic -> variadic = true
+                                }
+                                if variadic {
+                                    variadic_fixture_arity(args, declaration.params.len())
+                                    variadic_calls += 1
+                                }
+                            }
+                        }
+                        if callee == .TraitMethod(id, _, _) {
+                            loop declaration in program.traits {
+                                loop method in declaration.methods {
+                                    if method.id.value != id.value -> next
+                                    variadic := false
+                                    loop parameter in method.params {
+                                        if parameter.variadic -> variadic = true
+                                    }
+                                    if variadic {
+                                        offset :: if method.self_access != None -> 1 else -> 0
+                                        variadic_fixture_arity(args, method.params.len() + offset)
+                                        trait_calls += 1
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    if variadic_calls == 0 -> panic("fixture did not exercise a checked variadic call")
+    if require_coercions && (trait_calls == 0 || boxes == 0 || materializations == 0) -> panic("checked trait/fixed-list slot regression did not exercise its carriers")
+    if require_indirect && indirect_calls == 0 -> panic("fixture lost its checked variadic function-value signature")
+}
+
+fn variadic_fixture_accept(file: String, require_coercions: Bool) {
+    checked :: jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program)
+    if checked == {
+        .Refused(refusal) -> panic("{file}: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            if result.internal_problem != None -> panic("{file}: internal compiler failure")
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("{file}: unexpected {diagnostic.code}")
+            }
+            program :: result.mir ?? panic("{file}: compilation produced no MIR")
+            variadic_fixture_mir(program, require_coercions, file.ends_with("/variadics_eval_order.jet"))
+        }
+    }
+}
+
+fn run() {
+    root :: "Compiler/JetSema/Tests/fixtures"
+    variadic_fixture_reject("{root}/variadic_spread_non_tail.jet", "E1312")
+    variadic_fixture_reject("{root}/variadic_move_borrowed.jet", "E0201")
+    variadic_fixture_reject("{root}/variadic_move_read_tail.jet", "E0203")
+    variadic_fixture_reject("{root}/variadic_non_clone_spread.jet", "E0211")
+    variadic_fixture_reject("{root}/variadic_spread_element_mismatch.jet", "E0112")
+    examples :: "Examples/features/basics"
+    stems :: [String]{"variadics_spread", "variadics_owned_lists", "variadics_borrowed_lists", "variadics_mixed_lists", "variadics_eval_order", "variadics_coercions"}
+    loop stem in stems -> variadic_fixture_accept("{examples}/{stem}.jet", false)
+    variadic_fixture_accept("{root}/variadic_slot_coercions.jet", true)
+    variadic_fixture_accept("{root}/variadic_time_reordered.jet", false)
+    print("checked variadic packing and refusals: passed")
+}

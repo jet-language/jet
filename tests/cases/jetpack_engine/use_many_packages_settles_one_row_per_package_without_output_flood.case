@@ -1,0 +1,74 @@
+# HAND-PORT tests/jetpack_engine.rs:7842-7896 use_many_packages_settles_one_row_per_package_without_output_flood
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+refused: pty
+# Verbatim original setup and every predicate awaiting the named seam:
+# #[test]
+# fn use_many_packages_settles_one_row_per_package_without_output_flood() {
+#     let project = Scratch::new("use-many-packages");
+#     copy_dir_recursive(&example_dir(), &project.path);
+#     let root = Scratch::new("use-many-packages-root");
+#     let fixtures = example_fixtures(&root.path);
+#     let artifact = fixtures.join("omp-1.0.0");
+#     fs::write(&artifact, "#!/bin/sh\nprintf '%s\\n' omp\n").unwrap();
+#     let digest = jetpack::SHA256::sha256_file_hex(&artifact).unwrap();
+#     fs::write(
+#         fixtures.join("jetpackage-omp.json"),
+#         format!(
+#             "{{\"tag\":\"v1.0.0\",\"version\":\"1.0.0\",\"sha256\":\"{digest}\",\"artifact\":\"omp-1.0.0\"}}"
+#         ),
+#     )
+#     .unwrap();
+#     let refs = (0..26)
+#         .map(|_| "omp@releases#1.0.0")
+#         .collect::<Vec<_>>()
+#         .join(" ");
+#     let binary = common::jetpack_bin()
+#         .display()
+#         .to_string()
+#         .replace('\'', "'\\''");
+#     let fixtures_arg = fixtures.display().to_string().replace('\'', "'\\''");
+#     let command = format!(
+#         "stty rows 30 cols 120; exec '{binary}' use --prep --offline --fixtures '{fixtures_arg}' -y {refs}"
+#     );
+#     let output = Command::new("script")
+#         .args(["-qfec", &command, "/dev/null"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures)
+#         .env_remove("NO_COLOR")
+#         .env_remove("FORCE_COLOR")
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}\nstdout: {}",
+#         String::from_utf8_lossy(&output.stderr),
+#         String::from_utf8_lossy(&output.stdout)
+#     );
+#     let transcript = String::from_utf8_lossy(&output.stdout);
+#     let settled = transcript.matches('✓').count();
+#     assert_eq!(settled, 26, "one settled row per package: {transcript}");
+#     assert!(
+#         settled + 1 <= 30,
+#         "26 settled rows plus aggregate must fit the 30-row terminal: {transcript}"
+#     );
+#     assert!(
+#         transcript.contains("0/26 packages"),
+#         "aggregate live line must remain pinned above settled rows: {transcript}"
+#     );
+# }
+# Original real terminal size: rows=30 cols=120; verified fixture realization also required.
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step: jetpack use --prep --offline --fixtures {work}/fixtures -y omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0 omp@releases#1.0.0
+cwd: project
+pty: true
+unset: NO_COLOR
+unset: FORCE_COLOR
+exit: 0
+stdout: count "✓" = 26
+stdout: count "✓" <= 29 # settled + 1 <= 30 in the original
+stdout: ~ "0/26 packages" # original contains predicate
+

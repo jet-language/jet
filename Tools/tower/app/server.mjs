@@ -138,7 +138,7 @@ const routes = {
   'clearance':       (s, p) => db.ratify(s, p.decisionId, p.outcome, p.comment, p.by, p.quote),
   'clearance/batch': (s, p) => (p.decisions || []).map(d => db.ratify(s, d.decisionId, d.outcome, d.comment, p.by, d.quote || p.quote)),
   'clearance/reopen': (s, p) => db.reopenDecision(s, p.decisionId, p.by),
-  'verdict':         (s, p) => db.mintVerdict(s, p.id, p.outcome, p.title, p.by),
+  'verdict':         (s, p) => db.mintVerdict(s, p.id, p.outcome, p.title, p.by, p.supersedes),
   'question/add':    (s, p) => db.addQuestion(s, p),
   'question/answer': (s, p) => db.answerQuestion(s, p.id, p.answer, p.by),
   'question/delete': (s, p) => db.deleteQuestion(s, p.id, p.by),
@@ -565,7 +565,7 @@ export function serve(store, port = 7878, open = false) {
         if (url.pathname.endsWith('/challenge')) {
           const s = live.state();
           const d = s.decisions.find(x => x.id === p.decisionId);
-          if (!d || d.status === 'ratified' || d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
+          if (!d || d.draft || d.status === 'ratified' || d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
             return reject('decision is not a live owner-verification ballot');
           if (p.outcome !== 'accept' && p.outcome !== 'bounce') return reject('acceptance outcome must be accept or bounce');
           const c = s.cards.find(x => x.id === d.cardId);

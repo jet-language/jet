@@ -1,0 +1,18 @@
+# HAND-PORT tests/fact_reads.rs:298-301 typed_fact_fixture_matches_aot_default_and_interpreter
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Exact original unchanged typed-fact fixture and existing golden across original full matrix, including stderr relational parity.
+fixture: typed_fact_fixture_matches_aot_default_and_interpreter.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = typed_fact_fixture_matches_aot_default_and_interpreter.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = typed_fact_fixture_matches_aot_default_and_interpreter.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = typed_fact_fixture_matches_aot_default_and_interpreter.stdout.expected
+stderr: == default

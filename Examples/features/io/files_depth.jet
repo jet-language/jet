@@ -1,7 +1,7 @@
 // D-FSOPS1=A: std-backed filesystem depth beyond read/write/list_dir.
 package {
     name: "files_depth"
-    authority: { holds: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [Env, FS, FS.Read, FS.Write, IO, Mem.Alloc] } }
 }
 
 use core.files as fs
@@ -12,36 +12,36 @@ fn run() {
     if fs.exists(root) -> fs.remove_all(root)
     if fs.exists(copy_root) -> fs.remove_all(copy_root)
     nested :: Path.from(root).join("a/b")
-    fs.create_dir_all(nested)
+    fs.create_dir_all(nested.to_string())
     file :: nested.join("data.txt")
     fs.write(file, "abcdef")
     stat :: fs.stat(file)
     print("stat: {stat.kind} {stat.size} {stat.is_file}")
-    part :: fs.read_at(file, 2, 3)
+    part :: fs.read_at(file.to_string(), 2, 3)
     print("read_at bytes: {part.len()}")
     patch :: [U8]{88, 89}
-    fs.write_at(file, 3, patch)
+    fs.write_at(file.to_string(), 3, patch)
     fs.fsync(file)
-    text :: fs.read(file)
+    text :: fs.read(file.to_string())
     print(text)
     bytes_path :: nested.join("bytes.bin")
     bytes :: [U8]{0xC3, 0x28, 0x00, 0xFF}
-    fs.write_bytes(bytes_path, bytes)
-    roundtrip :: fs.read_bytes(bytes_path)
+    fs.write_bytes(bytes_path.to_string(), bytes)
+    roundtrip :: fs.read_bytes(bytes_path.to_string())
     print("bytes round-trip: {roundtrip == bytes}")
     atom :: [U8]{79, 75}
     atomic_path :: nested.join("atomic.txt")
-    fs.write_atomic(atomic_path, atom)
-    atomic_text :: fs.read(atomic_path)
+    fs.write_atomic(atomic_path.to_string(), atom)
+    atomic_text :: fs.read(atomic_path.to_string())
     print("atomic: {atomic_text}")
-    walked :: fs.walk(root)
+    walked :: fs.walk(root, None)
     print("walk count: {walked.len()}")
     matches :: fs.glob(Path.from(root).join("*.txt"))
     print("glob count: {matches.len()}")
     link :: Path.from(root).join("data.link")
     fs.symlink(file, link)
     link_stat :: fs.stat(link)
-    link_target :: fs.read_link(link)
+    link_target :: fs.read_link(link.to_string())
     print("link: {link_stat.is_symlink} {link_target}")
     hard :: Path.from(root).join("hard.txt")
     fs.hard_link(file, hard)

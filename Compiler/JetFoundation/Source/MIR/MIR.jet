@@ -2,118 +2,118 @@
 // places, calls, functions and control flow; target adapters consume these facts
 // rather than recreating source-level policy.
 
-pub MIR_SCHEMA_VERSION :: prep { 6 }
+MIR_SCHEMA_VERSION :: prep { 7 }
 
 // Every MIR identity is a fixed 64-bit word, as in the Rust reference
 // (`mir_id!` newtypes over `u64`): a stable FNV-1a hash or, in fixtures, a
 // small dense number. Ids never cross into exact `Int`.
-pub struct MIRFunctionID { pub value: U64 }
+struct MIRFunctionID { value: U64 }
 
-pub struct MIRBlockID { pub value: U64 }
+struct MIRBlockID { value: U64 }
 
-pub struct MIRValueID { pub value: U64 }
+struct MIRValueID { value: U64 }
 
-pub struct MIRPlaceID { pub value: U64 }
+struct MIRPlaceID { value: U64 }
 
-pub struct MIRLocalID { pub value: U64 }
+struct MIRLocalID { value: U64 }
 
-pub struct MIROpID { pub value: U64 }
+struct MIROpID { value: U64 }
 
-pub struct MIRTypeID { pub value: U64 }
+struct MIRTypeID { value: U64 }
 
-pub struct MIRCoreCallID { pub value: U64 }
+struct MIRCoreCallID { value: U64 }
 
-pub struct MIRScopeID { pub value: U64 }
+struct MIRScopeID { value: U64 }
 
-pub struct MIRClosureID { pub value: U64 }
+struct MIRClosureID { value: U64 }
 
-pub struct MIRModuleID { pub value: U64 }
+struct MIRModuleID { value: U64 }
 
-pub struct MIRImportID { pub value: U64 }
+struct MIRImportID { value: U64 }
 
-pub struct MIRTraitID { pub value: U64 }
+struct MIRTraitID { value: U64 }
 
-pub struct MIRImplID { pub value: U64 }
+struct MIRImplID { value: U64 }
 
-pub struct MIRConstantID { pub value: U64 }
+struct MIRConstantID { value: U64 }
 
-pub struct MIRGCEditSiteID { pub value: U64 }
+struct MIRGCEditSiteID { value: U64 }
 
-pub struct MIRForeignID { pub value: U64 }
+struct MIRForeignID { value: U64 }
 
-pub struct MIRLinkUnitID { pub value: U64 }
+struct MIRLinkUnitID { value: U64 }
 
-pub struct MIRCallbackID { pub value: U64 }
+struct MIRCallbackID { value: U64 }
 
-pub struct MIRHandleID { pub value: U64 }
+struct MIRHandleID { value: U64 }
 
-pub struct MIRArtifactID { pub value: U64 }
+struct MIRArtifactID { value: U64 }
 
-pub struct MIRHarnessID { pub value: U64 }
+struct MIRHarnessID { value: U64 }
 
-pub struct MIRJobID { pub value: U64 }
+struct MIRJobID { value: U64 }
 
-pub struct MIRTestID { pub value: U64 }
+struct MIRTestID { value: U64 }
 
-pub struct MIRCoveragePointID { pub value: U64 }
+struct MIRCoveragePointID { value: U64 }
 
-pub struct MIRTraitMethodID { pub value: U64 }
+struct MIRTraitMethodID { value: U64 }
 
-pub struct MIROutputCheckID { pub value: U64 }
+struct MIROutputCheckID { value: U64 }
 
-pub struct MIRDataPlanNodeID { pub value: U64 }
+struct MIRDataPlanNodeID { value: U64 }
 
-pub struct MIRPreludeCallID { pub value: U64 }
+struct MIRPreludeCallID { value: U64 }
 
-pub struct MIRFieldID { pub value: U64 }
+struct MIRFieldID { value: U64 }
 
-pub struct MIRSourceFileID { pub value: U64 }
+struct MIRSourceFileID { value: U64 }
 
-pub struct MIRSiteID { pub value: U64 }
+struct MIRSiteID { value: U64 }
 
 // Stable FNV-1a over namespace, NUL, and canonical identity; IDs never depend
 // on process hash seeds, allocation order, or a backend's naming scheme.
-pub fn stable_id(namespace: String, identity: String) -> U64 Never! {
+fn stable_id(namespace: String, identity: String) -> U64 Never! {
     prime :: U64{0x100000001b3}
     // The FNV-1a offset basis 0xcbf29ce484222325, built from two halves that
     // each fit an Int literal: a wider literal is parsed from its decimal
     // text on every call, which dominated this function.
     high :: U64{0xcbf29ce4}
-    hash := high.wrapping_mul(U64{0x100000000}) ~| U64{0x84222325}
-    loop byte in namespace.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    hash := (high.wrapping_mul(U64{0x100000000})).bit_xor(U64{0x84222325})
+    loop byte in namespace.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     hash = hash.wrapping_mul(prime)
-    loop byte in identity.bytes() -> hash = (hash ~| U64.from_u8(byte)).wrapping_mul(prime)
+    loop byte in identity.bytes() -> hash = ((hash).bit_xor(U64.from_u8(byte))).wrapping_mul(prime)
     if hash == 0 -> return U64{1}
     hash
 }
 
-pub fn mir_function_id(identity: String) -> MIRFunctionID Never! { MIRFunctionID{value: stable_id("mir-function", identity)} }
+fn mir_function_id(identity: String) -> MIRFunctionID Never! { MIRFunctionID{value: stable_id("mir-function", identity)} }
 
-pub fn mir_type_id(identity: String) -> MIRTypeID Never! { MIRTypeID{value: stable_id("mir-type", identity)} }
+fn mir_type_id(identity: String) -> MIRTypeID Never! { MIRTypeID{value: stable_id("mir-type", identity)} }
 
-pub fn mir_module_id(identity: String) -> MIRModuleID Never! { MIRModuleID{value: stable_id("mir-module", identity)} }
+fn mir_module_id(identity: String) -> MIRModuleID Never! { MIRModuleID{value: stable_id("mir-module", identity)} }
 
-pub fn mir_trait_id(identity: String) -> MIRTraitID Never! { MIRTraitID{value: stable_id("mir-trait", identity)} }
+fn mir_trait_id(identity: String) -> MIRTraitID Never! { MIRTraitID{value: stable_id("mir-trait", identity)} }
 
-pub fn mir_field_id(identity: String) -> MIRFieldID Never! { MIRFieldID{value: stable_id("mir-field", identity)} }
+fn mir_field_id(identity: String) -> MIRFieldID Never! { MIRFieldID{value: stable_id("mir-field", identity)} }
 
-pub fn mir_source_file_id(identity: String) -> MIRSourceFileID Never! {
+fn mir_source_file_id(identity: String) -> MIRSourceFileID Never! {
     MIRSourceFileID{value: stable_id("mir-source-file", identity)}
 }
 
-pub enum MIRVisibility { Private Package Public }
+enum MIRVisibility { Private Package Public }
 
-pub enum MIRFunctionKind { Jet Foreign Test }
+enum MIRFunctionKind { Jet Foreign Test }
 
-pub enum MIRSerdeCodec { Encode Decode }
+enum MIRSerdeCodec { Encode Decode }
 
-pub enum MIROperatorMarker { Commutative }
+enum MIROperatorMarker { Commutative }
 
-pub enum MIRScopeKind { Unsafe Impure Reactive Shield Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
+enum MIRScopeKind { Unsafe Impure Reactive Shield StopCleanup Region Policy TaskGroup Layout Authority Context Live AssumeDeterministic Transaction ScopeMember DebugOnly }
 
-pub enum MIRIndexKind { List FixedListProof Map Lane Pool }
+enum MIRIndexKind { List FixedListProof Map Lane Pool }
 
-pub enum MIRLoopSourceKind {
+enum MIRLoopSourceKind {
     Plain
     Chars
     LinesFile
@@ -124,35 +124,44 @@ pub enum MIRLoopSourceKind {
     Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String)
 }
 
-pub enum MIRWebBucket { JS Wasm }
+enum MIRWebBucket { JS Wasm }
 
-pub enum MIROSTarget { Linux MacOS Windows }
+enum MIROSTarget { Linux MacOS Windows }
 
-pub enum MIRWebPartitionMarker { Wasm JS WasmExport }
+enum MIRWebPartitionMarker { Wasm JS WasmExport }
 
-pub enum MIRAccess { Read Write Move }
+enum MIRAccess { Read Write Move }
 
-pub enum MIROwnershipMode { Copy Owned Shared ReadBorrow WriteBorrow Move }
+enum MIROwnershipMode { Copy Owned Shared ReadBorrow WriteBorrow Move }
 
-pub enum MIRDropKind { NoDrop Value Shared View ForeignHandle }
+enum MIRDropKind { NoDrop Value Shared View ForeignHandle }
 
-pub struct MIROwnership {
-    pub mode: MIROwnershipMode
-    pub drop: MIRDropKind
-    pub moved: Bool
-    pub last_use: Bool
-    pub gc_root: Bool
+struct MIROwnership {
+    mode: MIROwnershipMode
+    drop: MIRDropKind
+    moved: Bool
+    last_use: Bool
+    gc_root: Bool
 }
 
-pub fn mir_copy_ownership() -> MIROwnership Never! {
+fn mir_copy_ownership() -> MIROwnership Never! {
     MIROwnership{mode: MIROwnershipMode.Copy, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
 }
 
-pub fn mir_owned_ownership() -> MIROwnership Never! {
+// A copyable immutable value whose physical carrier owns a resource (Int).
+fn mir_copy_value_ownership() -> MIROwnership Never! {
+    MIROwnership{mode: MIROwnershipMode.Copy, drop: MIRDropKind.Value, moved: false, last_use: false, gc_root: false}
+}
+
+fn mir_runtime_owned_ownership(ownership: MIROwnership) -> Bool Never! {
+    ownership.drop != MIRDropKind.NoDrop && ownership.mode != MIROwnershipMode.ReadBorrow && ownership.mode != MIROwnershipMode.WriteBorrow
+}
+
+fn mir_owned_ownership() -> MIROwnership Never! {
     MIROwnership{mode: MIROwnershipMode.Owned, drop: MIRDropKind.Value, moved: false, last_use: false, gc_root: false}
 }
 
-pub fn mir_ownership_from_access(access: MIRAccess) -> MIROwnership Never! {
+fn mir_ownership_from_access(access: MIRAccess) -> MIROwnership Never! {
     if access == {
         .Read -> MIROwnership{mode: MIROwnershipMode.ReadBorrow, drop: MIRDropKind.NoDrop, moved: false, last_use: false, gc_root: false}
         .Write -> MIROwnership{mode: MIROwnershipMode.WriteBorrow, drop: MIRDropKind.View, moved: false, last_use: false, gc_root: false}
@@ -160,16 +169,16 @@ pub fn mir_ownership_from_access(access: MIRAccess) -> MIROwnership Never! {
     }
 }
 
-pub enum MIRMeasureRule { Add Mul Match }
+enum MIRMeasureRule { Add Mul Match }
 
-pub enum MIRMeasure {
+enum MIRMeasure {
     Literal(kind: String, value: Int)
     SignedLiteral(kind: String, value: Int)
     Symbol(kind: String, name: String)
     Combined(kind: String, rule: MIRMeasureRule, left: MIRMeasure, right: MIRMeasure)
 }
 
-pub fn mir_measure_kind(measure: MIRMeasure) -> String Never! {
+fn mir_measure_kind(measure: MIRMeasure) -> String Never! {
     if measure == {
         .Literal(kind, _) -> kind
         .SignedLiteral(kind, _) -> kind
@@ -178,7 +187,7 @@ pub fn mir_measure_kind(measure: MIRMeasure) -> String Never! {
     }
 }
 
-pub fn mir_measure_expression(measure: MIRMeasure) -> String Never! {
+fn mir_measure_expression(measure: MIRMeasure) -> String Never! {
     if measure == {
         .Literal(_, value) -> "{value}"
         .SignedLiteral(_, value) -> "{value}"
@@ -195,7 +204,7 @@ pub fn mir_measure_expression(measure: MIRMeasure) -> String Never! {
     }
 }
 
-pub fn mir_measure_literal_value(measure: MIRMeasure) -> Int? {
+fn mir_measure_literal_value(measure: MIRMeasure) -> Int? {
     if measure == {
         .Literal(_, value) -> Val(value)
         .Combined(_, rule, left, right) -> {
@@ -217,9 +226,9 @@ pub fn mir_measure_literal_value(measure: MIRMeasure) -> Int? {
     }
 }
 
-pub struct MIRDimensionAxis { pub name: String, pub exponent: MIRMeasure }
+struct MIRDimensionAxis { name: String, exponent: MIRMeasure }
 
-pub struct MIRDimension { pub axes: [MIRDimensionAxis] }
+struct MIRDimension { axes: [MIRDimensionAxis] }
 
 fn mir_measure_signed_value(measure: MIRMeasure) -> Int? {
     if measure == {
@@ -244,7 +253,7 @@ fn mir_measure_signed_value(measure: MIRMeasure) -> Int? {
     }
 }
 
-pub fn mir_dimension_identity(dimension: MIRDimension) -> String Never! {
+fn mir_dimension_identity(dimension: MIRDimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
         exponent :: mir_measure_signed_value(axis.exponent).map(value -> "{value}") ?? mir_measure_expression(axis.exponent)
@@ -253,7 +262,7 @@ pub fn mir_dimension_identity(dimension: MIRDimension) -> String Never! {
     parts.join(";")
 }
 
-pub fn mir_dimension_display_name(dimension: MIRDimension) -> String Never! {
+fn mir_dimension_display_name(dimension: MIRDimension) -> String Never! {
     parts := [String]{}
     loop axis in dimension.axes {
         leaf := axis.name.split("::").to_list()
@@ -272,7 +281,7 @@ pub fn mir_dimension_display_name(dimension: MIRDimension) -> String Never! {
     parts.join(" * ")
 }
 
-pub enum MIRInternalTag {
+enum MIRInternalTag {
     CoreCryptoNominal
     DeterministicClock
     SystemClock
@@ -284,16 +293,16 @@ pub enum MIRInternalTag {
     AllocatorView
 }
 
-pub enum MIRTagMarker {
+enum MIRTagMarker {
     User(name: String)
     Internal(internal_tag: MIRInternalTag)
 }
 
-pub fn mir_tag_is_identity_bearing(marker: MIRTagMarker) -> Bool Never! {
+fn mir_tag_is_identity_bearing(marker: MIRTagMarker) -> Bool Never! {
     marker == MIRTagMarker.Internal{internal_tag: MIRInternalTag.CoreCryptoNominal}
 }
 
-pub fn mir_tag_name(marker: MIRTagMarker) -> String Never! {
+fn mir_tag_name(marker: MIRTagMarker) -> String Never! {
     if marker == {
         .User(name) -> name
         .Internal(internal_tag) -> {
@@ -312,57 +321,73 @@ pub fn mir_tag_name(marker: MIRTagMarker) -> String Never! {
     }
 }
 
-pub struct MIRCallContractRow { pub label: String, pub zone: ParamZone }
+struct MIRCallContractRow { label: String, zone: ParamZone }
 
-pub struct MIRCallablePolicy { pub name: String, pub arguments: [String] }
+struct MIRCallablePolicy { name: String, arguments: [String] }
 
-pub struct MIRCallablePolicyChain { pub policies: [MIRCallablePolicy] }
+struct MIRCallablePolicyChain { policies: [MIRCallablePolicy] }
 
-pub struct MIRCallMetadata {
-    pub names: [String]
-    pub defaults: [Bool]
-    pub variadic: [Bool]
-    pub conventions: [MIRAccess]
-    pub policies: MIRCallablePolicyChain
+struct MIRCallMetadata {
+    names: [String]
+    defaults: [Bool]
+    variadic: [Bool]
+    conventions: [MIRAccess]
+    policies: MIRCallablePolicyChain
 }
 
-pub fn mir_call_metadata_is_variadic(metadata: MIRCallMetadata) -> Bool Never! {
+fn mir_call_metadata_is_variadic(metadata: MIRCallMetadata) -> Bool Never! {
     loop variadic in metadata.variadic {
         if variadic -> return true
     }
     false
 }
 
-pub struct MIRNominalRef { pub id: MIRTypeID, pub name: String }
+struct MIRNominalRef { id: MIRTypeID, name: String }
 
-pub struct MIRTraitRef { pub id: MIRTraitID, pub name: String }
+struct MIRTraitRef { id: MIRTraitID, name: String }
 
-pub fn mir_nominal_ref(name: String) -> MIRNominalRef Never! {
+fn mir_nominal_ref(name: String) -> MIRNominalRef Never! {
     MIRNominalRef{id: mir_type_id(name), name: name}
 }
 
-pub fn mir_trait_ref(name: String) -> MIRTraitRef Never! {
+fn mir_trait_ref(name: String) -> MIRTraitRef Never! {
     MIRTraitRef{id: mir_trait_id(name), name: name}
 }
 
-pub struct MIRFunctionSignature {
-    pub params: [MIRType]
-    pub ret: MIRType?
-    pub effect_bound: [String]?
-    pub param_contract: [MIRCallContractRow]?
-    pub call_metadata: MIRCallMetadata?
-    pub return_view_provenance: [MIRViewProvenanceEntry]?
+// The registered native Codec definitions, shared by checking and lowering.
+fn mir_builtin_codec_trait_name(codec: MIRSerdeCodec) -> String Never! {
+    if codec == {
+        .Encode -> "Encode"
+        .Decode -> "Decode"
+    }
 }
 
-pub enum MIRScalarKind { Int Float Float32 Bool Char Pointer }
+fn mir_builtin_codec_trait_id(codec: MIRSerdeCodec) -> MIRTraitID Never! {
+    mir_trait_id(mir_builtin_codec_trait_name(codec))
+}
 
-pub enum MIRABI { Scalar(kind: MIRScalarKind) Aggregate Sequence Function Nominal Dynamic Never }
+fn mir_builtin_codec_trait_ref(codec: MIRSerdeCodec) -> MIRTraitRef Never! {
+    mir_trait_ref(mir_builtin_codec_trait_name(codec))
+}
 
-pub enum MIRSize { Static(bytes: Int) Dynamic }
+struct MIRFunctionSignature {
+    params: [MIRType]
+    ret: MIRType?
+    effect_bound: [String]?
+    param_contract: [MIRCallContractRow]?
+    call_metadata: MIRCallMetadata?
+    return_view_provenance: [MIRViewProvenanceEntry]?
+}
 
-pub struct MIRLayout { pub abi: MIRABI, pub size: MIRSize, pub align: MIRSize }
+enum MIRScalarKind { Int Float Float32 Bool Char Pointer }
 
-pub enum MIRTypeKind {
+enum MIRABI { Scalar(kind: MIRScalarKind) Aggregate Sequence Function Nominal Dynamic Never }
+
+enum MIRSize { Static(bytes: Int) Dynamic }
+
+struct MIRLayout { abi: MIRABI, size: MIRSize, align: MIRSize }
+
+enum MIRTypeKind {
     Int
     Float
     Bool
@@ -388,18 +413,18 @@ pub enum MIRTypeKind {
     Measure(value: MIRMeasure)
 }
 
-pub struct MIRTupleField { pub name: String, pub ty: MIRType }
+struct MIRTupleField { name: String, ty: MIRType }
 
-pub struct MIRType { pub kind: MIRTypeKind, pub identity: MIRTypeID?, pub layout: MIRLayout }
+struct MIRType { kind: MIRTypeKind, identity: MIRTypeID?, layout: MIRLayout }
 
-pub enum MIRViewCopyKind { String List }
+enum MIRViewCopyKind { String List }
 
-pub fn mir_view_copy_symbol(kind: MIRViewCopyKind) -> String Never! {
+fn mir_view_copy_symbol(kind: MIRViewCopyKind) -> String Never! {
     if kind == MIRViewCopyKind.String -> return "jet_string_view_copy"
     "jet_view_copy"
 }
 
-pub fn mir_view_copy_kind(source: MIRType) -> MIRViewCopyKind? {
+fn mir_view_copy_kind(source: MIRType) -> MIRViewCopyKind? {
     if source.kind == {
         .String -> return Val(MIRViewCopyKind.String)
         .List(_) | .FixedList(_, _) -> return Val(MIRViewCopyKind.List)
@@ -421,7 +446,7 @@ pub fn mir_view_copy_kind(source: MIRType) -> MIRViewCopyKind? {
     None
 }
 
-pub fn mir_view_copy_target_matches(kind: MIRViewCopyKind, target: MIRType) -> Bool Never! {
+fn mir_view_copy_target_matches(kind: MIRViewCopyKind, target: MIRType) -> Bool Never! {
     if target.kind == .Tagged(_, inner) -> return mir_view_copy_target_matches(kind, inner)
     if target.kind == {
         .Apply(name, args) -> {
@@ -435,7 +460,7 @@ pub fn mir_view_copy_target_matches(kind: MIRViewCopyKind, target: MIRType) -> B
     false
 }
 
-pub fn mir_type_layout(kind: MIRTypeKind) -> MIRLayout Never! {
+fn mir_type_layout(kind: MIRTypeKind) -> MIRLayout Never! {
     if kind == {
         .Int -> MIRLayout{abi: MIRABI.Scalar{kind: MIRScalarKind.Int}, size: MIRSize.Dynamic, align: MIRSize.Static{bytes: 8}}
         .Float -> mir_scalar_layout(MIRScalarKind.Float, 8)
@@ -482,20 +507,20 @@ fn is_atomic_apply(name: String, args: [MIRType]) -> Bool Never! {
     if args[0].kind == {
         .Bool -> true
         .Int -> true
-        .IntN(signed, bits) -> (signed && bits == 32) || (!signed && (bits == 32 | 64))
+        .IntN(_, bits) -> bits == 32 || bits == 64
         else -> false
     }
 }
 
-pub fn mir_type_from_kind(kind: MIRTypeKind) -> MIRType Never! {
+fn mir_type_from_kind(kind: MIRTypeKind) -> MIRType Never! {
     MIRType{kind: kind, identity: None, layout: mir_type_layout(kind)}
 }
 
-pub fn mir_type_with_identity(ty: MIRType, identity: MIRTypeID) -> MIRType Never! {
+fn mir_type_with_identity(ty: MIRType, identity: MIRTypeID) -> MIRType Never! {
     MIRType{kind: ty.kind, identity: Val(identity), layout: ty.layout}
 }
 
-pub fn mir_type_same_checked_type(left: MIRType, right: MIRType) -> Bool Never! {
+fn mir_type_same_checked_type(left: MIRType, right: MIRType) -> Bool Never! {
     if left.identity != None && right.identity != None -> return left.identity == right.identity
     mir_type_kind_same_identity(left, right)
 }
@@ -678,12 +703,12 @@ fn mir_variadic_identity_equal(left: MIRCallMetadata?, right: MIRCallMetadata?) 
     true
 }
 
-pub fn mir_type_identity_key(ty: MIRType) -> String Never! {
+fn mir_type_identity_key(ty: MIRType) -> String Never! {
     identity :: ty.identity ?? return mir_type_canonical_key(ty)
     "id:{identity.value}"
 }
 
-pub fn mir_type_canonical_key(ty: MIRType) -> String Never! {
+fn mir_type_canonical_key(ty: MIRType) -> String Never! {
     kind :: ty.kind
     if kind == {
         .Int -> return "Int"
@@ -722,7 +747,8 @@ pub fn mir_type_canonical_key(ty: MIRType) -> String Never! {
 fn mir_function_signature_canonical_key(signature: MIRFunctionSignature) -> String Never! {
     params := [String]{}
     loop param in signature.params -> &params.push(mir_type_canonical_key(param))
-    result :: signature.ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
+    // WORKAROUND #4581: revert when the JIT Option.map payload bug is fixed
+    result :: if signature.ret == .Val(value) -> mir_type_canonical_key(value) else -> "Unit"
     contract := [String]{}
     contract_rows :: signature.param_contract ?? [MIRCallContractRow]{}
     loop row in contract_rows -> &contract.push("{row.label}:{param_zone_name(row.zone)}")
@@ -756,7 +782,8 @@ fn mir_function_signature_canonical_key(signature: MIRFunctionSignature) -> Stri
 fn mir_send_function_canonical_key(params: [MIRType], ret: MIRType?, conventions: [MIRAccess]) -> String Never! {
     names := [String]{}
     loop param in params -> &names.push(mir_type_canonical_key(param))
-    result :: ret.map(value -> mir_type_canonical_key(value)) ?? "Unit"
+    // WORKAROUND #4581: revert when the JIT Option.map payload bug is fixed
+    result :: if ret == .Val(value) -> mir_type_canonical_key(value) else -> "Unit"
     access := [String]{}
     loop item in conventions -> &access.push(mir_access_code(item))
     "SendFn({names.join(",")})->{result};conventions={access.join("")}"
@@ -795,7 +822,7 @@ fn mir_access_code(access: MIRAccess) -> String Never! {
     }
 }
 
-pub fn mir_type_display_name(ty: MIRType) -> String Never! {
+fn mir_type_display_name(ty: MIRType) -> String Never! {
     if ty.kind == {
         .Int -> "Int"
         .Float -> "Float"
@@ -811,7 +838,8 @@ pub fn mir_type_display_name(ty: MIRType) -> String Never! {
         .SendFn(params, ret, _) -> {
             names := [String]{}
             loop param in params -> &names.push(mir_type_display_name(param))
-            result :: ret.map(value -> mir_type_display_name(value)) ?? "Unit"
+            // WORKAROUND #4581: revert when the JIT Option.map payload bug is fixed
+            result :: if ret == .Val(value) -> mir_type_display_name(value) else -> "Unit"
             "SendFn({names.join(", ")}) -> {result}"
         }
         .Apply(name, args) -> {
@@ -872,7 +900,7 @@ fn mir_marked_display_name(ty: MIRType) -> String Never! {
     }
 }
 
-pub fn mir_function_signature_display_name(signature: MIRFunctionSignature) -> String Never! {
+fn mir_function_signature_display_name(signature: MIRFunctionSignature) -> String Never! {
     params :: mir_signature_parameter_names(signature.params, signature.param_contract)
     out := "fn({params})"
     if signature.ret == .Val(value) {
@@ -901,7 +929,7 @@ fn mir_signature_parameter_names(params: [MIRType], param_contract: [MIRCallCont
     names.join(", ")
 }
 
-pub fn mir_type_is_integer(ty: MIRType) -> Bool Never! {
+fn mir_type_is_integer(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Int -> true
         .IntN(_, _) -> true
@@ -911,7 +939,7 @@ pub fn mir_type_is_integer(ty: MIRType) -> Bool Never! {
     }
 }
 
-pub fn mir_type_is_float(ty: MIRType) -> Bool Never! {
+fn mir_type_is_float(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Float -> true
         .Float32 -> true
@@ -921,99 +949,136 @@ pub fn mir_type_is_float(ty: MIRType) -> Bool Never! {
     }
 }
 
-pub fn mir_type_is_numeric(ty: MIRType) -> Bool Never! { mir_type_is_integer(ty) || mir_type_is_float(ty) }
+fn mir_type_is_numeric(ty: MIRType) -> Bool Never! { mir_type_is_integer(ty) || mir_type_is_float(ty) }
 
-pub fn mir_type_has_valid_layout(ty: MIRType) -> Bool Never! { ty.layout == mir_type_layout(ty.kind) }
+fn mir_type_has_valid_layout(ty: MIRType) -> Bool Never! { ty.layout == mir_type_layout(ty.kind) }
 
-pub fn mir_type_is_scalar(ty: MIRType) -> Bool Never! { ty.layout.abi == .Scalar(_) }
+fn mir_type_is_scalar(ty: MIRType) -> Bool Never! { ty.layout.abi == .Scalar(_) }
 
-pub fn mir_type_is_unit(ty: MIRType) -> Bool Never! {
+fn mir_type_is_unit(ty: MIRType) -> Bool Never! {
     if ty.kind == {
         .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
         else -> false
     }
 }
 
-pub enum MIRFunctionForm {
+enum MIRFunctionForm {
     TopLevel
     Method(owner: MIRType, self_access: MIRAccess?)
     TraitMethod(owner: MIRType, trait_ref: MIRTraitRef, self_access: MIRAccess?, serde: MIRSerdeCodec?)
 }
 
-pub enum MIRViewSource {
+enum MIRViewSource {
     Receiver
     Parameter(index: Int)
     Static(module_path: String, name: String)
 }
 
-pub enum MIRViewProjection { Field(name: String) Index Range }
+enum MIRViewProjection { Field(name: String) Index Range }
 
-pub struct MIRViewSourcePath { pub source: MIRViewSource, pub projections: [MIRViewProjection] }
+struct MIRViewSourcePath { source: MIRViewSource, projections: [MIRViewProjection] }
 
-pub struct MIRViewProvenance { pub sources: [MIRViewSourcePath], pub mutable: Bool }
+struct MIRViewProvenance { sources: [MIRViewSourcePath], mutable: Bool }
 
-pub struct MIRViewProvenanceEntry { pub slot: [String], pub provenance: MIRViewProvenance }
+struct MIRViewProvenanceEntry { slot: [String], provenance: MIRViewProvenance }
 
-pub struct MIREffectFacts {
-    pub direct: [String]
-    pub solved: [String]
-    pub call_edges: [String]
-    pub maximal: Bool
-    pub direct_spans: [MIRNamedSpan]
+struct MIREffectFacts {
+    direct: [String]
+    solved: [String]
+    call_edges: [String]
+    maximal: Bool
+    direct_spans: [MIRNamedSpan]
 }
 
-pub struct MIRNamedSpan { pub name: String, pub span: Span }
+struct MIRNamedSpan { name: String, span: Span }
 
-pub enum MIRFailureCarrier {
+enum MIRFailureCarrier {
     Infallible
     Result(success: MIRType, error: MIRType)
     Optional(value: MIRType)
     Diverges(value: MIRType)
 }
 
-pub enum MIRCallFallibility { Infallible Failure(failure: MIRFailureCarrier) }
+enum MIRCallFallibility { Infallible Failure(failure: MIRFailureCarrier) }
 
-pub struct MIRTargetApplicability {
-    pub rust_aot: Bool
-    pub cranelift: Bool
-    pub interpreter: Bool
-    pub web: Bool
+struct MIRTargetApplicability {
+    rust_aot: Bool
+    interpreter: Bool
+    web: Bool
 }
 
-pub struct MIRParam {
-    pub index: Int
-    pub name: String
-    pub span: Span
-    pub ty: MIRType
-    pub access: MIRAccess
-    pub ownership: MIROwnership
-    pub public_label: String
-    pub variadic: Bool
-    pub default_present: Bool
+struct MIRParam {
+    index: Int
+    name: String
+    span: Span
+    ty: MIRType
+    access: MIRAccess
+    ownership: MIROwnership
+    public_label: String
+    variadic: Bool
+    default_present: Bool
 }
 
-pub struct MIRCaptureParam { pub slot: Int, pub name: String, pub span: Span, pub ty: MIRType, pub access: MIRAccess, pub ownership: MIROwnership }
+// A place-only capture lends an address, never an eagerly loaded SSA value.
+// Its Capture result may anchor MIRPlaceBase.Capture only.
+struct MIRCaptureParam { slot: Int, name: String, span: Span, ty: MIRType, access: MIRAccess, ownership: MIROwnership, place_only: Bool }
 
-pub enum MIRCaptureOperand { Value(value: MIRValueID) Place(place: MIRPlaceID) }
+enum MIRCaptureOperand { Value(value: MIRValueID) Place(place: MIRPlaceID) }
 
-pub struct MIRLocal {
-    pub id: MIRLocalID
-    pub name: String
-    pub span: Span
-    pub ty: MIRType
-    pub place: MIRPlaceID
-    pub mutable: Bool
-    pub ownership: MIROwnership
-    pub is_comptime: Bool
-    pub uninit: Bool
-    pub arena_view: Bool
-    pub string_view: Bool
-    pub gc_root: Bool
+// Retained native roots borrow storage, not the source value's ownership.
+// The producer records the exact checked operation granting access to that
+// owned place; a caller cannot turn a borrowed address into a Move permission.
+enum MIRRetainedRootCellAction { Read Write Move Initialize Replace Cleanup }
+
+struct MIRRetainedRootCellGrant {
+    function: MIRFunctionID
+    operation: MIROpID
+    place: MIRPlaceID
+    action: MIRRetainedRootCellAction
 }
 
-pub enum MIRPlaceBase { Local(local: MIRLocalID) Parameter(value: MIRValueID) Capture(value: MIRValueID) Temporary(value: MIRValueID) Static(name: String) }
+struct MIRRetainedRootLivePlace {
+    place: MIRPlaceID
+    live: MIRPlaceID
+    value_type: MIRType
+    drop_kind: MIRDropKind
+}
 
-pub enum MIRProjection {
+struct MIRRetainedRootCellBinding {
+    declaration: SymbolID
+    ty: MIRType
+    place: MIRPlaceID
+    capture_value: MIRValueID
+    capture_slot: Int
+    access: MIRAccess
+    ownership: MIROwnership
+    // Root and required projection flags are the original MIR Bool places.
+    // Copy/NoDrop values still have a presence flag, but no destructor action.
+    live_places: [MIRRetainedRootLivePlace]
+    grants: [MIRRetainedRootCellGrant]
+    cleanup_identity: String
+}
+
+struct MIRLocal {
+    id: MIRLocalID
+    name: String
+    span: Span
+    ty: MIRType
+    place: MIRPlaceID
+    // The SSA definition writes this same owning cell; never a second copy.
+    ssa_value: MIRValueID?
+    mutable: Bool
+    ownership: MIROwnership
+    is_comptime: Bool
+    uninit: Bool
+    arena_view: Bool
+    string_view: Bool
+    gc_root: Bool
+}
+
+enum MIRPlaceBase { Local(local: MIRLocalID) Parameter(value: MIRValueID) Capture(value: MIRValueID) Temporary(value: MIRValueID) Static(name: String) }
+
+enum MIRProjection {
     Field(field: MIRFieldID, span: Span)
     Index(kind: MIRIndexKind, index: MIRValueID, call: MIRPreludeCallID, write_call: MIRPreludeCallID?, location: MIRPanicLoc, context: MIRPanicContext?, span: Span)
     Deref(span: Span)
@@ -1028,75 +1093,77 @@ pub enum MIRProjection {
     // projected place keeps the list type, so a length-preserving callee
     // edits the window in place without a copy.
     Range(range: MIRValueID, location: MIRPanicLoc, span: Span)
+    // D-PAT-MAP1: a read window selected by one Ptr<V>? lookup.
+    MapLookup(lookup: MIRValueID, optional: Bool, span: Span)
 }
 
 // Which carrier a `MIRProjection.Payload` enters.
-pub enum MIRPayloadKind {
+enum MIRPayloadKind {
     Option
     Result(ok: Bool)
     Enum(owner: MIRTypeID, variant: String, index: Int)
 }
 
-pub struct MIRPlace {
-    pub id: MIRPlaceID
-    pub span: Span
-    pub ty: MIRType
-    pub base: MIRPlaceBase
-    pub projections: [MIRProjection]
-    pub access: MIRAccess
-    pub persist_key: String?
+struct MIRPlace {
+    id: MIRPlaceID
+    span: Span
+    ty: MIRType
+    base: MIRPlaceBase
+    projections: [MIRProjection]
+    access: MIRAccess
+    persist_key: String?
 }
 
-pub struct MIRValueFact { pub id: MIRValueID, pub ty: MIRType, pub span: Span, pub ownership: MIROwnership }
+struct MIRValueFact { id: MIRValueID, ty: MIRType, span: Span, ownership: MIROwnership }
 
-pub struct MIRScope { pub id: MIRScopeID, pub kind: MIRScopeKind, pub span: Span, pub name: String?, pub deadline: MIRValueID?, pub facts: [MIRScopeFact] }
+struct MIRScope { id: MIRScopeID, kind: MIRScopeKind, span: Span, name: String?, deadline: MIRValueID?, facts: [MIRScopeFact] }
 
-pub struct MIRScopeFact { pub key: String, pub value: String }
+struct MIRScopeFact { key: String, value: String }
 
-pub struct MIRCallSignature { pub arity: Int, pub max_arity: Int, pub borrow_mask: [Bool] }
+struct MIRCallSignature { arity: Int, max_arity: Int, borrow_mask: [Bool] }
 
-pub enum MIRPreludeFamily { MathBuiltin PreciseBuiltin BuiltinMethod HostBorrowCallback Overflow HandleMethod ClosureMethod ColumnarAccess StaticPrelude Host }
+enum MIRPreludeFamily { MathBuiltin PreciseBuiltin BuiltinMethod HostBorrowCallback Overflow HandleMethod ClosureMethod ColumnarAccess StaticPrelude Host }
 
-pub enum MIRPreludeABI { Value Aggregate Control Effect }
+enum MIRPreludeABI { Value Aggregate Control Effect }
 
-pub enum MIRSymbol { Prelude(name: String) Runtime(name: String) }
+enum MIRSymbol { Prelude(name: String) Runtime(name: String) }
 
-pub fn mir_symbol_name(symbol: MIRSymbol) -> String Never! {
+fn mir_symbol_name(symbol: MIRSymbol) -> String Never! {
     if symbol == {
         .Prelude(name) -> name
         .Runtime(name) -> name
     }
 }
 
-pub struct MIRPreludeCall {
-    pub id: MIRPreludeCallID
-    pub family: MIRPreludeFamily
-    pub module_name: String
-    pub member: String
-    pub symbol: MIRSymbol
-    pub signature: MIRCallSignature
-    pub effect_kind: Effect?
-    pub fallibility: MIRCallFallibility
-    pub abi: MIRPreludeABI
-    pub authority: MIRAuthorityDecision?
-    pub db_metadata: MIRDBQueryMetadata?
+struct MIRPreludeCall {
+    id: MIRPreludeCallID
+    family: MIRPreludeFamily
+    module_name: String
+    member: String
+    symbol: MIRSymbol
+    signature: MIRCallSignature
+    effect_kind: Effect?
+    fallibility: MIRCallFallibility
+    abi: MIRPreludeABI
+    authority: MIRAuthorityDecision?
+    db_metadata: MIRDBQueryMetadata?
 }
 
-pub struct MIRHostImportFact {
-    pub id: String
-    pub operation: String
-    pub required_right: String
-    pub parameter_type_ids: [String]
-    pub result_type_id: String?
+struct MIRHostImportFact {
+    id: String
+    operation: String
+    required_right: String
+    parameter_type_ids: [String]
+    result_type_id: String?
 }
 
-pub struct MIRAuthorityDecision {
-    pub import: MIRHostImportFact
-    pub authority_argument: Int?
-    pub inherited: Bool
+struct MIRAuthorityDecision {
+    import: MIRHostImportFact
+    authority_argument: Int?
+    inherited: Bool
 }
 
-pub fn mir_authority_plugin_load() -> MIRAuthorityDecision Never! {
+fn mir_authority_plugin_load() -> MIRAuthorityDecision Never! {
     MIRAuthorityDecision{
         import: MIRHostImportFact{
             id: "core.plugin.authority",
@@ -1110,88 +1177,88 @@ pub fn mir_authority_plugin_load() -> MIRAuthorityDecision Never! {
     }
 }
 
-pub fn mir_authority_plugin_call() -> MIRAuthorityDecision Never! {
+fn mir_authority_plugin_call() -> MIRAuthorityDecision Never! {
     load :: mir_authority_plugin_load()
     MIRAuthorityDecision{import: load.import, authority_argument: None, inherited: true}
 }
 
-pub struct MIRDBTableFact { pub table_id: String, pub read: Bool, pub write: Bool }
+struct MIRDBTableFact { table_id: String, read: Bool, write: Bool }
 
-pub struct MIRDBQueryMetadata {
-    pub source_file: MIRSourceFileID
-    pub source_path: String
-    pub source_span: Span
-    pub statement_identity: String
-    pub table_facts: [MIRDBTableFact]
+struct MIRDBQueryMetadata {
+    source_file: MIRSourceFileID
+    source_path: String
+    source_span: Span
+    statement_identity: String
+    table_facts: [MIRDBTableFact]
 }
 
-pub enum MIRItemRef { Type(id: MIRTypeID) Trait(id: MIRTraitID) Function(id: MIRFunctionID) Constant(id: MIRConstantID) Impl(id: MIRImplID) Foreign(id: MIRForeignID) Import(id: MIRImportID) }
+enum MIRItemRef { Type(id: MIRTypeID) Trait(id: MIRTraitID) Function(id: MIRFunctionID) Constant(id: MIRConstantID) Impl(id: MIRImplID) Foreign(id: MIRForeignID) Import(id: MIRImportID) }
 
-pub enum MIRImportKind { File(path: String) Module(path: String) Unqualified(module_id: MIRModuleID, items: [MIRImportItem]) }
+enum MIRImportKind { File(path: String) Module(path: String) Unqualified(module_id: MIRModuleID, items: [MIRImportItem]) }
 
-pub struct MIRImportItem { pub original: String, pub local: String, pub item: MIRItemRef }
+struct MIRImportItem { original: String, local: String, item: MIRItemRef }
 
-pub struct MIRImport { pub id: MIRImportID, pub module_id: MIRModuleID, pub visibility: MIRVisibility, pub alias: String, pub kind: MIRImportKind, pub span: Span, pub version: String? }
+struct MIRImport { id: MIRImportID, module_id: MIRModuleID, visibility: MIRVisibility, alias: String, kind: MIRImportKind, span: Span, version: String? }
 
-pub struct MIRModule { pub id: MIRModuleID, pub key: String, pub name: String, pub path: String, pub source_file: MIRSourceFileID, pub imports: [MIRImportID], pub children: [MIRModuleID], pub item_order: [MIRItemRef] }
+struct MIRModule { id: MIRModuleID, key: String, name: String, path: String, source_file: MIRSourceFileID, imports: [MIRImportID], children: [MIRModuleID], item_order: [MIRItemRef] }
 
-pub struct MIRSourceFile { pub id: MIRSourceFileID, pub path: String, pub source: String }
+struct MIRSourceFile { id: MIRSourceFileID, path: String, source: String }
 
-pub enum MIRStructLayout { C CAligned(alignment: Int, target: Bool) Columnar }
+enum MIRStructLayout { C CAligned(alignment: Int, target: Bool) Columnar }
 
-pub enum MIRCEnumTag { CInt U8 I8 U16 I16 U32 I32 U64 I64 }
+enum MIRCEnumTag { CInt U8 I8 U16 I16 U32 I32 U64 I64 }
 
-pub struct MIRShapeFieldNames {
-    pub text: String
-    pub json: String?
-    pub cbor: String?
-    pub csv: String?
-    pub toml: String?
-    pub yaml: String?
-    pub xml: String?
-    pub args: String
-    pub env: String
-    pub db: String?
-    pub layout: String?
+struct MIRShapeFieldNames {
+    text: String
+    json: String?
+    cbor: String?
+    csv: String?
+    toml: String?
+    yaml: String?
+    xml: String?
+    args: String
+    env: String
+    db: String?
+    layout: String?
 }
 
-pub struct MIRLayoutAlignmentFact {
-    pub requested_alignment: Int
-    pub effective_alignment: Int
-    pub target_mode: Bool
-    pub target_profile: String
-    pub fact_identity: String
+struct MIRLayoutAlignmentFact {
+    requested_alignment: Int
+    effective_alignment: Int
+    target_mode: Bool
+    target_profile: String
+    fact_identity: String
 }
 
-pub struct MIRIntegerRange { pub lo: Int, pub hi: Int }
+struct MIRIntegerRange { lo: Int, hi: Int }
 
-pub enum MIRSerdeAttributeKind { RenameAll Tag Untagged DenyUnknownFields }
+enum MIRSerdeAttributeKind { RenameAll Tag Untagged DenyUnknownFields }
 
-pub struct MIRSerdeAttribute { pub kind: MIRSerdeAttributeKind, pub value: String?, pub span: Span }
+struct MIRSerdeAttribute { kind: MIRSerdeAttributeKind, value: String?, span: Span }
 
-pub struct MIRCLIBinding { pub name: String, pub function: MIRFunctionID, pub span: Span, pub markers: [String] }
+struct MIRCLIBinding { name: String, function: MIRFunctionID, span: Span, markers: [String] }
 
-pub struct MIRField {
-    pub id: MIRFieldID
-    pub name: String
-    pub shape_names: MIRShapeFieldNames
-    pub skip: Bool
-    pub ty: MIRType
-    pub span: Span
-    pub public: Bool
-    pub package_public: Bool
-    pub computed: Bool
-    pub has_default: Bool
-    pub redact: Bool
+struct MIRField {
+    id: MIRFieldID
+    name: String
+    shape_names: MIRShapeFieldNames
+    skip: Bool
+    ty: MIRType
+    span: Span
+    public: Bool
+    package_public: Bool
+    computed: Bool
+    has_default: Bool
+    redact: Bool
 }
 
-pub struct MIRFieldRow { pub id: MIRFieldID, pub owner: MIRTypeID, pub field: MIRField }
+struct MIRFieldRow { id: MIRFieldID, owner: MIRTypeID, field: MIRField }
 
-pub enum MIRVariantPayload { Unit Single(value: MIRType) Named(fields: [MIRField]) }
+enum MIRVariantPayload { Unit Single(value: MIRType) Named(fields: [MIRField]) }
 
-pub struct MIRVariant { pub name: String, pub wire_name: String, pub span: Span, pub payload: MIRVariantPayload, pub discriminant: Int? }
+struct MIRVariant { name: String, wire_name: String, span: Span, payload: MIRVariantPayload, discriminant: Int? }
 
-pub enum MIRTypeDefKind {
+enum MIRTypeDefKind {
     Struct(fields: [MIRField], methods: [MIRFunctionID])
     Enum(variants: [MIRVariant], methods: [MIRFunctionID])
     Distinct(base: MIRType, range: MIRIntegerRange?)
@@ -1199,133 +1266,134 @@ pub enum MIRTypeDefKind {
     UnitFamily(members: [String])
 }
 
-pub enum MIRCompilerBuiltin { DefaultErr }
+enum MIRCompilerBuiltin { DefaultErr }
 
-pub struct MIRTypeDef {
-    pub id: MIRTypeID
-    pub module_id: MIRModuleID
-    pub key: String
-    pub name: String
-    pub span: Span
-    pub public: Bool
-    pub package_public: Bool
-    pub generic_params: [MIRGenericParam]
-    pub derives: [MIRTraitID]
-    pub auto_derive_default: Bool
-    pub auto_printable: Bool
-    pub published_schema: Bool
-    pub single_use: Bool
-    pub must_use: Bool
-    pub layout: MIRStructLayout?
-    pub c_layout_tag: MIRCEnumTag?
-    pub enum_layout: LayoutFacts?
-    pub layout_alignment: MIRLayoutAlignmentFact?
-    pub cli: MIRCLIEntry?
-    pub serde: [MIRSerdeAttribute]
-    pub cli_bindings: [MIRCLIBinding]
-    pub ownership: MIROwnershipMode
-    pub boxed_edges: [String]
-    pub compiler_builtin: MIRCompilerBuiltin?
-    pub kind: MIRTypeDefKind
+struct MIRTypeDef {
+    id: MIRTypeID
+    module_id: MIRModuleID
+    key: String
+    name: String
+    span: Span
+    public: Bool
+    package_public: Bool
+    generic_params: [MIRGenericParam]
+    derives: [MIRTraitID]
+    auto_derive_default: Bool
+    auto_printable: Bool
+    published_schema: Bool
+    single_use: Bool
+    must_use: Bool
+    layout: MIRStructLayout?
+    c_layout_tag: MIRCEnumTag?
+    enum_layout: LayoutFacts?
+    layout_alignment: MIRLayoutAlignmentFact?
+    cli: MIRCLIEntry?
+    serde: [MIRSerdeAttribute]
+    cli_bindings: [MIRCLIBinding]
+    ownership: MIROwnershipMode
+    boxed_edges: [String]
+    compiler_builtin: MIRCompilerBuiltin?
+    kind: MIRTypeDefKind
 }
 
-pub struct MIRCoreOwner {
-    pub id: MIRTypeID
-    pub nominal_id: MIRTypeID
-    pub module_id: MIRModuleID?
-    pub key: String
-    pub name: String
-    pub ownership: MIROwnershipMode
+struct MIRCoreOwner {
+    id: MIRTypeID
+    nominal_id: MIRTypeID
+    module_id: MIRModuleID?
+    key: String
+    name: String
+    ownership: MIROwnershipMode
 }
 
-pub enum MIRCLIValueKind { Bool Int Float String Path }
+enum MIRCLIValueKind { Bool Int Float String Path }
 
-pub enum MIRCLIDefault { TypeDefault Value(value: MIRConstant) }
+enum MIRCLIDefault { TypeDefault Value(value: MIRConstant) }
 
-pub enum MIRCLIInputShape {
+enum MIRCLIInputShape {
     Flag
     Value(kind: MIRCLIValueKind, optional: Bool, default: MIRCLIDefault?)
 }
 
-pub struct MIRCLIInput {
-    pub parameter: Int
-    pub name: String
-    pub label: String
-    pub ty: MIRType
-    pub zone: ParamZone
-    pub flag: String
-    pub short: String?
-    pub env: String?
-    pub help: String
-    pub metavar: String?
-    pub shape: MIRCLIInputShape
-    pub positional: Int?
-    pub variadic: Bool
+struct MIRCLIInput {
+    parameter: Int
+    name: String
+    label: String
+    ty: MIRType
+    zone: ParamZone
+    flag: String
+    short: String?
+    env: String?
+    help: String
+    metavar: String?
+    shape: MIRCLIInputShape
+    positional: Int?
+    variadic: Bool
 }
 
-pub struct MIRCLICommand {
-    pub name: String
-    pub description: String?
-    pub function: MIRFunctionID
-    pub receiver: MIRTypeID?
-    pub inputs: [MIRCLIInput]
+struct MIRCLICommand {
+    name: String
+    description: String?
+    function: MIRFunctionID
+    receiver: MIRTypeID?
+    inputs: [MIRCLIInput]
 }
 
-pub struct MIRCLIEntry {
-    pub record_inputs: Bool
-    pub description: String?
-    pub inputs: [MIRCLIInput]
-    pub commands: [MIRCLICommand]
-    pub standard: Bool
-    pub version: String?
+struct MIRCLIEntry {
+    record_inputs: Bool
+    description: String?
+    inputs: [MIRCLIInput]
+    commands: [MIRCLICommand]
+    standard: Bool
+    version: String?
 }
 
-pub struct MIRGenericParam { pub name: String, pub bounds: [MIRTraitRef] }
+struct MIRGenericParam { name: String, bounds: [MIRTraitRef] }
 
-pub struct MIRAssociatedTypeDecl { pub name: String, pub span: Span }
+struct MIRAssociatedTypeDecl { name: String, span: Span }
 
-pub struct MIRTraitMethod {
-    pub id: MIRTraitMethodID
-    pub name: String
-    pub span: Span
-    pub self_access: MIRAccess?
-    pub params: [MIRParam]
-    pub declared_return: MIRType?
-    pub return_type: MIRType
-    pub failure: MIRFailureCarrier
-    pub effects: MIREffectFacts
-    pub is_pure: Bool
-    pub return_view_provenance: [MIRViewProvenanceEntry]?
-    pub declared_return_view_provenance: [MIRViewProvenanceEntry]?
-    pub default: MIRFunctionID?
+struct MIRTraitMethod {
+    id: MIRTraitMethodID
+    name: String
+    span: Span
+    self_access: MIRAccess?
+    params: [MIRParam]
+    declared_return: MIRType?
+    return_type: MIRType
+    failure: MIRFailureCarrier
+    effects: MIREffectFacts
+    is_pure: Bool
+    return_view_provenance: [MIRViewProvenanceEntry]?
+    declared_return_view_provenance: [MIRViewProvenanceEntry]?
+    default: MIRFunctionID?
 }
 
-pub struct MIRTraitDef { pub id: MIRTraitID, pub module_id: MIRModuleID, pub key: String, pub name: String, pub span: Span, pub visibility: MIRVisibility, pub associated_types: [MIRAssociatedTypeDecl], pub methods: [MIRTraitMethod] }
+struct MIRTraitDef { id: MIRTraitID, module_id: MIRModuleID, key: String, name: String, span: Span, visibility: MIRVisibility, associated_types: [MIRAssociatedTypeDecl], methods: [MIRTraitMethod] }
 
-pub struct MIRAssociatedTypeValue { pub name: String, pub ty: MIRType, pub span: Span }
+struct MIRAssociatedTypeValue { name: String, ty: MIRType, span: Span }
 
-pub struct MIRImplDef {
-    pub id: MIRImplID
-    pub module_id: MIRModuleID
-    pub key: String
-    pub span: Span
-    pub self_type: MIRType
-    pub trait_ref: MIRTraitRef?
-    pub associated_types: [MIRAssociatedTypeValue]
-    pub methods: [MIRFunctionID]
-    pub delegation: MIRFieldID?
-    pub compiler_generated: Bool
-    pub serde: MIRSerdeCodec?
-    pub operator_marker: MIROperatorMarker?
-    pub operator_rhs: MIRType?
-    pub target_os: MIROSTarget?
-    pub target_applicability: MIRTargetApplicability
+struct MIRImplDef {
+    id: MIRImplID
+    module_id: MIRModuleID
+    key: String
+    span: Span
+    self_type: MIRType
+    trait_ref: MIRTraitRef?
+    associated_types: [MIRAssociatedTypeValue]
+    methods: [MIRFunctionID]
+    delegation: MIRFieldID?
+    compiler_generated: Bool
+    serde: MIRSerdeCodec?
+    operator_marker: MIROperatorMarker?
+    operator_rhs: MIRType?
+    target_os: MIROSTarget?
+    target_applicability: MIRTargetApplicability
 }
 
-pub struct MIRConstantDef { pub id: MIRConstantID, pub module_id: MIRModuleID, pub key: String, pub name: String, pub span: Span, pub visibility: MIRVisibility, pub ty: MIRType, pub is_storage: Bool, pub value: MIRConstant }
+struct MIRConstantDef { id: MIRConstantID, module_id: MIRModuleID, key: String, name: String, span: Span, visibility: MIRVisibility, ty: MIRType, is_storage: Bool, value: MIRConstant }
 
-pub enum MIRConstKey {
+enum MIRConstKey {
     Int(value: Int)
+    BigInt(decimal: String)
     String(value: String)
     Bool(value: Bool)
     Char(value: Int)
@@ -1334,15 +1402,37 @@ pub enum MIRConstKey {
     Enum(type_name: String, variant: String)
 }
 
-pub struct MIRConstKeyField { pub name: String, pub key: MIRConstKey }
+struct MIRConstKeyField { name: String, key: MIRConstKey }
 
-pub struct MIRConstField { pub name: String, pub value: MIRConstant }
+struct MIRConstField { name: String, value: MIRConstant }
 
-pub struct MIRConstEnumArg { pub name: String?, pub value: MIRConstant }
+struct MIRConstEnumArg { name: String?, value: MIRConstant }
 
-pub enum MIRConstReport { Clean(ty: MIRType) Told(value: MIRConstant) }
+enum MIRConstReport { Clean(ty: MIRType) Told(value: MIRConstant) }
 
-pub enum MIRConstant {
+// Core publication sites use the same Global path as module storage. The
+// initializer declaration, not a callsite, supplies their identity.
+enum MIRSharedLifetime { Process World Thread Attempt }
+fn mir_shared_lifetime_core_member(name: String) -> MIRSharedLifetime? Never! {
+    if name == {
+        "__process_shared" -> Val(MIRSharedLifetime.Process)
+        "__world_shared" -> Val(MIRSharedLifetime.World)
+        "__thread_shared" -> Val(MIRSharedLifetime.Thread)
+        "__attempt_shared" -> Val(MIRSharedLifetime.Attempt)
+        else -> None
+    }
+}
+struct MIRSharedSite { initializer: MIRFunctionID, lifetime: MIRSharedLifetime }
+
+// The pinned Core image and every dynamic importer use this exact link name.
+fn mir_shared_site_getter_symbol(initializer: MIRFunctionID) -> String Never! {
+    prefix :: "jet_core_shared_".bytes()
+    digits :: "0123456789abcdef".bytes()
+    bytes :: loop index in 0..<32 -> if index < 16 -> prefix[index] else -> digits[Int.from_u64((initializer.value >> ((31 - index) * 4)).bit_and(U64{15}))]
+    String.from_bytes(bytes) ?? panic("Shared site symbol is not ASCII")
+}
+
+enum MIRConstant {
     Int(value: Int, width: MIRIntegerWidth?, spelling: String?)
     Float(value: Float, f32: Bool, spelling: String?)
     Bool(value: Bool)
@@ -1350,6 +1440,7 @@ pub enum MIRConstant {
     String(value: String)
     Bytes(value: [U8])
     Unit
+    SharedSite(site: MIRSharedSite)
     BigInt(decimal: String)
     List(values: [MIRConstant])
     Map(entries: [MIRConstMapEntry])
@@ -1359,17 +1450,58 @@ pub enum MIRConstant {
     Failed(report: MIRConstReport)
 }
 
-pub struct MIRIntegerWidth { pub signed: Bool, pub bits: Int }
+struct MIRIntegerWidth { signed: Bool, bits: Int }
 
-pub struct MIRConstMapEntry { pub key: MIRConstKey, pub value: MIRConstant }
+// Native MIR Int carries an i64. Keep an unbounded value outside that range in
+// BigInt; a checked U64 literal instead keeps the seed's signed-bit i64 payload
+// and its width. Both emitters recover the same unsigned value from that pair.
+fn mir_integer_constant(number: Int, width: MIRIntegerWidth?, spelling: String?) -> MIRConstant Never! {
+    payload := number
+    if width == Val(word) {
+        if !word.signed && word.bits == 64 && number > 9223372036854775807 {
+            payload = number - 18446744073709551616
+        }
+    }
+    if payload < -9223372036854775807 - 1 || payload > 9223372036854775807 -> return MIRConstant.BigInt{decimal: "{payload}"}
+    MIRConstant.Int{value: payload, width: width, spelling: spelling}
+}
 
-pub struct MIRPanicLoc { pub file: MIRSourceFileID, pub line: Int, pub column: Int }
+fn mir_integer_key(number: Int) -> MIRConstKey Never! {
+    if mir_integer_constant(number, None, None) == {
+        .Int(value, _, _) -> MIRConstKey.Int{value: value}
+        .BigInt(decimal) -> MIRConstKey.BigInt{decimal: decimal}
+        else -> panic("integer key materialization is not an integer")
+    }
+}
 
-pub struct MIRPanicLocal { pub name: String, pub local: MIRLocalID }
+// Both decimals are canonical BigInt keys, so sign, digit count, then lexical
+// order compare their exact numeric values without parsing or allocating limbs.
+fn mir_big_integer_key_compare(left: String, right: String) -> Int Never! {
+    left_negative :: left.starts_with("-")
+    right_negative :: right.starts_with("-")
+    if left_negative != right_negative -> return if left_negative -> -1 else -> 1
+    order :: if left.len() < right.len() -> -1 else -> if left.len() > right.len() -> 1 else -> if left < right -> -1 else -> if left > right -> 1 else -> 0
+    if left_negative -> -order else -> order
+}
 
-pub struct MIRPanicContext { pub function: String, pub source_line: String, pub caret: Int, pub locals: [MIRPanicLocal] }
+// Decode the i64 payload only for readers doing mathematical comparisons or
+// arithmetic. Machine-word lowering and canonical digesting keep the raw bits.
+fn mir_integer_value(payload: Int, width: MIRIntegerWidth?) -> Int Never! {
+    if width == Val(word) {
+        if !word.signed && word.bits == 64 && payload < 0 -> return payload + 18446744073709551616
+    }
+    payload
+}
 
-pub enum MIRStringFormat {
+struct MIRConstMapEntry { key: MIRConstKey, value: MIRConstant }
+
+struct MIRPanicLoc { file: MIRSourceFileID, line: Int, column: Int }
+
+struct MIRPanicLocal { name: String, local: MIRLocalID }
+
+struct MIRPanicContext { function: String, source_line: String, caret: Int, locals: [MIRPanicLocal] }
+
+enum MIRStringFormat {
     Display
     Debug
     Pretty
@@ -1385,48 +1517,48 @@ pub enum MIRStringFormat {
     Unit(format: MIRUnitFormat)
 }
 
-pub enum MIRUnitFormat { Symbol Name Bare }
+enum MIRUnitFormat { Symbol Name Bare }
 
-pub enum MIRStringPartKind {
+enum MIRStringPartKind {
     Literal(text: String)
     Interpolation(value: MIRValueID, format: MIRStringFormat)
 }
 
-pub struct MIRStringPart { pub kind: MIRStringPartKind }
+struct MIRStringPart { kind: MIRStringPartKind }
 
-pub struct MIRPhiIncoming { pub block: MIRBlockID, pub value: MIRValueID }
+struct MIRPhiIncoming { block: MIRBlockID, value: MIRValueID }
 
-pub struct MIRMapEntry { pub key: MIRValueID, pub value: MIRValueID }
+struct MIRMapEntry { key: MIRValueID, value: MIRValueID }
 
-pub struct MIRCallArg {
-    pub value: MIRValueID
-    pub place: MIRPlaceID?
-    pub access: MIRAccess
-    pub span: Span
-    pub label: String?
-    pub source_index: Int?
-    pub binder_slot: Int?
-    pub spread: Bool
-    pub implicit_clone: Bool
-    pub shared_auto_clone: Bool
-    pub owned_last_use: Bool
-    pub authority_boundary: Bool
-    pub fn_coercion: MIRFnCoercion?
-    pub widen_fixed_to_list: Bool
-    pub widen_to_union: MIRUnionCoercion?
-    pub box_as_trait: MIRTypeID?
+struct MIRCallArg {
+    value: MIRValueID
+    place: MIRPlaceID?
+    access: MIRAccess
+    span: Span
+    label: String?
+    source_index: Int?
+    binder_slot: Int?
+    spread: Bool
+    implicit_clone: Bool
+    shared_auto_clone: Bool
+    owned_last_use: Bool
+    authority_boundary: Bool
+    fn_coercion: MIRFnCoercion?
+    widen_fixed_to_list: Bool
+    widen_to_union: MIRUnionCoercion?
+    box_as_trait: MIRTypeID?
 }
 
-pub struct MIRFnCoercion { pub ty: MIRType, pub already_boxed: Bool }
+struct MIRFnCoercion { ty: MIRType, already_boxed: Bool }
 
-pub struct MIRUnionCoercion { pub union: MIRTypeID, pub variant: String }
+struct MIRUnionCoercion { union: MIRTypeID, variant: String }
 
-pub enum MIRPreludeTypeArg {
+enum MIRPreludeTypeArg {
     Type(ty: MIRType)
     HostUsize
 }
 
-pub enum MIRComponentTypeDescriptor {
+enum MIRComponentTypeDescriptor {
     Int
     Float
     Bool
@@ -1437,18 +1569,18 @@ pub enum MIRComponentTypeDescriptor {
     Record(name: String, fields: [MIRComponentTypeField])
 }
 
-pub struct MIRComponentTypeField {
-    pub index: Int
-    pub name: String
-    pub ty: MIRComponentTypeDescriptor
+struct MIRComponentTypeField {
+    index: Int
+    name: String
+    ty: MIRComponentTypeDescriptor
 }
 
-pub struct MIRComponentSignatureDescriptor {
-    pub params: [MIRComponentTypeDescriptor]
-    pub result: MIRComponentTypeDescriptor
+struct MIRComponentSignatureDescriptor {
+    params: [MIRComponentTypeDescriptor]
+    result: MIRComponentTypeDescriptor
 }
 
-pub enum MIRTextHoleKind {
+enum MIRTextHoleKind {
     Text
     Int
     Float
@@ -1456,32 +1588,32 @@ pub enum MIRTextHoleKind {
     InlineRange(lo: Int, hi: Int)
 }
 
-pub enum MIRTextPatternPart {
+enum MIRTextPatternPart {
     Literal(value: String)
     Hole(kind: MIRTextHoleKind, ty: MIRTypeID, span: Span)
 }
 
-pub enum MIRBinaryPatternPart {
+enum MIRBinaryPatternPart {
     Literal(bytes: [U8])
     Bits(width: U8, ty: MIRTypeID, little: Bool, span: Span)
     Rest(ty: MIRTypeID, span: Span)
 }
 
-pub enum MIRStructExtra { HTTPRequestParams }
+enum MIRStructExtra { HTTPRequestParams }
 
-pub enum MIRLayoutCompareOp { Equal LessEqual GreaterEqual }
+enum MIRLayoutCompareOp { Equal LessEqual GreaterEqual }
 
-pub enum MIRRequireKind { Require RequireEq Panic }
+enum MIRRequireKind { Require RequireEq Panic }
 
-pub enum MIRHTTPMethod { Get Post Put Delete Patch Head Options }
+enum MIRHTTPMethod { Get Post Put Delete Patch Head Options }
 
-pub enum MIRAllocatorKind { Arena Bump Pool Fixed }
+enum MIRAllocatorKind { Arena Bump Pool Fixed }
 
-pub enum MIRTaskGroupKind { All Any Race }
+enum MIRTaskGroupKind { All Any Race }
 
-pub enum MIRSelectKind { Start Receive After Wait }
+enum MIRSelectKind { Start Receive After Wait }
 
-pub enum MIRCoreClosureKind {
+enum MIRCoreClosureKind {
     Spawn
     Realtime
     Serve
@@ -1507,145 +1639,89 @@ pub enum MIRCoreClosureKind {
     )
 }
 
-pub enum MIRGCEditKind { Clear Pop RemoveIndex InsertIndex Prepend Additive Plain EdgeSlot }
+enum MIRGCEditKind { Clear Pop RemoveIndex InsertIndex Prepend Additive Plain EdgeSlot }
 
-pub enum MIRTypedHeadKind { SQL HTML Sh URL Path DateTime }
+enum MIRTypedHeadKind { SQL HTML Sh URL Path DateTime }
+
+// The shared boundary-head classification, mirrored by Syntax::typed_head_kind.
+fn mir_typed_head_kind(head: Type) -> MIRTypedHeadKind? {
+    if head == {
+        .Named(name) -> {
+            if name == "SQL" -> return Val(MIRTypedHeadKind.SQL)
+            if name == "HTML" -> return Val(MIRTypedHeadKind.HTML)
+            if name == "Sh" -> return Val(MIRTypedHeadKind.Sh)
+            if name == "URL" -> return Val(MIRTypedHeadKind.URL)
+            if name == "Path" -> return Val(MIRTypedHeadKind.Path)
+            if name == "DateTime" -> return Val(MIRTypedHeadKind.DateTime)
+        }
+        else -> {}
+    }
+    None
+}
 
 // The Core module whose runtime serves a boundary typed head (its usage and
 // linkage key), not necessarily a record of the same type.
-pub fn mir_boundary_head_owner_module(name: String) -> String? {
+fn mir_boundary_head_owner_module(name: String) -> String? {
     if name == "URL" -> return Val("core.net.url")
     if name == "Path" -> return Val("core.files")
     if name == "DateTime" -> return Val("core.time")
     None
 }
 
-// The Core module whose same-named record IS the built-in value: only
-// `core.net.url`'s `URL`. Every other Core record sharing a head's leaf
-// (`core.files.path`'s `Path`, `core.time`'s civil `DateTime`) is a
-// different type and never claims the bare spelling.
-pub fn mir_boundary_head_carrier_module(name: String) -> String? {
+// The Core module whose same-named record is the built-in value. URL and
+// DateTime use their checked source carriers; Path stays the native boundary
+// carrier, distinct from core.files.path's record.
+fn mir_boundary_head_carrier_module(name: String) -> String? {
     if name == "URL" -> return Val("core.net.url")
+    if name == "DateTime" -> return Val("core.time")
     None
 }
 
-pub enum MIRRegisterWidth { U8 U16 U32 U64 }
+enum MIRRegisterWidth { U8 U16 U32 U64 }
 
-pub enum MIRHardwareOp {
+enum MIRHardwareOp {
     RegisterRead(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
     RegisterWrite(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
     DMAStart(profile_id: String, channel: String, buffer_ty: MIRType)
     DMAWait(profile_id: String, channel: String, buffer_ty: MIRType)
 }
 
-pub struct MIRReflectField {
-    pub name: String
-    pub type_name: String
-    pub path: String
-    pub value: MIRValueID
+struct MIRReflectField {
+    name: String
+    type_name: String
+    path: String
+    value: MIRValueID
 }
 
-pub enum MIRResourceAccessMode { Read Write Move }
 
-pub enum MIRResourceIdentity { Named(name: String) Unknown }
+enum MIRCallee { User(function: MIRFunctionID) Associated(function: MIRFunctionID, owner: MIRType) TraitMethod(method: MIRTraitMethodID, trait_ref: MIRTraitRef, receiver: MIRType) Method(function: MIRFunctionID, owner: MIRType) Core(call: MIRCoreCallID) Prelude(call: MIRPreludeCallID) Foreign(id: MIRForeignID) Indirect(value: MIRValueID) }
 
-pub enum MIRResourceRegion {
-    Whole
-    Bytes(start: Int, length: Int)
-    Unknown
-}
+enum MIRUnaryOp { Neg Not }
 
-pub struct MIRResourceLayout {
-    pub size: Int
-    pub align: Int
-    pub layout: String
-    pub device: String
-}
+enum MIRBinaryOp { Add Sub Mul Div FloorDiv Mod Rem Pow BitAnd BitOr BitXor Shl Shr Eq Ne Lt Gt Le Ge Compare And Or }
 
-pub struct MIRResourceAccess {
-    pub resource: MIRResourceIdentity
-    pub mode: MIRResourceAccessMode
-    pub region: MIRResourceRegion
-    pub layout: MIRResourceLayout?
-    pub temporary: Bool
-}
-
-pub enum MIRFrameCompletion {
-    Synchronous
-    Pending(token: String)
-    Event(token: String)
-}
-
-pub struct MIRFrameOperation {
-    pub name: String
-    pub source_index: Int
-    pub accesses: [MIRResourceAccess]
-    pub completion: MIRFrameCompletion
-    pub completion_provider: String?
-    pub external_effect: Bool
-}
-
-pub struct MIRFrameDependency {
-    pub before: Int
-    pub after: Int
-    pub resource: String
-    pub reason: String
-}
-
-pub struct MIRFrameTransfer {
-    pub before: Int
-    pub after: Int
-    pub resource: String
-    pub from_device: String
-    pub to_device: String
-}
-
-pub struct MIRFrameReuse {
-    pub previous_resource: String
-    pub next_resource: String
-    pub previous_last_use: Int
-    pub next_first_use: Int
-    pub legal: Bool
-    pub reason: String
-}
-
-pub struct MIRFrameRetention {
-    pub resource: String
-    pub operation: Int
-    pub owner: String
-    pub completion_token: String?
-    pub completed: Bool
-}
-
-pub struct MIRFrameSchedule {
-    pub operations: [MIRFrameOperation]
-    pub dependencies: [MIRFrameDependency]
-    pub transfers: [MIRFrameTransfer]
-    pub reuse: [MIRFrameReuse]
-    pub retentions: [MIRFrameRetention]
-    pub conservative: [String]
-}
-
-pub enum MIRCallee { User(function: MIRFunctionID) Associated(function: MIRFunctionID, owner: MIRType) TraitMethod(method: MIRTraitMethodID, trait_ref: MIRTraitRef, receiver: MIRType) Method(function: MIRFunctionID, owner: MIRType) Core(call: MIRCoreCallID) Prelude(call: MIRPreludeCallID) Foreign(id: MIRForeignID) Indirect(value: MIRValueID) }
-
-pub enum MIRUnaryOp { Neg Not }
-
-pub enum MIRBinaryOp { Add Sub Mul Div FloorDiv Mod Rem Pow BitAnd BitOr BitXor Shl Shr Eq Ne Lt Gt Le Ge Compare And Or }
-
-pub enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location: MIRPanicLoc?) }
+enum MIRBinaryDispatch { Primitive Prelude(call: MIRPreludeCallID, location: MIRPanicLoc?) }
 
 // `Trap` exactly when the operands are fixed-width integers, the operator can
-// overflow (`+ - * / ^ << >>`), and the dispatch is that width's trap route
+// overflow (`+ - * / pow << >>`), and the dispatch is that width's trap route
 // (`{width}.trap.{op}`). Native MIR carries the trap only in that route, so the
 // bootstrap bridge checks this rule going out and re-derives the mode coming back.
-pub enum MIRBinaryOverflow { Unchecked Trap }
+enum MIRBinaryOverflow { Unchecked Trap }
 
-pub enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }
+// Trap is the checked policy fact; sema never puts it on a proven-total op.
+fn mir_binary_can_trap(op: MIRBinaryOp, overflow: MIRBinaryOverflow) -> Bool Never! {
+    if overflow != .Trap -> return false
+    if op == {
+        .Add | .Sub | .Mul | .Div | .FloorDiv | .Mod | .Rem | .Pow | .Shl | .Shr -> true
+        else -> false
+    }
+}
 
-pub struct MIREnumArg { pub field: MIRFieldID?, pub value: MIRValueID, pub boxed: Bool }
+enum MIRConversion { Transparent NumericCast SendFn Prelude(call: MIRPreludeCallID, location: MIRPanicLoc, fallibility: MIRCallFallibility) }
 
-pub enum MIRSemanticOp {
-    DataEntriesToMap(call: MIRPreludeCallID, local: MIRLocalID)
+struct MIREnumArg { field: MIRFieldID?, value: MIRValueID, boxed: Bool }
+
+enum MIRSemanticOp {
     MathBuiltin(type_id: MIRTypeID, call: MIRPreludeCallID, args: [MIRValueID])
     PreciseBuiltin(type_id: MIRTypeID, call: MIRPreludeCallID, args: [MIRValueID])
     Print(call: MIRPreludeCallID, value: MIRValueID)
@@ -1666,7 +1742,6 @@ pub enum MIRSemanticOp {
         type_id: MIRTypeID,
         fields: [MIRFieldValue],
         extra: MIRStructExtra?,
-        trait_coercion: MIRTypeID?,
         boxed_fields: [MIRFieldID]
     )
     CellGuardProject(
@@ -1781,10 +1856,10 @@ pub enum MIRSemanticOp {
 // copy carries the sema decision that made it; lowering and backends never
 // print a clone without one, and the legality verifier checks the fact
 // against the operand's type.
-pub enum MIRCopyFact { Explicit Materialize Share Scalar ViewMaterialize }
+enum MIRCopyFact { Explicit Materialize Share Scalar ViewMaterialize }
 
 // Stable wire name (digests, emitted copy tags).
-pub fn mir_copy_fact_name(fact: MIRCopyFact) -> String Never! {
+fn mir_copy_fact_name(fact: MIRCopyFact) -> String Never! {
     if fact == {
         .Explicit -> "explicit"
         .Materialize -> "materialize"
@@ -1794,14 +1869,14 @@ pub fn mir_copy_fact_name(fact: MIRCopyFact) -> String Never! {
     }
 }
 
-// An implicit copy (materialize, share) of a Copy-ABI value is a bitwise read;
-// the user's `~` and view materialization keep their fact.
-pub fn mir_copy_fact_for_ownership(fact: MIRCopyFact, mode: MIROwnershipMode) -> MIRCopyFact Never! {
-    if mode == MIROwnershipMode.Copy && (fact == MIRCopyFact.Materialize || fact == MIRCopyFact.Share) -> return MIRCopyFact.Scalar
-    ~fact
+// Only a NoDrop Copy-ABI value can strip an implicit physical clone.
+// The user's `~` and view materialization keep their fact.
+fn mir_copy_fact_for_ownership(fact: MIRCopyFact, ownership: MIROwnership) -> MIRCopyFact Never! {
+    if ownership.mode == MIROwnershipMode.Copy && ownership.drop == MIRDropKind.NoDrop && (fact == MIRCopyFact.Materialize || fact == MIRCopyFact.Share) -> return MIRCopyFact.Scalar
+    fact.copy()
 }
 
-pub enum MIROperation {
+enum MIROperation {
     Parameter(index: Int, name: String)
     Capture(slot: Int)
     Global(name: String)
@@ -1819,6 +1894,7 @@ pub enum MIROperation {
     BuildString(parts: [MIRStringPart])
     BuildList(values: [MIRValueID], trait_coercion: MIRTypeID?)
     BuildMap(entries: [MIRMapEntry])
+    MapLookup(map: MIRPlaceID, key: MIRValueID, cache: MIRPlaceID)
     EnumIs(subject: MIRValueID, owner: MIRTypeID, variant: String)
     EnumPayload(subject: MIRValueID, owner: MIRTypeID, variant: String, index: Int)
     OptionIsSome(subject: MIRValueID)
@@ -1866,46 +1942,581 @@ pub enum MIROperation {
     Drop(value: MIRValueID, kind: MIRDropKind)
 }
 
-pub struct MIRFieldValue { pub field: MIRFieldID, pub value: MIRValueID }
-
-pub struct MIRCaptureFacts { pub escapes: Bool, pub needs_fn_mut: Bool, pub mutable: [String], pub cloned: [String], pub frozen: [String], pub materialized: [String], pub moved: [String] }
-
-pub enum MIRTestScopeMember { ExpectFail(expected_code: String?, expected_message: String?) Timeout(duration: MIRValueID) Skip(whole_test: Bool) Measure }
-
-pub enum MIRDataPlanOperation { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Collect }
-
-pub enum MIRDataPlanSourceKind { Table Series CSV JSON JSONL Parquet Arrow Loader CSVReader JSONReader }
-
-pub enum MIRDataPlanStreamMode { Bounded(batch_rows: Int?) Materialized(reason: String) }
-
-pub enum MIRDataPlanPhysicalOperator { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Batch Materialize }
-
-pub MIR_DATA_PLAN_SCHEMA_VERSION :: 1
-
-pub struct MIRDataPlan {
-    pub schema_version: Int
-    pub source: MIRDataPlanSourceKind
-    pub logical: [MIRDataPlanNode]
-    pub physical: [MIRDataPlanPhysicalNode]
-    pub output: MIRDataPlanNodeID
-    pub source_span: Span
+// One physical-consumption mechanism for verification, last-use selection and
+// SSA retirement. Through preserves prospective last-use traversal; its bit
+// distinguishes a carrier transfer from a projection/implicit clone.
+enum MIRValueConsumption {
+    Yes(requires_owner: Bool)
+    Through(transfers: Bool)
+    No
 }
 
-pub struct MIRDataPlanNode { pub id: MIRDataPlanNodeID, pub operation: MIRDataPlanOperation, pub inputs: [MIRDataPlanNodeID], pub source: MIRDataPlanSourceKind?, pub row_type: MIRType, pub columns: [MIRDataPlanColumn], pub callable: MIRDataPlanCallable?, pub stream: MIRDataPlanStreamMode, pub span: Span }
+fn mir_value_consumption_transfers(consumption: MIRValueConsumption) -> Bool Never! {
+    if consumption == {
+        .Yes(_) -> true
+        .Through(transfers) -> transfers
+        .No -> false
+    }
+}
 
-pub struct MIRDataPlanColumn { pub name: String, pub ty: MIRType, pub nullable: Bool }
+fn mir_value_consumption_requires_owner(consumption: MIRValueConsumption) -> Bool Never! {
+    if consumption == {
+        .Yes(requires_owner) -> requires_owner
+        else -> false
+    }
+}
 
-pub struct MIRDataPlanCallable { pub label: String, pub parameter: MIRType, pub result: MIRType, pub span: Span }
+fn mir_call_arg_consumes(arg: MIRCallArg) -> Bool Never! {
+    !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list) && (arg.access == .Move || arg.owned_last_use)
+}
 
-pub struct MIRDataPlanPhysicalNode { pub logical: MIRDataPlanNodeID, pub operator: MIRDataPlanPhysicalOperator, pub stream: MIRDataPlanStreamMode, pub reason: String }
+fn mir_call_value_consumption(args: [MIRCallArg], value: MIRValueID) -> MIRValueConsumption Never! {
+    loop arg in args {
+        if arg.value == value && mir_call_arg_consumes(arg) -> return MIRValueConsumption.Yes{requires_owner: true}
+    }
+    MIRValueConsumption.No
+}
 
-pub struct MIRInstruction { pub id: MIROpID, pub span: Span, pub source_line: Int?, pub result: MIRValueID?, pub ty: MIRType?, pub operation: MIROperation }
+// `borrow_mask` is the checked route's receiver-first borrow mask;
+// callers resolve it once per instruction, never invent access from a name.
+// Only these operation shapes use checked positional masks for consumption.
+fn mir_operation_consumption_route(operation: MIROperation) -> MIRPreludeCallID? Never! {
+    if operation == .Semantic(semantic) {
+        if semantic == {
+            .BuiltinMethod(call, _, _, _, _) | .HandleMethod(call, _, _, _, _) -> return Val(call)
+            else -> {}
+        }
+    }
+    None
+}
 
-pub struct MIRBasicBlock { pub id: MIRBlockID, pub span: Span, pub instructions: [MIRInstruction], pub terminator: MIRTerminator }
+fn mir_operation_value_consumption(operation: MIROperation, value: MIRValueID, borrow_mask: [Bool]) -> MIRValueConsumption Never! {
+    if operation == {
+        .Move(taken) | .TraitBox(taken, _) -> if taken == value -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+        .Drop(taken, kind) -> if taken == value && kind != .NoDrop -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+        .WritePlace(_, stored) | .ReplacePlace(_, stored) | .Present(stored) | .ResultOk(stored) | .ResultErr(stored) -> if stored == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .BuildList(values, _) -> if values.contains(value) -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .BuildMap(entries) -> {
+            loop entry in entries {
+                if entry.key == value || entry.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+            }
+            MIRValueConsumption.No
+        }
+        .Struct(_, fields) | .Tuple(_, fields) -> {
+            loop field in fields {
+                if field.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+            }
+            MIRValueConsumption.No
+        }
+        .Enum(_, _, args) -> {
+            loop arg in args {
+                if arg.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+            }
+            MIRValueConsumption.No
+        }
+        .Phi(rows) -> {
+            loop row in rows {
+                if row.value == value -> return MIRValueConsumption.Through{transfers: true}
+            }
+            MIRValueConsumption.No
+        }
+        .AttachTag(carried, _) -> if carried == value -> MIRValueConsumption.Through{transfers: true} else -> MIRValueConsumption.No
+        .Convert(carried, _, _, conversion) -> {
+            if carried == value && (conversion == .Transparent || conversion == .SendFn) -> return MIRValueConsumption.Through{transfers: true}
+            MIRValueConsumption.No
+        }
+        .Copy(source, fact) -> {
+            if source == value && fact != .Explicit && fact != .ViewMaterialize -> return MIRValueConsumption.Through{transfers: false}
+            MIRValueConsumption.No
+        }
+        .OptionValue(source) | .ResultValue(source, _) | .EnumPayload(source, _, _, _) -> if source == value -> MIRValueConsumption.Through{transfers: false} else -> MIRValueConsumption.No
+        .Call(_, args, _) | .IndirectCall(_, args, _) | .CoreCall(_, _, args, _, _, _) -> mir_call_value_consumption(args, value)
+        .LoopIterInit(_, collection, _, by_value, _) -> if collection == value && by_value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        .Closure(_, captures, _) -> {
+            loop capture in captures {
+                if capture == .Value(captured) {
+                    if captured == value -> return MIRValueConsumption.Yes{requires_owner: false}
+                }
+            }
+            MIRValueConsumption.No
+        }
+        .Semantic(semantic) -> {
+            if semantic == {
+                .StructLiteral(_, fields, _, _) -> {
+                    loop field in fields {
+                        if field.value == value -> return MIRValueConsumption.Yes{requires_owner: false}
+                    }
+                    MIRValueConsumption.No
+                }
+                .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) | .AllocNew(_, _, _, args) -> mir_call_value_consumption(args, value)
+                .TaskGroup(_, _, tasks) -> {
+                    loop child in tasks {
+                        if child == value -> return MIRValueConsumption.Yes{requires_owner: true}
+                    }
+                    MIRValueConsumption.No
+                }
+                .CoreClosureCall(_, .Spawn, _, closure, _, _) -> if closure == Val(spawned_value) && spawned_value == value -> MIRValueConsumption.Yes{requires_owner: true} else -> MIRValueConsumption.No
+                .HandleMethod(_, receiver, args, _, _) -> {
+                    if receiver == value && borrow_mask.len() > 0 && !borrow_mask[0] -> return MIRValueConsumption.Yes{requires_owner: true}
+                    loop (index, arg) in args {
+                        if arg == value && index + 1 < borrow_mask.len() && !borrow_mask[index + 1] -> return MIRValueConsumption.Yes{requires_owner: false}
+                    }
+                    MIRValueConsumption.No
+                }
+                .BuiltinMethod(_, receiver, _, args, _) -> {
+                    if receiver == value -> return MIRValueConsumption.No
+                    loop (index, arg) in args {
+                        if arg == value && index + 1 < borrow_mask.len() && !borrow_mask[index + 1] -> return MIRValueConsumption.Yes{requires_owner: false}
+                    }
+                    MIRValueConsumption.No
+                }
+                else -> MIRValueConsumption.No
+            }
+        }
+        else -> MIRValueConsumption.No
+    }
+}
 
-pub struct MIRSwitchArm { pub condition: MIRValueID, pub target: MIRBlockID, pub span: Span }
+fn mir_terminator_value_consumption(terminator: MIRTerminator, value: MIRValueID) -> MIRValueConsumption Never! {
+    if terminator == {
+        .Return(returned) -> if returned == .Val(returned_value) && returned_value == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        // Break's value is transferred by its destination phi, not twice.
+        .Break(_, returned) -> if returned == .Val(break_value) && break_value == value -> MIRValueConsumption.Through{transfers: false} else -> MIRValueConsumption.No
+        .Yield(yielded, _) -> if yielded == value -> MIRValueConsumption.Yes{requires_owner: false} else -> MIRValueConsumption.No
+        else -> MIRValueConsumption.No
+    }
+}
 
-pub enum MIRTerminator {
+// Checked access metadata, not a second ownership-consumption convention.
+fn mir_operation_call_args(operation: MIROperation) -> [MIRCallArg] Never! {
+    if operation == {
+        .Call(_, args, _) | .IndirectCall(_, args, _) | .CoreCall(_, _, args, _, _, _) -> args
+        .Semantic(semantic) -> if semantic == {
+            .StaticPreludeCall(_, args, _, _) | .HardwareCall(_, _, _, args) | .ClosureMethod(_, args, _) | .HostCall(_, args) | .AllocNew(_, _, _, args) -> args
+            else -> [MIRCallArg]{}
+        }
+        else -> [MIRCallArg]{}
+    }
+}
+
+fn mir_operation_mutated_places(operation: MIROperation) -> [MIRPlaceID] Never! {
+    places := [MIRPlaceID]{}
+    if operation == {
+        .WritePlace(place, _) | .ReplacePlace(place, _) | .MovePlace(place) | .InitializeUninit(place) -> &places.push(place)
+        .AddressOf(place, access) -> { if access == .Write -> &places.push(place) }
+        .Semantic(semantic) -> if semantic == {
+            .BuiltinMethod(_, _, receiver_place, _, _) -> { if receiver_place == .Val(place) -> &places.push(place) }
+            .CursorTakePattern(_, place, _) | .ReaderTakePattern(_, place, _) -> &places.push(place)
+            else -> {}
+        }
+        else -> {}
+    }
+    loop arg in mir_operation_call_args(operation) {
+        if arg.place == .Val(place) {
+            if arg.access == .Write || arg.access == .Move -> &places.push(place)
+        }
+    }
+    places
+}
+
+// Parameter, capture and temporary spellings of one SSA value name the same
+// storage. Projections conservatively share their root for snapshot stability.
+fn mir_place_storage_root(place: MIRPlace) -> String Never! {
+    if place.base == {
+        .Local(local) -> "l{local.value}"
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> "v{value.value}"
+        .Static(name) -> "s{name}"
+    }
+}
+
+fn mir_snapshot_type_may_borrow(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 | .Measure(_) -> false
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) | .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) -> mir_snapshot_type_may_borrow(inner)
+        .Map(key, value) -> mir_snapshot_type_may_borrow(key) || mir_snapshot_type_may_borrow(value)
+        .Result(ok, err) -> mir_snapshot_type_may_borrow(ok) || mir_snapshot_type_may_borrow(err)
+        .Tuple(fields) -> {
+            loop field in fields {
+                if mir_snapshot_type_may_borrow(field.ty) -> return true
+            }
+            false
+        }
+        .Union(members) -> {
+            loop member in members {
+                if mir_snapshot_type_may_borrow(member) -> return true
+            }
+            false
+        }
+        // Nominal layouts and callable captures are unavailable to this
+        // function-local proof, so their borrowed dependencies are retained.
+        else -> true
+    }
+}
+
+fn mir_snapshot_dependence_carrier(operation: MIROperation, value: MIRValueFact) -> Bool Never! {
+    if value.ownership.mode == .ReadBorrow || value.ownership.mode == .WriteBorrow -> return true
+    if operation == {
+        .ReadPlace(_) | .MovePlace(_) | .Move(_) | .Phi(_) | .AttachTag(_, _) | .Closure(_, _, _) -> return true
+        .Convert(_, _, _, conversion) -> {
+            if conversion == .Transparent || conversion == .SendFn -> return true
+        }
+        else -> {}
+    }
+    mir_snapshot_type_may_borrow(value.ty)
+}
+
+// A Copy read is an owned snapshot until the CFG proves that borrowing its
+// storage cannot observe a later write. Dependence deliberately over-approximates
+// borrowed aliases, including values stored in and re-read from local holders:
+// an uncertain case retains the original snapshot, never rejects valid source.
+fn mir_read_snapshot_unstable(function: MIRFunction, candidates: [U64:Bool], routes: [U64:Int], prelude: [MIRPreludeCall]) -> [U64:Bool] Never! {
+    unstable := [U64:Bool]{}
+    if function.is_unsafe {
+        loop (value, _) in candidates -> _ := &unstable.add(value, true)
+        return unstable
+    }
+    values := [U64:Int]{}
+    places := [U64:Int]{}
+    blocks := [U64:Int]{}
+    place_roots := [String]{}
+    edges := [[Int]]{}
+    origins := [[Int]]{}
+    cursors := [Int]{}
+    queued := [Bool]{}
+    loop (row, value) in function.values {
+        _ := &values.add(value.id.value, row)
+        &edges.push([Int]{})
+        &origins.push([Int]{})
+        &cursors.push(0)
+        &queued.push(false)
+    }
+    loop (row, place) in function.places {
+        _ := &places.add(place.id.value, row)
+        &place_roots.push(mir_place_storage_root(place))
+    }
+    loop (row, block) in function.blocks -> _ := &blocks.add(block.id.value, row)
+    deadlines := [U64:MIRValueID]{}
+    loop scope in function.scopes {
+        if scope.deadline == .Val(value) -> _ := &deadlines.add(scope.id.value, value)
+    }
+    owners := [String:[Int]]{}
+    ssa_owners := [U64:[Int]]{}
+    stored := [String:[Int]]{}
+    work := [Int]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .WritePlace(place, value) | .ReplacePlace(place, value) -> {
+                    position :: places.get(place.value) ?? next
+                    source :: values.get(value.value) ?? next
+                    key :: place_roots[position]
+                    rows := stored.get(key) ?? [Int]{}
+                    &rows.push(source)
+                    _ := &stored.add(key, rows)
+                }
+                else -> {}
+            }
+            result :: instruction.result ?? next
+            target :: values.get(result.value) ?? next
+            if instruction.operation == .ReadPlace(place) {
+                position :: places.get(place.value) ?? next
+                key :: place_roots[position]
+                if candidates.get(result.value) != None {
+                    roots := owners.get(key) ?? [Int]{}
+                    &roots.push(target)
+                    _ := &owners.add(key, roots)
+                    if function.places[position].base == {
+                        .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+                            aliases := ssa_owners.get(value.value) ?? [Int]{}
+                            &aliases.push(target)
+                            _ := &ssa_owners.add(value.value, aliases)
+                        }
+                        else -> {}
+                    }
+                    &origins[target].push(target)
+                    queued[target] = true
+                    &work.push(target)
+                }
+            }
+            if !mir_snapshot_dependence_carrier(instruction.operation, function.values[target]) -> next
+            loop operand in mir_operation_value_uses(instruction.operation) {
+                source :: values.get(operand.value) ?? next
+                &edges[source].push(target)
+            }
+            loop place in mir_operation_place_uses(instruction.operation) {
+                position :: places.get(place.value) ?? next
+                if function.places[position].base == {
+                    .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+                        source :: values.get(value.value) ?? next
+                        &edges[source].push(target)
+                    }
+                    else -> {}
+                }
+            }
+        }
+    }
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            target :: values.get(result.value) ?? next
+            if !mir_snapshot_dependence_carrier(instruction.operation, function.values[target]) -> next
+            loop place in mir_operation_place_uses(instruction.operation) {
+                position :: places.get(place.value) ?? next
+                key :: place_roots[position]
+                loop source in (stored.get(key) ?? [Int]{}) -> &edges[source].push(target)
+            }
+        }
+    }
+    members := [Int:Bool]{}
+    loop row in work -> _ := &members.add(row * function.values.len() + row, true)
+    head := 0
+    loop head < work.len() {
+        row :: work[head].copy()
+        head += 1
+        queued[row] = false
+        loop cursors[row] < origins[row].len() {
+            origin :: origins[row][cursors[row]].copy()
+            cursors[row] = cursors[row] + 1
+            loop target in edges[row] {
+                key :: target * function.values.len() + origin
+                if members.get(key) != None -> next
+                _ := &members.add(key, true)
+                &origins[target].push(origin)
+                if !queued[target] {
+                    queued[target] = true
+                    &work.push(target)
+                }
+            }
+        }
+    }
+    // Each block's may-written state is a union over incoming CFG paths.
+    // Re-executing a read in a loop starts a fresh snapshot and kills its bit.
+    incoming := [[Int:Bool]]{}
+    reached := [Bool]{}
+    block_queued := [Bool]{}
+    block_work := [Int]{}
+    loop _ in function.blocks {
+        &incoming.push([Int:Bool]{})
+        &reached.push(false)
+        &block_queued.push(false)
+    }
+    entry :: blocks.get(function.entry.value) ?? return candidates
+    reached[entry] = true
+    block_queued[entry] = true
+    &block_work.push(entry)
+    loop drop in function.drops {
+        target := MIRBlockID?{None}
+        if drop.edge == {
+            .Failure(block) | .Unwind(block) -> target = .Val(block)
+            else -> {}
+        }
+        if target == .Val(block) {
+            row :: blocks.get(block.value) ?? next
+            if !block_queued[row] {
+                reached[row] = true
+                block_queued[row] = true
+                &block_work.push(row)
+            }
+        }
+    }
+    head = 0
+    loop head < block_work.len() {
+        row :: block_work[head]
+        head += 1
+        block_queued[row] = false
+        dirty := incoming[row]
+        block :: function.blocks[row]
+        loop instruction in block.instructions {
+            uses :: mir_operation_value_uses(instruction.operation)
+            route := Int?{None}
+            if mir_operation_consumption_route(instruction.operation) == Val(call) -> route = routes.get(call.value)
+            loop operand in uses {
+                source :: values.get(operand.value) ?? next
+                if !mir_runtime_owned_ownership(function.values[source].ownership) -> next
+                consumption :: if route == .Val(position) -> mir_operation_value_consumption(instruction.operation, operand, prelude[position].signature.borrow_mask) else -> mir_operation_value_consumption(instruction.operation, operand, [Bool]{})
+                if mir_value_consumption_transfers(consumption) {
+                    loop origin in (ssa_owners.get(operand.value) ?? [Int]{}) -> _ := &dirty.add(origin, true)
+                }
+            }
+            loop place in mir_operation_mutated_places(instruction.operation) {
+                position :: places.get(place.value) ?? next
+                root :: function.places[position]
+                loop origin in (owners.get(place_roots[position]) ?? [Int]{}) -> _ := &dirty.add(origin, true)
+                if instruction.operation == .AddressOf(_, .Write) {
+                    loop origin in (owners.get(place_roots[position]) ?? [Int]{}) -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+                // Writing through the prospective snapshot would also change
+                // the source owner after refinement, even without a later use.
+                loop source in (stored.get(place_roots[position]) ?? [Int]{}) {
+                    loop origin in origins[source] -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+                if root.base == {
+                    .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+                        source :: values.get(value.value) ?? next
+                        loop origin in origins[source] -> _ := &unstable.add(function.values[origin].id.value, true)
+                    }
+                    else -> {}
+                }
+            }
+            loop arg in mir_operation_call_args(instruction.operation) {
+                if arg.access != .Write && arg.access != .Move -> next
+                source :: values.get(arg.value.value) ?? next
+                loop origin in origins[source] -> _ := &unstable.add(function.values[origin].id.value, true)
+            }
+            // Unanalysed callees can reach captured or static owners without
+            // naming them in argument-place metadata; retain uncertain snapshots.
+            unknown := false
+            if instruction.operation == {
+                .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) -> unknown = true
+                .Semantic(semantic) -> if semantic == {
+                    .StaticPreludeCall(_, _, _, _) | .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .HostCall(_, _) | .HardwareCall(_, _, _, _) -> unknown = true
+                    else -> {}
+                }
+                else -> {}
+            }
+            if unknown -> loop (value, _) in candidates {
+                origin :: values.get(value) ?? next
+                _ := &dirty.add(origin, true)
+            }
+            if instruction.operation == .ReadPlace(_) {
+                if instruction.result == .Val(value) && candidates.get(value.value) != None {
+                    origin :: values.get(value.value) ?? next
+                    _ := &dirty.remove(origin)
+                }
+            }
+            loop operand in uses {
+                source :: values.get(operand.value) ?? next
+                loop origin in origins[source] {
+                    if dirty.get(origin) != None -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+            }
+            if instruction.operation == .ScopeEnter(scope, _) {
+                value :: deadlines.get(scope.value) ?? next
+                source :: values.get(value.value) ?? next
+                loop origin in origins[source] {
+                    if dirty.get(origin) != None -> _ := &unstable.add(function.values[origin].id.value, true)
+                }
+            }
+        }
+        loop operand in mir_terminator_value_uses(block.terminator) {
+            source :: values.get(operand.value) ?? next
+            loop origin in origins[source] {
+                if dirty.get(origin) != None -> _ := &unstable.add(function.values[origin].id.value, true)
+            }
+        }
+        loop target in mir_terminator_targets(block.terminator) {
+            successor :: blocks.get(target.value) ?? next
+            changed := !reached[successor]
+            reached[successor] = true
+            loop (origin, _) in dirty {
+                if incoming[successor].get(origin) == None {
+                    _ := &incoming[successor].add(origin, true)
+                    changed = true
+                }
+            }
+            if changed && !block_queued[successor] {
+                block_queued[successor] = true
+                &block_work.push(successor)
+            }
+        }
+    }
+    unstable
+}
+
+// Post-last-use facts shared by every backend. A borrowed read must neither
+// transfer ownership nor observe an owner mutation before its last dependent use.
+fn mir_refine_function_ownership(function: &MIRFunction, prelude: [MIRPreludeCall]) -> Int Never! {
+    candidates := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .ReadPlace(_) {
+                if instruction.result == .Val(value) -> _ := &candidates.add(value.value, true)
+            }
+        }
+    }
+    if candidates.len() == 0 -> return 0
+    routes := [U64:Int]{}
+    loop (row, call) in prelude -> _ := &routes.add(call.id.value, row)
+    transferred := [U64:Bool]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            route := Int?{None}
+            if mir_operation_consumption_route(instruction.operation) == Val(call) -> route = routes.get(call.value)
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if candidates.get(value.value) == None -> next
+                consumption :: if route == .Val(row) -> mir_operation_value_consumption(instruction.operation, value, prelude[row].signature.borrow_mask) else -> mir_operation_value_consumption(instruction.operation, value, [Bool]{})
+                if mir_value_consumption_transfers(consumption) -> _ := &transferred.add(value.value, true)
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) {
+            if candidates.get(value.value) != None && mir_value_consumption_transfers(mir_terminator_value_consumption(block.terminator, value)) -> _ := &transferred.add(value.value, true)
+        }
+    }
+    eligible := [U64:Bool]{}
+    loop value in function.values {
+        if candidates.get(value.id.value) != None && transferred.get(value.id.value) == None && mir_runtime_owned_ownership(value.ownership) -> _ := &eligible.add(value.id.value, true)
+    }
+    if eligible.len() == 0 -> return 0
+    unstable :: mir_read_snapshot_unstable(function, eligible, routes, prelude)
+    changed := 0
+    loop row in 0..<function.values.len() {
+        value :: function.values[row]
+        if eligible.get(value.id.value) == None || unstable.get(value.id.value) != None -> next
+        function.values[row].ownership = mir_ownership_from_access(MIRAccess.Read)
+        changed += 1
+    }
+    changed
+}
+
+
+struct MIRFieldValue { field: MIRFieldID, value: MIRValueID }
+
+struct MIRCaptureFacts { escapes: Bool, needs_fn_mut: Bool, mutable: [String], cloned: [String], frozen: [String], materialized: [String], moved: [String] }
+
+enum MIRTestScopeMember { ExpectFail(expected_code: String?, expected_message: String?) Timeout(duration: MIRValueID) Skip(whole_test: Bool) Measure }
+
+enum MIRDataPlanOperation { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Collect }
+
+enum MIRDataPlanSourceKind { Table Series CSV JSON JSONL Parquet Arrow Loader CSVReader JSONReader }
+
+enum MIRDataPlanStreamMode { Bounded(batch_rows: Int?) Materialized(reason: String) }
+
+enum MIRDataPlanPhysicalOperator { Scan Filter SortBy InnerJoin LeftJoin Group Window Project Batch Materialize }
+
+MIR_DATA_PLAN_SCHEMA_VERSION :: 1
+
+struct MIRDataPlan {
+    schema_version: Int
+    source: MIRDataPlanSourceKind
+    logical: [MIRDataPlanNode]
+    physical: [MIRDataPlanPhysicalNode]
+    output: MIRDataPlanNodeID
+    source_span: Span
+}
+
+struct MIRDataPlanNode { id: MIRDataPlanNodeID, operation: MIRDataPlanOperation, inputs: [MIRDataPlanNodeID], source: MIRDataPlanSourceKind?, row_type: MIRType, columns: [MIRDataPlanColumn], callable: MIRDataPlanCallable?, stream: MIRDataPlanStreamMode, span: Span }
+
+struct MIRDataPlanColumn { name: String, ty: MIRType, nullable: Bool }
+
+struct MIRDataPlanCallable { label: String, parameter: MIRType, result: MIRType, span: Span }
+
+struct MIRDataPlanPhysicalNode { logical: MIRDataPlanNodeID, operator: MIRDataPlanPhysicalOperator, stream: MIRDataPlanStreamMode, reason: String }
+
+struct MIRInstruction { id: MIROpID, span: Span, source_line: Int?, result: MIRValueID?, ty: MIRType?, operation: MIROperation }
+
+struct MIRBasicBlock { id: MIRBlockID, span: Span, instructions: [MIRInstruction], terminator: MIRTerminator }
+
+struct MIRSwitchArm { condition: MIRValueID, target: MIRBlockID, span: Span }
+
+// Stop points of the unified execution host (#4720; Docs/research/jet-backend-design-2026-10-01.md
+// "Stop points"). `Check` delivers a pending session interrupt where every live
+// value is initialized; `Propagate` directly follows a can-stop operation and
+// reads only a stop that operation already delivered. `resume` continues;
+// `stop` runs canonical cleanup and ends in `Stopped`, which leaves the
+// function with the stop still delivered and no result written.
+enum MIRPollKind { Check Propagate }
+
+enum MIRTerminator {
     Jump(target: MIRBlockID)
     Branch(condition: MIRValueID, then_target: MIRBlockID, else_target: MIRBlockID)
     Switch(subject: MIRValueID, arms: [MIRSwitchArm], otherwise: MIRBlockID)
@@ -1914,206 +2525,203 @@ pub enum MIRTerminator {
     Break(target: MIRBlockID, value: MIRValueID?)
     Continue(target: MIRBlockID)
     Unreachable(reason: String)
+    Poll(kind: MIRPollKind, resume: MIRBlockID, stop: MIRBlockID)
+    Stopped
 }
 
-pub enum MIRDropEdge { Normal Return Failure(target: MIRBlockID) Unwind(target: MIRBlockID) }
+enum MIRDropEdge { Normal Return Failure(target: MIRBlockID) Unwind(target: MIRBlockID) }
 
-pub struct MIRDropAction { pub place: MIRPlaceID, pub edge: MIRDropEdge, pub span: Span }
+struct MIRDropAction { place: MIRPlaceID, edge: MIRDropEdge, span: Span }
 
-pub struct MIRKernelFacts { pub bounds: Bool, pub alias_free: Bool, pub captures: Bool, pub race_free: Bool, pub barriers_uniform: Bool, pub control_flow: Bool }
+struct MIRKernelFacts { bounds: Bool, alias_free: Bool, captures: Bool, race_free: Bool, barriers_uniform: Bool, control_flow: Bool }
 
-pub struct MIRGeneratorFacts { pub item: MIRType }
+struct MIRGeneratorFacts { item: MIRType }
 
-pub struct MIRUnsafeGate { pub file: String, pub line: Int, pub reason: String, pub enabled: Bool, pub fenced: Bool }
+struct MIRUnsafeGate { file: String, line: Int, reason: String, enabled: Bool, fenced: Bool }
 
-pub struct MIRWebParamField { pub field: String, pub parameter: String, pub ty: MIRType }
+struct MIRWebParamField { field: String, parameter: String, ty: MIRType }
 
-pub struct MIRWebParamReconstruction { pub local: String, pub ty: MIRType, pub fields: [MIRWebParamField] }
+struct MIRWebParamReconstruction { local: String, ty: MIRType, fields: [MIRWebParamField] }
 
-pub enum MIROptimizationPassID { LegalityVerification UnreachableBlockElimination CFGSimplification ExactConstantFolding BoundsCheckElimination DeadPureValueElimination CanonicalLoopFacts }
+enum MIROptimizationPassID { LegalityVerification UnreachableBlockElimination CFGSimplification ExactConstantFolding BoundsCheckElimination DeadPureValueElimination CanonicalLoopFacts }
 
-pub enum MIRDecisionKind { Tier Inline Vectorize Parallel Copy Bounds Deopt Unreachable LoopInvariant }
+enum MIRDecisionKind { Tier Inline Vectorize Parallel Copy Bounds Deopt Unreachable LoopInvariant }
 
-pub enum MIRDecisionDisposition { Accepted Rejected Selected NotAttempted Unavailable }
+enum MIRDecisionDisposition { Accepted Rejected Selected NotAttempted Unavailable }
 
-pub enum MIROptimizationRejection { MissingProof MayTrap HasEffects HasEarlyExit MayAlias CrossIterationDependency DynamicTripCount UnknownCopyCost ScalarBoundary ObservableLayout OwnershipObligation UnsupportedOperation }
+enum MIROptimizationRejection { MissingProof MayTrap HasEffects HasEarlyExit MayAlias CrossIterationDependency DynamicTripCount UnknownCopyCost ScalarBoundary ObservableLayout OwnershipObligation UnsupportedOperation }
 
-pub enum MIROptimizationDecision { Eligible Rejected(reason: MIROptimizationRejection) }
+enum MIROptimizationDecision { Eligible Rejected(reason: MIROptimizationRejection) }
 
-pub enum MIRDerivationMethod { StaticDerivation FormalProof RecordedExecution SampledAgreement ExternalAssumption }
 
-pub enum MIRDerivationDisposition { Current Stale Expired Redacted Unavailable Unsupported BudgetExhausted Unknown }
-
-pub struct MIRDerivationRef { pub id: String }
-
-pub struct MIRDecisionIdentity {
-    pub source: String
-    pub configuration: String
-    pub profile: String
-    pub target: String
-    pub implementation: String
-    pub artifact: String
-    pub run: String
+struct MIRDecisionIdentity {
+    source: String
+    configuration: String
+    profile: String
+    target: String
+    implementation: String
+    artifact: String
+    run: String
 }
 
-pub struct MIRDecisionEdit { pub span: Span, pub replacement: String }
+struct MIRDecisionEdit { span: Span, replacement: String }
 
-pub struct MIRDecisionRow {
-    pub id: U64
-    pub kind: MIRDecisionKind
-    pub disposition: MIRDecisionDisposition
-    pub function: MIRFunctionID?
-    pub function_name: String
-    pub span: Span
-    pub rule: String
-    pub reason: String
-    pub producer: String
-    pub evidence: String
-    pub edit: MIRDecisionEdit?
-    pub derivation: MIRDerivationRef?
-    pub identity: MIRDecisionIdentity?
-    pub evidence_method: MIRDerivationMethod?
-    pub derivation_disposition: MIRDerivationDisposition?
+struct MIRDecisionRow {
+    id: U64
+    kind: MIRDecisionKind
+    disposition: MIRDecisionDisposition
+    function: MIRFunctionID?
+    function_name: String
+    span: Span
+    rule: String
+    reason: String
+    producer: String
+    evidence: String
+    edit: MIRDecisionEdit?
+    derivation: MIRDerivationRef?
+    identity: MIRDecisionIdentity?
+    evidence_method: MIRDerivationMethod?
+    derivation_disposition: MIRDerivationDisposition?
 }
 
-pub enum MIRLoopForm { Unconditional Counted Iterator }
+enum MIRLoopForm { Unconditional Counted Iterator }
 
-pub enum MIRCopyCost { NoCopy PerIteration(count: Int) Unknown }
+enum MIRCopyCost { NoCopy PerIteration(count: Int) Unknown }
 
-pub struct MIRLoopFact {
-    pub header: MIRBlockID
-    pub body: MIRBlockID?
-    pub exit: MIRBlockID?
-    pub form: MIRLoopForm
-    pub trip_count: Int?
-    pub copy_cost: MIRCopyCost
-    pub canonical: Bool
-    pub span: Span
-    pub decision: MIROptimizationDecision
+struct MIRLoopFact {
+    header: MIRBlockID
+    body: MIRBlockID?
+    exit: MIRBlockID?
+    form: MIRLoopForm
+    trip_count: Int?
+    copy_cost: MIRCopyCost
+    canonical: Bool
+    span: Span
+    decision: MIROptimizationDecision
 }
 
-pub struct MIRBoundsFact {
-    pub operation: MIROpID
-    pub place: MIRPlaceID?
-    pub index: MIRValueID?
-    pub kind: MIRIndexKind
-    pub proven: Bool
-    pub elided: Bool
-    pub failure_preserved: Bool
-    pub span: Span
+struct MIRBoundsFact {
+    operation: MIROpID
+    place: MIRPlaceID?
+    index: MIRValueID?
+    kind: MIRIndexKind
+    proven: Bool
+    elided: Bool
+    failure_preserved: Bool
+    span: Span
 }
 
-pub enum MIRVectorRule { Elementwise FieldAccess ConditionalAccumulate EarlyExitSearch Reduction }
+enum MIRVectorRule { Elementwise FieldAccess ConditionalAccumulate EarlyExitSearch Reduction }
 
-pub enum MIRVectorLayout { Flat AosStrided ColumnarDirect }
+enum MIRVectorLayout { Flat AosStrided ColumnarDirect }
 
-pub enum MIRVectorAccessRoot { Place(id: MIRPlaceID) Value(id: MIRValueID) }
+enum MIRVectorAccessRoot { Place(id: MIRPlaceID) Value(id: MIRValueID) }
 
-pub struct MIRVectorAccess {
-    pub root: MIRVectorAccessRoot
-    pub field: MIRFieldID?
-    pub layout: MIRVectorLayout
-    pub column_index: Int?
+struct MIRVectorAccess {
+    root: MIRVectorAccessRoot
+    field: MIRFieldID?
+    layout: MIRVectorLayout
+    column_index: Int?
 }
 
-pub enum MIRFixedReductionTree { AdjacentPairsThenRoot }
+enum MIRFixedReductionTree { AdjacentPairsThenRoot }
 
-pub struct MIRFixedReductionOrder {
-    pub lanes: Int
-    pub seed_lane: Int
-    pub tree: MIRFixedReductionTree
+struct MIRFixedReductionOrder {
+    lanes: Int
+    seed_lane: Int
+    tree: MIRFixedReductionTree
 }
 
-pub struct MIRFixedReductionFact {
-    pub accumulator: MIRPlaceID
-    pub addend: MIRValueID
-    pub seed: MIRValueID
-    pub condition: MIRValueID?
-    pub source_operations: [MIROpID]
-    pub exit: MIRBlockID
-    pub order: MIRFixedReductionOrder
+struct MIRFixedReductionFact {
+    accumulator: MIRPlaceID
+    addend: MIRValueID
+    seed: MIRValueID
+    condition: MIRValueID?
+    source_operations: [MIROpID]
+    exit: MIRBlockID
+    order: MIRFixedReductionOrder
 }
 
-pub struct MIRVectorFact {
-    pub loop_header: MIRBlockID
-    pub cursor: MIRValueID?
-    pub body_blocks: [MIRBlockID]
-    pub advance_block: MIRBlockID?
-    pub rule: MIRVectorRule
-    pub accesses: [MIRVectorAccess]
-    pub layout: MIRVectorLayout
-    pub element_type: MIRType?
-    pub packed: Bool
-    pub lane_width: Int?
-    pub no_aliasing: Bool
-    pub no_early_exit: Bool
-    pub effect_free_body: Bool
-    pub no_cross_iteration_dependencies: Bool
-    pub fixed_reduction: MIRFixedReductionFact?
-    pub span: Span
-    pub decision: MIROptimizationDecision
+struct MIRVectorFact {
+    loop_header: MIRBlockID
+    cursor: MIRValueID?
+    body_blocks: [MIRBlockID]
+    advance_block: MIRBlockID?
+    rule: MIRVectorRule
+    accesses: [MIRVectorAccess]
+    layout: MIRVectorLayout
+    element_type: MIRType?
+    packed: Bool
+    lane_width: Int?
+    no_aliasing: Bool
+    no_early_exit: Bool
+    effect_free_body: Bool
+    no_cross_iteration_dependencies: Bool
+    fixed_reduction: MIRFixedReductionFact?
+    span: Span
+    decision: MIROptimizationDecision
 }
 
-pub struct MIRFusionFact {
-    pub first_loop: MIRBlockID
-    pub second_loop: MIRBlockID
-    pub packed: Bool
-    pub same_iteration_domain: Bool
-    pub no_aliasing: Bool
-    pub effect_free: Bool
-    pub no_cross_iteration_dependencies: Bool
-    pub span: Span
-    pub decision: MIROptimizationDecision
+struct MIRFusionFact {
+    first_loop: MIRBlockID
+    second_loop: MIRBlockID
+    packed: Bool
+    same_iteration_domain: Bool
+    no_aliasing: Bool
+    effect_free: Bool
+    no_cross_iteration_dependencies: Bool
+    span: Span
+    decision: MIROptimizationDecision
 }
 
-pub enum MIRAccelerationTransform { TransientColumnCopy PooledParallelChunks }
+enum MIRAccelerationTransform { TransientColumnCopy PooledParallelChunks }
 
-pub struct MIRAccelerationProof {
-    pub source_proven: Bool
-    pub independent_iterations: Bool
-    pub no_aliasing: Bool
-    pub no_cross_iteration_dependencies: Bool
-    pub no_early_exit: Bool
-    pub effect_free_body: Bool
-    pub ownership_safe: Bool
-    pub failure_order_preserved: Bool
+struct MIRAccelerationProof {
+    source_proven: Bool
+    independent_iterations: Bool
+    no_aliasing: Bool
+    no_cross_iteration_dependencies: Bool
+    no_early_exit: Bool
+    effect_free_body: Bool
+    ownership_safe: Bool
+    failure_order_preserved: Bool
 }
 
-pub struct MIRAccelerationWorkloadFacts { pub nested_reuse: Bool, pub single_pass: Bool }
+struct MIRAccelerationWorkloadFacts { nested_reuse: Bool, single_pass: Bool }
 
-pub struct MIRAccelerationFact {
-    pub loop_header: MIRBlockID
-    pub transform: MIRAccelerationTransform
-    pub workload: MIRAccelerationWorkloadFacts
-    pub proof: MIRAccelerationProof
-    pub span: Span
+struct MIRAccelerationFact {
+    loop_header: MIRBlockID
+    transform: MIRAccelerationTransform
+    workload: MIRAccelerationWorkloadFacts
+    proof: MIRAccelerationProof
+    span: Span
 }
 
-pub struct MIROptimizationFacts {
-    pub pure: Bool
-    pub replayable: Bool
-    pub diverges: Bool
-    pub inline: Bool
-    pub inline_always: Bool
-    pub gc_return: Bool
-    pub gc_scope: Bool
-    pub kernel: Bool
-    pub auto_vectorizable: Bool
-    pub no_aliasing: Bool
-    pub no_early_exit: Bool
-    pub no_cross_iteration_dependencies: Bool
-    pub derived_from_digest: String?
-    pub decision_rows: [MIRDecisionRow]
-    pub pass_ids: [MIROptimizationPassID]
-    pub loop_facts: [MIRLoopFact]
-    pub bounds_facts: [MIRBoundsFact]
-    pub vector_facts: [MIRVectorFact]
-    pub checked_vector_facts: [MIRVectorFact]
-    pub fusion_facts: [MIRFusionFact]
-    pub acceleration_facts: [MIRAccelerationFact]
+struct MIROptimizationFacts {
+    pure: Bool
+    replayable: Bool
+    diverges: Bool
+    inline: Bool
+    inline_always: Bool
+    gc_return: Bool
+    gc_scope: Bool
+    kernel: Bool
+    auto_vectorizable: Bool
+    no_aliasing: Bool
+    no_early_exit: Bool
+    no_cross_iteration_dependencies: Bool
+    derived_from_digest: String?
+    decision_rows: [MIRDecisionRow]
+    pass_ids: [MIROptimizationPassID]
+    loop_facts: [MIRLoopFact]
+    bounds_facts: [MIRBoundsFact]
+    vector_facts: [MIRVectorFact]
+    checked_vector_facts: [MIRVectorFact]
+    fusion_facts: [MIRFusionFact]
+    acceleration_facts: [MIRAccelerationFact]
 }
 
-pub fn mir_empty_optimization_facts() -> MIROptimizationFacts Never! {
+fn mir_empty_optimization_facts() -> MIROptimizationFacts Never! {
     MIROptimizationFacts{
         pure: false,
         replayable: false,
@@ -2139,55 +2747,55 @@ pub fn mir_empty_optimization_facts() -> MIROptimizationFacts Never! {
     }
 }
 
-pub struct MIRFunction {
-    pub id: MIRFunctionID
-    pub module_id: MIRModuleID
-    pub source_file: MIRSourceFileID
-    pub key: String
-    pub module_name: String
-    pub name: String
-    pub span: Span
-    pub kind: MIRFunctionKind
-    pub form: MIRFunctionForm
-    pub visibility: MIRVisibility
-    pub target_applicability: MIRTargetApplicability
-    pub web_bucket: MIRWebBucket?
-    pub web_marker: MIRWebPartitionMarker?
-    pub generic_params: [MIRGenericParam]
-    pub capture_params: [MIRCaptureParam]
-    pub params: [MIRParam]
-    pub declared_return: MIRType?
-    pub return_type: MIRType
-    pub failure: MIRFailureCarrier
-    pub effects: MIREffectFacts
-    pub captures: MIRCaptureFacts?
-    pub generator: MIRGeneratorFacts?
-    pub optimization: MIROptimizationFacts
-    pub is_unsafe: Bool
-    pub unsafe_gate: MIRUnsafeGate?
-    pub is_pure: Bool
-    pub memo_bound: Int?
-    pub memo_unbounded: Bool
-    pub is_reactive: Bool
-    pub reactive_upgrades: [String]
-    pub is_inline: Bool
-    pub is_inline_always: Bool
-    pub is_scalar: Bool
-    pub kernel_proof: MIRKernelFacts?
-    pub gc_return: Bool
-    pub return_view_provenance: [MIRViewProvenanceEntry]?
-    pub web_param_reconstructions: [MIRWebParamReconstruction]
-    pub blocks: [MIRBasicBlock]
-    pub entry: MIRBlockID
-    pub locals: [MIRLocal]
-    pub values: [MIRValueFact]
-    pub places: [MIRPlace]
-    pub scopes: [MIRScope]
-    pub drops: [MIRDropAction]
-    pub foreign_language: String?
+struct MIRFunction {
+    id: MIRFunctionID
+    module_id: MIRModuleID
+    source_file: MIRSourceFileID
+    key: String
+    module_name: String
+    name: String
+    span: Span
+    kind: MIRFunctionKind
+    form: MIRFunctionForm
+    visibility: MIRVisibility
+    target_applicability: MIRTargetApplicability
+    web_bucket: MIRWebBucket?
+    web_marker: MIRWebPartitionMarker?
+    generic_params: [MIRGenericParam]
+    capture_params: [MIRCaptureParam]
+    params: [MIRParam]
+    declared_return: MIRType?
+    return_type: MIRType
+    failure: MIRFailureCarrier
+    effects: MIREffectFacts
+    captures: MIRCaptureFacts?
+    generator: MIRGeneratorFacts?
+    optimization: MIROptimizationFacts
+    is_unsafe: Bool
+    unsafe_gate: MIRUnsafeGate?
+    is_pure: Bool
+    memo_bound: Int?
+    memo_unbounded: Bool
+    is_reactive: Bool
+    reactive_upgrades: [String]
+    is_inline: Bool
+    is_inline_always: Bool
+    is_scalar: Bool
+    kernel_proof: MIRKernelFacts?
+    gc_return: Bool
+    return_view_provenance: [MIRViewProvenanceEntry]?
+    web_param_reconstructions: [MIRWebParamReconstruction]
+    blocks: [MIRBasicBlock]
+    entry: MIRBlockID
+    locals: [MIRLocal]
+    values: [MIRValueFact]
+    places: [MIRPlace]
+    scopes: [MIRScope]
+    drops: [MIRDropAction]
+    foreign_language: String?
 }
 
-pub fn mir_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID] Never! {
+fn mir_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID] Never! {
     if terminator == {
         .Jump(target) -> [MIRBlockID]{target}
         .Branch(_, then_target, else_target) -> [MIRBlockID]{then_target, else_target}
@@ -2198,13 +2806,14 @@ pub fn mir_terminator_targets(terminator: MIRTerminator) -> [MIRBlockID] Never! 
             targets
         }
         .Yield(_, resume) -> [MIRBlockID]{resume}
+        .Poll(_, resume, stop) -> [MIRBlockID]{resume, stop}
         .Break(target, _) -> [MIRBlockID]{target}
         .Continue(target) -> [MIRBlockID]{target}
         else -> [MIRBlockID]{}
     }
 }
 
-pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Never! {
+fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Never! {
     if terminator == {
         .Branch(condition, _, _) -> [MIRValueID]{condition}
         .Switch(subject, arms, _) -> {
@@ -2225,9 +2834,76 @@ pub fn mir_terminator_value_uses(terminator: MIRTerminator) -> [MIRValueID] Neve
     }
 }
 
-pub enum MIROperationUseKind { Value Place }
+// These selectors name only facts the operation actually evaluates. Merely
+// registering a projected place or a drop flag does not check its bounds.
+fn mir_operation_stop_operand(operation: MIROperation) -> MIRValueID? Never! {
+    if operation == .Unary(.Neg, value) -> return Val(value)
+    None
+}
 
-pub fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! {
+fn mir_operation_stop_place(operation: MIROperation) -> MIRPlaceID? Never! {
+    if operation == {
+        .ReadPlace(place) | .MovePlace(place) | .WritePlace(place, _) | .ReplacePlace(place, _) -> Val(place)
+        else -> None
+    }
+}
+
+fn mir_fixed_neg_can_trap(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .IntN(_, bits) -> bits > 0 && bits <= 64
+        .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> mir_fixed_neg_can_trap(base)
+        else -> false
+    }
+}
+
+// User/callback/wait operations can deliver stops. For Prelude routes, Panic
+// is a checked registry fact, independent of a returned failure carrier.
+fn mir_operation_can_stop(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .Binary(op, _, overflow, _, _) {
+        if mir_binary_can_trap(op, overflow) -> return true
+    }
+    if mir_operation_stop_operand(operation) != None && operand_type == .Val(ty) {
+        if mir_fixed_neg_can_trap(ty) -> return true
+    }
+    if mir_operation_stop_place(operation) != None && accessed_place == .Val(place) {
+        writing :: if operation == .WritePlace(_, _) || operation == .ReplacePlace(_, _) -> true else -> false
+        loop projection in place.projections {
+            if projection == .Index(_, _, call, write_call, _, _, _) {
+                position :: prelude_positions.get(call.value)
+                if position == .Val(at) && prelude_calls[at].effect_kind == .Val(route_effect) && route_effect == .Panic -> return true
+                if writing && write_call == .Val(setter) {
+                    setter_position :: prelude_positions.get(setter.value)
+                    if setter_position == .Val(at) && prelude_calls[at].effect_kind == .Val(route_effect) && route_effect == .Panic -> return true
+                }
+            }
+        }
+    }
+    loop call in mir_operation_prelude_calls(operation) {
+        position :: prelude_positions.get(call.value) ?? next
+        if prelude_calls[position].effect_kind == .Val(route_effect) && route_effect == .Panic -> return true
+    }
+    if operation == {
+        .Call(_, _, _) | .IndirectCall(_, _, _) | .CoreCall(_, _, _, _, _, _) | .ScopeExit(_) -> true
+        .LoopIterInit(_, _, _, _, _) | .LoopIterAdvance(_, _) -> true
+        .Semantic(semantic) -> if semantic == {
+            .ClosureMethod(_, _, _) | .CoreClosureCall(_, _, _, _, _, _) | .PluginInvoke(_, _, _, _, _) | .TaskGroup(_, _, _) | .Select(_, _, _) | .PolicyFunction(_, _) | .InterruptFunction(_, _) | .HostCall(_, _) -> true
+            .RequireStop(_, _, _, _, _, _, _) -> true
+            else -> false
+        }
+        else -> false
+    }
+}
+
+// Existing user/callback/Core operations can panic through the code they invoke.
+// ScopeExit alone only forwards an already-delivered stop.
+fn mir_operation_can_panic(operation: MIROperation, operand_type: MIRType?, accessed_place: MIRPlace?, prelude_calls: [MIRPreludeCall], prelude_positions: [U64:Int]) -> Bool Never! {
+    if operation == .ScopeExit(_) -> return false
+    mir_operation_can_stop(operation, operand_type, accessed_place, prelude_calls, prelude_positions)
+}
+
+enum MIROperationUseKind { Value Place }
+
+fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! {
     uses := [MIRValueID]{}
     if operation == {
         .Phi(rows) -> {
@@ -2260,6 +2936,7 @@ pub fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! 
                 &uses.push(entry.value)
             }
         }
+        .MapLookup(_, key, _) -> &uses.push(key)
         .EnumIs(subject, _, _) -> &uses.push(subject)
         .EnumPayload(subject, _, _, _) -> &uses.push(subject)
         .OptionIsSome(subject) -> &uses.push(subject)
@@ -2342,10 +3019,9 @@ pub fn mir_operation_value_uses(operation: MIROperation) -> [MIRValueID] Never! 
     uses
 }
 
-pub fn mir_semantic_op_value_uses(operation: MIRSemanticOp) -> [MIRValueID] Never! {
+fn mir_semantic_op_value_uses(operation: MIRSemanticOp) -> [MIRValueID] Never! {
     uses := [MIRValueID]{}
     if operation == {
-        .DataEntriesToMap(_, _) -> {}
         .MathBuiltin(_, _, args)
         | .PreciseBuiltin(_, _, args)
         | .TaskGroup(_, _, args)
@@ -2373,7 +3049,7 @@ pub fn mir_semantic_op_value_uses(operation: MIRSemanticOp) -> [MIRValueID] Neve
             &uses.push(left)
             &uses.push(right)
         }
-        .StructLiteral(_, fields, _, _, _) -> {
+        .StructLiteral(_, fields, _, _) -> {
             loop field in fields -> &uses.push(field.value)
         }
         .CellGuardProject(_, _, guard, _, _, _)
@@ -2470,7 +3146,7 @@ pub fn mir_semantic_op_value_uses(operation: MIRSemanticOp) -> [MIRValueID] Neve
     uses
 }
 
-pub fn mir_semantic_op_place_uses(operation: MIRSemanticOp) -> [MIRPlaceID] Never! {
+fn mir_semantic_op_place_uses(operation: MIRSemanticOp) -> [MIRPlaceID] Never! {
     if operation == {
         .BuiltinMethod(_, _, receiver_place, _, _) -> {
             place :: receiver_place ?? return [MIRPlaceID]{}
@@ -2480,7 +3156,7 @@ pub fn mir_semantic_op_place_uses(operation: MIRSemanticOp) -> [MIRPlaceID] Neve
     }
 }
 
-pub fn mir_operation_place_uses(operation: MIROperation) -> [MIRPlaceID] Never! {
+fn mir_operation_place_uses(operation: MIROperation) -> [MIRPlaceID] Never! {
     if operation == {
         .ReadPlace(place) -> [MIRPlaceID]{place}
         .MovePlace(place) -> [MIRPlaceID]{place}
@@ -2489,12 +3165,19 @@ pub fn mir_operation_place_uses(operation: MIROperation) -> [MIRPlaceID] Never! 
         .InitializeUninit(place) -> [MIRPlaceID]{place}
         .RawAddressOf(place) -> [MIRPlaceID]{place}
         .AddressOf(place, _) -> [MIRPlaceID]{place}
+        .Closure(_, captures, _) -> {
+            places := [MIRPlaceID]{}
+            loop capture in captures {
+                if capture == .Place(place) -> &places.push(place)
+            }
+            places
+        }
         .Semantic(semantic) -> mir_semantic_op_place_uses(semantic)
         else -> [MIRPlaceID]{}
     }
 }
 
-pub fn mir_call_arg_type_uses(args: [MIRCallArg]) -> [MIRTypeID] Never! {
+fn mir_call_arg_type_uses(args: [MIRCallArg]) -> [MIRTypeID] Never! {
     uses := [MIRTypeID]{}
     loop arg in args {
         if arg.fn_coercion != None {
@@ -2516,7 +3199,7 @@ pub fn mir_call_arg_type_uses(args: [MIRCallArg]) -> [MIRTypeID] Never! {
     uses
 }
 
-pub fn mir_failure_type_uses(failure: MIRFailureCarrier) -> [MIRTypeID] Never! {
+fn mir_failure_type_uses(failure: MIRFailureCarrier) -> [MIRTypeID] Never! {
     uses := [MIRTypeID]{}
     if failure == {
         .Infallible -> {}
@@ -2540,14 +3223,14 @@ pub fn mir_failure_type_uses(failure: MIRFailureCarrier) -> [MIRTypeID] Never! {
     uses
 }
 
-pub fn mir_call_fallibility_type_uses(fallibility: MIRCallFallibility) -> [MIRTypeID] Never! {
+fn mir_call_fallibility_type_uses(fallibility: MIRCallFallibility) -> [MIRTypeID] Never! {
     if fallibility == {
         .Infallible -> [MIRTypeID]{}
         .Failure(failure) -> mir_failure_type_uses(failure)
     }
 }
 
-pub fn mir_data_plan_type_uses(plan: MIRDataPlan) -> [MIRTypeID] Never! {
+fn mir_data_plan_type_uses(plan: MIRDataPlan) -> [MIRTypeID] Never! {
     uses := [MIRTypeID]{}
     loop node in plan.logical {
         if node.row_type.identity != None {
@@ -2575,14 +3258,11 @@ pub fn mir_data_plan_type_uses(plan: MIRDataPlan) -> [MIRTypeID] Never! {
     uses
 }
 
-pub fn mir_semantic_op_type_uses(operation: MIRSemanticOp) -> [MIRTypeID] Never! {
+fn mir_semantic_op_type_uses(operation: MIRSemanticOp) -> [MIRTypeID] Never! {
     uses := [MIRTypeID]{}
     if operation == {
         .MathBuiltin(type_id, _, _) | .PreciseBuiltin(type_id, _, _) -> &uses.push(type_id)
-        .StructLiteral(type_id, _, _, trait_coercion, _) -> {
-            &uses.push(type_id)
-            if trait_coercion == Val(trait_id) -> &uses.push(trait_id)
-        }
+        .StructLiteral(type_id, _, _, _) -> &uses.push(type_id)
         .StaticPreludeCall(_, args, owner_type_args, type_args) -> {
             loop type_id in mir_call_arg_type_uses(args) -> &uses.push(type_id)
             loop type_arg in owner_type_args {
@@ -2639,7 +3319,7 @@ pub fn mir_semantic_op_type_uses(operation: MIRSemanticOp) -> [MIRTypeID] Never!
     uses
 }
 
-pub fn mir_operation_type_uses(operation: MIROperation) -> [MIRTypeID] Never! {
+fn mir_operation_type_uses(operation: MIROperation) -> [MIRTypeID] Never! {
     uses := [MIRTypeID]{}
     if operation == {
         .Struct(type_id, _) | .Enum(type_id, _, _) | .Tuple(type_id, _) -> {
@@ -2726,13 +3406,12 @@ pub fn mir_operation_type_uses(operation: MIROperation) -> [MIRTypeID] Never! {
     uses
 }
 
-pub fn mir_semantic_op_prelude_calls(operation: MIRSemanticOp) -> [MIRPreludeCallID] Never! {
+fn mir_semantic_op_prelude_calls(operation: MIRSemanticOp) -> [MIRPreludeCallID] Never! {
     calls := [MIRPreludeCallID]{}
     if operation == {
         .Print(call, _)
         | .AmbientInput(call, _)
         | .RequireStop(call, _, _, _, _, _, _)
-        | .DataEntriesToMap(call, _)
         | .LayoutCompare(call, _, _, _)
         | .SharedGuardMap(call, _, _, _)
         | .SharedGuardWait(call, _, _, _)
@@ -2779,7 +3458,7 @@ pub fn mir_semantic_op_prelude_calls(operation: MIRSemanticOp) -> [MIRPreludeCal
     calls
 }
 
-pub fn mir_operation_prelude_calls(operation: MIROperation) -> [MIRPreludeCallID] Never! {
+fn mir_operation_prelude_calls(operation: MIROperation) -> [MIRPreludeCallID] Never! {
     calls := [MIRPreludeCallID]{}
     if operation == {
         .Call(callee, _, _) -> {
@@ -2820,9 +3499,9 @@ pub fn mir_operation_prelude_calls(operation: MIROperation) -> [MIRPreludeCallID
     calls
 }
 
-pub struct MIRTypeDefRow { pub definition: MIRTypeDef }
+struct MIRTypeDefRow { definition: MIRTypeDef }
 
-pub enum MIRRuntimePartID {
+enum MIRRuntimePartID {
     GC
     Event
     Realtime
@@ -2849,275 +3528,285 @@ pub enum MIRRuntimePartID {
     Browser
     Args
     Reflect
-    AuthTokens
     AuthSession
     Sync
     Services
     Mod
 }
 
-pub enum MIRForeignLanguage { C Cpp Rust Assembly }
+enum MIRForeignLanguage { C Cpp Rust Assembly }
 
-pub enum MIRForeignABI { C CUnwind System Stdcall Fastcall Vectorcall Rust Platform(name: String) }
+enum MIRForeignABI { C CUnwind System Stdcall Fastcall Vectorcall Rust Platform(name: String) }
 
-pub enum MIRLinkArtifactKind { Object StaticLibrary DynamicLibrary Framework GeneratedSource }
+enum MIRLinkArtifactKind { Object StaticLibrary DynamicLibrary Framework GeneratedSource }
 
-pub struct MIRLinkArtifact { pub kind: MIRLinkArtifactKind, pub path: String }
+struct MIRLinkArtifact { kind: MIRLinkArtifactKind, path: String }
 
-pub struct MIRLinkUnit {
-    pub id: MIRLinkUnitID
-    pub crate_spec: String
-    pub cache_identity: String
-    pub target_applicability: MIRTargetApplicability
-    pub artifacts: [MIRLinkArtifact]
-    pub dependency_dirs: [String]
-    pub link_closure: [MIRLinkUnitID]
+struct MIRLinkUnit {
+    id: MIRLinkUnitID
+    crate_spec: String
+    cache_identity: String
+    target_applicability: MIRTargetApplicability
+    artifacts: [MIRLinkArtifact]
+    dependency_dirs: [String]
+    link_closure: [MIRLinkUnitID]
 }
 
-pub struct MIRCallbackAdapter {
-    pub id: MIRCallbackID
-    pub symbol: String
-    pub function: MIRFunctionID
-    pub params: [MIRParam]
-    pub return_type: MIRType?
-    pub abi: MIRForeignABI
-    pub managed: Bool
-    pub plan_digest: String?
-    pub callback_identity: String?
+struct MIRCallbackAdapter {
+    id: MIRCallbackID
+    symbol: String
+    function: MIRFunctionID
+    params: [MIRParam]
+    return_type: MIRType?
+    abi: MIRForeignABI
+    managed: Bool
+    plan_digest: String?
+    callback_identity: String?
 }
 
-pub struct MIRCImportLink { pub importing_module: String, pub scope: String?, pub alias: String, pub target_module: String }
+struct MIRCImportLink { importing_module: String, scope: String?, alias: String, target_module: String }
 
-pub struct MIRCLib { pub lib: String, pub module_name: String }
+struct MIRCLib { lib: String, module_name: String }
 
-pub struct MIRCOverlayOverride { pub lib: String, pub generated_symbol: String, pub overlay_symbol: String }
+struct MIRCOverlayOverride { lib: String, generated_symbol: String, overlay_symbol: String }
 
-pub struct MIRCloseAdapter { pub lib: String, pub handle_type: String, pub raw_function: String, pub adapter_function: String }
+struct MIRCloseAdapter { lib: String, handle_type: String, raw_function: String, adapter_function: String }
 
-pub enum MIRFFIEvidenceBasis { Proved Enforced Contained Trusted Unknown }
+enum MIRFFIEvidenceBasis { Proved Enforced Contained Trusted Unknown }
 
-pub struct MIRFFIBoundaryObligation {
-    pub name: String
-    pub basis: MIRFFIEvidenceBasis
-    pub checker: String
-    pub assumptions: [String]
-    pub coverage_digest: String
+struct MIRFFIBoundaryObligation {
+    name: String
+    basis: MIRFFIEvidenceBasis
+    checker: String
+    assumptions: [String]
+    coverage_digest: String
 }
 
-pub struct MIRFFIBoundaryFacts {
-    pub schema: String
-    pub digest: String
-    pub language: String
-    pub library: String
-    pub effect_root: String
-    pub effects: String
-    pub source_authority: String
-    pub artifact_coverage_digest: String
-    pub loaded_artifact: String
-    pub transitive_dependencies: [String]?
-    pub reachable_callbacks: [String]?
-    pub compiler_flags: [String]?
-    pub target: String
-    pub generator: String
-    pub obligations: [MIRFFIBoundaryObligation]
+struct MIRFFIBoundaryFacts {
+    schema: String
+    digest: String
+    language: String
+    library: String
+    effect_root: String
+    effects: String
+    source_authority: String
+    artifact_coverage_digest: String
+    loaded_artifact: String
+    transitive_dependencies: [String]?
+    reachable_callbacks: [String]?
+    compiler_flags: [String]?
+    target: String
+    generator: String
+    obligations: [MIRFFIBoundaryObligation]
 }
 
-pub struct MIRCffiFacts {
-    pub import_links: [MIRCImportLink]
-    pub libs: [MIRCLib]
-    pub overlay_overrides: [MIRCOverlayOverride]
-    pub boundaries: [MIRFFIBoundaryFacts]
-    pub direct_links: [String]
-    pub transitive_links: [String]
-    pub close_adapters: [MIRCloseAdapter]
+struct MIRCffiFacts {
+    import_links: [MIRCImportLink]
+    libs: [MIRCLib]
+    overlay_overrides: [MIRCOverlayOverride]
+    boundaries: [MIRFFIBoundaryFacts]
+    direct_links: [String]
+    transitive_links: [String]
+    close_adapters: [MIRCloseAdapter]
 }
 
-pub enum MIRHandleOwnership { Owned Shared Borrowed }
+enum MIRHandleOwnership { Owned Shared Borrowed }
 
-pub struct MIRHandlePayload { pub library: String, pub typedef_name: String, pub close: String }
+struct MIRHandlePayload { library: String, typedef_name: String, close: String }
 
-pub enum MIRFFICloseSource { Conventional Overlay }
+enum MIRFFICloseSource { Conventional Overlay }
 
-pub enum MIRFFIThreadSafety { Unspecified Safe Unsafe }
+enum MIRFFIThreadSafety { Unspecified Safe Unsafe }
 
-pub struct MIRHandleLifecycle {
-    pub id: MIRHandleID
-    pub ty: MIRType
-    pub ownership: MIRHandleOwnership
-    pub payload: MIRHandlePayload
-    pub close: MIRFunctionID?
-    pub close_foreign: MIRForeignID?
-    pub undo: MIRFunctionID?
-    pub send: Bool
-    pub sync: Bool
-    pub close_source: MIRFFICloseSource?
-    pub thread_safety: MIRFFIThreadSafety?
+struct MIRHandleLifecycle {
+    id: MIRHandleID
+    ty: MIRType
+    ownership: MIRHandleOwnership
+    payload: MIRHandlePayload
+    close: MIRFunctionID?
+    close_foreign: MIRForeignID?
+    undo: MIRFunctionID?
+    send: Bool
+    sync: Bool
+    close_source: MIRFFICloseSource?
+    thread_safety: MIRFFIThreadSafety?
 }
 
-pub struct MIRForeign {
-    pub id: MIRForeignID
-    pub module_id: MIRModuleID
-    pub key: String
-    pub module_name: String
-    pub name: String
-    pub span: Span
-    pub symbol: String
-    pub path: String
-    pub params: [MIRParam]
-    pub raw_scalar_abi: Bool
-    pub bridge_eligible: Bool
-    pub return_type: MIRType?
-    pub foreign_abi: MIRForeignABI
-    pub foreign_language: MIRForeignLanguage
-    pub target_applicability: MIRTargetApplicability
-    pub effects: MIREffectFacts
-    pub callback_transport: String?
-    pub callback_plan_digest: String?
-    pub callback_identity: String?
-    pub link: MIRLinkUnitID?
-    pub callback: MIRCallbackID?
-    pub handle: MIRHandleID?
-    pub close_function: MIRFunctionID?
-    pub close_foreign: MIRForeignID?
-    pub undo_function: MIRFunctionID?
+struct MIRForeign {
+    id: MIRForeignID
+    module_id: MIRModuleID
+    key: String
+    module_name: String
+    name: String
+    span: Span
+    symbol: String
+    path: String
+    params: [MIRParam]
+    raw_scalar_abi: Bool
+    bridge_eligible: Bool
+    return_type: MIRType?
+    foreign_abi: MIRForeignABI
+    foreign_language: MIRForeignLanguage
+    target_applicability: MIRTargetApplicability
+    effects: MIREffectFacts
+    callback_transport: String?
+    callback_plan_digest: String?
+    callback_identity: String?
+    link: MIRLinkUnitID?
+    callback: MIRCallbackID?
+    handle: MIRHandleID?
+    close_function: MIRFunctionID?
+    close_foreign: MIRForeignID?
+    undo_function: MIRFunctionID?
+    // D-MEM-SENTRY1: the declaration's own `#Unsafe("reason")` gate for an
+    // audited inline foreign function. Every call runs inside its sentry scope.
+    unsafe_gate: MIRUnsafeGate?
 }
 
-pub enum MIRJobScope { Dev Ship Internal }
+enum MIRJobScope { Dev Ship Internal }
 
-pub enum MIRJobSchedule {
+enum MIRJobSchedule {
     Duration(nanos: Int)
     WallClockTime(hour: Int, minute: Int)
 }
 
-pub enum MIRJobDispatch { Direct Spawn Scheduled }
+enum MIRJobDispatch { Direct Spawn Scheduled }
 
-pub enum MIRJobSkip { Always(reason: String) UnlessPlatform(platform: String) }
+enum MIRJobSkip { Always(reason: String) UnlessPlatform(platform: String) }
 
-pub enum MIRJobCachePolicy { Uncached Local Shared }
+enum MIRJobCachePolicy { Uncached Local Shared }
 
-pub struct MIRJobLimit { pub name: String, pub value: String }
+struct MIRJobLimit { name: String, value: String }
 
-pub struct MIRJob {
-    pub id: MIRJobID
-    pub function: MIRFunctionID
-    pub name: String
-    pub doc: String?
-    pub scope: MIRJobScope
-    pub schedule: MIRJobSchedule?
-    pub inputs: [MIRCLIInput]
-    pub dispatch: MIRJobDispatch
-    pub after: [String]
-    pub parallel: Int
-    pub packages: [String]
-    pub working_directory: String?
-    pub input_paths: [String]
-    pub output_paths: [String]
-    pub skip: MIRJobSkip?
-    pub cache: MIRJobCachePolicy
-    pub limits: [MIRJobLimit]
+struct MIRJob {
+    id: MIRJobID
+    function: MIRFunctionID
+    name: String
+    doc: String?
+    scope: MIRJobScope
+    schedule: MIRJobSchedule?
+    inputs: [MIRCLIInput]
+    dispatch: MIRJobDispatch
+    after: [String]
+    parallel: Int
+    packages: [String]
+    working_directory: String?
+    input_paths: [String]
+    output_paths: [String]
+    skip: MIRJobSkip?
+    cache: MIRJobCachePolicy
+    limits: [MIRJobLimit]
 }
 
-pub enum MIRTestKind { Unit Property }
+enum MIRTestKind { Unit Property }
 
-pub struct MIRTestCase {
-    pub id: MIRTestID
-    pub function: MIRFunctionID
-    pub name: String
-    pub span: Span
-    pub kind: MIRTestKind
-    pub contract_generated: Bool
-    pub eligibility: MIRFunctionID?
-    pub parameters: [MIRParam]
-    pub faults: [String]
-    pub expected_failure: Bool
-    pub generation_unavailable_reason: String?
+struct MIRTestCase {
+    id: MIRTestID
+    function: MIRFunctionID
+    name: String
+    span: Span
+    kind: MIRTestKind
+    contract_generated: Bool
+    eligibility: MIRFunctionID?
+    parameters: [MIRParam]
+    faults: [String]
+    expected_failure: Bool
+    generation_unavailable_reason: String?
 }
 
-pub struct MIROutputCheck { pub id: MIROutputCheckID, pub name: String, pub function: MIRFunctionID }
+struct MIROutputCheck { id: MIROutputCheckID, name: String, function: MIRFunctionID }
 
-pub struct MIRCoveragePoint { pub id: MIRCoveragePointID, pub function: MIRFunctionID, pub block: MIRBlockID, pub span: Span }
+struct MIRCoveragePoint { id: MIRCoveragePointID, function: MIRFunctionID, block: MIRBlockID, span: Span }
 
-pub enum MIRHarnessKind { Test Fuzz Coverage }
+enum MIRHarnessKind { Test Fuzz Coverage }
 
-pub struct MIRHarnessPlan {
-    pub id: MIRHarnessID
-    pub kind: MIRHarnessKind
-    pub tests: [MIRTestID]
-    pub output_checks: [MIROutputCheck]
-    pub selected_test: MIRTestID?
-    pub coverage_points: [MIRCoveragePoint]
-    pub command_override: Bool
+struct MIRHarnessPlan {
+    id: MIRHarnessID
+    kind: MIRHarnessKind
+    tests: [MIRTestID]
+    output_checks: [MIROutputCheck]
+    selected_test: MIRTestID?
+    coverage_points: [MIRCoveragePoint]
+    command_override: Bool
 }
 
-pub enum MIRNameVisibility { Private Package Public }
+enum MIRNameVisibility { Private Package Public }
 
-pub struct MIRNameModule { pub alias: String, pub path: String, pub package: String }
+struct MIRNameModule { alias: String, path: String, package: String, namespace: String?{None} }
 
-pub struct MIRNameDeclaration {
-    pub module_index: Int
-    pub name: String
-    pub path: String
-    pub kind: String
-    pub span: Span
-    pub visibility: MIRNameVisibility
+struct MIRNameDeclaration {
+    module_index: Int
+    name: String
+    path: String
+    kind: String
+    span: Span
+    visibility: MIRNameVisibility
 }
 
-pub struct MIRNameAlias {
-    pub module_index: Int
-    pub name: String
-    pub target: String
-    pub target_module: Int?
-    pub span: Span
-    pub visibility: MIRNameVisibility
+struct MIRNameAlias {
+    module_index: Int
+    name: String
+    target: String
+    target_module: Int?
+    span: Span
+    visibility: MIRNameVisibility
 }
 
-pub struct MIRNameReference {
-    pub module_path: String
-    pub kind: String
-    pub def_span: Span
-    pub semantic_identity: String?
+struct MIRNameReference {
+    module_path: String
+    kind: String
+    def_span: Span
+    semantic_identity: String?
 }
 
-pub enum MIRStructureFactKind { Liveness Lifecycle ImportEdge }
+enum MIRStructureFactKind { Liveness Lifecycle ImportEdge }
 
-pub struct MIRStructureFact {
-    pub kind: MIRStructureFactKind
-    pub subject: String
-    pub source: String
-    pub span: Span
-    pub status: String
-    pub detail: String
-    pub gate: String?
+struct MIRStructureFact {
+    kind: MIRStructureFactKind
+    subject: String
+    source: String
+    span: Span
+    status: String
+    detail: String
+    gate: String?
 }
 
-pub struct MIRNameFacts {
-    pub modules: [MIRNameModule]
-    pub declarations: [MIRNameDeclaration]
-    pub aliases: [MIRNameAlias]
-    pub references: [MIRNameReference]
-    pub structure_facts: [MIRStructureFact]
+struct MIRNameDisplayPath {
+    module_index: Int
+    internal_path: String
+    display_path: String
 }
 
-pub struct MIRSchemaMigrationPlan {
-    pub type_name: String
-    pub historical_shapes: [[String]]
-    pub steps: [MIRSchemaMigrationStep]
+struct MIRNameFacts {
+    modules: [MIRNameModule]
+    declarations: [MIRNameDeclaration]
+    aliases: [MIRNameAlias]
+    references: [MIRNameReference]
+    structure_facts: [MIRStructureFact]
+    // Source-facing paths are semantic-check metadata, not emitted identities.
+    display_paths: [MIRNameDisplayPath]{[MIRNameDisplayPath]{}}
 }
 
-pub struct MIRSchemaMigrationStep {
-    pub from_shape: String
-    pub to_shape: String
-    pub ops: [MIRSchemaMigrationOp]
+struct MIRSchemaMigrationPlan {
+    type_name: String
+    historical_shapes: [[String]]
+    steps: [MIRSchemaMigrationStep]
 }
 
-pub enum MIRSchemaMigrationOp {
+struct MIRSchemaMigrationStep {
+    from_shape: String
+    to_shape: String
+    ops: [MIRSchemaMigrationOp]
+}
+
+enum MIRSchemaMigrationOp {
     Rename(from_key: String, to_key: String)
     Remove(key: String)
     Add(key: String, type_name: String, default_fn: String)
     Change(key: String, from_type: String, to_type: String, converter_fn: String)
 }
 
-pub enum MIRArtifactKind {
+enum MIRArtifactKind {
     NativeExecutable
     NativeLibrary
     SandboxPlugin
@@ -3127,206 +3816,331 @@ pub enum MIRArtifactKind {
     TestOverride
 }
 
-pub enum MIRArtifactTarget { RustAOT Cranelift Interpreter Web }
+enum MIRArtifactTarget { RustAOT Interpreter Web }
 
-pub enum MIRArtifactBuildMode { Dev Release Test Fuzz Coverage }
+enum MIRArtifactBuildMode { Dev Release Test Fuzz Coverage }
 
-pub enum MIREntryKind { Library Command App Service Test }
+enum MIREntryKind { Library Command App Service Test }
 
-pub enum MIREntryOutput { NoOutput ReturnValue StandardOutput ExitStatus }
+enum MIREntryOutput { NoOutput ReturnValue StandardOutput ExitStatus }
 
-pub struct MIRExport { pub symbol: String, pub function: MIRFunctionID, pub abi: MIRForeignABI }
+struct MIRExport { symbol: String, function: MIRFunctionID, abi: MIRForeignABI }
 
-pub struct MIREntrySpec {
-    pub kind: MIREntryKind
-    pub function: MIRFunctionID?
-    pub cli: MIRCLIEntry?
-    pub output: MIREntryOutput
-    pub initialize_environment: Bool
-    pub initialize_gc: Bool
-    pub serves_until_stopped: Bool
-    pub package_version: String
+// The native Library C export law (owner ruling U3, 2026-10-09): every
+// parameter and the result of an `#Export(c)` function is one C primitive,
+// independently per position. Fixed widths map 1:1 to their C types; `Int` is
+// `int64_t`, `Float` is `double`, `String` is the JetText pointer/length pair.
+// The frozen Rust compiler keeps its older homogeneous Library scalar rule;
+// this law is Jet-only.
+enum MIRCPrimitive { Int Float Bool Text I8 I16 I32 I64 U8 U16 U32 U64 F32 }
+
+fn mir_c_primitive(ty: MIRType) -> MIRCPrimitive? {
+    if ty.kind == {
+        .Int -> Val(MIRCPrimitive.Int)
+        .Float -> Val(MIRCPrimitive.Float)
+        .Bool -> Val(MIRCPrimitive.Bool)
+        .String -> Val(MIRCPrimitive.Text)
+        .Float32 -> Val(MIRCPrimitive.F32)
+        .IntN(signed, bits) -> {
+            if bits == 8 -> return Val(if signed -> MIRCPrimitive.I8 else -> MIRCPrimitive.U8)
+            if bits == 16 -> return Val(if signed -> MIRCPrimitive.I16 else -> MIRCPrimitive.U16)
+            if bits == 32 -> return Val(if signed -> MIRCPrimitive.I32 else -> MIRCPrimitive.U32)
+            if bits == 64 -> return Val(if signed -> MIRCPrimitive.I64 else -> MIRCPrimitive.U64)
+            None
+        }
+        else -> None
+    }
 }
 
-pub struct MIRArtifactPlan {
-    pub id: MIRArtifactID
-    pub kind: MIRArtifactKind
-    pub name: String
-    pub target: MIRArtifactTarget
-    pub mode: MIRArtifactBuildMode
-    pub modules: [MIRModuleID]
-    pub links: [MIRLinkUnitID]
-    pub jobs: [MIRJobID]
-    pub runtime_parts: [MIRRuntimePartID]
-    pub exports: [MIRExport]
-    pub provider_identity: String
-    pub closure_identity: String
-    pub artifact_identity: String
-    pub entry: MIREntrySpec?
-    pub harness: MIRHarnessID?
+// A C `void` result: the checked unit value.
+fn mir_c_void(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .Tuple(fields) -> fields.len() == 0
+        .Apply(name, args) -> args.len() == 0 && name.name == "Unit"
+        else -> false
+    }
 }
 
-pub struct MIRByteSize { pub bytes: Int }
-
-pub enum MIRTargetRegisterAccessMode { ReadOnly WriteOnly ReadWrite }
-
-pub struct MIRSVDProvenance { pub source: String, pub sha256: String }
-
-pub struct MIRTargetRegisterFact {
-    pub name: String
-    pub offset: Int
-    pub width: MIRRegisterWidth
-    pub access: MIRTargetRegisterAccessMode
-    pub volatile: Bool
+// The value an export publishes: the success value of a Result carrier (the
+// generated boundary exits on failure) or the plain return. Optional and
+// diverging carriers have no C result.
+fn mir_c_export_result(function: MIRFunction) -> MIRType? {
+    if function.failure == {
+        .Infallible -> Val(function.return_type)
+        .Result(success, _) -> Val(success)
+        else -> None
+    }
 }
 
-pub struct MIRTargetRegisterBlockFact {
-    pub name: String
-    pub base: Int
-    pub size: MIRByteSize
-    pub registers: [MIRTargetRegisterFact]
+// Whether a checked top-level function satisfies the C export law.
+fn mir_c_export_signature(function: MIRFunction) -> Bool Never! {
+    if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return false
+    loop param in function.params {
+        if mir_c_primitive(param.ty) == None -> return false
+    }
+    result :: mir_c_export_result(function) ?? return false
+    mir_c_void(result) || mir_c_primitive(result) != None
 }
 
-pub enum MIRTargetRegisterOperation { Read Write }
-
-pub struct MIRTargetRegisterAccessFact {
-    pub block: String
-    pub register: String
-    pub operation: MIRTargetRegisterOperation
-    pub width: MIRRegisterWidth
+// The sandbox Component export law (D-PLUGIN-EXPORT1=A): every parameter and
+// the published result of a sandbox `pub fn` is one recursively closed
+// Component Model shape, independently per position: `Int`, `Float`, `Bool`,
+// `String`, or a `List`, `Option`, `Result` or `#Codable` record of them. The
+// published result is the same `mir_c_export_result` the C law uses, so a
+// unit, Optional or diverging result has no Component value. `codable_keys`
+// names the checked record types that derive both Encode and Decode: the
+// boundary never invents a record layout from a spelling. Fixed widths,
+// maps, tuples, unions, handles and generic applications have no Component
+// shape here.
+fn mir_component_type_descriptor(types: [MIRTypeDef], codable_keys: [String], ty: MIRType, seen: [MIRTypeID]) -> MIRComponentTypeDescriptor? {
+    if ty.kind == {
+        .Int -> return Val(MIRComponentTypeDescriptor.Int)
+        .Float -> return Val(MIRComponentTypeDescriptor.Float)
+        .Bool -> return Val(MIRComponentTypeDescriptor.Bool)
+        .String -> return Val(MIRComponentTypeDescriptor.String)
+        .List(inner) | .FixedList(inner, _) -> return mir_component_type_descriptor(types, codable_keys, inner, seen).map(value -> MIRComponentTypeDescriptor.List{inner: value})
+        .Option(inner) -> return mir_component_type_descriptor(types, codable_keys, inner, seen).map(value -> MIRComponentTypeDescriptor.Option{inner: value})
+        .InlineRange(inner, _, _) | .Tagged(_, inner) -> return mir_component_type_descriptor(types, codable_keys, inner, seen)
+        .Result(ok, err) -> {
+            ok_descriptor :: mir_component_type_descriptor(types, codable_keys, ok, seen) ?? return None
+            err_descriptor :: mir_component_type_descriptor(types, codable_keys, err, seen) ?? return None
+            return Val(MIRComponentTypeDescriptor.Result{ok: ok_descriptor, err: err_descriptor})
+        }
+        .Apply(name, args) -> {
+            if args.len() != 0 -> return None
+            loop prior in seen {
+                if prior == name.id -> return None
+            }
+            next_seen := seen
+            &next_seen.push(name.id)
+            loop definition in types {
+                if definition.id != name.id -> next
+                if definition.kind == {
+                    .Alias(target) -> return mir_component_type_descriptor(types, codable_keys, target, next_seen)
+                    .Struct(fields, _) -> {
+                        if !codable_keys.contains(definition.key) -> return None
+                        component_fields := [MIRComponentTypeField]{}
+                        loop index in 0..<fields.len() {
+                            field :: fields[index]
+                            if field.skip || field.computed -> next
+                            descriptor :: mir_component_type_descriptor(types, codable_keys, field.ty, next_seen) ?? return None
+                            &component_fields.push(MIRComponentTypeField{index: index, name: field.shape_names.json ?? field.name, ty: descriptor})
+                        }
+                        return Val(MIRComponentTypeDescriptor.Record{name: definition.name, fields: component_fields})
+                    }
+                    else -> return None
+                }
+            }
+            return None
+        }
+        else -> return None
+    }
 }
 
-pub struct MIRTargetInterruptFact {
-    pub name: String
-    pub vector: Int
-    pub forbidden_effects: [String]
-    pub bounded: Bool
+// Whether a checked top-level function satisfies the sandbox Component export
+// law, and its canonical Component signature when it does.
+fn mir_component_export_signature(types: [MIRTypeDef], codable_keys: [String], function: MIRFunction) -> MIRComponentSignatureDescriptor? {
+    if function.form != .TopLevel || function.generic_params.len() != 0 || function.capture_params.len() != 0 -> return None
+    params := [MIRComponentTypeDescriptor]{}
+    loop param in function.params {
+        descriptor :: mir_component_type_descriptor(types, codable_keys, param.ty, [MIRTypeID]{}) ?? return None
+        &params.push(descriptor)
+    }
+    result :: mir_c_export_result(function) ?? return None
+    result_descriptor :: mir_component_type_descriptor(types, codable_keys, result, [MIRTypeID]{}) ?? return None
+    Val(MIRComponentSignatureDescriptor{params: params, result: result_descriptor})
 }
 
-pub struct MIRTargetInterruptHandlerFact {
-    pub interrupt: String
-    pub handler: String
-    pub effects: [String]
-    pub forbidden_effects: [String]
-    pub bounded: Bool
+struct MIREntrySpec {
+    kind: MIREntryKind
+    function: MIRFunctionID?
+    cli: MIRCLIEntry?
+    output: MIREntryOutput
+    initialize_environment: Bool
+    initialize_gc: Bool
+    serves_until_stopped: Bool
+    package_version: String
 }
 
-pub enum MIRTargetDMAOwnership { Borrowed Transfer }
-
-pub struct MIRTargetDMAChannelFact {
-    pub name: String
-    pub channel: Int
-    pub transfer_width: MIRRegisterWidth
-    pub ownership: MIRTargetDMAOwnership
-    pub max_transfer_bytes: Int?
+struct MIRArtifactPlan {
+    id: MIRArtifactID
+    kind: MIRArtifactKind
+    name: String
+    target: MIRArtifactTarget
+    mode: MIRArtifactBuildMode
+    modules: [MIRModuleID]
+    links: [MIRLinkUnitID]
+    jobs: [MIRJobID]
+    runtime_parts: [MIRRuntimePartID]
+    exports: [MIRExport]
+    provider_identity: String
+    closure_identity: String
+    artifact_identity: String
+    entry: MIREntrySpec?
+    harness: MIRHarnessID?
 }
 
-pub enum MIRTargetDMAOperation { Start Wait UseBuffer }
+struct MIRByteSize { bytes: Int }
 
-pub enum MIRTargetDMAOwner { CPU Device }
+enum MIRTargetRegisterAccessMode { ReadOnly WriteOnly ReadWrite }
 
-pub struct MIRTargetDMAOperationFact {
-    pub channel: String
-    pub buffer: String
-    pub operation: MIRTargetDMAOperation
-    pub owner: MIRTargetDMAOwner
+struct MIRSVDProvenance { source: String, sha256: String }
+
+struct MIRTargetRegisterFact {
+    name: String
+    offset: Int
+    width: MIRRegisterWidth
+    access: MIRTargetRegisterAccessMode
+    volatile: Bool
 }
 
-pub enum MIRTargetHardwareUnresolvedReference {
+struct MIRTargetRegisterBlockFact {
+    name: String
+    base: Int
+    size: MIRByteSize
+    registers: [MIRTargetRegisterFact]
+}
+
+enum MIRTargetRegisterOperation { Read Write }
+
+struct MIRTargetRegisterAccessFact {
+    block: String
+    register: String
+    operation: MIRTargetRegisterOperation
+    width: MIRRegisterWidth
+}
+
+struct MIRTargetInterruptFact {
+    name: String
+    vector: Int
+    forbidden_effects: [String]
+    bounded: Bool
+}
+
+struct MIRTargetInterruptHandlerFact {
+    interrupt: String
+    handler: String
+    effects: [String]
+    forbidden_effects: [String]
+    bounded: Bool
+}
+
+enum MIRTargetDMAOwnership { Borrowed Transfer }
+
+struct MIRTargetDMAChannelFact {
+    name: String
+    channel: Int
+    transfer_width: MIRRegisterWidth
+    ownership: MIRTargetDMAOwnership
+    max_transfer_bytes: Int?
+}
+
+enum MIRTargetDMAOperation { Start Wait UseBuffer }
+
+enum MIRTargetDMAOwner { CPU Device }
+
+struct MIRTargetDMAOperationFact {
+    channel: String
+    buffer: String
+    operation: MIRTargetDMAOperation
+    owner: MIRTargetDMAOwner
+}
+
+enum MIRTargetHardwareUnresolvedReference {
     RegisterBlock(block: String)
     Register(block: String, register: String)
     DMAChannel(channel: String)
     Interrupt(interrupt: String)
 }
 
-pub struct MIRTargetHardwareFacts {
-    pub svd: MIRSVDProvenance?
-    pub register_blocks: [MIRTargetRegisterBlockFact]
-    pub interrupts: [MIRTargetInterruptFact]
-    pub dma_channels: [MIRTargetDMAChannelFact]
+struct MIRTargetHardwareFacts {
+    svd: MIRSVDProvenance?
+    register_blocks: [MIRTargetRegisterBlockFact]
+    interrupts: [MIRTargetInterruptFact]
+    dma_channels: [MIRTargetDMAChannelFact]
 }
 
-pub struct MIRTargetHardwareUse {
-    pub register_accesses: [MIRTargetRegisterAccessFact]
-    pub interrupt_handlers: [MIRTargetInterruptHandlerFact]
-    pub dma_operations: [MIRTargetDMAOperationFact]
-    pub unresolved_references: [MIRTargetHardwareUnresolvedReference]
+struct MIRTargetHardwareUse {
+    register_accesses: [MIRTargetRegisterAccessFact]
+    interrupt_handlers: [MIRTargetInterruptHandlerFact]
+    dma_operations: [MIRTargetDMAOperationFact]
+    unresolved_references: [MIRTargetHardwareUnresolvedReference]
 }
 
-pub enum MIRTargetProgrammerAdapter { Emulator ProbeRs OpenOcd }
+enum MIRTargetProgrammerAdapter { Emulator ProbeRs OpenOcd }
 
-pub struct MIRTargetProgrammerFacts {
-    pub adapter: MIRTargetProgrammerAdapter
-    pub executable: String
-    pub chip: String?
-    pub interface: String?
-    pub config: [String]
-    pub speed_khz: Int?
-    pub reset: Bool
-    pub machine: String?
-    pub cpu: String?
+struct MIRTargetProgrammerFacts {
+    adapter: MIRTargetProgrammerAdapter
+    executable: String
+    chip: String?
+    interface: String?
+    config: [String]
+    speed_khz: Int?
+    reset: Bool
+    machine: String?
+    cpu: String?
 }
 
-pub struct MIRLayoutSupportFacts {
-    pub proven: Bool
-    pub alignments: [Int]
-    pub max_size: Int?
-    pub max_address: Int?
-    pub abi: String?
-    pub provenance: String
+struct MIRLayoutSupportFacts {
+    proven: Bool
+    alignments: [Int]
+    max_size: Int?
+    max_address: Int?
+    abi: String?
+    provenance: String
 }
 
-pub struct MIRLayoutCapabilityFacts {
-    pub fact_version: String
-    pub target_profile: String
-    pub execution_modes: [String]
-    pub backend: String
-    pub toolchain: String
-    pub linker: String
-    pub allocator_provider: String
-    pub type_representation: MIRLayoutSupportFacts
-    pub stack_placement: MIRLayoutSupportFacts
-    pub global_placement: MIRLayoutSupportFacts
-    pub heap_allocator: MIRLayoutSupportFacts
-    pub foreign_by_value_abi: MIRLayoutSupportFacts
+struct MIRLayoutCapabilityFacts {
+    fact_version: String
+    target_profile: String
+    execution_modes: [String]
+    backend: String
+    toolchain: String
+    linker: String
+    allocator_provider: String
+    type_representation: MIRLayoutSupportFacts
+    stack_placement: MIRLayoutSupportFacts
+    global_placement: MIRLayoutSupportFacts
+    heap_allocator: MIRLayoutSupportFacts
+    foreign_by_value_abi: MIRLayoutSupportFacts
 }
 
-pub enum MIRMemoryKind { Flash Ram MMIO Reserved }
+enum MIRMemoryKind { Flash Ram MMIO Reserved }
 
-pub enum MIRMemoryAccess { R Rw Rx Rwx }
+enum MIRMemoryAccess { R Rw Rx Rwx }
 
-pub struct MIRMemoryRegion {
-    pub name: String
-    pub origin: Int
-    pub size: MIRByteSize
-    pub kind: MIRMemoryKind
-    pub access: MIRMemoryAccess
+struct MIRMemoryRegion {
+    name: String
+    origin: Int
+    size: MIRByteSize
+    kind: MIRMemoryKind
+    access: MIRMemoryAccess
 }
 
-pub enum MIRLinkerInput {
+enum MIRLinkerInput {
     HostedDefault
     Unspecified
     Generated
     File(path: String, sha256: String)
 }
 
-pub struct MIRProviderABI { pub calling_convention: String, pub version: String }
+struct MIRProviderABI { calling_convention: String, version: String }
 
-pub struct MIRProviderLimits {
-    pub max_request_bytes: Int?
-    pub max_response_bytes: Int?
-    pub max_calls: Int?
+struct MIRProviderLimits {
+    max_request_bytes: Int?
+    max_response_bytes: Int?
+    max_calls: Int?
 }
 
-pub struct MIRProviderContract {
-    pub provider: String
-    pub sha256: String
-    pub provenance: String
-    pub abi: MIRProviderABI
-    pub limits: MIRProviderLimits
+struct MIRProviderContract {
+    provider: String
+    sha256: String
+    provenance: String
+    abi: MIRProviderABI
+    limits: MIRProviderLimits
 }
 
-pub enum MIRAllocatorPolicy {
+enum MIRAllocatorPolicy {
     HostedDefault
     Unspecified
     NoAllocator
@@ -3335,18 +4149,18 @@ pub enum MIRAllocatorPolicy {
     Counting(cap: MIRByteSize?)
 }
 
-pub enum MIRPanicPolicy {
+enum MIRPanicPolicy {
     HostedDefault
     Unspecified
     Abort
     Report(provider: MIRProviderContract)
 }
 
-pub enum MIRClockPolicy { HostedDefault Unspecified NoClock Provider(provider: MIRProviderContract) }
+enum MIRClockPolicy { HostedDefault Unspecified NoClock Provider(provider: MIRProviderContract) }
 
-pub enum MIREntropyPolicy { HostedDefault Unspecified NoEntropy Provider(provider: MIRProviderContract) }
+enum MIREntropyPolicy { HostedDefault Unspecified NoEntropy Provider(provider: MIRProviderContract) }
 
-pub enum MIRSchedulerPolicy {
+enum MIRSchedulerPolicy {
     HostedDefault
     Unspecified
     NoScheduler
@@ -3355,301 +4169,332 @@ pub enum MIRSchedulerPolicy {
     BoardRuntime(provider: MIRProviderContract)
 }
 
-pub enum MIRMMIOPolicy { HostedDefault Unspecified NoMMIO Provider(provider: MIRProviderContract) }
+enum MIRMMIOPolicy { HostedDefault Unspecified NoMMIO Provider(provider: MIRProviderContract) }
 
-pub enum MIRByteSinkPolicy {
+enum MIRByteSinkPolicy {
     HostedDefault
     Unspecified
     NoByteSink
     Provider(read: MIRProviderContract?, write: MIRProviderContract?, report: MIRProviderContract?)
 }
 
-pub enum MIRStartupPolicy {
+enum MIRStartupPolicy {
     HostedDefault
     Unspecified
     Generated(provider: MIRProviderContract)
 }
 
-pub struct MIRAuditPolicy { pub build_artifact: Bool, pub dossier_lens: Bool }
+struct MIRAuditPolicy { build_artifact: Bool, dossier_lens: Bool }
 
-pub struct MIRTargetMachine {
-    pub name: String
-    pub triple: String
-    pub layout: MIRLayoutCapabilityFacts
-    pub no_os: Bool
-    pub memory: [MIRMemoryRegion]
-    pub linker: MIRLinkerInput
-    pub allocator: MIRAllocatorPolicy
-    pub panic: MIRPanicPolicy
-    pub mmio: MIRMMIOPolicy
-    pub wall_clock: MIRClockPolicy
-    pub monotonic_clock: MIRClockPolicy
-    pub zone_data: MIRClockPolicy
-    pub sleep: MIRClockPolicy
-    pub entropy: MIREntropyPolicy
-    pub scheduler: MIRSchedulerPolicy
-    pub byte_sink: MIRByteSinkPolicy
-    pub startup: MIRStartupPolicy
-    pub startup_entry: String
-    pub startup_vectors: String
-    pub startup_abi: MIRProviderABI
-    pub startup_placement: String
-    pub hardware: MIRTargetHardwareFacts
-    pub programmers: [MIRTargetProgrammerFacts]
-    pub audit: MIRAuditPolicy
+struct MIRTargetMachine {
+    name: String
+    triple: String
+    layout: MIRLayoutCapabilityFacts
+    no_os: Bool
+    memory: [MIRMemoryRegion]
+    linker: MIRLinkerInput
+    allocator: MIRAllocatorPolicy
+    panic: MIRPanicPolicy
+    mmio: MIRMMIOPolicy
+    wall_clock: MIRClockPolicy
+    monotonic_clock: MIRClockPolicy
+    zone_data: MIRClockPolicy
+    sleep: MIRClockPolicy
+    entropy: MIREntropyPolicy
+    scheduler: MIRSchedulerPolicy
+    byte_sink: MIRByteSinkPolicy
+    startup: MIRStartupPolicy
+    startup_entry: String
+    startup_vectors: String
+    startup_abi: MIRProviderABI
+    startup_placement: String
+    hardware: MIRTargetHardwareFacts
+    programmers: [MIRTargetProgrammerFacts]
+    audit: MIRAuditPolicy
 }
 
-pub enum MIRRuntimeLayer { Core Alloc Std }
+enum MIRRuntimeLayer { Core Alloc Std }
 
-pub struct MIRTargetDossier {
-    pub machine: MIRTargetMachine?
-    pub layer: MIRRuntimeLayer
-    pub provider_identity: String
-    pub closure_identity: String
-    pub linker_identity: String
-    pub tier_identity: String
-    pub compiler_identity: String
-    pub environment_identity: String
-    pub dependency_identity: String
+struct MIRTargetDossier {
+    machine: MIRTargetMachine?
+    layer: MIRRuntimeLayer
+    provider_identity: String
+    closure_identity: String
+    linker_identity: String
+    tier_identity: String
+    compiler_identity: String
+    environment_identity: String
+    dependency_identity: String
 }
 
-pub enum MIRAppRenderMode { CSR SSR SSG Stream Island }
+enum MIRAppRenderMode { CSR SSR SSG Stream Island }
 
-pub enum MIRAppRenderFactMode { Static Server ServerStream ServerIsland Client }
+enum MIRAppRenderFactMode { Static Server ServerStream ServerIsland Client }
 
-pub enum MIRAppCacheFact { Unspecified Immutable Revalidate Private }
+enum MIRAppCacheFact { Unspecified Immutable Revalidate Private }
 
-pub struct MIRAppPendingBoundaryID { pub value: U64 }
+struct MIRAppPendingBoundaryID { value: U64 }
 
-pub enum MIRAppHydrationTrigger { Immediate ClientLoad ClientIdle ClientVisible Manual }
+enum MIRAppHydrationTrigger { Immediate ClientLoad ClientIdle ClientVisible Manual }
 
-pub struct MIRAppResumeCapture { pub name: String, pub ty: String, pub serializable: Bool }
+struct MIRAppResumeCapture { name: String, ty: String, serializable: Bool }
 
-pub struct MIRAppResumePayload { pub captures: [MIRAppResumeCapture], pub serializable: Bool }
+struct MIRAppResumePayload { captures: [MIRAppResumeCapture], serializable: Bool }
 
-pub struct MIRAppIslandFact {
-    pub identity: String
-    pub hydration_trigger: MIRAppHydrationTrigger
-    pub resume_payload: MIRAppResumePayload
+struct MIRAppIslandFact {
+    identity: String
+    hydration_trigger: MIRAppHydrationTrigger
+    resume_payload: MIRAppResumePayload
 }
 
-pub struct MIRAppRenderFacts {
-    pub mode: MIRAppRenderFactMode
-    pub reason: [String]
-    pub effects: [String]
-    pub interactive: Bool
-    pub loader: String?
-    pub form: String?
-    pub cache: MIRAppCacheFact
-    pub override_mode: MIRAppRenderFactMode?
-    pub pending_boundary_id: MIRAppPendingBoundaryID?
-    pub island: MIRAppIslandFact?
+struct MIRAppRenderFacts {
+    mode: MIRAppRenderFactMode
+    reason: [String]
+    effects: [String]
+    interactive: Bool
+    loader: String?
+    form: String?
+    cache: MIRAppCacheFact
+    override_mode: MIRAppRenderFactMode?
+    pending_boundary_id: MIRAppPendingBoundaryID?
+    island: MIRAppIslandFact?
 }
 
-pub struct MIRAppRouteField {
-    pub name: String
-    pub ty: String
-    pub codec: String
-    pub required: Bool
-    pub default: String?
+struct MIRAppRouteField {
+    name: String
+    ty: String
+    codec: String
+    required: Bool
+    default: String?
 }
 
-pub struct MIRAppRouteLoader {
-    pub handler: String
-    pub data_type: String
-    pub dependency: String
-    pub preload: Bool
-    pub cache_identity: String
+struct MIRAppRouteLoader {
+    handler: String
+    data_type: String
+    dependency: String
+    preload: Bool
+    cache_identity: String
 }
 
-pub struct MIRAppRouteBoundaries { pub pending: String?, pub not_found: String?, pub error: String? }
+struct MIRAppRouteBoundaries { pending: String?, not_found: String?, error: String? }
 
-pub struct MIRAppRoute {
-    pub path: String
-    pub handler: String
-    pub route_identity: String
-    pub path_params: [MIRAppRouteField]
-    pub search_params: [MIRAppRouteField]
-    pub search_codec: String
-    pub loader: MIRAppRouteLoader?
-    pub boundaries: MIRAppRouteBoundaries
-    pub precedence: String
-    pub render: MIRAppRenderMode
-    pub render_facts: MIRAppRenderFacts
-    pub provenance: String
-    pub span_start: Int
-    pub span_end: Int
+struct MIRAppRoute {
+    path: String
+    handler: String
+    route_identity: String
+    path_params: [MIRAppRouteField]
+    search_params: [MIRAppRouteField]
+    search_codec: String
+    loader: MIRAppRouteLoader?
+    boundaries: MIRAppRouteBoundaries
+    precedence: String
+    render: MIRAppRenderMode
+    render_facts: MIRAppRenderFacts
+    provenance: String
+    span_start: Int
+    span_end: Int
 }
 
-pub struct MIRAppAction {
-    pub name: String
-    pub handler: String
-    pub kind: String
-    pub preload: Bool
-    pub input_type: String
-    pub output_type: String
-    pub error_type: String
-    pub endpoint: String
-    pub method: String
-    pub csrf: String
-    pub effects: [String]
-    pub middleware: [String]
-    pub provenance: String
-    pub span_start: Int
-    pub span_end: Int
+struct MIRAppAction {
+    name: String
+    handler: String
+    kind: String
+    preload: Bool
+    input_type: String
+    output_type: String
+    error_type: String
+    endpoint: String
+    method: String
+    csrf: String
+    effects: [String]
+    middleware: [String]
+    provenance: String
+    span_start: Int
+    span_end: Int
 }
 
-pub struct MIRAppMount {
-    pub prefix: String
-    pub handler: String
-    pub effects: [String]
-    pub security: [String]
-    pub provenance: String
-    pub span_start: Int
-    pub span_end: Int
+struct MIRAppMount {
+    prefix: String
+    handler: String
+    effects: [String]
+    security: [String]
+    provenance: String
+    span_start: Int
+    span_end: Int
 }
 
-pub struct MIRAppRoutesFrom { pub root: String, pub span_start: Int, pub span_end: Int }
+struct MIRAppRoutesFrom { root: String, span_start: Int, span_end: Int }
 
-pub struct MIRAppPolicy {
-    pub security: [String]
-    pub assets: [String]
-    pub split: [String]
-    pub cache: [String]
-    pub a11y: [String]
-    pub adapters: [String]
+struct MIRAppPolicy {
+    security: [String]
+    assets: [String]
+    split: [String]
+    cache: [String]
+    a11y: [String]
+    adapters: [String]
 }
 
-pub struct MIRAppQueryFact { pub key: String, pub footprint: String, pub source: String, pub kind: String }
+struct MIRAppQueryFact { key: String, footprint: String, source: String, kind: String }
 
-pub struct MIRAppStoreFact { pub name: String, pub source: String, pub kind: String, pub history_limit: String }
+struct MIRAppStoreFact { name: String, source: String, kind: String, history_limit: String }
 
-pub struct MIRAppFormFieldFact {
-    pub name: String
-    pub ty: String
-    pub required: Bool
-    pub default: String?
-    pub label: String
-    pub control: String
-    pub wire_name: String
+struct MIRAppFormFieldFact {
+    name: String
+    ty: String
+    required: Bool
+    default: String?
+    label: String
+    control: String
+    wire_name: String
 }
 
-pub struct MIRAppFormFact {
-    pub name: String
-    pub model: String
-    pub action: String
-    pub input_type: String
-    pub output_type: String
-    pub error_type: String
-    pub endpoint: String
-    pub method: String
-    pub csrf: String
-    pub effects: [String]
-    pub fields: [MIRAppFormFieldFact]
-    pub middleware: [String]
-    pub provenance: String
-    pub span_start: Int
-    pub span_end: Int
+struct MIRAppFormFact {
+    name: String
+    model: String
+    action: String
+    input_type: String
+    output_type: String
+    error_type: String
+    endpoint: String
+    method: String
+    csrf: String
+    effects: [String]
+    fields: [MIRAppFormFieldFact]
+    middleware: [String]
+    provenance: String
+    span_start: Int
+    span_end: Int
 }
 
-pub struct MIRAppGraph {
-    pub entry_file: String
-    pub routes: [MIRAppRoute]
-    pub actions: [MIRAppAction]
-    pub forms: [MIRAppFormFact]
-    pub queries: [MIRAppQueryFact]
-    pub stores: [MIRAppStoreFact]
-    pub mounts: [MIRAppMount]
-    pub routes_from: [MIRAppRoutesFrom]
-    pub policy: MIRAppPolicy
-    pub hydration: String
-    pub shared_tir: Bool
+struct MIRAppGraph {
+    entry_file: String
+    routes: [MIRAppRoute]
+    actions: [MIRAppAction]
+    forms: [MIRAppFormFact]
+    queries: [MIRAppQueryFact]
+    stores: [MIRAppStoreFact]
+    mounts: [MIRAppMount]
+    routes_from: [MIRAppRoutesFrom]
+    policy: MIRAppPolicy
+    hydration: String
+    shared_tir: Bool
 }
 
-pub struct MIRPackageFacts {
-    pub project_root: String
-    pub edition: String
-    pub runtime_parts: [MIRRuntimePartID]
-    pub uses_arrow: Bool
-    pub active_os: String
-    pub inferred_layer: String
-    pub allocator: String
-    pub package_version: String
-    pub artifact_target: MIRArtifactTarget?
-    pub target_dossier: MIRTargetDossier
-    pub web_app: MIRAppGraph?
-    pub authority_needs: [String]
-    pub hardware_use: MIRTargetHardwareUse
-    pub hardware_profile: MIRTargetHardwareFacts?
-    pub hardware_profile_id: String
-    pub hardware_capabilities: [String]
-    pub hardware_setups: [MIRHardwareSetup]
+struct MIRPackageFacts {
+    project_root: String
+    edition: String
+    runtime_parts: [MIRRuntimePartID]
+    uses_arrow: Bool
+    active_os: String
+    inferred_layer: String
+    allocator: String
+    program_allocator: MIRAllocatorPolicy
+    package_version: String
+    artifact_target: MIRArtifactTarget?
+    target_dossier: MIRTargetDossier
+    web_app: MIRAppGraph?
+    authority_needs: [String]
+    hardware_use: MIRTargetHardwareUse
+    hardware_profile: MIRTargetHardwareFacts?
+    hardware_profile_id: String
+    hardware_capabilities: [String]
+    hardware_setups: [MIRHardwareSetup]
 }
 
-pub enum MIRHardwareSetup {
+enum MIRHardwareSetup {
     DMAConfigure(profile_id: String, channel: String, transfer_width: MIRRegisterWidth, ownership: MIRTargetDMAOwnership)
     InterruptBind(profile_id: String, interrupt: String, vector: Int, handler_symbol: String, forbidden_effects: [String])
 }
 
-pub struct MIRCoreCall {
-    pub id: MIRCoreCallID
-    pub key: String
-    pub module_name: String
-    pub member: String
-    pub receiver_types: [String]
-    pub arity: Int
-    pub max_arity: Int
-    pub borrow_mask: [Bool]
-    pub fallibility: CoreCallFallibility
-    pub effect_kind: Effect?
-    pub effect_leaf: String?
-    pub sink_class: SinkClass?
-    pub pure_route: CoreCallPureRoute
-    pub interpreter_route: CoreCallInterpreterRoute
-    pub symbol: CoreCallSymbol
-    pub coverage_bits: Int
-    pub aot_direct: Bool
-    pub jit_direct: Bool
-    pub jit_symbol: String?
-    pub native_int_result: Bool
-    pub marker: CoreMarkerApplication?
+struct MIRCoreCall {
+    id: MIRCoreCallID
+    key: String
+    module_name: String
+    member: String
+    receiver_types: [String]
+    arity: Int
+    max_arity: Int
+    borrow_mask: [Bool]
+    fallibility: CoreCallFallibility
+    effect_kind: Effect?
+    effect_leaf: String?
+    sink_class: SinkClass?
+    pure_route: CoreCallPureRoute
+    interpreter_route: CoreCallInterpreterRoute
+    symbol: CoreCallSymbol
+    coverage_bits: Int
+    aot_direct: Bool
+    native_int_result: Bool
+    marker: CoreMarkerApplication?
 }
 
-pub struct MIRFunctionRow { pub function: MIRFunction }
+struct MIRFunctionRow { function: MIRFunction }
 
-pub enum MIRErasureReason { CompileTimeOnly Disabled ExpandedBeforeLowering SemanticIndexOnly }
+enum MIRErasureReason { CompileTimeOnly Disabled ExpandedBeforeLowering SemanticIndexOnly }
 
-pub struct MIRUnreachable { pub construct: String, pub span: Span, pub reason: MIRErasureReason }
+struct MIRUnreachable { construct: String, span: Span, reason: MIRErasureReason }
 
-// Backend-neutral semantic graph used by lowering and all MIR consumers. Native
-// artifact/provider activation records remain in their owning backend adapters.
-pub struct MIRProgram {
-    pub cffi: MIRCffiFacts
-    pub schema_version: Int
-    pub package_identity: String
-    pub facts: MIRPackageFacts
-    pub names: MIRNameFacts
-    pub modules: [MIRModule]
-    pub imports: [MIRImport]
-    pub types: [MIRTypeDef]
-    pub traits: [MIRTraitDef]
-    pub core_owners: [MIRCoreOwner]
-    pub impls: [MIRImplDef]
-    pub constants: [MIRConstantDef]
-    pub fields: [MIRFieldRow]
-    pub source_files: [MIRSourceFile]
-    pub functions: [MIRFunction]
-    pub foreign: [MIRForeign]
-    pub links: [MIRLinkUnit]
-    pub callbacks: [MIRCallbackAdapter]
-    pub handles: [MIRHandleLifecycle]
-    pub jobs: [MIRJob]
-    pub tests: [MIRTestCase]
-    pub harnesses: [MIRHarnessPlan]
-    pub artifacts: [MIRArtifactPlan]
-    pub core_calls: [MIRCoreCall]
-    pub prelude_calls: [MIRPreludeCall]
-    pub type_instances: [MIRType]
-    pub codec_migrations: [String:MIRSchemaMigrationPlan]
-    pub unreachable: [MIRUnreachable]
+// Backend-neutral semantic graph used by lowering and all MIR consumers.
+// native_pack is set only at the explicit native-runtime ABI lowering boundary;
+// it is not the stop-point/native-program fact or a host-provider activation.
+struct MIRProgram {
+    cffi: MIRCffiFacts
+    native_pack: Bool
+    schema_version: Int
+    package_identity: String
+    facts: MIRPackageFacts
+    names: MIRNameFacts
+    modules: [MIRModule]
+    imports: [MIRImport]
+    types: [MIRTypeDef]
+    traits: [MIRTraitDef]
+    core_owners: [MIRCoreOwner]
+    impls: [MIRImplDef]
+    constants: [MIRConstantDef]
+    fields: [MIRFieldRow]
+    source_files: [MIRSourceFile]
+    functions: [MIRFunction]
+    foreign: [MIRForeign]
+    links: [MIRLinkUnit]
+    callbacks: [MIRCallbackAdapter]
+    handles: [MIRHandleLifecycle]
+    jobs: [MIRJob]
+    tests: [MIRTestCase]
+    harnesses: [MIRHarnessPlan]
+    artifacts: [MIRArtifactPlan]
+    core_calls: [MIRCoreCall]
+    prelude_calls: [MIRPreludeCall]
+    type_instances: [MIRType]
+    codec_migrations: [String:MIRSchemaMigrationPlan]
+    unreachable: [MIRUnreachable]
+    // A consumer-built lookup index, never serialized or digested: the first
+    // row of each type id and each type key in `types` (JetBackend Lower.jet
+    // lower_indexed_program). Empty unless a consumer builds it; when empty,
+    // lookups scan `types`.
+    type_id_rows: [U64:Int]{[U64:Int]{}}
+    type_key_rows: [String:Int]{[String:Int]{}}
+}
+
+// Resolve a private Core value hook through checked nominal and function
+// identities. Consumers prepare this once; a short user type name never wins.
+fn mir_source_value_hook(program: MIRProgram, ty: MIRType, operation: String) -> MIRFunctionID? Never! {
+    if ty.kind == .Tagged(_, inner) -> return mir_source_value_hook(program, inner, operation)
+    if ty.kind == .Apply(owner, _) {
+        hook :: core_source_value_hook(owner.name, operation) ?? return None
+        found := MIRFunctionID?{None}
+        loop function in program.functions {
+            if function.form == .Method(method_owner, self_access) {
+                if self_access != (Val(MIRAccess.Read)) -> next
+                if method_owner.kind == .Apply(method_ref, _) {
+                    if method_ref.id != owner.id || method_ref.name != owner.name -> next
+                    parts :: function.name.split("::").to_list()
+                    if parts.len() == 0 || parts[parts.len() - 1] != hook -> next
+                    if found != None -> return None
+                    found = Val(function.id)
+                }
+            }
+        }
+        return found
+    }
+    None
 }

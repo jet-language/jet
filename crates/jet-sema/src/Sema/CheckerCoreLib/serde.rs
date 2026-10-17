@@ -79,10 +79,10 @@ impl<'a> Checker<'a> {
             }
             Type::Named(n) => {
                 n == "Decimal"
-                    || n == "DataTree"
+                    || n == "Dyn"
                     || matches!(
                         n.as_str(),
-                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "ZonedDateTime" | "Duration"
                     )
                     || is_json_type_name(n)
                     || self.serde_trait_impl(n, crate::Generics::ENCODE)
@@ -122,28 +122,12 @@ impl<'a> Checker<'a> {
             Type::Map { key, value, .. } => {
                 matches!(**key, Type::String) && self.is_decodable(value)
             }
-            // D-CONFIG-ENV1: Core crypto marks `Secret` with an internal
-            // nominal tag before it reaches sema. Its text decoder is a
-            // vetted Prelude bridge, so admit that tagged carrier on the
-            // same typed Decode rail as an ordinary named type.
-            Type::Tagged { inner, .. } if matches!(inner.as_ref(), Type::Named(name) if name == "Secret") => {
-                true
-            }
             Type::Named(n) => {
-                let core_secret = n == "Secret"
-                    || n.split_once('.').is_some_and(|(alias, leaf)| {
-                        leaf == "Secret"
-                            && self
-                                .core_imports
-                                .get(alias)
-                                .is_some_and(|module| module == "core.crypto")
-                    });
                 n == "Decimal"
                     || n == "DataTree"
-                    || core_secret
                     || matches!(
                         n.as_str(),
-                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Duration"
+                        "Date" | "LocalDate" | "LocalTime" | "DateTime" | "ZonedDateTime" | "Duration"
                     )
                     || self.serde_trait_impl(n, crate::Generics::DECODE)
                     || self.type_param_scope.iter().any(|p| {

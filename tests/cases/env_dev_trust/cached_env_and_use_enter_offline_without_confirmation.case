@@ -1,0 +1,38 @@
+# Port of tests/env_dev_trust.rs:260-334 and assert_cached_entries:112-156.
+# Real Hangar admission replaces Store::seal_local_output; the cached closure,
+# not fixtures, network or host /nix/store, must serve both entry commands.
+# PENDING-GRAMMAR(batch-four): mkdir/chmod setup actions and captured template tokens.
+fixture: fixtures/cached-entry
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: JETPACK_FIXTURES={work}/fixtures
+mkdir: root
+mkdir: home
+mkdir: fixtures
+chmod: fastfetch/bin/fastfetch 0755
+step: jetpack hangar ingest {work}/fastfetch --name fastfetch --json
+exit: 0
+capture: digest stdout doc $.output_hash
+step: jetpack hangar verify {cap:digest} --json
+exit: 0
+write: fixtures/nixpkgs-fastfetch.json cached-fastfetch.template
+copy: {work}/fixtures/nixpkgs-fastfetch.json {work}/fixtures/jetpack-fastfetch.json
+step: jetpack config trust add {work}* --no-color
+exit: 0
+step: jetpack env --prep --yes --no-color --offline
+exit: 0
+remove: fixtures/nixpkgs-fastfetch.json
+remove: fixtures/jetpack-fastfetch.json
+remove: fixtures/fastfetch.drv
+step: jetpack env --no-color -- fastfetch
+isolate: no-nix network=disabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout.trim: = fastfetch.out
+stderr: !~ "continue?" # original predicate: cached env entry must not ask for confirmation
+step: jetpack use fastfetch@jetpack --no-color -- fastfetch
+isolate: no-nix network=disabled
+unset: JETPACK_FIXTURES
+exit: 0
+stdout.trim: = fastfetch.out
+stderr: !~ "continue?" # original predicate: cached use entry must not ask for confirmation

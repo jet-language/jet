@@ -140,3 +140,16 @@ fn either(value: *Node | Label) {}
         "`*Node | Label` must be a union with a `*Node` member"
     );
 }
+
+#[test]
+fn copy_callable_declaration_matches_contextual_member_name() {
+    let source = "fn copy(value: Float) -> Float Never! { value }\nfn run() { math.copy(Float{1.0}) }\n";
+    let (tokens, diagnostics) = Lexer::lex(source);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    let program = Parser::parse(&tokens).expect("copy callable should parse");
+    assert!(matches!(&program.items[0], Item::Func(function) if function.name == "copy"));
+
+    let (tokens, _) = Lexer::lex("fn run() { value :: copy other }\n");
+    let diagnostics = Parser::parse(&tokens).expect_err("copy keyword remains retired");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0991"));
+}

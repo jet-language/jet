@@ -22,6 +22,10 @@ jet run
 stable diagnostic code with its source location and fix. `jet explain` looks up
 the registered explanation for that code.
 
+Loader reports share the source text for each failing file. A large unit with
+many errors or advisories retains one source buffer, rather than copying the
+entire file for every report; source locations and fixes remain available.
+
 ## 1. Fix an unknown function
 
 Create a project and enter it:

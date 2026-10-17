@@ -1,0 +1,26 @@
+# Port of tests/bind.rs:739-788; all input/program bytes are verbatim.
+# PENDING-REFERENCE: no snapshots blessed until all original assertions hold.
+fixture: fixtures/data_bind_uses_canonical_names_and_exact_json_number_lexemes
+step: jet inspect bind json "hostile.json" --type "String"
+file: ".jet/bindings/hostile.jet" = data_bind_uses_canonical_names_and_exact_json_number_lexemes.0.generated.jet.out
+step: jet fmt .jet/bindings/hostile.jet
+step: jet inspect bind json "exact.json" --type "Exact"
+file: ".jet/bindings/exact.jet" = data_bind_uses_canonical_names_and_exact_json_number_lexemes.1.generated.jet.out
+# PENDING-GRAMMAR: concat plus JSON-escaped hostile filename tokens.
+concat: main.jet .jet/bindings/exact.jet separator program.jet
+step: jet check main.jet
+step: jet build --profile=debug main.jet
+step: built
+stdout: = data_bind_uses_canonical_names_and_exact_json_number_lexemes.out
+step: jet run main.jet
+env: JET_STORE_DIR={work}/run-cache
+stdout: = data_bind_uses_canonical_names_and_exact_json_number_lexemes.out
+stderr: = data_bind_uses_canonical_names_and_exact_json_number_lexemes.default.stderr
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/interpreter-cache
+stdout: = data_bind_uses_canonical_names_and_exact_json_number_lexemes.out
+stderr: = data_bind_uses_canonical_names_and_exact_json_number_lexemes.interpreter.stderr
+copy: plain.json "records\nname\u0001.json"
+step: jet inspect bind json "records\nname\u0001.json" --type "Record"
+file: ".jet/bindings/records_name.jet" = data_bind_uses_canonical_names_and_exact_json_number_lexemes.2.generated.jet.out
+step: jet fmt .jet/bindings/records_name.jet

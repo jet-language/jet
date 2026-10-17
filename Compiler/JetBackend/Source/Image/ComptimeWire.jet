@@ -1,0 +1,263 @@
+// Lossless native value transport. Only canonical compiler-owned descriptors
+// may reach these readers; addresses are child-local borrowed storage.
+use jet_foundation.foundation_json_quote
+
+struct X64ClosureValueLayout {
+    snapshot: String
+    function: String
+    boundary: X64ValueBoundary
+    captures: [X64ValueMember]
+}
+struct X64ClosureRegistration {
+    offset: Int
+    layout: X64ClosureValueLayout
+}
+
+fn x64_closure_registration_json(row: X64ClosureRegistration) -> String Never! {
+    captures :: loop member in row.layout.captures -> x64_value_member_json(member)
+    "[{row.offset},{foundation_json_quote(row.layout.snapshot)},{foundation_json_quote(row.layout.function)},{x64_value_boundary_json(row.layout.boundary)},[{captures.join(",")}]]"
+}
+fn x64_closure_registration_decode(tree: Dyn, code_size: Int) -> X64ClosureRegistration? Never! {
+    rows :: x64_execution_array(tree) ?? return None
+    if rows.len() != 5 -> return None
+    offset :: x64_execution_int(rows[0]) ?? return None
+    if offset < 0 || offset >= code_size -> return None
+    snapshot :: x64_execution_string(rows[1]) ?? return None
+    function :: x64_execution_string(rows[2]) ?? return None
+    boundary :: x64_value_boundary_decode(rows[3]) ?? return None
+    members :: x64_execution_array(rows[4]) ?? return None
+    captures := [X64ValueMember]{}
+    loop member in members -> &captures.push(x64_value_member_decode(member, boundary.descriptors.len()) ?? return None)
+    Val(X64ClosureRegistration{offset: offset, layout: X64ClosureValueLayout{snapshot: snapshot, function: function, boundary: boundary, captures: captures}})
+}
+
+struct X64NativeValue {
+    kind: String
+    attributes: [String]
+    text: String
+    children: [X64NativeValue]
+}
+
+fn x64_value_node(fd: Int, kind: String, attributes: [String], children: Int, bytes: Int) -> Bool {
+    fields :: loop field in attributes -> foundation_json_quote(field)
+    x64_session_write_frame(fd, "[\"Node\",{foundation_json_quote(kind)},[{fields.join(",")}],{children},{bytes}]")
+}
+
+fn x64_value_text_stream(runtime: X64Runtime, fd: Int, kind: String, word: Int, header: Int) -> Bool {
+    carrier := word
+    if kind == "Int" -> carrier = x64_execution_call(runtime, "jet_rt_int_to_string", word)
+    data :: x64_execution_call(runtime, "jet_rt_string_data", carrier)
+    length :: x64_execution_call(runtime, "jet_rt_string_byte_len", carrier)
+    success := length >= 0 && x64_value_node(fd, kind, [String]{}, 0, length)
+    at := 0
+    loop success && at < length {
+        count := length - at
+        if count > 65536 -> count = 65536
+        success = x64_session_write_address_frame(fd, data + at, count, header)
+        at += count
+    }
+    if kind == "Int" -> _ := x64_execution_call(runtime, "jet_rt_string_drop", carrier)
+    success
+}
+
+fn x64_value_stream_member(runtime: X64Runtime, fd: Int, boundary: X64ValueBoundary, member: X64ValueMember, base: Int, closures: [Int:X64ClosureValueLayout], header: Int) -> Bool {
+    address := base + member.offset
+    if member.boxed -> address = x64_value_word(address)
+    x64_value_native_stream(runtime, fd, boundary, member.descriptor, address, closures, header)
+}
+
+// Preorder, counted nodes with small JSON headers and borrowed raw text chunks.
+// There is no nested JSON value or joined JSON body, including for large lists.
+fn x64_value_native_stream(runtime: X64Runtime, fd: Int, boundary: X64ValueBoundary, row: Int, address: Int, closures: [Int:X64ClosureValueLayout], header: Int) -> Bool {
+    if row < 0 || row >= boundary.descriptors.len() -> return false
+    descriptor :: boundary.descriptors[row]
+    kind :: descriptor.kind
+    if kind == "Alias" -> return x64_value_native_stream(runtime, fd, boundary, descriptor.children[0], address, closures, header)
+    if kind == "Unit" -> return x64_value_node(fd, kind, [String]{}, 0, 0)
+    if kind == "String" || kind == "Int" -> return x64_value_text_stream(runtime, fd, kind, x64_value_word(address), header)
+    if kind == "Bool" {
+        byte :: x64_value_byte(address)
+        if byte != 0 && byte != 1 -> return false
+        return x64_value_node(fd, kind, [String]{"{byte}"}, 0, 0)
+    }
+    if kind == "Char" -> return x64_value_node(fd, kind, [String]{"{x64_value_unsigned_bytes(address, 4)}"}, 0, 0)
+    if kind == "Float" || kind == "Float32" {
+        bits := x64_value_unsigned_bytes(address, descriptor.size)
+        if bits < 0 -> bits += 18446744073709551616
+        return x64_value_node(fd, "Float", [String]{"{if kind == "Float32" -> 32 else -> 64}", "{bits}"}, 0, 0)
+    }
+    if kind == "Signed" || kind == "Unsigned" {
+        bits :: descriptor.stride
+        if bits < 1 || bits > 64 -> return false
+        number := x64_value_unsigned_bytes(address, descriptor.size)
+        modulus :: 1 << bits
+        number = number.bit_and(modulus - 1)
+        if kind == "Signed" && number >= (modulus >> 1) -> number -= modulus
+        return x64_value_node(fd, "Integer", [String]{"{number}"}, 0, 0)
+    }
+    if kind == "Option" {
+        pointer :: x64_value_word(address)
+        if pointer == 0 -> return x64_value_node(fd, "Absent", [String]{boundary.descriptors[descriptor.children[0]].name}, 0, 0)
+        if !x64_value_node(fd, "Present", [String]{}, 1, 0) -> return false
+        return x64_value_native_stream(runtime, fd, boundary, descriptor.children[0], pointer, closures, header)
+    }
+    if kind == "Result" {
+        pointer :: x64_value_word(address)
+        selector :: x64_value_word(pointer)
+        if selector != 0 && selector != 1 -> return false
+        if !x64_value_node(fd, "Result", [String]{"{selector}"}, 1, 0) -> return false
+        return x64_value_native_stream(runtime, fd, boundary, descriptor.children[if selector == 1 -> 0 else -> 1], pointer + 8, closures, header)
+    }
+    if kind == "Struct" {
+        names := [String]{descriptor.name}
+        loop member in descriptor.members -> &names.push(member.name)
+        if !x64_value_node(fd, kind, names, descriptor.members.len(), 0) -> return false
+        loop member in descriptor.members {
+            if !x64_value_stream_member(runtime, fd, boundary, member, address, closures, header) -> return false
+        }
+        return true
+    }
+    if kind == "List" || kind == "Map" {
+        length :: x64_value_word(address)
+        data :: x64_value_word(address + 16)
+        if length < 0 -> return false
+        count :: length * if kind == "Map" -> 2 else -> 1
+        if !x64_value_node(fd, kind, [String]{}, count, 0) -> return false
+        loop index in 0..<length {
+            element :: data + descriptor.stride * index
+            if kind == "List" {
+                if !x64_value_native_stream(runtime, fd, boundary, descriptor.children[0], element, closures, header) -> return false
+            } else {
+                loop member in descriptor.members {
+                    if !x64_value_stream_member(runtime, fd, boundary, member, element, closures, header) -> return false
+                }
+            }
+        }
+        return true
+    }
+    if kind == "Tag" || kind == "Enum" {
+        pointer :: x64_value_word(address)
+        selector :: if kind == "Tag" -> pointer else -> x64_value_word(pointer)
+        loop variant in descriptor.variants {
+            if variant.selector != selector -> next
+            names := [String]{descriptor.name, variant.name, if variant.named -> "named" else -> "single"}
+            loop member in variant.members -> &names.push(member.name)
+            if !x64_value_node(fd, "Enum", names, variant.members.len(), 0) -> return false
+            loop member in variant.members {
+                if !x64_value_stream_member(runtime, fd, boundary, member, pointer, closures, header) -> return false
+            }
+            return true
+        }
+        return false
+    }
+    if kind == "Closure" {
+        pointer :: x64_value_word(address)
+        layout :: closures.get(x64_value_word(pointer + 8)) ?? return false
+        names := [String]{layout.snapshot, layout.function}
+        loop member in layout.captures -> &names.push(member.name)
+        if !x64_value_node(fd, kind, names, layout.captures.len(), 0) -> return false
+        loop member in layout.captures {
+            if !x64_value_stream_member(runtime, fd, layout.boundary, member, pointer, closures, header) -> return false
+        }
+        return true
+    }
+    false
+}
+
+fn x64_value_receive(fd: Int, first: String) -> X64NativeValue? {
+    tree :: execution_json.parse(first) ?? return None
+    rows :: x64_execution_array(tree) ?? return None
+    if rows.len() != 5 || x64_execution_string(rows[0]) != (Val("Node")) -> return None
+    kind :: x64_execution_string(rows[1]) ?? return None
+    fields :: x64_execution_array(rows[2]) ?? return None
+    attributes := [String]{}
+    loop field in fields -> &attributes.push(x64_execution_string(field) ?? return None)
+    count :: x64_execution_int(rows[3]) ?? return None
+    length :: x64_execution_int(rows[4]) ?? return None
+    if count < 0 || length < 0 || (length != 0 && (kind != "String" && kind != "Int")) -> return None
+    bytes := [U8]{}
+    loop bytes.len() < length {
+        chunk :: x64_session_read_bytes_frame(fd, 65536) ?? return None
+        if chunk.len() == 0 || chunk.len() > length - bytes.len() -> return None
+        loop byte in chunk -> &bytes.push(byte)
+    }
+    text :: String.from_bytes(bytes) ?? return None
+    children := [X64NativeValue]{}
+    loop _ in 0..<count {
+        child :: x64_value_receive(fd, x64_session_read_frame(fd) ?? return None) ?? return None
+        &children.push(child)
+    }
+    Val(X64NativeValue{kind: kind, attributes: attributes, text: text, children: children})
+}
+
+
+fn x64_value_member_json(member: X64ValueMember) -> String Never! {
+    "[{foundation_json_quote(member.name)},{member.offset},{member.descriptor},{member.boxed}]"
+}
+fn x64_value_boundary_json(boundary: X64ValueBoundary) -> String Never! {
+    rows := [String]{}
+    loop descriptor in boundary.descriptors {
+        children :: loop child in descriptor.children -> "{child}"
+        members :: loop member in descriptor.members -> x64_value_member_json(member)
+        variants := [String]{}
+        loop variant in descriptor.variants {
+            fields :: loop member in variant.members -> x64_value_member_json(member)
+            &variants.push("[{foundation_json_quote(variant.name)},{variant.selector},[{fields.join(",")}],{variant.named}]")
+        }
+        &rows.push("[{foundation_json_quote(descriptor.kind)},{foundation_json_quote(descriptor.name)},{descriptor.size},{descriptor.align},{descriptor.stride},[{children.join(",")}],[{members.join(",")}],[{variants.join(",")}]]")
+    }
+    "[{boundary.root},[{rows.join(",")}]]"
+}
+fn x64_value_member_decode(tree: Dyn, count: Int) -> X64ValueMember? Never! {
+    rows :: x64_execution_array(tree) ?? return None
+    if rows.len() != 4 -> return None
+    name :: x64_execution_string(rows[0]) ?? return None
+    offset :: x64_execution_int(rows[1]) ?? return None
+    descriptor :: x64_execution_int(rows[2]) ?? return None
+    boxed :: x64_execution_bool(rows[3]) ?? return None
+    if offset < 0 || descriptor < 0 || descriptor >= count -> return None
+    Val(X64ValueMember{name: name, offset: offset, descriptor: descriptor, boxed: boxed})
+}
+fn x64_value_boundary_decode(tree: Dyn) -> X64ValueBoundary? Never! {
+    fields :: x64_execution_array(tree) ?? return None
+    if fields.len() != 2 -> return None
+    root :: x64_execution_int(fields[0]) ?? return None
+    rows :: x64_execution_array(fields[1]) ?? return None
+    if root < 0 || root >= rows.len() -> return None
+    descriptors := [X64ValueDescriptor]{}
+    loop row in rows {
+        values :: x64_execution_array(row) ?? return None
+        if values.len() != 8 -> return None
+        kind :: x64_execution_string(values[0]) ?? return None
+        name :: x64_execution_string(values[1]) ?? return None
+        size :: x64_execution_int(values[2]) ?? return None
+        align :: x64_execution_int(values[3]) ?? return None
+        stride :: x64_execution_int(values[4]) ?? return None
+        if size < 0 || align < 1 || stride < 0 -> return None
+        child_rows :: x64_execution_array(values[5]) ?? return None
+        children := [Int]{}
+        loop child in child_rows {
+            index :: x64_execution_int(child) ?? return None
+            if index < 0 || index >= rows.len() -> return None
+            &children.push(index)
+        }
+        member_rows :: x64_execution_array(values[6]) ?? return None
+        members := [X64ValueMember]{}
+        loop member in member_rows -> &members.push(x64_value_member_decode(member, rows.len()) ?? return None)
+        variant_rows :: x64_execution_array(values[7]) ?? return None
+        variants := [X64ValueVariant]{}
+        loop variant in variant_rows {
+            parts :: x64_execution_array(variant) ?? return None
+            if parts.len() != 4 -> return None
+            variant_name :: x64_execution_string(parts[0]) ?? return None
+            selector :: x64_execution_int(parts[1]) ?? return None
+            payload :: x64_execution_array(parts[2]) ?? return None
+            named :: x64_execution_bool(parts[3]) ?? return None
+            variant_fields := [X64ValueMember]{}
+            loop member in payload -> &variant_fields.push(x64_value_member_decode(member, rows.len()) ?? return None)
+            &variants.push(X64ValueVariant{name: variant_name, selector: selector, members: variant_fields, named: named})
+        }
+        &descriptors.push(X64ValueDescriptor{kind: kind, name: name, size: size, align: align, stride: stride, children: children, members: members, variants: variants})
+    }
+    Val(X64ValueBoundary{root: root, descriptors: descriptors, errors: [String]{}})
+}

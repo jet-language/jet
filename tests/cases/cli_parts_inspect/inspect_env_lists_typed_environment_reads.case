@@ -1,0 +1,22 @@
+# Port of tests/cli_parts/inspect.rs:3-33; exact original sources and assertions.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): setup actions and prepend/append line transforms.
+# Original exact snapshots copied unchanged; config.jet added at original sequence point.
+fixture: fixtures/env_reads
+step: jet inspect env env.jet --json
+env: NO_COLOR=1
+env: HOME=/test/home
+exit: 0
+json: stdout doc $ valid # original predicate: parses
+stdout: ~ "\"name\":\"$HOME\"" # original predicate
+stdout: ~ "\"type\":\"String\"" # original predicate
+stdout: = inspect_env_reads.json
+copy: env.jet config.jet
+step: jet inspect env config.jet --json
+env: NO_COLOR=1
+env: HOME=/test/home
+exit: 0
+json: stdout doc $ valid # original predicate: parses
+stdout: ~ "\"name\":\"$HOME\"" # original predicate
+stdout: ~ "\"type\":\"String\"" # original predicate
+stdout: = inspect_config_reads.json

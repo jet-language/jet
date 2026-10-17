@@ -2,7 +2,7 @@
 //!
 //! Zed owns worktree trust and executes the compiled extension outside the
 //! Rust integration-test harness. Keep this check beside the other extension
-//! configuration checks so a future edit cannot restore worktree PATH lookup.
+//! configuration checks so the server-discovery rule stays the reviewed one.
 
 mod common;
 
@@ -23,7 +23,7 @@ fn artifact_contains(artifact: &[u8], needle: &[u8]) -> bool {
 }
 
 #[test]
-fn zed_extension_keeps_hostile_worktree_path_out_of_the_server_command() {
+fn zed_extension_server_discovery_is_settings_then_path_never_worktree_files() {
     let root = repo_root().join("Tools/editors/zed");
     let source = fs::read_to_string(root.join("wasm-src/src/lib.rs"))
         .expect("Zed extension source must be present");
@@ -33,25 +33,32 @@ fn zed_extension_keeps_hostile_worktree_path_out_of_the_server_command() {
     let artifact = fs::read(root.join("extension.wasm"))
         .expect("tracked Zed extension artifact must be present");
 
-    // A hostile worktree may put `jet` earlier on the worktree PATH. The
-    // extension must return the literal command identity that the manifest
-    // approves; it must never ask Zed for an executable path from Worktree.
+    // Server discovery (owner decision 2026-10-15, superseding the earlier
+    // literal-command / no-PATH rule): the Zed setting
+    // `lsp.jet-lsp.binary.path` first, else `jet` from the worktree PATH via
+    // `worktree.which`, else an error naming the setting. The extension must
+    // still never read worktree files, the worktree shell environment or a
+    // repository build output.
+    let settings_at = source
+        .find("LspSettings::for_worktree(SERVER_ID, worktree)")
+        .unwrap_or_else(|| panic!("settings lookup missing: {source}"));
+    let which_at = source
+        .find("worktree.which(\"jet\")")
+        .unwrap_or_else(|| panic!("PATH fallback missing: {source}"));
+    assert!(settings_at < which_at, "settings must win over PATH: {source}");
+    assert!(source.contains("const SERVER_ID: &str = \"jet-lsp\";"), "{source}");
+    assert!(source.contains("`lsp.jet-lsp.binary.path`"), "error must name the setting: {source}");
     assert!(
-        source.contains(
-            "command: \"jet\".to_string(),\n            args: vec![\"self\".to_string(), \"lsp\".to_string()]"
-        ),
+        source.contains("vec![\"self\".to_string(), \"lsp\".to_string()]"),
         "{source}"
     );
-    assert!(!source.contains("worktree.which"), "worktree PATH lookup returned: {source}");
     assert!(!source.contains("shell_env"), "worktree environment lookup returned: {source}");
     assert!(!source.contains("root_path"), "worktree path lookup returned: {source}");
+    assert!(!source.contains("read_text_file"), "worktree file lookup returned: {source}");
     assert!(manifest.contains("kind = \"process:exec\""), "{manifest}");
     assert!(manifest.contains("command = \"jet\""), "{manifest}");
     assert!(manifest.contains("args = [\"self\", \"lsp\"]"), "{manifest}");
-    assert!(
-        !artifact_contains(&artifact, b"worktree.which"),
-        "tracked artifact still embeds worktree PATH lookup"
-    );
+    assert!(manifest.contains("[language_servers.jet-lsp]"), "{manifest}");
     assert!(
         !artifact_contains(&artifact, b"/target/debug/jet"),
         "tracked artifact still embeds a worktree debug-binary fallback"
@@ -60,7 +67,8 @@ fn zed_extension_keeps_hostile_worktree_path_out_of_the_server_command() {
     // The trust decision is made by Zed. Keep the operational contract
     // visible to users rather than implying that source-tree files are trust.
     assert!(readme.contains("worktree-trust gate"), "{readme}");
-    assert!(readme.contains("does not call\n`Worktree::which`"), "{readme}");
+    assert!(readme.contains("`lsp.jet-lsp.binary.path`"), "{readme}");
+    assert!(readme.contains("`Worktree::which`"), "{readme}");
 }
 
 #[cfg(unix)]
@@ -140,6 +148,9 @@ const vscode = {
       };
     },
     createFileSystemWatcher() {
+      return { dispose() {} };
+    },
+    onDidChangeTextDocument() {
       return { dispose() {} };
     },
   },

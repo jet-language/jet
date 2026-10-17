@@ -15,23 +15,23 @@ use jet_foundation.[
     ast_func,
 ]
 
-pub struct SemaMigrationFieldName {
-    pub field: String
-    pub json_key: String
+struct SemaMigrationFieldName {
+    field: String
+    json_key: String
 }
 
-pub struct SemaMigrationCanonicalShape {
-    pub names: [SemaMigrationFieldName]
-    pub current: [String]
-    pub historical: [[String]]
-    pub skipped: [String]
+struct SemaMigrationCanonicalShape {
+    names: [SemaMigrationFieldName]
+    current: [String]
+    historical: [[String]]
+    skipped: [String]
 }
 
 fn sema_migration_insert_sorted(values: [String], value: String) -> [String] Never! {
     result := [String]{}
     inserted := false
     loop current in values {
-        if current == value -> return ~values
+        if current == value -> return values.copy()
         if !inserted && current > value {
             &result.push(value)
             inserted = true
@@ -56,30 +56,30 @@ fn sema_migration_rename_all(definition: StructDef) -> String? {
     sema_checked_marker_text(marker ?? panic("checked RenameAll marker disappeared"))
 }
 
-pub fn sema_migration_wire_name(style: String?, name: String) -> String Never! {
+fn sema_migration_wire_name(style: String?, name: String) -> String Never! {
     sema_checked_wire_case(style, name)
 }
 
 fn sema_migration_json_key(definition: StructDef, style: String?, name: String) -> String Never! {
-    loop field in definition.fields {
-        if field.name == name {
-            names := sema_checked_field_shape_names(definition, field)
+    loop field_index in 0..<definition.fields.len() {
+        if definition.fields[field_index].name == name {
+            names := sema_checked_field_shape_names(definition, definition.fields[field_index])
             return names.json ?? names.text
         }
     }
     sema_migration_wire_name(style, name)
 }
 
-pub fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
+fn sema_migration_canonical_shape(definition: StructDef, migrations: [MigrationDecl]) -> SemaMigrationCanonicalShape Never! {
     style := sema_migration_rename_all(definition)
     names := [SemaMigrationFieldName]{}
     current := [String]{}
     skipped := [String]{}
-    loop field in definition.fields {
-        key := sema_migration_json_key(definition, style, field.name)
-        &names.push(SemaMigrationFieldName{field: field.name, json_key: key})
+    loop field_index in 0..<definition.fields.len() {
+        key := sema_migration_json_key(definition, style, definition.fields[field_index].name)
+        &names.push(SemaMigrationFieldName{field: definition.fields[field_index].name, json_key: key})
         if {
-            sema_checked_marker(field.serde_markers, "Skip") != None -> skipped = sema_migration_insert_sorted(skipped, key)
+            sema_checked_marker(definition.fields[field_index].serde_markers, "Skip") != None -> skipped = sema_migration_insert_sorted(skipped, key)
             else -> current = sema_migration_insert_sorted(current, key)
         }
     }
@@ -147,6 +147,7 @@ fn sema_migration_callable_converter_function(name: String, old_ty: Type, new_ty
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        declared_footprint: None,
     }}
     function.return_type = Val(new_ty)
     function.return_type_span = Val(span)
@@ -176,6 +177,7 @@ fn sema_migration_converter_function(name: String, old_ty: Type, new_ty: Type, c
                 variadic: false,
                 variadic_bound_list: None,
                 declared_view_from_names: None,
+                declared_footprint: None,
             }}
             function.return_type = Val(new_ty)
             function.return_type_span = Val(span)
@@ -194,7 +196,7 @@ fn sema_migration_type_is_enabled(type_name: String, enabled_types: [String]) ->
     false
 }
 
-pub fn sema_migration_desugar(migrations: &[MigrationDecl], enabled_types: [String]) -> [Func] Never! {
+fn sema_migration_desugar(migrations: &[MigrationDecl], enabled_types: [String]) -> [Func] Never! {
     functions := [Func]{}
     migration_index := 0
     loop migration in migrations {

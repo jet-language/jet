@@ -1,4 +1,37 @@
-use crate::DataTree::DataTree;
+use crate::Dyn::Dyn;
+
+// The same handle-free EncodingError ABI used by the emitted Prelude.
+#[allow(dead_code)]
+mod encoding_types {
+    use crate::Outcome::{JetAbsent, JetOutcome};
+    include!("../../jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
+    include!("../../jet-codegen/src/Prelude/Core/EncodingError.rs");
+}
+pub use encoding_types::{EncodingCause, EncodingError, EncodingErrorKind, EncodingFormat};
+
+pub fn json_unsupported(reason: impl Into<String>) -> EncodingError {
+    EncodingError::new(
+        EncodingFormat::JSON,
+        EncodingErrorKind::Unsupported,
+        0,
+        Err(crate::Outcome::JetAbsent),
+        Err(crate::Outcome::JetAbsent),
+        "$",
+        reason,
+    )
+}
+
+pub fn encoding_error_show(error: &EncodingError) -> String {
+    encoding_types::jet_encoding_error_kernel_show(
+        error.format.as_str(),
+        &format!("{:?}", error.kind),
+        error.byte_offset,
+        error.line.as_ref().ok().copied(),
+        error.column.as_ref().ok().copied(),
+        &error.path,
+        &error.reason,
+    )
+}
 
 // One JSON parser for the embedded Prelude and comptime adapters.
 
@@ -21,30 +54,27 @@ mod tests {
     fn integer_tokens_never_round_through_float() {
         assert_eq!(
             parse_json("-9223372036854775808", false),
-            Ok(DataTree::Int(i64::MIN))
+            Ok(Dyn::Int(i64::MIN.into()))
         );
         assert_eq!(
             parse_json("9223372036854775808", false),
-            Ok(DataTree::Number("9223372036854775808".to_string()))
+            Ok(Dyn::Number("9223372036854775808".to_string()))
         );
         assert_eq!(
             parse_json("123456789012345678901234567890", false),
-            Ok(DataTree::Number("123456789012345678901234567890".to_string()))
+            Ok(Dyn::Number("123456789012345678901234567890".to_string()))
         );
     }
 
     #[test]
-    fn typed_json_keeps_quoted_numbers_distinct() {
+    fn exact_json_keeps_quoted_numbers_distinct() {
         assert_eq!(
-            parse_json_typed(r#"["123",123]"#, false),
-            Ok(DataTree::Array(vec![
-                DataTree::TypedText("123".to_string()),
-                DataTree::Number("123".to_string()),
+            parse_json_exact_numbers(r#"["123",123,1.50]"#, false),
+            Ok(Dyn::Array(vec![
+                Dyn::Text("123".to_string()),
+                Dyn::Number("123".to_string()),
+                Dyn::Number("1.50".to_string()),
             ]))
-        );
-        assert_eq!(
-            parse_json_exact_numbers(r#""123""#, false),
-            Ok(DataTree::Text("123".to_string()))
         );
     }
 
@@ -54,6 +84,19 @@ mod tests {
             parse_json(input, false).expect_err("invalid JSON must be rejected");
         }
     }
+
+    #[test]
+    fn native_dyn_scalars_render_as_text_without_changing_json_parse_kinds() {
+        let tree = Dyn::Object(vec![
+            ("b".into(), Dyn::Bytes(vec![0, 255])),
+            ("a".into(), Dyn::parse_datetime("2024-01-01T05:30:00.120+05:30").unwrap()),
+        ]);
+        let text = render_json(&tree, false, 0);
+        assert_eq!(text, r#"{"b":"AP8=","a":"2024-01-01T05:30:00.12+05:30"}"#);
+        let parsed = parse_json(&text, false).unwrap();
+        assert!(matches!(parsed.get("b").unwrap(), Dyn::Text(_)));
+        assert!(matches!(parsed.get("a").unwrap(), Dyn::Text(_)));
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -62,36 +105,31 @@ pub struct Error {
     pub message: String,
 }
 
-pub fn parse_json(text: &str, reject_duplicate_keys: bool) -> Result<DataTree, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, false, false)
+/// Host-internal parse: integers that fit `i64` become `Int`, other integers
+/// keep their lexeme as `Number`, and fractions become `Float`.
+pub fn parse_json(text: &str, reject_duplicate_keys: bool) -> Result<Dyn, Error> {
+    parse_json_with_modes(text, reject_duplicate_keys, false)
 }
 
+/// The Jet `json.parse` meaning (#4602): every number token keeps its exact
+/// lexeme as `Number` until a typed read range-checks it.
 pub fn parse_json_exact_numbers(
     text: &str,
     reject_duplicate_keys: bool,
-) -> Result<DataTree, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, true, false)
-}
-
-pub fn parse_json_typed(
-    text: &str,
-    reject_duplicate_keys: bool,
-) -> Result<DataTree, Error> {
-    parse_json_with_modes(text, reject_duplicate_keys, true, true)
+) -> Result<Dyn, Error> {
+    parse_json_with_modes(text, reject_duplicate_keys, true)
 }
 
 fn parse_json_with_modes(
     text: &str,
     reject_duplicate_keys: bool,
     preserve_numbers: bool,
-    preserve_strings: bool,
-) -> Result<DataTree, Error> {
+) -> Result<Dyn, Error> {
     let mut parser = Parser {
         chars: text.chars().collect(),
         pos: 0,
         reject_duplicate_keys,
         preserve_numbers,
-        preserve_strings,
     };
     let value = parser.value(0)?;
     parser.ws();
@@ -110,7 +148,6 @@ struct Parser {
     pos: usize,
     reject_duplicate_keys: bool,
     preserve_numbers: bool,
-    preserve_strings: bool,
 }
 
 impl Parser {
@@ -136,20 +173,13 @@ impl Parser {
         }
     }
 
-    fn value(&mut self, depth: usize) -> Result<DataTree, Error> {
+    fn value(&mut self, depth: usize) -> Result<Dyn, Error> {
         self.ws();
         match self.peek() {
-            Some('n') => self.word("null", DataTree::Null),
-            Some('t') => self.word("true", DataTree::Bool(true)),
-            Some('f') => self.word("false", DataTree::Bool(false)),
-            Some('"') => {
-                let text = self.string()?;
-                Ok(if self.preserve_strings {
-                    DataTree::TypedText(text)
-                } else {
-                    DataTree::Text(text)
-                })
-            }
+            Some('n') => self.word("null", Dyn::Null),
+            Some('t') => self.word("true", Dyn::Bool(true)),
+            Some('f') => self.word("false", Dyn::Bool(false)),
+            Some('"') => Ok(Dyn::Text(self.string()?)),
             Some('[') => self.array(depth),
             Some('{') => self.object(depth),
             Some('-') | Some('0'..='9') => self.number(),
@@ -157,7 +187,7 @@ impl Parser {
         }
     }
 
-    fn word(&mut self, word: &str, value: DataTree) -> Result<DataTree, Error> {
+    fn word(&mut self, word: &str, value: Dyn) -> Result<Dyn, Error> {
         for ch in word.chars() {
             if self.peek() != Some(ch) {
                 return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_WORD));
@@ -254,7 +284,7 @@ impl Parser {
         Ok(value)
     }
 
-    fn number(&mut self) -> Result<DataTree, Error> {
+    fn number(&mut self) -> Result<Dyn, Error> {
         let start = self.pos;
         if self.peek() == Some('-') {
             self.pos += 1;
@@ -295,15 +325,15 @@ impl Parser {
         if self.preserve_numbers {
             super::jet_json_number::validate_json_number(&text)
                 .map_err(|message| self.err(&message))?;
-            return Ok(DataTree::Number(text));
+            return Ok(Dyn::Number(text));
         }
         if is_integer {
             if let Ok(value) = text.parse::<i64>() {
-                return Ok(DataTree::Int(value));
+                return Ok(Dyn::Int((value).into()));
             }
             super::jet_json_number::validate_json_number(&text)
                 .map_err(|message| self.err(&message))?;
-            return Ok(DataTree::Number(text));
+            return Ok(Dyn::Number(text));
         }
         let value = text
             .parse::<f64>()
@@ -311,10 +341,10 @@ impl Parser {
         if !value.is_finite() {
             return Err(self.err(super::jet_encoding_errors::JSON_BAD_NUMBER));
         }
-        Ok(DataTree::Float(value))
+        Ok(Dyn::Float(value))
     }
 
-    fn array(&mut self, depth: usize) -> Result<DataTree, Error> {
+    fn array(&mut self, depth: usize) -> Result<Dyn, Error> {
         if depth >= MAX_JSON_DEPTH {
             return Err(self.err("JSON value is nested too deeply"));
         }
@@ -324,7 +354,7 @@ impl Parser {
             self.ws();
             if self.peek() == Some(']') {
                 self.pos += 1;
-                return Ok(DataTree::Array(values));
+                return Ok(Dyn::Array(values));
             }
             values.push(self.value(depth + 1)?);
             self.ws();
@@ -344,7 +374,7 @@ impl Parser {
         }
     }
 
-    fn object(&mut self, depth: usize) -> Result<DataTree, Error> {
+    fn object(&mut self, depth: usize) -> Result<Dyn, Error> {
         if depth >= MAX_JSON_DEPTH {
             return Err(self.err("JSON value is nested too deeply"));
         }
@@ -354,7 +384,7 @@ impl Parser {
             self.ws();
             if self.peek() == Some('}') {
                 self.pos += 1;
-                return Ok(DataTree::Object(fields));
+                return Ok(Dyn::Object(fields));
             }
             let key = self.string()?;
             self.ws();
@@ -393,19 +423,20 @@ impl Parser {
         }
     }
 }
-    pub fn render_json(j: &DataTree, pretty: bool, depth: usize) -> String {
+    pub fn render_json(j: &Dyn, pretty: bool, depth: usize) -> String {
         match j {
-            DataTree::Null => "null".to_string(),
-            DataTree::Bool(value) => value.to_string(),
-            DataTree::Int(value) => value.to_string(),
-            DataTree::Float(value) => {
+            Dyn::Null => "null".to_string(),
+            Dyn::Bool(value) => value.to_string(),
+            Dyn::Int(value) => value.to_string(),
+            Dyn::Float(value) => {
                 assert!(value.is_finite(), "JSON cannot encode a non-finite Float");
                 format!("{value:?}")
             }
-            DataTree::Number(value) => value.clone(),
-            DataTree::TypedText(value) | DataTree::Text(value) => quote_json(value),
-            DataTree::Bytes(_) => panic!("JSON cannot encode Bytes"),
-            DataTree::Array(items) => {
+            Dyn::Number(value) => value.clone(),
+            Dyn::Text(value) => quote_json(value),
+            Dyn::Bytes(value) => quote_json(&Dyn::bytes_text(value)),
+            Dyn::DateTime(value) => quote_json(&value.to_rfc3339()),
+            Dyn::Array(items) => {
                 if items.is_empty() {
                     return "[]".to_string();
                 }
@@ -422,7 +453,7 @@ impl Parser {
                     .collect();
                 format!("[\n{}\n{}]", parts.join(",\n"), end)
             }
-            DataTree::Object(entries) => {
+            Dyn::Object(entries) => {
                 if entries.is_empty() {
                     return "{}".to_string();
                 }
@@ -454,20 +485,26 @@ impl Parser {
     }
 
     pub fn quote_json(s: &str) -> String {
-        let mut out = String::from("\"");
-        for c in s.chars() {
-            match c {
-                '"' => out.push_str("\\\""),
-                '\\' => out.push_str("\\\\"),
-                '\u{0008}' => out.push_str("\\b"),
-                '\u{000c}' => out.push_str("\\f"),
-                '\n' => out.push_str("\\n"),
-                '\r' => out.push_str("\\r"),
-                '\t' => out.push_str("\\t"),
-                c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-                _ => out.push(c),
-            }
-        }
-        out.push('"');
+        let mut out = String::with_capacity(s.len() + 2);
+        append_quote_json(&mut out, s);
         out
     }
+
+pub fn append_quote_json(out: &mut String, s: &str) {
+    use std::fmt::Write as _;
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\u{0008}' => out.push_str("\\b"),
+            '\u{000c}' => out.push_str("\\f"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => write!(out, "\\u{:04x}", c as u32).unwrap(),
+            _ => out.push(c),
+        }
+    }
+    out.push('"');
+}

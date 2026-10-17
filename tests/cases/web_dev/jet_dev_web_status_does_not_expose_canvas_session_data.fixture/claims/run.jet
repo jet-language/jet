@@ -1,0 +1,43 @@
+use core.files as files
+use core.crypto as crypto
+
+fn s5_canvas_token() -> String {
+    text :: sys.get("S5_CANVAS") ?? panic("Canvas URL")
+    marker :: "session=".bytes()
+    bytes :: text.bytes()
+    start :: (s5_web_find(bytes, marker) ?? panic("session parameter")) + marker.len()
+    end := start
+    loop end < bytes.len() {
+        byte :: Int.from_u8(bytes[end])
+        if !((byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70) || (byte >= 97 && byte <= 102)) -> break
+        end = end + 1
+    }
+    assert(end - start >= 32, "original Canvas session parser")
+    String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
+}
+
+fn s5_canvas_get(path: String) -> S5HTTPResponse { s5_web_get(s5_web_port(), path, Val(s5_canvas_token())) ?? panic("Canvas GET") }
+fn s5_canvas_post(path: String, body: String) -> S5HTTPResponse { s5_web_post(s5_web_port(), path, body, Val(s5_canvas_token())) ?? panic("Canvas POST") }
+fn s5_canvas_body(response: S5HTTPResponse) -> String { String.from_bytes_lossy(response.body) }
+// ORACLE-PORT crates/jet-devserver/src/Canvas/source_model.rs:24-25, exact original source_revision expression.
+fn s5_canvas_revision(source: String) -> String { "sha256-{crypto.sha256(source.bytes()).hex()}" }
+fn s5_canvas_field(body: String, field: String) -> String {
+    marker :: "\"{field}\":\"".bytes()
+    bytes :: body.bytes()
+    start :: (s5_web_find(bytes, marker) ?? panic("json field")) + marker.len()
+    end := start
+    loop end < bytes.len() && Int.from_u8(bytes[end]) != 34 -> end = end + 1
+    assert(end < bytes.len(), "field terminator")
+    String.from_bytes_lossy(s5_web_bytes(bytes, start, end))
+}
+
+#Test("original public status excludes retained Canvas state") {
+    graph :: s5_canvas_get("/canvas/graph")
+    assert_eq(graph.status, 200)
+    assert(s5_canvas_body(graph).contains("\"source_text\":"))
+    response :: s5_web_get(s5_web_port(), "/__jet_dev_status", None) ?? panic("public status")
+    assert_eq(response.status, 200)
+    body :: s5_canvas_body(response)
+    assert(!body.contains("\"session\":"))
+    assert(!body.contains("\"source_text\":"))
+}

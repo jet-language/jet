@@ -3,6 +3,10 @@
 use jet_foundation.[
     DIAGNOSTIC_ERROR,
     Diagnostic,
+    DiagnosticStructured,
+    DiagnosticFixApplicability,
+    DiagnosticFixSafety,
+    TextEdit,
     Span,
     Type,
     diagnostic_from_registry,
@@ -12,31 +16,35 @@ use jet_foundation.[
     type_name,
 ]
 
-pub enum SemaSourceOrigin { Snapshot CompilerGenerated }
+enum SemaSourceOrigin { Snapshot CompilerGenerated }
 
-pub struct SemaSourceSegment {
-    pub generated: Span
-    pub source_file: String
-    pub source_start: Int
-    pub line_starts: [Int]
-    pub origin: SemaSourceOrigin
+fn sema_module_is_core_source(module_identity: String) -> Bool Never! {
+    module_identity.starts_with("<corelib>/")
 }
 
-pub fn sema_source_file_at(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String Never! {
+struct SemaSourceSegment {
+    generated: Span
+    source_file: String
+    source_start: Int
+    line_starts: [Int]
+    origin: SemaSourceOrigin
+}
+
+fn sema_source_file_at(segments: [SemaSourceSegment], fallback: String, fallback_origin: SemaSourceOrigin, site: Span) -> String Never! {
     loop segment in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end -> return segment.source_file
     }
     if fallback_origin == SemaSourceOrigin.Snapshot -> fallback else -> ""
 }
 
-pub struct SemaSourceLocation {
-    pub source_path: String
-    pub aggregate_start: Int
-    pub source_start: Int
-    pub origin: SemaSourceOrigin
+struct SemaSourceLocation {
+    source_path: String
+    aggregate_start: Int
+    source_start: Int
+    origin: SemaSourceOrigin
 }
 
-pub fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> SemaSourceLocation? {
+fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> SemaSourceLocation? {
     if site.end < site.start || segments.len() == 0 -> return None
     candidate := -1
     matches := 0
@@ -80,7 +88,7 @@ pub fn sema_source_location_at(segments: [SemaSourceSegment], site: Span) -> Sem
     Val(SemaSourceLocation{source_path: segment.source_file, aggregate_start: segment.generated.start, source_start: segment.source_start, origin: segment.origin})
 }
 
-pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
+fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [SemaSourceSegment]) -> Diagnostic Never! {
     updated := diagnostic
     span :: updated.span ?? return updated
     location :: sema_source_location_at(segments, span) ?? {
@@ -121,7 +129,7 @@ pub fn sema_diagnostic_with_source_location(diagnostic: ^Diagnostic, segments: [
     diagnostic_with_source_mapping(^updated, location.source_path, location.aggregate_start, location.source_start)
 }
 
-pub fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) Never! {
+fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start: Int, segments: [SemaSourceSegment]) Never! {
     loop index in start..<diagnostics.len() {
         diagnostics[index] = sema_diagnostic_with_source_location(diagnostics[index], segments)
     }
@@ -130,7 +138,7 @@ pub fn sema_attach_diagnostic_source_locations(diagnostics: &[Diagnostic], start
 
 // Whether any diagnostic from `start` on is an error. Completeness follows
 // errors only: a warning-only module still lowers and emits.
-pub fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
+fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never! {
     loop index in start..<diagnostics.len() {
         if diagnostics[index].severity == DIAGNOSTIC_ERROR -> return true
     }
@@ -140,7 +148,7 @@ pub fn sema_has_error_since(diagnostics: [Diagnostic], start: Int) -> Bool Never
 // the source length, so a site past the end of the unit reads the final line.
 // That case is real: a derive expanded from `Prelude/Derives.jet` keeps that
 // template's offsets, which can run past a small file's end.
-pub fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> Int? {
+fn sema_source_line_at(segments: [SemaSourceSegment], site: Span) -> Int? {
     last_index := -1
     loop (index, segment) in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end -> return sema_source_segment_line(segment, site.start - segment.generated.start)
@@ -172,7 +180,7 @@ fn sema_source_segment_line(segment: SemaSourceSegment, local_offset: Int) -> In
 // The 1-based column of `site` in its source line (Rust `span_line_col`).
 // Segments carry line starts, not text, so this counts bytes; Rust counts
 // characters, which agree on ASCII lines.
-pub fn sema_source_column_at(segments: [SemaSourceSegment], site: Span) -> Int? {
+fn sema_source_column_at(segments: [SemaSourceSegment], site: Span) -> Int? {
     line :: sema_source_line_at(segments, site) ?? return None
     loop segment in segments {
         if site.start >= segment.generated.start && site.start < segment.generated.end -> return Val(site.start - segment.generated.start - segment.line_starts[line - 1] + 1)
@@ -180,23 +188,29 @@ pub fn sema_source_column_at(segments: [SemaSourceSegment], site: Span) -> Int? 
     None
 }
 
-pub fn sema_error_optional(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic {
+fn sema_error_optional(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, span, what, why, fix)
 }
 
-pub fn sema_error(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+fn sema_error(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
     sema_error_optional(code, Val(span), what, why, fix)
 }
 
-pub fn sema_lint(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
+// Rust Sema/Purity.rs `e3402`: ambient I/O or network access attempted
+// during a sandboxed package build or module-value evaluation.
+fn sema_e3402(call_name: String, span: Span?) -> Diagnostic {
+    sema_error_optional("E3402", span, "`{call_name}` is not allowed during a sandboxed package build", "package builds run with ambient I/O and network access disabled (D-PURE2)", "compute this value at compile time or pass it in as a parameter")
+}
+
+fn sema_lint(code: String, span: Span, what: String, why: String, fix: String) -> Diagnostic {
     diagnostic_from_registry(code, Val(span), what, why, fix)
 }
 
-pub fn sema_defined_twice_optional(name: String, why: String, span: Span?) -> Diagnostic {
+fn sema_defined_twice_optional(name: String, why: String, span: Span?) -> Diagnostic {
     sema_error_optional("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }
 
-pub fn sema_already_defined(name: String, span: Span) -> Diagnostic {
+fn sema_already_defined(name: String, span: Span) -> Diagnostic {
     sema_error(
         "E0118",
         span,
@@ -206,11 +220,11 @@ pub fn sema_already_defined(name: String, span: Span) -> Diagnostic {
     )
 }
 
-pub fn sema_defined_twice(name: String, why: String, span: Span) -> Diagnostic {
+fn sema_defined_twice(name: String, why: String, span: Span) -> Diagnostic {
     sema_error("E0105", span, "`{name}` is defined twice", why, "rename or remove one of the definitions")
 }
 
-pub fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
+fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
     sema_error(
         "E0107",
         span,
@@ -220,7 +234,7 @@ pub fn sema_unknown_name(name: String, span: Span) -> Diagnostic {
     )
 }
 
-pub fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
+fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnostic {
     // D-TYPEDTEXT1 / D-FFI-SH1 / D-REGEX-LIT1 (Rust `typed_text_mismatch`): a
     // runtime `String` never becomes a checked typed text or a `Regex`.
     if required == .Named(name) && offered == Type.String {
@@ -244,7 +258,7 @@ pub fn sema_type_mismatch(required: Type, offered: Type, span: Span) -> Diagnost
 
 // The plain-words type name diagnostics print (the Rust reference's
 // `Type::show`): scalars carry a gloss and nominal names are quoted.
-pub fn sema_type_show(ty: Type) -> String Never! {
+fn sema_type_show(ty: Type) -> String Never! {
     if ty == {
         .Int -> "Int (a whole number)"
         .Float -> "Float (an approximate binary number)"
@@ -300,7 +314,7 @@ fn sema_type_nominal_leaf(ty: Type) -> String Never! {
 
 // The repair for a value of type `got` where `want` is required (the Rust
 // reference's `type_fix_hint`). A fix never prescribes what was written.
-pub fn sema_type_fix_hint(want: Type, got: Type) -> String Never! {
+fn sema_type_fix_hint(want: Type, got: Type) -> String Never! {
     want_show :: sema_type_show(want)
     if want_show == sema_type_show(got) -> return "these are two different declarations that both print as {want_show}; make both sides name the same one (import it once and use that name)"
     want_leaf :: sema_type_nominal_leaf(want)
@@ -342,7 +356,7 @@ fn sema_return_value_fix(want: Type, got: Type) -> String Never! {
 
 // E0113: a value handed back by `function` does not match its written
 // return type `want`.
-pub fn sema_return_value_mismatch(function: String, want: Type, got: Type, span: Span) -> Diagnostic {
+fn sema_return_value_mismatch(function: String, want: Type, got: Type, span: Span) -> Diagnostic {
     // The failure solver wraps even a written infallible result in
     // `T Never!`. That erased error rail is not part of the value contract,
     // and must not hide the concrete conversion/wrapping advice for T.

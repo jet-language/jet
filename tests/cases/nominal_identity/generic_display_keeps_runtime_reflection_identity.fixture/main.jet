@@ -1,0 +1,21 @@
+use "labels"
+use labels.[Label]
+use core.reflect as reflect
+
+// Phantom parameters have neither Display nor Equatable; stored fields govern.
+#!Equatable
+struct FromSpace { id: Int }
+#!Equatable
+struct ToSpace { id: Int }
+enum Phantom<T> { Marker }
+fn qualified(value: ^Label<FromSpace, ToSpace>) -> labels.Label<FromSpace, ToSpace> { ^value }
+fn run() {
+    a :: Label<FromSpace, ToSpace>{text: "source identity"}
+    b :: qualified(a.copy())
+    assert_eq(a, b)
+    assert_eq(Phantom<FromSpace>.Marker, Phantom<FromSpace>.Marker)
+    print(reflect.of(a).type_name() == reflect.of(b).type_name())
+    print("{a}" == ("{b}"))
+    assert_eq(reflect.of(a).display(), "{a}")
+    assert_eq("{a}", "source identity")
+}

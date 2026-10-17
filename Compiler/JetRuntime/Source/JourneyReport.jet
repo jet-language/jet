@@ -1,0 +1,154 @@
+// Outcome.rs:1097-1254. Pure renderer over canonical Journey32/Hop48;
+// width0 means no column budget. Unicode scalars count as columns, not bytes.
+fn journey_digits(number: I64) -> I64 {
+    value := number
+    count := I64{1}
+    loop value >= (I64{10}) {
+        value = value /% I64{10}
+        count += I64{1}
+    }
+    count
+}
+fn journey_label_columns(index: I64) -> I64 { if (index == I64{0}) -> I64{12} else -> journey_digits(index) + I64{1} }
+fn journey_fixed_columns(hop: I64, index: I64, note: Bool) -> I64 {
+    cols := I64{2} + journey_label_columns(index) + I64{1} + jet_char_len(rt_text_word(hop + HOP_FUNCTION)) + I64{2} + I64{1} + journey_digits(rt_text_word(hop + HOP_LINE)) + I64{1}
+    count :: rt_text_word(hop + HOP_COUNT)
+    if (count > I64{1}) -> cols += I64{2} + journey_digits(count)
+    text :: rt_text_word(hop + HOP_NOTE)
+    if (note && rt_text_len(text) != I64{0}) -> cols += I64{3} + jet_char_len(text)
+    cols
+}
+fn journey_label(out: I64, index: I64) {
+    if (index == I64{0}) {
+        rt_text_push_word(out, I64{7503107365972566374}, I64{8})
+        rt_text_push_word(out, I64{979726949}, I64{4})
+    } else {
+        rt_text_push_number(out, index)
+        rt_text_push_scalar(out, I64{46})
+    }
+}
+fn journey_color_start(out: I64, color: Bool) { if color -> rt_text_push_word(out, I64{30741465637477147}, I64{7}) }
+fn journey_color_end(out: I64, color: Bool) {
+    if color -> rt_text_push_word(out, I64{1831885595}, I64{4})
+    rt_text_push_scalar(out, I64{10})
+}
+// Return offset into the original UTF8 path and whether to prefix an ellipsis.
+// Whole path segments shed first; basename is always the floor.
+fn journey_path_start(file: I64, budget: I64) -> (offset: I64, ellipsis: Bool) {
+    if jet_char_len(file) <= budget -> return (offset: I64{0}, ellipsis: false)
+    data :: rt_text_data(file)
+    length :: rt_text_len(file)
+    start := I64{0}
+    at := I64{0}
+    remaining := jet_char_len(file)
+    loop at < length {
+        scalar :: rt_text_decode(data + at)
+        at += rt_text_width(data + at)
+        remaining -= I64{1}
+        if (scalar == I64{47}) {
+            start = at
+            if (remaining + I64{2} <= budget) -> return (offset: start, ellipsis: true)
+        }
+    }
+    (offset: start, ellipsis: false)
+}
+fn journey_hop_line(out: I64, hop: I64, index: I64, width: I64, budget: I64, color: Bool) {
+    file :: rt_text_word(hop + HOP_FILE)
+    start :: if (width == I64{0}) -> (offset: I64{0}, ellipsis: false) else -> journey_path_start(file, budget)
+    // Count the retained suffix without allocating it just to measure it.
+    ptr :: rt_text_data(file) + start.offset
+    length :: rt_text_len(file) - start.offset
+    at := I64{0}
+    path_columns := if start.ellipsis -> I64{2} else -> I64{0}
+    loop at < length {
+        at += rt_text_width(ptr + at)
+        path_columns += I64{1}
+    }
+    note :: rt_text_word(hop + HOP_NOTE)
+    note_columns :: jet_char_len(note)
+    identity :: journey_fixed_columns(hop, index, false) + path_columns
+    full :: journey_fixed_columns(hop, index, true) + path_columns
+    shown := note_columns
+    truncated := false
+    if (width != I64{0} && full > width) {
+        shown = if (width > identity + I64{4}) -> width - identity - I64{4} else -> I64{0}
+        truncated = shown != I64{0}
+    }
+    journey_color_start(out, color)
+    rt_text_push_word(out, I64{8224}, I64{2})
+    journey_label(out, index)
+    rt_text_push_scalar(out, I64{32})
+    err_append(out, rt_text_word(hop + HOP_FUNCTION))
+    rt_text_push_word(out, I64{10272}, I64{2}) // space + (
+    if start.ellipsis {
+        rt_text_push_scalar(out, I64{8230})
+        rt_text_push_scalar(out, I64{47})
+    }
+    rt_text_append(out, ptr, length)
+    rt_text_push_scalar(out, I64{58})
+    rt_text_push_number(out, rt_text_word(hop + HOP_LINE))
+    rt_text_push_scalar(out, I64{41})
+    count :: rt_text_word(hop + HOP_COUNT)
+    if (count > I64{1}) {
+        rt_text_push_scalar(out, I64{32})
+        rt_text_push_scalar(out, I64{215})
+        rt_text_push_number(out, count)
+    }
+    if (shown != I64{0}) {
+        rt_text_push_scalar(out, I64{32})
+        rt_text_push_scalar(out, I64{8212})
+        rt_text_push_scalar(out, I64{32})
+        note_at := I64{0}
+        chars := I64{0}
+        note_data :: rt_text_data(note)
+        loop chars < shown {
+            note_at += rt_text_width(note_data + note_at)
+            chars += I64{1}
+        }
+        rt_text_append(out, note_data, note_at)
+        if truncated -> rt_text_push_scalar(out, I64{8230})
+    }
+    journey_color_end(out, color)
+}
+#Export(c) fn jet_journey_render_styled(journey: I64, color: Bool, width: I64) -> I64 {
+    out :: jet_rt_string_builder_new()
+    if (journey == I64{0}) -> return out
+    origin :: rt_text_word(journey + JOURNEY_ORIGIN)
+    count :: rt_text_word(journey + JOURNEY_HOPS)
+    data :: rt_text_word(journey + JOURNEY_HOPS + I64{16})
+    widest := if (origin == I64{0}) -> I64{0} else -> journey_fixed_columns(origin, I64{0}, true)
+    total := I64{0}
+    row := I64{0}
+    loop row < count {
+        hop :: rt_text_word(data + row * I64{8})
+        fixed :: journey_fixed_columns(hop, row + I64{1}, true)
+        if fixed > widest -> widest = fixed
+        total = wrapping(total + rt_text_word(hop + HOP_COUNT)).bit_and(I64{4294967295})
+        row += I64{1}
+    }
+    budget :: if width > widest -> width - widest else -> I64{0}
+    if (origin != I64{0}) -> journey_hop_line(out, origin, I64{0}, width, budget, color)
+    if (count != I64{0}) {
+        journey_color_start(out, color)
+        rt_text_push_word(out, I64{6566367456568431648}, I64{8})
+        rt_text_push_word(out, I64{2891413430910071621}, I64{8})
+        rt_text_push_number(out, total)
+        rt_text_push_word(out, I64{1886349344}, I64{4})
+        if (total != I64{1}) -> rt_text_push_scalar(out, I64{115})
+        full_columns :: I64{16} + journey_digits(total) + I64{4} + (if (total == I64{1}) -> I64{0} else -> I64{1}) + I64{22}
+        if (width != I64{0} && full_columns > width) {
+            rt_text_push_word(out, I64{14889}, I64{2})
+        } else {
+            rt_text_push_word(out, I64{2318297316494767648}, I64{8})
+            rt_text_push_word(out, I64{7359003190108975727}, I64{8})
+            rt_text_push_word(out, I64{63949721793129}, I64{6})
+        }
+        journey_color_end(out, color)
+    }
+    row = I64{0}
+    loop row < count {
+        journey_hop_line(out, rt_text_word(data + row * I64{8}), row + I64{1}, width, budget, color)
+        row += I64{1}
+    }
+    out
+}

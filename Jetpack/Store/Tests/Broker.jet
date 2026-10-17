@@ -195,7 +195,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
     assert(store_broker_test_incoming_empty(shared_root))
 
     corrupted := archive
-    corrupted[0] = U8{Int.from_u8(corrupted[0]) ^ 1}
+    corrupted[0] = U8{(Int.from_u8(corrupted[0])).pow(1)}
     assert(store_broker_promote_staged_archive(&verification, shared, config, key_path, corrupted, binding) == .Err(_))
     still :: store_find_by_reference(&verification, shared, entry.reference) ?? panic("still published")
     assert_eq(still.id, published.id)
@@ -250,7 +250,7 @@ fn store_broker_test_incoming_empty(shared_root: String) -> Bool Never! {
 
     // A corrupted archive is refused and live data stays intact.
     corrupted := archive
-    corrupted[0] = U8{Int.from_u8(corrupted[0]) ^ 1}
+    corrupted[0] = U8{(Int.from_u8(corrupted[0])).pow(1)}
     corrupt_socket :: files.join(roots.root, "corrupt.sock")
     rejecting :: store_broker_test_serve_once(&verification, corrupt_socket, config)
     corrupt_client := net.unix_connect(corrupt_socket) ?? panic("connect")

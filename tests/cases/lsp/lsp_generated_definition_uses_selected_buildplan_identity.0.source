@@ -1,0 +1,13 @@
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("right") {
+        fn generated_value() -> String { "right" }
+    }
+    b.generate("left") {
+        fn generated_value() -> String { "left" }
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/left.jet"], [])
+    return b.plan(app)
+}
+fn run() {
+    generated_value()
+}

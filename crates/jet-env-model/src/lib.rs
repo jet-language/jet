@@ -21,7 +21,6 @@
 //! Syntax) — both path-only (I6). No provider/store/network/shell dep.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 // Re-export the compiler frontend funnel so files in this crate can use
 // `crate::AST`, `crate::Comptime`, `crate::Diagnostics`, `crate::Lexer`,

@@ -23,8 +23,8 @@ fn pkg_apply_source_edits(text: String, edits: [SourceEdit]) -> String Never! {
     out.join("")
 }
 
-fn pkg_token_is_ident(token: Token, name: String) -> Bool Never! {
-    token.kind == TOKEN_IDENT && token.payload.text == name
+fn pkg_token_is_ident(tables: TokenTables, token: Token, name: String) -> Bool Never! {
+    token.kind == TOKEN_IDENT && token_text(tables, token) == name
 }
 
 fn pkg_token_kind_at(tokens: [Token], index: Int) -> Int Never! {
@@ -33,18 +33,19 @@ fn pkg_token_kind_at(tokens: [Token], index: Int) -> Int Never! {
 }
 
 // The retired rewrite result: the new text and the number of edits.
-pub struct RetiredRewrite {
-    pub text: String
-    pub count: Int
+struct RetiredRewrite {
+    text: String
+    count: Int
 }
 
 // Rewrite the retired `plugin` package target to `sandbox`: unquoted values
 // in a `packages:` block and `target: plugin` fields.
-pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
-    tokens :: pkg_manifest_tokens(text) ?? return RetiredRewrite{text: text, count: 0}
+fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
+    lexed :: pkg_manifest_lexed(text) ?? return RetiredRewrite{text: text, count: 0}
+    tokens :: lexed.tokens
     ranges := [EditSpan]{}
     loop index in 0..<tokens.len() {
-        if !pkg_token_is_ident(tokens[index], MANIFEST_BLOCK_PACKAGES) || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
+        if !pkg_token_is_ident(lexed.tables, tokens[index], MANIFEST_BLOCK_PACKAGES) || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
         open := index + 2
         if pkg_token_kind_at(tokens, open) == TOKEN_DOT -> open += 1
         if pkg_token_kind_at(tokens, open) != TOKEN_LBRACE -> next
@@ -63,14 +64,14 @@ pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
     }
     edits := [SourceEdit]{}
     loop index in 0..<tokens.len() {
-        if !pkg_token_is_ident(tokens[index], RETIRED_TARGET_PLUGIN) -> next
+        if !pkg_token_is_ident(lexed.tables, tokens[index], RETIRED_TARGET_PLUGIN) -> next
         in_packages := false
         loop range in ranges {
             if range.start <= index && index < range.end -> in_packages = true
         }
         previous :: pkg_token_kind_at(tokens, index - 1)
         package_value :: in_packages && index > 0 && (previous == TOKEN_COLON || previous == TOKEN_COMMA || previous == TOKEN_LBRACKET)
-        target_field :: index >= 2 && previous == TOKEN_COLON && pkg_token_is_ident(tokens[index - 2], "target")
+        target_field :: index >= 2 && previous == TOKEN_COLON && pkg_token_is_ident(lexed.tables, tokens[index - 2], "target")
         if package_value || target_field -> &edits.push(SourceEdit{start: tokens[index].span.start, end: tokens[index].span.end, replacement: TARGET_SANDBOX})
     }
     RetiredRewrite{text: pkg_apply_source_edits(text, edits), count: edits.len()}
@@ -79,15 +80,16 @@ pub fn pkg_rewrite_retired_targets(text: String) -> RetiredRewrite Never! {
 // Rewrite retired public provider refs in direct `deps:` values; arbitrary
 // strings and nested metadata stay byte-stable.
 fn pkg_rewrite_retired_dependency_refs(text: String) -> RetiredRewrite Never! {
-    tokens :: pkg_manifest_tokens(text) ?? return RetiredRewrite{text: text, count: 0}
+    lexed :: pkg_manifest_lexed(text) ?? return RetiredRewrite{text: text, count: 0}
+    tokens :: lexed.tokens
     edits := [SourceEdit]{}
     loop index in 0..<tokens.len() {
-        if !pkg_token_is_ident(tokens[index], "deps") || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
+        if !pkg_token_is_ident(lexed.tables, tokens[index], "deps") || pkg_token_kind_at(tokens, index + 1) != TOKEN_COLON -> next
         open := index + 2
         if pkg_token_kind_at(tokens, open) == TOKEN_DOT -> open += 1
         if pkg_token_kind_at(tokens, open) != TOKEN_LBRACE -> next
         close :: pkg_matching_typed_record_brace(tokens, open) ?? next
-        pkg_collect_dependency_ref_edits(text, tokens, open, close, &edits)
+        pkg_collect_dependency_ref_edits(text, tokens, lexed.tables, open, close, &edits)
     }
     if edits.len() == 0 -> return RetiredRewrite{text: text, count: 0}
     ordered := [SourceEdit]{}
@@ -115,7 +117,7 @@ fn pkg_matching_typed_record_brace(tokens: [Token], open: Int) -> Int? Never! {
     None
 }
 
-fn pkg_collect_dependency_ref_edits(text: String, tokens: [Token], open: Int, close: Int, edits: &[SourceEdit]) Never! {
+fn pkg_collect_dependency_ref_edits(text: String, tokens: [Token], tables: TokenTables, open: Int, close: Int, edits: &[SourceEdit]) Never! {
     depth := 0
     value_start := -1
     index := open + 1
@@ -123,13 +125,13 @@ fn pkg_collect_dependency_ref_edits(text: String, tokens: [Token], open: Int, cl
         kind :: tokens[index].kind
         if depth == 0 {
             if value_start >= 0 && pkg_dependency_field_boundary(text, tokens, index, value_start) {
-                pkg_rewrite_dependency_value(text, tokens, value_start, index, &edits)
+                pkg_rewrite_dependency_value(text, tokens, tables, value_start, index, &edits)
                 value_start = -1
             }
             if value_start < 0 && kind == TOKEN_COLON {
                 value_start = index + 1
             } else if kind == TOKEN_COMMA && value_start >= 0 {
-                pkg_rewrite_dependency_value(text, tokens, value_start, index, &edits)
+                pkg_rewrite_dependency_value(text, tokens, tables, value_start, index, &edits)
                 value_start = -1
             }
         }
@@ -137,7 +139,7 @@ fn pkg_collect_dependency_ref_edits(text: String, tokens: [Token], open: Int, cl
         if kind == TOKEN_RBRACE || kind == TOKEN_RBRACKET || kind == TOKEN_RPAREN -> depth -= 1
         index += 1
     }
-    if value_start >= 0 -> pkg_rewrite_dependency_value(text, tokens, value_start, close, &edits)
+    if value_start >= 0 -> pkg_rewrite_dependency_value(text, tokens, tables, value_start, close, &edits)
 }
 
 // A new `ident:` field starts at `index` when whitespace separates it from
@@ -148,15 +150,15 @@ fn pkg_dependency_field_boundary(text: String, tokens: [Token], index: Int, valu
     pkg_text_has_space(gap)
 }
 
-fn pkg_rewrite_dependency_value(text: String, tokens: [Token], start: Int, end: Int, edits: &[SourceEdit]) Never! {
+fn pkg_rewrite_dependency_value(text: String, tokens: [Token], tables: TokenTables, start: Int, end: Int, edits: &[SourceEdit]) Never! {
     if start >= end -> return
     first :: tokens[start]
     last :: tokens[end - 1]
     if first.kind == TOKEN_STRING {
         if start + 1 != end -> return
-        parts :: first.payload.string_parts
+        parts :: token_string_parts(tables, first)
         if parts.len() != 1 || parts[0].kind != STRING_PART_TEXT -> return
-        value :: parts[0].text
+        value :: name_text(tables.names, parts[0].text)
         replacement :: MigratedRef.public(value).canonical
         if replacement == value -> return
         literal :: pkg_binder_slice(text, first.span.start, first.span.end)
@@ -186,7 +188,7 @@ fn pkg_migrated_string_literal(literal: String, value: String, replacement: Stri
 
 // Rewrite the retired `.{ … }` record head (D-LIT-DOT1): `.Kind.{` becomes
 // `.Kind{`.
-pub fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
+fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
     edits := [SourceEdit]{}
     loop span in pkg_retired_record_head_spans(text) -> &edits.push(SourceEdit{start: span.start, end: span.end, replacement: ""})
     RetiredRewrite{text: pkg_apply_source_edits(text, edits), count: edits.len()}
@@ -194,14 +196,14 @@ pub fn pkg_rewrite_retired_record_heads(text: String) -> RetiredRewrite Never! {
 
 // Why a Package/Config source cannot be formatted (Rust `String` errors).
 #Error
-pub struct PackageFormatError {
-    pub message: String
+struct PackageFormatError {
+    message: String
 }
 
 // Format one canonical Package or Config source file after migrating
 // retired spellings and validating it with the same model that loads it.
 // Files with comments fail closed.
-pub fn pkg_format_source(input: String, origin: String) -> String PackageFormatError! {
+fn pkg_format_source(input: String, origin: String) -> String PackageFormatError! {
     text :: pkg_rewrite_retired_record_heads(pkg_rewrite_retired_dependency_refs(pkg_rewrite_retired_targets(input).text).text).text
     stripped :: pkg_strip_comments(text)
     trimmed :: stripped.trim()

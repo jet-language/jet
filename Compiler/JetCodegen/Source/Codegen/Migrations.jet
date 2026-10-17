@@ -15,7 +15,7 @@ fn jet_codegen_migration_insert_sorted(values: [String], value: String) -> [Stri
     result := [String]{}
     inserted := false
     loop current in values {
-        if current == value -> return ~values
+        if current == value -> return values.copy()
         if !inserted && current > value {
             &result.push(value)
             inserted = true
@@ -108,7 +108,7 @@ fn jet_codegen_migration_steps(fields: [TField], blocks: [MigrationDecl], style:
     Val(steps)
 }
 
-pub fn jet_codegen_lower_migration_plan(definition: TTypeDef, migrations: &[MigrationDecl]) -> MIRSchemaMigrationPlan? {
+fn jet_codegen_lower_migration_plan(definition: TTypeDef, migrations: &[MigrationDecl]) -> MIRSchemaMigrationPlan? {
     published := definition.published_schema
     loop derive_name in definition.derives {
         if derive_name == "PublishedSchema" -> published = true

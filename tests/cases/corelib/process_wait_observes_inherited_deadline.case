@@ -1,0 +1,9 @@
+# Port of tests/corelib_parts/system.rs::process_wait_observes_inherited_deadline; guest sources preserved verbatim.
+fixture: fixtures/process_wait_observes_inherited_deadline
+chmod: sleep.sh 755
+write: fixture.jet fixture.template
+step: jet build fixture.jet
+step: built
+exit: 70
+stderr: ~ "Error [E3003]" # original conjunction
+stderr: ~ "process wait" # original conjunction

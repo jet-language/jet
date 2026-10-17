@@ -1,0 +1,26 @@
+Error [E0204]: `solver` is being changed in this call, so it can't be used again here
+  --> builtin_mut_receiver_uses_two_phase_reservation_5.jet:5:27
+    |
+  5 |     solver.require(solver.failure_count() == 0)
+    |                           ^^^^^^^^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&solver`) only once, or copy first with `~solver`
+More: jet-lang.dev/e/E0204
+
+Error [E0204]: `solver` is being changed in this call, so it can't be used again here
+  --> builtin_mut_receiver_uses_two_phase_reservation_5.jet:5:27
+    |
+  5 |     solver.require(solver.failure_count() == 0)
+    |                           ^^^^^^^^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&solver`) only once, or copy first with `~solver`
+More: jet-lang.dev/e/E0204
+
+Error [E0224]: This call writes `solver`, but `solver` has no `&` mark
+  --> builtin_mut_receiver_uses_two_phase_reservation_5.jet:5:5
+    |
+  5 |     solver.require(solver.failure_count() == 0)
+    |     ^^^^^^
+ Why: The method is declared with `&self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments
+ Fix: Write `&solver`
+More: jet-lang.dev/e/E0224

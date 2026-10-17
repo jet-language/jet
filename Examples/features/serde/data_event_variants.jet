@@ -1,0 +1,42 @@
+// The twelve canonical `core.encoding.DataEvent` variants (D-ENCSTREAM-SURFACE1=A),
+// in catalog order. `Number` carries the exact lexical number as text, so a
+// value outside the Int/Float range keeps every digit.
+use core.encoding as encoding
+
+fn describe(event: encoding.DataEvent) -> String {
+    if event == {
+        .Null -> return "null"
+        .Bool(value) -> return "bool {value}"
+        .Int(value) -> return "int {value + 1}"
+        .Float(value) -> return "float {value * 2.0}"
+        .Number(text) -> return "number {text} ({text.len()} chars)"
+        .Text(text) -> return "text {text}"
+        .Bytes(bytes) -> return "bytes {bytes.len()}"
+        .ArrayStart -> return "array start"
+        .ArrayEnd -> return "array end"
+        .ObjectStart -> return "object start"
+        .Key(name) -> return "key {name}"
+        .ObjectEnd -> return "object end"
+    }
+}
+
+fn run() {
+    events :: [encoding.DataEvent]{
+        encoding.DataEvent.Null,
+        encoding.DataEvent.Bool(true),
+        encoding.DataEvent.Int(41),
+        encoding.DataEvent.Float(1.25),
+        encoding.DataEvent.Number("123456789012345678901234567890"),
+        encoding.DataEvent.Text("hi"),
+        encoding.DataEvent.Bytes([U8]{1, 2, 3}),
+        encoding.DataEvent.ArrayStart,
+        encoding.DataEvent.ArrayEnd,
+        encoding.DataEvent.ObjectStart,
+        encoding.DataEvent.Key("id"),
+        encoding.DataEvent.ObjectEnd,
+    }
+    print(events.len())
+    loop event in events -> print(describe(event))
+    print(events[4] == encoding.DataEvent.Number("123456789012345678901234567890"))
+    print(events[4] == encoding.DataEvent.Text("123456789012345678901234567890"))
+}

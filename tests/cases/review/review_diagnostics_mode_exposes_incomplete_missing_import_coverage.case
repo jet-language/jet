@@ -1,0 +1,10 @@
+# PORT tests/review.rs::review_diagnostics_mode_exposes_incomplete_missing_import_coverage
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: review_diagnostics_mode_exposes_incomplete_missing_import_coverage.fixture
+step: jet review {work}/base/run.jet {work}/head/run.jet --diagnostics --json
+exit: 0
+stdout: ~ "\"schema\":\"jet.diagnostic-review/v1\"" # Original contains predicate.
+stdout: ~ "\"complete\":false" # Original contains predicate.
+stdout: ~ "\"completeness\":\"incomplete\"" # Original contains predicate.
+stdout: ~ "\"status\":\"unknown\"" # Original contains predicate.
+stdout: !~ "\"status\":\"new\"" # Original negative predicate.

@@ -3,7 +3,7 @@ use jet_foundation.[
     Effect,
     MIRAccess,
     MIRCallArg,
-    MIRConstant,
+    mir_integer_constant,
     MIROperation,
     MIRPreludeABI,
     MIRPreludeFamily,
@@ -15,13 +15,13 @@ use jet_foundation.[
 ]
 
 struct JetCodegenClosureRoute {
-    pub module_name: String
-    pub member: String
-    pub symbol: String
-    pub arity: Int
-    pub borrow_mask: [Bool]
-    pub effect_kind: Effect?
-    pub abi: MIRPreludeABI
+    module_name: String
+    member: String
+    symbol: String
+    arity: Int
+    borrow_mask: [Bool]
+    effect_kind: Effect?
+    abi: MIRPreludeABI
 }
 
 fn jet_codegen_closure_route_row(module_name: String, member: String, symbol: String, arity: Int, borrow_mask: [Bool], route_effect: Effect?, abi: MIRPreludeABI) -> JetCodegenClosureRoute Never! {
@@ -49,10 +49,10 @@ fn jet_codegen_closure_receiver_without_user_tags(receiver: Type) -> Type Never!
         .Tagged(marker, inner) -> {
             if marker == {
                 .User(_) -> return jet_codegen_closure_receiver_without_user_tags(inner)
-                else -> return ~receiver
+                else -> return receiver.copy()
             }
         }
-        else -> return ~receiver
+        else -> return receiver.copy()
     }
 }
 
@@ -60,11 +60,12 @@ fn jet_codegen_collection_closure_route(operation: TClosureOp, receiver: Type) -
     kind :: jet_codegen_closure_receiver_kind(receiver) ?? panic("checked closure operation has an unsupported receiver type")
     if operation == {
         .Map -> {
-            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map", "jet_list_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            // #4566 slice 5: the eager list map kernels borrow their source.
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map", "jet_list_map", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
             if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "map", "jet_iter_map", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         }
         .MapMut -> {
-            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
+            if kind == "list" -> return jet_codegen_closure_route_row("core.list", "map_mut", "jet_list_map_mut", 2, [Bool]{true, false}, None, MIRPreludeABI.Value)
             if kind == "iter" -> return jet_codegen_closure_route_row("core.iter", "map_mut", "jet_iter_map_mut", 2, [Bool]{false, false}, None, MIRPreludeABI.Value)
         }
         .TryMap -> {
@@ -198,16 +199,16 @@ fn jet_codegen_closure_method_mutates_receiver(operation: TClosureOp) -> Bool Ne
     }
 }
 
-fn jet_codegen_lower_closure_receiver(builder: &JetCodegenBuilder, receiver: TExpr, mutating: Bool) -> MIRValueID {
+fn jet_codegen_lower_closure_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, receiver: TExpr, mutating: Bool) -> MIRValueID {
     if !mutating {
         if jet_codegen_closure_receiver_kind(receiver.ty) == (Val("iter")) {
-            place := jet_codegen_lower_expression_place(&builder, receiver, MIRAccess.Move)
-            if place != None -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MIROperation.MovePlace{place: place ?? panic("checked owned closure receiver place disappeared")})
+            place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Move)
+            if place != None -> return jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.MovePlace{place: place ?? panic("checked owned closure receiver place disappeared")})
         }
-        return jet_codegen_lower_expr(&builder, receiver)
+        return jet_codegen_lower_expr(&builder, program, receiver)
     }
-    place := jet_codegen_lower_expression_place(&builder, receiver, MIRAccess.Write)
-    if place == None -> return jet_codegen_lower_expr(&builder, receiver)
+    place := jet_codegen_lower_expression_place(&builder, program, receiver, MIRAccess.Write)
+    if place == None -> return jet_codegen_lower_expr(&builder, program, receiver)
     is_indexed_collection := false
     if receiver.kind == {
         .Index(_, _, _, _, _, _) | .Field(_, _) -> {
@@ -219,11 +220,11 @@ fn jet_codegen_lower_closure_receiver(builder: &JetCodegenBuilder, receiver: TEx
         }
         else -> {}
     }
-    if is_indexed_collection -> return jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MIROperation.ReadPlace{place: place ?? panic("checked indexed closure receiver place disappeared")})
-    jet_codegen_emit_value(&builder, receiver.span, receiver.ty, MIROperation.AddressOf{place: place ?? panic("checked mutating closure receiver place disappeared"), access: MIRAccess.Write})
+    if is_indexed_collection -> return jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.ReadPlace{place: place ?? panic("checked indexed closure receiver place disappeared")})
+    jet_codegen_emit_value(&builder, program, receiver.span, receiver.ty, MIROperation.AddressOf{place: place ?? panic("checked mutating closure receiver place disappeared"), access: MIRAccess.Write})
 }
 
-fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TExpr, receiver: TExpr, operation: TClosureOp, args: [TExpr]) -> MIRValueID {
+fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, receiver: TExpr, operation: TClosureOp, args: [TExpr]) -> MIRValueID {
     route_receiver := receiver.ty
     if operation == TClosureOp.OptionMap {
         if receiver.ty == {
@@ -234,16 +235,16 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TEx
     route := jet_codegen_closure_route(operation, route_receiver)
     carrier := jet_codegen_failure_carrier_for_type(expression.ty)
     mutating := jet_codegen_closure_method_mutates_receiver(operation)
-    lowered_receiver := jet_codegen_lower_closure_receiver(&builder, receiver, mutating)
+    lowered_receiver := jet_codegen_lower_closure_receiver(&builder, program, receiver, mutating)
 
     lowered_args := [MIRCallArg]{}
     loop argument in args {
-        callback := jet_codegen_plain_callback_argument(builder, operation, argument)
-        value := jet_codegen_lower_expr(&builder, callback)
+        callback := jet_codegen_plain_callback_argument(builder, program, operation, argument)
+        value := jet_codegen_lower_expr(&builder, program, callback)
         &lowered_args.push(jet_codegen_host_call_value_arg(value, argument.span, MIRAccess.Read, None))
     }
     if operation == TClosureOp.ParaMap && args.len() == 1 {
-        limit := jet_codegen_emit_value(&builder, expression.span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: 9223372036854775807, width: None, spelling: None}})
+        limit := jet_codegen_emit_value(&builder, program, expression.span, Type.Int, MIROperation.Constant{value: mir_integer_constant(9223372036854775807, None, None)})
         &lowered_args.push(jet_codegen_host_call_value_arg(limit, expression.span, MIRAccess.Read, None))
     }
     if lowered_args.len() + 1 != route.arity -> panic("checked closure method operand count disagrees with its canonical Prelude route")
@@ -251,21 +252,21 @@ fn jet_codegen_lower_closure_method(builder: &JetCodegenBuilder, expression: TEx
     index := 0
     loop index < lowered_args.len() {
         argument := lowered_args[index]
-        argument.access = jet_codegen_host_value_access(builder, argument.value, route.borrow_mask[index + 1])
+        argument.access = jet_codegen_host_value_access(builder, program, argument.value, route.borrow_mask[index + 1])
         lowered_args[index] = argument
         index += 1
     }
-    call := jet_codegen_intern_route(&builder, MIRPreludeFamily.ClosureMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
-    jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: lowered_receiver, args: lowered_args, call: call}})
+    call := jet_codegen_intern_route(&builder, program, MIRPreludeFamily.ClosureMethod, route.module_name, route.member, route.symbol, route.arity, route.borrow_mask, route.effect_kind, carrier, route.abi)
+    jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Semantic{operation: MIRSemanticOp.ClosureMethod{receiver: lowered_receiver, args: lowered_args, call: call}})
 }
 
 // #3740: a named `T Never!` function returns `T` directly while its checked
 // value type names the carrier. A callback slot that takes a plain value gets
 // the executable return, so the function value needs no `Ok` adapter the
 // kernel cannot accept. `Never Never!` keeps its carrier, as the function does.
-fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, operation: TClosureOp, argument: TExpr) -> TExpr Never! {
+fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, program: JetCodegenProgram, operation: TClosureOp, argument: TExpr) -> TExpr Never! {
     if operation == {
-        .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc | .EachRef -> return ~argument
+        .TryMap | .TryFilter | .TrySortBy | .TrySortByDesc | .EachRef -> return argument.copy()
         else -> {}
     }
     named := if argument.kind == {
@@ -273,19 +274,19 @@ fn jet_codegen_plain_callback_argument(builder: JetCodegenBuilder, operation: TC
             .NamedFn(_, lambda) -> lambda == None
             else -> false
         }
-        .ConstRef(symbol) -> jet_codegen_find_function_row(builder.function_index, symbol.key) != None
+        .ConstRef(symbol) -> jet_codegen_find_function_row(program.function_index, symbol.key) != None
         else -> false
     }
-    if !named -> return ~argument
+    if !named -> return argument.copy()
     fn_type := jet_codegen_unwrap_pattern_tags(argument.ty)
     if fn_type == .Fn(params, ret, effect_bound, param_contract, call_metadata, return_view_provenance) {
-        declared :: ret ?? return ~argument
-        success :: jet_codegen_never_carrier_success(declared) ?? return ~argument
-        if jet_codegen_unwrap_pattern_tags(success) == (Type.Named{name: "Never"}) -> return ~argument
+        declared :: ret ?? return argument.copy()
+        success :: jet_codegen_never_carrier_success(declared) ?? return argument.copy()
+        if jet_codegen_unwrap_pattern_tags(success) == (Type.Named{name: "Never"}) -> return argument.copy()
         plain := argument
         plain.ty = Type.Fn{params: params, ret: Val(success), effect_bound: effect_bound, param_contract: param_contract, call_metadata: call_metadata, return_view_provenance: return_view_provenance}
         return plain
     }
-    ~argument
+    argument.copy()
 }
 

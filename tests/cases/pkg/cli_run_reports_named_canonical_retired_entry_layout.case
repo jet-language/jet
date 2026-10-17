@@ -1,0 +1,13 @@
+# Port of tests/pkg.rs:5461-5487; source/helper-expanded manifest bytes verbatim.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/manifests/ambiguous.txt package.jet
+copy: {root}/tests/cases/pkg/fixtures/sources/current.txt ambiguous.jet
+copy: {root}/tests/cases/pkg/fixtures/sources/retired.txt main.jet
+step: jet run
+exit: nonzero
+stderr: ~ "ambiguous project entry" # original predicate
+stderr: ~ "main.jet" # original predicate
+stderr: ~ "ambiguous.jet" # original predicate
+file: main.jet is-file
+file: ambiguous.jet is-file

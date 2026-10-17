@@ -8,6 +8,7 @@
 // extracted to typed plan fields here; anything else lands in `extra` for
 // `Jetpack::Services` to flag as E1262 at supervision time — never here, so a
 // forward-compatible extra key is never a hard parse/sema error.
+use core.files as envmodel_dev_service_files
 
 // The recognized fields of a dev service record.
 enum DevServiceField {
@@ -79,7 +80,7 @@ enum ReadyProbeKind {
 
 // U12: evaluate one `name: { … }` entry from an `env.<name>` role-module's
 // `services:` map into a `DevServicePlan`.
-pub fn envmodel_evaluate_dev_service(entry: ServiceEntry, scope: ModuleEvalScope, globals: [String: CtValue]) -> DevServicePlan EnvModelEvalError! {
+fn envmodel_evaluate_dev_service(entry: ServiceEntry, scope: ModuleEvalScope, globals: [String: CtValue]) -> DevServicePlan EnvModelEvalError! {
     plan := DevServicePlan{name: entry.name}
     enable := Bool?{None}
     loop field in entry.fields {
@@ -216,7 +217,7 @@ fn envmodel_ready_probe_from(value: Expr, scope: ModuleEvalScope, globals: [Stri
         }
         .Notify -> {
             path :: envmodel_probe_string_at(values, 0) ?? return Err(envmodel_probe_error("typed notify readiness needs a path", "ServiceProbe.notify observes one project-relative readiness file", "write ready: .notify(\".jet/ready/api\")", call.name_span))
-            if files.is_absolute(path) || envmodel_path_has_parent_component(path) {
+            if envmodel_dev_service_files.is_absolute(path) || envmodel_path_has_parent_component(path) {
                 return Err(envmodel_probe_error("typed notify readiness path must stay inside the project", "ServiceProbe.notify observes a project-relative readiness file", "write a relative path without `..` or an absolute prefix", call.name_span))
             }
             ReadyProbe.Notify{path: path}
@@ -254,7 +255,7 @@ fn envmodel_probe_port_at(values: [CtValue], index: Int) -> Int? Never! {
 // True when a `/`-separated relative path has a `..` component
 // (Rust `Path::components` containing `ParentDir`).
 fn envmodel_path_has_parent_component(path: String) -> Bool Never! {
-    loop part in files.split_slash(path) {
+    loop part in envmodel_dev_service_files.split_slash(path) {
         if part == ".." -> return true
     }
     false

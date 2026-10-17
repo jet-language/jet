@@ -1,42 +1,42 @@
 // Canonical derivation relations retained by Source facts and typed payloads.
 // IDs match the native FactsDerivation framing algorithm.
 
-pub struct DerivationIdentity {
-    pub source: String
-    pub build: String
-    pub run: String
-    pub target: String
+struct DerivationIdentity {
+    source: String
+    build: String
+    run: String
+    target: String
 }
 
-pub struct DerivationObservation {
-    pub event_id: String?
-    pub counterexample_id: String?
+struct DerivationObservation {
+    event_id: String?
+    counterexample_id: String?
 }
 
-pub enum DerivationPayload { FrameSchedule(schedule: MIRFrameSchedule) }
+enum DerivationPayload { FrameSchedule(schedule: MIRFrameSchedule) }
 
-pub struct DerivationRecord {
-    pub id: String
-    pub subject: String
-    pub claim: String
-    pub producer: String
-    pub method: MIRDerivationMethod
-    pub rule: String
-    pub premises: [String]
-    pub identity: DerivationIdentity
-    pub assumptions: [String]
-    pub disposition: MIRDerivationDisposition
-    pub observation: DerivationObservation?
-    pub payload: DerivationPayload?
+struct DerivationRecord {
+    id: String
+    subject: String
+    claim: String
+    producer: String
+    method: MIRDerivationMethod
+    rule: String
+    premises: [String]
+    identity: DerivationIdentity
+    assumptions: [String]
+    disposition: MIRDerivationDisposition
+    observation: DerivationObservation?
+    payload: DerivationPayload?
 }
 
-pub struct DerivationStore { pub records: [DerivationRecord] }
+struct DerivationStore { records: [DerivationRecord] }
 
-pub fn derivation_identity(source: String, build: String, run: String, target: String) -> DerivationIdentity Never! {
+fn derivation_identity(source: String, build: String, run: String, target: String) -> DerivationIdentity Never! {
     DerivationIdentity{source: source, build: build, run: run, target: target}
 }
 
-pub fn derivation_record(subject: String, claim: String, producer: String, method: MIRDerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
+fn derivation_record(subject: String, claim: String, producer: String, method: MIRDerivationMethod, rule: String, premises: [String], identity: DerivationIdentity) -> DerivationRecord Never! {
     sorted_premises := derivation_strings_sorted_unique(premises)
     record := DerivationRecord{
         id: "",
@@ -56,28 +56,36 @@ pub fn derivation_record(subject: String, claim: String, producer: String, metho
     record
 }
 
-pub fn derivation_record_with_payload(record: ^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
+fn derivation_record_with_payload(record: ^DerivationRecord, payload: DerivationPayload) -> DerivationRecord Never! {
     updated := record
     updated.payload = Val(payload)
     updated.id = derivation_record_id(updated)
     updated
 }
 
-pub fn derivation_record_reference(record: DerivationRecord) -> MIRDerivationRef Never! {
+fn derivation_record_reference(record: DerivationRecord) -> MIRDerivationRef Never! {
     MIRDerivationRef{id: record.id}
 }
 
-pub fn derivation_record_validate(record: DerivationRecord) -> Bool Never! {
+// Rust DerivationRecord::invalidate_if_identity_changed, reused by evidence.
+fn derivation_record_invalidate_if_identity_changed(record: &DerivationRecord, current: DerivationIdentity) -> Bool Never! {
+    if record.disposition != MIRDerivationDisposition.Current -> return false
+    if record.identity.source == current.source && record.identity.build == current.build && record.identity.run == current.run && record.identity.target == current.target -> return false
+    record.disposition = MIRDerivationDisposition.Stale
+    true
+}
+
+fn derivation_record_validate(record: DerivationRecord) -> Bool Never! {
     record.id == derivation_record_id(record)
 }
 
-pub fn derivation_payload_json(payload: DerivationPayload) -> String Never! {
+fn derivation_payload_json(payload: DerivationPayload) -> String Never! {
     if payload == {
         .FrameSchedule(schedule) -> mir_frame_schedule_json(schedule)
     }
 }
 
-pub fn derivation_record_json(record: DerivationRecord) -> String Never! {
+fn derivation_record_json(record: DerivationRecord) -> String Never! {
     premises := derivation_json_strings(record.premises)
     assumptions := derivation_json_strings(record.assumptions)
     observation := "null"
@@ -91,17 +99,17 @@ pub fn derivation_record_json(record: DerivationRecord) -> String Never! {
     "{{\"assumptions\":[{assumptions}],\"claim\":{derivation_record_quote(record.claim)},\"disposition\":{derivation_disposition_name(record.disposition)},\"id\":{derivation_record_quote(record.id)},\"identity\":{{\"build\":{derivation_record_quote(record.identity.build)},\"run\":{derivation_record_quote(record.identity.run)},\"source\":{derivation_record_quote(record.identity.source)},\"target\":{derivation_record_quote(record.identity.target)}}},\"method\":{derivation_method_name(record.method)},\"observation\":{observation},\"payload\":{payload},\"premises\":[{premises}],\"producer\":{derivation_record_quote(record.producer)},\"rule\":{derivation_record_quote(record.rule)},\"subject\":{derivation_record_quote(record.subject)}}}"
 }
 fn derivation_optional_payload_json(payload: DerivationPayload?, absent: String) -> String Never! {
-    value :: payload ?? return ~absent
+    value :: payload ?? return absent.copy()
     derivation_payload_json(value)
 }
 
-pub fn derivation_store_empty() -> DerivationStore Never! {
+fn derivation_store_empty() -> DerivationStore Never! {
     DerivationStore{records: [DerivationRecord]{}}
 }
 
 // Invalid non-canonical records are not interned. Existing IDs resolve to the
 // first canonical record, preserving idempotent evidence collection.
-pub fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) -> MIRDerivationRef? {
+fn derivation_store_intern(store: &DerivationStore, record: DerivationRecord) -> MIRDerivationRef? {
     if !derivation_record_validate(record) -> return None
     loop existing in store.records {
         if existing.id == record.id -> return Val(derivation_record_reference(existing))
@@ -195,7 +203,7 @@ fn derivation_record_id(record: DerivationRecord) -> String Never! {
     derivation_hash_hex(state)
 }
 
-pub struct DerivationHashState { pub first: U64, pub second: U64 }
+struct DerivationHashState { first: U64, second: U64 }
 
 fn derivation_method_raw(method: MIRDerivationMethod) -> String Never! {
     if method == {
@@ -210,14 +218,14 @@ fn derivation_method_raw(method: MIRDerivationMethod) -> String Never! {
 fn derivation_hash_frame(state: &DerivationHashState, value: String) Never! {
     bytes := value.bytes()
     length := bytes.len()
-    loop index in 0..<8 -> derivation_hash_byte(&state, U8{(length >> ((7 - index) * 8)) & 255})
+    loop index in 0..<8 -> derivation_hash_byte(&state, U8{((length >> ((7 - index) * 8))).bit_and(255)})
     loop byte in bytes -> derivation_hash_byte(&state, byte)
 }
 
 fn derivation_hash_byte(state: &DerivationHashState, byte: U8) Never! {
     value :: U64.from_u8(byte)
-    state.first = (state.first ~| value).wrapping_mul(U64{0x100000001b3})
-    state.second = (state.second ~| state.first.rotate_left(17) ~| value).wrapping_mul(U64{0x9e3779b185ebca87})
+    state.first = ((state.first).bit_xor(value)).wrapping_mul(U64{0x100000001b3})
+    state.second = (((state.second).bit_xor(state.first.rotate_left(17))).bit_xor(value)).wrapping_mul(U64{0x9e3779b185ebca87})
 }
 
 fn derivation_hash_hex(state: DerivationHashState) -> String Never! {
@@ -225,8 +233,8 @@ fn derivation_hash_hex(state: DerivationHashState) -> String Never! {
     first :: Int.from_u64(state.first)
     second :: Int.from_u64(state.second)
     output := [U8]{}
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(first >> shift) & 15])
-    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[(second >> shift) & 15])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((first >> shift)).bit_and(15)])
+    loop shift in ([Int]{60, 56, 52, 48, 44, 40, 36, 32, 28, 24, 20, 16, 12, 8, 4, 0}) -> &output.push(digits[((second >> shift)).bit_and(15)])
     String.from_bytes(output) ?? ""
 }
 
@@ -293,7 +301,7 @@ fn derivation_json_quote(value: String) -> String Never! {
 
 fn derivation_hex_byte(value: Int) -> String Never! {
     digits := "0123456789abcdef".bytes()
-    String.from_bytes([U8]{digits[(value >> 4) & 15], digits[value & 15]}) ?? "00"
+    String.from_bytes([U8]{digits[((value >> 4)).bit_and(15)], digits[(value).bit_and(15)]}) ?? "00"
 }
 
 fn mir_frame_schedule_json(schedule: MIRFrameSchedule) -> String Never! {

@@ -1,0 +1,11 @@
+# Port of tests/devtools.rs:294-338. PENDING-SAME-HEAD; original source bytes and assertions preserved.
+# Implementation writes cwd-relative paths (CmdDevTools.rs3657); no override flag or real-root mutation.
+step: jet self devtools new-ui devtools_test_scaffold_{pid}_297
+file: tests/ui/devtools_test_scaffold_{pid}_297.jet is-file
+file: tests/ui/devtools_test_scaffold_{pid}_297.stderr is-file
+step: jet check tests/ui/devtools_test_scaffold_{pid}_297.jet
+exit: any # original predicate: compile result renders either diagnostics or (no errors); Error assertion below implies failing compile
+stderr: ~ "Error [" # original predicate: actual rendered text includes a real error
+capture: actual = text stderr
+write: actual.stderr devtools_new_ui_scaffolds_a_self_consistent_snapshot_pair.capture-template
+file: actual.stderr == tests/ui/devtools_test_scaffold_{pid}_297.stderr

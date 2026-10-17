@@ -1,1455 +1,1035 @@
-package {
-    name: "core.email"
-    version: "0.0.1"
-    edition: "2026"
-    description: "MIME messages and SMTP."
-    license: "MIT"
-    outputs: {
-        email: .Library{ entry: email }
-    }
-}
-use core
-use core.crypto.[Secret, sha256]
-use core.crypto.expert.[secret_bytes]
-use core.encoding.base64 as base64
-use core.encoding.hex as hex
+// SMTP defaults and environment configuration are Core policy, not host policy.
+// Transport and private message carriers retain the registered provider boundary.
+use core as core
+use core.sys as sys
+use core.crypto.[Secret]
 
-C_MAX_RECIPIENTS :: 100
+struct Limits {
+    max_reply_line_bytes: Int
+    max_reply_lines: Int
+    max_capabilities: Int
+    max_recipients: Int
+    max_message_bytes: Int
+    max_auth_challenge_bytes: Int
 
-C_MAX_ATTACHMENTS :: 64
-
-C_MAX_HEADER_BYTES :: 998
-
-C_MAX_HEADER_VALUE_BYTES :: 65536
-
-C_MAX_BODY_BYTES :: 1048576
-
-C_MAX_ATTACHMENT_BYTES :: 26214400
-
-C_MAX_MESSAGE_BYTES :: 33554432
-
-C_MAX_REPLY_LINE_BYTES :: 512
-
-C_MAX_REPLY_LINES :: 100
-
-C_MAX_CAPABILITIES :: 100
-
-C_MAX_AUTH_CHALLENGE_BYTES :: 4096
-
-// Jet owns deterministic address, MIME, and message policy. Only the
-// transport-facing SMTP provider calls below cross the native boundary.
-#Error
-pub enum EmailError {
-    Configuration(operation: String, server: String?, code: Int?, reason: String)
-    DNS(operation: String, server: String?, code: Int?, reason: String)
-    Connect(operation: String, server: String?, code: Int?, reason: String)
-    TLS(operation: String, server: String?, code: Int?, reason: String)
-    Auth(operation: String, server: String?, code: Int?, reason: String)
-    Protocol(operation: String, server: String?, code: Int?, reason: String)
-    Rejected(operation: String, server: String?, code: Int?, reason: String)
-    Transient(operation: String, server: String?, code: Int?, reason: String)
-    TimedOut(operation: String, server: String?, code: Int?, reason: String)
-    Cancelled(operation: String, server: String?, code: Int?, reason: String)
-    DeliveryUnknown(operation: String, server: String?, code: Int?, reason: String)
+    fn safe() -> Limits Never! { limits_safe() }
 }
 
-// These records and enums describe the stable checked email surface. Address,
-// MIME, SMTP, and secret handling keep one semantic path across execution
-// tiers; only actual provider I/O remains native.
-pub struct Address {
-    pub display: String?
-    pub mailbox: String
-}
-
-pub struct Attachment {
-    pub filename: String
-    pub mime: String
-    pub bytes: [U8]
-}
-
-pub struct Envelope {
-    pub from: Address
-    pub recipients: [Address]
-}
-
-pub struct Message {
-    pub from: Address
-    pub to: [Address]
-    pub bcc: [Address]
-    pub subject: String
-    pub text: String
-    pub html: String
-    pub attachments: [Attachment]
-    pub envelope: Envelope
-    pub wire_upper: Int
-}
-
-pub enum SMTPSecurity {
-    StartTLS
-    TLS
-}
-
-pub enum RecipientPolicy {
-    RequireAll
-    DeliverAccepted
-}
-
-pub struct Limits {
-    pub max_reply_line_bytes: Int
-    pub max_reply_lines: Int
-    pub max_capabilities: Int
-    pub max_recipients: Int
-    pub max_message_bytes: Int
-    pub max_auth_challenge_bytes: Int
-}
-
-pub enum TLSTrust {
-    System
-    SystemPlusCa(pem: [U8])
-}
-
-pub struct DKIMConfig {
-    pub domain: String
-    pub selector: String
-    pub private_key: Secret
-    pub signed_headers: [String]
-}
-
-pub struct SMTPConfig {
-    pub host: String
-    pub port: Int
-    pub security: SMTPSecurity
-    pub auth: SMTPAuth
-    pub recipient_policy: RecipientPolicy
-    pub trust: TLSTrust
-    pub limits: Limits
-    pub dkim: DKIMConfig?
-}
-
-// Mailer is an opaque provider handle. Its send method owns the network
-// protocol and reports accepted/rejected recipients without fake success.
-pub struct Mailer {
-
-}
-
-pub struct RecipientReport {
-    pub address: Address
-    pub accepted: Bool
-    pub code: Int
-    pub message: String
-}
-
-pub struct SendReport {
-    pub server: String
-    pub accepted: [RecipientReport]
-    pub rejected: [RecipientReport]
-    pub response_code: Int
-    pub response: String
-    pub accepted_at: String
-}
-
-pub fn limits() -> Limits Never! {
+fn limits_safe() -> Limits Never! {
     Limits{
-        max_reply_line_bytes: C_MAX_REPLY_LINE_BYTES,
-        max_reply_lines: C_MAX_REPLY_LINES,
-        max_capabilities: C_MAX_CAPABILITIES,
-        max_recipients: C_MAX_RECIPIENTS,
-        max_message_bytes: C_MAX_MESSAGE_BYTES,
-        max_auth_challenge_bytes: C_MAX_AUTH_CHALLENGE_BYTES,
+        max_reply_line_bytes: 512,
+        max_reply_lines: 100,
+        max_capabilities: 100,
+        max_recipients: 100,
+        max_message_bytes: 33554432,
+        max_auth_challenge_bytes: 4096,
     }
 }
 
-pub fn smtp_auth(user: String, password: Secret) -> SMTPAuth Never! {
-    SMTPAuth.Password{username: user, password: password}
+fn configuration_error(reason: String) -> EmailError Never! {
+    EmailError.Configuration{operation: "smtp_from_env", server: None, code: None, reason: reason}
 }
 
-pub fn dkim(domain: String, selector: String, key: Secret, signed_headers: [String]) -> DKIMConfig Never! {
-    DKIMConfig{domain: domain, selector: selector, private_key: key, signed_headers: signed_headers}
+// Preserve the old signed-i64 decimal grammar (no whitespace, radix prefixes,
+// underscores, or Unicode digits), even though Jet's Int itself is unbounded.
+fn environment_port(text: String) -> Int EmailError! {
+    bytes :: text.bytes()
+    reason :: "SMTP_PORT must be an integer"
+    if bytes.len() == 0 -> return Err(configuration_error(reason))
+    negative :: bytes[0] == (U8{45})
+    start :: if negative || bytes[0] == (U8{43}) -> 1 else -> 0
+    if start == bytes.len() -> return Err(configuration_error(reason))
+    limit :: if negative -> 9223372036854775808 else -> 9223372036854775807
+    value := 0
+    loop index in start..<bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return Err(configuration_error(reason))
+        value = value * 10 + digit
+        if value > limit -> return Err(configuration_error(reason))
+    }
+    Ok(if negative -> -value else -> value)
 }
 
-pub fn send_report(server: String, accepted: [RecipientReport], rejected: [RecipientReport], response_code: Int, response: String, accepted_at: String) -> SendReport Never! {
-    SendReport{
-        server: server,
-        accepted: accepted,
-        rejected: rejected,
-        response_code: response_code,
-        response: response,
-        accepted_at: accepted_at,
+// These environment values use ASCII case folding, exactly like the SMTP wire.
+fn ascii_lower(text: String) -> String Never! {
+    bytes := text.bytes()
+    loop i in 0..<bytes.len() {
+        value :: Int.from_u8(bytes[i])
+        if value >= 65 && value <= 90 -> bytes[i] = U8{value + 32}
     }
+    String.from_bytes(bytes) ?? text
 }
 
-pub fn address(text: String) -> Address EmailError! {
-    reject_controls(~text, "email address") ?? return Err(invalid_address("email address contains a forbidden control character"))
-    value := text.trim()
-    if value.bytes().len() == 0 || value.bytes().len() > 512 {
-        return Err(invalid_address("email address must contain 1 to 512 bytes"))
-    }
-    opens := count_byte(~value, 60) ?? panic("count_byte failed")
-    closes := count_byte(~value, 62) ?? panic("count_byte failed")
-    display := no_display()
-    mailbox := ~value
-    if opens == 0 && closes == 0 -> mailbox = ~value else if opens == 1 && closes == 1 && (ends_with_byte(~value, 62) ?? panic("ends_with_byte failed")) {
-        open := last_byte(~value, 60) ?? panic("last_byte failed")
-        shown := (slice_text(~value, 0, open) ?? panic("slice_text failed")).trim()
-        if shown.bytes().len() == 0 -> return Err(invalid_address("display name cannot be empty"))
-        parsed :: parse_display(~shown) ?? return Err(invalid_address("invalid display name"))
-        display = Val(parsed)
-        mailbox = (slice_text(~value, open + 1, value.bytes().len() - 1) ?? panic("slice_text failed")).trim()
-    } else { return Err(invalid_address("display address must have one final `<mailbox>`")) }
-    validate_mailbox(~mailbox) ?? return Err(invalid_address("invalid mailbox"))
-    Ok(Address{display: display, mailbox: mailbox})
+fn base64_value(byte: U8) -> Int? Never! {
+    value :: Int.from_u8(byte)
+    if value >= 65 && value <= 90 -> return Val(value - 65)
+    if value >= 97 && value <= 122 -> return Val(value - 97 + 26)
+    if value >= 48 && value <= 57 -> return Val(value - 48 + 52)
+    if value == 43 -> return Val(62)
+    if value == 47 -> return Val(63)
+    None
 }
 
-pub fn attachment(name: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
-    validate_attachment_parts(~name, ~mime, ~bytes) ?? return Err(invalid_attachment("invalid attachment"))
-    if bytes.len() > C_MAX_ATTACHMENT_BYTES {
-        return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
-    }
-    Ok(Attachment{filename: name, mime: ascii_lower(mime), bytes: bytes})
-}
-
-pub fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: HTML, attachments: [Attachment]) -> Message EmailError! {
-    html_text :: html.text()
-    validate_message_parts(from, to, bcc, subject, text, html_text, attachments) ?? return Err(invalid_message("message contains invalid fields"))
-    upper :: prospective_wire_upper(from, to, subject, text, html_text, attachments)
-    if upper > C_MAX_MESSAGE_BYTES {
-        return Err(limit_error("message", "serialized message exceeds 33554432 bytes"))
-    }
-    validate_rendered_headers(from, to, subject) ?? return Err(invalid_message("message headers are invalid"))
-    envelope :: default_envelope(from, to, bcc) ?? return Err(invalid_message("message envelope is invalid"))
-    Ok(
-    Message{
-        from: from,
-        to: to,
-        bcc: bcc,
-        subject: subject,
-        text: text,
-        html: html_text,
-        attachments: attachments,
-        envelope: envelope,
-        wire_upper: upper,
-    },
-    )
-}
-
-pub fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
-    validate_address(from) ?? return Err(invalid_address("invalid sender address"))
-    if recipients.len() == 0 {
-        return Err(invalid_message("email envelope needs at least one recipient"))
-    }
-    if recipients.len() > C_MAX_RECIPIENTS {
-        return Err(limit_error("envelope", "email envelope exceeds 100 recipients"))
-    }
-    loop recipient in recipients {
-        validate_address(recipient) ?? return Err(invalid_address("invalid envelope recipient"))
-    }
-    Ok(Envelope{from: from, recipients: recipients})
-}
-
-pub fn serialize(message: Message) -> [U8] EmailError! {
-    validate_message_value(message) ?? return Err(invalid_message("message is invalid"))
-    mixed :: boundary(message, "mixed")
-    alternative :: boundary(message, "alternative")
-    from := ~message.from
-    to := ~message.to
-    subject := ~message.subject
-    out := [U8]{}
-    add_header(&out, "From", render_address(from)) ?? return Err(invalid_message("invalid From header"))
-    add_header(&out, "To", render_addresses(to, "To")) ?? return Err(invalid_message("invalid To header"))
-    add_header(&out, "Subject", encode_header(~subject)) ?? return Err(invalid_message("invalid Subject header"))
-    add_header(&out, "MIME-Version", "1.0") ?? return Err(invalid_message("invalid MIME header"))
-    if message.attachments.len() == 0 {
-        render_body(&out, message, ~alternative) ?? return Err(invalid_message("invalid message body"))
-    } else {
-        add_header(&out, "Content-Type", "multipart/mixed; boundary=\"{mixed}\"") ?? return Err(invalid_message("invalid multipart header"))
-        push_crlf(&out)
-        push_text(&out, "--{mixed}")
-        push_crlf(&out)
-        render_body(&out, message, ~alternative) ?? return Err(invalid_message("invalid message body"))
-        loop item in message.attachments {
-            push_crlf(&out)
-            push_text(&out, "--{mixed}")
-            push_crlf(&out)
-            add_header(&out, "Content-Type", ~item.mime) ?? return Err(invalid_attachment("invalid attachment MIME"))
-            add_header(&out, "Content-Transfer-Encoding", "base64") ?? return Err(invalid_attachment("invalid attachment encoding"))
-            encoded_name :: percent_encode(~item.filename) ?? return Err(invalid_attachment("invalid attachment filename"))
-            add_header(&out, "Content-Disposition", "attachment; filename*=UTF-8''{encoded_name}") ?? return Err(invalid_attachment("invalid attachment disposition"))
-            push_crlf(&out)
-            push_text(&out, base64_lines(~item.bytes))
+// Do not use the edition-sensitive public base64 decoder: DKIM environment
+// keys always require canonical standard base64 with no whitespace.
+fn decode_dkim(text: Secret) -> Secret EmailError! {
+    invalid :: "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"
+    #Unsafe("DKIM decoding: borrow encoded bytes and keep partial output in a zeroizing Secret") {
+        length :: text.bytes.len()
+        if length == 0 || length %% 4 != 0 -> return Err(configuration_error(invalid))
+        // Allocate only non-secret zeros; decoded bytes never enter a buffer
+        // whose ordinary List growth could free them without zeroizing.
+        output := Secret.from_bytes(loop index in 0..<32 -> U8{0})
+        written := 0
+        blocks :: length /% 4
+        loop index in 0..<blocks {
+            offset :: index * 4
+            pad2 :: text.bytes[offset + 2] == (U8{61})
+            pad3 :: text.bytes[offset + 3] == (U8{61})
+            pads :: (if pad2 -> 1 else -> 0) + (if pad3 -> 1 else -> 0)
+            if (pads != 0 && index + 1 != blocks) || (pad2 && !pad3) -> return Err(configuration_error(invalid))
+            a :: base64_value(text.bytes[offset]) ?? return Err(configuration_error(invalid))
+            b :: base64_value(text.bytes[offset + 1]) ?? return Err(configuration_error(invalid))
+            c :: if pad2 -> 0 else -> base64_value(text.bytes[offset + 2]) ?? return Err(configuration_error(invalid))
+            d :: if pad3 -> 0 else -> base64_value(text.bytes[offset + 3]) ?? return Err(configuration_error(invalid))
+            if (pads == 2 && (b.bit_and(15)) != 0) || (pads == 1 && (c.bit_and(3)) != 0) -> return Err(configuration_error(invalid))
+            if written < 32 -> output.bytes[written] = U8{((a << 2).bit_or((b >> 4))).bit_and(255)}
+            written += 1
+            if pads < 2 {
+                if written < 32 -> output.bytes[written] = U8{((b << 4).bit_or((c >> 2))).bit_and(255)}
+                written += 1
+            }
+            if pads == 0 {
+                if written < 32 -> output.bytes[written] = U8{((c << 6).bit_or(d)).bit_and(255)}
+                written += 1
+            }
         }
-        push_crlf(&out)
-        push_text(&out, "--{mixed}--")
-        push_crlf(&out)
+        if written != 32 -> return Err(configuration_error("SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"))
+        return Ok(^output)
     }
-    if out.len() > message.wire_upper || out.len() > C_MAX_MESSAGE_BYTES {
-        return Err(limit_error("serialize", "serialized message exceeded its checked wire bound"))
-    }
-    Ok(out)
 }
 
-pub fn smtp(config: SMTPConfig) -[Net]> Mailer EmailError! {
-    issue :: validate_smtp_config(config)
-    if issue == {
-        .None -> { _ := 0 }
-        .Val(error) -> return Err(error)
+fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
+    host :: sys.get("SMTP_HOST") ?? return Err(configuration_error("SMTP_HOST is required"))
+    security_text :: ascii_lower(sys.get("SMTP_SECURITY") ?? "starttls")
+    security :: if security_text == {
+        "starttls" -> SMTPSecurity.StartTLS
+        "tls" -> SMTPSecurity.TLS
+        else -> { return Err(configuration_error("SMTP_SECURITY must be `starttls` or `tls`")) }
     }
+    default_port :: if security == .TLS -> 465 else -> 587
+    port_text :: sys.get("SMTP_PORT")
+    port :: if port_text == .Val(value) -> environment_port(value) ? number -> number ! error -> return Err(error) else -> default_port
+    policy_text :: ascii_lower(sys.get("SMTP_RECIPIENT_POLICY") ?? "require_all")
+    recipient_policy :: if policy_text == {
+        "require_all" -> RecipientPolicy.RequireAll
+        "deliver_accepted" -> RecipientPolicy.DeliverAccepted
+        else -> { return Err(configuration_error("SMTP_RECIPIENT_POLICY must be `require_all` or `deliver_accepted`")) }
+    }
+    trust :: if sys.get("SMTP_CA_PEM") == .Val(pem) -> TLSTrust.SystemPlusCa{pem: pem.bytes()} else -> TLSTrust.System
+    username :: sys.get("SMTP_USERNAME")
+    password :: sys.get("SMTP_PASSWORD").map((text) -> Secret.from_text(text))
+    auth :: if {
+        username == .Val(user) -> {
+            secret :: password ?? return Err(configuration_error("SMTP_USERNAME and SMTP_PASSWORD must be set together"))
+            SMTPAuth.Password{username: user, password: ^secret}
+        }
+        else -> {
+            if password != None -> return Err(configuration_error("SMTP_USERNAME and SMTP_PASSWORD must be set together"))
+            SMTPAuth{.None}
+        }
+    }
+    domain :: sys.get("SMTP_DKIM_DOMAIN")
+    selector :: sys.get("SMTP_DKIM_SELECTOR")
+    encoded :: sys.get("SMTP_DKIM_PRIVATE_KEY_BASE64").map((text) -> Secret.from_text(text))
+    headers :: sys.get("SMTP_DKIM_SIGNED_HEADERS")
+    dkim := DKIMConfig?{None}
+    if {
+        domain == .Val(domain_text) && selector == .Val(selector_text) && encoded == .Val(encoded_key) -> {
+            private_key :: decode_dkim(encoded_key) ? key -> key ! error -> return Err(error)
+            signed_headers :: if headers == .Val(value) -> loop header in value.split(",").to_list() -> header.trim() else -> [String]{"from", "to", "subject", "mime-version", "content-type"}
+            dkim = Val(DKIMConfig{domain: domain_text, selector: selector_text, private_key: ^private_key, signed_headers: signed_headers})
+        }
+        domain != None || selector != None || encoded != None || headers != None -> {
+            return Err(configuration_error("SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"))
+        }
+        else -> {}
+    }
+    config :: SMTPConfig{host: host, port: port, security: security, auth: auth, recipient_policy: recipient_policy, trust: trust, limits: limits_safe(), dkim: dkim}
+    validate_smtp_config(config) ? unit -> unit ! error -> return Err(error)
     core.email.smtp(config)
 }
 
-fn no_smtp_auth() -> SMTPAuth Never! { .None }
-
-fn no_dkim() -> DKIMConfig? { None }
-
-pub fn smtp_from_env() -[Env, Net]> Mailer EmailError! {
-    host_value :: core.sys.get("SMTP_HOST")
-    host := ""
-    if host_value == {
-        .Val(value) -> { host = value }
-        .None -> return Err(email_error("smtp_from_env", "SMTP_HOST is required"))
-    }
-    security_value :: core.sys.get("SMTP_SECURITY")
-    security_text := if security_value == {
-        .None -> "starttls"
-        .Val(value) -> ascii_lower(value)
-    }
-    security := SMTPSecurity.StartTLS
-    if security_text == {
-        "starttls" -> security = SMTPSecurity.StartTLS
-        "tls" -> security = SMTPSecurity.TLS
-        else -> {
-            return Err(email_error("smtp_from_env", "SMTP_SECURITY must be `starttls` or `tls`"))
-        }
-    }
-    default_port := if security == {
-        .StartTLS -> 587
-        .TLS -> 465
-    }
-    port_value :: core.sys.get("SMTP_PORT")
-    port := if port_value == {
-        .None -> default_port
-        .Val(value) -> parse_smtp_integer(value) ?? return Err(email_error("smtp_from_env", "SMTP_PORT must be an integer"))
-    }
-    policy_value :: core.sys.get("SMTP_RECIPIENT_POLICY")
-    policy_text := if policy_value == {
-        .None -> "require_all"
-        .Val(value) -> ascii_lower(value)
-    }
-    recipient_policy := RecipientPolicy.RequireAll
-    if policy_text == {
-        "require_all" -> recipient_policy = RecipientPolicy.RequireAll
-        "deliver_accepted" -> recipient_policy = RecipientPolicy.DeliverAccepted
-        else -> {
-            return Err(email_error("smtp_from_env", "SMTP_RECIPIENT_POLICY must be `require_all` or `deliver_accepted`"))
-        }
-    }
-    ca_value :: core.sys.get("SMTP_CA_PEM")
-    trust := if ca_value == {
-        .None -> TLSTrust.System
-        .Val(pem) -> TLSTrust.SystemPlusCa{pem: pem.bytes()}
-    }
-    username_value :: core.sys.get("SMTP_USERNAME")
-    password_value :: core.sys.get("SMTP_PASSWORD")
-    if username_value == .None && password_value != None {
-        return Err(email_error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together"))
-    }
-    if username_value != None && password_value == .None {
-        return Err(email_error("smtp_from_env", "SMTP_USERNAME and SMTP_PASSWORD must be set together"))
-    }
-    auth := if username_value == {
-        .None -> no_smtp_auth()
-        .Val(username) -> if password_value == {
-            .None -> no_smtp_auth()
-            .Val(password) -> SMTPAuth.Password{username: username, password: Secret.from_text(password)}
-        }
-    }
-
-    domain_value :: core.sys.get("SMTP_DKIM_DOMAIN")
-    selector_value :: core.sys.get("SMTP_DKIM_SELECTOR")
-    key_value :: core.sys.get("SMTP_DKIM_PRIVATE_KEY_BASE64")
-    headers_value :: core.sys.get("SMTP_DKIM_SIGNED_HEADERS")
-    has_dkim := domain_value != None || selector_value != None || key_value != None || headers_value != None
-    dkim := no_dkim()
-    if has_dkim {
-        domain := ""
-        if domain_value == {
-            .Val(value) -> { domain = value }
-            .None -> {
-                return Err(email_error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"))
-            }
-        }
-        selector := ""
-        if selector_value == {
-            .Val(value) -> { selector = value }
-            .None -> {
-                return Err(email_error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"))
-            }
-        }
-        encoded_key := ""
-        if key_value == {
-            .Val(value) -> { encoded_key = value }
-            .None -> {
-                return Err(email_error("smtp_from_env", "SMTP_DKIM_DOMAIN, SMTP_DKIM_SELECTOR, and SMTP_DKIM_PRIVATE_KEY_BASE64 must be set together"))
-            }
-        }
-        key_bytes :: base64.decode(encoded_key) ?? return Err(email_error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"))
-        if key_bytes.len() != 32 {
-            return Err(email_error("smtp_from_env", "SMTP_DKIM_PRIVATE_KEY_BASE64 must decode to exactly 32 bytes"))
-        }
-        signed_headers := if headers_value == {
-            .None -> [String]{"from", "to", "subject", "mime-version", "content-type"}
-            .Val(value) -> split_signed_headers(value)
-        }
-        dkim_config :: DKIMConfig{
-            domain: domain,
-            selector: selector,
-            private_key: Secret.from_bytes(key_bytes),
-            signed_headers: signed_headers,
-        }
-        dkim = Val(dkim_config)
-    }
-    config := SMTPConfig{
-        host: host,
-        port: port,
-        security: security,
-        auth: auth,
-        recipient_policy: recipient_policy,
-        trust: trust,
-        limits: limits(),
-        dkim: dkim,
-    }
-    smtp(config)
+// Seed oracle: Prelude/CoreLib/Email.rs:168-184. First invalid field wins.
+fn validate_limits(limits: Limits) EmailError! {
+    if limits.max_reply_line_bytes < 64 || limits.max_reply_line_bytes > 65536 ->
+        return Err(construction_error("smtp", "max_reply_line_bytes must be between 64 and 65536; got {limits.max_reply_line_bytes}"))
+    if limits.max_reply_lines < 1 || limits.max_reply_lines > 1000 ->
+        return Err(construction_error("smtp", "max_reply_lines must be between 1 and 1000; got {limits.max_reply_lines}"))
+    if limits.max_capabilities < 1 || limits.max_capabilities > 1000 ->
+        return Err(construction_error("smtp", "max_capabilities must be between 1 and 1000; got {limits.max_capabilities}"))
+    if limits.max_recipients < 1 || limits.max_recipients > 10000 ->
+        return Err(construction_error("smtp", "max_recipients must be between 1 and 10000; got {limits.max_recipients}"))
+    if limits.max_message_bytes < 1 || limits.max_message_bytes > 1073741824 ->
+        return Err(construction_error("smtp", "max_message_bytes must be between 1 and 1073741824; got {limits.max_message_bytes}"))
+    if limits.max_auth_challenge_bytes < 1 || limits.max_auth_challenge_bytes > 65536 ->
+        return Err(construction_error("smtp", "max_auth_challenge_bytes must be between 1 and 65536; got {limits.max_auth_challenge_bytes}"))
+    Ok()
 }
 
-fn parse_smtp_integer(text: String) -> Int? {
-    raw := text.bytes()
-    if raw.len() == 0 -> return None
-    negative := false
-    start := 0
-    if raw[0] == (U8{45}) {
-        negative = true
-        start = 1
-    } else if raw[0] == (U8{43}) -> start = 1
-    if start == raw.len() -> return None
-    value := 0
-    loop i in start..<raw.len() {
-        digit := Int.from_u8(raw[i]) - 48
-        if digit < 0 || digit > 9 -> return None
-        if value > 922337203685477580 -> return None
-        if value == 922337203685477580 && digit > 7 {
-            if negative && digit == 8 && i == raw.len() - 1 -> return Val(-9223372036854775807 - 1)
-            return None
-        }
-        value = value * 10 + digit
-    }
-    if negative -> return Val(-value)
-    Val(value)
-}
-
-fn split_signed_headers(text: String) -> [String] Never! {
-    raw := text.bytes()
-    headers := [String]{}
-    start := 0
-    i := 0
-    loop i <= raw.len() {
-        if i == raw.len() || raw[i] == (U8{44}) {
-            &headers.push(slice_text(text, start, i).trim())
-            start = i + 1
-        }
-        i += 1
-    }
-    headers
-}
-
-fn push_text(out: &[U8], text: String) Never! {
-    loop byte in text.bytes() -> &out.push(byte)
-}
-
-fn push_crlf(out: &[U8]) Never! {
-    &out.push(U8{13})
-    &out.push(U8{10})
-}
-
-fn validate_smtp_config(config: SMTPConfig) -> EmailError? {
-    auth_error :: validate_smtp_auth(config.auth)
-    if auth_error == {
-        .None -> { _ := 0 }
-        .Val(error) -> return Val(error)
-    }
-    limits := ~config.limits
-    if limits.max_reply_line_bytes < 64 || limits.max_reply_line_bytes > 65536 {
-        return Val(email_error("smtp", "max_reply_line_bytes must be between 64 and 65536; got {limits.max_reply_line_bytes}") ?? panic("total email error"))
-    }
-    if limits.max_reply_lines < 1 || limits.max_reply_lines > 1000 {
-        return Val(email_error("smtp", "max_reply_lines must be between 1 and 1000; got {limits.max_reply_lines}") ?? panic("total email error"))
-    }
-    if limits.max_capabilities < 1 || limits.max_capabilities > 1000 {
-        return Val(email_error("smtp", "max_capabilities must be between 1 and 1000; got {limits.max_capabilities}") ?? panic("total email error"))
-    }
-    if limits.max_recipients < 1 || limits.max_recipients > 10000 {
-        return Val(email_error("smtp", "max_recipients must be between 1 and 10000; got {limits.max_recipients}") ?? panic("total email error"))
-    }
-    if limits.max_message_bytes < 1 || limits.max_message_bytes > 1073741824 {
-        return Val(email_error("smtp", "max_message_bytes must be between 1 and 1073741824; got {limits.max_message_bytes}") ?? panic("total email error"))
-    }
-    if limits.max_auth_challenge_bytes < 1 || limits.max_auth_challenge_bytes > 65536 {
-        return Val(email_error("smtp", "max_auth_challenge_bytes must be between 1 and 65536; got {limits.max_auth_challenge_bytes}") ?? panic("total email error"))
-    }
-
-    host := ~config.host
-    host_bytes := host.bytes()
-    if host_bytes.len() == 0 || host_bytes.len() > 253 || !is_ascii(host) {
-        return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes") ?? panic("total email error"))
-    }
-    loop byte in host_bytes {
+// Seed oracle: Prelude/CoreLib/Email.rs:310-338; preserve validation order.
+// Key length/password UTF-8 checks belong to smtp_bytes, not this predicate.
+fn validate_smtp_config(config: SMTPConfig) EmailError! {
+    validate_limits(config.limits) ? unit -> unit ! error -> return Err(error)
+    host :: config.host.bytes()
+    if host.len() == 0 || host.len() > 253 ->
+        return Err(construction_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+    loop byte in host {
         n :: Int.from_u8(byte)
-        if n < 33 || n == 127 {
-            return Val(email_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes") ?? panic("total email error"))
+        if n > 127 || n <= 32 || n == 127 ->
+            return Err(construction_error("smtp", "host must contain 1 to 253 non-whitespace ASCII bytes"))
+    }
+    if config.port < 1 || config.port > 65535 ->
+        return Err(construction_error("smtp", "port must be between 1 and 65535"))
+    if config.port == 587 && !(config.security == .StartTLS) ->
+        return Err(construction_error("smtp", "port 587 requires verified STARTTLS"))
+    if config.port == 465 && !(config.security == .TLS) ->
+        return Err(construction_error("smtp", "port 465 requires TLS from connect"))
+    if config.auth == .Password(username, _) {
+        bytes :: username.bytes()
+        if bytes.len() == 0 || bytes.len() > 512 ->
+            return Err(construction_error("smtp", "SMTP username must contain 1 to 512 bytes without controls"))
+        loop byte in bytes {
+            n :: Int.from_u8(byte)
+            if n < 32 || n == 127 ->
+                return Err(construction_error("smtp", "SMTP username must contain 1 to 512 bytes without controls"))
         }
     }
-    if config.port < 1 || config.port > 65535 {
-        return Val(email_error("smtp", "port must be between 1 and 65535") ?? panic("total email error"))
+    if config.trust == .SystemPlusCa(pem) {
+        validate_ca_pem(pem) ? unit -> unit ! error -> return Err(error)
     }
-    if config.security == {
-        .StartTLS -> {
-            if config.port == 465 {
-                return Val(email_error("smtp", "port 465 requires TLS from connect") ?? panic("total email error"))
-            }
-        }
-        .TLS -> {
-            if config.port == 587 {
-                return Val(email_error("smtp", "port 587 requires verified STARTTLS") ?? panic("total email error"))
-            }
-        }
+    if config.dkim == .Val(dkim) {
+        validate_dkim_config(dkim) ? unit -> unit ! error -> return Err(error)
     }
-
-    if config.trust == {
-        .System -> { _ := 0 }
-        .SystemPlusCa(pem) -> {
-            pem_error :: validate_ca_pem(~pem)
-            if pem_error == {
-                .None -> { _ := 0 }
-                .Val(reason) -> return Val(email_error("smtp", reason) ?? panic("total email error"))
-            }
-        }
-    }
-
-    if config.dkim == {
-        .None -> { _ := 0 }
-        .Val(dkim) -> {
-            dkim_error :: validate_dkim_config(dkim)
-            if dkim_error == {
-                .None -> { _ := 0 }
-                .Val(error) -> return Val(error)
-            }
-            key_length := 0
-            #Unsafe("read the DKIM key length, then wipe this copy") {
-                key_bytes := secret_bytes(dkim.private_key)
-                key_length = key_bytes.len()
-                loop i in 0..<key_bytes.len() -> key_bytes[i] = U8{0}
-            }
-            if key_length != 32 {
-                return Val(email_error("dkim", "private_key must contain exactly 32 bytes") ?? panic("total email error"))
-            }
-        }
-    }
-    None
+    Ok()
 }
 
-fn validate_smtp_auth(auth: SMTPAuth) -> EmailError? {
-    if auth == {
-        .None -> { _ := 0 }
-        .Password(username, _) -> {
-            if username.bytes().len() == 0 || username.bytes().len() > 512 || has_control(username) {
-                return Val(email_error("smtp", "SMTP username must contain 1 to 512 bytes without controls") ?? panic("total email error"))
-            }
+// Seed oracle: Prelude/CoreLib/Email.rs:341-346.
+fn valid_dkim_dns_name(value: String) -> Bool Never! {
+    if value.bytes().len() == 0 || value.bytes().len() > 253 -> return false
+    loop label in value.split(".") {
+        bytes :: label.bytes()
+        if bytes.len() == 0 || bytes.len() > 63 || bytes[0] == (U8{45}) || bytes[bytes.len() - 1] == (U8{45}) -> return false
+        loop byte in bytes {
+            if !ascii_alphanumeric(byte) && byte != (U8{45}) -> return false
         }
-    }
-    None
-}
-
-fn has_ascii_control(text: String) -> Bool {
-    loop byte in text.bytes() {
-        n :: Int.from_u8(byte)
-        if n < 32 || n == 127 -> return true
-    }
-    false
-}
-
-fn validate_ca_pem(pem: [U8]) -> String? {
-    if pem.len() == 0 -> return Val("custom CA PEM must not be empty")
-    text :: String.from_bytes(~pem) ?? return Val("custom CA PEM must be UTF-8 text")
-    raw := text.bytes()
-    begin := "-----BEGIN CERTIFICATE-----".bytes()
-    end := "-----END CERTIFICATE-----".bytes()
-    cursor := 0
-    certificates := 0
-    loop cursor < raw.len() {
-        loop cursor < raw.len() && is_ascii_space(raw[cursor]) -> cursor += 1
-        if cursor == raw.len() -> break
-        if !bytes_at(raw, cursor, begin) {
-            return Val("custom CA PEM contains data outside certificate blocks")
-        }
-        cursor += begin.len()
-        encoded := [U8]{}
-        found_end := false
-        loop cursor < raw.len() {
-            if bytes_at(raw, cursor, end) {
-                cursor += end.len()
-                found_end = true
-                break
-            }
-            if !is_ascii_space(raw[cursor]) -> &encoded.push(raw[cursor])
-            cursor += 1
-        }
-        if !found_end -> return Val("custom CA PEM has an unterminated certificate")
-        encoded_text :: String.from_bytes(encoded) ?? return Val("custom CA PEM contains invalid base64")
-        der :: base64.decode(~encoded_text) ?? return Val("custom CA PEM contains invalid base64")
-        if der.len() < 4 || der[0] != (U8{48}) {
-            return Val("custom CA PEM does not contain an X.509 DER certificate")
-        }
-        certificates += 1
-    }
-    if certificates == 0 -> return Val("custom CA PEM must contain only certificate blocks")
-    None
-}
-
-fn is_ascii_space(byte: U8) -> Bool Never! {
-    n :: Int.from_u8(byte)
-    n == 32 || (n >= 9 && n <= 13)
-}
-
-fn bytes_at(raw: [U8], start: Int, value: [U8]) -> Bool Never! {
-    if start < 0 || start + value.len() > raw.len() -> return false
-    loop i in 0..<value.len() {
-        if raw[start + i] != value[i] -> return false
     }
     true
 }
 
-fn validate_dkim_config(dkim: DKIMConfig) -> EmailError? {
-    if !valid_dns_name(~dkim.domain) {
-        return Val(email_error("dkim", "domain must be a valid ASCII DNS name") ?? panic("total email error"))
-    }
-    if dkim.selector.contains(".") || !valid_dns_name(~dkim.selector) {
-        return Val(email_error("dkim", "selector must be one valid ASCII DNS label") ?? panic("total email error"))
-    }
-    if dkim.signed_headers.len() == 0 {
-        return Val(email_error("dkim", "signed_headers must not be empty") ?? panic("total email error"))
-    }
-    if dkim.signed_headers.len() > 64 {
-        return Val(email_error("dkim", "signed_headers must contain at most 64 names") ?? panic("total email error"))
-    }
-
+// Seed oracle: Prelude/CoreLib/Email.rs:348-389. Never inspect the Secret.
+fn validate_dkim_config(dkim: DKIMConfig) EmailError! {
+    if !valid_dkim_dns_name(dkim.domain) ->
+        return Err(construction_error("dkim", "domain must be a valid ASCII DNS name"))
+    if dkim.selector.contains(".") || !valid_dkim_dns_name(dkim.selector) ->
+        return Err(construction_error("dkim", "selector must be one valid ASCII DNS label"))
+    if dkim.signed_headers.len() == 0 ->
+        return Err(construction_error("dkim", "signed_headers must not be empty"))
+    if dkim.signed_headers.len() > 64 ->
+        return Err(construction_error("dkim", "signed_headers must contain at most 64 names"))
     normalized := [String]{}
     list_bytes := 0
     has_from := false
     loop name in dkim.signed_headers {
-        raw := name.bytes()
-        if raw.len() == 0 || !is_ascii(name) {
-            return Val(email_error("dkim", "signed_headers must contain valid header names") ?? panic("total email error"))
-        }
-        loop byte in raw {
+        bytes :: name.bytes()
+        if bytes.len() == 0 ->
+            return Err(construction_error("dkim", "signed_headers must contain valid header names"))
+        loop byte in bytes {
             n :: Int.from_u8(byte)
-            if n < 33 || n > 126 || n == 58 {
-                return Val(email_error("dkim", "signed_headers must contain valid header names") ?? panic("total email error"))
-            }
+            if n < 33 || n > 126 || n == 58 ->
+                return Err(construction_error("dkim", "signed_headers must contain valid header names"))
         }
-        lower :: ascii_lower(~name)
-        if lower == "received" || lower == "return-path" || lower == "dkim-signature" || lower == "authentication-results" || lower == "arc-authentication-results" || lower == "arc-message-signature" || lower == "arc-seal" {
-            return Val(email_error("dkim", "signed_headers contains forbidden hop header `{lower}`") ?? panic("total email error"))
-        }
+        lower :: ascii_lower(name)
+        if lower == "received" || lower == "return-path" || lower == "dkim-signature" ||
+            lower == "authentication-results" || lower == "arc-authentication-results" ||
+            lower == "arc-message-signature" || lower == "arc-seal" ->
+            return Err(construction_error("dkim", "signed_headers contains forbidden hop header `{lower}`"))
         loop existing in normalized {
-            if existing == lower {
-                return Val(email_error("dkim", "signed_headers contains duplicate `{lower}`") ?? panic("total email error"))
-            }
+            if existing == lower -> return Err(construction_error("dkim", "signed_headers contains duplicate `{lower}`"))
         }
         if lower == "from" -> has_from = true
         list_bytes += lower.bytes().len()
         &normalized.push(lower)
     }
-    if !has_from -> return Val(email_error("dkim", "signed_headers must include `from`") ?? panic("total email error"))
-    list_bytes += normalized.len() - 1
-    if list_bytes + 6 > C_MAX_HEADER_BYTES {
-        return Val(email_error("dkim", "signed_headers exceeds the DKIM header line bound") ?? panic("total email error"))
+    if !has_from -> return Err(construction_error("dkim", "signed_headers must include `from`"))
+    if list_bytes + normalized.len() - 1 + 6 > 998 ->
+        return Err(construction_error("dkim", "signed_headers exceeds the DKIM header line bound"))
+    Ok()
+}
+
+// Seed oracle: Prelude/CoreLib/Email.rs:391-420. Rust trim is Unicode-aware.
+fn validate_ca_pem(pem: [U8]) EmailError! {
+    if pem.len() == 0 -> return Err(construction_error("smtp", "custom CA PEM must not be empty"))
+    text :: String.from_bytes(pem) ?? return Err(construction_error("smtp", "custom CA PEM must be UTF-8 text"))
+    raw :: text.bytes()
+    begin :: "-----BEGIN CERTIFICATE-----".bytes()
+    end :: "-----END CERTIFICATE-----".bytes()
+    cursor := 0
+    certificates := 0
+    loop {
+        start :: ca_marker(raw, cursor, begin) ?? break
+        if byte_text(raw[cursor..<start]).trim().bytes().len() != 0 ->
+            return Err(construction_error("smtp", "custom CA PEM contains data outside certificate blocks"))
+        cursor = start + begin.len()
+        stop :: ca_marker(raw, cursor, end) ?? return Err(construction_error("smtp", "custom CA PEM has an unterminated certificate"))
+        der :: decode_ca_base64(byte_text(raw[cursor..<stop])) ? value -> value ! error -> return Err(error)
+        if der.len() < 4 || der[0] != (U8{48}) ->
+            return Err(construction_error("smtp", "custom CA PEM does not contain an X.509 DER certificate"))
+        certificates += 1
+        cursor = stop + end.len()
+    }
+    if certificates == 0 || byte_text(raw[cursor..<raw.len()]).trim().bytes().len() != 0 ->
+        return Err(construction_error("smtp", "custom CA PEM must contain only certificate blocks"))
+    Ok()
+}
+
+fn ca_marker(raw: [U8], start: Int, marker: [U8]) -> Int? Never! {
+    cursor := start
+    loop cursor + marker.len() <= raw.len() {
+        matches := true
+        loop index in 0..<marker.len() {
+            if raw[cursor + index] != marker[index] {
+                matches = false
+                break
+            }
+        }
+        if matches -> return Val(cursor)
+        cursor += 1
     }
     None
 }
 
-fn valid_dns_name(text: String) -> Bool Never! {
-    raw := text.bytes()
-    if raw.len() == 0 || raw.len() > 253 || !is_ascii(text) -> return false
-    start := 0
-    i := 0
-    loop i <= raw.len() {
-        if i == raw.len() || raw[i] == (U8{46}) {
-            if i == start || i - start > 63 -> return false
-            if raw[start] == (U8{45}) || raw[i - 1] == (U8{45}) -> return false
-            loop j in start..<i {
-                n :: Int.from_u8(raw[j])
-                if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45) {
-                    return false
+// Seed oracle: Prelude/CoreLib/Email.rs:422-461. Unlike the DKIM decoder this
+// accepts noncanonical trailing bits, but rejects bytes after a padded quartet.
+fn decode_ca_base64(text: String) -> [U8] EmailError! {
+    out := [U8]{}
+    quartet := [U8]{0, 0, 0, 0}
+    used := 0
+    padded := false
+    loop byte in text.bytes() {
+        n :: Int.from_u8(byte)
+        if n == 32 || n == 9 || n == 10 || n == 12 || n == 13 -> next
+        if padded -> return Err(construction_error("smtp", "custom CA PEM has data after base64 padding"))
+        quartet[used] = byte
+        used += 1
+        if used == 4 {
+            values := [Int]{0, 0, 0, 0}
+            pads := 0
+            loop index in 0..<4 {
+                if quartet[index] == (U8{61}) {
+                    pads += 1
+                } else {
+                    if pads != 0 -> return Err(construction_error("smtp", "custom CA PEM has invalid base64 padding"))
+                    values[index] = base64_value(quartet[index]) ?? return Err(construction_error("smtp", "custom CA PEM contains invalid base64"))
                 }
             }
-            start = i + 1
+            if pads > 2 -> return Err(construction_error("smtp", "custom CA PEM has invalid base64 padding"))
+            &out.push(U8{((values[0] << 2).bit_or((values[1] >> 4))).bit_and(255)})
+            if pads < 2 -> &out.push(U8{((values[1] << 4).bit_or((values[2] >> 2))).bit_and(255)})
+            if pads == 0 -> &out.push(U8{((values[2] << 6).bit_or(values[3])).bit_and(255)})
+            padded = pads != 0
+            used = 0
         }
-        i += 1
     }
-    true
+    if used != 0 || out.len() == 0 -> return Err(construction_error("smtp", "custom CA PEM contains incomplete base64"))
+    Ok(out)
 }
 
-fn email_error(operation: String, reason: String) -> EmailError Never! {
-    EmailError.Configuration{operation: operation, server: no_display(), code: None, reason: reason}
-}
-
-fn invalid_address(reason: String) -> EmailError Never! { email_error("InvalidAddress", reason) }
-
-fn invalid_attachment(reason: String) -> EmailError Never! { email_error("InvalidAttachment", reason) }
-
-fn invalid_message(reason: String) -> EmailError Never! { email_error("InvalidMessage", reason) }
-
-fn invalid_header(reason: String) -> EmailError Never! { email_error("InvalidHeader", reason) }
-
-fn invalid_smtp(reason: String) -> EmailError Never! { email_error("smtp", reason) }
-
-fn limit_error(operation: String, reason: String) -> EmailError Never! { email_error(operation, reason) }
-
-fn no_display() -> String? { None }
-
-fn count_byte(text: String, needle: Int) -> Int {
-    count := 0
-    loop byte in text.bytes() {
-        if Int.from_u8(byte) == needle -> count += 1
+// Port of tests/corelib_parts/email.rs:145-190 (core-email-policy row 437).
+// Exact errors observed from the current Rust seed, not inferred from a port.
+#Test("SMTP private limits config CA and DKIM preserve ratified law") {
+    safe :: limits_safe()
+    invalid := safe
+    invalid.max_reply_line_bytes = 63
+    invalid.max_reply_lines = 0
+    if validate_limits(invalid) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "smtp", server: None, code: None, reason: "max_reply_line_bytes must be between 64 and 65536; got 63"})
+    } else { panic("invalid limits accepted") }
+    config := SMTPConfig{
+        host: "smtp.example.com", port: 587, security: .StartTLS,
+        auth: .None, recipient_policy: .RequireAll,
+        trust: .SystemPlusCa{pem: "-----BEGIN CERTIFICATE-----\nMAMCAQE=\n-----END CERTIFICATE-----\n".bytes()},
+        limits: safe, dkim: None,
     }
-    count
-}
-
-fn last_byte(text: String, needle: Int) -> Int {
-    raw := text.bytes()
-    i := raw.len()
-    loop i > 0 {
-        i -= 1
-        if Int.from_u8(raw[i]) == needle -> return i
+    assert(validate_smtp_config(config) == .Ok(_))
+    config.dkim = Val(DKIMConfig{domain: "example.com", selector: "login-2026",
+        private_key: Secret.from_bytes([U8]{}), signed_headers: [String]{"subject"}})
+    if validate_smtp_config(config) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "dkim", server: None, code: None, reason: "signed_headers must include `from`"})
+    } else { panic("DKIM without from accepted") }
+    config.dkim = Val(DKIMConfig{domain: "example.com", selector: "login-2026",
+        private_key: Secret.from_bytes([U8]{}), signed_headers: [String]{"from", "FROM"}})
+    if validate_smtp_config(config) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "dkim", server: None, code: None, reason: "signed_headers contains duplicate `from`"})
+    } else { panic("duplicate DKIM header accepted") }
+    config.dkim = Val(DKIMConfig{domain: "example.com", selector: "login-2026",
+        private_key: Secret.from_bytes([U8]{}), signed_headers: [String]{"from", "received"}})
+    if validate_smtp_config(config) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "dkim", server: None, code: None, reason: "signed_headers contains forbidden hop header `received`"})
+    } else { panic("DKIM hop header accepted") }
+    malformed :: SMTPConfig{
+        host: "smtp.example.com", port: 465, security: .TLS,
+        auth: .None, recipient_policy: .DeliverAccepted,
+        trust: .SystemPlusCa{pem: "-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".bytes()},
+        limits: safe, dkim: None,
     }
-    -1
+    if validate_smtp_config(malformed) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "smtp", server: None, code: None, reason: "custom CA PEM must contain only certificate blocks"})
+    } else { panic("noncertificate CA accepted") }
 }
 
-fn ends_with_byte(text: String, needle: Int) -> Bool {
-    raw := text.bytes()
-    raw.len() > 0 && Int.from_u8(raw[raw.len() - 1]) == needle
+#Test("safe SMTP limits preserve every bound") {
+    defaults :: Limits.safe()
+    assert_eq(defaults.max_reply_line_bytes, 512)
+    assert_eq(defaults.max_reply_lines, 100)
+    assert_eq(defaults.max_capabilities, 100)
+    assert_eq(defaults.max_recipients, 100)
+    assert_eq(defaults.max_message_bytes, 33554432)
+    assert_eq(defaults.max_auth_challenge_bytes, 4096)
 }
 
-fn slice_text(text: String, start: Int, end: Int) -> String Never! {
-    raw := text.bytes()
+#Test("DKIM environment base64 stays canonical in every edition") {
+    assert(decode_dkim(Secret.from_text("")) == .Err(_))
+    assert(decode_dkim(Secret.from_text("AB==")) == .Err(_))
+    assert(decode_dkim(Secret.from_text("AA==")) == .Err(_))
+    assert(decode_dkim(Secret.from_text("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=")) == .Ok(_))
+    loop text in ["AAA", "AA=A", "AA==AAAA", "AA_A", "AA-A", "AA A", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB="] {
+        assert(decode_dkim(Secret.from_text(text)) == .Err(_))
+    }
+}
+
+#Test("DKIM decoding borrows the encoded Secret and reads every quartet") {
+    encoded :: Secret.from_text("AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=")
+    decoded :: decode_dkim(encoded) ?? panic("canonical 32-byte key")
+    #Unsafe("DKIM known-answer fixture reads only synthetic key bytes") {
+        assert_eq(encoded.bytes.len(), 44)
+        assert_eq(decoded.bytes.len(), 32)
+        loop index in 0..<32 {
+            assert_eq(decoded.bytes[index], U8{index})
+        }
+    }
+}
+
+#Test("DKIM invalid quartet after an oversized decoded prefix wins over length") {
+    // Eleven complete quartets decode to 33 bytes before the invalid tail.
+    encoded :: Secret.from_text("AAAA".repeat(11) + "AAA?")
+    decoded :: decode_dkim(encoded)
+    if decoded == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "smtp_from_env", server: None, code: None, reason: "SMTP_DKIM_PRIVATE_KEY_BASE64 must be valid base64"})
+    } else { panic("invalid quartet must be refused") }
+}
+
+#Test("SMTP port grammar retains signed-i64 parsing boundaries") {
+    assert_eq(environment_port("+465") ?? panic("positive port"), 465)
+    assert_eq(environment_port("-9223372036854775808") ?? panic("minimum i64"), -9223372036854775808)
+    assert_eq(environment_port("9223372036854775807") ?? panic("maximum i64"), 9223372036854775807)
+    loop text in ["", "+", "-", " 465", "465 ", "0x1d1", "4_65", "４６５", "9223372036854775808", "-9223372036854775809"] {
+        assert(environment_port(text) == .Err(_))
+    }
+    assert_eq(ascii_lower("STARTTLS"), "starttls")
+    assert_eq(ascii_lower("TLSÉ"), "tlsÉ")
+}
+
+// These errors use Configuration exactly as the original message builder;
+// InvalidAddress/InvalidHeader/etc. are operation strings, not new variants.
+fn construction_error(operation: String, reason: String) -> EmailError Never! {
+    EmailError.Configuration{operation: operation, server: None, code: None, reason: reason}
+}
+
+fn reject_controls(value: String, what: String) EmailError! {
+    bytes :: value.bytes()
+    loop index in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte < 32 || byte == 127 ||
+            (byte == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) >= 128 && Int.from_u8(bytes[index + 1]) <= 159) {
+            return Err(construction_error("InvalidHeader", "{what} contains a forbidden control character"))
+        }
+    }
+    Ok()
+}
+
+fn byte_text(bytes: [U8]) -> String Never! {
+    String.from_bytes(bytes) ?? panic("checked UTF-8 byte boundary")
+}
+
+fn parse_display(value: String) -> String EmailError! {
+    bytes :: value.bytes()
+    if bytes[0] != (U8{34}) {
+        loop byte in bytes {
+            if byte == (U8{34}) || byte == (U8{60}) || byte == (U8{62}) ->
+                return Err(construction_error("InvalidAddress", "display name has an unmatched quote or angle bracket"))
+        }
+        return Ok(value)
+    }
+    if bytes.len() < 2 || bytes[bytes.len() - 1] != (U8{34}) ->
+        return Err(construction_error("InvalidAddress", "quoted display name needs a closing quote"))
     out := [U8]{}
-    loop i in start..<end -> &out.push(raw[i])
-    String.from_bytes(out) ?? ""
+    escaped := false
+    loop index in 1..<bytes.len() - 1 {
+        byte :: bytes[index]
+        if escaped {
+            if byte != (U8{34}) && byte != (U8{92}) ->
+                return Err(construction_error("InvalidAddress", "quoted display name may escape only quote or backslash"))
+            &out.push(byte)
+            escaped = false
+        } else if byte == (U8{92}) {
+            escaped = true
+        } else if byte == (U8{34}) {
+            return Err(construction_error("InvalidAddress", "quoted display name contains an unescaped quote"))
+        } else {
+            &out.push(byte)
+        }
+    }
+    if escaped || out.len() == 0 ->
+        return Err(construction_error("InvalidAddress", "quoted display name is empty or ends with an escape"))
+    Ok(byte_text(out))
 }
 
-fn has_control(text: String) -> Bool Never! {
-    raw := text.bytes()
-    loop i in 0..<raw.len() {
-        n :: Int.from_u8(raw[i])
-        if n < 32 || n == 127 -> return true
-        if n == 194 && i + 1 < raw.len() {
-            next :: Int.from_u8(raw[i + 1])
-            if next >= 128 && next <= 159 -> return true
-        }
+fn ascii_alphanumeric(byte: U8) -> Bool Never! {
+    value :: Int.from_u8(byte)
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || (value >= 48 && value <= 57)
+}
+
+fn atext(byte: U8) -> Bool Never! {
+    if ascii_alphanumeric(byte) -> return true
+    loop allowed in "!#$%&'*+-/=?^_`{{|}}~.".bytes() {
+        if byte == allowed -> return true
     }
     false
 }
 
-fn reject_controls(text: String, what: String) -> Bool EmailError! {
-    if has_control(text) ?? panic("has_control failed") {
-        return Err(invalid_header("{what} contains a forbidden control character"))
-    }
-    Ok(true)
-}
-
-fn parse_display(text: String) -> String EmailError! {
-    raw := text.bytes()
-    if raw.len() == 0 -> return Err(invalid_address("display name cannot be empty"))
-    if raw[0] != (U8{34}) {
-        loop byte in raw {
-            if byte == (U8{34}) || byte == (U8{60}) || byte == (U8{62}) {
-                return Err(invalid_address("display name has an unmatched quote or angle bracket"))
-            }
-        }
-        return Ok(text)
-    }
-    if raw.len() < 2 || raw[raw.len() - 1] != (U8{34}) {
-        return Err(invalid_address("quoted display name needs a closing quote"))
-    }
-    out := [U8]{}
-    escaped := false
-    loop i in 1..<(raw.len() - 1) {
-        byte :: raw[i]
-        if escaped {
-            if byte != (U8{34}) && byte != (U8{92}) {
-                return Err(invalid_address("quoted display name may escape only quote or backslash"))
-            }
-            &out.push(byte)
-            escaped = false
-        } else if byte == (U8{92}) -> escaped = true else if byte == (U8{34}) {
-            return Err(invalid_address("quoted display name contains an unescaped quote"))
-        } else { &out.push(byte) }
-    }
-    if escaped || out.len() == 0 {
-        return Err(invalid_address("quoted display name is empty or ends with an escape"))
-    }
-    Ok(String.from_bytes(out) ?? return Err(invalid_address("quoted display name is not valid UTF-8")))
-}
-
-fn is_atext(byte: U8) -> Bool Never! {
-    n :: Int.from_u8(byte)
-    (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 33 || n == 35 || n == 36 || n == 37 || n == 38 || n == 39 || n == 42 || n == 43 || n == 45 || n == 47 || n == 61 || n == 63 || n == 94 || n == 95 || n == 96 || n == 123 || n == 124 || n == 125 || n == 126 || n == 46
-}
-
-fn mailbox_separator(text: String) -> Int EmailError! {
+fn mailbox_separator(bytes: [U8]) -> Int EmailError! {
     quoted := false
     escaped := false
-    separator := -1
-    raw := text.bytes()
-    loop i in 0..<raw.len() {
-        byte :: raw[i]
-        if escaped -> escaped = false else if quoted && byte == (U8{92}) -> escaped = true else if byte == (U8{34}) {
+    separator := Int?{None}
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if escaped {
+            escaped = false
+        } else if quoted && byte == (U8{92}) {
+            escaped = true
+        } else if byte == (U8{34}) {
             quoted = !quoted
         } else if byte == (U8{64}) && !quoted {
-            if separator >= 0 {
-                return Err(invalid_address("mailbox needs exactly one unquoted `@`"))
-            }
-            separator = i
+            if separator != None -> return Err(construction_error("InvalidAddress", "mailbox needs exactly one unquoted `@`"))
+            separator = Val(index)
         }
     }
-    if quoted || escaped {
-        return Err(invalid_address("mailbox has an unterminated quoted local part"))
-    }
-    if separator < 0 -> return Err(invalid_address("mailbox needs one unquoted `@`"))
-    Ok(separator)
+    if quoted || escaped ->
+        return Err(construction_error("InvalidAddress", "mailbox has an unterminated quoted local part"))
+    Ok(separator ?? return Err(construction_error("InvalidAddress", "mailbox needs one unquoted `@`")))
 }
 
-fn validate_quoted_local(local: String) -> Bool {
-    raw := local.bytes()
-    if raw.len() < 2 || raw[raw.len() - 1] != (U8{34}) -> return false
+fn validate_quoted_local(bytes: View<U8>) EmailError! {
+    if bytes.len() < 2 || bytes[bytes.len() - 1] != (U8{34}) ->
+        return Err(construction_error("InvalidAddress", "quoted mailbox local part needs a closing quote"))
     escaped := false
-    loop i in 1..<(raw.len() - 1) {
-        byte :: Int.from_u8(raw[i])
+    loop index in 1..<bytes.len() - 1 {
+        byte :: Int.from_u8(bytes[index])
         if escaped {
-            if byte < 33 || byte > 126 -> return false
+            if byte < 33 || byte > 126 ->
+                return Err(construction_error("InvalidAddress", "quoted mailbox escape is not printable ASCII"))
             escaped = false
-        } else if byte == 92 -> escaped = true else if byte == 34 || byte < 32 || byte > 126 {
-            return false
+        } else if byte == 92 {
+            escaped = true
+        } else if byte == 34 || byte < 32 || byte > 126 {
+            return Err(construction_error("InvalidAddress", "quoted mailbox local part contains an invalid byte"))
         }
     }
-    !escaped
+    if escaped -> return Err(construction_error("InvalidAddress", "quoted mailbox local part ends with an escape"))
+    Ok()
 }
 
-fn validate_mailbox(text: String) -> Bool EmailError! {
-    raw := text.bytes()
-    if raw.len() == 0 || raw.len() > 254 {
-        return Err(invalid_address("mailbox must be 1 to 254 ASCII bytes"))
+fn validate_mailbox(mailbox: String) EmailError! {
+    bytes :: mailbox.bytes()
+    if bytes.len() == 0 || bytes.len() > 254 ->
+        return Err(construction_error("InvalidAddress", "mailbox must be 1 to 254 ASCII bytes"))
+    loop byte in bytes {
+        if Int.from_u8(byte) > 127 -> return Err(construction_error("InvalidAddress", "mailbox must be 1 to 254 ASCII bytes"))
     }
-    loop byte in raw {
-        n :: Int.from_u8(byte)
-        if n >= 128 -> return Err(invalid_address("mailbox must be 1 to 254 ASCII bytes"))
-    }
-    at :: mailbox_separator(~text) ?? return Err(invalid_address("mailbox needs one unquoted `@`"))
-    local := slice_text(~text, 0, at) ?? panic("slice_text failed")
-    domain := slice_text(~text, at + 1, raw.len()) ?? panic("slice_text failed")
-    local_len :: local.bytes().len()
-    domain_len :: domain.bytes().len()
-    if local_len == 0 || domain_len == 0 || local_len > 64 || domain_len > 253 {
-        return Err(invalid_address("mailbox local part or domain has an invalid length"))
-    }
-    local_raw := local.bytes()
-    if local_raw[0] == (U8{34}) {
-        if !(validate_quoted_local(~local) ?? panic("validate_quoted_local failed")) {
-            return Err(invalid_address("quoted mailbox local part contains an invalid byte"))
-        }
+    at :: mailbox_separator(bytes) ? index -> index ! error -> return Err(error)
+    local :: bytes[0..<at]
+    domain :: byte_text(bytes[at + 1..<bytes.len()])
+    if local.len() == 0 || domain.bytes().len() == 0 || local.len() > 64 || domain.bytes().len() > 253 ->
+        return Err(construction_error("InvalidAddress", "mailbox local part or domain has an invalid length"))
+    if local[0] == (U8{34}) {
+        validate_quoted_local(local) ? unit -> unit ! error -> return Err(error)
     } else {
-        if local_raw[0] == (U8{46}) || local_raw[local_raw.len() - 1] == (U8{46}) {
-            return Err(invalid_address("mailbox local part is not dot-atom or quoted-string"))
-        }
-        loop i in 0..<local_raw.len() {
-            if !(is_atext(local_raw[i]) ?? panic("is_atext failed")) {
-                return Err(invalid_address("mailbox local part is not dot-atom or quoted-string"))
-            }
-            if i > 0 && local_raw[i] == (U8{46}) && local_raw[i - 1] == (U8{46}) {
-                return Err(invalid_address("mailbox local part is not dot-atom or quoted-string"))
-            }
+        if local[0] == (U8{46}) || local[local.len() - 1] == (U8{46}) || byte_text(bytes[0..<at]).contains("..") ->
+            return Err(construction_error("InvalidAddress", "mailbox local part is not dot-atom or quoted-string"))
+        loop byte in local {
+            if !atext(byte) -> return Err(construction_error("InvalidAddress", "mailbox local part is not dot-atom or quoted-string"))
         }
     }
-    if !(valid_domain(~domain) ?? panic("valid_domain failed")) -> return Err(invalid_address("mailbox domain has an invalid label"))
-    Ok(true)
-}
-
-fn valid_domain(text: String) -> Bool {
-    raw := text.bytes()
-    if raw.len() == 0 -> return false
-    if raw[0] == (U8{46}) || raw[raw.len() - 1] == (U8{46}) -> return false
-    start := 0
-    i := 0
-    loop i <= raw.len() {
-        is_separator := i == raw.len()
-        if i < raw.len() -> is_separator = raw[i] == (U8{46})
-        if is_separator {
-            if i == start || i - start > 63 -> return false
-            if raw[start] == (U8{45}) || raw[i - 1] == (U8{45}) -> return false
-            loop j in start..<i {
-                n :: Int.from_u8(raw[j])
-                if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45) {
-                    return false
-                }
-            }
-            start = i + 1
-        }
-        i += 1
-    }
-    true
-}
-
-fn validate_attachment_parts(name: String, mime: String, bytes: [U8]) -> Bool EmailError! {
-    if has_control(name) || has_control(mime) {
-        return Err(invalid_attachment("attachment fields contain a forbidden control character"))
-    }
-    if name.trim().len() == 0 || name.contains("/") || name.contains("\\") {
-        return Err(invalid_attachment("attachment filename must be a plain non-empty name"))
-    }
-    if !valid_mime(mime) {
-        return Err(invalid_attachment("attachment content type must be `type/subtype`"))
-    }
-    if !physical_header_fits("Content-Type", mime.len()) {
-        return Err(limit_error("attachment", "Content-Type physical header line exceeds 998 bytes"))
-    }
-    if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
-        return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
-    }
-    if bytes.len() > C_MAX_ATTACHMENT_BYTES {
-        return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
-    }
-    Ok(true)
-}
-
-fn valid_mime(text: String) -> Bool Never! {
-    raw := text.bytes()
-    slash := -1
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{47}) {
-            if slash >= 0 -> return false
-            slash = i
-        } else {
-            n :: Int.from_u8(raw[i])
-            allowed := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 33 || n == 35 || n == 36 || n == 38 || n == 45 || n == 94 || n == 95 || n == 46 || n == 43
-            if !allowed -> return false
+    loop label in domain.split(".") {
+        if label.bytes().len() == 0 || label.starts_with("-") || label.ends_with("-") ->
+            return Err(construction_error("InvalidAddress", "mailbox domain has an invalid label"))
+        loop byte in label.bytes() {
+            if !ascii_alphanumeric(byte) && byte != (U8{45}) ->
+                return Err(construction_error("InvalidAddress", "mailbox domain has an invalid label"))
         }
     }
-    slash > 0 && slash + 1 < raw.len()
+    Ok()
 }
 
-fn physical_header_fits(name: String, value_bytes: Int) -> Bool Never! {
-    name.bytes().len() + 2 + value_bytes + 2 <= C_MAX_HEADER_BYTES
+fn address(input: String) -> Address EmailError! {
+    reject_controls(input, "email address") ? unit -> unit ! error -> return Err(error)
+    value :: input.trim()
+    bytes :: value.bytes()
+    if bytes.len() == 0 || bytes.len() > 512 ->
+        return Err(construction_error("InvalidAddress", "email address must contain 1 to 512 bytes"))
+    opens := 0
+    closes := 0
+    open := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{60}) {
+            opens += 1
+            open = index
+        }
+        if bytes[index] == (U8{62}) -> closes += 1
+    }
+    display := String?{None}
+    mailbox := value
+    if opens == 0 && closes == 0 {
+    } else if opens == 1 && closes == 1 && bytes[bytes.len() - 1] == (U8{62}) {
+        shown :: byte_text(bytes[0..<open]).trim()
+        if shown.bytes().len() == 0 -> return Err(construction_error("InvalidAddress", "display name cannot be empty"))
+        shown_display :: parse_display(shown) ? text -> text ! error -> return Err(error)
+        display = Val(shown_display)
+        mailbox = byte_text(bytes[open + 1..<bytes.len() - 1]).trim()
+    } else {
+        return Err(construction_error("InvalidAddress", "display address must have one final `<mailbox>`"))
+    }
+    validate_mailbox(mailbox) ? unit -> unit ! error -> return Err(error)
+    Ok(core.email.__address_parts(^display, ^mailbox))
 }
 
-fn percent_encoded_len(text: String) -> Int Never! {
+fn physical_header_len(name: String, value_len: Int) EmailError! {
+    if name.bytes().len() + 2 + value_len + 2 > 998 ->
+        return Err(construction_error("LimitExceeded", "{name} physical header line exceeds 998 bytes"))
+    Ok()
+}
+
+fn percent_encoded_len(value: String) -> Int Never! {
     total := 0
-    loop byte in text.bytes() {
-        n :: Int.from_u8(byte)
-        unreserved := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 95 || n == 46 || n == 126
-        total += if unreserved -> 1 else -> 3
+    loop byte in value.bytes() {
+        total += if ascii_alphanumeric(byte) || byte == (U8{45}) || byte == (U8{95}) || byte == (U8{46}) || byte == (U8{126}) -> 1 else -> 3
     }
     total
 }
 
-fn ascii_lower(text: String) -> String Never! {
-    out := [U8]{}
-    loop byte in text.bytes() {
-        n :: Int.from_u8(byte)
-        if n >= 65 && n <= 90 -> &out.push(U8{n + 32}) else -> &out.push(byte)
-    }
-    String.from_bytes(out) ?? text
-}
-
-fn validate_address(address: Address) -> Bool EmailError! {
-    if address.mailbox.bytes().len() == 0 {
-        return Err(invalid_address("mailbox must not be empty"))
-    }
-    if address.display == {
-        .None -> { _ := 0 }
-        .Val(display) -> {
-            if display.bytes().len() == 0 || has_control(display) {
-                return Err(invalid_address("display name is empty or contains a forbidden control character"))
+fn valid_mime(value: String) -> Bool Never! {
+    parts :: value.split("/").to_list()
+    if parts.len() != 2 || parts[0].bytes().len() == 0 || parts[1].bytes().len() == 0 -> return false
+    loop part in parts {
+        loop byte in part.bytes() {
+            if !ascii_alphanumeric(byte) {
+                allowed := false
+                loop candidate in "!#$&-^_.+".bytes() {
+                    if byte == candidate -> allowed = true
+                }
+                if !allowed -> return false
             }
-            parse_display(~display) ?? return Err(invalid_address("invalid display name"))
         }
-    }
-    validate_mailbox(~address.mailbox) ?? return Err(invalid_address("invalid mailbox"))
-    Ok(true)
-}
-
-fn validate_message_parts(
-from: Address,
-to: [Address],
-bcc: [Address],
-subject: String,
-text: String,
-html: String,
-attachments: [Attachment],
-) -> Bool EmailError! {
-    reject_controls(~subject, "subject") ?? return Err(invalid_header("subject contains a forbidden control character"))
-    if subject.bytes().len() > C_MAX_HEADER_VALUE_BYTES {
-        return Err(limit_error("message", "subject exceeds 65536 bytes"))
-    }
-    if to.len() == 0 -> return Err(invalid_message("message needs at least one visible recipient"))
-    if to.len() + bcc.len() > C_MAX_RECIPIENTS {
-        return Err(limit_error("message", "message exceeds 100 recipients"))
-    }
-    if attachments.len() > C_MAX_ATTACHMENTS {
-        return Err(limit_error("message", "message exceeds 64 attachments"))
-    }
-    if text.bytes().len() == 0 && html.bytes().len() == 0 {
-        return Err(invalid_message("message needs text or HTML content"))
-    }
-    if text.bytes().len() > C_MAX_BODY_BYTES || html.bytes().len() > C_MAX_BODY_BYTES {
-        return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
-    }
-    validate_address(from) ?? return Err(invalid_address("invalid sender address"))
-    loop visible_recipient in to {
-        validate_address(visible_recipient) ?? return Err(invalid_address("invalid visible recipient"))
-    }
-    loop hidden_recipient in bcc {
-        validate_address(hidden_recipient) ?? return Err(invalid_address("invalid hidden recipient"))
-    }
-    loop item in attachments {
-        validate_attachment_record(item) ?? return Err(invalid_attachment("invalid attachment"))
-    }
-    Ok(true)
-}
-
-fn prospective_wire_upper(
-from: Address,
-to: [Address],
-subject: String,
-text: String,
-html: String,
-attachments: [Attachment],
-) -> Int Never! {
-    total := 4096 + rendered_address_len(from)
-    loop visible_recipient in to -> total += rendered_address_len(visible_recipient) + 4
-    total += encoded_header_len(~subject) + 32
-    total += base64_lines_len(text.bytes().len()) + 256
-    total += base64_lines_len(html.bytes().len()) + 256
-    loop item in attachments {
-        total += base64_lines_len(item.bytes.len())
-        total += item.mime.bytes().len()
-        total += percent_encoded_len(~item.filename)
-        total += 512
-    }
-    total + attachments.len() * 256
-}
-
-fn validate_rendered_headers(from: Address, to: [Address], subject: String) -> Bool EmailError! {
-    if !validate_folded_header("From", render_address(from)) {
-        return Err(invalid_header("From header is invalid"))
-    }
-    if !validate_folded_header("To", render_addresses(to, "To")) {
-        return Err(invalid_header("To header is invalid"))
-    }
-    if !validate_folded_header("Subject", encode_header(~subject)) {
-        return Err(invalid_header("Subject header is invalid"))
-    }
-    Ok(true)
-}
-
-fn default_envelope(from: Address, to: [Address], bcc: [Address]) -> Envelope EmailError! {
-    recipients := [Address]{}
-    loop address in to -> &recipients.push(address)
-    loop address in bcc -> &recipients.push(address)
-    envelope(from, recipients) ?? return Err(invalid_message("message envelope is invalid"))
-}
-
-fn validate_message_value(message: Message) -> Bool EmailError! {
-    validate_message_record(message) ?? return Err(invalid_message("message contains invalid fields"))
-    upper :: prospective_message_wire_upper(message)
-    if message.wire_upper < upper || message.wire_upper > C_MAX_MESSAGE_BYTES {
-        return Err(limit_error("serialize", "serialized message size bound is invalid"))
-    }
-    validate_message_headers(message) ?? return Err(invalid_message("message headers are invalid"))
-    sender := ~message.envelope.from
-    validate_address(sender) ?? return Err(invalid_message("message envelope sender is invalid"))
-    if message.envelope.recipients.len() == 0 || message.envelope.recipients.len() > C_MAX_RECIPIENTS {
-        return Err(invalid_message("message envelope recipient count is outside the supported range"))
-    }
-    loop recipient in message.envelope.recipients {
-        validate_address(recipient) ?? return Err(invalid_message("message envelope recipient is invalid"))
-    }
-    Ok(true)
-}
-
-fn validate_attachment_record(item: Attachment) -> Bool EmailError! {
-    name := ~item.filename
-    mime := ~item.mime
-    if has_control(name) || has_control(mime) {
-        return Err(invalid_attachment("attachment fields contain a forbidden control character"))
-    }
-    if name.trim().len() == 0 || name.contains("/") || name.contains("\\") {
-        return Err(invalid_attachment("attachment filename must be a plain non-empty name"))
-    }
-    if !valid_mime(mime) {
-        return Err(invalid_attachment("attachment content type must be `type/subtype`"))
-    }
-    if !physical_header_fits("Content-Type", mime.len()) {
-        return Err(limit_error("attachment", "Content-Type physical header line exceeds 998 bytes"))
-    }
-    if !physical_header_fits("Content-Disposition", 29 + percent_encoded_len(~name)) {
-        return Err(limit_error("attachment", "Content-Disposition physical header line exceeds 998 bytes"))
-    }
-    if item.bytes.len() > C_MAX_ATTACHMENT_BYTES {
-        return Err(limit_error("attachment", "attachment exceeds 26214400 bytes"))
-    }
-    Ok(true)
-}
-
-fn validate_message_record(message: Message) -> Bool EmailError! {
-    subject := ~message.subject
-    if has_control(subject) {
-        return Err(invalid_header("subject contains a forbidden control character"))
-    }
-    if subject.bytes().len() > C_MAX_HEADER_VALUE_BYTES {
-        return Err(limit_error("message", "subject exceeds 65536 bytes"))
-    }
-    if message.to.len() == 0 {
-        return Err(invalid_message("message needs at least one visible recipient"))
-    }
-    if message.to.len() + message.bcc.len() > C_MAX_RECIPIENTS {
-        return Err(limit_error("message", "message exceeds 100 recipients"))
-    }
-    if message.attachments.len() > C_MAX_ATTACHMENTS {
-        return Err(limit_error("message", "message exceeds 64 attachments"))
-    }
-    if message.text.bytes().len() == 0 && message.html.bytes().len() == 0 {
-        return Err(invalid_message("message needs text or HTML content"))
-    }
-    if message.text.bytes().len() > C_MAX_BODY_BYTES || message.html.bytes().len() > C_MAX_BODY_BYTES {
-        return Err(limit_error("message", "each message body is limited to 1048576 bytes"))
-    }
-    sender := ~message.from
-    validate_address(sender) ?? return Err(invalid_address("invalid sender address"))
-    loop visible_recipient in message.to {
-        validate_address(visible_recipient) ?? return Err(invalid_address("invalid visible recipient"))
-    }
-    loop hidden_recipient in message.bcc {
-        validate_address(hidden_recipient) ?? return Err(invalid_address("invalid hidden recipient"))
-    }
-    loop item in message.attachments {
-        validate_attachment_record(item) ?? return Err(invalid_attachment("invalid attachment"))
-    }
-    Ok(true)
-}
-
-fn prospective_message_wire_upper(message: Message) -> Int Never! {
-    sender := ~message.from
-    total := 4096 + rendered_address_len(sender)
-    loop visible_recipient in message.to -> total += rendered_address_len(visible_recipient) + 4
-    total += encoded_header_len(~message.subject) + 32
-    total += base64_lines_len(message.text.bytes().len()) + 256
-    total += base64_lines_len(message.html.bytes().len()) + 256
-    loop item in message.attachments {
-        total += base64_lines_len(item.bytes.len())
-        total += item.mime.bytes().len()
-        total += percent_encoded_len(~item.filename)
-        total += 512
-    }
-    total + message.attachments.len() * 256
-}
-
-fn validate_message_headers(message: Message) -> Bool EmailError! {
-    sender := ~message.from
-    visible := ~message.to
-    subject := ~message.subject
-    validate_rendered_headers(sender, visible, subject)
-}
-
-fn rendered_address_len(address: Address) -> Int Never! { render_address(address).bytes().len() }
-
-fn boundary(message: Message, label: String) -> String Never! {
-    state := boundary_digest(label.bytes())
-    index := 1
-    index = absorb_boundary(&state, index, message.subject.bytes())
-    index = absorb_boundary(&state, index, message.text.bytes())
-    index = absorb_boundary(&state, index, message.html.bytes())
-    index = absorb_boundary(&state, index, message.from.mailbox.bytes())
-    loop address in message.to -> index = absorb_boundary(&state, index, address.mailbox.bytes())
-    loop address in message.bcc -> index = absorb_boundary(&state, index, address.mailbox.bytes())
-    loop item in message.attachments -> index = absorb_boundary(&state, index, item.bytes)
-    digest :: boundary_digest(state)
-    suffix := [U8]{}
-    loop i in 0..<24 -> &suffix.push(digest[i])
-    "jet-{label}-{hex.encode(suffix)}"
-}
-
-fn absorb_boundary(state: &[U8], index: Int, bytes: [U8]) -> Int Never! {
-    digest :: boundary_digest(bytes)
-    loop slot in 0..<32 {
-        sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])) %% 256
-        shift :: index %% 7
-        rotated := sum
-        if shift != 0 -> rotated = ((sum << shift) + (sum >> (8 - shift))) & 255
-        state[slot] = U8{rotated ~| index}
-    }
-    index + 1
-}
-
-fn boundary_digest(bytes: [U8]) -> [U8] Never! {
-    digest_hex :: sha256(bytes).hex()
-    hex.decode(digest_hex) ?? panic("SHA-256 returned invalid hexadecimal")
-}
-
-fn render_address(address: Address) -> String Never! {
-    if address.display == {
-        .None -> return address.mailbox
-        .Val(display) -> {
-            if is_ascii(display) -> return "{render_ascii_display(display)} <{address.mailbox}>"
-            return "{encode_header(~display)} <{address.mailbox}>"
-        }
-    }
-    address.mailbox
-}
-
-fn render_ascii_display(display: String) -> String Never! {
-    raw := display.bytes()
-    phrase_safe := raw.len() > 0
-    start := 0
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{32}) {
-            if i == start -> phrase_safe = false
-            start = i + 1
-        } else if !is_atext(raw[i]) -> phrase_safe = false
-    }
-    if start == raw.len() -> phrase_safe = false
-    if phrase_safe -> return ~display
-    out := [U8]{34}
-    loop byte in raw {
-        if byte == (U8{92}) || byte == (U8{34}) -> &out.push(U8{92})
-        &out.push(byte)
-    }
-    &out.push(U8{34})
-    String.from_bytes(out) ?? display
-}
-
-fn is_ascii(text: String) -> Bool Never! {
-    loop byte in text.bytes() {
-        if Int.from_u8(byte) >= 128 -> return false
     }
     true
 }
 
-fn encode_header(text: String) -> String Never! {
-    if is_ascii(text) -> return ~text
-    raw := text.bytes()
+fn attachment(filename: String, mime: String, bytes: [U8]) -> Attachment EmailError! {
+    reject_controls(filename, "attachment filename") ? unit -> unit ! error -> return Err(error)
+    reject_controls(mime, "attachment content type") ? unit -> unit ! error -> return Err(error)
+    if filename.trim().bytes().len() == 0 || filename.contains("/") || filename.contains("\\") ->
+        return Err(construction_error("InvalidAttachment", "attachment filename must be a plain non-empty name"))
+    if !valid_mime(mime) ->
+        return Err(construction_error("InvalidAttachment", "attachment content type must be `type/subtype`"))
+    physical_header_len("Content-Type", mime.bytes().len()) ? unit -> unit ! error -> return Err(error)
+    physical_header_len("Content-Disposition", "attachment; filename*=UTF-8''".bytes().len() + percent_encoded_len(filename)) ? unit -> unit ! error -> return Err(error)
+    if bytes.len() > 26214400 ->
+        return Err(construction_error("LimitExceeded", "attachment exceeds 26214400 bytes"))
+    // Public builders borrow; transfer explicit owned copies to the carrier.
+    owned_filename :: filename.copy()
+    owned_mime :: ascii_lower(mime)
+    owned_bytes :: bytes.copy()
+    Ok(core.email.__attachment_parts(^owned_filename, ^owned_mime, ^owned_bytes))
+}
+
+fn envelope(from: Address, recipients: [Address]) -> Envelope EmailError! {
+    if recipients.len() == 0 ->
+        return Err(construction_error("envelope", "email envelope needs at least one recipient"))
+    if recipients.len() > 100 ->
+        return Err(construction_error("envelope", "email envelope exceeds 100 recipients"))
+    owned_from :: from.copy()
+    owned_recipients :: recipients.copy()
+    Ok(core.email.__envelope_parts(^owned_from, ^owned_recipients))
+}
+
+#Test("email address grammar preserves quoted local and display rules") {
+    loop input in ["alice@example.test", "\"a@b\"@example.test", "A Name <a@example.test>", "\"A\\\"B\" <a@example.test>"] {
+        assert(address(input) == .Ok(_))
+    }
+    loop input in ["", "a@@example.test", ".a@example.test", "a..b@example.test", "a@-example.test", "a@é.test", "<a@example.test>", "\"\" <a@example.test>", "a@example.test\n"] {
+        assert(address(input) == .Err(_))
+    }
+}
+
+#Test("email attachment and envelope limits preserve refusal operations") {
+    assert(attachment("part.bin", "APPLICATION/OCTET-STREAM", [U8]{}) == .Ok(_))
+    assert(attachment("dir/part.bin", "text/plain", [U8]{}) == .Err(_))
+    assert(attachment("part.bin", "text/plain/extra", [U8]{}) == .Err(_))
+    sender :: address("a@example.test") ?? panic("sender fixture")
+    if envelope(sender, [Address]{}) == .Err(error) {
+        assert_eq(error, EmailError.Configuration{operation: "envelope", server: None, code: None, reason: "email envelope needs at least one recipient"})
+    } else { panic("empty envelope must be refused") }
+}
+
+fn crlf() -> String Never! { byte_text([U8]{U8{13}, U8{10}}) }
+
+// The private views borrow the native carriers as one record, never as a
+// collection of per-field host calls. All MIME policy below is source-owned.
+fn ascii_text(value: String) -> Bool Never! {
+    loop byte in value.bytes() { if Int.from_u8(byte) > 127 -> return false }
+    true
+}
+
+fn mime_base64(bytes: [U8]) -> String Never! {
+    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/".bytes()
     out := [U8]{}
+    offset := 0
+    loop offset < bytes.len() {
+        remaining :: bytes.len() - offset
+        a :: Int.from_u8(bytes[offset])
+        b :: if remaining > 1 -> Int.from_u8(bytes[offset + 1]) else -> 0
+        c :: if remaining > 2 -> Int.from_u8(bytes[offset + 2]) else -> 0
+        &out.push(alphabet[a >> 2])
+        &out.push(alphabet[((a.bit_and(3)) << 4).bit_or((b >> 4))])
+        &out.push(if remaining > 1 -> alphabet[((b.bit_and(15)) << 2).bit_or((c >> 6))] else -> U8{61})
+        &out.push(if remaining > 2 -> alphabet[c.bit_and(63)] else -> U8{61})
+        offset += 3
+    }
+    byte_text(out)
+}
+
+fn encoded_header(value: String) -> String Never! {
+    if ascii_text(value) -> return value.copy()
+    bytes :: value.bytes()
+    out := ""
     start := 0
-    i := 0
-    loop i < raw.len() {
-        width :: utf8_width(raw[i])
-        if i > start && i + width - start > 45 {
-            if out.len() > 0 {
-                push_crlf(&out)
-                &out.push(U8{32})
-            }
-            push_text(&out, "=?UTF-8?B?")
-            push_text(&out, base64.encode(slice_u8(raw, start, i)))
-            push_text(&out, "?=")
-            start = i
+    index := 0
+    loop index < bytes.len() {
+        first :: Int.from_u8(bytes[index])
+        width :: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
+        if index > start && index + width - start > 45 {
+            if out.bytes().len() != 0 -> out += "{crlf()} "
+            out += "=?UTF-8?B?{mime_base64(bytes[start..<index])}?="
+            start = index
         }
-        i += width
+        index += width
     }
-    if start < raw.len() {
-        if out.len() > 0 {
-            push_crlf(&out)
-            &out.push(U8{32})
-        }
-        push_text(&out, "=?UTF-8?B?")
-        push_text(&out, base64.encode(slice_u8(raw, start, raw.len())))
-        push_text(&out, "?=")
+    if start < bytes.len() {
+        if out.bytes().len() != 0 -> out += "{crlf()} "
+        out += "=?UTF-8?B?{mime_base64(bytes[start..<bytes.len()])}?="
     }
-    String.from_bytes(out) ?? text
-}
-
-fn utf8_width(byte: U8) -> Int Never! {
-    n :: Int.from_u8(byte)
-    if n < 128 -> return 1
-    if n < 224 -> return 2
-    if n < 240 -> return 3
-    4
-}
-
-fn render_addresses(addresses: [Address], name: String) -> String Never! {
-    out := [U8]{}
-    physical := name.bytes().len() + 2
-    item_index := 0
-    loop address in addresses {
-        rendered :: render_address(address)
-        if item_index > 0 {
-            first_line :: first_line_len(~rendered)
-            if physical + 2 + first_line + 2 > C_MAX_HEADER_BYTES {
-                &out.push(U8{44})
-                push_crlf(&out)
-                &out.push(U8{32})
-                physical = 1
-            } else {
-                push_text(&out, ", ")
-                physical += 2
-            }
-        }
-        push_text(&out, ~rendered)
-        if contains_crlf(~rendered) -> physical = last_line_len(~rendered) else {
-            physical += rendered.bytes().len()
-        }
-        item_index += 1
-    }
-    String.from_bytes(out) ?? ""
-}
-
-fn first_line_len(text: String) -> Int Never! {
-    raw := text.bytes()
-    i := 0
-    loop i + 1 < raw.len() {
-        if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) -> return i
-        i += 1
-    }
-    raw.len()
-}
-
-fn contains_crlf(text: String) -> Bool Never! {
-    raw := text.bytes()
-    loop i in 0..<(raw.len() - 1) {
-        if raw[i] == (U8{13}) && raw[i + 1] == (U8{10}) -> return true
-    }
-    false
-}
-
-fn last_line_len(text: String) -> Int Never! {
-    raw := text.bytes()
-    i := raw.len()
-    loop i >= 2 {
-        i -= 1
-        if raw[i - 1] == (U8{13}) && raw[i] == (U8{10}) -> return raw.len() - i - 1
-    }
-    raw.len()
-}
-
-fn encoded_header_len(text: String) -> Int Never! { encode_header(text).bytes().len() }
-
-fn base64_lines_len(byte_count: Int) -> Int Never! {
-    encoded :: base64_len(byte_count)
-    if encoded == 0 -> return 0
-    encoded + (((encoded + 75) /% 76) - 1) * 2
-}
-
-fn base64_len(byte_count: Int) -> Int Never! { ((byte_count + 2) /% 3) * 4 }
-
-fn base64_lines(bytes: [U8]) -> String Never! {
-    encoded :: base64.encode(bytes)
-    raw :: encoded.bytes()
-    out := [U8]{}
-    start := 0
-    loop start < raw.len() {
-        end := start + 76
-        if end > raw.len() -> end = raw.len()
-        if start > 0 -> push_crlf(&out)
-        loop i in start..<end -> &out.push(raw[i])
-        start = end
-    }
-    String.from_bytes(out) ?? ""
-}
-
-fn percent_encode(text: String) -> String EmailError! {
-    out := [U8]{}
-    loop byte in text.bytes() {
-        n :: Int.from_u8(byte)
-        unreserved := (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45 || n == 95 || n == 46 || n == 126
-        if unreserved -> &out.push(byte) else {
-            &out.push(U8{37})
-            &out.push(hex_digit(n /% 16))
-            &out.push(hex_digit(n %% 16))
-        }
-    }
-    Ok(String.from_bytes(out) ?? return Err(invalid_attachment("filename encoding is not valid UTF-8")))
-}
-
-fn hex_digit(value: Int) -> U8 Never! {
-    if value < 10 -> return U8{48 + value}
-    U8{55 + value}
-}
-
-fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    loop i in start..<end -> &out.push(raw[i])
     out
 }
 
-fn add_header(out: &[U8], name: String, value: String) -> Bool EmailError! {
-    if !validate_folded_header(~name, ~value) {
-        return Err(invalid_header("{name} contains an invalid or oversized header line"))
-    }
-    push_text(&out, "{name}: {value}")
-    push_crlf(&out)
-    Ok(true)
-}
-
-fn validate_folded_header(name: String, value: String) -> Bool Never! {
-    raw := value.bytes()
-    loop i in 0..<raw.len() {
-        n :: Int.from_u8(raw[i])
-        if n == 13 && (i + 2 >= raw.len() || raw[i + 1] != (U8{10}) || (raw[i + 2] != (U8{32}) && raw[i + 2] != (U8{9}))) {
-            return false
-        }
-        if n == 10 && (i == 0 || raw[i - 1] != (U8{13})) -> return false
-        if n < 32 && n != 9 && n != 10 && n != 13 -> return false
-    }
-    start := 0
-    first := true
-    i := 0
-    loop i <= raw.len() {
-        if i == raw.len() || (i + 1 < raw.len() && raw[i] == (U8{13}) && raw[i + 1] == (U8{10})) {
-            prefix := 0
-            if first -> prefix = name.bytes().len() + 2
-            if prefix + i - start + 2 > C_MAX_HEADER_BYTES -> return false
-            first = false
-            if i < raw.len() {
-                i += 2
-                start = i
-            }
-        } else { i += 1 }
+fn safe_phrase(display: String) -> Bool Never! {
+    loop word in display.split(" ") {
+        if word.bytes().len() == 0 -> return false
+        loop byte in word.bytes() { if !atext(byte) -> return false }
     }
     true
 }
 
-fn render_body(out: &[U8], message: Message, alternative: String) -> Bool EmailError! {
-    if message.html.bytes().len() == 0 {
-        text_part(&out, "text/plain", ~message.text) ?? return Err(invalid_message("invalid text body"))
-    } else if message.text.bytes().len() == 0 {
-        text_part(&out, "text/html", ~message.html) ?? return Err(invalid_message("invalid HTML body"))
-    } else {
-        add_header(&out, "Content-Type", "multipart/alternative; boundary=\"{alternative}\"") ?? return Err(invalid_header("invalid alternative content type"))
-        push_crlf(&out)
-        push_text(&out, "--{alternative}")
-        push_crlf(&out)
-        text_part(&out, "text/plain", ~message.text) ?? return Err(invalid_message("invalid text body"))
-        push_crlf(&out)
-        push_text(&out, "--{alternative}")
-        push_crlf(&out)
-        text_part(&out, "text/html", ~message.html) ?? return Err(invalid_message("invalid HTML body"))
-        push_crlf(&out)
-        push_text(&out, "--{alternative}--")
-        push_crlf(&out)
+fn rendered_address(address: Address) -> String Never! {
+    parts :: core.email.__address_view(address)
+    if parts.display == .Val(display) {
+        shown :: if !ascii_text(display) -> encoded_header(display) else if safe_phrase(display) -> display else ->
+            "\"{display.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+        return "{shown} <{parts.mailbox}>"
     }
-    Ok(true)
+    parts.mailbox
 }
 
-fn text_part(out: &[U8], mime: String, body: String) -> Bool EmailError! {
-    add_header(&out, "Content-Type", "{mime}; charset=utf-8") ?? return Err(invalid_header("invalid text Content-Type"))
-    add_header(&out, "Content-Transfer-Encoding", "base64") ?? return Err(invalid_header("invalid transfer encoding"))
-    push_crlf(&out)
-    push_text(&out, base64_lines(body.bytes()))
-    Ok(true)
+fn rendered_addresses(addresses: [Address], name: String) -> String Never! {
+    out := ""
+    physical := name.bytes().len() + 2
+    index := 0
+    loop address in addresses {
+        rendered :: rendered_address(address)
+        first :: rendered.split(crlf()).to_list()[0]
+        if index > 0 && physical + 2 + first.bytes().len() + 2 > 998 {
+            out += ",{crlf()} "
+            physical = 1
+        } else if index > 0 {
+            out += ", "
+            physical += 2
+        }
+        out += rendered
+        lines :: rendered.split(crlf()).to_list()
+        physical = lines[lines.len() - 1].bytes().len() + (if lines.len() > 1 -> 0 else -> physical)
+        index += 1
+    }
+    out
+}
+
+fn folded_header(name: String, value: String) EmailError! {
+    bytes :: value.bytes()
+    loop index in 0..<bytes.len() {
+        byte :: Int.from_u8(bytes[index])
+        if byte == 13 {
+            if index + 2 >= bytes.len() || bytes[index + 1] != (U8{10}) ||
+                (bytes[index + 2] != (U8{32}) && bytes[index + 2] != (U8{9})) ->
+                return Err(construction_error("InvalidHeader", "{name} contains an invalid fold"))
+        }
+        if byte == 10 && (index == 0 || bytes[index - 1] != (U8{13})) ->
+            return Err(construction_error("InvalidHeader", "{name} contains a bare newline"))
+        if byte < 32 && byte != 13 && byte != 10 && byte != 9 ->
+            return Err(construction_error("InvalidHeader", "{name} contains a control byte"))
+    }
+    index := 0
+    loop line in value.split(crlf()) {
+        prefix :: if index == 0 -> name.bytes().len() + 2 else -> 0
+        if prefix + line.bytes().len() + 2 > 998 ->
+            return Err(construction_error("LimitExceeded", "{name} physical header line exceeds 998 bytes"))
+        index += 1
+    }
+    Ok()
+}
+
+fn header(name: String, value: String) -> String EmailError! {
+    folded_header(name, value) ? unit -> unit ! error -> return Err(error)
+    Ok("{name}: {value}{crlf()}")
+}
+
+fn base64_size(length: Int) -> Int Never! { ((length + 2) /% 3) * 4 }
+fn base64_lines_size(length: Int) -> Int Never! {
+    encoded :: base64_size(length)
+    if encoded == 0 -> 0 else -> encoded + (((encoded + 75) /% 76) - 1) * 2
+}
+
+fn encoded_header_size(value: String) -> Int Never! {
+    if ascii_text(value) -> return value.bytes().len()
+    bytes :: value.bytes()
+    start := 0
+    index := 0
+    total := 0
+    chunks := 0
+    loop index < bytes.len() {
+        first :: Int.from_u8(bytes[index])
+        width :: if first < 128 -> 1 else if first < 224 -> 2 else if first < 240 -> 3 else -> 4
+        if index > start && index + width - start > 45 {
+            total += 12 + base64_size(index - start)
+            start = index
+            chunks += 1
+        }
+        index += width
+    }
+    if start < bytes.len() {
+        total += 12 + base64_size(bytes.len() - start)
+        chunks += 1
+    }
+    total + (if chunks > 0 -> (chunks - 1) * 3 else -> 0)
+}
+
+fn rendered_address_size(address: Address) -> Int Never! {
+    parts :: core.email.__address_view(address)
+    if parts.display == .Val(display) {
+        if !ascii_text(display) -> return encoded_header_size(display) + parts.mailbox.bytes().len() + 3
+        length := display.bytes().len()
+        if !safe_phrase(display) {
+            length += 2
+            loop byte in display.bytes() { if byte == (U8{92}) || byte == (U8{34}) -> length += 1 }
+        }
+        return length + parts.mailbox.bytes().len() + 3
+    }
+    parts.mailbox.bytes().len()
+}
+
+fn message(from: Address, to: [Address], bcc: [Address], subject: String, text: String, html: String, attachments: [Attachment]) -> Message EmailError! {
+    reject_controls(subject, "subject") ? unit -> unit ! error -> return Err(error)
+    if subject.bytes().len() > 65536 -> return Err(construction_error("LimitExceeded", "subject exceeds 65536 bytes"))
+    if to.len() == 0 -> return Err(construction_error("InvalidMessage", "message needs at least one visible recipient"))
+    if to.len() + bcc.len() > 100 -> return Err(construction_error("LimitExceeded", "message exceeds 100 recipients"))
+    if attachments.len() > 64 -> return Err(construction_error("LimitExceeded", "message exceeds 64 attachments"))
+    if text.bytes().len() == 0 && html.bytes().len() == 0 -> return Err(construction_error("InvalidMessage", "message needs text or HTML content"))
+    if text.bytes().len() > 1048576 || html.bytes().len() > 1048576 -> return Err(construction_error("LimitExceeded", "each message body is limited to 1048576 bytes"))
+    upper := 4096 + rendered_address_size(from)
+    loop address in to -> upper += rendered_address_size(address) + 4
+    upper += encoded_header_size(subject) + 32
+    upper += base64_lines_size(text.bytes().len()) + 256
+    upper += base64_lines_size(html.bytes().len()) + 256
+    loop attachment in attachments {
+        parts :: core.email.__attachment_view(attachment)
+        upper += base64_lines_size(parts.bytes.len()) + parts.mime.bytes().len() + percent_encoded_len(parts.filename) + 512
+    }
+    upper += attachments.len() * 256
+    if upper > 33554432 -> return Err(construction_error("LimitExceeded", "serialized message exceeds 33554432 bytes"))
+    folded_header("From", rendered_addresses([Address]{from}, "From")) ? unit -> unit ! error -> return Err(error)
+    folded_header("To", rendered_addresses(to, "To")) ? unit -> unit ! error -> return Err(error)
+    if ascii_text(subject) { physical_header_len("Subject", subject.bytes().len()) ? unit -> unit ! error -> return Err(error) }
+    recipients := [Address]{}
+    loop address in to -> &recipients.push(address)
+    loop address in bcc -> &recipients.push(address)
+    // Recipient bounds are checked above; transfer this fresh list directly.
+    owned_from :: from.copy()
+    checked_envelope :: core.email.__envelope_parts(^owned_from, ^recipients)
+    message_from :: from.copy()
+    message_to :: to.copy()
+    message_bcc :: bcc.copy()
+    message_subject :: subject.copy()
+    message_text :: text.copy()
+    message_html :: html.copy()
+    message_attachments :: attachments.copy()
+    Ok(core.email.__message_parts(^message_from, ^message_to, ^message_bcc, ^message_subject, ^message_text, ^message_html, ^message_attachments, ^checked_envelope, ^upper))
+}
+
+fn mime_lines(bytes: [U8]) -> String Never! {
+    encoded :: mime_base64(bytes).bytes()
+    out := ""
+    start := 0
+    loop start < encoded.len() {
+        if start != 0 -> out += crlf()
+        end :: if start + 76 < encoded.len() -> start + 76 else -> encoded.len()
+        out += byte_text(encoded[start..<end])
+        start = end
+    }
+    out
+}
+
+fn percent_encode(value: String) -> String Never! {
+    hex :: "0123456789ABCDEF".bytes()
+    out := [U8]{}
+    loop byte in value.bytes() {
+        if ascii_alphanumeric(byte) || byte == (U8{45}) || byte == (U8{95}) || byte == (U8{46}) || byte == (U8{126}) {
+            &out.push(byte)
+        } else {
+            code :: Int.from_u8(byte)
+            &out.push(U8{37})
+            &out.push(hex[code >> 4])
+            &out.push(hex[code.bit_and(15)])
+        }
+    }
+    byte_text(out)
+}
+
+fn mime_boundary(message: __EmailMessageView, label: String) -> String Never! {
+    state := core.crypto.sha256(label.bytes()).bytes
+    index := 1
+    // Absorb in the native order without introducing a host-side hash policy.
+    inputs := [String]{message.subject, message.text, message.html, core.email.__address_view(message.from).mailbox}
+    loop address in message.to -> &inputs.push(core.email.__address_view(address).mailbox)
+    loop address in message.bcc -> &inputs.push(core.email.__address_view(address).mailbox)
+    loop input in inputs {
+        digest :: core.crypto.sha256(input.bytes()).bytes
+        loop slot in 0..<32 {
+            sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])).bit_and(255)
+            shift :: index %% 7
+            rotated :: ((sum << shift).bit_or((sum >> (8 - shift)))).bit_and(255)
+            state[slot] = U8{rotated.bit_xor(index)}
+        }
+        index = (index + 1).bit_and(255)
+    }
+    loop attachment in message.attachments {
+        digest :: core.crypto.sha256(core.email.__attachment_view(attachment).bytes).bytes
+        loop slot in 0..<32 {
+            sum :: (Int.from_u8(state[slot]) + Int.from_u8(digest[(slot + index) %% 32])).bit_and(255)
+            shift :: index %% 7
+            state[slot] = U8{(((sum << shift).bit_or((sum >> (8 - shift)))).bit_and(255)).bit_xor(index)}
+        }
+        index = (index + 1).bit_and(255)
+    }
+    digest :: core.crypto.sha256(state).bytes
+    hex :: "0123456789abcdef".bytes()
+    suffix := [U8]{}
+    loop slot in 0..<24 {
+        byte :: Int.from_u8(digest[slot])
+        &suffix.push(hex[byte >> 4])
+        &suffix.push(hex[byte.bit_and(15)])
+    }
+    "jet-{label}-{byte_text(suffix)}"
+}
+
+fn mime_text(mime: String, body: String) -> String EmailError! {
+    first :: header("Content-Type", "{mime}; charset=utf-8") ? value -> value ! error -> return Err(error)
+    second :: header("Content-Transfer-Encoding", "base64") ? value -> value ! error -> return Err(error)
+    Ok("{first}{second}{crlf()}{mime_lines(body.bytes())}")
+}
+
+fn mime_body(message: __EmailMessageView, alternative: String) -> String EmailError! {
+    if message.html.bytes().len() == 0 -> return mime_text("text/plain", message.text)
+    if message.text.bytes().len() == 0 -> return mime_text("text/html", message.html)
+    first :: header("Content-Type", "multipart/alternative; boundary=\"{alternative}\"") ? value -> value ! error -> return Err(error)
+    plain :: mime_text("text/plain", message.text) ? value -> value ! error -> return Err(error)
+    html :: mime_text("text/html", message.html) ? value -> value ! error -> return Err(error)
+    Ok("{first}{crlf()}--{alternative}{crlf()}{plain}{crlf()}--{alternative}{crlf()}{html}{crlf()}--{alternative}--{crlf()}")
+}
+
+fn serialize(message: Message) -> [U8] EmailError! {
+    parts :: core.email.__message_view(message)
+    mixed :: mime_boundary(parts, "mixed")
+    alternative :: mime_boundary(parts, "alternative")
+    from :: header("From", rendered_address(parts.from)) ? value -> value ! error -> return Err(error)
+    to :: header("To", rendered_addresses(parts.to, "To")) ? value -> value ! error -> return Err(error)
+    subject :: header("Subject", encoded_header(parts.subject)) ? value -> value ! error -> return Err(error)
+    version :: header("MIME-Version", "1.0") ? value -> value ! error -> return Err(error)
+    out := "{from}{to}{subject}{version}"
+    if parts.attachments.len() == 0 {
+        body :: mime_body(parts, alternative) ? value -> value ! error -> return Err(error)
+        out += body
+    } else {
+        content :: header("Content-Type", "multipart/mixed; boundary=\"{mixed}\"") ? value -> value ! error -> return Err(error)
+        body :: mime_body(parts, alternative) ? value -> value ! error -> return Err(error)
+        out += "{content}{crlf()}--{mixed}{crlf()}{body}"
+        loop attachment in parts.attachments {
+            item :: core.email.__attachment_view(attachment)
+            content_type :: header("Content-Type", item.mime) ? value -> value ! error -> return Err(error)
+            transfer :: header("Content-Transfer-Encoding", "base64") ? value -> value ! error -> return Err(error)
+            disposition :: header("Content-Disposition", "attachment; filename*=UTF-8''{percent_encode(item.filename)}") ? value -> value ! error -> return Err(error)
+            out += "{crlf()}--{mixed}{crlf()}{content_type}{transfer}{disposition}{crlf()}{mime_lines(item.bytes)}"
+        }
+        out += "{crlf()}--{mixed}--{crlf()}"
+    }
+    if out.bytes().len() > parts.wire_upper || out.bytes().len() > 33554432 ->
+        return Err(construction_error("LimitExceeded", "serialized message exceeded its checked wire bound"))
+    Ok(out.bytes())
+}
+
+#Test("MIME byte-exact independent oracle covers folds, Unicode, BCC and attachments") {
+    // Native seed probe observed 2608 bytes, SHA256 below, wire_upper 7096.
+    // This source #Test remains unexercised; native-email-probe.mjs is in scratch.
+    sender :: address("a@example.test") ?? panic("sender")
+    visible :: loop index in 0..<3 ->
+        address("{"A".repeat(450)} <b{index}@example.test>") ?? panic("recipient")
+    hidden :: address("hidden@example.test") ?? panic("bcc")
+    bytes :: loop index in 0..<60 -> U8{index}
+    attached :: attachment("café.bin", "APPLICATION/OCTET-STREAM", bytes) ?? panic("attachment")
+    checked :: message(sender, visible, [Address]{hidden}, "é".repeat(30), "plain\nbody", "<p>é</p>", [Attachment]{attached}) ?? panic("message")
+    wire :: serialize(checked) ?? panic("serialize")
+    assert_eq(wire.len(), 2608)
+    assert_eq(core.crypto.sha256(wire).hex(), "84e5a41ec770d155e40626b8b7f76693c77d21a2d0391dcc1f9cc1848859cdc3")
+    parts :: core.email.__message_view(checked)
+    assert_eq(parts.wire_upper, 7096)
+    assert_eq(mime_boundary(parts, "mixed"), "jet-mixed-8b6aec880cb8ae134157bef1c0404a99cfc0158252d2577c")
+    assert_eq(mime_boundary(parts, "alternative"), "jet-alternative-e1468ba8f335b57a8c1313344654588b4006c6157ce7c68d")
+    assert_eq(encoded_header_size("é".repeat(30)), 111)
+}
+
+#Test("message refusal order remains native") {
+    sender :: address("a@example.test") ?? panic("sender")
+    recipients :: [Address]{sender}
+    if message(sender, [Address]{}, [Address]{}, "\n", "", "", [Attachment]{}) == .Err(error) {
+        assert_eq(error, construction_error("InvalidHeader", "subject contains a forbidden control character"))
+    } else { panic("subject refusal precedes empty recipient") }
+    assert(message(sender, [Address]{}, [Address]{}, "", "", "", [Attachment]{}) == .Err(_))
+    assert(message(sender, recipients, [Address]{}, "", "", "", [Attachment]{}) == .Err(_))
 }

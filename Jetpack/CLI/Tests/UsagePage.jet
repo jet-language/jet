@@ -259,7 +259,7 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
 
 #Test("cli project declares env is true for the phase one directive surface") {
     dir :: cli_usage_test_scratch("phase1_env")
-    files.write(files.join(dir, ENV_FILE), "use jetpack as pkg\npub fn shell() -> [JSON] {{\n    return [pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("write env.jet")
+    files.write(files.join(dir, ENV_FILE), "use jetpack as pkg\nfn shell() -> [JSON] {{\n    return [pkg.packages([\"ripgrep\"])]\n}}\n") ?? panic("write env.jet")
     assert(cli_project_declares_env(dir))
     files.remove_all(dir).drop("scratch cleanup")
 }
@@ -276,4 +276,19 @@ fn cli_usage_test_scratch(label: String) -[FS]> String {
     assert(declares_env)
     assert(!(has_foreign && !declares_env))
     files.remove_all(dir).drop("scratch cleanup")
+}
+
+// tests/jetpack_dispatch.rs: bare_jetpack_prints_help_without_entering_an_environment.
+// Reuses the claim recovered from 61693bcbd's JetpackDiscoveryTests.jet, with
+// the current Core process receipt and shared explicit JETPACK_BIN carrier.
+#Test("bare jetpack prints help without entering an environment") {
+    project :: cli_usage_test_scratch("bare-project")
+    root :: cli_usage_test_scratch("bare-root")
+    files.write(files.join(project, "env.jet"), "module broken {{ invalid }}") ?? panic("write invalid environment")
+    receipt :: cli_test_jetpack([String]{}).cwd(project).env("JETPACK_ROOT", root).run() ?? panic("run bare jetpack")
+    assert(receipt.success, "bare jetpack must print help successfully: {receipt.errors}")
+    assert(receipt.errors.contains("jet env"), "stderr: {receipt.errors}")
+    assert(!files.exists(files.join(project, ".jet")), "bare jetpack entered an environment")
+    files.remove_all(project).drop("test project cleanup")
+    files.remove_all(root).drop("test store cleanup")
 }

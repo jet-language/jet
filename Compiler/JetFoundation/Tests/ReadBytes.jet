@@ -1,0 +1,51 @@
+// Assemble with the canonical Compiler unit, replacing its host entry.
+// These literal byte-input fixtures do not prove a String storage projection,
+// native activation, allocation counts, or failure-close behavior.
+fn read_bytes_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("READ bytes: {message}")
+}
+
+fn run() Never! {
+    source :: [U8]{65, 0, 10, 13, 9, 27, 127, 194, 128, 194, 159, 226, 128, 168, 226, 128, 169, 240, 159, 152, 128, 244, 143, 191, 191}
+    starts :: [Int]{0, 1, 2, 3, 4, 5, 6, 7, 9, 11, 14, 17, 21}
+    codepoints :: [Int]{65, 0, 10, 13, 9, 27, 127, 128, 159, 8232, 8233, 128512, 1114111}
+    next_bytes :: [Int]{1, 2, 3, 4, 5, 6, 7, 9, 11, 14, 17, 21, 25}
+    read_bytes_require(foundation_read_bytes_len(source) == 25, "original byte extent")
+    read_bytes_require(foundation_read_bytes_at(source, 0) == 65 && foundation_read_bytes_at(source, 24) == 191, "first and last byte")
+    loop index in 0..<starts.len() {
+        scalar :: foundation_read_bytes_scalar_at(source, starts[index])
+        read_bytes_require(scalar.codepoint == codepoints[index], "canonical scalar")
+        read_bytes_require(scalar.next_byte == next_bytes[index], "next byte boundary")
+    }
+
+    out := [U8]{62}
+    foundation_append_read_bytes(&out, source, 0, 0)
+    foundation_append_read_bytes(&out, source, 25, 25)
+    read_bytes_require(out == ([U8]{62}), "empty ranges do not append")
+    foundation_append_read_bytes(&out, source, 7, 11)
+    read_bytes_require(out == ([U8]{62, 194, 128, 194, 159}), "unchanged original multibyte range")
+    foundation_append_read_bytes(&out, source, 21, 25)
+    read_bytes_require(out == ([U8]{62, 194, 128, 194, 159, 244, 143, 191, 191}), "supplementary scalar copied byte-exact")
+    read_bytes_require(source == ([U8]{65, 0, 10, 13, 9, 27, 127, 194, 128, 194, 159, 226, 128, 168, 226, 128, 169, 240, 159, 152, 128, 244, 143, 191, 191}), "source stays unchanged after output append")
+    empty :: [U8]{}
+    read_bytes_require(foundation_read_bytes_len(empty) == 0, "empty extent")
+    foundation_append_read_bytes(&out, empty, 0, 0)
+    read_bytes_require(out.len() == 9, "empty source appends nothing")
+
+    // Preserve the existing diagnostics policy, not public Core's stricter
+    // decoder. The shared kernel has a zero width for an absent lead and
+    // otherwise a one-byte invalid/truncated-prefix fallback.
+    read_bytes_require(foundation_utf8_lead_width(-1) == 0, "absent lead")
+    read_bytes_require(foundation_utf8_lead_width(0) == 1 && foundation_utf8_lead_width(127) == 1, "ASCII leads")
+    read_bytes_require(foundation_utf8_lead_width(128) == 1 && foundation_utf8_lead_width(193) == 1 && foundation_utf8_lead_width(245) == 1, "invalid leads")
+    read_bytes_require(foundation_utf8_lead_width(194) == 2 && foundation_utf8_lead_width(223) == 2, "two-byte leads")
+    read_bytes_require(foundation_utf8_lead_width(224) == 3 && foundation_utf8_lead_width(239) == 3, "three-byte leads")
+    read_bytes_require(foundation_utf8_lead_width(240) == 4 && foundation_utf8_lead_width(244) == 4, "four-byte leads")
+    read_bytes_require(foundation_utf8_width(4, 128) == 4 && foundation_utf8_width(4, 191) == 4, "continuation bounds")
+    read_bytes_require(foundation_utf8_width(4, 127) == 1 && foundation_utf8_width(4, 192) == 1 && foundation_utf8_width(4, -1) == 1, "invalid continuation")
+    read_bytes_require(diagnostic_utf8_width([U8]{224, 128}, 0) == 1, "truncated prefix")
+    read_bytes_require(diagnostic_utf8_width([U8]{240, 65, 128, 128}, 0) == 1, "bad second byte")
+    read_bytes_require(diagnostic_utf8_width([U8]{240, 128, 65, 128}, 0) == 1, "bad third byte")
+    read_bytes_require(diagnostic_codepoint_at([U8]{65}, 0, 0) == 65 && diagnostic_codepoint_at([U8]{65}, 0, 5) == 65, "original other-width fallback")
+    read_bytes_require(diagnostic_utf8_width([U8]{224, 128, 128}, 0) == 3, "existing continuation-only width policy")
+}

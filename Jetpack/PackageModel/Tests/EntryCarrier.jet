@@ -18,8 +18,10 @@ fn pkg_entry_test_write(root: String, relative: String, text: String) Never! -[F
 }
 
 fn pkg_entry_test_facts(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> PackageFacts Never! {
-    found :: pkg_package_facts_for_entry(&cache, entry) ?? panic("entry facts load")
-    found ?? panic("entry has a package")
+    if pkg_package_facts_for_entry(&cache, entry) == {
+        .Ok(found) -> found ?? panic("entry has a package")
+        .Err(_) -> panic("entry facts load")
+    }
 }
 
 fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS, Env]> Diagnostic Never! {
@@ -33,10 +35,11 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("composed-parity")
     body :: "name: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: {{ dep: ./deps/dep }}\nconfigs: [dev, \"release.jet\"]\ndefaults: {{ run: app }}\nauthority: {{ holds: {{ allow: [IO] }} }}\npolicy: {{ unsafe: .Deny }}\ndev :: Config{{ services: {{ db: {{}} }} }}\n"
-    loop name in [String]{"inline", "extracted"} {
+    entry_names :: [String]{"inline", "extracted"}
+    loop name in entry_names {
         dir :: files.join(root, name)
         pkg_entry_test_write(dir, "deps/dep/package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n")
-        pkg_entry_test_write(dir, "release.jet", "pub release :: Config{{ outputs: {{ app: .Executable{{ name: \"app\", entry: run }} }} }}\n")
+        pkg_entry_test_write(dir, "release.jet", "release :: Config{{ outputs: {{ app: .Executable{{ name: \"app\", entry: run }} }} }}\n")
     }
     inline_entry :: files.join(root, "inline/run.jet")
     extracted_entry :: files.join(root, "extracted/run.jet")
@@ -61,7 +64,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("arbitrary-inline")
     pkg_entry_test_write(root, "nested/launch.jet", "package {{ name: \"launch\", configs: [dev] }}\nfn run() {{}}\n")
-    pkg_entry_test_write(root, "nested/renamed.jet", "pub dev :: Config{{ version: \"selected\" }}\n")
+    pkg_entry_test_write(root, "nested/renamed.jet", "dev :: Config{{ version: \"selected\" }}\n")
     facts :: pkg_entry_test_facts(&cache, files.join(root, "nested/launch.jet"))
     assert_eq(facts.name, "launch")
     assert_eq(facts.version, Val("selected"))
@@ -73,7 +76,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("parent-inline")
     pkg_entry_test_write(root, "run.jet", "package {{ name: \"parent\", configs: [dev] }}\nfn run() {{}}\n")
-    pkg_entry_test_write(root, "dev.jet", "pub dev :: Config{{ version: \"parent-config\" }}\n")
+    pkg_entry_test_write(root, "dev.jet", "dev :: Config{{ version: \"parent-config\" }}\n")
     pkg_entry_test_write(root, "nested/other.jet", "fn run() {{}}\n")
     facts :: pkg_entry_test_facts(&cache, files.join(root, "nested/other.jet"))
     assert_eq(facts.name, "parent")
@@ -185,7 +188,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("malformed-config")
     source :: "package {{ name: \"demo\", configs: [bad] }}\nfn run() {{}}\n"
-    config :: "pub bad :: Config{{ members: [\"child\"] }}\n"
+    config :: "bad :: Config{{ members: [\"child\"] }}\n"
     pkg_entry_test_write(root, "run.jet", source)
     pkg_entry_test_write(root, "bad.jet", config)
     diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
@@ -202,7 +205,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     root :: pkg_entry_test_root("bad-default")
     source :: "package {{ name: \"demo\", configs: [dev], defaults: {{ run: missing }} }}\nfn run() {{}}\n"
     pkg_entry_test_write(root, "run.jet", source)
-    pkg_entry_test_write(root, "dev.jet", "pub dev :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}\n")
+    pkg_entry_test_write(root, "dev.jet", "dev :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}\n")
     diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))
     assert_eq(diagnostic.code, "E1362")
     assert(diagnostic.why.contains("missing"))
@@ -229,7 +232,8 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("members")
     body :: "name: \"root\"\nmembers: [\"child\"]\n"
-    loop name in [String]{"inline", "conventional"} {
+    entry_carriers :: [String]{"inline", "conventional"}
+    loop name in entry_carriers {
         pkg_entry_test_write(root, "{name}/child/package.jet", "name: \"child\"\n")
     }
     pkg_entry_test_write(root, "inline/run.jet", "package {{\n{body}}}\nfn run() {{}}\n")
@@ -240,7 +244,7 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     assert_eq(left.semantic_digest(), right.semantic_digest())
     assert_eq(left.members.len(), 1)
     // Nested membership is refused in both forms, not truncated.
-    loop name in [String]{"inline", "conventional"} {
+    loop name in entry_carriers {
         pkg_entry_test_write(root, "{name}/child/package.jet", "name: \"child\"\nmembers: [\"grandchild\"]\n")
     }
     assert_eq(pkg_entry_test_failure(&cache, files.join(root, "inline/run.jet")).code, "E1362")
@@ -304,7 +308,8 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("ambiguous-boundary")
     pkg_entry_test_write(root, "package.jet", "name: \"outer\"\nversion: \"0.1.0\"\n")
-    loop name in [String]{"a", "b"} {
+    workspace_names :: [String]{"a", "b"}
+    loop name in workspace_names {
         pkg_entry_test_write(root, "child/{name}.jet", "module workspace {{ policy: {{ deny: #(FS) }} }}\n")
     }
     pkg_entry_test_write(root, "child/src/other.jet", "fn run() {{}}\n")
@@ -429,7 +434,8 @@ fn pkg_entry_test_failure(cache: &WorkspaceDeclarationCache, entry: String) -[FS
     cache := WorkspaceDeclarationCache.new()
     root :: pkg_entry_test_root("duplicate-member")
     pkg_entry_test_write(root, "run.jet", "package {{ name: \"root\", members: [\"one\", \"two\"] }}\nfn run() {{}}\n")
-    loop name in [String]{"one", "two"} {
+    member_names :: [String]{"one", "two"}
+    loop name in member_names {
         pkg_entry_test_write(root, "{name}/package.jet", "name: \"same\"\n")
     }
     diagnostic :: pkg_entry_test_failure(&cache, files.join(root, "run.jet"))

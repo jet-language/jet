@@ -1,0 +1,18 @@
+
+use core.sys as os
+use core.process as process
+use core.time as time
+
+fn run() {
+    os.on_interrupt(() -> {
+        #Context(deadline: time.now()) {
+            time.sleep(5ms)
+        }
+    })
+    os.on_interrupt(() -> {
+        print("second")
+        process.exit(0)
+    })
+    print("ready")
+    loop { }
+}

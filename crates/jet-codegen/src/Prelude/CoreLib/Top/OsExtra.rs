@@ -7,157 +7,21 @@ pub(crate) fn jet_std_os_name() -> String {
 pub(crate) fn jet_std_os_arch() -> String {
     std::env::consts::ARCH.to_string()
 }
-pub(crate) fn jet_std_os_cpu_count() -> i64 {
-    std::thread::available_parallelism()
-        .map(|n| n.get() as i64)
-        .unwrap_or(1)
+pub(crate) fn jet_sys_cpu_count_raw() -> Option<i64> {
+    std::thread::available_parallelism().ok().map(|n| n.get() as i64)
 }
-pub(crate) fn jet_std_os_temp_dir() -> String {
-    std::env::temp_dir().to_string_lossy().to_string()
-}
-pub(crate) fn jet_std_os_executable() -> String {
-    std::env::current_exe()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_default()
+pub(crate) fn jet_sys_executable_raw() -> Option<String> {
+    std::env::current_exe().ok().map(|p| p.to_string_lossy().into_owned())
 }
 pub(crate) fn jet_std_os_pid() -> i64 {
     std::process::id() as i64
 }
-pub(crate) fn jet_std_os_hostname() -> String {
-    std::env::var("HOSTNAME")
-        .ok()
-        .filter(|s| !s.is_empty())
-        .or_else(|| std::fs::read_to_string("/etc/hostname").ok().map(|s| s.trim().to_string()))
-        .unwrap_or_else(|| "localhost".to_string())
-}
-pub(crate) fn jet_std_os_username() -> String {
-    std::env::var("USER")
-        .ok()
-        .or_else(|| std::env::var("USERNAME").ok())
-        .unwrap_or_default()
+pub(crate) fn jet_sys_host_env_raw(name: &str) -> Option<Vec<u8>> {
+    std::env::var_os(name).map(std::ffi::OsString::into_encoded_bytes)
 }
 
-fn jet_os_unsupported(op: &str) -> jet_std::IOError {
-    jet_std::IOError::other(
-        jet_std::IOOperation::Resolve,
-        None,
-        std::io::Error::new(std::io::ErrorKind::Unsupported, format!("{op} is POSIX-only")),
-    )
-}
 
-pub(crate) fn jet_std_os_release() -> String {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(text) = std::fs::read_to_string("/proc/sys/kernel/osrelease") {
-            let trimmed = text.trim();
-            if !trimmed.is_empty() {
-                return trimmed.to_string();
-            }
-        }
-        if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
-            for line in text.lines() {
-                if let Some(value) = line.strip_prefix("VERSION_ID=") {
-                    return value.trim_matches('"').to_string();
-                }
-            }
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("uname").arg("-r").output() {
-            if let Ok(s) = String::from_utf8(output.stdout) {
-                let trimmed = s.trim();
-                if !trimmed.is_empty() {
-                    return trimmed.to_string();
-                }
-            }
-        }
-    }
-    #[cfg(windows)]
-    {
-        if let Ok(v) = std::env::var("OS") {
-            if !v.is_empty() {
-                return v;
-            }
-        }
-    }
-    String::new()
-}
 
-pub(crate) fn jet_std_os_version() -> String {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(text) = std::fs::read_to_string("/etc/os-release") {
-            for line in text.lines() {
-                if let Some(value) = line.strip_prefix("PRETTY_NAME=") {
-                    return value.trim_matches('"').to_string();
-                }
-            }
-        }
-        return jet_std_os_release();
-    }
-    #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("sw_vers")
-            .arg("-productVersion")
-            .output()
-        {
-            if let Ok(s) = String::from_utf8(output.stdout) {
-                let trimmed = s.trim();
-                if !trimmed.is_empty() {
-                    return format!("macOS {trimmed}");
-                }
-            }
-        }
-        return jet_std_os_release();
-    }
-    #[cfg(windows)]
-    {
-        return std::env::var("OS").unwrap_or_default();
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    {
-        String::new()
-    }
-}
-
-pub(crate) fn jet_std_os_getpid() -> i64 {
-    jet_std_os_pid()
-}
-
-pub(crate) fn jet_std_os_expand(template: &String) -> String {
-    let mut out = String::with_capacity(template.len());
-    let bytes = template.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'$' {
-            i += 1;
-            if i < bytes.len() && bytes[i] == b'{' {
-                i += 1;
-                let start = i;
-                while i < bytes.len() && bytes[i] != b'}' {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                if i < bytes.len() {
-                    i += 1;
-                }
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            } else {
-                let start = i;
-                while i < bytes.len() && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
-                    i += 1;
-                }
-                let name = &template[start..i];
-                out.push_str(&jet_std_env_get(&name.to_string()).unwrap_or_default());
-            }
-        } else {
-            out.push(bytes[i] as char);
-            i += 1;
-        }
-    }
-    out
-}
 
 #[cfg(unix)]
 #[repr(C)]
@@ -233,285 +97,159 @@ mod jet_os_sys {
     }
 }
 
-#[cfg(unix)]
-fn jet_os_last_err(op: jet_std::IOOperation, path: Option<String>) -> jet_std::IOError {
-    let errno = unsafe { *jet_os_sys::errno_ptr() };
-    jet_std::IOError::other(op, path, std::io::Error::from_raw_os_error(errno))
+
+pub(crate) fn jet_sys_getppid_raw() -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::getppid() as i64 }) }
+    #[cfg(not(unix))]
+    { None }
+}
+pub(crate) fn jet_sys_getuid_raw() -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::getuid() as i64 }) }
+    #[cfg(not(unix))]
+    { None }
+}
+pub(crate) fn jet_sys_geteuid_raw() -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::geteuid() as i64 }) }
+    #[cfg(not(unix))]
+    { None }
+}
+pub(crate) fn jet_sys_getgid_raw() -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::getgid() as i64 }) }
+    #[cfg(not(unix))]
+    { None }
+}
+pub(crate) fn jet_sys_getegid_raw() -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::getegid() as i64 }) }
+    #[cfg(not(unix))]
+    { None }
+}
+pub(crate) fn jet_sys_groups_count_raw() -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::getgroups(0, std::ptr::null_mut()) as i64 }) }
+    #[cfg(not(unix))]
+    { None }
 }
 
-pub(crate) fn jet_std_os_getppid() -> i64 {
+// Capacity has already been checked against the syscall's nonnegative i32
+// range by Jet. Return the count and full buffer without interpreting failure.
+pub(crate) fn jet_sys_groups_fill_raw(capacity: i64) -> Vec<jet_foundation::Numeric::JetInt> {
     #[cfg(unix)]
     {
-        return unsafe { jet_os_sys::getppid() as i64 };
+        let mut buf = vec![0u32; capacity as usize];
+        let count = unsafe { jet_os_sys::getgroups(capacity as i32, buf.as_mut_ptr()) };
+        std::iter::once(jet_std::jet_int_owned_from_i64(count as i64))
+            .chain(buf.into_iter().map(|value| jet_std::jet_int_owned_from_i64(value as i64))).collect()
     }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { let _ = capacity; Vec::new() }
 }
-pub(crate) fn jet_std_os_getuid() -> i64 {
+pub(crate) fn jet_sys_getpgid_raw(pid: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::getpgid(pid as i32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = pid; jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_getpgrp_raw() -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::getpgrp() as i64 }) }
+    #[cfg(not(unix))]
+    { None }
+}
+pub(crate) fn jet_sys_getsid_raw(pid: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::getsid(pid as i32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = pid; jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_fork_raw() -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::fork(); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_setuid_raw(uid: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::setuid(uid as u32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = uid; jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_setgid_raw(gid: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::setgid(gid as u32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = gid; jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_setpgid_raw(pid: i64, pgid: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::setpgid(pid as i32, pgid as i32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = (pid, pgid); jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_setpgrp_raw() -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::setpgrp(); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_setsid_raw() -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::setsid(); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_initgroups_raw(user: &str, group: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
-        return unsafe { jet_os_sys::getuid() as i64 };
+        // Jet checked NUL absence immediately before this private boundary.
+        let c_user = unsafe { std::ffi::CString::from_vec_unchecked(user.as_bytes().to_vec()) };
+        unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::initgroups(c_user.as_ptr(), group as u32); jet_sys_call_sample(value as i64) }
     }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { let _ = (user, group); jet_sys_unavailable_sample() }
 }
-pub(crate) fn jet_std_os_geteuid() -> i64 {
+pub(crate) fn jet_sys_kill_raw(pid: i64, sig: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::kill(pid as i32, sig as i32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = (pid, sig); jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_wait_raw() -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
-        return unsafe { jet_os_sys::geteuid() as i64 };
+        let mut status = 0;
+        unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::wait(&mut status);
+            let (available, value, errno) = jet_sys_call_sample(value as i64);
+            (available, value, errno, jet_std::jet_int_owned_from_i64(status as i64)) }
     }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { let (available, value, errno) = jet_sys_unavailable_sample(); (available, value, errno, jet_std::jet_int_owned_from_i64(0)) }
 }
-pub(crate) fn jet_std_os_getgid() -> i64 {
+pub(crate) fn jet_sys_waitpid_raw(pid: i64, options: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
-        return unsafe { jet_os_sys::getgid() as i64 };
+        let mut status = 0;
+        unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::waitpid(pid as i32, &mut status, options as i32);
+            let (available, value, errno) = jet_sys_call_sample(value as i64);
+            (available, value, errno, jet_std::jet_int_owned_from_i64(status as i64)) }
     }
     #[cfg(not(unix))]
-    {
-        0
-    }
+    { let _ = (pid, options); let (available, value, errno) = jet_sys_unavailable_sample(); (available, value, errno, jet_std::jet_int_owned_from_i64(0)) }
 }
-pub(crate) fn jet_std_os_getegid() -> i64 {
-    #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getegid() as i64 };
-    }
-    #[cfg(not(unix))]
-    {
-        0
-    }
-}
-pub(crate) fn jet_std_os_getgroups() -> Vec<i64> {
-    #[cfg(unix)]
-    {
-        unsafe {
-            let n = jet_os_sys::getgroups(0, std::ptr::null_mut());
-            if n < 0 {
-                return Vec::new();
-            }
-            let mut buf = vec![0u32; n as usize];
-            let got = jet_os_sys::getgroups(n, buf.as_mut_ptr());
-            if got < 0 {
-                return Vec::new();
-            }
-            return buf.into_iter().take(got as usize).map(|g| g as i64).collect();
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        Vec::new()
-    }
-}
-pub(crate) fn jet_std_os_getpgid(pid: i64) -> Result<i64, jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let out = unsafe { jet_os_sys::getpgid(pid as i32) };
-        if out < 0 {
-            return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
-        }
-        return Ok(out as i64);
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        Err(jet_os_unsupported("getpgid"))
-    }
-}
-pub(crate) fn jet_std_os_getpgrp() -> i64 {
-    #[cfg(unix)]
-    {
-        return unsafe { jet_os_sys::getpgrp() as i64 };
-    }
-    #[cfg(not(unix))]
-    {
-        0
-    }
-}
-pub(crate) fn jet_std_os_getsid(pid: i64) -> Result<i64, jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let out = unsafe { jet_os_sys::getsid(pid as i32) };
-        if out < 0 {
-            return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
-        }
-        return Ok(out as i64);
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = pid;
-        Err(jet_os_unsupported("getsid"))
-    }
-}
-pub(crate) fn jet_std_os_fork() -> Result<i64, jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let pid = unsafe { jet_os_sys::fork() };
-        if pid < 0 {
-            return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
-        }
-        return Ok(pid as i64);
-    }
-    #[cfg(not(unix))]
-    {
-        Err(jet_os_unsupported("fork"))
-    }
-}
-pub(crate) fn jet_std_os_setuid(uid: i64) -> Result<(), jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        if unsafe { jet_os_sys::setuid(uid as u32) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = uid;
-        Err(jet_os_unsupported("setuid"))
-    }
-}
-pub(crate) fn jet_std_os_setgid(gid: i64) -> Result<(), jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        if unsafe { jet_os_sys::setgid(gid as u32) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = gid;
-        Err(jet_os_unsupported("setgid"))
-    }
-}
-pub(crate) fn jet_std_os_setpgid(pid: i64, pgid: i64) -> Result<(), jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        if unsafe { jet_os_sys::setpgid(pid as i32, pgid as i32) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (pid, pgid);
-        Err(jet_os_unsupported("setpgid"))
-    }
-}
-pub(crate) fn jet_std_os_setpgrp() -> Result<(), jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        if unsafe { jet_os_sys::setpgrp() } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-    }
-    #[cfg(not(unix))]
-    {
-        Err(jet_os_unsupported("setpgrp"))
-    }
-}
-pub(crate) fn jet_std_os_setsid() -> Result<i64, jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let out = unsafe { jet_os_sys::setsid() };
-        if out < 0 {
-            return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-        }
-        return Ok(out as i64);
-    }
-    #[cfg(not(unix))]
-    {
-        Err(jet_os_unsupported("setsid"))
-    }
-}
-pub(crate) fn jet_std_os_initgroups(user: &String, group: i64) -> Result<(), jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let c_user = std::ffi::CString::new(user.as_str()).map_err(|_| {
-            jet_std::IOError::other(
-                jet_std::IOOperation::Write,
-                None,
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "username contains NUL"),
-            )
-        })?;
-        if unsafe { jet_os_sys::initgroups(c_user.as_ptr(), group as u32) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (user, group);
-        Err(jet_os_unsupported("initgroups"))
-    }
-}
-pub(crate) fn jet_std_os_kill(pid: i64, sig: i64) -> Result<(), jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        if unsafe { jet_os_sys::kill(pid as i32, sig as i32) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (pid, sig);
-        Err(jet_os_unsupported("kill"))
-    }
-}
-pub(crate) fn jet_std_os_wait() -> Result<i64, jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let mut status = 0i32;
-        let got = unsafe { jet_os_sys::wait(&mut status) };
-        if got < 0 {
-            return Err(jet_os_last_err(jet_std::IOOperation::Close, None));
-        }
-        return Ok(status as i64);
-    }
-    #[cfg(not(unix))]
-    {
-        Err(jet_os_unsupported("wait"))
-    }
-}
-pub(crate) fn jet_std_os_waitpid(pid: i64, options: i64) -> Result<i64, jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let mut status = 0i32;
-        let got = unsafe { jet_os_sys::waitpid(pid as i32, &mut status, options as i32) };
-        if got < 0 {
-            return Err(jet_os_last_err(jet_std::IOOperation::Close, None));
-        }
-        return Ok(status as i64);
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (pid, options);
-        Err(jet_os_unsupported("waitpid"))
-    }
-}
-pub(crate) fn jet_std_os_pipe() -> Result<Vec<i64>, jet_std::IOError> {
+pub(crate) fn jet_sys_pipe_raw() -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
         let mut fds = [0i32; 2];
-        if unsafe { jet_os_sys::pipe(fds.as_mut_ptr()) } == 0 {
-            return Ok(vec![fds[0] as i64, fds[1] as i64]);
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
+        unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::pipe(fds.as_mut_ptr());
+            let (available, value, errno) = jet_sys_call_sample(value as i64);
+            (available, value, errno, jet_std::jet_int_owned_from_i64(fds[0] as i64), jet_std::jet_int_owned_from_i64(fds[1] as i64)) }
     }
     #[cfg(not(unix))]
-    {
-        Err(jet_os_unsupported("pipe"))
-    }
+    { let (available, value, errno) = jet_sys_unavailable_sample(); (available, value, errno, jet_std::jet_int_owned_from_i64(0), jet_std::jet_int_owned_from_i64(0)) }
 }
 pub(crate) fn jet_std_os_close_fd(fd: i64) {
     #[cfg(unix)]
@@ -523,26 +261,14 @@ pub(crate) fn jet_std_os_close_fd(fd: i64) {
         let _ = fd;
     }
 }
-pub(crate) fn jet_std_os_mkfifo(path: &String, mode: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_sys_mkfifo_raw(path: &str, mode: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
-        let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
-            jet_std::IOError::other(
-                jet_std::IOOperation::Resolve,
-                Some(path.clone()),
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"),
-            )
-        })?;
-        if unsafe { jet_os_sys::mkfifo(c_path.as_ptr(), mode as u32) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Resolve, Some(path.clone())));
+        let c_path = unsafe { std::ffi::CString::from_vec_unchecked(path.as_bytes().to_vec()) };
+        unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::mkfifo(c_path.as_ptr(), mode as u32); jet_sys_call_sample(value as i64) }
     }
     #[cfg(not(unix))]
-    {
-        let _ = (path, mode);
-        Err(jet_os_unsupported("mkfifo"))
-    }
+    { let _ = (path, mode); jet_sys_unavailable_sample() }
 }
 pub(crate) fn jet_std_os_sync() {
     #[cfg(unix)]
@@ -550,139 +276,78 @@ pub(crate) fn jet_std_os_sync() {
         jet_os_sys::sync();
     }
 }
-pub(crate) fn jet_std_os_umask(mask: i64) -> i64 {
+pub(crate) fn jet_sys_umask_raw(mask: i64) -> Option<i64> {
+    #[cfg(unix)]
+    { Some(unsafe { jet_os_sys::umask(mask as u32) as i64 }) }
+    #[cfg(not(unix))]
+    { let _ = mask; None }
+}
+pub(crate) fn jet_sys_getpriority_raw(who: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::getpriority(0, who as u32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = who; jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_setpriority_raw(who: i64, priority: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    #[cfg(unix)]
+    { unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::setpriority(0, who as u32, priority as i32); jet_sys_call_sample(value as i64) } }
+    #[cfg(not(unix))]
+    { let _ = (who, priority); jet_sys_unavailable_sample() }
+}
+pub(crate) fn jet_sys_loadavg_raw() -> (bool, jet_foundation::Numeric::JetInt, f64, f64, f64) {
     #[cfg(unix)]
     {
-        return unsafe { jet_os_sys::umask(mask as u32) as i64 };
+        let mut avg = [0.0; 3];
+        let count = unsafe { jet_os_sys::getloadavg(avg.as_mut_ptr(), 3) };
+        (true, jet_std::jet_int_owned_from_i64(count as i64), avg[0], avg[1], avg[2])
     }
     #[cfg(not(unix))]
-    {
-        let _ = mask;
-        0
-    }
+    { (false, jet_std::jet_int_owned_from_i64(0), 0.0, 0.0, 0.0) }
 }
-pub(crate) fn jet_std_os_getpriority(who: i64) -> Result<i64, jet_std::IOError> {
+pub(crate) fn jet_sys_utime_raw(path: &str, atime: i64, mtime: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
-        unsafe {
-            *jet_os_sys::errno_ptr() = 0;
-            let got = jet_os_sys::getpriority(0, who as u32);
-            if got == -1 && *jet_os_sys::errno_ptr() != 0 {
-                return Err(jet_os_last_err(jet_std::IOOperation::Resolve, None));
-            }
-            return Ok(got as i64);
-        }
+        let c_path = unsafe { std::ffi::CString::from_vec_unchecked(path.as_bytes().to_vec()) };
+        let times = JetOsUtimbuf { actime: atime, modtime: mtime };
+        unsafe { *jet_os_sys::errno_ptr() = 0; let value = jet_os_sys::utime(c_path.as_ptr(), &times); jet_sys_call_sample(value as i64) }
     }
     #[cfg(not(unix))]
-    {
-        let _ = who;
-        Err(jet_os_unsupported("getpriority"))
-    }
+    { let _ = (path, atime, mtime); jet_sys_unavailable_sample() }
 }
-pub(crate) fn jet_std_os_setpriority(who: i64, prio: i64) -> Result<(), jet_std::IOError> {
+pub(crate) fn jet_sys_times_raw() -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
     #[cfg(unix)]
     {
-        if unsafe { jet_os_sys::setpriority(0, who as u32, prio as i32) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, None));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (who, prio);
-        Err(jet_os_unsupported("setpriority"))
-    }
-}
-pub(crate) fn jet_std_os_loadavg() -> Vec<f64> {
-    #[cfg(unix)]
-    {
-        let mut avg = [0.0f64; 3];
-        let n = unsafe { jet_os_sys::getloadavg(avg.as_mut_ptr(), 3) };
-        if n < 0 {
-            return vec![0.0, 0.0, 0.0];
-        }
-        return avg[..n as usize].to_vec();
-    }
-    #[cfg(not(unix))]
-    {
-        vec![0.0, 0.0, 0.0]
-    }
-}
-pub(crate) fn jet_std_os_utime(path: &String, atime: i64, mtime: i64) -> Result<(), jet_std::IOError> {
-    #[cfg(unix)]
-    {
-        let c_path = std::ffi::CString::new(path.as_str()).map_err(|_| {
-            jet_std::IOError::other(
-                jet_std::IOOperation::Write,
-                Some(path.clone()),
-                std::io::Error::new(std::io::ErrorKind::InvalidInput, "path contains NUL"),
-            )
-        })?;
-        let times = JetOsUtimbuf {
-            actime: atime,
-            modtime: mtime,
-        };
-        if unsafe { jet_os_sys::utime(c_path.as_ptr(), &times) } == 0 {
-            return Ok(());
-        }
-        return Err(jet_os_last_err(jet_std::IOOperation::Write, Some(path.clone())));
-    }
-    #[cfg(not(unix))]
-    {
-        let _ = (path, atime, mtime);
-        Err(jet_os_unsupported("utime"))
-    }
-}
-pub(crate) fn jet_std_os_exitcode(status: i64) -> i64 {
-    #[cfg(unix)]
-    {
-        let s = status as i32;
-        if (s & 0x7f) == 0 {
-            return ((s >> 8) & 0xff) as i64;
-        }
-        return -1;
-    }
-    #[cfg(not(unix))]
-    {
-        status
-    }
-}
-pub(crate) fn jet_std_os_times() -> Vec<f64> {
-    #[cfg(unix)]
-    {
-        let mut t = unsafe { std::mem::zeroed::<JetOsTms>() };
+        let mut t = JetOsTms { tms_utime: 0, tms_stime: 0, tms_cutime: 0, tms_cstime: 0 };
         let elapsed = unsafe { jet_os_sys::times(&mut t) };
-        let ticks = unsafe { jet_os_sys::sysconf(jet_os_sys::_SC_CLK_TCK) }.max(1) as f64;
-        return vec![
-            t.tms_utime as f64 / ticks,
-            t.tms_stime as f64 / ticks,
-            t.tms_cutime as f64 / ticks,
-            t.tms_cstime as f64 / ticks,
-            if elapsed < 0 {
-                0.0
-            } else {
-                elapsed as f64 / ticks
-            },
-        ];
+        let ticks = unsafe { jet_os_sys::sysconf(jet_os_sys::_SC_CLK_TCK) };
+        (true, jet_std::jet_int_owned_from_i64(t.tms_utime), jet_std::jet_int_owned_from_i64(t.tms_stime),
+         jet_std::jet_int_owned_from_i64(t.tms_cutime), jet_std::jet_int_owned_from_i64(t.tms_cstime),
+         jet_std::jet_int_owned_from_i64(elapsed), jet_std::jet_int_owned_from_i64(ticks))
     }
     #[cfg(not(unix))]
-    {
-        vec![0.0, 0.0, 0.0, 0.0, 0.0]
-    }
+    { (false, jet_std::jet_int_owned_from_i64(0), jet_std::jet_int_owned_from_i64(0),
+       jet_std::jet_int_owned_from_i64(0), jet_std::jet_int_owned_from_i64(0),
+       jet_std::jet_int_owned_from_i64(0), jet_std::jet_int_owned_from_i64(0)) }
 }
-pub(crate) fn jet_std_os_uptime() -> f64 {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(text) = std::fs::read_to_string("/proc/uptime") {
-            if let Some(first) = text.split_whitespace().next() {
-                if let Ok(v) = first.parse::<f64>() {
-                    return v;
-                }
-            }
-        }
-    }
-    0.0
+
+#[cfg(unix)]
+fn jet_sys_call_sample(value: i64) -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    let errno = unsafe { *jet_os_sys::errno_ptr() };
+    (true, jet_std::jet_int_owned_from_i64(value), jet_std::jet_int_owned_from_i64(errno as i64))
 }
-pub(crate) fn jet_std_os_stop(code: i64) {
-    jet_std_process_exit(code);
+#[cfg(not(unix))]
+fn jet_sys_unavailable_sample() -> (bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt) {
+    (false, jet_std::jet_int_owned_from_i64(0), jet_std::jet_int_owned_from_i64(0))
+}
+pub(crate) fn jet_sys_errno_text_raw(errno: i64) -> String {
+    std::io::Error::from_raw_os_error(errno as i32).to_string()
+}
+pub(crate) fn jet_sys_current_dir_raw() -> Result<String, String> {
+    std::env::current_dir()
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn jet_sys_set_current_dir_raw(path: &str) -> Result<(), String> {
+    std::env::set_current_dir(path).map_err(|error| error.to_string())
 }

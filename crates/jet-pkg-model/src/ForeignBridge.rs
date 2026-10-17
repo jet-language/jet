@@ -2035,15 +2035,20 @@ pub fn read_boundary_provenance(path: &Path) -> Result<Provenance, String> {
     })
 }
 
+/// Provenance is one `name=value` row per line, and the reader splits each row
+/// at its first `=`. A name therefore cannot hold `=`, while a value may: handle
+/// facts and descriptor stamps are themselves `key=value;...` records. A field
+/// with several values is written as repeated rows, never as one value that
+/// holds line breaks.
 fn append_line(text: &mut String, name: &str, value: &str) -> Result<(), String> {
-    if name.is_empty()
-        || value.is_empty()
-        || name
-            .bytes()
-            .any(|byte| matches!(byte, b'\n' | b'\r' | b'='))
-        || value.bytes().any(|byte| matches!(byte, b'\n' | b'\r'))
-    {
-        return Err("bridge provenance fields cannot contain line breaks or `=`".into());
+    let line_break = |field: &str| field.bytes().any(|byte| matches!(byte, b'\n' | b'\r'));
+    if name.is_empty() || line_break(name) || name.contains('=') {
+        return Err("bridge provenance field names must be non-empty and hold no line break or `=`".into());
+    }
+    if value.is_empty() || line_break(value) {
+        return Err(format!(
+            "bridge provenance field `{name}` must have a non-empty, single-line value; write one `{name}` row per value"
+        ));
     }
     text.push_str(name);
     text.push('=');
@@ -2447,7 +2452,7 @@ pub fn render_scalar_jet(
     let _ = writeln!(out, "    fn take_error() -> Int = \"{abi}_take_error\"\n}}");
     let _ = writeln!(out, "use c.{abi} as abi\n");
     for function in functions {
-        let _ = write!(out, "pub fn {}(", function.name);
+        let _ = write!(out, "fn {}(", function.name);
         for (index, scalar) in function.params.iter().enumerate() {
             if index > 0 {
                 out.push_str(", ");
@@ -2848,6 +2853,48 @@ mod tests {
         let first = first.finish();
         assert_eq!(first, same.finish());
         assert_ne!(first, changed.finish());
+    }
+
+    #[test]
+    fn provenance_values_keep_equals_signs_and_refuse_line_breaks() {
+        let root = std::env::temp_dir().join(format!(
+            "jet_provenance_equals_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("hb.provenance");
+        let blob = "lib=hb;typedef=hb_blob_t;jet=HbBlob;close=hb_blob_destroy";
+        let font = "lib=hb;typedef=hb_font_t;jet=HbFont;close=hb_font_destroy";
+        write_provenance(
+            &path,
+            "identity-digest",
+            &[
+                ("handle-fact", blob),
+                ("handle-fact", font),
+                ("link-closure", "direct=hb;transitive="),
+            ],
+            &[("hb.jet".to_string(), "digest".to_string())],
+        )
+        .unwrap();
+        let record = read_provenance(&path).unwrap();
+        assert_eq!(record.identity, "identity-digest");
+        assert_eq!(
+            record.fields.get("handle-fact"),
+            Some(&vec![blob.to_string(), font.to_string()])
+        );
+        assert_eq!(record.value("link-closure"), Some("direct=hb;transitive="));
+        assert_eq!(record.value("artifact.hb.jet"), Some("digest"));
+        let _ = fs::remove_dir_all(&root);
+
+        let joined = format!("{blob}\n{font}");
+        let error = render_provenance("identity", &[("handle-facts", &joined)], &[]).unwrap_err();
+        assert!(error.contains("`handle-facts`"), "{error}");
+        assert!(render_provenance("identity", &[("handle-facts", "")], &[]).is_err());
+        assert!(render_provenance("identity", &[("handle=fact", blob)], &[]).is_err());
     }
 
     #[test]

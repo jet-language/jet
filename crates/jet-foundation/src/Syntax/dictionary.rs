@@ -329,7 +329,7 @@ fn curated(token: &str) -> &'static [Curated] {
                 "Before a name (move)",
                 "Moves the value out of the name and hands it to where the mark is written. Jet already moves a name at its last use, so the mark is optional; it makes the move exact and visible.",
                 "names :: [\"ada\", \"grace\"]\narchive(^names)",
-                "`names` can no longer be used: a later use is error E0121. To keep using it, pass a copy with `~names` instead.",
+                "`names` can no longer be used: a later use is error E0121. To keep using it, pass a copy with `names.copy()` instead.",
                 &["E0121", "E0225"],
             ),
             (
@@ -338,13 +338,6 @@ fn curated(token: &str) -> &'static [Curated] {
                 "fn archive(name: ^String) -> String { name }\nsaved :: archive(^title)",
                 "The caller's value moves into the function; the caller can't use it after the call.",
                 &["E0209"],
-            ),
-            (
-                "Between two numbers (power)",
-                "Raises the left number to the power of the right one.",
-                "side :: 3\narea :: side ^ 2",
-                "Both numbers are unchanged and the result is a new number (here 9). `x ^= 2` raises `x` in place.",
-                &[],
             ),
         ],
         SIGIL_WRITE => &[
@@ -362,20 +355,13 @@ fn curated(token: &str) -> &'static [Curated] {
                 "Callers must mark the argument with `&`.",
                 &["E0202"],
             ),
-            (
-                "Between two whole numbers",
-                "Bitwise AND: each result bit is 1 only where both numbers have a 1.",
-                "flags :: 6\nlow :: flags & 3",
-                "Both numbers are unchanged; here `low` is 2.",
-                &[],
-            ),
         ],
-        SIGIL_COPY => &[(
+        SIGIL_COPY_RETIRED => &[(
             "Before a value",
-            "Makes an independent copy of the value.",
-            "items := [1, 2, 3]\nbackup :: ~items",
-            "Changing one does not change the other, and the original stays usable.",
-            &["E0211"],
+            "The retired copy mark (D-COPY-WORD1). A copy is the method `.copy()`; error E0941 rewrites `~items` to `items.copy()`.",
+            "items := [1, 2, 3]\nbackup :: items.copy()",
+            "Changing one copy does not change the other, and the original stays usable.",
+            &["E0941", "E0211"],
         )],
         SIGIL_SPREAD => &[
             (
@@ -519,13 +505,6 @@ fn curated(token: &str) -> &'static [Curated] {
                 "Either alternative is accepted.",
                 "fn load(path: String) -> Config (IOError | ParseError)! { … }",
                 "Code that handles the result must cover every alternative.",
-                &[],
-            ),
-            (
-                "Between two whole numbers",
-                "Bitwise OR: each result bit is 1 where either number has a 1.",
-                "mode :: READ | WRITE",
-                "Both numbers are unchanged.",
                 &[],
             ),
         ],
@@ -714,7 +693,7 @@ fn curated(token: &str) -> &'static [Curated] {
             "Between two whole numbers",
             "Bitwise exclusive OR: each result bit is 1 where exactly one number has a 1.",
             "toggled :: flags ~| 1",
-            "Both numbers are unchanged. Prefix `~` alone still means copy.",
+            "Both numbers are unchanged. A prefix `~` alone is the retired copy mark (E0941).",
             &[],
         )],
         OP_TILDE_PIPE_EQ => &[(

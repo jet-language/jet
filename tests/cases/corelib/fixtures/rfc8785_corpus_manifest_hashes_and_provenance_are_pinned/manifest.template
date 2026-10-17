@@ -1,0 +1,18 @@
+use core.files as files
+use core.crypto as crypto
+
+#Test("RFC8785 manifest hashes and provenance") {
+    rows :: files.read_lines("{root}/tests/fixtures/encoding/rfc8785/MANIFEST.tsv") ?? panic("manifest")
+    count := 0
+    loop row in rows {
+        if row == "" || row.starts_with("#") -> next
+        fields :: row.split("\t")
+        assert_eq(fields.len(), 4)
+        bytes :: files.read_bytes("{root}/tests/fixtures/encoding/rfc8785/{fields[0]}") ?? panic("corpus member")
+        assert_eq(crypto.sha256(bytes).hex(), fields[1])
+        assert(fields[2].starts_with("https://www.rfc-editor.org/rfc/rfc8785.html#"))
+        assert_eq(fields[3], "IETF-Trust-Legal-Provisions")
+        count += 1
+    }
+    assert_eq(count, 2)
+}

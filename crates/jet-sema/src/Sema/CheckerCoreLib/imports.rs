@@ -166,22 +166,8 @@ impl<'a> Checker<'a> {
             let method = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
             self.record_semantic_reference(span, format!("fn:{identity}::{method}"));
         }
-        // D-MOD2/3: a qualified `M.item` call from outside the module reaches only
-        // its `pub` items — a bare private item escapes its module otherwise.
-        if !self.name_ledger.exported(self.module_idx, mangled) {
-            let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
-            self.diags.push(Diagnostic::error(
-                "E0609",
-                format!("`{}` is private in module `{}`", item, alias),
-                "only `pub` items in an inline module are reachable from outside it".to_string(),
-                format!("add `pub` before `fn {}` in module `{}`", item, alias),
-                Some(alias_span),
-            ));
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            return None;
-        }
+        // D-VIS-MODULE1: an inline module of this file is always reachable
+        // from its enclosing file, `priv` or not.
         self.record_import_alias_reference(alias, alias_span);
         let item = mangled.strip_prefix(&member_prefix).unwrap_or(mangled);
         if Syntax::classify_identifier(item) == Syntax::IdentifierClass::SoftPublic {
@@ -274,8 +260,10 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in type_params.iter().zip(type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
-                    if !actual.is_never() {
+                    // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain parameter.
+                    if !actual.is_never()
+                        || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                    {
                         self.check_declared_type(&actual, span);
                     }
                     for bound in &param.bounds {
@@ -427,10 +415,8 @@ impl<'a> Checker<'a> {
         // D-MOD-CYCLE1=A: an imported package is one namespace; the function
         // may live in any of its files.
         if !target.funcs.contains_key(&semantic_name) {
-            let owner = self
-                .name_ledger
-                .namespace_siblings(mod_idx)
-                .find(|&sibling| mods[sibling].funcs.contains_key(name));
+            let owner = self.name_ledger.namespace_owner(mod_idx, name)
+                .filter(|&owner| mods[owner].funcs.contains_key(name));
             if let Some(owner) = owner
             {
                 return self.infer_import_call_with_warning(
@@ -443,7 +429,11 @@ impl<'a> Checker<'a> {
             let is_pub = self
                 .name_ledger
                 .visible(self.module_idx, mod_idx, &semantic_name);
-            if !is_pub && mod_idx != self.module_idx {
+            // Canonical Core sources share private implementation seams;
+            // neither a user import nor a public export acquires that authority.
+            let core_private_seam = self.module_is_core_source(self.module_idx)
+                && target.is_core_source;
+            if !is_pub && mod_idx != self.module_idx && !core_private_seam {
                 self.diags.push(private_item(name, span));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
@@ -459,7 +449,7 @@ impl<'a> Checker<'a> {
                 self.diags.push(soft_public_use(name, span));
             }
             let mut sig = target.funcs.get(&semantic_name).unwrap().clone();
-            self.qualify_builtin_shadowing_sig(mod_idx, &mut sig);
+            self.qualify_imported_function_sig(mod_idx, &semantic_name, &mut sig);
             if let Some(dep) = sig.deprecation.as_ref() {
                 self.check_deprecation(name, dep, span);
             }
@@ -519,6 +509,9 @@ impl<'a> Checker<'a> {
                 .get(&semantic_name)
                 .cloned()
                 .unwrap_or_default();
+            let source_json = semantic_name == "json"
+                && jet_foundation::CoreModuleExports::core_source_module("core.http.server")
+                    .is_some_and(|source| target.module_alias == source.alias);
             let mut subst = HashMap::new();
             let mut pre_inferred = Vec::new();
             if !type_args.is_empty() {
@@ -548,18 +541,28 @@ impl<'a> Checker<'a> {
                 } else {
                     for (param, actual) in type_params.iter().zip(type_args) {
                         let actual = self.resolve_type(actual.clone());
-                        // D-CALLBACK-ERR1=A: `Never` fills a failure-domain parameter.
-                        if !actual.is_never() {
+                        // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain parameter.
+                        if !actual.is_never()
+                            || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                        {
                             self.check_declared_type(&actual, span);
                         }
                         for bound in &param.bounds {
                             if !self.type_satisfies_bound(&actual, bound) {
-                                self.diags.push(crate::Generics::e0905(
-                                    &actual.name(),
-                                    bound,
-                                    span,
-                                    false,
-                                ));
+                                let encoding_span = if source_json && bound == crate::Generics::ENCODE {
+                                    sig.params.iter().position(|(_, ty)| matches!(ty, Type::Named(name) if name == &param.name))
+                                        .and_then(|index| args.get(index)).map(|arg| arg.expr.span())
+                                } else { None };
+                                if let Some(encoding_span) = encoding_span {
+                                    self.check_encodable(&actual, encoding_span);
+                                } else {
+                                    self.diags.push(crate::Generics::e0905(
+                                        &actual.name(),
+                                        bound,
+                                        span,
+                                        false,
+                                    ));
+                                }
                             }
                         }
                         subst.insert(param.name.clone(), actual);
@@ -575,20 +578,28 @@ impl<'a> Checker<'a> {
                     !sig.is_extern,
                 );
                 if inference.complete {
-                    if let Some((ty, bound)) = type_params.iter().find_map(|param| {
+                    if let Some((param, ty, bound)) = type_params.iter().find_map(|param| {
                         let ty = inference.subst.get(&param.name)?;
                         param
                             .bounds
                             .iter()
                             .find(|bound| !self.type_satisfies_bound(ty, bound))
-                            .map(|bound| (ty, bound))
+                            .map(|bound| (param, ty, bound))
                     }) {
-                        self.diags.push(crate::Generics::e0905(
-                            &ty.name(),
-                            bound,
-                            span,
-                            false,
-                        ));
+                        let encoding_span = if source_json && bound == crate::Generics::ENCODE {
+                            sig.params.iter().position(|(_, ty)| matches!(ty, Type::Named(name) if name == &param.name))
+                                .and_then(|index| args.get(index)).map(|arg| arg.expr.span())
+                        } else { None };
+                        if let Some(encoding_span) = encoding_span {
+                            self.check_encodable(ty, encoding_span);
+                        } else {
+                            self.diags.push(crate::Generics::e0905(
+                                &ty.name(),
+                                bound,
+                                span,
+                                false,
+                            ));
+                        }
                     }
                 }
                 pre_inferred = inference.pre_inferred;
@@ -869,9 +880,9 @@ impl<'a> Checker<'a> {
                 self.diags.push(Diagnostic::error(
                     "E0102",
                     format!("nothing named `{}` exists in this import", name),
-                    "only `pub` functions and types from the other file are reachable here"
+                    "only functions and types outside a `priv module` of the other file are reachable here"
                         .to_string(),
-                    "check the spelling, or mark the item `pub` in its file".to_string(),
+                    "check the spelling, or move the item out of its `priv module`".to_string(),
                     Some(span),
                 ));
             }
@@ -879,8 +890,9 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::error(
                 "E0102",
                 format!("nothing named `{}` exists in this import", name),
-                "only `pub` functions and types from the other file are reachable here".to_string(),
-                "check the spelling, or mark the item `pub` in its file".to_string(),
+                "only functions and types outside a `priv module` of the other file are reachable here"
+                    .to_string(),
+                "check the spelling, or move the item out of its `priv module`".to_string(),
                 Some(alias_span),
             ));
         }

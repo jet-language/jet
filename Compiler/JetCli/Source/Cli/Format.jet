@@ -1,0 +1,128 @@
+// CmdCompile.rs run_fmt/run_fmt_stdin: atomic preflight and both output channels.
+// The formatter and source migration helpers remain the existing Host.jet ones.
+use core.files as cli_files
+use core.term as cli_term
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USAGE, JET_DRIVER_EXIT_USER_ERROR]
+use jet_parser.jet_format_unified_diff
+use jet_foundation.[Diagnostic, diagnostic_render_all]
+
+fn jet_cli_format_diagnostics(path: String, source: String, diagnostics: [Diagnostic]) -> String Never! {
+    jet_cli_reports_status_json("fmt", false, jet_cli_report_cwd(), path, source, diagnostics)
+}
+
+fn jet_cli_format_stdin(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOutput {
+    source :: cli_term.read_all_input() ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", "failed to read from stdin", jet_cli_why("E2105"), "correct the named problem, then run the command again", request.color), exit_code: JET_DRIVER_EXIT_USAGE}
+    label :: request.stdin_path ?? "<stdin>"
+    file :: jet_cli_fmt_one(label, source, request)
+    if file.report == .Val(report) {
+        return JetDriverVerbOutput{stdout: "", stderr: report, exit_code: JET_DRIVER_EXIT_USAGE}
+    }
+    if file.diagnostics.len() > 0 {
+        report :: if json -> jet_cli_format_diagnostics(label, source, file.diagnostics) else -> diagnostic_render_all(label, source, file.diagnostics, false)
+        return JetDriverVerbOutput{stdout: "", stderr: report, exit_code: JET_DRIVER_EXIT_USAGE}
+    }
+    JetDriverVerbOutput{stdout: file.formatted, stderr: if request.quiet || json -> "" else -> jet_cli_fmt_statuses(label, file, false), exit_code: JET_DRIVER_EXIT_OK}
+}
+
+fn jet_cli_format_io_error(path: String, message: String) -> String Never! {
+    details :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("status", jet_cli_status_text("error")), jet_cli_status_field("errors", jet_cli_status_array([JetCLIStatusValue]{jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(path)), jet_cli_status_field("message", jet_cli_status_text(message))})}))})
+    "{jet_cli_status_render("fmt", false, [JetCLIStatusField]{jet_cli_status_field("fmt", details)})}\n"
+}
+
+fn jet_cli_format_run(request: JetCLIFmtRequest, json: Bool) -> JetDriverVerbOutput {
+    if request.stdin_mode -> return jet_cli_format_stdin(request, json)
+    color :: request.color
+    cwd :: cli_files.cwd() ?? "."
+    files := [String]{}
+    if request.changed {
+        files = jet_cli_fmt_changed_files() ?? return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2104", "`--changed` requires a git repository", "`jet fmt --changed` uses git to find modified .jet files", "run from inside a git repository, or format specific files with `jet fmt <path>`", color), exit_code: JET_DRIVER_EXIT_USAGE}
+    } else if request.paths.len() == 0 {
+        jet_cli_fmt_walk(jet_cli_manifest_root(cwd) ?? cwd, &files)
+    } else {
+        loop raw in request.paths {
+            if cli_files.is_dir(raw) -> jet_cli_fmt_walk(raw, &files) else -> &files.push(raw)
+        }
+        &files.sort()
+        unique := [String]{}
+        loop file in files {
+            if unique.len() == 0 || unique[unique.len() - 1] != file -> &unique.push(file)
+        }
+        files = unique
+    }
+    if files.len() == 0 -> return jet_cli_external_fmt_ok(json)
+    results := [JetCLIFmtFile]{}
+    loop path in files {
+        source :: cli_files.read(path) ?? {
+            &results.push(JetCLIFmtFile{path: path, original: "", formatted: "", changed: false, retired_interpolation_selectors: 0, retired_print_family_spellings: 0, retired_type_names: 0, retired_target_spellings: 0, io_error: Val("can't read `{path}`: {jet_cli_io_error_text(err)}"), diagnostics: [Diagnostic]{}, report: None})
+            next
+        }
+        &results.push(jet_cli_fmt_one(path, source, request))
+    }
+    failed := false
+    loop result in results {
+        if result.io_error != None || result.report != None || result.diagnostics.len() > 0 {
+            failed = true
+        }
+    }
+    if failed {
+        stderr := ""
+        loop result in results {
+            if result.io_error == .Val(problem) {
+                stderr = "{stderr}{if json -> jet_cli_format_io_error(result.path, problem) else -> jet_cli_report("E2105", problem, jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}"
+            }
+            if result.report == .Val(report) -> stderr = "{stderr}{report}"
+            if result.diagnostics.len() > 0 {
+                stderr = "{stderr}{if json -> jet_cli_format_diagnostics(result.path, result.original, result.diagnostics) else -> diagnostic_render_all(result.path, result.original, result.diagnostics, false)}"
+            }
+        }
+        return JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: if request.check -> JET_DRIVER_EXIT_USER_ERROR else -> JET_DRIVER_EXIT_USAGE}
+    }
+    display_root :: jet_cli_manifest_root(cwd) ?? cwd
+    if request.check {
+        dirty := [JetCLIFmtFile]{}
+        loop result in results {
+            if result.changed -> &dirty.push(result)
+        }
+        if dirty.len() == 0 -> return jet_cli_external_fmt_ok(json)
+        relative :: loop result in dirty -> jet_cli_fmt_relative(result.path, display_root)
+        order := [Int]{}
+        loop index in 0..<dirty.len() -> &order.push(index)
+        loop position in 1..<order.len() {
+            current :: order[position].copy()
+            slot := position
+            loop slot > 0 && relative[current] < relative[order[slot - 1]] {
+                order[slot] = order[slot - 1]
+                slot -= 1
+            }
+            order[slot] = current
+        }
+        stdout := ""
+        entries := [JetCLIStatusValue]{}
+        loop index in order {
+            if json {
+                if request.diff {
+                    diff :: jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)
+                    &entries.push(jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("path", jet_cli_status_text(relative[index])), jet_cli_status_field("diff", jet_cli_status_text(diff))}))
+                } else { &entries.push(jet_cli_status_text(dirty[index].path)) }
+            } else {
+                // Rust uses the original path in JSON without --diff.
+                stdout = "{stdout}{relative[index]}\n"
+                if request.diff {
+                    stdout = "{stdout}{jet_format_unified_diff(relative[index], dirty[index].original, dirty[index].formatted)}"
+                }
+            }
+        }
+        if json -> stdout = jet_cli_external_fmt_status("dirty", Val(entries))
+        return JetDriverVerbOutput{stdout: stdout, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    stderr := ""
+    loop result in results {
+        if !result.changed -> next
+        cli_files.write(result.path, result.formatted) ?? return JetDriverVerbOutput{stdout: "", stderr: "{stderr}{jet_cli_report("E2105", "couldn't write `{result.path}`: {jet_cli_io_error_text(err)}", jet_cli_why("E2105"), "correct the named problem, then run the command again", color)}", exit_code: JET_DRIVER_EXIT_USAGE}
+        if !request.quiet && !json {
+            stderr = "{stderr}{jet_cli_fmt_statuses(result.path, result, true)}"
+        }
+    }
+    // Rust write mode emits no success status, including --json.
+    JetDriverVerbOutput{stdout: "", stderr: stderr, exit_code: JET_DRIVER_EXIT_OK}
+}

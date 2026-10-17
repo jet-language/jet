@@ -4,6 +4,9 @@ use core.text.[caseless_eq]
 use core.text.wrap as text_wrap
 
 fn run() {
+    assert(text.inspect("A")[0] == "U+0041 LATIN CAPITAL LETTER A")
+    assert(text.inspect("\n")[0] == "U+000A LINE FEED (LF)")
+    assert(text.inspect("α")[0] == "U+03B1 GREEK SMALL LETTER ALPHA")
     sample :: "é👍"
     print("bytes: {text.byte_count(sample)}")
     print("scalars: {text.scalar_count(sample)}")
@@ -18,11 +21,12 @@ fn run() {
     print(text.upper("ßև"))
     print(text.words("Hi, κόσμε 123.").len())
     print(text.sentences("One. Two!").len())
+    print(text.display_width("表a"))
     print(text.display_width("1️⃣"))
     print(text.display_width("©️"))
     print(text.display_width("́‍"))
-    cjk :: TextWidth{ambiguous: .Wide, controls: .Reject}
-    print(text.display_width("·", policy: cjk) ?? -1)
+    // D-TEXTWIDTH1=B uses portable width, including narrow ambiguous scalars.
+    print(text.display_width("·"))
     print(text.is_alphabetic("Ж"))
     print(text.is_numeric("٣"))
     print(text.pad_start("7", 3, "0"))

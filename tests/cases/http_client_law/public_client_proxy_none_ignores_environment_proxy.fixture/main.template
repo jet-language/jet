@@ -1,0 +1,7 @@
+
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().proxy(.None)
+    resp :: client.send(http.request("GET", "http://{cap:origin}/direct")) ?? panic("send")
+    print(resp.body().text(16) ?? panic("body"))
+}

@@ -1,0 +1,10 @@
+#Test("original readiness and response") {
+    if (sys.get("S5_CHECK") ?? "") == "1" {
+        response :: s5_web_get(s5_web_port(), "/", None) ?? panic("invalid-UTF8 index GET failed")
+        assert_eq(response.status, 404)
+        assert_eq(response.content_type, "text/plain; charset=utf-8")
+        assert(response.body.len() < 128)
+    } else {
+        s5_web_wait_up(s5_web_port(), 30000)
+    }
+}

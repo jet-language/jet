@@ -1,0 +1,8 @@
+# Port of tests/memory_semantics.rs:490-500; existing exact CLI snapshot reused verbatim.
+# PENDING-GRAMMAR: normalize replace; original root path replaced with WORKSPACE.
+env: NO_COLOR=1
+env: JET_MEMORY_LEDGER={work}/.jet/memory/ledger-v1.jsonl
+step: jet audit memory
+normalize: replace {work} "WORKSPACE"
+exit: 1
+stderr: = ../../cli/memory_ledger_missing_e2112.txt

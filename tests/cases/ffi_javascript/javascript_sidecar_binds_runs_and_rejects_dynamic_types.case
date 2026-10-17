@@ -1,0 +1,26 @@
+# tests/ffi_javascript.rs::javascript_sidecar_binds_runs_and_rejects_dynamic_types
+# ORACLE-LITERAL: original sources and predicates; PENDING-SAME-HEAD, runtime UNRUN.
+requires: os:unix
+requires: tool:node
+requires: tool:cc
+requires: tool:ar
+fixture: javascript_sidecar_binds_runs_and_rejects_dynamic_types.fixture
+env: NO_COLOR=1
+step: jet inspect bind js ops.d.ts --runtime ops.mjs --pkg ops
+exit: 0
+file: .jet/bindings/js/ops.jet ~ "jet-ffi-descriptor=" # original ed77c235f tests/ffi_javascript.rs:55 generated contains descriptor
+file: .jet/bindings/js/ops.jet ~ "Int !String -[FFI]>" # original ed77c235f tests/ffi_javascript.rs:56 generated contains signature
+file: .jet/bindings/js/ops.jet !~ "=>" # original ed77c235f tests/ffi_javascript.rs:57 generated excludes retired arrow
+file: .jet/bindings/js/libjet_js_ops.a is-file
+file: .jet/bindings/js/ops.d.ts is-file
+file: .jet/bindings/js/ops.provenance ~ "descriptor=" # original ed77c235f tests/ffi_javascript.rs:61 provenance contains descriptor
+file: .jet/bindings/js/ops.provenance ~ "artifact.libjet_js_ops.a=" # original ed77c235f tests/ffi_javascript.rs:62 provenance contains artifact
+step: jet run main.jet
+exit: 0
+stdout: = javascript_sidecar_binds_runs_and_rejects_dynamic_types.out
+step: jet inspect bind js bad.d.ts --runtime ops.mjs --pkg bad
+exit: nonzero
+stderr: ~ "Error [E3208]:" # original ed77c235f tests/ffi_javascript.rs:104 contains predicate
+stderr: ~ " Why:" # original ed77c235f tests/ffi_javascript.rs:105 contains predicate
+stderr: ~ " Fix:" # original ed77c235f tests/ffi_javascript.rs:106 contains predicate
+file: .jet/bindings/js/bad.jet absent

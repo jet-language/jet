@@ -1,0 +1,27 @@
+// Term.rs:213-224/245-263. The thread-local mode is a scalar, not an owned
+// pointer: auto0, always1, never2. A fresh attached thread starts at auto.
+terminal_color_key := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_terminal_color_init() {
+    if (terminal_color_key == I64{0}) -> terminal_color_key = jet_rt_tls_key_new(I64{0})
+}
+
+#Export(c) fn jet_term_color_mode_raw() -> I64 { jet_rt_tls_get(terminal_color_key) }
+#Export(c) fn jet_terminal8_color_mode() -> I64 { jet_term_color_mode_raw() }
+
+#Export(c) fn jet_term_set_color_mode(mode: I64) {
+    value :: if {
+        jet_rt_string_eq(mode, rt_static_text("always")) -> I64{1}
+        jet_rt_string_eq(mode, rt_static_text("never")) -> I64{2}
+        else -> I64{0}
+    }
+    jet_rt_tls_set(terminal_color_key, value)
+}
+
+fn terminal_color_enabled() -> Bool {
+    mode :: jet_term_color_mode_raw()
+    if (mode == I64{1}) -> return true
+    if (mode == I64{2}) -> return false
+    journey_auto_color(host_is_tty(I64{1}))
+}

@@ -35,14 +35,16 @@ fn parser_parse_tag_policy(state: &JetParserState, modifiers: ParsedItemModifier
         if parser_current_kind(&state) == TOKEN_KW_FN {
             parser_bump(&state)
             method :: parser_expect_name(&state, "after `fn`")
-            parser_add_error_code(&state, "E0732", method.span, "the tag `{name.payload.decoded}` declares a method `{method.payload.decoded}`, but tags have no methods", "a `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches", "make `{name.payload.decoded}` a `trait` if `{method.payload.decoded}` should dispatch, or remove the method to keep `{name.payload.decoded}` a marker tag")
+            tag_name :: parser_value(state, name)
+            method_name :: parser_value(state, method)
+            parser_add_error_code(&state, "E0732", method.span, "the tag `{tag_name}` declares a method `{method_name}`, but tags have no methods", "a `tag` is a marker that erases at runtime; only a `trait` carries methods and dispatches", "make `{tag_name}` a `trait` if `{method_name}` should dispatch, or remove the method to keep `{tag_name}` a marker tag")
             parser_sync_top(&state)
-            return Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, method.span)}}
+            return Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, method.span)}}
         }
         field :: parser_expect_name(&state, "for a tag policy field")
         parser_expect(&state, TOKEN_COLON, "after a tag policy field")
         values :: parser_tag_path_list(&state)
-        if field.payload.decoded == {
+        if parser_value(state, field) == {
             "deny" -> {
                 if deny.len() > 0 -> parser_tag_error(&state, field.span, "tag `deny` is repeated", "each tag policy field is declared once", "keep one `deny: [...]` field")
                 deny = values
@@ -57,7 +59,7 @@ fn parser_parse_tag_policy(state: &JetParserState, modifiers: ParsedItemModifier
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "`}}` after a tag policy")
     if deny.len() == 0 -> parser_tag_error(&state, name.span, "a tag needs at least one denied destination", "an empty tag policy has no enforceable effect", "add a path to `deny: [...]`")
-    Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: name.payload.decoded, name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span)}}
+    Item.Tag{value: TagDef{is_pub: modifiers.is_pub, is_package_pub: modifiers.is_package_pub, name: parser_value(state, name), name_span: name.span, deny: deny, from: from, span: parser_cover(start.span, close.span)}}
 }
 
 fn parser_tag_path_list(state: &JetParserState) -> [NamedSpan] {
@@ -65,12 +67,12 @@ fn parser_tag_path_list(state: &JetParserState) -> [NamedSpan] {
     paths := [NamedSpan]{}
     loop parser_current_kind(&state) != TOKEN_RBRACKET && parser_current_kind(&state) != TOKEN_EOF {
         first :: parser_expect_name(&state, "in a tag policy path")
-        path := first.payload.decoded
+        path := parser_value(state, first)
         end := first.span
         loop parser_current_kind(&state) == TOKEN_DOT {
             parser_bump(&state)
             part :: parser_expect_name(&state, "after `.` in a tag policy path")
-            path = "{path}.{part.payload.decoded}"
+            path = "{path}.{parser_value(state, part)}"
             end = part.span
         }
         &paths.push(NamedSpan{name: path, span: parser_cover(first.span, end)})

@@ -1,0 +1,35 @@
+// HTTPClient.rs:7-12 / frozen seed176181-185: Clone enum, ordinal order.
+// CAbiRoutes.rs:10550-10574: Url ctor borrows+clones Text, getter returns a
+// fresh Text owner, wrong variant takes the core record-variant panic.
+HTTP_PROXY_BYTES :: prep { I64{16} }
+HTTP_PROXY_TAG :: prep { I64{0} }
+HTTP_PROXY_PAYLOAD :: prep { I64{8} }
+fn http_proxy_ordinal(value: I64) -> I64 {
+    ordinal :: encoding_word(value + HTTP_PROXY_TAG)
+    if (ordinal < I64{0} || ordinal > I64{2}) -> rt_record_variant_panic()
+    ordinal
+}
+fn http_proxy_new(ordinal: I64, payload: I64) -> I64 {
+    result :: jet_rt_alloc(HTTP_PROXY_BYTES, I64{8})
+    encoding_store(result + HTTP_PROXY_TAG, ordinal)
+    encoding_store(result + HTTP_PROXY_PAYLOAD, payload)
+    result
+}
+#Export(c) fn jet_rt_record_new_jet_http_proxy_from_environment() -> I64 { http_proxy_new(I64{0}, I64{0}) }
+#Export(c) fn jet_rt_record_new_jet_http_proxy_none() -> I64 { http_proxy_new(I64{1}, I64{0}) }
+#Export(c) fn jet_rt_record_new_jet_http_proxy_url(payload: I64) -> I64 { http_proxy_new(I64{2}, jet_rt_string_clone(payload)) }
+#Export(c) fn jet_rt_record_tag_jet_http_proxy(value: I64) -> I64 { http_proxy_ordinal(value) }
+#Export(c) fn jet_rt_record_get_jet_http_proxy_url(value: I64) -> I64 {
+    if (http_proxy_ordinal(value) != I64{2}) -> rt_record_variant_panic()
+    jet_rt_string_clone(encoding_word(value + HTTP_PROXY_PAYLOAD))
+}
+#Export(c) fn jet_rt_handle_clone_jet_http_proxy(value: I64) -> I64 {
+    ordinal :: http_proxy_ordinal(value)
+    payload :: if (ordinal == I64{2}) -> jet_rt_string_clone(encoding_word(value + HTTP_PROXY_PAYLOAD)) else -> I64{0}
+    http_proxy_new(ordinal, payload)
+}
+#Export(c) fn jet_rt_handle_drop_jet_http_proxy(value: I64) {
+    if (value == I64{0}) -> return
+    if (http_proxy_ordinal(value) == I64{2}) -> jet_rt_string_drop(encoding_word(value + HTTP_PROXY_PAYLOAD))
+    jet_rt_free(value, HTTP_PROXY_BYTES, I64{8})
+}

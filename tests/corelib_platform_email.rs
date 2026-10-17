@@ -29,7 +29,7 @@ fn run() {
     let file = dir.join("email_domain_labels.jet");
     fs::write(&file, src).unwrap();
     for (tier, use_interpreter) in [("default dev", false), ("forced interpreter", true)] {
-        match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, use_interpreter) {
+        match crate::common::dev_run(file.to_str().unwrap(), false, use_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,

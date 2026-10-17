@@ -1,0 +1,26 @@
+# HAND-PORT tests/web_build.rs:3672-3726 web_file_module_same_leaf_partitions_ignore_load_order
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Both original import orders, original format! expansion and sibling sources preserved; all JS predicates+exact stdout preserved, only generated Rust helper-name scan retires.
+requires: tool:node
+fixture: web_file_module_same_leaf_partitions_ignore_load_order.fixture
+env: NO_COLOR=1
+step: jet build --target web order0/main.jet
+exit: 0
+file: order0/.jet/build/app.wasm is-file
+file: order0/.jet/build/app.js ~ "function __jet_left__value()" # original JavaScript/runtime predicate
+file: order0/.jet/build/app.js ~ "function __jet_left__helper()" # original JavaScript/runtime predicate
+file: order0/.jet/build/app.js ~ "await bridge___jet_right__value()" # original JavaScript/runtime predicate
+step: node app.js
+cwd: order0/.jet/build
+exit: 0
+stdout: = web_file_module_same_leaf_partitions_ignore_load_order.stdout.expected
+step: jet build --target web order1/main.jet
+exit: 0
+file: order1/.jet/build/app.wasm is-file
+file: order1/.jet/build/app.js ~ "function __jet_left__value()" # original JavaScript/runtime predicate
+file: order1/.jet/build/app.js ~ "function __jet_left__helper()" # original JavaScript/runtime predicate
+file: order1/.jet/build/app.js ~ "await bridge___jet_right__value()" # original JavaScript/runtime predicate
+step: node app.js
+cwd: order1/.jet/build
+exit: 0
+stdout: = web_file_module_same_leaf_partitions_ignore_load_order.stdout.expected

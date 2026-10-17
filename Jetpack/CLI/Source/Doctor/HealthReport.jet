@@ -9,7 +9,7 @@
 DOCTOR_STALE_AFTER :: prep { 2592000 }
 
 // Overall health, ordered: the report takes the worst check.
-pub enum DoctorHealth {
+enum DoctorHealth {
     Healthy
     Degraded
     Broken
@@ -40,11 +40,11 @@ pub enum DoctorHealth {
 }
 
 // One named finding with its detail and the fix to run (empty when healthy).
-pub struct DoctorCheck {
-    pub name: String
-    pub health: DoctorHealth
-    pub detail: String
-    pub fix: String
+struct DoctorCheck {
+    name: String
+    health: DoctorHealth
+    detail: String
+    fix: String
 
     fn ok(name: String, detail: String) -> DoctorCheck Never! {
         DoctorCheck{name: name, health: DoctorHealth.Healthy, detail: detail, fix: ""}
@@ -59,8 +59,8 @@ pub struct DoctorCheck {
     }
 }
 
-pub struct DoctorReport {
-    pub checks: [DoctorCheck]
+struct DoctorReport {
+    checks: [DoctorCheck]
 
     // Run every check against the resolved Jetpack root and `project`.
     fn run(verification: &StoreVerification, project: String, online: Bool) -[FS, Env, Exec, Time, Time.Wait]> DoctorReport Never! {
@@ -97,21 +97,22 @@ pub struct DoctorReport {
         "{out}Result: {self.health().word()}\n"
     }
 
-    fn to_json(self) -> String Never! {
-        checks := [DataTree]{}
+    fn to_json(self) -> String ReportError! {
+        checks := [Dyn]{}
         loop check in self.checks {
-            fields := [String: DataTree]{}
-            fields["name"] = DataTree.Text(check.name)
-            fields["status"] = DataTree.Text(check.health.word())
-            fields["detail"] = DataTree.Text(check.detail)
-            fields["fix"] = DataTree.Text(check.fix)
-            &checks.push(DataTree.Object(fields))
+            fields := [String: Dyn]{}
+            fields["name"] = Dyn.Text(check.name)
+            fields["status"] = Dyn.Text(check.health.word())
+            fields["detail"] = Dyn.Text(check.detail)
+            fields["fix"] = Dyn.Text(check.fix)
+            &checks.push(Dyn.Object(fields))
         }
-        document := [String: DataTree]{}
-        document["kind"] = DataTree.Text("jetpack.doctor")
-        document["status"] = DataTree.Text(self.health().word())
-        document["checks"] = DataTree.Array(checks)
-        json.to_string(DataTree.Object(document))
+        document := [String: Dyn]{}
+        document["kind"] = Dyn.Text("jetpack.doctor")
+        document["status"] = Dyn.Text(self.health().word())
+        document["checks"] = Dyn.Array(checks)
+        text :: json.to_string(Dyn.Object(document)) ?? return Err(ReportError.new(err.reason))
+        Ok(text)
     }
 }
 
@@ -417,7 +418,7 @@ fn cli_doctor_is_ascii_hex(value: String) -> Bool Never! {
 // The signing bridge could not answer.
 #Error
 struct DoctorSigningBridgeError {
-    pub detail: String
+    detail: String
 }
 
 // Sign a fixed challenge with the secret seed through the cached crypto

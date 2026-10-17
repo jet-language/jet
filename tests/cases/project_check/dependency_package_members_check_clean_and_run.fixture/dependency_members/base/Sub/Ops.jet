@@ -1,0 +1,28 @@
+fn widen(end: Int) -> Int Never! {
+    hidden :: Hidden{value: end}
+    if hidden.value > LIMIT -> return hidden.value
+    hidden.value + 1
+}
+
+impl Span {
+    fn width(self) -> Int Never! { self.end - self.start }
+}
+
+fn kind_value(kind: Kind) -> Int Never! {
+    if kind == {
+        .Alpha -> 0
+        .Beta(v) -> v + make_span(0, 1).width()
+    }
+}
+
+struct Label {
+    text: String
+    inner: [Shape]
+}
+
+fn same_shape(a: Shape, b: Shape) -> Bool Never! {
+    a == b
+}
+
+// A compile-time table of a sibling file's enum with a named payload.
+MARKS :: prep { [Mark]{ Mark.Point{at: Span{start: 0, end: 2}}, Mark.Blank } }

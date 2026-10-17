@@ -1,0 +1,12 @@
+# HAND-PORT tests/jetpack_engine.rs:5502-5550 outdated_reports_newer_channel_without_mutating_lock
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: outdated_reports_newer_channel_without_mutating_lock.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: root
+step: jetpack outdated --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 0
+stderr: ~ "v1.2.0" # original predicate
+stderr: ~ "v1.3.0" # original predicate
+file: project/.jet/lock ~ "exact = \"github:acme/tools#v1.2.0\"" # original predicate
+

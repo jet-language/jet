@@ -1,9 +1,18 @@
+package {
+    name: "ui_surface"
+    version: "0.1.0"
+    authority: {
+        holds: { allow: [IO, Mem.Alloc] }
+        needs: [UI.FileDialog, UI.Clipboard, UI.IME, UI.DragDrop, UI.Shortcuts, UI.Accessibility, UI.FontShaping]
+    }
+}
 // One portable source witness for the core UI, TUI, font, and host-service
 // vocabulary.  The null backend keeps the tree executable without inventing a
 // platform adapter; host calls retain their typed cancellation/error results.
 use core.font as font
 use core.tui as tui
 use core.ui as ui
+use core.ui.[previews, playgrounds]
 use core.ui.host as host
 use core.ui.host.accessibility as accessibility
 use core.ui.host.clipboard as clipboard
@@ -22,7 +31,7 @@ fn preview_body() -> UINode {
 
 fn playground_body() -> UINode { ui.text_input("Try the playground", .Native) }
 
-fn save_command() -> UIShortcut { .cmd("s") }
+fn save_command() -> UIShortcut { UIShortcut.cmd("s") }
 
 fn run() {
     point :: ui.point(8.0, 12.0)
@@ -45,8 +54,8 @@ fn run() {
 
     preview :: ui.preview("surface-preview", () -> preview_body(), viewport: ui.phone())
     playground :: ui.playground("surface-playground", () -> playground_body(), viewport: ui.tablet())
-    _preview_registry :: ui.previews([preview])
-    _playground_registry :: ui.playgrounds([playground])
+    _preview_registry :: previews([preview])
+    _playground_registry :: playgrounds([playground])
     _phone :: ui.phone()
     _tablet :: ui.tablet()
     _desktop :: ui.desktop()
@@ -121,34 +130,21 @@ fn run() {
 
     command :: save_command()
     _host_shortcut :: host.shortcut("s", command.modifiers)
-    binding_result :: shortcuts.binding(command, "save")
-    if binding_result == {
-        .Ok(binding) -> {
-            _registered :: shortcuts.register(binding)
-            _dispatched :: shortcuts.dispatch(command)
-        }
-        .Err(_) -> {}
-    }
+    binding :: shortcuts.binding(command, "save")
+    _registered :: shortcuts.register(binding)
+    _dispatched :: shortcuts.dispatch(command)
 
-    if grant_result == {
-        .Ok(grant) -> {
-            open_request :: host.open_request(~grant)
-            save_request :: host.save_request(~grant)
-            _open_result :: host.open_file(open_request)
-            _save_result :: host.save_file(save_request)
-        }
-        .Err(_) -> {}
-    }
+    grant :: grant_result
+    open_request :: host.open_request(grant.copy())
+    save_request :: host.save_request(grant.copy())
+    _open_result :: host.open_file(open_request)
+    _save_result :: host.save_file(save_request)
 
-    if _metadata_result == {
-        .Ok(metadata) -> {
-            accessible :: ui.node_accessibility(tree, ~metadata)
-            _attached :: accessibility.attach(accessible, metadata)
-            if _ime_event == {
-                .Ok(event) -> { _projected :: accessibility.project(accessible, event.target) }
-                .Err(_) -> {}
-            }
-        }
-        .Err(_) -> {}
+    metadata :: _metadata_result
+    accessible :: ui.node_accessibility(tree, metadata.copy())
+    _attached :: accessibility.attach(accessible, metadata)
+    if _ime_event == {
+        .Val(event) -> { _projected :: accessibility.project(accessible, event.target) }
+        .None -> {}
     }
 }

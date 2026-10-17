@@ -1,0 +1,118 @@
+// TextGlueABI owns private layouts. CAbiRoutes9527-9542/11800-11809/
+// 12089-12098/12117-12126: borrowed Text ctor/getters clone E4 owners.
+fn text_glue_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized aligned word in a live native text diagnostic") { return os_load_i64(address) }
+}
+fn text_glue_store(address: I64, value: I64) {
+    #Unsafe("owns a writable aligned word in a fresh native text diagnostic") { os_store_i64(address, value) }
+}
+fn text_error_new(message: I64) -> I64 {
+    result :: jet_rt_alloc(TEXT_ERROR_BYTES, I64{8})
+    text_glue_store(result + TEXT_ERROR_MESSAGE, jet_rt_string_clone(message))
+    result
+}
+fn text_error_get(value: I64) -> I64 { jet_rt_string_clone(text_glue_word(value + TEXT_ERROR_MESSAGE)) }
+fn text_error_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(text_glue_word(value + TEXT_ERROR_MESSAGE))
+    jet_rt_free(value, TEXT_ERROR_BYTES, I64{8})
+}
+fn text_error_equal(left: I64, right: I64) -> Bool { jet_rt_string_eq(text_glue_word(left + TEXT_ERROR_MESSAGE), text_glue_word(right + TEXT_ERROR_MESSAGE)) }
+// CommonTypes6647-6696: all three renders clone the single stored message.
+#Export(c) fn jet_rt_record_new_text_error(message: I64) -> I64 { text_error_new(message) }
+#Export(c) fn jet_rt_record_get_text_error_message(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_clone_text_error(value: I64) -> I64 { text_error_new(text_glue_word(value + TEXT_ERROR_MESSAGE)) }
+#Export(c) fn jet_rt_handle_drop_text_error(value: I64) { text_error_drop(value) }
+#Export(c) fn jet_rt_handle_eq_text_error(left: I64, right: I64) -> Bool { text_error_equal(left, right) }
+#Export(c) fn jet_rt_handle_show_text_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_display_text_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_debug_text_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_record_new_utf8_error(message: I64) -> I64 { text_error_new(message) }
+#Export(c) fn jet_rt_record_get_utf8_error_message(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_clone_utf8_error(value: I64) -> I64 { text_error_new(text_glue_word(value + TEXT_ERROR_MESSAGE)) }
+#Export(c) fn jet_rt_handle_drop_utf8_error(value: I64) { text_error_drop(value) }
+#Export(c) fn jet_rt_handle_eq_utf8_error(left: I64, right: I64) -> Bool { text_error_equal(left, right) }
+#Export(c) fn jet_rt_handle_show_utf8_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_display_utf8_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_debug_utf8_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_record_new_range_error(reason: I64) -> I64 { text_error_new(reason) }
+#Export(c) fn jet_rt_record_get_range_error_reason(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_clone_range_error(value: I64) -> I64 { text_error_new(text_glue_word(value + TEXT_ERROR_MESSAGE)) }
+#Export(c) fn jet_rt_handle_drop_range_error(value: I64) { text_error_drop(value) }
+#Export(c) fn jet_rt_handle_eq_range_error(left: I64, right: I64) -> Bool { text_error_equal(left, right) }
+#Export(c) fn jet_rt_handle_show_range_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_display_range_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_handle_debug_range_error(value: I64) -> I64 { text_error_get(value) }
+#Export(c) fn jet_rt_record_new_field_error(path: I64, reason: I64) -> I64 {
+    result :: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
+    text_glue_store(result + TEXT_FIELD_PATH, jet_rt_string_clone(path))
+    text_glue_store(result + TEXT_FIELD_REASON, jet_rt_string_clone(reason))
+    result
+}
+#Export(c) fn jet_rt_handle_clone_field_error(value: I64) -> I64 {
+    jet_rt_record_new_field_error(text_glue_word(value + TEXT_FIELD_PATH), text_glue_word(value + TEXT_FIELD_REASON))
+}
+#Export(c) fn jet_rt_handle_drop_field_error(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(text_glue_word(value + TEXT_FIELD_PATH))
+    jet_rt_string_drop(text_glue_word(value + TEXT_FIELD_REASON))
+    jet_rt_free(value, TEXT_FIELD_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_field_error(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(text_glue_word(left + TEXT_FIELD_PATH), text_glue_word(right + TEXT_FIELD_PATH)) &&
+        jet_rt_string_eq(text_glue_word(left + TEXT_FIELD_REASON), text_glue_word(right + TEXT_FIELD_REASON))
+}
+#Export(c) fn jet_rt_record_get_field_error_path(value: I64) -> I64 { jet_rt_string_clone(text_glue_word(value + TEXT_FIELD_PATH)) }
+#Export(c) fn jet_rt_record_get_field_error_reason(value: I64) -> I64 { jet_rt_string_clone(text_glue_word(value + TEXT_FIELD_REASON)) }
+#Export(c) fn jet_rt_handle_show_field_error(value: I64) -> I64 {
+    // DataTree613-626 -> Core/FieldError10-16: byte-exact backtick prefix.
+    path :: text_glue_word(value + TEXT_FIELD_PATH)
+    reason :: text_glue_word(value + TEXT_FIELD_REASON)
+    if (rt_text_len(path) == I64{0}) -> return jet_rt_string_clone(reason)
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{1612739681}, I64{4}) // "at `"
+    jet_rt_string_builder_push(target, path)
+    rt_text_push_word(target, I64{2112096}, I64{3}) // "`: "
+    jet_rt_string_builder_push(target, reason)
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_field_error(value: I64) -> I64 { jet_rt_handle_show_field_error(value) }
+#Export(c) fn jet_rt_handle_debug_field_error(value: I64) -> I64 { jet_rt_handle_show_field_error(value) }
+fn text_flag(value: I64, field: I64) -> Bool { (text_glue_word(value + field).bit_and(I64{255})) != I64{0} }
+#Export(c) fn jet_rt_record_new_regex_flags(insensitive: U8, multiline: U8, dotall: U8) -> I64 {
+    // CAbiRoutes11928-11929 treats every nonzero input byte as true.
+    result :: jet_rt_alloc(TEXT_FLAGS_BYTES, I64{8})
+    text_glue_store(result + TEXT_FLAGS_INSENSITIVE, if (insensitive == U8{0}) -> I64{0} else -> I64{1})
+    text_glue_store(result + TEXT_FLAGS_MULTILINE, if (multiline == U8{0}) -> I64{0} else -> I64{1})
+    text_glue_store(result + TEXT_FLAGS_DOTALL, if (dotall == U8{0}) -> I64{0} else -> I64{1})
+    result
+}
+#Export(c) fn jet_rt_handle_clone_regex_flags(value: I64) -> I64 {
+    result :: jet_rt_alloc(TEXT_FLAGS_BYTES, I64{8})
+    text_glue_store(result + TEXT_FLAGS_INSENSITIVE, if text_flag(value, TEXT_FLAGS_INSENSITIVE) -> I64{1} else -> I64{0})
+    text_glue_store(result + TEXT_FLAGS_MULTILINE, if text_flag(value, TEXT_FLAGS_MULTILINE) -> I64{1} else -> I64{0})
+    text_glue_store(result + TEXT_FLAGS_DOTALL, if text_flag(value, TEXT_FLAGS_DOTALL) -> I64{1} else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_regex_flags(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, TEXT_FLAGS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_regex_flags(left: I64, right: I64) -> Bool {
+    text_flag(left, TEXT_FLAGS_INSENSITIVE) == text_flag(right, TEXT_FLAGS_INSENSITIVE) &&
+        text_flag(left, TEXT_FLAGS_MULTILINE) == text_flag(right, TEXT_FLAGS_MULTILINE) &&
+        text_flag(left, TEXT_FLAGS_DOTALL) == text_flag(right, TEXT_FLAGS_DOTALL)
+}
+#Export(c) fn jet_rt_record_get_regex_flags_case_insensitive(value: I64) -> Bool { text_flag(value, TEXT_FLAGS_INSENSITIVE) }
+#Export(c) fn jet_rt_record_get_regex_flags_multiline(value: I64) -> Bool { text_flag(value, TEXT_FLAGS_MULTILINE) }
+#Export(c) fn jet_rt_record_get_regex_flags_dotall(value: I64) -> Bool { text_flag(value, TEXT_FLAGS_DOTALL) }
+#Export(c) fn jet_rt_handle_show_regex_flags(value: I64) -> I64 {
+    // Regex294-307: flags in i/m/s order, no display/debug API in census.
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{7020063402075055442}, I64{8}) // "RegexFla"
+    rt_text_push_word(target, I64{2650983}, I64{3}) // "gs("
+    if text_flag(value, TEXT_FLAGS_INSENSITIVE) -> rt_text_push_word(target, I64{105}, I64{1})
+    if text_flag(value, TEXT_FLAGS_MULTILINE) -> rt_text_push_word(target, I64{109}, I64{1})
+    if text_flag(value, TEXT_FLAGS_DOTALL) -> rt_text_push_word(target, I64{115}, I64{1})
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}

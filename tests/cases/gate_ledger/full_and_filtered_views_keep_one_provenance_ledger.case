@@ -1,0 +1,31 @@
+# Port of tests/gate_ledger.rs:227-282; original raw-stream predicates.
+fixture: fixtures/gates
+step: jet inspect gates gates.jet
+exit: 0
+stdout: ~ "gates:" # original predicate
+stdout: ~ "unsafe:" # original predicate
+stdout: ~ "impure:" # original predicate
+stdout: ~ "nondeterministic:" # original predicate
+step: jet inspect gates --json gates.jet
+exit: 0
+stdout: ^= "{\"schema\":\"jet.status/v1\",\"action\":\"inspect.gates\",\"ok\":true,\"reports\":[],\"gates\":{\"entries\":[" # original predicate
+stdout: ~ "\"provenance\":[" # original predicate
+stdout: ~ "test unsafe reason" # original predicate
+step: jet inspect gates --kind impure gates.jet
+exit: 0
+stdout: ~ "impure: 1" # original predicate
+stdout: !~ "unsafe:" # original predicate
+step: jet inspect gates --scope block gates.jet
+exit: 0
+stdout: ~ "impure:" # original predicate
+stdout: !~ "unsafe:" # original predicate
+step: jet inspect rights --json gates.jet
+exit: 0
+stdout: ~ "\"action\":\"inspect.rights\"" # original predicate
+stdout: ~ "\"required\":[\"IO\"]" # original predicate
+stdout: !~ "precision_demotion" # original predicate
+step: jet inspect gates --kind unsafe --json gates.jet
+exit: 0
+stdout: ~ "\"kind\":\"unsafe\"" # original predicate
+stdout: ~ "\"counts\":{\"unsafe\":1}" # original predicate
+stdout: !~ "test impure reason" # original predicate

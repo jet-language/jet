@@ -44,10 +44,10 @@ use jet_foundation.[
     stable_id,
 ]
 
-pub struct JetCodegenJobTestArtifacts {
-    pub jobs: [MIRJob]
-    pub tests: [MIRTestCase]
-    pub harnesses: [MIRHarnessPlan]
+struct JetCodegenJobTestArtifacts {
+    jobs: [MIRJob]
+    tests: [MIRTestCase]
+    harnesses: [MIRHarnessPlan]
 }
 
 fn jet_codegen_artifact_function(reference: TFunctionRef, functions: JetCodegenFunctionIndex) -> TFunc? {
@@ -353,8 +353,8 @@ fn jet_codegen_insert_harness(rows: &[MIRHarnessPlan], row: MIRHarnessPlan) Neve
     rows[index] = row
 }
 
-pub fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
-    function_index :: jet_codegen_function_index(~functions)
+fn jet_codegen_lower_job_test_artifacts(jobs: [TJobFact], tests: [TTestFact], harnesses: [THarnessPlanFact], functions: [TFunc], checked_functions: [MIRFunction]) -> JetCodegenJobTestArtifacts Never! {
+    function_index :: jet_codegen_function_index(functions.copy())
     lowered_jobs := [MIRJob]{}
     loop row in jobs {
         if jet_codegen_lower_job_fact(row, function_index, checked_functions) == .Val(lowered) -> jet_codegen_insert_job(&lowered_jobs, lowered)

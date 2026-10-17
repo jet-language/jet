@@ -1,7 +1,4 @@
-// Claims ported from crates/jetpack/src/Transition.rs #[cfg(test)]. The
-// JetOS `SplitTarget::Hosts` claims are omitted with the hosts transition;
-// the two journal-recovery claims that used a hosts split run on an
-// environment split instead.
+// Claims ported from crates/jetpack/src/Transition.rs #[cfg(test)].
 
 TRANSITION_TEST_ENV_PACKAGE :: prep { "name: \"demo\"\nenvironments: {{ development: Environment{{ tools: [\"git\"] }} }}\n" }
 
@@ -22,6 +19,57 @@ fn env_transition_test_error(result: TransitionResult EnvironmentError!, what: S
         .Ok(_) -> panic("{what} must be refused")
         .Err(error) -> error.message()
     }
+}
+
+#Test("hosts split binds the checked System name and fold restores exact root") {
+    root :: env_transition_test_root("hosts")
+    original :: "name: \"demo\"\noutputs: {{ server: System{{ name: \"halcyon\", target: linux.x64 }} }}\n"
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, original)
+    preview :: env_transition_split(root, SplitTarget.Hosts("server"), true) ?? panic("preview hosts")
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), original)
+    assert(!files.exists(files.join(root, "package/fleet.jet")))
+    result :: env_transition_split(root, SplitTarget.Hosts("server"), false) ?? panic("split hosts")
+    assert_eq(result.summary.before_fingerprint, result.summary.after_fingerprint)
+    assert_eq(result.summary.before_fingerprint, preview.summary.before_fingerprint)
+    expected :: "pub home :: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\"\n            hosts: {{ server: system.halcyon }}\n        }}\n    }}\n}}\n"
+    assert_eq(env_transition_test_read(root, "package/fleet.jet"), expected)
+    env_transition_fold(root, "package/fleet.jet", false) ?? panic("fold hosts")
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), original)
+    assert(!files.exists(files.join(root, "package/fleet.jet")))
+    files.remove_all(root) ?? panic("remove root")
+}
+
+#Test("hosts split refuses invalid names and non-System Outputs before writes") {
+    root :: env_transition_test_root("hosts-invalid")
+    original :: "name: \"demo\"\noutputs: {{ server: Executable{{ name: \"server\", entry: run }} }}\n"
+    env_transition_test_write(root, TRANSITION_PACKAGE_FILE, original)
+    invalid :: env_transition_test_error(env_transition_split(root, SplitTarget.Hosts("server/name"), false), "invalid host")
+    assert(invalid.contains("invalid host name"))
+    wrong_kind :: env_transition_test_error(env_transition_split(root, SplitTarget.Hosts("server"), false), "non-System host")
+    assert_eq(wrong_kind, "outputs.server is Executable, but host extraction needs a System Output")
+    assert_eq(env_transition_test_read(root, TRANSITION_PACKAGE_FILE), original)
+    assert(!files.exists(files.join(root, "package/fleet.jet")))
+    files.remove_all(root) ?? panic("remove root")
+}
+
+#Test("transition journal preserves every byte and distinguishes absent from empty") {
+    bytes := [U8]{}
+    loop value in 0..<256 -> &bytes.push(U8{value})
+    encoded :: env_transition_encode_state(Val(bytes))
+    assert(encoded.starts_with("f00010203"))
+    assert(encoded.ends_with("fcfdfeff"))
+    assert_eq(encoded.bytes().len(), 513)
+    decoded :: env_transition_decode_state(Val(encoded), "fixture.journal") ?? panic("decode every byte")
+    assert_eq(decoded, Val(bytes))
+    assert_eq(env_transition_encode_state(None), "-")
+    assert_eq(env_transition_encode_state(Val([U8]{})), "f")
+    assert_eq(env_transition_decode_state(Val("-"), "fixture.journal") ?? panic("decode absent"), None)
+    assert_eq(env_transition_decode_state(Val("f"), "fixture.journal") ?? panic("decode empty"), Val([U8]{}))
+    binary :: [U8]{0, 10, 13, 34, 124, 128, 255}
+    assert_eq(env_transition_encode_state(Val(binary)), "f000a0d227c80ff")
+    assert_eq(env_transition_decode_state(Val("f000a0d227c80ff"), "fixture.journal") ?? panic("decode binary"), Val(binary))
+    if env_transition_decode_state(Val("f0"), "fixture.journal") == .Ok(_) -> panic("odd hex must be refused")
+    if env_transition_decode_state(Val("fgg"), "fixture.journal") == .Ok(_) -> panic("nonhex must be refused")
 }
 
 #Test("environment split and fold restore exact root") {

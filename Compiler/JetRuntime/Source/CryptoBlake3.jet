@@ -1,0 +1,169 @@
+// Reuses Core/crypto/crypto.jet BLAKE3 IV, permutation and seven-round G.
+// Borrowed input, caller-owned disjoint digest32 and aligned scratch3904.
+// state128/message128/permuted128/CV64/CVstack54*64; no allocation or inputcopy.
+// The fixed stack covers every nonnegative I64 byte length (at most 2^53 chunks).
+fn rt_blake3_iv(index: I64) -> I64 {
+    if {
+        (index == I64{0}) -> I64{0x6a09e667}
+        (index == I64{1}) -> I64{0xbb67ae85}
+        (index == I64{2}) -> I64{0x3c6ef372}
+        (index == I64{3}) -> I64{0xa54ff53a}
+        (index == I64{4}) -> I64{0x510e527f}
+        (index == I64{5}) -> I64{0x9b05688c}
+        (index == I64{6}) -> I64{0x1f83d9ab}
+        else -> I64{0x5be0cd19}
+    }
+}
+fn rt_blake3_perm(index: I64) -> I64 {
+    if {
+        (index == I64{0}) -> I64{2}
+        (index == I64{1}) -> I64{6}
+        (index == I64{2}) -> I64{3}
+        (index == I64{3}) -> I64{10}
+        (index == I64{4}) -> I64{7}
+        (index == I64{5}) -> I64{0}
+        (index == I64{6}) -> I64{4}
+        (index == I64{7}) -> I64{13}
+        (index == I64{8}) -> I64{1}
+        (index == I64{9}) -> I64{11}
+        (index == I64{10}) -> I64{12}
+        (index == I64{11}) -> I64{5}
+        (index == I64{12}) -> I64{9}
+        (index == I64{13}) -> I64{14}
+        (index == I64{14}) -> I64{15}
+        else -> I64{8}
+    }
+}
+fn rt_blake3_g(a: I64, b: I64, c: I64, d: I64, mx: I64, my: I64) {
+    rt_text_store(a, (rt_text_word(a) + rt_text_word(b) + mx).bit_and(I64{0xffffffff}))
+    rt_text_store(d, rt_sha256_rotate(rt_text_word(d).bit_xor(rt_text_word(a)), I64{16}))
+    rt_text_store(c, (rt_text_word(c) + rt_text_word(d)).bit_and(I64{0xffffffff}))
+    rt_text_store(b, rt_sha256_rotate(rt_text_word(b).bit_xor(rt_text_word(c)), I64{12}))
+    rt_text_store(a, (rt_text_word(a) + rt_text_word(b) + my).bit_and(I64{0xffffffff}))
+    rt_text_store(d, rt_sha256_rotate(rt_text_word(d).bit_xor(rt_text_word(a)), I64{8}))
+    rt_text_store(c, (rt_text_word(c) + rt_text_word(d)).bit_and(I64{0xffffffff}))
+    rt_text_store(b, rt_sha256_rotate(rt_text_word(b).bit_xor(rt_text_word(c)), I64{7}))
+}
+// The message is already sixteen zero-extended U32 words at scratch+128.
+// CV output may alias CV input: all eight input words are consumed first.
+fn rt_blake3_compress(cv: I64, counter: I64, length: I64, flags: I64, scratch: I64) {
+    rt_text_bytes_copy(scratch, cv, I64{64})
+    i := I64{0}
+    loop i < (I64{4}) {
+        rt_text_store(scratch + I64{64} + i * I64{8}, rt_blake3_iv(i))
+        i += I64{1}
+    }
+    rt_text_store(scratch + I64{96}, counter.bit_and(I64{0xffffffff}))
+    rt_text_store(scratch + I64{104}, counter >> I64{32})
+    rt_text_store(scratch + I64{112}, length)
+    rt_text_store(scratch + I64{120}, flags)
+    message := scratch + I64{128}
+    permuted := scratch + I64{256}
+    round := I64{0}
+    loop round < (I64{7}) {
+        rt_blake3_g(scratch, scratch + I64{32}, scratch + I64{64}, scratch + I64{96}, rt_text_word(message), rt_text_word(message + I64{8}))
+        rt_blake3_g(scratch + I64{8}, scratch + I64{40}, scratch + I64{72}, scratch + I64{104}, rt_text_word(message + I64{16}), rt_text_word(message + I64{24}))
+        rt_blake3_g(scratch + I64{16}, scratch + I64{48}, scratch + I64{80}, scratch + I64{112}, rt_text_word(message + I64{32}), rt_text_word(message + I64{40}))
+        rt_blake3_g(scratch + I64{24}, scratch + I64{56}, scratch + I64{88}, scratch + I64{120}, rt_text_word(message + I64{48}), rt_text_word(message + I64{56}))
+        rt_blake3_g(scratch, scratch + I64{40}, scratch + I64{80}, scratch + I64{120}, rt_text_word(message + I64{64}), rt_text_word(message + I64{72}))
+        rt_blake3_g(scratch + I64{8}, scratch + I64{48}, scratch + I64{88}, scratch + I64{96}, rt_text_word(message + I64{80}), rt_text_word(message + I64{88}))
+        rt_blake3_g(scratch + I64{16}, scratch + I64{56}, scratch + I64{64}, scratch + I64{104}, rt_text_word(message + I64{96}), rt_text_word(message + I64{104}))
+        rt_blake3_g(scratch + I64{24}, scratch + I64{32}, scratch + I64{72}, scratch + I64{112}, rt_text_word(message + I64{112}), rt_text_word(message + I64{120}))
+        if (round < I64{6}) {
+            i = I64{0}
+            loop i < (I64{16}) {
+                rt_text_store(permuted + i * I64{8}, rt_text_word(message + rt_blake3_perm(i) * I64{8}))
+                i += I64{1}
+            }
+            old :: message
+            message = permuted
+            permuted = old
+        }
+        round += I64{1}
+    }
+    i = I64{0}
+    loop i < (I64{8}) {
+        rt_text_store(cv + i * I64{8}, rt_text_word(scratch + i * I64{8}).bit_xor(rt_text_word(scratch + I64{64} + i * I64{8})))
+        i += I64{1}
+    }
+}
+fn rt_blake3_cv_init(cv: I64) {
+    i := I64{0}
+    loop i < (I64{8}) {
+        rt_text_store(cv + i * I64{8}, rt_blake3_iv(i))
+        i += I64{1}
+    }
+}
+// Chunk length0..1024; borrowed virtual-zero padded final block, never copied.
+fn rt_blake3_chunk(input: I64, length: I64, counter: I64, root: Bool, scratch: I64) {
+    cv :: scratch + I64{384}
+    rt_blake3_cv_init(cv)
+    at := I64{0}
+    loop {
+        remaining :: length - at
+        count :: if (remaining < I64{64}) -> remaining else -> I64{64}
+        last :: remaining <= I64{64}
+        word_index := I64{0}
+        loop word_index < (I64{16}) {
+            word := I64{0}
+            b := I64{0}
+            loop b < (I64{4}) {
+                index :: word_index * I64{4} + b
+                if (index < count) -> word = word.bit_or((rt_text_byte(input + at + index) << (b * I64{8})))
+                b += I64{1}
+            }
+            rt_text_store(scratch + I64{128} + word_index * I64{8}, word)
+            word_index += I64{1}
+        }
+        flags := I64{0}
+        if (at == I64{0}) -> flags = I64{1}
+        if last -> flags = flags.bit_or(I64{2})
+        if (root && last) -> flags = flags.bit_or(I64{8})
+        rt_blake3_compress(cv, counter, count, flags, scratch)
+        if last -> break
+        at += count
+    }
+}
+fn rt_blake3_parent(left: I64, root: Bool, scratch: I64) {
+    cv :: scratch + I64{384}
+    rt_text_bytes_copy(scratch + I64{128}, left, I64{64})
+    rt_text_bytes_copy(scratch + I64{192}, cv, I64{64})
+    rt_blake3_cv_init(cv)
+    flags :: if root -> I64{12} else -> I64{4}
+    rt_blake3_compress(cv, I64{0}, I64{64}, flags, scratch)
+}
+// Public span length nonnegative; no secret-dependent addresses or branches.
+// Completed chunks are merged by binary carry. Keep the final chunk unmerged
+// until the right-to-left stack fold so ROOT marks the actual final parent.
+fn rt_crypto_blake3(input: I64, length: I64, output: I64, scratch: I64) {
+    cv :: scratch + I64{384}
+    stack :: scratch + I64{448}
+    depth := I64{0}
+    counter := I64{0}
+    at := I64{0}
+    loop length - at > (I64{1024}) {
+        rt_blake3_chunk(input + at, I64{1024}, counter, false, scratch)
+        total := counter + I64{1}
+        loop {
+            if ((total.bit_and(I64{1})) != I64{0}) -> break
+            depth -= I64{1}
+            rt_blake3_parent(stack + depth * I64{64}, false, scratch)
+            total = total >> I64{1}
+        }
+        rt_text_bytes_copy(stack + depth * I64{64}, cv, I64{64})
+        depth += I64{1}
+        counter += I64{1}
+        at += I64{1024}
+    }
+    rt_blake3_chunk(input + at, length - at, counter, depth == I64{0}, scratch)
+    loop depth > (I64{0}) {
+        depth -= I64{1}
+        rt_blake3_parent(stack + depth * I64{64}, depth == I64{0}, scratch)
+    }
+    i := I64{0}
+    loop i < (I64{32}) {
+        rt_text_put(output + i, (rt_text_word(cv + (i / I64{4}) * I64{8}) >> ((i % I64{4}) * I64{8})).bit_and(I64{255}))
+        i += I64{1}
+    }
+    rt_crypto_wipe(scratch, I64{3904})
+}

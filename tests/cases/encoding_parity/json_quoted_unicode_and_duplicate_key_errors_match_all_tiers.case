@@ -1,0 +1,23 @@
+# tests/encoding_parity.rs::json_quoted_unicode_and_duplicate_key_errors_match_all_tiers
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: json_quoted_unicode_and_duplicate_key_errors_match_all_tiers.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: = "{\"text\":\"quote: \\\" and music: 𝄞\"}\ntrue|/a|duplicate object key `a`\n"
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot

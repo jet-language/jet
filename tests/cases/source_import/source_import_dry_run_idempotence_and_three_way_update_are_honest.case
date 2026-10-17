@@ -1,0 +1,35 @@
+# Port of tests/source_import.rs:325-383; original sources and every predicate retained.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: source_import_dry_run_idempotence_and_three_way_update_are_honest.fixture
+mkdir: python/app
+step: jet import py python/app --dry-run
+exit: 0
+file: jet absent
+step: jet import py python/app
+exit: 0
+copy: jet/app/main.jet original.jet.bytes
+step: jet import py python/app
+exit: 0
+file: jet/app/main.jet == original.jet.bytes
+concat: edited.jet.bytes original.jet.bytes owner-edit.bytes
+copy: edited.jet.bytes jet/app/main.jet
+step: jet import py python/app
+normalize: replace "{work}" "$ROOT"
+exit: 1
+stderr: = conflict.stderr
+step: jet import py python/app --update
+exit: 0
+file: jet/app/main.jet == edited.jet.bytes
+copy: jet/app/import-report.json original-report.bytes
+concat: edited-report.bytes original-report.bytes owner-note.bytes
+copy: edited-report.bytes jet/app/import-report.json
+step: jet import py python/app --update
+exit: 1
+stderr: ~ "JT0199" # original predicate
+file: jet/app/import-report.json == edited-report.bytes
+copy: changed-source.bytes python/app/main.py
+step: jet import py python/app --update
+exit: 1
+stderr: ~ "JT0199" # original predicate
+file: jet/app/main.jet == edited.jet.bytes
+file: jet/app/import-report.json == edited-report.bytes

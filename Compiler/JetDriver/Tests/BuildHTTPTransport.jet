@@ -1,0 +1,55 @@
+// Checked-build transport policy, assembled with the canonical compiler unit.
+fn run() {
+    assert(jet_driver_build_public_address([U8]{8, 8, 8, 8}))
+    denied :: [[U8]]{
+        [U8]{0, 1, 2, 3}, [U8]{10, 1, 2, 3}, [U8]{100, 64, 0, 1},
+        [U8]{100, 127, 255, 255}, [U8]{127, 0, 0, 1}, [U8]{169, 254, 1, 1},
+        [U8]{172, 16, 0, 1}, [U8]{172, 31, 255, 255}, [U8]{192, 0, 0, 9},
+        [U8]{192, 0, 2, 1}, [U8]{192, 168, 1, 1}, [U8]{198, 18, 0, 1},
+        [U8]{198, 19, 255, 255}, [U8]{198, 51, 100, 1}, [U8]{203, 0, 113, 1},
+        [U8]{224, 0, 0, 1}, [U8]{255, 255, 255, 255},
+    }
+    loop address in denied -> assert(!jet_driver_build_public_address(address))
+    allowed :: [[U8]]{[U8]{100, 63, 255, 255}, [U8]{100, 128, 0, 1}, [U8]{172, 15, 0, 1}, [U8]{172, 32, 0, 1}, [U8]{192, 0, 1, 1}, [U8]{198, 17, 0, 1}, [U8]{198, 20, 0, 1}, [U8]{223, 255, 255, 255}}
+    loop address in allowed -> assert(jet_driver_build_public_address(address))
+    public6 :: [U8]{32, 1, 72, 96, 72, 96, 0, 0, 0, 0, 0, 0, 0, 0, 136, 136}
+    documentation6 :: [U8]{32, 1, 13, 184, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
+    assert(jet_driver_build_public_address(public6))
+    assert(!jet_driver_build_public_address(documentation6))
+    assert(!jet_driver_build_public_address([U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}))
+    assert(!jet_driver_build_public_address([U8]{252, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}))
+    assert(!jet_driver_build_public_address([U8]{254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}))
+    assert(!jet_driver_build_public_address([U8]{255, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}))
+    assert(jet_driver_build_public_address([U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 8, 8, 8, 8}))
+    assert(!jet_driver_build_public_address([U8]{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 127, 0, 0, 1}))
+    assert(!jet_driver_build_public_address([U8]{}))
+    assert(!jet_driver_build_public_address([U8]{1, 2, 3}))
+    assert(jet_driver_build_http_length([[U8]]{"Content-Length: 5".bytes()}) == .Ok(()))
+    assert(jet_driver_build_http_length([[U8]]{"cOnTeNt-LeNgTh: 67108865".bytes()}) == .Err("response exceeds its size bound"))
+    assert(jet_driver_build_http_length([[U8]]{"Content-Length: nope".bytes()}) == .Err("invalid Content-Length"))
+    assert(jet_driver_build_http_length([[U8]]{"Content-Length: -1".bytes()}) == .Err("invalid Content-Length"))
+    assert(jet_driver_build_http_length([[U8]]{"Location: https://other.invalid/".bytes()}) == .Ok(()))
+    span :: Span{start: 3, end: 5}
+    net :: EffectRowEntry{name: "Net", span: span}
+    wait :: EffectRowEntry{name: "Time.Wait", span: span}
+    time :: EffectRowEntry{name: "Time", span: span}
+    open :: EffectRowEntry{name: "..E", span: span}
+    assert(jet_driver_build_declared_network(Val([EffectRowEntry]{net, wait})))
+    assert(!jet_driver_build_declared_network(None))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{net})))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{wait})))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{net, time})))
+    assert(!jet_driver_build_declared_network(Val([EffectRowEntry]{open})))
+    args :: [BuildSessionValue]{.Text("https://example.invalid/data"), .Text("pin")}
+    refused :: jet_driver_build_fetch(None, None, false, "/", args, span)
+    if refused == .Failure(error) {
+        assert(error.code == "E3414")
+        assert(error.what == "HTTP build fetch requires declared Net and Time.Wait")
+        assert(error.start == 3 && error.end == 5)
+    } else { panic("undeclared HTTP transport did not refuse") }
+    unavailable :: jet_driver_build_fetch(None, None, true, "/", args, span)
+    assert(unavailable == .HostRequest("fetch", _))
+    certificate :: jet_driver_build_http_error("https://example.invalid/data", "unknownissuer", span)
+    if certificate == .Failure(error) -> assert(error.what == "TLS certificate for `example.invalid` could not be trusted")
+    else -> panic("raw TLS error lost source-owned meaning")
+}

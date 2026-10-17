@@ -3,40 +3,40 @@
 // edges become `LockInput`s, while exact revisions and output provenance
 // become semantic records in the same `.jet/lock` file.
 
-pub struct FlakeInput {
-    pub name: String
-    pub url: String
-    pub revision: String
-    pub follows: String
-    pub provenance: String
+struct FlakeInput {
+    name: String
+    url: String
+    revision: String
+    follows: String
+    provenance: String
 }
 
 // One input edge of a native `flake.lock` node. `target` stays canonical
 // JSON so every Nix field is lossless.
-pub struct FlakeLockEdge {
-    pub name: String
-    pub target: String
+struct FlakeLockEdge {
+    name: String
+    target: String
 }
 
 // One node of the native `flake.lock` graph; `original` and `locked` are
 // canonical JSON objects rather than a second resolver model.
-pub struct FlakeLockNode {
-    pub name: String
-    pub original: String
-    pub locked: String
-    pub inputs: [FlakeLockEdge]
+struct FlakeLockNode {
+    name: String
+    original: String
+    locked: String
+    inputs: [FlakeLockEdge]
 }
 
 // An indirect flake reference resolved by the locked node. Ambient user or
 // system registries are never consulted; the lock is the authority.
-pub struct FlakeRegistryEntry {
-    pub alias: String
-    pub node: String
-    pub original: String
-    pub locked: String
+struct FlakeRegistryEntry {
+    alias: String
+    node: String
+    original: String
+    locked: String
 }
 
-pub enum FlakeOutputKind {
+enum FlakeOutputKind {
     Package
     DevShell
     App
@@ -103,16 +103,16 @@ pub enum FlakeOutputKind {
     }
 }
 
-pub struct FlakeOutput {
-    pub name: String
-    pub kind: FlakeOutputKind
-    pub system: String
-    pub attribute: String
-    pub provenance: String
+struct FlakeOutput {
+    name: String
+    kind: FlakeOutputKind
+    system: String
+    attribute: String
+    provenance: String
 
     // `kind:system:attribute`, or the bare attribute of a system-less output.
     fn declared(kind: FlakeOutputKind, system: String, attribute: String, provenance: String) -> FlakeOutput Never! {
-        name :: if system == "" -> ~attribute else -> "{kind.label()}:{system}:{attribute}"
+        name :: if system == "" -> attribute.copy() else -> "{kind.label()}:{system}:{attribute}"
         FlakeOutput{name, kind, system, attribute, provenance}
     }
 
@@ -128,31 +128,31 @@ pub struct FlakeOutput {
 // ordinary graph facts and round-trip through `.jet/lock`. Loaded graphs also
 // keep a content fingerprint per imported module so a module edit cannot
 // reuse a stale lock.
-pub struct FlakeComposition {
-    pub framework: String
-    pub modules: [String]
-    pub module_sources: [String]
-    pub systems: [String]
-    pub per_system: Bool
+struct FlakeComposition {
+    framework: String
+    modules: [String]
+    module_sources: [String]
+    systems: [String]
+    per_system: Bool
 }
 
 // One `key=value` field of a flake URL query.
-pub struct FlakeQueryField {
-    pub key: String
-    pub value: String
+struct FlakeQueryField {
+    key: String
+    value: String
 }
 
 // The source a flake URL names, for matching against a lock node's
 // `original` metadata.
-pub enum FlakeSourceIdentity {
+enum FlakeSourceIdentity {
     Direct(kind: String, owner: String, repo: String, pin: FlakeSourcePin, query: [FlakeQueryField])
     Indirect(alias: String, pin: FlakeSourcePin, query: [FlakeQueryField])
 }
 
 // The ref and revision a flake URL pins through its path or query.
-pub struct FlakeSourcePin {
-    pub reference: String?
-    pub revision: String?
+struct FlakeSourcePin {
+    reference: String?
+    revision: String?
 
     // This pin with `ref=`/`rev=` query fields applied; None when a query
     // field disagrees with the path.
@@ -233,8 +233,8 @@ fn trust_flake_query_value(fields: [FlakeQueryField], key: String) -> String? Ne
 
 // The exact revision a flake URL pins: a `rev=` query field, else a
 // hex-looking last path segment, else "".
-pub fn trust_flake_revision(url: String) -> String Never! {
-    base := ~url
+fn trust_flake_revision(url: String) -> String Never! {
+    base := url.copy()
     if trust_text_split_first(url, TRUST_QUESTION) == {
         .Val(parts) -> {
             if trust_flake_query_fields(parts.after) == {
@@ -260,8 +260,8 @@ pub fn trust_flake_revision(url: String) -> String Never! {
 
 // Rust `flake_source_identity`: the typed source a flake URL names, or None
 // for URL forms that only compare textually.
-pub fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
-    base := ~url
+fn trust_flake_source_identity(url: String) -> FlakeSourceIdentity? Never! {
+    base := url.copy()
     query_text := ""
     if trust_text_split_first(url, TRUST_QUESTION) == {
         .Val(parts) -> {
@@ -314,7 +314,7 @@ fn trust_flake_direct_source(base: String) -> TrustTextSplit? Never! {
 
 // An indirect `[flake:]alias[/ref][/rev]` reference.
 fn trust_flake_indirect_identity(base: String, query: [FlakeQueryField]) -> FlakeSourceIdentity? Never! {
-    path :: if base.starts_with("flake:") -> base.removeprefix("flake:") else -> ~base
+    path :: if base.starts_with("flake:") -> base.removeprefix("flake:") else -> base.copy()
     if path == "" || path.starts_with(".") || path.starts_with("/") || path.contains(":") -> return None
     parts :: trust_text_split(path, TRUST_SLASH)
     alias :: parts[0]

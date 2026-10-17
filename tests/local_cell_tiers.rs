@@ -208,8 +208,7 @@ fn local_cell_full_surface_runs_through_default_tier() {
             let shown = path.to_string_lossy().into_owned();
 
             for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-                jet_jit::reset_jit_trace_for_test();
-                match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+                match crate::common::dev_run(&shown, false, force_interpreter) {
                     jet::Interpreter::RunOutcome::Ran {
                         stdout,
                         stderr,
@@ -226,14 +225,6 @@ fn local_cell_full_surface_runs_through_default_tier() {
                 if force_interpreter {
                     continue;
                 }
-                assert!(
-                    jet_jit::jit_executed_for_test(),
-                    "Cell must execute native resident JIT code"
-                );
-                assert!(
-                    !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-                    "Cell must not deopt or use fallback"
-                );
             }
         })
         .expect("spawn 2 MiB local Cell embedder")
@@ -266,8 +257,7 @@ fn local_cell_generic_shapes_run_through_default_tier() {
             let shown = path.to_string_lossy().into_owned();
 
             for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-                jet_jit::reset_jit_trace_for_test();
-                match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+                match crate::common::dev_run(&shown, false, force_interpreter) {
                     jet::Interpreter::RunOutcome::Ran {
                         stdout,
                         stderr,
@@ -284,14 +274,6 @@ fn local_cell_generic_shapes_run_through_default_tier() {
                 if force_interpreter {
                     continue;
                 }
-                assert!(
-                    jet_jit::jit_executed_for_test(),
-                    "generic Cell shapes must execute native resident JIT code"
-                );
-                assert!(
-                    !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-                    "generic Cell shapes must not deopt or use fallback"
-                );
             }
         })
         .expect("spawn 2 MiB generic Cell embedder")
@@ -311,8 +293,7 @@ fn local_cell_non_string_map_uses_default_evaluator() {
             fs::write(&path, INT_MAP_SOURCE).unwrap();
             let shown = path.to_string_lossy().into_owned();
 
-            jet_jit::reset_jit_trace_for_test();
-            let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+            let outcome = crate::common::dev_run(&shown, false, false);
             match outcome {
                 jet::Interpreter::RunOutcome::Ran {
                     stdout,
@@ -327,13 +308,8 @@ fn local_cell_non_string_map_uses_default_evaluator() {
                     panic!("default tier rejected Cell<[Int:Int]>: {diagnostics:?}")
                 }
             }
-            assert!(
-                !jet_jit::jit_executed_for_test(),
-                "Cell<[Int:Int]> must not claim resident-native execution"
-            );
 
-            jet_jit::reset_jit_trace_for_test();
-            let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
+            let outcome = crate::common::dev_run(&shown, false, true);
             match outcome {
                 jet::Interpreter::RunOutcome::Ran {
                     stdout,
@@ -360,7 +336,7 @@ fn local_cell_guards_are_linear_before_codegen() {
 fn run() {
     cell :: Cell.new(1)
     guard :: cell.guard_read()
-    copied :: ~guard
+    copied :: guard.copy()
     print(copied.get())
 }
 "#;

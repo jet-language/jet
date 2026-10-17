@@ -1,0 +1,38 @@
+# Port of tests/cli_parts/runtime.rs:439-469; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/clean
+step: jet check run.jet
+env: NO_COLOR=1
+env: JET_RECEIPT_DIR={work}/.jet/receipts
+env: TERM=dumb
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stdout+stderr: = check_clean_one_line.txt
+step: jet check run.jet
+env: NO_COLOR=1
+env: JET_RECEIPT_DIR={work}/.jet/receipts
+env: TERM=dumb
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stdout+stderr: = check_clean_one_line.txt
+step: jet check
+env: NO_COLOR=1
+env: JET_RECEIPT_DIR={work}/.jet/receipts
+env: TERM=dumb
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stdout+stderr: = project-clean.out
+step: jet check
+env: NO_COLOR=1
+env: JET_RECEIPT_DIR={work}/.jet/receipts
+env: TERM=dumb
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stdout+stderr: = project-clean.out
+step: jet check --verbose run.jet
+env: NO_COLOR=1
+env: JET_RECEIPT_BYPASS=1
+exit: 0
+stdout: ^= "check: passed (" # original predicate
+stdout: count-lines ^= "proof: " = 4 # original predicate

@@ -420,10 +420,7 @@ fn jet_rust_emit_unit_wrapper(ctx: &JetRustEmitContext, test: MIRTestCase, funct
     body :: jet_rust_emit_test_body(function, "{jet_rust_emit_function_name(&ctx, function.id)}()")
     &lines.push("fn {wrapper}() -> JetTestOutcome {{")
     &lines.push("let __jet_result = jet_test_run({expected}, || {{ {body} }});")
-    &lines.push("let __jet_stdout = jet_test_take_output();")
-    &lines.push("let (__jet_failed, __jet_stderr) = match __jet_result {{ Ok(()) => (false, String::new()), Err(__jet_error) => (true, __jet_error) }};")
-    &lines.push("let __jet_skipped = jet_test_take_whole_skip();")
-    &lines.push("JetTestOutcome {{ name: {jet_rust_emit_quote(test.name)}.to_string(), ok: __jet_skipped || (__jet_failed == {expected}), expected_failure: {expected}, skipped: __jet_skipped, stdout: __jet_stdout, stderr: __jet_stderr, property_cases: None }}")
+    &lines.push("jet_test_unit_outcome({jet_rust_emit_quote(test.name)}.to_string(), {expected}, __jet_result)")
     &lines.push("}}")
 }
 
@@ -483,7 +480,7 @@ fn jet_rust_emit_output_check(ctx: &JetRustEmitContext, check: MIROutputCheck, l
 
 fn jet_rust_emit_harness_main(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, run: String, dispatch_jobs: Bool, lines: &[String]) Never! {
     if artifact.entry != None || artifact.kind == MIRArtifactKind.NativeLibrary || artifact.kind == MIRArtifactKind.SandboxPlugin -> return
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     &lines.push("fn main() {{")
     &lines.push("    {root}jet_std_env_init();")
     &lines.push("    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());")
@@ -561,7 +558,7 @@ fn jet_rust_emit_harness(ctx: &JetRustEmitContext, artifact: MIRArtifactPlan, li
         jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR harness identity has no row", "a harness artifact names one checked harness plan", None)
         return
     }
-    root :: ~ctx.config.root_prefix
+    root :: ctx.config.root_prefix.copy()
     selected :: if harness.selected_test == .Val(test_id) -> "Some(MirTestId({test_id.value}))" else -> "None"
     &lines.push("// jet-mir-harness: id={harness.id.value} kind={jet_rust_emit_harness_kind_debug(harness.kind)} selected_test={selected} command_override={jet_rust_emit_bool_text(harness.command_override)}")
     tests :: jet_rust_emit_selected_tests(&ctx, harness)

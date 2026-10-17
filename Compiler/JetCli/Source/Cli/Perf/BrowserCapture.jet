@@ -1,0 +1,127 @@
+// BrowserTrace.rs relay consumer. Compiler-produced identities/maps, never
+// re-opened browser source files, are the attribution authority.
+use core.encoding.hex as perf_hex
+use jet_foundation.[TraceBrowser, SourceIdentity, TraceSourceMap, mir_sha256_hex]
+
+struct JetCLIPerfBrowser { rows: [TraceBrowser], sources: [SourceIdentity], source_maps: [TraceSourceMap], truncated: Bool }
+fn jet_cli_perf_hex_text(value: String) -> String JetCLIReadError! {
+    bytes :: perf_hex.decode(value) ?? return Err(jet_cli_read_error("browser relay has invalid hexadecimal text"))
+    Ok(String.from_bytes(bytes) ?? return Err(jet_cli_read_error("browser relay text is not UTF-8")))
+}
+fn jet_cli_perf_digest(value: String) -> Bool Never! {
+    if value.bytes().len() != 64 -> return false
+    loop byte in value.bytes() {
+        if !(byte >= U8{48} && byte <= U8{57}) && !(byte >= U8{97} && byte <= U8{102}) -> return false
+    }
+    true
+}
+fn jet_cli_perf_browser_symbol(value: String) -> Bool Never! {
+    if value == "" || value.bytes().len() > 128 -> return false
+    loop byte in value.bytes() {
+        if !(byte >= U8{48} && byte <= U8{57}) && !(byte >= U8{65} && byte <= U8{90}) && !(byte >= U8{97} && byte <= U8{122}) && byte != (U8{95}) && byte != (U8{36}) -> return false
+    }
+    true
+}
+fn jet_cli_perf_browser_status(value: Dyn, action: String, required: [String], optional: [String]) JetCLIReadError! {
+    fields := [String]{"schema", "action", "ok", "reports"}
+    loop field in required -> &fields.push(field)
+    jet_cli_perf_object(value, fields, optional, "browser relay status")
+    if jet_cli_perf_text(jet_cli_perf_field(value, "schema")) != JET_CLI_STATUS_SCHEMA || jet_cli_perf_text(jet_cli_perf_field(value, "action")) != action || !jet_cli_perf_bool(jet_cli_perf_field(value, "ok")) -> return Err(jet_cli_read_error("browser relay status header is invalid"))
+    if jet_cli_perf_array(jet_cli_perf_field(value, "reports")).len() != 0 -> return Err(jet_cli_read_error("browser relay has unexpected reports"))
+}
+fn jet_cli_perf_browser_decode(text: String, pid: Int, started: String) -> JetCLIPerfBrowser JetCLIReadError! {
+    lines :: text.split("\n").to_list()
+    if lines.len() == 0 || lines[0] == "" -> return Err(jet_cli_read_error("browser relay has no header"))
+    header :: perf_json.parse(lines[0]) ?? return Err(jet_cli_read_error("browser relay header is not JSON"))
+    jet_cli_perf_browser_status(header, "browser.relay", [String]{"nonce", "pid", "started", "sources"}, [String]{"source_map"})
+    nonce :: jet_cli_perf_text(jet_cli_perf_field(header, "nonce"))
+    if nonce == "" || jet_cli_perf_uint(jet_cli_perf_field(header, "pid")) != (U64{pid}) || jet_cli_perf_text(jet_cli_perf_field(header, "started")) != started -> return Err(jet_cli_read_error("browser relay process identity mismatch"))
+    sources_text :: jet_cli_perf_hex_text(jet_cli_perf_text(jet_cli_perf_field(header, "sources")))
+    sources := [SourceIdentity]{}
+    paths := [String:Int]{}
+    symbols := [String:String]{}
+    // Definitions precede symbols in the producer's canonical TSV carrier.
+    loop line in sources_text.split("\n") {
+        if line == "" -> next
+        fields :: line.split("\t").to_list()
+        if fields.len() == 3 && fields[0] == "source" {
+            path :: jet_cli_perf_hex_text(fields[1])
+            if path == "" || perf_text.has_control(path) || paths.has_key(path) || !jet_cli_perf_digest(fields[2]) -> return Err(jet_cli_read_error("browser source identity is invalid or duplicated"))
+            if sources.len() >= 4096 -> return Err(jet_cli_read_error("browser source identities exceed their bound"))
+            paths[path] = sources.len()
+            &sources.push(SourceIdentity{path: path, sha256: fields[2], symbols: [(name: String, kind: String)]{}})
+        } else if fields.len() == 4 && fields[0] == "symbol" {
+            path :: jet_cli_perf_hex_text(fields[1])
+            name :: jet_cli_perf_hex_text(fields[2])
+            if !paths.has_key(path) || symbols.has_key(name) || !jet_cli_perf_browser_symbol(name) || (fields[3] != "fn" && fields[3] != "handler") -> return Err(jet_cli_read_error("browser symbol identity is invalid or duplicated"))
+            if symbols.len() >= 4096 -> return Err(jet_cli_read_error("browser symbols exceed their bound"))
+            index :: paths[path]
+            &sources[index].symbols.push((name: name, kind: fields[3]))
+            symbols[name] = path
+        } else {
+            return Err(jet_cli_read_error("browser source identity TSV is malformed"))
+        }
+    }
+    if sources.len() == 0 -> return Err(jet_cli_read_error("browser relay has no source identities"))
+    maps := [TraceSourceMap]{}
+    if jet_cli_perf_optional(header, "source_map") == .Val(encoded) {
+        map :: jet_cli_perf_hex_text(jet_cli_perf_text(encoded))
+        &maps.push(TraceSourceMap{kind: "js", path: "app.js", sha256: mir_sha256_hex(map), map: map})
+    }
+    rows := [TraceBrowser]{}
+    truncated := false
+    loop index in 1..<lines.len() {
+        if lines[index] == "" {
+            if index != lines.len() - 1 -> return Err(jet_cli_read_error("browser relay has an empty interior row"))
+            next
+        }
+        row :: perf_json.parse(lines[index]) ?? return Err(jet_cli_read_error("browser relay row is not JSON"))
+        action :: jet_cli_perf_text(jet_cli_perf_field(row, "action"))
+        if action == "browser.relay.truncated" {
+            jet_cli_perf_browser_status(row, action, [String]{}, [String]{})
+            if truncated -> return Err(jet_cli_read_error("browser relay repeats its truncation marker"))
+            truncated = true
+            next
+        }
+        if truncated -> return Err(jet_cli_read_error("browser relay rows follow its truncation marker"))
+        jet_cli_perf_browser_status(row, "browser.relay.row", [String]{"class", "duration_ns", "start_ns", "symbol"}, [String]{})
+        class :: jet_cli_perf_text(jet_cli_perf_field(row, "class"))
+        name :: jet_cli_perf_text(jet_cli_perf_field(row, "symbol"))
+        if !([String]{"event", "wasm", "dom"}).contains(class) || !symbols.has_key(name) -> return Err(jet_cli_read_error("browser relay row has no checked compiler attribution"))
+        if rows.len() >= 4096 -> return Err(jet_cli_read_error("browser relay exceeds its row bound"))
+        &rows.push(TraceBrowser{class: class, duration_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "duration_ns")), start_ns: jet_cli_perf_uint(jet_cli_perf_field(row, "start_ns")), symbol: JetSymbolRef{path: symbols[name], name: name}})
+    }
+    Ok(JetCLIPerfBrowser{rows: rows, sources: sources, source_maps: maps, truncated: truncated})
+}
+fn jet_cli_perf_browser_read(pid: Int) -[FS.Read, Env, Time.Wait]> JetCLIPerfBrowser JetCLIReadError! {
+    started :: jet_cli_perf_process_start(pid)
+    path :: perf_files.join(perf_sys.temp_dir(), "jet-browser-trace-{pid}.relay")
+    bytes :: jet_cli_perf_read_private(path, 1048576)
+    text :: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("browser relay is not UTF-8"))
+    capture :: jet_cli_perf_browser_decode(text, pid, started)
+    if jet_cli_perf_process_start(pid) != started -> return Err(jet_cli_read_error("browser process identity changed during capture"))
+    Ok(capture)
+}
+
+fn jet_cli_perf_browser_request(pid: Int) -[FS, Env, Time.Wait]> String JetCLIReadError! {
+    started :: jet_cli_perf_process_start(pid)
+    path :: perf_files.join(perf_sys.temp_dir(), "jet-browser-trace-{pid}.request")
+    if perf_files.remove(path) == {
+        .Ok(_) -> {}
+        .Err(.NotFound(_)) -> {}
+        .Err(_) -> return Err(jet_cli_read_error("cannot replace browser trace request"))
+    }
+    writer :: perf_files.create(path, if_exists: .Refuse, mode: Val(0o600), links: .Refuse) ?? return Err(jet_cli_read_error("cannot securely create browser trace request"))
+    writer.write_all("jet.browser.request.v1\t{pid}\t{started}\n".bytes()) ?? return Err(jet_cli_read_error("cannot write browser trace request"))
+    writer.flush() ?? return Err(jet_cli_read_error("cannot flush browser trace request"))
+    Ok(started)
+}
+fn jet_cli_perf_browser_cancel_request(pid: Int) JetCLIReadError! -[FS.Write, Env]> {
+    if pid <= 0 || pid > 4294967295 -> return Err(jet_cli_read_error("process id must be a nonzero u32"))
+    path :: perf_files.join(perf_sys.temp_dir(), "jet-browser-trace-{pid}.request")
+    if perf_files.remove(path) == {
+        .Ok(_) -> {}
+        .Err(.NotFound(_)) -> {}
+        .Err(_) -> return Err(jet_cli_read_error("cannot cancel browser trace request"))
+    }
+}

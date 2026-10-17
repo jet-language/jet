@@ -120,7 +120,7 @@ The first migration is an eligible function boundary whose native argument, resu
 
 ```jet
 #Export(c)
-pub fn on_tick(dt: I64) I64 -> dt + 1
+fn on_tick(dt: I64) I64 -> dt + 1
 ```
 
 ```cmake

@@ -1,0 +1,15 @@
+use java.counter as counter
+
+#Test("JVM managed exception is checked") {
+    handle :: counter.new(40) ?? panic("JVM create failed")
+    assert_eq(counter.explode(handle, -1) ?? -7, -7)
+    counter.close(^handle)
+}
+
+fn run() -[FFI.Java, IO]> {
+    handle :: counter.new(40) ?? panic("JVM create failed")
+    print(counter.add(handle, 2) ?? -1)
+    print(counter.twice(2.5) ?? -1.0)
+    print(counter.explode(handle, -1) ?? -7)
+    counter.close(^handle)
+}

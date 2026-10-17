@@ -1,0 +1,348 @@
+# HAND-PORT tests/jetpack_engine.rs:2373-2630 doctor_checks_real_state_and_is_read_only
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: doctor_checks_real_state_and_is_read_only.fixture
+env: NO_COLOR=1
+requires: tool:git
+refused: store-ingest
+# Verbatim original setup/predicates; signing-bridge cache artifact subclaims RETIRE at Rust exit.
+# #[test]
+# fn doctor_checks_real_state_and_is_read_only() {
+#     let project = Scratch::new("doctor-project");
+#     let root = Scratch::new("doctor-root");
+#     let keys = Scratch::new("doctor-keys");
+#     let registry = project.join("registry.git");
+#     let registry_init = Command::new("git")
+#         .args(["init", "--bare", registry.to_str().unwrap()])
+#         .output()
+#         .unwrap();
+#     assert!(
+#         registry_init.status.success(),
+#         "registry init: {}",
+#         String::from_utf8_lossy(&registry_init.stderr)
+#     );
+#     let keygen = jet()
+#         .args(["registry", "keygen"])
+#         .current_dir(&project.path)
+#         .env("JET_KEYS_DIR", &keys.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         keygen.status.success(),
+#         "keygen: {}",
+#         String::from_utf8_lossy(&keygen.stderr)
+#     );
+#     let registry_url = format!("file://{}", registry.display());
+#     let credentialed_registry_url = "http://user:super-secret@example.invalid/index";
+#     let helper = jetpack::FFI::cached_crypto_helper_path();
+#     let helper_before = fs::metadata(&helper).unwrap();
+#     // #2075: that directory is the Cargo target dir SHARED by every bridge key,
+#     // so "this bridge's files" is a key filter — another suite building another
+#     // bridge concurrently must not read as `doctor` touching this one.
+#     let signing_bridge_files = |dir: &std::path::Path, key: &str| {
+#         let mut names = fs::read_dir(dir)
+#             .unwrap()
+#             .map(|e| e.unwrap().file_name())
+#             .filter(|name| name.to_string_lossy().contains(key))
+#             .collect::<Vec<_>>();
+#         names.sort();
+#         names
+#     };
+#     let helper_dir = helper.parent().unwrap().to_path_buf();
+#     let helper_key = common::ffi_bridge_key(&helper);
+#     let helper_parent_before = signing_bridge_files(&helper_dir, &helper_key);
+# 
+#     let healthy = jetpack()
+#         .args(["doctor", "--json", "--online"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JET_KEYS_DIR", &keys.path)
+#         .env("JET_REGISTRY_URL", &registry_url)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         healthy.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&healthy.stderr)
+#     );
+#     let healthy_json = jetpack::JSON::parse(&String::from_utf8_lossy(&healthy.stdout)).unwrap();
+#     assert_eq!(json_string(&healthy_json, "status"), "healthy");
+#     assert_eq!(
+#         fs::metadata(&helper).unwrap().len(),
+#         helper_before.len(),
+#         "doctor changed signing helper"
+#     );
+#     let helper_parent_after = signing_bridge_files(&helper_dir, &helper_key);
+#     assert_eq!(
+#         helper_parent_after, helper_parent_before,
+#         "doctor changed signing helper cache"
+#     );
+# 
+#     fs::remove_file(keys.join("jet.ed25519")).unwrap();
+#     let degraded = jetpack()
+#         .args(["doctor", "--online"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JET_KEYS_DIR", &keys.path)
+#         .env("JET_REGISTRY_URL", credentialed_registry_url)
+#         .output()
+#         .unwrap();
+#     assert_eq!(degraded.status.code(), Some(2));
+#     let degraded_text = String::from_utf8(degraded.stderr).unwrap();
+#     assert!(degraded_text.contains("[Fail] registry"), "{degraded_text}");
+#     assert!(
+#         degraded_text.contains("embedded registry credentials"),
+#         "{degraded_text}"
+#     );
+#     assert!(degraded_text.contains("[Warn] signing"), "{degraded_text}");
+#     assert!(
+#         degraded_text.ends_with("Result: broken\n"),
+#         "{degraded_text}"
+#     );
+#     assert!(
+#         !degraded_text.contains("super-secret"),
+#         "credential leaked: {degraded_text}"
+#     );
+#     let query_degraded = jetpack()
+#         .args(["doctor", "--online"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JET_KEYS_DIR", &keys.path)
+#         .env(
+#             "JET_REGISTRY_URL",
+#             "file:///registry.git?access_token=super-secret",
+#         )
+#         .output()
+#         .unwrap();
+#     assert_eq!(query_degraded.status.code(), Some(2));
+#     let query_degraded_text = String::from_utf8(query_degraded.stderr).unwrap();
+#     assert!(
+#         query_degraded_text.contains("embedded registry credentials"),
+#         "{query_degraded_text}"
+#     );
+#     assert!(
+#         !query_degraded_text.contains("super-secret"),
+#         "credential leaked: {query_degraded_text}"
+#     );
+#     let keygen = jet()
+#         .args(["registry", "keygen", "--force"])
+#         .current_dir(&project.path)
+#         .env("JET_KEYS_DIR", &keys.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         keygen.status.success(),
+#         "keygen: {}",
+#         String::from_utf8_lossy(&keygen.stderr)
+#     );
+#     let public_path = keys.join("jet.ed25519.pub");
+#     let matching_public = fs::read_to_string(&public_path).unwrap();
+#     let mut mismatched_public = matching_public.clone().into_bytes();
+#     mismatched_public[0] = if mismatched_public[0] == b'0' {
+#         b'1'
+#     } else {
+#         b'0'
+#     };
+#     fs::write(&public_path, &mismatched_public).unwrap();
+#     let mismatch = jetpack()
+#         .args(["doctor", "--online"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JET_KEYS_DIR", &keys.path)
+#         .env("JET_REGISTRY_URL", credentialed_registry_url)
+#         .output()
+#         .unwrap();
+#     let mismatch_text = String::from_utf8(mismatch.stderr).unwrap();
+#     assert_eq!(mismatch.status.code(), Some(2), "{mismatch_text}");
+#     assert!(
+#         mismatch_text.contains("does not match its public key"),
+#         "{mismatch_text}"
+#     );
+#     assert!(
+#         !mismatch_text.contains("super-secret"),
+#         "credential leaked: {mismatch_text}"
+#     );
+#     fs::write(&public_path, matching_public).unwrap();
+# 
+#     let output = root.join("owned-output");
+#     fs::create_dir_all(&output).unwrap();
+#     fs::write(output.join("payload"), "trusted bytes").unwrap();
+#     let roots = jetpack::Store::Roots {
+#         root: root.path.clone(),
+#         dev_mode: false,
+#     };
+#     let entry = jetpack::Store::ingest_tree(
+#         &roots,
+#         &jetpack::Store::IngestRequest {
+#             name: "demo".into(),
+#             version: "1".into(),
+#             reference: "./demo".into(),
+#             cache_identity: jetpack::Store::CacheIdentity {
+#                 source_fingerprint: "sha256-test-source".into(),
+#                 recipe_fingerprint: "sha256-test-recipe".into(),
+#                 policy_fingerprint: "sha256-test-policy".into(),
+#                 platform: jetpack::Envelope::host_platform(),
+#             },
+#             references: Vec::new(),
+#             outputs: std::collections::BTreeMap::from([("out".into(), output.clone())]),
+#             signature: String::new(),
+#             provenance: "./demo via test".into(),
+#             platform_artifact_kind: String::new(),
+#         },
+#     )
+#     .unwrap()
+#     .entry;
+#     let meta = root.join(&format!("hangar/{}/meta.json", entry.id));
+#     let old_meta = fs::read_to_string(&meta).unwrap();
+#     let stale_meta = old_meta.replace(
+#         &format!("\"last_used_at\": \"{}\"", entry.last_used_at),
+#         "\"last_used_at\": \"0\"",
+#     );
+#     fs::write(&meta, &stale_meta).unwrap();
+#     make_writable(&entry.out);
+#     fs::write(
+#         std::path::Path::new(&entry.out).join("payload"),
+#         "corrupt bytes",
+#     )
+#     .unwrap();
+#     fs::create_dir_all(root.join(".locks")).unwrap();
+#     let stale_lock = root.join(".locks/abandoned.lock");
+#     fs::write(&stale_lock, "pid=4294967294\n").unwrap();
+#     fs::remove_file(keys.join("jet.ed25519")).unwrap();
+#     let before_meta = fs::read(&meta).unwrap();
+#     let before_lock = fs::read(&stale_lock).unwrap();
+#     let before_public = fs::read(keys.join("jet.ed25519.pub")).unwrap();
+#     let before_public_permissions = fs::metadata(keys.join("jet.ed25519.pub"))
+#         .unwrap()
+#         .permissions();
+#     let before_output_permissions = fs::metadata(output.join("payload")).unwrap().permissions();
+# 
+#     let broken = jetpack()
+#         .args(["doctor", "--json", "--offline"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JET_KEYS_DIR", &keys.path)
+#         .env(
+#             "JET_REGISTRY_URL",
+#             format!("file://{}", project.join("missing").display()),
+#         )
+#         .output()
+#         .unwrap();
+#     assert_eq!(broken.status.code(), Some(2));
+#     let text = String::from_utf8(broken.stdout).unwrap();
+#     assert!(text.contains("failed its content digest"), "{text}");
+#     assert!(text.contains("local index missing"), "{text}");
+#     assert!(!text.contains("stale lock"), "{text}");
+#     assert!(text.contains("kernel advisory locks readable"), "{text}");
+#     assert!(text.contains("unused for more than 30 days"), "{text}");
+#     assert!(text.contains("signing key for `jet` is missing"), "{text}");
+#     assert_eq!(
+#         fs::read(&meta).unwrap(),
+#         before_meta,
+#         "doctor changed metadata"
+#     );
+#     assert_eq!(
+#         fs::read(&stale_lock).unwrap(),
+#         before_lock,
+#         "doctor changed lock state"
+#     );
+#     assert_eq!(
+#         fs::read(keys.join("jet.ed25519.pub")).unwrap(),
+#         before_public,
+#         "doctor changed public key"
+#     );
+#     assert_eq!(
+#         fs::metadata(keys.join("jet.ed25519.pub"))
+#             .unwrap()
+#             .permissions(),
+#         before_public_permissions,
+#         "doctor changed key permissions"
+#     );
+#     assert_eq!(
+#         fs::metadata(output.join("payload")).unwrap().permissions(),
+#         before_output_permissions,
+#         "doctor changed output permissions"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: keys
+step: git init --bare {work}/project/registry.git
+exit: 0
+step: jet registry keygen
+cwd: project
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+step: jetpack doctor --json --online
+cwd: project
+env: JET_KEYS_DIR={work}/keys
+env: JET_REGISTRY_URL=file://{work}/project/registry.git
+exit: 0
+json: stdout doc $.status = "healthy"
+remove: keys/jet.ed25519
+step: jetpack doctor --online
+cwd: project
+env: JET_KEYS_DIR={work}/keys
+env: JET_REGISTRY_URL=http://user:super-secret@example.invalid/index
+exit: 2
+stderr: ~ "[Fail] registry" # original contains predicate
+stderr: ~ "embedded registry credentials" # original contains predicate
+stderr: ~ "[Warn] signing" # original contains predicate
+stderr: $= "Result: broken\n" # original ends_with predicate
+stderr: !~ "super-secret" # original negative contains predicate
+step: jetpack doctor --online
+cwd: project
+env: JET_KEYS_DIR={work}/keys
+env: JET_REGISTRY_URL=file:///registry.git?access_token=super-secret
+exit: 2
+stderr: ~ "embedded registry credentials" # original contains predicate
+stderr: !~ "super-secret" # original negative contains predicate
+step: jet registry keygen --force
+cwd: project
+env: JET_KEYS_DIR={work}/keys
+exit: 0
+copy: keys/jet.ed25519.pub matching-public
+step: jet run mismatch-public.jet -- {work}/keys/jet.ed25519.pub
+exit: 0
+step: jetpack doctor --online
+cwd: project
+env: JET_KEYS_DIR={work}/keys
+env: JET_REGISTRY_URL=http://user:super-secret@example.invalid/index
+exit: 2
+stderr: ~ "does not match its public key" # original contains predicate
+stderr: !~ "super-secret" # original negative contains predicate
+copy: matching-public keys/jet.ed25519.pub
+
+write: root/owned-output/payload trusted.template
+# store-ingest seam supplies the exact original IngestRequest at 2538-2558;
+# it must NOT use hangar ingest with CacheIdentity.empty() as a substitute.
+step: jetpack explain demo --json --no-color
+cwd: project
+exit: 0
+capture: id stdout doc $.explain.entry.id
+capture: out stdout doc $.explain.entry.output_path
+capture: old_used file root/hangar/{cap:id}/meta.json doc $.last_used_at
+step: jet run broken-setup.jet -- {work}/root/hangar/{cap:id}/meta.json {cap:old_used} {cap:out} {work}/root
+exit: 0
+remove: keys/jet.ed25519
+copy: root/hangar/{cap:id}/meta.json before-meta
+copy: root/.locks/abandoned.lock before-lock
+copy: keys/jet.ed25519.pub before-public
+capture: public_permissions = permissions file keys/jet.ed25519.pub
+capture: payload_permissions = permissions file root/owned-output/payload
+step: jetpack doctor --json --offline
+cwd: project
+env: JET_KEYS_DIR={work}/keys
+env: JET_REGISTRY_URL=file://{work}/project/missing
+exit: 2
+stdout: ~ "failed its content digest" # original contains predicate
+stdout: ~ "local index missing" # original contains predicate
+stdout: !~ "stale lock" # original negative contains predicate
+stdout: ~ "kernel advisory locks readable" # original contains predicate
+stdout: ~ "unused for more than 30 days" # original contains predicate
+stdout: ~ "signing key for `jet` is missing" # original contains predicate
+file: root/hangar/{cap:id}/meta.json == before-meta
+file: root/.locks/abandoned.lock == before-lock
+file: keys/jet.ed25519.pub == before-public
+file: keys/jet.ed25519.pub permissions = "{cap:public_permissions}"
+file: root/owned-output/payload permissions = "{cap:payload_permissions}"

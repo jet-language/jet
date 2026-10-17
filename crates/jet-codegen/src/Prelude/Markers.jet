@@ -6,20 +6,20 @@
 // written here (D-VERDICT-1455-1, law zero).
 //
 // A plain parameter is an argument the use site writes: `name: Type` with an
-// optional `{default}`. An `@`-marked parameter is a fact about the rule
+// optional `{default}`. A `$`-marked parameter is a fact about the rule
 // itself:
 //
-//   @sites        the attachment points the rule accepts, `[]` for none
-//   @repeatable   the rule may be written more than once on one target
-//   @owns_menu    the rule teaches its own argument menu in its own error
-//   @inherits     the rule takes part in lexical policy inheritance
-//   @resolution   how nested writings combine: .Override, .Merge, .Tighten
-//   @scopes       the policy scopes the rule may be written at
-//   @companion    `[Rule, .Site]` — one extra site a companion rule opens
-//   @retired      the replacement text for a name that no longer works
+//   $sites        the attachment points the rule accepts, `[]` for none
+//   $repeatable   the rule may be written more than once on one target
+//   $owns_menu    the rule teaches its own argument menu in its own error
+//   $inherits     the rule takes part in lexical policy inheritance
+//   $resolution   how nested writings combine: .Override, .Merge, .Tighten
+//   $scopes       the policy scopes the rule may be written at
+//   $companion    `[Rule, .Site]` — one extra site a companion rule opens
+//   $retired      the replacement text for a name that no longer works
 //
-// `@sites` is the only public legal-site declaration form. Ordinary names
-// are typed use-site arguments; every `@` name is fixed declaration metadata.
+// `$sites` is the only public legal-site declaration form. Ordinary names
+// are typed use-site arguments; every `$` name is fixed declaration metadata.
 //
 marker Policy(settings: ...PolicySetting, $sites: [.Package, .Module, .Function, .Method, .Block], $inherits: true, $resolution: .Tighten, $scopes: [.Package, .Module, .Function, .Block])
 
@@ -37,6 +37,8 @@ marker Pre(condition: Value, message: String, $sites: [.Function, .Method], $rep
 
 marker Post(condition: Value, message: String, $sites: [.Function, .Method], $repeatable: true)
 
+// D-CODEGEN-HINTS1=A: these rows stay separate. Kernel requests a checked
+// worker-boundary proof; Inline(Always) is a checked promise, not a hint.
 marker Kernel(mode: KernelMode, $sites: [.Function])
 
 marker Inline(mode: InlineMode{.Hint}, $sites: [.Function, .Method, .Constant])
@@ -196,8 +198,6 @@ marker Root($sites: [.Parameter])
 
 marker HTML(page: Path, $sites: [.File, .Block])
 
-marker PubFile($sites: [.File])
-
 marker NoPrelude($sites: [.File])
 
 marker SQL(row: Type{none}, $sites: [.Block])
@@ -208,6 +208,7 @@ marker Bindgen($sites: [.Module])
 
 marker allow(lint: Ident, reason: String{none}, $sites: [.Declaration, .Field, .Statement], $repeatable: true)
 
+// D-CODEGEN-HINTS1=A: stable-address storage is not a code-generation hint.
 marker Static($sites: [.Constant])
 
 marker wire($sites: [.Field])

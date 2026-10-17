@@ -1,0 +1,43 @@
+# Port of tests/corelib_parts/platform.rs:199-333; exact original source and predicates.
+# PENDING-SAME-HEAD/PENDING-GRAMMAR(batch-four bit_and/first-existing).
+fixture: fixtures/core_files_stat_mode_matches_across_tiers
+mkdir: directory
+when os unix: chmod: executable.sh 755
+step default: jet run main.jet  -- {work}/regular.txt {work}/executable.sh {work}/directory {work}/regular.link
+exit: 0
+when os unix: stdout.line(0).strip_prefix("family:"): = "unix"
+when os windows: stdout.line(0).strip_prefix("family:"): = "windows"
+stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt"
+stdout.line(2).trim.split(",", 0): is-i64
+stdout.line(2).trim.split(",", 1): is-i64
+stdout.line(2).trim.split(",", 2): is-i64
+stdout.line(2).trim.split(",", 3): is-i64
+stdout.line(2).trim.split(",", 4): is-i64
+stdout.line(2).trim.split(",", 5): is-i64
+stdout.line(2).trim.replace(",", "\n"): lines = 6
+stdout.line(2).trim.split(",", 0).bit_and(0o170000): numeric-lines = [32768]
+stdout.line(2).trim.split(",", 0).bit_and(0o777): numeric-lines = [420]
+stdout.line(2).trim.split(",", 1).bit_and(0o170000): numeric-lines = [32768]
+stdout.line(2).trim.split(",", 1).bit_and(0o777): numeric-lines = [493]
+stdout.line(2).trim.split(",", 2).bit_and(0o170000): numeric-lines = [16384]
+stdout.line(2).trim.split(",", 2).bit_and(0o777): numeric-lines = [493]
+stdout.line(2).trim.split(",", 4).bit_and(0o170000): numeric-lines = [32768]
+stdout.line(2).trim.split(",", 4).bit_and(0o777): numeric-lines = [384]
+stdout.line(2).trim.split(",", 5).bit_and(0o170000): numeric-lines = [16384]
+stdout.line(2).trim.split(",", 5).bit_and(0o777): numeric-lines = [448]
+stdout.line(2).trim.split(",", 3).bit_and(0o170000): numeric-lines = [40960]
+stdout.line(2).trim.split(",", 3).bit_and(0o111): each-line !^= "0"
+remove: regular.link
+step interpreted: jet run main.jet --interpret -- {work}/regular.txt {work}/executable.sh {work}/directory {work}/regular.link
+exit: 0
+when os unix: stdout.line(0).strip_prefix("family:"): = "unix"
+when os windows: stdout.line(0).strip_prefix("family:"): = "windows"
+stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt"
+stdout.line(2).trim.replace(",", "\n"): numeric-lines == default
+remove: regular.link
+step release: jet run main.jet --release -- {work}/regular.txt {work}/executable.sh {work}/directory {work}/regular.link
+exit: 0
+when os unix: stdout.line(0).strip_prefix("family:"): = "unix"
+when os windows: stdout.line(0).strip_prefix("family:"): = "windows"
+stdout.line(1).strip_prefix("absolute:"): = "{work}/regular.txt"
+stdout.line(2).trim.replace(",", "\n"): numeric-lines == default

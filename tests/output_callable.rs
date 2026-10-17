@@ -1,20 +1,21 @@
 use jet::Interpreter::RunOutcome;
 use jet::AST::{Expr, Item, OutputKind, Type};
-use jet_jit::CraneliftBackend;
 
 mod common;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_native_aot(bundle: &jet::AST::ProgramBundle, checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]) -> String {
     emit_native_artifact(
         bundle,
+        checked_nominals,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     )
 }
 
-fn emit_test_harness(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_test_harness(bundle: &jet::AST::ProgramBundle, checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]) -> String {
     emit_native_artifact(
         bundle,
+        checked_nominals,
         jet_foundation::MIR::MirArtifactKind::TestExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Test,
     )
@@ -22,6 +23,7 @@ fn emit_test_harness(bundle: &jet::AST::ProgramBundle) -> String {
 
 fn emit_native_artifact(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     kind: jet_foundation::MIR::MirArtifactKind,
     mode: jet_foundation::MIR::MirArtifactBuildMode,
 ) -> String {
@@ -30,7 +32,7 @@ fn emit_native_artifact(
         kind,
         mode,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in output-callable test");
@@ -54,15 +56,16 @@ fn checked_bundle(
     source: &str,
     tag: &str,
     mode: jet::Sema::CompileMode,
-) -> jet::AST::ProgramBundle {
+) -> (jet::AST::ProgramBundle, std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>) {
     let dir = common::unique_tmp(tag);
     std::fs::create_dir_all(&dir).unwrap();
     let file = dir.join("main.jet");
     std::fs::write(&file, source).unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, mode);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    bundle
+    (bundle, checked_nominals)
 }
 
 #[test]
@@ -168,16 +171,18 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
-    let rust = emit_native_aot(&bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(rust.contains("match __jet_start()"), "{rust}");
     assert!(matches!(
         common::run_interpreter_checked_bundle(
             &bundle,
+            &checked_nominals,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -185,43 +190,40 @@ fn aot_dev_and_jit_consume_the_resolved_entry() {
 }
 
 #[test]
-fn resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallback() {
-    // `run` then `hot_swap` is one resident session, and a session is scoped
-    // to its thread (D-HOTSWAP1 / D-PERSIST1). Install the sized compiler
-    // stack once around the whole session; `CraneliftBackend::run`'s own
-    // boundary is re-entrant and runs inline inside it.
-    jet_jit::on_compiler_stack(resident_jit_hot_swap_session);
+fn interpreter_runs_hot_swaps_and_reports_fallible_selected_entry() {
+    // `run` then `hot_swap` is one dev session, and a session is scoped to its
+    // thread (D-HOTSWAP1 / D-PERSIST1). Install the sized compiler stack once
+    // around the whole session.
+    jet_evalhost::on_compiler_stack(interpreter_hot_swap_session);
 }
 
-fn resident_jit_hot_swap_session() {
-    if !jet_jit::cranelift_host_supported() {
-        return;
-    }
-    let v1 = checked_bundle(
+fn interpreter_hot_swap_session() {
+    let (v1, v1_nominals) = checked_bundle(
         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { print(\"v1\") }\n",
-        "jet_output_resident_v1",
+        "jet_output_session_v1",
         jet::Sema::CompileMode::Run,
     );
-    let v2 = checked_bundle(
+    let (v2, v2_nominals) = checked_bundle(
         "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { return Err(\"selected boom\") }\n",
-        "jet_output_resident_v2",
+        "jet_output_session_v2",
         jet::Sema::CompileMode::Run,
     );
-    assert!(common::cranelift_resident_safe(&v1));
-    assert!(common::cranelift_resident_safe(&v2));
 
     let policy = common::development_policy();
-    let mut backend = CraneliftBackend::new();
-    let first = common::run_cranelift_bundle(&mut backend, &v1, false, &policy);
+    let mut backend = jet::JitBackend::InterpreterBackend::new(
+        jet::Interpreter::InterpreterInvocation::DevInterpret,
+    );
+    let first = common::run_interpreter_bundle(&mut backend, &v1, &v1_nominals, false, &policy);
     assert!(matches!(first, RunOutcome::Ran { ref stdout, exit_code: 0, .. } if stdout == "v1\n"));
-    let swapped = common::hot_swap_cranelift_bundle(
+    let swapped = common::hot_swap_interpreter_bundle(
         &mut backend,
         "start",
         &v2,
+        &v2_nominals,
         false,
         &policy,
     )
-    .expect("resident hot swap");
+    .expect("interpreter hot swap");
     assert!(
         matches!(&swapped, RunOutcome::Ran { stderr, exit_code: 1, .. } if stderr == "Error: selected boom\n"),
         "{swapped:?}"
@@ -232,7 +234,7 @@ fn resident_jit_hot_swap_session() {
 fn qualified_entry_keeps_one_definition_and_effect_identity() {
     let dir = common::unique_tmp("jet_output_callable_qualified");
     std::fs::create_dir_all(&dir).unwrap();
-    std::fs::write(dir.join("helper.jet"), "pub fn start() { print(\"ok\") }\n").unwrap();
+    std::fs::write(dir.join("helper.jet"), "fn start() { print(\"ok\") }\n").unwrap();
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
@@ -240,7 +242,7 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let (diagnostics, facts) =
+    let (diagnostics, facts, checked_nominals) =
         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     let output = bundle.modules[bundle.entry]
@@ -261,13 +263,13 @@ fn qualified_entry_keeps_one_definition_and_effect_identity() {
     assert!(facts.name_ledger.references().values().any(|anchor| {
         anchor.module_path == output.source_path && anchor.def_span == output.definition
     }));
-    let rust = emit_native_aot(&bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(rust.contains("__jet_helper::__jet_start()"), "{rust}");
     assert!(matches!(
         common::run_interpreter_checked_bundle(
             &bundle,
+            &checked_nominals,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran { exit_code: 0, .. }
@@ -280,12 +282,12 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     std::fs::create_dir_all(dir.join("src")).unwrap();
     std::fs::write(
         dir.join("src/command.jet"),
-        "pub fn run() { print(\"nested\") }\n",
+        "fn run() { print(\"nested\") }\n",
     )
     .unwrap();
     std::fs::write(
         dir.join("src/cli.jet"),
-        "pub use \"command\" as command\npub fn run() { print(\"reexport\") }\n",
+        "pub use \"command\" as command\nfn run() { print(\"reexport\") }\n",
     )
     .unwrap();
     std::fs::write(
@@ -301,7 +303,8 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     .unwrap();
 
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     let outputs = bundle.modules[bundle.entry]
         .items
@@ -331,13 +334,13 @@ fn qualified_entry_follows_nested_quoted_import_graph() {
     assert_eq!(reexported.source_name, "run");
     assert!(reexported.source_path.ends_with("src/cli.jet"));
 
-    let rust = emit_native_aot(&bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(rust.contains("__jet_command::__jet_run()"), "{rust}");
     assert!(matches!(
         common::run_interpreter_checked_bundle(
             &bundle,
+            &checked_nominals,
             false,
-            jet::Interpreter::InterpreterInvocation::RunInterpret,
             &common::development_policy(),
         ),
         RunOutcome::Ran {
@@ -362,7 +365,7 @@ fn manifest_output_root_alias_is_live_for_direct_check() {
         "use \"src/cli/main\" as app\n",
     )
     .unwrap();
-    std::fs::write(dir.join("src/cli/main.jet"), "pub fn run() {}\n").unwrap();
+    std::fs::write(dir.join("src/cli/main.jet"), "fn run() {}\n").unwrap();
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["check", "run.jet"])
@@ -400,7 +403,7 @@ fn nested_output_links_report_e1321_before_codegen() {
     let missing = codes(
         "jet_output_nested_missing",
         "pub use \"cli\" as cli;\n",
-        "pub fn run() {}\n",
+        "fn run() {}\n",
         "app.cli.missing",
     );
     assert!(
@@ -411,7 +414,7 @@ fn nested_output_links_report_e1321_before_codegen() {
     let private = codes(
         "jet_output_nested_private",
         "use \"cli\" as cli;\n",
-        "pub fn run() {}\n",
+        "fn run() {}\n",
         "app.cli.run",
     );
     assert!(
@@ -549,12 +552,12 @@ fn invalid_output_selection_stops_in_jet_before_codegen() {
 
 #[test]
 fn checked_default_selects_one_of_multiple_executables() {
-    let bundle = checked_bundle(
+    let (bundle, checked_nominals) = checked_bundle(
         "ONE :: Output.Executable{ name: \"one\", entry: first }\nTWO :: Output.Executable{ name: \"two\", entry: second }\ndefaults: { run: TWO }\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n",
         "jet_output_checked_default",
         jet::Sema::CompileMode::Run,
     );
-    let selected = bundle.modules[bundle.entry]
+    let selected = bundle.bundle.modules[bundle.bundle.entry]
         .items
         .iter()
         .find_map(|item| {
@@ -568,7 +571,7 @@ fn checked_default_selects_one_of_multiple_executables() {
         })
         .expect("checked default selects one Output");
     assert_eq!(selected.address, "two");
-    let rust = emit_native_aot(&bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(rust.contains("match __jet_second()"), "{rust}");
     assert!(
         !rust.contains("match __jet_first()"),
@@ -660,9 +663,10 @@ fn check_outputs_are_plural_real_test_harness_entries_without_test_blocks() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Test);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Test);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    let rust = emit_test_harness(&bundle);
+    let rust = emit_test_harness(&bundle, &checked_nominals);
     assert_eq!(rust.matches("// jet-mir-output-check:").count(), 2, "{rust}");
     assert_eq!(rust.matches("fn __jet_output_check_").count(), 2, "{rust}");
 
@@ -692,7 +696,7 @@ fn renamed_entry_is_not_recovered_from_a_stale_lock() {
         "version = 1\nentry = \"helper.start\"\n",
     )
     .unwrap();
-    std::fs::write(dir.join("helper.jet"), "pub fn renamed() {}\n").unwrap();
+    std::fs::write(dir.join("helper.jet"), "fn renamed() {}\n").unwrap();
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
@@ -721,12 +725,13 @@ fn typed_executable_output_reuses_the_checked_cli_schema() {
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
     let schema = jet_foundation::CLISchema::entry_schema_for_bundle(&bundle)
         .expect("typed Output owns one checked CLI schema");
     assert_eq!(schema.entry_type, "Args");
-    let rust = emit_native_aot(&bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(rust.contains("jet_args_option_base"), "{rust}");
     assert!(rust.contains("__jet_launch(__jet_cli_0)"), "{rust}");
 }
@@ -740,7 +745,7 @@ fn compiled_imported_typed_fallible_entry_uses_its_defining_module() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "#CLI\npub struct Args { value: Int }\n\npub fn launch(args: Args) {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
+        "#CLI\nstruct Args { value: Int }\n\nfn launch(args: Args) {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n",
     )
     .unwrap();
     let file = dir.join("main.jet");

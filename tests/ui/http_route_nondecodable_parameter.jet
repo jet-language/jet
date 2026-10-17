@@ -1,0 +1,16 @@
+use core.http.server as server
+
+#!Codable
+struct JokeID { value: Int }
+
+struct Jokes {
+    #server.Get("/jokes/:id")
+    fn joke(self, id: JokeID) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "joke={id.value}"))
+    }
+}
+
+fn run() {
+    mux :: server.mux()
+    mux.mount(Jokes{})
+}

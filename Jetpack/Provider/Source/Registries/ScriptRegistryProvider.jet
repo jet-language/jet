@@ -7,7 +7,7 @@
 // PackagistRegistry.jet.
 
 // Which scripting registry a provider instance serves.
-pub enum ScriptRegistryKind {
+enum ScriptRegistryKind {
     RubyGems
     Cpan
     Packagist
@@ -96,13 +96,13 @@ pub enum ScriptRegistryKind {
 }
 
 // One dependency edge: a package name and its registry-syntax requirement.
-pub struct RegistryDependency {
-    pub name: String
-    pub requirement: String
+struct RegistryDependency {
+    name: String
+    requirement: String
 }
 
 // How a fetched archive is verified.
-pub enum RegistryIntegrity {
+enum RegistryIntegrity {
     SHA256(String)
     SHA1(String)
     // A GitHub zipball of a full commit reference whose source authority the
@@ -111,25 +111,25 @@ pub enum RegistryIntegrity {
 }
 
 // One registry release candidate.
-pub struct RegistryPackage {
-    pub name: String
-    pub version: String
-    pub url: String
-    pub integrity: RegistryIntegrity
-    pub dependencies: [RegistryDependency]
+struct RegistryPackage {
+    name: String
+    version: String
+    url: String
+    integrity: RegistryIntegrity
+    dependencies: [RegistryDependency]
     // Packagist PSR-4 prefix -> relative directories.
-    pub psr4: [String: [String]]
+    psr4: [String: [String]]
 }
 
 // A fetched archive of the resolved closure.
-pub struct RegistryArtifact {
-    pub package: RegistryPackage
-    pub path: String
-    pub sha256: String
+struct RegistryArtifact {
+    package: RegistryPackage
+    path: String
+    sha256: String
 }
 
-pub struct ScriptRegistryProvider {
-    pub kind: ScriptRegistryKind
+struct ScriptRegistryProvider {
+    kind: ScriptRegistryKind
 
     // A locked realization must still match `authority.providers`.
     fn validate_cache_authority(self, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) ProviderError! -[FS, Env]> {
@@ -165,7 +165,7 @@ fn provider_script_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, E
     RegistryAuthority.load(ctx, kind.label(), kind.repository(), kind.fetch_authorities())
 }
 
-pub fn provider_script_registry_cache_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
+fn provider_script_registry_cache_authority(kind: ScriptRegistryKind, ctx: ProviderCtx) -[FS, Env]> RegistryAuthority ProviderError! {
     authority :: provider_script_authority(kind, ctx) ?? return Err(err.into_provider(kind.error_kind()))
     Ok(authority)
 }
@@ -507,7 +507,7 @@ fn provider_script_url_piece(value: String) -> String Never! {
         } else {
             &out.push(U8{37})
             &out.push(digits[code >> 4])
-            &out.push(digits[code & 15])
+            &out.push(digits[(code).bit_and(15)])
         }
     }
     pkg_bytes_text(out, 0, out.len())
@@ -535,25 +535,25 @@ fn provider_script_has_nul(value: String) -> Bool Never! {
     false
 }
 
-// ── DataTree readers (Rust `DataTree::get`/`as_str`/`as_array` texts) ──
+// ── Dyn readers (Rust `Dyn::get`/`as_str`/`as_array` texts) ──
 
-fn provider_script_json_field(value: DataTree, key: String) -> DataTree? Never! {
+fn provider_script_json_field(value: Dyn, key: String) -> Dyn? Never! {
     object :: pkg_json_object(value) ?? return None
     object.get(key)
 }
 
-fn provider_script_json_get(value: DataTree, key: String) -> DataTree RegistryError! {
+fn provider_script_json_get(value: Dyn, key: String) -> Dyn RegistryError! {
     found :: provider_script_json_field(value, key) ?? return Err(RegistryError.Reason("missing key `{key}`"))
     Ok(found)
 }
 
-fn provider_script_json_str(value: DataTree) -> String RegistryError! {
+fn provider_script_json_str(value: Dyn) -> String RegistryError! {
     text :: pkg_json_text(value) ?? return Err(RegistryError.Reason(PKG_JSON_NOT_STRING))
     Ok(text)
 }
 
 // A string field, failing as `invalid metadata field `{field}`: {error}`.
-fn provider_script_json_string(value: DataTree, field: String) -> String RegistryError! {
+fn provider_script_json_string(value: Dyn, field: String) -> String RegistryError! {
     found :: provider_script_json_get(value, field) ?? return Err(RegistryError.Reason("invalid metadata field `{field}`: {err.message()}"))
     text :: provider_script_json_str(found) ?? return Err(RegistryError.Reason("invalid metadata field `{field}`: {err.message()}"))
     Ok(text)

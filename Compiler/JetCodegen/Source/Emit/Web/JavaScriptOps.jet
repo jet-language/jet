@@ -110,7 +110,6 @@ fn jet_web_js_valid_identifier(value: String) -> Bool Never! {
 fn jet_web_js_symbol_alias(name: String) -> String? {
     if {
         name == "jet_term_write_stdout_line" -> Val("jetDom.print")
-        name == "jet_std::jet_typed_url_literal" -> Val("jet_typed_url_literal")
         name == "jet_std::jet_int_abs" -> Val("jet_int_abs")
         name == "jet_std::jet_int_add" -> Val("jet_int_add")
         name == "jet_std::jet_int_sub" -> Val("jet_int_sub")
@@ -124,9 +123,6 @@ fn jet_web_js_symbol_alias(name: String) -> String? {
         name == "jet_std::JetReceiver::try_receive" -> Val("jet_channel_try_receive")
         name == "jet_std::JetReceiver::close" -> Val("jet_channel_close")
         name == "jet_std::JetShared::new" -> Val("jet_shared_new")
-        name == "jet_std::JetMeasurement::new" -> Val("jet_measurement_new")
-        name == "jet_std::JetMeasurement::value" -> Val("jet_measurement_value")
-        name == "jet_std::JetMeasurement::uncertainty" -> Val("jet_measurement_uncertainty")
         name == "jet_std::JetSignal::new" -> Val("jetDom.makeSignal")
         name == "jet_std::JetSignal::get" -> Val("jetDom.signalGet")
         name == "jet_std::JetSignal::set" -> Val("jetDom.signalSet")
@@ -146,8 +142,6 @@ fn jet_web_js_symbol_alias(name: String) -> String? {
         name == "jet_data_track" -> Val("jet_data_track")
         name == "jet_data_query" -> Val("jet_data_query")
         name == "jet_data_count" -> Val("jet_data_count")
-        name == "jet_data_load" -> Val("jet_data_loader_load")
-        name == "jet_data_loader_load" -> Val("jet_data_loader_load")
         name == "jet_data_loader_file" -> Val("jet_data_loader_file")
         name == "jet_data_loader_url" -> Val("jet_data_loader_url")
         name == "jet_data_stream_next" -> Val("jet_data_stream_next")
@@ -222,11 +216,6 @@ fn jet_web_js_symbol_alias(name: String) -> String? {
         name == "jet_std::JetReceiver::delay_ms" -> Val("jet_channel_delay_ms")
         name == "jet_std::jet_select_wait_tagged" -> Val("jet_scheduler_select")
         name == "jet_std::jet_select_try_wait_tagged" -> Val("jet_scheduler_try_select")
-        name == "jet_std::JetMeasurement::add" -> Val("jet_measurement_add")
-        name == "jet_std::JetMeasurement::sub" -> Val("jet_measurement_sub")
-        name == "jet_std::JetMeasurement::mul" -> Val("jet_measurement_mul")
-        name == "jet_std::JetMeasurement::div" -> Val("jet_measurement_div")
-        name == "jet_std::JetMeasurement::sqrt" -> Val("jet_measurement_sqrt")
         name == "::jet_std::JetShared::new" -> Val("jet_shared_new")
         name == "JetUiShortcut::cmd" -> Val("jet_ui_shortcut_cmd")
         name == "::JetUiShortcut::cmd" -> Val("jet_ui_shortcut_cmd")
@@ -346,20 +335,16 @@ fn jet_web_js_runtime_identity(name: String) -> Bool Never! {
         "jet_iter_zip_strict", "jet_iter_zip_pad", "jet_iter_step_by", "jet_iter_dedup", "jet_iter_chunks", "jet_iter_windows", "jet_iter_flatten",
         "jet_list_flatten", "jet_iter_intersperse", "jet_iter_repeat", "jet_iter_cycle", "jet_iter_drop_last", "jet_iter_shuffle", "jet_iter_is_sorted",
         "jet_iter_last_index_of", "jet_iter_average_int", "jet_iter_average_float", "jet_iter_compare", "jet_iter_split", "jet_iter_zip_family",
-        "jet_list_try_collect", "jet_iter_first", "jet_iter_next", "jet_float_display", "jet_fmt_decimal", "jet_fmt_quantity", "jet_fmt_fixed_even",
-        "jet_fmt_grouped", "jet_fmt_decimal_int", "jet_fmt_grouped_int", "jet_group_decimal", "jet_fmt_pretty", "jet_gc_root", "jet_gc_apply", "jet_gc_read",
+        "jet_list_try_collect", "jet_iter_first", "jet_iter_next", "jet_float_display", "jet_fmt_decimal", "jet_fmt_quantity", "jet_fmt_fixed_exact",
+        "jet_fmt_point", "jet_fmt_grouped", "jet_fmt_decimal_int", "jet_fmt_grouped_int", "jet_group_decimal", "jet_fmt_pretty", "jet_gc_root", "jet_gc_apply", "jet_gc_read",
         "jet_gc_edit_clear", "jet_gc_edit_pop", "jet_gc_edit_remove_index", "jet_gc_edit_insert_index", "jet_gc_edit_prepend", "jet_gc_edit_additive",
         "jet_gc_edit_plain", "jet_gc_edit_edge_slot", "jet_typed_sql_raw", "jet_typed_sql_interpolate", "jet_typed_sql_template", "jet_typed_sql_params",
         "jet_typed_html_raw", "jet_typed_html_text", "jet_typed_html_escape", "jet_typed_html_interpolate", "jet_typed_sh_raw", "jet_typed_sh_interpolate",
         "jet_typed_path_component", "jet_typed_path_interpolate", "jet_typed_path_literal", "jet_typed_datetime_interpolate", "jet_typed_datetime_literal",
-        "jet_typed_url_literal", "jet_expiring_now", "jet_expiring_new", "jet_expiring_secret_new", "jet_expiring_get", "jet_expiring_secret_with",
         "jet_fraction_value", "jet_fraction_from_parts", "jet_fraction_add", "jet_fraction_sub", "jet_fraction_mul", "jet_fraction_div",
         "jet_fraction_equal", "jet_fraction_numerator", "jet_fraction_denominator", "jet_fraction_to_float", "jet_fraction_is_zero",
         "jet_fraction_to_string", "jet_complex_value", "jet_complex_from_parts", "jet_complex_add", "jet_complex_sub", "jet_complex_mul", "jet_complex_div",
-        "jet_complex_abs", "jet_measurement_kernel_new", "jet_measurement_kernel_from_relative", "jet_measurement_kernel_add", "jet_measurement_kernel_sub",
-        "jet_measurement_kernel_mul", "jet_measurement_kernel_div", "jet_measurement_kernel_sqrt", "jet_measurement_kernel_show", "jet_measurement_new",
-        "jet_measurement_value", "jet_measurement_uncertainty", "jet_measurement_add", "jet_measurement_sub", "jet_measurement_mul", "jet_measurement_div",
-        "jet_measurement_sqrt", "jet_measurement_show", "jet_cell_replace", "jet_cell_read", "jet_cell_edit", "jet_cell_get_or_set", "jet_cell_guard_read",
+        "jet_complex_abs", "jet_cell_replace", "jet_cell_read", "jet_cell_edit", "jet_cell_get_or_set", "jet_cell_guard_read",
         "jet_cell_guard_edit", "jet_cell_guard_map", "jet_cell_guard_split", "jet_cell_read_guard_get", "jet_cell_read_guard_read",
         "jet_cell_edit_guard_get", "jet_cell_edit_guard_set", "jet_cell_edit_guard_read", "jet_cell_edit_guard_edit", "jet_pool_get", "jet_pool_get_mut",
         "jet_pool_set", "jet_authority_covers", "jet_authority_workspace", "jet_authority_from_rights", "jet_authority_with", "jet_authority_without",
@@ -436,6 +421,7 @@ fn jet_web_js_constant(ctx: &JetWebEmitContext, constant: MIRConstant) -> String
             return "new Uint8Array([{rendered.join(", ")}])"
         }
         .Unit -> return "undefined"
+        .SharedSite(_) -> panic("publication site used as a Web literal")
         .BigInt(value) -> return "BigInt({jet_web_js_quote(value)})"
         .List(values) -> {
             rendered := [String]{}
@@ -504,6 +490,7 @@ fn jet_web_js_constant_type_id(ctx: &JetWebEmitContext, type_name: String) -> MI
 fn jet_web_js_const_key(ctx: &JetWebEmitContext, key: MIRConstKey) -> String Never! {
     if key == {
         .Int(value) -> return "BigInt(\"{value}\")"
+        .BigInt(decimal) -> return "BigInt(\"{decimal}\")"
         .String(value) -> return jet_web_js_quote(value)
         .Bool(value) -> return jet_web_bool_json(value)
         .Char(value) -> return jet_web_js_quote("{value}")
@@ -531,8 +518,8 @@ fn jet_web_js_copy_key(ty: MIRType) -> String Never! {
 }
 
 struct JetWebCopyBindings {
-    pub names: [String]
-    pub keys: [String]
+    names: [String]
+    keys: [String]
 }
 
 fn jet_web_js_copy_binding(bindings: JetWebCopyBindings, name: String) -> String? {
@@ -710,7 +697,7 @@ fn jet_web_js_copy_shape(ctx: &JetWebEmitContext, ty: MIRType, bindings: JetWebC
             if leaf == "Secret" || leaf == "ExpiringSecret" || leaf == "HistoryRNG" || leaf == "Ptr" -> return "kind: \"opaque\""
             if leaf == "Bytes" -> return "kind: \"bytes\""
             if leaf == "BigInt" -> return "kind: \"integer\""
-            if leaf == "DataTree" -> return "kind: \"data\""
+            if leaf == "Dyn" -> return "kind: \"data\""
             definition := jet_web_js_copy_definition(&ctx, ty)
             if definition == None {
                 jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR nominal copy schema definition is missing", "checked copy facts require every nominal type instance to resolve to a canonical definition", None)
@@ -833,9 +820,9 @@ fn jet_web_js_place_expression(ctx: &JetWebEmitContext, function: MIRFunction, p
                 slot :: if kind == .Enum(_, _, index) -> index else -> 0
                 expression = "({expression}).values[{slot}]"
             }
-            .Range(_, _, span) -> {
-                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web MIR has no range write window lowering", "a range write window edits its owner list in place, which the Web target does not lower yet", Val(span))
-                return "undefined"
+            .Range(range, location, _) -> expression = "jet_pattern_rest_window({expression}, {jet_web_js_value(range)}, {jet_web_js_quote(jet_web_find_source_path(ctx.program, location.file) ?? "")}, {location.line})"
+            .MapLookup(lookup, optional, _) -> {
+                expression = if optional -> jet_web_js_value(lookup) else -> "({jet_web_js_value(lookup)}).values[0]"
             }
         }
     }
@@ -898,6 +885,15 @@ fn jet_web_js_read_place(ctx: &JetWebEmitContext, function: MIRFunction, place: 
     }
     place_row :: row ?? return "undefined"
     expression :: jet_web_js_place_expression(&ctx, function, place)
+    loop projection in place_row.projections {
+        if projection == {
+            .MapLookup(_, _, _) | .Range(_, _, _) -> return expression
+            .Index(kind, _, _, write_call, _, _, _) -> {
+                if kind == MIRIndexKind.List && write_call == None -> return expression
+            }
+            else -> {}
+        }
+    }
     jet_web_js_copy(&ctx, place_row.ty, expression)
 }
 
@@ -976,6 +972,10 @@ fn jet_web_js_write_projected(ctx: &JetWebEmitContext, target: String, projectio
             nested :: jet_web_js_write_projected(&ctx, "__jet_index_value", projections, start + 1, expression)
             store :: jet_web_js_index_write(&ctx, setter, "__jet_index_base", index_text, "__jet_index_value", location, context, span)
             return "(() => {{ const __jet_index_base = {target}; const __jet_index_value = {read}; void ({nested}); return {store}; }})()"
+        }
+        .MapLookup(_, _, span) -> {
+            jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "map lookup window is read-only", "map patterns borrow their values", Val(span))
+            return "undefined"
         }
         .Range(_, _, span) -> {
             jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "Web MIR has no range write window lowering", "a range write window edits its owner list in place, which the Web target does not lower yet", Val(span))
@@ -1279,7 +1279,7 @@ fn jet_web_js_codec_descriptor(ctx: &JetWebEmitContext, value: MIRType) -> Strin
         }
         .Tagged(_, inner) -> return jet_web_js_codec_descriptor(&ctx, inner)
         .Apply(name, _) -> {
-            if name.name == "Data" || name.name == "DataTree" -> return "{{ kind: \"datatree\" }}"
+            if name.name == "Dyn" -> return "{{ kind: \"dyn\" }}"
             if name.name == "Date" -> return "{{ kind: \"date\" }}"
             if name.name == "LocalDate" -> return "{{ kind: \"local_date\" }}"
             if name.name == "LocalTime" -> return "{{ kind: \"local_time\" }}"
@@ -1525,7 +1525,7 @@ fn jet_web_js_frame_schedule_json(value: MIRFrameSchedule) -> String Never! {
     "{{\"schema\":\"jet.frame_schedule/v1\",\"operations\":[{operations_text}],\"dependencies\":[{dependencies_text}],\"transfers\":[{transfers_text}],\"reuse\":[{reuse_text}],\"retentions\":[{retentions_text}],\"conservative\":[{conservative_text}]}}"
 }
 
-fn jet_web_js_datatree_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID, receiver: String, args: [String]) -> String Never! {
+fn jet_web_js_dyn_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID, receiver: String, args: [String]) -> String Never! {
     row := jet_web_find_prelude(ctx.program, call)
     if row == None {
         values := [String]{receiver}
@@ -1537,28 +1537,32 @@ fn jet_web_js_datatree_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID, rec
         loop arg in args -> &values.push(arg)
         return jet_web_js_route_call(&ctx, call, values)
     }
+    if route.member == "index_key" || route.member == "index_at" || route.member == "get_key" || route.member == "get_at" || route.member == "has" || route.member == "keys" || route.member == "remove" || route.member == "len" || route.member == "binary" || route.member == "compare" || route.member == "set_path" {
+        jet_web_fail(&ctx, JetWebEmitFailureKind.MissingPreludeCall, "E0003", "MIR Prelude symbol has no direct Web binding", mir_symbol_name(route.symbol), None)
+        return "__jet_missing_prelude"
+    }
     arity :: if route.member == {
         "field" | "at" | "equal_unordered" -> 2
         "int" | "text" | "bool" | "float" | "to_text" -> 1
         else -> 0
     }
     if arity == 0 || args.len() + 1 != arity || route.signature.arity != arity || route.signature.max_arity != arity {
-        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR DataTree call has an invalid signature", "checked DataTree routes preserve their exact receiver and argument ABI", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Dyn call has an invalid signature", "checked Dyn routes preserve their exact receiver and argument ABI", None)
         return "undefined"
     }
     expected :: if route.member == {
-        "field" -> "jet_datatree_field"
-        "at" -> "jet_datatree_at"
-        "int" -> "jet_datatree_int"
-        "text" -> "jet_datatree_text"
-        "bool" -> "jet_datatree_bool"
-        "float" -> "jet_datatree_float"
-        "to_text" -> "jet_datatree_to_text"
-        "equal_unordered" -> "jet_datatree_equal_unordered"
+        "field" -> "jet_dyn_field"
+        "at" -> "jet_dyn_at"
+        "int" -> "jet_dyn_int"
+        "text" -> "jet_dyn_text"
+        "bool" -> "jet_dyn_bool"
+        "float" -> "jet_dyn_float"
+        "to_text" -> "jet_dyn_to_text"
+        "equal_unordered" -> "jet_dyn_equal_unordered"
         else -> ""
     }
     if mir_symbol_name(route.symbol) != expected {
-        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR DataTree call has an unexpected symbol", "checked DataTree routes preserve their canonical runtime symbol", None)
+        jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR Dyn call has an unexpected symbol", "checked Dyn routes preserve their canonical runtime symbol", None)
         return "undefined"
     }
     values := [String]{receiver}
@@ -1588,10 +1592,10 @@ fn jet_web_js_handle_method_call(ctx: &JetWebEmitContext, call: MIRPreludeCallID
         if route.member == "receiver.receive" || route.member == "sender.send" -> return "await ({expression})"
         return expression
     }
-    if route.module_name == "core.encoding.datatree" {
+    if route.module_name == "core.encoding.dyn" {
         rendered := [String]{}
         loop arg in args -> &rendered.push(jet_web_js_value(arg))
-        return jet_web_js_datatree_call(&ctx, call, receiver, rendered)
+        return jet_web_js_dyn_call(&ctx, call, receiver, rendered)
     }
     if route.module_name == "core.handle" && route.member == "duration.ns_value" {
         if args.len() != 0 {
@@ -1746,7 +1750,7 @@ fn jet_web_js_trait_method_call(ctx: &JetWebEmitContext, caller: MIRFunction, me
         return "undefined"
     }
     method :: method_row ?? return "undefined"
-    receiver_value := ~values[0]
+    receiver_value := values[0].copy()
     values[0] = "__jet_receiver"
     rendered_args :: values.join(", ")
     dispatch := "(() => {{ throw new Error({jet_web_js_quote("no implementation for trait method {method_id.value}")}) }})()"
@@ -2229,16 +2233,6 @@ fn jet_web_js_shared_guard_split(ctx: &JetWebEmitContext, result_ty: MIRType?, m
 
 fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MIRFunction, operation: MIRSemanticOp, result_ty: MIRType?) -> String {
     if operation == {
-        .DataEntriesToMap(call, local) -> {
-            place := MIRPlaceID?{None}
-            loop row in function.locals { if row.id == local -> place = Val(row.place) }
-            if place == None {
-                jet_web_fail(&ctx, JetWebEmitFailureKind.InvalidMIR, "E0003", "MIR data-entry local is missing", "checked DataEntriesToMap locals must resolve to a place", Val(function.span))
-                return "undefined"
-            }
-            place_text :: jet_web_js_read_place(&ctx, function, place ?? MIRPlaceID{value: 0})
-            return jet_web_js_route_call(&ctx, call, [place_text])
-        }
         .MathBuiltin(type_id, call, args) -> {
             if !jet_web_js_type_instance_valid(&ctx, type_id) -> return "undefined"
             return jet_web_js_semantic_call(&ctx, call, args)
@@ -2321,7 +2315,7 @@ fn jet_web_js_semantic_expression(ctx: &JetWebEmitContext, function: MIRFunction
             return "{{ type: {jet_web_js_quote(type_name)}, path: {jet_web_js_quote(path)}, display: {jet_web_js_value(display)}, fields: {{ {rendered.join(", ")} }} }}"
         }
         .LayoutLiteral(inner) -> return jet_web_js_value(inner)
-        .StructLiteral(type_id, fields, _, _, _) -> return jet_web_js_field_object(&ctx, type_id, fields, false)
+        .StructLiteral(type_id, fields, _, _) -> return jet_web_js_field_object(&ctx, type_id, fields, false)
         .CellGuardProject(map_call, split_call, guard, paths, editable, disjoint) -> return jet_web_js_cell_guard_project(&ctx, result_ty, map_call, split_call, jet_web_js_value(guard), paths, editable, disjoint)
         .SharedGuardMap(call, guard, path, editable) -> {
             if path.len() == 0 {

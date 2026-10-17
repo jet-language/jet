@@ -1,0 +1,88 @@
+use core.files as files
+
+#Test("raw and line sessions send messages and close stdin before collecting the unread remainder") {
+    root :: cases_test_root("session-send-close")
+    loop mode in ["raw", "line"] {
+        expected :: if mode == "line" -> "hello\n" else -> "hello"
+        source :: "session peer {mode}: cat\nsend peer: \"hello\"\nclose peer\nstdout: = \"{expected.replace("\n", "\\n")}\"\nstderr: empty\n"
+        assert_eq(cases_test_advanced(root, mode, source).verdict.status, "PASS")
+        failed :: "session peer {mode}: cat\nsend peer: \"hello\"\nclose peer\nstdout: = \"wrong\"\n"
+        assert_eq(cases_test_advanced(root, "wrong-{mode}", failed).verdict.status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove session scratch")
+}
+
+#Test("bounded receive forms parse fully and refuse the precise missing read_bytes capability") {
+    root :: cases_test_root("session-read-seam")
+    loop receive in ["recv peer", "recv peer until $.id = 1", "recv peer line until ~ \"ok\" timeout 1s # original predicate", "recv peer collect until ndjson $ #>= 2 timeout 1s", "recv peer collect until ndjson $[?id=1] #>= 1 && ndjson $[?id=2] #>= 1 timeout 1s", "recv peer until ~ \"ok\" within 1s every 10ms optional # original predicate", "recv peer line until = \"timeout\" timeout 1s"] {
+        result :: cases_test_advanced(root, "read", "session peer line: cat\n{receive}\nclose peer\n")
+        assert_eq(result.verdict.status, "REFUSED")
+        assert_eq(result.verdict.detail, "read_bytes")
+    }
+    loop source in ["recv missing\n", "session peer strange: cat\nclose peer\n", "session peer raw: cat\nrecv peer timeout nope\nclose peer\n", "session peer raw: cat\nrecv peer until $.id = invalid-json\nclose peer\n", "session peer raw: cat\nrecv peer collect until ndjson $ #>= 2 && timeout 1s\nclose peer\n", "session peer raw: cat\nrecv peer timeout 1s within 1s\nclose peer\n", "spawn peer: cat\nrecv peer\nwait: peer\n"] {
+        result :: cases_test_advanced(root, "invalid", source)
+        assert_eq(result.verdict.status, "REFUSED")
+        assert(result.verdict.detail != "read_bytes")
+    }
+    files.remove_all(root) ?? panic("remove receive scratch")
+}
+
+#Test("parallel sends are concurrent and wait keeps stdin open while explicit signals are expected stops") {
+    root :: cases_test_root("session-parallel")
+    source :: "session left raw: cat\nsession right raw: cat\nparallel\nsend left: \"left\"\nsend right: \"right\"\nend parallel\nclose left\nstdout: = \"left\"\nclose right\nstdout: = \"right\"\n"
+    assert_eq(cases_test_advanced(root, "parallel", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "parallel-failure", "{source}step: printf wrong\nstdout: = \"right\"\n").verdict.status, "FAIL")
+    stop :: "requires: os:unix\nsession peer raw: jet -c 'exec sleep 20'\nsignal peer: TERM\nwait peer timeout 1s\nexit: any # original sent termination judged as a stop\n"
+    assert_eq(cases_test_advanced(root, "signal", stop).verdict.status, "PASS")
+    timed :: "session peer raw: cat\nwait peer timeout 2ms\n"
+    assert_eq(cases_test_advanced(root, "open-stdin", timed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove parallel scratch")
+}
+
+#Test("post-completion output file wiring and null input/output follow their admitted contracts") {
+    root :: cases_test_root("process-wiring")
+    source :: "step: jet -c 'cat; printf out; printf err >&2'\nstdin: null\nstdout: file output\nstderr: file errors\nfile: output = \"out\"\nfile: errors = \"err\"\nstep: printf discarded\nstdout: null\nstep: printf done\nstdout: = \"done\"\n"
+    assert_eq(cases_test_advanced(root, "files", source).verdict.status, "PASS")
+    bad :: "step: printf discarded\nstdout: null\nstdout: empty\n"
+    assert_eq(cases_test_advanced(root, "nulled-assertion", bad).verdict.status, "REFUSED")
+    loop modifier in ["pty: true size 24x80", "pty: stdout", "stderr-to-stdout: true"] {
+        result :: cases_test_advanced(root, "seam", "step: printf unreachable\n{modifier}\n")
+        assert_eq(result.verdict.status, "REFUSED")
+        assert_eq(result.verdict.detail, if modifier.starts_with("pty:") -> "pty" else -> "process-merge-stderr")
+    }
+    files.remove_all(root) ?? panic("remove wiring scratch")
+}
+
+#Test("content-length frames use UTF-8 byte counts and file payloads expand capture tokens") {
+    root :: cases_test_root("session-content-length")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "payload.txt"), "{{cap:word}}")
+    source :: "step: printf '%s' é\ncapture: word = text stdout\nsession peer content-length: cat\nsend peer: payload.txt\nclose peer\nstdout: = \"Content-Length: 2\\r\\n\\r\\né\"\n"
+    // A failed frame length must be visible as a real exact-output failure.
+    assert_eq(cases_test_advanced(root, "frames", source).verdict.status, "PASS")
+    wrong :: "session peer: cat\nsend peer: \"é\"\nclose peer\nstdout: = \"Content-Length: 1\\r\\n\\r\\né\"\n"
+    assert_eq(cases_test_advanced(root, "wrong-bytes", wrong).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove framing scratch")
+}
+
+#Test("session stdin null closes immediately and wait preserves joined output for labelled relations") {
+    root :: cases_test_root("session-stdin")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "input.txt"), "initial")
+    source :: "session peer raw: cat\nstdin: input.txt\nclose peer\nstdout: = \"initial\"\nstep compare: printf initial\nstdout: == peer\nsession eof raw: cat\nstdin: null\nwait eof timeout 1s\nstdout: empty\n"
+    assert_eq(cases_test_advanced(root, "input", source).verdict.status, "PASS")
+    refused :: cases_test_advanced(root, "closed", "session peer raw: cat\nstdin: null\nsend peer: \"unreachable\"\nclose peer\n")
+    assert_eq(refused.verdict.status, "REFUSED")
+    assert(refused.verdict.detail.contains("closed null stdin"))
+    files.remove_all(root) ?? panic("remove session input scratch")
+}
+
+#Test("explicit KILL is an expected stop and exit mismatches and delivery failures still fail") {
+    root :: cases_test_root("session-kill")
+    source :: "requires: os:unix\nspawn peer: jet -c 'exec sleep 20'\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit termination is judged by exit\n"
+    assert_eq(cases_test_advanced(root, "kill", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong-exit", "{source}exit: 0\n").verdict.status, "FAIL")
+    failed :: "requires: os:unix\nsession peer raw: cat\nsignal peer: -1\nclose peer\n"
+    assert_eq(cases_test_advanced(root, "delivery", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove signal scratch")
+}

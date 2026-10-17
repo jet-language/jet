@@ -18,13 +18,13 @@ struct StoreQuotaCandidate {
 // Reserve a small journal and metadata allowance with every admission.
 // Without this guard band, a tree that exactly fills the object budget could
 // still make the durable receipt and closure transaction exceed the ceiling.
-pub fn store_admission_reservation(incoming_bytes: Int) -> Int Never! {
+fn store_admission_reservation(incoming_bytes: Int) -> Int Never! {
     if incoming_bytes > STORE_INT_MAX - STORE_ADMISSION_RESERVE_BYTES -> return STORE_INT_MAX
     incoming_bytes + STORE_ADMISSION_RESERVE_BYTES
 }
 
 // The logical footprint of one admission source.
-pub fn store_admission_size(path: String) -> Int StoreError! {
+fn store_admission_size(path: String) -> Int StoreError! {
     store_quota_footprint(path, None)
 }
 
@@ -35,7 +35,7 @@ pub fn store_admission_size(path: String) -> Int StoreError! {
 // earlier than physical allocation requires, but it cannot undercount disk
 // pressure. The incoming stage is excluded because its bytes are supplied as
 // `incoming_bytes` instead.
-pub fn store_ensure_hangar_capacity(verification: &StoreVerification, roots: HangarRoots, incoming_bytes: Int, excluded: String?) StoreError! {
+fn store_ensure_hangar_capacity(verification: &StoreVerification, roots: HangarRoots, incoming_bytes: Int, excluded: String?) StoreError! {
     hangar :: roots.hangar_dir()
     store_ensure_real_directory(hangar, "Hangar root")
     limit :: store_quota_configured_limit(roots)
@@ -134,7 +134,7 @@ fn store_quota_sweep_orphans(verification: &StoreVerification, roots: HangarRoot
     // Receipt deletion is safe only when every package record has readable,
     // valid metadata. A damaged record must not turn this bounded path into a
     // destructive guess; valid object eviction still proceeds above.
-    retained := ~live.receipts
+    retained := live.receipts.copy()
     uncertain := false
     loop entry in store_object_dirs(roots.hangar_dir()) {
         if retired.contains(entry.name) -> next

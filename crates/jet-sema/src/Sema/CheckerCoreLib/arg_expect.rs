@@ -148,7 +148,26 @@ impl<'a> Checker<'a> {
         self.borrow_ctx = true;
         let got = self.infer(&mut arg.expr);
         if let Some(got) = got {
-            if matches!(got, Type::String) || matches!(got, Type::Named(ref n) if n == "URL") {
+            if matches!(got, Type::String) {
+                return;
+            }
+            if matches!(got, Type::Named(ref name) if self.same_declared_name_identity("URL", name)) {
+                let span = arg.expr.span();
+                let receiver = std::mem::replace(&mut arg.expr, Expr::Absent(span));
+                arg.expr = Expr::MethodCall {
+                    receiver: Box::new(receiver),
+                    method: "to_string".to_string(),
+                    method_span: span,
+                    owner_type_args: Vec::new(),
+                    type_args: Vec::new(),
+                    args: Vec::new(),
+                    recv_type: None,
+                    resolved_ret: None,
+                    operator_rhs: None,
+                    checked_widen: false,
+                    checked_callee: None,
+                };
+                self.infer(&mut arg.expr);
                 return;
             }
             self.diags.push(Diagnostic::error(
@@ -166,23 +185,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Same elaboration as `expect_core_arg`, but for the handful of std
-    /// constructors that genuinely store the argument as their own payload
-    /// (`JSON.Text`/`DBValue.Text` own their `String`, etc. — see
-    /// `check_core_json_lit` / `check_core_dbvalue_lit`). Only these call
-    /// sites may trip the implicit-clone E0209 below; an ordinary read-only
-    /// stdlib call (e.g. `fs.read(path)`) must not, even though its param
-    /// type is also String/List/Map (D-MEM1/S2 false-positive fix).
-    pub(crate) fn expect_core_arg_consuming(
-        &mut self,
-        call_name: &str,
-        idx: usize,
-        param_ty: &Type,
-        arg: &mut crate::AST::CallArg,
-    ) {
-        self.expect_core_arg_impl(call_name, idx, param_ty, arg, true, false);
-    }
-
+    /// Elaborate an owning Core argument that permits an explicit take.
+    /// The owning position records its payload move after elaboration.
     pub(crate) fn expect_core_arg_moving(
         &mut self,
         call_name: &str,
@@ -222,7 +226,11 @@ impl<'a> Checker<'a> {
         // literal argument (`f(5)` where `f` takes a `U8`) adopts that width and
         // is range-checked (E1003) at the literal. Restored after the argument.
         let saved_expected = self.expected_type.clone();
-        self.expected_type = Some(param_ty.clone());
+        self.expected_type = if !consumes && self.is_trait_parameter(param_ty) {
+            None
+        } else {
+            Some(param_ty.clone())
+        };
         let got = self.infer(&mut arg.expr);
         self.expected_type = saved_expected;
         if let Some(mut got) = got {
@@ -237,9 +245,15 @@ impl<'a> Checker<'a> {
             let reads_expiring_secret_loan = !consumes
                 && arg.convention == AccessConvention::Read
                 && crate::Sema::Diagnostics::expiring_secret_loan_matches(param_ty, &got);
+            let trait_identity = self.is_trait_parameter(param_ty)
+                && self.trait_parameter_identity(param_ty, &got);
+            let invariant_trait = arg.convention == AccessConvention::Write
+                && self.is_trait_parameter(param_ty);
+            let boxes_as_trait = !invariant_trait && self.trait_slot_accepts(param_ty, &got);
             let reported = query_callback_effect_bad
                 || reads_expiring_secret_loan
-                || self.check_type_assignable(param_ty, &got, arg.expr.span());
+                || (!trait_identity && !invariant_trait
+                    && self.check_type_assignable(param_ty, &got, arg.expr.span()));
             let fixed_widens = matches!(
                 (param_ty, &got),
                 (Type::List(want), Type::FixedList { elem: actual, .. }) if want == actual
@@ -253,6 +267,8 @@ impl<'a> Checker<'a> {
                 && !fixed_widens
                 && !union_widens
                 && !reads_expiring_secret_loan
+                && !trait_identity
+                && !boxes_as_trait
             {
                 if let Some(diag) = typed_text_mismatch(param_ty, &got, arg.expr.span()) {
                     self.diags.push(diag);
@@ -284,26 +300,19 @@ impl<'a> Checker<'a> {
             if let Some((root, place, place_span)) = core_consuming_place(&arg.expr) {
                 if self.is_borrowed_binding(&root) {
                     arg.flags.implicit_clone = true;
-                    // D-MEM1/S2 (was D-L0201 lint): a hard error now, regardless
-                    // of liveness — no clone is ever silent. Unlike a Move-param
-                    // user function, this is a fixed std read-only signature —
-                    // `^` is never accepted here (E0203), so `~name`
-                    // (D-SHAPE-COPY1, supersedes D-CAP2/S4) is the only fix,
-                    // not a liveness-dependent move/reorder menu.
+                    // Borrowed storage cannot become this constructor's
+                    // owned payload. A take marker is valid only for an
+                    // owner, so an explicit copy is the repair here.
                     let (what, fix) = match place {
                             Some(place) => (
                                 format!("implicit clone of `{}`", place),
-                                format!(
-                                    "write `{}{}` to copy explicitly",
-                                    Syntax::SIGIL_COPY,
-                                    place
-                                ),
+                                format!("write `{}` to copy explicitly", Syntax::copy_call(&place)),
                             ),
                             None => (
                                 "implicit clone of this consumed expression".to_string(),
                                 format!(
-                                    "write `{}` before the highlighted expression to copy it explicitly",
-                                    Syntax::SIGIL_COPY
+                                    "call `.{}()` on the highlighted expression to copy it explicitly",
+                                    Syntax::METHOD_COPY
                                 ),
                             ),
                         };

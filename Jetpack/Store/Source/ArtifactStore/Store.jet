@@ -7,57 +7,57 @@
 // reported, so a later publish repairs them.
 
 // A deterministic store listing entry.
-pub struct ArtifactEntryStatus {
-    pub kind: ArtifactEntryKind
-    pub key: String
-    pub namespace: String?
-    pub size_bytes: Int
-    pub last_use: Int
-    pub pinned: Bool
-    pub path: String
+struct ArtifactEntryStatus {
+    kind: ArtifactEntryKind
+    key: String
+    namespace: String?
+    size_bytes: Int
+    last_use: Int
+    pinned: Bool
+    path: String
 }
 
 // Store state suitable for status UIs and deterministic tests.
-pub struct ArtifactStoreStatus {
-    pub root: String
-    pub footprint_bytes: Int
-    pub limit_bytes: Int
-    pub reserve_bytes: Int
-    pub available_bytes: Int?
-    pub live_leases: Int
-    pub host_limit_bytes: Int?
-    pub entries: [ArtifactEntryStatus]
-    pub tiers: [String]
+struct ArtifactStoreStatus {
+    root: String
+    footprint_bytes: Int
+    limit_bytes: Int
+    reserve_bytes: Int
+    available_bytes: Int?
+    live_leases: Int
+    host_limit_bytes: Int?
+    entries: [ArtifactEntryStatus]
+    tiers: [String]
 }
 
 // The result of one deterministic prune operation.
-pub struct ArtifactPruneReport {
-    pub target_bytes: Int
-    pub before_bytes: Int
-    pub after_bytes: Int
-    pub removed: [ArtifactEntryStatus]
-    pub pinned_bytes: Int
-    pub blocked: Bool
+struct ArtifactPruneReport {
+    target_bytes: Int
+    before_bytes: Int
+    after_bytes: Int
+    removed: [ArtifactEntryStatus]
+    pinned_bytes: Int
+    blocked: Bool
 }
 
 // A verified action record that points at one immutable CAS object.
-pub struct StoredArtifact {
-    pub action: ActionHandle
-    pub object: ObjectHandle
-    pub path: String
-    pub executable: Bool
+struct StoredArtifact {
+    action: ActionHandle
+    object: ObjectHandle
+    path: String
+    executable: Bool
 }
 
 // Result of looking up a named artifact. Corrupt records and objects are
 // quarantined before `Corrupt` is returned.
-pub enum ArtifactLookup {
+enum ArtifactLookup {
     Missing
     Corrupt
     Hit(StoredArtifact)
 }
 
 // Result of restoring a named artifact to a display path.
-pub enum ArtifactRestore {
+enum ArtifactRestore {
     Missing
     Corrupt
     Hit(object: ObjectHandle, executable: Bool)
@@ -118,9 +118,9 @@ fn store_artifact_saturating_mul(left: Int, right: Int) -> Int Never! {
 // The local content-addressed artifact store. `owner` is this process's
 // identity, drawn once when the store opens and written into its lock and
 // lease files.
-pub struct ArtifactStore {
-    config_value: ArtifactStoreConfig
-    owner_value: ArtifactProcessIdentity
+struct ArtifactStore {
+    priv config_value: ArtifactStoreConfig
+    priv owner_value: ArtifactProcessIdentity
 
     fn open(config: ArtifactStoreConfig) -[FS, Env, Rand]> ArtifactStore ArtifactStoreError! {
         if config.root() == "" -> return Err(ArtifactStoreError.Config("store root cannot be empty"))
@@ -239,10 +239,22 @@ pub struct ArtifactStore {
             }
             else -> {}
         }
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         store_artifact_atomic_write(pointer, object.text().bytes())
         Ok(object)
+    }
+
+    // The last-run pointer belongs to the selected workspace, not the cache.
+    fn publish_last_build_record(self, workspace_root: String, key: String, record: BuildRecord) -[FS, Env, Exec, Time, Rand, Time.Wait]> ObjectHandle ArtifactStoreError! {
+        object :: self.publish_build_record(key, record)
+        store_build_write_last_run(workspace_root, record.program, key)
+        Ok(object)
+    }
+
+    fn last_build_record(self, workspace_root: String, program: String) -[FS, Env, Exec, Time, Rand, Time.Wait]> BuildRecord? ArtifactStoreError! {
+        key :: store_build_last_run(workspace_root, program) ?? return Ok(None)
+        self.build_record(key)
     }
 
     // Load an immutable build record addressed by its content key.
@@ -292,7 +304,7 @@ pub struct ArtifactStore {
         key :: ArtifactEntryKey.Action(action.key())
         encoded :: store_artifact_encode_action(action, record)
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}
@@ -385,7 +397,7 @@ pub struct ArtifactStore {
     // Pin `targets` from pruning until the returned lease is closed.
     fn acquire_artifact_lease(self, targets: [LeaseTarget]) -[FS, Env, Time, Rand]> ArtifactLease ArtifactStoreError! {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         directory :: files.join(self.root(), "leases")
         path :: files.join(directory, "lease-{self.owner_value.pid()}-{store_artifact_unique_token()}")
@@ -400,7 +412,7 @@ pub struct ArtifactStore {
 
     fn status(self) -[FS, Env, Exec, Time, Rand]> ArtifactStoreStatus ArtifactStoreError! {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         self.status_locked()
     }
@@ -424,7 +436,7 @@ pub struct ArtifactStore {
     // Persist or clear the stricter machine-level cap.
     fn set_host_limit(self, limit_bytes: Int?) ArtifactStoreError! -[FS, Env, Time, Rand]> {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         path :: self.host_limit_path()
         if limit_bytes == {
@@ -443,7 +455,7 @@ pub struct ArtifactStore {
 
     fn prune(self, target_bytes: Int?) -[FS, Env, Exec, Time, Rand]> ArtifactPruneReport ArtifactStoreError! {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         target :: if target_bytes == {
             .Val(bytes) -> bytes
@@ -545,7 +557,7 @@ pub struct ArtifactStore {
             .Missing -> Ok(ArtifactRestore.Missing)
             .Corrupt -> Ok(ArtifactRestore.Corrupt)
             .Hit(artifact) -> {
-                lease :: self.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)})
+                lease :: self.acquire_artifact_lease([LeaseTarget]{LeaseTarget.Action(artifact.action), LeaseTarget.Blob(artifact.object)}) ?? return Err(err)
                 defer close(^lease)
                 bytes :: files.read_bytes(artifact.path)
                 store_artifact_atomic_write(destination, bytes)
@@ -557,7 +569,7 @@ pub struct ArtifactStore {
 
     fn publish_data(self, key: ArtifactEntryKey, path: String, bytes: [U8]) ArtifactStoreError! -[FS, Env, Exec, Time, Rand]> {
         self.ensure_layout()
-        lock :: self.acquire_lock()
+        lock :: self.acquire_lock() ?? return Err(err)
         defer close(^lock)
         if store_artifact_read_file(path) == {
             .Missing -> {}
@@ -638,7 +650,7 @@ pub struct ArtifactStore {
         }
         // Rust orders by (pinned, last_use, key) in one comparator; no reliance
         // on sort stability across two passes.
-        order := ~entries
+        order := entries.copy()
         &order.sort_by((left: ArtifactStoredEntry, right: ArtifactStoredEntry) -> ((if left.pinned -> 1 else -> 0) <=> (if right.pinned -> 1 else -> 0)).then(left.last_use <=> right.last_use).then(store_artifact_entry_order(left, right)))
         after := before
         removed := [ArtifactEntryStatus]{}

@@ -1,0 +1,11 @@
+# Port of tests/diagnostic_gate.rs::pure_teaching_fails_default_run (279-313).
+# PENDING-GRAMMAR and PENDING-SAME-HEAD: original assertions; no runtime snapshot.
+fixture: pure.fixture
+env: NO_COLOR=1
+step: jet build pure.jet
+exit: nonzero
+stderr+stdout: ~ E0927 # original predicate
+step: jet run pure.jet
+exit: nonzero
+stderr+stdout: ~ E0927 # original predicate
+stderr+stdout: !~ hi # original predicate

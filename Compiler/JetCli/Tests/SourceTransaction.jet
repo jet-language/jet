@@ -1,0 +1,46 @@
+// Assemble with Compiler and execute once with the real held-directory host.
+struct JetCLITransactionFixtureRoot {
+    path: String
+}
+impl JetCLITransactionFixtureRoot.Close {
+    fn close(^self) -[FS]> {
+        cli_files.remove_all(self.path).drop("test project cleanup")
+    }
+}
+
+fn run() {
+    root :: "{cli_sys.temp_dir()}/jet-source-transaction-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("test project")
+    owner :: JetCLITransactionFixtureRoot{path: root}
+    defer close(^owner)
+    cli_files.write("{root}/first.jet", "first") ?? panic("first source")
+    cli_files.write("{root}/second.jet", "second") ?? panic("second source")
+    changes :: [JetCLISourceChange]{
+        JetCLISourceChange{path: "{root}/first.jet", before: "first".bytes(), after: "updated first".bytes()},
+        JetCLISourceChange{path: "{root}/second.jet", before: "second".bytes(), after: "updated second".bytes()},
+    }
+    log :: jet_cli_fix_log(root, "test", changes, [JetCLISemOp]{})
+    path :: jet_cli_commit_source_changes(root, changes, "test.log.json", log) ?? panic("commit")
+    assert(path == "{root}/.jet/codemods/test.log.json")
+    first :: cli_files.read("{root}/first.jet") ?? panic("read first")
+    second :: cli_files.read("{root}/second.jet") ?? panic("read second")
+    assert(first == "updated first" && second == "updated second")
+    stale :: jet_cli_commit_source_changes(root, changes, "stale.log.json", log) == .Err(_)
+    assert(stale)
+    marker :: jet_cli_undo_source_changes(root, "test.log.json") ?? panic("undo")
+    assert(marker.starts_with("codemod undo `test` applied\n  files: 2\n"))
+    restored_first :: cli_files.read("{root}/first.jet") ?? panic("restored first")
+    restored_second :: cli_files.read("{root}/second.jet") ?? panic("restored second")
+    assert(restored_first == "first" && restored_second == "second")
+    journal :: cli_files.exists("{root}/.jet/codemods/transaction.journal")
+    assert(!journal)
+    operations :: jet_cli_fix_rewrite(`fn rün() { 1 }`.bytes(), `fn rün() { 2 }`.bytes())
+    assert(operations.len() == 1)
+    if operations[0].from == .Val(from) -> assert(from == "1") else { panic("rewrite from missing") }
+    if operations[0].to == .Val(to) -> assert(to == "2") else { panic("rewrite to missing") }
+    assert(jet_cli_fix_rewrite([U8]{255}, [U8]{254}).len() == 0)
+    escaped :: jet_cli_transaction_relative(root, "{root}/../outside.jet") == .Err(_)
+    assert(escaped)
+    malformed :: jet_cli_transaction_relative(root, "{root}/folder//name.jet") == .Err(_)
+    assert(malformed)
+}

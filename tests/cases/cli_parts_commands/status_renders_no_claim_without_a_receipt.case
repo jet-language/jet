@@ -1,0 +1,10 @@
+# Port of tests/cli_parts/commands.rs:28-52; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# PENDING-GRAMMAR(batch-four): machine-output.
+fixture: fixtures/status_missing
+step: jet status run.jet --json
+exit: 0
+stdout: machine-output = [status] # original predicate
+stdout: ^= "{\"schema\":\"jet.status/v1\"" # original predicate
+stdout: !~ "\"status_report\"" # original predicate
+stdout: ~ "\"claims\":[]" # original predicate

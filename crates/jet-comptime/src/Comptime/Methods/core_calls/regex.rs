@@ -376,40 +376,21 @@ pub(super) fn regex_split_limit(args: Vec<CtValue>, span: Span) -> Result<CtValu
             .collect(),
     ))
 }
-fn regex_replace_impl(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let rep = as_string(
-        args.get(1)
-            .ok_or_else(|| unsupported("regex.replace: missing replacement argument", span))?,
-        span,
-    )?;
-    let text = as_string(
-        args.get(2)
-            .ok_or_else(|| unsupported("regex.replace: missing text argument", span))?,
-        span,
-    )?;
-    let replaced = re.replace(text, rep);
-    Ok(CtValue::Str(replaced))
+// `core.regex.replace(pattern, text, replacement)` is the method form with the
+// pattern as receiver: one argument order on every tier.
+fn regex_replace_call(args: Vec<CtValue>, method: &str, span: Span) -> Result<CtValue, Diagnostic> {
+    let (pattern, rest) = args
+        .split_first()
+        .ok_or_else(|| unsupported("regex call: missing pattern argument", span))?;
+    regex_replace_method(pattern, method, rest, span)
 }
 
 pub(super) fn regex_replace(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    regex_replace_impl(args, span)
+    regex_replace_call(args, "replace", span)
 }
 
 pub(super) fn regex_replace_first(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
-    let re = regex_pattern(&args, span)?;
-    let rep = as_string(
-        args.get(1).ok_or_else(|| {
-            unsupported("regex.replace_first: missing replacement argument", span)
-        })?,
-        span,
-    )?;
-    let text = as_string(
-        args.get(2)
-            .ok_or_else(|| unsupported("regex.replace_first: missing text argument", span))?,
-        span,
-    )?;
-    Ok(CtValue::Str(re.replace_first(text, rep)))
+    regex_replace_call(args, "replace_first", span)
 }
 
 fn regex_replace_method(
@@ -493,4 +474,45 @@ pub(super) fn regex_match_value(
             ("names".to_string(), CtValue::List(names)),
         ],
     }
+}
+
+pub(super) fn regex_subn(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let re = regex_pattern(&args, span)?;
+    let text = as_string(args.get(1).ok_or_else(|| unsupported("regex.subn text", span))?, span)?;
+    let replacement = as_string(args.get(2).ok_or_else(|| unsupported("regex.subn replacement", span))?, span)?;
+    let (text, count) = super::super::super::regex_kernel::jet_regex_subn(&re, text, replacement);
+    Ok(super::named_tuple(&[("text", CtValue::Str(text)), ("count", CtValue::Int(count))]))
+}
+
+pub(super) fn regex_expand(args: Vec<CtValue>, span: Span) -> Result<CtValue, Diagnostic> {
+    let matched = args.first().ok_or_else(|| unsupported("regex.expand match", span))?;
+    let template = as_string(args.get(1).ok_or_else(|| unsupported("regex.expand template", span))?, span)?;
+    let CtValue::Struct { type_name, fields } = matched else {
+        return Err(unsupported("regex.expand Match value", span));
+    };
+    if type_name != "Match" {
+        return Err(unsupported("regex.expand Match value", span));
+    }
+    let list = |name: &str| {
+        fields.iter().find_map(|(field, value)| match value {
+            CtValue::List(items) if field == name => Some(items.as_slice()),
+            _ => None,
+        }).unwrap_or_default()
+    };
+    let groups = list("groups");
+    let names = list("names");
+    let group = |index: usize| match groups.get(index) {
+        Some(CtValue::Present(value)) => match value.as_ref() {
+            CtValue::Str(text) => Some(text.clone()),
+            _ => None,
+        },
+        _ => None,
+    };
+    Ok(CtValue::Str(super::super::super::regex_kernel::jet_regex_expand_with(
+        template,
+        |index| usize::try_from(index).ok().and_then(group),
+        |name| names.iter().position(|value| matches!(value,
+            CtValue::Present(value) if matches!(value.as_ref(), CtValue::Str(text) if text == name)
+        )).and_then(group),
+    )))
 }

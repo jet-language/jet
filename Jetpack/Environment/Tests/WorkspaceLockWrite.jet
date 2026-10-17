@@ -189,3 +189,55 @@ fn env_wlock_test_lock_text(root: String) -[FS]> String {
     assert_eq(files.read(lock_path) ?? panic("read lock"), raw)
     files.remove_all(root).drop("test cleanup")
 }
+
+// tests/gate_law.rs:88-101: Force and dependency grant checks precede
+// process locking as well as publication; no managed directory is created.
+#Test("workspace policy refuses force pins and build grants before any lock write") {
+    loop key in ([PolicyKey]{PolicyKey.ForcePin, PolicyKey.DependencyGrant}) {
+        root :: env_wlock_test_dir("gate-forbidden")
+        cache := WorkspaceDeclarationCache.new()
+        name :: policy_key_name(key)
+        files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ {name}: .Forbid }}\n") ?? panic("gate policy")
+        plan := WorkspacePlan.empty()
+        site := "workspace.jet build grant app"
+        if key == PolicyKey.ForcePin {
+            plan.overlay_policy = pkg_parse_workspace_policy("module workspace {{ overlay audit {{ package(\"app\").version: Force(\"2\") }} }}\n") ?? panic("force overlay")
+            site = "workspace.jet overlay audit package app .Force"
+        } else {
+            &plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
+        }
+        if env_workspace_lock_write(&cache, root, plan) == {
+            .Ok(_) -> panic("forbidden workspace write succeeded")
+            .Err(error) -> {
+                if error == {
+                    .Gate(gate) -> {
+                        assert_eq(gate.diagnostics.len(), 1)
+                        diagnostic :: gate.diagnostics[0]
+                        policy :: files.join(files.canonicalize(root) ?? panic("canonical policy root"), PACKAGE_FILE)
+                        assert_eq(diagnostic.code, "E3415")
+                        assert_eq(diagnostic.what, "The `{name}` gate at `{site}` is forbidden by `{policy}`.")
+                    }
+                    else -> panic("gate refusal was converted to an I/O error")
+                }
+            }
+        }
+        assert(!files.exists(files.join(root, UNIFIED_LOCK_FILE)))
+        assert(!files.exists(files.join(root, CONFIG_DEFAULT_DIR)))
+        files.remove_all(root).drop("test cleanup")
+    }
+}
+
+#Test("workspace GateOnly permits forced overlays and nonempty dependency grants") {
+    root :: env_wlock_test_dir("gate-allowed")
+    cache := WorkspaceDeclarationCache.new()
+    files.write(files.join(root, PACKAGE_FILE), "name: \"law\"\npolicy: {{ force_pin: .GateOnly, dependency_grant: .GateOnly }}\n") ?? panic("gate policy")
+    plan := WorkspacePlan.empty()
+    plan.overlay_policy = pkg_parse_workspace_policy("module workspace {{ overlay audit {{ package(\"app\").version: Force(\"2\") }} }}\n") ?? panic("force overlay")
+    &plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
+    env_workspace_lock_write(&cache, root, plan) ?? panic("workspace gates permitted")
+    assert(files.exists(files.join(root, UNIFIED_LOCK_FILE)))
+    loaded :: pkg_lock_parse(env_wlock_test_lock_text(root)) ?? panic("published lock")
+    assert_eq(loaded.workspace_overlay_policy.overlays.len(), 1)
+    assert_eq(loaded.workspace_overlay_policy.build_grants.len(), 1)
+    files.remove_all(root).drop("test cleanup")
+}

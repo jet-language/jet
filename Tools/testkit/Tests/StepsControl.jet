@@ -1,0 +1,149 @@
+use core.files as files
+use core.sys as sys
+
+#Test("sorted file loops bind paths names stems and append outer captures from real case text") {
+    root :: cases_test_root("control-files")
+    source :: "mkdir: entries\nwrite: entries/z.txt = \"z\"\nwrite: entries/a.txt = \"a\"\nfor file entries kind file sorted as f\nstep: printf '%s' {{f.name}}\ncapture: names += text stdout\nwrite: {{f.path}} = \"{{f.stem}}\"\nend for\ncap:names: = \"a.txtz.txt\"\nfile: entries/a.txt = \"a\"\n"
+    assert_eq(cases_test_advanced(root, "sorted", source).verdict.status, "PASS")
+    failed :: "write: value = \"x\"\nfor file . kind file sorted as f\nstep: printf wrong\nstdout: = \"right\"\nend for\n"
+    assert_eq(cases_test_advanced(root, "failure", failed).verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "invalid", "for file . as f\nstep: true\n").verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove file-loop scratch")
+}
+
+#Test("line loops keep iteration captures local while += starts empty and survives the loop") {
+    root :: cases_test_root("control-lines")
+    source :: "step original: printf 'a\\\\nb\\\\n'\nfor line stdout of original as row\nstep: printf '%s' {{row}}\ncapture: local = text stdout\ncapture: joined += text cap:local\nend for\ncap:joined: = \"ab\"\nwhen captured local: step: false\nfor line stdout.filter(= \"missing\") as empty\nstep: false\nend for\n"
+    assert_eq(cases_test_advanced(root, "local", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "outside", "step: printf a\ncapture: joined += text stdout\n").verdict.status, "REFUSED")
+    failed :: "step: printf a\nfor line stdout as row\nstep: printf wrong\nstdout: = \"right\"\nend for\n"
+    assert_eq(cases_test_advanced(root, "line-failure", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove line-loop scratch")
+}
+
+#Test("bounded repeat executes its body until the file condition ends and reports timeout failure") {
+    root :: cases_test_root("control-repeat")
+    source :: "write: pending = \"x\"\nrepeat while file: pending exists timeout 1s every 1ms fail \"never finished\"\nremove: pending\nend repeat\nstep: printf done\nstdout: = \"done\"\n"
+    assert_eq(cases_test_advanced(root, "done", source).verdict.status, "PASS")
+    timeout :: "repeat while file: missing absent timeout 2ms every 1ms fail \"deadline\"\nend repeat\n"
+    result :: cases_test_advanced(root, "timeout", timeout)
+    assert_eq(result.verdict.status, "FAIL")
+    assert_eq(result.verdict.detail, "deadline")
+    files.remove_all(root) ?? panic("remove repeat scratch")
+}
+
+#Test("nested file and transformed line loops restore shadowed bindings and local capture declarations") {
+    root :: cases_test_root("control-nested")
+    source :: "write: entries/value.txt = \"outer\"\nfor file entries sorted as row\nstep original: printf 'a\\\\nb\\\\n'\nfor line stdout.filter(= \"a\") of original as row\nstep: printf '%s' {{row}}\ncapture: joined += text stdout\ncapture: local = text stdout\nend for\nstep: printf '%s' {{row.name}}\nstdout: = \"value.txt\"\nend for\ncap:joined: = \"a\"\nstep: printf again\nfor line stdout as next\ncapture: local = text stdout\nend for\nwhen captured local: step: false\n"
+    assert_eq(cases_test_advanced(root, "restored", source).verdict.status, "PASS")
+    failed :: "write: entries/value = \"x\"\nfor file entries sorted as outer\nfor file entries sorted as inner\nstep: false\nend for\nend for\n"
+    assert_eq(cases_test_advanced(root, "nested-failure", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove nested control scratch")
+}
+
+#Test("repeat process liveness finishes after an explicit kill and joined reap from the loop body") {
+    root :: cases_test_root("control-process")
+    source :: "requires: os:unix\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} alive timeout 1s every 1ms fail \"process remained alive\"\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\nend repeat\n"
+    assert_eq(cases_test_advanced(root, "stopped", source).verdict.status, "PASS")
+    failed :: "requires: os:unix\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} alive timeout 2ms every 1ms fail \"process remained alive\"\nend repeat\nwait: peer\n"
+    result :: cases_test_advanced(root, "deadline", failed)
+    assert_eq(result.verdict.status, "FAIL")
+    assert_eq(result.verdict.detail, "process remained alive")
+    files.remove_all(root) ?? panic("remove process repeat scratch")
+}
+
+#Test("line loops over repeated labels use the current iteration and capture subjects use their own text") {
+    root :: cases_test_root("control-latest")
+    source :: "write: entries/a = \"A\"\nwrite: entries/b = \"B\"\nfor file entries sorted as entry\nstep current: cat {{entry.path}}\nfor line stdout of current as row\nstep: printf '%s' {{row}}\ncapture: joined += text stdout\nend for\nwhen current.stdout = \"B\": write: latest = \"yes\"\nend for\ncap:joined: = \"AB\"\nfile: latest = \"yes\"\nstep: printf 'x\\\\ny\\\\n'\ncapture: rows = text stdout\nstep: printf wrong\nfor line cap:rows as row\nstep: printf '%s' {{row}}\ncapture: cap_joined += text stdout\nend for\ncap:cap_joined: = \"xy\"\n"
+    assert_eq(cases_test_advanced(root, "current", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}cap:joined: = \"AA\"\n").verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove latest-label scratch")
+}
+
+#Test("empty loops initialize outer accumulating captures and assertions after structural boundaries still run") {
+    root :: cases_test_root("control-empty")
+    source :: "step: printf ''\nfor line stdout as row\ncapture: joined += text stdout\nend for\ncap:joined: empty\nwhen exit != 0\nstep: false\nend when\nstdout: empty\nrepeat while file: missing exists timeout 1s every 1ms fail \"unreachable\"\nstep: false\nend repeat\ncap:joined: empty\n"
+    assert_eq(cases_test_advanced(root, "empty", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "after-end", "{source}cap:joined: = \"wrong\"\n").verdict.status, "FAIL")
+    failed :: "step: printf right\nwhen exit != 0\nstep: false\nend when\nstdout: = \"wrong\"\n"
+    assert_eq(cases_test_advanced(root, "skipped-when", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove empty-loop scratch")
+}
+
+#Test("line loops read transformed quoted files and reject invalid file subjects") {
+    root :: cases_test_root("control-line-files")
+    source :: "write: \"space name.txt\" = \"a\\nb\\n\\n\"\nfor line file.filter(!= \"\").trim \"space name.txt\" as row\nstep: printf '%s' {{row}}\ncapture: joined += text stdout\nend for\ncap:joined: = \"ab\"\n"
+    assert_eq(cases_test_advanced(root, "quoted", source).verdict.status, "PASS")
+    assert_eq(cases_test_advanced(root, "wrong", "{source}cap:joined: = \"wrong\"\n").verdict.status, "FAIL")
+    assert_eq(cases_test_advanced(root, "missing", "for line file absent as row\nstep: true\nend for\n").verdict.status, "ERROR")
+    loop selector in ["file", "file ../escape", "file {{root}}/escape", "file {{tmp}}/../escape", "file? value", "files value", "file value of prior"] {
+        plan :: kit_steps_parse_case("for line {selector} as row\nstep: true\nend for\n")
+        assert(plan.error.contains("invalid bounded loop"))
+    }
+    files.remove_all(root) ?? panic("remove line-file scratch")
+}
+
+#Test("non-zombie probes preserve distinct services and agent proc-stat laws") {
+    assert_eq(kit_steps_process_nonzombie_probe(None, "alive-nonzombie"), None)
+    assert_eq(kit_steps_process_nonzombie_probe(None, "proc-readable-nonzombie"), Val(false))
+    loop stat in ["", "malformed", "1 (name)", "1 (name) ", "1 (name) R 0", "1 (name) Zeta 0", "1 (name) ZZ 0", "1 (name) Z) R 0", "1 (name) Z 0) R 0"] {
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), None)
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(true))
+    }
+    loop stat in ["1 (name) Z", "1 (name) Z 0", "1 (embedded) name) Z 0", "1 (name) \tZ\n0", "1 (name)  Z 0", "1 (name) Z 0"] {
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), Val(false))
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(false))
+    }
+    // The agent separator requires ASCII space immediately after the last ')'.
+    loop stat in ["1 (name)Z", "1 (name)\tZ 0", "1 (name) Z 0"] {
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "alive-nonzombie"), Val(false))
+        assert_eq(kit_steps_process_nonzombie_probe(Val(stat), "proc-readable-nonzombie"), Val(true))
+    }
+}
+
+#Test("repeat accepts only the two canonical non-zombie policies") {
+    loop mode in ["alive", "alive-nonzombie", "proc-readable-nonzombie"] {
+        plan :: kit_steps_parse_case("repeat while process -1 {mode} timeout 1s every 1ms fail \"deadline\"\nend repeat\n")
+        assert_eq(plan.error, "")
+        assert_eq(plan.steps[0].argv[4], mode)
+    }
+    loop mode in ["nonzombie", "non-zombie", "alive-non-zombie", "proc-nonzombie", "proc-readable", "proc-readable-non-zombie"] {
+        assert(kit_steps_parse_case("repeat while process -1 {mode} timeout 1s every 1ms fail \"deadline\"\nend repeat\n").error.contains("invalid bounded loop"))
+    }
+}
+
+#Test("non-zombie repeats observe real children reaping deadlines and absent proc entries") {
+    if sys.name() != "linux" -> return
+    root :: cases_test_root("control-nonzombie")
+    loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
+        stopped :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 1s every 1ms fail \"process remained alive\"\nsignal peer: KILL\nwait peer timeout 1s\nexit: any # explicit signal is an expected stop\nend repeat\n"
+        assert_eq(cases_test_advanced(root, "stopped", stopped).verdict.status, "PASS")
+        timeout :: "requires: os-name:linux\nspawn peer: jet -c 'exec sleep 20'\nrepeat while process {{pid:peer}} {mode} timeout 2ms every 1ms fail \"process remained alive\"\nend repeat\n"
+        failed :: cases_test_advanced(root, "deadline", timeout)
+        assert_eq(failed.verdict.status, "FAIL")
+        assert_eq(failed.verdict.detail, "process remained alive")
+        absent :: "requires: os-name:linux\nrepeat while process -1 {mode} timeout 1s every 1ms fail \"unreachable\"\nstep: false\nend repeat\nstep: printf done\nstdout: = \"done\"\n"
+        assert_eq(cases_test_advanced(root, "absent", absent).verdict.status, "PASS")
+        malformed :: cases_test_advanced(root, "malformed", "requires: os-name:linux\nrepeat while process invalid {mode} timeout 1s every 1ms fail \"unreachable\"\nend repeat\n")
+        assert_eq(malformed.verdict.status, "ERROR")
+        assert_eq(malformed.verdict.detail, "repeat pid is not an integer")
+        missing :: cases_test_advanced(root, "missing", "requires: os-name:linux\nrepeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\nend repeat\n")
+        assert_eq(missing.verdict.status, "ERROR")
+        assert_eq(missing.verdict.detail, "repeat token unavailable")
+    }
+    files.remove_all(root) ?? panic("remove nonzombie repeat scratch")
+}
+
+#Test("non-zombie repeat platform refusal follows conditions and precedes PID expansion") {
+    root :: cases_test_root("control-nonzombie-host")
+    loop mode in ["alive-nonzombie", "proc-readable-nonzombie"] {
+        skipped :: "when os-name !{sys.name()}\nrepeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text stdout\nend repeat\nend when\nwhen captured joined: step: false\nstep: printf done\nstdout: = \"done\"\n"
+        assert_eq(cases_test_advanced(root, "skipped", skipped).verdict.status, "PASS")
+        if sys.name() != "linux" {
+            selected :: cases_test_advanced(root, "selected", "repeat while process {{cap:unknown}} {mode} timeout 1s every 1ms fail \"unreachable\"\ncapture: joined += text stdout\nend repeat\n")
+            assert_eq(selected.verdict.status, "REFUSED")
+            assert_eq(selected.verdict.detail, "process-state")
+        }
+    }
+    files.remove_all(root) ?? panic("remove nonzombie repeat host scratch")
+}

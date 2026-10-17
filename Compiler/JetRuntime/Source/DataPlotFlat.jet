@@ -1,0 +1,237 @@
+// Native-private flat records. All offsets live in DataABI.jet.
+// Seed declaration/derive cites: DataPlot.rs:409-413,585-593,834-840,
+// 885-890,1046-1052,1080-1087,1181-1187. CAbiRoutes record constructors
+// clone borrowed text; getters own text clones; sequence reads lend.
+// Axis.ticks: CAbiRoutes.rs:9759-9766; SourceFacts.rows:10097-10116.
+// Both Rust fields are i64: raw private words, checked Int conversion only
+// at constructors, fresh exact Int owners only at getters; never Int drops.
+fn data_plot_flag(value: U8) -> I64 { if (value == U8{0}) -> I64{0} else -> I64{1} }
+fn data_plot_tag(value: I64, count: I64) -> I64 {
+    // CAbiRoutes.rs:11-13, ctor range_stop uses the shared arithmetic stop.
+    if (value < I64{0} || value >= count) -> trap_native_index_range_stop()
+    value
+}
+fn data_plot_text_header(text: I64, out: I64) {
+    // Borrowed C text header is [ptr,len,cap], matching E4 text storage.
+    data_tree_store(out, rt_text_data(text))
+    data_tree_store(out + I64{8}, rt_text_len(text))
+    data_tree_store(out + I64{16}, data_tree_word(text + I64{16}))
+}
+#Export(c) fn jet_rt_record_new_jet_data_plot_field(m0: I64, m1: I64, m2: I64) -> I64 {
+    value :: jet_rt_alloc(DP_FIELD_BYTES, I64{8})
+    data_tree_store(value + DP_FIELD_ID, jet_rt_string_clone(m0))
+    data_tree_store(value + DP_FIELD_NAME, jet_rt_string_clone(m1))
+    data_tree_store(value + DP_FIELD_TYPE_NAME, jet_rt_string_clone(m2))
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_field(value: I64) -> I64 { jet_rt_record_new_jet_data_plot_field(data_tree_word(value + DP_FIELD_ID), data_tree_word(value + DP_FIELD_NAME), data_tree_word(value + DP_FIELD_TYPE_NAME)) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_field(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + DP_FIELD_ID))
+    jet_rt_string_drop(data_tree_word(value + DP_FIELD_NAME))
+    jet_rt_string_drop(data_tree_word(value + DP_FIELD_TYPE_NAME))
+    jet_rt_free(value, DP_FIELD_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_field(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(data_tree_word(a + DP_FIELD_ID), data_tree_word(b + DP_FIELD_ID)) && jet_rt_string_eq(data_tree_word(a + DP_FIELD_NAME), data_tree_word(b + DP_FIELD_NAME)) && jet_rt_string_eq(data_tree_word(a + DP_FIELD_TYPE_NAME), data_tree_word(b + DP_FIELD_TYPE_NAME))
+}
+#Export(c) fn jet_rt_record_get_jet_data_plot_field_id(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_FIELD_ID)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_field_name(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_FIELD_NAME)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_field_type_name(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_FIELD_TYPE_NAME)) }
+#Export(c) fn jet_rt_record_new_jet_data_plot_accessibility(m0: I64, m1: I64, m2: I64, m3: U8, m4: U8) -> I64 {
+    value :: jet_rt_alloc(DP_ACCESS_BYTES, I64{8})
+    data_tree_store(value + DP_ACCESS_TITLE, jet_rt_string_clone(m0))
+    data_tree_store(value + DP_ACCESS_DESCRIPTION, jet_rt_string_clone(m1))
+    data_tree_store(value + DP_ACCESS_SUMMARY, jet_rt_string_clone(m2))
+    data_tree_store(value + DP_ACCESS_KEYBOARD, data_plot_flag(m3))
+    data_tree_store(value + DP_ACCESS_ANNOUNCE, data_plot_flag(m4))
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_accessibility(value: I64) -> I64 {
+    jet_rt_record_new_jet_data_plot_accessibility(data_tree_word(value + DP_ACCESS_TITLE), data_tree_word(value + DP_ACCESS_DESCRIPTION), data_tree_word(value + DP_ACCESS_SUMMARY), U8{data_tree_word(value + DP_ACCESS_KEYBOARD)}, U8{data_tree_word(value + DP_ACCESS_ANNOUNCE)})
+}
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_accessibility(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + DP_ACCESS_TITLE))
+    jet_rt_string_drop(data_tree_word(value + DP_ACCESS_DESCRIPTION))
+    jet_rt_string_drop(data_tree_word(value + DP_ACCESS_SUMMARY))
+    jet_rt_free(value, DP_ACCESS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_accessibility(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(data_tree_word(a + DP_ACCESS_TITLE), data_tree_word(b + DP_ACCESS_TITLE)) && jet_rt_string_eq(data_tree_word(a + DP_ACCESS_DESCRIPTION), data_tree_word(b + DP_ACCESS_DESCRIPTION)) && jet_rt_string_eq(data_tree_word(a + DP_ACCESS_SUMMARY), data_tree_word(b + DP_ACCESS_SUMMARY)) && data_tree_word(a + DP_ACCESS_KEYBOARD) == data_tree_word(b + DP_ACCESS_KEYBOARD) && data_tree_word(a + DP_ACCESS_ANNOUNCE) == data_tree_word(b + DP_ACCESS_ANNOUNCE)
+}
+#Export(c) fn jet_rt_record_get_jet_data_plot_accessibility_title(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_ACCESS_TITLE)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_accessibility_description(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_ACCESS_DESCRIPTION)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_accessibility_summary(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_ACCESS_SUMMARY)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_accessibility_keyboard(value: I64) -> Bool { data_tree_word(value + DP_ACCESS_KEYBOARD) != I64{0} }
+#Export(c) fn jet_rt_record_get_jet_data_plot_accessibility_announce_selection(value: I64) -> Bool { data_tree_word(value + DP_ACCESS_ANNOUNCE) != I64{0} }
+#Export(c) fn jet_rt_record_new_jet_data_plot_layout(m0: F64, m1: F64, m2: F64, m3: F64, m4: F64, m5: F64) -> I64 {
+    value :: jet_rt_alloc(DP_LAYOUT_BYTES, I64{8})
+    data_tree_store(value + DP_LAYOUT_WIDTH, rt_f64_bits(m0))
+    data_tree_store(value + DP_LAYOUT_HEIGHT, rt_f64_bits(m1))
+    data_tree_store(value + DP_LAYOUT_TOP, rt_f64_bits(m2))
+    data_tree_store(value + DP_LAYOUT_RIGHT, rt_f64_bits(m3))
+    data_tree_store(value + DP_LAYOUT_BOTTOM, rt_f64_bits(m4))
+    data_tree_store(value + DP_LAYOUT_LEFT, rt_f64_bits(m5))
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_layout(value: I64) -> I64 {
+    result :: jet_rt_alloc(DP_LAYOUT_BYTES, I64{8})
+    coll_copy(value, result, DP_LAYOUT_BYTES)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_layout(value: I64) { if (value != I64{0}) -> jet_rt_free(value, DP_LAYOUT_BYTES, I64{8}) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_layout(a: I64, b: I64) -> Bool {
+    rt_f64_from_bits(data_tree_word(a + DP_LAYOUT_WIDTH)) == rt_f64_from_bits(data_tree_word(b + DP_LAYOUT_WIDTH)) && rt_f64_from_bits(data_tree_word(a + DP_LAYOUT_HEIGHT)) == rt_f64_from_bits(data_tree_word(b + DP_LAYOUT_HEIGHT)) && rt_f64_from_bits(data_tree_word(a + DP_LAYOUT_TOP)) == rt_f64_from_bits(data_tree_word(b + DP_LAYOUT_TOP)) && rt_f64_from_bits(data_tree_word(a + DP_LAYOUT_RIGHT)) == rt_f64_from_bits(data_tree_word(b + DP_LAYOUT_RIGHT)) && rt_f64_from_bits(data_tree_word(a + DP_LAYOUT_BOTTOM)) == rt_f64_from_bits(data_tree_word(b + DP_LAYOUT_BOTTOM)) && rt_f64_from_bits(data_tree_word(a + DP_LAYOUT_LEFT)) == rt_f64_from_bits(data_tree_word(b + DP_LAYOUT_LEFT))
+}
+#Export(c) fn jet_rt_record_get_jet_data_plot_layout_width(value: I64) -> F64 { rt_f64_from_bits(data_tree_word(value + DP_LAYOUT_WIDTH)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_layout_height(value: I64) -> F64 { rt_f64_from_bits(data_tree_word(value + DP_LAYOUT_HEIGHT)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_layout_margin_top(value: I64) -> F64 { rt_f64_from_bits(data_tree_word(value + DP_LAYOUT_TOP)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_layout_margin_right(value: I64) -> F64 { rt_f64_from_bits(data_tree_word(value + DP_LAYOUT_RIGHT)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_layout_margin_bottom(value: I64) -> F64 { rt_f64_from_bits(data_tree_word(value + DP_LAYOUT_BOTTOM)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_layout_margin_left(value: I64) -> F64 { rt_f64_from_bits(data_tree_word(value + DP_LAYOUT_LEFT)) }
+#Export(c) fn jet_rt_record_new_jet_data_plot_axis(m0: I64, m1: I64, m2: U8, m3: U8, m4: I64) -> I64 {
+    channel :: data_plot_tag(m0, I64{6})
+    ticks :: jet_int_owned_to_i64(m4)
+    value :: jet_rt_alloc(DP_AXIS_BYTES, I64{8})
+    data_tree_store(value + DP_AXIS_CHANNEL, channel)
+    data_tree_store(value + DP_AXIS_TITLE, jet_rt_string_clone(m1))
+    data_tree_store(value + DP_AXIS_VISIBLE, data_plot_flag(m2))
+    data_tree_store(value + DP_AXIS_GRID, data_plot_flag(m3))
+    data_tree_store(value + DP_AXIS_TICKS, ticks)
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_axis(value: I64) -> I64 {
+    result :: jet_rt_alloc(DP_AXIS_BYTES, I64{8})
+    coll_copy(value, result, DP_AXIS_BYTES)
+    data_tree_store(result + DP_AXIS_TITLE, jet_rt_string_clone(data_tree_word(value + DP_AXIS_TITLE)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_axis(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + DP_AXIS_TITLE))
+    jet_rt_free(value, DP_AXIS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_axis(a: I64, b: I64) -> Bool {
+    data_tree_word(a + DP_AXIS_CHANNEL) == data_tree_word(b + DP_AXIS_CHANNEL) && jet_rt_string_eq(data_tree_word(a + DP_AXIS_TITLE), data_tree_word(b + DP_AXIS_TITLE)) && data_tree_word(a + DP_AXIS_VISIBLE) == data_tree_word(b + DP_AXIS_VISIBLE) && data_tree_word(a + DP_AXIS_GRID) == data_tree_word(b + DP_AXIS_GRID) && data_tree_word(a + DP_AXIS_TICKS) == data_tree_word(b + DP_AXIS_TICKS)
+}
+#Export(c) fn jet_rt_record_get_jet_data_plot_axis_channel(value: I64) -> I64 { data_tree_word(value + DP_AXIS_CHANNEL) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_axis_title(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_AXIS_TITLE)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_axis_visible(value: I64) -> Bool { data_tree_word(value + DP_AXIS_VISIBLE) != I64{0} }
+#Export(c) fn jet_rt_record_get_jet_data_plot_axis_grid(value: I64) -> Bool { data_tree_word(value + DP_AXIS_GRID) != I64{0} }
+#Export(c) fn jet_rt_record_get_jet_data_plot_axis_ticks(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + DP_AXIS_TICKS)) }
+#Export(c) fn jet_rt_record_new_jet_data_plot_legend(m0: I64, m1: I64, m2: I64, m3: U8) -> I64 {
+    channel :: data_plot_tag(m0, I64{6})
+    position :: data_plot_tag(m2, I64{4})
+    value :: jet_rt_alloc(DP_LEGEND_BYTES, I64{8})
+    data_tree_store(value + DP_LEGEND_CHANNEL, channel)
+    data_tree_store(value + DP_LEGEND_TITLE, jet_rt_string_clone(m1))
+    data_tree_store(value + DP_LEGEND_POSITION, position)
+    data_tree_store(value + DP_LEGEND_VISIBLE, data_plot_flag(m3))
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_legend(value: I64) -> I64 { jet_rt_record_new_jet_data_plot_legend(data_tree_word(value + DP_LEGEND_CHANNEL), data_tree_word(value + DP_LEGEND_TITLE), data_tree_word(value + DP_LEGEND_POSITION), U8{data_tree_word(value + DP_LEGEND_VISIBLE)}) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_legend(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + DP_LEGEND_TITLE))
+    jet_rt_free(value, DP_LEGEND_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_legend(a: I64, b: I64) -> Bool {
+    data_tree_word(a + DP_LEGEND_CHANNEL) == data_tree_word(b + DP_LEGEND_CHANNEL) && jet_rt_string_eq(data_tree_word(a + DP_LEGEND_TITLE), data_tree_word(b + DP_LEGEND_TITLE)) && data_tree_word(a + DP_LEGEND_POSITION) == data_tree_word(b + DP_LEGEND_POSITION) && data_tree_word(a + DP_LEGEND_VISIBLE) == data_tree_word(b + DP_LEGEND_VISIBLE)
+}
+#Export(c) fn jet_rt_record_get_jet_data_plot_legend_channel(value: I64) -> I64 { data_tree_word(value + DP_LEGEND_CHANNEL) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_legend_title(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_LEGEND_TITLE)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_legend_position(value: I64) -> I64 { data_tree_word(value + DP_LEGEND_POSITION) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_legend_visible(value: I64) -> Bool { data_tree_word(value + DP_LEGEND_VISIBLE) != I64{0} }
+#Export(c) fn jet_rt_record_new_jet_data_plot_capability(m0: I64, m1: I64, m2: I64, m3: I64, m4: I64) -> I64 {
+    backend :: data_plot_tag(m0, I64{4})
+    support :: data_plot_tag(m2, I64{3})
+    value :: jet_rt_alloc(DP_CAP_BYTES, I64{8})
+    data_tree_store(value + DP_CAP_BACKEND, backend)
+    data_tree_store(value + DP_CAP_FEATURE, jet_rt_string_clone(m1))
+    data_tree_store(value + DP_CAP_SUPPORT, support)
+    data_tree_store(value + DP_CAP_REASON, jet_rt_string_clone(m3))
+    data_tree_store(value + DP_CAP_REPLACEMENT, jet_rt_string_clone(m4))
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_capability(value: I64) -> I64 { jet_rt_record_new_jet_data_plot_capability(data_tree_word(value + DP_CAP_BACKEND), data_tree_word(value + DP_CAP_FEATURE), data_tree_word(value + DP_CAP_SUPPORT), data_tree_word(value + DP_CAP_REASON), data_tree_word(value + DP_CAP_REPLACEMENT)) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_capability(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + DP_CAP_FEATURE))
+    jet_rt_string_drop(data_tree_word(value + DP_CAP_REASON))
+    jet_rt_string_drop(data_tree_word(value + DP_CAP_REPLACEMENT))
+    jet_rt_free(value, DP_CAP_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_capability(a: I64, b: I64) -> Bool {
+    data_tree_word(a + DP_CAP_BACKEND) == data_tree_word(b + DP_CAP_BACKEND) && jet_rt_string_eq(data_tree_word(a + DP_CAP_FEATURE), data_tree_word(b + DP_CAP_FEATURE)) && data_tree_word(a + DP_CAP_SUPPORT) == data_tree_word(b + DP_CAP_SUPPORT) && jet_rt_string_eq(data_tree_word(a + DP_CAP_REASON), data_tree_word(b + DP_CAP_REASON)) && jet_rt_string_eq(data_tree_word(a + DP_CAP_REPLACEMENT), data_tree_word(b + DP_CAP_REPLACEMENT))
+}
+#Export(c) fn jet_rt_record_get_jet_data_plot_capability_backend(value: I64) -> I64 { data_tree_word(value + DP_CAP_BACKEND) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_capability_feature(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_CAP_FEATURE)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_capability_support(value: I64) -> I64 { data_tree_word(value + DP_CAP_SUPPORT) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_capability_reason(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_CAP_REASON)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_capability_replacement(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_CAP_REPLACEMENT)) }
+#Export(c) fn jet_rt_record_new_jet_data_plot_source_facts(m0: I64, m1: I64, m2: I64, m3: I64, m4: I64, m5: I64, m6: I64) -> I64 {
+    rows :: jet_int_owned_to_i64(m4)
+    value :: jet_rt_alloc(DP_SOURCE_BYTES, I64{8})
+    data_tree_store(value + DP_SOURCE_TABLE, jet_rt_string_clone(m0))
+    data_tree_store(value + DP_SOURCE_ID, jet_rt_string_clone(m1))
+    data_tree_store(value + DP_SOURCE_SCHEMA, jet_rt_string_clone(m2))
+    data_tree_store(value + DP_SOURCE_ROW_TYPE, jet_rt_string_clone(m3))
+    data_tree_store(value + DP_SOURCE_ROWS, rows)
+    data_tree_store(value + DP_SOURCE_DATA, jet_rt_string_clone(m5))
+    data_tree_store(value + DP_SOURCE_PROVENANCE, jet_rt_string_clone(m6))
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_source_facts(value: I64) -> I64 {
+    result :: jet_rt_alloc(DP_SOURCE_BYTES, I64{8})
+    data_tree_store(result + DP_SOURCE_TABLE, jet_rt_string_clone(data_tree_word(value + DP_SOURCE_TABLE)))
+    data_tree_store(result + DP_SOURCE_ID, jet_rt_string_clone(data_tree_word(value + DP_SOURCE_ID)))
+    data_tree_store(result + DP_SOURCE_SCHEMA, jet_rt_string_clone(data_tree_word(value + DP_SOURCE_SCHEMA)))
+    data_tree_store(result + DP_SOURCE_ROW_TYPE, jet_rt_string_clone(data_tree_word(value + DP_SOURCE_ROW_TYPE)))
+    data_tree_store(result + DP_SOURCE_ROWS, data_tree_word(value + DP_SOURCE_ROWS))
+    data_tree_store(result + DP_SOURCE_DATA, jet_rt_string_clone(data_tree_word(value + DP_SOURCE_DATA)))
+    data_tree_store(result + DP_SOURCE_PROVENANCE, jet_rt_string_clone(data_tree_word(value + DP_SOURCE_PROVENANCE)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_source_facts(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + DP_SOURCE_TABLE))
+    jet_rt_string_drop(data_tree_word(value + DP_SOURCE_ID))
+    jet_rt_string_drop(data_tree_word(value + DP_SOURCE_SCHEMA))
+    jet_rt_string_drop(data_tree_word(value + DP_SOURCE_ROW_TYPE))
+    jet_rt_string_drop(data_tree_word(value + DP_SOURCE_DATA))
+    jet_rt_string_drop(data_tree_word(value + DP_SOURCE_PROVENANCE))
+    jet_rt_free(value, DP_SOURCE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_source_facts(a: I64, b: I64) -> Bool {
+    jet_rt_string_eq(data_tree_word(a + DP_SOURCE_TABLE), data_tree_word(b + DP_SOURCE_TABLE)) && jet_rt_string_eq(data_tree_word(a + DP_SOURCE_ID), data_tree_word(b + DP_SOURCE_ID)) && jet_rt_string_eq(data_tree_word(a + DP_SOURCE_SCHEMA), data_tree_word(b + DP_SOURCE_SCHEMA)) && jet_rt_string_eq(data_tree_word(a + DP_SOURCE_ROW_TYPE), data_tree_word(b + DP_SOURCE_ROW_TYPE)) && data_tree_word(a + DP_SOURCE_ROWS) == data_tree_word(b + DP_SOURCE_ROWS) && jet_rt_string_eq(data_tree_word(a + DP_SOURCE_DATA), data_tree_word(b + DP_SOURCE_DATA)) && jet_rt_string_eq(data_tree_word(a + DP_SOURCE_PROVENANCE), data_tree_word(b + DP_SOURCE_PROVENANCE))
+}
+#Export(c) fn jet_rt_record_get_jet_data_plot_source_facts_table_plan_identity(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_SOURCE_TABLE)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_source_facts_source_identity(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_SOURCE_ID)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_source_facts_schema_identity(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_SOURCE_SCHEMA)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_source_facts_row_type(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_SOURCE_ROW_TYPE)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_source_facts_rows(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + DP_SOURCE_ROWS)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_source_facts_data_identity(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_SOURCE_DATA)) }
+#Export(c) fn jet_rt_record_get_jet_data_plot_source_facts_provenance(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + DP_SOURCE_PROVENANCE)) }
+// Same borrowed sequence ABI as Dyn; push consumes the child handle.
+fn data_plot_sequence_push(sequence: I64, item: I64) {
+    slot :: data_sequence_reserve(sequence, DATA_TREE_ELEMENT_BYTES)
+    data_tree_store(slot, item)
+    data_tree_store(sequence + DATA_SEQUENCE_LENGTH, data_tree_word(sequence + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_field_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_field_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_field_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_field_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_axis_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_axis_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_axis_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_axis_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_legend_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_legend_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_legend_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_legend_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_capability_new(capacity: I64) -> I64 { data_sequence_new(capacity, DATA_TREE_ELEMENT_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_capability_len(value: I64) -> I64 { data_tree_word(value + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_capability_get(value: I64, index: I64) -> I64 { data_tree_word(data_sequence_slot(value, index, DATA_TREE_ELEMENT_BYTES)) }
+#Export(c) fn jet_rt_record_seq_list_rec_jet_data_plot_capability_push(value: I64, item: I64) { data_plot_sequence_push(value, item) }

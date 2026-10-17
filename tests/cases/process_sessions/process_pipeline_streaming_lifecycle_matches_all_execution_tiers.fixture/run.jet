@@ -1,0 +1,37 @@
+
+use core.process as process
+
+fn run() {
+    streamed :: process.pipeline([
+        process.cmd(["python3", "-c", "import sys;sys.stdout.write('x'*131072)"]),
+        process.cmd(["wc", "-c"])
+    ]) ?? panic("stream pipeline failed")
+    print("stream:{streamed.output.trim()}")
+
+    if process.pipeline([
+        process.cmd(["python3", "-c", "import sys;sys.stdout.write('x'*131072)"]).output_limit(4096),
+        process.cmd(["cat"])
+    ]) == {
+        .Err(error) -> {
+            if error == {
+                .ResourceLimit(limit) -> print(if limit == .Output -> "bounded:output" else -> "bounded:wrong")
+                else -> print("bounded:wrong")
+            }
+        }
+        .Ok(_) -> print("bounded:accepted")
+    }
+
+    if process.pipeline([
+        process.cmd(["yes", "x"]),
+        process.cmd(["head", "-c", "4"])
+    ]) == {
+        .Ok(receipt) -> print("early:{receipt.output.len()}:{receipt.success}")
+        .Err(_) -> print("early:error")
+    }
+
+    nonzero :: process.pipeline([
+        process.cmd(["sh", "-c", "printf out; printf err >&2; exit 7"]),
+        process.cmd(["cat"])
+    ]) ?? panic("nonzero pipeline failed")
+    print("nonzero:{nonzero.output.trim()}:{nonzero.errors.trim()}:{nonzero.code}:{nonzero.success}")
+}

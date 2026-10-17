@@ -1,0 +1,29 @@
+
+use core.process as process
+
+fn run() -[Exec, IO, Time.Wait]> {
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 120, rows: 40 },
+        mode: .Raw
+    }
+    plan :: process.cmd(["echo", "hi"]).terminal(policy)
+    facts :: plan.abilities()
+    print(facts.has(TerminalFact.terminal))
+    print(facts.has(TerminalFact.resize))
+    print(facts.has(TerminalFact.raw))
+    print(facts.has("preview_x"))
+    if process.run_spec(plan) == {
+        .Ok(_) -> { print("terminal:ok") }
+        .Err(_) -> { print("terminal:unavailable") }
+    }
+    child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
+    if child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            print("plain child unexpectedly has terminal")
+        }
+        .None -> { print("plain child has no terminal") }
+    }
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.output.trim())
+}

@@ -1,0 +1,10 @@
+# PORT tests/structural_merge.rs::structural_merge_applies_recorded_rename_to_a_parallel_body_edit
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: structural_merge_applies_recorded_rename_to_a_parallel_body_edit.fixture
+mkdir: .jet/codemods
+write: .jet/codemods/recorded-rename.log.json receipt.txt
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/merged.jet
+exit: 0
+file: merged.jet ~ "fn summarize" # Original contains predicate.
+file: merged.jet ~ "return 2" # Original contains predicate.
+file: merged.jet !~ "fn report" # Original negative predicate.

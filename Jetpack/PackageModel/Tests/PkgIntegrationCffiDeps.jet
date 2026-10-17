@@ -1,0 +1,17 @@
+// Port of tests/cffi.rs:2906-2934; exact public PackageFacts/DepSource assertions.
+// Original manifest bytes retained; no public API added.
+#Test("C deps are parsed by the one Package parser as exact native link references") {
+    manifest :: "\nname: \"p\"\nversion: \"0.1.0\"\ndeps: {{\n    raylib: c@system,\n    foo:    c@\"/opt/foo\",\n}}\n"
+    facts :: PackageFacts.parse(manifest, "test") ?? panic("manifest parses")
+    raylib_matches :: if facts.deps.get("raylib") == {
+        .Val(value) -> value == DepSource.CLib{target: "system"}
+        .None -> false
+    }
+    foo_matches :: if facts.deps.get("foo") == {
+        .Val(value) -> value == DepSource.CLib{target: "/opt/foo"}
+        .None -> false
+    }
+    assert(raylib_matches)
+    assert(foo_matches)
+    assert(facts.deps.get("sqlite3") == None)
+}

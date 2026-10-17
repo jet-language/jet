@@ -1,0 +1,27 @@
+package {
+    name: "io_read_bytes_paths"
+    version: "0.1.0"
+    authority: { holds: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] } }
+}
+
+// `files.read_bytes` takes its path as text from any String value (here a
+// trimmed interpolation), yields every byte unsigned (0..255), reads an empty
+// file as no bytes, and reports a missing path as a typed `Err`.
+use core.files as files
+
+fn run() {
+    scratch :: files.temp_dir("jet-read-bytes") ?? panic("temp dir")
+    root :: scratch.path
+    files.write_bytes(files.join(root, "bytes.bin"), [U8]{0, 1, 127, 128, 255}) ?? panic("write bytes")
+    files.write_bytes(files.join(root, "empty.bin"), [U8]{}) ?? panic("write empty")
+    bytes_path :: " {files.join(root, "bytes.bin")} "
+    bytes :: files.read_bytes(bytes_path.trim()) ?? panic("read bytes")
+    loop byte in bytes {
+        print(byte)
+    }
+    print(bytes.len())
+    empty :: files.read_bytes(files.join(root, "empty.bin")) ?? panic("read empty")
+    print(empty.len())
+    missing_path :: " {files.join(root, "missing.bin")} "
+    print(files.read_bytes(missing_path.trim()) == .Err(_))
+}

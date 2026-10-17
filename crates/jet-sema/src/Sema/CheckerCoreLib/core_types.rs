@@ -64,12 +64,27 @@ pub(crate) fn json_ty() -> Type {
     Type::Named(Syntax::TYPE_DATA.to_string())
 }
 
-/// The ordered `DataTree.Object` payload a compiler-generated struct encoder
-/// accumulates: `[(key: String, value: DataTree)]`, one row per emitted field
+pub(crate) fn is_dyn_type(ty: &Type) -> bool {
+    matches!(ty.without_user_tags(), Type::Named(name) if Syntax::is_data_type_name(name))
+}
+
+pub(crate) fn dyn_wrappable(ty: &Type) -> bool {
+    match ty.without_user_tags() {
+        Type::Int | Type::Float | Type::String | Type::Bool => true,
+        Type::Named(name) => Syntax::is_data_type_name(name)
+            || matches!(name.as_str(), "DateTime" | "ZonedDateTime"),
+        Type::List(elem) | Type::FixedList { elem, .. } => is_u8_ty(elem) || dyn_wrappable(elem),
+        Type::Map { key, value, .. } => **key == Type::String && dyn_wrappable(value),
+        _ => false,
+    }
+}
+
+/// The ordered `Dyn.Object` payload a compiler-generated struct encoder
+/// accumulates: `[(key: String, value: Dyn)]`, one row per emitted field
 /// in declaration order. It is the pair list every engine already stores for
 /// an Object, so appending a row per present field keeps the encoder linear
 /// in the field count while absent optional fields stay off the wire.
-pub(crate) fn data_tree_object_pairs_ty() -> Type {
+pub(crate) fn dyn_object_pairs_ty() -> Type {
     Type::List(Box::new(Type::Tuple(vec![
         ("key".to_string(), Box::new(Type::String)),
         ("value".to_string(), Box::new(json_ty())),
@@ -104,15 +119,15 @@ pub(crate) fn field_error_ty() -> Type {
     Type::Named("FieldError".to_string())
 }
 
-/// D-SERDE13=B: the value tree's one user-facing name is `DataTree`. The old
+/// D-SERDE13=B: the value tree's one user-facing name is `Dyn`. The old
 /// `Data` spelling is retired (no alias, I8) — point at the new name wherever a
 /// user still writes `Data` as a type or a construction receiver.
-pub(crate) fn data_renamed_to_datatree(span: Span) -> Diagnostic {
+pub(crate) fn data_renamed_to_dyn(span: Span) -> Diagnostic {
     Diagnostic::error(
         "E0351",
-        "the value tree is named `DataTree`, not `Data`".to_string(),
-        "`DataTree` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Text`/`.Array`/`.Object`".to_string(),
-        "write `DataTree` instead of `Data`".to_string(),
+        "the value tree is named `Dyn`, not `Data`".to_string(),
+        "`Dyn` is the one name a hand codec constructs and returns and every format's `parse` yields — its variants are `.Null`/`.Bool`/`.Int`/`.Float`/`.Number`/`.Text`/`.Bytes`/`.DateTime`/`.Array`/`.Object`".to_string(),
+        "write `Dyn` instead of `Data`".to_string(),
         Some(span),
     )
 }
@@ -274,7 +289,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-DET-CAPAPI: `Duration` value type for the widened clock surface.
         // D-AUTHORITY-NAME1=A: one ordinary, nameable rights carrier.
         | Syntax::TYPE_AUTHORITY
-        | "Clock" | "RNG" | Syntax::DETERMINISTIC_WORLD_TYPE | "Fake" | "Duration" | "DurationUnit" | "RangeError" | "Condition"
+        | "Clock" | "RNG" | Syntax::DETERMINISTIC_WORLD_TYPE | "Duration" | "DurationUnit" | "RangeError" | "Condition"
         // D-SHARED-REVISION1=A: the opaque owner-bound snapshot carrier and
         // its typed wrong-owner/exhaustion failures.
         | Syntax::TYPE_SHARED_SNAPSHOT | Syntax::TYPE_SHARED_REVISION_ERROR
@@ -302,7 +317,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "Mod" | "ModGrant"
         | "FileReader" | "FileWriter" | "FileLines" | "FileScope" | "MappedFile"
         // D-LSDIR1/D-FSOPS1/D-WATCH-SCOPE1: filesystem and watcher values.
-        | "DirEntry" | "Stat" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
+        | "DirEntry" | "WalkEntry" | "TempDir" | "TempFile" | "FileLock"
         // stdlib-api-laws D4: `WatchEvent.domain`/`.kind` are closed enums.
         | "WatchEvent" | "WatchDomain" | "WatchKind" | "WatchHandle" | "WatchSet"
         // D-DATA-SURFACE1=A / D-DATA-STATUS1=A: data summary/status values.
@@ -339,7 +354,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "DNSSRV" | "UnixListener" | "UnixStream" | "TLSStream" | "TLSClientConfig" | "TLSClientConfigType"
         | "TLSRootCertificates" | "TLSRootCertificatesType" | "TLSClientIdentity" | "TLSClientIdentityType"
         | "TLSClientTrust" | "TLSVersion" | "TLSPeerIdentity" | "TLSCertificate"
-        | "NetError" | "NetErrorDetail" | "NetDnsError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
+        | "NetError" | "NetErrorDetail" | "NetDNSError" | "NetShutdown" | "NetReadyInterest" | "NetReady"
         // D-COMPUTE1=D / D-COMPUTE-TYPE1=D: ranked tensor owner + compute errors.
         | "Tensor" | "ComputeError" | "ComputeDevice" | "ComputeStream" | "VJPRun"
         | "SparseTensor"
@@ -348,6 +363,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "ServiceDelivery" | "ServiceRuntime" | "ServiceStateStore" | "Delivery"
         | "DeliveryState" | "DeliveryReceipt" | "DeliveryEvent"
         | "ServiceUpgradeReceipt" | "TaskOutcome" | "TaskStatus"
+        | "__DeliveryFacts" | "__DeliveryRecord" | "__EndpointMailbox" | "__MailboxRead"
         | "HTTPRequest" | "HTTPResponse" | "HTTPRouter" | "HTTPClient" | "HTTPClientType"
         // D-CRYPTO-API1=A: purpose-bound crypto values. Secret-bearing values
         // are opaque and receive no structural/collection capabilities.
@@ -365,7 +381,7 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         // D-TERM1 (ratified 2026-06-22): terminal key-event enum.
         | "Key"
         // D-SERDE2 / D-VALIDATE-DECODE1: the format-agnostic value tree.
-        | "DataTree"
+        | "Dyn"
         // D-VALIDATE1 (ratified 2026-07-12, card #506): the accumulated
         // validation error a `validate { }` block / `Type.validate(value)` /
         // `Validate.over(s)` build up.
@@ -458,8 +474,6 @@ pub(crate) fn core_type_known(name: &str) -> bool {
         | "WebVirtualWindow" | "WebVirtualPlan" | "WebVirtualPlanViewport"
         | "WebStoreTransaction" | "WebStoreEvent" | "WebStoreInspection"
         | "WebStorePatch" | "WebStore" | "WebStoreSubscription"
-        // D-APPROX1=A: approximate sketch data structures.
-        | "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler"
         // D-TIMEDEPTH1=A: civil-time types.
         | "Date" | "LocalDate" | "LocalTime" | "DateTime" | "Instant" | "Period" | "Zone"
         | "ZonedDateTime"
@@ -711,16 +725,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             _ => None,
         };
     }
-    if type_name == Syntax::TYPE_ERR {
-        return match field {
-            "message" => Some(Type::String),
-            "code" => Some(Type::Option(Box::new(Type::String))),
-            "cause" => Some(Type::Option(Box::new(Type::Named(
-                Syntax::TYPE_ERR.to_string(),
-            )))),
-            _ => None,
-        };
-    }
     if type_name == Syntax::TYPE_RANGE {
         return match field {
             "start" | "end" => Some(Type::Int),
@@ -736,7 +740,7 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "seed" => Some(Type::Option(Box::new(Type::Int))),
             "case_ids" => Some(Type::List(Box::new(Type::String))),
             "inputs" | "reference" | "candidate" => Some(Type::List(Box::new(Type::Named(
-                "DataTree".to_string(),
+                "Dyn".to_string(),
             )))),
             "status" | "relation" | "source" | "tool" | "target" | "reason" => {
                 Some(Type::String)
@@ -766,23 +770,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
             "dns_names" => Some(Type::List(Box::new(Type::String))),
             "valid_from_unix_ms" | "valid_until_unix_ms" => Some(Type::Int),
             "subject" | "issuer" => Some(Type::String),
-            _ => None,
-        };
-    }
-    if type_name == "Claims" {
-        return match field {
-            "subject" | "issuer" => Some(Type::Option(Box::new(Type::String))),
-            "audience" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
-            "not_before" => Some(Type::Option(Box::new(Type::Int))),
-            "issued_at" => Some(Type::Option(Box::new(Type::Int))),
-            _ => None,
-        };
-    }
-    if type_name == "Session" {
-        return match field {
-            "id" | "user_id" | "cookie" => Some(Type::String),
-            "expires_at" => Some(Type::Int),
             _ => None,
         };
     }
@@ -920,6 +907,30 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         && matches!(field, "accepted" | "overloaded" | "completed" | "cancelled")
     {
         return Some(Type::Int);
+    }
+    if type_name == "__EmailAddressView" {
+        return match field {
+            "display" => Some(Type::Option(Box::new(Type::String))),
+            "mailbox" => Some(Type::String),
+            _ => None,
+        };
+    }
+    if type_name == "__EmailAttachmentView" {
+        return match field {
+            "filename" | "mime" => Some(Type::String),
+            "bytes" => Some(Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))),
+            _ => None,
+        };
+    }
+    if type_name == "__EmailMessageView" {
+        return match field {
+            "from" => Some(Type::Named("Address".into())),
+            "to" | "bcc" => Some(Type::List(Box::new(Type::Named("Address".into())))),
+            "subject" | "text" | "html" => Some(Type::String),
+            "attachments" => Some(Type::List(Box::new(Type::Named("Attachment".into())))),
+            "wire_upper" => Some(Type::Int),
+            _ => None,
+        };
     }
     if type_name == "Address" {
         return match field {
@@ -1901,10 +1912,6 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         // D-LSDIR1=A: DirEntry has name (bare filename), path (full path), is_dir.
         ("DirEntry", "name" | "path") => Some(Type::String),
         ("DirEntry", "is_dir") => Some(Type::Bool),
-        // D-FSOPS1=A: typed filesystem metadata and recursive walk entries.
-        ("Stat", "size" | "modified_ms" | "created_ms" | "mode") => Some(Type::Int),
-        ("Stat", "readonly" | "is_file" | "is_dir" | "is_symlink") => Some(Type::Bool),
-        ("Stat", "kind") => Some(Type::String),
         ("WalkEntry", "path" | "relative") => Some(Type::String),
         ("WalkEntry", "is_dir") => Some(Type::Bool),
         ("WalkEntry", "depth") => Some(Type::Int),
@@ -2045,10 +2052,10 @@ pub(crate) fn core_struct_field(type_name: &str, field: &str) -> Option<Type> {
         ("ProcessChild", "stderr") => Some(Type::Named("ProcessStderrStream".to_string())),
         // D-HTTP-CORE2=A: one byte-native message model.
         ("HTTPRequest", "method" | "path") => Some(Type::String),
-        ("HTTPRequest", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPRequest", "body") => Some(Type::Named("core.http.Body".to_string())),
         ("HTTPRequest", "headers") => Some(Type::Named("Headers".to_string())),
         ("HTTPResponse", "status") => Some(Type::Int),
-        ("HTTPResponse", "body") => Some(Type::Named("Body".to_string())),
+        ("HTTPResponse", "body") => Some(Type::Named("core.http.Body".to_string())),
         ("HTTPResponse", "headers") => Some(Type::Named("Headers".to_string())),
         // D-HTTPLIB1=A: TLS constructor fields are public PEM values.
         ("HTTPServerTLS", "cert_pem" | "key_pem") => Some(Type::String),
@@ -2391,9 +2398,6 @@ pub(crate) fn core_generic_struct_field(
             _ => None,
         };
     }
-    if type_name == "Measurement" && args.len() == 1 {
-        return matches!(field, "value" | "uncertainty").then_some(args[0].clone());
-    }
     if type_name == "FfiCallbackEvent" && args.len() == 1 {
         return (field == "value").then_some(args[0].clone());
     }
@@ -2607,47 +2611,6 @@ pub(crate) fn job_queue_method_return(
             n_args == 3,
             result(Type::Named("JobQueueReceipt".to_string())),
         ),
-        "receipt" => (
-            n_args == 1,
-            result(Type::Named("JobQueueReceipt".to_string())),
-        ),
-        "inspect" => (
-            n_args == 2,
-            result(Type::List(Box::new(Type::Named(
-                "JobQueueRecord".to_string(),
-            )))),
-        ),
-        "events" => (
-            n_args == 1,
-            result(Type::List(Box::new(Type::Named(
-                "JobQueueEvent".to_string(),
-            )))),
-        ),
-        "claim" => (
-            n_args == 2,
-            result(Type::List(Box::new(Type::Named(
-                "JobQueueClaim".to_string(),
-            )))),
-        ),
-        "heartbeat" | "acknowledge" | "fail" | "cancel" | "dead_letter" => {
-            let valid = match method {
-                "heartbeat" => n_args == 1,
-                "acknowledge" | "fail" => n_args == 2,
-                "cancel" | "dead_letter" => (2..=3).contains(&n_args),
-                _ => false,
-            };
-            (
-                valid,
-                result(Type::Named("JobQueueReceipt".to_string())),
-            )
-        }
-        "recover_expired" => (n_args == 0, result(unit_ty())),
-        "status" | "pause" | "resume" => (
-            n_args == 0,
-            result(Type::Named("JobQueueStatus".to_string())),
-        ),
-        "wait" => (n_args == 1, result(Type::Named("JobQueueStatus".to_string()))),
-        "prune" => (n_args == 0, result(Type::Int)),
         _ => return None,
     };
     Some(valid.then_some(ret))
@@ -2787,15 +2750,14 @@ pub fn core_json_pattern_types(variant: &str) -> Option<Vec<Type>> {
         "Int" => Some(vec![Type::Int]),
         "Float" => Some(vec![Type::Float]),
         "Text" => Some(vec![Type::String]),
+        "Bytes" => Some(vec![Type::List(Box::new(u8_ty()))]),
+        "DateTime" => Some(vec![Type::Named("ZonedDateTime".to_string())]),
         "Array" => Some(vec![Type::List(Box::new(json.clone()))]),
-        "Object" => Some(vec![Type::Map {
-            key: Box::new(Type::String),
-            key_span: None,
-            value: Box::new(json),
-        }]),
+        // D-DATATREE-ORDER1=A: an object is its fields in arrival order.
+        "Object" => Some(vec![dyn_object_pairs_ty()]),
         // `Number` is the compiler-only lexical carrier used by typed JSON
         // parsing. It is accepted in generated union decoder patterns, but
-        // has no public `DataTree.Number(...)` constructor.
+        // has no public `Dyn.Number(...)` constructor.
         "Number" => Some(vec![Type::String]),
         _ => None,
     }
@@ -2872,15 +2834,11 @@ pub(crate) fn core_terminal_mode_variants(
         .collect()
 }
 
-pub(crate) fn core_env_error_variants(
-) -> std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)> {
-    use crate::Diagnostics::Span;
-    use crate::AST::VariantPayload;
-    let zero = Span::new(0, 0);
-    ["InvalidName", "InvalidValue", "NonUnicode"]
-        .into_iter()
-        .map(|name| (name.to_string(), (zero, VariantPayload::Unit)))
-        .collect()
+pub(crate) fn core_native_enum_variant_names(module: &str, item: &str) -> Option<&'static [&'static str]> {
+    match jet_foundation::CoreModuleExports::core_leaf_kind(module, item) {
+        Some(jet_foundation::CoreModuleExports::CoreLeafKind::Enum(variants)) => Some(variants),
+        _ => None,
+    }
 }
 
 pub(crate) fn core_net_control_variants(
@@ -2910,7 +2868,7 @@ pub fn core_net_error_variants(
     use crate::AST::VariantPayload;
     let zero = Span::new(0, 0);
     let mut variants = std::collections::HashMap::new();
-    if enum_name == "NetDnsError" {
+    if enum_name == "NetDNSError" {
         for name in ["NotFound", "Failure"] {
             variants.insert(
                 name.to_string(),
@@ -2950,7 +2908,7 @@ pub fn core_net_error_variants(
         "DNS".to_string(),
         (
             zero,
-            VariantPayload::Single(Type::Named("NetDnsError".to_string()), zero),
+            VariantPayload::Single(Type::Named("NetDNSError".to_string()), zero),
         ),
     );
     Some(variants)
@@ -3508,8 +3466,11 @@ pub fn core_file_handle_dispatch_name(handle_ty: &str) -> Option<&'static str> {
         "StdinHandle" | "<corelib>/Core/term::Core/term/term.jet::StdinHandle" => {
             Some("StdinHandle")
         }
-        "Stdout" | "<corelib>/Core/term::Core/term/term.jet::Stdout" => Some("Stdout"),
-        "Stderr" | "<corelib>/Core/term::Core/term/term.jet::Stderr" => Some("Stderr"),
+        // `core.term` declares `Stdout`/`Stderr` with their own methods
+        // (source-owned): their canonical identity dispatches to those Jet
+        // methods, never to the native stdio handle table.
+        "Stdout" => Some("Stdout"),
+        "Stderr" => Some("Stderr"),
         _ => None,
     }
 }
@@ -3556,8 +3517,10 @@ pub fn file_handle_method_return(
             "read_line" if n_args == 0 => {
                 Some(Some(result_ty(Type::Option(Box::new(Type::String)), io)))
             }
+            // #3593: `.read(max)` — up to `max` bytes; an empty list at EOF.
+            "read" if n_args == 1 => Some(Some(result_ty(Type::List(Box::new(u8_ty())), io))),
             // Wrong direction: writing to a reader.
-            "write_line" | "flush" => {
+            "write_line" | "flush" | "write_all" | "fsync" | "set_mode" => {
                 diags.push(Diagnostic::error(
                     "E2501",
                     format!("`{}` is not available on a read-only file handle", method),
@@ -3574,9 +3537,12 @@ pub fn file_handle_method_return(
             // `.write_line(text)` — writes a line followed by a newline.
             "write_line" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
             // `.flush()` — ensure buffered bytes reach disk.
-            "flush" if n_args == 0 => Some(Some(result_ty(unit, io))),
+            "flush" if n_args == 0 => Some(Some(result_ty(unit.clone(), io.clone()))),
+            // #3593: `.write_all(bytes)` — buffered; `.fsync()` flushes then syncs.
+            "write_all" if n_args == 1 => Some(Some(result_ty(unit.clone(), io.clone()))),
+            "fsync" if n_args == 0 => Some(Some(result_ty(unit, io))),
             // Wrong direction: reading from a writer.
-            "lines" | "read_line" => {
+            "lines" | "read_line" | "read" => {
                 diags.push(Diagnostic::error(
                     "E2501",
                     format!("`{}` is not available on a write-only file handle", method),
@@ -3628,22 +3594,15 @@ pub fn encoding_handle_method_return(
             Some(Some(result_ty(unit, error)))
         }
         ("JSONLReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+            Type::Option(Box::new(Type::Named("Dyn".to_string()))),
             error,
         ))),
         ("JSONLWriter", "write", 1) | ("JSONLWriter", "flush" | "finish", 0) => {
             Some(Some(result_ty(unit, error)))
         }
-        ("CSVReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::Named("CSVRow".to_string()))),
-            error,
-        ))),
         // DataStream<T>.next is handled specially in method_calls (needs T).
-        ("CSVWriter", "write", 1) | ("CSVWriter", "flush" | "finish", 0) => {
-            Some(Some(result_ty(unit, error)))
-        }
         ("XMLReader", "next", 0) => Some(Some(result_ty(
-            Type::Option(Box::new(Type::Named("DataTree".to_string()))),
+            Type::Option(Box::new(Type::Named("Dyn".to_string()))),
             error,
         ))),
         ("XMLWriter", "write", 1) | ("XMLWriter", "flush" | "finish", 0) => {
@@ -3660,11 +3619,24 @@ pub fn encoding_handle_method_return(
     }
 }
 
+// Literal visibility is data projected into the Jet record rows. Field reads
+// remain public; these failure carriers are constructed only by vetted Core.
+pub(crate) const CORE_ONLY_RECORD_LITERALS: &[&str] = &["TextError", "RangeError"];
+
+pub(crate) fn core_record_literal_is_core_only(name: &str) -> bool {
+    CORE_ONLY_RECORD_LITERALS.contains(&name)
+}
+
 /// E2-M10: field definitions for compiler-known constructable struct types.
 /// Returns `Some(fields)` when the named type is a prelude struct users can construct.
 pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, Type)>> {
     let str_ty = Type::String;
     match type_name {
+        // Compiler-owned failure records have the same checked shape at
+        // construction and field access; they need no source declaration.
+        "TextError" => Some(vec![("message".to_string(), Type::String)]),
+        "RangeError" => Some(vec![("reason".to_string(), Type::String)]),
+        "Expired" => Some(vec![]),
         // D-COMPUTE1=D: Tensor is a Core-exported struct whose source
         // declaration is owned by `core.compute`; keep its field shape here
         // so imported values and `Tensor{ ... }` literals share one oracle.
@@ -3673,15 +3645,7 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("data".to_string(), Type::List(Box::new(Type::Float))),
             ("device".to_string(), Type::String),
             ("numeric_profile".to_string(), Type::String),
-        ]),
-        // D-FAIL-ERROR1=A: constructor calls normalize to this private shape.
-        name if name == Syntax::TYPE_ERR => Some(vec![
-            ("message".to_string(), Type::String),
-            ("code".to_string(), Type::Option(Box::new(Type::String))),
-            (
-                "cause".to_string(),
-                Type::Option(Box::new(Type::Named(Syntax::TYPE_ERR.to_string()))),
-            ),
+            ("requested".to_string(), Type::String),
         ]),
         "HandleID" | "TaskID" | "EventID" => Some(vec![("value".to_string(), Type::Named("Count".to_string()))]),
         "HistoryCase" => Some(vec![
@@ -3733,15 +3697,15 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ),
             (
                 "inputs".to_string(),
-                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+                Type::List(Box::new(Type::Named("Dyn".to_string()))),
             ),
             (
                 "reference".to_string(),
-                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+                Type::List(Box::new(Type::Named("Dyn".to_string()))),
             ),
             (
                 "candidate".to_string(),
-                Type::List(Box::new(Type::Named("DataTree".to_string()))),
+                Type::List(Box::new(Type::Named("Dyn".to_string()))),
             ),
             ("first_difference".to_string(), Type::Int),
             ("reason".to_string(), Type::String),
@@ -4152,16 +4116,18 @@ pub(crate) fn core_constructable_fields(type_name: &str) -> Option<Vec<(String, 
             ("response".to_string(), Type::String),
             ("accepted_at".to_string(), Type::String),
         ]),
-"MIME" => Some(vec![
-    ("top".to_string(), Type::String),
-    ("sub".to_string(), Type::String),
-]),
         "NetErrorDetail" => Some(vec![
             ("operation".to_string(), Type::String),
             ("address".to_string(), Type::Option(Box::new(Type::String))),
             ("name".to_string(), Type::Option(Box::new(Type::String))),
             ("message".to_string(), Type::String),
             ("os_code".to_string(), Type::Option(Box::new(Type::Int))),
+        ]),
+        "__ResolveError" => Some(vec![
+            ("kind".to_string(), Type::Int),
+            ("has_os_code".to_string(), Type::Bool),
+            ("os_code".to_string(), Type::Int),
+            ("message".to_string(), Type::String),
         ]),
         "Duration" => Some(vec![("ns".to_string(), Type::Int)]),
         "Stopwatch" => Some(vec![("start_ns".to_string(), Type::Int)]),
@@ -4411,6 +4377,39 @@ pub(crate) fn core_tls_variants(
     Some(variants)
 }
 
+/// D-ENCSTREAM-SURFACE1=A: the canonical twelve `core.encoding.DataEvent`
+/// variants in catalog and runtime order (`CoreModuleExports`, `jet_std::DataEvent`).
+/// Every checker and lowerer reads this one table and `data_event_payload`.
+pub const DATA_EVENT_VARIANTS: [&str; 12] = [
+    "Null",
+    "Bool",
+    "Int",
+    "Float",
+    "Number",
+    "Text",
+    Syntax::TYPE_BYTES,
+    "ArrayStart",
+    "ArrayEnd",
+    "ObjectStart",
+    "Key",
+    "ObjectEnd",
+];
+
+/// The payload of one `DataEvent` variant: `Some(None)` for a unit variant,
+/// `Some(Some(ty))` for a single payload, `None` for a name that is not a
+/// `DataEvent` variant. `Number` carries the exact lexical number as text.
+pub fn data_event_payload(variant: &str) -> Option<Option<Type>> {
+    match variant {
+        "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => Some(None),
+        "Bool" => Some(Some(Type::Bool)),
+        "Int" => Some(Some(Type::Int)),
+        "Float" => Some(Some(Type::Float)),
+        "Number" | "Text" | "Key" => Some(Some(Type::String)),
+        Syntax::TYPE_BYTES => Some(Some(Type::List(Box::new(u8_ty())))),
+        _ => None,
+    }
+}
+
 /// D-ENCSTREAM-SURFACE1=A: closed shared stream enums.
 pub(crate) fn core_encoding_variants(
     enum_name: &str,
@@ -4439,7 +4438,16 @@ pub(crate) fn core_encoding_variants(
             "StaleRevision",
             "InvalidValue",
         ],
-        "DataEvent" => &["Null", "ArrayStart", "ArrayEnd", "ObjectStart", "ObjectEnd"],
+        "DataEvent" => {
+            for name in DATA_EVENT_VARIANTS {
+                let payload = match data_event_payload(name) {
+                    Some(Some(ty)) => VariantPayload::Single(ty, zero),
+                    _ => VariantPayload::Unit,
+                };
+                variants.insert(name.to_string(), (zero, payload));
+            }
+            return Some(variants);
+        }
         "DataFormat" => &["CSV", "JSON", "JSONL", "Parquet", "Arrow"],
         "DataLoaderKind" => &["File", "URL", "Database", "Value"],
         "DataFreshness" => &["Pending", "Fresh", "Stale", "Error", "Offline", "Cancelled"],
@@ -4490,7 +4498,7 @@ pub(crate) fn core_encoding_variants(
         "XMLReason" => &["Syntax", "Truncated", "ForbiddenDTD", "UnknownEntity"],
         "XMLEntityPolicy" => &["PredefinedOnly", "Reject"],
         "XMLEncoding" => &["UTF8", "UTF16"],
-        "XMLCanonicalMode" => &["Inclusive", "Exclusive"],
+        "XMLCanonicalMode" => &["Inclusive11", "Exclusive10"],
         _ => return None,
     };
     for name in units {
@@ -4501,68 +4509,14 @@ pub(crate) fn core_encoding_variants(
             ("Bool", Type::Bool),
             ("Int", Type::Int),
             ("Float", Type::Float),
+            ("Number", Type::String),
             ("Text", Type::String),
             (Syntax::TYPE_BYTES, Type::List(Box::new(u8_ty()))),
+            ("DateTime", Type::Named("ZonedDateTime".to_string())),
             ("Key", Type::String),
         ] {
             variants.insert(name.to_string(), (zero, VariantPayload::Single(ty, zero)));
         }
     }
-    Some(variants)
-}
-
-/// D-AUTH-TOKENPOLICY1=A: inspectable verifier failures.
-pub(crate) fn core_auth_variants(
-    enum_name: &str,
-) -> Option<std::collections::HashMap<String, (crate::Diagnostics::Span, crate::AST::VariantPayload)>>
-{
-    use crate::Diagnostics::Span;
-    use crate::AST::{VariantField, VariantPayload};
-    if enum_name != "AuthError" {
-        return None;
-    }
-    let zero = Span::new(0, 0);
-    let field = |name: &str, ty: Type| VariantField {
-        name: name.to_string(),
-        name_span: zero,
-        ty,
-        ty_span: zero,
-    };
-    let mut variants = std::collections::HashMap::new();
-    for name in ["InvalidSignature", "WeakKey", "TokenExpired"] {
-        variants.insert(name.to_string(), (zero, VariantPayload::Unit));
-    }
-    for name in [
-        "MalformedToken",
-        "UnsupportedToken",
-        "MissingClaim",
-        "DecodeError",
-    ] {
-        variants.insert(
-            name.to_string(),
-            (zero, VariantPayload::Single(Type::String, zero)),
-        );
-    }
-    variants.insert(
-        "WrongAudience".to_string(),
-        (
-            zero,
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ),
-    );
-    variants.insert(
-        "WrongIssuer".to_string(),
-        (
-            zero,
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ),
-    );
-    variants.insert("TokenNotYetValid".to_string(), (zero, VariantPayload::Unit));
     Some(variants)
 }

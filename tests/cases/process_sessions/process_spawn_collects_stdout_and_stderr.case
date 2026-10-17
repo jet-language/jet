@@ -1,0 +1,18 @@
+# Port of tests/process_sessions.rs:134-149; source verbatim, including leading newline.
+# ORACLE-LITERAL; PENDING-SAME-HEAD (heavy lane paused); have_rustc guard erased.
+requires: os:unix
+requires: tool:sh
+fixture: process_spawn_collects_stdout_and_stderr.fixture
+step default: jet run run.jet
+exit: 0
+stdout: = process_spawn_collects_stdout_and_stderr.out
+step: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default

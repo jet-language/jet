@@ -1,0 +1,47 @@
+# Port of cli_compiler_speed.rs::parallel_check_matches_serial_check.
+fixture: fixtures/parallel
+step serial_multi: jet check main.jet --threads 1
+env: JET_STORE_DIR={work}/store-0-serial
+exit: 1
+stderr: = parallel-serial.stderr
+step: jet check main.jet --threads 8
+env: JET_STORE_DIR={work}/store-0-parallel
+exit: 1
+stdout: == serial_multi
+stderr: == serial_multi
+step serial_imports: jet check {root}/Examples/features/modules/imports/run.jet --threads 1
+env: JET_STORE_DIR={work}/store-1-serial
+step: jet check {root}/Examples/features/modules/imports/run.jet --threads 8
+env: JET_STORE_DIR={work}/store-1-parallel
+stdout: == serial_imports
+stderr: == serial_imports
+step serial_modules: jet check {root}/Examples/features/modules/generic_modules.jet --threads 1
+env: JET_STORE_DIR={work}/store-2-serial
+step: jet check {root}/Examples/features/modules/generic_modules.jet --threads 8
+env: JET_STORE_DIR={work}/store-2-parallel
+stdout: == serial_modules
+stderr: == serial_modules
+step serial_union: jet check {root}/Examples/features/errors/inferred_failure_union.jet --threads 1
+env: JET_STORE_DIR={work}/store-3-serial
+step: jet check {root}/Examples/features/errors/inferred_failure_union.jet --threads 8
+env: JET_STORE_DIR={work}/store-3-parallel
+stdout: == serial_union
+stderr: == serial_union
+step serial_errors: jet check {root}/Examples/features/errors/typed_error_families.jet --threads 1
+env: JET_STORE_DIR={work}/store-4-serial
+step: jet check {root}/Examples/features/errors/typed_error_families.jet --threads 8
+env: JET_STORE_DIR={work}/store-4-parallel
+stdout: == serial_errors
+stderr: == serial_errors
+step serial_generics: jet check {root}/Examples/features/generics/generic_callback_values.jet --threads 1
+env: JET_STORE_DIR={work}/store-5-serial
+step: jet check {root}/Examples/features/generics/generic_callback_values.jet --threads 8
+env: JET_STORE_DIR={work}/store-5-parallel
+stdout: == serial_generics
+stderr: == serial_generics
+step serial_traits: jet check {root}/Examples/features/traits/impl_shape_matrix.jet --threads 1
+env: JET_STORE_DIR={work}/store-6-serial
+step: jet check {root}/Examples/features/traits/impl_shape_matrix.jet --threads 8
+env: JET_STORE_DIR={work}/store-6-parallel
+stdout: == serial_traits
+stderr: == serial_traits

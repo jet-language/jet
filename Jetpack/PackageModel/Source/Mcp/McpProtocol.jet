@@ -26,7 +26,7 @@ MCP_MAX_REVISION_BYTES :: prep { 64 }
 MCP_MAX_IMPLEMENTATION_FIELD_BYTES :: prep { 256 }
 
 // MCP protocol revisions known to this SDK.
-pub enum MCPRevision {
+enum MCPRevision {
     // Session-oriented stable MCP revision.
     Stable20251125
     // Stateless release-candidate MCP revision.
@@ -72,7 +72,7 @@ pub enum MCPRevision {
 }
 
 // Revision-specific JSON codec profile.
-pub enum MCPCodec {
+enum MCPCodec {
     Stable20251125
     Preview20260728
 
@@ -85,7 +85,7 @@ pub enum MCPCodec {
 }
 
 // Local revision selection policy.
-pub enum MCPVersionPolicy {
+enum MCPVersionPolicy {
     // Stable MCP only (the default).
     Stable
     // One exact revision; selecting the preview revision is explicit.
@@ -117,13 +117,13 @@ pub enum MCPVersionPolicy {
 }
 
 // Bounds applied by every MCP codec and structured initialize value.
-pub struct MCPLimits {
+struct MCPLimits {
     // Maximum encoded UTF-8 JSON message size.
-    pub max_message_bytes: Int
+    max_message_bytes: Int
     // Maximum JSON nesting depth for params, results, and capabilities.
-    pub max_schema_depth: Int
+    max_schema_depth: Int
     // Maximum capability entries in one initialize value.
-    pub max_capability_entries: Int
+    max_capability_entries: Int
 
     fn defaults() -> MCPLimits Never! {
         MCPLimits{max_message_bytes: MCP_DEFAULT_MAX_MESSAGE_BYTES, max_schema_depth: MCP_MAX_SCHEMA_DEPTH, max_capability_entries: MCP_DEFAULT_MAX_CAPABILITY_ENTRIES}
@@ -144,11 +144,11 @@ pub struct MCPLimits {
 }
 
 // One local MCP protocol policy.
-pub struct MCPPolicy {
+struct MCPPolicy {
     // Revisions this peer may negotiate.
-    pub versions: MCPVersionPolicy
+    versions: MCPVersionPolicy
     // Wire and structured-value bounds.
-    pub limits: MCPLimits
+    limits: MCPLimits
 
     // Stable-by-default policy.
     fn stable() -> MCPPolicy Never! {
@@ -218,7 +218,7 @@ pub struct MCPPolicy {
 }
 
 // Lifecycle law selected by a negotiated revision.
-pub enum MCPLifecycleProfile {
+enum MCPLifecycleProfile {
     // `initialize` → `initialized` → `shutdown` → `exit`.
     Session
     // No session handshake; each request is independently usable.
@@ -226,7 +226,7 @@ pub enum MCPLifecycleProfile {
 }
 
 // Current peer lifecycle stage.
-pub enum MCPLifecycleState {
+enum MCPLifecycleState {
     New
     Negotiated
     Initializing
@@ -260,7 +260,7 @@ pub enum MCPLifecycleState {
 }
 
 // Client or server role for audit and lifecycle ownership.
-pub enum MCPPeerRole {
+enum MCPPeerRole {
     Client
     Server
 
@@ -273,16 +273,16 @@ pub enum MCPPeerRole {
 }
 
 // Result of successful revision negotiation.
-pub struct MCPNegotiatedProtocol {
-    pub revision: MCPRevision
-    pub codec: MCPCodec
-    pub lifecycle: MCPLifecycleProfile
+struct MCPNegotiatedProtocol {
+    revision: MCPRevision
+    codec: MCPCodec
+    lifecycle: MCPLifecycleProfile
 }
 
 // An implementation identity: non-empty, bounded, control-free fields.
-pub struct MCPImplementation {
-    pub name: String
-    pub version: String
+struct MCPImplementation {
+    name: String
+    version: String
 
     fn new(name: String, version: String) -> MCPImplementation MCPCodecError! {
         implementation :: MCPImplementation{name: name, version: version}
@@ -299,7 +299,7 @@ pub struct MCPImplementation {
 
 // Revision negotiation failure.
 #Error
-pub enum MCPNegotiationError {
+enum MCPNegotiationError {
     InvalidPolicy(String)
     PreviewRequiresOptIn
     PeerVersionListTooLarge(actual: Int, maximum: Int)
@@ -323,7 +323,7 @@ pub enum MCPNegotiationError {
 
 // Lifecycle transition failure.
 #Error
-pub enum MCPLifecycleError {
+enum MCPLifecycleError {
     InvalidState(operation: String, lifecycle: MCPLifecycleState)
     NotNegotiated
     StatelessRevision
@@ -343,7 +343,7 @@ pub enum MCPLifecycleError {
 
 // Codec and structured-value failure.
 #Error
-pub enum MCPCodecError {
+enum MCPCodecError {
     InvalidJSON
     InvalidMessage(String)
     MessageTooLarge(actual: Int, maximum: Int)
@@ -364,11 +364,11 @@ pub enum MCPCodecError {
 }
 
 // Redacted, structured facts suitable for a dossier or trace.
-pub struct MCPAuditFacts {
-    pub role: MCPPeerRole
-    pub negotiated_revision: MCPRevision?
-    pub codec: MCPCodec?
-    pub lifecycle: MCPLifecycleState
+struct MCPAuditFacts {
+    role: MCPPeerRole
+    negotiated_revision: MCPRevision?
+    codec: MCPCodec?
+    lifecycle: MCPLifecycleState
 
     // Stable, secret-free key/value fields.
     fn as_map(self) -> [String: String] Never! {
@@ -389,11 +389,11 @@ pub struct MCPAuditFacts {
 
 // One negotiated MCP peer. Transports own I/O; this type owns protocol and
 // lifecycle state only.
-pub struct MCPPeer {
-    peer_role: MCPPeerRole
-    policy: MCPPolicy
-    negotiated: MCPNegotiatedProtocol?
-    lifecycle: MCPLifecycleState
+struct MCPPeer {
+    priv peer_role: MCPPeerRole
+    priv policy: MCPPolicy
+    priv negotiated: MCPNegotiatedProtocol?
+    priv lifecycle: MCPLifecycleState
 
     fn client(policy: MCPPolicy) -> MCPPeer Never! {
         MCPPeer.new(MCPPeerRole.Client, policy)
@@ -437,7 +437,7 @@ pub struct MCPPeer {
         if self.lifecycle != MCPLifecycleState.New -> return Err(MCPNegotiationError.AlreadyNegotiated)
         negotiated :: self.policy.negotiate(peer_versions)
         self.lifecycle = if negotiated.lifecycle == MCPLifecycleProfile.Stateless -> MCPLifecycleState.Ready else -> MCPLifecycleState.Negotiated
-        self.negotiated = Val(~negotiated)
+        self.negotiated = Val(negotiated.copy())
         Ok(negotiated)
     }
 

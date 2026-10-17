@@ -1,0 +1,13 @@
+# Original: tests/web_dev.rs#embedded_devserver_rejects_hardlinked_source
+# Source selector: tests/web_dev.rs:3725-3758
+# PENDING-SEAM(DFileRaw hardlink; exact original command and byte equality)
+fixture: embedded_devserver_rejects_hardlinked_source.fixture
+env: S5_PORT={free-port:web}
+env: S5_CHECK=0
+requires: os:unix|windows
+write: outside-app.jet app.source
+capture: before = opt-bytes file outside-app.jet
+hardlink: outside-app.jet app.jet
+step: jet dev app.jet
+exit: nonzero
+file: outside-app.jet same-as {cap:before}

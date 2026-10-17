@@ -4,24 +4,24 @@
 // of affected packages so offline realize fails until they rebuild.
 
 // One `(overlay, package)` policy fingerprint.
-pub struct OverlayFingerprint {
-    pub overlay: String
-    pub package: String
-    pub fingerprint: String
+struct OverlayFingerprint {
+    overlay: String
+    package: String
+    fingerprint: String
 }
 
-pub struct OverlayInvalidation {
-    pub overlay: String
-    pub package: String
-    pub policy_fingerprint_before: String
-    pub policy_fingerprint_after: String
-    pub affected_action_keys: [String]
-    pub reason: String
+struct OverlayInvalidation {
+    overlay: String
+    package: String
+    policy_fingerprint_before: String
+    policy_fingerprint_after: String
+    affected_action_keys: [String]
+    reason: String
 }
 
 // Every `(overlay, package)` whose fingerprint changed, in (overlay, package)
 // order. A package without declared actions invalidates `action:<package>`.
-pub fn trust_overlay_invalidations(before: [OverlayFingerprint], after: [OverlayFingerprint], actions_by_package: [String: [String]]) -> [OverlayInvalidation] Never! {
+fn trust_overlay_invalidations(before: [OverlayFingerprint], after: [OverlayFingerprint], actions_by_package: [String: [String]]) -> [OverlayInvalidation] Never! {
     keys := [OverlayFingerprint]{}
     loop entry in before -> &keys.push(entry)
     loop entry in after -> &keys.push(entry)
@@ -33,8 +33,8 @@ pub fn trust_overlay_invalidations(before: [OverlayFingerprint], after: [Overlay
         overlay :: keys[index].overlay
         package :: keys[index].package
         if index > 0 && overlay == previous_overlay && package == previous_package -> next
-        previous_overlay = ~overlay
-        previous_package = ~package
+        previous_overlay = overlay.copy()
+        previous_package = package.copy()
         fingerprint_before :: trust_overlay_fingerprint(before, overlay, package)
         fingerprint_after :: trust_overlay_fingerprint(after, overlay, package)
         if fingerprint_before == fingerprint_after -> next
@@ -61,7 +61,7 @@ fn trust_overlay_fingerprint(entries: [OverlayFingerprint], overlay: String, pac
 
 // Drop each invalidated `package-overlay` record and clear the hash of
 // every record the invalidation names by package or action key.
-pub fn trust_apply_overlay_invalidations(lock: &SemanticLockFile, invalidations: [OverlayInvalidation]) Never! {
+fn trust_apply_overlay_invalidations(lock: &SemanticLockFile, invalidations: [OverlayInvalidation]) Never! {
     loop invalidation in invalidations {
         &lock.remove_records(LockRecordKind.PackageOverlay, "{invalidation.overlay}:{invalidation.package}")
         loop index in 0..<lock.records.len() {

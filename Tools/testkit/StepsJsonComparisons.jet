@@ -1,0 +1,32 @@
+
+fn kit_steps_json_any_contains(value: Dyn, needle: String) -> String? {
+    if value == {
+        .Array(items) -> {
+            loop item in items {
+                if item == {
+                    .Text(text) -> { if text.contains(needle) -> return None }
+                    else -> {}
+                }
+            }
+            return Val("JSON array has no string containing the expected substring")
+        }
+        else -> return Val("JSON any ~ needs an array")
+    }
+}
+
+fn kit_steps_json_same_document(text: String, mode: String, path: String, op: String, other: String) -> String? {
+    left :: kit_steps_json_values(text, mode, path) ?? return Val("JSON left path missing")
+    right :: kit_steps_json_values(text, mode, other) ?? return Val("JSON right path missing")
+    if left.len() == 0 || right.len() == 0 -> return Val("JSON same-document filter selected no values")
+    if op == "#==" {
+        if left.len() != right.len() -> return Val("JSON same-document selection counts differ")
+        loop index in 0..<left.len() {
+            a :: kit_steps_json_size(left[index]) ?? return Val("JSON left count needs an array or object")
+            b :: kit_steps_json_size(right[index]) ?? return Val("JSON right count needs an array or object")
+            if a != b -> return Val("JSON same-document counts differ")
+        }
+        return None
+    }
+    equal :: kit_steps_json_equal(Dyn.Array(left), Dyn.Array(right))
+    if equal == (op == "==") -> None else -> Val("JSON same-document deep comparison failed: {op}")
+}

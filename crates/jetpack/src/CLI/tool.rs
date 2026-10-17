@@ -22,7 +22,7 @@ use crate::Store;
 use crate::Syntax;
 use crate::JSON;
 use crate::SHA256;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_env_model::ModuleEval;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -1145,7 +1145,7 @@ fn record_tool_manifest_locked(
 }
 
 fn parse_tool_manifest(text: &str) -> Result<ToolManifest, String> {
-    let DataTree::Object(root) = JSON::parse(text)? else {
+    let Dyn::Object(root) = JSON::parse(text)? else {
         return Err("user-tools manifest root is not an object".into());
     };
     expect_exact_keys(
@@ -1159,7 +1159,7 @@ fn parse_tool_manifest(text: &str) -> Result<ToolManifest, String> {
         return Err("user-tools manifest schema or profile identity mismatch".into());
     }
 
-    let DataTree::Array(source_values) = tree_field(&root, "sources").unwrap() else {
+    let Dyn::Array(source_values) = tree_field(&root, "sources").unwrap() else {
         return Err("user-tools manifest sources field is not an array".into());
     };
     if source_values.len() > MAX_PROFILE_TOOLS {
@@ -1168,7 +1168,7 @@ fn parse_tool_manifest(text: &str) -> Result<ToolManifest, String> {
     let mut sources = Vec::with_capacity(source_values.len());
     let mut source_names = BTreeSet::new();
     for value in source_values {
-        let DataTree::Object(source) = value else {
+        let Dyn::Object(source) = value else {
             return Err("user-tools manifest source entry is not an object".into());
         };
         expect_exact_keys(
@@ -1201,7 +1201,7 @@ fn parse_tool_manifest(text: &str) -> Result<ToolManifest, String> {
     }
     sources.sort_by(|left, right| left.name.cmp(&right.name));
 
-    let DataTree::Array(tool_values) = tree_field(&root, "tools").unwrap() else {
+    let Dyn::Array(tool_values) = tree_field(&root, "tools").unwrap() else {
         return Err("user-tools manifest tools field is not an array".into());
     };
     if tool_values.len() > MAX_PROFILE_TOOLS {
@@ -1211,7 +1211,7 @@ fn parse_tool_manifest(text: &str) -> Result<ToolManifest, String> {
     let mut tool_names = BTreeSet::new();
     let mut bins = BTreeSet::new();
     for value in tool_values {
-        let DataTree::Object(tool) = value else {
+        let Dyn::Object(tool) = value else {
             return Err("user-tools manifest tool entry is not an object".into());
         };
         expect_exact_keys(
@@ -2063,7 +2063,7 @@ fn migrate_legacy_generations_locked() -> io::Result<()> {
         }
         let metadata = read_bounded(&entry.path().join("meta.json"))?;
         let parsed = JSON::parse(&metadata).map_err(io::Error::other)?;
-        let DataTree::Object(root) = parsed else {
+        let Dyn::Object(root) = parsed else {
             return Err(io::Error::other("tool metadata root is not an object"));
         };
         if tree_field(&root, "schema").is_none() {
@@ -2644,7 +2644,7 @@ fn parse_legacy_generation_meta(
     text: &str,
     expected_generation: u64,
 ) -> Result<Vec<InstalledTool>, String> {
-    let DataTree::Object(root) = JSON::parse(text)? else {
+    let Dyn::Object(root) = JSON::parse(text)? else {
         return Err("legacy profile metadata root is not an object".into());
     };
     expect_exact_keys(
@@ -2658,7 +2658,7 @@ fn parse_legacy_generation_meta(
         return Err("legacy profile metadata identity mismatch".into());
     }
     let _ = json_field_u64(&root, "created_at")?;
-    let DataTree::Array(entries) = tree_field(&root, "tools").ok_or("legacy metadata lacks tools")?
+    let Dyn::Array(entries) = tree_field(&root, "tools").ok_or("legacy metadata lacks tools")?
     else {
         return Err("legacy profile tools field is not an array".into());
     };
@@ -2671,7 +2671,7 @@ fn parse_legacy_generation_meta(
     let mut tools = Vec::with_capacity(entries.len());
     let mut seen_bins = std::collections::BTreeSet::new();
     for entry in entries {
-        let DataTree::Object(tool) = entry else {
+        let Dyn::Object(tool) = entry else {
             return Err("legacy profile tool entry is not an object".into());
         };
         expect_exact_keys(
@@ -2737,16 +2737,16 @@ fn parse_legacy_generation_meta(
 }
 
 fn tree_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
 fn expect_exact_keys(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     expected: &[&str],
     label: &str,
 ) -> Result<(), String> {
@@ -2764,7 +2764,7 @@ fn expect_exact_keys(
 }
 
 fn json_field_string<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
 ) -> Result<&'a str, String> {
     tree_field(object, key)
@@ -2773,7 +2773,7 @@ fn json_field_string<'a>(
 }
 
 fn bounded_json_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     key: &str,
 ) -> Result<String, String> {
     let value = json_field_string(object, key)?;
@@ -2783,10 +2783,10 @@ fn bounded_json_string(
     Ok(value.to_string())
 }
 
-fn json_field_u64(object: &[(String, DataTree)], key: &str) -> Result<u64, String> {
+fn json_field_u64(object: &[(String, Dyn)], key: &str) -> Result<u64, String> {
     match tree_field(object, key) {
-        Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
-        Some(DataTree::Float(value))
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| format!("profile field `{key}` is not an exact integer")),
+        Some(Dyn::Float(value))
             if value.is_finite()
                 && *value >= 0.0
                 && value.fract() == 0.0
@@ -2800,18 +2800,18 @@ fn json_field_u64(object: &[(String, DataTree)], key: &str) -> Result<u64, Strin
 }
 
 fn json_string_array(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     key: &str,
 ) -> Result<Vec<String>, String> {
     json_bounded_string_array(object, key, 255)
 }
 
 fn json_bounded_string_array(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     key: &str,
     max_len: usize,
 ) -> Result<Vec<String>, String> {
-    let Some(DataTree::Array(values)) = tree_field(object, key) else {
+    let Some(Dyn::Array(values)) = tree_field(object, key) else {
         return Err(format!("profile field `{key}` is not an array"));
     };
     values

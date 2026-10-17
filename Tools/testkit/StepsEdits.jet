@@ -1,0 +1,91 @@
+use core.files as files
+
+struct KitSourceEdit {
+    file: String
+    start: Int
+    end: Int
+    text: String
+}
+
+fn kit_steps_edits_valid(words: [String]) -> Bool {
+    if words.len() < 3 || !kit_steps_subject_valid(words[0]) -> return false
+    subject :: kit_steps_subject(words[0])
+    offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
+    if words.len() != 3 + offset || words[1 + offset] != "doc" -> return false
+    if offset == 1 && !kit_steps_relative_path(words[1]) -> return false
+    kit_steps_json_path(kit_steps_json_preview(words[2 + offset])) != None
+}
+
+fn kit_steps_edit_field(tree: Dyn, key: String) -> Dyn? {
+    if tree == { .Object(_) -> tree.get(key) else -> None }
+}
+
+fn kit_steps_edit(tree: Dyn) -> KitSourceEdit? {
+    file :: kit_steps_edit_field(tree, "file") ?? return None
+    span :: kit_steps_edit_field(tree, "span") ?? return None
+    start :: kit_steps_edit_field(span, "start") ?? return None
+    end :: kit_steps_edit_field(span, "end") ?? return None
+    text :: kit_steps_edit_field(tree, "new_text") ?? return None
+    file_name :: if file == { .Text(value) -> value else -> { return None } }
+    start_byte :: start.int() ?? return None
+    end_byte :: end.int() ?? return None
+    new_text :: if text == { .Text(value) -> value else -> { return None } }
+    if start_byte < 0 || end_byte < start_byte -> return None
+    Val(KitSourceEdit{file: file_name, start: start_byte, end: end_byte, text: new_text})
+}
+
+fn kit_steps_edit_boundary(bytes: [U8], offset: Int) -> Bool {
+    offset >= 0 && offset <= bytes.len() && (offset == bytes.len() || bytes[offset] < (U8{128}) || bytes[offset] >= (U8{192}))
+}
+
+fn kit_steps_edits(step: KitStep, context: KitStepCtx, state: KitStepState) -> KitStepResult {
+    selector :: step.argv[0]
+    subject :: kit_steps_subject(selector)
+    offset :: if subject == "file" || subject == "file?" -> 1 else -> 0
+    source :: kit_steps_capture_subject(selector, if offset == 1 -> step.argv[1] else -> "", context, state) ?? return kit_steps_action_error(state, "apply-edits input: {err}")
+    values :: kit_steps_json_values(source, "doc", step.argv[2 + offset]) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits document or path is invalid")}
+    edits := [KitSourceEdit]{}
+    loop value in values {
+        rows :: if value == { .Array(items) -> items else -> [value] }
+        loop row in rows {
+            edit := kit_steps_edit(row) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits needs file, span.start/end integers and new_text")}
+            edit.file = kit_steps_work_path(edit.file, context.env, context.work, context.scratch, state.built) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits file escapes work directory")}
+            &edits.push(edit)
+        }
+    }
+    if values.len() == 0 -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits selection is empty")}
+    paths := [String]{}
+    loop edit in edits {
+        if !kit_expect_named(paths, edit.file) -> &paths.push(edit.file)
+    }
+    loop path in paths {
+        changes := [KitSourceEdit]{}
+        loop edit in edits {
+            if edit.file == path -> &changes.push(edit)
+        }
+        &changes.sort_by(edit -> -edit.start)
+        original :: files.read_bytes(path) ?? return kit_steps_action_error(state, "apply-edits read: {err}")
+        prior := original.len()
+        loop edit in changes {
+            if edit.end > prior || !kit_steps_edit_boundary(original, edit.start) || !kit_steps_edit_boundary(original, edit.end) -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "apply-edits span out of range, overlapping, or not a UTF-8 boundary")}
+            prior = edit.start
+        }
+        // Descending spans refer to original bytes. Build the equivalent final
+        // file in one forward pass, avoiding a full copy per replacement.
+        result := [U8]{}
+        cursor := 0
+        index := changes.len()
+        loop index > 0 {
+            index -= 1
+            edit :: changes[index]
+            loop at in cursor..<edit.start -> &result.push(original[at])
+            loop byte in edit.text.bytes() -> &result.push(byte)
+            cursor = edit.end
+        }
+        loop at in cursor..<original.len() -> &result.push(original[at])
+        files.write_bytes(path, result) ?? return kit_steps_action_error(state, "apply-edits write: {err}")
+    }
+    result := state
+    result.last = kit_steps_action_run()
+    KitStepResult{state: result, verdict: kit_expect_verdict("PASS", "")}
+}

@@ -1,0 +1,16 @@
+# HAND-PORT tests/jetpack_engine.rs:83-113 hangar_path_reports_the_native_user_data_location
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: hangar_path_reports_the_native_user_data_location.fixture
+env: NO_COLOR=1
+mkdir: data
+unset: JETPACK_ROOT
+unset: XDG_STATE_HOME
+unset: LOCALAPPDATA
+env: XDG_DATA_HOME={work}/data
+step: jet run {work}/expected-path.jet -- {work}/data
+exit: 0
+capture: expected stdout doc $
+step: jet hangar path --no-color
+exit: 0
+stdout.trim: = "{cap:expected}" # original String equality; expected itself is NOT trimmed
+

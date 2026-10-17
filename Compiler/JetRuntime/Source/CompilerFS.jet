@@ -1,0 +1,304 @@
+// Compiler-required whole-file leaves. Core/files owns the fault checkpoints,
+// UTF-8 validation and mapped-writer refusal; these leaves do only host work.
+// Linux transport uses the existing HostFiles/HostProcess and audited OS layer.
+fn compiler_fs_error(kind: I64, operation: I64, path: I64, code: I64, cause: I64, error: I64) -> I64 {
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    rt_text_store(value, kind)
+    rt_text_store(value + I64{8}, operation)
+    rt_text_store(value + I64{16}, jet_rt_string_clone(path))
+    rt_text_store(value + I64{24}, if (code == I64{0}) -> I64{0} else -> I64{1})
+    rt_text_store(value + I64{32}, code)
+    rt_text_store(value + I64{40}, cause)
+    rt_text_store(value + I64{48}, I64{0})
+    rt_text_store(error, value)
+    I64{0}
+}
+// JSONDyn.rs:2-22 jet_std::io_error_at: only these std ErrorKinds have their
+// own IOError arm. AlreadyExists, Unsupported and the rest are Other.
+fn compiler_fs_errno(operation: I64, path: I64, code: I64, error: I64) -> I64 {
+    kind :: if {
+        (code == I64{2}) -> HOST_IO_KIND_NOT_FOUND
+        (code == I64{1} || code == I64{13}) -> HOST_IO_KIND_PERMISSION_DENIED
+        (code == I64{22}) -> HOST_IO_KIND_INVALID_INPUT
+        (code == I64{32} || code == I64{107}) -> HOST_IO_KIND_CLOSED
+        (code == I64{110}) -> HOST_IO_KIND_TIMED_OUT
+        else -> HOST_IO_KIND_OTHER
+    }
+    compiler_fs_error(kind, operation, path, code, host_errno_cause(code), error)
+}
+fn compiler_fs_path(path: I64, operation: I64, error: I64) -> Bool {
+    at := I64{0}
+    loop at < rt_text_len(path) {
+        if (rt_text_byte(rt_text_data(path) + at) == I64{0}) {
+            _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, operation, path, I64{0}, jet_rt_string_clone(rt_static_text("file name contained an unexpected NUL byte")), error)
+            return false
+        }
+        at += I64{1}
+    }
+    true
+}
+fn compiler_fs_fault(path: I64, error: I64) -> Bool {
+    if !jet_fault_should_fail(rt_static_text("FS.Read")) -> return false
+    _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(path), jet_rt_string_clone(rt_static_text("fault injected: FS.Read")), error)
+    true
+}
+// Return exactly len native U8 elements; the caller's list owns this allocation.
+fn compiler_fs_bytes_take(bytes: I64, capacity: I64, length: I64, output: I64, len: I64) {
+    data := I64{0}
+    if (length != I64{0}) {
+        if (RT_HOST_U8_STRIDE == I64{1} && length == capacity) { data = bytes } else {
+            data = jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+            at := I64{0}
+            loop at < length {
+                host_u8_put(data, at, rt_text_byte(bytes + at))
+                at += I64{1}
+            }
+        }
+    }
+    if (data != bytes) -> jet_rt_free(bytes, capacity, I64{8})
+    rt_text_store(output, data)
+    rt_text_store(len, length)
+}
+#Export(c) fn jet_files_read_bytes_os(path: I64, output: I64, len: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    name :: fd_c_path(path)
+    fd :: host_call(I64{2}, name, I64{524288}, I64{0})
+    if (fd < I64{0}) {
+        fd_c_path_drop(name, path)
+        return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
+    }
+    capacity := I64{8192}
+    bytes := jet_rt_alloc(capacity, I64{8})
+    used := I64{0}
+    failure := I64{0}
+    loop {
+        // Probe EOF before growing, avoiding a final unnecessary reallocation.
+        if (used == capacity) {
+            // The now-unused terminated path allocation lends its first byte.
+            probe :: name
+            count := I64{0}
+            loop {
+                count = host_call(I64{0}, fd, probe, I64{1})
+                if (count != I64{-4}) -> break
+            }
+            if (count <= I64{0}) {
+                failure = count
+                break
+            }
+            grown :: capacity * I64{2}
+            next_bytes :: jet_rt_alloc(grown, I64{8})
+            rt_text_bytes_copy(next_bytes, bytes, used)
+            rt_text_put(next_bytes + used, rt_text_byte(probe))
+            jet_rt_free(bytes, capacity, I64{8})
+            bytes = next_bytes
+            capacity = grown
+            used += I64{1}
+        }
+        count :: host_call(I64{0}, fd, bytes + used, capacity - used)
+        if (count == I64{-4}) -> next
+        if (count <= I64{0}) {
+            failure = count
+            break
+        }
+        used += count
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    fd_c_path_drop(name, path)
+    if (failure < I64{0}) {
+        jet_rt_free(bytes, capacity, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, -failure, error)
+    }
+    compiler_fs_bytes_take(bytes, capacity, used, output, len)
+    I64{1}
+}
+#Export(c) fn jet_files_write_bytes_os(path: I64, data: I64, length: I64, error: I64) -> I64 {
+    // O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+    compiler_fs_write_open(path, data, length, error, I64{524865})
+}
+#Export(c) fn jet_files_append_bytes_os(path: I64, data: I64, length: I64, error: I64) -> I64 {
+    // O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC
+    compiler_fs_write_open(path, data, length, error, I64{525377})
+}
+// Opens `path` with `flags` (mode 0666 before the umask) and writes all of
+// `data`; 1, or 0 with the IOError written through `error`.
+fn compiler_fs_write_open(path: I64, data: I64, length: I64, error: I64, flags: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
+    name :: fd_c_path(path)
+    fd :: host_call(I64{2}, name, flags, I64{438})
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -fd, error)
+    temporary :: RT_HOST_U8_STRIDE != I64{1} && length != I64{0}
+    packed :: if temporary -> jet_rt_alloc(length, I64{8}) else -> data
+    if temporary -> net_copy_packed(data, length, packed)
+    at := I64{0}
+    failure := I64{0}
+    loop at < length {
+        count :: host_call(I64{1}, fd, packed + at, length - at)
+        if (count == I64{-4}) -> next
+        if (count <= I64{0}) {
+            failure = if (count == I64{0}) -> HOST_WRITE_ZERO else -> count
+            break
+        }
+        at += count
+    }
+    if temporary -> jet_rt_free(packed, length, I64{8})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if (failure == HOST_WRITE_ZERO) -> return host_io_other_take(HOST_IO_OP_WRITE, jet_rt_string_clone(path), host_write_zero_text(), error)
+    if (failure < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -failure, error)
+    I64{1}
+}
+#Export(c) fn jet_files_create_dirs_os(path: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_WRITE, error) -> return I64{0}
+    length :: rt_text_len(path)
+    if (length == I64{0}) -> return I64{1}
+    name :: fd_c_path(path)
+    scratch :: jet_rt_alloc(I64{128}, I64{8})
+    at := I64{1}
+    failure := I64{0}
+    loop at <= length {
+        if (at == length || rt_text_byte(name + at) == I64{47}) {
+            saved :: rt_text_byte(name + at)
+            rt_text_put(name + at, I64{0})
+            result :: host_call(I64{83}, name, I64{511}, I64{0})
+            if (result < I64{0}) {
+                // create_dir_all accepts existing directories, not existing files.
+                #Unsafe("the prefix remains terminated and scratch lends 128 writable portable stat-fact bytes") {
+                    stat :: os_stat_facts_i64(I64{4}, name, scratch)
+                    if (stat < I64{0} || (rt_text_word(scratch + I64{16}).bit_and(I64{61440})) != I64{16384}) -> failure = result
+                }
+            }
+            rt_text_put(name + at, saved)
+            if (failure < I64{0}) -> break
+        }
+        at += I64{1}
+    }
+    jet_rt_free(scratch, I64{128}, I64{8})
+    fd_c_path_drop(name, path)
+    if (failure < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_WRITE, path, -failure, error)
+    I64{1}
+}
+#Export(c) fn jet_files_read_link_os(path: I64, output: I64, error: I64) -> I64 {
+    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    capacity := I64{256}
+    loop {
+        bytes :: jet_rt_alloc(capacity, I64{8})
+        count :: jet_fs_readlink_raw(path, bytes, capacity, scratch)
+        if (count < I64{0}) {
+            code :: rt_text_word(scratch + I64{8})
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
+        }
+        if (count < capacity) {
+            rt_text_store(output, rt_text_lossy(bytes, count))
+            jet_rt_free(bytes, capacity, I64{8})
+            jet_rt_free(scratch, I64{32}, I64{8})
+            return I64{1}
+        }
+        jet_rt_free(bytes, capacity, I64{8})
+        capacity *= I64{2}
+    }
+}
+// JetFileReader's sole descriptor owner is the shared FD72 carrier. No Rust
+// BufReader or second descriptor registry survives the nonblocking open.
+#Export(c) fn jet_std_files_open_reader_nonblocking(path: I64, output: I64, error: I64) -> I64 {
+    if compiler_fs_fault(path, error) -> return I64{0}
+    if !compiler_fs_path(path, HOST_IO_OP_READ, error) -> return I64{0}
+    name :: fd_c_path(path)
+    fd :: host_call(I64{2}, name, I64{526336}, I64{0})
+    fd_c_path_drop(name, path)
+    if (fd < I64{0}) -> return compiler_fs_errno(HOST_IO_OP_READ, path, -fd, error)
+    rt_text_store(output, fd_new(fd, path, false))
+    I64{1}
+}
+#Export(c) fn jet_rt_handle_drop_jet_file_reader(reader: I64) { jet_fd_drop_raw(reader) }
+#Export(c) fn jet_std_file_reader_path(reader: I64) -> I64 { jet_fd_path_raw(reader) }
+#Export(c) fn jet_rt_record_get_jet_file_reader_path(reader: I64) -> I64 { jet_fd_path_raw(reader) }
+#Export(c) fn jet_std_file_reader_read(reader: I64, maximum: I64, output: I64, len: I64, error: I64) -> I64 {
+    path :: fd_word(reader, I64{24})
+    if compiler_fs_fault(path, error) -> return I64{0}
+    limit := I64{16777216}
+    if (jet_int_compare(maximum, limit) < I64{0}) {
+        if (jet_int_compare(maximum, I64{0}) <= I64{0}) {
+            count :: if int_fits(maximum, U64{9223372036854775808}) -> jet_int_owned_to_i64(maximum) else -> I64{-9223372036854775808}
+            cause :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(cause, rt_static_text("read needs a positive byte count, got "))
+            rt_text_push_number(cause, count)
+            return compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_READ, path, I64{0}, jet_rt_string_builder_finish(cause), error)
+        }
+        limit = jet_int_owned_to_i64(maximum)
+    }
+    scratch :: jet_rt_alloc(I64{32}, I64{8})
+    bytes :: jet_rt_alloc(limit, I64{8})
+    count := I64{0}
+    loop {
+        count = jet_fd_read_raw(reader, bytes, limit, scratch)
+        if (count >= I64{0} || rt_text_word(scratch + I64{8}) != I64{4}) -> break
+    }
+    if (count < I64{0}) {
+        code :: rt_text_word(scratch + I64{8})
+        jet_rt_free(bytes, limit, I64{8})
+        jet_rt_free(scratch, I64{32}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, path, code, error)
+    }
+    jet_rt_free(scratch, I64{32}, I64{8})
+    compiler_fs_bytes_take(bytes, limit, count, output, len)
+    I64{1}
+}
+
+fn compiler_fs_time_ns(seconds: I64, nanos: I64) -> I64 {
+    scaled :: if (seconds > I64{9223372036}) -> I64{9223372036854775807} else if (seconds < I64{-9223372036}) -> I64{-9223372036854775808} else -> seconds * I64{1000000000}
+    if (scaled > I64{9223372036854775807} - nanos) -> I64{9223372036854775807} else -> scaled + nanos
+}
+// FileHandles.rs:571-616 jet_fs_stat_row from StatFacts128 and BirthTime24:
+// kind, size, mode, readonly, device, inode, links, owner, size_on_disk,
+// modified_ns, changed_ns, created present, created_ns. Shared by every stat.
+fn compiler_fs_stat_row(facts: I64, birth: I64, output: I64, len: I64) {
+    mode :: rt_text_word(facts + I64{16})
+    bits :: mode.bit_and(I64{61440})
+    kind :: if {
+        (bits == I64{32768}) -> I64{0}
+        (bits == I64{16384}) -> I64{1}
+        (bits == I64{40960}) -> I64{2}
+        (bits == I64{4096}) -> I64{3}
+        (bits == I64{49152}) -> I64{4}
+        (bits == I64{8192}) -> I64{5}
+        (bits == I64{24576}) -> I64{6}
+        else -> I64{7}
+    }
+    row :: jet_rt_alloc(I64{104}, I64{8})
+    rt_text_store(row, kind)
+    rt_text_store(row + I64{8}, rt_text_word(facts + I64{56}))
+    rt_text_store(row + I64{16}, mode.bit_and(I64{4095}))
+    rt_text_store(row + I64{24}, if ((mode.bit_and(I64{146})) == I64{0}) -> I64{1} else -> I64{0})
+    rt_text_store(row + I64{32}, rt_text_word(facts))
+    rt_text_store(row + I64{40}, rt_text_word(facts + I64{8}))
+    rt_text_store(row + I64{48}, rt_text_word(facts + I64{24}))
+    rt_text_store(row + I64{56}, rt_text_word(facts + I64{32}))
+    blocks :: rt_text_word(facts + I64{112})
+    rt_text_store(row + I64{64}, if (blocks > I64{18014398509481983}) -> I64{9223372036854775807} else if (blocks < I64{-18014398509481984}) -> I64{-9223372036854775808} else -> blocks * I64{512})
+    rt_text_store(row + I64{72}, compiler_fs_time_ns(rt_text_word(facts + I64{80}), rt_text_word(facts + I64{88})))
+    rt_text_store(row + I64{80}, compiler_fs_time_ns(rt_text_word(facts + I64{96}), rt_text_word(facts + I64{104})))
+    present :: rt_text_word(birth) != I64{0}
+    rt_text_store(row + I64{88}, if present -> I64{1} else -> I64{0})
+    rt_text_store(row + I64{96}, if present -> compiler_fs_time_ns(rt_text_word(birth + I64{8}), rt_text_word(birth + I64{16})) else -> I64{0})
+    rt_text_store(output, row)
+    rt_text_store(len, I64{13})
+}
+#Export(c) fn jet_std_file_reader_stat(reader: I64, output: I64, len: I64, error: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{184}, I64{8})
+    facts :: scratch
+    birth :: scratch + I64{128}
+    errno :: scratch + I64{152}
+    jet_fd_stat_raw(reader, facts, errno)
+    if (rt_text_word(errno) != I64{0}) {
+        code :: rt_text_word(errno + I64{8})
+        jet_rt_free(scratch, I64{184}, I64{8})
+        return compiler_fs_errno(HOST_IO_OP_READ, fd_word(reader, I64{24}), code, error)
+    }
+    jet_fd_created_raw(reader, birth, errno)
+    compiler_fs_stat_row(facts, birth, output, len)
+    jet_rt_free(scratch, I64{184}, I64{8})
+    I64{1}
+}

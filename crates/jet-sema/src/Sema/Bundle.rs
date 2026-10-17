@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 
 mod Comptime;
 pub(super) mod ComptimeReuse;
-mod Units;
+pub(crate) mod Units;
 
 mod GenericModules;
 mod InlineCalls;
@@ -29,7 +29,7 @@ mod Validation;
 
 pub use Comptime::bundle_has_comptime_evaluation;
 use Comptime::stmts_have_comptime_evaluation;
-use Units::{inject_units_prelude, resolve_unit_dimensions};
+use Units::{inject_units_prelude, resolve_default_time_literals, resolve_unit_dimensions};
 pub use PackageSeal::{
     sealed_package_count, with_package_records, PackageRecordStore, PackageReuse,
     PackageReuseRow,
@@ -41,7 +41,6 @@ pub(crate) use GenericModules::expand_generic_module_aliases;
 pub(crate) use GenericModules::hoist_inline_module_member_types;
 pub(crate) use GenericModules::module_type_name;
 pub use GenericModules::specialize_function_types;
-use GenericModules::{clone_enum, clone_struct};
 use Outputs::{cli_entry_param_shape, no_run_error, resolve_outputs, CLIEntryShape};
 use Pipeline::{
     check_bundle_opts_for_output as pipeline_check_bundle_opts_for_output,
@@ -313,6 +312,7 @@ fn fold_multi_head_function(
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        footprint: Default::default(),
     }];
     folded.body = vec![Stmt::Switch {
         subject,
@@ -985,7 +985,6 @@ fn incremental_module_interface(module: &crate::AST::LoadedModule) -> Vec<u8> {
         &module.alias,
         &module.imports,
         module.web_target_ceiling,
-        module.pub_file,
         module.no_prelude,
         &module.default_target,
         &module.html_path,
@@ -1231,6 +1230,10 @@ fn builtin_type_registry() -> TypeRegistry {
     );
     TypeRegistry {
         types,
+        source_owned_types: HashSet::new(),
+        core_source_module: None,
+        opaque_methods: HashMap::new(),
+        operator_signatures: HashMap::new(),
         error_types: HashSet::new(),
         unit_types,
         unit_facts,
@@ -1771,7 +1774,7 @@ fn populate_name_ledger(
     ledger: &mut jet_foundation::Names::NameLedger,
 ) {
     for (module_idx, module) in bundle.modules.iter().enumerate() {
-        let package = jet_foundation::Names::package_scope_for(&module.path, &bundle.project_root);
+        let package = states[module_idx].package_scope.clone();
         ledger.set_module(
             module_idx,
             module.alias.clone(),
@@ -1882,12 +1885,13 @@ fn populate_name_ledger(
                         // D-MOD-CYCLE1=A: a dependency package is bound through
                         // one member file; the name belongs to whichever member
                         // declares it.
-                        let owner = std::iter::once(*target_module)
-                            .chain(ledger.namespace_siblings(*target_module))
-                            .find(|&candidate| {
-                                module_declares(&bundle.modules[candidate].items, original)
-                            })
-                            .unwrap_or(*target_module);
+                        let owner = if module_declares(&bundle.modules[*target_module].items, original) {
+                            *target_module
+                        } else {
+                            ledger.namespace_owner(*target_module, original)
+                                .filter(|&candidate| module_declares(&bundle.modules[candidate].items, original))
+                                .unwrap_or(*target_module)
+                        };
                         Some((
                             format!("{}.{}", bundle.modules[owner].alias, original),
                             Some(owner),
@@ -2019,7 +2023,7 @@ pub fn check_bundle_for_output_opts_with_effect_facts(
     output: &str,
     no_os: bool,
     gates: crate::Policy::GateSet,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(bundle, mode, no_os, gates, Some(output), None)
 }
 
@@ -2027,7 +2031,7 @@ pub fn check_bundle_for_output_opts_with_effect_facts(
 pub fn check_bundle_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2046,7 +2050,7 @@ pub fn check_bundle_with_effect_facts(
 pub fn check_bundle_with_effect_facts_for_build(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output_with_context(
         bundle,
         mode,
@@ -2138,7 +2142,7 @@ pub fn check_bundle_with_effect_facts_incremental(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     cache: &mut IncrementalSemaCache,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2166,7 +2170,7 @@ pub fn check_bundle_no_os(bundle: &mut ProgramBundle, mode: CompileMode) -> Vec<
 pub fn check_bundle_no_os_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(
         bundle,
         mode,
@@ -2191,7 +2195,7 @@ pub fn check_bundle_gates_with_effect_facts(
     bundle: &mut ProgramBundle,
     mode: CompileMode,
     gates: crate::Policy::GateSet,
-) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts) {
+) -> (Vec<Diagnostic>, super::Effects::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>) {
     pipeline_check_bundle_opts_for_output(bundle, mode, false, gates, None, None)
 }
 
@@ -2320,13 +2324,13 @@ mod structure_tests {
                 path: std::path::PathBuf::from("cache-accounting.jet"),
                 display: "cache-accounting.jet".to_string(),
                 source: source.to_string(),
+                core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
                 alias: "main".to_string(),
                 imports: std::mem::take(&mut program.imports),
                 items: std::mem::take(&mut program.items),
                 script_body: std::mem::take(&mut program.script_body),
                 block_spans: std::mem::take(&mut program.block_spans),
                 web_target_ceiling: program.web_target_ceiling,
-                pub_file: program.pub_file,
                 no_prelude: program.no_prelude,
                 default_target: program.default_target,
                 html_path: program.html_path,
@@ -2352,6 +2356,151 @@ mod structure_tests {
             active_os: crate::Syntax::OSTarget::host(),
             build_facts: Default::default(),
             edition: "2027".to_string(),
+        }
+    }
+
+    fn typed_scalar_module_check(bundle: &mut ProgramBundle) -> Vec<Diagnostic> {
+        static INSTALL: std::sync::Once = std::sync::Once::new();
+        INSTALL.call_once(jet_codegen::Codegen::MIREval::install_mir_bridge);
+        check_bundle(bundle, CompileMode::Check)
+    }
+
+    #[test]
+    fn typed_scalar_module_globals_preserve_checked_carriers() {
+        let source = include_str!("../../../../Compiler/JetSema/Tests/ScalarGlobalFixtures.jet");
+        let mut bundle = incremental_bundle(source);
+        let diagnostics = typed_scalar_module_check(&mut bundle);
+        assert!(diagnostics.iter().all(|diagnostic| diagnostic.severity != crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        for (name, expected) in [
+            ("root", Type::IntN { signed: true, bits: 64 }),
+            ("argc", Type::IntN { signed: true, bits: 64 }),
+            ("small", Type::IntN { signed: false, bits: 8 }),
+            ("enabled", Type::Bool),
+            ("fraction", Type::Float32),
+            ("precise", Type::Float),
+            ("CONSTANT_I64", Type::IntN { signed: true, bits: 64 }),
+        ] {
+            let constant = bundle.modules[0].items.iter().find_map(|item| {
+                if let Item::Const(constant) = item {
+                    (constant.name == name).then_some(constant)
+                } else {
+                    None
+                }
+            }).unwrap();
+            assert_eq!(constant.ty.as_ref(), Some(&expected), "{name}");
+            assert!(constant.ct.is_some(), "{name} must be initialized once from checked scalar data");
+        }
+    }
+
+    #[test]
+    fn typed_scalar_module_storage_rejects_nonliteral_initializers() {
+        for source in [
+            "fn make() -> Int { 0 }\nvalue := I64{make()}\nfn run() {}\n",
+            "value := I64{1 + 2}\nfn run() {}\n",
+            "struct CellValue { field: Int }\nvalue := CellValue{field: 1}\nfn run() {}\n",
+        ] {
+            let mut bundle = incremental_bundle(source);
+            let diagnostics = typed_scalar_module_check(&mut bundle);
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0622"), "{source}\n{diagnostics:#?}");
+        }
+    }
+
+    #[test]
+    fn typed_scalar_module_storage_checks_literal_range() {
+        let mut bundle = incremental_bundle("value := U8{256}\nfn run() {}\n");
+        let diagnostics = typed_scalar_module_check(&mut bundle);
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error), "{diagnostics:#?}");
+        assert!(!diagnostics.iter().any(|diagnostic| diagnostic.code == "E0622"), "a scalar literal must reach normal checked conversion diagnostics: {diagnostics:#?}");
+    }
+    #[test]
+    fn checked_nominal_contexts_share_reachable_module_bodies() {
+        let mut bundle = incremental_bundle("fn run() {}\n");
+        for (alias, source) in [
+            ("shared", "pub fn shared_value() -> Int { 1 }\n"),
+            ("left", "use shared\nfn left() -> Int { shared.shared_value() }\n"),
+            ("right", "use shared\nfn right() -> Int { shared.shared_value() }\n"),
+        ] {
+            let mut module = incremental_bundle(source).modules.remove(0);
+            module.path = std::path::PathBuf::from(format!("{alias}.jet"));
+            module.display = format!("{alias}.jet");
+            module.alias = alias.to_string();
+            bundle.modules.push(module);
+        }
+        let (diagnostics, _, facts) =
+            check_bundle_with_effect_facts(&mut bundle, CompileMode::Check);
+        assert!(
+            diagnostics.iter().all(|diagnostic|
+                diagnostic.severity != crate::Diagnostics::Severity::Error),
+            "{diagnostics:#?}"
+        );
+        let shared_body = |index: usize| facts[index].core_source_bodies.values()
+            .find(|body| body.functions.contains_key("shared_value"))
+            .expect("each importing context retains the shared function body");
+        assert!(std::sync::Arc::ptr_eq(shared_body(2), shared_body(3)));
+        assert!(!shared_body(2).functions["shared_value"].body.is_empty());
+    }
+
+    #[test]
+    fn original_error_supplier_retains_one_source_owner_and_parser_provenance() {
+        let mut bundle = incremental_bundle("struct Message { value: Int }\nfn run() {}\n");
+        let user_items = bundle.modules[0].items.len();
+        let program = crate::Sema::Prelude::error_prelude_program().unwrap();
+        let owner = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap();
+        assert_eq!(owner, 1);
+        assert_eq!(bundle.entry, 0);
+        assert_eq!(bundle.modules[0].items.len(), user_items);
+        assert!(bundle.modules[0].items.iter().all(|item|
+            !matches!(item, Item::Struct(definition) if definition.compiler_builtin_error)));
+        let source_rows = program.items.iter().filter_map(|item| match item {
+            Item::Struct(definition) => Some(definition),
+            _ => None,
+        }).collect::<Vec<_>>();
+        assert_eq!(source_rows.len(), 7, "the original supplier declares seven nominal rows");
+        assert_eq!(bundle.modules[owner].items.len(), source_rows.len());
+        for (item, original) in bundle.modules[owner].items.iter().zip(source_rows) {
+            let Item::Struct(retained) = item else { panic!("original supplier row changed kind") };
+            assert!(retained.compiler_builtin_error);
+            assert_eq!(retained.name, original.name);
+            assert_eq!(retained.span, original.span);
+            assert_eq!(retained.name_span, original.name_span);
+        }
+        assert_eq!(crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap(), owner);
+        assert_eq!(bundle.modules.len(), 2, "rechecking retains the same source owner");
+    }
+
+    #[test]
+    fn original_error_supplier_rejects_changed_source_custody() {
+        let mut bundle = incremental_bundle("fn run() {}\n");
+        let owner = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap();
+        bundle.modules[owner].source.push('\n');
+        let diagnostics = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"));
+    }
+
+    #[test]
+    fn original_error_supplier_rejects_changed_alias_custody() {
+        let mut bundle = incremental_bundle("fn run() {}\n");
+        let owner = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap();
+        bundle.modules[owner].alias = crate::Syntax::generated_path("other/Errors.jet");
+        let diagnostics = crate::Sema::Prelude::retain_error_prelude_module(&mut bundle).unwrap_err();
+        assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0003"));
+        assert_eq!(bundle.modules.len(), 2, "a changed alias does not create another owner");
+        assert!(bundle.modules[owner].items.iter().any(|item|
+            matches!(item, Item::Struct(definition) if definition.compiler_builtin_error)));
+    }
+
+    #[test]
+    fn original_private_error_names_are_denied_in_normal_source() {
+        for name in [
+            "__jet_ErrorContextFrame", "__jet_ErrorConversion", "__jet_ErrorField",
+            "__jet_ErrorSpan", "__jet_ErrorDetails", "__jet_ErrorMetadata",
+        ] {
+            let (_, diagnostics) = crate::Lexer::lex(&format!("struct {name} {{}}\n"));
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"),
+                "{name} must not become a legal user declaration: {diagnostics:?}");
+            let (_, diagnostics) = crate::Lexer::lex(&format!("use other.[{name} as Metadata]\n"));
+            assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0067"),
+                "{name} must not become a legal nonowner alias: {diagnostics:?}");
         }
     }
 
@@ -2392,7 +2541,7 @@ mod structure_tests {
 
         let mut cache = IncrementalSemaCache::new();
         let mut first = incremental_bundle(before);
-        let (first_diags, _) = check_bundle_with_effect_facts_incremental(
+        let (first_diags, _, _) = check_bundle_with_effect_facts_incremental(
             &mut first,
             CompileMode::Check,
             &mut cache,
@@ -2407,7 +2556,7 @@ mod structure_tests {
         cache.clear_measurement();
 
         let mut second = incremental_bundle(after);
-        let (second_diags, _) = check_bundle_with_effect_facts_incremental(
+        let (second_diags, _, _) = check_bundle_with_effect_facts_incremental(
             &mut second,
             CompileMode::Check,
             &mut cache,
@@ -2495,7 +2644,7 @@ mod structure_tests {
         );
         let import_span = bundle.modules[0].imports[0].span;
         let mut dependency =
-            incremental_bundle("pub #UnitFamily(Inventory, dimension, base: item) { item }\n")
+            incremental_bundle("#UnitFamily(Inventory, dimension, base: item) { item }\n")
                 .modules
                 .remove(0);
         dependency.path = "deps/dep.jet".into();
@@ -2529,9 +2678,9 @@ mod structure_tests {
     #[test]
     fn incremental_dependencies_include_nested_module_imports() {
         let mut bundle = incremental_bundle(
-            "module api {\n    use dep.[value]\n    pub fn call() -> Int { return value() }\n}\n",
+            "module api {\n    use dep.[value]\n    fn call() -> Int { return value() }\n}\n",
         );
-        let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
+        let mut dependency = incremental_bundle("fn value() -> Int { return 1 }\n")
             .modules
             .remove(0);
         dependency.path = "dep.jet".into();
@@ -2547,7 +2696,7 @@ mod structure_tests {
     fn incremental_dependencies_match_directory_module_imports() {
         let mut bundle =
             incremental_bundle("use archive\nfn run() -> Int { return archive.value() }\n");
-        let mut dependency = incremental_bundle("pub fn value() -> Int { return 1 }\n")
+        let mut dependency = incremental_bundle("fn value() -> Int { return 1 }\n")
             .modules
             .remove(0);
         dependency.path = "archive/run.jet".into();
@@ -2566,7 +2715,7 @@ mod structure_tests {
     fn pending_diagnostics_have_exact_retained_byte_cost() {
         let mut bundle = incremental_bundle("fn run() {}\n");
         let mut cache = IncrementalSemaCache::new();
-        let (diagnostics, _) =
+        let (diagnostics, _, _) =
             check_bundle_with_effect_facts_incremental(&mut bundle, CompileMode::Check, &mut cache);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         assert_eq!(cache.functions.len(), 1);

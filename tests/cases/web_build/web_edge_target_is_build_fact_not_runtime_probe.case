@@ -1,0 +1,18 @@
+# HAND-PORT tests/web_build.rs:2921-2952 web_edge_target_is_build_fact_not_runtime_probe
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All emitted JavaScript/runtime predicates retained; the include_str Rust emitter law at2951 retires with Rust.
+fixture: web_edge_target_is_build_fact_not_runtime_probe.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js count "const JET_EDGE_TARGET = \"web\";" = 1 # original occurrence count
+file: .jet/build/app.js !~ "_isMain" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "process.argv" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "process.versions" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "typeof process" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "window.location" # original JavaScript/runtime predicate
+file: .jet/build/app.js !~ "navigator.userAgent" # original JavaScript/runtime predicate
+file: .jet/build/jet_dom_runtime.js ~ "class JetHostAbiError" # original JavaScript/runtime predicate
+file: .jet/build/jet_dom_runtime.js ~ "class JetHostWasmError" # original JavaScript/runtime predicate
+file: .jet/build/jet_dom_runtime.js !~ "throw new Error(" # original JavaScript/runtime predicate

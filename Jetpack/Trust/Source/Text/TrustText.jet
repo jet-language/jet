@@ -155,7 +155,7 @@ fn trust_text_words(text: String) -> [String] Never! {
     loop index < raw.len() {
         index = pkg_bytes_skip_space(raw, index)
         if index >= raw.len() -> break
-        start :: ~index
+        start :: index.copy()
         loop index < raw.len() && pkg_bytes_space_width(raw, index) == 0 -> index += 1
         &words.push(pkg_bytes_text(raw, start, index))
     }
@@ -166,7 +166,7 @@ fn trust_text_words(text: String) -> [String] Never! {
 fn trust_text_replace_all(text: String, needle: String, replacement: String) -> String Never! {
     raw :: text.bytes()
     pattern :: needle.bytes()
-    if pattern.len() == 0 -> return ~text
+    if pattern.len() == 0 -> return text.copy()
     out := [U8]{}
     index := 0
     loop index < raw.len() {
@@ -178,7 +178,7 @@ fn trust_text_replace_all(text: String, needle: String, replacement: String) -> 
         &out.push(raw[index])
         index += 1
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 // Rust `u8::is_ascii_whitespace`.

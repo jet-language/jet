@@ -1,0 +1,102 @@
+
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn run() {
+    near_limits := encoding.EncodingLimits.safe()
+    near_limits.buffer_bytes = 4096
+    near_limits.max_depth = 1
+    near_limits.max_item_bytes = 100000
+    near_limits.max_expansion_bytes = 0
+    near_input :: files.open("{work}/near-string.jsonl") ?? panic("near string open")
+    near_reader :: jsonl.reader(^near_input, near_limits) ?? panic("near string reader")
+    near_result :: near_reader.next()
+    if near_result == {
+        .Ok(_) -> { print("near-string-limit-missed") }
+        .Err(first) -> {
+            near_again :: near_reader.next()
+            if near_again == {
+                .Ok(_) -> { print("near-string-terminal-missed") }
+                .Err(second) -> {
+                    print(first.byte_offset == 100003)
+                    print(first.path)
+                    print(first.reason)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }
+            }
+        }
+    }
+
+    valid_limits := encoding.EncodingLimits.safe()
+    valid_limits.max_item_bytes = 512
+    valid_input :: files.open("{work}/valid.jsonl") ?? panic("valid open")
+    valid_reader :: jsonl.reader(^valid_input, valid_limits) ?? panic("valid reader")
+    valid_record :: valid_reader.next() ?? panic("valid next")
+    if valid_record == {
+        Val(value) -> {
+            last :: value.at(31) ?? Dyn.Int(-1)
+            print(last.int() ?? -1)
+        }
+        None -> { print("valid-missing") }
+    }
+
+    scalar_limits := encoding.EncodingLimits.safe()
+    scalar_limits.max_item_bytes = 7
+    scalar_input :: files.open("{work}/scalar.jsonl") ?? panic("scalar open")
+    scalar_reader :: jsonl.reader(^scalar_input, scalar_limits) ?? panic("scalar reader")
+    scalar_result :: scalar_reader.next()
+    if scalar_result == {
+        .Ok(_) -> { print("scalar-limit-missed") }
+        .Err(first) -> {
+            scalar_again :: scalar_reader.next()
+            if scalar_again == {
+                .Ok(_) -> { print("scalar-terminal-missed") }
+                .Err(second) -> {
+                    print(first.path)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }
+            }
+        }
+    }
+
+    array_limits := encoding.EncodingLimits.safe()
+    array_limits.max_item_bytes = 512
+    array_input :: files.open("{work}/array.jsonl") ?? panic("array open")
+    array_reader :: jsonl.reader(^array_input, array_limits) ?? panic("array reader")
+    array_result :: array_reader.next()
+    if array_result == {
+        .Ok(_) -> { print("array-limit-missed") }
+        .Err(first) -> {
+            array_again :: array_reader.next()
+            if array_again == {
+                .Ok(_) -> { print("array-terminal-missed") }
+                .Err(second) -> {
+                    print(first.byte_offset < 256)
+                    print(first.path)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }
+            }
+        }
+    }
+
+    object_limits := encoding.EncodingLimits.safe()
+    object_limits.max_item_bytes = 512
+    object_input :: files.open("{work}/object.jsonl") ?? panic("object open")
+    object_reader :: jsonl.reader(^object_input, object_limits) ?? panic("object reader")
+    object_result :: object_reader.next()
+    if object_result == {
+        .Ok(_) -> { print("object-limit-missed") }
+        .Err(first) -> {
+            object_again :: object_reader.next()
+            if object_again == {
+                .Ok(_) -> { print("object-terminal-missed") }
+                .Err(second) -> {
+                    print(first.byte_offset < 2048)
+                    print(first.path)
+                    print(first.byte_offset == second.byte_offset && first.path == second.path && first.reason == second.reason)
+                }
+            }
+        }
+    }
+}

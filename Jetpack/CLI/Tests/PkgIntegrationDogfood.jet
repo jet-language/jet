@@ -1,0 +1,31 @@
+// tests/jetpack_dogfood.rs:171-184; exact live environment/store oracle.
+// Package-tests staging seam: invoke this SINGLE FILE (#4838), not its directory.
+// The opt-in public case supplies the realized project/store after each phase.
+fn cli_test_dogfood_live_producers() {
+    project :: sys.get("JET_TEST_DOGFOOD_PROJECT") ?? return
+    store :: sys.get("JET_TEST_DOGFOOD_STORE") ?? panic("JET_TEST_DOGFOOD_STORE is required with a project")
+    source :: files.read(files.join(project, "env.jet")) ?? panic("read live project environment")
+    plan :: envmodel_evaluate_env_with_environment(source, project, Val("compiler")) ?? panic("evaluate compiler environment")
+    roots :: HangarRoots.at(store)
+    verification := StoreVerification.new()
+    entries :: store_list_checked(&verification, roots) ?? panic("checked live store listing")
+    loop reference in plan.package_refs {
+        found := StoreEntry?{None}
+        loop entry in entries {
+            if entry.reference == reference {
+                found = Val(entry)
+                break
+            }
+        }
+        entry :: found ?? panic("missing declared package {reference}")
+        producer :: ProducerRecord.decode(entry.producer_record) ?? panic("decode live producer record for {reference}")
+        assert_eq(producer.facts.get("nix.index.revision"), Val("3ed67ec0a4d3c7ab4ae1f04f8ee8df07bfa506a2"))
+        assert_eq(producer.facts.get("nix.index.tier"), Val("local-unofficial"))
+        assert(producer.facts.has_key("nix.cache.closure.receipt.sha256"))
+        assert(!producer.facts.has_key("nix.fallback.provenance"))
+    }
+}
+
+#Test("jet_repository_env_cold_and_offline_live_producer_facts") {
+    cli_test_dogfood_live_producers()
+}

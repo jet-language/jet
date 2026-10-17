@@ -1,0 +1,256 @@
+// Checked Output contracts use the production parser, registration graph and
+// resolver. Cases collect independent failures; no mock links or second checker.
+fn output_fixture_graph(label: String, source: String, effects_source: String, failures: &[String]) -> SemaRegistrationGraph? {
+    parsed := parse_source(source.bytes())
+    if sema_has_error_since(parsed.diagnostics, 0) {
+        &failures.push("{label}: source parsing failed: {parsed.diagnostics:Debug}")
+        return None
+    }
+    canonical :: jet_driver_canonical_effect_module(effects_source) ?? {
+        &failures.push("{label}: canonical effect declaration failed parsing")
+        return None
+    }
+    facts :: SemaBuildFacts{package_name: "output-fixture", package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    input :: SemaRegistrationModuleInput{package_identity: "output-fixture", module_identity: "output-fixture::main", module_name: "main", core_source_alias: "", module_path: "main.jet", source_file: "main.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source}
+    Val(sema_registration_prepare_graph([SemaRegistrationModuleInput]{input, canonical}, [SemaRegistrationImportEdge]{}, "output-fixture", "output-fixture::main", canonical.module_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false))
+}
+
+fn output_fixture_case(label: String, source: String, effects_source: String, intent: SemaOutputIntent, address: String?, expected_codes: [String], expected_selected: [String], failures: &[String]) {
+    graph := output_fixture_graph(label, source, effects_source, &failures) ?? return
+    if !graph.complete || graph.internal_problem != None {
+        &failures.push("{label}: registration failed: {graph.diagnostics:Debug}")
+        return
+    }
+    diagnostics :: sema_output_resolve(&graph, intent, address)
+    codes := [String]{}
+    loop diagnostic in diagnostics -> &codes.push(diagnostic.code.copy())
+    if codes != expected_codes -> &failures.push("{label}: diagnostics {codes:Debug}, expected {expected_codes:Debug}")
+    selected := [String]{}
+    loop constant in graph.modules[0].constants {
+        if constant.declaration.resolved_output == .Val(output) {
+            if output.selected -> &selected.push(output.address.copy())
+            if output.authority != OutputCallableAuthority.SafeJet -> &failures.push("{label}: wrong callable authority")
+            if output.module_id < 0 || output.module_id >= graph.modules.len() -> &failures.push("{label}: missing checked target module")
+        }
+    }
+    if selected != expected_selected -> &failures.push("{label}: selected {selected:Debug}, expected {expected_selected:Debug}")
+}
+
+fn output_fixture_solved_effects(effects_source: String, failures: &[String]) {
+    source :: "APP :: Output.Executable{{name: \"app\", entry: launch}}\nfn leaf() {{ print(\"checked effect\") }}\nfn launch() {{ leaf() }}\n"
+    graph := output_fixture_graph("solved effect publication", source, effects_source, &failures) ?? return
+    output_diagnostics :: sema_output_resolve(&graph, SemaOutputIntent.Run, None)
+    if sema_has_error_since(output_diagnostics, 0) {
+        &failures.push("solved effect publication: Output resolution failed {output_diagnostics:Debug}")
+        return
+    }
+    hooks :: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}
+    stage := sema_collect_comptime_declarations(graph, [SemaRegistrationPackagePolicy]{}, hooks, compiler_threads_single(), None)
+    checked := sema_finalize_registration_graph(graph, None, ^stage, [SemaComptimeItemValue]{}, [SemaComptimeFunctionResult]{}, hooks, compiler_threads_single(), None, None)
+    if !checked.complete {
+        &failures.push("solved effect publication: real body/effect check failed {checked.diagnostics:Debug}")
+        return
+    }
+    key :: symbol_id(SymbolKind.Function, "output-fixture::main", "", "launch").key
+    solved := [String]?{None}
+    settled_return := Type?{None}
+    loop function in checked.modules[0].functions {
+        if function.key == key {
+            solved = Val(function.effects.solved.copy())
+            settled_return = function.ret.copy()
+        }
+    }
+    expected :: solved ?? {
+        &failures.push("solved effect publication: checked callable is missing")
+        return
+    }
+    if expected.len() == 0 -> &failures.push("solved effect publication: genuine print/call chain has no solved effects")
+    declaration_span := Span?{None}
+    loop function in graph.modules[0].functions {
+        if function.symbol.id.key == key -> declaration_span = function.declaration.return_type_span
+    }
+    settled_contract :: failure_contract_of_function(settled_return, declaration_span)
+    if checked.outputs.len() != 1 -> &failures.push("solved output publication: the graph result lost its ordered Output row")
+    loop output in checked.outputs {
+        if output.effects != expected || output.return_type != settled_return || output.failure_contract != settled_contract -> &failures.push("solved output publication: the graph result differs from the settled callable contract")
+    }
+    found := false
+    loop constant in checked.modules[0].constants {
+        if constant.declaration.resolved_output == .Val(output) {
+            found = true
+            if output.effects != expected -> &failures.push("solved effect publication: Output differs from the real checked callable")
+            if output.return_type != settled_return || output.failure_contract != settled_contract -> &failures.push("solved output publication: checked constant retains the declaration's unsolved contract")
+        }
+    }
+    if !found -> &failures.push("solved effect publication: checked Output fact is missing")
+    // Effect inputs need not share the checked module order. Re-publish through
+    // the production in-place graph path and cover each manifest denial once.
+    effect_inputs := [SemaEffectModuleInput]{}
+    loop module_index in 0..<checked.modules.len() {
+        source_index :: sema_registration_module_index(graph, checked.modules[module_index].module_identity) ?? {
+            &failures.push("in-place effect publication: checked module has no source")
+            return
+        }
+        &effect_inputs.push(SemaEffectModuleInput{
+            module_index: module_index,
+            sources: sema_comptime_effect_sources(graph.modules[source_index]),
+            source_segments: graph.modules[source_index].source_segments,
+            trait_bounds: sema_effect_trait_bounds(graph.modules[source_index].program.items),
+        })
+    }
+    &effect_inputs.reverse()
+    republished :: sema_effects_check_modules(&checked.modules, effect_inputs, [String]{"Mem.Alloc", "Mem.Rc"})
+    if republished.memory_declarations.len() != 2 -> &failures.push("in-place effect publication: manifest memory declarations duplicated")
+    function_count := 0
+    loop module_row in checked.modules -> function_count += module_row.functions.len()
+    if republished.memory_projections.len() != 2 * function_count -> &failures.push("in-place effect publication: manifest projections omitted or duplicated")
+    launch_found := false
+    loop function in checked.modules[0].functions {
+        if function.key == key {
+            launch_found = true
+            if function.effects.solved != expected -> &failures.push("in-place effect publication: reordered inputs changed the solved caller row")
+        }
+    }
+    if !launch_found -> &failures.push("in-place effect publication: publishing moved the checked callable away")
+}
+
+fn output_fixture_visibility(label: String, main_source: String, bank_source: String, bridge_source: String?, bank_package: String, main_package: String, effects_source: String, expected_link: Bool, failures: &[String]) {
+    sources := [String]{main_source, bank_source}
+    names := [String]{"main", "bank"}
+    packages := [String]{main_package, bank_package}
+    if bridge_source == .Val(source) {
+        &sources.push(source.copy())
+        &names.push("bridge")
+        &packages.push(bank_package.copy())
+    }
+    inputs := [SemaRegistrationModuleInput]{}
+    edges := [SemaRegistrationImportEdge]{}
+    loop (index, source) in sources {
+        parsed := parse_source(source.bytes())
+        if sema_has_error_since(parsed.diagnostics, 0) {
+            &failures.push("{label}: real module {names[index]} did not parse {parsed.diagnostics:Debug}")
+            return
+        }
+        identity :: "{packages[index]}::{names[index]}"
+        loop declaration in parsed.program.imports {
+            target := Int?{None}
+            if declaration.kind == .File(path, _) {
+                loop (candidate, name) in names {
+                    if path == "{name}.jet" -> target = Val(candidate)
+                }
+            }
+            target_index :: target ?? {
+                &failures.push("{label}: fixture has no authenticated file target for {declaration:Debug}")
+                return
+            }
+            &edges.push(SemaRegistrationImportEdge{source_module_identity: identity.copy(), target_module_identity: "{packages[target_index]}::{names[target_index]}", target_package_identity: packages[target_index].copy(), foreign_binding: None, declaration: declaration.copy()})
+        }
+        &inputs.push(SemaRegistrationModuleInput{package_identity: packages[index].copy(), module_identity: ^identity, module_name: names[index].copy(), core_source_alias: "", module_path: "{names[index]}.jet", source_file: "{names[index]}.jet", source_segments: [SemaSourceSegment]{}, source_origin: SemaSourceOrigin.Snapshot, program: ^parsed.program, foreign_handles: [SemaRegistrationForeignHandleFacts]{}, source: source.copy()})
+    }
+    canonical :: jet_driver_canonical_effect_module(effects_source) ?? {
+        &failures.push("{label}: canonical effects source did not parse")
+        return
+    }
+    effect_identity :: canonical.module_identity.copy()
+    &inputs.push(canonical)
+    facts :: SemaBuildFacts{package_name: main_package.copy(), package_version: "0.1.0", os: "linux", profile: "dev", stamp_git: None, stamp_dirty: false, stamp_toolchain: "fixture", stamp_at: ""}
+    graph := sema_registration_prepare_graph(inputs, edges, main_package, "{main_package}::main", effect_identity, [SemaForeignProviderInput]{}, jet_target_machine_hosted("x86_64-unknown-linux-gnu", "0.1.0"), facts, false)
+    if !graph.complete || graph.internal_problem != None || sema_has_error_since(graph.diagnostics, 0) {
+        &failures.push("{label}: ordinary registration failed {graph.diagnostics:Debug}")
+        return
+    }
+    diagnostics :: sema_output_resolve(&graph, SemaOutputIntent.Run, None)
+    if expected_link {
+        if diagnostics.len() != 0 -> &failures.push("{label}: public link rejected {diagnostics:Debug}")
+        found := false
+        loop constant in graph.modules[0].constants {
+            if constant.declaration.resolved_output == .Val(output) {
+                found = true
+                if output.module_id != 1 || output.source_path != "bank.jet" || output.semantic_name != "launch" || !output.selected -> &failures.push("{label}: Output lost its original declaring-module/callable identity")
+            }
+        }
+        if !found -> &failures.push("{label}: checked Output fact is missing")
+        expected_key :: symbol_id(SymbolKind.Function, "{bank_package}::bank", "", "launch").key
+        function_references := 0
+        loop reference in graph.output_name_references {
+            if reference.kind == "function" {
+                function_references += 1
+                if reference.symbol.id.key != expected_key -> &failures.push("{label}: function reference has the intermediary namespace's owner")
+            }
+        }
+        if function_references != 1 -> &failures.push("{label}: expected exactly one authenticated callable reference")
+    } else {
+        if diagnostics.len() != 1 -> &failures.push("{label}: expected one Output visibility error, got {diagnostics:Debug}")
+        loop diagnostic in diagnostics { if diagnostic.code != "E1321" -> &failures.push("{label}: unexpected visibility diagnostic {diagnostic.code}") }
+        loop constant in graph.modules[0].constants {
+            if constant.declaration.resolved_output == .Val(_) -> &failures.push("{label}: rejected private link still published a checked fact")
+        }
+    }
+}
+
+fn output_fixture_visibility_cases(effects_source: String, failures: &[String]) {
+    direct :: "use \"bank.jet\" as bank\nAPP :: Output.Executable{{name: \"app\", entry: bank.launch}}\n"
+    forwarded :: "use \"bridge.jet\" as bridge\nAPP :: Output.Executable{{name: \"app\", entry: bridge.bank.launch}}\n"
+    public :: "fn launch() {{}}\n"
+    package_only :: "priv(package) module package_scope {{\n fn launch() {{}}\n}}\n"
+    public_bridge :: Val("pub use \"bank.jet\" as bank\n")
+    package_direct :: "use \"bank.jet\" as bank\nAPP :: Output.Executable{{name: \"app\", entry: bank.package_scope.launch}}\n"
+    package_forwarded :: "use \"bridge.jet\" as bridge\nAPP :: Output.Executable{{name: \"app\", entry: bridge.bank.package_scope.launch}}\n"
+    private_direct :: "use \"bank.jet\" as bank\nAPP :: Output.Executable{{name: \"app\", entry: bank.api.internal.launch}}\n"
+    private_source :: "module api {{\n priv module internal {{\n fn launch() {{}}\n }}\n}}\n"
+    output_fixture_visibility("public file entry", direct, public, None, "bank-package", "main-package", effects_source, true, &failures)
+    output_fixture_visibility("private file entry", private_direct, private_source, None, "same", "same", effects_source, false, &failures)
+    output_fixture_visibility("same-package entry", package_direct, package_only, None, "same", "same", effects_source, true, &failures)
+    output_fixture_visibility("different-package entry", package_direct, package_only, None, "bank-package", "main-package", effects_source, false, &failures)
+    output_fixture_visibility("public namespace re-export", forwarded, public, public_bridge, "bank-package", "main-package", effects_source, true, &failures)
+    output_fixture_visibility("re-export retains original requester package", package_forwarded, package_only, public_bridge, "bank-package", "main-package", effects_source, false, &failures)
+    output_fixture_visibility("private namespace does not export public member", forwarded, public, Val("use \"bank.jet\" as bank\n"), "bank-package", "main-package", effects_source, false, &failures)
+}
+
+fn output_fixture_run(effects_source: String) Never! {
+    failures := [String]{}
+    nine :: "LIB :: Output.Library{{name: \"lib\"}}\nAPP :: Output.Executable{{name: \"app\", entry: launch}}\nRPC :: Output.Service{{name: \"rpc\", entry: launch}}\nCHECK :: Output.Check{{name: \"check\", entry: launch}}\nENV :: Output.Environment{{name: \"env\"}}\nIMAGE :: Output.Image{{name: \"image\"}}\nBUNDLE :: Output.Bundle{{name: \"bundle\"}}\nSYSTEM :: Output.System{{name: \"system\"}}\nFLEET :: Output.Fleet{{name: \"fleet\"}}\nfn launch() {{}}\n"
+    output_fixture_case("nine closed kinds/check projection", nine, effects_source, SemaOutputIntent.Check, None, [String]{}, [String]{}, &failures)
+    output_fixture_case("nine kinds/test projection", nine, effects_source, SemaOutputIntent.Test, None, [String]{}, [String]{"CHECK"}, &failures)
+    output_fixture_case("explicit Service", nine, effects_source, SemaOutputIntent.Run, Val("RPC"), [String]{}, [String]{"RPC"}, &failures)
+    output_fixture_case("explicit incompatible Check", nine, effects_source, SemaOutputIntent.Run, Val("CHECK"), [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("missing address", nine, effects_source, SemaOutputIntent.Run, Val("MISSING"), [String]{"E1321"}, [String]{}, &failures)
+    sole :: "APP :: Output.Executable{{name: \"app\", entry: launch}}\nfn launch() {{}}\n"
+    output_fixture_case("sole Executable", sole, effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    output_fixture_case("check does not select sole", sole, effects_source, SemaOutputIntent.Check, None, [String]{}, [String]{}, &failures)
+    plural :: "A :: Output.Executable{{name: \"a\", entry: launch}}\nB :: Output.Executable{{name: \"b\", entry: launch}}\nfn launch() {{}}\n"
+    output_fixture_case("plural ambiguity", plural, effects_source, SemaOutputIntent.Run, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("checked default", "{plural}defaults: {{run: B}}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"B"}, &failures)
+    output_fixture_case("invalid default despite sole", "{sole}defaults: {{run: MISSING}}\n", effects_source, SemaOutputIntent.Run, None, [String]{"E1321"}, [String]{"APP"}, &failures)
+    output_fixture_case("legacy winner", "{sole}fn run() {{}}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{}, &failures)
+    output_fixture_case("invalid default despite legacy", "{sole}fn run() {{}}\ndefaults: {{run: MISSING}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("text default rejected", "{sole}defaults: {{run: \"APP\"}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    checks :: "A :: Output.Check{{name: \"a\", entry: first}}\nB :: Output.Check{{name: \"b\", entry: second}}\nfn first() {{}}\nfn second() {{}}\n"
+    output_fixture_case("test selects all Checks", checks, effects_source, SemaOutputIntent.Test, None, [String]{}, [String]{"A", "B"}, &failures)
+    output_fixture_case("non-runnable entry rejected", "LIB :: Output.Library{{name: \"lib\", entry: launch}}\nfn launch() {{}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("duplicate payload field", "APP :: Output.Executable{{name: \"a\", name: \"b\", entry: launch}}\nfn launch() {{}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("unknown runnable field", "APP :: Output.Executable{{name: \"a\", entry: launch, flags: 1}}\nfn launch() {{}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("missing entry", "APP :: Output.Executable{{name: \"a\"}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("call not reference", "APP :: Output.Executable{{name: \"a\", entry: launch()}}\nfn launch() {{}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("wrong params", "APP :: Output.Executable{{name: \"a\", entry: launch}}\nfn launch(value: Int) {{}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("wrong return", "APP :: Output.Executable{{name: \"a\", entry: launch}}\nfn launch() -> Bool Never! {{ true }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("unsafe entry rejected", "APP :: Output.Executable{{name: \"a\", entry: launch}}\n#Unsafe(\"fixture boundary\")\nfn launch() {{}}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("typed CLI entry", "APP :: Output.Executable{{name: \"a\", entry: launch}}\n#CLI\nstruct Args {{verbose: Bool}}\nfn launch(args: Args) {{}}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    output_fixture_case("inline qualified entry", "APP :: Output.Executable{{name: \"a\", entry: bank.launch}}\nmodule bank {{ fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    output_fixture_case("inline aliased entry", "use bank.[launch as start]\nAPP :: Output.Executable{{name: \"a\", entry: start}}\nmodule bank {{ fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    output_fixture_case("missing inline member", "APP :: Output.Executable{{name: \"a\", entry: bank.missing}}\nmodule bank {{ fn launch() {{}} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("private inline entry", "APP :: Output.Executable{{name: \"a\", entry: bank.internal.launch}}\nmodule bank {{ priv module internal {{ fn launch() {{}} }} }}\n", effects_source, SemaOutputIntent.Check, None, [String]{"E1321"}, [String]{}, &failures)
+    output_fixture_case("inline authenticated re-export", "APP :: Output.Executable{{name: \"a\", entry: bridge.start}}\nmodule bank {{ fn launch() {{}} }}\nmodule bridge {{ pub use bank.[launch as start] }}\n", effects_source, SemaOutputIntent.Run, None, [String]{}, [String]{"APP"}, &failures)
+    empty := output_fixture_graph("no-inline early return", "fn helper() {{}}\n", effects_source, &failures)
+    if empty == .Val(graph) {
+        if graph.modules[0].inline_bindings.imports.len() != 0 || graph.modules[0].inline_bindings.modules.len() != 0 -> &failures.push("no-inline early return retains empty binder products")
+    }
+    if name_mangle("launch") != "__jet_launch" || name_mangle("$launch") != "__jet_ct_launch" || name_mangle("__jet_launch") != "__jet_launch" -> &failures.push("canonical machine-name bytes")
+    output_fixture_solved_effects(effects_source, &failures)
+    output_fixture_visibility_cases(effects_source, &failures)
+    if failures.len() > 0 -> panic("OutputFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+}
+
+fn run() {
+    output_fixture_run("effect IO\n")
+}

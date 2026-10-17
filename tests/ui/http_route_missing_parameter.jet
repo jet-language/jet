@@ -1,0 +1,13 @@
+use core.http.server as server
+
+struct Jokes {
+    #server.Get("/jokes/:id")
+    fn joke(self) -> HTTPResponse HTTPError! {
+        Ok(server.response(200, "joke"))
+    }
+}
+
+fn run() {
+    mux :: server.mux()
+    mux.mount(Jokes{})
+}

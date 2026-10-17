@@ -2,11 +2,11 @@
 // `NixDrvError` text of the Rust reference (crates/jetpack/src/NixDrv.rs); the
 // import variants are the project-root import authority's refusals
 // (NixEval/Authority.rs); the fallback variants are the one-shot local-Nix
-// import record's errors (NixFallback.rs, including `DataTree::as_object`).
+// import record's errors (NixFallback.rs, including `Dyn::as_object`).
 // Evaluator failures stay in the NixEval area's `NixEvalError`.
 
 #Error
-pub enum NixError {
+enum NixError {
     DrvParse(String)
     DrvPath(String)
     DrvUnsupported(String)
@@ -38,7 +38,7 @@ pub enum NixError {
             .ImportIO(reason) -> reason
             .FallbackFieldConflict(label) -> "fallback document has more than one {label} field"
             .FallbackFieldMissing(label) -> "fallback document has no {label} field"
-            .FallbackNotObject -> "expected a DataTree object"
+            .FallbackNotObject -> "expected a Dyn object"
             .FallbackNonFinite -> "fallback document contains a non-finite number"
             .Fallback(detail) -> detail
         }

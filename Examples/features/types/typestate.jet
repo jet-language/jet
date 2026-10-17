@@ -70,7 +70,7 @@ impl Unseeded {
 
 impl Reservation {
     // Entry transition: a fresh booking starts life in `Pending`.
-    #Transition(_, Pending) fn book(guest: String) -> Reservation { {guest: ~guest} }
+    #Transition(_, Pending) fn book(guest: String) -> Reservation { {guest: guest.copy()} }
 
     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
         // Paying advances `Pending -> Confirmed`. The transition *consumes* the old

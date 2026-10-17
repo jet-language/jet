@@ -1,0 +1,108 @@
+// CommandSuite.rs:8-49: a 24B snapshot [iteration0,result8,runner16].
+// The runner is a named-fn box using Lower/Closures.jet:3-16,291-315:
+// [refs0,code8,release16], called with box first and inline pair output second.
+// TLS uses the one dynamic-key mechanism, with detach owning its state free.
+test_suite_key := I64{0}
+
+fn rt_test_suite_state_drop_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_test_suite_init() {
+    if (test_suite_key != I64{0}) -> return
+    closure :: jet_rt_alloc(I64{24}, I64{8})
+    trap_store(closure, I64{1})
+    trap_store(closure + I64{8}, rt_test_suite_state_drop_address())
+    trap_store(closure + I64{16}, I64{0})
+    test_suite_key = jet_rt_tls_key_new(closure)
+}
+
+fn test_suite_state() -> I64 { jet_rt_tls_get(test_suite_key) }
+
+fn test_suite_state_ensure() -> I64 {
+    state := test_suite_state()
+    if (state == I64{0}) {
+        state = jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(state, I64{24})
+        jet_rt_tls_set(test_suite_key, state)
+    }
+    state
+}
+
+// Runtime-only harness ingress, not a public Core API. The harness supplies a
+// live, thread-confined named-fn box, never a capturing closure. One permanent
+// process-lifetime pin per install intentionally leaks a reference to model the
+// seed's static fn pointer: old snapshots remain valid even after reinstall.
+// Match the generated non-atomic clone (Closures.jet:432-447); do not introduce
+// an atomic/non-atomic mix or duplicate its unref/release logic (:407-427).
+#Export(c) fn jet_test_suite_install(runner: I64) {
+    trap_store(runner, trap_word(runner) + I64{1})
+    state :: test_suite_state_ensure()
+    trap_store(state, I64{0})
+    trap_store(state + I64{8}, I64{0})
+    trap_store(state + I64{16}, runner)
+}
+
+#Export(c) fn jet_test_suite_new() -> I64 {
+    suite :: jet_rt_alloc(I64{24}, I64{8})
+    state :: test_suite_state()
+    if (state == I64{0}) {
+        thread_zero(suite, I64{24})
+    } else {
+        trap_store(suite, trap_word(state))
+        trap_store(suite + I64{8}, trap_word(state + I64{8}))
+        trap_store(suite + I64{16}, trap_word(state + I64{16}))
+    }
+    suite
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_test_suite(suite: I64) -> I64 {
+    cloned :: jet_rt_alloc(I64{24}, I64{8})
+    trap_store(cloned, trap_word(suite))
+    trap_store(cloned + I64{8}, trap_word(suite + I64{8}))
+    trap_store(cloned + I64{16}, trap_word(suite + I64{16}))
+    cloned
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_test_suite(suite: I64) {
+    jet_rt_free(suite, I64{24}, I64{8})
+}
+
+#Export(c) fn jet_test_suite_run(suite: I64) -> I64 {
+    runner :: trap_word(suite + I64{16})
+    if (runner == I64{0}) { return trap_word(suite + I64{8}) }
+    state :: test_suite_state_ensure()
+    // The two inline result words go directly to TLS, never to the receiver.
+    // Tuple result stores happen on return, after the runner's user code, so
+    // no extra heap workspace or Rust/C pair-return convention is needed.
+    #Unsafe("the pinned named-fn box code takes its box and writable inline 16B result storage") {
+        _ := os_call_address_two_i64(trap_word(runner + I64{8}), runner, state)
+    }
+    trap_word(state + I64{8})
+}
+
+#Export(c) fn jet_test_suite_status() -> I64 {
+    state :: test_suite_state()
+    if (state == I64{0}) -> I64{0} else -> trap_word(state + I64{8})
+}
+
+#Export(c) fn jet_rt_test_suite_state_drop(_closure: I64, state: I64) -> I64 {
+    // Thread clears the cell before this callback; only its state is owned.
+    // The runner's intentional process-lifetime pin is never released here.
+    jet_rt_free(state, I64{24}, I64{8})
+    I64{0}
+}
+
+#Export(c) fn jet_rt_handle_show_jet_test_suite(suite: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    rt_text_push_word(text, I64{0x7469755374736554}, I64{8})
+    rt_text_push_word(text, I64{0x72657469207b2065}, I64{8})
+    rt_text_push_word(text, I64{0x203a6e6f697461}, I64{7})
+    rt_text_push_number(text, trap_word(suite))
+    rt_text_push_word(text, I64{0x746c75736572202c}, I64{8})
+    rt_text_push_word(text, I64{0x203a}, I64{2})
+    rt_text_push_number(text, trap_word(suite + I64{8}))
+    rt_text_push_word(text, I64{0x7d20}, I64{2})
+    text
+}

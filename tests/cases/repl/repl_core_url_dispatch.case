@@ -1,0 +1,18 @@
+# PORT tests/repl.rs:3288-3316; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_core_url_dispatch.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_core_url_dispatch.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout: !~ "E0956" # original predicate
+stderr: !~ "E0956" # original predicate
+stdout|stderr: ~ "\"a%20b%2Fc\" : String" # original predicate
+stdout|stderr: ~ "a b : Result" # original predicate
+stdout|stderr: ~ "\"a=1&b=2%20c\" : String" # original predicate
+stdout|stderr: ~ "https://ex.com/b?x=1#f" # original predicate
+stdout|stderr: ~ "err : Result" # original predicate
+stdout|stderr: ~ "file:///tmp/x.txt" # original predicate

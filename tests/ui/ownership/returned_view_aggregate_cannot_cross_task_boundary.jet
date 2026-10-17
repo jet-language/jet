@@ -1,0 +1,14 @@
+
+struct Window { values: View<Int> }
+
+fn window(values: [Int]) -[]> Window {
+    selected :: values[0..1]
+    return Window{ values: selected }
+}
+
+fn run() {
+    handle :: task window([7, 8])
+    print((handle.join() ?? Window{ values: [] }).values[0])
+}
+
+// KNOWN-FAILING function #4796: original Rust suite already red; this variant retains its original contract, not a skip.

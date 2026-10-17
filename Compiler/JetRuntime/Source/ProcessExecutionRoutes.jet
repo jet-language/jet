@@ -1,0 +1,101 @@
+// Plain native execution. Authority-bound execution remains fail-closed until
+// the native isolation engine exists; a plain bwrap argv is ordinary execution.
+// ExecutionChild128: mutex0 refs8 Child72*16 owned Spec136*24 worker32 done40
+// receipt48 error56 reserved64 startNs72 output80 errors88 captured96 timeout104
+// limit112 stop120. Worker owns one ref; every public alias owns one ref.
+fn rt_process_execution_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+fn process_execution_native(child: I64) -> I64 { fd_word(child, I64{16}) }
+fn process_execution_now() -> I64 { sync_now_ns() }
+fn process_execution_launch(spec: I64, collect: Bool, err: I64) -> I64 {
+    jet_rt_world_reject_uncontrolled(I64{0})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (fd_word(spec, PROCESS_SPEC_POLICY_WIRE) != I64{0}) {
+        _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("authority-bound process execution requires the #398/#893 isolation backend; refusing before spawn")), err)
+        return I64{0}
+    }
+    native :: process_execution_launch_native(spec, err)
+    if (native == I64{0}) -> return I64{0}
+    child :: jet_rt_alloc(I64{128}, I64{8})
+    coll_zero(child, I64{128})
+    fd_put(child, I64{8}, I64{1})
+    fd_put(child, I64{16}, native)
+    fd_put(child, I64{24}, jet_rt_handle_clone_process_spec(spec))
+    fd_put(child, I64{72}, process_execution_now())
+    fd_put(child, I64{80}, jet_rt_string_builder_new())
+    fd_put(child, I64{88}, jet_rt_string_builder_new())
+    if (collect && !process_execution_collect_start(child, err)) {
+        jet_rt_handle_drop_process_child(child)
+        return I64{0}
+    }
+    child
+}
+fn process_execution_launch_input(spec: I64, input: I64, collect: Bool, err: I64) -> I64 {
+    if (input == I64{0}) -> return process_execution_launch(spec, collect, err)
+    prepared :: jet_rt_handle_clone_process_spec(spec)
+    dirs := fd_word(prepared, PROCESS_SPEC_DIRECTORIES)
+    if (dirs == I64{0}) {
+        dirs = data_sequence_new(I64{1}, I64{24})
+        fd_put(prepared, PROCESS_SPEC_DIRECTORIES, dirs)
+    }
+    row :: data_sequence_reserve(dirs, I64{24})
+    fd_put(row, I64{0}, jet_fd_retain_raw(input))
+    fd_put(row, I64{8}, I64{0})
+    fd_put(row, I64{16}, I64{0})
+    fd_put(dirs, I64{0}, fd_word(dirs, I64{0}) + I64{1})
+    encoding_enum_drop(fd_word(prepared, PROCESS_SPEC_STDIN))
+    fd_put(prepared, PROCESS_SPEC_STDIN, process_raw_box(HOST_PROCESS_STREAM_INHERIT))
+    child :: process_execution_launch(prepared, collect, err)
+    jet_rt_handle_drop_process_spec(prepared)
+    child
+}
+#Export(c) fn jet_process_spec_plan(spec: I64, _ok: I64, err: I64) -> I64 {
+    if (fd_word(spec, PROCESS_SPEC_POLICY_WIRE) == I64{0}) -> return process_execution_invalid(spec, rt_static_text("ProcessSpec.plan() requires an authority policy from .under(...)"), err)
+    process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("authority-bound process execution requires the #398/#893 isolation backend; refusing before spawn")), err)
+}
+#Export(c) fn jet_process_spec_spawn(spec: I64, ok: I64, err: I64) -> I64 {
+    child :: process_execution_launch(spec, true, err)
+    if (child == I64{0}) -> return I64{0}
+    fd_put(ok, I64{0}, child)
+    I64{1}
+}
+#Export(c) fn jet_process_spec_run(spec: I64, ok: I64, err: I64) -> I64 {
+    child :: process_execution_launch(spec, true, err)
+    if (child == I64{0}) -> return I64{0}
+    result :: process_execution_wait(child, ok, err)
+    jet_rt_handle_drop_process_child(child)
+    result
+}
+#Export(c) fn jet_process_spec_run_checked(spec: I64, ok: I64, err: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    result :: jet_process_spec_run(spec, scratch, err)
+    if (result == I64{0}) {
+        jet_rt_free(scratch, I64{8}, I64{8})
+        return I64{0}
+    }
+    receipt :: fd_word(scratch, I64{0})
+    jet_rt_free(scratch, I64{8}, I64{8})
+    if (fd_word(receipt, I64{24}) != I64{0}) {
+        fd_put(ok, I64{0}, receipt)
+        return I64{1}
+    }
+    cause :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(cause, rt_static_text("process exited unsuccessfully: code="))
+    rt_text_push_number(cause, jet_int_owned_to_i64(fd_word(receipt, I64{0})))
+    signal :: fd_word(receipt, I64{32})
+    if (signal != I64{0}) {
+        jet_rt_string_builder_push(cause, rt_static_text(", signal="))
+        rt_text_push_number(cause, jet_int_owned_to_i64(fd_word(signal, I64{0})))
+    }
+    jet_rt_string_builder_push(cause, rt_static_text(", stderr="))
+    errors :: fd_word(receipt, I64{16})
+    end := if (rt_text_len(errors) > I64{4096}) -> { I64{4096} } else -> { rt_text_len(errors) }
+    loop end > (I64{0}) && end < rt_text_len(errors) && rt_text_byte(rt_text_data(errors) + end).bit_and(I64{192}) == (I64{128}) -> end -= I64{1}
+    rt_text_append(cause, rt_text_data(errors), end)
+    jet_rt_handle_drop_process_receipt(receipt)
+    process_execution_error(spec, HOST_IO_OP_CLOSE, jet_rt_string_builder_finish(cause), err)
+}
+#Export(c) fn jet_process_child_wait(child: I64, ok: I64, err: I64) -> I64 { process_execution_wait(child, ok, err) }
+#Export(c) fn jet_process_child_id(child: I64) -> I64 {
+    jet_int_owned_from_i64(if (fd_word(child, I64{120}).bit_and(I64{2}) != I64{0}) -> { I64{0} } else -> { fd_word(process_execution_native(child), I64{8}) })
+}
+#Export(c) fn jet_rt_handle_show_process_child(_child: I64) -> I64 { jet_rt_string_clone(rt_static_text("ProcessChild")) }

@@ -1,0 +1,73 @@
+// ServiceAuthority.rs:121-128, Services.rs:1211-1213;
+// CAbiRoutes.rs:1599-1609,5781-5783,7233-7235,10281-10312.
+// Native Delivery40 owns id/store/authority text; bool16, raw generation32.
+DELIVERY_HANDLE_BYTES :: prep { I64{40} }
+#Export(c) fn jet_rt_record_new_jet_delivery(id: I64, store: I64, duplicate: U8, authority: I64, generation: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(generation)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    delivery_allocate_raw(id, store, duplicate, authority, raw)
+}
+fn delivery_allocate_raw(id: I64, store: I64, duplicate: U8, authority: I64, raw: I64) -> I64 {
+    value :: jet_rt_alloc(DELIVERY_HANDLE_BYTES, I64{8})
+    rt_text_store(value, jet_rt_string_clone(id))
+    rt_text_store(value + I64{8}, jet_rt_string_clone(store))
+    rt_text_store(value + I64{16}, if (duplicate != U8{0}) -> I64{1} else -> I64{0})
+    rt_text_store(value + I64{24}, jet_rt_string_clone(authority))
+    rt_text_store(value + I64{32}, raw)
+    value
+}
+#Export(c) fn jet_rt_record_get_jet_delivery_id(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value)) }
+#Export(c) fn jet_rt_record_get_jet_delivery_store(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{8})) }
+#Export(c) fn jet_rt_record_get_jet_delivery_duplicate(value: I64) -> Bool { (rt_text_word(value + I64{16}).bit_and(I64{255})) != I64{0} }
+#Export(c) fn jet_rt_record_get_jet_delivery_authority(value: I64) -> I64 { jet_rt_string_clone(rt_text_word(value + I64{24})) }
+#Export(c) fn jet_rt_record_get_jet_delivery_generation(value: I64) -> I64 { jet_int_owned_from_i64(rt_text_word(value + I64{32})) }
+#Export(c) fn jet_rt_handle_clone_jet_delivery(value: I64) -> I64 {
+    result :: jet_rt_alloc(DELIVERY_HANDLE_BYTES, I64{8})
+    rt_text_store(result, jet_rt_string_clone(rt_text_word(value)))
+    rt_text_store(result + I64{8}, jet_rt_string_clone(rt_text_word(value + I64{8})))
+    rt_text_store(result + I64{16}, if jet_rt_record_get_jet_delivery_duplicate(value) -> I64{1} else -> I64{0})
+    rt_text_store(result + I64{24}, jet_rt_string_clone(rt_text_word(value + I64{24})))
+    rt_text_store(result + I64{32}, rt_text_word(value + I64{32}))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_delivery(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(rt_text_word(value))
+    jet_rt_string_drop(rt_text_word(value + I64{8}))
+    jet_rt_string_drop(rt_text_word(value + I64{24}))
+    jet_rt_free(value, DELIVERY_HANDLE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_delivery(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(rt_text_word(left), rt_text_word(right)) &&
+        jet_rt_string_eq(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) &&
+        jet_rt_record_get_jet_delivery_duplicate(left) == jet_rt_record_get_jet_delivery_duplicate(right) &&
+        jet_rt_string_eq(rt_text_word(left + I64{24}), rt_text_word(right + I64{24})) &&
+        rt_text_word(left + I64{32}) == rt_text_word(right + I64{32})
+}
+#Export(c) fn jet_rt_handle_show_jet_delivery(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{8751168585183552836}, I64{8}) // Delivery
+    rt_text_push_word(target, I64{40}, I64{1})
+    jet_rt_string_builder_push(target, rt_text_word(value))
+    rt_text_push_word(target, I64{41}, I64{1})
+    jet_rt_string_builder_finish(target)
+}
+
+// Services.rs:3371-3376 / ServiceAuthority.rs:2749. These transport leaves
+// borrow the canonical native Delivery40 carrier; no registry access occurs.
+#Export(c) fn jet_services_raw_delivery_allocate(id: I64, store: I64, duplicate: U8, authority: I64, generation: I64) -> I64 {
+    // Unlike the record constructor, this Rust i64 parameter is untagged.
+    delivery_allocate_raw(id, store, duplicate, authority, generation)
+}
+#Export(c) fn jet_services_raw_delivery_identity(value: I64, id: I64, store: I64, duplicate: I64, authority: I64, generation: I64) {
+    rt_text_store(id, jet_rt_record_get_jet_delivery_id(value))
+    rt_text_store(store, jet_rt_record_get_jet_delivery_store(value))
+    #Unsafe("the C ABI lends exactly one writable bool byte; upper bytes are not part of this output") {
+        os_store_u8(duplicate, if jet_rt_record_get_jet_delivery_duplicate(value) -> I64{1} else -> I64{0})
+    }
+    rt_text_store(authority, jet_rt_record_get_jet_delivery_authority(value))
+    rt_text_store(generation, jet_rt_record_get_jet_delivery_generation(value))
+}
+#Export(c) fn jet_services_raw_delivery_store(value: I64) -> I64 {
+    jet_rt_record_get_jet_delivery_store(value)
+}

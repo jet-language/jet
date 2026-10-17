@@ -1,0 +1,10 @@
+
+use core.files as fs
+
+fn run() {
+    fs.create_dir_all("owned") ?? panic("mkdir")
+    fs.write("owned/closure.journal", "closure") ?? panic("write")
+    fs.fsync("owned/closure.journal") ?? panic("fsync")
+    contents :: fs.read("owned/closure.journal") ?? panic("read")
+    print(contents)
+}

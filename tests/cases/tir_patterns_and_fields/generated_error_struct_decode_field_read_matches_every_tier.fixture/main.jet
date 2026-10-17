@@ -1,0 +1,13 @@
+
+use core.encoding.json as json
+
+#[Error, Codable]
+struct CLIError {
+    message: String
+}
+
+fn run() -> ![FieldError] {
+    raw :: "{{\"message\":\"bad\"}}"
+    decoded :: json.decode<CLIError>(raw)
+    print(decoded.message)
+}

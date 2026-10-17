@@ -14,6 +14,13 @@ function jet_list_fold(xs, seed, f) {
   for (const value of xs) acc = f(acc, value);
   return acc;
 }
+// Native `jet_view_fold` borrows its list or view receiver; on the web both
+// are arrays, folded left-to-right like `jet_list_fold`.
+function jet_view_fold(xs, seed, f) {
+  let acc = seed;
+  for (const value of xs) acc = f(acc, value);
+  return acc;
+}
 
 // D-FRED1=A: these are only Web marshalling adapters. The compiled Prelude
 // export owns seed, lanes, and tree shape through the shared Compute bridge.
@@ -116,6 +123,17 @@ function jet_list_reverse(xs) {
   return null;
 }
 
+function jet_list_swap(xs, first, second) {
+  jet_list_get(xs, first, "<core.prelude>", 0);
+  jet_list_get(xs, second, "<core.prelude>", 0);
+  first = Number(first);
+  second = Number(second);
+  const value = xs[first];
+  xs[first] = xs[second];
+  xs[second] = value;
+  return null;
+}
+
 function jet_list_sort(xs) {
   xs.sort((left, right) => {
     if (left === right) return 0;
@@ -195,13 +213,13 @@ function jet_list_remove_value(xs, value) {
     : jet_option_some(xs.splice(position, 1)[0]);
 }
 
-function jet_list_remove_slot(xs, index) {
+function jet_list_remove_slot(xs, index, file, line) {
   const position = Number(index);
   if (!Number.isSafeInteger(position) || position < 0 || position >= xs.length) {
     jet_runtime_stop(
       "E3010",
-      "<core.collections>",
-      0,
+      file,
+      line,
       `the list has ${xs.length} items, so position ${index} doesn't exist`,
     );
   }

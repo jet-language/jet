@@ -1,0 +1,21 @@
+
+use core.time as time
+
+fn leave_on_deadline() {
+    task.group group {
+        child :: task {
+            total := 0
+            loop n in 0..<2000000 { total += n }
+            print("settled")
+        }
+        #Context(deadline: time.now() - 1) {
+            time.sleep(10000ms)
+        }
+        child.join() ?? panic("child failed")
+    }
+}
+
+fn run() {
+    leave_on_deadline()
+    print("caller")
+}

@@ -1,0 +1,18 @@
+# HAND-PORT tests/web_build.rs:2280-2320 web_js_unknown_runtime_stop_preserves_host_status_101
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original harness and export append copied verbatim; both host-error name/status/code predicates remain in the actual JavaScript execution.
+requires: tool:node
+fixture: web_js_unknown_runtime_stop_preserves_host_status_101.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+append: .jet/build/app.js "\nexport { jet_runtime_stop };\n"
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: ~ "E9999:status=101:name=JetHostError" # original contains predicate
+stdout: ~ "E1001:status=101:name=JetHostError" # original contains predicate

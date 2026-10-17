@@ -24,7 +24,7 @@ enum StopAction {
 }
 
 // How a supervisor host places services (Rust `cfg(test)` vs production).
-pub enum ServiceHost {
+enum ServiceHost {
     // Production: a re-executed supervisor under the platform authority.
     Platform
     // The service runs as a direct child in its own process group, and the
@@ -249,7 +249,9 @@ fn services_kill_authority_now(authority: ServiceAuthority) ServicesError! -[Env
 // Rust `{:?}` of an `Option<String>`.
 fn services_debug_option(value: String?) -> String Never! {
     text :: value ?? return "None"
-    "Some({json.to_string(DataTree.Text(text))})"
+    // Text is always encodable: no Float or map-key exclusion can apply here.
+    quoted :: json.to_string(Dyn.Text(text)) ?? panic("Text must be JSON-encodable")
+    "Some({quoted})"
 }
 
 // Run one readiness command for at most 750 ms; a timed-out probe's whole

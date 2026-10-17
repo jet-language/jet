@@ -16,35 +16,35 @@ package {
 // `DEFAULT` is a section name, not a magic fallback, unless `get_or` is used
 // with a caller-supplied default. This codec is pure.
 #Error
-pub struct INIError {
-    pub line: Int
-    pub reason: String
+struct INIError {
+    line: Int
+    reason: String
 }
 
 impl INIError {
-    pub fn new(line: Int, reason: String) -> INIError Never! {
+    fn new(line: Int, reason: String) -> INIError Never! {
         INIError{line: line, reason: reason}
     }
 }
 
 
-pub struct Pair {
-    pub key: String
-    pub value: String
+struct Pair {
+    key: String
+    value: String
 }
 
-pub struct Section {
-    pub name: String
-    pub pairs: [Pair]
+struct Section {
+    name: String
+    pairs: [Pair]
 }
 
-pub struct Ini {
-    pub sections: [Section]
+struct Ini {
+    sections: [Section]
 }
 
-pub fn empty() -> Ini Never! { Ini{sections: [Section]{}} }
+fn empty() -> Ini Never! { Ini{sections: [Section]{}} }
 
-pub fn parse(text: String) -> Ini INIError! {
+fn parse(text: String) -> Ini INIError! {
     doc := empty()
     current := ""
     line := 0
@@ -81,7 +81,7 @@ pub fn parse(text: String) -> Ini INIError! {
     Ok(doc)
 }
 
-pub fn to_string(doc: Ini) -> String Never! {
+fn to_string(doc: Ini) -> String Never! {
     out := ""
     loop section in doc.sections {
         out = "{out}[{section.name}]\n"
@@ -91,22 +91,22 @@ pub fn to_string(doc: Ini) -> String Never! {
     out
 }
 
-pub fn sections(doc: Ini) -> [String] Never! {
+fn sections(doc: Ini) -> [String] Never! {
     names := [String]{}
     loop s in doc.sections -> &names.push(s.name)
     names
 }
 
-pub fn has_section(doc: Ini, name: String) -> Bool Never! {
+fn has_section(doc: Ini, name: String) -> Bool Never! {
     loop s in doc.sections {
         if s.name == name -> return true
     }
     false
 }
 
-pub fn has_option(doc: Ini, section: String, key: String) -> Bool Never! { get(doc, section, key) != None }
+fn has_option(doc: Ini, section: String, key: String) -> Bool Never! { get(doc, section, key) != None }
 
-pub fn get(doc: Ini, section: String, key: String) -> String? Never! {
+fn get(doc: Ini, section: String, key: String) -> String? Never! {
     loop s in doc.sections {
         if s.name == section {
             loop p in s.pairs {
@@ -117,14 +117,14 @@ pub fn get(doc: Ini, section: String, key: String) -> String? Never! {
     None
 }
 
-pub fn get_or(doc: Ini, section: String, key: String, fallback: String) -> String Never! { get(doc, section, key) ?? fallback }
+fn get_or(doc: Ini, section: String, key: String, fallback: String) -> String Never! { get(doc, section, key) ?? fallback }
 
-pub fn get_int(doc: Ini, section: String, key: String) -> Int? Never! {
+fn get_int(doc: Ini, section: String, key: String) -> Int? Never! {
     text :: get(doc, section, key) ?? return None
     parse_int(text)
 }
 
-pub fn get_bool(doc: Ini, section: String, key: String) -> Bool? Never! {
+fn get_bool(doc: Ini, section: String, key: String) -> Bool? Never! {
     text :: get(doc, section, key) ?? return None
     t :: ascii_lower(trim(text))
     if t == {
@@ -134,25 +134,25 @@ pub fn get_bool(doc: Ini, section: String, key: String) -> Bool? Never! {
     }
 }
 
-pub fn get_float(doc: Ini, section: String, key: String) -> Float? Never! {
+fn get_float(doc: Ini, section: String, key: String) -> Float? Never! {
     text :: get(doc, section, key) ?? return None
     parse_float(text)
 }
 
-pub fn items(doc: Ini, section: String) -> [Pair] Never! {
+fn items(doc: Ini, section: String) -> [Pair] Never! {
     loop s in doc.sections {
         if s.name == section -> return s.pairs
     }
     [Pair]{}
 }
 
-pub fn options(doc: Ini, section: String) -> [String] Never! {
+fn options(doc: Ini, section: String) -> [String] Never! {
     keys := [String]{}
     loop p in items(doc, section) -> &keys.push(p.key)
     keys
 }
 
-pub fn set(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
+fn set(doc: Ini, section: String, key: String, value: String) -> Ini Never! {
     sections := [Section]{}
     found_section := false
     loop s in doc.sections {
@@ -180,7 +180,7 @@ pub fn set(doc: Ini, section: String, key: String, value: String) -> Ini Never! 
     Ini{sections: sections}
 }
 
-pub fn remove_option(doc: Ini, section: String, key: String) -> Ini Never! {
+fn remove_option(doc: Ini, section: String, key: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
         if s.name == section {
@@ -196,7 +196,7 @@ pub fn remove_option(doc: Ini, section: String, key: String) -> Ini Never! {
     Ini{sections: sections}
 }
 
-pub fn remove_section(doc: Ini, section: String) -> Ini Never! {
+fn remove_section(doc: Ini, section: String) -> Ini Never! {
     sections := [Section]{}
     loop s in doc.sections {
         if s.name != section -> &sections.push(s)
@@ -204,10 +204,10 @@ pub fn remove_section(doc: Ini, section: String) -> Ini Never! {
     Ini{sections: sections}
 }
 
-pub fn defaults(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
+fn defaults(doc: Ini) -> [Pair] Never! { items(doc, "DEFAULT") }
 
 fn ensure_section(doc: Ini, name: String) -> Ini Never! {
-    if has_section(doc, name) -> return ~doc
+    if has_section(doc, name) -> return doc.copy()
     sections := [Section]{}
     loop s in doc.sections -> &sections.push(s)
     &sections.push(Section{name: name, pairs: [Pair]{}})
@@ -231,7 +231,7 @@ fn strip_comment(line: String) -> String Never! {
         }
         i = i + 1
     }
-    ~line
+    line.copy()
 }
 
 fn unquote(text: String) -> String Never! {
@@ -254,10 +254,10 @@ fn unquote(text: String) -> String Never! {
                 }
                 i += 1
             }
-            return String.from_bytes(body) ?? ~text
+            return String.from_bytes(body) ?? text.copy()
         }
     }
-    ~text
+    text.copy()
 }
 
 fn ini_value(text: String) -> String {
@@ -269,7 +269,7 @@ fn ini_value(text: String) -> String {
         if n == 32 || n == 9 || n == 35 || n == 59 || n == 34 || n == 39 || n == 10 || n == 13 || n == 92 -> quote = true
         i += 1
     }
-    if !quote -> return ~text
+    if !quote -> return text.copy()
     out := "\""
     loop b in raw {
         if b == (U8{92}) -> out = "{out}\\\\"
@@ -345,7 +345,7 @@ fn ascii_lower(text: String) -> String Never! {
             &out.push(b)
         }
     }
-    String.from_bytes(out) ?? ~text
+    String.from_bytes(out) ?? text.copy()
 }
 
 fn parse_int(text: String) -> Int? {

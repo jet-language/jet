@@ -1,0 +1,112 @@
+use core.time as time
+
+// Split only unquoted conjunctions: quoted JSON/string contents stay intact.
+fn kit_steps_predicates(text: String) -> [String]? {
+    body :: kit_steps_body(text)
+    tokens :: kit_steps_tokens(body) ?? return None
+    result := [String]{}
+    start := 0
+    loop token in tokens {
+        if token.text != "&&" || kit_steps_byte_slice(body, token.start, token.end) != "&&" -> next
+        part :: kit_steps_byte_slice(body, start, token.start).trim().copy()
+        if part == "" -> return None
+        &result.push(part)
+        start = token.end
+    }
+    last :: kit_steps_byte_slice(body, start, body.count_bytes()).trim().copy()
+    if last == "" -> return None
+    &result.push(last)
+    Val(result)
+}
+
+fn kit_steps_poll_step(label: String, original: String) -> KitStep? {
+    if label == "" || label.contains(" ") || label.contains("\t") -> return None
+    body :: kit_steps_body(original)
+    tokens :: kit_steps_tokens(body) ?? return None
+    until := -1
+    boundary := tokens.len()
+    loop (index, token) in tokens {
+        raw :: kit_steps_byte_slice(body, token.start, token.end)
+        if raw == "until" && until < 0 -> until = index
+        if until >= 0 && raw == "timeout" {
+            boundary = index
+            break
+        }
+    }
+    if until <= 0 || boundary <= until + 1 || tokens.len() != boundary + 4 -> return None
+    if tokens[boundary + 2].text != "every" -> return None
+    timeout :: kit_steps_duration_ns(tokens[boundary + 1].text) ?? return None
+    interval :: kit_steps_duration_ns(tokens[boundary + 3].text) ?? return None
+    predicates :: kit_steps_predicates(kit_steps_byte_slice(body, tokens[until + 1].start, tokens[boundary - 1].end)) ?? return None
+    assertions := [KitAssertion]{}
+    exit := "0"
+    reason :: kit_steps_byte_slice(original, kit_steps_comment(original), original.count_bytes())
+    loop predicate in predicates {
+        colon :: kit_steps_condition_colon(predicate) ?? return None
+        subject :: kit_steps_byte_slice(predicate, 0, colon).trim().copy()
+        form :: kit_steps_byte_slice(predicate, colon + 1, predicate.count_bytes()).trim().copy()
+        assertion :: if subject == "exit" -> {
+            if kit_steps_integer(form) == None -> return None
+            // Every explicit status is checked below; "any" must not exempt exit 101 from process failure classification.
+            exit = "any"
+            KitAssertion{stream: "exit", path: "", mode: "in", value: "", alternatives: [form]}
+        } else if subject == "json" -> {
+            kit_steps_json_assertion("{form} {reason}") ?? return None
+        } else -> {
+            kit_steps_stream_assertion(subject, "{form} {reason}") ?? return None
+        }
+        &assertions.push(assertion)
+    }
+    argv := [String]{}
+    loop token in tokens.slice(0, until) -> &argv.push(token.text)
+    Val(KitStep{argv: argv, stdin: "", exit: exit, assertions: assertions, label: label, action: "poll", duration: timeout, instruction: "{interval}"})
+}
+
+fn kit_steps_poll(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState, hooks: KitStepHooks) -> KitStepResult {
+    state := previous
+    attempt := step
+    attempt.action = ""
+    state.replacements = kit_steps_replacements(step.replacements, context, state) ?? return kit_steps_action_error(state, "poll replacement token unavailable")
+    rules := context.plan.json_normalize
+    loop rule in step.json_normalize -> &rules.push(rule)
+    interval :: Int.parse(step.instruction) ?? return kit_steps_action_error(state, "invalid polling interval")
+    started :: time.instant()
+    attempt_context := context
+    attempt_context.bless.all = false
+    attempt_context.bless.ids = []
+    loop {
+        remaining_before :: step.duration - started.elapsed().ns
+        if remaining_before <= 0 -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
+        policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "poll policy unavailable")
+        attempt.duration = if remaining_before < policy.timeout.ns -> remaining_before else -> policy.timeout.ns
+        state.json_stdout = None
+        state.json_stderr = None
+        invoked :: hooks.invoke(attempt, index, context, state)
+        state = invoked.state
+        if invoked.verdict.status != "PASS" -> return invoked
+        if state.last.timed_out -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded")}
+        failure :: kit_steps_failure(attempt, state.last)
+        if failure == {
+            .Val(verdict) -> {
+                if verdict.status != "FAIL" -> return KitStepResult{state: state, verdict: verdict}
+            }
+            .None -> {}
+        }
+        if rules.len() > 0 && failure == None {
+            output :: kit_steps_json_normalize(state.last.stdout, "stdout", rules)
+            errors :: kit_steps_json_normalize(state.last.stderr, "stderr", rules)
+            if output.error != "" -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", output.error)}
+            if errors.error != "" -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", errors.error)}
+            state.json_stdout = Val(output.text)
+            state.json_stderr = Val(errors.text)
+        }
+        verdict :: hooks.check(attempt, index, attempt_context, state)
+        if verdict.status != "FAIL" {
+            state.last.elapsed_ns = started.elapsed().ns
+            return KitStepResult{state: state, verdict: verdict}
+        }
+        remaining :: step.duration - started.elapsed().ns
+        if remaining <= 0 -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "poll deadline exceeded: {verdict.detail}")}
+        time.sleep(time.duration_ns(if interval < remaining -> interval else -> remaining))
+    }
+}

@@ -1,6 +1,6 @@
 use super::studio_server::StudioContext;
 use crate::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::path::{Path, PathBuf};
 
 pub(super) struct StudioChangeSet {
@@ -265,7 +265,7 @@ pub(super) fn handle_studio_transaction(
 
 fn studio_changeset_status(
     context: &StudioContext,
-    request: &[(String, DataTree)],
+    request: &[(String, Dyn)],
 ) -> (&'static str, String) {
     match context.changeset.lock() {
         Ok(changeset) => {
@@ -298,7 +298,7 @@ fn studio_changeset_status(
 
 fn studio_changeset_discard(
     context: &StudioContext,
-    request: &[(String, DataTree)],
+    request: &[(String, Dyn)],
 ) -> (&'static str, String) {
     match context.changeset.lock() {
         Ok(mut changeset) => {
@@ -323,7 +323,7 @@ fn studio_changeset_discard(
 
 fn studio_changeset_apply(
     context: &StudioContext,
-    request: &[(String, DataTree)],
+    request: &[(String, Dyn)],
 ) -> (&'static str, String) {
     let _source_write = match context.source_write.lock() {
         Ok(lock) => lock,
@@ -446,7 +446,7 @@ fn studio_changeset_apply(
 
 fn studio_changeset_stage_rollback(
     context: &StudioContext,
-    request: &[(String, DataTree)],
+    request: &[(String, Dyn)],
 ) -> (&'static str, String) {
     let _source_write = match context.source_write.lock() {
         Ok(lock) => lock,
@@ -839,7 +839,7 @@ fn validate_studio_generation_binding(proved: &StudioProvedSource) -> Result<(),
         .map_err(|error| format!("reading proved generation source proof failed: {error}"))?;
     let parsed = JSON::parse(&source_proof)
         .map_err(|error| format!("proved generation source proof is invalid: {error}"))?;
-    let DataTree::Object(fields) = parsed else {
+    let Dyn::Object(fields) = parsed else {
         return Err("proved generation source proof is not an object".to_string());
     };
     let string = |name: &str| {
@@ -882,10 +882,10 @@ fn validate_studio_proof_artifact(
 ) -> Result<StudioProofArtifact, String> {
     let parsed = JSON::parse(proof.trim())
         .map_err(|error| format!("generation proof JSON is invalid: {error}"))?;
-    let DataTree::Object(root) = parsed else {
+    let Dyn::Object(root) = parsed else {
         return Err("generation proof is not a JSON object".to_string());
     };
-    let Some(DataTree::Object(source_proof)) = studio_tree_value(&root, "source_proof") else {
+    let Some(Dyn::Object(source_proof)) = studio_tree_value(&root, "source_proof") else {
         return Err("generation proof is missing source_proof".to_string());
     };
     let field = |name: &str| {
@@ -899,7 +899,7 @@ fn validate_studio_proof_artifact(
     if field("input_plan_sha256") != Some(input_plan_revision) {
         return Err("generation proof input plan hash does not match captured plan".to_string());
     }
-    let Some(DataTree::Text(plan)) = studio_tree_value(&root, "plan") else {
+    let Some(Dyn::Text(plan)) = studio_tree_value(&root, "plan") else {
         return Err("generation proof is missing its plan artifact".to_string());
     };
     let artifact_plan_revision = studio_source_revision(plan);
@@ -907,11 +907,11 @@ fn validate_studio_proof_artifact(
         return Err("generation proof plan hash does not match its plan artifact".to_string());
     }
     let generation = match studio_tree_value(&root, "generation") {
-        Some(DataTree::Text(value)) => value.clone(),
+        Some(Dyn::Text(value)) => value.clone(),
         _ => return Err("generation proof is missing its generation ID".to_string()),
     };
     let path = match studio_tree_value(&root, "path") {
-        Some(DataTree::Text(value)) => PathBuf::from(value),
+        Some(Dyn::Text(value)) => PathBuf::from(value),
         _ => return Err("generation proof is missing its generation path".to_string()),
     };
     Ok(StudioProofArtifact {
@@ -1363,9 +1363,9 @@ fn source_diff(path: &Path, before: &str, after: &str) -> String {
     diff
 }
 fn studio_tree_value<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -1373,30 +1373,30 @@ fn studio_tree_value<'a>(
 
 fn studio_request(
     body: &str,
-) -> Result<Vec<(String, DataTree)>, String> {
+) -> Result<Vec<(String, Dyn)>, String> {
     let parsed =
         JSON::parse(body).map_err(|error| format!("invalid Studio JSON request: {error}"))?;
     match parsed {
-        DataTree::Object(object) => Ok(object),
+        Dyn::Object(object) => Ok(object),
         _ => Err("Studio request must be a JSON object".to_string()),
     }
 }
 
 fn studio_request_string(
-    request: &[(String, DataTree)],
+    request: &[(String, Dyn)],
     key: &str,
 ) -> Option<String> {
     match studio_tree_value(request, key) {
-        Some(DataTree::Text(value)) => Some(value.clone()),
+        Some(Dyn::Text(value)) => Some(value.clone()),
         _ => None,
     }
 }
 
 fn studio_request_bool(
-    request: &[(String, DataTree)],
+    request: &[(String, Dyn)],
     key: &str,
 ) -> bool {
-    matches!(studio_tree_value(request, key), Some(DataTree::Bool(true)))
+    matches!(studio_tree_value(request, key), Some(Dyn::Bool(true)))
 }
 
 fn studio_source_revision(source: &str) -> String {
@@ -1559,7 +1559,7 @@ fn studio_changeset_token(source: &str, session_id: &str) -> String {
 }
 
 fn studio_request_owns_changeset(
-    request: &[(String, DataTree)],
+    request: &[(String, Dyn)],
     changeset: &StudioChangeSet,
 ) -> bool {
     studio_request_string(request, "session_id").as_deref() == Some(changeset.session_id.as_str())

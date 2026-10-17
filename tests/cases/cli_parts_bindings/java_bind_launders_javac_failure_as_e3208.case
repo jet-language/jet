@@ -1,0 +1,9 @@
+# Port of tests/cli_parts/bindings.rs:784-807. Source copied verbatim.
+# PENDING-SAME-HEAD: historical Could/Use capitalization differs from the original lowercase snapshot; do not bless it.
+# Original scrub maps the source path to BAD.jet; expected snapshot maps that token
+# back to {work}/Broken.java for standard kit paths normalization.
+fixture: fixtures/java_broken
+step: jet inspect bind java {work}/Broken.java --pkg broken
+exit: nonzero
+stderr: = bind-java-invalid.stderr
+stderr: !~ Broken.java: # Original forbids raw javac location leakage.

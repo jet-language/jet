@@ -37,26 +37,23 @@ where
     JetViewIter(Box::new(iter))
 }
 
-fn jet_bytes_view_iter<'a>(bytes: &'a [u8]) -> JetViewIter<'a, &'a [u8]> {
-    jet_view_iter_from_iter(bytes.iter().map(std::slice::from_ref))
-}
 
-fn jet_text_unicode_scalar_count(s: &String) -> i64 {
+fn jet_text_unicode_scalar_count(s: &str) -> i64 {
     s.chars().count() as i64
 }
-fn jet_text_unicode_byte_count(s: &String) -> i64 {
+fn jet_text_unicode_byte_count(s: &str) -> i64 {
     s.len() as i64
 }
-fn jet_text_unicode_is_ascii(s: &String) -> bool {
+fn jet_text_unicode_is_ascii(s: &str) -> bool {
     s.is_ascii()
 }
-fn jet_text_unicode_lower(s: &String) -> String {
+fn jet_text_unicode_lower(s: &str) -> String {
     jet_text_lower(s)
 }
-fn jet_text_unicode_upper(s: &String) -> String {
+fn jet_text_unicode_upper(s: &str) -> String {
     jet_text_upper(s)
 }
-fn jet_text_unicode_scalars(s: &String) -> Vec<String> {
+fn jet_text_unicode_scalars(s: &str) -> Vec<String> {
     s.chars().map(|c| c.to_string()).collect()
 }
 fn jet_text_unicode_name(cp: u32) -> &'static str {
@@ -65,7 +62,7 @@ fn jet_text_unicode_name(cp: u32) -> &'static str {
         .map(|at| UNICODE_NAME_INDEX[at].1)
         .unwrap_or("UNASSIGNED")
 }
-fn jet_text_inspect(s: &String) -> Vec<String> {
+fn jet_text_inspect(s: &str) -> Vec<String> {
     s.chars()
         .map(|c| format!("U+{:04X} {}", c as u32, jet_text_unicode_name(c as u32)))
         .collect()
@@ -183,7 +180,7 @@ fn jet_text_canonical_order(seq: &mut [u32]) {
     }
 }
 
-fn jet_text_nfd_inner(s: &String, compat: bool) -> String {
+fn jet_text_nfd_inner(s: &str, compat: bool) -> String {
     let mut seq: Vec<u32> = Vec::with_capacity(s.len());
     for c in s.chars() {
         jet_text_expand_char(c as u32, compat, &mut seq);
@@ -193,8 +190,12 @@ fn jet_text_nfd_inner(s: &String, compat: bool) -> String {
         .filter_map(char::from_u32)
         .collect()
 }
-fn jet_text_nfd(s: &String) -> String { jet_text_nfd_inner(s, false) }
-fn jet_text_nfkd(s: &String) -> String { jet_text_nfd_inner(s, true) }
+fn jet_text_nfd(s: &str) -> String {
+    jet_text_nfd_inner(s, false)
+}
+fn jet_text_nfkd(s: &str) -> String {
+    jet_text_nfd_inner(s, true)
+}
 
 fn jet_text_compose_pair_cp(a: u32, b: u32) -> Option<u32> {
     UNICODE_COMPOSE_PAIRS
@@ -255,8 +256,12 @@ fn jet_text_compose(s: String) -> String {
     }
     out.into_iter().filter_map(char::from_u32).collect()
 }
-fn jet_text_nfc(s: &String) -> String { jet_text_compose(jet_text_nfd(s)) }
-fn jet_text_nfkc(s: &String) -> String { jet_text_compose(jet_text_nfkd(s)) }
+fn jet_text_nfc(s: &str) -> String {
+    jet_text_compose(jet_text_nfd(s))
+}
+fn jet_text_nfkc(s: &str) -> String {
+    jet_text_compose(jet_text_nfkd(s))
+}
 
 fn jet_text_fold_lookup(cp: u32) -> Option<&'static [u32]> {
     let idx = UNICODE_FOLD_INDEX
@@ -265,7 +270,7 @@ fn jet_text_fold_lookup(cp: u32) -> Option<&'static [u32]> {
     let (_, start, len) = UNICODE_FOLD_INDEX[idx];
     Some(&UNICODE_FOLD_POOL[start as usize..(start + len) as usize])
 }
-fn jet_text_casefold(s: &String) -> String {
+fn jet_text_casefold(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         match jet_text_fold_lookup(c as u32) {
@@ -294,10 +299,10 @@ fn jet_text_alphabetic(cp: u32) -> bool { jet_text_property(UNICODE_ALPHABETIC, 
 fn jet_text_numeric(cp: u32) -> bool { jet_text_property(UNICODE_NUMERIC, cp) }
 fn jet_text_whitespace(cp: u32) -> bool { jet_text_property(UNICODE_WHITE_SPACE, cp) }
 fn jet_text_letter(cp: u32) -> bool { jet_text_property(UNICODE_LETTER, cp) }
-fn jet_text_lower(s: &String) -> String {
+fn jet_text_lower(s: &str) -> String {
     jet_unicode_lower(s)
 }
-fn jet_text_upper(s: &String) -> String {
+fn jet_text_upper(s: &str) -> String {
     jet_unicode_upper(s)
 }
 fn jet_text_title_mapping(cp: u32) -> Option<&'static [u32]> {
@@ -314,7 +319,7 @@ fn jet_text_append_title_mapping(out: &mut String, cp: u32) {
         out.push(ch);
     }
 }
-fn jet_text_title(s: &String) -> String {
+fn jet_text_title(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut word_start = true;
     for ch in s.chars() {
@@ -335,7 +340,7 @@ fn jet_text_title(s: &String) -> String {
     out
 }
 // Unicode Default Caseless Matching: NFD(toCasefold(NFD(text))).
-fn jet_text_caseless_eq(a: &String, b: &String) -> bool {
+fn jet_text_caseless_eq(a: &str, b: &str) -> bool {
     jet_text_nfd(&jet_text_casefold(&jet_text_nfd(a)))
         == jet_text_nfd(&jet_text_casefold(&jet_text_nfd(b)))
 }
@@ -426,7 +431,7 @@ fn jet_text_grapheme_break_classes(pc: u8, cc: u8) -> bool {
     true // GB999
 }
 
-fn jet_text_graphemes(s: &String) -> Vec<String> {
+fn jet_text_graphemes(s: &str) -> Vec<String> {
     let cps: Vec<char> = s.chars().collect();
     if cps.is_empty() { return Vec::new(); }
     let mut out = Vec::new();
@@ -651,7 +656,7 @@ where
     true // WB999
 }
 
-fn jet_text_word_segments(s: &String) -> Vec<String> {
+fn jet_text_word_segments(s: &str) -> Vec<String> {
     let cps: Vec<char> = s.chars().collect();
     if cps.is_empty() { return Vec::new(); }
     let (units, ends) = jet_text_word_reduce(cps.iter().copied());
@@ -686,7 +691,7 @@ fn jet_text_word_segments(s: &String) -> Vec<String> {
     out
 }
 
-fn jet_text_words(s: &String) -> Vec<String> {
+fn jet_text_words(s: &str) -> Vec<String> {
     jet_text_word_segments(s)
         .into_iter()
         .filter(|w| w.chars().any(|c| jet_text_alphabetic(c as u32) || jet_text_numeric(c as u32)))
@@ -768,11 +773,6 @@ pub(crate) fn jet_text_line_views<'a>(s: &'a str) -> JetViewIter<'a, &'a str> {
     jet_view_iter_from_iter(s.lines())
 }
 
-/// Text bytes are exposed as one-byte windows over the original UTF-8 buffer.
-/// The byte API is intentionally independent of scalar/grapheme boundaries.
-pub(crate) fn jet_text_byte_views<'a>(s: &'a str) -> JetViewIter<'a, &'a [u8]> {
-    jet_bytes_view_iter(s.as_bytes())
-}
 
 
 // ---- SB1-SB11 sentence boundaries -------------------------------------------
@@ -841,7 +841,7 @@ fn jet_text_sentence_breaks(units: &[u8]) -> Vec<bool> {
     brk
 }
 
-fn jet_text_sentence_segments(s: &String) -> Vec<String> {
+fn jet_text_sentence_segments(s: &str) -> Vec<String> {
     let cps: Vec<char> = s.chars().collect();
     if cps.is_empty() { return Vec::new(); }
     let mut units: Vec<u8> = Vec::new();
@@ -877,7 +877,7 @@ fn jet_text_sentence_segments(s: &String) -> Vec<String> {
     out
 }
 
-fn jet_text_sentences(s: &String) -> Vec<String> {
+fn jet_text_sentences(s: &str) -> Vec<String> {
     jet_text_sentence_segments(s)
         .into_iter()
         .filter_map(|seg| { let t = jet_text_trim(&seg); if t.is_empty() { None } else { Some(t) } })
@@ -913,32 +913,35 @@ fn jet_text_cluster_width(cluster: &str, ambiguous_wide: bool, controls_reject: 
     if jet_text_eaw_class(base as u32) == 1 { return Ok(if ambiguous_wide { 2 } else { 1 }); }
     Ok(1)
 }
-fn jet_text_display_width_default(s: &String) -> i64 {
-    jet_text_grapheme_views(s.as_str())
+fn jet_text_display_width_default(s: &str) -> i64 {
+    jet_text_grapheme_views(s)
         .into_iter()
         .map(|g| jet_text_cluster_width(g, false, false).unwrap_or(0))
         .sum()
 }
-fn jet_text_display_width_policy(
-    s: &String,
-    ambiguous_wide: bool,
-    controls_reject: bool,
-) -> Result<i64, String> {
+fn jet_text_display_width_policy(s: &str, ambiguous_wide: bool,
+controls_reject: bool,) -> Result<i64, String> {
     let mut total = 0i64;
-    for g in jet_text_grapheme_views(s.as_str()) {
+    for g in jet_text_grapheme_views(s) {
         total += jet_text_cluster_width(g, ambiguous_wide, controls_reject)?;
     }
     Ok(total)
 }
-fn jet_text_display_width(s: &String, policy: &jet_std::TextWidth) -> Result<i64, jet_std::TextError> {
+fn jet_text_display_width(s: &str, policy: &jet_std::TextWidth) -> Result<i64, jet_std::TextError> {
     let ambiguous_wide = matches!(policy.ambiguous, jet_std::TextWidthAmbiguous::Wide);
     let controls_reject = matches!(policy.controls, jet_std::TextWidthControls::Reject);
     jet_text_display_width_policy(s, ambiguous_wide, controls_reject)
         .map_err(|message| jet_std::TextError { message })
 }
-fn jet_text_is_alphabetic(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_alphabetic(c as u32)) }
-fn jet_text_is_numeric(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_numeric(c as u32)) }
-fn jet_text_is_whitespace(s: &String) -> bool { !s.is_empty() && s.chars().all(|c| jet_text_whitespace(c as u32)) }
+fn jet_text_is_alphabetic(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| jet_text_alphabetic(c as u32))
+}
+fn jet_text_is_numeric(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| jet_text_numeric(c as u32))
+}
+fn jet_text_is_whitespace(s: &str) -> bool {
+    !s.is_empty() && s.chars().all(|c| jet_text_whitespace(c as u32))
+}
 // #1476: cased-char predicates (Python islower/isupper shape — at least one
 // cased scalar, every cased scalar has the named case). Uses pinned case maps.
 fn jet_text_char_is_lower(c: char) -> bool {
@@ -955,7 +958,7 @@ fn jet_text_char_is_upper(c: char) -> bool {
     let one = c.to_string();
     jet_unicode_lower(&one) != one
 }
-fn jet_text_is_lower(s: &String) -> bool {
+fn jet_text_is_lower(s: &str) -> bool {
     let mut saw = false;
     for c in s.chars() {
         if jet_unicode_contains(UNICODE_CASED, c as u32) {
@@ -967,7 +970,7 @@ fn jet_text_is_lower(s: &String) -> bool {
     }
     saw
 }
-fn jet_text_is_upper(s: &String) -> bool {
+fn jet_text_is_upper(s: &str) -> bool {
     let mut saw = false;
     for c in s.chars() {
         if jet_unicode_contains(UNICODE_CASED, c as u32) {
@@ -979,7 +982,7 @@ fn jet_text_is_upper(s: &String) -> bool {
     }
     saw
 }
-fn jet_text_capitalize(s: &String) -> String {
+fn jet_text_capitalize(s: &str) -> String {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
         return String::new();
@@ -990,7 +993,7 @@ fn jet_text_capitalize(s: &String) -> String {
     out.push_str(&jet_text_lower(&rest));
     out
 }
-fn jet_text_swapcase(s: &String) -> String {
+fn jet_text_swapcase(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for c in s.chars() {
         if !jet_unicode_contains(UNICODE_CASED, c as u32) {
@@ -1012,16 +1015,16 @@ fn jet_text_swapcase(s: &String) -> String {
     }
     out
 }
-fn jet_text_remove_prefix(s: &String, prefix: &String) -> String {
-    match s.strip_prefix(prefix.as_str()) {
+fn jet_text_remove_prefix(s: &str, prefix: &str) -> String {
+    match s.strip_prefix(prefix) {
         Some(rest) => rest.to_string(),
-        None => s.clone(),
+        None => s.to_owned(),
     }
 }
-fn jet_text_remove_suffix(s: &String, suffix: &String) -> String {
-    match s.strip_suffix(suffix.as_str()) {
+fn jet_text_remove_suffix(s: &str, suffix: &str) -> String {
+    match s.strip_suffix(suffix) {
         Some(rest) => rest.to_string(),
-        None => s.clone(),
+        None => s.to_owned(),
     }
 }
 fn jet_text_compare(a: &str, b: &str) -> i64 {
@@ -1031,29 +1034,35 @@ fn jet_text_compare(a: &str, b: &str) -> i64 {
         std::cmp::Ordering::Greater => 1,
     }
 }
-fn jet_text_reverse(s: &String) -> String {
+fn jet_text_reverse(s: &str) -> String {
     s.chars().rev().collect()
 }
-fn jet_text_normalize_nfc(s: &String) -> String {
+fn jet_text_normalize_nfc(s: &str) -> String {
     jet_text_nfc(s)
 }
-fn jet_text_trim_start(s: &String) -> String { jet_unicode_trim_start(s) }
-fn jet_text_trim_end(s: &String) -> String { jet_unicode_trim_end(s) }
-fn jet_text_trim(s: &String) -> String { jet_unicode_trim(s) }
-fn jet_text_splitn(s: &String, pat: &String, n: i64) -> Vec<String> {
+fn jet_text_trim_start(s: &str) -> String {
+    jet_unicode_trim_start(s)
+}
+fn jet_text_trim_end(s: &str) -> String {
+    jet_unicode_trim_end(s)
+}
+fn jet_text_trim(s: &str) -> String {
+    jet_unicode_trim(s)
+}
+fn jet_text_splitn(s: &str, pat: &str, n: i64) -> Vec<String> {
     let limit = n.max(0) as usize;
     let mut out = Vec::with_capacity(limit.min(s.len().saturating_add(1)));
     out.extend(s.splitn(limit, pat).map(|x| x.to_string()));
     out
 }
-fn jet_text_rsplitn(s: &String, pat: &String, n: i64) -> Vec<String> {
+fn jet_text_rsplitn(s: &str, pat: &str, n: i64) -> Vec<String> {
     let limit = n.max(0) as usize;
     let mut out = Vec::with_capacity(limit.min(s.len().saturating_add(1)));
     out.extend(s.rsplitn(limit, pat).map(|x| x.to_string()));
     out
 }
-fn jet_text_fill_columns(fill: &String, columns: i64) -> String {
-    let Some(unit) = jet_text_grapheme_views(fill.as_str()).into_iter().next() else {
+fn jet_text_fill_columns(fill: &str, columns: i64) -> String {
+    let Some(unit) = jet_text_grapheme_views(fill).into_iter().next() else {
         return " ".repeat(columns.max(0) as usize);
     };
     let width = jet_text_cluster_width(unit, false, false).unwrap_or(0);
@@ -1075,11 +1084,7 @@ fn jet_text_fill_columns(fill: &String, columns: i64) -> String {
     out.extend(std::iter::repeat(' ').take(remainder));
     out
 }
-fn jet_text_pad_start(
-    s: &String,
-    width: jet_foundation::Numeric::JetInt,
-    fill: &String,
-) -> String {
+fn jet_text_pad_start(s: &str, width: jet_foundation::Numeric::JetInt, fill: &str) -> String {
     let width = width
         .to_i64()
         .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
@@ -1087,23 +1092,15 @@ fn jet_text_pad_start(
     out.push_str(s);
     out
 }
-fn jet_text_pad_end(
-    s: &String,
-    width: jet_foundation::Numeric::JetInt,
-    fill: &String,
-) -> String {
+fn jet_text_pad_end(s: &str, width: jet_foundation::Numeric::JetInt, fill: &str) -> String {
     let width = width
         .to_i64()
         .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
-    let mut out = s.clone();
+    let mut out = s.to_owned();
     out.push_str(&jet_text_fill_columns(fill, (width - jet_text_display_width_default(s)).max(0)));
     out
 }
-fn jet_text_center(
-    s: &String,
-    width: jet_foundation::Numeric::JetInt,
-    fill: &String,
-) -> String {
+fn jet_text_center(s: &str, width: jet_foundation::Numeric::JetInt, fill: &str) -> String {
     let width = width
         .to_i64()
         .unwrap_or_else(|| panic!("text padding width does not fit native i64"));
@@ -1112,118 +1109,105 @@ fn jet_text_center(
     let right = gap - left;
     format!("{}{}{}", jet_text_fill_columns(fill, left), s, jet_text_fill_columns(fill, right))
 }
-fn jet_text_pad_start_i64(s: &String, width: i64, fill: &String) -> String {
+fn jet_text_pad_start_i64(s: &str, width: i64, fill: &str) -> String {
     jet_text_pad_start(
         s,
         jet_foundation::Numeric::JetInt::from_i64(width),
         fill,
     )
 }
-fn jet_text_pad_end_i64(s: &String, width: i64, fill: &String) -> String {
+fn jet_text_pad_end_i64(s: &str, width: i64, fill: &str) -> String {
     jet_text_pad_end(
         s,
         jet_foundation::Numeric::JetInt::from_i64(width),
         fill,
     )
 }
-fn jet_text_center_i64(s: &String, width: i64, fill: &String) -> String {
+fn jet_text_center_i64(s: &str, width: i64, fill: &str) -> String {
     jet_text_center(
         s,
         jet_foundation::Numeric::JetInt::from_i64(width),
         fill,
     )
 }
-fn jet_text_pad_start_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
+fn jet_text_pad_start_ref(s: &str, width: &jet_foundation::Numeric::JetInt, fill: &str) -> String {
     jet_text_pad_start(s, width.clone(), fill)
 }
-fn jet_text_pad_end_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
+fn jet_text_pad_end_ref(s: &str, width: &jet_foundation::Numeric::JetInt, fill: &str) -> String {
     jet_text_pad_end(s, width.clone(), fill)
 }
-fn jet_text_center_ref(s: &String, width: &jet_foundation::Numeric::JetInt, fill: &String) -> String {
+fn jet_text_center_ref(s: &str, width: &jet_foundation::Numeric::JetInt, fill: &str) -> String {
     jet_text_center(s, width.clone(), fill)
 }
-fn jet_text_starts_any(s: &String, prefixes: &Vec<String>) -> bool {
+fn jet_text_starts_any(s: &str, prefixes: &Vec<String>) -> bool {
     prefixes.iter().any(|p| s.starts_with(p))
 }
-pub(crate) fn jet_text_parse_split(text: &String, separator: &String) -> Vec<String> {
+pub(crate) fn jet_text_parse_split(text: &str, separator: &str) -> Vec<String> {
     if separator.is_empty() {
         return text.chars().map(|character| character.to_string()).collect();
     }
-    text.split(separator.as_str())
+    text.split(separator)
         .map(str::to_string)
         .collect()
 }
-pub(crate) fn jet_text_parse_rsplit(
-    text: &String,
-    separator: &String,
-    maxsplit: i64,
-) -> Vec<String> {
+pub(crate) fn jet_text_parse_rsplit(text: &str, separator: &str, maxsplit: i64,) -> Vec<String> {
     if separator.is_empty() {
         return text.chars().map(|character| character.to_string()).collect();
     }
     if maxsplit < 0 {
-        return text.split(separator.as_str()).map(str::to_string).collect();
+        return text.split(separator).map(str::to_string).collect();
     }
     let mut parts = text
-        .rsplitn(maxsplit.saturating_add(1) as usize, separator.as_str())
+        .rsplitn(maxsplit.saturating_add(1) as usize, separator)
         .map(str::to_string)
         .collect::<Vec<_>>();
     parts.reverse();
     parts
 }
-pub(crate) fn jet_text_parse_split_once(
-    text: &String,
-    separator: &String,
-) -> (bool, String, String) {
-    match text.find(separator.as_str()) {
+pub(crate) fn jet_text_parse_split_once(text: &str, separator: &str) -> (bool, String, String) {
+    match text.find(separator) {
         Some(index) => (
             true,
             text[..index].to_string(),
             text[index + separator.len()..].to_string(),
         ),
-        None => (false, text.clone(), String::new()),
+        None => (false, text.to_owned(), String::new()),
     }
 }
-pub(crate) fn jet_text_parse_partition(
-    text: &String,
-    separator: &String,
-) -> (String, String, String) {
-    match text.find(separator.as_str()) {
+pub(crate) fn jet_text_parse_partition(text: &str, separator: &str) -> (String, String, String) {
+    match text.find(separator) {
         Some(index) => (
             text[..index].to_string(),
-            separator.clone(),
+            separator.to_owned(),
             text[index + separator.len()..].to_string(),
         ),
-        None => (text.clone(), String::new(), String::new()),
+        None => (text.to_owned(), String::new(), String::new()),
     }
 }
-pub(crate) fn jet_text_parse_rpartition(
-    text: &String,
-    separator: &String,
-) -> (String, String, String) {
-    match text.rfind(separator.as_str()) {
+pub(crate) fn jet_text_parse_rpartition(text: &str, separator: &str) -> (String, String, String) {
+    match text.rfind(separator) {
         Some(index) => (
             text[..index].to_string(),
-            separator.clone(),
+            separator.to_owned(),
             text[index + separator.len()..].to_string(),
         ),
-        None => (String::new(), String::new(), text.clone()),
+        None => (String::new(), String::new(), text.to_owned()),
     }
 }
-pub(crate) fn jet_text_parse_split_ws(text: &String) -> Vec<String> {
+pub(crate) fn jet_text_parse_split_ws(text: &str) -> Vec<String> {
     text.split_whitespace().map(str::to_string).collect()
 }
-pub(crate) fn jet_text_parse_bool(text: &String) -> Option<bool> {
+pub(crate) fn jet_text_parse_bool(text: &str) -> Option<bool> {
     match text.trim().to_ascii_lowercase().as_str() {
         "true" | "1" | "yes" | "on" => Some(true),
         "false" | "0" | "no" | "off" => Some(false),
         _ => None,
     }
 }
-pub(crate) fn jet_text_parse_int(text: &String) -> Option<i64> {
+pub(crate) fn jet_text_parse_int(text: &str) -> Option<i64> {
     text.trim().parse::<i64>().ok()
 }
-pub(crate) fn jet_text_parse_int_base(text: &String, base: i64) -> Option<i64> {
+pub(crate) fn jet_text_parse_int_base(text: &str, base: i64) -> Option<i64> {
     if !(2..=36).contains(&base) {
         return None;
     }
@@ -1235,44 +1219,36 @@ pub(crate) fn jet_text_parse_int_base(text: &String, base: i64) -> Option<i64> {
     let parsed = i64::from_str_radix(digits, base as u32).ok()?;
     Some(if negative { -parsed } else { parsed })
 }
-pub(crate) fn jet_text_parse_float(text: &String) -> Option<f64> {
+pub(crate) fn jet_text_parse_float(text: &str) -> Option<f64> {
     text.trim().parse::<f64>().ok()
 }
-pub(crate) fn jet_text_parse_find(text: &String, needle: &String) -> i64 {
-    text.find(needle.as_str()).map_or(-1, |index| index as i64)
+pub(crate) fn jet_text_parse_find(text: &str, needle: &str) -> i64 {
+    text.find(needle).map_or(-1, |index| index as i64)
 }
-pub(crate) fn jet_text_parse_rfind(text: &String, needle: &String) -> i64 {
-    text.rfind(needle.as_str()).map_or(-1, |index| index as i64)
+pub(crate) fn jet_text_parse_rfind(text: &str, needle: &str) -> i64 {
+    text.rfind(needle).map_or(-1, |index| index as i64)
 }
-pub(crate) fn jet_text_parse_count(text: &String, needle: &String) -> i64 {
+pub(crate) fn jet_text_parse_count(text: &str, needle: &str) -> i64 {
     if needle.is_empty() {
         return text.chars().count() as i64 + 1;
     }
-    text.match_indices(needle.as_str()).count() as i64
+    text.match_indices(needle).count() as i64
 }
-pub(crate) fn jet_text_parse_replace_n(
-    text: &String,
-    old: &String,
-    new: &String,
-    count: i64,
-) -> String {
+pub(crate) fn jet_text_parse_replace_n(text: &str, old: &str, new: &str, count: i64,) -> String {
     if old.is_empty() {
-        return text.clone();
+        return text.to_owned();
     }
     if count < 0 {
-        text.replace(old.as_str(), new.as_str())
+        text.replace(old, new)
     } else {
-        text.replacen(old.as_str(), new.as_str(), count as usize)
+        text.replacen(old, new, count as usize)
     }
 }
-pub(crate) fn jet_text_parse_kv(
-    text: &String,
-    separator: &String,
-) -> (String, bool, String) {
+pub(crate) fn jet_text_parse_kv(text: &str, separator: &str) -> (String, bool, String) {
     if separator.is_empty() {
         return (text.trim().to_string(), false, String::new());
     }
-    match text.find(separator.as_str()) {
+    match text.find(separator) {
         Some(index) => (
             text[..index].trim().to_string(),
             true,
@@ -1281,10 +1257,10 @@ pub(crate) fn jet_text_parse_kv(
         None => (text.trim().to_string(), false, String::new()),
     }
 }
-pub(crate) fn jet_text_parse_join(parts: &Vec<String>, separator: &String) -> String {
-    parts.join(separator.as_str())
+pub(crate) fn jet_text_parse_join(parts: &Vec<String>, separator: &str) -> String {
+    parts.join(separator)
 }
-pub(crate) fn jet_text_parse_splitlines(text: &String, keepends: bool) -> Vec<String> {
+pub(crate) fn jet_text_parse_splitlines(text: &str, keepends: bool) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = 0usize;
     let bytes = text.as_bytes();
@@ -1313,9 +1289,9 @@ pub(crate) fn jet_text_parse_splitlines(text: &String, keepends: bool) -> Vec<St
     }
     out
 }
-pub(crate) fn jet_text_wrap(text: &String, width: i64) -> Vec<String> {
+pub(crate) fn jet_text_wrap(text: &str, width: i64) -> Vec<String> {
     if width <= 0 {
-        return vec![text.clone()];
+        return vec![text.to_owned()];
     }
     let mut out = Vec::new();
     let mut line = String::new();
@@ -1337,14 +1313,10 @@ pub(crate) fn jet_text_wrap(text: &String, width: i64) -> Vec<String> {
     }
     out
 }
-pub(crate) fn jet_text_fill(text: &String, width: i64) -> String {
+pub(crate) fn jet_text_fill(text: &str, width: i64) -> String {
     jet_text_wrap(text, width).join("\n")
 }
-pub(crate) fn jet_text_indent_with(
-    text: &String,
-    prefix: &String,
-    predicate_nonblank: bool,
-) -> String {
+pub(crate) fn jet_text_indent_with(text: &str, prefix: &str, predicate_nonblank: bool,) -> String {
     text.split('\n')
         .map(|line| {
             if !predicate_nonblank || !line.trim_matches([' ', '\t']).is_empty() {
@@ -1356,26 +1328,21 @@ pub(crate) fn jet_text_indent_with(
         .collect::<Vec<_>>()
         .join("\n")
 }
-pub(crate) fn jet_text_wrap_paragraphs(text: &String, width: i64) -> String {
+pub(crate) fn jet_text_wrap_paragraphs(text: &str, width: i64) -> String {
     text.split("\n\n")
         .filter(|paragraph| !paragraph.trim().is_empty())
-        .map(|paragraph| jet_text_fill(&paragraph.to_string(), width))
+        .map(|paragraph| jet_text_fill(paragraph, width))
         .collect::<Vec<_>>()
         .join("\n\n")
 }
-pub(crate) fn jet_text_hanging_indent(
-    text: &String,
-    first: &String,
-    rest: &String,
-    width: i64,
-) -> String {
+pub(crate) fn jet_text_hanging_indent(text: &str, first: &str, rest: &str, width: i64,) -> String {
     let words = text.split_whitespace().collect::<Vec<_>>();
     if words.is_empty() {
         return String::new();
     }
     let mut lines = Vec::new();
     let mut current = String::new();
-    let mut prefix = first.as_str();
+    let mut prefix = first;
     for word in words {
         let limit = (width - prefix.len() as i64).max(1) as usize;
         let trial = if current.is_empty() {
@@ -1385,7 +1352,7 @@ pub(crate) fn jet_text_hanging_indent(
         };
         if !current.is_empty() && trial.len() > limit {
             lines.push(format!("{prefix}{current}"));
-            prefix = rest.as_str();
+            prefix = rest;
             current = word.to_string();
         } else {
             current = trial;
@@ -1396,9 +1363,9 @@ pub(crate) fn jet_text_hanging_indent(
     }
     lines.join("\n")
 }
-pub(crate) fn jet_text_shorten(text: &String, width: i64, placeholder: &String) -> String {
+pub(crate) fn jet_text_shorten(text: &str, width: i64, placeholder: &str) -> String {
     if width < 0 || text.len() <= width as usize {
-        return text.clone();
+        return text.to_owned();
     }
     let keep = (width as usize).saturating_sub(placeholder.len());
     let end = text
@@ -1410,13 +1377,13 @@ pub(crate) fn jet_text_shorten(text: &String, width: i64, placeholder: &String) 
         .min(keep);
     format!("{}{}", &text[..end], placeholder)
 }
-pub(crate) fn jet_text_indent(text: &String, prefix: &String) -> String {
+pub(crate) fn jet_text_indent(text: &str, prefix: &str) -> String {
     text.split('\n')
         .map(|line| format!("{prefix}{line}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
-pub(crate) fn jet_text_dedent(text: &String) -> String {
+pub(crate) fn jet_text_dedent(text: &str) -> String {
     let lines = text.split('\n').collect::<Vec<_>>();
     let margin = lines
         .iter()
@@ -1425,7 +1392,7 @@ pub(crate) fn jet_text_dedent(text: &String) -> String {
         .min()
         .unwrap_or(0);
     if margin == 0 {
-        return text.clone();
+        return text.to_owned();
     }
     lines
         .iter()
@@ -1439,7 +1406,7 @@ pub(crate) fn jet_text_dedent(text: &String) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
-pub(crate) fn jet_text_expand_tabs(text: &String, tabsize: i64) -> String {
+pub(crate) fn jet_text_expand_tabs(text: &str, tabsize: i64) -> String {
     let tabsize = if tabsize <= 0 { 8 } else { tabsize as usize };
     let mut out = String::with_capacity(text.len());
     let mut column = 0usize;
@@ -1488,7 +1455,7 @@ fn jet_text_html_entity(name: &str) -> Option<String> {
     };
     number.and_then(char::from_u32).map(|character| character.to_string())
 }
-pub(crate) fn jet_text_html_escape(text: &String, quote: bool) -> String {
+pub(crate) fn jet_text_html_escape(text: &str, quote: bool) -> String {
     let mut out = String::with_capacity(text.len());
     for character in text.chars() {
         match character {
@@ -1502,9 +1469,9 @@ pub(crate) fn jet_text_html_escape(text: &String, quote: bool) -> String {
     }
     out
 }
-pub(crate) fn jet_text_html_unescape(text: &String) -> String {
+pub(crate) fn jet_text_html_unescape(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    let mut rest = text.as_str();
+    let mut rest = text;
     while let Some(start) = rest.find('&') {
         out.push_str(&rest[..start]);
         let after = &rest[start + 1..];
@@ -1525,7 +1492,7 @@ pub(crate) fn jet_text_html_unescape(text: &String) -> String {
     out.push_str(rest);
     out
 }
-pub(crate) fn jet_text_html_strip_tags(text: &String) -> String {
+pub(crate) fn jet_text_html_strip_tags(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_tag = false;
     for character in text.chars() {
@@ -1538,52 +1505,52 @@ pub(crate) fn jet_text_html_strip_tags(text: &String) -> String {
     }
     out
 }
-pub(crate) fn jet_text_html_escape_quoted(text: &String) -> String {
+pub(crate) fn jet_text_html_escape_quoted(text: &str) -> String {
     jet_text_html_escape(text, true)
 }
-pub(crate) fn jet_text_html_escape_text(text: &String) -> String {
+pub(crate) fn jet_text_html_escape_text(text: &str) -> String {
     jet_text_html_escape(text, false)
 }
-pub(crate) fn jet_text_html_unescape_and_strip(text: &String) -> String {
+pub(crate) fn jet_text_html_unescape_and_strip(text: &str) -> String {
     jet_text_html_unescape(&jet_text_html_strip_tags(text))
 }
-pub(crate) fn jet_text_parse_capwords(text: &String) -> String {
+pub(crate) fn jet_text_parse_capwords(text: &str) -> String {
     text.split_whitespace()
-        .map(|word| jet_text_capitalize(&word.to_string()))
+        .map(jet_text_capitalize)
         .collect::<Vec<_>>()
         .join(" ")
 }
-pub(crate) fn jet_text_parse_find_from(text: &String, needle: &String, start: i64) -> i64 {
+pub(crate) fn jet_text_parse_find_from(text: &str, needle: &str, start: i64) -> i64 {
     let start = start.max(0) as usize;
     let Some(rest) = text.get(start..) else {
         return -1;
     };
-    rest.find(needle.as_str())
+    rest.find(needle)
         .map_or(-1, |index| (start + index) as i64)
 }
-pub(crate) fn jet_text_parse_rfind_from(text: &String, needle: &String, end: i64) -> i64 {
+pub(crate) fn jet_text_parse_rfind_from(text: &str, needle: &str, end: i64) -> i64 {
     let end = end.clamp(0, text.len() as i64) as usize;
     let Some(prefix) = text.get(..end) else {
         return -1;
     };
-    prefix.rfind(needle.as_str()).map_or(-1, |index| index as i64)
+    prefix.rfind(needle).map_or(-1, |index| index as i64)
 }
-pub(crate) fn jet_text_parse_index(text: &String, needle: &String) -> i64 {
+pub(crate) fn jet_text_parse_index(text: &str, needle: &str) -> i64 {
     jet_text_parse_find(text, needle)
 }
-pub(crate) fn jet_text_parse_contains(text: &String, needle: &String) -> bool {
-    text.contains(needle.as_str())
+pub(crate) fn jet_text_parse_contains(text: &str, needle: &str) -> bool {
+    text.contains(needle)
 }
-pub(crate) fn jet_text_parse_lstrip(text: &String) -> String {
+pub(crate) fn jet_text_parse_lstrip(text: &str) -> String {
     text.trim_start().to_string()
 }
-pub(crate) fn jet_text_parse_rstrip(text: &String) -> String {
+pub(crate) fn jet_text_parse_rstrip(text: &str) -> String {
     text.trim_end().to_string()
 }
-pub(crate) fn jet_text_parse_strip(text: &String) -> String {
+pub(crate) fn jet_text_parse_strip(text: &str) -> String {
     text.trim().to_string()
 }
-pub(crate) fn jet_text_parse_escape_c(text: &String) -> String {
+pub(crate) fn jet_text_parse_escape_c(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for character in text.chars() {
         match character {
@@ -1597,7 +1564,7 @@ pub(crate) fn jet_text_parse_escape_c(text: &String) -> String {
     }
     out
 }
-pub(crate) fn jet_text_parse_unescape_c(text: &String) -> String {
+pub(crate) fn jet_text_parse_unescape_c(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars();
     while let Some(character) = chars.next() {
@@ -1617,13 +1584,13 @@ pub(crate) fn jet_text_parse_unescape_c(text: &String) -> String {
     }
     out
 }
-fn jet_text_ends_any(s: &String, suffixes: &Vec<String>) -> bool {
+fn jet_text_ends_any(s: &str, suffixes: &Vec<String>) -> bool {
     suffixes.iter().any(|p| s.ends_with(p))
 }
-fn jet_text_rindex(s: &String, needle: &String) -> i64 {
+fn jet_text_rindex(s: &str, needle: &str) -> i64 {
     s.rfind(needle).map(|index| index as i64).unwrap_or(-1)
 }
-fn jet_text_isidentifier(s: &String) -> bool {
+fn jet_text_isidentifier(s: &str) -> bool {
     let mut chars = s.chars();
     let Some(first) = chars.next() else {
         return false;
@@ -1631,22 +1598,22 @@ fn jet_text_isidentifier(s: &String) -> bool {
     (first == '_' || first.is_alphabetic())
         && chars.all(|character| character == '_' || character.is_alphanumeric())
 }
-fn jet_text_encode(s: &String) -> Vec<u8> {
+fn jet_text_encode(s: &str) -> Vec<u8> {
     s.as_bytes().to_vec()
 }
-fn jet_text_isdecimal(s: &String) -> bool {
+fn jet_text_isdecimal(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
 }
-fn jet_text_isnumeric(s: &String) -> bool {
+fn jet_text_isnumeric(s: &str) -> bool {
     !s.is_empty() && s.chars().all(char::is_numeric)
 }
-fn jet_text_isalnum(s: &String) -> bool {
+fn jet_text_isalnum(s: &str) -> bool {
     !s.is_empty() && s.chars().all(char::is_alphanumeric)
 }
-fn jet_text_isdigit(s: &String) -> bool {
+fn jet_text_isdigit(s: &str) -> bool {
     !s.is_empty() && s.chars().all(|character| character.is_ascii_digit())
 }
-fn jet_text_istitle(s: &String) -> bool {
+fn jet_text_istitle(s: &str) -> bool {
     let mut has_cased = false;
     let mut expect_upper = true;
     for character in s.chars() {
@@ -1666,13 +1633,10 @@ fn jet_text_istitle(s: &String) -> bool {
     }
     has_cased
 }
-fn jet_text_isprintable(s: &String) -> bool {
+fn jet_text_isprintable(s: &str) -> bool {
     s.chars().all(|character| !character.is_control())
 }
-fn jet_text_expandtabs(
-    s: &String,
-    tabsize: jet_foundation::Numeric::JetInt,
-) -> String {
+fn jet_text_expandtabs(s: &str, tabsize: jet_foundation::Numeric::JetInt,) -> String {
     let width = tabsize
         .to_i64()
         .unwrap_or_else(|| panic!("text tab size does not fit native i64"))
@@ -1699,24 +1663,21 @@ fn jet_text_expandtabs(
     }
     out
 }
-fn jet_text_zfill(s: &String, width: i64) -> String {
+fn jet_text_zfill(s: &str, width: i64) -> String {
     let length = s.chars().count() as i64;
     if width <= length {
-        return s.clone();
+        return s.to_owned();
     }
     let (sign, body) = if let Some(rest) = s.strip_prefix('+') {
         ("+", rest)
     } else if let Some(rest) = s.strip_prefix('-') {
         ("-", rest)
     } else {
-        ("", s.as_str())
+        ("", s)
     };
     format!("{sign}{}{}", "0".repeat((width - length) as usize), body)
 }
-fn jet_text_zfill_int(
-    s: &String,
-    width: jet_foundation::Numeric::JetInt,
-) -> String {
+fn jet_text_zfill_int(s: &str, width: jet_foundation::Numeric::JetInt,) -> String {
     jet_text_zfill(
         s,
         width
@@ -1724,7 +1685,7 @@ fn jet_text_zfill_int(
             .unwrap_or_else(|| panic!("text zfill width does not fit native i64")),
     )
 }
-fn jet_text_zfill_ref(s: &String, width: &jet_foundation::Numeric::JetInt) -> String {
+fn jet_text_zfill_ref(s: &str, width: &jet_foundation::Numeric::JetInt) -> String {
     jet_text_zfill(
         s,
         width
@@ -1732,35 +1693,35 @@ fn jet_text_zfill_ref(s: &String, width: &jet_foundation::Numeric::JetInt) -> St
             .unwrap_or_else(|| panic!("text zfill width does not fit native i64")),
     )
 }
-fn jet_text_char_indices(s: &String) -> Vec<String> {
+fn jet_text_char_indices(s: &str) -> Vec<String> {
     s.char_indices().map(|(i, c)| format!("{}:{}", i, c)).collect()
 }
 
-fn jet_std_fs_read(path: &String) -> Result<String, jet_std::IOError> {
+fn jet_std_fs_read(path: &str) -> Result<String, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Read",
         ));
     }
     std::fs::read_to_string(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))
 }
-fn jet_std_fs_write(path: &String, text: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_write(path: &str, text: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
     std::fs::write(path, text).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
-fn jet_std_fs_append(path: &String, text: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_append(path: &str, text: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
@@ -1773,9 +1734,6 @@ fn jet_std_fs_append(path: &String, text: &String) -> Result<(), jet_std::IOErro
     f.write_all(text.as_bytes())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
-fn jet_std_fs_exists(path: &String) -> bool {
-    std::path::Path::new(path).exists()
-}
 pub(crate) fn jet_fs_remove_entry(path: &str) -> std::io::Result<()> {
     let metadata = std::fs::symlink_metadata(path)?;
     if metadata.file_type().is_dir() {
@@ -1785,32 +1743,40 @@ pub(crate) fn jet_fs_remove_entry(path: &str) -> std::io::Result<()> {
     }
 }
 
-fn jet_std_fs_remove(path: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_remove(path: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_remove_raw(path)
+}
+
+pub(crate) fn jet_std_fs_remove_raw(path: &str) -> Result<(), jet_std::IOError> {
     jet_fs_remove_entry(path)
         .map_err(|error| jet_std::io_error_at(jet_std::IOOperation::Write, path, error))
 }
 // D-LSDIR1=A: returns DirEntry values with name, full path, and is_dir flag.
-fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
+fn jet_std_fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Read",
         ));
     }
+    jet_std_fs_list_dir_raw(path)
+}
+
+pub(crate) fn jet_std_fs_list_dir_raw(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
     let mut out = Vec::new();
     let rd = std::fs::read_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
     for entry in rd {
         let entry = entry.map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Read, path, e))?;
         let name = entry.file_name().to_string_lossy().to_string();
-        let full_path = std::path::Path::new(path.as_str())
+        let full_path = std::path::Path::new(path)
             .join(&name)
             .to_string_lossy()
             .to_string();
@@ -1824,88 +1790,104 @@ fn jet_std_fs_list_dir(path: &String) -> Result<Vec<jet_std::DirEntry>, jet_std:
     out.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(out)
 }
-fn jet_std_fs_create_dir(path: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_create_dir(path: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
-    std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+    jet_std_fs_create_dir_all_raw(path)
 }
-fn jet_std_fs_create_dir_all(path: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_create_dir_all(path: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
-    std::fs::create_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
+    jet_std_fs_create_dir_all_raw(path)
 }
-fn jet_std_fs_is_dir(path: &String) -> bool {
-    std::path::Path::new(path).is_dir()
+pub(crate) fn jet_std_fs_create_dir_all_raw(path: &str) -> Result<(), jet_std::IOError> {
+    std::fs::create_dir_all(path)
+        .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
-fn jet_std_fs_remove_dir(path: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_remove_dir(path: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_remove_dir_raw(path)
+}
+
+pub(crate) fn jet_std_fs_remove_dir_raw(path: &str) -> Result<(), jet_std::IOError> {
     std::fs::remove_dir(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
 }
-fn jet_std_fs_remove_all(path: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_remove_all(path: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(path.clone()),
+            Some(path.to_owned()),
             "fault injected: FS.Write",
         ));
     }
-    let p = std::path::Path::new(path);
-    if p.is_dir() {
+    jet_std_fs_remove_all_raw(path, std::path::Path::new(path).is_dir())
+}
+
+pub(crate) fn jet_std_fs_remove_all_raw(path: &str, directory: bool) -> Result<(), jet_std::IOError> {
+    if directory {
         std::fs::remove_dir_all(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
     } else {
         std::fs::remove_file(path).map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, path, e))
     }
 }
-fn jet_std_fs_copy(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_copy(from: &str, to: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(from.clone()),
+            Some(from.to_owned()),
             "fault injected: FS.Read",
         ));
     }
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(to.clone()),
+            Some(to.to_owned()),
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_copy_raw(from, to)
+}
+
+pub(crate) fn jet_std_fs_copy_raw(from: &str, to: &str) -> Result<(), jet_std::IOError> {
     std::fs::copy(from, to)
         .map(|_| ())
         .map_err(|e| jet_std::io_error_at(jet_std::IOOperation::Write, from, e))
 }
-fn jet_std_fs_copy_dir(from: &String, to: &String) -> Result<(), jet_std::IOError> {
+fn jet_std_fs_copy_dir(from: &str, to: &str) -> Result<(), jet_std::IOError> {
     if jet_fault_should_fail("FS.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
-            Some(from.clone()),
+            Some(from.to_owned()),
             "fault injected: FS.Read",
         ));
     }
     if jet_fault_should_fail("FS.Write") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Write,
-            Some(to.clone()),
+            Some(to.to_owned()),
             "fault injected: FS.Write",
         ));
     }
+    jet_std_fs_copy_dir_raw(from, to)
+}
+
+pub(crate) fn jet_std_fs_copy_dir_raw(from: &str, to: &str) -> Result<(), jet_std::IOError> {
     fn copy_tree(
         src: &std::path::Path,
         dst: &std::path::Path,

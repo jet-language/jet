@@ -15,7 +15,7 @@ ENVELOPE_READ_CHUNK :: prep { 65536 }
 
 // Why an output tree could not be hashed; `message()` is the reference text.
 #Error
-pub enum EnvelopeError {
+enum EnvelopeError {
     MissingOutput(String)
     Inspect(path: String, detail: String)
     SymlinkRoot(String)
@@ -72,7 +72,7 @@ pub enum EnvelopeError {
 }
 
 // The observation points of the canonical walk.
-pub enum EnvelopeWalkStage {
+enum EnvelopeWalkStage {
     Node
     DirectorySnapshotted
     FileOpened
@@ -86,17 +86,17 @@ pub enum EnvelopeWalkStage {
     }
 }
 
-pub struct EnvelopeWalkEvent {
-    pub path: String
-    pub stage: EnvelopeWalkStage
+struct EnvelopeWalkEvent {
+    path: String
+    stage: EnvelopeWalkStage
 }
 
 // The canonical traversal observation seam. `events` records every stage in
 // walk order; `react` is infallible and runs at each stage (reproducibility certification and
 // the concurrency proofs). The canonical archive stays the sole identity.
-pub struct EnvelopeWalkHook {
-    pub events: [EnvelopeWalkEvent]
-    pub react: fn(String, EnvelopeWalkStage) Never! -[FS]>
+struct EnvelopeWalkHook {
+    events: [EnvelopeWalkEvent]
+    react: fn(String, EnvelopeWalkStage) Never! -[FS]>
 
     // A hook that only records.
     fn recording() -> EnvelopeWalkHook Never! {
@@ -104,7 +104,7 @@ pub struct EnvelopeWalkHook {
     }
 
     fn observe(&self, path: String, stage: EnvelopeWalkStage) Never! -[FS]> {
-        &self.events.push(EnvelopeWalkEvent{path: ~path, stage: stage})
+        &self.events.push(EnvelopeWalkEvent{path: path.copy(), stage: stage})
         self.react(path, stage)
     }
 }
@@ -113,8 +113,8 @@ fn pkg_envelope_walk_ignore(path: String, stage: EnvelopeWalkStage) Never! -[FS]
 
 // The streamed canonical archive: the magic, then header/payload records in
 // the reference byte order.
-pub struct EnvelopeArchive {
-    hasher: Hasher
+struct EnvelopeArchive {
+    priv hasher: Hasher
 
     fn new() -> EnvelopeArchive Never! {
         envelope_archive := EnvelopeArchive{hasher: crypto.Hasher.new()}
@@ -148,18 +148,18 @@ pub struct EnvelopeArchive {
 fn pkg_u32_be_bytes(value: Int) -> [U8] Never! {
     out := [U8]{}
     shift_values :: [Int]{24, 16, 8, 0}
-    loop shift in shift_values -> &out.push(U8{(value >> shift) & 0xFF})
+    loop shift in shift_values -> &out.push(U8{((value >> shift)).bit_and(0xFF)})
     out
 }
 
 // Content hash of a realized output root; an empty compatibility digest when
 // the output is missing or unreadable (Store registration rejects it).
-pub fn pkg_output_hash_of(out: String) -[FS, Env]> String Never! {
+fn pkg_output_hash_of(out: String) -[FS, Env]> String Never! {
     pkg_try_output_hash_of(out) ?? ""
 }
 
 // The canonical archive digest of a native output.
-pub fn pkg_try_output_hash_of(out: String) -[FS, Env]> String EnvelopeError! {
+fn pkg_try_output_hash_of(out: String) -[FS, Env]> String EnvelopeError! {
     hook := EnvelopeWalkHook.recording()
     pkg_try_output_hash_of_with_policy(out, false, &hook)
 }
@@ -167,17 +167,17 @@ pub fn pkg_try_output_hash_of(out: String) -[FS, Env]> String EnvelopeError! {
 // Like `pkg_try_output_hash_of`, but Hangar/internal shared-CAS hardlink
 // peers do not fail the external-hardlink law; peers outside those roots
 // still reject. CAS peers are never encoded as in-tree `H` records.
-pub fn pkg_try_output_hash_of_in_hangar(out: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> String EnvelopeError! {
+fn pkg_try_output_hash_of_in_hangar(out: String, hangar_root: String, allow_semantic_xattrs: Bool) -[FS, Env]> String EnvelopeError! {
     hook := EnvelopeWalkHook.recording()
     pkg_try_output_hash_of_in_hangar_with_policy(out, hangar_root, allow_semantic_xattrs, &hook)
 }
 
-pub fn pkg_try_output_hash_of_in_hangar_with_policy(out: String, hangar_root: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+fn pkg_try_output_hash_of_in_hangar_with_policy(out: String, hangar_root: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
     pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, Val(hangar_root), &hook)
 }
 
 // Like `pkg_try_output_hash_of`, with an explicit semantic-xattr policy.
-pub fn pkg_try_output_hash_of_with_policy(out: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
+fn pkg_try_output_hash_of_with_policy(out: String, allow_semantic_xattrs: Bool, hook: &EnvelopeWalkHook) -[FS, Env]> String EnvelopeError! {
     pkg_try_output_hash_of_with_hook(out, allow_semantic_xattrs, None, &hook)
 }
 
@@ -381,7 +381,7 @@ fn pkg_envelope_encode_node(root: String, path: String, rel: String, envelope_ar
     }
     if info.is_file {
         key :: pkg_envelope_file_identity(info)
-        if ~key == {
+        if key.copy() == {
             .Val(identity) -> {
                 loop index in 0..<hardlinks.len() {
                     if hardlinks[index].key == identity {
@@ -548,8 +548,8 @@ struct EnvelopeStableIdentity {
             device: info.id.device,
             inode: info.id.inode,
             length: info.size,
-            modified_ns: info.modified.unix_ns,
-            changed_ns: info.changed.unix_ns,
+            modified_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds"),
+            changed_ns: info.changed.to_unix_ns() ?? panic("file times fit Unix nanoseconds"),
             mode: info.mode,
             links: info.links
         }
@@ -584,13 +584,13 @@ fn pkg_envelope_file_identity(info: Stat) -> FileID? Never! {
 
 // `<content sha256 hex>-<mode & 0o7777 as 8 hex digits>`: the CAS pool name.
 fn pkg_envelope_cas_key(info: Stat, content_digest: String) -[Env]> String Never! {
-    "{content_digest}-{pkg_envelope_hex8(pkg_envelope_mode(info) & 0o7777)}"
+    "{content_digest}-{pkg_envelope_hex8((pkg_envelope_mode(info)).bit_and(0o7777))}"
 }
 
 fn pkg_envelope_hex8(value: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     shift_values :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
-    loop shift in shift_values -> &out.push(digits[(value >> shift) & 15])
+    loop shift in shift_values -> &out.push(digits[((value >> shift)).bit_and(15)])
     String.from_bytes(out) ?? ""
 }

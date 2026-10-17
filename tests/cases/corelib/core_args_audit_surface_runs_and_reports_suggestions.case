@@ -1,0 +1,9 @@
+# Port of tests/corelib_parts/compile.rs::core_args_audit_surface_runs_and_reports_suggestions; original source unchanged.
+fixture: fixtures/core_args_audit_surface_runs_and_reports_suggestions
+env: JET_ARGS_PROFILE=dev
+step: jet build fixture.jet
+step: built
+exit: any # original predicate: original code unasserted
+stdout: ~ "unknown option `--verbse`" # original predicate
+stdout: ~ "did you mean `--verbose`?" # original predicate
+stdout: ^= "true\ndev\n8\n2\n" # original predicate: starts_with

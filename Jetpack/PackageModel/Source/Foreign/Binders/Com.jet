@@ -10,7 +10,7 @@ COM_TRANSPORT :: prep { "windows-com-automation" }
 COM_OPERATION_FAILED :: prep { "the Windows COM operation failed" }
 
 // Where the type library comes from: a file, or a registered library.
-pub enum ComTypeLibraryInput {
+enum ComTypeLibraryInput {
     File(String)
     Registered(guid: String, major: Int, minor: Int, lcid: Int)
 
@@ -22,11 +22,11 @@ pub enum ComTypeLibraryInput {
     }
 }
 
-pub struct ComBindResult {
-    pub source: String
-    pub archive: String
-    pub provenance: String
-    pub methods: [String]
+struct ComBindResult {
+    source: String
+    archive: String
+    provenance: String
+    methods: [String]
 }
 
 enum ComKind {
@@ -62,7 +62,7 @@ enum ComKind {
             .Float -> "Float"
             .Bool -> "Bool"
             .Text -> "String"
-            .Data -> "DataTree"
+            .Data -> "Dyn"
             .Object(name) -> name
         }
     }
@@ -122,7 +122,7 @@ struct ComSchema {
 
 // Inspect the type library on a Windows host, build the automation bridge
 // archive, and render the Jet surface with its provenance record.
-pub fn pkg_com_bind(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, Env, Exec, Time, Time.Wait]> ComBindResult ForeignBindError! {
+fn pkg_com_bind(input: ComTypeLibraryInput, lib: String, cache: String) -[FS, Env, Exec, Time, Time.Wait]> ComBindResult ForeignBindError! {
     if BinderHostOS.current() != BinderHostOS.Windows -> return Err(ForeignBindError.UnsupportedHost("COM type libraries and IDispatch require a Windows host"))
     if !pkg_binder_is_ident(lib) -> return Err(ForeignBindError.Source("`{lib}` is not a valid Jet library name"))
     cc_found :: pkg_bridge_tool_path("cc") ?? return Err(ForeignBindError.ToolMissing("cc"))
@@ -217,7 +217,7 @@ pub fn pkg_com_bind(input: ComTypeLibraryInput, lib: String, cache: String) -[FS
 // Validate the published COM cache before the linker consumes it. COM's
 // registry and type-library ABI are outside the Jet compiler, so the cache
 // must carry enough identity to reject a stale or hand-edited bridge.
-pub fn pkg_com_validate_provenance(provenance_path: String, generated_source: String, archive: String, lib: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
+fn pkg_com_validate_provenance(provenance_path: String, generated_source: String, archive: String, lib: String) ForeignBindError! -[FS, Env, Exec, Time.Wait]> {
     provenance :: pkg_bridge_read_provenance(provenance_path)
     if provenance.schema != FOREIGN_BRIDGE_PROVENANCE_SCHEMA -> return Err(ForeignBindError.Source("unsupported COM binding provenance schema `{provenance.schema}`"))
     descriptor :: pkg_binder_descriptor(ForeignLanguage.Com) ?? return Err(ForeignBindError.Source("COM binder descriptor is not registered"))
@@ -524,13 +524,13 @@ fn pkg_com_render_jet(lib: String, schema: ComSchema) -> String Never! {
     }
     out = "{out}}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\n"
     interfaces :: pkg_com_interfaces(schema)
-    loop interface in interfaces -> out = "{out}pub struct {interface} {{ value: Int }}\n"
-    out = "{out}#Error\npub enum ComError {{ WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }}\n\n"
-    out = "{out}pub fn open() -[FFI.Com]> {root} ComError! {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({root}{{ value: value }})\n}}\n\n"
-    out = "{out}pub fn close(^object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
+    loop interface in interfaces -> out = "{out}struct {interface} {{ value: Int }}\n"
+    out = "{out}#Error\nenum ComError {{ WrongApartment InvalidHandle InvalidArgument MemberFailed TypeMismatch Limit }}\n\n"
+    out = "{out}fn open() -[FFI.Com]> {root} ComError! {{\n    value :: abi.open()\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    return Ok({root}{{ value: value }})\n}}\n\n"
+    out = "{out}fn close(^object: {root}) -[FFI.Com]> {{\n    abi.close(object.value)\n    if abi.take_error() != 0 {{ panic(\"COM resource close failed\") }}\n}}\n\n"
     loop interface in interfaces {
         out = "{out}impl {interface}.Close {{\n    fn close(^self) {{\n        abi.close(self.value)\n        code :: abi.take_error()\n        if code != 0 {{ panic(\"COM resource close failed\") }}\n    }}\n}}\n\n"
-        out = "{out}#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_{interface}(object: {interface}, name: String, args: [DataTree], flags: Int) -[FFI.Com]> DataTree ComError! {{\n    raw :: abi.dynamic(object.value, name, json.to_string(args), flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
+        out = "{out}#Unsafe(\"dynamic IDispatch has no type-library contract\")\npub fn dynamic_{interface}(object: {interface}, name: String, args: [Dyn], flags: Int) -[FFI.Com]> Dyn ComError! {{\n    payload :: json.to_string(args) ?? return Err(ComError.TypeMismatch)\n    raw :: abi.dynamic(object.value, name, payload, flags)\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n    value := json.parse(raw) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n}}\n\n"
     }
     out = "{out}fn error(code: Int) -[]> ComError Never! {{\n    if code == 1 {{ return ComError.WrongApartment }}\n    if code == 2 {{ return ComError.InvalidHandle }}\n    if code == 3 {{ return ComError.InvalidArgument }}\n    if code == 5 {{ return ComError.TypeMismatch }}\n    if code == 6 {{ return ComError.Limit }}\n    return ComError.MemberFailed\n}}\n\n"
     loop method in schema.methods {
@@ -543,7 +543,7 @@ fn pkg_com_render_jet(lib: String, schema: ComSchema) -> String Never! {
         }
         unit :: method.result == ComKind.Unit
         head :: if unit -> ") ComError! -[FFI.Com]> {{\n    " else -> ") -[FFI.Com]> {method.result.jet()} ComError! {{\n    value :: "
-        out = "{out}pub fn {name}(object: {method.interface}{params}{head}abi.{name}(object.value{args})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n"
+        out = "{out}fn {name}(object: {method.interface}{params}{head}abi.{name}(object.value{args})\n    code :: abi.take_error()\n    if code != 0 {{ return Err(error(code)) }}\n"
         tail :: if method.result == {
             .Unit -> "    return\n"
             .Data -> "    value := json.parse(value) ?? return Err(ComError.TypeMismatch)\n    return Ok(value)\n"
@@ -557,7 +557,7 @@ fn pkg_com_render_jet(lib: String, schema: ComSchema) -> String Never! {
 
 fn pkg_com_abi_call_arg(param: ComParam) -> String Never! {
     if param.kind == {
-        .Data -> "json.to_string({param.name})"
+        .Data -> "(json.to_string({param.name}) ?? return Err(ComError.TypeMismatch))"
         .Object(_) -> "{param.name}.value"
         else -> param.name
     }

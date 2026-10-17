@@ -7,12 +7,12 @@
 // borrow them for calls and consumes them through `close`.
 
 // A JVM binding also names the directory holding the embeddable `libjvm`.
-pub struct JavaBindResult {
-    pub source: String
-    pub bound: [String]
-    pub archive: String
-    pub jvm_dir: String
-    pub provenance: String
+struct JavaBindResult {
+    source: String
+    bound: [String]
+    archive: String
+    jvm_dir: String
+    provenance: String
 }
 
 PKG_JAVA_TOOL_ACTION :: prep { "rejected the JVM binding input" }
@@ -87,7 +87,7 @@ struct JavaSurface {
 }
 
 // Compile and bind the public class of the Java source at `source_path`.
-pub fn pkg_java_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> JavaBindResult ForeignBindError! {
+fn pkg_java_bind(source_path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> JavaBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
     path :: pkg_binder_canonicalize(source_path, "could not resolve Java source")
     on_disk :: pkg_binder_read_text(path, "could not read Java source")
@@ -121,7 +121,7 @@ pub fn pkg_java_bind(source_path: String, source: String, lib: String, cache: St
     javap_identity :: pkg_bridge_tool_identity("javap")
     cc_identity :: pkg_bridge_tool_identity("cc")
     ar_identity :: pkg_bridge_tool_identity("ar")
-    language :: ForeignLanguage.Java.root()
+    language :: (ForeignLanguage.Java).root()
     builder := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
     &builder.field("language", language.bytes())
     &builder.field("binder_schema", "jet-java-bind-v1".bytes())
@@ -261,17 +261,17 @@ fn pkg_java_render_jet(lib: String, surface: JavaSurface) -> String Never! {
         result :: if method.result == JavaScalar.Void -> "" else -> " {method.result.jet()}"
         &out.push("    fn {method.name}({receiver}{pkg_java_params_jet(method.params)}){result} = \"{abi}_{method.name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\n\npub struct Handle {{ value: Int }}\n#Error\npub enum JavaError {{ Exception }}\n\n")
-    &out.push("pub fn new({ctor_params}) -[FFI.Java]> Handle JavaError! {{\n    value :: abi.new({pkg_java_args(surface.ctor.len())})\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n")
-    &out.push("pub fn close(^handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\n")
+    &out.push("}}\nuse c.{abi} as abi\n\nstruct Handle {{ value: Int }}\n#Error\nenum JavaError {{ Exception }}\n\n")
+    &out.push("fn new({ctor_params}) -[FFI.Java]> Handle JavaError! {{\n    value :: abi.new({pkg_java_args(surface.ctor.len())})\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(Handle{{ value: value }})\n}}\n\n")
+    &out.push("fn close(^handle: Handle) -[FFI.Java]> {{}}\n\nimpl Handle.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\n")
     loop method in surface.methods {
         receiver :: pkg_java_receiver(method, "handle: Handle")
         call_receiver :: pkg_java_receiver(method, "handle.value")
         call :: "abi.{method.name}({call_receiver}{pkg_java_args(method.params.len())})"
         if method.result == JavaScalar.Void {
-            &out.push("pub fn {method.name}({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {{\n    {call}\n    if abi.take_error() != 0 {{ panic(\"Java exception\") }}\n}}\n\n")
+            &out.push("fn {method.name}({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {{\n    {call}\n    if abi.take_error() != 0 {{ panic(\"Java exception\") }}\n}}\n\n")
         } else {
-            &out.push("pub fn {method.name}({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {method.result.jet()} !JavaError {{\n    value :: {call}\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(value)\n}}\n\n")
+            &out.push("fn {method.name}({receiver}{pkg_java_params_jet(method.params)}) -[FFI.Java]> {method.result.jet()} !JavaError {{\n    value :: {call}\n    if abi.take_error() != 0 {{ return Err(JavaError.Exception) }}\n    return Ok(value)\n}}\n\n")
         }
     }
     out.join("")
@@ -281,7 +281,7 @@ fn pkg_java_render_jet(lib: String, surface: JavaSurface) -> String Never! {
 // method has parameters); empty for a static method.
 fn pkg_java_receiver(method: JavaMethod, receiver: String) -> String Never! {
     if method.is_static -> return ""
-    if method.params.len() == 0 -> return ~receiver
+    if method.params.len() == 0 -> return receiver.copy()
     "{receiver}, "
 }
 

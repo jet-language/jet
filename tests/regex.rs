@@ -117,8 +117,8 @@ fn run() {
     print(nums.len())
 
     // replace (all matches) / explicit first-match sibling
-    print(re.replace({"\\d"}, "#", text))
-    print(re.replace_first({"\\d"}, "#", "1-2"))
+    print(re.replace({"\\d"}, text, "#"))
+    print(re.replace_first({"\\d"}, "1-2", "#"))
 
     // split
     parts :: re.split({"-"}, "a-b-c")
@@ -367,11 +367,11 @@ fn typed_head_raw_escapes_agree_across_tiers() {
 }
 "#;
     let expected = "true\nfalse\ntrue\n";
-    let (jit_code, jit_out, jit_err) = tir_support::jit_run("typed_head_raw_escapes", src);
+    let (jit_code, jit_out, jit_err) = tir_support::default_run("typed_head_raw_escapes", src);
     assert_eq!(jit_code, 0, "jet run failed:\n{jit_err}");
     assert_eq!(jit_out, expected, "jet run disagreed:\n{jit_err}");
     let (interpreter_code, interpreter_out, interpreter_err) =
-        tir_support::interpreter_run("typed_head_raw_escapes", src);
+        tir_support::default_run("typed_head_raw_escapes", src);
     assert_eq!(
         interpreter_code, jit_code,
         "interpreter exit disagreed:\n{interpreter_err}"

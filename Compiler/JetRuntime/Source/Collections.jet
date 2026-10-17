@@ -1,0 +1,1289 @@
+// Native collection representation shared by iterator boundaries. Lists are
+// inline [len, cap, data]; descriptors are [stride, clone, drop, show, equal,
+// compare, kind, child0, child1]. Callbacks operate on borrowed payload slots.
+// Only initialized payload bytes are read (Bool is one byte; Unit is empty).
+// The native List<U8> carrier is packed, matching checked StorageLayout(U8)
+// and the generated C ABI's u8 elements. Every host byte-list seam shares it.
+RT_HOST_U8_STRIDE :: prep { I64{1} }
+fn host_u8_get(data: I64, index: I64) -> I64 {
+    #Unsafe("data lends index's initialized packed native U8 element") {
+        return os_load_u8(wrapping(data + index * RT_HOST_U8_STRIDE))
+    }
+}
+fn host_u8_put(data: I64, index: I64, byte: I64) {
+    #Unsafe("data owns index's writable packed native U8 element") {
+        address :: wrapping(data + index * RT_HOST_U8_STRIDE)
+        os_store_u8(address, byte)
+    }
+}
+
+// core.mem.__list_reserve_exact (Lists.jet lower_encoding_list_leaf): grow the
+// exclusively lent native List header to exactly len + additional elements of
+// `stride` bytes. Failure (negative/overflowing request, no memory) returns
+// false and keeps the original allocation intact; policy is authored in Jet.
+#Export(c) fn jet_rt_encoding_list_reserve_exact(header: I64, stride: I64, additional: I64) -> Bool {
+    if (additional < I64{0} || stride <= I64{0} || header == I64{0}) -> return false
+    length :: trap_word(header)
+    capacity :: trap_word(header + I64{8})
+    if (additional > I64{9223372036854775807} - length) -> return false
+    required :: length + additional
+    if (required <= capacity) -> return true
+    if (required > I64{9223372036854775807} /% stride) -> return false
+    next :: jet_rt_alloc_try(required * stride, I64{8})
+    if (next == I64{0}) -> return false
+    data :: trap_word(header + I64{16})
+    if (length != I64{0}) -> rt_text_bytes_copy(next, data, length * stride)
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * stride, I64{8})
+    trap_store(header + I64{8}, required)
+    trap_store(header + I64{16}, next)
+    true
+}
+
+fn coll_payload(meta: I64) -> I64 {
+    kind :: trap_word(meta + I64{48}).bit_and(I64{4294967295})
+    if (kind == I64{11}) { return I64{0} }
+    if (kind == I64{9}) { return I64{1} }
+    trap_word(meta)
+}
+
+fn coll_size(meta: I64) -> I64 {
+    width :: trap_word(meta)
+    if (width < I64{8}) -> I64{8} else -> width
+}
+
+fn coll_zero(address: I64, size: I64) {
+    at := I64{0}
+    loop at < size {
+        trap_put(address + at, I64{0})
+        at += I64{1}
+    }
+}
+
+fn coll_copy(source: I64, target: I64, size: I64) {
+    at := I64{0}
+    loop at + (I64{8}) <= size {
+        trap_store(target + at, trap_word(source + at))
+        at += I64{8}
+    }
+    loop at < size {
+        trap_put(target + at, trap_byte(source + at))
+        at += I64{1}
+    }
+}
+
+fn coll_meta_copy(source: I64) -> I64 {
+    if (source == I64{0}) { return I64{0} }
+    target :: jet_rt_alloc(I64{72}, I64{8})
+    coll_copy(source, target, I64{56})
+    trap_store(target + I64{56}, coll_meta_copy(trap_word(source + I64{56})))
+    trap_store(target + I64{64}, coll_meta_copy(trap_word(source + I64{64})))
+    target
+}
+
+fn coll_meta_drop(meta: I64) {
+    if (meta == I64{0}) {
+        return
+    }
+    coll_meta_drop(trap_word(meta + I64{56}))
+    coll_meta_drop(trap_word(meta + I64{64}))
+    jet_rt_free(meta, I64{72}, I64{8})
+}
+
+fn coll_call1(code: I64, a: I64) -> I64 {
+    #Unsafe("checked native value-returning callback; its raw argument stays valid for the synchronous call") {
+        return os_call1_i64(code, a)
+    }
+}
+
+fn coll_call2(code: I64, a: I64, b: I64) -> I64 {
+    #Unsafe("checked native value-returning callback; both raw arguments stay valid for the synchronous call") {
+        return os_call2_i64(code, a, b)
+    }
+}
+
+fn coll_call3(code: I64, a: I64, b: I64, c: I64) -> I64 {
+    #Unsafe("checked unary closure adapter with borrowed environment, input and output slots") {
+        return os_call3_i64(code, a, b, c)
+    }
+}
+
+fn coll_call4(code: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    #Unsafe("checked binary closure adapter with live environment, inputs and output slots") {
+        return os_call4_i64(code, a, b, c, d)
+    }
+}
+
+fn coll_call1_unit(code: I64, a: I64) {
+    #Unsafe("checked native Unit callback; its raw argument stays valid for the synchronous call") {
+        os_call1_unit_i64(code, a)
+    }
+}
+
+fn coll_call2_unit(code: I64, a: I64, b: I64) {
+    #Unsafe("checked Unit clone callback; source remains live and target lends writable output storage") {
+        os_call2_unit_i64(code, a, b)
+    }
+}
+
+fn coll_slot_new(meta: I64) -> I64 {
+    slot :: jet_rt_alloc(coll_size(meta), I64{8})
+    coll_zero(slot, coll_size(meta))
+    slot
+}
+
+fn coll_slot_clone(source: I64, target: I64, meta: I64) {
+    coll_call2_unit(trap_word(meta + I64{8}), source, target)
+}
+
+fn coll_slot_drop(slot: I64, meta: I64) {
+    code :: trap_word(meta + I64{16})
+    if (code != I64{0}) {
+        saved :: jet_rt_session_cleanup_enter(jet_scheduler_native_status())
+        jet_scheduler_shield_enter()
+        coll_call1_unit(code, slot)
+        jet_scheduler_shield_leave()
+        jet_rt_session_cleanup_leave(saved)
+    }
+}
+
+fn coll_slot_free(slot: I64, meta: I64) {
+    if (slot == I64{0}) {
+        return
+    }
+    coll_slot_drop(slot, meta)
+    jet_rt_free(slot, coll_size(meta), I64{8})
+}
+
+fn coll_list_new() -> I64 {
+    header :: jet_rt_alloc(I64{24}, I64{8})
+    coll_zero(header, I64{24})
+    header
+}
+
+fn coll_list_push(header: I64, slot: I64, meta: I64) {
+    length :: trap_word(header)
+    capacity :: trap_word(header + I64{8})
+    stride :: trap_word(meta)
+    data := trap_word(header + I64{16})
+    if length == capacity {
+        grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
+        buffer :: jet_rt_alloc(grown * stride, I64{8})
+        if (length != I64{0}) { coll_copy(data, buffer, length * stride) }
+        if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
+        trap_store(header + I64{8}, grown)
+        trap_store(header + I64{16}, buffer)
+        data = buffer
+    }
+    coll_copy(slot, data + length * stride, coll_payload(meta))
+    trap_store(header, length + I64{1})
+}
+
+fn coll_list_drop(header: I64, meta: I64, start: I64) {
+    length :: trap_word(header)
+    data :: trap_word(header + I64{16})
+    stride :: trap_word(meta)
+    at := start
+    loop at < length {
+        coll_slot_drop(data + at * stride, meta)
+        at += I64{1}
+    }
+    capacity :: trap_word(header + I64{8})
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
+    coll_zero(header, I64{24})
+}
+
+// Native byte lists have packed one-byte elements; C borrows packed bytes.
+// Empty packed bytes use E4's non-null dangling convention, without allocation.
+#Export(c) fn jet_rt_bytes_pack(list: I64) -> I64 {
+    length :: trap_word(list)
+    if (length == I64{0}) { return I64{1} }
+    packed :: jet_rt_alloc(length, I64{1})
+    data :: trap_word(list + I64{16})
+    at := I64{0}
+    loop at < length {
+        trap_put(packed + at, host_u8_get(data, at))
+        at += I64{1}
+    }
+    packed
+}
+
+#Export(c) fn jet_rt_bytes_free(ptr: I64, len: I64) {
+    if (len != I64{0}) { jet_rt_free(ptr, len, I64{1}) }
+}
+
+#Export(c) fn jet_rt_bytes_unpack(ptr: I64, len: I64) -> I64 {
+    header :: coll_list_new()
+    if (len == I64{0}) { return header }
+    data :: jet_rt_alloc(len * RT_HOST_U8_STRIDE, I64{8})
+    at := I64{0}
+    loop at < len {
+        host_u8_put(data, at, trap_byte(ptr + at))
+        at += I64{1}
+    }
+    trap_store(header, len)
+    trap_store(header + I64{8}, len)
+    trap_store(header + I64{16}, data)
+    header
+}
+
+fn coll_result_size(ok: I64, error: I64) -> I64 {
+    a :: coll_payload(ok)
+    b :: coll_payload(error)
+    size := if a > b -> a else -> b
+    if (size < I64{8}) { size = I64{8} }
+    I64{8} + ((size + I64{7}).bit_and(I64{-8}))
+}
+
+// Bits owns a sorted, unique sequence of nonnegative native I64 indices.
+// The header uses the same [len, cap, data] layout as the collection boundary;
+// indices are not exact-Int carriers until they cross a public Word route.
+fn coll_bits_bound(bits: I64, value: I64) -> I64 {
+    low := I64{0}
+    high := trap_word(bits)
+    data :: trap_word(bits + I64{16})
+    loop low < high {
+        middle :: low + (high - low) / I64{2}
+        if trap_word(data + middle * I64{8}) < value -> low = middle + I64{1} else { high = middle }
+    }
+    low
+}
+
+#Export(c) fn jet_rt_native_bits_new() -> I64 { coll_list_new() }
+
+#Export(c) fn jet_rt_native_bits_clear(bits: I64) {
+    capacity :: trap_word(bits + I64{8})
+    if (capacity != I64{0}) { jet_rt_free(trap_word(bits + I64{16}), capacity * I64{8}, I64{8}) }
+    coll_zero(bits, I64{24})
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_bit_set(bits: I64) {
+    if (bits == I64{0}) {
+        return
+    }
+    jet_rt_native_bits_clear(bits)
+    jet_rt_free(bits, I64{24}, I64{8})
+}
+
+#Export(c) fn jet_bit_set_count(bits: I64) -> I64 { jet_int_owned_from_i64(trap_word(bits)) }
+
+#Export(c) fn jet_bit_set_is_empty(bits: I64) -> Bool { trap_word(bits) == I64{0} }
+
+#Export(c) fn jet_bit_set_len(bits: I64) -> I64 {
+    count :: trap_word(bits)
+    if (count == I64{0}) { return I64{0} }
+    last :: trap_word(trap_word(bits + I64{16}) + (count - I64{1}) * I64{8})
+    if (last == I64{9223372036854775807}) {
+        jet_rt_panic_overflow()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    jet_int_owned_from_i64(last + I64{1})
+}
+
+#Export(c) fn jet_bit_set_has(bits: I64, carrier: I64) -> Bool {
+    value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    at :: coll_bits_bound(bits, value)
+    if at == trap_word(bits) -> return false
+    trap_word(trap_word(bits + I64{16}) + at * I64{8}) == value
+}
+
+#Export(c) fn jet_bitset_add(bits: I64, carrier: I64) -> Bool {
+    value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    if (value < I64{0}) { return false }
+    at :: coll_bits_bound(bits, value)
+    length :: trap_word(bits)
+    data := trap_word(bits + I64{16})
+    if at < length && trap_word(data + at * I64{8}) == value -> return false
+    capacity :: trap_word(bits + I64{8})
+    if length == capacity {
+        grown :: if (capacity == I64{0}) -> I64{4} else -> capacity * I64{2}
+        buffer :: jet_rt_alloc(grown * I64{8}, I64{8})
+        coll_copy(data, buffer, length * I64{8})
+        if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{8}, I64{8}) }
+        trap_store(bits + I64{8}, grown)
+        trap_store(bits + I64{16}, buffer)
+        data = buffer
+    }
+    move := length
+    loop move > at {
+        trap_store(data + move * I64{8}, trap_word(data + (move - I64{1}) * I64{8}))
+        move -= I64{1}
+    }
+    trap_store(data + at * I64{8}, value)
+    trap_store(bits, length + I64{1})
+    true
+}
+
+#Export(c) fn jet_bitset_remove(bits: I64, carrier: I64) {
+    value :: jet_int_owned_to_i64(carrier)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    at := coll_bits_bound(bits, value)
+    length :: trap_word(bits)
+    data :: trap_word(bits + I64{16})
+    if at == length || trap_word(data + at * I64{8}) != value {
+        return
+    }
+    loop at + (I64{1}) < length {
+        trap_store(data + at * I64{8}, trap_word(data + (at + I64{1}) * I64{8}))
+        at += I64{1}
+    }
+    trap_store(bits, length - I64{1})
+}
+
+#Export(c) fn jet_bits_copy(bits: I64) -> I64 {
+    copied :: coll_list_new()
+    length :: trap_word(bits)
+    if (length != I64{0}) {
+        data :: jet_rt_alloc(length * I64{8}, I64{8})
+        coll_copy(trap_word(bits + I64{16}), data, length * I64{8})
+        trap_store(copied, length)
+        trap_store(copied + I64{8}, length)
+        trap_store(copied + I64{16}, data)
+    }
+    copied
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_bit_set(bits: I64) -> I64 { jet_bits_copy(bits) }
+
+// Route List results return a native length and transfer the fresh slot
+// buffer through out_data. Each initialized slot owns its exact Int carrier.
+#Export(c) fn jet_bit_set_to_list(bits: I64, out_data: I64) -> I64 {
+    length :: trap_word(bits)
+    if (length == I64{0}) {
+        trap_store(out_data, I64{0})
+        return I64{0}
+    }
+    output :: jet_rt_alloc(length * I64{8}, I64{8})
+    source :: trap_word(bits + I64{16})
+    at := I64{0}
+    loop at < length {
+        trap_store(output + at * I64{8}, jet_int_owned_from_i64(trap_word(source + at * I64{8})))
+        at += I64{1}
+    }
+    trap_store(out_data, output)
+    length
+}
+
+fn coll_bits_render(bits: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{20}, I64{1})
+    trap_put(scratch, I64{91})
+    rt_text_append(text, scratch, I64{1})
+    length :: trap_word(bits)
+    data :: trap_word(bits + I64{16})
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) {
+            trap_put(scratch, I64{44})
+            trap_put(scratch + I64{1}, I64{32})
+            rt_text_append(text, scratch, I64{2})
+        }
+        value := trap_word(data + at * I64{8})
+        begin := I64{20}
+        loop {
+            begin -= I64{1}
+            trap_put(scratch + begin, I64{48} + value % I64{10})
+            value /= I64{10}
+            if (value == I64{0}) { break }
+        }
+        rt_text_append(text, scratch + begin, I64{20} - begin)
+        at += I64{1}
+    }
+    trap_put(scratch, I64{93})
+    rt_text_append(text, scratch, I64{1})
+    jet_rt_free(scratch, I64{20}, I64{1})
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_display_jet_bit_set(bits: I64) -> I64 { coll_bits_render(bits) }
+
+#Export(c) fn jet_rt_handle_show_jet_bit_set(bits: I64) -> I64 { coll_bits_render(bits) }
+
+#Export(c) fn jet_rt_handle_debug_jet_bit_set(bits: I64) -> I64 { coll_bits_render(bits) }
+
+// These legacy collection routes use native signed-I64 words, not tagged Int
+// input slots (CAbiRoutes.rs list_in(... |w| w as i64)). Their scalar index
+// results are exact Int carriers; returned slot buffers transfer ownership.
+fn coll_i64_output(length: I64, out_data: I64) -> I64 {
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    trap_store(out_data, data)
+    data
+}
+
+fn coll_i64_bound(data: I64, length: I64, value: I64, right: Bool) -> I64 {
+    low := I64{0}
+    high := length
+    loop low < high {
+        middle :: low + (high - low) / I64{2}
+        item :: trap_word(data + middle * I64{8})
+        if item < value || (right && item == value) -> low = middle + I64{1} else { high = middle }
+    }
+    low
+}
+
+#Export(c) fn jet_coll_bisect_left(data: I64, length: I64, value: I64) -> I64 {
+    jet_int_owned_from_i64(coll_i64_bound(data, length, value, false))
+}
+
+#Export(c) fn jet_coll_bisect_right(data: I64, length: I64, value: I64) -> I64 {
+    jet_int_owned_from_i64(coll_i64_bound(data, length, value, true))
+}
+
+fn coll_i64_insort(data: I64, length: I64, value: I64, out_data: I64, right: Bool) -> I64 {
+    at :: coll_i64_bound(data, length, value, right)
+    result :: coll_i64_output(length + I64{1}, out_data)
+    coll_copy(data, result, at * I64{8})
+    trap_store(result + at * I64{8}, value)
+    coll_copy(data + at * I64{8}, result + (at + I64{1}) * I64{8}, (length - at) * I64{8})
+    length + I64{1}
+}
+
+#Export(c) fn jet_coll_insort_left(data: I64, length: I64, value: I64, out_data: I64) -> I64 {
+    coll_i64_insort(data, length, value, out_data, false)
+}
+
+#Export(c) fn jet_coll_insort_right(data: I64, length: I64, value: I64, out_data: I64) -> I64 {
+    coll_i64_insort(data, length, value, out_data, true)
+}
+
+fn coll_i64_swap(data: I64, left: I64, right: I64) {
+    value :: trap_word(data + left * I64{8})
+    trap_store(data + left * I64{8}, trap_word(data + right * I64{8}))
+    trap_store(data + right * I64{8}, value)
+}
+
+// Same strict child/tie choice as MathLibPure.rs:1287-1306; minimum=false
+// is the max-heap dual used to select the n smallest values without a copy
+// of the unselected input.
+fn coll_i64_sift(data: I64, length: I64, root: I64, minimum: Bool) {
+    index := root
+    loop index < length / (I64{2}) {
+        left :: index * I64{2} + I64{1}
+        best := index
+        left_value :: trap_word(data + left * I64{8})
+        best_value := trap_word(data + best * I64{8})
+        if (if minimum -> left_value < best_value else -> left_value > best_value) {
+            best = left
+            best_value = left_value
+        }
+        right :: left + I64{1}
+        if (right < length) {
+            right_value :: trap_word(data + right * I64{8})
+            if (if minimum -> right_value < best_value else -> right_value > best_value) {
+                best = right
+            }
+        }
+        if (best == index) {
+            return
+        }
+        coll_i64_swap(data, index, best)
+        index = best
+    }
+}
+
+fn coll_i64_heap(data: I64, length: I64, minimum: Bool) {
+    index := length / I64{2}
+    loop index > (I64{0}) {
+        index -= I64{1}
+        coll_i64_sift(data, length, index, minimum)
+    }
+}
+
+#Export(c) fn jet_coll_heapify(data: I64, length: I64, out_data: I64) -> I64 {
+    result :: coll_i64_output(length, out_data)
+    coll_copy(data, result, length * I64{8})
+    coll_i64_heap(result, length, true)
+    length
+}
+
+#Export(c) fn jet_coll_heappush(data: I64, length: I64, value: I64, out_data: I64) -> I64 {
+    result :: coll_i64_output(length + I64{1}, out_data)
+    coll_copy(data, result, length * I64{8})
+    trap_store(result + length * I64{8}, value)
+    index := length
+    loop index > (I64{0}) {
+        parent :: (index - I64{1}) / I64{2}
+        if (trap_word(result + index * I64{8}) >= trap_word(result + parent * I64{8})) { break }
+        coll_i64_swap(result, index, parent)
+        index = parent
+    }
+    length + I64{1}
+}
+
+#Export(c) fn jet_coll_merge_sorted(left: I64, left_len: I64, right: I64, right_len: I64, out_data: I64) -> I64 {
+    length :: left_len + right_len
+    result :: coll_i64_output(length, out_data)
+    a := I64{0}
+    b := I64{0}
+    written := I64{0}
+    loop a < left_len && b < right_len {
+        x :: trap_word(left + a * I64{8})
+        y :: trap_word(right + b * I64{8})
+        if x <= y {
+            trap_store(result + written * I64{8}, x)
+            a += I64{1}
+        } else {
+            trap_store(result + written * I64{8}, y)
+            b += I64{1}
+        }
+        written += I64{1}
+    }
+    coll_copy(left + a * I64{8}, result + written * I64{8}, (left_len - a) * I64{8})
+    written += left_len - a
+    coll_copy(right + b * I64{8}, result + written * I64{8}, (right_len - b) * I64{8})
+    length
+}
+
+fn coll_i64_select(n: I64, data: I64, length: I64, out_data: I64, largest: Bool) -> I64 {
+    count :: if (n <= I64{0}) -> I64{0} else if (n < length) -> n else -> length
+    result :: coll_i64_output(count, out_data)
+    if (count == I64{0}) { return I64{0} }
+    coll_copy(data, result, count * I64{8})
+    coll_i64_heap(result, count, largest)
+    at := count
+    loop at < length {
+        value :: trap_word(data + at * I64{8})
+        worst :: trap_word(result)
+        if (if largest -> value > worst else -> value < worst) {
+            trap_store(result, value)
+            coll_i64_sift(result, count, I64{0}, largest)
+        }
+        at += I64{1}
+    }
+    remaining := count
+    loop remaining > (I64{1}) {
+        remaining -= I64{1}
+        coll_i64_swap(result, I64{0}, remaining)
+        coll_i64_sift(result, remaining, I64{0}, largest)
+    }
+    count
+}
+
+#Export(c) fn jet_coll_nsmallest(n: I64, data: I64, length: I64, out_data: I64) -> I64 {
+    coll_i64_select(n, data, length, out_data, false)
+}
+
+#Export(c) fn jet_coll_nlargest(n: I64, data: I64, length: I64, out_data: I64) -> I64 {
+    coll_i64_select(n, data, length, out_data, true)
+}
+
+// Insertion-ordered paired lists: keys at 0, values at 24, each a native
+// [len, cap, data] header. String slots own independent E4 text handles.
+fn coll_pair_new(capacity: I64) -> I64 {
+    pair :: jet_rt_alloc(I64{48}, I64{8})
+    coll_zero(pair, I64{48})
+    if (capacity != I64{0}) {
+        trap_store(pair + I64{8}, capacity)
+        trap_store(pair + I64{16}, jet_rt_alloc(capacity * I64{8}, I64{8}))
+        trap_store(pair + I64{32}, capacity)
+        trap_store(pair + I64{40}, jet_rt_alloc(capacity * I64{8}, I64{8}))
+    }
+    pair
+}
+
+fn coll_pair_append(pair: I64, key: I64, value: I64) {
+    length :: trap_word(pair)
+    trap_store(trap_word(pair + I64{16}) + length * I64{8}, key)
+    trap_store(trap_word(pair + I64{40}) + length * I64{8}, value)
+    trap_store(pair, length + I64{1})
+    trap_store(pair + I64{24}, length + I64{1})
+}
+
+fn coll_text_list_drop(header: I64, strings: Bool) {
+    length :: trap_word(header)
+    capacity :: trap_word(header + I64{8})
+    data :: trap_word(header + I64{16})
+    if strings {
+        at := I64{0}
+        loop at < length {
+            jet_rt_string_drop(trap_word(data + at * I64{8}))
+            at += I64{1}
+        }
+    }
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{8}, I64{8}) }
+}
+
+fn coll_pair_drop(pair: I64, numeric: Bool) {
+    if (pair == I64{0}) {
+        return
+    }
+    coll_text_list_drop(pair, true)
+    coll_text_list_drop(pair + I64{24}, !numeric)
+    jet_rt_free(pair, I64{48}, I64{8})
+}
+
+fn coll_pair_find(pair: I64, key: I64) -> I64 {
+    length :: trap_word(pair)
+    keys :: trap_word(pair + I64{16})
+    at := I64{0}
+    loop at < length {
+        if jet_rt_string_eq(trap_word(keys + at * I64{8}), key) -> return at
+        at += I64{1}
+    }
+    I64{-1}
+}
+
+fn coll_pair_copy(pair: I64, numeric: Bool) -> I64 {
+    length :: trap_word(pair)
+    result :: coll_pair_new(length)
+    keys :: trap_word(pair + I64{16})
+    values :: trap_word(pair + I64{40})
+    at := I64{0}
+    loop at < length {
+        value :: trap_word(values + at * I64{8})
+        coll_pair_append(result, jet_rt_string_clone(trap_word(keys + at * I64{8})), if numeric -> value else -> jet_rt_string_clone(value))
+        at += I64{1}
+    }
+    result
+}
+
+fn coll_text_list_copy(header: I64, out_data: I64) -> I64 {
+    length :: trap_word(header)
+    data :: trap_word(header + I64{16})
+    result :: coll_i64_output(length, out_data)
+    at := I64{0}
+    loop at < length {
+        trap_store(result + at * I64{8}, jet_rt_string_clone(trap_word(data + at * I64{8})))
+        at += I64{1}
+    }
+    length
+}
+
+#Export(c) fn jet_coll_ordered_map() -> I64 { coll_pair_new(I64{0}) }
+
+#Export(c) fn jet_rt_handle_drop_jet_ordered_map(map: I64) { coll_pair_drop(map, false) }
+
+#Export(c) fn jet_rt_handle_clone_jet_ordered_map(map: I64) -> I64 { coll_pair_copy(map, false) }
+
+#Export(c) fn jet_coll_map_contains(map: I64, key: I64) -> Bool {
+    coll_pair_find(map, key) != I64{-1}
+}
+
+#Export(c) fn jet_coll_map_len(map: I64) -> I64 { jet_int_owned_from_i64(trap_word(map)) }
+
+#Export(c) fn jet_coll_map_get(map: I64, key: I64, some: I64) -> I64 {
+    at :: coll_pair_find(map, key)
+    if (at == I64{-1}) { return I64{0} }
+    trap_store(some, jet_rt_string_clone(trap_word(trap_word(map + I64{40}) + at * I64{8})))
+    I64{1}
+}
+
+#Export(c) fn jet_coll_map_keys(map: I64, out_data: I64) -> I64 {
+    coll_text_list_copy(map, out_data)
+}
+
+#Export(c) fn jet_coll_map_values(map: I64, out_data: I64) -> I64 {
+    coll_text_list_copy(map + I64{24}, out_data)
+}
+
+#Export(c) fn jet_coll_map_set(map: I64, key: I64, value: I64) -> I64 {
+    length :: trap_word(map)
+    found :: coll_pair_find(map, key)
+    result :: coll_pair_new(length + (if (found == I64{-1}) -> I64{1} else -> I64{0}))
+    keys :: trap_word(map + I64{16})
+    values :: trap_word(map + I64{40})
+    at := I64{0}
+    loop at < length {
+        stored_key :: trap_word(keys + at * I64{8})
+        stored_value :: trap_word(values + at * I64{8})
+        same :: jet_rt_string_eq(stored_key, key)
+        coll_pair_append(result, jet_rt_string_clone(if same -> key else -> stored_key), jet_rt_string_clone(if same -> value else -> stored_value))
+        at += I64{1}
+    }
+    if (found == I64{-1}) {
+        coll_pair_append(result, jet_rt_string_clone(key), jet_rt_string_clone(value))
+    }
+    result
+}
+
+#Export(c) fn jet_coll_map_remove(map: I64, key: I64) -> I64 {
+    length :: trap_word(map)
+    keys :: trap_word(map + I64{16})
+    removed := I64{0}
+    scan := I64{0}
+    loop scan < length {
+        if jet_rt_string_eq(trap_word(keys + scan * I64{8}), key) -> removed += I64{1}
+        scan += I64{1}
+    }
+    result :: coll_pair_new(length - removed)
+    values :: trap_word(map + I64{40})
+    at := I64{0}
+    loop at < length {
+        if !jet_rt_string_eq(trap_word(keys + at * I64{8}), key) {
+            coll_pair_append(result, jet_rt_string_clone(trap_word(keys + at * I64{8})), jet_rt_string_clone(trap_word(values + at * I64{8})))
+        }
+        at += I64{1}
+    }
+    result
+}
+
+fn coll_render_word(text: I64, scratch: I64, word: I64, length: I64) {
+    trap_store(scratch, word)
+    rt_text_append(text, scratch, length)
+}
+
+// Values.rs:278-281,369-372: String's list Show is raw text (no quoting),
+// with comma-space separators. All three OrderedMap modes share this form.
+fn coll_render_text_items(text: I64, scratch: I64, header: I64) {
+    length :: trap_word(header)
+    data :: trap_word(header + I64{16})
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) { coll_render_word(text, scratch, I64{8236}, I64{2}) }
+        jet_rt_string_builder_push(text, trap_word(data + at * I64{8}))
+        at += I64{1}
+    }
+}
+
+fn coll_ordered_map_render(map: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    coll_render_word(text, scratch, I64{5576693780593275471}, I64{8})  // OrderedM
+    coll_render_word(text, scratch, I64{4211843553023455329}, I64{8})  // ap{keys:
+    coll_render_word(text, scratch, I64{23328}, I64{2})  //  [
+    coll_render_text_items(text, scratch, map)
+    coll_render_word(text, scratch, I64{7310868735955315805}, I64{8})  // ], value
+    coll_render_word(text, scratch, I64{2314885531808316019}, I64{4})  // s: [
+    coll_render_text_items(text, scratch, map + I64{24})
+    coll_render_word(text, scratch, I64{32093}, I64{2})  // ]}
+    jet_rt_free(scratch, I64{8}, I64{8})
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_display_jet_ordered_map(map: I64) -> I64 { coll_ordered_map_render(map) }
+
+#Export(c) fn jet_rt_handle_show_jet_ordered_map(map: I64) -> I64 { coll_ordered_map_render(map) }
+
+#Export(c) fn jet_rt_handle_debug_jet_ordered_map(map: I64) -> I64 { coll_ordered_map_render(map) }
+
+fn coll_i64_add(left: I64, right: I64) -> I64 {
+    result :: wrapping(left + right)
+    if (((left.bit_xor(result)).bit_and((right.bit_xor(result)))) < I64{0}) {
+        jet_rt_panic_overflow()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    result
+}
+
+fn coll_i64_sub(left: I64, right: I64) -> I64 {
+    result :: wrapping(left - right)
+    if (((left.bit_xor(right)).bit_and((left.bit_xor(result)))) < I64{0}) {
+        jet_rt_panic_overflow()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    result
+}
+
+fn coll_counter_copy_capacity(counter: I64, capacity: I64) -> I64 {
+    result :: coll_pair_new(capacity)
+    length :: trap_word(counter)
+    keys :: trap_word(counter + I64{16})
+    counts :: trap_word(counter + I64{40})
+    at := I64{0}
+    loop at < length {
+        coll_pair_append(result, jet_rt_string_clone(trap_word(keys + at * I64{8})), trap_word(counts + at * I64{8}))
+        at += I64{1}
+    }
+    result
+}
+
+fn coll_counter_remove(counter: I64, index: I64) {
+    length :: trap_word(counter)
+    keys :: trap_word(counter + I64{16})
+    counts :: trap_word(counter + I64{40})
+    jet_rt_string_drop(trap_word(keys + index * I64{8}))
+    at := index
+    loop at + (I64{1}) < length {
+        trap_store(keys + at * I64{8}, trap_word(keys + (at + I64{1}) * I64{8}))
+        trap_store(counts + at * I64{8}, trap_word(counts + (at + I64{1}) * I64{8}))
+        at += I64{1}
+    }
+    trap_store(counter, length - I64{1})
+    trap_store(counter + I64{24}, length - I64{1})
+}
+
+// Core/Collections.rs:3331-3357; apply to our fresh owner in place so a
+// merge/from-list copies each input only once, not once per delta.
+fn coll_counter_delta(counter: I64, key: I64, amount: I64) {
+    keys :: trap_word(counter + I64{16})
+    counts :: trap_word(counter + I64{40})
+    found := false
+    at := I64{0}
+    loop at < trap_word(counter) {
+        if jet_rt_string_eq(trap_word(keys + at * I64{8}), key) {
+            found = true
+            next :: coll_i64_add(trap_word(counts + at * I64{8}), amount)
+            if (jet_scheduler_native_propagate() != I64{0}) -> return
+            if (next == I64{0}) { coll_counter_remove(counter, at) } else {
+                trap_store(counts + at * I64{8}, next)
+                at += I64{1}
+            }
+        } else { at += I64{1} }
+    }
+    if (!found && amount != I64{0}) { coll_pair_append(counter, jet_rt_string_clone(key), amount) }
+}
+
+#Export(c) fn jet_coll_counter() -> I64 { coll_pair_new(I64{0}) }
+
+#Export(c) fn jet_rt_handle_drop_jet_counter(counter: I64) { coll_pair_drop(counter, true) }
+
+#Export(c) fn jet_rt_handle_clone_jet_counter(counter: I64) -> I64 { coll_pair_copy(counter, true) }
+
+#Export(c) fn jet_coll_counter_clear(counter: I64) -> I64 { jet_coll_counter() }
+
+#Export(c) fn jet_coll_counter_from(keys: I64, length: I64) -> I64 {
+    result :: coll_pair_new(length)
+    at := I64{0}
+    loop at < length {
+        coll_counter_delta(result, trap_word(keys + at * I64{8}), I64{1})
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            jet_rt_handle_drop_jet_counter(result)
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    result
+}
+
+#Export(c) fn jet_coll_counter_add(counter: I64, key: I64, amount: I64) -> I64 {
+    capacity :: trap_word(counter) + (if (amount == I64{0}) -> I64{0} else -> I64{1})
+    result :: coll_counter_copy_capacity(counter, capacity)
+    coll_counter_delta(result, key, amount)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_jet_counter(result)
+        return I64{0}
+    }
+    result
+}
+
+#Export(c) fn jet_coll_counter_inc(counter: I64, key: I64) -> I64 {
+    jet_coll_counter_add(counter, key, I64{1})
+}
+
+#Export(c) fn jet_coll_counter_dec(counter: I64, key: I64) -> I64 {
+    jet_coll_counter_add(counter, key, I64{-1})
+}
+
+fn coll_counter_get(counter: I64, key: I64) -> I64 {
+    at :: coll_pair_find(counter, key)
+    if (at == I64{-1}) -> I64{0} else -> trap_word(trap_word(counter + I64{40}) + at * I64{8})
+}
+
+#Export(c) fn jet_coll_counter_get(counter: I64, key: I64) -> I64 {
+    jet_int_owned_from_i64(coll_counter_get(counter, key))
+}
+
+#Export(c) fn jet_coll_counter_set_count(counter: I64, key: I64, count: I64) -> I64 {
+    amount :: coll_i64_sub(count, coll_counter_get(counter, key))
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_coll_counter_add(counter, key, amount)
+}
+
+#Export(c) fn jet_coll_counter_total(counter: I64) -> I64 {
+    length :: trap_word(counter + I64{24})
+    counts :: trap_word(counter + I64{40})
+    total := I64{0}
+    at := I64{0}
+    loop at < length {
+        total = coll_i64_add(total, trap_word(counts + at * I64{8}))
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        at += I64{1}
+    }
+    jet_int_owned_from_i64(total)
+}
+
+#Export(c) fn jet_coll_counter_names(counter: I64, out_data: I64) -> I64 {
+    coll_text_list_copy(counter, out_data)
+}
+
+#Export(c) fn jet_coll_counter_elements(counter: I64, out_data: I64) -> I64 {
+    length :: trap_word(counter)
+    keys :: trap_word(counter + I64{16})
+    counts :: trap_word(counter + I64{40})
+    total := I64{0}
+    at := I64{0}
+    loop at < length {
+        count :: trap_word(counts + at * I64{8})
+        if (count > I64{0}) {
+            total = coll_i64_add(total, count)
+            if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+        }
+        at += I64{1}
+    }
+    result :: coll_i64_output(total, out_data)
+    at = I64{0}
+    written := I64{0}
+    loop at < length {
+        count :: trap_word(counts + at * I64{8})
+        repeat := I64{0}
+        loop repeat < count {
+            trap_store(result + written * I64{8}, jet_rt_string_clone(trap_word(keys + at * I64{8})))
+            written += I64{1}
+            repeat += I64{1}
+        }
+        at += I64{1}
+    }
+    total
+}
+
+#Export(c) fn jet_coll_counter_most_common(counter: I64, k: I64) -> I64 {
+    length :: trap_word(counter)
+    limit :: if (k < I64{0} || k > length) -> length else -> k
+    result :: coll_pair_new(limit)
+    if (limit == I64{0}) { return result }
+    bytes :: length / I64{8} + (if (length % I64{8} == I64{0}) -> I64{0} else -> I64{1})
+    used :: jet_rt_alloc(bytes, I64{1})
+    coll_zero(used, bytes)
+    keys :: trap_word(counter + I64{16})
+    counts :: trap_word(counter + I64{40})
+    pick := I64{0}
+    loop pick < limit {
+        best := I64{-1}
+        at := I64{0}
+        loop at < length {
+            mask :: I64{1} << (at % I64{8})
+            if ((trap_byte(used + at / I64{8}).bit_and(mask)) == I64{0}) {
+                if (best == I64{-1} || trap_word(counts + at * I64{8}) > trap_word(counts + best * I64{8})) {
+                    best = at
+                }
+            }
+            at += I64{1}
+        }
+        address :: used + best / I64{8}
+        trap_put(address, trap_byte(address).bit_or((I64{1} << (best % I64{8}))))
+        coll_pair_append(result, jet_rt_string_clone(trap_word(keys + best * I64{8})), trap_word(counts + best * I64{8}))
+        pick += I64{1}
+    }
+    jet_rt_free(used, bytes, I64{1})
+    result
+}
+
+fn coll_counter_merge(left: I64, right: I64, subtract: Bool) -> I64 {
+    result :: coll_counter_copy_capacity(left, trap_word(left) + trap_word(right))
+    keys :: trap_word(right + I64{16})
+    counts :: trap_word(right + I64{40})
+    at := I64{0}
+    loop at < trap_word(right) {
+        count :: trap_word(counts + at * I64{8})
+        amount :: if subtract -> coll_i64_sub(I64{0}, count) else -> count
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            jet_rt_handle_drop_jet_counter(result)
+            return I64{0}
+        }
+        coll_counter_delta(result, trap_word(keys + at * I64{8}), amount)
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            jet_rt_handle_drop_jet_counter(result)
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    result
+}
+
+#Export(c) fn jet_coll_counter_merge_add(left: I64, right: I64) -> I64 {
+    coll_counter_merge(left, right, false)
+}
+
+#Export(c) fn jet_coll_counter_subtract(left: I64, right: I64) -> I64 {
+    coll_counter_merge(left, right, true)
+}
+
+fn coll_render_i64(text: I64, scratch: I64, value: I64) {
+    negative :: value < I64{0}
+    magnitude := iter_unsigned(value)
+    if negative -> magnitude = wrapping(magnitude.bit_not() + U64{1})
+    begin := I64{20}
+    loop {
+        begin -= I64{1}
+        trap_put(scratch + begin, I64{48} + I64{magnitude % U64{10}})
+        magnitude /= U64{10}
+        if (magnitude == U64{0}) { break }
+    }
+    if negative {
+        begin -= I64{1}
+        trap_put(scratch + begin, I64{45})
+    }
+    rt_text_append(text, scratch + begin, I64{20} - begin)
+}
+
+fn coll_counter_render(counter: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{20}, I64{8})
+    coll_render_word(text, scratch, I64{8895283764753952579}, I64{8})  // Counter{
+    coll_render_word(text, scratch, I64{2331492667511891307}, I64{7})  // keys: [
+    coll_render_text_items(text, scratch, counter)
+    coll_render_word(text, scratch, I64{8389772277102685277}, I64{8})  // ], count
+    coll_render_word(text, scratch, I64{2314885531808316019}, I64{4})  // s: [
+    at := I64{0}
+    loop at < trap_word(counter + I64{24}) {
+        if (at != I64{0}) { coll_render_word(text, scratch, I64{8236}, I64{2}) }
+        coll_render_i64(text, scratch, trap_word(trap_word(counter + I64{40}) + at * I64{8}))
+        at += I64{1}
+    }
+    coll_render_word(text, scratch, I64{32093}, I64{2})
+    jet_rt_free(scratch, I64{20}, I64{8})
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_display_jet_counter(counter: I64) -> I64 { coll_counter_render(counter) }
+
+#Export(c) fn jet_rt_handle_show_jet_counter(counter: I64) -> I64 { coll_counter_render(counter) }
+
+#Export(c) fn jet_rt_handle_debug_jet_counter(counter: I64) -> I64 { coll_counter_render(counter) }
+
+// Native Chain owns a list of inline 48-byte Layer pairs. Each Layer keeps
+// both input lengths, matching Core/Collections.rs:3524-3555 (not layer_from's
+// Core source normalization). Only matching an unpaired key raises bounds.
+fn coll_layer_init(layer: I64, keys: I64, key_count: I64, values: I64, value_count: I64) {
+    coll_zero(layer, I64{48})
+    trap_store(layer, key_count)
+    trap_store(layer + I64{8}, key_count)
+    trap_store(layer + I64{24}, value_count)
+    trap_store(layer + I64{32}, value_count)
+    owned_keys :: coll_i64_output(key_count, layer + I64{16})
+    owned_values :: coll_i64_output(value_count, layer + I64{40})
+    at := I64{0}
+    loop at < key_count {
+        trap_store(owned_keys + at * I64{8}, jet_rt_string_clone(trap_word(keys + at * I64{8})))
+        at += I64{1}
+    }
+    at = I64{0}
+    loop at < value_count {
+        trap_store(owned_values + at * I64{8}, jet_rt_string_clone(trap_word(values + at * I64{8})))
+        at += I64{1}
+    }
+}
+
+fn coll_layer_copy_into(layer: I64, target: I64) {
+    coll_layer_init(target, trap_word(layer + I64{16}), trap_word(layer), trap_word(layer + I64{40}), trap_word(layer + I64{24}))
+}
+
+#Export(c) fn jet_rt_handle_clone_jet_layer(layer: I64) -> I64 {
+    result :: jet_rt_alloc(I64{48}, I64{8})
+    coll_layer_copy_into(layer, result)
+    result
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_layer(layer: I64) { coll_pair_drop(layer, false) }
+
+fn coll_chain_new(length: I64) -> I64 {
+    chain :: coll_list_new()
+    trap_store(chain, length)
+    trap_store(chain + I64{8}, length)
+    if (length != I64{0}) { trap_store(chain + I64{16}, jet_rt_alloc(length * I64{48}, I64{8})) }
+    chain
+}
+
+#Export(c) fn jet_coll_chain() -> I64 { coll_chain_new(I64{0}) }
+
+#Export(c) fn jet_rt_handle_clone_jet_chain(chain: I64) -> I64 {
+    length :: trap_word(chain)
+    result :: coll_chain_new(length)
+    source :: trap_word(chain + I64{16})
+    target :: trap_word(result + I64{16})
+    at := I64{0}
+    loop at < length {
+        coll_layer_copy_into(source + at * I64{48}, target + at * I64{48})
+        at += I64{1}
+    }
+    result
+}
+
+#Export(c) fn jet_rt_handle_drop_jet_chain(chain: I64) {
+    if (chain == I64{0}) {
+        return
+    }
+    length :: trap_word(chain)
+    capacity :: trap_word(chain + I64{8})
+    data :: trap_word(chain + I64{16})
+    at := I64{0}
+    loop at < length {
+        coll_text_list_drop(data + at * I64{48}, true)
+        coll_text_list_drop(data + at * I64{48} + I64{24}, true)
+        at += I64{1}
+    }
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * I64{48}, I64{8}) }
+    jet_rt_free(chain, I64{24}, I64{8})
+}
+
+#Export(c) fn jet_coll_chain_push(chain: I64, keys: I64, key_count: I64, values: I64, value_count: I64) -> I64 {
+    length :: trap_word(chain)
+    result :: coll_chain_new(length + I64{1})
+    target :: trap_word(result + I64{16})
+    coll_layer_init(target, keys, key_count, values, value_count)
+    source :: trap_word(chain + I64{16})
+    at := I64{0}
+    loop at < length {
+        coll_layer_copy_into(source + at * I64{48}, target + (at + I64{1}) * I64{48})
+        at += I64{1}
+    }
+    result
+}
+
+// Borrowed nullable E4 text: contains must not allocate a discarded get result.
+fn coll_chain_value(chain: I64, key: I64) -> I64 {
+    length :: trap_word(chain)
+    data :: trap_word(chain + I64{16})
+    at := I64{0}
+    loop at < length {
+        layer :: data + at * I64{48}
+        found :: coll_pair_find(layer, key)
+        if (found != I64{-1}) {
+            values :: trap_word(layer + I64{24})
+            if (found >= values) {
+                jet_rt_panic_list_bounds(values, Int.from_i64(found))
+                if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+                return I64{0}
+            }
+            return trap_word(trap_word(layer + I64{40}) + found * I64{8})
+        }
+        at += I64{1}
+    }
+    I64{0}
+}
+
+#Export(c) fn jet_coll_chain_get(chain: I64, key: I64, some: I64) -> I64 {
+    value :: coll_chain_value(chain, key)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
+    trap_store(some, jet_rt_string_clone(value))
+    I64{1}
+}
+
+#Export(c) fn jet_coll_chain_contains(chain: I64, key: I64) -> Bool {
+    value :: coll_chain_value(chain, key)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return false
+    value != I64{0}
+}
+
+fn coll_layer_render_into(layer: I64, text: I64, scratch: I64) {
+    coll_render_word(text, scratch, I64{7308070551597703500}, I64{8})  // Layer{ke
+    coll_render_word(text, scratch, I64{391382725497}, I64{5})  // ys: [
+    coll_render_text_items(text, scratch, layer)
+    coll_render_word(text, scratch, I64{7310868735955315805}, I64{8})  // ], value
+    coll_render_word(text, scratch, I64{2314885531808316019}, I64{4})  // s: [
+    coll_render_text_items(text, scratch, layer + I64{24})
+    coll_render_word(text, scratch, I64{32093}, I64{2})
+}
+
+fn coll_layer_render(layer: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    coll_layer_render_into(layer, text, scratch)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_display_jet_layer(layer: I64) -> I64 { coll_layer_render(layer) }
+
+#Export(c) fn jet_rt_handle_show_jet_layer(layer: I64) -> I64 { coll_layer_render(layer) }
+
+#Export(c) fn jet_rt_handle_debug_jet_layer(layer: I64) -> I64 { coll_layer_render(layer) }
+
+fn coll_chain_render(chain: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    coll_render_word(text, scratch, I64{7020121633308371011}, I64{8})  // Chain{la
+    coll_render_word(text, scratch, I64{25649658297738617}, I64{7})  // yers: [
+    length :: trap_word(chain)
+    data :: trap_word(chain + I64{16})
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) { coll_render_word(text, scratch, I64{8236}, I64{2}) }
+        coll_layer_render_into(data + at * I64{48}, text, scratch)
+        at += I64{1}
+    }
+    coll_render_word(text, scratch, I64{32093}, I64{2})
+    jet_rt_free(scratch, I64{8}, I64{8})
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_rt_handle_display_jet_chain(chain: I64) -> I64 { coll_chain_render(chain) }
+
+#Export(c) fn jet_rt_handle_show_jet_chain(chain: I64) -> I64 { coll_chain_render(chain) }
+
+#Export(c) fn jet_rt_handle_debug_jet_chain(chain: I64) -> I64 { coll_chain_render(chain) }
+
+// Legacy numeric LoopRange uses the CAbi.rs:735-780 exact-Int boundary.
+// The private native cursor keeps [current, end, step, exclusive, done].
+fn coll_loop_range_stop(exhausted: Bool) {
+    trap_header(I64{0})
+    trap_write_word(I64{8028827855593824626}, I64{8})
+    if exhausted {
+        trap_write_word(I64{7310868735955333231}, I64{8})
+        trap_write_word(I64{8391162085809418784}, I64{8})
+        trap_write_word(I64{8243122676036559973}, I64{8})
+        trap_write_word(I64{8391179591946364192}, I64{8})
+        trap_write_word(I64{7237481}, I64{3})
+    } else {
+        trap_write_word(I64{7235440120820691055}, I64{8})
+        trap_write_word(I64{7935470582666960997}, I64{8})
+        trap_write_word(I64{7312192564799501423}, I64{8})
+        trap_write_word(I64{28530}, I64{2})
+    }
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
+}
+
+#Export(c) fn jet_loop_range_init(start: I64, end: I64, step: I64, has_step: U8, exclusive: U8) -> I64 {
+    stride :: if (has_step == U8{0}) -> I64{1} else -> jet_int_owned_to_i64(step)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    first :: jet_int_owned_to_i64(start)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    last :: jet_int_owned_to_i64(end)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (stride == I64{0}) {
+        coll_loop_range_stop(false)
+        return I64{0}
+    }
+    cursor :: jet_rt_alloc(I64{40}, I64{8})
+    trap_store(cursor, first)
+    trap_store(cursor + I64{8}, last)
+    trap_store(cursor + I64{16}, stride)
+    trap_store(cursor + I64{24}, if (exclusive == U8{0}) -> I64{0} else -> I64{1})
+    trap_store(cursor + I64{32}, I64{0})
+    cursor
+}
+
+#Export(c) fn jet_loop_range_has_next(cursor: I64) -> Bool {
+    if (trap_word(cursor + I64{32}) != I64{0}) { return false }
+    current :: trap_word(cursor)
+    end :: trap_word(cursor + I64{8})
+    exclusive :: trap_word(cursor + I64{24}) != I64{0}
+    if {
+        (trap_word(cursor + I64{16}) > I64{0}) -> current < end || (!exclusive && current == end)
+        else -> current > end || (!exclusive && current == end)
+    }
+}
+
+#Export(c) fn jet_loop_range_value(cursor: I64) -> I64 {
+    if !jet_loop_range_has_next(cursor) {
+        coll_loop_range_stop(true)
+        return I64{0}
+    }
+    jet_int_owned_from_i64(trap_word(cursor))
+}
+
+#Export(c) fn jet_loop_range_advance(cursor: I64) {
+    if (trap_word(cursor + I64{32}) != I64{0}) {
+        return
+    }
+    current :: trap_word(cursor)
+    step :: trap_word(cursor + I64{16})
+    advanced :: wrapping(current + step)
+    if (((current.bit_xor(advanced)).bit_and((step.bit_xor(advanced)))) < I64{0}) {
+        trap_store(cursor + I64{32}, I64{1})
+        return
+    }
+    trap_store(cursor, advanced)
+    trap_store(cursor + I64{32}, if jet_loop_range_has_next(cursor) -> I64{0} else -> I64{1})
+}
+
+#Export(c) fn jet_loop_cursor_drop(cursor: I64) {
+    if (cursor != I64{0}) { jet_rt_free(cursor, I64{40}, I64{8}) }
+}
+
+#Export(c) fn jet_range_contains(start: I64, end: I64, exclusive: U8, value: I64) -> Bool {
+    value >= start && (value < end || (exclusive == U8{0} && value == end))
+}

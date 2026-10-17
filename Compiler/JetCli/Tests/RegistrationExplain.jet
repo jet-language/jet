@@ -1,0 +1,20 @@
+// Actual Rust reference envelopes, plus the full non-writer fact/truth lookup.
+fn run() Never! {
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"explain\",\"ok\":true,\"reports\":[],\"code\":\"Flow\",\"stage\":\"registration table\",\"what\":\"attaches to a value.\",\"why\":\"facts tighten silently in the `gain` direction; loosening one is always written\",\"fix\":\"nothing loosens this row; read it and act on what it says\",\"example\":null}}\n"
+    flow :: jet_cli_explain_registration("Flow", false, true) ?? panic("registered Flow")
+    if flow == {
+        .Done(output) -> { if output.stdout != expected || output.stderr != "" || output.exit_code != 0 -> panic("Rust Flow envelope") }
+        else -> panic("Flow is an offline result")
+    }
+    if jet_cli_explain_registration("flow", false, true) != None -> panic("registration names are case sensitive")
+    if jet_cli_explain_registration("not_registered", false, false) != None -> panic("unknown names keep existing dispatch")
+    loop index in 0..<REGISTRATION_FACT_ROWS.len() {
+        explanation :: jet_cli_registration_fact_explanation(index)
+        if explanation.code != REGISTRATION_FACT_ROWS[index].name || explanation.stage != "registration table" || explanation.what == None || explanation.why == None || explanation.fix == None -> panic("every fact declaration explains itself")
+    }
+    loop index in 0..<REGISTRATION_TRUTH_ROWS.len() {
+        explanation :: jet_cli_registration_truth_explanation(index)
+        row :: REGISTRATION_TRUTH_ROWS[index] ?? panic("truth fixture iterates canonical rows")
+        if explanation.code != row.name || explanation.what == None || explanation.why == None || explanation.fix == None -> panic("every corpus truth names its home and guard")
+    }
+}

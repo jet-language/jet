@@ -23,7 +23,6 @@
 
     pub use super::AllocError;
     pub use super::jet_uninit_semantics::{JetUninit, JetUninitFixed};
-
     const DEFAULT_ARENA_BYTES: usize = 4096;
     const DEFAULT_BUMP_BYTES: usize = 64 * 1024;
     const DEFAULT_POOL_SLOTS: usize = 64;
@@ -150,6 +149,86 @@
         // SAFETY: the source gate owns the raw operation; the shared sentry
         // kernel has already observed the active allocation when on.
         unsafe { ptr.read() }
+    }
+
+    // The Jet-native backend's raw-pointer adapters (Lower/Pointers.jet): the
+    // same sentry kernel facts for a native storage size and alignment. They
+    // are C-ABI exports of a generated runtime (crate::jet_c_abi); the
+    // evaluator host (jet-evalhost, cfg jet_evalhost) includes this file
+    // without that module and exports nothing.
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_sentry_address_of(ptr: *const u8, bytes: usize) -> i64 {
+        crate::jet_c_abi::guard(|| {
+            jet_sentry_register_allocation(ptr.cast_mut(), bytes);
+            ptr as usize as i64
+        })
+    }
+
+    /// Validates a read of `bytes` at the word address `address` and returns
+    /// it as the pointer the native caller loads from.
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_sentry_read(address: i64, bytes: usize, align: usize) -> *const u8 {
+        crate::jet_c_abi::guard(|| {
+            if let Some(fault) = sentry_kernel::jet_sentry_check(address as usize, bytes, align, "read", "valid_ptr") {
+                jet_sentry_runtime_stop(fault);
+            }
+            address as usize as *const u8
+        })
+    }
+
+    // Rust-tier seed ABI only. Native packing defines these five exports in
+    // Compiler/JetRuntime/Source/Sentry.jet; this seed dies at Rust exit.
+    // The lowering lends a 64-byte align-8 save on both runtime paths.
+    const _: () = {
+        assert!(std::mem::size_of::<JetSentryGuard>() <= 64);
+        assert!(std::mem::align_of::<JetSentryGuard>() <= 8);
+    };
+
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_sentry_scope_enter(
+        save: *mut u8, enabled: i64, fenced: i64,
+        file: *const u8, file_len: usize, line: u32,
+        reason: *const u8, reason_len: usize,
+    ) {
+        crate::jet_c_abi::guard(|| {
+            // SAFETY: lowering lends checked UTF-8 module literals for the
+            // duration of this call, and a distinct aligned frame save.
+            let (file, reason) = unsafe {
+                (
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(file, file_len)),
+                    std::str::from_utf8_unchecked(std::slice::from_raw_parts(reason, reason_len)),
+                )
+            };
+            let gate = if fenced != 0 {
+                jet_sentry_fenced_scope(enabled != 0, file, line, reason)
+            } else {
+                jet_sentry_scope(enabled != 0, file, line, reason)
+            };
+            unsafe { save.cast::<JetSentryGuard>().write(gate) };
+        })
+    }
+
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_sentry_policy_enter(save: *mut u8, enabled: i64) {
+        crate::jet_c_abi::guard(|| {
+            // SAFETY: the caller-owned frame save is uninitialized and
+            // satisfies JetSentryGuard's statically asserted layout.
+            unsafe { save.cast::<JetSentryGuard>().write(jet_sentry_policy_scope(enabled != 0)) };
+        })
+    }
+
+    #[cfg(all(not(jet_native_pack), not(target_arch = "wasm32"), not(jet_evalhost)))]
+    #[no_mangle]
+    pub extern "C" fn jet_rt_sentry_scope_leave(save: *mut u8) {
+        crate::jet_c_abi::guard(|| {
+            // SAFETY: the matching ScopeEnter initialized this save once,
+            // and MIR's normal/stopped cleanup edges leave it exactly once.
+            unsafe { std::ptr::drop_in_place(save.cast::<JetSentryGuard>()) };
+        })
     }
 
     pub fn jet_sentry_volatile_read<T>(ptr: *const T, obligation: &str) -> T {

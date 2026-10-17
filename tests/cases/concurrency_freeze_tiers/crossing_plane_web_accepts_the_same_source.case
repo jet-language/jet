@@ -1,0 +1,9 @@
+# HAND-PORT tests/concurrency_freeze_tiers.rs:182 crossing_plane_web_accepts_the_same_source
+# PENDING-KIT; no historical failure captures blessed.
+# Original web artifact presence and exact js_app substring (crossing case only).
+fixture: crossing_plane_web_accepts_the_same_source.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.js is-file
+file: .jet/build/app.js ~ "jet_task_spawn" # original web.js_app predicate

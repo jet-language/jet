@@ -1,0 +1,25 @@
+use core.files as files
+use core.text.parse as parse
+
+// tests/jetpack_nix_eval_boundary.rs:55-81. Every committed pin and budget stays exact.
+#Test("oracle_pin_is_independent_from_mutable_root_flake_lock") {
+    oracle :: files.read("tests/fixtures/nix-compat/oracle.json") ?? panic("oracle manifest")
+    needles :: [String]{
+        "\"version\": \"2.34.8\"",
+        "b6769c588f60b3e762f73d3a8cf60294df078ccd",
+        "f3f1c3c5b8ad91850e0f7c590cf177f7ab022024",
+        "b5aa0fbd538984f6e3d201be0005b4463d8b09f8",
+        "\"last_modified\": 1782723713",
+        "sha256-oPXCU/SSUokcGaJREHibG1CBX3+s/W7orDWQOZDsEeQ=",
+        "\"corpus_status\": \"bit_exact\"",
+    }
+    loop needle in needles -> assert(oracle.contains(needle), "oracle lost {needle}")
+    assert_eq(parse.count(oracle, "\"build_nar_hash\": \""), 4)
+    assert_eq(parse.count(oracle, "\"executable_nar_hash\": \""), 4)
+    assert_eq(parse.count(oracle, "\"status\": \"ready\""), 4)
+    breadth :: files.read("tests/fixtures/nix-compat/breadth.json") ?? panic("breadth fixture")
+    fields :: [String]{"\"fuzz_seeds\"", "\"locks\"", "\"output_identities\"", "\"memory_bytes\": 16777216", "\"latency_micros\": 1000000"}
+    loop field in fields -> assert(breadth.contains(field), "breadth lost {field}")
+    stopline :: files.read("Tools/agent/verify-nix-eval-stopline.sh") ?? panic("stop-line")
+    assert(stopline.contains("breadth.json"))
+}

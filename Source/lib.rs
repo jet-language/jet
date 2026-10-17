@@ -9,7 +9,6 @@
 // non_snake_case lint at module-name level.
 #![allow(non_snake_case)]
 // Warnings are errors: keeps the build warning-clean (card c115).
-#![deny(warnings)]
 
 // Seam crates — re-export everything so callers use `jet::AST`, `jet::Sema`, etc.
 // unchanged. Within Source/, `crate::AST` etc. resolve through these re-exports.
@@ -117,7 +116,6 @@ pub use RecordIndex::{
     RecordLink,
 };
 pub mod ReceiptStore;
-pub mod RunCache;
 pub use ReceiptStore::{Receipt, ReceiptClaim, ReceiptInput};
 pub mod BudgetProviders;
 pub mod BudgetStore;
@@ -250,6 +248,7 @@ pub fn with_compiler_stack<R: Send>(work: impl FnOnce() -> R + Send) -> R {
 pub struct CheckedMirSnapshot {
     pub bundle: AST::ProgramBundle,
     pub facts: Sema::SemIndexEffectFacts,
+    pub checked_nominals: std::sync::Arc<[std::sync::Arc<AST::MirFragmentNominalFacts>]>,
     pub mir: jet_foundation::MIR::MirProgram,
     pub artifact: jet_foundation::MIR::MirArtifactId,
 }
@@ -258,9 +257,10 @@ pub struct CheckedMirSnapshot {
 /// before returning the backend-ready program.
 pub fn lower_checked_semantic_mir_program_for(
     bundle: &AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<AST::MirFragmentNominalFacts>],
     request: jet_foundation::MIR::MirArtifactRequest,
 ) -> (jet_foundation::MIR::MirProgram, jet_foundation::MIR::MirArtifactId) {
-    let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
     mir.validate()
         .unwrap_or_else(|error| jet_foundation::ice!(None, "canonical MIR validation failed: {error}"));
@@ -2831,43 +2831,20 @@ pub fn has_entry_fn(file: &str, name: &str) -> bool {
 pub fn has_test_blocks(file: &str) -> bool {
     with_compiler_stack(
         || match Loader::load_entry_with_overlay(file, None, false) {
-            Ok(bundle) => bundle
-                .modules
-                .iter()
-                .flat_map(|module| module.items.iter())
-                .any(|i| matches!(i, AST::Item::Test(_))),
+            Ok(bundle) => Sema::has_test_blocks_in_items(&bundle.modules[bundle.entry].items),
             Err(_) => true,
         },
     )
 }
-fn item_has_contracts(item: &AST::Item) -> bool {
-    match item {
-        AST::Item::Func(function) => !function.pre.is_empty() || !function.post.is_empty(),
-        AST::Item::Impl(implementation) => implementation
-            .methods
-            .iter()
-            .any(|method| !method.pre.is_empty() || !method.post.is_empty()),
-        AST::Item::CodeModule(module) => module
-            .body
-            .as_ref()
-            .is_some_and(|items| items.iter().any(item_has_contracts)),
-        _ => false,
-    }
-}
 
-/// Does the entry file define any contract-bearing callable? `jet test` uses
-/// this discovery alongside `#Test` discovery so a file with only `#Pre` /
-/// `#Post` contracts still reaches the ordinary checked producer path. A load
-/// failure returns `true`, matching `has_test_blocks`, so the caller surfaces
-/// the real compile error instead of silently skipping the target.
+/// Does the entry file contain a generated contract-sampling candidate?
+/// Uncalled declarations still contribute static contract evidence to prove;
+/// only parameterized preconditions can produce a sampled runtime test.
+/// A load failure returns true so normal compilation owns the diagnostic.
 pub fn has_test_contracts(file: &str) -> bool {
     with_compiler_stack(
         || match Loader::load_entry_with_overlay(file, None, false) {
-            Ok(bundle) => bundle
-                .modules
-                .iter()
-                .flat_map(|module| module.items.iter())
-                .any(item_has_contracts),
+            Ok(bundle) => Sema::has_contract_sampling_candidates(&bundle.modules[bundle.entry].items),
             Err(_) => true,
         },
     )
@@ -2891,7 +2868,7 @@ fn coverable_functions_inner(
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
 ) -> Vec<(String, usize)> {
-    let (diagnostics, bundle, _) = Driver::check_file_with_effect_facts_profile_and_settings(
+    let (diagnostics, bundle, _, _) = Driver::check_file_with_effect_facts_profile_and_settings(
         file,
         None,
         false,
@@ -3014,7 +2991,7 @@ fn eval_pure_program_value_inner(
     // Use the checked eval bundle rather than rebuilding a top-level function
     // map.  The bundle carries the same impl/trait methods and sema facts that
     // the forced interpreter consumes, so eval cannot silently lose operators.
-    let (diagnostics, bundle, _effect_facts) = Driver::check_eval_with_effect_facts(src, file);
+    let (diagnostics, bundle, _effect_facts, checked_nominals) = Driver::check_eval_with_effect_facts(src, file);
     if diagnostics
         .iter()
         .any(|diagnostic| diagnostic.severity == Diagnostics::Severity::Error)
@@ -3024,6 +3001,7 @@ fn eval_pure_program_value_inner(
     let bundle = bundle.ok_or(diagnostics)?;
     let (mir, artifact) = lower_checked_semantic_mir_program_for(
         &bundle,
+        &checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::Interpreter,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,

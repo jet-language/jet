@@ -1,0 +1,162 @@
+// Exact compiler-value contract from Collections.rs::build_context_method_*.
+// This table is arity-polymorphic; Core owns the session semantics, not sema.
+use jet_foundation.[AccessConvention, CallArg, Diagnostic, Expr, NamedCtValue, ParamZone, Span, TExpr, TExprKind, THostCall, TStrPart, Type, ast_program]
+use jet_parser.jfmt_format_program_with_tokens
+use jet_foundation.Token
+
+struct SemaBuildContextMethodContract {
+    parameters: [Type]
+    result: Type
+}
+
+fn sema_build_result(name: String) -> Type Never! {
+    Type.Result{ok: Type.Named{name: name}, err: Type.Named{name: "BuildError"}}
+}
+
+fn sema_build_context_method_contract(method: String, arity: Int) -> SemaBuildContextMethodContract? {
+    strings :: Type.List{element: Type.String}
+    action :: Type.Named{name: "BuildAction"}
+    target :: Type.Named{name: "BuildTarget"}
+    toolchain :: Type.Named{name: "BuildToolchain"}
+    signing :: Type.Named{name: "BuildSigningIdentity"}
+    probes :: Type.List{element: Type.Named{name: "BuildProbe"}}
+    parameters := [Type]{}
+    result := Type.Named{name: "Unit"}
+    if {
+        method == "generate" && arity == 2 -> {
+            parameters = [Type]{Type.String}
+            result = sema_build_result("Unit")
+        }
+        (method == "find" || method == "embed") && arity == 1 -> {
+            parameters = [Type]{Type.String}
+            result = if method == "find" -> strings else -> Type.String
+        }
+        (method == "fetch" || method == "plugin") && arity == 2 -> {
+            parameters = [Type]{Type.String, Type.String}
+            result = if method == "fetch" -> Type.Result{ok: Type.String, err: Type.Named{name: "BuildError"}} else -> sema_build_result("Unit")
+        }
+        method == "contribute" && arity == 2 -> parameters = [Type]{Type.String}
+        method == "action" && (arity == 5 || (arity >= 7 && arity <= 15)) -> {
+            parameters = [Type]{Type.String, strings, strings, strings, strings}
+            trailing :: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String}
+            loop index in 0..<arity - 5 -> &parameters.push(trailing[index])
+            result = sema_build_result("BuildAction")
+        }
+        method == "legacy" && arity >= 6 && arity <= 17 -> {
+            parameters = [Type]{Type.String, Type.String, strings, strings, strings, strings}
+            trailing :: [Type]{toolchain, probes, signing, Type.String, strings, strings, strings, strings, strings, Type.String, Type.String}
+            loop index in 0..<arity - 6 -> &parameters.push(trailing[index])
+            result = sema_build_result("BuildAction")
+        }
+        sema_build_context_target_method(method) && arity >= 3 && arity <= 7 -> {
+            parameters = [Type]{Type.String, strings, Type.List{element: action}}
+            trailing :: [Type]{Type.List{element: target}, probes, toolchain, signing}
+            loop index in 0..<arity - 3 -> &parameters.push(trailing[index])
+            result = sema_build_result("BuildTarget")
+        }
+        method == "toolchain" && arity >= 2 && arity <= 6 -> {
+            loop _ in 0..<arity -> &parameters.push(Type.String)
+            result = sema_build_result("BuildToolchain")
+        }
+        method == "signing" && arity == 2 -> {
+            parameters = [Type]{Type.String, Type.String}
+            result = sema_build_result("BuildSigningIdentity")
+        }
+        method == "probe" && arity >= 3 && arity <= 6 -> {
+            parameters = [Type]{Type.String, Type.String, Type.String}
+            if arity == 6 {
+                &parameters.push(Type.String)
+                &parameters.push(Type.String)
+                &parameters.push(toolchain)
+            } else {
+                union :: Type.Union{members: [Type]{Type.String, toolchain}}
+                loop _ in 3..<arity -> &parameters.push(union)
+            }
+            result = sema_build_result("BuildProbe")
+        }
+        method == "error" && arity == 5 -> parameters = [Type]{Type.Named{name: "SourceSpan"}, Type.String, Type.String, Type.String, Type.String}
+        method == "plan" && (arity == 0 || arity == 1) -> {
+            if arity == 1 -> &parameters.push(target)
+            result = sema_build_result("BuildPlan")
+        }
+        else -> return None
+    }
+    Val(SemaBuildContextMethodContract{parameters: parameters, result: result})
+}
+
+fn sema_build_context_target_method(method: String) -> Bool Never! {
+    method == "add_executable" || method == "add_library" || method == "add_test" || method == "add_asset_bundle" || method == "add_doc" || method == "add_install" || method == "add_package" || method == "add_publish"
+}
+
+fn sema_build_context_arity_description(method: String) -> String Never! {
+    if method == "action" -> return "5 or 7 to 15"
+    if method == "legacy" -> return "6 to 17"
+    if sema_build_context_target_method(method) -> return "3 to 7"
+    if method == "toolchain" -> return "2 to 6"
+    if method == "probe" -> return "3 to 6"
+    if method == "plan" -> return "0 or 1"
+    if method == "find" || method == "embed" -> return "1"
+    if method == "error" -> return "5"
+    "2"
+}
+
+fn sema_call_try_build_context_method(receiver: Expr, receiver_value: TExpr, method: String, args: [CallArg], span: Span, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> SemaMethodSpecialCheck {
+    if receiver_value.ty != (Type.Named{name: "BuildContext"}) -> return SemaMethodSpecialCheck{handled: false, value: None}
+    failed :: SemaMethodSpecialCheck{handled: true, value: None}
+    contract :: sema_build_context_method_contract(method, args.len()) ?? {
+        loop argument in args {
+            if argument.flags.template_items == None -> _ := sema_check_expression(argument.expr, None, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
+        }
+        &diagnostics.push(sema_error("E0104", span, "`BuildContext.{method}` expects {sema_build_context_arity_description(method)} arguments, got {args.len()}", "build methods have one canonical base shape and typed trailing controls", "pass the arguments accepted by `b.{method}`"))
+        return failed
+    }
+    template_count := 0
+    loop argument in args {
+        if argument.flags.template_items != None -> template_count += 1
+    }
+    if method == "generate" && template_count != 1 {
+        &diagnostics.push(sema_error("E3502", span, "`b.generate` requires a name followed by a typed item block", "generated bodies are Jet items checked by the ordinary semantic path", "write `b.generate(\"name\") {{ ... }}?`; source strings are retired"))
+        return failed
+    }
+    if method != "generate" && template_count > 0 -> return failed
+    values := [TExpr]{}
+    params := [SemaCallParam]{}
+    ordinary := [CallArg]{}
+    loop argument in args {
+        if argument.flags.template_items != None -> next
+        &ordinary.push(argument)
+        required := Type?{None}
+        if ordinary.len() <= contract.parameters.len() -> required = Val(contract.parameters[ordinary.len() - 1])
+        value :: sema_check_expression(argument.expr, required, environment, program, &scopes, &state, &tail_store, &context, &diagnostics) ?? return failed
+        if required == .Val(ty) {
+            compatible :: sema_call_type_assignable(ty, value.ty, environment, program) ?? return failed
+            if !compatible {
+                &diagnostics.push(sema_type_mismatch(ty, value.ty, argument.span))
+                return failed
+            }
+        }
+        if argument.label != None || argument.spread {
+            &diagnostics.push(sema_error("E0764", argument.span, "`BuildContext.{method}` takes positional arguments", "the build method contract does not declare labels or variadic slots", "remove the label or spread from this argument"))
+            return failed
+        }
+        &values.push(value)
+        &params.push(SemaCallParam{label: "", name: "", zone: ParamZone.PositionalOnly, default: None, default_ref: None, convention: AccessConvention.Read, ty: Val(value.ty), variadic: false})
+    }
+    ownership :: sema_ownership_check_method_call(&state, "BuildContext.{method}", receiver, AccessConvention.Read, params, &ordinary, scopes, span, &diagnostics)
+    if !ownership.accepted || !ownership.complete -> return failed
+    if method == "generate" {
+        // Rust lower_build_generate also expands/formats the typed body under
+        // an empty compile-time scope before sending private host payload text.
+        loop argument in args {
+            if argument.flags.template_items == .Val(body) {
+                items :: sema_derive_expand_template_body(body, [NamedCtValue]{}, &diagnostics) ?? return failed
+                generated_program := ast_program()
+                generated_program.items = items
+                source :: jfmt_format_program_with_tokens(generated_program, "", [Token]{}, false)
+                &values.push(sema_tir_node(Type.String, TExprKind.StrLit{parts: [TStrPart]{TStrPart.Literal{text: source}}}, argument.span))
+            }
+        }
+    }
+    value :: sema_tir_node(contract.result, TExprKind.HostCall{call: THostCall.Method{receiver: receiver_value, method: method, args: values}}, span)
+    SemaMethodSpecialCheck{handled: true, value: sema_expr_expected(value, expected, environment, program, &diagnostics)}
+}

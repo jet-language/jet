@@ -1,0 +1,48 @@
+// Terminal8Raw.rs:19 and IoLineStream.rs:79: locked stdin read_to_string,
+// publishing either owned UTF-8 text or empty text plus an owned IO error.
+terminal_input_root := I64{0}
+// runtime-init: 4
+#Export(c) fn jet_rt_terminal_input_init() {
+    if (terminal_input_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{8}, I64{8})
+    thread_zero(root, I64{8})
+    terminal_input_root = root
+}
+// Tuple<String, Option<String>>: text, optional-error tag and payload slots.
+#Export(c) fn jet_terminal8_read_all(output: I64, error_tag: I64, error: I64) {
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    value :: jet_rt_string_builder_new()
+    scratch :: jet_rt_alloc(I64{4096}, I64{8})
+    failure := I64{0}
+    sync_mutex_lock(terminal_input_root)
+    loop {
+        got := I64{0}
+        #Unsafe("the writable stdin chunk buffer lives through a raw Linux read") {
+            got = os_syscall_i64(I64{0}, I64{0}, scratch, I64{4096}, I64{0}, I64{0}, I64{0})
+        }
+        if (got == I64{-4}) -> next
+        if (got == I64{0}) -> break
+        if (got < I64{0}) {
+            failure = host_errno_cause(-got)
+            break
+        }
+        rt_text_append(value, scratch, got)
+    }
+    sync_mutex_unlock(terminal_input_root)
+    jet_rt_free(scratch, I64{4096}, I64{8})
+    invalid :: text_bytes_utf8_error(rt_text_data(value), rt_text_len(value))
+    if (invalid != I64{0}) {
+        jet_rt_string_drop(invalid)
+        if (failure != I64{0}) -> jet_rt_string_drop(failure)
+        failure = jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8"))
+    }
+    if (failure != I64{0}) {
+        jet_rt_string_drop(value)
+        rt_text_store(output, jet_rt_string_builder_new())
+        rt_text_store(error_tag, I64{1})
+        rt_text_store(error, failure)
+    } else {
+        rt_text_store(output, value)
+        rt_text_store(error_tag, I64{0})
+    }
+}

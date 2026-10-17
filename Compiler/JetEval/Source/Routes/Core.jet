@@ -6,6 +6,7 @@ use jet_foundation.[
     CoreCallInterpreterRoute,
     CoreCallPureRoute,
     MIRCallFallibility,
+    Effect,
     MIRCoreCall,
     MIRCoreCallID,
     MIRPreludeABI,
@@ -13,14 +14,22 @@ use jet_foundation.[
     MIRPreludeFamily,
     MIRType,
     Span,
+    TComptimeEnumArg,
     TComptimeField,
     TComptimeValue,
+    diagnostic_from_registry,
+    diagnostic_registry_row,
+    diagnostic_with_rights,
     mir_symbol_name,
 ]
 
 fn jet_eval_route_core_symbol(row: MIRCoreCall, machine: &JetEvalMachine, span: Span) -> String? {
     if row.symbol == {
         .Prelude(name) -> Val(name)
+        .SourceOwned -> {
+            jet_eval_compiler_fail(&machine, span, "source-owned Core declaration reached a host route")
+            None
+        }
         else -> {
             jet_eval_unsupported(&machine, span, "Core route does not carry a Prelude symbol")
             None
@@ -30,6 +39,12 @@ fn jet_eval_route_core_symbol(row: MIRCoreCall, machine: &JetEvalMachine, span: 
 
 fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [JetEvalRuntimeValue], fallibility: MIRCallFallibility, result_ty: MIRType?, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
+    if row.module_name == "core.math" && row.member == "__numeric_stop" {
+        if data.len() != 1 -> return jet_eval_route_not_supported(&machine, span, "numeric stop ABI")
+        message :: jet_eval_route_string(data[0]) ?? return jet_eval_route_not_supported(&machine, span, "numeric stop message")
+        jet_eval_source_fail(&machine, span, message)
+        return None
+    }
     if row.module_name == "core.math" && row.member == "fraction" {
         if data.len() != 2 {
             jet_eval_compiler_fail(&machine, span, "core.math.fraction requires numerator and denominator")
@@ -62,59 +77,44 @@ fn jet_eval_route_core_math(row: MIRCoreCall, data: [TComptimeValue], args: [Jet
             bits :: jet_eval_route_core_wrapping_bits(data[0], &machine, span) ?? return None
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Float{value: math.from_bits(bits), bits: 64}})
         }
-        // Host Float predicates (plain_calls `is_nan`/`is_infinite`/`is_finite`
-        // and the classification rows).
-        "jet_std_math_is_nan" | "jet_std_math_is_infinite" | "jet_std_math_is_finite" | "jet_std_math_is_normal" | "jet_std_math_is_subnormal" | "jet_std_math_is_signed" | "jet_std_math_sign_bit" | "jet_std_math_is_zero" | "jet_std_math_is_integer" -> {
+        "jet_std_math_cmp" -> {
+            left :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
+            right :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: math.cmp(left, right)}})
+        }
+        "jet_std_math_is_nan" | "jet_std_math_is_infinite" | "jet_std_math_is_finite" -> {
             number :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
-            flag :: if symbol == {
-                "jet_std_math_is_nan" -> math.is_nan(number)
-                "jet_std_math_is_infinite" -> math.is_inf(number)
-                "jet_std_math_is_finite" -> math.is_finite(number)
-                "jet_std_math_is_normal" -> math.is_normal(number)
-                "jet_std_math_is_subnormal" -> math.is_subnormal(number)
-                "jet_std_math_is_signed" | "jet_std_math_sign_bit" -> math.is_signed(number)
-                "jet_std_math_is_zero" -> number == 0.0
-                else -> math.is_integer(number)
+            flag :: if {
+                symbol == "jet_std_math_is_nan" -> math.is_nan(number)
+                symbol == "jet_std_math_is_infinite" -> math.is_inf(number)
+                else -> math.is_finite(number)
             }
             Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: flag}})
         }
         "jet_std_math_sin" | "jet_std_math_cos" | "jet_std_math_tan" | "jet_std_math_asin" | "jet_std_math_acos" | "jet_std_math_atan" | "jet_std_math_sinh" | "jet_std_math_cosh" | "jet_std_math_tanh" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
         "jet_std_math_exp" | "jet_std_math_ln" | "jet_std_math_log2" | "jet_std_math_log10" | "jet_std_math_acosh" | "jet_std_math_asinh" | "jet_std_math_atanh" | "jet_std_math_cbrt" | "jet_std_math_exp2" | "jet_std_math_exp_m1" | "jet_std_math_ln_1p" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
-        "jet_std_math_degrees" | "jet_std_math_radians" | "jet_std_math_floor" | "jet_std_math_ceil" | "jet_std_math_trunc" | "jet_std_math_fract" | "jet_std_math_signum" | "jet_std_math_sqrt" | "jet_std_math_next_up" | "jet_std_math_next_down" | "jet_std_math_cot" | "jet_std_math_inv" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
-        // plain_calls `is_canonical`, `sin_cos`, `modf`, `fma`, `lerp`.
-        "jet_std_math_is_canonical" -> {
+        "jet_std_math_floor" | "jet_std_math_ceil" | "jet_std_math_trunc" | "jet_std_math_sqrt" -> jet_eval_route_core_float_result(jet_eval_route_core_unary(symbol, jet_eval_route_core_float(data, 0, &machine, span) ?? return None))
+        "jet_std_math_sin_cos" -> {
             number :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
-            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Bool{value: math.is_finite(number) || math.is_nan(number)}})
-        }
-        "jet_std_math_sin_cos" | "jet_std_math_modf" -> {
-            number :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
-            first_name :: if symbol == "jet_std_math_sin_cos" -> "sin" else -> "fract"
-            second_name :: if symbol == "jet_std_math_sin_cos" -> "cos" else -> "whole"
-            first :: if symbol == "jet_std_math_sin_cos" -> math.sin(number) else -> math.fract(number)
-            second :: if symbol == "jet_std_math_sin_cos" -> math.cos(number) else -> math.trunc(number)
-            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Struct{type_name: "({first_name},{second_name})", fields: [TComptimeField]{
-                TComptimeField{name: first_name, value: TComptimeValue.Float{value: first, bits: 64}},
-                TComptimeField{name: second_name, value: TComptimeValue.Float{value: second, bits: 64}},
+            pair :: math.sin_cos(number)
+            Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Struct{type_name: "(sin,cos)", fields: [TComptimeField]{
+                TComptimeField{name: "sin", value: TComptimeValue.Float{value: pair.sin, bits: 64}},
+                TComptimeField{name: "cos", value: TComptimeValue.Float{value: pair.cos, bits: 64}},
             }}})
         }
-        "jet_std_math_fma" | "jet_std_math_lerp" -> {
+        "jet_std_math_fma" -> {
             first :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
             second :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
             third :: jet_eval_route_core_float(data, 2, &machine, span) ?? return None
-            jet_eval_route_core_float_result(if symbol == "jet_std_math_fma" -> math.fma(first, second, third) else -> math.lerp(first, second, third))
+            jet_eval_route_core_float_result(math.fma(first, second, third))
         }
-        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_copysign" | "jet_std_math_log" | "jet_std_math_pow" | "jet_std_math_fmod" | "jet_std_math_remainder" | "jet_std_math_next_after" -> {
+        "jet_std_math_atan2" | "jet_std_math_hypot" | "jet_std_math_fmod" -> {
             left :: jet_eval_route_core_float(data, 0, &machine, span) ?? return None
             right :: jet_eval_route_core_float(data, 1, &machine, span) ?? return None
             result :: if symbol == {
                 "jet_std_math_atan2" -> math.atan2(left, right)
                 "jet_std_math_hypot" -> math.hypot(left, right)
-                "jet_std_math_copysign" -> math.copysign(left, right)
-                "jet_std_math_log" -> math.log(left, right)
-                "jet_std_math_pow" -> math.pow(left, right)
-                "jet_std_math_fmod" -> math.fmod(left, right)
-                "jet_std_math_remainder" -> math.remainder(left, right)
-                else -> math.next_after(left, right)
+                else -> math.fmod(left, right)
             }
             jet_eval_route_core_float_result(result)
         }
@@ -224,44 +224,41 @@ fn jet_eval_route_core_unary(symbol: String, number: Float) -> Float Never! {
         "jet_std_math_exp2" -> math.exp2(number)
         "jet_std_math_exp_m1" -> math.exp_m1(number)
         "jet_std_math_ln_1p" -> math.ln_1p(number)
-        "jet_std_math_degrees" -> math.degrees(number)
-        "jet_std_math_radians" -> math.radians(number)
         "jet_std_math_floor" -> math.floor(number)
         "jet_std_math_ceil" -> math.ceil(number)
         "jet_std_math_trunc" -> math.trunc(number)
-        "jet_std_math_fract" -> math.fract(number)
-        "jet_std_math_signum" -> math.signum(number)
-        "jet_std_math_sqrt" -> math.sqrt(number)
-        "jet_std_math_next_up" -> math.next_up(number)
-        "jet_std_math_next_down" -> math.next_down(number)
-        "jet_std_math_cot" -> math.cot(number)
-        else -> math.inv(number)
+        else -> math.sqrt(number)
     }
+}
+
+// MIREval `eval_core_call` (D-DET1 / D-CTEFFECT1): compile-time evaluation
+// runs only Core calls whose effect row is empty, memory and panics aside.
+// Ambient time or randomness is E3403; any other effect is observable outside
+// the program, so folding it would bake one build-time result into every run
+// (E3410). False after recording the refusal.
+fn jet_eval_route_core_comptime_effect_allowed(row: MIRCoreCall, machine: &JetEvalMachine, span: Span) -> Bool {
+    kind :: row.effect_kind ?? return true
+    if kind == Effect.Mem || kind == Effect.Panic -> return true
+    if machine.failure != None -> return false
+    if kind == Effect.Time || kind == Effect.Rand {
+        segments :: row.module_name.split(".").to_list()
+        api :: "{segments[segments.len() - 1]}.{row.member}"
+        entry :: diagnostic_registry_row("E3403") ?? panic("E3403 has no registry row")
+        refusal :: diagnostic_from_registry("E3403", Val(span), entry.what.replace("{{what}}", api), entry.why, entry.fix)
+        machine.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_with_rights(refusal, "pure", [String]{api}, [String]{}, None)})
+        return false
+    }
+    machine.failure = Val(JetEvalError{kind: JetEvalErrorKind.Effect, diagnostic: diagnostic_from_registry("E3410", Val(span), "`{row.module_name}.{row.member}` is a Tier-2 comptime effect — it requires a `#Impure` gate", "effectful Core APIs are not allowed in pure comptime evaluation", "wrap the comptime binding in `#Impure(\"reason\") {{ … }}` and pass `--gate impure=allow` to the build, or keep the call at runtime")})
+    false
 }
 
 fn jet_eval_route_core(machine: &JetEvalMachine, call: MIRCoreCallID, route: MIRPreludeCallID, args: [JetEvalRuntimeValue], type_args: [MIRType], fallibility: MIRCallFallibility, result_ty: MIRType?, span: Span) -> JetEvalRuntimeValue? {
     row :: jet_eval_route_core_row(&machine, call, span) ?? return None
     route_row :: jet_eval_route_prelude_row(&machine, route, span) ?? return None
     symbol :: jet_eval_route_core_symbol(row, &machine, span) ?? return None
-    if row.module_name == "core.term" && row.member == "eprint" {
-        if symbol != "jet_std_io_eprint" || row.arity != 1 || row.max_arity != 1 || row.borrow_mask.len() != 1 || !row.borrow_mask[0] || route_row.family != MIRPreludeFamily.StaticPrelude || route_row.module_name != "core.term" || route_row.member != "eprint" || mir_symbol_name(route_row.symbol) != "jet_std_io_eprint" || route_row.abi != MIRPreludeABI.Value || route_row.signature.arity != 1 || route_row.signature.max_arity != 1 || route_row.signature.borrow_mask.len() != 1 || !route_row.signature.borrow_mask[0] || route_row.fallibility != MIRCallFallibility.Infallible {
-            jet_eval_compiler_fail(&machine, span, "MIR eprint route has non-canonical metadata")
-            return None
-        }
-        if !jet_eval_route_signature_core(row, args.len(), &machine, span) -> return None
-        if !machine.config.runtime_execution {
-            jet_eval_effect_fail(&machine, span, "core.term.eprint")
-            return None
-        }
-        data :: jet_eval_route_args(args, &machine, span) ?? return None
-        if data.len() != 1 {
-            jet_eval_compiler_fail(&machine, span, "MIR eprint route requires one String argument")
-            return None
-        }
-        return jet_eval_host_row(&machine, route_row, args, result_ty, span)
-    }
     if route_row.abi == MIRPreludeABI.Control || route_row.abi == MIRPreludeABI.Effect -> return jet_eval_route_not_supported(&machine, span, "Core route references a non-value Prelude route")
     if !jet_eval_route_signature_core(row, args.len(), &machine, span) -> return None
+    if !machine.config.runtime_execution && !jet_eval_route_core_comptime_effect_allowed(row, &machine, span) -> return None
     // MIREval `eval_core_call_binding`: runtime evaluation takes the ambient
     // adapter; comptime evaluation of a row that also carries a pure
     // descriptor takes the pure dispatcher, and only ambient-only rows are an
@@ -295,6 +292,13 @@ fn jet_eval_route_core(machine: &JetEvalMachine, call: MIRCoreCallID, route: MIR
 
         output :: jet_eval_host_row_with_moves(&machine, route_row, args, result_ty, move_permissions, span) ?? return None
         return Val(jet_eval_route_success(output, fallibility))
+    }
+    if row.module_name == "core.data.plot" && row.member == "__plot_aggregate_none" && row.interpreter_route == CoreCallInterpreterRoute.TypedIntrinsic {
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Enum{type_name: "JetDataPlotAggregate", variant: "None", args: [TComptimeEnumArg]{}}})
+    }
+    if row.module_name == "core.encoding" && row.member == "__edition" {
+        year :: Int.parse(machine.program.facts.edition) ?? return jet_eval_route_not_supported(&machine, span, "resolved package edition is not an integer")
+        return Val(JetEvalRuntimeValue.Data{value: TComptimeValue.Int{value: year}})
     }
     if row.interpreter_route == CoreCallInterpreterRoute.TypedIntrinsic && jet_eval_route_core_encoding_module(row.module_name) {
         data :: jet_eval_route_args(args, &machine, span) ?? return None

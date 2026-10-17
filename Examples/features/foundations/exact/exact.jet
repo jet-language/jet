@@ -1,20 +1,20 @@
 use core.math as math
 
 #Codable
-pub struct Rational {
-    pub numerator: Int
-    pub denominator: Int
+struct Rational {
+    numerator: Int
+    denominator: Int
 }
 
 #Codable
-pub struct BuiltInExact {
-    pub amount: Decimal
-    pub whole: Int
+struct BuiltInExact {
+    amount: Decimal
+    whole: Int
 }
 
 // Construction is the one fallible boundary. Arithmetic below keeps the
 // reduced representation invariant without routing through this helper.
-pub fn rational(numerator: Int, denominator: Int) -> Rational? {
+fn rational(numerator: Int, denominator: Int) -> Rational? {
     if denominator == 0 -> return None
     gcd :: math.gcd(numerator, denominator)
     n :: numerator /% gcd
@@ -40,7 +40,7 @@ impl Rational.Add {
     }
 }
 
-impl Rational.Add {
+impl Rational.Add(Int) #Commutative {
     fn add(self, rhs: Int) -> Rational { Rational{
         numerator: self.numerator + rhs * self.denominator,
         denominator: self.denominator,
@@ -59,7 +59,7 @@ impl Rational.Sub {
     }
 }
 
-impl Rational.Sub {
+impl Rational.Sub(Int) {
     fn sub(self, rhs: Int) -> Rational {
         return Rational{
             numerator: self.numerator - rhs * self.denominator,
@@ -80,7 +80,7 @@ impl Rational.Mul {
     }
 }
 
-impl Rational.Mul {
+impl Rational.Mul(Int) #Commutative {
     fn mul(self, rhs: Int) -> Rational {
         numerator :: self.numerator * rhs
         denominator :: self.denominator
@@ -105,7 +105,7 @@ impl Rational.Div {
     }
 }
 
-impl Rational.Div {
+impl Rational.Div(Int) {
     fn div(self, rhs: Int) -> Rational {
         if rhs == 0 -> panic("division by zero")
         numerator :: self.numerator
@@ -139,9 +139,9 @@ impl Rational.Display {
 }
 
 #Codable
-pub struct ScaledDecimal {
-    pub coefficient: Int
-    pub scale: Int
+struct ScaledDecimal {
+    coefficient: Int
+    scale: Int
 }
 
 impl ScaledDecimal.Literal.Float {
@@ -204,7 +204,7 @@ impl ScaledDecimal.Add {
     }
 }
 
-impl ScaledDecimal.Add {
+impl ScaledDecimal.Add(Int) #Commutative {
     fn add(self, rhs: Int) -> ScaledDecimal {
         factor := 1
         power_index := 0
@@ -247,7 +247,7 @@ impl ScaledDecimal.Mul {
     } }
 }
 
-impl ScaledDecimal.Mul {
+impl ScaledDecimal.Mul(Int) #Commutative {
     fn mul(self, rhs: Int) -> ScaledDecimal { ScaledDecimal{
         coefficient: self.coefficient * rhs,
         scale: self.scale,
@@ -314,15 +314,15 @@ impl ScaledDecimal.Display {
     fn display(self) -> String { "{self.coefficient}e-{self.scale}" }
 }
 
-pub enum Rounding {
+enum Rounding {
     Down
     Up
     HalfUp
 }
 
 #Codable
-pub struct Money {
-    pub cents: Int
+struct Money {
+    cents: Int
 }
 
 impl Money.Literal.Int {
@@ -333,7 +333,7 @@ impl Money.Add {
     fn add(self, rhs: Money) -> Money { Money{cents: self.cents + rhs.cents} }
 }
 
-impl Money.Add {
+impl Money.Add(Int) #Commutative {
     fn add(self, rhs: Int) -> Money { Money{cents: self.cents + rhs} }
 }
 
@@ -341,15 +341,15 @@ impl Money.Sub {
     fn sub(self, rhs: Money) -> Money { Money{cents: self.cents - rhs.cents} }
 }
 
-impl Money.Sub {
+impl Money.Sub(Int) {
     fn sub(self, rhs: Int) -> Money { Money{cents: self.cents - rhs} }
 }
 
-impl Money.Mul {
+impl Money.Mul(Int) #Commutative {
     fn mul(self, rhs: Int) -> Money { Money{cents: self.cents * rhs} }
 }
 
-impl Money.Div {
+impl Money.Div(Int) {
     fn div(self, rhs: Int) -> Money {
         if rhs == 0 -> panic("money division by zero")
         return Money{cents: self.cents /% rhs}
@@ -372,7 +372,7 @@ impl Money.Display {
     fn display(self) -> String { "{self.cents} cents" }
 }
 
-pub fn round_tax(amount: Money, basis_points: Int, mode: Rounding) -> Money {
+fn round_tax(amount: Money, basis_points: Int, mode: Rounding) -> Money {
     scaled :: amount.cents * basis_points
     whole := scaled /% 10000
     remainder :: scaled % 10000
@@ -381,28 +381,28 @@ pub fn round_tax(amount: Money, basis_points: Int, mode: Rounding) -> Money {
     return Money{cents: whole}
 }
 
-pub fn pair_add<T: Add>(left: T, right: T) -> T { left + right }
+fn pair_add<T: Add>(left: T, right: T) -> T { left + right }
 
-pub fn largest<T: Comparable>(values: [T]) -> T? {
+fn largest<T: Comparable>(values: [T]) -> T? {
     if values.len() == 0 -> return None
-    best := ~values[0]
+    best := values[0].copy()
     index := 1
     loop index < values.len() {
-        if values[index] > best -> best = ~values[index]
+        if values[index] > best -> best = values[index].copy()
         index += 1
     }
     return Val(best)
 }
 
-pub fn accept_rational(value: Rational) -> Rational { value }
+fn accept_rational(value: Rational) -> Rational { value }
 
-pub fn accept_decimal(value: ScaledDecimal) -> ScaledDecimal { value }
+fn accept_decimal(value: ScaledDecimal) -> ScaledDecimal { value }
 
-pub fn accept_money(value: Money) -> Money { value }
+fn accept_money(value: Money) -> Money { value }
 
-pub fn add_decimals(left: ScaledDecimal, right: ScaledDecimal) -> ScaledDecimal { left + right }
+fn add_decimals(left: ScaledDecimal, right: ScaledDecimal) -> ScaledDecimal { left + right }
 
-pub fn million_money() -> Money {
+fn million_money() -> Money {
     total := Money{cents: 0}
     loop i in 0..<1_000_000 -> total += Money{cents: i % 100}
     return total

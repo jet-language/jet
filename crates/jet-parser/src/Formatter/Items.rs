@@ -294,9 +294,9 @@ impl<'a> Fmt<'a> {
 
     pub(super) fn fmt_item(&mut self, item: &Item) {
         match item {
-            Item::Func(f) => self.fmt_func(f, true),
-            Item::Struct(s) => self.fmt_struct(s, true),
-            Item::Enum(e) => self.fmt_enum(e, true),
+            Item::Func(f) => self.fmt_func(f),
+            Item::Struct(s) => self.fmt_struct(s),
+            Item::Enum(e) => self.fmt_enum(e),
             Item::Impl(i) => {
                 // External-method sugar (`fn Type.method(…) :[]>`) is
                 // normalized to an ImplDef by the parser. Its AST deliberately
@@ -336,9 +336,6 @@ impl<'a> Fmt<'a> {
             Item::Trait(t) => self.fmt_trait(t),
             // D-QUAL2: tag declarations are emitted verbatim (non-destructive).
             Item::Tag(t) => {
-                // `TagDef::span` starts at `tag`; visibility is parsed before
-                // that span and must be reconstructed from the AST fact.
-                self.fmt_pub_qualifier(t.is_pub, t.is_package_pub);
                 let text = self.src[t.span.start..t.span.end].to_string();
                 self.write(&text);
                 self.newline();
@@ -384,9 +381,7 @@ impl<'a> Fmt<'a> {
             // D-QUAL3: unit-family declarations are emitted verbatim (the sugar
             // surface is preserved; it is not expanded into per-member distincts).
             Item::UnitFamily(uf) => {
-                // The marker span begins at `#UnitFamily`, after any `pub`
-                // qualifier consumed by the visibility parser.
-                self.fmt_pub_qualifier(uf.is_pub, uf.is_package_pub);
+                // The marker span begins at `#UnitFamily`.
                 let text = self.src[uf.span.start..uf.span.end].to_string();
                 self.write(&text);
                 self.skip_verbatim_comments(uf.span.end);
@@ -426,9 +421,9 @@ impl<'a> Fmt<'a> {
             // templates, not opaque source strings.
             Item::GenericModule(gm) => self.fmt_generic_module(gm),
             // D-CONF-GENSPELL1=A: module alias declarations emitted verbatim (non-destructive)
-            // apart from the `pub`/`pub(package)` qualifier — see Item::GenericModule.
+            // apart from the `priv`/`priv(package)` module privacy (D-VIS-MODULE1).
             Item::ModuleAlias(ma) => {
-                self.fmt_pub_qualifier(ma.is_pub, ma.is_package_pub);
+                self.fmt_module_privacy(ma.is_pub, ma.is_package_pub);
                 let text = self.src[ma.span.start..ma.span.end].to_string();
                 self.write(&text);
                 self.newline();
@@ -468,8 +463,23 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_marker_decl(&mut self, declaration: &crate::AST::MarkerDecl) {
+        if declaration.is_pub {
+            self.write("pub ");
+        } else if declaration.is_package_pub {
+            self.write("pub(package) ");
+        }
         self.write("marker ");
         self.write(&declaration.name);
+        if let Some(members) = &declaration.group {
+            self.write(" = #[");
+            for (index, member) in members.iter().enumerate() {
+                if index > 0 { self.write(", "); }
+                self.fmt_marker(member);
+            }
+            self.write("]");
+            self.newline();
+            return;
+        }
         self.write("(");
         self.fmt_marker_decl_params(&declaration.params, declaration.name_span.end);
         self.write(")");
@@ -493,7 +503,6 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_protocol_decl(&mut self, protocol: &crate::AST::ProtocolDecl) {
-        self.fmt_pub_qualifier(protocol.is_pub, protocol.is_package_pub);
         self.write("protocol ");
         self.write(&protocol.name);
         self.write(" {");
@@ -539,13 +548,8 @@ impl<'a> Fmt<'a> {
 
     /// D-STRUCT-POLICY1=A: policy wrappers are carried beside ordinary items,
     /// so preserve their checked source boundary in the formatter's first
-    /// implementation slice. `span` starts at the `policy` keyword, so the
-    /// visibility prefix comes from `is_pub` — echoing the slice alone drops
-    /// `pub` and the formatter's own output then fails E0003.
+    /// implementation slice. `span` starts at the `policy` keyword.
     pub(super) fn fmt_user_policy_decl(&mut self, declaration: &crate::AST::UserPolicyDecl) {
-        if declaration.is_pub {
-            self.write("pub ");
-        }
         let text = &self.src[declaration.span.start..declaration.span.end];
         self.write(text);
         self.newline();
@@ -663,7 +667,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_code_module(&mut self, module: &CodeModule) {
-        self.fmt_pub_qualifier(module.is_pub, module.is_package_pub);
+        self.fmt_module_privacy(module.is_pub, module.is_package_pub);
         self.write("module ");
         self.write(&module.name);
         if let Some(target) = module.web_target {
@@ -679,7 +683,7 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_generic_module(&mut self, module: &GenericModuleDef) {
-        self.fmt_pub_qualifier(module.is_pub, module.is_package_pub);
+        self.fmt_module_privacy(module.is_pub, module.is_package_pub);
         self.write("module ");
         self.write(&module.name);
 
@@ -874,7 +878,6 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_trait(&mut self, t: &crate::AST::TraitDef) {
-        self.fmt_pub_qualifier(t.is_pub, t.is_package_pub);
         self.write("trait ");
         self.write(&t.name);
         // D-TRAIT-OVERLOAD1=A: one supertrait stays bare, several use the list.
@@ -923,6 +926,13 @@ impl<'a> Fmt<'a> {
                     f.source_list_span_after(m.name_span.end, super::SourceDelimiter::Paren),
                 );
                 f.write(")");
+                let unit_fallible = m
+                    .return_type
+                    .as_ref()
+                    .is_some_and(|ty| Self::is_unit_fallible_type(ty));
+                if let Some(ret) = m.return_type.as_ref().filter(|_| unit_fallible) {
+                    f.fmt_unit_fallible_return(ret);
+                }
                 if let Some(effects) = &m.declared_effects {
                     let source = f.source_effect_row_span_after(m.name_span.end);
                     f.write(" ");
@@ -939,10 +949,8 @@ impl<'a> Fmt<'a> {
                     f.write(Syntax::EFFECT_ARROW_OPEN);
                     f.write(Syntax::EFFECT_ARROW_CLOSE);
                 }
-                if let Some(ret) = &m.return_type {
-                    if Self::is_unit_fallible_type(ret) {
-                        f.fmt_unit_fallible_return(ret);
-                    } else if m.declared_effects.is_some() || m.is_pure {
+                if let Some(ret) = m.return_type.as_ref().filter(|_| !unit_fallible) {
+                    if m.declared_effects.is_some() || m.is_pure {
                         f.write(" ");
                         f.fmt_return_type(ret);
                     } else {
@@ -1085,23 +1093,18 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_pub_qualifier(&mut self, is_pub: bool, is_package_pub: bool) {
+    /// D-VIS-MODULE1: `priv module` / `priv(package) module`. Declarations
+    /// other than modules carry no visibility marker.
+    fn fmt_module_privacy(&mut self, is_pub: bool, is_package_pub: bool) {
         if is_package_pub {
-            self.write("pub(package) ");
-            return;
-        }
-        if self.pub_file {
-            if !is_pub {
-                self.write("priv ");
-            }
-        } else if is_pub {
-            self.write("pub ");
+            self.write("priv(package) ");
+        } else if !is_pub {
+            self.write("priv ");
         }
     }
 
     fn fmt_distinct(&mut self, d: &crate::AST::DistinctDef) {
         self.fmt_type_markers(&d.type_markers, true);
-        self.fmt_pub_qualifier(d.is_pub, d.is_package_pub);
         self.write(&d.name);
         self.write(" :: distinct ");
         self.fmt_type_at(&d.base, Some(d.base_span));
@@ -1115,7 +1118,6 @@ impl<'a> Fmt<'a> {
     }
 
     fn fmt_type_alias(&mut self, a: &crate::AST::TypeAliasDef) {
-        self.fmt_pub_qualifier(a.is_pub, a.is_package_pub);
         self.write("alias ");
         self.write(&a.name);
         self.fmt_type_params(
@@ -1306,14 +1308,14 @@ impl<'a> Fmt<'a> {
                 }
                 ImplBodyMember::Method(method) => {
                     self.emit_leading(method.name_span.start);
-                    self.fmt_func(method, false);
+                    self.fmt_func(method);
                 }
             }
             previous = Some(member);
         }
     }
 
-    fn fmt_func(&mut self, f: &Func, top_level: bool) {
+    fn fmt_func(&mut self, f: &Func) {
         let ordered_rules = f.markers.clone();
         if !ordered_rules.is_empty() {
             let rules = ordered_rules.iter().collect::<Vec<_>>();
@@ -1328,11 +1330,6 @@ impl<'a> Fmt<'a> {
             } else {
                 self.fmt_marker_group(&rules, Syntax::RULE_PREFIX, false);
             }
-        }
-        if top_level {
-            self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
-        } else if f.is_pub {
-            self.fmt_pub_qualifier(f.is_pub, f.is_package_pub);
         }
         if f.is_comptime {
             // D-FOUND-LITERAL1=A (card #2789), respelled by D-PREP-FN1=A:
@@ -1378,7 +1375,10 @@ impl<'a> Fmt<'a> {
             .return_type
             .as_ref()
             .is_some_and(|ty| Self::is_unit_fallible_type(ty));
-        // D-SIG-AFTER1=A: the one arrow, then optional return facts.
+        // D-CALLABLE-ONE1 / D-FAIL-UNIT1: the unit error contract precedes effects.
+        if let Some(ret) = f.return_type.as_ref().filter(|_| unit_fallible) {
+            self.fmt_unit_fallible_return(ret);
+        }
         let has_effect_row = f.declared_effects.is_some() || f.effect_via.is_some() || f.is_pure;
         if has_effect_row {
             if let Some(effects) = &f.declared_effects {
@@ -1404,24 +1404,28 @@ impl<'a> Fmt<'a> {
                 self.write(param);
                 self.write(Syntax::EFFECT_ARROW_CLOSE);
             }
-            if let Some(ret) = &f.return_type {
-                if unit_fallible {
-                    self.fmt_unit_fallible_return(ret);
-                } else {
-                    self.write(" ");
-                    self.fmt_type_at(ret, f.return_type_span);
-                }
-            }
-        } else if let Some(ret) = &f.return_type {
-            if unit_fallible {
-                self.fmt_unit_fallible_return(ret);
-            } else {
-                self.write(" -> ");
+            if let Some(ret) = f.return_type.as_ref().filter(|_| !unit_fallible) {
+                self.write(" ");
                 self.fmt_type_at(ret, f.return_type_span);
             }
+        } else if let Some(ret) = f.return_type.as_ref().filter(|_| !unit_fallible) {
+            self.write(" -> ");
+            self.fmt_type_at(ret, f.return_type_span);
         }
         if let Some(map) = &f.declared_return_view_provenance {
             self.fmt_declared_return_view_from(map, &f.params);
+        }
+        // D-ADOPT-GUEST1: parsing moves the C symbol into the Import marker
+        // and clears the body. It remains a declaration, never an empty fn.
+        for marker in &f.markers {
+            if marker.name == Syntax::MARKER_IMPORT && !marker.negated {
+                if let Some(crate::AST::CtValue::Str(symbol)) = &marker.ct {
+                    self.write(" = \"");
+                    self.write(&escape_str_lit(symbol));
+                    self.write("\"");
+                    return;
+                }
+            }
         }
         let saved_return_type =
             std::mem::replace(&mut self.expected_return_type, f.return_type.clone());
@@ -1554,6 +1558,23 @@ impl<'a> Fmt<'a> {
         );
     }
 
+    /// D-METHOD-FOOTPRINT1=A: a stated receiver footprint, `self.log` or
+    /// `self.[log, hits]`.
+    fn fmt_receiver_footprint(&mut self, p: &Param) {
+        let Some(fields) = &p.footprint.declared else {
+            return;
+        };
+        if let [(field, _)] = fields.as_slice() {
+            self.write(".");
+            self.write(field);
+            return;
+        }
+        let names: Vec<&str> = fields.iter().map(|(field, _)| field.as_str()).collect();
+        self.write(".[");
+        self.write(&names.join(", "));
+        self.write("]");
+    }
+
     fn fmt_param(&mut self, p: &Param) {
         if p.root {
             self.write("#");
@@ -1575,6 +1596,7 @@ impl<'a> Fmt<'a> {
                 self.write(s);
             }
             self.write(&p.name);
+            self.fmt_receiver_footprint(p);
         } else {
             // D-APILABEL1=A: `timeout seconds: Int` — public label, then local name.
             if let Some((label, _)) = &p.public_label {
@@ -1582,6 +1604,7 @@ impl<'a> Fmt<'a> {
                 self.write(" ");
             }
             self.write(&p.name);
+            self.fmt_receiver_footprint(p);
             self.write(": ");
             if let Some(s) = sigil {
                 self.write(s);
@@ -1755,7 +1778,7 @@ impl<'a> Fmt<'a> {
             TypeBodyMember::TraitImpl(block) => self.fmt_trait_impl_block(block),
             TypeBodyMember::Method(method) => {
                 self.emit_leading(method.name_span.start);
-                self.fmt_func(method, false);
+                self.fmt_func(method);
             }
             TypeBodyMember::Validate { start, body } => {
                 self.emit_leading(start);
@@ -1795,15 +1818,12 @@ impl<'a> Fmt<'a> {
         }
     }
 
-    fn fmt_struct(&mut self, s: &StructDef, top_level: bool) {
+    fn fmt_struct(&mut self, s: &StructDef) {
         // D-VERDICT-1455-1: the retained registry marker nodes are the sole
         // formatter input. Typed flags remain for sema/codegen only.
         let lone_hash_ok =
             s.layout.is_none() && !s.is_published_schema && !s.is_single_use && !s.is_must_use;
         self.fmt_type_markers(&s.type_markers, lone_hash_ok);
-        if top_level {
-            self.fmt_pub_qualifier(s.is_pub, s.is_package_pub);
-        }
         self.write("struct ");
         self.write(&s.name);
         self.fmt_type_params(
@@ -1846,14 +1866,11 @@ impl<'a> Fmt<'a> {
         self.end_block();
     }
 
-    fn fmt_enum(&mut self, e: &EnumDef, top_level: bool) {
+    fn fmt_enum(&mut self, e: &EnumDef) {
         // D-VERDICT-1455-1: type markers are retained nodes, not flag
         // reconstruction. The flags below remain semantic data only.
         let lone_hash_ok = !e.is_single_use && !e.is_must_use;
         self.fmt_type_markers(&e.type_markers, lone_hash_ok);
-        if top_level {
-            self.fmt_pub_qualifier(e.is_pub, e.is_package_pub);
-        }
         self.write("enum ");
         self.write(&e.name);
         self.fmt_type_params(
@@ -2091,22 +2108,15 @@ impl<'a> Fmt<'a> {
             self.fmt_expr(&c.value, Prec::OrFallback);
             return;
         }
-        // Fallback: treat as an explicit known value.
+        // Runtime module bindings retain their authored mutability.
         self.write(&c.name);
-        self.write(" :: ");
+        self.write(if c.mutable { " := " } else { " :: " });
         self.fmt_expr(&c.value, Prec::OrFallback);
     }
 
     pub(super) fn fmt_import(&mut self, imp: &ImportDecl) {
-        // Imports don't take `priv` — the parser only accepts `use …` (not
-        // re-exported, the ambient default whether or not the file is
-        // `#PubFile`) or `pub use …` (re-exported). Unlike struct/fn/etc.,
-        // there's no `#PubFile`-relative "priv" spelling to fall back to, so
-        // this can't route through `fmt_pub_qualifier` (that produced
-        // unparseable `priv use …` output — a real fmt idempotence bug).
-        if imp.is_package_pub {
-            self.write("pub(package) ");
-        } else if imp.is_pub {
+        // D-MOD4: `pub use` is the only re-export spelling (ballot pending).
+        if imp.is_pub {
             self.write("pub ");
         }
         self.write(Syntax::KW_USE);
@@ -2233,7 +2243,9 @@ impl<'a> Fmt<'a> {
             }
             self.write(" ");
         }
-        self.fmt_pub_qualifier(field.is_pub, field.is_package_pub);
+        if !field.is_pub {
+            self.write("priv ");
+        }
         self.write(&field.name);
         self.write(": ");
         self.fmt_decode_type(&field.ty, field.ty_span, derives_decode);

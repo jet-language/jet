@@ -11,4 +11,13 @@ fn run() {
     pattern :: Path.from(root).join("*.txt")
     result :: files.glob(pattern) ?? panic("glob")
     print(result.len())
+    nested :: Path.from(root).join("nested")
+    files.create_dir(nested) ?? panic("nested")
+    files.write(nested.join("deep.txt"), "deep") ?? panic("deep")
+    files.write(Path.from(root).join("q"), "question") ?? panic("question")
+    files.write(Path.from(root).join("[x]"), "literal") ?? panic("literal")
+    assert_eq((files.glob(pattern) ?? panic("star crosses separator")).len(), 2)
+    assert_eq((files.glob(Path.from(root).join("?")) ?? panic("question")).len(), 1)
+    assert_eq((files.glob(Path.from(root).join("[x]")) ?? panic("literal bracket")).len(), 1)
+    files.remove_all(root) ?? panic("cleanup")
 }

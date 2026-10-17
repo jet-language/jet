@@ -54,12 +54,22 @@ pub(crate) fn collect_window_names(pattern: &Pattern, out: &mut HashSet<String>)
         }
         Pattern::Struct { fields, .. } => {
             for field in fields {
-                if let crate::AST::StructPatField::Bind { local, .. } = field {
-                    out.insert(local.clone());
+                match field {
+                    crate::AST::StructPatField::Bind { local, .. } => {
+                        out.insert(local.clone());
+                    }
+                    crate::AST::StructPatField::Nested { pattern, .. } => {
+                        collect_window_names(pattern, out)
+                    }
+                    crate::AST::StructPatField::Value { .. } => {}
                 }
             }
         }
-        Pattern::Or(..)
+        // D-PAT-RECORD1 / D-PAT-MAP1: list items and map values bind
+        // read-only values, never write windows.
+        Pattern::List { .. }
+        | Pattern::Map { .. }
+        | Pattern::Or(..)
         | Pattern::StrMatch { .. }
         | Pattern::BinMatch { .. }
         | Pattern::Absent(_)
@@ -74,7 +84,7 @@ fn collect_window_slot_names(slot: &PatSlot, out: &mut HashSet<String>) {
         }
         PatSlot::Nested(inner) => collect_window_names(inner, out),
         PatSlot::Named { slot, .. } => collect_window_slot_names(slot, out),
-        PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Rest(_) => {}
+        PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Rest(_) | PatSlot::Value(_) => {}
     }
 }
 
@@ -229,10 +239,115 @@ fn slot_cover_cell(slot: &crate::AST::PatSlot) -> CoverCell<'_> {
         crate::AST::PatSlot::Bind { .. }
         | crate::AST::PatSlot::Wildcard
         | crate::AST::PatSlot::Rest(_) => CoverCell::Any,
-        crate::AST::PatSlot::Range { .. } => CoverCell::Refutable,
+        crate::AST::PatSlot::Range { .. } | crate::AST::PatSlot::Value(_) => CoverCell::Refutable,
         crate::AST::PatSlot::Nested(inner) => CoverCell::Pat(inner),
         crate::AST::PatSlot::Named { slot, .. } => slot_cover_cell(slot),
     }
+}
+
+/// D-PAT-MAP1=A: a map pattern matches every map only when it ends with
+/// `..` and every entry is an optional key whose slot matches anything.
+fn map_pattern_irrefutable(pattern: &Pattern) -> bool {
+    matches!(
+        pattern,
+        Pattern::Map { entries, rest: Some(_), .. }
+            if entries.iter().all(|entry| {
+                entry.optional && matches!(slot_cover_cell(&entry.slot), CoverCell::Any)
+            })
+    )
+}
+
+/// D-PAT-MAP1: a map pattern names no constructor; it is either total or a
+/// refutable test. Rewrite the first column accordingly.
+fn settle_map_cells<'p>(rows: Vec<Vec<CoverCell<'p>>>) -> Vec<Vec<CoverCell<'p>>> {
+    rows.into_iter()
+        .map(|mut row| {
+            if let Some(CoverCell::Pat(pattern @ Pattern::Map { .. })) = row.first().copied() {
+                row[0] = if map_pattern_irrefutable(pattern) {
+                    CoverCell::Any
+                } else {
+                    CoverCell::Refutable
+                };
+            }
+            row
+        })
+        .collect()
+}
+
+/// D-PAT-RECORD1=A: rows that can match a struct value, with one cell per
+/// declared field in place of the first column. A field the pattern leaves
+/// out (under `..`) matches anything; a compared value is refutable.
+fn specialize_struct_rows<'p>(
+    rows: &[Vec<CoverCell<'p>>],
+    fields: &[(String, Type)],
+) -> Vec<Vec<CoverCell<'p>>> {
+    rows.iter()
+        .filter_map(|row| {
+            let (first, rest) = row.split_first()?;
+            let mut cells = match *first {
+                CoverCell::Any => vec![CoverCell::Any; fields.len()],
+                CoverCell::Refutable => return None,
+                CoverCell::Pat(Pattern::Struct {
+                    fields: written, ..
+                }) => fields
+                    .iter()
+                    .map(|(name, _)| {
+                        match written.iter().find(|field| field.field_name() == name) {
+                            Some(crate::AST::StructPatField::Bind { .. }) | None => CoverCell::Any,
+                            Some(crate::AST::StructPatField::Value { .. }) => CoverCell::Refutable,
+                            Some(crate::AST::StructPatField::Nested { pattern, .. }) => {
+                                CoverCell::Pat(pattern)
+                            }
+                        }
+                    })
+                    .collect(),
+                CoverCell::Pat(_) => return None,
+            };
+            cells.extend_from_slice(rest);
+            Some(cells)
+        })
+        .collect()
+}
+
+/// D-PAT-RECORD1=A: rows that can match a list of exactly `len` items (or,
+/// with `at_least`, of `len` or more), with one cell per item in place of
+/// the first column.
+fn specialize_list_rows<'p>(
+    rows: &[Vec<CoverCell<'p>>],
+    len: usize,
+    at_least: bool,
+) -> Vec<Vec<CoverCell<'p>>> {
+    rows.iter()
+        .filter_map(|row| {
+            let (first, rest) = row.split_first()?;
+            let mut cells = match *first {
+                CoverCell::Any => vec![CoverCell::Any; len],
+                CoverCell::Refutable => return None,
+                CoverCell::Pat(Pattern::List {
+                    items,
+                    rest: list_rest,
+                    ..
+                }) => {
+                    let fits = match list_rest {
+                        Some(_) => items.len() <= len,
+                        None => !at_least && items.len() == len,
+                    };
+                    if !fits {
+                        return None;
+                    }
+                    items
+                        .iter()
+                        .map(slot_cover_cell)
+                        .chain(std::iter::repeat(CoverCell::Any))
+                        .take(len)
+                        .collect()
+                }
+                CoverCell::Pat(_) => return None,
+            };
+            cells.extend_from_slice(rest);
+            Some(cells)
+        })
+        .collect()
 }
 
 /// D-PAT-NAMED-NEST1=A: what a case's payload fields are called.
@@ -614,6 +729,15 @@ pub(crate) fn normalize_contextual_pattern(pattern: &mut Pattern, subject_ty: &T
     else {
         return;
     };
+    // A compared value in a carrier payload (`.Val("a")`) has no carrier
+    // pattern form; validation reports it with the guard fix.
+    if contextual_literal(variant).is_some()
+        && bindings
+            .iter()
+            .any(|slot| matches!(slot, crate::AST::PatSlot::Value(_)))
+    {
+        return;
+    }
     // S31: a nested payload pattern moves into `inner`; the carrier's own
     // binding is then the wildcard. The inner pattern is normalized against
     // the payload type in the same pass.
@@ -1123,6 +1247,104 @@ impl<'a> Checker<'a> {
         self.normalize_checked_pattern_tree(pattern, subject_ty);
     }
 
+    /// D-PAT-RECORD1 / D-PAT-MAP1: the patterns nested in a struct, list or
+    /// map pattern, each with the type of the part it tests. Normalization
+    /// passes recurse through these exactly as through enum payloads.
+    fn shape_child_types(&self, pattern: &Pattern, subject_ty: &Type) -> Vec<Type> {
+        let subject_ty = subject_ty.without_user_tags();
+        match (pattern, subject_ty) {
+            (Pattern::Struct { fields, .. }, _) => {
+                let declared = self.struct_cover_fields(subject_ty).unwrap_or_default();
+                fields
+                    .iter()
+                    .filter(|field| matches!(field, crate::AST::StructPatField::Nested { .. }))
+                    .map(|field| {
+                        declared
+                            .iter()
+                            .find(|(name, _)| name == field.field_name())
+                            .map(|(_, ty)| ty.clone())
+                            .unwrap_or_else(|| Type::Named("Unit".to_string()))
+                    })
+                    .collect()
+            }
+            (
+                Pattern::List { items, .. },
+                Type::List(elem) | Type::FixedList { elem, .. },
+            ) => items
+                .iter()
+                .filter(|item| matches!(item, PatSlot::Nested(_)))
+                .map(|_| (**elem).clone())
+                .collect(),
+            (Pattern::Map { entries, .. }, Type::Map { value, .. }) => entries
+                .iter()
+                .filter(|entry| matches!(entry.slot, PatSlot::Nested(_)))
+                .map(|entry| {
+                    if entry.optional {
+                        Type::Option(value.clone())
+                    } else {
+                        (**value).clone()
+                    }
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// The nested child patterns `shape_child_types` describes, in order.
+    fn shape_children_mut(pattern: &mut Pattern) -> Vec<&mut Pattern> {
+        match pattern {
+            Pattern::Struct { fields, .. } => fields
+                .iter_mut()
+                .filter_map(|field| match field {
+                    crate::AST::StructPatField::Nested { pattern, .. } => Some(pattern.as_mut()),
+                    _ => None,
+                })
+                .collect(),
+            Pattern::List { items, .. } => items
+                .iter_mut()
+                .filter_map(|item| match item {
+                    PatSlot::Nested(inner) => Some(inner.as_mut()),
+                    _ => None,
+                })
+                .collect(),
+            Pattern::Map { entries, .. } => entries
+                .iter_mut()
+                .filter_map(|entry| match &mut entry.slot {
+                    PatSlot::Nested(inner) => Some(inner.as_mut()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn shape_children(pattern: &Pattern) -> Vec<&Pattern> {
+        match pattern {
+            Pattern::Struct { fields, .. } => fields
+                .iter()
+                .filter_map(|field| match field {
+                    crate::AST::StructPatField::Nested { pattern, .. } => Some(pattern.as_ref()),
+                    _ => None,
+                })
+                .collect(),
+            Pattern::List { items, .. } => items
+                .iter()
+                .filter_map(|item| match item {
+                    PatSlot::Nested(inner) => Some(inner.as_ref()),
+                    _ => None,
+                })
+                .collect(),
+            Pattern::Map { entries, .. } => entries
+                .iter()
+                .filter_map(|entry| match &entry.slot {
+                    PatSlot::Nested(inner) => Some(inner.as_ref()),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
     /// D-ERR-CASES1=A: a case name that exactly one member of a union
     /// declares may be matched flat (`.Err(.NotFound(w))` over
     /// `FindError | ParseError`). The raw tree is rewritten onto the member
@@ -1160,7 +1382,12 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                let types = self.shape_child_types(pattern, subject_ty);
+                for (child, ty) in Self::shape_children_mut(pattern).into_iter().zip(&types) {
+                    self.lift_flat_union_cases(child, ty);
+                }
+            }
         }
     }
 
@@ -1222,7 +1449,12 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                let types = self.shape_child_types(pattern, subject_ty);
+                for (child, ty) in Self::shape_children_mut(pattern).into_iter().zip(&types) {
+                    self.resolve_named_payload_slots(child, ty);
+                }
+            }
         }
     }
 
@@ -1295,6 +1527,7 @@ impl<'a> Checker<'a> {
                 PatSlot::Wildcard
                 | PatSlot::Bind { .. }
                 | PatSlot::Range { .. }
+                | PatSlot::Value(_)
                 | PatSlot::Nested(_) => {
                     unreachable!("the parser admits only `field: pattern` entries and `..` inside `.Case{{…}}`")
                 }
@@ -1376,6 +1609,13 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
                     .to_string()
             }
+            PatSlot::Value(value) => {
+                let span = value.span();
+                self.source
+                    .get(span.start..span.end)
+                    .unwrap_or(Syntax::PAT_WILDCARD_SLOT)
+                    .to_string()
+            }
             PatSlot::Wildcard | PatSlot::Named { .. } | PatSlot::Rest(_) => {
                 Syntax::PAT_WILDCARD_SLOT.to_string()
             }
@@ -1442,7 +1682,12 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                let types = self.shape_child_types(pattern, subject_ty);
+                for (child, ty) in Self::shape_children_mut(pattern).into_iter().zip(&types) {
+                    self.normalize_checked_pattern_tree(child, ty);
+                }
+            }
         }
     }
 
@@ -1494,7 +1739,12 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            _ => {}
+            _ => {
+                let types = self.shape_child_types(pattern, subject_ty);
+                for (child, ty) in Self::shape_children(pattern).into_iter().zip(&types) {
+                    self.report_retired_nested_outcome(child, ty);
+                }
+            }
         }
     }
 
@@ -1660,7 +1910,19 @@ impl<'a> Checker<'a> {
             return Some(vec!["_".to_string(); types.len()]);
         }
         let (first, rest) = types.split_first()?;
-        let rows = expand_cover_rows(rows);
+        let rows = settle_map_cells(expand_cover_rows(rows));
+        let tests_shape = depth < 64
+            && rows.iter().any(|row| {
+                matches!(
+                    row.first(),
+                    Some(CoverCell::Pat(Pattern::Struct { .. } | Pattern::List { .. }))
+                )
+            });
+        if tests_shape {
+            if let Some(witness) = self.uncovered_shape_witness(first, rest, &rows, depth) {
+                return witness;
+            }
+        }
         let tests_constructor = rows
             .iter()
             .any(|row| matches!(row.first(), Some(CoverCell::Pat(_))));
@@ -1692,6 +1954,99 @@ impl<'a> Checker<'a> {
         let mut out = vec!["_".to_string()];
         out.extend(witness);
         Some(out)
+    }
+
+    /// D-PAT-RECORD1=A: coverage of a struct or list column. `None` when the
+    /// column type is neither (the caller falls back to the constructor or
+    /// default split); otherwise `Some(witness)` with the usual meaning.
+    fn uncovered_shape_witness<'p>(
+        &self,
+        first: &Type,
+        rest: &[Type],
+        rows: &[Vec<CoverCell<'p>>],
+        depth: usize,
+    ) -> Option<Option<Vec<String>>> {
+        if let Some(fields) = self.struct_cover_fields(first) {
+            let specialized = specialize_struct_rows(rows, &fields);
+            let mut sub_types: Vec<Type> = fields.iter().map(|(_, ty)| ty.clone()).collect();
+            sub_types.extend_from_slice(rest);
+            let Some(witness) = self.uncovered_witness(&sub_types, &specialized, depth + 1) else {
+                return Some(None);
+            };
+            let (args, tail) = witness.split_at(fields.len());
+            let named: Vec<String> = fields
+                .iter()
+                .zip(args)
+                .filter(|(_, arg)| arg.as_str() != "_")
+                .map(|((name, _), arg)| format!("{name}: {arg}"))
+                .collect();
+            let text = if named.len() == fields.len() {
+                format!("{{{}}}", named.join(", "))
+            } else if named.is_empty() {
+                "_".to_string()
+            } else {
+                format!("{{{}, ..}}", named.join(", "))
+            };
+            let mut out = vec![text];
+            out.extend_from_slice(tail);
+            return Some(Some(out));
+        }
+        let (elem, fixed) = match first.without_user_tags() {
+            Type::List(elem) => ((**elem).clone(), None),
+            Type::FixedList { elem, len } => {
+                ((**elem).clone(), len.literal_value().map(|len| len as usize))
+            }
+            _ => return None,
+        };
+        let longest = rows
+            .iter()
+            .filter_map(|row| match row.first() {
+                Some(CoverCell::Pat(Pattern::List { items, .. })) => Some(items.len()),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0);
+        let lengths: Vec<(usize, bool)> = match fixed {
+            Some(len) => vec![(len, false)],
+            None => (0..=longest)
+                .map(|len| (len, false))
+                .chain(std::iter::once((longest + 1, true)))
+                .collect(),
+        };
+        for (len, at_least) in lengths {
+            let specialized = specialize_list_rows(rows, len, at_least);
+            let mut sub_types = vec![elem.clone(); len];
+            sub_types.extend_from_slice(rest);
+            if let Some(witness) = self.uncovered_witness(&sub_types, &specialized, depth + 1) {
+                let (args, tail) = witness.split_at(len);
+                let mut items: Vec<String> = args.to_vec();
+                if at_least {
+                    items.push("..".to_string());
+                }
+                let mut out = vec![format!("[{}]", items.join(", "))];
+                out.extend_from_slice(tail);
+                return Some(Some(out));
+            }
+        }
+        Some(None)
+    }
+
+    /// D-PAT-RECORD1=A: the declared fields of a struct type, in order.
+    pub(crate) fn struct_cover_fields(&self, ty: &Type) -> Option<Vec<(String, Type)>> {
+        let (Type::Named(type_name) | Type::Apply {
+            name: type_name, ..
+        }) = ty.without_user_tags()
+        else {
+            return None;
+        };
+        let (import_ns, lookup_name) = self.struct_type_name_parts(type_name);
+        let owner = self.struct_owner_module(lookup_name, import_ns)?;
+        Some(
+            self.struct_fields_of(owner, lookup_name)?
+                .iter()
+                .map(|(name, _, ty)| (name.clone(), ty.clone()))
+                .collect(),
+        )
     }
 
     /// One pattern arm's contribution to the covered set — shared by the
@@ -1831,6 +2186,71 @@ impl<'a> Checker<'a> {
                 ),
                 Some(span),
             ));
+            return;
+        }
+        // D-PAT-RECORD1 / D-PAT-MAP1: struct, list and map subjects are
+        // covered shape by shape (lists by length, structs by field, maps
+        // only by an `..` arm of optional keys).
+        let shape_subject = matches!(
+            st.without_user_tags(),
+            Type::List(_) | Type::FixedList { .. } | Type::Map { .. }
+        ) || self.struct_cover_fields(st).is_some();
+        if shape_subject
+            && arms
+                .iter()
+                .any(|arm| matches!(arm, Pattern::Struct { .. } | Pattern::List { .. } | Pattern::Map { .. }))
+        {
+            let rows: Vec<Vec<CoverCell<'_>>> =
+                arms.iter().map(|arm| vec![CoverCell::Pat(arm)]).collect();
+            let Some(witness) = self.uncovered_witness(std::slice::from_ref(st), &rows, 0) else {
+                return;
+            };
+            let missing = witness.into_iter().next().unwrap_or_else(|| "_".to_string());
+            let mut diag = if missing == "_" {
+                Diagnostic::error(
+                    "E0307",
+                    format!(
+                        "this `{}` doesn't cover every `{}` value — it needs an `{}` arm",
+                        Syntax::KW_IF,
+                        st.show(),
+                        Syntax::KW_ELSE
+                    ),
+                    "every arm tests part of the value's shape, so some values match no arm"
+                        .to_string(),
+                    format!(
+                        "add `{} {} {{ … }}` after the last arm",
+                        Syntax::KW_ELSE,
+                        Syntax::OP_UNIFIED_ARROW
+                    ),
+                    Some(span),
+                )
+            } else {
+                Diagnostic::error(
+                    "E0307",
+                    format!(
+                        "this `{}` doesn't cover every case — missing: {missing}",
+                        Syntax::KW_IF
+                    ),
+                    "every arm here is a pattern test, so each shape of the value must be matched"
+                        .to_string(),
+                    format!("add an arm for: {missing}"),
+                    Some(span),
+                )
+            };
+            if !multi_head {
+                if let Some(at) = insert_at {
+                    let head = if missing == "_" {
+                        Syntax::KW_ELSE.to_string()
+                    } else {
+                        missing.clone()
+                    };
+                    diag.set_structured_edit(TextEdit {
+                        span: at,
+                        new_text: format!("\n    {head} {} {{}}", Syntax::OP_UNIFIED_ARROW),
+                    });
+                }
+            }
+            self.diags.push(diag);
             return;
         }
         let missing = if is_three_state(st) || arms.iter().any(Pattern::has_nested_pattern) {
@@ -2129,6 +2549,16 @@ impl<'a> Checker<'a> {
             }
             return;
         };
+        // Coverage has already checked this carrier or owned transfer once.
+        // Retain both the type and elaborated subject for the condition walk,
+        // which must not repeat a taking call just to validate its patterns.
+        if !has_else && !self.compiler_generated
+            && (preserve_result_carrier || matches!(subj.without_parens(),
+                Expr::Place(_, crate::AST::PlaceAccess::Take, _)))
+        {
+            self.result_handler_subject_types.insert(
+                subj.span().start, (st.clone(), subj.clone()));
+        }
         // Probe without retaining recovery diagnostics — the ordinary
         // per-level inference reports each arm's own errors once.
         let has_str_match_arm = raw
@@ -2356,7 +2786,11 @@ impl<'a> Checker<'a> {
                     );
                     arm_patterns.push(pattern.clone());
                     let bindings = self.validate_pattern(st, &pattern, pspan);
-                    self.mark_pattern_subject_moved(subject, &bindings);
+                    // D-PAT-RECORD1 / D-PAT-MAP1: list and map patterns read
+                    // parts of the subject; it stays usable.
+                    if !matches!(pattern, Pattern::List { .. } | Pattern::Map { .. }) {
+                        self.mark_pattern_subject_moved(subject, &bindings);
+                    }
                     let mut windows = HashSet::new();
                     if is_write_window_subject(subject) {
                         collect_window_names(&pattern, &mut windows);

@@ -1,0 +1,12 @@
+Error [E0121]: `keep` can run only once, and it already ran
+  --> tests/ui/lambda_take_capture_twice.jet:7:5
+    |
+  7 |     keep()
+    |     ^^^^
+  --> tests/ui/lambda_take_capture_twice.jet:6:5
+    |
+  6 |     keep()
+    |     ^^^^ `keep` ran here
+ Why: `keep` takes its captured `title` with the move marker `^`, so its first call gave `title` away
+ Fix: Call `keep` once, or let it pass a copy of `title` (`title.copy()`) instead of taking it
+More: jet-lang.dev/e/E0121

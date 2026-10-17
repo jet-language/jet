@@ -11,12 +11,12 @@ use core.encoding.json as json
     fn sleep_call(handle: Int, input: String, deadline_ms: Int) -> String = "jet_ruby_ops_invoke_sleep_call"
 }
 
-pub struct Session {
-    value: Int
+struct Session {
+    priv value: Int
 }
 
 #Error
-pub enum RubyError {
+enum RubyError {
     NotRunning
     Timeout
     Cancelled
@@ -29,42 +29,42 @@ impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) { abi.close(session.value) }
+fn close(session: ^Session) { abi.close(session.value) }
 
-pub fn open() -> Session RubyError! {
+fn open() -> Session RubyError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(RubyError.NotRunning)
     return Ok(Session{value: handle})
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
-fn decode_response(raw: String, code: Int) -> DataTree RubyError! {
+fn decode_response(raw: String, code: Int) -> Dyn RubyError! {
     if code == 1 -> return Err(RubyError.NotRunning)
     if code == 2 -> return Err(RubyError.Timeout)
     if code == 3 -> return Err(RubyError.Cancelled)
     if code == 5 -> return Err(RubyError.Limit)
     if code != 0 -> return Err(RubyError.Protocol)
     response := json.parse(raw) ?? return Err(RubyError.Protocol)
-    succeeded := (&response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(RubyError.CommandFailed)
-    return Ok(&response.field("value") ?? DataTree.Null)
+    return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-pub fn transform(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
-    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+fn transform(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
+    raw :: abi.transform(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn fail_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
-    raw :: abi.fail_call(session.value, json.to_string(input), deadline_ms)
+fn fail_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
+    raw :: abi.fail_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn sleep_call(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {
-    raw :: abi.sleep_call(session.value, json.to_string(input), deadline_ms)
+fn sleep_call(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {
+    raw :: abi.sleep_call(session.value, json.to_string(input) ?? return Err(RubyError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }

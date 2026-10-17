@@ -1,0 +1,45 @@
+# PORT tests/structural_merge.rs::git_driver_repairs_exact_keys_and_supports_gitdir_indirection
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: git_driver_repairs_exact_keys_and_supports_gitdir_indirection.fixture
+requires: tool:git
+mkdir: repo
+step: git init
+cwd: {work}/repo
+exit: 0
+step: git config user.email jet-test@example.invalid
+cwd: {work}/repo
+exit: 0
+step: git config user.name "Jet Test"
+cwd: {work}/repo
+exit: 0
+step: git config merge.jetstruct.name stale
+cwd: {work}/repo
+exit: 0
+step: git config merge.other.driver keep-me
+cwd: {work}/repo
+exit: 0
+copy: seed.txt repo/seed
+step: git add seed
+cwd: {work}/repo
+exit: 0
+step: git commit -m seed
+cwd: {work}/repo
+exit: 0
+step: git worktree add -b linked-test {work}/linked
+cwd: {work}/repo
+exit: 0
+step: jet merge install-driver --repo {work}/linked
+exit: 0
+step: git config --local --get merge.jetstruct.name
+cwd: {work}/linked
+exit: 0
+stdout.trim: = git_driver_repairs_exact_keys_and_supports_gitdir_indirection.fixture/merge.jetstruct.name.out # original ed77c235f tests/structural_merge.rs:655-669 trimmed local merge.jetstruct.name readback equality
+step: git config --local --get merge.jetstruct.driver
+cwd: {work}/linked
+exit: 0
+stdout.trim: = git_driver_repairs_exact_keys_and_supports_gitdir_indirection.fixture/merge.jetstruct.driver.out # original ed77c235f tests/structural_merge.rs:655-669 trimmed local merge.jetstruct.driver readback equality
+step: git config --local --get merge.other.driver
+cwd: {work}/linked
+exit: 0
+stdout.trim: = git_driver_repairs_exact_keys_and_supports_gitdir_indirection.fixture/merge.other.driver.out # original ed77c235f tests/structural_merge.rs:655-669 trimmed local merge.other.driver readback equality
+file: linked/.git is-file

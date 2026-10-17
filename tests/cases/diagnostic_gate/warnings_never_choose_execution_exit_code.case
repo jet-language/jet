@@ -1,0 +1,93 @@
+# Port of tests/diagnostic_gate.rs::warnings_never_choose_execution_exit_code (104-161).
+# PENDING-GRAMMAR and PENDING-SAME-HEAD: original assertions; no runtime snapshot.
+fixture: warnings.fixture
+env: NO_COLOR=1
+step: jet run main.jet
+cwd: l0103
+env: JET_STORE_DIR={work}/cache/l0103/default/build
+exit: 0
+stderr: ~ "Warning [L0103]" # original predicate
+stderr: !~ "Error [L0103]" # original predicate
+stdout: = l0103.out
+step: jet run --interpret main.jet
+cwd: l0103
+env: JET_STORE_DIR={work}/cache/l0103/interpret/build
+exit: 0
+stderr: ~ "Warning [L0103]" # original predicate
+stderr: !~ "Error [L0103]" # original predicate
+stdout: = l0103.out
+step: jet run --release main.jet
+cwd: l0103
+env: JET_STORE_DIR={work}/cache/l0103/release/build
+exit: 0
+stderr: ~ "Warning [L0103]" # original predicate
+stderr: !~ "Error [L0103]" # original predicate
+stdout: = l0103.out
+step: jet dev main.jet --watch=off
+cwd: l0103
+env: JET_STORE_DIR={work}/cache/l0103/dev/build
+exit: 0
+stderr: ~ "Warning [L0103]" # original predicate
+stderr: !~ "Error [L0103]" # original predicate
+stdout: = l0103.out
+step: jet build main.jet
+cwd: l0103
+env: JET_STORE_DIR={work}/cache/l0103/build/build
+exit: 0
+stderr: ~ "Warning [L0103]" # original predicate
+stderr: !~ "Error [L0103]" # original predicate
+step: {work}/l0103/.jet/build/main
+cwd: l0103
+exit: 0
+stdout: = l0103.out
+step: jet run main.jet
+cwd: l0202
+env: JET_STORE_DIR={work}/cache/l0202/default/build
+exit: 0
+stderr: ~ "Warning [L0202]" # original predicate
+stderr: !~ "Error [L0202]" # original predicate
+stdout: = l0202.out
+step: jet run --interpret main.jet
+cwd: l0202
+env: JET_STORE_DIR={work}/cache/l0202/interpret/build
+exit: 0
+stderr: ~ "Warning [L0202]" # original predicate
+stderr: !~ "Error [L0202]" # original predicate
+stdout: = l0202.out
+step: jet run --release main.jet
+cwd: l0202
+env: JET_STORE_DIR={work}/cache/l0202/release/build
+exit: 0
+stderr: ~ "Warning [L0202]" # original predicate
+stderr: !~ "Error [L0202]" # original predicate
+stdout: = l0202.out
+step: jet dev main.jet --watch=off
+cwd: l0202
+env: JET_STORE_DIR={work}/cache/l0202/dev/build
+exit: 0
+stderr: ~ "Warning [L0202]" # original predicate
+stderr: !~ "Error [L0202]" # original predicate
+stdout: = l0202.out
+step: jet build main.jet
+cwd: l0202
+env: JET_STORE_DIR={work}/cache/l0202/build/build
+exit: 0
+stderr: ~ "Warning [L0202]" # original predicate
+stderr: !~ "Error [L0202]" # original predicate
+step: {work}/l0202/.jet/build/main
+cwd: l0202
+exit: 0
+stdout: = l0202.out
+step: jet run --json main.jet
+cwd: l0103
+env: JET_STORE_DIR={work}/cache/json/build
+exit: 0
+stdout: = l0103.out
+stderr: ~ "\"severity\":\"warning\"" # original predicate
+stderr: ~ "\"code\":\"L0103\"" # original predicate
+stderr: !~ "\"severity\":\"error\"" # original predicate
+step: jet run --quiet main.jet
+cwd: l0103
+env: JET_STORE_DIR={work}/cache/quiet/build
+exit: 0
+stdout: = l0103.out

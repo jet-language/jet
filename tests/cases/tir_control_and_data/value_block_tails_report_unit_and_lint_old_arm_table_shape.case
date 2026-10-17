@@ -1,0 +1,31 @@
+# HAND-PORT tests/tir_control_and_data.rs:243-369 value_block_tails_report_unit_and_lint_old_arm_table_shape
+# PENDING-KIT; no runtime/reference proof.
+# All original invalid3/count/non-null spans;first L0513 source edit applied only,comments+else/return absence;semicolon absence+recheck;effectful no L0513.
+fixture: value_block_tails_report_unit_and_lint_old_arm_table_shape.fixture
+step: jet check invalid.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E0114"] #= 3
+json: machine doc $.reports[?code="E0114"].span != null
+step: jet check lintable.jet --json
+exit: 0
+json: machine doc $.reports[?code="L0513"] #>= 1
+json: machine doc $.reports[?code="L0513"][0].fix_edits #>= 1
+apply-edits: machine doc $.reports[?code="L0513"][0].fix_edits[0]
+file: lintable.jet ~ "else -> { \"other\" }" # original fixed-source substring
+file: lintable.jet ~ "Keep the arm comment" # original fixed-source substring
+file: lintable.jet ~ "keep value comment" # original fixed-source substring
+file: lintable.jet ~ "Keep the fallback comment" # original fixed-source substring
+file: lintable.jet ~ "Keep the tail comment" # original fixed-source substring
+file: lintable.jet !~ "return" # original fixed-source absence
+step: jet check semicolon.jet --json
+exit: 0
+json: machine doc $.reports[?code="L0513"] #>= 1
+json: machine doc $.reports[?code="L0513"][0].fix_edits #>= 1
+apply-edits: machine doc $.reports[?code="L0513"][0].fix_edits[0]
+file: semicolon.jet !~ "return" # original fixed-source absence
+file: semicolon.jet !~ ";" # original fixed-source absence
+step: jet check semicolon.jet
+exit: 0
+step: jet check effectful.jet --json
+exit: 0
+json: machine doc $.reports[?code="L0513"] #= 0

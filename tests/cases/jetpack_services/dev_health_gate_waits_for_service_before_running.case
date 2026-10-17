@@ -1,0 +1,19 @@
+# Port of tests/jetpack_services.rs:368-401; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# PENDING-GRAMMAR(batch-four): mkdir, chmod and host-name conditional.
+fixture: dev_health_gate_waits_for_service_before_running.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+mkdir: root
+mkdir: home
+when os-name linux: mkdir: state
+when os-name linux: chmod: bin/systemd-run 755
+when os-name linux: chmod: bin/systemctl 755
+step: jetpack dev --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+stdout: ~ "DEV-RAN" # original predicate
+step: jetpack services down --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+exit: any # original predicate; cleanup result was ignored

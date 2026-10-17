@@ -1,0 +1,32 @@
+# Port of tests/cli_parts/runtime.rs:1043-1156; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+# PENDING-SEAM(compiler-lib): COMMAND_ROLE_FILES-derived per-file scaffold content claims :1120-1125; ledger-only subclaims in S1-RUNTIME-SEAMS.tsv.
+fixture: fixtures/role
+step: jet run
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "role" # original predicate
+copy: {root}/tests/cases/cli_parts_runtime/role-explicit.bytes explicit.jet
+step: jet run explicit.jet
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "file scope" # original predicate
+stdout: !~ "role\n" # original predicate
+step: jet run --show-default
+cwd: stock
+env: NO_COLOR=1
+exit: 0
+stderr: ~ "jet run: using stock default" # original predicate
+stdout: ~ "stock" # original predicate
+stdout: !~ "role\n" # original predicate
+step: jet new scaffold --template overrides
+env: NO_COLOR=1
+exit: 0
+step: jet run
+cwd: duplicate
+env: NO_COLOR=1
+exit: 1
+stderr: ~ "Error [E0624]" # original predicate
+stderr: ~ "Why:" # original predicate
+stderr: ~ "Fix:" # original predicate

@@ -98,6 +98,33 @@ fn fallible_collection_return(recv_ty: &Type, method: &str, callback_ret: &Type)
     })
 }
 
+/// A callable value handed to an eager sequence adapter keeps its checked
+/// failure route. `fn(T) -> U` carries the default `Err` route, so TIR runs
+/// the `Try*` kernel and the call site propagates each element's failure
+/// exactly as a direct `f(item)` would. A literal lambda records its own
+/// propagation (`fallible_propagation`), and a written `Result` return is
+/// projected onto the collection by `fallible_collection_return`.
+fn callback_value_takes_default_route(
+    recv_ty: &Type,
+    method: &str,
+    callback: &Expr,
+    callback_ty: &Type,
+) -> bool {
+    let Type::Fn { params, ret, .. } = callback_ty else {
+        return false;
+    };
+    let eager = match method {
+        "map" | "filter" => !matches!(recv_ty, Type::Option(_) | Type::Map { .. }),
+        "sort_by" | "sort_by_desc" => {
+            params.len() == 1 && matches!(recv_ty, Type::List(_) | Type::FixedList { .. })
+        }
+        _ => false,
+    };
+    eager
+        && !matches!(callback.without_parens(), Expr::Lambda(_))
+        && crate::AST::FailureContract::from_return_type(ret.as_deref()).is_default()
+}
+
 impl<'a> Checker<'a> {
     fn check_builtin_method_labels(&mut self, method: &str, args: &[CallArg]) {
         // Zip labels name output fields rather than parameters. Map.merge's
@@ -462,7 +489,7 @@ impl<'a> Checker<'a> {
             let captured = self
                 .lookup(&name)
                 .map(|info| info.ty.clone())
-                .or_else(|| self.consts.get(&name).cloned());
+                .or_else(|| self.const_type(&name).cloned());
             let Some(ty) = captured else { continue };
             if super::super::is_reactive_handle_ty(&ty)
                 && !self.lookup(&name).is_some_and(|info| info.reactive_local)
@@ -486,7 +513,34 @@ impl<'a> Checker<'a> {
         span: Span,
         ret: Option<Type>,
     ) -> Option<Type> {
+        let ret = if matches!(recv_ty, Type::Named(name) if name == crate::Syntax::CLOCK_TYPE)
+            && method == "now"
+        {
+            self.core_source_owner_module("core.time", "Instant")
+                .map(|owner| Type::Named(self.canonical_nominal_name(owner, "Instant")))
+                .or(ret)
+        } else if *recv_ty == Type::Int
+            && method == "pow"
+            && args.len() == 1
+            && super::super::binary::is_written_negative_int(&args[0].expr)
+        {
+            Some(Type::Named(crate::Syntax::TYPE_FRACTION.to_string()))
+        } else {
+            ret
+        };
         self.check_builtin_method_labels(method, args);
+        // The parser stores `&xs.push(^x.f)`'s move mark on the CallArg. A
+        // field read keeps it as the exact-place move a consuming call
+        // argument gets (`check_call_argument_access`), so the stored value
+        // moves out of its owner instead of materializing a copy.
+        for arg in args.iter_mut() {
+            if arg.convention == crate::AST::AccessConvention::Move
+                && matches!(arg.expr, Expr::Field(..))
+            {
+                let place = std::mem::replace(&mut arg.expr, Expr::Absent(arg.span));
+                arg.expr = Expr::Place(Box::new(place), crate::AST::PlaceAccess::Take, arg.span);
+            }
+        }
         let mut call_access = self.call_access_frame();
         let receiver_borrow = Collections::builtin_receiver_borrow(recv_ty, method);
         self.with_call_access(&mut call_access, |checker| match receiver_borrow {
@@ -997,6 +1051,15 @@ impl<'a> Checker<'a> {
                         et,
                         crate::AST::AccessConvention::Read,
                     );
+                    // Inside a callback the failure propagates through that
+                    // callback's carrier, exactly as a direct `f(item)` does.
+                    if i == 0 && callback_value_takes_default_route(recv_ty, method, &arg.expr, &gt) {
+                        if self.in_lambda_body {
+                            self.task_body_propagates = true;
+                        } else {
+                            self.failure_direct_source = true;
+                        }
+                    }
                     if Collections::is_closure_method(method) && i == 0 && method == "map" {
                         if let Type::Fn {
                             ret: Some(ref r), ..

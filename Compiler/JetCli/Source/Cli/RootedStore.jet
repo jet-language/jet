@@ -1,0 +1,386 @@
+// Rooted transactions over Core's held directories (D-CORE-FILEDIR1). The one
+// Jet implementation of the store primitives every CLI history writer shares:
+// Source/RecordIndex.rs `secure_create_dir`, `acquire_index_lock`,
+// `store_unlocked` and `read_bounded`, and Source/ReceiptStore.rs
+// `publish_immutable_bytes` and `read_regular`. Every step names one part
+// relative to a directory held open from the canonical project root, never a
+// pathname, so a link or a renamed ancestor cannot redirect a read or a
+// publication, and a staged file only ever becomes visible by one rename.
+
+// RecordIndex.rs RECORD_INDEX_LOCK_ATTEMPTS, retried 5 ms apart.
+JET_CLI_ROOTED_LOCK_ATTEMPTS :: 2000
+// Fresh staging names one publication tries before it refuses.
+JET_CLI_ROOTED_STAGE_ATTEMPTS :: 64
+JET_CLI_ROOTED_READ_CHUNK :: 65536
+
+// One directory held below a canonical store root. `path` is display text;
+// every operation goes through the held handle.
+struct JetCLIRootedDirectory {
+    path: String
+    handle: cli_files.Directory
+
+    // Hold `parts` below the canonical absolute `root`, one part at a time,
+    // never following a link (RecordIndex.rs `secure_create_dir`). A missing
+    // part is created with mode 0o700 when `create`, and is an error
+    // otherwise (ask `present` first). A link or a non-directory part is an
+    // error, never a fallback. Bind the result with `??`: a held handle moved
+    // out of a match on the temporary result is not guaranteed to survive.
+    fn open(root: String, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
+        if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
+        handle := jet_cli_rooted_open_root(root)
+        path := root
+        loop part in parts {
+            jet_cli_rooted_validate_name(part)
+            shown :: jet_cli_rooted_join(path, part)
+            present :: if handle.entry_stat(part) == {
+                .Ok(info) -> {
+                    if info.is_symlink -> return Err(jet_cli_read_error("store directory is a symlink: {shown}"))
+                    if !info.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {shown}"))
+                    true
+                }
+                .Err(error) -> {
+                    if !jet_cli_rooted_missing(error) -> return Err(jet_cli_read_error("could not inspect store directory `{shown}`: {jet_cli_io_error_text(error)}"))
+                    false
+                }
+            }
+            if !present {
+                if !create -> return Err(jet_cli_read_error("store directory does not exist: {shown}"))
+                // A writer that created it first is checked below exactly like
+                // a directory that was already there.
+                if handle.create_directory(part, mode: Val(0o700)) == .Err(error) {
+                    if !jet_cli_rooted_exists(error) -> return Err(jet_cli_read_error("could not create store directory `{shown}`: {jet_cli_io_error_text(error)}"))
+                }
+            }
+            handle = handle.open_directory(part) ?? return Err(jet_cli_read_error("could not open store directory `{shown}`: {jet_cli_io_error_text(err)}"))
+            held :: handle.stat() ?? return Err(jet_cli_read_error("could not inspect store directory `{shown}`: {jet_cli_io_error_text(err)}"))
+            if !held.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {shown}"))
+            path = shown
+        }
+        Ok(JetCLIRootedDirectory{path: path, handle: handle})
+    }
+
+    // Whether every part below `root` exists as a real directory; a link or a
+    // non-directory part is an error, exactly as `open` reports it.
+    fn present(root: String, parts: [String]) -[FS]> Bool JetCLIReadError! {
+        if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
+        handle := jet_cli_rooted_open_root(root)
+        path := root
+        loop part in parts {
+            jet_cli_rooted_validate_name(part)
+            shown :: jet_cli_rooted_join(path, part)
+            info :: handle.entry_stat(part) ?? {
+                if jet_cli_rooted_missing(err) -> return Ok(false)
+                return Err(jet_cli_read_error("could not inspect store directory `{shown}`: {jet_cli_io_error_text(err)}"))
+            }
+            if info.is_symlink -> return Err(jet_cli_read_error("store directory is a symlink: {shown}"))
+            if !info.is_dir -> return Err(jet_cli_read_error("store directory is not a directory: {shown}"))
+            handle = handle.open_directory(part) ?? return Err(jet_cli_read_error("could not open store directory `{shown}`: {jet_cli_io_error_text(err)}"))
+            path = shown
+        }
+        Ok(true)
+    }
+
+    // The regular file `name` held here, at most `limit` bytes
+    // (`read_regular`/`read_bounded`). Absence is None. A link, a non-file, a
+    // size over the bound, or a file replaced while it was read is an error.
+    fn read(self, name: String, limit: Int) -[FS, Time.Wait]> [U8]? JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        shown :: jet_cli_rooted_join(self.path, name)
+        info :: self.handle.entry_stat(name) ?? {
+            if err == .NotFound(_) -> return Ok(None)
+            return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
+        }
+        if info.is_symlink || !info.is_file -> return Err(jet_cli_read_error("`{shown}` is not a regular file"))
+        if info.size > limit -> return Err(jet_cli_read_error("`{shown}` exceeds {limit} bytes"))
+        reader :: self.handle.open(name) ?? return Err(jet_cli_read_error("could not open `{shown}`: {jet_cli_io_error_text(err)}"))
+        opened :: reader.stat() ?? return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
+        if !opened.is_file || opened.id != info.id -> return Err(jet_cli_read_error("`{shown}` changed while it was read"))
+        bytes := [U8]{}
+        loop {
+            chunk :: reader.read(JET_CLI_ROOTED_READ_CHUNK) ?? return Err(jet_cli_read_error("could not read `{shown}`: {jet_cli_io_error_text(err)}"))
+            if chunk.len() == 0 -> break
+            loop byte in chunk -> &bytes.push(byte)
+            if bytes.len() > limit -> return Err(jet_cli_read_error("`{shown}` exceeds {limit} bytes"))
+        }
+        after :: reader.stat() ?? return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
+        if after.id != info.id || after.size != bytes.len() -> return Err(jet_cli_read_error("`{shown}` changed while it was read"))
+        Ok(Val(bytes))
+    }
+
+    // The entries held here whose names are valid UTF-8, in raw-name order.
+    // A link or a non-file entry is reported as such, never followed.
+    fn list(self) -[FS]> [JetCLIRootedEntry] JetCLIReadError! {
+        entries :: self.handle.list() ?? return Err(jet_cli_read_error("could not list `{self.path}`: {jet_cli_io_error_text(err)}"))
+        rows := [JetCLIRootedEntry]{}
+        loop entry in entries {
+            if !entry.name_is_unicode -> next
+            info :: self.handle.entry_stat(entry.name) ?? {
+                if err == .NotFound(_) -> next
+                return Err(jet_cli_read_error("could not inspect `{entry.path}`: {jet_cli_io_error_text(err)}"))
+            }
+            &rows.push(JetCLIRootedEntry{name: entry.name, is_file: info.is_file && !info.is_symlink, is_dir: info.is_dir && !info.is_symlink, is_symlink: info.is_symlink, size: info.size})
+        }
+        &rows.sort_by((left: JetCLIRootedEntry, right: JetCLIRootedEntry) -> left.name <=> right.name)
+        Ok(rows)
+    }
+
+    // Hold this directory's exclusive advisory lock (RecordIndex.rs
+    // `acquire_index_lock`): contention is retried every 5 ms, 2000 times,
+    // then refused. The kernel releases the lock when its owner closes or the
+    // process ends, so no stale lock file is ever left behind to steal.
+    // Callers bind the owner to a local with `??`; it holds the lock until
+    // that local leaves scope.
+    fn lock(self, what: String) -[FS, Time]> cli_files.AdvisoryLock JetCLIReadError! {
+        attempt := 0
+        loop {
+            // Bind the owner through `??`: returning it out of a match on the
+            // temporary result drops (releases) the lock on the way out.
+            held :: self.handle.lock() ?? {
+                if !jet_cli_rooted_contended(err) -> return Err(jet_cli_read_error("could not lock {what}: {jet_cli_io_error_text(err)}"))
+                attempt += 1
+                if attempt >= JET_CLI_ROOTED_LOCK_ATTEMPTS -> return Err(jet_cli_read_error("timed out waiting for {what} lock"))
+                cli_time.sleep(5ms)
+                next
+            }
+            return Ok(held)
+        }
+    }
+
+    // Stage `bytes` beside `name` under a fresh exclusive name
+    // (`.{name}.{pid}.{n}`), set `mode` exactly, and make the bytes durable.
+    // Returns the staged name; the caller publishes or removes it.
+    fn stage(self, name: String, bytes: [U8], mode: Int?) -[FS, Env, Time.Wait]> String JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        pid :: cli_process.current_pid()
+        attempt := 0
+        loop {
+            temp :: ".{name}.{pid}.{attempt}"
+            writer := self.handle.create(temp, if_exists: .Refuse) ?? {
+                if err == .AlreadyExists(_) && attempt + 1 < JET_CLI_ROOTED_STAGE_ATTEMPTS {
+                    attempt += 1
+                    next
+                }
+                return Err(jet_cli_read_error("could not stage `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(err)}"))
+            }
+            if jet_cli_rooted_fill(&writer, bytes, mode) == .Err(error) {
+                close(^writer)
+                self.discard(temp)
+                return Err(jet_cli_read_error("could not write `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(error)}"))
+            }
+            close(^writer)
+            return Ok(temp)
+        }
+    }
+
+    // Publish `bytes` as the immutable file `name` (ReceiptStore.rs
+    // `publish_immutable_bytes`): true when this call created it, false when
+    // the identical bytes were already published. Different existing bytes
+    // are an identity collision. Nothing ever replaces a published name.
+    fn publish_immutable(self, name: String, bytes: [U8], mode: Int?, limit: Int) -[FS, Env, Time.Wait]> Bool JetCLIReadError! {
+        temp :: self.stage(name, bytes, mode)
+        shown :: jet_cli_rooted_join(self.path, name)
+        if self.handle.rename(temp, name, if_exists: .Refuse) == .Err(error) {
+            self.discard(temp)
+            if !jet_cli_rooted_exists(error) -> return Err(jet_cli_read_error("could not publish `{shown}`: {jet_cli_io_error_text(error)}"))
+            if self.read(name, limit) == {
+                .Ok(existing) -> {
+                    if existing == .Val(published) {
+                        if published == bytes -> return Ok(false)
+                    } else {
+                        return Err(jet_cli_read_error("`{shown}` disappeared while it was published"))
+                    }
+                }
+                .Err(failure) -> return Err(failure)
+            }
+            return Err(jet_cli_read_error("`{shown}` identity collision with different content"))
+        }
+        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        Ok(true)
+    }
+
+    // Atomically replace the regular file `name` with `bytes`
+    // (RecordIndex.rs `store_unlocked`): an existing link or non-file is
+    // refused, the staged bytes become visible by one rename, and the
+    // directory is flushed. Callers that read-modify-write hold `lock` first.
+    fn replace(self, name: String, bytes: [U8], mode: Int?) JetCLIReadError! -[FS, Env, Time.Wait]> {
+        jet_cli_rooted_validate_name(name)
+        shown :: jet_cli_rooted_join(self.path, name)
+        if self.handle.entry_stat(name) == {
+            .Ok(info) -> {
+                if info.is_symlink || !info.is_file -> return Err(jet_cli_read_error("`{shown}` is unsafe: not a regular file"))
+            }
+            .Err(error) -> {
+                if !jet_cli_rooted_missing(error) -> return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(error)}"))
+            }
+        }
+        temp :: self.stage(name, bytes, mode)
+        if self.handle.rename(temp, name, if_exists: .Replace) == .Err(error) {
+            self.discard(temp)
+            return Err(jet_cli_read_error("could not publish `{shown}`: {jet_cli_io_error_text(error)}"))
+        }
+        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+    }
+
+    // Permission preservation for a checked source repair, never a link.
+    fn file_mode(self, name: String) -[FS]> Int JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        shown :: jet_cli_rooted_join(self.path, name)
+        info :: self.handle.entry_stat(name) ?? return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
+        if info.is_symlink || !info.is_file -> return Err(jet_cli_read_error("`{shown}` is not a regular file"))
+        Ok(info.mode)
+    }
+
+    // Remove the regular file `name` (RecordIndex.rs
+    // `remove_disposable_artifact`); absence is not an error. A link or a
+    // directory is refused, never followed or removed.
+    fn remove(self, name: String) -[FS]> Bool JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        shown :: jet_cli_rooted_join(self.path, name)
+        info :: self.handle.entry_stat(name) ?? {
+            if jet_cli_rooted_missing(err) -> return Ok(false)
+            return Err(jet_cli_read_error("could not inspect `{shown}`: {jet_cli_io_error_text(err)}"))
+        }
+        if info.is_symlink || !info.is_file -> return Err(jet_cli_read_error("`{shown}` is not a regular file"))
+        if self.handle.remove(name) == .Err(error) {
+            if error == .NotFound(_) -> return Ok(false)
+            return Err(jet_cli_read_error("could not remove `{shown}`: {jet_cli_io_error_text(error)}"))
+        }
+        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush `{self.path}`: {jet_cli_io_error_text(err)}"))
+        Ok(true)
+    }
+
+    // Transaction members must have exactly one link. Retain the identity for
+    // the final pre-rename and recovery comparisons.
+    fn transaction_stat(self, name: String) -[FS]> cli_files.Stat JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        info :: self.handle.entry_stat(name) ?? return Err(jet_cli_read_error("could not inspect `{jet_cli_rooted_join(self.path, name)}`: {jet_cli_io_error_text(err)}"))
+        if info.is_symlink || !info.is_file || info.links != 1 -> return Err(jet_cli_read_error("transaction member is not a regular single-link file: {jet_cli_rooted_join(self.path, name)}"))
+        Ok(info)
+    }
+
+    fn member_present(self, name: String) -[FS]> Bool JetCLIReadError! {
+        jet_cli_rooted_validate_name(name)
+        _ :: self.handle.entry_stat(name) ?? {
+            if jet_cli_rooted_missing(err) -> return Ok(false)
+            return Err(jet_cli_read_error("could not inspect member: {jet_cli_io_error_text(err)}"))
+        }
+        Ok(true)
+    }
+
+    fn transaction_lock(self) -[FS]> cli_files.AdvisoryLock JetCLIReadError! {
+        self.handle.lock() ?? return Err(jet_cli_read_error("another codemod holds `{self.path}`"))
+    }
+
+    fn publish_staged(self, temp: String, name: String, destination_id: cli_files.FileID, temp_id: cli_files.FileID) JetCLIReadError! -[FS]> {
+        destination :: self.transaction_stat(name)
+        staged :: self.transaction_stat(temp)
+        if destination.id != destination_id || staged.id != temp_id -> return Err(jet_cli_read_error("transaction member identity changed before publication: {jet_cli_rooted_join(self.path, name)}"))
+        self.handle.rename(temp, name, if_exists: .Replace) ?? return Err(jet_cli_read_error("could not publish transaction member: {jet_cli_io_error_text(err)}"))
+        self.handle.fsync() ?? return Err(jet_cli_read_error("could not flush transaction directory: {jet_cli_io_error_text(err)}"))
+    }
+
+    // Open descendants from this retained root, never by reopening display
+    // text. An empty path means the caller should borrow this root itself.
+    fn descendant(self, parts: [String], create: Bool) -[FS]> JetCLIRootedDirectory JetCLIReadError! {
+        if parts.len() == 0 -> return Err(jet_cli_read_error("descendant requires at least one directory part"))
+        loop part in parts -> jet_cli_rooted_validate_name(part)
+        first :: parts[0]
+        if create && self.handle.entry_stat(first) == .Err(error) {
+            if !jet_cli_rooted_missing(error) -> return Err(jet_cli_read_error("could not inspect directory: {jet_cli_io_error_text(error)}"))
+            if self.handle.create_directory(first, mode: Val(0o700)) == .Err(failure) {
+                if !jet_cli_rooted_exists(failure) -> return Err(jet_cli_read_error("could not create directory: {jet_cli_io_error_text(failure)}"))
+            }
+        }
+        held := self.handle.open_directory(first) ?? return Err(jet_cli_read_error("could not hold directory: {jet_cli_io_error_text(err)}"))
+        path := jet_cli_rooted_join(self.path, first)
+        loop index in 1..<parts.len() {
+            part :: parts[index]
+            if create && held.entry_stat(part) == .Err(error) {
+                if !jet_cli_rooted_missing(error) -> return Err(jet_cli_read_error("could not inspect directory: {jet_cli_io_error_text(error)}"))
+                if held.create_directory(part, mode: Val(0o700)) == .Err(failure) {
+                    if !jet_cli_rooted_exists(failure) -> return Err(jet_cli_read_error("could not create directory: {jet_cli_io_error_text(failure)}"))
+                }
+            }
+            held = held.open_directory(part) ?? return Err(jet_cli_read_error("could not hold directory: {jet_cli_io_error_text(err)}"))
+            path = jet_cli_rooted_join(path, part)
+        }
+        Ok(JetCLIRootedDirectory{path: path, handle: held})
+    }
+
+    // Best-effort removal of a staged name after a failed publication; the
+    // original failure is what the caller reports.
+    fn discard(self, temp: String) Never! -[FS]> {
+        _ :: self.handle.remove(temp) ?? return
+    }
+}
+
+// One listed entry, described without following a link.
+struct JetCLIRootedEntry {
+    name: String
+    is_file: Bool
+    is_dir: Bool
+    is_symlink: Bool
+    size: Int
+}
+
+fn jet_cli_rooted_fill(writer: &cli_files.FileWriter, bytes: [U8], mode: Int?) IOError! -[FS, Time.Wait]> {
+    writer.write_all(bytes)
+    if mode == .Val(bits) -> writer.set_mode(bits)
+    writer.fsync()
+}
+
+fn jet_cli_rooted_missing(error: IOError) -> Bool Never! {
+    if error == .NotFound(_) -> return true
+    false
+}
+
+fn jet_cli_rooted_exists(error: IOError) -> Bool Never! {
+    if error == .AlreadyExists(_) -> return true
+    false
+}
+
+// flock(2) reports a held lock as EWOULDBLOCK, which Core maps to `Other`.
+fn jet_cli_rooted_contended(error: IOError) -> Bool Never! {
+    if error == .Other(_) -> return true
+    false
+}
+
+// A store part is one plain name: never empty, `.`, `..`, or a path.
+fn jet_cli_rooted_validate_name(name: String) JetCLIReadError! {
+    if name.len() == 0 || name == "." || name == ".." || name.contains("/") || name.contains("\\") || name.bytes().contains(U8{0}) {
+        return Err(jet_cli_read_error("store name `{name}` is not one plain part"))
+    }
+}
+
+// Hold every root component too: O_NOFOLLOW on only the final root component
+// does not stop a replaced intermediate ancestor from redirecting the store.
+fn jet_cli_rooted_open_root(root: String) -[FS]> cli_files.Directory JetCLIReadError! {
+    if !root.starts_with("/") -> return Err(jet_cli_read_error("store root must be absolute: {root}"))
+    held := cli_files.open_directory("/") ?? return Err(jet_cli_read_error("could not open store root `/`: {jet_cli_io_error_text(err)}"))
+    path := ""
+    loop part in root.split("/") {
+        if part == "" -> next
+        jet_cli_rooted_validate_name(part)
+        path = "{path}/{part}"
+        held = held.open_directory(part) ?? return Err(jet_cli_read_error("could not open store root `{path}`: {jet_cli_io_error_text(err)}"))
+    }
+    Ok(held)
+}
+
+fn jet_cli_rooted_join(base: String, name: String) -> String Never! {
+    if base.ends_with("/") -> return "{base}{name}"
+    "{base}/{name}"
+}
+
+// Source/CmdCompile.rs::build_record_program: the invocation's selected entry,
+// made absolute/canonical when possible and root-relative only on a complete
+// path-component prefix. This identity is shared by the writer and reader.
+fn jet_cli_build_record_program_at(file: String, workspace_root: String, cwd: String) -[FS, Env]> String Never! {
+    joined :: if cli_files.is_absolute(file) -> file else -> jet_cli_entry_join(cwd, file)
+    input :: (cli_files.realpath(joined) ?? joined).replace("\\", "/")
+    root :: (cli_files.realpath(workspace_root) ?? workspace_root).replace("\\", "/")
+    if input == root -> return ""
+    prefix :: if root.ends_with("/") -> root else -> "{root}/"
+    if input.starts_with(prefix) -> return input.removeprefix(prefix)
+    input
+}

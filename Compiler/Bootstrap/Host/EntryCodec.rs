@@ -114,7 +114,7 @@ pub(crate) trait BootstrapEntryPhysicalBindings: Clone + Send + Sync + 'static {
         checked_type: &MirType,
         program: &MirProgram,
         physical_identity: usize,
-        root: jet_jit::SourceSharedInterop::SourceSharedInterop,
+        root: jet_evalhost::SourceSharedInterop::SourceSharedInterop,
         payload_shape: &BootstrapEntryHostTypeShape,
     ) -> Result<Option<MirRuntimeValue>, String>;
 
@@ -1428,7 +1428,7 @@ pub(crate) fn __jet_bootstrap_entry_native_interface_{method}_result_to_runtime<
 const ENTRY_NATIVE_INTERFACE_ARGUMENT: &str = r#"
 #[doc(hidden)]
 pub(crate) fn __jet_bootstrap_entry_native_interface_argument<P, T>(
-    call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
+    call: &mut ::jet_evalhost::SourceInterfaces::NativeInterfaceCall,
     index: usize,
     compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
     physical: &P,
@@ -1525,7 +1525,7 @@ fn emit_entry_native_interface_shim(
         r#"
 #[doc(hidden)]
 pub(crate) fn __jet_bootstrap_entry_native_interface_{name}<P, F>(
-    call: &mut ::jet_jit::SourceInterfaces::NativeInterfaceCall,
+    call: &mut ::jet_evalhost::SourceInterfaces::NativeInterfaceCall,
     compiler_program: &::std::sync::Arc<::jet_foundation::MIR::MirProgram>,
     machine_abi_shape: &crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape,
     physical: &P,
@@ -1625,16 +1625,28 @@ pub(crate) fn append_bootstrap_entry_codec(
     }
     to_types.sort_by_key(|definition| definition.id);
     from_types.sort_by_key(|definition| definition.id);
+    // Every converter and helper is generated even after one fails, so
+    // `finish` reports the whole packaging error list in one stage-zero run.
     for definition in &to_types {
-        emit_to_runtime_converter(out, program, symbols, definition)?;
+        if let Err(error) = emit_to_runtime_converter(out, program, symbols, definition) {
+            symbols.record(error);
+        }
     }
     for definition in &from_types {
-        emit_from_runtime_converter(out, program, symbols, definition)?;
+        if let Err(error) = emit_from_runtime_converter(out, program, symbols, definition) {
+            symbols.record(error);
+        }
     }
-    emit_entry_native_interface_codecs(out, program, symbols, &native_methods)?;
-    emit_entry_machine_access_helpers(out, program, symbols)?;
-    emit_entry_host_type_shape_from_source(out, symbols)?;
-    emit_entry_conversion_helpers(out)?;
+    for emitted in [
+        emit_entry_native_interface_codecs(out, program, symbols, &native_methods),
+        emit_entry_machine_access_helpers(out, program, symbols),
+        emit_entry_host_type_shape_from_source(out, symbols),
+        emit_entry_conversion_helpers(out),
+    ] {
+        if let Err(error) = emitted {
+            symbols.record(error);
+        }
+    }
     Ok(())
 }
 
@@ -1759,8 +1771,8 @@ fn emit_entry_conversion_helpers(out: &mut String) -> Result<(), BootstrapHostCo
 /// Both carry the same result and `Box<dyn Any + Send>` completion.
 fn __jet_bootstrap_shared_outcome<T>(
     outcome: crate::JetSharedPhysicalOperationOutcome<T>,
-) -> ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome<T> {
-    ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(outcome.result, outcome.completion)
+) -> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome<T> {
+    ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(outcome.result, outcome.completion)
 }
 
 /// A runtime owner-alias lease behind the JIT interop alias surface.
@@ -1768,7 +1780,7 @@ struct __JetBootstrapSharedOwnerAlias<T: Send + Sync + 'static> {
     alias: Option<crate::jet_std::JetSharedPhysicalOwnerAlias<T>>,
 }
 
-impl<T: Send + Sync + 'static> ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
+impl<T: Send + Sync + 'static> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
     for __JetBootstrapSharedOwnerAlias<T>
 {
     fn token_id(&self) -> i64 {
@@ -1777,10 +1789,10 @@ impl<T: Send + Sync + 'static> ::jet_jit::SourceSharedInterop::SourceSharedInter
 
     fn release(
         mut self: Box<Self>,
-    ) -> ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
+    ) -> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
         match self.alias.take() {
-            Some(alias) => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(()), alias.release()),
-            None => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
+            Some(alias) => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(()), alias.release()),
+            None => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
                 Err("Source Shared owner alias was already released".to_string()),
                 None,
             ),
@@ -1792,20 +1804,20 @@ impl<T: Send + Sync + 'static> ::jet_jit::SourceSharedInterop::SourceSharedInter
 struct __JetBootstrapSharedOwnerWeak<T: Send + Sync + 'static> {
     owner: crate::jet_std::JetSharedPhysicalOwner<T>,
     root_builder: ::std::sync::Arc<
-        dyn Fn() -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String> + Send + Sync,
+        dyn Fn() -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String> + Send + Sync,
     >,
     type_id: u64,
 }
 
-impl<T: Send + Sync + 'static> ::jet_jit::SourceSharedInterop::SourceSharedInteropWeakOwner
+impl<T: Send + Sync + 'static> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropWeakOwner
     for __JetBootstrapSharedOwnerWeak<T>
 {
     fn upgrade(
         &self,
     ) -> Result<
         Option<(
-            ::jet_jit::SourceSharedInterop::SourceSharedInterop,
-            Box<dyn ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>,
+            ::jet_evalhost::SourceSharedInterop::SourceSharedInterop,
+            Box<dyn ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>,
         )>,
         String,
     > {
@@ -1835,9 +1847,9 @@ fn __jet_bootstrap_shared_source_interop_root<T: Send + Sync + 'static>(
     owner: &crate::jet_std::JetSharedPhysicalOwner<T>,
     type_id: u64,
     root_builder: ::std::sync::Arc<
-        dyn Fn() -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String> + Send + Sync,
+        dyn Fn() -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String> + Send + Sync,
     >,
-) -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String> {
+) -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String> {
     let root = root_builder()?;
     if root.type_id() != type_id {
         return Err("Source Shared callback root has a different checked type".to_string());
@@ -1861,7 +1873,7 @@ fn __jet_bootstrap_shared_source_interop_root<T: Send + Sync + 'static>(
             move || {
                 retain_owner.retain_alias().map(|alias| {
                     Box::new(__JetBootstrapSharedOwnerAlias { alias: Some(alias) })
-                        as Box<dyn ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>
+                        as Box<dyn ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease>
                 })
             },
         )
@@ -1895,7 +1907,7 @@ struct __JetBootstrapSharedGuard<
 }
 
 impl<G, Read, Stage, Suspend, Resume, Held, Abort, RootPtr, MarkDirty, Revision, Release>
-    ::jet_jit::SourceSharedInterop::SourceSharedInteropGuard
+    ::jet_evalhost::SourceSharedInterop::SourceSharedInteropGuard
     for __JetBootstrapSharedGuard<
         G,
         Read,
@@ -1962,9 +1974,9 @@ where
     fn wait_suspend(
         &mut self,
         value: ::jet_foundation::MIR::MirRuntimeValue,
-    ) -> ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
+    ) -> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
         let Some(guard) = self.guard.as_mut() else {
-            return ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
+            return ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
                 Err("Shared guard was already released".to_string()),
                 None,
             );
@@ -1974,32 +1986,32 @@ where
             Ok(_) => match (self.stage)(guard, value) {
                 Ok(()) => __jet_bootstrap_shared_outcome((self.suspend)(guard)),
                 Err(error) => {
-                    ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Err(error), None)
+                    ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Err(error), None)
                 }
             },
-            Err(error) => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Err(error), None),
+            Err(error) => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Err(error), None),
         }
     }
 
     fn wait_resume(
         &mut self,
         cancelled: &mut dyn FnMut() -> bool,
-    ) -> ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome<
+    ) -> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome<
         Option<::jet_foundation::MIR::MirRuntimeValue>,
     > {
         let Some(guard) = self.guard.as_mut() else {
-            return ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
+            return ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
                 Err("Shared guard was already released".to_string()),
                 None,
             );
         };
         match (self.resume)(guard, cancelled) {
-            Ok(true) => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
+            Ok(true) => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
                 (self.read)(guard).map(Some),
                 None,
             ),
-            Ok(false) => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(None), None),
-            Err(error) => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Err(error), None),
+            Ok(false) => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(None), None),
+            Err(error) => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Err(error), None),
         }
     }
 
@@ -2016,17 +2028,17 @@ where
         Ok(())
     }
 
-    fn wait_abort(&mut self) -> ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
+    fn wait_abort(&mut self) -> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
         match self.guard.as_mut() {
             Some(guard) => __jet_bootstrap_shared_outcome((self.abort)(guard)),
-            None => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(()), None),
+            None => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(()), None),
         }
     }
 
-    fn release(&mut self) -> ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
+    fn release(&mut self) -> ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome<()> {
         match self.guard.take() {
             Some(guard) => __jet_bootstrap_shared_outcome((self.release)(guard)),
-            None => ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(()), None),
+            None => ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(Ok(()), None),
         }
     }
 
@@ -2361,15 +2373,21 @@ fn emit_to_runtime_converter(
     let id = definition.id.0;
     let body = match &definition.kind {
         MirTypeDefKind::Struct { fields, .. } => {
+            // The default Err is the native `JetErr` carrier, not an emitted
+            // record: it boxes `cause` inside the outcome and keeps the private
+            // error metadata as typed carrier facts, read through its accessors.
+            let default_err = definition.compiler_builtin
+                == Some(jet_foundation::MIR::MirCompilerBuiltin::DefaultErr);
             let mut rows = Vec::with_capacity(fields.len());
             for field in fields {
-                let symbol = symbols.field_symbol(&definition.name, &field.name)?;
                 let field_source = if definition.name == "JetEvalOwnedRoot" && field.name == "config" {
                     format!("&{}", symbols.call("jet_eval_owned_root_config", &[("*value", "value.clone()")])?)
-                } else if BootstrapCodecSymbols::boxed_edge(definition, &field.name) {
-                    format!("&*value.{symbol}")
+                } else if default_err && jet_foundation::Syntax::is_memo_storage_name(&field.name) {
+                    format!("&{}", default_err_metadata_value(symbols)?)
+                } else if !default_err && BootstrapCodecSymbols::boxed_edge(definition, &field.name) {
+                    format!("&*value.{}", symbols.field_symbol(&definition.name, &field.name)?)
                 } else {
-                    format!("&value.{symbol}")
+                    format!("&value.{}", symbols.field_symbol(&definition.name, &field.name)?)
                 };
                 let expr = to_runtime_expression(
                     program,
@@ -2521,6 +2539,40 @@ writeln!(
     id = id,
 )
 .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
+}
+
+/// The checked `__jet_ErrorMetadata` record of a default Err `value`, built
+/// from the `JetErr` carrier's typed facts. Shape-checked literals keep the
+/// Prelude declaration the only field list.
+fn default_err_metadata_value(symbols: &BootstrapCodecSymbols<'_>) -> Result<String, BootstrapHostCodecError> {
+    symbols.render(
+        "@s.__jet_ErrorMetadata@{ \
+            typed_identity: match jet_err_typed_identity(value) { Some(identity) => Ok(identity), None => Err(Default::default()) }, \
+            context_frames: jet_err_context(value).into_iter().map(|frame| @s.__jet_ErrorContextFrame@{ \
+                text: frame.text, \
+                file: frame.file, \
+                line: jet_foundation::Numeric::JetInt::from_i64(i64::from(frame.line)) \
+            }).collect::<Vec<_>>(), \
+            conversion_history: jet_err_conversions(value).into_iter().map(|conversion| @s.__jet_ErrorConversion@{ \
+                source: conversion.source, \
+                target: conversion.target \
+            }).collect::<Vec<_>>(), \
+            details: match jet_err_details(value) { \
+                Some(details) => Ok(@s.__jet_ErrorDetails@{ \
+                    variant: details.variant, \
+                    fields: details.fields.into_iter().map(|field| @s.__jet_ErrorField@{ name: field.name, value: field.value }).collect::<Vec<_>>(), \
+                    source_span: match details.source_span { \
+                        Some(span) => Ok(@s.__jet_ErrorSpan@{ \
+                            start: jet_foundation::Numeric::JetInt::from_i64(span.start as i64), \
+                            end: jet_foundation::Numeric::JetInt::from_i64(span.end as i64) \
+                        }), \
+                        None => Err(Default::default()) \
+                    } \
+                }), \
+                None => Err(Default::default()) \
+            } \
+        }",
+    )
 }
 
 fn emit_from_runtime_converter(
@@ -2807,7 +2859,7 @@ fn shared_to_runtime_expression(
             let __jet_shared_identity = ({source}).physical_identity();
             let __jet_shared_owner = ({source}).physical_owner();
             let __jet_shared_type_id =
-                ::jet_jit::SourceSharedInterop::checked_type_id_for_program(
+                ::jet_evalhost::SourceSharedInterop::checked_type_id_for_program(
                     {program_expr}.as_ref(),
                     checked,
                 );
@@ -2833,7 +2885,7 @@ fn shared_to_runtime_expression(
             let __jet_shared_shape_build =
                 ::std::sync::Arc::clone(&__jet_shared_shape);
             let __jet_shared_build: ::std::sync::Arc<
-                dyn Fn() -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String>
+                dyn Fn() -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String>
                     + Send
                     + Sync,
             > = ::std::sync::Arc::new(move || {{
@@ -2882,7 +2934,7 @@ fn shared_to_runtime_expression(
                     ::std::sync::Arc::clone(&__jet_shared_base_path);
                 let __jet_shared_replace_path =
                     ::std::sync::Arc::clone(&__jet_shared_base_path);
-                Ok(::jet_jit::SourceSharedInterop::SourceSharedInterop::from_callbacks_with_guard(
+                Ok(::jet_evalhost::SourceSharedInterop::SourceSharedInterop::from_callbacks_with_guard(
                     __jet_shared_type_id,
                     move |callback: &mut dyn FnMut(
                         &::jet_foundation::MIR::MirRuntimeValue,
@@ -2904,7 +2956,7 @@ fn shared_to_runtime_expression(
                             Ok(None) => Err("Shared owner was dropped".to_string()),
                             Err(error) => Err(error),
                         }};
-                        ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
+                        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
                     }},
                     move |callback: &mut dyn FnMut(
                         &mut ::jet_foundation::MIR::MirRuntimeValue,
@@ -2936,7 +2988,7 @@ fn shared_to_runtime_expression(
                             Ok(None) => Err("Shared owner was dropped".to_string()),
                             Err(error) => Err(error),
                         }};
-                        ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
+                        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
                     }},
                     move |editable: bool| {{
                         let operation =
@@ -3007,12 +3059,12 @@ fn shared_to_runtime_expression(
                                     mark_dirty,
                                     revision,
                                     release,
-                                }}) as Box<dyn ::jet_jit::SourceSharedInterop::SourceSharedInteropGuard>)
+                                }}) as Box<dyn ::jet_evalhost::SourceSharedInterop::SourceSharedInteropGuard>)
                             }},
                             Ok(None) => Err("Shared owner was dropped".to_string()),
                             Err(error) => Err(error),
                         }};
-                        ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
+                        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
                     }},
                     move |callback: &mut dyn FnMut(
                         &::jet_foundation::MIR::MirRuntimeValue,
@@ -3037,7 +3089,7 @@ fn shared_to_runtime_expression(
                             Ok(None) => Err("Shared owner was dropped".to_string()),
                             Err(error) => Err(error),
                         }};
-                        ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
+                        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
                     }},
                     move |expected_revision: u64,
                           runtime_value: ::jet_foundation::MIR::MirRuntimeValue| {{
@@ -3051,7 +3103,7 @@ fn shared_to_runtime_expression(
                         ) {{
                             Ok(replacement) => replacement,
                             Err(error) => {{
-                                return ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
+                                return ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(
                                     Err(error),
                                     None,
                                 );
@@ -3065,7 +3117,7 @@ fn shared_to_runtime_expression(
                             Ok(None) => Err("Shared owner was dropped".to_string()),
                             Err(error) => Err(error),
                         }};
-                        ::jet_jit::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
+                        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOperationOutcome::new(result, completion)
                     }},
                 ))
             }});
@@ -3263,7 +3315,8 @@ fn from_runtime_expression(
                     let child = from_runtime_expression(program, symbols, field_ty, "field_value", &format!("&__jet_tuple_type_{index}"), program_expr, path)?;
                     decoded.push(format!("{{ let __jet_tuple_type_{index} = {field_type}; let field_value = __jet_bootstrap_entry_take_tuple_field(&mut fields, {index})?; {child} }}"));
                 }
-                format!("{{ let ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields: mut fields }} = {value} else {{ return Err(\"checked tuple result has invalid carrier\".to_string()) }}; if type_name != \"Tuple\" {{ return Err(\"checked tuple result has wrong nominal name\".to_string()) }} ({}) }}", decoded.join(", "))
+                let trailing = if fields.len() == 1 { "," } else { "" };
+                format!("{{ let ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields: mut fields }} = {value} else {{ return Err(\"checked tuple result has invalid carrier\".to_string()) }}; if type_name != \"Tuple\" {{ return Err(\"checked tuple result has wrong nominal name\".to_string()) }} ({}{trailing}) }}", decoded.join(", "))
             }
         }
         Kind::InlineRange { base, .. } | Kind::Tagged { inner: base, .. } | Kind::Quantity { base, .. } => {
@@ -3294,13 +3347,23 @@ fn to_const_key_expression(
     use MirTypeKind as Kind;
     let key = "::jet_foundation::MIR::MirConstKey";
     Ok(match ty.kind() {
-        Kind::Int => format!("{key}::Int(({source}).to_i64().ok_or_else(|| \"integer map key exceeds i64\".to_string())?)"),
+        // The source carrier is embedded in standalone runtime code, not the
+        // linked host Numeric module. Its decimal representation is canonical.
+        Kind::Int => format!("match ({source}).to_i64() {{ Some(value) => {key}::Int(value), None => {key}::BigInt(({source}).to_string_rep()) }}"),
         Kind::IntN { .. } => format!("{key}::Int(({source}).to_string().parse::<i64>().map_err(|_| \"fixed-width integer map key exceeds i64\".to_string())?)"),
         Kind::String => format!("{key}::String(({source}).clone())"),
         Kind::Bool => format!("{key}::Bool(*({source}))"),
         Kind::Char => format!("{key}::Char(*({source}))"),
         Kind::Tagged { inner, .. } | Kind::Quantity { base: inner, .. } => {
             return to_const_key_expression(program, _symbols, inner, source, _checked, _program_expr, _path)
+        }
+        Kind::Tuple(fields) if !fields.is_empty() => {
+            let mut encoded = Vec::with_capacity(fields.len());
+            for (index, (name, field_ty)) in fields.iter().enumerate() {
+                let field = to_const_key_expression(program, _symbols, field_ty, &format!("&({source}).{index}"), _checked, _program_expr, _path)?;
+                encoded.push(format!("({name:?}.to_string(), {field})"));
+            }
+            format!("{key}::Tuple(vec![{}])", encoded.join(", "))
         }
         Kind::Apply { name, .. } => {
             let definition = checked_definition_by_ref(program, name)?;
@@ -3309,7 +3372,7 @@ fn to_const_key_expression(
                     let mut arms = Vec::new();
                     for variant in variants {
                         let path = _symbols.variant_path(&definition.name, &variant.name)?;
-                        arms.push(format!("{path} => Ok({key}::Enum {{ type_name: {name:?}.to_string(), variant: {variant:?}.to_string() }}),", name=definition.name, variant=variant.name));
+                        arms.push(format!("{path} => {key}::Enum {{ type_name: {name:?}.to_string(), variant: {variant:?}.to_string() }},", name=definition.name, variant=variant.name));
                     }
                     return Ok(format!("match {source} {{ {} }}", arms.join(" ")))
                 }
@@ -3317,7 +3380,7 @@ fn to_const_key_expression(
                     let mut arms = Vec::new();
                     for member in members {
                         let path = unit_family_variant_path(_symbols, &definition.name, member)?;
-                        arms.push(format!("{path} => Ok({key}::Enum {{ type_name: {name:?}.to_string(), variant: {member:?}.to_string() }}),", name=definition.name, member=member));
+                        arms.push(format!("{path} => {key}::Enum {{ type_name: {name:?}.to_string(), variant: {member:?}.to_string() }},", name=definition.name, member=member));
                     }
                     return Ok(format!("match {source} {{ {} }}", arms.join(" ")))
                 }
@@ -3339,7 +3402,7 @@ fn from_const_key_expression(
 ) -> Result<String, BootstrapHostCodecError> {
     use MirTypeKind as Kind;
     Ok(match ty.kind() {
-        Kind::Int => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Int(value) => jet_foundation::Numeric::JetInt::from_i64(value), _ => return Err(\"map key does not match checked Int\".to_string()) }}"),
+        Kind::Int => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Int(value) => jet_foundation::Numeric::JetInt::from_i64(value), ::jet_foundation::MIR::MirConstKey::BigInt(decimal) => jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&decimal)?), _ => return Err(\"map key does not match checked Int\".to_string()) }}"),
         Kind::IntN { signed, bits } => {
             let target=format!("{}{bits}",if *signed {'i'} else {'u'});
             format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Int(value) => {target}::try_from(value).map_err(|_| \"map key does not fit checked fixed width\".to_string())?, _ => return Err(\"map key does not match checked fixed width\".to_string()) }}")
@@ -3348,6 +3411,36 @@ fn from_const_key_expression(
         Kind::Bool => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Bool(value) => value, _ => return Err(\"map key does not match checked Bool\".to_string()) }}"),
         Kind::Char => format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Char(value) => value, _ => return Err(\"map key does not match checked Char\".to_string()) }}"),
         Kind::Tagged { inner, .. } | Kind::Quantity { base: inner, .. } => return from_const_key_expression(_program, _symbols, inner, key, _checked, _program_expr, _path),
+        Kind::Tuple(fields) if !fields.is_empty() => {
+            let count = fields.len();
+            let mut decoded = Vec::with_capacity(count);
+            for (name, field_ty) in fields {
+                let field = from_const_key_expression(_program, _symbols, field_ty, "__jet_key_field", _checked, _program_expr, _path)?;
+                decoded.push(format!("{{ let Some((__jet_key_name, __jet_key_field)) = __jet_key_fields.next() else {{ return Err(\"tuple map key is missing a field\".to_string()) }}; if __jet_key_name != {name:?} {{ return Err(\"tuple map key field names do not match checked type\".to_string()) }} {field} }}"));
+            }
+            let trailing = if count == 1 { "," } else { "" };
+            format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Tuple(__jet_key_fields) if __jet_key_fields.len() == {count} => {{ let mut __jet_key_fields = __jet_key_fields.into_iter(); ({}{trailing}) }}, _ => return Err(\"map key does not match checked tuple\".to_string()) }}", decoded.join(", "))
+        }
+        Kind::Apply { name, .. } => {
+            let definition = checked_definition_by_ref(_program, name)?;
+            let mut arms = Vec::new();
+            match &definition.kind {
+                MirTypeDefKind::Enum { variants, .. } if variants.iter().all(|variant| matches!(variant.payload, MirVariantPayload::Unit)) => {
+                    for variant in variants {
+                        let path = _symbols.variant_path(&definition.name, &variant.name)?;
+                        arms.push(format!("{variant:?} => {path},", variant = variant.name));
+                    }
+                }
+                MirTypeDefKind::UnitFamily { members } => {
+                    for member in members {
+                        let path = unit_family_variant_path(_symbols, &definition.name, member)?;
+                        arms.push(format!("{member:?} => {path},"));
+                    }
+                }
+                _ => return Err(BootstrapHostCodecError::InvalidMetadata(format!("entry map key type `{}` has no checked source reconstruction", definition.name))),
+            }
+            format!("match {key} {{ ::jet_foundation::MIR::MirConstKey::Enum {{ type_name: __jet_key_type_name, variant: __jet_key_variant }} if __jet_key_type_name == {name:?} => match __jet_key_variant.as_str() {{ {} _ => return Err(format!(\"unknown checked enum map key variant `{{}}`\", __jet_key_variant)) }}, _ => return Err(\"map key does not match checked enum\".to_string()) }}", arms.join(" "), name = definition.name)
+        }
         _ => return Err(BootstrapHostCodecError::InvalidMetadata(format!("entry map key type `{}` has no checked source reconstruction",ty.canonical_key()))),
     })
 }
@@ -3553,8 +3646,8 @@ pub(crate) fn validate_runtime_value(program:&MirProgram,ty:&MirType,value:&MirR
             for (key_value,item) in entries{validate_const_key(program,key,key_value,depth+1)?;if !seen.insert(key_value){return Err("compiler-entry map has duplicate keys".to_string());}validate_runtime_value(program,item_ty,item,depth+1)?;}Ok(())
         },
         K::Shared(_) => {
-            let root = jet_jit::SourceSharedInterop::SourceSharedInterop::from_native_owned(value)?;
-            if root.type_id() == jet_jit::SourceSharedInterop::checked_type_id_for_program(program, ty) {
+            let root = jet_evalhost::SourceSharedInterop::SourceSharedInterop::from_native_owned(value)?;
+            if root.type_id() == jet_evalhost::SourceSharedInterop::checked_type_id_for_program(program, ty) {
                 Ok(())
             } else {
                 Err(mismatch(ty, "exact checked Shared physical root"))
@@ -3602,6 +3695,13 @@ fn validate_const_key(program:&MirProgram,ty:&MirType,key_ty:&MirConstKey,depth:
     if depth>=MAX_VALUE_DEPTH{return Err("map key exceeds checked nesting bound".to_string());}
     match (ty.kind(),key_ty){
         (MirTypeKind::Int|MirTypeKind::IntN{..}|MirTypeKind::Measure(_),MirConstKey::Int(_))|(MirTypeKind::String,MirConstKey::String(_))|(MirTypeKind::Bool,MirConstKey::Bool(_))|(MirTypeKind::Char,MirConstKey::Char(_))=>Ok(()),
+        (MirTypeKind::Int,MirConstKey::BigInt(decimal)) => {
+            let value = jet_foundation::Numeric::CtBigInt::from_str(decimal)?;
+            if value.try_i64().is_some() || value.to_string_rep() != *decimal {
+                return Err("map BigInt key is not canonical".to_string());
+            }
+            Ok(())
+        },
         (MirTypeKind::Tuple(types),MirConstKey::Tuple(values)) if types.len()==values.len()=>{for ((name,ty),(actual,key)) in types.iter().zip(values){if name!=actual{return Err("tuple map key names do not match checked type".to_string());}validate_const_key(program,ty,key,depth+1)?;}Ok(())},
         (MirTypeKind::Apply{name,..},MirConstKey::Struct{type_name,fields})=>{let def=program.types.iter().find(|d|d.id==name.id).ok_or_else(||"checked map key type is missing".to_string())?;let MirTypeDefKind::Struct{fields:declared,..}=&def.kind else{return Err("map key is not a checked struct".to_string());};if type_name!=&def.name||declared.len()!=fields.len(){return Err("struct key differs from checked nominal type".to_string());}for (field,(name,key)) in declared.iter().zip(fields){if field.name!=*name{return Err("struct key field order/name mismatch".to_string());}validate_const_key(program,&field.ty,key,depth+1)?;}Ok(())},
         (MirTypeKind::Apply{name,..},MirConstKey::Enum{type_name,variant})=>{let def=program.types.iter().find(|d|d.id==name.id).ok_or_else(||"checked map key type is missing".to_string())?;if type_name!=&def.name{return Err("enum key name mismatch".to_string());}match &def.kind{MirTypeDefKind::Enum{variants,..} if variants.iter().any(|row|row.name==*variant&&matches!(row.payload,MirVariantPayload::Unit))=>Ok(()),MirTypeDefKind::UnitFamily{members} if members.iter().any(|member|member==variant)=>Ok(()),_=>Err("map enum key is not a checked unit variant".to_string())}},

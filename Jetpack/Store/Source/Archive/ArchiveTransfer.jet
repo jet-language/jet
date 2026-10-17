@@ -8,7 +8,7 @@
 // whole snapshot.
 
 // Export a package closure into the canonical signed archive.
-pub fn store_export_archive(roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> (bytes: [U8], report: HangarArchiveReport) StoreError! {
+fn store_export_archive(roots: HangarRoots, target: String, include_closure: Bool, key: String?) -> (bytes: [U8], report: HangarArchiveReport) StoreError! {
     _lock :: env_runtime_lock(roots.root, "hangar")
     archive :: store_archive_build_unlocked(roots, target, include_closure, false)
     signer :: store_archive_signing_key(roots, key, true)
@@ -21,7 +21,7 @@ pub fn store_export_archive(roots: HangarRoots, target: String, include_closure:
 // request. The broker verifies the contents and applies its own store
 // signature before promotion. The explicit unsigned trailer keeps the bytes
 // structurally complete for the archive decoder.
-pub fn store_export_unsigned_archive(roots: HangarRoots, target: String, include_closure: Bool) -> [U8] StoreError! {
+fn store_export_unsigned_archive(roots: HangarRoots, target: String, include_closure: Bool) -> [U8] StoreError! {
     _lock :: env_runtime_lock(roots.root, "hangar")
     archive :: store_archive_build_unlocked(roots, target, include_closure, false)
     archive.encode()
@@ -31,7 +31,7 @@ pub fn store_export_unsigned_archive(roots: HangarRoots, target: String, include
 // staging directory before the closure WAL and package projections are
 // touched. Existing identical objects are reused; conflicting objects fail
 // closed.
-pub fn store_import_archive(roots: HangarRoots, bytes: [U8], key: String?, allow_unsigned: Bool) -> HangarArchiveReport StoreError! {
+fn store_import_archive(roots: HangarRoots, bytes: [U8], key: String?, allow_unsigned: Bool) -> HangarArchiveReport StoreError! {
     if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
     archive :: HangarArchive.decode(bytes)
     archive.verify_signature(roots, key, allow_unsigned)
@@ -43,7 +43,7 @@ pub fn store_import_archive(roots: HangarRoots, bytes: [U8], key: String?, allow
 // verified the archive with its private signing key. The client repeats the
 // bounded decode, content hash, and metadata checks before importing, but
 // never reads the administrator's signing secret.
-pub fn store_import_broker_archive(roots: HangarRoots, bytes: [U8]) -> HangarArchiveReport StoreError! {
+fn store_import_broker_archive(roots: HangarRoots, bytes: [U8]) -> HangarArchiveReport StoreError! {
     if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
     archive :: HangarArchive.decode(bytes)
     if archive.signature == None -> return Err(StoreError.InvalidData("shared-store broker returned an unsigned archive"))
@@ -70,14 +70,14 @@ fn store_archive_import_verified(roots: HangarRoots, archive: HangarArchive, all
 // Hangar lock is held by the caller, so a live archive operation cannot be
 // mistaken for abandoned state. A symlinked stage root stops recovery rather
 // than allowing cleanup to follow an attacker-controlled path.
-pub fn store_recover_archive_staging_unlocked(roots: HangarRoots) -> Int StoreError! {
+fn store_recover_archive_staging_unlocked(roots: HangarRoots) -> Int StoreError! {
     store_sweep_abandoned_directory(files.join(roots.hangar_dir(), STORE_ARCHIVE_STAGE), "Hangar archive staging")
 }
 
 // Restore a repair quarantine left by a process crash. Only names written by
 // `store_repair_archive` are considered, and the backup is re-hashed before
 // it can return to the canonical object pool.
-pub fn store_recover_repair_quarantine_unlocked(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
+fn store_recover_repair_quarantine_unlocked(verification: &StoreVerification, roots: HangarRoots) -> Int StoreError! {
     hangar :: roots.hangar_dir()
     quarantine :: files.join(hangar, "quarantine")
     observed :: store_archive_lstat(quarantine)
@@ -156,7 +156,7 @@ fn store_archive_recover_quarantine_entries(verification: &StoreVerification, ro
 
 // Have the shared-store broker sign a bounded, content-verified archive.
 // This keeps the administrator's signing secret inside the broker process.
-pub fn store_attest_archive(roots: HangarRoots, bytes: [U8], key: String) -> [U8] StoreError! {
+fn store_attest_archive(roots: HangarRoots, bytes: [U8], key: String) -> [U8] StoreError! {
     if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
     archive :: HangarArchive.decode(bytes)
     if archive.signature != None -> return Err(StoreError.InvalidData("shared-store write archive must not carry a client signature"))
@@ -166,18 +166,18 @@ pub fn store_attest_archive(roots: HangarRoots, bytes: [U8], key: String) -> [U8
 }
 
 // Read a bounded archive file for a CLI or connector caller.
-pub fn store_read_archive_file(path: String) -> [U8] StoreError! {
+fn store_read_archive_file(path: String) -> [U8] StoreError! {
     store_archive_read_bounded(path)
 }
 
 // Atomically write a canonical archive file.
-pub fn store_write_archive_file(path: String, bytes: [U8]) StoreError! {
+fn store_write_archive_file(path: String, bytes: [U8]) StoreError! {
     if bytes.len() > STORE_MAX_ARCHIVE_BYTES -> return Err(StoreError.InvalidData("archive exceeds the 1 GiB limit"))
     store_archive_write_atomic(path, bytes)
 }
 
 // Verify an archive or one live Hangar entry without changing state.
-pub fn store_verify_archive(roots: HangarRoots, target: String, key: String?) -> HangarArchiveReport StoreError! {
+fn store_verify_archive(roots: HangarRoots, target: String, key: String?) -> HangarArchiveReport StoreError! {
     _lock :: env_runtime_lock(roots.root, "hangar")
     if files.is_file(target) {
         archive :: HangarArchive.decode(store_archive_read_bounded(target))
@@ -201,7 +201,7 @@ pub fn store_verify_archive(roots: HangarRoots, target: String, key: String?) ->
 // Sign an archive in place, or create a signed single-object archive for a
 // live entry. The latter is stored as a hidden sidecar under the entry so
 // signing never mutates immutable package metadata.
-pub fn store_sign_archive(roots: HangarRoots, target: String, destination: String?, key: String?) -> HangarArchiveReport StoreError! {
+fn store_sign_archive(roots: HangarRoots, target: String, destination: String?, key: String?) -> HangarArchiveReport StoreError! {
     _lock :: env_runtime_lock(roots.root, "hangar")
     if files.is_file(target) {
         archive :: HangarArchive.decode(store_archive_read_bounded(target))
@@ -226,7 +226,7 @@ pub fn store_sign_archive(roots: HangarRoots, target: String, destination: Strin
 // requiring a second, unrelated local trust key. Remote archive transport is
 // deliberately not inferred from a URL: SSH/HTTP endpoints fail before any
 // bytes are copied.
-pub fn store_copy_archive(roots: HangarRoots, target: String, destination: String, key: String?) -> HangarArchiveReport StoreError! {
+fn store_copy_archive(roots: HangarRoots, target: String, destination: String, key: String?) -> HangarArchiveReport StoreError! {
     if destination.contains("://") {
         return Err(StoreError.InvalidData("Hangar copy has no configured remote archive transport; use a local Hangar root or export/import the signed archive"))
     }
@@ -239,7 +239,7 @@ pub fn store_copy_archive(roots: HangarRoots, target: String, destination: Strin
 // Repair a corrupt live object from a signed archive. No source archive is
 // guessed: a missing repair input is a safe, actionable error. The damaged
 // object is quarantined before import and restored if any import step fails.
-pub fn store_repair_archive(verification: &StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
+fn store_repair_archive(verification: &StoreVerification, roots: HangarRoots, target: String, source_archive: String?, key: String?) -> HangarArchiveReport StoreError! {
     _lock :: env_runtime_lock(roots.root, "hangar")
     store_archive_repair_unlocked(&verification, roots, target, source_archive, key)
 }
@@ -543,12 +543,12 @@ fn store_archive_import_staged(roots: HangarRoots, archive: HangarArchive, allow
     store_sync_store_directory(objects_dir)
     store_register_entries_unlocked(roots, package_records)
     Ok(package_records.len())
-fn store_archive_rollback_import_moves(verification: &StoreVerification, moved: [HangarArchiveMove], hangar: String) StoreError! {
+}
 
 // Rebuild a local StoreEntry for an archived package record: its identity
 // must match its metadata, and its paths are remapped under the local
 // content-addressed object.
-            store_remove_seal(&verification, entry.destination, hangar)
+fn store_archive_portable_entry(roots: HangarRoots, object: HangarArchiveObject, meta: ParsedMeta) -> StoreEntry StoreError! {
     store_archive_validate_id(object.id)
     source_id :: store_entry_id(meta.name, meta.version, meta.reference, meta.out)
     if source_id != object.id {
@@ -926,7 +926,7 @@ fn store_archive_decode_secret(bytes: [U8]) -> [U8] StoreError! {
     loop index < trimmed.len() {
         high :: store_archive_hex_value(trimmed[index]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
         low :: store_archive_hex_value(trimmed[index + 1]) ?? return Err(StoreError.InvalidData("archive key has invalid hex"))
-        &out.push(U8{(high << 4) | low})
+        &out.push(U8{(high << 4).bit_or(low)})
         index += 2
     }
     Ok(out)
@@ -998,7 +998,7 @@ fn store_archive_publish_partial(partial: String, path: String, bytes: [U8], mod
     if mode == {
         .Val(private) -> {
             out.set_mode(private)
-            if (out.stat().mode & STORE_MODE_PERMISSION_BITS) != private {
+            if (out.stat().mode.bit_and(STORE_MODE_PERMISSION_BITS)) != private {
                 return Err(StoreError.InvalidData("archive signer key could not be made private before writing"))
             }
         }
@@ -1063,7 +1063,7 @@ fn store_archive_make_tree_writable(path: String) StoreError! {
     if metadata.is_dir {
         loop child in files.list_dir(path) -> store_archive_make_tree_writable(child.path)
     }
-    files.set_mode(path, metadata.mode | STORE_MODE_OWNER_WRITE)
+    files.set_mode(path, metadata.mode.bit_or(STORE_MODE_OWNER_WRITE))
 }
 
 // Clear every write bit through a tree. Symlink permissions are not
@@ -1074,11 +1074,11 @@ fn store_archive_seal_tree(path: String) StoreError! {
     if metadata.is_dir {
         loop child in files.list_dir(path) -> store_archive_seal_tree(child.path)
     }
-    files.set_mode(path, metadata.mode - (metadata.mode & STORE_MODE_WRITE_BITS))
+    files.set_mode(path, metadata.mode - (metadata.mode.bit_and(STORE_MODE_WRITE_BITS)))
 }
 
 fn store_archive_set_mode(path: String, mode: Int) StoreError! {
-    files.set_mode(path, mode & STORE_MODE_PERMISSION_BITS)
+    files.set_mode(path, mode.bit_and(STORE_MODE_PERMISSION_BITS))
 }
 
 // No-follow metadata, or None when the path does not exist.

@@ -1,0 +1,35 @@
+# Port of tests/lsp.rs:1346-1469; exact disk/overlay source and protocol order.
+# PENDING-GRAMMAR(batch-three), PENDING-SEAM(read_bytes).
+# Original root deliberately contains spaces; URI spaces remain percent-encoded.
+fixture: lsp_workspace_symbols_follow_all_roots_and_folder_changes.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"workspaceFolders\":[{\"uri\":\"file://{work}/lsp%20multi%20root/first\",\"name\":\"first\"},{\"uri\":\"file://{work}/lsp%20multi%20root/second\",\"name\":\"second\"}],\"capabilities\":{}}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/lsp%20multi%20root/second/open.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"fn OpenSecond() {}\\n\"}}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
+recv lsp
+stdout: ~ "ClosedFirst" # original ed77c235f tests/lsp.rs:1397 contains predicate
+stdout: ~ "OpenSecond" # original ed77c235f tests/lsp.rs:1397 contains predicate
+stdout: !~ "DiskSecond" # original ed77c235f tests/lsp.rs:1400 not contains predicate
+stdout: !~ "AddedThird" # original ed77c235f tests/lsp.rs:1400 not contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{\"event\":{\"removed\":[{\"uri\":\"file://{work}/lsp%20multi%20root/first\",\"name\":\"first\"}],\"added\":[{\"uri\":\"file://{work}/lsp%20multi%20root/third\",\"name\":\"third\"}]}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
+recv lsp
+stdout: ~ "OpenSecond" # original ed77c235f tests/lsp.rs:1415 contains predicate
+stdout: ~ "AddedThird" # original ed77c235f tests/lsp.rs:1415 contains predicate
+stdout: !~ "ClosedFirst" # original ed77c235f tests/lsp.rs:1419 not contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{\"event\":{\"removed\":[{\"uri\":\"file://{work}/lsp%20multi%20root/second\",\"name\":\"second\"}],\"added\":[]}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
+recv lsp
+stdout: ~ "AddedThird" # original ed77c235f tests/lsp.rs:1436 contains predicate
+stdout: !~ "OpenSecond" # original ed77c235f tests/lsp.rs:1440 not contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"workspace/didChangeWorkspaceFolders\",\"params\":{\"event\":{\"removed\":[{\"uri\":\"file://{work}/lsp%20multi%20root/third\",\"name\":\"third\"}],\"added\":[]}}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"workspace/symbol\",\"params\":{\"query\":\"\"}}"
+recv lsp
+stdout: ~ "\"result\":[]"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+close lsp
+exit: any # original child.wait ignored its status, no exit notification

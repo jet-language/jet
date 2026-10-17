@@ -1,0 +1,14 @@
+# PORT tests/repl.rs:397-410 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "1 +\r" after 200ms
+pty-send: "\r" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "E0003" # Original incomplete-input error rs407.

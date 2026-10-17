@@ -1,0 +1,9 @@
+use core.net as net
+
+// The original bind/read/drop race is intentional. Process exit closes the
+// listener even on providers without an exposed TCPListener.close operation.
+fn main() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("free-port bind failed")
+    address :: net.listener_local_socket_addr(listener) ?? panic("free-port local address failed")
+    print(address.port)
+}

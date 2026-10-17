@@ -1,0 +1,26 @@
+Error [E0119]: There's no type called `NoClone`
+  --> move_non_clonable_is_hard_error.jet:2:19
+    |
+  2 | fn consume(item: ^NoClone) {
+    |                   ^^^^^^^
+ Why: The types are `Int`, `Float`, `Bool`, and `String` (plus types you define)
+ Fix: Check the spelling, or define the struct or enum first
+More: jet-lang.dev/e/E0119
+
+Error [E0112]: `consume` wants `NoClone` for argument 1, but this is String (text)
+  --> move_non_clonable_is_hard_error.jet:8:13
+    |
+  8 |     consume(msg)
+    |             ^^^
+ Why: Every argument must match its parameter's type
+ Fix: Use `NoClone` here
+More: jet-lang.dev/e/E0112
+
+Error [E0201]: `consume` needs the move marker `^` here — this value can't be copied
+  --> move_non_clonable_is_hard_error.jet:8:13
+    |
+  8 |     consume(msg)
+    |             ^^^
+ Why: Parameter 1 takes ownership through the move marker `^`; passing `msg` without that marker would have to copy it, but this type can't be copied
+ Fix: Write the move marker `^` (`^msg`) to move ownership to `consume`
+More: jet-lang.dev/e/E0201

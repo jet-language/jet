@@ -1,0 +1,24 @@
+
+use core.event as event
+
+#Error
+enum EventFailure { Explicit }
+
+fn fail(_n: Int) EventFailure! {
+    return Err(EventFailure.Explicit)
+}
+
+fn run() {
+    scope :: event.scope()
+    async_event :: event.async_result<Int, EventFailure>(
+        AsyncPolicy{ capacity: 2, overflow: .Block },
+        .Collect
+    ) ?? panic("policy")
+    async_event.on(scope, (_n: Int) -> {})
+    async_event.on(scope, (n: Int) -> fail(n))
+
+    report :: async_event.emit_async(1).join() ?? panic("dispatch")
+    print(report.state() == .HandlerFailed)
+    print(report.delivered_handlers())
+    print(report.failures().len())
+}

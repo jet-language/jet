@@ -1,0 +1,19 @@
+#Target(Web)
+
+#Target(JS)
+fn js_value() -[]> Int {
+    value := 0
+    #Impure("preserve JS body") {
+        value = 7
+    }
+    return value
+}
+#WasmExport
+fn wasm_value() -[]> Int {
+    value := 0
+    #Impure("preserve Wasm body") {
+        value = 9
+    }
+    return value
+}
+fn run() { print(js_value()) }

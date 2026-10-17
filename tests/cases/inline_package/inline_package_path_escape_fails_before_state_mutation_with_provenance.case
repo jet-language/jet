@@ -1,0 +1,16 @@
+# Port of tests/inline_package.rs:345-385; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_package_path_escape_fails_before_state_mutation_with_provenance
+file: workspace.jet = "module workspace { members: [] }\n"
+file: {tmp}/outside-config-{pid}.jet = "host-state\n"
+step: jet check run.jet --json
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: nonzero
+json: machine doc $.reports[0].code = "E1362"
+json: machine doc $.reports[0].span != null
+file: run.jet = "package {\n    name: \"escape\"\n    configs: [\"../outside-config.jet\"]\n}\nfn run() {}\n"
+file: {tmp}/outside-config-{pid}.jet = "host-state\n"

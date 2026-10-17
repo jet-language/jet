@@ -1,0 +1,27 @@
+
+use core.process as process
+
+fn run() {
+    policy :: process.workspace()
+    read_spec :: process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
+    if read_spec.plan() == {
+        .Ok(_) -> {
+            if read_spec.run_checked() == {
+                .Ok(_) -> print("host-read-blocked")
+                .Err(_) -> print("host-read-escaped")
+            }
+        }
+        .Err(_) -> print("unsupported")
+    }
+
+    write_spec :: process.cmd(["sh", "-c", "if printf escaped > '{tmp}/jet-agent-executor-host-write-{pid}'; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy)
+    if write_spec.plan() == {
+        .Ok(_) -> {
+            if write_spec.run_checked() == {
+                .Ok(_) -> print("host-write-blocked")
+                .Err(_) -> print("host-write-escaped")
+            }
+        }
+        .Err(_) -> print("unsupported")
+    }
+}

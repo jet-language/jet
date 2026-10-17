@@ -1,0 +1,83 @@
+// Ui.rs347-362 derives: InputEvent Key/Resize and richer TuiEvent.
+// UiABI native-private storage; E4 texts, inline raw f64 size, packed bytes.
+fn ui_event_size_copy(source: I64, target: I64) {
+    ui_carrier_store(target + UI_EVENT_FIRST, ui_carrier_word(source + UI_EVENT_FIRST))
+    ui_carrier_store(target + UI_EVENT_SECOND, ui_carrier_word(source + UI_EVENT_SECOND))
+}
+fn ui_event_size_eq(a: I64, b: I64) -> Bool {
+    rt_f64_from_bits(ui_carrier_word(a + UI_EVENT_FIRST)) == rt_f64_from_bits(ui_carrier_word(b + UI_EVENT_FIRST)) && rt_f64_from_bits(ui_carrier_word(a + UI_EVENT_SECOND)) == rt_f64_from_bits(ui_carrier_word(b + UI_EVENT_SECOND))
+}
+#Export(c) fn jet_rt_handle_clone_jet_input_event(value: I64) -> I64 {
+    kind :: ui_carrier_word(value + UI_EVENT_KIND)
+    result :: jet_rt_alloc(UI_EVENT_BYTES, I64{8})
+    ui_carrier_store(result + UI_EVENT_KIND, kind)
+    if {
+        (kind == I64{0}) -> {
+            ui_carrier_store(result + UI_EVENT_FIRST, jet_rt_string_clone(ui_carrier_word(value + UI_EVENT_FIRST)))
+            ui_carrier_store(result + UI_EVENT_SECOND, I64{0})
+        }
+        else -> ui_event_size_copy(value, result)
+    }
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_input_event(value: I64) {
+    if (value == I64{0}) -> return
+    if (ui_carrier_word(value + UI_EVENT_KIND) == I64{0}) -> jet_rt_string_drop(ui_carrier_word(value + UI_EVENT_FIRST))
+    jet_rt_free(value, UI_EVENT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_input_event(a: I64, b: I64) -> Bool {
+    kind :: ui_carrier_word(a + UI_EVENT_KIND)
+    if (kind != ui_carrier_word(b + UI_EVENT_KIND)) -> return false
+    if (kind == I64{0}) -> return jet_rt_string_eq(ui_carrier_word(a + UI_EVENT_FIRST), ui_carrier_word(b + UI_EVENT_FIRST))
+    ui_event_size_eq(a, b)
+}
+#Export(c) fn jet_rt_handle_clone_jet_tui_event(value: I64) -> I64 {
+    kind :: ui_carrier_word(value + UI_EVENT_KIND)
+    result :: jet_rt_alloc(UI_EVENT_BYTES, I64{8})
+    ui_carrier_store(result + UI_EVENT_KIND, kind)
+    first := I64{0}
+    second := I64{0}
+    if {
+        (kind == I64{1}) -> ui_event_size_copy(value, result)
+        else -> {
+            if (kind == I64{0} || kind == I64{2} || kind == I64{3}) -> first = jet_rt_string_clone(ui_carrier_word(value + UI_EVENT_FIRST))
+            if (kind == I64{4}) -> first = ui_carrier_bool(value + UI_EVENT_FIRST)
+            if (kind == I64{0}) -> second = ui_carrier_word(value + UI_EVENT_SECOND).bit_and(I64{255})
+            if (kind == I64{2}) -> second = ui_carrier_word(value + UI_EVENT_SECOND)
+            if (kind == I64{3}) -> second = data_sequence_clone(ui_carrier_word(value + UI_EVENT_SECOND), DATA_TREE_BYTE_LIST)
+            ui_carrier_store(result + UI_EVENT_FIRST, first)
+            ui_carrier_store(result + UI_EVENT_SECOND, second)
+        }
+    }
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_tui_event(value: I64) {
+    if (value == I64{0}) -> return
+    kind :: ui_carrier_word(value + UI_EVENT_KIND)
+    if (kind == I64{0} || kind == I64{2} || kind == I64{3}) -> jet_rt_string_drop(ui_carrier_word(value + UI_EVENT_FIRST))
+    if (kind == I64{3}) -> data_sequence_drop(ui_carrier_word(value + UI_EVENT_SECOND), DATA_TREE_BYTE_LIST)
+    jet_rt_free(value, UI_EVENT_BYTES, I64{8})
+}
+fn ui_event_bytes_eq(a: I64, b: I64) -> Bool {
+    length :: ui_carrier_word(a + DATA_SEQUENCE_LENGTH)
+    if (length != ui_carrier_word(b + DATA_SEQUENCE_LENGTH)) -> return false
+    ap :: ui_carrier_word(a + DATA_SEQUENCE_DATA)
+    bp :: ui_carrier_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (host_u8_get(ap, at) != host_u8_get(bp, at)) -> return false
+        at += I64{1}
+    }
+    true
+}
+#Export(c) fn jet_rt_handle_eq_jet_tui_event(a: I64, b: I64) -> Bool {
+    kind :: ui_carrier_word(a + UI_EVENT_KIND)
+    if (kind != ui_carrier_word(b + UI_EVENT_KIND)) -> return false
+    if (kind == I64{1}) -> return ui_event_size_eq(a, b)
+    if (kind == I64{4}) -> return ui_carrier_bool(a + UI_EVENT_FIRST) == ui_carrier_bool(b + UI_EVENT_FIRST)
+    if (kind >= I64{5}) -> return true
+    if (!jet_rt_string_eq(ui_carrier_word(a + UI_EVENT_FIRST), ui_carrier_word(b + UI_EVENT_FIRST))) -> return false
+    if (kind == I64{0}) -> return (ui_carrier_word(a + UI_EVENT_SECOND).bit_and(I64{255})) == (ui_carrier_word(b + UI_EVENT_SECOND).bit_and(I64{255}))
+    if (kind == I64{2}) -> return ui_carrier_word(a + UI_EVENT_SECOND) == ui_carrier_word(b + UI_EVENT_SECOND)
+    ui_event_bytes_eq(ui_carrier_word(a + UI_EVENT_SECOND), ui_carrier_word(b + UI_EVENT_SECOND))
+}

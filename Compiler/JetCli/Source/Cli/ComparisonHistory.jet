@@ -1,0 +1,116 @@
+// Source/CmdTest.rs::persist_comparison_artifacts and ReceiptStore.rs
+// index_published_receipt. The comparison and receipt index rows land together.
+use jet_foundation.[EvidenceSource, EvidenceBuild, EvidenceRevision, EvidenceAttachment, EvidenceProducerKind, EvidenceKind, EvidenceOutcome, EvidenceReport, evidence_identity_for_record, evidence_record_new, evidence_record_checked_derivation, evidence_report_new, evidence_report_add_record_with_derivation, evidence_merge_error_text, evidence_report_encode, canonical_json_bytes, comparison_record_to_json]
+
+fn jet_cli_comparison_evidence_outcome(status: ComparisonStatus) -> EvidenceOutcome Never! {
+    if status == {
+        .Matched -> EvidenceOutcome.Passed
+        .Mismatch -> EvidenceOutcome.Failed
+        .InvalidOracle | .Contaminated -> EvidenceOutcome.Error
+        else -> EvidenceOutcome.Unavailable
+    }
+}
+
+fn jet_cli_comparison_evidence(run: JetCLIComparisonRun, target: String, artifact_id: String) -> EvidenceReport JetCLIReadError! {
+    record :: run.record
+    source := "jet.test-compare"
+    tool := "jet"
+    comparison_target := target
+    if record.samples.len() > 0 {
+        identity :: record.samples[0].identity
+        source = identity.source
+        tool = identity.tool
+        comparison_target = identity.target
+    }
+    count :: U64{record.samples.len()}
+    detail :: record.reason ?? "comparison record is {comparison_status_as_str(record.status)}"
+    source_ref :: EvidenceSource{path: source, line: U32{0}, column: U32{1}}
+    build :: EvidenceBuild{toolchain: tool, target: comparison_target, profile: "comparison"}
+    revision :: EvidenceRevision{source: artifact_id, build: "jet-comparison-v1", revision: artifact_id}
+    report_id :: "test-compare-{artifact_id}"
+    identity :: evidence_identity_for_record(report_id, "comparison", EvidenceProducerKind.Test, EvidenceKind.Unit, source_ref, count, detail)
+    evidence := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, jet_cli_comparison_evidence_outcome(record.status), count, source_ref, build, revision)
+    binding :: run.binding
+    evidence.attachments = [EvidenceAttachment]{
+        EvidenceAttachment{name: "boundary", value: binding.boundary_digest},
+        EvidenceAttachment{name: "source-identity", value: binding.source_identity},
+        EvidenceAttachment{name: "replacement-identity", value: binding.replacement_identity},
+        EvidenceAttachment{name: "tool-identity", value: binding.tool_identity},
+        EvidenceAttachment{name: "target-identity", value: binding.target_identity},
+        EvidenceAttachment{name: "coverage", value: binding.coverage_digest},
+    }
+    loop assumption in binding.assumptions -> &evidence.attachments.push(EvidenceAttachment{name: "assumption", value: assumption})
+    &evidence.attachments.push(EvidenceAttachment{name: "comparison-artifact", value: artifact_id})
+    derivation :: evidence_record_checked_derivation(evidence)
+    report := evidence_report_new(report_id, EvidenceProducerKind.Test, source_ref, build, revision)
+    evidence_report_add_record_with_derivation(&report, ^evidence, ^derivation) ?? return Err(jet_cli_read_error(evidence_merge_error_text(err)))
+    Ok(report)
+}
+
+fn jet_cli_comparison_index_entry(index: JetCLIRecordIndex, identity: JetCLIRecordIdentity, kind: String, id: String, path: String, size: Int, consumed: [JetCLIRecordLink], produced: [JetCLIRecordLink], protected: Bool) -> JetCLIRecordIndexEntry JetCLIReadError! {
+    existing :: jet_cli_record_index_find(index, kind, id, true)
+    sequence :: if existing == .Val(entry) -> entry.recorded_sequence else -> jet_cli_record_index_next_sequence(index)
+    saved :: protected || (if existing == .Val(entry) -> entry.saved else -> false)
+    entry :: JetCLIRecordIndexEntry{identity: identity, kind: kind, artifact_id: id, path: path, consumed: consumed, produced: produced, capture: "safe", size: U64{size}, recorded_sequence: sequence, saved: saved}
+    jet_cli_record_entry_normalize(entry)
+}
+
+// Evidence is rooted from cwd, whereas the receipt is rooted from its target.
+// These roots deliberately need not coincide for an external corpus.
+fn jet_cli_comparison_persist(run: JetCLIComparisonRun, target: String, argv: [String], terminal: [U8]) JetCLIReadError! -[FS, Env, Time]> {
+    payload :: comparison_record_to_json(run.record) ?? return Err(jet_cli_read_error(err.message))
+    bytes :: canonical_json_bytes(payload)
+    artifact_id :: receipt_crypto.sha256(bytes).hex()
+    report :: jet_cli_comparison_evidence(run, target, artifact_id)
+    evidence_bytes :: evidence_report_encode(report) ?? return Err(jet_cli_read_error(err.message))
+    cwd :: cli_sys.current_dir() ?? return Err(jet_cli_read_error("could not read the current directory: {jet_cli_io_error_text(err)}"))
+    cache := WorkspaceDeclarationCache.new()
+    evidence_root :: jet_cli_selected_project_root(&cache, cwd) ?? return Err(jet_cli_read_error("could not resolve evidence project root: {err.diagnostic}"))
+    evidence_held :: JetCLIRootedDirectory.open(evidence_root, [String]{".jet", "evidence"}, true) ?? return Err(err)
+    report_id :: report.identity.report_id
+    _ :: evidence_held.publish_immutable("{report_id}.json", evidence_bytes, Val(0o600), 268435456) ?? return Err(err)
+    evidence_index := jet_cli_record_index_load(evidence_root)
+    evidence_identity :: JetCLIRecordIdentity{target_inputs_sha256: artifact_id, tool_version: report.build.toolchain, engine: "jet-test"}
+    evidence_entry :: jet_cli_comparison_index_entry(evidence_index, evidence_identity, "evidence", report_id, ".jet/evidence/{report_id}.json", evidence_bytes.len(), [JetCLIRecordLink]{}, [JetCLIRecordLink]{}, true)
+    jet_cli_record_index_publish_and_store(&evidence_index, evidence_root, evidence_entry)
+
+    paths :: jet_cli_comparison_input_paths(&cache, target)
+    if paths.len() == 0 -> return Err(jet_cli_read_error("comparison corpus has no current input path"))
+    claim :: jet_cli_receipt_claim("test-compare", paths, argv, terminal)
+    // ReceiptStore's target_path consumes the full normalized argv, not the
+    // display path. The dispatcher supplies that same selected corpus here.
+    start :: AuthorityResolver.authority_walk_root(target) ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
+    receipt_root :: jet_cli_receipt_project_root(&cache, start)
+    section :: jet_cli_receipt_section_new("comparison", "ComparisonRecord", bytes)
+    consumed :: [JetCLIRecordLink]{JetCLIRecordLink{kind: "evidence", artifact_id: report_id}}
+    produced :: [JetCLIRecordLink]{JetCLIRecordLink{kind: "comparison", artifact_id: artifact_id}}
+    status :: if run.record.status == ComparisonStatus.Matched -> 0 else -> 1
+    receipt :: jet_cli_receipt_prepare(claim, status, [U8]{}, [U8]{}, [JetCLIReceiptSection]{section}, consumed, produced, [String]{})
+    _ :: jet_cli_receipt_publish(receipt_root, receipt)
+    published :: if jet_cli_receipt_lookup(receipt_root, claim) == {
+        .Val(current) -> current
+        .None -> { return Err(jet_cli_read_error("receipt was not current after publication")) }
+        .Err(error) -> { return Err(error) }
+    }
+    target_digest :: jet_cli_receipt_target_identity(&cache, target, claim.inputs)
+    index := jet_cli_record_index_load(receipt_root)
+    path :: ".jet/receipts/objects/{claim.key}"
+    comparison_identity :: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-comparison-v1"}
+    comparison_entry :: jet_cli_comparison_index_entry(index, comparison_identity, "comparison", artifact_id, path, bytes.len(), consumed, [JetCLIRecordLink]{}, false)
+    receipt_identity :: JetCLIRecordIdentity{target_inputs_sha256: target_digest.input_sha256, tool_version: JET_CLI_VERSION, engine: "jet-receipt-v2"}
+    receipt_bytes :: jet_cli_receipt_encode(published)
+    receipt_entry :: jet_cli_comparison_index_entry(index, receipt_identity, "receipt", claim.key, path, receipt_bytes.len(), consumed, produced, false)
+    jet_cli_record_index_upsert_many_and_store(&index, receipt_root, [JetCLIRecordIndexEntry]{comparison_entry, receipt_entry})
+}
+
+fn jet_cli_comparison_history_notice(error: String) -> String Never! {
+    lower :: error.to_lower()
+    fix :: if {
+        lower.contains("permission") || lower.contains("access denied") -> "check `.jet` history permissions"
+        lower.contains("no space") || lower.contains("disk full") || lower.contains("quota") -> "free `.jet` history storage or raise its quota"
+        lower.contains("queue") || lower.contains("worker") -> "retry after optional history drains or repair `.jet` history storage"
+        lower.contains("budget") || lower.contains("exceeds") -> "raise the history byte budget or remove disposable history"
+        else -> "check `.jet` history storage and retry"
+    }
+    "history: optional persistence failed while writing a comparison record: {error}; fix: {fix}\n"
+}

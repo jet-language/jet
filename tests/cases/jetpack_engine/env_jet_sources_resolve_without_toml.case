@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:8120-8161 env_jet_sources_resolve_without_toml
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: env_jet_sources_resolve_without_toml.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack build --no-color -- hello
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+

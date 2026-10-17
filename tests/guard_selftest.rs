@@ -59,6 +59,16 @@ fn generated_ffi_does_not_move_unsafe_baseline() {
 }
 
 #[test]
+fn corelib_wrapper_needs_unsafe_or_proof() {
+    unsafe_ratchet::corelib_wrapper_needs_unsafe_or_proof();
+}
+
+#[test]
+fn corelib_wrapper_with_brace_defaults_is_still_seen() {
+    unsafe_ratchet::corelib_wrapper_with_brace_defaults_is_still_seen();
+}
+
+#[test]
 #[ignore = "trips the allocation-cap guard on purpose; run explicitly with a small JET_TEST_ALLOC_CAP_GB"]
 fn alloc_cap_guard_trips() {
     let mut chunks: Vec<Vec<u8>> = Vec::new();

@@ -1,0 +1,53 @@
+# Port of tests/ffi_python.rs:30-166; sources copied verbatim, every public oracle.
+# PENDING-SAME-HEAD: no runtime/reference proof.
+requires: os:unix
+requires: tool:python3
+requires: tool:cc
+requires: tool:ar
+fixture: fixtures/python_sidecar_binds_runs_and_launders_failure
+step: jet inspect bind py ops.py --pkg ops
+env: NO_COLOR=1
+exit: 0
+file: .jet/bindings/py/ops.jet ~ "jet-ffi-descriptor=" # original ed77c235f tests/ffi_python.rs:59 generated contains descriptor
+file: .jet/bindings/py/ops.jet ~ "-[FFI.Py]>" # original ed77c235f tests/ffi_python.rs:60 generated contains effect
+file: .jet/bindings/py/ops.jet !~ "=>" # original ed77c235f tests/ffi_python.rs:61 generated excludes retired arrow
+file: .jet/bindings/py/libjet_py_ops.a is-file
+file: .jet/bindings/py/ops.provenance ~ "descriptor=" # original ed77c235f tests/ffi_python.rs:64 provenance contains descriptor
+file: .jet/bindings/py/ops.provenance ~ "layout=AdapterTyped" # original ed77c235f tests/ffi_python.rs:65 provenance contains layout
+file: .jet/bindings/py/ops.provenance ~ "ownership=AdapterOwned" # original ed77c235f tests/ffi_python.rs:66 provenance contains ownership
+file: .jet/bindings/py/ops.provenance ~ "errors=AdapterResult" # original ed77c235f tests/ffi_python.rs:67 provenance contains errors
+file: .jet/bindings/py/ops.provenance ~ "callbacks=AdapterMarshalled" # original ed77c235f tests/ffi_python.rs:68 provenance contains callbacks
+file: .jet/bindings/py/ops.provenance ~ "async=AdapterMarshalled" # original ed77c235f tests/ffi_python.rs:69 provenance contains async
+file: .jet/bindings/py/ops.provenance ~ "tasks=AdapterMarshalled" # original ed77c235f tests/ffi_python.rs:70 provenance contains tasks
+file: .jet/bindings/py/ops.provenance ~ "safety=GeneratedWrapper" # original ed77c235f tests/ffi_python.rs:71 provenance contains safety
+file: .jet/bindings/py/ops.provenance ~ "provider=PyPi" # original ed77c235f tests/ffi_python.rs:72 provenance contains provider
+file: .jet/bindings/py/ops.provenance ~ "artifact.libjet_py_ops.a=" # original ed77c235f tests/ffi_python.rs:73 provenance contains artifact
+file: .jet/bindings/py/ops.provenance ~ "runtime-toolchain=" # original ed77c235f tests/ffi_python.rs:74 provenance contains runtime toolchain
+file: .jet/bindings/py/ops.provenance ~ "source-sha256=" # original ed77c235f tests/ffi_python.rs:75 provenance contains source digest
+capture: first_identity = text file.filter(^= "identity=").line(0).strip_prefix("identity=") .jet/bindings/py/ops.provenance # original ed77c235f tests/ffi_python.rs:76-80 first lines.find_map strip_prefix identity
+file: .jet/bindings/py/.bridges/{cap:first_identity}/libjet_py_ops.a is-file
+remove: .jet/bindings/py/libjet_py_ops.a
+step: jet inspect bind py ops.py --pkg ops
+env: NO_COLOR=1
+exit: 0
+capture: cached_identity = text file.filter(^= "identity=").line(0).strip_prefix("identity=") .jet/bindings/py/ops.provenance # original ed77c235f tests/ffi_python.rs:97-102 first lines.find_map strip_prefix identity
+cap:cached_identity: = "{cap:first_identity}"
+file: .jet/bindings/py/libjet_py_ops.a is-file
+step: jet run main.jet
+env: NO_COLOR=1
+exit: 0
+stdout: = "5\nfalse\n99\n123\n"
+copy: changed.py ops.py
+step: jet inspect bind py ops.py --pkg ops
+env: NO_COLOR=1
+exit: 0
+capture: changed_identity = text file.filter(^= "identity=").line(0).strip_prefix("identity=") .jet/bindings/py/ops.provenance # original ed77c235f tests/ffi_python.rs:141-144 first lines.find_map strip_prefix identity
+cap:changed_identity: != "{cap:first_identity}"
+file: .jet/bindings/py/.bridges/{cap:changed_identity}/libjet_py_ops.a is-file
+step: jet inspect bind py bad.py --pkg bad
+env: NO_COLOR=1
+exit: nonzero
+stderr: ~ "Error [E3208]:" # original ed77c235f tests/ffi_python.rs:161 contains predicate
+stderr: ~ " Why:" # original ed77c235f tests/ffi_python.rs:162 contains predicate
+stderr: ~ " Fix:" # original ed77c235f tests/ffi_python.rs:163 contains predicate
+file: .jet/bindings/py/bad.jet absent

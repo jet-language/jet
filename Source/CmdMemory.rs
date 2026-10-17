@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::exit;
 
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse_json;
 
 use crate::OutputMode;
@@ -297,9 +297,9 @@ fn read_rows(path: &Path) -> Result<Vec<Row>, String> {
     });
     Ok(rows)
 }
-fn parse_row(value: &DataTree, line: usize) -> Result<Row, String> {
+fn parse_row(value: &Dyn, line: usize) -> Result<Row, String> {
     let object = match value {
-        DataTree::Object(object) => object,
+        Dyn::Object(object) => object,
         _ => return Err(format!("memory ledger row {line} is not an object")),
     };
     if string(object, "schema", line)? != LEDGER_SCHEMA
@@ -315,7 +315,7 @@ fn parse_row(value: &DataTree, line: usize) -> Result<Row, String> {
         return Err(format!("memory ledger row {line} has a reversed span"));
     }
     let expected = match object_field(object, "expected") {
-        Some(DataTree::Null) | None => None,
+        Some(Dyn::Null) | None => None,
         Some(value) => match value.as_str().ok().filter(|value| value.len() <= MAX_FIELD_BYTES) {
             Some(value) => Some(value.to_string()),
             None => {
@@ -326,7 +326,7 @@ fn parse_row(value: &DataTree, line: usize) -> Result<Row, String> {
         },
     };
     let repairs = match object_field(object, "repairs") {
-        Some(DataTree::Array(values)) if values.len() <= 16 => values
+        Some(Dyn::Array(values)) if values.len() <= 16 => values
             .iter()
             .map(|value| {
                 value
@@ -354,21 +354,21 @@ fn parse_row(value: &DataTree, line: usize) -> Result<Row, String> {
     })
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], name: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], name: &str) -> Option<&'a Dyn> {
     object.iter().find_map(|(key, value)| (key == name).then_some(value))
 }
 
 fn field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     name: &str,
     line: usize,
-) -> Result<&'a DataTree, String> {
+) -> Result<&'a Dyn, String> {
     object_field(object, name)
         .ok_or_else(|| format!("memory ledger row {line} is missing `{name}`"))
 }
 
 fn string<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     name: &str,
     line: usize,
 ) -> Result<&'a str, String> {
@@ -378,7 +378,7 @@ fn string<'a>(
 }
 
 fn safe_string(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     name: &str,
     line: usize,
 ) -> Result<String, String> {
@@ -392,12 +392,12 @@ fn safe_string(
 }
 
 fn uint(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     name: &str,
     line: usize,
 ) -> Result<u64, String> {
     match field(object, name, line)? {
-        DataTree::Int(value) if *value >= 0 => u64::try_from(*value).map_err(|_| {
+        Dyn::Int(value) => value.to_u64().ok_or_else(|| {
             format!("memory ledger row {line} `{name}` is not a non-negative integer")
         }),
         _ => Err(format!(
@@ -407,12 +407,12 @@ fn uint(
 }
 
 fn boolean(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     name: &str,
     line: usize,
 ) -> Result<bool, String> {
     match field(object, name, line)? {
-        DataTree::Bool(value) => Ok(*value),
+        Dyn::Bool(value) => Ok(*value),
         _ => Err(format!("memory ledger row {line} `{name}` is not Bool")),
     }
 }

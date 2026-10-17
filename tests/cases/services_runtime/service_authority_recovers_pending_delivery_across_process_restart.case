@@ -1,0 +1,56 @@
+# Port of tests/services_runtime.rs:427-517; all source bytes unchanged.
+# PENDING-GRAMMAR(batch-four): capture transformed text, relational count, relative truncate, ends-with.
+fixture: service_authority_recovers_pending_delivery_across_process_restart.fixture
+step: jet build restart.jet
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority.log
+env: JET_SERVICE_AUTH_PHASE=send
+stdout.trim: nonempty # original predicate; receipt id after Rust trim
+capture: receipt = text stdout.trim
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority.log
+env: JET_SERVICE_AUTH_PHASE=recover
+env: JET_SERVICE_AUTH_ID={cap:receipt}
+stdout: = service_authority_recovers_pending_delivery_across_process_restart.authority.log-recover-aot.out
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/authority-default.log
+env: JET_SERVICE_AUTH_PHASE=send
+stdout.trim: nonempty # original predicate; receipt id after Rust trim
+capture: default_receipt = text stdout.trim
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority-default.log
+env: JET_SERVICE_AUTH_PHASE=recover
+env: JET_SERVICE_AUTH_ID={cap:default_receipt}
+stdout: = service_authority_recovers_pending_delivery_across_process_restart.authority-default.log-recover-aot.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority-aot-to-default.log
+env: JET_SERVICE_AUTH_PHASE=send
+stdout.trim: nonempty # original predicate; receipt id after Rust trim
+capture: cross_tier_receipt = text stdout.trim
+step: jet run restart.jet
+env: JET_SERVICE_AUTH_STORE={work}/authority-aot-to-default.log
+env: JET_SERVICE_AUTH_PHASE=recover
+env: JET_SERVICE_AUTH_ID={cap:cross_tier_receipt}
+stdout: = service_authority_recovers_pending_delivery_across_process_restart.authority-aot-to-default.log-recover-default.out
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority-corrupt.log
+env: JET_SERVICE_AUTH_PHASE=send
+capture: corrupt-id = text stdout.trim
+file: authority-corrupt.log count "|" >= 10 # original predicate
+step: jet run mutate_authority.jet authority-corrupt.log
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority-corrupt.log
+env: JET_SERVICE_AUTH_PHASE=recover
+env: JET_SERVICE_AUTH_ID={cap:corrupt-id}
+exit: nonzero
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority-truncated.log
+env: JET_SERVICE_AUTH_PHASE=send
+capture: truncated-id = text stdout.trim
+file: authority-truncated.log $= "\n" # original predicate; truncated.pop() is Some(LF)
+truncate: authority-truncated.log -1
+step: built
+env: JET_SERVICE_AUTH_STORE={work}/authority-truncated.log
+env: JET_SERVICE_AUTH_PHASE=recover
+env: JET_SERVICE_AUTH_ID={cap:truncated-id}
+exit: nonzero

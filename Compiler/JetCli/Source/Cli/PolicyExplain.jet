@@ -1,0 +1,96 @@
+// CmdDevTools.rs run_explain_policy/run_explain_marker over the canonical
+// authorized load-only query. No semantic check is used for these essays.
+use jet_driver.[JetDriverSourceQueryResult]
+use jet_foundation.[DiagnosticExplanation, EffectivePolicy, PolicyDeclaration, PolicyKey, PolicyScope, policy_key_name, policy_key_parse, policy_resolve, policy_scope_name, policy_value_display]
+
+struct JetCLIMarkerSite {
+ file: String
+ line: U64
+}
+
+fn jet_cli_explain_marker_site(site: String) -> JetCLIMarkerSite JetCLIReadError! {
+ bytes :: site.bytes()
+ cut := bytes.len()
+ loop cut > 0 {
+ cut -= 1
+ if (bytes[cut] == U8{58}) {
+ text :: site.slice((cut + 1)..<bytes.len())
+ line :: jet_cli_remote_unsigned(text) ?? return Err(jet_cli_read_error("marker line must be a positive number"))
+ if (line == U64{0}) -> return Err(jet_cli_read_error("marker line must be a positive number"))
+ return Ok(JetCLIMarkerSite{file: site.slice(0..<cut), line: line})
+ }
+ }
+ Err(jet_cli_read_error("marker site must be `<file>:<line>`"))
+}
+
+fn jet_cli_explain_policy_render(effective: EffectivePolicy) -> String Never! {
+ text := "{policy_key_name(effective.key)} = {policy_value_display(effective.value)}"
+ loop (index, declaration) in effective.provenance {
+ status :: if index + 1 == effective.provenance.len() -> "effective" else -> "shadowed"
+ text = "{text}\n  [{status}] {policy_scope_name(declaration.scope)} {policy_value_display(declaration.value)} at {declaration.source}:{declaration.span.start}..{declaration.span.end}"
+ }
+ text
+}
+
+fn jet_cli_explain_policy_lookup(key: PolicyKey, declarations: [PolicyDeclaration]) -> DiagnosticExplanation? Never! {
+ effective :: if policy_resolve(key, declarations) == {
+ .Val(value) -> value
+ .None -> { return None }
+ .Err(_) -> { return None }
+ }
+ name :: policy_key_name(key)
+ Val(DiagnosticExplanation{
+ code: name, stage: "policy", meaning: "effective scoped policy `{name}`",
+ what: Val(jet_cli_explain_policy_render(effective)),
+ why: Val("the nearest applicable declaration wins subject to the registry's tightening and conflict rules"),
+ fix: Val("change the nearest declaration, or remove it to inherit the next outer value"),
+ example: None, retired: false,
+ })
+}
+
+fn jet_cli_explain_marker_offset(source: String, line: U64) -> Int Never! {
+ // A user `--line 0` names no line after the first; `line - 1` on U64 would trap.
+ if (line <= U64{1}) -> return 0
+ remaining := line - U64{1}
+ loop (index, byte) in source.bytes() {
+ if (byte != U8{10}) -> next
+ remaining -= U64{1}
+ if (remaining == U64{0}) -> return index + 1
+ }
+ source.bytes().len()
+}
+
+fn jet_cli_explain_loaded_policy(key: PolicyKey, loaded: JetDriverSourceQueryResult, site: String?, line: U64?, color: Bool, json: Bool) -> JetCLIPlan Never! {
+ if !loaded.complete {
+ stderr := ""
+ loop diagnostic in loaded.diagnostics -> stderr = "{stderr}{diagnostic.what}\n"
+ return jet_cli_done("", stderr, JET_DRIVER_EXIT_USER_ERROR)
+ }
+ declarations := [PolicyDeclaration]{}
+ if line == .Val(number) {
+ // Rust marker-site selection intentionally sees only the entry module.
+ source_module :: loaded.modules[0]
+ offset :: jet_cli_explain_marker_offset(source_module.source, number)
+ loop declaration in source_module.program.policy_declarations {
+ if declaration.key != key -> next
+ if declaration.scope == PolicyScope.Function || declaration.scope == PolicyScope.Block {
+ target :: declaration.target ?? next
+ if offset < target.start || offset > target.end -> next
+ }
+ &declarations.push(declaration)
+ }
+ } else {
+ // Whole-file policy queries combine every loaded module, not just entry.
+ loop source_module in loaded.modules {
+ loop declaration in source_module.program.policy_declarations {
+ if declaration.key == key -> &declarations.push(declaration)
+ }
+ }
+ }
+ explanation :: jet_cli_explain_policy_lookup(key, declarations) ?? {
+ name :: policy_key_name(key)
+ if site == .Val(location) -> return jet_cli_fail("E2104", "`{name}` has no effective declaration at {location}", jet_cli_why("E2104"), "correct the named argument or input, then run the command again", color, JET_DRIVER_EXIT_USER_ERROR)
+ return jet_cli_fail("E2104", "policy `{name}` has no effective declaration", "the policy has no applicable writer at this source site", "add one registered policy declaration or explain a concrete marker site", color, JET_DRIVER_EXIT_USER_ERROR)
+ }
+ jet_cli_explanation_output(explanation, color, json)
+}

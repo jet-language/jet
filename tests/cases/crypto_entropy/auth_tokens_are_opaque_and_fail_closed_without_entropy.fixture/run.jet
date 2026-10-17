@@ -1,0 +1,16 @@
+// Direct registered Core auth cells preserve original raw timestamp0/ttl1000 and literal password-hash (not wrapper policy).
+#Test("auth_tokens_are_opaque_live") {
+    user :: "auth-regression-s1@example.com"
+    core.auth.register_user(user, "password-hash") ?? panic("register")
+    first :: core.auth.password_login(user, "password-hash", 0, 1000) ?? panic("first")
+    second :: core.auth.password_login(user, "password-hash", 0, 1000) ?? panic("second")
+    first_id :: core.auth.session_id(first)
+    second_id :: core.auth.session_id(second)
+    assert(first_id.starts_with("sess-"))
+    assert(second_id.starts_with("sess-"))
+    assert_ne(first_id, second_id)
+    magic :: core.auth.magic_link_issue(user, 0, 1000) ?? panic("magic")
+    assert(magic.starts_with("magic-"))
+    assert_ne(magic, "magic-{"00".repeat(32)}")
+    core.auth.magic_link_consume(magic, 0, 1000) ?? panic("consume")
+}

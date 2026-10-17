@@ -1,0 +1,138 @@
+// Source/RecordIndex.rs read-only snapshot semantics. Filesystem publication
+// remains owned by the canonical store; this layer validates the graph before
+// any row, including a redacted row, is exposed to a CLI consumer.
+fn jet_cli_record_key(kind: String, artifact_id: String) -> String Never! {
+    rank :: jet_cli_record_kind_rank(kind) ?? panic("validated record kind")
+    "{rank}/{artifact_id}"
+}
+
+fn jet_cli_record_entry_order(left: JetCLIRecordIndexEntry, right: JetCLIRecordIndexEntry) -> Ordering Never! {
+    left_rank :: jet_cli_record_kind_rank(left.kind) ?? panic("validated record kind")
+    right_rank :: jet_cli_record_kind_rank(right.kind) ?? panic("validated record kind")
+    (left_rank <=> right_rank).then(left.artifact_id <=> right.artifact_id).then(left.identity.target_inputs_sha256 <=> right.identity.target_inputs_sha256).then(left.identity.tool_version <=> right.identity.tool_version).then(left.identity.engine <=> right.identity.engine).then(left.path <=> right.path)
+}
+
+fn jet_cli_record_visit_cycle(key: String, graph: [String:[String]], state: &[String:Int]) -> Bool Never! {
+    phase :: state.get(key) ?? 0
+    if phase == 1 -> return true
+    if phase == 2 -> return false
+    state[key] = 1
+    edges :: graph.get(key) ?? [String]{}
+    loop edge in edges {
+        if jet_cli_record_visit_cycle(edge, graph, &state) -> return true
+    }
+    state[key] = 2
+    false
+}
+
+fn jet_cli_record_snapshot_validate(entries: [JetCLIRecordIndexEntry], budget: U64{268435456}) JetCLIReadError! {
+    keys := [String:Bool]{}
+    graph := [String:[String]]{}
+    total := U64{0}
+    total_links := 0
+    previous := U64?{None}
+    loop entry in entries {
+        jet_cli_record_entry_validate(entry)
+        if previous == .Val(sequence) && entry.recorded_sequence <= sequence {
+            return Err(jet_cli_read_error("recorded_sequence values must be unique and strictly increasing"))
+        }
+        previous = Val(entry.recorded_sequence)
+        key :: jet_cli_record_key(entry.kind, entry.artifact_id)
+        if keys.get(key) != None {
+            return Err(jet_cli_read_error("duplicate record identity `{entry.kind}/{entry.artifact_id}`"))
+        }
+        keys[key] = true
+        if jet_cli_record_entry_is_disposable(entry) {
+            if entry.size > U64.MAX - total -> return Err(jet_cli_read_error("record budget byte count overflows"))
+            total += entry.size
+        }
+        total_links += entry.consumed.len() + entry.produced.len()
+        edges := [String]{}
+        loop link in entry.consumed -> &edges.push(jet_cli_record_key(link.kind, link.artifact_id))
+        loop link in entry.produced -> &edges.push(jet_cli_record_key(link.kind, link.artifact_id))
+        graph[key] = edges
+    }
+    if total > budget -> return Err(jet_cli_read_error("disposable record size {total} exceeds budget {budget}"))
+    if total_links > 100000 -> return Err(jet_cli_read_error("record index has too many links"))
+    loop entry in entries {
+        loop link in entry.consumed {
+            if keys.get(jet_cli_record_key(link.kind, link.artifact_id)) == .None {
+                return Err(jet_cli_read_error("record `{entry.kind}/{entry.artifact_id}` links to missing `{link.kind}/{link.artifact_id}`"))
+            }
+        }
+        loop link in entry.produced {
+            if keys.get(jet_cli_record_key(link.kind, link.artifact_id)) == .None {
+                return Err(jet_cli_read_error("record `{entry.kind}/{entry.artifact_id}` links to missing `{link.kind}/{link.artifact_id}`"))
+            }
+        }
+    }
+    ordered := entries
+    &ordered.sort_by(jet_cli_record_entry_order)
+    state := [String:Int]{}
+    loop entry in ordered {
+        if jet_cli_record_visit_cycle(jet_cli_record_key(entry.kind, entry.artifact_id), graph, &state) {
+            return Err(jet_cli_read_error("record links contain a cycle at `{entry.kind}/{entry.artifact_id}`"))
+        }
+    }
+}
+
+fn jet_cli_record_snapshot_parse(bytes: [U8], budget: U64{268435456}) -> [JetCLIRecordIndexEntry] JetCLIReadError! {
+    if bytes.len() > 268435456 -> return Err(jet_cli_read_error("record index exceeds the 256 MiB limit"))
+    text :: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("record index is not valid UTF-8"))
+    entries := [JetCLIRecordIndexEntry]{}
+    loop (index, line) in text.split("\n").to_list() {
+        if line.trim() == "" -> next
+        raw :: line.bytes()
+        length :: raw.len() - (if raw.len() > 0 && raw[raw.len() - 1] == (U8{13}) -> 1 else -> 0)
+        if length > 1048576 -> return Err(jet_cli_read_error("record index line {index + 1} exceeds the 1 MiB limit"))
+        parse_line :: if length == raw.len() -> line else -> (String.from_bytes(raw.slice(0, length)) ?? panic("UTF-8 line without trailing CR"))
+        entry :: jet_cli_record_index_parse_line(parse_line) ?? return Err(jet_cli_read_error("record index line {index + 1} is invalid: {err.message}"))
+        &entries.push(entry)
+    }
+    jet_cli_record_snapshot_validate(entries, budget)
+    Ok(entries)
+}
+
+fn jet_cli_record_snapshot_query(entries: [JetCLIRecordIndexEntry], authenticated: Bool) -> [JetCLIRecordIndexEntry] Never! {
+    visible := [String:Bool]{}
+    if !authenticated {
+        loop entry in entries {
+            if entry.capture != "sensitive" {
+                visible[jet_cli_record_key(entry.kind, entry.artifact_id)] = true
+            }
+        }
+    }
+    rows := [JetCLIRecordIndexEntry]{}
+    loop entry in entries {
+        if !authenticated && entry.capture == "sensitive" -> next
+        row := entry
+        if !authenticated {
+            consumed := [JetCLIRecordLink]{}
+            produced := [JetCLIRecordLink]{}
+            loop link in entry.consumed {
+                if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
+                    &consumed.push(link)
+                }
+            }
+            loop link in entry.produced {
+                if visible.get(jet_cli_record_key(link.kind, link.artifact_id)) != None {
+                    &produced.push(link)
+                }
+            }
+            row.consumed = consumed
+            row.produced = produced
+        }
+        &rows.push(row)
+    }
+    &rows.sort_by(jet_cli_record_entry_order)
+    rows
+}
+
+fn jet_cli_record_next_sequence(entries: [JetCLIRecordIndexEntry]) -> U64 JetCLIReadError! {
+    largest := U64{0}
+    loop entry in entries {
+        if entry.recorded_sequence > largest -> largest = entry.recorded_sequence
+    }
+    if largest == U64.MAX -> return Err(jet_cli_read_error("recorded_sequence exhausted"))
+    Ok(largest + 1)
+}

@@ -1,0 +1,154 @@
+use core.files as files
+use core.crypto as crypto
+use core.time as time
+
+fn kit_steps_action_run() -> KitRun {
+    KitRun{stdout: "", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
+}
+
+fn kit_steps_action_error(state: KitStepState, message: String) -> KitStepResult {
+    KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", message)}
+}
+
+fn kit_steps_inventory(directory: String, root: String) -> [KitInventoryItem] Err! {
+    result := [KitInventoryItem]{}
+    entries :: files.list_dir(directory) ?? return Err("inventory directory: {err}")
+    loop entry in entries {
+        info :: files.stat(entry.path) ?? return Err("inventory stat: {err}")
+        digest := ""
+        if info.is_file {
+            bytes :: files.read_bytes(entry.path) ?? return Err("inventory read: {err}")
+            digest = crypto.sha256(bytes).hex()
+        }
+        &result.push(KitInventoryItem{path: files.relative(entry.path, root), kind: info.kind,
+            size: info.size, modified_ms: info.modified.to_unix_ms(), digest: digest})
+        if info.is_dir && !info.is_symlink {
+            descendants :: kit_steps_inventory(entry.path, root) ?? return Err(err)
+            loop child in descendants -> &result.push(child)
+        }
+    }
+    &result.sort_by(item -> item.path)
+    Ok(result)
+}
+
+fn kit_steps_inventory_equal(left: [KitInventoryItem], right: [KitInventoryItem]) -> Bool {
+    if left.len() != right.len() -> return false
+    loop i in 0..<left.len() {
+        a :: left[i]
+        b :: right[i]
+        if a.path != b.path || a.kind != b.kind || a.size != b.size || a.modified_ms != b.modified_ms || a.digest != b.digest -> return false
+    }
+    true
+}
+
+fn kit_steps_action(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
+    state := previous
+    if step.action == "assert" -> return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    if step.action == "apply-edits" -> return kit_steps_edits(step, context, state)
+    if step.action == "await" -> return kit_steps_await(step, context, state)
+    if kit_expect_named(["session", "send", "recv", "signal", "close", "wait"], step.action) -> return kit_steps_session_action(step, context, state)
+    if kit_steps_setup_kind(step.action) {
+        verdict :: kit_steps_setup_run(step, context.env, context.work, context.scratch, state.built)
+        state.last = kit_steps_action_run()
+        return KitStepResult{state: state, verdict: verdict}
+    }
+    if step.action == "capture" {
+        if step.argv[1] == "+=" {
+            words := step.argv
+            words[1] = "="
+            captured :: kit_steps_capture_value(words, context, state)
+            if captured.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: captured.verdict}
+            suffix :: if captured.value == { .Text(text) -> text else -> "" }
+            found := false
+            loop index in 0..<state.captures.len() {
+                if state.captures[index].name == words[0] {
+                    prefix :: kit_steps_captured_subject(words[0], state.captures) ?? return kit_steps_action_error(state, "accumulating capture is not text")
+                    state.captures[index].value = KitCapturedValue.Text("{prefix}{suffix}")
+                    state.captures[index].aggregate = true
+                    found = true
+                }
+            }
+            if !found -> &state.captures.push(KitCapture{name: words[0], value: captured.value, aggregate: true})
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
+        if step.argv[1] == "=" && step.argv[2] == "opt-bytes" {
+            path :: kit_steps_work_path(step.argv[4], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "capture bytes path escapes work")
+            bytes :: if files.exists(path) -> Val(files.read_bytes(path) ?? return kit_steps_action_error(state, "capture bytes: {err}")) else -> None
+            &state.captures.push(KitCapture{name: step.argv[0], value: KitCapturedValue.Bytes(bytes)})
+            state.last = kit_steps_action_run()
+        } else {
+            captured :: kit_steps_capture_value(step.argv, context, state)
+            if captured.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: captured.verdict}
+            &state.captures.push(KitCapture{name: step.argv[0], value: captured.value})
+            selector :: if step.argv[1] == "=" && (step.argv[2] == "text" || step.argv[2] == "lines") -> kit_steps_subject(step.argv[3]) else -> kit_steps_subject(step.argv[1])
+            if selector == "file" || selector == "file?" || (step.argv[1] == "=" && step.argv[2] != "text" && step.argv[2] != "lines") -> state.last = kit_steps_action_run()
+        }
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    if step.action == "write" {
+        destination :: kit_steps_work_path(step.argv[1], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "write destination escapes work directory")
+        template :: if step.literal_input -> step.argv[2] else -> files.read(files.join(context.snapshots, step.argv[2])) ?? return kit_steps_action_error(state, "write template: {err}")
+        if kit_steps_build_target_text(template) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
+        text :: kit_steps_runtime_expand(template, context, state) ?? return kit_steps_action_error(state, "write template: undefined capture or unavailable tool token")
+        files.create_dir_all(files.dirname(destination)) ?? return kit_steps_action_error(state, "write mkdir: {err}")
+        files.write(destination, text) ?? return kit_steps_action_error(state, "write: {err}")
+        state.last = kit_steps_action_run()
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    if step.action == "inventory" {
+        path :: kit_steps_work_path(step.argv[0], context.env, context.work, context.scratch, state.built) ?? return kit_steps_action_error(state, "inventory directory escapes work")
+        items :: kit_steps_inventory(path, path) ?? return kit_steps_action_error(state, "{err}")
+        if step.label != "" -> &state.inventories.push(KitInventory{label: step.label, items: items})
+        else {
+            found := false
+            loop saved in state.inventories {
+                if saved.label == step.argv[2] {
+                    found = true
+                    if !kit_steps_inventory_equal(saved.items, items) -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "inventory differs from {saved.label}")}
+                }
+            }
+            if !found -> return kit_steps_action_error(state, "inventory label missing")
+        }
+        state.last = kit_steps_action_run()
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    if step.action == "spawn" {
+        policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid process policy")
+        overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
+        prepared :: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
+        started :: time.instant()
+        child := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "spawn: {err}")
+        input_error := ""
+        &child.stdin.write(prepared.stdin) ?? {
+            input_error = "stdin: {err}"
+            ()
+        }
+        child.stdin.close()
+        &state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    kit_steps_action_error(state, "unknown kit action: {step.action}")
+}
+
+fn kit_steps_finish(state: KitStepState, verdict: KitVerdict) -> KitOutcome {
+    errors := [String]{}
+    loop pending in state.children {
+        if pending.joined -> next
+        exited :: pending.child.exited() ?? {
+            &errors.push("cleanup status: {err}")
+            false
+        }
+        if !exited {
+            pending.child.kill() ?? {
+                &errors.push("cleanup kill: {err}")
+                ()
+            }
+        }
+        _ :: pending.child.wait() ?? {
+            &errors.push("cleanup wait: {err}")
+            next
+        }
+    }
+    if errors.len() > 0 -> return KitOutcome{verdict: kit_expect_verdict("ERROR", "{verdict.detail}; {errors.join("; ")}"), run: state.last}
+    KitOutcome{verdict: verdict, run: state.last}
+}

@@ -5,10 +5,10 @@ use core.text.parse as text_parse
 fn run() {
     sender :: email.address("sender@example.com") ?? return
     recipient :: email.address("recipient@example.net") ?? return
-    envelope :: email.envelope(sender, [~recipient]) ?? return
+    envelope :: email.envelope(sender, [recipient.copy()]) ?? return
     message :: email.message(
     sender,
-    [~recipient],
+    [recipient.copy()],
     [Address]{},
     subject: "Welcome",
     text: "Hello",

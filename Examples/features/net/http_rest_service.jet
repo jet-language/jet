@@ -9,9 +9,7 @@ use core.http.server as http_server
 use core.files as files
 use core.net as net
 
-fn handle_api(req: HTTPRequest) -> HTTPResponse HTTPError! {
-    name :: req.param("name") ?? "missing"
-    path :: req.param("path") ?? "missing"
+fn handle_api(name: String, path: String, req: HTTPRequest) -> HTTPResponse HTTPError! {
     body :: req.body().text(64) ?? "invalid body"
     return Ok(http_server.response(200, "{name}|{path}|{req.header("cookie") ?? "missing"}|{req.body_len()}|{req.under_limit(64)}|{body}"))
 }
@@ -21,7 +19,7 @@ fn run() (HTTPError | IOError | NetError | TaskFailure)! {
     listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
     addr :: listener.local_addr() ?? panic("address")
     mux :: http_server.mux()
-    mux.post("/api/:name/*path", (req: HTTPRequest) -> handle_api(req))
+    mux.post("/api/:name/*path", handle_api)
     mux.get("/events", (_req: HTTPRequest) -> Ok(http_server.sse("ready")))
     mux.get("/file", (req: HTTPRequest) -> Ok(http_server.static_file_range(req, "/tmp/jet_http_static.txt", "text/plain") ?? http_server.response(500, "range")))
     t :: task {

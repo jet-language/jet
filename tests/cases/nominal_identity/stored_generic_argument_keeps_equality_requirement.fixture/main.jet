@@ -1,0 +1,12 @@
+// Only truly phantom type arguments may lack Equatable.
+#!Equatable
+struct Opaque { value: Int }
+struct Stored<T> { value: T }
+enum StoredEnum<T> { Value(T) }
+fn refusal(left: Stored<Opaque>, right: Stored<Opaque>) {
+    print(left == right)
+}
+fn refusal_enum(left: StoredEnum<Opaque>, right: StoredEnum<Opaque>) {
+    print(left == right)
+}
+fn run() {}

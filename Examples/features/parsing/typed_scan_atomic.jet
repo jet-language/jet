@@ -1,0 +1,68 @@
+// Same source/golden on reference, evaluator and native tiers. A miss after
+// one valid hole must leave the receiver unchanged; retries see the same tail.
+use core.math
+
+fn float_bits(raw: String, expected: Int) -> Bool {
+    cursor :: Cursor.over(raw)
+    captured :: cursor.take_pattern("{value:Float}") ?? panic("Float capture rejected")
+    math.to_bits(captured.value) == expected
+}
+
+fn run() {
+    text :: Cursor.over("id=7;enabled=TRUE;tail")
+    if text.take_pattern("id={id:Int};enabled={enabled:Bool};") == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("uppercase Bool must miss")
+    }
+    retry :: text.take_pattern("id={id:Int};enabled={enabled:String};") ?? panic("text miss consumed input")
+    print("retry={retry.id}/{retry.enabled}")
+    tail :: text.take_pattern("{tail:String}") ?? panic("missing tail")
+    print("tail={tail.tail}")
+
+    overflow :: Cursor.over("9223372036854775808!")
+    if overflow.take_pattern("{value:Int}!") == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("i64 overflow must miss")
+    }
+    preserved :: overflow.take_pattern("{raw:String}!") ?? panic("overflow miss consumed input")
+    print(preserved.raw)
+    minimum :: Cursor.over("-9223372036854775808!")
+    low :: minimum.take_pattern("{value:Int}!") ?? panic("MIN rejected")
+    print(low.value)
+
+    reader :: Reader.over([U8]{0xAB, 0x01, 0x02, 0x03, 0xFE})
+    if reader.take_pattern([U8]{"{first:U8}wrong"}) == {
+        .Err(error) -> print(error)
+        .Ok(_) -> panic("reader literal must miss")
+    }
+    print("remaining={reader.remaining()}")
+    packet :: reader.take_pattern([U8]{"{hi:U4}{lo:U4}{word:U24le}"}) ?? panic("reader miss consumed input")
+    print("packet={packet.hi}/{packet.lo}/{packet.word} remaining={reader.remaining()}")
+    rest :: reader.take_pattern([U8]{"{rest:...}"}) ?? panic("rest rejected")
+    print("rest={rest.rest.len()}/{rest.rest[0]}")
+
+    if ([U8]{0xAB, 0xCD}) == {
+        [U8]{"{byte:U8}"} -> panic("whole binary scan ignored trailing input")
+        else -> print("whole-tail-miss")
+    }
+    if ([U8]{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}) == {
+        [U8]{"{word:U64be}"} -> print(word)
+        else -> panic("U64 rejected")
+    }
+
+    print("decimal={float_bits("0.1", 4591870180066957722)}")
+    print("integer-round={float_bits("9007199254740993", 4845873199050653696)}")
+    print("half-even={float_bits("1.00000000000000011102230246251565404236316680908203125", 4607182418800017408)}")
+    print("above-half={float_bits("1.00000000000000011102230246251565404236316680908203126", 4607182418800017409)}")
+    print("underflow={float_bits("1e-324", 0)}")
+    print("below-subnormal-half={float_bits("2.4703282292062327e-324", 0)}")
+    print("above-subnormal-half={float_bits("2.4703282292062328e-324", 1)}")
+    print("min-subnormal={float_bits("4.9406564584124654e-324", 1)}")
+    print("min-normal={float_bits("2.2250738585072014e-308", 4503599627370496)}")
+    print("large={float_bits("1e308", 9214871658872686752)}")
+    print("max-finite={float_bits("1.7976931348623157e308", 9218868437227405311)}")
+    print("overflow={float_bits("1.7976931348623159e308", 9218868437227405312)}")
+    print("negative-zero={float_bits("-0", -9223372036854775808)}")
+    print("infinity={float_bits("+INFINITY", 9218868437227405312)}")
+    print("nan={float_bits("NaN", 9221120237041090560)}")
+}

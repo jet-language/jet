@@ -1,0 +1,37 @@
+# Port of tests/jetpack_jetos.rs:2962-3102. All original predicates, fixture sources verbatim.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_generations_are_newest_first_and_rollback_activates_prior.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+step: jet os switch halcyon --name first --no-color --offline
+cwd: project
+exit: 0
+step: jet os switch halcyon --name second --no-color --offline
+cwd: project
+exit: 0
+file: package-root/systems/generations/second/activation-proof.txt absent
+step: jet os build halcyon --name second --no-color --offline
+cwd: project
+exit: 0
+file: package-root/systems/generations/first/generation-root.json ~ "\"kind\":\"jetos.generation-root.v1\"" # original generation root predicate
+file: package-root/systems/generations/first/generation-root.json ~ "\"output_digests\":[\"sha256-" # original generation root predicate
+file: package-root/systems/generations/second/generation-root.json ~ "\"kind\":\"jetos.generation-root.v1\"" # original generation root predicate
+file: package-root/systems/generations/second/generation-root.json ~ "\"output_digests\":[\"sha256-" # original generation root predicate
+capture: before = tree-contents package-root/hangar/lifecycle-db/journal
+capture: lifecycle = concat-files package-root/hangar/lifecycle-db/journal sorted
+cap:lifecycle: count "external-consumer" >= 2 # original lifecycle roots predicate
+step: jet os generations halcyon --no-color
+exit: 0
+stdout: before "second" "first" # original newest-first order
+file: package-root/systems/activation-proofs/halcyon/second.txt ~ "service-risk"
+file: package-root/systems/activation-proofs/halcyon/second.txt ~ "rollback-proof: pass previous=first"
+step: jet os rollback halcyon first --no-color
+exit: 0
+stderr: ~ "rolled back"
+capture: after = tree-contents package-root/hangar/lifecycle-db/journal
+cap:after: = "{cap:before}" # original sorted(name,bytes) journal equality; no mtime
+step: jet os rollback halcyon first --no-color
+exit: 2
+stderr: ~ "no generation is available"

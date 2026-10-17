@@ -1,0 +1,9 @@
+# Port of tests/fmt_project.rs::idempotent_format (641-669).
+# PENDING-SAME-HEAD: original predicates, no reference snapshot or blessing.
+fixture: idempotent_format.fixture
+step: jet fmt {work}/main.jet
+exit: 0
+copy: main.jet after-first.txt
+step: jet fmt {work}/main.jet
+exit: 0
+file: main.jet == after-first.txt

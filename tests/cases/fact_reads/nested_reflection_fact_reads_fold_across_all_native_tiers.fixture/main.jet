@@ -1,0 +1,71 @@
+// D-ANY-JAI1 (c7jaiany §6, ratified 2026-07-01): `reflect.of(x)` — the runtime
+// reflection floor. Legal wherever `"{x}"` interpolation is (the `Renderable`
+// gate a trait-bounded variadic's `...Renderable` bound also uses):
+// `.type_name()` and `.path()` and `.display()` always work — `.display()` shows exactly
+// what `"{x}"` would; `.fields()` is populated for a struct receiver and
+// empty for anything else (primitives, enums, …).
+use core.reflect as reflect
+
+#UnitFamily(Length, dimension) { meter }
+
+ATTRIBUTION :: prep { report.$attribution }
+
+UNIT_SCALE :: prep { Meter.$unit_scale_provenance }
+
+derive T.Summarize {
+    info :: T.reflect()
+    type_name :: info.name
+    first :: info.fields[0].name
+    second :: info.fields[1].name
+    third :: info.fields[2].name
+    range_start :: info.$range.start
+    method_effects :: info.methods[0].$effects.values.len()
+    method_sendability :: info.methods[0].$sendability.known
+    method_movedness :: info.methods[0].$movedness.known
+    method_origin :: info.methods[0].$origin.tracked
+    method_view_mutable :: info.methods[0].$view_provenance.mutable
+    method_maturity :: info.methods[0].$maturity.level
+    fn compile_field_names(self) -> String { "{$type_name}: {$first},{$second},{$third} range={$range_start} effects={$method_effects} send={$method_sendability} moved={$method_movedness} track={$method_origin} view={$method_view_mutable} maturity={$method_maturity == .Experimental}" }
+}
+
+// `reflect.of(x)` is legal exactly where `"{x}"` is, so a reflected type owns a
+// `Display`. A generic box cannot interpolate its `T` without a bound, so it
+// shows its own shape; the reflected FIELD still carries the substituted type.
+struct Box<T> {
+    value: T
+
+    impl Display {
+        fn display(self) -> String { "Box" }
+    }
+}
+
+#Summarize
+struct Point {
+    x: Int(0..10)
+    y: Int
+    level: Int(0..10)
+
+    fn describe(self) -> String { "{self.x},{self.y}" }
+
+    impl Display {
+        fn display(self) -> String { "({self.x}, {self.y})" }
+    }
+}
+
+fn run() {
+    p :: Point{x: 3, y: 4, level: 2}
+    print(p.compile_field_names())
+    print("attribution={ATTRIBUTION.source} scale={UNIT_SCALE.kind == .Rational}")
+    v :: reflect.of(p)
+    print(v.type_name())
+    print(v.path())
+    print(v.display())
+    loop f in v.fields() -> print("{f.name()}:{f.value().type_name()} = {f.value().display()}")
+    boxed :: Box<Int>{value: 7}
+    boxed_fields :: reflect.of(boxed).fields()
+    print("generic {boxed_fields[0].name()}:{boxed_fields[0].value().type_name()}")
+    n :: reflect.of(42)
+    print(n.type_name())
+    print(n.display())
+    print(n.fields().len())
+}

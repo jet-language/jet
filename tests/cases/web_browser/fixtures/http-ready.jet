@@ -1,0 +1,20 @@
+// SETUP-PORT of web_browser.rs222-237/282-309 and notebook.rs537-558.
+// Raw HTTP bytes only; no test assertions live here.
+use core.net as net
+fn run(args: [String]) {
+    stream :: net.tcp_connect(args[0]) ?? return
+    net.set_read_timeout(&stream, 250) ?? return
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    auth := ""
+    if args[2] != "-" -> auth = "Authorization: Bearer {args[2]}{crlf}"
+    request :: "GET {args[1]} HTTP/1.1{crlf}Host: {args[0]}{crlf}{auth}Connection: close{crlf}{crlf}"
+    stream.write_text(request) ?? return
+    if args[3] == "write" -> net.tcp_shutdown(&stream, .Write) ?? return
+    response := ""
+    loop {
+        text :: stream.read_text(8192) ?? break
+        if text.len() == 0 -> break
+        response = "{response}{text}"
+    }
+    print(response)
+}

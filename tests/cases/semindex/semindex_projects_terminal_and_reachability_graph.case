@@ -1,0 +1,10 @@
+# Original tests/semindex.rs:403-451; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_projects_terminal_and_reachability_graph.fixture
+step: jet inspect semindex terminal_state_graph.jet --json
+json: stdout doc $.semindex.state_graphs[?owner="Door"][0].states[?name="Closed"][0].terminal = false
+json: stdout doc $.semindex.state_graphs[?owner="Door"][0].states[?name="Open"][0].terminal = true
+json: stdout doc $.semindex.state_graphs[?owner="Door"][0].states[?name="Closed"][0].reachable = true
+json: stdout doc $.semindex.state_graphs[?owner="Door"][0].states[?name="Open"][0].reachable = true
+json: stdout doc $.semindex.state_graphs[?owner="Door"][0].states[?name="Orphan"][0].reachable = false
+stdout: ~ "\"state_graphs\":[{" # original predicate

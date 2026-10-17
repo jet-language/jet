@@ -25,6 +25,7 @@ use jet_lexer.[
     TOKEN_KW_IF,
     TOKEN_KW_IN,
     TOKEN_KW_IT,
+    TOKEN_LAMBDA_ARROW,
     TOKEN_LBRACE,
     TOKEN_LPAREN,
     TOKEN_RPAREN,
@@ -33,17 +34,17 @@ use jet_lexer.[
 ]
 
 struct ParserExpressionFormLoopClause {
-    pub var: String
-    pub var_span: Span
-    pub var2: NamedSpan?
-    pub kind: ForKind
+    var: String
+    var_span: Span
+    var2: NamedSpan?
+    kind: ForKind
 }
 
 struct ParserExpressionFormCountedLoop {
-    pub init: Binding
-    pub cond: Expr
-    pub step: Stmt?
-    pub span: Span
+    init: Binding
+    cond: Expr
+    step: Stmt?
+    span: Span
 }
 
 fn parser_expression_form_loop_body_start(state: &JetParserState) -> Bool Never! {
@@ -73,10 +74,10 @@ fn parser_expression_form_loop_binding(state: &JetParserState) -> ParserExpressi
         second :: parser_expect_name(&state, "as the second loop variable")
         if parser_current_kind(&state) == TOKEN_COMMA -> parser_bump(&state)
         parser_expect(&state, TOKEN_RPAREN, "after the two loop variables")
-        return ParserExpressionFormLoopClause{var: first.payload.decoded, var_span: first.span, var2: Val(NamedSpan{name: second.payload.decoded, span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
+        return ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: Val(NamedSpan{name: parser_value(state, second), span: second.span}), kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
     }
     first :: parser_expect_name(&state, "as the loop variable")
-    ParserExpressionFormLoopClause{var: first.payload.decoded, var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
+    ParserExpressionFormLoopClause{var: parser_value(state, first), var_span: first.span, var2: None, kind: ForKind.In{collection: Expr.Unit{span: first.span}, step: None}}
 }
 
 fn parser_expression_form_loop_separator(state: &JetParserState) {
@@ -247,7 +248,7 @@ fn parser_expression_form_parse_counted_loop(state: &JetParserState, start: Span
     name :: parser_expect_name(&state, "as the counted-loop binding")
     sigil :: parser_expect(&state, TOKEN_COLON_EQ, "after the counted-loop binding name")
     initial :: parser_parse_expression_no_struct_lit(&state, depth + 1)
-    init :: ast_binding(name.payload.decoded, name.span, true, initial.expr, Val(sigil.span))
+    init :: ast_binding(parser_value(state, name), name.span, true, initial.expr, Val(sigil.span))
     parser_expression_form_loop_header_separator(&state, "after the counted-loop initializer")
     condition :: parser_parse_expression_no_struct_lit(&state, depth + 1)
     step := Stmt?{None}
@@ -276,6 +277,16 @@ fn parser_expression_form_parse_loop(state: &JetParserState, depth: Int) -> Pars
         end :: block.span
         loop_stmt :: Stmt.Loop{body: block.statements, span: parser_cover(start.span, end), arrow_body: false, label: None}
         return parser_expression_form_make_loop_lambda(body: [Stmt]{loop_stmt}, start: start.span, end: end, result_loop: true, collecting_loop: false, requires_exhaustion_route: false, exhaustion_span: None)
+    }
+    // Rust yielding_loop_expr accepts only the header shapes with an
+    // exhaustion edge before attempting the collecting expression.
+    head :: parser_current_kind(&state)
+    following :: parser_kind_at(&state, 1)
+    binding_head :: head == TOKEN_IDENT || head == TOKEN_KW_IT
+    finite_header :: head == TOKEN_LPAREN || (binding_head && (following == TOKEN_COLON_EQ || following == TOKEN_SEMI || following == TOKEN_COMMA || following == TOKEN_KW_IF || following == TOKEN_KW_IN || following == TOKEN_UNIFIED_ARROW || following == TOKEN_LAMBDA_ARROW))
+    if !finite_header {
+        parser_add_fatal_code(&state, "E0072", start.span, "this collecting loop cannot return a List because it has no finite exhaustion edge", "a collecting loop must finish after a statically finite source or C-style condition; bare infinite and condition-only loops do not provide that boundary", "remove `->`, or iterate a finite source; return one final value from an ordinary loop with `break value`")
+        return ParsedExpr{expr: Expr.Unit{span: start.span}, span: start.span}
     }
     bindingless :: (parser_current_kind(&state) == TOKEN_IDENT || parser_current_kind(&state) == TOKEN_KW_IT) && (parser_kind_at(&state, 1) == TOKEN_UNIFIED_ARROW || parser_kind_at(&state, 1) == TOKEN_KW_IF)
     counted := ParserExpressionFormCountedLoop?{None}

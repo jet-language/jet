@@ -1,0 +1,10 @@
+// Source/CmdDevTools.rs `run_emit_rust`: successful --json still prints raw
+// generated Rust. The mode flag changes only compiler diagnostic routing.
+use jet_driver.[JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR, jet_driver_report_problems]
+
+fn jet_cli_emit_check_failure(file: String, source: String, errors: [Diagnostic], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    if json {
+        return JetDriverVerbOutput{stdout: jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, errors), stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    JetDriverVerbOutput{stdout: "", stderr: jet_driver_report_problems(file, source, errors, color, true), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}

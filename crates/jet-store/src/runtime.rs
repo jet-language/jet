@@ -5,7 +5,7 @@
 //! compile that mutually dependent closure once as ONE `jet_runtime` rlib, then
 //! link the user program against it. The two blocks reference each other
 //! (the fixed runtime reaches `jet_std`, the scheduler world, SIMD kernels and
-//! `DataTree` in the Core block, and Core reaches the runtime traits), so they
+//! `Dyn` in the Core block, and Core reaches the runtime traits), so they
 //! cannot be two crates: Rust crates cannot depend on each other cyclically.
 //! The Core block is selected only by build facts (edition, OS, test harness,
 //! runtime parts, devtools policy), never by user source, so the key is the
@@ -648,6 +648,11 @@ enum Scope {
     Macro,
     /// A module-level `thread_local! { … }` block: its statics are items.
     ThreadLocal,
+    /// A module-level foreign block (`extern "C" { … }`): its functions and
+    /// statics are items. A program's foreign declarations live in the unit
+    /// crate that owns them, and a sibling shard calls them through its glob
+    /// import.
+    Foreign,
     Other,
 }
 
@@ -761,6 +766,7 @@ fn export_line(line: &str, masked: &str, scope: Scope) -> String {
         Scope::Struct => looks_like_struct_field(code),
         Scope::InherentImpl => starts_impl_member(code),
         Scope::ThreadLocal => strip_visibility(code).starts_with("static "),
+        Scope::Foreign => starts_foreign_item(code),
         _ => false,
     };
     if !should_export {
@@ -878,6 +884,13 @@ fn starts_impl_member(code: &str) -> bool {
     .any(|prefix| code.starts_with(prefix))
 }
 
+fn starts_foreign_item(code: &str) -> bool {
+    let code = strip_visibility(code);
+    ["fn ", "safe fn ", "unsafe fn ", "static ", "safe static ", "unsafe static "]
+        .iter()
+        .any(|prefix| code.starts_with(prefix))
+}
+
 fn looks_like_struct_field(code: &str) -> bool {
     let code = strip_visibility(code);
     let Some(colon) = code.find(':') else {
@@ -930,6 +943,11 @@ fn scope_for_header(header: &str) -> Scope {
         Scope::Macro
     } else if header.starts_with("thread_local!") {
         Scope::ThreadLocal
+    } else if (header.starts_with("extern ") || header.starts_with("unsafe extern "))
+        && !header.contains("fn ")
+        && !header.starts_with("extern crate ")
+    {
+        Scope::Foreign
     } else if header.contains("fn ") {
         Scope::Function
     } else {

@@ -1,0 +1,50 @@
+#!/bin/sh
+case " $* " in
+    *" --version"*)
+        exit 0
+        ;;
+esac
+command_name=""
+remote=""
+after_separator=0
+for arg in "$@"; do
+    if [ "$arg" = "ls-remote" ] || [ "$arg" = "clone" ]; then
+        command_name="$arg"
+    fi
+    if [ "$after_separator" = 1 ] && [ -z "$remote" ]; then
+        remote="$arg"
+    fi
+    if [ "$arg" = "--" ]; then
+        after_separator=1
+    fi
+done
+printf 'command=%s\nremote=%s\n' "$command_name" "$remote" >> "$JET_TEST_GIT_LOG"
+if [ "$command_name" = "ls-remote" ]; then
+    mv "$JET_TEST_GIT_SOURCE" "$JET_TEST_GIT_BACKUP" || exit 10
+    ln -s "$JET_TEST_GIT_OUTSIDE" "$JET_TEST_GIT_SOURCE" || exit 11
+    printf '%s\trefs/heads/main\n' '0000000000000000000000000000000000000000'
+    exit 0
+fi
+if [ "$command_name" = "clone" ]; then
+    destination=""
+    for arg in "$@"; do
+        destination="$arg"
+    done
+    mkdir -p "$destination" || exit 12
+    case "$remote" in
+        /proc/self/fd/*|/dev/fd/*)
+            printf 'authority=fd\n' >> "$JET_TEST_GIT_LOG"
+            source_path="$remote"
+            ;;
+        file://*)
+            printf 'authority=path\n' >> "$JET_TEST_GIT_LOG"
+            source_path="${remote#file://}"
+            ;;
+        *)
+            exit 13
+            ;;
+    esac
+    cat "$source_path/package.jet" > "$destination/package.jet" || exit 14
+    exit 0
+fi
+exit 0

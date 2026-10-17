@@ -1,8 +1,10 @@
 use super::{AccessConvention, BinOp, Expr, Lambda, ParamZone, Type};
+use crate::EncodingJson::{json_unsupported, EncodingError};
 use crate::Names::{mangle, mangle_path};
 use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::fmt::Write as _;
 
 #[allow(dead_code)]
 mod map_key_semantics {
@@ -420,13 +422,18 @@ impl CtFloat {
         format!("{self:?}")
     }
 
-    pub fn to_json(self) -> String {
-        let rendered = self.render();
-        if rendered.contains('.') || rendered.contains('e') || rendered.contains('E') {
-            rendered
-        } else {
-            format!("{rendered}.0")
+    pub fn to_json(self) -> Result<String, EncodingError> {
+        let mut out = String::new();
+        self.append_json(&mut out)?;
+        Ok(out)
+    }
+
+    fn append_json(self, out: &mut String) -> Result<(), EncodingError> {
+        if !self.as_f64().is_finite() {
+            return Err(json_unsupported("JSON cannot encode a non-finite Float"));
         }
+        write!(out, "{self:?}").unwrap();
+        Ok(())
     }
 
     pub fn serialize(self) -> String {
@@ -1307,6 +1314,7 @@ impl PartialEq for ClosureData {
 #[derive(Clone, Debug)]
 pub enum CtKey {
     Int(i64),
+    BigInt(crate::Numeric::CtBigInt),
     Str(String),
     Bool(bool),
     Char(char),
@@ -1330,6 +1338,10 @@ impl CtKey {
     fn map_key(&self) -> map_key_semantics::JetMapKey {
         match self {
             CtKey::Int(value) => map_key_semantics::JetMapKey::Int(*value),
+            CtKey::BigInt(value) => map_key_semantics::JetMapKey::BigInt {
+                negative: value.negative,
+                limbs: value.limbs.clone(),
+            },
             CtKey::Str(value) => map_key_semantics::JetMapKey::String(value.clone()),
             CtKey::Bool(value) => map_key_semantics::JetMapKey::Bool(*value),
             CtKey::Char(value) => map_key_semantics::JetMapKey::Char(*value),
@@ -1373,7 +1385,10 @@ impl CtKey {
             // Exact Int arithmetic spills values outside the evaluator's
             // fast i64 carrier into BigInt. If the spill still fits i64,
             // canonicalize it to the same key used by direct Int values.
-            CtValue::BigInt(value) => value.try_i64().map(CtKey::Int),
+            CtValue::BigInt(value) => Some(match value.try_i64() {
+                Some(number) => CtKey::Int(number),
+                None => CtKey::BigInt(value),
+            }),
             CtValue::Str(s) => Some(CtKey::Str(s)),
             CtValue::Bool(b) => Some(CtKey::Bool(b)),
             CtValue::Char(c) => Some(CtKey::Char(c)),
@@ -1405,6 +1420,7 @@ impl CtKey {
     pub fn to_value(&self) -> CtValue {
         match self {
             CtKey::Int(n) => CtValue::Int(*n),
+            CtKey::BigInt(value) => CtValue::BigInt(value.clone()),
             CtKey::Str(s) => CtValue::Str(s.clone()),
             CtKey::Bool(b) => CtValue::Bool(*b),
             CtKey::Char(c) => CtValue::Char(*c),
@@ -1431,7 +1447,7 @@ impl CtKey {
     }
     pub(crate) fn jet_type(&self) -> Type {
         match self {
-            CtKey::Int(_) => Type::Int,
+            CtKey::Int(_) | CtKey::BigInt(_) => Type::Int,
             CtKey::Str(_) => Type::String,
             CtKey::Bool(_) => Type::Bool,
             CtKey::Char(_) => Type::Char,
@@ -1818,86 +1834,99 @@ impl CtValue {
         }
     }
 
-    pub fn to_json(&self) -> String {
+    pub fn to_json(&self) -> Result<String, EncodingError> {
+        let mut out = String::new();
+        self.append_json(&mut out)?;
+        Ok(out)
+    }
+
+    pub fn append_json(&self, out: &mut String) -> Result<(), EncodingError> {
         match self {
-            CtValue::Int(n) => n.to_string(),
-            CtValue::Float(value) => value.to_json(),
-            CtValue::Bool(b) => b.to_string(),
-            CtValue::Char(c) => format!("\"{}\"", c),
-            CtValue::Str(s) => {
-                let mut out = String::from('"');
-                for ch in s.chars() {
-                    match ch {
-                        '"' => out.push_str("\\\""),
-                        '\\' => out.push_str("\\\\"),
-                        '\n' => out.push_str("\\n"),
-                        '\r' => out.push_str("\\r"),
-                        '\t' => out.push_str("\\t"),
-                        c => out.push(c),
-                    }
-                }
-                out.push('"');
-                out
+            CtValue::Int(n) => write!(out, "{n}").unwrap(),
+            CtValue::Float(value) => value.append_json(out)?,
+            CtValue::Bool(b) => out.push_str(if *b { "true" } else { "false" }),
+            CtValue::Char(c) => {
+                let mut bytes = [0; 4];
+                crate::JSON::append_quote(out, c.encode_utf8(&mut bytes));
             }
-            // A `BigInt` doesn't fit in a JSON number without losing
-            // precision in most readers, so it round-trips as a string —
-            // matching how AOT's `#[Codable]` handles arbitrary precision.
-            CtValue::BigInt(b) => format!("\"{}\"", b.to_string_rep()),
+            CtValue::Str(s) => crate::JSON::append_quote(out, s),
+            // BigInt remains explicit text, preserving arbitrary precision.
+            CtValue::BigInt(b) => crate::JSON::append_quote(out, &b.to_string_rep()),
             CtValue::Bytes(bs) => {
-                let parts: Vec<String> = bs.iter().map(|b| b.to_string()).collect();
-                format!("[{}]", parts.join(","))
+                out.push('[');
+                for (index, byte) in bs.iter().enumerate() {
+                    if index != 0 { out.push(','); }
+                    write!(out, "{byte}").unwrap();
+                }
+                out.push(']');
             }
             CtValue::List(xs) => {
-                let parts: Vec<String> = xs.iter().map(|x| x.to_json()).collect();
-                format!("[{}]", parts.join(","))
+                out.push('[');
+                for (index, value) in xs.iter().enumerate() {
+                    if index != 0 { out.push(','); }
+                    value.append_json(out)?;
+                }
+                out.push(']');
             }
-            CtValue::Map(m) => {
-                let parts: Vec<String> = m
-                    .iter()
-                    .map(|(k, v)| format!("{}:{}", k.to_value().to_json(), v.to_json()))
-                    .collect();
-                format!("{{{}}}", parts.join(","))
+            CtValue::Map(entries) => {
+                out.push('{');
+                for (index, (key, value)) in entries.iter().enumerate() {
+                    let CtKey::Str(key) = key else {
+                        return Err(json_unsupported("JSON cannot encode non-text map keys"));
+                    };
+                    if index != 0 { out.push(','); }
+                    crate::JSON::append_quote(out, key);
+                    out.push(':');
+                    value.append_json(out)?;
+                }
+                out.push('}');
             }
             CtValue::Struct { fields, .. } => {
-                let parts: Vec<String> = fields
-                    .iter()
-                    .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
-                    .map(|(n, v)| format!("\"{}\":{}", n, v.to_json()))
-                    .collect();
-                format!("{{{}}}", parts.join(","))
+                out.push('{');
+                let mut first = true;
+                for (name, value) in fields {
+                    if crate::Syntax::is_memo_storage_name(name) { continue; }
+                    if !first { out.push(','); }
+                    first = false;
+                    crate::JSON::append_quote(out, name);
+                    out.push(':');
+                    value.append_json(out)?;
+                }
+                out.push('}');
             }
             CtValue::Enum { variant, args, .. } => {
                 if args.is_empty() {
-                    format!("\"{}\"", variant)
+                    crate::JSON::append_quote(out, variant);
                 } else {
-                    let parts: Vec<String> = args
-                        .iter()
-                        .map(|(label, v)| {
-                            if let Some(lbl) = label {
-                                format!("\"{}\":{}", lbl, v.to_json())
-                            } else {
-                                v.to_json()
-                            }
-                        })
-                        .collect();
-                    if args.iter().all(|(label, _)| label.is_some()) {
-                        format!("{{\"{}\":{{{}}}}}", variant, parts.join(","))
-                    } else {
-                        format!("{{\"{}\":[{}]}}", variant, parts.join(","))
+                    let labeled = args.iter().all(|(label, _)| label.is_some());
+                    out.push('{');
+                    crate::JSON::append_quote(out, variant);
+                    out.push(':');
+                    out.push(if labeled { '{' } else { '[' });
+                    for (index, (label, value)) in args.iter().enumerate() {
+                        if index != 0 { out.push(','); }
+                        if labeled {
+                            crate::JSON::append_quote(out, label.as_deref().unwrap());
+                            out.push(':');
+                        }
+                        value.append_json(out)?;
                     }
+                    out.push(if labeled { '}' } else { ']' });
+                    out.push('}');
                 }
             }
-            // D-FAIL-CARRIER1=A: one carrier, so a payload encodes as itself and
-            // a clean stop as null; only a told report needs a tag.
-            CtValue::Present(v) => v.to_json(),
-            CtValue::Failed(CtReport::Clean(_)) => "null".to_string(),
-            CtValue::Failed(CtReport::Told(e)) => format!("{{\"err\":{}}}", e.to_json()),
-            CtValue::Unit => "null".to_string(),
-            // c139: a closure has no JSON representation — unreachable in
-            // practice (a value routed through the encoder never contains
-            // one; codable derives never target a `fn`-typed field).
-            CtValue::Closure(_) => "null".to_string(),
+            // D-FAIL-CARRIER1=A: present payloads encode as themselves.
+            CtValue::Present(value) => value.append_json(out)?,
+            CtValue::Failed(CtReport::Told(error)) => {
+                out.push_str("{\"err\":");
+                error.append_json(out)?;
+                out.push('}');
+            }
+            CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
+                out.push_str("null");
+            }
         }
+        Ok(())
     }
 
     pub fn serialize(&self) -> String {
@@ -2090,8 +2119,62 @@ fn ct_mangle(name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{CtFloat, CtValue, FailureContract, FuncSig};
+    use super::{CtFloat, CtKey, CtReport, CtValue, FailureContract, FuncSig};
     use crate::AST::{BinOp, Type};
+
+    #[test]
+    fn comptime_map_keys_accept_every_int() {
+        use super::CtKey;
+        use crate::Numeric::CtBigInt;
+        use std::collections::BTreeMap;
+        let mut map = BTreeMap::new();
+        for decimal in ["18446744073709551615", "-9223372036854775809", "0"] {
+            let value = CtValue::BigInt(CtBigInt::from_str(decimal).unwrap());
+            let key = CtKey::from_value(value.clone()).expect("every Int is a map key");
+            assert_eq!(key.to_value().jet_show(), value.jet_show());
+            map.insert(key, decimal);
+        }
+        assert_eq!(map.values().copied().collect::<Vec<_>>(),
+            ["-9223372036854775809", "0", "18446744073709551615"]);
+        assert!(matches!(CtKey::from_value(CtValue::BigInt(CtBigInt::from_int(0))),
+            Some(CtKey::Int(0))));
+    }
+
+    #[test]
+    fn exact_integer_key_order_and_hash_use_canonical_numeric_values() {
+        use super::CtKey;
+        use crate::MIR::MirConstKey;
+        use crate::Numeric::CtBigInt;
+        use std::collections::{BTreeMap, HashSet};
+        let decimals = [
+            "-100000000000000000000000000000000000000000",
+            "-9223372036854775810", "-9223372036854775809",
+            "-9223372036854775808", "0", "9223372036854775807",
+            "9223372036854775808", "9223372036854775809",
+            "100000000000000000000000000000000000000000",
+        ];
+        let mut ct = BTreeMap::new();
+        let mut mir = BTreeMap::new();
+        for decimal in decimals.iter().rev() {
+            let number = CtBigInt::from_str(decimal).unwrap();
+            let key = CtKey::from_value(CtValue::BigInt(number.clone())).unwrap();
+            let mir_key = MirConstKey::from_bigint(&number);
+            ct.insert(key, *decimal);
+            mir.insert(mir_key, *decimal);
+        }
+        assert_eq!(ct.values().copied().collect::<Vec<_>>(), decimals);
+        assert_eq!(mir.values().copied().collect::<Vec<_>>(), decimals);
+        let canonical = MirConstKey::from_bigint(&CtBigInt::from_str("+0009223372036854775808").unwrap());
+        let mut hash = HashSet::new();
+        assert!(hash.insert(canonical));
+        assert!(!hash.insert(MirConstKey::from_bigint(&CtBigInt::from_str("9223372036854775808").unwrap())));
+        assert_eq!(MirConstKey::from_bigint(&CtBigInt::from_str("-0000").unwrap()), MirConstKey::Int(0));
+        let nested = CtValue::Struct {
+            type_name: "tuple".to_string(),
+            fields: vec![("key".to_string(), CtValue::BigInt(CtBigInt::from_str(decimals[0]).unwrap()))],
+        };
+        assert_eq!(CtKey::from_value(nested.clone()).unwrap().to_value(), nested);
+    }
 
     #[test]
     fn ct_float_preserves_width_native_equality_and_rounding() {
@@ -2115,14 +2198,141 @@ mod tests {
         ]);
 
         assert_eq!(format!("{:?}", CtFloat::f32(-0.0)), "-0.0");
-        assert_eq!(CtValue::Float(CtFloat::f32(1.0)).to_json(), "1.0");
-        assert_eq!(nested.to_json(), "[16777216.0,16777217.0]");
+        assert_eq!(CtValue::Float(CtFloat::f32(1.0)).to_json().unwrap(), "1.0");
+        assert_eq!(nested.to_json().unwrap(), "[16777216.0,16777217.0]");
         assert_eq!(nested.serialize(), "vec![16777216.0f32, 16777217.0f64]");
         assert_eq!(CtFloat::f32(f32::NAN).serialize(), "f32::NAN");
         assert_eq!(
             CtFloat::f64(f64::NEG_INFINITY).serialize(),
             "f64::NEG_INFINITY"
         );
+    }
+
+    fn require_json_unsupported(value: &CtValue, reason: &str) {
+        use crate::EncodingJson::{EncodingErrorKind, EncodingFormat};
+        let error = value.to_json().expect_err("unsupported JSON must not emit a value");
+        assert_eq!(error.format, EncodingFormat::JSON);
+        assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+        assert_eq!(error.reason, reason);
+        assert_eq!(error.byte_offset, 0);
+        assert!(error.line.is_err() && error.column.is_err() && error.cause.is_err());
+        assert_eq!(error.path, "$");
+    }
+
+    #[test]
+    fn comptime_json_rejects_nonfinite_floats_and_propagates_nested_errors() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for number in [CtFloat::f32(value as f32), CtFloat::f64(value)] {
+                let error = number.to_json().unwrap_err();
+                assert_eq!(error.reason, "JSON cannot encode a non-finite Float");
+                let value = CtValue::Float(number);
+                for nested in [
+                    value.clone(),
+                    CtValue::List(vec![value.clone()]),
+                    CtValue::Map([(CtKey::Str("value".into()), value.clone())].into()),
+                    CtValue::Struct { type_name: "Sample".into(), fields: vec![("value".into(), value.clone())] },
+                    CtValue::Enum { type_name: "Sample".into(), variant: "Value".into(), args: vec![(Some("value".into()), value.clone())] },
+                    CtValue::Present(Box::new(value.clone())),
+                    CtValue::Failed(CtReport::Told(Box::new(value))),
+                ] {
+                    require_json_unsupported(&nested, "JSON cannot encode a non-finite Float");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn comptime_json_rejects_every_nontext_map_key_without_coercion() {
+        for key in [
+            CtKey::Int(1), CtKey::Bool(true), CtKey::Char('a'),
+            CtKey::Tuple(Vec::new()),
+            CtKey::Struct { type_name: "Key".into(), fields: Vec::new() },
+            CtKey::Enum { type_name: "Key".into(), variant: "Value".into() },
+        ] {
+            let value = CtValue::Map([(key, CtValue::Int(2))].into());
+            require_json_unsupported(&value, "JSON cannot encode non-text map keys");
+            require_json_unsupported(&CtValue::List(vec![value]), "JSON cannot encode non-text map keys");
+        }
+    }
+
+    #[test]
+    fn comptime_json_char_and_c0_escaping_matches_text_and_is_lowercase() {
+        let expected = [
+            "\\u0000", "\\u0001", "\\u0002", "\\u0003", "\\u0004", "\\u0005", "\\u0006", "\\u0007",
+            "\\u0008", "\\t", "\\n", "\\u000b", "\\u000c", "\\r", "\\u000e", "\\u000f",
+            "\\u0010", "\\u0011", "\\u0012", "\\u0013", "\\u0014", "\\u0015", "\\u0016", "\\u0017",
+            "\\u0018", "\\u0019", "\\u001a", "\\u001b", "\\u001c", "\\u001d", "\\u001e", "\\u001f",
+        ];
+        for (code, escaped) in expected.iter().enumerate() {
+            let character = char::from_u32(code as u32).unwrap();
+            let encoded = CtValue::Char(character).to_json().unwrap();
+            assert_eq!(encoded, format!("\"{escaped}\""));
+            assert_eq!(encoded, CtValue::Str(character.to_string()).to_json().unwrap());
+            assert_eq!(crate::JSON::parse(&encoded).unwrap(), crate::Dyn::Dyn::Text(character.to_string()));
+        }
+        for (character, escaped) in [('"', "\\\""), ('\\', "\\\\"), ('λ', "λ"), ('😀', "😀")] {
+            assert_eq!(CtValue::Char(character).to_json().unwrap(), format!("\"{escaped}\""));
+        }
+        let text: String = (0..32).map(|code| char::from_u32(code).unwrap()).collect();
+        assert_eq!(CtValue::Str(text).to_json().unwrap(), format!("\"{}\"", expected.join("")));
+    }
+
+    #[test]
+    fn comptime_json_escapes_object_names_and_enum_labels() {
+        let value = CtValue::Struct { type_name: "Sample".into(), fields: vec![("a\"\u{001f}".into(), CtValue::Int(1))] };
+        assert_eq!(value.to_json().unwrap(), "{\"a\\\"\\u001f\":1}");
+        let value = CtValue::Enum { type_name: "Sample".into(), variant: "v\"".into(), args: vec![(Some("x\u{0001}".into()), CtValue::Int(2))] };
+        assert_eq!(value.to_json().unwrap(), "{\"v\\\"\":{\"x\\u0001\":2}}");
+        let value = CtValue::Map([(CtKey::Str("x\u{0001}".into()), CtValue::Int(2))].into());
+        assert_eq!(value.to_json().unwrap(), "{\"x\\u0001\":2}");
+    }
+
+    #[test]
+    fn ct_json_rejects_non_finite_floats_and_non_text_map_keys() {
+        use crate::EncodingJson::{EncodingErrorKind, EncodingFormat};
+        for float in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            for value in [
+                CtValue::Float(CtFloat::f64(float)),
+                CtValue::List(vec![CtValue::Float(CtFloat::f64(float))]),
+            ] {
+                let error = value.to_json().unwrap_err();
+                assert_eq!(error.format, EncodingFormat::JSON);
+                assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+                assert_eq!(error.reason, "JSON cannot encode a non-finite Float");
+                assert_eq!(error.path, "$");
+                assert_eq!(error.byte_offset, 0);
+                assert!(error.line.is_err() && error.column.is_err() && error.cause.is_err());
+            }
+        }
+        let map = CtValue::Map([(CtKey::Int(1), CtValue::Int(2))].into_iter().collect());
+        let error = map.to_json().unwrap_err();
+        assert_eq!(error.kind, EncodingErrorKind::Unsupported);
+        assert_eq!(error.reason, "JSON cannot encode non-text map keys");
+    }
+
+    #[test]
+    fn ct_json_quotes_char_c0_and_field_names() {
+        for character in ['"', '\\', '\0', '\u{001f}', '\n', '\r', '\t'] {
+            let text = character.to_string();
+            let encoded = CtValue::Char(character).to_json().unwrap();
+            assert_eq!(encoded, crate::EncodingJson::quote_json(&text));
+            assert_eq!(
+                crate::JSON::parse(&encoded).unwrap(),
+                crate::Dyn::Dyn::Text(text)
+            );
+        }
+        let controls: String = (0..32).map(|byte| char::from(byte)).collect();
+        let encoded = CtValue::Str(controls.clone()).to_json().unwrap();
+        assert!(encoded.contains("\\u001f"));
+        assert_eq!(
+            crate::JSON::parse(&encoded).unwrap(),
+            crate::Dyn::Dyn::Text(controls)
+        );
+        let value = CtValue::Struct {
+            type_name: "Quoted".into(),
+            fields: vec![("a\"\\\0".into(), CtValue::Int(1))],
+        };
+        assert_eq!(value.to_json().unwrap(), "{\"a\\\"\\\\\\u0000\":1}");
     }
 
     #[test]

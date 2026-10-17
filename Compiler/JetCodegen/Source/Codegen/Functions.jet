@@ -1,9 +1,15 @@
 // Complete checked top-level TIR functions into backend-neutral MIR.
 use jet_foundation.[
+    mir_integer_constant,
+    mir_function_id,
+    MIRBlockID,
+    MIRInstruction,
     AccessConvention,
     CORE_CALLS,
+    CORE_ENUM_ROWS,
     CallablePolicy,
     CallablePolicyChain,
+    CompilerThreads,
     CompilerTraceSink,
     ConstAttr,
     CoreCallCompletion,
@@ -75,6 +81,7 @@ use jet_foundation.[
     MIRLayoutAlignmentFact,
     MIRLinkArtifact,
     MIRLinkUnit,
+    MIRLocal,
     MIRLinkUnitID,
     MIRModuleID,
     MIRNamedSpan,
@@ -85,6 +92,7 @@ use jet_foundation.[
     MIROwnershipMode,
     MIRPackageFacts,
     MIRParam,
+    MIRPlace,
     MIRPlaceID,
     MIRPreludeABI,
     MIRPreludeCall,
@@ -95,6 +103,7 @@ use jet_foundation.[
     MIRSerdeCodec,
     MIRShapeFieldNames,
     MIRSourceFile,
+    MIRScope,
     MIRStructLayout,
     MIRSymbol,
     MIRTargetApplicability,
@@ -110,6 +119,8 @@ use jet_foundation.[
     MIRTypeKind,
     MIRUnsafeGate,
     MIRValueID,
+    MIRValueFact,
+    MIRVectorFact,
     MIRVariant,
     MIRVariantPayload,
     MIRVisibility,
@@ -135,6 +146,7 @@ use jet_foundation.[
     TEffectFacts,
     TEffectSpan,
     TExpr,
+    TExprKind,
     TFailureCarrier,
     TField,
     TFunc,
@@ -159,14 +171,21 @@ use jet_foundation.[
     TypeTupleField,
     WebBucket,
     WebPartitionMarker,
+    compiler_threads_admit,
+    compiler_threads_failure_text,
+    compiler_threads_partition,
     core_call_key,
     core_call_symbol_name,
+    compiler_apply_order,
+    compiler_take_rows,
+    compiler_transfer_rows,
     mir_empty_optimization_facts,
     mir_field_id,
     mir_module_id,
     mir_nominal_ref,
     mir_owned_ownership,
     mir_ownership_from_access,
+    mir_refine_function_ownership,
     mir_source_file_id,
     mir_trait_id,
     mir_type_canonical_key,
@@ -180,6 +199,8 @@ use jet_foundation.[
     tir_symbol_local,
     type_identity_key,
     type_is_unit_callable_return,
+    type_union_member_tag_name,
+    type_unqualified_name,
 ]
 use jet_sema.[
     SemaCheckedForeignFunction,
@@ -190,24 +211,42 @@ use jet_sema.[
     SemaGraphModuleResult,
 ]
 
-pub struct JetCodegenFunctions {
-    pub functions: [MIRFunction]
-    pub nested_functions: [MIRFunction]
-    pub callbacks: [MIRCallbackAdapter]
-    pub types: [MIRTypeDef]
-    pub core_owners: [MIRCoreOwner]
-    pub traits: [MIRTraitDef]
-    pub impls: [MIRImplDef]
-    pub constants: [MIRConstantDef]
-    pub fields: [MIRFieldRow]
-    pub core_calls: [MIRCoreCall]
-    pub prelude_calls: [MIRPreludeCall]
-    pub used_core: [String]
+struct JetCodegenFunctions {
+    functions: [MIRFunction]
+    nested_functions: [MIRFunction]
+    callbacks: [MIRCallbackAdapter]
+    closure_sources: [JetCodegenClosureSource]
+    types: [MIRTypeDef]
+    core_owners: [MIRCoreOwner]
+    traits: [MIRTraitDef]
+    impls: [MIRImplDef]
+    constants: [MIRConstantDef]
+    fields: [MIRFieldRow]
+    core_calls: [MIRCoreCall]
+    prelude_calls: [MIRPreludeCall]
+    used_core: [String]
+    // JET_KEEP_GOING (lower_functions `keep_going`): each function whose
+    // lowering stopped, in row order; its row of `functions` is a trap.
+    lowering_failures: [JetCodegenLoweringFailure]{[JetCodegenLoweringFailure]{}}
 }
-pub struct JetCodegenForeignArtifacts {
-    pub foreign: [MIRForeign]
-    pub links: [MIRLinkUnit]
-    pub handles: [MIRHandleLifecycle]
+
+// One function whose lowering stopped under JET_KEEP_GOING: its checked row
+// and the stop's text.
+struct JetCodegenLoweringFailure {
+    name: String
+    key: String
+    source_file: String
+    span: Span
+    message: String
+}
+struct JetCodegenForeignArtifacts {
+    foreign: [MIRForeign]
+    links: [MIRLinkUnit]
+    handles: [MIRHandleLifecycle]
+    // Rust `function_foreign_provenance`: one body-less `asm` leaf per
+    // checked `#FFI(asm)` row, keyed like its foreign row, so native
+    // lowering binds the foreign call to the declaration's inline body.
+    functions: [MIRFunction]
 }
 fn jet_codegen_lower_declaration_ownership_mode(ownership: TDeclarationOwnership) -> MIROwnershipMode Never! {
     if ownership == {
@@ -605,7 +644,7 @@ fn jet_codegen_lower_trait_method(method: TTraitMethod, trait_key: String, modul
     }
     return MIRTraitMethod{
         id: MIRTraitMethodID{value: stable_id("mir-trait-method", "{trait_key}::{method.key}")},
-        name: method.name,
+        name: jet_codegen_impl_method_leaf(method.name),
         span: method.span,
         self_access: self_access,
         params: params,
@@ -701,7 +740,7 @@ fn jet_codegen_impl_method_leaf(key: String) -> String Never! {
         }
         position -= 1
     }
-    String.from_bytes(~(bytes[start..<end])) ?? ""
+    String.from_bytes(bytes[start..<end].copy()) ?? ""
 }
 
 fn jet_codegen_impl_owner_name(ty: Type) -> String Never! {
@@ -735,14 +774,14 @@ fn jet_codegen_impl_method_matches(function: TFunc, definition: TImplDef, trait_
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows. Only a
 // lowered function (`lowered_ids`) is an executable impl method.
-fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], fields_by_name: [String:MIRFieldID], lowered_ids: [String:Bool]) -> MIRImplDef? {
+fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, fields_by_name: [String:MIRFieldID], lowered_ids: [U64:Bool]) -> MIRImplDef? {
     trait_name := if definition.trait_ref == {
         Val(name) -> Val(name)
         None -> definition.trait_name
     }
     trait_ref := if trait_name == {
         None -> None
-        Val(name) -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(modules, name, definition.module_identity))
+        Val(name) -> if jet_codegen_is_literal_capability_trait(name) -> None else -> Val(jet_codegen_lower_declared_or_builtin_trait_ref(trait_names, name, definition.module_identity))
     }
     method_ids := [MIRFunctionID]{}
     seen_methods := [U64:Bool]{}
@@ -757,7 +796,7 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegen
             row = functions.next_by_name[row]
         }
         loop id in candidates {
-            if lowered_ids.get("{id.value}") == None || seen_methods.get(id.value) != None -> next
+            if lowered_ids.get(id.value) == None || seen_methods.get(id.value) != None -> next
             _ := &seen_methods.add(id.value, true)
             &method_ids.push(id)
         }
@@ -807,7 +846,7 @@ fn jet_codegen_lower_impl_definition(definition: TImplDef, functions: JetCodegen
         operator_marker: operator_marker,
         operator_rhs: operator_rhs,
         target_os: jet_codegen_lower_target_os(definition.target_os),
-        target_applicability: MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+        target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: true},
     }
 }
 
@@ -823,16 +862,19 @@ fn jet_codegen_constant_is_output_type(ty: Type, modules: [SemaGraphModuleResult
     }
 }
 
-pub struct JetCodegenConstantIndex {
-    pub rows: [String:JetCodegenConstantRow]
-    pub forced_static: [String:Bool]
-    pub forced_inline: [String:Bool]
-    pub copies_into_uses: [String:Bool]
+struct JetCodegenConstantIndex {
+    rows: [String:JetCodegenConstantRow]
+    forced_static: [String:Bool]
+    forced_inline: [String:Bool]
+    // #5001: the constants every read borrows in place (a `Static` place),
+    // by symbol key, naming their MIR global key; and those global keys.
+    in_place: [String:String]
+    in_place_keys: [String:Bool]
 }
 
-pub struct JetCodegenConstantRow {
-    pub module_index: Int
-    pub definition_index: Int
+struct JetCodegenConstantRow {
+    module_index: Int
+    definition_index: Int
 }
 
 // A checked read names a module constant by its symbol (`ConstRef`), whose
@@ -860,7 +902,21 @@ fn jet_codegen_constant_index(modules: [SemaGraphModuleResult]) -> JetCodegenCon
             }
         }
     }
-    JetCodegenConstantIndex{rows: rows, forced_static: forced_static, forced_inline: forced_inline, copies_into_uses: [String:Bool]{}}
+    in_place := [String:String]{}
+    in_place_keys := [String:Bool]{}
+    loop module_row in 0..<modules.len() {
+        loop (definition_row, definition) in modules[module_row].declarations.constants {
+            key :: jet_codegen_constant_symbol_key(definition)
+            // The declaration a read resolves (the row `rows` keeps).
+            row :: rows.get(key) ?? next
+            if row.module_index != module_row || row.definition_index != definition_row -> next
+            qualified :: jet_codegen_qualified_function_key(definition.module_identity, key)
+            if !jet_codegen_constant_reads_in_place(definition, modules, forced_static.get(qualified) != None, forced_inline.get(qualified) != None) -> next
+            _ := &in_place.add(key, definition.key)
+            if in_place_keys.get(definition.key) == None -> _ := &in_place_keys.add(definition.key, true)
+        }
+    }
+    JetCodegenConstantIndex{rows: rows, forced_static: forced_static, forced_inline: forced_inline, in_place: in_place, in_place_keys: in_place_keys}
 }
 
 // Card #4258 (D-CONSTMARK1): a read of an immutable module constant copies
@@ -878,6 +934,26 @@ fn jet_codegen_constant_copies_into_uses(definition: TConstantDef, modules: [Sem
     if definition.value == .Closure(_) -> return definition.is_comptime
     leaves :: jet_codegen_constant_use_site_leaves(definition.value)
     leaves >= 0 && leaves <= 8
+}
+
+// #5001: an immutable module constant whose folded value is one shared
+// aggregate (text, list, map, option, result, tuple or nominal value) that
+// no use site copies is read in place: the constant is the `Static` place of
+// its MIR global, built once, and every read borrows it like a read
+// parameter's place (jet_codegen_read_parameter_place). A read whose value
+// must own copies only what it takes; nothing ever moves or writes it.
+fn jet_codegen_constant_reads_in_place(definition: TConstantDef, modules: [SemaGraphModuleResult], forced_static: Bool, forced_inline: Bool) -> Bool Never! {
+    if definition.is_storage -> return false
+    if definition.value == {
+        .Unit | .Closure(_) -> return false
+        else -> {}
+    }
+    if jet_codegen_constant_copies_into_uses(definition, modules, forced_static, forced_inline) -> return false
+    aggregate :: if jet_codegen_lower_type_with_modules(definition.ty, modules, definition.module_identity, [String]{}).kind == {
+        .String | .List(_) | .Map(_, _) | .Option(_) | .Result(_, _) | .Tuple(_) | .Apply(_, _) -> true
+        else -> false
+    }
+    aggregate
 }
 
 // The scalar leaves of a value that may be copied into a use site: scalars and
@@ -918,7 +994,9 @@ fn jet_codegen_constant_use_site_leaves(value: TComptimeValue) -> Int Never! {
 fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [SemaGraphModuleResult]) -> MIRConstantDef? {
     if jet_codegen_constant_is_output_type(definition.ty, modules, definition.module_identity) -> return None
     if definition.is_comptime && definition.value == .Unit -> return None
-    value :: jet_codegen_lower_comptime_value(definition.value, modules, definition.module_identity, [String]{}) ?? return None
+    lowered := jet_codegen_lower_byte_list_constant(definition.ty, definition.value)
+    if lowered == None -> lowered = jet_codegen_lower_comptime_value(definition.value, modules, definition.module_identity, [String]{})
+    value :: lowered ?? return None
     return MIRConstantDef{
         id: MIRConstantID{value: stable_id("mir-constant", definition.key)},
         module_id: mir_module_id(definition.module_identity),
@@ -932,34 +1010,66 @@ fn jet_codegen_lower_constant_definition(definition: TConstantDef, modules: [Sem
     }
 }
 
-// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::inline_known_constant_reads
-fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, expression: TExpr, symbol: SymbolID) -> MIRValueID {
-    if jet_codegen_find_function_row(builder.function_index, symbol.key) != None {
-        return jet_codegen_lower_named_function_value(&builder, expression, symbol.key, false)
+// Rust mir.rs `lower_byte_list_constant`: a `[U8]` constant whose folded value
+// is a list of integer bytes (generated Unicode tables) is one Bytes constant.
+fn jet_codegen_lower_byte_list_constant(ty: Type, value: TComptimeValue) -> MIRConstant? Never! {
+    is_byte_list :: if jet_codegen_unwrap_pattern_tags(ty) == {
+        .List(element) -> element == Type.IntN{signed: false, bits: 8}
+        else -> false
     }
-    row :: builder.owners.constants.rows.get(symbol.key) ?? panic("checked constant reference has no declaration or function target")
+    if !is_byte_list -> return None
+    if value == {
+        .List(elements) -> {
+            bytes := [U8]{}
+            loop element in elements {
+                if element == {
+                    .Int(literal) -> {
+                        byte :: U8.from_int(literal) ?? return None
+                        &bytes.push(byte)
+                    }
+                    else -> return None
+                }
+            }
+            return Val(MIRConstant.Bytes{value: bytes})
+        }
+        else -> {}
+    }
+    None
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::inline_known_constant_reads
+fn jet_codegen_lower_constant_reference(builder: &JetCodegenBuilder, program: JetCodegenProgram, expression: TExpr, symbol: SymbolID) -> MIRValueID {
+    if jet_codegen_find_function_row(program.function_index, symbol.key) != None {
+        return jet_codegen_lower_named_function_value(&builder, program, expression, symbol.key, false)
+    }
+    // #5001: a constant read in place is read from its one `Static` place:
+    // the read borrows it, and only an owning use copies what it takes.
+    if jet_codegen_constant_place(&builder, program, expression, symbol) == .Val(place) {
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.ReadPlace{place: place})
+    }
+    row :: program.owners.constants.rows.get(symbol.key) ?? panic("checked constant reference has no declaration or function target")
     // Copied out of the builder, which the emits below write through.
-    definition :: ~builder.modules[row.module_index].declarations.constants[row.definition_index]
-    copies := builder.owners.constants.copies_into_uses.get(symbol.key)
+    definition :: program.modules[row.module_index].declarations.constants[row.definition_index].copy()
+    copies := builder.constant_copies.get(symbol.key)
     if copies == None {
         qualified := jet_codegen_qualified_function_key(definition.module_identity, symbol.key)
-        decision := jet_codegen_constant_copies_into_uses(definition, builder.modules, builder.owners.constants.forced_static.get(qualified) != None, builder.owners.constants.forced_inline.get(qualified) != None)
-        _ := &builder.owners.constants.copies_into_uses.add(symbol.key, decision)
+        decision := jet_codegen_constant_copies_into_uses(definition, program.modules, program.owners.constants.forced_static.get(qualified) != None, program.owners.constants.forced_inline.get(qualified) != None)
+        _ := &builder.constant_copies.add(symbol.key, decision)
         copies = Val(decision)
     }
-    if !(copies ?? false) -> return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Global{name: definition.key})
-    constant := jet_codegen_lower_comptime_value(definition.value, builder.modules, definition.module_identity, builder.generic_type_names) ?? {
+    if !(copies ?? false) -> return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Global{name: definition.key})
+    constant := jet_codegen_lower_comptime_value(definition.value, program.modules, definition.module_identity, builder.generic_type_names) ?? {
         if definition.is_comptime -> panic("checked compile-time constant reference has no MIR value")
-        return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Global{name: definition.key})
+        return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Global{name: definition.key})
     }
     // A sized-integer read keeps its width, as a literal does.
     if constant == {
         .Int(number, width, spelling) -> {
-            if width == None -> constant = MIRConstant.Int{value: number, width: jet_codegen_pattern_integer_width(expression.ty), spelling: spelling}
+            if width == None -> constant = mir_integer_constant(number, jet_codegen_pattern_integer_width(expression.ty), spelling)
         }
         else -> {}
     }
-    return jet_codegen_emit_value(&builder, expression.span, expression.ty, MIROperation.Constant{value: constant})
+    return jet_codegen_emit_value(&builder, program, expression.span, expression.ty, MIROperation.Constant{value: constant})
 }
 
 fn jet_codegen_tuple_shape_names(name: String) -> MIRShapeFieldNames Never! {
@@ -1157,7 +1267,7 @@ fn jet_codegen_append_failure_tuple_rows(failure: MIRFailureCarrier, rows: &[MIR
     }
 }
 
-fn jet_codegen_lower_field_rows(types: [MIRTypeDef], functions: [MIRFunction], traits: [MIRTraitDef], impls: [MIRImplDef], constants: [MIRConstantDef]) -> [MIRFieldRow] Never! {
+fn jet_codegen_lower_field_rows(types: [MIRTypeDef], functions: [MIRFunction], nested_functions: [MIRFunction], traits: [MIRTraitDef], impls: [MIRImplDef], constants: [MIRConstantDef]) -> [MIRFieldRow] Never! {
     rows := [MIRFieldRow]{}
     seen := [U64:Bool]{}
     loop definition in types {
@@ -1170,19 +1280,8 @@ fn jet_codegen_lower_field_rows(types: [MIRTypeDef], functions: [MIRFunction], t
             }
         }
     }
-    loop function in functions {
-        jet_codegen_append_tuple_field_rows(function.return_type, &rows, &seen)
-        jet_codegen_append_failure_tuple_rows(function.failure, &rows, &seen)
-        if function.declared_return != None {
-            ty :: function.declared_return ?? panic("MIR function return type disappeared while collecting field rows")
-            jet_codegen_append_tuple_field_rows(ty, &rows, &seen)
-        }
-        loop parameter in function.params -> jet_codegen_append_tuple_field_rows(parameter.ty, &rows, &seen)
-        loop parameter in function.capture_params -> jet_codegen_append_tuple_field_rows(parameter.ty, &rows, &seen)
-        loop local in function.locals -> jet_codegen_append_tuple_field_rows(local.ty, &rows, &seen)
-        loop value in function.values -> jet_codegen_append_tuple_field_rows(value.ty, &rows, &seen)
-        loop place in function.places -> jet_codegen_append_tuple_field_rows(place.ty, &rows, &seen)
-    }
+    loop function in functions -> jet_codegen_append_function_field_rows(function, &rows, &seen)
+    loop function in nested_functions -> jet_codegen_append_function_field_rows(function, &rows, &seen)
     loop definition in traits {
         loop method in definition.methods {
             loop parameter in method.params -> jet_codegen_append_tuple_field_rows(parameter.ty, &rows, &seen)
@@ -1205,6 +1304,20 @@ fn jet_codegen_lower_field_rows(types: [MIRTypeDef], functions: [MIRFunction], t
     }
     loop constant in constants -> jet_codegen_append_tuple_field_rows(constant.ty, &rows, &seen)
     return rows
+}
+
+fn jet_codegen_append_function_field_rows(function: MIRFunction, rows: &[MIRFieldRow], seen: &[U64:Bool]) Never! {
+    jet_codegen_append_tuple_field_rows(function.return_type, &rows, &seen)
+    jet_codegen_append_failure_tuple_rows(function.failure, &rows, &seen)
+    if function.declared_return != None {
+        ty :: function.declared_return ?? panic("MIR function return type disappeared while collecting field rows")
+        jet_codegen_append_tuple_field_rows(ty, &rows, &seen)
+    }
+    loop parameter in function.params -> jet_codegen_append_tuple_field_rows(parameter.ty, &rows, &seen)
+    loop parameter in function.capture_params -> jet_codegen_append_tuple_field_rows(parameter.ty, &rows, &seen)
+    loop local in function.locals -> jet_codegen_append_tuple_field_rows(local.ty, &rows, &seen)
+    loop value in function.values -> jet_codegen_append_tuple_field_rows(value.ty, &rows, &seen)
+    loop place in function.places -> jet_codegen_append_tuple_field_rows(place.ty, &rows, &seen)
 }
 fn jet_codegen_core_effect_name(effect_value: Effect?) -> String? {
     return if effect_value == {
@@ -1229,10 +1342,10 @@ fn jet_codegen_core_effect_name(effect_value: Effect?) -> String? {
     }
 }
 
-fn jet_codegen_core_call_fallibility(carrier: TFailureCarrier, builder: JetCodegenBuilder) -> MIRCallFallibility Never! {
+fn jet_codegen_core_call_fallibility(carrier: TFailureCarrier, builder: JetCodegenBuilder, program: JetCodegenProgram) -> MIRCallFallibility Never! {
     if carrier == {
         .Infallible -> MIRCallFallibility.Infallible
-        else -> MIRCallFallibility.Failure{failure: jet_codegen_lower_failure(carrier, builder)}
+        else -> MIRCallFallibility.Failure{failure: jet_codegen_lower_failure(carrier, builder, program)}
     }
 }
 
@@ -1245,10 +1358,11 @@ fn jet_codegen_core_route_fallibility_identity(carrier: TFailureCarrier) -> Stri
     }
 }
 
-fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, record: CoreCallRecord, carrier: TFailureCarrier) -> MIRPreludeCallID Never! {
+fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, program: JetCodegenProgram, record: CoreCallRecord, carrier: TFailureCarrier) -> MIRPreludeCallID Never! {
     symbol := if record.symbol == {
         .Prelude(name) -> MIRSymbol.Prelude{name: name}
         .Rust(name) -> MIRSymbol.Runtime{name: name}
+        .SourceOwned -> panic("source-owned Core declaration reached a host route")
     }
     module_name := record.module_name
     if module_name == "" -> module_name = "receiver({record.receiver_types.join("|")})"
@@ -1272,12 +1386,12 @@ fn jet_codegen_intern_core_route(builder: &JetCodegenBuilder, record: CoreCallRe
         symbol: symbol,
         signature: MIRCallSignature{arity: record.signature.arity, max_arity: record.signature.max_arity, borrow_mask: record.signature.borrow_mask},
         effect_kind: record.effect_kind,
-        fallibility: jet_codegen_core_call_fallibility(carrier, builder),
+        fallibility: jet_codegen_core_call_fallibility(carrier, builder, program),
         abi: MIRPreludeABI.Value,
         authority: record.authority,
         db_metadata: None,
     }
-    return jet_codegen_intern_prelude_call(&builder, row)
+    return jet_codegen_intern_prelude_call(&builder, program, row)
 }
 
 fn jet_codegen_core_call_row(record: CoreCallRecord) -> MIRCoreCall Never! {
@@ -1300,8 +1414,6 @@ fn jet_codegen_core_call_row(record: CoreCallRecord) -> MIRCoreCall Never! {
         symbol: record.symbol,
         coverage_bits: record.coverage.bits,
         aot_direct: record.aot_direct,
-        jit_direct: record.jit_direct,
-        jit_symbol: record.jit_symbol,
         native_int_result: record.native_int_result,
         marker: record.marker,
     }
@@ -1384,7 +1496,7 @@ fn jet_codegen_core_records_match(left: CoreCallRecord, right: CoreCallRecord) -
     if left.signature.arity != right.signature.arity || left.signature.max_arity != right.signature.max_arity || !jet_codegen_bool_rows_equal(left.signature.borrow_mask, right.signature.borrow_mask) -> return false
     if left.fallibility != right.fallibility || left.effect_kind != right.effect_kind || left.effect_leaf != right.effect_leaf || left.sink_class != right.sink_class -> return false
     if left.pure_route != right.pure_route || left.interpreter_route != right.interpreter_route || left.symbol != right.symbol -> return false
-    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.jit_direct != right.jit_direct || left.jit_symbol != right.jit_symbol || left.native_int_result != right.native_int_result -> return false
+    if left.coverage.bits != right.coverage.bits || left.aot_direct != right.aot_direct || left.native_int_result != right.native_int_result -> return false
     if !jet_codegen_core_access_rows_equal(left.frame_accesses, right.frame_accesses) || !jet_codegen_core_completion_equal(left.frame_completion, right.frame_completion) || !jet_codegen_core_capability_equal(left.capability, right.capability) || !jet_codegen_string_rows_equal(left.ui_capabilities, right.ui_capabilities) -> return false
     jet_codegen_authority_decisions_equal(left.authority, right.authority) && jet_codegen_core_markers_equal(left.marker, right.marker)
 }
@@ -1408,7 +1520,7 @@ fn jet_codegen_canonical_core_record_in(rows: [CoreCallRecord], record: CoreCall
     canonical
 }
 
-fn jet_codegen_note_core_module(builder: &JetCodegenBuilder, module_name: String) Never! {
+fn jet_codegen_note_core_module(builder: &JetCodegenBuilder, program: JetCodegenProgram, module_name: String) Never! {
     if module_name != "core" && !module_name.starts_with("core.") -> return
     loop existing in builder.used_core {
         if existing == module_name -> return
@@ -1416,7 +1528,8 @@ fn jet_codegen_note_core_module(builder: &JetCodegenBuilder, module_name: String
     &builder.used_core.push(module_name)
 }
 
-fn jet_codegen_intern_core_call(builder: &JetCodegenBuilder, record: CoreCallRecord) -> MIRCoreCallID Never! {
+fn jet_codegen_intern_core_call(builder: &JetCodegenBuilder, program: JetCodegenProgram, record: CoreCallRecord) -> MIRCoreCallID Never! {
+    if record.symbol == CoreCallSymbol.SourceOwned -> panic("source-owned Core declaration reached executable MIR")
     row := jet_codegen_core_call_row(record)
     loop existing in builder.core_calls {
         if existing.id == row.id {
@@ -1425,7 +1538,7 @@ fn jet_codegen_intern_core_call(builder: &JetCodegenBuilder, record: CoreCallRec
         }
     }
     &builder.core_calls.push(row)
-    if record.module_name != "" -> jet_codegen_note_core_module(&builder, record.module_name)
+    if record.module_name != "" -> jet_codegen_note_core_module(&builder, program, record.module_name)
     row.id
 }
 
@@ -1458,20 +1571,20 @@ fn jet_codegen_lower_web_marker(marker: WebPartitionMarker?) -> MIRWebPartitionM
     }
 }
 
-fn jet_codegen_lower_failure(failure: TFailureCarrier, builder: JetCodegenBuilder) -> MIRFailureCarrier Never! {
+fn jet_codegen_lower_failure(failure: TFailureCarrier, builder: JetCodegenBuilder, program: JetCodegenProgram) -> MIRFailureCarrier Never! {
     if failure == {
         .Infallible -> MIRFailureCarrier.Infallible
-        .Result(success, error) -> MIRFailureCarrier.Result{success: jet_codegen_lower_type_for_function(success, builder), error: jet_codegen_lower_type_for_function(error, builder)}
-        .Optional(value) -> MIRFailureCarrier.Optional{value: jet_codegen_lower_type_for_function(value, builder)}
-        .Diverges(value) -> MIRFailureCarrier.Diverges{value: jet_codegen_lower_type_for_function(value, builder)}
+        .Result(success, error) -> MIRFailureCarrier.Result{success: jet_codegen_lower_type_for_function(success, builder, program), error: jet_codegen_lower_type_for_function(error, builder, program)}
+        .Optional(value) -> MIRFailureCarrier.Optional{value: jet_codegen_lower_type_for_function(value, builder, program)}
+        .Diverges(value) -> MIRFailureCarrier.Diverges{value: jet_codegen_lower_type_for_function(value, builder, program)}
     }
 }
 
-fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, parameter: TParameter, index: Int) Never! {
+fn jet_codegen_lower_parameter(builder: &JetCodegenBuilder, program: JetCodegenProgram, parameter: TParameter, index: Int) Never! {
     access := jet_codegen_lower_access(parameter.convention)
-    lowered_ty :: jet_codegen_lower_type_for_function(parameter.ty, builder)
-    value := jet_codegen_emit_mir_type(&builder, parameter.span, lowered_ty, mir_ownership_from_access(access), MIROperation.Parameter{index: index, name: parameter.name})
-    _ := jet_codegen_bind_local(&builder, parameter.local, parameter.ty, parameter.local.mutable, Val(value), Val(access), false)
+    lowered_ty :: jet_codegen_lower_type_for_function(parameter.ty, builder, program)
+    value := jet_codegen_emit_mir_type(&builder, program, parameter.span, lowered_ty, mir_ownership_from_access(access), MIROperation.Parameter{index: index, name: parameter.name})
+    _ := jet_codegen_bind_local(&builder, program, parameter.local, parameter.ty, parameter.local.mutable, Val(value), Val(access), false)
     &builder.params.push(MIRParam{
         index: index,
         name: parameter.name,
@@ -1512,31 +1625,31 @@ fn jet_codegen_lower_kernel_proof(proof: KernelProof?) -> MIRKernelFacts? {
     }
 }
 
-fn jet_codegen_lower_web_reconstructions(builder: JetCodegenBuilder, rows: [TWebParamReconstruction]) -> [MIRWebParamReconstruction] Never! {
+fn jet_codegen_lower_web_reconstructions(builder: JetCodegenBuilder, program: JetCodegenProgram, rows: [TWebParamReconstruction]) -> [MIRWebParamReconstruction] Never! {
     lowered := [MIRWebParamReconstruction]{}
     loop row in rows {
         fields := [MIRWebParamField]{}
-        loop field in row.fields -> &fields.push(MIRWebParamField{field: field.field, parameter: field.parameter, ty: jet_codegen_lower_type_for_function(field.ty, builder)})
-        &lowered.push(MIRWebParamReconstruction{local: row.local.name, ty: jet_codegen_lower_type_for_function(row.ty, builder), fields: fields})
+        loop field in row.fields -> &fields.push(MIRWebParamField{field: field.field, parameter: field.parameter, ty: jet_codegen_lower_type_for_function(field.ty, builder, program)})
+        &lowered.push(MIRWebParamReconstruction{local: row.local.name, ty: jet_codegen_lower_type_for_function(row.ty, builder, program), fields: fields})
     }
     lowered
 }
 
 
+// Sort scalar index keys, then move whole rows through empty slots into their
+// canonical positions. The original receiver allocation is retained.
 fn jet_codegen_sort_blocks(blocks: &[MIRBasicBlock]) Never! {
     keys := [U64]{}
-    loop block in blocks -> &keys.push(block.id.value)
-    sorted := [MIRBasicBlock]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(blocks[position])
-    loop (index, block) in sorted -> blocks[index] = block
+    loop index in 0..<blocks.len() -> &keys.push(blocks[index].id.value)
+    compiler_apply_order<MIRBasicBlock>(&blocks, jet_codegen_sorted_order(keys, [String]{}))
 }
-fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, convention: AccessConvention?, span: Span, index: Int) Never! {
+fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, program: JetCodegenProgram, owner_type: Type, convention: AccessConvention?, span: Span, index: Int) Never! {
     access := if convention == {
         None -> MIRAccess.Read
         Val(value) -> jet_codegen_lower_access(value)
     }
-    lowered_ty :: jet_codegen_lower_type_for_function(owner_type, builder)
-    value := jet_codegen_emit_mir_type(&builder, span, lowered_ty, mir_ownership_from_access(access), MIROperation.Parameter{index: index, name: "self"})
+    lowered_ty :: jet_codegen_lower_type_for_function(owner_type, builder, program)
+    value := jet_codegen_emit_mir_type(&builder, program, span, lowered_ty, mir_ownership_from_access(access), MIROperation.Parameter{index: index, name: "self"})
     local := TLocal{
         name: "self",
         symbol_id: Val(symbol_id(SymbolKind.Parameter, builder.function.module_identity, builder.function.key, "self")),
@@ -1553,7 +1666,7 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, con
         uninit_fixed: false,
         direct_closure: false,
     }
-    _ := jet_codegen_bind_local(&builder, local, owner_type, local.mutable, Val(value), Val(access), false)
+    _ := jet_codegen_bind_local(&builder, program, local, owner_type, local.mutable, Val(value), Val(access), false)
     &builder.params.push(MIRParam{
         index: index,
         name: "self",
@@ -1567,7 +1680,7 @@ fn jet_codegen_lower_receiver(builder: &JetCodegenBuilder, owner_type: Type, con
     })
 }
 
-fn jet_codegen_lower_function_form(function: TFunc, builder: JetCodegenBuilder) -> MIRFunctionForm Never! {
+fn jet_codegen_lower_function_form(function: TFunc, builder: JetCodegenBuilder, program: JetCodegenProgram) -> MIRFunctionForm Never! {
     return if function.kind == {
         .TopLevel -> MIRFunctionForm.TopLevel
         .Method(convention, owner_type) -> {
@@ -1575,7 +1688,7 @@ fn jet_codegen_lower_function_form(function: TFunc, builder: JetCodegenBuilder) 
                 None -> None
                 Val(value) -> Val(jet_codegen_lower_access(value))
             }
-            MIRFunctionForm.Method{owner: jet_codegen_lower_type_for_function(owner_type, builder), self_access: self_access}
+            MIRFunctionForm.Method{owner: jet_codegen_lower_type_for_function(owner_type, builder, program), self_access: self_access}
         }
         .TraitMethod(_, convention, owner_type, trait_symbol, codec) -> {
             self_access := if convention == {
@@ -1589,8 +1702,8 @@ fn jet_codegen_lower_function_form(function: TFunc, builder: JetCodegenBuilder) 
                     .Decode -> Val(MIRSerdeCodec.Decode)
                 }
             }
-            trait_ref := jet_codegen_mir_trait_ref_for_symbol(builder.modules, trait_symbol)
-            MIRFunctionForm.TraitMethod{owner: jet_codegen_lower_type_for_function(owner_type, builder), trait_ref: trait_ref, self_access: self_access, serde: serde}
+            trait_ref := jet_codegen_mir_trait_ref_for_symbol(program.modules, trait_symbol)
+            MIRFunctionForm.TraitMethod{owner: jet_codegen_lower_type_for_function(owner_type, builder, program), trait_ref: trait_ref, self_access: self_access, serde: serde}
         }
     }
 }
@@ -1651,7 +1764,7 @@ fn jet_codegen_validate_lambda_metadata(lambda: TLambda) Never! {
     }
 }
 
-fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda) Never! {
+fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, program: JetCodegenProgram, lambda: TLambda) Never! {
     facts := jet_codegen_lambda_capture_facts(lambda)
     builder.capture_facts = Val(facts)
     slot := 0
@@ -1659,17 +1772,15 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda
         moved := facts.moved.contains(capture.source)
         cloned := !moved && (facts.cloned.contains(capture.source) || facts.materialized.contains(capture.source))
         access := if {
-            moved -> MIRAccess.Move
             facts.mutable.contains(capture.source) -> MIRAccess.Write
             else -> MIRAccess.Read
         }
         ownership := if {
-            moved -> mir_ownership_from_access(MIRAccess.Move)
-            cloned -> mir_owned_ownership()
+            moved || cloned -> mir_owned_ownership()
             else -> mir_ownership_from_access(access)
         }
-        lowered_ty :: jet_codegen_lower_type_for_function(capture.ty, builder)
-        value := jet_codegen_emit_mir_type(&builder, lambda.source_span, lowered_ty, ownership, MIROperation.Capture{slot: slot})
+        lowered_ty :: jet_codegen_lower_type_for_function(capture.ty, builder, program)
+        value := jet_codegen_emit_mir_type(&builder, program, lambda.source_span, lowered_ty, ownership, MIROperation.Capture{slot: slot})
         &builder.capture_params.push(MIRCaptureParam{
             slot: slot,
             name: capture.source,
@@ -1677,30 +1788,36 @@ fn jet_codegen_bind_lambda_captures(builder: &JetCodegenBuilder, lambda: TLambda
             ty: lowered_ty,
             access: access,
             ownership: ownership,
+            place_only: false,
         })
         if capture.local.name != capture.source {
             source_local := capture.local
             source_local.name = capture.source
-            _ := jet_codegen_bind_capture_local(&builder, source_local, capture.ty, value, access, ownership, false)
+            _ := jet_codegen_bind_capture_local(&builder, program, source_local, capture.ty, value, access, ownership, false)
         }
-        place := jet_codegen_bind_capture_local(&builder, capture.local, capture.ty, value, access, ownership, false)
-        if moved -> jet_codegen_register_drop_live(&builder, place, capture.ty, ownership, true)
+        _ := jet_codegen_bind_capture_local(&builder, program, capture.local, capture.ty, value, access, ownership, false)
         slot += 1
     }
+}
+
+// Keep local byte spans attached to the checked function that owns them.
+fn jet_codegen_lowering_error_message(function: TFunc, span: Span, message: String) -> String Never! {
+    "checked TIR cannot lower to MIR at {span.start}..{span.end}: {function.source_file} (module {function.module_identity}), {function.name}: {message}"
 }
 
 
 // Lowers `function` on `builder`, which holds the program-wide inputs; the
 // builder's per-function state is reset first (jet_codegen_begin_function).
-fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, statements: [TStmt], expression: TExpr?, lambda: TLambda?) -> JetCodegenLoweredFunction {
+fn jet_codegen_lower_function(builder: &JetCodegenBuilder, program: JetCodegenProgram, function: TFunc, statements: [TStmt], expression: TExpr?, lambda: TLambda?) -> JetCodegenLoweredFunction {
     // #3740: lower against the executable signature; a plain-return function
     // (`T Never!`) returns its success value directly.
-    jet_codegen_begin_function(&builder, jet_codegen_executable_function(function))
+    jet_codegen_begin_function(&builder, program, jet_codegen_executable_function(function))
     builder.stable_element_lets = jet_codegen_stable_element_lets(statements, expression)
+    builder.partial_move_roots = jet_codegen_partial_move_roots(statements, expression)
     if lambda != None {
         value := lambda
         jet_codegen_validate_lambda_metadata(value)
-        jet_codegen_bind_lambda_captures(&builder, value)
+        jet_codegen_bind_lambda_captures(&builder, program, value)
     }
     parameter_index := if function.kind == {
         .TopLevel -> 0
@@ -1708,7 +1825,7 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
             if convention == {
                 None -> 0
                 else -> {
-                    jet_codegen_lower_receiver(&builder, owner_type, convention, function.source_span, 0)
+                    jet_codegen_lower_receiver(&builder, program, owner_type, convention, function.source_span, 0)
                     1
                 }
             }
@@ -1717,44 +1834,54 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
             if convention == {
                 None -> 0
                 else -> {
-                    jet_codegen_lower_receiver(&builder, owner_type, convention, function.source_span, 0)
+                    jet_codegen_lower_receiver(&builder, program, owner_type, convention, function.source_span, 0)
                     1
                 }
             }
         }
     }
     loop parameter in function.params {
-        jet_codegen_lower_parameter(&builder, parameter, parameter_index)
+        jet_codegen_lower_parameter(&builder, program, parameter, parameter_index)
         parameter_index += 1
     }
+    jet_codegen_emit_entry_check(&builder, program)
     return_source := builder.function.ret ?? Type.Named{name: "Unit"}
     if {
         expression == None -> {
-            jet_codegen_lower_statements(&builder, statements)
+            jet_codegen_lower_statements(&builder, program, statements)
         } else -> {
             value :: expression
-            lowered_value := jet_codegen_lower_expr(&builder, value)
-            if jet_codegen_current_is_open(builder) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, MIRTerminator.Return{value: Val(lowered_value)}, -1)
+            lowered_value := jet_codegen_lower_expr(&builder, program, value)
+            if jet_codegen_current_is_open(builder, program) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Return{value: Val(lowered_value)}, -1)
         }
     }
     // Rust `lower_function` ends every open body with a bare return; a checked
     // body can only reach its end when its success is Unit.
-    if jet_codegen_current_is_open(builder) {
-        unit_ok :: jet_codegen_unit_never_return(&builder, function.source_span)
+    if jet_codegen_current_is_open(builder, program) {
+        unit_ok :: jet_codegen_unit_never_return(&builder, program, function.source_span)
         if {
-            unit_ok != None -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, MIRTerminator.Return{value: unit_ok}, -1)
-            jet_codegen_bare_return_completes(builder.function) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, MIRTerminator.Return{value: None}, -1)
-            else -> panic("checked non-Unit TFunc falls through during MIR lowering")
+            unit_ok != None -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Return{value: unit_ok}, -1)
+            jet_codegen_bare_return_completes(builder.function) -> _ := jet_codegen_terminate_with_owned_cleanup(&builder, program, MIRTerminator.Return{value: None}, -1)
+            else -> panic(jet_codegen_lowering_error_message(builder.function, function.source_span, "checked non-Unit TFunc falls through during MIR lowering"))
         }
     }
-    jet_codegen_seal_all_exit_chains(&builder)
+    jet_codegen_seal_all_exit_chains(&builder, program)
     loop block in builder.blocks {
         if jet_codegen_is_open_terminator(block.terminator) {
-            panic("Jet codegen left an unterminated MIR block")
+            panic(jet_codegen_lowering_error_message(builder.function, function.source_span, "Jet codegen left an unterminated MIR block"))
         }
     }
-    jet_codegen_move_last_uses(&builder)
-    jet_codegen_resolve_drop_flags(&builder)
+    jet_codegen_move_last_uses(&builder, program)
+    jet_codegen_resolve_drop_flags(&builder, program)
+    jet_codegen_pack_function(&builder, program, function, return_source)
+}
+
+// Shared checked MIR packing for complete functions and suspended REPL roots.
+// A suspended root deliberately has not run last-use/drop-finalization passes.
+// Packing moves the function's rows out of `builder` (compiler_take_rows),
+// leaving those lists empty: the next jet_codegen_begin_function resets the
+// builder anyway, and a caller that keeps lowering on the builder packs a copy.
+fn jet_codegen_pack_function(builder: &JetCodegenBuilder, program: JetCodegenProgram, function: TFunc, return_source: Type) -> JetCodegenLoweredFunction {
     optimization := mir_empty_optimization_facts()
     optimization.pure = function.is_pure
     optimization.inline = function.is_inline
@@ -1762,11 +1889,18 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
     optimization.gc_return = function.gc_return
     optimization.gc_scope = function.gc_scope
     optimization.kernel = function.kernel_proof != None
-    optimization.checked_vector_facts = builder.checked_vector_facts
-    blocks := builder.blocks
-    jet_codegen_sort_blocks(&blocks)
+    // Every builder-derived fact is read before any row list moves out.
     declared_return := MIRType?{None}
-    if builder.function.ret != None -> declared_return = Val(jet_codegen_lower_type_for_function(return_source, builder))
+    if builder.function.ret != None -> declared_return = Val(jet_codegen_lower_type_for_function(return_source, builder, program))
+    return_type :: jet_codegen_lower_type_for_function(return_source, builder, program)
+    form :: jet_codegen_lower_function_form(function, builder, program)
+    failure :: jet_codegen_lower_failure(builder.function.failure_carrier, builder, program)
+    web_param_reconstructions :: jet_codegen_lower_web_reconstructions(builder, program, function.web_param_reconstructions)
+    entry :: builder.entry
+    captures :: builder.capture_facts
+    optimization.checked_vector_facts = compiler_take_rows<MIRVectorFact>(&builder.checked_vector_facts)
+    blocks := compiler_take_rows<MIRBasicBlock>(&builder.blocks)
+    jet_codegen_sort_blocks(&blocks)
     foreign_language := String?{None}
     if function.foreign == .Val(provenance) -> foreign_language = Val(provenance.language)
     mir_function := MIRFunction{
@@ -1778,22 +1912,21 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
         name: function.name,
         span: function.source_span,
         kind: MIRFunctionKind.Jet,
-        form: jet_codegen_lower_function_form(function, builder),
+        form: form,
         visibility: jet_codegen_lower_visibility(function.visibility),
         target_applicability: MIRTargetApplicability{
             rust_aot: function.target_applicability.rust_aot,
-            cranelift: function.target_applicability.cranelift,
             interpreter: function.target_applicability.interpreter,
             web: function.target_applicability.web,
         },
         web_bucket: jet_codegen_lower_web_bucket(function.web_bucket),
         web_marker: jet_codegen_lower_web_marker(function.web_marker),
-        generic_params: jet_codegen_lower_generic_params(function.generic_params, builder.modules),
-        capture_params: builder.capture_params,
-        params: builder.params,
+        generic_params: jet_codegen_lower_generic_params(function.generic_params, program.modules),
+        capture_params: compiler_take_rows<MIRCaptureParam>(&builder.capture_params),
+        params: compiler_take_rows<MIRParam>(&builder.params),
         declared_return: declared_return,
-        return_type: jet_codegen_lower_type_for_function(return_source, builder),
-        failure: jet_codegen_lower_failure(builder.function.failure_carrier, builder),
+        return_type: return_type,
+        failure: failure,
         effects: MIREffectFacts{
             direct: function.effects.direct,
             solved: function.effects.solved,
@@ -1801,7 +1934,7 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
             maximal: function.effects.maximal,
             direct_spans: jet_codegen_lower_effect_spans(function.effects.direct_spans),
         },
-        captures: builder.capture_facts,
+        captures: captures,
         generator: None,
         optimization: optimization,
         is_unsafe: function.is_unsafe,
@@ -1817,31 +1950,32 @@ fn jet_codegen_lower_function(builder: &JetCodegenBuilder, function: TFunc, stat
         kernel_proof: jet_codegen_lower_kernel_proof(function.kernel_proof),
         gc_return: function.gc_return,
         return_view_provenance: jet_codegen_lower_view_provenance_map(function.return_view_provenance),
-        web_param_reconstructions: jet_codegen_lower_web_reconstructions(builder, function.web_param_reconstructions),
+        web_param_reconstructions: web_param_reconstructions,
         blocks: blocks,
-        entry: builder.entry,
-        locals: builder.locals,
-        values: builder.values,
-        places: builder.places,
-        scopes: builder.scopes,
+        entry: entry,
+        locals: compiler_take_rows<MIRLocal>(&builder.locals),
+        values: compiler_take_rows<MIRValueFact>(&builder.values),
+        places: compiler_take_rows<MIRPlace>(&builder.places),
+        scopes: compiler_take_rows<MIRScope>(&builder.scopes),
         drops: [MIRDropAction]{},
         foreign_language: foreign_language,
     }
-    function_rows := [MIRFunction]{mir_function}
-    loop nested_index in 0..<builder.nested_functions.len() {
-        nested :: builder.nested_functions[nested_index]
-        &function_rows.push(nested)
-    }
-    fields := jet_codegen_lower_field_rows([MIRTypeDef]{}, function_rows, [MIRTraitDef]{}, [MIRImplDef]{}, [MIRConstantDef]{})
+    nested_functions := compiler_take_rows<MIRFunction>(&builder.nested_functions)
+    fields := [MIRFieldRow]{}
+    field_ids := [U64:Bool]{}
+    jet_codegen_append_function_field_rows(mir_function, &fields, &field_ids)
+    loop nested in nested_functions -> jet_codegen_append_function_field_rows(nested, &fields, &field_ids)
     jet_codegen_sort_field_rows(&fields)
     return JetCodegenLoweredFunction{
         function: mir_function,
-        nested_functions: builder.nested_functions,
-        callbacks: builder.callbacks,
+        nested_functions: nested_functions,
+        shared_sites: compiler_take_rows<MIRConstantDef>(&builder.shared_sites),
+        closure_sources: compiler_take_rows<JetCodegenClosureSource>(&builder.closure_sources),
+        callbacks: compiler_take_rows<MIRCallbackAdapter>(&builder.callbacks),
         fields: fields,
-        prelude_calls: builder.prelude_calls,
-        core_calls: builder.core_calls,
-        used_core: builder.used_core,
+        prelude_calls: compiler_take_rows<MIRPreludeCall>(&builder.prelude_calls),
+        core_calls: compiler_take_rows<MIRCoreCall>(&builder.core_calls),
+        used_core: compiler_take_rows<String>(&builder.used_core),
     }
 }
 
@@ -1860,8 +1994,8 @@ fn jet_codegen_lambda_function_type(lambda: TLambda) -> Type Never! {
     Type.Fn{params: lambda.param_types, ret: lambda.ret, effect_bound: None, param_contract: None, call_metadata: metadata, return_view_provenance: None}
 }
 
-fn jet_codegen_send_function_type(builder: JetCodegenBuilder, ty: Type) -> MIRType Never! {
-    lowered := jet_codegen_lower_type_for_function(ty, builder)
+fn jet_codegen_send_function_type(builder: JetCodegenBuilder, program: JetCodegenProgram, ty: Type) -> MIRType Never! {
+    lowered := jet_codegen_lower_type_for_function(ty, builder, program)
     if lowered.kind == {
         .Fn(signature) -> {
             conventions := [MIRAccess]{}
@@ -1886,14 +2020,14 @@ fn jet_codegen_send_function_type(builder: JetCodegenBuilder, ty: Type) -> MIRTy
 // Rust mir.rs `promote_spawn_closure_to_send`: a spawned task body runs on a
 // worker thread, so the spawn retypes its closure value to SendFn (an `Arc`
 // closure in Rust AOT); the value keeps the ownership it was emitted with.
-fn jet_codegen_promote_spawn_closure_to_send(builder: &JetCodegenBuilder, closure: MIRValueID, closure_type: Type) Never! {
+fn jet_codegen_promote_spawn_closure_to_send(builder: &JetCodegenBuilder, program: JetCodegenProgram, closure: MIRValueID, closure_type: Type) Never! {
     at :: builder.value_positions.get(closure.value) ?? panic("spawn closure has no MIR value type")
     if builder.values[at].ty.kind == {
         .SendFn(_, _, _) -> return
         .Fn(_) -> {}
         else -> panic("spawn closure is not callable")
     }
-    target := jet_codegen_send_function_type(builder, closure_type)
+    target := jet_codegen_send_function_type(builder, program, closure_type)
     builder.values[at].ty = target
     // The closure is the instruction the spawn just lowered, in the current block.
     position :: builder.block_positions.get(builder.current.value) ?? panic("spawn closure block is missing")
@@ -1910,13 +2044,13 @@ fn jet_codegen_promote_spawn_closure_to_send(builder: &JetCodegenBuilder, closur
     panic("spawn closure instruction is missing")
 }
 
-fn jet_codegen_emit_owned_value(builder: &JetCodegenBuilder, span: Span, ty: Type, operation: MIROperation) -> MIRValueID Never! {
-    lowered_ty :: jet_codegen_lower_type_for_function(ty, builder)
-    jet_codegen_emit_mir_type(&builder, span, lowered_ty, mir_owned_ownership(), operation)
+fn jet_codegen_emit_owned_value(builder: &JetCodegenBuilder, program: JetCodegenProgram, span: Span, ty: Type, operation: MIROperation) -> MIRValueID Never! {
+    lowered_ty :: jet_codegen_lower_type_for_function(ty, builder, program)
+    jet_codegen_emit_mir_type(&builder, program, span, lowered_ty, mir_owned_ownership(), operation)
 }
 
-fn jet_codegen_place_shares_record_handle(builder: JetCodegenBuilder, place: MIRPlaceID) -> Bool Never! {
-    row :: jet_codegen_find_place(builder, place) ?? return false
+fn jet_codegen_place_shares_record_handle(builder: JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID) -> Bool Never! {
+    row :: jet_codegen_find_place(builder, program, place) ?? return false
     if row.projections.len() == 0 -> return false
     is_index := if row.projections[row.projections.len() - 1] == {
         .Index(_, _, _, _, _, _, _) -> true
@@ -1938,16 +2072,18 @@ fn jet_codegen_same_callback(left: MIRCallbackAdapter, right: MIRCallbackAdapter
         left.callback_identity == right.callback_identity
 }
 
-fn jet_codegen_append_nested_function(builder: &JetCodegenBuilder, function: MIRFunction) Never! {
+fn jet_codegen_append_nested_function(builder: &JetCodegenBuilder, program: JetCodegenProgram, function: MIRFunction) Never! {
     loop existing in builder.nested_functions {
         if existing.id == function.id || (existing.module_id == function.module_id && existing.key == function.key) -> panic("duplicate nested MIR function identity")
     }
     &builder.nested_functions.push(function)
 }
 
-fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCodegenLoweredFunction) Never! {
-    jet_codegen_append_nested_function(&builder, lowered.function)
-    loop nested in lowered.nested_functions -> jet_codegen_append_nested_function(&builder, nested)
+fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, program: JetCodegenProgram, lowered: JetCodegenLoweredFunction) Never! {
+    jet_codegen_append_nested_function(&builder, program, lowered.function)
+    loop nested in lowered.nested_functions -> jet_codegen_append_nested_function(&builder, program, nested)
+    loop source in lowered.closure_sources -> &builder.closure_sources.push(source)
+    jet_codegen_merge_shared_sites(&builder.shared_sites, lowered.shared_sites)
     loop callback in lowered.callbacks {
         duplicate := false
         loop existing in builder.callbacks {
@@ -1965,7 +2101,7 @@ fn jet_codegen_merge_lowered_child(builder: &JetCodegenBuilder, lowered: JetCode
                 panic("conflicting Prelude route identity across nested functions")
             }
         } else {
-            jet_codegen_push_prelude_call(&builder, call)
+            jet_codegen_push_prelude_call(&builder, program, call)
         }
     }
     loop call in lowered.core_calls {
@@ -2001,7 +2137,7 @@ fn jet_codegen_lambda_effects(function_index: JetCodegenFunctionIndex, effects: 
     projected
 }
 
-fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: Bool, purpose: String) -> JetCodegenLambdaValue {
+fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, program: JetCodegenProgram, lambda: TLambda, send: Bool, purpose: String) -> JetCodegenLambdaValue {
     jet_codegen_validate_lambda_metadata(lambda)
     base_key := "{builder.function.key}::lambda@{lambda.source_span.start}..{lambda.source_span.end}"
     occurrence := builder.spawn_occurrences.get(base_key) ?? 0
@@ -2054,8 +2190,8 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
         source_file: builder.function.source_file,
         source_span: lambda.source_span,
         failure_carrier: lambda.failure_carrier,
-        effects: jet_codegen_lambda_effects(builder.function_index, lambda.effects),
-        target_applicability: TTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+        effects: jet_codegen_lambda_effects(program.function_index, lambda.effects),
+        target_applicability: builder.function.target_applicability,
         web_bucket: builder.function.web_bucket,
         web_marker: None,
         visibility: TVisibility.Private,
@@ -2095,11 +2231,12 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
     }
     // The nested function lowers on the same builder (no program copy); the
     // enclosing function's state is saved around it.
-    enclosing := jet_codegen_function_state(builder)
-    lowered := jet_codegen_lower_function(&builder, function, statements, expression, Val(lambda))
-    jet_codegen_restore_function_state(&builder, ^enclosing)
+    enclosing := jet_codegen_function_state(builder, program)
+    lowered := jet_codegen_lower_function(&builder, program, function, statements, expression, Val(lambda))
+    jet_codegen_restore_function_state(&builder, program, ^enclosing)
     function_id := lowered.function.id
-    jet_codegen_merge_lowered_child(&builder, lowered)
+    jet_codegen_merge_lowered_child(&builder, program, lowered)
+    &builder.closure_sources.push(JetCodegenClosureSource{function: function_id, source_file: builder.function.source_file, lambda: lambda})
 
     facts := jet_codegen_lambda_capture_facts(lambda)
     captures := [MIRCaptureOperand]{}
@@ -2107,37 +2244,36 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
         moved := facts.moved.contains(capture.source)
         cloned := !moved && (facts.cloned.contains(capture.source) || facts.materialized.contains(capture.source))
         access := if {
-            moved -> MIRAccess.Move
             facts.mutable.contains(capture.source) -> MIRAccess.Write
             else -> MIRAccess.Read
         }
-        borrowed := (access == MIRAccess.Read || access == MIRAccess.Write) && !cloned
+        borrowed := (access == MIRAccess.Read || access == MIRAccess.Write) && !moved && !cloned
         outer_slot := capture.local.name
         if cloned && capture.local.name != capture.source -> outer_slot = capture.source
-        outer_access := if cloned -> MIRAccess.Read else -> access
+        outer_access := if moved -> MIRAccess.Move else if cloned -> MIRAccess.Read else -> access
         outer_local := capture.local
         outer_local.name = outer_slot
-        place := jet_codegen_lower_place_for_access(&builder, TPlace.Local{local: outer_local}, outer_access)
+        place := jet_codegen_lower_place_for_access(&builder, program, TPlace.Local{local: outer_local}, outer_access)
         if borrowed {
             &captures.push(MIRCaptureOperand.Place{place: place})
             next
         }
         value := if {
             cloned -> {
-                read := jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MIROperation.ReadPlace{place: place})
+                read := jet_codegen_emit_value(&builder, program, lambda.source_span, capture.ty, MIROperation.ReadPlace{place: place})
                 if {
-                    facts.mutable.contains(capture.source) && jet_codegen_place_shares_record_handle(builder, place) -> {
+                    facts.mutable.contains(capture.source) && jet_codegen_place_shares_record_handle(builder, program, place) -> {
                         read
                     } else -> {
-                        jet_codegen_emit_owned_value(&builder, lambda.source_span, capture.ty, MIROperation.Copy{value: read, fact: if facts.materialized.contains(capture.source) -> MIRCopyFact.ViewMaterialize else -> MIRCopyFact.Materialize})
+                        jet_codegen_emit_owned_value(&builder, program, lambda.source_span, capture.ty, MIROperation.Copy{value: read, fact: if facts.materialized.contains(capture.source) -> MIRCopyFact.ViewMaterialize else -> MIRCopyFact.Materialize})
                     }
                 }
             }
-            access == MIRAccess.Move -> {
-                jet_codegen_emit_owned_value(&builder, lambda.source_span, capture.ty, MIROperation.MovePlace{place: place})
+            moved -> {
+                jet_codegen_emit_owned_value(&builder, program, lambda.source_span, capture.ty, MIROperation.MovePlace{place: place})
             }
             else -> {
-                jet_codegen_emit_value(&builder, lambda.source_span, capture.ty, MIROperation.ReadPlace{place: place})
+                jet_codegen_emit_value(&builder, program, lambda.source_span, capture.ty, MIROperation.ReadPlace{place: place})
             }
         }
         &captures.push(MIRCaptureOperand.Value{value: value})
@@ -2147,10 +2283,10 @@ fn jet_codegen_lower_lambda(builder: &JetCodegenBuilder, lambda: TLambda, send: 
     closure_type := jet_codegen_lambda_function_type(lambda)
     value := if {
         send -> {
-            send_ty :: jet_codegen_send_function_type(builder, closure_type)
-            jet_codegen_emit_mir_type(&builder, lambda.source_span, send_ty, mir_owned_ownership(), operation)
+            send_ty :: jet_codegen_send_function_type(builder, program, closure_type)
+            jet_codegen_emit_mir_type(&builder, program, lambda.source_span, send_ty, mir_owned_ownership(), operation)
         } else -> {
-            jet_codegen_emit_value(&builder, lambda.source_span, closure_type, operation)
+            jet_codegen_emit_value(&builder, program, lambda.source_span, closure_type, operation)
         }
     }
     JetCodegenLambdaValue{value: value, function: function_id}
@@ -2208,7 +2344,7 @@ fn jet_codegen_comptime_item_tfunc(module_identity: String, module_name: String,
         source_span: span,
         failure_carrier: TFailureCarrier.Infallible,
         effects: TEffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [TEffectSpan]{}},
-        target_applicability: TTargetApplicability{rust_aot: false, cranelift: false, interpreter: true, web: false},
+        target_applicability: TTargetApplicability{rust_aot: false, interpreter: true, web: false},
         web_bucket: None,
         web_marker: None,
         visibility: TVisibility.Private,
@@ -2253,17 +2389,22 @@ fn jet_codegen_comptime_item_function(request: SemaComptimeItemRequest, modules:
 }
 
 // The lowering inputs of one staged module set, kept by a comptime run across
-// its items: the builder owns the modules (moved in once), their owner, field
+// its items: the program owns the modules (moved in once), their owner, field
 // and source indexes, all built once here, and the staged values that land
 // later join it in place (jet_codegen_comptime_session_add_constants). Each
-// item lowers its closure and itself on this one builder; per item only the
+// item lowers its closure and itself on the one builder; per item only the
 // closure-sized function index and closure method set change, never a
 // whole-program walk.
-pub struct JetCodegenComptimeSession {
+struct JetCodegenComptimeSession {
+    program: JetCodegenProgram
     builder: JetCodegenBuilder
     // The staged modules' constant rows (jet_codegen_lower_constant_rows),
-    // kept in canonical order; each item's program takes a copy.
+    // in canonical order when `constants_sorted` (rows added since are sorted
+    // when a program next takes a copy).
     constants: [MIRConstantDef]
+    constants_sorted: Bool
+    // Module identity -> its first position in `program.modules`.
+    module_rows: [String:Int]
     // The staged modules' declared types (jet_codegen_declared_type_slots),
     // lowered once against no function: each item's program takes these rows
     // and relowers only the definitions whose methods its closure lowers and
@@ -2272,14 +2413,19 @@ pub struct JetCodegenComptimeSession {
     // Qualified method key (jet_codegen_qualified_function_key) -> the
     // positions in `type_slots` of the rows that list that method.
     method_slots: [String:[Int]]
+    // The staged modules' trait spellings (jet_codegen_trait_names): staged
+    // values add only constants, so every item's impl rows resolve their
+    // trait names against this one index.
+    trait_names: JetCodegenTraitNames
+    // The qualified keys (jet_codegen_qualified_function_key) of every
+    // function a declared row looks up by key: type methods, trait default
+    // bodies and impl methods. A free function outside this set changes no
+    // type, trait or impl row when it joins a program
+    // (lower_comptime_growth).
+    row_keys: [String:Bool]
 }
 
-pub struct JetCodegenComptimeLowering {
-    pub functions: JetCodegenFunctions
-    pub item: JetCodegenLoweredFunction
-}
-
-pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile]) -> JetCodegenComptimeSession {
+fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_files: [MIRSourceFile], stop_points: Bool, edition: String) -> JetCodegenComptimeSession {
     field_symbols := jet_codegen_field_symbol_index(modules)
     source_index := jet_codegen_source_index(source_files)
     function_index := jet_codegen_function_index([TFunc]{})
@@ -2303,11 +2449,49 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
             method_slots[qualified] = positions
         }
     }
+    trait_names := jet_codegen_trait_names(modules)
+    module_rows := [String:Int]{}
+    loop (index, semantic_module) in modules {
+        if module_rows.get(semantic_module.module_identity) == None -> module_rows[semantic_module.module_identity] = index
+    }
+    row_keys := [String:Bool]{}
+    loop semantic_module in modules {
+        loop definition in semantic_module.declarations.type_defs {
+            method_keys := if definition.kind == {
+                .Struct(_, methods) | .Enum(_, methods) -> methods
+                else -> [String]{}
+            }
+            loop key in method_keys -> row_keys[jet_codegen_qualified_function_key(definition.module_identity, key)] = true
+        }
+        loop definition in semantic_module.declarations.traits {
+            loop method in definition.methods {
+                if method.default_function_key == .Val(key) -> row_keys[jet_codegen_qualified_function_key(definition.module_identity, key)] = true
+            }
+        }
+        loop definition in semantic_module.declarations.impls {
+            loop key in definition.methods -> row_keys[jet_codegen_qualified_function_key(definition.module_identity, key)] = true
+        }
+    }
     // Every lowering replaces this first function (jet_codegen_begin_function).
     first := jet_codegen_comptime_item_tfunc("", "", "", "", Span{start: 0, end: 0}, Type.Named{name: "Unit"})
-    builder := jet_codegen_new_builder(first, ^function_index, ^modules, ^field_symbols, source_files, ^source_index)
-    builder.owners.closure_only = true
-    JetCodegenComptimeSession{builder: ^builder, constants: ^constants, type_slots: ^type_slots, method_slots: ^method_slots}
+    program := jet_codegen_new_program(^function_index, ^modules, ^field_symbols, source_files, ^source_index, edition)
+    // A native-host comptime session lowers compiler callables: stop points
+    // plus the budget can-stop operations.
+    program.stop_points = stop_points
+    program.comptime_budget = stop_points
+    builder := jet_codegen_new_builder(first, program)
+    program.owners.closure_only = true
+    JetCodegenComptimeSession{program: ^program, builder: ^builder, constants: ^constants, constants_sorted: true, module_rows: ^module_rows, type_slots: ^type_slots, method_slots: ^method_slots, trait_names: ^trait_names, row_keys: ^row_keys}
+}
+
+// The staged modules a session was built from, moved out of it at the end of
+// a comptime run: as given, with the constant rows of the values that landed
+// since joined (jet_codegen_comptime_session_add_constants changes nothing
+// else in them).
+fn jet_codegen_comptime_session_modules(session: ^JetCodegenComptimeSession) -> [SemaGraphModuleResult] {
+    owned := ^session
+    modules := ^owned.program.modules
+    modules
 }
 
 // Joins the checked rows of staged constants that landed after the session
@@ -2316,26 +2500,22 @@ pub fn jet_codegen_comptime_session(modules: ^[SemaGraphModuleResult], source_fi
 // lowering finds a module constant only by its symbol key, and constant rows
 // keep canonical ID order, so where a row joins is unobservable. A key that
 // already has a row keeps it, as the first staged value of a key wins.
-pub fn jet_codegen_comptime_session_add_constants(session: &JetCodegenComptimeSession, definitions: [TConstantDef]) {
-    added := false
+// Returns the lowered rows it added, in order; the session's rows are sorted
+// again only when a program takes them (lower_comptime_closure), not per add.
+fn jet_codegen_comptime_session_add_constants(session: &JetCodegenComptimeSession, definitions: [TConstantDef]) -> [MIRConstantDef] {
+    added := [MIRConstantDef]{}
     loop definition in definitions {
         key :: jet_codegen_constant_symbol_key(definition)
-        if session.builder.owners.constants.rows.get(key) != None -> next
-        module_index := -1
-        loop index in 0..<session.builder.modules.len() {
-            if session.builder.modules[index].module_identity == definition.module_identity {
-                module_index = index
-                break
-            }
-        }
-        if module_index < 0 -> panic("a staged comptime constant has no staged module")
-        _ := &session.builder.owners.constants.rows.add(key, JetCodegenConstantRow{module_index: module_index, definition_index: session.builder.modules[module_index].declarations.constants.len()})
-        &session.builder.modules[module_index].declarations.constants.push(definition)
-        lowered :: jet_codegen_lower_constant_definition(definition, session.builder.modules) ?? next
+        if session.program.owners.constants.rows.get(key) != None -> next
+        module_index :: session.module_rows.get(definition.module_identity) ?? panic("a staged comptime constant has no staged module")
+        _ := &session.program.owners.constants.rows.add(key, JetCodegenConstantRow{module_index: module_index, definition_index: session.program.modules[module_index].declarations.constants.len()})
+        &session.program.modules[module_index].declarations.constants.push(definition)
+        lowered :: jet_codegen_lower_constant_definition(definition, session.program.modules) ?? next
         &session.constants.push(lowered)
-        added = true
+        &added.push(lowered)
+        session.constants_sorted = false
     }
-    if added -> jet_codegen_sort_constant_definitions(&session.constants)
+    added
 }
 
 // The declared type rows of one closure's program: the session's rows, with
@@ -2345,7 +2525,7 @@ pub fn jet_codegen_comptime_session_add_constants(session: &JetCodegenComptimeSe
 // because none of its methods is in the closure's function index.
 fn jet_codegen_comptime_types(session: JetCodegenComptimeSession) -> [MIRTypeDef] {
     named := (loop _ in session.type_slots -> false)
-    loop function in session.builder.function_index.rows {
+    loop function in session.program.function_index.rows {
         positions :: session.method_slots.get(jet_codegen_qualified_function_key(function.module_identity, function.key)) ?? next
         loop position in positions -> named[position] = true
     }
@@ -2358,37 +2538,131 @@ fn jet_codegen_comptime_types(session: JetCodegenComptimeSession) -> [MIRTypeDef
                 next
             }
         }
-        definition :: session.builder.modules[slot.module_index].declarations.type_defs[slot.definition_index]
-        &types.push(jet_codegen_lower_type_definition(definition, session.builder.function_index, session.builder.modules, true))
+        definition :: session.program.modules[slot.module_index].declarations.type_defs[slot.definition_index]
+        &types.push(jet_codegen_lower_type_definition(definition, session.program.function_index, session.program.modules, true))
     }
     types
 }
 
-// The temporary interpreter lowering of one comptime item: its checked
-// function closure, then the item. A type row names only the methods lowered
-// with this closure: the owner index consults the closure method set
-// (jet_codegen_function_type_generic_names) and type rows drop methods outside
-// the closure's function index (jet_codegen_type_method_ids), so the staged
-// modules are never rewritten per item.
-pub fn lower_comptime_closure(session: &JetCodegenComptimeSession, request: SemaComptimeItemRequest, functions: [TFunc]) -> JetCodegenComptimeLowering {
-    closure_methods := [String:Bool]{}
-    loop function in functions -> closure_methods[jet_codegen_qualified_function_key(function.module_identity, function.key)] = true
-    session.builder.owners.closure_methods = ^closure_methods
-    session.builder.function_index = jet_codegen_function_index(~functions)
-    rows := jet_codegen_lower_each_function(&session.builder, functions, None)
+// The temporary interpreter lowering of a comptime program's checked function
+// closure, returned as program rows; the session's builder keeps the
+// closure's function index, so lower_comptime_item then lowers each item
+// function of the program against it. A type row names only the methods
+// lowered with this closure: the owner index consults the closure method set
+// (jet_codegen_function_type_generic_names) and type rows drop methods
+// outside the closure's function index (jet_codegen_type_method_ids), so the
+// staged modules are never rewritten per program.
+fn lower_comptime_closure(session: &JetCodegenComptimeSession, functions: [TFunc]) -> JetCodegenFunctions {
+    jet_codegen_comptime_session_restore(&session, functions)
+    rows := jet_codegen_lower_each_function(&session.builder, session.program, functions, None)
+    if !session.constants_sorted {
+        jet_codegen_sort_constant_definitions(&session.constants)
+        session.constants_sorted = true
+    }
     constants := session.constants
     types := jet_codegen_comptime_types(session)
-    lowered := jet_codegen_functions_from_rows(rows, functions, session.builder.function_index, session.builder.modules, ^types, ^constants)
-    item_function := jet_codegen_comptime_item_function(request, session.builder.modules)
-    item := jet_codegen_lower_function(&session.builder, item_function, [TStmt]{}, Val(request.expression), None)
-    JetCodegenComptimeLowering{functions: lowered, item: item}
+    jet_codegen_functions_from_rows(^rows, functions, session.program.function_index, session.program.modules, session.trait_names, ^types, ^constants)
+}
+
+// Makes `functions` the session's closure (its function index and closure
+// method set), as lower_comptime_closure does before lowering them: a growing
+// program's closure again, after the session lowered another program's.
+fn jet_codegen_comptime_session_restore(session: &JetCodegenComptimeSession, functions: [TFunc]) {
+    closure_methods := [String:Bool]{}
+    loop function in functions -> closure_methods[jet_codegen_qualified_function_key(function.module_identity, function.key)] = true
+    session.program.owners.closure_methods = ^closure_methods
+    session.program.function_index = jet_codegen_function_index(functions.copy())
+}
+
+// The item function of one comptime `request`, lowered against the closure
+// the last lower_comptime_closure set up on `session`.
+fn lower_comptime_item(session: &JetCodegenComptimeSession, request: SemaComptimeItemRequest) -> JetCodegenLoweredFunction {
+    item_function := jet_codegen_comptime_item_function(request, session.program.modules)
+    jet_codegen_lower_function(&session.builder, session.program, item_function, [TStmt]{}, Val(request.expression), None)
+}
+
+// A2c, one growing comptime program per run: the rows a program whose
+// closure is the session's gains when `functions` (closure functions it
+// lacks) and the item functions of `requests` join it, as
+// lower_comptime_closure, lower_comptime_item and the driver's item merge
+// give them for the larger closure. Each new function must be a free
+// function that no declared row names (`row_keys`): such a function changes
+// no type, trait or impl row (type method lists, trait defaults and impl
+// methods look functions up only by those keys, or by name among methods),
+// so the program keeps every row it has and gains only these. The new
+// functions join the session's closure before any lowers (a function's
+// lowering looks up its callees, which its closure holds). `fields` holds the
+// field rows of the new closure functions and of `constants` (the constant
+// rows the program gains), as jet_codegen_functions_from_rows derives them,
+// then each item's own rows, unmerged; `types` holds the synthetic union rows
+// the new closure functions name, which the program must already have. None,
+// before the session changes, when a new function is not such a free
+// function.
+fn lower_comptime_growth(session: &JetCodegenComptimeSession, functions: [TFunc], requests: [SemaComptimeItemRequest], constants: [MIRConstantDef]) -> JetCodegenFunctions? {
+    loop function in functions {
+        free := if function.kind == {
+            .TopLevel -> true
+            else -> false
+        }
+        if !free -> return None
+        if session.row_keys.get(jet_codegen_qualified_function_key(function.module_identity, function.key)) != None -> return None
+    }
+    if functions.len() > 0 {
+        loop function in functions -> session.program.owners.closure_methods[jet_codegen_qualified_function_key(function.module_identity, function.key)] = true
+        added := functions.copy()
+        jet_codegen_function_index_append(&session.program.function_index, &added)
+    }
+    rows := jet_codegen_lower_each_function(&session.builder, session.program, functions, None)
+    grown := JetCodegenFunctions{functions: [MIRFunction]{}, nested_functions: [MIRFunction]{}, callbacks: [MIRCallbackAdapter]{}, closure_sources: [JetCodegenClosureSource]{}, types: [MIRTypeDef]{}, core_owners: [MIRCoreOwner]{}, traits: [MIRTraitDef]{}, impls: [MIRImplDef]{}, constants: [MIRConstantDef]{}, fields: [MIRFieldRow]{}, core_calls: [MIRCoreCall]{}, prelude_calls: [MIRPreludeCall]{}, used_core: [String]{}}
+    seen := JetCodegenGrowthSeen{prelude_calls: [U64:Bool]{}, core_calls: [U64:Bool]{}, used_core: [String:Bool]{}}
+    loop row in rows -> jet_codegen_growth_add(&grown, &seen, row)
+    jet_codegen_register_synthetic_unions(&grown.types, grown.functions, grown.nested_functions)
+    grown.fields = jet_codegen_lower_field_rows([MIRTypeDef]{}, grown.functions, grown.nested_functions, [MIRTraitDef]{}, [MIRImplDef]{}, constants)
+    loop request in requests {
+        item := lower_comptime_item(&session, request)
+        loop field in item.fields -> &grown.fields.push(field)
+        jet_codegen_growth_add(&grown, &seen, item)
+    }
+    Val(grown)
+}
+
+struct JetCodegenGrowthSeen {
+    prelude_calls: [U64:Bool]
+    core_calls: [U64:Bool]
+    used_core: [String:Bool]
+}
+
+// Appends one lowered function's rows to `grown`: its function, nested
+// functions and callbacks, and the Prelude calls, Core calls and Core modules
+// `grown` does not list yet.
+fn jet_codegen_growth_add(grown: &JetCodegenFunctions, seen: &JetCodegenGrowthSeen, row: JetCodegenLoweredFunction) Never! {
+    &grown.functions.push(row.function)
+    loop nested in row.nested_functions -> &grown.nested_functions.push(nested)
+    loop callback in row.callbacks -> &grown.callbacks.push(callback)
+    loop source in row.closure_sources -> &grown.closure_sources.push(source)
+    jet_codegen_merge_shared_sites(&grown.constants, row.shared_sites)
+    loop call in row.prelude_calls {
+        if seen.prelude_calls.get(call.id.value) != None -> next
+        seen.prelude_calls[call.id.value] = true
+        &grown.prelude_calls.push(call)
+    }
+    loop call in row.core_calls {
+        if seen.core_calls.get(call.id.value) != None -> next
+        seen.core_calls[call.id.value] = true
+        &grown.core_calls.push(call)
+    }
+    loop usage in row.used_core {
+        if seen.used_core.get(usage) != None -> next
+        seen.used_core[usage] = true
+        &grown.used_core.push(usage)
+    }
 }
 
 // Positions of `keys` in stable ascending (key, tie) order; an empty `keys`
 // or `ties` list compares as all-equal. Bottom-up merge sort: O(n log n) on
 // the hash-ordered ids the canonical row sorts see, where insertion sort was
 // quadratic.
-pub fn jet_codegen_sorted_order(keys: [U64], ties: [String]) -> [Int] Never! {
+fn jet_codegen_sorted_order(keys: [U64], ties: [String]) -> [Int] Never! {
     count :: if keys.len() > ties.len() -> keys.len() else -> ties.len()
     order := [Int]{}
     loop index in 0..<count -> &order.push(index)
@@ -2436,34 +2710,28 @@ fn jet_codegen_order_before(keys: [U64], ties: [String], left: Int, right: Int) 
 fn jet_codegen_sort_functions(rows: &[MIRFunction]) Never! {
     keys := [U64]{}
     ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
+    loop index in 0..<rows.len() {
+        &keys.push(rows[index].id.value)
+        &ties.push(rows[index].key)
     }
-    sorted := [MIRFunction]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    compiler_apply_order<MIRFunction>(&rows, jet_codegen_sorted_order(keys, ties))
 }
 
 fn jet_codegen_sort_callback_adapters(rows: &[MIRCallbackAdapter]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRCallbackAdapter]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRCallbackAdapter>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_type_definitions(rows: &[MIRTypeDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRTypeDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRTypeDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 struct JetCodegenUnionIndex {
-    pub rows: [MIRType]
-    pub positions: [U64:Int]
-    pub canonical_keys: [String]
+    rows: [MIRType]
+    positions: [U64:Int]
+    canonical_keys: [String]
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_anonymous_union_type_defs
@@ -2537,27 +2805,28 @@ fn jet_codegen_collect_unions_from_function(function: MIRFunction, unions: &JetC
     }
 }
 
+// Rust `AST::union_member_tag` over the member's source spelling, which is
+// what every use site tags (Foundation type_union_member_tag): a declared
+// member is its own unqualified name. The MIR display qualifies the nominal
+// (`<corelib>/Core/time::Core/time/time.jet::LocalDate<>`), so the
+// spelling is rebuilt from the MIR type with each nominal unqualified and an
+// argument-less nominal written without `<>`.
 fn jet_codegen_union_mir_member_tag(ty: MIRType) -> String {
-    raw := mir_type_display_name(ty)
-    before_args := raw.split("<").to_list()[0]
-    bytes := before_args.bytes()
-    last_separator := -1
-    index := 0
-    loop index + 1 < bytes.len() {
-        if {
-            bytes[index] == (U8{58}) && bytes[index + 1] == (U8{58}) -> {
-                last_separator = index + 1
-                index += 2
-            } else -> {
-                index += 1
-            }
+    type_union_member_tag_name(jet_codegen_union_mir_member_spelling(ty))
+}
+
+fn jet_codegen_union_mir_member_spelling(ty: MIRType) -> String Never! {
+    if ty.kind == {
+        .Apply(name, args) -> {
+            leaf :: type_unqualified_name(name.name)
+            if args.len() == 0 -> return leaf
+            names :: loop arg in args -> jet_codegen_union_mir_member_spelling(arg)
+            return "{leaf}<{names.join(", ")}>"
         }
+        .List(inner) -> return "[{jet_codegen_union_mir_member_spelling(inner)}]"
+        .Option(inner) -> return "{jet_codegen_union_mir_member_spelling(inner)}?"
+        else -> return mir_type_display_name(ty)
     }
-    start := if last_separator >= 0 -> last_separator + 1 else -> 0
-    base := String.from_bytes(bytes[start..<bytes.len()]) ?? panic("canonical union member name is not valid UTF-8")
-    suffix := ""
-    if before_args.len() < raw.len() -> suffix = String.from_bytes(raw.bytes()[before_args.bytes().len()..<raw.bytes().len()]) ?? panic("canonical union generic name is not valid UTF-8")
-    jet_codegen_union_member_tag_name("{base}{suffix}")
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_anonymous_union_type_defs
@@ -2612,13 +2881,36 @@ fn jet_codegen_synthetic_union_definition(ty: MIRType, module_id: MIRModuleID) -
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_record
-// (`Range` and the COMPILER_OWNED_CORE_RECORDS rows)
+// (`Range`, `FieldError`, the carrier, Core and math record rows)
 fn jet_codegen_compiler_owned_record_definition(module_identity: String, name: String, record_fields: [TypeTupleField]) -> MIRTypeDef {
+    jet_codegen_compiler_owned_definition(module_identity, name, MIRTypeDefKind.Struct{fields: jet_codegen_compiler_owned_fields(name, record_fields), methods: [MIRFunctionID]{}})
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_types.rs::compiler_owned_type_defs
+// (a COMPILER_OWNED_ENUMS row) and compiler_owned_core_enums (`plain`: a Core
+// enum leaf with no loaded source declaration, every variant unit).
+fn jet_codegen_compiler_owned_enum_definition(module_identity: String, name: String, variant_names: [String], plain: Bool) -> MIRTypeDef {
+    variants := [MIRVariant]{}
+    loop variant in variant_names {
+        payload := if plain -> JetCodegenCompilerOwnedPayload.Unit else -> jet_codegen_compiler_owned_enum_payload(name, variant)
+        lowered := if payload == {
+            .Unit -> MIRVariantPayload.Unit
+            .Single(ty) -> MIRVariantPayload.Single{value: jet_codegen_lower_type(ty)}
+            .Named(fields) -> MIRVariantPayload.Named{fields: jet_codegen_compiler_owned_fields("{name}::{variant}", fields)}
+        }
+        &variants.push(MIRVariant{name: variant, wire_name: variant, span: Span{start: 0, end: 0}, payload: lowered, discriminant: None})
+    }
+    jet_codegen_compiler_owned_definition(module_identity, name, MIRTypeDefKind.Enum{variants: variants, methods: [MIRFunctionID]{}})
+}
+
+// The declared fields of a compiler-owned row: public, stored, under the
+// field IDs `{owner_key}::{field}` a projection of the bare row resolves to.
+fn jet_codegen_compiler_owned_fields(owner_key: String, record_fields: [TypeTupleField]) -> [MIRField] {
     span :: Span{start: 0, end: 0}
     fields := [MIRField]{}
     loop field in record_fields {
         &fields.push(MIRField{
-            id: jet_codegen_mir_field_id(JetCodegenResolvedField{module_identity: "", nominal_name: name, field_name: field.name}),
+            id: mir_field_id("{owner_key}::{field.name}"),
             name: field.name,
             shape_names: jet_codegen_tuple_shape_names(field.name),
             skip: false,
@@ -2631,15 +2923,23 @@ fn jet_codegen_compiler_owned_record_definition(module_identity: String, name: S
             redact: false,
         })
     }
+    fields
+}
+
+// One compiler-owned row under its bare canonical key, with the row's type
+// parameters (`jet_codegen_compiler_owned_generic_params`).
+fn jet_codegen_compiler_owned_definition(module_identity: String, name: String, kind: MIRTypeDefKind) -> MIRTypeDef {
+    generic_params := [MIRGenericParam]{}
+    loop param in jet_codegen_compiler_owned_generic_params(name) -> &generic_params.push(MIRGenericParam{name: param, bounds: [MIRTraitRef]{}})
     return MIRTypeDef{
         id: mir_type_id(name),
         module_id: mir_module_id(module_identity),
         key: name,
         name: name,
-        span: span,
+        span: Span{start: 0, end: 0},
         public: true,
         package_public: false,
-        generic_params: [MIRGenericParam]{},
+        generic_params: generic_params,
         derives: [MIRTraitID]{},
         auto_derive_default: false,
         auto_printable: false,
@@ -2656,7 +2956,7 @@ fn jet_codegen_compiler_owned_record_definition(module_identity: String, name: S
         ownership: MIROwnershipMode.Owned,
         boxed_edges: [String]{},
         compiler_builtin: None,
-        kind: MIRTypeDefKind.Struct{fields: fields, methods: [MIRFunctionID]{}},
+        kind: kind,
     }
 }
 
@@ -2695,12 +2995,13 @@ fn jet_codegen_parse_error_alias_definition(module_identity: String) -> MIRTypeD
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_anonymous_union_type_defs
-fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFunction]) {
+fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFunction], nested_functions: [MIRFunction]) {
     unions := JetCodegenUnionIndex{rows: [MIRType]{}, positions: [U64:Int]{}, canonical_keys: [String]{}}
     loop function in functions -> jet_codegen_collect_unions_from_function(function, &unions)
+    loop function in nested_functions -> jet_codegen_collect_unions_from_function(function, &unions)
     loop definition in types -> jet_codegen_collect_unions_from_type_definition(definition, &unions)
     if unions.rows.len() == 0 -> return
-    module_id := if functions.len() > 0 -> functions[0].module_id else -> if types.len() > 0 -> types[0].module_id else -> panic("structural union has no owning MIR module")
+    module_id := if functions.len() > 0 -> functions[0].module_id else -> if nested_functions.len() > 0 -> nested_functions[0].module_id else -> if types.len() > 0 -> types[0].module_id else -> panic("structural union has no owning MIR module")
     definitions := [U64:Bool]{}
     loop definition in types -> _ := &definitions.add(definition.id.value, true)
     loop union_type in unions.rows {
@@ -2715,60 +3016,47 @@ fn jet_codegen_register_synthetic_unions(types: &[MIRTypeDef], functions: [MIRFu
 
 fn jet_codegen_sort_trait_definitions(rows: &[MIRTraitDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRTraitDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRTraitDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_impl_definitions(rows: &[MIRImplDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRImplDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRImplDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_constant_definitions(rows: &[MIRConstantDef]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRConstantDef]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRConstantDef>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_field_rows(rows: &[MIRFieldRow]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRFieldRow]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRFieldRow>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_core_calls(rows: &[MIRCoreCall]) Never! {
     keys := [U64]{}
     ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
+    loop index in 0..<rows.len() {
+        &keys.push(rows[index].id.value)
+        &ties.push(rows[index].key)
     }
-    sorted := [MIRCoreCall]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    compiler_apply_order<MIRCoreCall>(&rows, jet_codegen_sorted_order(keys, ties))
 }
 
 fn jet_codegen_sort_prelude_calls(rows: &[MIRPreludeCall]) Never! {
     keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRPreludeCall]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    loop index in 0..<rows.len() -> &keys.push(rows[index].id.value)
+    compiler_apply_order<MIRPreludeCall>(&rows, jet_codegen_sorted_order(keys, [String]{}))
 }
 
 fn jet_codegen_sort_used_core(rows: &[String]) Never! {
-    sorted := [String]{}
-    loop position in jet_codegen_sorted_order([U64]{}, rows) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    order :: jet_codegen_sorted_order([U64]{}, rows)
+    compiler_apply_order<String>(&rows, order)
 }
 
 fn jet_codegen_add_needed_trait(reference: MIRTraitRef, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
@@ -2795,7 +3083,10 @@ fn jet_codegen_add_needed_trait(reference: MIRTraitRef, known: [MIRTraitID], nee
         if reference.name != "CheckedText" -> panic("CheckedText reference name disagrees with its canonical identity")
         return
     }
-    panic("MIR trait reference has no declared or registered builtin identity")
+    // Rust mir.rs::ensure_referenced_traits: any other referenced trait
+    // without a declaration (a builtin bound such as `Numeric`) gets a
+    // synthesized row under its reference name.
+    &needed.push(reference)
 }
 
 fn jet_codegen_add_needed_derived_trait(id: MIRTraitID, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
@@ -2810,7 +3101,12 @@ fn jet_codegen_add_needed_derived_trait(id: MIRTraitID, known: [MIRTraitID], nee
         return
     }
     if jet_codegen_is_checked_text_trait_id(id) -> return
-    panic("MIR derive identity has no declared or registered builtin trait")
+    // Rust mir.rs::ensure_referenced_traits: a derive with a selected impl but
+    // no declaration gets a synthesized `derive#<id>` row.
+    loop prior in needed {
+        if prior.id == id -> return
+    }
+    &needed.push(MIRTraitRef{id: id, name: "derive#{id.value}"})
 }
 
 fn jet_codegen_synthesized_trait_associated_types(name: String) -> [MIRAssociatedTypeDecl] Never! {
@@ -2857,7 +3153,30 @@ fn jet_codegen_ensure_builtin_debug_trait(traits: &[MIRTraitDef], types: [MIRTyp
     })
 }
 
-fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplDef], functions: [MIRFunction], types: [MIRTypeDef]) Never! {
+// Trait-object bounds in callable/value types retain their declaration rows.
+fn jet_codegen_collect_type_traits(ty: MIRType, known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
+    if ty.kind == {
+        .TraitObject(bounds) -> loop bound in bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
+        .Union(members) | .Apply(_, members) -> loop member in members -> jet_codegen_collect_type_traits(member, known, &needed)
+        .List(inner) | .Shared(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) | .Quantity(inner, _) -> jet_codegen_collect_type_traits(inner, known, &needed)
+        .Map(key, value) | .Result(key, value) -> {
+            jet_codegen_collect_type_traits(key, known, &needed)
+            jet_codegen_collect_type_traits(value, known, &needed)
+        }
+        .Fn(signature) -> {
+            loop parameter in signature.params -> jet_codegen_collect_type_traits(parameter, known, &needed)
+            if signature.ret == .Val(ret) -> jet_codegen_collect_type_traits(ret, known, &needed)
+        }
+        .SendFn(params, ret, _) -> {
+            loop parameter in params -> jet_codegen_collect_type_traits(parameter, known, &needed)
+            if ret == .Val(value) -> jet_codegen_collect_type_traits(value, known, &needed)
+        }
+        .Tuple(fields) -> loop field in fields -> jet_codegen_collect_type_traits(field.ty, known, &needed)
+        else -> {}
+    }
+}
+
+fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplDef], functions: [MIRFunction], nested_functions: [MIRFunction], types: [MIRTypeDef]) Never! {
     known := [MIRTraitID]{}
     needed := [MIRTraitRef]{}
     loop definition in traits -> &known.push(definition.id)
@@ -2867,30 +3186,39 @@ fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplD
             Val(reference) -> jet_codegen_add_needed_trait(reference, known, &needed)
         }
     }
-    loop function in functions {
-        if function.form == {
-            .TraitMethod(_, reference, _, _) -> jet_codegen_add_needed_trait(reference, known, &needed)
-            else -> {}
-        }
-        loop parameter in function.generic_params {
-            loop bound in parameter.bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
-        }
-    }
+    jet_codegen_collect_function_traits(functions, known, &needed)
+    jet_codegen_collect_function_traits(nested_functions, known, &needed)
     loop definition in types {
         loop derived_trait in definition.derives -> jet_codegen_add_needed_derived_trait(derived_trait, known, &needed)
         loop parameter in definition.generic_params {
             loop bound in parameter.bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
+        }
+        if definition.kind == {
+            .Struct(fields, _) -> loop field in fields -> jet_codegen_collect_type_traits(field.ty, known, &needed)
+            .Enum(variants, _) -> loop variant in variants {
+                if variant.payload == {
+                    .Single(value) -> jet_codegen_collect_type_traits(value, known, &needed)
+                    .Named(fields) -> loop field in fields -> jet_codegen_collect_type_traits(field.ty, known, &needed)
+                    .Unit -> {}
+                }
+            }
+            .Distinct(base, _) | .Alias(base) -> jet_codegen_collect_type_traits(base, known, &needed)
+            .UnitFamily(_) -> {}
         }
     }
     module_id := mir_module_id("compiler")
     if traits.len() > 0 -> module_id = traits[0].module_id
     if traits.len() == 0 && impls.len() > 0 -> module_id = impls[0].module_id
     if traits.len() == 0 && impls.len() == 0 && functions.len() > 0 -> module_id = functions[0].module_id
+    if traits.len() == 0 && impls.len() == 0 && functions.len() == 0 && nested_functions.len() > 0 -> module_id = nested_functions[0].module_id
     loop reference in needed {
-        name_option := jet_codegen_compiler_owned_trait_name_for_id(reference.id)
-        if name_option == None -> panic("only registered compiler-owned traits may be synthesized without declarations")
-        name :: name_option ?? panic("compiler-owned trait identity disappeared")
-        if reference.name != name -> panic("synthesized trait name disagrees with its canonical identity")
+        // Compiler-owned traits keep their canonical name; any other
+        // reference keeps its own (Rust ensure_referenced_traits).
+        name := reference.name
+        if jet_codegen_compiler_owned_trait_name_for_id(reference.id) == .Val(owned) {
+            if reference.name != owned -> panic("synthesized trait name disagrees with its canonical identity")
+            name = owned
+        }
         &traits.push(MIRTraitDef{
             id: reference.id,
             module_id: module_id,
@@ -2901,6 +3229,30 @@ fn jet_codegen_ensure_referenced_traits(traits: &[MIRTraitDef], impls: [MIRImplD
             associated_types: jet_codegen_synthesized_trait_associated_types(name),
             methods: [MIRTraitMethod]{},
         })
+    }
+}
+
+fn jet_codegen_collect_function_traits(functions: [MIRFunction], known: [MIRTraitID], needed: &[MIRTraitRef]) Never! {
+    loop function in functions {
+        if function.form == {
+            .TraitMethod(_, reference, _, _) -> jet_codegen_add_needed_trait(reference, known, &needed)
+            else -> {}
+        }
+        loop parameter in function.generic_params {
+            loop bound in parameter.bounds -> jet_codegen_add_needed_trait(bound, known, &needed)
+        }
+        jet_codegen_collect_type_traits(function.return_type, known, &needed)
+        if function.declared_return == .Val(ret) -> jet_codegen_collect_type_traits(ret, known, &needed)
+        loop parameter in function.params -> jet_codegen_collect_type_traits(parameter.ty, known, &needed)
+        loop capture in function.capture_params -> jet_codegen_collect_type_traits(capture.ty, known, &needed)
+        loop local in function.locals -> jet_codegen_collect_type_traits(local.ty, known, &needed)
+        loop value in function.values -> jet_codegen_collect_type_traits(value.ty, known, &needed)
+        loop place in function.places -> jet_codegen_collect_type_traits(place.ty, known, &needed)
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.ty == .Val(ty) -> jet_codegen_collect_type_traits(ty, known, &needed)
+            }
+        }
     }
 }
 fn jet_codegen_canonical_target_type(module_identity: String, name: String) -> String Never! {
@@ -2950,13 +3302,13 @@ fn jet_codegen_canonical_impl_key(module_identity: String, owner: MIRType, trait
 }
 
 struct JetCodegenImplOwnerIndex {
-    pub identities: [String:Int]
-    pub heads: [String:Int]
-    pub tails: [String:Int]
-    pub next_rows: [Int]
-    pub fallback_heads: [String:Int]
-    pub fallback_tails: [String:Int]
-    pub next_fallback_rows: [Int]
+    identities: [String:Int]
+    heads: [String:Int]
+    tails: [String:Int]
+    next_rows: [Int]
+    fallback_heads: [String:Int]
+    fallback_tails: [String:Int]
+    next_fallback_rows: [Int]
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::find_impl_index
@@ -3035,7 +3387,7 @@ fn jet_codegen_retain_selected_derives(types: &[MIRTypeDef], impls: [MIRImplDef]
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::attach_orphan_methods
-fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFunction], source_functions: [TFunc]) {
+fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFunction], nested_functions: [MIRFunction], source_functions: [TFunc]) {
     // Every function id some impl already lists, kept current as orphans are
     // attached (instead of rescanning every impl's methods per function).
     owned := [U64:Bool]{}
@@ -3049,6 +3401,11 @@ fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFuncti
     loop implementation in impls {
         loop method in implementation.methods -> _ := &owned.add(method.value, true)
     }
+    jet_codegen_attach_orphan_rows(&impls, functions, source_functions, source_rows, &owned, &owner_index)
+    jet_codegen_attach_orphan_rows(&impls, nested_functions, source_functions, source_rows, &owned, &owner_index)
+}
+
+fn jet_codegen_attach_orphan_rows(impls: &[MIRImplDef], functions: [MIRFunction], source_functions: [TFunc], source_rows: [U64:Int], owned: &[U64:Bool], owner_index: &JetCodegenImplOwnerIndex) {
     loop function in functions {
         if function.form == {
             .TopLevel -> next
@@ -3095,7 +3452,7 @@ fn jet_codegen_attach_orphan_methods(impls: &[MIRImplDef], functions: [MIRFuncti
             operator_marker: None,
             operator_rhs: None,
             target_os: None,
-            target_applicability: MIRTargetApplicability{rust_aot: true, cranelift: true, interpreter: true, web: true},
+            target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: true},
         })
         jet_codegen_index_impl_owner(&owner_index, impls[impls.len() - 1], impls.len() - 1)
     }
@@ -3122,15 +3479,7 @@ fn jet_codegen_bind_trait_impl_forms(functions: &[MIRFunction], impls: [MIRImplD
 }
 
 fn jet_codegen_sort_core_owners(rows: &[MIRCoreOwner]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
-    }
-    sorted := [MIRCoreOwner]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRCoreOwner, right: MIRCoreOwner) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: SemaGraphModuleResult) -> MIRCoreOwner Never! {
@@ -3155,72 +3504,290 @@ fn jet_codegen_lower_core_builtin_owner(owner: TCoreBuiltinOwner, module_info: S
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_impl_rows
-// The checked `functions` and `modules` move into the one builder that lowers
-// every function and back out when lowering ends, so the caller keeps them and
-// the checked program is never resident twice.
-pub fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], trace_sink: CompilerTraceSink?) -> JetCodegenFunctions {
+// The checked `functions` and `modules` move into the one program that every
+// function lowers against and back out when lowering ends, so the caller
+// keeps them and the checked program is never resident twice. With more than
+// one admitted thread (jet_codegen_lower_threads) the program moves into the
+// threads' shared slot for the lowering and back out after it.
+fn lower_functions(functions: &[TFunc], modules: &[SemaGraphModuleResult], source_files: [MIRSourceFile], threads: CompilerThreads, trace_sink: CompilerTraceSink?, native_stop_points: Bool, edition: String, keep_going: Bool) -> JetCodegenFunctions {
     if functions.len() == 0 {
         constants := jet_codegen_lower_constant_rows(modules)
         empty_index := jet_codegen_function_index([TFunc]{})
         types := jet_codegen_declared_type_rows(empty_index, modules)
-        return jet_codegen_functions_from_rows([JetCodegenLoweredFunction]{}, functions, empty_index, modules, ^types, ^constants)
+        no_rows := [JetCodegenLoweredFunction]{}
+        return jet_codegen_functions_from_rows(^no_rows, functions, empty_index, modules, jet_codegen_trait_names(modules), ^types, ^constants)
     }
     rows := [TFunc]{}
-    jet_codegen_move_function_rows(&rows, &functions)
-    builder_modules := [SemaGraphModuleResult]{}
-    jet_codegen_move_module_rows(&builder_modules, &modules)
+    compiler_transfer_rows<TFunc>(&rows, &functions)
+    program_modules := [SemaGraphModuleResult]{}
+    compiler_transfer_rows<SemaGraphModuleResult>(&program_modules, &modules)
     function_index := jet_codegen_function_index(^rows)
-    field_symbols := jet_codegen_field_symbol_index(builder_modules)
+    field_symbols := jet_codegen_field_symbol_index(program_modules)
     source_index := jet_codegen_source_index(source_files)
-    first :: ~function_index.rows[0]
-    builder := jet_codegen_new_builder(first, ^function_index, ^builder_modules, ^field_symbols, source_files, ^source_index)
-    lowered_rows := jet_codegen_lower_indexed_functions(&builder, trace_sink)
-    constants := jet_codegen_lower_constant_rows(builder.modules)
-    types := jet_codegen_declared_type_rows(builder.function_index, builder.modules)
-    lowered := jet_codegen_functions_from_rows(lowered_rows, builder.function_index.rows, builder.function_index, builder.modules, ^types, ^constants)
-    jet_codegen_move_function_rows(&functions, &builder.function_index.rows)
-    jet_codegen_move_module_rows(&modules, &builder.modules)
+    program := jet_codegen_new_program(^function_index, ^program_modules, ^field_symbols, source_files, ^source_index, edition)
+    // Select before threaded and closure lowering share this program.
+    program.stop_points = native_stop_points
+    lowered_rows := [JetCodegenLoweredFunction]{}
+    weights :: jet_codegen_lower_weights(program)
+    // Capture follows the real per-function lowering order, never thread
+    // completion order. Ordinary compiles keep the existing parallel waves.
+    capture_passes :: if program.canonical_journal == { .Val(_) -> true None -> false }
+    workers :: if capture_passes -> 1 else -> jet_codegen_lower_threads(weights, threads, trace_sink)
+    lowering_failures := [JetCodegenLoweringFailure]{}
+    if {
+        keep_going -> {
+            bounds :: compiler_threads_partition(weights, workers)
+            slot :: shared JetCodegenProgramSlot{programs: [JetCodegenProgram]{}}
+            jet_codegen_program_slot_fill(slot, ^program)
+            lowered_rows = jet_codegen_lower_keep_going(slot, bounds, workers, &lowering_failures)
+            program = jet_codegen_program_slot_take(slot)
+        }
+        workers > 1 -> {
+            bounds :: compiler_threads_partition(weights, workers)
+            slot :: shared JetCodegenProgramSlot{programs: [JetCodegenProgram]{}}
+            jet_codegen_program_slot_fill(slot, ^program)
+            lowered_rows = jet_codegen_lower_in_parts(slot, bounds, workers)
+            program = jet_codegen_program_slot_take(slot)
+        }
+        else -> {
+            builder := jet_codegen_new_builder(program.function_index.rows[0], program)
+            lowered_rows = jet_codegen_lower_indexed_functions(&builder, program, trace_sink)
+        }
+    }
+    constants := jet_codegen_lower_constant_rows(program.modules)
+    types := jet_codegen_declared_type_rows(program.function_index, program.modules)
+    lowered := jet_codegen_functions_from_rows(lowered_rows, program.function_index.rows, program.function_index, program.modules, jet_codegen_trait_names(program.modules), ^types, ^constants)
+    lowered.lowering_failures = lowering_failures
+    compiler_transfer_rows<TFunc>(&functions, &program.function_index.rows)
+    compiler_transfer_rows<SemaGraphModuleResult>(&modules, &program.modules)
     lowered
 }
 
-// Moves every module of `from` onto the end of `to` in order, leaving `from`
-// empty; each pop moves one module (jet_codegen_move_function_rows).
-fn jet_codegen_move_module_rows(to: &[SemaGraphModuleResult], from: &[SemaGraphModuleResult]) Never! {
-    reversed := [SemaGraphModuleResult]{}
-    loop from.len() > 0 {
-        module_row := &from.pop() ?? { break }
-        &reversed.push(^module_row)
+
+// A compiler thread is admitted for at least this many bytes of function
+// source, so a small program lowers on the calling thread.
+JET_CODEGEN_LOWER_MIN_BYTES_PER_THREAD :: 65536
+
+// The threads that lower functions of these source `weights`: one under a
+// per-function trace (its spans time each function in order), else as many
+// as `threads` admits for their source bytes.
+fn jet_codegen_lower_threads(weights: [Int], threads: CompilerThreads, trace_sink: CompilerTraceSink?) -> Int {
+    if trace_sink == .Val(sink) {
+        if sink.functions() -> return 1
     }
+    work := 0
+    loop index in 0..<weights.len() -> work += weights[index]
+    compiler_threads_admit(threads, weights.len(), work, JET_CODEGEN_LOWER_MIN_BYTES_PER_THREAD, 0, 0)
+}
+
+// Each function row's source bytes, in row order.
+fn jet_codegen_lower_weights(program: JetCodegenProgram) -> [Int] {
+    weights := [Int]{}
+    loop index in 0..<program.function_index.rows.len() {
+        span :: program.function_index.rows[index].source_span
+        &weights.push(span.end - span.start)
+    }
+    weights
+}
+
+// The program while compiler threads lower against it: moved in as the one
+// row of `programs` and moved back out after, so it is never copied.
+struct JetCodegenProgramSlot {
+    programs: [JetCodegenProgram]
+}
+
+fn jet_codegen_program_slot_fill(slot: Shared<JetCodegenProgramSlot>, program: ^JetCodegenProgram) {
+    permit :: slot.guard_edit()
+    &permit.value.programs.push(^program)
+}
+
+fn jet_codegen_program_slot_take(slot: Shared<JetCodegenProgramSlot>) -> JetCodegenProgram {
+    permit :: slot.guard_edit()
+    &permit.value.programs.pop() ?? panic("the lowering program left the threads' shared slot")
+}
+
+// One thread's consecutive function rows [first, last) and their lowerings.
+struct JetCodegenLowerPart {
+    first: Int
+    last: Int
+    rows: [JetCodegenLoweredFunction]
+}
+
+// Lowers the program in `slot` on `workers` threads: the consecutive parts of
+// its function rows `bounds` cuts (compiler_threads_partition), each on its
+// own builder, joined in part order. A function's lowering reads only the
+// program and its own builder state (jet_codegen_begin_function resets every
+// per-function field), so the rows are those one builder lowers in order.
+fn jet_codegen_lower_in_parts(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], workers: Int) -> [JetCodegenLoweredFunction] {
+    parts := [Shared<JetCodegenLowerPart>]{}
+    loop part in 0..<workers {
+        row :: shared JetCodegenLowerPart{first: bounds[part], last: bounds[part + 1], rows: [JetCodegenLoweredFunction]{}}
+        &parts.push(row)
+    }
+    _ := jet_codegen_lower_parts(slot, parts, 0)
+    reversed := [JetCodegenLoweredFunction]{}
+    part := workers
+    loop part > 0 {
+        part -= 1
+        jet_codegen_lower_part_drain(parts[part], &reversed)
+    }
+    lowered_rows := [JetCodegenLoweredFunction]{}
     loop reversed.len() > 0 {
-        module_row := &reversed.pop() ?? { break }
-        &to.push(^module_row)
+        lowered := &reversed.pop() ?? { break }
+        &lowered_rows.push(^lowered)
+    }
+    lowered_rows
+}
+
+// Moves a part's lowerings onto `reversed`, last first.
+fn jet_codegen_lower_part_drain(part: Shared<JetCodegenLowerPart>, reversed: &[JetCodegenLoweredFunction]) {
+    permit :: part.guard_edit()
+    loop permit.value.rows.len() > 0 {
+        lowered :: &permit.value.rows.pop() ?? break
+        &reversed.push(lowered)
     }
 }
 
-// Lowers every row of the builder's function index, in order, on that one
-// builder. Each row is copied for its own lowering because the builder owns
-// the rows and is written while the function lowers.
-fn jet_codegen_lower_indexed_functions(builder: &JetCodegenBuilder, trace_sink: CompilerTraceSink?) -> [JetCodegenLoweredFunction] {
+// Lowers `parts[from..]`, one task per part and the last part on this thread;
+// returns how many functions they lowered.
+fn jet_codegen_lower_parts(slot: Shared<JetCodegenProgramSlot>, parts: [Shared<JetCodegenLowerPart>], from: Int) -> Int {
+    if from >= parts.len() - 1 -> return jet_codegen_lower_part(slot, parts[from])
+    lowered := 0
+    task.group lower_threads {
+        head :: task jet_codegen_lower_part(slot, parts[from])
+        lowered = jet_codegen_lower_parts(slot, parts, from + 1)
+        lowered += head.join() ?? panic(compiler_threads_failure_text(err))
+    }
+    lowered
+}
+
+// One thread: lowers its part's rows in order on its own builder.
+fn jet_codegen_lower_part(slot: Shared<JetCodegenProgramSlot>, part: Shared<JetCodegenLowerPart>) -> Int {
+    inputs :: slot.guard_read()
+    permit := part.guard_edit()
+    // Passed straight through: a local binding of the guarded program would copy it.
+    jet_codegen_lower_part_rows(inputs.value.programs[0], &permit.value)
+}
+
+fn jet_codegen_lower_part_rows(program: JetCodegenProgram, part: &JetCodegenLowerPart) -> Int {
+    if part.first >= part.last -> return 0
+    builder := jet_codegen_new_builder(program.function_index.rows[part.first], program)
+    loop position in part.first..<part.last {
+        &part.rows.push(jet_codegen_lower_function(&builder, program, program.function_index.rows[position], program.function_index.rows[position].body, None, None))
+    }
+    part.last - part.first
+}
+
+// JET_KEEP_GOING: a lowering that stops (a panic) stops only the task that
+// runs it, and its join is a TaskFailure. The parts of `bounds` lower as in
+// jet_codegen_lower_in_parts, each a task returning its rows; a part whose
+// task stopped lowers again one task per function, and each function that
+// stops there is one row of `failures` and lowers as a trap of its signature
+// (jet_codegen_keep_going_trap), so the rest of the program still lowers.
+// Without JET_KEEP_GOING lowering never runs here.
+struct JetCodegenLoweredRange {
+    complete: Bool
+    failure: String
+    rows: [JetCodegenLoweredFunction]
+}
+
+fn jet_codegen_lower_keep_going(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], workers: Int, failures: &[JetCodegenLoweringFailure]) -> [JetCodegenLoweredFunction] {
+    ranges := [JetCodegenLoweredRange]{}
+    loop _ in 0..<workers -> &ranges.push(JetCodegenLoweredRange{complete: false, failure: "", rows: [JetCodegenLoweredFunction]{}})
+    jet_codegen_lower_ranges_caught(slot, bounds, 0, workers, &ranges)
     lowered_rows := [JetCodegenLoweredFunction]{}
-    trace_functions := false
-    if trace_sink == .Val(sink) -> trace_functions = sink.functions()
-    count :: builder.function_index.rows.len()
-    loop position in 0..<count {
-        function :: ~builder.function_index.rows[position]
-        if trace_sink == .Val(sink) -> sink.progress("lower", position, count)
-        if trace_functions {
-            if trace_sink == .Val(sink) -> sink.begin("lower.function", function.name, position, count)
+    loop part in 0..<workers {
+        if ranges[part].complete {
+            &lowered_rows.extend(compiler_take_rows<JetCodegenLoweredFunction>(&ranges[part].rows))
+            next
         }
-        &lowered_rows.push(jet_codegen_lower_function(&builder, function, function.body, None, None))
-        if trace_functions {
-            if trace_sink == .Val(sink) -> sink.end("lower.function", 1)
+        loop position in bounds[part]..<bounds[part + 1] {
+            single := jet_codegen_lower_range_caught(slot, position)
+            if single.complete {
+                &lowered_rows.extend(compiler_take_rows<JetCodegenLoweredFunction>(&single.rows))
+                next
+            }
+            &lowered_rows.push(jet_codegen_lower_keep_going_trap(slot, position, single.failure, &failures))
         }
     }
     lowered_rows
 }
 
+// Lowers parts `from..<workers` of `bounds`, each as its own task.
+fn jet_codegen_lower_ranges_caught(slot: Shared<JetCodegenProgramSlot>, bounds: [Int], from: Int, workers: Int, ranges: &[JetCodegenLoweredRange]) {
+    if from >= workers -> return
+    task.group lower_threads {
+        head :: task jet_codegen_lower_range(slot, bounds[from], bounds[from + 1])
+        jet_codegen_lower_ranges_caught(slot, bounds, from + 1, workers, &ranges)
+        ranges[from] = head.join() ?? jet_codegen_lowered_range_stopped(err)
+    }
+}
+
+// Lowers function row `position` alone, as a task.
+fn jet_codegen_lower_range_caught(slot: Shared<JetCodegenProgramSlot>, position: Int) -> JetCodegenLoweredRange {
+    lowered := JetCodegenLoweredRange{complete: false, failure: "", rows: [JetCodegenLoweredFunction]{}}
+    task.group lower_function {
+        head :: task jet_codegen_lower_range(slot, position, position + 1)
+        lowered = head.join() ?? jet_codegen_lowered_range_stopped(err)
+    }
+    lowered
+}
+
+fn jet_codegen_lowered_range_stopped(failure: TaskFailure) -> JetCodegenLoweredRange Never! {
+    JetCodegenLoweredRange{complete: false, failure: compiler_threads_failure_text(failure), rows: [JetCodegenLoweredFunction]{}}
+}
+
+// One task: lowers function rows [first, last) on its own builder and
+// returns them, so a stop loses only this range.
+fn jet_codegen_lower_range(slot: Shared<JetCodegenProgramSlot>, first: Int, last: Int) -> JetCodegenLoweredRange {
+    inputs :: slot.guard_read()
+    part := JetCodegenLowerPart{first: first, last: last, rows: [JetCodegenLoweredFunction]{}}
+    // Passed straight through: a local binding of the guarded program would copy it.
+    _ := jet_codegen_lower_part_rows(inputs.value.programs[0], &part)
+    JetCodegenLoweredRange{complete: true, failure: "", rows: compiler_take_rows<JetCodegenLoweredFunction>(&part.rows)}
+}
+
+// Records row `position`'s stop and lowers it as a trap: the driver's
+// keep-going trap (jet_driver_keep_going_tir_trap), a body of one
+// unreachable stop with the signature, owner and identity unchanged, so
+// every caller still lowers. A trap that cannot lower stops the compile.
+fn jet_codegen_lower_keep_going_trap(slot: Shared<JetCodegenProgramSlot>, position: Int, message: String, failures: &[JetCodegenLoweringFailure]) -> JetCodegenLoweredFunction {
+    inputs :: slot.guard_read()
+    trapped := inputs.value.programs[0].function_index.rows[position].copy()
+    &failures.push(JetCodegenLoweringFailure{name: trapped.name, key: trapped.key, source_file: trapped.source_file, span: trapped.source_span, message: message})
+    stop :: TExpr{ty: Type.Named{name: "Never"}, kind: TExprKind.Never{reason: "keep-going trap: lowering this function stopped: {message}"}, span: trapped.source_span, integer_bounds: None, cost: None}
+    trapped.body = [TStmt]{TStmt.ExprStmt{value: stop, span: trapped.source_span}}
+    builder := jet_codegen_new_builder(trapped, inputs.value.programs[0])
+    jet_codegen_lower_function(&builder, inputs.value.programs[0], trapped, trapped.body, None, None)
+}
+
+// Lowers every row of the program's function index, in order, on `builder`.
+// Each row is read in place: the program, which owns the rows, is read-only
+// while functions lower.
+fn jet_codegen_lower_indexed_functions(builder: &JetCodegenBuilder, program: JetCodegenProgram, trace_sink: CompilerTraceSink?) -> [JetCodegenLoweredFunction] {
+    lowered_rows := [JetCodegenLoweredFunction]{}
+    trace_functions := false
+    if trace_sink == .Val(sink) -> trace_functions = sink.functions()
+    count :: program.function_index.rows.len()
+    loop position in 0..<count {
+        if trace_sink == .Val(sink) -> sink.progress("lower", position, count)
+        if trace_functions {
+            if trace_sink == .Val(sink) -> sink.begin("lower.function", program.function_index.rows[position].name, position, count)
+        }
+        &lowered_rows.push(jet_codegen_lower_function(&builder, program, program.function_index.rows[position], program.function_index.rows[position].body, None, None))
+        if trace_functions {
+            if trace_sink == .Val(sink) -> sink.end("lower.function", 1)
+        }
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.lower.functions_scanned", count, -1)
+        sink.progress("counters.lower.functions_lowered", lowered_rows.len(), -1)
+    }
+    lowered_rows
+}
+
 // Lowers each of `functions` (a comptime closure), in order, on one builder.
-fn jet_codegen_lower_each_function(builder: &JetCodegenBuilder, functions: [TFunc], trace_sink: CompilerTraceSink?) -> [JetCodegenLoweredFunction] {
+fn jet_codegen_lower_each_function(builder: &JetCodegenBuilder, program: JetCodegenProgram, functions: [TFunc], trace_sink: CompilerTraceSink?) -> [JetCodegenLoweredFunction] {
     lowered_rows := [JetCodegenLoweredFunction]{}
     trace_functions := false
     if trace_sink == .Val(sink) -> trace_functions = sink.functions()
@@ -3229,10 +3796,14 @@ fn jet_codegen_lower_each_function(builder: &JetCodegenBuilder, functions: [TFun
         if trace_functions {
             if trace_sink == .Val(sink) -> sink.begin("lower.function", function.name, position, functions.len())
         }
-        &lowered_rows.push(jet_codegen_lower_function(&builder, function, function.body, None, None))
+        &lowered_rows.push(jet_codegen_lower_function(&builder, program, function, function.body, None, None))
         if trace_functions {
             if trace_sink == .Val(sink) -> sink.end("lower.function", 1)
         }
+    }
+    if trace_sink == .Val(sink) {
+        sink.progress("counters.lower.functions_scanned", functions.len(), -1)
+        sink.progress("counters.lower.functions_lowered", lowered_rows.len(), -1)
     }
     lowered_rows
 }
@@ -3248,20 +3819,26 @@ struct JetCodegenTypeSlot {
     definition_index: Int
 }
 
-// Rust `collect_items`: every module's type rows, then the compiler-owned
-// `Range` record and Core records, each unless a declaration already owns its
-// canonical key, then the compiler-owned `ParseError` alias. With
-// `defer_cli`, a definition with a CLI entry or binding keeps no row.
+// Rust `collect_items`: every module's type rows, then the compiler-owned rows
+// of compiler_owned_type_defs (the runtime enums, the plain Core enums no
+// loaded source declares, `FieldError`, `Range`, the carrier records, the Core
+// records and the math records), each unless a row already owns its canonical
+// key, then the compiler-owned `ParseError` alias. With `defer_cli`, a
+// definition with a CLI entry or binding keeps no row. A plain Core enum row
+// also stays out when a program declaration (outside `<corelib>/`) spells its
+// leaf: declared keys are module-qualified, so the key check never sees it,
+// and the bootstrap host codec resolves enum owners by leaf name, so a second
+// `Effect` row shadows the compiler's own `Effect` (every variant missing).
 fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], closure_only: Bool, defer_cli: Bool) -> [JetCodegenTypeSlot] {
     slots := [JetCodegenTypeSlot]{}
     declared_keys := [String:Bool]{}
+    program_type_names := [String:Bool]{}
     parse_error_declared := false
     loop module_index in 0..<modules.len() {
         loop definition_index in 0..<modules[module_index].declarations.type_defs.len() {
             definition :: modules[module_index].declarations.type_defs[definition_index]
-            // core.term stream handles lower to their native carrier, never a record row.
-            if jet_codegen_is_core_term_stream_carrier(modules, definition.module_identity, definition.name) -> next
             declared_keys[definition.key] = true
+            if !definition.key.starts_with("<corelib>/") -> program_type_names[definition.name] = true
             if definition.key == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
             row := MIRTypeDef?{None}
             if !defer_cli || (definition.cli == None && definition.cli_bindings.len() == 0) -> row = Val(jet_codegen_lower_type_definition(definition, function_index, modules, closure_only))
@@ -3270,13 +3847,33 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
     }
     if modules.len() > 0 {
         record_module :: modules[0].module_identity
-        if declared_keys.get(JET_CODEGEN_RANGE_RECORD) == None {
-            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, JET_CODEGEN_RANGE_RECORD, jet_codegen_range_record_fields())), module_index: -1, definition_index: -1})
+        loop row in JET_CODEGEN_COMPILER_OWNED_ENUMS {
+            if declared_keys.get(row.name) != None -> next
+            declared_keys[row.name] = true
+            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_enum_definition(record_module, row.name, row.variants, false)), module_index: -1, definition_index: -1})
         }
-        loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS {
-            if declared_keys.get(record.name) != None -> next
-            if record.name == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
-            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, record.name, jet_codegen_compiler_owned_core_record_fields(record))), module_index: -1, definition_index: -1})
+        // Rust compiler_owned_core_enums less discard_duplicate_core_enum_fallbacks:
+        // a Core enum leaf whose one loaded source declaration owns its identity
+        // keeps no plain row.
+        source_enum_counts := jet_codegen_core_source_enum_counts(modules)
+        loop core_row in CORE_ENUM_ROWS {
+            if declared_keys.get(core_row.name) != None || program_type_names.get(core_row.name) != None -> next
+            if (source_enum_counts.get(core_row.name) ?? 0) == 1 -> next
+            if core_row.kind == .Enum(variants) {
+                declared_keys[core_row.name] = true
+                &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_enum_definition(record_module, core_row.name, variants, true)), module_index: -1, definition_index: -1})
+            }
+        }
+        record_names := [String]{"FieldError", JET_CODEGEN_RANGE_RECORD}
+        loop name in JET_CODEGEN_COMPILER_OWNED_CARRIER_RECORDS -> &record_names.push(name)
+        loop record in JET_CODEGEN_COMPILER_OWNED_CORE_RECORDS -> &record_names.push(record.name)
+        loop record in JET_CODEGEN_COMPILER_OWNED_MATH_RECORDS -> &record_names.push(record.name)
+        loop name in record_names {
+            if declared_keys.get(name) != None -> next
+            declared_keys[name] = true
+            if name == JET_CODEGEN_PARSE_ERROR_ALIAS -> parse_error_declared = true
+            fields :: jet_codegen_compiler_owned_record_fields(name) ?? panic("compiler-owned record `{name}` has no field rows")
+            &slots.push(JetCodegenTypeSlot{row: Val(jet_codegen_compiler_owned_record_definition(record_module, name, fields)), module_index: -1, definition_index: -1})
         }
     }
     // Rust `collect_items` (seed_parse_error): each module that declares no
@@ -3297,6 +3894,19 @@ fn jet_codegen_declared_type_slots(function_index: JetCodegenFunctionIndex, modu
     slots
 }
 
+// Rust discard_duplicate_core_enum_fallbacks: how many loaded Core source enum
+// rows (`<corelib>/...` keys) declare each leaf name.
+fn jet_codegen_core_source_enum_counts(modules: [SemaGraphModuleResult]) -> [String:Int] Never! {
+    counts := [String:Int]{}
+    loop semantic_module in modules {
+        loop definition in semantic_module.declarations.type_defs {
+            if !definition.key.starts_with("<corelib>/") || definition.key == definition.name -> next
+            if definition.kind == .Enum(_, _) -> counts[definition.name] = (counts.get(definition.name) ?? 0) + 1
+        }
+    }
+    counts
+}
+
 // The declared type rows of a whole program (jet_codegen_declared_type_slots),
 // each moved out of its slot.
 fn jet_codegen_declared_type_rows(function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult]) -> [MIRTypeDef] {
@@ -3315,46 +3925,82 @@ fn jet_codegen_declared_type_rows(function_index: JetCodegenFunctionIndex, modul
     types
 }
 
+// Intern Core publication constants by their canonical initializer identity.
+fn jet_codegen_merge_shared_sites(rows: &[MIRConstantDef], incoming: [MIRConstantDef]) Never! {
+    loop site in incoming {
+        found := false
+        loop existing in rows {
+            if existing.id != site.id -> next
+            if existing.ty != site.ty -> panic("one Core initializer has conflicting Shared payload types")
+            if existing.value == .SharedSite(left) && site.value == .SharedSite(right) {
+                if left.initializer != right.initializer || left.lifetime != right.lifetime -> panic("one Core initializer has conflicting publication lifetimes")
+            } else {
+                panic("Core publication site collides with ordinary constant")
+            }
+            found = true
+        }
+        if !found -> &rows.push(site)
+    }
+}
+
 // The program rows of `functions`, lowered as `lowered_rows`: their merged
 // function, callback and call rows, plus every module's trait and impl rows,
 // with `declared_types` (jet_codegen_declared_type_rows of `modules`, or a
 // comptime closure's jet_codegen_comptime_types) and `constants`
 // (jet_codegen_lower_constant_rows of `modules`).
-fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], declared_types: ^[MIRTypeDef], constants: ^[MIRConstantDef]) -> JetCodegenFunctions {
+// The lowered rows are owned: each row's function, nested functions and
+// metadata rows move out of it in program order, so no MIR row is copied.
+fn jet_codegen_functions_from_rows(lowered_rows: ^[JetCodegenLoweredFunction], functions: [TFunc], function_index: JetCodegenFunctionIndex, modules: [SemaGraphModuleResult], trait_names: JetCodegenTraitNames, declared_types: ^[MIRTypeDef], constant_rows: ^[MIRConstantDef]) -> JetCodegenFunctions {
+    constants := ^constant_rows
     lowered_functions := [MIRFunction]{}
     prelude_calls := [MIRPreludeCall]{}
     core_calls := [MIRCoreCall]{}
     used_core := [String]{}
     nested_functions := [MIRFunction]{}
     callbacks := [MIRCallbackAdapter]{}
+    closure_sources := [JetCodegenClosureSource]{}
     // Identity sets so each merge step is O(1) rather than a rescan of every
-    // row lowered so far: `"id"` and `"module:key"` per top-level and nested
+    // row lowered so far: the id and `"module:key"` per top-level and nested
     // function, and row positions of callbacks, routes and Core calls by id.
-    top_ids := [String:Bool]{}
+    top_ids := [U64:Bool]{}
     top_keys := [String:Bool]{}
-    nested_ids := [String:Bool]{}
+    nested_ids := [U64:Bool]{}
     nested_keys := [String:Bool]{}
     callback_rows := [String:Int]{}
     prelude_seen := [String:Bool]{}
     core_rows := [String:Int]{}
     used_core_seen := [String:Bool]{}
-    loop lowered in lowered_rows {
-        id_key :: "{lowered.function.id.value}"
+    // Popping the reversed rows yields them in program order.
+    pending := ^lowered_rows
+    &pending.reverse()
+    loop {
+        lowered := &pending.pop() ?? break
+        jet_codegen_merge_shared_sites(&constants, lowered.shared_sites)
+        id_key :: lowered.function.id.value
         module_key :: "{lowered.function.module_id.value}:{lowered.function.key}"
         if top_ids.get(id_key) != None || top_keys.get(module_key) != None -> panic("duplicate top-level MIR function identity")
         if nested_ids.get(id_key) != None || nested_keys.get(module_key) != None -> panic("top-level MIR function collides with a nested function")
-        &lowered_functions.push(lowered.function)
+        // A field moves only when a write in the same block refills it
+        // (LastUse.jet); the bodiless signature row is that refill.
+        shell := jet_rust_emit_signature_row(lowered.function)
+        function := ^lowered.function
+        lowered.function = ^shell
+        &lowered_functions.push(^function)
         top_ids[id_key] = true
         top_keys[module_key] = true
-        loop nested in lowered.nested_functions {
-            nested_id_key :: "{nested.id.value}"
+        // Popping the reversed list in place moves each nested row out.
+        &lowered.nested_functions.reverse()
+        loop {
+            nested := &lowered.nested_functions.pop() ?? break
+            nested_id_key :: nested.id.value
             nested_module_key :: "{nested.module_id.value}:{nested.key}"
             if top_ids.get(nested_id_key) != None || top_keys.get(nested_module_key) != None -> panic("nested MIR function collides with a top-level function")
             if nested_ids.get(nested_id_key) != None || nested_keys.get(nested_module_key) != None -> panic("duplicate nested MIR function identity")
-            &nested_functions.push(nested)
+            &nested_functions.push(^nested)
             nested_ids[nested_id_key] = true
             nested_keys[nested_module_key] = true
         }
+        loop source in lowered.closure_sources -> &closure_sources.push(source)
         loop callback in lowered.callbacks {
             callback_key :: "{callback.id.value}"
             if callback_rows.get(callback_key) == .Val(row) {
@@ -3387,9 +4033,6 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
             }
         }
     }
-    all_function_rows := [MIRFunction]{}
-    loop function in lowered_functions -> &all_function_rows.push(function)
-    loop function in nested_functions -> &all_function_rows.push(function)
 
     core_owners := [MIRCoreOwner]{}
     loop semantic_module in modules {
@@ -3413,7 +4056,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
         loop definition in semantic_module.declarations.traits -> &traits.push(jet_codegen_lower_trait_definition(definition, function_index, modules))
     }
     jet_codegen_ensure_builtin_debug_trait(&traits, types)
-    jet_codegen_register_synthetic_unions(&types, all_function_rows)
+    jet_codegen_register_synthetic_unions(&types, lowered_functions, nested_functions)
     jet_codegen_sort_type_definitions(&types)
     jet_codegen_sort_trait_definitions(&traits)
 
@@ -3425,7 +4068,7 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     impl_index_by_key := [String:Int]{}
     loop semantic_module in modules {
         loop definition in semantic_module.declarations.impls {
-            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, fields_by_name, top_ids) ?? next
+            lowered :: jet_codegen_lower_impl_definition(definition, function_index, modules, trait_names, fields_by_name, top_ids) ?? next
             if impl_index_by_key.get(lowered.key) == .Val(index) {
                 loop method in lowered.methods {
                     method_key := jet_codegen_qualified_function_key(lowered.key, "{method.value}")
@@ -3441,10 +4084,10 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
             &impls.push(lowered)
         }
     }
-    jet_codegen_attach_orphan_methods(&impls, all_function_rows, functions)
+    jet_codegen_attach_orphan_methods(&impls, lowered_functions, nested_functions, functions)
     jet_codegen_retain_selected_derives(&types, impls)
+    jet_codegen_ensure_referenced_traits(&traits, impls, lowered_functions, nested_functions, types)
     jet_codegen_bind_trait_impl_forms(&lowered_functions, impls)
-    jet_codegen_ensure_referenced_traits(&traits, impls, all_function_rows, types)
     jet_codegen_sort_trait_definitions(&traits)
 
     jet_codegen_sort_functions(&lowered_functions)
@@ -3454,12 +4097,13 @@ fn jet_codegen_functions_from_rows(lowered_rows: [JetCodegenLoweredFunction], fu
     jet_codegen_sort_core_calls(&core_calls)
     jet_codegen_sort_prelude_calls(&prelude_calls)
     jet_codegen_sort_used_core(&used_core)
-    fields := jet_codegen_lower_field_rows(types, all_function_rows, traits, impls, constants)
+    fields := jet_codegen_lower_field_rows(types, lowered_functions, nested_functions, traits, impls, constants)
     jet_codegen_sort_field_rows(&fields)
     return JetCodegenFunctions{
         functions: lowered_functions,
         nested_functions: nested_functions,
         callbacks: callbacks,
+        closure_sources: closure_sources,
         types: types,
         core_owners: core_owners,
         traits: traits,
@@ -3487,10 +4131,9 @@ fn jet_codegen_lower_constant_rows(modules: [SemaGraphModuleResult]) -> [MIRCons
 }
 fn jet_codegen_foreign_target_applicability(target: MIRArtifactTarget) -> MIRTargetApplicability Never! {
     if target == {
-        .RustAOT -> MIRTargetApplicability{rust_aot: true, cranelift: false, interpreter: false, web: false}
-        .Cranelift -> MIRTargetApplicability{rust_aot: false, cranelift: true, interpreter: false, web: false}
-        .Interpreter -> MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: true, web: false}
-        .Web -> MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: true}
+        .RustAOT -> MIRTargetApplicability{rust_aot: true, interpreter: false, web: false}
+        .Interpreter -> MIRTargetApplicability{rust_aot: false, interpreter: true, web: false}
+        .Web -> MIRTargetApplicability{rust_aot: false, interpreter: false, web: true}
     }
 }
 
@@ -3507,12 +4150,14 @@ fn jet_codegen_lower_foreign_abi(abi: String) -> MIRForeignABI Never! {
     }
 }
 
+// Rust mir.rs::lower_foreign_language: the language head before any `:`;
+// every other head (an inline body's `rust`, `zig`, ...) is Rust.
 fn jet_codegen_lower_foreign_language(language: String) -> MIRForeignLanguage Never! {
-    if language == "c" -> return MIRForeignLanguage.C
-    if language == "cpp" || language == "c++" -> return MIRForeignLanguage.Cpp
-    if language == "asm" || language == "assembly" -> return MIRForeignLanguage.Assembly
-    if language.starts_with("rust:") || language == "rust" -> return MIRForeignLanguage.Rust
-    panic("checked foreign language has no MIR representation")
+    head :: language.split(":").to_list()[0].lower()
+    if head == "c" -> return MIRForeignLanguage.C
+    if head == "cpp" || head == "c++" -> return MIRForeignLanguage.Cpp
+    if head == "asm" || head == "assembly" -> return MIRForeignLanguage.Assembly
+    MIRForeignLanguage.Rust
 }
 
 fn jet_codegen_foreign_effects(effect_root: String?, span: Span) -> MIREffectFacts Never! {
@@ -3528,9 +4173,9 @@ fn jet_codegen_foreign_effects(effect_root: String?, span: Span) -> MIREffectFac
 }
 
 struct JetCodegenForeignHookIndex {
-    pub functions: [String:MIRFunctionID]
-    pub foreign: [String:MIRForeignID]
-    pub ambiguous: [String:Bool]
+    functions: [String:MIRFunctionID]
+    foreign: [String:MIRForeignID]
+    ambiguous: [String:Bool]
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_foreign_rows
@@ -3611,13 +4256,16 @@ fn jet_codegen_lower_foreign_row(row: SemaCheckedForeignFunction, modules: [Sema
         None -> None
         Val(key) -> Val(MIRHandleID{value: stable_id("mir-handle", key)})
     }
+    // Rust lower_foreign_rows resolves the close and undo hooks with
+    // `and_then`: a key with no checked TFunc (a host leaf, a foreign row)
+    // leaves the hook unset rather than stopping the build.
     close_function := if row.close_function_key == {
         None -> None
-        Val(key) -> Val(hooks.functions.get(key) ?? panic("checked foreign close adapter has no registered TFunc"))
+        Val(key) -> hooks.functions.get(key)
     }
     close_foreign := if row.close_foreign_key == {
         None -> None
-        Val(key) -> Val(jet_codegen_foreign_lookup_id(hooks, key) ?? panic("checked raw foreign close has no registered foreign row"))
+        Val(key) -> jet_codegen_foreign_lookup_id(hooks, key)
     }
     undo_function := if row.undo_function_key == {
         None -> None
@@ -3649,6 +4297,7 @@ fn jet_codegen_lower_foreign_row(row: SemaCheckedForeignFunction, modules: [Sema
         close_function: close_function,
         close_foreign: close_foreign,
         undo_function: undo_function,
+        unsafe_gate: jet_codegen_lower_unsafe_gate(row.unsafe_gate),
     }
 }
 
@@ -3682,14 +4331,10 @@ fn jet_codegen_lower_foreign_thread_safety(safety: String) -> MIRFFIThreadSafety
 fn jet_codegen_lower_foreign_handle(handle: SemaCheckedForeignHandle, module_identity: String, modules: [SemaGraphModuleResult], hooks: JetCodegenForeignHookIndex) -> MIRHandleLifecycle Never! {
     close_function := MIRFunctionID?{None}
     close_foreign := MIRForeignID?{None}
-    if handle.close_function_key != None {
-        key :: handle.close_function_key ?? panic("checked foreign handle close function key disappeared")
-        close_function = hooks.functions.get(key) ?? panic("checked foreign handle close adapter does not resolve to a TFunc")
-    }
-    if handle.close_foreign_key != None {
-        key :: handle.close_foreign_key ?? panic("checked foreign handle close foreign key disappeared")
-        close_foreign = jet_codegen_foreign_lookup_id(hooks, key) ?? panic("checked foreign handle fallback does not resolve to a foreign row")
-    }
+    // Rust lower_handle_rows: a close hook resolves to a function when one is
+    // registered, else to the provider's foreign close row, else neither.
+    if handle.close_function_key == .Val(key) -> close_function = hooks.functions.get(key)
+    if close_function == None && handle.close_foreign_key == .Val(key) -> close_foreign = jet_codegen_foreign_lookup_id(hooks, key)
     undo := MIRFunctionID?{None}
     if handle.undo_function_key != None {
         key :: handle.undo_function_key ?? panic("checked foreign handle undo key disappeared")
@@ -3715,41 +4360,19 @@ fn jet_codegen_foreign_push_unique_string(rows: &[String], value: String) Never!
 }
 
 fn jet_codegen_foreign_sort_strings(rows: &[String]) Never! {
-    sorted := [String]{}
-    loop position in jet_codegen_sorted_order([U64]{}, rows) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort()
 }
 
 fn jet_codegen_foreign_sort_rows(rows: &[MIRForeign]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.key)
-    }
-    sorted := [MIRForeign]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRForeign, right: MIRForeign) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.key <=> right.key)
 }
 
 fn jet_codegen_foreign_sort_links(rows: &[MIRLinkUnit]) Never! {
-    keys := [U64]{}
-    ties := [String]{}
-    loop row in rows {
-        &keys.push(row.id.value)
-        &ties.push(row.crate_spec)
-    }
-    sorted := [MIRLinkUnit]{}
-    loop position in jet_codegen_sorted_order(keys, ties) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRLinkUnit, right: MIRLinkUnit) -> if left.id.value != right.id.value -> left.id.value <=> right.id.value else -> left.crate_spec <=> right.crate_spec)
 }
 
 fn jet_codegen_foreign_sort_handles(rows: &[MIRHandleLifecycle]) Never! {
-    keys := [U64]{}
-    loop row in rows -> &keys.push(row.id.value)
-    sorted := [MIRHandleLifecycle]{}
-    loop position in jet_codegen_sorted_order(keys, [String]{}) -> &sorted.push(rows[position])
-    loop (index, row) in sorted -> rows[index] = row
+    &rows.sort_by((left: MIRHandleLifecycle, right: MIRHandleLifecycle) -> left.id.value <=> right.id.value)
 }
 
 fn jet_codegen_foreign_add_link_closure_id(closure: &[MIRLinkUnitID], name: String, libraries: &[String]) Never! {
@@ -3799,7 +4422,7 @@ fn jet_codegen_same_foreign_handle(left: MIRHandleLifecycle, right: MIRHandleLif
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/mir.rs::lower_foreign_rows
-pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRPackageFacts) -> JetCodegenForeignArtifacts Never! {
+fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: MIRPackageFacts) -> JetCodegenForeignArtifacts Never! {
     direct_links := [String]{}
     transitive_links := [String]{}
     libraries := [String]{}
@@ -3813,7 +4436,7 @@ pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: 
             loop library in provider.transitive_links -> jet_codegen_foreign_push_unique_string(&transitive_links, library)
         }
     }
-    if !has_foreign_data -> return JetCodegenForeignArtifacts{foreign: [MIRForeign]{}, links: [MIRLinkUnit]{}, handles: [MIRHandleLifecycle]{}}
+    if !has_foreign_data -> return JetCodegenForeignArtifacts{foreign: [MIRForeign]{}, links: [MIRLinkUnit]{}, handles: [MIRHandleLifecycle]{}, functions: [MIRFunction]{}}
     target :: package_facts.artifact_target ?? panic("checked foreign artifact lowering has no selected package target")
     applicability := jet_codegen_foreign_target_applicability(target)
     jet_codegen_foreign_sort_strings(&direct_links)
@@ -3835,6 +4458,7 @@ pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: 
     loop library in libraries -> &links.push(jet_codegen_foreign_link_row(library, cache_identity, applicability, &direct_links, &transitive_links, &libraries))
     foreign := [MIRForeign]{}
     hooks := jet_codegen_foreign_hook_index(modules)
+    asm_functions := [MIRFunction]{}
     loop semantic_module in modules {
         loop row in semantic_module.foreign_functions {
             if row.owner == SemaCheckedForeignOwner.CModule {
@@ -3851,6 +4475,7 @@ pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: 
                 if existing.id == lowered.id -> panic("duplicate or colliding checked foreign function identity")
             }
             &foreign.push(lowered)
+            if row.language == "asm" -> &asm_functions.push(jet_codegen_lower_asm_leaf(row, modules, applicability))
         }
     }
     handles := [MIRHandleLifecycle]{}
@@ -3890,5 +4515,65 @@ pub fn lower_foreign_artifacts(modules: [SemaGraphModuleResult], package_facts: 
     jet_codegen_foreign_sort_rows(&foreign)
     jet_codegen_foreign_sort_links(&links)
     jet_codegen_foreign_sort_handles(&handles)
-    JetCodegenForeignArtifacts{foreign: foreign, links: links, handles: handles}
+    JetCodegenForeignArtifacts{foreign: foreign, links: links, handles: handles, functions: asm_functions}
+}
+
+// Rust `function_foreign_provenance` (TIR/mod.rs): an `#FFI(asm)` function
+// is a foreign leaf whose code is its inline source. It keeps the checked
+// foreign row's key, parameters, return and declaration span; the native
+// backend lowers it from that span (InlineAsm.jet) and never runs a body,
+// so its one block is unreachable.
+fn jet_codegen_lower_asm_leaf(row: SemaCheckedForeignFunction, modules: [SemaGraphModuleResult], applicability: MIRTargetApplicability) -> MIRFunction Never! {
+    unit :: Type.Named{name: "Unit"}
+    return_type :: jet_codegen_lower_type_with_modules(row.return_type ?? unit, modules, row.module_identity, [String]{})
+    entry :: MIRBlockID{value: stable_id("mir-block", "{row.key}|{row.source_file}|{row.span.start}|{row.span.end}|asm-entry")}
+    declared_return := MIRType?{None}
+    if row.return_type != None -> declared_return = Val(return_type)
+    MIRFunction{
+        id: mir_function_id("{row.key}|{row.source_file}|{row.span.start}|{row.span.end}|asm"),
+        module_id: mir_module_id(row.module_identity),
+        source_file: mir_source_file_id(row.source_file),
+        key: row.key,
+        module_name: row.module_name,
+        name: row.name,
+        span: row.span,
+        kind: MIRFunctionKind.Foreign,
+        form: MIRFunctionForm.TopLevel,
+        visibility: MIRVisibility.Private,
+        target_applicability: applicability,
+        web_bucket: None,
+        web_marker: None,
+        generic_params: [MIRGenericParam]{},
+        capture_params: [MIRCaptureParam]{},
+        params: jet_codegen_lower_foreign_params(row.params, modules, row.module_identity),
+        declared_return: declared_return,
+        return_type: return_type,
+        failure: MIRFailureCarrier.Infallible,
+        effects: jet_codegen_foreign_effects(row.effect_root, row.span),
+        captures: None,
+        generator: None,
+        optimization: mir_empty_optimization_facts(),
+        is_unsafe: true,
+        unsafe_gate: jet_codegen_lower_unsafe_gate(row.unsafe_gate),
+        is_pure: false,
+        memo_bound: None,
+        memo_unbounded: false,
+        is_reactive: false,
+        reactive_upgrades: [String]{},
+        is_inline: false,
+        is_inline_always: false,
+        is_scalar: false,
+        kernel_proof: None,
+        gc_return: false,
+        return_view_provenance: None,
+        web_param_reconstructions: [MIRWebParamReconstruction]{},
+        blocks: [MIRBasicBlock]{MIRBasicBlock{id: entry, span: row.span, instructions: [MIRInstruction]{}, terminator: MIRTerminator.Unreachable{reason: "inline asm leaf lowers from its source span"}}},
+        entry: entry,
+        locals: [MIRLocal]{},
+        values: [MIRValueFact]{},
+        places: [MIRPlace]{},
+        scopes: [MIRScope]{},
+        drops: [MIRDropAction]{},
+        foreign_language: Val("asm"),
+    }
 }

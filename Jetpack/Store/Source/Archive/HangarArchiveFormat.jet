@@ -33,25 +33,25 @@ fn store_archive_magic() -> [U8] Never! {
 }
 
 // Summary of one archive operation, printed by the Hangar CLI.
-pub struct HangarArchiveReport {
-    pub objects: Int
-    pub bytes: Int
-    pub signed: Bool
-    pub root: String
+struct HangarArchiveReport {
+    objects: Int
+    bytes: Int
+    signed: Bool
+    root: String
 
     // Stable `jet.status/v1` output for the Hangar CLI (Rust `report_json`).
-    fn json(self, action: String) -> String Never! {
+    fn json(self, action: String) -> String ReportError! {
         fields :: StatusFields.new()
-            .with("bytes", DataTree.Int(self.bytes))
-            .with("objects", DataTree.Int(self.objects))
-            .with("root", DataTree.Text(self.root))
-            .with("signed", DataTree.Bool(self.signed))
+            .with("bytes", Dyn.Int(self.bytes))
+            .with("objects", Dyn.Int(self.objects))
+            .with("root", Dyn.Text(self.root))
+            .with("signed", Dyn.Bool(self.signed))
         StatusEnvelope.new(action, true).with_fields(fields).json()
     }
 }
 
 // The kind of one archived output node, with its one-byte wire tag.
-pub enum HangarArchiveNodeKind {
+enum HangarArchiveNodeKind {
     Directory
     File
     Symlink
@@ -79,11 +79,11 @@ pub enum HangarArchiveNodeKind {
 
 // One node of an archived output tree. `bytes` holds file contents or the
 // link target of a symlink or hardlink.
-pub struct HangarArchiveNode {
-    pub path: String
-    pub kind: HangarArchiveNodeKind
-    pub mode: Int
-    pub bytes: [U8]
+struct HangarArchiveNode {
+    path: String
+    kind: HangarArchiveNodeKind
+    mode: Int
+    bytes: [U8]
 
     // The node's wire bytes, shared by the archive body and the canonical
     // Nix object bytes.
@@ -98,21 +98,21 @@ pub struct HangarArchiveNode {
 
 // One archived record: an output tree (empty `meta`, `id == digest`) or a
 // package record whose `meta` is the entry's meta.json.
-pub struct HangarArchiveObject {
-    pub id: String
-    pub digest: String
-    pub meta: String
-    pub root_mode: Int
-    pub nodes: [HangarArchiveNode]
+struct HangarArchiveObject {
+    id: String
+    digest: String
+    meta: String
+    root_mode: Int
+    nodes: [HangarArchiveNode]
 }
 
 // The typed closure manifest a Nix CAS bundle carries after its objects.
-pub struct NixClosureManifest {
-    pub output: String
-    pub platform: String
-    pub revision: String
-    pub cache_key: String
-    pub members: [NixClosureMember]
+struct NixClosureManifest {
+    output: String
+    platform: String
+    revision: String
+    cache_key: String
+    members: [NixClosureMember]
 
     fn encode_into(self, out: &[U8]) StoreError! {
         store_archive_put_string(&out, self.output)
@@ -155,18 +155,18 @@ pub struct NixClosureManifest {
 
 // One member of a Nix closure manifest: its CAS key, the digest and size of
 // its canonical object bytes, and its sorted direct references.
-pub struct NixClosureMember {
-    pub key: String
-    pub hash: String
-    pub size: Int
-    pub references: [String]
+struct NixClosureMember {
+    key: String
+    hash: String
+    size: Int
+    references: [String]
 }
 
 // The detached signature trailer.
-pub struct HangarArchiveSignature {
-    pub key_id: String
-    pub algorithm: String
-    pub sig_hex: String
+struct HangarArchiveSignature {
+    key_id: String
+    algorithm: String
+    sig_hex: String
 
     fn from_trust(signature: TrustSignature) -> HangarArchiveSignature Never! {
         HangarArchiveSignature{key_id: signature.key_id, algorithm: signature.algorithm, sig_hex: signature.sig_hex}
@@ -174,11 +174,11 @@ pub struct HangarArchiveSignature {
 }
 
 // A decoded or assembled canonical archive.
-pub struct HangarArchive {
-    pub root_id: String
-    pub objects: [HangarArchiveObject]
-    pub nix_manifest: NixClosureManifest?
-    pub signature: HangarArchiveSignature?
+struct HangarArchive {
+    root_id: String
+    objects: [HangarArchiveObject]
+    nix_manifest: NixClosureManifest?
+    signature: HangarArchiveSignature?
 
     fn report(self) -> HangarArchiveReport Never! {
         bytes := 0
@@ -356,7 +356,7 @@ struct HangarArchiveReader {
     fn u32(&self) -> Int StoreError! {
         taken :: &self.take_bytes(4)
         value := 0
-        loop index in 0..<4 -> value = value | (Int.from_u8(taken[index]) << (8 * index))
+        loop index in 0..<4 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
     }
 
@@ -365,7 +365,7 @@ struct HangarArchiveReader {
     fn u64(&self) -> Int StoreError! {
         taken :: &self.take_bytes(8)
         value := 0
-        loop index in 0..<8 -> value = value | (Int.from_u8(taken[index]) << (8 * index))
+        loop index in 0..<8 -> value = (value).bit_or((Int.from_u8(taken[index]) << (8 * index)))
         Ok(value)
     }
 
@@ -389,11 +389,11 @@ fn store_archive_put_u32(out: &[U8], value: Int) StoreError! {
 }
 
 fn store_archive_put_raw_u32(out: &[U8], value: Int) Never! {
-    loop index in 0..<4 -> &out.push(U8{(value >> (8 * index)) & 255})
+    loop index in 0..<4 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 fn store_archive_put_u64(out: &[U8], value: Int) Never! {
-    loop index in 0..<8 -> &out.push(U8{(value >> (8 * index)) & 255})
+    loop index in 0..<8 -> &out.push(U8{((value >> (8 * index))).bit_and(255)})
 }
 
 fn store_archive_put_string(out: &[U8], value: String) StoreError! {

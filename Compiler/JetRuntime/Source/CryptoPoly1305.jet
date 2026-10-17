@@ -1,0 +1,151 @@
+// RFC 8439 Poly1305. Bounded radix-2^26 limbs replace bigint modulo in
+// Core/crypto/expert.jet:366-424@5933a61b2; no secret branches/table accesses.
+// State160 aligned8: r[5],h[5],pad16,block24,products[5]. Caller wipes state.
+fn rt_poly_init(key: I64, state: I64) {
+    rt_crypto_wipe(state, I64{160})
+    t0 :: rt_crypto_le32(key)
+    t1 :: rt_crypto_le32(key + I64{4})
+    t2 :: rt_crypto_le32(key + I64{8})
+    t3 :: rt_crypto_le32(key + I64{12})
+    rt_text_store(state, t0.bit_and(I64{0x3ffffff}))
+    rt_text_store(state + I64{8}, ((t0 >> I64{26}).bit_or((t1 << I64{6}))).bit_and(I64{0x3ffff03}))
+    rt_text_store(state + I64{16}, ((t1 >> I64{20}).bit_or((t2 << I64{12}))).bit_and(I64{0x3ffc0ff}))
+    rt_text_store(state + I64{24}, ((t2 >> I64{14}).bit_or((t3 << I64{18}))).bit_and(I64{0x3f03fff}))
+    rt_text_store(state + I64{32}, (t3 >> I64{8}).bit_and(I64{0xfffff}))
+    rt_text_bytes_copy(state + I64{80}, key + I64{16}, I64{16})
+}
+// Public length 1..16. padded=true means pad to16 before appending the 1 bit.
+fn rt_poly_block(input: I64, length: I64, padded: Bool, state: I64) {
+    block :: state + I64{96}
+    rt_crypto_wipe(block, I64{24})
+    rt_text_bytes_copy(block, input, length)
+    end :: if padded -> I64{16} else -> length
+    rt_text_put(block + end, I64{1})
+    t0 :: rt_crypto_le32(block)
+    t1 :: rt_crypto_le32(block + I64{4})
+    t2 :: rt_crypto_le32(block + I64{8})
+    t3 :: rt_crypto_le32(block + I64{12})
+    h :: state + I64{40}
+    rt_text_store(h, rt_text_word(h) + (t0.bit_and(I64{0x3ffffff})))
+    rt_text_store(h + I64{8}, rt_text_word(h + I64{8}) + (((t0 >> I64{26}).bit_or((t1 << I64{6}))).bit_and(I64{0x3ffffff})))
+    rt_text_store(h + I64{16}, rt_text_word(h + I64{16}) + (((t1 >> I64{20}).bit_or((t2 << I64{12}))).bit_and(I64{0x3ffffff})))
+    rt_text_store(h + I64{24}, rt_text_word(h + I64{24}) + (((t2 >> I64{14}).bit_or((t3 << I64{18}))).bit_and(I64{0x3ffffff})))
+    rt_text_store(h + I64{32}, rt_text_word(h + I64{32}) + (t3 >> I64{8}) + (rt_text_byte(block + I64{16}) << I64{24}))
+    products :: state + I64{120}
+    i := I64{0}
+    loop {
+        if (i >= I64{5}) -> break
+        rt_text_store(products + i * I64{8}, I64{0})
+        i += I64{1}
+    }
+    i = I64{0}
+    loop {
+        if (i >= I64{5}) -> break
+        j := I64{0}
+        loop {
+            if (j >= I64{5}) -> break
+            sum :: i + j
+            factor :: if (sum >= I64{5}) -> I64{5} else -> I64{1}
+            at :: products + (sum % I64{5}) * I64{8}
+            rt_text_store(at, rt_text_word(at) + rt_text_word(h + i * I64{8}) * rt_text_word(state + j * I64{8}) * factor)
+            j += I64{1}
+        }
+        i += I64{1}
+    }
+    carry := I64{0}
+    i = I64{0}
+    loop {
+        if (i >= I64{5}) -> break
+        value :: rt_text_word(products + i * I64{8}) + carry
+        rt_text_store(h + i * I64{8}, value.bit_and(I64{0x3ffffff}))
+        carry = value >> I64{26}
+        i += I64{1}
+    }
+    first :: rt_text_word(h) + carry * I64{5}
+    rt_text_store(h, first.bit_and(I64{0x3ffffff}))
+    rt_text_store(h + I64{8}, rt_text_word(h + I64{8}) + (first >> I64{26}))
+}
+fn rt_poly_update(input: I64, length: I64, padded: Bool, state: I64) {
+    at := I64{0}
+    loop at < length {
+        count := I64{16}
+        if (length - at < count) -> count = length - at
+        rt_poly_block(input + at, count, padded, state)
+        at += count
+    }
+}
+fn rt_poly_finish(state: I64, output: I64) {
+    h :: state + I64{40}
+    carry := I64{0}
+    i := I64{1}
+    loop {
+        if (i >= I64{5}) -> break
+        value :: rt_text_word(h + i * I64{8}) + carry
+        rt_text_store(h + i * I64{8}, value.bit_and(I64{0x3ffffff}))
+        carry = value >> I64{26}
+        i += I64{1}
+    }
+    first :: rt_text_word(h) + carry * I64{5}
+    rt_text_store(h, first.bit_and(I64{0x3ffffff}))
+    rt_text_store(h + I64{8}, rt_text_word(h + I64{8}) + (first >> I64{26}))
+    g :: state + I64{120}
+    carry = I64{5}
+    i = I64{0}
+    loop {
+        if (i >= I64{5}) -> break
+        value :: rt_text_word(h + i * I64{8}) + carry
+        rt_text_store(g + i * I64{8}, value.bit_and(I64{0x3ffffff}))
+        carry = value >> I64{26}
+        i += I64{1}
+    }
+    // h+5 overflows 2^130 iff h>=p. Select without branch on secret h.
+    mask :: I64{0} - carry
+    i = I64{0}
+    loop {
+        if (i >= I64{5}) -> break
+        rt_text_store(h + i * I64{8}, (rt_text_word(g + i * I64{8}).bit_and(mask)).bit_or((rt_text_word(h + i * I64{8}).bit_and((mask.bit_xor(I64{-1}))))))
+        i += I64{1}
+    }
+    h0 :: rt_text_word(h)
+    h1 :: rt_text_word(h + I64{8})
+    h2 :: rt_text_word(h + I64{16})
+    h3 :: rt_text_word(h + I64{24})
+    h4 :: rt_text_word(h + I64{32})
+    w0 :: (h0.bit_or((h1 << I64{26}))).bit_and(I64{0xffffffff})
+    w1 :: ((h1 >> I64{6}).bit_or((h2 << I64{20}))).bit_and(I64{0xffffffff})
+    w2 :: ((h2 >> I64{12}).bit_or((h3 << I64{14}))).bit_and(I64{0xffffffff})
+    w3 :: ((h3 >> I64{18}).bit_or((h4 << I64{8}))).bit_and(I64{0xffffffff})
+    v0 :: w0 + rt_crypto_le32(state + I64{80})
+    v1 :: w1 + rt_crypto_le32(state + I64{84}) + (v0 >> I64{32})
+    v2 :: w2 + rt_crypto_le32(state + I64{88}) + (v1 >> I64{32})
+    v3 :: w3 + rt_crypto_le32(state + I64{92}) + (v2 >> I64{32})
+    rt_crypto_put32(output, v0)
+    rt_crypto_put32(output + I64{4}, v1)
+    rt_crypto_put32(output + I64{8}, v2)
+    rt_crypto_put32(output + I64{12}, v3)
+}
+fn rt_crypto_poly1305(key: I64, input: I64, length: I64, output: I64, scratch: I64) {
+    rt_poly_init(key, scratch)
+    rt_poly_update(input, length, false, scratch)
+    rt_poly_finish(scratch, output)
+    rt_crypto_wipe(scratch, I64{160})
+}
+fn rt_crypto_equal(a: I64, b: I64, length: I64) -> Bool {
+    diff := I64{0}
+    i := I64{0}
+    loop i < length {
+        diff = diff.bit_or((rt_text_byte(a + i).bit_xor(rt_text_byte(b + i))))
+        i += I64{1}
+    }
+    diff == I64{0}
+}
+// Public lengths may differ; byte values never select a branch or early exit.
+// The same fixed-span engine authenticates AEAD tags, age MACs and Core bytes.
+fn rt_crypto_equal_spans(a: I64, a_length: I64, b: I64, b_length: I64) -> Bool {
+    if (a_length < I64{0} || b_length < I64{0}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return false
+    }
+    if (a_length != b_length) -> return false
+    return rt_crypto_equal(a, b, a_length)
+}

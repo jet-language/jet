@@ -1,0 +1,8 @@
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("b_generated") {
+        fn b_generated() -> String { "b" }
+    }
+    target :: b.add_library("b", ["run.jet", ".jet/generated/b/b_generated.jet"], [])
+    return b.plan(target)
+}
+fn run() {}

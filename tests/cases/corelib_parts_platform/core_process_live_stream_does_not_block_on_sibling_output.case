@@ -1,0 +1,18 @@
+# Port of tests/corelib_parts/platform.rs:618-676; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_live_stream_does_not_block_on_sibling_output
+write: main.jet main.template
+write: slow.sh slow.sh.template
+chmod: slow.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "done\nfinished\n"
+stderr: empty
+step rerun: built
+exit: 0
+stdout: = "done\nfinished\n"
+stderr: empty
+elapsed: rerun < 1500ms

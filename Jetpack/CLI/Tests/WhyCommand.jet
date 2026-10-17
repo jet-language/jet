@@ -24,14 +24,19 @@ fn cli_why_test_sample() -> PackageWhy {
     }
 }
 
-fn cli_why_test_field(tree: DataTree, key: String) -> DataTree {
+fn cli_why_test_field(tree: Dyn, key: String) -> Dyn {
     if tree == {
-        .Object(object) -> object.get(key) ?? panic("missing field {key}")
+        .Object(object) -> {
+            loop pair in object {
+                if pair.key == key -> return pair.value
+            }
+            panic("missing field {key}")
+        }
         else -> panic("expected an object around {key}")
     }
 }
 
-fn cli_why_test_text(tree: DataTree) -> String {
+fn cli_why_test_text(tree: Dyn) -> String {
     if tree == {
         .Text(text) -> text
         else -> panic("expected a string")
@@ -45,7 +50,7 @@ fn cli_why_test_text(tree: DataTree) -> String {
     loop fact in facts_1 {
         assert(text.contains(fact), "human report misses {fact}")
     }
-    rendered :: report.to_json()
+    rendered :: report.to_json() ?? panic("valid typed why report JSON")
     tree :: json.parse(rendered) ?? panic("the why report is JSON")
     facts_2 :: [String]{"\"env_file\"", "\"lock_file\"", "\"catalog\"", "\"endpoint\"", "\"signature_chain\"", "\"source_digest\"", "\"grade\"", "\"bytes\"", "\"dependents\"", "\"receipt\""}
     loop fact in facts_2 {
@@ -53,7 +58,7 @@ fn cli_why_test_text(tree: DataTree) -> String {
     }
     assert_eq(cli_why_test_text(cli_why_test_field(tree, "action")), "why")
     requesting :: cli_why_test_field(tree, "requesting")
-    assert_eq(cli_why_test_field(cli_why_test_field(requesting, "env_file"), "line"), DataTree.Int(12))
+    assert_eq(cli_why_test_field(cli_why_test_field(requesting, "env_file"), "line"), Dyn.Int(12))
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(tree, "trust"), "grade")), "signed")
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(tree, "origin"), "endpoint")), "https://index.example")
     assert_eq(cli_why_test_text(cli_why_test_field(cli_why_test_field(requesting, "lock_file"), "text")), "name = \"ripgrep\"")
@@ -62,5 +67,5 @@ fn cli_why_test_text(tree: DataTree) -> String {
         else -> panic("dependents is a list")
     }
     assert_eq(cli_why_test_text(dependents[0]), "tool@1.0 (tool@jetpack)")
-    assert_eq(cli_why_test_field(cli_why_test_field(tree, "disk"), "bytes"), DataTree.Int(4096))
+    assert_eq(cli_why_test_field(cli_why_test_field(tree, "disk"), "bytes"), Dyn.Int(4096))
 }

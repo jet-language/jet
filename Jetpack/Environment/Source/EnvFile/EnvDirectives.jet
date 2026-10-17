@@ -4,7 +4,7 @@
 //     // env.jet: a Jetpack project environment (dev-shell descriptor)
 //     use jetpack as pkg
 //
-//     pub fn shell() -> [JSON] {
+//     fn shell() -> [JSON] {
 //         return [
 //             pkg.source("nixpkgs"),
 //             pkg.packages(["ripgrep", "fd", "claude-code"]),
@@ -20,11 +20,11 @@
 // A named source declaration: `pkg.source("<name>", "<upstream>" [, "<via>"])`.
 // `via` selects the provider (`nix` by default, `core` for first-party Jet
 // packages, R2).
-pub struct EnvNamedSource {
-    pub name: String
-    pub upstream: String
+struct EnvNamedSource {
+    name: String
+    upstream: String
     // The provider name (`nix`/`core`); None means the default `nix`.
-    pub via: String?
+    via: String?
 }
 
 // The declared environment, parsed from the directive calls. Sources are a
@@ -32,13 +32,13 @@ pub struct EnvNamedSource {
 // entries are bare (resolved against the default source) or
 // `package@source`. `env.jet` is purely the dev-shell descriptor (U10): the
 // package index lives in the source repo's `pkg.jet`, never here.
-pub struct EnvFile {
+struct EnvFile {
     // The default source for bare package entries (a one-argument source).
-    pub default_source: String?
+    default_source: String?
     // Named sources, in declaration order.
-    pub named: [EnvNamedSource]
-    pub packages: [String]
-    pub prompt: String?
+    named: [EnvNamedSource]
+    packages: [String]
+    prompt: String?
 
     fn empty() -> EnvFile Never! {
         EnvFile{default_source: None, named: [EnvNamedSource]{}, packages: [String]{}, prompt: None}
@@ -111,7 +111,7 @@ pub struct EnvFile {
         loop package in self.packages -> &quoted.push(env_file_quote_jet_string(package))
         &lines.push("        pkg.packages([{quoted.join(", ")}])")
         &lines.push("        pkg.prompt({prompt})")
-        "// {ENV_FILE} — a Jetpack project environment\nuse jetpack as pkg\n\npub fn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
+        "// {ENV_FILE} — a Jetpack project environment\nuse jetpack as pkg\n\nfn shell() -> [JSON] {{\n    return [\n{lines.join(",\n")}\n    ]\n}}\n"
     }
 
     // Path to the env file in a project dir.

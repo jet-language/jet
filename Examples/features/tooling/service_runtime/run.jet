@@ -46,40 +46,40 @@ fn telemetry_has_service_counters(text: String) -> Bool {
 // D-CONC-JOIN1: the dogfood service task is consumed, not dropped.
 fn service_probe() -> String {
     probe := service.tree("probe")
-    endpoint :: probe.worker("echo", worker_a, capacity: 1) ?? panic("probe worker")
-    probe.start() ?? panic("probe start")
-    probe.send(endpoint, "probe") ?? panic("probe send")
-    message :: probe.receive(endpoint) ?? panic("probe receive")
-    probe.stop() ?? panic("probe stop")
+    endpoint :: &probe.worker("echo", worker_a, capacity: 1) ?? panic("probe worker")
+    &probe.start() ?? panic("probe start")
+    &probe.send(endpoint, "probe") ?? panic("probe send")
+    message :: &probe.receive(endpoint) ?? panic("probe receive")
+    &probe.stop() ?? panic("probe stop")
     return message
 }
 
 fn run() {
     tree := service.tree("app")
-    tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
+    &tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     temp :: testing.temp_dir("service-runtime")
     state_store :: Path.from(temp).join("state.log").to_string()
     telemetry_path :: Path.from(temp).join("service.jsonl").to_string()
     store :: service.state_store(state_store) ?? panic("state store")
-    tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
-    a :: tree.worker("a", worker_a, capacity: 2) ?? panic("a")
-    _b :: tree.worker("b", worker_b, capacity: 2) ?? panic("b")
-    tree.set_restart(service.restart_rest_for_one()) ?? panic("restart")
-    tree.start() ?? panic("start")
+    &tree.set_state_event_log(store, "app-events", 1, "reversible") ?? panic("state")
+    a :: &tree.worker("a", worker_a, capacity: 2) ?? panic("a")
+    _b :: &tree.worker("b", worker_b, capacity: 2) ?? panic("b")
+    &tree.set_restart(service.restart_rest_for_one()) ?? panic("restart")
+    &tree.start() ?? panic("start")
 
     probe :: task service_probe()
     print("probe:{probe.join() ?? panic("probe join")}")
 
-    delivery :: tree.send_durable(a, "ping", key: "k1") ?? panic("durable")
-    state :: (~delivery).status() ?? panic("delivery status")
+    delivery :: &tree.send_durable(a, "ping", key: "k1") ?? panic("durable")
+    state :: (delivery.copy()).status() ?? panic("delivery status")
     history :: delivery.events() ?? panic("delivery events")
     if history.len() == 0 -> panic("delivery history")
     print("delivery:{state.show()}")
-    tree.append_event("pinged") ?? panic("event")
+    &tree.append_event("pinged") ?? panic("event")
     print("events:{tree.event_count()}")
 
-    run_id :: tree.workflow_start("checkout", 1) ?? panic("wf")
-    tree.workflow_step(run_id, "pay") ?? panic("step")
+    run_id :: &tree.workflow_start("checkout", 1) ?? panic("wf")
+    &tree.workflow_step(run_id, "pay") ?? panic("step")
     print("hist:{tree.workflow_history(run_id) ?? panic("hist")}")
     scheduled :: tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity")
     print("activity:{status_label(scheduled)}")
@@ -92,27 +92,27 @@ fn run() {
     workflow_outcome :: tree.workflow_outcome(run_id) ?? panic("outcome")
     if !outcome_is_finished(workflow_outcome) -> panic("typed workflow outcome")
     print("outcome:{outcome_label(workflow_outcome)}")
-    tree.directory_register("front", a) ?? panic("dir")
+    &tree.directory_register("front", a) ?? panic("dir")
     resolved :: tree.directory_resolve("front") ?? panic("resolve")
     print(resolved.show())
-    tree.drain_worker(a) ?? panic("drain")
+    &tree.drain_worker(a) ?? panic("drain")
     if a.send("late") == {
         .Ok(_) -> { print("drain_send:accepted") }
         .Err(_) -> { print("drain_send:rejected") }
     }
-    gen :: tree.handoff_generation() ?? panic("handoff")
+    gen :: &tree.handoff_generation() ?? panic("handoff")
     print("gen:{gen}")
     print(tree.upgrade_receipt() ?? panic("upgrade receipt"))
     if a.send("stale") == {
         .Ok(_) -> { print("stale_send:accepted") }
         .Err(_) -> { print("stale_send:rejected") }
     }
-    if tree.receive(a) == {
+    if &tree.receive(a) == {
         .Ok(_) -> { print("handoff_receive:accepted") }
         .Err(_) -> { print("handoff_receive:rejected") }
     }
     print("handoff_depth:{tree.mailbox_depth(a) ?? panic("handoff depth")}")
-    chaos :: tree.chaos_fail() ?? panic("chaos")
+    chaos :: &tree.chaos_fail() ?? panic("chaos")
     observation :: &tree.observe()
     print(observation)
     restart_count :: tree.restarts(a) ?? panic("restarts")
@@ -127,5 +127,5 @@ fn run() {
     log.flush()
     telemetry :: files.read(telemetry_path) ?? panic("telemetry read")
     print("telemetry:{telemetry_has_service_counters(telemetry)}")
-    tree.stop() ?? panic("stop")
+    &tree.stop() ?? panic("stop")
 }

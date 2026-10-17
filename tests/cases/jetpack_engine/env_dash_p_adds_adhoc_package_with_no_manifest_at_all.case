@@ -1,0 +1,44 @@
+# HAND-PORT tests/jetpack_engine.rs:5989-6017 env_dash_p_adds_adhoc_package_with_no_manifest_at_all
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+refused: hangar-verified-fixture
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn env_dash_p_adds_adhoc_package_with_no_manifest_at_all() {
+#     // U16: `jet env -p <pkg>... -- cmd` needs no env.jet/package.jet at all — the
+#     // ad-hoc package becomes an ordinary nixpkgs RefSpec, folded into an
+#     // otherwise-empty plan, trust-gated and realized exactly like a
+#     // manifest-declared ref.
+#     let root = Scratch::new("dashp-root");
+#     let proj = Scratch::new("dashp-proj");
+#     let fixtures = Scratch::new("dashp-fx");
+#     let out = Scratch::new("dashp-out");
+#     write_runnable_fixture(&fixtures.path, &root.path, &out.path);
+#     let output = jetpack()
+#         .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
+#         .arg(&fixtures.path)
+#         .args(["-p", "greet", "--", "greet"])
+#         .current_dir(&proj.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     assert_eq!(
+#         String::from_utf8_lossy(&output.stdout).trim(),
+#         "hello from jetpack"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack env --no-color --trust --offline --fixtures {work}/fixtures -p greet -- greet
+cwd: project
+exit: 0
+stdout.trim: = env_dash_p_adds_adhoc_package_with_no_manifest_at_all.expected
+

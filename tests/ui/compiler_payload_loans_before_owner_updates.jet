@@ -1,0 +1,72 @@
+struct LoanBinding { name: String, transferred: Bool }
+enum LoanStatement {
+    Val(binding: LoanBinding)
+    Unit
+}
+struct LoanFields { values: [String] }
+enum LoanItem {
+    Fields(fields: LoanFields)
+    Unit
+}
+
+fn update_statements(statements: &[LoanStatement]) -> Int Never! {
+    total := 0
+    index := 0
+    loop index < statements.len() {
+        transfer := false
+        if statements[index] == .Val(binding) {
+            total += binding.name.len()
+            transfer = !binding.transferred
+        }
+        if transfer {
+            if statements[index] == .Val(binding) {
+                updated := binding
+                updated.transferred = true
+                statements[index] = LoanStatement.Val{binding: updated}
+            }
+        }
+        index += 1
+    }
+    total
+}
+
+fn read_then_append(items: &[LoanItem]) -> Int Never! {
+    total := 0
+    boundary := items.len()
+    index := 0
+    loop index < boundary {
+        if items[index] == .Fields(fields) {
+            loop text in fields.values -> total += text.len()
+        }
+        &items.push(LoanItem.Unit)
+        index += 1
+    }
+    total
+}
+
+fn owned_loop_metadata(rounds: [Int]) -> Int Never! {
+    total := 0
+    loop round in rounds {
+        operation := LoanFields{values: [String]{"a", "bc"}}
+        loop text in operation.values -> total += text.len()
+    }
+    total
+}
+
+fn run() Never! {
+    statements := [LoanStatement]{
+        LoanStatement.Val{binding: LoanBinding{name: "one", transferred: false}},
+        LoanStatement.Val{binding: LoanBinding{name: "four", transferred: false}},
+    }
+    assert(update_statements(&statements) == 7)
+    loop statement in statements {
+        if statement == .Val(binding) -> assert(binding.transferred)
+    }
+    items := [LoanItem]{
+        LoanItem.Fields{fields: LoanFields{values: [String]{"a", "bc"}}},
+        LoanItem.Fields{fields: LoanFields{values: [String]{"def"}}},
+    }
+    assert(read_then_append(&items) == 6)
+    assert(items.len() == 4)
+    assert(owned_loop_metadata([Int]{0, 1, 2}) == 9)
+}

@@ -19,7 +19,7 @@ fn jet_codegen_drop_flag_count_use(uses: &[U64:Int], value: MIRValueID) Never! {
 }
 
 // Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_drop_flags.rs::LowerCtx::resolve_drop_flags
-fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
+fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder, program: JetCodegenProgram) Never! {
     if builder.drop_live_all.len() == 0 -> return
     block_count :: builder.blocks.len()
     block_index := [U64:Int]{}
@@ -319,7 +319,7 @@ fn jet_codegen_resolve_drop_flags(builder: &JetCodegenBuilder) Never! {
         if flag < 0 || !dead[flag] -> &places.push(row)
     }
     builder.places = places
-    jet_codegen_reindex_lowering_rows(&builder)
+    jet_codegen_reindex_lowering_rows(&builder, program)
     records := [JetCodegenDropLive]{}
     loop record in builder.drop_live_all {
         flag :: flag_of_place.get(record.live.value) ?? -1

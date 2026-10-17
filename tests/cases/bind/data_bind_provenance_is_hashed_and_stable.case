@@ -1,0 +1,16 @@
+# Port of tests/bind.rs:1123-1158; input bytes copied verbatim.
+# REFERENCE-OBSERVED: original hash/idempotence/regeneration assertions held; snapshots captured from dev-595e0dca3, not same-head acceptance.
+fixture: fixtures/data_bind_provenance_is_hashed_and_stable
+step: jet "inspect" "bind" "json" "fixtures/stable.json" "--type" "Stable"
+exit: 0
+file: "fixtures/.jet/bindings/stable.jet" = data_bind_provenance_is_hashed_and_stable.0.generated.jet.out
+copy: fixtures/.jet/bindings/stable.jet before.jet
+step: jet "inspect" "bind" "json" "fixtures/stable.json" "--type" "Stable"
+exit: 0
+file: "fixtures/.jet/bindings/stable.jet" = data_bind_provenance_is_hashed_and_stable.1.generated.jet.out
+file: fixtures/.jet/bindings/stable.jet == before.jet
+copy: changed.json fixtures/stable.json
+step: jet "inspect" "bind" "json" "fixtures/stable.json" "--type" "Stable"
+exit: 0
+file: "fixtures/.jet/bindings/stable.jet" = data_bind_provenance_is_hashed_and_stable.2.generated.jet.out
+file: fixtures/.jet/bindings/stable.jet != before.jet

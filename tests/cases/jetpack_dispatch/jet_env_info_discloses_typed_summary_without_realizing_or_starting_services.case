@@ -1,0 +1,56 @@
+# Port of tests/jetpack_dispatch.rs:278-461. PENDING-SAME-HEAD and batch-four grammar.
+# Sources/literal predicates copied verbatim, helper templates expanded exactly.
+fixture: fixtures/jet_env_info_discloses_typed_summary_without_realizing_or_starting_services
+mkdir: root
+env: JETPACK_ROOT={work}/root
+mkdir: scripts/githooks
+step: jet env info --json --offline --no-color
+env: HOME=/test/home
+exit: 0
+json: stdout doc $ valid # original JSON::parse succeeds (no added top-level type/canonical restriction)
+stdout: ~ "\"packages\":[\"ripgrep@nixpkgs\"]" # original contains predicate
+stdout: ~ "\"name\":\"fixture\",\"enabled\":false" # original contains predicate
+stdout: ~ "\"run\":[\"fixture\",\"--port\",\"8080\"]" # original contains predicate
+stdout: ~ "\"ready\":\"fixture --ready\"" # original contains predicate
+stdout: ~ "\"after\":[\"database\"]" # original contains predicate
+stdout: ~ "\"before_start\":[\"lint_all\"]" # original contains predicate
+stdout: ~ "\"sockets\":[\"run/fixture.sock\"]" # original contains predicate
+stdout: ~ "\"checks\":[],\"jobs\":[\"lint_all\"]" # original contains predicate
+stdout: ~ "\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}]" # original contains predicate
+stdout: ~ "\"files\":[\"config/generated.txt\"]" # original contains predicate
+stdout: ~ "\"git_hooks_path\":\"scripts/githooks\"" # original contains predicate
+stdout: !~ "\"name\":\"sibling\"" # original absent predicate
+stdout: !~ "full-only-check" # original absent predicate
+stdout: !~ "FULL_ONLY" # original absent predicate
+stdout: !~ "config/full.txt" # original absent predicate
+file: .jet/services absent
+step: jet env info --offline --no-color
+env: HOME=/test/home
+exit: 0
+stdout+stderr: ~ "fixture (disabled" # original contains predicate
+stdout+stderr: ~ "ports=8080" # original contains predicate
+stdout+stderr: ~ "run=fixture --port 8080" # original contains predicate
+stdout+stderr: ~ "ready=fixture --ready" # original contains predicate
+stdout+stderr: ~ "data_dir=state/fixture" # original contains predicate
+stdout+stderr: ~ "watch=src" # original contains predicate
+stdout+stderr: ~ "after=database" # original contains predicate
+stdout+stderr: ~ "before_start=lint" # original contains predicate
+stdout+stderr: ~ "sockets=run/fixture.sock" # original contains predicate
+stdout+stderr: ~ "git hooks path: scripts/githooks" # original contains predicate
+file: .jet/services absent
+step: jet env info --json --offline --no-color --env full
+env: HOME=/test/home
+exit: 0
+stdout: ~ "\"active_environment\":\"full\"" # original contains predicate
+stdout: ~ "\"packages\":[\"fd@nixpkgs\"]" # original contains predicate
+stdout: ~ "\"name\":\"sibling\",\"enabled\":false" # original contains predicate
+stdout: ~ "\"checks\":[\"full-only-check\"]" # original contains predicate
+stdout: ~ "\"name\":\"FULL_ONLY\"" # original contains predicate
+stdout: ~ "\"files\":[\"config/full.txt\"]" # original contains predicate
+stdout: !~ "\"name\":\"fixture\"" # original absent predicate
+stdout: !~ "config/generated.txt" # original absent predicate
+step: jet env info --offline --no-color --env missing
+exit: 2
+stderr: ~ "E1337" # original contains predicate
+stderr: ~ "environment module `missing` is not declared" # original contains predicate
+file: .jet/services absent

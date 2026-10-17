@@ -1,0 +1,25 @@
+trait Measure {
+    fn measure(self, text: String) -> Int
+}
+struct Counter {
+    bonus: Int
+    impl Measure {
+        fn measure(self, text: String) -> Int {
+            return text.len() + self.bonus
+        }
+    }
+}
+fn apply_measure(counter: Measure, text: String) -> Int {
+    return inspect(counter) + counter.measure(text)
+}
+fn inspect<T>(value: T) -> Int {
+    return 1
+}
+fn run() {
+    counters :: [Measure]{ Counter{bonus: 2} }
+    counters.each((counter) -> {
+        text :: "read"
+        print(apply_measure(counter, text))
+        print(text)
+    })
+}

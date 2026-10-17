@@ -1,0 +1,34 @@
+// Shared CLI projections for find/expand/review. Collection belongs to sema;
+// the CLI only selects checked rows and adapts existing external writers.
+use jet_driver.JetDriverCompileResult
+use jet_foundation.[GateEntry, GateKind, GateLedger, gate_source_entry, gate_ledger_push, gate_ledger_sort]
+use jet_foundation.Span
+
+fn jet_cli_gate_ledger(compiled: JetDriverCompileResult) -> Shared<GateLedger>? Never! {
+    loop doc in compiled.doc_modules {
+        if doc.gate_ledger == .Val(ledger) -> return Val(ledger)
+    }
+    None
+}
+
+fn jet_cli_gate_entries_at(ledger: GateLedger, source: String, span: Span) -> [GateEntry] Never! {
+    rows := [GateEntry]{}
+    loop entry in ledger.rows {
+        if entry.source != source -> next
+        site :: entry.span ?? next
+        if span.start <= site.start && site.end <= span.end -> &rows.push(entry.copy())
+    }
+    rows
+}
+
+// Project the provenance that the canonical fact resolver already settled.
+// A forced writer is one build gate, not a new build-fact policy mechanism.
+fn jet_cli_gate_append_build_facts(ledger: &GateLedger, facts: [EffectiveFact]) Never! {
+    loop fact in facts {
+        loop contribution in fact.provenance {
+            if !contribution.force -> next
+            gate_ledger_push(&ledger, gate_source_entry(GateKind.BuildFlag, "build", contribution.layer.name(), contribution.source, contribution.span, fact.key.name, Val(contribution.force_reason ?? ".Force"), ".Force {contribution.value.display()}", "recorded"))
+        }
+    }
+    gate_ledger_sort(&ledger)
+}

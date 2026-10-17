@@ -1,0 +1,8 @@
+Error [E0204]: `values` is being changed in this call, so it can't be used again here
+  --> nested_lambda_forms_use_the_enclosing_call_access_frame.jet:7:41
+    |
+  7 |     both(&values, Work{ callback: () -> values.len() })
+    |                                         ^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `~values`
+More: jet-lang.dev/e/E0204

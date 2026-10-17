@@ -1,0 +1,119 @@
+// WsClient.rs:10-19,57-61 Clone/PartialEq. Native-private carriers in WsABI.
+#Export(c) fn jet_rt_handle_clone_jet_ws_error(value: I64) -> I64 {
+    kind :: data_tree_word(value + WS_ERROR_TAG)
+    result :: jet_rt_alloc(WS_ERROR_BYTES, I64{8})
+    data_tree_store(result + WS_ERROR_TAG, kind)
+    data_tree_store(result + WS_ERROR_LIMIT, if (kind == I64{3}) -> data_tree_word(value + WS_ERROR_LIMIT) else -> I64{0})
+    data_tree_store(result + WS_ERROR_OPERATION, if (kind == I64{4}) -> jet_rt_string_clone(data_tree_word(value + WS_ERROR_OPERATION)) else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_ws_error(value: I64) {
+    if (value == I64{0}) -> return
+    if (data_tree_word(value + WS_ERROR_TAG) == I64{4}) -> jet_rt_string_drop(data_tree_word(value + WS_ERROR_OPERATION))
+    jet_rt_free(value, WS_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ws_error(left: I64, right: I64) -> Bool {
+    kind :: data_tree_word(left + WS_ERROR_TAG)
+    if kind != data_tree_word(right + WS_ERROR_TAG) -> return false
+    if (kind == I64{3}) -> return data_tree_word(left + WS_ERROR_LIMIT) == data_tree_word(right + WS_ERROR_LIMIT)
+    if (kind == I64{4}) -> return jet_rt_string_eq(data_tree_word(left + WS_ERROR_OPERATION), data_tree_word(right + WS_ERROR_OPERATION))
+    true
+}
+// Custom show/debug/display are identical, never Rust derived Debug:
+// WsClient.rs:22-52. IO operation is raw text, MessageTooLarge is signed i64.
+#Export(c) fn jet_rt_handle_show_jet_ws_error(value: I64) -> I64 {
+    kind :: data_tree_word(value + WS_ERROR_TAG)
+    result :: jet_rt_string_builder_new()
+    if (kind == I64{8}) {
+        rt_text_push_word(result, I64{7599087837772343412}, I64{8})
+        rt_text_push_word(result, I64{7306934683317593196}, I64{8})
+        rt_text_push_word(result, I64{2338330706115829876}, I64{8})
+        rt_text_push_word(result, I64{7308044150667109751}, I64{8})
+        rt_text_push_word(result, I64{8389754659302219892}, I64{8})
+        rt_text_push_word(result, I64{8386658456067597088}, I64{8})
+        return result
+    }
+    rt_text_push_word(result, I64{7308044150667109751}, I64{8}) // "websocke"
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(result, I64{8316213699087245428}, I64{8})
+            rt_text_push_word(result, I64{7235433442201987360}, I64{8})
+        }
+        (kind == I64{1}) -> {
+            rt_text_push_word(result, I64{7526469827509624948}, I64{8})
+            rt_text_push_word(result, I64{7811882119908911969}, I64{8})
+            rt_text_push_word(result, I64{25701}, I64{2})
+        }
+        (kind == I64{2}) -> {
+            rt_text_push_word(result, I64{7165073554179891316}, I64{8})
+            rt_text_push_word(result, I64{8245935278387129455}, I64{8})
+        }
+        (kind == I64{3}) -> {
+            rt_text_push_word(result, I64{7449362198107594868}, I64{8})
+            rt_text_push_word(result, I64{7234299854336630885}, I64{8})
+            rt_text_push_word(result, I64{8307}, I64{2})
+            rt_text_push_number(result, data_tree_word(value + WS_ERROR_LIMIT))
+            rt_text_push_word(result, I64{126879583003168}, I64{6})
+        }
+        (kind == I64{4}) -> {
+            rt_text_push_word(result, I64{7018332593771323508}, I64{8})
+            rt_text_push_word(result, I64{8247608382885031017}, I64{8})
+            rt_text_push_word(result, I64{543649385}, I64{4})
+            jet_rt_string_builder_push(result, data_tree_word(value + WS_ERROR_OPERATION))
+        }
+        (kind == I64{5}) -> {
+            rt_text_push_word(result, I64{2334102027479818356}, I64{8})
+            rt_text_push_word(result, I64{7632239}, I64{3})
+        }
+        (kind == I64{6}) -> {
+            rt_text_push_word(result, I64{8028901226721124468}, I64{8})
+            rt_text_push_word(result, I64{6579571}, I64{3})
+        }
+        else -> {
+            rt_text_push_word(result, I64{7810758454475432052}, I64{8})
+            rt_text_push_word(result, I64{6579564}, I64{3})
+        }
+    }
+    result
+}
+#Export(c) fn jet_rt_handle_debug_jet_ws_error(value: I64) -> I64 { jet_rt_handle_show_jet_ws_error(value) }
+#Export(c) fn jet_rt_handle_display_jet_ws_error(value: I64) -> I64 { jet_rt_handle_show_jet_ws_error(value) }
+#Export(c) fn jet_rt_handle_clone_jet_ws_message(value: I64) -> I64 {
+    kind :: data_tree_word(value + WS_MESSAGE_TAG)
+    payload := data_tree_word(value + WS_MESSAGE_PAYLOAD)
+    reason := I64{0}
+    if (kind == I64{0}) { payload = jet_rt_string_clone(payload) } else if (kind == I64{1}) { payload = data_sequence_clone(payload, DATA_TREE_BYTE_LIST) } else { reason = jet_rt_string_clone(data_tree_word(value + WS_MESSAGE_REASON)) }
+    result :: jet_rt_alloc(WS_MESSAGE_BYTES, I64{8})
+    data_tree_store(result + WS_MESSAGE_TAG, kind)
+    data_tree_store(result + WS_MESSAGE_PAYLOAD, payload)
+    data_tree_store(result + WS_MESSAGE_REASON, reason)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_ws_message(value: I64) {
+    if (value == I64{0}) -> return
+    kind :: data_tree_word(value + WS_MESSAGE_TAG)
+    payload :: data_tree_word(value + WS_MESSAGE_PAYLOAD)
+    if (kind == I64{0}) { jet_rt_string_drop(payload) } else if (kind == I64{1}) { data_sequence_drop(payload, DATA_TREE_BYTE_LIST) } else { jet_rt_string_drop(data_tree_word(value + WS_MESSAGE_REASON)) }
+    jet_rt_free(value, WS_MESSAGE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ws_message(left: I64, right: I64) -> Bool {
+    kind :: data_tree_word(left + WS_MESSAGE_TAG)
+    if kind != data_tree_word(right + WS_MESSAGE_TAG) -> return false
+    a :: data_tree_word(left + WS_MESSAGE_PAYLOAD)
+    b :: data_tree_word(right + WS_MESSAGE_PAYLOAD)
+    if (kind == I64{0}) -> return jet_rt_string_eq(a, b)
+    if (kind == I64{2}) {
+        if a != b -> return false
+        return jet_rt_string_eq(data_tree_word(left + WS_MESSAGE_REASON), data_tree_word(right + WS_MESSAGE_REASON))
+    }
+    length :: data_tree_word(a + DATA_SEQUENCE_LENGTH)
+    if length != data_tree_word(b + DATA_SEQUENCE_LENGTH) -> return false
+    ad :: data_tree_word(a + DATA_SEQUENCE_DATA)
+    bd :: data_tree_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if host_u8_get(ad, at) != host_u8_get(bd, at) -> return false
+        at += I64{1}
+    }
+    true
+}

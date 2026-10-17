@@ -1,0 +1,238 @@
+use core.files as files
+use core.sys as sys
+use core.process as process
+
+fn cases_test_advanced(root: String, name: String, source: String) -> KitOutcome {
+    cases_test_source(root, name, source)
+    kit_cases_run(cases_test_entry(name), cases_test_context(root, files.join(root, "scratch")))[0]
+}
+
+#Test("double quoted case tokens round trip LF and U+0001 while single quoted shell argv stays supported") {
+    root :: cases_test_root("advanced-quoted")
+    directory :: files.join(root, "tests/cases/group")
+    control :: String.from_bytes([U8{1}]) ?? panic("control character")
+    kit_exec_write(files.join(directory, "quoted.out"), "a\nb{control}")
+    kit_exec_write(files.join(directory, "single.out"), "single quote\n")
+    kit_exec_write(files.join(directory, "in{control}.txt"), "input\n")
+    kit_exec_write(files.join(directory, "input.out"), "input\n")
+    source :: "step: printf \"%s\" \"a\\nb\\u0001\"\nstdout: = quoted.out\nstderr: empty\nstep: jet -c 'printf \"%s\\\\n\" \"single quote\"'\nstdout: = single.out\nstep: cat\nstdin: \"in\\u0001.txt\"\nstdout: = input.out\nstep: jet -c 'printf %s \"$VALUE\"'\nenv: VALUE=\"a\\nb\\u0001\"\nstdout: = quoted.out\n"
+    result :: cases_test_advanced(root, "quoted", source)
+    assert_eq(result.verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove quoted scratch")
+}
+
+#Test("JSON filters projections string predicates and zero-selection checks execute from case text") {
+    root :: cases_test_root("advanced-json")
+    directory :: files.join(root, "tests/cases/group")
+    document :: "{{\"items\":[{{\"kind\":\"wanted\",\"id\":1}},{{\"kind\":\"wanted\",\"id\":2}},{{\"kind\":\"other\",\"id\":3}},{{\"id\":4}}],\"word\":\"prefix-tail\"}}\n"
+    kit_exec_write(files.join(directory, "document.txt"), document)
+    source :: "step first: cat\nstdin: document.txt\njson: stdout doc $.items[?kind=\"wanted\"] #= 2\njson: stdout doc $.items[?kind!=\"wanted\"] #= 2\njson: stdout doc $.items[?kind~=\"wan\"] #= 2\njson: stdout doc $.items[?kind!~=\"wan\"] #= 2\njson: stdout doc $.items[?kind=\"absent\"] #= 0\njson: stdout doc $.items[?kind=\"wanted\"][*].{{id,kind}} : object # original predicate\njson: stdout doc $.items[?kind=\"wanted\"][0].{{id,kind}} = {{\"kind\":\"wanted\",\"id\":1}}\njson: stdout doc $.items #>= 3\njson: stdout doc $.items !has {{\"kind\":\"forbidden\"}}\njson: stdout doc $.word ~ \"tail\" # original predicate\njson: stdout doc $.word ^= \"prefix\" # original predicate\nstep second: cat\nstdin: document.txt\njson: stdout doc $.items == first\njson: stdout doc $.items #== first\njson: stdout doc $.items #>= 1*first\n"
+    assert_eq(cases_test_advanced(root, "json", source).verdict.status, "PASS")
+    empty :: "step: cat\nstdin: document.txt\njson: stdout doc $.items[?kind=\"absent\"] : array # original predicate\n"
+    assert_eq(cases_test_advanced(root, "empty", empty).verdict.status, "FAIL")
+    missing :: "step: cat\nstdin: document.txt\njson: stdout doc $.absent #= 0\n"
+    assert_eq(cases_test_advanced(root, "missing", missing).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove JSON scratch")
+}
+
+#Test("JSON has checks key presence even when values are empty and missing parents still fail") {
+    root :: cases_test_root("advanced-json-keys")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "keys.txt"), "{{\"parent\":{{\"empty\":[],\"text\":\"\",\"nothing\":null,\"a.b\":\"\"}},\"number\":7}}\n")
+    source :: "step: cat\nstdin: keys.txt\njson: stdout doc $.parent has \"empty\"\njson: stdout doc $.parent has \"text\"\njson: stdout doc $.parent has \"nothing\"\njson: stdout doc $.parent has \"a.b\"\njson: stdout doc $.parent !has \"absent\"\ncapture: number stdout doc $.number\nstep: cat\nstdin: keys.txt\njson: stdout doc $.number = {{cap:number}}\n"
+    assert_eq(cases_test_advanced(root, "keys", source).verdict.status, "PASS")
+    missing :: "step: cat\nstdin: keys.txt\njson: stdout doc $.missing !has \"absent\"\n"
+    assert_eq(cases_test_advanced(root, "missing-parent", missing).verdict.status, "FAIL")
+    present :: "step: cat\nstdin: keys.txt\njson: stdout doc $.parent !has \"empty\"\n"
+    assert_eq(cases_test_advanced(root, "present", present).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove JSON key scratch")
+}
+
+#Test("captured selectors and scalar JSON expectations are parsed after real token expansion") {
+    root :: cases_test_root("advanced-json-tokens")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tokens.txt"), "{{\"key\":\"chosen\",\"index\":1,\"expected\":7,\"chosen\":[3,7],\"items\":[{{\"id\":3}},{{\"id\":7}}]}}\n")
+    source :: "step: cat\nstdin: tokens.txt\ncapture: key stdout doc $.key\ncapture: index stdout doc $.index\ncapture: expected stdout doc $.expected\nstep: cat\nstdin: tokens.txt\njson: stdout doc $.{{cap:key}}[{{cap:index}}] = {{cap:expected}}\njson: stdout doc $.items[?id={{cap:expected}}] #= 1\ncapture: selected stdout doc $.{{cap:key}}[{{cap:index}}]\nstep: cat\nstdin: tokens.txt\njson: stdout doc $.expected = {{cap:selected}}\n"
+    assert_eq(cases_test_advanced(root, "tokens", source).verdict.status, "PASS")
+    wrong :: "step: cat\nstdin: tokens.txt\ncapture: expected stdout doc $.index\nstep: cat\nstdin: tokens.txt\njson: stdout doc $.expected = {{cap:expected}}\n"
+    assert_eq(cases_test_advanced(root, "wrong", wrong).verdict.status, "FAIL")
+    invalid :: "step: cat\nstdin: tokens.txt\ncapture: key stdout doc $.key\nstep: cat\nstdin: tokens.txt\njson: stdout doc $.chosen[{{cap:key}}] = 7\n"
+    assert_eq(cases_test_advanced(root, "invalid", invalid).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove JSON token scratch")
+}
+
+#Test("JSON count relations multiply earlier selections and stderr labels are selectable") {
+    root :: cases_test_root("advanced-json-count")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "one.txt"), "[1]\n")
+    kit_exec_write(files.join(directory, "two.txt"), "[1,2]\n")
+    source :: "step first: jet -c 'cat >&2'\nstdin: one.txt\nstep second: cat\nstdin: two.txt\njson: stdout doc $ #== 2*first.stderr\njson: stdout doc $ #>= 2*first.stderr\n"
+    assert_eq(cases_test_advanced(root, "multiply", source).verdict.status, "PASS")
+    unequal :: "step first: cat\nstdin: one.txt\nstep second: cat\nstdin: two.txt\njson: stdout doc $ #== first\n"
+    assert_eq(cases_test_advanced(root, "unequal", unequal).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove JSON count scratch")
+}
+
+#Test("capture scalar and line tails expand into argv env paths stdin and write templates") {
+    root :: cases_test_root("advanced-capture")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "capture.txt"), "{{\"name\":\"chosen\",\"number\":7}}\n")
+    kit_exec_write(files.join(directory, "template.txt"), "{{cap:name}}={{cap:number}}/{{cap:tail}}\n")
+    kit_exec_write(files.join(directory, "chosen.in"), "payload\n")
+    kit_exec_write(files.join(directory, "payload.out"), "payload\n")
+    kit_exec_write(files.join(directory, "render.out"), "chosen=7/tail\n")
+    kit_exec_write(files.join(directory, "name.out"), "chosen")
+    source :: "step: cat\nstdin: capture.txt\ncapture: name stdout doc $.name\ncapture: number stdout doc $.number\nstep: printf \"VALUE=tail\\n\"\ncapture: tail stdout line ^= \"VALUE=\" # original predicate\nwrite: {{cap:name}}/result.txt template.txt\nfile: {{cap:name}}/result.txt = render.out\nstep: printf \"%s\" {{cap:name}}\nstdout: = name.out\nstep: jet -c 'printf %s \"$CAPTURED\"'\nenv: CAPTURED={{cap:name}}\nstdout: = name.out\nstep: cat\nstdin: {{cap:name}}.in\nstdout: = payload.out\n"
+    assert_eq(cases_test_advanced(root, "capture", source).verdict.status, "PASS")
+    undefined :: "step: printf {{cap:missing}}\n"
+    assert_eq(cases_test_advanced(root, "undefined", undefined).verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove capture scratch")
+}
+
+#Test("concat preserves non-UTF8 bytes file predicates and optional missing files") {
+    root :: cases_test_root("advanced-concat")
+    directory :: files.join(root, "tests/cases/group")
+    files.create_dir_all(files.join(directory, "tree")) ?? panic("concat fixture")
+    files.write_bytes(files.join(directory, "tree/left"), [U8{0}, U8{255}]) ?? panic("left bytes")
+    files.write_bytes(files.join(directory, "tree/right"), [U8{1}, U8{10}]) ?? panic("right bytes")
+    files.write_bytes(files.join(directory, "tree/expected"), [U8{0}, U8{255}, U8{1}, U8{10}]) ?? panic("expected bytes")
+    kit_exec_write(files.join(directory, "empty.out"), "")
+    source :: "fixture: tree\nconcat: combined left right\nfile: combined == expected\nfile: combined is-file\nfile: . is-dir\nfile?: missing empty\nfile?: missing = empty.out\n"
+    assert_eq(cases_test_advanced(root, "concat", source).verdict.status, "PASS")
+    missing :: "concat: combined absent also-absent\n"
+    assert_eq(cases_test_advanced(root, "missing", missing).verdict.status, "ERROR")
+    plain :: "step: printf x\nfile: missing empty\n"
+    assert_eq(cases_test_advanced(root, "plain", plain).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove concat scratch")
+}
+
+#Test("raw binary file predicates do not decode UTF-8 before checking ELF and byte content") {
+    root :: cases_test_root("advanced-binary")
+    directory :: files.join(root, "tests/cases/group")
+    files.create_dir_all(files.join(directory, "tree")) ?? panic("binary fixture")
+    files.write_bytes(files.join(directory, "tree/binary"), [U8{127}, U8{69}, U8{76}, U8{70}, U8{255}, U8{0}, U8{65}, U8{10}]) ?? panic("binary bytes")
+    source :: "fixture: tree\nstep: printf ready\nfile: binary ^= \"\\u007fELF\" # original predicate\nfile: binary ~ ELF # original predicate\nfile: binary !~ missing # original predicate\nfile: binary ~i elf # original predicate\nfile: binary !~i absent # original predicate\nfile: binary ~any missing ELF # original predicate\nfile: binary count ELF = 1 # original predicate\nfile: binary before ELF A # original predicate\nfile: binary line ^= \"\\u007fELF\" ~ A # original predicate\nfile: binary nonempty # original predicate\n"
+    assert_eq(cases_test_advanced(root, "binary", source).verdict.status, "PASS")
+    loop predicate in ["^= MZ", "~ absent", "!~ ELF", "~i missing", "!~i elf", "~any absent missing", "count ELF = 2", "before A ELF", "line ^= ELF", "empty"] {
+        wrong :: "fixture: tree\nstep: printf ready\nfile: binary {predicate} # original predicate\n"
+        assert_eq(cases_test_advanced(root, "wrong", wrong).verdict.status, "FAIL")
+    }
+    files.remove_all(root) ?? panic("remove binary scratch")
+}
+
+#Test("stream composition OR and trims use independent subjects not accidental concatenation") {
+    root :: cases_test_root("advanced-streams")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "stdout.out"), "left")
+    kit_exec_write(files.join(directory, "start.out"), "left ")
+    kit_exec_write(files.join(directory, "end.out"), " left")
+    kit_exec_write(files.join(directory, "joined.out"), " left right ")
+    kit_exec_write(files.join(directory, "reverse.out"), "right  left ")
+    source :: "step: jet -c 'printf \" left \"; printf \"right \" >&2'\nstdout.trim: = stdout.out # original predicate\nstdout.trim_start: = start.out # original predicate\nstdout.trim_end: = end.out # original predicate\nstdout+stderr: = joined.out\nstderr+stdout: = reverse.out\nstdout|stderr: ~ right # original predicate\nstderr|stdout: ~ left # original predicate\nstdout|stderr: !~ left # original predicate\nstdout+stderr.trim: ^= \"left right\" # original predicate\n"
+    assert_eq(cases_test_advanced(root, "subjects", source).verdict.status, "PASS")
+    split :: "step: jet -c 'printf cross-; printf boundary >&2'\nstdout|stderr: ~ cross-boundary # original predicate\n"
+    assert_eq(cases_test_advanced(root, "split", split).verdict.status, "FAIL")
+    combined :: "step: jet -c 'printf cross-; printf boundary >&2'\nstdout+stderr: ~ cross-boundary # original predicate\n"
+    assert_eq(cases_test_advanced(root, "combined", combined).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove streams scratch")
+}
+
+#Test("line suffix count and line-count predicates retain their original selection semantics") {
+    root :: cases_test_root("advanced-lines")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "lines.txt"), "skip\nROW wanted\nmarker suffix\nababab\n")
+    kit_exec_write(files.join(directory, "suffix.out"), "marker suffix\nababab\n")
+    source :: "step first: cat\nstdin: lines.txt\nstdout: line ^= ROW ~ wanted # original predicate\nstdout: from marker = suffix.out # original predicate\nstdout: count abab = 1 # original predicate\nstdout: lines = 4 # original predicate\nstdout: nonempty # original predicate\nstep second: cat\nstdin: lines.txt\nstdout: lines = 1*first # original predicate\n"
+    assert_eq(cases_test_advanced(root, "lines", source).verdict.status, "PASS")
+    split :: "step: printf \"ROW absent\\nother wanted\\n\"\nstdout: line ^= ROW ~ wanted # original predicate\n"
+    assert_eq(cases_test_advanced(root, "split", split).verdict.status, "FAIL")
+    missing :: "step: printf unchanged\nstdout: from absent = suffix.out # original predicate\n"
+    assert_eq(cases_test_advanced(root, "missing", missing).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove line scratch")
+}
+
+#Test("path token predicates match raw output before normalization and replacements precede exact comparisons") {
+    root :: cases_test_root("advanced-raw")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "paths.out"), "{{work}}/leaf")
+    kit_exec_write(files.join(directory, "replaced.out"), "WORK/leaf")
+    source :: "step: printf \"%s/leaf\" {{work}}\nstdout: ^= {{work}} # original predicate\nstdout: ~ {{work}}/leaf # original predicate\nstdout: !~ {{scratch}}/absent # original predicate\nstdout: = paths.out\nstep: printf \"%s/leaf\" {{work}}\nnormalize: replace {{work}} WORK\nstdout: = replaced.out\n"
+    assert_eq(cases_test_advanced(root, "raw", source).verdict.status, "PASS")
+    literal :: "step: printf \"%s%s\" \"\\u007b\" \"work\\u007d\"\nstdout: ^= {{work}} # original predicate\n"
+    assert_eq(cases_test_advanced(root, "literal", literal).verdict.status, "FAIL")
+    insensitive :: "step: printf MixedCase\nstdout: ~i mixedcase # original predicate\nstdout: !~i absent # original predicate\nstdout: ~any absent MixedCase # original predicate\n"
+    assert_eq(cases_test_advanced(root, "insensitive", insensitive).verdict.status, "PASS")
+    files.remove_all(root) ?? panic("remove raw scratch")
+}
+
+#Test("inventory compares bytes kinds paths sizes and modification times without process helpers") {
+    root :: cases_test_root("advanced-inventory")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "tree/value"), "stable\n")
+    stable :: "fixture: tree\ninventory before: .\nstep: cat value\ninventory: . == before\n"
+    assert_eq(cases_test_advanced(root, "stable", stable).verdict.status, "PASS")
+    changed :: "fixture: tree\ninventory before: .\nstep: jet -c 'printf changed > value'\ninventory: . == before\n"
+    assert_eq(cases_test_advanced(root, "changed", changed).verdict.status, "FAIL")
+    // The core stat seam is millisecond-precision until modified_ns lands.
+    // This sleep changes observable mtime without changing file content.
+    touched :: "fixture: tree\ninventory before: .\nstep: jet -c 'sleep 0.05; touch value'\ninventory: . == before\n"
+    assert_eq(cases_test_advanced(root, "touched", touched).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove inventory scratch")
+}
+
+#Test("spawn and wait launch real concurrent children with independent bounds and receipts") {
+    root :: cases_test_root("advanced-spawn")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "left.out"), "left")
+    kit_exec_write(files.join(directory, "right.out"), "right")
+    source :: "spawn left: jet -c 'touch left; while [ ! -f right ]; do sleep 0.01; done; printf left'\nlimit: time=2 memory=65536\nspawn right: jet -c 'touch right; while [ ! -f left ]; do sleep 0.01; done; printf right'\nlimit: time=2 memory=65536\nwait left:\nstdout: = left.out\nstderr: empty\nwait right:\nstdout: = right.out\nstderr: empty\n"
+    assert_eq(cases_test_advanced(root, "concurrent", source).verdict.status, "PASS")
+    loop invalid in ["spawn x: printf x\n", "spawn x: printf x\nspawn x: printf y\nwait x:\n", "wait unknown:\n", "spawn x: printf x\nwait x:\nwait x:\n"] {
+        assert_eq(cases_test_advanced(root, "invalid", invalid).verdict.status, "REFUSED")
+    }
+    failed :: "spawn sleeping: jet -c 'exec sleep 20'\nlimit: time=2\nstep: printf wrong\nstdout: = left.out\nwait sleeping:\n"
+    assert_eq(cases_test_advanced(root, "cleanup", failed).verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove spawn scratch")
+}
+
+#Test("tool alternatives choose first available and external executable copies preserve mode") {
+    root :: cases_test_root("advanced-tools")
+    directory :: files.join(root, "tests/cases/group")
+    kit_exec_write(files.join(directory, "selected.out"), "selected")
+    source :: "requires: tool:testkit-deliberately-missing-tool|printf\nstep: {{tool:testkit-deliberately-missing-tool|printf}} \"%s\" selected\nstdout: = selected.out\ncopy: {{jet}} isolated/jet\nfile: isolated/jet is-file\nstep: {{work}}/isolated/jet -c 'printf selected'\nstdout: = selected.out\nstep: printf \"%s\" {{sys:dll-suffix}}\nstdout: nonempty # original predicate\n"
+    assert_eq(cases_test_advanced(root, "tools", source).verdict.status, "PASS")
+    absent :: "requires: tool:testkit-missing-tool-a|testkit-missing-tool-b\nstep: printf impossible\n"
+    assert_eq(cases_test_advanced(root, "absent", absent).verdict.status, "SKIP-HOST")
+    files.remove_all(root) ?? panic("remove tools scratch")
+}
+
+#Test("copying the real Jet executable preserves its mode and its version banner") {
+    root :: cases_test_root("advanced-jet-copy")
+    cases_test_source(root, "jet-copy", "step original: jet --version\ncopy: {{jet}} isolated/jet\nfile: isolated/jet is-file\nstep: {{work}}/isolated/jet --version\nstdout: == original\nstderr: empty\n")
+    context := cases_test_context(root, files.join(root, "scratch"))
+    context.env.jet = sys.get("TESTKIT_JET") ?? (process.which("jet") ?? panic("a real Jet compiler is required for executable-copy acceptance"))
+    result :: kit_cases_run(cases_test_entry("jet-copy"), context)[0]
+    assert_eq(result.verdict.status, "PASS")
+    assert(result.run.stdout.starts_with("Jet "))
+    files.remove_all(root) ?? panic("remove real Jet copy scratch")
+}
+
+#Test("exit any and not-equal accept only normal receipts and exact 101 is intentional") {
+    root :: cases_test_root("advanced-exit")
+    any :: "step: jet -c 'exit 7'\nexit: any # original predicate\n"
+    assert_eq(cases_test_advanced(root, "any", any).verdict.status, "PASS")
+    not_equal :: "step: jet -c 'exit 7'\nexit: != 3 # original predicate\n"
+    assert_eq(cases_test_advanced(root, "not-equal", not_equal).verdict.status, "PASS")
+    equal :: "step: jet -c 'exit 7'\nexit: != 7 # original predicate\n"
+    assert_eq(cases_test_advanced(root, "equal", equal).verdict.status, "FAIL")
+    ice :: "step: jet -c 'exit 101'\nexit: any # original predicate\n"
+    assert_eq(cases_test_advanced(root, "ice", ice).verdict.status, "ERROR")
+    intentional :: "step: jet -c 'exit 101'\nexit: 101\n"
+    assert_eq(cases_test_advanced(root, "intentional", intentional).verdict.status, "PASS")
+    signal :: "step: jet -c 'kill -TERM $$'\nexit: any # original predicate\n"
+    assert_eq(cases_test_advanced(root, "signal", signal).verdict.status, "ERROR")
+    loop undocumented in ["stdout: !~ forbidden", "stdout: ^= prefix", "stdout: line ^= prefix", "stdout: count token = 0", "stdout: from marker = out.txt", "stdout.trim: empty", "stdout: nonempty", "exit: any", "exit: != 1", "json: stdout doc $ : object", "json: stdout doc $ ~ needle", "json: stdout doc $ ^= prefix"] {
+        assert_eq(cases_test_advanced(root, "undocumented", "step: printf token\n{undocumented}\n").verdict.status, "REFUSED")
+    }
+    files.remove_all(root) ?? panic("remove exit scratch")
+}

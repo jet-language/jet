@@ -1,0 +1,24 @@
+
+struct Order {
+    state { Draft, Confirmed, Cancelled, Closed }
+    id: Int
+}
+
+impl Order {
+    #Transition(_, Draft) fn start(id: Int) -[]> Order { return Order{ id: id } }
+    #Transition(Draft, Confirmed) fn confirm(self: ^Order) -[]> Order { return self }
+    #Transition(Draft, Cancelled) fn cancel(self: ^Order) -[]> Order { return self }
+    #Transition(Confirmed, Closed) fn close(self: ^Order) -[]> Order { return self }
+    #Transition(Cancelled, Closed) fn archive(self: ^Order) -[]> Order { return self }
+    #State(Confirmed) fn ship(self) -[]> Int { return self.id }
+}
+
+fn decide(n: Int) {
+  order := Order.start(1)
+  loop i := 0, i < n {
+    fresh := Order.start(2)
+    order = fresh.confirm()
+  }
+  print(order.ship())
+}
+fn run() { decide(1) }

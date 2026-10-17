@@ -9,7 +9,7 @@ use crate::ForeignBridge::{
     ForeignArtifactCoverage, ForeignBoundaryContract, ForeignBoundaryIdentity,
     ForeignEvidenceBasis, IdentityBuilder,
 };
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use crate::JSON;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read;
@@ -697,7 +697,7 @@ fn binding_identity(
 }
 
 fn project_surface(
-    ast: &DataTree,
+    ast: &Dyn,
     header: &Path,
     selected: &[String],
 ) -> Result<Surface, BindError> {
@@ -720,7 +720,7 @@ fn project_surface(
 }
 
 fn walk_ast(
-    value: &DataTree,
+    value: &Dyn,
     header: &str,
     inherited_main: bool,
     namespace: &mut Vec<String>,
@@ -777,7 +777,7 @@ fn walk_ast(
 }
 
 fn parse_class(
-    map: &[(String, DataTree)],
+    map: &[(String, Dyn)],
     namespace: &[String],
 ) -> Result<Class, BindError> {
     let name = string(map, "name").unwrap_or("");
@@ -825,7 +825,7 @@ fn parse_class(
 }
 
 fn parse_template(
-    map: &[(String, DataTree)],
+    map: &[(String, Dyn)],
     namespace: &[String],
 ) -> Result<FunctionTemplate, BindError> {
     let name = string(map, "name").unwrap_or("");
@@ -933,7 +933,7 @@ fn instantiate_templates(
 }
 
 fn parse_routine(
-    map: &[(String, DataTree)],
+    map: &[(String, Dyn)],
     cpp_name: String,
     jet_name: Option<String>,
 ) -> Result<Routine, BindError> {
@@ -951,7 +951,7 @@ fn parse_routine(
 }
 
 fn parse_params(
-    map: &[(String, DataTree)],
+    map: &[(String, Dyn)],
     substitutions: &BTreeMap<String, String>,
 ) -> Result<Vec<Param>, BindError> {
     raw_params(map)?
@@ -969,7 +969,7 @@ fn parse_params(
         .collect()
 }
 
-fn raw_params(map: &[(String, DataTree)]) -> Result<Vec<(String, String)>, BindError> {
+fn raw_params(map: &[(String, Dyn)]) -> Result<Vec<(String, String)>, BindError> {
     children(map)
         .iter()
         .filter_map(|value| object(value))
@@ -987,14 +987,14 @@ fn raw_params(map: &[(String, DataTree)]) -> Result<Vec<(String, String)>, BindE
         .collect()
 }
 
-fn return_type(map: &[(String, DataTree)]) -> Result<&str, BindError> {
+fn return_type(map: &[(String, Dyn)]) -> Result<&str, BindError> {
     let ty = qual_type(map)?;
     ty.split_once(" (")
         .map(|(result, _)| result.trim())
         .ok_or_else(|| BindError::Source(format!("clang returned an invalid function type `{ty}`")))
 }
 
-fn qual_type(map: &[(String, DataTree)]) -> Result<&str, BindError> {
+fn qual_type(map: &[(String, Dyn)]) -> Result<&str, BindError> {
     field(map, "type")
         .and_then(object)
         .and_then(|value| string(value, "qualType"))
@@ -1043,36 +1043,36 @@ fn qualified(namespace: &[String], name: &str) -> String {
     }
 }
 
-fn field<'a>(map: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(map: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     map.iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
-fn object(value: &DataTree) -> Option<&[(String, DataTree)]> {
+fn object(value: &Dyn) -> Option<&[(String, Dyn)]> {
     match value {
-        DataTree::Object(value) => Some(value),
+        Dyn::Object(value) => Some(value),
         _ => None,
     }
 }
-fn string<'a>(map: &'a [(String, DataTree)], key: &str) -> Option<&'a str> {
+fn string<'a>(map: &'a [(String, Dyn)], key: &str) -> Option<&'a str> {
     field(map, key).and_then(|value| match value {
-        DataTree::Text(value) | DataTree::TypedText(value) => Some(value.as_str()),
+        Dyn::Text(value) => Some(value.as_str()),
         _ => None,
     })
 }
 
-fn bool_field(map: &[(String, DataTree)], key: &str) -> bool {
-    matches!(field(map, key), Some(DataTree::Bool(true)))
+fn bool_field(map: &[(String, Dyn)], key: &str) -> bool {
+    matches!(field(map, key), Some(Dyn::Bool(true)))
 }
 
-fn children(map: &[(String, DataTree)]) -> &[DataTree] {
+fn children(map: &[(String, Dyn)]) -> &[Dyn] {
     match field(map, "inner") {
-        Some(DataTree::Array(values)) => values,
+        Some(Dyn::Array(values)) => values,
         _ => &[],
     }
 }
 
-fn location_file(map: &[(String, DataTree)]) -> Option<&str> {
+fn location_file(map: &[(String, Dyn)]) -> Option<&str> {
     field(map, "loc")
         .and_then(object)
         .and_then(|loc| string(loc, "file"))
@@ -1082,7 +1082,7 @@ fn location_file(map: &[(String, DataTree)]) -> Option<&str> {
 /// native implementation carrier for the canonical C binder. This is derived
 /// from clang's AST rather than a command flag or a guessed filename; system
 /// headers and unrelated C++ surfaces do not unlock the empty-surface path.
-fn has_local_c_abi_declaration(value: &DataTree, source_dir: &Path) -> bool {
+fn has_local_c_abi_declaration(value: &Dyn, source_dir: &Path) -> bool {
     let Some(map) = object(value) else {
         return false;
     };
@@ -1374,11 +1374,11 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
             function.jet_name
         ));
     }
-    out.push_str(&format!("}}\nuse c.{abi} as abi\n\npub enum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
+    out.push_str(&format!("}}\nuse c.{abi} as abi\n\nenum CppError {{ Exception InvalidHandle ResourceLimit }}\n\nfn cpp_error(code: Int) -[]> CppError {{ if code == 2 {{ return CppError.InvalidHandle }} if code == 3 {{ return CppError.ResourceLimit }} return CppError.Exception }}\n\n"));
     for class in &surface.classes {
         let name = snake(&class.name);
         out.push_str(&format!(
-            "#SingleUse\npub struct {} {{ value: Int }}\n\npub fn new_{name}(",
+            "#SingleUse\nstruct {} {{ value: Int }}\n\nfn new_{name}(",
             class.name
         ));
         jet_params(&mut out, &class.ctor);
@@ -1395,7 +1395,7 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
             out.push_str(&format!("impl {} {{\n", class.name));
         }
         for method in &class.methods {
-            out.push_str(&format!("    pub fn {}(self", method.jet_name));
+            out.push_str(&format!("    fn {}(self", method.jet_name));
             if !method.params.is_empty() {
                 out.push_str(", ");
                 jet_params(&mut out, &method.params);
@@ -1414,10 +1414,10 @@ fn render_jet(lib: &str, surface: &Surface) -> String {
         if !class.methods.is_empty() {
             out.push_str("}\n\n");
         }
-        out.push_str(&format!("pub fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
+        out.push_str(&format!("fn close_{name}(value: ^{}) -[FFI.Cpp]> {{\n    abi.{name}_close(value.value)\n    if abi.take_error() != 0 {{ panic(\"C++ handle close failed\") }}\n}}\n\n", class.name));
     }
     for function in &surface.functions {
-        out.push_str(&format!("pub fn {}(", function.jet_name));
+        out.push_str(&format!("fn {}(", function.jet_name));
         jet_params(&mut out, &function.params);
         out.push_str(&format!(
             ") -[FFI.Cpp]> {} !CppError {{\n    result_value :: abi.{}(",

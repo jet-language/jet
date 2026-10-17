@@ -509,13 +509,13 @@ pub fn item_source_fingerprint(item: &Item) -> String {
 /// default methods. Private inherent methods are dropped. A body edit that
 /// changes an inferred fact reaches importers through the checker's
 /// summaries, not through this fingerprint.
-pub fn item_interface_fingerprint(item: &Item, pub_file: bool) -> Option<String> {
-    let erased = interface_item(item, pub_file)?;
+pub fn item_interface_fingerprint(item: &Item) -> Option<String> {
+    let erased = interface_item(item)?;
     Some(sha256_hex(&crate::CanonicalAST::canonical_fragment(&erased)))
 }
 
-fn exported(is_pub: bool, is_package_pub: bool, pub_file: bool) -> bool {
-    is_pub || is_package_pub || pub_file
+fn exported(is_pub: bool, is_package_pub: bool) -> bool {
+    is_pub || is_package_pub
 }
 
 fn keeps_body(func: &Func) -> bool {
@@ -528,8 +528,8 @@ fn erase_func(func: &mut Func) {
     }
 }
 
-fn erase_inherent_methods(methods: &mut Vec<Func>, pub_file: bool) {
-    methods.retain(|method| exported(method.is_pub, method.is_package_pub, pub_file));
+fn erase_inherent_methods(methods: &mut Vec<Func>) {
+    methods.retain(|method| exported(method.is_pub, method.is_package_pub));
     methods.iter_mut().for_each(erase_func);
 }
 
@@ -539,28 +539,28 @@ fn erase_trait_impls(blocks: &mut [crate::AST::TraitImplBlock]) {
     }
 }
 
-fn interface_item(item: &Item, pub_file: bool) -> Option<Item> {
+fn interface_item(item: &Item) -> Option<Item> {
     let mut item = item.clone();
     let keep = match &mut item {
         Item::Func(func) => {
             erase_func(func);
-            exported(func.is_pub, func.is_package_pub, pub_file)
+            exported(func.is_pub, func.is_package_pub)
         }
         Item::Struct(def) => {
-            erase_inherent_methods(&mut def.methods, pub_file);
+            erase_inherent_methods(&mut def.methods);
             erase_trait_impls(&mut def.trait_impls);
-            exported(def.is_pub, def.is_package_pub, pub_file)
+            exported(def.is_pub, def.is_package_pub)
         }
         Item::Enum(def) => {
-            erase_inherent_methods(&mut def.methods, pub_file);
+            erase_inherent_methods(&mut def.methods);
             erase_trait_impls(&mut def.trait_impls);
-            exported(def.is_pub, def.is_package_pub, pub_file)
+            exported(def.is_pub, def.is_package_pub)
         }
         Item::Impl(def) => {
             if def.trait_name.is_some() {
                 def.methods.iter_mut().for_each(erase_func);
             } else {
-                erase_inherent_methods(&mut def.methods, pub_file);
+                erase_inherent_methods(&mut def.methods);
             }
             true
         }
@@ -568,20 +568,21 @@ fn interface_item(item: &Item, pub_file: bool) -> Option<Item> {
             if let Some(body) = &mut module.body {
                 *body = body
                     .iter()
-                    .filter_map(|item| interface_item(item, pub_file))
+                    .filter_map(|item| interface_item(item))
                     .collect();
             }
-            exported(module.is_pub, module.is_package_pub, pub_file)
+            exported(module.is_pub, module.is_package_pub)
         }
-        Item::Distinct(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::TypeAlias(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::UnitFamily(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::Trait(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::Tag(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::Const(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::ProtocolDecl(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::GenericModule(def) => exported(def.is_pub, def.is_package_pub, pub_file),
-        Item::ModuleAlias(def) => exported(def.is_pub, def.is_package_pub, pub_file),
+        Item::Distinct(def) => exported(def.is_pub, def.is_package_pub),
+        Item::TypeAlias(def) => exported(def.is_pub, def.is_package_pub),
+        Item::UnitFamily(def) => exported(def.is_pub, def.is_package_pub),
+        Item::Trait(def) => exported(def.is_pub, def.is_package_pub),
+        Item::Tag(def) => exported(def.is_pub, def.is_package_pub),
+        Item::Const(def) => exported(def.is_pub, def.is_package_pub),
+        Item::ProtocolDecl(def) => exported(def.is_pub, def.is_package_pub),
+        Item::GenericModule(def) => exported(def.is_pub, def.is_package_pub),
+        Item::ModuleAlias(def) => exported(def.is_pub, def.is_package_pub),
+        Item::MarkerDecl(def) => exported(def.is_pub, def.is_package_pub),
         Item::Test(_) => false,
         // Declarations without a visibility flag register package-wide facts
         // (effects, markers, facts, derives, migrations, conversions, foreign
@@ -594,7 +595,6 @@ fn interface_item(item: &Item, pub_file: bool) -> Option<Item> {
         | Item::Migration(_)
         | Item::UserDerive(_)
         | Item::TemplateLoop(_)
-        | Item::MarkerDecl(_)
         | Item::FactDecl(_) => true,
     };
     keep.then_some(item)
@@ -633,7 +633,7 @@ pub fn module_interface(module: &LoadedModule) -> Vec<(String, String)> {
         .items
         .iter()
         .filter_map(|item| {
-            item_interface_fingerprint(item, module.pub_file).map(|fingerprint| (item_name(item), fingerprint))
+            item_interface_fingerprint(item).map(|fingerprint| (item_name(item), fingerprint))
         })
         .collect()
 }

@@ -13,17 +13,17 @@ PKG_MAX_TREE_DEPTH :: prep { 256 }
 AUTHORITY_SOURCE_WALK_SKIPPED :: prep { [String]{"target", "build", "node_modules", "bin"} }
 
 // One directory entry observed without following links.
-pub struct AuthorityEntry {
-    pub name: String
-    pub path: String
-    pub info: files.Stat
+struct AuthorityEntry {
+    name: String
+    path: String
+    info: files.Stat
 }
 
 // Entry, file, and byte budget for one authority walk.
-pub struct AuthorityWalkBudget {
-    entries: Int
-    files: Int
-    bytes: Int
+struct AuthorityWalkBudget {
+    priv entries: Int
+    priv files: Int
+    priv bytes: Int
 
     fn new() -> AuthorityWalkBudget Never! {
         AuthorityWalkBudget{entries: 0, files: 0, bytes: 0}
@@ -58,7 +58,7 @@ pub struct AuthorityWalkBudget {
 // Every entry of the held `directory` (displayed as `path`), sorted by name,
 // each observed with a no-follow Stat and counted against `budget`.
 fn pkg_authority_read_sorted_entries(directory: Directory, path: String, budget: &AuthorityWalkBudget) -[FS]> [AuthorityEntry] AuthorityError! {
-    listed :: &directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
+    listed :: directory.list() ?? return Err(AuthorityError.IO{path: path, operation: "read", detail: "{err}"})
     entries := [AuthorityEntry]{}
     loop entry in listed {
         info :: directory.entry_stat(entry.name) ?? return Err(AuthorityError.IO{path: path, operation: "inspect", detail: "{err}"})
@@ -83,7 +83,7 @@ fn pkg_authority_has_candidate(root: String) -[FS, Env]> Bool AuthorityError! {
 // A world-writable directory is shared discovery space, never an authority.
 fn pkg_authority_is_shared_directory(info: files.Stat) -[Env]> Bool Never! {
     if !sys.is_unix() -> return false
-    (info.mode & 0o002) != 0
+    ((info.mode).bit_and(0o002)) != 0
 }
 
 fn pkg_authority_is_shared_directory_path(path: String) -[FS, Env]> Bool Never! {

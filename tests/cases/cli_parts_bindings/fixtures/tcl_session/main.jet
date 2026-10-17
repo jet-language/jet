@@ -1,0 +1,11 @@
+use tcl.eda as tcl
+
+fn run() -[FFI.Tcl, IO]> {
+    session :: tcl.open() ?? panic("Tcl open failed")
+    print(tcl.eval_int(session, "incr counter 2") ?? -1)
+    print(tcl.eval_int(session, "incr counter 1") ?? -1)
+    print(tcl.eval_once("expr 6 * 7") ?? "bad")
+    print(tcl.eval_float(session, "expr 5.0 / 2") ?? -1.0)
+    print(tcl.eval(session, "error \"foreign stack secret\"") ?? "tcl-error")
+    tcl.close(^session)
+}

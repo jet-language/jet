@@ -1,0 +1,14 @@
+# Port of tests/corelib_parts/encoding_streams.rs::xml_stream_drop_and_codec_heap_ceiling_are_enforced; guest source unchanged.
+# ORACLE-CONSTRUCTED: encoding_streams.rs:1426-1429 substitutes original heap fixture byte length (8192+9=8201) into exact stdout.
+# PENDING-SAME-HEAD: unchanged count++ retains historical E0160 (class identified batch5); never rewritten.
+fixture: fixtures/xml_stream_drop_and_codec_heap_ceiling_are_enforced
+write: guest.jet fixtures/xml_stream_drop_and_codec_heap_ceiling_are_enforced/fixture.template
+step aot: jet build guest.jet
+step aot_run: built
+stdout: = xml_stream_drop_and_codec_heap_ceiling_are_enforced.expected-stream
+stderr: empty
+file: partial.xml = xml_stream_drop_and_codec_heap_ceiling_are_enforced.partial.xml.expected
+step: jet run guest.jet
+stdout: = xml_stream_drop_and_codec_heap_ceiling_are_enforced.expected-stream
+stderr: empty
+file: partial.xml = xml_stream_drop_and_codec_heap_ceiling_are_enforced.partial.xml.expected

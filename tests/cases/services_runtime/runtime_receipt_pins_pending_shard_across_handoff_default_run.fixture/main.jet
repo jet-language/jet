@@ -1,0 +1,43 @@
+
+use core.service as service
+use core.testing as testing
+use core.time as time
+
+fn worker() {}
+
+fn receipt_id(receipt: ^Delivery) -> Delivery {
+    return receipt
+}
+
+fn receipt_kind(receipt: ^Delivery) -> String {
+    state :: receipt.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    temp := testing.temp_dir("runtime-handoff-pending")
+    store :: Path.from(temp).join("authority.log").to_string()
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := service.runtime(store, retention: retention)
+    tree := service.tree("runtime-handoff-pending")
+    endpoint :: tree.worker("api", worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+
+    receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
+    id :: receipt_id(receipt.copy())
+    print("sent:{receipt_kind(^receipt)}")
+    print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+    print("received:{tree.receive(endpoint) ?? panic("receive")}")
+    runtime.commit(id) ?? panic("commit")
+    print("next:{tree.handoff_generation() ?? panic("next handoff")}")
+    tree.stop() ?? panic("stop")
+}

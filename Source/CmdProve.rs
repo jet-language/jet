@@ -18,14 +18,14 @@ use jet::RecordIndex::{
     RecordCapture, RecordIdentity, RecordIndex, RecordIndexEntry, RecordKind, RecordLink,
 };
 use jet::AST::{Expr, Func, Item, Stmt};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::Evidence::{
     decode_report_bytes, EvidenceKind, EvidenceOutcome, EvidenceReport,
 };
 use jet_foundation::Facts::{
     DerivationDisposition, DerivationIdentity, DerivationMethod, DerivationRecord,
 };
-use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
+use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use jet_foundation::JSON::parse_json;
 
 use crate::ProveReplay::json_str as json;
@@ -233,21 +233,27 @@ fn persist_evidence_report(target: &Target, report: &EvidenceReport) -> Result<R
             "evidence report has an unsafe report id `{report_id}`"
         ));
     }
+    // The child already publishes these bytes under the report's source
+    // revision. Reusing that intrinsic identity makes publication idempotent;
+    // the enclosing proof target has a separate record identity.
     let identity = RecordIdentity::new(
-        target.input_sha256.clone(),
+        report.revision.source.clone(),
         report.build.toolchain.clone(),
         report.producer.as_str(),
     )?;
+    let bytes = report.encode()?;
+    // A producer report id names its invocation, not its observed bytes:
+    // generated-case replay and fresh execution can yield different evidence.
+    let artifact_id = jet::SHA256::sha256_hex(&bytes);
     let path = target
         .authority_root
         .join(".jet/evidence")
-        .join(format!("{report_id}.json"));
-    let bytes = report.encode()?;
+        .join(format!("{artifact_id}.json"));
     let size = write_authoritative_bytes(&path, &bytes, "evidence report")?;
     index_artifact(
         identity,
         RecordKind::Evidence,
-        report_id.to_string(),
+        artifact_id,
         path,
         size,
         RecordCapture::Safe,
@@ -273,7 +279,7 @@ fn replay_artifact_id(bytes: &[u8]) -> Result<String, String> {
     }
     let header = std::str::from_utf8(&bytes[16..header_end])
         .map_err(|_| "replay artifact header is not UTF-8".to_string())?;
-    let DataTree::Object(fields) =
+    let Dyn::Object(fields) =
         parse_json(header).map_err(|_| "replay artifact header is not valid JSON".to_string())?
     else {
         return Err("replay artifact header is not a JSON object".into());
@@ -304,11 +310,30 @@ pub(crate) fn index_replay_artifact(
     let record_identity = identity.record_identity()?;
     let size =
         u64::try_from(bytes.len()).map_err(|_| "replay artifact is too large".to_string())?;
+    // An explicit capture path is an export. The record index owns a
+    // canonical in-project copy, never the caller's export destination.
+    let project_root = jet::build_project_root(&identity.entry)
+        .map_err(|diagnostics| format!("could not resolve replay project root: {diagnostics:?}"))?;
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().map_err(|error| error.to_string())?.join(path)
+    };
+    let indexed_path = if absolute.starts_with(project_root.join(".jet/replays"))
+        || absolute.starts_with(project_root.join(".jet/records/saved"))
+    {
+        absolute
+    } else {
+        validate_artifact_id(&artifact_id)?;
+        let canonical = project_root.join(".jet/replays").join(format!("{artifact_id}.jetproof-replay"));
+        write_authoritative_bytes(&canonical, &bytes, "replay artifact")?;
+        canonical
+    };
     index_artifact(
         record_identity,
         RecordKind::Replay,
         artifact_id,
-        path.to_path_buf(),
+        indexed_path,
         size,
         capture,
         Vec::new(),
@@ -439,7 +464,19 @@ fn save_replay_command(
     let project_root = jet::build_project_root(&identity.entry)
         .map_err(|diagnostics| ("E3622", format!("could not resolve replay project root: {diagnostics:?}")))?;
     let mut index = load_record_index(&project_root).map_err(|error| ("E3622", error))?;
-    let Some(entry) = resolve_indexed_replay(&index, raw).map_err(|error| ("E3621", error))? else {
+    let indexed = resolve_indexed_replay(&index, raw).map_err(|error| ("E3622", error))?;
+    let indexed = match indexed {
+        Some(entry) => Some(entry),
+        None => {
+            // Authenticate an exported capture before resolving its canonical
+            // indexed copy. Replay itself still reads the requested export.
+            crate::ProveReplay::prepare_replay(identity, raw)?;
+            let bytes = fs::read(raw).map_err(|error| ("E3622", error.to_string()))?;
+            let id = replay_artifact_id(&bytes).map_err(|error| ("E3622", error))?;
+            index.find(RecordKind::Replay, &id, true)
+        }
+    };
+    let Some(entry) = indexed else {
         return Err((
             "E3621",
             format!("replay `{raw}` is not an indexed replay artifact"),
@@ -741,7 +778,7 @@ fn history_artifact_path(target: &Target, member: &Member) -> PathBuf {
 fn parse_history_artifact_detail(detail: &str) -> Option<String> {
     detail.lines().find_map(|line| {
         let artifact = line.trim().strip_prefix(HISTORY_ARTIFACT_PREFIX)?;
-        let DataTree::Object(fields) = parse_json(artifact).ok()? else {
+        let Dyn::Object(fields) = parse_json(artifact).ok()? else {
             return None;
         };
         let schema = fields
@@ -750,7 +787,7 @@ fn parse_history_artifact_detail(detail: &str) -> Option<String> {
         let version = fields
             .iter()
             .find_map(|(key, value)| (key == "version").then_some(value));
-        if schema != Some("jet.testing.history") || !matches!(version, Some(DataTree::Int(1))) {
+        if schema != Some("jet.testing.history") || !matches!(version, Some(Dyn::Int(value)) if value.to_i64() == Some(1)) {
             return None;
         }
         Some(artifact.to_string())
@@ -832,7 +869,7 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
         return None;
     }
     let text = fs::read_to_string(path).ok()?;
-    let DataTree::Object(fields) = parse_json(&text).ok()? else {
+    let Dyn::Object(fields) = parse_json(&text).ok()? else {
         return None;
     };
     let field = |name: &str| {
@@ -840,7 +877,7 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
             .iter()
             .find_map(|(key, value)| (key == name).then_some(value))
     };
-    if !matches!(field("version"), Some(DataTree::Int(1)))
+    if !matches!(field("version"), Some(Dyn::Int(value)) if value.to_i64() == Some(1))
         || !matches!(
             field("target").and_then(|value| value.as_str().ok()),
             Some(value) if value == target.input_sha256
@@ -852,9 +889,9 @@ fn read_generated_failure(target: &Target, member: &Member) -> Option<GeneratedF
     {
         return None;
     }
-    let parse_u64 = |value: Option<&DataTree>| match value {
-        Some(DataTree::Int(value)) if *value >= 0 => u64::try_from(*value).ok(),
-        Some(DataTree::Text(value)) | Some(DataTree::TypedText(value)) => value.parse().ok(),
+    let parse_u64 = |value: Option<&Dyn>| match value {
+        Some(Dyn::Int(value)) => value.to_u64(),
+        Some(Dyn::Text(value)) => value.parse().ok(),
         _ => None,
     };
     let seed = parse_u64(field("seed"))?;
@@ -1315,8 +1352,8 @@ pub(crate) fn run_prove(args: &[String], json: bool) {
             }
             Err(error) => {
                 crate::ProveReplay::emit_prove_diag(
-                    "E3621",
-                    "replay semantic identity could not be resolved",
+                    "E3622",
+                    "replay artifact path is invalid",
                     &error,
                     "use an indexed replay id or a canonical `.jetproof-replay` path",
                     json,
@@ -2687,28 +2724,9 @@ fn collect_capture_pattern(
     local_functions: &HashSet<String>,
     sites: &mut Vec<CaptureSite>,
 ) {
-    match pattern {
-        jet::AST::Pattern::Or(patterns, _) => {
-            for pattern in patterns {
-                collect_capture_pattern(pattern, aliases, local_functions, sites);
-            }
-        }
-        jet::AST::Pattern::Struct { fields, .. } => {
-            for field in fields {
-                if let jet::AST::StructPatField::Value { value, .. } = field {
-                    collect_capture_expr(value, aliases, local_functions, sites);
-                }
-            }
-        }
-        jet::AST::Pattern::Variant { .. }
-        | jet::AST::Pattern::Present { .. }
-        | jet::AST::Pattern::Absent(_)
-        | jet::AST::Pattern::Ok { .. }
-        | jet::AST::Pattern::Err { .. }
-        | jet::AST::Pattern::Range { .. }
-        | jet::AST::Pattern::StrMatch { .. }
-        | jet::AST::Pattern::BinMatch { .. } => {}
-    }
+    pattern.for_each_value_expr(&mut |expr| {
+        collect_capture_expr(expr, aliases, local_functions, sites);
+    });
 }
 
 fn capture_receiver_path(expr: &Expr) -> Option<String> {
@@ -3065,9 +3083,10 @@ fn run_test_producers(target: &Target) -> Result<(Vec<TestItem>, i32, Vec<Record
                             highest_exit = ExitCodes::ICE;
                         } else {
                             if report.records.iter().any(|record| {
-                                matches!(record.kind, EvidenceKind::Runtime)
-                                    || (matches!(record.kind, EvidenceKind::Contract)
-                                        && record.outcome == EvidenceOutcome::Failed)
+                                !record.is_caught_property_case()
+                                    && (matches!(record.kind, EvidenceKind::Runtime)
+                                        || (matches!(record.kind, EvidenceKind::Contract)
+                                            && record.outcome == EvidenceOutcome::Failed))
                             }) && highest_exit != ExitCodes::ICE
                             {
                                 highest_exit = ExitCodes::RUNTIME_PANIC;
@@ -3592,7 +3611,7 @@ fn resolve_target(raw: &str) -> Result<Target, String> {
         None
     };
     let core_abi = proof_core_abi(
-        semantic_bundle.as_ref().map(|(bundle, _)| bundle),
+        semantic_bundle.as_ref().map(|(bundle, _, _)| bundle),
         &source_digest,
     );
     let mir = proof_mir_identity(
@@ -3755,8 +3774,8 @@ fn load_checked_proof_bundle(
     entry: &str,
     profile: &str,
     setting_overrides: &BTreeMap<String, String>,
-) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)> {
-    let (diagnostics, bundle, facts) =
+) -> Option<(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>)> {
+    let (diagnostics, bundle, facts, checked_nominals) =
         jet::Driver::check_file_with_effect_facts_for_run(entry, profile, setting_overrides);
     if diagnostics
         .iter()
@@ -3764,7 +3783,7 @@ fn load_checked_proof_bundle(
     {
         None
     } else {
-        bundle.map(|bundle| (bundle, facts))
+        bundle.map(|bundle| (bundle, facts, checked_nominals))
     }
 }
 
@@ -3811,14 +3830,15 @@ fn unavailable_mir_identity(
 }
 
 fn proof_mir_identity(
-    checked: Option<&(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts)>,
+    checked: Option<&(jet::AST::ProgramBundle, jet::Sema::SemIndexEffectFacts, std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>)>,
     source_digest: &str,
     core_abi: &str,
     members: &[Member],
 ) -> jet_foundation::MIR::MirProgramIdentity {
-    if let Some((bundle, _facts)) = checked {
+    if let Some((bundle, _facts, checked_nominals)) = checked {
         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
             bundle,
+            checked_nominals,
             jet_foundation::MIR::MirArtifactRequest::new(
                 jet_foundation::MIR::MirArtifactTarget::RustAot,
                 jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -4366,7 +4386,7 @@ fn render_report(
     let (solver_selected, solver_proved, solver_disproved, solver_unknown, solver_unavailable) =
         crate::ProveSolver::summarize(solver);
     let unit_report = unit_test_report(tests);
-    let unit_summary = unit_report.status_envelope().json();
+    let unit_summary = unit_report.json();
     let unit_unavailable = tests
         .iter()
         .filter(|item| (item.kind == 0 || item.kind == 2) && item.state == 3)
@@ -4533,7 +4553,7 @@ fn canonicalize_evidence_rows(target: &Target, rows: &[String]) -> (String, Stri
 }
 
 fn row_string_field(row: &str, field: &str) -> Option<String> {
-    let DataTree::Object(fields) = parse_json(row).ok()? else {
+    let Dyn::Object(fields) = parse_json(row).ok()? else {
         return None;
     };
     fields
@@ -4662,16 +4682,13 @@ impl UnitTestReport {
         )
     }
 
-    fn status_envelope(&self) -> StatusEnvelope {
-        StatusEnvelope::new("test", self.failed == 0).with_field(
-            "test",
-            StatusValue::object(
-                StatusFields::new()
-                    .with("failed", self.failed)
-                    .with("passed", self.passed)
-                    .with("skipped", self.skipped)
-                    .with("selected", self.passed + self.failed + self.skipped),
-            ),
+    fn json(&self) -> String {
+        format!(
+            "{{\"failed\":{},\"passed\":{},\"selected\":{},\"skipped\":{}}}",
+            self.failed,
+            self.passed,
+            self.passed + self.failed + self.skipped,
+            self.skipped,
         )
     }
 }
@@ -4771,7 +4788,7 @@ fn record_links_json(links: &[RecordLink]) -> String {
     format!("[{}]", values.join(","))
 }
 
-/// D-JPROOF1=A: write `.jet/proofs/<kind>/<name>/<first-16-report_id>.jetproof`.
+/// D-JPROOF1=A: persist semantic report identity separately from delivery links.
 /// Identical existing bytes are left unchanged; differing bytes refuse.
 fn write_jetproof(
     target: &Target,
@@ -4781,6 +4798,11 @@ fn write_jetproof(
 ) -> Result<ProofArtifact, String> {
     let report_bytes = format!("{proof_report}\n");
     let report_id = jet::SHA256::sha256_hex(report_bytes.as_bytes());
+    let consumed_json = record_links_json(consumed);
+    let produced_json = record_links_json(produced);
+    let artifact_id = jet::SHA256::sha256_hex(
+        format!("{{\"consumed\":{consumed_json},\"produced\":{produced_json},\"report_id\":{}}}\n", json(&report_id)).as_bytes(),
+    );
     let kind = target.kind;
     let name = {
         let root = Path::new(&target.root);
@@ -4797,14 +4819,13 @@ fn write_jetproof(
     };
     let rel = format!(
         ".jet/proofs/{kind}/{name}/{}.jetproof",
-        &report_id[..16.min(report_id.len())]
+        &artifact_id[..16]
     );
     let path = target.authority_root.join(&rel);
-    let consumed_json = record_links_json(consumed);
-    let produced_json = record_links_json(produced);
     let envelope = format!(
-        "{{\"artifact\":{{\"path\":{}}},\"consumed\":{},\"links_version\":1,\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"produced\":{},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":2}}\n",
+        "{{\"artifact\":{{\"path\":{}}},\"artifact_id\":{},\"consumed\":{},\"links_version\":1,\"privacy\":{{\"absolute_paths\":\"omitted\",\"argv\":\"omitted\",\"environment\":\"omitted\",\"full_source\":\"omitted\",\"producer_transcripts\":\"omitted\",\"safe_locals\":\"redacted_by_D-OBS2\"}},\"produced\":{},\"proofReport\":{proof_report},\"report_id\":{},\"schema\":\"jet.jproof\",\"version\":2}}\n",
         json(&rel),
+        json(&artifact_id),
         consumed_json,
         produced_json,
         json(&report_id)
@@ -4817,7 +4838,7 @@ fn write_jetproof(
         let existing = fs::read(&path).map_err(|e| e.to_string())?;
         if existing == envelope.as_bytes() {
             return Ok(ProofArtifact {
-                artifact_id: report_id,
+                artifact_id,
                 path,
                 size: u64::try_from(envelope.len())
                     .map_err(|_| "proof artifact is too large".to_string())?,
@@ -4879,7 +4900,7 @@ fn write_jetproof(
         return Err(error);
     }
     Ok(ProofArtifact {
-        artifact_id: report_id,
+        artifact_id,
         path,
         size: u64::try_from(envelope.len())
             .map_err(|_| "proof artifact is too large".to_string())?,

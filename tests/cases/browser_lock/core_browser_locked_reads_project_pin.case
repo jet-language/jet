@@ -1,0 +1,21 @@
+# HAND-PORT tests/browser_lock.rs:190-247 core_browser_locked_reads_project_pin
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: core_browser_locked_reads_project_pin.fixture
+env: NO_COLOR=1
+requires: os:unix
+env: JET_PROJECT_ROOT={work}
+chmod: chromium 0755
+step: jetpack browser lock chromium --binary {work}/chromium --version 140.0 --protocol bidi-2025.5
+exit: 0
+step: jet run {work}/main.jet
+exit: 0
+stdout: ~ "engine:chromium" # original predicate
+stdout: ~ "version:140.0" # original predicate
+stdout: ~ "protocol:bidi-2025.5" # original predicate
+stdout: ~ "verified:true" # original predicate
+remove: chromium
+copy: hostile.jet main.jet
+step: jet run {work}/main.jet
+exit: 0
+stdout: ~ "outcome:caught" # original predicate
+

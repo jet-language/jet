@@ -1,0 +1,14 @@
+// Both semantic tiers retain the existing refusal:
+// E0112: service worker handler lifetime is outside the checked builder shape
+// why: service topology values must stay visible to sema before runtime construction
+// fix: pass a top-level function, not a local or captured function value
+// Diagnostic execution is reserved for the composed verifier.
+use core.service as service
+
+fn reject(callback: fn()) {
+    tree := service.tree("checked")
+    _ :: tree.worker("worker", callback, capacity: 1) ?? return
+}
+
+fn ordinary() {}
+fn run() { reject(ordinary) }

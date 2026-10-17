@@ -1,0 +1,67 @@
+// Exact originals tests/policy_scope.rs; no fixture spelling migrations.
+
+#Test("package policy cannot authorize unsafe") {
+    rejected :: if PackageFacts.parse("name: \"bad_policy\"\nversion: \"0.1.0\"\npolicy: {{ unsafe: .Allow }}\n", "test") == {
+        .Ok(_) -> false
+        .Err(error) -> {
+            bad :: if error == { .BadPackagePolicy(_) -> true else -> false }
+            assert(bad)
+            assert(error.message().contains("policy.unsafe"))
+            assert(error.message().contains(".Deny"))
+            true
+        }
+    }
+    assert(rejected)
+}
+
+// volatile: original input ends "})" without closing the policy brace.
+#Test("package team policy parser normalizes typed controls") {
+    package :: PackageFacts.parse("name: \"policy\"\nversion: \"0.1.0\"\ndeps: {{ zlib: c@system }}\npolicy: {{ effects: {{ \"./src\": -[IO, IO]> }}, unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, deps: .List([\"zlib\", \"zlib\"]), lints: {{ deny: [float_money] }})\n", "test") ?? panic("typed controls parse")
+    ceiling :: package.policy.effects.get("src") ?? panic("src ceiling")
+    assert_eq(ceiling.len(), 1)
+    assert(ceiling.contains("IO"))
+    assert_eq(package.policy.unsafe_paths, Val([String]{"src"}))
+    assert_eq(package.policy.expert, Val(false))
+    assert_eq(package.policy.deps, Val([String]{"zlib"}))
+    assert_eq(package.policy.lints_deny, Val([String]{"float_money"}))
+}
+
+#Test("manifest memory denial uses the effects rights tree") {
+    package :: PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ deny: [Mem.Alloc(above: 65536)] }} }}\n", "test") ?? panic("memory denial parse")
+    assert_eq(package.effects_deny, Val([String]{"Mem.Alloc(above: 65536)"}))
+}
+
+#Test("organization policy document is exact and fails closed") {
+    valid :: pkg_parse_policy_document("policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}\n") ?? panic("organization policy parse")
+    assert_eq(valid.len(), 3)
+    assert_eq(valid[0].value, PolicyValue.Obligations)
+    assert_eq(valid[1].key, PolicyKey.Impure)
+    assert_eq(valid[2].key, PolicyKey.Nondeterministic)
+    invalid :: [String]{"policy: {{ unsafe: .Obligations", "policy: {{ unsafe: .Obligations }}\npackage: {{}}"}
+    loop text in invalid {
+        rejected :: if pkg_parse_policy_document(text) == {
+            .Err(_) -> true
+            .Ok(_) -> false
+        }
+        assert(rejected)
+    }
+}
+
+#Test("package policy document accepts explicit units") {
+    declarations :: pkg_parse_policy_document("policy: {{ explicit_units: true }}\n") ?? panic("policy parse")
+    assert_eq(declarations.len(), 1)
+    assert_eq(declarations[0].key, PolicyKey.ExplicitUnits)
+    assert_eq(declarations[0].value, PolicyValue.Enabled)
+}
+
+#Test("copies policy is package and source explicit only") {
+    declarations :: pkg_parse_policy_document("policy: {{ copies: .Explicit }}\n") ?? panic("policy parse")
+    assert_eq(declarations.len(), 1)
+    assert_eq(declarations[0].key, PolicyKey.Copies)
+    assert_eq(declarations[0].value, PolicyValue.Explicit)
+    rejected :: if pkg_parse_policy_document("policy: {{ copies: true }}\n") == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+    assert(rejected)
+}

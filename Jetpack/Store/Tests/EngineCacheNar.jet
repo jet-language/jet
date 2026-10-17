@@ -1,0 +1,61 @@
+// Exact public engine NAR claims; PENDING-SEAM(package-tests), no runtime proof claimed.
+// Independent original u64 little-endian framing; do not use the production NAR encoder.
+fn engine_cache_nar_string(out: &[U8], value: String) {
+    bytes :: value.bytes()
+    length :: bytes.len()
+    loop shift in 0..<8 -> &out.push(U8{(length >> (8 * shift)).bit_and(255)})
+    loop byte in bytes -> &out.push(byte)
+    padding :: (8 - length % 8) % 8
+    loop _ in 0..<padding -> &out.push(U8{0})
+}
+fn engine_cache_nar_regular_entry(out: &[U8], name: String) {
+    fields :: [String]{"entry", "(", "name", name, "node", "(", "type", "regular", "contents", "", ")", ")"}
+    loop field in fields -> engine_cache_nar_string(&out, field)
+}
+
+// ported from jetpack_engine.rs:1168-1252
+#Test("binary_cache_nar_codec_rejects_noncanonical_and_malicious_input") {
+    nar := [U8]{}
+    fields :: [String]{"nix-archive-1", "(", "type", "regular", "contents", "payload", "executable", "", ")"}
+    loop field in fields -> engine_cache_nar_string(&nar, field)
+    assert(store_validate_nar(nar) == .Err(_))
+    destination :: files.tmpdir("jet-engine-nar-malformed-") ?? panic("destination fixture")
+    output :: files.join(destination, "out")
+    assert(store_read_nar(nar, output) == .Err(_))
+    assert(!files.exists(output))
+    unordered_nar := [U8]{}
+    head :: [String]{"nix-archive-1", "(", "type", "directory"}
+    loop field in head -> engine_cache_nar_string(&unordered_nar, field)
+    engine_cache_nar_regular_entry(&unordered_nar, "z")
+    engine_cache_nar_regular_entry(&unordered_nar, "a")
+    engine_cache_nar_string(&unordered_nar, ")")
+    assert(store_validate_nar(unordered_nar) == .Err(_))
+    escape_nar := [U8]{}
+    escape_fields :: [String]{"nix-archive-1", "(", "type", "directory", "entry", "(", "name", "escape", "node", "(", "type", "symlink", "target", "../outside", ")", ")", ")"}
+    loop field in escape_fields -> engine_cache_nar_string(&escape_nar, field)
+    assert(store_validate_nar(escape_nar) == .Err(_))
+    escape_output :: files.join(destination, "escape-out")
+    assert(store_read_nar(escape_nar, escape_output) == .Err(_))
+    assert(!files.exists(escape_output))
+    if sys.is_unix() {
+        source :: files.tmpdir("jet-engine-nar-escape-") ?? panic("source fixture")
+        files.write(files.join(source, "outside"), "outside") ?? panic("outside fixture")
+        files.symlink("../outside", files.join(source, "escape")) ?? panic("escape symlink")
+        assert(store_write_nar(source) == .Err(_))
+        files.remove_all(source).drop("source cleanup")
+    }
+    files.remove_all(destination).drop("destination cleanup")
+}
+
+// ported from jetpack_engine.rs:1254-1275
+#Test("binary_cache_narinfo_reads_standard_uncompressed_fields") {
+    hash :: store_nar_digest("payload".bytes())
+    reference :: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-tool"
+    text :: "StorePath: /nix/store/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-tool\nURL: nar/tool.nar\nCompression: none\nFileHash: {hash}\nFileSize: 7\nNarHash: {hash}\nNarSize: 7\nReferences: {reference}\nDeriver: unknown-deriver\n"
+    info :: NarInfo.parse(text) ?? panic("standard narinfo")
+    canonical :: info.to_text() ?? panic("canonical narinfo")
+    assert(canonical.contains("FileHash: "))
+    assert(canonical.contains("References: {reference}\n"))
+    assert(canonical.contains("Deriver: unknown-deriver\n"))
+    assert_eq(NarInfo.parse(canonical) ?? panic("canonical narinfo parses"), info)
+}

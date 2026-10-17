@@ -1,0 +1,22 @@
+
+#Job
+fn migrate(to: String{"latest"}) {
+    print("migrate {to}")
+}
+#Job(after: ["migrate"])
+fn populate(label: String{"dev"}) {
+    print("populate {label}")
+}
+#Job
+fn web(port: Int{8080}, host: String{"127.0.0.1"}) {
+    print("web host={host} port={port}")
+}
+#Job
+fn broken() {
+    panic("broken job")
+}
+#Job(after: ["broken"])
+fn needs_broken() {
+    print("needs_broken ran")
+}
+fn run() {}

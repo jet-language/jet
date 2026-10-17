@@ -155,7 +155,7 @@ impl JetOpenApiSchema {
                             out.pop();
                             out.push_str(&format!(
                                 ",\"default\":{}",
-                                jet_std::render_datatree_json(default, false, 0)
+                                jet_std::render_dyn_json(default, false, 0)
                             ));
                             out.push('}');
                         }
@@ -193,18 +193,18 @@ impl JetOpenApiSchema {
         }
     }
 
-    fn validate_tree(&self, value: &jet_std::DataTree, path: &str) -> Vec<JetOpenApiValidationError> {
+    fn validate_tree(&self, value: &jet_std::Dyn, path: &str) -> Vec<JetOpenApiValidationError> {
         match self {
             Self::Any => Vec::new(),
             Self::Null => {
-                if matches!(value, jet_std::DataTree::Null) {
+                if matches!(value, jet_std::Dyn::Null) {
                     Vec::new()
                 } else {
                     vec![JetOpenApiValidationError::new(path, "expected null")]
                 }
             }
             Self::Boolean => {
-                if matches!(value, jet_std::DataTree::Bool(_)) {
+                if matches!(value, jet_std::Dyn::Bool(_)) {
                     Vec::new()
                 } else {
                     vec![JetOpenApiValidationError::new(path, "expected boolean")]
@@ -212,8 +212,8 @@ impl JetOpenApiSchema {
             }
             Self::Integer => {
                 let valid = match value {
-                    jet_std::DataTree::Int(_) => true,
-                    jet_std::DataTree::Number(text) => text.parse::<i64>().is_ok(),
+                    jet_std::Dyn::Int(_) => true,
+                    jet_std::Dyn::Number(text) => text.parse::<i64>().is_ok(),
                     _ => false,
                 };
                 if valid {
@@ -224,9 +224,9 @@ impl JetOpenApiSchema {
             }
             Self::Number => {
                 let valid = match value {
-                    jet_std::DataTree::Int(_) => true,
-                    jet_std::DataTree::Float(number) => number.is_finite(),
-                    jet_std::DataTree::Number(text) => text.parse::<f64>().map(|n| n.is_finite()).unwrap_or(false),
+                    jet_std::Dyn::Int(_) => true,
+                    jet_std::Dyn::Float(number) => number.is_finite(),
+                    jet_std::Dyn::Number(text) => text.parse::<f64>().map(|n| n.is_finite()).unwrap_or(false),
                     _ => false,
                 };
                 if valid {
@@ -236,14 +236,14 @@ impl JetOpenApiSchema {
                 }
             }
             Self::String => {
-                if matches!(value, jet_std::DataTree::Text(_) | jet_std::DataTree::TypedText(_)) {
+                if matches!(value, jet_std::Dyn::Text(_)) {
                     Vec::new()
                 } else {
                     vec![JetOpenApiValidationError::new(path, "expected string")]
                 }
             }
             Self::Array(item) => match value {
-                jet_std::DataTree::Array(values) => values
+                jet_std::Dyn::Array(values) => values
                     .iter()
                     .enumerate()
                     .flat_map(|(index, value)| item.validate_tree(value, &format!("{path}[{index}]")))
@@ -254,7 +254,7 @@ impl JetOpenApiSchema {
                 properties,
                 additional_properties,
             } => {
-                let jet_std::DataTree::Object(values) = value else {
+                let jet_std::Dyn::Object(values) = value else {
                     return vec![JetOpenApiValidationError::new(path, "expected object")];
                 };
                 let mut errors = Vec::new();
@@ -304,7 +304,7 @@ impl JetOpenApiSchema {
                 }
             }
             Self::Nullable(item) => {
-                if matches!(value, jet_std::DataTree::Null) {
+                if matches!(value, jet_std::Dyn::Null) {
                     Vec::new()
                 } else {
                     item.validate_tree(value, path)
@@ -344,7 +344,7 @@ pub struct JetOpenApiProperty {
     pub name: String,
     pub schema: JetOpenApiSchema,
     pub required: bool,
-    pub default: Option<jet_std::DataTree>,
+    pub default: Option<jet_std::Dyn>,
 }
 
 impl JetOpenApiProperty {
@@ -357,7 +357,7 @@ impl JetOpenApiProperty {
         }
     }
 
-    pub fn optional(name: String, schema: JetOpenApiSchema, default: Option<jet_std::DataTree>) -> Self {
+    pub fn optional(name: String, schema: JetOpenApiSchema, default: Option<jet_std::Dyn>) -> Self {
         Self {
             name,
             schema,
@@ -373,7 +373,7 @@ pub struct JetOpenApiParameter {
     pub name: String,
     pub schema: JetOpenApiSchema,
     pub required: bool,
-    pub default: Option<jet_std::DataTree>,
+    pub default: Option<jet_std::Dyn>,
     pub catch_all: bool,
 }
 
@@ -912,7 +912,7 @@ pub struct JetOpenApiRequest {
     pub query: std::collections::BTreeMap<String, String>,
     pub headers: std::collections::BTreeMap<String, String>,
     pub cookies: std::collections::BTreeMap<String, String>,
-    pub body: Option<jet_std::DataTree>,
+    pub body: Option<jet_std::Dyn>,
 }
 
 impl JetOpenApiRequest {
@@ -1181,7 +1181,7 @@ fn jet_openapi_parameter_json(parameter: &JetOpenApiParameter) -> String {
         parameter.schema.render_json()
     );
     if let Some(default) = &parameter.default {
-        out.push_str(&format!(",\"default\":{}", jet_std::render_datatree_json(default, false, 0)));
+        out.push_str(&format!(",\"default\":{}", jet_std::render_dyn_json(default, false, 0)));
     }
     out.push('}');
     out
@@ -1262,18 +1262,18 @@ pub fn jet_web_openapi_from_routes(
 }
 
 fn jet_openapi_contract_object(
-    value: &jet_std::DataTree,
-) -> Result<&[(String, jet_std::DataTree)], String> {
+    value: &jet_std::Dyn,
+) -> Result<&[(String, jet_std::Dyn)], String> {
     match value {
-        jet_std::DataTree::Object(fields) => Ok(fields),
+        jet_std::Dyn::Object(fields) => Ok(fields),
         _ => Err("OpenAPI route contract must be an object".to_string()),
     }
 }
 
 fn jet_openapi_contract_field<'a>(
-    object: &'a [(String, jet_std::DataTree)],
+    object: &'a [(String, jet_std::Dyn)],
     name: &str,
-) -> Result<&'a jet_std::DataTree, String> {
+) -> Result<&'a jet_std::Dyn, String> {
     object
         .iter()
         .find_map(|(field_name, value)| (field_name == name).then_some(value))
@@ -1281,32 +1281,32 @@ fn jet_openapi_contract_field<'a>(
 }
 
 fn jet_openapi_contract_text(
-    object: &[(String, jet_std::DataTree)],
+    object: &[(String, jet_std::Dyn)],
     name: &str,
 ) -> Result<String, String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => Ok(value.clone()),
+        jet_std::Dyn::Text(value) => Ok(value.clone()),
         _ => Err(format!("OpenAPI route contract field `{name}` must be text")),
     }
 }
 
 fn jet_openapi_contract_bool(
-    object: &[(String, jet_std::DataTree)],
+    object: &[(String, jet_std::Dyn)],
     name: &str,
 ) -> Result<bool, String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::DataTree::Bool(value) => Ok(*value),
+        jet_std::Dyn::Bool(value) => Ok(*value),
         _ => Err(format!("OpenAPI route contract field `{name}` must be boolean")),
     }
 }
 
 fn jet_openapi_contract_optional_text(
-    object: &[(String, jet_std::DataTree)],
+    object: &[(String, jet_std::Dyn)],
     name: &str,
 ) -> Result<Option<String>, String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::DataTree::Null => Ok(None),
-        jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
+        jet_std::Dyn::Null => Ok(None),
+        jet_std::Dyn::Text(value) => {
             Ok(Some(value.clone()))
         }
         _ => Err(format!(
@@ -1316,22 +1316,23 @@ fn jet_openapi_contract_optional_text(
 }
 
 fn jet_openapi_contract_array<'a>(
-    object: &'a [(String, jet_std::DataTree)],
+    object: &'a [(String, jet_std::Dyn)],
     name: &str,
-) -> Result<&'a [jet_std::DataTree], String> {
+) -> Result<&'a [jet_std::Dyn], String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::DataTree::Array(values) => Ok(values),
+        jet_std::Dyn::Array(values) => Ok(values),
         _ => Err(format!("OpenAPI route contract field `{name}` must be an array")),
     }
 }
 
 fn jet_openapi_contract_integer(
-    object: &[(String, jet_std::DataTree)],
+    object: &[(String, jet_std::Dyn)],
     name: &str,
 ) -> Result<i64, String> {
     match jet_openapi_contract_field(object, name)? {
-        jet_std::DataTree::Int(value) => Ok(*value),
-        jet_std::DataTree::Number(value) => value
+        jet_std::Dyn::Int(value) => value.to_i64()
+            .ok_or_else(|| format!("OpenAPI route contract field `{name}` is out of range")),
+        jet_std::Dyn::Number(value) => value
             .parse::<i64>()
             .map_err(|_| format!("OpenAPI route contract field `{name}` is out of range")),
         _ => Err(format!("OpenAPI route contract field `{name}` must be an integer")),
@@ -1339,15 +1340,15 @@ fn jet_openapi_contract_integer(
 }
 
 fn jet_openapi_contract_schema(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> Result<JetOpenApiSchema, String> {
     let object = jet_openapi_contract_object(value)?;
     let Some(kind) = jet_openapi_contract_field(object, "type").ok() else {
         if let Some(any_of) = jet_openapi_contract_field(object, "anyOf").ok() {
-            let jet_std::DataTree::Array(items) = any_of else {
+            let jet_std::Dyn::Array(items) = any_of else {
                 return Err("OpenAPI schema `anyOf` must be an array".to_string());
             };
-            if items.len() == 2 && matches!(items[1], jet_std::DataTree::Object(_)) {
+            if items.len() == 2 && matches!(items[1], jet_std::Dyn::Object(_)) {
                 let null_schema = jet_openapi_contract_schema(&items[1])?;
                 if matches!(null_schema, JetOpenApiSchema::Null) {
                     return Ok(JetOpenApiSchema::Nullable(Box::new(
@@ -1357,7 +1358,7 @@ fn jet_openapi_contract_schema(
             }
         }
         if let Some(one_of) = jet_openapi_contract_field(object, "oneOf").ok() {
-            let jet_std::DataTree::Array(items) = one_of else {
+            let jet_std::Dyn::Array(items) = one_of else {
                 return Err("OpenAPI schema `oneOf` must be an array".to_string());
             };
             return Ok(JetOpenApiSchema::OneOf(
@@ -1369,7 +1370,7 @@ fn jet_openapi_contract_schema(
         }
         return Ok(JetOpenApiSchema::Any);
     };
-    let (jet_std::DataTree::Text(kind) | jet_std::DataTree::TypedText(kind)) = kind else {
+    let jet_std::Dyn::Text(kind) = kind else {
         return Err("OpenAPI schema `type` must be text".to_string());
     };
     match kind.as_str() {
@@ -1383,17 +1384,17 @@ fn jet_openapi_contract_schema(
         ))),
         "object" => {
             let properties = match jet_openapi_contract_field(object, "properties")? {
-                jet_std::DataTree::Object(fields) => fields,
+                jet_std::Dyn::Object(fields) => fields,
                 _ => {
                     return Err("OpenAPI object schema `properties` must be an object".to_string())
                 }
             };
             let required = match jet_openapi_contract_field(object, "required").ok() {
                 None => Vec::new(),
-                Some(jet_std::DataTree::Array(values)) => values
+                Some(jet_std::Dyn::Array(values)) => values
                     .iter()
                     .map(|value| match value {
-                        jet_std::DataTree::Text(name) | jet_std::DataTree::TypedText(name) => {
+                        jet_std::Dyn::Text(name) => {
                             Ok(name.clone())
                         }
                         _ => Err("OpenAPI schema `required` names must be text".to_string()),
@@ -1403,7 +1404,7 @@ fn jet_openapi_contract_schema(
             };
             let additional_properties =
                 match jet_openapi_contract_field(object, "additionalProperties")? {
-                    jet_std::DataTree::Bool(value) => *value,
+                    jet_std::Dyn::Bool(value) => *value,
                     _ => {
                         return Err(
                             "OpenAPI object schema `additionalProperties` must be boolean"
@@ -1432,7 +1433,7 @@ fn jet_openapi_contract_schema(
 }
 
 fn jet_openapi_contract_parameter(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> Result<JetOpenApiParameter, String> {
     let object = jet_openapi_contract_object(value)?;
     let location = match jet_openapi_contract_text(object, "in")?.as_str() {
@@ -1453,9 +1454,9 @@ fn jet_openapi_contract_parameter(
 }
 
 fn jet_openapi_contract_request_body(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> Result<Option<JetOpenApiRequestBody>, String> {
-    let jet_std::DataTree::Null = value else {
+    let jet_std::Dyn::Null = value else {
         let object = jet_openapi_contract_object(value)?;
         return Ok(Some(JetOpenApiRequestBody {
             required: jet_openapi_contract_bool(object, "required")?,
@@ -1467,14 +1468,14 @@ fn jet_openapi_contract_request_body(
 }
 
 fn jet_openapi_contract_response(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> Result<JetOpenApiResponse, String> {
     let object = jet_openapi_contract_object(value)?;
     let status = jet_openapi_contract_integer(object, "status")?;
     let status = u16::try_from(status)
         .map_err(|_| "OpenAPI response status is outside the u16 range".to_string())?;
     let schema = match jet_openapi_contract_field(object, "schema")? {
-        jet_std::DataTree::Null => None,
+        jet_std::Dyn::Null => None,
         schema => Some(jet_openapi_contract_schema(schema)?),
     };
     Ok(JetOpenApiResponse {
@@ -1486,13 +1487,13 @@ fn jet_openapi_contract_response(
 }
 
 fn jet_openapi_contract_security(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> Result<JetOpenApiSecurityRequirement, String> {
     let object = jet_openapi_contract_object(value)?;
     let scopes = jet_openapi_contract_array(object, "scopes")?
         .iter()
         .map(|scope| match scope {
-            jet_std::DataTree::Text(scope) | jet_std::DataTree::TypedText(scope) => {
+            jet_std::Dyn::Text(scope) => {
                 Ok(scope.clone())
             }
             _ => Err("OpenAPI security scopes must be text".to_string()),
@@ -1616,10 +1617,37 @@ fn jet_openapi_router_inputs(
     Ok(inputs)
 }
 
-/// Generate OpenAPI from HTTPRouter's checked route facts. Visual WebRouter
-/// routes are intentionally not accepted: they have no HTTP contract.
-pub fn jet_web_openapi(router: &JetHTTPRouter) -> String {
-    let inputs = match jet_openapi_router_inputs(router) {
+pub trait JetHTTPRouteSource {
+    fn checked_http_routes(&self) -> Result<Vec<JetOpenApiRouteInput>, String>;
+}
+
+impl JetHTTPRouteSource for JetHTTPRouter {
+    fn checked_http_routes(&self) -> Result<Vec<JetOpenApiRouteInput>, String> {
+        jet_openapi_router_inputs(self)
+    }
+}
+
+impl JetHTTPRouteSource for JetHTTPMux {
+    fn checked_http_routes(&self) -> Result<Vec<JetOpenApiRouteInput>, String> {
+        self.checked_routes(|routes| {
+            let mut inputs = Vec::with_capacity(routes.len());
+            for route in routes {
+                let input = jet_openapi_contract_input(&route.contract_json)?;
+                if !input.method.as_str().eq_ignore_ascii_case(&route.method)
+                    || input.pattern != jet_http_route_pattern(&route.pattern)? {
+                    return Err(format!("checked OpenAPI contract does not match route `{} {}`", route.method, route.pattern));
+                }
+                inputs.push(input);
+            }
+            Ok(inputs)
+        })
+    }
+}
+
+/// Generate OpenAPI from the checked facts of the served route value.
+/// Visual WebRouter routes have no HTTP contract and are not accepted.
+pub fn jet_web_openapi<T: JetHTTPRouteSource>(router: &T) -> String {
+    let inputs = match router.checked_http_routes() {
         Ok(inputs) => inputs,
         Err(error) => jet_runtime_stop("E2805", "", 0, &error),
     };

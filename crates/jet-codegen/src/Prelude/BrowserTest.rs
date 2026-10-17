@@ -259,7 +259,7 @@ fn jet_browser_test_split_command(raw: &str) -> Vec<String> {
     command
 }
 
-pub(crate) fn jet_browser_test_selected(config: &JetBrowserTestConfig, name: &String) -> bool {
+pub(crate) fn jet_browser_test_selected(config: &JetBrowserTestConfig, name: &str) -> bool {
     if config.filter.trim().is_empty() {
         return true;
     }
@@ -299,9 +299,9 @@ fn jet_browser_test_glob_match(pattern: &str, value: &str) -> bool {
     p == pattern.len()
 }
 
-fn jet_browser_test_source(path: &String, line: i64, column: i64) -> JetBrowserTestSource {
+fn jet_browser_test_source(path: &str, line: i64, column: i64) -> JetBrowserTestSource {
     JetBrowserTestSource {
-        path: path.clone(),
+        path: path.to_owned(),
         line: u32::try_from(line.max(0)).unwrap_or(u32::MAX),
         column: u32::try_from(column.max(0)).unwrap_or(u32::MAX),
     }
@@ -438,8 +438,8 @@ pub(crate) struct JetBrowserTestSession {
 
 fn jet_browser_test_begin(
     config: &JetBrowserTestConfig,
-    test: &String,
-    engine: &String,
+    test: &str,
+    engine: &str,
     attempt: i64,
     source: JetBrowserTestSource,
 ) -> Result<JetBrowserTestSession, JetBrowserError> {
@@ -468,7 +468,7 @@ fn jet_browser_test_begin(
         "network.fetchError",
         "browsingContext.consoleMessage",
     ] {
-        let _ = jet_browser_subscribe(&browser, &event.to_string());
+        let _ = jet_browser_subscribe(&browser, event);
     }
     Ok(JetBrowserTestSession {
         browser,
@@ -476,8 +476,8 @@ fn jet_browser_test_begin(
         page,
         actions,
         config: config.clone(),
-        test: test.clone(),
-        engine: engine.clone(),
+        test: test.to_owned(),
+        engine: engine.to_owned(),
         attempt,
         source,
         started: std::time::Instant::now(),
@@ -485,10 +485,10 @@ fn jet_browser_test_begin(
 }
 pub(crate) fn jet_browser_test_begin_named(
     config: &JetBrowserTestConfig,
-    test: &String,
-    engine: &String,
+    test: &str,
+    engine: &str,
     attempt: i64,
-    source_path: &String,
+    source_path: &str,
     line: i64,
     column: i64,
 ) -> Result<JetBrowserTestFixture, JetBrowserError> {
@@ -756,16 +756,16 @@ fn jet_browser_test_finish(
 }
 
 fn jet_browser_test_setup_failure(
-    test: &String,
-    engine: &String,
+    test: &str,
+    engine: &str,
     attempt: i64,
     expected_failure: bool,
     source: JetBrowserTestSource,
     error: JetBrowserError,
 ) -> JetBrowserTestAttempt {
     JetBrowserTestAttempt {
-        test: test.clone(),
-        engine: engine.clone(),
+        test: test.to_owned(),
+        engine: engine.to_owned(),
         attempt,
         passed: false,
         expected_failure,
@@ -784,14 +784,14 @@ type JetBrowserTestBody = fn(&JetBrowserPage) -> Result<(), JetBrowserError>;
 
 fn jet_browser_test_run_case(
     config: &JetBrowserTestConfig,
-    name: &String,
+    name: &str,
     source: JetBrowserTestSource,
     expected_failure: bool,
     body: JetBrowserTestBody,
 ) -> JetBrowserTestCase {
     if !jet_browser_test_selected(config, name) {
         return JetBrowserTestCase {
-            name: name.clone(),
+            name: name.to_owned(),
             selected: false,
             attempts: Vec::new(),
         };
@@ -822,7 +822,7 @@ fn jet_browser_test_run_case(
         }
     }
     JetBrowserTestCase {
-        name: name.clone(),
+        name: name.to_owned(),
         selected: true,
         attempts,
     }
@@ -868,22 +868,22 @@ fn jet_browser_test_report_summary(report: &JetBrowserTestReport) -> String {
     format!("{passed} passed, {failed} failed, {skipped} skipped")
 }
 
-fn jet_browser_test_json_source(source: &JetBrowserTestSource) -> jet_std::DataTree {
+fn jet_browser_test_json_source(source: &JetBrowserTestSource) -> jet_std::Dyn {
     jet_browser_object(vec![
         ("path", jet_browser_text(&source.path)),
-        ("line", jet_std::DataTree::Float(f64::from(source.line))),
-        ("column", jet_std::DataTree::Float(f64::from(source.column))),
+        ("line", jet_std::Dyn::Float(f64::from(source.line))),
+        ("column", jet_std::Dyn::Float(f64::from(source.column))),
     ])
 }
 
-fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::DataTree {
-    let actions = jet_std::DataTree::Array(
+fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Dyn {
+    let actions = jet_std::Dyn::Array(
         attempt
             .actions
             .iter()
             .map(|action| {
                 jet_browser_object(vec![
-                    ("sequence", jet_std::DataTree::Float(action.sequence as f64)),
+                    ("sequence", jet_std::Dyn::Float(action.sequence as f64)),
                     ("kind", jet_browser_text(&action.kind)),
                     ("fact", jet_browser_text(&action.fact)),
                     ("source", jet_browser_test_json_source(&attempt.source)),
@@ -891,7 +891,7 @@ fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Da
             })
             .collect(),
     );
-    let snapshots = jet_std::DataTree::Array(
+    let snapshots = jet_std::Dyn::Array(
         attempt
             .snapshots
             .iter()
@@ -899,14 +899,14 @@ fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Da
                 jet_browser_object(vec![
                     ("kind", jet_browser_text(&snapshot.kind)),
                     ("hash", jet_browser_text(&snapshot.hash)),
-                    ("bytes", jet_std::DataTree::Float(snapshot.bytes as f64)),
+                    ("bytes", jet_std::Dyn::Float(snapshot.bytes as f64)),
                     ("path", jet_browser_text(&snapshot.path)),
                     ("source", jet_browser_test_json_source(&snapshot.source)),
                 ])
             })
             .collect(),
     );
-    let events = jet_std::DataTree::Array(
+    let events = jet_std::Dyn::Array(
         attempt
             .events
             .iter()
@@ -918,14 +918,14 @@ fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Da
                     ("urlHash", jet_browser_text(&event.url_hash)),
                     (
                         "statusCode",
-                        jet_std::DataTree::Float(event.status_code as f64),
+                        jet_std::Dyn::Float(event.status_code as f64),
                     ),
-                    ("isBlocked", jet_std::DataTree::Bool(event.is_blocked)),
+                    ("isBlocked", jet_std::Dyn::Bool(event.is_blocked)),
                 ])
             })
             .collect(),
     );
-    let artifacts = jet_std::DataTree::Array(
+    let artifacts = jet_std::Dyn::Array(
         attempt
             .artifacts
             .iter()
@@ -934,14 +934,14 @@ fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Da
                     ("name", jet_browser_text(&artifact.name)),
                     ("path", jet_browser_text(&artifact.path)),
                     ("mime", jet_browser_text(&artifact.mime)),
-                    ("bytes", jet_std::DataTree::Float(artifact.bytes as f64)),
+                    ("bytes", jet_std::Dyn::Float(artifact.bytes as f64)),
                     ("hash", jet_browser_text(&artifact.hash)),
                     ("source", jet_browser_test_json_source(&artifact.source)),
                 ])
             })
             .collect(),
     );
-    let trace = jet_std::DataTree::Array(
+    let trace = jet_std::Dyn::Array(
         attempt
             .trace
             .iter()
@@ -953,16 +953,16 @@ fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Da
         ("engine", jet_browser_text(&attempt.engine)),
         (
             "attempt",
-            jet_std::DataTree::Float(attempt.attempt as f64),
+            jet_std::Dyn::Float(attempt.attempt as f64),
         ),
-        ("passed", jet_std::DataTree::Bool(attempt.passed)),
+        ("passed", jet_std::Dyn::Bool(attempt.passed)),
         (
             "expectedFailure",
-            jet_std::DataTree::Bool(attempt.expected_failure),
+            jet_std::Dyn::Bool(attempt.expected_failure),
         ),
         (
             "durationMs",
-            jet_std::DataTree::Float(attempt.duration_ms as f64),
+            jet_std::Dyn::Float(attempt.duration_ms as f64),
         ),
         ("source", jet_browser_test_json_source(&attempt.source)),
         ("actions", actions),
@@ -973,7 +973,7 @@ fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Da
         (
             "error",
             if attempt.error.is_empty() {
-                jet_std::DataTree::Null
+                jet_std::Dyn::Null
             } else {
                 jet_browser_text(&attempt.error)
             },
@@ -982,17 +982,17 @@ fn jet_browser_test_json_attempt(attempt: &JetBrowserTestAttempt) -> jet_std::Da
 }
 
 fn jet_browser_test_json(report: &JetBrowserTestReport) -> String {
-    let cases = jet_std::DataTree::Array(
+    let cases = jet_std::Dyn::Array(
         report
             .cases
             .iter()
             .map(|case| {
                 jet_browser_object(vec![
                     ("name", jet_browser_text(&case.name)),
-                    ("selected", jet_std::DataTree::Bool(case.selected)),
+                    ("selected", jet_std::Dyn::Bool(case.selected)),
                     (
                         "attempts",
-                        jet_std::DataTree::Array(
+                        jet_std::Dyn::Array(
                             case
                                 .attempts
                                 .iter()
@@ -1009,12 +1009,12 @@ fn jet_browser_test_json(report: &JetBrowserTestReport) -> String {
             ("schema", jet_browser_text("jet.browser.test/v1")),
             ("sourceRoot", jet_browser_text(&report.source_root)),
             ("reporter", jet_browser_text(&report.reporter)),
-            ("ui", jet_std::DataTree::Bool(report.ui)),
-            ("watch", jet_std::DataTree::Bool(report.watch)),
+            ("ui", jet_std::Dyn::Bool(report.ui)),
+            ("watch", jet_std::Dyn::Bool(report.watch)),
             ("summary", jet_browser_text(&jet_browser_test_report_summary(report))),
             (
                 "exitCode",
-                jet_std::DataTree::Float(jet_browser_test_report_exit_code(report) as f64),
+                jet_std::Dyn::Float(jet_browser_test_report_exit_code(report) as f64),
             ),
             ("cases", cases),
         ]),
@@ -1143,7 +1143,7 @@ fn jet_browser_test_render(report: &JetBrowserTestReport) -> String {
 
 pub(crate) fn jet_browser_test_write_report(
     report: &JetBrowserTestReport,
-    path: &String,
+    path: &str,
 ) -> Result<(), JetBrowserError> {
     let rendered = jet_browser_test_render(report);
     let target = std::path::Path::new(path);
@@ -1155,7 +1155,7 @@ pub(crate) fn jet_browser_test_write_report(
     Ok(())
 }
 pub(crate) fn jet_browser_test_watch_changed(
-    path: &String,
+    path: &str,
     last_modified_ms: i64,
 ) -> Result<bool, JetBrowserError> {
     let metadata = match std::fs::metadata(path) {
@@ -1188,9 +1188,9 @@ fn jet_browser_test_escape_source(value: &str) -> String {
 }
 
 pub(crate) fn jet_browser_test_generate_source(
-    name: &String,
-    route: &String,
-    output: &String,
+    name: &str,
+    route: &str,
+    output: &str,
 ) -> Result<String, JetBrowserError> {
     if name.is_empty()
         || !name
@@ -1337,6 +1337,8 @@ where
     R: std::io::Read + Send + 'static,
 {
     std::thread::spawn(move || {
+        #[cfg(jet_native_pack)]
+        let _jet_thread = crate::JetNativeThreadAttachment::enter();
         let mut bytes = Vec::new();
         let _ = reader.read_to_end(&mut bytes);
         bytes.truncate(JET_BROWSER_TEST_MAX_SERVER_LOG_BYTES);

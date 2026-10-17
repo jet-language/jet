@@ -1,0 +1,195 @@
+// The canonical bounded big-endian evidence encoder (Rust Evidence.rs).
+// Decoder lives in EvidenceCodec; both use EvidenceCodecTables and EvidenceReport.
+// Native runtime composes this encoder without decoder/Core JSON dependencies.
+
+fn evidence_put_number(out: &[U8], value: U64, width: Int) Never! {
+    loop index in 0..<width {
+        &out.push(U8{Int.from_u64((value >> ((width - index - 1) * 8)).bit_and(U64{255}))})
+    }
+}
+
+fn evidence_put_string(out: &[U8], text: String) EvidenceCodecError! {
+    bytes :: text.bytes()
+    if bytes.len() > 1048576 {
+        return Err(evidence_codec_error("evidence report field exceeds the 1 MiB limit"))
+    }
+    evidence_put_number(&out, U64{bytes.len()}, 8)
+    loop byte in bytes -> &out.push(byte)
+    return
+}
+
+fn evidence_put_len(out: &[U8], length: Int) EvidenceCodecError! {
+    if length > 10000 -> return Err(evidence_codec_error("evidence report collection is too large"))
+    evidence_put_number(&out, U64{length}, 4)
+    return
+}
+
+fn evidence_put_optional(out: &[U8], value: String?) EvidenceCodecError! {
+    if value == {
+        .None -> { &out.push(U8{0}) }
+        .Val(text) -> {
+            &out.push(U8{1})
+            evidence_put_string(&out, text)
+        }
+    }
+    return
+}
+
+fn evidence_attachment_indices(values: [EvidenceAttachment]) -> [Int] Never! {
+    indices := [Int]{}
+    loop index in 0..<values.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> evidence_attachment_order(values[left], values[right]))
+    indices
+}
+
+fn evidence_diagnostic_indices(values: [EvidenceDiagnostic]) -> [Int] Never! {
+    indices := [Int]{}
+    loop index in 0..<values.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> evidence_diagnostic_order(values[left], values[right]))
+    indices
+}
+
+fn evidence_chain_indices(values: [EvidenceChainLink]) -> [Int] Never! {
+    indices := [Int]{}
+    loop index in 0..<values.len() -> &indices.push(index)
+    &indices.sort_by((left: Int, right: Int) -> evidence_chain_order(values[left], values[right]))
+    indices
+}
+
+fn evidence_encode_record_body(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
+    if evidence_record_validate(record) == {
+        .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
+        .Ok(_) -> {}
+    }
+    &out.push(U8{evidence_kind_code(record.kind)})
+    &out.push(U8{evidence_producer_code(record.producer)})
+    &out.push(U8{evidence_facet_code(record.facet)})
+    &out.push(U8{evidence_outcome_code(record.outcome).bit_or((evidence_expectation_code(record.expectation) * 128))})
+    &out.push(U8{evidence_completeness_code(record.completeness)})
+    evidence_put_number(&out, record.count, 8)
+    evidence_put_number(&out, U64{Int.from_u32(record.source.line)}, 4)
+    evidence_put_number(&out, U64{Int.from_u32(record.source.column)}, 4)
+    evidence_put_string(&out, record.identity.report_id)
+    evidence_put_string(&out, record.identity.claim_id)
+    evidence_put_string(&out, record.identity.evidence_id)
+    evidence_put_string(&out, record.source.path)
+    evidence_put_string(&out, record.build.toolchain)
+    evidence_put_string(&out, record.build.target)
+    evidence_put_string(&out, record.build.profile)
+    evidence_put_string(&out, record.revision.source)
+    evidence_put_string(&out, record.revision.build)
+    evidence_put_string(&out, record.revision.revision)
+    evidence_put_string(&out, record.detail)
+    evidence_put_len(&out, record.attachments.len())
+    loop index in evidence_attachment_indices(record.attachments) {
+        value :: record.attachments[index]
+        evidence_put_string(&out, value.name)
+        evidence_put_string(&out, value.value)
+    }
+    evidence_put_len(&out, record.diagnostics.len())
+    loop index in evidence_diagnostic_indices(record.diagnostics) {
+        value :: record.diagnostics[index]
+        evidence_put_string(&out, value.code)
+        evidence_put_string(&out, value.message)
+        if value.source == {
+            .None -> { &out.push(U8{0}) }
+            .Val(source) -> {
+                &out.push(U8{1})
+                evidence_put_number(&out, U64{Int.from_u32(source.line)}, 4)
+                evidence_put_number(&out, U64{Int.from_u32(source.column)}, 4)
+                evidence_put_string(&out, source.path)
+            }
+        }
+    }
+    evidence_put_len(&out, record.chain.len())
+    loop index in evidence_chain_indices(record.chain) {
+        value :: record.chain[index]
+        evidence_put_string(&out, value.evidence_id)
+        evidence_put_string(&out, value.relation)
+    }
+    evidence_put_string(&out, evidence_completeness_reason(record.completeness) ?? "")
+    reference := ""
+    if record.derivation == {
+        .Val(value) -> { reference = value.id }
+        .None -> {}
+    }
+    evidence_put_string(&out, reference)
+    return
+}
+
+fn evidence_encode_record(record: EvidenceRecord, out: &[U8]) EvidenceCodecError! {
+    if record.derivation != None {
+        return Err(evidence_codec_error("evidence record has a derivation; encode with its canonical definition"))
+    }
+    evidence_encode_record_body(record, &out)
+    &out.push(U8{0})
+    return
+}
+
+fn evidence_encode_record_with_derivation(record: EvidenceRecord, derivation: DerivationRecord, out: &[U8]) EvidenceCodecError! {
+    if evidence_record_validate(record) == {
+        .Err(error) -> return Err(evidence_codec_error(evidence_expectation_error_text(error)))
+        .Ok(_) -> {}
+    }
+    if record.derivation != Val(derivation_record_reference(derivation)) {
+        return Err(evidence_codec_error("evidence record {record.identity.evidence_id} does not reference derivation {derivation.id}"))
+    }
+    evidence_encode_record_body(record, &out)
+    &out.push(U8{1})
+    evidence_encode_derivation(derivation, &out)
+}
+
+fn evidence_encode_derivation(value: DerivationRecord, out: &[U8]) EvidenceCodecError! {
+    if !derivation_record_validate(value) {
+        return Err(evidence_codec_error("derivation {value.id} has a non-canonical identity"))
+    }
+    evidence_put_string(&out, value.id)
+    evidence_put_string(&out, value.subject)
+    evidence_put_string(&out, value.claim)
+    evidence_put_string(&out, value.producer)
+    &out.push(U8{evidence_derivation_method_code(value.method)})
+    evidence_put_string(&out, value.rule)
+    evidence_put_len(&out, value.premises.len())
+    loop premise in value.premises -> evidence_put_string(&out, premise)
+    evidence_put_string(&out, value.identity.source)
+    evidence_put_string(&out, value.identity.build)
+    evidence_put_string(&out, value.identity.run)
+    evidence_put_string(&out, value.identity.target)
+    evidence_put_len(&out, value.assumptions.len())
+    loop assumption in value.assumptions -> evidence_put_string(&out, assumption)
+    &out.push(U8{evidence_derivation_disposition_code(value.disposition)})
+    if value.observation == {
+        .None -> { &out.push(U8{0}) }
+        .Val(observation) -> {
+            &out.push(U8{1})
+            evidence_put_optional(&out, observation.event_id)
+            evidence_put_optional(&out, observation.counterexample_id)
+        }
+    }
+    if value.payload == {
+        .None -> { &out.push(U8{0}) }
+        .Val(payload) -> {
+            &out.push(U8{1})
+            evidence_put_string(&out, derivation_payload_json(payload))
+        }
+    }
+    return
+}
+
+fn evidence_report_encode(report: EvidenceReport) -> [U8] EvidenceCodecError! {
+    out := EVIDENCE_REPORT_MAGIC.bytes()
+    evidence_put_number(&out, U64.from_u16(EVIDENCE_REPORT_VERSION), 2)
+    loop record in report.records {
+        if record.derivation == {
+            .None -> { evidence_encode_record(record, &out) }
+            .Val(reference) -> {
+                derivation :: evidence_report_derivation(report, reference) ?? return Err(evidence_codec_error("evidence record {record.identity.evidence_id} references missing derivation {reference.id}"))
+                evidence_encode_record_with_derivation(record, derivation, &out)
+            }
+        }
+        if out.len() > 16777216 {
+            return Err(evidence_codec_error("evidence report exceeds the 16 MiB limit"))
+        }
+    }
+    Ok(out)
+}

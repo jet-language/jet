@@ -1,0 +1,8 @@
+// SETUP-PORT tests/web_dev.rs:3268-3269; original cleanup ignores failures.
+use core.files as files
+use core.sys as sys
+fn run() {
+    root :: sys.get("S5_ROOT") ?? panic("root")
+    files.remove(files.join(root, "build/race.js")).drop("original ignored unlink")
+    files.rename(files.join(root, "build/race.js.parked"), files.join(root, "build/race.js")).drop("original ignored rename")
+}

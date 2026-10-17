@@ -1,0 +1,27 @@
+# Port of tests/dev_parts/routine.rs:6295-6362. Sources verbatim; ORACLE-LITERAL original predicates.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) where used.
+refused: read_bytes
+fixture: package_callable_survives_dev_and_run_watch_reload.fixture
+env: NO_COLOR=1
+session dev line: jet dev {work}/dev
+recv dev until line = "selected-1" within 30s
+stdout: !~ "wrong callable" # original wait_for rejects the wrong callable before the selected line
+write: dev/entry.jet package_callable_survives_dev_and_run_watch_reload.final.template
+recv dev until line = "selected-2" within 30s
+stdout: !~ "wrong callable" # original wait_for rejects the wrong callable before the selected line
+signal dev: KILL
+close dev
+exit: any # original status unasserted after intentional child.kill
+stderr: !~ "Error [" # original reload failure predicate
+stderr: !~ "E2211" # original reload failure predicate
+session run line: jet run {work}/run --watch
+recv run until line = "selected-1" within 30s
+stdout: !~ "wrong callable" # original wait_for rejects the wrong callable before the selected line
+write: run/entry.jet package_callable_survives_dev_and_run_watch_reload.final.template
+recv run until line = "selected-2" within 30s
+stdout: !~ "wrong callable" # original wait_for rejects the wrong callable before the selected line
+signal run: KILL
+close run
+exit: any # original status unasserted after intentional child.kill
+stderr: !~ "Error [" # original reload failure predicate
+stderr: !~ "E2211" # original reload failure predicate

@@ -1,0 +1,69 @@
+// Port of tests/http_server_lifecycle.rs:1269-1431 against public Core APIs.
+// PENDING-SEAM(http-server-options): workers=1, admission_queue=5,
+// read_header_timeout=40ms/read_idle_timeout=40ms; the incomplete-header
+// exchange (1s read deadline, one200, one408, close suffix) needs those options.
+// Report.accepted/completed ==8 depends on that eighth connection and remains pending.
+// PENDING-SEAM(http-keepalive-constants): idle timeout ==60s and max requests ==1000.
+use core.http.server as server
+use core.net as net
+
+fn s6_pipeline_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+fn s6_pipeline_exchange(addr: String, request: String) -> String {
+    stream :: net.tcp_connect(addr) ?? panic("connect")
+    stream.write_all(request.bytes()) ?? panic("request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request write")
+    parts := [String]{}
+    loop {
+        part :: stream.read_text(8192) ?? panic("response read")
+        if part == "" -> break
+        &parts.push(part)
+    }
+    parts.join("")
+}
+
+#Test("HTTP keepalive pipelines in order and closes at boundaries") {
+    mux :: server.mux()
+    mux.post("/one", (req: HTTPRequest) -> Ok(server.response(200, req.body().text(1024 * 1024) ?? panic("body"))))
+    mux.get("/two", (_req: HTTPRequest) -> Ok(server.response(200, "two")))
+    mux.get("/empty", (_req: HTTPRequest) -> Ok(server.response(204, "forbidden")))
+    bound :: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr :: bound.local_addr() ?? panic("address")
+    serving :: task { bound.serve() ?? panic("server") }
+    crlf :: s6_pipeline_crlf()
+    pipelined :: s6_pipeline_exchange(addr, "POST /one HTTP/1.1{crlf}Host: local{crlf}Content-Length: 3{crlf}{crlf}oneGET /two HTTP/1.1{crlf}Host: local{crlf}Connection: close{crlf}{crlf}")
+    one :: pipelined.index_of("{crlf}{crlf}one")
+    two :: pipelined.index_of("{crlf}{crlf}two")
+    assert(one >= 0, "first response")
+    assert(two >= 0, "second response")
+    assert(one < two, "pipelined responses reordered: {pipelined}")
+    assert(pipelined.count("HTTP/1.1 200 OK") == 2, pipelined)
+    assert(pipelined.count("Connection: close") == 1, pipelined)
+    http10 :: s6_pipeline_exchange(addr, "GET /two HTTP/1.0{crlf}Host: local{crlf}{crlf}GET /two HTTP/1.0{crlf}Host: local{crlf}{crlf}")
+    assert(http10.count("HTTP/1.0 200 OK") == 1, http10)
+    assert(http10.count("Connection: close") == 1, http10)
+    http10_keepalive :: s6_pipeline_exchange(addr, "GET /two HTTP/1.0{crlf}Host: local{crlf}Connection: keep-alive{crlf}{crlf}GET /two HTTP/1.0{crlf}Host: local{crlf}Connection: close{crlf}{crlf}")
+    assert(http10_keepalive.count("HTTP/1.0 200 OK") == 2, http10_keepalive)
+    assert(http10_keepalive.count("Connection: close") == 1, http10_keepalive)
+    capped_request :: "GET /two HTTP/1.1{crlf}Host: local{crlf}{crlf}".repeat(1001)
+    capped :: s6_pipeline_exchange(addr, capped_request)
+    assert(capped.count("HTTP/1.1 200 OK") == 1000, capped)
+    assert(capped.count("Connection: close") == 1, capped)
+    body_forbidden :: s6_pipeline_exchange(addr, "GET /empty HTTP/1.1{crlf}Host: local{crlf}{crlf}GET /two HTTP/1.1{crlf}Host: local{crlf}Connection: close{crlf}{crlf}")
+    next :: body_forbidden.index_of("HTTP/1.1 200 OK")
+    assert(next >= 0, "response after 204")
+    no_content :: body_forbidden.slice(0..<next)
+    assert(no_content.starts_with("HTTP/1.1 204 No Content{crlf}"), body_forbidden)
+    assert(!no_content.to_lower().contains("content-length:"), body_forbidden)
+    assert(!body_forbidden.contains("forbidden"), body_forbidden)
+    assert(body_forbidden.ends_with("{crlf}{crlf}two"), body_forbidden)
+    invalid_versions :: [String]{"HTTP/2.0", "garbage"}
+    loop version in invalid_versions {
+        invalid :: s6_pipeline_exchange(addr, "GET /two {version}{crlf}Host: local{crlf}{crlf}GET /two HTTP/1.1{crlf}Host: local{crlf}{crlf}")
+        assert(invalid.count("HTTP/1.1 505 HTTP Version Not Supported") == 1, invalid)
+        assert(!invalid.contains("200 OK"), "unsupported version persisted: {invalid}")
+        assert(invalid.ends_with("Connection: close{crlf}{crlf}"), invalid)
+    }
+    bound.shutdown(30s) ?? panic("shutdown")
+    ^serving.join() ?? panic("server join")
+}

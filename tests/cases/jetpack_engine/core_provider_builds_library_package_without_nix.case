@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:7684-7738 core_provider_builds_library_package_without_nix
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: core_provider_builds_library_package_without_nix.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+write: project/env.jet env.template
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "built 1 package(s)" # original contains predicate
+

@@ -1,0 +1,25 @@
+# tests/encoding_parity.rs::cbor_primitive_container_boundaries_match_aot_and_forced_deopt
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: cbor_primitive_container_boundaries_match_aot_and_forced_deopt.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet check probe/run.jet
+exit: 0
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: = "-8|4000000000|1.5|1,2|222,173|7|7|true|true|true|true|true|expected I8, found out-of-range Int|expected U8, found out-of-range Int|expected a fixed list of length 2, found 1\n"
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot

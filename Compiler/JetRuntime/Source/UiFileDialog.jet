@@ -1,0 +1,81 @@
+// HostServices.rs1214-1218,1288-1295: owns grant, optional granted path,
+// and ordered filters. Inline grant reuses its field-copy/drop, no temp owner.
+fn ui_granted_path_copy(value: I64, result: I64) {
+    ui_carrier_store(result + UI_GRANTED_PATH_PATH, jet_rt_string_clone(ui_carrier_word(value + UI_GRANTED_PATH_PATH)))
+    ui_carrier_store(result + UI_GRANTED_PATH_ROOT, jet_rt_string_clone(ui_carrier_word(value + UI_GRANTED_PATH_ROOT)))
+    ui_carrier_store(result + UI_GRANTED_PATH_ACCESS, ui_carrier_word(value + UI_GRANTED_PATH_ACCESS))
+}
+fn ui_granted_path_fields_drop(value: I64) {
+    jet_rt_string_drop(ui_carrier_word(value + UI_GRANTED_PATH_PATH))
+    jet_rt_string_drop(ui_carrier_word(value + UI_GRANTED_PATH_ROOT))
+}
+fn ui_granted_path_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(UI_GRANTED_PATH_BYTES, I64{8})
+    ui_granted_path_copy(value, result)
+    result
+}
+fn ui_granted_path_drop(value: I64) {
+    if (value == I64{0}) -> return
+    ui_granted_path_fields_drop(value)
+    jet_rt_free(value, UI_GRANTED_PATH_BYTES, I64{8})
+}
+fn ui_granted_path_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    jet_rt_string_eq(ui_carrier_word(a + UI_GRANTED_PATH_PATH), ui_carrier_word(b + UI_GRANTED_PATH_PATH)) && jet_rt_string_eq(ui_carrier_word(a + UI_GRANTED_PATH_ROOT), ui_carrier_word(b + UI_GRANTED_PATH_ROOT)) && ui_carrier_word(a + UI_GRANTED_PATH_ACCESS) == ui_carrier_word(b + UI_GRANTED_PATH_ACCESS)
+}
+fn ui_file_filters_clone(value: I64) -> I64 {
+    length :: jet_rt_record_seq_list_rec_jet_ui_file_filter_len(value)
+    result :: jet_rt_record_seq_list_rec_jet_ui_file_filter_new(length)
+    at := I64{0}
+    loop at < length {
+        jet_rt_record_seq_list_rec_jet_ui_file_filter_push(result, jet_rt_handle_clone_jet_ui_file_filter(jet_rt_record_seq_list_rec_jet_ui_file_filter_get(value, at)))
+        at += I64{1}
+    }
+    result
+}
+fn ui_file_filters_drop(value: I64) {
+    length :: jet_rt_record_seq_list_rec_jet_ui_file_filter_len(value)
+    capacity :: ui_carrier_word(value + DATA_SEQUENCE_CAPACITY)
+    at := I64{0}
+    loop at < length {
+        jet_rt_handle_drop_jet_ui_file_filter(jet_rt_record_seq_list_rec_jet_ui_file_filter_get(value, at))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(ui_carrier_word(value + DATA_SEQUENCE_DATA), capacity * UI_FILE_FILTER_CHILD_BYTES, I64{8})
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+fn ui_file_filters_eq(a: I64, b: I64) -> Bool {
+    length :: jet_rt_record_seq_list_rec_jet_ui_file_filter_len(a)
+    if (length != jet_rt_record_seq_list_rec_jet_ui_file_filter_len(b)) -> return false
+    at := I64{0}
+    loop at < length {
+        if (!jet_rt_handle_eq_jet_ui_file_filter(jet_rt_record_seq_list_rec_jet_ui_file_filter_get(a, at), jet_rt_record_seq_list_rec_jet_ui_file_filter_get(b, at))) -> return false
+        at += I64{1}
+    }
+    true
+}
+#Export(c) fn jet_rt_handle_clone_jet_ui_file_dialog_request(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_DIALOG_BYTES, I64{8})
+    ui_carrier_store(result + UI_DIALOG_KIND, ui_carrier_word(value + UI_DIALOG_KIND))
+    ui_carrier_store(result + UI_DIALOG_TITLE, jet_rt_string_clone(ui_carrier_word(value + UI_DIALOG_TITLE)))
+    ui_fs_grant_copy(value + UI_DIALOG_GRANT, result + UI_DIALOG_GRANT)
+    ui_carrier_store(result + UI_DIALOG_INITIAL, ui_granted_path_clone(ui_carrier_word(value + UI_DIALOG_INITIAL)))
+    ui_carrier_store(result + UI_DIALOG_FILTERS, ui_file_filters_clone(ui_carrier_word(value + UI_DIALOG_FILTERS)))
+    ui_carrier_store(result + UI_DIALOG_MULTIPLE, ui_carrier_bool(value + UI_DIALOG_MULTIPLE))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_ui_file_dialog_request(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(ui_carrier_word(value + UI_DIALOG_TITLE))
+    ui_fs_grant_fields_drop(value + UI_DIALOG_GRANT)
+    ui_granted_path_drop(ui_carrier_word(value + UI_DIALOG_INITIAL))
+    ui_file_filters_drop(ui_carrier_word(value + UI_DIALOG_FILTERS))
+    jet_rt_free(value, UI_DIALOG_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ui_file_dialog_request(a: I64, b: I64) -> Bool {
+    ui_carrier_word(a + UI_DIALOG_KIND) == ui_carrier_word(b + UI_DIALOG_KIND) && jet_rt_string_eq(ui_carrier_word(a + UI_DIALOG_TITLE), ui_carrier_word(b + UI_DIALOG_TITLE)) && jet_rt_handle_eq_jet_ui_fs_grant(a + UI_DIALOG_GRANT, b + UI_DIALOG_GRANT) && ui_granted_path_eq(ui_carrier_word(a + UI_DIALOG_INITIAL), ui_carrier_word(b + UI_DIALOG_INITIAL)) && ui_file_filters_eq(ui_carrier_word(a + UI_DIALOG_FILTERS), ui_carrier_word(b + UI_DIALOG_FILTERS)) && ui_carrier_bool(a + UI_DIALOG_MULTIPLE) == ui_carrier_bool(b + UI_DIALOG_MULTIPLE)
+}
+#Export(c) fn jet_rt_handle_field_jet_ui_file_dialog_request_title(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_DIALOG_TITLE), out) }
+#Export(c) fn jet_rt_handle_field_jet_ui_file_dialog_request_grant(value: I64) -> I64 { value + UI_DIALOG_GRANT }
+#Export(c) fn jet_rt_handle_field_jet_ui_file_dialog_request_allow_multiple(value: I64) -> I64 { value + UI_DIALOG_MULTIPLE }

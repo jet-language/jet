@@ -2,7 +2,6 @@
 
 mod common;
 
-use jet::JitBackend::JitBackend;
 use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -110,15 +109,16 @@ fn shared_weak_cycle_matches_aot_and_default_tiers() {
 
         let (_, default_path) = fixture("jet_shared_weak_default", source);
         let mut bundle = jet::Loader::load_entry(default_path.to_str().unwrap()).unwrap();
-        let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
+        let (diagnostics, _facts, checked_nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors = diagnostics.into_iter()
             .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
             .collect::<Vec<_>>();
         assert!(errors.is_empty(), "{errors:?}");
+        let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
                 assert_eq!(stdout, expected);
             }

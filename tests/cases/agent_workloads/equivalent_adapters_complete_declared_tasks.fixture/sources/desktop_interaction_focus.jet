@@ -1,0 +1,39 @@
+use core.files as fs
+use core.encoding.csv as csv
+use core.ui as ui
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    text :: fs.read(input) ?? panic("cannot read input")
+    backend :: ui.tui_backend()
+    save :: ui.button("Save")
+    cancel :: ui.button("Cancel")
+    backend.set_focus_group([save, cancel])
+    rows :: csv.rows(
+        text, delimiter: "\t", header: true, skip_blank: true
+    ) ?? panic("cannot parse input")
+    loop row in rows {
+        fields :: row.fields
+        line_number :: row.line
+        if fields.len() != 1 -> panic("bad desktop row {line_number}")
+        line :: fields.get(0) ?? panic("missing line")
+        if {
+            line == "Tab" -> {
+                backend.on_event(ui.key_event(line))
+                print("focus|{backend.focused_label()}")
+            }
+            else -> {
+                label :: "{line}"
+                key := ""
+                if line != "Empty" -> key = line.copy()
+                backend.on_event(ui.key_event(key))
+                print("event|{label}|observed")
+            }
+        }
+    }
+}

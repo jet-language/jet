@@ -1,0 +1,41 @@
+
+enum Selection {
+    One(View<Int>)
+    Pair(PairViews)
+}
+
+struct PairViews { left: View<Int>, right: View<Int> }
+struct Edit { values: ViewMut<Int> }
+
+fn select(left: [Int], right: [Int], pair: Bool) -[]> Selection {
+    if pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Selection.Pair(PairViews{ left: left_view, right: right_view })
+    }
+    selected :: right[0..1]
+    return Selection.One(selected)
+}
+
+fn first(selection: Selection) -[]> View<Int> {
+    if selection == {
+        .One(values) -> { return values }
+        .Pair(values) -> { return values.left }
+    }
+}
+
+fn edit(values: &[Int]) -[]> Edit {
+    selected :: &values[0..1]
+    return Edit{ values: selected }
+}
+
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    chosen :: select(left, right, true)
+    print(first(chosen)[0])
+    target := [1, 2]
+    borrowed :: edit(&target)
+    borrowed.values[0] = 3
+    print(borrowed.values[0])
+}

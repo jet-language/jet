@@ -1,0 +1,128 @@
+// A stopped native map pull must not become a successful short collection.
+package {
+    name: "runtime_iter_cancelled"
+    authority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }
+}
+fn mapped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> [Int] {
+    [1, 2, 3].lazy().map(
+    n -> {
+        if n == 2 {
+            started.send(1)
+            blocked.receive() ?? panic("blocking channel closed")
+        }
+        n * 10
+    },
+    )
+        .to_list()
+}
+
+fn looped_worker(started: Sender<Int>, blocked: Receiver<Int>) -> Int {
+    values :: [1, 2, 3].lazy().map(
+    n -> {
+        if n == 2 {
+            started.send(1)
+            blocked.receive() ?? panic("blocking channel closed")
+        }
+        n * 10
+    },
+    )
+    total := 0
+    loop n in values -> total += n
+    total
+}
+
+fn family_worker(family: Int, started: Sender<Int>, blocked: Receiver<Int>) -> Bool {
+    if family == 7 {
+        return [1, 2, 3, 5].lazy().chunk_while(
+        (a: Int, b: Int) -> {
+            if b == 3 {
+                started.send(1)
+                blocked.receive() ?? panic("blocking channel closed")
+            }
+            b == a + 1
+        },
+        )
+            .to_list().len() > 0
+    }
+    stop :: (n: Int) -> {
+        if n == (if family == 0 -> 1 else -> 2) {
+            started.send(1)
+            blocked.receive() ?? panic("blocking channel closed")
+        }
+        n
+    }
+    if family == 6 -> return [1, 2, 3].lazy().dedup_by(stop).to_list().len() > 0
+    values :: [1, 2, 3].lazy().map(stop)
+    if family == {
+        0 -> {
+            loop n in values -> assert(n > 0)
+        }
+        1 -> return values.repeat(2).to_list().len() > 0
+        2 -> return values.cycle(5).to_list().len() > 0
+        3 -> return values.shuffle().to_list().len() > 0
+        4 -> return values.drop_last(1).to_list().len() > 0
+        5 -> return values.to_list().len() > 0
+        8 -> return values.join("|").len() > 0
+        9 -> return values.average() > 0.0
+        10 -> return values.map(n -> Float.from_int(n)).average() > 0.0
+        11 -> return values.dedup_by(n -> n).to_list().len() > 0
+        12 -> return values.chunk_while((a: Int, b: Int) -> b == a + 1).to_list().len() > 0
+        13 -> return values.zip([10, 20, 30]).to_list().len() > 0
+        else -> panic("unknown cancellation family")
+    }
+    true
+}
+
+fn run() {
+    (start_tx, start_rx) :: channel<Int>(capacity: 1)
+    (block_tx, block_rx) :: channel<Int>(capacity: 1)
+    worker :: task mapped_worker(start_tx, block_rx)
+    start_rx.receive() ?? panic("worker did not reach map callback")
+    worker.cancel()
+    if ^^worker.join() == {
+        .Ok(short_result) -> { panic("cancelled map returned short success: {short_result}") }
+        .Err(error) -> {
+            if error == {
+                .Cancelled -> { print("cancelled") }
+                .DeadlineBlown -> { panic("unexpected deadline") }
+                .Panicked(reason) -> panic("unexpected panic: {reason}")
+            }
+        }
+    }
+    // Keep the blocking sender live until after cancellation has been joined.
+    block_tx.close()
+    (loop_start_tx, loop_start_rx) :: channel<Int>(capacity: 1)
+    (loop_block_tx, loop_block_rx) :: channel<Int>(capacity: 1)
+    loop_worker :: task looped_worker(loop_start_tx, loop_block_rx)
+    loop_start_rx.receive() ?? panic("loop did not reach map callback")
+    loop_worker.cancel()
+    if ^^loop_worker.join() == {
+        .Ok(short_result) -> { panic("cancelled loop returned short success: {short_result}") }
+        .Err(error) -> {
+            if error == {
+                .Cancelled -> { print("loop cancelled") }
+                .DeadlineBlown -> { panic("unexpected deadline") }
+                .Panicked(reason) -> panic("unexpected panic: {reason}")
+            }
+        }
+    }
+    loop_block_tx.close()
+    loop family in 0..<14 {
+        (family_start_tx, family_start_rx) :: channel<Int>(capacity: 1)
+        (family_block_tx, family_block_rx) :: channel<Int>(capacity: 1)
+        family_task :: task family_worker(family, family_start_tx, family_block_rx)
+        family_start_rx.receive() ?? panic("family did not reach callback")
+        family_task.cancel()
+        if ^^family_task.join() == {
+            .Ok(result) -> { panic("cancelled family {family} returned success: {result}") }
+            .Err(error) -> {
+                if error == {
+                    .Cancelled -> { print("family {family} cancelled") }
+                    .DeadlineBlown -> { panic("unexpected deadline") }
+                    .Panicked(reason) -> panic("unexpected panic: {reason}")
+                }
+            }
+        }
+        family_block_tx.close()
+    }
+}

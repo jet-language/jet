@@ -3,23 +3,26 @@
 // registering or type-checking ordinary function bodies.
 use jet_foundation.[
     AccessConvention,
+    ArithmeticMode,
+    ArithmeticPolicyFact,
     CallArg,
     Diagnostic,
     Expr,
     Func,
     ImplDef,
     Item,
+    Marker,
     NamedType,
     Span,
     Stmt,
 ]
 
-pub struct SemaFunctionHeaderMarkerGate {
-    pub name: String
-    pub span: Span
+struct SemaFunctionHeaderMarkerGate {
+    name: String
+    span: Span
 }
 
-pub fn sema_function_header_normalize_external_method(function: Func) -> Item Never! {
+fn sema_function_header_normalize_external_method(function: Func) -> Item Never! {
     external :: function.external_type ?? return Item.Func{value: function}
     method := function
     method.external_type = None
@@ -39,12 +42,12 @@ pub fn sema_function_header_normalize_external_method(function: Func) -> Item Ne
     }}
 }
 
-pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_root_params(function: Func, is_method: Bool, diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     if is_method || function.external_type != None {
-        loop parameter in function.params {
-            if parameter.root {
-                &diagnostics.push(sema_error("E0103", parameter.name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
+        loop parameter_index in 0..<function.params.len() {
+            if function.params[parameter_index].root {
+                &diagnostics.push(sema_error("E0103", function.params[parameter_index].name_span, "`#Root` is only valid on a top-level function", "a method already owns its receiver after the dot; marking another receiver would make dispatch ambiguous", "remove `#Root`, or move the function to module scope"))
                 valid = false
             }
         }
@@ -65,16 +68,16 @@ pub fn sema_function_header_check_root_params(function: Func, is_method: Bool, d
 
 // D-NARG-D2 (E0126): a default expression may name only parameters written
 // before its own; defaults fill left to right. `self` is not a parameter here.
-pub fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_default_forward_refs(function: Func, diagnostics: &[Diagnostic]) -> Bool {
     names := [String]{}
-    loop parameter in function.params {
-        if parameter.name != "self" -> &names.push(parameter.name)
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].name != "self" -> &names.push(function.params[parameter_index].name)
     }
     valid := true
     index := 0
-    loop parameter in function.params {
-        if parameter.name == "self" -> next
-        if parameter.default == .Val(default) {
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].name == "self" -> next
+        if function.params[parameter_index].default == .Val(default) {
             references := [Expr]{}
             sema_function_header_default_idents(default, &references)
             loop reference in references {
@@ -87,7 +90,7 @@ pub fn sema_function_header_check_default_forward_refs(function: Func, diagnosti
                         }
                     }
                     if later {
-                        &diagnostics.push(sema_error("E0126", span, "default for `{parameter.name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{parameter.name}`, or use a constant default"))
+                        &diagnostics.push(sema_error("E0126", span, "default for `{function.params[parameter_index].name}` in `{function.name}` references `{name}`, which comes after it", "defaults fill left to right; a parameter isn't in scope until it appears in the list", "reorder the parameters so `{name}` comes before `{function.params[parameter_index].name}`, or use a constant default"))
                         valid = false
                     }
                 }
@@ -116,7 +119,7 @@ fn sema_function_header_default_idents(value: Expr, found: &[Expr]) {
             sema_function_header_default_idents(callee, &found)
             loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) -> {
             sema_function_header_default_idents(receiver, &found)
             loop argument in args -> sema_function_header_default_idents(argument.expr, &found)
         }
@@ -134,7 +137,7 @@ fn sema_function_header_default_idents(value: Expr, found: &[Expr]) {
     }
 }
 
-pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
+fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunctionHeaderMarkerGate] Never! {
     gates := [SemaFunctionHeaderMarkerGate]{}
     if function.is_unsafe -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Unsafe", span: function.unsafe_span ?? function.name_span})
     if function.is_replayable -> &gates.push(SemaFunctionHeaderMarkerGate{name: "Replayable", span: function.replayable_span ?? function.name_span})
@@ -145,7 +148,7 @@ pub fn sema_function_header_active_marker_gates(function: Func) -> [SemaFunction
     gates
 }
 
-pub fn sema_function_header_check_marker_gates(function: Func, function_allowed_markers: [String], diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_marker_gates(function: Func, function_allowed_markers: [String], diagnostics: &[Diagnostic]) -> Bool {
     valid := true
     loop gate in sema_function_header_active_marker_gates(function) {
         allowed := false
@@ -161,15 +164,48 @@ pub fn sema_function_header_check_marker_gates(function: Func, function_allowed_
 }
 
 // The function rules whose meaning the parser projects onto `Func` fields
-// that the checker, foreign stage and lowering read; the marker row itself
-// adds nothing.
+// that the checker, foreign stage and lowering read, plus `#Arithmetic`,
+// which the body checker reads as the function's arithmetic policy
+// (sema_function_arithmetic_policy); the marker row itself adds nothing.
 fn sema_function_header_marker_projected(name: String) -> Bool Never! {
-    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI"
+    name == "Unsafe" || name == "Inline" || name == "MustUse" || name == "Replayable" || name == "Scrub" || name == "Comptime" || name == "FFI" || name == "Arithmetic"
+}
+
+// D-WRAP-SCOPE1=A (Rust `check_fn`): the first `#Arithmetic(mode)` marker of
+// a function opens its lexical fixed-width arithmetic mode for the whole
+// body; an argument that names no mode opens none.
+fn sema_function_arithmetic_policy(markers: [Marker]) -> ArithmeticPolicyFact? Never! {
+    loop marker in markers {
+        if marker.name != "Arithmetic" -> next
+        if marker.args.len() == 0 -> return None
+        mode :: if marker.args[0] == {
+            .Expr(value) -> sema_function_arithmetic_mode(value)
+            else -> None
+        } ?? return None
+        return Val(ArithmeticPolicyFact{mode: mode, scope_span: marker.span, operation_span: marker.span, operation: None})
+    }
+    None
+}
+
+// Rust `ArithmeticMode::from_expr`.
+fn sema_function_arithmetic_mode(value: Expr) -> ArithmeticMode? Never! {
+    word :: if value == {
+        .Ident(name, _) -> name
+        .Field(_, member, _) -> member
+        .EnumLit(_, variant, _, _, _, _) -> variant
+        else -> ""
+    }
+    if word == {
+        "Checked" -> Val(ArithmeticMode.Checked)
+        "Wrapping" -> Val(ArithmeticMode.Wrapping)
+        "Saturating" -> Val(ArithmeticMode.Saturating)
+        else -> None
+    }
 }
 
 // The header forms the body checker does not handle yet. Each one records
 // why on `context`, so an incomplete function never fails without a cause.
-pub fn sema_function_header_supported(function: Func, context: &SemaCheckContext) -> Bool Never! {
+fn sema_function_header_supported(function: Func, context: &SemaCheckContext) -> Bool Never! {
     supported := true
     if function.head_pattern != None {
         sema_check_unsupported(&context, "the multi-head pattern function `{function.name}` reached body checking without being desugared")
@@ -193,21 +229,30 @@ pub fn sema_function_header_supported(function: Func, context: &SemaCheckContext
         supported = false
     }
     loop marker in function.markers {
-        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) -> next
+        // Rust Guest.rs `is_guest_export_marker`: an `#Export(c)` function is an
+        // ordinary Jet body; the export row is read after checking
+        // (jet_driver_c_exports), so the marker adds nothing to the body check.
+        if sema_function_header_marker_projected(marker.name) || (marker.name == "Reactive" && function.is_reactive) || sema_marker_is_guest_export(marker) -> next
         sema_check_unsupported(&context, "the function marker `#{marker.name}` is not supported by the self-hosted checker yet")
         supported = false
     }
-    loop parameter in function.params {
-        if parameter.root {
-            sema_check_unsupported(&context, "the `#Root` parameter `{parameter.name}` (reversible dot call) is not supported by the self-hosted checker yet")
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].root {
+            sema_check_unsupported(&context, "the `#Root` parameter `{function.params[parameter_index].name}` (reversible dot call) is not supported by the self-hosted checker yet")
             supported = false
         }
-        if parameter.variadic_bound_list != None {
-            sema_check_unsupported(&context, "the variadic bound list on parameter `{parameter.name}` is not supported by the self-hosted checker yet")
+        if function.params[parameter_index].variadic_bound_list != None {
+            sema_check_unsupported(&context, "the variadic bound list on parameter `{function.params[parameter_index].name}` is not supported by the self-hosted checker yet")
             supported = false
         }
-        if parameter.declared_view_from_names != None {
-            sema_check_unsupported(&context, "the declared `from` view sources on parameter `{parameter.name}` are not supported by the self-hosted checker yet")
+        if function.params[parameter_index].declared_view_from_names != None {
+            sema_check_unsupported(&context, "the declared `from` view sources on parameter `{function.params[parameter_index].name}` are not supported by the self-hosted checker yet")
+            supported = false
+        }
+        // D-METHOD-FOOTPRINT1=A: the Rust checker owns the E0231 body check
+        // and API publication of a stated receiver footprint.
+        if function.params[parameter_index].declared_footprint != None {
+            sema_check_unsupported(&context, "the stated receiver footprint on `{function.name}` is not supported by the self-hosted checker yet")
             supported = false
         }
     }
@@ -237,7 +282,7 @@ fn sema_function_header_inline_has_core_mem(module_row: SemaRegistrationModule) 
 // trait-bounded variadic parameter (`...Trait` / `...[A, B]`) has no single
 // Rust type, so its only supported use is the collection of one top-level
 // `loop x in name { … }` loop. Every other reference is reported.
-pub fn sema_function_header_check_variadic_bound_shape(function: Func, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) -> Bool {
+fn sema_function_header_check_variadic_bound_shape(function: Func, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) -> Bool {
     if function.params.len() == 0 -> return true
     last :: function.params[function.params.len() - 1]
     if !last.variadic -> return true
@@ -245,9 +290,8 @@ pub fn sema_function_header_check_variadic_bound_shape(function: Func, environme
     if last.variadic_bound_list == .Val(list) {
         bounded = list.len() > 0
     } else {
-        graph_option :: environment.registration_graph
-        if last.ty == .Named(trait_name) && trait_name != "" && graph_option == .Val(graph) {
-            bounded = sema_expr_expected_trait_symbol(graph, trait_name, environment.module_identity) != None
+        if last.ty == .Named(trait_name) && trait_name != "" && program.registration_graph == .Val(graph) {
+            bounded = sema_type_graph_trait_symbol(graph, environment.module_identity, trait_name) != None
         }
     }
     if !bounded -> return true
@@ -345,7 +389,7 @@ fn sema_function_header_variadic_expr(expr: Expr, name: String, uses: &[Span]) N
             if found == name -> &uses.push(span)
         }
         .Call(call) -> sema_function_header_variadic_args(call.args, name, &uses)
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .CallValue(receiver, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .CallValue(receiver, args, _) -> {
             sema_function_header_variadic_expr(receiver, name, &uses)
             sema_function_header_variadic_args(args, name, &uses)
         }

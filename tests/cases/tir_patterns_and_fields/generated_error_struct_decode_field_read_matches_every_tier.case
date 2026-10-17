@@ -1,0 +1,24 @@
+# HAND-PORT tests/tir_patterns_and_fields.rs:163-180 generated_error_struct_decode_field_read_matches_every_tier
+# PENDING-SAME-HEAD runtimeGap=build/admission; PENDING-GRAMMAR; original assertions, no historical failing captures.
+# Exact original tier stderr+stdout+exit relations; generated Rust mangle/name-lane asserts retire where present; ORACLE-LITERAL.
+fixture: generated_error_struct_decode_field_read_matches_every_tier.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_ROOT={work}/jetpack-default
+exit: 0
+stdout: = generated_error_struct_decode_field_read_matches_every_tier.stdout.expected
+step interpret: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache-interpret
+env: JETPACK_ROOT={work}/jetpack-interpret
+exit: 0
+stdout: = generated_error_struct_decode_field_read_matches_every_tier.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+env: JET_STORE_DIR={work}/cache-aot
+env: JETPACK_ROOT={work}/jetpack-aot
+exit: 0
+step aot: built
+exit: 0
+stdout: = generated_error_struct_decode_field_read_matches_every_tier.stdout.expected
+stderr: == default

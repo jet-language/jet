@@ -6,11 +6,11 @@
 // default (`CARGO_PKG_VERSION` of jet-foundation).
 PKG_BUILD_STAMP_TOOLCHAIN :: prep { "0.1.0" }
 
-pub struct BuildStamp {
-    pub git: String?
-    pub dirty: Bool
-    pub toolchain: String
-    pub at: String
+struct BuildStamp {
+    git: String?
+    dirty: Bool
+    toolchain: String
+    at: String
 
     fn default() -> BuildStamp Never! {
         BuildStamp{git: None, dirty: false, toolchain: PKG_BUILD_STAMP_TOOLCHAIN, at: ""}
@@ -20,7 +20,7 @@ pub struct BuildStamp {
 // Return the lock-pinned provenance, or capture one stamp for the
 // lock-writing operation. A locked build may not fall back to the wall
 // clock: a missing stamp is a stale lock input.
-pub fn pkg_lock_build_stamp(project_root: String, locked: Bool) -[FS, Exec, Time, Time.Wait]> BuildStamp LockError! {
+fn pkg_lock_build_stamp(project_root: String, locked: Bool) -[FS, Exec, Time, Time.Wait]> BuildStamp LockError! {
     if pkg_lock_load(project_root) == {
         .Val(lock) -> if lock.build_stamp == {
             .Val(stamp) -> { return Ok(stamp) }
@@ -34,7 +34,7 @@ pub fn pkg_lock_build_stamp(project_root: String, locked: Bool) -[FS, Exec, Time
 
 // Pin provenance on every writer of the unified lock. Existing stamps are
 // immutable; a new lock gets one capture at the write boundary.
-pub fn pkg_lock_ensure_build_stamp(project_root: String, lock: &LockFile) -[Exec, Time, Time.Wait]> {
+fn pkg_lock_ensure_build_stamp(project_root: String, lock: &LockFile) -[Exec, Time, Time.Wait]> {
     if lock.build_stamp == None -> lock.build_stamp = Val(pkg_lock_capture_build_stamp(project_root))
 }
 

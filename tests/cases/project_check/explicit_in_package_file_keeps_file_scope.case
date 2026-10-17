@@ -1,0 +1,12 @@
+# tests/project_check.rs::explicit_in_package_file_keeps_file_scope at tests/project_check.rs:268; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: explicit_in_package_file_keeps_file_scope.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check --verbose src/cli/main.jet
+cwd: {work}/frozen_dogfood
+exit: 0
+stdout: ~ "scope=explicit-file" # original predicate
+stdout.filter(^= "proof: "): lines = 4 # original ed77c235f tests/project_check.rs:197-208 proof-prefix projection and281-287 exact four explicit-file proof rows
+stdout.filter(^= "proof: "): each-line ~ "output=not-applicable" # original predicate
+stdout.filter(^= "proof: "): each-line ~ "[not applicable]" # original predicate

@@ -1,0 +1,22 @@
+# Port of comptime_cli_parity.rs:178-259. PENDING-GRAMMAR: step env, is-file.
+fixture: fixtures/build_entry_workspace_matches_release_default_and_dev_interpreter
+# Original run_jet (comptime_cli_parity.rs:70-75) creates the root and selects its run child.
+mkdir: cache/named
+step: jet build foundation
+env: JET_STORE_DIR={work}/cache/named/run
+file: packages/foundation/.jet/generated/foundation/foundation_marker.jet is-file
+mkdir: cache/workspace
+step: jet build
+env: JET_STORE_DIR={work}/cache/workspace/run
+mkdir: cache/release
+step: jet run --release run.jet
+env: JET_STORE_DIR={work}/cache/release/run
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
+mkdir: cache/default
+step: jet run run.jet
+env: JET_STORE_DIR={work}/cache/default/run
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out
+mkdir: cache/interpreted
+step: jet dev run.jet --interpret --watch=off
+env: JET_STORE_DIR={work}/cache/interpreted/run
+stdout: = ../../../Examples/features/expected/tooling/build_entry_discovery.out

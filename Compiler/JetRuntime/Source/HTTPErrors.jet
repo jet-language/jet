@@ -1,0 +1,181 @@
+// HTTPMessage.rs:6-38,65-123: Operation enum8; Error16 {tag,payload}.
+// HTTPMessage.rs:272-325: Display, JetShow and JetDebug share these exact
+// user-facing templates (not Rust enum Debug). Text payloads own E4 handles.
+HTTP_ERROR_BYTES :: prep { I64{16} }
+HTTP_ERROR_TAG :: prep { I64{0} }
+HTTP_ERROR_PAYLOAD :: prep { I64{8} }
+#Export(c) fn jet_rt_handle_clone_jet_http_operation(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_http_operation(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_http_operation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+fn http_error_tag(value: I64) -> I64 {
+    ordinal :: encoding_word(value + HTTP_ERROR_TAG)
+    if (ordinal < I64{0} || ordinal > I64{20}) -> rt_record_variant_panic()
+    ordinal
+}
+#Export(c) fn jet_rt_handle_clone_jet_http_error(value: I64) -> I64 {
+    ordinal :: http_error_tag(value)
+    payload :: encoding_word(value + HTTP_ERROR_PAYLOAD)
+    result :: jet_rt_alloc(HTTP_ERROR_BYTES, I64{8})
+    encoding_store(result + HTTP_ERROR_TAG, ordinal)
+    encoding_store(result + HTTP_ERROR_PAYLOAD, if (ordinal >= I64{9} && ordinal <= I64{19}) -> jet_rt_string_clone(payload) else -> payload)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_http_error(value: I64) {
+    if (value == I64{0}) -> return
+    ordinal :: http_error_tag(value)
+    if (ordinal >= I64{9} && ordinal <= I64{19}) -> jet_rt_string_drop(encoding_word(value + HTTP_ERROR_PAYLOAD))
+    jet_rt_free(value, HTTP_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_http_error(left: I64, right: I64) -> Bool {
+    ordinal :: http_error_tag(left)
+    if (ordinal != http_error_tag(right)) -> return false
+    if (ordinal < I64{8}) -> return true
+    a :: encoding_word(left + HTTP_ERROR_PAYLOAD)
+    b :: encoding_word(right + HTTP_ERROR_PAYLOAD)
+    if (ordinal >= I64{9} && ordinal <= I64{19}) -> jet_rt_string_eq(a, b) else -> a == b
+}
+fn http_error_prefix(target: I64, ordinal: I64) {
+    if {
+        (ordinal == I64{0}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{8387229866601501768}, I64{8})
+            rt_text_push_word(target, I64{6582120}, I64{3})
+        }
+        (ordinal == I64{1}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{5499551692247815240}, I64{8})
+        }
+        (ordinal == I64{2}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{7018130082322732104}, I64{8})
+            rt_text_push_word(target, I64{7497060}, I64{3})
+        }
+        (ordinal == I64{3}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{7022364301601297480}, I64{8})
+            rt_text_push_word(target, I64{7566708}, I64{3})
+        }
+        (ordinal == I64{4}) -> {
+            rt_text_push_word(target, I64{7237111017133855816}, I64{8})
+            rt_text_push_word(target, I64{7809558908765675641}, I64{8})
+            rt_text_push_word(target, I64{8026294666651592050}, I64{8})
+            rt_text_push_word(target, I64{110386790888302}, I64{6})
+        }
+        (ordinal == I64{5}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{7021787057996715080}, I64{8})
+            rt_text_push_word(target, I64{1735289197}, I64{4})
+        }
+        (ordinal == I64{6}) -> {
+            rt_text_push_word(target, I64{8245933071047814773}, I64{8})
+            rt_text_push_word(target, I64{5788344089835758964}, I64{8})
+            rt_text_push_word(target, I64{7954800022568002080}, I64{8})
+            rt_text_push_word(target, I64{113723912253283}, I64{6})
+        }
+        (ordinal == I64{7}) -> {
+            rt_text_push_word(target, I64{7309464379799655496}, I64{8})
+            rt_text_push_word(target, I64{7142830433799266674}, I64{8})
+            rt_text_push_word(target, I64{7234307589253852769}, I64{8})
+        }
+        (ordinal == I64{8}) -> {
+            rt_text_push_word(target, I64{7237111017133855816}, I64{8})
+            rt_text_push_word(target, I64{7234299854336630905}, I64{8})
+            rt_text_push_word(target, I64{8307}, I64{2})
+        }
+        (ordinal == I64{9}) -> {
+            rt_text_push_word(target, I64{7881701907940791368}, I64{8})
+            rt_text_push_word(target, I64{8461260341336219749}, I64{8})
+            rt_text_push_word(target, I64{7593462736201148788}, I64{8})
+            rt_text_push_word(target, I64{2338053640979506540}, I64{8})
+        }
+        (ordinal == I64{10}) -> {
+            rt_text_push_word(target, I64{7957688057024762952}, I64{8})
+            rt_text_push_word(target, I64{2336927755366786414}, I64{8})
+            rt_text_push_word(target, I64{7358992177896710502}, I64{8})
+            rt_text_push_word(target, I64{2126447}, I64{3})
+        }
+        (ordinal == I64{11}) -> {
+            rt_text_push_word(target, I64{6002264901141419080}, I64{8})
+            rt_text_push_word(target, I64{2334102023183623712}, I64{8})
+            rt_text_push_word(target, I64{9120923167913316}, I64{7})
+        }
+        (ordinal == I64{12}) -> {
+            rt_text_push_word(target, I64{7883960304824243272}, I64{8})
+            rt_text_push_word(target, I64{8247608383154515813}, I64{8})
+            rt_text_push_word(target, I64{543649385}, I64{4})
+        }
+        (ordinal == I64{13}) -> {
+            rt_text_push_word(target, I64{8030604369643983944}, I64{8})
+            rt_text_push_word(target, I64{7308332162361620856}, I64{8})
+            rt_text_push_word(target, I64{7453010373661433956}, I64{8})
+            rt_text_push_word(target, I64{32}, I64{1})
+        }
+        (ordinal == I64{14}) -> {
+            rt_text_push_word(target, I64{7234313859552793672}, I64{8})
+            rt_text_push_word(target, I64{7018332753559384681}, I64{8})
+            rt_text_push_word(target, I64{35435164560489}, I64{6})
+        }
+        (ordinal == I64{15}) -> {
+            rt_text_push_word(target, I64{8245933071047814773}, I64{8})
+            rt_text_push_word(target, I64{5788344089835758964}, I64{8})
+            rt_text_push_word(target, I64{8026381506781016096}, I64{8})
+            rt_text_push_word(target, I64{8300}, I64{2})
+        }
+        (ordinal == I64{16}) -> {
+            rt_text_push_word(target, I64{5705859656037192776}, I64{8})
+            rt_text_push_word(target, I64{2334102023183623712}, I64{8})
+            rt_text_push_word(target, I64{9120923167913316}, I64{7})
+        }
+        (ordinal == I64{17}) -> {}
+        (ordinal == I64{18}) -> {
+            rt_text_push_word(target, I64{8315177770121712712}, I64{8})
+            rt_text_push_word(target, I64{7959303536279450991}, I64{8})
+            rt_text_push_word(target, I64{7809911822066218593}, I64{8})
+            rt_text_push_word(target, I64{2112101}, I64{3})
+        }
+        (ordinal == I64{19}) -> {
+            rt_text_push_word(target, I64{7809644666444607081}, I64{8})
+            rt_text_push_word(target, I64{7018332598687778848}, I64{8})
+            rt_text_push_word(target, I64{7575119880135208041}, I64{8})
+            rt_text_push_word(target, I64{2338615488267510638}, I64{8})
+        }
+        else -> rt_text_push_word(target, I64{138786657352}, I64{5}) // HTTP (tag20)
+    }
+}
+#Export(c) fn jet_rt_handle_show_jet_http_error(value: I64) -> I64 {
+    ordinal :: http_error_tag(value)
+    payload :: encoding_word(value + HTTP_ERROR_PAYLOAD)
+    if (ordinal == I64{20} && (payload < I64{0} || payload > I64{2})) -> rt_record_variant_panic()
+    target :: jet_rt_string_builder_new()
+    http_error_prefix(target, ordinal)
+    if (ordinal == I64{8}) {
+        rt_text_push_number(target, payload)
+        rt_text_push_word(target, I64{7596482291585081901}, I64{8})
+        rt_text_push_word(target, I64{7629165}, I64{3}) // -byte limit
+    } else if (ordinal >= I64{9} && ordinal <= I64{19}) {
+        jet_rt_string_builder_push(target, payload)
+    } else if (ordinal == I64{20}) {
+        if {
+            (payload == I64{0}) -> {
+                rt_text_push_word(target, I64{7142837026506239075}, I64{8})
+                rt_text_push_word(target, I64{127970252320367}, I64{6})
+            }
+            (payload == I64{1}) -> {
+                rt_text_push_word(target, I64{7070777195076150643}, I64{8})
+                rt_text_push_word(target, I64{6581865}, I64{3})
+            }
+            else -> {
+                rt_text_push_word(target, I64{7596482291618178419}, I64{8})
+                rt_text_push_word(target, I64{125779969406067}, I64{6})
+            }
+        }
+        rt_text_push_word(target, I64{8530220618551093536}, I64{8})
+        rt_text_push_word(target, I64{2334391151658559841}, I64{8})
+        rt_text_push_word(target, I64{2338328528881217135}, I64{8})
+        rt_text_push_word(target, I64{7022273334665114978}, I64{8})
+        rt_text_push_word(target, I64{1952802674}, I64{4})
+    }
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_http_error(value: I64) -> I64 { jet_rt_handle_show_jet_http_error(value) }
+#Export(c) fn jet_rt_handle_debug_jet_http_error(value: I64) -> I64 { jet_rt_handle_show_jet_http_error(value) }

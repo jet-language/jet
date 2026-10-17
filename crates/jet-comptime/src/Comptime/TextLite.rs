@@ -2,6 +2,8 @@
 
 mod text_kernel {
     pub mod jet_std {
+        pub(crate) use super::JetProcessDirectory;
+
         #[derive(Clone, Copy, Debug, PartialEq)]
         pub enum IOOperation {
             Read,
@@ -48,6 +50,8 @@ mod text_kernel {
             Closed(IOContext),
             Protocol(IOContext),
             Other(IOContext),
+            AlreadyExists(IOContext),
+            Unsupported(IOContext),
         }
 
         impl IOError {
@@ -72,7 +76,17 @@ mod text_kernel {
                 error.raw_os_error().map(i64::from),
                 Some(error.to_string()),
             );
+            let not_supported = matches!(
+                context.os_code,
+                Some(code) if (cfg!(target_os = "linux") && code == 95)
+                    || (cfg!(target_os = "macos") && (code == 45 || code == 102))
+            );
+            if not_supported {
+                return IOError::Unsupported(context);
+            }
             match error.kind() {
+                std::io::ErrorKind::AlreadyExists => IOError::AlreadyExists(context),
+                std::io::ErrorKind::Unsupported => IOError::Unsupported(context),
                 std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
                     IOError::InvalidInput(context)
                 }
@@ -137,6 +151,8 @@ mod text_kernel {
         }
 
         include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/MappedFile.rs");
+        include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/FileHandles.rs");
+        include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/FileLockRaw.rs");
     }
 
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
@@ -148,11 +164,11 @@ mod text_kernel {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
     pub(crate) struct JetFileReader {
-        pub(crate) inner: std::io::BufReader<std::fs::File>,
+        pub(crate) inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
         pub(crate) path: String,
     }
     pub(crate) struct JetFileWriter {
-        pub(crate) inner: std::io::BufWriter<std::fs::File>,
+        pub(crate) inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
         pub(crate) path: String,
     }
     include!("../../../jet-codegen/src/Prelude/Core/StdinReader.rs");
@@ -185,11 +201,13 @@ mod text_kernel {
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/Text.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSIgnore.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSWalk.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/FSWalk8Raw.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FSOps.rs");
     include!("../../../jet-codegen/src/Prelude/Core/FileHandleOwners.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSRuntimeOps.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FSWriteOps.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/FileStream.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/PlatformFamily.rs");
 
     pub(super) fn nfd(s: &str) -> String {
         jet_text_nfd(&s.to_string())
@@ -440,12 +458,6 @@ mod text_kernel {
     pub(super) fn fs_append(path: &str, text: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_append(&path.to_string(), &text.to_string())
     }
-    pub(super) fn fs_exists(path: &str) -> bool {
-        jet_std_fs_exists(&path.to_string())
-    }
-    pub(super) fn fs_is_dir(path: &str) -> bool {
-        jet_std_fs_is_dir(&path.to_string())
-    }
     pub(super) fn fs_create_dir(path: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_create_dir(&path.to_string())
     }
@@ -463,9 +475,6 @@ mod text_kernel {
     }
     pub(super) fn fs_copy(from: &str, to: &str) -> Result<(), jet_std::IOError> {
         jet_std_fs_copy(&from.to_string(), &to.to_string())
-    }
-    pub(super) fn fs_copy_dir(from: &str, to: &str) -> Result<(), jet_std::IOError> {
-        jet_std_fs_copy_dir(&from.to_string(), &to.to_string())
     }
     pub(super) fn fs_list_dir(path: &str) -> Result<Vec<jet_std::DirEntry>, jet_std::IOError> {
         jet_std_fs_list_dir(&path.to_string())
@@ -560,12 +569,21 @@ pub fn mir_fs_temp_file(prefix: &str) -> Result<MirFileOwner, crate::AST::CtValu
         .map_err(io_error_ct)
 }
 
-pub fn mir_fs_lock(path: &str) -> Result<MirFileOwner, crate::AST::CtValue> {
-    text_kernel::jet_std_fs_lock(&path.to_string())
-        .map(|owner| MirFileOwner {
-            inner: MirFileOwnerKind::FileLock(owner),
-        })
+
+pub fn mir_fs_temp_dir_raw(path: String) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_temp_dir_raw(path)
+        .map(|owner| MirFileOwner { inner: MirFileOwnerKind::TempDir(owner) })
         .map_err(io_error_ct)
+}
+
+pub fn mir_fs_temp_file_raw(path: String) -> Result<MirFileOwner, crate::AST::CtValue> {
+    text_kernel::jet_std_fs_temp_file_raw(path)
+        .map(|owner| MirFileOwner { inner: MirFileOwnerKind::TempFile(owner) })
+        .map_err(io_error_ct)
+}
+
+pub fn mir_fs_lock_owner_raw(path: String, fd: i64) -> MirFileOwner {
+    MirFileOwner { inner: MirFileOwnerKind::FileLock(text_kernel::jet_std::jet_fs_lock_owner_raw(path, fd)) }
 }
 
 #[derive(Clone, Copy)]
@@ -644,6 +662,8 @@ fn io_error_ct(error: text_kernel::jet_std::IOError) -> crate::AST::CtValue {
 
         text_kernel::jet_std::IOError::Protocol(context) => ("Protocol", context),
         text_kernel::jet_std::IOError::Other(context) => ("Other", context),
+        text_kernel::jet_std::IOError::AlreadyExists(context) => ("AlreadyExists", context),
+        text_kernel::jet_std::IOError::Unsupported(context) => ("Unsupported", context),
     };
     crate::AST::CtValue::Enum {
         type_name: "IOError".to_string(),
@@ -769,6 +789,67 @@ fn writer_flush(handle: &FileWriterHandle) -> Result<(), crate::AST::CtValue> {
     text_kernel::jet_std_file_writer_flush(writer).map_err(io_error_ct)
 }
 
+/// #3593: run one leaf on a live reader; a poisoned or closed handle is an IOError.
+fn with_reader<T>(
+    handle: &FileReaderHandle,
+    run: impl FnOnce(&mut text_kernel::JetFileReader) -> Result<T, text_kernel::jet_std::IOError>,
+) -> Result<T, crate::AST::CtValue> {
+    let mut reader = handle.0.lock().map_err(|_| {
+        io_error_ct(text_kernel::jet_std::IOError::other(
+            text_kernel::jet_std::IOOperation::Read,
+            None,
+            "file reader handle is poisoned",
+        ))
+    })?;
+    let reader = reader.as_mut().ok_or_else(|| {
+        closed_file_error(text_kernel::jet_std::IOOperation::Read, "file reader is closed")
+    })?;
+    run(reader).map_err(io_error_ct)
+}
+
+/// #3593: run one leaf on a live writer; a poisoned or closed handle is an IOError.
+fn with_writer<T>(
+    handle: &FileWriterHandle,
+    run: impl FnOnce(&mut text_kernel::JetFileWriter) -> Result<T, text_kernel::jet_std::IOError>,
+) -> Result<T, crate::AST::CtValue> {
+    let mut writer = handle.0.lock().map_err(|_| {
+        io_error_ct(text_kernel::jet_std::IOError::other(
+            text_kernel::jet_std::IOOperation::Write,
+            None,
+            "file writer handle is poisoned",
+        ))
+    })?;
+    let writer = writer.as_mut().ok_or_else(|| {
+        closed_file_error(text_kernel::jet_std::IOOperation::Write, "file writer is closed")
+    })?;
+    run(writer).map_err(io_error_ct)
+}
+
+fn handle_result<T>(
+    result: Result<T, crate::AST::CtValue>,
+    value: impl FnOnce(T) -> crate::AST::CtValue,
+) -> crate::AST::CtValue {
+    match result {
+        Ok(ok) => crate::AST::CtValue::Present(Box::new(value(ok))),
+        Err(error) => crate::AST::CtValue::failed(Box::new(error)),
+    }
+}
+
+/// `[U8]` from a comptime list or byte value.
+fn ct_bytes(value: &crate::AST::CtValue) -> Option<Vec<u8>> {
+    match value {
+        crate::AST::CtValue::Bytes(bytes) => Some(bytes.clone()),
+        crate::AST::CtValue::List(values) => values
+            .iter()
+            .map(|value| match value {
+                crate::AST::CtValue::Int(byte) => u8::try_from(*byte).ok(),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
+    }
+}
+
 fn reader_line_value(handle: &FileReaderHandle) -> crate::AST::CtValue {
     match reader_line(handle) {
         Ok(line) => crate::AST::CtValue::Present(Box::new(match line {
@@ -859,6 +940,19 @@ pub(crate) fn apply_file_handle(
                     span,
                 ),
             ),
+            "file_reader.read" | "read" => {
+                let [crate::AST::CtValue::Int(max)] = args else {
+                    return Some(Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileReader.read expects one Int argument",
+                        span,
+                    )));
+                };
+                let max = jet_foundation::Numeric::JetInt::from_i64(*max);
+                Ok(handle_result(
+                    with_reader(handle, |reader| text_kernel::jet_std_file_reader_read(reader, max)),
+                    crate::AST::CtValue::Bytes,
+                ))
+            }
             _ => Err(crate::Comptime::Diagnostics::unsupported(
                 &format!("FileReader.{method}"),
                 span,
@@ -903,6 +997,29 @@ pub(crate) fn apply_file_handle(
             "file_writer.flush" | "flush" if args.is_empty() => {
                 Ok(writer_result(writer_flush(handle)))
             }
+            "file_writer.write_all" | "write_all" => {
+                let Some(bytes) = (match args {
+                    [bytes] => ct_bytes(bytes),
+                    _ => None,
+                }) else {
+                    return Some(Err(crate::Comptime::Diagnostics::unsupported(
+                        "FileWriter.write_all expects one [U8] argument",
+                        span,
+                    )));
+                };
+                Ok(handle_result(
+                    with_writer(handle, |writer| text_kernel::jet_std_file_writer_write_all(writer, &bytes)),
+                    |()| crate::AST::CtValue::Unit,
+                ))
+            }
+            "file_writer.fsync" | "fsync" if args.is_empty() => Ok(handle_result(
+                with_writer(handle, |writer| text_kernel::jet_std_file_writer_fsync(writer)),
+                |()| crate::AST::CtValue::Unit,
+            )),
+            "file_writer.fsync" | "fsync" => Err(crate::Comptime::Diagnostics::unsupported(
+                "FileWriter.fsync expects no arguments",
+                span,
+            )),
             "file_writer.flush" | "flush" => Err(crate::Comptime::Diagnostics::unsupported(
                 "FileWriter.flush expects no arguments",
                 span,
@@ -950,12 +1067,6 @@ pub(super) fn fs_fsync(path: &str) -> FsResult<()> {
 pub(super) fn fs_set_mode(path: &str, mode: i64) -> FsResult<()> {
     text_kernel::jet_std_fs_set_mode(&path.to_string(), mode).map_err(io_error_ct)
 }
-pub(super) fn fs_exists(path: &str) -> bool {
-    text_kernel::fs_exists(path)
-}
-pub(super) fn fs_is_dir(path: &str) -> bool {
-    text_kernel::fs_is_dir(path)
-}
 pub(super) fn fs_create_dir(path: &str) -> FsResult<()> {
     text_kernel::fs_create_dir(path).map_err(io_error_ct)
 }
@@ -973,9 +1084,6 @@ pub(super) fn fs_remove_all(path: &str) -> FsResult<()> {
 }
 pub(super) fn fs_copy(from: &str, to: &str) -> FsResult<()> {
     text_kernel::fs_copy(from, to).map_err(io_error_ct)
-}
-pub(super) fn fs_copy_dir(from: &str, to: &str) -> FsResult<()> {
-    text_kernel::fs_copy_dir(from, to).map_err(io_error_ct)
 }
 pub(super) fn fs_rename(from: &str, to: &str) -> FsResult<()> {
     text_kernel::jet_fs_rename(from, to).map_err(|error| {
@@ -998,50 +1106,279 @@ pub(super) fn fs_read_link(path: &str) -> FsResult<String> {
 pub(super) fn fs_canonicalize(path: &str) -> FsResult<String> {
     text_kernel::jet_std_fs_canonicalize(&path.to_string()).map_err(io_error_ct)
 }
-pub(super) fn fs_absolute(path: &str) -> FsResult<String> {
-    text_kernel::jet_std_fs_absolute(&path.to_string()).map_err(io_error_ct)
-}
-pub(super) fn fs_stat(path: &str) -> FsResult<crate::AST::CtValue> {
-    text_kernel::jet_fs_stat(&path.to_string())
-        .map(|stat| crate::AST::CtValue::Struct {
-            type_name: "Stat".to_string(),
-            fields: vec![
-                ("size".to_string(), crate::AST::CtValue::Int(stat.size)),
-                (
-                    "modified_ms".to_string(),
-                    crate::AST::CtValue::Int(stat.modified_ms),
-                ),
-                (
-                    "created_ms".to_string(),
-                    crate::AST::CtValue::Int(stat.created_ms),
-                ),
-                (
-                    "readonly".to_string(),
-                    crate::AST::CtValue::Bool(stat.readonly),
-                ),
-                (
-                    "is_file".to_string(),
-                    crate::AST::CtValue::Bool(stat.is_file),
-                ),
-                ("is_dir".to_string(), crate::AST::CtValue::Bool(stat.is_dir)),
-                (
-                    "is_symlink".to_string(),
-                    crate::AST::CtValue::Bool(stat.is_symlink),
-                ),
-                ("kind".to_string(), crate::AST::CtValue::Str(stat.kind)),
-                ("mode".to_string(), crate::AST::CtValue::Int(stat.mode)),
-            ],
+/// #3593: the interpreter adapter for the `core.files.__*` provider leaves.
+/// Each arm only converts CtValue arguments and results; the leaf itself is
+/// the shared Prelude FileHandles.rs / FileStream.rs function AOT calls.
+/// `Err(String)` is a malformed call, which the caller reports.
+pub(crate) fn apply_files_leaf(
+    method: &str,
+    args: &[crate::AST::CtValue],
+) -> Option<Result<crate::AST::CtValue, String>> {
+    use crate::AST::CtValue;
+    let int = |i: usize| match args.get(i) {
+        Some(CtValue::Int(value)) => Ok(*value),
+        _ => Err(format!("core.files.{method} argument {i} must be an Int")),
+    };
+    let boolean = |i: usize| match args.get(i) {
+        Some(CtValue::Bool(value)) => Ok(*value),
+        _ => Err(format!("core.files.{method} argument {i} must be a Bool")),
+    };
+    let text = |i: usize| match args.get(i) {
+        Some(CtValue::Str(value)) => Ok(value.clone()),
+        _ => Err(format!("core.files.{method} argument {i} must be a String")),
+    };
+    let bytes = |i: usize| match args.get(i) {
+        Some(CtValue::Bytes(value)) => Ok(value.clone()),
+        Some(CtValue::List(values)) => values
+            .iter()
+            .map(|value| match value {
+                CtValue::Int(byte) => u8::try_from(*byte).map_err(|_| format!("core.files.{method} received an invalid U8")),
+                _ => Err(format!("core.files.{method} expects [U8]")),
+            })
+            .collect::<Result<Vec<u8>, String>>(),
+        _ => Err(format!("core.files.{method} argument {i} must be [U8]")),
+    };
+    fn done<T>(result: Result<T, text_kernel::jet_std::IOError>, value: impl FnOnce(T) -> CtValue) -> CtValue {
+        match result {
+            Ok(ok) => CtValue::Present(Box::new(value(ok))),
+            Err(error) => CtValue::failed(Box::new(io_error_ct(error))),
+        }
+    }
+    fn facts(fields: Vec<(&str, CtValue)>) -> CtValue {
+        CtValue::Struct {
+            type_name: format!("({})", fields.iter().map(|(name, _)| *name).collect::<Vec<_>>().join(",")),
+            fields: fields.into_iter().map(|(name, value)| (name.into(), value)).collect(),
+        }
+    }
+    fn error_facts(kind: i64, code: Option<i64>, cause: Option<String>) -> Vec<(&'static str, CtValue)> {
+        vec![
+            ("kind", CtValue::Int(kind)),
+            ("code", code.map_or_else(|| CtValue::absent(crate::AST::Type::Int), |value| CtValue::Present(Box::new(CtValue::Int(value))))),
+            ("cause", cause.map_or_else(|| CtValue::absent(crate::AST::Type::String), |value| CtValue::Present(Box::new(CtValue::Str(value))))),
+        ]
+    }
+    let unit = |_: ()| CtValue::Unit;
+    let run = || -> Result<CtValue, String> {
+        Ok(match method {
+            "__lock_open" | "__lock_try" => {
+                let raw = if method == "__lock_open" {
+                    text_kernel::jet_std::jet_fs_lock_open_raw(&text(0)?)
+                } else { text_kernel::jet_std::jet_fs_lock_try_raw(int(0)?) };
+                CtValue::Struct { type_name: "__LockCall".into(), fields: vec![
+                    ("value".into(), CtValue::Int(raw.value)),
+                    ("errno".into(), CtValue::Int(raw.errno)),
+                    ("platform".into(), CtValue::Int(raw.platform)),
+                ] }
+            }
+            "__lock_fd_identity" | "__lock_path_identity" => {
+                let raw = if method == "__lock_fd_identity" {
+                    text_kernel::jet_std::jet_fs_lock_fd_identity_raw(int(0)?)
+                } else { text_kernel::jet_std::jet_fs_lock_path_identity_raw(&text(0)?) };
+                CtValue::Struct { type_name: "__LockIdentity".into(), fields: vec![
+                    ("device".into(), CtValue::Int(raw.device)),
+                    ("low".into(), CtValue::Int(raw.low)),
+                    ("high".into(), CtValue::Int(raw.high)),
+                    ("regular".into(), CtValue::Bool(raw.regular)),
+                    ("reparse".into(), CtValue::Bool(raw.reparse)),
+                    ("errno".into(), CtValue::Int(raw.errno)),
+                    ("platform".into(), CtValue::Int(raw.platform)),
+                ] }
+            }
+            "__lock_wait" => {
+                let raw = text_kernel::jet_std::jet_fs_lock_wait_raw(int(0)?, int(1)?, boolean(2)?, int(3)?);
+                CtValue::Struct { type_name: "__LockWait".into(), fields: vec![
+                    ("acquired".into(), CtValue::Bool(raw.acquired)),
+                    ("timed_out".into(), CtValue::Bool(raw.timed_out)),
+                    ("errno".into(), CtValue::Int(raw.errno)),
+                    ("platform".into(), CtValue::Int(raw.platform)),
+                    ("deadline_ns".into(), CtValue::Int(raw.deadline_ns)),
+                ] }
+            }
+            "__lock_close" => CtValue::Int(text_kernel::jet_std::jet_fs_lock_close_raw(int(0)?)),
+            "__entries_context" => CtValue::Int(text_kernel::jet_entries8_open(&text(0)?, &text(1)?, boolean(2)?)),
+            "__entries_close" => { text_kernel::jet_entries8_close(int(0)?); CtValue::Unit },
+            "__entries_release" => { text_kernel::jet_entries8_release(int(0)?, int(1)?); CtValue::Unit },
+            "__entries_shown" => CtValue::Str(text_kernel::jet_entries8_shown(int(0)?, int(1)?)),
+            "__entries_before" => CtValue::Bool(text_kernel::jet_entries8_before(int(0)?, int(1)?, int(2)?)),
+            "__entries_read_dir" | "__entries_mkdir" | "__entries_copy" => {
+                let (kind, code, cause) = match method {
+                    "__entries_read_dir" => text_kernel::jet_entries8_read_dir(int(0)?, int(1)?),
+                    "__entries_mkdir" => text_kernel::jet_entries8_mkdir(int(0)?, int(1)?),
+                    _ => text_kernel::jet_entries8_copy(int(0)?, int(1)?),
+                };
+                facts(error_facts(kind, code, cause))
+            }
+            "__entries_next" => {
+                let (end, child, kind, code, cause) = text_kernel::jet_entries8_next(int(0)?, int(1)?);
+                let mut fields = vec![("end", CtValue::Bool(end)), ("child", CtValue::Int(child))];
+                fields.extend(error_facts(kind, code, cause));
+                facts(fields)
+            }
+            "__entries_file_type" => {
+                let (directory, file, kind, code, cause) = text_kernel::jet_entries8_file_type(int(0)?, int(1)?);
+                let mut fields = vec![("directory", CtValue::Bool(directory)), ("file", CtValue::Bool(file))];
+                fields.extend(error_facts(kind, code, cause));
+                facts(fields)
+            }
+            "__os_family" => CtValue::Str(text_kernel::jet_std_os_family()),
+            "__process_id_raw" => CtValue::Int(std::process::id() as i64),
+            "__map_raw" => done(text_kernel::jet_std::jet_std_files_map(&text(0)?), opaque_file),
+            "__remove_raw" => done(text_kernel::jet_std_fs_remove_raw(&text(0)?), unit),
+            "__remove_dir_raw" => done(text_kernel::jet_std_fs_remove_dir_raw(&text(0)?), unit),
+            "__remove_all_raw" => done(text_kernel::jet_std_fs_remove_all_raw(&text(0)?, boolean(1)?), unit),
+            "__copy_raw" => done(text_kernel::jet_std_fs_copy_raw(&text(0)?, &text(1)?), unit),
+            "__hard_link_raw" => done(text_kernel::jet_std_fs_hard_link_raw(&text(0)?, &text(1)?), unit),
+            "__fsync_raw" => done(text_kernel::jet_std_fs_fsync_raw(&text(0)?), unit),
+            "__stat_mode_raw" => done(text_kernel::jet_std_fs_stat_mode_raw(&text(0)?), CtValue::Int),
+            "__chown_raw" => done(text_kernel::jet_std_fs_chown_raw(&text(0)?, int(1)?, int(2)?), unit),
+            "__set_mode_raw" => done(text_kernel::jet_std_fs_set_mode_raw(&text(0)?, int(1)?), unit),
+            "__symlink_directory_raw" => done(text_kernel::jet_std_fs_symlink_directory_raw(&text(0)?), CtValue::Bool),
+            "__symlink_raw" => done(text_kernel::jet_std_fs_symlink_raw(&text(0)?, &text(1)?, boolean(2)?), unit),
+            "__mkdtemp_raw" => done(text_kernel::jet_std_fs_temp_dir_path_raw(text(0)?), CtValue::Str),
+            "__canonicalize_raw" => done(text_kernel::jet_std_fs_canonicalize_raw(&text(0)?), CtValue::Str),
+            "__list_dir_raw" => done(text_kernel::jet_std_fs_list_dir_raw(&text(0)?), |entries| {
+                CtValue::List(entries.into_iter().map(|entry| CtValue::Struct {
+                    type_name: "DirEntry".to_string(), fields: vec![
+                        ("name".to_string(), CtValue::Str(entry.name)),
+                        ("path".to_string(), CtValue::Str(entry.path)),
+                        ("is_dir".to_string(), CtValue::Bool(entry.is_dir)),
+                    ],
+                }).collect())
+            }),
+            "__walk_parallel_raw" => {
+                let ignore = match args.get(1) {
+                    Some(CtValue::Present(value)) => match value.as_ref() {
+                        CtValue::Str(value) => Some(value.as_str()),
+                        _ => return Err(format!("core.files.{method} ignore must be String?")),
+                    },
+                    Some(value) if value.is_clean_stop() => None,
+                    _ => return Err(format!("core.files.{method} ignore must be String?")),
+                };
+                done(text_kernel::fs_walk_parallel_with_ignore(&text(0)?, ignore), |entries| {
+                    CtValue::List(entries.into_iter().map(|entry| CtValue::Struct {
+                        type_name: "WalkEntry".to_string(), fields: vec![
+                            ("path".to_string(), CtValue::Str(entry.path)),
+                            ("relative".to_string(), CtValue::Str(entry.relative)),
+                            ("is_dir".to_string(), CtValue::Bool(entry.is_dir)),
+                            ("depth".to_string(), CtValue::Int(entry.depth)),
+                        ],
+                    }).collect())
+                })
+            },
+            "__create_dir_all_raw" => {
+                let path = match args.first() {
+                    Some(CtValue::Str(value)) => value,
+                    _ => return Err("core.files.__create_dir_all_raw argument 0 must be a String".to_string()),
+                };
+                done(text_kernel::jet_std_fs_create_dir_all_raw(path), unit)
+            },
+            "__temp_path_sample" | "__temp_clock_raw" => {
+                let (available, nanos) = text_kernel::jet_std::jet_fs_temp_path_sample_raw();
+                CtValue::Struct { type_name: "(clock_available,nanos)".to_string(),
+                    fields: vec![("clock_available".to_string(), CtValue::Bool(available)), ("nanos".to_string(), CtValue::Str(nanos))] }
+            },
+            "__directory_fd" => {
+                let (available, held, fd) = text_kernel::jet_std::jet_fs_directory_fd_raw(int(0)?);
+                CtValue::Struct { type_name: "(available,held,fd)".to_string(), fields: vec![
+                    ("available".to_string(), CtValue::Bool(available)), ("held".to_string(), CtValue::Bool(held)),
+                    ("fd".to_string(), CtValue::Int(fd.to_i64().expect("directory fd is i32")))] }
+            },
+            "__temp_directory" | "__temp_directory_raw" => CtValue::Str(text_kernel::jet_std::jet_fs_temp_directory_raw()),
+            "__host_path_is_absolute" => CtValue::Bool(text_kernel::jet_std::jet_fs_host_path_is_absolute_raw(&text(0)?)),
+            "__host_path_join" => CtValue::Str(text_kernel::jet_std::jet_fs_host_path_join_raw(&text(0)?, &text(1)?)),
+            "__metadata_directory" => match text_kernel::jet_std::jet_fs_metadata_directory_raw(&text(0)?) {
+                Ok(value) => CtValue::Present(Box::new(CtValue::Bool(value))),
+                Err(cause) => CtValue::failed(Box::new(CtValue::Str(cause))),
+            },
+            "jet_files_link_reader_at_raw" => {
+                let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileReader")
+                })?;
+                let reader = handle.0.lock().unwrap_or_else(|poison| poison.into_inner());
+                let reader = reader.as_ref().ok_or_else(|| {
+                    "compiler-private link requires a live checked FileReader".to_string()
+                })?;
+                let (available, held, value, errno) =
+                    text_kernel::jet_files_link_reader_at_raw(reader, int(1)?, &text(2)?);
+                CtValue::Struct {
+                    type_name: "(available,held,value,errno)".to_string(),
+                    fields: vec![
+                        ("available".to_string(), CtValue::Bool(available)),
+                        ("held".to_string(), CtValue::Bool(held)),
+                        ("value".to_string(), CtValue::Int(value.to_i64().expect("linkat returned i32"))),
+                        ("errno".to_string(), CtValue::Int(errno.to_i64().expect("errno was i32"))),
+                    ],
+                }
+            }
+            "__open_reader" => done(text_kernel::jet_std_files_open_reader(int(0)?, &text(1)?, int(2)?), |reader| {
+                opaque_file(FileReaderHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(reader)))))
+            }),
+            "__open_writer" => done(
+                text_kernel::jet_std_files_open_writer(int(0)?, &text(1)?, boolean(2)?, int(3)?, int(4)?, int(5)?),
+                |writer| opaque_file(FileWriterHandle(std::sync::Arc::new(std::sync::Mutex::new(Some(writer))))),
+            ),
+            "__open_directory" => done(text_kernel::jet_std::jet_fs_directory_open(int(0)?, &text(1)?), CtValue::Int),
+            "__close_directory" => {
+                text_kernel::jet_std::jet_fs_directory_close(int(0)?);
+                CtValue::Unit
+            }
+            "__fsync_directory" => done(text_kernel::jet_std::jet_fs_directory_fsync(int(0)?), unit),
+            "__flock" => done(text_kernel::jet_std::jet_fs_flock(int(0)?, int(1)?), unit),
+            "__create_directory" => done(text_kernel::jet_std::jet_fs_directory_create(int(0)?, &text(1)?, int(2)?), unit),
+            "__list_directory" => done(text_kernel::jet_std::jet_fs_directory_list(int(0)?), |rows| {
+                CtValue::List(rows.into_iter().map(CtValue::Bytes).collect())
+            }),
+            "__stat_at" => done(text_kernel::jet_std::jet_fs_stat_at(int(0)?, &text(1)?, boolean(2)?), |row| {
+                CtValue::List(row.into_iter().map(CtValue::Int).collect())
+            }),
+            "__path_kind" => done(text_kernel::jet_std::jet_fs_path_kind(&text(0)?), CtValue::Int),
+            "__rename_at" => done(
+                text_kernel::jet_std::jet_fs_rename_at(int(0)?, &text(1)?, int(2)?, &text(3)?, int(4)?),
+                unit,
+            ),
+            "__remove_at" => done(text_kernel::jet_std::jet_fs_remove_at(int(0)?, &text(1)?, boolean(2)?), unit),
+            "__read_link_at" => done(text_kernel::jet_std::jet_fs_read_link_at(int(0)?, &text(1)?), CtValue::Str),
+            "__xattr_names" => done(text_kernel::jet_std::jet_fs_xattr_names(&text(0)?), |names| {
+                CtValue::List(names.into_iter().map(CtValue::Str).collect())
+            }),
+            "__xattr_get" => done(text_kernel::jet_std::jet_fs_xattr_get(&text(0)?, &text(1)?), |value| match value {
+                Some(bytes) => CtValue::Present(Box::new(CtValue::Bytes(bytes))),
+                None => CtValue::absent(crate::AST::Type::List(Box::new(crate::AST::Type::Named("U8".to_string())))),
+            }),
+            "__xattr_set" => done(text_kernel::jet_std::jet_fs_xattr_set(&text(0)?, &text(1)?, &bytes(2)?), unit),
+            "__reader_stat" => {
+                let handle = args.first().and_then(file_reader_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileReader")
+                })?;
+                handle_result(with_reader(handle, |reader| text_kernel::jet_std_file_reader_stat(reader)), |row| {
+                    CtValue::List(row.into_iter().map(CtValue::Int).collect())
+                })
+            }
+            "__writer_stat" => {
+                let handle = args.first().and_then(file_writer_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileWriter")
+                })?;
+                handle_result(with_writer(handle, |writer| text_kernel::jet_std_file_writer_stat(writer)), |row| {
+                    CtValue::List(row.into_iter().map(CtValue::Int).collect())
+                })
+            }
+            "__writer_set_mode" => {
+                let handle = args.first().and_then(file_writer_handle).ok_or_else(|| {
+                    format!("core.files.{method} argument 0 must be a FileWriter")
+                })?;
+                let mode = int(1)?;
+                handle_result(
+                    with_writer(handle, |writer| text_kernel::jet_std_file_writer_set_mode(writer, mode)),
+                    unit,
+                )
+            }
+            _ => return Err(format!("core.files.{method} is not a provider leaf")),
         })
-        .map_err(io_error_ct)
-}
-pub(super) fn fs_glob(pattern: &str) -> FsResult<Vec<String>> {
-    text_kernel::jet_fs_glob(pattern).map_err(|error| {
-        io_error_ct(text_kernel::jet_std::io_error_at(
-            text_kernel::jet_std::IOOperation::Read,
-            pattern,
-            error,
-        ))
-    })
+    };
+    if !method.starts_with("__") {
+        return None;
+    }
+    Some(run())
 }
 /// `(name, full path, is_dir)` rows in the kernel's own sorted order (D-LSDIR1).
 pub(super) fn fs_list_dir(path: &str) -> FsResult<Vec<(String, String, bool)>> {
@@ -1216,6 +1553,9 @@ pub(super) fn char_indices(s: &str) -> Vec<String> {
 pub(super) fn inspect(s: &str) -> Vec<String> {
     text_kernel::inspect(s)
 }
+pub(super) fn string_count(s: &str, needle: &str) -> i64 {
+    text_kernel::jet_unicode_count(s, needle)
+}
 pub(super) fn unicode_scalar_count(s: &str) -> i64 {
     text_kernel::unicode_scalar_count(s)
 }
@@ -1240,4 +1580,15 @@ pub(super) fn string_route(
     args: &[crate::AST::CtValue],
 ) -> Option<crate::AST::CtValue> {
     text_kernel::string_route(s, member, args)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn process_directory_carrier_has_one_owner_across_the_text_kernel() {
+        assert_eq!(
+            std::any::TypeId::of::<super::text_kernel::JetProcessDirectory>(),
+            std::any::TypeId::of::<super::text_kernel::jet_std::JetProcessDirectory>(),
+        );
+    }
 }

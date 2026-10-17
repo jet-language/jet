@@ -1,0 +1,20 @@
+use core.files as files
+
+fn s5_mapless_length(bytes: [U8]) -> Int {
+    trailer :: "//# sourceMappingURL=app.js.map\n".bytes()
+    if bytes.len() < trailer.len() -> return bytes.len()
+    start :: bytes.len() - trailer.len()
+    loop index in 0..<trailer.len() { if bytes[start + index] != trailer[index] -> return bytes.len() }
+    start
+}
+
+#Test("served bundle equals original project root publication") {
+    response :: s5_web_get(s5_web_port(), "/app.js", None) ?? panic("GET app.js")
+    assert_eq(response.status, 200)
+    root :: sys.get("S5_PROJECT_ROOT") ?? panic("project root")
+    published :: files.read_bytes(files.join(root, ".jet/build/app.js")) ?? panic("app.js published at project root")
+    published_len :: s5_mapless_length(published)
+    served_len :: s5_mapless_length(response.body)
+    assert_eq(published_len, served_len)
+    loop index in 0..<published_len -> assert_eq(published[index], response.body[index])
+}

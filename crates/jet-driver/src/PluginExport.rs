@@ -52,14 +52,14 @@ fn resolve_version(bundle: &ProgramBundle) -> String {
         .unwrap_or_else(|| "0.0.0".to_string())
 }
 
-/// E1260: a sandbox's exported `pub fn` has no homogeneous scalar or closed
+/// E1260: a sandbox's exported top-level `fn` has no homogeneous scalar or closed
 /// Component Model shape.
 fn e1260(detail: &str) -> Diagnostic {
     Diagnostic::error(
         "E1260",
         "a sandbox's exported function has an unsupported signature".to_string(),
         detail.to_string(),
-        "every parameter and the return type must use one scalar type, or a recursively closed `#Codable` Component Model shape — narrow the signature, or drop `pub` if this function isn't meant to be called across the sandbox boundary".to_string(),
+        "every parameter and the return type must use one scalar type, or a recursively closed `#Codable` Component Model shape — narrow the signature, or move the function into a `priv module` if it isn't meant to be called across the sandbox boundary".to_string(),
         None,
     )
 }
@@ -75,7 +75,7 @@ fn component_signature(bundle: &ProgramBundle, guest: &crate::Sema::GuestFunctio
             .all(|(_, ty)| crate::Sema::sandbox_component_type(bundle, ty))
 }
 
-/// Validate the entry module's top-level `pub fn` surface for a
+/// Validate the entry module's top-level `fn` surface for a
 /// `target: sandbox` build. Every public function is checked through the sema
 /// guest projection; a non-conforming one is E1260, not a silent skip.
 pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
@@ -87,7 +87,7 @@ pub fn validate_export_surface(bundle: &ProgramBundle) -> Vec<Diagnostic> {
         };
         if guest.scalar.is_none() && !component_signature(bundle, &guest) {
             diags.push(e1260(&format!(
-                "`pub fn {}` has neither one homogeneous scalar shape nor a recursively closed `#Codable` Component Model shape",
+                "`fn {}` has neither one homogeneous scalar shape nor a recursively closed `#Codable` Component Model shape",
                 f.name
             )));
         }

@@ -1,0 +1,353 @@
+// Whole-value CBOR parser; policy and allocation accounting stay in Jet.
+// Unit policy helpers retain the same typed CBORError contract as value parses.
+use core.encoding.[Dyn]
+use core.encoding as encoding
+use core.encoding.cbor.[CBOROptions, CBORError, CBORErrorKind]
+use __core_encoding_stream as stream
+use core.math as math
+use core.mem as mem
+// Exact representability, rather than a rounded conversion, selects the RFC
+// preferred float width. Inexact values retain all their original f64 bits.
+fn narrow_bits(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Int? Never! {
+    negative :: bits < 0
+    sign :: if negative -> 1 << (exponent_bits + fraction_bits) else -> 0
+    exponent :: (bits >> 52).bit_and(2047)
+    fraction :: bits.bit_and(4503599627370495)
+    max_exponent :: (1 << exponent_bits) - 1
+    if exponent == 2047 {
+        if fraction != 0 -> return Val((max_exponent << fraction_bits).bit_or((1 << (fraction_bits - 1))))
+        return Val(sign.bit_or((max_exponent << fraction_bits)))
+    }
+    if exponent == 0 {
+        if fraction == 0 -> return Val(sign)
+        return None
+    }
+    bias :: (1 << (exponent_bits - 1)) - 1
+    target_exponent :: exponent - 1023 + bias
+    if target_exponent >= max_exponent -> return None
+    shift := 52 - fraction_bits
+    significand := fraction
+    if target_exponent <= 0 {
+        shift += 1 - target_exponent
+        if shift > 52 + fraction_bits -> return None
+        significand = significand.bit_or(4503599627370496)
+    }
+    if shift >= 63 -> return None
+    if (significand.bit_and(((1 << shift) - 1))) != 0 -> return None
+    mantissa :: significand >> shift
+    if target_exponent <= 0 -> return Val(sign.bit_or(mantissa))
+    Val(sign.bit_or((target_exponent << fraction_bits)).bit_or(mantissa))
+}
+
+fn failure(kind: CBORErrorKind, offset: Int, path: String, reason: String) -> CBORError Never! {
+    CBORError{kind: kind, byte_offset: offset, path: path, reason: reason}
+}
+
+fn parse(bytes: [U8], options: CBOROptions) -> Dyn CBORError! {
+    if options.max_depth < 1 || options.max_depth > 4096 -> return Err(failure(.Limit, 0, "$", "max_depth must be in 1..4096"))
+    if options.max_items < 1 || options.max_items > 1000000000 -> return Err(failure(.Limit, 0, "$", "max_items must be in 1..1000000000"))
+    if options.max_bytes < 0 || options.max_bytes > 1073741824 -> return Err(failure(.Limit, 0, "$", "max_bytes must be in 0..1073741824"))
+    if bytes.len() > options.max_bytes -> return Err(failure(.Limit, 0, "$", "input exceeds max_bytes {options.max_bytes}"))
+    parser := Parser{cursor: 0, items: 0, live: 0, options: options}
+    value :: &parser.value(bytes, 0, "$") ?? return Err(err)
+    if parser.cursor != bytes.len() -> return Err(failure(.TrailingData, parser.cursor, "$", "trailing CBOR data after root value"))
+    Ok(value)
+}
+
+struct Argument {
+    value: Int
+    outside_int: Bool
+}
+
+struct Parser {
+    cursor: Int
+    items: Int
+    live: Int
+    options: CBOROptions
+}
+
+impl Parser {
+    fn charge(&self, size: Int, offset: Int, path: String, what: String) CBORError! {
+        if size > self.options.max_bytes - self.live -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
+        self.live += size
+    }
+
+    fn reserve<T>(&self, values: &[T], count: Int, slot: Int, offset: Int, path: String, what: String) CBORError! {
+        capacity :: mem.__list_capacity<T>(values)
+        if count <= capacity - values.len() -> return
+        retained :: self.live - capacity * slot
+        available :: self.options.max_bytes - retained
+        if count > available /% slot || values.len() > available /% slot - count -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
+        if !mem.__list_reserve_exact<T>(&values, count) -> return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
+        actual :: mem.__list_capacity<T>(values)
+        if actual > available /% slot {
+            values = [T]{}
+            self.live = retained
+            return Err(failure(.Limit, offset, path, "{what} allocation exceeds max_bytes {self.options.max_bytes}"))
+        }
+        self.live = retained + actual * slot
+    }
+
+    fn count(&self, offset: Int, path: String) CBORError! {
+        self.items += 1
+        if self.items > self.options.max_items -> return Err(failure(.Limit, offset, path, "max_items {self.options.max_items} exceeded"))
+    }
+
+    fn indefinite(self, offset: Int, path: String) CBORError! {
+        if self.options.require_canonical -> return Err(failure(.NonCanonical, offset, path, "indefinite-length CBOR is not Core deterministic"))
+    }
+
+    fn argument(&self, input: [U8], additional: Int, start: Int, path: String) -> Argument CBORError! {
+        if additional < 24 -> return Ok(Argument{value: additional, outside_int: false})
+        width :: if additional == 24 -> 1 else if additional == 25 -> 2 else if additional == 26 -> 4 else if additional == 27 -> 8 else -> 0
+        if width == 0 -> return Err(failure(.Unsupported, start, path, "indefinite/reserved CBOR length is unsupported by whole-value decoding"))
+        if width > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR length argument is truncated"))
+        outside :: width == 8 && input[self.cursor] >= (U8{128})
+        number := 0
+        loop _ in 0..<width {
+            if !outside -> number = (number << 8).bit_or(Int.from_u8(input[self.cursor]))
+            self.cursor += 1
+        }
+        if outside -> number = 9223372036854775807
+        if self.options.require_canonical && ((additional == 24 && number < 24) || (additional == 25 && number <= 255) || (additional == 26 && number <= 65535) || (additional == 27 && number <= 4294967295)) {
+            return Err(failure(.NonCanonical, start, path, "CBOR argument does not use its shortest form"))
+        }
+        Ok(Argument{value: number, outside_int: outside})
+    }
+
+    fn string(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String, major: Int) -> Dyn CBORError! {
+        if additional == 31 {
+            self.indefinite(start, path) ?? return Err(err)
+            if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
+            if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Dyn; use decode<[U8]>"))
+            bytes := [U8]{}
+            loop {
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR string ended before its break"))
+                if input[self.cursor] == (U8{255}) {
+                    self.cursor += 1
+                    break
+                }
+                chunk :: self.cursor
+                head :: Int.from_u8(input[self.cursor])
+                self.cursor += 1
+                &self.count(chunk, path) ?? return Err(err)
+                if (head >> 5) != major || (head.bit_and(31)) == 31 -> return Err(failure(.Syntax, chunk, path, "indefinite CBOR string contains a wrong or indefinite chunk"))
+                length :: &self.argument(input, head.bit_and(31), chunk, path) ?? return Err(err)
+                if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string chunk is truncated"))
+                encoding.__utf8_validate(input[self.cursor..<(self.cursor + length.value)]) ?? return Err(failure(.Syntax, chunk, path, "CBOR text chunk is not UTF-8"))
+                &self.reserve<U8>(&bytes, length.value, 1, chunk, path, "CBOR text string") ?? return Err(err)
+                piece :: input[self.cursor..<(self.cursor + length.value)]
+                loop byte in piece -> &bytes.push(byte)
+                self.cursor += length.value
+            }
+            text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
+            return Ok(Dyn.Text(text))
+        }
+        length :: &self.argument(input, additional, start, path) ?? return Err(err)
+        if length.value > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR byte/text string is truncated"))
+        if major == 2 -> return Err(failure(.Unsupported, start, path, "CBOR byte strings are outside core.encoding.Dyn; use decode<[U8]>"))
+        bytes := [U8]{}
+        &self.reserve<U8>(&bytes, length.value, 1, start, path, "CBOR text string") ?? return Err(err)
+        loop _ in 0..<length.value {
+            &bytes.push(input[self.cursor])
+            self.cursor += 1
+        }
+        text :: String.from_bytes(bytes) ?? return Err(failure(.Syntax, start, path, "CBOR text is not UTF-8"))
+        Ok(Dyn.Text(text))
+    }
+
+    fn array(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
+        if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
+        items := [Dyn]{}
+        length := -1
+        if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
+        else {
+            argument :: &self.argument(input, additional, start, path) ?? return Err(err)
+            length = argument.value
+            &self.reserve<Dyn>(&items, length, 32, start, path, "CBOR array") ?? return Err(err)
+        }
+        index := 0
+        loop length < 0 || index < length {
+            if length < 0 {
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR array ended before its break"))
+                if input[self.cursor] == (U8{255}) {
+                    self.cursor += 1
+                    break
+                }
+            }
+            child_path :: "{path}[{index}]"
+            charged :: child_path.count_bytes()
+            offset :: if length < 0 -> self.cursor else -> start
+            &self.charge(charged, offset, path, "CBOR path") ?? return Err(err)
+            if length < 0 {
+                if self.items >= self.options.max_items -> return Err(failure(.Limit, self.cursor, child_path, "max_items {self.options.max_items} exceeded"))
+                &self.reserve<Dyn>(&items, 1, 32, self.cursor, child_path, "CBOR array") ?? return Err(err)
+            }
+            child :: &self.value(input, depth + 1, child_path) ?? {
+                self.live -= charged
+                return Err(err)
+            }
+            self.live -= charged
+            &items.push(child)
+            index += 1
+        }
+        Ok(Dyn.Array(items))
+    }
+
+    fn object(&self, input: [U8], additional: Int, start: Int, depth: Int, path: String) -> Dyn CBORError! {
+        if depth + 1 > self.options.max_depth -> return Err(failure(.Limit, start, path, "max_depth {self.options.max_depth} exceeded"))
+        entries := [(key: String, value: Dyn)]{}
+        length := -1
+        if additional == 31 -> self.indefinite(start, path) ?? return Err(err)
+        else {
+            argument :: &self.argument(input, additional, start, path) ?? return Err(err)
+            length = argument.value
+            &self.reserve<(key: String, value: Dyn)>(&entries, length, 56, start, path, "CBOR map") ?? return Err(err)
+        }
+        prior_start := -1
+        prior_end := -1
+        index := 0
+        loop length < 0 || index < length {
+            if length < 0 {
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR map ended before its break"))
+                if input[self.cursor] == (U8{255}) {
+                    self.cursor += 1
+                    break
+                }
+                if self.items >= self.options.max_items -> return Err(failure(.Limit, self.cursor, path, "max_items {self.options.max_items} exceeded"))
+                &self.reserve<(key: String, value: Dyn)>(&entries, 1, 56, self.cursor, path, "CBOR map") ?? return Err(err)
+            }
+            key_start :: self.cursor
+            key_value :: &self.value(input, depth + 1, path) ?? return Err(err)
+            key := ""
+            if key_value == {
+                .Text(text) -> key = text
+                else -> return Err(failure(.Unsupported, key_start, path, "CBOR map key must be text"))
+            }
+            key_end :: self.cursor
+            if self.options.require_canonical && prior_start >= 0 && !bytewise_before(input, prior_start, prior_end, key_start, key_end) {
+                return Err(failure(.NonCanonical, key_start, path, "CBOR map keys are not in Core deterministic bytewise order"))
+            }
+            loop entry in entries {
+                if entry.key == key -> return Err(failure(.Unsupported, key_start, path, "duplicate CBOR text map key"))
+            }
+            prior_start = key_start
+            prior_end = key_end
+            if length < 0 {
+                if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "indefinite CBOR map ended before its value"))
+                if input[self.cursor] == (U8{255}) -> return Err(failure(.Syntax, self.cursor, path, "indefinite CBOR map break appears where a value is required"))
+            }
+            key_debug :: "{key:Debug}".replace("'", "\\'")
+            child_path :: "{path}[{key_debug}]"
+            charged :: child_path.count_bytes()
+            &self.charge(charged, key_start, path, "CBOR path") ?? return Err(err)
+            child :: &self.value(input, depth + 1, child_path) ?? {
+                self.live -= charged
+                return Err(err)
+            }
+            self.live -= charged
+            &entries.push((key: key, value: child))
+            index += 1
+        }
+        Ok(stream.object_from_entries(^entries))
+    }
+
+    fn float(&self, input: [U8], additional: Int, start: Int, path: String) -> Dyn CBORError! {
+        width :: if additional == 25 -> 2 else if additional == 26 -> 4 else -> 8
+        name :: if width == 2 -> "Float16" else if width == 4 -> "Float32" else -> "Float64"
+        if width > input.len() - self.cursor -> return Err(failure(.Truncated, input.len(), path, "CBOR {name} is truncated"))
+        bits := 0
+        loop i in 0..<width {
+            byte :: Int.from_u8(input[self.cursor])
+            if width == 8 && i == 0 && byte >= 128 -> bits = byte - 256
+            else -> bits = (bits << 8).bit_or(byte)
+            self.cursor += 1
+        }
+        value :: if width == 2 -> widen_float(bits, 5, 10) else if width == 4 -> widen_float(bits, 8, 23) else -> math.from_bits(bits)
+        if self.options.require_canonical {
+            if width == 2 {
+                if math.is_nan(value) && bits != 32256 -> return Err(failure(.NonCanonical, start, path, "CBOR NaN is not the canonical 0xf97e00 encoding"))
+            } else if math.is_nan(value) || narrow_bits(math.to_bits(value), 5, 10) != None || (width == 8 && narrow_bits(math.to_bits(value), 8, 23) != None) {
+                return Err(failure(.NonCanonical, start, path, "CBOR Float does not use its preferred shortest encoding"))
+            }
+        }
+        Ok(Dyn.Float(value))
+    }
+
+    fn value(&self, input: [U8], depth: Int, path: String) -> Dyn CBORError! {
+        if self.cursor == input.len() -> return Err(failure(.Truncated, input.len(), path, "CBOR value is missing"))
+        start :: self.cursor
+        head :: Int.from_u8(input[self.cursor])
+        self.cursor += 1
+        &self.count(start, path) ?? return Err(err)
+        major :: head >> 5
+        additional :: head.bit_and(31)
+        if major == 0 || major == 1 {
+            number :: &self.argument(input, additional, start, path) ?? return Err(err)
+            if number.outside_int -> return Err(failure(.Unsupported, start, path, "CBOR integer is outside Jet Int"))
+            return Ok(Dyn.Int(if major == 0 -> number.value else -> -number.value - 1))
+        }
+        if major == 2 || major == 3 -> return &self.string(input, additional, start, depth, path, major)
+        if major == 4 -> return &self.array(input, additional, start, depth, path)
+        if major == 5 -> return &self.object(input, additional, start, depth, path)
+        if major == 6 -> return Err(failure(.Unsupported, start, path, "CBOR tags are unsupported"))
+        if additional == 20 -> return Ok(Dyn.Bool(false))
+        if additional == 21 -> return Ok(Dyn.Bool(true))
+        if additional == 22 -> return Ok(Dyn.Null)
+        if additional >= 25 && additional <= 27 -> return &self.float(input, additional, start, path)
+        if additional == 31 -> return Err(failure(.Syntax, start, path, "CBOR break outside an indefinite container"))
+        Err(failure(.Unsupported, start, path, "unsupported CBOR simple value {additional}"))
+    }
+}
+
+fn bytewise_before(bytes: [U8], a: Int, a_end: Int, b: Int, b_end: Int) -> Bool Never! {
+    width := a_end - a
+    if b_end - b < width -> width = b_end - b
+    loop i in 0..<width {
+        if bytes[a + i] != bytes[b + i] -> return bytes[a + i] < bytes[b + i]
+    }
+    a_end - a < b_end - b
+}
+
+fn widen_float(bits: Int, exponent_bits: Int, fraction_bits: Int) -> Float Never! {
+    sign :: if (bits >> (exponent_bits + fraction_bits)) != 0 -> (-9223372036854775807 - 1) else -> 0
+    maximum :: (1 << exponent_bits) - 1
+    exponent :: (bits >> fraction_bits).bit_and(maximum)
+    fraction :: bits.bit_and(((1 << fraction_bits) - 1))
+    if exponent == maximum -> return math.from_bits(sign.bit_or((2047 << 52)).bit_or((fraction << (52 - fraction_bits))))
+    bias :: (1 << (exponent_bits - 1)) - 1
+    if exponent == 0 {
+        if fraction == 0 -> return math.from_bits(sign)
+        lead := fraction_bits - 1
+        loop 0 == (fraction.bit_and((1 << lead))) -> lead -= 1
+        normal_exponent :: 1 - bias - fraction_bits + lead
+        mantissa :: (fraction - (1 << lead)) << (52 - lead)
+        return math.from_bits(sign.bit_or(((normal_exponent + 1023) << 52)).bit_or(mantissa))
+    }
+    math.from_bits(sign.bit_or(((exponent - bias + 1023) << 52)).bit_or((fraction << (52 - fraction_bits))))
+}
+
+// D-BYTESDECODE1: the adapter and String.from_bytes share the validator,
+// including the E0/ED/F0/F4 bounds, invalid-subpart and incomplete-tail law.
+#Test("CBOR borrowed UTF-8 validation equals strict String decoding") {
+    cases :: [[U8]]{
+        [U8]{}, [U8]{0}, [U8]{127}, [U8]{194, 128}, [U8]{223, 191},
+        [U8]{224, 160, 128}, [U8]{237, 159, 191}, [U8]{239, 191, 191},
+        [U8]{240, 144, 128, 128}, [U8]{244, 143, 191, 191},
+        [U8]{128}, [U8]{192, 128}, [U8]{193, 191}, [U8]{224, 159, 191},
+        [U8]{237, 160, 128}, [U8]{240, 143, 191, 191}, [U8]{244, 144, 128, 128},
+        [U8]{245, 128, 128, 128}, [U8]{255}, [U8]{194}, [U8]{224, 160},
+        [U8]{240, 144, 128}, [U8]{65, 194, 32}, [U8]{65, 224, 160, 32},
+    }
+    loop bytes in cases {
+        validation := String?{None}
+        if encoding.__utf8_validate(bytes) == {
+            .Ok(_) -> {}
+            .Err(message) -> validation = Val(message)
+        }
+        if String.from_bytes(bytes) == {
+            .Ok(_) -> assert(validation == None)
+            .Err(error) -> assert_eq(validation, Val(error.message))
+        }
+    }
+}

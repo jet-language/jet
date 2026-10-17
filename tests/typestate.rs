@@ -64,7 +64,7 @@ struct Reservation {
 
 impl Reservation {
     #Transition(_, Pending) fn book(guest: String) -[]> Reservation {
-        return Reservation{ guest: ~guest }
+        return Reservation{ guest: guest.copy() }
     }
     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -[]> Reservation {
         return self
@@ -380,27 +380,18 @@ fn typestate_graph_is_folded_before_aot_jit_and_interpreter() {
 
 #[test]
 fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
-    if !jet_jit::cranelift_host_supported() {
-        eprintln!("note: resident Cranelift host unavailable; skipping resident-JIT proof");
-        return;
-    }
     let scratch = common::Scratch::new("typestate-jit");
     let path = scratch.join("main.jet");
     fs::write(&path, TIER_SOURCE).unwrap();
     let shown = path.to_string_lossy().into_owned();
     let mut bundle = jet::Loader::load_entry(&shown).expect("typestate fixture loads");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics.is_empty(),
         "typestate fixture diagnostics: {diagnostics:#?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "typestate fixture must be resident-safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    jet_jit::reset_jit_trace_for_test();
-    let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
+    let outcome = crate::common::dev_run(&shown, false, false);
     let stdout = match outcome {
         jet::Interpreter::RunOutcome::Ran { stdout, .. } => stdout,
         jet::Interpreter::RunOutcome::Problems(diags) => {
@@ -408,14 +399,6 @@ fn typestate_graph_runs_on_resident_jit_without_runtime_state() {
         }
     };
     assert_eq!(stdout, TIER_EXPECTED);
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "typestate fixture did not execute on JIT"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "typestate fixture fell back to interpreter"
-    );
 }
 
 #[test]

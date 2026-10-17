@@ -11,37 +11,157 @@ package {
 use core as core
 use core.time as time
 
-
-// core.tasks — cooperative tasks on the Jet scheduler.
-//
-// `after` is a one-shot timer channel: after the supplied duration it yields
-// `value`. `interval` yields 1, 2, 3, … on the period. `yield_now` returns
-// control without sleeping. The live builtins are generic; this source
-// records the `Int` specialisation used by the convenience wrappers below.
-//
-// Timer creation and channel parking are host scheduler cells; the stateful
-// TaskState helpers remain pure Jet.
-
-
-
-pub struct TaskState {
-    pub values: [Int]
-    pub capacity: Int
-    pub closed: Bool
-    pub locked: Bool
-    pub generation: Int
+// Timer creation and scheduler identity are host cells. Scheduler channels
+// and task groups use language primitives; TaskState transitions are pure Jet.
+// Sleeping uses core.time.sleep.
+fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! {
+    core.tasks.after(delay, value)
 }
 
-pub fn channel(capacity: Int) -> TaskState Never! {
+fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
+    core.tasks.__interval_ms(interval_milliseconds(period))
+}
+
+fn interval_milliseconds(period: time.Duration) -> Int Never! {
+    milliseconds :: period.ns /% 1000000
+    if milliseconds < 1 -> return 1
+    milliseconds
+}
+
+// These functions back compiler-private channel rows, not new public API.
+module scheduler {
+    use core as core
+
+    fn channel<T>() -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+        pair :: core.tasks.__channel_new<T>()
+        (sender: pair.sender, receiver: pair.receiver)
+    }
+
+    #Test("scheduler channel preserves its named sender and receiver") {
+        pair :: channel<Int>()
+        pair.sender.send(41)
+        assert_eq(pair.receiver.receive() ?? panic("channel closed"), 41)
+        pair.sender.close()
+    }
+
+    fn bounded<T>(capacity: Int) -> (sender: Sender<T>, receiver: Receiver<T>) Never! {
+        limit :: if capacity < 1 -> 1 else -> capacity
+        pair :: core.tasks.__channel_bounded<T>(limit)
+        (sender: pair.sender, receiver: pair.receiver)
+    }
+
+    #Test("scheduler bounded channel preserves its named sender and receiver") {
+        pair :: bounded<Int>(0)
+        pair.sender.send(42)
+        assert_eq(pair.receiver.receive() ?? panic("bounded channel closed"), 42)
+        pair.sender.close()
+    }
+}
+
+impl Condition {
+    fn notify_one(self) Never! { core.tasks.__condition_notify_one(self) }
+    fn notify_all(self) Never! { core.tasks.__condition_notify_all(self) }
+}
+
+fn yield_now() Never! -[Time.Wait]> { host_yield() }
+
+fn current_task() -> String Never! { host_task_id() }
+
+/// Receive from the host scheduler channel. A closed channel maps to the
+/// existing integer sentinel because this convenience rail is non-fallible.
+fn recv(rx: Receiver<Int>) -[Time.Wait]> Int Never! {
+    value :: rx.receive() ?? return -1
+    value
+}
+
+/// Blocking receive spellings used by queue/future adapters.
+fn get(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+
+fn result(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+
+fn wait(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
+
+fn waitall(receivers: [Receiver<Int>]) -[Time.Wait]> [Int] Never! {
+    out := [Int]{}
+    loop rx in receivers -> &out.push(wait(rx))
+    out
+}
+
+fn waitany(receivers: [Receiver<Int>]) -[Time.Wait]> Int Never! {
+    if receivers.len() == 0 -> return -1
+    // Receiver readiness is owned by the scheduler's opaque handle. This
+    // convenience rail keeps the deterministic first-arm selection; callers
+    // needing a true race should use the host select surface.
+    wait(receivers[0])
+}
+
+
+fn host_sleep_ms(ms: Int) -[Time]> {
+    _ :: recv(core.tasks.after(Duration.milliseconds(ms) ?? panic("sleep duration is outside Duration's range"), 0))
+}
+
+
+fn host_yield() -[Time.Wait]> { core.tasks.__yield_now() }
+
+fn host_task_id() -> String {
+    paused :: core.tasks.__task_paused() ?? false
+    cancel :: core.tasks.__task_cancelled() ?? false
+    task_trace(paused, cancel)
+}
+
+fn task_trace(paused: Bool, cancel: Bool) -> String Never! {
+    "paused={paused},cancel={cancel}"
+}
+
+/// Receiver metadata is owned by the scheduler's typed handle.
+fn is_timer(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
+
+fn is_interval(rx: Receiver<Int>) -> Bool Never! { rx.is_interval() }
+
+fn is_cancelled(rx: Receiver<Int>) -> Bool Never! { rx.is_cancelled() }
+
+fn is_ready(rx: Receiver<Int>) -> Bool Never! { rx.is_ready() }
+
+fn delay_ms(rx: Receiver<Int>) -> Int Never! { rx.delay_ms() }
+
+fn timeout(delay: time.Duration) Never! -[Time]> {
+    _ :: recv(core.tasks.after(delay, 0))
+}
+
+fn sleep(ms: Int) Never! -[Time]> {
+    delay := ms
+    if delay < 0 -> delay = 0
+    host_sleep_ms(delay)
+}
+
+fn try_recv(rx: Receiver<Int>) -> Int? Never! { rx.try_receive() }
+
+/// Closing the receiver wakes blocked consumers and is the host cancellation
+/// operation. The returned handle remains usable for identity/ownership.
+fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
+    rx.close()
+    rx.copy()
+}
+
+struct TaskState {
+    values: [Int]
+    capacity: Int
+    closed: Bool
+    locked: Bool
+    generation: Int
+}
+
+// Pure value-state transitions; these are separate from scheduler.channel<T>.
+fn channel(capacity: Int) -> TaskState Never! {
     cap := capacity
     if cap < 0 -> cap = 0
     TaskState{values: [Int]{}, capacity: cap, closed: false, locked: false, generation: 0}
 }
 
-pub fn put(state: TaskState, value: Int) -> TaskState Never! {
-    if state.closed -> return ~state
-    if state.capacity > 0 && state.values.len() >= state.capacity -> return ~state
-    values := ~state.values
+fn put(state: TaskState, value: Int) -> TaskState Never! {
+    if state.closed -> return state.copy()
+    if state.capacity > 0 && state.values.len() >= state.capacity -> return state.copy()
+    values := state.values.copy()
     &values.push(value)
     TaskState{
         values: values,
@@ -52,132 +172,110 @@ pub fn put(state: TaskState, value: Int) -> TaskState Never! {
     }
 }
 
-pub fn clear(state: TaskState) -> TaskState Never! {
-    if state.values.len() == 0 -> return ~state
+fn clear(state: TaskState) -> TaskState Never! {
+    if state.values.len() == 0 -> return state.copy()
     TaskState{values: [Int]{}, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn shutdown(state: TaskState) -> TaskState Never! {
-    if state.closed -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation + 1}
+fn shutdown(state: TaskState) -> TaskState Never! {
+    if state.closed -> return state.copy()
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: true, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn stop(state: TaskState) -> TaskState Never! { shutdown(state) }
+fn stop(state: TaskState) -> TaskState Never! { shutdown(state) }
 
-pub fn reset(state: TaskState) -> TaskState Never! {
+fn reset(state: TaskState) -> TaskState Never! {
     TaskState{values: [Int]{}, capacity: state.capacity, closed: false, locked: false, generation: state.generation + 1}
 }
 
-pub fn lock() -> TaskState Never! { channel(1) }
+fn lock() -> TaskState Never! { channel(1) }
 
-pub fn acquire(state: TaskState) -> TaskState Never! {
-    if state.closed || state.locked -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation + 1}
+fn acquire(state: TaskState) -> TaskState Never! {
+    if state.closed || state.locked -> return state.copy()
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: state.closed, locked: true, generation: state.generation + 1}
 }
 
-pub fn release(state: TaskState) -> TaskState Never! {
-    if !state.locked -> return ~state
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation + 1}
+fn release(state: TaskState) -> TaskState Never! {
+    if !state.locked -> return state.copy()
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: state.closed, locked: false, generation: state.generation + 1}
 }
 
-pub fn notify(state: TaskState) -> TaskState Never! {
-    TaskState{values: ~state.values, capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
+fn notify(state: TaskState) -> TaskState Never! {
+    TaskState{values: state.values.copy(), capacity: state.capacity, closed: state.closed, locked: state.locked, generation: state.generation + 1}
 }
 
-pub fn start(rx: Receiver<Int>) -> Receiver<Int> Never! { ~rx }
+fn start(rx: Receiver<Int>) -> Receiver<Int> Never! { rx.copy() }
 
-pub fn run() Never! -[Time.Wait]> {
-    yield_now()
-}
+fn run() Never! -[Time.Wait]> { yield_now() }
 
-pub fn waitall(receivers: [Receiver<Int>]) -[Time.Wait]> [Int] Never! {
-    out := [Int]{}
-    loop rx in receivers -> &out.push(wait(rx))
-    out
-}
+fn is_closed(state: TaskState) -> Bool Never! { state.closed }
+fn is_locked(state: TaskState) -> Bool Never! { state.locked }
+fn size(state: TaskState) -> Int Never! { state.values.len() }
+fn capacity(state: TaskState) -> Int Never! { state.capacity }
+fn generation(state: TaskState) -> Int Never! { state.generation }
 
-pub fn waitany(receivers: [Receiver<Int>]) -[Time.Wait]> Int Never! {
-    if receivers.len() == 0 -> return -1
-    // Receiver readiness is owned by the scheduler's opaque handle. This
-    // convenience rail keeps the deterministic first-arm selection; callers
-    // needing a true race should use the host select surface.
-    wait(receivers[0])
-}
-
-pub fn after(delay: time.Duration, value: Int{0}) -[Time]> Receiver<Int> Never! {
-    core.tasks.after(delay, value)
-}
-
-pub fn interval(period: time.Duration) -[Time]> Receiver<Int> Never! {
-    core.tasks.interval(period)
-}
-
-pub fn yield_now() Never! -[Time.Wait]> { host_yield() }
-
-pub fn current_task() -> String Never! { host_task_id() }
-
-/// Receive from the host scheduler channel. A closed channel maps to the
-/// existing integer sentinel because this convenience rail is non-fallible.
-pub fn recv(rx: Receiver<Int>) -[Time.Wait]> Int Never! {
-    value :: rx.receive() ?? return -1
-    value
-}
-
-/// Blocking receive spellings used by queue/future adapters.
-pub fn get(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
-
-pub fn result(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
-
-pub fn wait(rx: Receiver<Int>) -[Time.Wait]> Int Never! { recv(rx) }
-
-
-fn host_sleep_ms(ms: Int) -[Time]> {
-    _ :: recv(core.tasks.after(Duration.milliseconds(ms) ?? panic("sleep duration is outside Duration's range"), 0))
+fn spawn_name(name: String) -> String Never! {
+    name.copy()
 }
 
 
-fn host_yield() -[Time.Wait]> { core.tasks.yield_now() }
 
-fn host_task_id() -> String { core.tasks.current_task() }
-
-/// Receiver metadata is owned by the scheduler's typed handle.
-pub fn is_timer(rx: Receiver<Int>) -> Bool Never! { rx.is_timer() }
-
-pub fn is_interval(rx: Receiver<Int>) -> Bool Never! { rx.is_interval() }
-
-pub fn is_cancelled(rx: Receiver<Int>) -> Bool Never! { rx.is_cancelled() }
-
-pub fn is_ready(rx: Receiver<Int>) -> Bool Never! { rx.is_ready() }
-
-pub fn delay_ms(rx: Receiver<Int>) -> Int Never! { rx.delay_ms() }
-
-pub fn timeout(delay: time.Duration) Never! -[Time]> {
-    _ :: recv(core.tasks.after(delay, 0))
+#Test("current task has idle defaults outside a scheduled task") {
+    assert_eq(current_task(), "paused=false,cancel=false")
 }
 
-pub fn sleep(ms: Int) Never! -[Time]> {
-    delay := ms
-    if delay < 0 -> delay = 0
-    host_sleep_ms(delay)
+#Test("task trace preserves the pause and cancellation fields") {
+    assert_eq(task_trace(true, false), "paused=true,cancel=false")
+    assert_eq(task_trace(false, true), "paused=false,cancel=true")
+    assert_eq(task_trace(true, true), "paused=true,cancel=true")
 }
 
-pub fn try_recv(rx: Receiver<Int>) -> Int? Never! { rx.try_receive() }
-
-/// Closing the receiver wakes blocked consumers and is the host cancellation
-/// operation. The returned handle remains usable for identity/ownership.
-pub fn cancel(rx: Receiver<Int>) -[Time]> Receiver<Int> Never! {
-    rx.close()
-    ~rx
+#Test("interval periods truncate whole milliseconds and never spin at zero") {
+    assert_eq(interval_milliseconds(time.Duration{ns: -1000000}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 0}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 999999}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 1999999}), 1)
+    assert_eq(interval_milliseconds(time.Duration{ns: 2000000}), 2)
 }
 
-pub fn is_closed(state: TaskState) -> Bool Never! { state.closed }
-pub fn is_locked(state: TaskState) -> Bool Never! { state.locked }
-pub fn size(state: TaskState) -> Int Never! { state.values.len() }
-pub fn capacity(state: TaskState) -> Int Never! { state.capacity }
-pub fn generation(state: TaskState) -> Int Never! { state.generation }
-
-pub fn spawn_name(name: String) -> String Never! {
-    ~name
+#Test("task value channels preserve the source value and reject full or closed writes") {
+    initial :: channel(1)
+    written :: put(initial, 7)
+    assert_eq(size(initial), 0)
+    assert_eq(size(written), 1)
+    assert_eq(generation(written), 1)
+    full :: put(written, 8)
+    assert_eq(full.values, [Int]{7})
+    assert_eq(generation(full), 1)
+    closed :: shutdown(written)
+    assert_eq(is_closed(closed), true)
+    assert_eq(generation(stop(closed)), generation(closed))
+    assert_eq(generation(put(closed, 9)), generation(closed))
+    emptied :: clear(written)
+    assert_eq(size(emptied), 0)
+    assert_eq(generation(emptied), 2)
+    assert_eq(generation(clear(emptied)), 2)
+    assert_eq(capacity(channel(-1)), 0)
 }
 
-
+#Test("task lock transitions advance generations only for changes or notifications") {
+    initial :: lock()
+    held :: acquire(initial)
+    assert_eq(is_locked(initial), false)
+    assert_eq(is_locked(held), true)
+    assert_eq(generation(held), 1)
+    assert_eq(generation(acquire(held)), 1)
+    released :: release(held)
+    assert_eq(is_locked(released), false)
+    assert_eq(generation(released), 2)
+    assert_eq(generation(release(released)), 2)
+    signalled :: notify(held)
+    assert_eq(is_locked(signalled), true)
+    assert_eq(generation(signalled), 2)
+    restarted :: reset(shutdown(signalled))
+    assert_eq(is_closed(restarted), false)
+    assert_eq(is_locked(restarted), false)
+    assert_eq(size(restarted), 0)
+    assert_eq(capacity(restarted), 1)
+    assert_eq(generation(restarted), 4)
+}

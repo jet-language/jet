@@ -1,0 +1,13 @@
+# HAND-PORT tests/compiler_api.rs:211-234 check_file_api_includes_semindex_for_clean_program
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# Public exact typed compiler JSON projection; original per-diagnostic/semantic facts retained.
+fixture: check_file_api_includes_semindex_for_clean_program.fixture
+env: NO_COLOR=1
+step: jet inspect compiler check main.jet
+exit: 0
+json: stdout doc $.compiler.value.diagnostics #= 0
+json: stdout doc $.compiler.value.semantic_index.schema_version = 20 # ORACLE-DERIVED crates/jet-semindex/src/Types.rs:12
+json: stdout doc $.compiler.value.semantic_index.source_digest = "4e9da58087f8efc8b69e2fd7b09e833c85a2673049e2ba66ebba43722b8567ab" # ORACLE-DERIVED exact unchanged source hash
+json: stdout doc $.compiler.value.semantic_index.definitions[?name="run"] #>= 1
+json: stdout doc $.compiler.value.semantic_index.definitions[?name="helper"] #>= 1
+json: stdout doc $.compiler.value.semantic_index.calls[?callee="helper"] #>= 1

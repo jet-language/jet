@@ -1,0 +1,23 @@
+
+use core.encoding.json as json
+
+#Codable
+struct MaybeRow {
+    value: Int? | String
+}
+
+#Codable
+enum Envelope {
+    Value(Int | String)
+}
+
+fn run() {
+    decoded :: json.decode<MaybeRow>("{{\"value\":null}}") ?? panic("row")
+    print(json.to_string(decoded))
+
+    envelope :: Envelope.Value(7)
+    envelope_wire :: json.to_string(envelope)
+    print(envelope_wire)
+    back :: json.decode<Envelope>(envelope_wire) ?? panic("envelope")
+    print(json.to_string(back))
+}

@@ -1,0 +1,65 @@
+// D-OSTARGET1=A (ratified 2026-07-01, c134): native OS platform gating for
+// `#Extern` backends (Tower c134 Phase 9.3) — the mechanism, not a real
+// GTK/AppKit/Win32 backend (this sandbox has no toolkit dev headers; a real
+// native backend needs its own devShell/flake change first, tracked
+// separately as Phase 8).
+//
+// Three dummy structs implement the same `Backend` trait, each `impl` gated to
+// one OS with `#Target(OS.*)`. `jet build --target=<triple>` only emits/links
+// the `impl` matching that triple's OS (host OS when `--target` is omitted) —
+// `tests/cross.rs` proves this by inspecting the generated Rust per triple.
+//
+// D-OSTARGET2=B (ratified 2026-07-03): ungated `main` reaches the surviving
+// OS-gated `impl` through a `@if @build.os == { … }` dispatch. `@build.os`
+// is a compiler-known comptime value; the dispatch folds to the arm matching the
+// build's target OS *before* any OS-gating check runs, discarding the others —
+// so constructing an OS-gated type inside the taken arm is legal, and the dead
+// arms never trip `E-OSTARGET-UNMATCHED-CALL`. This is the one dispatch
+// primitive: no fn-level `#Target` gating (option A was rejected).
+trait Backend {
+    fn label(self) -> String
+}
+
+struct LinuxBackend {
+    name: String
+}
+
+struct MacOSBackend {
+    name: String
+}
+
+struct WindowsBackend {
+    name: String
+}
+
+#Target(OS.Linux)
+impl LinuxBackend.Backend {
+    fn label(self) -> String { "linux: {self.name}" }
+}
+
+#Target(OS.MacOS)
+impl MacOSBackend.Backend {
+    fn label(self) -> String { "macos: {self.name}" }
+}
+
+#Target(OS.Windows)
+impl WindowsBackend.Backend {
+    fn label(self) -> String { "windows: {self.name}" }
+}
+
+fn run() {
+    prep if $build.os == {
+        .Linux -> {
+            b :: LinuxBackend{name: "gtk"}
+            print(b.label())
+        }
+        .MacOS -> {
+            b :: MacOSBackend{name: "appkit"}
+            print(b.label())
+        }
+        .Windows -> {
+            b :: WindowsBackend{name: "win32"}
+            print(b.label())
+        }
+    }
+}

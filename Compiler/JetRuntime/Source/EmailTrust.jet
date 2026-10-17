@@ -1,0 +1,41 @@
+// Email.rs:213-216 derive(Clone,PartialEq): variant, then ordered PEM bytes.
+// CAbiRoutes.rs:4913-4924,8109-8112: borrowed clone/eq, owned null-safe drop.
+// Compose DataSequences.jet from 6d4fa9ba6 for canonical list geometry/ownership.
+#Export(c) fn jet_rt_handle_clone_tls_trust(value: I64) -> I64 {
+    kind :: rt_text_word(value + EMAIL_TRUST_KIND)
+    pem := I64{0}
+    if (kind == EMAIL_TRUST_SYSTEM_PLUS_CA) {
+        pem = jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})
+        data_u8_list_copy_into(rt_text_word(value + EMAIL_TRUST_PEM), pem)
+    }
+    result :: jet_rt_alloc(EMAIL_TRUST_BYTES, I64{8})
+    rt_text_store(result + EMAIL_TRUST_KIND, kind)
+    rt_text_store(result + EMAIL_TRUST_PEM, pem)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_tls_trust(value: I64) {
+    if (value == I64{0}) -> return
+    if (rt_text_word(value + EMAIL_TRUST_KIND) == EMAIL_TRUST_SYSTEM_PLUS_CA) {
+        pem :: rt_text_word(value + EMAIL_TRUST_PEM)
+        data_u8_list_drop_fields(pem)
+        jet_rt_free(pem, DATA_SEQUENCE_BYTES, I64{8})
+    }
+    jet_rt_free(value, EMAIL_TRUST_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_tls_trust(left: I64, right: I64) -> Bool {
+    kind :: rt_text_word(left + EMAIL_TRUST_KIND)
+    if (kind != rt_text_word(right + EMAIL_TRUST_KIND)) -> return false
+    if (kind == EMAIL_TRUST_SYSTEM) -> return true
+    a :: rt_text_word(left + EMAIL_TRUST_PEM)
+    b :: rt_text_word(right + EMAIL_TRUST_PEM)
+    length :: rt_text_word(a + DATA_SEQUENCE_LENGTH)
+    if (length != rt_text_word(b + DATA_SEQUENCE_LENGTH)) -> return false
+    ad :: rt_text_word(a + DATA_SEQUENCE_DATA)
+    bd :: rt_text_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (host_u8_get(ad, at) != host_u8_get(bd, at)) -> return false
+        at += I64{1}
+    }
+    true
+}

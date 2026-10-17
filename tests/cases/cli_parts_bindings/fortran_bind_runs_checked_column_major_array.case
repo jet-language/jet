@@ -1,0 +1,15 @@
+# Port of tests/cli_parts/bindings.rs:474-551. All three sources copied verbatim.
+# ORACLE-LITERAL tests/cli_parts/bindings.rs:531 (stdout bytes 302.0\n).
+fixture: fixtures/fortran_array
+step: jet inspect bind fortran {work}/matrix.f90 --pkg matrix
+exit: 0
+file: .jet/bindings/fortran/matrix.jet ~ fortran-layout probe.a: column-major 2x3 # Original CLI-generated Jet source predicate; not generated Rust.
+file: .jet/bindings/fortran/matrix.jet ~ a.len() != 6 # Original generated extent guard predicate.
+file: .jet/bindings/fortran/matrix.jet ~ -[FFI.Fortran]> # Original published FFI effect predicate; keep spelling unchanged.
+stdout: ~ layout: probe.a column-major 2x3 # Original bind report predicate.
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = column-major.out
+step: jet run --profile=debug bad.jet
+exit: nonzero
+stderr: ~ a must contain exactly 6 column-major values # Original checked-array runtime-stop predicate.

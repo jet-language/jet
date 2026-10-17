@@ -1,0 +1,73 @@
+// Email.rs:118-122; native Address16 owns nullable display0 and mailbox8.
+// Inline owners are shared by Message and Envelope, without child heap shells.
+MAIL_ADDRESS_BYTES :: prep { I64{16} }
+fn mail_address_copy_into(value: I64, target: I64) {
+    display :: rt_text_word(value)
+    rt_text_store(target, if (display == I64{0}) -> I64{0} else -> jet_rt_string_clone(display))
+    rt_text_store(target + I64{8}, jet_rt_string_clone(rt_text_word(value + I64{8})))
+}
+fn mail_address_drop_fields(value: I64) {
+    display :: rt_text_word(value)
+    if (display != I64{0}) -> jet_rt_string_drop(display)
+    jet_rt_string_drop(rt_text_word(value + I64{8}))
+}
+fn mail_address_eq(left: I64, right: I64) -> Bool {
+    a :: rt_text_word(left)
+    b :: rt_text_word(right)
+    if (a == I64{0} || b == I64{0}) {
+        if (a != b) -> return false
+    } else if (!jet_rt_string_eq(a, b)) -> return false
+    jet_rt_string_eq(rt_text_word(left + I64{8}), rt_text_word(right + I64{8}))
+}
+// Allocate only the inline sequence buffer, never a temporary List shell.
+fn mail_list_init(length: I64, stride: I64, target: I64) -> I64 {
+    if (length > I64{9223372036854775807} /% stride) -> rt_seq_capacity_overflow_stop()
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * stride, I64{8})
+    rt_text_store(target + DATA_SEQUENCE_LENGTH, length)
+    rt_text_store(target + DATA_SEQUENCE_CAPACITY, length)
+    rt_text_store(target + DATA_SEQUENCE_DATA, data)
+    data
+}
+fn mail_address_list_copy_into(value: I64, target: I64) {
+    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
+    data :: mail_list_init(length, MAIL_ADDRESS_BYTES, target)
+    source :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        mail_address_copy_into(source + at * MAIL_ADDRESS_BYTES, data + at * MAIL_ADDRESS_BYTES)
+        at += I64{1}
+    }
+}
+// CAbiRoutes.rs:26-29: nonpositive length or null slot pointer is an empty list.
+fn mail_address_list_from_slots_into(slots: I64, count: I64, target: I64) {
+    length :: if (count <= I64{0} || slots == I64{0}) -> I64{0} else -> count
+    data :: mail_list_init(length, MAIL_ADDRESS_BYTES, target)
+    at := I64{0}
+    loop at < length {
+        mail_address_copy_into(rt_text_word(slots + at * I64{8}), data + at * MAIL_ADDRESS_BYTES)
+        at += I64{1}
+    }
+}
+fn mail_address_list_drop_fields(value: I64) {
+    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
+    capacity :: rt_text_word(value + DATA_SEQUENCE_CAPACITY)
+    data :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        mail_address_drop_fields(data + at * MAIL_ADDRESS_BYTES)
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * MAIL_ADDRESS_BYTES, I64{8})
+}
+fn mail_address_list_eq(left: I64, right: I64) -> Bool {
+    length :: rt_text_word(left + DATA_SEQUENCE_LENGTH)
+    if (length != rt_text_word(right + DATA_SEQUENCE_LENGTH)) -> return false
+    a :: rt_text_word(left + DATA_SEQUENCE_DATA)
+    b :: rt_text_word(right + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (!mail_address_eq(a + at * MAIL_ADDRESS_BYTES, b + at * MAIL_ADDRESS_BYTES)) -> return false
+        at += I64{1}
+    }
+    true
+}

@@ -5,14 +5,14 @@
 
 // Why a data schema could not be bound.
 #Error
-pub struct DataBindError {
-    pub message: String
+struct DataBindError {
+    message: String
 }
 
 // Result of binding a data schema into ordinary, visible Jet source.
-pub struct DataBindResult {
-    pub source: String
-    pub record_count: Int
+struct DataBindResult {
+    source: String
+    record_count: Int
 }
 
 // The supported data schema formats.
@@ -50,7 +50,7 @@ enum DataSchemaFormat {
                 "NOT NULL and PRIMARY KEY columns stay required; supported constraints are validated."
             }
             .XML -> [String]{
-                "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as DataTree.",
+                "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as Dyn.",
                 "Nested elements become records; repeated child elements become arrays."
             }
             .Proto -> [String]{
@@ -77,7 +77,7 @@ enum BoundType {
             .Named(name) -> name
             .Array(element) -> "[{element.render()}]"
             .Optional(value) -> "{value.render()}?"
-            .Dynamic -> "DataTree"
+            .Dynamic -> "Dyn"
         }
     }
 }
@@ -160,7 +160,7 @@ fn pkg_data_input_stem_type_name(input_path: String) -> String Never! {
 // `command` is recorded losslessly in the provenance header; line and control
 // characters are escaped so the generated comment cannot be injected. Callers
 // pass the exact user-facing command line, without shell quoting.
-pub fn pkg_generate_data(format: String, input_path: String, input: String, root_name: String?, command: String) -> DataBindResult DataBindError! {
+fn pkg_generate_data(format: String, input_path: String, input: String, root_name: String?, command: String) -> DataBindResult DataBindError! {
     spelled :: pkg_ascii_lower(format)
     kind :: DataSchemaFormat.parse(spelled) ?? return Err(DataBindError{message: "unsupported data schema format {spelled}"})
     default_name :: root_name ?? pkg_data_input_stem_type_name(input_path)
@@ -232,7 +232,7 @@ fn pkg_data_escape_provenance(value: String) -> String Never! {
 
 // A JSON-quoted wire name with interpolation braces doubled for Jet source.
 fn pkg_data_quote_jet_string(value: String) -> String Never! {
-    pkg_json_render(DataTree.Text(~value)).replace("{{", "{{{{").replace("}}", "}}}}")
+    pkg_json_render(Dyn.Text(value.copy())).replace("{{", "{{{{").replace("}}", "}}}}")
 }
 
 // At least four lowercase hex digits.

@@ -36,7 +36,7 @@ STORE_RUNTIME_NATIVE_CPU_IDENTITY :: prep { "jet:target-cpu=native\n" }
 // Why the runtime cache could not prepare a program: the tool (rustc) failed
 // to run, or the artifact store failed.
 #Error
-pub enum NativeRuntimeError {
+enum NativeRuntimeError {
     Tool(String)
     Cache(ArtifactStoreError)
 
@@ -53,16 +53,16 @@ impl ArtifactStoreError -> NativeRuntimeError { NativeRuntimeError.Cache(self) }
 impl IOError -> NativeRuntimeError { NativeRuntimeError.Cache(ArtifactStoreError.IO(self)) }
 
 // One environment variable passed to every rustc invocation.
-pub struct NativeRuntimeEnvVar {
-    pub name: String
-    pub value: String
+struct NativeRuntimeEnvVar {
+    name: String
+    value: String
 }
 
 // The rustc identity of each rustc, environment and CPU tuning already
 // queried (the Rust process-wide identity memo, carried explicitly by the
 // caller).
-pub struct NativeRuntimeIdentityCache {
-    identities: [String: String]
+struct NativeRuntimeIdentityCache {
+    priv identities: [String: String]
 
     fn new() -> NativeRuntimeIdentityCache Never! {
         NativeRuntimeIdentityCache{identities: [String: String]{}}
@@ -137,14 +137,14 @@ impl NativeRuntimeMaterializedRoot.Close {
 // The program to hand to the native rustc invocation and the cached runtime
 // rlib it links. Keep it open until the consuming rustc command exits: it
 // holds the lease that pins the rlib and its staging copy.
-pub struct PreparedRuntime {
-    rust: String
-    runtime_rlib: String?
-    cache_hit: Bool
-    repaired: Bool
-    prebuilt: Bool
-    lease: ArtifactLease?
-    materialized_root: NativeRuntimeMaterializedRoot?
+struct PreparedRuntime {
+    priv rust: String
+    priv runtime_rlib: String?
+    priv cache_hit: Bool
+    priv repaired: Bool
+    priv prebuilt: Bool
+    priv lease: ArtifactLease?
+    priv materialized_root: NativeRuntimeMaterializedRoot?
 
     // The whole generated program, compiled without a cached runtime.
     fn inline(rust: String) -> PreparedRuntime Never! {
@@ -198,7 +198,7 @@ impl PreparedRuntime.Close {
 // Prepare the generated program for one native rustc invocation. A program
 // without runtime markers, with malformed markers, or whose runtime does not
 // compile is returned whole.
-pub fn store_runtime_prepare(store: ArtifactStore, identities: &NativeRuntimeIdentityCache, rustc: String, generated: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -[FS, Env, Exec, Time, Rand]> PreparedRuntime NativeRuntimeError! {
+fn store_runtime_prepare(store: ArtifactStore, identities: &NativeRuntimeIdentityCache, rustc: String, generated: String, rustc_flags: [String], rustc_env: [NativeRuntimeEnvVar]) -[FS, Env, Exec, Time, Rand]> PreparedRuntime NativeRuntimeError! {
     found :: store_runtime_split_generated(generated) ?? None
     split :: found ?? return Ok(PreparedRuntime.inline(generated))
     compile_flags :: store_runtime_compile_flags(rustc_flags)
@@ -504,7 +504,7 @@ fn store_runtime_be64(value: Int) -> [U8] Never! {
     out := [U8]{}
     shift := 56
     loop shift >= 0 {
-        &out.push(U8{(value >> shift) & 255})
+        &out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
     out

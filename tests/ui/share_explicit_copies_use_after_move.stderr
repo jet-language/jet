@@ -1,0 +1,12 @@
+Error [E0121]: `xs` was consumed by the binding `ys`, so it can't be used here
+  --> share_explicit_copies_use_after_move.jet:8:24
+    |
+  8 |     print("{ys.len()} {xs.len()}")
+    |                        ^^
+  --> share_explicit_copies_use_after_move.jet:7:11
+    |
+  7 |     ys := xs
+    |           ^^ `xs` moved to the binding `ys` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `xs` after the move, or give the binding `ys` a copy with `xs.copy()` where it moved.
+More: jet-lang.dev/e/E0121

@@ -1,0 +1,33 @@
+# HAND-PORT tests/http_i9.rs:1036-1084 hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All18 hostile HTTP/WS messages, original both default/interpreter exact output/empty stderr, same1s no-connect observer (any other error false) as approved existing H1 ports; original Jet source verbatim token replacements.
+fixture: hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer_default: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet run main.jet
+exit: 0
+stdout: = hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers.stdout.expected
+stderr: empty
+wait: peer_default
+exit: 0
+remove: addr.txt
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer_interpret: built
+await: file addr.txt timeout 30s
+capture: addr_interpret = text file addr.txt
+write: main.jet main_interpret.template
+step: jet run --interpret main.jet
+exit: 0
+stdout: = hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers.stdout.expected
+stderr: empty
+wait: peer_interpret
+exit: 0
+remove: addr.txt

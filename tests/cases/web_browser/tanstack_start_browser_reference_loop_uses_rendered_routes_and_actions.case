@@ -1,0 +1,47 @@
+# tests/web_browser.rs::tanstack_start_browser_reference_loop_uses_rendered_routes_and_actions
+# Original staging/reference tool and predicates; rustc availability guard retires.
+# NEST checks precede browser guard, preserving original order.
+# PENDING-SAME-HEAD, runtime UNRUN.
+env: NO_COLOR=1
+copy: {root}/tests/cases/web_browser/fixtures/nest {work}/nest
+file: nest/run.jet size = 298
+file: nest/run.jet sha256 = "e5c1707a9ab751897c662ece76a9047622a999c58eb56b4d03c853101f74deca"
+step: jet run run.jet
+cwd: {work}/nest
+exit: 0
+stdout: ~ "name=Ada" # original NEST-P001 assertion
+stdout: ~ "<form method=\"post\" action=\"/actions/save\" aria-busy=\"false\">" # original NEST-P001 assertion
+stdout: ~ "<input name=\"name\" id=\"Input-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required value=\"Ada\">" # original NEST-P001 assertion
+stdout: ~ "<button type=\"submit\">Submit</button>" # original NEST-P001 assertion
+stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
+stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
+step: jet run --interpret run.jet
+cwd: {work}/nest
+exit: 0
+stdout: ~ "name=Ada" # original NEST-P001 assertion
+stdout: ~ "<form method=\"post\" action=\"/actions/save\" aria-busy=\"false\">" # original NEST-P001 assertion
+stdout: ~ "<input name=\"name\" id=\"Input-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required value=\"Ada\">" # original NEST-P001 assertion
+stdout: ~ "<button type=\"submit\">Submit</button>" # original NEST-P001 assertion
+stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
+stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
+step: jet run --profile=debug run.jet
+cwd: {work}/nest
+exit: 0
+stdout: ~ "name=Ada" # original NEST-P001 assertion
+stdout: ~ "<form method=\"post\" action=\"/actions/save\" aria-busy=\"false\">" # original NEST-P001 assertion
+stdout: ~ "<input name=\"name\" id=\"Input-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required value=\"Ada\">" # original NEST-P001 assertion
+stdout: ~ "<button type=\"submit\">Submit</button>" # original NEST-P001 assertion
+stdout+stderr: !~ "source bytes 0..0" # original excludes old lowering ICE
+stdout+stderr: !~ "selected entry is not a top-level function" # original excludes old lowering ICE
+when probe {env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium} --version stdout+stderr: ~any "Chromium" "Chrome"
+when probe {env:JET_WEB_NODE|env:NODE|node} --version stdout: ^= "v0" | ^= "v1" | ^= "v2" | ^= "v3" | ^= "v4" | ^= "v5" | ^= "v6" | ^= "v7" | ^= "v8" | ^= "v9"
+copy: {root}/Examples/features/web/tanstack_start/run.jet {work}/run.jet
+copy: {root}/Examples/features/web/tanstack_start/package.jet {work}/package.jet
+copy: {root}/Examples/features/web/tanstack_start/public/index.html {work}/public/index.html
+copy: {root}/Examples/features/web/tanstack_start/public/app.css {work}/public/app.css
+step: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-dev-test/reference_app.mjs --metric first_run --manifest {root}/Tools/agent-eval/dx/manifest.json --exercise --app tanstack-start-orders --jet-env {root}/Tools/agent/jet-env
+env: CHROMIUM={env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium}
+exit: 0
+stdout: ~ "REFERENCE_METRIC:first_run" # original completion predicate
+end when
+end when

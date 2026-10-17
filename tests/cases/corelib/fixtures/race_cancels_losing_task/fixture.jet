@@ -1,0 +1,22 @@
+
+use core.tasks as tasks
+use core.time as time
+
+fn fast_nine() -> Int {
+    return 9
+}
+
+fn slow_one() -> Int {
+    time.sleep(300ms)
+    return 1
+}
+
+fn run() {
+    task.group g {
+        winner :: (task.race {
+            slow_one(),
+            fast_nine()
+        }) ?? panic("race failed")
+        print(winner)
+    }
+}

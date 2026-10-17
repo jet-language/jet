@@ -1,0 +1,25 @@
+# Port of tests/lsp.rs:1090-1169; every original wait/order/assertion retained.
+# PENDING-GRAMMAR: generic framed sessions and quoted JSON escapes.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_incremental_sync_range_edit_updates_document/0.json
+recv lsp
+json: stdout doc $.result.capabilities.textDocumentSync = 2
+send lsp: messages/lsp_incremental_sync_range_edit_updates_document/1.json
+send lsp: messages/lsp_incremental_sync_range_edit_updates_document/2.json
+recv lsp
+send lsp: messages/lsp_incremental_sync_range_edit_updates_document/3.json
+send lsp: messages/lsp_incremental_sync_range_edit_updates_document/4.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other fields contain variable response metadata
+stdout: !~ "E0009" # original negative predicate; other fields contain variable response metadata
+stdout: !~ "E0985" # original negative predicate; other fields contain variable response metadata
+recv lsp
+stdout: ~ "\"id\":2" # original predicate; other fields contain variable response metadata
+stdout: ~ "\"data\"" # original predicate; other fields contain variable response metadata
+send lsp: messages/lsp_incremental_sync_range_edit_updates_document/5.json
+recv lsp
+send lsp: messages/lsp_incremental_sync_range_edit_updates_document/6.json
+close lsp
+# Original child.wait did not assert process status.
+exit: any

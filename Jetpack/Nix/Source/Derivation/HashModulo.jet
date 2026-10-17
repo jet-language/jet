@@ -2,10 +2,10 @@
 // `derivations.cc`. Input derivations are read from an in-memory store; a
 // host `/nix/store` reader fills the same map at the effect boundary.
 
-pub struct NixDerivationStore {
-    pub derivations: [String: NixDerivation]
+struct NixDerivationStore {
+    derivations: [String: NixDerivation]
     // Modulo digests by mask and derivation path.
-    memo: [String: [String: [U8]]]
+    priv memo: [String: [String: [U8]]]
 
     fn read(self, drv_path: String) -> NixDerivation NixError! {
         derivation :: self.derivations.get(drv_path) ?? return Err(NixError.DrvIO("missing drv in map store: {drv_path}"))
@@ -27,7 +27,7 @@ pub struct NixDerivationStore {
         }
 
         hashes :: if drv.is_fixed() -> nix_fixed_modulo_hashes(drv) else -> &self.input_modulo_hashes(drv, mask_outputs)
-        self.memo[key] = ~hashes
+        self.memo[key] = hashes.copy()
         Ok(hashes)
     }
 
@@ -48,7 +48,7 @@ pub struct NixDerivationStore {
         }
         digest :: nix_sha256_digest(drv.unparse(mask_outputs, Val(inputs)).bytes())
         hashes := [String: [U8]]{}
-        loop name in drv.output_names() -> hashes[name] = ~digest
+        loop name in drv.output_names() -> hashes[name] = digest.copy()
         Ok(hashes)
     }
 
@@ -79,7 +79,7 @@ pub struct NixDerivationStore {
 }
 
 // A store over `derivations` with an empty modulo memo.
-pub fn nix_derivation_store(derivations: [String: NixDerivation]) -> NixDerivationStore Never! {
+fn nix_derivation_store(derivations: [String: NixDerivation]) -> NixDerivationStore Never! {
     NixDerivationStore{derivations, memo: [String: [String: [U8]]]{}}
 }
 
@@ -97,14 +97,14 @@ fn nix_fixed_modulo_hashes(drv: NixDerivation) -> [String: [U8]] NixError! {
 
 // Recompute the derivation's own store path (text method); fail closed on a
 // mismatch.
-pub fn nix_verify_drv_path(store_dir: String, drv_path: String, aterm: [U8], drv: NixDerivation) NixError! {
+fn nix_verify_drv_path(store_dir: String, drv_path: String, aterm: [U8], drv: NixDerivation) NixError! {
     expected :: nix_make_text_path(store_dir, nix_store_path_name(drv_path), aterm, drv.references_for_drv_path())
     if expected != drv_path -> return Err(NixError.Divergence{what: "drvPath", expected, actual: drv_path})
 }
 
 // Re-encode `drv`; any byte divergence from `aterm` fails closed, reporting
 // the first 120 scalars of each side.
-pub fn nix_verify_aterm_roundtrip(aterm: String, drv: NixDerivation) NixError! {
+fn nix_verify_aterm_roundtrip(aterm: String, drv: NixDerivation) NixError! {
     encoded :: drv.unparse(false, None)
     if encoded != aterm -> return Err(NixError.Divergence{what: "ATerm roundtrip", expected: nix_leading_scalars(aterm, 120), actual: nix_leading_scalars(encoded, 120)})
 }

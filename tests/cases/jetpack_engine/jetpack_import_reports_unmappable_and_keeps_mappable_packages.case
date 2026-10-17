@@ -1,0 +1,12 @@
+# HAND-PORT tests/jetpack_engine.rs:7505-7549 jetpack_import_reports_unmappable_and_keeps_mappable_packages
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: jetpack_import_reports_unmappable_and_keeps_mappable_packages.fixture
+step: jetpack import flake.nix --no-color --fixtures {work}/fixtures
+env: PATH=
+exit: 0
+file: env.jet ~ "packages: [ripgrep]" # original predicate
+file: env.jet !~ "ripgrepp" # original predicate
+stderr: count "JT0101" = 1 # original predicate
+stderr: ~ "unmappable Nix input `ripgrepp` at `flake.nix`; nearest catalog candidate: `ripgrep`" # original predicate
+file: .jet/lock ~ "key = \"nix-import-unmapped:ripgrepp\"" # original predicate
+

@@ -37,9 +37,6 @@ pub const RESERVED_TYPES: &[&str] = &[
     // D-VALIDATE1: the `Validate.over(s)` namespace is compiler-owned; it is
     // not a user-defined data type that can shadow the validation surface.
     Syntax::TYPE_VALIDATE,
-    // D-SOLVER-LIB1=A: `Solver` is the Core finite-solver handle. Reserving it
-    // prevents a user type from being mistaken for the runtime solver handle.
-    Syntax::SOLVER_TYPE,
     Syntax::TYPE_BUILD_CONTEXT,
     Syntax::TYPE_BUILD_PLAN,
     Syntax::TYPE_BUILD_ACTION,
@@ -299,6 +296,7 @@ const BUILTIN_METHOD_VOCABULARY: &str = concat!(
     "a accepted action active_count add add_asset_bundle add_doc add_executable add_install add_library add_new ",
     "add_package add_publish add_test advance after all any average b before binary_search binary_search_by ",
     "close collect compare compare_exchange concat contains contains_value copy copy_to count count_by count_where counts count_ones count_zeros bit_count bit_length ",
+    "bit_and bit_or bit_xor bit_not pow ",
     "encode cycle contribute dedup dedup_by delete delivered delivered_handlers diagnostics difference digest downgrade ",
     "drop_last dropped each edit edit_disjoint effects elapsed_millis embed emit emit_async ends_with eof ",
     "equal error events exponential extend failure_count failures fetch filter filter_map find first ",
@@ -478,6 +476,21 @@ fn atomic_method_arg_types(inner: &Type, method: &str) -> Option<Vec<Type>> {
     }
 }
 
+/// D-SHAPE-PLACE1=A: list methods that edit elements in place and never change
+/// the list's length — the mutating surface of a fixed-length range write window.
+pub const LENGTH_PRESERVING_LIST_METHODS: &[&str] = &[
+    "sort",
+    "sort_desc",
+    "sort_by",
+    "sort_by_key",
+    "reverse",
+    "swap",
+    "fill",
+    "shuffle",
+    "rotate_left",
+    "rotate_right",
+];
+
 /// `None` = not a built-in method; `Some(None)` = void; `Some(Some(t))` = returns `t`.
 pub fn builtin_method_return(
     recv_ty: &Type,
@@ -490,6 +503,15 @@ pub fn builtin_method_return(
     }
     if is_static_on_type {
         return builtin_static_return(recv_ty, method, arg_count);
+    }
+    // D-SIGIL-ALGEBRA1=B: these intrinsic methods lower in sema to the
+    // existing numeric operations, not to host-specific method dispatch.
+    if recv_ty.is_integer() {
+        if matches!((method, arg_count), ("bit_not", 0) | ("bit_and" | "bit_or" | "bit_xor" | "pow", 1)) {
+            return Some(Some(recv_ty.erased_inline_ranges()));
+        }
+    } else if recv_ty.is_float() && method == "pow" && arg_count == 1 {
+        return Some(Some(recv_ty.clone()));
     }
     if let Type::Apply { name, args } = recv_ty {
         if name == "Atomic" && args.len() == 1 {
@@ -540,12 +562,6 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::DETERMINISTIC_WORLD_TYPE => {
             deterministic_world_method_return(method, arg_count)
         }
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => fake_method_return(method, arg_count),
-        // D-SOLVER-LIB1=A: explicit finite solver handle. `new(seed)` constructs
-        // state; `require(Bool)` records a checked constraint; query methods read it.
-        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => {
-            solver_method_return(method, arg_count)
-        }
         // D-SHAPE-DURATIONCONVERT1=A: checked whole-unit read.
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => {
             duration_method_return(method, arg_count)
@@ -557,6 +573,12 @@ pub fn builtin_method_return(
         Type::Named(n) if n == crate::Syntax::TYPE_FRACTION => {
             crate::Numeric::fraction_method_return(method, arg_count)
         }
+        // D-TRAIT-OVERLOAD1=A: Complex is not Numeric (it has no order); its
+        // magnitude is its own `abs` method and answers a Float.
+        Type::Named(n) if n == Syntax::TYPE_COMPLEX => match (method, arg_count) {
+            ("abs", 0) => Some(Some(Type::Float)),
+            _ => None,
+        },
         Type::Named(n) if n == Syntax::TYPE_BUILD_CONTEXT => {
             build_context_method_return(method, arg_count)
         }
@@ -778,8 +800,19 @@ pub fn builtin_method_return(
             }))))
         }
         // D-DYNARRAY1: `View<T>` — read-only method surface on a zero-copy window.
-        Type::Apply { name, args } if matches!(name.as_str(), "View" | "ViewMut") => {
+        Type::Apply { name, args } if name == "View" => {
             view_method_return(args.first().unwrap_or(&Type::Int), method, arg_count)
+        }
+        // D-SHAPE-PLACE1=A: a range write window (`&xs[a..b].sort()`) adds the
+        // length-preserving list mutators to the read surface.
+        Type::Apply { name, args } if name == "ViewMut" => {
+            let elem = args.first().unwrap_or(&Type::Int);
+            view_method_return(elem, method, arg_count).or_else(|| {
+                LENGTH_PRESERVING_LIST_METHODS
+                    .contains(&method)
+                    .then(|| list_method_return(elem, method, arg_count))
+                    .flatten()
+            })
         }
         // D-ITERTOOLS1=A: lazy `Iter<T>` — adapters chain; terminals materialize.
         Type::Apply { name, args } if name == Syntax::TYPE_ITER => {
@@ -1329,9 +1362,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
             err: Box::new(Type::Named(crate::Syntax::TYPE_UTF8_ERROR.to_string())),
         })),
         (Type::String, "from_bytes_lossy", 1) => Some(Some(Type::String)),
-        (Type::Named(n), "new", 1) if n == crate::Syntax::SOLVER_TYPE => {
-            Some(Some(Type::Named(crate::Syntax::SOLVER_TYPE.to_string())))
-        }
         (Type::Named(n), "new", 0) if n == crate::Syntax::TYPE_CONDITION => {
             Some(Some(Type::Named(crate::Syntax::TYPE_CONDITION.to_string())))
         }
@@ -1356,7 +1386,6 @@ fn builtin_static_return(ty: &Type, method: &str, nargs: usize) -> Option<Option
         (Type::Named(n), "workspace", 0) if n == crate::Syntax::TYPE_AUTHORITY => {
             Some(Some(Type::Named(crate::Syntax::TYPE_AUTHORITY.to_string())))
         }
-        (Type::Named(n), "today", 0) if n == "Date" => Some(Some(Type::Named("Date".to_string()))),
         (Type::Named(n), "home", 0) if n == "Path" => Some(Some(Type::Named("Path".to_string()))),
         (Type::Named(n), method, 1)
             if n == crate::Syntax::DURATION_TYPE
@@ -1457,6 +1486,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
     match (method, nargs) {
         ("len", 0) => Some(Some(Type::Int)),
         ("is_empty", 0) => Some(Some(Type::Bool)),
+        ("__swap", 2) => Some(None),
         ("push" | "append" | "insert" | "reverse" | "sort" | "sort_desc" | "clear", _) => Some(None),
         ("try_push", 1) | ("try_reserve", 1) => Some(Some(Type::Result {
             ok: Box::new(Type::Named("Unit".to_string())),
@@ -1472,7 +1502,7 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         })),
         ("extend", 1) => Some(None),
         ("concat", 1) => Some(Some(Type::List(Box::new(inner.clone())))),
-        ("pop" | "get" | "first" | "last", 0 | 1) => {
+        ("pop", 0) | ("get" | "first" | "last", 0 | 1) => {
             Some(Some(Type::Option(Box::new(inner.clone()))))
         }
         ("index_of", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
@@ -1526,7 +1556,6 @@ fn list_method_return(inner: &Type, method: &str, nargs: usize) -> Option<Option
         ("chunk_while", 1) => Some(Some(iter_ty(Type::List(Box::new(inner.clone()))))),
         // #1477: remaining List ledger surface.
         ("starts_with" | "ends_with" | "equal", 1) => Some(Some(Type::Bool)),
-        ("copy", 0) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("slice", 2) => Some(Some(Type::List(Box::new(inner.clone())))),
         ("binary_search", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
         ("binary_search_by", 1) => Some(Some(Type::Option(Box::new(Type::Int)))),
@@ -1841,11 +1870,6 @@ fn map_method_return(key: &Type, value: &Type, method: &str, nargs: usize) -> Op
         ("update", 1) => Some(None),
         ("each", 1) => Some(None),
         // #1477: remaining Map ledger surface.
-        ("copy", 0) => Some(Some(Type::Map {
-            key: Box::new(key.clone()),
-            key_span: None,
-            value: Box::new(value.clone()),
-        })),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("first", 0) => Some(Some(Type::Option(Box::new(key.clone())))),
         ("to_list" | "items", 0) => Some(Some(Type::List(Box::new(Type::Tuple(vec![
@@ -1929,7 +1953,7 @@ fn string_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
             0,
         ) => Some(Some(Type::Bool)),
         (
-            "capitalize" | "swapcase" | "copy" | "reverse" | "normalize",
+            "capitalize" | "swapcase" | "reverse" | "normalize",
             0,
         ) => Some(Some(Type::String)),
         ("removeprefix" | "removesuffix", 1) => Some(Some(Type::String)),
@@ -2069,24 +2093,7 @@ fn history_rng_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
     }
 }
 
-fn fake_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("name" | "email" | "host" | "address", 0) => Some(Some(Type::String)),
-        ("locale", 1) => Some(Some(Type::Named(crate::Syntax::FAKE_TYPE.to_string()))),
-        _ => None,
-    }
-}
 
-/// D-SOLVER-LIB1=A: explicit finite solver state. This first Core slice admits
-/// ordinary Bool constraints only; richer domains stay future library work.
-fn solver_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
-    match (method, nargs) {
-        ("require", 1) => Some(None),
-        ("failure_count", 0) => Some(Some(Type::Int)),
-        ("status", 0) => Some(Some(Type::String)),
-        _ => None,
-    }
-}
 
 /// D-SHAPE-DURATIONCONVERT1=A: one checked whole-unit reader.
 fn duration_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
@@ -2532,7 +2539,7 @@ fn set_method_return(elem: &Type, method: &str, nargs: usize) -> Option<Option<T
         ("is_subset" | "issubset" | "is_superset" | "issuperset" | "is_disjoint" | "isdisjoint", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(elem.clone())))),
         // #1478: remaining Set surface (non-closure).
-        ("copy" | "to_set", 0) => Some(Some(set_of_elem())),
+        ("to_set", 0) => Some(Some(set_of_elem())),
         ("discard" | "update" | "difference_update" | "intersection_update" | "symmetric_difference_update", 1) => Some(None),
         ("equal", 1) => Some(Some(Type::Bool)),
         ("capacity", 0) => Some(Some(Type::Int)),
@@ -2626,7 +2633,6 @@ fn bit_set_method_return(method: &str, nargs: usize) -> Option<Option<Type>> {
         ("remove" | "clear", _) => Some(None),
         ("has", 1) => Some(Some(Type::Bool)),
         ("to_list", 0) => Some(Some(Type::List(Box::new(Type::Int)))),
-        ("copy", 0) => Some(Some(Type::Named(Syntax::TYPE_BITS.to_string()))),
         _ => None,
     }
 }
@@ -2643,7 +2649,7 @@ fn byte_buffer_method_return(method: &str, nargs: usize) -> Option<Option<Type>>
         ("to_string" | "string", 0) => Some(Some(Type::String)),
         (
             "trim" | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
-            | "clone" | "copy",
+            | "clone",
             0,
         ) => Some(Some(buf())),
         ("lines", 0) => Some(Some(Type::List(Box::new(Type::String)))),
@@ -2741,6 +2747,7 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
                 | "remove"
                 | "extend"
                 | "reverse"
+                | "__swap"
                 | "sort"
                 | "sort_by"
                 | "sort_desc"
@@ -2874,10 +2881,6 @@ pub fn builtin_method_mutates(recv_ty: &Type, method: &str) -> bool {
             )
         }
         Type::Named(n) if n == "HistoryRNG" => matches!(method, "next_u64" | "below"),
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => {
-            matches!(method, "name" | "email" | "host" | "address")
-        }
-        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => matches!(method, "require"),
         _ => false,
     }
 }
@@ -3059,6 +3062,7 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             "push" | "append" | "try_push" | "contains" => Some(vec![(**inner).clone()]),
             "try_reserve" => Some(vec![Type::Int]),
             "insert" => Some(vec![Type::Int, (**inner).clone()]),
+            "__swap" => Some(vec![Type::Int, Type::Int]),
             "get" => Some(vec![Type::Int]),
             "index_of" | "index" => Some(vec![(**inner).clone()]),
             "remove" => Some(vec![
@@ -3241,7 +3245,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             | "shuffle"
             | "average"
             | "to_set"
-            | "copy"
             | "random"
             | "min_max"
             | "counts" => Some(vec![]),
@@ -3856,15 +3859,6 @@ pub fn builtin_method_arg_types(recv_ty: &Type, method: &str) -> Option<Vec<Type
             }]),
             _ => Some(vec![]),
         },
-        Type::Named(n) if n == crate::Syntax::FAKE_TYPE => match method {
-            "locale" => Some(vec![Type::String]),
-            _ => Some(vec![]),
-        },
-        Type::Named(n) if n == crate::Syntax::SOLVER_TYPE => match method {
-            "new" => Some(vec![Type::Int]),
-            "require" => Some(vec![Type::Bool]),
-            _ => Some(vec![]),
-        },
         Type::Named(n) if n == crate::Syntax::DURATION_TYPE => Some(vec![]),
         _ => None,
     }
@@ -3918,8 +3912,6 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
                 if name == Syntax::CLOCK_TYPE
                     || name == Syntax::RNG_TYPE
                     || name == "HistoryRNG"
-                    || name == Syntax::FAKE_TYPE
-                    || name == Syntax::SOLVER_TYPE
         )
     {
         // TIR lowers these through helpers whose first argument is an explicit
@@ -3936,6 +3928,13 @@ pub fn builtin_receiver_borrow(recv_ty: &Type, method: &str) -> BuiltinReceiverB
 #[cfg(all(test, debug_assertions))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_pop_takes_no_slot_argument() {
+        // APICompPython t14: the Jet row is List.pop 0..0; `xs.pop(0)` must not check.
+        assert!(list_method_return(&Type::Int, "pop", 0).is_some());
+        assert!(list_method_return(&Type::Int, "pop", 1).is_none());
+    }
 
     #[test]
     fn list_mutation_borrows_match_for_growable_and_fixed_lists() {

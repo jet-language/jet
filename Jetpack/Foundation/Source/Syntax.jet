@@ -231,10 +231,6 @@ BINDINGS_ROOT_SUBDIR :: prep { "bindings" }
 // Rust-baked `CARGO_MANIFEST_DIR` paths), joined onto foundation_jet_source_root().
 FFI_JET_FOUNDATION_CRATE_PATH :: prep { "crates/jet-foundation" }
 FFI_JET_UNICODE_CRATE_PATH :: prep { "crates/jet-unicode" }
-FFI_JET_FOUNDATION_CODEGEN_PRELUDE_PATH :: prep { "crates/jet-codegen/src/Prelude" }
-FFI_JET_FOUNDATION_ARCHIVE_SOURCE_PATH :: prep { "Core/archive" }
-FFI_JET_FOUNDATION_TEXT_SOURCE_PATH :: prep { "Core/text" }
-FFI_JET_FOUNDATION_TESTS_PATH :: prep { "tests" }
 // S59 / D-CFFI2: the `c@<target>` system-library target (`lib: c@system`).
 SYSTEM_LIB_TARGET :: prep { "system" }
 
@@ -318,8 +314,9 @@ DEFAULT_ENTRY_FILE :: prep { "run.jet" }
 
 // ── EnvModel ModuleEval (jet_foundation::Syntax, jetpack_config.rs, core_surface.rs, package_files.rs, predicates.rs, math_layout.rs) ──
 
-// S7: the comptime mark on a top-level `NAME :: value` constant.
-COMPTIME_MARK :: prep { "@" }
+// D-ONCE-DOLLAR1=B: the comptime/environment mark (`$NAME` in config
+// surfaces; jet-foundation Syntax `COMPTIME_MARK`).
+COMPTIME_MARK :: prep { "$" }
 // D-GENERATED-NAMES1: the compiler-generated name prefix.
 GENERATED_NAME_PREFIX :: prep { "__jet_" }
 TYPE_STRING :: prep { "String" }
@@ -327,6 +324,7 @@ TYPE_STRING :: prep { "String" }
 TYPE_ENV :: prep { "Env" }
 TYPE_PROFILE :: prep { "Profile" }
 TYPE_PROMPT :: prep { "Prompt" }
+TYPE_SYSTEM :: prep { "System" }
 TYPE_IMAGE :: prep { "Image" }
 TYPE_BUDGET :: prep { "Budget" }
 // D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: the typed secret-map grammar.
@@ -373,6 +371,10 @@ IMAGE_FIELD_FROM :: prep { "from" }
 IMAGE_FIELD_FORMAT :: prep { "format" }
 IMAGE_KIND_OCI :: prep { "Oci" }
 IMAGE_KIND_ISO :: prep { "Iso" }
+// U14: the disk-image formats an `.Iso` image's `format:` may name.
+IMAGE_FORMAT_ISO :: prep { "iso" }
+IMAGE_FORMAT_QCOW :: prep { "qcow" }
+IMAGE_FORMAT_RAW :: prep { "raw" }
 IMAGE_FIELD_KIND :: prep { "kind" }
 IMAGE_FIELD_EXPOSE :: prep { "expose" }
 IMAGE_FIELD_ENV_VARS :: prep { "env_vars" }
@@ -432,9 +434,10 @@ RECIPE_STEP_FIELD_TOOL :: prep { "tool" }
 RECIPE_STEP_FIELD_ARGS :: prep { "args" }
 RECIPE_STEP_FIELD_SRC :: prep { "src" }
 RECIPE_STEP_FIELD_DEST :: prep { "dest" }
-// S31: string escape markers and their decoded characters (`{{`/`}}` are
-// literal braces).
-ESCAPES :: prep { [(marker: String, decoded: String)]{(marker: "n", decoded: "\n"), (marker: "t", decoded: "\t"), (marker: "\"", decoded: "\""), (marker: "\\", decoded: "\\")} }
+// S31: string escape markers and their decoded characters, index for index
+// (`{{`/`}}` are literal braces).
+ESCAPE_MARKERS :: prep { [String]{"n", "t", "\"", "\\"} }
+ESCAPE_DECODED :: prep { [String]{"\n", "\t", "\"", "\\"} }
 
 // ── CLI env/use/jobs (jet_foundation::Syntax, Syntax/effects_surface.rs) ──
 
@@ -517,7 +520,7 @@ TARGET_TEST :: prep { "test" }
 TARGET_EXAMPLE :: prep { "example" }
 TARGET_SANDBOX :: prep { "sandbox" }
 RETIRED_TARGET_PLUGIN :: prep { "plugin" }
-TARGET_RESERVED :: prep { [String]{} }
+TARGET_RESERVED :: [String]{}
 TARGET_FIELD_ENTRY :: prep { "entry" }
 TARGET_FIELD_NAME :: prep { "name" }
 TARGET_FIELD_EXPORT :: prep { "export" }
@@ -531,6 +534,8 @@ OUTPUT_FIELD_NATIVE :: prep { "native" }
 OUTPUT_FIELD_BINDINGS :: prep { "bindings" }
 // D-POLICY-WORD1 / D-TEAMPOLICY1 / D-JPK-POLICYSURFACE1: package policy fields.
 POLICY_FIELD_LINTS :: prep { "lints" }
+// D-LINTPOLICY1: the one `policy.lints` field (Syntax/predicates.rs).
+LINTS_FIELD_DENY :: prep { "deny" }
 POLICY_FIELD_EFFECTS :: prep { "effects" }
 POLICY_FIELD_UNSAFE :: prep { "unsafe" }
 POLICY_FIELD_EXPERT :: prep { "expert" }

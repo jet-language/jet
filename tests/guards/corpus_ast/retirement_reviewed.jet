@@ -1,0 +1,374 @@
+use core.files as s6_retirement_reviewed_files
+use corpus_manifest.policy_split_whitespace
+use jet_lexer.[lex, Token, STRING_PART_INTERPOLATION, TOKEN_IDENT, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_TRUE, TOKEN_FALSE, TOKEN_NULL, TOKEN_KW_IT, TOKEN_SELF, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_RBRACE, TOKEN_PLUS_PLUS, TOKEN_MINUS_MINUS, TOKEN_GT, TOKEN_SHR, TOKEN_COLON, TOKEN_COLON_COLON, TOKEN_LPAREN, TOKEN_LBRACKET, TOKEN_STAR, TOKEN_KW_FN, TOKEN_BANG, TOKEN_QUESTION, TOKEN_HASH, TOKEN_UNIFIED_ARROW, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_EOF]
+
+// Exact source-law algorithms tests/retirement_ratchet.rs:127-164,195-717.
+// Token facts use the compiler lexer, never a text substitute.
+struct S6RetirementReviewedFragment { first_line: Int source: String }
+struct S6RetirementReviewedHit { line: Int spelling: String }
+struct S6RetirementReviewedFence { marker: Int length: Int rest: String }
+
+fn s6_retirement_reviewed_slice(text: String, start: Int, end: Int) -> String {
+    String.from_bytes(text.bytes()[start..<end].copy()) ?? panic("source boundary")
+}
+
+fn s6_retirement_reviewed_skipped(path: String) -> Bool {
+    loop part in path.split("/") {
+        if part.starts_with(".") || part.starts_with("target") || part == "build" || part == "node_modules" -> return true
+    }
+    false
+}
+
+fn s6_retirement_reviewed_walk_law() {
+    assert(s6_retirement_reviewed_skipped("build"))
+    assert(s6_retirement_reviewed_skipped(".claude/worktrees/worker/examples"))
+    assert(s6_retirement_reviewed_skipped(".agent-worktrees/worker/examples"))
+    assert(!s6_retirement_reviewed_skipped("Examples"))
+    tail :: "que"
+    live_type :: "De{tail}"
+    assert(s6_retirement_reviewed_contains_word("let queue: {live_type}<Int> = {live_type}.new()", live_type))
+}
+
+fn s6_retirement_reviewed_word_byte(byte: U8) -> Bool {
+    value :: Int.from_u8(byte)
+    (value >= 65 && value <= 90) || (value >= 97 && value <= 122) || (value >= 48 && value <= 57) || value == 95
+}
+
+fn s6_retirement_reviewed_contains_word(text: String, word: String) -> Bool {
+    raw :: text.bytes()
+    needle :: word.bytes()
+    loop start in 0..<(raw.len() - needle.len() + 1) {
+        matches := true
+        loop at in 0..<needle.len() {
+            if raw[start + at] != needle[at] -> matches = false
+        }
+        if !matches -> next
+        end :: start + needle.len()
+        before :: if start > 0 -> s6_retirement_reviewed_word_byte(raw[start - 1]) else -> false
+        after :: if end < raw.len() -> s6_retirement_reviewed_word_byte(raw[end]) else -> false
+        if !before && !after -> return true
+    }
+    false
+}
+
+fn s6_retirement_reviewed_collect(tokens: [Token], out: &[Token]) {
+    loop token in tokens {
+        if token.kind == TOKEN_LINE_COMMENT || token.kind == TOKEN_BLOCK_COMMENT || token.kind == TOKEN_EOF -> next
+        &out.push(token)
+        if token.kind == TOKEN_STRING || token.kind == TOKEN_RAW_STRING {
+            loop part in token.payload.string_parts {
+                if part.kind == STRING_PART_INTERPOLATION -> s6_retirement_reviewed_collect(part.tokens, &out)
+            }
+        }
+    }
+}
+
+fn s6_retirement_reviewed_type_atom(token: Token) -> Bool {
+    token.kind == TOKEN_IDENT || token.kind == TOKEN_RPAREN || token.kind == TOKEN_RBRACKET || token.kind == TOKEN_GT || token.kind == TOKEN_SHR
+}
+
+fn s6_retirement_reviewed_contract_position(token: Token) -> Bool {
+    s6_retirement_reviewed_type_atom(token) || token.kind == TOKEN_COLON || token.kind == TOKEN_COLON_COLON || token.kind == TOKEN_RPAREN
+}
+
+fn s6_retirement_reviewed_expression_end(token: Token) -> Bool {
+    kinds :: [Int]{TOKEN_IDENT, TOKEN_STRING, TOKEN_RAW_STRING, TOKEN_INT, TOKEN_FLOAT, TOKEN_UNIT_NUMBER, TOKEN_CHAR, TOKEN_TRUE, TOKEN_FALSE, TOKEN_NULL, TOKEN_KW_IT, TOKEN_SELF, TOKEN_RPAREN, TOKEN_RBRACKET, TOKEN_RBRACE, TOKEN_PLUS_PLUS, TOKEN_MINUS_MINUS}
+    kinds.contains(token.kind)
+}
+
+fn s6_retirement_reviewed_type_name(token: Token) -> Bool {
+    if token.kind != TOKEN_IDENT || token.payload.text.bytes().len() == 0 -> return false
+    first :: Int.from_u8(token.payload.text.bytes()[0])
+    first >= 65 && first <= 90
+}
+
+fn s6_retirement_reviewed_lower_name(token: Token) -> Bool {
+    if token.kind != TOKEN_IDENT || token.payload.text.bytes().len() == 0 -> return false
+    first :: Int.from_u8(token.payload.text.bytes()[0])
+    (first >= 97 && first <= 122) || first == 95
+}
+
+fn s6_retirement_reviewed_result_arm(tokens: [Token], index: Int) -> Bool {
+    if index < 1 || index + 2 >= tokens.len() -> return false
+    s6_retirement_reviewed_lower_name(tokens[index - 1]) && s6_retirement_reviewed_lower_name(tokens[index + 1]) && tokens[index + 2].kind == TOKEN_UNIFIED_ARROW
+}
+
+fn s6_retirement_reviewed_infix(tokens: [Token], index: Int) -> Bool {
+    if index < 1 || index + 1 >= tokens.len() -> return false
+    previous :: tokens[index - 1]
+    following :: tokens[index + 1]
+    if !s6_retirement_reviewed_type_atom(previous) || !(s6_retirement_reviewed_type_atom(following) || following.kind == TOKEN_LPAREN) -> return false
+    if s6_retirement_reviewed_result_arm(tokens, index) -> return false
+    s6_retirement_reviewed_type_name(previous) || s6_retirement_reviewed_type_name(following)
+}
+
+fn s6_retirement_reviewed_type_prefix(token: Token) -> Bool {
+    s6_retirement_reviewed_type_name(token) || token.kind == TOKEN_LPAREN || token.kind == TOKEN_LBRACKET || token.kind == TOKEN_STAR || token.kind == TOKEN_KW_FN
+}
+
+fn s6_retirement_reviewed_line(source: String, offset: Int) -> Int {
+    line := 1
+    bytes :: source.bytes()
+    loop at in 0..<offset {
+        if Int.from_u8(bytes[at]) == 10 -> line += 1
+    }
+    line
+}
+
+fn s6_retirement_reviewed_hits(source: String) -> [S6RetirementReviewedHit] {
+    lexed :: lex(source.bytes())
+    tokens := [Token]{}
+    s6_retirement_reviewed_collect(lexed.tokens, &tokens)
+    &tokens.sort_by(token -> token.span.start)
+    hits := [S6RetirementReviewedHit]{}
+    loop index in 0..<tokens.len() {
+        token :: tokens[index]
+        if token.kind == TOKEN_BANG {
+            marker_negation :: index >= 2 && tokens[index - 2].kind == TOKEN_HASH
+            canonical_prefix := false
+            if index + 1 < tokens.len() {
+                following :: tokens[index + 1]
+                canonical_prefix = token.span.end == following.span.start && (following.kind == TOKEN_IDENT || following.kind == TOKEN_LPAREN || following.kind == TOKEN_LBRACKET || following.kind == TOKEN_STAR || following.kind == TOKEN_KW_FN)
+            }
+            if marker_negation || canonical_prefix || s6_retirement_reviewed_result_arm(tokens, index) -> next
+            if index > 0 && s6_retirement_reviewed_contract_position(tokens[index - 1]) -> &hits.push(S6RetirementReviewedHit{line: s6_retirement_reviewed_line(source, token.span.start), spelling: "retired failure contract"})
+        } else if token.kind == TOKEN_QUESTION {
+            contextual :: index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_LPAREN
+            handler :: index + 2 < tokens.len() && s6_retirement_reviewed_lower_name(tokens[index + 1]) && tokens[index + 2].kind == TOKEN_UNIFIED_ARROW
+            optional_prefix :: index + 1 < tokens.len() && s6_retirement_reviewed_type_prefix(tokens[index + 1]) && token.span.end == tokens[index + 1].span.start
+            expression_end :: index > 0 && s6_retirement_reviewed_expression_end(tokens[index - 1])
+            if contextual || handler || optional_prefix -> next
+            if s6_retirement_reviewed_infix(tokens, index) || expression_end -> &hits.push(S6RetirementReviewedHit{line: s6_retirement_reviewed_line(source, token.span.start), spelling: "retired failure propagation/type"})
+        }
+    }
+    hits
+}
+
+fn s6_retirement_reviewed_detector_law() {
+    current :: "fn maybe() -> Int? {{ None }}\nfn typed() -> Int IOError! {{ 1 }}\nfn union() -> Int (DbError | TimeoutError)! {{ 1 }}\nfn unit() IOError! {{}}\nstruct Holder {{ value: !IOError }}\nfn context() -> Int IOError! {{ read()?(\"loading\") }}\nfn handled() -> Int IOError! {{ value ? ok -> ok ! failure -> 0 }}\nif !ready -> print(\"ready\")\n"
+    assert_eq(s6_retirement_reviewed_hits(current).len(), 0)
+    retired :: [String]{
+        "fn suffix() Int Error!\n", "fn infix_bang() Int ! Error -> 1\n", "fn infix_question() Int ? Error -> 1\n", "fn suffix_option() Int? -> None\n", "fn bare() ! {{}}\n", "alias bare :: !\n", "fn propagated() Int Error! -> read()?\n", "fn literal_propagation() Bool -> true?\n", "fn string_propagation() String -> \"value\"?\n", "fn null_propagation() Null -> null?\n"
+    }
+    loop source in retired -> assert(s6_retirement_reviewed_hits(source).len() > 0, "retired failure syntax missed: {source}")
+}
+
+fn s6_retirement_reviewed_fence(line: String) -> S6RetirementReviewedFence? {
+    trimmed :: line.trim_start().copy()
+    bytes :: trimmed.bytes()
+    if bytes.len() == 0 -> return None
+    marker :: Int.from_u8(bytes[0])
+    if marker != 96 && marker != 126 -> return None
+    length := 0
+    loop length < bytes.len() && Int.from_u8(bytes[length]) == marker -> length += 1
+    if length < 3 -> return None
+    Val(S6RetirementReviewedFence{marker: marker, length: length, rest: s6_retirement_reviewed_slice(trimmed, length, bytes.len())})
+}
+
+fn s6_retirement_reviewed_inline(line: String) -> [String] {
+    bytes :: line.bytes()
+    fragments := [String]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        if Int.from_u8(bytes[cursor]) != 96 {
+            cursor += 1
+            next
+        }
+        length := 0
+        loop cursor + length < bytes.len() && Int.from_u8(bytes[cursor + length]) == 96 -> length += 1
+        start :: cursor + length
+        close := start
+        loop close < bytes.len() {
+            if Int.from_u8(bytes[close]) != 96 {
+                close += 1
+                next
+            }
+            close_length := 0
+            loop close + close_length < bytes.len() && Int.from_u8(bytes[close + close_length]) == 96 -> close_length += 1
+            if close_length == length {
+                &fragments.push(s6_retirement_reviewed_slice(line, start, close))
+                cursor = close + close_length
+                break
+            }
+            close += close_length
+        }
+        if close >= bytes.len() -> break
+    }
+    fragments
+}
+
+fn s6_retirement_reviewed_looks_jet(source: String) -> Bool {
+    markers :: [String]{"fn ", "alias ", "struct ", "pub fn ", "->", "-[", "fallible", "failure", "optional"}
+    loop marker in markers {
+        if source.contains(marker) -> return true
+    }
+    false
+}
+
+fn s6_retirement_reviewed_find(text: String, needle: String, from: Int) -> Int {
+    raw :: text.bytes()
+    wanted :: needle.bytes()
+    loop start in from..<(raw.len() - wanted.len() + 1) {
+        matches := true
+        loop at in 0..<wanted.len() {
+            if raw[start + at] != wanted[at] -> matches = false
+        }
+        if matches -> return start
+    }
+    -1
+}
+
+fn s6_retirement_reviewed_embedded(text: String) -> [S6RetirementReviewedFragment] {
+    bytes :: text.bytes()
+    fragments := [S6RetirementReviewedFragment]{}
+    cursor := 0
+    loop cursor < bytes.len() {
+        if Int.from_u8(bytes[cursor]) == 114 {
+            quote := cursor + 1
+            loop quote < bytes.len() && Int.from_u8(bytes[quote]) == 35 -> quote += 1
+            if quote < bytes.len() && Int.from_u8(bytes[quote]) == 34 {
+                hashes :: s6_retirement_reviewed_slice(text, cursor + 1, quote)
+                close :: "\"{hashes}"
+                start :: quote + 1
+                end :: s6_retirement_reviewed_find(text, close, start)
+                if end < 0 {
+                    cursor += 1
+                    next
+                }
+                source :: s6_retirement_reviewed_slice(text, start, end)
+                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: s6_retirement_reviewed_line(text, cursor), source: source})
+                cursor = end + close.bytes().len()
+                next
+            }
+        }
+        if Int.from_u8(bytes[cursor]) == 34 {
+            start :: cursor + 1
+            end := start
+            loop end < bytes.len() {
+                if Int.from_u8(bytes[end]) == 92 -> end += 2
+                else if Int.from_u8(bytes[end]) == 34 -> break
+                else -> end += 1
+            }
+            if end < bytes.len() {
+                source :: s6_retirement_reviewed_slice(text, start, end)
+                if s6_retirement_reviewed_looks_jet(source) -> &fragments.push(S6RetirementReviewedFragment{first_line: s6_retirement_reviewed_line(text, cursor), source: source})
+                cursor = end + 1
+                next
+            }
+        }
+        cursor += 1
+    }
+    fragments
+}
+
+fn s6_retirement_reviewed_extension(path: String) -> String {
+    name :: path.split("/").to_list().last() ?? ""
+    pieces :: name.split(".").to_list()
+    if pieces.len() < 2 || (pieces.len() == 2 && pieces[0] == "") -> return ""
+    pieces[pieces.len() - 1]
+}
+
+fn s6_retirement_reviewed_fragments(path: String, text: String) -> [S6RetirementReviewedFragment] {
+    extension :: s6_retirement_reviewed_extension(path)
+    if extension == "jet" -> return [S6RetirementReviewedFragment]{S6RetirementReviewedFragment{first_line: 1, source: text}}
+    if path.starts_with("Tools/editors/tree-sitter/test/corpus/") {
+        end :: s6_retirement_reviewed_find(text, "\n---", 0)
+        source :: if end < 0 -> text else -> s6_retirement_reviewed_slice(text, 0, end)
+        return [S6RetirementReviewedFragment]{S6RetirementReviewedFragment{first_line: 1, source: source}}
+    }
+    if extension != "md" -> return s6_retirement_reviewed_embedded(text)
+    fragments := [S6RetirementReviewedFragment]{}
+    opened := false
+    marker := 0
+    length := 0
+    first_line := 0
+    active := false
+    source := ""
+    index := 0
+    loop line in text.lines() {
+        fence :: s6_retirement_reviewed_fence(line)
+        if opened {
+            closing := false
+            if fence == .Val(found) -> closing = found.marker == marker && found.length >= length && found.rest.trim() == ""
+            if closing {
+                if active -> &fragments.push(S6RetirementReviewedFragment{first_line: first_line, source: source})
+                opened = false
+            } else if active -> source = "{source}{line}\n"
+        } else if fence == .Val(found) {
+            words :: policy_split_whitespace(found.rest)
+            language :: words.first() ?? ""
+            marker = found.marker
+            length = found.length
+            first_line = index + 2
+            active = language == "jet" || language == "Jet" || language == "jetlang"
+            source = ""
+            opened = true
+        } else {
+            snippets :: s6_retirement_reviewed_inline(line)
+            loop snippet in snippets -> &fragments.push(S6RetirementReviewedFragment{first_line: index + 1, source: snippet})
+        }
+        index += 1
+    }
+    if opened && active -> &fragments.push(S6RetirementReviewedFragment{first_line: first_line, source: source})
+    fragments
+}
+
+fn s6_retirement_reviewed_failure_skip(path: String) -> Bool {
+    if path.starts_with("Tools/gauntlet/results") -> return true
+    excluded :: [String]{".git", ".claude", ".agent-worktrees", ".opencode", ".tower", "node_modules", "build"}
+    loop part in path.split("/") {
+        if excluded.contains(part) || part.starts_with("target") -> return true
+    }
+    false
+}
+
+fn s6_retirement_reviewed_allowlisted(path: String) -> Bool {
+    path == "Docs/spec/syntax-decisions.md" || path == "Docs/spec/contributing/agent-engineering.md" || path == "Docs/spec/reference/prior-art.md" || path.starts_with("Docs/audits/") || path.starts_with("Docs/proposals/") || path.starts_with("Docs/research/") || path.starts_with("Tools/agent-eval/domain-foundations/") || path.starts_with("tests/ui/") || path.starts_with("tests/fuzz/") || path == "tests/syntax_reconciliation.rs" || path == "Tools/notebook-test/acceptance.mjs" || path == "crates/jet-codegen/src/Prelude/Diagnostics.jet" || path == "crates/jet-parser/src/Parser/mod.rs" || path == "tests/fmt.rs" || path == "tests/retirement_ratchet.rs"
+}
+
+fn s6_retirement_reviewed_scan_file(path: String, offenders: &[String]) {
+    if s6_retirement_reviewed_allowlisted(path) -> return
+    text :: s6_retirement_reviewed_files.read(path) ?? return
+    fragments :: s6_retirement_reviewed_fragments(path, text)
+    loop fragment in fragments {
+        hits :: s6_retirement_reviewed_hits(fragment.source)
+        loop hit in hits -> &offenders.push("{path}:{fragment.first_line + hit.line - 1}: {hit.spelling}")
+    }
+}
+
+fn s6_retirement_reviewed_walk(path: String, offenders: &[String]) {
+    entries :: s6_retirement_reviewed_files.list_dir(path) ?? return
+    extensions :: [String]{"jet", "md", "rs", "js", "json", "scm", "toml", "txt", "yaml", "yml"}
+    loop entry in entries {
+        kind :: s6_retirement_reviewed_files.stat(entry.path) ?? next
+        if kind.is_symlink -> next
+        relative :: "{path}/{entry.name}"
+        if kind.is_dir {
+            if !s6_retirement_reviewed_failure_skip(relative) -> s6_retirement_reviewed_walk(relative, &offenders)
+        } else if extensions.contains(s6_retirement_reviewed_extension(relative)) -> s6_retirement_reviewed_scan_file(relative, &offenders)
+    }
+}
+
+fn s6_retirement_reviewed_surface_law() {
+    offenders := [String]{}
+    roots :: [String]{"crates", "Examples", "tests", "Source", "corelib", "Docs", "Tools"}
+    loop root in roots -> s6_retirement_reviewed_walk(root, &offenders)
+    entries :: s6_retirement_reviewed_files.list_dir(".") ?? [s6_retirement_reviewed_files.DirEntry]{}
+    loop entry in entries {
+        if s6_retirement_reviewed_extension(entry.name) != "jet" -> next
+        kind :: s6_retirement_reviewed_files.stat(entry.path) ?? next
+        if kind.is_file -> s6_retirement_reviewed_scan_file(entry.name, &offenders)
+    }
+    if s6_retirement_reviewed_files.is_file("README.md") -> s6_retirement_reviewed_scan_file("README.md", &offenders)
+    assert_eq(offenders.len(), 0, "retired failure syntax escaped the diagnostic/history allowlist: {offenders}")
+}
+
+#Test("retirement walk skips outputs and nested worktrees but keeps live source visible") {
+    s6_retirement_reviewed_walk_law()
+}
+#Test("failure syntax detector accepts current forms only") {
+    s6_retirement_reviewed_detector_law()
+}
+#Test("failure surface has no active retired spelling") {
+    s6_retirement_reviewed_surface_law()
+}

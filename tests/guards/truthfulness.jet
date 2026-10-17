@@ -1,0 +1,282 @@
+use core.files as s3_truth_files
+use core.text as s3_truth_text
+use core.text.parse as s3_truth_parse
+
+// Reuse corpus_policy.jet's checked UTF-8 byte slicer rather than a second one.
+fn s3_truth_md_paths(directory: String) -> [String] {
+    entries :: s3_truth_files.list_dir(directory) ?? return [String]{}
+    paths := [String]{}
+    loop entry in entries -> &paths.push(entry.path.copy())
+    &paths.sort()
+    result := [String]{}
+    loop path in paths {
+        if s3_truth_files.is_dir(path) {
+            nested :: s3_truth_md_paths(path)
+            loop item in nested -> &result.push(item)
+        } else if path.ends_with(".md") && !path.ends_with("/.md") && path != ".md" {
+            &result.push(path)
+        }
+    }
+    result
+}
+
+fn s3_truth_example_paths(text: String) -> [String] {
+    prefix :: "Examples/features/"
+    result := [String]{}
+    rest := text
+    loop {
+        pos :: s3_truth_parse.find(rest, prefix)
+        if pos < 0 -> break
+        rest = policy_slice_bytes(rest, pos + prefix.bytes().len(), rest.bytes().len())
+        end := 0
+        // Rust char::is_alphanumeric: Unicode alphabetic OR Unicode numeric.
+        loop ch in s3_truth_parse.split(rest, "") {
+            if !s3_truth_text.is_alphabetic(ch) && !s3_truth_text.is_numeric(ch) && ch != "_" && ch != "." && ch != "-" && ch != "/" -> break
+            end += ch.bytes().len()
+        }
+        tail :: policy_slice_bytes(rest, 0, end)
+        if tail.ends_with(".jet") -> &result.push("{prefix}{tail}")
+    }
+    result
+}
+
+// Port of tests/truthfulness.rs:258-301 and helpers304-319/1999-2015.
+fn s3_guard_docs_examples() {
+    content := s3_truth_files.read("README.md") ?? ""
+    entries :: s3_truth_files.list_dir("Docs") ?? panic("Docs/ missing")
+    paths := [String]{}
+    loop entry in entries -> &paths.push(entry.path.copy())
+    &paths.sort()
+    loop path in paths {
+        if s3_truth_files.is_dir(path) {
+            // Only top-level historical directories are excluded in Rust.
+            if path == "Docs/audits" || path == "Docs/proposals" -> next
+            nested :: s3_truth_md_paths(path)
+            loop item in nested {
+                body :: s3_truth_files.read(item) ?? next
+                content = "{content}{body}"
+            }
+        } else if path.ends_with(".md") && !path.ends_with("/.md") {
+            body :: s3_truth_files.read(path) ?? next
+            content = "{content}{body}"
+        }
+    }
+    missing := [String]{}
+    loop path in s3_truth_example_paths(content) {
+        if !s3_truth_files.exists(path) -> &missing.push(path)
+    }
+    assert(missing.len() == 0, "docs reference example files that do not exist: {missing}")
+}
+
+#Test("docs_referenced_examples_exist") {
+    s3_guard_docs_examples()
+}
+
+fn s3_truth_ascii_word_byte(b: U8) -> Bool Never! {
+    (b >= (U8{65}) && b <= (U8{90})) || (b >= (U8{97}) && b <= (U8{122})) || (b >= (U8{48}) && b <= (U8{57})) || b == (U8{95})
+}
+
+fn s3_truth_contains_word(text: String, needle: String) -> Bool {
+    // parse.lower is ASCII-only, matching Rust to_ascii_lowercase exactly.
+    lowered :: s3_truth_parse.lower(text)
+    wanted :: s3_truth_parse.lower(needle)
+    raw :: lowered.bytes()
+    offset := 0
+    loop {
+        rest :: policy_slice_bytes(lowered, offset, raw.len())
+        found :: s3_truth_parse.find(rest, wanted)
+        if found < 0 -> return false
+        start :: offset + found
+        end :: start + wanted.bytes().len()
+        before := false
+        after := false
+        if start > 0 -> before = s3_truth_ascii_word_byte(raw[start - 1])
+        if end < raw.len() -> after = s3_truth_ascii_word_byte(raw[end])
+        if !before && !after -> return true
+        offset = end
+    }
+}
+
+fn s3_truth_retired_senses(text: String) -> [String] {
+    codec := false
+    event := false
+    collecting := false
+    loop raw in text.lines() {
+        line :: s3_truth_parse.lower(raw)
+        called :: line.contains("called") || line.contains("as a")
+        if called && line.contains("codec") && s3_truth_contains_word(line, "stream") -> codec = true
+        if called && line.contains("event") && s3_truth_contains_word(line, "stream") -> event = true
+        if called && line.contains("collecting loop") && line.contains("yielding") -> collecting = true
+    }
+    // Original sort_unstable + dedup order and unique labels.
+    result := [String]{}
+    if codec -> &result.push("codec mode called a stream")
+    if collecting -> &result.push("collecting loop called yielding")
+    if event -> &result.push("event called a stream")
+    result
+}
+
+fn s3_truth_link_targets(text: String) -> [String] {
+    result := [String]{}
+    rest := text
+    loop {
+        start :: s3_truth_parse.find(rest, "](")
+        if start < 0 -> break
+        after :: policy_slice_bytes(rest, start + 2, rest.bytes().len())
+        end :: s3_truth_parse.find(after, ")")
+        if end < 0 -> break
+        body :: policy_slice_bytes(after, 0, end)
+        first := ""
+        loop word in policy_split_whitespace(body) {
+            first = word.copy()
+            break
+        }
+        &result.push(first)
+        rest = policy_slice_bytes(after, end + 1, after.bytes().len())
+    }
+    result
+}
+
+fn s3_truth_link_path(raw: String) -> String {
+    bytes :: raw.bytes()
+    start := 0
+    end := bytes.len()
+    // Rust trim_matches('<').trim_matches('>') in that exact order.
+    loop start < end && bytes[start] == (U8{60}) -> start += 1
+    loop end > start && bytes[end - 1] == (U8{60}) -> end -= 1
+    loop start < end && bytes[start] == (U8{62}) -> start += 1
+    loop end > start && bytes[end - 1] == (U8{62}) -> end -= 1
+    trimmed :: policy_slice_bytes(raw, start, end)
+    bound := trimmed.bytes().len()
+    hash :: s3_truth_parse.find(trimmed, "#")
+    question :: s3_truth_parse.find(trimmed, "?")
+    if hash >= 0 && hash < bound -> bound = hash
+    if question >= 0 && question < bound -> bound = question
+    policy_slice_bytes(trimmed, 0, bound)
+}
+
+// Port of tests/truthfulness.rs:1679-1763 and all helpers1930-1992.
+fn s3_guard_vocabulary_senses() {
+    labels :: [String]{"codec mode called a stream", "event called a stream", "collecting loop called yielding"}
+    hostile :: [String]{"The codec mode is called a stream.", "The event is called a stream.", "The collecting loop is called yielding."}
+    loop i in 0..<labels.len() {
+        found :: s3_truth_retired_senses(hostile[i])
+        matched := false
+        loop label in found { if label == labels[i] -> matched = true }
+        assert(matched, "hostile fixture must be rejected: {labels[i]}")
+    }
+    markdown :: s3_truth_md_paths("Docs")
+    vocabulary_path :: s3_truth_files.canonicalize("Docs/spec/vocabulary.md") ?? panic("vocabulary path canonical")
+    docs_root :: s3_truth_files.canonicalize("Docs") ?? panic("docs path canonical")
+    seen := [String:Bool]{}
+    targets := [String]{}
+    loop source in markdown {
+        text :: s3_truth_files.read(source) ?? next
+        loop raw in s3_truth_link_targets(text) {
+            target :: s3_truth_link_path(raw)
+            if target == "" || target.starts_with("/") || target.contains("://") -> next
+            candidate :: s3_truth_files.canonicalize(s3_truth_files.join(s3_truth_files.dirname(source), target)) ?? next
+            if candidate != docs_root && !candidate.starts_with("{docs_root}/") -> next
+            if !candidate.ends_with(".md") || candidate.ends_with("/.md") -> next
+            if seen.get(candidate) ?? false -> next
+            _ :: &seen.add(candidate, true)
+            &targets.push(candidate)
+        }
+    }
+    violations := [String]{}
+    loop target in targets {
+        text :: s3_truth_files.read(target) ?? next
+        if target != vocabulary_path {
+            retired :: s3_truth_retired_senses(text)
+            if retired.len() > 0 -> &violations.push("{target}: retired senses: {retired}")
+            has_word := false
+            words :: [String]{"stream", "reader", "event", "collecting loop"}
+            loop word in words { if s3_truth_contains_word(text, word) -> has_word = true }
+            if has_word && !text.contains("vocabulary.md") -> &violations.push("{target}: uses Jet vocabulary without linking Docs/spec/vocabulary.md")
+        }
+    }
+    assert(violations.len() == 0, "linked Markdown targets must use the vocabulary page and current senses: {violations}")
+}
+
+#Test("vocabulary_page_has_one_definition_and_no_retired_senses") {
+    s3_guard_vocabulary_senses()
+}
+
+// Port of tests/truthfulness.rs:1110-1173, including the Tower-record fallback.
+fn s3_truth_decision_id_byte(b: U8) -> Bool Never! {
+    s3_truth_ascii_word_byte(b) || b == (U8{45})
+}
+
+fn s3_truth_exact_decision_token(text: String, authority: String) -> Bool {
+    raw :: text.bytes()
+    length :: authority.bytes().len()
+    offset := 0
+    loop offset <= raw.len() {
+        found :: s3_truth_parse.find_from(text, authority, offset)
+        if found < 0 -> return false
+        end :: found + length
+        before := false
+        after := false
+        if found > 0 -> before = s3_truth_decision_id_byte(raw[found - 1])
+        if end < raw.len() -> after = s3_truth_decision_id_byte(raw[end])
+        if !before && !after -> return true
+        // The original match_indices is non-overlapping.
+        if length > 0 {
+            offset = end
+        } else {
+            offset = found + 1
+            loop offset < raw.len() && raw[offset] >= (U8{128}) && raw[offset] < (U8{192}) -> offset += 1
+        }
+    }
+    false
+}
+
+fn s3_truth_ratified_section(docs: String) -> String {
+    marker :: "## Ratified"
+    from :: s3_truth_parse.find(docs, marker)
+    assert(from >= 0, "Docs/spec/syntax-decisions.md missing ## Ratified")
+    rest :: policy_slice_bytes(docs, from + marker.bytes().len(), docs.bytes().len())
+    to :: s3_truth_parse.find(rest, "\n## ")
+    if to < 0 -> return rest
+    policy_slice_bytes(rest, 0, to)
+}
+
+fn s3_truth_ratified_decision_exists(docs: String, tower: String, authority: String) -> Bool {
+    loop raw in s3_truth_ratified_section(docs).lines() {
+        line := raw.trim_start()
+        if line.starts_with("- ") -> line = policy_slice_bytes(line, 2, line.bytes().len())
+        if !line.starts_with("**") -> next
+        rest :: policy_slice_bytes(line, 2, line.bytes().len())
+        end :: s3_truth_parse.find(rest, "**")
+        if end < 0 -> next
+        heading :: policy_slice_bytes(rest, 0, end)
+        if s3_truth_exact_decision_token(heading, authority) -> return true
+    }
+    split :: s3_truth_parse.rfind(authority, "=")
+    id := authority
+    if split >= 0 -> id = policy_slice_bytes(authority, 0, split)
+    marker :: "\"id\": \"{id}\""
+    found :: s3_truth_parse.find(tower, marker)
+    if found < 0 -> return false
+    tail :: policy_slice_bytes(tower, found + marker.bytes().len(), tower.bytes().len())
+    record_end :: s3_truth_parse.find(tail, "\n      \"id\": \"")
+    record := tail
+    if record_end >= 0 -> record = policy_slice_bytes(tail, 0, record_end)
+    if !record.contains("\"status\": \"ratified\"") -> return false
+    if split < 0 -> return true
+    outcome :: policy_slice_bytes(authority, split + 1, authority.bytes().len())
+    record.contains("\"outcome\": \"{outcome}\"")
+}
+
+fn s3_guard_exact_ratified_lookup() {
+    docs :: "## Proposed\n**D-PENDING=A**: not law. See D-LIVE and D-CITED.\n## Ratified\n**D-LIVE=A**: supersedes D-CITED.\n## Declined\n**D-NOPE=A**: declined.\n"
+    assert(s3_truth_ratified_decision_exists(docs, "", "D-LIVE"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-LIV"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-CITED"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-PENDING=A"))
+    assert(!s3_truth_ratified_decision_exists(docs, "", "D-NOPE=A"))
+}
+
+#Test("ratified_decision_lookup_requires_exact_id_and_ratified_status") {
+    s3_guard_exact_ratified_lookup()
+}

@@ -1,0 +1,434 @@
+// The outer parent owns this cache. Factory adapters borrow attachments, never
+// a typed evaluator context or a previous factory's callback/projector.
+use core.crypto as core_parent_crypto
+use core.encoding.json as core_parent_json
+use jet_foundation.[MIRFunctionID, MIRProgram, MIRSharedLifetime, mir_program_digest]
+
+enum CoreSharedParentAdmission {
+    Attached(attachment: CoreSharedParentAttachment)
+    Refused(code: String, key: String)
+}
+struct CoreSharedParentAttachment { manifest_digest: String }
+struct CoreSharedParent {
+    state: Shared<CoreSharedParentState>
+}
+struct CoreSharedParentState {
+    manifest: CoreSharedManifest?
+    binding: CoreSharedBinding?
+    loaded: X64LoadedImage?
+    getters: [String:Int]
+    ready: Bool
+    poisoned: Bool
+    failure: String
+    runtime_receipt_identity: String
+    runtime_library_identity: String
+    begin: Int
+    status: Int
+    end: Int
+}
+// The private admitted host builds this inventory from RuntimeLibrary.symbol;
+// addresses are not selected by flags, a receipt sidecar, or RTLD_DEFAULT.
+struct CoreSharedParentRuntime {
+    receipt_identity: String
+    library_identity: String
+    symbols: [String:Int]
+    export_abis: [String:CoreSharedRuntimeExportABI]
+}
+// These are actual library-feed layouts sealed in the embedded receipt, not
+// signatures inferred from a symbol name or rebuilt by the receiving factory.
+fn core_shared_abi_field(tree: Dyn, name: String) -> Dyn? Never! {
+    if tree == .Object(fields) {
+        selected := Dyn?{None}
+        loop field in fields {
+            if field.key != name -> next
+            present :: if selected == { .Val(_) -> true else -> false }
+            if present -> return None
+            selected = Val(field.value)
+        }
+        return selected
+    }
+    None
+}
+fn core_shared_runtime_layout_decode(tree: Dyn) -> LIRLayout? Never! {
+    if tree == .Object(fields) && fields.len() != 3 -> return None
+    size :: x64_execution_int(core_shared_abi_field(tree, "size") ?? return None) ?? return None
+    align :: x64_execution_int(core_shared_abi_field(tree, "align") ?? return None) ?? return None
+    name :: x64_execution_string(core_shared_abi_field(tree, "class") ?? return None) ?? return None
+    if size <= 0 || align <= 0 || (align.bit_and((align - 1))) != 0 -> return None
+    class :: if {
+        name == "Integer" -> LIRABIClass.Integer
+        name == "Pointer" -> LIRABIClass.Pointer
+        name == "Float" -> LIRABIClass.Float
+        name == "Memory" -> LIRABIClass.Memory
+        else -> { return None }
+    }
+    Val(LIRLayout{size: size, align: align, class: class})
+}
+fn core_shared_runtime_export_abis_decode(tree: Dyn) -> [String:CoreSharedRuntimeExportABI]? Never! {
+    rows :: x64_execution_array(tree) ?? return None
+    result := [String:CoreSharedRuntimeExportABI]{}
+    previous := ""
+    loop row in rows {
+        if row == .Object(fields) && fields.len() != 3 -> return None
+        symbol :: x64_execution_string(core_shared_abi_field(row, "symbol") ?? return None) ?? return None
+        if symbol == "" || symbol <= previous -> return None
+        parameters := [LIRLayout]{}
+        params :: x64_execution_array(core_shared_abi_field(row, "parameters") ?? return None) ?? return None
+        loop param in params -> &parameters.push(core_shared_runtime_layout_decode(param) ?? return None)
+        result_tree :: core_shared_abi_field(row, "result") ?? return None
+        output := LIRLayout?{None}
+        if !(result_tree == .Null) -> output = Val(core_shared_runtime_layout_decode(result_tree) ?? return None)
+        result[symbol] = CoreSharedRuntimeExportABI{symbol: symbol, parameters: parameters, result: output}
+        previous = symbol
+    }
+    Val(result)
+}
+fn core_shared_runtime_abi_inventory_valid(runtime: CoreSharedParentRuntime) -> Bool Never! {
+    if runtime.symbols.len() != runtime.export_abis.len() -> return false
+    loop (symbol, address) in runtime.symbols {
+        row :: runtime.export_abis.get(symbol) ?? return false
+        if address == 0 || row.symbol != symbol -> return false
+    }
+    true
+}
+
+struct CoreSharedRuntimeCallResult {
+    word: Int
+    refusal_key: String
+}
+fn core_shared_runtime_word_layout(layout: LIRLayout) -> Bool Never! {
+    (layout.class == LIRABIClass.Integer || layout.class == LIRABIClass.Pointer)
+        && (layout.size == 1 || layout.size == 2 || layout.size == 4 || layout.size == 8)
+        && layout.align > 0 && layout.align <= 8 && (layout.align.bit_and((layout.align - 1))) == 0
+}
+fn core_shared_runtime_call_error(runtime: CoreSharedParentRuntime, symbol: String, arity: Int) -> String Never! {
+    if runtime.receipt_identity == "" || runtime.library_identity == "" -> return "RuntimeLibraryMissingAdmission: {symbol}"
+    row :: runtime.export_abis.get(symbol) ?? return "RuntimeLibraryExportABIInvalid: {symbol}"
+    if row.symbol != symbol || (runtime.symbols.get(symbol) ?? 0) == 0 -> return "RuntimeLibraryExportSealMismatch: {symbol}"
+    if arity < 0 || arity > 3 || row.parameters.len() != arity -> return "RuntimeLibraryExportABIArityMismatch: {symbol}: {arity}"
+    loop (index, parameter) in row.parameters {
+        if !core_shared_runtime_word_layout(parameter) -> return "RuntimeLibraryExportABIUnsupported: {symbol}: parameter {index}: {lir_abi_class_name(parameter.class)}/{parameter.size}"
+        if parameter.size != 8 -> return "RuntimeLibraryExportABIParameterSignednessUnknown: {symbol}: parameter {index}: {lir_abi_class_name(parameter.class)}/{parameter.size}"
+    }
+    if row.result == .Val(output) {
+        if !core_shared_runtime_word_layout(output) -> return "RuntimeLibraryExportABIUnsupported: {symbol}: result: {lir_abi_class_name(output.class)}/{output.size}"
+        // Reached by Shared.jet's weak-upgrade Bool. This raw call surface
+        // defines Integer/1 results as Bool/U8; signed narrow results need
+        // signedness in the sealed ABI and are not admitted here.
+        if output.size != 8 && !(output.size == 1 && output.class == LIRABIClass.Integer) -> return "RuntimeLibraryExportABIResultSignednessUnknown: {symbol}: result: {lir_abi_class_name(output.class)}/{output.size}"
+    }
+    ""
+}
+// Fixed arguments avoid allocating/copying an argument list on this hot path.
+fn core_shared_runtime_call(runtime: CoreSharedParentRuntime, symbol: String, arity: Int, first: Int, second: Int, third: Int) -> CoreSharedRuntimeCallResult {
+    error :: core_shared_runtime_call_error(runtime, symbol, arity)
+    if error != "" -> return CoreSharedRuntimeCallResult{word: 0, refusal_key: error}
+    row :: runtime.export_abis.get(symbol) ?? panic("validated runtime ABI disappeared")
+    loop (index, parameter) in row.parameters {
+        value :: if index == 0 -> first else if index == 1 -> second else -> third
+        range_error :: x64_native_word_range_error(parameter.size, value)
+        if range_error != "" -> return CoreSharedRuntimeCallResult{word: 0, refusal_key: "RuntimeLibraryExportABIArgumentInvalid: {symbol}: parameter {index}: {range_error}"}
+    }
+    word := x64_native_call(runtime.symbols.get(symbol) ?? panic("validated runtime symbol disappeared"), arity, first, second, third)
+    if row.result == .Val(output) {
+        if output.size < 8 -> word = word.bit_and((1 << (output.size * 8)) - 1)
+    } else { word = 0 }
+    CoreSharedRuntimeCallResult{word: word, refusal_key: ""}
+}
+fn core_shared_runtime_allocate(runtime: CoreSharedParentRuntime, size: Int, align: Int) -> X64NativeAllocation {
+    error := x64_native_allocation_error(size, align)
+    if error == "" -> error = core_shared_runtime_call_error(runtime, "jet_rt_alloc", 2)
+    if error == "" -> error = core_shared_runtime_call_error(runtime, "jet_rt_free", 3)
+    if error == "" {
+        allocator :: runtime.export_abis.get("jet_rt_alloc") ?? panic("validated allocator disappeared")
+        release :: runtime.export_abis.get("jet_rt_free") ?? panic("validated free disappeared")
+        if allocator.result == None || release.result != None -> error = "RuntimeLibraryExportABIAllocatorMismatch"
+        loop parameter in allocator.parameters { if parameter.size != 8 -> error = "RuntimeLibraryExportABIAllocatorMismatch" }
+        loop parameter in release.parameters { if parameter.size != 8 -> error = "RuntimeLibraryExportABIAllocatorMismatch" }
+        if allocator.result == .Val(output) && output.size != 8 -> error = "RuntimeLibraryExportABIAllocatorMismatch"
+    }
+    if error != "" -> return X64NativeAllocation{pointer: 0, size: size, align: align, release: 0, refusal_key: error}
+    x64_execution_alloc(runtime.symbols.get("jet_rt_alloc") ?? 0, runtime.symbols.get("jet_rt_free") ?? 0, size, align)
+}
+
+trait CoreSharedParentProducer {
+    fn produce(self) -> CoreSharedBinding Never!
+}
+struct CoreSharedCanonicalProducer {
+    program: MIRProgram
+    sources: [CoreSharedSource]
+    producer_identity: String
+}
+impl CoreSharedCanonicalProducer.CoreSharedParentProducer {
+    fn produce(self) -> CoreSharedBinding Never! {
+        roots := [MIRFunctionID]{}
+        loop definition in self.program.constants {
+            if definition.value == .SharedSite(site) -> &roots.push(site.initializer)
+        }
+        lowered :: lir_lower_core_shared(self.program, roots)
+        manifest :: core_shared_manifest(self.program, lowered, self.sources)
+        core_shared_binding(self.program, lowered, manifest, self.sources, self.producer_identity)
+    }
+}
+fn core_shared_parent_new() -> CoreSharedParent Never! {
+    CoreSharedParent{state: shared CoreSharedParentState{manifest: None, binding: None, loaded: None, getters: [String:Int]{}, ready: false, poisoned: false, failure: "", runtime_receipt_identity: "", runtime_library_identity: "", begin: 0, status: 0, end: 0}}
+}
+fn core_shared_parent_refusal(key: String) -> CoreSharedParentAdmission Never! {
+    CoreSharedParentAdmission.Refused{code: "E0956", key: key}
+}
+fn core_shared_parent_manifest_valid(expected: CoreSharedManifest) -> Bool Never! {
+    expected.errors.len() == 0 && expected.namespace_owner_key == "<corelib>" && expected.digest != "" && expected.digest == core_parent_crypto.sha256(core_shared_manifest_body(expected).bytes()).hex()
+}
+
+// This comparison is shared by warm admission and the schema-perturbation
+// witness. It runs under the caller's canonical state permit, before a producer
+// or getter can execute; a refusal never mutates the resident Process state.
+fn core_shared_parent_warm_admission(state: CoreSharedParentState, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime) -> CoreSharedParentAdmission? Never! {
+    resident :: state.manifest ?? return None
+    if resident.namespace_owner_key != expected.namespace_owner_key || resident.seal != expected.seal || resident.digest != expected.digest -> return Val(core_shared_parent_refusal("CoreSharedSchemaMismatch"))
+    if runtime.receipt_identity != state.runtime_receipt_identity || runtime.library_identity != state.runtime_library_identity -> return Val(core_shared_parent_refusal("RuntimeLibraryIdentityMismatch"))
+    if state.poisoned -> return Val(core_shared_parent_refusal(state.failure))
+    if !state.ready -> return Val(core_shared_parent_refusal("CoreSharedAdmissionIncomplete"))
+    Val(CoreSharedParentAdmission.Attached{attachment: CoreSharedParentAttachment{manifest_digest: resident.digest}})
+}
+
+// The producer runs only on the cold path while this host's admission is held.
+// A mapped/stopped startup is permanently retained and poisoned, never replayed.
+fn core_shared_parent_admit(parent: &CoreSharedParent, expected: CoreSharedManifest, runtime: CoreSharedParentRuntime, producer: CoreSharedParentProducer) -> CoreSharedParentAdmission Never! {
+    if !core_shared_parent_manifest_valid(expected) -> return core_shared_parent_refusal("CoreSharedManifestInvalid")
+    if !core_shared_runtime_abi_inventory_valid(runtime) -> return core_shared_parent_refusal("RuntimeLibraryExportABIInvalid")
+    guard := parent.state.guard_edit()
+    if core_shared_parent_warm_admission(guard.value, expected, runtime) == .Val(admission) -> return admission
+    if runtime.receipt_identity == "" || runtime.library_identity == "" -> return core_shared_parent_refusal("RuntimeLibraryMissingAdmission")
+    binding :: producer.produce()
+    if binding.errors.len() != 0 -> return core_shared_parent_refusal("CoreSharedProductionFailed: {binding.errors.join("; ")}")
+    if binding.manifest_digest != expected.digest || binding.source_seal != expected.seal || core_shared_source_seal(binding.original_sources) != expected.seal -> return core_shared_parent_refusal("CoreSharedSchemaMismatch")
+    if binding.compiled_image_sha != core_parent_crypto.sha256(binding.image.text).hex() || binding.producing_program_digest != mir_program_digest(binding.producing_program) -> return core_shared_parent_refusal("CoreSharedBindingIdentityMismatch")
+    if binding.getters.len() != expected.sorted_sites.len() -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch")
+    callable_error :: core_shared_callable_inventory_error(binding)
+    if callable_error != "" -> return core_shared_parent_refusal(callable_error)
+    loop (index, site) in expected.sorted_sites {
+        getter :: binding.getters[index]
+        if getter.canonical_site_key != site.canonical_site_key || getter.getter_canonical_symbol != site.getter_canonical_symbol || binding.image.exports.get(getter.getter_canonical_symbol) != Val(getter.linked_offset) -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch")
+    }
+    begin :: runtime.symbols.get("jet_rt_execution_begin") ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: jet_rt_execution_begin")
+    status :: runtime.symbols.get("jet_rt_session_status") ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: jet_rt_session_status")
+    end :: runtime.symbols.get("jet_rt_execution_end") ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: jet_rt_execution_end")
+    if begin == 0 || status == 0 || end == 0 -> return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: Core startup control")
+    addresses := [Int]{}
+    loop symbol in binding.image.imports {
+        if symbol.starts_with("jet_core_shared_") -> return core_shared_parent_refusal("CoreSharedProducerImportsGetter")
+        address :: runtime.symbols.get(symbol) ?? return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: {symbol}")
+        if address == 0 -> return core_shared_parent_refusal("RuntimeLibraryExportSealMismatch: {symbol}")
+        &addresses.push(address)
+    }
+    if binding.image.finalizer != None -> return core_shared_parent_refusal("CoreSharedUnexpectedFinalizer")
+    errors :: x64_core_export_errors(binding.image)
+    if errors.len() > 0 -> return core_shared_parent_refusal("CoreSharedGetterInventoryMismatch: {errors.join("; ")}")
+    loaded :: x64_load_image_bound(binding.image, addresses)
+    if loaded.errors.len() > 0 -> return core_shared_parent_refusal("CoreSharedImageLoadFailed: {loaded.errors.join("; ")}")
+    // Pin provenance/image BEFORE a startup may execute any code or stop.
+    guard.value.manifest = Val(expected)
+    guard.value.binding = Val(binding)
+    guard.value.loaded = Val(loaded)
+    guard.value.runtime_receipt_identity = runtime.receipt_identity
+    guard.value.runtime_library_identity = runtime.library_identity
+    guard.value.begin = begin
+    guard.value.status = status
+    guard.value.end = end
+    guard.value.poisoned = true
+    guard.value.failure = "CoreSharedStartupStopped"
+    failure :: x64_core_startup_bound(loaded, begin, status, end)
+    if failure != "" -> return core_shared_parent_refusal("CoreSharedStartupStopped: {failure}")
+    getters := [String:Int]{}
+    loop getter in binding.getters -> getters[getter.canonical_site_key] = loaded.base + getter.linked_offset
+    guard.value.getters = getters
+    guard.value.ready = true
+    guard.value.poisoned = false
+    guard.value.failure = ""
+    CoreSharedParentAdmission.Attached{attachment: CoreSharedParentAttachment{manifest_digest: expected.digest}}
+}
+
+struct CoreSharedParentGetterResult {
+    shared: Int
+    code: String
+    refusal_key: String
+}
+fn core_shared_parent_getter(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, site_key: String) -> CoreSharedParentGetterResult Never! {
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedNotAdmitted"}
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedSchemaMismatch"}
+    getter :: guard.value.getters.get(site_key) ?? return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedSiteMissing"}
+    shared := 0
+    started := 0
+    stopped := 0
+    #Unsafe("the admitted canonical control surrounds the producer's checked no-argument System V getter and its owned Shared result; the Core image remains process-pinned") {
+        started = os_call_address_three(guard.value.begin, -1, -1, 0)
+        if (started.bit_and(255)) != 0 {
+            shared = os_call_address(getter, 0)
+            stopped = os_call_address(guard.value.status, 0)
+            _ := os_call_address(guard.value.end, 0)
+        }
+    }
+    if (started.bit_and(255)) == 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterControlRefused"}
+    if stopped != 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterStopped: {stopped}"}
+    if shared == 0 -> return CoreSharedParentGetterResult{shared: 0, code: "E0956", refusal_key: "CoreSharedGetterReturnedNull"}
+    CoreSharedParentGetterResult{shared: shared, code: "", refusal_key: ""}
+}
+
+#Test("a schema-perturbed factory is refused before production or getter publication") {
+    original := CoreSharedManifest{namespace_owner_key: "<corelib>", seal: "retained-recipe", sorted_sites: [CoreSharedSiteSchema]{}, keyed_native_layout_inventory: [CoreSharedNativeLayout]{}, digest: "", errors: [String]{}}
+    original.digest = core_parent_crypto.sha256(core_shared_manifest_body(original).bytes()).hex()
+    perturbed := original.copy()
+    perturbed.seal = "perturbed-factory-schema"
+    perturbed.digest = core_parent_crypto.sha256(core_shared_manifest_body(perturbed).bytes()).hex()
+    assert(core_shared_parent_manifest_valid(original))
+    assert(core_shared_parent_manifest_valid(perturbed))
+    parent := core_shared_parent_new()
+    runtime :: CoreSharedParentRuntime{receipt_identity: "receipt", library_identity: "library", symbols: [String:Int]{}, export_abis: [String:CoreSharedRuntimeExportABI]{}}
+    if true {
+        guard := parent.state.guard_edit()
+        guard.value.manifest = Val(original)
+        guard.value.runtime_receipt_identity = runtime.receipt_identity
+        guard.value.runtime_library_identity = runtime.library_identity
+    }
+    guard :: parent.state.guard_read()
+    refused :: core_shared_parent_warm_admission(guard.value, perturbed, runtime) ?? panic("the resident Core schema was not compared")
+    assert_eq(refused, CoreSharedParentAdmission.Refused{code: "E0956", key: "CoreSharedSchemaMismatch"})
+    assert_eq(guard.value.manifest, Val(original))
+    assert_eq(guard.value.getters.len(), 0)
+    assert(!guard.value.ready)
+}
+
+// Callable lookup uses the same pinned image and digest as the admitted getter.
+// The factory receives only an address for this invocation, never binding state.
+struct CoreSharedParentCallableResult {
+    address: Int
+    refusal_key: String
+}
+struct CoreSharedParentCallableLookup {
+    row: CoreSharedCallableBinding?
+    base: Int
+    refusal_key: String
+}
+fn core_shared_parent_callable_lookup(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableLookup Never! {
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedNotAdmitted"}
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedSchemaMismatch"}
+    binding :: guard.value.binding ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedNotAdmitted"}
+    error :: core_shared_callable_inventory_error(binding)
+    if error != "" -> return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: error}
+    row :: core_shared_callable_binding(binding, identity) ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedCallableBindingMissing: {identity}"}
+    loaded :: guard.value.loaded ?? return CoreSharedParentCallableLookup{row: None, base: 0, refusal_key: "CoreSharedNotAdmitted"}
+    CoreSharedParentCallableLookup{row: Val(row), base: loaded.base, refusal_key: ""}
+}
+fn core_shared_parent_callable(parent: &CoreSharedParent, attachment: CoreSharedParentAttachment, identity: String) -> CoreSharedParentCallableResult Never! {
+    lookup :: core_shared_parent_callable_lookup(&parent, attachment, identity)
+    row :: lookup.row ?? return CoreSharedParentCallableResult{address: 0, refusal_key: lookup.refusal_key}
+    CoreSharedParentCallableResult{address: lookup.base + row.linked_offset, refusal_key: ""}
+}
+
+// Return the admitted canonical inventory, not a factory-derived layout table.
+// Fetch once per admitted attachment and retain that immutable inventory in
+// the factory codec context; this returns a manifest value, not a live view.
+fn core_shared_parent_payload_manifest(parent: CoreSharedParent, attachment: CoreSharedParentAttachment) -> CoreSharedManifest? Never! {
+    guard :: parent.state.guard_read()
+    manifest :: guard.value.manifest ?? return None
+    if !guard.value.ready || guard.value.poisoned || attachment.manifest_digest != manifest.digest -> return None
+    Val(manifest)
+}
+fn core_shared_payload_callable_error(row: CoreSharedCallableBinding, type_key: String, clone: Bool) -> String Never! {
+    role :: if clone -> "lazy.clone" else -> "lazy.drop"
+    if row.role != role || row.type_key != type_key || row.semantic_identity != "{role}:{type_key}" -> return "CoreSharedPayloadCallableRoleMismatch: {row.semantic_identity}"
+    if row.signature.convention != .SystemV || row.signature.result != None || row.signature.params.len() != (if clone -> 2 else -> 1) -> return "CoreSharedPayloadCallableSignatureMismatch: {row.semantic_identity}"
+    loop parameter in row.signature.params {
+        if parameter.size != 8 || parameter.align != 8 || parameter.class != LIRABIClass.Pointer -> return "CoreSharedPayloadCallableSignatureMismatch: {row.semantic_identity}"
+    }
+    ""
+}
+fn core_shared_parent_payload_callable(parent: CoreSharedParent, attachment: CoreSharedParentAttachment, type_key: String, clone: Bool) -> CoreSharedParentCallableResult Never! {
+    role :: if clone -> "lazy.clone" else -> "lazy.drop"
+    owner := parent
+    lookup :: core_shared_parent_callable_lookup(&owner, attachment, "{role}:{type_key}")
+    row :: lookup.row ?? return CoreSharedParentCallableResult{address: 0, refusal_key: lookup.refusal_key}
+    signature_error :: core_shared_payload_callable_error(row, type_key, clone)
+    if signature_error != "" -> return CoreSharedParentCallableResult{address: 0, refusal_key: signature_error}
+    CoreSharedParentCallableResult{address: lookup.base + row.linked_offset, refusal_key: ""}
+}
+
+#Test("payload clone and drop roles bind only exact pinned pointer signatures") {
+    row := CoreSharedCallableBinding{semantic_identity: "lazy.drop:checked", role: "lazy.drop", type_key: "checked", symbol: "jet_core_callable_7", function: LIRFunctionID{value: 7}, signature: LIRSignature{id: LIRSignatureID{value: 3}, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer()}, result: None}, linked_offset: 40}
+    assert_eq(core_shared_payload_callable_error(row, "checked", false), "")
+    assert_eq(core_shared_payload_callable_error(row, "checked", true), "CoreSharedPayloadCallableRoleMismatch: lazy.drop:checked")
+    row.signature.params = [LIRLayout]{lir_layout_word()}
+    assert_eq(core_shared_payload_callable_error(row, "checked", false), "CoreSharedPayloadCallableSignatureMismatch: lazy.drop:checked")
+}
+
+#Test("parent runtime ABI rows decode sealed layouts and refuse malformed inventories") {
+    word :: LIRLayout{size: 8, align: 8, class: LIRABIClass.Integer}
+    first :: CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{word}, result: Val(word)}
+    second :: CoreSharedRuntimeExportABI{symbol: "jet_two", parameters: [LIRLayout]{}, result: None}
+    text :: x64_runtime_export_abi_json([CoreSharedRuntimeExportABI]{first, second})
+    tree :: core_parent_json.parse(text) ?? panic("library ABI JSON was not valid")
+    decoded :: core_shared_runtime_export_abis_decode(tree) ?? panic("actual ABI rows did not decode")
+    assert_eq(decoded.get(first.symbol), Val(first))
+    assert_eq(decoded.get(second.symbol), Val(second))
+    assert(core_shared_runtime_export_abis_decode(Dyn.Null) == None)
+    invalid_rows :: [[CoreSharedRuntimeExportABI]]{
+        [CoreSharedRuntimeExportABI]{second, first},
+        [CoreSharedRuntimeExportABI]{first, first},
+        [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "", parameters: [LIRLayout]{}, result: None}},
+        [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{LIRLayout{size: 0, align: 8, class: LIRABIClass.Integer}}, result: None}},
+        [CoreSharedRuntimeExportABI]{CoreSharedRuntimeExportABI{symbol: "jet_one", parameters: [LIRLayout]{LIRLayout{size: 8, align: 3, class: LIRABIClass.Integer}}, result: None}},
+    }
+    loop rows in invalid_rows {
+        invalid :: core_parent_json.parse(x64_runtime_export_abi_json(rows)) ?? panic("invalid rows must still be JSON")
+        assert(core_shared_runtime_export_abis_decode(invalid) == None)
+    }
+    unknown :: core_parent_json.parse("[{{\"symbol\":\"jet_one\",\"parameters\":[],\"result\":{{\"size\":8,\"align\":8,\"class\":\"Unknown\"}}}}]") ?? panic("unknown-class fixture must be JSON")
+    assert(core_shared_runtime_export_abis_decode(unknown) == None)
+}
+
+#Test("native slot validators reject unsupported widths and out of range writes before touching memory") {
+    widths :: [Int]{1, 2, 4, 8}
+    loop size in widths {
+        assert_eq(x64_native_slot_error(8, size), "")
+        assert_eq(x64_native_slot_write_error(8, size, 255), "")
+    }
+    assert_eq(x64_native_slot_error(8, 3), "NativeSlotWidthInvalid: 3")
+    assert_eq(x64_native_slot_error(0, 8), "NativeSlotAddressInvalid")
+    assert_eq(x64_native_slot_write_error(8, 1, 256), "NativeSlotValueOutOfRange: 1")
+    assert_eq(x64_native_slot_write(8, 3, 0), "NativeSlotWidthInvalid: 3")
+}
+
+#Test("native allocations pair the original release address with exact layout") {
+    assert_eq(x64_native_allocation_error(32, 8), "")
+    assert_eq(x64_native_allocation_error(0, 8), "NativeAllocationSizeInvalid: 0")
+    assert_eq(x64_native_allocation_error(32, 3), "NativeAllocationAlignmentInvalid: 3")
+    owner :: X64NativeAllocation{pointer: 8, size: 32, align: 8, release: 8, refusal_key: ""}
+    assert_eq(x64_native_free_error(owner, 32, 8), "")
+    assert_eq(x64_execution_free(owner, 16, 8), "NativeAllocationFreeLayoutMismatch")
+    assert_eq(x64_execution_alloc(0, 0, 32, 8).refusal_key, "NativeAllocationProviderMissing")
+}
+
+#Test("native runtime dispatch requires sealed arity and one register classes") {
+    word :: LIRLayout{size: 8, align: 8, class: LIRABIClass.Integer}
+    runtime := CoreSharedParentRuntime{receipt_identity: "receipt", library_identity: "library", symbols: [String:Int]{"jet_word": 8}, export_abis: [String:CoreSharedRuntimeExportABI]{"jet_word": CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(word)}}}
+    assert_eq(core_shared_runtime_call_error(runtime, "jet_word", 1), "")
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 2, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIArityMismatch: jet_word: 2")
+    assert_eq(core_shared_runtime_call(runtime, "jet_absent", 0, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIInvalid: jet_absent")
+    floating :: LIRLayout{size: 8, align: 8, class: LIRABIClass.Float}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{floating}, result: Val(word)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIUnsupported: jet_word: parameter 0: Float/8")
+    wide :: LIRLayout{size: 16, align: 8, class: LIRABIClass.Integer}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(wide)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIUnsupported: jet_word: result: Integer/16")
+    narrow :: LIRLayout{size: 1, align: 1, class: LIRABIClass.Integer}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{narrow}, result: Val(word)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, -1, 0, 0).refusal_key, "RuntimeLibraryExportABIParameterSignednessUnknown: jet_word: parameter 0: Integer/1")
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(narrow)}
+    assert_eq(core_shared_runtime_call_error(runtime, "jet_word", 1), "")
+    narrow_word :: LIRLayout{size: 4, align: 4, class: LIRABIClass.Integer}
+    runtime.export_abis["jet_word"] = CoreSharedRuntimeExportABI{symbol: "jet_word", parameters: [LIRLayout]{word}, result: Val(narrow_word)}
+    assert_eq(core_shared_runtime_call(runtime, "jet_word", 1, 0, 0, 0).refusal_key, "RuntimeLibraryExportABIResultSignednessUnknown: jet_word: result: Integer/4")
+}

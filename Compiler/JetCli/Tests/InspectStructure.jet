@@ -1,0 +1,18 @@
+// Source/CmdStructure.rs transport contracts; no compilation is needed to render facts.
+use jet_foundation.[MIRStructureFact, MIRStructureFactKind, GateLedger, GateKind, GateEntry, Span]
+
+fn run() Never! {
+    empty :: jet_cli_structure_report([MIRStructureFact]{}, GateLedger{}, false)
+    if !empty.ends_with("facts: 0\n  (none in this program)\ngates: 0\n  (none in this program)\n") -> panic("empty structure text")
+    facts :: [MIRStructureFact]{MIRStructureFact{kind: MIRStructureFactKind.Liveness, subject: "unused", source: "entry.jet", span: Span{start: 3, end: 9}, status: "unreachable", detail: "private function is never reached", gate: None}}
+    text :: jet_cli_structure_report(facts, GateLedger{}, false)
+    if !text.contains("  liveness  entry.jet:3..9  unused  unreachable — private function is never reached\n") -> panic("structure fact text")
+    machine :: jet_cli_structure_report(facts, GateLedger{}, true)
+    if !machine.starts_with("{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.structure\",\"ok\":true,") -> panic("structure envelope")
+    if !machine.contains("\"registry\":\"Structure.Liveness\"") || !machine.contains("\"gate\":null") -> panic("structure registry and optional gate")
+    if !machine.ends_with("\n") -> panic("structure report newline")
+    core :: jet_cli_structure_core(false)
+    if core.exit_code != 0 || core.stderr != "" || !core.stdout.starts_with("core\nbootstrap:\n  1. Syntax  depends_on [none]\n") -> panic("canonical Core text")
+    core_json :: jet_cli_structure_core(true)
+    if core_json.exit_code != 0 || !core_json.stdout.contains("\"root_types\":") || !core_json.stdout.contains("\"type_exports\":") -> panic("canonical Core projection")
+}

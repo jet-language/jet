@@ -1,0 +1,11 @@
+# Port of tests/jetpack_discovery.rs:116-164; lock fixture text copied verbatim.
+fixture: fixtures/registry
+mkdir: isolated-root
+env: JETPACK_ROOT={work}/isolated-root
+copy: state/lock .jet/lock
+step: jet inspect info jet.textkit --json --offline --no-color
+exit: 0
+stdout: ~ "\"maintainer_liveness\":\"passed\"" # original predicate
+step: jet inspect info jet.textkit --offline --no-color
+exit: 0
+stdout: ~ "maintainer liveness: passed" # original predicate

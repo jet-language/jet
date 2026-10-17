@@ -1,0 +1,19 @@
+# PORT tests/repl.rs:64-101 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: repl_history_persists_only_successes_searches_clears_and_is_private.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+step: jet repl
+stdin: repl_history_persists_only_successes_searches_clears_and_is_private.fixture/first.in
+unset: JET_REPL_HISTORY
+exit: 0
+file: state/jet/repl-history lines = 1
+when os unix: file: state/jet/repl-history mode = 0600
+step: jet repl
+stdin: repl_history_persists_only_successes_searches_clears_and_is_private.fixture/second.in
+unset: JET_REPL_HISTORY
+exit: any # Original second session status unasserted rs87-99.
+stdout: ~ "answer :: 42" # Original search substring rs93.
+stdout: ~ "No history matches." # Original failed-turn search substring rs94-97.
+stdout: ~ "History cleared." # Original clear substring rs98.
+file: state/jet/repl-history absent

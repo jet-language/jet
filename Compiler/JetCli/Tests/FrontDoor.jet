@@ -1,0 +1,68 @@
+// The real front door keeps opaque engine arguments and renderable channels.
+fn cli_front_fixture_done(plan: JetCLIPlan, stdout: String, stderr: String, code: Int) Never! {
+    if plan == {
+        .Done(output) -> {
+            if output.stdout != stdout || output.stderr != stderr || output.exit_code != code -> panic("front-door streams/status")
+        }
+        else -> panic("expected completed front-door plan")
+    }
+}
+
+fn cli_front_fixture_engine(plan: JetCLIPlan, verb: String, argv: [String]) Never! {
+    if plan == {
+        .InspectB(.Engine(engine, actual_verb, actual_argv)) -> {
+            if engine != JET_CLI_JETPACK_BINARY || actual_verb != verb || actual_argv != argv -> panic("opaque engine dispatch must retain argv exactly")
+        }
+        else -> panic("expected canonical engine plan")
+    }
+}
+
+fn run() {
+    loop verb in ([String]{"cc", "c++"}) {
+        argv :: [String]{verb, "--version", "--help", "--unknown-compiler-option", "--", "source with spaces.c", "-Werror"}
+        cli_front_fixture_engine(jet_cli_plan(argv), verb, argv)
+    }
+    loop verb in ([String]{"shared-store", "trust", "image", "os", "search", "clean"}) {
+        argv :: [String]{verb, "--unknown-engine-option", "--", "argument with spaces", "--json"}
+        forwarded :: jet_cli_engine_commands(verb, argv) ?? panic("registered engine verb")
+        cli_front_fixture_engine(forwarded, verb, argv)
+    }
+    env_argv :: [String]{"--quiet", "env", "run", "--", "--help", "argument with spaces"}
+    forwarded_env :: jet_cli_engine_commands("env", env_argv) ?? panic("env forwarding")
+    cli_front_fixture_engine(forwarded_env, "env", [String]{"env", "--quiet", "run", "--", "--help", "argument with spaces"})
+    if jet_cli_engine_commands("check", [String]{"check", "source.jet"}) != None -> panic("compiler verbs must not become engine dispatch")
+    cli_front_fixture_done(jet_cli_renderable("human\n", false), "human\n", "", 0)
+    cli_front_fixture_done(jet_cli_renderable("human\n", true), "", "", 0)
+    cli_front_fixture_done(jet_cli_plan([String]{"version", "--json"}), "", "", 0)
+    cli_front_fixture_done(jet_cli_plan([String]{"help", "--json"}), "", "", 0)
+    cli_front_fixture_done(jet_cli_plan([String]{"--version", "--json"}), "", "", 0)
+    cli_front_fixture_done(jet_cli_plan([String]{"help", "diff"}), jet_cli_structural_help("diff") ?? panic("diff help"), "", 0)
+    invalid :: jet_cli_help([String]{"help", "--sort=not-an-order"}, [String]{"help"}, None, false, true)
+    if invalid == {
+        .Refused(report, _, code, _) -> {
+            if report.code != "E2104" || code != 2 -> panic("machine mode never hides invalid help ordering")
+        }
+        else -> panic("invalid help ordering must refuse")
+    }
+}
+
+#Test("try front door carries exact plan keep and JSON selections") {
+    cases :: [(keep: Bool, json: Bool, quiet: Bool)]{(keep: false, json: false, quiet: false), (keep: true, json: false, quiet: false), (keep: false, json: true, quiet: false), (keep: true, json: true, quiet: true)}
+    loop selected in cases {
+        argv := [String]{"try", "plan with spaces.json", "ignored-extra-target"}
+        if selected.keep -> &argv.push("--keep")
+        if selected.json -> &argv.push("--json")
+        if selected.quiet -> &argv.push("--quiet")
+        if jet_cli_plan(argv) == {
+            .Try(plan_path, keep, json) -> {
+                assert_eq(plan_path, "plan with spaces.json")
+                assert_eq(keep, selected.keep)
+                assert_eq(json, selected.json)
+            }
+            else -> panic("try must retain its actual plan projection")
+        }
+    }
+    cli_front_fixture_done(jet_cli_plan([String]{"try"}), "", jet_cli_command_help("try"), JET_DRIVER_EXIT_USAGE)
+    cli_front_fixture_done(jet_cli_plan([String]{"try", "--keep", "--quiet"}), "", "", JET_DRIVER_EXIT_USAGE)
+    cli_front_fixture_done(jet_cli_plan([String]{"try", "--json"}), "", "", JET_DRIVER_EXIT_USAGE)
+}

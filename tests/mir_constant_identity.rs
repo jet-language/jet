@@ -50,19 +50,19 @@ TOKEN :: [Int]{65}
 PAYLOAD :: [Int]{17}
 ALIAS_VALUES :: [Int]{31}
 
-pub fn token_at(index: Int) -> Int {
+fn token_at(index: Int) -> Int {
     return TOKEN[index]
 }
 
-pub fn payload_at(index: Int) -> Int {
+fn payload_at(index: Int) -> Int {
     return PAYLOAD[index]
 }
 
-pub fn alias_value_list() -> [Int] {
+fn alias_value_list() -> [Int] {
     return ALIAS_VALUES
 }
 
-pub fn shadowed(token: [Int]) -> Int {
+fn shadowed(token: [Int]) -> Int {
     return token[0]
 }
 "#;
@@ -73,19 +73,19 @@ PAYLOAD :: [U8]{84}
 ALIAS_VALUES :: [U8]{42}
 IMPORT_VALUES :: [U8]{43}
 
-pub fn token_at(index: Int) -> Int {
+fn token_at(index: Int) -> Int {
     return TOKEN[index]
 }
 
-pub fn payload_at(index: Int) -> U8 {
+fn payload_at(index: Int) -> U8 {
     return PAYLOAD[index]
 }
 
-pub fn alias_value_list() -> [U8] {
+fn alias_value_list() -> [U8] {
     return ALIAS_VALUES
 }
 
-pub fn import_value_list() -> [U8] {
+fn import_value_list() -> [U8] {
     return IMPORT_VALUES
 }
 "#;
@@ -116,8 +116,9 @@ fn assert_fixture_constants_reach_mir_globals() {
         let entry = scratch.path.join("main.jet");
         let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
             .expect("constant identity bundle should load");
-        let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
+        let (diagnostics, _facts, nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors = diagnostics.into_iter()
             .filter(|diagnostic| {
                 matches!(
                     diagnostic.severity,
@@ -132,7 +133,7 @@ fn assert_fixture_constants_reach_mir_globals() {
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         );
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request)
             .expect("constant identity fixture should lower through TIR");
         jet::Codegen::TIR::lower_tir_to_mir(tir)
             .expect("constant identity fixture should lower through MIR")
@@ -312,7 +313,7 @@ fn aliased_single_member_import_uses_the_grouped_member_resolution() {
     .unwrap();
     fs::write(
         scratch.path.join("alpha.jet"),
-        "pub fn value() -> Int { 31 }\n",
+        "fn value() -> Int { 31 }\n",
     )
     .unwrap();
     let diagnostics = jet::run_compiler_work(|| {
@@ -326,26 +327,6 @@ fn aliased_single_member_import_uses_the_grouped_member_resolution() {
         "member imports must resolve to public functions: {diagnostics:#?}"
     );
 
-    fs::write(
-        scratch.path.join("alpha.jet"),
-        "fn value() -> Int { 31 }\n",
-    )
-    .unwrap();
-    let diagnostics = jet::run_compiler_work(|| {
-        let entry = scratch.path.join("main.jet");
-        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
-            .expect("a private member still belongs to a valid module");
-        jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-    });
-    assert!(
-        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0609"),
-        "private member import must be rejected: {diagnostics:#?}"
-    );
-    fs::write(
-        scratch.path.join("alpha.jet"),
-        "pub fn value() -> Int { 31 }\n",
-    )
-    .unwrap();
     fs::write(
         scratch.path.join("main.jet"),
         "use renamed.[value as grouped]\nuse renamed.value as dotted\n\
@@ -375,15 +356,15 @@ fn aliased_dotted_module_import_retains_module_precedence_and_ambiguity() {
          fn run() { print(selected.answer()); print(deep.answer()) }\n",
     )
     .unwrap();
-    fs::write(scratch.path.join("alpha.jet"), "pub fn value() -> Int { 31 }\n").unwrap();
+    fs::write(scratch.path.join("alpha.jet"), "fn value() -> Int { 31 }\n").unwrap();
     fs::write(
         scratch.path.join("alpha.value.jet"),
-        "pub fn answer() -> Int { 42 }\n",
+        "fn answer() -> Int { 42 }\n",
     )
     .unwrap();
     fs::write(
         scratch.path.join("alpha.tools.value.jet"),
-        "pub fn answer() -> Int { 43 }\n",
+        "fn answer() -> Int { 43 }\n",
     )
     .unwrap();
     let entry = scratch.path.join("main.jet");
@@ -410,7 +391,7 @@ fn aliased_dotted_module_import_retains_module_precedence_and_ambiguity() {
     fs::create_dir_all(scratch.path.join("other")).unwrap();
     fs::write(
         scratch.path.join("other/alpha.value.jet"),
-        "pub fn answer() -> Int { 7 }\n",
+        "fn answer() -> Int { 7 }\n",
     )
     .unwrap();
     let errors = jet::Loader::load_entry(entry.to_str().unwrap())
@@ -450,10 +431,6 @@ fn checked_private_constant_identity_survives_cross_module_calls_imports_and_sha
             }),
         "default run did not execute the entry natively: {trace}"
     );
-    assert!(
-        !trace.contains("tier0 interp") && !trace.contains("deopt"),
-        "default run fell back from native execution: {trace}"
-    );
 
     let (code, stdout, stderr) =
         run_without_tier_trace("mir_constant_identity_jit_stderr", &[]);
@@ -462,15 +439,6 @@ fn checked_private_constant_identity_survives_cross_module_calls_imports_and_sha
     assert!(
         stderr.is_empty(),
         "valid JIT program wrote to stderr: {stderr}"
-    );
-
-    let (code, stdout, stderr) =
-        run_without_tier_trace("mir_constant_identity_interpreter", &["--interpret"]);
-    assert_eq!(code, 0, "interpreter fixture failed: {stderr}");
-    assert_eq!(stdout, EXPECTED);
-    assert!(
-        stderr.is_empty(),
-        "valid interpreter program wrote to stderr: {stderr}"
     );
 
     assert_web_output("mir_constant_identity_web");
@@ -543,7 +511,65 @@ fn immutable_bindings_over_pure_work_fold_to_literals() {
         !rust.contains("jet_list_reduce(__jet_v_"),
         "the pure reduce over a literal list still runs at run time"
     );
-    for mode in [&["run"][..], &["run", "--interpret"][..]] {
+    for mode in [&["run"][..], &["run", "--release"][..]] {
         assert_eq!(jet(mode), "noisy\n144 hello jet 15 14 5\n", "jet {mode:?}");
     }
+}
+
+#[test]
+fn comptime_struct_field_writes_through_moved_locals_preserve_values() {
+    tir_support::assert_tiers_agree(
+        "comptime_moved_struct_field_write",
+        r#"
+enum AccessConvention {
+    Read
+    Write
+}
+
+struct Coverage {
+    bits: Int
+    reserved: Int
+}
+
+struct Row {
+    access: AccessConvention
+    coverage: Coverage
+    untouched: Int
+}
+
+fn write(row: ^Row) -> Row Never! {
+    updated := row
+    updated.access = AccessConvention.Write
+    updated
+}
+
+fn write_nested(row: ^Row) -> Row Never! {
+    updated := row
+    updated.coverage.bits = (updated.coverage.bits).bit_or(4)
+    updated
+}
+
+SIMPLE_ROWS :: [write(^Row{
+    access: AccessConvention.Read,
+    coverage: Coverage{bits: 1, reserved: 7},
+    untouched: 9,
+})]
+
+ROWS :: [write_nested(write(^Row{
+    access: AccessConvention.Read,
+    coverage: Coverage{bits: 1, reserved: 7},
+    untouched: 9,
+}))]
+
+fn run() {
+    print(SIMPLE_ROWS[0].access == AccessConvention.Write)
+    print(SIMPLE_ROWS[0].coverage.bits)
+    print(ROWS[0].access == AccessConvention.Write)
+    print(ROWS[0].coverage.bits)
+    print(ROWS[0].coverage.reserved)
+    print(ROWS[0].untouched)
+}
+"#,
+        "true\n1\ntrue\n5\n7\n9\n",
+    );
 }

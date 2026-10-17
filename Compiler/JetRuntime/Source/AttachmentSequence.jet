@@ -1,0 +1,20 @@
+// CAbiRoutes8483-8492 typed Attachment sequence. Canonical Attachment40
+// fields/helpers belong to MailAttachment.jet7641c13a6; native sequence
+// geometry belongs to DataSequences.jet6d4fa9ba6 (composition dependencies).
+// An element is INLINE40, not a pointer column or a byte-list payload.
+#Export(c) fn jet_rt_record_seq_list_rec_attachment_new(capacity: I64) -> I64 {
+    data_sequence_new(capacity, I64{40})
+}
+#Export(c) fn jet_rt_record_seq_list_rec_attachment_len(value: I64) -> I64 {
+    rt_text_word(value + DATA_SEQUENCE_LENGTH)
+}
+#Export(c) fn jet_rt_record_seq_list_rec_attachment_get(value: I64, index: I64) -> I64 {
+    data_sequence_slot(value, index, I64{40})
+}
+#Export(c) fn jet_rt_record_seq_list_rec_attachment_push(value: I64, item: I64) {
+    slot :: data_sequence_reserve(value, I64{40})
+    // Move initialized fields; cloning here would change ownership semantics.
+    coll_copy(item, slot, I64{40})
+    jet_rt_free(item, I64{40}, I64{8})
+    rt_text_store(value + DATA_SEQUENCE_LENGTH, rt_text_word(value + DATA_SEQUENCE_LENGTH) + I64{1})
+}

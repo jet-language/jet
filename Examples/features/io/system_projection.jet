@@ -5,23 +5,30 @@ use core.testing as testing
 
 fn run() {
     original :: sys.current_dir() ?? return
-    print("cwd:{original}")
-    print("home:{sys.home_dir() ?? \"none\"}")
+    print("cwd is absolute: {original.starts_with("/")}")
+    print("home agrees with environment: {sys.home_dir() == expected_home()}")
     root :: testing.temp_dir("system-projection")
     sys.set_current_dir(root) ?? return
-    path :: root + "/clock.txt"
-    files.write(path, "clock") ?? return
-    sys.utime(path, 0, 0) ?? return
+    path :: "{root}/clock.txt"
+    files.write(path, "clock")
+    #Unsafe("the clock file was created above in this test-owned directory") {
+        sys.utime(path, 0, 0) ?? return
+    }
     sys.set_current_dir(original) ?? return
     print("directory:restored")
-    print("interrupt:{sys.on_interrupt(() -> {})}")
 
     #Unsafe("fork and reap both children before returning") {
         first :: sys.fork() ?? return
         if first == 0 -> return
-        print("wait:{sys.wait() ?? return}")
+        print("wait status zero: {(sys.wait() ?? return) == 0}")
         second :: sys.fork() ?? return
         if second == 0 -> return
-        print("waitpid:{sys.waitpid(second, 0) ?? return}")
+        print("waitpid status zero: {(sys.waitpid(second, 0) ?? return) == 0}")
     }
+}
+
+fn expected_home() -> String? {
+    home :: sys.get("HOME")
+    if home != None -> return home
+    sys.get("USERPROFILE")
 }

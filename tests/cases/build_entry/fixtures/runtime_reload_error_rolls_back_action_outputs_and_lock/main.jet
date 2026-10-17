@@ -1,0 +1,10 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("rollback after runtime reload") {
+    stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])
+    app :: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

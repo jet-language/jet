@@ -1,0 +1,24 @@
+
+use core.encoding.json as json
+
+#Codable
+struct Wrap<T> {
+    value: T
+}
+
+#Codable
+struct Tagged<K> {
+    raw: Int
+    #Skip marker: K?
+}
+
+fn run() {
+    wi :: Wrap<Int>{ value: 7 }
+    print(json.to_string(wi))
+    back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
+    print(back.value)
+    id :: Tagged<Wrap<Int>>{ raw: 9, marker: None }
+    print(json.to_string(id))
+    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    print(rid.raw)
+}

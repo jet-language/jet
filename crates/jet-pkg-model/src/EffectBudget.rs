@@ -18,15 +18,16 @@
 //! for both `deps:` (path/git/provider) entries and hangar-realized
 //! `use <pkg>` libraries (U17).
 
-use crate::Diagnostics::{Diagnostic, Span};
+use crate::Diagnostics::{Diagnostic, DiagnosticOrigin, Span};
 use crate::Package::PackageFacts;
 use crate::Sema::{effect_covers, effect_set_has_root, Effect, EffectSet, EffectSummary};
-use crate::AST::{ImportKind, Item, ProgramBundle};
+use crate::AST::{ImportKind, Item, LoadedModule, ProgramBundle};
 use jet_foundation::Authority::{
-    answer, parse_right, root as effect_root, ApplicationAuthority, Holds, Verdict,
+    answer, is_deny_only, parse_right, root as effect_root, ApplicationAuthority, Holds, Verdict,
 };
 use jet_foundation::Report::{StatusEnvelope, StatusValue};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 /// The application-boundary view of one checked program.
 ///
@@ -227,13 +228,16 @@ fn is_memory_right(name: &str) -> bool {
 
 /// One package's (root, or a dependency) aggregated effect set.
 #[derive(Debug, Clone)]
-pub struct PackageEffects {
+pub struct PackageEffects<'a> {
     /// `"root"` for the building package itself, else the dependency name.
     pub name: String,
     pub effects: EffectSet,
     /// One deterministic function identity that reaches each effect.
     /// This is the package-budget provenance used by E1220.
     pub effect_sites: BTreeMap<String, String>,
+    /// Authored locations of the selected effect witnesses, borrowed until
+    /// enforcement needs to materialize a diagnostic source.
+    pub effect_witnesses: BTreeMap<String, (&'a LoadedModule, Span)>,
     /// Function identities where a deniable Panic stop enters the graph.
     /// This is the package-budget provenance used by E1220.
     pub panic_sites: Vec<String>,
@@ -273,11 +277,11 @@ fn dependency_boundary_span(bundle: &ProgramBundle, dependency: &str) -> Option<
 /// loaded helpers that the selected driver never calls must not become
 /// application provenance. Functions with no entry in `solved` contribute
 /// nothing even when a reachable summary exists.
-pub fn compute_package_effects(
-    bundle: &ProgramBundle,
+pub fn compute_package_effects<'a>(
+    bundle: &'a ProgramBundle,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
-) -> Vec<PackageEffects> {
+) -> Vec<PackageEffects<'a>> {
     let reachable = entry_reachable_keys(bundle, summaries, "run");
     let mut by_pkg: BTreeMap<String, PackageEffectAggregate> = BTreeMap::new();
 
@@ -316,11 +320,48 @@ pub fn compute_package_effects(
         .map(|(name, aggregate)| PackageEffects {
             name,
             effects: aggregate.effects,
+            effect_witnesses: aggregate
+                .effect_sites
+                .values()
+                .fold(BTreeMap::new(), |mut witnesses, site| {
+                    if !witnesses.contains_key(site) {
+                        if let Some(witness) = effect_witness(bundle, site) {
+                            witnesses.insert(site.clone(), witness);
+                        }
+                    }
+                    witnesses
+                }),
             effect_sites: aggregate.effect_sites,
             panic_sites: aggregate.panic_sites.into_iter().collect(),
             boundary_span: aggregate.boundary_span,
         })
         .collect()
+}
+
+fn effect_witness<'a>(bundle: &'a ProgramBundle, site: &str) -> Option<(&'a LoadedModule, Span)> {
+    for module in &bundle.modules {
+        let Some(key) = site.strip_prefix(&module.alias).and_then(|rest| rest.strip_prefix("::")) else {
+            continue;
+        };
+        let (owner, name) = key.split_once("::").map_or((None, key), |(owner, name)| (Some(owner), name));
+        for item in &module.items {
+            let span = match (owner, item) {
+                (None, Item::Func(function)) if function.name == name => Some(function.name_span),
+                (Some(owner), Item::Impl(block)) if block.type_name == owner =>
+                    block.methods.iter().find(|method| method.name == name).map(|method| method.name_span),
+                (Some(owner), Item::Struct(definition)) if definition.name == owner =>
+                    definition.methods.iter().chain(definition.trait_impls.iter().flat_map(|block| &block.methods))
+                        .find(|method| method.name == name).map(|method| method.name_span),
+                (Some(owner), Item::Enum(definition)) if definition.name == owner =>
+                    definition.methods.iter().find(|method| method.name == name).map(|method| method.name_span),
+                _ => None,
+            };
+            if let Some(span) = span {
+                return Some((module, span));
+            }
+        }
+    }
+    None
 }
 fn selected_output_identity(bundle: &ProgramBundle) -> Option<(String, String)> {
     let entry_module = bundle.modules.get(bundle.entry)?;
@@ -434,7 +475,8 @@ fn collect_effects_for_key(
     };
     out.extend(set.iter().cloned());
     for effect in set {
-        let site = effect_site(&key, effect, solved, summaries, &mut HashSet::new());
+        let site = effect_site(&key, effect, solved, summaries, &mut HashSet::new())
+            .unwrap_or_else(|| key.clone());
         effect_sites.entry(effect.clone()).or_insert(site);
     }
     if let Some(site) = panic_site(&key, summaries, &mut HashSet::new()) {
@@ -442,18 +484,22 @@ fn collect_effects_for_key(
     }
 }
 
+/// The function where `effect` enters the graph below `key`: the first one
+/// that performs it directly or is maximal. A call cycle is never a site:
+/// revisiting a function on the current walk tries the next callee instead,
+/// so a recursive caller is not blamed for an effect one of its callees adds.
 fn effect_site(
     key: &str,
     effect: &str,
     solved: &HashMap<String, EffectSet>,
     summaries: &HashMap<String, EffectSummary>,
     seen: &mut HashSet<String>,
-) -> String {
+) -> Option<String> {
     if !seen.insert(key.to_string()) {
-        return key.to_string();
+        return None;
     }
     let Some(summary) = summaries.get(key) else {
-        return key.to_string();
+        return Some(key.to_string());
     };
     if summary.maximal
         || summary
@@ -461,19 +507,19 @@ fn effect_site(
             .iter()
             .any(|direct| effect_covers(direct, effect))
     {
-        return key.to_string();
+        return Some(key.to_string());
     }
-    for callee in &summary.edges {
-        let reaches = solved.get(callee).is_some_and(|effects| {
-            effects
-                .iter()
-                .any(|candidate| effect_covers(candidate, effect))
-        });
-        if reaches {
-            return effect_site(callee, effect, solved, summaries, seen);
-        }
-    }
-    key.to_string()
+    summary
+        .edges
+        .iter()
+        .filter(|callee| {
+            solved.get(*callee).is_some_and(|effects| {
+                effects
+                    .iter()
+                    .any(|candidate| effect_covers(candidate, effect))
+            })
+        })
+        .find_map(|callee| effect_site(callee, effect, solved, summaries, seen))
 }
 
 fn panic_site(
@@ -818,7 +864,6 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
         .map(|names| {
             names
                 .iter()
-                .filter(|name| !is_memory_right(name))
                 .filter_map(|n| parse_right(n))
                 .collect()
         })
@@ -841,22 +886,19 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
 
     let empty = Holds::new();
     let mut diags = Vec::new();
+    let mut origins = HashMap::new();
     for pkg in entries {
         let granted = grants.get(pkg.name.as_str());
-        for effect in pkg
-            .effects
-            .iter()
-            .filter(|effect| effect_root(effect) != "Mem")
-        {
+        for effect in &pkg.effects {
             let is_panic = effect_root(effect) == Effect::Panic.name();
-            // D-PANICROOT1: Panic is deny-only. Omission from `allow` is not
-            // a denial, and an audited positive grant cannot override one.
-            if !is_panic
+            // Deny-only effects require no grant, but an explicit denial wins
+            // even when a dependency has an audited positive grant.
+            if !is_deny_only(effect)
                 && granted.is_some_and(|g| answer(g, &empty, effect) == Verdict::Allowed)
             {
                 continue;
             }
-            let outside_allow = !is_panic
+            let outside_allow = !is_deny_only(effect)
                 && allow
                     .as_ref()
                     .is_some_and(|a| answer(a, &empty, effect) != Verdict::Allowed);
@@ -871,7 +913,15 @@ pub fn enforce(entries: &[PackageEffects], manifest: &PackageFacts) -> Vec<Diagn
                     diags.push(e1220_panic(&pkg.name, site, pkg.boundary_span));
                 } else {
                     let site = pkg.effect_sites.get(effect).map(String::as_str);
-                    diags.push(e1220_at(&pkg.name, effect, site));
+                    let mut diagnostic = e1220_at(&pkg.name, effect, site);
+                    if let Some((module, span)) = site.and_then(|site| pkg.effect_witnesses.get(site)) {
+                        diagnostic.span = Some(*span);
+                        let origin = origins.entry(&module.path).or_insert_with(|| Arc::new(
+                            DiagnosticOrigin::new(module.display.clone(), module.path.to_string_lossy().into_owned(), module.source.clone()),
+                        ));
+                        diagnostic = diagnostic.with_origin(Arc::clone(origin));
+                    }
+                    diags.push(diagnostic);
                 }
             }
         }
@@ -972,13 +1022,13 @@ mod tests {
             path: std::path::PathBuf::from(path),
             display: path.to_string(),
             source: source.to_string(),
+            core_identifier_demand: crate::Lexer::core_identifier_demand(&tokens),
             alias: alias.to_string(),
             imports: std::mem::take(&mut program.imports),
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -1077,13 +1127,38 @@ mod tests {
         (bundle, solved, summaries)
     }
 
-    fn package<'a>(entries: &'a [PackageEffects], name: &str) -> &'a PackageEffects {
+    fn package<'a, 'b>(entries: &'a [PackageEffects<'b>], name: &str) -> &'a PackageEffects<'b> {
         entries
             .iter()
             .find(|entry| entry.name == name)
             .expect("fixture package entry")
     }
 
+
+    #[test]
+    fn package_budget_keeps_effect_witness_source_and_shares_origins() {
+        let (bundle, mut solved, summaries) = effect_fixture(true);
+        solved.insert("run::run".to_string(), EffectSet::from(["Rand".to_string()]));
+        let entries = compute_package_effects(&bundle, &solved, &summaries);
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec!["IO".to_string()]);
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 2);
+        let witness = &bundle.modules[1];
+        let Item::Func(seal) = &witness.items[1] else { panic!("seal function") };
+        for diagnostic in &diagnostics {
+            assert_eq!(diagnostic.span, Some(seal.name_span));
+            let origin = diagnostic.origin.as_ref().expect("effect witness source");
+            assert_eq!(origin.path, witness.path.to_string_lossy());
+            assert_eq!(origin.source, witness.source);
+        }
+        assert!(Arc::ptr_eq(diagnostics[0].origin.as_ref().unwrap(), diagnostics[1].origin.as_ref().unwrap()));
+        assert_eq!(
+            diagnostics[0].render("run.jet", "fn run() {}\n"),
+            include_str!("../../../tests/fixtures/effect_budget_origin.stderr"),
+        );
+    }
 
     #[test]
     fn package_budget_ignores_unreachable_loaded_rand_helper() {
@@ -1133,6 +1208,7 @@ mod tests {
             name: "dep".to_string(),
             effects: EffectSet::from(["Net".to_string()]),
             effect_sites: BTreeMap::new(),
+            effect_witnesses: BTreeMap::new(),
             panic_sites: Vec::new(),
             boundary_span: None,
         }];
@@ -1154,6 +1230,7 @@ mod tests {
             name: "root".to_string(),
             effects: EffectSet::from(["Net".to_string()]),
             effect_sites: BTreeMap::from([("Net".to_string(), "run::fetch".to_string())]),
+            effect_witnesses: BTreeMap::new(),
             panic_sites: Vec::new(),
             boundary_span: None,
         }];
@@ -1183,6 +1260,7 @@ mod tests {
             name: "panicdep".to_string(),
             effects: EffectSet::from(["Panic".to_string()]),
             effect_sites: BTreeMap::new(),
+            effect_witnesses: BTreeMap::new(),
             panic_sites: vec!["panicdep::parse_port".to_string()],
             boundary_span: Some(Span::new(4, 12)),
         }];
@@ -1202,6 +1280,33 @@ mod tests {
         assert_eq!(diagnostics[0].code, "E1220");
         assert!(diagnostics[0].what.contains("panicdep::parse_port"));
         assert_eq!(diagnostics[0].span, Some(Span::new(4, 12)));
+    }
+
+    #[test]
+    fn time_wait_budget_ignores_allow_omission_but_honors_denial() {
+        // D-AUTH-AMBIENT2=A: waiting is deny-only, like Mem and Panic.
+        let mut manifest = PackageFacts::default();
+        manifest.effects_enabled = true;
+        manifest.authority.holds.allow = Some(vec!["IO".to_string()]);
+        let entries = [PackageEffects {
+            name: "waitdep".to_string(),
+            effects: EffectSet::from([
+                "IO".to_string(),
+                "Mem.Rc".to_string(),
+                "Time.Wait".to_string(),
+            ]),
+            effect_sites: BTreeMap::from([("Time.Wait".to_string(), "waitdep::join".to_string())]),
+            effect_witnesses: BTreeMap::new(),
+            panic_sites: Vec::new(),
+            boundary_span: None,
+        }];
+        assert!(enforce(&entries, &manifest).is_empty());
+
+        manifest.authority.holds.deny = Some(vec!["Time.Wait".to_string()]);
+        let diagnostics = enforce(&entries, &manifest);
+        assert_eq!(diagnostics.len(), 1);
+        assert_eq!(diagnostics[0].code, "E1220");
+        assert!(diagnostics[0].what.contains("Time.Wait"), "{}", diagnostics[0].what);
     }
 
     #[test]
@@ -1266,7 +1371,7 @@ mod tests {
         let required = EffectSet::from([
             "IO".to_string(),
             "Mem.Alloc".to_string(),
-            "Exec".to_string(),
+            "Exec.Args".to_string(),
         ]);
         let projection = project_application_effects(&required, None);
 
@@ -1276,7 +1381,7 @@ mod tests {
             EffectSet::from([
                 "IO".to_string(),
                 "Mem.Alloc".to_string(),
-                "Exec".to_string(),
+                "Exec.Args".to_string(),
             ])
         );
         assert!(projection.undecided().is_empty());
@@ -1344,7 +1449,8 @@ mod tests {
         };
 
         let diagnostic = application_policy_diagnostic(&projection, &EffectSet::new(), None);
-        assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
+        // `Mem.Alloc` is deny-only (D-AUTHORITY-MEM1), never a requested grant.
+        assert!(diagnostic.fix.contains("allow: [Exec, IO]"), "{}", diagnostic.fix);
     }
 
     #[test]

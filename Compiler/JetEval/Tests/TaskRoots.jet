@@ -108,7 +108,7 @@ fn jet_eval_task_roots_fixture_ok_payload(value: JetEvalRuntimeValue) -> JetEval
 // Stable owner for the real checked callback selected by the fixture harness.
 // Returning the lambda makes its capture escape; the generated lambda MIR row
 // has one capture parameter and escaping capture facts.
-pub fn jet_eval_task_roots_fixture_escaping_callback_owner(seed: Int) -> fn(Int) -> Int {
+fn jet_eval_task_roots_fixture_escaping_callback_owner(seed: Int) -> fn(Int) -> Int {
     (value: Int) -> seed + value
 }
 
@@ -177,10 +177,10 @@ fn jet_eval_task_roots_fixture_shared_row(module_name: String, member: String, s
     arity :: borrow_mask.len()
     row.id = MIRPreludeCallID{value: stable_id("mir-prelude-call", "task-root-shared:{module_name}:{member}:{symbol}")}
     row.family = MIRPreludeFamily.StaticPrelude
-    row.module_name = ~module_name
-    row.member = ~member
-    row.symbol = MIRSymbol.Prelude{name: ~symbol}
-    row.signature = MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: ~borrow_mask}
+    row.module_name = module_name.copy()
+    row.member = member.copy()
+    row.symbol = MIRSymbol.Prelude{name: symbol.copy()}
+    row.signature = MIRCallSignature{arity: arity, max_arity: arity, borrow_mask: borrow_mask.copy()}
     Val(row)
 }
 
@@ -214,9 +214,9 @@ fn jet_eval_task_roots_fixture_checked_nominal(machine: &JetEvalMachine, name: S
 // This producer owns the Source Machine only for the duration of creating and
 // exporting one pre-adopted Shared carrier. Its OwnedRoot is the only Source
 // runtime authority that survives the return.
-pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: ^JetEvalConfig, span: Span) -> JetEvalSharedHostCarrier? {
+fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: ^JetEvalConfig, span: Span) -> JetEvalSharedHostCarrier? {
     source_config := jet_eval_runtime_config(config)
-    source_machine := jet_eval_machine(~program, ^source_config)
+    source_machine := jet_eval_machine(program.copy(), ^source_config)
     int_type :: mir_type_from_kind(MIRTypeKind.Int)
     inner_shared_type :: mir_type_from_kind(MIRTypeKind.Shared{inner: int_type})
     payload_type :: jet_eval_task_roots_fixture_checked_nominal(&source_machine, "JetEvalTaskRootsSharedPayload", span) ?? return None
@@ -387,7 +387,7 @@ pub fn jet_eval_task_roots_fixture_shared_produce(program: ^MIRProgram, config: 
 // B runs with its own Source Machine after the producer's Machine has returned.
 // Its final strong release must run the Source-owned payload finalizer, then its
 // weak capability must observe the missing physical owner.
-pub fn jet_eval_task_roots_fixture_shared_consume(
+fn jet_eval_task_roots_fixture_shared_consume(
     program: ^MIRProgram,
     config: ^JetEvalConfig,
     carrier: ^JetEvalSharedHostCarrier,
@@ -1205,10 +1205,48 @@ fn jet_eval_task_roots_fixture_failures(machine: &JetEvalMachine, callback: MIRF
     true
 }
 
+// The native startup view must produce the evaluator's exact shapes and keep
+// all Core identity checks, including checked source-module membership.
+fn jet_eval_task_roots_fixture_shape_index(machine: JetEvalMachine, shape_program: MIRProgram) -> Bool {
+    if shape_program.functions.len() != 0 || shape_program.type_instances.len() != 0 || shape_program.constants.len() != 0 || shape_program.fields.len() != 0 || shape_program.unreachable.len() != 0 -> return false
+    if shape_program.types.len() != machine.program.types.len() || shape_program.core_owners.len() != machine.program.core_owners.len() || shape_program.modules.len() != machine.program.modules.len() || shape_program.handles.len() != machine.program.handles.len() -> return false
+    shape_rows := jet_eval_program_shape_rows(shape_program)
+    if shape_rows.functions.len() != 0 || shape_rows.fields.len() != 0 || shape_rows.type_instances.len() != 0 || shape_rows.function_rows.len() != 0 -> return false
+    if shape_rows.source_clone_hooks.len() != 0 || shape_rows.source_show_hooks.len() != 0 || shape_rows.source_debug_hooks.len() != 0 -> return false
+    loop row in machine.program.types {
+        if shape_rows.types.get(row.id.value) != machine.rows.types.get(row.id.value) -> return false
+    }
+    loop row in machine.program.modules {
+        if shape_rows.modules.get(row.id.value) != machine.rows.modules.get(row.id.value) -> return false
+    }
+    loop row in machine.program.handles {
+        if shape_rows.handles.get(row.id.value) != machine.rows.handles.get(row.id.value) -> return false
+        full :: jet_eval_host_type_shape_from_rows(machine.program, machine.rows, row.ty)
+        projected :: jet_eval_host_type_shape_from_rows(shape_program, shape_rows, row.ty)
+        if projected != full -> return false
+        if jet_eval_core_owner_check(shape_program, shape_rows, row.ty) != jet_eval_core_owner_check(machine.program, machine.rows, row.ty) -> return false
+        if jet_eval_core_owner_check(shape_program, shape_rows, row.ty) == .Valid(owner) {
+            // Mutate the index, not the compiler's checked facts. The same
+            // canonical checker must reject missing modules and duplicate IDs.
+            invalid_rows := jet_eval_program_shape_rows(shape_program)
+            if owner.module_id != None {
+                invalid_rows.modules = [U64:Int]{}
+                if jet_eval_core_owner_check(shape_program, invalid_rows, row.ty) != (.Invalid{message: "native Core owner fact has no checked source module"}) -> return false
+            }
+            duplicate_rows := jet_eval_program_shape_rows(shape_program)
+            indices :: duplicate_rows.core_owners_by_id.get(owner.id.value) ?? return false
+            if indices.len() != 1 -> return false
+            duplicate_rows.core_owners_by_id[owner.id.value] = [Int]{indices[0], indices[0]}
+            if jet_eval_core_owner_check(shape_program, duplicate_rows, row.ty) != (.Invalid{message: "native Core owner registered ID is ambiguous"}) -> return false
+        }
+    }
+    true
+}
+
 // `callback` must be a real checked escaping closure function with one capture
 // parameter. The harness supplies its ID from the fixture MIR; this function
 // deliberately never fabricates capture facts for a zero-capture function.
-pub fn jet_eval_task_roots_fixture(program: ^MIRProgram, config: ^JetEvalConfig, callback: MIRFunctionID, resource_handle: MIRHandleID, resource_raw: Int, span: Span) -> Bool {
+fn jet_eval_task_roots_fixture(program: ^MIRProgram, shape_program: MIRProgram, config: ^JetEvalConfig, callback: MIRFunctionID, resource_handle: MIRHandleID, resource_raw: Int, span: Span) -> Bool {
     // D-PATTERN-HOLE-NAME1=A: EvalValues must compare the decimal value,
     // not match an always-successful text hole, in either operand order.
     if !jet_eval_value_equal(TComptimeValue.BigInt{decimal: "7"}, TComptimeValue.Int{value: 7}) -> return false
@@ -1220,6 +1258,7 @@ pub fn jet_eval_task_roots_fixture(program: ^MIRProgram, config: ^JetEvalConfig,
     // raw capability must be a live arena registration the adapter can release.
     if resource_handle != jet_eval_loop_cursor_handle_id() -> return false
     machine := jet_eval_machine(^program, ^config)
+    if !jet_eval_task_roots_fixture_shape_index(machine, shape_program) -> return false
     if !jet_eval_task_roots_fixture_list_slices(&machine, span) -> return false
     cell :: jet_eval_new_shared_cell(machine, JetEvalRuntimeValue.Data{value: TComptimeValue.Unit}, MIRAccess.Write)
     cell_id :: jet_eval_task_roots_fixture_shared_cell_index(cell) ?? return false

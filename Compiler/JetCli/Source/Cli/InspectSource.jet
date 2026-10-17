@@ -1,0 +1,19 @@
+// Resolve report bytes from the same immutable checked bundle, not fresh disk IO.
+use jet_driver.[JetDriverCompileResult, JetDriverAuthorizedSourceSnapshot]
+
+fn jet_cli_inspection_source(result: JetDriverCompileResult, snapshot: JetDriverAuthorizedSourceSnapshot, display: String) -> String {
+    loop doc_module in result.doc_modules {
+        if doc_module.path == display || doc_module.physical_path == display -> return doc_module.source
+    }
+    loop generated in result.generated_source_files {
+        if generated.path == display -> return generated.source
+    }
+    cwd :: jet_cli_report_cwd()
+    absolute :: jet_cli_report_path(cwd, display)
+    loop root in snapshot.roots {
+        loop file in root.files {
+            if file.path == absolute || file.path == display || file.relative_path == display -> return file.source
+        }
+    }
+    ""
+}

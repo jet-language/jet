@@ -244,7 +244,7 @@ impl<'a> Parser<'a> {
         let end = self.toks[self.pos - 1].span.end;
         let span = Span::new(start.start, end);
         for marker in &type_markers {
-            self.bind_rule_fact(marker.name_span, Some(span), crate::Policy::RuleSite::Type);
+            self.bind_rule_fact(&marker.name, marker.name_span, Some(span), crate::Policy::RuleSite::Type);
         }
         Ok(crate::AST::DistinctDef {
             is_pub,
@@ -513,6 +513,7 @@ impl<'a> Parser<'a> {
         // The closing `}` ends the item; the lexer inserts a synthetic `;`.
         let end = self.toks[self.pos - 1].span.end;
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(Span::new(marker.span.start, end)),
             crate::Policy::RuleSite::Type,
@@ -847,13 +848,10 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let is_pub = outer_is_pub
-            || if matches!(&self.peek().kind, TokKind::KwPub) {
-                self.bump();
-                true
-            } else {
-                false
-            };
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
+        }
+        let is_pub = outer_is_pub;
         if matches!(self.peek().kind, TokKind::KwEnum) {
             if has_alignment || !matches!(layout.as_ref(), Some(crate::AST::StructLayout::C)) {
                 return Err(Diagnostic::error(
@@ -874,6 +872,7 @@ impl<'a> Parser<'a> {
                 _ => unreachable!(),
             };
             self.bind_rule_fact(
+                Syntax::MARKER_LAYOUT,
                 marker_name_span,
                 Some(target),
                 crate::Policy::RuleSite::Type,
@@ -900,6 +899,7 @@ impl<'a> Parser<'a> {
                 _ => unreachable!(),
             };
             self.bind_rule_fact(
+                Syntax::MARKER_LAYOUT,
                 marker_name_span,
                 Some(target),
                 crate::Policy::RuleSite::Type,
@@ -974,6 +974,7 @@ impl<'a> Parser<'a> {
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         let marker = crate::AST::Marker {
             name: attr,
+            declaration: None,
             negated: false,
             name_span: attr_name_span,
             args: Vec::new(),
@@ -986,11 +987,11 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        // optional `pub` after the marker (the `pub #SingleUse` form already ate it)
-        let want_pub = outer_is_pub || matches!(&self.peek().kind, TokKind::KwPub);
-        if !outer_is_pub && matches!(&self.peek().kind, TokKind::KwPub) {
-            self.bump();
+        // D-VIS-MODULE1: a retired `pub` after the marker is reported and deleted.
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
         }
+        let want_pub = outer_is_pub;
         match self.peek().kind {
                 TokKind::KwStruct => {
                     let mut def = self.struct_def_after_pub(want_pub)?;
@@ -1049,6 +1050,7 @@ impl<'a> Parser<'a> {
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         let marker = crate::AST::Marker {
             name: attr,
+            declaration: None,
             negated: false,
             name_span: attr_name_span,
             args: Vec::new(),
@@ -1059,10 +1061,10 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let want_pub = outer_is_pub || matches!(&self.peek().kind, TokKind::KwPub);
-        if !outer_is_pub && matches!(&self.peek().kind, TokKind::KwPub) {
-            self.bump();
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
         }
+        let want_pub = outer_is_pub;
         match self.peek().kind {
                 TokKind::KwStruct => {
                     let mut def = self.struct_def_after_pub(want_pub)?;
@@ -1120,6 +1122,7 @@ impl<'a> Parser<'a> {
         let attr_span = Span::new(attr_start.start, attr_name_span.end);
         let marker = crate::AST::Marker {
             name: attr,
+            declaration: None,
             negated: false,
             name_span: attr_name_span,
             args: Vec::new(),
@@ -1132,14 +1135,11 @@ impl<'a> Parser<'a> {
         while matches!(&self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        // optional `pub` after the marker
-        let is_pub = outer_is_pub
-            || if matches!(&self.peek().kind, TokKind::KwPub) {
-                self.bump();
-                true
-            } else {
-                false
-            };
+        // D-VIS-MODULE1: a retired `pub` after the marker is reported and deleted.
+        if matches!(&self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
+        }
+        let is_pub = outer_is_pub;
         let mut def = self.struct_def_after_pub(is_pub)?;
         def.is_published_schema = true;
         def.published_schema_span = Some(attr_span);
@@ -1215,6 +1215,7 @@ impl<'a> Parser<'a> {
                 let mut f = self.field()?;
                 for marker in &field_markers {
                     self.bind_rule_fact(
+                        &marker.name,
                         marker.name_span,
                         Some(f.name_span),
                         crate::Policy::RuleSite::Field,
@@ -1257,6 +1258,7 @@ impl<'a> Parser<'a> {
             span: Span::new(item_start, item_end),
             is_pub,
             is_package_pub,
+            compiler_builtin_error: false,
             name,
             name_span,
             type_params,

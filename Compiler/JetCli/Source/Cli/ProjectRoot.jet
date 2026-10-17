@@ -1,0 +1,93 @@
+// The one canonical project root for generated artifacts (crates/jet-driver
+// Loader.rs `selected_project_root` and the walks it composes, 3226-3267 and
+// 3716-3747). A declared workspace owns its members; otherwise the enclosing
+// repository owns the source; without a repository the nearest checked
+// package owns it; a standalone source stays at its canonical directory.
+// Every walk is the checked Jetpack AuthorityResolver (D-FSDIR1), so a
+// malformed workspace or manifest is its registered diagnostic, never a
+// silently different root. `cache` is the one declaration cache of the
+// command's discovery session.
+use core.files as cli_files
+
+fn jet_cli_selected_project_root(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String ManifestError! {
+    if jet_cli_find_workspace_root_checked(&cache, start) == {
+        .Ok(found) -> {
+            if found == .Val(root) -> return Ok(root)
+        }
+        .Err(error) -> return Err(error)
+    }
+    if jet_cli_find_repository_root(start) == .Val(root) -> return Ok(root)
+    if jet_cli_find_package_root_checked(&cache, start) == {
+        .Ok(found) -> {
+            if found == .Val(root) -> return Ok(root)
+        }
+        .Err(error) -> return Err(error)
+    }
+    if AuthorityResolver.authority_walk_root(start) == {
+        .Ok(root) -> Ok(root)
+        .Err(error) -> Err(ManifestError{diagnostic: error.diagnostic()})
+    }
+}
+
+// ReceiptStore.rs `receipt_project_root`: the selected root, else the
+// canonical start, else the start as given. History is optional, so a
+// discovery diagnostic never stops the command that records it.
+fn jet_cli_receipt_project_root(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String Never! {
+    if jet_cli_selected_project_root(&cache, start) == {
+        .Ok(root) -> root
+        .Err(_) -> cli_files.realpath(start) ?? start
+    }
+}
+
+// Loader.rs `find_workspace_root_checked`: the nearest directory whose
+// checked authority resolves a workspace declaration. Every failure is the
+// workspace diagnostic, as `find_workspace_root_with_error` maps it.
+fn jet_cli_find_workspace_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+    dir := AuthorityResolver.authority_walk_root(start) ?? return Err(ManifestError{diagnostic: err.workspace_diagnostic()})
+    loop {
+        if AuthorityResolver.open_for_authority_walk(dir) == {
+            .Ok(found) -> {
+                if found == .Val(resolver) {
+                    if resolver.resolve_workspace_source(&cache) == {
+                        .Ok(source) -> {
+                            if source != None -> return Ok(Val(dir))
+                        }
+                        .Err(error) -> return Err(ManifestError{diagnostic: error.workspace_diagnostic()})
+                    }
+                }
+            }
+            .Err(error) -> return Err(ManifestError{diagnostic: error.workspace_diagnostic()})
+        }
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return Ok(None)
+    }
+}
+
+// Loader.rs `find_repository_root`: the nearest real `.git` marker, never a
+// link to one. A worktree's `.git` file is a repository marker too.
+fn jet_cli_find_repository_root(start: String) -[FS, Env]> String? Never! {
+    dir := AuthorityResolver.authority_walk_root(start) ?? return None
+    loop {
+        marker :: if dir.ends_with("/") -> "{dir}.git" else -> "{dir}/.git"
+        if cli_files.stat(marker) == .Ok(info) {
+            if !info.is_symlink && (info.is_dir || info.is_file) -> return Val(dir)
+        }
+        dir = AuthorityResolver.authority_walk_parent(dir) ?? return None
+    }
+}
+
+// Loader.rs `find_package_root_checked`: the extracted manifest root or the
+// inline Package carrier's root; the inline root wins so a later facts read
+// reports the explicit conflict instead of silently choosing one.
+fn jet_cli_find_package_root_checked(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> String? ManifestError! {
+    manifest :: if pkg_find_manifest_root_checked(&cache, start) == {
+        .Ok(found) -> found
+        .Err(error) -> { return Err(error) }
+    }
+    if pkg_find_inline_package_root_checked(&cache, start) == {
+        .Ok(found) -> {
+            if found != None -> return Ok(found)
+        }
+        .Err(error) -> return Err(error)
+    }
+    Ok(manifest)
+}

@@ -16,15 +16,15 @@ RECIPE_EXCLUSIVE_ATTEMPTS :: prep { 16 }
 RECIPE_COPY_CHUNK :: prep { 65536 }
 
 // A freshly allocated private child of a held directory.
-pub struct RecipeChildDir {
-    pub name: String
-    pub path: String
+struct RecipeChildDir {
+    name: String
+    path: String
 }
 
 // A held, no-follow directory authority.
-pub struct PinnedRecipeDirectory {
-    directory: Directory
-    path: String
+struct PinnedRecipeDirectory {
+    priv directory: Directory
+    priv path: String
 
     // Open `path` (made absolute and normalized) one component at a time
     // without following links, creating missing components as private
@@ -491,7 +491,7 @@ fn recipe_realized_tool(tools: [String: String], tool: String) -[FS, Env]> Strin
     file :: files.open(path, links: .Refuse) ?? return Err(RecipeDiagnostic.e1238(tool))
     opened :: file.stat() ?? return Err(RecipeDiagnostic.e1238(tool))
     if !opened.is_file || !recipe_same_file_identity(expected, opened) -> return Err(RecipeDiagnostic.e1238(tool))
-    if !sys.is_windows() && expected.mode & 0o111 == 0 -> return Err(RecipeDiagnostic.e1238(tool))
+    if !sys.is_windows() && (expected.mode).bit_and(0o111) == 0 -> return Err(RecipeDiagnostic.e1238(tool))
     after :: files.stat(path) ?? return Err(RecipeDiagnostic.e1238(tool))
     if !recipe_same_file_identity(expected, after) -> return Err(RecipeDiagnostic.e1238(tool))
     Ok(path)

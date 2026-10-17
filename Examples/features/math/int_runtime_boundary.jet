@@ -1,0 +1,32 @@
+// Runtime calls keep these operations off the compile-time constant rail.
+fn exact_boundary(value: Int) -> Int { value }
+
+fn run() {
+    top :: exact_boundary(4611686018427387903)
+    bottom :: exact_boundary(-4611686018427387904)
+    large :: exact_boundary(123456789012345678901234567890)
+    other :: exact_boundary(98765432109876543210)
+    print(top + 1)
+    print(bottom - 1)
+    print((top + 1) - 1)
+    print((bottom - 1) + 1)
+    print(large + other)
+    print(large - other)
+    print(large * other)
+    print(large /% other)
+    print(large % other)
+    print((-large) /% other)
+    print((-large) % other)
+    print(large << 65)
+    print((-large) >> 65)
+    print(large.bit_and(other))
+    print(large.bit_or(other))
+    print(large.bit_xor(other))
+    print(exact_boundary(3).pow(exact_boundary(80)))
+    print(large > other)
+    print(-large < -other)
+    // A static boxed owner is cloned into each use, then read by the Rust
+    // display consumer through the same C carrier as Jet arithmetic results.
+    print(large)
+    print(large)
+}

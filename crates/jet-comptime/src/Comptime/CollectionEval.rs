@@ -121,18 +121,31 @@ pub(crate) mod collection_semantics {
     // Values.rs is shared with the AOT Prelude; bind its unqualified Int
     // formatter to the comptime mirror before including that fragment.
     use crate::Comptime::SyncLite::jet_int_to_string;
+    // The borrowed index check is shared with the Prelude collection kernel.
+    include!("../../../jet-codegen/src/Prelude/Core/FixedList.rs");
+    fn jet_arithmetic_stop(file: &str, line: u32, message: &str) -> ! {
+        jet_panic_rich_code("E3010", file, line, "", "", 0, 0, message, "")
+    }
     include!("../../../jet-codegen/src/Prelude/Core/Loadable.rs");
     include!("../../../jet-codegen/src/Prelude/Core/RangeBounds.rs");
     include!("../../../jet-codegen/src/Prelude/Core/Values.rs");
     // D-DATAFRAME1 / card #2447: comptime evaluation consumes the same typed
     // table-plan fact kernel as AOT and JIT; it owns no alternate plan shape.
     include!("../../../jet-codegen/src/Prelude/Core/LazyTablePlan.rs");
+    use jet_foundation::StructuralDebug::jet_text_list;
     include!("../../../jet-codegen/src/Prelude/Core/TextValues.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs");
     include!("../../../jet-codegen/src/Prelude/Memo.rs");
     include!("../../../jet-codegen/src/Prelude/Core/SimdLanes.rs");
     include!("../../../jet-codegen/src/Prelude/Core/CollectionFailure.rs");
     include!("../../../jet-codegen/src/Prelude/Core/SortKernel.rs");
+    include!("../../../jet-codegen/src/Prelude/Core/FloatOrdering.rs");
+    // #4566 slice 8: the vetted inline-list storage `Collections.rs` names
+    // as `jet_mem::JetInlineList` (AOT embeds it in its `jet_mem`).
+    #[allow(dead_code)]
+    mod jet_mem {
+        include!("../../../jet-codegen/src/Prelude/InlineList.rs");
+    }
     include!("../../../jet-codegen/src/Prelude/Core/Collections.rs");
 
     pub struct LoopListCursor<T> {
@@ -227,11 +240,11 @@ pub(crate) mod collection_semantics {
     }
 
     pub(super) fn try_list_new<T>() -> JetOutcome<Vec<T>, AllocError> {
-        jet_list_try_new()
+        jet_list_try_new(())
     }
 
     pub(super) fn try_list_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
-        jet_list_try_with_capacity(capacity)
+        jet_list_try_with_capacity_defaulted(capacity, |_| true, |_| {})
     }
 
     pub(super) fn try_list_with_capacity_defaulted<T>(
@@ -254,7 +267,7 @@ pub(crate) mod collection_semantics {
         values: &mut Vec<T>,
         additional: i64,
     ) -> JetOutcome<(), AllocError> {
-        jet_list_try_reserve(values, additional)
+        jet_list_try_reserve_native(values, additional)
     }
 
     pub(super) fn try_map_insert<K: Ord + Clone, V: Clone>(
@@ -293,6 +306,150 @@ pub(crate) mod collection_semantics {
     }
     pub(super) fn string_split(text: &str, separator: &str) -> Vec<String> {
         jet_iter_string_split(text, separator).to_list()
+    }
+
+    /// The generated-call ABI of the owned-Int collection kernels: AOT passes
+    /// the owned `Int` carrier (and a unit static `List` owner), while hosts
+    /// that carry `Int` as a word use the `_native` bodies. Typed bindings
+    /// pin every signature; the assertions pin the clamp and failure meaning.
+    #[cfg(test)]
+    mod owned_int_kernel_abi {
+        use super::*;
+        use jet_foundation::Numeric::JetInt;
+
+        fn past_word(sign: i64) -> JetInt {
+            JetInt::from_i64(i64::MAX)
+                .mul(&JetInt::from_i64(4 * sign))
+                .unwrap_or_else(|_| panic!("an Int past the machine word allocates"))
+        }
+
+        fn split(index: JetInt) -> (Vec<i64>, Vec<i64>) {
+            let mut queue: std::collections::VecDeque<i64> = (1..=4).collect();
+            let tail: std::collections::VecDeque<i64> = jet_deque_split(&mut queue, index);
+            (Vec::from(queue), Vec::from(tail))
+        }
+
+        #[test]
+        fn deque_split_clamps_an_owned_index() {
+            assert_eq!(split(JetInt::from_i64(1)), (vec![1], vec![2, 3, 4]));
+            assert_eq!(split(past_word(1)), (vec![1, 2, 3, 4], Vec::new()));
+            assert_eq!(split(past_word(-1)), (Vec::new(), vec![1, 2, 3, 4]));
+        }
+
+        #[test]
+        fn list_allocation_kernels_take_the_owned_int() {
+            let created: JetOutcome<Vec<i64>, AllocError> = jet_list_try_new(());
+            assert!(created.is_ok());
+
+            let mut values: Vec<i64> = jet_list_try_with_capacity((), JetInt::from_i64(4))
+                .unwrap_or_else(|_| panic!("a small capacity reserves"));
+            assert!(values.capacity() >= 4);
+            assert!(jet_list_try_with_capacity::<i64>((), JetInt::from_i64(-1)).is_err());
+            assert!(jet_list_try_with_capacity::<i64>((), past_word(1)).is_err());
+
+            let reserved: JetOutcome<(), AllocError> =
+                jet_list_try_reserve(&mut values, JetInt::from_i64(8));
+            assert!(reserved.is_ok());
+            assert!(values.capacity() >= 8);
+            assert!(jet_list_try_reserve(&mut values, past_word(1)).is_err());
+            assert!(jet_list_try_reserve(&mut values, past_word(-1)).is_err());
+        }
+
+        #[test]
+        fn indexes_yield_the_owned_int() {
+            let indexes: JetIter<JetInt> = jet_iter_indexes(3);
+            let indexes = indexes
+                .to_list()
+                .iter()
+                .map(|index| index.to_i64().expect("small index"))
+                .collect::<Vec<_>>();
+            assert_eq!(indexes, vec![0, 1, 2]);
+            assert!(jet_iter_indexes(-2).to_list().is_empty());
+        }
+
+        #[test]
+        fn memo_stats_projects_the_function_result_store() {
+            let store = std::sync::Mutex::new(JetMemo::<i64, i64>::with_bound(Some(2)));
+            assert_eq!(jet_memo_stats(&store).bound, "2");
+            assert_eq!(jet_memo_call(&store, 7, || 49), 49);
+            assert_eq!(jet_memo_call(&store, 7, || panic!("cache hit recomputed")), 49);
+            let stats = jet_memo_stats(&store);
+            assert_eq!((stats.hits, stats.misses, stats.size), (1, 1, 1));
+            let unbounded = std::sync::Mutex::new(JetMemo::<i64, i64>::with_bound(None));
+            assert_eq!(jet_memo_stats(&unbounded).bound, "none");
+        }
+
+        #[test]
+        fn collection_native_int_abi_is_shared_by_cache_and_bitset() {
+            let mut cache = JetCache::<i64, i64>::new(JetInt::from_i64(2));
+            assert_eq!(cache.put(1, 11), None);
+            assert_eq!(cache.capacity(), 2);
+
+            let mut bits = JetBitSet::new();
+            assert!(jet_bitset_add(&mut bits, JetInt::from_i64(7)));
+            assert!(jet_bit_set_has(&bits, JetInt::from_i64(7)));
+            jet_bitset_remove(&mut bits, JetInt::from_i64(7));
+            assert!(!jet_bit_set_has(&bits, JetInt::from_i64(7)));
+        }
+
+        #[test]
+        #[should_panic(expected = "E3010")]
+        fn collection_native_int_overflow_uses_the_shared_runtime_stop() {
+            jet_collection_native_int(&past_word(1));
+        }
+    }
+
+    /// Sequence kernels the lowering reaches with either carrier: an eager
+    /// List call passes its `Vec`, a lazy pipeline its `JetIter`.
+    #[cfg(test)]
+    mod sequence_carrier_abi {
+        use super::*;
+
+        #[test]
+        fn is_sorted_by_reads_a_list_or_an_iter() {
+            let descending = |value: &i64| -*value;
+            assert!(!jet_iter_is_sorted_by(vec![3_i64, 1, 2], descending));
+            assert!(jet_iter_is_sorted_by(vec![3_i64, 2, 1], descending));
+            assert!(jet_iter_is_sorted_by(jet_iter_from_vec(vec![3_i64, 2, 1]), descending));
+        }
+
+        #[test]
+        fn compare_orders_any_pair_of_sequences() {
+            let left = || vec![1_i64, 2, 3];
+            let lazy = |values: Vec<i64>| jet_iter_from_vec(values);
+            assert_eq!(jet_iter_compare(lazy(left()), lazy(vec![1, 2, 4])), -1);
+            assert_eq!(jet_iter_compare(left(), lazy(left())), 0);
+            assert_eq!(jet_iter_compare(lazy(left()), vec![1, 2]), 1);
+        }
+    }
+
+    /// D-FLOATSORT1: Float and Float32 list sorts share `jet_float_sort_cmp`
+    /// (NaNs after numbers ascending, before them descending).
+    #[cfg(test)]
+    mod float_sort_kernels {
+        use super::*;
+
+        fn shown<T: std::fmt::Display>(values: &[T]) -> Vec<String> {
+            values.iter().map(|value| format!("{value}")).collect()
+        }
+
+        #[test]
+        fn float_lists_sort_with_the_shared_comparator() {
+            let mut values = vec![2.5_f64, f64::NAN, -1.0, 0.0];
+            jet_list_sort_float(&mut values);
+            assert_eq!(shown(&values), ["-1", "0", "2.5", "NaN"]);
+            jet_list_sort_desc_float(&mut values);
+            assert_eq!(shown(&values), ["NaN", "2.5", "0", "-1"]);
+        }
+
+        #[test]
+        fn float32_lists_widen_to_the_same_order() {
+            let mut values = vec![2.5_f32, f32::NAN, -1.0, 0.0];
+            jet_list_sort_float32(&mut values);
+            assert_eq!(shown(&values), ["-1", "0", "2.5", "NaN"]);
+            jet_list_sort_desc_float32(&mut values);
+            assert_eq!(shown(&values), ["NaN", "2.5", "0", "-1"]);
+        }
     }
 }
 pub fn string_split(text: &str, separator: &str) -> Vec<String> {
@@ -990,7 +1147,7 @@ fn set_method(
             }
             Ok(CtValue::List(out))
         }
-        "copy" | "to_set" => Ok(set_struct(type_name, items)),
+        "to_set" => Ok(set_struct(type_name, items)),
         "capacity" => Ok(CtValue::Int(items.len() as i64)),
         "equal" => {
             let other = args
@@ -1294,7 +1451,6 @@ fn bitset_method(
             let bit = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
             Ok(CtValue::Bool(bits.contains(&CtValue::Int(bit))))
         }
-        "copy" => Ok(bitset_struct(bits.clone())),
         "to_list" => Ok(CtValue::List(bits)),
         _ => Err(unsupported(
             &format!("Bits.{} at compile time", method),
@@ -1648,7 +1804,7 @@ fn byte_buffer_method(
             }
             Ok(byte_buffer_struct(out.into_bytes()))
         }
-        "clone" | "copy" => Ok(byte_buffer_struct_at(bytes, pos)),
+        "clone" => Ok(byte_buffer_struct_at(bytes, pos)),
         "lines" => Ok(CtValue::List(
             text.lines().map(|s| CtValue::Str(s.to_string())).collect(),
         )),

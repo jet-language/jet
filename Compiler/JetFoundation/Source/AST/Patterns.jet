@@ -1,7 +1,7 @@
 // Rust-shaped pattern and destructuring nodes. Span is shared with JetLexer;
 // semantic types are the canonical JetFoundation::Type.
 
-pub enum Pattern {
+enum Pattern {
     Variant(variant: String, bindings: [PatSlot], leading_dot: Bool, span: Span)
     // S31: `inner` holds a nested payload pattern (`.Val(.Rect(w, h))`,
     // `.Err(.Low)`); the binding is then `_`.
@@ -11,12 +11,14 @@ pub enum Pattern {
     Err(binding: String, binding_span: Span, inner: Pattern?, span: Span)
     Range(lo: Int, hi: Int, span: Span)
     Or(alternatives: [Pattern], span: Span)
-    Struct(fields: [StructPatField], rest: Span?, span: Span)
+    Struct(fields: [StructPatField], rest: Span?, span: Span, type_name: PatternTypeHead?)
+    List(items: [PatSlot], rest: ListPatRest?, span: Span)
+    Map(entries: [MapPatEntry], rest: Span?, span: Span)
     StrMatch(parts: [StrMatchPart], span: Span)
     BinMatch(parts: [BinMatchPart], span: Span)
 }
 
-pub enum PatSlot {
+enum PatSlot {
     Wildcard
     Bind(name: String, span: Span)
     Range(lo: Int, hi: Int)
@@ -28,53 +30,72 @@ pub enum PatSlot {
     Named(field: String, field_span: Span, slot: PatSlot)
     // D-PAT-NAMED-NEST1=A: the trailing `..` of `.Case{field: pat, ..}`.
     Rest(span: Span)
+    Value(value: Expr)
 }
 
-pub enum BinMatchPart {
+enum BinMatchPart {
     Lit(bytes: [U8])
     Hole(name: String, spec: BinSpec, span: Span)
 }
 
-pub enum BinSpec {
+enum BinSpec {
     Bits(width: Int, endian: BinEndian)
     Rest
 }
 
-pub enum BinEndian {
+enum BinEndian {
     Unspecified
     Big
     Little
 }
 
-pub enum StrMatchPart {
+enum StrMatchPart {
     Lit(text: String)
     Hole(name: String, ty: Type?, span: Span)
 }
 
-pub enum StructPatField {
+enum StructPatField {
     Bind(field: String, field_span: Span, local: String, local_span: Span)
     Value(field: String, field_span: Span, value: Expr)
+    Nested(field: String, field_span: Span, pattern: Pattern)
 }
 
-pub struct BindName {
-    pub name: String
-    pub span: Span
-    pub rename: BindNameRename?
+struct PatternTypeHead {
+    name: String
+    span: Span
 }
 
-pub struct BindNameRename {
-    pub name: String
-    pub span: Span
+struct ListPatRest {
+    name: BindName?
+    span: Span
 }
 
-pub enum BindPattern {
+struct MapPatEntry {
+    key: Expr
+    optional: Bool
+    slot: PatSlot
+    span: Span
+}
+
+struct BindName {
+    name: String
+    span: Span
+    rename: BindNameRename?
+}
+
+struct BindNameRename {
+    name: String
+    span: Span
+}
+
+enum BindPattern {
     Struct(type_name: String, type_span: Span, fields: [BindName], rest: Span?, span: Span)
     List(elems: [BindName], span: Span)
     Tuple(elems: [BindName], span: Span)
     Refutable(pattern: Pattern, fallback: OrFallback, names: [BindName], span: Span)
 }
 
-pub enum OrFallback {
+enum OrFallback {
     Value(value: Expr)
     Block(body: [Stmt], value: Expr?, span: Span)
     Return(value: Expr?, span: Span)
@@ -88,7 +109,7 @@ pub enum OrFallback {
 // Rust `Pattern::binding_names`: the capture names a successful match
 // introduces. The parser turns a pattern test with a diverging fallback into
 // a binding of exactly these names (D-CHOOSE-TEST1); sema types each one.
-pub fn pattern_binding_names(pattern: Pattern) -> [BindName] Never! {
+fn pattern_binding_names(pattern: Pattern) -> [BindName] Never! {
     names := [BindName]{}
     pattern_collect_binding_names(pattern, &names)
     names
@@ -103,11 +124,17 @@ fn pattern_collect_binding_names(pattern: Pattern, names: &[BindName]) Never! {
         .Or(alternatives, _) -> {
             if alternatives.len() > 0 -> pattern_collect_binding_names(alternatives[0], &names)
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _, _, _) -> {
             loop field in fields {
                 if field == .Bind(name, field_span, local, local_span) -> &names.push(BindName{name: name, span: field_span, rename: Val(BindNameRename{name: local, span: local_span})})
+                if field == .Nested(_, _, nested) -> pattern_collect_binding_names(nested, &names)
             }
         }
+        .List(items, rest, _) -> {
+            loop item in items -> pattern_collect_slot_names(item, &names)
+            if rest == .Val(tail) && tail.name == .Val(name) -> &names.push(name)
+        }
+        .Map(entries, _, _) -> loop entry in entries -> pattern_collect_slot_names(entry.slot, &names)
         .StrMatch(parts, _) -> {
             loop part in parts {
                 if part == .Hole(name, _, span) -> &names.push(BindName{name: name, span: span, rename: None})

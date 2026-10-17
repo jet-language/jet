@@ -1,0 +1,282 @@
+// Assertion-for-assertion ports of tests/pkg.rs. The input strings retain
+// the originals' bytes, including intentionally historical manifest forms.
+// PENDING-SEAM(package-tests): these tests require the PackageModel test package.
+
+// Ported from pkg.rs:279-293; braces escape Jet interpolation only.
+fn pkg_integration_min_manifest(name: String, version: String) -> String Never! {
+    "name: \"{name}\"\nversion: \"{version}\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n"
+}
+
+fn pkg_integration_manifest_with_deps(name: String, version: String, deps: String) -> String Never! {
+    "{pkg_integration_min_manifest(name, version)}\ndeps: {{\n{deps}\n}}\n"
+}
+
+fn pkg_integration_manifest_error(raw: String) -> ManifestError Never! {
+    if Manifest.parse("package.jet", raw) == {
+        .Err(error) -> error
+        .Ok(_) -> panic("original required Manifest.parse to fail")
+    }
+}
+
+fn pkg_integration_package_error(raw: String) -> PackageParseError Never! {
+    if PackageFacts.parse(raw, "test") == {
+        .Err(error) -> error
+        .Ok(_) -> panic("original required PackageFacts.parse to fail")
+    }
+}
+
+// Ported from pkg.rs:1570-1590.
+#Test("pkg integration manifest_parse_valid_fields") {
+    raw :: "name:    \"myapp\"\nversion: \"1.2.3\"\njet:     \">=0.1.0\"\ndescription: \"A test package\"\nlicense: \"MIT OR Apache-2.0\"\nrepository: \"https://example.com\"\ndeps: {{\n}}\n"
+    mf :: Manifest.parse("package.jet", raw) ?? panic("valid manifest should parse")
+    assert_eq(mf.package.name, "myapp")
+    assert_eq(mf.package.version, "1.2.3")
+    assert_eq(mf.package.jet_constraint, Val(">=0.1.0"))
+    assert_eq(mf.package.description, Val("A test package"))
+    assert_eq(mf.package.license, Val("MIT OR Apache-2.0"))
+    assert_eq(mf.dependencies.len(), 0)
+    assert_eq(mf.boundaries.len(), 0)
+}
+
+// Ported from pkg.rs:1593-1610.
+#Test("pkg integration manifest_parse_import_boundaries") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nboundaries: {{\n    deny: [\n        {{ from: \"app.ui\", to: \"app.db\" }},\n        {{ from: \"app.api.*\", to: \"app.db.*\" }},\n    ],\n}}\n"
+    mf :: Manifest.parse("package.jet", raw) ?? panic("boundary policy should parse")
+    assert_eq(mf.boundaries.len(), 2)
+    assert_eq(mf.boundaries[0].from, "app.ui")
+    assert_eq(mf.boundaries[0].to, "app.db")
+    assert(mf.boundaries[1].matches("app.api.auth", "app.db.users"))
+    assert(!mf.boundaries[1].matches("app.web", "app.db.users"))
+}
+
+// Ported from pkg.rs:1613-1648; all seven invalid inputs are retained.
+#Test("pkg integration manifest_parse_import_boundaries_rejects_malformed_patterns") {
+    patterns :: [String]{"app.ui", "app.*.ui", "app.**"}
+    loop pattern in patterns {
+        raw :: pkg_integration_min_manifest("app", "0.1.0") + "boundaries: {{ deny: [{{ from: {pattern}, to: \"app.db\" }}] }}\n"
+        error :: pkg_integration_manifest_error(raw)
+        assert_eq(error.diagnostic.code, "E1206")
+        assert(error.diagnostic.what.contains("package.jet"))
+    }
+    blocks :: [String]{
+        "boundaries: {{ allow: [{{ from: \"app.ui\", to: \"app.db\" }}] }}",
+        "boundaries: {{ deny: [{{ to: \"app.db\" }}] }}",
+        "boundaries: {{ deny: [{{ from: \"app.ui\" }}] }}",
+        "boundaries: {{ deny: [{{ from: \"app.ui\", from: \"app.api\", to: \"app.db\" }}] }}"
+    }
+    loop block in blocks {
+        error :: pkg_integration_manifest_error(pkg_integration_min_manifest("app", "0.1.0") + block + "\n")
+        assert_eq(error.diagnostic.code, "E1206")
+    }
+}
+
+// Ported from pkg.rs:1848-1854.
+#Test("pkg integration manifest_parse_dep_path") {
+    mf :: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    helpers: ../helpers,")) ?? panic("path dep should parse")
+    dep :: mf.dependencies.get("helpers") ?? panic("missing helpers dep")
+    assert(dep == DepSpec.Path{path: "../helpers"})
+}
+
+// Ported from pkg.rs:1857-1862.
+#Test("pkg integration manifest_rejects_traversal_dependency_name") {
+    error :: pkg_integration_manifest_error(pkg_integration_manifest_with_deps("root", "0.1.0", "    ../escape: \"1.0.0\","))
+    assert_eq(error.diagnostic.code, "E1206")
+}
+
+// Ported from pkg.rs:1865-1881.
+#Test("pkg integration manifest_parse_dep_git_tag") {
+    mf :: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    parsekit: {{ git: \"https://github.com/acme/parsekit\", tag: \"v0.4.1\" }},")) ?? panic("git tag dep should parse")
+    dep :: mf.dependencies.get("parsekit") ?? panic("missing parsekit")
+    valid :: if dep == {
+        .Git(url, selector) -> url.contains("parsekit") && selector == GitSelector.Tag("v0.4.1")
+        else -> false
+    }
+    assert(valid)
+}
+
+// Ported from pkg.rs:1884-1899.
+#Test("pkg integration manifest_parse_foreign_package_dep") {
+    mf :: Manifest.parse("package.jet", pkg_integration_manifest_with_deps("root", "0.1.0", "    plotly: js@\"plotly#version=2.35.0@npm\",")) ?? panic("foreign package dep should parse")
+    assert_eq(mf.dependencies.get("plotly"), Val(DepSpec.Foreign{language: ForeignLanguage.JS, reference: "plotly#version=2.35.0@npm"}))
+}
+
+// Ported from pkg.rs:2058-2065.
+#Test("pkg integration manifest_parse_e1206_missing_required_field") {
+    assert_eq(pkg_integration_manifest_error("version: \"0.1.0\"\n").diagnostic.code, "E1206")
+}
+
+// Ported from pkg.rs:2068-2076; the exact original include is reused.
+#Test("pkg integration manifest_parse_e1206_unknown_field") {
+    raw :: #IncludeText("tests/ui/manifest_unknown_field/package.jet")
+    error :: pkg_integration_manifest_error(raw)
+    assert_eq(error.diagnostic.code, "E1206")
+    assert(error.diagnostic.what.contains("payload"))
+}
+
+// Ported from pkg.rs:2079-2084.
+#Test("pkg integration manifest_parse_e1209_reserved_nonempty") {
+    error :: pkg_integration_manifest_error(pkg_integration_min_manifest("myapp", "0.1.0") + "\ndev_deps: {{\n    testlib: ../testlib,\n}}\n")
+    assert_eq(error.diagnostic.code, "E1209")
+}
+
+// Ported from pkg.rs:2091-2105.
+#Test("pkg integration manifest_parse_effects_block") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{\n    holds: {{ allow: [FS, Time], deny: [Net, Panic] }},\n}}\n"
+    pm :: PackageFacts.parse(raw, "test") ?? panic("authority holds should parse")
+    assert(pm.effects_enabled)
+    assert_eq(pm.effects_allow, Val([String]{"FS", "Time"}))
+    assert_eq(pm.effects_deny, Val([String]{"Net", "Panic"}))
+}
+
+// Ported from pkg.rs:2108-2130; no weaker reuse of the existing budget test.
+#Test("pkg integration manifest_panic_budget_names_the_dependency_stop_site") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ holds: {{ deny: [Panic] }} }}\n"
+    manifest :: PackageFacts.parse(raw, "test") ?? panic("Panic should be a manifest effect root")
+    entries :: [PackageEffects]{PackageEffects{name: "panicdep", effects: [String]{"Panic"}, effect_sites: [String: String]{}, effect_witnesses: [String: EffectBudgetWitness]{}, panic_sites: [String]{"panicdep::parse_port"}, boundary_span: Val(Span{start: 4, end: 12})}}
+    diagnostics :: pkg_effect_enforce(entries, manifest)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E1220")
+    assert(diagnostics[0].what.contains("panicdep"))
+    assert(diagnostics[0].what.contains("parse_port"))
+    assert(diagnostics[0].fix.contains("fallible result"))
+    assert(diagnostics[0].fix.contains("#Pre"))
+    assert_eq(diagnostics[0].span, Val(Span{start: 4, end: 12}))
+}
+
+// Ported from pkg.rs:2133-2141.
+#Test("pkg integration manifest_parse_grants_block") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ grants: {{ \"pdf-lib\": [Net] }} }}\n"
+    pm :: PackageFacts.parse(raw, "test") ?? panic("grants block should parse")
+    assert_eq(pm.grants, [PackageGrant]{PackageGrant{package: "pdf-lib", rights: [String]{"Net"}}})
+}
+
+// Ported from pkg.rs:2144-2179.
+#Test("pkg integration manifest_parse_authority_block_holds_grants_trust_and_providers") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{\n    holds: {{ allow: [Net, DB.Read], deny: [Exec] }},\n    grants: {{ \"image-codec\": [FS.Read] }},\n    trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ stripe: allow }} }},\n    providers: {{ nix: {{ registry: \"nixpkgs\", deny: [\"openssl-1.0\"] }} }},\n}}\n"
+    pm :: PackageFacts.parse(raw, "test") ?? panic("one authority block should parse")
+    assert_eq(pm.authority.holds.allow, Val([String]{"Net", "DB.Read"}))
+    assert_eq(pm.authority.holds.deny, Val([String]{"Exec"}))
+    assert_eq(pm.authority.grants, [PackageGrant]{PackageGrant{package: "image-codec", rights: [String]{"FS.Read"}}})
+    assert_eq(pm.grants, pm.authority.grants)
+    assert_eq(pm.effects_allow, pm.authority.holds.allow)
+    assert_eq(pm.effects_deny, pm.authority.holds.deny)
+    trust :: pm.authority.trust ?? panic("expected prompt trust")
+    assert_eq(trust.default, Val(TrustDecision.Prompt))
+    assert_eq(pm.authority.providers.len(), 1)
+    assert_eq(pm.authority.providers[0].provider, "nix")
+    assert_eq(pm.authority.providers[0].registry, "nixpkgs")
+    assert_eq(pm.authority.providers[0].deny, [String]{"openssl-1.0"})
+}
+
+// Ported from pkg.rs:2182-2210.
+#Test("pkg integration manifest_parse_authority_trust_block") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ trust: {{ default: prompt, ci: {{ prompt: deny }}, services: {{ postgres: prompt }}, require: attested }} }}\n"
+    pm :: PackageFacts.parse(raw, "test") ?? panic("authority.trust block should parse")
+    policy :: pm.authority.trust ?? panic("authority trust policy should be stored")
+    assert_eq(policy.default, Val(TrustDecision.Prompt))
+    assert_eq(policy.ci_prompt, Val(TrustDecision.Deny))
+    assert_eq(policy.services, [ServiceTrust]{ServiceTrust{service: "postgres", decision: TrustDecision.Prompt}})
+    assert_eq(policy.require, Val(ProvenanceRequirement.Attested))
+}
+
+// Ported from pkg.rs:2213-2221.
+#Test("pkg integration manifest_authority_trust_rejects_unknown_decision") {
+    error :: pkg_integration_package_error(pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ trust: {{ default: maybe }} }}\n")
+    bad :: if error == {
+        .BadEffectsBlock(_) -> true
+        else -> false
+    }
+    assert(bad)
+}
+
+// Ported from pkg.rs:2224-2230.
+#Test("pkg integration manifest_no_effects_block_disables_enforcement") {
+    pm :: PackageFacts.parse(pkg_integration_min_manifest("app", "0.1.0"), "test") ?? panic("valid manifest should parse")
+    assert(!pm.effects_enabled)
+    assert_eq(pm.effects_allow, None)
+}
+
+// Ported from pkg.rs:2233-2244.
+#Test("pkg integration manifest_parse_effects_e1221_unknown_effect") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ holds: {{ allow: [NotAnEffect] }} }}\n"
+    error :: pkg_integration_package_error(raw)
+    assert_eq(pkg_integration_manifest_error(raw).diagnostic.code, "E1221")
+    bad :: if error == {
+        .BadEffectsBlock(_) -> true
+        else -> false
+    }
+    assert(bad)
+}
+
+// Ported from pkg.rs:2247-2252.
+#Test("pkg integration manifest_parse_effects_e1221_unknown_field") {
+    raw :: pkg_integration_min_manifest("app", "0.1.0") + "\nauthority: {{ holds: {{ nope: [FS] }} }}\n"
+    assert_eq(pkg_integration_manifest_error(raw).diagnostic.code, "E1221")
+}
+
+// Ported from pkg.rs:2590-2594.
+#Test("pkg integration manifest_toolchain_ok") {
+    mf :: Manifest.parse("package.jet", pkg_integration_min_manifest("myapp", "0.1.0")) ?? panic("parse manifest")
+    if pkg_check_toolchain(mf, "package.jet") == {
+        .Ok(_) -> {}
+        .Err(_) -> panic("original required toolchain success")
+    }
+}
+
+// Ported from pkg.rs:2597-2602.
+#Test("pkg integration manifest_toolchain_e1208_future_version") {
+    mf :: Manifest.parse("package.jet", "name: \"myapp\"\nversion: \"0.1.0\"\njet: \">=99.0.0\"\n") ?? panic("parse manifest")
+    if pkg_check_toolchain(mf, "package.jet") == {
+        .Err(error) -> assert_eq(error.diagnostic.code, "E1208")
+        .Ok(_) -> panic("original required E1208")
+    }
+}
+
+// Ported from pkg.rs:2609-2619.
+#Test("pkg integration manifest_template_plain_parses") {
+    mf :: Manifest.parse("package.jet", pkg_new_template("myapp", false)) ?? panic("plain template should parse")
+    assert_eq(mf.package.name, "myapp")
+    assert_eq(mf.package.version, "0.1.0")
+    assert(mf.package.jet_constraint != None)
+}
+
+// Ported from pkg.rs:2622-2632.
+#Test("pkg integration manifest_template_annotated_has_dep_comments") {
+    raw :: pkg_new_template("myapp", true)
+    assert(raw.contains("// Jet package dependencies:"))
+    _ :: Manifest.parse("package.jet", raw) ?? panic("annotated template should parse")
+}
+
+// Ported from pkg.rs:2639-2653.
+#Test("pkg integration manifest_add_dep_inserts_in_existing_table") {
+    raw :: pkg_integration_min_manifest("root", "0.1.0") + "\ndeps: {{\n}}\n"
+    updated :: pkg_add_dep(raw, "helpers", DepSpec.Path{path: "../helpers"})
+    mf :: Manifest.parse("package.jet", updated) ?? panic("should reparse")
+    assert_eq(mf.dependencies.get("helpers"), Val(DepSpec.Path{path: "../helpers"}))
+}
+
+// Ported from pkg.rs:2656-2671.
+#Test("pkg integration manifest_add_dep_creates_table_when_absent") {
+    updated :: pkg_add_dep(pkg_integration_min_manifest("root", "0.1.0"), "helpers", DepSpec.Path{path: "../helpers"})
+    assert(updated.contains("deps:"))
+    mf :: Manifest.parse("package.jet", updated) ?? panic("should reparse")
+    assert_eq(mf.dependencies.get("helpers"), Val(DepSpec.Path{path: "../helpers"}))
+}
+
+// Ported from pkg.rs:2674-2690.
+#Test("pkg integration manifest_add_dep_expands_inline_empty_table") {
+    raw :: pkg_integration_min_manifest("root", "0.1.0") + "\ndeps: {{}}\n"
+    updated :: pkg_add_dep(raw, "helpers", DepSpec.Path{path: "../helpers"})
+    mf :: Manifest.parse("package.jet", updated) ?? panic("inline empty deps table should stay parseable")
+    assert_eq(mf.dependencies.get("helpers"), Val(DepSpec.Path{path: "../helpers"}))
+    assert(updated.contains("deps: {{\n    helpers: ../helpers,\n}}\n"))
+}
+
+// Ported from pkg.rs:2693-2706.
+#Test("pkg integration manifest_remove_dep_removes_correct_entry") {
+    raw :: pkg_integration_min_manifest("root", "0.1.0") + "\ndeps: {{\n    helpers: ../helpers,\n    other: ../other,\n}}\n"
+    updated :: pkg_remove_dep(raw, "helpers")
+    mf :: Manifest.parse("package.jet", updated) ?? panic("should reparse")
+    assert_eq(mf.dependencies.get("helpers"), None)
+    assert(mf.dependencies.get("other") != None)
+}

@@ -1,67 +1,111 @@
 // core.net.url — RFC 3986 URLs and component escaping.
 //
 // URL structure, authority validation, dot-segment removal, query ordering,
-// and the percent codecs are deterministic Jet code. The value is intentionally
-// kept as the existing `URL` carrier used by the Core registry.
+// and the percent codecs are deterministic Jet code. URL components are private;
+// callers use the accessor methods, with optional authority components.
 //
 // Non-ASCII host labels are lowercased byte-wise and Punycode-encoded
 // (RFC 3492, `xn--` prefix); no IDNA mapping table is applied. An explicit
 // authority port is remembered so rendering keeps it even when it equals the
 // scheme default; `port` itself follows the default-port convention.
 use core.net.mime.[MIME]
+use core.text as unicode
 #Error
-pub enum URLError {
+enum URLError {
     Syntax
     Percent
 }
 
-pub struct URL {
-    pub scheme: String
+struct URLPart {
+    text: String
+    hole: Bool
+}
+
+struct URL {
+    scheme_text: String
     user_text: String
     password_text: String
-    pub host: String
-    pub port: Int
+    host_text: String
+    port_value: Int
     port_explicit: Bool
-    pub path: String
-    pub query: String
-    pub fragment: String
-    pub raw: String
+    path_text: String
+    query_text: String
+    fragment_text: String
+    raw: String
+    host_recipe: [URLPart]
+    path_recipe: [URLPart]
+    impl Display {
+        fn display(self) -> String { unparse(self) }
+    }
+    impl Debug {
+        fn debug(^self) -> String { unparse(self) }
+    }
+    impl Equatable {
+        fn equal(self, rhs: URL) -> Bool {
+            self.scheme_text == rhs.scheme_text && self.user_text == rhs.user_text &&
+            self.password_text == rhs.password_text && self.host_text == rhs.host_text &&
+            self.port_value == rhs.port_value && self.port_explicit == rhs.port_explicit &&
+            self.path_text == rhs.path_text && self.query_text == rhs.query_text &&
+            self.fragment_text == rhs.fragment_text && self.raw == rhs.raw
+        }
+    }
 }
 
 impl URL {
+    fn scheme(self) -> String Never! { self.scheme_text.copy() }
+    fn path(self) -> String Never! { self.path_text.copy() }
+    fn query(self) -> String Never! { self.query_text.copy() }
+
+    fn host(self) -> String? Never! {
+        if self.host_text.bytes().len() == 0 -> return None
+        Val(self.host_text.copy())
+    }
+
+    /// Only an authority port written explicitly is present.
+    fn port(self) -> Int? Never! {
+        if !self.port_explicit || self.port_value < 0 -> return None
+        Val(self.port_value)
+    }
+
+    fn fragment(self) -> String? Never! {
+        if self.fragment_text.bytes().len() == 0 -> return None
+        Val(self.fragment_text.copy())
+    }
+
     /// Render the URL; an explicit authority port is kept.
-    pub fn to_string(self) -> String Never! { unparse(self) }
+    fn to_string(self) -> String Never! { unparse(self) }
 
     /// The decoded user name, or empty when absent.
-    pub fn username(self) -> String Never! { ~self.user_text }
+    fn username(self) -> String Never! { self.user_text.copy() }
 
     /// The decoded password, or empty when absent.
-    pub fn password(self) -> String Never! { ~self.password_text }
+    fn password(self) -> String Never! { self.password_text.copy() }
 
     /// `user:password`, `user`, or empty.
-    pub fn userinfo(self) -> String Never! { userinfo_text(self) }
+    fn userinfo(self) -> String Never! { userinfo_text(self) }
 
     /// `userinfo@host:port` with the port only when it was written explicitly.
-    pub fn authority(self) -> String Never! {
-        if self.host.bytes().len() == 0 -> return ""
+    fn authority(self) -> String Never! {
+        if self.host_text.bytes().len() == 0 -> return ""
         out := ""
         info :: userinfo_text(self)
         if info.bytes().len() > 0 -> out = "{info}@"
-        out = "{out}{render_host(self.host)}"
-        if self.port_explicit && self.port >= 0 -> out = "{out}:{self.port}"
+        out = "{out}{render_host(self.host_text)}"
+        if self.port_explicit && self.port_value >= 0 -> out = "{out}:{self.port_value}"
         out
     }
 
     /// The registered default port for the scheme, when it has one.
-    pub fn default_port(self) -> Int? Never! {
-        port :: scheme_default_port(self.scheme)
+    fn default_port(self) -> Int? Never! {
+        port :: scheme_default_port(self.scheme_text)
         if port < 0 -> return None
         Val(port)
     }
 
     /// Decoded, non-empty path segments.
-    pub fn path_segments(self) -> [String] Never! {
-        raw :: self.path.bytes()
+    fn path_segments(self) -> [String] Never! {
+        if self.path_recipe.len() > 0 -> return recipe_segments(self.path_recipe)
+        raw :: self.path_text.bytes()
         out := [String]{}
         start := 0
         loop i in 0..<(raw.len() + 1) {
@@ -74,38 +118,336 @@ impl URL {
     }
 
     /// Decoded repeated query pairs, in order.
-    pub fn query_pairs(self) -> [[String]] Never! { parse_qsl(self.query) ?? [[String]]{} }
+    fn query_pairs(self) -> [[String]] Never! { parse_qsl(self.query_text) ?? [[String]]{} }
 
     /// A copy with a lowercase scheme, ASCII host, and dot segments removed.
-    pub fn normalize(self) -> URL Never! {
-        scheme :: ascii_lower(self.scheme)
-        path := self.path
-        if scheme != "data" -> path = normalize_path(self.path, self.host.bytes().len() > 0 || starts(self.path, "/"))
+    fn normalize(self) -> URL Never! {
+        scheme :: ascii_lower(self.scheme_text)
+        path := self.path_text
+        if scheme != "data" && self.path_recipe.len() == 0 -> path = normalize_path(self.path_text, self.host_text.bytes().len() > 0 || starts(self.path_text, "/"))
         URL{
-            scheme: scheme,
+            scheme_text: scheme,
             user_text: self.user_text,
             password_text: self.password_text,
-            host: host_to_ascii(ascii_lower(self.host)),
-            port: self.port,
+            host_text: if self.host_recipe.len() == 0 -> host_to_ascii(ascii_lower(self.host_text)) else -> self.host_text,
+            port_value: self.port_value,
             port_explicit: self.port_explicit,
-            path: path,
-            query: self.query,
-            fragment: self.fragment,
+            path_text: path,
+            query_text: self.query_text,
+            fragment_text: self.fragment_text,
             raw: "",
+            host_recipe: self.host_recipe,
+            path_recipe: self.path_recipe,
         }
     }
 
     /// Resolve a relative reference against this URL.
-    pub fn join(self, relative: String) -> URL URLError! { join_url(self, relative) }
+    fn join(self, relative: String) -> URL URLError! { join_url(self, relative) }
+
+    /// Replace every occurrence of a decoded query key, appending its value.
+    fn set_query(self, key: String, value: String) -> URL Never! {
+        rows := [[String]]{}
+        loop row in self.query_pairs() {
+            if row[0] != key -> &rows.push(row)
+        }
+        &rows.push([String]{key, value})
+        with_query(self, rows)
+    }
+
+    /// Append a pair without changing previous occurrences or their order.
+    fn add_query(self, key: String, value: String) -> URL Never! {
+        rows := self.query_pairs()
+        &rows.push([String]{key, value})
+        with_query(self, rows)
+    }
+}
+
+fn with_query(url: URL, rows: [[String]]) -> URL Never! {
+    URL{
+        scheme_text: url.scheme_text,
+        user_text: url.user_text,
+        password_text: url.password_text,
+        host_text: url.host_text,
+        port_value: url.port_value,
+        port_explicit: url.port_explicit,
+        path_text: url.path_text,
+        query_text: encode_query(rows),
+        fragment_text: url.fragment_text,
+        raw: "",
+        host_recipe: url.host_recipe,
+        path_recipe: url.path_recipe,
+    }
 }
 
 fn userinfo_text(url: URL) -> String Never! {
-    if url.password_text.bytes().len() == 0 -> return ~url.user_text
+    if url.password_text.bytes().len() == 0 -> return url.user_text.copy()
     "{url.user_text}:{url.password_text}"
 }
 
 
-pub fn parse(text: String) -> URL URLError! {
+// The compiler validates the skeleton before lowering. Holes remain opaque:
+// their slashes and dot segments never become URL grammar.
+fn literal(literals: [String], holes: [String]) -> URL Never! {
+    if literals.len() != holes.len() + 1 -> panic("typed URL literal and hole counts do not match")
+    nonce := 0
+    marker := ""
+    loop {
+        marker = "jet-hole-opaque-{nonce}-"
+        collision := false
+        loop text in literals {
+            if find_text(text, marker, 0) >= 0 -> collision = true
+        }
+        if !collision -> break
+        nonce += 1
+    }
+    skeleton := literals[0]
+    loop i in 0..<holes.len() -> skeleton = "{skeleton}{marker}{literals[i + 1]}"
+    // Match the validator's Unicode-whitespace skeleton boundary, without
+    // trimming any substituted hole value.
+    skeleton = unicode.trim(skeleton)
+    url := parse_recipe(skeleton, false) ?? panic("validated URL skeleton is invalid")
+    cursor := URLHoleCursor{index: 0}
+    url.scheme_text = ascii_lower(replace_holes(url.scheme_text, marker, holes, &cursor))
+    url.user_text = replace_holes(url.user_text, marker, holes, &cursor)
+    url.password_text = replace_holes(url.password_text, marker, holes, &cursor)
+    url.host_recipe = apply_holes(url.host_text, marker, holes, &cursor)
+    url.host_text = recipe_text(url.host_recipe)
+    url.path_recipe = apply_holes(url.path_text, marker, holes, &cursor)
+    if url.scheme_text != "data" -> url.path_recipe = normalize_recipe(url.path_recipe)
+    url.path_text = recipe_text(url.path_recipe)
+    rows := [[String]]{}
+    loop row in parse_qsl(url.query_text) ?? panic("validated URL query is invalid") {
+        key :: replace_holes(row[0], marker, holes, &cursor)
+        value :: replace_holes(row[1], marker, holes, &cursor)
+        &rows.push([String]{key, value})
+    }
+    url.query_text = encode_query(rows)
+    url.fragment_text = replace_holes(url.fragment_text, marker, holes, &cursor)
+    if cursor.index != holes.len() -> panic("typed URL holes do not match its literal skeleton")
+    url.raw = literal_raw(url, skeleton)
+    url
+}
+
+struct URLHoleCursor { index: Int }
+
+// `raw` keeps the constructor's canonical rendering, including explicitly
+// empty user/password/fragment components which accessor storage omits.
+fn literal_raw(url: URL, skeleton: String) -> String Never! {
+    raw :: trim_ascii(skeleton).bytes()
+    colon :: index_of(raw, 58)
+    authority :: colon + 2 < raw.len() && raw[colon + 1] == (U8{47}) && raw[colon + 2] == (U8{47})
+    out := "{url.scheme_text}:"
+    if authority {
+        end := colon + 3
+        loop end < raw.len() {
+            n :: Int.from_u8(raw[end])
+            if n == 47 || n == 63 || n == 35 -> break
+            end += 1
+        }
+        auth :: slice(raw, colon + 3, end)
+        at :: last_index(auth.bytes(), 64)
+        out = "{out}//"
+        if at >= 0 {
+            out = "{out}{percent_encode(url.user_text)}"
+            info :: slice(auth.bytes(), 0, at)
+            if index_of(info.bytes(), 58) >= 0 -> out = "{out}:{percent_encode(url.password_text)}"
+            out = "{out}@"
+        }
+        out = "{out}{render_recipe(url.host_recipe, false, false)}"
+        if url.port_explicit -> out = "{out}:{url.port_value}"
+    }
+    out = "{out}{render_recipe(url.path_recipe, true, url.scheme_text == "data" && !authority)}"
+    if url.query_text != "" -> out = "{out}?{url.query_text}"
+    if index_of(raw, 35) >= 0 -> out = "{out}#{percent_encode(url.fragment_text)}"
+    out
+}
+
+fn find_text(text: String, needle: String, start: Int) -> Int Never! {
+    raw :: text.bytes()
+    wanted :: needle.bytes()
+    loop i in start..<raw.len() {
+        if i + wanted.len() > raw.len() -> break
+        same := true
+        loop j in 0..<wanted.len() {
+            if raw[i + j] != wanted[j] -> same = false
+        }
+        if same -> return i
+    }
+    -1
+}
+
+fn replace_holes(text: String, marker: String, holes: [String], cursor: &URLHoleCursor) -> String Never! {
+    next_marker := find_text(text, marker, 0)
+    if next_marker < 0 -> return text.copy()
+    out := ""
+    start := 0
+    loop next_marker >= 0 {
+        if cursor.index >= holes.len() -> panic("typed URL holes do not match its literal skeleton")
+        out = "{out}{slice(text.bytes(), start, next_marker)}{holes[cursor.index]}"
+        cursor.index += 1
+        start = next_marker + marker.bytes().len()
+        next_marker = find_text(text, marker, start)
+    }
+    "{out}{slice(text.bytes(), start, text.bytes().len())}"
+}
+
+fn apply_holes(text: String, marker: String, holes: [String], cursor: &URLHoleCursor) -> [URLPart] Never! {
+    out := [URLPart]{}
+    start := 0
+    loop {
+        next_marker :: find_text(text, marker, start)
+        if next_marker < 0 -> break
+        if next_marker > start || out.len() == 0 -> &out.push(URLPart{text: slice(text.bytes(), start, next_marker), hole: false})
+        if cursor.index >= holes.len() -> panic("typed URL holes do not match its literal skeleton")
+        &out.push(URLPart{text: holes[cursor.index], hole: true})
+        cursor.index += 1
+        start = next_marker + marker.bytes().len()
+    }
+    if start < text.bytes().len() || out.len() == 0 -> &out.push(URLPart{text: slice(text.bytes(), start, text.bytes().len()), hole: false})
+    out
+}
+
+fn recipe_text(parts: [URLPart]) -> String Never! {
+    out := ""
+    loop part in parts -> out = "{out}{part.text}"
+    out
+}
+
+fn recipe_has_hole(parts: [URLPart]) -> Bool Never! {
+    loop part in parts {
+        if part.hole -> return true
+    }
+    false
+}
+
+fn normalize_recipe(parts: [URLPart]) -> [URLPart] Never! {
+    absolute :: parts.len() > 0 && !parts[0].hole && starts(parts[0].text, "/")
+    trailing :: parts.len() > 0 && !parts[parts.len() - 1].hole && ends_slash(parts[parts.len() - 1].text)
+    segments := [[URLPart]]{}
+    segment := [URLPart]{}
+    loop part in parts {
+        if part.hole {
+            &segment.push(part)
+        } else {
+            raw :: part.text.bytes()
+            start := 0
+            loop i in 0..<(raw.len() + 1) {
+                if i == raw.len() || raw[i] == (U8{47}) {
+                    if i > start -> &segment.push(URLPart{text: slice(raw, start, i), hole: false})
+                    if i < raw.len() {
+                        &segments.push(segment)
+                        segment = [URLPart]{}
+                    }
+                    start = i + 1
+                }
+            }
+        }
+    }
+    &segments.push(segment)
+    normalized := [[URLPart]]{}
+    loop row in segments {
+        if row.len() == 0 -> next
+        text :: recipe_text(row)
+        if !recipe_has_hole(row) && text == "." -> next
+        if !recipe_has_hole(row) && text == ".." {
+            if normalized.len() > 0 {
+                if !recipe_has_hole(normalized[normalized.len() - 1]) {
+                    _ :: &normalized.pop()
+                } else {
+                    &normalized.push(row)
+                }
+            }
+        } else {
+            &normalized.push(row)
+        }
+    }
+    out := [URLPart]{}
+    if absolute -> &out.push(URLPart{text: "/", hole: false})
+    loop i in 0..<normalized.len() {
+        if i > 0 -> &out.push(URLPart{text: "/", hole: false})
+        loop part in normalized[i] -> &out.push(part)
+    }
+    if trailing && (out.len() == 0 || !ends_slash(out[out.len() - 1].text)) -> &out.push(URLPart{text: "/", hole: false})
+    out
+}
+
+fn ends_slash(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    raw.len() > 0 && raw[raw.len() - 1] == (U8{47})
+}
+
+fn recipe_segments(parts: [URLPart]) -> [String] Never! {
+    out := [String]{}
+    current := ""
+    loop part in parts {
+        if part.hole -> current = "{current}{part.text}"
+        else {
+            raw :: part.text.bytes()
+            start := 0
+            loop i in 0..<(raw.len() + 1) {
+                if i == raw.len() || raw[i] == (U8{47}) {
+                    current = "{current}{slice(raw, start, i)}"
+                    if i < raw.len() && current != "" {
+                        &out.push(current)
+                        current = ""
+                    }
+                    start = i + 1
+                }
+            }
+        }
+    }
+    if current != "" -> &out.push(current)
+    out
+}
+
+fn render_recipe(parts: [URLPart], path: Bool, data: Bool) -> String Never! {
+    out := ""
+    payload := false
+    loop part in parts {
+        if data {
+            if part.hole -> out = "{out}{percent_encode(part.text)}"
+            else if payload -> out = "{out}{part.text}"
+            else {
+                comma :: index_of(part.text.bytes(), 44)
+                if comma >= 0 {
+                    out = "{out}{render_data_mime(slice(part.text.bytes(), 0, comma))},{slice(part.text.bytes(), comma + 1, part.text.bytes().len())}"
+                    payload = true
+                } else {
+                    out = "{out}{render_data_mime(part.text)}"
+                }
+            }
+        } else if part.hole && path && (part.text == "." || part.text == "..") {
+            loop _ in part.text.bytes() -> out = "{out}%2E"
+        } else if part.hole -> out = "{out}{percent_encode(part.text)}"
+        else if path -> out = "{out}{encode_component(part.text, true, false)}"
+        else -> out = "{out}{render_authority_literal(part.text)}"
+    }
+    out
+}
+
+fn render_authority_literal(text: String) -> String Never! {
+    out := ""
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if unreserved(b) || n == 91 || n == 93 || n == 58 -> out = "{out}{slice([U8]{b}, 0, 1)}"
+        else -> out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}"
+    }
+    out
+}
+
+fn render_data_mime(text: String) -> String Never! {
+    out := ""
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if (unreserved(b) && n != 126) || n == 33 || n == 35 || n == 36 || n == 38 || n == 43 || n == 47 || n == 59 || n == 61 || n == 94 -> out = "{out}{slice([U8]{b}, 0, 1)}"
+        else -> out = "{out}%{slice([U8]{hex_nibble(n /% 16), hex_nibble(n %% 16)}, 0, 2)}"
+    }
+    out
+}
+
+fn parse(text: String) -> URL URLError! { parse_recipe(text, true) }
+
+fn parse_recipe(text: String, normalize: Bool) -> URL URLError! {
     input :: trim_ascii(text)
     raw :: input.bytes()
     if raw.len() == 0 -> return Err(URLError.Syntax)
@@ -132,7 +474,7 @@ pub fn parse(text: String) -> URL URLError! {
         authority :: slice(raw, rest_i, auth_end)
         if authority.bytes().len() == 0 -> return Err(URLError.Syntax)
         at := last_index(authority.bytes(), 64)
-        hostport := ~authority
+        hostport := authority.copy()
         if at >= 0 {
             info :: slice(authority.bytes(), 0, at)
             sep := index_of(info.bytes(), 58)
@@ -149,11 +491,16 @@ pub fn parse(text: String) -> URL URLError! {
         if hp[0] == (U8{91}) {
             rb := index_of(hp, 93)
             if rb < 0 -> return Err(URLError.Syntax)
-            host = ascii_lower(slice(hp, 1, rb))
+            host = ascii_lower(if normalize -> slice(hp, 1, rb) else -> slice(hp, 0, rb + 1))
             if rb + 1 < hp.len() {
-                if hp[rb + 1] != (U8{58}) -> return Err(URLError.Syntax)
-                port = parse_port(slice(hp, rb + 2, hp.len())) ?? return Err(URLError.Syntax)
-                port_explicit = true
+                if hp[rb + 1] == (U8{58}) {
+                    port = parse_port(slice(hp, rb + 2, hp.len())) ?? return Err(URLError.Syntax)
+                    port_explicit = true
+                } else if !normalize {
+                    host = ascii_lower(hostport)
+                } else {
+                    return Err(URLError.Syntax)
+                }
             }
         } else {
             col := last_index(hp, 58)
@@ -166,9 +513,9 @@ pub fn parse(text: String) -> URL URLError! {
                 host = host_to_ascii(ascii_lower(hostport))
             }
         }
-        if !valid_url_host(host) -> return Err(URLError.Syntax)
+        if normalize && !valid_url_host(host) -> return Err(URLError.Syntax)
         rest_i = auth_end
-    } else if scheme == "http" || scheme == "https" || scheme == "ws" || scheme == "wss" {
+    } else if scheme == "http" || scheme == "https" || (normalize && (scheme == "ws" || scheme == "wss")) {
         return Err(URLError.Syntax)
     }
 
@@ -189,16 +536,16 @@ pub fn parse(text: String) -> URL URLError! {
     path_raw :: slice(raw, rest_i, qpos)
     if !valid_percent(path_raw) -> return Err(URLError.Percent)
     path := if scheme == "data" -> path_raw else -> percent_decode(path_raw) ?? return Err(URLError.Percent)
-    path = if scheme == "data" -> path else -> normalize_path(path, host.bytes().len() > 0)
+    if normalize && scheme != "data" -> path = normalize_path(path, host.bytes().len() > 0)
     if path.bytes().len() == 0 && host.bytes().len() > 0 -> path = "/"
     query := ""
     if qpos < hash -> query = escape_query(slice(raw, qpos + 1, hash))
     fragment := ""
     if hash < raw.len() -> fragment = percent_decode(slice(raw, hash + 1, raw.len())) ?? return Err(URLError.Percent)
-    Ok(URL{scheme: scheme, user_text: user, password_text: password, host: host, port: port, port_explicit: port_explicit, path: path, query: query, fragment: fragment, raw: input})
+    Ok(URL{scheme_text: scheme, user_text: user, password_text: password, host_text: host, port_value: port, port_explicit: port_explicit, path_text: path, query_text: query, fragment_text: fragment, raw: input, host_recipe: [URLPart]{}, path_recipe: [URLPart]{}})
 }
 
-pub fn from_parts(scheme: String, host: String, path: String, query: [[String]], fragment: String) -> URL URLError! {
+fn from_parts(scheme: String, host: String, path: String, query: [[String]], fragment: String) -> URL URLError! {
     scheme_l :: ascii_lower(scheme)
     if !valid_scheme(scheme_l) -> return Err(URLError.Syntax)
     if host.bytes().len() == 0 && (scheme_l == "http" || scheme_l == "https" || scheme_l == "ws" || scheme_l == "wss") {
@@ -221,16 +568,16 @@ pub fn from_parts(scheme: String, host: String, path: String, query: [[String]],
     parse(raw)
 }
 
-pub fn file(path: String) -> URL Never! {
+fn file(path: String) -> URL Never! {
     p := path
     if p.bytes().len() == 0 -> p = "/"
     if p.bytes()[0] != (U8{47}) -> p = "/{p}"
-    URL{scheme: "file", user_text: "", password_text: "", host: "", port: -1, port_explicit: false, path: normalize_path(p, true), query: "", fragment: "", raw: ""}
+    URL{scheme_text: "file", user_text: "", password_text: "", host_text: "", port_value: -1, port_explicit: false, path_text: normalize_path(p, true), query_text: "", fragment_text: "", raw: "", host_recipe: [URLPart]{}, path_recipe: [URLPart]{}}
 }
 
-pub fn data(mime: MIME, payload: String) -> URL Never! {
+fn data(mime: MIME, payload: String) -> URL Never! {
     encoded :: percent_encode(payload)
-    URL{scheme: "data", user_text: "", password_text: "", host: "", port: -1, port_explicit: false, path: "{mime.top}/{mime.sub},{encoded}", query: "", fragment: "", raw: ""}
+    URL{scheme_text: "data", user_text: "", password_text: "", host_text: "", port_value: -1, port_explicit: false, path_text: "{mime.top}/{mime.sub},{encoded}", query_text: "", fragment_text: "", raw: "", host_recipe: [URLPart]{}, path_recipe: [URLPart]{}}
 }
 
 fn scheme_default_port(scheme: String) -> Int Never! {
@@ -246,7 +593,7 @@ fn scheme_default_port(scheme: String) -> Int Never! {
     }
 }
 
-pub fn query(pairs: [[String]]) -> String Never! { encode_query(pairs) }
+fn query(pairs: [[String]]) -> String Never! { encode_query(pairs) }
 
 fn encode_query(pairs: [[String]]) -> String Never! {
     out := ""
@@ -267,11 +614,11 @@ fn encode_query(pairs: [[String]]) -> String Never! {
     out
 }
 
-pub fn percent_encode(text: String) -> String Never! {
+fn percent_encode(text: String) -> String Never! {
     encode_component(text, false, false)
 }
 
-pub fn percent_decode(text: String) -> String URLError! {
+fn percent_decode(text: String) -> String URLError! {
     raw :: text.bytes()
     out := [U8]{}
     i := 0
@@ -291,51 +638,51 @@ pub fn percent_decode(text: String) -> String URLError! {
     String.from_bytes(out) ?? return Err(URLError.Percent)
 }
 
-pub fn geturl(url: URL) -> String Never! { unparse(url) }
+fn geturl(url: URL) -> String Never! { unparse(url) }
 
-pub fn unparse(url: URL) -> String Never! {
-    scheme :: ascii_lower(url.scheme)
+fn unparse(url: URL) -> String Never! {
+    scheme :: ascii_lower(url.scheme_text)
     authority := ""
-    if url.host.bytes().len() > 0 {
-        host :: render_host(url.host)
-        authority = ~host
+    if url.host_text.bytes().len() > 0 {
+        host :: if url.host_recipe.len() > 0 -> render_recipe(url.host_recipe, false, false) else -> render_host(url.host_text)
+        authority = host.copy()
         if url.user_text.bytes().len() > 0 {
             authority = percent_encode(url.user_text)
             if url.password_text.bytes().len() > 0 -> authority = "{authority}:{percent_encode(url.password_text)}"
             authority = "{authority}@{host}"
         }
-        if url.port >= 0 && (url.port_explicit || url.port != scheme_default_port(scheme)) -> authority = "{authority}:{url.port}"
+        if url.port_value >= 0 && (url.port_explicit || url.port_value != scheme_default_port(scheme)) -> authority = "{authority}:{url.port_value}"
     }
-    path := url.path
+    path := url.path_text
     if authority.bytes().len() > 0 && path.bytes().len() == 0 -> path = "/"
-    path_text :: if scheme == "data" -> path else -> encode_component(path, true, false)
+    path_text :: if url.path_recipe.len() > 0 -> render_recipe(url.path_recipe, true, scheme == "data" && url.host_text == "") else if scheme == "data" -> path else -> encode_component(path, true, false)
     query_text := ""
-    if url.query.bytes().len() > 0 -> query_text = "?{url.query}"
+    if url.query_text.bytes().len() > 0 -> query_text = "?{url.query_text}"
     fragment_text := ""
-    if url.fragment.bytes().len() > 0 -> fragment_text = "#{percent_encode(url.fragment)}"
+    if url.fragment_text.bytes().len() > 0 -> fragment_text = "#{percent_encode(url.fragment_text)}"
     if authority.bytes().len() > 0 -> return "{scheme}://{authority}{path_text}{query_text}{fragment_text}"
     if scheme == "file" -> return "file://{path_text}{query_text}{fragment_text}"
     return "{scheme}:{path_text}{query_text}{fragment_text}"
 }
 
-pub fn urljoin(base: String, rel: String) -> String URLError! {
+fn urljoin(base: String, rel: String) -> String URLError! {
     parsed :: parse(base)
     joined :: join_url(parsed, rel)
     unparse(joined)
 }
 
 fn join_url(parsed: URL, rel: String) -> URL URLError! {
-    if rel.bytes().len() == 0 -> return with_parts(parsed, parsed.path, parsed.query, parsed.fragment)
+    if rel.bytes().len() == 0 -> return with_parts(parsed, parsed.path_text, parsed.query_text, parsed.fragment_text)
     if has_scheme(rel) -> return parse(rel)
-    if starts(rel, "//") -> return parse("{parsed.scheme}:{rel}")
+    if starts(rel, "//") -> return parse("{parsed.scheme_text}:{rel}")
     if rel.bytes()[0] == (U8{35}) {
         fragment :: percent_decode(slice(rel.bytes(), 1, rel.bytes().len())) ?? return Err(URLError.Percent)
-        return with_parts(parsed, parsed.path, parsed.query, fragment)
+        return with_parts(parsed, parsed.path_text, parsed.query_text, fragment)
     }
     if rel.bytes()[0] == (U8{63}) {
         query :: slice(rel.bytes(), 1, rel.bytes().len())
         if !valid_percent(query) -> return Err(URLError.Percent)
-        return with_parts(parsed, parsed.path, escape_query(query), "")
+        return with_parts(parsed, parsed.path_text, escape_query(query), "")
     }
     hash := index_of(rel.bytes(), 35)
     rel_no_frag := if hash >= 0 -> slice(rel.bytes(), 0, hash) else -> rel
@@ -346,39 +693,69 @@ fn join_url(parsed: URL, rel: String) -> URL URLError! {
     rel_path :: percent_decode(rel_path_raw) ?? return Err(URLError.Percent)
     rel_query := if qpos >= 0 -> slice(rel_no_frag.bytes(), qpos + 1, rel_no_frag.bytes().len()) else -> ""
     if !valid_percent(rel_query) -> return Err(URLError.Percent)
-    path := parsed.path
-    query := parsed.query
+    path := parsed.path_text
+    query := parsed.query_text
+    path_recipe := parsed.path_recipe
     if rel_path.bytes().len() == 0 {
         if qpos >= 0 -> query = escape_query(rel_query)
     } else if rel_path.bytes()[0] == (U8{47}) {
-        path = normalize_path(rel_path, parsed.host.bytes().len() > 0)
+        path = normalize_path(rel_path, parsed.host_text.bytes().len() > 0)
         query = escape_query(rel_query)
+        path_recipe = [URLPart]{}
     } else {
-        dir :: dirname_url(parsed.path)
-        path = normalize_path("{dir}{rel_path}", parsed.host.bytes().len() > 0)
+        dir :: dirname_url(parsed.path_text)
+        path = normalize_path("{dir}{rel_path}", parsed.host_text.bytes().len() > 0)
         query = escape_query(rel_query)
+        if parsed.path_recipe.len() > 0 {
+            path_recipe = recipe_directory(parsed.path_recipe)
+            if path_recipe.len() == 0 -> &path_recipe.push(URLPart{text: "/", hole: false})
+            &path_recipe.push(URLPart{text: rel_path, hole: false})
+            path_recipe = normalize_recipe(path_recipe)
+            path = recipe_text(path_recipe)
+        }
     }
-    with_parts(parsed, path, query, frag)
+    joined := with_parts(parsed, path, query, frag)
+    joined.path_recipe = path_recipe
+    joined
 }
 
 fn with_parts(url: URL, path: String, query: String, fragment: String) -> URL Never! {
     URL{
-        scheme: url.scheme,
+        scheme_text: url.scheme_text,
         user_text: url.user_text,
         password_text: url.password_text,
-        host: url.host,
-        port: url.port,
+        host_text: url.host_text,
+        port_value: url.port_value,
         port_explicit: url.port_explicit,
-        path: path,
-        query: query,
-        fragment: fragment,
+        path_text: path,
+        query_text: query,
+        fragment_text: fragment,
         raw: "",
+        host_recipe: url.host_recipe,
+        path_recipe: if path == url.path_text -> url.path_recipe else -> [URLPart]{},
     }
+}
+
+fn recipe_directory(parts: [URLPart]) -> [URLPart] Never! {
+    i := parts.len() - 1
+    loop i >= 0 {
+        if !parts[i].hole {
+            slash :: last_index(parts[i].text.bytes(), 47)
+            if slash >= 0 {
+                out := [URLPart]{}
+                loop j in 0..<i -> &out.push(parts[j])
+                &out.push(URLPart{text: slice(parts[i].text.bytes(), 0, slash + 1), hole: false})
+                return out
+            }
+        }
+        i -= 1
+    }
+    [URLPart]{}
 }
 
 fn render_host(host: String) -> String Never! {
     if contains_byte(host, 58) && !starts(host, "[") -> return "[{host}]"
-    ~host
+    host.copy()
 }
 
 // Percent-encode query bytes that RFC 3986 does not allow unescaped; existing
@@ -407,14 +784,14 @@ fn host_to_ascii(host: String) -> String Never! {
     loop b in raw {
         if Int.from_u8(b) >= 128 -> ascii = false
     }
-    if ascii -> return ~host
+    if ascii -> return host.copy()
     out := ""
     start := 0
     loop i in 0..<(raw.len() + 1) {
         if i == raw.len() || raw[i] == (U8{46}) {
             label :: slice(raw, start, i)
             encoded := label
-            points :: utf8_points(label.bytes()) ?? return ~host
+            points :: utf8_points(label.bytes()) ?? return host.copy()
             non_ascii := false
             loop cp in points {
                 if cp >= 128 -> non_ascii = true
@@ -436,13 +813,13 @@ fn utf8_points(raw: [U8]) -> [Int]? {
         cp := b
         if b >= 240 {
             width = 4
-            cp = b & 7
+            cp = (b).bit_and(7)
         } else if b >= 224 {
             width = 3
-            cp = b & 15
+            cp = (b).bit_and(15)
         } else if b >= 192 {
             width = 2
-            cp = b & 31
+            cp = (b).bit_and(31)
         } else if b >= 128 {
             return None
         }
@@ -450,7 +827,7 @@ fn utf8_points(raw: [U8]) -> [Int]? {
         loop k in 1..<width {
             next :: Int.from_u8(raw[i + k])
             if next < 128 || next >= 192 -> return None
-            cp = cp * 64 + (next & 63)
+            cp = cp * 64 + ((next).bit_and(63))
         }
         &out.push(cp)
         i = i + width
@@ -518,7 +895,7 @@ fn punycode_adapt(delta_in: Int, points: Int, first: Bool) -> Int Never! {
     k + (36 * delta) /% (delta + 38)
 }
 
-pub fn parse_qsl(query: String) -> [[String]] URLError! {
+fn parse_qsl(query: String) -> [[String]] URLError! {
     rows := [[String]]{}
     raw :: query.bytes()
     if raw.len() == 0 -> return rows
@@ -545,42 +922,42 @@ pub fn parse_qsl(query: String) -> [[String]] URLError! {
     rows
 }
 
-pub fn urlencode(pairs: [[String]]) -> String Never! { encode_query(pairs) }
+fn urlencode(pairs: [[String]]) -> String Never! { encode_query(pairs) }
 
-pub fn split_fragment(url: String) -> (fragment: String, url: String) Never! {
+fn split_fragment(url: String) -> (fragment: String, url: String) Never! {
     raw :: url.bytes()
     i := index_of(raw, 35)
     if i < 0 -> return (fragment: "", url: url)
     (fragment: slice(raw, i + 1, raw.len()), url: slice(raw, 0, i))
 }
 
-pub fn quote(text: String) -> String Never! { encode_component(text, true, false) }
-pub fn quote_from_bytes(data: [U8]) -> String Never! { encode_component(String.from_bytes(data) ?? "", true, false) }
-pub fn quote_plus(text: String) -> String Never! { encode_component(text, false, true) }
-pub fn unquote(text: String) -> String URLError! { percent_decode(text) }
+fn quote(text: String) -> String Never! { encode_component(text, true, false) }
+fn quote_from_bytes(data: [U8]) -> String Never! { encode_component(String.from_bytes(data) ?? "", true, false) }
+fn quote_plus(text: String) -> String Never! { encode_component(text, false, true) }
+fn unquote(text: String) -> String URLError! { percent_decode(text) }
 
-pub fn unquote_to_bytes(text: String) -> [U8] URLError! {
+fn unquote_to_bytes(text: String) -> [U8] URLError! {
     decoded :: percent_decode(text)
     decoded.bytes()
 }
 
-pub fn unquote_plus(text: String) -> String URLError! {
+fn unquote_plus(text: String) -> String URLError! {
     percent_decode(form_to_percent(text))
 }
 
-pub fn urlparse(text: String) -> URL URLError! { parse(text) }
-pub fn urlsplit(text: String) -> URL URLError! { parse(text) }
-pub fn urlunparse(url: URL) -> String Never! { unparse(url) }
-pub fn urlunsplit(url: URL) -> String Never! { unparse(url) }
+fn urlparse(text: String) -> URL URLError! { parse(text) }
+fn urlsplit(text: String) -> URL URLError! { parse(text) }
+fn urlunparse(url: URL) -> String Never! { unparse(url) }
+fn urlunsplit(url: URL) -> String Never! { unparse(url) }
 
-pub fn urldefrag(text: String) -> (url: String, fragment: String) Never! {
+fn urldefrag(text: String) -> (url: String, fragment: String) Never! {
     raw :: text.bytes()
     i := index_of(raw, 35)
     if i < 0 -> return (url: text, fragment: "")
     (url: slice(raw, 0, i), fragment: slice(raw, i + 1, raw.len()))
 }
 
-pub fn parse_qs(query: String) -> [[String]] URLError! { parse_qsl(query) }
+fn parse_qs(query: String) -> [[String]] URLError! { parse_qsl(query) }
 
 fn encode_component(text: String, allow_slash: Bool, plus_space: Bool) -> String Never! {
     out := [U8]{}
@@ -830,4 +1207,86 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     if start < 0 || start >= limit -> return out
     loop i in start..<limit -> &out.push(raw[i])
     out
+}
+
+#Test("URL receiver components and query updates") {
+    original :: parse("https://example.com:443/a?x=1&keep=2&x=3#part") ?? panic("valid URL")
+    assert(original.scheme() == "https")
+    assert(original.path() == "/a")
+    assert(original.query() == "x=1&keep=2&x=3")
+    host :: Val("example.com")
+    port :: Val(443)
+    fragment :: Val("part")
+    assert(original.host() == host)
+    assert(original.port() == port)
+    assert(original.fragment() == fragment)
+    changed :: original.set_query("x", "a b")
+    assert(changed.query() == "keep=2&x=a%20b")
+    assert(changed.add_query("x", "4").query() == "keep=2&x=a%20b&x=4")
+    assert(original.query() == "x=1&keep=2&x=3")
+}
+
+#Test("absent URL components") {
+    local :: file("/tmp/a")
+    assert(local.host() == None)
+    assert(local.port() == None)
+    assert(local.fragment() == None)
+    web :: parse("https://example.com/") ?? panic("valid URL")
+    assert(web.port() == None)
+    https_port :: Val(443)
+    assert(web.default_port() == https_port)
+}
+
+#Test("URL literals keep component holes opaque") {
+    user :: "a:b"
+    password :: "p@ss"
+    host :: "other/host"
+    path :: "a/b?x=1#f"
+    key :: "k&="
+    value :: "v&="
+    fragment :: "f#?"
+    typed :: URL{"https://{user}:{password}@{host}/root/{path}?{key}={value}#{fragment}"}
+    assert(typed.username() == user)
+    assert(typed.password() == password)
+    assert(typed.host() == Val(host))
+    assert(typed.path() == "/root/{path}")
+    assert(typed.path_segments() == [String]{"root", path})
+    assert(typed.query_pairs() == [[String]]{[String]{key, value}})
+    assert(typed.fragment() == Val(fragment))
+    assert(typed.to_string() == "https://a%3Ab:p%40ss@other%2Fhost/root/a%2Fb%3Fx%3D1%23f?k%26%3D=v%26%3D#f%23%3F")
+}
+
+#Test("URL literals normalize only literal dot segments") {
+    dot :: ".."
+    typed :: URL{"https://example.test/a/{dot}/../b/./c"}
+    assert(typed.to_string() == "https://example.test/a/%2E%2E/../b/c")
+    assert(typed.normalize().to_string() == typed.to_string())
+    assert(typed.add_query("q", "a b").to_string() == "https://example.test/a/%2E%2E/../b/c?q=a%20b")
+    joined :: typed.join("next") ?? panic("relative URL")
+    assert(joined.to_string() == "https://example.test/a/%2E%2E/../b/next")
+}
+
+#Test("URL data literal payload and marker collisions") {
+    payload :: "a/b?x=1#f"
+    typed :: URL{"data:text/plain,{payload}"}
+    assert(typed.to_string() == "data:text/plain,a%2Fb%3Fx%3D1%23f")
+    authority :: URL{"data://example.test/a~/{payload}"}
+    assert(authority.to_string() == "data://example.test/a~/a%2Fb%3Fx%3D1%23f")
+    collision :: URL{"https://example.test/jet-hole-opaque-0-/{payload}"}
+    assert(collision.path_segments() == [String]{"jet-hole-opaque-0-", payload})
+    assert(collision.to_string() == "https://example.test/jet-hole-opaque-0-/a%2Fb%3Fx%3D1%23f")
+    ipv6 :: URL{"https://[::1]:443/a"}
+    assert(ipv6.to_string() == "https://[::1]:443/a")
+}
+
+#Test("URL literal raw rendering preserves empty components") {
+    explicit :: URL{"https://:@example.test:443/a#"}
+    assert(explicit.raw == "https://:@example.test:443/a#")
+    local :: URL{"file:/tmp/a"}
+    assert(local.raw == "file:/tmp/a")
+    parsed :: parse("https://example.test/a") ?? panic("URL")
+    typed :: URL{"https://example.test/a"}
+    assert(parsed == typed)
+    padded :: URL{"　https://example.test/a　"}
+    assert(padded.raw == "https://example.test/a")
 }

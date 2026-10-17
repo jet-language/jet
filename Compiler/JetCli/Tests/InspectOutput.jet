@@ -1,0 +1,36 @@
+// Production sema Output selection and CLI report, not CLI text resolution.
+fn inspect_output_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("InspectOutput: {message}")
+}
+fn inspect_output_request(source: String) -> JetDriverCompileRequest {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/inspect-output", identity: "output-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/inspect-output/run.jet", relative_path: "run.jet", identity: "output-source", source: source}}, foreign_cache_files: []}}, entry_root_identity: "output-root", entry_path: "/inspect-output/run.jet"}
+    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    request.host_facts.target_triple = Val("x86_64-unknown-linux-gnu")
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request
+}
+fn run() {
+    source :: "APP :: Output.Executable{{name: \"demo\", entry: start}}\nfn start() Never! {{}}"
+    request :: inspect_output_request(source)
+    query :: jet_driver_output_query(^request, None)
+    inspect_output_require(query.compile.complete && query.outputs.len() == 1 && query.outputs[0].selected, "sema selected Output")
+    text :: jet_cli_output_report(query, query.outputs[0], false)
+    inspect_output_require(text == "selected: Executable \"demo\"\nentry: start\nsource path: /inspect-output/run.jet\ncallable identity: run::start\nfailure contract: Never! (explicit !Never (proven unreachable))\nrequired effects: none\ngranted effects: Exec.Args, IO, Mem.Alloc\ndenied effects: none\nauthority: application default\nselection reason: sole compatible Output\n", "selected checked callable exact human output")
+    machine :: jet_cli_output_report(query, query.outputs[0], true)
+    inspect_output_require(machine == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.output\",\"ok\":true,\"reports\":[],\"output\":{{\"binding\":\"APP\",\"kind\":\"Executable\",\"name\":\"demo\",\"entry\":\"start\",\"source_path\":\"/inspect-output/run.jet\",\"callable_identity\":\"run::start\",\"failure_contract\":\"Never!\",\"failure_source\":\"explicit !Never (proven unreachable)\",\"effects\":[],\"required_effects\":[],\"granted_effects\":[\"Exec.Args\",\"IO\",\"Mem.Alloc\"],\"denied_effects\":[],\"authority\":\"application default\",\"selection_reason\":\"sole compatible Output\"}}}}\n", "selected checked callable exact JSON output")
+    layout :: query.target_layout ?? panic("explicit target lost its checked layout")
+    inspect_output_require(query.target_triple == "x86_64-unknown-linux-gnu" && layout.triple == query.target_triple && layout.pointer_size == 8 && layout.pointer_alignment == 8, "layout is the explicit 64-bit target fact")
+    portable := inspect_output_request(source)
+    portable.host_facts.target_triple = Val("wasm32-unknown-unknown")
+    portable_query :: jet_driver_output_query(^portable, None)
+    portable_layout :: portable_query.target_layout ?? panic("explicit portable target lost its checked layout")
+    inspect_output_require(portable_query.compile.complete && portable_query.target_triple == "wasm32-unknown-unknown" && portable_layout.triple == portable_query.target_triple && portable_layout.pointer_size == 4 && portable_layout.pointer_alignment == 4, "32-bit target facts never inherit host width")
+    inspect_output_require(jet_cli_output_report(portable_query, portable_query.outputs[0], true) == machine, "callable report does not fabricate target-layout fields")
+    choices :: "APP :: Output.Executable{{name: \"one\", entry: first}}\nALT :: Output.Service{{name: \"two\", entry: second}}\nfn first() Never! {{}}\nfn second() Never! {{}}"
+    explicit :: jet_cli_output_host(inspect_output_request(choices), Val("ALT"), "run.jet", true)
+    inspect_output_require(explicit.exit_code == JET_DRIVER_EXIT_OK && explicit.stderr == "" && explicit.stdout == "{{\"schema\":\"jet.status/v1\",\"action\":\"inspect.output\",\"ok\":true,\"reports\":[],\"output\":{{\"binding\":\"ALT\",\"kind\":\"Service\",\"name\":\"two\",\"entry\":\"second\",\"source_path\":\"/inspect-output/run.jet\",\"callable_identity\":\"run::second\",\"failure_contract\":\"Never!\",\"failure_source\":\"explicit !Never (proven unreachable)\",\"effects\":[],\"required_effects\":[],\"granted_effects\":[\"Exec.Args\",\"IO\",\"Mem.Alloc\"],\"denied_effects\":[],\"authority\":\"application default\",\"selection_reason\":\"explicit address\"}}}}\n", "explicit address exact output is not a guessed function")
+    failed :: jet_cli_output_host(inspect_output_request("APP :: Output.Executable{{name: \"bad\", entry: \"start\"}}\nfn run() {{}}"), None, "run.jet", true)
+    inspect_output_require(failed.exit_code == JET_DRIVER_EXIT_USER_ERROR && failed.stdout.contains("\"action\":\"inspect\"") && failed.stdout.contains("E1321") && failed.stderr == "", "canonical invalid callable failure")
+    absent :: jet_cli_output_host(inspect_output_request("fn run() {{}}"), None, "run.jet", true)
+    inspect_output_require(absent.exit_code == JET_DRIVER_EXIT_USER_ERROR && absent.stderr == "" && absent.stdout.contains("E2104"), "successful check with no selected Output returns the canonical diagnostic carrier")
+}

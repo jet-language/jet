@@ -10,8 +10,44 @@ pub enum Value {
     Float(f64),
     Text(String),
     Bytes(Vec<u8>),
+    DateTime(crate::Dyn::DynDateTime),
     Array(Vec<Value>),
     Object(Vec<(String, Value)>),
+}
+
+/// The single Dyn-to-wire projection used by hosts and generated runtimes.
+pub fn from_dyn_at(value: &crate::Dyn::Dyn, path: &str) -> Result<Value, Error> {
+    use crate::Dyn::Dyn;
+    let unsupported = |reason: String| Error::new(ErrorKind::Unsupported, 0, path, reason);
+    Ok(match value {
+        Dyn::Null => Value::Null,
+        Dyn::Bool(value) => Value::Bool(*value),
+        Dyn::Int(value) => Value::Int(value.to_i64()
+            .ok_or_else(|| unsupported("CBOR integer is outside I64".to_string()))?),
+        Dyn::Float(value) => Value::Float(*value),
+        Dyn::Number(text) => match text.parse::<i64>() {
+            Ok(value) => Value::Int(value),
+            Err(_) => Value::Float(text.parse::<f64>().ok().filter(|value| value.is_finite())
+                .ok_or_else(|| unsupported(format!("number {text} is outside the CBOR Int and float64 range")))?),
+        },
+        Dyn::Text(value) => Value::Text(value.clone()),
+        Dyn::Bytes(value) => Value::Bytes(value.clone()),
+        Dyn::DateTime(value) => Value::DateTime(*value),
+        Dyn::Array(values) => {
+            let mut output = Vec::with_capacity(values.len());
+            for (index, value) in values.iter().enumerate() {
+                output.push(from_dyn_at(value, &format!("{path}[{index}]"))?);
+            }
+            Value::Array(output)
+        }
+        Dyn::Object(entries) => {
+            let mut output = Vec::with_capacity(entries.len());
+            for (key, value) in entries {
+                output.push((key.clone(), from_dyn_at(value, &format!("{path}[{key:?}]"))?));
+            }
+            Value::Object(output)
+        }
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -238,6 +274,12 @@ fn encode_value(value: &Value, out: &mut Vec<u8>, canonical: bool) -> Result<(),
         Value::Bytes(value) => {
             push_len(out, 2, value.len() as u64);
             out.extend_from_slice(value);
+        }
+        Value::DateTime(value) => {
+            push_len(out, 6, 0);
+            let text = value.to_rfc3339();
+            push_len(out, 3, text.len() as u64);
+            out.extend_from_slice(text.as_bytes());
         }
         Value::Array(values) => {
             push_len(out, 4, values.len() as u64);
@@ -553,7 +595,6 @@ fn decode_indefinite_string(
     path: &str,
     major: u8,
     start: usize,
-    allow_bytes: bool,
 ) -> Result<Value, Error> {
     indefinite(options, budget, start, path)?;
     if depth + 1 > options.max_depth {
@@ -563,15 +604,6 @@ fn decode_indefinite_string(
             start,
             path,
             format_args!("max_depth {} exceeded", options.max_depth),
-        ));
-    }
-    if major == 2 && !allow_bytes {
-        return Err(cbor_error!(
-            budget,
-            ErrorKind::Unsupported,
-            start,
-            path,
-            "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>",
         ));
     }
     let mut bytes = Vec::new();
@@ -680,7 +712,6 @@ fn decode_value(
     depth: i64,
     items: &mut i64,
     path: &str,
-    allow_bytes: bool,
 ) -> Result<Value, Error> {
     if *cursor >= input.len() {
         return Err(cbor_error!(
@@ -750,7 +781,6 @@ fn decode_value(
                     path,
                     major,
                     start,
-                    allow_bytes,
                 );
             }
             let length = usize::try_from(read_len(
@@ -778,15 +808,6 @@ fn decode_value(
                     input.len(),
                     path,
                     "CBOR byte/text string is truncated",
-                ));
-            }
-            if major == 2 && !allow_bytes {
-                return Err(cbor_error!(
-                    budget,
-                    ErrorKind::Unsupported,
-                    start,
-                    path,
-                    "CBOR byte strings are outside core.encoding.Data; use decode<[U8]>",
                 ));
             }
             let mut bytes = Vec::new();
@@ -863,7 +884,7 @@ fn decode_value(
                         budget,
                         &mut values,
                         1,
-                        crate::CborBudget::DATA_TREE_SLOT_BYTES,
+                        crate::CborBudget::DYN_SLOT_BYTES,
                         *cursor,
                         &child_path,
                         "CBOR array",
@@ -876,7 +897,6 @@ fn decode_value(
                         depth + 1,
                         items,
                         &child_path,
-                        allow_bytes,
                     );
                     budget.release(charged);
                     values.push(child?);
@@ -905,7 +925,7 @@ fn decode_value(
                     budget,
                     &mut values,
                     length,
-                    crate::CborBudget::DATA_TREE_SLOT_BYTES,
+                    crate::CborBudget::DYN_SLOT_BYTES,
                     start,
                     path,
                     "CBOR array",
@@ -920,7 +940,6 @@ fn decode_value(
                         depth + 1,
                         items,
                         &child_path,
-                        allow_bytes,
                     );
                     budget.release(charged);
                     values.push(child?);
@@ -1024,7 +1043,6 @@ fn decode_value(
                     depth + 1,
                     items,
                     path,
-                    false,
                 )?;
                 let key = match key_value {
                     Value::Text(value) => value,
@@ -1089,7 +1107,6 @@ fn decode_value(
                     depth + 1,
                     items,
                     &child_path,
-                    allow_bytes,
                 );
                 budget.release(charged);
                 entries.push((key, value?));
@@ -1097,13 +1114,39 @@ fn decode_value(
             }
             Ok(Value::Object(entries))
         }
-        6 => Err(cbor_error!(
-            budget,
-            ErrorKind::Unsupported,
-            start,
-            path,
-            "CBOR tags are unsupported",
-        )),
+        6 => {
+            let tag = read_len(input, cursor, additional, start,
+                options.require_canonical, budget, path)?;
+            if tag > 1 {
+                return Err(cbor_error!(budget, ErrorKind::Unsupported, start, path,
+                    "only CBOR date-time tags 0 and 1 are supported"));
+            }
+            if depth >= options.max_depth {
+                return Err(cbor_error!(budget, ErrorKind::Limit, start, path,
+                    "CBOR date-time tag exceeds max_depth"));
+            }
+            let value = decode_value(input, cursor, options, budget, depth + 1, items, path)?;
+            let datetime = match (tag, value) {
+                (0, Value::Text(text)) => crate::Dyn::DynDateTime::parse_rfc3339(&text)
+                    .map_err(|reason| cbor_error!(budget, ErrorKind::Unsupported, start, path, reason))?,
+                (1, Value::Int(seconds)) => crate::Dyn::DynDateTime {
+                    unix_seconds: seconds, nanos: 0, leap_second: false, offset_seconds: 0,
+                },
+                (1, Value::Float(seconds)) if seconds.is_finite()
+                    && seconds.floor() >= i64::MIN as f64 && seconds.floor() < -(i64::MIN as f64) => {
+                    let whole = seconds.floor();
+                    let nanos = ((seconds - whole) * 1_000_000_000.0).round() as u32;
+                    crate::Dyn::DynDateTime {
+                        unix_seconds: (whole as i64).checked_add(i64::from(nanos == 1_000_000_000))
+                            .ok_or_else(|| cbor_error!(budget, ErrorKind::Unsupported, start, path, "epoch is outside DateTime"))?,
+                        nanos: nanos % 1_000_000_000, leap_second: false, offset_seconds: 0,
+                    }
+                }
+                _ => return Err(cbor_error!(budget, ErrorKind::Unsupported, start, path,
+                    "invalid CBOR date-time tag payload")),
+            };
+            Ok(Value::DateTime(datetime))
+        }
         7 => match additional {
             20 => Ok(Value::Bool(false)),
             21 => Ok(Value::Bool(true)),
@@ -1211,7 +1254,7 @@ fn decode_value(
     }
 }
 
-pub fn decode(bytes: &[u8], options: &Options, allow_bytes: bool) -> Result<Value, Error> {
+pub fn decode(bytes: &[u8], options: &Options) -> Result<Value, Error> {
     options.validate()?;
     let mut budget = CborAllocationBudget::new(options.max_bytes as usize);
     if bytes.len() as i64 > options.max_bytes {
@@ -1233,7 +1276,6 @@ pub fn decode(bytes: &[u8], options: &Options, allow_bytes: bool) -> Result<Valu
         0,
         &mut items,
         "$",
-        allow_bytes,
     )?;
     if cursor != bytes.len() {
         return Err(cbor_error!(
@@ -1245,4 +1287,33 @@ pub fn decode(bytes: &[u8], options: &Options, allow_bytes: bool) -> Result<Valu
         ));
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod dyn_codec_tests {
+    use super::*;
+
+    #[test]
+    fn native_binary_and_temporal_tags_roundtrip() {
+        let options = Options::safe();
+        let bytes = Value::Bytes(vec![0, 255]);
+        assert_eq!(decode(&encode(&bytes, false).unwrap(), &options).unwrap(), bytes);
+        let value = crate::Dyn::DynDateTime::parse_rfc3339("2024-02-29T12:34:56.12+05:30").unwrap();
+        for canonical in [false, true] {
+            let wire = encode(&Value::DateTime(value), canonical).unwrap();
+            assert_eq!(wire[0], 0xc0);
+            assert_eq!(decode(&wire, &options).unwrap(), Value::DateTime(value));
+        }
+        assert_eq!(decode(&[0xc1, 0x20], &options).unwrap(), Value::DateTime(crate::Dyn::DynDateTime {
+            unix_seconds: -1, nanos: 0, leap_second: false, offset_seconds: 0,
+        }));
+        let mut float = vec![0xc1, 0xfb];
+        float.extend_from_slice(&(-0.25f64).to_be_bytes());
+        assert_eq!(decode(&float, &options).unwrap(), Value::DateTime(crate::Dyn::DynDateTime {
+            unix_seconds: -1, nanos: 750_000_000, leap_second: false, offset_seconds: 0,
+        }));
+        let mut shallow = options;
+        shallow.max_depth = 1;
+        assert_eq!(decode(&[0xc0, 0xc0, 0x60], &shallow).unwrap_err().kind, ErrorKind::Limit);
+    }
 }

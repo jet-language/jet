@@ -1,0 +1,20 @@
+use core.http as http
+use core.http.server as server
+fn handle(req: HTTPRequest) -> HTTPResponse {
+    m :: req.method()
+    p :: req.path()
+    h :: req.header("host")
+    q :: req.param("id")
+    body :: "m={m} p={p}"
+    return server.response(200, body)
+}
+fn describe(resp: HTTPResponse) -> String {
+    s :: resp.status()
+    b :: resp.body().text(1048576) ?? "invalid body"
+    return "{s}: {b}"
+}
+fn run() {
+    req :: http.parse("GET /x HTTP/1.1\nHost: localhost")
+    resp :: handle(req)
+    print(describe(resp))
+}

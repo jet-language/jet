@@ -54,6 +54,9 @@ const CORE_EXPORTS_PATH = "crates/jet-foundation/src/CoreModuleExports.rs";
 const CORE_SOURCE_TEXTS_PATH = "crates/jet-sema/src/CoreSourceTexts.rs";
 const CORE_ROWS_GENERATOR_PATH = "Compiler/Bootstrap/generate-core-sources.mjs";
 const RING_LAYER_PATH = "crates/jet-foundation/src/RingLayer.rs";
+const CORE_PARTS_PATH = "crates/jet-foundation/src/CoreSourceParts.rs";
+const CORE_RUNTIME_PARTS_BEGIN = "// BEGIN GENERATED CORE RUNTIME PARTS";
+const CORE_RUNTIME_PARTS_END = "// END GENERATED CORE RUNTIME PARTS";
 const CORE_CALLS_BEGIN = "// BEGIN GENERATED CORE CALLS";
 const CORE_CALLS_END = "// END GENERATED CORE CALLS";
 const ENCODING_FORMAT_BEGIN = "// BEGIN GENERATED CORE ENCODING FORMATS";
@@ -113,16 +116,15 @@ const CORE_API_SYNTAX_MARKERS = [
   "Stream<Int>",
   "yield i",
   "delay: Int",
-  "pub policy audit",
+  "policy audit",
   "wrap(call)",
   "#Policy(",
 ];
 const AGENT_RUNNER = "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks";
 const AGENT_SCORING = "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
-// Fake-data helpers are an internal deterministic test capability, not a
-// public collection container. Keep dispatch discovery strict without scoring
-// this private table as Core API.
-const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["fake_method_return", "view_iter_method_return"]);
+// ViewIter shares Iter's scored operations. Keep dispatch discovery strict
+// without scoring the internal table as a separate Core container.
+const PRIVATE_COLLECTION_METHOD_FUNCTIONS = new Set(["view_iter_method_return"]);
 // Internal Prelude helpers may be present in the compiler dispatcher without
 // being public module members. Core.jet declares these adapter-only rows
 // alongside ordinary dispatcher rows; there is no second handwritten key list.
@@ -563,6 +565,7 @@ const TYPE_CONTAINER = {
   Float: "core.math",
   Float32: "core.math",
   Decimal: "core.math",
+  Complex: "core.math",
   String: "String",
   Range: "Iter",
   TypeInfo: "core.reflect",
@@ -591,7 +594,6 @@ const TYPE_CONTAINER = {
   CompilerSyntaxTree: "core.compiler",
   CompilerNode: "core.compiler",
   BuildContext: "core.compiler",
-  Solver: "core.compute.solve",
   Authority: "core.process",
   Clock: "core.time",
   Duration: "core.time",
@@ -604,9 +606,9 @@ const TYPE_CONTAINER = {
   Period: "core.time",
   Zone: "core.time",
   ZonedDateTime: "core.time",
-  // Exact Rust type names harvested from url_mime_method_return. `URL` is the
-  // `core.net.url` source record: its methods come from the declaration.
-  MIME: "core.net.mime",
+  // Exact Rust type names harvested from regex_method_return. `URL` and `MIME`
+  // are `core.net.url`/`core.net.mime` source records: their methods come from
+  // the declarations.
   Regex: "core.regex",
   Match: "core.regex",
   ExpiringValue: "core.time.expiring",
@@ -637,8 +639,6 @@ const COLLECTION_METHOD_FUNCTIONS = {
   deterministic_world_method_return: "DeterministicWorld",
   rng_method_return: "Rng",
   history_rng_method_return: "HistoryRng",
-  solver_method_return: "Solver",
-  fake_method_return: null,
   duration_method_return: "Duration",
   task_method_return: "Task",
   receiver_method_return: "Receiver",
@@ -801,11 +801,11 @@ const RATIFIED_DECLINES = {
   "gap.core.sync.locked": ["D-CORESURF-SMALL1", "core.tasks — message passing, not raw shared-memory locks"],
   "gap.core.encoding.xml.close": ["D-CORESURF-SMALL1", "XMLWriter.finish"],
   "gap.core.encoding.xml.copy": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
-  "gap.core.encoding.xml.end": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.end": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
   "gap.core.encoding.xml.flush": ["D-CORESURF-SMALL1", "XMLWriter.flush"],
-  "gap.core.encoding.xml.indent": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
-  "gap.core.encoding.xml.name": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
-  "gap.core.encoding.xml.nodetype": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared DataTree (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.indent": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.name": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
+  "gap.core.encoding.xml.nodetype": ["D-CORESURF-SMALL1", "core.encoding.xml parses into one shared Dyn (D-SERDE13=B), not incremental SAX tags"],
   "gap.core.encoding.xml.write": ["D-CORESURF-SMALL1", "XMLWriter.write"],
   "gap.core.encoding.xml.clear": ["D-CORESURF-SMALL1", "one witness language; no consistent competitor meaning"],
   "gap.core.process.id": ["D-CORESURF-SMALL1", "ProcessChild.id"],
@@ -1414,17 +1414,17 @@ function readRustCall(source, start, context) {
   return { name: match[1], args: args, end: close + 1 };
 }
 
-function rustStringExpression(expression, context) {
+function rustStringValue(expression, context) {
   const value = expression.trim();
   const literal = value.match(/^"((?:\\.|[^"\\])*)"$/);
-  if (literal) return jetStringExpression(decodeRustStringContent(literal[1], context));
+  if (literal) return decodeRustStringContent(literal[1], context);
   const symbolic = value.match(/^(?:(?:crate::)?Syntax::|super::)?([A-Z][A-Z0-9_]*)$/);
   if (!symbolic) throw new Error("unsupported Rust string value in " + context + ": " + value);
   const constants = syntaxConstants();
   if (!constants.has(symbolic[1])) {
     throw new Error("unknown Rust string constant `" + value + "` in " + context);
   }
-  return jetStringExpression(constants.get(symbolic[1]));
+  return constants.get(symbolic[1]);
 }
 
 function rustSliceItems(expression, context) {
@@ -1435,39 +1435,44 @@ function rustSliceItems(expression, context) {
   });
 }
 
-function translateRustBool(expression, context) {
+function rustBoolValue(expression, context) {
   const value = expression.trim();
   if (value !== "true" && value !== "false") {
     throw new Error("unsupported Rust boolean in " + context + ": " + value);
   }
-  return value;
+  return value === "true";
 }
 
-function translateRustInteger(expression, context) {
+function rustIntegerValue(expression, context) {
   const value = expression.trim().replace(/_/g, "");
   const match = value.match(/^([0-9]+)(?:usize)?$/);
   if (!match || !Number.isSafeInteger(Number(match[1]))) {
     throw new Error("unsupported Rust integer in " + context + ": " + value);
   }
-  return String(Number(match[1]));
+  return Number(match[1]);
 }
 
-function translateBoolSlice(expression, context) {
-  return "[Bool]{" + rustSliceItems(expression, context).map(function (value) {
-    return translateRustBool(value, context);
-  }).join(", ") + "}";
+function rustBoolSliceValue(expression, context) {
+  return rustSliceItems(expression, context).map(function (value) {
+    return rustBoolValue(value, context);
+  });
 }
 
-function translateStringSlice(expression, context) {
-  return "[String]{" + rustSliceItems(expression, context).map(function (value) {
-    return rustStringExpression(value, context);
-  }).join(", ") + "}";
+function rustStringSliceValue(expression, context) {
+  return rustSliceItems(expression, context).map(function (value) {
+    return rustStringValue(value, context);
+  });
 }
 
-function translatePureRoute(expression, context) {
+// Jet CoreCalls.jet CORE_CALL_COVERAGE_* bits.
+const CORE_CALL_COVERAGE = {
+  SEMA: 1, TIR_SUBSET: 2, TIR_EVAL: 4, AOT: 8, INTERPRETER: 16, COMPTIME: 32, KNOWN: 63,
+};
+
+function corePureRouteValue(expression, context) {
   const match = expression.trim().match(/^CoreCallPureRoute::([A-Za-z][A-Za-z0-9_]*)$/);
   const variants = new Set([
-    "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Measurement", "Date",
+    "None", "Mime", "Email", "EncodingXml", "Time", "Math", "Date",
     "DateTime", "SketchHll", "SketchTDigest", "SketchCms", "SketchReservoir", "Ui",
     "Raylib", "Io", "Net", "Crypto",
   ]);
@@ -1480,10 +1485,10 @@ function translatePureRoute(expression, context) {
     None: "NoPureRoute", Mime: "MIME", EncodingXml: "EncodingXML", SketchHll: "SketchHLL",
     SketchCms: "SketchCMS", Ui: "UI", Io: "IO",
   };
-  return "CoreCallPureRoute." + (jetSpelling[match[1]] ?? match[1]);
+  return jetSpelling[match[1]] ?? match[1];
 }
 
-function translateInterpreterRoute(expression, context) {
+function coreInterpreterRouteValue(expression, context) {
   const value = expression.trim();
   if (value.startsWith("CoreCallInterpreterRoute::Pure(")) {
     const pure = readRustCall(value, 0, context);
@@ -1491,120 +1496,122 @@ function translateInterpreterRoute(expression, context) {
         pure.end !== value.length || pure.args.length !== 1) {
       throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
     }
-    return "CoreCallInterpreterRoute.Pure(" +
-      translatePureRoute(pure.args[0], context) + ")";
+    return { kind: "Pure", route: corePureRouteValue(pure.args[0], context) };
   }
   const match = value.match(/^CoreCallInterpreterRoute::(None|Ambient|TypedIntrinsic)$/);
   if (!match) {
     throw new Error("unsupported CoreCallInterpreterRoute in " + context + ": " + value);
   }
-  const variant = match[1] === "None" ? "NoRoute" : match[1];
-  return "CoreCallInterpreterRoute." + variant;
+  return { kind: match[1] === "None" ? "NoRoute" : match[1] };
 }
 
-function translateCoreCoverage(expression, context) {
+function coreCoverageValue(expression, context) {
   const value = expression.trim();
   const call = readRustCall(value, 0, context);
   if (call.name !== "CoreCallCoverage::from_bits" || call.end !== value.length ||
       call.args.length !== 1) {
     throw new Error("unsupported CoreCallCoverage in " + context + ": " + value);
   }
-  const bits = call.args[0].split("|").map(function (raw) {
+  return call.args[0].split("|").reduce(function (bits, raw) {
     const part = raw.trim();
-    const constant = part.match(
-      /^CoreCallCoverage::(SEMA|TIR_SUBSET|TIR_EVAL|AOT|INTERPRETER|COMPTIME|JIT|KNOWN)$/,
-    );
-    if (constant) return "CORE_CALL_COVERAGE_" + constant[1];
-    return translateRustInteger(part, context);
-  });
-  return "CoreCallCoverage{bits: " + bits.join(" | ") + "}";
+    const constant = part.match(/^CoreCallCoverage::([A-Z_]+)$/);
+    if (constant) {
+      if (!Object.hasOwn(CORE_CALL_COVERAGE, constant[1])) {
+        throw new Error("CoreCallCoverage::" + constant[1] + " has no Jet coverage bit in " + context);
+      }
+      return bits | CORE_CALL_COVERAGE[constant[1]];
+    }
+    return bits | rustIntegerValue(part, context);
+  }, 0);
 }
 
-function translateResourceAccess(expression, context) {
+function coreResourceAccessValue(expression, context) {
   const call = readRustCall(expression.trim(), 0, context);
   if (call.end !== expression.trim().length || call.args.length !== 1) {
     throw new Error("unsupported CoreCallResourceAccess in " + context);
   }
   const mode = {
-    "CoreCallResourceAccess::read": "read",
-    "CoreCallResourceAccess::write": "write",
-    "CoreCallResourceAccess::move_": "move",
+    "CoreCallResourceAccess::read": "Read",
+    "CoreCallResourceAccess::write": "Write",
+    "CoreCallResourceAccess::move_": "Move",
   }[call.name];
   if (!mode) throw new Error("unsupported CoreCallResourceAccess in " + context + ": " + call.name);
-  return "core_call_resource_access_" + mode + "(" +
-    translateRustInteger(call.args[0], context) + ")";
+  return { argument: rustIntegerValue(call.args[0], context), mode: mode };
 }
 
-function translateCompletion(expression, context) {
+function coreCompletionValue(expression, context) {
   const call = readRustCall(expression.trim(), 0, context);
   if (call.end !== expression.trim().length) {
     throw new Error("unsupported CoreCallCompletion in " + context);
   }
   if (call.name === "CoreCallCompletion::synchronous" && call.args.length === 1) {
-    return "core_call_completion_synchronous(" +
-      rustStringExpression(call.args[0], context) + ")";
+    return { kind: "Synchronous", token: null, provider: rustStringValue(call.args[0], context) };
   }
   if (call.name === "CoreCallCompletion::pending" && call.args.length === 2) {
-    return "core_call_completion_pending(" +
-      rustStringExpression(call.args[0], context) + ", " +
-      rustStringExpression(call.args[1], context) + ")";
+    return {
+      kind: "Pending",
+      token: rustStringValue(call.args[0], context),
+      provider: rustStringValue(call.args[1], context),
+    };
   }
   if (call.name === "CoreCallCompletion::event" && call.args.length === 2) {
-    return "core_call_completion_event(" +
-      rustStringExpression(call.args[0], context) + ", " +
-      rustStringExpression(call.args[1], context) + ")";
+    return {
+      kind: "Event",
+      token: rustStringValue(call.args[0], context),
+      provider: rustStringValue(call.args[1], context),
+    };
   }
   throw new Error("unsupported CoreCallCompletion in " + context + ": " + call.name);
 }
 
-function translateCapability(expression, context) {
+function coreCapabilityValue(kind, provider, fallback, failure) {
+  return { kind: kind, provider: provider, fallback: fallback, failure: failure };
+}
+
+function coreCapabilityFromRust(expression, context) {
   const call = readRustCall(expression.trim(), 0, context);
   if (call.end !== expression.trim().length) {
     throw new Error("unsupported CoreCapabilityContract in " + context);
   }
+  const strings = call.args.map(function (value) { return rustStringValue(value, context); });
   if (call.name === "CoreCapabilityContract::pure" && call.args.length === 0) {
-    return "core_capability_pure()";
+    return coreCapabilityValue("Pure", null, null, null);
   }
   if (call.name === "CoreCapabilityContract::native_required" && call.args.length === 2) {
-    return "core_capability_native_required(" +
-      rustStringExpression(call.args[0], context) + ", " +
-      rustStringExpression(call.args[1], context) + ")";
+    return coreCapabilityValue("NativeRequired", strings[0], null, strings[1]);
   }
   if (call.name === "CoreCapabilityContract::portable_fallback" && call.args.length === 3) {
-    return "core_capability_portable_fallback(" +
-      call.args.map(function (value) { return rustStringExpression(value, context); }).join(", ") +
-      ")";
+    return coreCapabilityValue("PortableFallback", strings[0], strings[1], strings[2]);
   }
   if (call.name === "CoreCapabilityContract::explicit_simulation" && call.args.length === 2) {
-    return "core_capability_explicit_simulation(" +
-      call.args.map(function (value) { return rustStringExpression(value, context); }).join(", ") +
-      ")";
+    return coreCapabilityValue("ExplicitSimulation", strings[0], null, strings[1]);
   }
   throw new Error("unsupported CoreCapabilityContract in " + context + ": " + call.name);
 }
 
-function translateOptionalString(expression, context) {
+function rustOptionalStringValue(expression, context) {
   const value = expression.trim();
-  if (value === "None") return "None";
+  if (value === "None") return null;
   const call = readRustCall(value, 0, context);
   if (call.name !== "Some" || call.end !== value.length || call.args.length !== 1) {
     throw new Error("unsupported optional Rust string in " + context + ": " + value);
   }
-  return "Val(" + rustStringExpression(call.args[0], context) + ")";
+  return rustStringValue(call.args[0], context);
 }
 
-function translateMarker(expression, context) {
+function coreMarkerValue(expression, context) {
   const value = expression.trim();
   const call = readRustCall(value, 0, context);
   if (call.name !== "CoreMarkerApplication::deprecated" ||
       call.end !== value.length || call.args.length !== 4) {
     throw new Error("unsupported CoreMarkerApplication in " + context);
   }
-  return "core_marker_deprecated(" +
-    rustStringExpression(call.args[0], context) + ", " +
-    rustStringExpression(call.args[1], context) + ", " +
-    rustStringExpression(call.args[2], context) + ", " +
-    translateOptionalString(call.args[3], context) + ")";
+  return {
+    member: rustStringValue(call.args[0], context),
+    since: rustStringValue(call.args[1], context),
+    replacement: rustStringValue(call.args[2], context),
+    removed_in: rustOptionalStringValue(call.args[3], context),
+  };
 }
 
 function expectRustArgumentCount(name, args, count, context) {
@@ -1613,115 +1620,370 @@ function expectRustArgumentCount(name, args, count, context) {
   }
 }
 
-function translateCoreCallConstructor(name, args, context) {
+// The per-call effect, effect-leaf and sink facts of a plain Core call, keyed
+// by module and member. The Rust reference is jet_foundation::Syntax::core_calls
+// (`CoreCallRecord::new`); CORE_CALLS lands these facts as literal rows so the
+// table needs no compile-time execution host.
+function coreCallOneOf(value, choices) {
+  return choices.includes(value);
+}
+
+function coreCallEffectFor(moduleName, member) {
+  if (moduleName === "core.files" && member === "__temp_path_sample") return "Time";
+  if (moduleName === "core.files" && member === "__temp_directory") return "Env";
+  if (moduleName === "core.files" && coreCallOneOf(member, ["__host_path_is_absolute", "__host_path_join", "__fault_should_fail", "__os_family", "__path_windows", "__atomic_pid", "__scope_roots", "__reader_path"])) return null;
+  if (moduleName === "core.log" && member === "__metric_publish") return null;
+  if (moduleName === "core.devtools" && member === "__publish_payload") return null;
+  if (moduleName === "core.web" && coreCallOneOf(member, ["__openapi_inputs", "__openapi_render", "__contract_stop", "__live_stats_snapshot"])) return null;
+  if (moduleName === "core.web.store" && coreCallOneOf(member, ["__transact", "__facts_snapshot"])) return null;
+  if (moduleName === "core.web.table" && coreCallOneOf(member, ["__columns", "__replace_columns", "__state", "__set_state", "__alias",
+    "__has_loader", "__invoke_loader", "__generation", "__query_facts", "__state_equal", "__page_facts",
+    "__commit_keys", "__loading_store", "__error_store", "__page_store",
+    "__state_store", "__has_key", "__page_accessor_keys", "__page_keys", "__page_replace_keys",
+    "__column_info", "__cell", "__rows", "__row_key", "__make_page"])) return null;
+  if (moduleName === "core.mod" && coreCallOneOf(member, ["__supported", "__os",
+    "__parse_context", "__check_context", "__context_name", "__context_digest", "__exports_count", "__export_info", "__finish_context"])) return null;
+  if (moduleName === "core.mod" && coreCallOneOf(member, ["__read_context", "__stage_context"])) return "FS";
+  if (moduleName === "core.process" && member === "__with_directory_raw") return "FS";
+  if (moduleName === "core.time" && member === "__zone_env") return "Env";
+  if (moduleName === "core.time" && coreCallOneOf(member, ["zone", "parse_zoned", "__zone_file_bytes"])) return "FS";
+  if ((moduleName === "core.time" && coreCallOneOf(member, [
+    "clock", "time", "local_time", "parse_time", "new", "parse", "from_timestamp",
+    "period", "period_days", "period_months", "period_years", "parse_rfc3339",
+    "from_unix_ms", "from_unix_seconds", "from_unix_microseconds", "from_unix_nanoseconds",
+    "parse_iso_week_date", "from_iso_week", "datetime", "utc",
+    "zoned", "zoned_local", "days_in_month", "is_leap_year",
+    "__embedded_zone_bytes", "__clock_mono_ns",
+  ])) || (moduleName === "core.math.random" && member === "rng")) return null;
+  if (moduleName === "core.time" && coreCallOneOf(member, ["now", "now_utc", "today", "instant", "sleep", "sleep_until", "start"])) return "Time";
+  if (moduleName === "core.rt" && member === "callback") return "Time";
+  if (moduleName === "core.math" && member === "random") return "Rand";
+  if ((moduleName === "core.math.random" && coreCallOneOf(member, [
+    "int", "float", "float_range", "bool", "normal", "exponential", "pick", "weighted_pick",
+    "sample", "shuffle", "seed", "split", "bytes",
+  ])) || (moduleName === "core.crypto.random" && member === "bytes")) return "Rand";
+  if (member === "style_force" && moduleName === "core.term") return null;
+  if (moduleName === "core.net" && member === "gethostname") return "Env";
+  if (moduleName === "core.http.server" && member === "__response_parts") return null;
+  if (moduleName === "core.net" && coreCallOneOf(member, [
+    "ip_addr", "ip_to_string", "ip_is_ipv4", "ip", "ipv4", "ipv6", "parse_ip", "is_ipv4",
+    "__ip_from_bytes", "__ip_bytes", "__ip_is_v4", "__socket_from_parts",
+    "__socket_ip", "__socket_port", "__socket_scope", "__udp_packet_addr",
+    "is_ipv6", "socket_addr_parse", "socket_host", "socket_port", "socket_to_string",
+    "ready_readable", "ready_writable", "error_operation", "error_address", "error_name",
+    "error_message", "error_os_code", "dns_srv_target", "dns_srv_port", "dns_srv_priority",
+    "dns_srv_weight", "udp_packet_data", "udp_packet_addr", "udp_packet_bytes",
+    "udp_packet_original_len", "udp_packet_truncated",
+  ])) return null;
+  if (moduleName === "core.watcher") {
+    if (member === "files" || member === "__files") return "FS";
+    if (member === "process_pid" || member === "__process_pid") return "Exec";
+    if (member === "port" || member === "__port") return "Net";
+    return null;
+  }
+  if (moduleName === "core.web.browser") {
+    if (coreCallOneOf(member, ["profile", "timeout", "__path_join", "__html_path",
+      "__report_options", "__report_json", "__report_html", "__report_text", "__write_report_bytes", "__server_stop"])) return null;
+    if (coreCallOneOf(member, ["locked", "__read_text", "__is_file", "__file_size", "__modified_ms"])) return "FS";
+    if (member === "config_from_env") return "Env";
+    return "Net";
+  }
+  if (moduleName === "core.encoding" && coreCallOneOf(member, ["__read_byte", "__read_into", "__write_bytes", "__write_text", "__flush"])) return "IO";
+  // Encoding readers and writers.
+  if ((coreCallOneOf(moduleName, [
+    "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor",
+  ]) && coreCallOneOf(member, ["reader", "writer"])) || (moduleName === "core.encoding.csv" && member === "query")) return "FS";
+  if (moduleName === "core.compute" && member !== "device_cpu") return "GPU";
+  if (moduleName === "core.data" && member === "__host_path_is_file") return "FS";
+  if (moduleName === "core.files") return "FS";
+  if (moduleName === "core.service" && member === "state_store") return "FS";
+  if (moduleName === "core.net" || moduleName === "core.net.tls" || moduleName === "core.http.client" || moduleName === "core.http.server" || moduleName === "core.http.middleware" || (moduleName === "core.http" && coreCallOneOf(member, ["serve", "get"]))) return "Net";
+  if (moduleName === "core.game.raylib") return "GPU";
+  if (moduleName === "core.time") return "Time";
+  // #4652: `core.math.random()` draws from the same ambient stream.
+  if (moduleName === "core.math.random" || moduleName === "core.crypto.random" || (moduleName === "core.math" && member === "random")) return "Rand";
+  // Key generation draws from the OS generator, like crypto.random.bytes.
+  if (moduleName === "core.crypto" && coreCallOneOf(member, ["__x25519_generate", "__signing_generate"])) return "Rand";
+  if (moduleName === "core.perf" && coreCallOneOf(member, ["__read_bits", "__write_bits", "fidelity", "override_fidelity", "reset_fidelity"])) return "Env";
+  if (moduleName === "core.sys" && member === "success") return null;
+  if (moduleName === "core.sys") return "Env";
+  if (moduleName === "core.process" && member === "status_ok") return null;
+  if (moduleName === "core.process") return "Exec";
+  if (moduleName === "core.term" && coreCallOneOf(member, [
+    "__stdio_fault", "__stdout_terminal", "__stderr_terminal",
+  ])) return null;
+  if (moduleName === "core.term") return "IO";
+  if (moduleName === "core.db" || moduleName === "core.jobs") return "DB";
+  if (moduleName === "core.auth" && coreCallOneOf(member, [
+    "register_user", "password_login", "session_validate", "magic_link_issue", "magic_link_consume",
+    "oauth_begin", "oauth_finish", "__store_load", "__store_replace",
+  ])) return "DB";
+  if (moduleName === "core.plugin" || moduleName === "core.mod") return "Exec";
+  if (moduleName === "core.log") return "Log";
+  if (moduleName === "core.ui" || moduleName === "core.web" || moduleName === "core.web.storage.local" || moduleName === "core.web.storage.session") return "Browser";
+  if (moduleName === "core.crypto.vault" && coreCallOneOf(member, [
+    "get", "current", "versions", "load", "status", "prepare_generate", "prepare_store",
+    "prepare_rotate", "prepare_retire", "prepare_revoke", "authorize_write", "commit_generate",
+    "commit_store", "commit_rotate", "commit_retire", "commit_revoke", "export_to_recipients",
+    "export_to_passphrase", "prepare_import_wrapped", "authorize_wrapped_import", "commit_import_wrapped",
+    "prepare_import_signing", "prepare_import_x25519", "commit_import_signing", "commit_import_x25519",
+  ])) return "Secret";
+  return null;
+}
+
+function coreCallEffectLeafFor(moduleName, member) {
+  if ((moduleName === "core.net" && member === "gethostname") || (moduleName === "core.sys" && member === "hostname")) return "FS.Read";
+  if (moduleName === "core.process" && member === "__with_directory_raw") return "FS.Read";
+  if (moduleName === "core.service" && member === "state_store") return "FS.Read";
+  if (moduleName === "core.time" && coreCallOneOf(member, ["zone", "parse_zoned", "__zone_file_bytes"])) return "FS.Read";
+  if (moduleName === "core.time" && coreCallOneOf(member, ["sleep", "sleep_until"])) return "Time.Wait";
+  if (moduleName === "core.tasks" && coreCallOneOf(member, ["yield_now", "__yield_now"])) return "Time.Wait";
+  if (moduleName === "core.files" && member === "scope") return "FS.Read";
+  // A file operation names the one leaf it needs, so `--allow=FS.Read`
+  // covers a read and never a write. `copy` and `copy_dir` both read and
+  // write, so they keep the bare `FS` root.
+  if (moduleName === "core.files" && coreCallOneOf(member, [
+    "read", "read_bytes", "read_at", "read_link", "map", "open", "exists", "is_dir", "is_fifo", "is_socket",
+    "stat", "lstat", "list_dir", "walk", "walk_parallel", "walk_files", "glob", "canonicalize", "absolute",
+    "__read_bytes_os", "__read_at_os", "__read_link_os", "__scope_read_at", "__reader_line_bytes",
+    // #3593 provider leaves behind Core/files/files.jet.
+    "__open_reader", "__open_directory", "__close_directory", "__list_directory", "__stat_at", "__path_kind", "__read_link_at",
+    "__xattr_names", "__xattr_get", "__reader_stat", "__writer_stat", "__metadata_directory", "__directory_fd",
+    "__map_raw", "__list_dir_raw", "__stat_mode_raw", "__canonicalize_raw", "__walk_parallel_raw",
+    "__entries_context", "__entries_close", "__entries_release", "__entries_read_dir",
+    "__entries_next", "__entries_file_type", "__entries_before", "__entries_shown",
+  ])) return "FS.Read";
+  if (moduleName === "core.files" && coreCallOneOf(member, [
+    "write", "write_bytes", "write_at", "write_atomic", "append_all", "create", "append", "fsync", "remove",
+    "remove_dir", "remove_all", "create_dir", "create_dir_all", "rename", "symlink", "hard_link", "chown",
+    "__write_bytes_os", "__append_bytes_os", "__create_dirs_os", "__write_at_os", "__writer_refusal",
+    "__atomic_reserve", "__atomic_finish", "__atomic_remove", "__atomic_rename", "__atomic_sync_parent", "__atomic_close",
+    "jet_files_link_reader_at_raw",
+    "set_mode", "mkdtemp", "mktemp", "temp_dir", "temp_file", "lock", "__open_writer", "__create_directory",
+    "__fsync_directory", "__rename_at", "__remove_at", "__xattr_set", "__writer_set_mode", "__flock",
+    "__remove_raw", "__remove_dir_raw", "__remove_all_raw", "__hard_link_raw", "__fsync_raw", "__chown_raw",
+    "__set_mode_raw", "__symlink_directory_raw", "__symlink_raw", "__mkdtemp_raw", "__temp_dir_raw", "__temp_file_raw",
+    "try_lock", "__lock_open", "__lock_try", "__lock_wait", "__lock_close", "__lock_fd_identity", "__lock_path_identity", "__lock_owner",
+    "__entries_mkdir", "__entries_copy",
+  ])) return "FS.Write";
+  // D-AUTH-AMBIENT1=A: reading the program's own arguments is a leaf of
+  // `Exec` (Syntax::EFFECT_LEAF_EXEC_ARGS); spawning a process keeps the
+  // ungranted `Exec` root.
+  if (moduleName === "core.process" && coreCallOneOf(member, ["argv", "args"])) return rustStringValue("EFFECT_LEAF_EXEC_ARGS", "core.process effect leaf");
+  if (moduleName === "core.term" && coreCallOneOf(member, [
+    "confirm", "choose", "input_secret", "read_all_input", "readline", "read_until", "take", "binread",
+    "binwrite", "progress", "read_key", "__terminal8_line", "__terminal8_write_stdout", "__terminal8_write_stderr", "__terminal8_mode_enter", "__terminal8_mode_leave", "__terminal8_read_all", "__terminal8_read_until", "__terminal8_key_bytes",
+  ])) return "Time.Wait";
+  if (moduleName === "core.sys" && coreCallOneOf(member, ["wait", "waitpid"])) return "Time.Wait";
+  if (moduleName === "core.process" && coreCallOneOf(member, ["run", "pipeline"])) return "Time.Wait";
+  if (moduleName === "core.net" && coreCallOneOf(member, [
+    "__resolve_ordered",
+    "__tcp_accept", "__tcp_connect", "__tcp_connect_addr", "__tcp_connect_timeout", "__tcp_connect_happy",
+    "__tcp_reply",
+    "__udp_send_to", "__udp_recv_from", "__udp_send_bytes_to", "__udp_receive",
+    "__unix_accept", "__unix_read", "__unix_write_all_bytes",
+    "__unix_connect_host", "__unix_connect_deadline_host",
+    "tcp_accept", "tcp_connect", "tcp_connect_addr", "tcp_connect_timeout", "tcp_connect_happy", "tcp_read",
+    "tcp_write", "tcp_read_bytes", "tcp_read_text", "tcp_write_bytes", "tcp_write_all_bytes", "tcp_write_text",
+    "tcp_ready", "sendfile", "tcp_reply", "udp_send_to", "udp_recv_from", "udp_send_bytes_to", "udp_receive",
+    "unix_accept", "unix_connect", "unix_read", "unix_write", "unix_read_bytes", "unix_write_all_bytes",
+    "dns_a", "dns_aaaa", "dns_a_at", "dns_aaaa_at", "dns_txt", "dns_txt_at", "dns_ptr", "dns_srv",
+    "dns_srv_at", "getservbyname", "getservbyport", "tls_connect", "tls_read", "tls_write", "tls_close",
+    "__dns_a_lookup", "__dns_aaaa_lookup", "__dns_a_at_lookup", "__dns_aaaa_at_lookup",
+    "__dns_txt_lookup", "__dns_txt_at_lookup", "__dns_ptr_lookup", "__dns_srv_lookup", "__dns_srv_at_lookup",
+  ])) return "Time.Wait";
+  // TLS waits.
+  if (moduleName === "core.net.tls" && coreCallOneOf(member, ["client", "read", "read_text", "write", "write_all", "write_text", "close", "__read", "__write", "__write_all", "__client_stream", "__client_deadline", "__client_config_deadline"])) return "Time.Wait";
+  // HTTP waits.
+  if ((moduleName === "core.http.client" && coreCallOneOf(member, ["get", "post", "request", "__get", "__post", "__request", "jet_http_build_resolve", "jet_http_build_get"])) || (moduleName === "core.http" && member === "get") || (moduleName === "core.http.server" && coreCallOneOf(member, ["serve", "serve_once", "serve_once_listener", "__serve_once", "__serve_once_listener", "__serve"]))) return "Time.Wait";
+  // Encoding readers and writers.
+  if ((coreCallOneOf(moduleName, [
+    "core.encoding.json", "core.encoding.jsonl", "core.encoding.csv", "core.encoding.xml", "core.encoding.cbor",
+  ]) && coreCallOneOf(member, ["reader", "writer"])) || (moduleName === "core.encoding.csv" && member === "query")) return "Time.Wait";
+  if (moduleName === "core.db" && coreCallOneOf(member, ["transaction", "__transaction", "migrate", "__migrate"])) return "Time.Wait";
+  if (moduleName === "core.jobs" && coreCallOneOf(member, ["wait", "poll"])) return "Time.Wait";
+  if (moduleName === "core.service" && coreCallOneOf(member, [
+    "send", "send_durable", "receive", "endpoint_send", "endpoint_receive", "workflow_sleep",
+    "workflow_activity_wait", "workflow_all",
+  ])) return "Time.Wait";
+  return null;
+}
+
+function coreCallSinkFor(moduleName, member) {
+  if (moduleName === "core.log") return "Credential";
+  if (moduleName === "core.term" && coreCallOneOf(member, ["print", "eprint"])) return "Credential";
+  // Encoding serializers.
+  if ((coreCallOneOf(moduleName, [
+    "core.encoding.json", "core.encoding.csv", "core.encoding.toml", "core.encoding.yaml", "core.encoding.cbor", "core.encoding.xml",
+  ]) && coreCallOneOf(member, ["to_string", "to_string_pretty", "to_bytes", "to_bytes_canonical"])) || (moduleName === "core.encoding.jsonl" && member === "to_string")) return "Credential";
+  return null;
+}
+
+function coreInterpreterRouteIsExecutable(route) {
+  if (route.kind === "NoRoute") return false;
+  if (route.kind === "Pure") return route.route !== "NoPureRoute";
+  return true;
+}
+
+function coreCallRecordNew(moduleName, member, symbol, prelude, borrowMask) {
+  const effectKind = coreCallEffectFor(moduleName, member);
+  const route = { kind: effectKind === null ? "TypedIntrinsic" : "NoRoute" };
+  return {
+    module_name: moduleName,
+    member: member,
+    receiver_types: [],
+    signature: { arity: borrowMask.length, max_arity: borrowMask.length, borrow_mask: borrowMask },
+    frame_accesses: [],
+    frame_completion: null,
+    effect_kind: effectKind,
+    capability: effectKind !== null ?
+      coreCapabilityValue("NativeRequired", moduleName, null, "core.capability.unavailable") :
+      coreCapabilityValue("Pure", null, null, null),
+    effect_leaf: coreCallEffectLeafFor(moduleName, member),
+    sink_class: coreCallSinkFor(moduleName, member),
+    pure_route: "NoPureRoute",
+    interpreter_route: route,
+    symbol: { kind: prelude ? "Prelude" : "Rust", name: symbol },
+    source_target: null,
+    coverage: coreInterpreterRouteIsExecutable(route) ?
+      CORE_CALL_COVERAGE.KNOWN : CORE_CALL_COVERAGE.KNOWN - CORE_CALL_COVERAGE.INTERPRETER,
+    aot_direct: true,
+    native_int_result: false,
+    ui_capabilities: [],
+    marker: null,
+  };
+}
+
+function coreCallRecordReceiver(receiverTypes, member, borrowMask) {
+  return {
+    module_name: "",
+    member: member,
+    receiver_types: receiverTypes,
+    signature: { arity: borrowMask.length, max_arity: borrowMask.length, borrow_mask: borrowMask },
+    frame_accesses: [],
+    frame_completion: null,
+    effect_kind: null,
+    capability: coreCapabilityValue("Pure", null, null, null),
+    effect_leaf: null,
+    sink_class: null,
+    pure_route: "NoPureRoute",
+    interpreter_route: { kind: "TypedIntrinsic" },
+    symbol: { kind: "Rust", name: "" },
+    source_target: null,
+    coverage: CORE_CALL_COVERAGE.KNOWN,
+    aot_direct: false,
+    native_int_result: false,
+    ui_capabilities: [],
+    marker: null,
+  };
+}
+
+function coreCallMarkSourceOwned(record) {
+  record.symbol = { kind: "SourceOwned" };
+  record.coverage = CORE_CALL_COVERAGE.SEMA;
+  record.interpreter_route = { kind: "NoRoute" };
+  record.aot_direct = false;
+}
+
+function coreCallSetInterpreterRoute(record, route) {
+  record.interpreter_route = route;
+  if (coreInterpreterRouteIsExecutable(route)) record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
+}
+
+function coreCallConstructorRecord(name, args, context) {
+  if (name === "CoreCallRecord::source_owned") {
+    expectRustArgumentCount(name, args, 3, context);
+    const member = rustStringValue(args[1], context);
+    const record = coreCallRecordNew(rustStringValue(args[0], context), member, member, false,
+      rustBoolSliceValue(args[2], context));
+    coreCallMarkSourceOwned(record);
+    return record;
+  }
   if (name === "sema_web_call") {
     expectRustArgumentCount(name, args, 4, context);
-    return "core_call_web(" +
-      rustStringExpression(args[0], context) + ", " +
-      rustStringExpression(args[1], context) + ", " +
-      rustStringExpression(args[2], context) + ", " +
-      translateBoolSlice(args[3], context) + ")";
+    const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
+      rustStringValue(args[2], context), true, rustBoolSliceValue(args[3], context));
+    coreCallSetInterpreterRoute(record, { kind: "TypedIntrinsic" });
+    return record;
   }
   if (name === "CoreCallRecord::new" || name === "CoreCallRecord::new_with_coverage") {
     const withCoverage = name.endsWith("new_with_coverage");
     expectRustArgumentCount(name, args, withCoverage ? 6 : 5, context);
-    const translated = [
-      rustStringExpression(args[0], context),
-      rustStringExpression(args[1], context),
-      rustStringExpression(args[2], context),
-      translateRustBool(args[3], context),
-      translateBoolSlice(args[4], context),
-    ];
-    if (withCoverage) translated.push(translateCoreCoverage(args[5], context));
-    return "core_call_" + (withCoverage ? "new_with_coverage" : "new") +
-      "(" + translated.join(", ") + ")";
+    const record = coreCallRecordNew(rustStringValue(args[0], context), rustStringValue(args[1], context),
+      rustStringValue(args[2], context), rustBoolValue(args[3], context), rustBoolSliceValue(args[4], context));
+    if (withCoverage) record.coverage = coreCoverageValue(args[5], context);
+    return record;
   }
   if (name === "CoreCallRecord::receiver" ||
       name === "CoreCallRecord::receiver_with_symbol" ||
       name === "CoreCallRecord::receiver_with_coverage") {
     const withSymbol = name.endsWith("receiver_with_symbol");
     const withCoverage = name.endsWith("receiver_with_coverage");
-    const expected = withSymbol ? 5 : withCoverage ? 4 : 3;
-    expectRustArgumentCount(name, args, expected, context);
-    const translated = [
-      translateStringSlice(args[0], context),
-      rustStringExpression(args[1], context),
-    ];
+    expectRustArgumentCount(name, args, withSymbol ? 5 : withCoverage ? 4 : 3, context);
+    const receiverTypes = rustStringSliceValue(args[0], context);
+    const member = rustStringValue(args[1], context);
     if (withSymbol) {
-      translated.push(
-        rustStringExpression(args[2], context),
-        translateRustBool(args[3], context),
-        translateBoolSlice(args[4], context),
-      );
-    } else if (withCoverage) {
-      translated.push(
-        translateBoolSlice(args[2], context),
-        translateCoreCoverage(args[3], context),
-      );
-    } else {
-      translated.push(translateBoolSlice(args[2], context));
+      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[4], context));
+      record.symbol = {
+        kind: rustBoolValue(args[3], context) ? "Prelude" : "Rust",
+        name: rustStringValue(args[2], context),
+      };
+      return record;
     }
-    const suffix = withSymbol ? "receiver_with_symbol" :
-      withCoverage ? "receiver_with_coverage" : "receiver";
-    return "core_call_" + suffix + "(" + translated.join(", ") + ")";
+    if (withCoverage) {
+      const record = coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
+      record.coverage = coreCoverageValue(args[3], context);
+      record.interpreter_route = { kind: "NoRoute" };
+      return record;
+    }
+    return coreCallRecordReceiver(receiverTypes, member, rustBoolSliceValue(args[2], context));
   }
   throw new Error("unsupported CoreCallRecord constructor in " + context + ": " + name);
 }
 
-function translateCoreCallMethod(record, name, args, context) {
-  if (name === "without_direct_aot" || name === "without_direct_jit" ||
-      name === "with_native_int_result") {
+function applyCoreCallMethod(record, name, args, context) {
+  if (name === "without_direct_aot" || name === "with_native_int_result" || name === "with_source_owned") {
     expectRustArgumentCount(name, args, 0, context);
-    return "core_call_" + name + "(" + record + ")";
+    if (name === "without_direct_aot") record.aot_direct = false;
+    else if (name === "with_native_int_result") record.native_int_result = true;
+    else coreCallMarkSourceOwned(record);
+    return;
   }
   expectRustArgumentCount(name, args, 1, context);
   const argument = args[0];
   if (name === "with_max_arity") {
-    return "core_call_with_max_arity(" + record + ", " +
-      translateRustInteger(argument, context) + ")";
-  }
-  if (name === "with_jit_symbol") {
-    return "core_call_with_jit_symbol(" + record + ", " +
-      rustStringExpression(argument, context) + ")";
-  }
-  if (name === "with_pure_route") {
-    return "core_call_with_pure_route(" + record + ", " +
-      translatePureRoute(argument, context) + ")";
-  }
-  if (name === "with_interpreter_route") {
-    return "core_call_with_interpreter_route(" + record + ", " +
-      translateInterpreterRoute(argument, context) + ")";
-  }
-  if (name === "with_frame_accesses") {
-    const accesses = rustSliceItems(argument, context).map(function (value) {
-      return translateResourceAccess(value, context);
+    record.signature.max_arity = rustIntegerValue(argument, context);
+  } else if (name === "with_pure_route") {
+    const route = corePureRouteValue(argument, context);
+    record.pure_route = route;
+    record.interpreter_route = { kind: "Pure", route: route };
+    if (route !== "NoPureRoute") record.coverage |= CORE_CALL_COVERAGE.INTERPRETER;
+  } else if (name === "with_interpreter_route") {
+    coreCallSetInterpreterRoute(record, coreInterpreterRouteValue(argument, context));
+  } else if (name === "with_frame_accesses") {
+    record.frame_accesses = rustSliceItems(argument, context).map(function (value) {
+      return coreResourceAccessValue(value, context);
     });
-    return "core_call_with_frame_accesses(" + record +
-      ", [CoreCallResourceAccess]{" + accesses.join(", ") + "})";
+  } else if (name === "with_frame_completion") {
+    record.frame_completion = coreCompletionValue(argument, context);
+  } else if (name === "with_capability") {
+    record.capability = coreCapabilityFromRust(argument, context);
+  } else if (name === "with_ui_capabilities") {
+    record.ui_capabilities = rustStringSliceValue(argument, context);
+  } else if (name === "with_source_target") {
+    record.source_target = rustStringValue(argument, context);
+  } else if (name === "with_marker") {
+    record.marker = coreMarkerValue(argument, context);
+  } else {
+    throw new Error("unsupported CoreCallRecord builder in " + context + ": " + name);
   }
-  if (name === "with_frame_completion") {
-    return "core_call_with_frame_completion(" + record + ", " +
-      translateCompletion(argument, context) + ")";
-  }
-  if (name === "with_capability") {
-    return "core_call_with_capability(" + record + ", " +
-      translateCapability(argument, context) + ")";
-  }
-  if (name === "with_ui_capabilities") {
-    return "core_call_with_ui_capabilities(" + record + ", " +
-      translateStringSlice(argument, context) + ")";
-  }
-  if (name === "with_marker") {
-    return "core_call_with_marker(" + record + ", " +
-      translateMarker(argument, context) + ")";
-  }
-  throw new Error("unsupported CoreCallRecord builder in " + context + ": " + name);
 }
 
-function translateCoreCallExpression(expression, context) {
+// Evaluate one Rust CoreCallRecord builder chain into its record value.
+function coreCallRecordFromRust(expression, context) {
   const value = expression.trim();
   const root = readRustCall(value, 0, context);
-  let translated = translateCoreCallConstructor(root.name, root.args, context);
+  const record = coreCallConstructorRecord(root.name, root.args, context);
   let position = root.end;
   while (position < value.length) {
     while (/\s/.test(value[position] || "")) position += 1;
@@ -1731,10 +1993,70 @@ function translateCoreCallExpression(expression, context) {
     }
     position += 1;
     const method = readRustCall(value, position, context);
-    translated = translateCoreCallMethod(translated, method.name, method.args, context);
+    applyCoreCallMethod(record, method.name, method.args, context);
     position = method.end;
   }
-  return translated;
+  return record;
+}
+
+function jetOptional(value, render) {
+  return value === null ? "None" : "Val(" + render(value) + ")";
+}
+
+function jetStringList(values) {
+  return "[String]{" + values.map(jetStringExpression).join(", ") + "}";
+}
+
+// The CoreCallRecord literal, fields in CoreCalls.jet declaration order.
+function coreCallRecordLiteral(record) {
+  const route = record.interpreter_route;
+  const symbol = record.symbol;
+  const capability = record.capability;
+  const completion = record.frame_completion;
+  const marker = record.marker;
+  return "CoreCallRecord{" + [
+    "module_name: " + jetStringExpression(record.module_name),
+    "member: " + jetStringExpression(record.member),
+    "receiver_types: " + jetStringList(record.receiver_types),
+    "signature: CoreCallSignature{arity: " + record.signature.arity +
+      ", max_arity: " + record.signature.max_arity +
+      ", borrow_mask: [Bool]{" + record.signature.borrow_mask.join(", ") + "}}",
+    "frame_accesses: [CoreCallResourceAccess]{" + record.frame_accesses.map(function (access) {
+      return "CoreCallResourceAccess{argument: " + access.argument + ", mode: CoreCallResourceAccessMode." + access.mode + "}";
+    }).join(", ") + "}",
+    "frame_completion: " + (completion === null ? "None" :
+      "Val(CoreCallCompletion{kind: CoreCallCompletionKind." + completion.kind +
+      ", token: " + jetOptional(completion.token, jetStringExpression) +
+      ", provider: " + jetStringExpression(completion.provider) + "})"),
+    "fallibility: CoreCallFallibility.Sema",
+    "effect_kind: " + jetOptional(record.effect_kind, function (effect) { return "Effect." + effect; }),
+    "capability: CoreCapabilityContract{kind: CoreCapabilityKind." + capability.kind +
+      ", provider: " + jetOptional(capability.provider, jetStringExpression) +
+      ", fallback: " + jetOptional(capability.fallback, jetStringExpression) +
+      ", failure: " + jetOptional(capability.failure, jetStringExpression) + "}",
+    "effect_leaf: " + jetOptional(record.effect_leaf, jetStringExpression),
+    "sink_class: " + jetOptional(record.sink_class, function (sink) { return "SinkClass." + sink; }),
+    "pure_route: CoreCallPureRoute." + record.pure_route,
+    "interpreter_route: CoreCallInterpreterRoute." + route.kind +
+      (route.kind === "Pure" ? "{route: CoreCallPureRoute." + route.route + "}" : ""),
+    "symbol: CoreCallSymbol." + symbol.kind +
+      (symbol.kind === "SourceOwned" ? "" : "{name: " + jetStringExpression(symbol.name) + "}"),
+    "source_target: " + jetOptional(record.source_target, jetStringExpression),
+    "coverage: CoreCallCoverage{bits: " + record.coverage + "}",
+    "aot_direct: " + record.aot_direct,
+    "native_int_result: " + record.native_int_result,
+    "ui_capabilities: " + jetStringList(record.ui_capabilities),
+    "marker: " + (marker === null ? "None" :
+      "Val(CoreMarkerApplication{member: " + jetStringExpression(marker.member) +
+      ", since: " + jetStringExpression(marker.since) +
+      ", replacement: " + jetStringExpression(marker.replacement) +
+      ", removed_in: " + jetOptional(marker.removed_in, jetStringExpression) + "})"),
+    "authority: None",
+  ].join(", ") + "}";
+}
+
+function translateCoreCallExpression(expression, context) {
+  return coreCallRecordLiteral(coreCallRecordFromRust(expression, context));
 }
 
 function rustArrayEntries(source, startToken) {
@@ -1798,7 +2120,7 @@ function coreCallReceiverTypes(argument, sourceLine) {
 
 function coreCallIdentity(expression, sourceLine) {
   const call = expression.match(
-    /^(?:(CoreCallRecord::(new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
+    /^(?:(CoreCallRecord::(source_owned|new_with_coverage|new|receiver_with_coverage|receiver_with_symbol|receiver))|(sema_web_call))\s*\(/,
   );
   if (!call) {
     throw new Error("dispatcher row has no CoreCallRecord adapter at line " + sourceLine);
@@ -1811,10 +2133,29 @@ function coreCallIdentity(expression, sourceLine) {
   if (args.length <= memberIndex || (moduleIndex !== null && args.length <= moduleIndex)) {
     throw new Error("dispatcher row adapter has no module/member identity at line " + sourceLine);
   }
+  let sourceMember = coreCallIdentityValue(args[memberIndex], "member", sourceLine);
+  if (constructor === "CoreCallRecord::source_owned") {
+    const value = expression.trim();
+    const context = "source-owned dispatcher line " + sourceLine;
+    let position = readRustCall(value, 0, context).end;
+    while (position < value.length) {
+      while (/\s/.test(value[position] || "")) position += 1;
+      if (position >= value.length) break;
+      // Identity readers also receive the remainder of a Rust row array.
+      if (value[position] !== ".") break;
+      const method = readRustCall(value, position + 1, context);
+      if (method.name === "with_source_target") {
+        expectRustArgumentCount(method.name, method.args, 1, context);
+        sourceMember = coreCallIdentityValue(method.args[0], "source target", sourceLine);
+      }
+      position = method.end;
+    }
+  }
   return {
     constructor: constructor,
     module: moduleIndex === null ? "" : coreCallIdentityValue(args[moduleIndex], "module", sourceLine),
     member: coreCallIdentityValue(args[memberIndex], "member", sourceLine),
+    sourceMember: sourceMember,
     receiverTypes: receiver ? coreCallReceiverTypes(args[0], sourceLine) : [],
   };
 }
@@ -1845,7 +2186,50 @@ function validateDispatcherIdentity(module, member, expression, sourceLine) {
   return actual;
 }
 
-function parseCoreSource(source) {
+// The runtime unit an owned wrapper calls, when its body reaches a
+// `core.<area>.runtime.<unit>` import and no longer calls its own
+// `core.<module>.<member>` provider; otherwise null.
+function ownedWrapperRuntimeUnit(source, module, member) {
+  const lines = source.split(/\r?\n/);
+  const start = lines.findIndex(function (line) {
+    return new RegExp("^\\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\\(\"(?:[^\"\\\\]|\\\\.)*\"\\))?\\s+)*fn\\s+" + member + "\\b").test(line);
+  });
+  if (start < 0) return null;
+  let end = start + 1;
+  while (end < lines.length &&
+      !/^(?:priv\s+)?(?:fn|struct|enum|alias|impl|module|trait)\b|^#/.test(lines[end])) {
+    end += 1;
+  }
+  const body = lines.slice(start, end).join("\n");
+  if (body.includes(module + "." + member + "(")) return null;
+  const locals = new Map();
+  for (const match of source.matchAll(
+    /^use\s+(core\.[a-z0-9_]+\.runtime\.[a-z0-9_]+)(?:\.\[([^\]]*)\]|\.([A-Za-z_][A-Za-z0-9_]*))?(?:\s+as\s+([A-Za-z_][A-Za-z0-9_]*))?/gm,
+  )) {
+    const unit = match[1];
+    if (match[2] !== undefined) {
+      for (const item of match[2].split(",").map(function (value) { return value.trim(); }).filter(Boolean)) {
+        const parts = item.split(/\s+as\s+/);
+        locals.set((parts[1] || parts[0]).trim() + "(", unit);
+      }
+    } else if (match[3] !== undefined) {
+      locals.set((match[4] || match[3]) + "(", unit);
+    } else {
+      locals.set((match[4] || unit.split(".").pop()) + ".", unit);
+    }
+  }
+  for (const [local, unit] of locals) {
+    if (new RegExp("(?:^|[^A-Za-z0-9_.])" + local.replace(/[.(]/g, "\\$&")).test(body)) return unit;
+  }
+  return null;
+}
+
+function parseCoreSource(source, root = ROOT) {
+  const readSource = (path) => {
+    const sourcePath = join(root, path);
+    if (!existsSync(sourcePath)) throw new Error("missing source: " + path);
+    return readFileSync(sourcePath, "utf8");
+  };
   const modules = [];
   const sourceModules = [];
   const bootstraps = [];
@@ -1957,7 +2341,7 @@ function parseCoreSource(source) {
       continue;
     }
     const sourceModule = line.match(
-      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}$/,
+      /^source_module\s+([A-Za-z_][A-Za-z0-9_.]*)\s+path\s+([^\s]+)\s+alias\s+([A-Za-z_][A-Za-z0-9_]*)\s+owns\s+\{([^}]*)\}(?:\s+types\s+\{([^}]*)\})?(?:\s+impls\s+\{([^}]*)\})?$/,
     );
     if (sourceModule) {
       const module = sourceModule[1];
@@ -1970,8 +2354,17 @@ function parseCoreSource(source) {
         throw new Error("duplicate Core source alias `" + alias + "` at line " + sourceLine);
       }
       const ownedMembers = coreList(sourceModule[4], "Core.jet line " + sourceLine);
+      // `types { … }` names the module's source-owned nominals: every tier uses
+      // the Jet declaration and no native carrier projection exists for them.
+      const ownedTypes = sourceModule[5] === undefined
+        ? []
+        : coreList(sourceModule[5], "Core.jet line " + sourceLine);
+      // Owner-only impl admission never exports a type or changes its carrier.
+      const implTypes = sourceModule[6] === undefined
+        ? []
+        : coreList(sourceModule[6], "Core.jet line " + sourceLine);
       // Type-only Core sources may own nominals and static methods without free functions.
-      if (!existsSync(join(ROOT, path))) {
+      if (!existsSync(join(root, path))) {
         throw new Error("Core source module path does not exist at line " + sourceLine + ": " + path);
       }
       seenSourceModules.add(module);
@@ -1981,6 +2374,8 @@ function parseCoreSource(source) {
         path: path,
         alias: alias,
         ownedMembers: ownedMembers,
+        ownedTypes: ownedTypes,
+        implTypes: implTypes,
         sourceLine: sourceLine,
       });
       continue;
@@ -2022,7 +2417,8 @@ function parseCoreSource(source) {
         const descriptor = parts[1] || "plain";
         const genericMatch = descriptor.match(/^generic\(([1-9][0-9]*)\)$/);
         const enumMatch = descriptor.match(/^plain\(([^()]*)\)$/);
-        const kind = genericMatch || enumMatch ? "plain" : descriptor;
+        const fromMatch = descriptor.match(/^from\((core\.[A-Za-z_][A-Za-z0-9_.]*)\)$/);
+        const kind = genericMatch || enumMatch || fromMatch ? "plain" : descriptor;
         if (!["plain", "crypto_nominal"].includes(kind)) {
           throw new Error("invalid Core type kind `" + kind + "` in Core.jet line " + sourceLine);
         }
@@ -2045,6 +2441,7 @@ function parseCoreSource(source) {
           kind: kind,
           variants: variants,
           genericArity: genericMatch ? Number(genericMatch[1]) : null,
+          ...(fromMatch ? {fromModule: fromMatch[1]} : {}),
         });
       }
       const memberSet = new Set();
@@ -2073,6 +2470,29 @@ function parseCoreSource(source) {
     }
     throw new Error("unrecognized Core declaration at line " + sourceLine + ": " + line);
   }
+  // Reexports share one catalog definition instead of copying variant ordinals.
+  // DataPlot's canonical definition moves to Jet when Rust DataPlot.rs is ported.
+  const typeModules = new Map(modules.map((module) => [module.module, module]));
+  const resolving = new Set();
+  function resolveType(module, type) {
+    if (!type.fromModule) return type;
+    const key = module.module + "." + type.name;
+    if (resolving.has(key)) throw new Error("cyclic Core type reference `" + key + "`");
+    const owner = typeModules.get(type.fromModule);
+    const target = owner?.types.find((row) => row.name === type.name);
+    if (!target || !owner.members.includes(type.name)) {
+      throw new Error("unknown Core type reference `" + type.fromModule + "." + type.name + "`");
+    }
+    resolving.add(key);
+    const canonical = resolveType(owner, target);
+    type.kind = canonical.kind;
+    type.variants = canonical.variants;
+    type.genericArity = canonical.genericArity;
+    delete type.fromModule;
+    resolving.delete(key);
+    return type;
+  }
+  for (const module of modules) for (const type of module.types) resolveType(module, type);
 
   if (!bootstraps.length) throw new Error("Core.jet has no bootstrap declarations");
   const bootstrapNames = new Set(bootstraps.map(function (step) { return step.name; }));
@@ -2115,15 +2535,35 @@ function parseCoreSource(source) {
           sourceModule.module + "." + member + "`");
       }
     }
+    // Source ownership includes private nominals, not only the public export
+    // metadata. The exact declaring source is validated below.
+  }
+  const sourceTargets = new Map();
+  for (const row of dispatcherRows) {
+    if (row.kind === "receiver") continue;
+    const identity = coreCallIdentity(row.expression, row.sourceLine);
+    if (identity.constructor === "CoreCallRecord::source_owned") {
+      sourceTargets.set(row.module + "." + identity.member, identity.sourceMember);
+    }
   }
   for (const sourceModule of sourceModules) {
     const sourceFunctions = new Set(Array.from(
-      read(sourceModule.path).matchAll(/^\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+      readSource(sourceModule.path).matchAll(/^\s*(?:#[A-Za-z_][A-Za-z0-9_]*(?:\("(?:[^"\\]|\\.)*"\))?\s+)*fn\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
     ).map(function (match) { return match[1]; }));
     for (const member of sourceModule.ownedMembers) {
-      if (!sourceFunctions.has(member)) {
+      const target = sourceTargets.get(sourceModule.module + "." + member) ?? member;
+      if (!sourceFunctions.has(target)) {
         throw new Error("Core source module does not define owned member `" +
-          sourceModule.module + "." + member + "` at line " + sourceModule.sourceLine);
+          sourceModule.module + "." + member + "` target `" + target + "` at line " + sourceModule.sourceLine);
+      }
+    }
+    const sourceTypes = new Set(Array.from(
+      readSource(sourceModule.path).matchAll(/^(?:struct|enum|alias)\s+([A-Za-z_][A-Za-z0-9_]*)/gm),
+    ).map(function (match) { return match[1]; }));
+    for (const type of sourceModule.ownedTypes) {
+      if (!sourceTypes.has(type)) {
+        throw new Error("Core source module does not declare owned type `" +
+          sourceModule.module + "." + type + "` at line " + sourceModule.sourceLine);
       }
     }
   }
@@ -2142,12 +2582,35 @@ function parseCoreSource(source) {
   }
   for (const row of dispatcherRows) {
     if (row.kind === "receiver") continue;
+    if (coreCallIdentity(row.expression, row.sourceLine).constructor === "CoreCallRecord::source_owned" &&
+        !sourceModules.some(source => source.module === row.module &&
+          source.ownedMembers.includes(coreDispatcherMemberValue(row.member)))) {
+      throw new Error("source-owned dispatcher row has no owning source_module: " +
+        row.module + "." + row.member);
+    }
     if (!moduleSet.has(row.module) && row.kind !== "adapter") {
       throw new Error("dispatcher row names missing Core module `" + row.module + "`");
     }
     if (row.kind === "plain" && !memberSets.get(row.module).has(row.member)) {
       throw new Error("dispatcher row is not declared by Core.jet exports: " +
         row.module + "." + row.member);
+    }
+  }
+  // Cutover end state: once an owned wrapper calls a runtime unit instead of
+  // its `core.<module>.<member>` provider, the dispatcher row (and the Rust
+  // symbol it names) is dead and must go in the same change.
+  for (const row of dispatcherRows) {
+    if (row.kind === "receiver") continue;
+    const owner = sourceModules.find(function (entry) {
+      return entry.module === row.module && entry.ownedMembers.includes(row.member);
+    });
+    if (!owner) continue;
+    const unit = ownedWrapperRuntimeUnit(readSource(owner.path), owner.module, row.member);
+    if (unit) {
+      throw new Error("dispatcher row `" + row.module + "." + row.member + "` (Core.jet line " +
+        row.sourceLine + ") is dead: its owned wrapper `fn " + row.member + "` in " + owner.path +
+        " (owns at Core.jet line " + owner.sourceLine + ") calls runtime unit `" + unit +
+        "` instead of the provider; delete the row and the Rust symbol it names");
     }
   }
   const nonReceiverDispatcherCounts = new Map();
@@ -2212,7 +2675,7 @@ function coreModuleInventory() {
 // a source declaration.
 function publicDispatcherRows() {
   const source = read(CORE_CALLS_PATH);
-  const start = source.indexOf("pub const CORE_CALLS");
+  const start = source.indexOf("pub static CORE_CALLS");
   const end = source.indexOf("\n];", start);
   if (start < 0 || end < 0) {
     throw new Error("CoreCall dispatcher table is missing its bounded source");
@@ -2433,6 +2896,15 @@ function generatedCoreExports(source, declarations) {
     "    pub alias: &'static str,",
     "    pub path: &'static str,",
     "    pub owned_members: &'static [&'static str],",
+    "    pub impl_types: &'static [&'static str],",
+    "}",
+    "",
+    "/// One source-owned Core nominal: `name` is declared by the Core source at",
+    "/// `path` and no tier projects it onto a native carrier.",
+    "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
+    "pub struct CoreSourceOwnedType {",
+    "    pub path: &'static str,",
+    "    pub name: &'static str,",
     "}",
     "",
     "#[derive(Debug, Clone, Copy, PartialEq, Eq)]",
@@ -2488,7 +2960,14 @@ function generatedCoreExports(source, declarations) {
       "\", path: \"" + entry.path +
       "\", owned_members: &[" +
       entry.ownedMembers.map(function (member) { return "\"" + member + "\""; }).join(", ") +
-      "] },");
+      "], impl_types: &[" + entry.implTypes.map(type => "\"" + type + "\"").join(", ") + "] },");
+  }
+  lines.push("];", "");
+  lines.push("pub const CORE_SOURCE_OWNED_TYPES: &[CoreSourceOwnedType] = &[");
+  for (const entry of declarations.sourceModules) {
+    for (const type of entry.ownedTypes) {
+      lines.push("    CoreSourceOwnedType { path: \"" + entry.path + "\", name: \"" + type + "\" },");
+    }
   }
   lines.push("];", "");
   lines.push("pub const CORE_ROOT_TYPES: &[&str] = &[" +
@@ -2512,11 +2991,83 @@ function generatedCoreSourceTexts(declarations) {
     lines.push("    (\"" + entry.module + "\", include_str!(\"../../../" + entry.path + "\")),");
   }
   lines.push("];", "");
+  lines.push(
+    "// Body text of every runtime unit in",
+    "// `jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS`, keyed by its module.",
+    "const CORE_RUNTIME_SOURCE_TEXTS: &[(&str, &str)] = &[",
+  );
+  for (const part of coreRuntimeParts()) {
+    lines.push("    (\"" + part.module + "\", include_str!(\"../../../" + part.path + "\")),");
+  }
+  lines.push("];", "");
   return lines.join("\n");
 }
 
 function writeCoreSourceTexts(declarations) {
   writeFileSync(join(ROOT, CORE_SOURCE_TEXTS_PATH), generatedCoreSourceTexts(declarations));
+}
+
+// Compiler-private runtime units come straight from the directory: every
+// `Core/<area>/runtime/**/<unit>.jet` except a `// PORT-PENDING` packet, whose
+// body is still the Rust it replaces. A nested directory is one more path
+// segment (`Core/text/runtime/assets/x.jet` is `core.text.runtime.assets.x`).
+// One list, no hand-kept table.
+function coreRuntimeParts() {
+  const parts = [];
+  const aliases = new Set();
+  const coreRoot = join(ROOT, "Core");
+  const walk = function (directory, segments) {
+    for (const entry of readdirSync(directory).sort()) {
+      const full = join(directory, entry);
+      if (statSync(full).isDirectory()) {
+        walk(full, segments.concat([entry]));
+        continue;
+      }
+      if (!entry.endsWith(".jet") || !statSync(full).isFile()) continue;
+      const path = "Core/" + segments.join("/") + "/" + entry;
+      if (/^\/\/ PORT-PENDING\b/m.test(read(path))) continue;
+      const unitSegments = segments.concat([entry.slice(0, -".jet".length)]);
+      for (const segment of unitSegments) {
+        if (!/^[a-z][a-z0-9_]*$/.test(segment)) {
+          throw new Error("runtime unit path segment `" + segment + "` is not a lowercase identifier: " + path);
+        }
+      }
+      const alias = "__core_" + unitSegments.join("_");
+      if (aliases.has(alias)) {
+        throw new Error("runtime unit alias `" + alias + "` is claimed twice; rename " + path);
+      }
+      aliases.add(alias);
+      parts.push({ module: "core." + unitSegments.join("."), alias: alias, path: path });
+    }
+  };
+  for (const area of readdirSync(coreRoot).sort()) {
+    const directory = join(coreRoot, area, "runtime");
+    if (existsSync(directory) && statSync(directory).isDirectory()) walk(directory, [area, "runtime"]);
+  }
+  return parts;
+}
+
+function generatedCoreRuntimeParts() {
+  const lines = [
+    CORE_RUNTIME_PARTS_BEGIN,
+    "// Generated by Tools/agent/check-core-surface-ledger.mjs --write from Core/*/runtime/**/*.jet; do not edit.",
+    "pub const CORE_RUNTIME_PARTS: &[CoreSourceModule] = &[",
+  ];
+  for (const part of coreRuntimeParts()) {
+    lines.push("    CoreSourceModule { module: \"" + part.module + "\", alias: \"" + part.alias +
+      "\", path: \"" + part.path + "\", owned_members: &[], impl_types: &[] },");
+  }
+  lines.push("];", CORE_RUNTIME_PARTS_END);
+  return lines.join("\n");
+}
+
+function writeCoreRuntimeParts() {
+  writeFileSync(join(ROOT, CORE_PARTS_PATH), replaceGeneratedSection(
+    read(CORE_PARTS_PATH),
+    CORE_RUNTIME_PARTS_BEGIN,
+    CORE_RUNTIME_PARTS_END,
+    generatedCoreRuntimeParts(),
+  ));
 }
 function generatedEncodingFormats(source, declarations) {
   if (!declarations.formatRows.length) {
@@ -2625,7 +3176,9 @@ function generatedCoreCalls(source, declarations) {
   lines.push(
     "];",
     "",
-    "pub const CORE_CALLS: &[CoreCallRecord] = &[",
+    "// Evaluate the immutable bootstrap registry once, not in every consuming crate.",
+    "#[allow(long_running_const_eval)]",
+    "pub static CORE_CALLS: &[CoreCallRecord] = &[",
   );
   for (const row of declarations.dispatcherRows) {
     lines.push("    " + coreDispatcherExpression(row, ambientKeys) + ",");
@@ -2647,8 +3200,10 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     "// Source: " + TIR_CORE_CALLS_PATH + " (TIR_CORE_CALL_RECORDS, appended in declaration order)",
     "// Source SHA-256: " + sha256(tirSource),
     "// Core ABI rows keep Core.jet order followed by the TIR extension order.",
+    "// Each row is the evaluated CoreCallRecord literal of its Rust builder chain,",
+    "// so the table lands without a compile-time execution host.",
     "// CoreModuleExportNames is the separate module/export-name projection.",
-    "pub CORE_CALLS :: prep { [CoreCallRecord]{",
+    "CORE_CALLS :: prep { [CoreCallRecord]{",
   ];
   for (const row of declarations.dispatcherRows) {
     const expression = coreDispatcherExpression(row, ambientKeys);
@@ -2669,7 +3224,7 @@ function generatedCoreCallRegistry(coreSource, tirSource, declarations) {
     "} }",
     "",
     "// Module/member/type names follow Core.jet module declaration order.",
-    "pub CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
+    "CORE_MODULE_EXPORTS :: [CoreModuleExportNames]{",
   );
   for (const module of declarations.modules) {
     const members = module.members.map(function (member) {
@@ -2716,16 +3271,38 @@ function generatedCoreEnumRows(source, declarations) {
     "// Source SHA-256: " + sha256(source),
     "// Core enum leaves in Core.jet module declaration order; the first row",
     "// naming a type is its canonical variant list.",
-    "pub CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
+    "CORE_ENUM_ROWS :: [CoreModuleTypeExport]{",
   ];
+  // `core_module_enum_variants` authenticates the exporting module through its
+  // catalog row and reads the leaf's variants here, so every module that
+  // exports one enum leaf must declare the same variants.
+  const seen = new Map();
   for (const module of declarations.modules) {
     for (const type of module.types) {
       if (type.genericArity || !(type.variants && type.variants.length)) continue;
+      const variants = type.variants.join("|");
+      if (seen.has(type.name) && seen.get(type.name) !== variants) {
+        throw new Error(CORE_SOURCE_PATH + ": Core enum leaf " + type.name + " has different variants in " + module.module);
+      }
+      seen.set(type.name, variants);
       lines.push(
         "    CoreModuleTypeExport{name: " + jetStringExpression(type.name) +
         ", kind: CoreLeafKind.Enum{variants: [String]{" +
         type.variants.map(jetStringExpression).join(", ") + "}}},",
       );
+    }
+  }
+  lines.push(
+    "}",
+    "",
+    "// Source-owned Core nominals (`source_module … types { … }`) in Core.jet",
+    "// order; the Rust mirror is CoreModuleExports::CORE_SOURCE_OWNED_TYPES.",
+    "CORE_SOURCE_OWNED_TYPES :: [CoreSourceOwnedType]{",
+  );
+  for (const entry of declarations.sourceModules) {
+    for (const type of entry.ownedTypes) {
+      lines.push("    CoreSourceOwnedType{path: " + jetStringExpression(entry.path) +
+        ", name: " + jetStringExpression(type) + "},");
     }
   }
   lines.push("}", "// END GENERATED CORE ENUM ROWS", "");
@@ -2742,6 +3319,7 @@ const CORE_TYPES_RS_PATH = "crates/jet-sema/src/Sema/CheckerCoreLib/core_types.r
 const CHECKER_ITEMS_RS_PATH = "crates/jet-sema/src/Sema/CheckerItems.rs";
 const SYNTAX_RS_DIR = "crates/jet-foundation/src/Syntax";
 const CORE_ENUM_PAYLOAD_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet";
+const CORE_SOURCE_OWNED_ROWS_PATH = "Compiler/JetFoundation/Source/Registry/CoreSourceOwned.jet";
 
 function rustSyntaxConstants() {
   const strings = new Map();
@@ -2791,6 +3369,12 @@ function rustPayloadType(expression, constants, rel) {
   const text = expression.replace(/\s+/g, "");
   const scalar = { "Type::Int": "Type.Int", "Type::Bool": "Type.Bool", "Type::String": "Type.String", "Type::Char": "Type.Char", "Type::Float": "Type.Float" };
   if (scalar[text]) return scalar[text];
+  if (text === "u8_ty()") {
+    const body = rustFunctionBody(read(CORE_TYPES_RS_PATH), "u8_ty", CORE_TYPES_RS_PATH);
+    const integer = /Type::IntN\s*\{\s*signed:\s*(true|false),\s*bits:\s*(\d+),?\s*\}/.exec(body);
+    if (!integer) throw new Error(rel + ": u8_ty payload factory changed shape");
+    return "Type.IntN{signed: " + integer[1] + ", bits: " + integer[2] + "}";
+  }
   const named = /^Type::Named\((.+)\.to_string\(\)\)$/.exec(text);
   if (named) return "Type.Named{name: " + jetStringExpression(rustSyntaxString(named[1], constants, rel)) + "}";
   const list = /^Type::List\(Box::new\((.+)\)\)$/.exec(text);
@@ -2891,6 +3475,53 @@ function rustTaskFailureVariantFamily(source, constants) {
   return { name: "TaskFailure", rows };
 }
 
+function rustDataEventVariantFamily(source, constants) {
+  const body = rustFunctionBody(source, "core_encoding_variants", CORE_TYPES_RS_PATH);
+  const table = /pub const DATA_EVENT_VARIANTS: \[&str;\s*(\d+)\]\s*=\s*\[([^\]]*)\];/.exec(source);
+  if (!table || !/for name in DATA_EVENT_VARIANTS\s*\{/.test(body) ||
+      !/match data_event_payload\(name\)/.test(body)) {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table changed shape");
+  }
+  const variants = table[2].split(",").map((value) => value.trim()).filter(Boolean)
+    .map((value) => rustSyntaxString(value, constants, CORE_TYPES_RS_PATH));
+  if (variants.length !== Number(table[1]) || new Set(variants).size !== variants.length) {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent variant table is incomplete or duplicated");
+  }
+  const payloadBody = rustFunctionBody(source, "data_event_payload", CORE_TYPES_RS_PATH);
+  const arms = /^\s*match variant\s*\{([\s\S]*)\}\s*$/.exec(payloadBody);
+  if (!arms) throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload table changed shape");
+  const payloads = new Map();
+  const lines = arms[1].split("\n").map((line) => line.trim()).filter(Boolean);
+  if (lines.pop() !== "_ => None,") {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload table has no closed default");
+  }
+  for (const line of lines) {
+    const arm = /^(.+?)\s*=>\s*Some\((None|Some\((.+)\))\),$/.exec(line);
+    if (!arm) throw new Error(CORE_TYPES_RS_PATH + ": unrecognized DataEvent payload arm `" + line + "`");
+    const payload = arm[2] === "None" ? [] : [rustPayloadType(arm[3], constants, CORE_TYPES_RS_PATH)];
+    for (const name of arm[1].split("|")) {
+      const variant = rustSyntaxString(name, constants, CORE_TYPES_RS_PATH);
+      if (payloads.has(variant)) throw new Error(CORE_TYPES_RS_PATH + ": duplicate DataEvent payload `" + variant + "`");
+      payloads.set(variant, payload);
+    }
+  }
+  if (payloads.size !== variants.length || variants.some((variant) => !payloads.has(variant))) {
+    throw new Error(CORE_TYPES_RS_PATH + ": DataEvent payload projection is incomplete");
+  }
+  return {name: "DataEvent", rows: variants.map((variant) => ({variant, payload: payloads.get(variant)}))};
+}
+
+// D-REDUCE-VALUE1=A: `core_reduce_op_variants` guards one enum name and maps
+// one literal name list to unit variants.
+function rustGuardedUnitVariantFamily(source, constants, name) {
+  const body = rustFunctionBody(source, name, CORE_TYPES_RS_PATH);
+  const guard = /if enum_name != ((?:crate::)?Syntax::\w+|"\w+") \{\s*return None;\s*\}/.exec(body);
+  if (!guard) throw new Error(CORE_TYPES_RS_PATH + ": " + name + " changed shape; update the payload-row projection");
+  const rows = rustNullaryVariantRows(body, constants, CORE_TYPES_RS_PATH, name);
+  if (!rows.length || rows.some((row) => row.payload.length)) throw new Error(CORE_TYPES_RS_PATH + ": " + name + " is not one unit name list");
+  return { name: rustSyntaxString(guard[1], constants, CORE_TYPES_RS_PATH), rows };
+}
+
 function coreEnumPayloadFamilies(declarations) {
   const constants = rustSyntaxConstants();
   const coreTypes = read(CORE_TYPES_RS_PATH);
@@ -2908,6 +3539,9 @@ function coreEnumPayloadFamilies(declarations) {
   families.push(...rustIOVariantFamilies(coreTypes, constants));
   if (!/core_plugin_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": plugin enum resolver is missing");
   families.push(...rustPluginVariantFamilies(coreTypes, constants));
+  families.push(rustDataEventVariantFamily(coreTypes, constants));
+  if (!/core_reduce_op_variants\(enum_name\)/.test(resolver)) throw new Error(CHECKER_ITEMS_RS_PATH + ": resolve_enum_variants_cloned no longer consults core_reduce_op_variants");
+  families.push(rustGuardedUnitVariantFamily(coreTypes, constants, "core_reduce_op_variants"));
   const declared = new Set();
   for (const module of declarations.modules) {
     for (const type of module.types) {
@@ -2917,10 +3551,39 @@ function coreEnumPayloadFamilies(declarations) {
   return families.filter((family) => !declared.has(family.name) || family.rows.some((row) => row.payload.length));
 }
 
+// Owning an opaque impl or a compiler enum menu does not create an export.
+// The qualified-annotation gate's suffixes come from the same generated
+// ownership rows: CORE_SOURCE_OWNED_ROWS impl types, then the
+// CORE_ENUM_PAYLOAD_ROWS enum names, each once in first-occurrence order.
+function coreOwnerAnnotationSuffixes(families) {
+  const owned = read(CORE_SOURCE_OWNED_ROWS_PATH);
+  const head = "CORE_SOURCE_OWNED_ROWS :: prep { [CoreSourceOwnedRow]{";
+  const start = owned.indexOf(head);
+  const end = owned.indexOf("\n} }", start);
+  if (start < 0 || end < 0) throw new Error(CORE_SOURCE_OWNED_ROWS_PATH + " has no CORE_SOURCE_OWNED_ROWS table");
+  const suffixes = [];
+  const add = function (name) {
+    const suffix = "." + name;
+    if (!suffixes.includes(suffix)) suffixes.push(suffix);
+  };
+  for (const match of owned.slice(start, end).matchAll(/impl_types: \[String\]\{([^}]*)\}/g)) {
+    for (const item of match[1].split(",").map((part) => part.trim()).filter(Boolean)) {
+      const name = item.match(/^"([A-Za-z_][A-Za-z0-9_]*)"$/);
+      if (!name) throw new Error(CORE_SOURCE_OWNED_ROWS_PATH + ": unreadable impl type " + item);
+      add(name[1]);
+    }
+  }
+  for (const family of families) {
+    for (const _row of family.rows) add(family.name);
+  }
+  return suffixes;
+}
+
 function generatedCoreEnumPayloadRows(declarations) {
   const sources = [CHECKER_ITEMS_RS_PATH, CORE_TYPES_RS_PATH];
   const syntax = readdirSync(join(ROOT, SYNTAX_RS_DIR)).filter((name) => name.endsWith(".rs")).sort()
     .map((name) => read(SYNTAX_RS_DIR + "/" + name)).join("");
+  const families = coreEnumPayloadFamilies(declarations);
   const lines = [
     "// BEGIN GENERATED CORE ENUM PAYLOAD ROWS",
     "// Source: " + sources.join(", ") + ", " + SYNTAX_RS_DIR,
@@ -2928,9 +3591,9 @@ function generatedCoreEnumPayloadRows(declarations) {
     "// Compiler-owned Core enum families without a Core.jet declaration, in",
     "// Rust `resolve_enum_variants_cloned` order; each row is one variant and",
     "// its positional payload types (none for a unit variant).",
-    "pub CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
+    "CORE_ENUM_PAYLOAD_ROWS :: [CoreEnumPayloadRow]{",
   ];
-  for (const family of coreEnumPayloadFamilies(declarations)) {
+  for (const family of families) {
     for (const row of family.rows) {
       lines.push(
         "    CoreEnumPayloadRow{enum_name: " + jetStringExpression(family.name) +
@@ -2939,7 +3602,18 @@ function generatedCoreEnumPayloadRows(declarations) {
       );
     }
   }
-  lines.push("}", "// END GENERATED CORE ENUM PAYLOAD ROWS", "");
+  lines.push(
+    "}",
+    "",
+    "// Owning an opaque impl or a compiler enum menu does not create an export.",
+    "// Qualified-annotation suffixes: " + CORE_SOURCE_OWNED_ROWS_PATH + " impl types,",
+    "// then the enum names above, each once in first-occurrence order.",
+    "JET_CORE_OWNER_ANNOTATION_SUFFIXES :: [String]{",
+    ...coreOwnerAnnotationSuffixes(families).map((suffix) => "    " + jetStringExpression(suffix) + ","),
+    "}",
+    "// END GENERATED CORE ENUM PAYLOAD ROWS",
+    "",
+  );
   return lines.join("\n");
 }
 function writeCoreEnumPayloadRows(declarations) {
@@ -3016,6 +3690,13 @@ function validateGeneratedViews(source, declarations) {
       read(CORE_SOURCE_TEXTS_PATH) !== generatedCoreSourceTexts(declarations)) {
     throw new Error("CoreSourceTexts.rs is stale; run --write to regenerate from Core.jet");
   }
+  const partsSource = read(CORE_PARTS_PATH);
+  const partsStart = partsSource.indexOf(CORE_RUNTIME_PARTS_BEGIN);
+  const partsEnd = partsSource.indexOf(CORE_RUNTIME_PARTS_END, partsStart);
+  if (partsStart < 0 || partsEnd < partsStart ||
+      partsSource.slice(partsStart, partsEnd + CORE_RUNTIME_PARTS_END.length) !== generatedCoreRuntimeParts()) {
+    throw new Error("CoreSourceParts.rs runtime parts are stale; run --write to regenerate from Core/*/runtime");
+  }
   // The Jet-hosted CLI's Core row table is generated from the export table.
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH), "--check"], { cwd: ROOT, stdio: "inherit" });
   if (!existsSync(join(ROOT, CORE_ENUM_ROWS_PATH)) ||
@@ -3033,6 +3714,7 @@ function writeCoreViews() {
   const source = read(CORE_SOURCE_PATH);
   const declarations = coreSourceFacts();
   writeCoreExportTable(source, declarations);
+  writeCoreRuntimeParts();
   execFileSync(process.execPath, [join(ROOT, CORE_ROWS_GENERATOR_PATH)], { cwd: ROOT, stdio: "inherit" });
   writeCoreSourceTexts(declarations);
   writeRingDependencyTable(source, declarations);
@@ -3063,8 +3745,9 @@ function checkCoreCallRegistryOnly() {
 function fixedSignaturePairs(modules) {
   const source = read(FIXED_SIGS_PATH);
   const knownModules = new Set(modules.map(function (entry) { return entry.module; }));
-  const sigFn = source.includes("fn core_fixed_sig_impl(") ? "core_fixed_sig_impl" : "core_fixed_sig";
-  const arms = matchArms(functionBody(source, sigFn), "match (module, name)");
+  // The public signature and tuple-normalization entry points delegate here;
+  // only the canonical raw table contains the module/member match arms.
+  const arms = matchArms(functionBody(source, "core_fixed_sig_raw"), "match (module, name)");
   const pairs = new Set();
   for (const arm of arms) {
     const strings = quoted(arm.lhs);
@@ -3145,7 +3828,8 @@ function methodNames(body, constants) {
   for (const arm of allMatchArms(body, "match method")) {
     addResolved(arm.lhs.split(" if ")[0]);
   }
-  return methods;
+  // Reserved embedded-Core storage seams are not user collection APIs.
+  return new Set(Array.from(methods).filter(name => !name.startsWith("__")));
 }
 
 // Discovery keyed on dispatch, not on a name. A name-suffix scan cannot see a
@@ -3344,11 +4028,12 @@ function collectionInventory() {
   for (const table of inlineTables(dispatch.inlineArms, source, constants)) tables.push(table);
 
   // D-TIMEDEPTH1: civil-time methods are typed in net_text_time.rs, not Collections.
-  // D-URL1: URL/MIME methods live in the same file (url_mime_method_return).
+  // URL and MIME are `core.net.url`/`core.net.mime` source records: their
+  // methods come from the declarations.
   {
     const civilText = read(NET_TEXT_TIME_PATH);
     const civilSources = [{ path: NET_TEXT_TIME_PATH, text: civilText }];
-    for (const tableName of ["civil_time_method_return", "url_mime_method_return", "regex_method_return"]) {
+    for (const tableName of ["civil_time_method_return", "regex_method_return"]) {
       const civilBody = tableBody(tableName, civilSources);
       if (!civilBody) {
         throw new Error(tableName + " missing from net_text_time.rs");
@@ -5735,6 +6420,61 @@ function hostileFixtures() {
   const board = towerBoard();
   const results = [];
 
+  results.push(rejects("source-owned dispatcher lacks a source owner",
+    "source-owned dispatcher row has no owning source_module", function () {
+    parseCoreSource([
+      "bootstrap Syntax depends_on []",
+      "bootstrap Effects depends_on [Syntax]",
+      "bootstrap Core depends_on [Effects]",
+      "bootstrap Derives depends_on [Core]",
+      "module core.fake exports {call}",
+      'dispatcher_row plain core.fake call | CoreCallRecord::source_owned("core.fake", "call", &[])',
+    ].join("\n"));
+  }));
+  results.push(holds("source-owned constructor preserves its declaration facts", function () {
+    const actual = translateCoreCallExpression(
+      'CoreCallRecord::source_owned("core.ui.host", "shortcut", &[false, false]).with_ui_capabilities(&["UI.Shortcuts"])',
+      "source-owned constructor fixture");
+    const expected = 'CoreCallRecord{module_name: "core.ui.host", member: "shortcut", receiver_types: [String]{}, ' +
+      'signature: CoreCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{false, false}}, ' +
+      'frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, ' +
+      'effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, ' +
+      'effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, ' +
+      'interpreter_route: CoreCallInterpreterRoute.NoRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, ' +
+      'coverage: CoreCallCoverage{bits: 1}, aot_direct: false, native_int_result: false, ' +
+      'ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}';
+    if (actual !== expected) {
+      throw new Error("source-owned constructor lost its signature or UI capability facts: " + actual);
+    }
+  }));
+  results.push(holds("source-owned builder preserves normalized source targets", function () {
+    const record = coreCallRecordFromRust(
+      'CoreCallRecord::new("core.net", "unix_connect", "jet_net_unix_connect", true, &[true]).with_max_arity(2).with_source_owned().with_source_target("__unix_connect_entry")',
+      "source-owned builder fixture");
+    if (record.symbol.kind !== "SourceOwned" || record.source_target !== "__unix_connect_entry" ||
+        record.signature.arity !== 1 || record.signature.max_arity !== 2 ||
+        record.effect_kind !== "Net" || record.effect_leaf !== "Time.Wait" ||
+        record.capability.kind !== "NativeRequired" || record.capability.provider !== "core.net" ||
+        record.coverage !== CORE_CALL_COVERAGE.SEMA || record.interpreter_route.kind !== "NoRoute" ||
+        record.aot_direct) {
+      throw new Error("source-owned builder lost its declaration facts or target: " + coreCallRecordLiteral(record));
+    }
+  }));
+  results.push(holds("source-owned targets resolve generically without changing public identity", function () {
+    const actual = coreCallIdentity(
+      'CoreCallRecord::source_owned("core.fake", "call", &[false]).with_source_target("__checked_call"),',
+      1);
+    if (actual.module !== "core.fake" || actual.member !== "call" ||
+        actual.sourceMember !== "__checked_call") {
+      throw new Error("source-owned target changed the public identity or was ignored");
+    }
+    const ordinary = coreCallIdentity(
+      'CoreCallRecord::source_owned("core.fake", "call", &[false]),', 1);
+    if (ordinary.sourceMember !== "call") {
+      throw new Error("a source-owned declaration without a target lost its member");
+    }
+  }));
+
   results.push(rejects("public dispatcher names a non-ledger module",
     "public dispatcher row names a non-ledger module", function () {
     validatePublicDispatcher(ledger.inventory.modules, [
@@ -5984,6 +6724,13 @@ function hostileFixtures() {
     }
   }));
 
+  results.push(holds("reserved Core storage seams are not public collection methods", function () {
+    const names = methodNames('match (method, nargs) { ("__swap", 2) => Some(None), ("get", 1) => Some(None) }', new Map());
+    if (names.has("__swap") || !names.has("get")) {
+      throw new Error("reserved method filtering hid a public method or exposed __swap");
+    }
+  }));
+
   results.push(holds("discovery reaches a pub fn table in another module", function () {
     const sources = [
       { path: COLLECTIONS_PATH, text: read(COLLECTIONS_PATH) },
@@ -6209,7 +6956,10 @@ function hostileFixtures() {
 
 export {
   buildLedger,
+  parseCoreSource,
   coreSourceFacts,
+  rustDataEventVariantFamily,
+  ownedWrapperRuntimeUnit,
   publicDispatcherRows,
   validatePublicDispatcher,
   generatedCoreExports,

@@ -1,0 +1,103 @@
+# Port of tests/cli_parts/budget.rs:1650-1708.
+# PENDING-SAME-HEAD: no runtime reference run.
+# PENDING-GRAMMAR(batch-four): pending predicate and step forms remain explicit.
+# PENDING-SEAM(sparse-set-len)
+refused: sparse-set-len
+fixture: fixtures/hostile_files
+resize: oversized 536870913
+step: jet self completions bash --for oversized
+exit: 1
+stderr: ~ "larger than the 512 MiB" # original predicate
+when os unix: step: jet self completions bash --for /dev/null
+when os unix: exit: 1
+when os unix: stderr: ~ "not a regular file" # original predicate
+when os unix: step: mkfifo program-fifo
+when os unix: exit: 0
+when os unix: step: jet self completions bash --for program-fifo
+when os unix: exit: 1
+when os unix: stderr: ~ "not a regular file" # original predicate
+copy: notexe.payload "safe\nINJECT_COMMAND\nnext"
+step: jet self completions bash --for "safe\nINJECT_COMMAND\nnext"
+exit: 1
+stdout: empty
+stderr: ~ "contains a control character" # original predicate
+stderr: !~ "\nINJECT_COMMAND\n" # original predicate
+stderr: ~ "safe\\nINJECT_COMMAND\\nnext" # original predicate
+step: jet self completions zsh --for "safe\nINJECT_COMMAND\nnext"
+exit: 1
+stdout: empty
+stderr: ~ "contains a control character" # original predicate
+stderr: !~ "\nINJECT_COMMAND\n" # original predicate
+stderr: ~ "safe\\nINJECT_COMMAND\\nnext" # original predicate
+step: jet self completions fish --for "safe\nINJECT_COMMAND\nnext"
+exit: 1
+stdout: empty
+stderr: ~ "contains a control character" # original predicate
+stderr: !~ "\nINJECT_COMMAND\n" # original predicate
+stderr: ~ "safe\\nINJECT_COMMAND\\nnext" # original predicate
+step: jet self completions powershell --for "safe\nINJECT_COMMAND\nnext"
+exit: 1
+stdout: empty
+stderr: ~ "contains a control character" # original predicate
+stderr: !~ "\nINJECT_COMMAND\n" # original predicate
+stderr: ~ "safe\\nINJECT_COMMAND\\nnext" # original predicate
+# Original source and EVERY assertion retained verbatim below; the named missing oracle prevents PASS.
+# #[test]
+# fn external_completion_rejects_hostile_files_and_names() {
+#     let dir = isolated_cwd("shape_cli_hostile_artifacts");
+#     let oversized = dir.join("oversized");
+#     fs::File::create(&oversized)
+#         .unwrap()
+#         .set_len(512 * 1024 * 1024 + 1)
+#         .unwrap();
+#     let oversized_out = Command::new(jet())
+#         .args(["self", "completions", "bash", "--for", "oversized"])
+#         .current_dir(&dir)
+#         .output()
+#         .unwrap();
+#     assert_eq!(oversized_out.status.code(), Some(1));
+#     assert!(String::from_utf8_lossy(&oversized_out.stderr).contains("larger than the 512 MiB"));
+# 
+#     #[cfg(unix)]
+#     {
+#         let device = Command::new(jet())
+#             .args(["self", "completions", "bash", "--for", "/dev/null"])
+#             .output()
+#             .unwrap();
+#         assert_eq!(device.status.code(), Some(1));
+#         assert!(String::from_utf8_lossy(&device.stderr).contains("not a regular file"));
+# 
+#         let fifo = dir.join("program-fifo");
+#         let made = Command::new("mkfifo").arg(&fifo).status().unwrap();
+#         assert!(made.success());
+#         let fifo_out = Command::new(jet())
+#             .args(["self", "completions", "bash", "--for", "program-fifo"])
+#             .current_dir(&dir)
+#             .output()
+#             .unwrap();
+#         assert_eq!(fifo_out.status.code(), Some(1));
+#         assert!(String::from_utf8_lossy(&fifo_out.stderr).contains("not a regular file"));
+#     }
+# 
+#     let hostile = "safe\nINJECT_COMMAND\nnext";
+#     fs::write(dir.join(hostile), b"not an executable").unwrap();
+#     for shell in ["bash", "zsh", "fish", "powershell"] {
+#         let out = Command::new(jet())
+#             .args(["self", "completions", shell, "--for", hostile])
+#             .current_dir(&dir)
+#             .output()
+#             .unwrap();
+#         assert_eq!(out.status.code(), Some(1));
+#         assert!(
+#             out.stdout.is_empty(),
+#             "{shell} emitted attacker-controlled script bytes"
+#         );
+#         let stderr = String::from_utf8(out.stderr).unwrap();
+#         assert!(stderr.contains("contains a control character"));
+#         assert!(
+#             !stderr.contains("\nINJECT_COMMAND\n"),
+#             "{shell} exposed an executable line: {stderr:?}"
+#         );
+#         assert!(stderr.contains("safe\\nINJECT_COMMAND\\nnext"));
+#     }
+# }

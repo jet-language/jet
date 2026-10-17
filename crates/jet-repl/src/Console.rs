@@ -10,13 +10,11 @@
 #![allow(dead_code)]
 
 use super::{
-    collect_moved_names, display_value, rebuild_funcs, repl_executable_stmts,
-    restore_move_diagnostic, type_check_item, type_check_stmts, update_core_imports_from_ledger,
-    ReplAuthorization, ReplFlags, ReplPolicy, Session,
+    echo_text, rebuild_funcs, run_stmts_turn, type_check_item, update_core_imports_from_ledger,
+    ReplFlags, ReplPolicy, Session, TurnResult,
 };
-use crate::Comptime::{CtValue, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET};
-use crate::Diagnostics::{Diagnostic, Span};
-use crate::AST::{Func, Stmt, StructDef};
+use crate::Diagnostics::Diagnostic;
+use crate::AST::Stmt;
 use jet_foundation::Authority::{answer, parse_right, root, Authority, Holds, Verdict};
 use jet_foundation::Hex::encode as hex_bytes;
 use jet_foundation::SHA256;
@@ -2360,11 +2358,13 @@ impl ConsoleSession {
                 false,
             )),
             super::InputKind::Meta(command, _) => {
-                let diagnostic = super::e1802(&format!("meta-command `:{command}`"));
-                self.evaluation_diagnostic(trimmed, &diagnostic)
-            }
-            super::InputKind::Reject(feature) => {
-                let diagnostic = super::e1802(&feature);
+                let diagnostic = Diagnostic::error(
+                    "E2104",
+                    format!("the console does not run meta-command `:{command}`"),
+                    "console input is Jet source or a console request".to_string(),
+                    "send the Jet expression or statement itself".to_string(),
+                    None,
+                );
                 self.evaluation_diagnostic(trimmed, &diagnostic)
             }
             super::InputKind::Item(src) => self.evaluate_item(trimmed, &src),
@@ -2555,105 +2555,37 @@ impl ConsoleSession {
         suppress: bool,
         check_src: &str,
     ) -> Result<ConsoleOutput, ConsoleError> {
-        let (checked_stmts, checked_core_imports) =
-            match type_check_stmts(&self.repl, &stmts, self.repl.step, check_src) {
-                Ok(checked) => checked,
-                Err(diags) => return self.evaluation_diagnostics(input, &diags),
-            };
-        let session_binding_names: std::collections::HashSet<String> =
-            self.repl.scope.keys().cloned().collect();
-        let newly_moved = collect_moved_names(&stmts, &session_binding_names, &self.repl.scope);
-        let executable = repl_executable_stmts(checked_stmts.clone());
-        let mut core_imports = self.repl.core_imports.clone();
-        core_imports.extend(checked_core_imports);
-        let before_keys: std::collections::HashSet<String> = self.repl.scope.keys().cloned().collect();
-        let funcs: std::collections::HashMap<String, &Func> = self
-            .repl
-            .func_defs
-            .iter()
-            .map(|(name, func)| (name.clone(), func))
-            .collect();
-        let structs: std::collections::HashMap<String, &StructDef> = self
-            .repl
-            .struct_defs
-            .iter()
-            .map(|(name, structure)| (name.clone(), structure))
-            .collect();
-        let authority = self.effective_authority();
-        let denied = self.denied.clone();
-        let flags = policy_flags(&authority, &denied);
+        // Console authority becomes the child's invocation rights; the build
+        // pipeline's application-authority check is the one per-operation
+        // gate (E1803), and nothing prompts.
+        let flags = console_flags(&self.effective_authority(), &self.denied, self.mode);
         let mut policy = ReplPolicy::new(flags, &self.project.root);
-        let mut inner = policy.authorizer(None);
-        let mut effect_audit = Vec::new();
-        let mut authorizer = ConsoleReplAuthorization {
-            inner: &mut inner,
-            authority: &authority,
-            denied: &denied,
-            mode: self.mode,
-            session_id: &self.identity.session_id,
-            events: &mut effect_audit,
-        };
-        let mut sink = DevSink::new();
-        let mut trial_scope = self.repl.scope.clone();
-        let result = crate::Comptime::run_repl_step(
-            &executable,
-            &funcs,
-            &self.project.root,
-            &mut sink,
-            &mut trial_scope,
-            REPL_FUEL_BUDGET,
+        let mut authorizer = policy.authorizer(None);
+        let root = self.project.root.clone();
+        let result = run_stmts_turn(
+            &mut self.repl,
+            &stmts,
             suppress,
-            &core_imports,
-            &structs,
-            &self.repl.binding_types,
+            check_src,
+            input,
+            &root,
             &mut authorizer,
+            true,
         );
         drop(authorizer);
-        drop(inner);
-        drop(policy);
-        for event in effect_audit {
-            self.record_audit(event);
-        }
         match result {
-            Ok(echo) => {
-                for name in &newly_moved {
-                    trial_scope.remove(name);
+            TurnResult::Done {
+                stdout,
+                stderr,
+                echo,
+                bound_name,
+                had_effect,
+                ..
+            } => {
+                let mut summary = format!("{stdout}{stderr}");
+                if let Some(value) = &echo {
+                    summary.push_str(&echo_text(value));
                 }
-                self.repl.scope = trial_scope;
-                self.repl.moved_names.extend(newly_moved);
-                let raw = input.trim_end_matches(';').trim();
-                if !raw.is_empty() && !raw.starts_with("__repl_echo__") {
-                    self.repl.stmt_srcs.push(format!("{};", raw));
-                }
-                let new_names: Vec<String> = self
-                    .repl
-                    .scope
-                    .keys()
-                    .filter(|name| !before_keys.contains(*name) && *name != "__repl_echo__")
-                    .cloned()
-                    .collect();
-                self.repl.record_stmts(&checked_stmts);
-                let mut summary = String::new();
-                if !sink.stdout.is_empty() {
-                    summary.push_str(&sink.stdout);
-                }
-                if !sink.stderr.is_empty() {
-                    summary.push_str(&sink.stderr);
-                }
-                let value_text = echo
-                    .as_ref()
-                    .filter(|value| !matches!(value, CtValue::Unit))
-                    .map(display_value);
-                if let Some(value) = &value_text {
-                    summary.push_str(value);
-                }
-                let had_effect = super::looks_effectful(input)
-                    || !sink.stdout.is_empty()
-                    || !sink.stderr.is_empty();
-                let bound_name = match new_names.as_slice() {
-                    [only] => Some(only.clone()),
-                    _ => None,
-                };
                 self.repl.record_turn_ex(
                     input,
                     super::ReplTurnStatus::Ok,
@@ -2662,11 +2594,11 @@ impl ConsoleSession {
                     bound_name,
                 );
                 self.repl.remember_success(input);
-                let stdout = bounded(sink.stdout, CONSOLE_MAX_RESULT_BYTES);
-                let stderr = bounded(sink.stderr, CONSOLE_MAX_RESULT_BYTES);
-                let value_json = value_text
+                let stdout = bounded(stdout, CONSOLE_MAX_RESULT_BYTES);
+                let stderr = bounded(stderr, CONSOLE_MAX_RESULT_BYTES);
+                let value_json = echo
                     .as_ref()
-                    .map(|value| quote(value))
+                    .and_then(|value| value.json.clone())
                     .unwrap_or_else(|| "null".to_string());
                 let payload = format!(
                     "{{\"stdout\":{},\"stderr\":{},\"value\":{}}}",
@@ -2685,13 +2617,49 @@ impl ConsoleSession {
                         || stderr.len() >= CONSOLE_MAX_RESULT_BYTES,
                 ))
             }
-            Err(diagnostic) => {
-                let diagnostic = if diagnostic.code == "E2202" {
-                    super::e1801(REPL_FUEL_BUDGET)
-                } else {
-                    restore_move_diagnostic(diagnostic, &self.repl.moved_names)
-                };
+            TurnResult::Interrupted => {
+                let diagnostic = Diagnostic::error(
+                    "E2105",
+                    "the console turn was interrupted".to_string(),
+                    "its child build-and-execute run was stopped".to_string(),
+                    "run the input again".to_string(),
+                    None,
+                );
                 self.evaluation_diagnostic(input, &diagnostic)
+            }
+            TurnResult::Failed {
+                diagnostics,
+                report,
+                ..
+            } => {
+                for diagnostic in diagnostics.iter().filter(|d| d.code == "E1803") {
+                    self.record_audit(ConsoleAuditEvent::new(
+                        &self.identity.session_id.clone(),
+                        None,
+                        "repl.authority".to_string(),
+                        None,
+                        ConsoleAuditOutcome::Denied,
+                        "the console authority does not hold this right",
+                        Some(&diagnostic.what),
+                        None,
+                    ));
+                }
+                let mut diagnostics = diagnostics;
+                if let Some(report) = report {
+                    diagnostics.push(Diagnostic::error(
+                        "E2105",
+                        report
+                            .lines()
+                            .find(|line| !line.trim().is_empty())
+                            .unwrap_or("the program stopped")
+                            .trim()
+                            .to_string(),
+                        report.clone(),
+                        "fix the stopping operation and run the input again".to_string(),
+                        None,
+                    ));
+                }
+                self.evaluation_diagnostics(input, &diagnostics)
             }
         }
     }
@@ -2883,236 +2851,43 @@ impl Drop for ConsoleSession {
     }
 }
 
-/// The REPL policy remains the implementation of filesystem confinement and
-/// host I/O.  This wrapper adds console-specific capability granularity and
-/// redacted audit facts before delegating to that policy.
-struct ConsoleReplAuthorization<'a, 'policy> {
-    inner: &'a mut ReplAuthorization<'policy>,
-    authority: &'a Authority,
-    denied: &'a Holds,
-    mode: ConsoleMode,
-    session_id: &'a str,
-    events: &'a mut Vec<ConsoleAuditEvent>,
-}
-
-impl ConsoleReplAuthorization<'_, '_> {
-    fn required_right(&self, request: &ReplEffectRequest) -> String {
-        match request.root.as_str() {
-            "FS" => match request.operation.as_str() {
-                "Read" => "FS.Read".to_string(),
-                "Write" => "FS.Write".to_string(),
-                _ => "FS".to_string(),
-            },
-            "DB" => {
-                if is_read_operation(&request.operation) {
-                    "DB.Read".to_string()
-                } else {
-                    "DB.Write".to_string()
-                }
+/// Console authority projected onto child invocation rights. Read-only modes
+/// hold only reading leaves; sandbox-data mode also holds database writes.
+fn console_flags(authority: &Authority, denied: &Holds, mode: ConsoleMode) -> ReplFlags {
+    let mut allow = BTreeSet::new();
+    for right in authority.rights() {
+        let right: &str = right.as_ref();
+        let (root_name, operation) = right.split_once('.').unwrap_or((right, ""));
+        let db_sandbox = mode == ConsoleMode::SandboxData && root_name.eq_ignore_ascii_case("DB");
+        if db_sandbox {
+            allow.insert(right.to_string());
+        } else if operation.is_empty() {
+            if matches!(root_name, "FS" | "DB" | "Env") {
+                allow.insert(format!("{root_name}.Read"));
+            } else if !is_mutating_right(root_name, "read") {
+                allow.insert(right.to_string());
             }
-            "Net" => "Net.Connect".to_string(),
-            "Env" => format!("Env.{}", request.operation),
-            "Exec" => "Exec.Run".to_string(),
-            root => format!("{}.{}", root, request.operation),
+        } else if !is_mutating_right(root_name, operation) {
+            allow.insert(right.to_string());
         }
     }
-
-    fn diagnostic(
-        &self,
-        request: &ReplEffectRequest,
-        right: &str,
-        reason: &str,
-        span: Span,
-    ) -> Diagnostic {
-        Diagnostic::error(
-            "E1803",
-            format!("console capability `{right}` was denied"),
-            format!(
-                "{reason}; operation `{}` was stopped before the host path; session={}",
-                request.operation, self.session_id
-            ),
-            format!("grant `{right}` explicitly or close the console"),
-            Some(span),
-        )
-    }
-
-    fn check(
-        &mut self,
-        request: &ReplEffectRequest,
-        span: Span,
-    ) -> Result<String, Diagnostic> {
-        let right = self.required_right(request);
-        let write = is_mutating_effect(request);
-        if write
-            && (self.mode != ConsoleMode::SandboxData
-                || !request.root.eq_ignore_ascii_case("DB"))
-        {
-            let reason = if self.mode != ConsoleMode::SandboxData {
-                "read-only console mode rejects mutations for every effect root"
-            } else {
-                "sandbox-data mode permits only database mutations"
-            };
-            let diagnostic = self.diagnostic(request, &right, reason, span);
-            self.events.push(ConsoleAuditEvent::new(
-                self.session_id,
-                None,
-                format!("repl.{}.{}", request.root, request.operation),
-                Some(right),
-                ConsoleAuditOutcome::Denied,
-                reason,
-                Some(&request.resource),
-                None,
-            ));
-            return Err(diagnostic);
-        }
-        let verdict = answer(self.authority.holds(), self.denied, &right);
-        if verdict != Verdict::Allowed {
-            let reason = match verdict {
-                Verdict::Denied => "explicit deny overrides the console authority",
-                Verdict::Missing => "the console authority does not hold this right",
-                Verdict::Allowed => unreachable!(),
-            };
-            let diagnostic = self.diagnostic(request, &right, reason, span);
-            self.events.push(ConsoleAuditEvent::new(
-                self.session_id,
-                None,
-                format!("repl.{}.{}", request.root, request.operation),
-                Some(right),
-                ConsoleAuditOutcome::Denied,
-                reason,
-                Some(&request.resource),
-                None,
-            ));
-            return Err(diagnostic);
-        }
-        Ok(right)
-    }
-}
-
-impl ReplAuthorizer for ConsoleReplAuthorization<'_, '_> {
-    fn preflight(&mut self, request: &ReplEffectRequest, span: Span) -> Result<(), Diagnostic> {
-        let right = self.check(request, span)?;
-        if let Err(_diagnostic) = self.inner.preflight(request, span) {
-            self.events.push(ConsoleAuditEvent::new(
-                self.session_id,
-                None,
-                format!("repl.{}.{}", request.root, request.operation),
-                Some(right),
-                ConsoleAuditOutcome::Denied,
-                "REPL host preflight rejected the operation",
-                Some(&request.resource),
-                None,
-            ));
-            return Err(self.diagnostic(
-                request,
-                &self.required_right(request),
-                "REPL host preflight rejected the operation",
-                span,
-            ));
-        }
-        Ok(())
-    }
-
-    fn authorize(&mut self, request: &ReplEffectRequest, span: Span) -> Result<(), Diagnostic> {
-        let right = self.check(request, span)?;
-        if let Err(_diagnostic) = self.inner.authorize(request, span) {
-            self.events.push(ConsoleAuditEvent::new(
-                self.session_id,
-                None,
-                format!("repl.{}.{}", request.root, request.operation),
-                Some(right.clone()),
-                ConsoleAuditOutcome::Denied,
-                "REPL authority rejected the operation",
-                Some(&request.resource),
-                None,
-            ));
-            return Err(self.diagnostic(
-                request,
-                &right,
-                "REPL authority rejected the operation",
-                span,
-            ));
-        }
-        self.events.push(ConsoleAuditEvent::new(
-            self.session_id,
-            None,
-            format!("repl.{}.{}", request.root, request.operation),
-            Some(right),
-            ConsoleAuditOutcome::Allowed,
-            "REPL authority accepted the operation",
-            Some(&request.resource),
-            None,
-        ));
-        Ok(())
-    }
-
-    fn fs_read(&mut self, path: &str) -> std::io::Result<Vec<u8>> {
-        self.inner.fs_read(path)
-    }
-
-    fn fs_write(&mut self, path: &str, bytes: &[u8], append: bool) -> std::io::Result<()> {
-        self.inner.fs_write(path, bytes, append)
-    }
-
-    fn fs_exists(&mut self, path: &str) -> std::io::Result<bool> {
-        self.inner.fs_exists(path)
-    }
-
-    fn fs_is_dir(&mut self, path: &str) -> std::io::Result<bool> {
-        self.inner.fs_is_dir(path)
-    }
-
-    fn fs_create_dir(&mut self, path: &str) -> std::io::Result<()> {
-        self.inner.fs_create_dir(path)
-    }
-
-    fn fs_remove(&mut self, path: &str) -> std::io::Result<()> {
-        self.inner.fs_remove(path)
-    }
-
-    fn verified_root(&mut self) -> std::io::Result<std::fs::File> {
-        self.inner.verified_root()
-    }
-
-    fn read_input(&mut self, prompt: &str) -> std::io::Result<String> {
-        self.inner.read_input(prompt)
-    }
-
-    fn reset_session(&mut self) {
-        self.inner.reset_session();
-    }
-}
-
-fn policy_flags(authority: &Authority, denied: &Holds) -> ReplFlags {
-    let allow = authority
-        .rights()
-        .map(root)
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let deny = denied
-        .iter()
-        .map(|right| root(right))
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
+    let allow: Vec<String> = allow.into_iter().collect();
+    let deny: Vec<String> = denied.iter().map(|right| right.to_string()).collect();
     ReplFlags::new(&allow, &deny)
 }
 
-fn is_mutating_effect(request: &ReplEffectRequest) -> bool {
-    let root = request.root.to_ascii_lowercase();
-    if root == "db" {
-        return !is_read_operation(&request.operation);
+fn is_mutating_right(root_name: &str, operation: &str) -> bool {
+    let root_name = root_name.to_ascii_lowercase();
+    if root_name == "db" {
+        return !is_read_operation(operation);
     }
     if matches!(
-        root.as_str(),
+        root_name.as_str(),
         "net" | "exec" | "ffi" | "process" | "browser" | "secret"
     ) {
         return true;
     }
-    !is_read_operation(&request.operation)
+    !is_read_operation(operation)
 }
 
 fn is_read_operation(operation: &str) -> bool {
@@ -3322,8 +3097,8 @@ impl fmt::Display for ConsoleError {
             Self::Cancelled => write!(formatter, "console session is cancelled"),
             Self::Expired => write!(formatter, "console authority has expired; restart the console"),
             Self::NonLoopbackDenied => write!(formatter, "non-loopback console request rejected before dispatch"),
-            Self::RouterUnavailable => write!(formatter, "in-process application router is not attached"),
-            Self::DataBackendUnavailable => write!(formatter, "project data backend is not attached"),
+            Self::RouterUnavailable => write!(formatter, "in-process application router is not attached: this build does not boot the application inside the console (no in-process native tier); run the app with `jet run` and use its own endpoints"),
+            Self::DataBackendUnavailable => write!(formatter, "project data backend is not attached: this build does not boot the application inside the console, so its databases are not open here; use the application's own data tools"),
             Self::TransactionActive => write!(formatter, "sandbox transaction is already active"),
             Self::NoTransaction => write!(formatter, "no sandbox transaction is active"),
             Self::ConfirmationRequired(expected) => write!(formatter, "explicit confirmation required: `{expected}`"),

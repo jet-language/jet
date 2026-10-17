@@ -61,7 +61,7 @@ pub(crate) fn is_subset_param_ty(ty: &Type, cx: &Cx) -> bool {
     if matches!(&ty, Type::Named(n) if n == "DataEvent") {
         return true;
     }
-    // D-ENC-DYN1=A+: DataTree and its canonical format spellings are one
+    // D-ENC-DYN1=A+: Dyn and its canonical format spellings are one
     // Clone-backed Prelude enum. Their variant construction/matching has a
     // dedicated TIR path below; admit the type here so functions using a
     // dynamic value do not fall back before that path can run.
@@ -243,7 +243,7 @@ pub(crate) fn is_covered_pool_ty(ty: &Type, cx: &Cx) -> bool {
         // `Node` is covered recurses into this field, which would recurse right
         // back into "is `Node` covered" through `concurrency_elem_covered` —
         // an infinite loop `is_covered_struct_ty` has no cycle guard for.
-        "ID" => matches!(elem, Type::Named(n) if cx.type_names.contains(n)),
+        "ID" => matches!(elem, Type::Named(n) if cx.fact_type_name(n)),
         "Pool" => concurrency_elem_covered(elem, cx),
         _ => false,
     }
@@ -300,7 +300,7 @@ pub(crate) fn is_covered_shared_weak_ty(ty: &Type, cx: &Cx) -> bool {
         // D-SHARED-CYCLE1=C: Weak of a user struct is always a sized handle.
         // Do not recurse into that struct's fields — a `Shared.Weak<Node>` field
         // on `Node` would otherwise loop forever through is_subset_param_ty.
-        Type::Named(n) if cx.struct_fields.contains_key(n) => true,
+        Type::Named(n) if cx.fact_struct_fields(n).is_some() => true,
         other => is_subset_param_ty(other, cx),
     }
 }
@@ -402,7 +402,7 @@ pub(crate) fn is_covered_generic_struct_ty(ty: &Type, cx: &Cx) -> bool {
     };
     // The base must be a known struct (not an enum/trait/core/prelude type). Local
     // and imported user structs are both registered in `cx.struct_fields`.
-    if !cx.struct_fields.contains_key(name) {
+    if !cx.fact_struct_fields(name).is_some() {
         return false;
     }
     if !struct_is_covered(name, cx, &mut HashSet::new()) {
@@ -472,11 +472,11 @@ pub(crate) fn is_type_var_param_ty(ty: &Type, cx: &Cx) -> bool {
 /// which silently drops every alias-qualified imported type out of the covered
 /// subset (I3: coverage reads the bundle-resolved origin, never re-derives it).
 pub(crate) fn foreign_type_module<'a>(name: &str, cx: &'a Cx) -> Option<&'a str> {
-    if let Some(module) = cx.foreign_types.get(name) {
+    if let Some(module) = cx.fact_foreign_types(name) {
         return Some(module.as_str());
     }
     let identity = cx.imported_type_metadata_name(name)?;
-    cx.foreign_types.get(&identity).map(String::as_str)
+    cx.fact_foreign_types(&identity).map(String::as_str)
 }
 
 /// c109 Phase 17: a FOREIGN/PRELUDE type usable as a param/return/local *value* type.
@@ -511,10 +511,7 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     }
     if matches!(
         name.as_str(),
-        "Claims"
-            | "AuthError"
-            | "Session"
-            | "Auth"
+        "Auth"
             | "SyncText"
             | "SyncCounter"
             | "SyncMap"
@@ -552,7 +549,7 @@ pub(crate) fn is_covered_foreign_value_ty(ty: &Type, cx: &Cx) -> bool {
     // are canonical Core nominals (not user declarations), so no local
     // `struct_fields`/`enum_variants` row is registered for them; their
     // fields and enum literals still lower through the ordinary TIR paths.
-    if !cx.type_names.contains(name)
+    if !cx.fact_type_name(name)
         && matches!(
             name.as_str(),
             "FontStyle" | "FontFace" | "Glyph" | "GlyphRun" | "GlyphShaper"
@@ -591,6 +588,7 @@ pub(crate) fn is_prelude_struct_name(name: &str) -> bool {
             | "DataLineOptions"
             | "AsyncPolicy" | "FieldError"
             | "EncodingLimits" | "EncodingCause" | "EncodingError"
+            | "__QueryRead"
             | "CBOROptions" | "CBORError" | "XMLLimits" | "XMLParseOptions"
             | "XMLRenderOptions" | "XMLCanonical" | "XMLError"
             | "RecipientReport" | "SendReport" | "Limits" | "DKIMConfig" | "SMTPConfig"
@@ -625,11 +623,11 @@ pub(crate) fn foreign_struct_lit_in_subset(
         let Some(import_mod) = cx.import_mods.get(alias) else {
             return false;
         };
-        if cx.foreign_types.get(&qualified) != Some(import_mod) {
+        if cx.fact_foreign_types(&qualified) != Some(import_mod) {
             return false;
         }
     }
-    if !cx.struct_fields.contains_key(&qualified) {
+    if !cx.fact_struct_fields(&qualified).is_some() {
         return false;
     }
     type_args

@@ -1,0 +1,68 @@
+
+fn bool_level_10(left: Bool, right: Bool) -> Bool Never! {
+    return left == right
+}
+
+fn bool_level_9(left: Bool, right: Bool) -> Bool Never! {
+    return if {
+        left -> bool_level_10(left, right)
+        else -> bool_level_10(right, left)
+    }
+}
+
+fn bool_level_8(left: Bool, right: Bool) -> Bool Never! {
+    return bool_level_9(left, right)
+}
+
+fn bool_level_7(left: Bool, right: Bool) -> Bool Never! {
+    return if {
+        right -> bool_level_8(left, right)
+        else -> bool_level_8(right, left)
+    }
+}
+
+fn bool_level_6(left: Bool, right: Bool) -> Bool Never! {
+    return bool_level_7(left, right)
+}
+
+fn bool_level_5(left: Bool, right: Bool) -> Bool Never! {
+    return if {
+        left -> bool_level_6(left, right)
+        else -> bool_level_6(right, left)
+    }
+}
+
+fn bool_level_4(left: Bool, right: Bool) -> Bool Never! {
+    return bool_level_5(left, right)
+}
+
+fn bool_level_3(left: Bool, right: Bool) -> Bool Never! {
+    return if {
+        right -> bool_level_4(left, right)
+        else -> bool_level_4(right, left)
+    }
+}
+
+fn bool_level_2(left: Bool, right: Bool) -> Bool Never! {
+    return bool_level_3(left, right)
+}
+
+fn bool_level_1(left: Bool, right: Bool) -> Bool Never! {
+    return if {
+        left -> bool_level_2(left, right)
+        else -> bool_level_2(right, left)
+    }
+}
+
+fn int_helper(value: Int) -> Int Never! {
+    return value
+}
+
+fn run() {
+    if bool_level_1(false, true) -> print("wrong") else -> print("no")
+    if int_helper(7) == 7 {
+        print("int")
+    }
+    print(bool_level_1(true, true) ?? false)
+    print(int_helper(9) ?? 0)
+}

@@ -1,0 +1,35 @@
+use core.files as files
+use core.crypto as crypto
+use core.sys as sys
+use core.encoding.hex as hex
+use core.encoding.base64 as base64
+use core.encoding.base32 as base32
+fn verify(root: String) -> Int {
+    manifest :: files.read(files.join(root, "MANIFEST.tsv")) ?? panic("manifest missing")
+    count := 0
+    loop line in manifest.lines() {
+        if line.starts_with("#") || line == "" -> next
+        fields :: line.split("\t").to_list()
+        assert(fields.len() >= 4, "bad manifest row")
+        bytes :: files.read_bytes(files.join(root, fields[0])) ?? panic("manifest file missing")
+        assert_eq(crypto.sha256(bytes).hex(), fields[1])
+        assert(fields[2].starts_with("https://") || fields[2] == "local", "bad source URL")
+        assert(fields[3] != "", "missing license")
+        count += 1
+    }
+    return count
+}
+fn run() {
+    root :: sys.get("JET_ENCODING_ROOT") ?? panic("root required")
+    verify(files.join(root, "rfc4648"))
+    corpus :: files.read(files.join(root, "rfc4648/vectors.tsv")) ?? panic("vectors")
+    loop line in corpus.lines() {
+        if line.starts_with("#") || line == "" -> next
+        fields :: line.split("\t").to_list()
+        assert_eq(fields.len(), 4)
+        plain :: if fields[0].starts_with("HEX:") -> hex.decode(fields[0][4..fields[0].len()]) ?? panic("hex") else -> fields[0].bytes()
+        assert_eq(base64.decode(fields[1]) ?? panic("base64"), plain)
+        assert_eq(base64.decode_url(fields[2]) ?? panic("base64url"), plain)
+        assert_eq(base32.decode(fields[3]) ?? panic("base32"), plain)
+    }
+}

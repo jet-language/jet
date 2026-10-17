@@ -1,0 +1,88 @@
+// Canonical native Mem observation counters; not the heap/Sentry range ledger.
+// Observe.rs:130-150,915-957 owns seven independent AtomicUsize words. Mem.rs:
+// 234/246/306/324 and Arena/Bump/Fixed/Pool lifecycle callers update these hooks.
+// x86-64 usize is 64 bits; signed I64 carries its unchanged unsigned bit pattern.
+// sync_add/CAS are indivisible wrapping updates; sync_load is a relaxed aligned
+// load. Snapshot is deliberately NOT transactional (Observe.rs:491-493).
+// Root56: arenas0/allocations8/live-bytes16/retained24/high-water32/
+// probe-allocations40/probe-bytes48. Only this provider owns these metric words.
+mem_registry_root := I64{0}
+
+// runtime-init: 1
+#Export(c) fn jet_rt_mem_registry_init() {
+    if (mem_registry_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{56}, I64{8})
+    at := I64{0}
+    loop at < (I64{56}) {
+        sync_store(root + at, I64{0})
+        at += I64{8}
+    }
+    mem_registry_root = root
+}
+
+fn mem_registry_unsigned_less(left: I64, right: I64) -> Bool Never! {
+    (left.bit_xor(I64{-9223372036854775808})) < (right.bit_xor(I64{-9223372036854775808}))
+}
+
+#Export(c) fn jet_rt_mem_arena_open() {
+    _ := sync_add(mem_registry_root, I64{1})
+}
+
+#Export(c) fn jet_rt_mem_arena_alloc(bytes: I64) {
+    _ := sync_add(mem_registry_root + I64{8}, I64{1})
+    previous :: sync_add(mem_registry_root + I64{16}, bytes)
+    sum :: wrapping(previous + bytes)
+    // Observe.rs:922 saturates only the high-water candidate, not the live word.
+    live :: if mem_registry_unsigned_less(sum, previous) -> I64{-1} else -> sum
+    high := sync_load(mem_registry_root + I64{32})
+    loop mem_registry_unsigned_less(high, live) {
+        observed :: sync_cas(mem_registry_root + I64{32}, high, live)
+        if observed == high -> break
+        high = observed
+    }
+    _ := sync_add(mem_registry_root + I64{40}, I64{1})
+    _ := sync_add(mem_registry_root + I64{48}, bytes)
+}
+
+#Export(c) fn jet_rt_mem_arena_retain(bytes: I64) {
+    _ := sync_add(mem_registry_root + I64{24}, bytes)
+}
+
+#Export(c) fn jet_rt_mem_arena_release(bytes: I64) {
+    _ := sync_add(mem_registry_root + I64{24}, wrapping(I64{0} - bytes))
+}
+
+#Export(c) fn jet_rt_mem_arena_reset(allocations: I64, bytes: I64) {
+    _ := sync_add(mem_registry_root + I64{8}, wrapping(I64{0} - allocations))
+    _ := sync_add(mem_registry_root + I64{16}, wrapping(I64{0} - bytes))
+}
+
+#Export(c) fn jet_rt_mem_arena_close() {
+    _ := sync_add(mem_registry_root, I64{-1})
+}
+
+// The caller owns 24 aligned writable bytes. No missing-producer fallback:
+// zero is an actual counter value; heap allocations never masquerade as arenas.
+#Export(c) fn jet_rt_mem_resources(out: I64) {
+    sync_store(out, sync_load(mem_registry_root))
+    sync_store(out + I64{8}, sync_load(mem_registry_root + I64{8}))
+    sync_store(out + I64{16}, sync_load(mem_registry_root + I64{16}))
+}
+
+// Observe.rs:933-937: caller owns 16 aligned writable bytes.
+#Export(c) fn jet_rt_mem_allocator_memory(out: I64) {
+    sync_store(out, sync_load(mem_registry_root + I64{24}))
+    sync_store(out + I64{8}, sync_load(mem_registry_root + I64{32}))
+}
+
+// SeqCst stores/swaps in Observe.rs:947-957 map to x86 locked exchanges, not
+// ordinary release stores. Probe reset/take never changes outstanding facts.
+#Export(c) fn jet_rt_mem_allocation_probe_reset() {
+    _ := sync_swap(mem_registry_root + I64{40}, I64{0})
+    _ := sync_swap(mem_registry_root + I64{48}, I64{0})
+}
+
+#Export(c) fn jet_rt_mem_allocation_probe_take(out: I64) {
+    sync_store(out, sync_swap(mem_registry_root + I64{40}, I64{0}))
+    sync_store(out + I64{8}, sync_swap(mem_registry_root + I64{48}, I64{0}))
+}

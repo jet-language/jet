@@ -24,48 +24,48 @@ use jet_foundation.[
     type_with_effective_fn_returns,
 ]
 
-pub struct SemaCallParam {
-    pub label: String
-    pub name: String
-    pub zone: ParamZone
-    pub default: Expr?
-    pub default_ref: FunctionDefaultRef?
-    pub convention: AccessConvention
-    pub ty: Type?
-    pub variadic: Bool
+struct SemaCallParam {
+    label: String
+    name: String
+    zone: ParamZone
+    default: Expr?
+    default_ref: FunctionDefaultRef?
+    convention: AccessConvention
+    ty: Type?
+    variadic: Bool
 }
 
-pub enum SemaCallArgSource {
+enum SemaCallArgSource {
     Written(index: Int)
     Default(parameter: Int)
 }
 
-pub enum SemaCallConventionDecision {
+enum SemaCallConventionDecision {
     Accepted
     NeedsImplicitClone
     RequiresWrite
     RejectsMove
 }
 
-pub struct SemaCallBinding {
+struct SemaCallBinding {
     // One entry per written source argument. The value is the explicit
     // parameter slot, or -1 only for an argument that has no slot after an
     // arity failure is recovered by the caller.
-    pub slots: [Int]
+    slots: [Int]
     // Declaration/output order. Written indices always refer to the original
     // source argument list, never to the rewritten list.
-    pub sources: [SemaCallArgSource]
+    sources: [SemaCallArgSource]
     // Defaults carried by Type.Fn but not materializable in this layer. The
     // owner_key/source_file/span identity is kept intact for a later resolver.
-    pub default_refs: [FunctionDefaultRef]
+    default_refs: [FunctionDefaultRef]
     // True when the result's written values can be evaluated left-to-right
     // without compiler temporaries: written source indices are increasing and
     // every supplied value precedes every default.
-    pub source_ordered: Bool
+    source_ordered: Bool
     // True when args was changed to declaration order or a concrete default
     // was inserted. Unresolved metadata defaults intentionally keep args in
     // source order and set this false.
-    pub rewrote: Bool
+    rewrote: Bool
 }
 
 fn sema_call_param_optional(param: SemaCallParam) -> Bool Never! {
@@ -76,19 +76,19 @@ fn sema_call_param_label(param: Param) -> String Never! {
     param.public_label.map((label) -> label.name) ?? param.name
 }
 
-pub fn sema_call_params_from_func(func: Func) -> [SemaCallParam] Never! {
-    params :: loop parameter in func.params -> {
-        effective_ty :: type_with_effective_fn_returns(parameter.ty)
-        parameter_ty :: if parameter.variadic -> Type.List{element: effective_ty} else -> effective_ty
+fn sema_call_params_from_func(func: Func) -> [SemaCallParam] Never! {
+    params :: loop parameter_index in 0..<func.params.len() -> {
+        effective_ty :: type_with_effective_fn_returns(func.params[parameter_index].ty)
+        parameter_ty :: if func.params[parameter_index].variadic -> Type.List{element: effective_ty} else -> effective_ty
         SemaCallParam{
-            label: sema_call_param_label(parameter),
-            name: parameter.name,
-            zone: parameter.zone,
-            default: parameter.default,
+            label: sema_call_param_label(func.params[parameter_index]),
+            name: func.params[parameter_index].name,
+            zone: func.params[parameter_index].zone,
+            default: func.params[parameter_index].default,
             default_ref: None,
-            convention: parameter.convention,
+            convention: func.params[parameter_index].convention,
             ty: Val(parameter_ty),
-            variadic: parameter.variadic,
+            variadic: func.params[parameter_index].variadic,
         }
     }
     params
@@ -165,19 +165,19 @@ fn sema_call_params_from_type_range(ty: Type, offset: Int, fallback_name: Bool) 
     }
 }
 
-pub fn sema_call_params_from_type(ty: Type) -> [SemaCallParam]? {
+fn sema_call_params_from_type(ty: Type) -> [SemaCallParam]? {
     sema_call_params_from_type_range(ty, 0, true)
 }
 
-pub fn sema_call_params_from_value_type(ty: Type) -> [SemaCallParam]? {
+fn sema_call_params_from_value_type(ty: Type) -> [SemaCallParam]? {
     sema_call_params_from_type_range(ty, 0, false)
 }
 
-pub fn sema_call_params_from_type_after(ty: Type, offset: Int) -> [SemaCallParam]? {
+fn sema_call_params_from_type_after(ty: Type, offset: Int) -> [SemaCallParam]? {
     sema_call_params_from_type_range(ty, offset, true)
 }
 
-pub fn sema_call_params_from_value_type_after(ty: Type, offset: Int) -> [SemaCallParam]? {
+fn sema_call_params_from_value_type_after(ty: Type, offset: Int) -> [SemaCallParam]? {
     sema_call_params_from_type_range(ty, offset, false)
 }
 
@@ -221,7 +221,7 @@ fn sema_call_diag_required_label(callee: String, label: String, span: Span) -> D
     sema_error("E0769", span, "`{label}` is a label-only parameter of `{callee}`", "the `*` in the declaration requires the label, so the call says what the value means", "write `{label}: …` for this argument")
 }
 
-pub fn sema_call_arity_diagnostic(callee: String, expected: Int, actual: Int, variadic: Bool, span: Span) -> Diagnostic {
+fn sema_call_arity_diagnostic(callee: String, expected: Int, actual: Int, variadic: Bool, span: Span) -> Diagnostic {
     if {
         variadic -> sema_error("E0104", span, "`{callee}` expects at least {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every fixed parameter must receive a value before the variadic tail", "check how many values this function expects")
         else -> sema_error("E0104", span, "`{callee}` expects {expected} argument{if expected == 1 -> "" else -> "s"}, got {actual}", "every argument must match a parameter", "check how many values this function expects")
@@ -268,7 +268,7 @@ fn sema_call_default_refs(params: [SemaCallParam], sources: [SemaCallArgSource])
 }
 
 fn sema_call_append_rewritten_written(taken: &[CallArg?], rewritten: &[CallArg], sources: &[SemaCallArgSource], original_index: Int, parameter: Int, params: [SemaCallParam], call_span: Span) Never! {
-    written :: ~taken[original_index] ?? return
+    written :: taken[original_index].copy() ?? return
     taken[original_index] = None
     &rewritten.push(sema_call_mark_written(written, original_index, parameter, params[parameter], call_span))
     &sources.push(SemaCallArgSource.Written{index: original_index})
@@ -349,7 +349,7 @@ fn sema_call_rewrite_args(params: [SemaCallParam], args: &[CallArg], slots: [[In
     SemaCallBinding{slots: [Int]{}, sources: sources, default_refs: default_refs, source_ordered: sema_call_source_ordered(sources), rewrote: false}
 }
 
-pub fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     slots := [[Int]]{}
     loop _ in params -> &slots.push([Int]{})
     source_slots := [Int]{}
@@ -502,29 +502,29 @@ pub fn sema_call_bind_args(callee: String, params: [SemaCallParam], args: &[Call
     binding
 }
 
-pub fn sema_call_bind_signature(callee: String, signature: Type, parameter_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+fn sema_call_bind_signature(callee: String, signature: Type, parameter_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     params :: sema_call_params_from_type_after(signature, parameter_offset) ?? return None
     sema_call_bind_args(callee, params, &args, call_span, &diagnostics)
 }
 
-pub fn sema_call_bind_direct(callee: String, signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+fn sema_call_bind_direct(callee: String, signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     sema_call_bind_signature(callee, signature, 0, &args, call_span, &diagnostics)
 }
 
-pub fn sema_call_bind_value(signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+fn sema_call_bind_value(signature: Type, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     params :: sema_call_params_from_value_type(signature) ?? return None
     sema_call_bind_args("this function value", params, &args, call_span, &diagnostics)
 }
 
-pub fn sema_call_bind_method(method: String, signature: Type, receiver_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
+fn sema_call_bind_method(method: String, signature: Type, receiver_offset: Int, args: &[CallArg], call_span: Span, diagnostics: &[Diagnostic]) -> SemaCallBinding? {
     sema_call_bind_signature(method, signature, receiver_offset, &args, call_span, &diagnostics)
 }
 
-pub fn sema_call_binding_has_default_refs(binding: SemaCallBinding) -> Bool Never! {
+fn sema_call_binding_has_default_refs(binding: SemaCallBinding) -> Bool Never! {
     binding.default_refs.len() > 0
 }
 
-pub fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: CallArg) -> Int Never! {
+fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: CallArg) -> Int Never! {
     if arg.flags.binder_slot == .Val(slot) -> return slot
     if source_index >= 0 && source_index < binding.slots.len() -> binding.slots[source_index] else -> -1
 }
@@ -536,7 +536,7 @@ pub fn sema_call_binding_slot(binding: SemaCallBinding, source_index: Int, arg: 
 // result, literal, field, or other temporary) passes: an owning parameter
 // takes it as a move and a write parameter edits it in place. The move marker
 // `^` on a read or write parameter is always rejected.
-pub fn sema_call_argument_convention(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision Never! {
+fn sema_call_argument_convention(param: SemaCallParam, arg: CallArg) -> SemaCallConventionDecision Never! {
     if {
         arg.convention == AccessConvention.Move && param.convention != AccessConvention.Move -> SemaCallConventionDecision.RejectsMove
         arg.convention != AccessConvention.Read || !sema_call_argument_is_bare_name(arg) -> SemaCallConventionDecision.Accepted
@@ -553,7 +553,7 @@ fn sema_call_argument_is_bare_name(arg: CallArg) -> Bool Never! {
     }
 }
 
-pub fn sema_call_parameter_type(param: SemaCallParam) -> Type? {
+fn sema_call_parameter_type(param: SemaCallParam) -> Type? {
     ty :: param.ty ?? return None
     if !param.variadic -> return Val(ty)
     if ty == {
@@ -565,12 +565,12 @@ pub fn sema_call_parameter_type(param: SemaCallParam) -> Type? {
 // The type one written argument must have: a call spread `...xs` into the
 // variadic tail is the whole `[T]` list, every other argument one element
 // (Rust `normalize_variadic_call`).
-pub fn sema_call_argument_parameter_type(param: SemaCallParam, arg: CallArg) -> Type? {
+fn sema_call_argument_parameter_type(param: SemaCallParam, arg: CallArg) -> Type? {
     if arg.spread && param.variadic -> return param.ty
     sema_call_parameter_type(param)
 }
 
-pub fn sema_call_method_receiver_type(signature: Type, receiver_offset: Int) -> Type? {
+fn sema_call_method_receiver_type(signature: Type, receiver_offset: Int) -> Type? {
     if receiver_offset <= 0 -> return None
     if signature == {
         .Fn(params, _, _, _, _, _) -> {
@@ -582,7 +582,7 @@ pub fn sema_call_method_receiver_type(signature: Type, receiver_offset: Int) -> 
     }
 }
 
-pub fn sema_call_method_receiver_convention(signature: Type, receiver_offset: Int) -> AccessConvention? {
+fn sema_call_method_receiver_convention(signature: Type, receiver_offset: Int) -> AccessConvention? {
     if receiver_offset <= 0 -> return None
     if signature == {
         .Fn(_, _, _, _, metadata, _) -> {

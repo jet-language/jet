@@ -2,13 +2,13 @@ use crate::Diagnostics::{Diagnostic, Span, TextEdit};
 use crate::Generics::{e0904, e0905, substitute_type, unify_types};
 use crate::Sema::Bundle::fn_types_compatible;
 use crate::Sema::CheckerCoreLib::{
-    io_error_ty, is_simd_lane_type, math_constructor_arg_types, overflow_opt_in_error, result_ty,
-    wrong_core_arity,
+    io_error_ty, is_simd_lane_type, math_constructor_arg_types,
+    overflow_opt_in_error, result_ty, wrong_core_arity,
 };
 use crate::Sema::CheckerOwnership::{e0142_aliased, e0143_drop_unaudited};
 use crate::Sema::Diagnostics::{
-    edit_distance, is_debuggable, is_displayable, is_printable,
-    owned_type_for_read_view, type_fix_hint, type_is_copy, typed_text_mismatch,
+    edit_distance, is_debuggable, owned_type_for_read_view, type_fix_hint, type_is_copy,
+    typed_text_mismatch,
 };
 use crate::Sema::Effects::builtin_effect;
 use crate::Sema::FFI::e3211;
@@ -115,9 +115,8 @@ fn seed_generic_type(
             return bind_inferred_type(param, found, source, type_params, subst, origins, conflict);
         }
     }
-    if expected == found {
-        return true;
-    }
+    // Equal composite types still contain parameters that must be bound:
+    // relaying Box<T> into another generic function is an instantiation too.
     if let Type::Named(param) = found {
         if type_params.contains(param) {
             return bind_inferred_type(
@@ -312,11 +311,24 @@ fn generic_conflict_diagnostic(span: Span, conflict: &GenericInferenceConflict) 
     )
 }
 
+fn channel_capacity_literal(expr: &Expr) -> Option<crate::Numeric::CtBigInt> {
+    match expr {
+        Expr::Int(value, _, _, raw) => Some(super::super::exact_integer_literal(*value, raw.as_deref())),
+        Expr::Paren(inner, _) => channel_capacity_literal(inner),
+        Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
+            let mut value = channel_capacity_literal(inner)?;
+            value.negative = !value.negative && !value.is_zero();
+            Some(value)
+        }
+        _ => None,
+    }
+}
+
 impl<'a> Checker<'a> {
     /// D-STRUCT-POLICY1=A: user policy calls use the same declaration-order
     /// binder as ordinary functions, including default expressions and
     /// their private earlier-parameter references.
-    fn bind_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg], span: Span) {
+    pub(crate) fn bind_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg], span: Span) {
         for argument in arguments {
             let Expr::Call(policy) = &mut argument.expr else {
                 continue;
@@ -359,7 +371,7 @@ impl<'a> Checker<'a> {
     /// D-VARIADIC1: the policy call has the same fixed list-slot ABI as an
     /// ordinary function call. Bind first so defaults occupy their slots,
     /// then pack the user declaration's homogeneous rest tail once.
-    fn normalize_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg]) {
+    pub(crate) fn normalize_user_policy_arguments(&mut self, arguments: &mut [crate::AST::CallArg]) {
         for argument in arguments {
             let Expr::Call(policy) = &mut argument.expr else {
                 continue;
@@ -833,6 +845,12 @@ impl<'a> Checker<'a> {
                     "write `channel<T>(capacity: 1)".to_string(),
                     Some(argument.expr.span()),
                 ));
+            } else if let Some(capacity) = channel_capacity_literal(&argument.expr)
+                .filter(|capacity| capacity.negative || capacity.is_zero())
+            {
+                self.diags.push(Diagnostic::from_row(
+                    "E0395", &[("capacity", &capacity.to_string_rep())], Some(argument.expr.span()),
+                ));
             }
         }
         let Some(element) = call.type_args.first().cloned() else {
@@ -865,6 +883,90 @@ impl<'a> Checker<'a> {
         Some(result)
     }
 
+    /// Respell `found`'s nominal heads with the parameter's spelling wherever
+    /// both name the same declaration. One nominal reaches a call under more
+    /// than one spelling: a Core leaf written through its module alias stays
+    /// the bare leaf (`DataArrowBatch`), while a value returned by an earlier
+    /// imported call carries the canonical owner path
+    /// (`<corelib>/Core/data::…::DataArrowBatch`). Assignment already compares
+    /// them by declared identity; generic inference must use that same
+    /// identity, or `T` in `DataArrowBatch<T>` never binds.
+    fn align_nominal_spelling(
+        &self,
+        expected: &Type,
+        found: &Type,
+        type_params: &HashSet<String>,
+    ) -> Type {
+        match (expected, found) {
+            (Type::Named(param), _) if type_params.contains(param) => found.clone(),
+            (Type::Named(want), Type::Named(got))
+                if want != got && self.same_declared_name_identity(want, got) =>
+            {
+                expected.clone()
+            }
+            (
+                Type::Apply {
+                    name: want,
+                    args: want_args,
+                },
+                Type::Apply {
+                    name: got,
+                    args: got_args,
+                },
+            ) if want_args.len() == got_args.len()
+                && self.same_declared_name_identity(want, got) =>
+            {
+                Type::Apply {
+                    name: want.clone(),
+                    args: want_args
+                        .iter()
+                        .zip(got_args)
+                        .map(|(want, got)| self.align_nominal_spelling(want, got, type_params))
+                        .collect(),
+                }
+            }
+            (Type::List(want), Type::List(got)) => {
+                Type::List(Box::new(self.align_nominal_spelling(want, got, type_params)))
+            }
+            (Type::Option(want), Type::Option(got)) => {
+                Type::Option(Box::new(self.align_nominal_spelling(want, got, type_params)))
+            }
+            (Type::Shared(want), Type::Shared(got)) => {
+                Type::Shared(Box::new(self.align_nominal_spelling(want, got, type_params)))
+            }
+            (
+                Type::Result {
+                    ok: want_ok,
+                    err: want_err,
+                },
+                Type::Result {
+                    ok: got_ok,
+                    err: got_err,
+                },
+            ) => Type::Result {
+                ok: Box::new(self.align_nominal_spelling(want_ok, got_ok, type_params)),
+                err: Box::new(self.align_nominal_spelling(want_err, got_err, type_params)),
+            },
+            (
+                Type::Map {
+                    key: want_key,
+                    value: want_value,
+                    ..
+                },
+                Type::Map {
+                    key: got_key,
+                    key_span,
+                    value: got_value,
+                },
+            ) => Type::Map {
+                key: Box::new(self.align_nominal_spelling(want_key, got_key, type_params)),
+                key_span: *key_span,
+                value: Box::new(self.align_nominal_spelling(want_value, got_value, type_params)),
+            },
+            _ => found.clone(),
+        }
+    }
+
     /// Infer a generic call's type arguments from its arguments. Local,
     /// file-module, inline-module and source-owned Core calls share this one
     /// rule, so a callback argument binds the same parameters on every route:
@@ -889,13 +991,12 @@ impl<'a> Checker<'a> {
             .collect();
         for (index, arg) in args.iter_mut().enumerate() {
             let param_conv = sig.params.get(index).map(|(conv, _)| *conv);
-            // A lambda argument is checked against its callable parameter
-            // once the arguments before it pin every type parameter. Its
-            // parameters then need no annotation, and a body that cannot
-            // fail meets a `Never!` callback slot, as it does at a
-            // non-generic call.
-            let lambda_expected = match (&arg.expr, sig.params.get(index)) {
-                (Expr::Lambda(_), Some((_, param_ty @ Type::Fn { .. }))) => {
+            // Contextual arguments are checked after earlier arguments pin
+            // the generic parameters. This includes leading-dot enum values,
+            // not just callback parameters.
+            let argument_expected = match (&arg.expr, sig.params.get(index)) {
+                (Expr::Lambda(_), Some((_, param_ty @ Type::Fn { .. })))
+                | (Expr::EnumLit { .. }, Some((_, param_ty))) => {
                     let mut subst = HashMap::new();
                     let mut origins = HashMap::new();
                     let mut conflict = None;
@@ -906,9 +1007,11 @@ impl<'a> Checker<'a> {
                             continue;
                         };
                         if !matches!(earlier_ty, Type::Fn { .. }) {
+                            let found =
+                                self.align_nominal_spelling(earlier_ty, found, &prepass_type_params);
                             seed_generic_type(
                                 earlier_ty,
-                                found,
+                                &found,
                                 &format!("argument {}", earlier + 1),
                                 &prepass_type_params,
                                 &mut subst,
@@ -958,7 +1061,7 @@ impl<'a> Checker<'a> {
                     checker.allow_string_view_read = true;
                 }
                 let saved_expected =
-                    lambda_expected.map(|expected| checker.expected_type.replace(expected));
+                    argument_expected.map(|expected| checker.expected_type.replace(expected));
                 let inferred = checker.infer(&mut arg.expr);
                 if let Some(saved) = saved_expected {
                     checker.expected_type = saved;
@@ -982,6 +1085,18 @@ impl<'a> Checker<'a> {
         if arg_types.len() != args.len() {
             return inference;
         }
+        // Generic inference matches nominal heads by declared identity, the
+        // same judgment the per-argument assignment check makes below.
+        let arg_types: Vec<Type> = arg_types
+            .iter()
+            .enumerate()
+            .map(|(index, arg_ty)| match sig.params.get(index) {
+                Some((_, param_ty)) => {
+                    self.align_nominal_spelling(param_ty, arg_ty, &prepass_type_params)
+                }
+                None => arg_ty.clone(),
+            })
+            .collect();
         let mut inferred_subst = HashMap::new();
         let mut origins = HashMap::new();
         let mut conflict = None;
@@ -1196,7 +1311,7 @@ impl<'a> Checker<'a> {
                 && !self.funcs.contains_key(&call.name)
                 && !self.core_item_imports.contains_key(&call.name)
                 && !self.unqualified.contains_key(&call.name)
-                && !self.unqualified_file.contains_key(&call.name)
+                && !self.has_file_function(&call.name)
                 && self.lookup(&call.name).is_none())
         {
             return Some(self.check_debug_trace(call));
@@ -1421,8 +1536,17 @@ impl<'a> Checker<'a> {
             for arg in call.args.iter_mut() {
                 self.borrow_ctx = true; // print borrows via `.jet_show()`
                 if let Some(t) = self.infer(&mut arg.expr) {
-                    if !(is_printable(&t, self.registry, self.trait_reg)
-                        || is_displayable(&t, self.registry, self.trait_reg))
+                    // Printing synthesizes Display dispatch during lowering.
+                    // Keep the checked owner method in source-body reachability.
+                    if let Type::Named(name) | Type::Apply { name, .. } = &t {
+                        if self.type_implements_trait_for_name(name, crate::Generics::DISPLAY) {
+                            // A zero-width synthesized site preserves the
+                            // argument's authored name/definition reference.
+                            let end = arg.expr.span().end;
+                            self.record_method_reference(name, "display", Span::new(end, end));
+                        }
+                    }
+                    if !self.is_printable_type(&t)
                         && !self.is_unit_type(&t)
                         && !matches!(&t, Type::Named(name) if name == Syntax::TYPE_NEVER)
                         && !matches!(
@@ -1676,22 +1800,32 @@ impl<'a> Checker<'a> {
             return Some(Some(Type::Named("__JetExpect__".to_string())));
         }
 
-        if self.funcs.get(&call.name).is_none() {
-            if let Some(info) = self.lookup(&call.name) {
-                if matches!(info.ty, Type::Fn { .. }) {
-                    let name_span = call.name_span;
-                    let mut callee = Box::new(Expr::Ident(call.name.clone(), name_span));
-                    let mut args = std::mem::take(&mut call.args);
-                    let end = args
-                        .last()
-                        .map(|a| a.expr.span().end)
-                        .unwrap_or(name_span.end);
-                    let span = Span::new(name_span.start, end);
-                    let ret = self.infer_call_value(&mut callee, &mut args, span);
-                    call.args = args;
-                    return Some(ret);
+        // Lexical value bindings win over file functions and imported calls.
+        if let Some(info) = self.lookup(&call.name) {
+            if !matches!(info.ty, Type::Fn { .. }) {
+                let ty = info.ty.clone();
+                self.diags.push(self.not_callable_value_diagnostic(
+                    &call.name, &ty, call.name_span,
+                ));
+                for arg in &mut call.args {
+                    self.infer(&mut arg.expr);
                 }
+                return None;
             }
+            let name_span = call.name_span;
+            let mut callee = Box::new(Expr::Ident(call.name.clone(), name_span));
+            let mut args = std::mem::take(&mut call.args);
+            let end = args.last().map(|a| a.expr.span().end).unwrap_or(name_span.end);
+            let span = Span::new(name_span.start, end);
+            let invalid_reads_before = self.invalid_binding_reads;
+            let ret = self.infer_call_value(&mut callee, &mut args, span);
+            call.args = args;
+            if ret.is_none() && self.invalid_binding_reads != invalid_reads_before {
+                return None;
+            }
+            return Some(ret);
+        }
+        if self.funcs.get(&call.name).is_none() {
             if let Some((alias, mod_idx, fn_name)) = self.resolve_import_call_path(&call.name) {
                 self.inferred_call_type_args = None;
                 let result = self.infer_import_call(
@@ -1751,7 +1885,7 @@ impl<'a> Checker<'a> {
                 .cloned();
             // D-MOD3: check unqualified file-module imports (e.g. `use math.clamp` for a file module).
             if let Some((fn_name, mod_idx)) =
-                inline_file.or_else(|| self.unqualified_file.get(&call.name).cloned())
+                inline_file.or_else(|| self.file_function_binding(&call.name))
             {
                 self.inferred_call_type_args = None;
                 let result = self.infer_import_call(
@@ -1952,6 +2086,7 @@ impl<'a> Checker<'a> {
             }
             return Some(None);
         }
+
 
         let Some(mut sig) = self.funcs.get(&call.name).cloned() else {
             let mut fix = format!(
@@ -2240,9 +2375,12 @@ impl<'a> Checker<'a> {
             } else {
                 for (param, actual) in fn_type_params.iter().zip(&call.type_args) {
                     let actual = self.resolve_type(actual.clone());
-                    // D-CALLBACK-ERR1=A: `Never` fills a failure-domain
-                    // parameter (`apply<Never>(plain)`).
-                    if !actual.is_never() {
+                    // D-CALLBACK-ERR1=A: `Never` fills only a failure-domain
+                    // parameter (`apply<Never>(plain)`); elsewhere it is a
+                    // value position (D-NEVER2=B, E2422).
+                    if !actual.is_never()
+                        || !crate::Sema::CheckerCore::sig_names_failure_domain(&sig, &param.name)
+                    {
                         self.check_declared_type(&actual, call.name_span);
                     }
                     for bound in &param.bounds {
@@ -2318,11 +2456,12 @@ impl<'a> Checker<'a> {
         };
         let args_pre_inferred = !fn_type_params.is_empty() && pre_inferred.len() == call.args.len();
 
+        let named_elsewhere = Self::args_named_elsewhere(&call.args);
         for (i, arg) in call.args.iter_mut().enumerate() {
             if !sig.is_extern {
                 // A `&name` argument grants the named place itself, so it is a
                 // borrow position: the owning-slot copy below must never turn
-                // a `&` parameter passed onward into `~name` (E0202). A write
+                // a `&` parameter passed onward into `name.copy()` (E0202). A write
                 // parameter is a borrow slot too: a bare name reaching it must
                 // stay a name so the missing `&` is reported, never copied.
                 if arg.convention == AccessConvention::Write {
@@ -2349,7 +2488,7 @@ impl<'a> Checker<'a> {
             // borrowed-place arm, so the copy landed BEFORE the convention
             // check read the name, and the hard error the law demands was
             // never reported — a clone became silent, which is the one thing
-            // D-MEM1/S2 forbids. `~name` and `^name` are not bare names
+            // D-MEM1/S2 forbids. `name.copy()` and `^name` are not bare names
             // (`Expr::Copy` / `AccessConvention::Move`), so the caller's own
             // ownership decision is still recognized and still exempt.
             let bare_arg_name = match &arg.expr {
@@ -2389,7 +2528,9 @@ impl<'a> Checker<'a> {
                     // D-SG9/D-TYPE2-DEFAULT1: let a numeric literal argument adopt the
                     // parameter's carrier or width and be checked at the literal.
                     self.expected_type = Some(param_ty.clone());
-                } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. } | Type::Tuple(_)) {
+                } else if matches!(param_ty, Type::Named(_) | Type::Option(_) | Type::Result { .. } | Type::Tuple(_))
+                    && !self.borrowed_trait_parameter(param_ty, *param_conv)
+                {
                     // D-ENUMDOT2=A: named/optional type so `.Variant` can
                     // resolve from context. D-FAIL-CARRIER1=A: a `T !E`
                     // parameter is the carrier itself; without this slot
@@ -2622,7 +2763,10 @@ impl<'a> Checker<'a> {
                 let reported = write_needs_a_place
                     || write_range_window
                     || reads_expiring_secret_loan
-                    || self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span());
+                    || (!(self.is_trait_parameter(&param_ty)
+                        && (*param_conv == AccessConvention::Write
+                            || self.trait_parameter_identity(&param_ty, &arg_ty)))
+                        && self.check_type_assignable(&param_ty, &arg_ty, arg.expr.span()));
                 // D-FIXARR1: [T#N] widens to [T] at a call site — compatible but codegen
                 // will emit .to_vec() on the argument.
                 let fixed_widens = matches!((&param_ty, &arg_ty),
@@ -2639,22 +2783,26 @@ impl<'a> Checker<'a> {
                         fn_types_compatible(&param_ty, &arg_ty)
                             && Type::obligations_satisfy(&param_ty, &arg_ty)
                     } else {
-                        arg_ty == param_ty && Type::obligations_satisfy(&param_ty, &arg_ty)
+                        (arg_ty == param_ty
+                            || (self.is_trait_parameter(&param_ty)
+                                && self.trait_parameter_identity(&param_ty, &arg_ty)))
+                            && Type::obligations_satisfy(&param_ty, &arg_ty)
                     };
-                // S48: a concrete value meets a trait-typed parameter and is
-                // boxed invisibly (`TCallArg::box_as_trait` at lowering).
-                let boxes_as_trait = self.trait_slot_accepts(&param_ty, &arg_ty);
-                let compatible = exact_or_obligation_compatible
-                    || fixed_widens
-                    || union_widens
-                    || boxes_as_trait
-                    || reads_expiring_secret_loan;
-                if boxes_as_trait {
-                    // The box owns the concrete value, exactly as a trait-object
-                    // list element does (`infer_owned_list_element` →
-                    // `note_move_if_direct_ident`), so a direct name gives its
-                    // value away here. A caller that needs to keep it writes
-                    // `~c` (the copy marker) — no clone is ever silent (D-MEM1/S2).
+                let boxes_as_trait = *param_conv != AccessConvention::Write
+                    && self.trait_slot_accepts(&param_ty, &arg_ty);
+                let compatible = if *param_conv == AccessConvention::Write
+                    && self.is_trait_parameter(&param_ty)
+                {
+                    self.trait_parameter_identity(&param_ty, &arg_ty)
+                } else {
+                    exact_or_obligation_compatible
+                        || fixed_widens
+                        || union_widens
+                        || boxes_as_trait
+                        || reads_expiring_secret_loan
+                };
+                if boxes_as_trait && *param_conv == AccessConvention::Move {
+                    // Only an owning trait slot transfers the concrete owner.
                     self.note_move_if_direct_ident(&arg.expr, &format!("`{}`", call.name));
                 }
                 if !reported && !compatible {
@@ -2698,11 +2846,29 @@ impl<'a> Checker<'a> {
                 }
             }
 
+            // D-CALLSITE-MARK1=A: a written `&` always means the call edits.
+            if !sig.is_extern
+                && *param_conv == AccessConvention::Read
+                && crate::Sema::Diagnostics::expr_root_ident(&arg.expr).is_some()
+                && self.reject_unbacked_write_mark(&call.name, arg, param_ty)
+            {
+                continue;
+            }
             match (param_conv, arg.convention) {
                 (AccessConvention::Move, AccessConvention::Read) => {
-                    if let Some((name, span)) = &bare_arg_name {
+                    // D-COPY-DEFAULT1=A: an unmarked last use moves like `^name`.
+                    let moved = self.take_unmarked_last_use(
+                        &call.name,
+                        arg,
+                        param_ty,
+                        &call_access,
+                        named_elsewhere.get(i).copied().unwrap_or(false),
+                    );
+                    if let Some((name, span)) = bare_arg_name.as_ref().filter(|_| !moved) {
                         if type_is_copy(param_ty) {
                             // Copy values cross an owning parameter by bits.
+                        } else if self.reject_take_while_lent(&call.name, arg, &call_access) {
+                            // E0204: an earlier argument already reads it.
                         } else if !self.is_resource_type(param_ty)
                             && self.is_cloneable_type(param_ty)
                         {
@@ -2745,7 +2911,9 @@ impl<'a> Checker<'a> {
                         arg_ty.as_ref(),
                         &call.name,
                         arg.span,
-                    ) {
+                    ) || (!type_is_copy(param_ty)
+                        && self.reject_take_while_lent(&call.name, arg, &call_access))
+                    {
                         continue;
                     }
                     // The value is given away for real.

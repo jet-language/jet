@@ -469,18 +469,32 @@ fn plugin_set_bytes_result(
         )),
     }
 }
+// D-CORE-FILEERROR1: known refusal/unsupported causes keep their canonical
+// variants and the original IOContext, including the raw platform code.
 fn plugin_io_error_value(
     operation: &str,
     resource: Option<&str>,
     error: &std::io::Error,
 ) -> Val {
-    let variant = match error.kind() {
-        std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => "invalid-input",
-        std::io::ErrorKind::NotFound => "not-found",
-        std::io::ErrorKind::PermissionDenied => "permission-denied",
-        std::io::ErrorKind::TimedOut => "timed-out",
-        std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "closed",
-        _ => "other",
+    let os_code = error.raw_os_error();
+    let not_supported = matches!(
+        os_code,
+        Some(code) if (cfg!(target_os = "linux") && code == 95)
+            || (cfg!(target_os = "macos") && (code == 45 || code == 102))
+    );
+    let variant = if not_supported {
+        "unsupported"
+    } else {
+        match error.kind() {
+            std::io::ErrorKind::AlreadyExists => "already-exists",
+            std::io::ErrorKind::Unsupported => "unsupported",
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => "invalid-input",
+            std::io::ErrorKind::NotFound => "not-found",
+            std::io::ErrorKind::PermissionDenied => "permission-denied",
+            std::io::ErrorKind::TimedOut => "timed-out",
+            std::io::ErrorKind::NotConnected | std::io::ErrorKind::BrokenPipe => "closed",
+            _ => "other",
+        }
     };
     let context = Val::Record(vec![
         (
@@ -493,11 +507,7 @@ fn plugin_io_error_value(
         ),
         (
             "os-code".to_string(),
-            Val::Option(
-                error
-                    .raw_os_error()
-                    .map(|value| Box::new(Val::S64(i64::from(value)))),
-            ),
+            Val::Option(os_code.map(|value| Box::new(Val::S64(i64::from(value))))),
         ),
         (
             "cause".to_string(),
@@ -1887,3 +1897,68 @@ fn plugin_from_val(value: &Val) -> Option<PluginValue> {
     }
 }
 
+
+#[cfg(test)]
+mod io_error_variant_tests {
+    use super::{plugin_io_error_value, Val};
+    use std::io::{Error, ErrorKind};
+
+    fn assert_original_context(error: &Error, expected: &str) {
+        let Val::Variant(variant, Some(context)) =
+            plugin_io_error_value("write", Some("fixture-target"), error)
+        else {
+            panic!("host IO failure must carry its original context");
+        };
+        assert_eq!(variant, expected);
+        let Val::Record(fields) = *context else {
+            panic!("IOContext must remain a record");
+        };
+        assert_eq!(fields.len(), 4);
+        let field = |name: &str| {
+            &fields
+                .iter()
+                .find(|(key, _)| key == name)
+                .expect("canonical IOContext field")
+                .1
+        };
+        assert!(matches!(field("operation"), Val::Enum(value) if value == "write"));
+        assert!(matches!(field("resource"), Val::Option(Some(value))
+            if matches!(&**value, Val::String(text) if text == "fixture-target")));
+        match (error.raw_os_error(), field("os-code")) {
+            (None, Val::Option(None)) => {}
+            (Some(expected), Val::Option(Some(value))) => {
+                assert!(matches!(&**value, Val::S64(code) if *code == i64::from(expected)));
+            }
+            _ => panic!("raw OS code must be preserved"),
+        }
+        assert!(matches!(field("cause"), Val::Option(Some(value))
+            if matches!(&**value, Val::String(text) if text == &error.to_string())));
+    }
+
+    #[test]
+    fn known_host_io_variants_preserve_original_context() {
+        assert_original_context(
+            &Error::new(ErrorKind::AlreadyExists, "existing target refused"),
+            "already-exists",
+        );
+        assert_original_context(
+            &Error::new(ErrorKind::Unsupported, "unsupported request"),
+            "unsupported",
+        );
+        assert_original_context(&Error::new(ErrorKind::Other, "unknown OS kind"), "other");
+    }
+
+    #[test]
+    fn known_platform_refusal_and_unsupported_codes_preserve_original_context() {
+        #[cfg(target_os = "linux")]
+        let codes = [(17, "already-exists"), (95, "unsupported"), (38, "unsupported")];
+        #[cfg(target_os = "macos")]
+        let codes = [(17, "already-exists"), (45, "unsupported"), (102, "unsupported"), (78, "unsupported")];
+        #[cfg(target_os = "windows")]
+        let codes = [(80, "already-exists"), (183, "already-exists"), (50, "unsupported")];
+        #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+        for (code, expected) in codes {
+            assert_original_context(&Error::from_raw_os_error(code), expected);
+        }
+    }
+}

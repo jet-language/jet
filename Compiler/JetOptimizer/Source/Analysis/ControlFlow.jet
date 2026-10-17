@@ -13,59 +13,59 @@ use jet_foundation.[
     mir_terminator_value_uses,
 ]
 
-pub struct MIROptimizationCFGRow {
-    pub block: MIRBlockID
-    pub predecessors: [MIRBlockID]
-    pub successors: [MIRBlockID]
-    pub reachable: Bool
+struct MIROptimizationCFGRow {
+    block: MIRBlockID
+    predecessors: [MIRBlockID]
+    successors: [MIRBlockID]
+    reachable: Bool
 }
 
-pub struct MIROptimizationDefUseRow {
-    pub value: MIRValueID
-    pub definition_block: MIRBlockID?
-    pub definition_index: Int?
-    pub use_count: Int
+struct MIROptimizationDefUseRow {
+    value: MIRValueID
+    definition_block: MIRBlockID?
+    definition_index: Int?
+    use_count: Int
 }
 
-pub struct MIROptimizationFunctionAnalysis {
-    pub cfg: [MIROptimizationCFGRow]
-    pub def_use: [MIROptimizationDefUseRow]
+struct MIROptimizationFunctionAnalysis {
+    cfg: [MIROptimizationCFGRow]
+    def_use: [MIROptimizationDefUseRow]
 }
 
 struct MIRPassDefinition {
-    pub value: MIRValueID
-    pub block: MIRBlockID
-    pub index: Int
+    value: MIRValueID
+    block: MIRBlockID
+    index: Int
 }
 
 // The function's defined SSA values, places and value metadata rows, keyed
 // by stable id (the first row wins), so a reference is a map probe instead of
 // a scan.
 struct MIRPassDefinitions {
-    pub values: [U64:MIRPassDefinition]
-    pub places: [U64:Int]
-    pub metadata: [U64:Int]
+    values: [U64:MIRPassDefinition]
+    places: [U64:Int]
+    metadata: [U64:Int]
 }
 
 struct MIRPassDominatorRow {
-    pub block: MIRBlockID
-    pub dominators: [MIRBlockID]
+    block: MIRBlockID
+    dominators: [MIRBlockID]
 }
 
 // Dominator-tree intervals in block order. An unnumbered block retains the
 // old universal set for a region unreachable from entry or a predecessor-free
 // root; those predecessors are neutral when intersecting a rooted row.
 struct MIRPassDominance {
-    pub blocks: [MIRBlockID]
-    pub positions: [U64:Int]
-    pub enter: [Int]
-    pub exit: [Int]
-    pub parents: [Int]
+    blocks: [MIRBlockID]
+    positions: [U64:Int]
+    enter: [Int]
+    exit: [Int]
+    parents: [Int]
 }
 
 // The public analyses are intentionally read-only and use the same edge and
 // operand walkers as the legality pass and transforms.
-pub fn mir_optimizer_analyze_function(function: MIRFunction) -> MIROptimizationFunctionAnalysis Never! {
+fn mir_optimizer_analyze_function(function: MIRFunction) -> MIROptimizationFunctionAnalysis Never! {
     cfg :: mir_pass_cfg_rows(function)
     defs :: mir_pass_definitions(function)
     // One operand walk counts every value and one map finds each first
@@ -396,6 +396,7 @@ fn mir_pass_place_value_uses(places: [MIRPlace], place_rows: [U64:Int], id: MIRP
         if projection == {
             .Index(_, index, _, _, _, _, _) -> &values.push(index)
             .Range(range, _, _) -> &values.push(range)
+            .MapLookup(lookup, _, _) -> &values.push(lookup)
             else -> {}
         }
     }
@@ -441,6 +442,7 @@ fn mir_pass_count_place_uses(places: [MIRPlace], place_rows: [U64:Int], id: MIRP
         if projection == {
             .Index(_, index, _, _, _, _, _) -> mir_pass_count_value_use(&counts, index)
             .Range(range, _, _) -> mir_pass_count_value_use(&counts, range)
+            .MapLookup(lookup, _, _) -> mir_pass_count_value_use(&counts, lookup)
             else -> {}
         }
     }

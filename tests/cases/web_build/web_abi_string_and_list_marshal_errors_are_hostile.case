@@ -1,0 +1,14 @@
+# HAND-PORT tests/web_build.rs:5446-5569 web_abi_string_and_list_marshal_errors_are_hostile
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original harness, including its intentionally hostile host fixture, tests the LIVE canonical Prelude JS via reviewer-approved copy: {root}/...; original exact stdout retained.
+requires: tool:node
+fixture: web_abi_string_and_list_marshal_errors_are_hostile.fixture
+env: NO_COLOR=1
+mkdir: build
+copy: package.json build/package.json
+copy: {root}/crates/jet-codegen/src/Prelude/DomRuntime.js build/jet_dom_runtime.js
+copy: harness.mjs build/harness.mjs
+step: node harness.mjs
+cwd: build
+exit: 0
+stdout: = web_abi_string_and_list_marshal_errors_are_hostile.stdout.expected

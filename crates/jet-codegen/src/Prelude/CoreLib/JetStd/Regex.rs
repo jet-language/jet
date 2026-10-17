@@ -782,12 +782,6 @@ pub fn jet_string_match(
     Ok(regex.find(text))
 }
 
-pub fn jet_regex_literal(pattern: &str) -> JetRegex {
-    match jet_regex_compile(pattern) {
-        Ok(regex) => regex,
-        Err(error) => unreachable!("sema accepted an invalid Regex literal: {error}"),
-    }
-}
 
 pub fn jet_regex_compile_with(pattern: &str, flags: &RegexFlags) -> Result<JetRegex, String> {
     if let Some(regex) = regex_cache()
@@ -876,16 +870,41 @@ pub fn jet_regex_matches(pattern: &JetRegex, text: &str) -> Vec<JetRegexMatch> {
     pattern.matches(text)
 }
 
-pub fn jet_regex_replace(
-    pattern: &JetRegex,
-    repl: &str,
-    text: &str,
-) -> String {
+pub fn jet_regex_replace(pattern: &JetRegex, text: &str, repl: &str) -> String {
     pattern.replace(text, repl)
 }
 
-pub fn jet_regex_replace_first(pattern: &JetRegex, repl: &str, text: &str) -> String {
+pub fn jet_regex_replace_first(pattern: &JetRegex, text: &str, repl: &str) -> String {
     pattern.replace_first(text, repl)
+}
+
+pub fn jet_regex_expand(mat: &JetRegexMatch, template: &str) -> String {
+    expand_regex_replacement(template, mat)
+}
+
+pub fn jet_regex_join(pattern: &JetRegex) -> String {
+    pattern.source()
+}
+
+pub fn jet_regex_subn(pattern: &JetRegex, text: &str, replacement: &str) -> (String, i64) {
+    let matches = pattern.matches(text);
+    let mut out = String::with_capacity(text.len());
+    let mut end = 0;
+    for mat in &matches {
+        out.push_str(&text[end..mat.span.0]);
+        out.push_str(&expand_regex_replacement(replacement, mat));
+        end = mat.span.1;
+    }
+    out.push_str(&text[end..]);
+    (out, matches.len() as i64)
+}
+
+pub fn jet_regex_purge() {
+    let mut cache = regex_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    for entries in &mut cache.entries {
+        entries.clear();
+    }
+    cache.order.clear();
 }
 
 pub fn jet_regex_split(pattern: &JetRegex, text: &str) -> Vec<String> {
@@ -2190,7 +2209,7 @@ unsafe fn regex_find_byte_avx2(
     };
     let mut pos = start;
     let target = _mm256_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(32) {
+    while haystack.len().saturating_sub(pos) >= 32 {
         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2217,7 +2236,7 @@ unsafe fn regex_find_byte_avx2(
     };
     let mut pos = start;
     let target = _mm256_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(32) {
+    while haystack.len().saturating_sub(pos) >= 32 {
         let chunk = _mm256_loadu_si256(haystack.as_ptr().add(pos).cast());
         let mask = _mm256_movemask_epi8(_mm256_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2244,7 +2263,7 @@ unsafe fn regex_find_byte_sse2(
     };
     let mut pos = start;
     let target = _mm_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(16) {
+    while haystack.len().saturating_sub(pos) >= 16 {
         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2271,7 +2290,7 @@ unsafe fn regex_find_byte_sse2(
     };
     let mut pos = start;
     let target = _mm_set1_epi8(needle as i8);
-    while pos <= haystack.len().saturating_sub(16) {
+    while haystack.len().saturating_sub(pos) >= 16 {
         let chunk = _mm_loadu_si128(haystack.as_ptr().add(pos).cast());
         let mask = _mm_movemask_epi8(_mm_cmpeq_epi8(chunk, target)) as u32;
         if mask != 0 {
@@ -2308,6 +2327,16 @@ fn regex_next_char(text: &str, pos: usize) -> Option<(char, usize)> {
 }
 
 fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
+    jet_regex_expand_with(repl, |index| mat.group(index).ok(), |name| mat.name(name).ok())
+}
+
+// Shared template semantics; erased compile-time Match values supply the same
+// two capture reads rather than carrying a second replacement parser.
+pub fn jet_regex_expand_with(
+    repl: &str,
+    mut group: impl FnMut(i64) -> Option<String>,
+    mut named: impl FnMut(&str) -> Option<String>,
+) -> String {
     let mut out = String::with_capacity(repl.len());
     let mut chars = repl.chars().peekable();
     while let Some(ch) = chars.next() {
@@ -2329,7 +2358,7 @@ fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
                     }
                     name.push(c);
                 }
-                if let Ok(value) = mat.name(&name) {
+                if let Some(value) = named(&name) {
                     out.push_str(&value);
                 }
             }
@@ -2345,7 +2374,7 @@ fn expand_regex_replacement(repl: &str, mat: &JetRegexMatch) -> String {
                     }
                 }
                 if valid {
-                    if let Ok(value) = mat.group(idx) {
+                    if let Some(value) = group(idx) {
                         out.push_str(&value);
                     }
                 }
@@ -2392,5 +2421,81 @@ mod tests {
 
         let alphabetic = JetRegex::parse(r"\p{Alphabetic}+").unwrap();
         assert_eq!(alphabetic.find("123λ!").ok().as_deref(), Some("λ"));
+    }
+
+    /// Core/regex/regex.jet gives these same answers (golden
+    /// text/regex_unicode_parity pins the Jet half): Unicode simple case
+    /// folding, classes over scalars, \p/\P, syntax errors, character
+    /// positions, and `$` replacement expansion.
+    #[test]
+    fn unicode_rules_shared_with_the_jet_engine() {
+        let ci = jet_regex_flags(true, false, false);
+        let plain = RegexFlags::default();
+        let find = |pattern: &str, flags: &RegexFlags, text: &str| {
+            jet_regex_compile_with(pattern, flags).unwrap().find(text).ok()
+        };
+        assert_eq!(find("straße", &ci, "STRASSE"), None);
+        assert_eq!(find("straße", &ci, "STRAßE").as_deref(), Some("STRAßE"));
+        assert_eq!(find("école", &ci, "ÉCOLE").as_deref(), Some("ÉCOLE"));
+        assert_eq!(find("σ", &ci, "Σ").as_deref(), Some("Σ"));
+        assert_eq!(find("[à-ö]+", &ci, "xÀÉÖy").as_deref(), Some("ÀÉÖ"));
+        assert_eq!(find("[é]+", &plain, "aééb").as_deref(), Some("éé"));
+        assert_eq!(find("[^a]", &plain, "é").as_deref(), Some("é"));
+        assert_eq!(find("[α-ω]+", &plain, "xαβγ").as_deref(), Some("αβγ"));
+        assert_eq!(find(r"\p{L}+", &plain, "123héllo!").as_deref(), Some("héllo"));
+        assert_eq!(find(r"\P{L}+", &plain, "123héllo!").as_deref(), Some("123"));
+        assert_eq!(find(r"\p{N}+", &plain, "x٣٤y").as_deref(), Some("٣٤"));
+        assert_eq!(find(r"\s", &plain, "a\u{3000}b").as_deref(), Some("\u{3000}"));
+        assert_eq!(find(r"[\p{L}\d]+", &plain, "ab1é!").as_deref(), Some("ab1é"));
+        for bad in [r"[\P{L}]", r"\p{Foo}", r"(a)\1", "[]"] {
+            assert!(jet_regex_compile(bad).is_err(), "{bad} must be a syntax error");
+        }
+        for good in ["[^]]", "a{5000}"] {
+            assert!(jet_regex_compile(good).is_ok(), "{good} must compile");
+        }
+        let found = JetRegex::parse("(é+)b").unwrap().matches("aéébxéb");
+        let spans: Vec<_> = found
+            .iter()
+            .map(|m| (m.start(), m.end(), m.group(1).ok()))
+            .collect();
+        assert_eq!(
+            spans,
+            vec![(1, 4, Some("éé".to_string())), (5, 7, Some("é".to_string()))]
+        );
+        let word = JetRegex::parse("([a-z]+)").unwrap();
+        assert_eq!(word.replace("ab cd", "<${1}>"), "<> <>");
+        let named = JetRegex::parse("(?<w>[a-z]+)").unwrap();
+        assert_eq!(named.replace("ab cd", "<${w}|$0|$$>"), "<ab|ab|$> <cd|cd|$>");
+    }
+
+    /// #4574: the byte search stays inside the haystack slice. Every byte past
+    /// the slice end is the needle, so a block load crossing the end would
+    /// report a position outside the slice. `regex_find_byte` runs the
+    /// backend this CPU selects (AVX2 or SSE2 on x86-64).
+    #[test]
+    fn byte_search_never_reads_past_a_short_haystack() {
+        for len in 0..=96 {
+            let mut owned = [b'z'; 160];
+            for (index, byte) in owned[..len].iter_mut().enumerate() {
+                *byte = if index % 37 == 36 { b'z' } else { b'a' };
+            }
+            let haystack = &owned[..len];
+            for start in 0..=len + 1 {
+                let expected = haystack
+                    .get(start..)
+                    .and_then(|tail| tail.iter().position(|byte| *byte == b'z'))
+                    .map(|offset| start + offset);
+                assert_eq!(
+                    regex_find_byte_scalar(haystack, b'z', start),
+                    expected,
+                    "scalar len={len} start={start}"
+                );
+                assert_eq!(
+                    regex_find_byte(haystack, b'z', start),
+                    expected,
+                    "selected backend len={len} start={start}"
+                );
+            }
+        }
     }
 }

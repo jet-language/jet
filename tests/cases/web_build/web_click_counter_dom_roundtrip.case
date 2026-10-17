@@ -1,0 +1,16 @@
+# HAND-PORT tests/web_build.rs:4058-4074 web_click_counter_dom_roundtrip
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original dependency-free fake DOM harness copied verbatim, including its own assertions; exact original stdout retained.
+requires: tool:node
+fixture: web_click_counter_dom_roundtrip.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_click_counter_dom_roundtrip.stdout.expected

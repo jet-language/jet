@@ -1,0 +1,8 @@
+Error [E0212]: `lib.books` cannot be changed by `.push()` while `first` is still looking into it
+  --> owner_backed_collection_rejects_resize_while_view_live.jet:21:10
+    |
+ 21 |     &lib.books.push(Book{ title: "Snow Crash", pages: 480 })
+    |          ^^^^^
+ Why: `first` is a live read view into `lib.books[…]`; changing or moving the owner could invalidate that view
+ Fix: Finish using `first` before changing `lib.books`, narrow the view's scope, or make an owned copy
+More: jet-lang.dev/e/E0212

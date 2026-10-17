@@ -1,0 +1,233 @@
+// Config-surface values through the one comptime path (Rust jet-comptime
+// `evaluate`, without a second evaluator; I8/I9). A config value (a field of
+// an `env.jet`/`config.jet` module) is turned into typed Jet code: every
+// global it reads (`$NAME` environment reads, module-level values, sibling
+// fields) becomes an ALL_CAPS module constant holding that value's literal,
+// the source's own top-level functions are carried by their exact text, and
+// the value itself becomes `JET_CONFIG_VALUE :: prep { <expression> }`. The
+// driver checks that program in `JetDriverCompileMode.Comptime`, whose
+// comptime stage lowers the `prep` value to MIR and evaluates it with JetEval;
+// the checked value is read back as a `CtValue`.
+use core.files as config_files
+use jet_driver.[
+    JetDriverAuthorizedSourceFile,
+    JetDriverAuthorizedSourceRoot,
+    JetDriverAuthorizedSourceSnapshot,
+    JetDriverCompileMode,
+    JetDriverCompileResult,
+    JetDriverCoreSource,
+    jet_driver_compile,
+]
+use jet_foundation.[
+    ComptimeNameSite,
+    CtValue,
+    DIAGNOSTIC_ERROR,
+    Diagnostic,
+    Expr,
+    Func,
+    ast_comptime_key_to_value,
+    ast_comptime_value_type,
+    comptime_walk_identifiers,
+    diagnostic_from_registry,
+    expr_span,
+    type_name,
+]
+use jet_sema.[
+    SemaComptimeItemKind,
+    sema_user_template_ct_value,
+]
+
+// A config value that could not be evaluated: the diagnostic, placed on the
+// config source.
+#Error
+struct ComptimeEvalError {
+    diagnostic: Diagnostic
+}
+
+JET_CONFIG_VALUE_NAME :: "JET_CONFIG_VALUE"
+JET_CONFIG_VALUE_FILE :: "jet_config_value.jet"
+
+// Evaluate `expr` (spelled in `source`) with `funcs` callable and `globals`
+// readable. A plain literal is already its value; every other expression
+// runs through the driver's comptime stage.
+fn comptime_evaluate(expr: Expr, source: String, funcs: [String: Func], base_dir: String, globals: [String: CtValue]) -> CtValue ComptimeEvalError! {
+    if jet_config_plain_literal(expr) == .Val(value) -> return Ok(value)
+    program :: jet_config_program(expr, source, funcs, globals)
+    core_sources :: if jet_cli_core_sources() == {
+        .Loaded(sources) -> sources
+        .Missing(what, fix) -> { return Err(ComptimeEvalError{diagnostic: diagnostic_from_registry("E2105", Val(expr_span(expr)), what, jet_cli_why("E2105"), fix)}) }
+    }
+    result :: jet_config_compile(program, core_sources, base_dir) ?? return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {err}"))
+    loop diagnostic in result.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> return Err(ComptimeEvalError{diagnostic: diagnostic_from_registry(diagnostic.code, Val(expr_span(expr)), diagnostic.what, diagnostic.why, diagnostic.fix)})
+    }
+    if result.internal_problem == .Val(problem) -> return Err(jet_config_eval_error(expr, "this config value could not be evaluated: {problem}"))
+    loop value in result.comptime_values {
+        if value.kind != SemaComptimeItemKind.Constant || !value.key.ends_with(":{JET_CONFIG_VALUE_NAME}") -> next
+        converted :: sema_user_template_ct_value(value.value) ?? return Err(jet_config_eval_error(expr, "this config value's result has a shape a config value can't hold"))
+        return Ok(converted)
+    }
+    Err(jet_config_eval_error(expr, "this config value produced no build-time value"))
+}
+
+fn jet_config_eval_error(expr: Expr, what: String) -> ComptimeEvalError Never! {
+    ComptimeEvalError{diagnostic: diagnostic_from_registry("E0956", Val(expr_span(expr)), what, "config values are evaluated as typed Jet code at build time, and only literal data crosses into and out of that code", "write the value as literal data, or compute it with a pure function over literal data")}
+}
+
+// A string with no interpolation, a whole number, or a truth value: the
+// literal is its own value, so no program is checked for it.
+fn jet_config_plain_literal(expr: Expr) -> CtValue? Never! {
+    if expr == {
+        .Paren(inner, _) -> jet_config_plain_literal(inner)
+        .Bool(flag, _) -> Val(CtValue.Bool{value: flag})
+        .Int(number, _, width, _) -> if width == None -> Val(CtValue.Int{value: number}) else -> None
+        .Str(parts, _) -> {
+            text := [String]{}
+            loop part in parts {
+                if part == .Lit(piece) -> &text.push(piece) else -> return None
+            }
+            Val(CtValue.Str{value: text.join("")})
+        }
+        else -> None
+    }
+}
+
+// The typed program for one config value. Each global the expression reads
+// becomes one ALL_CAPS module constant, and each read is respelled to it.
+fn jet_config_program(expr: Expr, source: String, funcs: [String: Func], globals: [String: CtValue]) -> String ComptimeEvalError! {
+    bytes :: source.bytes()
+    span :: expr_span(expr)
+    if span.start < 0 || span.end > bytes.len() || span.start > span.end -> return Err(jet_config_eval_error(expr, "this config value has no source text to evaluate"))
+    sites := [ComptimeNameSite]{}
+    loop site in comptime_walk_identifiers(expr) {
+        if globals.get(site.name) == None -> next
+        if site.span.start < span.start || site.span.end > span.end -> return Err(jet_config_eval_error(expr, "`{site.name}` is read outside this config value's source text"))
+        index := sites.len()
+        loop index > 0 && sites[index - 1].span.start > site.span.start -> index -= 1
+        &sites.insert(index, site)
+    }
+    constants := [String: String]{}
+    lines := [String]{}
+    loop name in funcs.keys() {
+        function :: funcs[name]
+        if function.span.start < 0 || function.span.end > bytes.len() -> next
+        &lines.push(String.from_bytes(bytes.slice(function.span.start, function.span.end)) ?? return Err(jet_config_eval_error(expr, "the function `{name}` is not valid text")))
+    }
+    text := [String]{}
+    cursor := span.start
+    loop site in sites {
+        if site.span.start < cursor -> next
+        constant := constants.get(site.name) ?? ""
+        if constant == "" {
+            constant = "JET_CONFIG_GLOBAL_{constants.len()}"
+            value :: globals[site.name]
+            literal :: jet_config_literal(value) ?? return Err(jet_config_eval_error(expr, "`{site.name}` holds a value this config value can't read as literal data"))
+            constants[site.name] = constant
+            &lines.push("{constant} :: {literal}")
+        }
+        &text.push(String.from_bytes(bytes.slice(cursor, site.span.start)) ?? "")
+        &text.push(constant)
+        cursor = site.span.end
+    }
+    &text.push(String.from_bytes(bytes.slice(cursor, span.end)) ?? "")
+    body :: text.join("")
+    &lines.push("{JET_CONFIG_VALUE_NAME} :: prep {{ {body} }}")
+    &lines.push("")
+    Ok(lines.join("\n"))
+}
+
+// The typed Jet literal spelling of a config value, or None for a value
+// literal data cannot spell (a config record such as `Env{…}`, a closure).
+fn jet_config_literal(value: CtValue) -> String? Never! {
+    if value == {
+        .Int(number) -> Val("{number}")
+        .BigInt(decimal) -> Val(decimal)
+        .Bool(flag) -> Val(if flag -> "true" else -> "false")
+        .Float(number) -> if number == {
+            .F64(inner) -> {
+                shown :: "{inner}"
+                if !shown.contains(".") && !shown.contains("e") -> return None
+                Val(shown)
+            }
+            .F32(_) -> None
+        }
+        .Str(text) -> Val("\"{jet_config_string_escape(text)}\"")
+        .List(values) -> {
+            element :: if values.len() == 0 -> "Int" else -> type_name(ast_comptime_value_type(values[0]))
+            items := [String]{}
+            loop item in values -> &items.push(jet_config_literal(item) ?? return None)
+            Val(["[", element, "]{{", items.join(", "), "}}"].join(""))
+        }
+        .Map(entries) -> {
+            map_type :: type_name(ast_comptime_value_type(value))
+            items := [String]{}
+            loop entry in entries {
+                key :: jet_config_literal(ast_comptime_key_to_value(entry.key)) ?? return None
+                item :: jet_config_literal(entry.value) ?? return None
+                &items.push("{key}: {item}")
+            }
+            Val([map_type, "{{", items.join(", "), "}}"].join(""))
+        }
+        .Present(inner) -> {
+            item :: jet_config_literal(inner) ?? return None
+            Val("Val({item})")
+        }
+        else -> None
+    }
+}
+
+// A string literal body: `\`, `"`, and line breaks escaped, and literal
+// braces doubled so they are not interpolation holes.
+fn jet_config_string_escape(text: String) -> String Never! {
+    out := [U8]{}
+    loop byte in text.bytes() {
+        if {
+            byte == (U8{92}) || byte == (U8{34}) -> {
+                &out.push(U8{92})
+                &out.push(byte)
+            }
+            byte == (U8{123}) || byte == (U8{125}) -> {
+                &out.push(byte)
+                &out.push(byte)
+            }
+            byte == (U8{10}) -> {
+                &out.push(U8{92})
+                &out.push(U8{110})
+            }
+            byte == (U8{13}) -> {
+                &out.push(U8{92})
+                &out.push(U8{114})
+            }
+            byte == (U8{9}) -> {
+                &out.push(U8{92})
+                &out.push(U8{116})
+            }
+            else -> &out.push(byte)
+        }
+    }
+    String.from_bytes(out) ?? text
+}
+
+// Check `program` as the one file of a source root at the config's own
+// directory (relative `embed_file` paths resolve there) and run its comptime
+// stage. The driver makes dynamic host calls with no effect bound, so this
+// stays unannotated like `jet_cli_compile_file`.
+fn jet_config_compile(program: String, core_sources: [JetDriverCoreSource], base_dir: String) -> JetDriverCompileResult {
+    root :: config_files.realpath(base_dir) ?? base_dir
+    path :: if root == "/" -> "/{JET_CONFIG_VALUE_FILE}" else -> "{root}/{JET_CONFIG_VALUE_FILE}"
+    identity :: "config-value-root:{root}"
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: root,
+            identity: identity,
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: JET_CONFIG_VALUE_FILE, identity: "config-value-file:{path}", source: program}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: identity,
+        entry_path: path,
+    }
+    request := jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Comptime)
+    jet_driver_compile(^request)
+}
+

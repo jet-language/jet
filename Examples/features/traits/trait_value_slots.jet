@@ -1,6 +1,7 @@
-// S48: a trait name in a field, an optional, or a declared result is a trait
-// value. A concrete value that implements the trait fills each of those slots
-// and is boxed invisibly, exactly as it is for a trait-typed parameter.
+// S48: a trait name in a field, an optional, or a declared result is an owning
+// trait-value slot. A concrete implementation fills it through an owned box.
+// A nonowning Read trait formal instead borrows the original concrete value;
+// passing that loan does not allocate a box or clone the concrete owner.
 trait Adapter {
     fn go(self) -> Int
 }

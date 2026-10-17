@@ -1,0 +1,17 @@
+# HAND-PORT tests/jetpack_engine.rs:5287-5317 no_nix_json_lists_realized_refs_and_holes
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: no_nix_json_lists_realized_refs_and_holes.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: project
+mkdir: root
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack build --no-color --json
+cwd: project
+env: HOME={work}/home
+env: PATH=
+exit: 2
+stdout: ~ "\"code\":\"E1272\"" # original predicate
+stdout: ~ "\"realized\":[\"hello@mine\"]" # original predicate
+stdout: ~ "\"holes\":[\"postgres@nixpkgs\"]" # original predicate
+

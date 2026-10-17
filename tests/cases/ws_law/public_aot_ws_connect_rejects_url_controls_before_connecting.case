@@ -1,0 +1,21 @@
+# tests/ws_law.rs::public_aot_ws_connect_rejects_url_controls_before_connecting
+# Exact original guest source and code/stdout predicates; PENDING-SAME-HEAD.
+# Original one-second nonblocking observer is executable through D-NET-NONBLOCKING1: Timeout keeps polling; other errors return false exactly as original.
+fixture: public_aot_ws_connect_rejects_url_controls_before_connecting.fixture
+step: jet build observer/run.jet
+exit: 0
+copy: observer/.jet/build/run observer-bin
+spawn observer: {work}/observer-bin
+stdout: file observer.stdout
+stderr: file observer.stderr
+await: file observer.stdout ~ "ADDRESS=" timeout 30s every 10ms # transport readiness bridge: fixture observer/run.jet:23-25 publishes the bound ADDRESS; retain the ported 30s/10ms gate
+capture: addr = text file.after_first("ADDRESS=").line(0) observer.stdout
+write: main.jet public_aot_ws_connect_rejects_url_controls_before_connecting.fixture/source.template # original ed77c235f tests/ws_law.rs:900-914 source with the bound address substituted; exact existing fixture template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = public_aot_ws_connect_rejects_url_controls_before_connecting.out
+wait: observer
+exit: 0
+file.line(1): observer.stdout = "false" # original ed77c235f tests/ws_law.rs:919-922 requires !observer.join().unwrap; fixture observer/run.jet:25-26 prints address then observed_connection result

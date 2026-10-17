@@ -1,0 +1,252 @@
+// Literal contracts for the private shared output kernels. Assemble the
+// registered Foundation/Text/Read + diagnostics wrappers and the three CLI
+// providers with this run entry. Input .bytes() calls construct owned test
+// facts; they are not proof of a zero-copy String/native/host invocation.
+fn shared_output_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("shared output: {name}")
+}
+fn shared_output_bytes(actual: [U8], expected: String, name: String) Never! {
+    shared_output_require(actual == expected.bytes(), name)
+}
+fn shared_output_facts() -> JetCLIOutputFacts Never! {
+    JetCLIOutputFacts{tty: true, term: Val("xterm-256color".bytes()), no_color: false, force_color: false, requested_color: .Auto, json: false, width: Val(U64{100}), unicode: true}
+}
+fn shared_output_profile(facts: JetCLIOutputFacts) -> JetCLIOutputProfile Never! {
+    jet_cli_output_profile(facts) ?? panic("valid explicit output facts refused")
+}
+fn shared_output_render(table: JetCLIAdaptiveTable, profile: JetCLIOutputProfile) -> [U8] Never! {
+    jet_cli_table_render(table, jet_cli_table_layout(table, profile)) ?? panic("human output hidden")
+}
+fn shared_output_pair() -> JetCLIAdaptiveTable Never! {
+    jet_cli_table([JetCLITableColumn]{
+        jet_cli_table_column("N".bytes(), .Text),
+        jet_cli_table_column("v".bytes(), .Integer)
+    }, [JetCLITableRow]{
+        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("a".bytes()), .Integer{value: 7}}),
+        jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("bbb".bytes()), .Integer{value: -2}})
+    })
+}
+fn shared_output_term_error(term: [U8]) Never! {
+    facts := shared_output_facts()
+    facts.term = Val(term.copy())
+    result :: jet_cli_output_profile(facts)
+    if result == .Err(error) {
+        if error == .InvalidTerm(value) {
+            shared_output_require(value == term, "typed TERM error preserves bytes")
+        } else {
+            panic("wrong typed TERM error")
+        }
+    } else {
+        panic("invalid TERM accepted")
+    }
+}
+fn shared_output_profiles() Never! {
+    facts := shared_output_facts()
+    profile :: shared_output_profile(facts)
+    shared_output_require(profile.width == U64{100} && profile.ansi_enabled && profile.unicode_enabled && profile.progress_enabled && profile.human_enabled && !profile.machine_enabled, "Rust human terminal capabilities")
+    shared_output_require(jet_cli_output_channel(profile, .Renderable) == .HumanStdout && jet_cli_output_channel(profile, .Machine) == .Hidden, "human primary channels")
+    loop kind in ([JetCLIOutputKind]{.Status, .Log, .Progress}) -> shared_output_require(jet_cli_output_channel(profile, kind) == .HumanStderr, "human secondary channels")
+
+    facts.tty = false
+    redirected :: shared_output_profile(facts)
+    shared_output_require(!redirected.ansi_enabled && !redirected.unicode_enabled && !redirected.progress_enabled && jet_cli_output_channel(redirected, .Renderable) == .HumanStdout, "Rust redirected auto")
+    shared_output_require(jet_cli_output_channel(redirected, .Progress) == .HumanStderr, "channel is not progress capability")
+    facts.force_color = true
+    shared_output_require(shared_output_profile(facts).ansi_enabled, "auto force color")
+    facts.no_color = true
+    shared_output_require(!shared_output_profile(facts).ansi_enabled, "NO_COLOR before FORCE_COLOR")
+    facts.requested_color = .Always
+    shared_output_require(shared_output_profile(facts).ansi_enabled, "explicit always before presence flags")
+    facts.requested_color = .Never
+    shared_output_require(!shared_output_profile(facts).ansi_enabled, "explicit never")
+    facts.no_color = false
+    facts.force_color = false
+    facts.requested_color = .Auto
+    shared_output_require(!shared_output_profile(facts).ansi_enabled, "auto non-TTY")
+    facts.tty = true
+    shared_output_require(shared_output_profile(facts).ansi_enabled, "auto TTY")
+    facts.term = Val("dumb".bytes())
+    facts.requested_color = .Always
+    dumb :: shared_output_profile(facts)
+    shared_output_require(dumb.ansi_enabled && !dumb.unicode_enabled && !dumb.progress_enabled, "Rust dumb explicit force")
+    facts.json = true
+    machine :: shared_output_profile(facts)
+    shared_output_require(!machine.ansi_enabled && !machine.unicode_enabled && !machine.progress_enabled && !machine.human_enabled && machine.machine_enabled, "Rust JSON capabilities")
+    loop kind in ([JetCLIOutputKind]{.Renderable, .Status, .Log, .Progress}) -> shared_output_require(jet_cli_output_channel(machine, kind) == .Hidden, "JSON human channels hidden")
+    shared_output_require(jet_cli_output_channel(machine, .Machine) == .MachineStdout, "JSON machine stdout")
+    table :: shared_output_pair()
+    shared_output_require(jet_cli_table_render(table, jet_cli_table_layout(table, machine)) == None, "table emits no JSON/ANSI fragment")
+
+    facts = shared_output_facts()
+    facts.width = Val(U64{0})
+    result :: jet_cli_output_profile(facts)
+    if result == .Err(error) {
+        if error == .InvalidWidth(value) {
+            shared_output_require(value == U64{0}, "typed width error")
+        } else {
+            panic("wrong width error")
+        }
+    } else {
+        panic("zero width accepted")
+    }
+    shared_output_term_error("x\nterm".bytes())
+    shared_output_term_error([U8]{})
+    shared_output_term_error([U8]{120, 194, 133, 116, 101, 114, 109})
+    facts = shared_output_facts()
+    facts.term = Val([U8]{120, 226, 128, 168, 116, 101, 114, 109})
+    shared_output_require(shared_output_profile(facts).human_enabled, "Cc differs from diagnostic separator policy")
+    facts.width = None
+    shared_output_require(shared_output_profile(facts).width == U64{80}, "canonical absent width")
+    facts.width = Val(U64{18446744073709551615})
+    huge :: shared_output_profile(facts)
+    shared_output_require(huge.width == U64{18446744073709551615} && jet_cli_table_layout(table, huge).width == 256, "unsigned usize preserved before render cap")
+    first :: shared_output_profile(facts)
+    second :: shared_output_profile(facts)
+    shared_output_require(first.width == second.width && first.ansi_enabled == second.ansi_enabled && first.unicode_enabled == second.unicode_enabled && first.progress_enabled == second.progress_enabled && first.human_enabled == second.human_enabled && first.machine_enabled == second.machine_enabled, "Rust deterministic selection")
+    spellings :: [String]{"auto", "always", "never"}
+    loop (index, color) in ([JetCLIColorRequest]{.Auto, .Always, .Never}) {
+        shared_output_require((jet_cli_color_request(spellings[index].bytes()) ?? panic("valid color refused")) == color, "exact color spellings")
+    }
+    bad :: "sometimes".bytes()
+    color_result :: jet_cli_color_request(bad)
+    if color_result == .Err(error) {
+        if error == .InvalidColorRequest(value) {
+            shared_output_require(value == bad, "typed color error")
+        } else {
+            panic("wrong color error")
+        }
+    } else {
+        panic("invalid color accepted")
+    }
+}
+fn shared_output_grids() Never! {
+    table :: shared_output_pair()
+    facts := shared_output_facts()
+    facts.tty = false
+    facts.width = Val(U64{80})
+    ascii :: shared_output_render(table, shared_output_profile(facts))
+    shared_output_bytes(ascii, "+-----+----+\n| N   |  v |\n+-----+----+\n| a   |  7 |\n| bbb | -2 |\n+-----+----+", "literal ASCII grid, numeric/header right alignment")
+    shared_output_require(ascii[ascii.len() - 1] != U8{10}, "renderer has no trailing newline")
+    facts.tty = true
+    shared_output_bytes(shared_output_render(table, shared_output_profile(facts)), "┌─────┬────┐\n│ N   │  v │\n├─────┼────┤\n│ a   │  7 │\n│ bbb │ -2 │\n└─────┴────┘", "literal Unicode grid")
+    facts.tty = false
+    facts.width = Val(U64{8})
+    shared_output_bytes(shared_output_render(table, shared_output_profile(facts)), "N: a\nv: 7\nN: bbb\nv: -2", "literal narrow boundary")
+    facts.width = Val(U64{9})
+    layout :: jet_cli_table_layout(table, shared_output_profile(facts))
+    shared_output_require(layout.widths == [Int]{1, 1} && !layout.narrow && !layout.plain, "minimum grid widths")
+    shared_output_bytes(jet_cli_table_render(table, layout) ?? panic("hidden"), "+---+---+\n| N | v |\n+---+---+\n| a | 7 |\n| b | - |\n| b | 2 |\n| b |   |\n+---+---+", "literal wrapped minimum grid")
+    shared_output_require(jet_cli_table_fit_widths([Int]{9, 2, 6}, 18) == [Int]{3, 2, 3}, "round-robin fitting")
+
+    padding :: [String]{"x   ", "   x", " x  "}
+    loop (index, alignment) in ([JetCLITableAlignment]{.Left, .Right, .Center}) {
+        out := [U8]{}
+        jet_cli_table_append_pad(&out, "x".bytes(), 4, alignment)
+        shared_output_bytes(out, padding[index], "literal alignment including odd center gap")
+    }
+    one :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("N".bytes(), .Text)}, [JetCLITableRow]{jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("abcde".bytes())})})
+    facts.width = Val(U64{4})
+    shared_output_bytes(shared_output_render(one, shared_output_profile(facts)), "N\nabcd\ne", "single-column plain boundary")
+    facts.width = Val(U64{5})
+    shared_output_bytes(shared_output_render(one, shared_output_profile(facts)), "+---+\n| N |\n+---+\n| a |\n| b |\n| c |\n| d |\n| e |\n+---+", "single-column grid boundary")
+    narrow :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("Details".bytes(), .Text), jet_cli_table_column("Other".bytes(), .Text)}, [JetCLITableRow]{jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("x".bytes()), jet_cli_table_cell_text("y".bytes())})})
+    facts.width = Val(U64{8})
+    shared_output_bytes(shared_output_render(narrow, shared_output_profile(facts)), "Deta…: x\nOther: y", "ASCII profile still uses canonical narrow ellipsis")
+    no_rows :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("N".bytes(), .Text), jet_cli_table_column("v".bytes(), .Integer)}, [JetCLITableRow]{})
+    shared_output_bytes(shared_output_render(no_rows, shared_output_profile(facts)), "N | v", "narrow no-row headings")
+    empty :: jet_cli_table([JetCLITableColumn]{}, [JetCLITableRow]{})
+    shared_output_bytes(shared_output_render(empty, shared_output_profile(facts)), "", "empty table")
+    empty_rows :: jet_cli_table([JetCLITableColumn]{}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{}}, JetCLITableRow{cells: [JetCLITableCell]{}}})
+    shared_output_bytes(shared_output_render(empty_rows, shared_output_profile(facts)), "\n", "empty logical rows retain newline")
+    facts.width = Val(U64{80})
+    missing :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("N".bytes(), .Text), jet_cli_table_column("v".bytes(), .Integer)}, [JetCLITableRow]{jet_cli_table_row([JetCLITableCell]{})})
+    shared_output_bytes(shared_output_render(missing, shared_output_profile(facts)), "+---+---+\n| N | v |\n+---+---+\n|   |   |\n+---+---+", "missing cells are empty")
+    mismatch :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("Value".bytes(), .Integer)}, [JetCLITableRow]{jet_cli_table_row([JetCLITableCell]{jet_cli_table_cell_text("z".bytes())})})
+    shared_output_bytes(shared_output_render(mismatch, shared_output_profile(facts)), "+-------+\n| Value |\n+-------+\n|     z |\n+-------+", "schema alignment does not coerce value kind")
+    shared_output_require(jet_cli_table_cell_kind(mismatch.rows[0].cells[0]) == .Text, "typed value kind retained")
+}
+fn shared_output_text() Never! {
+    ansi :: [U8]{27, 91, 51, 49, 109, 114, 101, 100, 27, 91, 48, 109, 32, 27, 93, 116, 105, 116, 108, 101, 7, 120, 32, 27, 93, 111, 116, 104, 101, 114, 27, 92, 121}
+    clean :: jet_cli_table_bound_text(^ansi)
+    shared_output_bytes(clean, "red x y", "CSI/OSC BEL/OSC ST exact removal")
+    non_ascii_escape :: jet_cli_table_bound_text([U8]{27, 206, 177, 122})
+    shared_output_bytes(non_ascii_escape, "z", "ESC consumes a whole non-ASCII scalar")
+    controls :: jet_cli_table_bound_text([U8]{97, 0, 9, 98})
+    shared_output_require(controls == [U8]{97, 0, 9, 98}, "non-ANSI controls remain literal")
+    crlf :: jet_cli_table_wrap([U8]{97, 13, 10, 10, 98, 10}, 2)
+    shared_output_require(crlf == [[U8]]{"a".bytes(), [U8]{}, "b".bytes(), [U8]{}}, "CR suffix and trailing/empty logical lines")
+    wide :: jet_cli_table_wrap("界a".bytes(), 1)
+    shared_output_require(wide == [[U8]]{"?".bytes(), "a".bytes()}, "oversize cluster is one question mark")
+    accents :: jet_cli_table_wrap("áb".bytes(), 1)
+    shared_output_require(accents == [[U8]]{"á".bytes(), "b".bytes()}, "combining cluster never split")
+    full_zero :: jet_cli_table_wrap([U8]{97, 0, 98}, 1)
+    shared_output_require(full_zero == [[U8]]{"a".bytes(), "b".bytes()}, "zero-width cluster dropped at full boundary")
+    flags :: jet_cli_table_wrap("🇺🇸🇬".bytes(), 1)
+    shared_output_require(flags == [[U8]]{"?".bytes(), "🇬".bytes()}, "regional pair versus single")
+    cluster_text :: [String]{"á", "👍🏽", "👨‍👩‍👧‍👦", "🇺🇸", "🇬", "1️⃣", "가"}
+    cluster_width :: [Int]{1, 2, 2, 2, 1, 1, 3}
+    loop (index, text) in cluster_text {
+        shared_output_require(jet_cli_table_text_width(text.bytes()) == cluster_width[index], "literal canonical CLI cluster widths, not Core UAX")
+    }
+    shared_output_require(jet_cli_table_text_width("abc\nx".bytes()) == 3 && jet_cli_table_text_width([U8]{0}) == 0, "maximum logical line and control width")
+    shared_output_bytes(jet_cli_table_clip("abcde".bytes(), 3, true), "ab…", "Unicode clipping")
+    shared_output_bytes(jet_cli_table_clip("abcde".bytes(), 3, false), "...", "ASCII clipping")
+    shared_output_bytes(jet_cli_table_clip("abcde".bytes(), 1, false), ".", "short ASCII suffix")
+    shared_output_bytes(jet_cli_table_clip("界abc".bytes(), 2, true), "…", "clipping preserves wide cluster")
+    shared_output_bytes(jet_cli_table_clip("abc".bytes(), 0, true), "", "zero clip width")
+    long :: jet_cli_table_bound_text("x".repeat(4097).bytes())
+    shared_output_require(long.len() == 4096 && long == "x".repeat(4096).bytes(), "UTF8 byte bound")
+    unicode_bound :: jet_cli_table_bound_text("界".repeat(1366).bytes())
+    shared_output_require(unicode_bound.len() == 4095 && unicode_bound == "界".repeat(1365).bytes(), "multibyte bound respects cluster")
+    huge_cluster :: "a{"́".repeat(2048)}z".bytes()
+    shared_output_bytes(jet_cli_table_bound_text(^huge_cluster), "z", "skip oversized cluster then retain later fitting cluster")
+    shared_output_require(jet_cli_table_extend(0x1dc00) && jet_cli_table_extend(0x1dfff) && !jet_cli_table_extend(0x1dbff) && !jet_cli_table_extend(0x1e000), "reference supplementary Extend boundaries")
+    shared_output_require(jet_cli_table_wide(0x3000) && jet_cli_table_wide(0x303e) && !jet_cli_table_wide(0x303f) && !jet_cli_table_wide(0x3040) && jet_cli_table_wide(0x3041), "reference wide gap boundaries")
+}
+fn shared_output_bounds() Never! {
+    columns := [JetCLITableColumn]{}
+    loop _ in 0..<65 -> &columns.push(jet_cli_table_column("c".bytes(), .Text))
+    cells := [JetCLITableCell]{}
+    loop _ in 0..<65 -> &cells.push(.Empty)
+    row :: jet_cli_table_row(^cells)
+    shared_output_require(row.cells.len() == 64, "row constructor cap")
+    table :: jet_cli_table(^columns, [JetCLITableRow]{row})
+    shared_output_require(table.columns.len() == 64 && table.rows[0].cells.len() == 64 && table.truncated, "column cap flags truncation")
+    source_columns := [JetCLITableColumn]{}
+    loop _ in 0..<64 -> &source_columns.push(jet_cli_table_column("c".bytes(), .Text))
+    source_cells := [JetCLITableCell]{}
+    loop _ in 0..<65 -> &source_cells.push(.Empty)
+    prebounded :: jet_cli_table(^source_columns, [JetCLITableRow]{jet_cli_table_row(^source_cells)})
+    shared_output_require(!prebounded.truncated, "row pre-truncation is not detected again")
+    rows := [JetCLITableRow]{}
+    loop _ in 0..<4097 -> &rows.push(JetCLITableRow{cells: [JetCLITableCell]{}})
+    row_bound :: jet_cli_table([JetCLITableColumn]{}, ^rows)
+    shared_output_require(row_bound.rows.len() == 4096 && row_bound.truncated, "row cap")
+    extra :: jet_cli_table([JetCLITableColumn]{jet_cli_table_column("c".bytes(), .Text)}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{.Empty, .Boolean{value: true}}}})
+    shared_output_require(extra.rows[0].cells.len() == 1 && extra.truncated, "extra cells ignored and flagged")
+    text_bound :: jet_cli_table([JetCLITableColumn]{JetCLITableColumn{name: "h".repeat(4097).bytes(), kind: .Text, alignment: .Left}}, [JetCLITableRow]{JetCLITableRow{cells: [JetCLITableCell]{.Text{value: "x".repeat(4097).bytes()}}}})
+    shared_output_require(text_bound.columns[0].name.len() == 4096 && !text_bound.truncated, "text/name bound is not structural truncation")
+    if text_bound.rows[0].cells[0] == .Text(value) {
+        shared_output_require(value.len() == 4096, "raw Text normalized by table")
+    } else {
+        panic("Text changed kind")
+    }
+    projection :: jet_cli_table_structured(extra)
+    shared_output_require(projection.columns.len() == extra.columns.len() && projection.rows.len() == extra.rows.len() && projection.truncated == extra.truncated && jet_cli_table_cell_kind(projection.rows[0].cells[0]) == .Empty, "structured typed projection")
+
+    minimum :: JetCLITableCell.Integer{value: -170141183460469231731687303715884105728}
+    maximum :: JetCLITableCell.Unsigned{value: 340282366920938463463374607431768211455}
+    shared_output_require(jet_cli_table_cell_width(minimum) == 40 && jet_cli_table_cell_width(maximum) == 39, "exact large integer domains")
+    shared_output_bytes(jet_cli_table_cell_lines(minimum, 256)[0], "-170141183460469231731687303715884105728", "canonical large negative Int display")
+    shared_output_bytes(jet_cli_table_cell_lines(maximum, 256)[0], "340282366920938463463374607431768211455", "canonical large positive Int display")
+    shared_output_bytes(jet_cli_table_cell_lines(.Boolean{value: true}, 256)[0], "true", "boolean true")
+    shared_output_bytes(jet_cli_table_cell_lines(.Boolean{value: false}, 256)[0], "false", "boolean false")
+    shared_output_require(jet_cli_table_cell_lines(.Empty, 256) == [[U8]]{[U8]{}}, "empty value")
+}
+fn run() Never! {
+    shared_output_profiles()
+    shared_output_grids()
+    shared_output_text()
+    shared_output_bounds()
+    print("shared output byte contracts OK")
+}

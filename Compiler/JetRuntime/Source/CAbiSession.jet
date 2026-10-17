@@ -1,0 +1,242 @@
+// CAbiSession.rs: resident typed places, confined to the owning Jet worker.
+// Session48: next0/id8/active16/last-binding24/has-last32/slots40.
+// Slot88: next0/binding8/schema-key16..40/size48/align56/payload64/glue72/
+// initialized80. Slot insertion is decreasing declaration order; no payload
+// copy, serialization or clone occurs at any session boundary.
+session_counter := I64{0}
+
+session_key := I64{0}
+
+// The checked runtime FunctionAddress table replaces this reference body.
+fn rt_session_tls_destructor_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// runtime-init: 4
+#Export(c) fn jet_rt_session_init() {
+    if (session_counter != I64{0}) {
+        return
+    }
+    session_counter = jet_rt_alloc(I64{8}, I64{8})
+    sync_store(session_counter, I64{1})
+    closure :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(closure, I64{1})
+    sync_store(closure + I64{8}, rt_session_tls_destructor_address())
+    sync_store(closure + I64{16}, I64{0})
+    session_key = jet_rt_tls_key_new(closure)
+}
+
+fn session_unsigned_after(a: I64, b: I64) -> Bool {
+    (a.bit_xor(I64{-9223372036854775808})) > (b.bit_xor(I64{-9223372036854775808}))
+}
+
+fn session_find(id: I64) -> I64 {
+    table :: jet_rt_tls_get(session_key)
+    if (table == I64{0}) { return I64{0} }
+    current := sync_load(table)
+    loop current != (I64{0}) {
+        if (sync_load(current + I64{8}) == id) { return current }
+        current = sync_load(current)
+    }
+    I64{0}
+}
+
+fn session_slot_find(session: I64, binding: I64) -> I64 {
+    slot := sync_load(session + I64{40})
+    loop slot != (I64{0}) {
+        current :: sync_load(slot + I64{8})
+        if (current == binding) { return slot }
+        if session_unsigned_after(binding, current) -> return I64{0}
+        slot = sync_load(slot)
+    }
+    I64{0}
+}
+
+fn session_slot_drop(slot: I64) {
+    payload :: sync_load(slot + I64{64})
+    glue :: sync_load(slot + I64{72})
+    if (sync_load(slot + I64{80}) != I64{0} && glue != I64{0}) {
+        // The host pins this exact-layout glue until destruction finishes.
+        _ := coll_call1(glue, payload)
+    }
+    jet_rt_free(payload, sync_load(slot + I64{48}), sync_load(slot + I64{56}))
+    jet_rt_free(slot, I64{88}, I64{8})
+}
+
+fn session_drop(session: I64) {
+    slot := sync_load(session + I64{40})
+    // Reverse lexical owners, matching Session::drop/pop_last, not ID guessing
+    // inside an executing frame (in-turn retirement remains explicit).
+    loop slot != (I64{0}) {
+        following :: sync_load(slot)
+        session_slot_drop(slot)
+        slot = following
+    }
+    jet_rt_free(session, I64{48}, I64{8})
+}
+
+#Export(c) fn jet_rt_session_tls_destructor(_closure: I64, table: I64) -> I64 {
+    // TLS clears its value before calling us. A glue callback can reenter the
+    // runtime and create a distinct table, handled by the ordinary TLS passes.
+    current := sync_load(table)
+    ordered := I64{0}
+    loop current != (I64{0}) {
+        following :: sync_load(current)
+        sync_store(current, ordered)
+        ordered = current
+        current = following
+    }
+    // Rust's thread-local BTreeMap destroys session IDs in ascending order.
+    loop ordered != (I64{0}) {
+        following :: sync_load(ordered)
+        session_drop(ordered)
+        ordered = following
+    }
+    jet_rt_free(table, I64{8}, I64{8})
+    I64{0}
+}
+
+#Export(c) fn jet_rt_session_create() -> I64 {
+    id := sync_load(session_counter)
+    loop {
+        // Rust fetch_update refuses u64::MAX before issuing that ID.
+        if (id == I64{-1}) { return I64{0} }
+        observed :: sync_cas(session_counter, id, wrapping(id + I64{1}))
+        if (observed == id) { break }
+        id = observed
+    }
+    table := jet_rt_tls_get(session_key)
+    if (table == I64{0}) {
+        table = jet_rt_alloc(I64{8}, I64{8})
+        sync_store(table, I64{0})
+        jet_rt_tls_set(session_key, table)
+    }
+    session :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(session, I64{48})
+    sync_store(session, sync_load(table))
+    sync_store(session + I64{8}, id)
+    sync_store(table, session)
+    id
+}
+
+#Export(c) fn jet_rt_session_begin(id: I64) -> Bool {
+    session :: session_find(id)
+    if (session == I64{0}) { return false }
+    if (sync_load(session + I64{16}) != I64{0}) { return false }
+    sync_store(session + I64{16}, I64{1})
+    true
+}
+
+#Export(c) fn jet_rt_session_end(id: I64) -> Bool {
+    session :: session_find(id)
+    if (session == I64{0}) { return false }
+    if (sync_load(session + I64{16}) == I64{0}) { return false }
+    link := session + I64{40}
+    slot := sync_load(link)
+    loop slot != (I64{0}) {
+        following :: sync_load(slot)
+        if (sync_load(slot + I64{80}) == I64{0}) {
+            sync_store(link, following)
+            session_slot_drop(slot)
+        } else { link = slot }
+        slot = following
+    }
+    sync_store(session + I64{16}, I64{0})
+    true
+}
+
+#Export(c) fn jet_rt_session_reserve(id: I64, binding: I64, key0: I64, key1: I64, key2: I64, key3: I64, size: I64, align: I64, glue: I64) -> I64 {
+    session :: session_find(id)
+    if (session == I64{0}) { return I64{0} }
+    if (sync_load(session + I64{16}) == I64{0}) { return I64{0} }
+    if (sync_load(session + I64{32}) != I64{0} && !session_unsigned_after(binding, sync_load(session + I64{24}))) {
+        return I64{0}
+    }
+    payload :: alloc_try(size, align)
+    if (payload == I64{0}) { return I64{0} }
+    slot :: jet_rt_alloc(I64{88}, I64{8})
+    sync_store(slot, sync_load(session + I64{40}))
+    sync_store(slot + I64{8}, binding)
+    sync_store(slot + I64{16}, key0)
+    sync_store(slot + I64{24}, key1)
+    sync_store(slot + I64{32}, key2)
+    sync_store(slot + I64{40}, key3)
+    sync_store(slot + I64{48}, size)
+    sync_store(slot + I64{56}, align)
+    sync_store(slot + I64{64}, payload)
+    sync_store(slot + I64{72}, glue)
+    sync_store(slot + I64{80}, I64{0})
+    sync_store(session + I64{24}, binding)
+    sync_store(session + I64{32}, I64{1})
+    sync_store(session + I64{40}, slot)
+    payload
+}
+
+#Export(c) fn jet_rt_session_publish(id: I64, binding: I64) -> Bool {
+    session :: session_find(id)
+    if (session == I64{0}) { return false }
+    if (sync_load(session + I64{16}) == I64{0}) { return false }
+    slot :: session_slot_find(session, binding)
+    if (slot == I64{0}) { return false }
+    if (sync_load(slot + I64{80}) != I64{0}) { return false }
+    sync_store(slot + I64{80}, I64{1})
+    true
+}
+
+fn session_access(id: I64, binding: I64, key0: I64, key1: I64, key2: I64, key3: I64, size: I64, align: I64, move_out: Bool) -> I64 {
+    session :: session_find(id)
+    if (session == I64{0}) { return I64{0} }
+    if (sync_load(session + I64{16}) == I64{0}) { return I64{0} }
+    slot :: session_slot_find(session, binding)
+    if (slot == I64{0}) { return I64{0} }
+    if (sync_load(slot + I64{80}) == I64{0} || sync_load(slot + I64{16}) != key0 || sync_load(slot + I64{24}) != key1 || sync_load(slot + I64{32}) != key2 || sync_load(slot + I64{40}) != key3 || sync_load(slot + I64{48}) != size || sync_load(slot + I64{56}) != align) {
+        return I64{0}
+    }
+    if move_out -> sync_store(slot + I64{80}, I64{0})
+    sync_load(slot + I64{64})
+}
+
+#Export(c) fn jet_rt_session_resolve(id: I64, binding: I64, key0: I64, key1: I64, key2: I64, key3: I64, size: I64, align: I64) -> I64 {
+    session_access(id, binding, key0, key1, key2, key3, size, align, false)
+}
+
+#Export(c) fn jet_rt_session_take(id: I64, binding: I64, key0: I64, key1: I64, key2: I64, key3: I64, size: I64, align: I64) -> I64 {
+    session_access(id, binding, key0, key1, key2, key3, size, align, true)
+}
+
+#Export(c) fn jet_rt_session_retire(id: I64, binding: I64) -> Bool {
+    session :: session_find(id)
+    if (session == I64{0}) { return false }
+    if (sync_load(session + I64{16}) == I64{0}) { return false }
+    link := session + I64{40}
+    slot := sync_load(link)
+    loop slot != (I64{0}) {
+        if (sync_load(slot + I64{8}) == binding) {
+            sync_store(link, sync_load(slot))
+            // Remove before invoking glue, as Rust drops outside RefCell borrow.
+            session_slot_drop(slot)
+            return true
+        }
+        link = slot
+        slot = sync_load(slot)
+    }
+    false
+}
+
+#Export(c) fn jet_rt_session_destroy(id: I64) -> Bool {
+    table :: jet_rt_tls_get(session_key)
+    if (table == I64{0}) { return false }
+    link := table
+    session := sync_load(link)
+    loop session != (I64{0}) {
+        if (sync_load(session + I64{8}) == id) {
+            if (sync_load(session + I64{16}) != I64{0}) { return false }
+            sync_store(link, sync_load(session))
+            session_drop(session)
+            return true
+        }
+        link = session
+        session = sync_load(session)
+    }
+    false
+}

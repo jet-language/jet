@@ -10,13 +10,16 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_native_aot(
+    bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
+) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in allocator test");
@@ -595,9 +598,8 @@ fn run() {
 }
 
 #[test]
-fn default_dev_runs_allocator_constructors_natively() {
+fn allocator_constructors_agree_on_interpreter_and_aot() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::JitBackend;
 
     if !common::have_rustc() {
         return;
@@ -628,37 +630,112 @@ fn run() {
     let path = root.join("main.jet");
     std::fs::write(&path, src).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
-
-    if jet_jit::cranelift_host_supported() {
-        let policy = common::development_policy();
-        common::compile_cranelift_bundle(&bundle, &policy)
-            .expect("allocator constructors must compile natively in resident JIT");
-    }
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
     let policy = common::development_policy();
-    let mut dev = jet_jit::CraneliftBackend::new();
-    jet_jit::reset_jit_trace_for_test();
-    match common::run_cranelift_bundle(&mut dev, &bundle, false, &policy) {
+    match common::run_interpreter_checked_bundle(
+        &bundle,
+        &checked_nominals,
+        false,
+        &policy,
+    ) {
         RunOutcome::Ran { stdout, .. } => {
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "allocator constructors must stay resident-native (no deopt)"
-            );
             assert_eq!(stdout, "1\n2\n3\n4\n5\n");
         }
         RunOutcome::Problems(diags) => {
-            panic!("resident JIT must run allocator constructors: {diags:?}");
+            panic!("interpreter must run allocator constructors: {diags:?}");
         }
     }
 
     let (code, stdout, _) = run_jet("pool_generation", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "1\n2\n3\n4\n5\n");
+}
+
+#[test]
+fn native_allocator_borrows_end_before_reset_and_close() {
+    if !common::have_rustc() {
+        return;
+    }
+    for (name, source, expected) in [
+        (
+            "arena_last_use",
+            include_str!("../Examples/features/memory/arena.jet"),
+            include_str!("../Examples/features/expected/memory/arena.out"),
+        ),
+        (
+            "arena_regions_last_use",
+            include_str!("../Examples/features/memory/arena_regions.jet"),
+            include_str!("../Examples/features/expected/memory/arena_regions.out"),
+        ),
+        (
+            "fixed_last_use",
+            r#"
+use core.mem
+struct Point {
+    x: Int
+    y: Int
+}
+fn run() {
+    bytes := [U8#128]{ uninit }
+    fixed :: mem.Fixed.over(&bytes)
+    value :: fixed.alloc(9)
+    point :: fixed.alloc(Point{x: 3, y: 4})
+    print(value)
+    print(point.x)
+    print(point.y)
+    &fixed.reset()
+    again :: fixed.alloc(10)
+    print(again)
+    &fixed.reset()
+    close(^fixed)
+}
+"#,
+            "9\n3\n4\n10\n",
+        ),
+    ] {
+        let (code, stdout, stderr) = run_jet(name, source);
+        assert_eq!(code, 0, "{name}: {stderr}");
+        assert_eq!(stdout, expected, "{name}");
+    }
+}
+
+#[test]
+fn native_owner_backed_windows_end_before_the_next_borrow() {
+    if !common::have_rustc() {
+        return;
+    }
+    let (code, stdout, stderr) = run_jet(
+        "owner_backed_last_use",
+        include_str!("../Examples/features/memory/owner_backed_views.jet"),
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/memory/owner_backed_views.out")
+    );
+}
+
+#[test]
+fn native_allocator_context_reads_do_not_require_owned_copies() {
+    if !common::have_rustc() {
+        return;
+    }
+    let (code, stdout, stderr) = run_jet(
+        "allocator_context_read",
+        include_str!("../Examples/features/effects/smart_context.jet"),
+    );
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/effects/smart_context.out")
+    );
 }
 
 #[test]
@@ -676,7 +753,7 @@ fn try_allocation_example_reports_exhaustion_as_a_value() {
         std::fs::write(&path, src).unwrap();
         for force_interpreter in [false, true] {
             let outcome =
-                jet::Interpreter::dev_iteration(&path.to_string_lossy(), false, force_interpreter);
+                crate::common::dev_run(&path.to_string_lossy(), false, force_interpreter);
             match outcome {
                 jet::Interpreter::RunOutcome::Ran {
                     stdout, exit_code, ..
@@ -752,14 +829,15 @@ fn program_allocator_fact_selects_counting_wrapper_for_aot() {
             cap: Some(jet::TargetMachine::ByteSize { bytes: 2048 })
         }
     ));
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics.into_iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
-    let rust = emit_native_aot(&bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(rust.contains(
-        "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting(2048)"
+        "static __JET_PROGRAM_ALLOCATOR: jet_program_allocator::JetProgramAllocator = jet_program_allocator::JetProgramAllocator::counting(2048)"
     ));
 }
 
@@ -771,12 +849,13 @@ fn missing_program_allocator_keeps_hidden_system_heap() {
         bundle.program_allocator,
         jet::TargetMachine::AllocatorPolicy::HostedDefault
     );
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics.into_iter()
         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
-    let rust = emit_native_aot(&bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert!(!rust.contains("__JET_PROGRAM_ALLOCATOR"));
 }
 
@@ -894,7 +973,7 @@ fn main() {
 }
 
 #[test]
-fn program_allocator_example_matches_aot_jit_and_interpreter() {
+fn program_allocator_example_matches_aot_default_and_interpreter() {
     if !common::have_rustc() {
         return;
     }
@@ -904,8 +983,7 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
     let expected =
         std::fs::read_to_string("Examples/features/expected/memory/program_allocator.out").unwrap();
     for (name, args) in [
-        ("jit", &["run", "run.jet"][..]),
-        ("interpreter", &["run", "--interpret", "run.jet"][..]),
+        ("default", &["run", "run.jet"][..]),
         ("aot", &["run", "--release", "run.jet"][..]),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
@@ -913,7 +991,7 @@ fn program_allocator_example_matches_aot_jit_and_interpreter() {
             .current_dir(&staged.path)
             .env("NO_COLOR", "1")
             .env(
-                "JET_RUN_CACHE_DIR",
+                "JET_STORE_DIR",
                 temp_dir(&format!("program_allocator_{name}")),
             )
             .output()

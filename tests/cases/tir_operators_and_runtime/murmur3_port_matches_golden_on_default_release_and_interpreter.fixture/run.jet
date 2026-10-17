@@ -1,0 +1,69 @@
+// MurmurHash3_x86_32 port. The C source reads little-endian 32-bit blocks;
+// Reader.read_u32_le states that byte order without a private load helper.
+fn hash(data: [U8], seed: U32) -[]> U32 {
+    #Arithmetic(.Wrapping) {
+        reader :: Reader.over(data)
+        nblocks :: data.len() /% 4
+        h1 := seed
+        c1 :: U32{0xcc9e2d51}
+        c2 :: U32{0x1b873593}
+
+        loop _block in 0..<nblocks {
+            k1 := reader.read_u32_le() ?? panic("Murmur block is truncated")
+            k1 = k1 * c1
+            k1 = k1.rotate_left(15)
+            k1 = k1 * c2
+            h1 ~|= k1
+            h1 = h1.rotate_left(13)
+            h1 = h1 * U32{5}
+            h1 = h1 + U32{0xe6546b64}
+        }
+
+        tail :: nblocks * 4
+        tail_len :: data.len() % 4
+        k1 := U32{0}
+        if tail_len == 3 -> k1 ~|= (U32.from_u8(data[tail + 2]) << 16)
+        if tail_len >= 2 -> k1 ~|= (U32.from_u8(data[tail + 1]) << 8)
+        if tail_len >= 1 -> k1 ~|= U32.from_u8(data[tail])
+        if tail_len != 0 {
+            k1 = k1 * c1
+            k1 = k1.rotate_left(15)
+            k1 = k1 * c2
+            h1 ~|= k1
+        }
+
+        length :: U32.from_int(data.len()) ?? U32{0}
+        h1 ~|= length
+        h1 ~|= h1 >> 16
+        h1 = h1 * U32{0x85ebca6b}
+        h1 ~|= h1 >> 13
+        h1 = h1 * U32{0xc2b2ae35}
+        return h1 ~| (h1 >> 16)
+    }
+}
+
+fn run() {
+    print(hash("".bytes(), U32{0}))
+    print(hash("a".bytes(), U32{0}))
+    print(hash("ab".bytes(), U32{0}))
+    print(hash("abc".bytes(), U32{0}))
+    print(hash("abcd".bytes(), U32{0}))
+    print(hash("hello".bytes(), U32{0}))
+    print(hash("hello world".bytes(), U32{0}))
+    print(hash("hello".bytes(), U32{42}))
+    print(hash([U8]{0, 1, 2, 3, 255}, U32{7}))
+}
+
+#Test("MurmurHash3 x86 32 vectors") {
+    tail_case :: [U8]{0, 1, 2, 3, 255}
+    assert_eq(tail_case.len() % 4, 1)
+    assert_eq(hash("".bytes(), U32{0}), U32{0})
+    assert_eq(hash("a".bytes(), U32{0}), U32{1009084850})
+    assert_eq(hash("ab".bytes(), U32{0}), U32{2613040991})
+    assert_eq(hash("abc".bytes(), U32{0}), U32{3017643002})
+    assert_eq(hash("abcd".bytes(), U32{0}), U32{1139631978})
+    assert_eq(hash("hello".bytes(), U32{0}), U32{613153351})
+    assert_eq(hash("hello world".bytes(), U32{0}), U32{1586663183})
+    assert_eq(hash("hello".bytes(), U32{42}), U32{3806057185})
+    assert_eq(hash(tail_case, U32{7}), U32{3881383995})
+}

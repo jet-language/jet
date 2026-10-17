@@ -100,30 +100,8 @@ impl DBValue {
     }
 }
 
-// D-DBPOLICY1: row reads report on `core.db`'s one failure domain, `DBError`.
-pub fn jet_db_row_value(row: &JetDBRow, key: &String) -> Result<DBValue, DBError> {
-    row.get(key).cloned().ok_or_else(|| DBError {
-        message: format!("missing column `{}`", key),
-    })
-}
-
-pub fn jet_db_row_int(row: &JetDBRow, key: &String) -> Result<i64, DBError> {
-    jet_db_row_value(row, key).and_then(|v| v.int().map_err(|message| DBError { message }))
-}
-
-pub fn jet_db_row_float(row: &JetDBRow, key: &String) -> Result<f64, DBError> {
-    jet_db_row_value(row, key).and_then(|v| v.float().map_err(|message| DBError { message }))
-}
-
-pub fn jet_db_row_text(row: &JetDBRow, key: &String) -> Result<String, DBError> {
-    jet_db_row_value(row, key).and_then(|v| v.text().map_err(|message| DBError { message }))
-}
-
-pub fn jet_db_row_bool(row: &JetDBRow, key: &String) -> Result<bool, DBError> {
-    jet_db_row_value(row, key).and_then(|v| v.bool().map_err(|message| DBError { message }))
-}
 /// D-SHAPE-ONE1=A: project checked DB column names into ordered entries for
-/// the canonical DataTree adapter. The callback is supplied by each typed host
+/// the canonical Dyn adapter. The callback is supplied by each typed host
 /// so this carrier remains usable by AOT, JIT, and interpreter modules without
 /// defining a second decoder trait here.
 pub fn jet_db_row_project<T, F>(
@@ -2423,7 +2401,7 @@ pub trait JetDBBackend {
 
 pub fn jet_db_transaction<B: JetDBBackend>(
     backend: &mut B,
-    label: &String,
+    label: &str,
     steps: &Vec<SQL>,
 ) -> Result<i64, DBError> {
     if !backend.begin() {
@@ -2453,10 +2431,10 @@ pub fn jet_db_transaction<B: JetDBBackend>(
 
 pub fn jet_db_migrate<B: JetDBBackend>(
     backend: &mut B,
-    name: &String,
+    name: &str,
     steps: &Vec<SQL>,
 ) -> Result<i64, DBError> {
-    let request = JetMigrationRequest::direct(name.clone(), steps.clone());
+    let request = JetMigrationRequest::direct(name.to_owned(), steps.clone());
     jet_db_migration_request(backend, &request).map(|outcome| outcome.step_count as i64)
 }
 

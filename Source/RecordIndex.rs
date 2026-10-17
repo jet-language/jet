@@ -6,7 +6,7 @@
 //! are versioned so the index can evolve without teaching each artifact codec
 //! about the other record kinds.
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
@@ -14,16 +14,12 @@ use std::fmt;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::thread;
-use std::time::Duration;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub const RECORD_INDEX_FILE: &str = "index.jsonl";
 pub const RECORD_INDEX_VERSION: i64 = 1;
 pub const RECORD_LINK_VERSION: i64 = 1;
 const RECORD_INDEX_LOCK_FILE: &str = ".index.lock";
-const RECORD_INDEX_LOCK_ATTEMPTS: usize = 2_000;
-const RECORD_INDEX_LOCK_STALE_AFTER: Duration = Duration::from_secs(60);
 pub const DEFAULT_RECORD_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 const MAX_INDEX_LINE_BYTES: usize = 1024 * 1024;
 const MAX_INDEX_BYTES: u64 = 256 * 1024 * 1024;
@@ -389,7 +385,7 @@ impl RecordIndexEntry {
         if line.len() > MAX_INDEX_LINE_BYTES {
             return Err("record index line exceeds the 1 MiB limit".into());
         }
-        let DataTree::Object(fields) = parse_json(line)
+        let Dyn::Object(fields) = parse_json(line)
             .map_err(|_| "record index line is not valid JSON".to_string())?
         else {
             return Err("record index line must be a JSON object".into());
@@ -1363,24 +1359,25 @@ fn links_json(links: &[RecordLink]) -> String {
     format!("[{}]", values.join(","))
 }
 
-fn field<'a>(fields: &'a [(String, DataTree)], name: &str) -> Option<&'a DataTree> {
+fn field<'a>(fields: &'a [(String, Dyn)], name: &str) -> Option<&'a Dyn> {
     fields
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value))
 }
 
-fn string_field(fields: &[(String, DataTree)], name: &str) -> Result<String, String> {
+fn string_field(fields: &[(String, Dyn)], name: &str) -> Result<String, String> {
     match field(fields, name) {
-        Some(DataTree::Text(value) | DataTree::TypedText(value)) => Ok(value.clone()),
+        Some(Dyn::Text(value)) => Ok(value.clone()),
         Some(_) => Err(format!("record index field `{name}` must be a string")),
         None => Err(format!("record index is missing `{name}`")),
     }
 }
 
-fn integer_field(fields: &[(String, DataTree)], name: &str) -> Result<i64, String> {
+fn integer_field(fields: &[(String, Dyn)], name: &str) -> Result<i64, String> {
     match field(fields, name) {
-        Some(DataTree::Int(value)) => Ok(*value),
-        Some(DataTree::Number(value)) => value
+        Some(Dyn::Int(value)) => value.to_i64()
+            .ok_or_else(|| format!("record index field `{name}` must be an integer")),
+        Some(Dyn::Number(value)) => value
             .parse::<i64>()
             .map_err(|_| format!("record index field `{name}` must be an integer")),
         Some(_) => Err(format!("record index field `{name}` must be an integer")),
@@ -1388,24 +1385,24 @@ fn integer_field(fields: &[(String, DataTree)], name: &str) -> Result<i64, Strin
     }
 }
 
-fn unsigned_field(fields: &[(String, DataTree)], name: &str) -> Result<u64, String> {
+fn unsigned_field(fields: &[(String, Dyn)], name: &str) -> Result<u64, String> {
     let value = integer_field(fields, name)?;
     u64::try_from(value).map_err(|_| format!("record index field `{name}` must be non-negative"))
 }
 
-fn bool_field(fields: &[(String, DataTree)], name: &str) -> Result<bool, String> {
+fn bool_field(fields: &[(String, Dyn)], name: &str) -> Result<bool, String> {
     match field(fields, name) {
-        Some(DataTree::Bool(value)) => Ok(*value),
+        Some(Dyn::Bool(value)) => Ok(*value),
         Some(_) => Err(format!("record index field `{name}` must be a boolean")),
         None => Err(format!("record index is missing `{name}`")),
     }
 }
 
 fn links_field(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     name: &str,
 ) -> Result<Vec<RecordLink>, String> {
-    let Some(DataTree::Array(values)) = field(fields, name) else {
+    let Some(Dyn::Array(values)) = field(fields, name) else {
         return Err(format!("record index field `{name}` must be an array"));
     };
     if values.len() > MAX_LINKS_PER_ENTRY {
@@ -1413,7 +1410,7 @@ fn links_field(
     }
     let mut links = Vec::with_capacity(values.len());
     for value in values {
-        let DataTree::Object(fields) = value else {
+        let Dyn::Object(fields) = value else {
             return Err(format!("record index {name} link must be an object"));
 
         };
@@ -1432,57 +1429,33 @@ fn links_field(
     Ok(normalized)
 }
 
+/// Exclusive writer lock on the record index: a kernel advisory lock on the
+/// persistent `.index.lock` file. Writers wait for each other without a time
+/// limit, and the kernel releases the lock when its holder exits or dies, so
+/// no lock can go stale. Dropping the handle releases it; the file stays.
 struct IndexWriteLock {
-    path: PathBuf,
-}
-
-impl Drop for IndexWriteLock {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.path);
-    }
+    _file: fs::File,
 }
 
 fn acquire_index_lock(root: &Path) -> Result<IndexWriteLock, String> {
     secure_create_dir(root)?;
     let path = root.join(RECORD_INDEX_LOCK_FILE);
-    for _ in 0..RECORD_INDEX_LOCK_ATTEMPTS {
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    if let Err(error) = file.set_permissions(fs::Permissions::from_mode(0o600)) {
-                        let _ = fs::remove_file(&path);
-                        return Err(format!("could not secure record index lock: {error}"));
-                    }
-                }
-                if let Err(error) = file.write_all(std::process::id().to_string().as_bytes()) {
-                    let _ = fs::remove_file(&path);
-                    return Err(format!("could not write record index lock: {error}"));
-                }
-                return Ok(IndexWriteLock { path });
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
-                if let Ok(metadata) = fs::symlink_metadata(&path) {
-                    if !metadata.file_type().is_symlink()
-                        && metadata.is_file()
-                        && metadata
-                            .modified()
-                            .ok()
-                            .and_then(|modified| modified.elapsed().ok())
-                            .is_some_and(|age| age > RECORD_INDEX_LOCK_STALE_AFTER)
-                    {
-                        let _ = fs::remove_file(&path);
-                    }
-                }
-                thread::sleep(Duration::from_millis(5));
-            }
-            Err(error) => {
-                return Err(format!("could not create record index lock: {error}"));
-            }
-        }
+    if fs::symlink_metadata(&path).is_ok_and(|metadata| !metadata.is_file()) {
+        return Err(format!("record index lock is not a regular file: {}", path.display()));
     }
-    Err("timed out waiting for record index lock".into())
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let file = options
+        .open(&path)
+        .map_err(|error| format!("could not open record index lock: {error}"))?;
+    file.lock()
+        .map_err(|error| format!("could not lock record index: {error}"))?;
+    Ok(IndexWriteLock { _file: file })
 }
 
 fn secure_create_dir(path: &Path) -> Result<(), String> {
@@ -1723,6 +1696,28 @@ mod tests {
                 .find(RecordKind::Receipt, &format!("receipt-{worker}"), true)
                 .is_some());
         }
+        let _ = fs::remove_dir_all(project);
+    }
+
+    #[test]
+    fn lock_file_left_by_a_dead_writer_does_not_block_writers() {
+        let (project, records) = temp_project("leftover-lock");
+        fs::write(records.join(RECORD_INDEX_LOCK_FILE), b"4242").unwrap();
+        let mut index = RecordIndex::new(records.clone());
+        index
+            .update_and_store(entry(
+                RecordKind::Receipt,
+                "after-crash",
+                ".jet/receipts/after-crash",
+                1,
+                1,
+                false,
+            ))
+            .unwrap();
+        assert!(RecordIndex::load(records)
+            .unwrap()
+            .find(RecordKind::Receipt, "after-crash", true)
+            .is_some());
         let _ = fs::remove_dir_all(project);
     }
 

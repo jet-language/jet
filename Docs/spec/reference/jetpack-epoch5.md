@@ -20,6 +20,15 @@ objects, process state, or a lock only at the operation that owns that write.
 Read-only inspection does not realize packages, run jobs, start services, or
 apply managed files.
 
+Trust-store grants check `trust_grant` before opening or creating the store.
+Workspace lock publication checks `force_pin` for `.Force` overlays and
+`dependency_grant` for nonempty build grants before acquiring its process lock.
+Invocation choices use their own audited gate: build flags, session flags, and
+force pins; `--allow` also checks `dependency_grant`. An organization or checked
+Package `.Forbid` returns E3415 with the gate, written site, and policy origin,
+without changing the store or publishing the lock. `.GateOnly` does not deny an
+explicit writer, and a one-shot `--trust` never persists a grant.
+
 ## Package roots and Config facts
 
 `package.jet` is the canonical package manifest. A migration-era `pkg.jet` can
@@ -56,6 +65,14 @@ symlinks, duplicate physical directories, duplicate Package names, and nested
 member roots. The package root owns membership even when a member is discovered
 from a `find` expression.
 
+The Jet authority resolver owns one pinned root directory. Checked root
+snapshots borrow that pin; descendant snapshots own only their descriptor-relative
+opened directory. Config composition and member discovery share the resolver
+and checked package directory instead of copying handles or reopening paths.
+Overlay staging retains those descendant owners through validation, atomic
+publication, and rollback. Commit notifications borrow only the committed path,
+never the owning stage; a failed rollback is reported alongside the commit error.
+
 ### Import boundaries
 
 The declaring Package can narrow its own module edges with `boundaries`:
@@ -80,6 +97,24 @@ resolution.
 Config files. Comment placement is fail-closed until that formatter owns it;
 Jet does not report a comment-bearing file clean after silently leaving it
 unchanged. Ordinary Jet source uses the compiler formatter.
+
+### Manifestless script dependencies
+
+A script without a Package carrier or `package.jet` may declare a top-level
+single-package import such as `use textkit#1.4.2`. The native CLI admits its
+sources from `<script-directory>/.jet/inline-deps/textkit/<version>/`, then
+`JET_INLINE_DEPS_FIXTURES/textkit/<version>/` when that override is set. A local
+package is authoritative even if none of its versions matches; admission never
+fetches a registry package or runs Cargo or another compiler.
+
+One- and two-component numeric selectors choose the highest matching
+three-component version. Exact three-component selectors are pinned; looser
+selectors retain the import-span L0203 teaching diagnostic. Invalid selectors,
+unknown packages, unmatched versions, and hostile source trees produce E1253.
+Root ancestors and source files must remain no-follow authorized objects.
+The imported package alias binds to the opened root in the driver snapshot,
+without fabricating a manifest. The selector, selected version, and full source
+tree content hash participate in receipt and package-check identities.
 
 ## Sources, providers, and the lock
 

@@ -1,5 +1,5 @@
 // D-SQL-SURFACE1=C: one small, std-only query kernel shared by the CSV file
-// door and the in-memory list door. The row stays `DataTree` here; typed
+// door and the in-memory list door. The row stays `Dyn` here; typed
 // wrappers preserve source row identity for wildcard/filter-only queries and
 // materialize explicit projections through the shared SQL result kernel.
 //
@@ -12,6 +12,8 @@ mod jet_sql_query {
 }
 
 type JetAnalyticsQuery = jet_sql_query::JetSqlQuery;
+include!("../../Core/CsvQueryRead.rs");
+use jet_sql_query::jet_data_query_validate_fields_raw;
 
 fn jet_analytics_query_error(message: impl Into<String>) -> Vec<jet_std::FieldError> {
     jet_std::FieldError::one(message.into())
@@ -22,51 +24,60 @@ fn jet_analytics_query_error(message: impl Into<String>) -> Vec<jet_std::FieldEr
 const JET_DATA_QUERY_MAX_BYTES: u64 = 512 * 1024 * 1024;
 
 pub fn jet_data_query_read(path: &String) -> Result<String, Vec<jet_std::FieldError>> {
-    use std::io::Read;
-
-    let file = std::fs::File::open(path)
+    let sample = jet_data_query_read_bounded(path, JET_DATA_QUERY_MAX_BYTES as i64)
         .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))?;
-    let size = file
-        .metadata()
-        .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))?
-        .len();
-    if size > JET_DATA_QUERY_MAX_BYTES {
+    if sample.size > JET_DATA_QUERY_MAX_BYTES {
         return Err(jet_analytics_query_error(format!(
             "could not read `{path}`: input exceeds the {}-byte query bound",
             JET_DATA_QUERY_MAX_BYTES
         )));
     }
-    let mut bytes = Vec::new();
-    file.take(JET_DATA_QUERY_MAX_BYTES.saturating_add(1))
-        .read_to_end(&mut bytes)
-        .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))?;
-    if bytes.len() as u64 > JET_DATA_QUERY_MAX_BYTES {
+    if sample.bytes.len() as u64 > JET_DATA_QUERY_MAX_BYTES {
         return Err(jet_analytics_query_error(format!(
             "could not read `{path}`: input grew beyond the {}-byte query bound",
             JET_DATA_QUERY_MAX_BYTES
         )));
     }
-    String::from_utf8(bytes)
+    String::from_utf8(sample.bytes)
         .map_err(|error| jet_analytics_query_error(format!("could not read `{path}`: {error}")))
 }
 
 /// Validate a CSV header against the canonical SQL row-field traversal.
 pub fn jet_data_query_validate_fields(
     fields: &[String],
-    sql: &String,
+    sql: &str,
 ) -> Result<(), Vec<jet_std::FieldError>> {
-    let query = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
-    jet_sql_query::validate_sql_query_schema(
-        &query,
-        |field| fields.iter().any(|known| known == field),
-        "analytics query",
-    )
-    .map_err(jet_analytics_query_error)
+    jet_data_query_validate_fields_raw(fields, sql).map_err(jet_analytics_query_error)
 }
+
 
 
 fn jet_analytics_query_spec(sql: &str) -> Result<JetAnalyticsQuery, String> {
     jet_sql_query::parse_sql_query(sql)
+}
+
+/// Bind the checked carrier after parsing, so a value cannot become query
+/// syntax. The bounded kernel has one scalar WHERE slot.
+fn jet_analytics_checked_query_spec(sql: &jet_std::SQL) -> Result<JetAnalyticsQuery, String> {
+    let mut query = jet_analytics_query_spec(&sql.0)?;
+    match (query.filter.as_mut(), sql.1.as_slice()) {
+        (Some((_, _, literal)), [value]) if literal.as_str() == "?" => {
+            *literal = match value {
+                jet_std::DBValue::Null => "null".to_string(),
+                jet_std::DBValue::Int(value) => value.to_string(),
+                jet_std::DBValue::Float(value) => value.to_string(),
+                jet_std::DBValue::Bool(value) => value.to_string(),
+                jet_std::DBValue::Text(value) => format!("'{}'", value.replace('\'', "''")),
+                jet_std::DBValue::Blob(_) => return Err("analytics query WHERE requires a scalar binding".to_string()),
+            };
+        }
+        (Some((_, _, literal)), []) if literal.as_str() == "?" => {
+            return Err("analytics query WHERE binding is missing".to_string());
+        }
+        (_, []) => {}
+        _ => return Err("analytics query bindings do not match its WHERE value".to_string()),
+    }
+    Ok(query)
 }
 fn jet_analytics_type_id(type_name: &str) -> JetTableTypeId {
     match type_name {
@@ -80,15 +91,15 @@ fn jet_analytics_type_id(type_name: &str) -> JetTableTypeId {
 }
 
 /// Query planning uses the same all-row schema inference as loader snapshots.
-fn jet_analytics_schema(rows: &[jet_std::DataTree]) -> JetTableSchema {
-    let tree = jet_std::DataTree::Array(rows.to_vec());
+fn jet_analytics_schema(rows: &[jet_std::Dyn]) -> JetTableSchema {
+    let tree = jet_std::Dyn::Array(rows.to_vec());
     let inferred = jet_std::DataSchema::infer(&tree, jet_std::DataFormat::JSON);
     let columns = inferred
         .columns
         .into_iter()
         .map(|column| JetTableColumn::new(column.name, jet_analytics_type_id(&column.type_name)))
         .collect();
-    JetTableSchema::new(JetTableTypeId::new("DataTree"), columns)
+    JetTableSchema::new(JetTableTypeId::new("Dyn"), columns)
 }
 
 fn jet_analytics_literal_type(value: &str) -> JetTableTypeId {
@@ -176,7 +187,7 @@ fn jet_analytics_select_columns(
 
 
 fn jet_analytics_plan(
-    rows: &[jet_std::DataTree],
+    rows: &[jet_std::Dyn],
     spec: &JetAnalyticsQuery,
 ) -> Result<JetTablePlan, String> {
     let schema = jet_analytics_schema(rows);
@@ -280,56 +291,56 @@ fn jet_analytics_plan(
 }
 
 
-fn jet_analytics_cell_text(cell: &jet_std::DataTree) -> String {
+fn jet_analytics_cell_text(cell: &jet_std::Dyn) -> String {
     match cell {
-        jet_std::DataTree::Text(value) => value.clone(),
-        jet_std::DataTree::Int(value) => value.to_string(),
-        jet_std::DataTree::Float(value) => value.to_string(),
-        jet_std::DataTree::Bool(value) => value.to_string(),
-        jet_std::DataTree::Null => String::new(),
-        other => jet_std::render_datatree_json(other, false, 0),
+        jet_std::Dyn::Text(value) => value.clone(),
+        jet_std::Dyn::Int(value) => value.to_string(),
+        jet_std::Dyn::Float(value) => value.to_string(),
+        jet_std::Dyn::Bool(value) => value.to_string(),
+        jet_std::Dyn::Null => String::new(),
+        other => jet_std::render_dyn_json(other, false, 0),
     }
 }
-fn jet_analytics_sql_value(value: &jet_std::DataTree) -> jet_sql_query::JetSqlValue {
+fn jet_analytics_sql_value(value: &jet_std::Dyn) -> jet_sql_query::JetSqlValue {
     match value {
-        jet_std::DataTree::Null => jet_sql_query::JetSqlValue::Null,
-        jet_std::DataTree::Bool(value) => jet_sql_query::JetSqlValue::Bool(*value),
-        jet_std::DataTree::Int(value) => jet_sql_query::JetSqlValue::Int(*value),
-        jet_std::DataTree::Float(value) => jet_sql_query::JetSqlValue::Float(*value),
-        jet_std::DataTree::Number(value) => jet_sql_query::JetSqlValue::literal(value),
-        jet_std::DataTree::TypedText(value) | jet_std::DataTree::Text(value) => {
+        jet_std::Dyn::Null => jet_sql_query::JetSqlValue::Null,
+        jet_std::Dyn::Bool(value) => jet_sql_query::JetSqlValue::Bool(*value),
+        jet_std::Dyn::Int(value) => jet_sql_query::JetSqlValue::literal(&value.to_string_rep()),
+        jet_std::Dyn::Float(value) => jet_sql_query::JetSqlValue::Float(*value),
+        jet_std::Dyn::Number(value) => jet_sql_query::JetSqlValue::literal(value),
+        jet_std::Dyn::Text(value) => {
             jet_sql_query::JetSqlValue::Text(value.clone())
         }
-        other => jet_sql_query::JetSqlValue::Text(jet_std::render_datatree_json(other, false, 0)),
+        other => jet_sql_query::JetSqlValue::Text(jet_std::render_dyn_json(other, false, 0)),
     }
 }
 
-fn jet_analytics_sql_tree(value: jet_sql_query::JetSqlValue) -> jet_std::DataTree {
+fn jet_analytics_sql_tree(value: jet_sql_query::JetSqlValue) -> jet_std::Dyn {
     match value {
-        jet_sql_query::JetSqlValue::Null => jet_std::DataTree::Null,
-        jet_sql_query::JetSqlValue::Bool(value) => jet_std::DataTree::Bool(value),
-        jet_sql_query::JetSqlValue::Int(value) => jet_std::DataTree::Int(value),
-        jet_sql_query::JetSqlValue::Float(value) => jet_std::DataTree::Float(value),
-        jet_sql_query::JetSqlValue::Text(value) => jet_std::DataTree::Text(value),
+        jet_sql_query::JetSqlValue::Null => jet_std::Dyn::Null,
+        jet_sql_query::JetSqlValue::Bool(value) => jet_std::Dyn::Bool(value),
+        jet_sql_query::JetSqlValue::Int(value) => jet_std::Dyn::Int((value).into()),
+        jet_sql_query::JetSqlValue::Float(value) => jet_std::Dyn::Float(value),
+        jet_sql_query::JetSqlValue::Text(value) => jet_std::Dyn::Text(value),
     }
 }
 
 fn jet_data_query_execute_trees(
-    rows: &[jet_std::DataTree],
+    rows: &[jet_std::Dyn],
     spec: &JetAnalyticsQuery,
-) -> Result<Vec<jet_std::DataTree>, String> {
+) -> Result<Vec<jet_std::Dyn>, String> {
     let fields = jet_analytics_schema(rows)
         .columns
         .into_iter()
         .map(|column| column.name)
         .collect::<Vec<_>>();
     let result = jet_sql_query::execute_sql_rows(&fields, rows.len(), spec, |index, field| {
-        jet_std::datatree_get(&rows[index], field).map(jet_analytics_sql_value)
+        jet_std::dyn_get(&rows[index], field).map(jet_analytics_sql_value)
     })?;
     Ok(result
         .into_iter()
         .map(|row| {
-            jet_std::DataTree::Object(
+            jet_std::Dyn::Object(
                 row.fields
                     .into_iter()
                     .map(|(name, value)| (name, jet_analytics_sql_tree(value)))
@@ -348,11 +359,18 @@ fn jet_data_query_execute_trees(
 /// represented as positions in a typed `T`; those callers use
 /// `jet_data_query_trees`, which materializes the same shared result rows.
 pub fn jet_data_query_indices(
-    rows: &[jet_std::DataTree],
+    rows: &[jet_std::Dyn],
     sql: &String,
 ) -> Result<Vec<usize>, Vec<jet_std::FieldError>> {
     let spec = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
-    let plan = jet_analytics_plan(rows, &spec).map_err(jet_analytics_query_error)?;
+    jet_data_query_indices_spec(rows, &spec)
+}
+
+fn jet_data_query_indices_spec(
+    rows: &[jet_std::Dyn],
+    spec: &JetAnalyticsQuery,
+) -> Result<Vec<usize>, Vec<jet_std::FieldError>> {
+    let plan = jet_analytics_plan(rows, spec).map_err(jet_analytics_query_error)?;
     plan
         .inspect()
         .map_err(|error| jet_analytics_query_error(format!(
@@ -360,22 +378,22 @@ pub fn jet_data_query_indices(
         )))?;
     if spec.needs_projection_execution() {
         return Err(jet_analytics_query_error(
-            "SQL projection/grouping changes the row shape; use the DataTree query result",
+            "SQL projection/grouping changes the row shape; use the Dyn query result",
         ));
     }
-    let selected = jet_sql_query::select_sql_indices(rows.len(), &spec, |index, field| {
-        jet_std::datatree_get(&rows[index], field).map(jet_analytics_cell_text)
+    let selected = jet_sql_query::select_sql_indices(rows.len(), spec, |index, field| {
+        jet_std::dyn_get(&rows[index], field).map(jet_analytics_cell_text)
     });
     Ok(selected)
 }
 
 /// Shared non-generic Prelude entry used by resident adapters. Explicit
-/// projections and grouped aggregates become ordered DataTree objects; the
+/// projections and grouped aggregates become ordered Dyn objects; the
 /// filter/order/limit-only path preserves source rows and source identity.
 pub fn jet_data_query_trees(
-    rows: &Vec<jet_std::DataTree>,
+    rows: &Vec<jet_std::Dyn>,
     sql: &String,
-) -> Result<Vec<jet_std::DataTree>, Vec<jet_std::FieldError>> {
+) -> Result<Vec<jet_std::Dyn>, Vec<jet_std::FieldError>> {
     let spec = jet_analytics_query_spec(sql).map_err(jet_analytics_query_error)?;
     if spec.needs_projection_execution() {
         let plan = jet_analytics_plan(rows, &spec).map_err(jet_analytics_query_error)?;

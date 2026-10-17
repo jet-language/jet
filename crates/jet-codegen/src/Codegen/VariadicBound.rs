@@ -37,7 +37,7 @@ pub(crate) fn lower_variadic_bound_call(
     env: &mut crate::Codegen::TIR::LowerEnv,
 ) -> crate::Codegen::TIR::TExpr {
     use crate::Codegen::TIR::{call_return_type, lower_one_call_arg, TExpr, TExprKind};
-    let sig = cx.sigs.get(&call.name).cloned();
+    let sig = cx.fact_sigs(&call.name).cloned();
     let tail_convention = sig
         .as_ref()
         .and_then(|params| params.get(fixed))
@@ -111,6 +111,7 @@ pub(crate) fn build_variadic_bound_func(f: &Func, bounds: &[String], arity: usiz
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
             public_label: None,
             zone: crate::AST::ParamZone::Either,
         });

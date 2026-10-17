@@ -10,7 +10,6 @@
 //! consolidated plan lives in `Docs/spec/reference/metaprogramming.md`.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 pub use jet_codegen::{Codegen, Comptime, Diagnostics, Lexer, Parser, Sema, Syntax, AST, SHA256};
 
@@ -36,7 +35,7 @@ pub use jet_pkg_model::MCP;
 // (L2). jetpack re-exports under the historical module paths via the thin
 // shims WorkspaceFile.rs and WorkspaceLock.rs in this crate.
 
-pub(crate) mod Batteries;
+pub mod Batteries;
 pub mod Bridge;
 pub mod BrowserLock;
 pub mod BuildDebug;

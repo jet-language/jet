@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const FEATURES = join(ROOT, "Examples/features");
 const EXPECTED = join(FEATURES, "expected");
-const JET = join(ROOT, "target/debug/jet");
+const JET = process.env.JET;
 const SCRATCH_BASE = process.env.JET_TEST_SCRATCH_DIR
   ?? (process.env.HOME ? join(process.env.HOME, ".cache/jet-dev/scratch") : null);
 const EXPECTED_FAIL_EXITS = new Set([1, 70]);
@@ -313,6 +313,7 @@ async function main() {
   const entries = collectFeatureExamples().filter((entry) => !options.filters.length || options.filters.some((needle) => entry.shown.includes(needle) || entry.stem.includes(needle)));
   if (!entries.length) throw new Error(`no examples matched: ${options.filters.join(" ")}`);
   if (options.list) { for (const entry of entries) console.log(entry.shown); console.log(`${entries.length} examples`); return; }
+  if (!JET) throw new Error("JET must name the admitted compiler binary");
   if (!SCRATCH_BASE) throw new Error("HOME is required for feature-example scratch");
   const requestedBase = resolve(SCRATCH_BASE);
   mkdirSync(requestedBase, { recursive: true });
@@ -340,7 +341,7 @@ async function main() {
     });
     const counts = summarize(results);
     if (options.json) {
-      console.log(JSON.stringify({ counts, results: results.map(({ stem, shown, status, detail }) => ({ stem, shown, status, detail })) }, null, 2));
+      console.log(JSON.stringify({ counts, results }, null, 2));
     } else {
       for (const result of results) console.log(`${result.status.padEnd(8)} ${result.shown}${result.detail ? `  ${result.detail}` : ""}`);
       console.log(`summary: ${results.length} examples  passed ${counts.passed}  failed ${counts.failed}  no-match ${counts["no-match"]}  timeout ${counts.timeout}  skipped ${counts.skipped}`);

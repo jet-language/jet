@@ -261,7 +261,7 @@ Each item gives the source evidence, Jet's state, and the disposition.
   function be called as `f(x)` and `x.f()`, and the formatter keeps both
   (D-CALLDUAL1=E; probe J11), which is exactly Odin's dialect. Ballot
   **D-CALL-ONE1** (#4170) recommends retiring `#Root` in favor of
-  import-scoped extensions (`pub fn Int.twice(self)` outside Int's module,
+  import-scoped extensions (`fn Int.twice(self)` outside Int's module,
   Kotlin style). That leaves one way to declare a dot call and one spelling
   per function. Operators
   stay as ratified (D-OPDEF1, D-OPMIX1, `Numeric`), matching your view that a

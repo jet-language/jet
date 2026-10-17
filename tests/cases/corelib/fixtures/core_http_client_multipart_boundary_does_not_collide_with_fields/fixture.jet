@@ -1,0 +1,82 @@
+use core.net as net
+use core.http.client as client
+use core.files as files
+use core.text.parse as txt
+
+fn multipart_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+fn multipart_length(headers: String) -> Int {
+    loop line in headers.lines() {
+        pair :: txt.split_once(line, ":")
+        if pair.found && txt.lower(pair.head) == "content-length" {
+            return Int.parse(pair.tail.trim()) ?? panic("content length")
+        }
+    }
+    panic("Content-Length missing")
+}
+fn multipart_test() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic("address"))
+    peer :: task {
+        stream :: net.tcp_accept(listener) ?? panic("accept")
+        net.set_read_timeout(stream, 5000) ?? panic("timeout")
+        request := [U8]{}
+        loop {
+            chunk :: net.tcp_read_bytes(stream, 4096) ?? panic("read request")
+            assert(chunk.len() != 0, "multipart request ended before body")
+            loop b in chunk -> &request.push(b)
+            shown :: String.from_bytes(request) ?? panic("request UTF-8")
+            header_end :: txt.find(shown, multipart_crlf() + multipart_crlf())
+            if header_end < 0 -> next
+            headers :: shown.slice(0, header_end).copy()
+            content_length :: multipart_length(headers)
+            if request.len() >= header_end + 4 + content_length -> break
+        }
+        response :: files.read_bytes("response.bin") ?? panic("response")
+        net.tcp_write_all_bytes(stream, response) ?? panic("write response")
+        net.tcp_close(stream) ?? panic("drop peer")
+        String.from_bytes(request) ?? panic("request UTF-8")
+    }
+    long_candidate :: files.read("long-candidate.txt") ?? panic("long candidate")
+    candidates :: files.read("candidates.txt") ?? panic("candidates")
+    crlf :: multipart_crlf()
+    raw_name :: "safe\"{crlf}X-Extra: yes{crlf}{long_candidate}{candidates}"
+    field_value :: "before{crlf}--{long_candidate}{crlf}{candidates}{crlf}after"
+    response :: client.request("POST", "http://{address}/").multipart_text(raw_name, field_value).send() ?? panic("multipart")
+    bytes :: response.body().bytes(8) ?? panic("response body")
+    assert(response.status() == 200 && bytes == "ok".bytes(), "original status/body")
+    request :: peer.join() ?? panic("peer failed")
+    request_parts :: txt.split_once(request, crlf + crlf)
+    assert(request_parts.found, "headers/body separator")
+    headers :: request_parts.head
+    body :: request_parts.tail
+    boundary := ""
+    prefix :: "content-type: multipart/form-data; boundary="
+    loop line in headers.lines() {
+        if line.starts_with(prefix) {
+            boundary = line.slice(prefix.bytes().len(), line.bytes().len()).copy()
+            break
+        }
+    }
+    content_length :: multipart_length(headers)
+    assert(boundary.bytes().len() >= 1 && boundary.bytes().len() <= 70, "original boundary byte-length range")
+    loop byte in boundary.bytes() {
+        n :: Int.from_u8(byte)
+        assert((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45, "original ASCII-alphanumeric-or-hyphen predicate")
+    }
+    assert(boundary == "jet-http-boundary-000000000000012c", "original exact first collision-free boundary")
+    assert(!raw_name.contains(boundary), "multipart name collision")
+    assert(!field_value.contains(boundary), "multipart value collision")
+    marker :: "--{boundary}{crlf}"
+    assert(body.starts_with(marker), "original body prefix")
+    stripped :: body.slice(marker.bytes().len(), body.bytes().len()).copy()
+    part :: txt.split_once(stripped, crlf + crlf)
+    assert(part.found, "original part separator")
+    field_name :: "safe%22%0D%0AX-Extra: yes%0D%0A{long_candidate}{candidates}"
+    assert(part.head == "Content-Disposition: form-data; name=\"{field_name}\"", "original exact escaped part headers")
+    assert(part.head.lines().to_list().len() == 1, "original single header line")
+    assert(content_length == body.bytes().len(), "original content length matches body bytes")
+    expected :: "--{boundary}{crlf}Content-Disposition: form-data; name=\"{field_name}\"{crlf}{crlf}{field_value}{crlf}--{boundary}--{crlf}"
+    assert(body == expected, "original exact multipart body")
+    assert(txt.split(body, "--{boundary}").len() - 1 == 2, "original delimiter substring count")
+}
+#Test("core_http_client_multipart_boundary_does_not_collide_with_fields") { multipart_test() }

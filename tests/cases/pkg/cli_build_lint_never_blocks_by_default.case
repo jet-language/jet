@@ -1,0 +1,11 @@
+# Port of tests/pkg.rs:2391-2435; original deliberately did NOT assert build exit.
+# PENDING-GRAMMAR(batch-four): mkdir. No retired rustc failure is suppressed/blessed.
+fixture: fixtures/minimal
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/sources/invoice.txt run.jet
+step: jet build run.jet
+exit: any # original predicate: exit wasn't asserted; effects summary proves lint gate passed
+stderr: ~ "L0504" # original predicate
+stderr: ~ "effects:" # original predicate
+stderr: !~ "E1293" # original predicate

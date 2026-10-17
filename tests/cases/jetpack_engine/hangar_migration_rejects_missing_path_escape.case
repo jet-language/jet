@@ -1,0 +1,18 @@
+# HAND-PORT tests/jetpack_engine.rs:234-258 hangar_migration_rejects_missing_path_escape
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+env: NO_COLOR=1
+requires: os:unix
+mkdir: data
+mkdir: legacy/jet/hangar
+symlink: ../../missing-target legacy/jet/hangar/escape
+step: jet hangar path --no-color
+unset: JETPACK_ROOT
+unset: LOCALAPPDATA
+env: XDG_STATE_HOME={work}/legacy
+env: XDG_DATA_HOME={work}/data
+exit: 2
+stderr: ~ "E2604" # original contains predicate
+stderr: ~ "escapes its migration root" # original contains predicate
+file: data/jet/hangar absent
+file: data/jet/.hangar-migration.partial is-dir
+

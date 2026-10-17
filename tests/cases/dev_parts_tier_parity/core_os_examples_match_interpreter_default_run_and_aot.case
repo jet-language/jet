@@ -1,0 +1,27 @@
+# Port of tests/dev_parts/tier_parity.rs:470-481; runtime PENDING-SAME-HEAD.
+fixture: core_os_examples_match_interpreter_default_run_and_aot.fixture
+# Forced interpreter RunOutcome baseline classifier2389-2414: compiler-lib, no CLI error-code approximation.
+step: jet check {root}/Examples/features/io/os_facts.jet
+exit: 0
+step: jet build {root}/Examples/features/io/os_facts.jet
+exit: 0
+step aot0: built
+exit: any # original compares native/default exits, not zero
+stdout: = os_facts.out
+step: jet run {root}/Examples/features/io/os_facts.jet
+exit: == aot0
+stdout: == aot0
+stderr: == aot0
+step: jet check {root}/Examples/features/io/os_process_control.jet
+exit: 0
+step: jet build {root}/Examples/features/io/os_process_control.jet
+exit: 0
+step aot1: built
+limit: time=120
+exit: any # original compares native/default exits, not zero
+stdout: = os_process_control.out
+step: jet run {root}/Examples/features/io/os_process_control.jet
+exit: == aot1
+stdout: == aot1
+stderr: == aot1
+

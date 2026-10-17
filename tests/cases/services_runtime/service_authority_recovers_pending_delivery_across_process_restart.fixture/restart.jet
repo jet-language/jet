@@ -1,0 +1,49 @@
+
+use core.sys as env
+use core.service as services
+use core.time as time
+
+fn orders_worker() {}
+
+fn receipt_id(receipt: ^Delivery) -> Delivery {
+    return receipt
+}
+
+fn receipt_kind(receipt: ^Delivery) -> String {
+    state :: receipt.status() ?? panic("status")
+    if state == {
+        .Pending -> { return "pending" }
+        .Accepted -> { return "accepted" }
+        .Delivering -> { return "delivering" }
+        .Delivered -> { return "delivered" }
+        .DeadLettered -> { return "dead" }
+        .Cancelled -> { return "cancelled" }
+    }
+    return "unknown"
+}
+
+fn run() {
+    store :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    retention :: Duration.seconds(86400) ?? panic("retention")
+    runtime := services.runtime(store, retention: retention)
+    tree := services.tree("restart-orders")
+    endpoint :: tree.worker("orders", orders_worker, capacity: 2) ?? panic("worker")
+    tree.group("orders-supervisor", ["orders"]) ?? panic("group")
+    tree.start() ?? panic("start")
+    if phase == "send" {
+        receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("send")
+        receipt.status() ?? panic("send status")
+        print("accepted")
+    } else {
+        tree.fail_worker(endpoint) ?? panic("restart")
+        print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
+        receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("recover")
+        retry :: runtime.retry(receipt) ?? panic("retry")
+        retry_copy :: retry.copy()
+        print(receipt_kind(^retry_copy))
+        message :: tree.receive(endpoint) ?? panic("receive")
+        print(message)
+        runtime.commit(retry) ?? panic("commit")
+    }
+}

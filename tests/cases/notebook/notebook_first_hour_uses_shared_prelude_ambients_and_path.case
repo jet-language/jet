@@ -1,0 +1,14 @@
+# tests/notebook.rs::notebook_first_hour_uses_shared_prelude_ambients_and_path
+# Public protocol projection; exact multiline cell source is carried losslessly by ipynb import.
+# Direct Kernel::open/document_path identity remains PENDING-SEAM(notebook-lib), original retained verbatim in scratch/TestSlice1d/notebook-original.rs.
+# PENDING-SAME-HEAD, runtime UNRUN.
+env: NO_COLOR=1
+step: jet notebook journey.jetnb --protocol
+stdin: notebook_first_hour_uses_shared_prelude_ambients_and_path.stdin
+exit: 0
+json: stdout ndjson $[2].status = "ok"
+json: stdout ndjson $[2].body ^= "status=ok;" # original result.ok(), not an unrelated protocol response
+json: stdout ndjson $[3].body ~ "ambient-eprint" # original bundle.text_plain
+json: stdout ndjson $[3].body ~ "Ada" # original bundle.text_plain
+file: notes.txt = "Ada"
+json: file journey.jetnb doc $.cells[0].source = "#FX(authority: IO, FS) {\n    eprint(\"ambient-eprint\")\n    name :: input(\"name: \") ?? \"fallback\"\n    assert(name == \"Ada\")\n    write_file(\"notes.txt\", name) ?? panic(\"write failed\")\n    assert(file_exists(\"notes.txt\"))\n    assert_eq(file_exists(\"notes.txt\"), true)\n    print(read_file(Path.from(\"notes.txt\")) ?? panic(\"read failed\"))\n}"

@@ -1,0 +1,26 @@
+use c.[nativeffi as c]
+
+#Import module c.nativeffi {
+    fn negate(value: I32) -> I32 = "jet_fixture_negate"
+    fn high_bits() -> U32 = "jet_fixture_high_bits"
+    fn scale(value: Float) -> Float = "jet_fixture_scale"
+    fn write(value: &I32) = "jet_fixture_write"
+    fn float_write(value: &Float) = "jet_fixture_float_write"
+    fn boolean() -> Bool = "jet_fixture_bool"
+    fn text(value: String) -> String = "jet_fixture_text"
+}
+
+fn run() {
+    if c.negate(I32{7}) != I32{-7} -> panic("signed C result was not normalized")
+    if c.high_bits() != U32{4275878552} -> panic("unsigned C result was not normalized")
+    if c.scale(1.25) != 2.5 -> panic("C double did not cross xmm registers")
+    signed := I32{55}
+    c.write(&signed)
+    if signed != I32{-1234567} -> panic("C narrow out-slot did not write back")
+    floating := 0.0
+    c.float_write(&floating)
+    if floating != 3.5 -> panic("C double out-slot did not write back")
+    if !c.boolean() -> panic("C bool did not cross the ABI")
+    if c.text("native C") != "native C" -> panic("C String result outlived its borrowed input")
+    print("native-c-ok")
+}

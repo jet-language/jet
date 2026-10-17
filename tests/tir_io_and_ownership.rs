@@ -82,7 +82,7 @@ use core.term as io
 fn collect() -[IO]> [String] {
     out := [String]{}
     loop true {
-        line :: io.input(\"> \") ?? return ~out
+        line :: io.input(\"> \") ?? return out.copy()
         if line == \"\" {
             break
         }
@@ -155,11 +155,11 @@ fn largest<T: Comparable>(xs: [T]) -[]> T? {
     if xs.len() == 0 {
         return None
     }
-    best := ~xs[0]
+    best := xs[0].copy()
     i := 1
     loop i < xs.len() {
         if xs[i] > best {
-            best = ~xs[i]
+            best = xs[i].copy()
         }
         i+= 1
     }
@@ -297,7 +297,7 @@ fn run() {
 }
 
 /// D-MEM-COPYSEM1: assigning a read parameter into an owned field materializes
-/// the same owning copy as `~`.
+/// the same owning copy as `.copy()`.
 #[test]
 fn borrowed_parameter_field_assignment_materializes_copy() {
     let src = "\
@@ -507,8 +507,8 @@ fn run() {
 }
 ";
     let notes_src = "\
-pub struct Note {
-    pub text: String
+struct Note {
+    text: String
 }
 ";
     let (code, stdout) = build_and_run_multi(
@@ -584,7 +584,7 @@ struct Holder<T> {
     }
 
     fn copy_tagged(self, value: #Input T) -[]> #Input T {
-        return ~value
+        return value.copy()
     }
 }
 
@@ -629,4 +629,74 @@ fn run() {
         src,
         "present:/tmp/jet-parent\nnone\n",
     );
+}
+
+#[test]
+fn split_owner_copy_only_nominal_field_keeps_ownership_leaf() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct RecordKey { value: U64 }
+struct Snapshot { fields: [String], type_id: RecordKey, type_name: String }
+fn run() {
+    snapshot := Snapshot{fields: [String]{"field"}, type_id: RecordKey{value: U64{7}}, type_name: "record"}
+    fields := ^snapshot.fields
+    id := ^snapshot.type_id
+    name := ^snapshot.type_name
+    print(fields.len())
+    print(id.value)
+    print(name)
+}
+"#;
+    let (code, stdout) = build_and_run("split_owner_copy_only_nominal_field", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "1\n7\nrecord\n");
+}
+
+#[test]
+fn inline_block_exhaustive_statement_tail_diverges() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+#Error
+enum LookupError {
+    Retired
+    Missing
+}
+fn select(value: Int?, retired: Int?) -> Int LookupError! {
+    found :: value ?? {
+        if retired == {
+            .Val(_) -> return Err(LookupError.Retired)
+            .None -> return Err(LookupError.Missing)
+        }
+    }
+    Ok(found)
+}
+fn select_if(value: Int?, kind: Int) -> Int LookupError! {
+    found :: value ?? {
+        if kind == 1 {
+            return Err(LookupError.Retired)
+        } else if kind == 2 {
+            return Err(LookupError.Missing)
+        } else {
+            return Err(LookupError.Retired)
+        }
+    }
+    Ok(found)
+}
+fn run() {
+    print(select(Val(7), None) ?? 0)
+    print(select(None, Val(1)) ?? 8)
+    print(select(None, None) ?? 9)
+    print(select_if(Val(4), 1) ?? 0)
+    print(select_if(None, 1) ?? 10)
+    print(select_if(None, 2) ?? 11)
+    print(select_if(None, 3) ?? 12)
+}
+"#;
+    let (code, stdout) = build_and_run("inline_block_exhaustive_statement_tail", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "7\n8\n9\n4\n10\n11\n12\n");
 }

@@ -1,0 +1,9 @@
+# spec.md:722-724: lexical value bindings supply their own call contract.
+# A non-callable local must not fall back to a same-named file function.
+fixture: non_callable_local_shadows_file_function.fixture
+step: jet check main.jet
+exit: nonzero
+stdout: == ""
+stderr: ~ "[E0803]" # lexical local is not callable
+stderr: ~ "`describe` is String" # retain the collision's local type identity
+stderr: ~ "not a function" # the file function must not be selected

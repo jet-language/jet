@@ -1,0 +1,32 @@
+// CmdRemote and RemoteBuildBinding registry codecs, assembled with Compiler.
+fn run() Never! {
+    if jet_cli_remote_unsigned("+18446744073709551615") != .Val(U64.MAX) -> panic("remote maximum timeout")
+    if jet_cli_remote_unsigned("18446744073709551616") != None || jet_cli_remote_unsigned("-0") != None || jet_cli_remote_unsigned("1_0") != None -> panic("remote unsigned grammar")
+    if jet_cli_remote_name("builder-a_1.test") == .Err(_) || jet_cli_remote_name("bad/name") == .Ok(_) -> panic("remote host name grammar")
+    if jet_cli_remote_name("bad/name") == {
+        .Err(error) -> assert(error.message == "remote builder must be 1..256 ASCII letters, digits, `.`, `_`, or `-`")
+        .Ok(_) -> panic("invalid builder must carry a typed read error")
+    }
+    binding :: JetCLIRemoteBinding{builder: "builder", root: "/jet-test-remote-root", credential_provider: "credential", trust_domain: "trusted", worker_id: "worker-a", platform: "linux-x86_64", abi: "native", cache_read: true, cache_write: false, execute: true, fallback_local: false, timeout_ms: U64{30000}}
+    expected :: "version=1\nbuilder=builder\nroot=/jet-test-remote-root\ncredential_provider=credential\ntrust_domain=trusted\nworker_id=worker-a\nplatform=linux-x86_64\nabi=native\ncache_read=1\ncache_write=0\nexecute=1\nfallback_local=0\ntimeout_ms=30000\n"
+    bytes :: jet_cli_remote_record(binding) ?? panic("remote record encode")
+    if bytes != expected.bytes() -> panic("Rust remote binding record bytes")
+    decoded :: jet_cli_remote_parse(bytes, "builder") ?? panic("remote record parse")
+    if decoded != binding -> panic("remote binding roundtrip")
+    carriage_return :: String.from_bytes([U8]{13}) ?? panic("ASCII carriage return is valid UTF-8")
+    crlf :: expected.replace("\n", "{carriage_return}\n")
+    decoded_crlf :: jet_cli_remote_parse(crlf.bytes(), "builder") ?? panic("remote registry accepts CRLF")
+    if decoded_crlf != binding -> panic("remote CRLF preserves every binding field")
+    doubled_cr :: expected.replace("\n", "{carriage_return}{carriage_return}\n")
+    if jet_cli_remote_parse(doubled_cr.bytes(), "builder") == .Ok(_) -> panic("remote registry strips only one trailing carriage return")
+    interior_cr :: expected.replace("worker-a", "worker{carriage_return}-a")
+    if jet_cli_remote_parse(interior_cr.bytes(), "builder") == .Ok(_) -> panic("remote registry rejects interior carriage return")
+    bare_final_cr :: "{expected.removesuffix("\n")}{carriage_return}"
+    if jet_cli_remote_parse(bare_final_cr.bytes(), "builder") == .Ok(_) -> panic("remote registry does not strip a bare final carriage return")
+    if jet_cli_remote_parse("{expected}version=1\n".bytes(), "builder") == .Ok(_) -> panic("duplicate registry field")
+    if jet_cli_remote_parse(bytes, "another") == .Ok(_) -> panic("builder identity mismatch")
+    fields :: jet_cli_remote_binding_fields(binding, true)
+    json :: "{jet_cli_status_render("remote.list", true, [JetCLIStatusField]{jet_cli_status_field("builders", jet_cli_status_array([JetCLIStatusValue]{jet_cli_status_object(fields)}))})}\n"
+    expected_json :: "{{\"schema\":\"jet.status/v1\",\"action\":\"remote.list\",\"ok\":true,\"reports\":[],\"builders\":[{{\"name\":\"builder\",\"root\":\"/jet-test-remote-root\",\"trust_domain\":\"trusted\",\"worker_id\":\"worker-a\",\"platform\":\"linux-x86_64\",\"abi\":\"native\",\"cache_read\":true,\"cache_write\":false,\"execute\":true,\"fallback_local\":false}}]}}\n"
+    if json != expected_json -> panic("Rust remote list JSON bytes")
+}

@@ -1,0 +1,53 @@
+# HAND-PORT tests/jetpack_engine.rs:4117-4144 nested_package_commands_use_the_nearest_package_root
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: nested_package_commands_use_the_nearest_package_root.fixture
+env: NO_COLOR=1
+refused: hangar-verified-fixture
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn nested_package_commands_use_the_nearest_package_root() {
+#     let (base, project, root) = core_hello_project("package-root");
+#     let package = project.join("package");
+#     let nested = package.join("src");
+#     fs::create_dir_all(&nested).unwrap();
+#     fs::rename(project.join("env.jet"), package.join("env.jet")).unwrap();
+#     fs::write(package.join("package.jet"), "name: \"demo\"\n").unwrap();
+# 
+#     let output = jetpack()
+#         .args(["run", "--no-color", "--offline", "--", "true"])
+#         .current_dir(&nested)
+#         .env("JETPACK_ROOT", &root)
+#         .env("JETPACK_FIXTURES", example_fixtures(&root))
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "nearest package root was not used: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     assert!(
+#         String::from_utf8_lossy(&output.stderr).contains("hello"),
+#         "package-root env facts were not loaded: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     drop(base);
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+mkdir: project/package/src
+copy: project/env.jet project/package/env.jet
+remove: project/env.jet
+step: jetpack run --no-color --offline -- true
+cwd: project/package/src
+exit: 0
+stderr: ~ "hello" # original contains predicate
+

@@ -1280,8 +1280,7 @@ impl TargetMachine {
                     StatusValue::object(
                         StatusFields::new()
                             .with("aot", true)
-                            .with("dev", !self.no_os)
-                            .with("jit", !self.no_os),
+                            .with("dev", !self.no_os),
                     ),
                 ),
         )
@@ -1774,9 +1773,9 @@ impl TargetMachine {
         }
     }
 
-    /// No-OS machines are AOT-only; hosted keeps Dev/JIT.
+    /// No-OS machines are AOT-only; hosted keeps Dev.
     pub fn supports_execution_tier(&self, tier: ExecutionTier) -> Result<(), TargetMachineError> {
-        if self.no_os && matches!(tier, ExecutionTier::Dev | ExecutionTier::Jit) {
+        if self.no_os && tier == ExecutionTier::Dev {
             return Err(TargetMachineError::ExecutionTierUnsupported {
                 tier: tier.as_str().to_string(),
                 machine: self.name.clone(),
@@ -2412,7 +2411,6 @@ fn virt_provider_source_contents(uart: u64) -> String {
 pub enum ExecutionTier {
     Aot,
     Dev,
-    Jit,
 }
 
 impl ExecutionTier {
@@ -2420,7 +2418,6 @@ impl ExecutionTier {
         match self {
             ExecutionTier::Aot => "aot",
             ExecutionTier::Dev => "dev",
-            ExecutionTier::Jit => "jit",
         }
     }
 }
@@ -3725,20 +3722,21 @@ fn validate_ram_budget(
             errors.push(TargetMachineError::MissingMemoryKind { kind });
         }
     }
-    let ram_bytes: u64 = machine
+    // The region total may exceed u64 even though each individual region cannot.
+    let ram_bytes: u128 = machine
         .memory
         .iter()
         .filter(|r| r.kind == MemoryKind::Ram)
-        .map(|r| r.size.bytes)
+        .map(|r| u128::from(r.size.bytes))
         .sum();
     let used_bytes = usage
         .stack_bytes
         .saturating_add(usage.static_ram_bytes)
         .saturating_add(machine.allocator.fixed_size());
-    if ram_bytes > 0 && used_bytes > ram_bytes {
+    if ram_bytes > 0 && u128::from(used_bytes) > ram_bytes {
         errors.push(TargetMachineError::RamOverflow {
             used_bytes,
-            ram_bytes,
+            ram_bytes: ram_bytes as u64,
         });
     }
 }
@@ -4503,9 +4501,9 @@ fn format_length(bytes: u64) -> String {
 
 fn execution_json(machine: &TargetMachine) -> String {
     if machine.no_os {
-        "{\"aot\":true,\"dev\":false,\"jit\":false}".to_string()
+        "{\"aot\":true,\"dev\":false}".to_string()
     } else {
-        "{\"aot\":true,\"dev\":true,\"jit\":true}".to_string()
+        "{\"aot\":true,\"dev\":true}".to_string()
     }
 }
 
@@ -4741,6 +4739,22 @@ mod tests {
     }
 
     #[test]
+    fn ram_budget_total_above_u64_does_not_overflow() {
+        let mut machine = valid_machine();
+        machine.memory = vec![
+            MemoryRegion::new("first", 0, ByteSize::bytes(u64::MAX), MemoryKind::Ram, MemoryAccess::Rw),
+            MemoryRegion::new("second", 0, ByteSize::bytes(1), MemoryKind::Ram, MemoryAccess::Rw),
+        ];
+        let usage = TargetMachineUse {
+            stack_bytes: u64::MAX,
+            ..TargetMachineUse::default()
+        };
+        let mut errors = Vec::new();
+        validate_ram_budget(&machine, &usage, &mut errors);
+        assert!(!errors.iter().any(|error| matches!(error, TargetMachineError::RamOverflow { .. })));
+    }
+
+    #[test]
     fn validation_reports_ram_heap_core_and_mmio_errors() {
         let mut machine = valid_machine();
         machine.allocator = AllocatorPolicy::None;
@@ -4830,7 +4844,7 @@ mod tests {
         assert_ne!(
             dossier.cache_bytes(&machine.triple),
             machine
-                .target_dossier(&usage, ExecutionTier::Jit, "jet@2300", "deps:none")
+                .target_dossier(&usage, ExecutionTier::Dev, "jet@2300", "deps:none")
                 .cache_bytes(&machine.triple)
         );
     }
@@ -4846,19 +4860,15 @@ mod tests {
     }
 
     #[test]
-    fn no_os_rejects_dev_and_jit_tiers() {
+    fn no_os_rejects_the_dev_tier() {
         let machine = valid_machine();
         assert!(machine.supports_execution_tier(ExecutionTier::Aot).is_ok());
         assert!(matches!(
             machine.supports_execution_tier(ExecutionTier::Dev),
             Err(TargetMachineError::ExecutionTierUnsupported { .. })
         ));
-        assert!(matches!(
-            machine.supports_execution_tier(ExecutionTier::Jit),
-            Err(TargetMachineError::ExecutionTierUnsupported { .. })
-        ));
         assert!(TargetMachine::hosted("x86_64-unknown-linux-gnu")
-            .supports_execution_tier(ExecutionTier::Jit)
+            .supports_execution_tier(ExecutionTier::Dev)
             .is_ok());
     }
 }

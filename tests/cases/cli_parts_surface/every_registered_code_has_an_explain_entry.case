@@ -1,0 +1,14 @@
+# Port of tests/cli_parts/surface.rs:1904-1941; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+# PENDING-SEAM(compiler-lib): Explain::index contains_key per live diagnostic code :1916-1922; ledger-only subclaims.
+step digest: jet inspect digest --topic diagnostics
+env: NO_COLOR=1
+exit: 0
+stdout.after_first("```text\n").filter(!^= "code\t" "```").first_words: lines > 150 # original predicate
+for line stdout.after_first("```text\n").filter(!^= "code\t" "```").first_words of digest as r
+step: jet explain {r}
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "{r}" # original predicate
+end for

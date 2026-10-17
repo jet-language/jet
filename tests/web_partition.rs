@@ -3,7 +3,7 @@
 mod common;
 
 use std::fs;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::path::PathBuf;
 
@@ -110,7 +110,7 @@ fn run() {}
 fn recursive_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String: [Int]]) -> [String: [Int]] { return ~values }
+fn echo(values: [String: [Int]]) -> [String: [Int]] { return values.copy() }
 
 #Target(JS)
 fn run() {}
@@ -127,7 +127,7 @@ fn run() {}
 fn unsigned_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String:U64]) -> [String:U64] { return ~values }
+fn echo(values: [String:U64]) -> [String:U64] { return values.copy() }
 
 #Target(JS)
 fn run() {}
@@ -144,7 +144,7 @@ fn run() {}
 fn narrow_sized_map_export_remains_an_honest_unsupported_error() {
     let src = r#"
 #WasmExport
-fn echo(values: [String:I32]) -> [String:I32] { return ~values }
+fn echo(values: [String:I32]) -> [String:I32] { return values.copy() }
 
 #Target(JS)
 fn run() {}
@@ -188,13 +188,13 @@ fn dom_fn() {
             path: std::path::PathBuf::from("t.jet"),
             display: "t.jet".to_string(),
             source: src.to_string(),
+            core_identifier_demand: jet::Lexer::core_identifier_demand(&toks),
             alias: "main".to_string(),
             imports: std::mem::take(&mut prog.imports),
             items: std::mem::take(&mut prog.items),
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
@@ -246,7 +246,7 @@ fn manifest_partitions(manifest: &str) -> Vec<(String, String)> {
     let root = parse_json(manifest).expect("manifest must be valid JSON");
     let partitions = json_get(&root, "partitions").expect("manifest missing partitions");
     let rows = match partitions {
-        DataTree::Object(rows) => rows,
+        Dyn::Object(rows) => rows,
         _ => panic!("manifest partitions must be an object"),
     };
     rows.iter()
@@ -272,11 +272,11 @@ fn imported_same_leaf_helpers_keep_distinct_buckets() {
             ),
             (
                 "left.jet",
-                "#Target(JS)\nfn helper() -> Int { return 1 }\n#Target(JS)\npub fn value() -> Int { return helper() }\n",
+                "#Target(JS)\nfn helper() -> Int { return 1 }\n#Target(JS)\nfn value() -> Int { return helper() }\n",
             ),
             (
                 "right.jet",
-                "fn helper() -> Int { return 2 }\n#WasmExport\npub fn value() -> Int { return helper() }\n",
+                "fn helper() -> Int { return 2 }\n#WasmExport\nfn value() -> Int { return helper() }\n",
             ),
         ],
     );
@@ -339,7 +339,7 @@ fn inline_module_callback_keeps_qualified_js_partition() {
     let src = r#"#Target(Web)
 module handlers {
     #Target(JS)
-    pub fn init() { print("ready") }
+    fn init() { print("ready") }
 }
 #Target(JS)
 fn run() { handlers.init() }

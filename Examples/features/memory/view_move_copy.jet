@@ -1,5 +1,5 @@
 // D-COPY-DEFAULT1=A: the compiler chooses when a name is unmarked, and a
-// mark gives exact control. `ys :: xs` reads `xs` through a view, `~xs` is an
+// mark gives exact control. `ys :: xs` reads `xs` through a view, `xs.copy()` is an
 // independent copy, and `^xs` moves `xs` exactly: after it, `xs` is gone.
 // A last use moves with no mark at all.
 struct Box {
@@ -25,7 +25,7 @@ fn run() {
     view :: xs
     print("view sees {view.len()} items")
 
-    dup := ~xs
+    dup := xs.copy()
     &dup.push(4)
     print("copy has {dup.len()}, xs still has {xs.len()}")
 

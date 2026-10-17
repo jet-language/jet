@@ -1,0 +1,80 @@
+// Transport ALGORITHM port of tests/web_app.rs:63-95; assertions stay in .case.
+use core.net as net
+use core.time as time
+use core.files as files
+use core.sys as sys
+
+fn s6_web_request_env(name: String) -> String {
+    sys.get(name) ?? panic("missing {name}")
+}
+
+fn run() {
+    port :: s6_web_request_env("S6_WEB_PORT")
+    method :: s6_web_request_env("S6_WEB_METHOD")
+    path :: s6_web_request_env("S6_WEB_PATH")
+    output :: s6_web_request_env("S6_WEB_RESPONSE")
+    deadline :: time.instant() + 30s
+    connected := net.TCPStream?{None}
+    loop {
+        if net.tcp_connect("127.0.0.1:{port}") == {
+            .Ok(stream) -> {
+                connected = Val(stream)
+                break
+            }
+            .Err(error) -> {
+                if time.instant() >= deadline -> panic("web app did not listen on {port}: {error}")
+                time.sleep(50ms)
+            }
+        }
+    }
+    stream :: connected ?? panic("connected stream")
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    request :: "{method} {path} HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}Content-Length: 0{crlf}{crlf}"
+    stream.write_all(request.bytes()) ?? panic("request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    bytes := [U8]{}
+    complete := false
+    reload :: sys.get("S6_WEB_RELOAD_APP")
+    if reload == .Val(app) {
+        // Original predicate: completion must not arrive during the absolute
+        // 250ms post-send/shutdown window. Partial bytes are retained.
+        started :: time.instant()
+        loop time.instant() - started < 250ms {
+            remaining :: 250 - time.duration_as_ms(time.instant() - started)
+            net.set_read_timeout(stream, remaining) ?? panic("first window timeout")
+            failed := false
+            if net.tcp_read_bytes(stream, 8192) == {
+                .Ok(part) -> {
+                    if part.len() == 0 {
+                        assert(time.instant() - started >= 250ms, "reload endpoint fired without a source change")
+                        complete = true
+                        break
+                    }
+                    loop byte in part -> &bytes.push(byte)
+                }
+                .Err(error) -> failed = true
+            }
+            // Per TestLead1: any first-window read error advances to the next
+            // window; a real reset/abort then fails the following EOF read.
+            if failed -> break
+        }
+        files.append_all(app, "\n") ?? panic("append source newline")
+    }
+    changed :: time.instant()
+    loop !complete {
+        if reload != None {
+            assert(time.instant() - changed < 10s, "reload response did not complete")
+            remaining :: 10000 - time.duration_as_ms(time.instant() - changed)
+            net.set_read_timeout(stream, remaining) ?? panic("changed window timeout")
+        }
+        part :: net.tcp_read_bytes(stream, 8192) ?? panic("response read")
+        if part.len() == 0 {
+            complete = true
+            if reload != None -> assert(time.instant() - changed <= 10s, "reload response completed after deadline")
+        } else {
+            loop byte in part -> &bytes.push(byte)
+        }
+    }
+    response :: String.from_bytes(bytes) ?? panic("response UTF-8")
+    files.write(output, response) ?? panic("record response")
+}

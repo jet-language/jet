@@ -1,0 +1,19 @@
+# Port of cli_parts/runtime.rs::top_level_help_lists_job_vocabulary_only.
+# Exact screens pin jobs' canonical description and exclude retired tasks/--task.
+normalize: version
+step: jet help
+stdout: = ../../cli/help_frequency.txt
+stdout: !~ tasks # original predicate
+stdout: !~ --task # original predicate
+step: jet self completions fish
+stdout: = ../../cli/completions_fish.txt
+stdout: !~ tasks # original predicate
+stdout: !~ --task # original predicate
+step: jet self completions zsh
+stdout: = ../../cli/completions_zsh.txt
+stdout: !~ tasks # original predicate
+stdout: !~ --task # original predicate
+step: jet self man
+stdout: = ../../cli/man.txt
+stdout: !~ tasks # original predicate
+stdout: !~ --task # original predicate

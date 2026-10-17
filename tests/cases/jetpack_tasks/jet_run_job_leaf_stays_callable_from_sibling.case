@@ -1,0 +1,7 @@
+# tests/jetpack_tasks.rs::jet_run_job_leaf_stays_callable_from_sibling
+fixture: fixtures/leaf
+step: jet run main.jet -- greet
+stdout: = leaf.out
+stderr: !~ E0102 # original predicate
+step: jet run main.jet -- seed_data
+stdout: = dependency.out

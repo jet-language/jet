@@ -23,7 +23,7 @@ use super::core_calls::{
     apply_core_call_with_type, apply_data_line_call, apply_history_rng_method,
     apply_impure_core_call_with_type, as_float,
     as_string, display_core_pure_value, eval_regex_replace_all_with, io_error_value,
-    jet_term_print_frame, normalize_path_args, sketch_add, solver_new, solver_require,
+    jet_term_print_frame, normalize_path_args,
     IoErrorOperation,
 };
 use super::repl_process::apply_repl_authorized_core_call_with_type;
@@ -171,8 +171,14 @@ pub fn apply_seeded_rng_method_with_type(
     };
     match method {
         "int" => {
-            let low = as_int(args.first().unwrap_or(&CtValue::Int(0)), span)?;
-            let high = as_int(args.get(1).unwrap_or(&CtValue::Int(0)), span)?;
+            let native_int = |value: &CtValue| match value {
+                CtValue::BigInt(value) => value.try_i64().ok_or_else(|| {
+                    Diagnostic::from_row("E1003", &[], Some(span))
+                }),
+                value => as_int(value, span),
+            };
+            let low = native_int(args.first().unwrap_or(&CtValue::Int(0)))?;
+            let high = native_int(args.get(1).unwrap_or(&CtValue::Int(0)))?;
             let value = seeded_rng_int(state, low, high).map_err(|message| {
                 Diagnostic::from_row("E3010", &[("msg", message)], Some(span))
             })?;
@@ -880,7 +886,7 @@ impl<'a> Interp<'a> {
             let line = format!(
                 "{} {site} = {}",
                 crate::Syntax::DEBUG_TRACE_PREFIX,
-                self.debug_value(&value)
+                self.debug_value(&value, span)?
             );
             if let Some(sink) = self.sink.as_mut() {
                 sink.stderr.push_str(&jet_term_print_frame(&line));
@@ -914,7 +920,7 @@ impl<'a> Interp<'a> {
         // D-META-USER1=A: a checked rule may reject with a registered
         // project diagnostic. Labels keep the product fields explicit; the
         // registry still owns the code's severity and rendering metadata.
-        if name == "reject" {
+        if name == crate::Syntax::BUILTIN_REJECT {
             let mut values = HashMap::new();
             for argument in args {
                 let Some((label, _)) = &argument.label else {
@@ -1081,7 +1087,7 @@ impl<'a> Interp<'a> {
                     ));
                 }
                 frame.insert(last.name.clone(), CtValue::List(rest));
-                return self.call_func_with_writebacks(name, func, frame, writebacks, scope);
+                return self.call_func_with_writebacks(func, frame, writebacks, scope);
             }
         }
         if func.params.len() != args.len() {
@@ -1091,7 +1097,7 @@ impl<'a> Interp<'a> {
             ));
         }
         let (frame, writebacks) = self.bind_fixed_call_args(&func.params, args, scope)?;
-        self.call_func_with_writebacks(name, func, frame, writebacks, scope)
+        self.call_func_with_writebacks(func, frame, writebacks, scope)
     }
 
     fn bind_fixed_call_args(
@@ -1119,13 +1125,12 @@ impl<'a> Interp<'a> {
 
     fn call_func_with_writebacks(
         &mut self,
-        name: &str,
         func: &Func,
         frame: HashMap<String, CtValue>,
         writebacks: Vec<(String, String)>,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        let (result, frame) = self.call_func_with_frame(name, func, frame)?;
+        let (result, frame) = self.call_func_with_frame(func, frame)?;
         for (param_name, caller_name) in writebacks {
             if let Some(value) = frame.get(&param_name) {
                 scope.insert(caller_name, value.clone());
@@ -1135,41 +1140,29 @@ impl<'a> Interp<'a> {
     }
 
     /// c139: run a resolved `Func`'s body in `frame` (already bound: params,
-    /// and `self` for an instance/associated method), threading the same
-    /// debugger bookkeeping and `?`/`?? return` sentinel handling `eval_call`
-    /// always has. Shared by plain calls, instance-method dispatch, and
-    /// code-module namespaced calls.
+    /// and `self` for an instance/associated method), with the `?`/`?? return`
+    /// sentinel handling `eval_call` always has. Shared by plain calls,
+    /// instance-method dispatch, and code-module namespaced calls.
     pub(in super::super) fn call_func(
         &mut self,
-        name: &str,
         func: &Func,
         frame: HashMap<String, CtValue>,
     ) -> Result<CtValue, Diagnostic> {
-        self.call_func_with_frame(name, func, frame)
-            .map(|(value, _)| value)
+        self.call_func_with_frame(func, frame).map(|(value, _)| value)
     }
 
     fn call_func_with_frame(
         &mut self,
-        name: &str,
         func: &Func,
         mut frame: HashMap<String, CtValue>,
     ) -> Result<(CtValue, HashMap<String, CtValue>), Diagnostic> {
-        // D-DBG3: enter a user-function frame — bump the debugger's call depth
-        // and current-function name so `next`/`finish` and the `in fn()` banner
-        // track correctly, then restore both on the way out (every path).
-        let prev_depth = self.depth;
-        let prev_func = std::mem::replace(&mut self.cur_func, name.to_string());
         let frame_types = func
             .params
             .iter()
             .map(|param| (param.name.clone(), param.ty.clone()))
             .collect();
         let prev_types = std::mem::replace(&mut self.binding_types, frame_types);
-        self.depth = prev_depth + 1;
         let result = self.exec_block(&func.body, &mut frame);
-        self.depth = prev_depth;
-        self.cur_func = prev_func;
         self.binding_types = prev_types;
         let value = match result {
             Ok(Flow::Return(v)) => Ok(v),
@@ -1180,6 +1173,32 @@ impl<'a> Interp<'a> {
             super::super::Interpreter::coerce_value_to_type(value, ty)
         });
         Ok((value, frame))
+    }
+
+    fn source_value_render(
+        &mut self,
+        value: &CtValue,
+        operation: &str,
+        span: Span,
+    ) -> Result<Option<String>, Diagnostic> {
+        let name = match value {
+            CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => type_name,
+            _ => return Ok(None),
+        };
+        let Some(hook) = jet_foundation::CoreModuleExports::core_source_value_hook(name, operation) else {
+            return Ok(None);
+        };
+        let function = self.methods.get(&(name.clone(), hook.to_string())).copied()
+            .ok_or_else(|| unsupported("checked source value renderer is missing", span))?;
+        if function.params.len() != 1 {
+            return Err(unsupported("checked source value renderer has invalid arity", span));
+        }
+        let mut frame = HashMap::new();
+        frame.insert(function.params[0].name.clone(), value.clone());
+        match self.call_func(function, frame)? {
+            CtValue::Str(text) => Ok(Some(text)),
+            _ => Err(unsupported("source value renderer did not return String", span)),
+        }
     }
 
     /// c139 (D-DISPLAYDBG1/2): render `v` as `{value}` interpolation / `print`
@@ -1193,8 +1212,11 @@ impl<'a> Interp<'a> {
     pub(in super::super) fn show_value(
         &mut self,
         v: &CtValue,
-        _span: Span,
+        span: Span,
     ) -> Result<String, Diagnostic> {
+        if let Some(text) = self.source_value_render(v, "show", span)? {
+            return Ok(text);
+        }
         let type_name = match v {
             CtValue::Struct { type_name, .. } | CtValue::Enum { type_name, .. } => {
                 Some(type_name.clone())
@@ -1204,13 +1226,13 @@ impl<'a> Interp<'a> {
         if let Some(tn) = type_name {
             if let Some(f) = self
                 .methods
-                .get(&(tn.clone(), "display".to_string()))
+                .get(&(tn, "display".to_string()))
                 .copied()
             {
                 if f.params.len() == 1 {
                     let mut frame = HashMap::new();
                     frame.insert(f.params[0].name.clone(), v.clone());
-                    if let CtValue::Str(s) = self.call_func(&format!("{}.display", tn), f, frame)? {
+                    if let CtValue::Str(s) = self.call_func(f, frame)? {
                         return Ok(s);
                     }
                 }
@@ -1269,7 +1291,14 @@ impl<'a> Interp<'a> {
         }
     }
 
-    pub(in super::super) fn debug_value(&self, v: &CtValue) -> String {
+    pub(in super::super) fn debug_value(&mut self, v: &CtValue, span: Span) -> Result<String, Diagnostic> {
+        if let Some(text) = self.source_value_render(v, "debug", span)? {
+            return Ok(text);
+        }
+        Ok(self.debug_fallback_value(v))
+    }
+
+    fn debug_fallback_value(&self, v: &CtValue) -> String {
         match v {
             CtValue::Struct { type_name, fields } => {
                 let Some(def) = self.structs.get(type_name) else {
@@ -1702,24 +1731,6 @@ impl<'a> Interp<'a> {
         }
     }
 }
-/// Standalone variant of [`invoke_standalone_closure`] for mutable Store
-/// transaction state.
-pub(in super::super) fn invoke_standalone_closure_mut(
-    closure: &CtValue,
-    arg: &mut CtValue,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    let mut args = vec![arg.clone()];
-    let result = invoke_standalone_closure_mut_args(closure, &mut args, span);
-    if result.is_ok() {
-        *arg = args
-            .into_iter()
-            .next()
-            .expect("mutable standalone closure received one argument");
-    }
-    result
-}
-
 /// Standalone mutable-argument closure invocation for callbacks that carry
 /// more than one writable value.
 pub(in super::super) fn invoke_standalone_closure_mut_args(
@@ -1746,10 +1757,7 @@ pub(in super::super) fn invoke_standalone_closure_mut_args(
         sink: None,
         core_imports: &core_imports,
         checked_nominals: None,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: String::new(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
@@ -1800,10 +1808,7 @@ pub(in super::super) fn invoke_standalone_closure(
         sink: None,
         core_imports: &core_imports,
         checked_nominals: None,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: String::new(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,

@@ -1,0 +1,16 @@
+#Target(Web)
+
+struct Counter {
+    value: Int
+}
+
+#Target(JS)
+fn run() {
+    cell :: shared Counter{value: 0}
+    cell.value += 1
+    #Transact {
+        cell.value += 1
+        cell.value += 1
+    }
+    print(cell.value)
+}

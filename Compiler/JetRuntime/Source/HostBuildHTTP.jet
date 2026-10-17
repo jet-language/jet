@@ -1,0 +1,668 @@
+// HTTP.rs:5536-5712: the checked-build DNS answer and pinned GET transport.
+// The caller supplies the DNS answer it checked, the transport timeout and the
+// byte bound. No lookup policy, redirects, status policy, pin or diagnostic
+// lives here. Plain http:// uses the native nonblocking socket and readiness
+// providers. TLS stays unavailable natively (D-NATIVE-TLS1=B): the secure branch
+// reports the runtime's canonical TLS refusal and never sends plaintext.
+// Results are native [[U8]]: an outer buffer of 24-byte [len,cap,data] headers,
+// inner data at RT_HOST_U8_STRIDE, exact capacity, null when empty.
+
+// Bytes24 is a native List<U8> header [len0, cap8, data16] being grown.
+fn bh_bytes_reserve(bytes: I64, extra: I64) {
+    length :: rt_text_word(bytes)
+    capacity :: rt_text_word(bytes + I64{8})
+    if (length + extra <= capacity) -> return
+    grown := if (capacity < I64{16}) -> I64{16} else -> capacity * I64{2}
+    if (grown < length + extra) -> grown = length + extra
+    data :: jet_rt_alloc(grown * RT_HOST_U8_STRIDE, I64{8})
+    old :: rt_text_word(bytes + I64{16})
+    if (length != I64{0}) -> rt_text_bytes_copy(data, old, length * RT_HOST_U8_STRIDE)
+    if (capacity != I64{0}) -> jet_rt_free(old, capacity * RT_HOST_U8_STRIDE, I64{8})
+    rt_text_store(bytes + I64{8}, grown)
+    rt_text_store(bytes + I64{16}, data)
+}
+
+// Appends count raw bytes.
+fn bh_bytes_append(bytes: I64, source: I64, count: I64) {
+    if (count <= I64{0}) -> return
+    bh_bytes_reserve(bytes, count)
+    length :: rt_text_word(bytes)
+    data :: rt_text_word(bytes + I64{16})
+    at := I64{0}
+    loop at < count {
+        host_u8_put(data, length + at, rt_text_byte(source + at))
+        at += I64{1}
+    }
+    rt_text_store(bytes, length + count)
+}
+
+fn bh_bytes_drop(bytes: I64) {
+    capacity :: rt_text_word(bytes + I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(bytes + I64{16}), capacity * RT_HOST_U8_STRIDE, I64{8})
+    thread_zero(bytes, I64{24})
+}
+
+// The owned native List<U8>: capacity exactly length, null data when empty.
+fn bh_bytes_seal(bytes: I64) {
+    length :: rt_text_word(bytes)
+    capacity :: rt_text_word(bytes + I64{8})
+    if (length == capacity) -> return
+    if (length == I64{0}) {
+        bh_bytes_drop(bytes)
+        return
+    }
+    old :: rt_text_word(bytes + I64{16})
+    data :: jet_rt_alloc(length * RT_HOST_U8_STRIDE, I64{8})
+    rt_text_bytes_copy(data, old, length * RT_HOST_U8_STRIDE)
+    jet_rt_free(old, capacity * RT_HOST_U8_STRIDE, I64{8})
+    rt_text_store(bytes + I64{8}, length)
+    rt_text_store(bytes + I64{16}, data)
+}
+
+fn bh_bytes_byte(bytes: I64, index: I64) -> I64 { host_u8_get(rt_text_word(bytes + I64{16}), index) }
+
+// Rows24 is a growable [len, cap, data] buffer of Bytes24 headers.
+fn bh_rows_push(rows: I64, bytes: I64) {
+    length :: rt_text_word(rows)
+    capacity :: rt_text_word(rows + I64{8})
+    if (length == capacity) {
+        grown :: if (capacity == I64{0}) -> I64{8} else -> capacity * I64{2}
+        data :: jet_rt_alloc(grown * I64{24}, I64{8})
+        old :: rt_text_word(rows + I64{16})
+        if (length != I64{0}) -> rt_text_bytes_copy(data, old, length * I64{24})
+        if (capacity != I64{0}) -> jet_rt_free(old, capacity * I64{24}, I64{8})
+        rt_text_store(rows + I64{8}, grown)
+        rt_text_store(rows + I64{16}, data)
+    }
+    bh_bytes_seal(bytes)
+    coll_copy(bytes, rt_text_word(rows + I64{16}) + length * I64{24}, I64{24})
+    thread_zero(bytes, I64{24})
+    rt_text_store(rows, length + I64{1})
+}
+
+fn bh_rows_drop(rows: I64) {
+    at := I64{0}
+    loop at < rt_text_word(rows) {
+        bh_bytes_drop(rt_text_word(rows + I64{16}) + at * I64{24})
+        at += I64{1}
+    }
+    capacity :: rt_text_word(rows + I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(rt_text_word(rows + I64{16}), capacity * I64{24}, I64{8})
+    thread_zero(rows, I64{24})
+}
+
+// Publishes the outer list through the route's ok/ok_len out slots.
+fn bh_rows_publish(rows: I64, ok: I64, ok_len: I64) -> I64 {
+    length :: rt_text_word(rows)
+    capacity :: rt_text_word(rows + I64{8})
+    data := rt_text_word(rows + I64{16})
+    if (length == I64{0}) {
+        if (capacity != I64{0}) -> jet_rt_free(data, capacity * I64{24}, I64{8})
+        data = I64{0}
+    } else if (length != capacity) {
+        exact :: jet_rt_alloc(length * I64{24}, I64{8})
+        rt_text_bytes_copy(exact, data, length * I64{24})
+        jet_rt_free(data, capacity * I64{24}, I64{8})
+        data = exact
+    }
+    thread_zero(rows, I64{24})
+    rt_text_store(ok, data)
+    rt_text_store(ok_len, length)
+    I64{1}
+}
+
+fn bh_text_error(error: I64, text: I64) -> I64 {
+    rt_text_store(error, text)
+    I64{0}
+}
+
+fn bh_static_error(error: I64, literal: I64) -> I64 { bh_text_error(error, jet_rt_string_clone(literal)) }
+
+// u16/u64/usize::try_from(i64) failures share TryFromIntError's Display.
+fn bh_range_error(error: I64) -> I64 { bh_static_error(error, rt_static_text("out of range integral type conversion attempted")) }
+
+// Rust `(host, port).to_socket_addrs()` after one [..] pair is removed.
+// Answers stay in resolver order as 4 or 16 network-order octets.
+#Export(c) fn jet_http_build_resolve(host: I64, port: I64, ok: I64, ok_len: I64, error: I64) -> I64 {
+    native_port :: host_native_int(port)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (native_port < I64{0} || native_port > I64{65535}) -> return bh_range_error(error)
+    length :: rt_text_len(host)
+    data :: rt_text_data(host)
+    bracketed :: length >= I64{2} && rt_text_byte(data) == I64{91} && rt_text_byte(data + length - I64{1}) == I64{93}
+    name :: if bracketed -> rt_text_copy(data + I64{1}, length - I64{2}) else -> host
+    scratch :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(scratch, I64{24})
+    resolved :: jet_net_raw_resolve_ordered(name, native_port, scratch, scratch + I64{8}, scratch + I64{16})
+    if bracketed -> jet_rt_string_drop(name)
+    rows :: rt_text_word(scratch)
+    count :: rt_text_word(scratch + I64{8})
+    failure :: rt_text_word(scratch + I64{16})
+    jet_rt_free(scratch, I64{24}, I64{8})
+    if (resolved == I64{0}) {
+        if (failure == I64{0}) -> return I64{0}
+        message :: jet_rt_record_get_jet_resolve_error_message(failure)
+        jet_rt_handle_drop_jet_resolve_error(failure)
+        return bh_text_error(error, message)
+    }
+    output :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(output, I64{48})
+    bytes :: output + I64{24}
+    at := I64{0}
+    loop at < count {
+        row :: rows + at * I64{56}
+        bh_bytes_append(bytes, row + I64{8}, if (rt_text_word(row) == I64{4}) -> I64{4} else -> I64{16})
+        bh_rows_push(output, bytes)
+        at += I64{1}
+    }
+    if (rows != I64{0}) -> jet_rt_free(rows, count * I64{56}, I64{8})
+    result :: bh_rows_publish(output, ok, ok_len)
+    jet_rt_free(output, I64{48}, I64{8})
+    result
+}
+
+// Transfer96: FD72 state0, monotonic deadline8, owned 8192-byte read buffer16,
+// buffer position24, buffer filled32, owned failure text40, ErrorOut32 48..79,
+// reserved80..95. Failure is -1 with text40, or with none on scheduler stop.
+fn bh_fail(transfer: I64, text: I64) -> I64 {
+    rt_text_store(transfer + I64{40}, text)
+    I64{-1}
+}
+
+fn bh_fail_static(transfer: I64, literal: I64) -> I64 { bh_fail(transfer, jet_rt_string_clone(literal)) }
+
+fn bh_fail_errno(transfer: I64, code: I64) -> I64 { bh_fail(transfer, host_errno_cause(code)) }
+
+// TimedSocket::remaining: the time left before the one fixed deadline.
+fn bh_remaining(transfer: I64) -> I64 { rt_text_word(transfer + I64{8}) - time_host_monotonic_i64() }
+
+// Waits for readiness at most `timeout` ns: the ready mask (0 when the
+// deadline elapsed), or -1 after a poller failure or scheduler stop.
+fn bh_wait(transfer: I64, interest: I64, timeout: I64) -> I64 {
+    ready :: jet_socket_ready_raw(rt_text_word(transfer), interest, timeout, transfer + I64{48})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{-1}
+    if (rt_text_word(transfer + I64{48}) != I64{0}) -> return bh_fail_errno(transfer, rt_text_word(transfer + I64{56}))
+    ready
+}
+
+// One TimedSocket read into the empty buffer: count, 0 at EOF, or -1. An
+// elapsed SO_RCVTIMEO is std's WouldBlock (EAGAIN) error; EINTR retries.
+fn bh_fill(transfer: I64) -> I64 {
+    loop {
+        remaining :: bh_remaining(transfer)
+        if (remaining <= I64{0}) -> return bh_fail_static(transfer, rt_static_text("timed out"))
+        got :: net_socket_call(rt_text_word(transfer), I64{45}, rt_text_word(transfer + I64{16}), I64{8192}, I64{0}, I64{0}, I64{0})
+        if (got >= I64{0}) {
+            rt_text_store(transfer + I64{24}, I64{0})
+            rt_text_store(transfer + I64{32}, got)
+            return got
+        }
+        if (got == I64{-4}) -> next
+        if (got != I64{-11}) -> return bh_fail_errno(transfer, -got)
+        ready :: bh_wait(transfer, I64{1}, remaining)
+        if (ready < I64{0}) -> return I64{-1}
+        if (ready == I64{0}) -> return bh_fail_errno(transfer, I64{11})
+    }
+}
+
+// BufReader + Take(limit): appends at most `limit` bytes, stopping after the
+// first newline when `line`; returns the appended count, or -1.
+fn bh_read(transfer: I64, limit: I64, line: Bool, output: I64) -> I64 {
+    taken := I64{0}
+    loop taken < limit {
+        if (rt_text_word(transfer + I64{24}) == rt_text_word(transfer + I64{32})) {
+            got :: bh_fill(transfer)
+            if (got < I64{0}) -> return I64{-1}
+            if (got == I64{0}) -> break
+        }
+        position :: rt_text_word(transfer + I64{24})
+        start :: rt_text_word(transfer + I64{16}) + position
+        available := rt_text_word(transfer + I64{32}) - position
+        if (available > limit - taken) -> available = limit - taken
+        count := available
+        found := false
+        if line {
+            count = I64{0}
+            loop count < available {
+                byte :: rt_text_byte(start + count)
+                count += I64{1}
+                if (byte == I64{10}) {
+                    found = true
+                    break
+                }
+            }
+        }
+        bh_bytes_append(output, start, count)
+        rt_text_store(transfer + I64{24}, position + count)
+        taken += count
+        if found -> break
+    }
+    taken
+}
+
+// write_all through TimedSocket, then flush's deadline check. MSG_NOSIGNAL
+// as in std's Unix socket send; EINTR retries; a zero write is WriteZero.
+fn bh_send(transfer: I64, request: I64) -> I64 {
+    data :: rt_text_data(request)
+    length :: rt_text_len(request)
+    at := I64{0}
+    loop at < length {
+        remaining :: bh_remaining(transfer)
+        if (remaining <= I64{0}) -> return bh_fail_static(transfer, rt_static_text("timed out"))
+        sent :: net_socket_call(rt_text_word(transfer), I64{44}, data + at, length - at, I64{16384}, I64{0}, I64{0})
+        if (sent > I64{0}) {
+            at += sent
+            next
+        }
+        if (sent == I64{0}) -> return bh_fail_static(transfer, rt_static_text("failed to write whole buffer"))
+        if (sent == I64{-4}) -> next
+        if (sent != I64{-11}) -> return bh_fail_errno(transfer, -sent)
+        ready :: bh_wait(transfer, I64{4}, remaining)
+        if (ready < I64{0}) -> return I64{-1}
+        if (ready == I64{0}) -> return bh_fail_errno(transfer, I64{11})
+    }
+    if (bh_remaining(transfer) <= I64{0}) -> return bh_fail_static(transfer, rt_static_text("timed out"))
+    I64{0}
+}
+
+// TcpStream::connect_timeout(address, timeout): the connected FD72, or 0 with
+// the failure text in transfer40 (or none on scheduler stop). The poll loop
+// rounds the remaining wait down to milliseconds, at least one.
+fn bh_connect(transfer: I64, address: I64, timeout: I64) -> I64 {
+    errno :: transfer + I64{48}
+    state :: jet_socket_create_raw(rt_text_word(address), I64{1}, I64{0}, errno)
+    if (state == I64{0}) {
+        if (jet_scheduler_native_propagate() == I64{0}) -> _ := bh_fail_errno(transfer, rt_text_word(errno + I64{8}))
+        return I64{0}
+    }
+    if (jet_socket_connect_raw(state, address, errno) >= I64{0}) -> return state
+    if (rt_text_word(errno + I64{8}) != I64{115}) {
+        _ := bh_fail_errno(transfer, rt_text_word(errno + I64{8}))
+        jet_fd_drop_raw(state)
+        return I64{0}
+    }
+    rt_text_store(transfer, state)
+    start :: time_host_monotonic_i64()
+    loop {
+        elapsed :: time_host_monotonic_i64() - start
+        if (elapsed >= timeout) {
+            _ := bh_fail_static(transfer, rt_static_text("connection timed out"))
+            break
+        }
+        milliseconds := (timeout - elapsed) /% I64{1000000}
+        if (milliseconds == I64{0}) -> milliseconds = I64{1}
+        ready :: bh_wait(transfer, I64{4}, milliseconds * I64{1000000})
+        if (ready < I64{0}) -> break
+        if (ready == I64{0}) -> next
+        value :: transfer + I64{80}
+        if (jet_socket_option_get_raw(state, I64{1}, I64{4}, value, errno) < I64{0}) {
+            _ := bh_fail_errno(transfer, rt_text_word(errno + I64{8}))
+            break
+        }
+        if (rt_text_word(value) != I64{0}) {
+            _ := bh_fail_errno(transfer, rt_text_word(value))
+            break
+        }
+        rt_text_store(transfer, I64{0})
+        return state
+    }
+    rt_text_store(transfer, I64{0})
+    jet_fd_drop_raw(state)
+    I64{0}
+}
+
+fn bh_ascii_lower(byte: I64) -> I64 { if (byte >= I64{65} && byte <= I64{90}) -> byte + I64{32} else -> byte }
+
+fn bh_ascii_space(byte: I64) -> Bool { byte == I64{32} || byte == I64{9} || byte == I64{10} || byte == I64{12} || byte == I64{13} }
+
+// eq_ignore_ascii_case of bytes[start..end] against a lowercase literal.
+fn bh_bytes_named(bytes: I64, start: I64, end: I64, literal: I64) -> Bool {
+    if (end - start != rt_text_len(literal)) -> return false
+    at := I64{0}
+    loop at < end - start {
+        if (bh_ascii_lower(bh_bytes_byte(bytes, start + at)) != rt_text_byte(rt_text_data(literal) + at)) -> return false
+        at += I64{1}
+    }
+    true
+}
+
+fn bh_bytes_colon(bytes: I64) -> I64 {
+    at := I64{0}
+    loop at < rt_text_word(bytes) {
+        if (bh_bytes_byte(bytes, at) == I64{58}) -> return at
+        at += I64{1}
+    }
+    I64{-1}
+}
+
+// trim_ascii of bytes[start..end]; Span16 receives the trimmed bounds.
+fn bh_trim(bytes: I64, start: I64, end: I64, span: I64) {
+    from := start
+    to := end
+    loop from < to && bh_ascii_space(bh_bytes_byte(bytes, from)) -> from += I64{1}
+    loop to > from && bh_ascii_space(bh_bytes_byte(bytes, to - I64{1})) -> to -= I64{1}
+    rt_text_store(span, from)
+    rt_text_store(span + I64{8}, to)
+}
+
+// A Transfer-Encoding header naming chunked among its comma parts.
+fn bh_chunked(rows: I64, span: I64) -> Bool {
+    at := I64{0}
+    loop at < rt_text_word(rows) {
+        line :: rt_text_word(rows + I64{16}) + at * I64{24}
+        colon :: bh_bytes_colon(line)
+        if (colon >= I64{0} && bh_bytes_named(line, I64{0}, colon, rt_static_text("transfer-encoding"))) {
+            part := colon + I64{1}
+            loop part <= rt_text_word(line) {
+                end := part
+                loop end < rt_text_word(line) && bh_bytes_byte(line, end) != (I64{44}) -> end += I64{1}
+                bh_trim(line, part, end, span)
+                if bh_bytes_named(line, rt_text_word(span), rt_text_word(span + I64{8}), rt_static_text("chunked")) -> return true
+                part = end + I64{1}
+            }
+        }
+        at += I64{1}
+    }
+    false
+}
+
+// Number24 receives [state, value, big]: state 0 parsed, 1 empty, 2 invalid
+// digit, 3 above u64::MAX; big marks a value above i64::MAX (value unused).
+// Rust's u64 FromStr/from_str_radix accept one leading '+' and stop at the
+// first invalid digit or overflow, whichever comes first.
+fn bh_parse_u64(bytes: I64, start: I64, end: I64, radix: I64, number: I64) {
+    thread_zero(number, I64{24})
+    from := start
+    if (end - start > I64{1} && bh_bytes_byte(bytes, start) == I64{43}) -> from += I64{1}
+    if (from == end) {
+        rt_text_store(number, if (end == start) -> I64{1} else -> I64{2})
+        return
+    }
+    // Magnitude limbs: high/low 32 bits each, so u64 overflow is exact.
+    high := I64{0}
+    low := I64{0}
+    at := from
+    loop at < end {
+        byte :: bh_bytes_byte(bytes, at)
+        digit :: if {
+            (byte >= I64{48} && byte <= I64{57}) -> byte - I64{48}
+            (radix == I64{16} && byte >= I64{97} && byte <= I64{102}) -> byte - I64{87}
+            (radix == I64{16} && byte >= I64{65} && byte <= I64{70}) -> byte - I64{55}
+            else -> I64{-1}
+        }
+        if (digit < I64{0}) {
+            rt_text_store(number, I64{2})
+            return
+        }
+        low = low * radix + digit
+        high = high * radix + (low >> I64{32})
+        low = low.bit_and(I64{4294967295})
+        if (high > I64{4294967295}) {
+            rt_text_store(number, I64{3})
+            return
+        }
+        at += I64{1}
+    }
+    rt_text_store(number + I64{16}, if (high > I64{2147483647}) -> I64{1} else -> I64{0})
+    rt_text_store(number + I64{8}, (high << I64{32}).bit_or(low))
+}
+
+fn bh_parse_message(state: I64) -> I64 {
+    if (state == I64{1}) -> return jet_rt_string_clone(rt_static_text("cannot parse integer from empty string"))
+    if (state == I64{2}) -> return jet_rt_string_clone(rt_static_text("invalid digit found in string"))
+    jet_rt_string_clone(rt_static_text("number too large to fit in target type"))
+}
+
+// The response after the request: head lines, informational heads skipped,
+// then a chunked or Content-Length/EOF body. Rows receive the header lines,
+// the body and the status, in that order. Returns 0 or -1.
+fn bh_response(transfer: I64, limit: I64, rows: I64) -> I64 {
+    over :: if (limit == I64{9223372036854775807}) -> limit else -> limit + I64{1}
+    work :: jet_rt_alloc(I64{120}, I64{8})
+    thread_zero(work, I64{120})
+    line :: work
+    status :: work + I64{24}
+    body :: work + I64{48}
+    span :: work + I64{72}
+    number :: work + I64{88}
+    result :: bh_response_parts(transfer, limit, over, rows, line, status, body, span, number)
+    if (result == I64{0}) {
+        bh_rows_push(rows, body)
+        bh_rows_push(rows, status)
+    }
+    bh_bytes_drop(line)
+    bh_bytes_drop(status)
+    bh_bytes_drop(body)
+    jet_rt_free(work, I64{120}, I64{8})
+    result
+}
+
+fn bh_response_parts(transfer: I64, limit: I64, over: I64, rows: I64, line: I64, status: I64, body: I64, span: I64, number: I64) -> I64 {
+    head := I64{0}
+    loop {
+        loop {
+            bh_bytes_drop(line)
+            if (bh_read(transfer, over, true, line) < I64{0}) -> return I64{-1}
+            length := rt_text_word(line)
+            if (length == I64{0}) -> return bh_fail_static(transfer, rt_static_text("unexpected EOF in HTTP response head"))
+            head = if (head > I64{9223372036854775807} - length) -> I64{9223372036854775807} else -> head + length
+            if (head > limit) -> return bh_fail_static(transfer, rt_static_text("HTTP response head exceeds transport byte bound"))
+            if ((length == I64{2} && bh_bytes_byte(line, I64{0}) == I64{13} && bh_bytes_byte(line, I64{1}) == I64{10}) || (length == I64{1} && bh_bytes_byte(line, I64{0}) == I64{10})) -> break
+            loop length > (I64{0}) && (bh_bytes_byte(line, length - I64{1}) == I64{13} || bh_bytes_byte(line, length - I64{1}) == I64{10}) -> length -= I64{1}
+            rt_text_store(line, length)
+            if (rt_text_word(status) == I64{0}) {
+                // split(b' ').nth(1): the field between the first two spaces.
+                first := I64{0}
+                loop first < length && bh_bytes_byte(line, first) != (I64{32}) -> first += I64{1}
+                if (first == length) -> return bh_fail_static(transfer, rt_static_text("HTTP response status is missing"))
+                end := first + I64{1}
+                loop end < length && bh_bytes_byte(line, end) != (I64{32}) -> end += I64{1}
+                bh_bytes_drop(status)
+                field :: jet_rt_alloc(end - first, I64{8})
+                at := I64{0}
+                loop at < (end - first - I64{1}) {
+                    rt_text_put(field + at, bh_bytes_byte(line, first + I64{1} + at))
+                    at += I64{1}
+                }
+                bh_bytes_append(status, field, end - first - I64{1})
+                jet_rt_free(field, end - first, I64{8})
+            } else {
+                bh_rows_push(rows, line)
+            }
+        }
+        // Informational heads precede the final response in HTTP framing;
+        // this is not redirect or success/failure status policy.
+        informational :: rt_text_word(status) == I64{3} && bh_bytes_byte(status, I64{0}) == I64{49}
+        switching :: informational && bh_bytes_byte(status, I64{1}) == I64{48} && bh_bytes_byte(status, I64{2}) == I64{49}
+        if (informational && !switching) {
+            bh_bytes_drop(status)
+            bh_rows_drop(rows)
+            next
+        }
+        break
+    }
+    if bh_chunked(rows, span) -> return bh_chunked_body(transfer, limit, over, line, body, span, number)
+    // Content-Length is transport framing, not response-size policy. A
+    // malformed length takes nothing; Jet interprets the returned head.
+    found := false
+    at := I64{0}
+    loop at < rt_text_word(rows) {
+        header :: rt_text_word(rows + I64{16}) + at * I64{24}
+        colon :: bh_bytes_colon(header)
+        if (colon >= I64{0} && bh_bytes_named(header, I64{0}, colon, rt_static_text("content-length"))) {
+            found = true
+            bh_trim(header, colon + I64{1}, rt_text_word(header), span)
+            bh_parse_u64(header, rt_text_word(span), rt_text_word(span + I64{8}), I64{10}, number)
+            break
+        }
+        at += I64{1}
+    }
+    valid :: found && rt_text_word(number) == I64{0}
+    big :: valid && rt_text_word(number + I64{16}) != I64{0}
+    length :: rt_text_word(number + I64{8})
+    wanted :: if {
+        (found && !valid) -> I64{0}
+        (valid && !big && length < over) -> length
+        else -> over
+    }
+    if (bh_read(transfer, wanted, false, body) < I64{0}) -> return I64{-1}
+    if (valid && !big && length <= limit && rt_text_word(body) != length) -> return bh_fail_static(transfer, rt_static_text("unexpected EOF in HTTP response body"))
+    I64{0}
+}
+
+fn bh_chunked_body(transfer: I64, limit: I64, over: I64, line: I64, body: I64, span: I64, number: I64) -> I64 {
+    loop {
+        bh_bytes_drop(line)
+        if (bh_read(transfer, over, true, line) < I64{0}) -> return I64{-1}
+        if (rt_text_word(line) > limit) -> return bh_fail_static(transfer, rt_static_text("HTTP chunk head exceeds transport byte bound"))
+        end := I64{0}
+        loop end < rt_text_word(line) && bh_bytes_byte(line, end) != (I64{59}) -> end += I64{1}
+        bh_trim(line, I64{0}, end, span)
+        start :: rt_text_word(span)
+        stop :: rt_text_word(span + I64{8})
+        invalid :: text_bytes_utf8_error(rt_text_word(line + I64{16}) + start * RT_HOST_U8_STRIDE, stop - start)
+        if (invalid != I64{0}) -> return bh_fail(transfer, invalid)
+        bh_parse_u64(line, start, stop, I64{16}, number)
+        if (rt_text_word(number) != I64{0}) -> return bh_fail(transfer, bh_parse_message(rt_text_word(number)))
+        big :: rt_text_word(number + I64{16}) != I64{0}
+        size :: rt_text_word(number + I64{8})
+        if (!big && size == I64{0}) -> break
+        room :: over - rt_text_word(body)
+        wanted :: if (!big && size < room) -> size else -> room
+        if (bh_read(transfer, wanted, false, body) < I64{0}) -> return I64{-1}
+        if (rt_text_word(body) - (over - room) != wanted) -> return bh_fail_static(transfer, rt_static_text("unexpected EOF in HTTP response chunk"))
+        if (rt_text_word(body) > limit) -> break
+        bh_bytes_drop(line)
+        if (bh_read(transfer, I64{2}, false, line) < I64{0}) -> return I64{-1}
+        if (rt_text_word(line) != I64{2}) -> return bh_fail_static(transfer, rt_static_text("failed to fill whole buffer"))
+        if (bh_bytes_byte(line, I64{0}) != I64{13} || bh_bytes_byte(line, I64{1}) != I64{10}) -> return bh_fail_static(transfer, rt_static_text("invalid HTTP response chunk framing"))
+    }
+    I64{0}
+}
+
+// Socket56 of one resolved answer: 4 or 16 octets of a native [U8] header.
+fn bh_address(header: I64, port: I64, address: I64) -> Bool {
+    length :: rt_text_word(header)
+    if (length != I64{4} && length != I64{16}) -> return false
+    thread_zero(address, I64{56})
+    rt_text_store(address, if (length == I64{4}) -> I64{4} else -> I64{6})
+    data :: rt_text_word(header + I64{16})
+    at := I64{0}
+    loop at < length {
+        rt_text_put(address + I64{8} + at, host_u8_get(data, at))
+        at += I64{1}
+    }
+    rt_text_store(address + I64{24}, port)
+    true
+}
+
+// The one native TLS refusal (Lower/Routes.jet lower_tls_transport_message,
+// generated as trap_msg_native_tls) as this leaf's String error.
+fn bh_tls_refusal() -> I64 {
+    text :: jet_rt_string_builder_new()
+    trap_build_msg_native_tls(text)
+    jet_rt_string_builder_finish(text)
+}
+
+#Export(c) fn jet_http_build_get(host: I64, authority: I64, target: I64, secure: Bool, addresses: I64, count: I64, port: I64, timeout_ms: I64, limit: I64, ok: I64, ok_len: I64, error: I64) -> I64 {
+    native_port :: host_native_int(port)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    timeout :: host_native_int(timeout_ms)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    bound :: host_native_int(limit)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (native_port < I64{0} || native_port > I64{65535} || timeout < I64{0} || bound < I64{0}) -> return bh_range_error(error)
+    transfer :: jet_rt_alloc(I64{96}, I64{8})
+    thread_zero(transfer, I64{96})
+    now :: time_host_monotonic_i64()
+    // Instant + Duration cannot overflow for an i64 millisecond count; the
+    // saturated deadline is the same unreachable instant.
+    rt_text_store(transfer + I64{8}, if (timeout > (I64{9223372036854775807} - now) /% I64{1000000}) -> I64{9223372036854775807} else -> now + timeout * I64{1000000})
+    address :: jet_rt_alloc(I64{56}, I64{8})
+    state := I64{0}
+    // An empty answer list fails with std's AddrNotAvailable text.
+    rt_text_store(transfer + I64{40}, jet_rt_string_clone(rt_static_text("no resolved addresses")))
+    at := I64{0}
+    stopped := false
+    loop at < count {
+        if !bh_address(addresses + at * I64{24}, native_port, address) {
+            jet_rt_string_drop(rt_text_word(transfer + I64{40}))
+            rt_text_store(transfer + I64{40}, jet_rt_string_clone(rt_static_text("invalid resolved address carrier")))
+            break
+        }
+        remaining :: bh_remaining(transfer)
+        if (remaining <= I64{0}) {
+            jet_rt_string_drop(rt_text_word(transfer + I64{40}))
+            rt_text_store(transfer + I64{40}, jet_rt_string_clone(rt_static_text("timed out")))
+            break
+        }
+        last :: rt_text_word(transfer + I64{40})
+        rt_text_store(transfer + I64{40}, I64{0})
+        state = bh_connect(transfer, address, remaining)
+        if (state != I64{0}) {
+            jet_rt_string_drop(last)
+            break
+        }
+        if (rt_text_word(transfer + I64{40}) == I64{0}) {
+            rt_text_store(transfer + I64{40}, last)
+            stopped = true
+            break
+        }
+        jet_rt_string_drop(last)
+        at += I64{1}
+    }
+    jet_rt_free(address, I64{56}, I64{8})
+    result := I64{0}
+    if (state == I64{0}) {
+        failure :: rt_text_word(transfer + I64{40})
+        if stopped {
+            jet_rt_string_drop(failure)
+        } else {
+            _ := bh_text_error(error, failure)
+        }
+        jet_rt_free(transfer, I64{96}, I64{8})
+        return I64{0}
+    }
+    rt_text_store(transfer, state)
+    if secure {
+        result = bh_text_error(error, bh_tls_refusal())
+    } else {
+        // HTTP framing only. Close avoids a connection pool or another
+        // request; identity keeps transport decoding off the pinned bytes.
+        // CRLF is the two-byte word 0x0A0D.
+        request :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(request, rt_static_text("GET "))
+        jet_rt_string_builder_push(request, target)
+        jet_rt_string_builder_push(request, rt_static_text(" HTTP/1.1"))
+        rt_text_push_word(request, I64{2573}, I64{2})
+        jet_rt_string_builder_push(request, rt_static_text("Host: "))
+        jet_rt_string_builder_push(request, authority)
+        rt_text_push_word(request, I64{2573}, I64{2})
+        jet_rt_string_builder_push(request, rt_static_text("Accept-Encoding: identity"))
+        rt_text_push_word(request, I64{2573}, I64{2})
+        jet_rt_string_builder_push(request, rt_static_text("Connection: close"))
+        rt_text_push_word(request, I64{168626701}, I64{4})
+        sent :: bh_send(transfer, request)
+        jet_rt_string_drop(request)
+        rows :: jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(rows, I64{24})
+        if (sent == I64{0}) {
+            buffer :: jet_rt_alloc(I64{8192}, I64{8})
+            rt_text_store(transfer + I64{16}, buffer)
+            received :: bh_response(transfer, bound, rows)
+            jet_rt_free(buffer, I64{8192}, I64{8})
+            if (received == I64{0}) -> result = bh_rows_publish(rows, ok, ok_len)
+        }
+        bh_rows_drop(rows)
+        jet_rt_free(rows, I64{24}, I64{8})
+        failure :: rt_text_word(transfer + I64{40})
+        if (result == I64{0} && failure != I64{0}) {
+            _ := bh_text_error(error, failure)
+        } else if (failure != I64{0}) {
+            jet_rt_string_drop(failure)
+        }
+    }
+    jet_fd_drop_raw(state)
+    jet_rt_free(transfer, I64{96}, I64{8})
+    result
+}

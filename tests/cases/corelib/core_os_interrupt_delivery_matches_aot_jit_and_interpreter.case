@@ -1,0 +1,40 @@
+# Port of tests/corelib_parts/compile.rs::core_os_interrupt_delivery_matches_aot_jit_and_interpreter; guest sources preserved verbatim.
+requires: os:unix
+refused: read_bytes
+# PENDING-GRAMMAR(batch-four): raw session + SIGINT +30s child liveness poll.
+fixture: fixtures/core_os_interrupt_delivery_matches_aot_jit_and_interpreter
+step: jet build fixture.jet
+session aot raw: built
+recv aot until = "ready\n" within 30s
+stdout: = "ready\n"
+signal aot: INT
+repeat while process {pid:aot} alive timeout 30s every 25ms fail "interrupt program did not exit after SIGINT"
+end repeat
+close aot
+exit: 0
+stdout: = "first\nsecond\n"
+stderr: !~ "unsupported" # original tier refusal exclusion
+session jit raw: jet run fixture.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/run-cache-jit
+recv jit until = "ready\n" within 30s
+stdout: = "ready\n"
+signal jit: INT
+repeat while process {pid:jit} alive timeout 30s every 25ms fail "interrupt program did not exit after SIGINT"
+end repeat
+close jit
+exit: 0
+stdout: = "first\nsecond\n"
+stderr: !~ "unsupported" # original tier refusal exclusion
+session interpret raw: jet run --interpret fixture.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/run-cache-interpreter
+recv interpret until = "ready\n" within 30s
+stdout: = "ready\n"
+signal interpret: INT
+repeat while process {pid:interpret} alive timeout 30s every 25ms fail "interrupt program did not exit after SIGINT"
+end repeat
+close interpret
+exit: 0
+stdout: = "first\nsecond\n"
+stderr: !~ "unsupported" # original tier refusal exclusion

@@ -15,7 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::OutputAdapter::active_profile;
 use crate::{OutputMode, report_problems};
 use jet::ExitCodes;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::EncodingJson::parse_json;
 use jet_foundation::Facts::{DerivationRecord, DerivationRef};
 use jet_foundation::JSON::json_escape;
@@ -468,7 +468,7 @@ fn load_curriculum() -> Result<Curriculum, String> {
     })
 }
 
-fn parse_task(value: &DataTree, index: usize) -> Result<LearningTask, String> {
+fn parse_task(value: &Dyn, index: usize) -> Result<LearningTask, String> {
     let object = value
         .as_object()
         .map_err(|error| format!("task {index} must be an object: {error}"))?;
@@ -517,7 +517,7 @@ fn parse_task(value: &DataTree, index: usize) -> Result<LearningTask, String> {
         .map_err(|error| format!("{id}.transfer must be an object: {error}"))?;
     let transfer = Transfer {
         fixture: parse_fixture(
-            &DataTree::Object(transfer_object.to_vec()),
+            &Dyn::Object(transfer_object.to_vec()),
             &format!("{id}.transfer"),
         )?,
         structural_difference: required_text(transfer_object, "structural_difference", &id)?,
@@ -562,7 +562,7 @@ fn parse_task(value: &DataTree, index: usize) -> Result<LearningTask, String> {
     })
 }
 
-fn parse_fixture(value: &DataTree, label: &str) -> Result<Fixture, String> {
+fn parse_fixture(value: &Dyn, label: &str) -> Result<Fixture, String> {
     let object = value
         .as_object()
         .map_err(|error| format!("{label} must be an object: {error}"))?;
@@ -574,7 +574,7 @@ fn parse_fixture(value: &DataTree, label: &str) -> Result<Fixture, String> {
     })
 }
 
-fn parse_input_identity(value: &DataTree, label: &str) -> Result<InputIdentity, String> {
+fn parse_input_identity(value: &Dyn, label: &str) -> Result<InputIdentity, String> {
     let object = value
         .as_object()
         .map_err(|error| format!("{label}.input_identity must be an object: {error}"))?;
@@ -585,7 +585,7 @@ fn parse_input_identity(value: &DataTree, label: &str) -> Result<InputIdentity, 
     })
 }
 
-fn parse_oracle(value: &DataTree, label: &str) -> Result<Oracle, String> {
+fn parse_oracle(value: &Dyn, label: &str) -> Result<Oracle, String> {
     let object = value
         .as_object()
         .map_err(|error| format!("{label}.oracle must be an object: {error}"))?;
@@ -598,7 +598,7 @@ fn parse_oracle(value: &DataTree, label: &str) -> Result<Oracle, String> {
     })
 }
 
-fn parse_reveal(value: &DataTree, label: &str) -> Result<Reveal, String> {
+fn parse_reveal(value: &Dyn, label: &str) -> Result<Reveal, String> {
     let object = value
         .as_object()
         .map_err(|error| format!("{label}.reveal must be an object: {error}"))?;
@@ -610,7 +610,7 @@ fn parse_reveal(value: &DataTree, label: &str) -> Result<Reveal, String> {
     })
 }
 
-fn parse_accessibility(value: &DataTree, label: &str) -> Result<Accessibility, String> {
+fn parse_accessibility(value: &Dyn, label: &str) -> Result<Accessibility, String> {
     let object = value
         .as_object()
         .map_err(|error| format!("{label}.accessibility must be an object: {error}"))?;
@@ -642,13 +642,13 @@ fn validate_fixture(fixture: &Fixture, label: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], name: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], name: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(key, value)| (key == name).then_some(value))
 }
 
-fn required_text(object: &[(String, DataTree)], name: &str, label: &str) -> Result<String, String> {
+fn required_text(object: &[(String, Dyn)], name: &str, label: &str) -> Result<String, String> {
     object_field(object, name)
         .and_then(|value| value.as_str().ok())
         .map(str::to_string)
@@ -656,15 +656,15 @@ fn required_text(object: &[(String, DataTree)], name: &str, label: &str) -> Resu
         .ok_or_else(|| format!("{label} is missing non-empty `{name}`"))
 }
 
-fn required_bool(object: &[(String, DataTree)], name: &str, label: &str) -> Result<bool, String> {
+fn required_bool(object: &[(String, Dyn)], name: &str, label: &str) -> Result<bool, String> {
     match object_field(object, name) {
-        Some(DataTree::Bool(value)) => Ok(*value),
+        Some(Dyn::Bool(value)) => Ok(*value),
         _ => Err(format!("{label} is missing boolean `{name}`")),
     }
 }
 
 fn text_array(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     name: &str,
     label: &str,
 ) -> Result<Vec<String>, String> {
@@ -1196,40 +1196,60 @@ fn drive_fixture(
     }
 }
 
+/// D-EXEC1/D-EXEC2=A: the exercise runs the way every program runs. The
+/// front end checks it in process (its diagnostics teach and its semantic
+/// index names the derivation); a clean exercise then runs as a child
+/// `jet run` (normal build path, then execute) whose stdout is compared.
 fn evaluate(path: &Path, expected_output: &str) -> Evaluation {
     let file = path.to_string_lossy();
-    let run = jet::Interpreter::dev_iteration_with_gates_profile_and_settings_with_lints(
+    let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_run(
         &file,
-        false,
-        false,
-        jet::Policy::GateSet::default(),
         "dev",
         &std::collections::BTreeMap::new(),
     );
-    let derivation = run.snapshot.as_ref().and_then(|snapshot| {
-        let index = jet_semindex::from_checked(&snapshot.bundle, &snapshot.facts);
-        index
-            .derivations()
+    let Some(bundle) = bundle.filter(|_| {
+        !diagnostics
             .iter()
-            .find(|record| record.disposition.is_current())
-            .cloned()
+            .any(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
+    }) else {
+        return Evaluation::Problems { diagnostics };
+    };
+    let derivation = jet_semindex::from_checked(&bundle, &facts)
+        .derivations()
+        .iter()
+        .find(|record| record.disposition.is_current())
+        .cloned();
+    let run = std::env::current_exe().and_then(|exe| {
+        std::process::Command::new(exe)
+            .arg("run")
+            .arg(path)
+            .stdin(std::process::Stdio::null())
+            .output()
     });
-    match run.outcome {
-        jet::Interpreter::RunOutcome::Problems(diagnostics) => Evaluation::Problems { diagnostics },
-        jet::Interpreter::RunOutcome::Ran {
-            stdout,
-            stderr,
-            exit_code,
-        } if exit_code == 0 && stdout == expected_output => Evaluation::Complete {
+    let run = match run {
+        Ok(run) => run,
+        Err(error) => {
+            return Evaluation::WrongOutput {
+                stdout: String::new(),
+                stderr: format!("couldn't run the exercise: {error}\n"),
+                derivation,
+            }
+        }
+    };
+    let stdout = String::from_utf8_lossy(&run.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&run.stderr).into_owned();
+    if crate::CmdCompile::child_exit_code(run.status) == 0 && stdout == expected_output {
+        Evaluation::Complete {
             stdout,
             stderr,
             derivation,
-        },
-        jet::Interpreter::RunOutcome::Ran { stdout, stderr, .. } => Evaluation::WrongOutput {
+        }
+    } else {
+        Evaluation::WrongOutput {
             stdout,
             stderr,
             derivation,
-        },
+        }
     }
 }
 
@@ -1759,7 +1779,7 @@ fn watch_until_changed(path: &Path, mode: OutputMode) -> Result<(), i32> {
         println!("Press Ctrl+C to exit. Run 'jet learn' to resume.");
     }
     loop {
-        jet_jit::scheduler_sleep_ms(120);
+        jet_evalhost::scheduler_sleep_ms(120);
         let Some(receipt) = watch.poll() else {
             continue;
         };
@@ -1871,16 +1891,16 @@ fn load_progress(path: &Path) -> Result<Option<Progress>, String> {
     }))
 }
 
-fn optional_text(object: &[(String, DataTree)], name: &str) -> String {
+fn optional_text(object: &[(String, Dyn)], name: &str) -> String {
     object_field(object, name)
         .and_then(|value| value.as_str().ok())
         .unwrap_or_default()
         .to_string()
 }
 
-fn optional_nullable_text(object: &[(String, DataTree)], name: &str) -> Option<String> {
+fn optional_nullable_text(object: &[(String, Dyn)], name: &str) -> Option<String> {
     match object_field(object, name) {
-        Some(DataTree::Null) | None => None,
+        Some(Dyn::Null) | None => None,
         Some(value) => value.as_str().ok().map(str::to_string),
     }
 }

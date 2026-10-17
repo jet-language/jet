@@ -5,7 +5,7 @@
 // D-FE-CLI1).
 
 // How `cli_realize_ref_outcome` reports a successful realization (D-FE-CLI1).
-pub enum RowStyle {
+enum RowStyle {
     // The state-column ledger row (`✓ name version state`), D-JPK-CACHE1.
     Ledger
     // The tier-1 trivial-op row (`✓ name version`, no state or detail).
@@ -15,7 +15,7 @@ pub enum RowStyle {
     Silent
 }
 
-pub enum RefOutcome {
+enum RefOutcome {
     // The realized entry, its source state, the ledger row text (computed for
     // every style), and the lease that keeps the entry consumable.
     Realized(entry: StoreEntry, state: SourceState, line: String, lease: CacheLease)
@@ -29,7 +29,7 @@ pub enum RefOutcome {
 // Whose ledger a realization belongs to. A user tool is installed into the
 // user profile and is never reconciled against the lock of whatever project
 // the shell happens to be standing in.
-pub enum RealizeScope {
+enum RealizeScope {
     Project
     UserProfile
     Use
@@ -39,7 +39,7 @@ pub enum RealizeScope {
 // current project's env file (`jetpack use ripgrep@stable`) and any workspace
 // member (`jetpack use logging`, `jetpack use packages/logging`, Slice B,
 // D-MONOREF1=A). Prints the diagnostic on failure.
-pub fn cli_classify_or_report(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> RefSpec RefError! {
+fn cli_classify_or_report(cache: &WorkspaceDeclarationCache, theme: Theme, raw: String) -[IO, FS, Env, Exec, Time.Wait]> RefSpec RefError! {
     table :: cli_cwd_table(&cache)
     index :: cli_cwd_workspace_index(&cache)
     if RefSpec.classify_with_workspace(raw, table, index) == {
@@ -116,7 +116,7 @@ fn cli_cached_plan_item(spec: RefSpec, entry: StoreEntry) -[FS]> PlanItem Never!
 // read here for its signed closure sizes; payload admission remains behind
 // the caller's single confirmation gate. `progress` is the planning live
 // region's sink (Rust `Store::with_progress`), when one is drawn.
-pub fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, specs: [RefSpec], scope: RealizeScope, progress: ProgressHandle?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
+fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, specs: [RefSpec], scope: RealizeScope, progress: ProgressHandle?) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> DownloadPlan CLIError! {
     store_dir :: roots.hangar_dir()
     project_dir :: cli_scope_project_dir(scope)
     fixtures :: cli_effective_fixtures(flags)
@@ -181,7 +181,7 @@ pub fn cli_plan_downloads(verification: &StoreVerification, theme: Theme, roots:
 
 // Realize one ref, recording it in the store and printing progress. `table`
 // resolves named sources (D-JPK17); it is empty for direct CLI refs.
-pub fn cli_realize_ref(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState)? Never! {
+fn cli_realize_ref(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState)? Never! {
     live := LiveRegion?{None}
     if cli_realize_ref_outcome(&verification, theme, roots, flags, table, spec, name_w, RowStyle.Ledger, &live, RealizeScope.Project) == {
         .Realized(entry, state, _, _) -> Val((entry: entry, state: state))
@@ -208,7 +208,7 @@ fn cli_report_offline_nix(theme: Theme, spec: RefSpec) Never! -[IO, Time.Wait]> 
     ProviderError.Offline("`{spec.raw}` is not in the hangar and --offline forbids fetching provider output").report(theme)
 }
 
-pub fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int, style: RowStyle, live: &LiveRegion?, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> RefOutcome Never! {
+fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, table: SourceTable, spec: RefSpec, name_w: Int, style: RowStyle, live: &LiveRegion?, scope: RealizeScope) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> RefOutcome Never! {
     // Tier 2 (D-FE-CLI1: erase live regions before diagnostics). A `Silent`
     // caller owns the aggregate line, which its progress sink redraws while
     // this call runs; clear only the spinner/ledger path up front.
@@ -305,7 +305,7 @@ pub fn cli_realize_ref_outcome(verification: &StoreVerification, theme: Theme, r
                 cli_stop_spinner(^spinner)
                 cli_clear_live_region(live)
                 env_warn_sandbox_fallback(theme)
-                if trust_gate_build_identity(theme, trust_store_path(), identity, flags.trust) != None -> return RefOutcome.Failed
+                if trust_gate_build_identity(theme, trust_store_path(), project_dir ?? ".", identity, flags.trust) != None -> return RefOutcome.Failed
             }
         }
         .Err(reason) -> {
@@ -426,7 +426,7 @@ fn cli_package_fixture_available(flags: CLIFlags, spec: RefSpec) -[FS, Env]> Boo
 
 // E1272: packages with no supported Nix compatibility output. Under `--json`
 // the hole list precedes the human diagnostic.
-pub fn cli_report_nix_bridge_required(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) Never! -[IO, Time.Wait]> {
+fn cli_report_nix_bridge_required(theme: Theme, flags: CLIFlags, holes: [NixBridgeNeed], realized_refs: [String]) Never! -[IO, Time.Wait]> {
     if flags.json {
         hole_texts := [String]{}
         loop hole in holes -> &hole_texts.push(cli_json_quote(hole.reference))
@@ -449,7 +449,7 @@ pub fn cli_report_nix_bridge_required(theme: Theme, flags: CLIFlags, holes: [Nix
 
 // Realize one U20 adapter package. `consume` pins its executable through the
 // lease so the caller can run it.
-pub fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState, lease: CacheLease)? Never! {
+fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots: HangarRoots, flags: CLIFlags, plan: AdapterPlan, table: SourceTable, consume: Bool) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> (entry: StoreEntry, state: SourceState, lease: CacheLease)? Never! {
     theme.status("Adapting {theme.bold(plan.name)} …")
     ctx :: cli_provider_ctx(roots, flags, cli_effective_fixtures(flags), cli_current_project_dir(), None, Val(roots))
     expectation :: provider_adapter_cache_expectation(plan, table, ctx) ?? {
@@ -459,7 +459,7 @@ pub fn cli_realize_adapter(verification: &StoreVerification, theme: Theme, roots
     if plan.recipe == .Build(recipe) {
         env_warn_sandbox_fallback(theme)
         identity :: provider_adapter_action_identity(plan, recipe, expectation.identity.source_fingerprint, expectation.identity.platform, table)
-        if trust_gate_build_identity(theme, trust_store_path(), identity, flags.trust) != None -> return None
+        if trust_gate_build_identity(theme, trust_store_path(), cli_current_project_dir() ?? ".", identity, flags.trust) != None -> return None
     }
     request :: RealizeRequest.Adapter{plan: plan, table: table, expectation: expectation}
     if store_realize_verified(&verification, roots, ctx, request) == {
@@ -523,7 +523,7 @@ fn cli_report_realize_error(theme: Theme, error: RealizeError) Never! -[IO, Time
 // Best-effort version out of a store-path basename like
 // `<hash>-ripgrep-14.1.0`: everything after `<name>-`, if it starts with a
 // digit (so `my-tool-src` never masquerades as a version).
-pub fn cli_version_from_out(name: String, out: String) -> String? Never! {
+fn cli_version_from_out(name: String, out: String) -> String? Never! {
     base :: out.cut_last("/")?.after ?? out
     parts :: base.split_once("-{name}-") ?? return None
     version :: parts.after

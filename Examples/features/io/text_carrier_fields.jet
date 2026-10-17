@@ -1,0 +1,22 @@
+// Runtime-handle String fields lend a canonical header, never a Rust String.
+// Each owning read clones the bytes; the final clone outlives its file owner.
+package {
+    name: "text_carrier_fields"
+    authority: { holds: { allow: [FS.Write, IO, Mem.Alloc] } }
+}
+
+use core.files as files
+
+fn escaped_writer_path() -> String {
+    owner :: files.create("/dev/null") ?? panic("open null writer")
+    print(owner.path)
+    first :: owner.path
+    cloned :: first.copy()
+    print(cloned)
+    cloned
+}
+
+fn run() {
+    escaped :: escaped_writer_path()
+    print(escaped)
+}

@@ -1,0 +1,11 @@
+# Port of tests/pkg.rs:5590-5641; all source/helper-expanded manifest bytes verbatim.
+# Original git availability gate retained; rustc is not required by the test subject.
+requires: tool:git
+fixture: fixtures/vendor
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet registry vendor --vendor-dir third_party
+exit: 0
+file: third_party/greeter is-dir
+file: third_party/manifest.json is-file
+file: vendor absent

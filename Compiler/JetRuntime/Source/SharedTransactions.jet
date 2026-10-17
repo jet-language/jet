@@ -1,0 +1,295 @@
+// SharedProtocol.rs:544-595,751-788,934-1042 and MathTaskMem.rs:1756-1766,
+// 1895-1929. Bodies execute once on an immediate owned stage. No callback
+// environment is stored in a transaction or replayed at commit.
+// Root32: mutex0, owning thread8, recursive gate depth16, wake sequence24.
+// State48: stack-next0, weak parent8, sorted parts16, live24, gate32, refs40.
+// Native weak parents retain only the state allocation, not its live authority.
+// Part72: next0, retained cell8, stage16, writes24, commit-hook32,
+// prepared40, retired48, next revision56, borrowed cell descriptor64.
+// Each part retains the combined native cell allocation until disposal; its
+// descriptor and staged/drop functions therefore cannot outlive their owner.
+stm_root := I64{0}
+
+stm_key := I64{0}
+
+// runtime-init: 4
+#Export(c) fn jet_rt_stm_init() {
+    if stm_root != (I64{0}) -> return
+    stm_root = jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(stm_root, I64{32})
+    // Scoped transaction owners, not TLS, own the states. Like Rust's weak
+    // stack, forgetting a transaction does not manufacture a rollback.
+    stm_key = jet_rt_tls_key_new(I64{0})
+}
+
+// SharedProtocol.rs:544-595/729-748: the outermost process-wide gate is
+// held from begin through commit/rollback, including all body execution.
+// Nested scopes join their parent's authority rather than reacquiring it.
+fn stm_gate_enter() {
+    me :: sync_load(thread_base() + I64{8})
+    sync_mutex_lock(stm_root)
+    loop sync_load(stm_root + I64{8}) != (I64{0}) && sync_load(stm_root + I64{8}) != me {
+        scheduler_blocking_wait_enter()
+        _ := sync_cond_wait(stm_root + I64{24}, stm_root, I64{-1})
+        scheduler_blocking_wait_leave()
+    }
+    sync_store(stm_root + I64{8}, me)
+    _ := sync_add(stm_root + I64{16}, I64{1})
+    sync_mutex_unlock(stm_root)
+}
+
+fn stm_gate_leave() {
+    sync_mutex_lock(stm_root)
+    if sync_add(stm_root + I64{16}, I64{-1}) == (I64{1}) {
+        sync_store(stm_root + I64{8}, I64{0})
+        sync_cond_notify_all(stm_root + I64{24})
+    }
+    sync_mutex_unlock(stm_root)
+}
+
+fn stm_state_drop(state: I64) {
+    if state == (I64{0}) -> return
+    if sync_add(state + I64{40}, I64{-1}) != (I64{1}) -> return
+    parent :: sync_load(state + I64{8})
+    jet_rt_free(state, I64{48}, I64{8})
+    stm_state_drop(parent)
+}
+
+fn stm_pop(state: I64) {
+    first :: jet_rt_tls_get(stm_key)
+    if first == state {
+        jet_rt_tls_set(stm_key, sync_load(state))
+        return
+    }
+    before := first
+    loop before != (I64{0}) {
+        following :: sync_load(before)
+        if following == state {
+            sync_store(before, sync_load(state))
+            return
+        }
+        before = following
+    }
+}
+
+#Export(c) fn jet_rt_native_stm_begin() -> I64 {
+    parent :: jet_rt_tls_get(stm_key)
+    gate :: parent == I64{0}
+    if gate -> stm_gate_enter()
+    state :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(state, I64{48})
+    sync_store(state, parent)
+    sync_store(state + I64{8}, parent)
+    sync_store(state + I64{24}, I64{1})
+    sync_store(state + I64{32}, if gate -> I64{1} else -> I64{0})
+    sync_store(state + I64{40}, I64{1})
+    if parent != (I64{0}) -> _ := sync_add(parent + I64{40}, I64{1})
+    jet_rt_tls_set(stm_key, state)
+    state
+}
+
+fn stm_part(state: I64, cell: I64) -> I64 {
+    link := state + I64{16}
+    loop sync_load(link) != (I64{0}) {
+        part :: sync_load(link)
+        owner :: sync_load(part + I64{8})
+        if owner == cell -> return part
+        if owner > cell -> break
+        link = part
+    }
+    part :: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(part, I64{72})
+    shared_retain(cell)
+    sync_store(part, sync_load(link))
+    sync_store(part + I64{8}, cell)
+    sync_store(part + I64{64}, sync_load(cell + I64{56}))
+    sync_store(link, part)
+    part
+}
+
+fn stm_staged(state: I64, cell: I64) -> I64 {
+    if state == (I64{0}) || sync_load(state + I64{24}) == (I64{0}) -> return I64{0}
+    part := sync_load(state + I64{16})
+    loop part != (I64{0}) {
+        if sync_load(part + I64{8}) == cell {
+            staged :: sync_load(part + I64{16})
+            if staged != (I64{0}) -> return staged
+            break
+        }
+        part = sync_load(part)
+    }
+    stm_staged(sync_load(state + I64{8}), cell)
+}
+
+fn stm_clone(source: I64, meta: I64) -> I64 {
+    target :: coll_slot_new(meta)
+    coll_slot_clone(source, target, meta)
+    if jet_rt_session_propagate() != (I64{0}) {
+        // A failing checked clone cleans its partial output. It never creates
+        // an initialized owner in this log.
+        jet_rt_free(target, coll_size(meta), I64{8})
+        return I64{0}
+    }
+    target
+}
+
+#Export(c) fn jet_rt_native_shared_read_txn(cell: I64, state: I64, env: I64, invoke: I64, out: I64) {
+    _ := stm_part(state, cell)
+    staged :: stm_staged(state, cell)
+    if staged != (I64{0}) {
+        _ := coll_call3(invoke, env, staged, out)
+        return
+    }
+    shared_acquire(cell, false)
+    _ := coll_call3(invoke, env, sync_load(cell + I64{64}), out)
+    shared_release(cell, false)
+}
+
+#Export(c) fn jet_rt_native_shared_edit_txn(cell: I64, state: I64, env: I64, invoke: I64, out: I64) {
+    part :: stm_part(state, cell)
+    staged := sync_load(part + I64{16})
+    if staged == (I64{0}) {
+        meta :: sync_load(part + I64{64})
+        inherited :: stm_staged(sync_load(state + I64{8}), cell)
+        if {
+            inherited != (I64{0}) -> staged = stm_clone(inherited, meta)
+            else -> {
+                shared_acquire(cell, false)
+                staged = stm_clone(sync_load(cell + I64{64}), meta)
+                shared_release(cell, false)
+            }
+        }
+        if staged == (I64{0}) -> return
+        sync_store(part + I64{16}, staged)
+    }
+    sync_store(part + I64{24}, I64{1})
+    _ := coll_call3(invoke, env, staged, out)
+    // Rust installs its commit hook only after the synchronous body returns.
+    if jet_rt_session_propagate() == (I64{0}) -> sync_store(part + I64{32}, I64{1})
+}
+
+fn stm_parts_drop(first: I64) {
+    part := first
+    loop part != (I64{0}) {
+        following :: sync_load(part)
+        meta :: sync_load(part + I64{64})
+        coll_slot_free(sync_load(part + I64{16}), meta)
+        coll_slot_free(sync_load(part + I64{40}), meta)
+        coll_slot_free(sync_load(part + I64{48}), meta)
+        jet_rt_native_shared_drop(sync_load(part + I64{8}))
+        jet_rt_free(part, I64{72}, I64{8})
+        part = following
+    }
+}
+
+fn stm_finish(state: I64) {
+    if sync_load(state + I64{32}) != (I64{0}) {
+        sync_store(state + I64{32}, I64{0})
+        stm_gate_leave()
+    }
+    stm_state_drop(state)
+}
+
+#Export(c) fn jet_rt_native_stm_rollback(state: I64) {
+    if state == (I64{0}) -> return
+    if sync_swap(state + I64{24}, I64{0}) != (I64{0}) {
+        stm_pop(state)
+        parts :: sync_swap(state + I64{16}, I64{0})
+        stm_parts_drop(parts)
+    }
+    stm_finish(state)
+}
+
+fn stm_merge(parent: I64, first: I64) {
+    child := first
+    loop child != (I64{0}) {
+        target :: stm_part(parent, sync_load(child + I64{8}))
+        staged :: sync_load(child + I64{16})
+        if staged != (I64{0}) {
+            previous :: sync_load(target + I64{16})
+            // Transfer the child's initialized owner, as nested merge moves
+            // its staged authority. No clone or partial-merge failure path.
+            sync_store(target + I64{16}, staged)
+            sync_store(child + I64{16}, I64{0})
+            coll_slot_free(previous, sync_load(target + I64{64}))
+        }
+        if sync_load(child + I64{24}) != (I64{0}) -> sync_store(target + I64{24}, I64{1})
+        if sync_load(child + I64{32}) != (I64{0}) -> sync_store(target + I64{32}, I64{1})
+        child = sync_load(child)
+    }
+}
+
+#Export(c) fn jet_rt_native_stm_commit(state: I64) {
+    if state == (I64{0}) -> return
+    if sync_swap(state + I64{24}, I64{0}) == (I64{0}) {
+        stm_finish(state)
+        return
+    }
+    stm_pop(state)
+    parts :: sync_swap(state + I64{16}, I64{0})
+    parent :: sync_load(state + I64{8})
+    if parent != (I64{0}) && sync_load(parent + I64{24}) != (I64{0}) {
+        stm_merge(parent, parts)
+        stm_parts_drop(parts)
+        stm_finish(state)
+        return
+    }
+    // The list is deduplicated and kept in physical-owner address order.
+    // Even read-only participants acquire editable permits, as Rust934-975.
+    part := parts
+    loop part != (I64{0}) {
+        shared_acquire(sync_load(part + I64{8}), true)
+        part = sync_load(part)
+    }
+    prepared := true
+    exhausted := false
+    part = parts
+    loop part != (I64{0}) && prepared {
+        if sync_load(part + I64{32}) != (I64{0}) {
+            revision :: sync_load(sync_load(part + I64{8}) + I64{48})
+            if {
+                revision == (I64{-1}) -> {
+                    exhausted = true
+                    prepared = false
+                }
+                else -> {
+                    // MathTaskMem.rs:1911-1912 clones the working value in
+                    // the commit hook. Preserve observable clone-count parity;
+                    // prepare all copies before any participant publishes.
+                    value :: stm_clone(sync_load(part + I64{16}), sync_load(part + I64{64}))
+                    if {
+                        value == (I64{0}) -> prepared = false
+                        else -> {
+                            sync_store(part + I64{40}, value)
+                            sync_store(part + I64{56}, wrapping(revision + I64{1}))
+                        }
+                    }
+                }
+            }
+        }
+        part = sync_load(part)
+    }
+    // No participant publishes until every prepared clone and revision exists.
+    if prepared {
+        part = parts
+        loop part != (I64{0}) {
+            value :: sync_load(part + I64{40})
+            if value != (I64{0}) {
+                cell :: sync_load(part + I64{8})
+                sync_store(part + I64{48}, sync_swap(cell + I64{64}, value))
+                sync_store(part + I64{40}, I64{0})
+                sync_store(cell + I64{48}, sync_load(part + I64{56}))
+            }
+            part = sync_load(part)
+        }
+    }
+    part = parts
+    loop part != (I64{0}) {
+        shared_release(sync_load(part + I64{8}), true)
+        part = sync_load(part)
+    }
+    // Disposing old/staged values may call arbitrary glue: no permits remain.
+    stm_parts_drop(parts)
+    stm_finish(state)
+    if exhausted -> shared_revision_stop()
+}

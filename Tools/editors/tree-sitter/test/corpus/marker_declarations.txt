@@ -7,17 +7,73 @@ marker Pattern(value: String, $sites: [], $repeatable: true)
 ---
 
 (source_file
-  (marker_decl
-    name: (marker_name)
-    (marker_decl_params
-      (marker_decl_param
+  (decl_head
+    keyword: (identifier)
+    name: (type_identifier))
+  (paren_expr
+    (label
+      name: (identifier))
+    (primitive_type)
+    (meta_name)
+    (bracket_expr)
+    (meta_name)
+    (boolean)))
+
+====================
+Public fixed groups preserve members and import-local qualification
+====================
+
+pub marker Fast = #[library.Tag, Inline, Scalar]
+#library.Fast fn helper() {}
+
+---
+
+(source_file
+  (decl_head
+    keyword: (identifier)
+    name: (type_identifier))
+  (attribute_list
+    (identifier)
+    (variant
+      name: (type_identifier))
+    (type_identifier)
+    (type_identifier))
+  (attribute)
+  (function_def
+    name: (identifier)
+    parameters: (parameters)
+    body: (block)))
+
+====================
+Nested public marker groups
+====================
+
+pub module inner {
+    pub marker Tag($sites: [])
+    pub marker Pair = #[Tag, Inline]
+    #Pair fn helper() {}
+}
+
+---
+
+(source_file
+  (module_def
+    name: (identifier)
+    body: (block
+      (decl_head
+        keyword: (identifier)
+        name: (type_identifier))
+      (paren_expr
+        (meta_name)
+        (bracket_expr))
+      (decl_head
+        keyword: (identifier)
+        name: (type_identifier))
+      (attribute_list
+        (type_identifier)
+        (type_identifier))
+      (attribute)
+      (function_def
         name: (identifier)
-        type: (primitive_type))
-      (marker_decl_param
-        name: (marker_fact_name
-          (identifier))
-        (list_literal))
-      (marker_decl_param
-        name: (marker_fact_name
-          (identifier))
-        (boolean_literal)))))
+        parameters: (parameters)
+        body: (block)))))

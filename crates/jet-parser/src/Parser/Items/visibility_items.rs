@@ -1,11 +1,12 @@
 use super::super::{Diagnostic, Func, Item, MetaAttr, Parser, Span, Syntax, TokKind};
+use crate::Diagnostics::TextEdit;
 
 const VISIBILITY_ITEM_FORMS: &str =
     "`fn`, `struct`, `enum`, `trait`, `tag`, `module`, `protocol`, `alias`, `distinct`, `#UnitFamily`, or `NAME :: value`";
 
 impl<'a> Parser<'a> {
     /// D-VISDEFAULT2=A: parse one top-level item after a visibility qualifier.
-    pub(super) fn item_after_visibility(
+    pub(in crate::Parser) fn item_after_visibility(
         &mut self,
         is_pub: bool,
         is_package_pub: bool,
@@ -56,6 +57,12 @@ impl<'a> Parser<'a> {
             TokKind::Ident(ref n) if n.as_str() == Syntax::KW_ALIAS => self
                 .type_alias_def(is_pub, is_package_pub)
                 .map(Item::TypeAlias),
+            TokKind::Ident(ref n) if n.as_str() == Syntax::KW_MARKER && self.at_marker_decl() => {
+                let mut declaration = self.marker_decl()?;
+                declaration.is_pub = is_pub;
+                declaration.is_package_pub = is_package_pub;
+                Ok(Item::MarkerDecl(declaration))
+            }
             TokKind::Ident(_) if self.at_distinct_def() => self
                 .distinct_def(is_pub, is_package_pub)
                 .map(Item::Distinct),
@@ -67,7 +74,7 @@ impl<'a> Parser<'a> {
                     constant.is_package_pub = is_package_pub;
                     Item::Const(constant)
                 }),
-            TokKind::Hash if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_UNIT_FAMILY) => {
+            TokKind::Hash if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_UNIT_FAMILY) => {
                 self.unit_family_def(is_pub, is_package_pub)
                     .map(Item::UnitFamily)
             }
@@ -89,253 +96,303 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-VISDEFAULT2=A: parse top-level item visibility (`priv`, `pub`, defaults).
+    /// D-VIS-MODULE1 (card #4723): parse the visibility head of a top-level or
+    /// module-body declaration. Declarations are public by default; the only
+    /// visibility a declaration may carry is `priv` / `priv(package)` before
+    /// `module`. Every retired form (`pub`, `pub(…)`, `private`, declaration
+    /// `priv`, section labels) is reported with an edit that deletes it, and the
+    /// declaration then parses as if it were absent. Returns the declaration's
+    /// own `(is_pub, is_package_pub)`; [`Parser::apply_module_visibility`]
+    /// narrows members of private modules after the file is parsed.
     pub(in crate::Parser) fn parse_item_visibility(&mut self) -> (bool, bool) {
-        if matches!(self.peek().kind, TokKind::KwPub | TokKind::KwPriv)
-            && matches!(self.peek2().kind, TokKind::Colon)
-        {
-            let span = Span::new(self.peek().span.start, self.peek2().span.end);
-            self.bump();
-            self.bump();
-            self.diags.push(Diagnostic::error(
-                "E0415",
-                "section visibility labels like `pub:` / `priv:` are not supported".to_string(),
-                "moving an item above or below a label would silently change whether it exports"
-                    .to_string(),
-                format!(
-                    "write `#{}` once at the top of the file, then mark exceptions with `{}`",
-                    Syntax::MARKER_PUB_FILE,
-                    Syntax::KW_PRIV
-                ),
-                Some(span),
-            ));
-        }
-        if let TokKind::Ident(ref n) = self.peek().kind {
-            if (n == Syntax::KW_PUB || n == Syntax::KW_PRIV || n == Syntax::FOREIGN_PRIVATE)
-                && matches!(self.peek2().kind, TokKind::Colon)
-            {
-                let span = Span::new(self.peek().span.start, self.peek2().span.end);
-                self.bump();
-                self.bump();
-                self.diags.push(Diagnostic::error(
-                        "E0415",
-                        "section visibility labels like `pub:` / `priv:` are not supported".to_string(),
-                        "moving an item above or below a label would silently change whether it exports"
-                            .to_string(),
+        loop {
+            let is_label_word = match &self.peek().kind {
+                TokKind::KwPub | TokKind::KwPriv => true,
+                TokKind::Ident(n) => n == Syntax::KW_PUB || n == Syntax::KW_PRIV || n == Syntax::FOREIGN_PRIVATE,
+                _ => false,
+            };
+            if is_label_word && matches!(self.peek2().kind, TokKind::Colon) {
+                self.reject_section_label();
+                continue;
+            }
+            if matches!(self.peek().kind, TokKind::KwPub) {
+                self.reject_retired_pub();
+                continue;
+            }
+            if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::FOREIGN_PRIVATE) {
+                let word = self.bump().span;
+                self.diags.push(
+                    Diagnostic::error(
+                        "E0412",
+                        format!("Jet has no `{}`", Syntax::FOREIGN_PRIVATE),
+                        "declarations are public by default; privacy belongs to a `priv module` or a `priv` field".to_string(),
                         format!(
-                            "write `#{}` once at the top of the file, then mark exceptions with `{}`",
-                            Syntax::MARKER_PUB_FILE,
+                            "delete `{}`; move the declaration into a `{} module` if it must stay internal",
+                            Syntax::FOREIGN_PRIVATE,
+                            Syntax::KW_PRIV
+                        ),
+                        Some(word),
+                    )
+                    .with_edit(self.deletion_edit(word)),
+                );
+                continue;
+            }
+            if matches!(self.peek().kind, TokKind::KwPriv) {
+                let (span, package) = self.parse_priv_qualifier();
+                if matches!(self.peek().kind, TokKind::KwModule) {
+                    return (false, package);
+                }
+                self.diags.push(
+                    Diagnostic::error(
+                        "E0413",
+                        format!("`{}` marks only modules and fields", Syntax::KW_PRIV),
+                        "declarations are public by default; privacy belongs to a `priv module` or a `priv` field".to_string(),
+                        format!(
+                            "delete `{}`; move the declaration into a `{} module` if it must stay internal",
+                            Syntax::KW_PRIV,
                             Syntax::KW_PRIV
                         ),
                         Some(span),
-                    ));
+                    )
+                    .with_edit(self.deletion_edit(span)),
+                );
+                continue;
             }
-        }
-        if matches!(
-            &self.peek().kind,
-            TokKind::Ident(n) if n == Syntax::FOREIGN_PRIVATE
-        ) {
-            let span = self.peek().span;
-            self.bump();
-            self.diags.push(Diagnostic::error(
-                "E0412",
-                format!(
-                    "write `{}`, not `{}`",
-                    Syntax::KW_PRIV,
-                    Syntax::FOREIGN_PRIVATE
-                ),
-                format!(
-                    "inside a `#{}` file, `{}` marks an item that stays private to this file",
-                    Syntax::MARKER_PUB_FILE,
-                    Syntax::KW_PRIV
-                ),
-                format!(
-                    "write `{} fn …` instead of `{} fn …`",
-                    Syntax::KW_PRIV,
-                    Syntax::FOREIGN_PRIVATE
-                ),
-                Some(span),
-            ));
-            if matches!(self.peek().kind, TokKind::KwPub) {
-                let span = Span::new(span.start, self.peek().span.end);
-                self.bump();
-                let _ = self.try_parse_pub_package_suffix();
-                self.diags.push(Diagnostic::error(
-                    "E0417",
-                    format!(
-                        "`{}` and `{}` can't both apply to one item",
-                        Syntax::KW_PRIV,
-                        Syntax::KW_PUB
-                    ),
-                    "an item is either public or private — pick one qualifier".to_string(),
-                    format!(
-                        "drop `{}` (already public in a `#{}` file) or remove `{}`",
-                        Syntax::KW_PUB,
-                        Syntax::MARKER_PUB_FILE,
-                        Syntax::KW_PRIV
-                    ),
-                    Some(span),
-                ));
-            }
-            if !self.pub_file_default {
-                self.diags.push(Diagnostic::error(
-                    "E0413",
-                    format!(
-                        "`{}` only applies inside a `#{}` file",
-                        Syntax::KW_PRIV,
-                        Syntax::MARKER_PUB_FILE
-                    ),
-                    format!(
-                        "without `#{}`, items are private by default and export with `{}`",
-                        Syntax::MARKER_PUB_FILE,
-                        Syntax::KW_PUB
-                    ),
-                    format!(
-                        "add `#{}` at the top of the file, or write `{}` instead of `{}`",
-                        Syntax::MARKER_PUB_FILE,
-                        Syntax::KW_PUB,
-                        Syntax::KW_PRIV
-                    ),
-                    Some(span),
-                ));
-            }
-            return (false, false);
-        }
-        if matches!(self.peek().kind, TokKind::KwPriv) {
-            let span = self.peek().span;
-            self.bump();
-            if matches!(self.peek().kind, TokKind::KwPub) {
-                let span = Span::new(span.start, self.peek().span.end);
-                self.bump();
-                let _ = self.try_parse_pub_package_suffix();
-                self.diags.push(Diagnostic::error(
-                    "E0417",
-                    format!(
-                        "`{}` and `{}` can't both apply to one item",
-                        Syntax::KW_PRIV,
-                        Syntax::KW_PUB
-                    ),
-                    "an item is either public or private — pick one qualifier".to_string(),
-                    format!(
-                        "drop `{}` (already public in a `#{}` file) or remove `{}`",
-                        Syntax::KW_PUB,
-                        Syntax::MARKER_PUB_FILE,
-                        Syntax::KW_PRIV
-                    ),
-                    Some(span),
-                ));
-            }
-            if !self.pub_file_default {
-                self.diags.push(Diagnostic::error(
-                    "E0413",
-                    format!(
-                        "`{}` only applies inside a `#{}` file",
-                        Syntax::KW_PRIV,
-                        Syntax::MARKER_PUB_FILE
-                    ),
-                    format!(
-                        "without `#{}`, items are private by default and export with `{}`",
-                        Syntax::MARKER_PUB_FILE,
-                        Syntax::KW_PUB
-                    ),
-                    format!(
-                        "add `#{}` at the top of the file, or write `{}` instead of `{}`",
-                        Syntax::MARKER_PUB_FILE,
-                        Syntax::KW_PUB,
-                        Syntax::KW_PRIV
-                    ),
-                    Some(span),
-                ));
-            }
-            return (false, false);
-        }
-        if matches!(self.peek().kind, TokKind::KwPub) {
-            let (is_pub, is_package_pub) = self.parse_pub_qualifier();
-            if self.pub_file_default && is_pub && !is_package_pub {
-                self.diags.push(Diagnostic::error(
-                    "E0414",
-                    format!(
-                        "`{}` is redundant in a `#{}` file",
-                        Syntax::KW_PUB,
-                        Syntax::MARKER_PUB_FILE
-                    ),
-                    format!(
-                        "after `#{}`, top-level items are already public unless marked `{}`",
-                        Syntax::MARKER_PUB_FILE,
-                        Syntax::KW_PRIV
-                    ),
-                    format!(
-                        "drop `{}` or mark exceptions with `{}`",
-                        Syntax::KW_PUB,
-                        Syntax::KW_PRIV
-                    ),
-                    Some(self.toks[self.pos.saturating_sub(1)].span),
-                ));
-            }
-            return (is_pub, is_package_pub);
-        }
-        if self.pub_file_default {
-            (true, false)
-        } else {
-            (false, false)
-        }
-    }
-
-    /// D-PUBPKG1=A: parse an optional `pub` or `pub(package)` qualifier.
-    /// Returns `(is_pub, is_package_pub)`. On `pub(other)` pushes E0411 and returns `(true, false)`.
-    /// Non-failing: never returns Err.
-    pub(in crate::Parser) fn parse_pub_qualifier(&mut self) -> (bool, bool) {
-        if !matches!(self.peek().kind, TokKind::KwPub) {
-            return (false, false);
-        }
-        self.bump(); // consume `pub`
-        self.try_parse_pub_package_suffix()
-    }
-
-    /// Consume optional `(package)` after `pub` was already eaten.
-    fn try_parse_pub_package_suffix(&mut self) -> (bool, bool) {
-        if !matches!(self.peek().kind, TokKind::LParen) {
             return (true, false);
         }
-        // pub(…)
-        self.bump(); // consume `(`
-        match self.peek().kind.clone() {
-            TokKind::Ident(ref n) if n == Syntax::PUB_PACKAGE_QUALIFIER => {
-                self.bump(); // consume `package`
-                             // consume `)` — push error if missing but don't abort
-                if matches!(self.peek().kind, TokKind::RParen) {
-                    self.bump();
-                } else {
-                    let sp = self.peek().span;
-                    self.diags.push(Diagnostic::error(
-                            "E0003",
-                            "expected `)` to close `pub(package)`".to_string(),
-                            "write `pub(package)` with no extra content inside the parentheses".to_string(),
-                            "use `pub(package)` to restrict access to sibling packages in the same payload".to_string(),
-                            Some(sp),
-                        ));
-                }
-                (true, true)
+    }
+
+    /// D-VIS-MODULE1: the visibility head of a struct field. `priv` keeps the
+    /// field to its type's module; returns the field's `is_pub`.
+    pub(in crate::Parser) fn parse_field_visibility(&mut self) -> bool {
+        let mut is_pub = true;
+        loop {
+            if matches!(self.peek().kind, TokKind::KwPub) {
+                self.reject_retired_pub();
+                continue;
             }
-            _ => {
-                // pub(something_else) — reject
-                let sp = self.peek().span;
-                self.diags.push(Diagnostic::error(
+            if matches!(self.peek().kind, TokKind::KwPriv) {
+                let (span, package) = self.parse_priv_qualifier();
+                if package {
+                    let qualifier = Span::new(span.start + Syntax::KW_PRIV.len(), span.end);
+                    self.diags.push(
+                        Diagnostic::error(
+                            "E0417",
+                            format!("a field takes plain `{}`, not `{}(package)`", Syntax::KW_PRIV, Syntax::KW_PRIV),
+                            "a `priv` field is usable only by its type's module; package privacy belongs to modules".to_string(),
+                            format!("write `{}`", Syntax::KW_PRIV),
+                            Some(span),
+                        )
+                        .with_edit(TextEdit { span: qualifier, new_text: String::new() }),
+                    );
+                }
+                is_pub = false;
+                continue;
+            }
+            return is_pub;
+        }
+    }
+
+    /// D-MOD4: `pub use` re-export. Consumes `pub`; any `pub(…)` qualifier is
+    /// retired (E0411) and deleted. Returns `true` for the re-export flag.
+    pub(in crate::Parser) fn parse_reexport_qualifier(&mut self) -> bool {
+        if !matches!(self.peek().kind, TokKind::KwPub) {
+            return false;
+        }
+        self.bump();
+        if matches!(self.peek().kind, TokKind::LParen) {
+            let start = self.peek().span.start;
+            while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                self.bump();
+            }
+            let end = self.bump().span.end;
+            let span = Span::new(start, end);
+            self.diags.push(
+                Diagnostic::error(
                     "E0411",
-                    format!("unknown `pub(…)` qualifier — only `pub(package)` is supported"),
-                    "`pub(package)` restricts access to sibling packages in the same payload"
-                        .to_string(),
-                    "write `pub` (public to all) or `pub(package)` (package-scoped)".to_string(),
-                    Some(sp),
-                ));
-                // skip to `)`
-                while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
-                    self.bump();
-                }
-                if matches!(self.peek().kind, TokKind::RParen) {
-                    self.bump();
-                }
+                    "a re-export is written `pub use`; `pub(…)` qualifiers were removed".to_string(),
+                    "declarations are public by default and package privacy belongs to `priv(package) module`".to_string(),
+                    "delete the qualifier".to_string(),
+                    Some(span),
+                )
+                .with_edit(TextEdit { span, new_text: String::new() }),
+            );
+        }
+        true
+    }
+
+    /// D-VIS-MODULE1: consume a retired `pub` / `pub(…)` before a declaration,
+    /// a method, or a field, reporting E0411 with an edit that deletes it.
+    pub(in crate::Parser) fn reject_retired_pub(&mut self) {
+        let start = self.bump().span;
+        let mut span = start;
+        if matches!(self.peek().kind, TokKind::LParen) {
+            while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                self.bump();
+            }
+            span = Span::new(start.start, self.bump().span.end);
+        }
+        self.diags.push(
+            Diagnostic::error(
+                "E0411",
+                format!("`{}` was removed: everything is public by default", Syntax::KW_PUB),
+                format!(
+                    "privacy belongs to a `{} module` (or `{}(package) module`) and to `{}` fields",
+                    Syntax::KW_PRIV,
+                    Syntax::KW_PRIV,
+                    Syntax::KW_PRIV
+                ),
+                format!("delete `{}`", self.source_text(span)),
+                Some(span),
+            )
+            .with_edit(self.deletion_edit(span)),
+        );
+    }
+
+    /// D-VIS-MODULE1: `pub:` / `priv:` section labels (E0415), deleted.
+    pub(in crate::Parser) fn reject_section_label(&mut self) {
+        let span = Span::new(self.peek().span.start, self.peek2().span.end);
+        self.bump();
+        self.bump();
+        self.diags.push(
+            Diagnostic::error(
+                "E0415",
+                "section visibility labels like `pub:` / `priv:` are not supported".to_string(),
+                "moving an item above or below a label would silently change its visibility".to_string(),
+                format!(
+                    "delete the label; group internal declarations in a `{} module`",
+                    Syntax::KW_PRIV
+                ),
+                Some(span),
+            )
+            .with_edit(self.deletion_edit(span)),
+        );
+    }
+
+    /// D-VIS-MODULE1: the retired `#PubFile` / `#PublicFile` file marker
+    /// (E0418), deleted.
+    pub(in crate::Parser) fn reject_retired_file_marker(&mut self, span: Span) {
+        self.diags.push(
+            Diagnostic::error(
+                "E0418",
+                format!("`#{}` was removed: every file is public by default", Syntax::MARKER_PUB_FILE),
+                "declarations are public by default, so the file marker has nothing left to flip".to_string(),
+                "delete the marker".to_string(),
+                Some(span),
+            )
+            .with_edit(self.deletion_edit(span)),
+        );
+    }
+
+    /// Parse `priv` or `priv(package)`; an unknown `priv(…)` qualifier is
+    /// E0414 and deleted. Returns the whole marker span and whether it names
+    /// the package.
+    fn parse_priv_qualifier(&mut self) -> (Span, bool) {
+        let start = self.bump().span;
+        if !matches!(self.peek().kind, TokKind::LParen) {
+            return (start, false);
+        }
+        let open = self.bump().span;
+        let package = matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::PRIV_PACKAGE_QUALIFIER)
+            && matches!(self.peek2().kind, TokKind::RParen);
+        while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+            self.bump();
+        }
+        let end = self.bump().span.end;
+        if !package {
+            let qualifier = Span::new(open.start, end);
+            self.diags.push(
+                Diagnostic::error(
+                    "E0414",
+                    format!(
+                        "unknown `{}(…)` qualifier: only `{}({})` exists",
+                        Syntax::KW_PRIV,
+                        Syntax::KW_PRIV,
+                        Syntax::PRIV_PACKAGE_QUALIFIER
+                    ),
+                    "`priv(package) module` is the only qualified module privacy".to_string(),
+                    format!("delete the qualifier, or write `{}({})`", Syntax::KW_PRIV, Syntax::PRIV_PACKAGE_QUALIFIER),
+                    Some(qualifier),
+                )
+                .with_edit(TextEdit { span: qualifier, new_text: String::new() }),
+            );
+        }
+        (Span::new(start.start, end), package)
+    }
+
+    /// An edit deleting `span` and the horizontal whitespace after it.
+    pub(in crate::Parser) fn deletion_edit(&self, span: Span) -> TextEdit {
+        let bytes = self.source.as_deref().unwrap_or_default().as_bytes();
+        let mut end = span.end;
+        while end < bytes.len() && matches!(bytes[end], b' ' | b'\t') {
+            end += 1;
+        }
+        TextEdit { span: Span::new(span.start, end), new_text: String::new() }
+    }
+
+    fn source_text(&self, span: Span) -> &str {
+        self.source
+            .as_deref()
+            .and_then(|source| source.get(span.start..span.end))
+            .unwrap_or(Syntax::KW_PUB)
+    }
+
+    /// D-VIS-MODULE1: after a file is parsed, give every declaration inside a
+    /// `priv module` the module's privacy. A `priv module` is usable only by
+    /// its enclosing module (Private: the enclosing package namespace), a
+    /// `priv(package) module` by its package (Package); every other
+    /// declaration is public. Fields keep their own `priv`.
+    pub(in crate::Parser) fn apply_module_visibility(items: &mut [Item], inherited: (bool, bool)) {
+        fn narrow(outer: (bool, bool), own: (bool, bool)) -> (bool, bool) {
+            let private = |v: (bool, bool)| !v.0 && !v.1;
+            if private(outer) || private(own) {
+                (false, false)
+            } else if outer.1 || own.1 {
+                (false, true)
+            } else {
                 (true, false)
+            }
+        }
+        fn set_methods(methods: &mut [Func], vis: (bool, bool)) {
+            for method in methods {
+                method.is_pub = vis.0;
+                method.is_package_pub = vis.1;
+            }
+        }
+        for item in items {
+            match item {
+                Item::CodeModule(module) => {
+                    let effective = narrow(inherited, (module.is_pub, module.is_package_pub));
+                    if let Some(body) = module.body.as_mut() {
+                        Self::apply_module_visibility(body, effective);
+                    }
+                }
+                Item::GenericModule(module) => {
+                    let effective = narrow(inherited, (module.is_pub, module.is_package_pub));
+                    Self::apply_module_visibility(&mut module.body, effective);
+                }
+                Item::ModuleAlias(alias) => {
+                    let effective = narrow(inherited, (alias.is_pub, alias.is_package_pub));
+                    (alias.is_pub, alias.is_package_pub) = effective;
+                }
+                Item::Func(f) => (f.is_pub, f.is_package_pub) = inherited,
+                Item::Struct(def) => {
+                    (def.is_pub, def.is_package_pub) = inherited;
+                    set_methods(&mut def.methods, inherited);
+                }
+                Item::Enum(def) => {
+                    (def.is_pub, def.is_package_pub) = inherited;
+                    set_methods(&mut def.methods, inherited);
+                }
+                Item::Impl(def) => set_methods(&mut def.methods, inherited),
+                Item::Distinct(def) => (def.is_pub, def.is_package_pub) = inherited,
+                Item::TypeAlias(def) => (def.is_pub, def.is_package_pub) = inherited,
+                Item::UnitFamily(def) => (def.is_pub, def.is_package_pub) = inherited,
+                Item::Trait(def) => (def.is_pub, def.is_package_pub) = inherited,
+                Item::Tag(def) => (def.is_pub, def.is_package_pub) = inherited,
+                Item::Const(def) => (def.is_pub, def.is_package_pub) = inherited,
+                Item::ProtocolDecl(def) => (def.is_pub, def.is_package_pub) = inherited,
+                _ => {}
             }
         }
     }

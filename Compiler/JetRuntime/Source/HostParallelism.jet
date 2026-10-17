@@ -1,0 +1,513 @@
+// The ONE native std::thread::available_parallelism (Rust std 1.96,
+// library/std/src/sys/thread/unix.rs:147-191 Linux arm and cgroups::quota
+// :772-991). Rust's scheduler pool (Scheduler.rs:4338), core.sys.cpu_count
+// (OsExtra.rs:10) and the parallel kernels all call that single probe, so
+// the scheduler and jet_sys_cpu_count_raw share this one too.
+// Result: the positive count, or 0 for Rust's Err (each caller owns its
+// fallback). Paths are root-prefixed only so fixtures can supply a fake
+// procfs/sysfs; production passes the empty root.
+// Scope bounds, not semantic changes: cpu.max / cfs values are parsed as I64
+// (kernel quota <= 2^44 us, period <= 1 s); paths above 16 KiB fail to open
+// as ENAMETOOLONG would; kernel procfs text is ASCII, so a non-ASCII
+// controller list is treated as Rust's from_utf8 failure.
+CPU_UNLIMITED :: prep { I64{9223372036854775807} }
+CPU_PATH_CAPACITY :: prep { I64{16384} }
+CPU_CTX_ROOT :: prep { I64{0} }
+CPU_CTX_ROOT_LEN :: prep { I64{8} }
+CPU_CTX_PATH :: prep { I64{16} }
+CPU_CTX_PATH_LEN :: prep { I64{24} }
+CPU_CTX_OVERFLOW :: prep { I64{32} }
+CPU_CTX_FILE :: prep { I64{40} }
+CPU_CTX_FILE_LEN :: prep { I64{48} }
+CPU_CTX_FILE_CAP :: prep { I64{56} }
+CPU_CTX_GROUP :: prep { I64{64} }
+CPU_CTX_GROUP_LEN :: prep { I64{72} }
+CPU_CTX_MOUNT :: prep { I64{80} }
+CPU_CTX_MOUNT_LEN :: prep { I64{88} }
+CPU_CTX_SCRATCH :: prep { I64{96} }
+CPU_CTX_BYTES :: prep { I64{104} }
+
+fn cpu_word(address: I64) -> I64 { rt_text_word(address) }
+fn cpu_put(address: I64, value: I64) { rt_text_store(address, value) }
+fn cpu_min(a: I64, b: I64) -> I64 { if (a < b) -> a else -> b }
+
+fn cpu_ctx_new(root: I64, root_len: I64) -> I64 {
+    ctx :: jet_rt_alloc(CPU_CTX_BYTES, I64{8})
+    thread_zero(ctx, CPU_CTX_BYTES)
+    cpu_put(ctx + CPU_CTX_ROOT, root)
+    cpu_put(ctx + CPU_CTX_ROOT_LEN, root_len)
+    cpu_put(ctx + CPU_CTX_PATH, jet_rt_alloc(CPU_PATH_CAPACITY + I64{8}, I64{8}))
+    cpu_put(ctx + CPU_CTX_GROUP, jet_rt_alloc(CPU_PATH_CAPACITY, I64{8}))
+    cpu_put(ctx + CPU_CTX_MOUNT, jet_rt_alloc(CPU_PATH_CAPACITY, I64{8}))
+    cpu_put(ctx + CPU_CTX_SCRATCH, jet_rt_alloc(I64{160}, I64{8}))
+    ctx
+}
+
+fn cpu_ctx_drop(ctx: I64) {
+    jet_rt_free(cpu_word(ctx + CPU_CTX_PATH), CPU_PATH_CAPACITY + I64{8}, I64{8})
+    jet_rt_free(cpu_word(ctx + CPU_CTX_GROUP), CPU_PATH_CAPACITY, I64{8})
+    jet_rt_free(cpu_word(ctx + CPU_CTX_MOUNT), CPU_PATH_CAPACITY, I64{8})
+    jet_rt_free(cpu_word(ctx + CPU_CTX_SCRATCH), I64{160}, I64{8})
+    capacity :: cpu_word(ctx + CPU_CTX_FILE_CAP)
+    if (capacity != I64{0}) -> jet_rt_free(cpu_word(ctx + CPU_CTX_FILE), capacity, I64{8})
+    jet_rt_free(ctx, CPU_CTX_BYTES, I64{8})
+}
+
+// PathBuf::push of a relative path: append each component; empty and `.`
+// components carry no meaning for Path::components, starts_with or pop.
+fn cpu_path_append(ctx: I64, data: I64, length: I64) {
+    path :: cpu_word(ctx + CPU_CTX_PATH)
+    at := I64{0}
+    loop at < length {
+        loop at < length && rt_text_byte(data + at) == (I64{47}) { at += I64{1} }
+        start :: at
+        loop at < length && rt_text_byte(data + at) != (I64{47}) { at += I64{1} }
+        size :: at - start
+        if (size == I64{0} || (size == I64{1} && rt_text_byte(data + start) == I64{46})) { next }
+        used :: cpu_word(ctx + CPU_CTX_PATH_LEN)
+        if (used + I64{1} + size > CPU_PATH_CAPACITY) {
+            cpu_put(ctx + CPU_CTX_OVERFLOW, I64{1})
+            return
+        }
+        rt_text_put(path + used, I64{47})
+        rt_text_bytes_copy(path + used + I64{1}, data + start, size)
+        cpu_put(ctx + CPU_CTX_PATH_LEN, used + I64{1} + size)
+    }
+}
+
+fn cpu_path_append_text(ctx: I64, text: I64) {
+    cpu_path_append(ctx, rt_text_data(text), rt_text_len(text))
+}
+
+// An absolute path replaces the buffer (PathBuf::push of an absolute path),
+// under the fixture root.
+fn cpu_path_set(ctx: I64, data: I64, length: I64) {
+    cpu_put(ctx + CPU_CTX_PATH_LEN, I64{0})
+    cpu_put(ctx + CPU_CTX_OVERFLOW, I64{0})
+    cpu_path_append(ctx, cpu_word(ctx + CPU_CTX_ROOT), cpu_word(ctx + CPU_CTX_ROOT_LEN))
+    cpu_path_append(ctx, data, length)
+}
+
+fn cpu_path_set_text(ctx: I64, text: I64) {
+    cpu_path_set(ctx, rt_text_data(text), rt_text_len(text))
+}
+
+// PathBuf::pop: drop the last component; the root itself cannot be popped.
+fn cpu_path_pop(ctx: I64) -> Bool {
+    path :: cpu_word(ctx + CPU_CTX_PATH)
+    at := cpu_word(ctx + CPU_CTX_PATH_LEN)
+    if (at == I64{0}) -> return false
+    loop at > (I64{0}) {
+        at -= I64{1}
+        if (rt_text_byte(path + at) == I64{47}) -> break
+    }
+    cpu_put(ctx + CPU_CTX_PATH_LEN, at)
+    true
+}
+
+fn cpu_mount_capture(ctx: I64) {
+    length :: cpu_word(ctx + CPU_CTX_PATH_LEN)
+    rt_text_bytes_copy(cpu_word(ctx + CPU_CTX_MOUNT), cpu_word(ctx + CPU_CTX_PATH), length)
+    cpu_put(ctx + CPU_CTX_MOUNT_LEN, length)
+}
+
+// Path::starts_with is component-wise over the normalized buffers.
+fn cpu_path_within_mount(ctx: I64) -> Bool {
+    path :: cpu_word(ctx + CPU_CTX_PATH)
+    length :: cpu_word(ctx + CPU_CTX_PATH_LEN)
+    mount :: cpu_word(ctx + CPU_CTX_MOUNT)
+    prefix :: cpu_word(ctx + CPU_CTX_MOUNT_LEN)
+    if (length < prefix) -> return false
+    if !rt_text_equal_bytes(path, mount, prefix) -> return false
+    length == prefix || rt_text_byte(path + prefix) == I64{47}
+}
+
+fn cpu_path_terminate(ctx: I64) -> I64 {
+    path :: cpu_word(ctx + CPU_CTX_PATH)
+    length :: cpu_word(ctx + CPU_CTX_PATH_LEN)
+    if (length == I64{0}) {
+        rt_text_put(path, I64{47})
+        rt_text_put(path + I64{1}, I64{0})
+    } else {
+        rt_text_put(path + length, I64{0})
+    }
+    path
+}
+
+// fs::exists: stat follows links; NotFound and every other error are both
+// "not there" for these callers.
+fn cpu_exists(ctx: I64) -> Bool {
+    if (cpu_word(ctx + CPU_CTX_OVERFLOW) != I64{0}) -> return false
+    host_call(I64{4}, cpu_path_terminate(ctx), cpu_word(ctx + CPU_CTX_SCRATCH), I64{0}) == I64{0}
+}
+
+// File::open (O_RDONLY|O_CLOEXEC) + read_to_end, EINTR retried. The bytes
+// stay in the context's reusable buffer.
+fn cpu_read(ctx: I64) -> Bool {
+    if (cpu_word(ctx + CPU_CTX_OVERFLOW) != I64{0}) -> return false
+    fd :: host_call(I64{2}, cpu_path_terminate(ctx), I64{524288}, I64{0})
+    if (fd < I64{0}) -> return false
+    used := I64{0}
+    ok := true
+    loop {
+        capacity :: cpu_word(ctx + CPU_CTX_FILE_CAP)
+        if (used == capacity) {
+            grown :: if (capacity == I64{0}) -> I64{512} else -> capacity * I64{2}
+            bytes :: jet_rt_alloc(grown, I64{8})
+            if (used != I64{0}) -> rt_text_bytes_copy(bytes, cpu_word(ctx + CPU_CTX_FILE), used)
+            if (capacity != I64{0}) -> jet_rt_free(cpu_word(ctx + CPU_CTX_FILE), capacity, I64{8})
+            cpu_put(ctx + CPU_CTX_FILE, bytes)
+            cpu_put(ctx + CPU_CTX_FILE_CAP, grown)
+        }
+        count :: host_call(I64{0}, fd, cpu_word(ctx + CPU_CTX_FILE) + used, cpu_word(ctx + CPU_CTX_FILE_CAP) - used)
+        if (count == I64{-4}) { next }
+        if (count < I64{0}) {
+            ok = false
+            break
+        }
+        if (count == I64{0}) -> break
+        used += count
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    cpu_put(ctx + CPU_CTX_FILE_LEN, used)
+    ok
+}
+
+fn cpu_find(data: I64, from: I64, end: I64, byte: I64) -> I64 {
+    at := from
+    loop at < end && rt_text_byte(data + at) != byte { at += I64{1} }
+    at
+}
+
+fn cpu_space(byte: I64) -> Bool {
+    byte == I64{32} || (byte >= I64{9} && byte <= I64{13})
+}
+
+fn cpu_bytes_are(data: I64, length: I64, text: I64) -> Bool {
+    length == rt_text_len(text) && rt_text_equal_bytes(data, rt_text_data(text), length)
+}
+
+// usize::from_str: optional `+`, then one or more ASCII digits.
+fn cpu_parse(data: I64, length: I64, out: I64) -> Bool {
+    at := I64{0}
+    if (length > I64{0} && rt_text_byte(data) == I64{43}) -> at = I64{1}
+    if (at == length) -> return false
+    value := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(data + at)
+        if (byte < I64{48} || byte > I64{57}) -> return false
+        digit :: byte - I64{48}
+        if (value > (CPU_UNLIMITED - digit) / I64{10}) -> return false
+        value = value * I64{10} + digit
+        at += I64{1}
+    }
+    cpu_put(out, value)
+    true
+}
+
+// A comma-separated list contains the exact element `cpu`.
+fn cpu_list_has_cpu(data: I64, length: I64) -> Bool {
+    cpu :: rt_static_text("cpu")
+    at := I64{0}
+    loop at <= length {
+        end :: cpu_find(data, at, length, I64{44})
+        if cpu_bytes_are(data + at, end - at, cpu) -> return true
+        at = end + I64{1}
+    }
+    false
+}
+
+// unix.rs:842-888 quota_v2: walk cpu.max from the group to the mount root.
+// A readable cpu.max without a first line or a second field ends the walk
+// (the try block's `?`), keeping the quota found so far.
+fn cpu_quota_v2(ctx: I64) -> I64 {
+    quota := CPU_UNLIMITED
+    cpu_path_set_text(ctx, rt_static_text("/sys/fs/cgroup"))
+    cpu_mount_capture(ctx)
+    cpu_path_append(ctx, cpu_word(ctx + CPU_CTX_GROUP), cpu_word(ctx + CPU_CTX_GROUP_LEN))
+    cpu_path_append_text(ctx, rt_static_text("cgroup.controllers"))
+    if !cpu_exists(ctx) -> return CPU_UNLIMITED
+    _ := cpu_path_pop(ctx)
+    values :: cpu_word(ctx + CPU_CTX_SCRATCH)
+    loop cpu_path_within_mount(ctx) {
+        cpu_path_append_text(ctx, rt_static_text("cpu.max"))
+        if cpu_read(ctx) {
+            data :: cpu_word(ctx + CPU_CTX_FILE)
+            length :: cpu_word(ctx + CPU_CTX_FILE_LEN)
+            if (length == I64{0}) -> return quota
+            line := cpu_find(data, I64{0}, length, I64{10})
+            if (line < length && line > I64{0} && rt_text_byte(data + line - I64{1}) == I64{13}) -> line -= I64{1}
+            first :: cpu_find(data, I64{0}, line, I64{32})
+            if (first == line) -> return quota
+            second :: cpu_find(data, first + I64{1}, line, I64{32})
+            if (cpu_parse(data, first, values) && cpu_parse(data + first + I64{1}, second - first - I64{1}, values + I64{8})) {
+                period :: cpu_word(values + I64{8})
+                if (period > I64{0}) -> quota = cpu_min(quota, cpu_word(values) / period)
+            }
+        }
+        _ := cpu_path_pop(ctx)
+        _ := cpu_path_pop(ctx)
+    }
+    quota
+}
+
+// unix.rs:919-929 parse_file: read, trim, parse; the path is restored first.
+fn cpu_parse_file(ctx: I64, name: I64, out: I64) -> Bool {
+    cpu_path_append_text(ctx, name)
+    read :: cpu_read(ctx)
+    _ := cpu_path_pop(ctx)
+    if !read -> return false
+    data :: cpu_word(ctx + CPU_CTX_FILE)
+    start := I64{0}
+    end := cpu_word(ctx + CPU_CTX_FILE_LEN)
+    loop start < end && cpu_space(rt_text_byte(data + start)) { start += I64{1} }
+    loop end > start && cpu_space(rt_text_byte(data + end - I64{1})) { end -= I64{1} }
+    cpu_parse(data + start, end - start, out)
+}
+
+// unix.rs:954-990 find_mountpoint. Every `?` aborts the whole scan (None).
+// Sets the path to mount + trimmed group and captures the mount.
+fn cpu_find_mountpoint(ctx: I64) -> Bool {
+    cpu_path_set_text(ctx, rt_static_text("/proc/self/mountinfo"))
+    if !cpu_read(ctx) -> return false
+    data :: cpu_word(ctx + CPU_CTX_FILE)
+    length :: cpu_word(ctx + CPU_CTX_FILE_LEN)
+    group :: cpu_word(ctx + CPU_CTX_GROUP)
+    group_len :: cpu_word(ctx + CPU_CTX_GROUP_LEN)
+    fields :: jet_rt_alloc(I64{80}, I64{8})
+    at := I64{0}
+    loop at < length {
+        newline :: cpu_find(data, at, length, I64{10})
+        next_line :: newline + I64{1}
+        start := at
+        end := newline
+        at = next_line
+        loop start < end && cpu_space(rt_text_byte(data + start)) { start += I64{1} }
+        loop end > start && cpu_space(rt_text_byte(data + end - I64{1})) { end -= I64{1} }
+        // Field starts: 0..4 from the front; count every ' ' separated field.
+        count := I64{1}
+        cursor := start
+        loop cursor < end {
+            if (rt_text_byte(data + cursor) == I64{32}) -> count += I64{1}
+            cursor += I64{1}
+        }
+        if (count < I64{8}) {
+            jet_rt_free(fields, I64{80}, I64{8})
+            return false
+        }
+        // Record start offsets of fields 3, 4, n-3 and n-1 (with ends).
+        index := I64{0}
+        field := start
+        loop index < count {
+            stop :: cpu_find(data, field, end, I64{32})
+            if (index == I64{3}) {
+                cpu_put(fields, field)
+                cpu_put(fields + I64{8}, stop)
+            }
+            if (index == I64{4}) {
+                cpu_put(fields + I64{16}, field)
+                cpu_put(fields + I64{24}, stop)
+            }
+            if (index == count - I64{3}) {
+                cpu_put(fields + I64{32}, field)
+                cpu_put(fields + I64{40}, stop)
+            }
+            if (index == count - I64{1}) {
+                cpu_put(fields + I64{48}, field)
+                cpu_put(fields + I64{56}, stop)
+            }
+            field = stop + I64{1}
+            index += I64{1}
+        }
+        kind :: cpu_word(fields + I64{32})
+        options :: cpu_word(fields + I64{48})
+        if !cpu_bytes_are(data + kind, cpu_word(fields + I64{40}) - kind, rt_static_text("cgroup")) || !cpu_list_has_cpu(data + options, cpu_word(fields + I64{56}) - options) { next }
+        sub :: cpu_word(fields)
+        sub_end :: cpu_word(fields + I64{8})
+        if (sub == sub_end || rt_text_byte(data + sub) != I64{47}) {
+            jet_rt_free(fields, I64{80}, I64{8})
+            return false
+        }
+        // Normalize the bind-mount root into the mount buffer, then compare
+        // components with the normalized group path.
+        mount :: cpu_word(ctx + CPU_CTX_MOUNT)
+        normalized := I64{0}
+        part := sub
+        loop part < sub_end {
+            loop part < sub_end && rt_text_byte(data + part) == (I64{47}) { part += I64{1} }
+            begin :: part
+            part = cpu_find(data, part, sub_end, I64{47})
+            size :: part - begin
+            if (size == I64{0} || (size == I64{1} && rt_text_byte(data + begin) == I64{46})) { next }
+            if (normalized != I64{0}) {
+                rt_text_put(mount + normalized, I64{47})
+                normalized += I64{1}
+            }
+            rt_text_bytes_copy(mount + normalized, data + begin, size)
+            normalized += size
+        }
+        within :: normalized == I64{0} || (group_len >= normalized && rt_text_equal_bytes(group, mount, normalized) && (group_len == normalized || rt_text_byte(group + normalized) == I64{47}))
+        if !within { next }
+        trimmed :: if (normalized == I64{0}) -> I64{0} else if (group_len == normalized) -> normalized else -> normalized + I64{1}
+        point :: cpu_word(fields + I64{16})
+        cpu_path_set(ctx, data + point, cpu_word(fields + I64{24}) - point)
+        cpu_mount_capture(ctx)
+        cpu_path_append(ctx, group + trimmed, group_len - trimmed)
+        jet_rt_free(fields, I64{80}, I64{8})
+        return true
+    }
+    jet_rt_free(fields, I64{80}, I64{8})
+    false
+}
+
+// unix.rs:890-948 quota_v1: the first mount guess whose group directory
+// exists is walked up to its mount; later guesses are not tried.
+fn cpu_quota_v1(ctx: I64) -> I64 {
+    quota := CPU_UNLIMITED
+    values :: cpu_word(ctx + CPU_CTX_SCRATCH)
+    attempt := I64{0}
+    loop attempt < (I64{3}) {
+        if (attempt == I64{2}) {
+            if !cpu_find_mountpoint(ctx) -> return quota
+        } else {
+            cpu_path_set_text(ctx, if (attempt == I64{0}) -> rt_static_text("/sys/fs/cgroup/cpu") else -> rt_static_text("/sys/fs/cgroup/cpu,cpuacct"))
+            cpu_mount_capture(ctx)
+            cpu_path_append(ctx, cpu_word(ctx + CPU_CTX_GROUP), cpu_word(ctx + CPU_CTX_GROUP_LEN))
+        }
+        attempt += I64{1}
+        if !cpu_exists(ctx) { next }
+        loop cpu_path_within_mount(ctx) {
+            limit :: cpu_parse_file(ctx, rt_static_text("cpu.cfs_quota_us"), values)
+            period :: cpu_parse_file(ctx, rt_static_text("cpu.cfs_period_us"), values + I64{8})
+            if (limit && period && cpu_word(values + I64{8}) > I64{0}) -> quota = cpu_min(quota, cpu_word(values) / cpu_word(values + I64{8}))
+            _ := cpu_path_pop(ctx)
+        }
+        return quota
+    }
+    quota
+}
+
+// unix.rs:795-840 quota: fold /proc/self/cgroup lines. An explicit v1 `cpu`
+// controller line replaces any earlier choice; a v2 line only fills an empty
+// choice; a selected line without a path field resets the fold to None.
+fn cpu_quota(ctx: I64) -> I64 {
+    cpu_path_set_text(ctx, rt_static_text("/proc/self/cgroup"))
+    if !cpu_read(ctx) -> return CPU_UNLIMITED
+    data :: cpu_word(ctx + CPU_CTX_FILE)
+    length :: cpu_word(ctx + CPU_CTX_FILE_LEN)
+    version := I64{0}
+    group := I64{0}
+    group_len := I64{0}
+    at := I64{0}
+    loop {
+        end :: cpu_find(data, at, length, I64{10})
+        first :: cpu_find(data, at, end, I64{58})
+        if (first < end) {
+            second :: cpu_find(data, first + I64{1}, end, I64{58})
+            controllers :: data + first + I64{1}
+            size :: second - first - I64{1}
+            ascii := true
+            probe := I64{0}
+            loop probe < size {
+                if (rt_text_byte(controllers + probe) >= I64{128}) -> ascii = false
+                probe += I64{1}
+            }
+            kind :: if (size == I64{0}) -> I64{2} else if (ascii && cpu_list_has_cpu(controllers, size)) -> I64{1} else -> I64{0}
+            if (kind != I64{0} && !(version != I64{0} && kind == I64{2})) {
+                if (second == end) {
+                    version = I64{0}
+                } else {
+                    // Kernel paths start with `/`; path[1..] skips it.
+                    skip :: if (second + I64{1} < end) -> I64{2} else -> I64{1}
+                    version = kind
+                    group = second + skip
+                    group_len = end - group
+                }
+            }
+        }
+        if (end >= length) -> break
+        at = end + I64{1}
+    }
+    if (version == I64{0}) -> return CPU_UNLIMITED
+    // Normalize the group into its own buffer through the path helpers.
+    cpu_put(ctx + CPU_CTX_PATH_LEN, I64{0})
+    cpu_put(ctx + CPU_CTX_OVERFLOW, I64{0})
+    cpu_path_append(ctx, data + group, group_len)
+    normalized :: cpu_word(ctx + CPU_CTX_PATH_LEN)
+    // Drop the leading separator the append wrote before the first component.
+    stored :: if (normalized == I64{0}) -> I64{0} else -> normalized - I64{1}
+    if (stored != I64{0}) -> rt_text_bytes_copy(cpu_word(ctx + CPU_CTX_GROUP), cpu_word(ctx + CPU_CTX_PATH) + I64{1}, stored)
+    cpu_put(ctx + CPU_CTX_GROUP_LEN, stored)
+    if (version == I64{1}) -> return cpu_quota_v1(ctx)
+    cpu_quota_v2(ctx)
+}
+
+// sched_getaffinity(0, sizeof(cpu_set_t)=128, set) and CPU_COUNT. A failed
+// call (more than 1024 kernel CPUs) or an empty mask is 0.
+fn cpu_affinity_count() -> I64 {
+    mask :: jet_rt_alloc(I64{128}, I64{8})
+    thread_zero(mask, I64{128})
+    result := I64{0}
+    #Unsafe("sched_getaffinity writes at most the owned 128-byte mask; pid0 names this thread") {
+        result = os_syscall_i64(I64{204}, I64{0}, I64{128}, mask, I64{0}, I64{0}, I64{0})
+    }
+    count := I64{0}
+    if (result > I64{0}) {
+        at := I64{0}
+        loop at < result {
+            bits := rt_text_byte(mask + at)
+            loop bits != (I64{0}) {
+                bits = bits.bit_and(bits - I64{1})
+                count += I64{1}
+            }
+            at += I64{1}
+        }
+    }
+    jet_rt_free(mask, I64{128}, I64{8})
+    count
+}
+
+// glibc sysconf(_SC_NPROCESSORS_ONLN) = get_nprocs: the online CPU list
+// "a-b,c,...". [glibc's later /proc/stat fallback is not mirrored: sysfs is
+// always mounted where the affinity call can fail.] 0 is Rust's Err.
+fn cpu_online_count(ctx: I64) -> I64 {
+    cpu_path_set_text(ctx, rt_static_text("/sys/devices/system/cpu/online"))
+    if !cpu_read(ctx) -> return I64{0}
+    data :: cpu_word(ctx + CPU_CTX_FILE)
+    length :: cpu_word(ctx + CPU_CTX_FILE_LEN)
+    end := cpu_find(data, I64{0}, length, I64{10})
+    values :: cpu_word(ctx + CPU_CTX_SCRATCH)
+    total := I64{0}
+    at := I64{0}
+    loop at < end {
+        stop :: cpu_find(data, at, end, I64{44})
+        dash :: cpu_find(data, at, stop, I64{45})
+        if !cpu_parse(data + at, dash - at, values) -> return I64{0}
+        low :: cpu_word(values)
+        high := low
+        if (dash < stop) {
+            if !cpu_parse(data + dash + I64{1}, stop - dash - I64{1}, values) -> return I64{0}
+            high = cpu_word(values)
+        }
+        if (high < low) -> return I64{0}
+        total += high - low + I64{1}
+        at = stop + I64{1}
+    }
+    total
+}
+
+// unix.rs:159-191 Linux arm. root/root_len prefix every probed path.
+fn cpu_available_parallelism(root: I64, root_len: I64) -> I64 {
+    ctx :: cpu_ctx_new(root, root_len)
+    raw :: cpu_quota(ctx)
+    quota :: if (raw < I64{1}) -> I64{1} else -> raw
+    count :: cpu_affinity_count()
+    if (count > I64{0}) {
+        cpu_ctx_drop(ctx)
+        return cpu_min(count, quota)
+    }
+    online :: cpu_online_count(ctx)
+    cpu_ctx_drop(ctx)
+    if (online <= I64{0}) -> return I64{0}
+    cpu_min(online, quota)
+}

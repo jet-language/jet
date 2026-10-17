@@ -1,0 +1,87 @@
+# Port of tests/cli_parts/runtime.rs:168-407; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/determinism
+copy: run.jet original.bytes
+step absent: jet check run.jet --json
+env: NO_COLOR=1
+exit: 1
+step again: jet check run.jet --json
+env: NO_COLOR=1
+exit: 1
+exit: == absent
+machine: == absent # original predicate
+json: machine doc $ valid # original predicate: parse status
+json: machine doc $.reports : array # original pattern
+json: machine doc $.reports[0].applicability = "safe"
+json: machine doc $.reports[0].fix_edits : array # original pattern
+json: machine doc $.reports[0].fix_edits #= 1
+json: machine doc $.reports[0].fix_edits[0].file = "{work}/run.jet"
+json: machine doc $.reports[0].fix_edits[0].safety = "behavior-preserving"
+json: machine doc $.reports[0].fix_edits[0].span.start = 9
+json: machine doc $.reports[0].fix_edits[0].span.end = 16
+json: machine doc $.reports[0].fix_edits[0].new_text = "print"
+write: package.jet package.template
+copy: package.jet package.bytes
+step configured: jet check run.jet --json --profile=staging --set marker=cli
+env: NO_COLOR=1
+exit: 1
+json: machine doc $ valid # original predicate: parse status
+json: machine doc $.reports : array # original pattern
+json: machine doc $.reports[0].applicability = "safe"
+json: machine doc $.reports[0].fix_edits : array # original pattern
+json: machine doc $.reports[0].fix_edits #= 1
+json: machine doc $.reports[0].fix_edits[0].file = "{work}/run.jet"
+json: machine doc $.reports[0].fix_edits[0].safety = "behavior-preserving"
+json: machine doc $.reports[0].fix_edits[0].span.start = 9
+json: machine doc $.reports[0].fix_edits[0].span.end = 16
+json: machine doc $.reports[0].fix_edits[0].new_text = "print"
+json: machine doc $.reports[0].code == absent
+json: machine doc $.reports[0].applicability == absent
+json: machine doc $.reports[0].fix_edits == absent
+step preview: jet fix run.jet --dry-run
+env: NO_COLOR=1
+exit: 0
+step preview2: jet fix run.jet --dry-run
+env: NO_COLOR=1
+exit: 0
+exit: == preview
+stdout: == preview
+stderr: == preview
+file: run.jet == original.bytes
+step: jet fix run.jet
+env: NO_COLOR=1
+exit: 0
+file: run.jet ~ "print(\"safe\")" # original predicate
+file: run.jet !~ "println" # original predicate
+file: package.jet == package.bytes
+copy: run.jet fixed.bytes
+step fmtfirst: jet fmt run.jet --check --json
+env: NO_COLOR=1
+exit: any # original predicate: status not asserted
+step fmtsecond: jet fmt run.jet --check --json
+env: NO_COLOR=1
+exit: any # original predicate: status not asserted
+exit: == fmtfirst
+stdout: == fmtfirst
+stderr: == fmtfirst
+file: run.jet == fixed.bytes
+step: jet fmt run.jet
+env: NO_COLOR=1
+exit: 0
+step control: jet run --profile=debug control.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/run-cache
+exit: 0
+stdout: = safe.out
+step: jet run --profile=debug run.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/run-cache
+exit: 0
+stdout: == control
+step: jet check run.jet --json --profile=staging --set marker=cli
+env: NO_COLOR=1
+exit: 0
+json: machine doc $ valid # original predicate: parses
+json: machine doc $.provenance.profile = "staging"
+file: package.jet == package.bytes

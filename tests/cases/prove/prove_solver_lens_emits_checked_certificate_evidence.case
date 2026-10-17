@@ -1,0 +1,13 @@
+# Port of tests/prove.rs:1074-1117. Every original predicate retained; original fixture bytes copied from Rust literals.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: prove_solver_lens_emits_checked_certificate_evidence.fixture
+step first: jet prove checked.jet --lens solver --json
+exit: 0
+stdout: ~ "\"facet\":\"solver\"" # original predicate
+stdout: ~ "\"status\":\"proved\"" # original predicate
+stdout: ~ "\"certificateSha256\":" # original predicate
+stdout: ~ "\"backend\":\"native-presburger\"" # original predicate
+stdout: ~ "\"solver\":{\"disproved\":0,\"proved\":1" # original predicate
+step: jet prove checked.jet --lens solver --json
+exit: 0
+stdout: == first # original predicate

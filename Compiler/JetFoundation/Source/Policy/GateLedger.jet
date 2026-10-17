@@ -1,0 +1,181 @@
+// Canonical authority-gate read model (Authority.rs, D-AUTHORITY-GATE1).
+use jet_foundation.[Diagnostic, Span, PolicyKey, policy_key_name, policy_key_parse]
+
+enum GateKind {
+    Unsafe
+    Impure
+    DependencyGrant
+    BuildFlag
+    SessionFlag
+    TrustGrant
+    ForcePin
+    TaintScrub
+    DutyDrop
+    StateTransition
+    PrecisionDemotion
+    Nondeterministic
+    Structure
+    LintAllow
+}
+
+fn gate_kind_policy_key(kind: GateKind) -> PolicyKey Never! {
+    if kind == {
+        .Unsafe -> PolicyKey.Unsafe
+        .Impure -> PolicyKey.Impure
+        .DependencyGrant -> PolicyKey.DependencyGrant
+        .BuildFlag -> PolicyKey.BuildFlag
+        .SessionFlag -> PolicyKey.SessionFlag
+        .TrustGrant -> PolicyKey.TrustGrant
+        .ForcePin -> PolicyKey.ForcePin
+        .TaintScrub -> PolicyKey.TaintScrub
+        .DutyDrop -> PolicyKey.DutyDrop
+        .StateTransition -> PolicyKey.StateTransition
+        .PrecisionDemotion -> PolicyKey.PrecisionDemotion
+        .Nondeterministic -> PolicyKey.Nondeterministic
+        .Structure -> PolicyKey.Structure
+        .LintAllow -> PolicyKey.LintAllow
+    }
+}
+
+fn gate_kind_name(kind: GateKind) -> String Never! {
+    policy_key_name(gate_kind_policy_key(kind))
+}
+
+fn gate_kind_parse(value: String) -> GateKind? Never! {
+    if value.trim().to_ascii_lower() == {
+        "unsafe" | "unsafe_region" | "unsafe_fn" -> Val(GateKind.Unsafe)
+        "impure" -> Val(GateKind.Impure)
+        "dependency" | "dependency_grant" | "grant" -> Val(GateKind.DependencyGrant)
+        "build" | "build_flag" -> Val(GateKind.BuildFlag)
+        "session" | "session_flag" -> Val(GateKind.SessionFlag)
+        "trust" | "trust_grant" -> Val(GateKind.TrustGrant)
+        "force" | "force_pin" -> Val(GateKind.ForcePin)
+        "scrub" | "taint" | "taint_scrub" -> Val(GateKind.TaintScrub)
+        "drop" | "detach" | "duty" | "duty_drop" -> Val(GateKind.DutyDrop)
+        "state" | "transition" | "state_transition" -> Val(GateKind.StateTransition)
+        "approx" | "precision" | "precision_demotion" | "rounded" | "wrapping" | "saturating" | "checked" -> Val(GateKind.PrecisionDemotion)
+        "nondeterministic" | "determinism" -> Val(GateKind.Nondeterministic)
+        "structure" -> Val(GateKind.Structure)
+        "lint_allow" -> Val(GateKind.LintAllow)
+        else -> None
+    }
+}
+
+fn gate_kind_is_security(kind: GateKind) -> Bool Never! {
+    if kind == {
+        .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic -> true
+        else -> false
+    }
+}
+
+fn gate_kind_order(kind: GateKind) -> Int Never! {
+    if kind == {
+        .Unsafe -> 0
+        .Impure -> 1
+        .Nondeterministic -> 2
+        .DependencyGrant -> 3
+        .BuildFlag -> 4
+        .SessionFlag -> 5
+        .TrustGrant -> 6
+        .ForcePin -> 7
+        .TaintScrub -> 8
+        .DutyDrop -> 9
+        .StateTransition -> 10
+        .PrecisionDemotion -> 11
+        .Structure -> 12
+        .LintAllow -> 13
+    }
+}
+
+struct GateOperation {
+    kind: String
+    span: Span
+    required: [String]
+    asserted: [String]
+    discharged: Bool
+}
+
+struct GateEntry {
+    kind: GateKind
+    domain: String
+    scope: String
+    source: String
+    span: Span?
+    subject: String
+    reason: String?
+    status: String?
+    detail: String
+    provenance: [String]
+    operations: [GateOperation]
+}
+
+struct GateDiagnostic {
+    source: String
+    diagnostic: Diagnostic
+}
+
+struct GateLedger {
+    rows: [GateEntry]{[GateEntry]{}}
+    diagnostic_rows: [GateDiagnostic]{[GateDiagnostic]{}}
+}
+
+fn gate_same_fact(left: GateEntry, right: GateEntry) -> Bool Never! {
+    if left.kind != right.kind || left.domain != right.domain || left.scope != right.scope || left.subject != right.subject || left.detail != right.detail {
+        return false
+    }
+    if left.span == .None && right.span == .None -> return true
+    left.span != None && left.span == right.span && left.source == right.source
+}
+
+fn gate_ledger_push(ledger: &GateLedger, entry: ^GateEntry) Never! {
+    written := entry
+    if written.provenance.len() == 0 -> &written.provenance.push(written.source)
+    loop index in 0..<ledger.rows.len() {
+        if !gate_same_fact(ledger.rows[index], written) -> next
+        loop provenance in written.provenance {
+            if !ledger.rows[index].provenance.contains(provenance) {
+                &ledger.rows[index].provenance.push(provenance)
+            }
+        }
+        if ledger.rows[index].reason == .None -> ledger.rows[index].reason = written.reason
+        if ledger.rows[index].status == .None -> ledger.rows[index].status = written.status
+        &ledger.rows[index].provenance.sort()
+        return
+    }
+    &written.provenance.sort()
+    &ledger.rows.push(^written)
+}
+
+fn gate_entry_compare(left: GateEntry, right: GateEntry) -> Ordering Never! {
+    order :: gate_kind_order(left.kind) <=> gate_kind_order(right.kind)
+    if order != Ordering.Equal -> return order
+    source :: left.source <=> right.source
+    if source != Ordering.Equal -> return source
+    if left.span == .None && right.span != None -> return Ordering.Greater
+    if left.span != None && right.span == .None -> return Ordering.Less
+    if left.span == .Val(a) && right.span == .Val(b) {
+        start :: a.start <=> b.start
+        if start != Ordering.Equal -> return start
+        end :: a.end <=> b.end
+        if end != Ordering.Equal -> return end
+    }
+    subject :: left.subject <=> right.subject
+    if subject != Ordering.Equal -> return subject
+    left.detail <=> right.detail
+}
+
+fn gate_ledger_sort(ledger: &GateLedger) Never! {
+    loop index in 1..<ledger.rows.len() {
+        row :: ledger.rows[index].copy()
+        position := index
+        loop position > 0 && gate_entry_compare(ledger.rows[position - 1], row) == Ordering.Greater {
+            ledger.rows[position] = ledger.rows[position - 1]
+            position -= 1
+        }
+        ledger.rows[position] = row
+    }
+}
+
+fn gate_source_entry(kind: GateKind, domain: String, scope: String, source: String, span: Span, subject: String, reason: String?, detail: String, status: String) -> GateEntry Never! {
+    GateEntry{kind: kind, domain: domain, scope: scope, source: source, span: Val(span), subject: subject, reason: reason, status: Val(status), detail: detail, provenance: ["{source}:{span.start}..{span.end}"], operations: []}
+}

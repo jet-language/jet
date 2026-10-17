@@ -1657,7 +1657,7 @@ fn loader_enforces_import_boundaries_and_warns_on_zero_match() {
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
     );
     write(&denied, "ui.jet", "use db\nfn run() -[IO]> { }\n");
-    write(&denied, "db.jet", "pub fn value() -> Int { 1 }\n");
+    write(&denied, "db.jet", "fn value() -> Int { 1 }\n");
     let error = jet::Loader::load_entry(denied.join("ui.jet").to_str().unwrap())
         .expect_err("a denied import edge must fail during loading");
     assert_eq!(first_diag_code(&error), "E0619");
@@ -1696,7 +1696,7 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
         "ui.jet",
         "use db\nfn run() -[IO]> { print(db.value()) }\n",
     );
-    write(&root, "db.jet", "pub fn value() -> Int { 1 }\n");
+    write(&root, "db.jet", "fn value() -> Int { 1 }\n");
     let entry = root.join("ui.jet");
     let shown = entry.to_str().unwrap();
     let mut bundle = jet::Loader::load_entry(shown).expect("allowed edge must load");
@@ -1744,7 +1744,6 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
     for (label, args) in [
         ("aot", vec!["run", "--release", shown]),
         ("jit", vec!["run", shown]),
-        ("interpreter", vec!["run", "--interpret", shown]),
         ("dev", vec!["dev", shown, "--watch=off"]),
     ] {
         let output = Command::new(jet_bin())
@@ -1752,7 +1751,7 @@ fn loader_records_import_edge_facts_and_erases_boundary_policy_before_codegen() 
             .args(args)
             .env("NO_COLOR", "1")
             .env(
-                "JET_RUN_CACHE_DIR",
+                "JET_STORE_DIR",
                 root.join(".cache").join(label).join("run"),
             )
             .env(
@@ -1809,7 +1808,7 @@ fn denied_import_boundary_fact_reaches_structure_inspection() {
             + "boundaries: { deny: [{ from: \"app.ui\", to: \"app.db\" }] }\n"),
     );
     write(&root, "ui.jet", "use db\nfn run() { }\n");
-    write(&root, "db.jet", "pub fn value() -> Int { 1 }\n");
+    write(&root, "db.jet", "fn value() -> Int { 1 }\n");
     let entry = root.join("ui.jet");
     let shown = entry.to_str().unwrap();
 
@@ -1915,7 +1914,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(
         &artifact,
         format!(
-            "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n"
+            "// jet-ffi-descriptor={descriptor}\nfn scatter() -> Int {{\n    return 7\n}}\n"
         ),
     )
     .unwrap();
@@ -1944,7 +1943,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(stale_project.join("package.jet"), &manifest_text).unwrap();
     fs::write(
         &artifact,
-        "// jet-ffi-descriptor=stale\npub fn scatter() -> Int {\n    return 7\n}\n",
+        "// jet-ffi-descriptor=stale\nfn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     let stale_manifest =
@@ -1965,7 +1964,7 @@ fn foreign_package_provider_fetch_lock_and_locked_round_trip() {
     fs::write(
         &artifact,
         format!(
-            "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n"
+            "// jet-ffi-descriptor={descriptor}\nfn scatter() -> Int {{\n    return 7\n}}\n"
         ),
     )
     .unwrap();
@@ -2113,6 +2112,7 @@ fn manifest_panic_budget_names_the_dependency_stop_site() {
         name: "panicdep".to_string(),
         effects: jet::Sema::EffectSet::from(["Panic".to_string()]),
         effect_sites: std::collections::BTreeMap::new(),
+        effect_witnesses: std::collections::BTreeMap::new(),
         panic_sites: vec!["panicdep::parse_port".to_string()],
         boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
     }];
@@ -2330,7 +2330,7 @@ fn cli_build_enforces_effect_budget_e1220() {
     write(
         &tmp,
         "netdep/netdep.jet",
-        "use core.net as net\npub fn ping() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"e\") }\n",
+        "use core.net as net\nfn ping() { net.tcp_connect(\"127.0.0.1:1\") ?? panic(\"e\") }\n",
     );
 
     write(
@@ -2843,7 +2843,7 @@ fn store_ensure_path_dep_creates_entry() {
     write(
         &src,
         "mylib.jet",
-        "pub fn hello() -> String { return \"hi\" }\n",
+        "fn hello() -> String { return \"hi\" }\n",
     );
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
@@ -2870,7 +2870,7 @@ fn store_ensure_is_idempotent() {
     fs::create_dir_all(&store).unwrap();
 
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn x() {}\n");
+    write(&src, "mylib.jet", "fn x() {}\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-1111111111111111111111111111111111111111111111111111111111111111";
@@ -2980,7 +2980,7 @@ fn source_snapshot_keeps_verified_bytes_after_source_mutation() {
     fs::create_dir_all(&store).unwrap();
     let source = tmp.join("source");
     write(&source, "package.jet", &min_manifest("safe", "0.1.0"));
-    write(&source, "lib.jet", "pub fn trusted() {}\n");
+    write(&source, "lib.jet", "fn trusted() {}\n");
 
     let (snapshot, verified_hash) = with_store(&store, || {
         let snapshot = jet::Store::snapshot_tree(&source).expect("snapshot must verify");
@@ -2988,10 +2988,10 @@ fn source_snapshot_keeps_verified_bytes_after_source_mutation() {
         (snapshot, verified_hash)
     });
 
-    fs::write(source.join("lib.jet"), "pub fn hostile() {}\n").unwrap();
+    fs::write(source.join("lib.jet"), "fn hostile() {}\n").unwrap();
     assert_eq!(
         fs::read_to_string(snapshot.path().join("lib.jet")).unwrap(),
-        "pub fn trusted() {}\n",
+        "fn trusted() {}\n",
         "consumers must keep using the verified snapshot after the source changes"
     );
     assert_eq!(snapshot.content_hash(), verified_hash);
@@ -3015,7 +3015,7 @@ fn store_tamper_detected_e1204() {
     fs::create_dir_all(&store).unwrap();
 
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn ok() {}\n");
+    write(&src, "mylib.jet", "fn ok() {}\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-2222222222222222222222222222222222222222222222222222222222222222";
@@ -3028,7 +3028,7 @@ fn store_tamper_detected_e1204() {
     // Tamper: modify the stored file outside the locked section.
     fs::write(
         entry.join("mylib.jet"),
-        "pub fn evil() { /* tampered */ }\n",
+        "fn evil() { /* tampered */ }\n",
     )
     .unwrap();
 
@@ -3050,7 +3050,7 @@ fn content_hash_recorded_at_install() {
     fs::create_dir_all(&store).unwrap();
 
     let src = tmp.join("src");
-    write(&src, "lib.jet", "pub fn x() {}\n");
+    write(&src, "lib.jet", "fn x() {}\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-aaaa0000000000000000000000000000000000000000000000000000000000aa";
@@ -3077,7 +3077,7 @@ fn content_hash_mismatch_after_tamper() {
     fs::create_dir_all(&store).unwrap();
 
     let src = tmp.join("src");
-    write(&src, "lib.jet", "pub fn x() {}\n");
+    write(&src, "lib.jet", "fn x() {}\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-bbbb0000000000000000000000000000000000000000000000000000000000bb";
@@ -3087,7 +3087,7 @@ fn content_hash_mismatch_after_tamper() {
     });
 
     // Tamper with the store entry.
-    fs::write(entry.join("lib.jet"), "pub fn evil() {}\n").unwrap();
+    fs::write(entry.join("lib.jet"), "fn evil() {}\n").unwrap();
 
     let result = jet::Store::verify_content_hash("mylib", &entry, &original_hash);
     let diag = result.expect_err("tampered entry must fail verify_content_hash");
@@ -3102,7 +3102,7 @@ fn content_hash_covers_non_jet_files_copied_into_store() {
     fs::create_dir_all(&store).unwrap();
 
     let src = tmp.join("src");
-    write(&src, "lib.jet", "pub fn x() {}\n");
+    write(&src, "lib.jet", "fn x() {}\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
     fs::write(src.join("runtime.data"), b"trusted bytes\n").unwrap();
 
@@ -3210,7 +3210,7 @@ fn hardlink_projects_share_store_inode() {
     fs::create_dir_all(&store).unwrap();
 
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn hi() {}\n");
+    write(&src, "mylib.jet", "fn hi() {}\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     let fp = "sha256-3333333333333333333333333333333333333333333333333333333333333333";
@@ -3255,7 +3255,7 @@ fn path_dep_compiles_ok() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hello!\" }\n",
+        "fn greet() -> String { return \"hello!\" }\n",
     );
 
     // Root project with path dep.
@@ -3295,13 +3295,13 @@ fn transitive_path_dependency_cannot_escape_declaring_package() {
         "outer/package.jet",
         &manifest_with_deps("outer", "0.1.0", "    escape: ../outside,"),
     );
-    write(&tmp, "outer/outer.jet", "pub fn outer() {}\n");
+    write(&tmp, "outer/outer.jet", "fn outer() {}\n");
     write(
         &tmp,
         "outside/package.jet",
         &min_manifest("outside", "0.1.0"),
     );
-    write(&tmp, "outside/outside.jet", "pub fn hostile() {}\n");
+    write(&tmp, "outside/outside.jet", "fn hostile() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
     write(&tmp, "package.jet", &raw);
     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
@@ -3339,13 +3339,13 @@ fn transitive_path_dependency_cannot_escape_via_symlinked_directory() {
         "outer/package.jet",
         &manifest_with_deps("outer", "0.1.0", "    escape: ./link/escape,"),
     );
-    write(&tmp, "outer/outer.jet", "pub fn outer() {}\n");
+    write(&tmp, "outer/outer.jet", "fn outer() {}\n");
     write(
         &tmp,
         "outside/escape/package.jet",
         &min_manifest("escape", "0.1.0"),
     );
-    write(&tmp, "outside/escape/escape.jet", "pub fn hostile() {}\n");
+    write(&tmp, "outside/escape/escape.jet", "fn hostile() {}\n");
     symlink(tmp.join("outside"), tmp.join("outer/link")).unwrap();
 
     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
@@ -3375,10 +3375,10 @@ fn version_conflict_emits_e1201() {
     let tmp = tmp_dir("ver_conflict");
 
     write(&tmp, "liba/package.jet", &min_manifest("mylib", "1.0.0"));
-    write(&tmp, "liba/mylib.jet", "pub fn v1() {}\n");
+    write(&tmp, "liba/mylib.jet", "fn v1() {}\n");
 
     write(&tmp, "libb/package.jet", &min_manifest("mylib", "2.0.0"));
-    write(&tmp, "libb/mylib.jet", "pub fn v2() {}\n");
+    write(&tmp, "libb/mylib.jet", "fn v2() {}\n");
 
     write(
         &tmp,
@@ -3411,7 +3411,7 @@ fn toolchain_only_lock_keeps_declared_path_unlocked() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hi\" }\n",
+        "fn greet() -> String { return \"hi\" }\n",
     );
     let manifest_text =
         manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
@@ -3524,9 +3524,9 @@ fn compiler_rejects_transitive_path_dependency_escape() {
         "package.jet",
         &(min_manifest("outer", "0.1.0") + "\ndeps: { escape: ../outside }\n"),
     );
-    write(&outer, "outer.jet", "pub fn value() {}\n");
+    write(&outer, "outer.jet", "fn value() {}\n");
     write(&outside, "package.jet", &min_manifest("outside", "0.1.0"));
-    write(&outside, "outside.jet", "pub fn value() {}\n");
+    write(&outside, "outside.jet", "fn value() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,");
     write(&tmp, "package.jet", &raw);
     write(&tmp, "run.jet", "fn run() {}\n");
@@ -3553,9 +3553,9 @@ fn compiler_accepts_transitive_path_dependency_the_root_declares() {
         "package.jet",
         &(min_manifest("outer", "0.1.0") + "\ndeps: { shared: ../shared }\n"),
     );
-    write(&outer, "outer.jet", "pub fn value() {}\n");
+    write(&outer, "outer.jet", "fn value() {}\n");
     write(&shared, "package.jet", &min_manifest("shared", "0.1.0"));
-    write(&shared, "shared.jet", "pub fn value() {}\n");
+    write(&shared, "shared.jet", "fn value() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    outer: ./outer,\n    shared: ./shared,");
     write(&tmp, "package.jet", &raw);
     write(&tmp, "run.jet", "fn run() {}\n");
@@ -3584,7 +3584,7 @@ fn fetch_locked_rejects_tampered_path_dependency_store_entry() {
         "package.jet",
         &min_manifest("greeter", "0.1.0"),
     );
-    write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+    write(&dependency, "greeter.jet", "fn greet() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
     let manifest = jet::Manifest::parse(&tmp.join("package.jet"), &raw).unwrap();
@@ -3613,7 +3613,7 @@ fn fetch_locked_rejects_tampered_path_dependency_store_entry() {
             .expect("path dependency must be recorded in the lock");
         let store_entry =
             jet::Store::store_path(&package.name, &package.version, &package.fingerprint);
-        fs::write(store_entry.join("greeter.jet"), "pub fn compromised() {}\n").unwrap();
+        fs::write(store_entry.join("greeter.jet"), "fn compromised() {}\n").unwrap();
         jet::Fetch::fetch(&tmp, &manifest, Some(&lock), &locked)
             .expect_err("locked fetch must reject a changed store entry")
     });
@@ -3632,7 +3632,7 @@ fn locked_build_rejects_tampered_path_dependency_store_entry() {
         "package.jet",
         &min_manifest("greeter", "0.1.0"),
     );
-    write(&dependency, "greeter.jet", "pub fn greet() {}");
+    write(&dependency, "greeter.jet", "fn greet() {}");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
     write(&tmp, "run.jet", "fn run() {}\n");
@@ -3659,7 +3659,7 @@ fn locked_build_rejects_tampered_path_dependency_store_entry() {
             .expect("path dependency must be recorded in the lock");
         let store_entry =
             jet::Store::store_path(&package.name, &package.version, &package.fingerprint);
-        fs::write(store_entry.join("greeter.jet"), "pub fn compromised() {}\n").unwrap();
+        fs::write(store_entry.join("greeter.jet"), "fn compromised() {}\n").unwrap();
         jet::Driver::compile_bundle_path_build(entry.to_str().unwrap(), locked)
             .expect_err("locked build must reject a changed store entry before loading it")
     });
@@ -3678,7 +3678,7 @@ fn locked_build_rejects_wide_empty_store_tree_before_dependency_manifest_load() 
         "package.jet",
         &min_manifest("greeter", "0.1.0"),
     );
-    write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+    write(&dependency, "greeter.jet", "fn greet() {}\n");
     for index in 0..128 {
         fs::create_dir(dependency.join(format!("empty-{index}"))).unwrap();
     }
@@ -3737,7 +3737,7 @@ fn locked_build_rejects_deep_store_tree_before_dependency_manifest_load() {
         "package.jet",
         &min_manifest("greeter", "0.1.0"),
     );
-    write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+    write(&dependency, "greeter.jet", "fn greet() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
     write(&tmp, "run.jet", "fn run() {}\n");
@@ -3790,7 +3790,7 @@ fn locked_build_rejects_manifest_lock_path_identity_mismatch() {
         "package.jet",
         &min_manifest("greeter", "0.1.0"),
     );
-    write(&dependency, "greeter.jet", "pub fn greet() {}\n");
+    write(&dependency, "greeter.jet", "fn greet() {}\n");
     let raw = manifest_with_deps("app", "0.1.0", "    greeter: ./greeter,");
     write(&tmp, "package.jet", &raw);
     write(&tmp, "run.jet", "fn run() {}\n");
@@ -3884,7 +3884,7 @@ fn git_dep_local_bare_repo_fetches_ok() {
 
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
+    write(&src, "mylib.jet", "fn answer() -> Int { return 42 }\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init bare repo.
@@ -3981,10 +3981,10 @@ fn git_dep_local_bare_repo_fetches_ok() {
         .join("git-cache")
         .join(&url_hash[..16])
         .join(revision_prefix);
-    fs::write(cache_dir.join("mylib.jet"), "pub fn compromised() {}\n").unwrap();
+    fs::write(cache_dir.join("mylib.jet"), "fn compromised() {}\n").unwrap();
     fs::write(
         tmp.join(".jet/build/deps/mylib/mylib.jet"),
-        "pub fn compromised() {}\n",
+        "fn compromised() {}\n",
     )
     .unwrap();
 
@@ -4998,7 +4998,7 @@ fn git_dep_branch_update_rewrites_lock() {
 
     // Create a source directory to commit.
     let src = tmp.join("mylib_src");
-    write(&src, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
+    write(&src, "mylib.jet", "fn answer() -> Int { return 42 }\n");
     write(&src, "package.jet", &min_manifest("mylib", "0.1.0"));
 
     // Init a non-bare repo, commit, then mirror to a bare repo (avoids HEAD ambiguity).
@@ -5093,7 +5093,7 @@ fn git_dep_branch_update_rewrites_lock() {
     write(
         &clone,
         "extra.jet",
-        "pub fn extra() -> Int { return 99 }\n",
+        "fn extra() -> Int { return 99 }\n",
     );
     Command::new("git")
         .args(["add", "."])
@@ -5606,7 +5606,7 @@ fn cli_vendor_dir_flag_relocates() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hi\" }\n",
+        "fn greet() -> String { return \"hi\" }\n",
     );
     write(
         &tmp,
@@ -5686,7 +5686,7 @@ fn cli_end_to_end_new_then_add_path() {
     // 2. Create a local lib for `jet add --path`.
     let lib = tmp.join("mylib");
     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
-    write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
+    write(&lib, "mylib.jet", "fn answer() -> Int { return 42 }\n");
 
     // 3. jet add mylib --path ../mylib (from inside the project)
     let proj = tmp.join("myapp");
@@ -5726,7 +5726,7 @@ fn cli_add_path_into_inline_empty_deps_table() {
     );
     let lib = tmp.join("mylib");
     write(&lib, "package.jet", &min_manifest("mylib", "0.1.0"));
-    write(&lib, "mylib.jet", "pub fn answer() -> Int { return 42 }\n");
+    write(&lib, "mylib.jet", "fn answer() -> Int { return 42 }\n");
 
     let out = jet_cmd(&["add", "mylib", "--path", "./mylib"], &tmp, &store);
     assert!(
@@ -5909,7 +5909,7 @@ fn capability_sigil_frozen_in_public_api() {
 
     let write_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: &Account, amount: Int) -> Int {
+fn deposit(a: &Account, amount: Int) -> Int {
     a.balance = a.balance + amount
     return a.balance
 }
@@ -5930,7 +5930,7 @@ pub fn deposit(a: &Account, amount: Int) -> Int {
     // Same signature, only the capability sigil differs (read instead of write).
     let read_src = "\
 struct Account { balance: Int }
-pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
+fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
 ";
     let f2 = dir.join("read.jet");
     fs::write(&f2, read_src).unwrap();
@@ -5948,7 +5948,7 @@ pub fn deposit(a: Account, amount: Int) -> Int { return a.balance + amount }
 #[test]
 fn cli_typed_default_is_not_frozen_as_positional() {
     let dir = tmp_dir("cli_default_api_freeze");
-    let src = "#CLI\npub struct Config {\n    port: Int{3000}\n    required: Int\n}\n";
+    let src = "#CLI\nstruct Config {\n    port: Int{3000}\n    required: Int\n}\n";
     let path = dir.join("config.jet");
     fs::write(&path, src).unwrap();
     let api = jet::Publish::extract_public_api_for_package(src, path.to_str().unwrap(), "config");
@@ -5968,7 +5968,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     use jet::Publish::{diff_public_api, ApiItem};
 
     let dir = tmp_dir("physical_unit_api_freeze");
-    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
+    let current = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/1000) }\nfn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
     let current_path = dir.join("current.jet");
     fs::write(&current_path, current).unwrap();
     let current_api = jet::Publish::extract_public_api_for_package(
@@ -5978,7 +5978,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     let mut bundle =
         jet::Loader::load_entry_with_overlay(current_path.to_str().unwrap(), None, true).unwrap();
-    let (_, facts) =
+    let (_, facts, _checked_nominals) =
         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
     let entry = &bundle.modules[bundle.entry];
     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
@@ -6003,7 +6003,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         .collect();
     assert!(diff_public_api(&frozen_api, &current_api).is_empty());
 
-    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\npub fn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
+    let changed = "#UnitFamily(Length, base: meter) { meter millimeter(scale: 1/100) }\nfn distance() -> Millimeter { return Millimeter.from_float(1.0) }\n";
     let changed_path = dir.join("changed.jet");
     fs::write(&changed_path, changed).unwrap();
     let changed_api = jet::Publish::extract_public_api_for_package(
@@ -6019,7 +6019,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     );
     assert_eq!(diff_public_api(&current_api, &foreign_api).len(), 1);
 
-    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let affine = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }\nfn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
     let affine_path = dir.join("affine.jet");
     fs::write(&affine_path, affine).unwrap();
     let affine_api = jet::Publish::extract_public_api_for_package(
@@ -6027,7 +6027,7 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
         affine_path.to_str().unwrap(),
         "physics",
     );
-    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\npub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
+    let shifted = "#UnitFamily(Temperature, base: kelvin) { kelvin celsius(scale: 1, offset: 27415/100) }\nfn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }\n";
     let shifted_path = dir.join("shifted.jet");
     fs::write(&shifted_path, shifted).unwrap();
     let shifted_api = jet::Publish::extract_public_api_for_package(
@@ -6038,8 +6038,8 @@ fn physical_unit_api_freeze_and_semver_share_one_canonical_signature() {
     assert_eq!(diff_public_api(&affine_api, &shifted_api).len(), 1);
 
     let length_generic =
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n";
-    let time_generic = "pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }\n";
+        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n";
+    let time_generic = "fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }\n";
     let length_path = dir.join("length_generic.jet");
     let time_path = dir.join("time_generic.jet");
     fs::write(&length_path, length_generic).unwrap();
@@ -6067,8 +6067,8 @@ fn soft_public_names_are_not_semver_promises() {
     use jet::Publish::{diff_public_api, extract_public_api};
 
     let dir = tmp_dir("soft_public_api");
-    let old = "pub fn stable() {}\npub fn _unstable() {}\n";
-    let new = "pub fn stable() {}\n";
+    let old = "fn stable() {}\nfn _unstable() {}\n";
+    let new = "fn stable() {}\n";
     let old_path = dir.join("old.jet");
     let new_path = dir.join("new.jet");
     fs::write(&old_path, old).unwrap();
@@ -6089,8 +6089,8 @@ fn inferred_public_effect_drift_is_breaking() {
     let dir = tmp_dir("effect_api_drift");
     let pure_path = dir.join("pure.jet");
     let io_path = dir.join("io.jet");
-    let pure = "pub fn report() -> Int { return 1 }\n";
-    let io = "pub fn report() -> Int {\n    print(\"report\")\n    return 1\n}\n";
+    let pure = "fn report() -> Int { return 1 }\n";
+    let io = "fn report() -> Int {\n    print(\"report\")\n    return 1\n}\n";
     fs::write(&pure_path, pure).unwrap();
     fs::write(&io_path, io).unwrap();
 
@@ -6114,8 +6114,8 @@ fn inferred_inline_module_effects_are_published() {
     fs::create_dir_all(&new_dir).unwrap();
     let old_path = old_dir.join("run.jet");
     let new_path = new_dir.join("run.jet");
-    let old = "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() {} }\n";
-    let new = "module files { pub fn report() { print(\"report\") } }\nmodule bench { pub fn report() { print(\"bench\") } }\n";
+    let old = "module files { fn report() { print(\"report\") } }\nmodule bench { fn report() {} }\n";
+    let new = "module files { fn report() { print(\"report\") } }\nmodule bench { fn report() { print(\"bench\") } }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
@@ -6139,7 +6139,7 @@ fn v2_snapshot_upgrade_matches_duplicate_inline_leaves() {
 
     let dir = tmp_dir("v2_inline_api_upgrade");
     let path = dir.join("current.jet");
-    let source = "module bench { pub fn report() {} }\nmodule files { pub fn report(x: Int) {} }\n";
+    let source = "module bench { fn report() {} }\nmodule files { fn report(x: Int) {} }\n";
     fs::write(&path, source).unwrap();
     let mut current = extract_public_api(source, path.to_str().unwrap())
         .into_iter()
@@ -6181,7 +6181,7 @@ fn public_effect_metadata_preserves_symbolic_rows() {
 
     let dir = tmp_dir("effect_api_open_row");
     let path = dir.join("open.jet");
-    let source = "pub fn invoke<E>(act: fn() -[..E]> Int) -[..E]> Int { return act() }\n";
+    let source = "fn invoke<E>(act: fn() -[..E]> Int) -[..E]> Int { return act() }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -6197,8 +6197,8 @@ fn public_trait_effect_contract_drift_is_breaking() {
     let dir = tmp_dir("trait_effect_api_drift");
     let old_path = dir.join("old.jet");
     let new_path = dir.join("new.jet");
-    let old = "pub trait Render { fn draw(self) -[IO]> Int }\n";
-    let new = "pub trait Render { fn draw(self) -[GPU]> Int }\n";
+    let old = "trait Render { fn draw(self) -[IO]> Int }\n";
+    let new = "trait Render { fn draw(self) -[GPU]> Int }\n";
     fs::write(&old_path, old).unwrap();
     fs::write(&new_path, new).unwrap();
 
@@ -6229,7 +6229,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
     // canonical Length family instead (card #1765/#1769 root cause: the
     // prior fixture redeclared the family and shadowed the very identity
     // it meant to assert on).
-    let source = "pub trait Measure { fn scale(value: Meter) -> Meter }\n";
+    let source = "trait Measure { fn scale(value: Meter) -> Meter }\n";
     fs::write(&path, source).unwrap();
 
     let api = extract_public_api(source, path.to_str().unwrap());
@@ -6244,7 +6244,7 @@ fn physical_unit_trait_methods_use_canonical_dimensions() {
 
     let mut bundle = jet::Loader::load_entry_with_overlay(path.to_str().unwrap(), None, true)
         .expect("trait source bundle");
-    let (_, facts) =
+    let (_, facts, _checked_nominals) =
         jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Check);
     let entry = &bundle.modules[bundle.entry];
     let frozen = jet::Publish::ApiFreeze::snapshot_from_items_with_effects(
@@ -6316,7 +6316,7 @@ fn vendored_offline_locked_build() {
     write(
         &tmp,
         "greeter/greeter.jet",
-        "pub fn greet() -> String { return \"hi\" }\n",
+        "fn greet() -> String { return \"hi\" }\n",
     );
 
     // Project that depends on it.
@@ -8363,7 +8363,7 @@ fn pub_package_function_is_visible_inside_project_scope() {
     let s = Scratch::new("same");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) fn secret() -> String {\n    return \"ok\"\n}\n",
+        "fn secret() -> String {\n    return \"ok\"\n}\n",
     )
     .unwrap();
     fs::write(
@@ -8403,7 +8403,7 @@ fn pub_package_function_is_hidden_from_path_dependency_consumer() {
     .unwrap();
     fs::write(
         dep.join("dep.jet"),
-        "pub(package) fn secret() -> String {\n    return \"hidden\"\n}\n",
+        "fn secret() -> String {\n    return \"hidden\"\n}\n",
     )
     .unwrap();
 
@@ -8419,7 +8419,7 @@ fn pub_package_type_and_field_are_visible_inside_project_scope() {
     let s = Scratch::new("type");
     fs::write(
         s.join("helper.jet"),
-        "pub(package) struct Secret {\n    pub(package) value: String\n}\n\npub fn make() -> Secret { Secret{ value: \"ok\" } }\n",
+        "struct Secret {\n    value: String\n}\n\nfn make() -> Secret { Secret{ value: \"ok\" } }\n",
     )
     .unwrap();
     fs::write(
@@ -9194,7 +9194,7 @@ fn locked_build_rejects_manifest_lock_git_identity_mismatches() {
     write(
         &source,
         "mylib.jet",
-        "pub fn answer() -> Int { return 42 }\n",
+        "fn answer() -> Int { return 42 }\n",
     );
 
     assert!(

@@ -29,9 +29,10 @@ pub(crate) fn invalidate_view_owner(
     }
 }
 
-/// Where a `~` copy edit for this expression goes. A field or index node's
-/// span covers only its selector (`.name`, `[i]`), so the edit starts at the
-/// root of the place: `~result.session`, never `result.~session`.
+/// The whole place a `.copy()` copy edit covers. A field or index node's span
+/// covers only its selector (`.name`, `[i]`), so the edit starts at the root
+/// of the place and spans to its end: `result.session` becomes
+/// `result.session.copy()`.
 pub(crate) fn copy_edit_anchor(expr: &Expr) -> Span {
     let mut root = expr;
     while let Expr::Field(base, ..)
@@ -42,6 +43,29 @@ pub(crate) fn copy_edit_anchor(expr: &Expr) -> Span {
         root = base;
     }
     Span::new(root.span().start.min(expr.span().start), expr.span().end)
+}
+
+/// D-COPY-WORD1=A: the edit that turns the authored expression at `span`
+/// into its copy call (see [`Syntax::copy_call_source`]). A postfix operand
+/// keeps its text and the edit appends `.copy()` at its end (the Jet half's
+/// edit shape); any other operand is replaced by `(operand).copy()`. `None`
+/// when `span` does not hold authored source.
+pub(crate) fn copy_edit(source: &str, span: Span) -> Option<TextEdit> {
+    let text = source.get(span.start..span.end)?;
+    if text.is_empty() || text.trim() != text {
+        return None;
+    }
+    let call = Syntax::copy_call_source(text);
+    Some(match call.strip_prefix(text) {
+        Some(suffix) => TextEdit {
+            span: Span::new(span.end, span.end),
+            new_text: suffix.to_string(),
+        },
+        None => TextEdit {
+            span,
+            new_text: call,
+        },
+    })
 }
 
 #[derive(Clone)]
@@ -103,6 +127,25 @@ fn const_place_int(expr: &Expr) -> Option<i64> {
     }
 }
 
+/// Inclusive constant bounds of a range projection operand; a non-literal
+/// range leaves both bounds unknown.
+fn range_place_bounds(range: &Expr) -> (Option<i64>, Option<i64>) {
+    let Expr::Range {
+        start,
+        end,
+        exclusive,
+        ..
+    } = range
+    else {
+        return (None, None);
+    };
+    let mut end = const_place_int(end);
+    if *exclusive {
+        end = end.and_then(|value| value.checked_sub(1));
+    }
+    (const_place_int(start), end)
+}
+
 fn cell_guard_projection_path(expr: &Expr, parameter: &str) -> Option<Vec<String>> {
     match expr {
         Expr::Ident(name, _) if name == parameter => Some(Vec::new()),
@@ -139,13 +182,16 @@ fn cell_guard_projection_paths_overlap(first: &[String], second: &[String]) -> b
     first.starts_with(second) || second.starts_with(first)
 }
 
-fn named_view_field_path(expr: &Expr, fields: &mut Vec<String>) -> Option<String> {
+fn named_view_field_path<'a>(expr: &'a Expr, fields: &mut Vec<&'a str>) -> Option<&'a str> {
     match expr {
-        Expr::Ident(name, _) => Some(name.clone()),
+        Expr::Ident(name, _) => Some(name),
         Expr::Field(base, field, _) => {
             let name = named_view_field_path(base, fields)?;
-            fields.push(field.clone());
+            fields.push(field);
             Some(name)
+        }
+        Expr::Place(inner, _, _) | Expr::Paren(inner, _) => {
+            named_view_field_path(inner, fields)
         }
         _ => None,
     }
@@ -367,7 +413,7 @@ impl<'a> Checker<'a> {
                 ),
                 format!(
                     "keep `{}` inside the `{}` region, or copy what you need out with `{}` before it leaves",
-                    name, fact.place.owner.name, Syntax::SIGIL_COPY
+                    name, fact.place.owner.name, Syntax::copy_call(name)
                 ),
                 Some(span),
             )),
@@ -451,7 +497,7 @@ impl<'a> Checker<'a> {
                 def_span,
                 origin: ViewOwnerOrigin::Receiver,
             }
-        } else if self.consts.contains_key(owner) {
+        } else if self.const_type(owner).is_some() {
             ViewOwnerId {
                 name: owner.to_string(),
                 def_span,
@@ -503,6 +549,10 @@ impl<'a> Checker<'a> {
         transfer_from: Option<&str>,
         enum_variants: Option<&HashSet<String>>,
     ) {
+        let reborrow_parent = transfer_from
+            .and_then(|source| self.view_fact(source))
+            .filter(|fact| fact.access == ViewAccess::Write && place.extends(&fact.place))
+            .map(|fact| fact.seq);
         let conflicts = self
             .flow
             .views
@@ -513,6 +563,9 @@ impl<'a> Checker<'a> {
                     return false;
                 }
                 if transfer_from == Some(existing_name) {
+                    return false;
+                }
+                if reborrow_parent.is_some_and(|parent| self.view_loan_contains(parent, fact.seq)) {
                     return false;
                 }
                 // Several candidates for one logical output slot are alternatives,
@@ -571,9 +624,25 @@ impl<'a> Checker<'a> {
             access,
             scope_len: self.scope_depth(),
             seq: 0,
+            reborrow_parent,
             invalidated: None,
         };
         crate::Sema::push_view_fact(&mut self.flow.views, name, fact);
+    }
+
+    /// A descendant may use its suspended parent loan, never a sibling loan.
+    fn view_loan_contains(&self, mut descendant: usize, ancestor: usize) -> bool {
+        loop {
+            if descendant == ancestor {
+                return true;
+            }
+            let parent = self.flow.views.all()
+                .flat_map(|(_, facts)| facts)
+                .find(|fact| fact.seq == descendant)
+                .and_then(|fact| fact.reborrow_parent);
+            let Some(parent) = parent else { return false; };
+            descendant = parent;
+        }
     }
 
     fn view_paths_are_enum_alternatives(
@@ -602,10 +671,20 @@ impl<'a> Checker<'a> {
         crate::Sema::view_facts_for_binding(&self.flow.views, name, binding.def_span)
     }
 
-    fn view_fact_at_path(&self, name: &str, output_path: &[String]) -> Option<&ViewFact> {
-        self.view_facts_at_path(name, output_path)
-            .into_iter()
-            .next()
+    fn view_fact_at_path(&self, name: &str, output_path: &[&str]) -> Option<&ViewFact> {
+        let binding_span = self.lookup(name)?.def_span;
+        let mut best: Option<&ViewFact> = None;
+        for fact in self.flow.views.facts_of(name).flatten() {
+            if fact.binding_span == binding_span
+                && fact.output_path.len() <= output_path.len()
+                && fact.output_path.iter().zip(output_path)
+                    .all(|(held, written)| held.as_str() == *written)
+                && best.map_or(true, |held| fact.output_path.len() > held.output_path.len())
+            {
+                best = Some(fact);
+            }
+        }
+        best
     }
 
     fn view_facts_at_path(&self, name: &str, output_path: &[String]) -> Vec<&ViewFact> {
@@ -621,6 +700,23 @@ impl<'a> Checker<'a> {
             .into_iter()
             .filter(|fact| fact.output_path.len() == longest)
             .collect()
+    }
+
+    /// Follow the projected carrier, not merely its root binding: an aggregate
+    /// may hold several disjoint windows, each with its own loan identity.
+    fn write_view_seq_for_expr(&self, expr: &Expr) -> Option<usize> {
+        let mut output_path = Vec::new();
+        if let Some(name) = named_view_field_path(expr, &mut output_path) {
+            return self.view_fact_at_path(&name, &output_path)
+                .filter(|fact| fact.access == ViewAccess::Write)
+                .map(|fact| fact.seq);
+        }
+        match expr {
+            Expr::Field(base, _, _) | Expr::Index { base, .. }
+            | Expr::Slice { base, .. } | Expr::Place(base, _, _)
+            | Expr::Paren(base, _) => self.write_view_seq_for_expr(base),
+            _ => None,
+        }
     }
 
     fn compose_view_source_places(
@@ -987,9 +1083,7 @@ impl<'a> Checker<'a> {
         }
         if let Type::TraitObject(names) = &ty {
             let receiver = names.iter().find_map(|name| {
-                self.trait_reg
-                    .traits
-                    .get(name)
+                self.trait_reg.trait_info(name)
                     .and_then(|trait_info| trait_info.methods.get(method))
                     .and_then(|sig| sig.params.first())
             });
@@ -1418,9 +1512,20 @@ impl<'a> Checker<'a> {
             }
             Pattern::Struct { fields, .. } => {
                 for field in fields {
-                    if let crate::AST::StructPatField::Bind { local, .. } = field {
-                        bound.insert(local.clone());
+                    match field {
+                        crate::AST::StructPatField::Bind { local, .. } => {
+                            bound.insert(local.clone());
+                        }
+                        crate::AST::StructPatField::Nested { pattern, .. } => {
+                            Self::bind_pattern_names(pattern, bound)
+                        }
+                        crate::AST::StructPatField::Value { .. } => {}
                     }
+                }
+            }
+            Pattern::List { .. } | Pattern::Map { .. } => {
+                for name in pattern.binding_names() {
+                    bound.insert(name.local_name().to_string());
                 }
             }
             Pattern::Or(alts, _) => {
@@ -1456,7 +1561,8 @@ impl<'a> Checker<'a> {
             crate::AST::PatSlot::Named { slot, .. } => Self::bind_slot_names(slot, bound),
             crate::AST::PatSlot::Wildcard
             | crate::AST::PatSlot::Range { .. }
-            | crate::AST::PatSlot::Rest(_) => {}
+            | crate::AST::PatSlot::Rest(_)
+            | crate::AST::PatSlot::Value(_) => {}
         }
     }
 
@@ -1467,21 +1573,9 @@ impl<'a> Checker<'a> {
         bound: &HashSet<String>,
         out: &mut Vec<EvaluatedAccess>,
     ) {
-        match pattern {
-            Pattern::Struct { fields, .. } => {
-                for field in fields {
-                    if let crate::AST::StructPatField::Value { value, .. } = field {
-                        self.collect_evaluated_expr_accesses(value, mode, bound, out);
-                    }
-                }
-            }
-            Pattern::Or(alternatives, _) => {
-                for alternative in alternatives {
-                    self.collect_pattern_value_accesses(alternative, mode, bound, out);
-                }
-            }
-            _ => {}
-        }
+        pattern.for_each_value_expr(&mut |value| {
+            self.collect_evaluated_expr_accesses(value, mode, bound, out)
+        });
     }
 
     fn collect_evaluated_stmt_accesses(
@@ -1810,7 +1904,7 @@ impl<'a> Checker<'a> {
     /// returns. Call-form checkers supply only signature metadata.
     pub(crate) fn check_call_argument_access(
         &mut self,
-        arg: &crate::AST::CallArg,
+        arg: &mut crate::AST::CallArg,
         param_conv: AccessConvention,
         param_ty: &Type,
         borrowed_read: bool,
@@ -1828,6 +1922,17 @@ impl<'a> Checker<'a> {
                 "this consuming call",
                 arg.span,
             );
+            // The parser stores a call's mark on CallArg, unlike a value
+            // mark. Use the same exact-place node before inference so field
+            // reads neither materialize a copy nor lose their move fact.
+            if matches!(arg.expr, Expr::Field(..)) {
+                let place = std::mem::replace(&mut arg.expr, Expr::Absent(arg.span));
+                arg.expr = Expr::Place(
+                    Box::new(place),
+                    crate::AST::PlaceAccess::Take,
+                    arg.span,
+                );
+            }
         }
         let Some(place) = self.place_from_expr(&arg.expr) else {
             let mut accesses = Vec::new();
@@ -2064,14 +2169,13 @@ impl<'a> Checker<'a> {
                 place.projections.extend(
                     output_path[fact.output_path.len()..]
                         .iter()
-                        .cloned()
-                        .map(ViewProjection::Field),
+                        .map(|field| ViewProjection::Field((*field).to_string())),
                 );
                 return Some(place);
             }
         }
         match expr {
-            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.consts.contains_key(name))
+            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.const_type(name).is_some())
                 .then(|| ViewPlace {
                     owner: self.owner_id(name),
                     projections: Vec::new(),
@@ -2079,6 +2183,21 @@ impl<'a> Checker<'a> {
             Expr::Field(base, field, _) => {
                 let mut place = self.place_from_expr(base)?;
                 place.projections.push(ViewProjection::Field(field.clone()));
+                Some(place)
+            }
+            // `xs[a..b]` parses as an index whose operand is the range; infer
+            // rewrites it to the `Slice` below, so both spellings name the same
+            // range projection (a call argument's place is taken before infer).
+            Expr::Index {
+                base, index, span, ..
+            } if matches!(index.as_ref(), Expr::Range { .. }) => {
+                let mut place = self.place_from_expr(base)?;
+                let (start, end) = range_place_bounds(index);
+                place.projections.push(ViewProjection::Range {
+                    start,
+                    end,
+                    span: *span,
+                });
                 Some(place)
             }
             Expr::Index {
@@ -2100,20 +2219,7 @@ impl<'a> Checker<'a> {
             } => {
                 let mut place = self.place_from_expr(base)?;
                 let (start, end) = match range.as_deref() {
-                    Some(Expr::Range {
-                        start,
-                        end,
-                        exclusive,
-                        ..
-                    }) => {
-                        let start = const_place_int(start);
-                        let mut end = const_place_int(end);
-                        if *exclusive {
-                            end = end.and_then(|value| value.checked_sub(1));
-                        }
-                        (start, end)
-                    }
-                    Some(_) => (None, None),
+                    Some(range) => range_place_bounds(range),
                     None => (const_place_int(start), const_place_int(end)),
                 };
                 place.projections.push(ViewProjection::Range {
@@ -2133,7 +2239,7 @@ impl<'a> Checker<'a> {
     /// capturable, while anything after them belongs to the captured container.
     fn capture_place_info(&self, expr: &Expr) -> Option<(ViewPlace, Option<Type>, bool)> {
         match expr {
-            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.consts.contains_key(name))
+            Expr::Ident(name, _) => (self.lookup(name).is_some() || self.const_type(name).is_some())
                 .then(|| {
                     (
                         ViewPlace {
@@ -2286,7 +2392,7 @@ impl<'a> Checker<'a> {
             // Module-level mutable bindings are legal write places.
             return;
         }
-        if self.consts.contains_key(&root) {
+        if self.const_type(&root).is_some() {
             self.diags.push(Diagnostic::error(
                 "E0111",
                 format!("`{root}` is a const and can never change"),
@@ -2339,7 +2445,8 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_expr_change(&mut self, expr: &Expr, action: &str, span: Span) {
-        self.check_expr_change_with_view_exemption(expr, action, span, None);
+        let through_view = self.write_view_seq_for_expr(expr);
+        self.check_expr_change_with_view_exemption(expr, action, span, through_view);
     }
 
     fn check_expr_change_with_view_exemption(
@@ -2347,7 +2454,7 @@ impl<'a> Checker<'a> {
         expr: &Expr,
         action: &str,
         span: Span,
-        ignored_view: Option<(&str, Span, usize)>,
+        ignored_view: Option<usize>,
     ) {
         if let Some(freeze_site) = self.frozen_expr_site(expr) {
             let name = expr_root_ident(expr).unwrap_or("the frozen value");
@@ -2423,6 +2530,17 @@ impl<'a> Checker<'a> {
                             Syntax::KW_SELF
                         ),
                     )
+                } else if info.param_conv.is_some() {
+                    (
+                        format!(
+                            "cannot write to `{}` — it does not have the write-access marker `&`; required before calling `.{}()`",
+                            root, method
+                        ),
+                        format!(
+                            "change the parameter to `{}: {}{}` and pass the argument with `{}` at the call site",
+                            root, Syntax::SIGIL_WRITE, info.ty.name(), Syntax::SIGIL_WRITE
+                        ),
+                    )
                 } else {
                     (
                         format!(
@@ -2449,21 +2567,7 @@ impl<'a> Checker<'a> {
             // Passing a named write window with `&` reborrows its own
             // exclusive fact. The normal change checks still run so frozen
             // owners, scoped task loans, and other live views remain strict.
-            let write_view = expr_root_ident(&arg.expr).and_then(|root| {
-                self.view_fact(root)
-                    .filter(|fact| fact.access == ViewAccess::Write)
-                    .map(|fact| (root.to_string(), fact.binding_span, fact.seq))
-            });
-            if let Some((root, binding_span, seq)) = write_view {
-                self.check_expr_change_with_view_exemption(
-                    &arg.expr,
-                    "be passed with write access",
-                    arg.span,
-                    Some((&root, binding_span, seq)),
-                );
-            } else {
-                self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
-            }
+            self.check_expr_change(&arg.expr, "be passed with write access", arg.span);
             if let Some(root) = expr_root_ident(&arg.expr) {
                 self.clear_origin(root);
             }
@@ -2472,14 +2576,13 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn check_lvalue_change(&mut self, target: &LValue, action: &str) {
         let through_write_view = match target {
-            LValue::Index { base, .. } | LValue::Field { base, .. } => expr_root_ident(base)
-                .and_then(|name| self.view_fact(name))
-                .is_some_and(|fact| fact.access == ViewAccess::Write),
-            LValue::Local { name, .. } => self.is_write_view(name),
+            LValue::Index { base, .. } | LValue::Field { base, .. } => {
+                self.write_view_seq_for_expr(base)
+            }
+            LValue::Local { name, .. } => self.view_fact(name)
+                .filter(|fact| fact.access == ViewAccess::Write)
+                .map(|fact| fact.seq),
         };
-        if through_write_view {
-            return;
-        }
         let frozen_base = match target {
             LValue::Index { base, .. } | LValue::Field { base, .. } => Some(base.as_ref()),
             LValue::Local { .. } => None,
@@ -2511,7 +2614,10 @@ impl<'a> Checker<'a> {
             }),
         };
         if let Some(place) = place {
-            self.check_place_change(&place, action, target.span());
+            self.check_place_change_with_view_exemption(
+                &place, action, target.span(),
+                through_write_view,
+            );
         }
     }
 
@@ -2546,11 +2652,7 @@ impl<'a> Checker<'a> {
         let Some(place) = self.place_from_expr(expr) else {
             return;
         };
-        if let Some(root) = crate::Sema::Diagnostics::expr_root_ident(expr) {
-            if self.is_write_view(root) {
-                return;
-            }
-        }
+        let through_view = self.write_view_seq_for_expr(expr);
         // `suppress_partial_move_root_read` means this expression is only the
         // base of a deeper projection whose complete place the caller checks
         // (`adjacent.values` in `&adjacent.values[2..3]`, `Expr::Place` in
@@ -2568,6 +2670,7 @@ impl<'a> Checker<'a> {
                     && fact.access == ViewAccess::Write
                     && fact.place.overlaps(&place)
                     && fact.invalidated.is_none()
+                    && !through_view.is_some_and(|seq| self.view_loan_contains(seq, fact.seq))
                     && !(base_of_deeper_projection
                         && place.projections.len() < fact.place.projections.len())
             })
@@ -2601,7 +2704,7 @@ impl<'a> Checker<'a> {
         changed: &ViewPlace,
         action: &str,
         span: Span,
-        ignored_view: Option<(&str, Span, usize)>,
+        ignored_view: Option<usize>,
     ) {
         // D-CONC-FREEZE1=A: a frozen snapshot may be moved, but no operation
         // may mutate its root or any projected place.
@@ -2626,11 +2729,7 @@ impl<'a> Checker<'a> {
                 .find(|&(name, fact)| {
                     self.view_is_live_now(name)
                         && !ignored_view.is_some_and(
-                            |(ignored_name, binding_span, seq)| {
-                                name == ignored_name
-                                    && fact.binding_span == binding_span
-                                    && fact.seq == seq
-                            },
+                            |seq| self.view_loan_contains(seq, fact.seq),
                         )
                         && fact.place.overlaps(changed)
                         && fact.invalidated.is_none()
@@ -2686,7 +2785,8 @@ impl<'a> Checker<'a> {
     /// E1113: the typed row owns the frozen-write wording; the checker only
     /// supplies the source name, operation, and freeze-site provenance.
     fn report_frozen_write(&mut self, name: &str, freeze_site: Span, action: &str, span: Span) {
-        let site = format!("`freeze(...)` at byte {}", freeze_site.start);
+        let (line, column) = crate::Diagnostics::span_line_col(&self.source, freeze_site.start);
+        let site = format!("`freeze(...)` at line {line}, column {column}");
         self.diags.push(Diagnostic::from_row(
             "E1113",
             &[("name", name), ("action", action), ("freeze_site", &site)],
@@ -3107,6 +3207,18 @@ impl<'a> Checker<'a> {
             ..
         } = init
         {
+            if matches!(method.as_str(), "__object_entries_view" | "__bytes_view")
+                && matches!(receiver.as_ref().without_parens(), Expr::Ident(alias, _)
+                    if self.core_imports.get(alias).is_some_and(|module| module == "core.encoding")
+                        || jet_foundation::CoreModuleExports::core_source_module_by_alias(alias)
+                            .is_some_and(|source| source.module == "core.encoding"))
+            {
+                let Some(place) = args.first().and_then(|arg| self.place_from_expr(&arg.expr)) else {
+                    return Vec::new();
+                };
+                let kind = self.view_kind_for_place(&place);
+                return vec![(Vec::new(), place, kind, ViewAccess::Read)];
+            }
             if method == "split_write" || method == "get_disjoint_write" {
                 let Some(place) = self.place_from_expr(receiver) else {
                     return Vec::new();
@@ -3167,21 +3279,37 @@ impl<'a> Checker<'a> {
             receiver,
             method,
             args,
-            recv_type: Some(recv_type),
+            recv_type,
             ..
         } = init
         {
-            let Some(map) = self
-                .registry
-                .method(recv_type, method)
-                .and_then(|sig| sig.return_view_provenance.get())
-                .or_else(|| {
-                    self.trait_reg
-                        .traits
-                        .get(recv_type)
-                        .and_then(|info| info.methods.get(method))
+            // `module.function(...)` is a MethodCall in the surface AST too.
+            // Its returned window belongs to the imported function's contract,
+            // not to an inherent method on the module alias.
+            let imported = match receiver.without_parens() {
+                Expr::Ident(alias, _) => self.imports.get(alias).and_then(|&module| {
+                    let modules = self.modules?;
+                    let target = &modules[module];
+                    let (owner, name) = target.reexports.get(method)
+                        .map(|(name, owner)| (*owner, name.as_str()))
+                        .unwrap_or_else(|| (
+                            self.name_ledger.namespace_owner(module, method).unwrap_or(module),
+                            method.as_str(),
+                        ));
+                    modules[owner].funcs.get(name)
                         .and_then(|sig| sig.return_view_provenance.get())
-                })
+                }),
+                _ => None,
+            };
+            let Some(map) = imported.or_else(|| recv_type.as_ref().and_then(|recv_type| {
+                self.registry.method(recv_type, method)
+                    .and_then(|sig| sig.return_view_provenance.get())
+                    .or_else(|| {
+                        self.trait_reg.trait_info(recv_type)
+                            .and_then(|info| info.methods.get(method))
+                            .and_then(|sig| sig.return_view_provenance.get())
+                    })
+            }))
             else {
                 return Vec::new();
             };
@@ -3213,6 +3341,23 @@ impl<'a> Checker<'a> {
                 }
             }
             return sources;
+        }
+        // D-MEMPROVENANCE2: a bare subrange of a declared view is a read
+        // reborrow of the view's own owner path.
+        if let Expr::Slice { base, .. } = init {
+            let view_base = self.compound_expr_type(base).is_some_and(|ty| {
+                matches!(
+                    ty.without_user_tags(),
+                    Type::Apply { name, args }
+                        if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1
+                )
+            });
+            if view_base {
+                if let Some(place) = self.place_from_expr(init) {
+                    let kind = self.view_kind_for_place(&place);
+                    return vec![(Vec::new(), place, kind, ViewAccess::Read)];
+                }
+            }
         }
         if let Expr::Place(inner, access, _) = init {
             let Some(place) = self.place_from_expr(inner) else {
@@ -3370,7 +3515,88 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn collect_pattern_view_slots(
+        &self, pattern: &Pattern, ty: Option<&Type>, prefix: &[String],
+        slots: &mut Vec<(String, Span, Vec<String>)>,
+    ) {
+        match pattern {
+            Pattern::Present { binding, binding_span, inner, .. }
+            | Pattern::Ok { binding, binding_span, inner, .. }
+            | Pattern::Err { binding, binding_span, inner, .. } => {
+                if let Some(inner) = inner {
+                    let payload = match (pattern, ty) {
+                        (Pattern::Present { .. }, Some(Type::Option(payload))) => Some(payload.as_ref()),
+                        (Pattern::Ok { .. }, Some(Type::Result { ok, .. })) => Some(ok.as_ref()),
+                        (Pattern::Err { .. }, Some(Type::Result { err, .. })) => Some(err.as_ref()),
+                        _ => None,
+                    };
+                    self.collect_pattern_view_slots(inner, payload, prefix, slots);
+                } else if binding != "_" {
+                    slots.push((binding.clone(), *binding_span, prefix.to_vec()));
+                }
+            }
+            Pattern::Variant { variant, bindings, .. } => {
+                let payload = ty.map(|ty| self.pattern_payload_types(ty, variant)).unwrap_or_default();
+                let names = ty.and_then(|ty| match ty {
+                    Type::Named(name) | Type::Apply { name, .. } => self.resolve_enum_variants_cloned(name),
+                    _ => None,
+                }).and_then(|variants| variants.get(variant).cloned())
+                    .and_then(|(_, payload)| match payload {
+                        VariantPayload::Named(fields) => Some(fields.into_iter().map(|field| field.name).collect::<Vec<_>>()),
+                        _ => None,
+                    });
+                for (index, slot) in bindings.iter().enumerate() {
+                    let mut path = prefix.to_vec();
+                    path.push(variant.clone());
+                    path.push(names.as_ref().and_then(|names| names.get(index)).cloned()
+                        .unwrap_or_else(|| index.to_string()));
+                    match slot {
+                        crate::AST::PatSlot::Bind { name, span } => slots.push((name.clone(), *span, path)),
+                        crate::AST::PatSlot::Nested(inner) => self.collect_pattern_view_slots(inner, payload.get(index), &path, slots),
+                        _ => {}
+                    }
+                }
+            }
+            Pattern::Struct { fields, .. } => {
+                for field in fields {
+                    match field {
+                        crate::AST::StructPatField::Bind { field, local, local_span, .. } => {
+                            let mut path = prefix.to_vec();
+                            path.push(field.clone());
+                            slots.push((local.clone(), *local_span, path));
+                        }
+                        crate::AST::StructPatField::Nested { field, pattern, .. } => {
+                            let mut path = prefix.to_vec();
+                            path.push(field.clone());
+                            let field_ty = ty.cloned().and_then(|ty| self.projected_field_type(ty, field));
+                            self.collect_pattern_view_slots(pattern, field_ty.as_ref(), &path, slots);
+                        }
+                        crate::AST::StructPatField::Value { .. } => {}
+                    }
+                }
+            }
+            Pattern::List { .. } | Pattern::Map { .. } => {
+                for name in pattern.binding_names() {
+                    slots.push((name.local_name().to_string(), name.span, prefix.to_vec()));
+                }
+            }
+            Pattern::Or(alternatives, _) => {
+                for alternative in alternatives {
+                    self.collect_pattern_view_slots(alternative, ty, prefix, slots);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub(crate) fn record_pattern_view_bindings(&mut self, subject: &Expr, pattern: &Pattern) {
+        let mut bound_slots = Vec::new();
+        let mut typed_subject = subject;
+        while let Expr::Place(inner, _, _) | Expr::Paren(inner, _) | Expr::Copy(inner, _) = typed_subject {
+            typed_subject = inner;
+        }
+        let subject_ty = self.compound_expr_type(typed_subject);
+        self.collect_pattern_view_slots(pattern, subject_ty.as_ref(), &[], &mut bound_slots);
         // D-OPT-WRITE1 (#3974): each payload binding under a `&place` subject
         // is a live write window into that place. Distinct bindings get
         // disjoint slots; any other view of or write to the place overlaps.
@@ -3380,16 +3606,20 @@ impl<'a> Checker<'a> {
             };
             let mut names = HashSet::new();
             crate::Sema::CheckerCore::collect_window_names(pattern, &mut names);
-            let mut names = names.into_iter().collect::<Vec<_>>();
-            names.sort();
-            for name in names {
+            for (name, _, path) in bound_slots {
+                if !names.contains(&name) {
+                    continue;
+                }
                 let Some(binding_span) = self.lookup(&name).map(|info| info.def_span) else {
                     continue;
                 };
                 let mut place = base.clone();
-                place.projections.push(ViewProjection::Field(format!("{{{name}}}")));
+                place.projections.extend(path.into_iter().map(ViewProjection::Field));
                 let kind = self.view_kind_for_place(&place);
-                self.record_view(&name, Vec::new(), place, kind, ViewAccess::Write, binding_span);
+                self.record_view_with_exemptions(
+                    &name, Vec::new(), place, kind, ViewAccess::Write, binding_span,
+                    expr_root_ident(inner), None,
+                );
             }
             return;
         }
@@ -3402,73 +3632,27 @@ impl<'a> Checker<'a> {
                 _ => None,
             })
             .flatten();
-        let mut bound_slots = Vec::new();
-
-        match pattern {
-            Pattern::Present {
-                binding,
-                binding_span,
-                ..
-            }
-            | Pattern::Ok {
-                binding,
-                binding_span,
-                ..
-            }
-            | Pattern::Err {
-                binding,
-                binding_span,
-                ..
-            } => {
-                bound_slots.push((binding.clone(), *binding_span, Vec::new()));
-            }
-            Pattern::Variant {
-                variant,
-                bindings: slots,
-                ..
-            } => {
-                let slot_names = self.pattern_variant_slot_names(subject, variant, slots.len());
-                for (index, slot) in slots.iter().enumerate() {
-                    if let crate::AST::PatSlot::Bind { name, span } = slot {
-                        let slot_name = slot_names
-                            .get(index)
-                            .cloned()
-                            .unwrap_or_else(|| index.to_string());
-                        bound_slots.push((name.clone(), *span, vec![variant.clone(), slot_name]));
-                    }
-                }
-            }
-            Pattern::Struct { fields, .. } => {
-                for field in fields {
-                    if let crate::AST::StructPatField::Bind {
-                        field,
-                        local,
-                        local_span,
-                        ..
-                    } = field
-                    {
-                        bound_slots.push((local.clone(), *local_span, vec![field.clone()]));
-                    }
-                }
-            }
-            Pattern::Or(alternatives, _) => {
-                for alternative in alternatives {
-                    self.record_pattern_view_bindings(subject, alternative);
-                }
-                return;
-            }
-            Pattern::Absent(_)
-            | Pattern::Range { .. }
-            | Pattern::StrMatch { .. }
-            | Pattern::BinMatch { .. } => {}
-        }
 
         for (name, span, source_prefix) in bound_slots {
+            // Read patterns copy scalar payloads; they do not retain a place
+            // loan. Explicit `&place` pattern windows were handled above.
+            if self.lookup(&name).is_some_and(|info| info.ty.is_scalar()) {
+                continue;
+            }
             let binding_span = self.lookup(&name).map(|info| info.def_span).unwrap_or(span);
             let binding_has_view = self
                 .lookup(&name)
                 .is_some_and(|info| self.type_contains_view_boundary(&info.ty));
             if !binding_has_view {
+                // Ordinary payloads are projections too: slicing a borrowed
+                // list payload must keep the matched parameter as its owner.
+                if !self.frame_owns_place(subject) {
+                    if let Some(mut place) = self.place_from_expr(subject) {
+                        place.projections.extend(source_prefix.into_iter().map(ViewProjection::Field));
+                        let kind = self.view_kind_for_place(&place);
+                        self.record_view(&name, Vec::new(), place, kind, ViewAccess::Read, binding_span);
+                    }
+                }
                 continue;
             }
             let mut matched = false;
@@ -3723,37 +3907,6 @@ impl<'a> Checker<'a> {
             .collect()
     }
 
-    fn pattern_variant_slot_names(
-        &self,
-        subject: &Expr,
-        variant: &str,
-        slot_count: usize,
-    ) -> Vec<String> {
-        fn subject_type(checker: &Checker<'_>, subject: &Expr) -> Option<Type> {
-            match subject {
-                Expr::Ident(name, _) => checker.lookup(name).map(|info| info.ty.clone()),
-                Expr::Copy(inner, _) | Expr::Paren(inner, _) => subject_type(checker, inner),
-                _ => None,
-            }
-        }
-
-        let named = subject_type(self, subject)
-            .and_then(|ty| match ty {
-                Type::Named(name) | Type::Apply { name, .. } => Some(name),
-                _ => None,
-            })
-            .and_then(|name| self.resolve_enum_variants_cloned(&name))
-            .and_then(|variants| variants.get(variant).cloned())
-            .and_then(|(_, payload)| match payload {
-                VariantPayload::Named(fields) => {
-                    Some(fields.into_iter().map(|field| field.name).collect())
-                }
-                _ => None,
-            });
-
-        named.unwrap_or_else(|| (0..slot_count).map(|index| index.to_string()).collect())
-    }
-
     pub(crate) fn transfer_named_view(&mut self, target: &str, source: &str, span: Span) -> bool {
         let facts: Vec<_> = self.view_facts(source).into_iter().cloned().collect();
         if facts.is_empty() {
@@ -3780,14 +3933,42 @@ impl<'a> Checker<'a> {
             Expr::Place(inner, _, _) | Expr::Paren(inner, _) => inner.as_ref(),
             _ => expr,
         };
-        let (Expr::Field(..) | Expr::Index { .. }) = expr else {
-            return None;
+        // A subrange of a live write view reborrows its exclusive loan.
+        let (Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }) = expr else {
+            return self.mutable_view_call_root(expr);
         };
         let root = expr_root_ident(expr)?;
         self.view_facts(root)
             .iter()
             .any(|fact| fact.access == ViewAccess::Write)
             .then(|| root.to_string())
+    }
+
+    /// D-MEMPROVENANCE2: a call that returns a write view borrowed from a
+    /// live write-view argument takes over that argument's exclusive loan.
+    /// Inference may wrap the call in its propagation node (`Try`).
+    fn mutable_view_call_root(&self, expr: &Expr) -> Option<String> {
+        let expr = match expr.without_parens() {
+            Expr::Try(inner, ..) => inner.without_parens(),
+            other => other,
+        };
+        let Expr::Call(call) = expr else {
+            return None;
+        };
+        call.args.iter().find_map(|arg| match arg.expr.without_parens() {
+            Expr::Ident(name, _)
+                if self
+                    .view_facts(name)
+                    .iter()
+                    .any(|fact| fact.access == ViewAccess::Write)
+                    && self.lookup(name).is_some_and(|info| {
+                        matches!(info.ty.without_user_tags(), Type::Apply { name, .. } if name == "ViewMut")
+                    }) =>
+            {
+                Some(name.clone())
+            }
+            _ => None,
+        })
     }
 
     pub(crate) fn finish_mutable_view_aggregate_transfer(
@@ -3826,6 +4007,30 @@ impl<'a> Checker<'a> {
     /// True if `name` is currently a live `View<T>` binding.
     pub(crate) fn is_list_view(&self, name: &str) -> bool {
         self.view_kind(name).is_some_and(ViewKind::is_named_window)
+    }
+
+    /// D-MEMPROVENANCE2: a parameter (or the receiver) declared as
+    /// `View<T>`/`ViewMut<T>` is the owner path of every reborrow taken from
+    /// it. Returns that path and the access its type grants.
+    pub(crate) fn declared_view_owner_place(&self, name: &str) -> Option<(ViewPlace, ViewAccess)> {
+        let info = self.lookup(name)?;
+        if info.param_conv.is_none() && name != Syntax::KW_SELF {
+            return None;
+        }
+        let access = match info.ty.without_user_tags() {
+            Type::Apply { name, args } if name == "View" && args.len() == 1 => ViewAccess::Read,
+            Type::Apply { name, args } if name == "ViewMut" && args.len() == 1 => {
+                ViewAccess::Write
+            }
+            _ => return None,
+        };
+        Some((
+            ViewPlace {
+                owner: self.owner_id(name),
+                projections: Vec::new(),
+            },
+            access,
+        ))
     }
 
     pub(crate) fn type_contains_view_boundary(&self, ty: &Type) -> bool {
@@ -3938,7 +4143,7 @@ impl<'a> Checker<'a> {
                 "`{}` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at",
                 owner
             ),
-            "return an owned copy with `~place` (for example `~value[a..b]`), or accept the source as a parameter so the caller keeps owning it".to_string(),
+            "return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it".to_string(),
             Some(span),
         ));
     }
@@ -3968,7 +4173,7 @@ impl<'a> Checker<'a> {
                 "`^{owner}` moves the value into this function, which frees it when it returns, so a returned window into it would outlive its owner"
             ),
             format!(
-                "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `~`"
+                "take `{owner}` as a read or `&` parameter so the caller keeps owning it, or return an owned copy with `.copy()`"
             ),
             Some(span),
         ));
@@ -4142,7 +4347,7 @@ impl<'a> Checker<'a> {
             "returned views need a stable owner relationship".to_string(),
             "each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources"
                 .to_string(),
-            "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `~`"
+            "return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`"
                 .to_string(),
             Some(span),
         ));
@@ -4154,7 +4359,7 @@ impl<'a> Checker<'a> {
             "returned string views need a stable owner relationship".to_string(),
             "each public `View<str>` slot must name a bounded set of receiver, parameter, or static `String` sources that stay live; this return did not prove those sources"
                 .to_string(),
-            "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `~`"
+            "return a view derived from parameters or the receiver on every path, or return an owned `String` copy with `.copy()`"
                 .to_string(),
             Some(span),
         ));
@@ -4169,7 +4374,7 @@ impl<'a> Checker<'a> {
             "an owned `String` cannot fill a `View<str>` slot".to_string(),
             "`View<str>` needs a zero-copy window from `.trim()` / `.after()` / `.before()` (or an already-tracked string-view binding); a plain `String` place owns its buffer instead"
                 .to_string(),
-            "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `~`"
+            "bind a window with `.trim()`/`.after()`/`.before()`, return a `View` of the owning element and read the field through it, or store an owned `String` field and copy with `.copy()`"
                 .to_string(),
             Some(span),
         ));
@@ -4215,7 +4420,7 @@ impl<'a> Checker<'a> {
         let Expr::Ident(name, _) = receiver.as_ref() else {
             return None;
         };
-        if self.consts.contains_key(name) {
+        if self.const_type(name).is_some() {
             return None;
         }
         let Some(info) = self.lookup(name) else {
@@ -4269,7 +4474,7 @@ impl<'a> Checker<'a> {
                 "`{}` is a zero-copy view into `{}` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled",
                 name, owner
             ),
-            format!("write `{}{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::SIGIL_COPY, name),
+            format!("write `{}` first, or remove `copies: .Explicit` to use the default owning copy", Syntax::copy_call(name)),
             Some(span),
         );
         self.diags
@@ -4544,6 +4749,31 @@ impl<'a> Checker<'a> {
         reuse_span: Span,
         moved_ty: Option<&Type>,
     ) -> Diagnostic {
+        // D-CALLSITE-MARK1=A: a lambda that moved a capture runs once.
+        if let Some(capture) = self
+            .lookup(moved_place)
+            .and_then(|info| self.once_lambdas.get(&info.def_span))
+        {
+            let label = if moved_at.span == reuse_span {
+                format!("`{moved_place}` ran here on an earlier loop iteration")
+            } else {
+                format!("`{moved_place}` ran here")
+            };
+            return Diagnostic::error(
+                "E0121",
+                format!("`{moved_place}` can run only once, and it already ran"),
+                format!(
+                    "`{moved_place}` takes its captured `{capture}` with the move marker `{}`, so its first call gave `{capture}` away",
+                    Syntax::SIGIL_MOVE
+                ),
+                format!(
+                    "call `{moved_place}` once, or let it pass a copy of `{capture}` (`{}`) instead of taking it",
+                    Syntax::copy_call(capture)
+                ),
+                Some(reuse_span),
+            )
+            .with_label(moved_at.span, label);
+        }
         let consumer = moved_at.consumer.as_str();
         let note = if moved_ty.is_some_and(|ty| self.is_resource_type(ty)) {
             Some(format!(
@@ -4598,13 +4828,12 @@ impl<'a> Checker<'a> {
         };
         let place_name = Self::place_name(&place);
         let moved: Vec<(String, crate::Sema::FlowFacts::MoveOrigin)> =
-            if matches!(expr, Expr::Ident(..)) && self.suppress_partial_move_root_read {
-                self.flow
-                    .moved
-                    .get(&place_name)
-                    .cloned()
-                    .map(|at| (place_name.clone(), at))
-                    .into_iter()
+            if self.suppress_partial_move_root_read {
+                // Forming a projected assignment place does not read its
+                // moved descendants, but a moved ancestor is still unusable.
+                self.flow.moved.iter()
+                    .filter(|(moved, _)| Self::contains_place(moved, &place_name))
+                    .map(|(moved, at)| (moved.to_string(), at.clone()))
                     .collect()
             } else {
                 self.flow
@@ -4649,9 +4878,302 @@ impl<'a> Checker<'a> {
     }
 
     fn record_share_site(&mut self, site: Span, diagnostic: Diagnostic) {
+        if let Some(take) = self.implicit_take_sites.get_mut(&site) {
+            // An unmarked take argument is never shared behind the reader's
+            // back: the call was not the name's last use, so it needs `.copy()`.
+            if !take.reported {
+                take.reported = true;
+                let take = take.clone();
+                let reuse = diagnostic.span.unwrap_or(site);
+                let diagnostic = self.implicit_take_reused(&take, site, reuse);
+                self.diags.push(diagnostic);
+            }
+            return;
+        }
         if !self.share_sites.iter().any(|(known, _)| *known == site) {
             self.share_sites.push((site, diagnostic));
         }
+    }
+
+    /// D-CALLSITE-MARK1=A: for each argument written as a bare name, whether
+    /// another argument of the same call names it too. Such a name has no
+    /// last use in that call.
+    pub(crate) fn args_named_elsewhere(args: &[crate::AST::CallArg]) -> Vec<bool> {
+        args.iter()
+            .enumerate()
+            .map(|(index, arg)| match &arg.expr {
+                Expr::Ident(name, _) => args.iter().enumerate().any(|(other_index, other)| {
+                    other_index != index && super::Captures::expr_refs_name(&other.expr, name)
+                }),
+                _ => false,
+            })
+            .collect()
+    }
+
+    /// E0209: an unmarked argument to a take parameter moved its name, and a
+    /// later use (or the next loop iteration) still needs the value. The fix
+    /// is the explicit copy at the argument.
+    fn implicit_take_reused(&self, take: &ImplicitTakeSite, site: Span, reuse: Span) -> Diagnostic {
+        let ImplicitTakeSite { name, callee, ty, .. } = take;
+        let label = if reuse == site {
+            format!("the next loop iteration passes `{name}` here again")
+        } else {
+            format!("`{name}` is used again here")
+        };
+        let diagnostic = Diagnostic::error(
+            "E0209",
+            format!("`{callee}` takes `{name}`, but `{name}` is used again later"),
+            format!(
+                "`{callee}` takes ownership of this argument; an unmarked argument moves only at its name's last use, and this is not the last use of `{name}`"
+            ),
+            format!(
+                "write `{}` to pass a copy and keep `{name}`, or reorder so this call is the last use of `{name}`",
+                Syntax::copy_call(name),
+            ),
+            Some(site),
+        )
+        .with_label(reuse, label);
+        self.with_ownership_copy_edit(diagnostic, site, Some(ty))
+    }
+
+    /// D-CALLSITE-MARK1=A (amends D-COPY-DEFAULT1=A at call arguments): an
+    /// unmarked argument to a take (`^T`) parameter moves at its name's last
+    /// use, exactly as `^name` would. Only a plain owned local or take
+    /// parameter of an ordinary copyable value qualifies; a field, a value
+    /// with cleanup (a `Close` resource or `#SingleUse` duty, or a type that
+    /// holds one), a type parameter, a one-pass source, a task, a view, a
+    /// capture inside a lambda body, and a name another argument of the same
+    /// call already reads keep `^`, so the caller's E0209/E0201/E0204 stands.
+    /// A name in two argument slots of one call has no last use there
+    /// (`named_elsewhere`): E0209 here. The move is a flow fact: a later use
+    /// on any path, or the next iteration of a loop the name outlives,
+    /// reports E0209 here (`record_share_site`). Returns whether this
+    /// argument is settled (moved, or reported).
+    pub(crate) fn take_unmarked_last_use(
+        &mut self,
+        callee: &str,
+        arg: &mut crate::AST::CallArg,
+        param_ty: &Type,
+        call: &CallAccessFrame,
+        named_elsewhere: bool,
+    ) -> bool {
+        if arg.convention != AccessConvention::Read || arg.spread {
+            return false;
+        }
+        let Expr::Ident(name, span) = &arg.expr else {
+            return false;
+        };
+        let (name, span) = (name.clone(), *span);
+        if span.end.saturating_sub(span.start) != name.len() || !tracks_named_move(&name) {
+            return false;
+        }
+        let Some(info) = self.lookup(&name) else {
+            return false;
+        };
+        if info.invalid
+            || info.single_use_span.is_some()
+            || !matches!(info.param_conv, None | Some(AccessConvention::Move))
+        {
+            return false;
+        }
+        let ty = info.ty.clone();
+        let owner_def = info.def_span;
+        if self
+            .flow
+            .bindings
+            .depth_of(&name)
+            .is_none_or(|depth| depth < self.lambda_scope_floor)
+            || self.is_borrowed_binding(&name)
+            || self.is_view(&name)
+            || self.is_string_view(&name)
+            || call
+                .accesses
+                .iter()
+                .any(|access| access.place.owner.def_span == owner_def)
+        {
+            return false;
+        }
+        if ty != *param_ty && ty != self.resolve_type(param_ty.clone()) {
+            return false;
+        }
+        if type_is_copy(&ty)
+            || !self.is_cloneable_type(&ty)
+            || crate::Sema::Diagnostics::is_secret_bearing_crypto_type(&ty)
+            || is_one_pass_source(&ty)
+            || is_task_type(&ty)
+            || self.type_contains_view_boundary(&ty)
+            || self.type_holds_cleanup(&ty)
+        {
+            return false;
+        }
+        if named_elsewhere {
+            let diagnostic = Diagnostic::error(
+                "E0209",
+                format!("`{name}` is passed to `{callee}` more than once in this call"),
+                format!(
+                    "a name used in two arguments of one call has no last use in that call, so `{callee}` can't take `{name}` without a mark"
+                ),
+                format!(
+                    "write `{}` to pass a copy, or the move marker `{}` (`{}{name}`) where the call hands `{name}` over",
+                    Syntax::copy_call(&name),
+                    Syntax::SIGIL_MOVE,
+                    Syntax::SIGIL_MOVE,
+                ),
+                Some(span),
+            );
+            self.diags.push(diagnostic);
+            return true;
+        }
+        arg.convention = AccessConvention::Move;
+        self.implicit_take_sites.insert(
+            span,
+            ImplicitTakeSite {
+                name: name.clone(),
+                callee: callee.to_string(),
+                ty,
+                reported: false,
+            },
+        );
+        self.mark_moved_place_with_consumer(
+            ViewPlace {
+                owner: self.owner_id(&name),
+                projections: Vec::new(),
+            },
+            span,
+            format!("`{callee}`"),
+            true,
+        );
+        true
+    }
+
+    /// E0204 (#4702): one call reads a name through an earlier argument and
+    /// takes it through this one. The callee would hold a view of a value
+    /// that has already moved, so the call is refused here.
+    pub(crate) fn reject_take_while_lent(
+        &mut self,
+        callee: &str,
+        arg: &crate::AST::CallArg,
+        call: &CallAccessFrame,
+    ) -> bool {
+        let Expr::Ident(name, span) = &arg.expr else {
+            return false;
+        };
+        let Some(owner_def) = self.lookup(name).map(|info| info.def_span) else {
+            return false;
+        };
+        if !call
+            .accesses
+            .iter()
+            .any(|access| access.place.owner.def_span == owner_def)
+        {
+            return false;
+        }
+        self.diags.push(crate::Sema::Diagnostics::aliasing_take_while_lent(
+            name, callee, *span,
+        ));
+        true
+    }
+
+    /// E0225 (D-CALLSITE-MARK1=A): `&` on an argument whose parameter only
+    /// reads it. A written `&` must always mean the call edits the place, so
+    /// a mark the signature does not back is refused with a Safe removal.
+    /// A write window parameter (`ViewMut<T>`) is passed through its `&`
+    /// place and keeps the mark. Returns whether it reported.
+    pub(crate) fn reject_unbacked_write_mark(
+        &mut self,
+        callee: &str,
+        arg: &crate::AST::CallArg,
+        param_ty: &Type,
+    ) -> bool {
+        if arg.convention != AccessConvention::Write
+            || arg.spread
+            || crate::Sema::ReceiverMarks::is_window_type(param_ty)
+            || crate::Sema::ReceiverMarks::is_window_type(&self.resolve_type(param_ty.clone()))
+        {
+            return false;
+        }
+        let place_start = crate::Sema::ReceiverMarks::place_span(&arg.expr).start;
+        let mark_start = self
+            .source
+            .get(..place_start)
+            .map(|before| before.trim_end())
+            .filter(|before| before.ends_with(Syntax::SIGIL_WRITE))
+            .map(|before| before.len() - Syntax::SIGIL_WRITE.len());
+        let mark_span = mark_start
+            .map(|start| Span::new(start, start + Syntax::SIGIL_WRITE.len()))
+            .unwrap_or(arg.span);
+        let mut diagnostic = Diagnostic::error(
+            "E0225",
+            format!(
+                "`{callee}` only reads this argument, so it takes no `{}` mark",
+                Syntax::SIGIL_WRITE
+            ),
+            format!(
+                "a mark shows that a call writes (`{}`) or takes (`{}`) the named place; `{callee}` declares this parameter read-only, so the call leaves the place unmarked",
+                Syntax::SIGIL_WRITE,
+                Syntax::SIGIL_MOVE,
+            ),
+            format!("remove `{}`", Syntax::SIGIL_WRITE),
+            Some(mark_span),
+        );
+        if mark_start.is_some() {
+            diagnostic = diagnostic.with_edit(TextEdit {
+                span: mark_span,
+                new_text: String::new(),
+            });
+        }
+        self.diags.push(diagnostic);
+        true
+    }
+
+    /// A value with cleanup, which never moves without `^`: a `Close`
+    /// resource, a `#SingleUse` duty or task, a type parameter (its
+    /// cleanup is unknown where the generic is written), or any type that
+    /// holds one of those by value in a field, payload, or element.
+    pub(crate) fn type_holds_cleanup(&self, ty: &Type) -> bool {
+        fn walk(checker: &Checker<'_>, ty: &Type, seen: &mut HashSet<String>) -> bool {
+            if checker.is_resource_type(ty) || checker.type_is_single_use(ty) || is_task_type(ty) {
+                return true;
+            }
+            match ty {
+                Type::Named(name) => {
+                    checker.type_param_scope.iter().any(|param| &param.name == name)
+                        || nominal(checker, name, seen)
+                }
+                Type::Apply { name, args } => {
+                    args.iter().any(|arg| walk(checker, arg, seen)) || nominal(checker, name, seen)
+                }
+                Type::Option(inner)
+                | Type::List(inner)
+                | Type::Shared(inner)
+                | Type::Tagged { inner, .. } => walk(checker, inner, seen),
+                Type::Result { ok, err } => walk(checker, ok, seen) || walk(checker, err, seen),
+                Type::Map { key, value, .. } => {
+                    walk(checker, key, seen) || walk(checker, value, seen)
+                }
+                Type::Tuple(fields) => fields.iter().any(|(_, field)| walk(checker, field, seen)),
+                Type::FixedList { elem, .. } => walk(checker, elem, seen),
+                _ => false,
+            }
+        }
+        fn nominal(checker: &Checker<'_>, name: &str, seen: &mut HashSet<String>) -> bool {
+            if !seen.insert(name.to_string()) {
+                return false;
+            }
+            let registry = checker.registry;
+            registry.struct_fields(name).is_some_and(|fields| {
+                fields.iter().any(|(_, _, field)| walk(checker, field, seen))
+            }) || registry.enum_variants(name).is_some_and(|variants| {
+                variants.values().any(|(_, payload)| match payload {
+                    VariantPayload::Unit => false,
+                    VariantPayload::Single(field, _) => walk(checker, field, seen),
+                    VariantPayload::Named(fields) => {
+                        fields.iter().any(|field| walk(checker, &field.ty, seen))
+                    }
+                })
+            })
+        }
+        walk(self, ty, &mut HashSet::new())
     }
 
     /// D-COPY-DEFAULT1=A: an unmarked move of a whole binding, written as
@@ -4687,10 +5209,12 @@ impl<'a> Checker<'a> {
     }
 
     /// D-COPY-DEFAULT1=A: rewrite each shared move site in `body` to the
-    /// same `~name` node an authored copy uses, so every tier materializes
+    /// same `name.copy()` node an authored copy uses, so every tier materializes
     /// the value semantics at that site. A site the body no longer holds as
     /// a plain name keeps its E0121 instead of moving silently.
     pub(crate) fn materialize_share_sites(&mut self, body: &mut [Stmt]) {
+        // Implicit take sites already reported any reuse; they end with the body.
+        self.implicit_take_sites.clear();
         if self.share_sites.is_empty() {
             return;
         }
@@ -4762,6 +5286,65 @@ impl<'a> Checker<'a> {
         );
     }
 
+    fn is_consuming_close_body(&self, receiver_span: Span) -> bool {
+        let method_matches = |methods: &[crate::AST::Func]| methods.iter().any(|method| {
+            method.span == self.current_function_span
+                && method.name == Syntax::RESOURCE_CLOSE
+                && method.params.first().is_some_and(|parameter| {
+                    parameter.name == Syntax::KW_SELF
+                        && parameter.convention == AccessConvention::Move
+                        && parameter.name_span == receiver_span
+                })
+        });
+        let block_matches = |block: &crate::AST::TraitImplBlock| {
+            block.trait_name.rsplit("::").next() == Some(Syntax::TRAIT_CLOSE)
+                && method_matches(&block.methods)
+        };
+        self.items.iter().any(|item| match item {
+            crate::AST::Item::Impl(definition) => definition.trait_name.as_deref()
+                .is_some_and(|name| name.rsplit("::").next() == Some(Syntax::TRAIT_CLOSE))
+                && method_matches(&definition.methods),
+            crate::AST::Item::Struct(definition) => definition.trait_impls.iter().any(&block_matches),
+            crate::AST::Item::Enum(definition) => definition.trait_impls.iter().any(&block_matches),
+            _ => false,
+        })
+    }
+
+    fn reject_partial_close_move(&mut self, place: &ViewPlace, span: Span) -> bool {
+        if place.projections.is_empty() {
+            return false;
+        }
+        let Some(info) = self.lookup(&place.owner.name) else {
+            return false;
+        };
+        let receiver = place.owner.name == Syntax::KW_SELF
+            && info.def_span == place.owner.def_span
+            && info.param_conv == Some(AccessConvention::Move)
+            && self.is_consuming_close_body(place.owner.def_span);
+        let mut owner_ty = info.ty.clone();
+        for (depth, projection) in place.projections.iter().enumerate() {
+            if self.is_resource_type(&owner_ty) && !(depth == 0 && receiver) {
+                let name = Self::place_name(place);
+                self.diags.push(Diagnostic::error(
+                    "E0222",
+                    format!("A part of `{name}` cannot be moved independently"),
+                    format!("{} has its own Close implementation, which needs the complete owner; this move would leave it with an empty field", owner_ty.show()),
+                    "Move the Close owner as a whole, or copy the field if its type supports copying".to_string(),
+                    Some(span),
+                ));
+                return true;
+            }
+            let ViewProjection::Field(field) = projection else {
+                break;
+            };
+            let Some(field_ty) = self.projected_field_type(owner_ty, field) else {
+                break;
+            };
+            owner_ty = field_ty;
+        }
+        false
+    }
+
     fn mark_moved_place_with_consumer(
         &mut self,
         place: ViewPlace,
@@ -4772,6 +5355,9 @@ impl<'a> Checker<'a> {
         let name = place.owner.name.clone();
         let place_name = Self::place_name(&place);
         if !tracks_named_move(&name) {
+            return;
+        }
+        if !unmarked && self.reject_partial_close_move(&place, span) {
             return;
         }
         if self.reject_expiring_secret_loan_change(&name, "be moved", span) {
@@ -4789,45 +5375,11 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let shareable = unmarked && self.move_is_shareable(&place, span);
-        if let Some(info) = self.lookup(&name) {
-            // D-COPY-DEFAULT1=A: a `return` or `break` value leaves the loops
-            // it exits, so a move there is not repeated on a later iteration.
-            // A loop nested inside that value (in a lambda) is not left.
-            let exit_depth = match self.loop_exit_depth {
-                Some((exit, at)) if at == self.loop_depth => exit,
-                _ => self.loop_depth,
-            };
-            if info.decl_loop_depth < exit_depth {
-                // A second visit to a loop is a reuse of the first move. Keep
-                // that original provenance so E0121 can name both the first
-                // consuming call and the later re-move site. The fallback is
-                // needed when this is the first move seen on a loop path.
-                let moved = self
-                    .flow
-                    .moved
-                    .iter()
-                    .filter(|(moved, _)| Self::move_keys_overlap(&place_name, moved))
-                    .min_by_key(|(moved, _)| moved.len())
-                    .map(|(moved, origin)| (moved.to_string(), origin.clone()))
-                    .unwrap_or_else(|| {
-                        (
-                            place_name.clone(),
-                            crate::Sema::FlowFacts::MoveOrigin::new(span, consumer),
-                        )
-                    });
-                let diagnostic =
-                    self.moved_use_diagnostic(&moved.0, &moved.1, span, Some(&info.ty));
-                if shareable {
-                    // The next iteration uses the name again, so this
-                    // unmarked move shares and the source stays usable.
-                    self.record_share_site(span, diagnostic);
-                } else {
-                    self.push_moved_use_diagnostic(diagnostic);
-                }
-                return;
-            }
-        }
+        // An implicit take argument is tracked like a share site, so a later
+        // use reaches it (and reports E0209) even under `copies: .Explicit`.
+        let shareable = unmarked
+            && (self.implicit_take_sites.contains_key(&span)
+                || self.move_is_shareable(&place, span));
         self.flow.moved.set(
             &place_name,
             if shareable {
@@ -4840,6 +5392,33 @@ impl<'a> Checker<'a> {
             // D-TRACK-ORIGIN1=A: moving a whole binding ends access to its
             // origin fact; no stale metadata survives a move.
             self.clear_origin(&name);
+        }
+    }
+
+    /// Only a path that reaches the loop's back edge can repeat a move.
+    /// Reinitialization clears the fact before this point; return and break
+    /// paths never visit it. `next` checks its own edge before ending the path.
+    pub(crate) fn check_loop_move_backedge(&mut self, depth: usize) {
+        let Some(frame) = depth.checked_sub(1).and_then(|index| self.loop_value_frames.get(index)) else {
+            return;
+        };
+        let repeats: Vec<_> = self.flow.moved.iter().filter_map(|(place, origin)| {
+            if frame.moved_before.get(place) == Some(origin) {
+                return None;
+            }
+            let root = place.split(['.', '[']).next()?;
+            let info = self.lookup(root)?;
+            (info.decl_loop_depth < depth)
+                .then(|| (place.to_string(), origin.clone(), info.ty.clone()))
+        }).collect();
+        for (place, origin, ty) in repeats {
+            let diagnostic = self.moved_use_diagnostic(&place, &origin, origin.span, Some(&ty));
+            if origin.is_shareable() {
+                self.record_share_site(origin.span, diagnostic);
+                self.flow.moved.remove(&place);
+            } else {
+                self.push_moved_use_diagnostic(diagnostic);
+            }
         }
     }
 
@@ -4878,7 +5457,7 @@ impl<'a> Checker<'a> {
     /// programmer's exact move. An owned name (or a field of one) gives its
     /// value away here even when it is read later, so any later use is E0121
     /// naming the mark. A borrowed parameter owns nothing to move (E0201 with
-    /// a `~` edit), an element stays in its collection (E0225), and a `Copy`
+    /// a `.copy()` edit), an element stays in its collection (E0225), and a `Copy`
     /// value simply copies.
     pub(crate) fn note_exact_move(&mut self, place: &Expr, ty: Option<&Type>, mark_span: Span) {
         if ty.is_some_and(type_is_copy) {
@@ -4916,6 +5495,50 @@ impl<'a> Checker<'a> {
             );
             return;
         }
+        // The same law for any place below an element (`^items[i].tags`):
+        // the element keeps owning its fields, so the value can only be a
+        // copy, spelled with `.copy()`.
+        let mut base = place;
+        let mut below_element = false;
+        loop {
+            match base {
+                Expr::Field(inner, _, _) | Expr::Paren(inner, _) => base = inner,
+                Expr::Index { base: inner, .. } => {
+                    below_element = true;
+                    base = inner;
+                }
+                _ => break,
+            }
+        }
+        if below_element {
+            let mut diagnostic = Diagnostic::error(
+                "E0225",
+                "the move marker `^` cannot take a field out of a collection element".to_string(),
+                "an element stays owned by its collection together with every field inside it, so this value can only be a copy".to_string(),
+                format!(
+                    "remove `{}` and call `.copy()` on the field instead",
+                    Syntax::SIGIL_MOVE
+                ),
+                Some(sigil_span),
+            );
+            if !self.compiler_generated
+                && ty.is_some_and(|ty| !self.is_resource_type(ty) && self.is_cloneable_type(ty))
+            {
+                let anchor = copy_edit_anchor(place);
+                if let Some(text) = self.source.get(anchor.start..anchor.end) {
+                    diagnostic = diagnostic.with_edit_grade(
+                        TextEdit {
+                            span: Span::new(mark_span.start, anchor.end),
+                            new_text: Syntax::copy_call_source(text),
+                        },
+                        FixApplicability::Safe,
+                        FixSafety::BehaviorPreserving,
+                    );
+                }
+            }
+            self.diags.push(diagnostic);
+            return;
+        }
         let Some(info) = self.lookup(&root) else {
             return;
         };
@@ -4933,7 +5556,7 @@ impl<'a> Checker<'a> {
                     .to_string(),
                 format!(
                     "copy the value with `{}`, or accept it with the move marker `{}`",
-                    Syntax::SIGIL_COPY,
+                    Syntax::copy_call(&root),
                     Syntax::SIGIL_MOVE
                 ),
                 Some(sigil_span),
@@ -4958,10 +5581,10 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Attach the canonical `~` copy edit to an ownership diagnostic. The
+    /// Attach the canonical `.copy()` copy edit to an ownership diagnostic. The
     /// edit is offered only when the checker has proved a cloneable,
-    /// non-resource type: `~` on anything else is itself an error (E0211).
-    /// `anchor` must start at the whole place (see [`copy_edit_anchor`]).
+    /// non-resource type: `.copy()` on anything else is itself an error (E0211).
+    /// `anchor` must cover the whole place (see [`copy_edit_anchor`]).
     pub(crate) fn with_ownership_copy_edit(
         &self,
         diagnostic: Diagnostic,
@@ -4971,14 +5594,13 @@ impl<'a> Checker<'a> {
         if !ty.is_some_and(|ty| !self.is_resource_type(ty) && self.is_cloneable_type(ty)) {
             return diagnostic;
         }
-        diagnostic.with_edit_grade(
-            TextEdit {
-                span: Span::new(anchor.start, anchor.start),
-                new_text: Syntax::SIGIL_COPY.to_string(),
-            },
-            FixApplicability::Safe,
-            FixSafety::BehaviorPreserving,
-        )
+        if self.compiler_generated {
+            return diagnostic;
+        }
+        let Some(edit) = copy_edit(self.source, anchor) else {
+            return diagnostic;
+        };
+        diagnostic.with_edit_grade(edit, FixApplicability::Safe, FixSafety::BehaviorPreserving)
     }
 
     fn reject_expiring_secret_loan_change(&mut self, name: &str, action: &str, span: Span) -> bool {
@@ -4998,10 +5620,9 @@ impl<'a> Checker<'a> {
         true
     }
 
-    /// Finish one typed Core argument after its ordinary inference.  Core rows
-    /// and user functions share the same ownership fact: a `Move` parameter
-    /// must receive `^`, and a successful move invalidates the source binding.
-    /// Keeping this at the ownership boundary avoids per-API move tracking.
+    /// Finish one typed Core argument after ordinary inference. An existing
+    /// place needs `^` to transfer ownership; a fresh result has no source
+    /// binding to invalidate and passes unmarked, as for user functions.
     pub(crate) fn finish_core_call_ownership(
         &mut self,
         call_name: &str,
@@ -5013,7 +5634,12 @@ impl<'a> Checker<'a> {
         if param_conv != AccessConvention::Move {
             return;
         }
-        if arg.convention != AccessConvention::Move {
+        if arg.convention != AccessConvention::Move
+            && self.place_from_expr(&arg.expr).is_some()
+            // A bare slice materializes an owned result; a marked range
+            // remains a Place and must not take this fresh-value route.
+            && !matches!(arg.expr.without_parens(), Expr::Slice { .. })
+        {
             self.diags.push(Diagnostic::error(
                 "E0201",
                 format!(
@@ -5110,7 +5736,7 @@ impl<'a> Checker<'a> {
             let cap = self
                 .lookup(name)
                 .map(|i| (i.ty.clone(), self.sendability_for(name)))
-                .or_else(|| self.consts.get(name).map(|t| (t.clone(), true)));
+                .or_else(|| self.const_type(name).map(|t| (t.clone(), true)));
             let Some((cap_ty, cap_sendable)) = cap else {
                 continue;
             };
@@ -5209,6 +5835,10 @@ impl<'a> Checker<'a> {
                         self.funcs
                             .get(name)
                             .or_else(|| self.funcs.get(resolved))
+                            .or_else(|| {
+                                let owner = self.namespace_function_owner(name)?;
+                                self.modules?.get(owner)?.funcs.get(name)
+                            })
                             .map(|sig| {
                                 sig.return_type
                                     .as_ref()
@@ -6278,7 +6908,7 @@ impl<'a> Checker<'a> {
     /// cloneable carve-out is now a hard error (E0209, was `L0201`). `what`/
     /// `why` are call-site-specific; this builds the shared, liveness-aware
     /// fix menu: `^name` when this call is `name`'s last use (safe to move),
-    /// or `~name` (D-SHAPE-COPY1, supersedes D-CAP2/S4)/reorder when `name`
+    /// or `name.copy()` (D-COPY-WORD1)/reorder when `name`
     /// is still used afterward (moving now would break that later use).
     pub(crate) fn e0209_implicit_clone(
         &self,
@@ -6287,18 +6917,17 @@ impl<'a> Checker<'a> {
         name: &str,
         span: Span,
     ) -> Diagnostic {
+        let copy = Syntax::copy_call(name);
         let fix = if self.is_name_live_after(name) {
             format!(
-                "`{name}` is used again after this call, so the move marker `^` (`{}{name}`) would break that later use — write the copy marker `~` (`{}{name}`) to pass a copy, or reorder so this call is `{name}`'s last use and write the move marker `^` (`{}{name}`)",
+                "`{name}` is used again after this call, so the move marker `^` (`{}{name}`) would break that later use — write `{copy}` to pass a copy, or reorder so this call is `{name}`'s last use and write the move marker `^` (`{}{name}`)",
                 Syntax::SIGIL_MOVE,
-                Syntax::SIGIL_COPY,
                 Syntax::SIGIL_MOVE,
             )
         } else {
             format!(
-                "write the move marker `^` (`{}{name}`) to move it — this is `{name}`'s last use — or the copy marker `~` (`{}{name}`) to keep a copy",
+                "write the move marker `^` (`{}{name}`) to move it — this is `{name}`'s last use — or `{copy}` to keep a copy",
                 Syntax::SIGIL_MOVE,
-                Syntax::SIGIL_COPY,
             )
         };
         Diagnostic::error("E0209", what, why, fix, Some(span))
@@ -6443,6 +7072,17 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        if arg.convention == AccessConvention::Read
+            && self.take_unmarked_last_use(
+                call_name,
+                arg,
+                param_ty,
+                &CallAccessFrame::default(),
+                false,
+            )
+        {
+            return;
+        }
         match arg.convention {
             AccessConvention::Read => {
                 if let Expr::Ident(name, span) = &arg.expr {
@@ -6501,6 +7141,8 @@ impl<'a> Checker<'a> {
         param_conv: AccessConvention,
         param_ty: &Type,
         arg: &mut crate::AST::CallArg,
+        call: &CallAccessFrame,
+        named_elsewhere: bool,
     ) {
         if param_conv != AccessConvention::Move {
             if let Expr::Ident(name, span) = &arg.expr {
@@ -6521,12 +7163,26 @@ impl<'a> Checker<'a> {
             self.diags
                 .push(crate::Sema::Diagnostics::write_range_window_argument(arg.span));
         }
+        // D-CALLSITE-MARK1=A: a written `&` always means the call edits.
+        if param_conv == AccessConvention::Read
+            && expr_root_ident(&arg.expr).is_some()
+            && self.reject_unbacked_write_mark(call_name, arg, param_ty)
+        {
+            return;
+        }
 
         match (param_conv, arg.convention) {
             (AccessConvention::Move, AccessConvention::Read) => {
+                // D-COPY-DEFAULT1=A: an unmarked last use moves like `^name`.
+                if self.take_unmarked_last_use(call_name, arg, param_ty, call, named_elsewhere) {
+                    self.check_write_arg_change(arg);
+                    return;
+                }
                 if let Expr::Ident(name, span) = &arg.expr {
                     if type_is_copy(param_ty) {
                         // Copy values cross an owning parameter by bits.
+                    } else if self.reject_take_while_lent(call_name, arg, call) {
+                        // E0204: an earlier argument already reads it.
                     } else if !self.is_resource_type(param_ty)
                         && self.is_cloneable_type(param_ty)
                     {
@@ -6559,7 +7215,7 @@ impl<'a> Checker<'a> {
             }
             (AccessConvention::Move, AccessConvention::Move) => {
                 if let Expr::Ident(name, span) = &arg.expr {
-                    if !type_is_copy(param_ty) {
+                    if !type_is_copy(param_ty) && !self.reject_take_while_lent(call_name, arg, call) {
                         self.mark_moved_by(name.clone(), *span, call_name.to_string());
                     }
                 }

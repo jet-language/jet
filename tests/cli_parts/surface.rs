@@ -1,5 +1,5 @@
 use super::*;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_int, json_str};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -612,15 +612,29 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
     let mut declared = Vec::new();
     for group in jet::CLI::command_groups() {
         for action in group.actions {
-            let dispatch_exempts =
-                jet::CLI::moved_command(action.name).is_none() && action.name != "install";
-            assert_eq!(
-                action.also_canonical_top_level, dispatch_exempts,
-                "registry and moved_command disagree for {} {}",
-                group.name, action.name
-            );
+            let top_level_row = jet::CLI::COMMANDS
+                .iter()
+                .any(|command| command.name == action.name);
+            let teaches_move = jet::CLI::moved_command(action.name).is_some();
             if action.also_canonical_top_level {
+                // A declared spelling is a live top-level command, so the bare
+                // word dispatches there instead of teaching its grouped spelling.
+                assert!(
+                    top_level_row && !teaches_move,
+                    "{} {} is declared canonical but bare dispatch disagrees",
+                    group.name,
+                    action.name
+                );
                 declared.push(format!("{} {}", group.name, action.name));
+            } else if !top_level_row
+                && action.name != "install"
+                && !jet::CLI::is_retired_root(action.name)
+            {
+                assert!(
+                    teaches_move,
+                    "registry and moved_command disagree for {} {}",
+                    group.name, action.name
+                );
             }
         }
     }
@@ -628,8 +642,9 @@ fn moved_command_registry_agrees_with_dispatch_exceptions() {
         declared,
         vec![
             "inspect audit",
+            "inspect bind",
             "env test",
-            "gc report",
+            "cache status",
             "perf run",
             "perf test",
         ]
@@ -1043,7 +1058,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         assert_eq!(stderr.lines().count(), 1, "{stderr}");
         parse_json(stderr.trim()).unwrap_or_else(|_| panic!("invalid diagnostic JSON: {stderr}"))
     };
-    let report_file = |value: &DataTree| {
+    let report_file = |value: &Dyn| {
         jet_foundation::JSON::json_str(jet_foundation::JSON::json_get(value, "file").unwrap())
             .unwrap()
             .to_string()
@@ -1091,12 +1106,12 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
         "safe"
     );
     let edits = match jet_foundation::JSON::json_get(&fix_report, "fix_edits").unwrap() {
-        DataTree::Array(edits) => edits,
+        Dyn::Array(edits) => edits,
         _ => panic!("fix_edits is not an array"),
     };
     assert_eq!(edits.len(), 1);
     let edit = match &edits[0] {
-        DataTree::Object(_) => &edits[0],
+        Dyn::Object(_) => &edits[0],
         _ => panic!("fix edit is not an object"),
     };
     let edit_file =
@@ -1104,7 +1119,7 @@ fn machine_report_paths_stay_resolvable_across_repository_layouts() {
             .unwrap();
     assert_eq!(fix_file, edit_file);
     let span = match jet_foundation::JSON::json_get(edit, "span").unwrap() {
-        span @ DataTree::Object(_) => span,
+        span @ Dyn::Object(_) => span,
         _ => panic!("fix span is not an object"),
     };
     let start =
@@ -1215,7 +1230,7 @@ fn name_suggestion_json_edit_applies_and_rechecks_clean() {
         "E0107"
     );
     let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
-        DataTree::Array(edits) => edits,
+        Dyn::Array(edits) => edits,
         _ => panic!("fix_edits is not an array"),
     };
     assert_eq!(edits.len(), 1);
@@ -1305,17 +1320,17 @@ struct RepairReport {
 
 type RepairState = BTreeMap<PathBuf, String>;
 
-fn repair_json_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+fn repair_json_field<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
     json_get(value, key).unwrap_or_else(|| panic!("machine report missing {key}"))
 }
 
-fn repair_json_string(value: &DataTree, key: &str) -> String {
+fn repair_json_string(value: &Dyn, key: &str) -> String {
     json_str(repair_json_field(value, key))
         .unwrap_or_else(|| panic!("machine report {key} is not a string"))
         .to_string()
 }
 
-fn repair_json_usize(value: &DataTree, key: &str) -> usize {
+fn repair_json_usize(value: &Dyn, key: &str) -> usize {
     usize::try_from(
         json_int(repair_json_field(value, key))
             .unwrap_or_else(|| panic!("machine report {key} is not an integer")),
@@ -1323,11 +1338,11 @@ fn repair_json_usize(value: &DataTree, key: &str) -> usize {
     .unwrap_or_else(|_| panic!("machine report {key} is negative"))
 }
 
-fn parse_repair_report(value: &DataTree) -> RepairReport {
+fn parse_repair_report(value: &Dyn) -> RepairReport {
     assert_eq!(repair_json_string(value, "schema"), "jet.report/v2");
     let code = repair_json_string(value, "code");
     let edits = match repair_json_field(value, "fix_edits") {
-        DataTree::Array(edits) => edits
+        Dyn::Array(edits) => edits
             .iter()
             .map(|edit| {
                 let span = repair_json_field(edit, "span");
@@ -1345,11 +1360,11 @@ fn parse_repair_report(value: &DataTree) -> RepairReport {
     RepairReport { code, edits }
 }
 
-fn parse_repair_reports(value: &DataTree) -> Vec<RepairReport> {
+fn parse_repair_reports(value: &Dyn) -> Vec<RepairReport> {
     assert_eq!(repair_json_string(value, "schema"), "jet.status/v1");
     assert_eq!(repair_json_string(value, "action"), "check");
     match repair_json_field(value, "reports") {
-        DataTree::Array(reports) => reports.iter().map(parse_repair_report).collect(),
+        Dyn::Array(reports) => reports.iter().map(parse_repair_report).collect(),
         _ => panic!("machine status reports is not an array"),
     }
 }
@@ -1381,7 +1396,7 @@ fn check_repair_state(dir: &Path, state: &RepairState) -> Vec<RepairReport> {
         if output.status.success() {
             assert!(matches!(
                 json_get(&status, "ok"),
-                Some(DataTree::Bool(true))
+                Some(Dyn::Bool(true))
             ));
             assert!(
                 parse_repair_reports(&status).is_empty(),
@@ -1689,7 +1704,7 @@ fn fix_safety_tiers_are_reported_and_applied() {
         .unwrap()
         .to_string();
         let edits = match jet_foundation::JSON::json_get(&report, "fix_edits").unwrap() {
-            DataTree::Array(edits) => edits,
+            Dyn::Array(edits) => edits,
             _ => panic!("fix_edits is not an array"),
         };
         assert_eq!(edits.len(), 1);
@@ -2131,34 +2146,30 @@ fn cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs() {
 }
 
 #[test]
-fn cost_cli_rejects_incomplete_reachable_tir_projection() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    for (fixture, surface) in [
-        ("cost_incomplete_generic.jet", "identity"),
-        ("cost_incomplete_foreign.jet", "value"),
-    ] {
-        let file = root.join("tests/cli").join(fixture);
-        for args in [
-            vec!["check", file.to_str().unwrap()],
-            vec!["lint", "--cost", file.to_str().unwrap()],
-            vec!["explain", "--cost", file.to_str().unwrap(), "--json"],
-        ] {
-            let output = Command::new(jet())
-                .args(args)
-                .env("NO_COLOR", "1")
-                .output()
-                .unwrap();
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            assert!(
-                !output.status.success()
-                    && stderr.contains("E2104")
-                    && stderr.contains("cost projection")
-                    && stderr.contains("incomplete")
-                    && stderr.contains(surface),
-                "{fixture} must reject the omitted reachable {surface} surface:\n{stderr}"
-            );
-        }
-    }
+fn cost_cli_projects_generic_specializations() {
+    // Typed TIR lowers each generic specialization, so the projection is
+    // complete and names every specialization it costed. An incomplete
+    // projection is an internal compiler fault, never a user diagnostic.
+    let dir = isolated_cwd("cost_generic_specializations");
+    let file = dir.join("generic.jet");
+    fs::write(
+        &file,
+        "fn identity<T>(value: T) -> T {\n    return value\n}\n\nfn run() {\n    first :: identity(1)\n    second :: identity(\"text\")\n    print(first)\n    print(second)\n}\n",
+    )
+    .unwrap();
+    let output = Command::new(jet())
+        .args(["explain", "--cost", file.to_str().unwrap()])
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success()
+            && stdout.contains("identity__generic__Int")
+            && stdout.contains("identity__generic__String"),
+        "generic specializations must be projected:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 #[test]

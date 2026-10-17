@@ -1,7 +1,7 @@
 // D-LOG1: structured levels and sinks can be configured without ambient output.
 package {
     name: "log_projection"
-    authority: { holds: { allow: [FS.Write, IO, Log, Mem.Alloc] } }
+    authority: { holds: { allow: [FS, FS.Write, IO, Log, Mem.Alloc] } }
 }
 
 use core.files as files
@@ -21,5 +21,5 @@ fn run() {
     path := Path.from(root).join("events.jsonl").to_string()
     log.otlp_file(path)
     print("fields:{ratio.kind}:{redacted.redacted}")
-    files.remove_all(root) ?? return
+    files.remove_all(root)
 }

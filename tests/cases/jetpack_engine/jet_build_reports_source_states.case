@@ -1,0 +1,27 @@
+# HAND-PORT tests/jetpack_engine.rs:8539-8588 jet_build_reports_source_states
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: jet_build_reports_source_states.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack build --no-color
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "built" # original contains predicate
+stderr: ~ "1 built" # original contains predicate
+stderr: ~ "build sandbox outcome: non-executing (no child launched)" # original contains predicate
+step: jetpack build --no-color
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "cached" # original contains predicate
+stderr: ~ "1 cached" # original contains predicate
+stderr: ~ "build sandbox outcome: verified cache only" # original contains predicate
+

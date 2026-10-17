@@ -1,0 +1,33 @@
+// Source/CmdSupply.rs package_input and run_sbom. Supply commands may inspect
+// an extracted Package without an entry; dependency commands still require the
+// entry. Both use the SAME checked Package/facts reader and Publication model.
+use jetpack.[publication_emit_cyclonedx, publication_emit_spdx]
+
+fn jet_cli_supply_input(root: String, color: Bool, json: Bool) -[FS, Env]> JetCLIPackageInput JetCLIDependencyError! {
+    entry :: jet_cli_package_input_entry(root, color, json)
+    if cli_files.is_file(entry.path) {
+        input := jet_cli_dependency_input_at_entry(root, entry.path, color, json) ?? return Err(jet_cli_dependency_with_notice(err, entry.notice))
+        input.notice = entry.notice
+        return Ok(input)
+    }
+    cache := WorkspaceDeclarationCache.new()
+    loaded :: if pkg_package_facts_for_root(&cache, root) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(jet_cli_dependency_with_notice(jet_cli_dependency_source_error(JET_CLI_PACKAGE_FILE, "", error.diagnostic), entry.notice)) }
+    }
+    facts :: loaded ?? return Err(jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E2105", "couldn't resolve package facts for {root}", None, color, json), entry.notice))
+    input := jet_cli_package_input_from_facts(root, facts, color, json) ?? return Err(jet_cli_dependency_with_notice(err, entry.notice))
+    input.notice = entry.notice
+    Ok(input)
+}
+
+// Manifest-required root discovery stays in the shared front. Lock::load is
+// intentionally the canonical optional loader: absent/unreadable/malformed all
+// produce CmdSupply's E1202. SPDX/CycloneDX never gain a CLI JSON envelope.
+fn jet_cli_supply_sbom(root: String, args: [String], color: Bool, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    input :: jet_cli_supply_input(root, color, json) ?? return err.output
+    lock :: pkg_lock_load(root) ?? return jet_cli_dependency_with_notice(jet_cli_dependency_cli_error("E1202", "no lockfile found — run `jet fetch` first", None, color, json), input.notice).output
+    output :: if args.contains("--cyclonedx") -> publication_emit_cyclonedx(lock, input.manifest.package.name, input.manifest.package.version) else -> publication_emit_spdx(lock, input.manifest.package.name, input.manifest.package.version)
+    JetDriverVerbOutput{stdout: output, stderr: input.notice, exit_code: JET_DRIVER_EXIT_OK}
+}

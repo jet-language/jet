@@ -24,16 +24,18 @@ fn store_test_seal_fixture(verification: &StoreVerification, roots: HangarRoots,
 
 fn store_test_mtime_seconds(path: String) -> Int Never! {
     info :: files.stat(path) ?? panic("stat")
-    info.modified.unix_ns /% 1000000000
+    (info.modified.to_unix_ns() ?? panic("mtime")) /% 1000000000
 }
 
 fn store_test_set_mtime(path: String, seconds: Int) Never! {
-    sys.utime(path, seconds, seconds) ?? panic("utime failed for {path}")
+    #Unsafe("the store test owns the fixture file whose mtime it pins") {
+        sys.utime(path, seconds, seconds) ?? panic("utime failed for {path}")
+    }
 }
 
 fn store_test_make_writable(path: String) Never! {
     info :: files.stat(path) ?? panic("stat")
-    files.set_mode(path, info.mode | 128) ?? panic("chmod")
+    files.set_mode(path, (info.mode).bit_or(128)) ?? panic("chmod")
 }
 
 #Test("store native admission seals after shared cas hardlinking") {
@@ -179,7 +181,7 @@ fn store_test_make_writable(path: String) Never! {
     store_seal_memo_put(&verification, "object", "first")
     store_arm_command_memo(&verification)
     assert_eq(store_seal_memo_get(&verification, "object"), Val("first"))
-    retained := ~verification
+    retained := verification.copy()
     store_seal_memo_put(&retained, "object", "replacement")
     assert_eq(store_seal_memo_get(&verification, "object"), Val("replacement"))
     store_arm_command_memo(&other)
@@ -266,7 +268,7 @@ fn store_test_set_census_enabled(verification: &StoreVerification, enabled: Bool
     store_proven_member_insert(&verification, key)
     store_proven_member_insert(&verification, sibling)
     store_proven_member_insert(&verification, neighbor)
-    retained := ~verification
+    retained := verification.copy()
     assert(store_proven_member_contains(&retained, key))
     assert(!store_proven_member_contains(&other, key))
     store_invalidate_proven_member(&retained, "hangar", "sha256-member")

@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::parse_json;
 
 use crate::Types::{DefinitionFact, EffectFact, SemIndex};
@@ -83,7 +83,7 @@ pub fn semantic_ops_for_file(path: &Path, source_hash: &str) -> Vec<SemanticOp> 
                 let Ok(raw) = fs::read_to_string(&receipt) else {
                     continue;
                 };
-                let Ok(DataTree::Object(object)) = parse_json(&raw) else {
+                let Ok(Dyn::Object(object)) = parse_json(&raw) else {
                     continue;
                 };
                 let Some(files) = field(&object, "files").and_then(parse_files) else {
@@ -358,15 +358,15 @@ fn same_hash(recorded: &str, current: &str) -> bool {
         || current.strip_prefix("sha256-") == Some(recorded)
 }
 
-fn parse_files(value: &DataTree) -> Option<Vec<SemanticOpFile>> {
-    let DataTree::Array(values) = value else {
+fn parse_files(value: &Dyn) -> Option<Vec<SemanticOpFile>> {
+    let Dyn::Array(values) = value else {
         return None;
     };
     Some(values.iter().filter_map(file).collect())
 }
 
-fn file(value: &DataTree) -> Option<SemanticOpFile> {
-    let DataTree::Object(object) = value else {
+fn file(value: &Dyn) -> Option<SemanticOpFile> {
+    let Dyn::Object(object) = value else {
         return None;
     };
     Some(SemanticOpFile {
@@ -376,20 +376,20 @@ fn file(value: &DataTree) -> Option<SemanticOpFile> {
     })
 }
 
-fn ops(value: &DataTree) -> Option<Vec<SemanticOp>> {
-    let DataTree::Array(values) = value else {
+fn ops(value: &Dyn) -> Option<Vec<SemanticOp>> {
+    let Dyn::Array(values) = value else {
         return None;
     };
     Some(values.iter().filter_map(op).collect())
 }
 
-fn op(value: &DataTree) -> Option<SemanticOp> {
-    let DataTree::Object(object) = value else {
+fn op(value: &Dyn) -> Option<SemanticOp> {
+    let Dyn::Object(object) = value else {
         return None;
     };
     let targets = field(object, "targets")
         .and_then(|value| match value {
-            DataTree::Array(values) => Some(values.iter().filter_map(target).collect()),
+            Dyn::Array(values) => Some(values.iter().filter_map(target).collect()),
             _ => None,
         })
         .unwrap_or_default();
@@ -406,8 +406,8 @@ fn op(value: &DataTree) -> Option<SemanticOp> {
     })
 }
 
-fn target(value: &DataTree) -> Option<SemanticOpTarget> {
-    let DataTree::Object(object) = value else {
+fn target(value: &Dyn) -> Option<SemanticOpTarget> {
+    let Dyn::Object(object) = value else {
         return None;
     };
     Some(SemanticOpTarget {
@@ -419,20 +419,20 @@ fn target(value: &DataTree) -> Option<SemanticOpTarget> {
     })
 }
 
-fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
-fn string(object: &[(String, DataTree)], key: &str) -> Option<String> {
+fn string(object: &[(String, Dyn)], key: &str) -> Option<String> {
     field(object, key).and_then(|value| match value {
-        DataTree::Text(value) | DataTree::TypedText(value) => Some(value.clone()),
+        Dyn::Text(value) => Some(value.clone()),
         _ => None,
     })
 }
 
-fn optional_string(object: &[(String, DataTree)], key: &str) -> Option<String> {
+fn optional_string(object: &[(String, Dyn)], key: &str) -> Option<String> {
     string(object, key)
 }
 

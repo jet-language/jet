@@ -1,0 +1,245 @@
+// WatchService.rs discovery, shared by receipt input identity. The loader is
+// the sole dependency producer; HTML/CSS/JS and literal runtime inputs are the
+// watcher policy. This is not a source loader or a comptime-read approximation.
+use jet_driver.[JetDriverCompileRequest, jet_driver_query_loaded_input_paths]
+use core.files as cli_files
+use core.sys as cli_sys
+
+struct JetCLIWatchGraph {
+    entry: String
+    paths: [String]
+}
+#Error
+struct JetCLIWatchInputError {
+    message: String
+    comptime_unavailable: Bool{false}
+}
+fn jet_cli_watch_canonical(path: String) -[FS, Env]> String Never! {
+    cli_files.realpath(path) ?? (if path.starts_with("/") -> path else -> jet_cli_entry_join(cli_sys.current_dir() ?? ".", path))
+}
+fn jet_cli_watch_extension(path: String) -> String Never! {
+    name :: jet_cli_fmt_file_name(path)
+    parts :: name.split(".").to_list()
+    if parts.len() < 2 || (name.starts_with(".") && parts.len() == 2) -> return ""
+    jet_cli_ascii_lower(parts[parts.len() - 1])
+}
+fn jet_cli_watch_whitespace(byte: U8) -> Bool Never! {
+    byte == U8{9} || byte == U8{10} || byte == U8{11} || byte == U8{12} || byte == U8{13} || byte == U8{32}
+}
+fn jet_cli_watch_word(byte: U8) -> Bool Never! {
+    (byte >= U8{48} && byte <= U8{57}) || (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122}) || byte == U8{95}
+}
+fn jet_cli_watch_find(bytes: [U8], needle: [U8], offset: Int) -> Int? Never! {
+    index := offset
+    loop index <= bytes.len() - needle.len() {
+        same := true
+        loop part in 0..<needle.len() {
+            if bytes[index + part] != needle[part] {
+                same = false
+                break
+            }
+        }
+        if same -> return Val(index)
+        index += 1
+    }
+    None
+}
+fn jet_cli_watch_quoted(bytes: [U8], start: Int) -> (text: String, end: Int)? Never! {
+    if start >= bytes.len() -> return None
+    quote :: bytes[start]
+    if quote != (U8{39}) && quote != (U8{34}) -> return None
+    cursor := start + 1
+    loop cursor < bytes.len() {
+        if bytes[cursor] == (U8{92}) {
+            cursor += 2
+            next
+        }
+        if bytes[cursor] == quote -> return Val((text: String.from_bytes(bytes.slice(start + 1, cursor)) ?? "", end: cursor))
+        cursor += 1
+    }
+    None
+}
+fn jet_cli_watch_runtime_literals(source: String) -> [String:Bool] Never! {
+    inputs := [String:Bool]{}
+    bytes :: source.bytes()
+    loop method in ([String]{"copy", "copy_dir", "exists", "is_dir", "list_dir", "read", "read_bytes", "walk", "walk_parallel", "glob", "stat", "fixture", "golden", "corpus"}) {
+        directory :: [String]{"copy_dir", "is_dir", "list_dir", "walk", "walk_parallel", "corpus"}.contains(method)
+        marker :: ".{method}".bytes()
+        offset := 0
+        loop {
+            start :: jet_cli_watch_find(bytes, marker, offset) ?? break
+            cursor := start + marker.len()
+            if cursor < bytes.len() && jet_cli_watch_word(bytes[cursor]) {
+                offset = cursor
+                next
+            }
+            loop cursor < bytes.len() && jet_cli_watch_whitespace(bytes[cursor]) -> cursor += 1
+            if cursor >= bytes.len() || bytes[cursor] != (U8{40}) {
+                offset = cursor
+                next
+            }
+            cursor += 1
+            loop cursor < bytes.len() && jet_cli_watch_whitespace(bytes[cursor]) -> cursor += 1
+            if jet_cli_watch_quoted(bytes, cursor) == .Val(literal) {
+                value :: literal.text
+                if value != "" && !value.contains("{") && !value.contains("}") && !value.contains("://") -> inputs[value] = (inputs.get(value) ?? false) || directory
+                offset = literal.end + 1
+            } else { offset = cursor + 1 }
+        }
+    }
+    inputs
+}
+fn jet_cli_watch_extract(source: String, keyword: String, delimiter: Int, optional_parentheses: Bool, srcset: Bool, out: &[String]) Never! {
+    bytes :: source.bytes()
+    lower :: jet_cli_ascii_lower(source).bytes()
+    marker :: keyword.bytes()
+    offset := 0
+    loop {
+        start :: jet_cli_watch_find(lower, marker, offset) ?? break
+        after :: start + marker.len()
+        if (start > 0 && (jet_cli_watch_word(lower[start - 1]) || lower[start - 1] == U8{45})) || (after < lower.len() && (jet_cli_watch_word(lower[after]) || lower[after] == U8{45})) {
+            offset = after
+            next
+        }
+        cursor := after
+        loop cursor < bytes.len() && jet_cli_watch_whitespace(bytes[cursor]) -> cursor += 1
+        if delimiter >= 0 {
+            if cursor >= bytes.len() || Int.from_u8(bytes[cursor]) != delimiter {
+                offset = after
+                next
+            }
+            cursor += 1
+            loop cursor < bytes.len() && jet_cli_watch_whitespace(bytes[cursor]) -> cursor += 1
+        } else if optional_parentheses && cursor < bytes.len() && bytes[cursor] == (U8{40}) {
+            cursor += 1
+            loop cursor < bytes.len() && jet_cli_watch_whitespace(bytes[cursor]) -> cursor += 1
+        }
+        quote := U8?{None}
+        if cursor < bytes.len() && (bytes[cursor] == U8{39} || bytes[cursor] == U8{34}) {
+            quote = Val(bytes[cursor])
+            cursor += 1
+        }
+        if quote == None && delimiter < 0 {
+            offset = after
+            next
+        }
+        value_start :: cursor
+        loop cursor < bytes.len() {
+            if quote == .Val(value) {
+                if bytes[cursor] == value -> break
+            } else {
+                if jet_cli_watch_whitespace(bytes[cursor]) || bytes[cursor] == (U8{62}) || (delimiter == 40 && bytes[cursor] == U8{41}) -> break
+            }
+            cursor += 1
+        }
+        if value_start < cursor {
+            value :: String.from_bytes(bytes.slice(value_start, cursor)) ?? ""
+            if srcset {
+                loop candidate in value.split(",") {
+                    words :: jet_cli_find_words(candidate)
+                    if words.len() > 0 -> &out.push(words[0])
+                }
+            } else { &out.push(value) }
+        }
+        offset = cursor + 1
+    }
+}
+fn jet_cli_watch_references(path: String, source: String) -> [String] Never! {
+    extension :: jet_cli_watch_extension(path)
+    references := [String]{}
+    if extension == "html" || extension == "htm" {
+        loop attribute in ([String]{"src", "href", "poster", "srcset"}) -> jet_cli_watch_extract(source, attribute, 61, false, attribute == "srcset", &references)
+    }
+    if ([String]{"html", "htm", "css"}).contains(extension) -> jet_cli_watch_extract(source, "url", 40, false, false, &references)
+    if extension == "js" || extension == "mjs" {
+        jet_cli_watch_extract(source, "from", -1, false, false, &references)
+        jet_cli_watch_extract(source, "import", -1, true, false, &references)
+    }
+    references
+}
+fn jet_cli_watch_local_reference(base: String, raw: String) -[FS, Env]> String? Never! {
+    reference :: raw.trim().split("?").to_list()[0].split("#").to_list()[0].trim()
+    if reference == "" || reference.starts_with("//") || reference.contains("\\") -> return None
+    loop prefix in ([String]{"data:", "blob:", "http:", "https:", "mailto:", "javascript:"}) { if reference.starts_with(prefix) -> return None }
+    relative :: jet_cli_trim_start_matches(reference, "/")
+    Val(jet_cli_watch_canonical(jet_cli_entry_join(base, relative)))
+}
+fn jet_cli_watch_reference_tree(path: String, visited: &[String:Bool], paths: &[String]) Never! -[FS, Env]> {
+    canonical :: jet_cli_watch_canonical(path)
+    if visited.get(canonical) != None -> return
+    visited[canonical] = true
+    &paths.push(canonical)
+    source :: cli_files.read(canonical) ?? return
+    parent :: jet_cli_parent(canonical) ?? return
+    loop reference in jet_cli_watch_references(canonical, source) {
+        child :: jet_cli_watch_local_reference(parent, reference) ?? next
+        jet_cli_watch_reference_tree(child, &visited, &paths)
+    }
+}
+fn jet_cli_watch_runtime_tree(path: String, visited: &[String:Bool], paths: &[String]) Never! -[FS, Env]> {
+    canonical :: jet_cli_watch_canonical(path)
+    if visited.get(canonical) != None -> return
+    visited[canonical] = true
+    &paths.push(canonical)
+    if !cli_files.is_dir(canonical) -> return
+    entries :: cli_files.list_dir(canonical) ?? return
+    loop entry in entries -> jet_cli_watch_runtime_tree(jet_cli_entry_join(canonical, entry.name), &visited, &paths)
+}
+
+fn jet_cli_watch_from_entry(cache: &WorkspaceDeclarationCache, entry: String, dependencies: [String], comptime_inputs: [String]?) -[FS, Env]> JetCLIWatchGraph JetCLIWatchInputError! {
+    // #4736: only the actual build session can certify its comptime read set.
+    // None is missing coverage, not an observation of zero reads.
+    observed :: comptime_inputs ?? return Err(JetCLIWatchInputError{message: "comptime inputs: #4736; canonical build session has not certified its input read closure", comptime_unavailable: true})
+    canonical :: jet_cli_watch_canonical(entry)
+    entry_dir :: jet_cli_parent(canonical) ?? "/"
+    // Missing manifest data is optional; malformed/inaccessible data refuses
+    // discovery rather than claiming that the project has no manifest.
+    project :: if pkg_find_manifest_root_checked(&cache, entry_dir) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(JetCLIWatchInputError{message: "could not resolve watch manifest root: {error.diagnostic}"}) }
+    }
+    root :: project ?? entry_dir
+    manifest :: if pkg_manifest_path_checked(root) == {
+        .Val(value) -> Val(value)
+        .None -> None
+        .Err(error) -> { return Err(JetCLIWatchInputError{message: "could not resolve watch manifest: {error.diagnostic}"}) }
+    }
+    name :: jet_cli_stem(canonical)
+    paths := [String]{canonical}
+    html := [String]{jet_cli_entry_join(entry_dir, "{name}.html")}
+    if manifest == .Val(path) -> &paths.push(path)
+    &paths.push(jet_cli_entry_join(root, ".jet/lock"))
+    &paths.push(html[0])
+    loop extra in ([String]{jet_cli_entry_join(root, "{name}.css"), jet_cli_entry_join(root, "target.fact")}) { if cli_files.exists(extra) -> &paths.push(extra) }
+    loop dependency in dependencies {
+        path :: jet_cli_watch_canonical(dependency)
+        &paths.push(path)
+        if jet_cli_watch_extension(path) == "html" || jet_cli_watch_extension(path) == "htm" -> &html.push(path)
+    }
+    loop path in observed -> &paths.push(jet_cli_watch_canonical(path))
+    visited := [String:Bool]{}
+    loop path in html -> jet_cli_watch_reference_tree(path, &visited, &paths)
+    inputs := [String:Bool]{}
+    // Source set is frozen before adding runtime inputs, exactly as WatchGraph.
+    loop path in jet_cli_lock_canonical(paths) {
+        if jet_cli_watch_extension(path) != "jet" -> next
+        source :: cli_files.read(path) ?? next
+        loop (literal, directory) in jet_cli_watch_runtime_literals(source) {
+            input :: jet_cli_watch_canonical(if literal.starts_with("/") -> literal else -> jet_cli_entry_join(entry_dir, literal))
+            inputs[input] = (inputs.get(input) ?? false) || directory
+        }
+    }
+    runtime_visited := [String:Bool]{}
+    order := [String]{}
+    loop (input, _) in inputs -> &order.push(input)
+    &order.sort()
+    loop input in order -> jet_cli_watch_runtime_tree(input, &runtime_visited, &paths)
+    Ok(JetCLIWatchGraph{entry: canonical, paths: jet_cli_lock_canonical(paths)})
+}
+
+fn jet_cli_watch_discover(cache: &WorkspaceDeclarationCache, request: JetDriverCompileRequest) -[FS, Env]> JetCLIWatchGraph JetCLIWatchInputError! {
+    loaded :: jet_driver_query_loaded_input_paths(request) ?? return Err(JetCLIWatchInputError{message: "could not discover loaded watch inputs: {err}"})
+    observed_comptime :: if loaded.comptime_input_coverage_complete -> Val(loaded.comptime_input_paths) else -> None
+    jet_cli_watch_from_entry(&cache, request.authorized_sources.entry_path, loaded.paths, observed_comptime)
+}

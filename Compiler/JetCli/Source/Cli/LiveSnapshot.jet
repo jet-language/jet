@@ -1,0 +1,185 @@
+// LiveInspect.rs: the closed runtime snapshot codec. Core owns JSON parsing;
+// the optimizer owns decision-ledger authentication. Duplicate keys are corrupt
+// runtime transport and are rejected by Core's strict parser (Main ruling).
+// No runtime fact is inferred.
+use jet_foundation.[foundation_parse_protocol_json, foundation_json_quote]
+use jet_optimizer.[MIRDecisionLedger, mir_decision_ledger_read]
+use core.text as live_text
+
+struct JetCLILiveValue { value_id: String, type_identity: String, disposition: String, reason: String, rendered_value: String? }
+struct JetCLILiveTask { id: Int, parent: Int, state: String, wait: String, deadline_ms: Int?, cancelled: Bool }
+struct JetCLILiveChannel { id: Int, depth: Int, capacity: Int?, send_waiters: Int, recv_waiters: Int, closed: Bool }
+struct JetCLILiveRuntime { elapsed_ns: Int, cpu_ns: Int?, exit: Bool }
+struct JetCLILiveSnapshot {
+    protocol: String, session_id: String, source_id: String, build_id: String,
+    revision: String, world_id: String, pid: Int, start_id: String, captured_ms: Int,
+    values: [JetCLILiveValue], tasks: [JetCLILiveTask], channels: [JetCLILiveChannel],
+    effects: [String:Int], resources: [String:Int], runtime: JetCLILiveRuntime?,
+    decisions: MIRDecisionLedger?, raw_events: Dyn?, events: String?
+}
+
+fn jet_cli_live_field(value: Dyn, key: String) -> Dyn? Never! {
+    // Dyn.Object is an ordered list of fields, not a String-keyed map.
+    if value == .Object(fields) { loop field in fields { if field.key == key -> return Val(field.value) } }
+    None
+}
+// JSON.rs::json_int also accepts Float, using Rust's saturating i64 cast.
+// EventObservation's integer validator deliberately does NOT call this.
+fn jet_cli_live_json_int(value: Dyn) -> Int? Never! {
+    if value == {
+        .Int(number) -> { return Val(number) }
+        .Float(number) -> {
+            if number != number -> return Val(0)
+            if number >= 9223372036854775808.0 -> return Val(9223372036854775807)
+            if number <= -9223372036854775808.0 -> return Val(-9223372036854775808)
+            return Val(Int.from_float(status_math.trunc(number)) ?? return None)
+        }
+        else -> { return None }
+    }
+}
+fn jet_cli_live_object(value: Dyn, required: [String], optional: [String], label: String) JetCLIReadError! {
+    if value == .Object(fields) {
+        seen := [String:Bool]{}
+        loop field in fields {
+            if !required.contains(field.key) && !optional.contains(field.key) -> return Err(jet_cli_read_error("{label} has missing or unsafe fields"))
+            seen[field.key] = true
+        }
+        loop key in required { if !seen.has_key(key) -> return Err(jet_cli_read_error("{label} has missing or unsafe fields")) }
+        return
+    }
+    Err(jet_cli_read_error("{label} must be an object"))
+}
+fn jet_cli_live_int(value: Dyn, key: String, label: String, nonnegative: Bool) -> Int JetCLIReadError! {
+    field :: jet_cli_live_field(value, key) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))
+    if jet_cli_live_json_int(field) == .Val(number) {
+        if nonnegative && number < 0 -> return Err(jet_cli_read_error("{label} has negative `{key}`"))
+        return Ok(number)
+    }
+    Err(jet_cli_read_error("{label} has invalid `{key}`"))
+}
+fn jet_cli_live_optional_int(value: Dyn, key: String, label: String) -> Int? JetCLIReadError! {
+    field :: jet_cli_live_field(value, key) ?? return Ok(None)
+    if field == Dyn.Null -> return Ok(None)
+    Ok(Val(jet_cli_live_json_int(field) ?? return Err(jet_cli_read_error("{label} has invalid `{key}`"))))
+}
+fn jet_cli_live_string(value: Dyn, key: String, label: String) -> String JetCLIReadError! {
+    if jet_cli_live_field(value, key) == .Val(.Text(text)) {
+        if live_text.has_control(text) -> return Err(jet_cli_read_error("{label} has control characters in `{key}`"))
+        return Ok(text)
+    }
+    Err(jet_cli_read_error("{label} has invalid `{key}`"))
+}
+fn jet_cli_live_bool(value: Dyn, key: String, label: String) -> Bool JetCLIReadError! {
+    if jet_cli_live_field(value, key) == .Val(.Bool(flag)) -> return Ok(flag)
+    Err(jet_cli_read_error("{label} has invalid `{key}`"))
+}
+fn jet_cli_live_array(value: Dyn, key: String) -> [Dyn] JetCLIReadError! {
+    if jet_cli_live_field(value, key) == .Val(.Array(items)) {
+        if items.len() > 4096 -> return Err(jet_cli_read_error("live runtime snapshot has too many {key}"))
+        return Ok(items)
+    }
+    Err(jet_cli_read_error("live runtime snapshot {key} are not an array"))
+}
+// LiveInspect canonical_json_value sorts object keys before handing the exact
+// transport to the existing canonical decision-ledger reader.
+fn jet_cli_live_json(value: Dyn) -> String JetCLIReadError! {
+    if value == {
+        .Null -> { return Ok("null") }
+        .Bool(flag) -> { return Ok("{flag}") }
+        .Int(number) -> { return Ok("{number}") }
+        .Float(number) -> {
+            if !status_math.is_finite(number) -> return Err(jet_cli_read_error("decision ledger contains a non-finite number"))
+            return Ok("{number}")
+        }
+        .Text(text) -> { return Ok(foundation_json_quote(text)) }
+        .Array(items) -> {
+            encoded := [String]{}
+            loop item in items -> &encoded.push(jet_cli_live_json(item))
+            return Ok("[{encoded.join(",")}]")
+        }
+        .Object(fields) -> {
+            names := [String]{}
+            loop field in fields -> &names.push(field.key)
+            &names.sort()
+            encoded := [String]{}
+            loop name in names {
+                child :: jet_cli_live_field(value, name) ?? return Err(jet_cli_read_error("decision ledger field disappeared"))
+                &encoded.push("{foundation_json_quote(name)}:{jet_cli_live_json(child)}")
+            }
+            return Ok("{{{encoded.join(",")}}}")
+        }
+    }
+}
+fn jet_cli_live_decisions(root: Dyn) -> MIRDecisionLedger? JetCLIReadError! {
+    value :: jet_cli_live_field(root, "decisions") ?? return Ok(None)
+    if value == .Null -> return Ok(None)
+    payload :: jet_cli_live_json(value)
+    if payload.bytes().len() > 524288 -> return Err(jet_cli_read_error("live decision ledger exceeds its transport limit"))
+    ledger :: mir_decision_ledger_read(payload) ?? return Err(jet_cli_read_error(err.message))
+    Ok(Val(ledger))
+}
+fn jet_cli_live_counts(root: Dyn, key: String, keys: [String], label: String) -> [String:Int] JetCLIReadError! {
+    value :: jet_cli_live_field(root, key) ?? return Err(jet_cli_read_error("live runtime snapshot has no {key}"))
+    jet_cli_live_object(value, keys, [String]{}, label)
+    counts := [String:Int]{}
+    loop count_key in keys -> counts[count_key] = jet_cli_live_int(value, count_key, label, true)
+    Ok(counts)
+}
+fn jet_cli_live_decode(text: String) -> JetCLILiveSnapshot JetCLIReadError! {
+    root :: foundation_parse_protocol_json(text) ?? return Err(jet_cli_read_error("live runtime snapshot is not valid JSON"))
+    jet_cli_live_object(root, [String]{"protocol", "session_id", "source_id", "build_id", "revision", "world_id", "values", "schema_version", "pid", "start_id", "captured_ms", "tasks", "channels", "effects", "resources"}, [String]{"event_observations", "decisions", "runtime"}, "live runtime snapshot")
+    decisions :: jet_cli_live_decisions(root)
+    version :: jet_cli_live_int(root, "schema_version", "live runtime snapshot", true)
+    protocol :: jet_cli_live_string(root, "protocol", "live runtime snapshot")
+    if protocol != "jet.live.v1" -> return Err(jet_cli_read_error("live runtime snapshot protocol must be jet.live.v1"))
+    session_id :: jet_cli_live_string(root, "session_id", "live runtime snapshot")
+    source_id :: jet_cli_live_string(root, "source_id", "live runtime snapshot")
+    build_id :: jet_cli_live_string(root, "build_id", "live runtime snapshot")
+    revision :: jet_cli_live_string(root, "revision", "live runtime snapshot")
+    world_id :: jet_cli_live_string(root, "world_id", "live runtime snapshot")
+    if version != 1 -> return Err(jet_cli_read_error("live runtime snapshot has an unsupported schema version"))
+    pid :: jet_cli_live_int(root, "pid", "live runtime snapshot", true)
+    start_id :: jet_cli_live_string(root, "start_id", "live runtime snapshot")
+    captured_ms :: jet_cli_live_int(root, "captured_ms", "live runtime snapshot", true)
+    values := [JetCLILiveValue]{}
+    loop value in jet_cli_live_array(root, "values") {
+        jet_cli_live_object(value, [String]{"value_id", "type_identity", "disposition", "reason"}, [String]{"rendered_value"}, "live value")
+        disposition :: jet_cli_live_string(value, "disposition", "live value")
+        if (![String]{"kept", "migrated", "reset", "rejected"}.contains(disposition)) -> return Err(jet_cli_read_error("live value has an unsupported disposition"))
+        rendered := String?{None}
+        if jet_cli_live_field(value, "rendered_value") == .Val(rendered_field) {
+            if rendered_field == {
+                .Null -> {}
+                .Text(shown) -> {
+                    if shown.bytes().len() > 16384 -> return Err(jet_cli_read_error("live value `rendered_value` exceeds the Prelude limit"))
+                    if live_text.has_control(shown) -> return Err(jet_cli_read_error("live value has control characters in `rendered_value`"))
+                    rendered = Val(shown)
+                }
+                else -> { return Err(jet_cli_read_error("live value has invalid `rendered_value`")) }
+            }
+        }
+        &values.push(JetCLILiveValue{value_id: jet_cli_live_string(value, "value_id", "live value"), type_identity: jet_cli_live_string(value, "type_identity", "live value"), disposition: disposition, reason: jet_cli_live_string(value, "reason", "live value"), rendered_value: rendered})
+    }
+    tasks := [JetCLILiveTask]{}
+    loop value in jet_cli_live_array(root, "tasks") {
+        jet_cli_live_object(value, [String]{"id", "parent", "state", "wait", "deadline_ms", "cancelled"}, [String]{"label", "spawn_site"}, "live task")
+        &tasks.push(JetCLILiveTask{id: jet_cli_live_int(value, "id", "live task", true), parent: jet_cli_live_int(value, "parent", "live task", true), state: jet_cli_live_string(value, "state", "live task"), wait: jet_cli_live_string(value, "wait", "live task"), deadline_ms: jet_cli_live_optional_int(value, "deadline_ms", "live task"), cancelled: jet_cli_live_bool(value, "cancelled", "live task")})
+    }
+    channels := [JetCLILiveChannel]{}
+    loop value in jet_cli_live_array(root, "channels") {
+        jet_cli_live_object(value, [String]{"id", "depth", "capacity", "send_waiters", "recv_waiters", "closed"}, [String]{}, "live channel")
+        &channels.push(JetCLILiveChannel{id: jet_cli_live_int(value, "id", "live channel", true), depth: jet_cli_live_int(value, "depth", "live channel", true), capacity: jet_cli_live_optional_int(value, "capacity", "live channel"), send_waiters: jet_cli_live_int(value, "send_waiters", "live channel", true), recv_waiters: jet_cli_live_int(value, "recv_waiters", "live channel", true), closed: jet_cli_live_bool(value, "closed", "live channel")})
+    }
+    effects :: jet_cli_live_counts(root, "effects", [String]{"compute", "waiting", "channel", "time", "io"}, "live effects")
+    resources :: jet_cli_live_counts(root, "resources", [String]{"workers", "running", "queued", "cancelled", "arenas", "arena_allocations", "arena_bytes"}, "live resources")
+    runtime := JetCLILiveRuntime?{None}
+    if jet_cli_live_field(root, "runtime") == .Val(window) {
+        jet_cli_live_object(window, [String]{"elapsed_ns", "cpu_ns", "exit"}, [String]{}, "live runtime window")
+        elapsed_ns :: jet_cli_live_int(window, "elapsed_ns", "live runtime window", true)
+        cpu_ns :: jet_cli_live_optional_int(window, "cpu_ns", "live runtime window")
+        if cpu_ns == .Val(number) && number < 0 -> return Err(jet_cli_read_error("live runtime window has negative `cpu_ns`"))
+        runtime = Val(JetCLILiveRuntime{elapsed_ns: elapsed_ns, cpu_ns: cpu_ns, exit: jet_cli_live_bool(window, "exit", "live runtime window")})
+    }
+    raw_events :: jet_cli_live_field(root, "event_observations")
+    Ok(JetCLILiveSnapshot{protocol: protocol, session_id: session_id, source_id: source_id, build_id: build_id, revision: revision, world_id: world_id, pid: pid, start_id: start_id, captured_ms: captured_ms, values: values, tasks: tasks, channels: channels, effects: effects, resources: resources, runtime: runtime, decisions: decisions, raw_events: raw_events, events: None})
+}

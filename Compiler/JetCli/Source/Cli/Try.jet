@@ -1,0 +1,337 @@
+// Source/CmdTry.rs: speculate using one invocation's real incremental service;
+// keep enters the existing held SourceTransaction writer only after a verdict.
+use jet_driver.[JetDriverCompilerQueries, JetDriverCompilerCheckResult, JetDriverCompilerQueryStats, JetDriverCompileMode, jet_driver_compiler_queries_new, jet_driver_compiler_queries_set_document, jet_driver_compiler_queries_documents, jet_driver_compiler_queries_stats, jet_driver_compiler_queries_check_disk, jet_driver_compiler_queries_check_text, jet_driver_apply_edits]
+use jet_foundation.[Diagnostic, Span, TextEdit, mir_sha256_bytes, mir_sha256_hex_bytes]
+use jet_eval.[JetCompilerServicesParseFacts, JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse]
+
+struct JetCLITryObject {
+    fields: [JetCLIStatusField]
+    consumed: [Bool]
+}
+struct JetCLITryEdit { path: String, edit: TextEdit }
+enum JetCLITryAction {
+    Rename(from: String, to: String)
+    Edits(edits: [JetCLITryEdit])
+}
+struct JetCLITryPlan { name: String, entry: String, action: JetCLITryAction }
+struct JetCLITryVerdict { diagnostics: [Diagnostic], claims_rechecked: Int, claims_reused: Int }
+struct JetCLITryFileEdits { path: String, edits: [TextEdit] }
+struct JetCLITryChecked {
+    checked: JetDriverCompilerCheckResult
+    index: JetCLISemIndex?
+    sources: [String:String]
+    entry_source: String
+}
+
+#Error
+enum JetCLITryError {
+    Read(error: JetCLIReadError)
+    Output(output: JetDriverVerbOutput)
+
+    fn message(self) -> String Never! {
+        if self == {
+            .Read(error) -> error.message
+            .Output(output) -> output.stderr
+        }
+    }
+}
+impl JetCLIReadError -> JetCLITryError { return JetCLITryError.Read{error: self} }
+
+fn jet_cli_try_error_output(error: JetCLITryError) -> JetDriverVerbOutput Never! {
+    if error == {
+        .Read(problem) -> jet_cli_try_fail(problem.message)
+        .Output(output) -> output
+    }
+}
+
+fn jet_cli_try_fail(message: String) -> JetDriverVerbOutput Never! {
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", message, jet_cli_why("E2105"), "correct the named problem, then run the command again", false), exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+fn jet_cli_try_object(value: JetCLIStatusValue, message: String) -> JetCLITryObject JetCLIReadError! {
+    if value == .Object(fields) -> return Ok(JetCLITryObject{fields: fields, consumed: loop _ in fields -> false})
+    Err(jet_cli_read_error(message))
+}
+fn jet_cli_try_take(object: &JetCLITryObject, name: String) -> JetCLIStatusValue? Never! {
+    loop (index, field) in object.fields {
+        if !object.consumed[index] && field.name == name {
+            object.consumed[index] = true
+            return Val(field.value)
+        }
+    }
+    None
+}
+fn jet_cli_try_text(object: &JetCLITryObject, name: String) -> String? JetCLIReadError! {
+    value :: jet_cli_try_take(&object, name) ?? return Ok(None)
+    if value == .Text(text) -> return Ok(Val(text))
+    Err(jet_cli_read_error("`{name}` must be text"))
+}
+fn jet_cli_try_required_text(object: &JetCLITryObject, name: String) -> String JetCLIReadError! {
+    Ok(jet_cli_try_text(&object, name) ?? return Err(jet_cli_read_error("try plan is missing `{name}`")))
+}
+fn jet_cli_try_number(object: &JetCLITryObject, name: String) -> Int JetCLIReadError! {
+    value :: jet_cli_try_take(&object, name) ?? return Err(jet_cli_read_error("try edit is missing `{name}`"))
+    if value == .Integer(number) && number >= 0 -> return Ok(number)
+    Err(jet_cli_read_error("`{name}` must be a non-negative integer"))
+}
+fn jet_cli_try_unknown(object: JetCLITryObject, context: String) JetCLIReadError! {
+    names := [String]{}
+    loop (index, field) in object.fields { if !object.consumed[index] -> &names.push(field.name) }
+    if names.len() == 0 -> return
+    &names.sort()
+    Err(jet_cli_read_error("unknown field(s) in try {context}: {names.join(", ")}"))
+}
+fn jet_cli_try_identifier(name: String) JetCLIReadError! {
+    first := true
+    loop character in name.chars() {
+        text :: "{character}"
+        if !(text == "_" || text.is_alphabetic() || (!first && text.is_numeric())) -> return Err(jet_cli_read_error("`{name}` is not a Jet identifier"))
+        first = false
+    }
+    if first -> return Err(jet_cli_read_error("`{name}` is not a Jet identifier"))
+}
+fn jet_cli_try_absolute(raw: String) -> String JetCLIReadError! {
+    if raw.starts_with("/") -> return Ok(raw)
+    cwd :: cli_files.cwd() ?? return Err(jet_cli_read_error("could not resolve current directory: {jet_cli_io_error_text(err)}"))
+    Ok("{cwd}/{raw}")
+}
+fn jet_cli_try_resolve(plan_path: String, raw: String) -> String Never! {
+    if raw.starts_with("/") -> return raw.copy()
+    "{jet_cli_parent(plan_path) ?? "."}/{raw}"
+}
+fn jet_cli_try_edits(object: &JetCLITryObject, plan_path: String) -> [JetCLITryEdit] JetCLIReadError! {
+    value :: jet_cli_try_take(&object, "edits") ?? return Err(jet_cli_read_error("try plan is missing `edits`"))
+    items :: jet_cli_status_list(Val(value)) ?? return Err(jet_cli_read_error("`edits` must be an array"))
+    if items.len() == 0 -> return Err(jet_cli_read_error("try plan needs at least one edit"))
+    edits := [JetCLITryEdit]{}
+    loop item in items {
+        row := jet_cli_try_object(item, "each try edit must be an object")
+        path :: jet_cli_try_resolve(plan_path, jet_cli_try_required_text(&row, "path"))
+        start :: jet_cli_try_number(&row, "start")
+        end :: jet_cli_try_number(&row, "end")
+        if end < start -> return Err(jet_cli_read_error("try edit `end` must not be before `start`"))
+        replacement :: jet_cli_try_required_text(&row, "new_text")
+        jet_cli_try_unknown(row, "edit")
+        &edits.push(JetCLITryEdit{path: path, edit: TextEdit{span: Span{start: start, end: end}, new_text: replacement}})
+    }
+    Ok(edits)
+}
+fn jet_cli_try_named_action(object: &JetCLITryObject, operation: String, path: String) -> JetCLITryAction JetCLIReadError! {
+    if operation == {
+        "rename" -> {
+            from :: jet_cli_try_required_text(&object, "from")
+            to :: jet_cli_try_required_text(&object, "to")
+            jet_cli_try_identifier(from)
+            jet_cli_try_identifier(to)
+            return Ok(JetCLITryAction.Rename{from: from, to: to})
+        }
+        "text_edit" -> { return Ok(JetCLITryAction.Edits{edits: jet_cli_try_edits(&object, path)}) }
+        else -> { return Err(jet_cli_read_error("try plan operation `{operation}` is not supported")) }
+    }
+}
+fn jet_cli_try_edits_action(object: &JetCLITryObject, path: String) -> JetCLITryAction JetCLIReadError! {
+    Ok(JetCLITryAction.Edits{edits: jet_cli_try_edits(&object, path)})
+}
+
+fn jet_cli_try_read_plan(path: String) -> JetCLITryPlan JetCLIReadError! {
+    bytes :: cli_files.read_bytes(path) ?? return Err(jet_cli_read_error("could not read try plan `{path}`: {jet_cli_io_error_text(err)}"))
+    source :: String.from_bytes(bytes) ?? return Err(jet_cli_read_error("could not read try plan `{path}`: stream did not contain valid UTF-8"))
+    value :: jet_cli_status_value_parse(source) ?? return Err(jet_cli_read_error("invalid try plan JSON: {err.message}"))
+    object := jet_cli_try_object(value, "try plan must be a JSON object")
+    if jet_cli_try_take(&object, "version") == .Val(version) {
+        if version != jet_cli_status_int(1) -> return Err(jet_cli_read_error("unsupported try plan version; expected version 1"))
+    }
+    name :: jet_cli_try_text(&object, "name") ?? "Try"
+    entry :: jet_cli_try_resolve(path, jet_cli_try_required_text(&object, "entry"))
+    operation :: jet_cli_try_text(&object, "operation")
+    action :: if {
+        operation == .Val(selected) -> jet_cli_try_named_action(&object, selected, path)
+        else -> {
+            if jet_cli_status_get(value, "edits") == None -> return Err(jet_cli_read_error("try plan needs `operation: \"rename\"` or `edits`"))
+            jet_cli_try_edits_action(&object, path)
+        }
+    }
+    jet_cli_try_unknown(object, "plan")
+    Ok(JetCLITryPlan{name: name, entry: entry, action: action})
+}
+fn jet_cli_try_canonical(path: String) -> String Never! { cli_files.realpath(path) ?? path }
+
+fn jet_cli_try_group_edit(groups: &[JetCLITryFileEdits], positions: &[String:Int], path: String, edit: TextEdit) Never! {
+    if positions.get(path) == .Val(index) -> &groups[index].edits.push(edit) else {
+        positions[path] = groups.len()
+        &groups.push(JetCLITryFileEdits{path: path, edits: [TextEdit]{edit}})
+    }
+}
+fn jet_cli_try_stage_files(groups: [JetCLITryFileEdits], sources: &[String:String], checked_rename: Bool) -> [JetCLISourceChange] JetCLITryError! {
+    order := [Int]{}
+    loop index in 0..<groups.len() -> &order.push(index)
+    &order.sort_by((a, b) -> groups[a].path <=> groups[b].path)
+    changes := [JetCLISourceChange]{}
+    loop index in order {
+        group :: groups[index]
+        before :: if sources.get(group.path) == {
+            .Val(source) -> source.bytes()
+            .None -> {
+                if checked_rename -> return Err(JetCLITryError.Output{output: jet_cli_ice("the retained rename index lost its original source ownership")})
+                cli_files.read_bytes(group.path) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("could not read `{group.path}`: {jet_cli_io_error_text(err)}")})
+            }
+        }
+        source :: String.from_bytes(before) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try target `{group.path}` is not UTF-8")})
+        after :: jet_driver_apply_edits(source, group.edits) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try edits overlap or fall outside `{group.path}`")})
+        if source == after -> return Err(JetCLITryError.Read{error: jet_cli_read_error("try edit leaves `{group.path}` unchanged")})
+        &changes.push(JetCLISourceChange{path: group.path, before: before, after: after.bytes()})
+    }
+    Ok(changes)
+}
+fn jet_cli_try_index(entry: String, baseline: &JetCLITryChecked) -> JetCLISemIndex JetCLITryError! {
+    if baseline.index == .Val(index) -> return Ok(index)
+    if jet_cli_errors(baseline.checked.diagnostics).len() > 0 {
+        return Err(JetCLITryError.Output{output: JetDriverVerbOutput{stdout: "", stderr: diagnostic_render_all(entry, baseline.entry_source, baseline.checked.diagnostics, false), exit_code: JET_DRIVER_EXIT_USER_ERROR}})
+    }
+    Err(JetCLITryError.Output{output: jet_cli_ice("the baseline compiler query did not retain a complete checked index")})
+}
+fn jet_cli_try_stage(plan: JetCLITryPlan, baseline: &JetCLITryChecked) -> [JetCLISourceChange] JetCLITryError! {
+    groups := [JetCLITryFileEdits]{}
+    positions := [String:Int]{}
+    checked_rename := false
+    if plan.action == {
+        .Edits(edits) -> {
+            loop row in edits -> jet_cli_try_group_edit(&groups, &positions, jet_cli_try_canonical(row.path), row.edit)
+        }
+        .Rename(from, to) -> {
+            checked_rename = true
+            index :: jet_cli_try_index(plan.entry, &baseline)
+            loop definition in index.definitions {
+                if definition.def.name == from -> jet_cli_try_group_edit(&groups, &positions, jet_cli_try_canonical(definition.def.module_path), TextEdit{span: definition.def.def_span, new_text: to})
+            }
+            loop reference in index.references {
+                if reference.name == from -> jet_cli_try_group_edit(&groups, &positions, jet_cli_try_canonical(reference.module_path), TextEdit{span: reference.span, new_text: to})
+            }
+            if groups.len() == 0 -> return Err(JetCLITryError.Read{error: jet_cli_read_error("try plan found no `{from}` symbols")})
+        }
+    }
+    jet_cli_try_stage_files(groups, &baseline.sources, checked_rename)
+}
+fn jet_cli_try_semantic_ops(plan: JetCLITryPlan, baseline: &JetCLITryChecked) -> [JetCLISemOp] JetCLITryError! {
+    if plan.action == .Rename(from, to) {
+        index :: jet_cli_try_index(plan.entry, &baseline)
+        targets := [JetCLISemOpTarget]{}
+        loop fact in index.definition_facts {
+            if fact.name == from -> &targets.push(JetCLISemOpTarget{stable_id: fact.stable_id, before: fact.human_identity, after: "{fact.module_path}::{to}", kind: fact.kind, module_path: fact.module_path})
+        }
+        return Ok([JetCLISemOp]{JetCLISemOp{kind: "rename", rule_id: Val(plan.name), from: Val(from), to: Val(to), node: None, match_template: None, replace_template: None, targets: targets, files: [JetCLISemOpFile]{}}})
+    }
+    Ok([JetCLISemOp]{})
+}
+
+fn jet_cli_try_parse(source: String) -> JetCompilerServicesParseFacts JetCLIReadError! {
+    carrier :: jet_driver_inline_package(source)
+    masked :: jet_driver_mask_inline_package(source, carrier)
+    preparation :: if carrier.error == .Val(error) -> JetCompilerServicesSourcePreparation.Rejected{diagnostic: error} else -> JetCompilerServicesSourcePreparation.Masked{source: masked}
+    Ok(jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(preparation)}) ?? return Err(jet_cli_read_error("the compiler source query could not parse its source input")))
+}
+fn jet_cli_try_check(queries: &JetDriverCompilerQueries, entry: String, disk: Bool) -> JetCLITryChecked JetCLITryError! {
+    overlays := [JetCLIOverlay]{}
+    loop document in jet_driver_compiler_queries_documents(&queries) -> &overlays.push(JetCLIOverlay{path: document.path, source: document.source})
+    if jet_cli_prepare_overlays(entry, entry, overlays, false, None, JetDriverCompileMode.Doc) == {
+        .Refused(output) -> { return Err(JetCLITryError.Output{output: output}) }
+        .Prepared(request, snapshot) -> {
+            source := String?{None}
+            loop root in snapshot.roots { loop file in root.files { if file.path == snapshot.entry_path -> source = Val(file.source) } }
+            text :: source ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try entry has no actual prepared source")})
+            parsed :: jet_cli_try_parse(text)
+            sources := [String:String]{}
+            if disk {
+                loop root in snapshot.roots { loop file in root.files -> sources[jet_cli_try_canonical(file.path)] = file.source }
+            }
+            checked :: if disk -> {
+                jet_driver_compiler_queries_check_disk(&queries, parsed, ^request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+            } else -> {
+                jet_driver_compiler_queries_check_text(&queries, parsed, ^request) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})
+            }
+            if checked.internal_problem == .Val(problem) -> return Err(JetCLITryError.Output{output: jet_cli_ice(problem)})
+            index := JetCLISemIndex?{None}
+            if disk && checked.complete {
+                if checked.product == {
+                    .RetainedCheckedProjection(projection) -> { index = Val(jet_cli_checked_semindex(projection.compile) ?? return Err(JetCLITryError.Output{output: jet_cli_try_fail("{err}")})) }
+                    .CheckedCompilerValue(_) -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query returned an unrequested compiler value")}) }
+                    .Failed -> { return Err(JetCLITryError.Output{output: jet_cli_ice("the invocation query completed without its requested checked product")}) }
+                }
+            }
+            return Ok(JetCLITryChecked{checked: checked, index: index, sources: sources, entry_source: text})
+        }
+    }
+}
+fn jet_cli_try_counter_delta(before: Int, after: Int) -> Int JetCLITryError! {
+    if after < before -> return Err(JetCLITryError.Output{output: jet_cli_ice("incremental body counters decreased within one try invocation")})
+    Ok(after - before)
+}
+fn jet_cli_try_verdict(queries: &JetDriverCompilerQueries, before: JetDriverCompilerQueryStats, entry: String, changes: [JetCLISourceChange], entry_source: String) -> JetCLITryVerdict JetCLITryError! {
+    loop change in changes {
+        text :: String.from_bytes(change.after) ?? return Err(JetCLITryError.Read{error: jet_cli_read_error("try overlay contains non-UTF-8 source")})
+        jet_driver_compiler_queries_set_document(&queries, change.path, text)
+    }
+    jet_driver_compiler_queries_set_document(&queries, jet_cli_try_canonical(entry), entry_source)
+    checked :: jet_cli_try_check(&queries, entry, false)
+    after :: jet_driver_compiler_queries_stats(&queries)
+    rechecked :: jet_cli_try_counter_delta(before.item_recomputes, after.item_recomputes)
+    reused :: jet_cli_try_counter_delta(before.item_hits, after.item_hits)
+    Ok(JetCLITryVerdict{diagnostics: checked.checked.diagnostics, claims_rechecked: rechecked, claims_reused: reused})
+}
+fn jet_cli_try_receipt(name: String, changes: [JetCLISourceChange], verdict: JetCLITryVerdict) -> String Never! {
+    bytes := name.bytes()
+    counts :: [Int]{verdict.claims_rechecked, verdict.claims_reused}
+    loop count in counts {
+        loop offset in 0..<8 -> &bytes.push(U8{(count >> (offset * 8)).bit_and(255)})
+    }
+    loop change in changes {
+        &bytes.extend(change.path.bytes())
+        &bytes.extend(change.before)
+        &bytes.extend(change.after)
+    }
+    "try-{mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()])).slice(0..<12)}"
+}
+fn jet_cli_try_output(plan: JetCLITryPlan, verdict: JetCLITryVerdict, receipt: String, keep: Bool, json: Bool, entry_source: String) -> JetDriverVerbOutput {
+    failed :: jet_cli_errors(verdict.diagnostics).len() > 0
+    if failed {
+        if json {
+            fields :: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(plan.name)), jet_cli_status_field("kept", jet_cli_status_bool(false)), jet_cli_status_field("verdict", jet_cli_status_text("failed")), jet_cli_status_field("receipt_id", jet_cli_status_text(receipt))}
+            reports :: jet_cli_reports_json(jet_cli_report_cwd(), plan.entry, entry_source, verdict.diagnostics)
+            return JetDriverVerbOutput{stdout: "{jet_cli_status_render_with_reports("try", false, reports, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+        }
+        return JetDriverVerbOutput{stdout: "", stderr: "try `{plan.name}`: verdict failed; rolled back\n{diagnostic_render_all(plan.entry, entry_source, verdict.diagnostics, false)}", exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    if json {
+        fields :: [JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(plan.name)), jet_cli_status_field("kept", jet_cli_status_bool(keep)), jet_cli_status_field("claims_rechecked", jet_cli_status_int(verdict.claims_rechecked)), jet_cli_status_field("claims_reused", jet_cli_status_int(verdict.claims_reused)), jet_cli_status_field("receipt_id", jet_cli_status_text(receipt))}
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("try", true, fields)}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    kept :: if keep -> "  kept: working tree now contains the staged bytes\n" else -> "  rolled back (default): working tree is byte-identical\n"
+    JetDriverVerbOutput{stdout: "try `{plan.name}`: verdict clean\n  claims re-checked: {verdict.claims_rechecked} · claims reused: {verdict.claims_reused}\n  receipt: {receipt}\n{kept}", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+fn jet_cli_try_run(raw: String, keep: Bool, json: Bool) -> JetDriverVerbOutput {
+    path :: jet_cli_try_absolute(raw) ?? return jet_cli_try_fail(err.message)
+    plan :: jet_cli_try_read_plan(path) ?? return jet_cli_try_fail(err.message)
+    queries := jet_driver_compiler_queries_new()
+    baseline := jet_cli_try_check(&queries, plan.entry, true) ?? return jet_cli_try_error_output(err)
+    before :: jet_driver_compiler_queries_stats(&queries)
+    changes :: jet_cli_try_stage(plan, &baseline) ?? return jet_cli_try_error_output(err)
+    if changes.len() == 0 -> return jet_cli_try_fail("try plan produced no edit")
+    entry_source := String?{None}
+    entry :: jet_cli_try_canonical(plan.entry)
+    loop change in changes {
+        if change.path == entry -> entry_source = Val(String.from_bytes(change.after) ?? return jet_cli_try_fail("try overlay contains non-UTF-8 source"))
+    }
+    source :: entry_source ?? baseline.entry_source
+    operations :: jet_cli_try_semantic_ops(plan, &baseline) ?? return jet_cli_try_error_output(err)
+    verdict :: jet_cli_try_verdict(&queries, before, plan.entry, changes, source) ?? return jet_cli_try_error_output(err)
+    receipt :: jet_cli_try_receipt(plan.name, changes, verdict)
+    if jet_cli_errors(verdict.diagnostics).len() > 0 -> return jet_cli_try_output(plan, verdict, receipt, false, json, source)
+    if keep {
+        // Revalidate ALL originals before the first publication, as CmdTry does.
+        loop change in changes {
+            current :: cli_files.read_bytes(change.path) ?? return jet_cli_try_fail("could not re-read `{change.path}`: {jet_cli_io_error_text(err)}")
+            if current != change.before -> return jet_cli_try_fail("try target `{change.path}` changed while it was being checked; no files written")
+        }
+        loop change in changes -> _ :: jet_cli_commit_fix(change.path, change.before, change.after, Val(operations)) ?? return jet_cli_try_fail(err.message)
+    }
+    jet_cli_try_output(plan, verdict, receipt, keep, json, source)
+}

@@ -27,7 +27,7 @@ struct Options {
 fn option(args: [String], name: String) -> String {
     i := 0
     loop i + 1 < args.len() {
-        if args[i] == name -> return ~args[i + 1]
+        if args[i] == name -> return args[i + 1].copy()
         i += 1
     }
     return ""
@@ -47,13 +47,14 @@ fn options() -> Options {
 }
 
 // Encode: only the known source expression is representable in the declared enum.
+// ExternalCommand's closed schema has only a tag and an optional Text payload.
 fn encode(form: String, source: String, rounds: Int) -> String? {
     if source != "Command.Write(\"hello\")" -> return None
     wire := ""
     r := 0
     loop r < rounds {
         if form == {
-            "external" -> wire = json.to_string(ExternalCommand.Write("hello"))
+            "external" -> wire = json.to_string(ExternalCommand.Write("hello")) ?? panic("text enum must be JSON-encodable")
             else -> return None
         }
         r += 1
@@ -69,7 +70,7 @@ fn decode(form: String, wire: String, rounds: Int) -> String? {
         if form == {
             "external" -> {
                 v :: json.decode<ExternalCommand>(wire) ?? return None
-                text = json.to_string(v)
+                text = json.to_string(v) ?? panic("text enum must be JSON-encodable")
             }
             else -> return None
         }

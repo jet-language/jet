@@ -5,8 +5,8 @@ mod tir_support;
 
 use std::fs;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
-use tir_support::{build_and_run, build_and_run_full, have_rustc, interpreter_run, jit_run};
+use jet::Interpreter::RunOutcome;
+use tir_support::{build_and_run, build_and_run_full, have_rustc, default_run};
 
 const SOURCE: &str = r#"fn run() {
     print(zip().to_list().len())
@@ -56,10 +56,10 @@ fn run() {
 #[test]
 fn strict_zip_mismatch_reports_e0128_across_tiers() {
     let mut results = vec![
-        ("default JIT", jit_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE)),
+        ("default JIT", default_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE)),
         (
             "forced interpreter",
-            interpreter_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE),
+            default_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE),
         ),
     ];
     if have_rustc() {
@@ -122,7 +122,7 @@ fn zip_family_matches_aot_default_and_forced_interpreter() {
     fs::write(&path, SOURCE).unwrap();
     let shown = path.to_string_lossy().into_owned();
     for (tier, force_interpreter) in [("default tier", false), ("forced interpreter", true)] {
-        match dev_iteration(&shown, false, force_interpreter) {
+        match crate::common::dev_run(&shown, false, force_interpreter) {
             RunOutcome::Ran {
                 stdout,
                 stderr,

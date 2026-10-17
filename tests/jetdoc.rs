@@ -228,7 +228,7 @@ fn nested_state_docs_stay_on_the_struct_item() {
     let entry = scratch.0.join("nested_state.jet");
     fs::write(
         &entry,
-        "pub struct Door { state { Closed, Open } }\nfn run() {}\n",
+        "struct Door { state { Closed, Open } }\nfn run() {}\n",
     )
     .expect("write nested state fixture");
     let entry = entry.to_string_lossy().into_owned();
@@ -250,8 +250,7 @@ fn checked_text_contract_is_rendered_in_generated_docs() {
     let entry = scratch.0.join("checked_text.jet");
     fs::write(
         &entry,
-        r#"#PubFile
-#Error
+        r#"#Error
 enum PatternError { Bad }
 
 /// A checked pattern.

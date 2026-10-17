@@ -1,0 +1,248 @@
+// x64-only Atomic<T>: ONE inline, 8-aligned word, borrowed by its actual
+// storage address (including a record or boxed payload). No handle/refcount.
+// Docs/spec/stdlib-api-laws.md "Atomic scalar representation": SeqCst;
+// runtime Atomic.jet uses aligned MOV loads, XCHG stores and LOCK RMWs.
+// Atomic<Int> uses the ONE Jet hazard domain; providers consume owned scalar
+// inputs and return independently owned OLD/load values. Prevailing Int
+// ownership/drop lowering supplies their lifetime (NativeFeed5/NativeSlice6).
+// Non-Clone policy is Sema/Ownership/Copy.jet:127, not a second Lower policy.
+use jet_foundation.[MIRAccess, MIRCallArg, MIRInstruction, MIROperation, MIRPreludeCall, MIRPreludeCallID, MIRProgram, MIRType, MIRTypeKind, MIRValueID, mir_symbol_name, mir_type_same_checked_type]
+
+fn lower_atomic_lane(p: MIRProgram, scalar: MIRType) -> String? Never! {
+    if scalar.kind == {
+        .Bool -> return Val("bool")
+        .Int -> return Val("int")
+        .IntN(signed, bits) -> {
+            if bits == 32 -> return Val(if signed -> "i32" else -> "u32")
+            if bits == 64 -> return Val(if signed -> "i64" else -> "u64")
+        }
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_atomic_lane(p, inner)
+        else -> {
+            definition :: lower_type_def(p, scalar) ?? return None
+            if definition.kind == .Alias(inner) | .Distinct(inner, _) -> return lower_atomic_lane(p, inner)
+        }
+    }
+    None
+}
+
+// This is the sole Atomic type recognizer in Lower, reused by every hook.
+fn lower_atomic_scalar(p: MIRProgram, ty: MIRType) -> MIRType? Never! {
+    if ty.kind == {
+        .Tagged(_, inner) | .InlineRange(inner, _, _) | .Quantity(inner, _) -> return lower_atomic_scalar(p, inner)
+        .Apply(name, args) -> {
+            if (name.name == "Atomic" || name.name.ends_with("::Atomic") || name.name.ends_with(".Atomic")) && args.len() == 1 && lower_atomic_lane(p, args[0]) != None -> return Val(args[0])
+            definition :: lower_type_def(p, ty) ?? return None
+            if definition.kind == .Alias(inner) | .Distinct(inner, _) -> return lower_atomic_scalar(p, inner)
+        }
+        else -> {}
+    }
+    None
+}
+
+fn lower_atomic_needs_drop(p: MIRProgram, ty: MIRType) -> Bool Never! {
+    scalar :: lower_atomic_scalar(p, ty) ?? return false
+    lane :: lower_atomic_lane(p, scalar) ?? return false
+    lane == "int"
+}
+
+fn lower_atomic_check_offset(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, offset: Int) -> Bool Never! {
+    if lower_atomic_scalar(p, ty) != None && offset % 8 != 0 {
+        lower_fail(&m, &f, "Atomic word storage offset {offset} is not 8-aligned")
+        return false
+    }
+    true
+}
+
+fn lower_atomic_clone_assert(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType) -> Bool Never! {
+    if lower_atomic_scalar(p, ty) == None -> return true
+    lower_fail(&m, &f, "non-Clone Atomic reached an owning copy after Sema")
+    false
+}
+
+fn lower_atomic_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+    stored := [MIRValueID]{}
+    if operation == .Semantic(semantic) {
+        if semantic == .StaticPreludeCall(call, args, _, _) {
+            row :: lower_prelude_row(p, call) ?? return stored
+            if row.module_name == "::JetAtomic" {
+                loop arg in args { if arg.access == .Move -> &stored.push(arg.value) }
+            }
+        }
+        if semantic == .BuiltinMethod(call, _, _, args, _) {
+            row :: lower_prelude_row(p, call) ?? return stored
+            if lower_runtime_symbol(row).starts_with("jet_atomic_") -> stored = args
+        }
+    }
+    stored
+}
+
+// A consuming call gets its own publication reference when MIR lends a read;
+// an owning/moved operand transfers its reference, exactly as Shared.new.
+fn lower_atomic_taken(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, value: MIRValueID, scalar: MIRType, moving: Bool) -> LIRValueID? Never! {
+    ty :: lower_value_type(c, value) ?? return None
+    if !mir_type_same_checked_type(ty, scalar) {
+        lower_fail(&m, &f, "Atomic operand does not match its checked scalar type")
+        return None
+    }
+    held :: lower_use(&m, &f, value) ?? return None
+    if lower_atomic_lane(p, scalar) != Val("int") || (moving && lower_value_owned(c, value)) -> return Val(held)
+    owned :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_rt_int_clone", [LIRValueID]{held}, Val(owned))
+    Val(owned)
+}
+
+fn lower_atomic_new(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRCallArg]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if row.module_name != "::JetAtomic" -> return false
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "Atomic constructor has no checked result")
+        return true
+    }
+    atomic_ty :: if row.member == "try_new" && result_ty.kind == .Result(ok, _) -> ok else -> result_ty
+    scalar :: lower_atomic_scalar(p, atomic_ty) ?? {
+        lower_fail(&m, &f, "Atomic constructor needs a checked supported scalar application")
+        return true
+    }
+    if args.len() != 1 || (row.member != "new" && row.member != "try_new") {
+        lower_fail(&m, &f, "Atomic constructor requires one checked scalar argument")
+        return true
+    }
+    if row.member == "try_new" {
+        if result_ty.kind == .Result(_, err) {
+            if lower_record_handle(p, err) != Val("AllocError") {
+                lower_fail(&m, &f, "Atomic.try_new requires the canonical AllocError record")
+                return true
+            }
+        } else {
+            lower_fail(&m, &f, "Atomic.try_new requires a checked Result")
+            return true
+        }
+    }
+    input :: lower_atomic_taken(p, c, &m, &f, args[0].value, scalar, args[0].access == .Move) ?? return true
+    lane :: lower_atomic_lane(p, scalar) ?? panic("checked Atomic scalar")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
+    storage := dst
+    if row.member == "try_new" {
+        lower_alloc(&m, &f, dst, lower_box_size(p, result_ty))
+        lower_store_word(&f, dst, 0, 1)
+        storage = lower_address(&f, dst, 8)
+    } else {
+        lower_storage_into(p, &f, storage, atomic_ty)
+    }
+    // new/try_new have no allocation/fault probe for the atomic itself.
+    // Result boxing follows existing fatal, unprobed metadata convention.
+    lower_call_runtime(&m, &f, "jet_rt_atomic_{runtime_abi_atom(lane)}_init", [LIRValueID]{storage, input}, None)
+    if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
+    true
+}
+
+fn lower_atomic_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRPreludeCall, receiver: MIRValueID, args: [MIRValueID]) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    if !symbol.starts_with("jet_atomic_") -> return false
+    ty :: lower_value_type(c, receiver) ?? return true
+    scalar :: lower_atomic_scalar(p, ty) ?? {
+        lower_fail(&m, &f, "Atomic method receiver has no supported checked scalar")
+        return true
+    }
+    lane :: lower_atomic_lane(p, scalar) ?? panic("checked Atomic scalar")
+    operation :: if symbol == "jet_atomic_observe" -> "load" else if symbol == "jet_atomic_publish" -> "store" else -> row.member
+    arity :: if operation == "load" -> 0 else if operation == "compare_exchange" -> 2 else -> 1
+    if args.len() != arity || (operation != "load" && operation != "store" && operation != "add" && operation != "try_add" && operation != "compare_exchange") || ((operation == "add" && lane == "bool") || (operation == "try_add" && lane != "int")) {
+        lower_fail(&m, &f, "Atomic method violates its checked scalar/arity contract")
+        return true
+    }
+    // The borrowed inline receiver is already the real publication address;
+    // never load its word into a temporary cell and never write it back.
+    address :: lower_use(&m, &f, receiver) ?? return true
+    values := [LIRValueID]{address}
+    loop arg in args -> &values.push(lower_atomic_taken(p, c, &m, &f, arg, scalar, true) ?? return true)
+    if operation == "store" {
+        lower_call_runtime(&m, &f, "jet_rt_atomic_{runtime_abi_atom(lane)}_store", values, None)
+        lower_alias_absent(&f, instruction)
+        return true
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "Atomic method has no checked result type")
+        return true
+    }
+    if operation == "try_add" {
+        if result_ty.kind == .Result(ok, err) {
+            if !lower_is_exact_int(ok) || lower_record_handle(p, err) != Val("AllocError") {
+                lower_fail(&m, &f, "Atomic<Int>.try_add requires Int success and canonical AllocError")
+                return true
+            }
+        } else {
+            lower_fail(&m, &f, "Atomic<Int>.try_add requires a checked Result")
+            return true
+        }
+        dst :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
+        lower_call_helper(&m, &f, "atomic.try_add", result_ty, values, Val(dst))
+        if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
+        return true
+    }
+    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_new_value(&f, lower_repr_layout(lower_repr(p, result_ty)) ?? lir_layout_word(), lower_drop(&m, lower_repr(p, result_ty), true), result_ty.identity)
+    lower_call_runtime(&m, &f, "jet_rt_atomic_{runtime_abi_atom(lane)}_{runtime_abi_atom(operation)}", values, Val(dst))
+    if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
+    true
+}
+
+fn lower_atomic_drop_glue(m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer()}, None)
+    address :: f.open_params[0].copy()
+    nil :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Const{dst: nil, value: 0})
+    absent :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: absent, condition: .Eq, left: address, right: nil})
+    live :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: absent, then_target: lower_target(done, [LIRValueID]{}), else_target: lower_target(live, [LIRValueID]{})})
+    lower_start(&f, live, [LIRValueID]{})
+    lower_call_runtime(&m, &f, "jet_rt_atomic_int_drop", [LIRValueID]{address}, None)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_helper_atomic_try_add(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    ok_ty :: if glue.ty.kind == .Result(ok, _) -> ok else -> panic("Atomic try_add checked Result")
+    err_ty :: if glue.ty.kind == .Result(_, err) -> err else -> panic("Atomic try_add checked Result")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, Val(lir_layout_pointer()))
+    address :: f.open_params[0].copy()
+    delta :: f.open_params[1].copy()
+    result :: lower_pointer(&f)
+    lower_alloc(&m, &f, result, lower_result_box_size(p, ok_ty, err_ty))
+    scratch :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: scratch, size: 32, align: 8})
+    success :: lower_flag(&f)
+    lower_call_runtime(&m, &f, "jet_rt_atomic_int_try_add", [LIRValueID]{address, delta, scratch}, Val(success))
+    ok :: lower_new_block(&f)
+    err :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: success, then_target: lower_target(ok, [LIRValueID]{}), else_target: lower_target(err, [LIRValueID]{})})
+    lower_start(&f, ok, [LIRValueID]{})
+    old :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: old, base: scratch, offset: 0})
+    lower_store_word(&f, result, 0, 1)
+    lower_write_at(p, &f, result, 8, old, ok_ty)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lower_start(&f, err, [LIRValueID]{})
+    requested :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: requested, base: scratch, offset: 8})
+    exact_requested :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+    lower_convert_exact(&m, &f, exact_requested, requested, "jet_int_owned_from_i64", false)
+    allocator :: lower_render_string(&f)
+    allocator_text :: lower_static_text(&m, &f, "exact-int")
+    lower_call_runtime(&m, &f, "jet_rt_string_from_static", allocator_text, Val(allocator))
+    // Existing canonical constructor, same ownership conversion as
+    // Builtins.jet lower_helper_try_capacity (jet_rt_record_new_alloc_error).
+    error_handle :: lower_new_value(&f, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_handle_drop_alloc_error"}, None)
+    lower_call_runtime(&m, &f, "jet_rt_record_new_alloc_error", [LIRValueID]{exact_requested, allocator}, Val(error_handle))
+    lower_emit(&f, LIRInst.Drop{value: exact_requested})
+    lower_emit(&f, LIRInst.Drop{value: allocator})
+    error :: lower_pointer(&f)
+    lower_record_from_runtime(p, &m, &f, err_ty, error_handle, Val(error))
+    lower_store_word(&f, result, 0, 0)
+    lower_write_at(p, &f, result, 8, error, err_ty)
+    lower_seal(&f, LIRTerminator.Return{value: Val(result)})
+    lir_builder_finish(f.builder)
+}

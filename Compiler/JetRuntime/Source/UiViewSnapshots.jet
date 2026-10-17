@@ -1,0 +1,77 @@
+// Preview.rs88-112 Device+Viewport; WebVirtual.rs292-309 VirtualPlan.
+// Private data snapshots only, not signal-backed viewport resources.
+#Export(c) fn jet_rt_handle_clone_jet_ui_preview_viewport(value: I64) -> I64 {
+    kind :: ui_carrier_word(value + UI_PREVIEW_DEVICE)
+    result :: jet_rt_alloc(UI_PREVIEW_BYTES, I64{8})
+    ui_carrier_store(result + UI_PREVIEW_DEVICE, kind)
+    ui_carrier_store(result + UI_PREVIEW_CUSTOM, if (kind == I64{3}) -> jet_rt_string_clone(ui_carrier_word(value + UI_PREVIEW_CUSTOM)) else -> I64{0})
+    ui_carrier_store(result + UI_PREVIEW_WIDTH, ui_carrier_word(value + UI_PREVIEW_WIDTH).bit_and(I64{4294967295}))
+    ui_carrier_store(result + UI_PREVIEW_HEIGHT, ui_carrier_word(value + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295}))
+    ui_carrier_store(result + UI_PREVIEW_SCALE, ui_carrier_word(value + UI_PREVIEW_SCALE).bit_and(I64{65535}))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_ui_preview_viewport(value: I64) {
+    if (value == I64{0}) -> return
+    if (ui_carrier_word(value + UI_PREVIEW_DEVICE) == I64{3}) -> jet_rt_string_drop(ui_carrier_word(value + UI_PREVIEW_CUSTOM))
+    jet_rt_free(value, UI_PREVIEW_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ui_preview_viewport(a: I64, b: I64) -> Bool {
+    kind :: ui_carrier_word(a + UI_PREVIEW_DEVICE)
+    if (kind != ui_carrier_word(b + UI_PREVIEW_DEVICE)) -> return false
+    if (kind == I64{3} && !jet_rt_string_eq(ui_carrier_word(a + UI_PREVIEW_CUSTOM), ui_carrier_word(b + UI_PREVIEW_CUSTOM))) -> return false
+    (ui_carrier_word(a + UI_PREVIEW_WIDTH).bit_and(I64{4294967295})) == (ui_carrier_word(b + UI_PREVIEW_WIDTH).bit_and(I64{4294967295})) && (ui_carrier_word(a + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295})) == (ui_carrier_word(b + UI_PREVIEW_HEIGHT).bit_and(I64{4294967295})) && (ui_carrier_word(a + UI_PREVIEW_SCALE).bit_and(I64{65535})) == (ui_carrier_word(b + UI_PREVIEW_SCALE).bit_and(I64{65535}))
+}
+fn ui_virtual_measurements_clone(value: I64) -> I64 {
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    result :: data_sequence_new(length, UI_VIRTUAL_PAIR_BYTES)
+    source :: ui_carrier_word(value + DATA_SEQUENCE_DATA)
+    target :: ui_carrier_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        offset :: at * UI_VIRTUAL_PAIR_BYTES
+        ui_carrier_store(target + offset, ui_carrier_word(source + offset))
+        ui_carrier_store(target + offset + UI_VIRTUAL_WORD_BYTES, ui_carrier_word(source + offset + UI_VIRTUAL_WORD_BYTES))
+        at += I64{1}
+    }
+    ui_carrier_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+fn ui_virtual_measurements_drop(value: I64) {
+    capacity :: ui_carrier_word(value + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(ui_carrier_word(value + DATA_SEQUENCE_DATA), capacity * UI_VIRTUAL_PAIR_BYTES, I64{8})
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_clone_jet_web_virtual_plan(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_VIRTUAL_BYTES, I64{8})
+    offset := I64{0}
+    loop offset < UI_VIRTUAL_MEASUREMENTS {
+        ui_carrier_store(result + offset, ui_carrier_word(value + offset))
+        offset += UI_VIRTUAL_WORD_BYTES
+    }
+    ui_carrier_store(result + UI_VIRTUAL_MEASUREMENTS, ui_virtual_measurements_clone(ui_carrier_word(value + UI_VIRTUAL_MEASUREMENTS)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_web_virtual_plan(value: I64) {
+    if (value == I64{0}) -> return
+    ui_virtual_measurements_drop(ui_carrier_word(value + UI_VIRTUAL_MEASUREMENTS))
+    jet_rt_free(value, UI_VIRTUAL_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_web_virtual_plan(a: I64, b: I64) -> Bool {
+    offset := I64{0}
+    loop offset < UI_VIRTUAL_MEASUREMENTS {
+        if (ui_carrier_word(a + offset) != ui_carrier_word(b + offset)) -> return false
+        offset += UI_VIRTUAL_WORD_BYTES
+    }
+    ah :: ui_carrier_word(a + UI_VIRTUAL_MEASUREMENTS)
+    bh :: ui_carrier_word(b + UI_VIRTUAL_MEASUREMENTS)
+    length :: ui_carrier_word(ah + DATA_SEQUENCE_LENGTH)
+    if (length != ui_carrier_word(bh + DATA_SEQUENCE_LENGTH)) -> return false
+    ap :: ui_carrier_word(ah + DATA_SEQUENCE_DATA)
+    bp :: ui_carrier_word(bh + DATA_SEQUENCE_DATA)
+    offset = I64{0}
+    loop offset < length * UI_VIRTUAL_PAIR_BYTES {
+        if (ui_carrier_word(ap + offset) != ui_carrier_word(bp + offset)) -> return false
+        offset += UI_VIRTUAL_WORD_BYTES
+    }
+    true
+}

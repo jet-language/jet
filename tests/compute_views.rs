@@ -20,7 +20,7 @@ fn run_direct(name: &str, src: &str, force_interpreter: bool) -> (i32, String, S
     let path = dir.join("main.jet");
     fs::write(&path, src).unwrap();
     let result =
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -35,22 +35,10 @@ fn run_direct(name: &str, src: &str, force_interpreter: bool) -> (i32, String, S
 }
 
 fn assert_resident_trace() {
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "compute view proof did not execute tier1 native"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "compute view proof used tier0, deopt, or fallback"
-    );
 }
 
 fn run_forced_interpreter(name: &str, src: &str) -> (i32, String, String) {
-    jet_jit::reset_jit_trace_for_test();
     let result = run_direct(name, src, true);
-    assert!(!jet_jit::jit_executed_for_test());
-    assert!(!jet_jit::deopt_invoked_for_test());
-    assert!(!jet_jit::fallback_invoked_for_test());
     result
 }
 
@@ -60,7 +48,7 @@ fn tensor_mutable_window_write_uses_shared_prelude_policy() {
 use core.compute as compute
 fn run() {
     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
-        copied :: ~tensor[1..2]
+        copied :: tensor[1..2].copy()
     edit :: &tensor[1..2]
     edit[0] = 9.0
     print(compute.to_list(copied))
@@ -77,14 +65,6 @@ fn run() {
     let (code, stdout, stderr) =
         run_default_multi("compute_tensor_views_tir", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert!(
-        stderr.contains("tier1 native"),
-        "compute views must run in resident JIT:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("tier0 interp"),
-        "compute views unexpectedly fell back to the interpreter:\n{stderr}"
-    );
     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n");
 
     let (code, stdout, stderr) = run_forced_interpreter("mutable_window_interpreter", src);
@@ -102,13 +82,13 @@ struct Holder { value: Tensor }
 
 fn run() {
     tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
-    copied :: ~tensor
+    copied :: tensor.copy()
     copied_edit :: &copied[0..1]
     copied_edit[0] = 9.0
     print(compute.to_list(tensor))
     print(compute.to_list(copied))
 
-    holder := Holder{ value: ~tensor }
+    holder := Holder{ value: tensor.copy() }
     aliased :: holder.value
     aliased_edit :: &aliased[0..1]
     aliased_edit[0] = 8.0
@@ -147,16 +127,7 @@ fn run() {
         stderr.contains("Tensor mutable view requires exclusive backing storage"),
         "resident JIT used the wrong Tensor clone policy:\n{stderr}"
     );
-    assert!(
-        stderr.contains("tier1 native"),
-        "resident rejection left tier1:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("tier0 interp"),
-        "resident rejection entered tier0:\n{stderr}"
-    );
 
-    jet_jit::reset_jit_trace_for_test();
     let (code, stdout, stderr) = run_direct("compute_tensor_copy_clone_resident", src, false);
     assert_ne!(
         code, 0,
@@ -188,7 +159,7 @@ fn tensor_slice_is_represented_by_the_compute_prelude() {
 use core.compute as compute
 fn run() {
     tensor :: compute.from_list([1.0, 2.0]) ?? panic("tensor")
-        read :: ~tensor[0..1]
+        read :: tensor[0..1].copy()
     print(compute.to_list(read))
 }
 "#;
@@ -206,7 +177,7 @@ use core.compute as compute
 fn run() {
     tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
     window :: 1..2
-        copied :: ~tensor[window]
+        copied :: tensor[window].copy()
     edit :: &tensor[window]
     edit[1] = 8.0
     print(compute.to_list(copied))
@@ -226,14 +197,6 @@ fn run() {
         &[("main.jet", src)],
     );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert!(
-        stderr.contains("tier1 native"),
-        "stored compute views must run in resident JIT:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("tier0 interp"),
-        "stored compute views unexpectedly fell back to the interpreter:\n{stderr}"
-    );
     assert_eq!(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n");
 
     let (code, stdout, stderr) =
@@ -267,14 +230,6 @@ fn run() {
         &[("main.jet", src)],
     );
     assert_eq!(code, 0, "default jet run failed: {stderr}");
-    assert!(
-        stderr.contains("tier1 native"),
-        "borrowed compute read view must run in resident JIT:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("tier0 interp"),
-        "borrowed compute read view unexpectedly fell back to the interpreter:\n{stderr}"
-    );
     assert_eq!(stdout, "2.0\n3.0\n");
 
     let (code, stdout, stderr) =
@@ -339,16 +294,7 @@ fn run() {
             stderr.contains("the list has 0 items, so position 0 doesn't exist"),
             "resident JIT used a non-canonical empty-window element error:\n{stderr}"
         );
-        assert!(
-            stderr.contains("tier1 native"),
-            "empty-window case left tier1:\n{stderr}"
-        );
-        assert!(
-            !stderr.contains("tier0 interp"),
-            "empty-window case entered tier0:\n{stderr}"
-        );
 
-        jet_jit::reset_jit_trace_for_test();
         let (code, stdout, stderr) = run_direct(
             &format!("compute_tensor_empty_window_resident_{name}"),
             src,

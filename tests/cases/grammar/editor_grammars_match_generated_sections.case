@@ -1,0 +1,41 @@
+# Original tests/grammar.rs:95-123; verbatim sources and original predicates.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference-run or PASS claim.
+copy: {root}/tests/cases/grammar/support.fixture/Section.jet oracle/run.jet
+copy: {root}/Tools/editors/vscode/syntaxes/jet.tmLanguage.json Tools/editors/vscode/syntaxes/jet.tmLanguage.json
+step original0: jet run oracle
+env: S5_FILE={work}/Tools/editors/vscode/syntaxes/jet.tmLanguage.json
+exit: 0
+capture: original0 stdout doc $
+copy: {root}/Tools/editors/jet.tmGrammar Tools/editors/jet.tmGrammar
+step original1: jet run oracle
+env: S5_FILE={work}/Tools/editors/jet.tmGrammar
+exit: 0
+capture: original1 stdout doc $
+copy: {root}/Tools/editors/tree-sitter/grammar.js Tools/editors/tree-sitter/grammar.js
+step original2: jet run oracle
+env: S5_FILE={work}/Tools/editors/tree-sitter/grammar.js
+exit: 0
+capture: original2 stdout doc $
+copy: {root}/Tools/editors/zed/languages/jet/highlights.scm Tools/editors/zed/languages/jet/highlights.scm
+step original3: jet run oracle
+env: S5_FILE={work}/Tools/editors/zed/languages/jet/highlights.scm
+exit: 0
+capture: original3 stdout doc $
+step: jet self devtools grammars
+exit: 0
+step: jet run oracle
+env: S5_FILE={work}/Tools/editors/vscode/syntaxes/jet.tmLanguage.json
+exit: 0
+json: stdout doc $ = "{cap:original0}"
+step: jet run oracle
+env: S5_FILE={work}/Tools/editors/jet.tmGrammar
+exit: 0
+json: stdout doc $ = "{cap:original1}"
+step: jet run oracle
+env: S5_FILE={work}/Tools/editors/tree-sitter/grammar.js
+exit: 0
+json: stdout doc $ = "{cap:original2}"
+step: jet run oracle
+env: S5_FILE={work}/Tools/editors/zed/languages/jet/highlights.scm
+exit: 0
+json: stdout doc $ = "{cap:original3}"

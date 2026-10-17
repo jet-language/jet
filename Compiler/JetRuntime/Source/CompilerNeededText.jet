@@ -1,0 +1,21 @@
+// Text.rs:944-951, parity: Jet-only (Rust frozen). The Core wrappers already
+// own the same policy, but compiler Prelude routes still call these raw E4
+// exports. Reuse pinned Unicode 17 tables and the existing streaming decoder;
+// no scalar list, temporary suffix, locale-sensitive libc or per-scalar copy.
+fn compiler_text_all(value: I64, property: I64) -> Bool {
+    length :: rt_text_len(value)
+    if (length == I64{0}) -> return false
+    data :: rt_text_data(value)
+    at := I64{0}
+    loop at < length {
+        address :: wrapping(data + at)
+        cp :: rt_text_decode(address)
+        valid :: if (property == I64{0}) -> compiler_text_alphabetic(cp) else if (property == I64{1}) -> compiler_text_numeric(cp) else -> unicode_is_white_space(cp)
+        if !valid -> return false
+        at = wrapping(at + rt_text_width(address))
+    }
+    true
+}
+#Export(c) fn jet_text_is_alphabetic(value: I64) -> Bool { compiler_text_all(value, I64{0}) }
+#Export(c) fn jet_text_is_numeric(value: I64) -> Bool { compiler_text_all(value, I64{1}) }
+#Export(c) fn jet_text_is_whitespace(value: I64) -> Bool { compiler_text_all(value, I64{2}) }

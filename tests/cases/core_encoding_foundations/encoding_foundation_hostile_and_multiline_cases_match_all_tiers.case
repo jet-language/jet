@@ -1,0 +1,18 @@
+# HAND-PORT tests/core_encoding_foundations.rs:6-37 encoding_foundation_hostile_and_multiline_cases_match_all_tiers
+# PENDING-SAME-HEAD runtimeGap=build/admission; PENDING-GRAMMAR, no historical failure captures blessed.
+# ORACLE-LITERAL; exact original full tier parity.
+fixture: encoding_foundation_hostile_and_multiline_cases_match_all_tiers.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = encoding_foundation_hostile_and_multiline_cases_match_all_tiers.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = encoding_foundation_hostile_and_multiline_cases_match_all_tiers.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = encoding_foundation_hostile_and_multiline_cases_match_all_tiers.stdout.expected
+stderr: == default

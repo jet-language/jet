@@ -1,0 +1,48 @@
+// An arrowless unit-fallible signature preserves its typed failure carrier.
+// Both `Ok()` and `Ok(())` return Unit success, including in terminal arms;
+// terminal `Err(...)` returns the declared error rather than a default error.
+#Error
+enum StepError {
+    Refused
+}
+
+fn step(name: String) StepError! {
+    print("step {name}")
+    Ok()
+}
+
+fn guarded(value: Int) StepError! {
+    if value < 0 -> return Err(StepError.Refused)
+    if value == 0 {
+        print("early")
+        return Ok()
+    }
+    print("late")
+    Ok(())
+}
+
+fn chain(value: Int) StepError! {
+    step("chain")
+    guarded(value)
+    Ok()
+}
+
+fn refused() StepError! {
+    if true == {
+        true -> Err(StepError.Refused)
+        else -> Ok(())
+    }
+}
+
+fn run() {
+    loop value in [0, 1, -1] {
+        if chain(value) == {
+            .Ok(_) -> print("ok {value}")
+            .Err(error) -> print(error)
+        }
+    }
+    if refused() == {
+        .Ok(_) -> print("unexpected")
+        .Err(error) -> print(error)
+    }
+}

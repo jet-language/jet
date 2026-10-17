@@ -1,0 +1,10 @@
+// D-MEM-SENTRY1: a raw write from an address with no allocation provenance
+// is a located R0801 runtime fault in the default dev tier.
+use core.mem
+
+fn run() {
+    #Unsafe("external address must be a live allocation") {
+        pointer :: mem.Ptr<Int>.from_addr(1)
+        mem.volatile_write(pointer, 7)
+    }
+}

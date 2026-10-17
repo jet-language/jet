@@ -1186,8 +1186,8 @@ fn run() {
 }
 
 #[test]
-fn native_bidi_runs_real_network_path_in_forced_and_default_dev_tier_zero() {
-    fn run_once(use_interpreter: bool) -> (String, Vec<String>, Vec<jet_jit::TierRow>) {
+fn native_bidi_runs_real_network_path_in_forced_interpreter_and_default_run() {
+    fn run_once(use_interpreter: bool) -> (String, Vec<String>) {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());
         let server = thread::spawn(move || run_smoke(listener));
@@ -1220,12 +1220,8 @@ fn run() {
         let path = dir.join("browser_bidi_dev.jet");
         fs::write(&path, source).unwrap();
 
-        jet_jit::reset_jit_trace_for_test();
-        jet_jit::set_trace_tiers(true);
         let outcome =
-            jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, use_interpreter);
-        jet_jit::set_trace_tiers(false);
-        let trace = jet_jit::take_last_trace();
+            crate::common::dev_run(path.to_str().unwrap(), false, use_interpreter);
         let stdout = match outcome {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
@@ -1240,7 +1236,7 @@ fn run() {
                 panic!("Browser dev tier rejected real network program: {diags:?}")
             }
         };
-        (stdout, server.join().unwrap(), trace)
+        (stdout, server.join().unwrap())
     }
 
     fn dev_stdout(source: String, label: &str) -> String {
@@ -1253,7 +1249,7 @@ fn run() {
         .unwrap();
         let path = dir.join("browser_bidi_dev.jet");
         fs::write(&path, source).unwrap();
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+        match crate::common::dev_run(path.to_str().unwrap(), false, false) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -1269,31 +1265,16 @@ fn run() {
         }
     }
 
-    let (forced_stdout, forced_methods, _) = run_once(true);
+    let (forced_stdout, forced_methods) = run_once(true);
     assert_eq!(forced_stdout, "bidi-2024.11\nblocked\nblocked\nblocked\n");
     assert_eq!(
         forced_methods,
         ["session.status", "session.new", "session.end"]
     );
 
-    let (default_stdout, default_methods, trace) = run_once(false);
+    let (default_stdout, default_methods) = run_once(false);
     assert_eq!(default_stdout, forced_stdout);
     assert_eq!(default_methods, forced_methods);
-    let run_id = trace
-        .iter()
-        .find(|row| row.function_name.rsplit("::").next() == Some("run"))
-        .map(|row| row.function)
-        .expect("Browser trace must identify run");
-    assert!(
-        trace
-            .iter()
-            .any(|row| row.function == run_id && row.tier == jet_jit::Tier::Interp),
-        "Browser must visibly select/deopt run to tier-0, never AOT: {trace:?}"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "default dev must not hide Browser behind the legacy/AOT fallback"
-    );
 
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let endpoint = format!("ws://{}/session", listener.local_addr().unwrap());

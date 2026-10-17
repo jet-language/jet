@@ -1,0 +1,142 @@
+# Port of tests/jetpack_offline.rs:63-132; runtime PENDING-SAME-HEAD.
+refused: hangar-verified-realization
+mkdir: project
+mkdir: package-root
+mkdir: fixtures
+mkdir: staging/bin
+env: JETPACK_ROOT={work}/package-root
+step: jetpack build greet@nixpkgs --no-color --offline --fixtures {work}/fixtures
+cwd: project
+exit: 0
+step: jetpack build greet@nixpkgs --no-color --offline
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+unset: JETPACK_FIXTURES
+exit: 0
+stderr: ~ "cached" # original predicate
+stderr: !~ "fixture" # original predicate
+step: jetpack run greet@nixpkgs --no-color --offline -- greet
+cwd: project
+env: JETPACK_DENY_NETWORK=1
+unset: JETPACK_FIXTURES
+exit: 0
+stdout: ~ "hello from offline cache" # original predicate
+# Original authentic helper14-60 + test, retained verbatim:
+# fn write_runnable_fixture(
+#     fixtures: &Path,
+#     root: &Path,
+#     staging_dir: &Path,
+#     lua_path: Option<&str>,
+# ) -> PathBuf {
+#     fs::create_dir_all(fixtures).unwrap();
+#     let bin = staging_dir.join("bin");
+#     fs::create_dir_all(&bin).unwrap();
+#     let greet = bin.join(if cfg!(windows) { "greet.bat" } else { "greet" });
+#     #[cfg(windows)]
+#     fs::write(&greet, "@echo hello from offline cache\r\n").unwrap();
+#     #[cfg(not(windows))]
+#     {
+#         fs::write(&greet, "#!/bin/sh\necho hello from offline cache\n").unwrap();
+#         use std::os::unix::fs::PermissionsExt;
+#         fs::set_permissions(&greet, fs::Permissions::from_mode(0o755)).unwrap();
+#     }
+#     if let Some(lua_path) = lua_path {
+#         fs::write(staging_dir.join("lua-path"), lua_path).unwrap();
+#     }
+#     jetpack::Store::seal_local_output(staging_dir).unwrap();
+#     let digest = jetpack::Envelope::try_output_hash_of(&staging_dir.to_string_lossy()).unwrap();
+#     let out_dir = root.join("hangar").join("objects").join(&digest);
+#     fs::create_dir_all(out_dir.parent().unwrap()).unwrap();
+#     let mut staging_permissions = fs::metadata(staging_dir).unwrap().permissions();
+#     #[cfg(unix)]
+#     {
+#         use std::os::unix::fs::PermissionsExt;
+#         staging_permissions.set_mode(staging_permissions.mode() | 0o200);
+#     }
+#     #[cfg(not(unix))]
+#     staging_permissions.set_readonly(false);
+#     fs::set_permissions(staging_dir, staging_permissions).unwrap();
+#     fs::rename(staging_dir, &out_dir).unwrap();
+#     jetpack::Store::seal_local_output(&out_dir).unwrap();
+#     assert_eq!(
+#         jetpack::Envelope::try_output_hash_of(&out_dir.to_string_lossy()).unwrap(),
+#         digest,
+#         "published fixture must retain its content-addressed identity"
+#     );
+#     let json = format!(
+#         "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+#         out_dir.to_string_lossy()
+#     );
+#     fs::write(fixtures.join("nixpkgs-greet.json"), json).unwrap();
+#     out_dir
+# }
+# #[test]
+# fn offline_build_and_run_use_hangar_cache_with_network_denied() {
+#     let project = Scratch::new("project");
+#     let root = Scratch::new("root");
+#     let fixtures = Scratch::new("fixtures");
+#     let out_dir = Scratch::new("out");
+#     write_runnable_fixture(&fixtures.path, &root.path, &out_dir.path, None);
+# 
+#     let first = jetpack()
+#         .args([
+#             "build",
+#             "greet@nixpkgs",
+#             "--no-color",
+#             "--offline",
+#             "--fixtures",
+#         ])
+#         .arg(&fixtures.path)
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         first.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&first.stderr)
+#     );
+# 
+#     let second = jetpack()
+#         .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_DENY_NETWORK", "1")
+#         .env_remove("JETPACK_FIXTURES")
+#         .output()
+#         .unwrap();
+#     assert!(
+#         second.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&second.stderr)
+#     );
+#     let stderr = String::from_utf8_lossy(&second.stderr);
+#     assert!(stderr.contains("cached"), "stderr: {stderr}");
+#     assert!(!stderr.contains("fixture"), "stderr: {stderr}");
+# 
+#     let run = jetpack()
+#         .args([
+#             "run",
+#             "greet@nixpkgs",
+#             "--no-color",
+#             "--offline",
+#             "--",
+#             "greet",
+#         ])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_DENY_NETWORK", "1")
+#         .env_remove("JETPACK_FIXTURES")
+#         .output()
+#         .unwrap();
+#     assert!(
+#         run.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&run.stderr)
+#     );
+#     let stdout = String::from_utf8_lossy(&run.stdout);
+#     assert!(
+#         stdout.contains("hello from offline cache"),
+#         "stdout: {stdout}"
+#     );
+# }

@@ -1,0 +1,73 @@
+// RFC4231/5869 HMAC+HKDF, reused from Core/crypto/crypto.jet:1300-1317
+// and Core/crypto/expert.jet:559-580@5933a61b2. Single shared Sha256 engine.
+// Borrowed spans; no concatenation allocation; scratch672/744 aligned8 wiped.
+fn rt_crypto_hmac3(key: I64, key_len: I64, left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64) {
+    pad :: scratch + I64{576}
+    inner :: scratch + I64{640}
+    source := key
+    count := key_len
+    if (count > I64{64}) {
+        rt_sha256_parts(key, key_len, I64{1}, I64{0}, inner, scratch)
+        source = inner
+        count = I64{32}
+    }
+    rt_crypto_wipe(pad, I64{64})
+    rt_text_bytes_copy(pad, source, count)
+    i := I64{0}
+    loop {
+        if (i >= I64{64}) -> break
+        rt_text_put(pad + i, rt_text_byte(pad + i).bit_xor(I64{0x36}))
+        i += I64{1}
+    }
+    rt_crypto_hmac_pads3(pad, I64{0}, left, left_len, right, right_len, third, third_len, output, scratch)
+    rt_crypto_wipe(scratch, I64{672})
+}
+// Prepared pads let repeated PRFs reuse their password normalization. A zero
+// outer_pad reuses/toggles the inner pad for ordinary single HMAC calls.
+// scratch672 is disjoint from prepared pads, except the single-call inner pad
+// may occupy scratch576..640 as it always has. Output can alias message input:
+// both inner-message hashing and key-pad reads finish before output is written.
+fn rt_crypto_hmac_pads3(inner_pad: I64, outer_pad: I64, left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64) {
+    inner :: scratch + I64{640}
+    rt_sha256_parts4(inner_pad, I64{64}, left, left_len, right, right_len, third, third_len, inner, scratch)
+    outer := outer_pad
+    if (outer == I64{0}) {
+        outer = inner_pad
+        i := I64{0}
+        loop i < (I64{64}) {
+            rt_text_put(outer + i, rt_text_byte(outer + i).bit_xor(I64{0x36}).bit_xor(I64{0x5c}))
+            i += I64{1}
+        }
+    }
+    rt_sha256_parts(outer, I64{64}, inner, I64{32}, output, scratch)
+}
+fn rt_crypto_hmac(key: I64, key_len: I64, input: I64, length: I64, output: I64, scratch: I64) {
+    rt_crypto_hmac3(key, key_len, input, length, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch)
+}
+// HKDF extract+expand, length0..255*32; zero-length salt is the all-zero default.
+// Output must be disjoint from inputs/scratch; caller scratch744 aligned8.
+fn rt_crypto_hkdf(ikm: I64, ikm_len: I64, salt: I64, salt_len: I64, info: I64, info_len: I64, output: I64, length: I64, scratch: I64) -> Bool {
+    if (length < I64{0} || length > I64{8160} || ikm_len < I64{0} || salt_len < I64{0} || info_len < I64{0}) {
+        rt_crypto_wipe(scratch, I64{744})
+        return false
+    }
+    prk :: scratch + I64{672}
+    previous :: scratch + I64{704}
+    counter :: scratch + I64{736}
+    rt_crypto_hmac(salt, salt_len, ikm, ikm_len, prk, scratch)
+    at := I64{0}
+    previous_len := I64{0}
+    block := I64{1}
+    loop at < length {
+        rt_text_put(counter, block)
+        rt_crypto_hmac3(prk, I64{32}, previous, previous_len, info, info_len, counter, I64{1}, previous, scratch)
+        count := I64{32}
+        if (length - at < count) -> count = length - at
+        rt_text_bytes_copy(output + at, previous, count)
+        at += count
+        previous_len = I64{32}
+        block += I64{1}
+    }
+    rt_crypto_wipe(scratch, I64{744})
+    true
+}

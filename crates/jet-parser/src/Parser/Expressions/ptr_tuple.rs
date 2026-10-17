@@ -104,7 +104,7 @@ impl<'a> Parser<'a> {
     }
 
     /// S73: reject `.0` / `.1` field access before `expect_ident`.
-    pub(super) fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
+    pub(in crate::Parser) fn expect_field_name(&mut self) -> Result<(String, Span), Diagnostic> {
         if matches!(self.peek().kind, TokKind::Int(_, _) | TokKind::Float(..)) {
             let span = self.peek().span;
             self.bump();
@@ -165,10 +165,10 @@ impl<'a> Parser<'a> {
             self.bump();
             return Ok((Syntax::KW_IN.to_string(), span));
         }
-        // U20: `Recipe.copy()` uses the ordinary dot-member form, while `copy`
-        // is also the retired copy keyword (D-SHAPE-COPY1, now `~x`) in value
-        // position. Keep the keyword reserved everywhere else; permit it only
-        // after `.`.
+        // D-COPY-WORD1=A: `.copy()` is an ordinary member call; sema makes it
+        // the built-in copy on a value receiver and an associated call on a
+        // type (`Recipe.copy()`). The bare word `copy` stays
+        // teaching-reserved (E0991) in value position. Permit it only after `.`.
         if matches!(self.peek().kind, TokKind::KwCopy) {
             let span = self.peek().span;
             self.bump();

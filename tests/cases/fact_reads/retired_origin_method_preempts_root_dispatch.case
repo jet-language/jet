@@ -1,0 +1,10 @@
+# HAND-PORT tests/fact_reads.rs:233-249 retired_origin_method_preempts_root_dispatch
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Original exact code count + all matching reports exact what/fix (or same-diagnostic conjunction), no dropped universal predicate.
+fixture: retired_origin_method_preempts_root_dispatch.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0311"] #= 1
+json: stdout doc $.reports[?code="E0105"] #= 0
+json: stdout doc $.reports[?code="E0311"][?what="`.origin()` is retired for tracked values"][?fix="read `value.$origin` in comptime code"] #>= 1

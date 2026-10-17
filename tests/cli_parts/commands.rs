@@ -58,7 +58,9 @@ fn status_renders_each_receipt_verb_without_a_claim_inventory() {
     fs::write(&source, "fn run() { print(\"status\") }\n").unwrap();
     let store = jet::ReceiptStore::ReceiptStore::new(dir.join(".jet/receipts"));
     for verb in ["custom-api", "custom-test"] {
-        let argv = vec![verb.to_string(), "run.jet".to_string()];
+        // The test process's cwd is the checkout, so the recorded argv names
+        // the target absolutely; the receipt identity resolves argv against cwd.
+        let argv = vec![verb.to_string(), source.to_string_lossy().into_owned()];
         store
             .record(verb, &argv, std::slice::from_ref(&source), 0, b"ok", b"")
             .unwrap();
@@ -96,7 +98,7 @@ fn status_never_promotes_stale_receipt_to_proven() {
     fs::write(&source, "fn run() { print(\"status\") }\n").unwrap();
     let receipt_dir = dir.join(".jet/receipts");
     let store = jet::ReceiptStore::ReceiptStore::new(&receipt_dir);
-    let argv = vec!["prove".into(), "run.jet".into()];
+    let argv = vec!["prove".into(), source.to_string_lossy().into_owned()];
     store
         .record(
             "prove",
@@ -409,7 +411,7 @@ fn perl_bind_launders_parse_failure_as_e3208() {
 }
 
 #[test]
-fn ruby_bind_round_trips_datatree_state_timeout_and_cancellation() {
+fn ruby_bind_round_trips_dyn_state_timeout_and_cancellation() {
     if Command::new("ruby").arg("--version").output().is_err() {
         return;
     }
@@ -625,7 +627,7 @@ fn php_bind_launders_parse_failure_as_e3208() {
 }
 
 #[test]
-fn r_bind_round_trips_datatree_state_and_worker_lifecycle() {
+fn r_bind_round_trips_dyn_state_and_worker_lifecycle() {
     if Command::new("Rscript").arg("--version").output().is_err() {
         return;
     }
@@ -1011,7 +1013,7 @@ fn cobol_bind_rejects_unknown_copybook_usage_as_e3208() {
         "missing E3208:\n{stderr}"
     );
     assert!(
-        stderr.contains("unsupported PIC/usage"),
+        stderr.contains("Unsupported PIC/usage"),
         "missing copybook cause:\n{stderr}"
     );
     assert!(
@@ -1121,7 +1123,7 @@ fn retired_emit_rust_flag_teaches_canonical_command() {
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(2), "unexpected stderr:\n{stderr}");
     assert!(stderr.contains("Error [E2102]: `--emit-rust` isn't a flag"));
-    assert!(stderr.contains("Fix: run `jet emit --rust <file.jet>`"));
+    assert!(stderr.contains("Fix: Run `jet emit --rust <file.jet>`"));
 }
 
 /// D-JOBS1=A: `--threads N` caps the compiler on the compiling commands;
@@ -1182,17 +1184,17 @@ fn duplicate_authority_right_is_e2102() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("Error [E2102]"), "{stderr}");
     assert!(
-        stderr.contains("authority right `Net` is both allowed and denied"),
+        stderr.contains("Authority right `Net` is both allowed and denied"),
         "{stderr}"
     );
     assert!(
-        stderr.contains("remove one of `--allow=Net` or `--deny=Net`"),
+        stderr.contains("Remove one of `--allow=Net` or `--deny=Net`"),
         "{stderr}"
     );
 }
 
 /// `--allow` is invocation authority, not a build or artifact flag: it keeps
-/// the JIT and interpreter engines, and the native build still reaches the
+/// the native execution path at every profile, and the build still reaches the
 /// project-owned `.jet/build` when run from a repository subdirectory.
 #[test]
 fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
@@ -1206,8 +1208,7 @@ fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
     )
     .unwrap();
     for (engine, flags) in [
-        ("jit", &["--trace-tiers"][..]),
-        ("interpreter", &["--interpret"][..]),
+        ("default", &[][..]),
         ("aot", &["--release"][..]),
     ] {
         let output = Command::new(jet())
@@ -1221,10 +1222,6 @@ fn allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(output.status.success(), "{engine}: --allow=Time.Wait must run:\n{stderr}");
         assert_eq!(String::from_utf8_lossy(&output.stdout), "waited\n", "{engine}: {stderr}");
-        // Only the resident engines trace tiers; a forced AOT fallback is silent.
-        if engine == "jit" {
-            assert!(stderr.contains("tier1 native"), "--allow must keep the JIT:\n{stderr}");
-        }
     }
 }
 
@@ -1242,7 +1239,10 @@ fn fix_dry_run_does_not_write() {
         .output()
         .unwrap();
     let s = String::from_utf8_lossy(&out.stdout);
-    assert!(s.contains("dry run"), "dry-run should say so:\n{}", s);
+    // Human status narration goes to stderr (OutputAdapter::write_mode_status);
+    // stdout carries only the diff.
+    let status = String::from_utf8_lossy(&out.stderr);
+    assert!(status.contains("dry run"), "dry-run should say so:\n{}", status);
     assert!(s.contains("print"), "diff should show the fix:\n{}", s);
     // The file on disk is unchanged.
     assert_eq!(
@@ -1395,19 +1395,19 @@ fn run() {
         stderr,
         concat!(
             "Error [E0102]: `Iter` has no method `get`\n",
-            "  --> BAD.jet:14:36\n",
+            "  --> BAD.jet:14:37\n",
             "    |\n",
-            " 14 |         rows.push(Row{ name: parts.get(0), count: missing })\n",
-            "    |                                    ^^^\n",
+            " 14 |         &rows.push(Row{ name: parts.get(0), count: missing })\n",
+            "    |                                     ^^^\n",
             " Why: `Iter` is a one-pass source; `get` needs a materialized list, so collection consumes the source and allocates the list\n",
             " Fix: Materialize it first with `.to_list()`; this consumes the source and allocates a list\n",
             "More: jet-lang.dev/e/E0102\n",
             "\n",
             "Error [E0107]: Nothing named `missing` exists here\n",
-            "  --> BAD.jet:14:51\n",
+            "  --> BAD.jet:14:52\n",
             "    |\n",
-            " 14 |         rows.push(Row{ name: parts.get(0), count: missing })\n",
-            "    |                                                   ^^^^^^^\n",
+            " 14 |         &rows.push(Row{ name: parts.get(0), count: missing })\n",
+            "    |                                                    ^^^^^^^\n",
             " Why: A name must be declared before it's used\n",
             " Fix: Declare it first: `missing :: ...`\n",
             "More: jet-lang.dev/e/E0107\n",
@@ -1578,7 +1578,7 @@ fn check_reports_soft_public_lints_without_failing() {
     let dir = isolated_cwd("check_soft_public");
     fs::write(
         dir.join("library.jet"),
-        "pub fn _legacy() -> Int { return 1 }\n",
+        "fn _legacy() -> Int { return 1 }\n",
     )
     .unwrap();
     fs::write(

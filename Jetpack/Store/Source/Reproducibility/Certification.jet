@@ -16,7 +16,7 @@ STORE_REPRO_INDEPENDENT_PREFIX :: prep { "independent-agreeing-v1:" }
 store_repro_report_sequence := 0
 store_repro_certification_sequence := 0
 
-pub fn store_recover_certification_staging_unlocked(roots: HangarRoots) -[FS]> Int StoreError! {
+fn store_recover_certification_staging_unlocked(roots: HangarRoots) -[FS]> Int StoreError! {
     parent :: files.join(roots.hangar_dir(), STORE_REPRO_CERTIFICATION_STAGE_DIR)
     info :: files.stat(parent) ? found -> found ! error -> {
         if store_io_is_not_found(error) -> return Ok(0)
@@ -35,9 +35,9 @@ pub fn store_recover_certification_staging_unlocked(roots: HangarRoots) -[FS]> I
 }
 
 // One fresh private Jetpack root under the Hangar's certification staging.
-pub struct RootWorkspace {
-    pub path: String
-    pub roots: HangarRoots
+struct RootWorkspace {
+    path: String
+    roots: HangarRoots
 
     fn new(roots: HangarRoots, side: String, attempt: Int) -[FS, Env]> RootWorkspace StoreError! {
         hangar :: roots.hangar_dir()
@@ -95,11 +95,11 @@ fn store_repro_copy_nix_cache_configuration(target: HangarRoots, source: HangarR
 // A provider result that has not crossed the Hangar registration boundary.
 // The workspaces stay alive until the caller has promoted `realized`, then
 // the caller calls `release()` (Rust drops the guards).
-pub struct PreparedRealization {
-    pub realized: Realized
-    pub action_key: String?
-    pub attestation: String?
-    workspaces: [RootWorkspace]
+struct PreparedRealization {
+    realized: Realized
+    action_key: String?
+    attestation: String?
+    priv workspaces: [RootWorkspace]
 
     fn release(self) Never! -[FS]> {
         loop workspace in self.workspaces -> workspace.remove()
@@ -109,7 +109,7 @@ pub struct PreparedRealization {
 // Build through the real provider boundary without consulting a shared
 // cache. This is also the seam the normal realization path uses when a
 // writable shared cache would otherwise receive the result.
-pub fn store_realize_uncached(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -[IO, FS, Net, Env, Time, Time.Wait]> Realized RealizeError! {
+fn store_realize_uncached(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest) -[IO, FS, Net, Env, Time, Time.Wait]> Realized RealizeError! {
     if request == {
         .Package(spec, table) -> {
             realized :: provider_realize(&verification, spec, table, ctx) ?? return Err(RealizeError.Provider(err))
@@ -135,7 +135,7 @@ fn store_repro_workspace_ctx(ctx: ProviderCtx, store_dir: String) -> ProviderCtx
 
 // Build one or two fresh roots. A non-source provider result is returned once
 // for the ordinary path; the explicit certification API rejects it.
-pub fn store_build_for_cache(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions, require_built: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> PreparedRealization RealizeError! {
+fn store_build_for_cache(verification: &StoreVerification, roots: HangarRoots, ctx: ProviderCtx, request: RealizeRequest, options: IndependentRootOptions, require_built: Bool) -[IO, FS, Net, Env, Time, Time.Wait]> PreparedRealization RealizeError! {
     attempts :: options.retries + 1
     loop attempt in 0..<attempts {
         final_attempt :: attempt + 1 >= attempts
@@ -193,12 +193,12 @@ pub fn store_build_for_cache(verification: &StoreVerification, roots: HangarRoot
 
 // Two independent builds' registration entries, action keys, and their first
 // difference (`None` when they agree).
-pub struct IndependentComparison {
-    pub left_entry: StoreEntry
-    pub right_entry: StoreEntry
-    pub left_action: String
-    pub right_action: String
-    pub difference: FirstDifference?
+struct IndependentComparison {
+    left_entry: StoreEntry
+    right_entry: StoreEntry
+    left_action: String
+    right_action: String
+    difference: FirstDifference?
 }
 
 fn store_repro_compare_independent(verification: &StoreVerification, left_workspace: RootWorkspace, left: Realized, right_workspace: RootWorkspace, right: Realized) -[FS, Env]> IndependentComparison StoreError! {
@@ -326,12 +326,12 @@ fn store_repro_entry_from_realized(verification: &StoreVerification, roots: Hang
 
 // Certify one closure batch against one snapshot of the existing projection.
 // Batch registration must not re-read every existing record per candidate.
-pub fn store_certify_registrations_unlocked(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) StoreError! -[FS, Env]> {
+fn store_certify_registrations_unlocked(verification: &StoreVerification, roots: HangarRoots, entries: [StoreEntry]) StoreError! -[FS, Env]> {
     existing :: store_list_unlocked(roots)
     loop entry in entries -> store_repro_certify_registration(&verification, roots, entry, entries, None, existing)
 }
 
-pub fn store_certify_registration_unlocked_with_fresh_agreement(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) StoreError! -[FS, Env]> {
+fn store_certify_registration_unlocked_with_fresh_agreement(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, additional: [StoreEntry], action_key: String) StoreError! -[FS, Env]> {
     existing :: store_list_unlocked(roots)
     store_repro_certify_registration(&verification, roots, entry, additional, Val(action_key), existing)
 }
@@ -417,13 +417,13 @@ fn store_repro_compare_registration_entries(verification: &StoreVerification, le
 // Rust `{:?}` of a `Vec<String>`: `["a", "b"]`.
 fn store_repro_debug_list(values: [String]) -> String Never! {
     quoted := [String]{}
-    loop value in values -> &quoted.push(json.to_string(DataTree.Text(value)))
+    loop value in values -> &quoted.push(json.to_string(Dyn.Text(value)))
     "[{quoted.join(", ")}]"
 }
 
-pub struct NixActionOutput {
-    pub digest: String
-    pub path: String
+struct NixActionOutput {
+    digest: String
+    path: String
 }
 
 // `nix.output.<name>` producer facts paired with their recorded digests.
@@ -446,7 +446,7 @@ fn store_repro_nix_action_outputs(entry: StoreEntry, producer: ProducerRecord) -
 
 // A durable report blocks trusted cache use for the action until a fresh,
 // independently agreeing certification has replaced the action explicitly.
-pub fn store_reproducibility_blocked(roots: HangarRoots, action_key: String) -[FS]> Bool StoreError! {
+fn store_reproducibility_blocked(roots: HangarRoots, action_key: String) -[FS]> Bool StoreError! {
     directory :: store_repro_report_directory(roots, false) ?? return Ok(false)
     info :: files.stat(store_repro_report_path(directory, action_key)) ? found -> found ! error -> {
         if store_io_is_not_found(error) -> return Ok(false)
@@ -458,7 +458,7 @@ pub fn store_reproducibility_blocked(roots: HangarRoots, action_key: String) -[F
 
 // Clear divergence evidence only after the complete promotion boundary has
 // succeeded, so a killed worker or later publication failure stays fail-closed.
-pub fn store_clear_reproducibility_report(roots: HangarRoots, action_key: String) StoreError! -[FS, Env, Time]> {
+fn store_clear_reproducibility_report(roots: HangarRoots, action_key: String) StoreError! -[FS, Env, Time]> {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     store_repro_remove_report(roots, action_key)
 }
@@ -476,45 +476,45 @@ fn store_repro_remove_report(roots: HangarRoots, action_key: String) StoreError!
 }
 
 fn store_repro_report_json(action_key: String, left_action_key: String, right_action_key: String, left: StoreEntry, right: StoreEntry, left_producer: ProducerRecord, right_producer: ProducerRecord, difference: FirstDifference) -> String Never! {
-    report :: DataTree.Object([String: DataTree]{
-        "action_key": DataTree.Text(action_key),
-        "first_difference": DataTree.Object([String: DataTree]{
-            "kind": DataTree.Text(difference.kind.label()),
-            "left": DataTree.Text(difference.left),
-            "path": DataTree.Text(difference.path),
-            "right": DataTree.Text(difference.right),
+    report :: Dyn.Object([String: Dyn]{
+        "action_key": Dyn.Text(action_key),
+        "first_difference": Dyn.Object([String: Dyn]{
+            "kind": Dyn.Text(difference.kind.label()),
+            "left": Dyn.Text(difference.left),
+            "path": Dyn.Text(difference.path),
+            "right": Dyn.Text(difference.right),
         }),
         "left": store_repro_side_json(left, left_producer, left_action_key),
-        "producer_action": DataTree.Object([String: DataTree]{
-            "left_action_key": DataTree.Text(left_action_key),
-            "left_provider": DataTree.Text(left_producer.provider),
-            "left_source_digest": DataTree.Text(left_producer.source_digest),
-            "left_source": DataTree.Text(left_producer.immutable_source),
-            "right_action_key": DataTree.Text(right_action_key),
-            "right_provider": DataTree.Text(right_producer.provider),
-            "right_source_digest": DataTree.Text(right_producer.source_digest),
-            "right_source": DataTree.Text(right_producer.immutable_source),
+        "producer_action": Dyn.Object([String: Dyn]{
+            "left_action_key": Dyn.Text(left_action_key),
+            "left_provider": Dyn.Text(left_producer.provider),
+            "left_source_digest": Dyn.Text(left_producer.source_digest),
+            "left_source": Dyn.Text(left_producer.immutable_source),
+            "right_action_key": Dyn.Text(right_action_key),
+            "right_provider": Dyn.Text(right_producer.provider),
+            "right_source_digest": Dyn.Text(right_producer.source_digest),
+            "right_source": Dyn.Text(right_producer.immutable_source),
         }),
         "right": store_repro_side_json(right, right_producer, right_action_key),
-        "schema": DataTree.Text(STORE_REPRO_REPORT_SCHEMA),
-        "status": DataTree.Text(STORE_REPRO_REPORT_STATUS),
+        "schema": Dyn.Text(STORE_REPRO_REPORT_SCHEMA),
+        "status": Dyn.Text(STORE_REPRO_REPORT_STATUS),
     })
     "{json.canonical(report) ?? panic("value is not canonical JSON")}\n"
 }
 
-fn store_repro_side_json(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> DataTree Never! {
-    DataTree.Object([String: DataTree]{
-        "action_key": DataTree.Text(action_key),
-        "capabilities": DataTree.Text(producer.facts.get("build.capabilities") ?? ""),
-        "entry": DataTree.Text(store_repro_report_entry_id(entry, action_key)),
-        "output_hash": DataTree.Text(entry.envelope.output_hash),
-        "platform": DataTree.Text(entry.envelope.platform),
+fn store_repro_side_json(entry: StoreEntry, producer: ProducerRecord, action_key: String) -> Dyn Never! {
+    Dyn.Object([String: Dyn]{
+        "action_key": Dyn.Text(action_key),
+        "capabilities": Dyn.Text(producer.facts.get("build.capabilities") ?? ""),
+        "entry": Dyn.Text(store_repro_report_entry_id(entry, action_key)),
+        "output_hash": Dyn.Text(entry.envelope.output_hash),
+        "platform": Dyn.Text(entry.envelope.platform),
         "producer_facts": store_repro_text_object(producer.facts),
-        "provenance": DataTree.Text(entry.envelope.provenance),
+        "provenance": Dyn.Text(entry.envelope.provenance),
         "replay_facts": store_repro_text_object(producer.plan.facts()),
-        "source_fingerprint": DataTree.Text(entry.cache_identity.source_fingerprint),
-        "recipe_fingerprint": DataTree.Text(entry.cache_identity.recipe_fingerprint),
-        "policy_fingerprint": DataTree.Text(entry.cache_identity.policy_fingerprint),
+        "source_fingerprint": Dyn.Text(entry.cache_identity.source_fingerprint),
+        "recipe_fingerprint": Dyn.Text(entry.cache_identity.recipe_fingerprint),
+        "policy_fingerprint": Dyn.Text(entry.cache_identity.policy_fingerprint),
     })
 }
 
@@ -597,7 +597,7 @@ fn store_repro_report_path(directory: String, action_key: String) -> String Neve
 
 // A path-safe evidence file stem: a canonical `sha256-<64 hex>` action key as
 // is, anything else hashed into that shape.
-pub fn store_repro_report_file_stem(action_key: String) -> String Never! {
+fn store_repro_report_file_stem(action_key: String) -> String Never! {
     raw :: action_key.bytes()
     valid := raw.len() == 71 && action_key.starts_with("sha256-")
     if valid {

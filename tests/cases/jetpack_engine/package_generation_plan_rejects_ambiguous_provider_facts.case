@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:1724-1750 package_generation_plan_rejects_ambiguous_provider_facts
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: package_generation_plan_rejects_ambiguous_provider_facts.fixture
+env: NO_COLOR=1
+mkdir: project
+mkdir: project/jet-root
+step: jetpack profile plan dev --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 2
+stderr: ~ "E1335" # original contains predicate
+stderr: ~ "ambiguous provider fact" # original contains predicate
+stderr: ~ "unresolved inference" # original contains predicate
+

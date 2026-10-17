@@ -7,7 +7,7 @@ fn pkg_bad_allocator(detail: String) -> PackageParseError Never! {
     PackageParseError.BadAllocatorPolicy{detail: detail}
 }
 
-pub fn pkg_parse_program_allocator(value: String) -> MIRAllocatorPolicy PackageParseError! {
+fn pkg_parse_program_allocator(value: String) -> MIRAllocatorPolicy PackageParseError! {
     compact :: pkg_without_whitespace(value)
     if compact == "mem.Heap" -> return Ok(MIRAllocatorPolicy.HostedDefault)
     args :: pkg_strip_wrapped(compact, "mem.Counting.over(", ")") ?? return Err(pkg_bad_allocator("`allocator:` must be `mem.Heap` or `mem.Counting.over(mem.Heap, cap: <bytes>)`"))
@@ -49,7 +49,7 @@ fn pkg_parse_allocator_bytes(value: String) -> Int PackageParseError! {
 PKG_MAX_U64_IN_INT :: prep { 9223372036854775807 }
 
 // `str::parse::<u64>()`: an optional `+`, then one or more ASCII digits.
-pub fn pkg_parse_u64(text: String) -> Int? Never! {
+fn pkg_parse_u64(text: String) -> Int? Never! {
     raw :: text.bytes()
     start :: if raw.len() > 0 && Int.from_u8(raw[0]) == 43 -> 1 else -> 0
     if start >= raw.len() -> return None
@@ -65,7 +65,7 @@ pub fn pkg_parse_u64(text: String) -> Int? Never! {
 
 // `str::parse::<i64>()`: an optional sign, then one or more ASCII digits,
 // within `i64::MIN..=i64::MAX` (a negative magnitude may reach 2^63).
-pub fn pkg_parse_i64(text: String) -> Int? Never! {
+fn pkg_parse_i64(text: String) -> Int? Never! {
     raw :: text.bytes()
     if raw.len() == 0 || Int.from_u8(raw[0]) != 45 -> return pkg_parse_u64(text)
     if raw.len() == 1 -> return None
@@ -80,7 +80,7 @@ pub fn pkg_parse_i64(text: String) -> Int? Never! {
 }
 
 // The text with every Unicode whitespace scalar removed.
-pub fn pkg_without_whitespace(value: String) -> String Never! {
+fn pkg_without_whitespace(value: String) -> String Never! {
     raw :: value.bytes()
     out := [U8]{}
     index := 0

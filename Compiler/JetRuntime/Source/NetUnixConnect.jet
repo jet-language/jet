@@ -1,0 +1,92 @@
+// NetHTTP.rs:3105-3158: preserve blocking Unix connect in a detached worker.
+// The caller's deadline/cancellation never interrupts or joins that worker;
+// if abandoned, its last job reference closes the completed native fd.
+// Job48: atomic refs0/done8, owned E4 path16, owned FD72*24, status32,
+// owned ParkSlot40. Only the worker writes result fields before release done.
+fn rt_net_unix_connect_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+fn net_unix_connect_job_drop(job: I64) {
+    if (sync_add(job, I64{-1}) != I64{1}) -> return
+    jet_rt_string_drop(net_word(job, I64{16}))
+    jet_fd_drop_raw(net_word(job, I64{24}))
+    sync_park_drop(net_word(job, I64{40}))
+    jet_rt_free(job, I64{48}, I64{8})
+}
+#Export(c) fn jet_rt_net_unix_connect_worker(job: I64) -> I64 {
+    path :: net_word(job, I64{16})
+    status := net_unix_path_status(path)
+    state := I64{0}
+    if (status == I64{0}) {
+        // CLOEXEC without NONBLOCK: this detached worker alone may block.
+        descriptor :: host_call(I64{41}, I64{1}, I64{524289}, I64{0})
+        if (descriptor < I64{0}) { status = descriptor } else {
+            state = jet_fd_adopt_unbuffered_raw(descriptor, I64{0})
+            scratch :: jet_rt_alloc(I64{32}, I64{8})
+            if (jet_socket_unix_connect_raw(state, path, scratch) < I64{0}) {
+                status = -net_word(scratch, I64{8})
+            } else {
+                // std switches to nonblocking only after successful connect.
+                status = host_call(I64{72}, descriptor, I64{4}, I64{2048})
+            }
+            jet_rt_free(scratch, I64{32}, I64{8})
+            if (status < I64{0}) {
+                jet_fd_drop_raw(state)
+                state = I64{0}
+            }
+        }
+    }
+    net_put(job, I64{24}, state)
+    net_put(job, I64{32}, status)
+    sync_store(job + I64{8}, I64{1})
+    sync_park_wake(net_word(job, I64{40}))
+    net_unix_connect_job_drop(job)
+    I64{0}
+}
+#Export(c) fn jet_net_unix_connect_deadline(path: I64, deadline: I64, output: I64, error: I64) -> I64 {
+    operation :: rt_static_text("unix connect")
+    // Duration's provider word is untagged nanoseconds (not an exact Int).
+    milliseconds :: deadline / I64{1000000}
+    if (milliseconds < I64{0}) -> return net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, I64{0}, jet_rt_string_clone(rt_static_text("network timeout must be non-negative")), I64{0}, error)
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    save :: jet_rt_alloc(I64{16}, I64{8})
+    net_route_deadline_push(milliseconds, save)
+    job :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(job, I64{48})
+    net_put(job, I64{0}, I64{2})
+    net_put(job, I64{16}, jet_rt_string_clone(path))
+    net_put(job, I64{40}, sync_park_new())
+    worker :: thread_spawn(rt_net_unix_connect_worker_address(), job)
+    result := I64{0}
+    if (worker < I64{0}) {
+        _ := net_route_errno(operation, path, -worker, error)
+        net_unix_connect_job_drop(job)
+    } else {
+        _ := thread_detach(worker)
+        wait_kind :: host_net_wait_kind()
+        loop {
+            // The seed receives a completed result before entering a wait:
+            // neither a zero deadline nor cancellation replaces ready success.
+            if (sync_load(job + I64{8}) != I64{0}) {
+                status :: net_word(job, I64{32})
+                if (status == I64{0}) {
+                    net_put(output, I64{0}, jet_socket_stream_from_fd_raw(net_word(job, I64{24})))
+                    net_put(job, I64{24}, I64{0})
+                    result = I64{1}
+                } else if (status == HOST_UNIX_PATH_NUL || status == HOST_UNIX_PATH_TOO_LONG) {
+                    message :: if (status == HOST_UNIX_PATH_NUL) -> rt_static_text(" failed: paths must not contain interior null bytes") else -> rt_static_text(" failed: path must be shorter than SUN_LEN")
+                    _ := net_route_fail_take(NET_ERROR_INVALID_INPUT, operation, path, net_route_message(operation, message), I64{0}, error)
+                } else { _ := net_route_errno(operation, path, -status, error) }
+                break
+            }
+            if (scheduler_yield(wait_kind, net_word(job, I64{40}), I64{5000000}) != I64{0}) {
+                _ := net_route_wait_stop(operation, error)
+                break
+            }
+        }
+        jet_rt_string_drop(wait_kind)
+    }
+    net_unix_connect_job_drop(job)
+    jet_ctx_pop_deadline(save)
+    jet_rt_free(save, I64{16}, I64{8})
+    result
+}

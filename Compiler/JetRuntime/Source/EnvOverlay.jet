@@ -1,0 +1,303 @@
+// D-ENV-MUTATE1 uses the canonical native-private fieldless EnvError handle.
+// CoreEnumPayloadRows orders InvalidName, InvalidValue, NonUnicode; the checked
+// record marshaller supplies those same variant indices. EncodingABI owns the
+// eight-byte tag carrier shared by EnvError's existing clone/drop/render paths.
+fn env_overlay_error_new(kind: I64) -> I64 {
+    value :: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    encoding_store(value + ENCODING_ENUM_TAG, kind)
+    value
+}
+
+#Export(c) fn jet_rt_record_new_env_error_invalid_name() -> I64 {
+    env_overlay_error_new(I64{0})
+}
+
+#Export(c) fn jet_rt_record_new_env_error_invalid_value() -> I64 {
+    env_overlay_error_new(I64{1})
+}
+
+#Export(c) fn jet_rt_record_new_env_error_non_unicode() -> I64 {
+    env_overlay_error_new(I64{2})
+}
+
+#Export(c) fn jet_rt_record_tag_env_error(value: I64) -> I64 {
+    encoding_word(value + ENCODING_ENUM_TAG)
+}
+
+// One logical native environment cell, distinct from the immutable boot index.
+// Root40: mutex, seeded, rows, length, capacity. Row40: key bytes/length,
+// value bytes/length, owned allocation capacity (zero means borrowed startup
+// storage). All row access is under the same mutex. Readers copy rather than
+// lend cell bytes, so replacement inputs cannot alias a cell's owned buffer.
+// Mutation never writes libc environ or the immutable startup rows.
+env_overlay_root := I64{0}
+
+// runtime-init: 4
+#Export(c) fn jet_rt_env_overlay_init() {
+    if (env_overlay_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{40}, I64{8})
+    index := I64{0}
+    loop index < (I64{5}) {
+        encoding_store(root + index * I64{8}, I64{0})
+        index += I64{1}
+    }
+    env_overlay_root = root
+}
+
+fn env_overlay_equal(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {
+    if (left_length != right_length) -> return false
+    index := I64{0}
+    loop index < left_length {
+        if (rt_text_byte(left + index) != rt_text_byte(right + index)) -> return false
+        index += I64{1}
+    }
+    true
+}
+
+fn env_overlay_find(key: I64, length: I64) -> I64 {
+    rows :: encoding_word(env_overlay_root + I64{16})
+    count :: encoding_word(env_overlay_root + I64{24})
+    index := I64{0}
+    loop index < count {
+        row :: rows + index * I64{40}
+        if env_overlay_equal(key, length, encoding_word(row), encoding_word(row + I64{8})) -> return index
+        index += I64{1}
+    }
+    I64{-1}
+}
+
+fn env_overlay_row_release(row: I64) {
+    owned :: encoding_word(row + I64{32})
+    if (owned != I64{0}) -> jet_rt_free(encoding_word(row), owned, I64{1})
+}
+
+fn env_overlay_compact_at(index: I64) {
+    rows :: encoding_word(env_overlay_root + I64{16})
+    count :: encoding_word(env_overlay_root + I64{24})
+    cursor := index
+    loop cursor < (count - I64{1}) {
+        rt_text_bytes_copy(rows + cursor * I64{40}, rows + (cursor + I64{1}) * I64{40}, I64{40})
+        cursor += I64{1}
+    }
+    encoding_store(env_overlay_root + I64{24}, count - I64{1})
+}
+
+fn env_overlay_remove_at(index: I64) {
+    rows :: encoding_word(env_overlay_root + I64{16})
+    env_overlay_row_release(rows + index * I64{40})
+    env_overlay_compact_at(index)
+}
+
+// Failure unlocks BEFORE the canonical layout fault. The native caller must
+// transfer its actual captured Stop before decoding any result/output carrier;
+// private route activation is not permitted without that checked stop edge.
+fn env_overlay_layout_fault(size: I64, align: I64) {
+    sync_mutex_unlock(env_overlay_root)
+    _ := jet_rt_alloc(size, align)
+}
+
+fn env_overlay_reserve(count: I64) -> Bool {
+    capacity :: encoding_word(env_overlay_root + I64{32})
+    if (count <= capacity) -> return true
+    limit :: I64{9223372036854775807} /% I64{40}
+    if (count > limit) {
+        env_overlay_layout_fault(I64{-1}, I64{8})
+        return false
+    }
+    next_capacity :: if (capacity > limit /% I64{2}) -> limit else -> if (capacity == I64{0}) -> count else -> if (capacity * I64{2} < count) -> count else -> capacity * I64{2}
+    rows :: jet_rt_alloc(next_capacity * I64{40}, I64{8})
+    old_rows :: encoding_word(env_overlay_root + I64{16})
+    length :: encoding_word(env_overlay_root + I64{24})
+    rt_text_bytes_copy(rows, old_rows, length * I64{40})
+    if (capacity != I64{0}) -> jet_rt_free(old_rows, capacity * I64{40}, I64{8})
+    encoding_store(env_overlay_root + I64{16}, rows)
+    encoding_store(env_overlay_root + I64{32}, next_capacity)
+    true
+}
+
+fn env_overlay_row_store(row: I64, key: I64, key_length: I64, value: I64, value_length: I64, owned: I64) {
+    encoding_store(row, key)
+    encoding_store(row + I64{8}, key_length)
+    encoding_store(row + I64{16}, value)
+    encoding_store(row + I64{24}, value_length)
+    encoding_store(row + I64{32}, owned)
+}
+
+fn env_overlay_begin() -> Bool {
+    host_arguments_require()
+    sync_mutex_lock(env_overlay_root)
+    if (encoding_word(env_overlay_root + I64{8}) != I64{0}) -> return true
+    if !env_overlay_reserve(host_env_length) -> return false
+    index := I64{0}
+    loop index < host_env_length {
+        startup :: host_env_rows + index * I64{24}
+        key :: encoding_word(startup)
+        key_length :: encoding_word(startup + I64{8})
+        value :: key + encoding_word(startup + I64{16})
+        previous :: env_overlay_find(key, key_length)
+        if (previous >= I64{0}) -> env_overlay_remove_at(previous)
+        length :: encoding_word(env_overlay_root + I64{24})
+        row :: encoding_word(env_overlay_root + I64{16}) + length * I64{40}
+        env_overlay_row_store(row, key, key_length, value, host_startup_byte_length(value), I64{0})
+        encoding_store(env_overlay_root + I64{24}, length + I64{1})
+        index += I64{1}
+    }
+    encoding_store(env_overlay_root + I64{8}, I64{1})
+    true
+}
+
+fn env_overlay_name_valid(name: I64) -> Bool {
+    length :: rt_text_len(name)
+    if (length == I64{0}) -> return false
+    data :: rt_text_data(name)
+    index := I64{0}
+    loop index < length {
+        byte :: rt_text_byte(data + index)
+        if (byte == I64{0} || byte == I64{61}) -> return false
+        index += I64{1}
+    }
+    true
+}
+
+fn env_overlay_value_valid(value: I64) -> Bool {
+    length :: rt_text_len(value)
+    data :: rt_text_data(value)
+    index := I64{0}
+    loop index < length {
+        if (rt_text_byte(data + index) == I64{0}) -> return false
+        index += I64{1}
+    }
+    true
+}
+
+// Real Unit/EnvError corridor: tag1 succeeds without a Unit payload; tag0
+// transfers the owned enum through error_out. Captured Stop is a DIFFERENT
+// control transfer and must never be interpreted as an EnvError.
+fn env_overlay_try_set(name: I64, value: I64, error_out: I64) -> I64 {
+    encoding_store(error_out, I64{0})
+    if !env_overlay_name_valid(name) {
+        encoding_store(error_out, jet_rt_record_new_env_error_invalid_name())
+        return I64{0}
+    }
+    if !env_overlay_value_valid(value) {
+        encoding_store(error_out, jet_rt_record_new_env_error_invalid_value())
+        return I64{0}
+    }
+    if !env_overlay_begin() -> return I64{0}
+    key_length :: rt_text_len(name)
+    value_length :: rt_text_len(value)
+    if (value_length > I64{9223372036854775807} - key_length) {
+        env_overlay_layout_fault(I64{-1}, I64{1})
+        return I64{0}
+    }
+    length :: encoding_word(env_overlay_root + I64{24})
+    previous :: env_overlay_find(rt_text_data(name), key_length)
+    wanted :: if (previous >= I64{0}) -> length else -> length + I64{1}
+    if !env_overlay_reserve(wanted) -> return I64{0}
+    bytes :: key_length + value_length
+    storage := I64{0}
+    owned := bytes
+    if (previous >= I64{0}) {
+        old_row :: encoding_word(env_overlay_root + I64{16}) + previous * I64{40}
+        capacity :: encoding_word(old_row + I64{32})
+        if (capacity != I64{0} && capacity >= bytes) {
+            storage = encoding_word(old_row)
+            owned = capacity
+        }
+    }
+    if {
+        storage == (I64{0}) -> {
+            storage = jet_rt_alloc(bytes, I64{1})
+            rt_text_bytes_copy(storage, rt_text_data(name), key_length)
+            if (previous >= I64{0}) -> env_overlay_remove_at(previous)
+        }
+        else -> {
+            // Keep the owned key and allocation capacity; only the new value
+            // needs copying. Rotate the updated row LAST without freeing it.
+            env_overlay_compact_at(previous)
+        }
+    }
+    rt_text_bytes_copy(storage + key_length, rt_text_data(value), value_length)
+    appended :: encoding_word(env_overlay_root + I64{24})
+    row :: encoding_word(env_overlay_root + I64{16}) + appended * I64{40}
+    env_overlay_row_store(row, storage, key_length, storage + key_length, value_length, owned)
+    encoding_store(env_overlay_root + I64{24}, appended + I64{1})
+    sync_mutex_unlock(env_overlay_root)
+    I64{1}
+}
+
+fn env_overlay_try_remove(name: I64, removed_out: I64, error_out: I64) -> I64 {
+    encoding_store(error_out, I64{0})
+    if !env_overlay_name_valid(name) {
+        encoding_store(error_out, jet_rt_record_new_env_error_invalid_name())
+        return I64{0}
+    }
+    if !env_overlay_begin() -> return I64{0}
+    index :: env_overlay_find(rt_text_data(name), rt_text_len(name))
+    removed :: index >= I64{0}
+    if removed -> env_overlay_remove_at(index)
+    encoding_store(removed_out, if removed -> I64{1} else -> I64{0})
+    sync_mutex_unlock(env_overlay_root)
+    I64{1}
+}
+
+fn env_overlay_contains(name: I64) -> Bool {
+    if !env_overlay_begin() -> return false
+    present :: env_overlay_find(rt_text_data(name), rt_text_len(name)) >= I64{0}
+    sync_mutex_unlock(env_overlay_root)
+    present
+}
+
+// Copy raw value bytes, not a lossy Text or a borrowed pointer into mutable
+// storage. Missing returns length -1; present empty returns length0/data0.
+fn env_overlay_value_bytes(name: I64, data_out: I64) -> I64 {
+    encoding_store(data_out, I64{0})
+    if !env_overlay_begin() -> return I64{-1}
+    index :: env_overlay_find(rt_text_data(name), rt_text_len(name))
+    if (index < I64{0}) {
+        sync_mutex_unlock(env_overlay_root)
+        return I64{-1}
+    }
+    row :: encoding_word(env_overlay_root + I64{16}) + index * I64{40}
+    length :: encoding_word(row + I64{24})
+    bytes :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length, I64{1})
+    rt_text_bytes_copy(bytes, encoding_word(row + I64{16}), length)
+    encoding_store(data_out, bytes)
+    sync_mutex_unlock(env_overlay_root)
+    length
+}
+
+// Internal owned raw snapshot uses the SAME Row40 geometry. It is not a
+// guessed public tuple/Result ABI; the canonical alternating U8 columns adapter
+// must consume/drop this owner once after its approved layout is instantiated.
+fn env_overlay_snapshot(rows_out: I64) -> I64 {
+    encoding_store(rows_out, I64{0})
+    if !env_overlay_begin() -> return I64{0}
+    length :: encoding_word(env_overlay_root + I64{24})
+    rows :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{40}, I64{8})
+    source :: encoding_word(env_overlay_root + I64{16})
+    index := I64{0}
+    loop index < length {
+        row :: source + index * I64{40}
+        key_length :: encoding_word(row + I64{8})
+        value_length :: encoding_word(row + I64{24})
+        bytes :: key_length + value_length
+        storage :: jet_rt_alloc(bytes, I64{1})
+        rt_text_bytes_copy(storage, encoding_word(row), key_length)
+        rt_text_bytes_copy(storage + key_length, encoding_word(row + I64{16}), value_length)
+        env_overlay_row_store(rows + index * I64{40}, storage, key_length, storage + key_length, value_length, bytes)
+        index += I64{1}
+    }
+    encoding_store(rows_out, rows)
+    sync_mutex_unlock(env_overlay_root)
+    length
+}
+
+fn env_overlay_snapshot_drop(rows: I64, length: I64) {
+    index := I64{0}
+    loop index < length {
+        env_overlay_row_release(rows + index * I64{40})
+        index += I64{1}
+    }
+    if (length != I64{0}) -> jet_rt_free(rows, length * I64{40}, I64{8})
+}

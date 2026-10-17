@@ -1,0 +1,31 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {
+    limits :: encoding.EncodingLimits.safe()
+    output :: files.create("{work}/events.json") ?? panic("create")
+    writer :: json.writer(^output, limits, false) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("write")
+    writer.write(encoding.DataEvent.Key("message")) ?? panic("write")
+    writer.write(encoding.DataEvent.Text("hi ☺")) ?? panic("write")
+    writer.write(encoding.DataEvent.Key("values")) ?? panic("write")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("write")
+    writer.write(encoding.DataEvent.Int(7)) ?? panic("write")
+    writer.write(encoding.DataEvent.Bool(true)) ?? panic("write")
+    writer.write(encoding.DataEvent.Null) ?? panic("write")
+    writer.write(encoding.DataEvent.ArrayEnd) ?? panic("write")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("write")
+    writer.finish() ?? panic("finish")
+    writer.finish() ?? panic("finish")
+
+    input :: files.open("{work}/events.json") ?? panic("open")
+    reader :: json.reader(^input, encoding.EncodingLimits.safe()) ?? panic("reader")
+    count := 0
+    loop count < 11 {
+        maybe_event :: reader.next() ?? panic("next")
+        if maybe_event == None { print("eof") } else { print("event") }
+        count += 1
+    }
+}

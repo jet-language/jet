@@ -16,7 +16,7 @@ TRUST_BOOTSTRAP_MAX_BYTES :: prep { 4096 }
 
 // Trusted Unix time: production reads the wall clock (not monotonic
 // `time.instant()`), while tests fix a time.
-pub enum TrustedClock {
+enum TrustedClock {
     System
     Fixed(Int)
 
@@ -37,18 +37,18 @@ fn trust_os_random_bytes(count: Int) -[Rand]> [U8] TrustRootError! {
     }
 }
 
-pub struct TrustSignature {
-    pub key_id: String
-    pub algorithm: String
-    pub sig_hex: String
+struct TrustSignature {
+    key_id: String
+    algorithm: String
+    sig_hex: String
 }
 
 // An HMAC-SHA256 role signing key. The secret never enters public
 // metadata; only `key_id` appears on the wire.
-pub struct TrustKey {
-    pub key_id: String
-    pub algorithm: String
-    pub secret: [U8]
+struct TrustKey {
+    key_id: String
+    algorithm: String
+    secret: [U8]
 
     // Deterministic drill material: the domain-tagged label, padded or
     // truncated to 32 bytes.
@@ -87,15 +87,15 @@ fn trust_key_id_for(secret: [U8]) -> String Never! {
 // SLSA-shaped facts that make one cache result usable. `action` is the
 // versioned producer/action digest; the live cache binding folds the
 // canonical realized closure into it before this receipt is signed.
-pub struct CacheProvenance {
-    pub reference: String
-    pub source: String
-    pub builder: String
-    pub action: String
-    pub output: String
-    pub platform: String
-    pub sandbox: String
-    pub policy: String
+struct CacheProvenance {
+    reference: String
+    source: String
+    builder: String
+    action: String
+    output: String
+    platform: String
+    sandbox: String
+    policy: String
 
     fn validate(self) TrustRootError! {
         fields :: [TrustProvenanceField]{
@@ -126,14 +126,14 @@ struct TrustProvenanceField {
 
 // A signed, time-bounded cache admission receipt. `witness` names the
 // producing process or service and is part of the signed payload.
-pub struct CacheReceipt {
-    pub role: String
-    pub witness: String
-    pub provenance: CacheProvenance
-    pub version: Int
-    pub issued_unix: Int
-    pub expires_unix: Int
-    pub signature: TrustSignature
+struct CacheReceipt {
+    role: String
+    witness: String
+    provenance: CacheProvenance
+    version: Int
+    issued_unix: Int
+    expires_unix: Int
+    signature: TrustSignature
 
     // Issue for the current producer; CI and local publication share this
     // path and therefore one cache transport and verifier.
@@ -196,7 +196,7 @@ fn trust_has_control(value: String) -> Bool Never! {
 
 // The witness recorded in new receipts: an explicit `JET_RECEIPT_WITNESS`,
 // else `ci` under CI, else the local account.
-pub fn trust_current_receipt_witness() -[Env]> String TrustRootError! {
+fn trust_current_receipt_witness() -[Env]> String TrustRootError! {
     witness :: if {
         sys.get(TRUST_RECEIPT_WITNESS_ENV) != None -> sys.get(TRUST_RECEIPT_WITNESS_ENV) ?? ""
         sys.get("CI") != None -> "ci"
@@ -211,7 +211,7 @@ fn trust_validate_receipt_witness(witness: String) TrustRootError! {
 }
 
 // The stable host-owned identity of one cache builder input domain.
-pub fn trust_cache_builder_identity(provider: String, immutable_source: String, source_digest: String) -> String Never! {
+fn trust_cache_builder_identity(provider: String, immutable_source: String, source_digest: String) -> String Never! {
     canonical := "jet-cache-builder-v1\n"
     values :: [String]{provider, immutable_source, source_digest}
     loop value in values -> canonical = "{canonical}{value.bytes().len()}:{value}\n"
@@ -273,7 +273,7 @@ fn trust_read_cache_key_pin(path: String, role: String) -[FS]> String TrustRootE
 
 // Pin a cache role's signing identity on first use. Existing pins are
 // immutable; rotating the key needs an explicit host-side rebind.
-pub fn trust_pin_cache_key(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
+fn trust_pin_cache_key(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
     path :: trust_cache_key_pin_path(roots_dir, role)
     trust_ensure_trust_dir(roots_dir)
     expected :: trust_cache_key_fingerprint(key)
@@ -295,7 +295,7 @@ pub fn trust_pin_cache_key(roots_dir: String, role: String, key: TrustKey) Trust
 }
 
 // Verify a cache role against its existing host pin.
-pub fn trust_verify_pinned_cache_key(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
+fn trust_verify_pinned_cache_key(roots_dir: String, role: String, key: TrustKey) TrustRootError! -[FS]> {
     path :: trust_cache_key_pin_path(roots_dir, role)
     expected :: trust_cache_key_fingerprint(key)
     actual :: trust_read_cache_key_pin(path, role)
@@ -338,7 +338,7 @@ fn trust_state_body(lines: [String]) -> String Never! {
 }
 
 // Revoke one builder identity in host-owned trust state.
-pub fn trust_revoke_cache_builder(roots_dir: String, builder: String) TrustRootError! -[FS]> {
+fn trust_revoke_cache_builder(roots_dir: String, builder: String) TrustRootError! -[FS]> {
     if trust_blank_or_multiline(builder) -> return Err(TrustRootError.CacheReceiptInvalid{detail: "cache builder identity is empty or contains a newline"})
     dir :: trust_ensure_trust_dir(roots_dir)
     path :: trust_revoked_builders_path(roots_dir)
@@ -347,7 +347,7 @@ pub fn trust_revoke_cache_builder(roots_dir: String, builder: String) TrustRootE
     trust_atomic_write(files.join(dir, "revoked-cache-builders"), trust_state_body(builders).bytes())
 }
 
-pub fn trust_is_cache_builder_revoked(roots_dir: String, builder: String) -[FS]> Bool TrustRootError! {
+fn trust_is_cache_builder_revoked(roots_dir: String, builder: String) -[FS]> Bool TrustRootError! {
     if trust_blank_or_multiline(builder) -> return Err(TrustRootError.CacheReceiptInvalid{detail: "cache builder identity is empty or contains a newline"})
     lines :: trust_read_state_lines(trust_revoked_builders_path(roots_dir), "revoked cache-builder list is not a regular file") ?? return Ok(false)
     Ok(lines.contains(builder))
@@ -376,22 +376,22 @@ fn trust_is_cache_identity_allowed(roots_dir: String, directory: String, role: S
 
 // Add one immutable builder identity to a shared cache role's allowlist.
 // The first publication is the explicit write-grant boundary.
-pub fn trust_allow_cache_builder(roots_dir: String, role: String, builder: String) TrustRootError! -[FS]> {
+fn trust_allow_cache_builder(roots_dir: String, role: String, builder: String) TrustRootError! -[FS]> {
     trust_allow_cache_identity(roots_dir, "cache-builders", role, builder, "cache builder")
 }
 
-pub fn trust_is_cache_builder_allowed(roots_dir: String, role: String, builder: String) -[FS]> Bool TrustRootError! {
+fn trust_is_cache_builder_allowed(roots_dir: String, role: String, builder: String) -[FS]> Bool TrustRootError! {
     trust_is_cache_identity_allowed(roots_dir, "cache-builders", role, builder, "cache builder")
 }
 
 // Witness policy is separate from builder identity: the bytes may be built
 // by one identity and attested by another.
-pub fn trust_allow_cache_witness(roots_dir: String, role: String, witness: String) TrustRootError! -[FS]> {
+fn trust_allow_cache_witness(roots_dir: String, role: String, witness: String) TrustRootError! -[FS]> {
     trust_validate_receipt_witness(witness)
     trust_allow_cache_identity(roots_dir, "cache-witnesses", role, witness, "cache receipt witness")
 }
 
-pub fn trust_is_cache_witness_allowed(roots_dir: String, role: String, witness: String) -[FS]> Bool TrustRootError! {
+fn trust_is_cache_witness_allowed(roots_dir: String, role: String, witness: String) -[FS]> Bool TrustRootError! {
     trust_validate_receipt_witness(witness)
     trust_is_cache_identity_allowed(roots_dir, "cache-witnesses", role, witness, "cache receipt witness")
 }

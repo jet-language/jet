@@ -1,0 +1,128 @@
+// Production field-owner contracts, assembled with the canonical L4 sources.
+// These exercise checked metadata directly, including internal guard/tag shapes
+// that source syntax cannot name and Pin without invoking an unrelated emitter.
+// Bind literal loop inputs and parenthesize optional equality expressions so
+// the Rust stage-zero parser and the Jet parser consume the same fixture.
+fn fc_require(ok: Bool, name: String) {
+    if !ok -> panic("field owner contract failed: {name}")
+}
+
+fn fc_field(owner: Type, member: String) -> JetCodegenResolvedField Never! {
+    jet_codegen_resolve_field_by_name([SemaGraphModuleResult]{}, "", [String]{}, owner, member, "field-owner-contract")
+}
+
+fn fc_tuple_owners() {
+    tuple :: Type.Tuple{fields: [TypeTupleField]{TypeTupleField{name: "left", ty: Type.Int}, TypeTupleField{name: "right", ty: Type.String}}}
+    expected :: jet_codegen_mir_field_id(fc_field(tuple, "left"))
+    fc_require(jet_codegen_mir_field_id(fc_field(tuple, "0")).value == expected.value, "tuple numeric position")
+    fc_require(jet_codegen_mir_field_id(fc_field(tuple, "+0")).value == expected.value, "unsigned decimal plus sign")
+    fc_require(fc_field(tuple, "01").field_name == "right", "tuple leading zero")
+    tagged :: Type.Tagged{marker: TagMarker.Internal{internal_tag: InternalTag.SharedGuardRead}, inner: tuple}
+    fc_require(jet_codegen_mir_field_id(fc_field(tagged, "left")).value == expected.value, "tagged tuple")
+    wrappers :: [String]{"SharedGuard", "CellReadGuard", "CellEditGuard", "Pin"}
+    loop wrapper in wrappers {
+        guarded :: Type.Apply{name: wrapper, args: [Type]{tagged}}
+        fc_require(jet_codegen_mir_field_id(fc_field(guarded, "left")).value == expected.value, "{wrapper} tuple")
+    }
+    fc_require(jet_codegen_field_position("-1") == None, "negative position is not unsigned")
+    fc_require(jet_codegen_field_position(" 1") == None, "position whitespace is not accepted")
+    fc_require(jet_codegen_field_position("1_0") == None, "position separators are not accepted")
+    fc_require(jet_codegen_field_position("18446744073709551616") == None, "usize overflow is not a position")
+    fc_require(jet_codegen_field_owner_type(Type.Option{inner: tuple}) == Type.Option{inner: tuple}, "Option remains a payload boundary")
+    fc_require(jet_codegen_field_owner_type(Type.Shared{inner: tuple}) == Type.Shared{inner: tuple}, "Shared remains a handle boundary")
+}
+
+fn fc_nominal_owners() {
+    range :: fc_field(Type.Named{name: "Range"}, "lo")
+    fc_require(range.owner_key == "Range" && range.field_name == "lo", "compiler-owned record")
+    reason_fields :: jet_codegen_compiler_owned_record_fields("RangeError") ?? panic("RangeError record owner")
+    fc_require(reason_fields.len() == 1 && reason_fields[0].name == "reason" && reason_fields[0].ty == Type.String, "RangeError canonical reason field")
+    reason_owner :: jet_codegen_compiler_owned_record_definition("fixture", "RangeError", reason_fields)
+    fc_require(reason_owner.key == "RangeError" && fc_field(Type.Named{name: "RangeError"}, "reason").owner_key == reason_owner.key, "RangeError literal and field share their record owner")
+    measurement :: fc_field(Type.Apply{name: "Measurement", args: [Type]{Type.Int}}, "value")
+    fc_require(measurement.owner_key == "Measurement", "generic fields belong to the declaration")
+    payload :: fc_field(Type.Named{name: "WsError"}, "limit")
+    fc_require(payload.owner_key == "WsError::MessageTooLarge", "compiler-owned named enum payload")
+    math_names :: [String]{"F32x4", "F64x2", "Vec2", "Vec3", "Vec4"}
+    loop name in math_names {
+        owner :: Type.Named{name: name}
+        fc_require(jet_codegen_mir_field_id(fc_field(owner, "1")).value == jet_codegen_mir_field_id(fc_field(owner, "y")).value, "{name} numeric lane")
+    }
+    diagnostic :: jet_codegen_field_resolution_ice("fixture-function", Type.Option{inner: Type.Int}, Type.Int, "left", "missing row")
+    fc_require(diagnostic.contains("fixture-function") && diagnostic.contains("left") && diagnostic.contains("kind Option") && diagnostic.contains("kind Int"), "diagnostic retains original and normalized kinds and function")
+}
+
+// An embedded Jet CtValue.Int is exact, unlike the Rust half's i64 carrier.
+// Exercise the production semantic path before the checked native MIR codec.
+fn fc_embedded_integer_constants() {
+    span :: Span{start: 0, end: 1}
+    environment :: sema_scope_environment_init("fixture", "fixture", "fixture", "fixture.jet", SemaSourceOrigin.Snapshot, [SemaSourceSegment]{}, [SemaScopeDeclaration]{})
+    program :: sema_program_tables_init(None, [TTypeDef]{})
+    scopes := sema_scope_init("fixture")
+    state := sema_ownership_state_init()
+    context := sema_check_context_init()
+    diagnostics := [Diagnostic]{}
+    exact_decimals :: [String]{"18446744073709551615", "-9223372036854775809", "100000000000000000000000000000000000000000", "-100000000000000000000000000000000000000000"}
+    loop decimal in exact_decimals {
+        number :: Int.parse(decimal) ?? panic("fixture integer")
+        fc_require(mir_integer_constant(number, None, None) == (MIRConstant.BigInt{decimal: decimal}), "ordinary literals share the exact carrier")
+        ast_key :: ast_comptime_key_from_value(CtValue.Int{value: number}) ?? panic("exact Int is not a map key")
+        fc_require(ast_key == (CtKey.BigInt{decimal: decimal}), "AST map key spills only outside i64")
+        fc_require(ast_comptime_key_to_value(ast_key) == (CtValue.BigInt{value: decimal}), "AST exact key roundtrip")
+        typed_key :: sema_checked_comptime_key(ast_key) ?? panic("exact key was not checked")
+        fc_require(typed_key == (TComptimeKey.BigInt{decimal: decimal}), "checked exact key")
+        lowered_key :: jet_codegen_lower_comptime_key(typed_key) ?? panic("exact key was not lowered")
+        fc_require(lowered_key == (MIRConstKey.BigInt{decimal: decimal}), "native exact key")
+        map_value :: TComptimeValue.Map{entries: [TComptimeMapEntry]{TComptimeMapEntry{key: typed_key, value: TComptimeValue.String{value: "found"}}}}
+        lowered_map :: jet_codegen_lower_comptime_value(map_value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact map was not lowered")
+        fc_require(lowered_map == (MIRConstant.Map{entries: [MIRConstMapEntry]{MIRConstMapEntry{key: lowered_key, value: MIRConstant.String{value: "found"}}}}), "map retains exact key")
+        checked :: sema_expr_check_comptime_name("EXACT", span, Val(CtValue.Int{value: number}), None, environment, program, &scopes, &state, &context, &diagnostics) ?? panic("embedded integer was not checked")
+        expected :: TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: decimal}}
+        fc_require(checked.ty == Type.Int && checked.kind == expected, "embedded exact integer uses BigInt")
+        fc_require(checked.integer_bounds == (Val(integer_bounds_exact(number))), "embedded exact bounds")
+        prepared :: sema_fact_prepared_expr(TComptimeValue.Int{value: number}, Type.Int, span, environment, program) ?? panic("prepared integer was not checked")
+        fc_require(prepared.kind == expected && prepared.integer_bounds == checked.integer_bounds, "prepared exact integer uses BigInt")
+        if checked.kind == .CtLit(value) {
+            lowered :: jet_codegen_lower_comptime_value(value, [SemaGraphModuleResult]{}, "", [String]{}) ?? panic("exact integer was not lowered")
+            fc_require(lowered == (MIRConstant.BigInt{decimal: decimal}), "native MIR keeps exact decimal")
+        }
+    }
+    maximum :: Int.parse("18446744073709551615") ?? panic("fixture maximum")
+    unsigned_width :: Val(MIRIntegerWidth{signed: false, bits: 64})
+    fc_require(mir_integer_constant(maximum, unsigned_width, None) == (MIRConstant.Int{value: -1, width: unsigned_width, spelling: None}), "U64 maximum keeps native signed-bit payload and width")
+    fc_require(mir_integer_constant(9223372036854775808, unsigned_width, None) == (MIRConstant.Int{value: -9223372036854775807 - 1, width: unsigned_width, spelling: None}), "U64 high bit keeps native signed-bit payload")
+    fc_require(mir_integer_constant(-1, unsigned_width, None) == (MIRConstant.Int{value: -1, width: unsigned_width, spelling: None}), "native payload is not encoded twice")
+    fc_require(mir_integer_value(-1, unsigned_width) == maximum, "U64 maximum decodes to the mathematical value")
+    fc_require(mir_integer_value(-1, None) == -1, "signed payload remains negative")
+    high :: mir_integer_constant(maximum, unsigned_width, None)
+    low :: mir_integer_constant(0, unsigned_width, None)
+    fc_require(mir_pass_fold_binary(MIRBinaryOp.Gt, high, low, mir_type_from_kind(MIRTypeKind.Bool)) == (Val(MIRConstant.Bool{value: true})), "unsigned optimizer comparison decodes the high bit")
+    fixed_ty :: Type.IntN{signed: false, bits: 64}
+    fixed :: sema_fact_prepared_expr(TComptimeValue.Int{value: maximum}, fixed_ty, span, environment, program) ?? panic("fixed prepared integer was not checked")
+    fc_require(fixed.ty == fixed_ty, "prepared fixed destination type")
+    converted := false
+    if fixed.kind == .NumericMethod(receiver, operation) {
+        if operation == .CheckedIntToFixed(host_kind, _, _, _) {
+            converted = host_kind == 7 && receiver.ty == Type.Int && receiver.kind == (TExprKind.CtLit{value: TComptimeValue.BigInt{decimal: "18446744073709551615"}})
+        }
+    }
+    fc_require(converted, "prepared U64 maximum keeps checked Int-to-fixed conversion")
+    native_values :: [Int]{-9223372036854775807 - 1, 0, 9223372036854775807}
+    loop number in native_values {
+        ast_key :: ast_comptime_key_from_value(CtValue.BigInt{value: "{number}"}) ?? panic("native spill key")
+        fc_require(ast_key == (CtKey.Int{value: number}), "native spill has one key carrier")
+        typed_key :: sema_checked_comptime_key(ast_key) ?? panic("native key was not checked")
+        fc_require(typed_key == (TComptimeKey.Int{value: number}), "checked native key")
+        fc_require(jet_codegen_lower_comptime_key(typed_key) == (Val(MIRConstKey.Int{value: number})), "native key has one MIR carrier")
+        checked :: sema_expr_check_comptime_name("NATIVE", span, Val(CtValue.Int{value: number}), None, environment, program, &scopes, &state, &context, &diagnostics) ?? panic("native integer was not checked")
+        fc_require(checked.kind == (TExprKind.IntLit{value: number, width: None}), "native integer keeps IntLit")
+    }
+    fc_require(diagnostics.len() == 0, "exact integer diagnostics")
+}
+
+fn run() {
+    fc_tuple_owners()
+    fc_nominal_owners()
+    fc_embedded_integer_constants()
+    print("field owner contracts passed")
+}

@@ -52,7 +52,7 @@ fn command_with_environment(
     command
         .env("JET_STORE_DIR", environment.join("store"))
         .env("JET_PACKAGE_STORE_DIR", environment.join("package-store"))
-        .env("JET_RUN_CACHE_DIR", environment.join("run-cache"))
+        .env("JET_STORE_DIR", environment.join("run-cache"))
         .env("JET_TEST_SCRATCH_DIR", environment.join("test-scratch"))
         .env("JET_DEV_ORACLE_CACHE_DIR", environment.join("oracle-cache"))
         .env("TMPDIR", environment.join("tmp"))
@@ -139,7 +139,7 @@ fn assert_file(project: &Path, relative: &str, owner: &str) {
     );
 }
 
-const SECOND_MODULE: &str = r#"pub fn message() -> String { "second" }
+const SECOND_MODULE: &str = r#"fn message() -> String { "second" }
 "#;
 
 const SECOND_MODULE_RUN: &str = r#"use second
@@ -298,7 +298,7 @@ fn first_hour_cli_journey() {
     write_source(
         &lib1,
         "lib1.jet",
-        "pub fn answer() -> Int {\n    return 42\n}\n",
+        "fn answer() -> Int {\n    return 42\n}\n",
         OWNER_DEPS,
     );
     run_contains(
@@ -371,14 +371,6 @@ fn first_hour_cli_journey() {
         &demo,
         &environment,
         &["run"],
-        "hello, world\n5\n7\n",
-    );
-    run_exact(
-        "interpreter final program",
-        OWNER_ADVANCED,
-        &demo,
-        &environment,
-        &["run", "--interpret"],
         "hello, world\n5\n7\n",
     );
     run_exact(

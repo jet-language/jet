@@ -1,0 +1,69 @@
+# Port of tests/inline_package.rs:565-613; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_package_extraction_matches_extracted_entry_across_build_and_run_tiers
+file: workspace.jet = "module workspace { members: [] }\n"
+step: jet build inline/run.jet
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+step: jet build extracted/run.jet
+env: JET_STORE_DIR={work}/cache-1
+env: JET_PACKAGE_STORE_DIR={work}/store-1
+env: JETPACK_ROOT={work}/jetpack-1
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+step release_inline: jet run --release inline/run.jet
+env: JET_STORE_DIR={work}/cache-2
+env: JET_PACKAGE_STORE_DIR={work}/store-2
+env: JETPACK_ROOT={work}/jetpack-2
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = "inline-package=ok\n"
+step release_extracted: jet run --release extracted/run.jet
+env: JET_STORE_DIR={work}/cache-3
+env: JET_PACKAGE_STORE_DIR={work}/store-3
+env: JETPACK_ROOT={work}/jetpack-3
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = "inline-package=ok\n"
+stdout: == release_inline # original inline/extracted receipt equality
+step default_inline: jet run inline/run.jet
+env: JET_STORE_DIR={work}/cache-4
+env: JET_PACKAGE_STORE_DIR={work}/store-4
+env: JETPACK_ROOT={work}/jetpack-4
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = "inline-package=ok\n"
+step default_extracted: jet run extracted/run.jet
+env: JET_STORE_DIR={work}/cache-5
+env: JET_PACKAGE_STORE_DIR={work}/store-5
+env: JETPACK_ROOT={work}/jetpack-5
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = "inline-package=ok\n"
+stdout: == default_inline # original inline/extracted receipt equality
+step interpreted_inline: jet run --interpret inline/run.jet
+env: JET_STORE_DIR={work}/cache-6
+env: JET_PACKAGE_STORE_DIR={work}/store-6
+env: JETPACK_ROOT={work}/jetpack-6
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = "inline-package=ok\n"
+step interpreted_extracted: jet run --interpret extracted/run.jet
+env: JET_STORE_DIR={work}/cache-7
+env: JET_PACKAGE_STORE_DIR={work}/store-7
+env: JETPACK_ROOT={work}/jetpack-7
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: 0
+stdout: = "inline-package=ok\n"
+stdout: == interpreted_inline # original inline/extracted receipt equality

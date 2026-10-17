@@ -227,7 +227,7 @@ fn jet_term_positive_env_int(value: Option<String>) -> Option<i64> {
     value?.parse::<i64>().ok().filter(|value| *value > 0)
 }
 
-fn jet_term_size_from_stty() -> Option<(i64, i64)> {
+pub(crate) fn jet_term_size_from_stty() -> Option<(i64, i64)> {
     let output = std::process::Command::new("stty")
         .arg("size")
         .output()
@@ -297,9 +297,26 @@ pub(crate) enum JetTermRead {
     EndOfInput,
 }
 
-pub(crate) fn jet_term_read_stdin_line() -> std::io::Result<JetTermRead> {
+pub(crate) fn jet_term_read_stdin_line_raw() -> std::io::Result<(bool, String)> {
     let mut line = String::new();
-    if std::io::stdin().read_line(&mut line)? == 0 {
+    let count = std::io::stdin().read_line(&mut line)?;
+    Ok((count == 0, line))
+}
+
+pub(crate) fn jet_term_read_key_bytes_raw() -> ([u8; 6], usize) {
+    use std::io::Read;
+    let mut bytes = [0u8; 6];
+    let count = std::io::stdin().lock().read(&mut bytes).unwrap_or(0);
+    (bytes, count)
+}
+
+pub(crate) fn jet_term_color_mode_raw() -> i64 {
+    JET_TERM_COLOR_MODE.with(|mode| i64::from(mode.get()))
+}
+
+pub(crate) fn jet_term_read_stdin_line() -> std::io::Result<JetTermRead> {
+    let (eof, mut line) = jet_term_read_stdin_line_raw()?;
+    if eof {
         return Ok(JetTermRead::EndOfInput);
     }
     jet_term_trim_line(&mut line);
@@ -366,27 +383,6 @@ impl Drop for JetTermModeGuard {
     }
 }
 
-pub(crate) fn jet_term_confirm_prompt(prompt: &str) -> String {
-    format!("{prompt} [y/N] ")
-}
-
-pub(crate) fn jet_term_confirm_with_io<E>(
-    prompt: &str,
-    mut write: impl FnMut(&str) -> Result<(), E>,
-    mut read: impl FnMut() -> Result<JetTermRead, E>,
-) -> bool {
-    let prompt = jet_term_confirm_prompt(prompt);
-    // The safe default answers for a stream that says nothing, so a piped or
-    // closed input ends the prompt instead of holding the program.
-    let answer = match write(&prompt).and_then(|_| read()) {
-        Ok(JetTermRead::Line(line)) => line,
-        Ok(JetTermRead::EndOfInput) | Err(_) => return false,
-    };
-    matches!(
-        answer.trim().to_ascii_lowercase().as_str(),
-        "y" | "yes"
-    )
-}
 
 pub(crate) fn jet_term_choose_menu(prompt: &str, items: &[String]) -> String {
     let mut menu = format!("{prompt}\n");
@@ -950,4 +946,85 @@ pub(crate) fn jet_term_configure_fd(_fd: i32, _raw: bool) -> std::io::Result<()>
 #[allow(dead_code)]
 pub(crate) fn jet_term_layout_fingerprint() -> [usize; 20] {
     jet_term_mode::layout_fingerprint()
+}
+
+// Core/term/term.jet owns checkpoints, error contexts, and the flush decision.
+// These seed operations keep the existing locked std writer as the OS door.
+// Replaced by the RtL7 stdio layer; Rust seed/verification dies at cutover.
+pub(crate) fn jet_term_stdio_write_raw(
+    text: &str,
+    newline: bool,
+    stderr: bool,
+    flush: bool,
+) -> Option<String> {
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    if !stderr {
+        if newline {
+            let frame = jet_term_print_frame(text);
+            unsafe { jet_web_print(frame.as_ptr(), frame.len()) };
+        } else {
+            unsafe { jet_web_print(text.as_ptr(), text.len()) };
+        }
+        return None;
+    }
+    fn write(
+        out: &mut impl std::io::Write,
+        text: &str,
+        newline: bool,
+        flush: bool,
+    ) -> std::io::Result<()> {
+        out.write_all(text.as_bytes())?;
+        if newline {
+            out.write_all(b"\n")?;
+        }
+        if flush {
+            out.flush()?;
+        }
+        Ok(())
+    }
+    let result = if stderr {
+        write(&mut std::io::stderr().lock(), text, newline, flush)
+    } else {
+        write(&mut std::io::stdout().lock(), text, newline, flush)
+    };
+    result.err().map(|error| error.to_string())
+}
+
+pub(crate) fn jet_term_stdio_bytes_raw(
+    bytes: &Vec<u8>,
+    stderr: bool,
+    flush: bool,
+) -> Option<String> {
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    if !stderr {
+        unsafe { jet_web_print(bytes.as_ptr(), bytes.len()) };
+        return None;
+    }
+    fn write(out: &mut impl std::io::Write, bytes: &[u8], flush: bool) -> std::io::Result<()> {
+        out.write_all(bytes)?;
+        if flush {
+            out.flush()?;
+        }
+        Ok(())
+    }
+    let result = if stderr {
+        write(&mut std::io::stderr().lock(), bytes, flush)
+    } else {
+        write(&mut std::io::stdout().lock(), bytes, flush)
+    };
+    result.err().map(|error| error.to_string())
+}
+
+pub(crate) fn jet_term_stdio_flush_raw(stderr: bool) -> Option<String> {
+    use std::io::Write;
+    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+    if !stderr {
+        return None;
+    }
+    let result = if stderr {
+        std::io::stderr().lock().flush()
+    } else {
+        std::io::stdout().lock().flush()
+    };
+    result.err().map(|error| error.to_string())
 }

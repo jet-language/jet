@@ -1274,29 +1274,29 @@ impl GameProfileComparison {
 const JET_GAME_DEVTOOLS_COMMAND_FRAME_MAX: usize = 256;
 
 fn jet_game_control_object(
-    value: &jet_std::DataTree,
-) -> Result<&[(String, jet_std::DataTree)], String> {
+    value: &jet_std::Dyn,
+) -> Result<&[(String, jet_std::Dyn)], String> {
     match value {
-        jet_std::DataTree::Object(fields) => Ok(fields),
+        jet_std::Dyn::Object(fields) => Ok(fields),
         _ => Err("game control command payload must be an object".to_string()),
     }
 }
 
 fn jet_game_control_field<'a>(
-    fields: &'a [(String, jet_std::DataTree)],
+    fields: &'a [(String, jet_std::Dyn)],
     name: &str,
-) -> Option<&'a jet_std::DataTree> {
+) -> Option<&'a jet_std::Dyn> {
     fields
         .iter()
         .find_map(|(field_name, value)| (field_name == name).then_some(value))
 }
 
 fn jet_game_control_required_text(
-    fields: &[(String, jet_std::DataTree)],
+    fields: &[(String, jet_std::Dyn)],
     name: &str,
 ) -> Result<String, String> {
     match jet_game_control_field(fields, name) {
-        Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value))
+        Some(jet_std::Dyn::Text(value))
             if !value.is_empty() =>
         {
             Ok(value.clone())
@@ -1307,12 +1307,12 @@ fn jet_game_control_required_text(
 }
 
 fn jet_game_control_optional_text(
-    fields: &[(String, jet_std::DataTree)],
+    fields: &[(String, jet_std::Dyn)],
     name: &str,
 ) -> Result<Option<String>, String> {
     match jet_game_control_field(fields, name) {
-        None | Some(jet_std::DataTree::Null) => Ok(None),
-        Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value))
+        None | Some(jet_std::Dyn::Null) => Ok(None),
+        Some(jet_std::Dyn::Text(value))
             if !value.is_empty() =>
         {
             Ok(Some(value.clone()))
@@ -1322,13 +1322,14 @@ fn jet_game_control_optional_text(
 }
 
 fn jet_game_control_optional_u64(
-    fields: &[(String, jet_std::DataTree)],
+    fields: &[(String, jet_std::Dyn)],
     name: &str,
 ) -> Result<Option<u64>, String> {
     match jet_game_control_field(fields, name) {
-        None | Some(jet_std::DataTree::Null) => Ok(None),
-        Some(jet_std::DataTree::Int(value)) if *value >= 0 => Ok(Some(*value as u64)),
-        Some(jet_std::DataTree::Number(value)) => value
+        None | Some(jet_std::Dyn::Null) => Ok(None),
+        Some(jet_std::Dyn::Int(value)) => value.to_u64().map(Some)
+            .ok_or_else(|| format!("{name} must be a non-negative integer")),
+        Some(jet_std::Dyn::Number(value)) => value
             .parse::<u64>()
             .map(Some)
             .map_err(|_| format!("game control field `{name}` is outside u64")),
@@ -1423,7 +1424,7 @@ fn jet_game_ingest_devtools_command_frame(
         return Err("game control command frame direction mismatch".to_string());
     }
     let commands = match jet_game_control_field(fields, "commands") {
-        Some(jet_std::DataTree::Array(commands)) => commands,
+        Some(jet_std::Dyn::Array(commands)) => commands,
         _ => return Err("game control command frame requires commands".to_string()),
     };
     if commands.len() > JET_GAME_DEVTOOLS_COMMAND_FRAME_MAX {
@@ -3060,7 +3061,7 @@ fn jet_game_asset_watch_events(
         return Err("game asset watch frame exceeds skipped count limit".to_string());
     }
     let values = match jet_game_control_field(fields, "events") {
-        Some(jet_std::DataTree::Array(values)) => values,
+        Some(jet_std::Dyn::Array(values)) => values,
         _ => return Err("game asset watch frame requires events".to_string()),
     };
     if values.len() > JET_GAME_ASSET_MAX_EVENTS {
@@ -3071,17 +3072,17 @@ fn jet_game_asset_watch_events(
         .map(|value| {
             let fields = jet_game_control_object(value)?;
             let root = match jet_game_control_field(fields, "root") {
-                Some(jet_std::DataTree::Object(root)) => root,
+                Some(jet_std::Dyn::Object(root)) => root,
                 _ => return Err("game asset watch event requires root".to_string()),
             };
             let root_id = match jet_game_control_field(root, "id") {
-                Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value)) => {
+                Some(jet_std::Dyn::Text(value)) => {
                     value.clone()
                 }
                 _ => return Err("game asset watch root requires id".to_string()),
             };
             let root_path = match jet_game_control_field(root, "path") {
-                Some(jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value)) => {
+                Some(jet_std::Dyn::Text(value)) => {
                     value.clone()
                 }
                 _ => return Err("game asset watch root requires path".to_string()),

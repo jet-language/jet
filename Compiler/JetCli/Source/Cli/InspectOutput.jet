@@ -1,0 +1,60 @@
+// Source/CmdInspect.rs run_output: only canonical sema-selected Output facts.
+use jet_driver.[JetDriverCompileRequest, JetDriverOutputQueryResult, JetDriverVerbOutput, jet_driver_output_query, jet_driver_present_diagnostics, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[OutputKind, ResolvedOutput, type_name, failure_contract_effective_type, failure_contract_source, diagnostic_render_all]
+fn jet_cli_output_kind(kind: OutputKind) -> String Never! {
+    if kind == {
+        .Library -> "Library"
+        .Executable -> "Executable"
+        .Service -> "Service"
+        .Check -> "Check"
+        .Environment -> "Environment"
+        .Image -> "Image"
+        .Bundle -> "Bundle"
+        .System -> "System"
+        .Fleet -> "Fleet"
+    }
+}
+fn jet_cli_output_effects_text(effects: [String]) -> String Never! {
+    if effects.len() == 0 -> "none" else -> effects.join(", ")
+}
+fn jet_cli_output_report(query: JetDriverOutputQueryResult, output: ResolvedOutput, json: Bool) -> String Never! {
+    // Doc projection can omit synthetic modules. Resolve the retained graph
+    // index, not its position in the filtered array or a source-path basename.
+    module_index :: loop (index, projection) in query.compile.doc_modules {
+        if projection.name_module_index == output.module_id -> break index
+    } ?? panic("selected Output lost its canonical module projection")
+    projection :: query.compile.doc_modules[module_index]
+    identity :: "{projection.module_name}::{output.semantic_name}"
+    failure :: type_name(failure_contract_effective_type(output.failure_contract))
+    failure_source :: failure_contract_source(output.failure_contract)
+    effects :: jet_cli_sorted_set(output.effects)
+    authority :: jet_cli_application_authority(query.compile, None)
+    kind :: jet_cli_output_kind(output.kind)
+    if !json {
+        return "selected: {kind} \"{output.output_name}\"\nentry: {output.source_name}\nsource path: {output.source_path}\ncallable identity: {identity}\nfailure contract: {failure} ({failure_source})\nrequired effects: {jet_cli_output_effects_text(effects)}\ngranted effects: {jet_cli_output_effects_text(authority.granted)}\ndenied effects: {jet_cli_output_effects_text(authority.denied)}\nauthority: {authority.authority}\nselection reason: {output.selection_reason}\n"
+    }
+    value :: jet_cli_status_object([
+        jet_cli_status_field("binding", jet_cli_status_text(output.address)),
+        jet_cli_status_field("kind", jet_cli_status_text(kind)), jet_cli_status_field("name", jet_cli_status_text(output.output_name)),
+        jet_cli_status_field("entry", jet_cli_status_text(output.source_name)), jet_cli_status_field("source_path", jet_cli_status_text(output.source_path)),
+        jet_cli_status_field("callable_identity", jet_cli_status_text(identity)), jet_cli_status_field("failure_contract", jet_cli_status_text(failure)),
+        jet_cli_status_field("failure_source", jet_cli_status_text(failure_source)), jet_cli_status_field("effects", jet_cli_status_texts(effects)),
+        jet_cli_status_field("required_effects", jet_cli_status_texts(effects)), jet_cli_status_field("granted_effects", jet_cli_status_texts(authority.granted)),
+        jet_cli_status_field("denied_effects", jet_cli_status_texts(authority.denied)), jet_cli_status_field("authority", jet_cli_status_text(authority.authority)),
+        jet_cli_status_field("selection_reason", jet_cli_status_text(output.selection_reason)),
+    ])
+    "{jet_cli_status_render("inspect.output", true, [jet_cli_status_field("output", value)])}\n"
+}
+fn jet_cli_output_host(request: ^JetDriverCompileRequest, address: String?, file: String, json: Bool) -> JetDriverVerbOutput {
+    sources := request.authorized_sources
+    query :: jet_driver_output_query(^request, address)
+    if !query.compile.complete || query.compile.internal_problem != None {
+        diagnostics :: jet_driver_present_diagnostics(query.compile.diagnostics, sources, [MIRSourceFile]{})
+        report :: if json -> jet_cli_reports_status_json("inspect", false, jet_cli_report_cwd(), file, "", diagnostics) else -> diagnostic_render_all(file, "", diagnostics, false)
+        return JetDriverVerbOutput{stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+    }
+    loop output in query.outputs {
+        if output.selected -> return JetDriverVerbOutput{stdout: jet_cli_output_report(query, output, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+    }
+    jet_cli_execute(jet_cli_inspect_b_report("E2104", "the checked source has no selected Output", jet_cli_why("E2104"), "declare one Executable Output or select one by address", false, json, JET_DRIVER_EXIT_USER_ERROR))
+}

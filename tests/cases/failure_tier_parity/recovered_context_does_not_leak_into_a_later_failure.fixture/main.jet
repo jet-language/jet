@@ -1,0 +1,11 @@
+
+fn contextual_source() -> Int { Err("context", cause: Err("root")) }
+
+fn contextual() -> Int { contextual_source()?("loading") }
+
+fn later() -> Int { Err("later") }
+
+fn run() {
+    contextual() ?? 0
+    later()
+}

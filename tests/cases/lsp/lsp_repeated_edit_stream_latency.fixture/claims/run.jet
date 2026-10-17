@@ -1,0 +1,48 @@
+// Original assertions tests/lsp.rs3626-3656 over the real collected session frames.
+use core.files as files
+use core.sys as sys
+use core.encoding.json as json
+
+fn s5_latency_int_member(fields: [String:Dyn], key: String, expected: Int) -> Bool {
+    if fields.get(key) == .Val(value) {
+        if value == .Int(actual) -> return actual == expected
+    }
+    false
+}
+
+fn s5_latency_text_member(fields: [String:Dyn], key: String, expected: String) -> Bool {
+    if fields.get(key) == .Val(value) {
+        if value == .Text(actual) -> return actual == expected
+    }
+    false
+}
+
+fn s5_latency_original_assertions(source: String, marker: String, request_id: Int, version: Int) {
+    verdict := false
+    loop raw in source.lines() {
+        message :: json.parse(raw) ?? panic("valid LSP message")
+        if message == .Object(fields) {
+            if s5_latency_int_member(fields, "id", request_id) {
+                // Original Debug contains(marker); canonical JSON encodes the same
+                // decoded ASCII marker text, never escaped raw wire spelling.
+                assert(json.to_string(message).contains(marker), "stale symbols")
+            }
+            if !verdict && s5_latency_text_member(fields, "method", "textDocument/publishDiagnostics") {
+                if fields.get("params") == .Val(params_value) {
+                    if params_value == .Object(params) {
+                        if s5_latency_int_member(params, "version", version) -> verdict = true
+                    }
+                }
+            }
+        }
+    }
+    assert(verdict, "no verdict published for revision {version}")
+}
+
+#Test("edit stream asserts current marker and matching verdict") {
+    root :: sys.get("S5_FRAMES_ROOT") ?? panic("frames root")
+    loop edit in 1..200 {
+        source :: files.read(files.join(root, "frames-{edit}.ndjson")) ?? panic("session frames")
+        s5_latency_original_assertions(source, "marker_{edit}", 1000 + edit, edit + 1)
+    }
+}

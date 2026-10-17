@@ -12,38 +12,28 @@ package {
 use core as core
 use core.files as files
 
-pub struct WatchHandle { pub kind: String, pub target: String }
-pub struct WatchSet { pub handles: [WatchHandle] }
 
-pub fn files(path: String) -[FS]> WatchHandle IOError! {
-    if path.bytes().len() == 0 {
-        return Err(IOError.InvalidInput(IOContext{
-            operation: .Resolve,
-            resource: Val(path),
-            os_code: None,
-            cause: Val("empty path"),
-        }))
-    }
-    core.watcher.files(path)
+fn files(path: String) -[FS]> WatchHandle IOError! {
+    core.watcher.__files(path)
 }
 
-pub fn process_pid(pid: Int) -> WatchHandle Never! {
-    core.watcher.process_pid(pid)
+fn process_pid(pid: Int) -> WatchHandle Never! {
+    core.watcher.__process_pid(pid)
 }
 
-pub fn port(host: String, port: Int) -[Net]> WatchHandle Never! {
-    core.watcher.port(host, port)
+fn port(host: String, port: Int) -[Net]> WatchHandle Never! {
+    core.watcher.__port(host, port)
 }
 
-pub fn set() -> WatchSet Never! { core.watcher.set() }
+fn set() -> WatchSet Never! { core.watcher.__set() }
 
 
-pub fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
+fn add(set: WatchSet, handle: WatchHandle) -[IO]> WatchSet Never! {
     set.add(handle)
-    ~set
+    set.copy()
 }
 
-pub fn remove(set: WatchSet, target: String) -> WatchSet IOError! {
+fn remove(set: WatchSet, target: String) -> WatchSet IOError! {
     if target.len() == 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve,
@@ -60,7 +50,7 @@ pub fn remove(set: WatchSet, target: String) -> WatchSet IOError! {
     }))
 }
 
-pub fn contains(set: WatchSet, target: String) -> Bool IOError! {
+fn contains(set: WatchSet, target: String) -> Bool IOError! {
     if target.len() == 0 -> return Ok(false)
     Err(IOError.Other(IOContext{
         operation: .Resolve,
@@ -70,26 +60,26 @@ pub fn contains(set: WatchSet, target: String) -> Bool IOError! {
     }))
 }
 
-pub fn len(set: WatchSet) -> Int Never! {
+fn len(set: WatchSet) -> Int Never! {
     summary_count(set.summary())
 }
 
-pub fn kind(handle: WatchHandle) -> String Never! {
+fn kind(handle: WatchHandle) -> String Never! {
     summary_kind(handle.summary())
 }
 
-pub fn target(handle: WatchHandle) -> String Never! {
+fn target(handle: WatchHandle) -> String Never! {
     summary_target(handle.summary())
 }
 
 
-pub enum WatchDomain {
+enum WatchDomain {
     File
     Process
     Port
 }
 
-pub enum WatchEventKind {
+enum WatchEventKind {
     Created
     Modified
     Removed
@@ -98,21 +88,119 @@ pub enum WatchEventKind {
     Ready
 }
 
-pub struct WatchEvent {
-    pub domain: WatchDomain
-    pub kind: WatchEventKind
-    pub path: String
-    pub detail: String
-    pub pid: Int
-    pub port: Int
+// WatchEvent.kind has always exposed WatchKind in checked programs. The
+// independently exported WatchEventKind above remains a distinct public enum.
+enum WatchKind {
+    Created
+    Modified
+    Removed
+    Error
+    Exited
+    Ready
 }
 
-pub fn recursive(path: String) -[FS]> WatchHandle IOError! {
+fn watch_domain_tag(value: WatchDomain) -> Int Never! {
+    if value == {
+        .File -> 0
+        .Process -> 1
+        .Port -> 2
+    }
+}
+fn watch_kind_tag(value: WatchKind) -> Int Never! {
+    if value == {
+        .Created -> 0
+        .Modified -> 1
+        .Removed -> 2
+        .Error -> 3
+        .Exited -> 4
+        .Ready -> 5
+    }
+}
+fn watch_domain_name(value: WatchDomain) -> String Never! {
+    if value == {
+        .File -> "File"
+        .Process -> "Process"
+        .Port -> "Port"
+    }
+}
+fn watch_kind_name(value: WatchKind) -> String Never! {
+    if value == {
+        .Created -> "Created"
+        .Modified -> "Modified"
+        .Removed -> "Removed"
+        .Error -> "Error"
+        .Exited -> "Exited"
+        .Ready -> "Ready"
+    }
+}
+impl WatchDomain.Equatable {
+    fn equal(self, rhs: WatchDomain) -> Bool { watch_domain_tag(self) == watch_domain_tag(rhs) }
+}
+impl WatchKind.Equatable {
+    fn equal(self, rhs: WatchKind) -> Bool { watch_kind_tag(self) == watch_kind_tag(rhs) }
+}
+
+struct WatchEvent {
+    domain: WatchDomain
+    kind: WatchKind
+    path: String
+    detail: String
+    pid: Int
+    port: Int
+}
+
+impl WatchEvent {
+    fn __show(self) -> String Never! {
+        "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path}, detail: {self.detail} }}"
+    }
+    fn __debug(self) -> String Never! {
+        "WatchEvent {{ domain: {watch_domain_name(self.domain)}, kind: {watch_kind_name(self.kind)}, path: {self.path:Debug}, detail: {self.detail:Debug}, pid: {self.pid}, port: {self.port} }}"
+    }
+}
+impl WatchEvent.Equatable {
+    fn equal(self, rhs: WatchEvent) -> Bool {
+        self.domain == rhs.domain && self.kind == rhs.kind && self.path == rhs.path &&
+        self.detail == rhs.detail && self.pid == rhs.pid && self.port == rhs.port
+    }
+}
+
+#Test("WatchEvent source layout keeps all fields and independent copies") {
+    event :: WatchEvent{domain: .Process, kind: .Exited, path: "p", detail: "gone", pid: -1, port: 65535}
+    cloned_event := event.copy()
+    assert(event.equal(cloned_event))
+    cloned_event.path = "changed"
+    assert_eq(event.path, "p")
+    assert(!event.equal(cloned_event))
+    assert_eq(event.pid, -1)
+    assert_eq(event.port, 65535)
+    assert_eq(watch_domain_tag(event.domain), 1)
+    assert_eq(watch_kind_tag(event.kind), 4)
+    assert_eq(event.__show(), "WatchEvent {{ domain: Process, kind: Exited, path: p, detail: gone }}")
+    assert_eq(event.__debug(), "WatchEvent {{ domain: Process, kind: Exited, path: \"p\", detail: \"gone\", pid: -1, port: 65535 }}")
+}
+
+#Test("WatchEvent enum tags retain the native order and old exported enum") {
+    assert_eq(watch_domain_tag(.File), 0)
+    assert_eq(watch_domain_tag(.Port), 2)
+    assert_eq(watch_kind_tag(.Created), 0)
+    assert_eq(watch_kind_tag(.Modified), 1)
+    assert_eq(watch_kind_tag(.Removed), 2)
+    assert_eq(watch_kind_tag(.Error), 3)
+    assert_eq(watch_kind_tag(.Ready), 5)
+    old :: WatchEventKind.Ready
+    ready :: if old == {
+        .Ready -> true
+        else -> false
+    }
+    assert(ready)
+}
+
+fn recursive(path: String) -[FS]> WatchHandle IOError! {
     // The host file watcher already snapshots directories recursively.
     files(path)
 }
 
-pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
+fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
     if ms < 0 {
         return Err(IOError.InvalidInput(IOContext{
             operation: .Resolve,
@@ -129,17 +217,17 @@ pub fn debounce(handle: WatchHandle, ms: Int) -> WatchHandle IOError! {
     }))
 }
 
-pub fn poll(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.poll() }
+fn poll(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.poll() }
 
-pub fn events(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.events() }
+fn events(handle: WatchHandle) -[IO]> [WatchEvent] Never! { handle.events() }
 
-pub fn cancel(handle: WatchHandle) -[IO]> Never! { handle.cancel() }
+fn cancel(handle: WatchHandle) Never! -[IO]> { handle.cancel() }
 
-pub fn is_active(handle: WatchHandle) -> Bool Never! { handle.is_active() }
+fn is_active(handle: WatchHandle) -> Bool Never! { handle.is_active() }
 
-pub fn summary(handle: WatchHandle) -> String Never! { handle.summary() }
+fn summary(handle: WatchHandle) -> String Never! { handle.summary() }
 
-pub fn drain(set: WatchSet) -[IO]> [WatchEvent] Never! { set.poll() }
+fn drain(set: WatchSet) -[IO]> [WatchEvent] Never! { set.poll() }
 
 fn summary_kind(text: String) -> String {
     if has_prefix(text, "watch file ") -> return "file"

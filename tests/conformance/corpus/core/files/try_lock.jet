@@ -1,0 +1,46 @@
+// core-conformance: core.files.try_lock
+use core.files as files
+use core.testing as testing
+use core.time as time
+
+fn scope_claim(path: String) {
+    held :: files.lock(path) ?? panic("scope claim")
+    print(held.path == path)
+}
+
+fn run() {
+    root :: testing.temp_dir("files-system-lock")
+    path :: files.join(root, "fixture.lock")
+    held :: files.lock(path) ?? panic("first claim")
+    identity :: (files.stat(path) ?? panic("identity")).id
+    print((files.try_lock(path) ?? panic("try held")) == None)
+    if files.lock(path, timeout: Val(time.duration_ms(2))) == {
+        .Err(.TimedOut(context)) -> print(context.resource == Val(path))
+        .Err(_) -> panic("wrong timeout kind")
+        .Ok(owner) -> {
+            close(^owner)
+            panic("contended lock acquired")
+        }
+    }
+    close(^held)
+    print(files.exists(path))
+    print((files.stat(path) ?? panic("released identity")).id == identity)
+    claimed :: files.try_lock(path) ?? panic("try released")
+    if claimed == {
+        .Val(owner) -> {
+            print(owner.path == path)
+            close(^owner)
+        }
+        .None -> panic("release did not unlock")
+    }
+    scope_claim(path)
+    again :: files.lock(path, timeout: Val(time.duration_ms(2))) ?? panic("scope did not release")
+    close(^again)
+    // A directory (the current ProjectLock consumer's input) is not a lock
+    // file. This must fail rather than silently acquire a different domain.
+    if files.try_lock(root) == {
+        .Err(_) -> print(true)
+        .Ok(_) -> panic("directory was accepted as a lock file")
+    }
+    files.remove_all(root) ?? panic("cleanup")
+}

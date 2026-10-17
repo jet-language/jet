@@ -21,7 +21,7 @@ use super::tir_to_mir_types::{
     lower_mir_convention, lower_param_zone, lower_type, lower_type_defs, lower_view_provenance,
 };
 use super::{
-    TCallArg, TContract, TContractDisposition, TContractResult, TExpr, TExprKind, TFailureCarrier,
+    TBuiltinOp, TCallArg, TContract, TContractDisposition, TContractResult, TExpr, TExprKind, TFailureCarrier,
     TFunc, TFuncKind, TGenericParam, THardwareSetup, TLambda, TLambdaBody, TLocal, TPattern,
     TPlace, TPreludeRoute, TRoutePlan, TStmt, TTargetApplicability, TVisibility, TirErasureReason,
     TirProgram,
@@ -30,12 +30,14 @@ use jet_foundation::AST::{AccessConvention, CtKey, CtReport, CtValue, Type};
 use jet_foundation::Diagnostics::Span;
 use jet_foundation::MIR::{
     MIR_SCHEMA_VERSION, MirAbi, MirAccess, MirArtifactId, MirArtifactKind, MirArtifactPlan,
+    mir_refine_function_ownership,
     MirArtifactRequest, MirArtifactTarget, MirAssociatedTypeDecl, MirAssociatedTypeValue,
     MirBasicBlock, MirBinaryDispatch, MirBinaryPatternPart, MirBlockId, MirCImportLink, MirCLib,
     MirCOverlayOverride, MirCallArg, MirCallFallibility, MirCallSignature, MirCallbackAdapter,
     MirCallbackId, MirCallee, MirCaptureFacts, MirCaptureOperand, MirCaptureParam, MirCffiFacts,
     MirCliCommand, MirCliDefault, MirCliEntry, MirCliInput, MirCliInputShape, MirCliValueKind,
     MirCloseAdapter, MirConstant, MirConstantDef, MirConstantId, MirCopyFact, MirCoreCallId, MirCoreClosureKind,
+    MirConversion,
     MirCoveragePoint, MirDbQueryMetadata, MirDbTableFact, MirDropAction, MirDropKind,
     MirEffectFacts, MirEntryKind, MirEntryOutput, MirEntrySpec, MirFailureCarrier, MirFieldId,
     MirForeign, MirForeignAbi, MirForeignId, MirForeignLanguage, MirFunction, MirFunctionForm,
@@ -44,10 +46,10 @@ use jet_foundation::MIR::{
     MirHarnessPlan, MirImplDef, MirImplId, MirImport, MirImportId, MirImportItem, MirImportKind,
     MirIndexKind, MirInstruction, MirJob, MirJobCachePolicy, MirJobDispatch, MirJobId,
     MirJobSchedule, MirJobScope, MirJobSkip, MirKernelFacts, MirLinkArtifact, MirLinkArtifactKind,
-    MirLinkUnit, MirLinkUnitId, MirLocal, MirLocalId, MirNameFacts, MirNominalRef, MirOpId,
+    MirLinkUnit, MirLinkUnitId, MirLocal, MirLocalId, MirModuleId, MirNameFacts, MirNominalRef, MirOpId,
     MirOperation, MirOptimizationDecision, MirOptimizationFacts, MirOptimizationRejection,
     MirOutputCheck, MirOutputCheckId, MirOwnership, MirOwnershipMode, MirPackageFacts,
-    MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding, MirPatternField,
+    MirPanicContext, MirPanicLoc, MirParam, MirPattern, MirPatternBinding, MirPatternField, MirPayloadKind,
     MirPatternPosition, MirPatternShape, MirPlace, MirPlaceBase, MirPlaceId, MirPreludeAbi,
     MirPreludeCall, MirPreludeCallId, MirPreludeFamily, MirProgram, MirProjection, MirRequireKind,
     MirRuntimePartId, MirScope, MirScopeId, MirScopeKind, MirSemanticOp, MirSerdeCodec, MirSiteId,
@@ -58,6 +60,7 @@ use jet_foundation::MIR::{
     MirVectorFact, MirVectorLayout, MirVectorRule, MirVisibility, MirWebParamField,
     MirWebParamReconstruction, stable_id,
 };
+use jet_foundation::MIR::{MirPollKind, mir_operation_can_stop, mir_operation_stop_operand, mir_operation_stop_place};
 /// Keep only derive requests whose implementation is part of this target's
 /// checked program. Type-site markers are broader than Rust trait conformance:
 /// a user derive provider (for example `#Summarize`) contributes inherent
@@ -111,7 +114,6 @@ fn is_native_rust_derive(derive: MirTraitId) -> bool {
 fn target_supports_impl(applicability: MirTargetApplicability, target: MirArtifactTarget) -> bool {
     match target {
         MirArtifactTarget::RustAot => applicability.rust_aot,
-        MirArtifactTarget::Cranelift => applicability.cranelift,
         MirArtifactTarget::Interpreter => applicability.interpreter,
         MirArtifactTarget::Web => applicability.web,
     }
@@ -133,6 +135,14 @@ impl LowerError {
             span,
             message: message.into(),
         }
+    }
+
+    fn in_function(mut self, function: &TFunc) -> Self {
+        self.message = format!(
+            "{} (module {}), {}: {}",
+            function.source_file, function.module, function.name, self.message
+        );
+        self
     }
 }
 
@@ -181,6 +191,7 @@ pub(super) struct FunctionRegistry {
     /// MIR call lowering.  Transaction Rollback lowering uses this fact for
     /// its synthesized snapshot value; it must not guess an associated type.
     return_types: HashMap<MirFunctionId, Option<Type>>,
+    declaration_sites: HashMap<MirFunctionId, (MirModuleId, Span)>,
     generic_params: HashMap<MirFunctionId, Vec<String>>,
     owner_types: HashMap<MirFunctionId, Type>,
     pub(super) receiver_access: HashMap<MirFunctionId, MirAccess>,
@@ -189,12 +200,14 @@ pub(super) struct FunctionRegistry {
     /// cleanup closes a still-live local of that type through this function.
     close_impl_rows: Vec<(String, Type, Span, MirFunctionId)>,
     close_impls: HashMap<MirTypeId, MirFunctionId>,
+    /// Native runtime lowering owns explicit stop paths; AOT/web stay unwind-based.
+    stop_points: bool,
 }
 
 impl FunctionRegistry {
     fn build(
         functions: &[TFunc],
-        entry_sibling_calls: Option<&(String, String)>,
+        entry_call_alias: Option<&(String, String)>,
     ) -> Result<Self, LowerError> {
         let mut registry = Self {
             by_key: HashMap::new(),
@@ -206,11 +219,13 @@ impl FunctionRegistry {
             by_owner_method: HashMap::new(),
             by_identity: HashMap::new(),
             return_types: HashMap::new(),
+            declaration_sites: HashMap::new(),
             owner_types: HashMap::new(),
             generic_params: HashMap::new(),
             receiver_access: HashMap::new(),
             close_impl_rows: Vec::new(),
             close_impls: HashMap::new(),
+            stop_points: false,
         };
         // Resolve stable-ID hash collisions from a canonical identity order.
         // Normal rows retain their historical IDs; only a real collision gets
@@ -287,6 +302,10 @@ impl FunctionRegistry {
             }
             registry.by_identity.insert(identity, id);
             registry.return_types.insert(id, function.ret.clone());
+            registry.declaration_sites.insert(
+                id,
+                (MirModuleId(stable_id("mir-module", &function.module)), function.source_span),
+            );
             registry.generic_params.insert(
                 id,
                 function
@@ -312,9 +331,9 @@ impl FunctionRegistry {
                 .entry(function.name.clone())
                 .or_default()
                 .push(id);
-            // D-MOD-CYCLE1=A: a package sibling calls an entry function by the
-            // imported spelling `<entry alias>::<name>`; it names this row.
-            if let Some((entry_module, prefix)) = entry_sibling_calls {
+            // A canonical entry-qualified call names the entry row, even
+            // when its package has no sibling modules.
+            if let Some((entry_module, prefix)) = entry_call_alias {
                 if matches!(&function.kind, TFuncKind::TopLevel)
                     && function.module == *entry_module
                     && !function.name.contains("::")
@@ -361,9 +380,9 @@ impl FunctionRegistry {
 
     /// Resolve every `Close` owner to its checked MIR type identity. Runs once
     /// the type rows exist, before any function body is lowered.
-    fn index_close_impls(&mut self, types: &[MirTypeDef]) -> Result<(), LowerError> {
+    fn index_close_impls(&mut self, type_index: &NominalTypeIndex<'_>) -> Result<(), LowerError> {
         for (module, owner, span, function) in std::mem::take(&mut self.close_impl_rows) {
-            let owner = module_relative_type_instance(types, &owner, &module, span)?;
+            let owner = module_relative_type_instance(type_index, &owner, &module, span)?;
             let Some(identity) = owner.identity else {
                 return Err(LowerError::new(span, "checked Close owner has no nominal identity"));
             };
@@ -397,6 +416,9 @@ impl FunctionRegistry {
     }
     pub(super) fn return_type_for(&self, id: MirFunctionId) -> Option<Type> {
         self.return_types.get(&id).cloned().flatten()
+    }
+    pub(super) fn declaration_site_for(&self, id: MirFunctionId) -> Option<(MirModuleId, Span)> {
+        self.declaration_sites.get(&id).copied()
     }
     pub(super) fn call_return_type_for(
         &self,
@@ -448,7 +470,10 @@ impl FunctionRegistry {
             .get(&id)
             .map(Vec::as_slice)
             .unwrap_or_default();
-        if generic_params.len() != type_args.len() {
+        // A demanded generic instance (`Pattern::encode_hole__Int`) is already
+        // specialized: it has no binders left, and the call keeps its
+        // instance arguments only as the instance identity.
+        if !generic_params.is_empty() && generic_params.len() != type_args.len() {
             return Err("checked generic method has incomplete return-type arguments");
         }
         let mut substitutions = generic_params
@@ -567,6 +592,12 @@ impl FunctionRegistry {
             if rhs.is_some() || !candidates.is_empty() {
                 return candidates;
             }
+            if rhs.is_none() && !raw_owner.contains("::") && !raw_owner.contains('.') {
+                let candidates = self.carrier_record_methods(raw_owner, method, Some(trait_name));
+                if !candidates.is_empty() {
+                    return candidates;
+                }
+            }
             // A bounded generic receiver can reach MIR with no concrete owner
             // spelling. Keep the lookup checked and deterministic: a lone
             // implementation of this trait method is usable; several remain
@@ -604,23 +635,50 @@ impl FunctionRegistry {
                 .cloned()
                 .unwrap_or_default();
             if local.is_empty() && rhs.is_none() {
-                return self.carrier_record_methods(raw_prefix, method);
+                return self.carrier_record_methods(raw_prefix, method, None);
             }
             local
         }
     }
 
     /// A bare built-in boundary spelling (`URL`) that the calling module does
-    /// not declare names its Core carrier record (`row_claims_bare_name`), so
-    /// a method on it is that record's checked method.
-    fn carrier_record_methods(&self, owner: &str, method: &str) -> Vec<MirFunctionId> {
-        let Some(suffix) = crate::Syntax::typed_head_kind(owner)
+    /// not declare names its registered Core carrier record, so
+    /// a method on it is that record's checked method. Any other bare Core
+    /// export (`Digest256` returned by `sha256` into `core.email`) names the
+    /// record of the one Core source module that exports it.
+    fn carrier_record_methods(
+        &self,
+        owner: &str,
+        method: &str,
+        trait_name: Option<&str>,
+    ) -> Vec<MirFunctionId> {
+        let modules = match crate::Syntax::typed_head_kind(owner)
             .and_then(|kind| kind.carrier_record_module())
-            .and_then(jet_foundation::CoreModuleExports::core_source_module)
+        {
+            Some(module) => vec![module],
+            None => jet_foundation::CoreModuleExports::core_type_modules(owner),
+        };
+        let [module] = modules.as_slice() else {
+            return Vec::new();
+        };
+        let Some(suffix) = jet_foundation::CoreModuleExports::core_source_module(module)
             .map(|source| format!("{}::{owner}", source.path))
         else {
             return Vec::new();
         };
+        if let Some(trait_name) = trait_name {
+            return self
+                .by_target
+                .iter()
+                .filter(|(target, _)| {
+                    target.method == method
+                        && target.trait_name.as_deref() == Some(trait_name)
+                        && target.rhs.is_none()
+                        && target.owner.ends_with(&suffix)
+                })
+                .flat_map(|(_, ids)| ids.iter().copied())
+                .collect();
+        }
         self.by_owner_method
             .iter()
             .filter(|((_, candidate_owner, candidate_method), _)| {
@@ -886,12 +944,17 @@ fn lower_anonymous_union_type_defs(
         .enum_variants
         .keys()
         .filter(|name| name.starts_with("__JetUnion_"))
-        .cloned()
         .collect::<Vec<_>>();
     names.sort_unstable();
+    // Keep generated rows separate while the index borrows declaration keys.
+    // Added carrier keys borrow the program's enum table, so each insertion is
+    // immediately visible to subsequent unions without borrowing a growing Vec.
+    let mut type_index = NominalTypeIndex::build(types);
+    let mut type_ids = types.iter().map(|row| row.id).collect::<HashSet<_>>();
+    let mut generated = Vec::new();
 
     for name in names {
-        let variant_names = program.enum_variants.get(&name).ok_or_else(|| {
+        let variant_names = program.enum_variants.get(name).ok_or_else(|| {
             LowerError::new(span, format!("anonymous union `{name}` has no variants"))
         })?;
         let mut members = Vec::with_capacity(variant_names.len());
@@ -938,7 +1001,7 @@ fn lower_anonymous_union_type_defs(
             }
             members.push(member.clone());
         }
-        if crate::AST::union_enum_name(&members) != name {
+        if crate::AST::union_enum_name(&members) != *name {
             return Err(LowerError::new(
                 span,
                 format!("anonymous union `{name}` has a non-canonical shape"),
@@ -948,12 +1011,9 @@ fn lower_anonymous_union_type_defs(
         // The carrier identity is the checked instance identity: members name
         // their canonical declaration keys (`module::DBError`), exactly as
         // `canonical_type_instance` spells every value of this union type.
-        let canonical_union = canonicalize_type(types, &Type::Union(members.clone()), span)?;
+        let canonical_union = canonicalize_type(&type_index, &Type::Union(members.clone()), span)?;
         let union_id = MirTypeId(stable_id("mir-type", &type_identity_key(&canonical_union)));
-        if types
-            .iter()
-            .any(|definition| definition.id == union_id || definition.key == name)
-        {
+        if type_ids.contains(&union_id) || type_index.exact.contains_key(name.as_str()) {
             continue;
         }
 
@@ -968,7 +1028,7 @@ fn lower_anonymous_union_type_defs(
                     wire_name: tag,
                     span,
                     payload: MirVariantPayload::Single(canonical_type_instance(
-                        types, member, span,
+                        &type_index, member, span,
                     )?),
                     discriminant: None,
                 })
@@ -979,7 +1039,7 @@ fn lower_anonymous_union_type_defs(
             .iter()
             .find(|definition| {
                 definition.generic_params.is_empty()
-                    && definition.name == name
+                    && definition.name == *name
                     && definition.key.ends_with(&qualified_suffix)
                     && matches!(
                         &definition.kind,
@@ -994,7 +1054,7 @@ fn lower_anonymous_union_type_defs(
             id: union_id,
             module: module_id,
             key: name.clone(),
-            name,
+            name: name.clone(),
             span,
             public: false,
             package_public: false,
@@ -1043,8 +1103,12 @@ fn lower_anonymous_union_type_defs(
             definition.ownership = source.ownership;
             definition.boxed_edges = source.boxed_edges;
         }
-        types.push(definition);
+        type_index.insert(name, name, definition.id, definition.generic_params.is_empty());
+        type_ids.insert(definition.id);
+        generated.push(definition);
     }
+    drop(type_index);
+    types.extend(generated);
     Ok(())
 }
 
@@ -1126,9 +1190,20 @@ fn report_lower_sweep_failure(
 /// Lower a TIR program to MIR. The program is consumed: each function's body
 /// is released as soon as it is lowered, so a large program never holds its
 /// whole TIR and whole MIR at once.
-pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerError> {
+pub fn lower_tir_to_mir(program: TirProgram) -> Result<MirProgram, LowerError> {
+    lower_tir_to_mir_with_stop_points(program, false)
+}
+
+/// Checked native runtime MIR uses the same ownership builder as AOT, but
+/// transfers cancellation and task failure through explicit cleanup edges.
+pub fn lower_native_tir_to_mir(program: TirProgram) -> Result<MirProgram, LowerError> {
+    lower_tir_to_mir_with_stop_points(program, true)
+}
+
+fn lower_tir_to_mir_with_stop_points(mut program: TirProgram, stop_points: bool) -> Result<MirProgram, LowerError> {
     let mut function_registry =
-        FunctionRegistry::build(&program.funcs, program.entry_sibling_calls.as_ref())?;
+        FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())?;
+    function_registry.stop_points = stop_points;
     let mut types = lower_type_defs(&program.declarations.type_defs, &function_registry)?;
     lower_anonymous_union_type_defs(&program, &mut types)?;
     // Trait names are checked nominal identities too.  Unlike user types,
@@ -1146,12 +1221,18 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
         &function_registry,
     );
     fold_anonymous_union_declarations(&mut types);
-    function_registry.index_close_impls(&types)?;
+    // Close owners historically resolve before sorting; retain first-row
+    // selection in that declaration phase as well as in the frozen index.
+    if !function_registry.close_impl_rows.is_empty() {
+        function_registry.index_close_impls(&NominalTypeIndex::build(&types))?;
+    }
     types.sort_unstable_by_key(|ty| ty.id);
+    let type_index = NominalTypeIndex::build(&types);
     let mut functions: Vec<MirFunction> = Vec::with_capacity(program.funcs.len());
     let mut prelude_calls: Vec<MirPreludeCall> = Vec::new();
     let mut callbacks: Vec<MirCallbackAdapter> = Vec::new();
     let mut source_files: Vec<MirSourceFile> = Vec::new();
+    let mut shared_sites: BTreeMap<MirConstantId, MirConstantDef> = BTreeMap::new();
     // Row positions by id, so merging each function's rows stays constant
     // time per row (the first row per id wins, as a linear search would).
     let mut prelude_call_positions: HashMap<MirPreludeCallId, usize> = HashMap::new();
@@ -1161,7 +1242,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     for definition in &types {
         for embedded in type_def_types(definition) {
             let instance =
-                canonical_type_instance(&types, &mir_type_as_ast(&embedded), definition.span)?;
+                canonical_type_instance(&type_index, &mir_type_as_ast(&embedded), definition.span)?;
             merge_type_instance(&mut type_instances, instance, definition.span)?;
         }
     }
@@ -1188,6 +1269,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
             lower_function(
                 function,
                 &types,
+                &type_index,
                 &nominal_identities,
                 &program.reflect_paths,
                 &program.declarations.traits,
@@ -1197,9 +1279,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
                 None,
                 None,
             )
-            .map_err(|error| {
-                LowerError::new(error.span, format!("{}: {}", function.name, error.message))
-            })
+            .map_err(|error| error.in_function(function))
         };
         let result = if sweep {
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(lower)).unwrap_or_else(
@@ -1209,16 +1289,16 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
                         .map(String::as_str)
                         .or_else(|| payload.downcast_ref::<&str>().copied())
                         .unwrap_or("non-string panic");
-                    Err(LowerError::new(
-                        function.source_span,
-                        format!("{}: panic: {message}", function.name),
-                    ))
+                    Err(
+                        LowerError::new(function.source_span, format!("panic: {message}"))
+                            .in_function(function),
+                    )
                 },
             )
         } else {
             lower()
         };
-        let (lowered, calls, files, instances, nested, function_callbacks) = match result {
+        let (lowered, calls, files, instances, nested, function_callbacks, sites) = match result {
             Ok(lowered) => lowered,
             Err(error) if sweep => {
                 report_lower_sweep_failure(&indexed_sources, &function.source_file, &error);
@@ -1230,15 +1310,24 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
         // Merge the function's rows into the program. Under the debug sweep a
         // conflicting row is one more reported failure, not the end of the run.
         let merge = || -> Result<(), LowerError> {
+            for site in sites {
+                if let Some(existing) = shared_sites.get(&site.id) {
+                    if existing.ty != site.ty || existing.value != site.value {
+                        return Err(LowerError::new(site.span, "one Core initializer has conflicting publication lifetimes or types"));
+                    }
+                } else {
+                    shared_sites.insert(site.id, site);
+                }
+            }
             for embedded in function_type_rows(&lowered) {
                 let instance =
-                    canonical_type_instance(&types, &mir_type_as_ast(&embedded), lowered.span)?;
+                    canonical_type_instance(&type_index, &mir_type_as_ast(&embedded), lowered.span)?;
                 merge_type_instance(&mut type_instances, instance, lowered.span)?;
             }
             for nested_function in &nested {
                 for embedded in function_type_rows(nested_function) {
                     let instance = canonical_type_instance(
-                        &types,
+                        &type_index,
                         &mir_type_as_ast(&embedded),
                         nested_function.span,
                     )?;
@@ -1316,14 +1405,12 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
             })
         } else {
             merge()
-        };
+        }
+        .map_err(|error| error.in_function(function));
         match merged {
             Ok(()) => {}
             Err(error) if sweep => {
-                let error = LowerError::new(
-                    error.span,
-                    format!("{}: merge: {}", function.name, error.message),
-                );
+                let error = LowerError::new(error.span, format!("merge: {}", error.message));
                 report_lower_sweep_failure(&indexed_sources, &function.source_file, &error);
                 sweep_failures.push(error);
             }
@@ -1332,12 +1419,14 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
         // Only this function's lowering reads its body.
         program.funcs[index].body = Vec::new();
     }
-    if let Some(first) = sweep_failures.first() {
+    if sweep {
         eprintln!(
             "JET_DEBUG_LOWER_ALL summary: {} of {} functions failed to lower",
             sweep_failures.len(),
             program.funcs.len()
         );
+    }
+    if let Some(first) = sweep_failures.first() {
         return Err(first.clone());
     }
     ensure_artifact_source_files(
@@ -1368,12 +1457,12 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     for foreign in &foreign {
         for param in &foreign.params {
             let instance =
-                canonical_type_instance(&types, &mir_type_as_ast(&param.ty), foreign.span)?;
+                canonical_type_instance(&type_index, &mir_type_as_ast(&param.ty), foreign.span)?;
             merge_type_instance(&mut type_instances, instance, foreign.span)?;
         }
         if let Some(return_type) = &foreign.return_type {
             let instance =
-                canonical_type_instance(&types, &mir_type_as_ast(return_type), foreign.span)?;
+                canonical_type_instance(&type_index, &mir_type_as_ast(return_type), foreign.span)?;
             merge_type_instance(&mut type_instances, instance, foreign.span)?;
         }
     }
@@ -1385,7 +1474,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     for trait_def in &traits {
         for method in &trait_def.methods {
             for ty in trait_method_type_rows(method) {
-                let instance = canonical_type_instance(&types, &mir_type_as_ast(&ty), method.span)?;
+                let instance = canonical_type_instance(&type_index, &mir_type_as_ast(&ty), method.span)?;
                 merge_type_instance(&mut type_instances, instance, method.span)?;
             }
         }
@@ -1395,14 +1484,9 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
         &program.funcs,
         &function_registry,
         &types,
+        &type_index,
     )?;
     attach_orphan_methods(&mut impls, &functions);
-    retain_selected_derives(
-        &mut types,
-        &impls,
-        &program.artifact_facts.modules,
-        program.artifact_facts.target,
-    );
     for implementation in &impls {
         merge_type_instance(
             &mut type_instances,
@@ -1416,8 +1500,12 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
             merge_type_instance(&mut type_instances, ty.clone(), implementation.span)?;
         }
     }
-    ensure_referenced_traits(&mut traits, &impls, &functions, &types);
+    // Trait synthesis sees only the instances present before constants, as
+    // before. Derive metadata can be pruned once borrowed lookup keys expire.
+    let trait_type_instance_count = type_instances.rows.len();
     let mut constants = lower_constant_rows(&program.declarations.constants);
+    constants.extend(shared_sites.into_values());
+    constants.sort_unstable_by_key(|row| row.id);
     for row in program
         .declarations
         .constants
@@ -1426,7 +1514,7 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     {
         // A bare spelling resolves in the constant's own module first, so a
         // user `FontStyle` row never reads as a same-named Core declaration.
-        let instance = module_relative_type_instance(&types, &row.ty, &row.module, row.span);
+        let instance = module_relative_type_instance(&type_index, &row.ty, &row.module, row.span);
         // A prepared constant is materialized only when its folded value has
         // a canonical MIR type; reads of any other stay folded at the use.
         if row.is_comptime && instance.is_err() {
@@ -1441,6 +1529,17 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
         }
         merge_type_instance(&mut type_instances, instance, row.span)?;
     }
+    drop(type_index);
+    retain_selected_derives(
+        &mut types,
+        &impls,
+        &program.artifact_facts.modules,
+        program.artifact_facts.target,
+    );
+    ensure_referenced_traits(
+        &mut traits, &impls, &functions, &types,
+        &type_instances.rows[..trait_type_instance_count],
+    );
     let jobs = lower_job_rows(
         &program.artifact_facts.jobs,
         &program.funcs,
@@ -1462,9 +1561,11 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     );
     let artifacts =
         lower_artifact_rows(&program.artifact_facts, &program.funcs, &function_registry);
+    let cffi = lower_cffi_facts(&program.artifact_facts.cffi);
     let (modules, imports) = lower_module_rows(
         &program.artifact_facts.modules,
         &program.artifact_facts.imports,
+        &cffi,
         &types,
         &traits,
         &impls,
@@ -1532,10 +1633,11 @@ pub fn lower_tir_to_mir(mut program: TirProgram) -> Result<MirProgram, LowerErro
     inline_known_constant_reads(&mut functions, &program.declarations.constants, &constants);
 
     Ok(MirProgram {
+        native_pack: false,
         schema_version: MIR_SCHEMA_VERSION,
         package_identity: program.package_identity.clone(),
         facts: lower_package_facts(&program),
-        cffi: lower_cffi_facts(&program.artifact_facts.cffi),
+        cffi,
         names: lower_name_facts(&program.artifact_facts.names),
         modules,
         imports,
@@ -1913,11 +2015,22 @@ fn lower_foreign_rows(
                     .as_deref()
                     .and_then(|key| resolve_function_key(key, &row.module, registry)),
                 close_foreign: None,
+                unsafe_gate: row.unsafe_gate.as_ref().map(lower_unsafe_gate),
             }
         })
         .collect::<Vec<_>>();
     result.sort_unstable_by_key(|row| row.id);
     result
+}
+
+fn lower_unsafe_gate(gate: &super::TUnsafeGate) -> jet_foundation::MIR::MirUnsafeGate {
+    jet_foundation::MIR::MirUnsafeGate {
+        file: gate.file.clone(),
+        line: gate.line,
+        reason: gate.reason.clone(),
+        enabled: gate.enabled,
+        fenced: gate.fenced,
+    }
 }
 
 fn lower_target_applicability(
@@ -2005,13 +2118,19 @@ pub(super) fn is_plain_return(ty: &Type) -> bool {
 /// before the failure solve names the default `Result<T, Err>`). An `Option`
 /// return is plain only as the exact success of a `T? Never!` carrier, since
 /// a callee that keeps its `T?` carrier returns that `Option` itself.
-pub(super) fn is_plain_call_return(returned: &Type, checked: &Type) -> bool {
+pub(super) fn is_plain_call_return(ctx: &LowerCtx, returned: &Type, checked: &Type) -> bool {
     if is_plain_return(returned) {
         return is_result_carrier(checked);
     }
     matches!(returned.without_user_tags(), Type::Option(_))
         && never_carrier_success(checked)
-            .is_some_and(|success| success.without_user_tags() == returned.without_user_tags())
+            .is_some_and(|success| {
+                let success = success.without_user_tags();
+                let returned = returned.without_user_tags();
+                success == returned
+                    || ctx.normalize_contextual_type(success)
+                        == ctx.normalize_contextual_type(returned)
+            })
 }
 
 /// The adaptation a raw-payload function value needs to fill a callable slot
@@ -2165,6 +2284,7 @@ fn ensure_referenced_traits(
     impls: &[MirImplDef],
     functions: &[MirFunction],
     types: &[MirTypeDef],
+    type_instances: &[MirType],
 ) {
     let mut known: HashSet<MirTraitId> = traits.iter().map(|row| row.id).collect();
     let mut needed: Vec<MirTraitRef> = Vec::new();
@@ -2205,6 +2325,18 @@ fn ensure_referenced_traits(
         for generic in &ty.generic_params {
             for bound in &generic.bounds {
                 take(bound, &mut known, &mut needed);
+            }
+        }
+    }
+    // A bound used only in a callable/trait-object type is still a reference.
+    // Native compiler traits need declaration identities just like impl bounds.
+    for ty in type_instances {
+        if let MirTypeKind::TraitObject(bounds) = ty.kind() {
+            for bound in bounds {
+                let id = MirTraitId(stable_id("mir-trait", &bound.name));
+                if known.insert(id) {
+                    needed.push(MirTraitRef { id, name: bound.name.clone() });
+                }
             }
         }
     }
@@ -2297,28 +2429,56 @@ fn lower_impl_rows(
     functions: &[TFunc],
     registry: &FunctionRegistry,
     types: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
 ) -> Result<Vec<MirImplDef>, LowerError> {
+    // Indexes over `functions`, built once instead of rescanning every
+    // function for each impl method key (rows x methods x functions): each
+    // function's registry ID (`id_for` is pure over the immutable registry),
+    // the first function carrying each ID (the scan's `find` order), and the
+    // method functions by (module, method base leaf), the two cheap
+    // conjuncts of `impl_method_matches`. Candidates keep function order.
+    let function_ids: Vec<Option<MirFunctionId>> =
+        functions.iter().map(|function| registry.id_for(function).ok()).collect();
+    let mut first_function_with_id: HashMap<MirFunctionId, usize> = HashMap::new();
+    for (index, id) in function_ids.iter().enumerate() {
+        if let Some(id) = id {
+            first_function_with_id.entry(*id).or_insert(index);
+        }
+    }
+    let mut method_functions: HashMap<(&str, &str), Vec<usize>> = HashMap::new();
+    for (index, function) in functions.iter().enumerate() {
+        if tfunc_method_owner(function).is_some() {
+            method_functions
+                .entry((function.module.as_str(), method_base_leaf(&function.name)))
+                .or_default()
+                .push(index);
+        }
+    }
     let mut result = Vec::new();
     for row in rows {
         let declared_self_type =
-            module_relative_type_instance(types, &row.self_type, &row.module, row.span)?;
+            module_relative_type_instance(type_index, &row.self_type, &row.module, row.span)?;
         let trait_name = row.trait_ref.as_ref().or(row.trait_name.as_ref());
         let mut method_groups: Vec<(MirType, Vec<MirFunctionId>)> = Vec::new();
         for method_key in &row.methods {
             let mut candidates = Vec::new();
             if let Some(id) = resolve_function_key(method_key, &row.module, registry) {
-                if let Some(function) = functions
-                    .iter()
-                    .find(|function| registry.id_for(function).ok() == Some(id))
-                {
-                    candidates.push((id, function));
+                if let Some(index) = first_function_with_id.get(&id) {
+                    candidates.push((id, &functions[*index]));
                 }
             }
-            for function in functions
-                .iter()
-                .filter(|function| impl_method_matches(function, row, method_key))
-            {
-                let id = registry.id_for(function)?;
+            let same_leaf = method_functions
+                .get(&(row.module.as_str(), method_base_leaf(method_key)))
+                .map_or(&[][..], Vec::as_slice);
+            for index in same_leaf {
+                let function = &functions[*index];
+                if !impl_method_matches(function, row, method_key) {
+                    continue;
+                }
+                let id = match function_ids[*index] {
+                    Some(id) => id,
+                    None => registry.id_for(function)?,
+                };
                 if !candidates.iter().any(|(candidate, _)| *candidate == id) {
                     candidates.push((id, function));
                 }
@@ -2327,7 +2487,7 @@ fn lower_impl_rows(
                 let Some((owner, _)) = tfunc_method_owner(function) else {
                     continue;
                 };
-                let owner = module_relative_type_instance(types, owner, &row.module, row.span)?;
+                let owner = module_relative_type_instance(type_index, owner, &row.module, row.span)?;
                 if let Some((_group_owner, group_methods)) = method_groups
                     .iter_mut()
                     .find(|(group_owner, _)| same_impl_owner(group_owner, &owner))
@@ -2380,7 +2540,7 @@ fn lower_impl_rows(
                         Ok(MirAssociatedTypeValue {
                             name: associated.name.clone(),
                             ty: module_relative_type_instance(
-                                types,
+                                type_index,
                                 &associated.ty,
                                 &row.module,
                                 associated.span,
@@ -2402,13 +2562,12 @@ fn lower_impl_rows(
                 operator_rhs: row
                     .operator_rhs
                     .as_ref()
-                    .map(|ty| module_relative_type_instance(types, ty, &row.module, row.span))
+                    .map(|ty| module_relative_type_instance(type_index, ty, &row.module, row.span))
                     .transpose()?,
                 operator_marker: row.operator_marker.clone(),
                 target_os: row.target_os.clone(),
                 target_applicability: MirTargetApplicability {
                     rust_aot: true,
-                    cranelift: true,
                     interpreter: true,
                     web: true,
                 },
@@ -2438,10 +2597,7 @@ fn lower_impl_rows(
     // Keep only checked method references; a method that did not enter the
     // executable TIR cannot be represented as a valid MIR edge. The checked
     // function ids are collected once (not rescanned per impl method).
-    let checked_ids: HashSet<MirFunctionId> = functions
-        .iter()
-        .filter_map(|function| registry.id_for(function).ok())
-        .collect();
+    let checked_ids: HashSet<MirFunctionId> = function_ids.iter().flatten().copied().collect();
     result.retain(|row| row.methods.iter().all(|id| checked_ids.contains(id)));
     result.sort_unstable_by_key(|row| row.id);
     Ok(result)
@@ -2551,7 +2707,6 @@ fn attach_orphan_methods(impls: &mut Vec<MirImplDef>, functions: &[MirFunction])
             target_os: None,
             target_applicability: MirTargetApplicability {
                 rust_aot: true,
-                cranelift: true,
                 interpreter: true,
                 web: true,
             },
@@ -2615,12 +2770,37 @@ fn lower_constant_rows(rows: &[super::tir_to_mir_types::TirConstantDef]) -> Vec<
                 visibility: lower_decl_visibility(row.visibility),
                 ty: lower_type(&row.ty),
                 is_storage: row.is_storage,
-                value: lower_constant_value(&row.value)?,
+                value: lower_byte_list_constant(&row.ty, &row.value)
+                    .or_else(|| lower_constant_value(&row.value))?,
             })
         })
         .collect::<Vec<_>>();
     result.sort_unstable_by_key(|row| row.id);
     result
+}
+
+/// A `[U8]` module constant whose folded value is a list of integer bytes (the
+/// generated Unicode tables, `[U8]{"\x.."}`) is one `MirConstant::Bytes`, not
+/// one constant per element: the JIT allocates it once and AOT emits one
+/// `vec![]`. Same rule as `tir_to_mir_expr::constant_byte_list` for literals.
+fn lower_byte_list_constant(ty: &Type, value: &CtValue) -> Option<MirConstant> {
+    let Type::List(element) = ty.without_user_tags() else {
+        return None;
+    };
+    if !matches!(element.as_ref(), Type::IntN { signed: false, bits: 8 }) {
+        return None;
+    }
+    let CtValue::List(values) = value else {
+        return None;
+    };
+    values
+        .iter()
+        .map(|value| match value {
+            CtValue::Int(byte) => u8::try_from(*byte).ok(),
+            _ => None,
+        })
+        .collect::<Option<Vec<u8>>>()
+        .map(MirConstant::Bytes)
 }
 
 /// The most scalar leaves a constant may hold and still be copied into each
@@ -2763,6 +2943,7 @@ fn lower_constant_value(value: &CtValue) -> Option<MirConstant> {
 fn lower_const_key(key: &CtKey) -> Option<jet_foundation::MIR::MirConstKey> {
     Some(match key {
         CtKey::Int(value) => jet_foundation::MIR::MirConstKey::Int(*value),
+        CtKey::BigInt(value) => jet_foundation::MIR::MirConstKey::from_bigint(value),
         CtKey::Str(value) => jet_foundation::MIR::MirConstKey::String(value.clone()),
         CtKey::Bool(value) => jet_foundation::MIR::MirConstKey::Bool(*value),
         CtKey::Char(value) => jet_foundation::MIR::MirConstKey::Char(*value),
@@ -3434,8 +3615,18 @@ fn lower_module_item(
 /// importing module. Prefer an exact canonical key, then the importing
 /// module's child path, and finally a unique module name. An ambiguous name
 /// remains unchanged rather than guessing a target.
-fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) -> String {
+fn canonical_module_key(
+    modules: &[TirModuleFact],
+    owner: &str,
+    target: &str,
+    foreign_target: Option<&str>,
+) -> String {
     if target.is_empty() {
+        return target.to_string();
+    }
+    // Foreign binding aliases name the checked linkage target, not a guessed
+    // generated cache-module spelling.
+    if let Some(target) = foreign_target {
         return target.to_string();
     }
     if modules.iter().any(|row| row.key == target) {
@@ -3461,6 +3652,48 @@ fn canonical_module_key(modules: &[TirModuleFact], owner: &str, target: &str) ->
     match (matches.next(), matches.next()) {
         (Some(row), None) => row.key.clone(),
         _ => target.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod canonical_module_target_tests {
+    use super::{TirModuleFact, canonical_module_key};
+
+    fn module(key: &str, name: &str) -> TirModuleFact {
+        TirModuleFact {
+            key: key.into(),
+            name: name.into(),
+            path: key.into(),
+            source_path: key.into(),
+            imports: Vec::new(),
+            item_order: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn checked_foreign_target_does_not_guess_a_generated_cache_name() {
+        let modules = [
+            module(".jet/bindings/c::c.jet", "__c_cache_c"),
+            module("::c.c", "__c_c"),
+        ];
+        assert_eq!(
+            canonical_module_key(&modules, ".::run.jet", "c", Some("::c.c")),
+            "::c.c",
+        );
+        assert_eq!(canonical_module_key(&modules, ".::run.jet", "c", None), "c");
+    }
+
+    #[test]
+    fn ordinary_module_identity_keeps_owner_and_ambiguity_rules() {
+        let modules = [
+            module("owner::child", "child"),
+            module("other::child", "child"),
+        ];
+        assert_eq!(
+            canonical_module_key(&modules, "owner", "child", None),
+            "owner::child",
+        );
+        assert_eq!(canonical_module_key(&modules, "", "child", None), "child");
     }
 }
 
@@ -3518,6 +3751,7 @@ fn lower_import_item(
 fn lower_module_rows(
     modules: &[TirModuleFact],
     import_rows: &[TirImportFact],
+    cffi: &MirCffiFacts,
     types: &[MirTypeDef],
     traits: &[MirTraitDef],
     impls: &[MirImplDef],
@@ -3544,7 +3778,18 @@ fn lower_module_rows(
                 TirImportKind::File { path } => MirImportKind::File { path: path.clone() },
                 TirImportKind::Module { path } => MirImportKind::Module { path: path.clone() },
                 TirImportKind::Unqualified { module, items } => {
-                    let module_key = canonical_module_key(modules, &row.module, module);
+                    let foreign_target = cffi.import_links.iter().find(|link| {
+                        link.importing_module == row.module
+                            && link.scope.is_none()
+                            && (link.alias == row.alias
+                                || items.iter().any(|item| item.local == link.alias))
+                    });
+                    let module_key = canonical_module_key(
+                        modules,
+                        &row.module,
+                        module,
+                        foreign_target.map(|link| link.target_module.as_str()),
+                    );
                     MirImportKind::Unqualified {
                         module: jet_foundation::MIR::MirModuleId(stable_id(
                             "mir-module",
@@ -3713,24 +3958,57 @@ fn type_fields(ty: &MirTypeDef) -> Vec<jet_foundation::MIR::MirFieldRow> {
 /// artifact identity alongside the complete canonical program.
 pub fn lower_checked_mir_program_for(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
 ) -> Result<(MirProgram, MirArtifactId), LowerError> {
-    lower_checked_mir_program_for_with_debug(bundle, request, false)
+    lower_checked_mir_program_for_with_debug(bundle, checked_nominals, request, false)
+}
+
+/// Native runtime entry: the request is still the checked artifact selection,
+/// but ownership exits are explicit instead of crossing native frames.
+pub fn lower_checked_native_mir_program_for(
+    bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
+    request: MirArtifactRequest,
+) -> Result<(MirProgram, MirArtifactId), LowerError> {
+    let target = request.target;
+    let kind = request.kind;
+    let tir = super::lower_checked_tir_program_for_with_debug(bundle, checked_nominals, request, false)?;
+    let mir = lower_native_tir_to_mir(tir)?;
+    mir.validate().map_err(|error| LowerError::new(Span::new(0, 0), format!("native MIR validation failed: {error}")))?;
+    let artifact = mir.artifacts.iter().find(|artifact| artifact.target == target && artifact.kind == kind)
+        .map(|artifact| artifact.id)
+        .ok_or_else(|| LowerError::new(Span::new(0, 0), "native MIR request has no artifact row"))?;
+    Ok((mir, artifact))
 }
 
 /// Lower checked MIR with the native debug source-map markers enabled.
 pub fn lower_checked_mir_program_for_with_debug(
     bundle: &crate::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
     debug_linemap: bool,
 ) -> Result<(MirProgram, MirArtifactId), LowerError> {
     let target = request.target;
     let kind = request.kind;
-    let tir = super::lower_checked_tir_program_for_with_debug(bundle, request, debug_linemap)?;
+    let native_dump = std::env::var_os("JET_DUMP_NATIVE_MIR").map(|path| (path, request.clone()));
+    let tir = super::lower_checked_tir_program_for_with_debug(bundle, checked_nominals, request, debug_linemap)?;
     let mut mir = lower_tir_to_mir(tir)?;
     // Compile time is explicit in the checker, so ordinary immutable bindings
     // over pure work are folded here, once, for every execution tier.
     crate::Codegen::MIREval::fold_pure_calls(&mut mir);
+    // The collect-all census must expose the input even when entry legality
+    // rejects it. Stream Debug text through the existing bounded writer; the
+    // ordinary canonical post-pass dump keeps its original path and behavior.
+    if std::env::var_os("JET_DEBUG_LOWER_ALL").is_some_and(|value| value != "0") {
+        if let Some(path) = std::env::var_os("JET_DUMP_MIR") {
+            let mut before = path.clone();
+            before.push(".before-legality");
+            if let Err(error) = dump_mir_debug(&before, &mir) {
+                eprintln!("JET_DUMP_MIR: cannot write pre-legality input: {error}");
+            }
+        }
+    }
     let mir = jet_foundation::MIR::optimize_mir_program(
         mir,
         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
@@ -3741,11 +4019,20 @@ pub fn lower_checked_mir_program_for_with_debug(
             format!("canonical MIR optimization failed: {error}"),
         )
     })?;
+    jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::FunctionsLowered, mir.functions.len());
     // Debug hook for the Jet backend harness (Compiler/JetBackend/Tests):
     // JET_DUMP_MIR=<path> writes the canonical program's Debug form. Inert
-    // when unset.
+    // when unset. The Debug text streams through a buffered writer instead of
+    // one String, so a compiler-sized program never holds the whole text.
     if let Some(path) = std::env::var_os("JET_DUMP_MIR") {
-        let _ = std::fs::write(path, format!("{mir:#?}"));
+        if let Err(error) = dump_mir_debug(&path, &mir) {
+            eprintln!("JET_DUMP_MIR: cannot write {}: {error}", path.to_string_lossy());
+        }
+    }
+    if let Some((path, request)) = native_dump {
+        let (native, _) = lower_checked_native_mir_program_for(bundle, checked_nominals, request)?;
+        std::fs::write(path, format!("{native:#?}"))
+            .map_err(|error| LowerError::new(Span::new(0, 0), format!("cannot write native MIR: {error}")))?;
     }
     let artifact = mir
         .artifacts
@@ -3762,6 +4049,13 @@ pub fn lower_checked_mir_program_for_with_debug(
             )
         })?;
     Ok((mir, artifact))
+}
+
+fn dump_mir_debug(path: &std::ffi::OsStr, mir: &MirProgram) -> std::io::Result<()> {
+    use std::io::Write as _;
+    let mut out = std::io::BufWriter::new(std::fs::File::create(path)?);
+    write!(out, "{mir:#?}")?;
+    out.flush()
 }
 
 fn declared_type_instances(types: &[MirTypeDef]) -> TypeInstances {
@@ -4002,6 +4296,7 @@ fn lower_package_facts(program: &TirProgram) -> MirPackageFacts {
         active_os: program.facts.active_os.clone(),
         inferred_layer: program.facts.inferred_layer.clone(),
         allocator: program.facts.allocator.clone(),
+        program_allocator: program.facts.program_allocator.clone(),
         package_version: program.artifact_facts.package_version.clone(),
         artifact_target: Some(program.artifact_facts.target),
         target_dossier: program.artifact_facts.build.target_dossier.clone(),
@@ -4101,6 +4396,7 @@ fn lower_name_facts(facts: &super::artifact_plan::TirNameFacts) -> MirNameFacts 
         aliases: facts.aliases.clone(),
         references: facts.references.clone(),
         structure_facts: facts.structure_facts.clone(),
+        display_paths: facts.display_paths.clone(),
     }
 }
 type LoweredFunction = (
@@ -4110,6 +4406,7 @@ type LoweredFunction = (
     Vec<MirType>,
     Vec<MirFunction>,
     Vec<MirCallbackAdapter>,
+    Vec<MirConstantDef>,
 );
 fn lower_trait_ref(ctx: &LowerCtx<'_>, name: &str) -> Result<MirTraitRef, LowerError> {
     let canonical = ctx
@@ -4213,7 +4510,6 @@ fn parse_runtime_part(key: &str) -> Option<MirRuntimePartId> {
         Browser,
         Args,
         Reflect,
-        AuthTokens,
         AuthSession,
         Sync,
         Services,
@@ -4235,6 +4531,7 @@ fn int_width(ty: &Type) -> Option<(bool, u8)> {
 fn lower_function(
     f: &TFunc,
     type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     nominal_identities: &HashMap<String, String>,
     reflect_paths: &HashMap<String, String>,
     trait_defs: &[super::tir_to_mir_types::TirTraitDef],
@@ -4247,6 +4544,7 @@ fn lower_function(
     let mut ctx = LowerCtx::new(
         f,
         type_defs,
+        type_index,
         nominal_identities,
         reflect_paths,
         trait_defs,
@@ -4254,6 +4552,12 @@ fn lower_function(
         source_texts,
         modules,
     );
+    ctx.partial_move_roots = match body {
+        Some(TLambdaBody::Expr(expr)) => super::lower::projected_move_roots(&[], Some(expr)),
+        Some(TLambdaBody::Block(stmts)) => super::lower::projected_move_roots(stmts, None),
+        Some(TLambdaBody::SharedBlock(stmts)) => super::lower::projected_move_roots(stmts, None),
+        None => super::lower::projected_move_roots(&f.body, None),
+    };
     let source_file = ctx.source_file_id_for(&f.source_file);
 
     if let Some(lambda) = lambda {
@@ -4267,6 +4571,7 @@ fn lower_function(
     for (offset, (name, ty, access)) in f.params.iter().enumerate() {
         ctx.bind_parameter(param_index + offset, name, ty, *access)?;
     }
+    ctx.emit_poll(MirPollKind::Check, false)?;
     match body {
         Some(TLambdaBody::Expr(expr)) => {
             let value = ctx.lower_child(expr)?;
@@ -4359,7 +4664,7 @@ fn lower_function(
     scopes.sort_unstable_by_key(|scope| scope.id);
     let mut blocks = ctx.blocks;
     blocks.sort_unstable_by_key(|block| block.id);
-    let mir_function = MirFunction {
+    let mut mir_function = MirFunction {
         id: function_id,
         module_id: jet_foundation::MIR::MirModuleId(stable_id("mir-module", &f.module)),
         source_file,
@@ -4372,7 +4677,6 @@ fn lower_function(
         visibility: lower_visibility(f.visibility),
         target_applicability: MirTargetApplicability {
             rust_aot: f.target_applicability.rust_aot,
-            cranelift: f.target_applicability.cranelift,
             interpreter: f.target_applicability.interpreter,
             web: f.target_applicability.web,
         },
@@ -4402,16 +4706,7 @@ fn lower_function(
             maximal: f.effects.maximal,
             direct_spans: f.effects.direct_spans.clone(),
         },
-        unsafe_gate: f
-            .unsafe_gate
-            .as_ref()
-            .map(|gate| jet_foundation::MIR::MirUnsafeGate {
-                file: gate.file.clone(),
-                line: gate.line,
-                reason: gate.reason.clone(),
-                enabled: gate.enabled,
-                fenced: gate.fenced,
-            }),
+        unsafe_gate: f.unsafe_gate.as_ref().map(lower_unsafe_gate),
         is_pure: f.is_pure,
         is_unsafe: f.is_unsafe,
         memo_bound: f.memo_bound,
@@ -4461,6 +4756,7 @@ fn lower_function(
     let nested_functions = ctx.nested_functions;
     let mut prelude_calls = ctx.prelude_calls;
     prelude_calls.sort_unstable_by_key(|call| call.id);
+    mir_refine_function_ownership(&mut mir_function, &prelude_calls);
     let mut callbacks = ctx.callbacks;
     callbacks.sort_unstable_by_key(|callback| callback.id);
     Ok((
@@ -4470,6 +4766,7 @@ fn lower_function(
         ctx.type_instances.into_rows(),
         nested_functions,
         callbacks,
+        ctx.shared_sites,
     ))
 }
 
@@ -4580,15 +4877,62 @@ pub(super) fn type_identity_key(ty: &Type) -> String {
     }
 }
 
-/// The bare `Group` is the compiler-owned task-group handle. The same-leaf
-/// Core record (`core.data::Group<K, V>`) is generic and always spelled with
-/// arguments, so it never claims the bare spelling; only a non-generic checked
-/// row keyed exactly `Group` may.
-fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
-    name == crate::Syntax::TYPE_TASKGROUP
-        && !type_defs
-            .iter()
-            .any(|row| row.key == name && row.generic_params.is_empty())
+/// Nominal lookup facts borrowed from the type table. Declaration phases keep
+/// first-row order; after union folding and sorting, all function and lambda
+/// lowering shares one frozen index.
+pub(super) struct NominalTypeIndex<'a> {
+    exact: HashMap<&'a str, ExactNominal>,
+    declared_names: HashSet<(&'a str, &'a str)>,
+    core_carriers: HashMap<&'a str, &'a str>,
+    has_bare_task_group: bool,
+}
+
+struct ExactNominal {
+    id: MirTypeId,
+    ambiguous: bool,
+}
+
+impl<'a> NominalTypeIndex<'a> {
+    fn build(type_defs: &'a [MirTypeDef]) -> Self {
+        let mut index = Self {
+            exact: HashMap::with_capacity(type_defs.len()),
+            declared_names: HashSet::with_capacity(type_defs.len()),
+            core_carriers: HashMap::new(),
+            has_bare_task_group: false,
+        };
+        for row in type_defs {
+            index.insert(&row.key, &row.name, row.id, row.generic_params.is_empty());
+        }
+        index
+    }
+
+    fn insert(&mut self, key: &'a str, name: &'a str, id: MirTypeId, non_generic: bool) {
+        self.exact.entry(key)
+            .and_modify(|row| row.ambiguous = true)
+            .or_insert(ExactNominal { id, ambiguous: false });
+        self.declared_names.insert((key, name));
+        self.has_bare_task_group |= key == crate::Syntax::TYPE_TASKGROUP && non_generic;
+        if key.starts_with(jet_foundation::Diagnostics::CORE_SOURCE_ROOT) {
+            if let Some((owner, leaf)) = key.rsplit_once("::") {
+                if let Some((_, path)) = owner.rsplit_once("::") {
+                    if registered_core_owner_path(leaf) == Some(path) {
+                        // Preserve the original scan's first-row selection.
+                        self.core_carriers.entry(leaf).or_insert(key);
+                    }
+                }
+            }
+        }
+    }
+
+    fn declares(&self, key: &str, name: &str) -> bool {
+        self.declared_names.contains(&(key, name))
+    }
+}
+
+/// The bare `Group` is the compiler-owned handle unless a non-generic
+/// checked row keyed exactly `Group` claims that spelling.
+fn is_builtin_task_group(type_index: &NominalTypeIndex<'_>, name: &str) -> bool {
+    name == crate::Syntax::TYPE_TASKGROUP && !type_index.has_bare_task_group
 }
 
 /// The task-group handle's identity key. Every lowering path derives the
@@ -4597,39 +4941,38 @@ fn is_builtin_task_group(type_defs: &[MirTypeDef], name: &str) -> bool {
 /// the handle to that record's field layout (#3779).
 const BUILTIN_TASK_GROUP_IDENTITY_KEY: &str = "builtin:task-group";
 
-/// A bare built-in boundary spelling (`Path`, `URL`, `DateTime`) names only its
-/// carrier record (`core.net.url`'s `URL`); a loaded record that merely shares
-/// the leaf (`core.files.path`'s `Path`) is a different type and never claims
-/// the bare spelling. Every other name may match by leaf.
-fn row_claims_bare_name(row: &MirTypeDef, name: &str) -> bool {
-    let Some(kind) = crate::Syntax::typed_head_kind(name) else {
-        return true;
+/// Bare Core carriers have an owner registered in Core.jet. Resolve only that
+/// exact source identity; an unrelated declaration with the same leaf cannot
+/// participate. Ordinary source nominals arrive already module-qualified.
+fn registered_core_owner_path(name: &str) -> Option<&'static str> {
+    if name.contains("::") || name.contains('.') {
+        return None;
+    }
+    let modules;
+    let module = match crate::Syntax::typed_head_kind(name) {
+        Some(kind) => kind.carrier_record_module()?,
+        None => {
+            modules = jet_foundation::CoreModuleExports::core_type_modules(name);
+            let [module] = modules.as_slice() else { return None };
+            *module
+        }
     };
-    kind.carrier_record_module()
-        .and_then(jet_foundation::CoreModuleExports::core_source_module)
-        .is_some_and(|source| row.key.ends_with(&format!("{}::{name}", source.path)))
+    jet_foundation::CoreModuleExports::core_source_module(module).map(|source| source.path)
 }
 
 fn canonical_nominal_name(
-    type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     name: &str,
     span: Span,
 ) -> Result<String, LowerError> {
-    if let Some(carrier) = crate::Codegen::TIR::tir_to_mir_types::core_term_stream_carrier(name) {
-        return Ok(carrier.to_string());
-    }
-    let exact = type_defs
-        .iter()
-        .filter(|ty| ty.key == name)
-        .collect::<Vec<_>>();
-    if let [ty] = exact.as_slice() {
-        return Ok(ty.key.clone());
-    }
-    if exact.len() > 1 {
-        return Err(LowerError::new(
-            span,
-            format!("ambiguous checked MIR type key `{name}`"),
-        ));
+    if let Some((key, row)) = type_index.exact.get_key_value(name) {
+        if row.ambiguous {
+            return Err(LowerError::new(
+                span,
+                format!("ambiguous checked MIR type key `{name}`"),
+            ));
+        }
+        return Ok((*key).to_string());
     }
     // D-UNIONTYPE1=A: a module-qualified anonymous-union spelling names the
     // one structural carrier row (`fold_anonymous_union_declarations`).
@@ -4638,41 +4981,36 @@ fn canonical_nominal_name(
         .next()
         .filter(|leaf| *leaf != name && leaf.starts_with("__JetUnion_"))
     {
-        if type_defs.iter().any(|ty| ty.key == leaf) {
+        if type_index.exact.contains_key(leaf) {
             return Ok(leaf.to_string());
         }
     }
-    let matches = type_defs
-        .iter()
-        .filter(|ty| ty.name == name && row_claims_bare_name(ty, name))
-        .collect::<Vec<_>>();
-    match matches.as_slice() {
-        [ty] => Ok(ty.key.clone()),
-        [] => Ok(name.to_string()),
-        _ => Err(LowerError::new(
-            span,
-            format!("ambiguous checked MIR type name `{name}`"),
-        )),
+    if let Some(key) = type_index.core_carriers.get(name) {
+        return Ok(key.to_string());
     }
+    // Sema/TIR supplies module-qualified identities for source nominals.
+    // A bare name left here is a builtin or a generic parameter, never a
+    // request to search unrelated modules for a matching declaration leaf.
+    Ok(name.to_string())
 }
 
-fn canonicalize_type(type_defs: &[MirTypeDef], ty: &Type, span: Span) -> Result<Type, LowerError> {
+fn canonicalize_type(type_index: &NominalTypeIndex<'_>, ty: &Type, span: Span) -> Result<Type, LowerError> {
     Ok(match ty {
-        Type::List(inner) => Type::List(Box::new(canonicalize_type(type_defs, inner, span)?)),
+        Type::List(inner) => Type::List(Box::new(canonicalize_type(type_index, inner, span)?)),
         Type::Map {
             key,
             key_span,
             value,
         } => Type::Map {
-            key: Box::new(canonicalize_type(type_defs, key, span)?),
+            key: Box::new(canonicalize_type(type_index, key, span)?),
             key_span: *key_span,
-            value: Box::new(canonicalize_type(type_defs, value, span)?),
+            value: Box::new(canonicalize_type(type_index, value, span)?),
         },
-        Type::Shared(inner) => Type::Shared(Box::new(canonicalize_type(type_defs, inner, span)?)),
-        Type::Option(inner) => Type::Option(Box::new(canonicalize_type(type_defs, inner, span)?)),
+        Type::Shared(inner) => Type::Shared(Box::new(canonicalize_type(type_index, inner, span)?)),
+        Type::Option(inner) => Type::Option(Box::new(canonicalize_type(type_index, inner, span)?)),
         Type::Result { ok, err } => Type::Result {
-            ok: Box::new(canonicalize_type(type_defs, ok, span)?),
-            err: Box::new(canonicalize_type(type_defs, err, span)?),
+            ok: Box::new(canonicalize_type(type_index, ok, span)?),
+            err: Box::new(canonicalize_type(type_index, err, span)?),
         },
         Type::Fn {
             params,
@@ -4684,79 +5022,77 @@ fn canonicalize_type(type_defs: &[MirTypeDef], ty: &Type, span: Span) -> Result<
         } => Type::Fn {
             params: params
                 .iter()
-                .map(|param| canonicalize_type(type_defs, param, span))
+                .map(|param| canonicalize_type(type_index, param, span))
                 .collect::<Result<Vec<_>, _>>()?,
             ret: ret
                 .as_deref()
-                .map(|ret| canonicalize_type(type_defs, ret, span).map(Box::new))
+                .map(|ret| canonicalize_type(type_index, ret, span).map(Box::new))
                 .transpose()?,
             effect_bound: effect_bound.clone(),
             param_contract: param_contract.clone(),
             call_metadata: call_metadata.clone(),
             return_view_provenance: return_view_provenance.clone(),
         },
-        Type::Named(name) if is_builtin_task_group(type_defs, name) => ty.clone(),
-        Type::Named(name) => Type::Named(canonical_nominal_name(type_defs, name, span)?),
+        Type::Named(name) if is_builtin_task_group(type_index, name) => ty.clone(),
+        Type::Named(name) => Type::Named(canonical_nominal_name(type_index, name, span)?),
         Type::Apply { name, args } => Type::Apply {
-            name: canonical_nominal_name(type_defs, name, span)?,
+            name: canonical_nominal_name(type_index, name, span)?,
             args: args
                 .iter()
-                .map(|arg| canonicalize_type(type_defs, arg, span))
+                .map(|arg| canonicalize_type(type_index, arg, span))
                 .collect::<Result<Vec<_>, _>>()?,
         },
         Type::Tuple(fields) => Type::Tuple(
             fields
                 .iter()
                 .map(|(name, ty)| {
-                    canonicalize_type(type_defs, ty, span).map(|ty| (name.clone(), Box::new(ty)))
+                    canonicalize_type(type_index, ty, span).map(|ty| (name.clone(), Box::new(ty)))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
         ),
         Type::FixedList { elem, len } => Type::FixedList {
-            elem: Box::new(canonicalize_type(type_defs, elem, span)?),
+            elem: Box::new(canonicalize_type(type_index, elem, span)?),
             len: len.clone(),
         },
         Type::InlineRange { base, lo, hi } => Type::InlineRange {
-            base: Box::new(canonicalize_type(type_defs, base, span)?),
+            base: Box::new(canonicalize_type(type_index, base, span)?),
             lo: *lo,
             hi: *hi,
         },
         Type::Tagged { marker, inner } => Type::Tagged {
             marker: marker.clone(),
-            inner: Box::new(canonicalize_type(type_defs, inner, span)?),
+            inner: Box::new(canonicalize_type(type_index, inner, span)?),
         },
         Type::Union(members) => Type::Union(
             members
                 .iter()
-                .map(|member| canonicalize_type(type_defs, member, span))
+                .map(|member| canonicalize_type(type_index, member, span))
                 .collect::<Result<Vec<_>, _>>()?,
         ),
         Type::Quantity { base, dimension } => Type::Quantity {
-            base: Box::new(canonicalize_type(type_defs, base, span)?),
+            base: Box::new(canonicalize_type(type_index, base, span)?),
             dimension: dimension.clone(),
         },
         _ => ty.clone(),
     })
 }
 fn canonical_type_instance(
-    type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     ty: &Type,
     span: Span,
 ) -> Result<MirType, LowerError> {
-    let source = canonicalize_type(type_defs, ty, span)?;
+    let source = canonicalize_type(type_index, ty, span)?;
     let key = type_identity_key(&source);
     let identity = match &source {
-        Type::Named(name) if is_builtin_task_group(type_defs, name) => {
+        Type::Named(name) if is_builtin_task_group(type_index, name) => {
             MirTypeId(stable_id("mir-type", &key))
         }
-        Type::Named(name) => type_defs
-            .iter()
-            .find(|row| row.key == *name || (row.name == *name && row_claims_bare_name(row, name)))
+        Type::Named(name) => type_index.exact
+            .get(name.as_str())
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
-        Type::Apply { name, args } if args.is_empty() => type_defs
-            .iter()
-            .find(|row| row.key == *name || (row.name == *name && row_claims_bare_name(row, name)))
+        Type::Apply { name, args } if args.is_empty() => type_index.exact
+            .get(name.as_str())
             .map(|row| row.id)
             .unwrap_or_else(|| MirTypeId(stable_id("mir-type", &key))),
         _ => MirTypeId(stable_id("mir-type", &key)),
@@ -4764,7 +5100,7 @@ fn canonical_type_instance(
     Ok(lower_type(&source).with_identity(identity))
 }
 fn module_relative_type_instance(
-    type_defs: &[MirTypeDef],
+    type_index: &NominalTypeIndex<'_>,
     ty: &Type,
     module: &str,
     span: Span,
@@ -4774,12 +5110,9 @@ fn module_relative_type_instance(
             return None;
         }
         let candidate = format!("{module}::{name}");
-        type_defs
-            .iter()
-            .any(|definition| definition.key == candidate && definition.name == name)
-            .then_some(candidate)
+        type_index.declares(&candidate, name).then_some(candidate)
     });
-    canonical_type_instance(type_defs, &qualified, span)
+    canonical_type_instance(type_index, &qualified, span)
 }
 fn lower_visibility(visibility: super::TVisibility) -> jet_foundation::MIR::MirVisibility {
     match visibility {
@@ -4971,6 +5304,8 @@ enum ExitTarget {
     Return(Option<MirPlaceId>),
     Break(MirBlockId),
     Continue(MirBlockId),
+    Jump(MirBlockId),
+    Stopped,
 }
 
 /// One drop-chain entry of a frame: exits toward `target` taken after the
@@ -5056,6 +5391,8 @@ pub(super) struct IndexedSource<'s> {
 pub(super) struct LowerCtx<'a> {
     pub(super) function: &'a TFunc,
     pub(super) type_defs: &'a [MirTypeDef],
+    type_index: &'a NominalTypeIndex<'a>,
+    generic_parameters: HashSet<&'a str>,
     pub(super) nominal_identities: &'a HashMap<String, String>,
     pub(super) reflect_paths: &'a HashMap<String, String>,
     pub(super) trait_defs: &'a [super::tir_to_mir_types::TirTraitDef],
@@ -5086,10 +5423,12 @@ pub(super) struct LowerCtx<'a> {
     pub(super) scopes: Vec<MirScope>,
     pub(super) drops: Vec<MirDropAction>,
     pub(super) nested_functions: Vec<MirFunction>,
+    pub(super) shared_sites: Vec<MirConstantDef>,
     pub(super) checked_vector_facts: Vec<MirVectorFact>,
     pub(super) loops: Vec<(Option<String>, MirBlockId, MirBlockId)>,
     loop_defer_depths: Vec<usize>,
     defer_stack: Vec<DeferFrame>,
+    stop_cleanup_active: bool,
     /// The final block of each shared drop chain (see `ExitTarget`).
     exit_tails: HashMap<ExitTarget, MirBlockId>,
     /// Locals that carry a returned value through a shared drop chain, one
@@ -5109,6 +5448,8 @@ pub(super) struct LowerCtx<'a> {
     /// bindings under such a subject alias the place through
     /// `MirProjection::Payload` instead of copying the payload out.
     pattern_windows: HashMap<MirValueId, MirPlaceId>,
+    pub(super) pattern_lookup_head: Option<MirBlockId>,
+    pub(super) pattern_lookup_caches: HashMap<String, MirPlaceId>,
     /// Generated locals bound with `name := &place` (a nested-pattern switch
     /// evaluates its `&place` subject once into one); a pattern on such a
     /// local is a write window like the `&place` itself.
@@ -5128,8 +5469,13 @@ pub(super) struct LowerCtx<'a> {
     /// slot, so a consuming use copies it instead of moving out of the owner.
     read_alias_places: HashSet<MirPlaceId>,
     pub(super) drop_live_places: HashMap<MirPlaceId, MirPlaceId>,
-    /// Every file-owner leaf place registered for cleanup in this function.
-    pub(super) file_owner_places: Vec<MirPlaceId>,
+    /// Source roots of projected, consuming moves, collected before emission.
+    partial_move_roots: HashSet<String>,
+    /// Only these roots use leaf flags; ordinary records keep one root flag.
+    pub(super) split_drop_roots: HashSet<MirPlaceId>,
+    /// Every file-owner leaf place registered for cleanup in this function,
+    /// with the live flag that guards its cleanup.
+    pub(super) file_owner_places: Vec<(MirPlaceId, MirPlaceId)>,
     send_fn_locals: HashSet<String>,
     capture_values: HashMap<String, MirValueId>,
     pub(super) prelude_calls: Vec<MirPreludeCall>,
@@ -5251,6 +5597,7 @@ impl<'a> LowerCtx<'a> {
     fn new(
         function: &'a TFunc,
         type_defs: &'a [MirTypeDef],
+        type_index: &'a NominalTypeIndex<'a>,
         nominal_identities: &'a HashMap<String, String>,
         reflect_paths: &'a HashMap<String, String>,
         trait_defs: &'a [super::tir_to_mir_types::TirTraitDef],
@@ -5276,6 +5623,9 @@ impl<'a> LowerCtx<'a> {
             nominal_identities,
             reflect_paths,
             type_defs,
+            type_index,
+            generic_parameters: function.generic_params.iter()
+                .map(|parameter| parameter.name.as_str()).collect(),
             trait_defs,
             function_registry,
             trait_method_traits: HashMap::new(),
@@ -5297,9 +5647,11 @@ impl<'a> LowerCtx<'a> {
             drops: Vec::new(),
             checked_vector_facts: Vec::new(),
             nested_functions: Vec::new(),
+            shared_sites: Vec::new(),
             loops: Vec::new(),
             loop_defer_depths: Vec::new(),
             defer_stack: vec![DeferFrame::default()],
+            stop_cleanup_active: false,
             exit_tails: HashMap::new(),
             exit_value_slots: Vec::new(),
             deferred_closes: Vec::new(),
@@ -5310,11 +5662,15 @@ impl<'a> LowerCtx<'a> {
             local_values: HashMap::new(),
             shadowed_locals: Vec::new(),
             pattern_windows: HashMap::new(),
+            pattern_lookup_head: None,
+            pattern_lookup_caches: HashMap::new(),
             window_aliases: HashSet::new(),
             read_windows: HashSet::new(),
             read_parameter_values: HashSet::new(),
             read_alias_places: HashSet::new(),
             drop_live_places: HashMap::new(),
+            partial_move_roots: HashSet::new(),
+            split_drop_roots: HashSet::new(),
             file_owner_places: Vec::new(),
             send_fn_locals: HashSet::new(),
             capture_values: HashMap::new(),
@@ -5997,29 +6353,27 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn type_id_for(&self, key: &str) -> Result<MirTypeId, LowerError> {
-        // A bare name declared by the function's own module shadows a
-        // compiler-owned row of the same leaf (a user `Effect` over the Core
-        // export row keyed `Effect`), as `mir_type` resolves the value type.
+        // A bare name resolves in the function's scope first, exactly as
+        // `mir_type` resolves the value type: the module's own declaration
+        // or an import's checked identity shadows a compiler-owned row of the
+        // same leaf (a user `Effect` over the Core export row keyed `Effect`;
+        // Core json's imported source `DataEvent` over the native carrier row).
         let scoped = (!self.function.module.is_empty() && !key.contains("::"))
             .then(|| format!("{}::{key}", self.function.module))
-            .filter(|scoped| {
-                self.type_defs
-                    .iter()
-                    .any(|ty| ty.key == *scoped && ty.name == key)
+            .and_then(|scoped| {
+                self.nominal_identities
+                    .get(&scoped)
+                    .cloned()
+                    .or_else(|| self.type_index.declares(&scoped, key).then_some(scoped))
             });
         let canonical_key = canonical_nominal_name(
-            self.type_defs,
+            self.type_index,
             scoped.as_deref().unwrap_or(key),
             self.span(),
         )?;
-        let exact = self
-            .type_defs
-            .iter()
-            .filter(|ty| ty.key == canonical_key)
-            .collect::<Vec<_>>();
-        match exact.as_slice() {
-            [ty] => Ok(ty.id),
-            [] => match self
+        match self.type_index.exact.get(canonical_key.as_str()) {
+            Some(row) if !row.ambiguous => Ok(row.id),
+            None => match self
                 .trait_defs
                 .iter()
                 .filter(|trait_def| trait_def.key == key || trait_def.name == key)
@@ -6058,35 +6412,23 @@ impl<'a> LowerCtx<'a> {
 
     fn normalize_contextual_type(&self, ty: &Type) -> Type {
         ty.map_named_types(&|name| {
-            if self
-                .function
-                .generic_params
-                .iter()
-                .any(|parameter| parameter.name == name)
-            {
+            if self.generic_parameters.contains(name) {
                 return None;
             }
             let scoped = format!("{}::{name}", self.function.module);
-            // A bare built-in type name (`Path`) outside its declaring module is
-            // the built-in; a loaded module's same-named record is reached only
-            // through its scoped or canonical spelling.
-            let bare = if name == crate::Syntax::TYPE_TASKGROUP
-                || crate::Syntax::typed_head_kind(name).is_some()
-            {
-                None
-            } else {
-                self.nominal_identities.get(name)
-            };
+            // A bare nominal is resolved only in its declaring scope. Imported
+            // types arrive with a checked owner; a globally unique leaf is not
+            // visibility evidence and must not capture a native carrier name.
+            let canonical = name.contains("::")
+                .then(|| self.nominal_identities.get(name))
+                .flatten();
             self.nominal_identities
                 .get(&scoped)
-                .or(bare)
+                .or(canonical)
                 .cloned()
                 .or_else(|| {
                     let qualified = (!self.function.module.is_empty()).then_some(scoped)?;
-                    self.type_defs
-                        .iter()
-                        .any(|definition| definition.key == qualified && definition.name == name)
-                        .then_some(qualified)
+                    self.type_index.declares(&qualified, name).then_some(qualified)
                 })
         })
     }
@@ -6094,40 +6436,7 @@ impl<'a> LowerCtx<'a> {
     pub(super) fn mir_type(&mut self, ty: &Type) -> Result<MirType, LowerError> {
         let span = self.span();
         let normalized = self.normalize_contextual_type(ty);
-        let contextual_owner = match &normalized {
-            Type::Named(name) => {
-                let owner_name = match &self.function.kind {
-                    super::TFuncKind::Method { owner_type, .. }
-                    | super::TFuncKind::TraitMethod { owner_type, .. } => Some(owner_type.name()),
-                    super::TFuncKind::TopLevel => None,
-                };
-                owner_name.and_then(|owner_name| {
-                    let same_leaf = owner_name
-                        .rsplit("::")
-                        .next()
-                        .unwrap_or(owner_name.as_str())
-                        == name;
-                    let ambiguous = self
-                        .type_defs
-                        .iter()
-                        .filter(|definition| {
-                            definition.name == *name
-                                || definition
-                                    .key
-                                    .rsplit("::")
-                                    .next()
-                                    .unwrap_or(&definition.key)
-                                    == name.as_str()
-                        })
-                        .count()
-                        > 1;
-                    (same_leaf && ambiguous).then_some(Type::Named(owner_name))
-                })
-            }
-            _ => None,
-        };
-        let resolved_ty = contextual_owner.as_ref().unwrap_or(&normalized);
-        let instance = canonical_type_instance(self.type_defs, resolved_ty, span)?;
+        let instance = canonical_type_instance(self.type_index, &normalized, span)?;
         merge_type_instance(&mut self.type_instances, instance.clone(), span)?;
         Ok(instance)
     }
@@ -6225,7 +6534,7 @@ impl<'a> LowerCtx<'a> {
             // A structural union owns the generated carrier row whose identity
             // is keyed by its canonical members, as in `mir_type`.
             Type::Union(_) => {
-                type_identity_key(&canonicalize_type(self.type_defs, ty, self.span())?)
+                type_identity_key(&canonicalize_type(self.type_index, ty, self.span())?)
             }
             _ => type_identity_key(ty),
         };
@@ -6290,7 +6599,7 @@ impl<'a> LowerCtx<'a> {
         if let Type::Tuple(fields) = ty {
             if let Some(field_name) = tuple_field_name(fields, key) {
                 let identity =
-                    canonical_type_instance(self.type_defs, ty, self.span())?.identity_key();
+                    canonical_type_instance(self.type_index, ty, self.span())?.identity_key();
                 return Ok(MirFieldId(stable_id(
                     "mir-field",
                     &format!("{identity}::{field_name}"),
@@ -6444,6 +6753,9 @@ impl<'a> LowerCtx<'a> {
             jet_foundation::Syntax::CoreCallSymbol::Rust(name) => {
                 jet_foundation::MIR::MirSymbol::Runtime(name.to_string())
             }
+            jet_foundation::Syntax::CoreCallSymbol::SourceOwned => {
+                return Err(self.error(self.span(), "source-owned Core declaration reached a host route".to_string()));
+            }
         };
         let fallibility = call_fallibility(self, carrier)?;
         self.intern_prelude_call(MirPreludeCall {
@@ -6578,6 +6890,105 @@ impl<'a> LowerCtx<'a> {
         }
     }
 
+    /// The exact emission predicate also decides whether a program stop's
+    /// cleanup belongs before the call or on its real Propagate edge.
+    pub(super) fn can_emit_propagate(&self) -> bool {
+        self.function_registry.stop_points && !self.stop_cleanup_active
+            && self.transaction_restores.is_empty() && !self.is_terminated()
+    }
+
+    pub(super) fn terminate_program_stop(&mut self, propagated: bool, reason: &str) {
+        self.terminate(if propagated {
+            MirTerminator::Stopped
+        } else {
+            MirTerminator::Unreachable { reason: reason.to_string() }
+        });
+    }
+
+    /// Never read a can-stop result on the stop edge. Only the resume edge
+    /// binds it into a lexical frame; Stopped exits through that frame's
+    /// ordinary drop chain. Shield/transaction masks defer cancellation only.
+    pub(super) fn emit_poll(&mut self, kind: MirPollKind, panic_capable: bool) -> Result<(), LowerError> {
+        if !self.function_registry.stop_points || self.stop_cleanup_active || self.is_terminated()
+            || !panic_capable && (!self.transaction_restores.is_empty()
+            || self.defer_stack.iter().filter_map(|frame| frame.owner).any(|owner| {
+                self.scopes.iter().any(|scope| scope.id == owner && scope.kind == MirScopeKind::Shield)
+            }))
+        {
+            return Ok(());
+        }
+        let resume = self.new_block(self.span(), "poll.resume")?;
+        let stop = self.new_block(self.span(), "poll.stop")?;
+        self.terminate(MirTerminator::Poll { kind, resume, stop });
+        self.current = stop;
+        // A propagation edge owes only the actions still registered here.
+        // Never share an entry whose explicit count predates consumption.
+        self.stop_cleanup_active = true;
+        let cleanup = self.emit_deferred_cleanups_from(0, false);
+        self.stop_cleanup_active = false;
+        cleanup?;
+        self.terminate(MirTerminator::Stopped);
+        self.current = resume;
+        Ok(())
+    }
+
+    /// Raw compiler-owned expectation control, never a Core carrier adapter.
+    pub(super) fn emit_native_test_scope_call(
+        &mut self, symbol: &str, member: &str, scope: MirScopeId, ty: Type,
+    ) -> Result<MirValueId, LowerError> {
+        let saved = self.stop_cleanup_active;
+        self.stop_cleanup_active = true;
+        let result = (|| {
+            let value = self.emit("test.scope.id", Some(Type::IntN { signed: false, bits: 64 }),
+                MirOperation::Constant(MirConstant::Int {
+                    value: scope.0 as i64, width: Some((false, 64)), spelling: None,
+                }))?;
+            let call = self.intern_prelude_route(TPreludeRoute {
+                family: MirPreludeFamily::StaticPrelude,
+                module: "core.testing".to_string(), member: member.to_string(),
+                symbol: MirSymbol::Prelude(symbol.to_string()),
+                signature: MirCallSignature { arity: 1, max_arity: 1, borrow_mask: vec![false] },
+                effect: None, fallibility: TFailureCarrier::Infallible,
+                abi: MirPreludeAbi::Value, authority: None, db_metadata: None,
+            })?;
+            self.emit("test.scope.control", Some(ty),
+                MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
+                    call, args: vec![MirCallArg {
+                        value, access: MirAccess::Read, span: self.span(),
+                        label: None, source_index: None, binder_slot: None,
+                        spread: false, implicit_clone: false, shared_auto_clone: false,
+                        owned_last_use: false, authority_boundary: false, fn_coercion: None,
+                        widen_fixed_to_list: false, widen_to_union: None, box_as_trait: None,
+                        place: None,
+                    }], owner_type_args: Vec::new(), type_args: Vec::new(),
+                }))
+        })();
+        self.stop_cleanup_active = saved;
+        result
+    }
+
+    fn emit_test_stop_edges(&mut self) -> Result<(), LowerError> {
+        let scopes = self.defer_stack.iter().enumerate().rev().filter_map(|(depth, frame)| {
+            let scope = frame.owner?;
+            let row = self.scopes.iter().find(|row| row.id == scope)?;
+            let exit = row.facts.get("native_test_exit")?.parse::<u64>().ok()?;
+            Some((depth, scope, MirBlockId(exit)))
+        }).collect::<Vec<_>>();
+        for (depth, scope, exit) in scopes {
+            let caught = self.emit_native_test_scope_call(
+                "jet_rt_test_catch_for_scope", "catch_for_scope", scope, Type::Bool)?;
+            let deeper = if depth + 1 < self.defer_stack.len() {
+                self.exit_chain_entry(self.defer_stack.len() - 1, ExitTarget::Jump(exit), depth + 1)?
+            } else { exit };
+            let otherwise = self.new_block(self.span(), "test.catch.next")?;
+            self.terminate(MirTerminator::Branch {
+                condition: caught, then_target: deeper, else_target: otherwise,
+            });
+            self.current = otherwise;
+        }
+        Ok(())
+    }
+
     /// End the current path with `terminator`, running the cleanups of every
     /// frame from `from_depth` up first. Each frame's cleanups are lowered
     /// once, as a drop chain its exits share (`seal_exit_chains`), so cleanup
@@ -6704,6 +7115,7 @@ impl<'a> LowerCtx<'a> {
             }
             MirTerminator::Break { target, value: None } => Some(ExitTarget::Break(*target)),
             MirTerminator::Continue { target } => Some(ExitTarget::Continue(*target)),
+            MirTerminator::Stopped => Some(ExitTarget::Stopped),
             _ => None,
         })
     }
@@ -6751,6 +7163,7 @@ impl<'a> LowerCtx<'a> {
             span,
             ty: ty.clone(),
             place,
+            ssa_value: None,
             mutable: true,
             ownership: MirOwnership {
                 moved: false,
@@ -6822,6 +7235,8 @@ impl<'a> LowerCtx<'a> {
                 value: None,
             },
             ExitTarget::Continue(target) => MirTerminator::Continue { target },
+            ExitTarget::Jump(target) => MirTerminator::Jump { target },
+            ExitTarget::Stopped => MirTerminator::Stopped,
         };
         self.terminate(terminator);
         self.exit_tails.insert(target, block);
@@ -6872,8 +7287,10 @@ impl<'a> LowerCtx<'a> {
                 };
                 let mut block = entry(0, self)?;
                 self.switch_to(block);
-                for action in automatic.iter().rev() {
-                    self.emit_cleanup_action(*action, false)?;
+                let propagating = exit.target == ExitTarget::Stopped;
+                for index in (0..automatic.len()).rev() {
+                    self.emit_cleanup_suffix(depth, &[], &automatic[..index],
+                        automatic[index], propagating)?;
                 }
                 self.terminate(MirTerminator::Jump { target: next });
                 let deepest = entries.last().map_or(0, |last| last.explicit);
@@ -6884,7 +7301,8 @@ impl<'a> LowerCtx<'a> {
                     let action = explicit.get(count - 1).copied().ok_or_else(|| {
                         self.error(self.span(), "drop chain entry outlives its explicit cleanup")
                     })?;
-                    self.emit_cleanup_action(action, false)?;
+                    self.emit_cleanup_suffix(depth, &explicit[..count - 1], &automatic,
+                        action, propagating)?;
                     self.terminate(MirTerminator::Jump { target: following });
                 }
             }
@@ -6910,7 +7328,7 @@ impl<'a> LowerCtx<'a> {
     /// Exits taken before the stop keep the actions in their sealed chains.
     pub(super) fn emit_explicit_stop_cleanups(&mut self) -> Result<(), LowerError> {
         self.seal_all_exit_chains()?;
-        self.emit_deferred_cleanups_from(0, true)
+        self.emit_cleanup_actions(0, true, false, true)
     }
 
     /// D-SHAPE-RESOURCE1=A: run the cleanups that must happen before the one
@@ -6919,7 +7337,7 @@ impl<'a> LowerCtx<'a> {
     /// Plain releases are skipped because the process is ending anyway, and
     /// the actions stay registered for sibling paths that continue.
     pub(super) fn emit_stop_path_cleanups(&mut self) -> Result<(), LowerError> {
-        self.emit_cleanup_actions(0, false, true)
+        self.emit_cleanup_actions(0, false, true, false)
     }
 
     /// Whether a stop at this point owes any cleanup: a deferred action, or
@@ -6962,7 +7380,9 @@ impl<'a> LowerCtx<'a> {
         self.places
             .iter()
             .find(|row| row.id == place)
-            .is_some_and(|row| self.scope_end_close(&row.ty).is_some())
+            .is_some_and(|row| self.scope_end_close_for_place(place, &row.ty).is_some()
+                || crate::Codegen::MIRRust::contains_owned_close_with(
+                    self.type_defs, &row.ty, &|ty| self.scope_end_close(ty).is_some(), &mut Vec::new()))
     }
 
     fn emit_deferred_cleanups(&mut self, from_depth: usize) -> Result<(), LowerError> {
@@ -6974,7 +7394,7 @@ impl<'a> LowerCtx<'a> {
         from_depth: usize,
         consume: bool,
     ) -> Result<(), LowerError> {
-        self.emit_cleanup_actions(from_depth, consume, false)
+        self.emit_cleanup_actions(from_depth, consume, false, false)
     }
 
     fn emit_cleanup_actions(
@@ -6982,6 +7402,7 @@ impl<'a> LowerCtx<'a> {
         from_depth: usize,
         consume: bool,
         stop_path: bool,
+        explicit_stop: bool,
     ) -> Result<(), LowerError> {
         let from_depth = from_depth.min(self.defer_stack.len());
         for depth in (from_depth..self.defer_stack.len()).rev() {
@@ -6991,18 +7412,74 @@ impl<'a> LowerCtx<'a> {
             } else {
                 self.defer_stack[depth].actions.clone()
             };
-            // D-SHAPE-RESOURCE1=A: explicit deferred actions run first in
-            // reverse registration order; the automatic safety net then
-            // closes or releases every still-live local in reverse
-            // declaration order.
+            // Within an explicit process.exit/os.stop cleanup frame, deferred
+            // closes precede scope guards, each group newest first. Keep the
+            // existing cross-frame traversal and other exits' categories;
+            // neither order is decided by this local explicit-stop correction.
             let (automatic, explicit): (Vec<_>, Vec<_>) = actions
                 .into_iter()
-                .partition(|action| matches!(action, DeferredCleanup::DropPlace { .. }));
-            for action in explicit.into_iter().rev().chain(automatic.into_iter().rev()) {
-                self.emit_cleanup_action(action, stop_path)?;
+                .partition(|action| {
+                    matches!(action, DeferredCleanup::DropPlace { .. })
+                        || explicit_stop && matches!(action, DeferredCleanup::Guard(_))
+                });
+            for index in (0..explicit.len()).rev() {
+                self.emit_cleanup_suffix(depth, &explicit[..index], &automatic,
+                    explicit[index], stop_path)?;
+            }
+            for index in (0..automatic.len()).rev() {
+                self.emit_cleanup_suffix(depth, &[], &automatic[..index],
+                    automatic[index], stop_path)?;
+            }
+            if self.stop_cleanup_active {
+                if let Some(scope) = self.defer_stack[depth].owner {
+                    self.emit("stop.scope.exit", None, MirOperation::ScopeExit { scope })?;
+                }
             }
         }
         Ok(())
+    }
+
+    /// Present only the not-yet-run suffix to a cleanup's propagation edge.
+    /// The saved registrations belong to sibling paths, not this exit.
+    fn emit_cleanup_suffix(
+        &mut self,
+        depth: usize,
+        explicit: &[DeferredCleanup],
+        automatic: &[DeferredCleanup],
+        action: DeferredCleanup,
+        stop_path: bool,
+    ) -> Result<(), LowerError> {
+        let deeper = self.defer_stack.split_off(depth + 1);
+        let saved = std::mem::take(&mut self.defer_stack[depth].actions);
+        let count = self.defer_stack[depth].explicit;
+        self.defer_stack[depth].actions.extend_from_slice(automatic);
+        self.defer_stack[depth].actions.extend_from_slice(explicit);
+        self.defer_stack[depth].explicit = explicit.len();
+        let result = self.emit_cleanup_action(action, stop_path);
+        self.defer_stack[depth].actions = saved;
+        self.defer_stack[depth].explicit = count;
+        self.defer_stack.extend(deeper);
+        result
+    }
+
+    /// A typed owner without a new lexical frame: the current action has
+    /// already been consumed from the frame's pending cleanup suffix.
+    fn begin_stop_cleanup(&mut self) -> Result<MirScopeId, LowerError> {
+        let span = self.span();
+        let identity = self.reserve_identity("scope", span, "StopCleanup", "")?;
+        let scope = MirScopeId(stable_id("mir-scope", &identity));
+        self.scopes.push(MirScope {
+            id: scope,
+            kind: MirScopeKind::StopCleanup,
+            span,
+            name: None,
+            deadline: None,
+            facts: Default::default(),
+        });
+        self.emit("stop.cleanup.enter", None, MirOperation::ScopeEnter {
+            scope, test_member: None,
+        })?;
+        Ok(scope)
     }
 
     /// Lower one cleanup action into the current block. On a stop path a
@@ -7012,6 +7489,20 @@ impl<'a> LowerCtx<'a> {
         action: DeferredCleanup,
         stop_path: bool,
     ) -> Result<(), LowerError> {
+        let masked = self.stop_cleanup_active;
+        self.stop_cleanup_active = masked || stop_path;
+        let cleanup_scope = if self.stop_cleanup_active {
+            match self.begin_stop_cleanup() {
+                Ok(scope) => Some(scope),
+                Err(error) => {
+                    self.stop_cleanup_active = masked;
+                    return Err(error);
+                }
+            }
+        } else {
+            None
+        };
+        let result = (|| {
         match action {
             DeferredCleanup::Close(index) => self.emit_deferred_close(index)?,
             DeferredCleanup::Guard(place) => {
@@ -7049,7 +7540,16 @@ impl<'a> LowerCtx<'a> {
                 }
             }
         }
-        Ok(())
+            Ok(())
+        })();
+        let result = result.and_then(|()| {
+            if let Some(scope) = cleanup_scope.filter(|_| !self.is_terminated()) {
+                self.emit("stop.cleanup.exit", None, MirOperation::ScopeExit { scope })?;
+            }
+            Ok(())
+        });
+        self.stop_cleanup_active = masked;
+        result
     }
 
     pub(super) fn emit_scope_cleanups(&mut self, scope: MirScopeId) -> Result<(), LowerError> {
@@ -7185,13 +7685,25 @@ impl<'a> LowerCtx<'a> {
         })
     }
 
-    fn owned_file_paths(
+    fn owned_leaf_paths(
         &mut self,
         ty: &MirType,
+        for_drop: bool,
         path: &mut Vec<(String, Type)>,
         visiting: &mut Vec<MirTypeId>,
         output: &mut Vec<Vec<(String, Type)>>,
     ) -> Result<(), LowerError> {
+        if for_drop {
+            if self.ownership_for(&mir_type_as_ast(ty)).drop == MirDropKind::None {
+                return Ok(());
+            }
+            // The root's nominal Close was checked by register_owned_drop;
+            // only its consuming Close receiver may enter structurally.
+            if !path.is_empty() && self.scope_end_close(ty).is_some() {
+                output.push(path.clone());
+                return Ok(());
+            }
+        }
         if ty.identity.is_some_and(|identity| self.is_core_file_owner(identity)) {
             output.push(path.clone());
             return Ok(());
@@ -7199,35 +7711,48 @@ impl<'a> LowerCtx<'a> {
         if let Some(fields) = ty.tuple_fields() {
             for (name, field_ty) in fields {
                 path.push((name.clone(), mir_type_as_ast(field_ty)));
-                self.owned_file_paths(field_ty, path, visiting, output)?;
+                self.owned_leaf_paths(field_ty, for_drop, path, visiting, output)?;
                 path.pop();
             }
             return Ok(());
         }
-        let Some(identity) = ty.identity else { return Ok(()) };
+        let Some(identity) = ty.identity else {
+            if for_drop { output.push(path.clone()); }
+            return Ok(());
+        };
         if visiting.contains(&identity) {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         }
         let definitions = self.type_defs;
         let Some(definition) = definitions.iter().find(|row| row.id == identity) else {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         };
         if !matches!(definition.ownership, MirOwnershipMode::Owned | MirOwnershipMode::Move) {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         }
         let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+            if for_drop { output.push(path.clone()); }
             return Ok(());
         };
         visiting.push(identity);
         let owner = mir_type_as_ast(ty);
+        let first_leaf = output.len();
         for field in fields.iter().filter(|field| !field.computed) {
             let field_ty = self.field_type_for_type(&owner, &field.name)?;
             let checked = self.mir_type(&field_ty)?;
             path.push((field.name.clone(), field_ty));
-            self.owned_file_paths(&checked, path, visiting, output)?;
+            self.owned_leaf_paths(&checked, for_drop, path, visiting, output)?;
             path.pop();
         }
         visiting.pop();
+        // Nominal ownership is not structural Copy. A record whose stored
+        // members need no cleanup is still one owned move/drop leaf.
+        if for_drop && output.len() == first_leaf {
+            output.push(path.clone());
+        }
         Ok(())
     }
 
@@ -7285,7 +7810,7 @@ impl<'a> LowerCtx<'a> {
         }
         let ty = row.ty.clone();
         let mut paths = Vec::new();
-        self.owned_file_paths(&ty, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
+        self.owned_leaf_paths(&ty, false, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
         // Deferred bindings unwind in reverse order; record fields unwind in
         // declaration order within each binding.
         for path in paths.into_iter().rev() {
@@ -7318,7 +7843,7 @@ impl<'a> LowerCtx<'a> {
         if let Some(row) = self.places.iter_mut().find(|row| row.id == place) {
             retain_place_access(row, MirAccess::Move);
         }
-        self.file_owner_places.push(place);
+        self.file_owner_places.push((place, flag));
         self.defer_stack
             .last_mut()
             .expect("function always has a lexical cleanup frame")
@@ -7402,7 +7927,7 @@ impl<'a> LowerCtx<'a> {
             Some(ty.clone()),
             MirOperation::MovePlace { place },
         )?;
-        match self.scope_end_close(&ty) {
+        match self.scope_end_close_for_place(place, &ty) {
             Some(function) => self.emit_scope_end_close(function, ty, value)?,
             None => {
                 self.emit(
@@ -7419,13 +7944,25 @@ impl<'a> LowerCtx<'a> {
 
     /// D-SHAPE-RESOURCE1=A: a still-live local whose type has a nominal
     /// `Close` implementation is closed, not merely released, at scope end.
-    /// Inside that type's own `close` body the receiver is the value being
-    /// closed, so values of the type are released there without re-entering
-    /// `close`.
+    /// Only the consuming receiver is exempt from re-entering its own Close;
+    /// a second local of the same type still owns an independent cleanup.
     pub(super) fn scope_end_close(&self, ty: &MirType) -> Option<MirFunctionId> {
-        let function = self.function_registry.close_impl_for(ty)?;
-        let current = self.function_registry.id_for(self.function).ok();
-        (current != Some(function)).then_some(function)
+        self.function_registry.close_impl_for(ty)
+    }
+
+    pub(super) fn scope_end_close_for_place(&self, place: MirPlaceId, ty: &MirType) -> Option<MirFunctionId> {
+        let function = self.scope_end_close(ty)?;
+        let receiver = self.places.iter().find(|row| row.id == place)
+            .filter(|row| row.projections.is_empty())
+            .and_then(|row| match row.base {
+                MirPlaceBase::Parameter(value) => self.value_instruction(value),
+                _ => None,
+            })
+            .is_some_and(|instruction| matches!(
+                instruction.operation, MirOperation::Parameter { index: 0, .. }
+            ));
+        (!(receiver && self.function_registry.id_for(self.function).ok() == Some(function)))
+            .then_some(function)
     }
 
     /// The same consuming receiver call an explicit `close(^value)` lowers to.
@@ -7498,6 +8035,77 @@ impl<'a> LowerCtx<'a> {
         result.map(|_| ())
     }
 
+    /// A destructured temporary is no longer a whole owner. Retire its
+    /// whole-value cleanup and keep cleanup only for fields the pattern omits.
+    /// Moving bound fields has already transferred their cleanup to the bindings.
+    pub(super) fn finish_owned_destructure(
+        &mut self,
+        place: MirPlaceId,
+        ty: &Type,
+        bound_fields: &[(String, String)],
+    ) -> Result<(), LowerError> {
+        let frame = self.defer_stack.last().expect("destructure has a cleanup frame");
+        let original = frame.actions.iter().position(|action| {
+            matches!(action, DeferredCleanup::DropPlace { place: owner, .. } if *owner == place)
+        });
+        let before = frame.actions.len();
+        if let Some(flag) = self.drop_live_places.get(&place).copied() {
+            let off = self.emit(
+                "destructure.live.clear",
+                Some(Type::Bool),
+                MirOperation::Constant(MirConstant::Bool(false)),
+            )?;
+            self.emit(
+                "destructure.live.write",
+                None,
+                MirOperation::WritePlace { place: flag, value: off },
+            )?;
+        }
+        let owner = field_owner_type(ty);
+        if let Type::Tuple(fields) = owner {
+            for (name, _) in fields.iter().rev() {
+                self.register_omitted_destructure_field(place, ty, name, bound_fields)?;
+            }
+        } else {
+            let id = self.field_owner_id_for_type(owner)?;
+            let definitions = self.type_defs;
+            let definition = definitions.iter().find(|definition| definition.id == id)
+                .ok_or_else(|| self.error(self.span(), "missing destructure owner"))?;
+            let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
+                return Err(self.error(self.span(), "destructure owner has no fields"));
+            };
+            for field in fields.iter().rev().filter(|field| !field.computed) {
+                self.register_omitted_destructure_field(place, ty, &field.name, bound_fields)?;
+            }
+        }
+        let frame = self.defer_stack.last_mut().expect("destructure has a cleanup frame");
+        let added = frame.actions.len() - before;
+        if let Some(position) = original {
+            // Keep this one owner's remainder at its original scope position.
+            // Cleanup is LIFO, so reversed registration preserves field order.
+            frame.actions[position..].rotate_right(added);
+            frame.actions.remove(position + added);
+        } else if added != 0 {
+            return Err(self.error(self.span(), "owned destructure has no original cleanup position"));
+        }
+        Ok(())
+    }
+
+    fn register_omitted_destructure_field(
+        &mut self,
+        place: MirPlaceId,
+        ty: &Type,
+        name: &str,
+        bound_fields: &[(String, String)],
+    ) -> Result<(), LowerError> {
+        if bound_fields.iter().any(|(_, field)| field == name) {
+            return Ok(());
+        }
+        let field_ty = self.checked_field_type(ty, name)?;
+        let field_place = self.project_field_place(place, name, field_ty.clone(), self.span())?;
+        self.register_owned_drop(field_place, &field_ty, self.ownership_for(&field_ty), true)
+    }
+
     fn register_owned_drop(
         &mut self,
         place: MirPlaceId,
@@ -7505,10 +8113,46 @@ impl<'a> LowerCtx<'a> {
         ownership: MirOwnership,
         initialized: bool,
     ) -> Result<(), LowerError> {
-        if ownership.drop == MirDropKind::None
-            || matches!(self.ownership_for(ty).mode, MirOwnershipMode::Copy)
-        {
+        // Prerequisite tranche: preserve Rust cleanup emission until Copy+Value
+        // retirement and its flag-discipline validation land together.
+        if ownership.drop == MirDropKind::None || ownership.mode == MirOwnershipMode::Copy {
             return Ok(());
+        }
+        let split = !self.partial_move_roots.is_empty() && self.places.iter().find(|row| row.id == place)
+            .is_some_and(|row| row.projections.is_empty() && match row.base {
+                MirPlaceBase::Local(id) => self.locals.iter().any(|local| {
+                    local.id == id && self.partial_move_roots.contains(&local.name)
+                }),
+                MirPlaceBase::Parameter(value) => self.value_instruction(value)
+                    .and_then(|instruction| match instruction.operation {
+                        MirOperation::Parameter { index, .. } => self.params.get(index),
+                        _ => None,
+                    })
+                    .is_some_and(|parameter| self.partial_move_roots.contains(&parameter.name)),
+                _ => false,
+            });
+        if split {
+            let checked = self.mir_type(ty)?;
+            // The pre-scan is a name hint, not binding identity. A shadowed
+            // Close owner stays atomic; only an actual projected move refuses.
+            if self.scope_end_close_for_place(place, &checked).is_none() {
+                let mut paths = Vec::new();
+                self.owned_leaf_paths(&checked, true, &mut Vec::new(), &mut Vec::new(), &mut paths)?;
+                // A container, enum or opaque owner remains indivisible.
+                if !paths.iter().any(Vec::is_empty) {
+                    self.split_drop_roots.insert(place);
+                    for path in paths.into_iter().rev() {
+                        let mut leaf = place;
+                        let mut leaf_ty = ty.clone();
+                        for (name, field_ty) in path {
+                            leaf = self.project_field_place(leaf, &name, field_ty.clone(), self.span())?;
+                            leaf_ty = field_ty;
+                        }
+                        self.register_owned_drop(leaf, &leaf_ty, self.ownership_for(&leaf_ty), initialized)?;
+                    }
+                    return Ok(());
+                }
+            }
         }
         let live_local = TLocal::generated(format!("owned_live_{}", place.0)).as_mutable();
         let live = self.bind_local(&live_local, Type::Bool, true, false, false)?;
@@ -7535,6 +8179,60 @@ impl<'a> LowerCtx<'a> {
                 live,
                 kind: ownership.drop,
             });
+        Ok(())
+    }
+
+    fn drop_live_flags(&self, place: MirPlaceId, moving: bool) -> Result<Vec<MirPlaceId>, LowerError> {
+        if self.drop_live_places.contains_key(&place) {
+            return Ok(Vec::new());
+        }
+        if self.split_drop_roots.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(root) = self.places.iter().find(|row| row.id == place) else {
+            return Ok(Vec::new());
+        };
+        if !self.split_drop_roots.iter().any(|id| self.places.iter().any(|row| {
+            row.id == *id && row.base == root.base
+        })) {
+            return Ok(Vec::new());
+        }
+        let mut flags: Vec<_> = self.drop_live_places.iter().filter_map(|(id, flag)| {
+            let leaf = self.places.iter().find(|row| row.id == *id)?;
+            (root.base == leaf.base
+                && root.projections.len() <= leaf.projections.len()
+                && root.projections.iter().zip(&leaf.projections).all(|(a, b)| matches!(
+                    (a, b),
+                    (MirProjection::Field { field: a, .. }, MirProjection::Field { field: b, .. }) if a == b
+                )))
+                .then_some(*flag)
+        }).collect();
+        if moving && flags.is_empty() {
+            return Err(self.error(self.span(),
+                "cannot lower projected move under split owner: move covers no registered ownership leaf"));
+        }
+        flags.sort_unstable_by_key(|flag| flag.0);
+        Ok(flags)
+    }
+
+    fn check_projected_close_move(&self, place: MirPlaceId) -> Result<(), LowerError> {
+        let Some(moved) = self.places.iter().find(|row| row.id == place) else {
+            return Ok(());
+        };
+        if moved.projections.is_empty() {
+            return Ok(());
+        }
+        for owner in &self.places {
+            if owner.base == moved.base && owner.projections.is_empty()
+                && self.drop_live_places.contains_key(&owner.id)
+                && self.scope_end_close_for_place(owner.id, &owner.ty).is_some()
+            {
+                return Err(self.error(self.span(), format!(
+                    "cannot lower projected move from `{}`: owner has its own Close implementation",
+                    type_identity_key(&mir_type_as_ast(&owner.ty))
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -7604,6 +8302,16 @@ impl<'a> LowerCtx<'a> {
                 last_use: false,
                 gc_root: false,
             }),
+            MirOperation::AttachTag { value, .. }
+            | MirOperation::Convert { value, conversion: MirConversion::Transparent | MirConversion::SendFn, .. } => {
+                let mut ownership = self.values.iter()
+                    .find(|(id, _, _, _)| id == value)
+                    .map(|(_, _, _, ownership)| *ownership)
+                    .ok_or_else(|| self.error(self.span(), "checked carrier transfer has no source ownership fact"))?;
+                ownership.moved = false;
+                ownership.last_use = false;
+                Ok(ownership)
+            }
             MirOperation::Phi { incoming } => self.phi_ownership(incoming),
             _ => Ok(self.ownership_for(&mir_type_as_ast(value_type))),
         }
@@ -7707,7 +8415,7 @@ impl<'a> LowerCtx<'a> {
                     .iter()
                     .rev()
                     .find(|row| row.0 == value)
-                    .map_or(fact, |row| fact.for_ownership(row.3.mode)),
+                    .map_or(fact, |row| fact.for_ownership(&row.3)),
             },
             operation => operation,
         };
@@ -7733,16 +8441,24 @@ impl<'a> LowerCtx<'a> {
             | MirOperation::ReplacePlace { place, .. } => (self.file_owner_leaves(*place), true),
             _ => (Vec::new(), false),
         };
-        let (drop_live_place, drop_live) = match &operation {
-            MirOperation::MovePlace { place } => (self.drop_live_places.get(place).copied(), false),
-            MirOperation::InitializeUninit { place } => {
-                (self.drop_live_places.get(place).copied(), true)
-            }
-            MirOperation::WritePlace { place, .. }
-            | MirOperation::ReplacePlace { place, .. } => {
-                (self.drop_live_places.get(place).copied(), true)
-            }
+        let (drop_place, drop_live) = match &operation {
+            MirOperation::MovePlace { place } => (Some(*place), false),
+            MirOperation::InitializeUninit { place }
+            | MirOperation::WritePlace { place, .. }
+            | MirOperation::ReplacePlace { place, .. } => (Some(*place), true),
             _ => (None, false),
+        };
+        if let MirOperation::MovePlace { place } = &operation {
+            self.check_projected_close_move(*place)?;
+        }
+        let drop_live_place = drop_place.and_then(|place| self.drop_live_places.get(&place).copied());
+        let split_drop_flags = if drop_live_place.is_some() || self.split_drop_roots.is_empty() {
+            Vec::new()
+        } else {
+            match drop_place {
+                Some(place) => self.drop_live_flags(place, !drop_live)?,
+                None => Vec::new(),
+            }
         };
         let span = self.span();
         let source_line = self.current_line;
@@ -7750,6 +8466,14 @@ impl<'a> LowerCtx<'a> {
         let identity = self.reserve_identity("operation", span, role, &detail)?;
         let value = MirValueId(stable_id("mir-value", &identity));
         let op_id = jet_foundation::MIR::MirOpId(stable_id("mir-op", &identity));
+        let operand_type = mir_operation_stop_operand(&operation)
+            .and_then(|value| self.values.iter().find(|(id, ..)| *id == value).map(|(_, ty, ..)| ty));
+        let accessed_place = mir_operation_stop_place(&operation)
+            .and_then(|place| self.places.iter().find(|row| row.id == place));
+        let can_stop = mir_operation_can_stop(&operation, operand_type, accessed_place, |call| {
+            self.prelude_call_positions.get(&call).and_then(|position| self.prelude_calls[*position].effect)
+        });
+        let panic_capable = can_stop && !matches!(&operation, MirOperation::ScopeExit { .. });
         if let Some(value_type) = &value_type {
             let ownership = match forced_ownership {
                 Some(ownership) => ownership,
@@ -7786,7 +8510,7 @@ impl<'a> LowerCtx<'a> {
                 MirOperation::WritePlace { place: flag, value: next },
             )?;
         }
-        if let Some(flag) = drop_live_place {
+        for flag in drop_live_place.into_iter().chain(split_drop_flags) {
             let next = self.emit(
                 "owned.local.live.state",
                 Some(Type::Bool),
@@ -7797,6 +8521,9 @@ impl<'a> LowerCtx<'a> {
                 None,
                 MirOperation::WritePlace { place: flag, value: next },
             )?;
+        }
+        if can_stop {
+            self.emit_poll(MirPollKind::Propagate, panic_capable)?;
         }
         Ok(value)
     }
@@ -8192,7 +8919,7 @@ impl<'a> LowerCtx<'a> {
         // place reads that element in place. The copy of the whole container
         // (a whole `local.list` on every `local.list[i]` read) is never
         // observable through a read, and the element read copies the element
-        // as before. A user `~` copy is a distinct node and is never elided.
+        // as before. A user `.copy()` copy is a distinct node and is never elided.
         let base = match &base.kind {
             TExprKind::Clone(inner, _) if access == MirAccess::Read && tir_place_path(inner) => {
                 &**inner
@@ -8411,6 +9138,7 @@ impl<'a> LowerCtx<'a> {
             span: self.span(),
             ty: mir_ty,
             place,
+            ssa_value: None,
             mutable: matches!(access, MirAccess::Write),
             ownership: MirOwnership::from_access(access),
             comptime: false,
@@ -8526,6 +9254,7 @@ impl<'a> LowerCtx<'a> {
             span: self.span(),
             ty: mir_ty,
             place,
+            ssa_value: None,
             mutable,
             ownership,
             comptime,
@@ -8564,6 +9293,7 @@ impl<'a> LowerCtx<'a> {
             span: self.span(),
             ty: mir_ty,
             place,
+            ssa_value: None,
             mutable,
             ownership: MirOwnership::from_access(if mutable { MirAccess::Write } else { MirAccess::Read }),
             comptime: false,
@@ -8598,6 +9328,16 @@ impl<'a> LowerCtx<'a> {
             }
             _ => None,
         };
+        let window = match window {
+            None if matches!(subject.ty.without_user_tags(), Type::List(_) | Type::FixedList { .. } | Type::Map { .. }) => {
+                let place = super::tir_to_mir_expr::lower_receiver_place(self, subject, MirAccess::Read)?;
+                if let Some(place) = place {
+                    self.read_windows.insert(place);
+                }
+                place
+            }
+            window => window,
+        };
         let Some(window) = window else {
             if let Some(value) = self.lower_read_window(subject)? {
                 return Ok(value);
@@ -8616,7 +9356,7 @@ impl<'a> LowerCtx<'a> {
     /// D-MEM-COPYSEM1: read `subject` as a read window when it names a read
     /// parameter's place; `None` leaves the subject to the ordinary value path.
     /// A compiler-owned subject keeps the value path: its native Rust carrier
-    /// can hold a payload in a host representation (`DataTree.Int` is `i64`)
+    /// can hold a payload in a host representation (`Dyn.Int` is `i64`)
     /// that only the checked payload readers widen to the Jet type, so a
     /// payload place aliased through it would read the wrong type.
     pub(super) fn lower_read_window(
@@ -8655,7 +9395,7 @@ impl<'a> LowerCtx<'a> {
 
     /// D-MEM-COPYSEM1: the place `expr` names when it is a plain local or
     /// field-read path (under at most a compiler-inserted clone or a sema
-    /// read window `Borrow`) over a read parameter. A user `~` copy is never
+    /// read window `Borrow`) over a read parameter. A user `.copy()` copy is never
     /// elided.
     pub(super) fn read_window_place(
         &mut self,
@@ -8825,25 +9565,6 @@ impl<'a> LowerCtx<'a> {
         Ok(())
     }
 
-    pub(super) fn bind_data_entries_temp(
-        &mut self,
-        local: &TLocal,
-        owner: MirTypeId,
-        variant: &str,
-    ) -> Result<MirLocalId, LowerError> {
-        if let Some(local_id) = self
-            .locals
-            .iter()
-            .rfind(|candidate| candidate.name == local.name)
-            .map(|candidate| candidate.id)
-        {
-            return Ok(local_id);
-        }
-        let payload_ty = self.variant_payload_type(owner, variant, 0)?;
-        self.bind_local(local, payload_ty, true, false, true)?;
-        self.local_id_for(local)
-    }
-
     pub(super) fn bind_named_local(
         &mut self,
         name: &str,
@@ -8861,28 +9582,8 @@ impl<'a> LowerCtx<'a> {
         subject: MirValueId,
         pattern: &MirPattern,
     ) -> Result<MirValueId, LowerError> {
+        if self.pattern_lookup_head.is_none() { self.pattern_lookup_caches.clear(); }
         let subject_ty = self.value_source_type(subject)?;
-        // Object patterns bind their ordered payload to `temp`; the public
-        // map binding is a later then-body declaration.  Suppress the generic
-        // variant binder here so both writes do not alias one local place with
-        // incompatible list/map types.
-        let shape = match &pattern.position {
-            MirPatternPosition::DataEntries { .. } => match &pattern.shape {
-                MirPatternShape::Variant {
-                    variant,
-                    leading_dot,
-                    span,
-                    ..
-                } => MirPatternShape::Variant {
-                    variant: variant.clone(),
-                    bindings: vec![MirPatternBinding::Wildcard],
-                    leading_dot: *leading_dot,
-                    span: *span,
-                },
-                _ => pattern.shape.clone(),
-            },
-            _ => pattern.shape.clone(),
-        };
         // A mutable binding owns its copy; only an immutable one may alias a
         // read window.
         let window = self
@@ -8890,41 +9591,15 @@ impl<'a> LowerCtx<'a> {
             .get(&subject)
             .copied()
             .filter(|window| !(pattern.mutable && self.read_windows.contains(window)));
-        let condition = self.lower_pattern_shape_condition(
+        self.lower_pattern_shape_condition(
             subject,
             &subject_ty,
             pattern.owner,
-            &shape,
+            &pattern.shape,
             pattern.mutable,
             false,
             window,
-        )?;
-        if let MirPatternPosition::DataEntries { temp } = &pattern.position {
-            if let MirPatternShape::Variant { variant, .. } = &pattern.shape {
-                let owner = pattern.owner.ok_or_else(|| {
-                    self.error(
-                        self.span(),
-                        "checked data-entry pattern is missing its owner",
-                    )
-                })?;
-                return self.lower_guarded_pattern(condition, |ctx| {
-                    let payload_ty = ctx.variant_payload_type(owner, variant, 0)?;
-                    let payload = ctx.emit_checked(
-                        "pattern",
-                        Some(&payload_ty),
-                        MirOperation::EnumPayload {
-                            subject,
-                            owner,
-                            variant: variant.clone(),
-                            index: 0,
-                        },
-                    )?;
-                    ctx.write_local_id(*temp, payload)?;
-                    Ok(condition)
-                });
-            }
-        }
-        Ok(condition)
+        )
     }
 
     fn lower_pattern_shape_condition(
@@ -9010,7 +9685,7 @@ impl<'a> LowerCtx<'a> {
                         match binding {
                             MirPatternBinding::Wildcard => {}
                             MirPatternBinding::Bind { name, .. } => {
-                                let ty = ctx.variant_payload_type(owner, variant, index)?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 if let Some(window) = window {
                                     let place = ctx.project_payload_place(
                                         window,
@@ -9037,7 +9712,7 @@ impl<'a> LowerCtx<'a> {
                                 ctx.bind_pattern_value(name, ty, value, mutable, reuse_bindings)?;
                             }
                             MirPatternBinding::Range { lo, hi } => {
-                                let ty = ctx.variant_payload_type(owner, variant, index)?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 let value = ctx.emit_checked(
                                     "pattern",
                                     Some(&ty),
@@ -9050,10 +9725,15 @@ impl<'a> LowerCtx<'a> {
                                 )?;
                                 tests.push(ctx.lower_numeric_range(value, &ty, *lo, *hi)?);
                             }
+                            MirPatternBinding::Value(expected) => {
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
+                                let value = ctx.emit_checked("pattern", Some(&ty), MirOperation::EnumPayload {
+                                    subject, owner, variant: variant.clone(), index,
+                                })?;
+                                tests.push(ctx.pattern_equal(value, *expected)?);
+                            }
                             MirPatternBinding::Nested(inner) => {
-                                let ty = ctx
-                                    .enum_payload_type_for(subject_ty, variant, index)
-                                    .or_else(|_| ctx.variant_payload_type(owner, variant, index))?;
+                                let ty = ctx.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                                 let value = ctx.emit_checked(
                                     "pattern",
                                     Some(&ty),
@@ -9241,9 +9921,10 @@ impl<'a> LowerCtx<'a> {
                 self.lower_numeric_range(subject, subject_ty, *lo, *hi)
             }
             MirPatternShape::Or { alternatives, .. } => {
-                let mut tests = Vec::with_capacity(alternatives.len());
+                let join = self.new_block(self.span(), "pattern.or.join")?;
+                let mut incoming = Vec::with_capacity(alternatives.len() + 1);
                 for (index, alternative) in alternatives.iter().enumerate() {
-                    tests.push(self.lower_pattern_shape_condition(
+                    let test = self.lower_pattern_shape_condition(
                         subject,
                         subject_ty,
                         owner,
@@ -9254,9 +9935,25 @@ impl<'a> LowerCtx<'a> {
                         // bindings stay read-only values even under a `&place`
                         // subject (sema declares them so).
                         None,
-                    )?);
+                    )?;
+                    let matched = self.new_block(self.span(), "pattern.or.matched")?;
+                    let next = self.new_block(self.span(), "pattern.or.next")?;
+                    self.terminate(MirTerminator::Branch {
+                        condition: test, then_target: matched, else_target: next,
+                    });
+                    self.switch_to(matched);
+                    let value = self.emit_checked("pattern", Some(&Type::Bool),
+                        MirOperation::Constant(MirConstant::Bool(true)))?;
+                    incoming.push((self.current_block(), value));
+                    self.terminate(MirTerminator::Jump { target: join });
+                    self.switch_to(next);
                 }
-                self.combine_pattern_tests(tests, jet_foundation::AST::BinOp::Or)
+                let value = self.emit_checked("pattern", Some(&Type::Bool),
+                    MirOperation::Constant(MirConstant::Bool(false)))?;
+                incoming.push((self.current_block(), value));
+                self.terminate(MirTerminator::Jump { target: join });
+                self.switch_to(join);
+                self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Phi { incoming })
             }
             MirPatternShape::Struct { fields, .. } => {
                 let owner = owner.ok_or_else(|| {
@@ -9268,15 +9965,16 @@ impl<'a> LowerCtx<'a> {
                     MirOperation::Constant(MirConstant::Bool(true)),
                 )?];
                 for field in fields {
-                    let (field_id, value_ty, binding) = match field {
-                        MirPatternField::Bind { field, local, .. } => (
-                            *field,
-                            self.field_type_for_id(owner, *field)?,
-                            Some(local.as_str()),
-                        ),
-                        MirPatternField::Value {
-                            field, value: _, ..
-                        } => (*field, self.field_type_for_id(owner, *field)?, None),
+                    let name = match field {
+                        MirPatternField::Bind { field, .. }
+                        | MirPatternField::Value { field, .. }
+                        | MirPatternField::Nested { field, .. } => field,
+                    };
+                    let field_id = self.field_id_for(owner, name)?;
+                    let value_ty = self.subject_field_type(owner, subject_ty, field_id)?;
+                    let binding = match field {
+                        MirPatternField::Bind { local, .. } => Some(local.as_str()),
+                        _ => None,
                     };
                     if let (Some(window), Some(name)) = (window, binding) {
                         let span = self.span();
@@ -9319,6 +10017,104 @@ impl<'a> LowerCtx<'a> {
                             },
                         )?);
                     }
+                    else if let MirPatternField::Nested { shape, .. } = field {
+                        let nested_window = match window {
+                            Some(window) => Some(self.project_window_place(
+                                window, MirProjection::Field { field: field_id, span: self.span() }, &value_ty,
+                            )?),
+                            None => None,
+                        };
+                        tests.push(self.lower_nested_pattern_condition(
+                            projected, &value_ty, shape, mutable, reuse_bindings, nested_window,
+                        )?);
+                    }
+                }
+                self.combine_pattern_tests(tests, jet_foundation::AST::BinOp::And)
+            }
+            MirPatternShape::List { items, rest, .. } => {
+                let elem = match subject_ty.without_user_tags() {
+                    Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+                    _ => return Err(self.error(self.span(), "checked list pattern has non-list subject")),
+                };
+                let len = self.pattern_collection_len(subject, subject_ty)?;
+                let count = self.pattern_int(items.len())?;
+                let window = self.ensure_pattern_read_window(subject, subject_ty, window)?;
+                let test = self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Binary {
+                    op: super::mir_binary_op(if rest.is_some() { jet_foundation::AST::BinOp::Ge } else { jet_foundation::AST::BinOp::Eq }),
+                    dispatch: MirBinaryDispatch::Primitive, left: len, right: count,
+                })?;
+                self.lower_guarded_pattern(test, |ctx| {
+                    let mut tests = vec![test];
+                    for (index, slot) in items.iter().enumerate() {
+                        if matches!(slot, MirPatternBinding::Wildcard) { continue; }
+                        let index = ctx.pattern_int(index)?;
+                        let location = ctx.panic_location_at(ctx.source_line());
+                        let context = ctx.panic_context_at(ctx.source_line(), None);
+                        let call = ctx.intern_prelude_route(super::index_route(MirIndexKind::List, MirAccess::Read, &elem, &TFailureCarrier::Infallible)?)?;
+                        let place = ctx.project_window_place(window, MirProjection::Index {
+                            kind: MirIndexKind::List, index, call, write_call: None,
+                            location, context: Some(context), span: ctx.span(),
+                        }, &elem)?;
+                        if let MirPatternBinding::Bind { name, .. } = slot {
+                            ctx.bind_window_binding(name, elem.clone(), place)?;
+                        } else {
+                            let value = ctx.emit_checked("pattern", Some(&elem), MirOperation::ReadPlace(place))?;
+                            tests.push(ctx.lower_pattern_slot(value, &elem, slot, mutable, reuse_bindings, Some(place))?);
+                        }
+                    }
+                    if let Some(name) = rest.as_ref().and_then(|rest| rest.name.as_ref()) {
+                        let ty = Type::List(Box::new(elem));
+                        let range = ctx.emit_checked("pattern", Some(&Type::Named("Range".to_string())), MirOperation::Range {
+                            start: count, end: len, exclusive: true,
+                        })?;
+                        let location = ctx.panic_location_at(ctx.source_line());
+                        let place = ctx.project_window_place(window, MirProjection::Range { range, location, span: ctx.span() }, &ty)?;
+                        ctx.bind_window_binding(name, ty, place)?;
+                    }
+                    ctx.combine_pattern_tests(tests, jet_foundation::AST::BinOp::And)
+                })
+            }
+            MirPatternShape::Map { entries, rest, .. } => {
+                let value_ty = match subject_ty.without_user_tags() {
+                    Type::Map { value, .. } => (**value).clone(),
+                    _ => return Err(self.error(self.span(), "checked map pattern has non-map subject")),
+                };
+                let optional_ty = Type::Option(Box::new(value_ty.clone()));
+                let window = self.ensure_pattern_read_window(subject, subject_ty, window)?;
+                let pointer_ty = Type::Apply { name: "Ptr".to_string(), args: vec![value_ty.clone()] };
+                let lookup_ty = Type::Option(Box::new(pointer_ty));
+                let mut tests = Vec::with_capacity(entries.len() + 1);
+                let mut present_count = self.pattern_int(0)?;
+                for entry in entries {
+                    let cache = self.pattern_lookup_cache(window, entry.key, &lookup_ty)?;
+                    let lookup = self.emit_checked("pattern.map.lookup", Some(&lookup_ty), MirOperation::MapLookup { map: window, key: entry.key, cache })?;
+                    let present = self.emit_checked("pattern", Some(&Type::Bool), MirOperation::OptionIsSome { subject: lookup })?;
+                    if !*rest {
+                        let target = lower_type(&Type::Int);
+                        let increment = self.emit_checked("pattern", Some(&Type::Int), MirOperation::Convert {
+                            value: present, parameters: Vec::new(), target,
+                            conversion: jet_foundation::MIR::MirConversion::NumericCast,
+                        })?;
+                        present_count = self.emit_checked("pattern", Some(&Type::Int), MirOperation::Binary {
+                            op: super::mir_binary_op(jet_foundation::AST::BinOp::Add),
+                            dispatch: MirBinaryDispatch::Primitive, left: present_count, right: increment,
+                        })?;
+                    }
+                    if entry.optional {
+                        let place = self.project_window_place(window, MirProjection::MapLookup { lookup, optional: true, span: self.span() }, &optional_ty)?;
+                        let value = self.emit_checked("pattern", Some(&optional_ty), MirOperation::ReadPlace(place))?;
+                        tests.push(self.lower_pattern_slot(value, &optional_ty, &entry.slot, mutable, reuse_bindings, Some(place))?);
+                    } else {
+                        tests.push(self.lower_guarded_pattern(present, |ctx| {
+                            let place = ctx.project_window_place(window, MirProjection::MapLookup { lookup, optional: false, span: ctx.span() }, &value_ty)?;
+                            let value = ctx.emit_checked("pattern", Some(&value_ty), MirOperation::ReadPlace(place))?;
+                            ctx.lower_pattern_slot(value, &value_ty, &entry.slot, mutable, reuse_bindings, Some(place))
+                        })?);
+                    }
+                }
+                if !*rest {
+                    let len = self.pattern_collection_len(subject, subject_ty)?;
+                    tests.push(self.pattern_equal(len, present_count)?);
                 }
                 self.combine_pattern_tests(tests, jet_foundation::AST::BinOp::And)
             }
@@ -9327,6 +10123,119 @@ impl<'a> LowerCtx<'a> {
                 self.lower_binary_pattern(subject, subject_ty, parts)
             }
         }
+    }
+
+    fn ensure_pattern_read_window(
+        &mut self, subject: MirValueId, ty: &Type, window: Option<MirPlaceId>,
+    ) -> Result<MirPlaceId, LowerError> {
+        if let Some(window) = window {
+            return Ok(window);
+        }
+        let local = TLocal::generated(format!("pattern_subject_{}", subject.0));
+        let place = self.bind_local(&local, ty.clone(), false, false, false)?;
+        self.emit_checked("pattern", None, MirOperation::WritePlace { place, value: subject })?;
+        self.read_windows.insert(place);
+        self.pattern_windows.insert(subject, place);
+        Ok(place)
+    }
+
+    fn pattern_lookup_cache(&mut self, map: MirPlaceId, key: MirValueId, lookup_ty: &Type) -> Result<MirPlaceId, LowerError> {
+        let row = self.places.iter().find(|place| place.id == map).expect("checked map place");
+        let mut identity = format!("{:?}", row.base);
+        let mut optional_map_payload = false;
+        for projection in &row.projections {
+            if optional_map_payload && matches!(projection, MirProjection::Payload { kind: MirPayloadKind::Option, .. }) {
+                optional_map_payload = false;
+                continue;
+            }
+            match projection {
+                MirProjection::Field { field, .. } => identity.push_str(&format!("/f{}", field.0)),
+                MirProjection::Payload { kind, .. } => identity.push_str(&format!("/p{kind:?}")),
+                MirProjection::Index { index, .. } => {
+                    identity.push_str(&format!("/i{}", self.pattern_lookup_operand_identity(*index)));
+                }
+                MirProjection::MapLookup { lookup, optional, .. } => {
+                    let cache = self.blocks.iter().flat_map(|block| &block.instructions)
+                        .find(|instruction| instruction.result == Some(*lookup))
+                        .and_then(|instruction| match instruction.operation {
+                            MirOperation::MapLookup { cache, .. } => Some(cache),
+                            _ => None,
+                        }).expect("map window has a checked lookup");
+                    identity.push_str(&format!("/m{}", cache.0));
+                    optional_map_payload = *optional;
+                }
+                MirProjection::Deref { .. } => identity.push_str("/d"),
+                MirProjection::Range { range, .. } => identity.push_str(&format!("/r{}", range.0)),
+            }
+        }
+        let key_identity = self.pattern_lookup_operand_identity(key);
+        identity.push_str(&format!("/key:{key_identity}"));
+        if let Some(cache) = self.pattern_lookup_caches.get(&identity) { return Ok(*cache); }
+        let cache_ty = Type::Option(Box::new(lookup_ty.clone()));
+        let local = TLocal::generated(format!("pattern_lookup_cache_{}", self.locals.len())).as_mutable();
+        let cache = self.bind_local(&local, cache_ty.clone(), true, false, false)?;
+        let current = self.current;
+        if let Some(head) = self.pattern_lookup_head { self.current = head; }
+        let absent = self.emit_checked("pattern.lookup.uninitialized", Some(&cache_ty), MirOperation::Absent)?;
+        self.emit_checked("pattern.lookup.initialize", None, MirOperation::WritePlace { place: cache, value: absent })?;
+        self.current = current;
+        self.pattern_lookup_caches.insert(identity, cache);
+        Ok(cache)
+    }
+
+    fn pattern_lookup_operand_identity(&self, value: MirValueId) -> String {
+        let operation = self.blocks.iter().flat_map(|block| &block.instructions)
+            .find(|instruction| instruction.result == Some(value))
+            .map(|instruction| &instruction.operation);
+        match operation {
+            Some(MirOperation::Constant(MirConstant::Int { value, .. })) => format!("int:{value}"),
+            Some(MirOperation::Constant(MirConstant::Enum { type_name, variant, args })) if args.is_empty() => {
+                let owner = self.type_id_for(type_name).expect("checked enum map key");
+                format!("enum:{}:{variant}", owner.0)
+            }
+            Some(MirOperation::Enum { type_id, variant, args }) if args.is_empty() => format!("enum:{}:{variant}", type_id.0),
+            Some(MirOperation::Constant(value)) => format!("{value:?}"),
+            Some(MirOperation::Global { name, .. }) => format!("const:{name}"),
+            _ => format!("value:{}", value.0),
+        }
+    }
+
+    fn pattern_int(&mut self, value: usize) -> Result<MirValueId, LowerError> {
+        self.emit_checked("pattern", Some(&Type::Int), MirOperation::Constant(MirConstant::Int {
+            value: value as i64, width: None, spelling: None,
+        }))
+    }
+
+    fn pattern_equal(&mut self, left: MirValueId, right: MirValueId) -> Result<MirValueId, LowerError> {
+        self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Binary {
+            op: super::mir_binary_op(jet_foundation::AST::BinOp::Eq),
+            dispatch: MirBinaryDispatch::Primitive, left, right,
+        })
+    }
+
+    fn pattern_collection_len(&mut self, subject: MirValueId, ty: &Type) -> Result<MirValueId, LowerError> {
+        let route = TBuiltinOp::LenList.prelude_route(ty, &Type::Int, &TFailureCarrier::Infallible)?;
+        super::tir_to_mir_expr::emit_static_call(self, &Type::Int, route, vec![subject])
+    }
+
+    fn lower_pattern_slot(
+        &mut self, subject: MirValueId, ty: &Type, slot: &MirPatternBinding,
+        mutable: bool, reuse: bool, window: Option<MirPlaceId>,
+    ) -> Result<MirValueId, LowerError> {
+        match slot {
+            MirPatternBinding::Bind { name, .. } => {
+                if let Some(place) = window {
+                    self.bind_window_binding(name, ty.clone(), place)?;
+                } else {
+                    self.bind_pattern_value(name, ty.clone(), subject, mutable, reuse)?;
+                }
+            }
+            MirPatternBinding::Wildcard => {}
+            MirPatternBinding::Value(value) => return self.pattern_equal(subject, *value),
+            MirPatternBinding::Range { lo, hi } => return self.lower_numeric_range(subject, ty, *lo, *hi),
+            MirPatternBinding::Nested(shape) => return self.lower_nested_pattern_condition(subject, ty, shape, mutable, reuse, window),
+        }
+        self.emit_checked("pattern", Some(&Type::Bool), MirOperation::Constant(MirConstant::Bool(true)))
     }
 
     /// S31: test a payload value against a nested pattern. The nested
@@ -9591,7 +10500,7 @@ impl<'a> LowerCtx<'a> {
                 for (index, binding) in bindings.iter().enumerate() {
                     match binding {
                         MirPatternBinding::Bind { name, .. } => {
-                            let ty = self.variant_payload_type(owner, variant, index)?;
+                            let ty = self.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                             if let Some(window) = window {
                                 let kind = MirPayloadKind::Enum {
                                     owner,
@@ -9615,9 +10524,7 @@ impl<'a> LowerCtx<'a> {
                             self.bind_pattern_value(name, ty, value, mutable, false)?;
                         }
                         MirPatternBinding::Nested(inner) => {
-                            let ty = self
-                                .enum_payload_type_for(subject_ty, variant, index)
-                                .or_else(|_| self.variant_payload_type(owner, variant, index))?;
+                            let ty = self.subject_variant_payload_type(owner, subject_ty, variant, index)?;
                             let value = self.emit_checked(
                                 "pattern",
                                 Some(&ty),
@@ -9631,7 +10538,7 @@ impl<'a> LowerCtx<'a> {
                             let owner = self.field_owner_id_for_type(&ty).ok();
                             self.bind_success_shape(value, &ty, owner, inner, mutable)?;
                         }
-                        MirPatternBinding::Wildcard | MirPatternBinding::Range { .. } => {}
+                        MirPatternBinding::Wildcard | MirPatternBinding::Range { .. } | MirPatternBinding::Value(_) => {}
                     }
                 }
                 Ok(())
@@ -9738,19 +10645,40 @@ impl<'a> LowerCtx<'a> {
         index: usize,
     ) -> Result<Type, LowerError> {
         let owner = self.field_owner_id_for_type(ty)?;
+        self.subject_variant_payload_type(owner, ty, variant, index)
+    }
+
+    /// The declared payload slot of `variant` on the checked `owner`,
+    /// instantiated with the generic arguments of the matched subject type.
+    fn subject_variant_payload_type(
+        &self,
+        owner: MirTypeId,
+        subject_ty: &Type,
+        variant: &str,
+        index: usize,
+    ) -> Result<Type, LowerError> {
         let payload = self.variant_payload_type(owner, variant, index)?;
-        if let Type::Apply { args, .. } = ty {
-            if let Some(definition) = self.type_defs.iter().find(|definition| definition.id == owner) {
-                let substitutions = definition
-                    .generic_params
-                    .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                return Ok(crate::Generics::substitute_type(&payload, &substitutions));
-            }
-        }
-        Ok(payload)
+        Ok(self.instantiate_owner_member_type(owner, subject_ty, &payload))
+    }
+
+    /// Owner declarations keep their generic parameters (`T`, `E`); a member
+    /// read through an applied subject (`HookOutcome<Int, String>`) takes the
+    /// subject's arguments. Non-applied subjects keep the declared type.
+    fn instantiate_owner_member_type(&self, owner: MirTypeId, subject_ty: &Type, member: &Type) -> Type {
+        let normalized = self.normalize_contextual_type(subject_ty);
+        let Type::Apply { args, .. } = field_owner_type(&normalized) else {
+            return member.clone();
+        };
+        let Some(definition) = self.type_defs.iter().find(|definition| definition.id == owner) else {
+            return member.clone();
+        };
+        let substitutions = definition
+            .generic_params
+            .iter()
+            .zip(args)
+            .map(|(param, arg)| (param.name.clone(), arg.clone()))
+            .collect();
+        crate::Generics::substitute_type(member, &substitutions)
     }
 
     fn variant_payload_type(
@@ -9796,6 +10724,18 @@ impl<'a> LowerCtx<'a> {
                     )
                 }),
         }
+    }
+
+    /// The declared type of `field` on the checked `owner`, instantiated with
+    /// the generic arguments of the matched subject type.
+    fn subject_field_type(
+        &self,
+        owner: MirTypeId,
+        subject_ty: &Type,
+        field: MirFieldId,
+    ) -> Result<Type, LowerError> {
+        let declared = self.field_type_for_id(owner, field)?;
+        Ok(self.instantiate_owner_member_type(owner, subject_ty, &declared))
     }
 
     fn field_type_for_id(&self, owner: MirTypeId, field: MirFieldId) -> Result<Type, LowerError> {
@@ -9844,22 +10784,7 @@ impl<'a> LowerCtx<'a> {
         let owner = self.field_owner_id_for_type(ty)?;
         let field_id = self.field_id_for(owner, field)?;
         let field_ty = self.field_type_for_id(owner, field_id)?;
-        if let Type::Apply { args, .. } = ty {
-            if let Some(definition) = self
-                .type_defs
-                .iter()
-                .find(|definition| definition.id == owner)
-            {
-                let substitutions = definition
-                    .generic_params
-                    .iter()
-                    .zip(args)
-                    .map(|(param, arg)| (param.name.clone(), arg.clone()))
-                    .collect();
-                return Ok(crate::Generics::substitute_type(&field_ty, &substitutions));
-            }
-        }
-        Ok(field_ty)
+        Ok(self.instantiate_owner_member_type(owner, ty, &field_ty))
     }
 
     pub(super) fn checked_field_type(&self, ty: &Type, field: &str) -> Result<Type, LowerError> {
@@ -9869,14 +10794,11 @@ impl<'a> LowerCtx<'a> {
     /// Whether `field` is a stored (not computed) field of the nominal struct
     /// `ty`. Only a stored field can be read through a projected place.
     pub(super) fn is_stored_struct_field(&mut self, ty: &Type, field: &str) -> bool {
-        let Ok(mir_ty) = self.mir_type(ty) else {
-            return false;
-        };
-        let Some(identity) = mir_ty.identity else {
+        let Ok(owner) = self.field_owner_id_for_type(ty) else {
             return false;
         };
         self.type_defs.iter().any(|definition| {
-            definition.id == identity
+            definition.id == owner
                 && matches!(&definition.kind, MirTypeDefKind::Struct { fields, .. }
                     if fields.iter().any(|row| row.name == field && !row.computed))
         })
@@ -9908,14 +10830,90 @@ impl<'a> LowerCtx<'a> {
             })
     }
 
+    /// D-PIN3=A: whether a place still holds the `Pin<T>` window itself. A pin
+    /// local bound by `mem.pin(&place)` aliases the pinned owner place, which
+    /// is already the target; a stored or returned pin is a window to deref.
+    pub(super) fn place_is_pin(&self, place: MirPlaceId) -> bool {
+        self.places
+            .iter()
+            .find(|candidate| candidate.id == place)
+            .is_some_and(|candidate| {
+                matches!(
+                    candidate.ty.kind(),
+                    MirTypeKind::Apply { name, args }
+                        if name.name == crate::Syntax::TYPE_PIN && args.len() == 1
+                )
+            })
+    }
+
+    /// A read-window alias can contain an internally mutable handle. Its
+    /// checked write receiver changes the place's access, so every inherited
+    /// index projection must change its exact getter/setter routes as well.
+    fn promote_index_accessors(&mut self, row: usize) -> Result<(), LowerError> {
+        // Resolve deeper parents while their original prefix routes still
+        // match the checked place rows.
+        for at in (0..self.places[row].projections.len()).rev() {
+            let MirProjection::Index { kind, .. } = self.places[row].projections[at] else {
+                continue;
+            };
+            let parent = self.places.iter().find(|place| {
+                place.base == self.places[row].base
+                    && place.projections.len() == at
+                    && place.projections.iter().zip(&self.places[row].projections).all(|(left, right)| match (left, right) {
+                        (MirProjection::Field { field: left, .. }, MirProjection::Field { field: right, .. }) => left == right,
+                        (MirProjection::Index { kind: left_kind, index: left, .. }, MirProjection::Index { kind: right_kind, index: right, .. }) => left_kind == right_kind && left == right,
+                        (MirProjection::Deref { .. }, MirProjection::Deref { .. }) => true,
+                        (MirProjection::Payload { kind: left, .. }, MirProjection::Payload { kind: right, .. }) => left == right,
+                        (MirProjection::Range { range: left, .. }, MirProjection::Range { range: right, .. }) => left == right,
+                        (MirProjection::MapLookup { lookup: left, optional: left_optional, .. }, MirProjection::MapLookup { lookup: right, optional: right_optional, .. }) => left == right && left_optional == right_optional,
+                        _ => false,
+                    })
+            }).ok_or_else(|| self.error(self.places[row].span, "index alias has no checked parent place"))?;
+            let base = mir_type_as_ast(&parent.ty);
+            let lane_name = match base.without_user_tags() {
+                Type::Named(name) | Type::Apply { name, .. } => Some(name.as_str()),
+                _ => None,
+            };
+            let element = if kind == MirIndexKind::Lane {
+                let name = lane_name.ok_or_else(|| self.error(self.places[row].span, "lane alias has no checked lane type"))?;
+                crate::Sema::math_scalar_ty(name)
+            } else {
+                self.index_element_type(&base, kind)?
+            };
+            let carrier = TFailureCarrier::from_checked_type(&element);
+            let (getter, setter) = if kind == MirIndexKind::Lane {
+                let name = lane_name.expect("checked lane alias");
+                (
+                    super::lane_index_route(name, &element, &carrier)?,
+                    super::lane_index_write_route(name, &element, &carrier)?,
+                )
+            } else {
+                (
+                    super::index_route(kind, MirAccess::Write, &element, &carrier)?,
+                    super::index_write_route(kind, &base, &element, &carrier)?,
+                )
+            };
+            let getter = self.intern_prelude_route(getter)?;
+            let setter = self.intern_prelude_route(setter)?;
+            if let MirProjection::Index { call, write_call, .. } = &mut self.places[row].projections[at] {
+                *call = getter;
+                *write_call = Some(setter);
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn place_for_local(
         &mut self,
         local: &TLocal,
         access: MirAccess,
     ) -> Result<MirPlaceId, LowerError> {
         if let Some(id) = self.local_places.get(&local.name).copied() {
-            if let Some(place) = self.places.iter_mut().find(|place| place.id == id) {
-                retain_place_access(place, access);
+            if let Some(row) = self.places.iter().position(|place| place.id == id) {
+                if access == MirAccess::Write && self.places[row].access == MirAccess::Read {
+                    self.promote_index_accessors(row)?;
+                }
+                retain_place_access(&mut self.places[row], access);
             }
             return Ok(id);
         }
@@ -9978,13 +10976,38 @@ impl<'a> LowerCtx<'a> {
 
     fn bind_captures(&mut self, lambda: &TLambda) -> Result<(), LowerError> {
         let facts = self.capture_facts_for(lambda);
-        self.bind_capture_specs(&lambda.captures, facts, lambda.source_span)
+        self.bind_capture_specs(
+            &lambda.captures,
+            facts,
+            &lambda.capture_facts.taken,
+            lambda.source_span,
+        )
+    }
+
+    /// A `^name` capture the body only reads: the closure owns its slot,
+    /// filled by moving the binding in (the scope never uses it again), and
+    /// lends each call a read of it. The closure construction
+    /// (`closure.capture.{slot}.move`) and the capture parameter
+    /// (`bind_capture_specs`) must agree, so both ask here.
+    fn taken_read_capture(
+        &self,
+        taken: &BTreeSet<String>,
+        source: &str,
+        ty: &Type,
+        access: MirAccess,
+        cloned: bool,
+    ) -> bool {
+        access == MirAccess::Read
+            && !cloned
+            && taken.contains(source)
+            && matches!(self.ownership_for(ty), MirOwnership::Owned)
     }
 
     fn bind_capture_specs(
         &mut self,
         captures: &[(String, String, Type)],
         facts: MirCaptureFacts,
+        taken: &BTreeSet<String>,
         span: Span,
     ) -> Result<(), LowerError> {
         self.capture_facts = Some(facts.clone());
@@ -10000,22 +11023,20 @@ impl<'a> LowerCtx<'a> {
                     format!("invalid or duplicate checked lambda capture `{source}`"),
                 ));
             }
-            // A clone/materialization owns the closure environment once; it
-            // does not consume that environment on every callback invocation.
-            // Only a sema-proven consuming/resource capture is a per-call move.
+            // `moved` transfers ownership at closure creation, just like a
+            // clone/materialization fills an owning environment once. Each
+            // invocation lends the slot unless the body actually consumes it.
             let moved = facts.moved.contains(source);
             let cloned =
                 !moved && (facts.cloned.contains(source) || facts.materialized.contains(source));
-            let access = if moved {
-                MirAccess::Move
-            } else if facts.mutable.contains(source) {
+            let access = if facts.mutable.contains(source) {
                 MirAccess::Write
             } else {
                 MirAccess::Read
             };
-            let ownership = if moved {
-                MirOwnership::from_access(MirAccess::Move)
-            } else if cloned {
+            // A taken read capture owns its slot like a clone does; only the
+            // construction differs (a move instead of a copy).
+            let ownership = if moved || cloned || self.taken_read_capture(taken, source, ty, access, cloned) {
                 MirOwnership::Owned
             } else {
                 MirOwnership::from_access(access)
@@ -10034,6 +11055,7 @@ impl<'a> LowerCtx<'a> {
                 ty: mir_ty.clone(),
                 access,
                 ownership,
+                place_only: false,
             });
             let names: &[&str] = if runtime == source {
                 &[source.as_str()]
@@ -10058,6 +11080,7 @@ impl<'a> LowerCtx<'a> {
                     span,
                     ty: mir_ty.clone(),
                     place,
+                    ssa_value: None,
                     mutable: matches!(access, MirAccess::Write),
                     ownership: ownership.clone(),
                     comptime: false,
@@ -10216,7 +11239,7 @@ impl<'a> LowerCtx<'a> {
         let Ok(Some(returned)) = self.function_registry.call_return_type_for(function, &[]) else {
             return Ok(None);
         };
-        if !is_plain_call_return(&returned, ret) {
+        if !is_plain_call_return(self, &returned, ret) {
             return Ok(None);
         }
         let source_params = (0..params.len())
@@ -10291,7 +11314,7 @@ impl<'a> LowerCtx<'a> {
         value: MirValueId,
         returned: &Type,
     ) -> Result<MirValueId, LowerError> {
-        if !is_plain_call_return(returned, &expr.ty) {
+        if !is_plain_call_return(self, returned, &expr.ty) {
             return Ok(value);
         }
         if self.plain_try_operand == Some(expr as *const TExpr as usize) {
@@ -10330,12 +11353,7 @@ impl<'a> LowerCtx<'a> {
             source_span: lambda.source_span,
             failure_carrier: lambda.failure_carrier.clone(),
             effects: lambda.effects.clone(),
-            target_applicability: TTargetApplicability {
-                rust_aot: true,
-                cranelift: true,
-                interpreter: true,
-                web: true,
-            },
+            target_applicability: self.function.target_applicability,
             web_bucket: self.function.web_bucket,
             web_marker: None,
             visibility: TVisibility::Private,
@@ -10381,9 +11399,10 @@ impl<'a> LowerCtx<'a> {
             kind: TFuncKind::TopLevel,
             gc_scope: false,
         };
-        let (nested, calls, files, instances, deeper, callbacks) = lower_function(
+        let (nested, calls, files, instances, deeper, callbacks, sites) = lower_function(
             &function,
             self.type_defs,
+            self.type_index,
             self.nominal_identities,
             self.reflect_paths,
             self.trait_defs,
@@ -10400,6 +11419,7 @@ impl<'a> LowerCtx<'a> {
             self.prelude_calls.push(call);
         }
         self.callbacks.extend(callbacks);
+        self.shared_sites.extend(sites);
         self.type_instances.extend(instances);
         for file in files {
             self.source_files.entry(file.path).or_insert(file.id);
@@ -10408,20 +11428,26 @@ impl<'a> LowerCtx<'a> {
         let facts = self.capture_facts_for(lambda);
         let mut captures = Vec::with_capacity(lambda.captures.len());
         for (slot, (source, runtime, ty)) in lambda.captures.iter().enumerate() {
-            // Cloned/materialized captures are owned by the closure environment,
-            // but reusable callbacks borrow that environment on each call.
-            // Keep Move exclusively for sema-proven consuming captures.
+            // Construction owns moved/cloned/materialized captures once;
+            // reusable callbacks lend that environment on each invocation.
             let moved = facts.moved.contains(source);
             let cloned =
                 !moved && (facts.cloned.contains(source) || facts.materialized.contains(source));
-            let access = if moved {
-                MirAccess::Move
-            } else if facts.mutable.contains(source) {
+            let access = if facts.mutable.contains(source) {
                 MirAccess::Write
             } else {
                 MirAccess::Read
             };
-            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !cloned;
+            // A taken read capture (`taken_read_capture`) moves the binding
+            // into the closure's owning slot, never copies it.
+            let taken = self.taken_read_capture(
+                &lambda.capture_facts.taken,
+                source,
+                ty,
+                access,
+                cloned,
+            );
+            let borrowed = matches!(access, MirAccess::Read | MirAccess::Write) && !moved && !cloned && !taken;
             // `runtime` is the canonical TIR slot used by the lambda body and,
             // for borrowed and moved captures, the exact enclosing slot (which
             // may carry a generated spelling). A cloned/materialized capture's
@@ -10433,7 +11459,13 @@ impl<'a> LowerCtx<'a> {
                 .get(source)
                 .cloned()
                 .unwrap_or_else(|| runtime.clone());
-            let outer_access = if cloned { MirAccess::Read } else { access };
+            let outer_access = if cloned {
+                MirAccess::Read
+            } else if moved || taken {
+                MirAccess::Move
+            } else {
+                access
+            };
             let outer_name = self.resolved_local_name(&TLocal::user(outer_slot));
             let place = self.place_for_local(&TLocal::user(outer_name), outer_access)?;
             if borrowed {
@@ -10465,7 +11497,7 @@ impl<'a> LowerCtx<'a> {
                         },
                     )?
                 }
-            } else if matches!(access, MirAccess::Move) {
+            } else if moved || taken {
                 self.emit_owned(
                     &format!("closure.capture.{slot}.move"),
                     Some(ty.clone()),
@@ -10581,7 +11613,10 @@ impl<'a> LowerCtx<'a> {
                 place: None,
             })
             .collect::<Vec<_>>();
-        self.emit_deferred_cleanups(0)?;
+        let propagated = self.can_emit_propagate();
+        if !propagated {
+            self.emit_deferred_cleanups(0)?;
+        }
         self.emit(
             &format!("index-miss.panic.{}", self.current.0),
             Some(never),
@@ -10591,9 +11626,7 @@ impl<'a> LowerCtx<'a> {
                 type_args: Vec::new(),
             },
         )?;
-        self.terminate(MirTerminator::Unreachable {
-            reason: "index miss".to_string(),
-        });
+        self.terminate_program_stop(propagated, "index miss");
         Ok(())
     }
     fn capture_facts_for(&self, lambda: &TLambda) -> MirCaptureFacts {
@@ -10611,14 +11644,12 @@ impl<'a> LowerCtx<'a> {
     }
 
     pub(super) fn ownership_for(&self, ty: &Type) -> MirOwnership {
-        if matches!(
-            ty,
-            Type::Int | Type::Float | Type::Float32 | Type::Bool | Type::Char
-        ) || matches!(ty, Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE || name == crate::Syntax::TYPE_NEVER)
-        {
-            MirOwnership::copy()
-        } else {
-            MirOwnership::Owned
+        match ty {
+            Type::Int => MirOwnership::copy_value(),
+            Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. } | Type::Quantity { base: inner, .. } => self.ownership_for(inner),
+            Type::Float | Type::Float32 | Type::Bool | Type::Char | Type::IntN { .. } => MirOwnership::copy(),
+            Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE || name == crate::Syntax::TYPE_NEVER => MirOwnership::copy(),
+            _ => MirOwnership::Owned,
         }
     }
 
@@ -10635,15 +11666,8 @@ impl<'a> LowerCtx<'a> {
             Type::Named(name) if self.is_trait_name(name)
         );
         let box_as_trait = (!source_is_trait_object).then_some(arg.box_as_trait.as_ref()).flatten();
-        // A checked concrete-to-trait coercion transfers the concrete value to
-        // the box even when the trait parameter's convention is Read. Keep the
-        // ordinary borrow path for already-boxed or genuinely borrowed values.
-        let consumes_trait_box = box_as_trait.is_some()
-            && arg.borrow
-            && !arg.mut_borrow
-            && !arg.clone
-            && !arg.arc_clone;
         let consumes_union = arg.widen_to_union.is_some()
+            && !arg.borrow
             && !arg.mut_borrow
             && !arg.clone
             && !arg.arc_clone
@@ -10653,7 +11677,7 @@ impl<'a> LowerCtx<'a> {
             );
         let access = if arg.mut_borrow {
             MirAccess::Write
-        } else if consumes_trait_box || consumes_union {
+        } else if consumes_union {
             MirAccess::Move
         } else if arg.borrow {
             MirAccess::Read
@@ -10697,7 +11721,7 @@ impl<'a> LowerCtx<'a> {
             None
         };
         let value = if let Some(place) = place {
-            let operation = if consumes_trait_box || consumes_union {
+            let operation = if consumes_union {
                 MirOperation::MovePlace { place }
             } else {
                 MirOperation::ReadPlace(place)
@@ -10715,6 +11739,16 @@ impl<'a> LowerCtx<'a> {
         } else {
             self.lower_child(&arg.value)?
         };
+        // A union wrapper owns its payload even when the resulting union is
+        // borrowed by the callee. Preserve a named source by materializing its
+        // read; a fresh owned source can instead transfer into the temporary
+        // wrapper. A Copy source is copied into the wrapper, never consumed.
+        let copy_source = self.ownership_for(&arg.value.ty).mode
+            == jet_foundation::MIR::MirOwnershipMode::Copy;
+        let clones_union = arg.widen_to_union.is_some()
+            && access == MirAccess::Read
+            && place.is_some()
+            && !copy_source;
         // A raw-payload function value filling a `Result`-carrier callable
         // slot crosses as a fresh adapter closure, not as the source place.
         let adapted = match &arg.fn_coerce {
@@ -10724,7 +11758,9 @@ impl<'a> LowerCtx<'a> {
             _ => None,
         };
         let value = adapted.unwrap_or(value);
-        let call_place = if consumes_trait_box || consumes_union || adapted.is_some() {
+        let owned_trait_box = box_as_trait.is_some()
+            && !(access == MirAccess::Read && !arg.clone && !arg.arc_clone);
+        let call_place = if owned_trait_box || arg.widen_to_union.is_some() || adapted.is_some() {
             None
         } else {
             place
@@ -10737,13 +11773,13 @@ impl<'a> LowerCtx<'a> {
             source_index: None,
             binder_slot: None,
             spread: false,
-            implicit_clone: arg.clone,
+            implicit_clone: arg.clone || clones_union,
             shared_auto_clone: arg.arc_clone,
-            // Sema consumes the concrete value when it accepts trait boxing.
-            owned_last_use: matches!(access, MirAccess::Move) || box_as_trait.is_some(),
+            owned_last_use: matches!(access, MirAccess::Move) || owned_trait_box
+                || (arg.widen_to_union.is_some() && place.is_none() && !copy_source),
             authority_boundary: false,
             fn_coercion: None,
-            widen_fixed_to_list: false,
+            widen_fixed_to_list: arg.widen_to_vec,
             widen_to_union: match &arg.widen_to_union {
                 Some(ty) => {
                     let union = self.mir_type(ty)?.identity.ok_or_else(|| {
@@ -10790,6 +11826,68 @@ impl<'a> LowerCtx<'a> {
     }
     pub(super) fn resolve_function_id(&self, name: &str) -> Result<MirFunctionId, LowerError> {
         self.function_id_for(name)
+    }
+
+    pub(super) fn precise_source_target(
+        &self,
+        owner: &str,
+        operation: &str,
+    ) -> Result<Option<MirFunctionId>, LowerError> {
+        let Some(helper) = super::precise_source_helper(owner, operation) else {
+            return Ok(None);
+        };
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return Ok(None);
+        };
+        let Some(module) = self.modules.iter().find(|module| module.path == source.path) else {
+            return Ok(None);
+        };
+        let owned = (owner == "Int" && operation == "abs") || self.type_defs.iter().any(|definition| {
+            definition.name == owner && definition.key == format!("{}::{owner}", module.key)
+                && jet_foundation::CoreModuleExports::core_source_owns_type(&definition.key)
+        });
+        if !owned {
+            return Ok(None);
+        }
+        self.function_id_for(&format!("{}::{helper}", module.key)).map(Some)
+    }
+
+    pub(super) fn geometry_source_target(
+        &self,
+        owner: &Type,
+        operation: &str,
+    ) -> Result<Option<MirFunctionId>, LowerError> {
+        let Some(name) = owner.base_name() else { return Ok(None) };
+        if !crate::Sema::is_geometry_type(name) { return Ok(None) }
+        let type_id = self.type_id_for(name)?;
+        let Some(definition) = self.type_defs.iter().find(|definition| definition.id == type_id) else {
+            return Ok(None);
+        };
+        if !jet_foundation::CoreModuleExports::core_source_owns_type(&definition.key) {
+            return Ok(None);
+        }
+        let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+            return Ok(None);
+        };
+        let Some(module) = self.modules.iter().find(|module| module.path == source.path) else {
+            return Ok(None);
+        };
+        let mut selected = None;
+        for (target, functions) in &self.function_registry.by_target {
+            if target.module != module.key || target.method != operation || target.trait_name.is_some() {
+                continue;
+            }
+            for function in functions {
+                let Some(target_owner) = self.function_registry.owner_types.get(function) else { continue };
+                if target_owner.base_name().is_none_or(|head| canonical_target_type(&module.key, head) != definition.key) {
+                    continue;
+                }
+                if selected.replace(*function).is_some() {
+                    return Err(self.error(self.span(), "checked geometry source method is ambiguous"));
+                }
+            }
+        }
+        selected.map(Some).ok_or_else(|| self.error(self.span(), "checked geometry source method was pruned"))
     }
 
     pub(super) fn lower_pattern(
@@ -10950,6 +12048,12 @@ impl<'a> LowerCtx<'a> {
         }
         if !self.is_terminated() {
             self.emit("scope.exit", None, MirOperation::ScopeExit { scope })?;
+        }
+        if self.function_registry.stop_points && self.scopes.iter().any(|row| {
+            row.id == scope && row.kind == MirScopeKind::ScopeMember
+                && row.name.as_deref() != Some("skip") && row.name.as_deref() != Some("measure")
+        }) {
+            self.emit_poll(MirPollKind::Propagate, false)?;
         }
         Ok(())
     }
@@ -11474,6 +12578,24 @@ impl<'a> LowerCtx<'a> {
         record: &'static jet_foundation::Syntax::CoreCallRecord,
         widen_to_vec: bool,
     ) -> Result<MirCallArg, LowerError> {
+        // A registry read argument borrows the checked place even when sema
+        // inserted an implicit Clone for ordinary value consumption. Explicit
+        // copies/moves and mutation borrows keep their own access convention.
+        let borrowed_place = if record.signature.borrow_mask.get(index).copied() == Some(true)
+            || (record.module == "core.net.tls" && record.member == "client" && index >= 2)
+        {
+            let source = match &arg.kind {
+                TExprKind::Clone(inner, _) => &**inner,
+                _ => arg,
+            };
+            if matches!(&arg.kind, TExprKind::Borrow { .. }) {
+                None
+            } else {
+                super::tir_to_mir_expr::lower_receiver_place(self, source, MirAccess::Read)?
+            }
+        } else {
+            None
+        };
         let (access, place) = match &arg.kind {
             TExprKind::Borrow { place, mutable } => {
                 let access = if *mutable {
@@ -11484,9 +12606,11 @@ impl<'a> LowerCtx<'a> {
                 let place = self.lower_place(&TPlace::Expr(Box::new((**place).clone())), access)?;
                 (access, Some(place))
             }
+            _ if borrowed_place.is_some() => (MirAccess::Read, borrowed_place),
             TExprKind::Clone(..)
             | TExprKind::ExplicitCopy(_)
             | TExprKind::MaterializeView(_)
+            | TExprKind::TraitBox { .. }
             | TExprKind::Move(_)
             | TExprKind::ResourceTake(_) => (MirAccess::Move, None),
             _ if crate::Collections::is_iter_type(&arg.ty) => (MirAccess::Move, None),
@@ -11537,9 +12661,7 @@ impl<'a> LowerCtx<'a> {
             implicit_clone: false,
             shared_auto_clone: false,
             owned_last_use: matches!(access, MirAccess::Move),
-            authority_boundary: record.module == "core.plugin"
-                && record.member == "load"
-                && index == 1,
+            authority_boundary: record.authority_boundary_at(index),
             fn_coercion: None,
             widen_fixed_to_list: widen_to_vec,
             widen_to_union: None,
@@ -11689,5 +12811,207 @@ fn tir_place_path(expr: &TExpr) -> bool {
         TExprKind::Local(local) => !local.is_persistent(),
         TExprKind::Field { recv, .. } => tir_place_path(recv),
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod nominal_index_tests {
+    use super::*;
+
+    fn fixture() -> TirProgram {
+        jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+            let (bundle, nominals) = super::super::tests::checked_bundle(
+                "struct Gauge {\n n: Int\n}\nfn run() {}\n",
+            );
+            let request = jet_foundation::MIR::MirArtifactRequest::new(
+                MirArtifactTarget::RustAot,
+                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                jet_foundation::MIR::MirArtifactBuildMode::Dev,
+            );
+            super::super::lower_checked_tir_program_for(&bundle, &nominals, request)
+                .expect("checked nominal lookup fixture")
+        })
+    }
+
+    #[test]
+    fn nominal_index_retains_duplicate_key_diagnostic_and_first_identity() {
+        let program = fixture();
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let mut types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        let gauge = types.iter().find(|row| row.name == "Gauge").unwrap().clone();
+        let span = Span::new(17, 23);
+        let index = NominalTypeIndex::build(&types);
+        assert_eq!(
+            canonical_type_instance(&index, &Type::Named(gauge.key.clone()), span)
+                .unwrap().identity,
+            Some(gauge.id),
+        );
+        drop(index);
+        types.push(gauge.clone());
+        let index = NominalTypeIndex::build(&types);
+        let error = canonical_nominal_name(&index, &gauge.key, span).unwrap_err();
+        assert_eq!(error.span, span);
+        assert_eq!(error.message, format!("ambiguous checked MIR type key `{}`", gauge.key));
+    }
+
+    #[test]
+    fn nominal_index_tracks_generated_union_then_folded_qualified_spelling() {
+        let mut program = fixture();
+        let members = vec![Type::Int, Type::String];
+        let name = crate::AST::union_enum_name(&members);
+        let variants = members.iter().map(crate::AST::union_member_tag).collect::<Vec<_>>();
+        program.enum_variants.insert(name.clone(), variants.clone());
+        for (member, variant) in members.iter().zip(&variants) {
+            program.enum_variant_payload_types.insert(
+                format!("{name}::{variant}"), vec![member.clone()],
+            );
+        }
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let mut types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        lower_anonymous_union_type_defs(&program, &mut types).unwrap();
+        let carrier = types.iter().find(|row| row.key == name).unwrap().clone();
+        let mut qualified = carrier.clone();
+        qualified.key = format!("scope::{name}");
+        qualified.id = MirTypeId(stable_id("mir-type", &qualified.key));
+        types.push(qualified);
+        fold_anonymous_union_declarations(&mut types);
+        types.sort_unstable_by_key(|row| row.id);
+        let index = NominalTypeIndex::build(&types);
+        assert!(!index.exact.contains_key(format!("scope::{name}").as_str()));
+        assert_eq!(
+            canonical_type_instance(&index, &Type::Named(format!("scope::{name}")), Span::new(0, 0))
+                .unwrap().identity,
+            Some(carrier.id),
+        );
+    }
+
+    #[test]
+    fn nominal_index_core_carrier_requires_registered_source_owner() {
+        let program = fixture();
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        let template = types.iter().find(|row| row.name == "Gauge").unwrap();
+        let source = registered_core_owner_path("DateTime").expect("Core DateTime owner");
+        let mut unrelated = template.clone();
+        unrelated.name = "DateTime".into();
+        unrelated.key = "<corelib>/fixture::unrelated/time.jet::DateTime".into();
+        let mut owner = unrelated.clone();
+        owner.key = format!("<corelib>/fixture::{source}::DateTime");
+        let mut later_owner = owner.clone();
+        later_owner.key = format!("<corelib>/later::{source}::DateTime");
+        let rows = vec![unrelated.clone(), owner.clone(), later_owner];
+        let index = NominalTypeIndex::build(&rows);
+        assert_eq!(
+            canonical_nominal_name(&index, "DateTime", Span::new(0, 0)).unwrap(),
+            owner.key,
+        );
+        let rows = vec![unrelated];
+        let index = NominalTypeIndex::build(&rows);
+        assert_eq!(
+            canonical_nominal_name(&index, "DateTime", Span::new(0, 0)).unwrap(),
+            "DateTime",
+        );
+    }
+
+    #[test]
+    fn nominal_index_context_is_scoped_and_generic_parameters_shadow_nominals() {
+        let program = fixture();
+        let registry = FunctionRegistry::build(&program.funcs, program.entry_call_alias.as_ref())
+            .unwrap();
+        let mut types = lower_type_defs(&program.declarations.type_defs, &registry).unwrap();
+        let mut function = program.funcs.iter().find(|row| row.name == "run").unwrap().clone();
+        function.module = "scope".into();
+        let mut local = types.iter().find(|row| row.name == "Gauge").unwrap().clone();
+        local.name = "Local".into();
+        local.key = "scope::Local".into();
+        types.push(local);
+        let mut unrelated = types.last().unwrap().clone();
+        unrelated.name = "Unrelated".into();
+        unrelated.key = "elsewhere::Unrelated".into();
+        types.push(unrelated);
+        let index = NominalTypeIndex::build(&types);
+        let identities = HashMap::from([
+            ("scope::Visible".into(), "owner::Visible".into()),
+            ("checked::Imported".into(), "owner::Imported".into()),
+            ("Unrelated".into(), "elsewhere::Unrelated".into()),
+        ]);
+        let reflect = HashMap::new();
+        let sources = BTreeMap::new();
+        let ctx = LowerCtx::new(
+            &function, &types, &index, &identities, &reflect, &[], &registry, &sources, &[],
+        );
+        for (name, expected) in [
+            ("Local", "scope::Local"),
+            ("Visible", "owner::Visible"),
+            ("checked::Imported", "owner::Imported"),
+            ("Unrelated", "Unrelated"),
+        ] {
+            assert_eq!(
+                ctx.normalize_contextual_type(&Type::Named(name.into())),
+                Type::Named(expected.into()),
+            );
+        }
+        drop(ctx);
+        function.generic_params = vec![super::super::TGenericParam {
+            name: "Local".into(), bounds: Vec::new(),
+        }, super::super::TGenericParam {
+            name: "Visible".into(), bounds: Vec::new(),
+        }];
+        let ctx = LowerCtx::new(
+            &function, &types, &index, &identities, &reflect, &[], &registry, &sources, &[],
+        );
+        for name in ["Local", "Visible"] {
+            let ty = Type::Named(name.into());
+            assert_eq!(ctx.normalize_contextual_type(&ty), ty);
+        }
+    }
+}
+
+#[cfg(test)]
+mod core_carrier_trait_target_tests {
+    use super::*;
+
+    #[test]
+    fn bare_core_trait_target_keeps_owner_trait_and_ambiguity() {
+        let source = jet_foundation::CoreModuleExports::core_source_module("core.math").unwrap();
+        let module = "<corelib>/Core/math::Core/math/math.jet".to_string();
+        let owner = format!("{}::Fraction", module);
+        assert!(owner.ends_with(&format!("{}::Fraction", source.path)));
+        let key = FunctionTargetKey {
+            module,
+            owner,
+            trait_name: Some("Display".to_string()),
+            method: "display".to_string(),
+            rhs: None,
+        };
+        let mut registry = FunctionRegistry::build(&[], None).unwrap();
+        let display = MirFunctionId(1);
+        registry.by_target.insert(key.clone(), vec![display]);
+        let span = Span::new(0, 1);
+        assert_eq!(
+            registry.resolve("Fraction::Display::display", "consumer::run", span).unwrap(),
+            display,
+        );
+        assert!(registry.resolve("Fraction::Debug::display", "consumer::run", span).is_err());
+        assert!(registry.resolve("Other::Display::display", "consumer::run", span).is_err());
+
+        let local = MirFunctionId(2);
+        registry.by_target.insert(FunctionTargetKey {
+            module: "consumer::run".to_string(),
+            owner: "consumer::run::Fraction".to_string(),
+            trait_name: Some("Display".to_string()),
+            method: "display".to_string(),
+            rhs: None,
+        }, vec![local]);
+        assert_eq!(
+            registry.resolve("Fraction::Display::display", "consumer::run", span).unwrap(),
+            local,
+        );
+        registry.by_target.insert(key, vec![display, MirFunctionId(3)]);
+        assert!(registry.resolve("Fraction::Display::display", "another::run", span)
+            .unwrap_err().message.contains("ambiguous checked function target"));
     }
 }

@@ -1,0 +1,58 @@
+// The public SQL kernel is the one grammar and scalar policy owner.
+use core.db.sql as sql_kernel
+#Test("SQL canonical tokenizer retains Unicode strings and comments") {
+    tokens :: sql_kernel.sql_tokens("SELECT 'x'';é', value /* outer */ FROM source -- tail\nWHERE value >= 2;") ?? panic("tokens")
+    assert_eq(tokens, [String]{"SELECT", "'x'';é'", ",", "value", "FROM", "source", "WHERE", "value", ">=", "2", ";"})
+    assert_eq(sql_kernel.unquote("'x'';é'"), "x';é")
+    assert(sql_kernel.sql_tokens("SELECT 'open") == .Err(_))
+    assert(sql_kernel.sql_tokens("SELECT value /* open") == .Err(_))
+}
+#Test("SQL numeric comparison does not coerce a text literal to numeric") {
+    assert(sql_kernel.compare_sql_cell("10", ">", "2"))
+    assert(!sql_kernel.compare_sql_cell("10", ">", "'2'"))
+    assert(sql_kernel.compare_sql_cell("true", "=", "true"))
+    assert(!sql_kernel.compare_sql_cell("TRUE", "=", "true"))
+    assert_eq(sql_kernel.identifier(Val("'9id'"), "column") ?? panic("quoted identifier"), "9id")
+    assert(sql_kernel.identifier(Val("9id"), "column") == .Err(_))
+}
+#Test("SQL sum uses wide integer accumulation before narrowing") {
+    indices :: [U64]{U64{0}, U64{1}, U64{2}}
+    cell :: (index: U64, field: String) -> sql_kernel.JetSQLValue? {
+        if {
+            index == (U64{0}) -> Val(sql_kernel.JetSQLValue.Int(I64{9223372036854775807}))
+            index == (U64{1}) -> Val(sql_kernel.JetSQLValue.Int(I64{1}))
+            else -> Val(sql_kernel.JetSQLValue.Int(I64{-1}))
+        }
+    }
+    sum :: sql_kernel.sql_aggregate_value(indices, sql_kernel.JetSQLAggregate.Sum, Val("value"), cell)
+    assert_eq(sum, sql_kernel.JetSQLValue.Int(I64{9223372036854775807}))
+    count :: sql_kernel.sql_aggregate_value(indices, sql_kernel.JetSQLAggregate.Count, None, cell)
+    assert_eq(count, sql_kernel.JetSQLValue.Int(I64{3}))
+}
+#Test("SQL named result fields retain ordinal and column lookup") {
+    row :: sql_kernel.JetSQLResultRow{
+        fields: [(field: String, value: sql_kernel.JetSQLValue)]{
+            (field: "label", value: sql_kernel.JetSQLValue.Text("second")),
+            (field: "a", value: sql_kernel.JetSQLValue.Int(I64{2})),
+        },
+        source_indices: [U64]{U64{1}},
+    }
+    assert_eq(sql_kernel.sql_output_value(row, "1") ?? panic("first output"), sql_kernel.JetSQLValue.Text("second"))
+    assert_eq(sql_kernel.sql_output_value(row, "a") ?? panic("named output"), sql_kernel.JetSQLValue.Int(I64{2}))
+    assert_eq(sql_kernel.sql_output_value(row, "0"), None)
+    assert_eq(sql_kernel.sql_output_value(row, "3"), None)
+}
+#Test("SQL public parsing and ordered projection resolve private helpers and carriers") {
+    query :: sql_kernel.parse_sql_query("SELECT value FROM source ORDER BY value DESC") ?? panic("query")
+    cell :: (index: U64, field: String) -> sql_kernel.JetSQLValue? {
+        if {
+            field != "value" -> None
+            else -> Val(sql_kernel.JetSQLValue.Int(if index == (U64{0}) -> I64{1} else -> I64{2}))
+        }
+    }
+    rows :: sql_kernel.execute_sql_rows([String]{"value"}, U64{2}, query, cell) ?? panic("rows")
+    assert_eq(rows.len(), 2)
+    assert_eq(rows[0].source_indices, [U64]{U64{1}})
+    assert_eq(rows[1].source_indices, [U64]{U64{0}})
+    assert_eq(sql_kernel.sql_output_value(rows[0], "value") ?? panic("value"), sql_kernel.JetSQLValue.Int(I64{2}))
+}

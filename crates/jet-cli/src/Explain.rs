@@ -125,6 +125,16 @@ pub fn is_build_fact_query(query: &str) -> bool {
 /// Look up one code (case-insensitive).
 pub fn lookup(code: &str) -> Option<Explanation> {
     if let Some(row) = jet_foundation::Syntax::lookup(code) {
+        // D-META-REG1=A: a marker with a registered rule answers from that one
+        // row (typed signature, sites, retirement), never from the dictionary's
+        // generic placeholder, so a retired marker is never shown as live.
+        if row.kind == jet_foundation::Syntax::SyntaxDictionaryKind::Marker {
+            if let Some(rule) =
+                jet_foundation::Registry::row(&row.token).and_then(|registered| registered.rule)
+            {
+                return Some(rule_explanation(rule));
+            }
+        }
         // Every meaning, its example and what happens afterwards live in the
         // plain text; internal names and decision IDs stay behind
         // `syntax_internals` (`jet explain --verbose`).
@@ -182,41 +192,46 @@ pub fn lookup(code: &str) -> Option<Explanation> {
             let Some(row) = registered.rule else {
                 return Some(explain_fact_row(registered));
             };
-            let (retired, replacement) = match row.status {
-                jet_foundation::Policy::RuleStatus::Active => (false, None),
-                jet_foundation::Policy::RuleStatus::Retired { replacement } => {
-                    (true, Some(replacement))
-                }
-            };
-            Some(Explanation {
-                code: row.name.to_string(),
-                stage: "rule applicability".to_string(),
-                meaning: format!("`#{}{}`", row.name, row.signature.render()),
-                // D-MARK-FORM1=A: there is no written-form column. The row's
-                // own signature says whether parentheses may and must appear.
-                what: Some(format!(
-                    "arguments: {}; repeatable: {}; status: {:?}; attachment sites: {:?}.{}",
-                    if row.signature.arguments_required() {
-                        "required"
-                    } else if row.signature.accepts_arguments() {
-                        "optional"
-                    } else {
-                        "none"
-                    },
-                    row.repeatable,
-                    row.status,
-                    row.sites,
-                    marker_argument_declarations(row)
-                )),
-                why: Some(format!("resolution is {:?}; site-bound authority never becomes ambient policy", row.resolution)),
-                fix: Some(replacement.map_or_else(
-                    || "move the rule to one of its registered sites".to_string(),
-                    |replacement| format!("replace it with `{replacement}`"),
-                )),
-                example: None,
-                retired,
-            })
+            Some(rule_explanation(row))
         })
+}
+
+/// The explanation of one registered rule row: its typed signature, sites and status.
+fn rule_explanation(row: &jet_foundation::Policy::AppliedRule) -> Explanation {
+    let (retired, replacement) = match row.status {
+        jet_foundation::Policy::RuleStatus::Active => (false, None),
+        jet_foundation::Policy::RuleStatus::Retired { replacement } => {
+            (true, Some(replacement))
+        }
+    };
+    Explanation {
+        code: row.name.to_string(),
+        stage: "rule applicability".to_string(),
+        meaning: format!("`#{}{}`", row.name, row.signature.render()),
+        // D-MARK-FORM1=A: there is no written-form column. The row's
+        // own signature says whether parentheses may and must appear.
+        what: Some(format!(
+            "arguments: {}; repeatable: {}; status: {:?}; attachment sites: {:?}.{}",
+            if row.signature.arguments_required() {
+                "required"
+            } else if row.signature.accepts_arguments() {
+                "optional"
+            } else {
+                "none"
+            },
+            row.repeatable,
+            row.status,
+            row.sites,
+            marker_argument_declarations(row)
+        )),
+        why: Some(format!("resolution is {:?}; site-bound authority never becomes ambient policy", row.resolution)),
+        fix: Some(replacement.map_or_else(
+            || "move the rule to one of its registered sites".to_string(),
+            |replacement| format!("replace it with `{replacement}`"),
+        )),
+        example: None,
+        retired,
+    }
 }
 
 pub fn is_syntax_query(query: &str) -> bool {

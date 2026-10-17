@@ -1,0 +1,26 @@
+// core-conformance: core.data.sketch.reservoir.add
+// D-COPY-DEFAULT1=A: both slots and the deterministic RNG state are values.
+use core.data.sketch.reservoir as reservoir
+
+fn run() {
+    original := reservoir.new(3)
+    loop i in 0..<3 -> &original.add("{i}")
+    clone := original.copy()
+    loop i in 3..<20 -> &clone.add("{i}")
+    assert_eq(original.sample(), [String]{"0", "1", "2"})
+    // Observed from the retired shipped seed at 4e77834f3.
+    assert_eq(clone.sample(), [String]{"16", "4", "2"})
+    loop i in 3..<20 -> &original.add("{i}")
+    assert_eq(original.sample(), clone.sample())
+    // Returned samples are independent values too.
+    snapshot := clone.sample()
+    snapshot[0] = "changed"
+    assert_eq(clone.sample(), [String]{"16", "4", "2"})
+    minimum := reservoir.new(0)
+    &minimum.add("first")
+    &minimum.add("second")
+    assert_eq(minimum.sample(), [String]{"first"})
+    print(original.sample())
+    print(clone.sample())
+    print(minimum.sample())
+}

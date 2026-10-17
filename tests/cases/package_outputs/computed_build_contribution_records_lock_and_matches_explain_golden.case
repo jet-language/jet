@@ -1,0 +1,22 @@
+# Port of tests/package_outputs.rs:642-712; existing fixture/explain golden reused verbatim.
+# PENDING-GRAMMAR(batch-four): TOML Dyn assertions, all seven fields on the key-selected record.
+# ORACLE-LITERAL four.out from original line663; changed-run.txt is original line698's exact replacement.
+fixture: ../../../Examples/features/packages/build_contribution
+env: NO_COLOR=1
+step: jet run run.jet
+exit: 0
+stdout: = four.out
+json: file .jet/lock toml $.build.contribution[?key="Build.Settings.cache_slots"].key = "Build.Settings.cache_slots"
+json: file .jet/lock toml $.build.contribution[?key="Build.Settings.cache_slots"].package = "build_contribution_demo"
+json: file .jet/lock toml $.build.contribution[?key="Build.Settings.cache_slots"].value = "Int(4)"
+json: file .jet/lock toml $.build.contribution[?key="Build.Settings.cache_slots"].scope = "function"
+json: file .jet/lock toml $.build.contribution[?key="Build.Settings.cache_slots"].layer = "environment"
+json: file .jet/lock toml $.build.contribution[?key="Build.Settings.cache_slots"].source = "build_contribution_demo::build"
+json: file .jet/lock toml $.build.contribution[?key="Build.Settings.cache_slots"].reason = "computed by fn build"
+step: jet explain build.settings.cache_slots run.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/packages/build_contribution.explain.out
+copy: {root}/tests/cases/package_outputs/fixtures/contribution/changed-run.txt run.jet
+step: jet run --locked run.jet
+exit: nonzero
+stderr: ~ "E3512" # original predicate

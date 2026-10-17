@@ -1,0 +1,12 @@
+
+use core.http.client as http
+fn run() {
+    client :: http.Client.new()
+        .redirects(.Follow{ max: 2, same_origin_credentials: false })
+        .protocols(false, true, false)
+    req :: http.request("GET", "http://{cap:addr}/start")
+        .header("Authorization", "Bearer secret")
+    resp :: client.send(req) ?? panic("send")
+    print(resp.body().text(8) ?? panic("body"))
+    print(resp.redirect_history().len())
+}

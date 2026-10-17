@@ -1,0 +1,10 @@
+# Port of tests/build_entry.rs:3788-3797; original sources verbatim, canonical machine diagnostics.
+# PENDING-SAME-HEAD; source acceptance != complete direct-driver nominal proof.
+fixture: fixtures/criterion9_programmable_build_implicit_failure_preserves_build_error_identity
+step: jet build main.jet --json
+exit: nonzero
+json: machine doc $.reports[?code="E3502"] #>= 1
+json: machine doc $.reports[?code="E3502"][0].build_error.typed_identity = "BuildError::DuplicateTargetName"
+json: machine doc $.reports[?code="E3502"][0].build_error.details.variant = "DuplicateTargetName"
+json: machine doc $.reports[?code="E3502"][0].build_error.details.fields keys = ["value"]
+json: machine doc $.reports[?code="E3502"][0].build_error.details.fields.value = "app"

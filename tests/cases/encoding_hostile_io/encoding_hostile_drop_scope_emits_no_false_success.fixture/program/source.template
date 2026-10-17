@@ -1,0 +1,18 @@
+
+use core.encoding as encoding
+use core.encoding.jsonl as jsonl
+use core.files as files
+
+fn write_partial(path: String) {
+    output :: files.create(path) ?? panic("create")
+    writer :: jsonl.writer(^output) ?? panic("writer")
+    writer.write(Dyn.Text("kept")) ?? panic("write")
+    &writer.flush() ?? panic("flush")
+}
+
+fn run() {
+    write_partial("{work}/partial.jsonl")
+    leftover :: files.read("{work}/partial.jsonl") ?? panic("read")
+    print(leftover == "\"kept\"")
+    print(leftover.contains("\n") == false)
+}

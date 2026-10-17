@@ -292,7 +292,7 @@ fn probe_functions(
                 false,
                 true,
             );
-            checker.canonicalize_function_return_type(&mut clone);
+            checker.canonicalize_function_signature(&mut clone);
             checker.ret = crate::Sema::checked_body_return_type(&clone, false);
             checker.failure_union_probe = Some(FailureUnionProbe::default());
             checker.check_params_and_body(&mut clone, None);
@@ -436,6 +436,7 @@ fn mint_case_types(
             serde_markers: Vec::new(),
             type_markers: vec![crate::AST::Marker {
                 name: Syntax::MARKER_ERROR.to_string(),
+                declaration: None,
                 negated: false,
                 name_span: marker_span,
                 args: Vec::new(),

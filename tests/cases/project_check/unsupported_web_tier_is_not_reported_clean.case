@@ -1,0 +1,11 @@
+# tests/project_check.rs::unsupported_web_tier_is_not_reported_clean at tests/project_check.rs:370; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: unsupported_web_tier_is_not_reported_clean.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check . --target=web
+cwd: {work}/tier_lowering
+normalize: replace "{work}/tier_lowering" "<fixture>"
+exit: nonzero
+stderr: ~ "Error [E2392]" # original predicate
+stderr: = unsupported_web_tier_is_not_reported_clean.tier_lowering.expected

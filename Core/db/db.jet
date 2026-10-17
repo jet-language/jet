@@ -8,68 +8,331 @@ package {
         db: .Library{ entry: db }
     }
 }
-
 use core as core
+// D-DEP-DB1: the existing bridge retains the bundled SQLite engine. The held
+// CFFI adapter is preserved on corelib/db2-sqlite-held, not this source cutover.
 
-// core.db keeps the checked SQL and policy model in Jet's core call layer. The
-// provider owns connection state and executes only the typed operations exposed
-// here; this source module is the stable facade used by applications. Every
-// fallible operation reports on the module's one failure domain, `DBError`.
-
-pub fn open(url: String) -[DB]> DBConnection Never! {
-    core.db.open(url)
+// Public policy/effects are ordinary Core source. These reserved leaves keep
+// the existing SQLite bridge while the same-engine native driver is admitted.
+fn open(path: String) -[DB]> DBConnection Never! {
+    core.db.__open(path)
+}
+fn open_memory() -[DB]> DBConnection Never! {
+    core.db.__open_memory()
+}
+fn pool(url: String, *, max: Int) -[DB]> DBPool DBError! {
+    core.db.__pool(url, max)
+}
+fn policy(table: String, expression: String) -[DB]> RowPolicy DBError! {
+    core.db.__policy(table, expression)
+}
+fn policy_audit(scope: DBScope) -[DB]> String Never! {
+    core.db.__policy_audit(scope)
+}
+fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+    core.db.__transaction(scope, name, steps)
+}
+fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
+    core.db.__migrate(scope, name, steps)
 }
 
-pub fn open_memory() -[DB]> DBConnection Never! {
-    core.db.open_memory()
+// Core-private queue storage carrier. The existing SQLite bridge remains the
+// raw host leaf until cutover; no public connection gains raw-SQL authority.
+struct __QueueDb { raw: U64 }
+impl __QueueDb.Close {
+    fn close(^self) {
+        #Unsafe("consume the unique SQLite queue handle through its existing host close leaf") {
+            _ :: core.db.__queue_raw_close(self.raw)
+        }
+    }
+}
+fn __queue_open(path: String) -[DB]> __QueueDb? Never! {
+    #Unsafe("open the existing SQLite bridge and immediately adopt its handle into a consuming Core resource") {
+        raw :: core.db.__queue_raw_open(path)
+        if raw == (U64{0}) -> return None
+        return Val(__QueueDb{raw: raw})
+    }
+}
+fn __queue_begin(driver: __QueueDb) -[DB]> Bool Never! {
+    #Unsafe("borrow the live unique queue handle for BEGIN") { return core.db.__queue_raw_begin(driver.raw) }
+}
+fn __queue_commit(driver: __QueueDb) -[DB]> Bool Never! {
+    #Unsafe("borrow the live unique queue handle for COMMIT") { return core.db.__queue_raw_commit(driver.raw) }
+}
+fn __queue_rollback(driver: __QueueDb) -[DB]> Bool Never! {
+    #Unsafe("borrow the live unique queue handle for ROLLBACK") { return core.db.__queue_raw_rollback(driver.raw) }
+}
+fn __queue_execute(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> Int DBError! {
+    #Unsafe("execute bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
+        return core.db.__queue_raw_execute(driver.raw, sql, params)
+    }
+}
+fn __queue_query(driver: &__QueueDb, sql: String, params: [DBValue]) -[DB]> [[String: DBValue]] DBError! {
+    #Unsafe("query bound queue SQL on the exclusively borrowed SQLite handle; host only marshals its existing wire") {
+        return core.db.__queue_raw_query(driver.raw, sql, params)
+    }
 }
 
-pub fn pool(url: String, max: Int) -[DB]> DBPool DBError! {
-    core.db.pool(url, max: max)
+#Test("queue raw SQLite leaves preserve transaction rows and ordinary consuming Close") {
+    driver := __queue_open(":memory:") ?? panic("queue SQLite open failed")
+    assert(__queue_begin(driver))
+    _ :: __queue_execute(&driver, "CREATE TABLE queue_leaf_fixture (value INTEGER)", [DBValue]{}) ?? panic("queue schema failed")
+    assert_eq(__queue_execute(&driver, "INSERT INTO queue_leaf_fixture VALUES (?)", [DBValue]{.Int(17)}) ?? -1, 1)
+    assert(__queue_commit(driver))
+    rows :: __queue_query(&driver, "SELECT value FROM queue_leaf_fixture", [DBValue]{}) ?? panic("queue query failed")
+    assert_eq(row_int(rows[0], "value") ?? -1, 17)
+    close(^driver)
 }
 
-// D-DBPOLICY1=A: the closed row-policy language (table identifier, `true` or
-// `owner == user`, bounded text) is compiled once by the provider, so this
-// facade cannot accept a policy the scope would reject.
-pub fn policy(table: String, expression: String) -[DB]> RowPolicy DBError! {
-    core.db.policy(table, expression)
+// core.db owns its SQL values, typed row selection and conversion. The private
+// SQLite adapter alone holds engine pointers; fallible row reads use DBError.
+
+#Equatable
+enum DBValue {
+    Null
+    Int(Int)
+    Float(Float)
+    Text(String)
+    Bool(Bool)
+    Blob([U8])
 }
 
-pub fn policy_audit(scope: DBScope) -[DB]> String Never! {
-    core.db.policy_audit(scope)
+#Equatable
+enum __PoolLifecycle {
+    Open
+    Draining
+    Drained
 }
 
-pub fn row_value(row: [String: DBValue], column: String) -[DB]> DBValue DBError! {
-    core.db.row_value(row, column)
+// Receipts have always been opaque public values: the pool produces them;
+// source owns their exact counters, equality and textual projection.
+#Equatable
+struct DBPoolReceipt {
+    lifecycle: __PoolLifecycle
+    max: Int
+    available: Int
+    leased: Int
+    opening: Int
+    ready: Bool
+    acquires: Int
+    releases: Int
+    timeouts: Int
+    open_failures: Int
+    unhealthy: Int
+    replacements: Int
+    replacement_failures: Int
+}
+impl DBPoolReceipt.Display { fn display(self) -> String { pool_receipt_text(self) } }
+impl DBPoolReceipt.Debug { fn debug(^self) -> String { pool_receipt_text(self) } }
+
+fn pool_receipt_text(receipt: DBPoolReceipt) -> String Never! {
+    lifecycle :: if receipt.lifecycle == {
+        .Open -> "open"
+        .Draining -> "draining"
+        .Drained -> "drained"
+    }
+    ready :: if receipt.ready -> 1 else -> 0
+    "db.pool lifecycle={lifecycle} max={receipt.max} available={receipt.available} leased={receipt.leased} opening={receipt.opening} ready={ready} acquires={receipt.acquires} releases={receipt.releases} timeouts={receipt.timeouts} open_failures={receipt.open_failures} unhealthy={receipt.unhealthy} replacements={receipt.replacements} replacement_failures={receipt.replacement_failures}"
 }
 
-pub fn row_int(row: [String: DBValue], column: String) -[DB]> Int DBError! {
-    core.db.row_int(row, column)
+#Test("pool receipt text keeps every counter and lifecycle spelling") {
+    receipt := DBPoolReceipt{
+        lifecycle: .Open, max: 2, available: 1, leased: 0, opening: 1,
+        ready: true, acquires: 3, releases: 4, timeouts: 5, open_failures: 6,
+        unhealthy: 7, replacements: 8, replacement_failures: 9,
+    }
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=open max=2 available=1 leased=0 opening=1 ready=1 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Draining
+    receipt.ready = false
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=draining max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
+    receipt.lifecycle = .Drained
+    assert_eq(pool_receipt_text(receipt), "db.pool lifecycle=drained max=2 available=1 leased=0 opening=1 ready=0 acquires=3 releases=4 timeouts=5 open_failures=6 unhealthy=7 replacements=8 replacement_failures=9")
 }
 
-pub fn row_float(row: [String: DBValue], column: String) -[DB]> Float DBError! {
-    core.db.row_float(row, column)
+#[Error, Equatable]
+struct DBError { message: String }
+
+impl DBError.Display { fn display(self) -> String { self.message.copy() } }
+impl DBError.Debug { fn debug(^self) -> String { self.message } }
+impl DBError -> Err { Err(self.message) }
+impl DBValue.Display { fn display(self) -> String { render_value(self) } }
+
+impl DBValue {
+    fn is_null(self) -> Bool Never! {
+        if self == .Null -> return true
+        false
+    }
+    fn int(self) -> Int Err! {
+        if self == .Int(number) -> return Ok(number)
+        Err("expected an int, got {render_value(self)}")
+    }
+    fn float(self) -> Float Err! {
+        if self == {
+            .Float(number) -> Ok(number)
+            .Int(number) -> Ok(Float{number})
+            else -> Err("expected a float, got {render_value(self)}")
+        }
+    }
+    fn text(self) -> String Err! {
+        if self == .Text(text) -> return Ok(text.copy())
+        Err("expected text, got {render_value(self)}")
+    }
+    fn bool(self) -> Bool Err! {
+        if self == {
+            .Bool(value) -> Ok(value)
+            .Int(number) -> {
+                if number == 0 -> return Ok(false)
+                if number == 1 -> return Ok(true)
+                Err("expected a bool, got {render_value(self)}")
+            }
+            else -> Err("expected a bool, got {render_value(self)}")
+        }
+    }
+    fn blob(self) -> [U8] Err! {
+        if self == .Blob(bytes) -> return Ok(bytes.copy())
+        Err("expected a blob, got {render_value(self)}")
+    }
 }
 
-pub fn row_text(row: [String: DBValue], column: String) -[DB]> String DBError! {
-    core.db.row_text(row, column)
+fn row_value(row: [String: DBValue], column: String) -> DBValue DBError! {
+    value :: row.get(column) ?? return Err(DBError{message: "missing column `{column}`"})
+    Ok(value)
 }
 
-pub fn row_bool(row: [String: DBValue], column: String) -[DB]> Bool DBError! {
-    core.db.row_bool(row, column)
+fn row_int(row: [String: DBValue], column: String) -> Int DBError! {
+    value :: row_value(row, column)
+    if value == {
+        .Int(number) -> Ok(number)
+        else -> Err(DBError{message: "expected an int, got {render_value(value)}"})
+    }
 }
 
-// Typed row projection is a compiler lowering. Keeping the call routed through
-// core.db.decode preserves checked field names and the provider's DBValue
-// conversion instead of introducing a second parser in Jet source.
-pub fn decode<T: Decode>(row: [String: DBValue]) -[DB]> T [FieldError]! {
-    return core.db.decode<T>(row)
+fn row_float(row: [String: DBValue], column: String) -> Float DBError! {
+    value :: row_value(row, column)
+    if value == {
+        .Float(number) -> Ok(number)
+        .Int(number) -> Ok(Float{number})
+        else -> Err(DBError{message: "expected a float, got {render_value(value)}"})
+    }
 }
 
-pub fn transaction(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
-    core.db.transaction(scope, name, steps)
+fn row_text(row: [String: DBValue], column: String) -> String DBError! {
+    value :: row_value(row, column)
+    if value == {
+        .Text(text) -> Ok(text)
+        else -> Err(DBError{message: "expected text, got {render_value(value)}"})
+    }
 }
 
-pub fn migrate(scope: DBScope, name: String, steps: [SQL]) -[DB, Time.Wait]> Int DBError! {
-    core.db.migrate(scope, name, steps)
+fn row_bool(row: [String: DBValue], column: String) -> Bool DBError! {
+    value :: row_value(row, column)
+    if value == {
+        .Bool(boolean) -> Ok(boolean)
+        .Int(number) -> {
+            if number == 0 -> return Ok(false)
+            if number == 1 -> return Ok(true)
+            Err(DBError{message: "expected a bool, got {number}"})
+        }
+        else -> Err(DBError{message: "expected a bool, got {render_value(value)}"})
+    }
 }
+
+fn render_value(value: DBValue) -> String Never! {
+    if value == {
+        .Null -> "null"
+        .Int(number) -> "{number}"
+        .Float(number) -> float_text(number)
+        .Text(text) -> text
+        .Bool(boolean) -> "{boolean}"
+        .Blob(bytes) -> "{bytes}"
+    }
+}
+
+// SQL values use the shortest decimal f64 display spelling, not Jet's debug
+// spelling (which preserves ".0" and may use an exponent).
+fn float_text(value: Float) -> String Never! {
+    text :: "{value}"
+    raw :: text.bytes()
+    exponent_at := -1
+    dot_at := -1
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{101}) -> exponent_at = i
+        if raw[i] == (U8{46}) -> dot_at = i
+    }
+    if exponent_at < 0 {
+        if raw.len() >= 2 && raw[raw.len() - 2] == (U8{46}) && raw[raw.len() - 1] == (U8{48}) {
+            out := [U8]{}
+            loop i in 0..<raw.len() - 2 -> &out.push(raw[i])
+            return String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
+        }
+        return text
+    }
+    exponent := 0
+    at := exponent_at + 1
+    negative :: raw[at] == (U8{45})
+    if negative || raw[at] == (U8{43}) -> at += 1
+    loop at < raw.len() {
+        exponent = exponent * 10 + Int.from_u8(raw[at]) - 48
+        at += 1
+    }
+    if negative -> exponent = 0 - exponent
+    start :: if raw[0] == (U8{45}) -> 1 else -> 0
+    point :: if dot_at >= 0 -> dot_at - start else -> exponent_at - start
+    count := exponent_at - start
+    if dot_at >= 0 -> count -= 1
+    end := exponent_at
+    loop end > start && raw[end - 1] == (U8{48}) {
+        end -= 1
+        count -= 1
+    }
+    decimal :: point + exponent
+    out := [U8]{}
+    if start == 1 -> &out.push(U8{45})
+    if decimal <= 0 {
+        &out.push(U8{48})
+        &out.push(U8{46})
+        loop _ in 0..<0 - decimal -> &out.push(U8{48})
+    }
+    loop digit in 0..<count {
+        if decimal > 0 && digit == decimal -> &out.push(U8{46})
+        index := start + digit
+        if dot_at >= 0 && index >= dot_at -> index += 1
+        &out.push(raw[index])
+    }
+    loop _ in count..<decimal -> &out.push(U8{48})
+    String.from_bytes(out) ?? panic("decimal float text must be UTF-8")
+}
+
+
+#Test("typed SQL rows preserve conversion and missing-column errors") {
+    row :: [String: DBValue]{"number": DBValue.Int(42), "text": DBValue.Text("jet"), "zero": DBValue.Int(0), "one": DBValue.Int(1)}
+    assert_eq(row_int(row, "number") ?? -1, 42)
+    assert_eq(row_float(row, "number") ?? -1.0, 42.0)
+    assert_eq(row_text(row, "text") ?? "", "jet")
+    assert_eq(row_bool(row, "zero") ?? true, false)
+    assert_eq(row_bool(row, "one") ?? false, true)
+    if row_value(row, "absent") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "missing column `absent`")
+    }
+    if row_int(row, "text") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected an int, got jet")
+    }
+    floating :: [String: DBValue]{"value": DBValue.Float(1.0)}
+    if row_int(floating, "value") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected an int, got 1")
+    }
+    large :: [String: DBValue]{"value": DBValue.Float(1e21)}
+    if row_int(large, "value") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected an int, got 1000000000000000000000")
+    }
+    blob :: [String: DBValue]{"value": DBValue.Blob([U8]{1, 2})}
+    if row_text(blob, "value") == {
+        .Ok(_) -> assert(false)
+        .Err(error) -> assert_eq(error.message, "expected text, got [1, 2]")
+    }
+}
+

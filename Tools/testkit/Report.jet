@@ -1,0 +1,52 @@
+use core.encoding.json as json
+use core.files as files
+
+
+fn kit_report_row(result: KitCaseResult) {
+    print("{result.status}\t{result.case}\t{result.tier}\t{result.detail}")
+}
+
+fn kit_report_count(results: [KitCaseResult], status: String) -> Int {
+    total := 0
+    loop result in results {
+        if result.status == status -> total += 1
+    }
+    total
+}
+
+fn kit_report_counts(results: [KitCaseResult], suites: [String]) -> String {
+    pass :: kit_report_count(results, "PASS")
+    fail :: kit_report_count(results, "FAIL")
+    unsupported :: kit_report_count(results, "UNSUPPORTED")
+    skip :: kit_report_count(results, "SKIP-HOST")
+    opt_in :: kit_report_count(results, "OPT-IN")
+    refused :: kit_report_count(results, "REFUSED")
+    error :: kit_report_count(results, "ERROR")
+    timeout :: kit_report_count(results, "TIMEOUT")
+    known :: kit_report_count(results, "KNOWN-FAILING")
+    unexpected :: kit_report_count(results, "UNEXPECTED-PASS")
+    names :: json.to_string(suites) ?? panic("testkit suite report encode: {err}")
+    "{{\"PASS\":{pass},\"FAIL\":{fail},\"KNOWN-FAILING\":{known},\"UNEXPECTED-PASS\":{unexpected},\"UNSUPPORTED\":{unsupported},\"SKIP-HOST\":{skip},\"OPT-IN\":{opt_in},\"REFUSED\":{refused},\"ERROR\":{error},\"TIMEOUT\":{timeout},\"suites\":{names}}}"
+}
+
+fn kit_report_exit_code(results: [KitCaseResult]) -> Int {
+    if kit_report_count(results, "REFUSED") + kit_report_count(results, "ERROR") + kit_report_count(results, "TIMEOUT") > 0 -> return 2
+    if kit_report_count(results, "FAIL") + kit_report_count(results, "UNEXPECTED-PASS") > 0 -> return 1
+    0
+}
+
+fn kit_report_finish(jet: String, results: [KitCaseResult], path: String, suites: [String]) -> Int {
+    summary :: kit_report_counts(results, suites)
+    if path != "" {
+        // The reflected record preserves the literal `case` schema key.
+        records :: results.map(result -> json.to_string(result) ?? panic("testkit case report encode: {err}")).join(",")
+        compiler :: json.to_string(jet) ?? panic("testkit compiler report encode: {err}")
+        document :: "{{\"jet\":{compiler},\"counts\":{summary},\"results\":[{records}]}}\n"
+        files.write(path, document) ?? {
+            print("ERROR\tresults\t\t{err}")
+            return 2
+        }
+    }
+    print(summary)
+    kit_report_exit_code(results)
+}

@@ -1,0 +1,27 @@
+// Inspect the real registry metadata without invoking Core-private terminals.
+use jet_foundation.[core_platform_fixed_signature, type_identity_equal, Type, TypeTupleField]
+
+fn named_tuple_identity_registry_return(member: String) -> Type Never! {
+    signature :: core_platform_fixed_signature("core.term", member) ?? panic("missing terminal tuple signature")
+    signature.return_type ?? panic("terminal tuple signature has no return type")
+}
+
+fn named_tuple_identity_line_from_source() -> (cause: String?, eof: Bool, line: String) {
+    (eof: false, line: "", cause: None)
+}
+
+fn named_tuple_identity_fixture() {
+    line_type :: Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "cause", ty: Type.Option{inner: Type.String}},
+        TypeTupleField{name: "eof", ty: Type.Bool},
+        TypeTupleField{name: "line", ty: Type.String},
+    }}
+    size_type :: Type.Option{inner: Type.Tuple{fields: [TypeTupleField]{
+        TypeTupleField{name: "h", ty: Type.Int},
+        TypeTupleField{name: "w", ty: Type.Int},
+    }}}
+    assert(type_identity_equal(named_tuple_identity_registry_return("__terminal8_line"), line_type))
+    assert(type_identity_equal(named_tuple_identity_registry_return("__terminal8_stty"), size_type))
+    line :: named_tuple_identity_line_from_source()
+    assert(!line.eof && line.line == "" && line.cause == None)
+}

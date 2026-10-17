@@ -11,7 +11,7 @@
 // Where a ref is resolved from. The built-in sources need no declaration;
 // `Named` is a source declared in an `env.jet` (D-JPK17) that resolves to an
 // upstream/pin through a `SourceTable`.
-pub enum RefSource {
+enum RefSource {
     // The canonical Jetpack package catalog (D-JPK-SNIXREUSE1).
     Jetpack
     // The nixpkgs collection, retained as an internal migration alias; its
@@ -121,7 +121,7 @@ pub enum RefSource {
 // `Infer` is the unresolved state of the typed surface (U9): a `…@github`
 // source's kind depends on whether the remote repo carries a `package.jet`,
 // which only a realize-time probe can answer. It never reaches a provider.
-pub enum ProviderKind {
+enum ProviderKind {
     Nix
     Core
     Cran
@@ -204,7 +204,7 @@ pub enum ProviderKind {
 }
 
 // D-CHANNEL-AUTO1=A: who is allowed to move a source pin.
-pub enum ChannelPolicy {
+enum ChannelPolicy {
     // No channel marker: the declaration never moves.
     Pinned
     // Existing channel declarations move only through `jetpack update`.
@@ -244,10 +244,10 @@ pub enum ChannelPolicy {
 }
 
 // One `(name, upstream, provider)` source declaration.
-pub struct NamedSourceDecl {
-    pub name: String
-    pub upstream: String
-    pub via: ProviderKind
+struct NamedSourceDecl {
+    name: String
+    upstream: String
+    via: ProviderKind
 }
 
 struct SourceTableEntry {
@@ -260,8 +260,8 @@ struct SourceTableEntry {
 // The named sources an `env.jet` declares (D-JPK17): name -> upstream/pin and
 // the provider that realizes it. Built-in sources always resolve and are not
 // stored here. Every listing is in name order.
-pub struct SourceTable {
-    named: [String: SourceTableEntry]
+struct SourceTable {
+    priv named: [String: SourceTableEntry]
 
     // A table with no declared sources: only the built-ins resolve. This is
     // the table for direct CLI refs (`jetpack use fastfetch@nixpkgs`).
@@ -349,10 +349,10 @@ pub struct SourceTable {
 
 // A classified ref. `package` is the target before the final `@`: an attr
 // name for nixpkgs or an `owner/repo[/subpath]` for GitHub.
-pub struct RefSpec {
-    pub source: RefSource
-    pub package: String
-    pub raw: String
+struct RefSpec {
+    source: RefSource
+    package: String
+    raw: String
 
     // A short, human display name for the package (last path segment).
     fn short_name(self) -> String Never! {
@@ -460,7 +460,7 @@ pub struct RefSpec {
 // Why a ref string could not be classified. Each variant maps to a friendly
 // diagnostic.
 #Error
-pub enum RefError {
+enum RefError {
     // No `@` separator at all, e.g. `fastfetch`.
     MissingSeparator(String)
     // An empty source or package half, e.g. `@nixpkgs` or `fastfetch@`.
@@ -498,17 +498,17 @@ pub enum RefError {
 }
 
 // One workspace member: its name and normalized relative path.
-pub struct WorkspaceMember {
-    pub name: String
-    pub path: String
+struct WorkspaceMember {
+    name: String
+    path: String
 }
 
 // A queryable index of the current workspace's members (Slice B), consulted
 // by `RefSpec.classify_with_workspace` to resolve path-form (`infra/logging`)
 // and bare-form (`logging`) addressing.
-pub struct WorkspaceIndex {
+struct WorkspaceIndex {
     // Members in workspace source order, paths normalized.
-    members: [WorkspaceMember]
+    priv members: [WorkspaceMember]
 
     // An index with no members: path refs remain unresolved, while bare
     // package refs fall through to the Jetpack catalog.
@@ -587,14 +587,14 @@ fn pkg_normalize_member_path(path: String) -> String Never! {
 }
 
 // True for D-JPK-REF1 bare local-path refs.
-pub fn pkg_is_bare_path(raw: String) -> Bool Never! {
+fn pkg_is_bare_path(raw: String) -> Bool Never! {
     raw.starts_with("./") || raw.starts_with("../") || raw.starts_with("/")
 }
 
 // Attach the canonical built-in package source to a bare package ref.
 // Workspace member/path refs stay untouched and are resolved by the caller's
 // index.
-pub fn pkg_with_default_source(input: String) -> String Never! {
+fn pkg_with_default_source(input: String) -> String Never! {
     raw :: input.trim()
     if raw.contains(REF_PROVIDER_AT) || pkg_is_bare_path(raw) -> return raw
     if raw.split_once(REF_CHANNEL_MARKER) == {
@@ -652,10 +652,10 @@ fn pkg_edit_distance(a: String, b: String) -> Int Never! {
     loop j in 0..<(right.len() + 1) -> &row.push(j)
     diagonal := 0
     loop i in 1..<(left.len() + 1) {
-        diagonal = ~row[0]
+        diagonal = row[0].copy()
         row[0] = i
         loop j in 1..<(right.len() + 1) {
-            above :: ~row[j]
+            above :: row[j].copy()
             cost :: if left[i - 1] == right[j - 1] -> 0 else -> 1
             deletion :: above + 1
             insertion :: row[j - 1] + 1
@@ -679,7 +679,7 @@ fn pkg_edit_distance(a: String, b: String) -> Int Never! {
 
 // D-JPK-CHANNEL1=A: a source ref tracking intent, resolved only by update
 // verbs and stored exact in `.jet/lock`.
-pub enum ChannelRef {
+enum ChannelRef {
     Latest
     Main
     SemverMask(String)
@@ -721,12 +721,12 @@ fn pkg_is_semver_mask(selector: String) -> Bool Never! {
 // A classified `target@provider` source ref. `provider` is a built-in source
 // (or path for a bare path); `target` is the upstream locator (a repo+rev, a
 // local path, a channel/pin).
-pub struct ProviderRef {
-    pub provider: RefSource
-    pub target: String
-    pub channel: ChannelRef?
-    pub policy: ChannelPolicy
-    pub raw: String
+struct ProviderRef {
+    provider: RefSource
+    target: String
+    channel: ChannelRef?
+    policy: ChannelPolicy
+    raw: String
 
     // Reconstruct the provider-first upstream form without dropping a channel
     // selector. The source table uses this form for lock/update resolution,

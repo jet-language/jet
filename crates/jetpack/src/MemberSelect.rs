@@ -681,7 +681,7 @@ mod tests {
         // Change shared only.
         std::fs::write(
             root.join("packages/shared/lib.jet"),
-            "module shared { pub fn bump() {} }\n",
+            "module shared { fn bump() {} }\n",
         )
         .unwrap();
 
@@ -783,7 +783,7 @@ mod tests {
         // Change only a.
         std::fs::write(
             root.join("packages/a/lib.jet"),
-            "module a { pub fn changed() {} }\n",
+            "module a { fn changed() {} }\n",
         )
         .unwrap();
         let req = SelectRequest {

@@ -2886,8 +2886,21 @@ fn hover_for_fn(f: &AST::Func) -> String {
         .filter(|chain| !chain.is_empty())
         .map_or_else(String::new, |chain| format!(" ; policies=[{chain}]"));
     let failure = f.failure_contract();
+    // D-PARAM-CONST1=A: each parameter's promise in words. An unmarked
+    // parameter is Jet's const: deep, call-long, no-copy read access.
+    let promises = callable
+        .iter()
+        .map(|p| {
+            let promise = match p.convention {
+                AST::AccessConvention::Read => "read: nobody changes this during the call",
+                AST::AccessConvention::Write => "write (&): this call may change the caller's value",
+                AST::AccessConvention::Move => "take (^): this call takes ownership of the value",
+            };
+            format!("\n  {}: {promise}", p.name)
+        })
+        .collect::<String>();
     format!(
-        "fn {}({}){}{}{}\nfailure: {} ({})",
+        "fn {}({}){}{}{}\nfailure: {} ({}){}",
         f.name,
         params.join(", "),
         ret,
@@ -2895,6 +2908,7 @@ fn hover_for_fn(f: &AST::Func) -> String {
         policies,
         failure.effective_type().name(),
         failure.source(),
+        promises,
     )
 }
 
@@ -3273,7 +3287,7 @@ fn collect_call_inlay_hints(args: &[AST::CallArg], mp: &str, ctx: &mut WalkCtx<'
 
 fn collect_expr(e: &AST::Expr, mp: &str, ctx: &mut WalkCtx<'_>) {
     // D-MEM-COPYSEM1=A: sema-inserted owning copies remain visible as a ghost
-    // hint. An authored `~` has a span beginning at its sigil; an implicit
+    // hint. An authored `.copy()` has a span beginning at its sigil; an implicit
     // materializer reuses the operand span, which is the one distinction the
     // semantic index needs to expose.
     if let AST::Expr::Copy(inner, copy_span) = e {

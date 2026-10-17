@@ -1,0 +1,32 @@
+use core.files as fs
+
+#CLI
+struct WorkloadArgs {
+    root: String
+}
+
+fn run(args: WorkloadArgs) {
+    root :: args.root
+    paths :: fs.walk(root) ?? panic("cannot walk input root")
+    rows := [String]{}
+    loop file in paths {
+        if !file.is_dir {
+            text :: fs.read(file.path) ?? panic("cannot read input")
+            count := 0
+            loop line in text.split("\n") {
+                if line.contains("agent_workload:") -> count += 1
+            }
+            if count > 0 {
+                relative :: file.relative.replace("\\", "/")
+                &rows.push("/{relative}|{count}")
+            }
+        }
+    }
+    &rows.sort()
+    if rows.len() == 0 {
+        print("no-matches")
+        return
+    }
+    loop row in rows { print(row) }
+    return
+}

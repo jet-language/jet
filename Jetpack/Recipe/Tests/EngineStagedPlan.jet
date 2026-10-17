@@ -1,0 +1,72 @@
+// Hosted staged-plan admission is deliberately owner-gated. The former
+// lowering/fingerprint success fixtures now require E1238 before any callback,
+// input read, tool lookup or artifact publication.
+// PENDING-SEAM(package-tests): source-authored; no execution proof claimed.
+fn engine_staged_platform() -> String {
+    host :: PlatformKey.host()
+    "{host.os}-{host.arch}"
+}
+fn engine_staged_action(name: String, digest: String, platform: String) -> StagedPlanAction {
+    StagedPlanAction.new(name, 0, 1, [PlanInput]{PlanInput.new("manifest", digest)}, PlanAuthority{tools: [String]{"planner"}, effects: [BuildEffect]{BuildEffect.Exec}, platform})
+}
+fn engine_staged_forbidden_emit(_sandbox: PlanSandbox) -[FS, Env]> BuildPlanFragment StagedPlanActionError! {
+    panic("owner-gated graph admission must refuse before the callback")
+}
+fn engine_staged_error(action: StagedPlanAction, context: StagedPlanContext, tools: [String: String], emitter: StagedPlanEmitter) -> RecipeDiagnostic {
+    if recipe_run_staged_plan_action(action, context, tools, emitter) == {
+        .Ok(_) -> panic("owner-gated staged-plan admission must refuse")
+        .Err(error) -> error
+    }
+}
+fn engine_staged_assert_refusal(error: RecipeDiagnostic) {
+    assert_eq(error.code, "E1238")
+    assert_eq(error.what, "recipe graph admission is not available in the Jet-hosted engine")
+    assert(error.why.contains("canonical Core/build recipe producer and complete-plan fingerprint seam is not admitted"))
+    assert(error.why.contains("no recipe step or staged-plan callback was launched"))
+    assert(error.fix.contains("owner-approved Core/build seam"))
+}
+#Test("staged_plan_action_refuses_unadmitted_graph_and_fingerprint") {
+    root :: files.tmpdir("jet-engine-staged-refused-") ?? panic("root")
+    source :: files.join(root, "source")
+    artifacts :: files.join(root, "artifacts")
+    files.create_dir_all(source) ?? panic("source")
+    input :: "declared staged input".bytes()
+    files.write_bytes(files.join(source, "manifest"), input) ?? panic("manifest")
+    digest :: "sha256-{pkg_sha256_hex(input)}"
+    platform :: engine_staged_platform()
+    action :: StagedPlanAction.new("discover", 0, 1, [PlanInput]{PlanInput.new("manifest", digest)}, PlanAuthority{tools: [String]{"planner", "planner-alt"}, effects: [BuildEffect]{BuildEffect.Exec, BuildEffect.FS}, platform})
+    executable :: sys.executable()
+    tools :: [String: String]{"planner": executable, "planner-alt": executable}
+    context :: StagedPlanContext{source_dir: source, artifact_root: artifacts}
+    emitter :: StagedPlanEmitter{emit: engine_staged_forbidden_emit}
+    first :: engine_staged_error(action, context, tools, emitter)
+    second :: engine_staged_error(action, context, tools, emitter)
+    engine_staged_assert_refusal(first)
+    engine_staged_assert_refusal(second)
+    assert_eq(first.what, second.what)
+    assert_eq(first.why, second.why)
+    assert(!files.exists(artifacts))
+    reordered := action
+    reordered.authority.tools = [String]{"planner-alt", "planner"}
+    reordered.authority.effects = [BuildEffect]{BuildEffect.FS, BuildEffect.Exec}
+    reordered_error :: engine_staged_error(reordered, context, tools, emitter)
+    engine_staged_assert_refusal(reordered_error)
+    assert_eq(first.what, reordered_error.what)
+    assert_eq(first.why, reordered_error.why)
+    assert(!files.exists(artifacts))
+    assert_eq(files.read_bytes(files.join(source, "manifest")) ?? panic("input"), input)
+    files.remove_all(root).drop("fixture cleanup")
+}
+#Test("staged_plan_action_refuses_before_input_and_tool_validation") {
+    root :: files.tmpdir("jet-engine-staged-unavailable-") ?? panic("root")
+    source :: files.join(root, "missing-source")
+    artifacts :: files.join(root, "artifacts")
+    context :: StagedPlanContext{source_dir: source, artifact_root: artifacts}
+    // Neither the missing input nor the unrealized tool may mask the owner gate.
+    action :: engine_staged_action("missing-input-and-tool", "sha256-0000000000000000000000000000000000000000000000000000000000000000", engine_staged_platform())
+    error :: engine_staged_error(action, context, [String: String]{}, StagedPlanEmitter{emit: engine_staged_forbidden_emit})
+    engine_staged_assert_refusal(error)
+    assert(!files.exists(source))
+    assert(!files.exists(artifacts))
+    files.remove_all(root).drop("fixture cleanup")
+}

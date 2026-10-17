@@ -1,0 +1,26 @@
+# Port of tests/cli_parts/runtime.rs:1432-1493; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/publish
+step: jet init
+cwd: loud
+env: NO_COLOR=1
+exit: 0
+step: jet registry publish
+cwd: loud
+env: NO_COLOR=1
+env: JET_KEYS_DIR={work}/loud/keys
+exit: 1
+stdout: ~ "publishing" # original predicate
+stdout: ~ "[1/3]" # original predicate
+step: jet init
+cwd: quiet
+env: NO_COLOR=1
+exit: 0
+step: jet registry publish --quiet
+cwd: quiet
+env: NO_COLOR=1
+env: JET_KEYS_DIR={work}/quiet/keys
+exit: 1
+stdout.trim: empty # original predicate
+stderr: ~ "build: failed" # original predicate

@@ -1,0 +1,17 @@
+# Port of tests/inline_package.rs:437-462; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_package_import_cycle_fails_with_cycle_diagnostic_and_file_provenance
+file: workspace.jet = "module workspace { members: [] }\n"
+step: jet check run.jet --json
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: nonzero
+json: machine doc $.reports[0].code = "E0604"
+capture: failure_file machine doc $.reports[0].file
+cap:failure_file: $= "a.jet"
+json: machine doc $.reports[0].what = "these files import each other in a circle"
+file: run.jet = "package { name: \"cycle\" version: \"0.1.0\" }\nuse \"a\"\nfn run() {}\n"
+file: a.jet = "use \"run\"\nfn a() {}\n"

@@ -1,17 +1,39 @@
-// Canonical core.net.tls carriers keep endpoint policy and negotiated version
-// typed without manufacturing transport fields on TLSStream.
+// D-NETTLSCONFIG1 / D-NETTLSPEER1: a real loopback TLS handshake uses only
+// the checked-in test CA, then exposes the verified name, chain and version.
 package {
     name: "tls_peer_identity"
-    authority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }
+    authority: { holds: { allow: [FS.Read, IO, Mem.Alloc, Net, Time.Wait] } }
 }
 
+use core.files as files
+use core.http.server as server
+use core.net as net
 use core.net.tls as tls
 
-fn run() -[Net]> {
-    cfg :: tls.with_alpn(tls.config("localhost"), "h2")
-    print(tls.has_alpn(cfg, "h2"))
-    print(tls.flags(cfg).len() == 1)
-    print(tls.version_name(TLSVersion.TLS13))
-    print(tls.client("localhost", 0) == .Err(_))
-    print(tls.peer_port(TLSStream{}) == .Err(_))
+fn run() {
+    ca :: files.read("tests/fixtures/tls/smtp.ca.cert.pem") ?? panic("CA fixture")
+    cert :: files.read("tests/fixtures/tls/smtp.server.cert.pem") ?? panic("server certificate fixture")
+    key :: files.read("tests/fixtures/tls/smtp.server.key.pem") ?? panic("server key fixture")
+    roots :: tls.RootCertificates.from_pem(ca.bytes()) ?? panic("validate CA")
+    config :: tls.ClientConfig.default()
+        .with_trust(.CustomOnly(roots)) ?? panic("trust policy")
+    bounded :: config.with_version_bounds(min: TLSVersion.TLS13, max: TLSVersion.TLS13) ?? panic("version policy")
+    mux :: server.mux()
+    mux.get("/", (_request: HTTPRequest) -> Ok(server.response(200, "ok")))
+    listener :: server.bind("127.0.0.1:0", mux, tls: server.tls(cert, key)) ?? panic("bind TLS server")
+    addr :: listener.local_addr() ?? panic("server address")
+    serving :: task { listener.serve() ?? panic("serve TLS") }
+    tcp :: net.tcp_connect(addr) ?? panic("connect loopback")
+    budget :: 5s
+    secure := tls.client(^tcp, server_name: "localhost", config: bounded, deadline: budget) ?? panic("TLS handshake")
+    peer :: secure.peer_identity()
+    print(peer.verified_server_name)
+    print(peer.leaf.der.len() > 0 && peer.certificate_chain.len() > 0 && peer.certificate_chain[0].sha256 == peer.leaf.sha256)
+    print(if tls.is_tls13(peer.tls_version) -> "TLS13" else -> "TLS12")
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    secure.write_all("GET / HTTP/1.1{crlf}Host: localhost{crlf}Connection: close{crlf}{crlf}".bytes(), deadline: budget) ?? panic("request")
+    _ :: secure.read(8192, deadline: budget) ?? panic("response")
+    secure.close() ?? panic("close TLS")
+    _ :: listener.shutdown(100ms) ?? panic("shutdown TLS server")
+    _ :: ^serving.join() ?? panic("join TLS server")
 }

@@ -1,0 +1,29 @@
+# HAND-PORT tests/http_client_law.rs:1577-1679 upload_streams_before_the_body_source_finishes
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Verbatim AOT source format-expanded FIFO/address/body_len only; POST/upload prefix + ASCII casefold content-length204800; positive reads4096, exact body count204800 and >=64KiB boundary; original writer first32KiB a then acceptance-before-remainder b within5s; exit0+exactstdout, original stderr not asserted. Real mkfifo + lead-approved SETUP-only dd byte pipe; replaces no transport assertions; core-files-raw-write ledger note; no runtime/reference proof.
+requires: tool:mkfifo
+requires: tool:dd
+fixture: upload_streams_before_the_body_source_finishes.fixture
+env: NO_COLOR=1
+step: mkfifo {work}/upload.fifo
+exit: 0
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: writer/main.jet writer/source.template
+step: jet build writer/main.jet
+exit: 0
+spawn writer: built
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = upload_streams_before_the_body_source_finishes.stdout.expected
+wait: peer
+exit: 0
+wait: writer
+exit: 0

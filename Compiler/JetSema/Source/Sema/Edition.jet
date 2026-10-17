@@ -1,0 +1,161 @@
+// D-STRUCT-LIFE1=A: lifecycle is a projection of resolved name/call sites.
+// Adapted from Rust Edition.rs and mod.rs deprecation_from_markers. Payloads
+// belong to written markers or the checked Core registry, never a name table.
+use jet_foundation.[CoreMarkerApplication, Diagnostic, Expr, Marker, MIRStructureFact, MIRStructureFactKind, Span, TextEdit, diagnostic_with_edit]
+
+struct SemaLifecycleResult {
+    diagnostics: [Diagnostic]
+    facts: [MIRStructureFact]
+}
+
+fn sema_lifecycle_marker_string(marker: Marker, label: String, positional: Int) -> String? {
+    index := positional
+    loop (slot, name) in marker.arg_labels {
+        if name == .Val(named) && named.name == label {
+            index = slot
+            break
+        }
+    }
+    if index >= marker.args.len() -> return None
+    argument :: marker.args[index]
+    if argument == .Expr(value) {
+        if value == .Str(parts, _) {
+            text := ""
+            loop part in parts {
+                if part == {
+                    .Lit(literal) -> text = "{text}{literal}"
+                    else -> return None
+                }
+            }
+            return Val(text)
+        }
+    }
+    None
+}
+
+fn sema_lifecycle_marker(markers: [Marker], name: String) -> CoreMarkerApplication? {
+    loop marker in markers {
+        if marker.name != "Deprecated" -> next
+        since :: sema_lifecycle_marker_string(marker, "since", 0) ?? return None
+        replacement :: sema_lifecycle_marker_string(marker, "use", 1) ?? return None
+        return Val(CoreMarkerApplication{member: name, since: since, replacement: replacement, removed_in: sema_lifecycle_marker_string(marker, "removed_in", 2)})
+    }
+    None
+}
+
+fn sema_lifecycle_functions(functions: [SemaRegistrationFunction], payloads: &[String:CoreMarkerApplication]) Never! {
+    loop function in functions {
+        payload :: sema_lifecycle_marker(function.declaration.markers, function.symbol.name) ?? next
+        payloads[function.symbol.id.key] = payload
+    }
+}
+
+fn sema_lifecycle_edition_label(label: String) -> Bool Never! {
+    trimmed :: label.trim()
+    if trimmed.len() != 4 -> return false
+    zero :: U8{48}
+    nine :: U8{57}
+    loop byte in trimmed.bytes() {
+        if byte < zero || byte > nine -> return false
+    }
+    true
+}
+
+fn sema_lifecycle_edition_year(label: String) -> Int Never! {
+    trimmed :: label.trim()
+    year := 0
+    if trimmed.len() == 0 -> return 2026
+    zero :: U8{48}
+    nine :: U8{57}
+    loop byte in trimmed.bytes() {
+        if byte < zero || byte > nine || year > 429496729 -> return 2026
+        year = year * 10 + Int{byte - U8{48}}
+        if year > 4294967295 -> return 2026
+    }
+    year
+}
+
+fn sema_lifecycle_version_phrase(label: String) -> String Never! {
+    if sema_lifecycle_edition_label(label) -> return "edition {label}"
+    label.copy()
+}
+
+fn sema_lifecycle_edit(payload: CoreMarkerApplication, span: Span) -> TextEdit? Never! {
+    parts :: payload.replacement.split(".").to_list()
+    leaf :: parts[parts.len() - 1].trim()
+    if leaf.len() == 0 -> return None
+    underscore :: U8{95}
+    loop (index, byte) in leaf.bytes() {
+        alpha :: (byte >= U8{65} && byte <= U8{90}) || (byte >= U8{97} && byte <= U8{122})
+        digit :: byte >= U8{48} && byte <= U8{57}
+        if byte != underscore && !alpha && !(index > 0 && digit) -> return None
+    }
+    Val(TextEdit{span: span, new_text: leaf})
+}
+
+fn sema_lifecycle_record(payload: CoreMarkerApplication, source: String, span: Span, edition: String, result: &SemaLifecycleResult, seen: &[String:Bool]) {
+    key :: "{source}|{span.start}|{span.end}|{payload.member}"
+    if seen.get(key) != None -> return
+    seen[key] = true
+    status := "deprecated"
+    if sema_lifecycle_edition_label(payload.since) && sema_lifecycle_edition_year(edition) < sema_lifecycle_edition_year(payload.since) -> status = "active"
+    if payload.removed_in == .Val(removed) {
+        if sema_lifecycle_edition_label(removed) && sema_lifecycle_edition_year(edition) >= sema_lifecycle_edition_year(removed) -> status = "removed"
+    }
+    detail := "since {payload.since}; use `{payload.replacement}`"
+    if payload.removed_in == .Val(removed) -> detail = "{detail}; removed in {removed}"
+    &result.facts.push(MIRStructureFact{kind: MIRStructureFactKind.Lifecycle, subject: payload.member, source: source, span: span, status: status, detail: detail, gate: None})
+    if status == "active" -> return
+    item :: payload.member
+    since :: sema_lifecycle_version_phrase(payload.since)
+    fix :: "use `{payload.replacement}` instead, or run `jet fix` to migrate automatically."
+    diagnostic := if status == "removed" -> sema_error("E2002", span, "`{item}` was removed in {sema_lifecycle_version_phrase(payload.removed_in ?? "this edition")}", "`{item}` was deprecated in {since} and no longer exists in this edition; it has reached the end of its migration window.", fix) else -> {
+        why := "`{item}` was deprecated in {since}; it still works for now but should be migrated."
+        if payload.removed_in == .Val(removed) -> why = "`{item}` was deprecated in {since} and will be removed in {sema_lifecycle_version_phrase(removed)}; it still works for now but should be migrated."
+        sema_lint("L2001", span, "`{item}` is deprecated", why, fix)
+    }
+    if sema_lifecycle_edit(payload, span) == .Val(edit) -> diagnostic = diagnostic_with_edit(diagnostic, edit)
+    &result.diagnostics.push(diagnostic)
+}
+
+fn sema_lifecycle_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], policies: [SemaRegistrationPackagePolicy]) -> SemaLifecycleResult {
+    result := SemaLifecycleResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
+    payloads := [String:CoreMarkerApplication]{}
+    editions := [String:String]{}
+    loop policy in policies -> editions[policy.package_identity] = policy.edition
+    loop graph_module_index in 0..<graph.modules.len() {
+        sema_lifecycle_functions(graph.modules[graph_module_index].functions, &payloads)
+        loop implementation_index in 0..<graph.modules[graph_module_index].impls.len() -> sema_lifecycle_functions(graph.modules[graph_module_index].impls[implementation_index].methods, &payloads)
+        loop nominal_index in 0..<graph.modules[graph_module_index].nominals.len() {
+            sema_lifecycle_functions(graph.modules[graph_module_index].nominals[nominal_index].methods, &payloads)
+            markers := [Marker]{}
+            if graph.modules[graph_module_index].nominals[nominal_index].source == .SourceAST(item) {
+                if item == {
+                    .Struct(value) -> markers = value.type_markers
+                    .Enum(value) -> markers = value.type_markers
+                    .Distinct(value) -> markers = value.type_markers
+                    else -> {}
+                }
+            }
+            payload :: sema_lifecycle_marker(markers, graph.modules[graph_module_index].nominals[nominal_index].symbol.name) ?? next
+            payloads[graph.modules[graph_module_index].nominals[nominal_index].symbol.id.key] = payload
+        }
+    }
+    seen := [String:Bool]{}
+    loop (index, checked) in modules {
+        if index >= graph.modules.len() -> break
+        graph_module :: graph.modules[index]
+        edition :: editions.get(graph_module.package_identity) ?? "2026"
+        start :: result.diagnostics.len()
+        loop reference in checked.name_references {
+            payload :: payloads.get(reference.symbol.id.key) ?? next
+            sema_lifecycle_record(payload, graph_module.module_path, reference.span, edition, &result, &seen)
+        }
+        loop call in checked.call_facts {
+            payload :: call.lifecycle ?? next
+            sema_lifecycle_record(payload, graph_module.module_path, call.span, edition, &result, &seen)
+        }
+        sema_attach_diagnostic_source_locations(&result.diagnostics, start, graph_module.source_segments)
+    }
+    result
+}

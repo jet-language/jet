@@ -715,20 +715,31 @@ macro_rules! jet_lane_show {
         /// in the one TaskFailure rail; the scheduler owns only the wait-point
         /// adapter for cancellation of the joining parent.
         pub fn join(self) -> Result<T, JetTaskFailure> {
+            // The joining parent owns cancellation and completion until join
+            // succeeds. An interrupted wait must not orphan a parked child.
+            struct JoinCleanup<T> {
+                handle: Option<super::JetSchedulerJoin<T>>,
+                control: std::sync::Arc<super::JetTaskControl>,
+            }
+            impl<T> Drop for JoinCleanup<T> {
+                fn drop(&mut self) {
+                    if let Some(handle) = self.handle.take() {
+                        self.control.cancel();
+                        handle.drain();
+                    }
+                }
+            }
             let state = self.state;
             let skip_join_deadline = state.skip_join_deadline;
+            let mut cleanup = JoinCleanup {
+                handle: state.handle.lock().unwrap().take(),
+                control: state.control.clone(),
+            };
             if !skip_join_deadline {
                 super::jet_task_join_deadline_check();
             }
-            let result = {
-                let mut handle = state.handle.lock().unwrap();
-                let result = handle
-                    .as_mut()
-                    .expect("task already joined")
-                    .join();
-                let _ = handle.take();
-                result
-            };
+            let result = cleanup.handle.as_mut().expect("task already joined").join();
+            let _ = cleanup.handle.take();
             if !skip_join_deadline {
                 super::jet_task_join_deadline_check();
             }
@@ -839,10 +850,6 @@ macro_rules! jet_lane_show {
         super::jet_scheduler_yield_now();
     }
 
-    /// Control-plane trace of the currently running task (or the idle defaults).
-    pub fn jet_task_current_trace() -> String {
-        super::jet_scheduler_current_task_trace()
-    }
 
     fn jet_select_duration_ns(value: &jet_foundation::Numeric::JetInt) -> i64 {
         jet_int_owned_to_i64(value).unwrap_or_else(|error| {
@@ -932,7 +939,10 @@ macro_rules! jet_lane_show {
     // D-CONC-STREAM1=A / D-CANCELMODEL1=C: the canonical pull/cancellation
     // protocol lives in the shared Prelude scheduler. This module only
     // exposes it under the `jet_std` namespace used by emitted AOT code.
-    pub use super::{jet_stream_task, JetStream, JetStreamSender};
+    pub use super::{
+        jet_stream_task, JetKeyedStream, JetLateEventDisposition, JetStream, JetStreamEvent,
+        JetStreamSender, JetStreamWindow,
+    };
 
     /// D-TASKRUNTIME1=A: one-shot timer channel; wakes through the scheduler timer wheel.
     pub fn after(ms: i64) -> JetReceiver<()> {
@@ -959,18 +969,18 @@ macro_rules! jet_lane_show {
     }
 
     /// D-TASKRUNTIME1=A: interval timer channel; sends 1, 2, ... until process exit.
-    pub fn interval(ms: i64) -> JetReceiver<i64> {
+    pub fn interval(ms: i64) -> JetReceiver<jet_foundation::Numeric::JetInt> {
         let delay = super::jet_task_interval_ms_defaulted(ms);
         let inner = super::JetSchedulerChannel::interval(delay as i64);
         let tx = inner.sender();
         super::jet_scheduler_spawn_detached_timer(move || {
-            let mut tick = 1i64;
+            let mut tick = jet_foundation::Numeric::JetInt::from_i64(1);
             loop {
                 super::jet_scheduler_sleep_ms(delay);
-                if !tx.send(tick) {
+                if !tx.send(tick.clone()) {
                     break;
                 }
-                tick += 1;
+                tick = tick + jet_foundation::Numeric::JetInt::from_i64(1);
             }
         });
         JetReceiver { inner }
@@ -1933,6 +1943,10 @@ macro_rules! jet_lane_show {
             self.revision
         }
     }
+    // Mechanical generic free-function targets for checked Core data callers.
+    // The canonical revision stays in the existing Shared owner/ticket.
+    pub fn jet_shared_revision<T: 'static>(shared: &JetShared<T>) -> u64 { shared.revision() }
+    pub fn jet_shared_snapshot_revision<T: 'static, U: Clone>(snapshot: &JetSharedSnapshot<T, U>) -> u64 { snapshot.revision() }
     impl<T: 'static, U> Drop for JetSharedSnapshot<T, U> {
         fn drop(&mut self) {
             self.owner.release_logical_owner_during_drop();
@@ -1953,6 +1967,56 @@ macro_rules! jet_lane_show {
     impl<T: 'static, U: super::JetShow> super::JetDebug for JetSharedSnapshot<T, U> {
         fn jet_debug(&self) -> String {
             self.jet_show()
+        }
+    }
+
+    // #29 typed Rust-emitter seed, dies at compiler cutover. The site pins
+    // the existing Shared Arc, without allocating another wrapper/cell.
+    pub struct JetSharedSite<T> {
+        owner: std::sync::atomic::AtomicPtr<JetSharedCell<T>>,
+    }
+    unsafe impl<T: Send + Sync> Sync for JetSharedSite<T> {}
+    impl<T: 'static> JetSharedSite<T> {
+        pub const fn new() -> Self {
+            Self { owner: std::sync::atomic::AtomicPtr::new(std::ptr::null_mut()) }
+        }
+        pub fn get(&'static self, initialize: fn() -> JetShared<T>, world: bool) -> JetShared<T> {
+            use std::sync::atomic::Ordering;
+            let mut winner = self.owner.load(Ordering::Acquire);
+            if winner.is_null() {
+                let candidate = std::mem::ManuallyDrop::new(initialize());
+                assert!(candidate.1, "publication initializer returned a non-owning Shared");
+                // SAFETY: transfer exactly the candidate's existing physical
+                // and logical owner into the site, suppressing its old Drop.
+                let raw = unsafe { std::sync::Arc::into_raw(std::ptr::read(&candidate.0)) as *mut JetSharedCell<T> };
+                match self.owner.compare_exchange(std::ptr::null_mut(), raw, Ordering::AcqRel, Ordering::Acquire) {
+                    Ok(_) => {
+                        winner = raw;
+                        if world {
+                            crate::jet_global_shared_register_world(self as *const Self as usize, Self::reset);
+                        }
+                    }
+                    Err(existing) => {
+                        winner = existing;
+                        // SAFETY: failed publication leaves the transferred
+                        // candidate owner with us; use the ordinary Shared drop.
+                        unsafe { drop(JetShared(std::sync::Arc::from_raw(raw), true)); }
+                    }
+                }
+            }
+            // SAFETY: the process-pinned site owns this Arc; world reset is
+            // quiescent. Borrow that owner and fork through canonical Clone.
+            unsafe {
+                let owner = std::mem::ManuallyDrop::new(JetShared(std::sync::Arc::from_raw(winner), true));
+                JetShared::clone(&owner)
+            }
+        }
+        unsafe fn reset(address: usize) {
+            let site = &*(address as *const Self);
+            let owner = site.owner.swap(std::ptr::null_mut(), std::sync::atomic::Ordering::AcqRel);
+            if !owner.is_null() {
+                drop(JetShared(std::sync::Arc::from_raw(owner), true));
+            }
         }
     }
 
@@ -2098,7 +2162,7 @@ macro_rules! jet_lane_show {
 
     // jet:source-shared-interop-jit-begin
     type JetSharedSourceInteropRootBuilder = std::sync::Arc<
-        dyn Fn() -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String>
+        dyn Fn() -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String>
             + Send
             + Sync
             + 'static,
@@ -2111,16 +2175,16 @@ macro_rules! jet_lane_show {
     }
 
     impl<T: Send + Sync + 'static>
-        ::jet_jit::SourceSharedInterop::SourceSharedInteropWeakOwner
+        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropWeakOwner
         for JetSharedPhysicalOwnerWeak<T>
     {
         fn upgrade(
             &self,
         ) -> Result<
             Option<(
-                ::jet_jit::SourceSharedInterop::SourceSharedInterop,
+                ::jet_evalhost::SourceSharedInterop::SourceSharedInterop,
                 Box<
-                    dyn ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
+                    dyn ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
                 >,
             )>,
             String,
@@ -2145,7 +2209,7 @@ macro_rules! jet_lane_show {
     }
 
     impl<T: Send + Sync + 'static>
-        ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
+        ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease
         for JetSharedPhysicalOwnerAlias<T>
     {
         fn token_id(&self) -> i64 {
@@ -2167,7 +2231,7 @@ macro_rules! jet_lane_show {
             &self,
             type_id: u64,
             root_builder: JetSharedSourceInteropRootBuilder,
-        ) -> Result<::jet_jit::SourceSharedInterop::SourceSharedInterop, String> {
+        ) -> Result<::jet_evalhost::SourceSharedInterop::SourceSharedInterop, String> {
             let root = root_builder()?;
             if root.type_id() != type_id {
                 return Err("Source Shared callback root has a different checked type".to_string());
@@ -2197,7 +2261,7 @@ macro_rules! jet_lane_show {
                             .map(|alias| {
                                 Box::new(alias)
                                     as Box<
-                                        dyn ::jet_jit::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
+                                        dyn ::jet_evalhost::SourceSharedInterop::SourceSharedInteropOwnerAliasLease,
                                     >
                             })
                     },
@@ -2973,16 +3037,27 @@ macro_rules! jet_lane_show {
             )
         }
 
-        pub fn wait<F>(&mut self, condition: &JetCondition, ready: F) -> Result<(), String>
+        /// The canonical `SharedGuard.wait` (MIREval `eval_shared_guard_wait`
+        /// and the JIT `jet_jit_shared_guard_wait_once` mirror it): an invalid
+        /// or released guard traps, a read guard reports edit-required before
+        /// the predicate runs, and an interrupted park reports cancellation.
+        pub fn wait<F>(&self, condition: &JetCondition, mut ready: F) -> Result<(), String>
         where
-            F: Fn(&T) -> bool,
+            F: FnMut(&T) -> bool,
         {
             let state = self.state.clone();
-            if !state.held() {
-                return Err(crate::JET_SHARED_GUARD_INVALID.to_string());
+            let capability = if state.held() {
+                crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
+            } else {
+                Err(crate::JET_SHARED_GUARD_INVALID)
+            };
+            match capability {
+                Ok(()) => {}
+                Err(message) if message == crate::JET_SHARED_GUARD_INVALID => {
+                    super::jet_runtime_stop_with_context("E3001", "", 0, "", "", message)
+                }
+                Err(message) => return Err(message.to_string()),
             }
-            crate::jet_shared_guard_require_edit_capability(self.editable, state.permit())
-                .map_err(|message| message.to_string())?;
             loop {
                 if ready(self) {
                     return Ok(());
@@ -2991,12 +3066,21 @@ macro_rules! jet_lane_show {
                     std::sync::Arc::new(JetSchedulerConditionWaiter {
                         slot: super::ParkSlot::new(),
                     });
-                match crate::jet_shared_guard_wait_once(
+                match crate::jet_shared_guard_wait_once_with_handoff(
                     Some(state.as_ref()),
                     Some(&condition.inner),
                     waiter,
+                    None,
                 ) {
                     Ok(()) => {}
+                    Err(error) if error.traps() => super::jet_runtime_stop_with_context(
+                        "E3001",
+                        "",
+                        0,
+                        "",
+                        "",
+                        error.message(),
+                    ),
                     Err(error) => return Err(error.message().to_string()),
                 }
             }

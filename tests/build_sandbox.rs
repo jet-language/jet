@@ -1506,7 +1506,7 @@ fn core_cargo_build_refuses_before_unavailable_sandbox_can_run_build_script() {
         "name: \"escape\"\nversion: \"0.1.0\"\npackages: { escape: library }\n",
     )
     .unwrap();
-    std::fs::write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap();
+    std::fs::write(repo.join("lib.rs"), "fn value() -> u8 { 1 }\n").unwrap();
     std::fs::write(
         repo.join("Cargo.toml"),
         "[package]\nname = \"escape\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[lib]\npath = \"lib.rs\"\n",
@@ -1583,7 +1583,7 @@ fn core_cargo_build_is_private_and_not_published_to_shared_cache() {
         "name: \"private\"\nversion: \"0.1.0\"\npackages: { private: library }\n",
     )
     .unwrap();
-    std::fs::write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap();
+    std::fs::write(repo.join("lib.rs"), "fn value() -> u8 { 1 }\n").unwrap();
     std::fs::write(
         repo.join("Cargo.toml"),
         "[package]\nname = \"private\"\nversion = \"0.1.0\"\n[lib]\npath = \"lib.rs\"\n",

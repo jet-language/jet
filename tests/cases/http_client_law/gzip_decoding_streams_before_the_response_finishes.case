@@ -1,0 +1,21 @@
+# HAND-PORT tests/http_client_law.rs:427-547 gzip_decoding_streams_before_the_response_finishes
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original exact20byte gzip prefix/18byte suffix vectors+two2block hello/world chunks max5; real TCP signal before suffix with same2sec peer deadline; exactly2 chunks and FIRST normal EOF; original second request br send exact UnsupportedEncoding. No body-handle seam: all reads on SAME handle through transparent public chunks5.
+fixture: gzip_decoding_streams_before_the_response_finishes.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+await: file signal.txt timeout 30s
+capture: signal = text file signal.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = gzip_decoding_streams_before_the_response_finishes.stdout.expected
+wait: peer
+exit: 0

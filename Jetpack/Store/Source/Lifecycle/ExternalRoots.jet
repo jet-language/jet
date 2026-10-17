@@ -6,17 +6,17 @@
 
 // One manually retained closure as the external-root CLI and consumers see
 // it.
-pub struct ExternalRootView {
-    label: String
-    reference: String
-    etag: String
-    closure_size: Int
-    prepared: Bool
-    expires_at: Int?
+struct ExternalRootView {
+    priv label: String
+    priv reference: String
+    priv etag: String
+    priv closure_size: Int
+    priv prepared: Bool
+    priv expires_at: Int?
 }
 
 #Error
-pub enum ExternalRootError {
+enum ExternalRootError {
     Conflict(label: String, expected: String?, current: String?)
     ReferenceNotFound(String)
     Store(StoreError)
@@ -105,7 +105,7 @@ fn store_external_root_is_missing_reference(error: StoreError, reference: String
 }
 
 // Rust `external_root_closure_size`.
-pub fn store_external_root_closure_size(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> Int ExternalRootError! {
+fn store_external_root_closure_size(verification: &StoreVerification, roots: HangarRoots, reference: String) -[FS, Env]> Int ExternalRootError! {
     targets :: store_external_root_targets(&verification, roots, reference)
     Ok(targets.len())
 }
@@ -153,7 +153,7 @@ fn store_external_root_register_snapshot(verification: &StoreVerification, roots
 // manually retained Hangar closure. Lifecycle owns the typed identity, the
 // compare-and-swap check, expiry metadata and the prepare/commit sequence;
 // this adapter resolves the reference to its complete closure.
-pub fn store_register_external_root_at(verification: &StoreVerification, roots: HangarRoots, principal: String, label: String, reference: String, expires_at: Int?, expected_etag: String?, at: Int) -[FS, Env, Time]> ExternalRootView ExternalRootError! {
+fn store_register_external_root_at(verification: &StoreVerification, roots: HangarRoots, principal: String, label: String, reference: String, expires_at: Int?, expected_etag: String?, at: Int) -[FS, Env, Time]> ExternalRootView ExternalRootError! {
     store_external_root_validate_label(label)
     producer :: ProducerID.new(principal)
     expiry :: if expires_at == {
@@ -173,7 +173,7 @@ pub fn store_register_external_root_at(verification: &StoreVerification, roots: 
 }
 
 // Rust `list_external_roots`: the principal's live manual roots.
-pub fn store_list_external_roots(verification: &StoreVerification, roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
+fn store_list_external_roots(verification: &StoreVerification, roots: HangarRoots, principal: String) -[FS, Env, Time]> [ExternalRootView] ExternalRootError! {
     producer :: ProducerID.new(principal)
     snapshot :: store_lifecycle_snapshot(&verification, roots)
     views := [ExternalRootView]{}
@@ -193,7 +193,7 @@ fn store_external_root_remove(verification: &StoreVerification, roots: HangarRoo
 }
 
 // Rust `unregister_external_root_at`.
-pub fn store_unregister_external_root_at(verification: &StoreVerification, roots: HangarRoots, principal: String, label: String, expected_etag: String, at: Int) ExternalRootError! -[FS, Env, Time]> {
+fn store_unregister_external_root_at(verification: &StoreVerification, roots: HangarRoots, principal: String, label: String, expected_etag: String, at: Int) ExternalRootError! -[FS, Env, Time]> {
     store_external_root_validate_label(label)
     producer :: ProducerID.new(principal)
     id :: store_external_root_manual_id(producer, label)
@@ -209,7 +209,7 @@ pub fn store_unregister_external_root_at(verification: &StoreVerification, roots
 // Rust `reconcile_profile_generation_root`: prepare the immutable root of
 // one profile generation; None when it is already committed, otherwise the
 // exact incarnation and witness the caller must commit.
-pub fn store_reconcile_profile_generation_root(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -[FS, Env, Time]> PreparedProfileGenerationRoot? StoreError! {
+fn store_reconcile_profile_generation_root(verification: &StoreVerification, roots: HangarRoots, owner: String, profile: String, generation: Int, witness: String, targets: [String], at: Int) -[FS, Env, Time]> PreparedProfileGenerationRoot? StoreError! {
     id :: RootID.new("profile-generation:{owner}:{profile}:{generation}")
     incarnation :: Incarnation.new(1)
     root_witness :: RootWitness.new(witness)

@@ -12,12 +12,12 @@ use core.encoding.json as json
     fn pooled_sleep(handle: Int, input: String, deadline_ms: Int) -> String = "jet_php_ops_invoke_pooled_sleep"
 }
 
-pub struct PhpPool {
-    value: Int
+struct PhpPool {
+    priv value: Int
 }
 
 #Error
-pub enum PhpError {
+enum PhpError {
     NotRunning
     Timeout
     Cancelled
@@ -30,48 +30,48 @@ impl PhpPool.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(pool: ^PhpPool) { abi.close(pool.value) }
+fn close(pool: ^PhpPool) { abi.close(pool.value) }
 
-pub fn open() -> PhpPool PhpError! {
+fn open() -> PhpPool PhpError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PhpError.NotRunning)
     return Ok(PhpPool{value: handle})
 }
 
-pub fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
+fn cancel(pool: PhpPool) { abi.cancel(pool.value) }
 
-fn decode_response(raw: String, code: Int) -> DataTree PhpError! {
+fn decode_response(raw: String, code: Int) -> Dyn PhpError! {
     if code == 1 -> return Err(PhpError.NotRunning)
     if code == 2 -> return Err(PhpError.Timeout)
     if code == 3 -> return Err(PhpError.Cancelled)
     if code == 5 -> return Err(PhpError.Limit)
     if code != 0 -> return Err(PhpError.Protocol)
     response := json.parse(raw) ?? return Err(PhpError.Protocol)
-    succeeded := (&response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(PhpError.CommandFailed)
-    return Ok(&response.field("value") ?? DataTree.Null)
+    return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-pub fn transform(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
-    raw :: abi.transform(pool.value, json.to_string(input), deadline_ms)
+fn transform(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw :: abi.transform(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn fail_call(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
-    raw :: abi.fail_call(pool.value, json.to_string(input), deadline_ms)
+fn fail_call(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw :: abi.fail_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn sleep_call(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
-    raw :: abi.sleep_call(pool.value, json.to_string(input), deadline_ms)
+fn sleep_call(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw :: abi.sleep_call(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn pooled_sleep(pool: PhpPool, input: DataTree, deadline_ms: Int) -> DataTree PhpError! {
-    raw :: abi.pooled_sleep(pool.value, json.to_string(input), deadline_ms)
+fn pooled_sleep(pool: PhpPool, input: Dyn, deadline_ms: Int) -> Dyn PhpError! {
+    raw :: abi.pooled_sleep(pool.value, json.to_string(input) ?? return Err(PhpError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }

@@ -1,0 +1,17 @@
+Error [E0433]: This SQL value is thrown away
+  --> external_boundaries_seed_origin_facts_5.jet:7:9
+    |
+  7 |     SQL.raw(value)
+    |         ^^^
+ Why: `run` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `run` should return it, write `-> SQL` after its parameter list; to discard it on purpose, write `.drop("reason")`
+More: jet-lang.dev/e/E0433
+
+Error [E0721]: A `$origin.ffi` value is denied at `SQL.raw`
+  --> tests/ui/taint/external_boundaries_seed_origin_facts_5.jet:7:9
+    |
+  7 |     SQL.raw(value)
+    |         ^^^
+ Why: The declaration for `$origin.ffi` denies `SQL.raw`, which covers this destination
+ Fix: Remove the destination use, decode the value into a declared type, or pass it through an audited #Scrub function
+More: jet-lang.dev/e/E0721

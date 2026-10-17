@@ -1,0 +1,22 @@
+// Rust 1.97.1 char Debug: fmt/mod.rs2972-2979 and char/methods.rs474-487.
+// Layer on TextDebug.jet (301f6b608) and the one TRAP_DEBUG_RANGES table.
+// RtPlot1b frozen oracle: all 1,112,064 Unicode scalars, zero model differences.
+// Caller supplies a valid Unicode scalar; append directly, without temporary text.
+fn rt_text_push_rust_debug_char(target: I64, cp: I64) {
+    rt_text_push_word(target, I64{39}, I64{1})
+    short :: if {
+        (cp == I64{0}) -> I64{48}
+        (cp == I64{9}) -> I64{116}
+        (cp == I64{10}) -> I64{110}
+        (cp == I64{13}) -> I64{114}
+        (cp == I64{39}) -> I64{39}
+        (cp == I64{92}) -> I64{92}
+        else -> I64{-1}
+    }
+    if {
+        (short >= I64{0}) -> rt_text_push_word(target, I64{92}.bit_or(short << I64{8}), I64{2})
+        (cp < I64{32} || cp == I64{127} || (cp >= I64{128} && trap_debug_escaped(cp))) -> rt_text_push_rust_unicode_escape(target, cp)
+        else -> rt_text_push_scalar(target, cp)
+    }
+    rt_text_push_word(target, I64{39}, I64{1})
+}

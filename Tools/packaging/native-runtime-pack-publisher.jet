@@ -1,0 +1,103 @@
+// INTERNAL only. The existing Jetpack assembler's publication mode forwards
+// fn run here. This is not a user CLI command and introduces no flag/env/store.
+// Node supplies ordinary JSON; only the Jet codec emits canonical records.
+
+struct NativeRuntimePublicationBlob {
+    object: ObjectHandle
+    path: String
+}
+
+fn native_runtime_publication_blobs(fields: [String: Dyn]) -> [NativeRuntimePublicationBlob] NativeRuntimePackError! {
+    result := [NativeRuntimePublicationBlob]{}
+    seen := [String: Bool]{}
+    loop value in native_pack_array_field(fields, "blobs") {
+        row :: native_pack_fields(value, [String]{"object", "path"})
+        object :: native_pack_handle_field(row, "object")
+        native_pack_unique(&seen, object.text())
+        &result.push(NativeRuntimePublicationBlob{object, path: native_pack_text_field(row, "path")})
+    }
+    Ok(result)
+}
+
+fn native_runtime_publication_input(blobs: [NativeRuntimePublicationBlob], object: ObjectHandle) -[FS]> [U8] NativeRuntimePackError! {
+    loop blob in blobs {
+        if blob.object == object {
+            bytes :: files.read_bytes(blob.path)
+            if ObjectHandle.from_bytes(bytes) != object -> return Err(NativeRuntimePackError.Invalid("publication input bytes changed at {blob.path}"))
+            return Ok(bytes)
+        }
+    }
+    Err(NativeRuntimePackError.Invalid("publication input {object.text()} has no actual bytes"))
+}
+
+fn native_runtime_publication_steps(store: ArtifactStore, fields: [String: Dyn]) -[FS, Env, Exec, Time, Rand]> [NativeRuntimeObservedStep] NativeRuntimePackError! {
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
+    steps := [NativeRuntimeObservedStep]{}
+    loop value in native_pack_array_field(fields, "steps") {
+        row :: native_pack_fields(value, [String]{"schema", "id", "rc", "invocation", "inputs", "outputs", "log"})
+        native_pack_schema(row, "jet.native-runtime-step-receipt/v1")
+        id :: native_pack_text_field(row, "id")
+        observed_rc :: native_pack_rc(native_pack_text_field(row, "rc"))
+        invocation :: native_pack_handle_field(row, "invocation")
+        inputs :: native_pack_roles_field_empty(row, "inputs")
+        outputs :: native_pack_roles_field_empty(row, "outputs")
+        log :: native_pack_handle_field(row, "log")
+        _ :: native_pack_blob(store, log, &census)
+        // Every issued step record comes through the one Jet canonical codec.
+        receipt :: store.publish_blob(native_pack_encode(value))
+        &steps.push(NativeRuntimeObservedStep{id, observed_rc, invocation, inputs, outputs, receipt})
+    }
+    Ok(steps)
+}
+
+fn native_runtime_publication_execute(mode: String, request_path: String, result_path: String) NativeRuntimePackError! -[FS, Env, Exec, Time, Rand]> {
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
+    request :: json.parse(files.read(request_path))
+    keys := [String]{"schema", "subject", "blobs", "admission", "rail_contract", "job", "proof_done", "proof_terminal", "final_source_tree", "generation", "raw_frontend", "steps", "compiler"}
+    if mode == "publish" -> &keys.push("publication_authorization")
+    fields :: native_pack_fields(request, keys)
+    native_pack_schema(fields, "jet.native-runtime-publication-request/v1")
+    blobs :: native_runtime_publication_blobs(fields)
+    proof_done :: native_pack_handle_field(fields, "proof_done")
+    // Fail BEFORE admitting anything if this is not the actual terminal done0.
+    if native_runtime_publication_input(blobs, proof_done) != "0\n".bytes() -> return Err(NativeRuntimePackError.Invalid("internal publisher requires actual proofq done rc 0"))
+    subject_tree :: fields.get("subject") ?? return Err(NativeRuntimePackError.Invalid("publication request is missing subject"))
+    subject :: NativeRuntimePackSubject.from_tree(subject_tree)
+    store :: ArtifactStore.from_env()
+    loop blob in blobs -> store.publish_object(blob.object, files.read_bytes(blob.path))
+    evidence :: NativeRuntimePackEvidence{
+        admission: native_pack_handle_field(fields, "admission"), rail_contract: native_pack_handle_field(fields, "rail_contract"),
+        job: native_pack_handle_field(fields, "job"), proof_done, generation: native_pack_handle_field(fields, "generation"),
+        proof_terminal: native_pack_handle_field(fields, "proof_terminal"), final_source_tree: native_pack_handle_field(fields, "final_source_tree"),
+        raw_frontend: native_pack_handle_field(fields, "raw_frontend"), steps: native_runtime_publication_steps(store, fields),
+    }
+    prepared :: native_runtime_pack_prepare(store, subject, evidence)
+    if mode == "prepare" {
+        result :: native_pack_encode(Dyn.Object([String: Dyn]{
+            "schema": Dyn.Text("jet.native-runtime-prepared-subject/v1"), "subject": native_pack_handle_tree(prepared),
+            "rail_contract": native_pack_handle_tree(evidence.rail_contract), "admission": native_pack_handle_tree(evidence.admission),
+        }))
+        files.write_bytes(result_path, result)
+        return
+    }
+    authorization :: native_pack_handle_field(fields, "publication_authorization")
+    compiler :: native_pack_handle_field(fields, "compiler")
+    published :: native_runtime_pack_publish(store, subject, evidence.approval(prepared, authorization), compiler)
+    composition :: NativeCandidateComposition.from_bytes(native_pack_blob(store, published.object, &census))
+    result :: native_pack_encode(Dyn.Object([String: Dyn]{
+        "schema": Dyn.Text("jet.native-runtime-published-candidate/v1"),
+        "compiler": native_pack_handle_tree(compiler), "composition": native_pack_handle_tree(published.object),
+        "identity": native_pack_handle_tree(composition.expected_runtime_identity), "approval": native_pack_handle_tree(composition.expected_approval),
+        "subject": native_pack_handle_tree(prepared), "action_key": Dyn.Text(NativeCandidateComposition.action_key(compiler)),
+    }))
+    files.write_bytes(result_path, result)
+}
+
+fn native_runtime_pack_publisher() NativeRuntimePackError! {
+    args :: process.args()
+    if (args.len() != 3 || (args[0] != "prepare" && args[0] != "publish")) {
+        eprint("internal runtime publisher requires prepare/publish, request and result paths\n")
+        process.exit(EXIT_USAGE)
+    }
+    native_runtime_publication_execute(args[0], args[1], args[2])
+}

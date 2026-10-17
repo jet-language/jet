@@ -151,6 +151,35 @@ impl<'a> Checker<'a> {
             self.stmt_tail_len = tail.len();
             self.views_used_in_stmt.clear();
             self.scoped_loan_read_reported = false;
+            // Unit-fallible blocks still have a Result return contract. A
+            // terminal carrier constructor is a return, including inside a
+            // terminal arm or unsafe block; ordinary Unit statements remain
+            // statements. Use the normal return checker to retain E's identity.
+            if i + 1 == stmts.len()
+                && value_tail.is_none()
+                && matches!(self.ret.as_ref(), Some(Type::Result { ok, .. }) if matches!(ok.as_ref(), Type::Named(name) if name == crate::Syntax::INTERNAL_UNIT_TYPE))
+            {
+                let carrier_tail = match &stmts[i] {
+                    Stmt::Expr(expr) => match expr.without_parens() {
+                        Expr::Ok(..) | Expr::Err(..) => true,
+                        Expr::Call(call) => {
+                            matches!(call.name.as_str(), crate::Syntax::LIT_OK | crate::Syntax::LIT_ERR)
+                                && !self.funcs.contains_key(&call.name)
+                                && self.lookup(&call.name).is_none()
+                        }
+                        _ => false,
+                    },
+                    _ => false,
+                };
+                if carrier_tail {
+                    let span = stmts[i].span();
+                    if let Stmt::Expr(tail) =
+                        std::mem::replace(&mut stmts[i], Stmt::Return(None, span))
+                    {
+                        stmts[i] = Stmt::Return(Some(tail), span);
+                    }
+                }
+            }
             if i + 1 == stmts.len() {
                 if let Some((expected, _block_span)) = value_tail {
                     let uncovered = uncovered_guard_path(&stmts[..=i], self.source);
@@ -338,6 +367,12 @@ impl<'a> Checker<'a> {
                         self.report_missing_block_value_on_path(expected, span, Some(path));
                     }
                 }
+            }
+            Stmt::Unsafe { body, span, .. } => {
+                let previous = self.in_unsafe;
+                self.in_unsafe = true;
+                self.check_value_block(body, expected, true, *span);
+                self.in_unsafe = previous;
             }
             _ => {
                 let span = stmt.span();
@@ -1129,10 +1164,10 @@ impl<'a> Checker<'a> {
     }
 
     /// Check a body that may not run at all: a lambda or `task { … }` body,
-    /// or a `??` fallback block. A `return` inside such a body still returns
-    /// the enclosing function (that targeting is correct and the corpus
-    /// depends on it), but only when the body runs — so it is a CONDITIONAL
-    /// return, not an unconditional one. Statements after the construct stay
+    /// or a `??` fallback block. Return targeting belongs to the active
+    /// callable contract: lambda returns exit the lambda (D-TAIL-RETURN1),
+    /// while inline fallback returns exit the enclosing callable. Either
+    /// way, the body may not run, so statements after the construct stay
     /// reachable.
     ///
     /// Without this, `check_stmt` sees `flow.reachable == false` for every

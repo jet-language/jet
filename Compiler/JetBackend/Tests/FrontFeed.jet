@@ -1,0 +1,449 @@
+// Differential front-end feed: checked Jet MIR is passed directly to the
+// native backend. The Rust feed is decoded only for the independent comparator.
+// run-front-feed.mjs assembles this with the compiler and schema stream codec.
+use core.files as ff_files
+use jet_driver.[JetDriverCompileMode, jet_driver_present_diagnostics]
+use jet_cli.[jet_cli_compile_file]
+use jet_foundation.[DIAGNOSTIC_ERROR, Effect, Span, MIRAccess, MIRBinaryDispatch, MIRBinaryOp, MIRBinaryOverflow, MIRCallArg, MIRCallFallibility, MIRCallSignature, MIRCallee, MIRCaptureOperand, MIRConstant, MIRConversion, MIRCoreCallID, MIRDimension, MIRDimensionAxis, MIRFunction, MIRIndexKind, MIRPanicContext, MIRPanicLoc, MIRPanicLocal, MIRPlace, MIRPlaceBase, MIRPreludeABI, MIRPreludeCall, MIRPreludeCallID, MIRPreludeFamily, MIRProgram, MIRFunctionID, MIRPlaceID, MIRBlockID, MIRInstruction, MIROperation, MIROpID, MIRProjection, MIRRequireKind, MIRScopeID, MIRScopeKind, MIRSemanticOp, MIRSourceFileID, MIRSymbol, MIRTagMarker, MIRTerminator, MIRType, MIRTypeKind, MIRUnaryOp, MIRValueID, MIRValueFact, mir_operation_can_stop, mir_operation_can_panic, mir_type_from_kind, mir_terminator_targets]
+
+fn ff_native(name: String, program: MIRProgram, entry_id: MIRFunctionID, pack: GLPack) -> String {
+    lowered :: lir_lower_entry(program, entry_id)
+    if lowered.issues.len() > 0 {
+        lines :: loop issue in lowered.issues -> "{issue.function}\t{issue.message}"
+        gl_write_issues(name, lines)
+        return "unsupported"
+    }
+    entry :: lowered.entry ?? panic("native lowering lost its checked entry")
+    ff_files.write("{name}.lir", lir_print_module(lowered.lir)) ?? panic("cannot write {name}.lir")
+    object :: x64_relocatable_object(lowered.lir, entry)
+    if object.errors.len() > 0 {
+        gl_write_issues(name, object.errors)
+        return "object-error"
+    }
+    ff_files.write_bytes("{name}.o", object.bytes) ?? panic("cannot write {name}.o")
+    linked :: x64_link_executable([String]{"{name}.o", pack.path}, ^[[U8]]{object.bytes, pack.bytes})
+    if linked.errors.len() > 0 {
+        gl_write_issues(name, linked.errors)
+        return "link-error"
+    }
+    ff_files.write_bytes("{name}.exe", linked.bytes) ?? panic("cannot write {name}.exe")
+    ff_files.set_mode("{name}.exe", 0o755) ?? panic("cannot make {name}.exe executable")
+    "linked"
+}
+
+fn ff_case(file: String, name: String, pack: GLPack) -> String {
+    compiled :: jet_cli_compile_file(file, false, false, None, JetDriverCompileMode.Program)
+    if compiled == {
+        .Refused(refusal) -> {
+            ff_files.write("{name}.front-issues", refusal.stderr) ?? panic("cannot write front-end refusal")
+            return "front-refused"
+        }
+        .Compiled(result, snapshot) -> {
+            reports := [String]{}
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> &reports.push("{diagnostic.code}\t{diagnostic.what}\t{diagnostic.why}")
+            }
+            if result.internal_problem == .Val(problem) -> &reports.push("ICE\t{problem}")
+            if !result.complete -> &reports.push("INCOMPLETE\tJet front end did not finish")
+            // Assert the loader's actual Core closure, not just reachable MIR:
+            // source pruning could otherwise hide an unnecessary ambient load.
+            if file.ends_with("/prelude_load_absent.jet") || file == "prelude_load_absent.jet" {
+                loop source in result.generated_source_files {
+                    if source.path == "Core/prelude/prelude.jet" || source.path.ends_with("/Core/prelude/prelude.jet") -> &reports.push("INVENTORY\tunmentioned optional-to-failure body loaded core.prelude")
+                }
+            }
+            if reports.len() > 0 {
+                ff_files.write("{name}.front-issues", reports.join("\n")) ?? panic("cannot write front-end issues")
+                return "front-error"
+            }
+            program :: result.mir ?? panic("complete front end has no checked MIR")
+            entry :: result.entry_function ?? panic("complete golden has no checked entry")
+            stream := [String]{"{entry.value}"}
+            mirw_mir_program(program, &stream)
+            ff_files.write("{name}.mird", stream.join("\n")) ?? panic("cannot write Jet MIR inventory")
+            // Do not round-trip the stream here: the backend receives the live
+            // MIR value returned by the Jet driver, not Rust/debug conversion.
+            return ff_native(name, program, entry, pack)
+        }
+    }
+    "front-error"
+}
+
+// Pure predicate parity, not a hand-built production MIR or native golden.
+// The Rust test consumes exactly the same table and renders the same facts.
+fn ff_stop_type(name: String) -> MIRType {
+    fixed :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 8})
+    if name == {
+        "i8" -> fixed
+        "u64" -> mir_type_from_kind(MIRTypeKind.IntN{signed: false, bits: 64})
+        "int" -> mir_type_from_kind(MIRTypeKind.Int)
+        "float" -> mir_type_from_kind(MIRTypeKind.Float)
+        "float32" -> mir_type_from_kind(MIRTypeKind.Float32)
+        "tagged-i8" -> mir_type_from_kind(MIRTypeKind.Tagged{marker: MIRTagMarker.User{name: "checked"}, inner: fixed})
+        "range-i8" -> mir_type_from_kind(MIRTypeKind.InlineRange{base: fixed, lo: -8, hi: 8})
+        "quantity-i8" -> mir_type_from_kind(MIRTypeKind.Quantity{base: fixed, dimension: MIRDimension{axes: [MIRDimensionAxis]{}}})
+        "list" -> mir_type_from_kind(MIRTypeKind.List{inner: fixed})
+        "map" -> mir_type_from_kind(MIRTypeKind.Map{key: fixed, value: fixed})
+        else -> panic("unknown predicate type {name}")
+    }
+}
+
+fn ff_stop_prelude(id: U64, effect: String) -> MIRPreludeCall {
+    checked_effect :: if effect == "Panic" -> Val(Effect.Panic) else if effect == "None" -> Effect?{None} else -> panic("unknown predicate effect {effect}")
+    MIRPreludeCall{id: MIRPreludeCallID{value: id}, family: MIRPreludeFamily.Host,
+        module_name: "predicate", member: "predicate", symbol: MIRSymbol.Runtime{name: "predicate"},
+        signature: MIRCallSignature{arity: 0, max_arity: 0, borrow_mask: [Bool]{}},
+        effect_kind: checked_effect, fallibility: MIRCallFallibility.Infallible,
+        abi: MIRPreludeABI.Value, authority: None, db_metadata: None}
+}
+
+fn ff_stop_predicate(table: String) {
+    rendered := [String]{}
+    count := 0
+    loop row in table.split("\n").to_list() {
+        if row == "" -> next
+        columns :: row.split("\t").to_list()
+        if columns.len() != 8 -> panic("predicate row must carry eight checked facts")
+        value :: MIRValueID{value: 1}
+        place_id :: MIRPlaceID{value: 1}
+        route :: MIRPreludeCallID{value: 3}
+        ty :: ff_stop_type(columns[2])
+        location :: MIRPanicLoc{file: MIRSourceFileID{value: 1}, line: 1, column: 1}
+        context :: MIRPanicContext{function: "predicate", source_line: "", caret: 0, locals: [MIRPanicLocal]{}}
+        operation :: if columns[1] == {
+            "neg" -> MIROperation.Unary{op: MIRUnaryOp.Neg, value: value}
+            "not" -> MIROperation.Unary{op: MIRUnaryOp.Not, value: value}
+            "cast" -> MIROperation.Convert{value: value, parameters: [MIRValueID]{}, target: ty, conversion: MIRConversion.NumericCast}
+            "binary-trap" | "binary-prelude" -> MIROperation.Binary{op: MIRBinaryOp.Add,
+                dispatch: MIRBinaryDispatch.Prelude{call: route, location: None},
+                overflow: if columns[1] == "binary-trap" -> MIRBinaryOverflow.Trap else -> MIRBinaryOverflow.Unchecked,
+                left: value, right: value}
+            "binary-total" -> MIROperation.Binary{op: MIRBinaryOp.Add, dispatch: MIRBinaryDispatch.Primitive,
+                overflow: MIRBinaryOverflow.Unchecked, left: value, right: value}
+            "read" -> MIROperation.ReadPlace{place: place_id}
+            "move" -> MIROperation.MovePlace{place: place_id}
+            "write" -> MIROperation.WritePlace{place: place_id, value: value}
+            "replace" -> MIROperation.ReplacePlace{place: place_id, value: value}
+            "scope-exit" -> MIROperation.ScopeExit{scope: MIRScopeID{value: 1}}
+            "require-stop" -> MIROperation.Semantic{operation: MIRSemanticOp.RequireStop{
+                call: route, kind: MIRRequireKind.Panic, condition: None, location: location,
+                context: context, values: [MIRValueID]{}, always_stops: true}}
+            "call" -> MIROperation.Call{callee: MIRCallee.User{function: MIRFunctionID{value: 1}}, args: [MIRCallArg]{}, type_args: [MIRType]{}}
+            "indirect-call" -> MIROperation.IndirectCall{callee: value, args: [MIRCallArg]{}, type_args: [MIRType]{}}
+            "core-call" -> MIROperation.CoreCall{call: MIRCoreCallID{value: 1}, route: route,
+                args: [MIRCallArg]{}, type_args: [MIRType]{}, fallibility: MIRCallFallibility.Infallible, data_plan: None}
+            else -> panic("unknown predicate operation {columns[1]}")
+        }
+        place :: MIRPlace{id: place_id, span: Span{start: 0, end: 0}, ty: ty,
+            base: MIRPlaceBase.Temporary{value: value}, access: MIRAccess.Read, persist_key: None,
+            projections: [MIRProjection]{MIRProjection.Index{
+                kind: if columns[2] == "map" -> MIRIndexKind.Map else -> MIRIndexKind.List,
+                index: value, call: MIRPreludeCallID{value: 1}, write_call: Val(MIRPreludeCallID{value: 2}),
+                location: location, context: None, span: Span{start: 0, end: 0}}}}
+        calls :: [MIRPreludeCall]{ff_stop_prelude(1, columns[3]), ff_stop_prelude(2, columns[4]), ff_stop_prelude(3, columns[5])}
+        positions :: [U64:Int]{1: 0, 2: 1, 3: 2}
+        stop :: mir_operation_can_stop(operation, Val(ty), Val(place), calls, positions)
+        can_panic :: mir_operation_can_panic(operation, Val(ty), Val(place), calls, positions)
+        if "{stop}" != columns[6] -> panic("{columns[0]} stop mismatch")
+        if "{can_panic}" != columns[7] -> panic("{columns[0]} panic mismatch")
+        &rendered.push("{columns[0]}\t{columns[1]}\t{columns[2]}\t{columns[3]}\t{columns[4]}\t{columns[5]}\t{stop}\t{can_panic}")
+        count += 1
+    }
+    if count == 0 -> panic("predicate table is empty")
+    ff_files.write("front-stop-predicate-results.tsv", "{rendered.join("\n")}\n") ?? panic("cannot write exercised Jet predicate results")
+    print("stop predicate: {count} shared rows verified")
+}
+
+// Focused production producer witness; never a successful golden or a
+// hand-built MIR substitute. Its source is shared with the Rust builder test.
+fn ff_cleanup_place(operation: MIROperation, moved: [U64:MIRPlaceID]) -> MIRPlaceID? {
+    if operation == .Call(_, args, _) {
+        loop arg in args {
+            if arg.access == .Move && moved.get(arg.value.value) != None -> return moved.get(arg.value.value)
+        }
+    }
+    None
+}
+
+fn ff_cleanup_program(program: MIRProgram) {
+    tables :: mir_pass_legality_tables(program)
+    loop function in program.functions {
+        first := MIRPlaceID?{None}
+        remaining := MIRPlaceID?{None}
+        loop local in function.locals {
+            if local.name == "first" -> first = Val(local.place)
+            if local.name == "remaining" -> remaining = Val(local.place)
+        }
+        if first == None -> next
+        if remaining == None -> panic("cleanup witness lost remaining owner")
+        moved := [U64:MIRPlaceID]{}
+        maximum := U64{0}
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                if instruction.id.value > maximum -> maximum = instruction.id.value
+                if instruction.operation == .MovePlace(place) && instruction.result == .Val(value) -> moved[value.value] = place
+            }
+        }
+        loop block in function.blocks {
+            if block.instructions.len() == 0 -> next
+            last :: block.instructions[block.instructions.len() - 1]
+            if ff_cleanup_place(last.operation, moved) != first -> next
+            if block.terminator == .Poll(kind, _, stop) {
+                if kind != .Propagate -> panic("first normal cleanup has no propagation edge")
+                pending := [MIRBlockID]{stop}
+                seen := [U64:Bool]{}
+                calls := 0
+                cleanup_scopes := [U64:Bool]{}
+                loop scope in function.scopes {
+                    if scope.kind == MIRScopeKind.StopCleanup -> cleanup_scopes[scope.id.value] = true
+                }
+                entries := 0
+                leaves := 0
+                cleanup_exit := MIROpID?{None}
+                loop pending.len() > 0 {
+                    id :: &pending.pop() ?? panic("cleanup witness worklist underflow")
+                    if seen.get(id.value) != None -> next
+                    seen[id.value] = true
+                    found := false
+                    loop successor in function.blocks {
+                        if successor.id != id -> next
+                        found = true
+                        loop instruction in successor.instructions {
+                            if instruction.operation == {
+                                .ScopeEnter(scope, _) -> {
+                                    if cleanup_scopes.get(scope.value) != None -> entries += 1
+                                }
+                                .ScopeExit(scope) -> {
+                                    if cleanup_scopes.get(scope.value) != None {
+                                        leaves += 1
+                                        cleanup_exit = Val(instruction.id)
+                                    }
+                                }
+                                else -> {}
+                            }
+                            place :: ff_cleanup_place(instruction.operation, moved)
+                            if place == first -> panic("first cleanup was replayed")
+                            if place == remaining -> calls += 1
+                        }
+                        if successor.terminator == .Poll(_, _, _) -> panic("propagation cleanup recursively polled")
+                        loop target in mir_terminator_targets(successor.terminator) -> &pending.push(target)
+                    }
+                    if !found -> panic("cleanup witness stop edge names a missing block")
+                }
+                if calls != 1 -> panic("remaining cleanup must run exactly once, found {calls}")
+                if entries == 0 || entries != leaves -> panic("propagation cleanup lacks balanced typed StopCleanup owners")
+                definitions :: mir_pass_definitions(function)
+                dominance :: mir_pass_legality_dominators(function)
+                if mir_pass_validate_stop_points(function, definitions, dominance, tables) != None -> panic("clean cleanup witness failed native Legality")
+                missing_leave := function.copy()
+                exit_id :: cleanup_exit ?? panic("cleanup witness has no typed leave")
+                loop index in 0..<missing_leave.blocks.len() {
+                    kept := [MIRInstruction]{}
+                    loop instruction in missing_leave.blocks[index].instructions {
+                        if instruction.id != exit_id -> &kept.push(instruction)
+                    }
+                    missing_leave.blocks[index].instructions = kept
+                }
+                open_failure :: mir_pass_validate_stop_points(missing_leave, mir_pass_definitions(missing_leave), mir_pass_legality_dominators(missing_leave), tables)
+                if open_failure != Val("MIR exit leaves a StopCleanup token open") -> panic("native Legality accepted missing StopCleanup leave: {open_failure}")
+                duplicate := last
+                duplicate.id = MIROpID{value: maximum + U64{1}}
+                if last.result == .Val(old) {
+                    next_value := U64{0}
+                    metadata := MIRValueFact?{None}
+                    loop fact in function.values {
+                        if fact.id.value >= next_value -> next_value = fact.id.value + U64{1}
+                        if fact.id == old -> metadata = Val(fact)
+                    }
+                    fact := metadata ?? panic("cleanup call result lost its checked metadata")
+                    fact.id = MIRValueID{value: next_value}
+                    duplicate.result = Val(fact.id)
+                    &function.values.push(fact)
+                }
+                loop index in 0..<function.blocks.len() {
+                    if function.blocks[index].id == stop {
+                        instructions := [MIRInstruction]{duplicate}
+                        loop instruction in function.blocks[index].instructions -> &instructions.push(instruction)
+                        function.blocks[index].instructions = instructions
+                    }
+                }
+                failure :: mir_pass_validate_stop_points(function, mir_pass_definitions(function), mir_pass_legality_dominators(function), tables)
+                if failure != Val("MIR stop edge reuses an already-consumed cleanup input") -> panic("native Legality accepted replay of the first cleanup: {failure}")
+                print("normal cleanup: first consumed; remaining once; duplicate rejected")
+                return
+            }
+        }
+        panic("first normal cleanup has no Propagate poll")
+    }
+    panic("cleanup witness source produced no first owner")
+}
+
+fn ff_cleanup_case(file: String) {
+    compiled :: jet_cli_compile_file(file, false, false, Val(1), JetDriverCompileMode.Program)
+    if compiled == {
+        .Refused(refusal) -> panic("cleanup witness refused: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("cleanup witness diagnostic {diagnostic.code}: {diagnostic.what}")
+            }
+            if result.internal_problem == .Val(problem) -> panic("cleanup witness compiler ICE: {problem}")
+            if !result.complete -> panic("cleanup witness front end incomplete")
+            ff_cleanup_program(result.mir ?? panic("cleanup witness lost checked MIR"))
+        }
+    }
+}
+
+// The explicit stop ordering law is independent of ordinary return/Err/cancel.
+// Walk each production MIR's actual normal path and compare exercised Rust rows.
+fn ff_explicit_cleanup_function(program: MIRProgram, function: MIRFunction) -> String {
+    owners := [U64:String]{}
+    loop local in function.locals {
+        if local.name == "first" || local.name == "second" || local.name == "_guard_1" || local.name == "_guard_2" -> owners[local.place.value] = local.name
+    }
+    if owners.len() != 4 -> panic("{function.name} lost a checked cleanup owner")
+    values := [U64:String]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            result :: instruction.result ?? next
+            if instruction.operation == {
+                .ReadPlace(place) | .MovePlace(place) | .AddressOf(place, _) | .RawAddressOf(place) -> {
+                    if owners.get(place.value) == .Val(owner) -> values[result.value] = owner
+                }
+                .Move(value) | .Copy(value, _) -> {
+                    if values.get(value.value) == .Val(owner) -> values[result.value] = owner
+                }
+                .Closure(_, captures, _) -> {
+                    loop capture in captures {
+                        owner :: if capture == {
+                            .Place(place) -> owners.get(place.value)
+                            .Value(value) -> values.get(value.value)
+                        }
+                        if owner == .Val(name) {
+                            if name == "first" || name == "second" -> values[result.value] = name
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    booleans := [U64:Bool]{}
+    flags := [U64:Bool]{}
+    seen := [U64:Bool]{}
+    order := [String]{}
+    current := function.entry
+    loop {
+        if seen.get(current.value) != None -> panic("{function.name} cleanup path cycles")
+        seen[current.value] = true
+        block := MIRBlockID?{None}
+        next_block := MIRBlockID?{None}
+        reached := false
+        loop candidate in function.blocks {
+            if candidate.id != current -> next
+            block = Val(candidate.id)
+            loop instruction in candidate.instructions {
+                if instruction.operation == {
+                    .Constant(constant) -> if constant == .Bool(value) {
+                        if instruction.result == .Val(result) -> booleans[result.value] = value
+                    }
+                    .ReadPlace(place) -> {
+                        if flags.get(place.value) == .Val(value) && instruction.result == .Val(result) -> booleans[result.value] = value
+                    }
+                    .WritePlace(place, value) -> {
+                        if booleans.get(value.value) == .Val(state) -> flags[place.value] = state
+                    }
+                    .MovePlace(place) -> {
+                        if owners.get(place.value) == .Val(owner) {
+                            if owner == "_guard_1" || owner == "_guard_2" -> &order.push(owner)
+                        }
+                    }
+                    .IndirectCall(callee, _, _) -> {
+                        if values.get(callee.value) == .Val(owner) {
+                            if owner == "first" || owner == "second" -> &order.push(owner)
+                        }
+                    }
+                    .CoreCall(call, _, _, _, _, _) -> {
+                        loop row in program.core_calls {
+                            if row.id != call -> next
+                            if (row.module == "core.process" && row.member == "exit") || (row.module == "core.sys" && row.member == "stop") -> reached = true
+                        }
+                    }
+                    else -> {}
+                }
+                if reached -> break
+            }
+            if reached -> break
+            if candidate.terminator == {
+                .Jump(target) -> next_block = Val(target)
+                .Poll(_, resume, _) -> next_block = Val(resume)
+                .Branch(condition, then_target, else_target) -> {
+                    state :: booleans.get(condition.value) ?? panic("cleanup witness live flag has no checked state")
+                    next_block = Val(if state -> then_target else -> else_target)
+                }
+                else -> panic("{function.name} left its normal path before the explicit stop")
+            }
+            break
+        }
+        if block == None -> panic("cleanup witness names a missing block")
+        if reached {
+            if order != [String]{"second", "first", "_guard_2", "_guard_1"} -> panic("{function.name} explicit cleanup order: {order}")
+            return "{function.name}\t{order.join("\t")}\n"
+        }
+        current = next_block ?? panic("cleanup witness has no normal successor")
+    }
+}
+
+fn ff_explicit_cleanup_case(file: String) {
+    compiled :: jet_cli_compile_file(file, false, false, Val(1), JetDriverCompileMode.Program)
+    if compiled == {
+        .Refused(refusal) -> panic("explicit cleanup witness refused: {refusal.stderr}")
+        .Compiled(result, snapshot) -> {
+            loop diagnostic in jet_driver_present_diagnostics(result.diagnostics, snapshot, result.generated_source_files) {
+                if diagnostic.severity == DIAGNOSTIC_ERROR -> panic("explicit cleanup witness diagnostic {diagnostic.code}: {diagnostic.what}")
+            }
+            if result.internal_problem == .Val(problem) -> panic("explicit cleanup witness compiler ICE: {problem}")
+            if !result.complete -> panic("explicit cleanup witness front end incomplete")
+            program :: result.mir ?? panic("explicit cleanup witness lost checked MIR")
+            rendered := ""
+            loop name in [String]{"exit_case", "stop_case"} {
+                found := false
+                loop function in program.functions {
+                    if function.name != name -> next
+                    rendered = "{rendered}{ff_explicit_cleanup_function(program, function)}"
+                    found = true
+                    break
+                }
+                if !found -> panic("explicit cleanup witness lost {name}")
+            }
+            rust :: ff_files.read("front-explicit-cleanup-rust-results.tsv") ?? panic("explicit cleanup parity requires exercised Rust results")
+            if rendered != rust -> panic("Rust and Jet explicit cleanup order differ")
+            ff_files.write("front-explicit-cleanup-results.tsv", rendered) ?? panic("cannot write exercised Jet cleanup order")
+            print("explicit process.exit/os.stop: Rust and Jet cleanup order agree")
+        }
+    }
+}
+
+fn run() {
+    if ff_files.read("front-stop-predicate.tsv") == .Val(table) {
+        ff_stop_predicate(table)
+        return
+    }
+    if ff_files.read("front-cleanup-stop.txt") == .Val(file) {
+        ff_cleanup_case(file.trim())
+        return
+    }
+    if ff_files.read("front-explicit-cleanup-order.txt") == .Val(file) {
+        ff_explicit_cleanup_case(file.trim())
+        return
+    }
+    pack :: gl_pack() ?? panic("front-feed differential requires the shared runtime pack")
+    list :: ff_files.read("front-cases.txt") ?? panic("cannot read front-cases.txt")
+    loop row in list.split("\n").to_list() {
+        if row == "" -> next
+        columns :: row.split("\t").to_list()
+        if columns.len() != 2 -> panic("front-feed row must be source path and output prefix")
+        name :: columns[1]
+        print("{name}\trust\t{gl_case("{name}.rust", Val(pack))}")
+        print("{name}\tjet\t{ff_case(columns[0], "{name}.jet", pack)}")
+    }
+}

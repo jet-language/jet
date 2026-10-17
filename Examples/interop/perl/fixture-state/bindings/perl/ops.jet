@@ -11,12 +11,12 @@ use core.encoding.json as json
     fn transform(handle: Int, input: String, deadline_ms: Int) -> String = "jet_perl_ops_invoke_transform"
 }
 
-pub struct Session {
-    value: Int
+struct Session {
+    priv value: Int
 }
 
 #Error
-pub enum PerlError {
+enum PerlError {
     NotRunning
     Timeout
     Cancelled
@@ -29,42 +29,42 @@ impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) { abi.close(session.value) }
+fn close(session: ^Session) { abi.close(session.value) }
 
-pub fn open() -> Session PerlError! {
+fn open() -> Session PerlError! {
     handle :: abi.open()
     if abi.take_error() != 0 -> return Err(PerlError.NotRunning)
     return Ok(Session{value: handle})
 }
 
-pub fn cancel(session: Session) { abi.cancel(session.value) }
+fn cancel(session: Session) { abi.cancel(session.value) }
 
-fn decode_response(raw: String, code: Int) -> DataTree PerlError! {
+fn decode_response(raw: String, code: Int) -> Dyn PerlError! {
     if code == 1 -> return Err(PerlError.NotRunning)
     if code == 2 -> return Err(PerlError.Timeout)
     if code == 3 -> return Err(PerlError.Cancelled)
     if code == 5 -> return Err(PerlError.Limit)
     if code != 0 -> return Err(PerlError.Protocol)
     response := json.parse(raw) ?? return Err(PerlError.Protocol)
-    succeeded := (&response.field("ok") ?? DataTree.Bool(false)).bool() ?? false
+    succeeded := (&response.field("ok") ?? Dyn.Bool(false)).bool() ?? false
     if !succeeded -> return Err(PerlError.CommandFailed)
-    return Ok(&response.field("value") ?? DataTree.Null)
+    return Ok(&response.field("value") ?? Dyn.Null)
 }
 
-pub fn fail(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PerlError! {
-    raw :: abi.fail(session.value, json.to_string(input), deadline_ms)
+fn fail(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PerlError! {
+    raw :: abi.fail(session.value, json.to_string(input) ?? return Err(PerlError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn sleep(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PerlError! {
-    raw :: abi.sleep(session.value, json.to_string(input), deadline_ms)
+fn sleep(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PerlError! {
+    raw :: abi.sleep(session.value, json.to_string(input) ?? return Err(PerlError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }
 
-pub fn transform(session: Session, input: DataTree, deadline_ms: Int) -> DataTree PerlError! {
-    raw :: abi.transform(session.value, json.to_string(input), deadline_ms)
+fn transform(session: Session, input: Dyn, deadline_ms: Int) -> Dyn PerlError! {
+    raw :: abi.transform(session.value, json.to_string(input) ?? return Err(PerlError.Protocol), deadline_ms)
     code :: abi.take_error()
     return decode_response(raw, code)
 }

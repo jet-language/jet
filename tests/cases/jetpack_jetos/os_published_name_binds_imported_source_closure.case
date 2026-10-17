@@ -1,0 +1,16 @@
+# Port of tests/jetpack_jetos.rs:632-679; fixtures and predicates copied verbatim.
+# Runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_published_name_binds_imported_source_closure.fixture
+mkdir: package-root
+write: project/config.jet import-bound-config.template
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+step: jet os build halcyon --name import-bound --no-color --offline
+cwd: project
+exit: 0
+write: project/modules/extra.jet extra-revision-two.template
+step: jet os build halcyon --name import-bound --no-color --offline
+cwd: project
+exit: 2
+stderr: ~ "already published" # original predicate

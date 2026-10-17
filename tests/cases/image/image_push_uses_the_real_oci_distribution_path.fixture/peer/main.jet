@@ -1,0 +1,122 @@
+package {
+    name: "registry_peer"
+    authority: { holds: { allow: [IO, Mem.Alloc, FS, Net, Time.Wait] } }
+}
+// Real TCP peer port of tests/image.rs:138-209. Returns observations, never simulated snapshots.
+// One shared 20s deadline, immediate queued accepts and 5ms polling match the original.
+use core.net as net
+use core.files as files
+use core.text as text
+use core.text.parse as parse
+use core.encoding.json as json
+use core.encoding.Dyn
+use core.time as time
+
+fn registry_slice(bytes: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    loop i in start..<end -> &out.push(bytes[i])
+    out
+}
+
+fn registry_find(bytes: [U8], needle: [U8]) -> Int {
+    if needle.len() == 0 || needle.len() > bytes.len() -> return -1
+    loop i in 0..<(bytes.len() - needle.len() + 1) {
+        same := true
+        loop j in 0..<needle.len() {
+            if bytes[i + j] != needle[j] -> same = false
+        }
+        if same -> return i
+    }
+    -1
+}
+
+fn registry_words(value: String) -> [String] {
+    words := [String]{}
+    word := ""
+    loop scalar in text.scalars(value) {
+        if text.is_whitespace(scalar) {
+            if word != "" {
+                &words.push(word)
+                word = ""
+            }
+        } else {
+            word = "{word}{scalar}"
+        }
+    }
+    if word != "" -> &words.push(word)
+    words
+}
+
+fn run() {
+    listener := net.tcp_listen("127.0.0.1:0") ?? panic("registry listen")
+    address :: net.listener_local_socket_addr(listener) ?? panic("registry address")
+    files.write("registry.port", "{net.socket_port(address)}") ?? panic("write registry port")
+    deadline :: time.instant() + 20s
+    requests := [String]{}
+    loop requests.len() < 7 && time.instant() < deadline {
+        stream :: if &listener.accept(deadline: 0s) == {
+            .Ok(stream) -> stream
+            .Err(_) -> {
+                // Original let-else retries ANY accept error, not just WouldBlock.
+                time.sleep(5ms)
+                next
+            }
+        }
+        net.set_read_timeout(stream, 2000) ?? panic("registry two-second read timeout")
+        request := [U8]{}
+        header_end := -1
+        loop {
+            chunk :: net.tcp_read_bytes(stream, 4096) ?? panic("read registry headers")
+            if chunk.len() == 0 -> break
+            loop byte in chunk -> &request.push(byte)
+            boundary :: registry_find(request, [U8]{13, 10, 13, 10})
+            if boundary >= 0 {
+                header_end = boundary + 4
+                break
+            }
+            assert(request.len() < 128 * 1024, "registry test request headers are unbounded")
+        }
+        if header_end < 0 {
+            net.tcp_close(stream) ?? panic("close headerless connection")
+            next
+        }
+        headers :: String.from_bytes_lossy(registry_slice(request, 0, header_end))
+        lines :: headers.lines()
+        parts :: registry_words(if lines.len() == 0 -> "" else -> lines[0])
+        method :: if parts.len() > 0 -> parts[0] else -> ""
+        path :: if parts.len() > 1 -> parts[1] else -> ""
+        content_length := 0
+        loop line in lines {
+            field :: parse.split_once(line, ":")
+            if field.found && parse.lower(field.head) == "content-length" {
+                content_length = Int.parse(field.tail.trim()) ?? panic("registry content-length")
+                break
+            }
+        }
+        loop request.len() < header_end + content_length {
+            chunk :: net.tcp_read_bytes(stream, 4096) ?? panic("read registry body")
+            if chunk.len() == 0 -> break
+            loop byte in chunk -> &request.push(byte)
+        }
+        body_end :: if request.len() < header_end + content_length -> request.len() else -> header_end + content_length
+        body :: registry_slice(request, header_end, body_end)
+        // The sole body predicate in the original is this exact byte window.
+        has_schema :: registry_find(body, "schemaVersion".bytes()) >= 0
+        method_json :: json.to_string(Dyn.Text(method))
+        path_json :: json.to_string(Dyn.Text(path))
+        &requests.push("{{\"method\":{method_json},\"path\":{path_json},\"body_has_schema_version\":{has_schema}}}")
+        status := 404
+        extra := ""
+        if method == "HEAD" -> status = 404
+        else if method == "POST" {
+            status = 202
+            extra = "Location: /test-upload{String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }"
+        } else if method == "PUT" && (path.contains("/blobs/uploads/") || path.starts_with("/test-upload")) -> status = 201
+        else if method == "PUT" && path.contains("/manifests/") -> status = 201
+        crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+        response :: "HTTP/1.1 {status} Test{crlf}{extra}Content-Length: 0{crlf}Connection: close{crlf}{crlf}"
+        net.tcp_write_text(stream, response) ?? panic("write registry response")
+        net.tcp_close(stream) ?? panic("close registry connection")
+    }
+    print("[{parse.join(requests, ",")}]")
+}

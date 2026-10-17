@@ -214,7 +214,7 @@ struct NixEvalLexer {
 
     fn indented_string(&self) -> NixEvalToken NixEvalError! {
         self.position += 2
-        start :: ~self.position
+        start :: self.position.copy()
         loop self.position + 1 < self.bytes.len() && !(self.at(0) == 39 && self.at(1) == 39) -> self.position += 1
         if self.position + 1 >= self.bytes.len() -> return Err(NixEvalError.Syntax("unterminated indented string"))
         value :: nixeval_slice(self.bytes, start, self.position)
@@ -225,7 +225,7 @@ struct NixEvalLexer {
     }
 
     fn path(&self) -> String NixEvalError! {
-        start :: ~self.position
+        start :: self.position.copy()
         loop self.position < self.bytes.len() {
             byte :: self.at(0)
             if nixeval_is_ascii_whitespace(byte) || byte == 59 || byte == 44 || byte == 125 || byte == 93 || byte == 41 -> break
@@ -238,7 +238,7 @@ struct NixEvalLexer {
     }
 
     fn integer(&self) -> Int NixEvalError! {
-        start :: ~self.position
+        start :: self.position.copy()
         if self.at(0) == 45 -> self.position += 1
         loop nixeval_is_ascii_digit(self.at(0)) -> self.position += 1
         value :: Int.parse(nixeval_slice(self.bytes, start, self.position)) ?? return Err(NixEvalError.ResourceLimit("integer literal is out of range"))
@@ -247,7 +247,7 @@ struct NixEvalLexer {
     }
 
     fn identifier(&self) -> String Never! {
-        start :: ~self.position
+        start :: self.position.copy()
         self.position += 1
         loop {
             byte :: self.at(0)
@@ -289,7 +289,7 @@ fn nixeval_interpolated_parts(source: String) -> [NixEvalStringTokenPart] NixEva
 
 // Capture the source of one `${...}` body, leaving `position` after the `}`.
 fn nixeval_capture_interpolation(bytes: [U8], position: &Int) -> String NixEvalError! {
-    start :: ~position
+    start :: position.copy()
     braces := 0
     parentheses := 0
     brackets := 0

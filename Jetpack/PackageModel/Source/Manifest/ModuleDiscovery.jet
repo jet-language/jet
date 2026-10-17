@@ -5,7 +5,7 @@
 
 // Why discovering a package's module failed (U10).
 #Error
-pub enum DiscoveryError {
+enum DiscoveryError {
     // No source file declares `module <name>`.
     NotFound(name: String)
     // Several files declare `module <name>` (paths relative to the root).
@@ -14,7 +14,7 @@ pub enum DiscoveryError {
 
 // The directory holding the one file declaring `module <name>`. An explicit
 // named lookup, so D-SHAPE-MODULEINTERNAL1 does not filter `_name`.
-pub fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String DiscoveryError! {
+fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String DiscoveryError! {
     resolver :: AuthorityResolver.open(root) ?? return Err(DiscoveryError.NotFound{name: name})
     listed :: resolver.discover_source_files() ?? return Err(DiscoveryError.NotFound{name: name})
     matches := [String]{}
@@ -45,13 +45,13 @@ pub fn pkg_discover_module_in(root: String, name: String) -[FS, Env]> String Dis
 
 // Why the job registry could not be projected (Rust `String` errors).
 #Error
-pub struct JobDiscoveryError {
-    pub message: String
+struct JobDiscoveryError {
+    message: String
 }
 
 // Parse every checked source file below `root` and project its `#Job`
 // declarations, in sorted relative-path order; metadata files are skipped.
-pub fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError! {
+fn pkg_discover_jobs_in(root: String) -[FS, Env]> JobRegistry JobDiscoveryError! {
     resolver :: if AuthorityResolver.open(root) == {
         .Ok(opened) -> opened
         .Err(error) -> {
@@ -100,7 +100,7 @@ fn pkg_diagnostic_codes(diagnostics: [Diagnostic]) -> String Never! {
 
 // Whether `text` declares `module <name>` at brace depth 0 (line comments
 // stripped; `module` followed by space, tab, CR, or LF).
-pub fn pkg_file_declares_module(input: String, name: String) -> Bool Never! {
+fn pkg_file_declares_module(input: String, name: String) -> Bool Never! {
     bytes :: pkg_strip_comments(input).bytes()
     keyword :: KW_MODULE.bytes()
     wanted :: name.bytes()

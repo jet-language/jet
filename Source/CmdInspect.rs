@@ -38,6 +38,7 @@ use jet_foundation::MIR::{
 pub(crate) struct CheckProjection {
     pub(crate) bundle: jet::AST::ProgramBundle,
     pub(crate) facts: jet::Sema::SemIndexEffectFacts,
+    pub(crate) checked_nominals: std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>,
     index: std::sync::OnceLock<jet_semindex::SemIndex>,
     package_facts: Option<jet_semindex::PackageFacts>,
     workspace_overlay_policy: Option<jet_pkg_model::Overlay::OverlayPolicy>,
@@ -139,7 +140,7 @@ pub(crate) fn check_diagnostics(path: &Path) -> Result<DiagnosticProjection, Str
     }
 
     let entry = path.display().to_string();
-    let (mut diagnostics, bundle, _facts) =
+    let (mut diagnostics, bundle, _facts, _nominals) =
         jet::Driver::check_file_with_effect_facts_profile(&entry, None, false, "dev");
     let mut complete = bundle.is_some();
     if let Err(error) = jet_semindex::package_facts_for_entry(path) {
@@ -303,12 +304,13 @@ fn check_projection_with_options_and_preflight(
     } else {
         None
     };
-    let (mut diagnostics, bundle, facts, front_end) = if let Some(output) = project_build {
+    let (mut diagnostics, bundle, facts, checked_nominals, front_end) = if let Some(output) = project_build {
         programmable_build = "checked";
         let jet::Driver::BuildCompileOutput {
             compile,
             runtime,
             runtime_effect_facts,
+            runtime_checked_nominals,
             ..
         } = output;
         let bundle = runtime.ok_or_else(|| {
@@ -328,14 +330,20 @@ fn check_projection_with_options_and_preflight(
                 None,
             )]
         })?;
+        let checked_nominals = runtime_checked_nominals.ok_or_else(|| {
+            vec![Diagnostic::from_row(
+                "E2391", &[("detail", "project check returned no original runtime nominal facts")], None,
+            )]
+        })?;
         (
             compile.lints,
             Some(bundle),
             facts,
+            checked_nominals,
             "Driver::check_project_build_for_tier",
         )
     } else if scope == CheckScope::Project && !package_is_library_only(path) {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_for_run_and_entry(
                 &entry,
                 profile,
@@ -346,10 +354,11 @@ fn check_projection_with_options_and_preflight(
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_for_run_and_entry",
         )
     } else if let Some(output) = output {
-        let (diagnostics, bundle, facts) = jet::Driver::check_file_with_effect_facts_for_output(
+        let (diagnostics, bundle, facts, checked_nominals) = jet::Driver::check_file_with_effect_facts_for_output(
             &entry,
             output,
             profile,
@@ -359,28 +368,31 @@ fn check_projection_with_options_and_preflight(
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_for_output",
         )
     } else if run_mode {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_for_run(&entry, profile, setting_overrides);
         (
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_for_run",
         )
     } else if setting_overrides.is_empty() {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_profile(&entry, None, false, profile);
         (
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_profile",
         )
     } else {
-        let (diagnostics, bundle, facts) =
+        let (diagnostics, bundle, facts, checked_nominals) =
             jet::Driver::check_file_with_effect_facts_profile_and_settings(
                 &entry,
                 None,
@@ -392,6 +404,7 @@ fn check_projection_with_options_and_preflight(
             diagnostics,
             bundle,
             facts,
+            checked_nominals,
             "Driver::check_file_with_effect_facts_profile_and_settings",
         )
     };
@@ -414,6 +427,7 @@ fn check_projection_with_options_and_preflight(
         CheckScope::Project => project_proof_rows(
             &bundle,
             &facts,
+            &checked_nominals,
             package_facts.as_ref(),
             entry_fn,
             target,
@@ -442,6 +456,7 @@ fn check_projection_with_options_and_preflight(
     Ok(CheckProjection {
         bundle,
         facts,
+        checked_nominals,
         index: std::sync::OnceLock::new(),
         package_facts,
         workspace_overlay_policy,
@@ -725,6 +740,7 @@ impl ProjectBundleProof {
     fn from_bundle(
         bundle: &jet::AST::ProgramBundle,
         _facts: &jet::Sema::SemIndexEffectFacts,
+        checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
         target: Option<&str>,
         profile: &str,
         library: bool,
@@ -784,7 +800,7 @@ impl ProjectBundleProof {
         let artifact_target = if target == Some(jet::Syntax::BUILD_TARGET_WEB) {
             jet_foundation::MIR::MirArtifactTarget::Web
         } else {
-            jet_foundation::MIR::MirArtifactTarget::Cranelift
+            jet_foundation::MIR::MirArtifactTarget::RustAot
         };
         // D4: a `.Library` output has no runnable entry, so its proof lowers
         // the library artifact kind instead of an executable.
@@ -797,6 +813,7 @@ impl ProjectBundleProof {
         };
         let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
             bundle,
+            checked_nominals,
             jet_foundation::MIR::MirArtifactRequest::new(
                 artifact_target,
                 artifact_kind,
@@ -834,20 +851,10 @@ impl ProjectBundleProof {
             let detail_prefix = target
                 .map(|target| format!("target={target}; "))
                 .unwrap_or_default();
-            let jit_detail = jet_jit::resident_jit_safe_program_detail(&mir);
-            if jit_detail.is_empty() {
-                (
-                    "proven",
-                    format!(
-                        "{detail_prefix}AOT=proven; JIT=proven; interpreter=shared checked MIR route"
-                    ),
-                )
-            } else {
-                (
-                    "compiler defect",
-                    format!("{detail_prefix}JIT=compiler defect; {jit_detail}"),
-                )
-            }
+            (
+                "proven",
+                format!("{detail_prefix}AOT=proven; interpreter=shared checked MIR route"),
+            )
         };
         tier_detail.push(' ');
         tier_detail.push_str(&mir_detail);
@@ -1060,6 +1067,7 @@ fn failed_output_rows(
 fn project_proof_rows(
     bundle: &jet::AST::ProgramBundle,
     facts: &jet::Sema::SemIndexEffectFacts,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     package_facts: Option<&jet::Package::PackageFacts>,
     entry_fn: Option<&str>,
     target: Option<&str>,
@@ -1086,29 +1094,35 @@ fn project_proof_rows(
         let checked_bundle_storage = declared_output.then(|| {
             spec.path.as_deref().and_then(|path| {
                 let path = path.to_string_lossy().into_owned();
-                let (check_diagnostics, checked_bundle, checked_facts) =
+                let (check_diagnostics, checked_bundle, checked_facts, checked_nominals) =
                     jet::Driver::check_file_with_effect_facts_for_output(
                         &path,
                         &spec.address,
                         profile,
                         setting_overrides,
                     );
+                let valid = !check_diagnostics.iter().any(|diagnostic|
+                    diagnostic.severity == jet::Diagnostics::Severity::Error);
                 diagnostics.extend(check_diagnostics);
-                checked_bundle.map(|bundle| (bundle, checked_facts))
+                if valid {
+                    checked_bundle.map(|bundle| (bundle, checked_facts, checked_nominals))
+                } else {
+                    None
+                }
             })
         });
         let checked = if declared_output {
             checked_bundle_storage
                 .as_ref()
                 .and_then(Option::as_ref)
-                .map(|(bundle, facts)| (bundle, facts))
+                .map(|(bundle, facts, nominals)| (bundle, facts, nominals.as_ref()))
         } else {
-            Some((bundle, facts))
+            Some((bundle, facts, checked_nominals))
         };
 
-        let Some((checked_bundle, checked_facts)) = checked else {
+        let Some((checked_bundle, checked_facts, checked_nominals)) = checked else {
             let reason = if spec.path.is_some() {
-                "the output entry check returned no bundle"
+                "the output entry check returned no valid checked bundle"
             } else {
                 "the manifest entry could not be resolved"
             };
@@ -1127,6 +1141,7 @@ fn project_proof_rows(
         let shared = ProjectBundleProof::from_bundle(
             checked_bundle,
             checked_facts,
+            checked_nominals,
             target,
             profile,
             library,
@@ -1294,7 +1309,7 @@ pub(crate) fn check_result_record(check: &CheckResult) -> String {
 pub(crate) fn check_result_from_record(record: &str, elapsed_ms: u64) -> Option<CheckResult> {
     let value = jet_foundation::JSON::parse_json(record).ok()?;
     let object = value.as_object().ok()?;
-    fn text(fields: &[(String, jet_foundation::DataTree::DataTree)], name: &str) -> Option<String> {
+    fn text(fields: &[(String, jet_foundation::Dyn::Dyn)], name: &str) -> Option<String> {
         fields
             .iter()
             .find(|(key, _)| key == name)
@@ -1305,7 +1320,7 @@ pub(crate) fn check_result_from_record(record: &str, elapsed_ms: u64) -> Option<
         .iter()
         .find(|(key, _)| key == "diagnostics")
         .and_then(|(_, value)| match value {
-            jet_foundation::DataTree::DataTree::Int(count) => usize::try_from(*count).ok(),
+            jet_foundation::Dyn::Dyn::Int(count) => count.to_usize(),
             _ => None,
         })?;
     let scope = match text(object, "scope")?.as_str() {
@@ -1841,13 +1856,13 @@ fn llm_digest() -> String {
     let core_rules_body = [
         "Bindings: `name :: value` is immutable; `name := value` is mutable; `name = value` reassigns a mutable binding.",
         "Functions: `fn name(parameter: Type) -> Return { ... }`; an effect ceiling splits the arrow: `fn name(parameter: Type) -[Effects]> Return { ... }`, and `-[]>` declares a pure function.",
-        "Visibility: declarations are private by default; prefix an item with `pub` for package use.",
+        "Visibility: declarations are public by default; `priv module name { ... }` keeps its items inside the enclosing module (`priv(package) module`: inside the package), and a `priv` field stays inside its type's module.",
         "Types: `Int`, `Float`, `Bool`, `String`, `Char`; lists use `[T]`; optional values use `T?`; failures use `T E!`.",
         "Errors: failures propagate implicitly; handle `T?` or `T E!` with `?? fallback` or a pattern test. Use `Ok(value)`, `Err(error)`, `Val(value)`, and `None`.",
         "Control: `if condition { ... } else { ... }`; loops use `loop name in source { ... }`, and a collecting loop yields a list with `loop name in source -> value`; exit with `break` and advance with `next`.",
         "Construction: use `Type{ field: value }`; list literals use `[T]{ value1, value2 }`.",
         "Calls and member access use `name(args)` and `value.member(args)`. Core imports use `use core.module as alias`.",
-        "Ownership is safe by default. `&T` writes, `^T` moves, and `~value` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
+        "Ownership is safe by default. `&T` writes, `^T` moves, and `value.copy()` copies. Expert unsafe code needs `#Unsafe(\"reason\")`.",
     ]
     .join("\n");
     let marker_body = format!(
@@ -2737,10 +2752,22 @@ pub(crate) fn run_types(args: &[String], json: bool) {
         .unwrap_or_else(|diagnostics| render_check_failure(path, &diagnostics, json, false));
     let mut grouped: BTreeMap<String, Vec<String>> = BTreeMap::new();
     let mut registered = Vec::new();
+    let source_owned_types: std::collections::HashSet<_> =
+        jet_foundation::CoreModuleExports::CORE_SOURCE_OWNED_TYPES.iter().filter(|row|
+            projection.bundle.modules.iter().any(|module|
+                module.path.strip_prefix(jet_foundation::Diagnostics::CORE_SOURCE_ROOT)
+                    .is_ok_and(|path| path == Path::new(row.path))
+                && module.items.iter().any(|item| match item {
+                    jet_foundation::AST::Item::Struct(definition) => definition.name == row.name,
+                    jet_foundation::AST::Item::Enum(definition) => definition.name == row.name,
+                    jet_foundation::AST::Item::Distinct(definition) => definition.name == row.name,
+                    jet_foundation::AST::Item::TypeAlias(definition) => definition.name == row.name,
+                    _ => false,
+                }))).map(|row| row.name).collect();
     for module in &projection.bundle.modules {
         let mut registry =
             jet_foundation::Traits::TraitRegistry::auto_derives_for_items(&module.items);
-        registry.register_synthetic_operators();
+        registry.register_synthetic_operators(|name| source_owned_types.contains(name));
         registered.extend(registry.operator_impls);
     }
     for implementation in &registered {
@@ -3307,6 +3334,7 @@ fn run_accel(
     };
     let (mir, _) = jet::lower_checked_semantic_mir_program_for(
         &projection.bundle,
+        &projection.checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -3745,18 +3773,18 @@ fn run_decisions(
     });
     let (mir, artifact) = jet::lower_checked_semantic_mir_program_for(
         &projection.bundle,
+        &projection.checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::RustAot,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
             jet_foundation::MIR::MirArtifactBuildMode::Dev,
         ),
     );
-    let mut additional_rows = projection
+    let additional_rows = projection
         .diagnostics
         .iter()
         .filter_map(|diagnostic| diagnostic.decision_row.clone())
         .collect::<Vec<_>>();
-    additional_rows.extend(jet_jit::plan_mir_tiers(&mir, artifact).decision_ledger_rows(&mir));
     let ledger = jet_foundation::MIROptimization::decision_ledger(
         &mir,
         Some(artifact),
@@ -5500,7 +5528,7 @@ fn validate_capability_relation(
     }
 
     let consumers = capability_status_field(relation, "consumers");
-    for consumer in ["inspect", "hardening", "learner", "release"] {
+    for consumer in ["inspect", "hardening", "release"] {
         let Some(consumer_value) = consumers.and_then(|value| capability_status_field(value, consumer))
         else {
             errors.push(format!("consumer metadata is missing: {consumer}"));

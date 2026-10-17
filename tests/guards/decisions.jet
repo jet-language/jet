@@ -1,0 +1,86 @@
+use core.files as decision_files
+
+// The source scanner in decisions.rs:163-197 is Rust-only and retires.
+// These five real-document tombstone assertions (rs139-148) survive it.
+// Reuse the guard package's byte finder/slicer; Rust find/slice offsets are bytes.
+fn s3_decision_is_digit(byte: U8) -> Bool { Int.from_u8(byte) >= 48 && Int.from_u8(byte) <= 57 }
+
+fn s3_decision_expand(token: String) -> [String] {
+    if !token.contains("/") -> return [String]{token}
+    segments :: token.split("/").to_list()
+    first :: segments[0]
+    first_bytes :: first.bytes()
+    prefix_end := first_bytes.len()
+    loop (index, byte) in first_bytes {
+        if s3_decision_is_digit(byte) {
+            prefix_end = index
+            break
+        }
+    }
+    prefix :: s5_grammar_slice_bytes(first, 0, prefix_end)
+    last :: segments[segments.len() - 1]
+    last_bytes :: last.bytes()
+    suffix_start := last_bytes.len()
+    loop (index, byte) in last_bytes {
+        if !s3_decision_is_digit(byte) {
+            suffix_start = index
+            break
+        }
+    }
+    suffix :: s5_grammar_slice_bytes(last, suffix_start, last_bytes.len())
+    result := [String]{}
+    loop segment in segments {
+        digits := [U8]{}
+        started := false
+        loop byte in segment.bytes() {
+            if !started && !s3_decision_is_digit(byte) -> next
+            if !s3_decision_is_digit(byte) -> break
+            started = true
+            &digits.push(byte)
+        }
+        number :: String.from_bytes(digits) ?? panic("ASCII decision digits")
+        &result.push("{prefix}{number}{suffix}")
+    }
+    result
+}
+
+fn s3_guard_tombstone_provenance() {
+    docs :: decision_files.read("Docs/spec/syntax-decisions.md") ?? panic("read syntax decisions")
+    header :: "### Superseded IDs (tombstones)"
+    from :: s5_grammar_find(docs, header, 0)
+    assert(from >= 0, "syntax decisions missing tombstone section")
+    begin :: from + header.bytes().len()
+    end :: s5_grammar_find(docs, "## Enforcement", begin)
+    assert(end >= begin, "syntax decisions missing enforcement after tombstones")
+    section :: s5_grammar_slice_bytes(docs, begin, end).replace("\n", " ")
+    ids := [String]{}
+    at := 0
+    loop {
+        start :: s5_grammar_find(section, "**", at)
+        if start < 0 -> break
+        after :: start + 2
+        close :: s5_grammar_find(section, "**", after)
+        if close < 0 -> break
+        bold :: s5_grammar_slice_bytes(section, after, close)
+        title :: s5_grammar_find(bold, " — ", 0)
+        id_part :: if title >= 0 -> s5_grammar_slice_bytes(bold, 0, title) else -> bold
+        loop comma_piece in id_part.split(",") {
+            loop piece in comma_piece.split(" / ") {
+                token :: piece.trim().copy()
+                if !token.starts_with("D-") -> next
+                loop expanded in s3_decision_expand(token) {
+                    if !ids.contains(expanded) -> &ids.push(expanded)
+                }
+            }
+        }
+        at = close + 2
+    }
+    required :: [String]{"D-CTMARKER1", "D-MARKERMOVE1", "D-MARKERMOVE2", "D-MARKERMOVE3", "D-MARKER-FAMILY1"}
+    loop id in required {
+        assert(ids.contains(id), "tombstone extraction regressed: missing {id}")
+    }
+}
+
+#Test("tombstoned_decision_ids_carry_provenance_document_subclaims") {
+    s3_guard_tombstone_provenance()
+}

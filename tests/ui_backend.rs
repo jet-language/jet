@@ -7,6 +7,41 @@ use std::process::Command;
 mod common;
 mod tir_support;
 
+// Generic hosted-tier driver; all rights assertions live in Jet. Dies at cutover.
+#[test]
+fn ui_host_rights_source_preserves_storage_across_hosted_tiers() {
+    tir_support::assert_example_cli_tiers_agree_with_package(
+        "ui/host_rights",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/host_rights.out")),
+    );
+}
+
+#[test]
+fn raw_ui_transfer_requires_an_audited_gate() {
+    let source = "use core.ui as ui\nfn run() { ui.__node_transfer(\"\", 0.0, 0.0, -1, 0, [], false, \"\", 63, false, 0, 0, 0, 0, 0) }\n";
+    let (_, user_diags) = jet::Lexer::lex(source);
+    assert!(user_diags.iter().any(|diag| diag.code == "E0067"),
+        "user source must not enter the compiler-reserved identifier lane");
+    let dir = common::Scratch::new("ui_raw_transfer");
+    let path = dir.join("main.jet");
+    fs::write(&path, "use core.ui as ui\nfn run() { ui.text(\"jet\") }\n").unwrap();
+    let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
+    // Embedded Core uses the generated lexer lane. Exercise its semantic gate
+    // without relaxing the ordinary user-source reserved-name check.
+    let (tokens, lex_diags) = jet::Lexer::lex_generated(source);
+    assert!(lex_diags.is_empty(), "{lex_diags:?}");
+    let program = jet::Parser::parse(&tokens).unwrap();
+    let entry = &mut bundle.modules[bundle.entry];
+    entry.source = source.to_string();
+    entry.items = program.items;
+    entry.imports = program.imports;
+    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let rendered = jet::render_diagnostics(path.to_str().unwrap(), source, &diags);
+    assert!(rendered.contains("[E3101]"), "{rendered}");
+    assert!(rendered.contains("requires an audited `#Unsafe` region"), "{rendered}");
+}
+
 fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
     tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
     let path = dir.join(name);
@@ -75,6 +110,15 @@ fn tui_backend_reactive_render_loop() {
 }
 
 #[test]
+fn tui_portable_policy_tiers_agree() {
+    tir_support::assert_example_cli_tiers_agree_with_package(
+        "ui/tui_policy",
+        Some(tir_support::TIR_TEST_PACKAGE),
+        |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/tui_policy.out")),
+    );
+}
+
+#[test]
 fn tui_backend_reactive_conditional_capture() {
     tir_support::assert_tiers_agree_with_application_policy(
         "ui_reactive_conditional_capture",
@@ -92,7 +136,7 @@ fn view(title: String) -> UINode {
 fn run() {
     selected := reactive.signal(0)
     backend := ui.tui_backend()
-    render_backend :: ~backend
+    render_backend :: backend.copy()
     ui.reactive_render(() -> {
         marker :: if selected.get() == 0 -> "* " else -> "  "
         ui.mount(render_backend, view("{marker}Meeting"))
@@ -186,4 +230,37 @@ fn run() {
         "Save\nSave\ntext({x:0,y:0,w:8,h:1}, Title)\nfill({x:0,y:1,w:8,h:1}, #000000)\ntext({x:0,y:1,w:8,h:1}, Save)\nSave\nTitle\nSave\n"
     );
     let _ = fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn retained_box_children_materialize_borrowed_parameter() {
+    if !common::have_rustc() {
+        eprintln!("note: skipping retained box children test (need rustc)");
+        return;
+    }
+    let scratch = common::Scratch::new("ui_box_borrowed_children");
+    let (code, stdout, stderr) = build_and_run(
+        &scratch.path,
+        "ui_box_borrowed_children",
+        r#"
+use core.ui as ui
+
+fn boxed(children: [UINode]) -> UINode {
+    return ui.box(children)
+}
+
+fn run() {
+    children := [ui.text("first"), ui.text("second")]
+    first :: boxed(children)
+    second :: boxed(children)
+    _ :: first
+    _ :: second
+    print("ok")
+}
+"#,
+    );
+    // rustc checks the retained child argument's slot is actually defined.
+    // Reusing the source list also exercises its borrowed parameter path.
+    assert_eq!(code, 0, "retained UI box children failed: {stderr}");
+    assert_eq!(stdout, "ok\n");
 }

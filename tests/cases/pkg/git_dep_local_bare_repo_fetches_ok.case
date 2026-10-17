@@ -1,0 +1,62 @@
+# PORT tests/pkg.rs::git_dep_local_bare_repo_fetches_ok:3877-4019; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/git_dep_local_bare_repo_fetches_ok
+requires: tool:git
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: git init --bare {work}/mylib.git
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+step: git clone {work}/mylib.git {work}/mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+copy: mylib_src/mylib.jet mylib_clone/mylib.jet
+copy: mylib_src/package.jet mylib_clone/package.jet
+step: git config user.email "test@jet.test"
+cwd: mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+step: git config user.name "Jet Test"
+cwd: mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+step: git add .
+cwd: mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+step: git commit -m init
+cwd: mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+step: git push origin HEAD:main
+cwd: mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+step: git tag v0.1.0
+cwd: mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+step: git push origin v0.1.0
+cwd: mylib_clone
+exit: any
+# Original setup Command::output().unwrap() asserts spawn only, not Git exit.
+mkdir: home
+write: package.jet package.template
+step: jet fetch
+env: HOME={work}/home
+exit: 0
+json: file .jet/lock toml $.package[?name = "mylib"][0].locked.rev != null
+capture: cache_url = sole-entry home/.jet/git-cache kind dir
+capture: cache_revision = sole-entry {cap:cache_url} kind dir
+write: {cap:cache_revision}/mylib.jet compromised.template
+write: .jet/build/deps/mylib/mylib.jet compromised.template
+step: jet fetch --locked
+env: HOME={work}/home
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1204]"
+step: jet build --locked run.jet
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1204]"
+# Initial typed LockFile pin returned by Fetch is checked through the actual written lock; no constructed lock/cache.

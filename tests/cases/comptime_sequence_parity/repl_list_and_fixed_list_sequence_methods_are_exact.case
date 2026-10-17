@@ -1,0 +1,11 @@
+# Original tests/comptime_sequence_parity.rs:43-157; original inputs and exact public subclaims.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD.
+fixture: repl_list_and_fixed_list_sequence_methods_are_exact.fixture
+# LEDGER-ONLY(repl-lib): exact filtered ordered frames retained in archive; only independent !contains E0956 subclaim below.
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_list_and_fixed_list_sequence_methods_are_exact.fixture/input.txt
+exit: any # original library transcript did not assert process exit
+stdout: !~ "E0956" # original out.contains negative; needle does not overlap banner/prompt/turn echoes
+stderr: !~ "E0956" # same original predicate on CLI diagnostic fd

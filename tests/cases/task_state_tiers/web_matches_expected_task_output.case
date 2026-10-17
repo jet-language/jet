@@ -1,0 +1,8 @@
+# Port of tests/task_state_tiers.rs::web_matches_expected_task_output; original source unchanged.
+# ORACLE-LITERAL: task_state_tiers.rs:24 and web stdout equality at line128.
+fixture: fixtures/web_matches_expected_task_output
+step: jet build fixture.jet --target web
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js is-file
+step: node .jet/build/app.js
+stdout: = web_matches_expected_task_output.out

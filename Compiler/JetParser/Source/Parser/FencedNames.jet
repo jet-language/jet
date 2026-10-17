@@ -18,6 +18,9 @@ use jet_foundation.[
     TextEdit,
     diagnostic_from_registry,
     diagnostic_with_edit_grade,
+    name_empty,
+    name_intern,
+    name_text,
 ]
 use jet_lexer.[
     STRING_PART_INTERPOLATION,
@@ -63,7 +66,13 @@ use jet_lexer.[
     TOKEN_STRING,
     TOKEN_UNIFIED_ARROW,
     TOKEN_UNIT_NUMBER,
+    StringPart,
     Token,
+    TokenLiteral,
+    TokenTables,
+    token_decoded,
+    token_string_parts,
+    token_text,
 ]
 
 PARSER_FENCE_MAX_EXPANSION :: 4096
@@ -78,62 +87,67 @@ PARSER_FENCE_INT_MAX :: 9223372036854775807
 // One budget is shared by every fence in a source file, so many small fences
 // cannot add up to an unbounded expansion.
 struct ParserFenceBudget {
-    pub entries: Int
-    pub bytes: Int
+    entries: Int
+    bytes: Int
 }
 
 struct ParserFenceExpansion {
-    pub tokens: [Token]
-    pub fenced_statements: [FencedStatement]
-    pub diagnostics: [Diagnostic]
-    pub budget: ParserFenceBudget
+    tokens: [Token]
+    fenced_statements: [FencedStatement]
+    diagnostics: [Diagnostic]
+    budget: ParserFenceBudget
 }
 
 struct ParserFenceCost {
-    pub valid: Bool
-    pub count: Int
-    pub bytes: Int
+    valid: Bool
+    count: Int
+    bytes: Int
 }
 
 struct ParserFenceSegment {
-    pub valid: Bool
-    pub tokens: [Token]
-    pub fact: FencedStatement
-    pub diagnostics: [Diagnostic]
-    pub budget: ParserFenceBudget
+    valid: Bool
+    tokens: [Token]
+    fact: FencedStatement
+    diagnostics: [Diagnostic]
+    budget: ParserFenceBudget
 }
 
 struct ParserFenceEntries {
-    pub names: FencedNames
-    pub entries: [[Token]]
-    pub diagnostic: Diagnostic?
-    pub budget: ParserFenceBudget
+    names: FencedNames
+    entries: [[Token]]
+    diagnostic: Diagnostic?
+    budget: ParserFenceBudget
 }
 
 struct ParserFenceNumberedName {
-    pub prefix: String
-    pub number: Int
-    pub width: Int
+    prefix: String
+    number: Int
+    width: Int
 }
 
 struct ParserFenceNumberedRange {
-    pub names: [NamedSpan]
-    pub diagnostic: Diagnostic?
+    names: [NamedSpan]
+    diagnostic: Diagnostic?
 }
 
 // Ordinary source has no fences: keep the lexer's token list untouched, since
 // the parser skips comment trivia itself. A fenced source is expanded over its
 // comment-free tokens, so a comment never splits or joins a fence entry.
-fn parser_prepare_tokens(tokens: [Token]) -> ParserFenceExpansion {
-    has_fences :: loop token in tokens {
-        if token.kind == TOKEN_FENCE_OPEN || token.kind == TOKEN_FENCE_CLOSE -> break true
-    } ?? false
-    if !has_fences -> return ParserFenceExpansion{tokens: tokens, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
+fn parser_prepare_tokens(tokens: ^[Token], tables: &TokenTables) -> ParserFenceExpansion {
+    has_fences := false
+    loop index in 0..<tokens.len() {
+        kind :: tokens[index].kind
+        if kind == TOKEN_FENCE_OPEN || kind == TOKEN_FENCE_CLOSE {
+            has_fences = true
+            break
+        }
+    }
+    if !has_fences -> return ParserFenceExpansion{tokens: ^tokens, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     code := [Token]{}
     loop token in tokens {
         if !parser_is_trivia(token.kind) -> &code.push(token)
     }
-    parser_fence_expand(code)
+    parser_fence_expand(code, &tables)
 }
 
 fn parser_fence_reserve(budget: &ParserFenceBudget, entries: Int, bytes: Int) -> Bool Never! {
@@ -144,27 +158,28 @@ fn parser_fence_reserve(budget: &ParserFenceBudget, entries: Int, bytes: Int) ->
     true
 }
 
-fn parser_fence_token_cost(tokens: [Token]) -> ParserFenceCost Never! {
+fn parser_fence_token_cost(tokens: [Token], tables: TokenTables) -> ParserFenceCost Never! {
     cost := ParserFenceCost{valid: true, count: 0, bytes: 0}
     pending := [[Token]]{tokens}
     loop pending.len() > 0 {
         batch :: &pending.pop() ?? [Token]{}
         loop token in batch {
             cost.count += 1
-            cost.bytes += PARSER_FENCE_TOKEN_BYTES + parser_fence_token_extra_bytes(token, &pending)
+            cost.bytes += PARSER_FENCE_TOKEN_BYTES + parser_fence_token_extra_bytes(token, tables, &pending)
         }
     }
     cost
 }
 
-fn parser_fence_token_extra_bytes(token: Token, pending: &[[Token]]) -> Int Never! {
+fn parser_fence_token_extra_bytes(token: Token, tables: TokenTables, pending: &[[Token]]) -> Int Never! {
     kind :: token.kind
-    if kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return token.payload.text.len()
-    if kind == TOKEN_RAW_STRING -> return token.payload.decoded.len()
+    if kind == TOKEN_IDENT || kind == TOKEN_INT || kind == TOKEN_FLOAT || kind == TOKEN_UNIT_NUMBER || kind == TOKEN_LINE_COMMENT || kind == TOKEN_BLOCK_COMMENT -> return token_text(tables, token).len()
+    if kind == TOKEN_RAW_STRING -> return token_decoded(tables, token).len()
     if kind != TOKEN_STRING -> return 0
-    bytes := token.payload.string_parts.len() * PARSER_FENCE_STRING_PART_BYTES
-    loop part in token.payload.string_parts {
-        if part.kind == STRING_PART_TEXT -> bytes += part.text.len()
+    parts :: token_string_parts(tables, token)
+    bytes := parts.len() * PARSER_FENCE_STRING_PART_BYTES
+    loop part in parts {
+        if part.kind == STRING_PART_TEXT -> bytes += name_text(tables.names, part.text).len()
         if part.kind == STRING_PART_INTERPOLATION -> &pending.push(part.tokens)
     }
     bytes
@@ -174,21 +189,21 @@ fn parser_fence_token_extra_bytes(token: Token, pending: &[[Token]]) -> Int Neve
 // consumed exactly once. Charge both classes once, then multiply only the
 // authored cost; scanning the whole body for every copy would let a legal
 // 4096-entry fence turn the preflight itself into a CPU denial of service.
-fn parser_fence_expanded_cost(segment: [Token], opens: [Int], closes: [Int], fence_entries: [[[Token]]], copies: Int) -> ParserFenceCost Never! {
+fn parser_fence_expanded_cost(segment: [Token], opens: [Int], closes: [Int], fence_entries: [[[Token]]], copies: Int, tables: TokenTables) -> ParserFenceCost Never! {
     replacements := ParserFenceCost{valid: true, count: 0, bytes: 0}
     authored := [Token]{}
     cursor := 0
     loop (fence_index, open) in opens {
         loop index in cursor..<open -> &authored.push(segment[index])
         loop entry in fence_entries[fence_index] {
-            entry_cost :: parser_fence_token_cost(entry)
+            entry_cost :: parser_fence_token_cost(entry, tables)
             replacements.count += entry_cost.count
             replacements.bytes += entry_cost.bytes
         }
         cursor = closes[fence_index] + 1
     }
     loop index in cursor..<segment.len() -> &authored.push(segment[index])
-    repeated :: parser_fence_token_cost(authored)
+    repeated :: parser_fence_token_cost(authored, tables)
     if copies < 1 || repeated.count > PARSER_FENCE_INT_MAX /% copies || repeated.bytes > PARSER_FENCE_INT_MAX /% copies -> return ParserFenceCost{valid: false, count: 0, bytes: 0}
     separators :: copies - 1
     ParserFenceCost{
@@ -198,7 +213,7 @@ fn parser_fence_expanded_cost(segment: [Token], opens: [Int], closes: [Int], fen
     }
 }
 
-fn parser_fence_expand(tokens: [Token]) -> ParserFenceExpansion {
+fn parser_fence_expand(tokens: [Token], tables: &TokenTables) -> ParserFenceExpansion {
     expansion := ParserFenceExpansion{tokens: [Token]{}, fenced_statements: [FencedStatement]{}, diagnostics: [Diagnostic]{}, budget: ParserFenceBudget{entries: 0, bytes: 0}}
     segment := [Token]{}
     brace_depth := 0
@@ -212,7 +227,7 @@ fn parser_fence_expand(tokens: [Token]) -> ParserFenceExpansion {
         top_level :: nested_brace_depth == 0 && paren_depth == 0 && bracket_depth == 0
         boundary :: kind == TOKEN_EOF || (kind == TOKEN_SEMI && top_level) || (kind == TOKEN_LBRACE && !nested_expression_brace) || (kind == TOKEN_RBRACE && top_level)
         if boundary {
-            parser_fence_flush_segment(&expansion, segment, brace_depth)
+            parser_fence_flush_segment(&expansion, segment, brace_depth, &tables)
             segment = [Token]{}
             &expansion.tokens.push(token)
             if kind == TOKEN_LBRACE -> brace_depth += 1
@@ -229,13 +244,13 @@ fn parser_fence_expand(tokens: [Token]) -> ParserFenceExpansion {
             kind == TOKEN_RBRACE && nested_brace_depth > 0 -> nested_brace_depth -= 1
         }
     }
-    if segment.len() > 0 -> parser_fence_flush_segment(&expansion, segment, brace_depth)
+    if segment.len() > 0 -> parser_fence_flush_segment(&expansion, segment, brace_depth, &tables)
     expansion
 }
 
 // A statement whose fences are rejected keeps its authored tokens; the
 // diagnostics stop the parse before those tokens are read.
-fn parser_fence_flush_segment(expansion: &ParserFenceExpansion, segment: [Token], brace_depth: Int) {
+fn parser_fence_flush_segment(expansion: &ParserFenceExpansion, segment: [Token], brace_depth: Int, tables: &TokenTables) {
     has_fence :: loop token in segment {
         if token.kind == TOKEN_FENCE_OPEN || token.kind == TOKEN_FENCE_CLOSE -> break true
     } ?? false
@@ -243,7 +258,7 @@ fn parser_fence_flush_segment(expansion: &ParserFenceExpansion, segment: [Token]
         loop token in segment -> &expansion.tokens.push(token)
         return
     }
-    result :: parser_fence_expand_segment(segment, brace_depth, expansion.budget)
+    result :: parser_fence_expand_segment(segment, brace_depth, expansion.budget, &tables)
     expansion.budget = ParserFenceBudget{entries: result.budget.entries, bytes: result.budget.bytes}
     if !result.valid {
         loop token in segment -> &expansion.tokens.push(token)
@@ -262,7 +277,7 @@ fn parser_fence_segment_failure(span: Span, diagnostics: ^[Diagnostic], budget: 
     ParserFenceSegment{valid: false, tokens: [Token]{}, fact: FencedStatement{span: span, fences: [FencedNames]{}, copies: 0}, diagnostics: diagnostics, budget: ParserFenceBudget{entries: budget.entries, bytes: budget.bytes}}
 }
 
-fn parser_fence_expand_segment(segment: [Token], brace_depth: Int, budget: ParserFenceBudget) -> ParserFenceSegment {
+fn parser_fence_expand_segment(segment: [Token], brace_depth: Int, budget: ParserFenceBudget, tables: &TokenTables) -> ParserFenceSegment {
     used := ParserFenceBudget{entries: budget.entries, bytes: budget.bytes}
     statement_span :: parser_fence_statement_span(segment)
     diagnostics := [Diagnostic]{}
@@ -312,7 +327,7 @@ fn parser_fence_expand_segment(segment: [Token], brace_depth: Int, budget: Parse
         close :: closes[fence_index]
         content := [Token]{}
         loop content_index in (open + 1)..<close -> &content.push(segment[content_index])
-        parsed :: parser_fence_parse_entries(content, segment[open].span, binding_target && fence_index == 0, used)
+        parsed :: parser_fence_parse_entries(content, segment[open].span, binding_target && fence_index == 0, used, &tables)
         used = ParserFenceBudget{entries: parsed.budget.entries, bytes: parsed.budget.bytes}
         if parsed.diagnostic == {
             .Val(diagnostic) -> &diagnostics.push(diagnostic)
@@ -334,7 +349,7 @@ fn parser_fence_expand_segment(segment: [Token], brace_depth: Int, budget: Parse
     if diagnostics.len() > 0 -> return parser_fence_segment_failure(statement_span, ^diagnostics, used)
 
     copies :: fences[0].names.len()
-    cost :: parser_fence_expanded_cost(segment, opens, closes, fence_entries, copies)
+    cost :: parser_fence_expanded_cost(segment, opens, closes, fence_entries, copies, tables)
     if !cost.valid -> return parser_fence_segment_failure(statement_span, [Diagnostic]{parser_fence_rejected_entry(statement_span, "a fenced statement is too large to expand")}, used)
     if !parser_fence_reserve(&used, cost.count, cost.bytes) -> return parser_fence_segment_failure(statement_span, [Diagnostic]{parser_fence_rejected_entry(statement_span, "a fenced statement exceeds the expansion resource budget")}, used)
     expanded := [Token]{}
@@ -359,7 +374,7 @@ fn parser_fence_entries_failure(open_span: Span, diagnostic: ^Diagnostic, budget
 // Parse one fence's content into entries. A binding fence needs plain names
 // (or a numbered-name range). An expression fence also accepts expression
 // entries split on top-level commas; each entry substitutes token-for-token.
-fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: Bool, budget: ParserFenceBudget) -> ParserFenceEntries {
+fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: Bool, budget: ParserFenceBudget, tables: &TokenTables) -> ParserFenceEntries {
     used := ParserFenceBudget{entries: budget.entries, bytes: budget.bytes}
     if content.len() == 0 -> return parser_fence_entries_failure(open_span, diagnostic_from_registry("E0368", Val(open_span), "this fence is empty", "a fenced statement needs at least one entry to expand", "write one or more entries between `<:` and `:>`"), used)
 
@@ -371,8 +386,8 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
         // whose endpoints are integer literals. A descending range, or any
         // other endpoint shape, remains one ordinary range expression.
         if !binding_fence && content[0].kind == TOKEN_INT && content[2].kind == TOKEN_INT {
-            start :: content[0].payload.integer ?? 0
-            end :: content[2].payload.integer ?? 0
+            start :: token_integer_value(tables, content[0])
+            end :: token_integer_value(tables, content[2])
             if start <= end {
                 if end - start >= PARSER_FENCE_MAX_EXPANSION -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(range_span, "a fenced range expands to too many entries"), used)
                 count :: end - start + 1
@@ -380,7 +395,7 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
                 values := [[Token]]{}
                 value_names := [NamedSpan]{}
                 loop offset in 0..<count {
-                    &values.push([Token]{parser_fence_int_token(start + offset, range_span)})
+                    &values.push([Token]{parser_fence_int_token(&tables, start + offset, range_span)})
                     &value_names.push(NamedSpan{name: "", span: range_span})
                 }
                 return ParserFenceEntries{names: FencedNames{span: open_span, names: value_names, range: None}, entries: values, diagnostic: None, budget: used}
@@ -389,7 +404,7 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
         endpoints_are_names :: content[0].kind == TOKEN_IDENT && content[2].kind == TOKEN_IDENT
         if !endpoints_are_names && binding_fence -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(range_span, "a fenced name range needs two numbered names"), used)
         if endpoints_are_names {
-            numbered :: parser_fence_numbered_range(content[0].payload.decoded, content[2].payload.decoded, range_span)
+            numbered :: parser_fence_numbered_range(token_decoded(tables, content[0]), token_decoded(tables, content[2]), range_span)
             if numbered.diagnostic == {
                 .Val(diagnostic) -> {
                     if binding_fence -> return parser_fence_entries_failure(open_span, ^diagnostic, used)
@@ -402,7 +417,7 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
                     range_entries := [[Token]]{}
                     range_names := [NamedSpan]{}
                     loop named in numbered.names {
-                        &range_entries.push([Token]{parser_fence_ident_token(named.name, named.span)})
+                        &range_entries.push([Token]{parser_fence_ident_token(&tables, named.name, named.span)})
                         &range_names.push(NamedSpan{name: named.name, span: named.span})
                     }
                     return ParserFenceEntries{names: FencedNames{span: open_span, names: range_names, range: Val(range)}, entries: range_entries, diagnostic: None, budget: used}
@@ -426,7 +441,7 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
             current = [Token]{}
             next
         }
-        token_cost :: parser_fence_token_cost([Token]{~token})
+        token_cost :: parser_fence_token_cost([Token]{token.copy()}, tables)
         if !parser_fence_reserve(&used, 1, token_cost.bytes) -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(token.span, "a fenced entry exceeds the expansion resource budget"), used)
         &current.push(token)
     }
@@ -438,9 +453,9 @@ fn parser_fence_parse_entries(content: [Token], open_span: Span, binding_fence: 
     loop entry in entries {
         span :: Span{start: entry[0].span.start, end: entry[entry.len() - 1].span.end}
         if entry.len() == 1 && entry[0].kind == TOKEN_IDENT {
-            name :: entry[0].payload.decoded
+            name :: token_decoded(tables, entry[0])
             if !parser_fence_reserve(&used, 0, name.len()) -> return parser_fence_entries_failure(open_span, parser_fence_rejected_entry(span, "a fenced name exceeds the expansion resource budget"), used)
-            if binding_fence -> &seen.add(~name, true) ?? return parser_fence_entries_failure(open_span, diagnostic_from_registry("E0369", Val(span), "`{name}` appears twice in this fence", "one binding fence must name each generated copy once", "remove the second `{name}` or give it a different name"), used)
+            if binding_fence -> &seen.add(name.copy(), true) ?? return parser_fence_entries_failure(open_span, diagnostic_from_registry("E0369", Val(span), "`{name}` appears twice in this fence", "one binding fence must name each generated copy once", "remove the second `{name}` or give it a different name"), used)
             &names.push(NamedSpan{name: name, span: span})
             next
         }
@@ -498,19 +513,27 @@ fn parser_fence_numbered_name(name: String) -> ParserFenceNumberedName? {
     Val(ParserFenceNumberedName{prefix: String.from_bytes(prefix) ?? "", number: number, width: bytes.len() - split})
 }
 
-fn parser_fence_ident_token(name: String, span: Span) -> Token Never! {
+fn parser_fence_ident_token(tables: &TokenTables, name: String, span: Span) -> Token Never! {
     token := parser_synthetic_token(TOKEN_IDENT, span)
-    token.payload.text = ~name
-    token.payload.decoded = ~name
+    spelled :: name_intern(&tables.names, name)
+    token.text = spelled
+    token.decoded = spelled
     token
 }
 
-fn parser_fence_int_token(value: Int, span: Span) -> Token Never! {
+fn parser_fence_int_token(tables: &TokenTables, value: Int, span: Span) -> Token Never! {
     token := parser_synthetic_token(TOKEN_INT, span)
-    token.payload.text = "{value}"
-    token.payload.decoded = "{value}"
-    token.payload.integer = Val(value)
+    spelled :: name_intern(&tables.names, "{value}")
+    token.text = spelled
+    token.decoded = spelled
+    &tables.literals.push(TokenLiteral{integer: Val(value), decimal: None, suffix: name_empty(), interpolations: 0, string_parts: [StringPart]{}})
+    token.literal = tables.literals.len() - 1
     token
+}
+
+fn token_integer_value(tables: TokenTables, token: Token) -> Int Never! {
+    if token.literal < 0 -> return 0
+    tables.literals[token.literal].integer ?? 0
 }
 
 fn parser_fence_statement_span(segment: [Token]) -> Span Never! {

@@ -1,0 +1,17 @@
+Error [E0211]: ``Edit`` can't be copied
+  --> mutable_view_aggregates_are_not_cloneable.jet:12:18
+    |
+ 12 |     duplicate :: ~borrowed
+    |                  ^^^^^^^^^
+ Why: Copy needs a value made only of duplicable parts; this type holds something Jet can't duplicate — a function value, a trait value, or a type from outside Jet
+ Fix: Move it instead with the move marker `^` (`^name` if this is its last use), or change the type so every part can be copied
+More: jet-lang.dev/e/E0211
+
+Error [E0212]: `target[…]` already has a live view that conflicts with `duplicate`
+  --> mutable_view_aggregates_are_not_cloneable.jet:12:5
+    |
+ 12 |     duplicate :: ~borrowed
+    |     ^^^^^^^^^
+ Why: Many read views may overlap, but an exclusive mutable view cannot overlap any other live view
+ Fix: Finish using the earlier view before creating this one, or make an owned copy
+More: jet-lang.dev/e/E0212

@@ -1,0 +1,28 @@
+# Port of tests/feature_acceptance.rs:426-574; original fixtures verbatim.
+# Generated Rust assertions442-444 and Rust source-law assertions541-548/555-573 RETIRE.
+# Public compile_programmable_build execution446-475 uses the existing CLI build/built mechanism.
+# Runtime PENDING-SAME-HEAD.
+fixture: public_build_product.fixture
+file: programmable_build/run.jet ~ "fn build(b: BuildContext)" # original example-source predicate
+file: programmable_build/run.jet ~ "b.generate" # original example-source predicate
+file: programmable_build/run.jet ~ "b.add_executable" # original example-source predicate
+file: programmable_build/run.jet ~ "b.plan" # original example-source predicate
+step: jet build programmable_build/run.jet
+exit: 0
+artifact: programmable_build
+step: built
+exit: 0
+stdout.trim: = public_build_product.expected.bytes.trim
+step: jet inspect graph programmable_build/run.jet --json
+exit: 0
+stdout: ~ "programmable_build" # original graph predicate
+stdout: ~ "\"targets\"" # original graph predicate
+step: jet inspect query build programmable_build/run.jet --json
+exit: 0
+stdout: ~ "programmable_build" # original query predicate
+step: jet inspect explain-build programmable_build programmable_build/run.jet --json
+exit: 0
+stdout: ~ "\"provenance\"" # original explain predicate
+stdout: ~any "actions=" "sources=" # original explain disjunction
+file: sandbox.stderr ~ "E3505" # original fixture predicate
+file: sandbox.stderr ~ "build sandbox" # original fixture predicate

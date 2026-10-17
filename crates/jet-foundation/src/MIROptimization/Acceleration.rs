@@ -11,7 +11,7 @@ pub const ACCELERATION_RECEIPT_TYPE_NAME: &str = "AccelerationDecision";
 /// Runtime decision sections use the existing append-only receipt rail.
 pub const ACCELERATION_RECEIPT_SECTION_PREFIX: &str = "jet.acceleration.";
 /// Canonical `#Receipt` schema identity for the runtime envelope.  It uses
-/// the existing `type\0field:type;` framing and the wire-level `DataTree`
+/// the existing `type\0field:type;` framing and the wire-level `Dyn`
 /// types, including the complete nested decision and source fields.
 pub const ACCELERATION_RECEIPT_SCHEMA: &str =
     "AccelerationDecision\0decision:(measurement: (bandwidth_floor_nanos: Int, floor_nanos: Int, items: Int, projected_serial_nanos: Int?, required_serial_nanos: Int?, sample_items: Int, sample_nanos: Int, spawn_nanos: Int), pin: String?, status: String, transform: String);function:String;loop_header:Int;source:(end: Int, start: Int);";

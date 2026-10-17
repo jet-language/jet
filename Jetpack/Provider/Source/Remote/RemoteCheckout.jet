@@ -18,7 +18,7 @@ PROVIDER_READ_CHUNK_BYTES :: prep { 65536 }
 // the embedded batteries catalog, or a fetched git checkout. For a monorepo
 // the fetch is index-first: only the requested member's subtree and its
 // in-repo dependencies are materialized (Slice C, D-MONOREF1).
-pub fn provider_source_repo(upstream: String, want_package: String, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+fn provider_source_repo(upstream: String, want_package: String, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
     if upstream.starts_with("path:") {
         path :: upstream.removeprefix("path:")
         if files.is_abs(path) -> return Ok(path)
@@ -172,7 +172,7 @@ fn provider_publish_remote_checkout_held(source: HeldDirectoryEntry, cache: Held
 }
 
 // A full clone of `remote` at its revision, published into the source cache.
-pub fn provider_fetch_remote_repo(remote: RemoteSource, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
+fn provider_fetch_remote_repo(remote: RemoteSource, ctx: ProviderCtx) -[FS, Env, Exec, Net, Time.Wait, Rand]> String ProviderError! {
     provider_validate_remote_source(remote)
     cache :: provider_source_cache_dir(ctx.store_dir, remote)
     if provider_cache_is_real_directory(cache) -> return Ok(cache)
@@ -260,9 +260,9 @@ fn provider_open_held_directory(path: String, create: Bool) -[FS]> Directory IOE
 }
 
 // The held parent of a cache path and the cache's final name.
-pub struct HeldCacheParent {
-    pub directory: Directory
-    pub name: String
+struct HeldCacheParent {
+    directory: Directory
+    name: String
 
     fn open(cache: String) -[FS]> HeldCacheParent IOError! {
         HeldCacheParent.open_with(cache, false)
@@ -324,10 +324,10 @@ fn provider_open_or_create_child(parent: Directory, name: String) -[FS]> Directo
 }
 
 // A held directory together with the held parent and name it was opened by.
-pub struct HeldDirectoryEntry {
-    pub parent: Directory
-    pub name: String
-    pub directory: Directory
+struct HeldDirectoryEntry {
+    parent: Directory
+    name: String
+    directory: Directory
 
     fn open(path: String) -[FS]> HeldDirectoryEntry IOError! {
         name :: files.basename(path)
@@ -403,7 +403,7 @@ fn provider_read_all(reader: FileReader) -[FS]> [U8] IOError! {
 // `.jet`-only tree hash this addresses any package tree, so distinct
 // packages never collide in the store. Links, special files, and multiply
 // linked files are refused.
-pub fn provider_tree_fingerprint(root: String) -[FS]> String ProviderReason! {
+fn provider_tree_fingerprint(root: String) -[FS]> String ProviderReason! {
     source :: HeldDirectoryEntry.open(root) ?? return Err(ProviderReason{message: "{err}"})
     provider_tree_fingerprint_held(source.directory)
 }
@@ -452,7 +452,7 @@ fn provider_collect_fingerprint_files(directory: Directory, relative: String, ou
 // Recursively copy a tree, preserving file modes (so `bin/` executables stay
 // executable). Every source and destination operation is relative to a held
 // directory.
-pub fn provider_copy_tree(src: String, dst: String) ProviderReason! -[FS, Rand]> {
+fn provider_copy_tree(src: String, dst: String) ProviderReason! -[FS, Rand]> {
     source :: HeldDirectoryEntry.open(src) ?? return Err(ProviderReason{message: "{err}"})
     destination_parent :: HeldCacheParent.open_or_create(dst) ?? return Err(ProviderReason{message: "{err}"})
     destination :: destination_parent.open_or_create_directory() ?? return Err(ProviderReason{message: "{err}"})
@@ -495,7 +495,7 @@ fn provider_copy_held_file(source: Directory, source_name: String, destination: 
             if !store_io_is_not_found(error) -> return Err(error)
         }
     }
-    mode :: before.mode & 0o7777
+    mode :: (before.mode).bit_and(0o7777)
     temporary :: provider_create_temp_file_name(destination, mode)
     if provider_fill_temp_file(reader, before, destination, temporary.name, temporary.writer, mode, destination_name) == {
         .Ok(_) -> {}

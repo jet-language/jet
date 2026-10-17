@@ -11,7 +11,7 @@ fn parse_age(raw: String) -> Int ParseError! {
     // An explicit `Err` exits this function. A plain fallible call in a
     // caller propagates that result; final `Ok` is the success expression.
     if raw == "" -> return Err(ParseError.Empty)
-    if raw == "x" -> return Err(ParseError.BadDigit(~raw))
+    if raw == "x" -> return Err(ParseError.BadDigit(raw.copy()))
     Ok(42)
 }
 
@@ -32,8 +32,10 @@ fn run() {
 
     // A pattern table observes both result routes and handles the error
     // explicitly, so neither branch propagates out of `run`.
+    // Debug is the developer-facing representation, preserving quoted
+    // payloads; bare Display is reserved for user-facing presentation.
     if parse_age("x") == {
         .Ok(age) -> print(age)
-        .Err(error) -> print(error)
+        .Err(error) -> print("{error:Debug}")
     }
 }

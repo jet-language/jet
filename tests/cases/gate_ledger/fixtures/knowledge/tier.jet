@@ -1,0 +1,75 @@
+#Numeric Severity :: distinct Int(0..10)
+
+#UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+}
+
+struct Reservation {
+    state { Pending, Confirmed }
+    guest: String
+}
+
+impl Reservation {
+    #Transition(_, Pending) fn book(guest: String) -> Reservation { {guest: guest.copy()} }
+
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation { self }
+}
+
+#Scrub(Input) fn clean(raw: #Input String) -> String { raw.copy() }
+
+ANSWER :: prep { 40 + 2 }
+
+COMPTIME_RANGE :: prep { wrapping(4 + 5) }
+
+COMPTIME_EXACTNESS :: prep { exactness_value() }
+
+COMPTIME_UNIT :: prep { unit_value() }
+
+COMPTIME_STATE :: prep { state_value() }
+
+COMPTIME_CLASSIFICATION :: prep { classification_value() }
+
+fn exactness_value() -> Bool {
+    lossy :: Int{9007199254740993}
+    zero :: Float{0.0}
+    approx(lossy) > zero
+}
+
+fn unit_value() -> Float {
+    source :: Half.from_float(Float{5.0})
+    value :: Meter.from_half_rounded(source, .NearestEven, digits: 0) ?? panic("unit gate")
+    value.raw()
+}
+
+fn state_value() -> String {
+    reservation := Reservation.book("state")
+    reservation = ^reservation.pay()
+    reservation.guest
+}
+
+fn classification_value() -> String {
+    raw :: #Input "world"
+    clean(raw)
+}
+
+fn run() {
+    left :: Severity.from_int(4)
+    right :: Severity.from_int(5)
+    total :: wrapping(left + right)
+    exactness :: exactness_value()
+    unit :: unit_value()
+    state :: state_value()
+    classification :: classification_value()
+    print("{ANSWER}")
+    print("comptime_range={COMPTIME_RANGE}")
+    print("comptime_exactness={COMPTIME_EXACTNESS}")
+    print("comptime_unit={COMPTIME_UNIT}")
+    print("comptime_state={COMPTIME_STATE}")
+    print("comptime_classification={COMPTIME_CLASSIFICATION}")
+    print("exactness={exactness}")
+    print("unit={unit}")
+    print("state={state}")
+    print("classification={classification}")
+    print("range={total}")
+}

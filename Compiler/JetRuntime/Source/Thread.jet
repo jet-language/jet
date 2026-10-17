@@ -1,0 +1,434 @@
+// Jet threads and dynamic TLS. GS belongs exclusively to Jet; FS remains
+// musl's TLS until libc exit. The interim pthread imports die when musl leaves
+// the pack (U4 end); raw clone is implemented below but used only by fixtures.
+// TCB (320 bytes, align64), append-only runtime layout; owner per slot:
+// @0 Thread self; @8 Thread tid; @16 Scheduler current control;
+// @24 Scheduler shield; @32 Scheduler wait boundary; @40 Deadline boundary;
+// @48 Deadline presence; @56 Deadline ms; @64 Scheduler native body active;
+// @72 Sync park slot; @80 Task completion frames List*;
+// @88 Task compensation stack List*; @96 Deadline owner deadlines;
+// @104 World current lease; @112 World flags; @120 World park slot;
+// @128 Sentry enabled; @136 Sentry file; @144 Sentry file length;
+// @152 Sentry line; @160 Sentry reason; @168 Sentry reason length;
+// @176 Sentry fence depth; @184 Sentry frames List*; @192 reserved;
+// @200 Comptime request-scope flag; @208 Thread dynamic TLS List<I64>*
+// (also owns T1 capture/scope services); @216/@224 Sync absolute futex
+// timespec; @232/@240 Sync/HostIO clock_gettime timespec scratch;
+// @248 Scheduler shared scratch word (worker-count out).
+// Appended Comptime frame: @256 depth, @264 owner, @272 start, @280 end,
+// all raw U64 bit carriers. Comptime scope saves Scheduler's four words at
+// @288 previous control, @296 shield, @304 wait boundary, @312 body active.
+// Slot200 provenance: before this append, the 26b5c5911 source map reserves
+// 192/200. Searching I64{192}/I64{200} across Thread, Scheduler, Task,
+// TaskGroup, Deadline, World, TestCapture and Sync finds no TCB access:
+// Task's matches concern its separate 200-byte child, not the TCB.
+// RtL8a6 confirms no T1/Thread claim on either reserved slot. Attach before
+// the first GS read, never lazily from TLS.
+#Import(c) fn thread_pthread_create(out: I64, attr: I64, start: I64, arg: I64) -> I64 = "pthread_create"
+#Import(c) fn thread_pthread_join(thread: I64, out: I64) -> I64 = "pthread_join"
+#Import(c) fn thread_pthread_detach(thread: I64) -> I64 = "pthread_detach"
+#Import(c) fn thread_pthread_attr_init(attr: I64) -> I64 = "pthread_attr_init"
+#Import(c) fn thread_pthread_attr_setstacksize(attr: I64, size: I64) -> I64 = "pthread_attr_setstacksize"
+#Import(c) fn thread_pthread_attr_destroy(attr: I64) -> I64 = "pthread_attr_destroy"
+
+// Process lifetime root: mutex@0, atomic next-key counter@8, destructor native
+// List header@16, scope native List header@40 (0 thread, 1 attempt), and
+// live-TCB native List<I64> header@64 containing [tid,tcb,...] word pairs.
+// All headers use [len@0,cap@8,data@16]. Root is 88 bytes; closures transfer
+// to the registry for key lifetime. No inherited GS pointer is dereferenced.
+thread_tls_registry := I64{0}
+
+fn thread_zero(address: I64, bytes: I64) {
+    at := I64{0}
+    loop at < bytes {
+        sync_store(address + at, I64{0})
+        at += I64{8}
+    }
+}
+
+fn thread_base() -> I64 {
+    #Unsafe("every caller has attached before running Jet TLS code") { return os_tls_base_i64() }
+}
+
+fn thread_set_base(base: I64) {
+    #Unsafe("GS is reserved for Jet and base is a live self-addressed TCB or zero at detach") {
+        status :: os_syscall_i64(I64{158}, I64{4097}, base, I64{0}, I64{0}, I64{0}, I64{0})
+        if (status != I64{0}) { trap_gs_failure() }
+    }
+}
+
+fn thread_tid() -> I64 {
+    #Unsafe("gettid identifies this thread without reading its inherited GS") {
+        return os_syscall_i64(I64{186}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+
+fn thread_new_tcb(tid: I64) -> I64 {
+    tcb :: jet_rt_alloc(I64{320}, I64{64})
+    thread_zero(tcb, I64{320})
+    sync_store(tcb, tcb)
+    sync_store(tcb + I64{8}, tid)
+    tcb
+}
+
+// Registry mutex is held. These are native List<I64> words, two per thread.
+fn thread_register_tcb(tid: I64, tcb: I64) {
+    live :: thread_tls_registry + I64{64}
+    count :: sync_load(live)
+    thread_words_grow(live, count + I64{2})
+    data :: sync_load(live + I64{16})
+    sync_store(data + count * I64{8}, tid)
+    sync_store(data + (count + I64{1}) * I64{8}, tcb)
+    sync_store(live, count + I64{2})
+}
+
+// Bootstrap is exclusively for a newly spawned thread. Its inherited GS can
+// point to a parent's already-freed TCB; never read that base or its memory.
+#Export(c) fn jet_rt_thread_bootstrap() {
+    // Even an allocation failure must not let a trap read inherited GS.
+    thread_set_base(I64{0})
+    tid :: thread_tid()
+    tcb :: thread_new_tcb(tid)
+    sync_mutex_lock(thread_tls_registry)
+    thread_register_tcb(tid, tcb)
+    sync_mutex_unlock(thread_tls_registry)
+    thread_set_base(tcb)
+}
+
+// Host callers MUST pair explicit attach with detach before thread exit.
+// Otherwise a recycled Linux tid could match a stale live-registry row.
+#Export(c) fn jet_rt_thread_attach() {
+    // This path may also allocate; clear a foreign/inherited base first.
+    thread_set_base(I64{0})
+    // Explicit host attach and repeated attach use only live registry records.
+    // Linux gettid is the lookup key; a copied/stale GS base is irrelevant.
+    tid :: thread_tid()
+    sync_mutex_lock(thread_tls_registry)
+    live :: thread_tls_registry + I64{64}
+    count :: sync_load(live)
+    data :: sync_load(live + I64{16})
+    at := I64{0}
+    loop at < count {
+        if (sync_load(data + at * I64{8}) == tid) {
+            tcb :: sync_load(data + (at + I64{1}) * I64{8})
+            sync_mutex_unlock(thread_tls_registry)
+            thread_set_base(tcb)
+            return
+        }
+        at += I64{2}
+    }
+    tcb :: thread_new_tcb(tid)
+    thread_register_tcb(tid, tcb)
+    sync_mutex_unlock(thread_tls_registry)
+    thread_set_base(tcb)
+}
+
+fn thread_unregister_tcb(tcb: I64) {
+    sync_mutex_lock(thread_tls_registry)
+    live :: thread_tls_registry + I64{64}
+    count :: sync_load(live)
+    data :: sync_load(live + I64{16})
+    at := I64{0}
+    loop at < count {
+        if (sync_load(data + (at + I64{1}) * I64{8}) == tcb) {
+            last :: count - I64{2}
+            if at < last {
+                sync_store(data + at * I64{8}, sync_load(data + last * I64{8}))
+                sync_store(data + (at + I64{1}) * I64{8}, sync_load(data + (last + I64{1}) * I64{8}))
+            }
+            sync_store(live, last)
+            break
+        }
+        at += I64{2}
+    }
+    sync_mutex_unlock(thread_tls_registry)
+}
+
+// runtime-init: 2
+#Export(c) fn jet_rt_thread_init() {
+    // Runtime-object .init_array priority follows allocator and host init.
+    if (thread_tls_registry == I64{0}) {
+        thread_tls_registry = jet_rt_alloc(I64{88}, I64{8})
+        thread_zero(thread_tls_registry, I64{88})
+    }
+    jet_rt_thread_attach()
+}
+
+// Word-only native List growth: no Core List indexing or exact-Int carrier.
+fn thread_words_grow(header: I64, needed: I64) {
+    capacity :: sync_load(header + I64{8})
+    if needed <= capacity {
+        return
+    }
+    next := if (capacity == I64{0}) -> I64{8} else -> capacity
+    loop next < needed -> next = next * I64{2}
+    data :: jet_rt_alloc(next * I64{8}, I64{8})
+    thread_zero(data, next * I64{8})
+    old :: sync_load(header + I64{16})
+    count :: sync_load(header)
+    at := I64{0}
+    loop at < count {
+        sync_store(data + at * I64{8}, sync_load(old + at * I64{8}))
+        at += I64{1}
+    }
+    sync_store(header + I64{16}, data)
+    sync_store(header + I64{8}, next)
+    if (capacity != I64{0}) { jet_rt_free(old, capacity * I64{8}, I64{8}) }
+}
+
+// Called only with the registry mutex held, so both parallel tables publish
+// together and a site's shared-key setup can reserve exactly one key.
+fn thread_tls_key_new_locked(destructor: I64, scope: I64) -> I64 {
+    root :: thread_tls_registry
+    key :: sync_add(root + I64{8}, I64{1}) + I64{1}
+    header :: root + I64{16}
+    scopes :: root + I64{40}
+    thread_words_grow(header, key)
+    thread_words_grow(scopes, key)
+    sync_store(sync_load(header + I64{16}) + (key - I64{1}) * I64{8}, destructor)
+    sync_store(sync_load(scopes + I64{16}) + (key - I64{1}) * I64{8}, scope)
+    sync_store(header, key)
+    sync_store(scopes, key)
+    key
+}
+
+#Export(c) fn jet_rt_tls_key_new(destructor: I64) -> I64 {
+    sync_mutex_lock(thread_tls_registry)
+    key :: thread_tls_key_new_locked(destructor, I64{0})
+    sync_mutex_unlock(thread_tls_registry)
+    key
+}
+
+#Export(c) fn jet_rt_tls_shared_destructor(_header: I64, value: I64) -> I64 {
+    jet_rt_native_shared_drop(value)
+    I64{0}
+}
+
+// Same runtime-only checked FunctionAddress table as rt_thread_entry_address.
+fn rt_tls_shared_destructor_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// A declaration's site always supplies its stable lifetime scope:
+// 0 = thread exit only, 1 = attempt reset as well as thread exit.
+#Export(c) fn jet_rt_tls_shared_key(site: I64, scope: I64) -> I64 {
+    existing :: sync_load(site)
+    if (existing != I64{0}) { return existing }
+    sync_mutex_lock(thread_tls_registry)
+    key := sync_load(site)
+    if (key == I64{0}) {
+        closure :: jet_rt_alloc(I64{24}, I64{8})
+        sync_store(closure, I64{1})
+        sync_store(closure + I64{8}, rt_tls_shared_destructor_address())
+        sync_store(closure + I64{16}, I64{0})
+        key = thread_tls_key_new_locked(closure, scope)
+        sync_store(site, key)
+    }
+    sync_mutex_unlock(thread_tls_registry)
+    key
+}
+
+fn thread_tls_destroy(table: I64, key: I64, attempt_only: Bool) -> Bool {
+    value :: sync_load(sync_load(table + I64{16}) + (key - I64{1}) * I64{8})
+    if (value == I64{0}) { return false }
+    sync_mutex_lock(thread_tls_registry)
+    closure :: sync_load(sync_load(thread_tls_registry + I64{32}) + (key - I64{1}) * I64{8})
+    scope :: sync_load(sync_load(thread_tls_registry + I64{56}) + (key - I64{1}) * I64{8})
+    sync_mutex_unlock(thread_tls_registry)
+    if (attempt_only && scope != I64{1}) { return false }
+    // Clear first: a destructor can reenter reset_attempt without double-drop.
+    // Reload data on every key because a destructor may grow its TLS table.
+    sync_store(sync_load(table + I64{16}) + (key - I64{1}) * I64{8}, I64{0})
+    if (closure != I64{0}) {
+        #Unsafe("the registry owns this live closure header whose code accepts header and one I64 value") {
+            _ := os_call_address_two_i64(sync_load(closure + I64{8}), closure, value)
+        }
+        return true
+    }
+    false
+}
+
+#Export(c) fn jet_rt_tls_reset_attempt() {
+    table :: sync_load(thread_base() + I64{208})
+    if (table == I64{0}) {
+        return
+    }
+    key := sync_load(table)
+    loop key > (I64{0}) {
+        _ := thread_tls_destroy(table, key, true)
+        key -= I64{1}
+    }
+}
+
+#Export(c) fn jet_rt_tls_get(key: I64) -> I64 {
+    table :: sync_load(thread_base() + I64{208})
+    if (table == I64{0} || key <= I64{0}) { return I64{0} }
+    if key > sync_load(table) -> return I64{0}
+    sync_load(sync_load(table + I64{16}) + (key - I64{1}) * I64{8})
+}
+
+#Export(c) fn jet_rt_tls_set(key: I64, value: I64) {
+    if (key <= I64{0} || key > sync_load(thread_tls_registry + I64{8})) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
+    tcb :: thread_base()
+    table := sync_load(tcb + I64{208})
+    if (table == I64{0}) {
+        table = jet_rt_alloc(I64{24}, I64{8})
+        thread_zero(table, I64{24})
+        sync_store(tcb + I64{208}, table)
+    }
+    thread_words_grow(table, key)
+    if key > sync_load(table) -> sync_store(table, key)
+    sync_store(sync_load(table + I64{16}) + (key - I64{1}) * I64{8}, value)
+}
+
+#Export(c) fn jet_rt_thread_detach() {
+    tcb :: thread_base()
+    scheduler_thread_detach()
+    table :: sync_load(tcb + I64{208})
+    if (table != I64{0}) {
+        // Match musl pthread_key destructors: PTHREAD_DESTRUCTOR_ITERATIONS
+        // is 4 (musl src/thread/pthread_key_create.c). Each pass sees
+        // keys installed by the previous pass; values rearmed after the fourth
+        // pass are left undestroyed, exactly as pthread termination permits.
+        pass := I64{0}
+        loop pass < (I64{4}) {
+            invoked := false
+            key := sync_load(table)
+            loop key > (I64{0}) {
+                if thread_tls_destroy(table, key, false) -> invoked = true
+                key -= I64{1}
+            }
+            if !invoked -> break
+            pass += I64{1}
+        }
+        jet_rt_free(sync_load(table + I64{16}), sync_load(table + I64{8}) * I64{8}, I64{8})
+        jet_rt_free(table, I64{24}, I64{8})
+    }
+    sentry_thread_detach()
+    thread_unregister_tcb(tcb)
+    thread_set_base(I64{0})
+    jet_rt_free(tcb, I64{320}, I64{64})
+}
+
+// RuntimeLower alone replaces this body with FunctionAddress of the checked
+// #Export(c) jet_rt_thread_entry. It refuses a missing/non-word/non-C entry;
+// this body must never reach execution or ordinary function-body lowering.
+fn rt_thread_entry_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+#Export(c) fn jet_rt_thread_entry(start: I64) -> I64 {
+    jet_rt_thread_bootstrap()
+    entry :: sync_load(start)
+    argument :: sync_load(start + I64{8})
+    jet_rt_free(start, I64{16}, I64{8})
+    result := I64{0}
+    #Unsafe("the caller transferred a System V I64->I64 code address and one argument to this thread") {
+        result = os_call_address_i64(entry, argument)
+    }
+    jet_rt_thread_detach()
+    result
+}
+
+// Rust scheduler worker stack: CompilerStack::COMPILER_STACK_SIZE = 192 MiB.
+// A larger soft RLIMIT_STACK (the native compiler stages run under prlimit,
+// since O0 frames are larger than Rust's) also sizes every runtime thread, so
+// work moved onto a scheduler worker gets the main thread's recursion budget.
+// RLIM_INFINITY and failures keep 192 MiB; the reservation is capped at 8 GiB.
+fn thread_stack_bytes() -> I64 {
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    thread_zero(scratch, I64{16})
+    status := I64{-1}
+    #Unsafe("getrlimit(RLIMIT_STACK) writes its two-word record into the owned 16-byte scratch and retains no pointer") {
+        status = os_syscall_i64(I64{97}, I64{3}, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    soft :: sync_load(scratch)
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (status != I64{0} || soft <= I64{201326592}) { return I64{201326592} }
+    if (soft > I64{8589934592}) { return I64{8589934592} }
+    soft
+}
+
+// musl pthread_attr_t is 56 bytes on x86-64; 64-byte storage is conservative.
+// Returns pthread_t on success, negative pthread errno on failure.
+fn thread_spawn(entry: I64, argument: I64) -> I64 {
+    storage :: jet_rt_alloc(I64{72}, I64{8})
+    thread_zero(storage, I64{72})
+    attr :: storage + I64{8}
+    status := thread_pthread_attr_init(attr)
+    if (status != I64{0}) {
+        jet_rt_free(storage, I64{72}, I64{8})
+        return -status
+    }
+    status = thread_pthread_attr_setstacksize(attr, thread_stack_bytes())
+    start := I64{0}
+    if (status == I64{0}) {
+        start = jet_rt_alloc(I64{16}, I64{8})
+        sync_store(start, entry)
+        sync_store(start + I64{8}, argument)
+        status = thread_pthread_create(storage, attr, rt_thread_entry_address(), start)
+    }
+    _ := thread_pthread_attr_destroy(attr)
+    handle :: sync_load(storage)
+    jet_rt_free(storage, I64{72}, I64{8})
+    if (status != I64{0}) {
+        if (start != I64{0}) { jet_rt_free(start, I64{16}, I64{8}) }
+        return -status
+    }
+    handle
+}
+
+fn thread_join(handle: I64, result: I64) -> I64 { thread_pthread_join(handle, result) }
+
+fn thread_detach(handle: I64) -> I64 { thread_pthread_detach(handle) }
+
+// Raw clone control: mapping@0, size@8, CHILD_CLEARTID@16. Join owns the
+// control and stack until the kernel clears the TID and wakes a SHARED futex
+// (the kernel's clear_child_tid wake is not FUTEX_WAKE_PRIVATE).
+// Only joined raw threads are exposed here. At libc exit, detached raw threads
+// transfer the control to the scheduler reaper, which performs this same join
+// and munmap; a child never unmaps the stack it is still executing on.
+fn thread_clone_fixture(entry: I64, argument: I64) -> I64 {
+    bytes :: I64{201330688}
+    mapping := I64{0}
+    #Unsafe("fresh raw clone stack mapping with a PROT_NONE first-page guard; child may call only Jet/syscall code, never musl/Rust with inherited FS") {
+        mapping = os_syscall_i64(I64{9}, I64{0}, bytes, I64{3}, I64{34}, I64{-1}, I64{0})
+        if (mapping < I64{0}) { return mapping }
+        protect :: os_syscall_i64(I64{10}, mapping, I64{4096}, I64{0}, I64{0}, I64{0}, I64{0})
+        if (protect != I64{0}) {
+            _ := os_syscall_i64(I64{11}, mapping, bytes, I64{0}, I64{0}, I64{0}, I64{0})
+            return protect
+        }
+    }
+    control :: jet_rt_alloc(I64{24}, I64{8})
+    sync_store(control, mapping)
+    sync_store(control + I64{8}, bytes)
+    sync_store(control + I64{16}, I64{0})
+    stack :: mapping + bytes - I64{16}
+    sync_store(stack, entry)
+    sync_store(stack + I64{8}, argument)
+    tid := I64{0}
+    #Unsafe("guarded stack is seeded with Jet-only entry/arg; TID word is live until join; flags share VM, FS, FILES, SIGHAND, THREAD, SYSVSEM and enable parent-set/child-clear TID") {
+        tid = os_clone_i64(I64{3477248}, stack, control + I64{16}, control + I64{16})
+    }
+    if (tid < I64{0}) {
+        alloc_unmap(mapping, bytes)
+        jet_rt_free(control, I64{24}, I64{8})
+        return tid
+    }
+    control
+}
+
+fn thread_clone_join(control: I64) {
+    loop {
+        tid :: sync_load(control + I64{16})
+        if (tid == I64{0}) { break }
+        #Unsafe("kernel CHILD_CLEARTID clears this live word and wakes a non-private futex; recheck handles exit-before-wait and EINTR") {
+            _ := os_syscall_i64(I64{202}, control + I64{16}, I64{0}, tid, I64{0}, I64{0}, I64{0})
+        }
+    }
+    alloc_unmap(sync_load(control), sync_load(control + I64{8}))
+    jet_rt_free(control, I64{24}, I64{8})
+}

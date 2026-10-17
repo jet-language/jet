@@ -1,0 +1,18 @@
+# HAND-PORT tests/tir_place_window_lifetimes.rs:95-103 stack_window_uses_expiring_sentry_address
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Source bytes and every original public oracle retained; generated-Rust-only scans retire.
+fixture: stack_window_uses_expiring_sentry_address.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = stack_window_uses_expiring_sentry_address.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = stack_window_uses_expiring_sentry_address.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = stack_window_uses_expiring_sentry_address.stdout.expected
+stderr: == default

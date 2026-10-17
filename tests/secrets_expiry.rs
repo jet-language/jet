@@ -20,7 +20,7 @@ fn run() {
     if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
         print("available")
     }
-    fork := ~clock
+    fork := clock.copy()
     &fork.tick(1001)
     if secret.with((borrowed) -> borrowed.public_key()) == .Ok(_) {
         print("forked")
@@ -140,7 +140,7 @@ fn expiring_secret_loan_can_call_cross_file_read_helpers() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("helper.jet"),
-        "use core.crypto as crypto\npub fn inspect_key(key: crypto.SigningKey) -> crypto.VerifyKey { return key.public_key() }\n",
+        "use core.crypto as crypto\nfn inspect_key(key: crypto.SigningKey) -> crypto.VerifyKey { return key.public_key() }\n",
     )
     .unwrap();
     let src = r#"
@@ -168,7 +168,7 @@ fn run() {
 
     std::fs::write(
         dir.join("fake.jet"),
-        "pub struct SigningKey {}\npub fn inspect_key(key: SigningKey) -> Bool { return true }\n",
+        "struct SigningKey {}\nfn inspect_key(key: SigningKey) -> Bool { return true }\n",
     )
     .unwrap();
     let hostile = r#"
@@ -417,9 +417,9 @@ fn run() {
 }
 
 #[test]
-fn generic_ttl_remains_while_expiring_secret_replaces_rotting() {
+fn ttl_carriers_are_source_owned_and_retired_native_carriers_are_absent() {
     let compiled = jet::compile("fn run() {}").expect("empty program compiles");
-    assert!(compiled.rust.contains("struct JetExpiringSecret<T>"));
-    assert!(compiled.rust.contains("struct JetExpiring<T"));
+    assert!(!compiled.rust.contains("struct JetExpiringSecret<T>"));
+    assert!(!compiled.rust.contains("struct JetExpiring<T"));
     assert!(!compiled.rust.contains("struct JetRotting<T"));
 }

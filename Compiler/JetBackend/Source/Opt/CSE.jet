@@ -1,0 +1,134 @@
+// P6: value numbering along the CHK dominator tree. Pure expressions survive
+// calls/stores; loads have a separate block-local table invalidated by effects.
+// No commutative sorting or Float reassociation: keys preserve operand order.
+fn opt_cse_pure(inst: LIRInst) -> Bool Never! {
+    if inst == {
+        .Binary(_, _, _, _) | .Compare(_, _, _, _) | .PointerAdd(_, _, _) |
+        .DataAddress(_, _) | .FunctionAddress(_, _) | .Convert(_, _) | .Bitcast(_, _) -> true
+        else -> false
+    }
+}
+
+fn opt_cse_key(function: LIRFunction, inst: LIRInst, dst: LIRValueID) -> String Never! {
+    expression :: if inst == {
+        .Binary(_, op, a, b) -> "binary|{lir_print_binary(op)}|{a.value}|{b.value}"
+        .Compare(_, condition, a, b) -> "compare|{lir_print_condition(condition)}|{a.value}|{b.value}"
+        .PointerAdd(_, base, offset) -> "pointer|{base.value}|{offset.value}"
+        .DataAddress(_, data) -> "data|{data.value}"
+        .FunctionAddress(_, target) -> "function|{target.value}"
+        .Convert(_, src) -> "convert|{src.value}"
+        .Bitcast(_, src) -> "bitcast|{src.value}"
+        else -> ""
+    }
+    value :: function.values[dst.value]
+    type_key :: if value.jet_type == .Val(ty) -> "type:{ty.value}" else -> "no-type"
+    "{expression}|{lir_print_layout(value.layout)}|{value.layout.align}|{type_key}"
+}
+
+fn opt_cse_same_load(left: LIRInst, right: LIRInst) -> Bool Never! {
+    if left == .Load(_, base, offset) {
+        if right == .Load(_, other_base, other_offset) -> return base == other_base && offset == other_offset
+    }
+    false
+}
+
+fn opt_cse_lookup(function: LIRFunction, available: [LIRInst], inst: LIRInst, dst: LIRValueID) -> LIRValueID? {
+    loop previous in available {
+        if lir_inst_def(previous) == .Val(candidate) {
+            before :: function.values[candidate.value]
+            after :: function.values[dst.value]
+            if before.layout == after.layout && before.drop == after.drop && before.jet_type == after.jet_type && opt_cse_same_load(previous, inst) -> return Val(candidate)
+        }
+    }
+    None
+}
+
+fn lir_cse_function(original: LIRFunction) -> LIRFunction Never! {
+    function := original
+    dom :: opt_dominators(function)
+    aliases := opt_facts(function.values.len())
+    consumed := [Bool]{}
+    loop _ in function.values -> &consumed.push(false)
+    // Aliasing either a consumed result or a result to a consumed value can
+    // extend/merge ownership lifetimes. Refuse all such results, even when the
+    // consume is in another block. Nontrivial loads likewise cannot be shared.
+    loop block in function.blocks {
+        loop inst in block.insts {
+            loop value in lir_inst_consumes(inst) -> consumed[value.value] = true
+        }
+    }
+    available := [String:Int]{}
+    undo := [String]{}
+    count := 0
+    marks := [Int]{}
+    loop _ in function.blocks -> &marks.push(0)
+    changed := false
+    loop event in opt_dom_events(dom) {
+        if event < 0 {
+            row :: -event - 1
+            loop count > marks[row] {
+                count -= 1
+                available[undo[count]] = -1
+            }
+            next
+        }
+        row :: event
+        marks[row] = count
+        loads := [LIRInst]{}
+        insts := [LIRInst]{}
+        lines := [Int]{}
+        loop (index, original_inst) in function.blocks[row].insts {
+            inst :: opt_rename_inst(aliases, original_inst)
+            pure :: opt_cse_pure(inst)
+            load := false
+            if inst == .Load(_, _, _) -> load = true
+            replaced := false
+            if pure || load {
+                if lir_inst_def(inst) == .Val(dst) {
+                    if !consumed[dst.value] && function.values[dst.value].drop == .Trivial {
+                        if load {
+                            if opt_cse_lookup(function, loads, inst, dst) == .Val(value) {
+                                aliases.alias[dst.value] = value.value
+                                replaced = true
+                            } else {
+                                &loads.push(inst)
+                            }
+                        } else {
+                            key :: opt_cse_key(function, inst, dst)
+                            candidate :: available.get(key) ?? -1
+                            if candidate >= 0 {
+                                aliases.alias[dst.value] = candidate
+                                replaced = true
+                            } else {
+                                if available.get(key) == None -> &available.add(key, dst.value).drop("key checked absent")
+                                else -> available[key] = dst.value
+                                if count < undo.len() -> undo[count] = key else -> &undo.push(key)
+                                count += 1
+                            }
+                        }
+                        if replaced -> changed = true
+                    }
+                }
+            }
+            if !replaced {
+                &insts.push(inst)
+                &lines.push(opt_debug_line(function.blocks[row], index))
+            }
+            // New effectful variants must join this barrier (as well as the
+            // exhaustive LIR helper matches).
+            if inst == {
+                .Call(_, _, _, _) | .InlineAsm(_, _, _, _, _) | .Store(_, _, _) | .Drop(_) | .Move(_, _) | .Reown(_, _) -> { loads = [LIRInst]{} }
+                else -> {}
+            }
+        }
+        &lines.push(opt_debug_line(function.blocks[row], function.blocks[row].insts.len()))
+        function.blocks[row].lines = lines
+        function.blocks[row].insts = insts
+        function.blocks[row].terminator = opt_rename_terminator(aliases, function.blocks[row].terminator)
+    }
+    if !changed -> return original.copy()
+    // Storage order need not match dominance order. Rename every edge/use,
+    // including unreachable storage rows, before removing undefined aliases.
+    opt_rename_all(&function, aliases)
+    opt_compact(function)
+}

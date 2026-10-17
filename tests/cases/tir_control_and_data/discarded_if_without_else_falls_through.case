@@ -1,0 +1,18 @@
+# HAND-PORT tests/tir_control_and_data.rs:1235-1259 discarded_if_without_else_falls_through
+# PENDING-KIT; no runtime/reference proof.
+# Exact original source and literal outputs/status on named execution modes; rustc guards erased; original AOT helper TIR_TEST_PACKAGE retained separately from application policy; full original stderr equality retained.
+fixture: discarded_if_without_else_falls_through.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = discarded_if_without_else_falls_through.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = discarded_if_without_else_falls_through.stdout.expected
+stderr: == default
+step: jet build aot/main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = discarded_if_without_else_falls_through.stdout.expected
+stderr: == default

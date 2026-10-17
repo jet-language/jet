@@ -68,7 +68,6 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
         "root:Tools/gauntlet/entries",
         "root:tests/agent_workloads/adapters",
         "root:tests/compiled_workloads/adapters/jet",
-        "file:dogfood/jetpack/src/cli/main.jet",
     ] {
         assert!(
             matches!(source_profile(selector), "typed-cli" | "typed-cli-doc"),
@@ -88,11 +87,6 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
     ] {
         assert_eq!(source_profile(selector), "raw-cli", "raw boundary drifted: {selector}");
     }
-    assert_eq!(
-        source_profile("file:dogfood/tower/run.jet"),
-        "non-cli",
-        "domain-policy dogfood is not a CLI recipe"
-    );
     for selector in [
         "producer:Source/CmdCompile.rs#run_new.native_run_src",
         "producer:crates/jet-pkg-model/src/Package/Convert.rs#new_template",
@@ -105,6 +99,37 @@ fn cli_recipe_inventory_is_manifest_owned_and_ast_checked() {
                 .any(|producer| producer.selector == selector),
             "missing CLI starter producer row: {selector}"
         );
+    }
+}
+
+#[test]
+fn jetpack_engine_entry_is_the_ratified_raw_process_protocol() {
+    let policy = CorpusPolicy::load().unwrap();
+    let entry = policy
+        .manifest()
+        .sources
+        .iter()
+        .find(|source| source.selector == "file:Jetpack/CLI/Source/Entry/Main.jet")
+        .expect("engine protocol source is inventoried");
+    assert_eq!(entry.role, SourceRole::RawProtocol);
+    assert_eq!(entry.profile, "protocol");
+    assert_eq!(entry.decision, "D-JPK-DISPATCH1=B");
+    let source = include_str!("../Jetpack/CLI/Source/Entry/Main.jet");
+    let (tokens, lex_errors) = jet::Lexer::lex(source);
+    assert!(lex_errors.is_empty(), "{lex_errors:?}");
+    let program = jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        jet::Parser::parse(&tokens).expect("engine protocol source parses")
+    });
+    assert!(jet_foundation::CLISchema::entry_schema(&program.items).is_none());
+    for symbol in [
+        "cli_jetpack_main",
+        "ENGINE_PROTOCOL_FLAG",
+        "COMPILER_VERSION",
+        "EXTENSION_HOST_SUBCOMMAND",
+        "BUILD_PLUGIN_HOST_SUBCOMMAND",
+        "cli_run",
+    ] {
+        assert!(source.contains(symbol), "engine protocol lost {symbol}");
     }
 }
 
@@ -125,13 +150,40 @@ fn fixture_roles_and_approved_builder_boundary_are_explicit() {
 
     let builder = policy
         .evaluate_source(
-            "dogfood/jetpack/src/cli/main.jet",
+            "Jetpack/CLI/Source/Entry/Main.jet",
             "fn run() {\n    args.spec()\n    process.argv()\n}",
         )
         .unwrap();
     assert!(builder.iter().all(|violation| {
         violation.rule != "raw-cli-fixed-shape" && violation.rule != "raw-cli-builder-shape"
     }));
+}
+
+#[test]
+fn inline_package_keeps_the_reviewed_shield_group_site() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/features/concurrency/shield_commit.jet";
+    let source = include_str!("../Examples/features/concurrency/shield_commit.jet");
+    let violations = policy
+        .evaluate_source(path, source)
+        .expect("inline package must preserve exact AST exception offsets");
+    assert!(violations.is_empty(), "{violations:?}");
+    let shifted = format!("\n{source}");
+    let error = policy
+        .evaluate_source(path, &shifted)
+        .expect_err("moving a reviewed site still requires a new exact review");
+    assert!(error.contains("stmt:task.group@699..827"), "{error}");
+}
+
+#[test]
+fn cancellation_capsule_keeps_one_exact_shielded_loser_join() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/features/concurrency/conformance_capsule.jet";
+    let source = include_str!("../Examples/features/concurrency/conformance_capsule.jet");
+    assert!(policy.evaluate_source(path, source).unwrap().is_empty());
+    let shifted = format!("\n{source}");
+    let error = policy.evaluate_source(path, &shifted).unwrap_err();
+    assert!(error.contains("stmt:task.group@4382..4510"), "{error}");
 }
 
 #[test]
@@ -156,7 +208,7 @@ fn manifest_rejects_a_scope_without_source_coverage() {
     let policy = CorpusPolicy::load().unwrap();
     let mut manifest = policy.manifest().clone();
     manifest.scopes.push(RuleScopeRow {
-        rule: "entry-implicit".to_string(),
+        rule: "entry-explicit".to_string(),
         selector: "file:unclassified/entry.jet".to_string(),
         reason: "synthetic uncovered scope".to_string(),
     });
@@ -170,32 +222,32 @@ fn manifest_rejects_a_scope_without_source_coverage() {
 fn manifest_rejects_a_finding_without_an_executable_guard() {
     let policy = CorpusPolicy::load().unwrap();
     let mut manifest = policy.manifest().clone();
-    manifest.scopes.retain(|scope| scope.rule != "entry-implicit");
+    manifest.scopes.retain(|scope| scope.rule != "entry-explicit");
     let error = manifest
         .validate()
         .expect_err("every finding must retain a corpus or domain guard");
-    assert!(error.contains("entry-implicit has no executable corpus or domain guard"), "{error}");
+    assert!(error.contains("entry-explicit has no executable corpus or domain guard"), "{error}");
 }
 
 #[test]
 fn exception_matching_is_occurrence_scoped() {
     let policy = CorpusPolicy::load().unwrap();
-    let site = "fn:run@0..0".to_string();
+    let site = "call:process.argv@0..0".to_string();
     let candidate = SemanticViolation::new(
-        "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
-        "entry-implicit",
+        "tests/ui/args_spec_bad_parse_arity.jet",
+        "raw-cli-fixed-shape",
         site,
     );
     policy
         .validate_occurrences(
-            "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
+            "tests/ui/args_spec_bad_parse_arity.jet",
             std::slice::from_ref(&candidate),
         )
         .expect("the recorded single occurrence is accepted");
     let duplicate = vec![candidate.clone(), candidate];
     let error = policy
         .validate_occurrences(
-            "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
+            "tests/ui/args_spec_bad_parse_arity.jet",
             &duplicate,
         )
         .expect_err("a second occurrence cannot reuse one exception");
@@ -321,13 +373,53 @@ fn maintained_guidance_allow_explains_itself_at_the_source_site() {
 }
 
 #[test]
+fn explicit_entry_rule_matches_ordinary_file_execution() {
+    let policy = CorpusPolicy::load().unwrap();
+    for path in [
+        "Examples/features/basics/hello.jet",
+        "Examples/features/types/entry_law.jet",
+        "Examples/learn/entry_law.jet",
+        "tests/agent_workloads/llm_digest/first_program.jet",
+    ] {
+        for source in [
+            r#"fn run() { print("hello") }"#,
+            r#"VALUE :: 1
+fn helper() -> Int { VALUE }
+fn run() { print(helper()) }"#,
+            r#"fn helper() -> Int { 1 }"#,
+        ] {
+            let violations = policy.evaluate_source(path, source).unwrap();
+            assert!(
+                !violations.iter().any(|violation| violation.rule == "entry-explicit"),
+                "explicit execution and declaration-only files must be accepted: {path}: {violations:?}"
+            );
+        }
+        for (source, expected) in [
+            (r#"print("hello")"#, 1),
+            (r#"print("before")
+fn run() { print("inside") }
+print("after")"#, 2),
+        ] {
+            let violations = policy.evaluate_source(path, source).unwrap();
+            let entries = violations
+                .iter()
+                .filter(|violation| violation.rule == "entry-explicit")
+                .collect::<Vec<_>>();
+            assert_eq!(entries.len(), expected, "loose execution: {path}");
+            assert!(entries.iter().all(|violation| violation.site.starts_with("stmt:top-level@")));
+        }
+    }
+    assert!(!policy.manifest().exceptions.iter().any(|exception| exception.rule == "entry-explicit"));
+}
+
+#[test]
 fn card_2375_rules_reject_each_reintroduced_ceremony() {
     let policy = CorpusPolicy::load().unwrap();
     let cases = [
         (
             "Examples/features/basics/hello.jet",
-            r#"fn run() { print("hello") }"#,
-            "entry-implicit",
+            r#"print("hello")"#,
+            "entry-explicit",
         ),
         (
             "Docs/spec/guides/first-hour.md",
@@ -370,7 +462,7 @@ fn run() -[FS, IO]> {
             r#"use core.files as fs
 fn run() {
     path :: "input.txt"
-    text :: fs.read(~path)
+    text :: fs.read(path.copy())
 }"#,
             "readonly-copy",
         ),
@@ -472,7 +564,7 @@ fn every_response_binding_renderer_uses_the_shared_decoder_policy() {
         .collect::<Vec<_>>();
     assert_eq!(response_producers.len(), 7);
 
-    let source = "fn decode_response(raw: String, code: Int) -> DataTree Err! { return Ok(DataTree.Null) }";
+    let source = "fn decode_response(raw: String, code: Int) -> Dyn Err! { return Ok(Dyn.Null) }";
     for producer in response_producers {
         let violations = policy
             .evaluate_generated(&producer.selector, source)
@@ -490,7 +582,7 @@ fn walk_policy_distinguishes_file_only_filters_from_directory_tree_walks() {
     let policy = CorpusPolicy::load().unwrap();
     let file_only = policy
         .evaluate_source(
-            "dogfood/jetpack/tests/transcript.jet",
+            "Jetpack/Store/Tests/StoreIngest.jet",
             "use core.files as fs
 fn run() {
     entries :: fs.walk(root)
@@ -506,7 +598,7 @@ fn run() {
 
     let unrelated_walk_and_filter = policy
         .evaluate_source(
-            "dogfood/jetpack/tests/transcript.jet",
+            "Jetpack/Store/Tests/StoreIngest.jet",
             "use core.files as fs
 fn walk() {
     entries :: fs.walk(root)
@@ -522,7 +614,7 @@ fn filter(entry: Entry) {
 
     let tree = policy
         .evaluate_source(
-            "dogfood/jetpack/tests/transcript.jet",
+            "Jetpack/Store/Tests/StoreIngest.jet",
             "use core.files as fs
 fn run() {
     entries :: fs.walk(root)
@@ -628,22 +720,22 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
 
     let generic_policy = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
-            "fn duplicate_equal(left: DataTree, right: DataTree) -> Bool { return true }",
+            "Tools/tower/run.jet",
+            "fn duplicate_equal(left: Dyn, right: Dyn) -> Bool { return true }",
         )
         .unwrap();
     assert!(generic_policy
         .iter()
-        .any(|violation| violation.rule == "datatree-domain-policy"));
+        .any(|violation| violation.rule == "dyn-domain-policy"));
     let named_policy = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
-            "fn javascript_truthy(value: DataTree) -> Bool { return true }",
+            "Tools/tower/run.jet",
+            "fn javascript_truthy(value: Dyn) -> Bool { return true }",
         )
         .unwrap();
     assert!(!named_policy
         .iter()
-        .any(|violation| violation.rule == "datatree-domain-policy"));
+        .any(|violation| violation.rule == "dyn-domain-policy"));
 
     let mut lower_ladder = String::from("\"text\"");
     for (from, to) in ('A'..='Z').zip('a'..='z') {
@@ -651,7 +743,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
     }
     let ladder = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/path_laws.jet",
+            "Jetpack/PackageModel/Source/Envelope/PathLaw.jet",
             &format!("fn run() {{ value :: {lower_ladder} }}"),
         )
         .unwrap();
@@ -660,7 +752,7 @@ fn semantic_migration_rules_match_only_their_structural_shapes() {
         .any(|violation| violation.rule == "dogfood-ascii"));
     let partial = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/path_laws.jet",
+            "Jetpack/PackageModel/Source/Envelope/PathLaw.jet",
             "fn run() { value :: \"text\".replace(\"A\", \"a\").replace(\"B\", \"b\") }",
         )
         .unwrap();
@@ -816,7 +908,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let path = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/ingest.jet",
+            "Jetpack/Store/Source/Ingest/TreeIngest.jet",
             "fn run() { allowed :: candidate.starts_with(\"root/\") }",
         )
         .unwrap();
@@ -825,7 +917,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-path-containment"));
     let path_without_prefix = policy
         .evaluate_source(
-            "dogfood/jetpack/src/store/ingest.jet",
+            "Jetpack/Store/Source/Ingest/TreeIngest.jet",
             "fn run() { allowed :: candidate == root }",
         )
         .unwrap();
@@ -835,7 +927,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let json = policy
         .evaluate_source(
-            "dogfood/jetpack/src/cli/main.jet",
+            "Jetpack/CLI/Source/Entry/Main.jet",
             r#"fn run() { wire :: "{{\"key\": {value}}}" }"#,
         )
         .unwrap();
@@ -844,7 +936,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-json"));
     let typed_json = policy
         .evaluate_source(
-            "dogfood/jetpack/src/cli/main.jet",
+            "Jetpack/CLI/Source/Entry/Main.jet",
             "fn run() { wire :: json.to_string(value) }",
         )
         .unwrap();
@@ -854,7 +946,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let query = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
+            "Tools/tower/run.jet",
             "fn run() { fields :: query.split(\"&\") }",
         )
         .unwrap();
@@ -863,7 +955,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-url-query"));
     let query_api = policy
         .evaluate_source(
-            "dogfood/tower/run.jet",
+            "Tools/tower/run.jet",
             "fn run() { fields :: url.query() }",
         )
         .unwrap();
@@ -873,7 +965,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
 
     let equality = policy
         .evaluate_source(
-            "dogfood/jetpack/src/plan/plan.jet",
+            "Jetpack/CLI/Source/Realize/ProjectPlan.jet",
             "fn run() { same_strings(left, right) }",
         )
         .unwrap();
@@ -882,7 +974,7 @@ fn scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes() {
         .any(|violation| violation.rule == "dogfood-list-equality"));
     let direct_equality = policy
         .evaluate_source(
-            "dogfood/jetpack/src/plan/plan.jet",
+            "Jetpack/CLI/Source/Realize/ProjectPlan.jet",
             "fn run() { left == right }",
         )
         .unwrap();
@@ -897,7 +989,7 @@ fn generated_decoder_policy_requires_the_canonical_decoder_symbol() {
     let violations = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_other(raw: String, code: Int) -> DataTree Err! { return Ok(DataTree.Null) }",
+            "fn decode_other(raw: String, code: Int) -> Dyn Err! { return Ok(Dyn.Null) }",
         )
         .unwrap();
     assert_eq!(violations.len(), 1);
@@ -910,7 +1002,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let raw_json = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) -> DataTree Err! { return Ok(json.parse(raw)) }",
+            "fn decode_response(raw: String, code: Int) -> Dyn Err! { return Ok(json.parse(raw)) }",
         )
         .unwrap();
     assert!(raw_json.is_empty(), "raw JSON override is distinct: {raw_json:?}");
@@ -918,7 +1010,7 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     let ordinary = policy
         .evaluate_generated(
             "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet",
-            "fn decode_response(raw: String, code: Int) -> DataTree Err! {
+            "fn decode_response(raw: String, code: Int) -> Dyn Err! {
     response :: json.parse(raw)
     ok :: response.field(\"ok\")
     return Ok(response)
@@ -928,4 +1020,43 @@ fn generated_protocol_override_requires_a_distinct_envelope_shape() {
     assert!(ordinary
         .iter()
         .any(|violation| violation.rule == "generated-protocol-override"));
+}
+
+#[test]
+fn package_manifest_snapshots_preserve_canonical_authority_meaning() {
+    let policy = CorpusPolicy::load().unwrap();
+    for (snapshot, expected) in [("base", vec!["FS".to_string()]), ("head", vec!["FS".to_string(), "Net".to_string()])] {
+        let path = format!("Examples/learn/semantic_review/02_authority/{snapshot}.package.jet");
+        let source = std::fs::read_to_string(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(&path)).unwrap();
+        assert!(policy.evaluate_source(&path, &source).unwrap().is_empty());
+        let facts = jet::Package::PackageFacts::parse(&source, &path).unwrap();
+        assert_eq!(facts.name, "review_authority");
+        assert_eq!(facts.version.as_deref(), Some("0.1.0"));
+        assert_eq!(facts.edition.as_deref(), Some("2026"));
+        assert_eq!(facts.authority.holds.allow, Some(expected));
+    }
+}
+
+#[test]
+fn package_manifest_snapshot_registry_does_not_skip_ordinary_jet_filenames() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/learn/semantic_review/02_authority/ordinary.package.jet";
+    assert!(policy.evaluate_source(path, "fn run() { value :: 1 }").unwrap().is_empty());
+    let error = policy.evaluate_source(path, "fn run() { value: Int = 1 }").unwrap_err();
+    assert!(error.contains("Jet parser rejected corpus source"), "{error}");
+    assert!(error.contains("E0003"), "{error}");
+}
+
+#[test]
+fn package_manifest_snapshots_reject_invalid_manifest_meaning() {
+    let policy = CorpusPolicy::load().unwrap();
+    let path = "Examples/learn/semantic_review/02_authority/base.package.jet";
+    for source in [
+        "name: \"review_authority\"\nunknown_field: true\n",
+        "name: \"review_authority\"\nauthority: { holds: { allow: 42 } }\n",
+        "fn run() { value :: 1 }\n",
+    ] {
+        let error = policy.evaluate_source(path, source).unwrap_err();
+        assert!(error.contains("Package parser rejected corpus snapshot"), "{error}");
+    }
 }

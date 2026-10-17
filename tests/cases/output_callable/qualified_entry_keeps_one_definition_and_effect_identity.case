@@ -1,0 +1,13 @@
+# Port of tests/output_callable.rs::qualified_entry_keeps_one_definition_and_effect_identity; original sources and predicates.
+# ORACLE-LITERAL; PENDING-SAME-HEAD (heavy lane paused); no reference capture blessed.
+# Name-ledger anchor span/path identity remains PENDING-SEAM(compiler-lib); generated Rust symbol-text retires.
+fixture: qualified_entry_keeps_one_definition_and_effect_identity.fixture
+env: NO_COLOR=1
+step: jet inspect output main.jet --json
+exit: 0
+json: stdout doc $.output.callable_identity ^= "helper::" # original predicate/public projection
+json: stdout doc $.output.entry = "start"
+json: stdout doc $.output.authority = "safe-jet"
+json: stdout doc $.output.effects[*] #>= 1 # original nonempty effect row
+step: jet run --interpret main.jet
+exit: 0

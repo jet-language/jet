@@ -2,10 +2,10 @@
 // SemVer/range admission and diagnostic metadata have their canonical owners.
 // SemVer/compiler proof gates #4313/#4403, #4303 borrowed trim ABI, and
 // #4414 String.split iterator next() returning None remain; no alternate parser.
-pub enum PublicationResolveMode { Conservative Latest Lowest LowestDirect }
+enum PublicationResolveMode { Conservative Latest Lowest LowestDirect }
 
-pub fn publication_resolve_mode_default() -> PublicationResolveMode Never! { PublicationResolveMode.Conservative }
-pub fn publication_resolve_mode_label(mode: PublicationResolveMode) -> String Never! {
+fn publication_resolve_mode_default() -> PublicationResolveMode Never! { PublicationResolveMode.Conservative }
+fn publication_resolve_mode_label(mode: PublicationResolveMode) -> String Never! {
     if mode == {
         .Conservative -> "conservative"
         .Latest -> "latest"
@@ -14,19 +14,19 @@ pub fn publication_resolve_mode_label(mode: PublicationResolveMode) -> String Ne
     }
 }
 
-pub struct PublicationVersionConstraint {
-    pub package: String
-    pub req: PublicationVersionReq
-    pub from: String
+struct PublicationVersionConstraint {
+    package: String
+    req: PublicationVersionReq
+    from: String
 }
 
-pub struct PublicationSolverCandidate {
-    pub version: PublicationSemVer
-    pub dependencies: [PublicationVersionConstraint]
+struct PublicationSolverCandidate {
+    version: PublicationSemVer
+    dependencies: [PublicationVersionConstraint]
     // Set-valued Rust fields use unique lists, comparing canonical precedence.
-    pub rejected: [String: [PublicationSemVer]]
-    pub preferred: [String: [PublicationVersionReq]]
-    pub strict: [String]
+    rejected: [String: [PublicationSemVer]]
+    preferred: [String: [PublicationVersionReq]]
+    strict: [String]
 }
 
 struct PublicationSolverState {
@@ -40,8 +40,8 @@ struct PublicationSolverState {
 // Rust Result<T, Diagnostic> uses Jet's one fallible return mechanism; the
 // wrapper preserves the complete canonical Diagnostic unchanged.
 #Error
-pub struct PublicationDiagnosticError {
-    pub diagnostic: Diagnostic
+struct PublicationDiagnosticError {
+    diagnostic: Diagnostic
 }
 
 fn publication_satisfies_all(version: PublicationSemVer, constraints: [PublicationVersionConstraint]) -> Bool Never! {
@@ -53,7 +53,7 @@ fn publication_satisfies_all(version: PublicationSemVer, constraints: [Publicati
 
 // select_highest_compatible / select_compatible (:45-116). The winner is
 // tracked by index (Rust returns a borrow) and copied once when returned.
-pub fn publication_select_highest_compatible(package: String, constraints: [PublicationVersionConstraint], available: [PublicationSemVer]) -> PublicationSemVer PublicationDiagnosticError! {
+fn publication_select_highest_compatible(package: String, constraints: [PublicationVersionConstraint], available: [PublicationSemVer]) -> PublicationSemVer PublicationDiagnosticError! {
     winner := Int?{None}
     loop index in 0..<available.len() {
         if !publication_satisfies_all(available[index], constraints) -> next
@@ -63,7 +63,7 @@ pub fn publication_select_highest_compatible(package: String, constraints: [Publ
         }
         winner = Val(index)
     }
-    if winner == .Val(index) -> return Ok(~available[index])
+    if winner == .Val(index) -> return Ok(available[index].copy())
     reason := "the registry has no published candidate"
     if constraints.len() >= 2 {
         reason = "the registry has no candidate in the overlapping range"
@@ -76,7 +76,7 @@ pub fn publication_select_highest_compatible(package: String, constraints: [Publ
     Err(PublicationDiagnosticError{diagnostic: publication_proof_diagnostic(package, constraints, reason)})
 }
 
-pub fn publication_select_compatible(package: String, constraints: [PublicationVersionConstraint], available: [PublicationSemVer], mode: PublicationResolveMode) -> PublicationSemVer PublicationDiagnosticError! {
+fn publication_select_compatible(package: String, constraints: [PublicationVersionConstraint], available: [PublicationSemVer], mode: PublicationResolveMode) -> PublicationSemVer PublicationDiagnosticError! {
     if mode == PublicationResolveMode.Conservative || mode == PublicationResolveMode.Latest -> return publication_select_highest_compatible(package, constraints, available)
     winner := Int?{None}
     loop index in 0..<available.len() {
@@ -87,16 +87,16 @@ pub fn publication_select_compatible(package: String, constraints: [PublicationV
         }
         winner = Val(index)
     }
-    if winner == .Val(index) -> return Ok(~available[index])
+    if winner == .Val(index) -> return Ok(available[index].copy())
     publication_select_highest_compatible(package, constraints, available)
 }
 
 // solve_registry (:160-177). Lists for update_scope/direct have set semantics.
-pub fn publication_solve_registry(roots: [PublicationVersionConstraint], candidates: [String: [PublicationSolverCandidate]], locked: [String: String], update_scope: [String], mode: PublicationResolveMode, direct: [String]) -> [String: PublicationSemVer] PublicationDiagnosticError! {
+fn publication_solve_registry(roots: [PublicationVersionConstraint], candidates: [String: [PublicationSolverCandidate]], locked: [String: String], update_scope: [String], mode: PublicationResolveMode, direct: [String]) -> [String: PublicationSemVer] PublicationDiagnosticError! {
     state := PublicationSolverState{constraints: [String: [PublicationVersionConstraint]]{}, assignments: [String: PublicationSemVer]{}, rejected: [String: [PublicationSemVer]]{}, preferred: [String: [PublicationVersionReq]]{}, strict: [String]{}}
     loop root in roots {
         if !state.constraints.has_key(root.package) -> state.constraints[root.package] = [PublicationVersionConstraint]{}
-        &state.constraints[root.package].push(~root)
+        &state.constraints[root.package].push(root.copy())
     }
     publication_solve_registry_state(state, candidates, locked, update_scope, mode, direct)
 }
@@ -139,11 +139,11 @@ fn publication_solve_registry_state(state: PublicationSolverState, candidates: [
     unresolved := String?{None}
     loop name in packages {
         if !state.assignments.has_key(name) {
-            unresolved = Val(~name)
+            unresolved = Val(name.copy())
             break
         }
     }
-    if unresolved == None -> return Ok(~state.assignments)
+    if unresolved == None -> return Ok(state.assignments.copy())
     package :: unresolved ?? panic("unresolved package was established")
     requirements :: state.constraints.get(package) ?? [PublicationVersionConstraint]{}
     rejected :: state.rejected.get(package) ?? [PublicationSemVer]{}
@@ -168,24 +168,24 @@ fn publication_solve_registry_state(state: PublicationSolverState, candidates: [
     branches := [String]{}
     loop index in viable {
         candidate :: live[index]
-        branch := ~state
-        branch.assignments[package] = ~candidate.version
+        branch := state.copy()
+        branch.assignments[package] = candidate.version.copy()
         loop dependency in candidate.dependencies {
             if !branch.constraints.has_key(dependency.package) -> branch.constraints[dependency.package] = [PublicationVersionConstraint]{}
-            &branch.constraints[dependency.package].push(~dependency)
+            &branch.constraints[dependency.package].push(dependency.copy())
         }
         loop name in candidate.rejected.keys() {
             if !branch.rejected.has_key(name) -> branch.rejected[name] = [PublicationSemVer]{}
             loop version in candidate.rejected[name] {
-                if !branch.rejected[name].contains(version) -> &branch.rejected[name].push(~version)
+                if !branch.rejected[name].contains(version) -> &branch.rejected[name].push(version.copy())
             }
         }
         loop name in candidate.preferred.keys() {
             if !branch.preferred.has_key(name) -> branch.preferred[name] = [PublicationVersionReq]{}
-            loop rule in candidate.preferred[name] -> &branch.preferred[name].push(~rule)
+            loop rule in candidate.preferred[name] -> &branch.preferred[name].push(rule.copy())
         }
         loop name in candidate.strict {
-            if !branch.strict.contains(name) -> &branch.strict.push(~name)
+            if !branch.strict.contains(name) -> &branch.strict.push(name.copy())
         }
         if publication_solve_registry_state(branch, candidates, locked, update_scope, mode, direct) == {
             .Ok(assignments) -> { return Ok(assignments) }
@@ -254,7 +254,7 @@ fn publication_indent_proof(detail: String) -> String Never! {
     lines.join("\n")
 }
 
-pub fn publication_e2602(package: String, req_a: String, from_a: String, req_b: String, from_b: String) -> Diagnostic Never! {
+fn publication_e2602(package: String, req_a: String, from_a: String, req_b: String, from_b: String) -> Diagnostic Never! {
     diagnostic_from_registry("E2602", None,
         "dependency resolver conflict: `{package}` has incompatible version requirements",
         "`{package}` requires `{req_a}` from `{from_a}`, but `{req_b}` from `{from_b}`; no version satisfies both.",
@@ -266,7 +266,7 @@ pub fn publication_e2602(package: String, req_a: String, from_a: String, req_b: 
 fn publication_constraints_have_release(requirements: [PublicationVersionConstraint], index: Int, bounds: PublicationReleaseBounds) -> Bool Never! {
     if index == requirements.len() -> return true
     loop set in requirements[index].req.sets {
-        branch_bounds := ~bounds
+        branch_bounds := bounds.copy()
         if !publication_constrain_release_bounds(set, &branch_bounds) -> next
         if publication_precedence(branch_bounds.lower, branch_bounds.upper) == Ordering.Greater -> next
         if publication_constraints_have_release(requirements, index + 1, branch_bounds) -> return true
@@ -282,7 +282,7 @@ fn publication_all_constraints_diagnostic(package: String, requirements: [Public
     remaining_from := [String]{}
     loop index in 1..<requirements.len() {
         &remaining_ranges.push(publication_version_req_display(requirements[index].req))
-        &remaining_from.push(~requirements[index].from)
+        &remaining_from.push(requirements[index].from.copy())
     }
     req_b :: remaining_ranges.join("` and `")
     from_b :: remaining_from.join("` and `")
@@ -299,11 +299,11 @@ fn publication_all_constraints_diagnostic(package: String, requirements: [Public
 
 // check_conflicts (:449-501), including Main-authorized Rust tandem: an empty
 // whole-set intersection cannot silently pass just because pairs have witnesses.
-pub fn publication_check_conflicts(constraints: [PublicationVersionConstraint], available: [String: [PublicationSemVer]]) -> [Diagnostic] Never! {
+fn publication_check_conflicts(constraints: [PublicationVersionConstraint], available: [String: [PublicationSemVer]]) -> [Diagnostic] Never! {
     grouped := [String: [PublicationVersionConstraint]]{}
     loop constraint in constraints {
         if !grouped.has_key(constraint.package) -> grouped[constraint.package] = [PublicationVersionConstraint]{}
-        &grouped[constraint.package].push(~constraint)
+        &grouped[constraint.package].push(constraint.copy())
     }
     packages := grouped.keys().to_list()
     &packages.sort()
@@ -333,7 +333,7 @@ pub fn publication_check_conflicts(constraints: [PublicationVersionConstraint], 
                         }
                     }
                     if !pair_ok {
-                        &diagnostics.push(publication_proof_diagnostic(package, [PublicationVersionConstraint]{~a, ~b}, "available versions cannot satisfy both requirements"))
+                        &diagnostics.push(publication_proof_diagnostic(package, [PublicationVersionConstraint]{a.copy(), b.copy()}, "available versions cannot satisfy both requirements"))
                         reported = true
                         break
                     }

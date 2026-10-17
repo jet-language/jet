@@ -1,0 +1,62 @@
+// Subject program port of tests/fixtures/process_sessions/session_fixture.rs:8-55,80-96.
+// Observable output, allocation/open-handle pressure, and descendant lifetime are
+// unchanged. The assertions belong to the .case files, not this child program.
+// The terminal subject is PENDING-SEAM(term-is-terminal): width/height alone do
+// not establish that both stdin and stdout are TTYs.
+use core.process as process
+use core.files as files
+use core.time as time
+use core.sys as sys
+
+fn output(size: String) {
+    if size == "small" -> print("ok")
+    else -> print("0123456789abcdef0123456789abcdef")
+}
+
+fn cpu() {
+    loop {}
+}
+
+fn memory() {
+    blocks := [[U8]]{}
+    loop {
+        block := "x".repeat(256 * 1024).bytes()
+        block[0] = U8{1}
+        &blocks.push(block)
+        time.sleep(1ms)
+    }
+}
+
+fn descriptors() {
+    handles := [FileReader]{}
+    path :: if sys.family() == "windows" -> "NUL" else -> "/dev/null"
+    loop {
+        if files.open(path) == {
+            .Ok(handle) -> &handles.push(handle)
+            .Err(_) -> time.sleep(1ms)
+        }
+    }
+}
+
+fn tree(pid_file: String) {
+    executable :: sys.executable()
+    child :: process.cmd([executable, "descendant", pid_file]).spawn() ?? panic("spawn descendant")
+    loop { time.sleep(1s) }
+}
+
+fn descendant(pid_file: String) {
+    files.write(pid_file, "{process.current_pid()}") ?? panic("write descendant pid")
+    loop { time.sleep(1s) }
+}
+
+fn run() {
+    args :: process.argv()
+    mode :: args.get(1) ?? ""
+    if mode == "output" -> output(args.get(2) ?? "large")
+    else if mode == "cpu" -> cpu()
+    else if mode == "memory" -> memory()
+    else if mode == "files" -> descriptors()
+    else if mode == "tree" -> tree(args.get(2) ?? panic("tree needs a pid file"))
+    else if mode == "descendant" -> descendant(args.get(2) ?? panic("descendant needs a pid file"))
+    else -> process.exit(2)
+}

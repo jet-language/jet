@@ -1,0 +1,9 @@
+# Original tests/tir_collections_and_methods.rs:226-252; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: bare_run_rejects_non_unit_entry_contract.fixture
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E1321"][0].what = "Output entry `run` has the wrong callable contract"
+json: stdout doc $.reports[?code="E1321"][0].why = "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`"
+json: stdout doc $.reports[?code="E1321"][0].fix = "declare the entry as `fn run()` or `fn run() ()?`"
+json: stdout doc $.reports[?code="E1321"][0].span != null

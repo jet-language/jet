@@ -2,11 +2,14 @@
 // every enabled `Item.Module`, run each `env.*` field through comptime (or
 // the text-level Pkg-sugar parser for `packages:`), and merge the resulting
 // contributions through the §6 engine.
+use core.sys as envmodel_module_sys
 
 // Parse `src` and evaluate every enabled module it declares. `base_dir`
 // resolves `embed_file` inside contribution expressions, same as ordinary
-// comptime evaluation.
-pub fn envmodel_evaluate_source(src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
+// comptime evaluation. Module values run through the Compiler's comptime
+// path, whose driver makes dynamic host calls, so the evaluation chain
+// declares no effect row.
+fn envmodel_evaluate_source(src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
     program :: envmodel_parse_program(src)
     Ok(envmodel_evaluate_modules(program.items, src, base_dir))
 }
@@ -31,7 +34,7 @@ fn envmodel_last_error(diagnostics: [Diagnostic]) -> Diagnostic? Never! {
 // Lex + parse `src` to a `Program`, collapsing any lex/parse failure to a
 // single diagnostic. The module surface is evaluated, not type-checked, here,
 // so the first lexer error (or the parser's final error) is enough to stop.
-pub fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
+fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
     source :: src.bytes()
     lexed :: lex_config(source)
     if envmodel_first_error(lexed.diagnostics) == {
@@ -51,20 +54,20 @@ pub fn envmodel_parse_program(src: String) -> Program EnvModelEvalError! {
 // such as `"echo $HOME"` is not mistaken for a Jet environment read. String
 // interpolation token streams are walked recursively because they are parsed
 // as expressions by the config parser.
-pub fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEvalError! {
+fn envmodel_environment_reads(src: String) -> [EnvironmentRead] EnvModelEvalError! {
     lexed :: lex(src.bytes())
     if lexed.diagnostics.len() > 0 -> return Err(EnvModelEvalError{diagnostic: lexed.diagnostics[0]})
     reads := [EnvironmentRead]{}
-    envmodel_collect_environment_reads(lexed.tokens, &reads)
+    envmodel_collect_environment_reads(lexed.tokens, lexed.tables, &reads)
     Ok(reads)
 }
 
-fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentRead]) Never! {
+fn envmodel_collect_environment_reads(all_tokens: [Token], tables: TokenTables, reads: &[EnvironmentRead]) Never! {
     tokens :: lexer_without_comments(all_tokens)
-    loop index in 0..<tokens.len() {
-        token :: tokens[index]
-        if token.kind == TOKEN_DOLLAR && index + 1 < tokens.len() && tokens[index + 1].kind == TOKEN_IDENT {
-            name :: "${tokens[index + 1].payload.decoded}"
+    loop token in tokens {
+        // The lexer reads `$NAME` as one identifier word (D-ONCE-DOLLAR1=B).
+        if token.kind == TOKEN_IDENT && token_decoded(tables, token).starts_with(COMPTIME_MARK) {
+            name :: token_decoded(tables, token)
             seen := false
             loop read in reads {
                 if read.name == name -> seen = true
@@ -72,8 +75,8 @@ fn envmodel_collect_environment_reads(all_tokens: [Token], reads: &[EnvironmentR
             if !seen { &reads.push(EnvironmentRead{name: name, ty: TYPE_STRING}) }
         }
         if token.kind == TOKEN_STRING {
-            loop part in token.payload.string_parts {
-                if part.kind == STRING_PART_INTERPOLATION -> envmodel_collect_environment_reads(part.tokens, &reads)
+            loop part in token_string_parts(tables, token) {
+                if part.kind == STRING_PART_INTERPOLATION -> envmodel_collect_environment_reads(part.tokens, tables, &reads)
             }
         }
     }
@@ -84,14 +87,14 @@ fn envmodel_environment_globals(reads: [EnvironmentRead]) -[Env]> [String: CtVal
     globals := [String: CtValue]{}
     loop read in reads {
         name :: read.name.removeprefix("$")
-        globals[read.name] = CtValue.Str{value: sys.get(name) ?? ""}
+        globals[read.name] = CtValue.Str{value: envmodel_module_sys.get(name) ?? ""}
     }
     globals
 }
 
 // Evaluate every enabled `Item.Module` in `items` (already parsed).
-pub fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -[Env]> [EvaluatedModule] EnvModelEvalError! {
-    scope :: ModuleEvalScope{base_dir: base_dir, funcs: envmodel_collect_funcs(items)}
+fn envmodel_evaluate_modules(items: [Item], src: String, base_dir: String) -> [EvaluatedModule] EnvModelEvalError! {
+    scope :: ModuleEvalScope{base_dir: base_dir, source: src, funcs: envmodel_collect_funcs(items)}
     reads :: envmodel_environment_reads(src)
     globals :: envmodel_collect_comptime_globals(items, scope, envmodel_environment_globals(reads))
     out := [EvaluatedModule]{}
@@ -143,6 +146,9 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
     images := [ImagePlan]{}
     environment_contributions := [EnvironmentContribution]{}
     package_profiles := [PackageProfileSpec]{}
+    systems := [SystemPlan]{}
+    fleets := [FleetPlan]{}
+    vmtests := [FleetPlan]{}
     integrations :: envmodel_evaluate_integration_imports(decl.imports, scope, globals)
     source_bytes :: src.bytes()
     loop contribution in decl.contributions {
@@ -163,22 +169,52 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
             .Env(lit) -> {
                 capture :: envmodel_evaluate_env_fields(lit.fields, src, scope, globals, source)
                 services := [DevServicePlan]{}
-                loop service in lit.services -> { &services.push(envmodel_evaluate_dev_service(service, scope, globals)) }
+                loop service in lit.services -> &services.push(envmodel_evaluate_dev_service(service, scope, globals))
                 reads :: envmodel_environment_reads(pkg_bytes_text(source_bytes, contribution.span.start, contribution.span.end))
                 &environment_contributions.push(capture.contribution(contribution.path, reads, services))
                 &entries.push(ModuleEntry{key: ModuleEntryKey{namespace: Namespace.Env, path: contribution.path}, entry: capture.entry})
             }
             .Image(lit) -> { &images.push(envmodel_evaluate_image(contribution.path, lit, scope, globals)) }
             .Profile(lit) -> { &package_profiles.push(envmodel_evaluate_package_profile_fields(contribution.path, lit.fields, src, scope, globals, decl.name)) }
-            // The system/fleet/vmtest tiers belong to the JetOS evaluator and
-            // performance budgets to the performance gate; none of them
-            // carries an environment fact.
-            .System(_) | .Fleet(_) | .VMTest(_) | .Perf(_) -> {}
+            // Fleets and vmtests capture their hosts (E1244/E1245 here, E1242
+            // at plan assembly).
+            .System(lit) -> &systems.push(envmodel_evaluate_system(contribution.path, lit, src, scope, globals))
+            .Fleet(lit) -> {
+                hosts := [HostPlan]?{None}
+                loop field in lit.fields {
+                    if field.value == {
+                        // Rust ModuleEval/System.rs:523-540.
+                        .Hosts(host_entries) -> hosts = Val(envmodel_evaluate_hosts(host_entries, src, scope, globals))
+                        .Other(_) -> return Err(envmodel_error("E1244", "`{field.name}` isn't a field of `Fleet`", "fleet deployment remains frozen jetos research; only `hosts` is captured for planning", "remove `{field.name}`; captured fleets use `hosts: {{ … }}`", Val(field.name_span)))
+                    }
+                }
+                captured :: hosts ?? return Err(envmodel_error("E1245", "this `Fleet` has no `hosts`", "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning", "add `hosts: {{ web1: system.<name> }}` if this is research capture", Val(lit.span)))
+                &fleets.push(FleetPlan{name: contribution.path, hosts: captured})
+            }
+            .VMTest(lit) -> {
+                hosts := [HostPlan]?{None}
+                loop field in lit.fields {
+                    if field.value == {
+                        // Rust ModuleEval/System.rs:571-588: VM hosts use
+                        // the same override evaluator as fleet hosts.
+                        .Hosts(host_entries) -> hosts = Val(envmodel_evaluate_hosts(host_entries, src, scope, globals))
+                        .Run(_) -> {}
+                        .Other(_) -> return Err(envmodel_error("E1244", "`{field.name}` isn't a field of `Fleet`", "fleet deployment remains frozen jetos research; only `hosts` is captured for planning", "remove `{field.name}`; captured fleets use `hosts: {{ … }}`", Val(field.name_span)))
+                    }
+                }
+                captured :: hosts ?? return Err(envmodel_error("E1245", "this `Fleet` has no `hosts`", "fleet deployment is frozen jetos research, but captured fleets still name hosts for later planning", "add `hosts: {{ web1: system.<name> }}` if this is research capture", Val(lit.span)))
+                &vmtests.push(FleetPlan{name: contribution.path, hosts: captured})
+            }
+            // Performance budgets belong to the performance gate.
+            .Perf(_) -> {}
         }
     }
     Ok(EvaluatedModule{
         name: decl.name,
         entries: entries,
+        systems: systems,
+        fleets: fleets,
+        vmtests: vmtests,
         images: images,
         environment_contributions: environment_contributions,
         integrations: integrations,
@@ -188,7 +224,7 @@ fn envmodel_evaluate_module(decl: ModuleDecl, src: String, scope: ModuleEvalScop
 
 // Merge every evaluated module's contributions through the §6 engine,
 // grouping by `(namespace, path)` first, in first-seen key order.
-pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeError! {
+fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] MergeError! {
     keys := [ModuleEntryKey]{}
     grouped := [[EntryContribution]]{}
     loop evaluated in modules {
@@ -211,18 +247,18 @@ pub fn envmodel_merge_all(modules: [EvaluatedModule]) -> [MergedModuleEntry] Mer
         }
     }
     out := [MergedModuleEntry]{}
-    loop position in 0..<keys.len() -> { &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])}) }
+    loop position in 0..<keys.len() -> &out.push(MergedModuleEntry{key: keys[position], entry: pkg_merge_entry(grouped[position])})
     Ok(out)
 }
 
 // One merged `(namespace, path)` entry.
-pub struct MergedModuleEntry {
-    pub key: ModuleEntryKey
-    pub entry: MergedEntry
+struct MergedModuleEntry {
+    key: ModuleEntryKey
+    entry: MergedEntry
 }
 
 // The merged entry for `key`, if any module contributed to it.
-pub fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -> MergedEntry? Never! {
+fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -> MergedEntry? Never! {
     loop item in merged {
         if item.key == key -> return Val(item.entry)
     }
@@ -231,8 +267,160 @@ pub fn envmodel_merged_entry(merged: [MergedModuleEntry], key: ModuleEntryKey) -
 
 // Render one merged `Pkg` as a `<package>@<source>` ref. A bare package (the
 // sugar's empty source) resolves against the conventional `default` source.
-pub fn envmodel_pkg_ref(pkg: Pkg) -> String Never! {
+fn envmodel_pkg_ref(pkg: Pkg) -> String Never! {
     if pkg.source == "" && pkg.name.contains(REF_PROVIDER_AT) -> return pkg.name
     source :: if pkg.source == "" -> DEFAULT_SOURCE else -> pkg.source
     "{pkg.name}{REF_PROVIDER_AT}{source}"
+}
+
+// Rust ModuleEval/System.rs:523-540,571-588. Both host namespaces evaluate
+// overrides before capture; an absent tail stays absent, not an empty record.
+fn envmodel_evaluate_hosts(entries: [HostEntry], src: String, scope: ModuleEvalScope, globals: [String: CtValue]) -> [HostPlan] EnvModelEvalError! {
+    captured := [HostPlan]{}
+    bytes :: src.bytes()
+    loop entry in entries {
+        overrides := HostOverride?{None}
+        override_source := String?{None}
+        if entry.overrides == {
+            .Val(span) -> {
+                source :: pkg_bytes_text(bytes, span.start, span.end).trim()
+                overrides = Val(envmodel_evaluate_host_override(source, span, scope, globals))
+                override_source = Val(source)
+            }
+            .None -> {}
+        }
+        &captured.push(HostPlan{name: entry.name, system: entry.system, overrides: overrides, override_source: override_source})
+    }
+    Ok(captured)
+}
+
+// Rust ModuleEval/System.rs:615-753. Reuse the System parser and the pure
+// named-field graph, resolving generic fields before typed nested values.
+// Port reused from 45acf6f8f SystemFleetEval.jet, matched to the current oracle.
+fn envmodel_evaluate_host_override(source: String, original_span: Span, scope: ModuleEvalScope, globals: [String: CtValue]) -> HostOverride EnvModelEvalError! {
+    wrapped :: "module system.fleet_override {source}"
+    program :: envmodel_parse_program(wrapped) ?? {
+        diagnostic := err.diagnostic
+        diagnostic.span = Val(original_span)
+        return Err(EnvModelEvalError{diagnostic: diagnostic})
+    }
+    found := ModuleDecl?{None}
+    loop item in program.items {
+        if item == {
+            .Module(decl) -> {
+                found = Val(decl)
+                break
+            }
+            else -> {}
+        }
+    }
+    decl :: found ?? return Err(envmodel_error("E0003", "host override is not a record", "fleet overrides use the same record evaluator as system fields", "write `.{{ field: value }}` after the system reference", Val(original_span)))
+    if decl.contributions.len() == 0 -> return Err(envmodel_error("E0003", "host override is empty", "a host override must contain at least one typed field", "add a field inside the override record", Val(original_span)))
+    lit :: if decl.contributions[0].value == {
+        .System(lit) -> lit
+        else -> { return Err(envmodel_error("E0003", "host override is not a system record", "fleet overrides use System field semantics", "write named fields inside `.{{ … }}`", Val(original_span))) }
+    }
+    definitions := [String: NamedFieldExpr]{}
+    loop field in lit.fields {
+        if field.value == {
+            .Other(expr) -> definitions[field.name] = NamedFieldExpr{span: field.span, expr: expr}
+            else -> {}
+        }
+    }
+    computed :: envmodel_evaluate_named_fields(definitions, globals, scope, Val(wrapped), "host override values must have a deterministic dependency order", "break the cycle by making one field independent or by moving the shared computation into a pure function")
+    field_names :: definitions.keys().to_list()
+    prefix_len :: wrapped.bytes().len() - source.bytes().len()
+    fields := [(name: String, value: HostOverrideValue)]{}
+    provenance := [HostOverrideProvenance]{}
+    loop field in lit.fields {
+        value :: if field.value == {
+            .Platform(os, arch, span) -> HostOverrideValue.Platform{value: envmodel_check_platform(os, arch, span)}
+            .Packages(expr) -> HostOverrideValue.Packages{values: envmodel_extract_packages(expr, wrapped).packages}
+            .Services(entries) -> {
+                services := [ServicePlan]{}
+                loop entry in entries -> &services.push(envmodel_evaluate_system_service(entry, scope, computed.values))
+                HostOverrideValue.Services{values: services}
+            }
+            .Options(entries) -> {
+                options := [OptionPlan]{}
+                loop entry in entries -> &options.push(OptionPlan{key: entry.key, value: envmodel_evaluate_host_option(entry.value, entry.value_span, source, prefix_len, scope, computed.values)})
+                HostOverrideValue.Options{values: options}
+            }
+            .Other(expr) -> HostOverrideValue.Value{value: envmodel_evaluate_expression(expr, computed.values, scope)}
+        }
+        &fields.push((name: field.name, value: value))
+        common := ComputedFieldProvenance?{None}
+        loop candidate in computed.provenance {
+            if candidate.field == field.name {
+                common = Val(candidate)
+                break
+            }
+        }
+        dependencies := [String]{}
+        pure := true
+        text := ""
+        if common == {
+            .Val(candidate) -> {
+                dependencies = candidate.dependencies
+                pure = candidate.pure
+                text = candidate.source
+            }
+            .None -> dependencies = envmodel_typed_field_dependencies(field.value, field_names)
+        }
+        if text.is_empty() -> text = envmodel_host_field_source(source, field.span, prefix_len)
+        &provenance.push(HostOverrideProvenance{field: field.name, dependencies: dependencies, pure: pure, source: text})
+    }
+    Ok(HostOverride{fields: fields, source: source, provenance: provenance})
+}
+
+// Rust ModuleEval/System.rs:760-778. Symbolic option atoms keep their exact
+// spelling; resolved identifiers and real expressions use the pure evaluator.
+fn envmodel_evaluate_host_option(expr: Expr, span: Span, source: String, prefix_len: Int, scope: ModuleEvalScope, resolved: [String: CtValue]) -> String EnvModelEvalError! {
+    symbolic :: if expr == {
+        .Ident(name, _) -> !resolved.has_key(name)
+        .Field(_, _, _) | .Str(_, _) -> true
+        else -> false
+    }
+    value :: if symbolic -> CtValue.Str{value: envmodel_host_field_source(source, span, prefix_len)} else -> envmodel_evaluate_expression(expr, resolved, scope)
+    Ok(ast_comptime_value_show(value))
+}
+
+// Rust ModuleEval/System.rs:780-784. Parser spans belong to the synthetic
+// module; provenance belongs to the original override record's UTF-8 bytes.
+fn envmodel_host_field_source(source: String, span: Span, prefix_len: Int) -> String Never! {
+    start :: if span.start < prefix_len -> 0 else -> span.start - prefix_len
+    end :: if span.end < prefix_len -> 0 else -> span.end - prefix_len
+    bytes :: source.bytes()
+    text :: if start <= end && end <= bytes.len() -> String.from_bytes(bytes[start..<end]) ?? source else -> source
+    text.trim()
+}
+
+// Rust ModuleEval/System.rs:786-817. Dependencies of typed fields only name
+// generic sibling fields, de-duplicated and sorted regardless of source order.
+fn envmodel_typed_field_dependencies(value: SystemFieldValue, field_names: [String]) -> [String] Never! {
+    dependencies := [String]{}
+    if value == {
+        .Packages(expr) | .Other(expr) -> {
+            dependencies = envmodel_dependencies_for_expression(expr, field_names)
+        }
+        .Services(entries) -> {
+            loop entry in entries {
+                loop field in entry.fields {
+                    loop dependency in envmodel_dependencies_for_expression(field.value, field_names) {
+                        if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+                    }
+                }
+            }
+        }
+        .Options(entries) -> {
+            loop entry in entries {
+                loop dependency in envmodel_dependencies_for_expression(entry.value, field_names) {
+                    if !dependencies.contains(dependency) -> &dependencies.push(dependency)
+                }
+            }
+        }
+        .Platform(_, _, _) -> {}
+    }
+    &dependencies.sort()
+    dependencies
 }

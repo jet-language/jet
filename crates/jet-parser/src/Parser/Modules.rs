@@ -697,6 +697,7 @@ impl<'a> Parser<'a> {
                     | TokKind::KwEnum
                     | TokKind::KwImpl
                     | TokKind::KwPub
+                    | TokKind::KwPriv
                     | TokKind::KwConst
                     | TokKind::KwUse
                     | TokKind::KwModule
@@ -866,7 +867,7 @@ impl<'a> Parser<'a> {
                 ),
                 "write `module name;` to load a file, or `module name { … }` for an inline module"
                     .to_string(),
-                "example: `module math;` or `module math { pub fn double(n: Int) -> Int { … } }`"
+                "example: `module math;` or `module math { fn double(n: Int) -> Int { … } }`"
                     .to_string(),
                 Some(self.peek().span),
             )),
@@ -1071,20 +1072,26 @@ impl<'a> Parser<'a> {
     }
 
     fn code_module_import(&mut self) -> Result<crate::AST::ImportDecl, Diagnostic> {
-        let (is_pub, is_package_pub) = if matches!(self.peek().kind, TokKind::KwPub) {
-            self.parse_pub_qualifier()
-        } else {
-            (false, false)
-        };
+        let is_pub = self.parse_reexport_qualifier();
         let mut import = self.import_decl()?;
         import.is_pub = is_pub;
-        import.is_package_pub = is_package_pub;
+        import.is_package_pub = false;
         Ok(import)
     }
 
     /// Parse one top-level item inside an inline `module name { … }` body.
     fn top_level_item_in_code_module(&mut self) -> Result<Item, Diagnostic> {
         match &self.peek().kind {
+            TokKind::Hash if self.marker_sequence_leads_to_constant() => self.constant_with_marker_list().map(Item::Const),
+            TokKind::Ident(name) if name == Syntax::KW_MARKER && self.at_marker_decl() => self.marker_decl().map(Item::MarkerDecl),
+            TokKind::KwPub | TokKind::KwPriv
+                if matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::KW_MARKER)
+                    || (matches!(self.peek2().kind, TokKind::LParen)
+                        && matches!(&self.peek5().kind, TokKind::Ident(name) if name == Syntax::KW_MARKER)) =>
+            {
+                let (is_pub, is_package_pub) = self.parse_item_visibility();
+                self.item_after_visibility(is_pub, is_package_pub)
+            }
             TokKind::KwFn => self.func().map(Item::Func),
             TokKind::Hash if self.marker_sequence_leads_to_function() => {
                 self.func_with_marker_list().map(Item::Func)
@@ -1107,45 +1114,30 @@ impl<'a> Parser<'a> {
             TokKind::Hash if self.at_marker_list() || self.at_single_type_marker() => {
                 self.type_def_with_any_markers()
             }
-            // D-STATE-HOME1=A: a retired companion declaration is still
-            // recognized in an inline code module so it gets the same
-            // owner-shape rewrite as a file-level declaration.
-            TokKind::KwPriv
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL) =>
-            {
-                let (is_pub, is_package_pub) = self.parse_item_visibility();
-                self.reject_top_level_state_decl(is_pub, is_package_pub)
+            // D-VIS-MODULE1: `priv module` / `priv(package) module` inside a
+            // module body; every other `priv` and every `pub` is reported and
+            // the declaration parses as if it were absent.
+            TokKind::KwPriv | TokKind::KwPub if matches!(self.peek2().kind, TokKind::Colon) => {
+                self.reject_section_label();
+                self.top_level_item_in_code_module()
             }
-            TokKind::KwPriv => match self.peek2().kind {
-                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
-                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-                TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-                _ => self.func().map(Item::Func),
-            },
-            TokKind::KwPub
-                if matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL)
-                    || (matches!(self.peek2().kind, TokKind::LParen)
-                        && matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::PUB_PACKAGE_QUALIFIER)
-                        && matches!(self.peek4().kind, TokKind::RParen)
-                        && matches!(&self.peek5().kind, TokKind::Ident(n) if n == Syntax::KW_STATE_DECL)) =>
-            {
+            TokKind::KwPriv => {
                 let (is_pub, is_package_pub) = self.parse_item_visibility();
-                self.reject_top_level_state_decl(is_pub, is_package_pub)
+                if matches!(self.peek().kind, TokKind::KwModule) {
+                    self.code_module_with_pkg(is_pub, is_package_pub)
+                } else {
+                    self.top_level_item_in_code_module()
+                }
             }
-            TokKind::KwPub => match self.peek2().kind {
-                TokKind::KwModule => self.code_module(true),
-                TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
-                TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
-                TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
-                TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-                _ => self.func().map(Item::Func),
-            },
+            TokKind::KwPub => {
+                self.reject_retired_pub();
+                self.top_level_item_in_code_module()
+            }
             TokKind::KwStruct => self.struct_def(false).map(Item::Struct),
             TokKind::KwEnum => self.enum_def(false).map(Item::Enum),
             TokKind::KwTrait => self.trait_def(false).map(Item::Trait),
             TokKind::KwTag => self.tag_def(false).map(Item::Tag),
-            TokKind::KwModule => self.code_module(false),
+            TokKind::KwModule => self.code_module(true),
             TokKind::Ident(n)
                 if n == Syntax::KW_STATE_DECL && self.at_state_block() => {
                 let (is_pub, is_package_pub) = self.parse_item_visibility();
@@ -1221,7 +1213,7 @@ impl<'a> Parser<'a> {
                     describe(other)
                 ),
                 "an inline code module body may only contain top-level items".to_string(),
-                "example: `pub fn double(n: Int) -> Int { return n * 2 }`".to_string(),
+                "example: `fn double(n: Int) -> Int { return n * 2 }`".to_string(),
                 Some(self.peek().span),
             )),
         }

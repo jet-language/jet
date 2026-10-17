@@ -1,0 +1,26 @@
+# Port of tests/source_import.rs:674-742; original sources and every predicate retained.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: enterprise_import_reports_ambiguity_malformed_input_and_no_cpp_importer.fixture
+mkdir: python/app
+step: jet import java java/app
+exit: 0
+file: jet/app/Ambiguous.jet ~ "fn keep(value: Int) -> Int {" # original predicate
+file: jet/app/Ambiguous.jet !~ "fn add" # original predicate
+file: jet/app/Ambiguous.jet !~ "fn quotient" # original predicate
+file: jet/app/Ambiguous.jet !~ "fn broken" # original predicate
+file: java/app/Ambiguous.java = ../../../tests/fixtures/source_import/enterprise/failures/ambiguous.java
+file: jet/app/import-report.json ~ "unsupported java dependency declaration" # original predicate
+file: jet/app/import-report.json ~ "ambiguous overloaded java function" # original predicate
+file: jet/app/import-report.json ~ "foreign division or remainder semantics" # original predicate
+file: jet/app/import-report.json ~ "malformed java function" # original predicate
+file: jet/app/import-report.json ~ "\"migration_status\":\"omitted-reported\"" # original predicate
+step: jet check jet/app/Ambiguous.jet
+exit: 0
+step: jet import c java/app
+exit: 2
+stderr: ~ "intentionally unavailable" # original predicate
+stderr: ~ "binder" # original predicate
+step: jet import c++ java/app
+exit: 2
+stderr: ~ "intentionally unavailable" # original predicate
+stderr: ~ "binder" # original predicate

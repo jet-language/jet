@@ -1,0 +1,68 @@
+# HAND-PORT tests/jetpack_engine.rs:4387-4438 typed_env_build_recipe_uses_declared_tool_dependencies
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: typed_env_build_recipe_uses_declared_tool_dependencies.fixture
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
+# #[test]
+# fn typed_env_build_recipe_uses_declared_tool_dependencies() {
+#     let proj = Scratch::new("build-recipe-dependency-project");
+#     let root = Scratch::new("build-recipe-dependency-root");
+#     let fixtures = Scratch::new("build-recipe-dependency-fixtures");
+#     let staging = Scratch::new("build-recipe-dependency-staging");
+#     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+#     fs::create_dir_all(proj.join("vendor/tool")).unwrap();
+#     fs::write(
+#         proj.join("env.jet"),
+#         r#"
+# module dev {
+#     env.dev: Env{
+#         packages: [
+#             Pkg.adapt(
+#                 name: "tool",
+#                 source: "./vendor/tool",
+#                 deps: [default.greet],
+#                 recipe: Recipe.build(steps: [
+#                     .exec(tool: "greet", args: []),
+#                 ])
+#             )
+#         ],
+#     }
+# }
+# "#,
+#     )
+#     .unwrap();
+#     let output = jetpack()
+#         .args(["build", "--no-color", "--offline", "--trust"])
+#         .current_dir(&proj.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let roots = jetpack::Store::Roots {
+#         root: root.path.clone(),
+#         dev_mode: false,
+#     };
+#     assert!(
+#         jetpack::Store::list(&roots)
+#             .iter()
+#             .any(|entry| entry.reference == "adapt:tool:./vendor/tool"),
+#         "adapter with a declared executable dependency was not realized: {:?}",
+#         jetpack::Store::list(&roots)
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+mkdir: project/vendor/tool
+step: jetpack build --no-color --offline --trust
+cwd: project
+exit: 0
+

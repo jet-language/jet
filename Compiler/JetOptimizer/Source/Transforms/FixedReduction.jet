@@ -5,6 +5,8 @@ use jet_foundation.[
     MIRBlockID,
     MIRBoundsFact,
     MIRConstant,
+    mir_integer_constant,
+    mir_integer_value,
     MIRFixedReductionFact,
     MIRFunction,
     MIRInstruction,
@@ -29,10 +31,10 @@ use jet_foundation.[
 ]
 
 struct MIRPassFixedReductionRange {
-    pub first: Int
-    pub step: Int
-    pub lanes: Int
-    pub index_type: MIRType
+    first: Int
+    step: Int
+    lanes: Int
+    index_type: MIRType
 }
 
 // One function's pass of fixed-count reduction normalization; returns the
@@ -44,7 +46,7 @@ fn mir_pass_fixed_reduction_normalize_function(function: &MIRFunction, prelude_c
     loop vector_index < vectors.len() {
         vector := vectors[vector_index]
         if vector.rule == .Reduction && vector.decision == .Eligible && vector.fixed_reduction != None && vector.body_blocks.len() > 0 {
-            snapshot :: ~function
+            snapshot :: function.copy()
             normalized :: mir_pass_fixed_reduction_attempt(&function, prelude_calls, snapshot, vector)
             if {
                 normalized == .Val(rewritten) -> {
@@ -108,7 +110,8 @@ fn mir_pass_fixed_reduction_fact_current(function: MIRFunction, vector: MIRVecto
         if instruction.operation == {
             .Constant(constant) -> {
                 if constant == {
-                    .Int(constant_value, _, _) -> {
+                    .Int(payload, width, _) -> {
+                        constant_value :: mir_integer_value(payload, width)
                         lane :: index_values.len()
                         expected_operation :: stable_id("mir-fixed-reduction-op", "function={function.id.value}:loop={vector.loop_header.value}:fixed-index:{lane}:{constant_value}:0")
                         if lane >= lanes || instruction.id.value != expected_operation -> return false
@@ -273,6 +276,12 @@ fn mir_pass_fixed_reduction_lane_place_matches(first: MIRPlace, candidate: MIRPl
             .Range(range, location, span) -> if first_projection == {
                 .Range(first_range, first_location, first_span) -> {
                     if range != first_range || location != first_location || span != first_span -> return false
+                }
+                else -> return false
+            }
+            .MapLookup(lookup, optional, span) -> if first_projection == {
+                .MapLookup(first_lookup, first_optional, first_span) -> {
+                    if lookup != first_lookup || optional != first_optional || span != first_span -> return false
                 }
                 else -> return false
             }
@@ -475,7 +484,7 @@ fn mir_pass_fixed_reduction_rewrite(
         index_operation :: MIROpID{value: mir_pass_fixed_reduction_new_id(&used_operations, "mir-fixed-reduction-op", "function={function.id.value}:loop={shape.header.value}:fixed-index:{lane}:{lane_index}")}
         index_ownership :: mir_pass_find_value(function.values, induction) ?? return None
         &new_values.push(MIRValueFact{id: index_value, ty: range.index_type, span: index_ownership.span, ownership: index_ownership.ownership})
-        &new_instructions.push(MIRInstruction{id: index_operation, span: index_ownership.span, source_line: None, result: Val(index_value), ty: Val(range.index_type), operation: MIROperation.Constant{value: MIRConstant.Int{value: lane_index, width: mir_pass_integer_width(range.index_type, None), spelling: None}}})
+        &new_instructions.push(MIRInstruction{id: index_operation, span: index_ownership.span, source_line: None, result: Val(index_value), ty: Val(range.index_type), operation: MIROperation.Constant{value: mir_integer_constant(lane_index, mir_pass_integer_width(range.index_type, None), None)}})
         &source_operations.push(index_operation)
 
         lane_place :: MIRPlaceID{value: mir_pass_fixed_reduction_new_id(&used_places, "mir-fixed-reduction-place", "{identity}:input-place:{lane}")}
@@ -668,19 +677,19 @@ fn mir_pass_fixed_reduction_range(function: MIRFunction, analysis: MIRPassLoopAn
             if !mir_pass_prelude_is_pure(prelude_calls, call) -> return None
             start_fact :: mir_pass_constant_for(analysis.constants, start) ?? return None
             first :: if start_fact == {
-                .Int(value, _, _) -> value
+                .Int(value, width, _) -> mir_integer_value(value, width)
                 else -> { return None }
             }
             end_fact :: mir_pass_constant_for(analysis.constants, end) ?? return None
             last :: if end_fact == {
-                .Int(value, _, _) -> value
+                .Int(value, width, _) -> mir_integer_value(value, width)
                 else -> { return None }
             }
             step_value :: if step == {
                 .Val(step_id) -> {
                     step_fact :: mir_pass_constant_for(analysis.constants, step_id) ?? return None
                     if step_fact == {
-                        .Int(value, _, _) -> value
+                        .Int(value, width, _) -> mir_integer_value(value, width)
                         else -> { return None }
                     }
                 }
@@ -723,6 +732,7 @@ fn mir_pass_fixed_reduction_projection(projection: MIRProjection, induction_valu
         .Deref(span) -> MIRProjection.Deref{span: span}
         .Payload(kind, span) -> MIRProjection.Payload{kind: kind, span: span}
         .Range(range, location, span) -> MIRProjection.Range{range: range, location: location, span: span}
+        .MapLookup(lookup, optional, span) -> MIRProjection.MapLookup{lookup: lookup, optional: optional, span: span}
     }
 }
 

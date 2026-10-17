@@ -1,0 +1,28 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.files as files
+
+fn run() {
+    limits := encoding.EncodingLimits.safe()
+    limits.max_item_bytes = 1
+    output :: files.create("{work}/partial.json") ?? panic("create")
+    writer :: json.writer(^output, limits) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("array")
+    result :: writer.write(encoding.DataEvent.Text("ab"))
+    if result == {
+        .Ok(_) -> { print("missed-limit") }
+        .Err(first) -> {
+            again :: writer.finish()
+            if again == {
+                .Ok(_) -> { print("finish-after-limit-missed") }
+                .Err(second) -> {
+                    print(first.kind == encoding.EncodingErrorKind.Limit)
+                    print(first.reason == second.reason)
+                }
+            }
+        }
+    }
+    wire := files.read("{work}/partial.json") ?? panic("read")
+    print(wire)
+}

@@ -1,0 +1,30 @@
+// Sync.rs:65-68; CAbiRoutes.rs:2965-2975,12832-12840.
+// Shared inline-field ownership; callers retain ownership of their own shell.
+fn row_policy_copy_into(policy: I64, result: I64) {
+    data_tree_store(result + ROW_POLICY_TABLE, jet_rt_string_clone(data_tree_word(policy + ROW_POLICY_TABLE)))
+    data_tree_store(result + ROW_POLICY_EXPRESSION, jet_rt_string_clone(data_tree_word(policy + ROW_POLICY_EXPRESSION)))
+    data_tree_store(result + ROW_POLICY_COMPILED, data_tree_word(policy + ROW_POLICY_COMPILED))
+}
+fn row_policy_drop_fields(policy: I64) {
+    jet_rt_string_drop(data_tree_word(policy + ROW_POLICY_TABLE))
+    jet_rt_string_drop(data_tree_word(policy + ROW_POLICY_EXPRESSION))
+}
+#Export(c) fn jet_rt_handle_clone_jet_row_policy(policy: I64) -> I64 {
+    result :: jet_rt_alloc(ROW_POLICY_BYTES, I64{8})
+    row_policy_copy_into(policy, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_row_policy(policy: I64) {
+    if (policy == I64{0}) -> return
+    row_policy_drop_fields(policy)
+    jet_rt_free(policy, ROW_POLICY_BYTES, I64{8})
+}
+fn row_policy_lend_text(text: I64, output: I64) {
+    // Caller-owned read/clone-only descriptor. It never owns the buffer and
+    // must not be grown, consumed or dropped as a native Text owner.
+    data_tree_store(output, rt_text_data(text))
+    data_tree_store(output + I64{8}, rt_text_len(text))
+    data_tree_store(output + I64{16}, rt_text_word(text + I64{16}))
+}
+#Export(c) fn jet_rt_handle_field_jet_row_policy_table(policy: I64, output: I64) { row_policy_lend_text(data_tree_word(policy + ROW_POLICY_TABLE), output) }
+#Export(c) fn jet_rt_handle_field_jet_row_policy_expression(policy: I64, output: I64) { row_policy_lend_text(data_tree_word(policy + ROW_POLICY_EXPRESSION), output) }

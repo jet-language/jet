@@ -1,0 +1,64 @@
+// Email.rs:131-142; Message160=[Address16,List24,List24,3 Text ptrs,
+// Attachment List24,Envelope40,raw usize8]. CAbiRoutes.rs:4451-4461,7941-7943,
+// 13456-13482. No mail policy, validation or MIME formatting lives here.
+MAIL_MESSAGE_BYTES :: prep { I64{160} }
+// bcce3ecf9 Email.rs:1658-1662; gen-c-abi-routes.mjs:505-560,753-756.
+// All inputs are borrowed, including exact Int and ptr-to-handle slot lists.
+// This 12-argument plain-member ABI was admitted by NativeLead18.
+#Export(c) fn message_parts(from: I64, to_data: I64, to_length: I64, bcc_data: I64, bcc_length: I64, subject: I64, text: I64, html: I64, attachment_data: I64, attachment_length: I64, envelope: I64, wire_upper: I64) -> I64 {
+    wire :: jet_int_owned_to_i64(wire_upper)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(MAIL_MESSAGE_BYTES, I64{8})
+    mail_address_copy_into(from, result)
+    mail_address_list_from_slots_into(to_data, to_length, result + I64{16})
+    mail_address_list_from_slots_into(bcc_data, bcc_length, result + I64{40})
+    rt_text_store(result + I64{64}, jet_rt_string_clone(subject))
+    rt_text_store(result + I64{72}, jet_rt_string_clone(text))
+    rt_text_store(result + I64{80}, jet_rt_string_clone(html))
+    attachment_list_from_slots_into(attachment_data, attachment_length, result + I64{88})
+    mail_envelope_copy_into(envelope, result + I64{112})
+    rt_text_store(result + I64{152}, wire)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_message(value: I64) -> I64 {
+    result :: jet_rt_alloc(MAIL_MESSAGE_BYTES, I64{8})
+    mail_address_copy_into(value, result)
+    mail_address_list_copy_into(value + I64{16}, result + I64{16})
+    mail_address_list_copy_into(value + I64{40}, result + I64{40})
+    rt_text_store(result + I64{64}, jet_rt_string_clone(rt_text_word(value + I64{64})))
+    rt_text_store(result + I64{72}, jet_rt_string_clone(rt_text_word(value + I64{72})))
+    rt_text_store(result + I64{80}, jet_rt_string_clone(rt_text_word(value + I64{80})))
+    attachment_list_copy_into(value + I64{88}, result + I64{88})
+    mail_envelope_copy_into(value + I64{112}, result + I64{112})
+    rt_text_store(result + I64{152}, rt_text_word(value + I64{152}))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_message(value: I64) {
+    if (value == I64{0}) -> return
+    mail_address_drop_fields(value)
+    mail_address_list_drop_fields(value + I64{16})
+    mail_address_list_drop_fields(value + I64{40})
+    jet_rt_string_drop(rt_text_word(value + I64{64}))
+    jet_rt_string_drop(rt_text_word(value + I64{72}))
+    jet_rt_string_drop(rt_text_word(value + I64{80}))
+    attachment_list_drop_fields(value + I64{88})
+    mail_envelope_drop_fields(value + I64{112})
+    jet_rt_free(value, MAIL_MESSAGE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_message(left: I64, right: I64) -> Bool {
+    mail_address_eq(left, right) &&
+        mail_address_list_eq(left + I64{16}, right + I64{16}) &&
+        mail_address_list_eq(left + I64{40}, right + I64{40}) &&
+        jet_rt_string_eq(rt_text_word(left + I64{64}), rt_text_word(right + I64{64})) &&
+        jet_rt_string_eq(rt_text_word(left + I64{72}), rt_text_word(right + I64{72})) &&
+        jet_rt_string_eq(rt_text_word(left + I64{80}), rt_text_word(right + I64{80})) &&
+        attachment_list_eq(left + I64{88}, right + I64{88}) &&
+        mail_envelope_eq(left + I64{112}, right + I64{112}) &&
+        rt_text_word(left + I64{152}) == rt_text_word(right + I64{152})
+}
+#Export(c) fn jet_rt_handle_field_message_from(value: I64) -> I64 { value }
+#Export(c) fn jet_rt_handle_field_message_envelope(value: I64) -> I64 { value + I64{112} }
+// Read/clone-only stack descriptors; neither header nor buffer is transferred.
+#Export(c) fn jet_rt_handle_field_message_subject(value: I64, out: I64) { coll_copy(rt_text_word(value + I64{64}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_message_text(value: I64, out: I64) { coll_copy(rt_text_word(value + I64{72}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_message_html(value: I64, out: I64) { coll_copy(rt_text_word(value + I64{80}), out, I64{24}) }

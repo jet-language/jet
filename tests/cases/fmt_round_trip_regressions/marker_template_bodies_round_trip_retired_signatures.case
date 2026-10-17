@@ -1,0 +1,9 @@
+# Port of tests/fmt_round_trip_regressions.rs:58-70. Sources copied verbatim from the original include_str! paths.
+fixture: fixtures/marker_template_bodies_round_trip_retired_signatures
+step: jet fmt user_rule_body.jet
+exit: 0
+file: user_rule_body.jet ~ fn greeting(self) -> String { "hello" } # Original formatter substring assertion.
+copy: user_rule_body.jet user_rule_body.jet.once
+step: jet fmt user_rule_body.jet
+exit: 0
+file: user_rule_body.jet == user_rule_body.jet.once

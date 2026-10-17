@@ -1,0 +1,184 @@
+use core.encoding.json as json
+
+// Offsets retain JSON literals and paths verbatim; only a whole quoted token
+// is decoded. Single-quoted and bare words retain their original escape rule.
+fn kit_steps_tokens(text: String) -> [KitWord]? {
+    bytes :: text.bytes()
+    result := [KitWord]{}
+    i := 0
+    loop i < bytes.len() {
+        if bytes[i] == (U8{32}) || bytes[i] == (U8{9}) {
+            i += 1
+            next
+        }
+        start :: i
+        first :: Int.from_u8(bytes[i])
+        if (first == 40 || first == 41) && (i + 1 == bytes.len() || bytes[i + 1] == (U8{32}) || bytes[i + 1] == (U8{9})) {
+            &result.push(KitWord{text: kit_steps_byte_slice(text, i, i + 1), start: i, end: i + 1})
+            i += 1
+            next
+        }
+        quoted :: first == 34 || first == 39
+        quote := if quoted -> first else -> 0
+        escape := false
+        bare_escape := false
+        path_depth := 0
+        if quoted -> i += 1
+        loop i < bytes.len() {
+            c :: Int.from_u8(bytes[i])
+            if quote != 0 {
+                if escape -> escape = false
+                else if c == 92 -> escape = true
+                else if c == quote {
+                    quote = 0
+                    i += 1
+                    if quoted -> break
+                    next
+                }
+            } else {
+                if escape -> escape = false
+                else if c == 92 {
+                    escape = true
+                    bare_escape = true
+                } else {
+                    if (c == 32 || c == 9) && path_depth == 0 -> break
+                    if !quoted {
+                        if c == 91 || c == 123 || c == 40 -> path_depth += 1
+                        else if c == 93 || c == 125 || c == 41 -> path_depth -= 1
+                    }
+                    if c == 34 || c == 39 -> quote = c
+                }
+            }
+            i += 1
+        }
+        if quote != 0 || escape -> return None
+        if quoted && i < bytes.len() && bytes[i] != (U8{32}) && bytes[i] != (U8{9}) -> return None
+        raw :: kit_steps_byte_slice(text, start, i)
+        decoded := raw
+        if first == 34 {
+            tree :: json.parse(raw) ?? return None
+            if tree == {
+                .Text(value) -> decoded = value
+                else -> return None
+            }
+        } else if first == 39 {
+            interior :: kit_steps_byte_slice(text, start + 1, i - 1)
+            decoded = interior
+            if interior.contains("\\") {
+                buffer := [U8]{}
+                at := start + 1
+                loop at < i - 1 {
+                    if bytes[at] == (U8{92}) -> at += 1
+                    if at >= i - 1 -> return None
+                    &buffer.push(bytes[at])
+                    at += 1
+                }
+                decoded = String.from_bytes(buffer) ?? return None
+            }
+        }
+        if bare_escape -> decoded = kit_steps_unquoted(raw) ?? return None
+        &result.push(KitWord{text: decoded, start: start, end: i})
+    }
+    Val(result)
+}
+
+fn kit_steps_unquoted(text: String) -> String? {
+    bytes :: text.bytes()
+    result := [U8]{}
+    quote := 0
+    escape := false
+    i := 0
+    loop i < bytes.len() {
+        c :: Int.from_u8(bytes[i])
+        if quote == 0 && c == 92 {
+            i += 1
+            if i == bytes.len() -> return None
+        } else if quote != 0 {
+            if escape -> escape = false
+            else if c == 92 -> escape = true
+            else if c == quote -> quote = 0
+        } else if c == 34 || c == 39 -> quote = c
+        &result.push(bytes[i])
+        i += 1
+    }
+    Val(String.from_bytes(result) ?? return None)
+}
+
+fn kit_steps_integer(text: String) -> Int? {
+    Val(Int.parse(text) ?? return None)
+}
+
+fn kit_steps_comment(text: String) -> Int {
+    bytes :: text.bytes()
+    quote := 0
+    escape := false
+    loop (i, byte) in bytes {
+        c :: Int.from_u8(byte)
+        if quote != 0 {
+            if escape -> escape = false
+            else if c == 92 -> escape = true
+            else if c == quote -> quote = 0
+        } else if c == 34 || c == 39 -> quote = c
+        else if c == 35 && i > 0 && (bytes[i - 1] == (U8{32}) || bytes[i - 1] == (U8{9})) {
+            // Cardinality operators are not comments.
+            if i + 1 < bytes.len() && (bytes[i + 1] == (U8{61}) || bytes[i + 1] == (U8{62}) || bytes[i + 1] == (U8{60}) || kit_steps_byte_slice(text, i, text.count_bytes()).starts_with("#distinct=")) -> next
+            return i
+        }
+    }
+    bytes.len()
+}
+
+fn kit_steps_reason(text: String) -> Bool {
+    at :: kit_steps_comment(text)
+    at < text.count_bytes() && kit_steps_byte_slice(text, at + 1, text.count_bytes()).trim() != ""
+}
+
+fn kit_steps_body(text: String) -> String {
+    kit_steps_byte_slice(text, 0, kit_steps_comment(text)).trim().copy()
+}
+
+fn kit_steps_scalar_word(text: String) -> String? {
+    words :: kit_steps_words(text) ?? return None
+    if words.len() != 1 -> return None
+    Val(words[0])
+}
+
+fn kit_steps_capture_tokens(text: String, defined: [String]) -> Bool {
+    rest := text
+    loop {
+        start :: kit_steps_byte_index(rest, "{{cap:") ?? return true
+        after :: start + 5
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return false
+        name :: kit_steps_byte_slice(rest, after, after + end)
+        if !kit_expect_named(defined, name) -> return false
+        rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
+    }
+}
+
+// Syntax-check scalar substitution slots without evaluating or accepting a
+// fallback value. The executor always parses the expanded JSON itself.
+fn kit_steps_json_preview(text: String) -> String {
+    preview := text.replace("{{work}}", "0").replace("{{root}}", "0").replace("{{scratch}}", "0")
+        .replace("{{jet}}", "0").replace("{{jetpack}}", "0").replace("{{built}}", "0").replace("{{sys:dll-suffix}}", "0")
+    loop prefix in ["{{cap:", "{{tool:"] {
+        loop {
+            start :: kit_steps_byte_index(preview, prefix) ?? break
+            after :: start + prefix.count_bytes()
+            end :: kit_steps_byte_index(kit_steps_byte_slice(preview, after, preview.count_bytes()), "}}") ?? break
+            preview = "{kit_steps_byte_slice(preview, 0, start)}0{kit_steps_byte_slice(preview, after + end + 1, preview.count_bytes())}"
+        }
+    }
+    preview
+}
+
+fn kit_steps_exit_codes(text: String) -> [String]? {
+    if !text.starts_with("[") || !text.ends_with("]") -> return None
+    result := [String]{}
+    loop raw in kit_steps_byte_slice(text, 1, text.count_bytes() - 1).split(",") {
+        code :: raw.trim().copy()
+        if kit_steps_integer(code) == None -> return None
+        &result.push(code)
+    }
+    if result.len() == 0 -> return None
+    Val(result)
+}

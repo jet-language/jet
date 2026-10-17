@@ -1,0 +1,22 @@
+
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+
+impl SourceErr -> TargetErr {
+    return TargetErr.One
+}
+
+fn read() -> Int SourceErr! {
+    return Err(SourceErr.One)
+}
+
+fn outer() -> Int TargetErr! {
+    value :: read()
+    return Ok(value)
+}
+
+fn run() TargetErr! {
+    outer()
+}

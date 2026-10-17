@@ -1,0 +1,25 @@
+# Port of tests/live_inspect.rs:19-119; program bytes unchanged.
+# PUBLIC-PROJECTION approved TestLead1: inspect live calls the same LiveInspect::read.
+# PENDING-GRAMMAR(batch-four), PENDING-SEAM(read_bytes); no reference receipt claimed.
+fixture: tasks.fixture
+step: jet build live.jet
+session app raw: built
+env: JET_OBSERVE=1
+stdout: null
+stderr: null
+poll snapshot: jet inspect live --attach {pid:app} --once --json until exit: 0 && stdout: ~ "\"wait\":\"channel receive\"" && stdout: ~ "\"depth\":1,\"capacity\":1" timeout 5s every 25ms # original ed77c235f tests/live_inspect.rs:73-85 same snapshot contains channel-receive AND depth1/capacity1 with 5s deadline and 25ms polling
+stdout: ~ "\"parent\":1" # original ed77c235f tests/live_inspect.rs:86 snapshot.contains parent1
+stdout: ~ "\"label\":\"task@" # original ed77c235f tests/live_inspect.rs:87 snapshot.contains task label prefix
+stdout: ~ "\"spawn_site\":" # original ed77c235f tests/live_inspect.rs:88 snapshot.contains spawn_site field
+stdout: ~ "\"effects\":" # original ed77c235f tests/live_inspect.rs:89 snapshot.contains effects field
+stdout: ~ "\"arena_bytes\":" # original ed77c235f tests/live_inspect.rs:90 snapshot.contains arena_bytes field
+stdout: !~ "TOP_SECRET_CHANNEL_PAYLOAD" # original ed77c235f tests/live_inspect.rs:91 snapshot excludes secret bytes
+stdout: !~ "payload" # original ed77c235f tests/live_inspect.rs:92 snapshot excludes payload field
+stdout: !~ "locals" # original ed77c235f tests/live_inspect.rs:93 snapshot excludes locals field
+step: jet inspect live --attach {pid:app} --once --json
+stdout: ~ "\"pid\":{pid:app}" # original ed77c235f tests/live_inspect.rs:112 CLI snapshot contains the actual observed PID
+stdout: ~ "\"wait\":\"channel receive\"" # original ed77c235f tests/live_inspect.rs:113 CLI snapshot contains channel-receive marker
+stdout: !~ "TOP_SECRET_CHANNEL_PAYLOAD" # original ed77c235f tests/live_inspect.rs:114 CLI snapshot excludes secret bytes
+signal app: KILL
+close app
+exit: any # original ChildGuard kills and ignores wait status

@@ -1,0 +1,75 @@
+// CmdPkg observable bytes plus checked carrier edit/publication acceptance.
+// Provider-dependent fetch execution is a separate admitted runtime proof.
+fn run() {
+    lock := LockFile.empty()
+    lock.packages = [LockedPackage]{
+        LockedPackage{name: "root", version: "1.0.0", source: .Root},
+        LockedPackage{name: "local", version: "1.0.0", source: .Path("../local")},
+        LockedPackage{name: "zeta", version: "2.3.4", source: .Registry{registry: "stable", reference: "zeta#2.3.4", output: "out", source_hash: "hash", repository: "repo", authority: "auth", tier: "core", gate_status: "passed"}},
+        LockedPackage{name: "alpha", version: "0.1.2", source: .Registry{registry: "community", reference: "alpha#0.1.2", output: "other", source_hash: "hash", repository: "repo", authority: "auth", tier: "community", gate_status: "local"}},
+    }
+    tiers :: "resolved `zeta` 2.3.4 from registry `stable` (tier: core; gate status: passed)\nresolved `alpha` 0.1.2 from registry `community` (tier: community; gate status: local)\n"
+    assert_eq(jet_cli_dependency_success(lock, PackageFetchOptions{}), "{tiers}fetched all dependencies\n")
+    assert_eq(jet_cli_dependency_success(lock, PackageFetchOptions{locked: true}), "{tiers}lock verified\n")
+    assert_eq(jet_cli_dependency_success(lock, PackageFetchOptions{update: true}), "{tiers}updated all moving selectors\n")
+    assert_eq(jet_cli_dependency_success(lock, PackageFetchOptions{update: true, update_dep: Val("local")}), "{tiers}updated `local`\n")
+    assert_eq(jet_cli_dependency_edit_success("add", "local", "/project/package.jet"), "added `local` to /project/package.jet\n")
+    assert_eq(jet_cli_dependency_edit_success("remove", "local", "/project/run.jet"), "removed `local` from /project/run.jet\n")
+    failure :: IOError.Other(IOContext{operation: .Write, resource: Val("/project/package.jet"), os_code: None, cause: Val("failure")})
+    loop phase in ([FoundationPublicationPhase]{.CreateStage, .WriteStage, .SetMode, .InspectStage}) -> assert_eq(jet_cli_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not stage /project/package.jet: failure")
+    loop phase in ([FoundationPublicationPhase]{.SyncStage, .SyncParent}) -> assert_eq(jet_cli_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not sync /project/package.jet: failure")
+    assert_eq(jet_cli_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: .ValidateSource, error: failure}), "package source changed before publishing: failure")
+    loop phase in ([FoundationPublicationPhase]{.InspectDestination, .ValidateAuthority, .Rename, .ValidatePublished}) -> assert_eq(jet_cli_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not publish /project/package.jet: failure")
+    loop phase in ([FoundationPublicationPhase]{.OpenRoot, .OpenParent}) -> assert_eq(jet_cli_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: phase, error: failure}), "could not open package source authority: failure")
+    assert_eq(jet_cli_dependency_publication_error("/project/package.jet", FoundationPublicationError{phase: .PreparePath, error: failure}), "could not check /project/package.jet: failure")
+    assert_eq(jet_cli_dependency_flag([String]{"add", "local", "--path", "--git"}, "--path"), Val("--git"))
+    assert_eq(jet_cli_dependency_flag([String]{"add", "local", "--path=../local"}, "--path"), None)
+    selected :: jet_cli_dependency_add_spec([String]{"add", "local", "--path", "../local", "--git", "url", "--tag", "tag"}, false, false) ?? panic("path wins")
+    assert_eq(selected, (name: "local", spec: DepSpec.Path{path: "../local"}))
+    git :: jet_cli_dependency_add_spec([String]{"add", "local", "--git", "url", "--rev", "rev", "--branch", "branch", "--tag", "tag"}, false, false) ?? panic("tag wins")
+    assert_eq(git, (name: "local", spec: DepSpec.Git{url: "url", selector: GitSelector.Tag("tag")}))
+    if jet_cli_dependency_add_spec([String]{"add"}, false, false) == {
+        .Ok(_) -> panic("missing dependency name")
+        .Err(error) -> {
+            assert_eq(error.output.stdout, "")
+            assert_eq(error.output.stderr, "Error [E2104]: `jet add` needs a dependency name\n Why: Jet needs valid command input before it can run this command\n Fix: try `jet add mylib --path ../mylib`\nMore: jet-lang.dev/e/E2104\n")
+            assert_eq(error.output.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+        }
+    }
+    root :: "{cli_sys.temp_dir()}/jet-cli-dependency-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("fixture directory")
+    raw :: "name: \"consumer\"\nversion: \"1.0.0\"\ndeps: {{\n    // preserve\n}}\n"
+    inline :: "// carrier\npackage {{\n{raw}}}\nfn run() {{}}\n"
+    path :: "{root}/run.jet"
+    cli_files.write(path, inline) ?? panic("inline fixture")
+    input :: jet_cli_dependency_input(root, false, false) ?? panic("checked Package carrier")
+    assert_eq(input.path, path)
+    assert_eq(input.raw, inline)
+    expected :: "// carrier\npackage {{\nname: \"consumer\"\nversion: \"1.0.0\"\ndeps: {{\n    // preserve\n    local: ../local,\n}}\n}}\nfn run() {{}}\n"
+    updated :: jet_cli_dependency_edit(input, "local", Val(DepSpec.Path{path: "../local"}))
+    assert_eq(updated, expected)
+    jet_cli_dependency_publish(input, updated) ?? panic("existing checked publisher")
+    assert_eq(cli_files.read(path) ?? panic("read published carrier"), expected)
+    second :: jet_cli_dependency_input(root, false, false) ?? panic("reload published carrier")
+    removed :: jet_cli_dependency_edit(second, "local", None)
+    assert_eq(removed, inline)
+    // A writer arriving after preparation wins; no package-edit stage publishes
+    // over its unrelated source change, and the carrier stays byte-exact.
+    concurrent :: "{expected}// concurrent writer\n"
+    cli_files.write(path, concurrent) ?? panic("concurrent fixture edit")
+    if jet_cli_dependency_publish(second, removed) == {
+        .Ok(_) -> panic("must not overwrite concurrent writer")
+        .Err(error) -> assert_eq(error.message, "{path} changed while the package edit was prepared")
+    }
+    assert_eq(cli_files.read(path) ?? panic("read concurrent carrier"), concurrent)
+    absent :: jet_cli_package_dependency(root, "remove", [String]{"remove", "absent"}, [String]{"remove", "absent"}, false, false)
+    assert_eq(absent.stdout, "")
+    assert_eq(absent.stderr, "Error [E2104]: dependency `absent` is not present in package.jet\n Why: Jet needs valid command input before it can run this command\n Fix: remove a dependency listed in package.jet, or add `absent` first\nMore: jet-lang.dev/e/E2104\n")
+    assert_eq(absent.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    report :: diagnostic_from_registry("E1202", None, "missing graph", "locked read", "fetch first")
+    source_error :: jet_cli_dependency_source_error(path, concurrent, report).output
+    assert_eq(source_error.stdout, "")
+    assert_eq(source_error.stderr, "Error [E1202]: missing graph\n Why: locked read\n Fix: fetch first\nMore: jet-lang.dev/e/E1202\n")
+    assert_eq(source_error.exit_code, JET_DRIVER_EXIT_USER_ERROR)
+    cli_files.remove_all(root) ?? panic("cleanup fixture")
+}

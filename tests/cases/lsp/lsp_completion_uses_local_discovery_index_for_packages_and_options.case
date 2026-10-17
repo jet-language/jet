@@ -1,0 +1,36 @@
+# Port of tests/lsp.rs:2296-2436; fixture bytes unchanged.
+# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+# ORACLE-DERIVED SETUP: Discovery.rs217-228,516-546 serialize the exact original PackageRecord, one LF.
+fixture: lsp_completion_uses_local_discovery_index_for_packages_and_options.fixture
+mkdir: .jet/discovery
+copy: discovery-index.jsonl .jet/discovery/index.jsonl
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "completionProvider" # original ed77c235f tests/lsp.rs:2355 contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"module env.dev {\\n    env.dev: Env{\\n        packages: [default.postgres_16]\\n        services: { db: Service{ re }, configured: Service{ ready: false } }\\n    }\\n}\\n\"}}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":2,\"character\":31}}}"
+recv lsp
+stdout: ~ "postgres_16" # original ed77c235f tests/lsp.rs:2378 contains predicate
+stdout: ~ "package from default" # original ed77c235f tests/lsp.rs:2378 contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/completion\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":35}}}"
+recv lsp
+stdout: ~ "\"ready\"" # original ed77c235f tests/lsp.rs:2391 contains predicate
+stdout: ~ "Command polled until ready." # original ed77c235f tests/lsp.rs:2391 contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":2,\"character\":29}}}"
+recv lsp
+stdout: ~ "postgres_16" # original ed77c235f tests/lsp.rs:2404 contains predicate
+stdout: ~ "16.4" # original ed77c235f tests/lsp.rs:2405 contains predicate
+stdout: ~ "maintainer liveness: not-applicable" # original ed77c235f tests/lsp.rs:2406 contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"textDocument/hover\",\"params\":{\"textDocument\":{\"uri\":\"file://{work}/main.jet\"},\"position\":{\"line\":3,\"character\":63}}}"
+recv lsp
+stdout: ~ "Environment option `ready`" # original ed77c235f tests/lsp.rs:2419 contains predicate
+stdout: ~ "Command polled until ready." # original ed77c235f tests/lsp.rs:2420 contains predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":99,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{}}"
+close lsp
+exit: any # original child.wait ignored status

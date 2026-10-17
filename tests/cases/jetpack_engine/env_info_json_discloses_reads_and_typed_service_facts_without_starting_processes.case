@@ -1,0 +1,25 @@
+# HAND-PORT tests/jetpack_engine.rs:6440-6525 env_info_json_discloses_reads_and_typed_service_facts_without_starting_processes
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: env_info_json_discloses_reads_and_typed_service_facts_without_starting_processes.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+env: HOME=/test/home
+step: jetpack env info --json --no-color
+cwd: project
+exit: 0
+stdout: ~ "\"variables\":[{\"name\":\"HOME\",\"sources\":[\"environment\"]}" # original contains predicate
+stdout: ~ "\"name\":\"fixture\",\"enabled\":false" # original contains predicate
+stdout: ~ "\"run\":[\"fixture\",\"--port\",\"8080\"]" # original contains predicate
+stdout: ~ "\"ready\":\"fixture --ready\"" # original contains predicate
+stdout: ~ "\"data_dir\":\"state/fixture\"" # original contains predicate
+stdout: ~ "\"watch\":[\"src\"]" # original contains predicate
+stdout: ~ "\"after\":[\"database\"]" # original contains predicate
+stdout: ~ "\"before_start\":[\"lint_all\"]" # original contains predicate
+stdout: ~ "\"sockets\":[\"run/fixture.sock\"]" # original contains predicate
+stdout: ~ "\"files\":[\"config/generated.txt\"]" # original contains predicate
+stdout: ~ "\"jobs\":[\"lint_all\"]" # original contains predicate
+json: stdout doc $ valid
+file: project/.jet/services absent
+

@@ -108,7 +108,8 @@ fn interpret_on_thread(src: String) -> String {
     let path = dir.join("fixture.jet");
     std::fs::write(&path, &src).unwrap();
     let mut bundle = jet::Loader::load_entry(&path.to_string_lossy()).expect("fixture loads");
-    let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diags, _, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
         !diags
             .iter()
@@ -120,6 +121,7 @@ fn interpret_on_thread(src: String) -> String {
     jet::Codegen::MIREval::install_mir_bridge();
     jet::Comptime::MirBridge::run_bundle(
         &bundle,
+        &checked_nominals,
         &mut sink,
         jet::Policy::GateSet::allow(jet::Policy::PolicyKey::Impure),
     )
@@ -448,7 +450,7 @@ struct Queue {{
 }}
 
 fn attach(label: String, node: &Node) -> Queue from node {{
-    return Queue{{label: ~label, head: mem.pin(&node)}}
+    return Queue{{label: label.copy(), head: mem.pin(&node)}}
 }}
 
 fn run() {{

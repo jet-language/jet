@@ -1,0 +1,12 @@
+// The bounded JSON decode of the provider-facts carrier. It parses through
+// `pkg_json_parse_protocol` (Core `json.parse(limits:)`, D-CORE-JSONLIMIT1),
+// so it stays out of the Compiler unit's EnvModel block, which needs only the
+// carrier itself.
+impl ProviderFacts {
+    fn from_json(text: String) -> ProviderFacts ProviderFactsError! {
+        if pkg_json_parse_protocol(text) == {
+            .Parsed(tree) -> return ProviderFacts.from_json_tree(tree)
+            .Failed(reason) -> return Err(ProviderFactsError{message: reason})
+        }
+    }
+}

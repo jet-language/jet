@@ -49,9 +49,9 @@ use jet_lexer.[
     TOKEN_UNIFIED_ARROW,
 ]
 
-pub struct ParsedType {
-    pub ty: Type
-    pub span: Span
+struct ParsedType {
+    ty: Type
+    span: Span
 }
 
 fn parser_parse_type(state: &JetParserState, depth: Int) -> ParsedType {
@@ -230,9 +230,10 @@ fn parser_tokens_text(state: JetParserState, first: Int, end: Int) -> String Nev
     previous_end := -1
     loop index in first..<end {
         token :: state.tokens[index]
-        if parser_is_trivia(token.kind) || token.payload.text == "" -> next
+        text :: parser_text(state, token)
+        if parser_is_trivia(token.kind) || text == "" -> next
         if previous_end >= 0 && token.span.start > previous_end -> out = "{out} "
-        out = "{out}{token.payload.text}"
+        out = "{out}{text}"
         previous_end = token.span.end
     }
     out
@@ -325,12 +326,20 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
         TOKEN_LPAREN -> parser_parse_tuple_type(&state, depth + 1)
         else -> {
             if kind != TOKEN_IDENT && kind != TOKEN_SELF {
-                parser_add_error(&state, start.span, "expected a type, found `{start.payload.text}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `String?`, or `[U8]")
+                found :: parser_text(state, start)
+                parser_add_error(&state, start.span, "expected a type, found `{found}`", "a type position needs a type constructor or a declared type name", "write a type name such as `Int`, `String?`, or `[U8]")
                 if kind != TOKEN_EOF && kind != TOKEN_RBRACE && kind != TOKEN_COMMA -> parser_bump(&state)
                 return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
             }
+            // D-SOA2C (Rust `Types.rs` E1107): the per-container prefix
+            // spelling `columnar [T]` is reserved; nothing ships, so it is a
+            // fatal teaching error at the prefix word.
+            if kind == TOKEN_IDENT && parser_value(state, start) == "columnar" && parser_kind_at(&state, 1) == TOKEN_LBRACKET {
+                parser_add_fatal_code(&state, "E1107", start.span, "the `columnar [T]` per-container layout form is reserved", "a per-use columnar override isn't built yet — only the whole-struct form ships", "put `#Layout(columnar)` on the `struct` declaration instead")
+                return ParsedType{ty: Type.Named{name: "__jet_error"}, span: start.span}
+            }
             parser_bump(&state)
-            name := start.payload.decoded
+            name := parser_value(state, start)
             end := start.span
             if name == {
                 "Error" -> {
@@ -346,7 +355,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
             loop parser_current_kind(&state) == TOKEN_DOT {
                 parser_bump(&state)
                 member :: parser_expect_name(&state, "after `.` in a type path")
-                name = "{name}.{member.payload.decoded}"
+                name = "{name}.{parser_value(state, member)}"
                 end = member.span
             }
             // S33: the built-in generic constructors take `<…>`; square
@@ -362,7 +371,7 @@ fn parser_parse_type_base(state: &JetParserState, depth: Int) -> ParsedType {
                 if name == "Result" -> parser_add_error_code(&state, "E0406", start.span, "`Result<T, E>` is old Jet error syntax", "fallible Jet types write the error contract after the success type", "write `T? E!`, `T (E1 | E2)!`, or omit the contract for implicit `Err`")
                 return parser_parse_applied_type(&state, name, parser_cover(start.span, end), depth + 1)
             }
-            ParsedType{ty: parser_named_type(name), span: parser_cover(start.span, end)}
+            ParsedType{ty: foundation_named_type(name), span: parser_cover(start.span, end)}
         }
     }
 }
@@ -399,7 +408,7 @@ fn parser_parse_tuple_type(state: &JetParserState, depth: Int) -> ParsedType {
                 name :: parser_bump(&state)
                 parser_bump(&state)
                 ty :: parser_parse_type(&state, depth + 1)
-                &fields.push(TypeTupleField{name: name.payload.decoded, ty: ty.ty})
+                &fields.push(TypeTupleField{name: parser_value(state, name), ty: ty.ty})
             }
             else -> {
                 ty :: parser_parse_type(&state, depth + 1)
@@ -463,7 +472,7 @@ fn parser_parse_function_type(state: &JetParserState, depth: Int) -> ParsedType 
                     if token.kind == TOKEN_IDENT && parser_kind_at(&state, 1) == TOKEN_COLON {
                         parser_bump(&state)
                         parser_bump(&state)
-                        name = token.payload.decoded
+                        name = parser_value(state, token)
                     }
                     &params.push(parser_parse_type(&state, depth + 1).ty)
                     &names.push(name)
@@ -599,7 +608,7 @@ fn parser_parse_applied_type(state: &JetParserState, name: String, prefix: Span,
             if {
                 (name == "Vec" || name == "Matrix") && parser_current_kind(&state) == TOKEN_IDENT -> {
                     measure_token :: parser_bump(&state)
-                    &args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: measure_token.payload.decoded}})
+                    &args.push(Type.Measure{measure: Measure.Symbol{kind: "shape", name: parser_value(state, measure_token)}})
                 }
                 else -> {
                     &args.push(parser_parse_type(&state, depth + 1).ty)
@@ -630,11 +639,11 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
     if token.kind == {
         TOKEN_INT -> {
             parser_bump(&state)
-            Measure.Literal{kind: kind, value: token.payload.integer ?? 0}
+            Measure.Literal{kind: kind, value: parser_integer(state, token) ?? 0}
         }
         TOKEN_IDENT -> {
             parser_bump(&state)
-            Measure.Symbol{kind: kind, name: token.payload.decoded}
+            Measure.Symbol{kind: kind, name: parser_value(state, token)}
         }
         TOKEN_LPAREN -> {
             parser_bump(&state)
@@ -658,26 +667,6 @@ fn parser_parse_measure(state: &JetParserState, kind: String, depth: Int) -> Mea
     }
 }
 
-fn parser_named_type(name: String) -> Type Never! {
-    if name == {
-        "Int" -> Type.Int
-        "Float" | "F64" -> Type.Float
-        "F32" -> Type.Float32
-        "Bool" -> Type.Bool
-        "String" -> Type.String
-        "Char" -> Type.Char
-        "I8" -> Type.IntN{signed: true, bits: 8}
-        "I16" -> Type.IntN{signed: true, bits: 16}
-        "I32" -> Type.IntN{signed: true, bits: 32}
-        "I64" -> Type.IntN{signed: true, bits: 64}
-        "U8" -> Type.IntN{signed: false, bits: 8}
-        "U16" -> Type.IntN{signed: false, bits: 16}
-        "U32" -> Type.IntN{signed: false, bits: 32}
-        "U64" -> Type.IntN{signed: false, bits: 64}
-        "Shared" -> Type.Named{name: name}
-        else -> Type.Named{name: name}
-    }
-}
 
 fn parser_apply_named_type(name: String, args: [Type]) -> Type Never! {
     if {

@@ -1,0 +1,19 @@
+# Port of tests/cffi.rs:3255-3321, all source/renderer predicates retained.
+# The real helper sandbox remains mandatory; a stale private availability
+# refusal must not bypass the public run/build diagnostic assertions.
+requires: tool:cargo
+fixture: unresolvable-crate.fixture
+env: JET_FFI_CACHE_DIR={work}/ffi-cache
+env: NO_COLOR=1
+env: TERM=dumb
+env: CARGO_NET_OFFLINE=true
+mkdir: ffi-cache
+step run: jet run main.jet
+exit: nonzero
+stderr: !~ E0956 # original predicate
+stderr.filter(^= "Error [E0704]" " Why:" " Fix:"): ^= "Error [E0704]: Couldn't fetch or build `not-a-real-crate-xyz@9.9.9`" # original predicate
+step build: jet build main.jet
+exit: nonzero
+stderr: !~ E0956 # original predicate
+stderr.filter(^= "Error [E0704]" " Why:" " Fix:"): ^= "Error [E0704]: Couldn't fetch or build `not-a-real-crate-xyz@9.9.9`" # original predicate
+stderr.filter(^= "Error [E0704]" " Why:" " Fix:"): == run # original predicate

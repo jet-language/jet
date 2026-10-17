@@ -1,0 +1,23 @@
+# HAND-PORT tests/fact_reads.rs:286-296 nested_reflection_fact_reads_fold_across_all_native_tiers
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original release/default/interpreter example helper outputs and optional node web exact golden; Rust-only guard erased.
+fixture: nested_reflection_fact_reads_fold_across_all_native_tiers.fixture
+env: NO_COLOR=1
+step release: jet run --release main.jet
+exit: 0
+stdout: = nested_reflection_fact_reads_fold_across_all_native_tiers.stdout.expected
+step default: jet run main.jet
+exit: 0
+stdout: = nested_reflection_fact_reads_fold_across_all_native_tiers.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = nested_reflection_fact_reads_fold_across_all_native_tiers.stdout.expected
+when tool node
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = nested_reflection_fact_reads_fold_across_all_native_tiers.stdout.expected
+end when

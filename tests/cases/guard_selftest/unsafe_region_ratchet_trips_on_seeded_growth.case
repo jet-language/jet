@@ -1,0 +1,15 @@
+# PORT tests/guard_selftest.rs:46-49.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: unsafe_region_ratchet_trips_on_seeded_growth.fixture
+requires: tool:node
+write: package.jet = "name: \"fixture\"\nversion: \"0.1.0\"\n"
+write: safety.md = "# Safety\n"
+copy: main.source main.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md --update
+exit: 0
+copy: new.source new.jet
+step: node {root}/Tools/agent/check-unsafe-ratchet.mjs --root {work} --baseline {work}/safety.md
+exit: nonzero
+stderr: ~ "fixture: 2 -> 3" # original ed77c235f tests/unsafe_ratchet.rs:85 stderr.contains region-count growth; guard_selftest.rs:47-48 calls this helper
+stderr: ~ "new.jet" # original ed77c235f tests/unsafe_ratchet.rs:86 stderr.contains added source path
+stderr: ~ "new region reason" # original ed77c235f tests/unsafe_ratchet.rs:87 stderr.contains added unsafe-region reason

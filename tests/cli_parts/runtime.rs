@@ -1,5 +1,5 @@
 use super::*;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 
 /// `jet fix --edition=2027` rewrites `json.canonical(x)` per D-JSONCANON1:
 /// an omitted contract is the implicit default `Err`, so a fallible function
@@ -16,19 +16,19 @@ fn jet_fix_edition_2027_rewrites_json_canonical_and_is_idempotent() {
         &file,
         r#"use core.encoding.json as json
 
-pub fn show() Never! {
+fn show() Never! {
     data :: json.parse(`{"a":1}`) ?? panic("json")
     r :: json.canonical(data)
     print(r)
 }
 
-pub fn sign() -> String {
+fn sign() -> String {
     data :: json.parse(`{"a":1}`)
     r :: json.canonical(data)
     r
 }
 
-pub fn already_migrated() Never! {
+fn already_migrated() Never! {
     data :: json.parse(`{"a":1}`) ?? panic("json")
     r :: json.canonical(data) ?? panic("value is not canonical JSON")
     print(r)
@@ -193,23 +193,23 @@ fn check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence(
             .env("NO_COLOR", "1");
         command.output().unwrap()
     };
-    let parse_status = |output: &Output| -> DataTree {
+    let parse_status = |output: &Output| -> Dyn {
         let payload = machine_payload(output);
         assert!(!payload.is_empty(), "check emitted no machine report");
         parse_json(&payload).unwrap_or_else(|_| panic!("invalid machine report:\n{payload}"))
     };
-    let diagnostic_report = |status: &DataTree| -> DataTree {
+    let diagnostic_report = |status: &Dyn| -> Dyn {
         match jet_foundation::JSON::json_get(status, "reports").unwrap() {
-            DataTree::Array(reports) => reports
+            Dyn::Array(reports) => reports
                 .first()
                 .cloned()
                 .expect("diagnostic status must contain one report"),
             _ => panic!("diagnostic status reports is not an array"),
         }
     };
-    let report = |output: &Output| -> DataTree { parse_status(output) };
-    let first_report = |status: &DataTree| diagnostic_report(status);
-    let assert_safe_edit = |value: &DataTree| {
+    let report = |output: &Output| -> Dyn { parse_status(output) };
+    let first_report = |status: &Dyn| diagnostic_report(status);
+    let assert_safe_edit = |value: &Dyn| {
         assert_eq!(
             jet_foundation::JSON::json_str(
                 jet_foundation::JSON::json_get(value, "applicability").unwrap()
@@ -218,7 +218,7 @@ fn check_fix_and_format_are_deterministic_for_safe_edits_and_profile_precedence(
             "safe"
         );
         let edits = match jet_foundation::JSON::json_get(value, "fix_edits").unwrap() {
-            DataTree::Array(edits) => edits,
+            Dyn::Array(edits) => edits,
             _ => panic!("fix_edits is not an array"),
         };
         assert_eq!(edits.len(), 1);
@@ -367,7 +367,7 @@ build: {
             .args(["run", "--profile=debug", path.to_str().unwrap()])
             .current_dir(&dir)
             .env("JET_STORE_DIR", dir.join("store"))
-            .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
+            .env("JET_STORE_DIR", dir.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .unwrap()
@@ -1039,7 +1039,7 @@ fn run() {}
 /// Card #1866 / D-ROLEFILE1=A / D-CMDOVERRIDE1=A: a package-root command home
 /// wins over the ordinary stock entry, `--show-default` returns to the stock
 /// path, scaffolding writes all four homes, and duplicate package functions are
-/// a registered command-resolution error.
+/// rejected (E0624, the one package namespace).
 #[test]
 fn command_role_home_overrides_stock_and_show_default_reports_stock() {
     let dir = isolated_cwd("command_role_home");
@@ -1143,8 +1143,10 @@ fn command_role_home_overrides_stock_and_show_default_reports_stock() {
         .unwrap();
     assert_eq!(duplicate.status.code(), Some(1), "{duplicate:?}");
     let duplicate_stderr = String::from_utf8_lossy(&duplicate.stderr);
+    // Package files share one namespace, so a second package-scoped `fn run`
+    // is the package duplicate-name error before command resolution.
     assert!(
-        duplicate_stderr.contains("Error [E3540]"),
+        duplicate_stderr.contains("Error [E0624]"),
         "{duplicate_stderr}"
     );
     assert!(
@@ -1660,13 +1662,13 @@ fn measured_test_targets_filter_and_json_match_test_runner_contract() {
         "JSON must contain one record per selected claim: {json_stdout}"
     );
     for record in records {
-        let DataTree::Object(_) = &record else {
+        let Dyn::Object(_) = &record else {
             panic!("measurement JSON record is not an object")
         };
         assert!(
             matches!(
                 record.get("name").ok(),
-                Some(DataTree::Text(name) | DataTree::TypedText(name))
+                Some(Dyn::Text(name))
                     if name == "measured-needle"
             ),
             "JSON claim name is wrong: {record:?}"

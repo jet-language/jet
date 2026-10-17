@@ -4184,7 +4184,7 @@ fn write_checked_source(
 fn write_checked_candidate(path: &Path, before: &str, candidate: &str) -> Result<String, String> {
     let path_str = path.to_string_lossy();
     let abs = canonical_path(path);
-    let (diags, _, _) =
+    let (diags, _, _, _) =
         jet_driver::Driver::check_file_with_effect_facts(&path_str, Some((&abs, candidate)), true);
     let errors: Vec<Diagnostic> = diags
         .iter()

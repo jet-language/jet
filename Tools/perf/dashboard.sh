@@ -1038,7 +1038,6 @@ run_jit_trial() {
         -u JET_DEBUG_NATIVE_CACHE_LOG \
         -u JET_RUNTIME_CACHE_STATS \
         JET_RECEIPT_BYPASS=1 \
-        JET_RUN_CACHE_DIR="$trial_cache/run" \
         JET_STORE_DIR="$trial_cache/store" \
         NO_COLOR=1 \
         bash -c "cd '$trial_work' && $trial_invocation"; then
@@ -1341,82 +1340,20 @@ parity_compare_snapshot_prefix() {
     }
 }
 
-parity_tier_mode() {
-    parity_trace=$1
-    parity_native=0
-    parity_interpreter=0
-    grep -Fq 'tier1 native' "$parity_trace" && parity_native=1 || true
-    grep -Fq 'tier0 interp' "$parity_trace" && parity_interpreter=1 || true
-    case "$parity_native:$parity_interpreter" in
-        1:0) printf '%s\n' native ;;
-        0:1) printf '%s\n' interpreter ;;
-        1:1) printf '%s\n' mixed ;;
-        *) echo "missing tier receipt: $parity_trace" >&2; exit 1 ;;
-    esac
-}
-
-parity_require_tier() {
-    parity_mode=$1
-    parity_requirement=$2
-    case "$parity_requirement:$parity_mode" in
-        native:native|explicit:native|explicit:interpreter|explicit:mixed) ;;
-        native:*) echo "speed result used non-native tier: $parity_mode" >&2; exit 1 ;;
-        explicit:*) echo "missing explicit tier classification: $parity_mode" >&2; exit 1 ;;
-        *) echo "unknown tier requirement: $parity_requirement" >&2; exit 1 ;;
-    esac
-}
-
-check_native_jit() {
-    native_id=$1
-    native_program=$2
-    native_expected=$3
-    native_root="$run_dir/native-$native_id"
-    rm -rf "$native_root"
-    mkdir -p "$native_root"
-    prepare_fixture "$native_root" "$native_program" "$native_expected"
-    native_job=$(job_argument_for_program "$native_program")
-    if [ -n "$native_job" ]; then
-        parity_run_process "$native_root/status" "$native_root/stdout" "$native_root/stderr" "$native_root" \
-            env \
-            -u JET_DEBUG_NATIVE_CACHE_LOG \
-            -u JET_RUNTIME_CACHE_STATS \
-            JET_RECEIPT_BYPASS=1 \
-            JET_RUN_CACHE_DIR="$native_root/run-cache" \
-            JET_STORE_DIR="$native_root/store" \
-            NO_COLOR=1 \
-            "$JET_BIN" run run.jet --trace-tiers -- "$native_job"
-    else
-        parity_run_process "$native_root/status" "$native_root/stdout" "$native_root/stderr" "$native_root" \
-            env \
-            -u JET_DEBUG_NATIVE_CACHE_LOG \
-            -u JET_RUNTIME_CACHE_STATS \
-            JET_RECEIPT_BYPASS=1 \
-            JET_RUN_CACHE_DIR="$native_root/run-cache" \
-            JET_STORE_DIR="$native_root/store" \
-            NO_COLOR=1 \
-            "$JET_BIN" run run.jet --trace-tiers
-    fi
-    parity_require_status "$(sed -n '1p' "$native_root/status")" "$native_id/native"
-    parity_compare "$native_root/expected.out" "$native_root/stdout" "$native_id/native-stdout"
-    native_tier=$(parity_tier_mode "$native_root/stderr")
-    parity_require_tier "$native_tier" native
-}
-
 parity_run_case() {
     parity_id=$1
     parity_program=$2
     parity_expected=$3
-    parity_requirement=$4
     parity_root="$run_dir/parity-$parity_id"
     rm -rf "$parity_root"
     mkdir -p "$parity_root"
     prepare_fixture "$parity_root" "$parity_program" "$parity_expected"
 
     parity_run_process "$parity_root/jit.status" "$parity_root/jit.stdout" "$parity_root/jit.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/jit-run-cache" JET_STORE_DIR="$parity_root/jit-store" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_root/jit-store" NO_COLOR=1 \
         "$JET_BIN" run run.jet
     parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
         "$JET_BIN" dev run.jet --watch=off --quiet
     parity_run_process "$parity_root/aot-build.status" "$parity_root/aot-build.stdout" "$parity_root/aot-build.stderr" "$parity_root" \
         env JET_STORE_DIR="$parity_root/aot-store" NO_COLOR=1 \
@@ -1437,21 +1374,6 @@ parity_run_case() {
     parity_compare "$parity_root/jit.stderr" "$parity_root/dev.stderr" "$parity_id/jit-dev-stderr"
     parity_compare "$parity_root/jit.stderr" "$parity_root/aot.stderr" "$parity_id/jit-aot-stderr"
 
-    parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-store" NO_COLOR=1 \
-        "$JET_BIN" run run.jet --trace-tiers
-    parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-store" NO_COLOR=1 \
-        "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers
-    parity_require_status "$(sed -n '1p' "$parity_root/jit-trace.status")" "$parity_id/jit-trace"
-    parity_require_status "$(sed -n '1p' "$parity_root/dev-trace.status")" "$parity_id/dev-trace"
-    parity_jit_tier=$(parity_tier_mode "$parity_root/jit-trace.stderr")
-    parity_dev_tier=$(parity_tier_mode "$parity_root/dev-trace.stderr")
-    [ "$parity_jit_tier" = "$parity_dev_tier" ] || {
-        echo "JIT/dev tier divergence: $parity_id ($parity_jit_tier -> $parity_dev_tier)" >&2
-        exit 1
-    }
-    parity_require_tier "$parity_jit_tier" "$parity_requirement"
     PARITY_CASE_COUNT=$((PARITY_CASE_COUNT + 1))
 }
 
@@ -1474,11 +1396,11 @@ parity_run_dev_case() {
     parity_job=$(job_argument_for_program "$parity_program")
     if [ -n "$parity_job" ]; then
         parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
+            env JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
             "$JET_BIN" dev run.jet --watch=off --quiet -- "$parity_job"
     else
         parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
+            env JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
             "$JET_BIN" dev run.jet --watch=off --quiet
     fi
     parity_require_status "$(sed -n '1p' "$parity_root/dev.status")" "$parity_id/dev"
@@ -1486,30 +1408,6 @@ parity_run_dev_case() {
     parity_compare "$parity_jit_stdout" "$parity_root/dev.stdout" "$parity_id/jit-dev-stdout"
     parity_compare "$parity_jit_stderr" "$parity_root/dev.stderr" "$parity_id/jit-dev-stderr"
 
-    if [ -n "$parity_job" ]; then
-        parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-store" NO_COLOR=1 \
-            "$JET_BIN" run run.jet --trace-tiers -- "$parity_job"
-        parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-store" NO_COLOR=1 \
-            "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers -- "$parity_job"
-    else
-        parity_run_process "$parity_root/jit-trace.status" "$parity_root/jit-trace.stdout" "$parity_root/jit-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/jit-trace-run-cache" JET_STORE_DIR="$parity_root/jit-trace-store" NO_COLOR=1 \
-            "$JET_BIN" run run.jet --trace-tiers
-        parity_run_process "$parity_root/dev-trace.status" "$parity_root/dev-trace.stdout" "$parity_root/dev-trace.stderr" "$parity_root" \
-            env JET_RUN_CACHE_DIR="$parity_root/dev-trace-run-cache" JET_STORE_DIR="$parity_root/dev-trace-store" NO_COLOR=1 \
-            "$JET_BIN" dev run.jet --watch=off --quiet --trace-tiers
-    fi
-    parity_require_status "$(sed -n '1p' "$parity_root/jit-trace.status")" "$parity_id/jit-trace"
-    parity_require_status "$(sed -n '1p' "$parity_root/dev-trace.status")" "$parity_id/dev-trace"
-    parity_jit_tier=$(parity_tier_mode "$parity_root/jit-trace.stderr")
-    parity_dev_tier=$(parity_tier_mode "$parity_root/dev-trace.stderr")
-    [ "$parity_jit_tier" = "$parity_dev_tier" ] || {
-        echo "JIT/dev tier divergence: $parity_id ($parity_jit_tier -> $parity_dev_tier)" >&2
-        exit 1
-    }
-    parity_require_tier "$parity_jit_tier" native
     PARITY_CASE_COUNT=$((PARITY_CASE_COUNT + 1))
 }
 
@@ -1524,20 +1422,15 @@ parity_check_job_runner_case() {
     prepare_fixture "$parity_case_root" "$parity_case_program" "$parity_case_seed_expected"
 
     parity_run_process "$parity_case_root/run-seed.status" "$parity_case_root/run-seed.stdout" "$parity_case_root/run-seed.stderr" "$parity_case_root" \
-        env JET_RUN_CACHE_DIR="$parity_case_root/run-cache" JET_STORE_DIR="$parity_case_root/store" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_case_root/store" NO_COLOR=1 \
         "$JET_BIN" run run.jet -- seed_data
     parity_run_process "$parity_case_root/dev-seed.status" "$parity_case_root/dev-seed.stdout" "$parity_case_root/dev-seed.stderr" "$parity_case_root" \
-        env JET_RUN_CACHE_DIR="$parity_case_root/dev-run-cache" JET_STORE_DIR="$parity_case_root/dev-store" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_case_root/dev-store" NO_COLOR=1 \
         "$JET_BIN" dev run.jet --watch=off --quiet -- seed_data
-    parity_run_process "$parity_case_root/interpreter-seed.status" "$parity_case_root/interpreter-seed.stdout" "$parity_case_root/interpreter-seed.stderr" "$parity_case_root" \
-        env JET_RUN_CACHE_DIR="$parity_case_root/interpreter-run-cache" JET_STORE_DIR="$parity_case_root/interpreter-store" NO_COLOR=1 \
-        "$JET_BIN" run --interpret run.jet -- seed_data
     parity_require_status "$(sed -n '1p' "$parity_case_root/run-seed.status")" "$parity_case_id/run-seed"
     parity_require_status "$(sed -n '1p' "$parity_case_root/dev-seed.status")" "$parity_case_id/dev-seed"
-    parity_require_status "$(sed -n '1p' "$parity_case_root/interpreter-seed.status")" "$parity_case_id/interpreter-seed"
     parity_compare "$parity_case_root/expected.out" "$parity_case_root/run-seed.stdout" "$parity_case_id/expected-run-seed"
     parity_compare "$parity_case_root/expected.out" "$parity_case_root/dev-seed.stdout" "$parity_case_id/expected-dev-seed"
-    parity_compare "$parity_case_root/expected.out" "$parity_case_root/interpreter-seed.stdout" "$parity_case_id/expected-interpreter-seed"
 
     parity_run_process "$parity_case_root/release-build.status" "$parity_case_root/release-build.stdout" "$parity_case_root/release-build.stderr" "$parity_case_root" \
         env JET_STORE_DIR="$parity_case_root/release-store" NO_COLOR=1 \
@@ -1588,10 +1481,10 @@ parity_check_diagnostic() {
     rm -rf "$parity_root"
     mkdir -p "$parity_root"
     parity_run_process "$parity_root/jit.status" "$parity_root/jit.stdout" "$parity_root/jit.stderr" "$ROOT" \
-        env JET_RUN_CACHE_DIR="$parity_root/jit-run-cache" JET_STORE_DIR="$parity_root/jit-store" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_root/jit-store" NO_COLOR=1 \
         "$JET_BIN" run "$parity_source"
     parity_run_process "$parity_root/dev.status" "$parity_root/dev.stdout" "$parity_root/dev.stderr" "$ROOT" \
-        env JET_RUN_CACHE_DIR="$parity_root/dev-run-cache" JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
+        env JET_STORE_DIR="$parity_root/dev-store" NO_COLOR=1 \
         "$JET_BIN" dev "$parity_source" --watch=off --quiet
     parity_run_process "$parity_root/aot.status" "$parity_root/aot.stdout" "$parity_root/aot.stderr" "$ROOT" \
         env JET_STORE_DIR="$parity_root/aot-store" NO_COLOR=1 \
@@ -1625,9 +1518,9 @@ run_parity_checks() {
         parity_run_dev_case "edit-$(safe_id "$parity_edit")" "$parity_edit" "$parity_edit_expected" "$parity_program-jit-representative-edit"
     done < "$CORPUS"
     parity_check_job_runner
-    parity_run_case trait-object Examples/features/types/traits.jet Examples/features/expected/types/traits.out explicit
-    parity_run_case effects Examples/features/effects/effects.jet Examples/features/expected/effects/effects.out native
-    parity_run_case closure Examples/features/basics/bare_lambda_param.jet Examples/features/expected/basics/bare_lambda_param.out native
+    parity_run_case trait-object Examples/features/types/traits.jet Examples/features/expected/types/traits.out
+    parity_run_case effects Examples/features/effects/effects.jet Examples/features/expected/effects/effects.out
+    parity_run_case closure Examples/features/basics/bare_lambda_param.jet Examples/features/expected/basics/bare_lambda_param.out
     parity_check_diagnostic
     PARITY_RECEIPT=verified
     parity_rows_file="$run_dir/rows.with-parity.tsv"
@@ -1699,17 +1592,6 @@ measure_state() {
             rm -rf "$state_warm_cache"
             cp -R "$state_cache" "$state_warm_cache"
         fi
-    fi
-    # Warmup proves that the path can run. Phase totals below describe only
-    # the measured samples, so cache priming cannot dilute their timing.
-    if [ "$state_stage" = "jit-fast" ]; then
-        state_native_program=$state_program
-        state_native_expected=$state_expected
-        if [ "$state_kind" = "edit" ]; then
-            state_native_program=$state_edit_program
-            state_native_expected=$state_edit_expected
-        fi
-        check_native_jit "$state_id" "$state_native_program" "$state_native_expected"
     fi
     : > "$state_phases"
 

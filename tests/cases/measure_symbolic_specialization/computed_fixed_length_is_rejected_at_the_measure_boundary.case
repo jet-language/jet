@@ -1,0 +1,8 @@
+# HAND-PORT tests/measure_symbolic_specialization.rs:172-183 computed_fixed_length_is_rejected_at_the_measure_boundary
+# PENDING-SAME-HEAD runtimeGap=original-assert; PENDING-GRAMMAR, no historical failure captures blessed.
+# Original same-diagnostic conjunction (code, what, why), not independent witnesses.
+fixture: computed_fixed_length_is_rejected_at_the_measure_boundary.fixture
+env: NO_COLOR=1
+step: jet check --json main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0963"][?what~="fixed-size list length"][?why~="declared constant or module value parameter"] #>= 1

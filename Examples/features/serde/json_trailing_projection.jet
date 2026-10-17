@@ -1,9 +1,8 @@
 // Selective decoding keeps full validation: a typed projection that reads one
-// field, the full DataTree parse, and the pull reader all reject malformed
+// field, the full Dyn parse, and the pull reader all reject malformed
 // data in skipped fields and trailing bytes after the root.
 use core.encoding.json as json
 
-#Codable
 struct Small {
     a: Int
 }
@@ -21,7 +20,7 @@ fn full(label: String, text: String) {
         print("{label} full: {kind} at {err.byte_offset}: {err.reason}")
         return
     }
-    print("{label} full: ok {json.to_string(tree)}")
+    print("{label} full: ok {json.to_string(tree) ?? panic("JSON encode")}")
 }
 
 fn projected(label: String, text: String) {

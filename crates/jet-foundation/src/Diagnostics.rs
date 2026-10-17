@@ -1289,20 +1289,8 @@ fn row_no_fix_reason(row: &crate::Registry::DiagnosticRow) -> Option<NoFixReason
 /// line breaks become visible escape sequences in the human renderer.
 pub fn escape_terminal_text(value: &str) -> String {
     let mut escaped = String::with_capacity(value.len());
-    for character in value.chars() {
-        match character {
-            '\n' => escaped.push_str("\\n"),
-            '\r' => escaped.push_str("\\r"),
-            '\t' => escaped.push_str("\\t"),
-            character if character.is_control()
-                || matches!(character, '\u{2028}' | '\u{2029}') =>
-            {
-                use std::fmt::Write as _;
-                let _ = write!(escaped, "\\u{{{:04x}}}", character as u32);
-            }
-            character => escaped.push(character),
-        }
-    }
+    crate::RuntimeDiagnosticCore::jet_write_terminal_text(&mut escaped, value)
+        .expect("String formatting cannot fail");
     escaped
 }
 
@@ -2259,6 +2247,24 @@ mod crypto_diagnostic_contract_tests {
         let lint = Diagnostic::from_row("L2001", &[], None);
         assert_eq!(lint.severity, Severity::Lint);
         assert_eq!(lint.moment, ReportMoment::Compile);
+    }
+
+    #[test]
+    fn wrong_arity_machine_next_action_does_not_leak_registry_example_names() {
+        for callee in ["List.pop", "String.split", "Map.get"] {
+            let diagnostic = Diagnostic::error(
+                "E0104",
+                format!("`{callee}` has the wrong number of arguments"),
+                "Every argument must match a parameter".into(),
+                "Match the accepted argument count".into(),
+                Some(Span::new(0, 1)),
+            );
+            let json = diagnostic.to_json(&ReportPath::from_process("main.jet"), "x");
+            assert!(json.contains(
+                "\"no_fix_reason\":{\"kind\":\"ambiguous\",\"next\":\"Check the called function or method's parameters and match its argument count.\"}"
+            ), "{json}");
+            assert!(!json.contains("show"), "{json}");
+        }
     }
 
     #[test]

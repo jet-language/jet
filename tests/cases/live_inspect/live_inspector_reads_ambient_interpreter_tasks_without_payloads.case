@@ -1,0 +1,17 @@
+# Port of tests/live_inspect.rs:189-195 + helper121-182; program bytes unchanged.
+# PUBLIC-PROJECTION approved TestLead1: inspect live calls the same LiveInspect::read.
+# PENDING-GRAMMAR(batch-four), PENDING-SEAM(read_bytes); no reference receipt claimed.
+fixture: tasks.fixture
+session app raw: jet run --interpret --observe live.jet
+stdout: null
+stderr: null
+poll snapshot: jet inspect live --attach {pid:app} --once --json until exit: 0 && stdout: ~ "\"wait\":\"channel receive\"" timeout 5s every 25ms # original ed77c235f tests/live_inspect.rs:162-169 waits for channel-receive marker with 5s deadline and 25ms polling
+stdout: ~ "\"parent\":1" # original ed77c235f tests/live_inspect.rs:172 snapshot.contains parent1
+stdout: ~ "\"effects\":" # original ed77c235f tests/live_inspect.rs:173 snapshot.contains effects field
+stdout: ~ "\"arena_bytes\":" # original ed77c235f tests/live_inspect.rs:174 snapshot.contains arena_bytes field
+stdout: !~ "TOP_SECRET_CHANNEL_PAYLOAD" # original ed77c235f tests/live_inspect.rs:175 snapshot excludes secret bytes
+stdout: !~ "payload" # original ed77c235f tests/live_inspect.rs:176 snapshot excludes payload field
+stdout: !~ "locals" # original ed77c235f tests/live_inspect.rs:177 snapshot excludes locals field
+signal app: KILL
+close app
+exit: any # original ChildGuard kills and ignores wait status

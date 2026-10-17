@@ -3,7 +3,7 @@
 use crate::Comptime::DevSink;
 use crate::Diagnostics::{Diagnostic, Severity, Span};
 use crate::Lexer::{TokKind, Token};
-use crate::AST::{CtKey, CtReport, CtValue, Type};
+use crate::AST::{CtValue, Type};
 use crate::{Lexer, Parser, AST};
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
 use std::path::{Path, PathBuf};
@@ -1957,7 +1957,7 @@ fn compiler_semantic_index_value(
 }
 
 fn checked_value(source: &str) -> CtValue {
-    let (checked_diagnostics, bundle, effect_facts) =
+    let (checked_diagnostics, bundle, effect_facts, _nominals) =
         crate::Driver::check_eval_with_effect_facts(source, "core.compiler.jet");
     checked_value_from_parts(source, &checked_diagnostics, bundle.as_ref(), &effect_facts)
 }
@@ -2265,7 +2265,7 @@ pub fn parse_source(src: &str) -> SyntaxTree {
 
 pub fn check_file(path: &std::path::Path) -> CheckedFile {
     let file = path.to_string_lossy();
-    let (diagnostics, bundle, facts) =
+    let (diagnostics, bundle, facts, _nominals) =
         crate::Driver::check_file_with_effect_facts(&file, None, true);
     let has_errors = diagnostics.iter().any(|d| d.severity == Severity::Error);
     let source = std::fs::read_to_string(path).unwrap_or_default();
@@ -2338,13 +2338,18 @@ pub fn check_file_json(path: &std::path::Path) -> String {
             )
         }
     };
+    let value = match status_ct_value(&checked_value(&source)) {
+        Ok(value) => value,
+        Err(reason) => return StatusEnvelope::new("inspect.compiler.check", false)
+            .with_field("error", StatusValue::from(reason)).json(),
+    };
     let compiler = StatusValue::object(
         StatusFields::new()
             .with("schema_version", JSON_SCHEMA_VERSION)
             .with("api_version", API_VERSION)
             .with("operation", "check")
             .with("file", file.as_ref())
-            .with("value", status_ct_value(&checked_value(&source))),
+            .with("value", value),
     );
     compiler_json("check", compiler)
 }
@@ -2549,71 +2554,11 @@ fn status_source_map(map: &SourceMap) -> StatusValue {
             .with("generated_lines", lines),
     )
 }
-fn status_map_key(key: &CtKey) -> String {
-    match key {
-        CtKey::Int(value) => value.to_string(),
-        CtKey::Str(value) => value.clone(),
-        CtKey::Bool(value) => value.to_string(),
-        CtKey::Char(value) => value.to_string(),
-        CtKey::Tuple(_) | CtKey::Struct { .. } | CtKey::Enum { .. } => {
-            key.to_value().to_json()
-        }
-    }
-}
 
-fn status_ct_value(value: &CtValue) -> StatusValue {
-    match value {
-        CtValue::Int(value) => StatusValue::from(*value),
-        CtValue::Float(value) => StatusValue::Float(value.to_json()),
-        CtValue::Bool(value) => StatusValue::from(*value),
-        CtValue::Char(value) => StatusValue::from(value.to_string()),
-        CtValue::Str(value) => StatusValue::from(value.as_str()),
-        CtValue::BigInt(value) => StatusValue::from(value.to_string_rep().as_str()),
-        CtValue::Bytes(values) => {
-            StatusValue::array(values.iter().map(|value| StatusValue::from(*value as i128)))
-        }
-        CtValue::List(values) => StatusValue::array(values.iter().map(status_ct_value)),
-        CtValue::Map(values) => StatusValue::object(
-            values.iter().fold(StatusFields::new(), |fields, (key, value)| {
-                fields.with(status_map_key(key), status_ct_value(value))
-            }),
-        ),
-        CtValue::Struct { fields, .. } => StatusValue::object(
-            fields
-                .iter()
-                .filter(|(name, _)| !crate::Syntax::is_memo_storage_name(name))
-                .fold(StatusFields::new(), |fields, (name, value)| {
-                    fields.with(name.as_str(), status_ct_value(value))
-                }),
-        ),
-        CtValue::Enum {
-            variant, args, ..
-        } if args.is_empty() => StatusValue::from(variant.as_str()),
-        CtValue::Enum {
-            variant, args, ..
-        } if args.iter().all(|(label, _)| label.is_some()) => {
-            let fields = args.iter().fold(StatusFields::new(), |fields, (label, value)| {
-                fields.with(
-                    label.as_deref().expect("checked enum label"),
-                    status_ct_value(value),
-                )
-            });
-            StatusValue::object(StatusFields::new().with(variant.as_str(), StatusValue::object(fields)))
-        }
-        CtValue::Enum { variant, args, .. } => StatusValue::object(
-            StatusFields::new().with(
-                variant.as_str(),
-                StatusValue::array(args.iter().map(|(_, value)| status_ct_value(value))),
-            ),
-        ),
-        CtValue::Present(value) => status_ct_value(value),
-        CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit | CtValue::Closure(_) => {
-            StatusValue::Null
-        }
-        CtValue::Failed(CtReport::Told(value)) => {
-            StatusValue::object(StatusFields::new().with("err", status_ct_value(value)))
-        }
-    }
+fn status_ct_value(value: &CtValue) -> Result<StatusValue, String> {
+    let encoded = value.to_json()
+        .map_err(|error| jet_foundation::EncodingJson::encoding_error_show(&error))?;
+    StatusValue::parse(&encoded).map_err(|error| format!("invalid compiler JSON: {error:?}"))
 }
 
 pub fn source_map_from_generated_rust(rust_src: &str) -> SourceMap {

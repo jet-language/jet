@@ -1,0 +1,129 @@
+use core.files as files
+
+fn s5_grammar_find(text: String, needle: String, start: Int) -> Int {
+    bytes :: text.bytes()
+    wanted :: needle.bytes()
+    at := start
+    loop {
+        if at + wanted.len() > bytes.len() -> return -1
+        matched := true
+        loop offset in 0..<wanted.len() {
+            if bytes[at + offset] != wanted[offset] -> matched = false
+        }
+        if matched -> return at
+        at += 1
+    }
+}
+
+// The finder returns UTF-8 byte offsets, matching the Rust original's string indices.
+fn s5_grammar_slice_bytes(text: String, start: Int, end: Int) -> String {
+    raw :: text.bytes()
+    assert(start >= 0 && end >= start && end <= raw.len(), "valid grammar byte span")
+    if start == end -> return ""
+    String.from_bytes(raw[start..(end - 1)]) ?? panic("grammar byte span must end on UTF-8 boundaries")
+}
+
+#Test("grammar byte spans remain byte-indexed after Unicode") {
+    text :: "é🙂 result_handler_expr: λ body paren_expr:"
+    start :: s5_grammar_find(text, "result_handler_expr:", 0)
+    end :: s5_grammar_find(text, "paren_expr:", start)
+    assert(s5_grammar_slice_bytes(text, start, end) == "result_handler_expr: λ body ")
+    assert(s5_grammar_slice_bytes(text, start, start) == "")
+}
+
+#Test("editor_grammars_have_generated_sections") {
+    paths :: [String]{"Tools/editors/vscode/syntaxes/jet.tmLanguage.json", "Tools/editors/jet.tmGrammar", "Tools/editors/tree-sitter/grammar.js", "Tools/editors/zed/languages/jet/highlights.scm"}
+    loop path in paths {
+        text :: files.read(path) ?? panic("read {path}")
+        start :: s5_grammar_find(text, "BEGIN GENERATED JET SYNTAX HIGHLIGHTS", 0)
+        assert(start >= 0, "{path} missing generated start")
+        end :: s5_grammar_find(text, "END GENERATED JET SYNTAX HIGHLIGHTS", start)
+        assert(end >= start, "{path} missing generated end after start")
+    }
+}
+
+#Test("tree_sitter_map_type_grammar_keeps_colon_adjacent") {
+    grammar :: files.read("Tools/editors/tree-sitter/grammar.js") ?? panic("read tree-sitter grammar")
+    assert(grammar.contains("seq(\"[\", $._type, \":\", $._type, \"]\")"))
+    assert(!grammar.contains("seq(\"[\", $._type, \": \", $._type, \"]\")"))
+}
+
+#Test("tree_sitter_result_handler_grammar_keeps_the_canonical_shape") {
+    grammar :: files.read("Tools/editors/tree-sitter/grammar.js") ?? panic("read tree-sitter grammar")
+    start :: s5_grammar_find(grammar, "result_handler_expr:", 0)
+    assert(start >= 0, "result handler rule missing")
+    end :: s5_grammar_find(grammar, "paren_expr:", start)
+    assert(end >= start, "paren expression rule missing after result handler")
+    rule :: s5_grammar_slice_bytes(grammar, start, end)
+    assert(rule.contains("field(\"ok\", $.identifier)") && rule.contains("field(\"error\", $.identifier)") && rule.contains("field(\"success\"") && rule.contains("field(\"failure\""))
+    assert(!rule.contains("\":>\""))
+    assert(!rule.contains("\"=>\""))
+}
+
+#Test("vscode_strings_do_not_relex_interpolations") {
+    paths :: [String]{"Tools/editors/vscode/syntaxes/jet.tmLanguage.json", "Tools/editors/jet.tmGrammar"}
+    loop path in paths {
+        grammar :: files.read(path) ?? panic("read {path}")
+        assert(!grammar.contains("\"include\": \"$self\""))
+        assert(grammar.contains("\"include\": \"#string-interpolation\""))
+        assert(!grammar.contains("constant.character.escape.jet"))
+    }
+}
+
+#Test("classic_textmate_grammar_matches_vscode_source") {
+    classic :: files.read("Tools/editors/jet.tmGrammar") ?? panic("read classic TextMate grammar")
+    vscode :: files.read("Tools/editors/vscode/syntaxes/jet.tmLanguage.json") ?? panic("read VSCode grammar")
+    assert(classic == vscode, "classic TextMate grammar must mirror VSCode grammar")
+}
+
+fn s5_grammar_first_quoted(text: String, start: Int) -> String? {
+    first :: s5_grammar_find(text, "\"", start)
+    if first < 0 -> return None
+    last :: s5_grammar_find(text, "\"", first + 1)
+    if last < 0 -> return None
+    Val(s5_grammar_slice_bytes(text, first + 1, last))
+}
+
+#Test("zed_highlight_query_mentions_only_grammar_literals") {
+    nodes :: files.read("Tools/editors/tree-sitter/src/node-types.json") ?? panic("read tree-sitter node types")
+    anonymous := [String]{}
+    current_type := String?{None}
+    named := false
+    seen_named := false
+    loop line in nodes.split("\n") {
+        trimmed :: line.trim().copy()
+        if line.starts_with("  {{") {
+            current_type = None
+            named = false
+            seen_named = false
+        } else if trimmed.starts_with("\"type\":") && current_type == None {
+            colon :: s5_grammar_find(trimmed, ":", 0)
+            current_type = s5_grammar_first_quoted(trimmed, colon + 1)
+        } else if trimmed.starts_with("\"named\":") && !seen_named {
+            named = trimmed.contains("true")
+            seen_named = true
+        } else if line.starts_with("  }}") {
+            if seen_named && !named {
+                if current_type != None {
+                    token :: current_type ?? panic("known anonymous node type")
+                    &anonymous.push(token)
+                }
+            }
+        }
+    }
+    query :: files.read("Tools/editors/zed/languages/jet/highlights.scm") ?? panic("read Zed highlights")
+    loop line in query.split("\n") {
+        trimmed :: line.trim().copy()
+        if trimmed.starts_with(";") -> next
+        at := 0
+        loop {
+            first :: s5_grammar_find(trimmed, "\"", at)
+            if first < 0 -> break
+            last :: s5_grammar_find(trimmed, "\"", first + 1)
+            if last < 0 -> break
+            token :: s5_grammar_slice_bytes(trimmed, first + 1, last)
+            assert(anonymous.contains(token), "Zed query mentions non-anonymous grammar literal: {token}")
+            at = last + 1
+        }
+    }
+}

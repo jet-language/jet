@@ -1,0 +1,17 @@
+# Port of tests/fmt_round_trip_regressions.rs:72-95. Sources copied verbatim from the original include_str! paths.
+fixture: fixtures/generic_module_and_library_bodies_round_trip_retired_signatures
+# PENDING-GRAMMAR: approved batch-two JSON-escaped file predicate; keep the exact original newline, never replace with a prefix.
+step: jet fmt generic_modules.jet
+exit: 0
+file: generic_modules.jet ~ pub fn slot(k: K) -> Slot { Slot.Value(k) } # Original formatter substring assertion.
+copy: generic_modules.jet generic_modules.jet.once
+step: jet fmt generic_modules.jet
+exit: 0
+file: generic_modules.jet == generic_modules.jet.once
+step: jet fmt library.jet
+exit: 0
+file: library.jet ~ "fn greeting(self) -> String\n" # Original formatter substring; quoted escape retains its final newline.
+copy: library.jet library.jet.once
+step: jet fmt library.jet
+exit: 0
+file: library.jet == library.jet.once

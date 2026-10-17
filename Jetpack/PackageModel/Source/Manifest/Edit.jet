@@ -14,19 +14,19 @@ fn pkg_render_dep_spec(name: String, spec: DepSpec) -> String Never! {
 
 // Insert or update a dependency in `deps: { … }`, creating the block when it
 // is absent.
-pub fn pkg_add_dep(raw: String, name: String, spec: DepSpec) -> String Never! {
+fn pkg_add_dep(raw: String, name: String, spec: DepSpec) -> String Never! {
     pkg_edit_insert_or_replace_in_block(raw, "deps", name, "    {name}: {pkg_render_dep_spec(name, spec)},")
 }
 
 // Remove a dependency from `deps: { … }`.
-pub fn pkg_remove_dep(raw: String, name: String) -> String Never! {
+fn pkg_remove_dep(raw: String, name: String) -> String Never! {
     pkg_edit_remove_from_block(raw, "deps", name)
 }
 
 // Add one effect root to `authority.holds.allow`.
-pub fn pkg_add_authority_hold(raw: String, input: String) -> String Never! {
+fn pkg_add_authority_hold(raw: String, input: String) -> String Never! {
     right :: input.trim()
-    if right == "" -> return ~raw
+    if right == "" -> return raw.copy()
     lines :: pkg_binder_lines(raw)
     authority_line := -1
     loop index in 0..<lines.len() {

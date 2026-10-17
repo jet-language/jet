@@ -56,7 +56,9 @@ fn store_test_register_entry_locked(verification: &StoreVerification, roots: Han
         loop name in order.names {
             path :: files.join(journal, name)
             files.write(path, "same") ?? panic("journal file")
-            sys.utime(path, 1, 1) ?? panic("set mtime")
+            #Unsafe("the test owns the journal file it just wrote") {
+                sys.utime(path, 1, 1) ?? panic("set mtime")
+            }
         }
     }
     assert_eq(store_wal_state_stamp(first_roots) ?? panic("first stamp"), store_wal_state_stamp(second_roots) ?? panic("second stamp"))

@@ -1,0 +1,208 @@
+use core.files as files
+use core.sys as sys
+
+fn kit_test_steps_bless() -> KitBless {
+    KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}
+}
+
+fn kit_test_steps_env() -> KitEnv {
+    root :: sys.current_dir() ?? panic("step checkout root: {err}")
+    KitEnv{root: root, scratch: files.join(sys.get("HOME") ?? panic("HOME required"), ".cache/jet-dev/scratch"), jet: "", jetpack: "", timeout: 5s, memory_limit: 0}
+}
+
+#Test("step argv quoting preserves whitespace, escapes and empty arguments") {
+    argv :: kit_steps_words("printf '%s' \"two words\" '' escaped\\ space") ?? panic("words")
+    assert_eq(argv, ["printf", "%s", "two words", "", "escaped space"])
+    assert_eq(kit_steps_words("printf 'unclosed"), None)
+}
+
+#Test("step parser covers fixture env streams files input exit normalizers") {
+    plan :: kit_steps_parse("requires: tool:printf\nfixture: tree\nenv: NAME={{work}}\nnormalize: argv0\nstep: jet check \"two words.jet\"\nstdin: answers.stdin\nexit: nonzero\nstdout: = result.out\nstderr: !~ forbidden # original predicate\nfile: result.txt exists\nfile: state.txt ~ ready # asynchronous state text\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.fixture, "tree")
+    assert_eq(plan.environment, ["NAME={{work}}"])
+    assert_eq(plan.steps.len(), 1)
+    assert_eq(plan.steps[0].argv, ["jet", "check", "two words.jet"])
+    assert_eq(plan.steps[0].cwd, "")
+    assert_eq(plan.steps[0].unset.len(), 0)
+    assert_eq(plan.steps[0].environment.len(), 0)
+    assert_eq(plan.steps[0].stdin, "answers.stdin")
+    assert_eq(plan.steps[0].exit, "nonzero")
+    assert_eq(plan.steps[0].assertions.len(), 4)
+    assert(kit_expect_named(plan.normalize, "argv0"))
+    assert(kit_steps_parse("stdout: = result.out\n").error != "")
+    assert(kit_steps_parse("step: jet check x.jet\nstdout: ~ timing\n").error != "")
+    assert(kit_steps_parse("run: none\nref-audit: bridge # vetted bridge\n").error != "")
+    assert_eq(kit_steps_parse("artifact: custom-executable\n").artifact, "custom-executable")
+}
+
+#Test("one-of compares exact alternatives and refuses blessing before writes") {
+    root :: sys.current_dir() ?? panic("step fixture checkout root: {err}")
+    directory :: files.join(root, "Tools/testkit/Fixtures/steps")
+    accepted :: "vulkan:accepted\nwebgpu:rejected\n"
+    rejected :: "vulkan:rejected\nwebgpu:rejected\n"
+    alternatives :: "accepted.out rejected.out"
+    assert_eq(kit_steps_one_of("case", directory, alternatives, accepted, kit_test_steps_bless()).status, "PASS")
+    assert_eq(kit_steps_one_of("case", directory, alternatives, rejected, kit_test_steps_bless()).status, "PASS")
+    assert_eq(kit_steps_one_of("case", directory, alternatives, "vulkan:other\nwebgpu:rejected\n", kit_test_steps_bless()).status, "FAIL")
+    bless :: KitBless{ids: ["case"], all: false, reason: "", allow_shrink: [], first_tier: true}
+    assert_eq(kit_steps_one_of("case", directory, alternatives, accepted, bless).status, "REFUSED")
+    plan :: kit_steps_parse("step: built\nstdout: one-of accepted.out rejected.out # host-dependent device\n")
+    assert_eq(plan.error, "")
+    refusal :: kit_steps_bless_plan(plan, "case", bless) ?? panic("one-of bless must refuse")
+    assert(refusal.detail.contains("edit by hand"))
+}
+
+#Test("missing host skips before a declarative capability refusal") {
+    env :: kit_test_steps_env()
+    missing :: kit_steps_parse("requires: os:not-{sys.family()}\nrefused: missing Windows COM host\n")
+    skipped :: kit_steps_execute(kit_steps_context(missing, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(skipped.verdict.status, "SKIP-HOST")
+    present :: kit_steps_parse("requires: os:{sys.family()}\nrefused: missing Windows COM host\n")
+    refused :: kit_steps_execute(kit_steps_context(present, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(refused.verdict.status, "REFUSED")
+    assert(refused.verdict.detail.contains("COM"))
+}
+
+#Test("conditional capability refusals remain inside their inline and nested block guards") {
+    env :: kit_test_steps_env()
+    loop source in ["when os {sys.family()}: refused: selected-capability\n", "when os {sys.family()}\nwhen os-name {kit_steps_host_name()}\nrefused: selected-capability\nend when\nend when\n"] {
+        plan :: kit_steps_parse_case(source)
+        assert_eq(plan.error, "")
+        assert_eq(plan.refused, "")
+        result :: kit_steps_execute(kit_steps_context(plan, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
+        assert_eq(result.verdict.status, "REFUSED")
+        assert_eq(result.verdict.detail, "selected-capability")
+    }
+    loop source in ["when os !{sys.family()}: refused: unselected-capability\n", "when os {sys.family()}\nwhen os-name !{kit_steps_host_name()}\nrefused: unselected-capability\nend when\nend when\n"] {
+        plan :: kit_steps_parse_case(source)
+        assert_eq(plan.error, "")
+        result :: kit_steps_execute(kit_steps_context(plan, "case", env, env.root, env.scratch, env.root, kit_test_steps_bless()), kit_steps_hooks())
+        assert_eq(result.verdict.status, "PASS")
+    }
+    loop source in ["refused:\n", "when os {sys.family()}: refused:\n", "when made-up host: refused: bad\n", "when os {sys.family()}\nrefused: bad\n"] -> assert(kit_steps_parse_case(source).error != "")
+}
+
+#Test("step stream assertions enforce exit and exact bytes") {
+    env :: kit_test_steps_env()
+    run :: KitRun{stdout: "two words", stderr: "", code: 0, signal: None, timed_out: false, error: ""}
+    plan :: kit_steps_parse("step: printf '%s' 'two words'\nstdout: = message.out\nstderr: empty\n")
+    directory :: files.join(env.root, "Tools/testkit/Fixtures/steps")
+    context :: kit_steps_context(plan, "case", env, env.root, env.scratch, directory, kit_test_steps_bless())
+    assert_eq(kit_steps_check(plan.steps[0], context, KitStepState{last: run, built: "", built_once: false}, "").status, "PASS")
+    bad :: KitRun{stdout: "two words", stderr: "", code: 3, signal: None, timed_out: false, error: ""}
+    assert_eq(kit_steps_check(plan.steps[0], context, KitStepState{last: bad, built: "", built_once: false}, "").status, "FAIL")
+}
+
+#Test("build artifacts use the nearest package root or standalone entry directory") {
+    root :: kit_test_core_scratch("artifacts")
+    kit_exec_write(files.join(root, "pkg/package.jet"), "name: \"artifact-fixture\"\n")
+    kit_exec_write(files.join(root, "pkg/nested/deep/package.jet"), "name: \"nested-fixture\"\n")
+    assert_eq(kit_steps_artifact("plain/hello.jet", root, ""), files.join(root, "plain/.jet/build/hello"))
+    assert_eq(kit_steps_artifact("plain/a.b.jet", root, ""), files.join(root, "plain/.jet/build/a_b"))
+    assert_eq(kit_steps_artifact("pkg/nested/hello.jet", root, ""), files.join(root, "pkg/.jet/build/hello"))
+    assert_eq(kit_steps_artifact("pkg/nested/deep/run.jet", root, ""), files.join(root, "pkg/nested/deep/.jet/build/run"))
+    assert_eq(kit_steps_artifact("pkg/nested/hello.jet", root, "custom"), files.join(root, "pkg/.jet/build/custom"))
+    files.remove_all(root) ?? panic("remove artifact scratch")
+}
+
+#Test("default step hooks resolve built after an explicit successful CLI build") {
+    root :: kit_test_core_scratch("steps-built")
+    kit_exec_write(files.join(root, "hello.jet"), "fn run() {{ print(\"hello\") }}\n")
+    kit_exec_write(files.join(root, "expected.out"), "hello\n")
+    env :: kit_test_golden_env(root)
+    plan :: kit_steps_parse("step: jet build hello.jet\nstep: built\nstdout: = expected.out\n")
+    outcome :: kit_steps_execute(kit_steps_context(plan, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(outcome.verdict.status, "PASS")
+    assert_eq(outcome.run.stdout, "hello\n")
+    missing :: kit_steps_parse_case("step: built\n")
+    refused :: kit_steps_execute(kit_steps_context(missing, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(refused.verdict.status, "REFUSED")
+    files.remove_all(root) ?? panic("remove steps-built scratch")
+}
+
+#Test("step cwd and environment overlay apply after case values and unset last") {
+    root :: kit_test_core_scratch("step-env")
+    kit_exec_write(files.join(root, "nested/marker"), "")
+    kit_exec_write(files.join(root, "expected.out"), "{{work}}/nested|step|unset")
+    env :: kit_test_golden_env(root)
+    plan :: kit_steps_parse("env: TESTKIT_ORDER=case\nstep: sh -c 'printf \"%s|%s|%s\" \"$PWD\" \"$TESTKIT_ORDER\" \"${{JET_RECEIPT_BYPASS-unset}}\"'\ncwd: nested\nenv: TESTKIT_ORDER=step\nunset: JET_RECEIPT_BYPASS\nstdout: = expected.out\n")
+    outcome :: kit_steps_execute(kit_steps_context(plan, "case", env, root, root, root, kit_test_steps_bless()), kit_steps_hooks())
+    assert_eq(outcome.verdict.status, "PASS")
+    assert_eq(outcome.run.stdout, "{root}/nested|step|unset")
+    files.remove_all(root) ?? panic("remove step-env scratch")
+}
+
+#Test("case parser preserves UTF-8 byte spans through quoted tokens JSON paths and reasons") {
+    source :: "env: LABEL=\"é·→—😀\"\nstep first: printf '%s' 'é·→—😀'\nstdout: ~ \"é·→—😀\" # diagnostics · → — 😀\nstdout.filter(~ \"😀\").trim: = \"é·→—😀\" # original predicate\njson: stdout doc $[\"é·😀\"] = \"→—\" # Unicode object member\n"
+    plan :: kit_steps_parse_case(source)
+    assert_eq(plan.error, "")
+    assert_eq(plan.environment, ["LABEL=é·→—😀"])
+    assert_eq(plan.steps[0].argv, ["printf", "%s", "é·→—😀"])
+    assert_eq(plan.steps[0].assertions[0].value, "é·→—😀")
+    assert_eq(plan.steps[0].assertions[1].transform, "filter(~ \"😀\").trim")
+    assert_eq(plan.steps[0].assertions[2].json_path, "$[\"é·😀\"]")
+    assert(kit_steps_parse_case("step: printf x\nstdout: ~ \"é·😀\"\n").error != "")
+}
+
+#Test("setup actions do not end the case environment header but process assertions end modifier adjacency") {
+    plan :: kit_steps_parse_case("mkdir: cache\nenv: SHARED=value\nnormalize: replace \"token\" \"shared\"\nstep: printf value\nenv: LOCAL=step\nexit: 0\nstep: printf value\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.environment, ["SHARED=value"])
+    assert_eq(plan.replacements.len(), 1)
+    assert_eq(plan.steps[0].environment.len(), 0)
+    assert_eq(plan.steps[1].environment.len(), 1)
+    assert_eq(plan.steps[2].environment.len(), 0)
+    assert(kit_steps_parse_case("step: printf value\nexit: 0\nenv: LOCAL=late\n").error.contains("modifier not adjacent"))
+    assert(kit_steps_parse_case("step: printf value\nmkdir: cache\nenv: LOCAL=late\n").error.contains("modifier not adjacent"))
+}
+
+#Test("exit relations and membership preserve explicit status assertions and validate earlier labels") {
+    plan :: kit_steps_parse_case("step prior: printf value\nexit: 7\nstep current: printf value\nexit: == prior\nexit: in [7, 8] # original status alternatives\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[1].exit, "any")
+    assert_eq(plan.steps[1].assertions.len(), 2)
+    pinned :: kit_steps_parse_case("step prior: printf value\nstep current: printf value\nexit: 0\nexit: == prior\n")
+    assert_eq(pinned.error, "")
+    assert_eq(pinned.steps[1].exit, "0")
+    loop source in ["step current: printf value\nexit: == current\n", "step: printf value\nexit: == later\nstep later: printf value\n", "step: printf value\nexit: in [] # original predicate\n", "step: printf value\nexit: in [0, nope] # original predicate\n", "step: printf value\nexit: in [0, 1]\n"] {
+        assert(kit_steps_parse_case(source).error != "")
+    }
+    assert(kit_steps_parse_case("write: {{tmp}}/subject_{{pid:app}} = \"bytes\"\n").error == "")
+    assert(kit_steps_parse_case("write: {{root}}/subject = \"bytes\"\n").error.contains("escapes"))
+}
+
+#Test("exit relation checks exact optional status and membership failures") {
+    run :: KitRun{stdout: "", stderr: "", code: 7, signal: None, timed_out: false, error: ""}
+    state := KitStepState{last: run, built: "", built_once: false, history: [KitCapturedStep{label: "prior", stdout: "", stderr: "", elapsed_ns: 0, code: Val(7)}]}
+    relation :: KitAssertion{stream: "exit", path: "", mode: "==", value: "prior"}
+    assert_eq(kit_steps_exit_test(relation, state).status, "PASS")
+    state.last.code = 8
+    assert_eq(kit_steps_exit_test(relation, state).status, "FAIL")
+    membership :: KitAssertion{stream: "exit", path: "", mode: "in", value: "", alternatives: ["7", "8"]}
+    assert_eq(kit_steps_exit_test(membership, state).status, "PASS")
+    state.last.code = 9
+    assert_eq(kit_steps_exit_test(membership, state).status, "FAIL")
+    state.last.signal = Val(15)
+    state.history[0].code = None
+    assert_eq(kit_steps_exit_test(relation, state).status, "PASS")
+    assert_eq(kit_steps_exit_test(membership, state).status, "FAIL")
+}
+
+#Test("bounded polls preserve each exact exit predicate and require reasons for partial stream predicates") {
+    plan :: kit_steps_parse_case("poll ready: printf 'ready && complete' until exit: 0 && stdout: ~ \"ready && complete\" && exit: 7 timeout 1s every 1ms # readiness substring\n")
+    assert_eq(plan.error, "")
+    assert_eq(plan.steps[0].exit, "any")
+    assert_eq(plan.steps[0].assertions.len(), 3)
+    assert_eq(plan.steps[0].assertions[0].stream, "exit")
+    assert_eq(plan.steps[0].assertions[0].mode, "in")
+    assert_eq(plan.steps[0].assertions[0].alternatives, ["0"])
+    assert_eq(plan.steps[0].assertions[1].value, "ready && complete")
+    assert_eq(plan.steps[0].assertions[2].alternatives, ["7"])
+    default_status :: kit_steps_parse_case("poll ready: printf ready until stdout: = \"ready\" timeout 1s every 1ms\n")
+    assert_eq(default_status.error, "")
+    assert_eq(default_status.steps[0].exit, "0")
+    loop source in ["poll ready: printf ready until exit: any timeout 1s every 1ms", "poll ready: printf ready until exit: nope timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && stdout: ~ \"ready\" timeout 1s every 1ms", "poll ready: printf ready until exit: 0 && timeout 1s every 1ms"] {
+        assert(kit_steps_parse_case("{source}\n").error != "")
+    }
+}

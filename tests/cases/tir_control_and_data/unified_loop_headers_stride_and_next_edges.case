@@ -1,0 +1,16 @@
+# HAND-PORT tests/tir_control_and_data.rs:1989-2044 unified_loop_headers_stride_and_next_edges
+# PENDING-KIT; PENDING-GRAMMAR; original assertions, no historical failing captures.
+# Both original programs/outcomes in separate original-equivalent packages: no source item pulled on invalid stride; exact exit70 and stderr reason.
+fixture: unified_loop_headers_stride_and_next_edges.fixture
+env: NO_COLOR=1
+step: jet build --profile=debug valid/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = unified_loop_headers_stride_and_next_edges.stdout.expected
+step: jet build --profile=debug invalid/main.jet
+exit: 0
+step: built
+exit: 70
+stdout: = unified_loop_headers_stride_and_next_edges.invalid.expected
+stderr: ~ "E0123: loop stride must be positive" # original predicate

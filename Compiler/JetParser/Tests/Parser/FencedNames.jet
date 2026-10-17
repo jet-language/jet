@@ -1,0 +1,211 @@
+struct FenceTestExpansion {
+    tokens: [Token]
+    fenced_statements: [FencedStatement]
+    diagnostics: [Diagnostic]
+    tables: TokenTables
+}
+
+fn fence_test_expand(source: String) -> FenceTestExpansion {
+    lexed := lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    expanded := parser_prepare_tokens(^lexed.tokens, &lexed.tables)
+    assert(expanded.diagnostics.is_empty())
+    FenceTestExpansion{tokens: ^expanded.tokens, fenced_statements: ^expanded.fenced_statements, diagnostics: ^expanded.diagnostics, tables: ^lexed.tables}
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:841
+#Test("lexer_uses_fence_digraphs_and_close_suppresses_a_terminator") {
+    lexed :: lex(`<:
+    first,
+    second
+:>`.bytes())
+    assert(lexed.diagnostics.is_empty())
+    assert_eq(lexed.tokens[0].kind, TOKEN_FENCE_OPEN)
+    found := false
+    loop index in 1..<lexed.tokens.len() {
+        if lexed.tokens[index].kind == TOKEN_FENCE_CLOSE {
+            found = true
+            assert(lexed.tokens[index - 1].kind != TOKEN_SEMI)
+        }
+    }
+    assert(found)
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:856
+#Test("expands_numbered_binding_and_lock_step_reference_fences") {
+    expanded :: fence_test_expand(`fn run() {
+<: t1..t3 :> :: work()
+<: t1..t3 :>.wait()
+use_pair(<: t1, t2, t3 :>, <: a, b, c :>)
+}
+`)
+    names := [String]{}
+    loop token in expanded.tokens {
+        name :: token_decoded(expanded.tables, token)
+        if token.kind == TOKEN_IDENT && name.starts_with("t") -> &names.push(name)
+    }
+    assert(names.len() >= 3)
+    assert_eq(names[0..<3], [String]{"t1", "t2", "t3"})
+    assert_eq(expanded.fenced_statements.len(), 3)
+    assert_eq(expanded.fenced_statements[0].copies, 3)
+    assert(expanded.fenced_statements[1].fences[0].range != None)
+    assert_eq(expanded.fenced_statements[2].fences.len(), 2)
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:875
+#Test("diagnoses_empty_duplicate_mismatch_and_header_position") {
+    loop testcase in [
+        (source: `fn run() { <: :> :: 1 }`, code: "E0368"),
+        (source: `fn run() { <: a, a :> :: 1 }`, code: "E0369"),
+        (source: `fn run() { <: f(x), g :> :: 1 }`, code: "E0371"),
+        (source: `fn run() { call(<: a, b :>, <: c :>) }`, code: "E0370"),
+        (source: `fn run() { if <: a, b :> { print(a) } }`, code: "E0371"),
+        (source: `fn run() { f() :> 1 }`, code: "E0070")
+    ] {
+        code :: testcase.code
+        lexed := lex(testcase.source.bytes())
+        assert(lexed.diagnostics.is_empty())
+        _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, code)
+    }
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:895
+#Test("formatter_emits_one_fence_and_is_stable") {
+    formatted :: parser_test_stable(`fn run() {
+    <: first, second :> :: work()
+    show(<: first, second :>)
+}
+`)
+    assert_eq(formatted.split("<: first, second :>").to_list().len(), 3)
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:915
+#Test("formatter_preserves_whitespace_inside_fenced_string_literals") {
+    formatted :: parser_test_format(`fn run() {
+    show(<: first, second :>, "keep  two   spaces")
+}
+`)
+    assert(formatted.contains("\"keep  two   spaces\""))
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:926
+#Test("formatter_keeps_fenced_lambda_body_after_an_inline_comment") {
+    formatted :: parser_test_stable(`fn run() {
+    <: first, second :> :: work(() -> { // keep this note
+        print("body")
+        return 1
+    })
+}
+`)
+    assert(formatted.contains("// keep this note\n"))
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:968
+#Test("formatter_wraps_a_wide_fence_one_name_per_line") {
+    formatted :: parser_test_format(`fn run() {
+    <: this_name_is_deliberately_long_one, this_name_is_deliberately_long_two, this_name_is_deliberately_long_three :> :: work()
+}
+`)
+    assert(formatted.contains("<:\n"))
+    assert(formatted.contains("this_name_is_deliberately_long_one,\n"))
+    assert(formatted.contains("\n    :> :: work()"))
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:981
+#Test("numbered_range_expands_in_binding_and_receiver_expression") {
+    parsed :: parser_test_program(`fn run() {
+    <: task1..task3 :> :: spawn()
+    <: task1..task3 :>.wait()
+}
+`)
+    assert_eq(parser_test_function(parsed, "run").body.len(), 6)
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:999
+#Test("expression_entries_expand_an_expression_statement") {
+    expanded :: fence_test_expand(`fn run() {
+    print(<: "a={x}", "b", total(1, 2) :>)
+}
+`)
+    assert_eq(expanded.fenced_statements.len(), 1)
+    assert_eq(expanded.fenced_statements[0].copies, 3)
+    prints := 0
+    totals := 0
+    loop token in expanded.tokens {
+        if token.kind == TOKEN_IDENT && token_decoded(expanded.tables, token) == "print" -> prints += 1
+        if token.kind == TOKEN_IDENT && token_decoded(expanded.tables, token) == "total" -> totals += 1
+    }
+    assert_eq(prints, 3)
+    assert_eq(totals, 1)
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:1018
+#Test("expression_integer_range_expands_each_literal") {
+    expanded :: fence_test_expand(`fn run() { print(<:0..3:>) }
+`)
+    assert_eq(expanded.fenced_statements.len(), 1)
+    assert_eq(expanded.fenced_statements[0].copies, 4)
+    values := [Int]{}
+    loop token in expanded.tokens {
+        if token.kind == TOKEN_INT -> &values.push(token_integer(expanded.tables, token) ?? panic("integer payload"))
+    }
+    assert_eq(values, [Int]{0, 1, 2, 3})
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:1033
+#Test("expression_descending_and_non_literal_ranges_stay_single_entries") {
+    loop source in [
+        `fn run() { print(<:3..0:>) }`,
+        `fn run() { print(<:start..3:>) }`,
+        `fn run() { print(<: (0..3) :>) }`
+    ] {
+        facts :: fence_test_expand(source).fenced_statements
+        assert_eq(facts.len(), 1)
+        assert_eq(facts[0].copies, 1)
+    }
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:1046
+#Test("hostile_fence_ranges_are_rejected_before_expansion") {
+    padding :: "0".repeat(PARSER_FENCE_MAX_EXPANSION_BYTES.div_euclid(PARSER_FENCE_MAX_EXPANSION) + 1)
+    loop source in [
+        "fn run() {{ print(<:0..{PARSER_FENCE_MAX_EXPANSION}:>) }}\n",
+        `fn run() { <: task1..task1000000000 :> :: work() }`,
+        "fn run() {{ <: task{padding}..task4095 :> :: work() }}\n"
+    ] {
+        lexed := lex(source.bytes())
+        assert(lexed.diagnostics.is_empty())
+        _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
+    }
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:1066
+#Test("hostile_explicit_fence_lists_are_rejected_by_the_shared_budget") {
+    names :: loop index in 0..<(PARSER_FENCE_MAX_BUDGET_ENTRIES + 1) -> "name{index}"
+    source :: "fn run() {{ <: {names.join(", ")} :> :: work() }}\n"
+    lexed := lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:1084
+#Test("hostile_expanded_statement_bytes_are_rejected_by_the_shared_budget") {
+    body :: "x".repeat(PARSER_FENCE_MAX_EXPANSION_BYTES.div_euclid(PARSER_FENCE_MAX_EXPANSION) + 1)
+    source :: "fn run() {{ print(<:0..4095:>, \"{body}\") }}\n"
+    lexed := lex(source.bytes())
+    assert(lexed.diagnostics.is_empty())
+    _ :: parser_test_diagnostic(parser_prepare_tokens(^lexed.tokens, &lexed.tables).diagnostics, "E0371")
+}
+
+// Rust: crates/jet-parser/src/FencedNames.rs:1099
+#Test("nested_lambda_and_struct_braces_stay_inside_fenced_statements") {
+    parsed :: parser_test_program(`fn run() {
+    <: first, second :> :: () -> {
+        print("nested")
+    }
+    show(Thing{ value: <: first, second :> })
+}
+`)
+    assert_eq(parsed.fenced_statements.len(), 2)
+    assert_eq(parser_test_function(parsed, "run").body.len(), 4)
+}

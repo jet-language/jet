@@ -1,0 +1,29 @@
+# HAND-PORT tests/http_client_law.rs:1802-1927 unknown_length_upload_uses_h1_chunked_transfer_encoding
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Verbatim original UNKNOWN-length Body.reader AOT; exact POST/chunked prefix, transfer-encoding present/content-length absent, original pending-buffer hex sizes/CRLF/terminal-zero pending predicate, positive4096 reads, exact98304 bytes and64KiB seen flag; original first32KiB a then accepted5s then remainder b. Real mkfifo + lead-approved SETUP-only dd byte pipe; replaces no transport assertions; core-files-raw-write ledger note; no runtime/reference proof.
+requires: tool:mkfifo
+requires: tool:dd
+fixture: unknown_length_upload_uses_h1_chunked_transfer_encoding.fixture
+env: NO_COLOR=1
+step: mkfifo {work}/upload.fifo
+exit: 0
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: writer/main.jet writer/source.template
+step: jet build writer/main.jet
+exit: 0
+spawn writer: built
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = unknown_length_upload_uses_h1_chunked_transfer_encoding.stdout.expected
+wait: peer
+exit: 0
+wait: writer
+exit: 0

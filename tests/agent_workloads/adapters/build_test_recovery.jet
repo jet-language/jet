@@ -16,7 +16,7 @@ fn run(args: WorkloadArgs) {
     fs.copy_dir(input, project) ?? panic("cannot copy build/test project")
     timeout :: Duration.seconds(30) ?? panic("bad timeout")
 
-    invalid :: process.cmd([String]{~jet, "check", "{project}/invalid.jet"})
+    invalid :: process.cmd([String]{jet.copy(), "check", "{project}/invalid.jet"})
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
@@ -24,21 +24,21 @@ fn run(args: WorkloadArgs) {
     if invalid.timed_out || invalid.code == 0 -> panic("invalid source did not fail closed")
     print("invalid=failed")
 
-    checked :: process.cmd([String]{~jet, "check", "{project}/build_test_recovery.jet"})
+    checked :: process.cmd([String]{jet.copy(), "check", "{project}/build_test_recovery.jet"})
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
         .run() ?? panic("valid check could not run")
     if checked.timed_out || checked.code != 0 -> panic("valid source did not build")
 
-    tested :: process.cmd([String]{~jet, "test", "--release", "{project}/build_test_recovery.jet"})
+    tested :: process.cmd([String]{jet.copy(), "test", "--release", "{project}/build_test_recovery.jet"})
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)
         .run() ?? panic("valid test could not run")
     if tested.timed_out || tested.code != 0 -> panic("valid test did not pass")
 
-    ran :: process.cmd([String]{~jet, "run", "--release", "{project}/build_test_recovery.jet"})
+    ran :: process.cmd([String]{jet.copy(), "run", "--release", "{project}/build_test_recovery.jet"})
         .stdout(.Capture)
         .stderr(.Capture)
         .timeout(timeout)

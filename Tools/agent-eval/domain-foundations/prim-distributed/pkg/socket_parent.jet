@@ -13,7 +13,7 @@ fn run() {
     addr :: net.socket_to_string(net.listener_local_socket_addr(listener))
     worker_path :: "/home/nate/Projects/Github/jet/build/socket_worker"
 
-    first :: process.cmd([~worker_path, ~addr]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("first worker spawn failed")
+    first :: process.cmd([worker_path.copy(), addr.copy()]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("first worker spawn failed")
     second :: process.cmd([worker_path, addr]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("second worker spawn failed")
 
     first_connection :: &listener.accept()

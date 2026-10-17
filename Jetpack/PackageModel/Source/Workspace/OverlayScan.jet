@@ -77,7 +77,7 @@ fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> Int? Never! {
     needle :: word.bytes()
     cursor := start
     loop cursor < raw.len() {
-        at :: ~cursor
+        at :: cursor.copy()
         code :: Int.from_u8(raw[at])
         peek :: pkg_bytes_code(raw, at + 1)
         cursor += 1
@@ -97,7 +97,7 @@ fn pkg_overlay_find_word(raw: [U8], word: String, start: Int) -> Int? Never! {
 fn pkg_overlay_find_char(raw: [U8], start: Int, wanted: Int) -> Int? Never! {
     cursor := start
     loop cursor < raw.len() {
-        at :: ~cursor
+        at :: cursor.copy()
         code :: Int.from_u8(raw[at])
         peek :: pkg_bytes_code(raw, at + 1)
         cursor += 1
@@ -172,7 +172,7 @@ fn pkg_overlay_balanced(raw: [U8], start: Int) -> (body: String, consumed: Int) 
 }
 
 // `balanced_with_len` for callers holding the text after an opening `{`.
-pub fn pkg_overlay_balanced_with_len(text: String) -> (body: String, consumed: Int) Never! {
+fn pkg_overlay_balanced_with_len(text: String) -> (body: String, consumed: Int) Never! {
     pkg_overlay_balanced(text.bytes(), 0)
 }
 
@@ -244,7 +244,7 @@ fn pkg_overlay_split_colon(value: String) -> (before: String, after: String)? Ne
 // Split a record or list body on top-level commas. `//` markers become two
 // spaces (the comment text is kept); block comments, which nest, become
 // spaces with their line breaks kept. Blank pieces are dropped.
-pub fn pkg_overlay_top_level_commas(body: String) -> [String] Never! {
+fn pkg_overlay_top_level_commas(body: String) -> [String] Never! {
     raw :: body.bytes()
     out := [String]{}
     current := [U8]{}
@@ -422,7 +422,7 @@ fn pkg_overlay_read_ident(raw: [U8], at: Int) -> (ident: String, end: Int)? Neve
 }
 
 // Trim, drop trailing commas, and strip one pair of surrounding quotes.
-pub fn pkg_overlay_unquote(text: String) -> String Never! {
+fn pkg_overlay_unquote(text: String) -> String Never! {
     value := text.trim()
     loop value.ends_with(",") {
         value = value.removesuffix(",")
@@ -452,7 +452,7 @@ fn pkg_overlay_strip_wrapped(text: String, prefix: String, suffix: String) -> St
 }
 
 // Locate the `{` that opens the `module workspace { … }` body.
-pub fn pkg_overlay_find_workspace_body_start(src: String) -> Int? Never! {
+fn pkg_overlay_find_workspace_body_start(src: String) -> Int? Never! {
     raw :: src.bytes()
     namespace :: NS_WORKSPACE.bytes()
     search := 0

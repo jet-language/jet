@@ -1,0 +1,12 @@
+Error [E0121]: `aggregate` was consumed by the binding `selected`, so it can't be used here
+  --> mutable_view_extraction_retires_the_source_aggregate.jet:12:21
+    |
+ 12 |     print(aggregate.values[0])
+    |                     ^^^^^^
+  --> mutable_view_extraction_retires_the_source_aggregate.jet:11:27
+    |
+ 11 |     selected :: aggregate.values
+    |                           ^^^^^^ `aggregate` moved to the binding `selected` here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `aggregate` after the move, or give the binding `selected` a copy with `~aggregate` where it moved.
+More: jet-lang.dev/e/E0121

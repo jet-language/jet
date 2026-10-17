@@ -51,6 +51,81 @@ fn run() {
     assert!(res.is_ok(), "#Pure fn should compile: {:?}", res.err());
 }
 
+/// Deny-only allocation facts do not make an inferred callee impure (#4866).
+#[test]
+fn pure_fn_inferred_interpolation_compiles() {
+    let source = include_str!("fixtures/pure_deny_only_interpolation.jet");
+    let result = jet::compile(source);
+    assert!(
+        result.is_ok(),
+        "string interpolation must remain legal through a `-[]>` caller: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn pure_fn_inferred_owned_string_copy_compiles() {
+    let source = r#"
+fn copy_value(value: String) -> String { return value }
+fn compute(value: String) -[]> String { return copy_value(value) }
+fn run() { print(compute("text")) }
+"#;
+    let result = jet::compile(source);
+    assert!(
+        result.is_ok(),
+        "deny-only heap copies must be pure: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn pure_fn_inferred_panic_compiles() {
+    let source = r#"
+fn stop() -> Int { return panic("stop") }
+fn compute() -[]> Int { return stop() }
+fn run() {}
+"#;
+    let result = jet::compile(source);
+    assert!(
+        result.is_ok(),
+        "deny-only panic facts must be pure: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn pure_fn_inferred_interpolation_and_io_is_e3401() {
+    let source = r#"
+fn format(value: Int) -> String {
+    print(value)
+    return "{value}"
+}
+fn compute(value: Int) -[]> String { return format(value) }
+fn run() { print(compute(42)) }
+"#;
+    let diagnostics = jet::compile(source).expect_err("ambient IO must still violate purity");
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:?}");
+    assert_eq!(diagnostics[0].code, "E3401", "{diagnostics:?}");
+}
+
+#[test]
+fn pure_fn_inferred_interpolation_explicit_memory_denial_is_e0921() {
+    let source = r#"
+fn format(value: Int) -> String { return "{value}" }
+fn compute(value: Int) -[!Mem.Alloc]> String { return format(value) }
+fn run() { print(compute(42)) }
+"#;
+    let diagnostics = jet::compile(source).expect_err("explicit allocation denial must still hold");
+    assert!(
+        diagnostics.iter().any(|diagnostic| diagnostic.code == "E0921"),
+        "expected E0921, got {diagnostics:?}"
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic| diagnostic.code != "E3401"),
+        "deny-only allocation must not produce an impurity diagnostic: {diagnostics:?}"
+    );
+}
+
 /// Impure call inside `pure fn` fires E3401.
 #[test]
 fn pure_fn_impure_call_is_e3401() {
@@ -189,7 +264,7 @@ fn run() {
 #[test]
 fn pub_pure_fn_compiles() {
     let src = r#"
-pub fn double(n: Int) -[]> Int {
+fn double(n: Int) -[]> Int {
     return n * 2
 }
 fn run() {

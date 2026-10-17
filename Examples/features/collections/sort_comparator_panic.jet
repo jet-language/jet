@@ -1,0 +1,21 @@
+// #4884: a comparator Stop precedes payload relocation. The owned closure
+// capture and scalar scratch are released before the receiver's scope Close.
+struct Rows {
+    values: [Int]
+}
+
+impl Rows.Close {
+    fn close(^self) { print("receiver: {self.values}") }
+}
+
+fn fail_compare(a: Int, b: Int, label: String) -> Ordering {
+    print("compare {label}")
+    panic("sort comparator")
+}
+
+fn run() {
+    rows := Rows{values: [3, 1, 2]}
+    label :: "owned comparator capture {rows.values.len()}"
+    &rows.values.sort_by((a: Int, b: Int) -> fail_compare(a, b, label))
+    print("unreachable")
+}

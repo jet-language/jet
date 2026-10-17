@@ -1,0 +1,69 @@
+// tests/fixtures/crypto_bridge_entropy.rs:615-659. PORT+RETIRED(Rust-source-scan)+PENDING-SEAM(runtime-crypto-internals). Runtime UNRUN.
+// CryptoError payloads retire under D-CRYPTO-ERRFAM1=A; public tag mappings cite Core at assertion sites.
+use core.crypto as crypto
+use core.crypto.expert as expert
+use core.files as files
+fn filled(value: Int, count: Int) -> [U8] {
+    out := [U8]{}
+    loop _ in 0..<count -> &out.push((U8{value}))
+    out
+}
+fn cut(bytes: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    loop i in start..<end -> &out.push(bytes[i])
+    out
+}
+fn hex(text: String) -> [U8] {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop i in 0..<(raw.len() /% 2) {
+        a :: Int.from_u8(raw[2 * i])
+        b :: Int.from_u8(raw[2 * i + 1])
+        high :: if a <= 57 -> a - 48 else -> a - 87
+        low :: if b <= 57 -> b - 48 else -> b - 87
+        &out.push((U8{high * 16 + low}))
+    }
+    out
+}
+fn little(bytes: [U8], at: Int, width: Int) -> Int {
+    out := 0
+    loop i in 0..<width -> out = out | (Int.from_u8(bytes[at + i]) << (8 * i))
+    out
+}
+fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
+    loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)) & 255})
+}
+#Test("jetc_v1_expert_open_accepts_only_the_pinned_grammar") {
+    key := [U8]{}
+    loop i in 0..<32 -> &key.push((U8{i}))
+    plain :: "historical JETC v1".bytes()
+    #Unsafe("original pinned JETC v1 migration grammar") {
+        // Exact original independently pinned hex bytes, not a blessed transcript.
+        loop text in ["4a4554430101000102030405060708090a0be1927b744665cc23d6ef1fb9dd494d43bf41ffb4f45df6e23cf92a743b8c2c35892f", "4a4554430102000102030405060708090a0b2f6ba56faa97ab78ec2db7c1f4bd3b4df5e703347885e9b8d1d5780ecb37c61ac49c"] {
+            envelope :: hex(text)
+            if envelope[5] == (U8{2}) {
+                nonce :: cut(envelope, 6, 18)
+                ciphertext :: expert.aes256gcm_seal(key, nonce, plain, [U8]{}) ?? panic("v1 AES")
+                generated := cut(envelope, 0, 18)
+                loop byte in ciphertext -> &generated.push(byte)
+                assert_eq(generated, envelope)
+            }
+            assert_eq(expert.open_v1(key, envelope), Ok(plain))
+            loop mode in 0..<5 {
+                hostile := envelope.copy()
+                if mode == 0 -> hostile[0] = (U8{Int.from_u8(hostile[0]) ~| 1})
+                if mode == 1 -> hostile[4] = (U8{2})
+                if mode == 2 -> hostile[5] = (U8{3})
+                if mode == 3 {
+                    last :: hostile.len() - 1
+                    hostile[last] = (U8{Int.from_u8(hostile[last]) ~| 1})
+                }
+                if mode == 4 -> &hostile.push(U8{0})
+                // expert.jet609-620: all failures intentionally OpenFailed.
+                assert_eq(expert.open_v1(key, hostile), Err(crypto.CryptoError.OpenFailed))
+            }
+        }
+        assert_eq(expert.open_v1(filled(0, 31), filled(0, 34)), Err(crypto.CryptoError.OpenFailed))
+        assert_eq(expert.open_v1(key, filled(0, 33)), Err(crypto.CryptoError.OpenFailed))
+    }
+}

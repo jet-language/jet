@@ -23,27 +23,53 @@ use crate::Codegen::mangle;
 use crate::Diagnostics::Span;
 use crate::jet_generated_format as jet_format;
 
+/// D-UNIONTYPE1=A: the union member `got` injects into. A struct literal names
+/// its canonical declaration identity (`local_type_identities`) while checked
+/// union members keep the source spelling; both name one nominal.
+pub(crate) fn union_member_for<'m>(cx: &Cx, members: &'m [Type], got: &Type) -> Option<&'m Type> {
+    if matches!(got, Type::Union(_)) {
+        return None;
+    }
+    let identity = |name: &str| -> String {
+        cx.local_type_identities
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| name.to_string())
+    };
+    members.iter().find(|member| *member == got).or_else(|| {
+        members.iter().find(|member| match (member, got) {
+            (Type::Named(member), Type::Named(got)) => identity(member) == identity(got),
+            (
+                Type::Apply { name: member, args: member_args },
+                Type::Apply { name: got, args: got_args },
+            ) => member_args == got_args && identity(member) == identity(got),
+            _ => false,
+        })
+    })
+}
+
 /// D-UNIONTYPE1=A: wrap a member value into the compiler-generated union enum.
-pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type) -> TExpr {
+pub(crate) fn maybe_widen_expr_to_union(value: TExpr, want: &Type, cx: &Cx) -> TExpr {
     match want {
-        Type::Union(members)
-            if members.iter().any(|m| m == &value.ty) && !matches!(&value.ty, Type::Union(_)) =>
-        {
-            let enum_type = crate::AST::union_enum_name(members);
-            let variant = crate::AST::union_member_tag(&value.ty);
-            TExpr {
-                ty: want.clone(),
-                kind: TExprKind::EnumLit {
-                    enum_type,
-                    variant,
-                    payload: TEnumPayload::Positional(vec![TEnumArg {
-                        value,
-                        clone: false,
-                        boxed: false,
-                    }]),
-                },
+        Type::Union(members) => match union_member_for(cx, members, &value.ty) {
+            Some(member) => {
+                let enum_type = crate::AST::union_enum_name(members);
+                let variant = crate::AST::union_member_tag(member);
+                TExpr {
+                    ty: want.clone(),
+                    kind: TExprKind::EnumLit {
+                        enum_type,
+                        variant,
+                        payload: TEnumPayload::Positional(vec![TEnumArg {
+                            value,
+                            clone: false,
+                            boxed: false,
+                        }]),
+                    },
+                }
             }
-        }
+            None => value,
+        },
         _ => value,
     }
 }
@@ -58,13 +84,13 @@ pub(crate) fn box_present_trait_payload(mut value: TExpr, want: &Type, cx: &Cx) 
     };
     let trait_name = match slot.as_ref() {
         Type::TraitObject(names) if names.len() == 1 => &names[0],
-        Type::Named(name) if cx.trait_names.contains(name) => name,
+        Type::Named(name) if cx.is_trait_type_name(name) => name,
         _ => return value,
     };
     let boxes = match &value.kind {
         TExprKind::Present(payload) => match &payload.ty {
             Type::Named(concrete) | Type::Apply { name: concrete, .. } => {
-                concrete != trait_name && !cx.trait_names.contains(concrete)
+                concrete != trait_name && !cx.is_trait_type_name(concrete)
             }
             _ => false,
         },
@@ -188,7 +214,7 @@ fn lower_template_expr(
     template_vars: &std::collections::HashSet<String>,
 ) -> TExpr {
     match expr {
-        Expr::ComptimeName { name, .. } if cx.const_values.contains_key(name) => {
+        Expr::ComptimeName { name, .. } if cx.fact_const_values(name).is_some() => {
             lower_expr(expr, cx, env)
         }
         Expr::ComptimeName { value: Some(_), .. } => lower_expr(expr, cx, env),
@@ -857,13 +883,13 @@ pub(crate) fn lower_named_collection_callback(
     let Expr::Ident(name, _) = expr else {
         return None;
     };
-    if env.locals.contains_key(name) || cx.consts.contains_key(name) {
+    if env.locals.contains_key(name) || cx.fact_consts(name).is_some() {
         return None;
     }
     let ty = if effective {
-        cx.fn_types.get(name)
+        cx.fact_fn_types(name)
     } else {
-        cx.fn_source_types.get(name)
+        cx.fact_fn_source_types(name)
     }?;
     if !matches!(ty, Type::Fn { .. }) {
         return None;
@@ -872,7 +898,7 @@ pub(crate) fn lower_named_collection_callback(
         ty: ty.clone(),
         kind: TExprKind::FnValue {
             kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-                name: Some(name.clone()),
+                name: Some(cx.function_value_name(name)),
                 lambda: None,
             },
         },
@@ -952,13 +978,9 @@ pub(crate) fn spawn_body_carrier_ty(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Ty
             other => other.clone(),
         };
     }
-    match t {
-        Type::Result { .. } | Type::Option(_) => t,
-        t => Type::Result {
-            ok: Box::new(t),
-            err: Box::new(Type::Named(crate::Syntax::TYPE_ERR.to_string())),
-        },
-    }
+    // An infallible body has no private carrier: the handle stores `T`
+    // exactly as sema's `Task<T>` does.
+    t
 }
 
 /// `lambda_body_ty`, but seeding a bare (unannotated) param from `expected_params`
@@ -1105,7 +1127,7 @@ pub(crate) fn lower_call_arg_value(
     // A bare lambda flowing into a user fn-typed parameter takes its param
     // types from that fn-type so codegen emits the Rust closure-param types
     // rustc needs (c142). Other args lower normally.
-    let mut value = match (&a.expr, &conv) {
+    let value = match (&a.expr, &conv) {
         (Expr::Ident(name, _), Some((AccessConvention::Move, ty))) if env.is_resource(name) => {
             TExpr {
                 ty: ty.clone(),
@@ -1127,17 +1149,15 @@ pub(crate) fn lower_call_arg_value(
         }
         (Expr::Ident(name, _), Some((_, ty @ Type::Fn { .. })))
             if !env.locals.contains_key(name)
-                && !cx.consts.contains_key(name)
-                && cx
-                    .fn_types
-                    .get(name)
+                && !cx.fact_consts(name).is_some()
+                && cx.fact_fn_types(name)
                     .is_some_and(|fn_ty| matches!(fn_ty, Type::Fn { .. })) =>
         {
             TExpr {
                 ty: ty.clone(),
                 kind: TExprKind::FnValue {
                     kind: crate::Codegen::TIR::TFnValueKind::NamedFn {
-                        name: Some(name.clone()),
+                        name: Some(cx.function_value_name(name)),
                         lambda: None,
                     },
                 },
@@ -1177,21 +1197,26 @@ pub(crate) fn lower_call_arg_value(
         // D-SHAPE-PLACE1=A: a projected write window `&node.items` /
         // `&values[i]` lowers as the exclusive place itself, so the callee's
         // edits land in the owner's storage on every tier.
-        (Expr::Field(..) | Expr::Index { .. }, Some((AccessConvention::Write, _)))
+        (Expr::Field(..) | Expr::Index { .. } | Expr::Slice { .. }, Some((AccessConvention::Write, _)))
             if a.convention == AccessConvention::Write =>
         {
             lower_expr_as_mut_place(&a.expr, cx, env)
         }
         _ => lower_expr(&a.expr, cx, env),
     };
-    // `None` carries no payload to type it; the checked parameter does.
+    let value = absent_takes_parameter_type(value, conv.as_ref());
+    env.fallback_subject = fallback_subject;
+    env.binder_refs = saved_binder_refs;
+    value
+}
+
+/// `None` carries no payload to type it; the checked parameter does.
+fn absent_takes_parameter_type(mut value: TExpr, conv: Option<&(AccessConvention, Type)>) -> TExpr {
     if matches!(value.kind, TExprKind::Absent) {
-        if let Some((_, want @ Type::Option(_))) = &conv {
+        if let Some((_, want @ Type::Option(_))) = conv {
             value.ty = want.clone();
         }
     }
-    env.fallback_subject = fallback_subject;
-    env.binder_refs = saved_binder_refs;
     value
 }
 
@@ -1242,6 +1267,9 @@ pub(crate) fn lower_one_call_arg(
         })
         .unwrap_or_else(|| lower_call_arg_value(a, conv.clone(), env, cx))
     };
+    // A worklist-scheduled value skipped `lower_call_arg_value`, which types
+    // a `None` argument from its parameter.
+    let value = absent_takes_parameter_type(value, conv.as_ref());
     // A worklist cache may have lowered a local identifier before an earlier
     // binding's refined type was installed in the sequential environment.
     // Refresh local reads from that environment before resolving boundary
@@ -1336,12 +1364,20 @@ pub(crate) fn lower_one_call_arg(
         }
         _ => None,
     };
-    // D-UNIONTYPE1=A: member → union inject at the call boundary.
-    let widen_to_union = match (&value.ty, conv.as_ref().map(|(_, t)| t)) {
-        (got, Some(want @ Type::Union(members))) if members.iter().any(|m| m == got) => {
-            Some(want.clone())
-        }
-        _ => None,
+    // D-UNIONTYPE1=A: member → union inject at the call boundary. The value
+    // takes the member's spelling, so every backend tags the same variant.
+    let (value, widen_to_union) = match conv.as_ref().map(|(_, t)| t) {
+        Some(want @ Type::Union(members)) => match union_member_for(cx, members, &value.ty) {
+            Some(member) => (
+                TExpr {
+                    ty: member.clone(),
+                    kind: value.kind,
+                },
+                Some(want.clone()),
+            ),
+            None => (value, None),
+        },
+        _ => (value, None),
     };
     // S48: a concrete value meeting a single-trait value slot is boxed at the
     // call boundary. Keep the target type as a typed TIR fact; MIR resolves it
@@ -1351,7 +1387,7 @@ pub(crate) fn lower_one_call_arg(
         (Type::Named(concrete) | Type::Apply { name: concrete, .. }, Some(want)) => {
             let trait_name = match want {
                 Type::TraitObject(names) if names.len() == 1 => names.first(),
-                Type::Named(name) if cx.trait_names.contains(name) => Some(name),
+                Type::Named(name) if cx.is_trait_type_name(name) => Some(name),
                 _ => None,
             };
             trait_name
@@ -1480,8 +1516,8 @@ pub(crate) fn lower_extern_call_arg(
 /// `s.starts_with("Box::new(")` check, resolved at lowering.
 pub(crate) fn ast_arg_is_named_fn_value(e: &Expr, cx: &Cx, env: &LowerEnv) -> bool {
     if let Expr::Ident(name, _) = e {
-        if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-            return matches!(cx.fn_types.get(name), Some(Type::Fn { .. }));
+        if !env.locals.contains_key(name) && !cx.fact_consts(name).is_some() {
+            return matches!(cx.fact_fn_types(name), Some(Type::Fn { .. }));
         }
     }
     false
@@ -1663,18 +1699,13 @@ pub(crate) fn tir_recv_jet_ty(e: &Expr, env: &LowerEnv) -> Option<Type> {
                     return Some(builtin_dispatch_ty(ret));
                 }
             }
-            // Path and sketch method calls may carry their checked owner/return
+            // Path method calls may carry their checked owner/return
             // facts without a persisted `resolved_ret` (the owner is still the
             // canonical dispatch key). Recover the carrier here so an outer
             // builtin, such as `Path.to_string().ends_with(...)`, selects the
             // same target as the lowered inner call.
             if let Some(handle) = recv_type {
                 let receiver_ty = Type::Named(handle.clone());
-                if let Some(Some(ret)) =
-                    crate::Sema::sketch_method_return(&receiver_ty, method, args)
-                {
-                    return Some(builtin_dispatch_ty(ret));
-                }
                 if crate::Codegen::TIR::handle_method_op(handle, method, args.len()).is_some() {
                     let ret = crate::Codegen::TIR::handle_method_return_ty(
                         handle,

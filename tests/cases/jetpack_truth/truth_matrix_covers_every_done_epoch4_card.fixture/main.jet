@@ -1,0 +1,163 @@
+use core.files as truth_files
+use core.process as truth_process
+use core.text.parse as truth_text
+use core.encoding.json as truth_json
+
+// ORACLE-PORT tests/jetpack_truth.rs:12-17,39-111,148-294.
+// Tower remains the existing repository tooling subject (NODE-DEBT); all
+// completion predicates, including live-first/history preference, remain Jet.
+struct TruthCardState {
+    epoch: String
+    phase: String
+    log_empty: Bool
+}
+struct TruthMatrixRow {
+    class: String
+    evidence: String
+    boundary: String
+}
+fn truth_slice(text: String, start: Int, end: Int) -> String {
+    if start == end -> return ""
+    String.from_bytes(text.bytes()[start..(end - 1)]) ?? panic("truth UTF-8 byte slice")
+}
+fn truth_matrix_rows(raw: String) -> [Int: TruthMatrixRow] {
+    rows := [Int: TruthMatrixRow]{}
+    loop line in raw.lines() {
+        if !line.starts_with("| #") -> next
+        stripped := line.copy()
+        // Rust trim_matches('|') removes every leading and trailing pipe.
+        loop stripped.starts_with("|") -> stripped = truth_slice(stripped, 1, stripped.bytes().len())
+        loop stripped.ends_with("|") -> stripped = truth_slice(stripped, 0, stripped.bytes().len() - 1)
+        cells := [String]{}
+        loop cell in truth_text.split(stripped, "|") -> &cells.push(cell.trim().copy())
+        assert_eq(cells.len(), 4, "malformed truth row: {line}")
+        number_text := cells[0].copy()
+        loop number_text.starts_with("#") -> number_text = truth_slice(number_text, 1, number_text.bytes().len())
+        num :: Int.parse(number_text) ?? panic("truth row card number")
+        assert(!rows.has_key(num), "duplicate truth row for #{num}")
+        rows[num] = TruthMatrixRow{class: cells[1], evidence: cells[2], boundary: cells[3]}
+    }
+    rows
+}
+fn truth_evidence_resolves(root: String, evidence: String) -> Bool {
+    tokens :: truth_text.split(evidence, "`")
+    paths := [String]{}
+    loop index in 0..<tokens.len() {
+        if index % 2 == 1 -> &paths.push(tokens[index])
+    }
+    if paths.is_empty() -> return false
+    loop path in paths {
+        if !truth_files.exists(truth_files.join(root, path)) -> return false
+    }
+    true
+}
+fn truth_card_refs(text: String) -> [Int] {
+    bytes :: text.bytes()
+    refs := [Int]{}
+    index := 0
+    loop index < bytes.len() {
+        if bytes[index] == (U8{35}) {
+            start :: index + 1
+            end := start
+            loop end < bytes.len() {
+                if bytes[end] < (U8{48}) || bytes[end] > (U8{57}) -> break
+                end += 1
+            }
+            if end > start {
+                &refs.push(Int.parse(truth_slice(text, start, end)) ?? panic("successor card number"))
+                index = end
+                next
+            }
+        }
+        index += 1
+    }
+    refs
+}
+fn truth_ingest_card(cards: &[Int: TruthCardState], card: Dyn, prefer_existing: Bool) {
+    value :: card.field("num") ?? panic("Tower card num is required")
+    num :: if value == {
+        .Int(number) -> number
+        .Float(number) -> number.to_int()
+        .Number(number) -> (Float.parse(number) ?? panic("card num is not numeric")).to_int()
+        else -> panic("card num is not numeric")
+    }
+    if prefer_existing && cards.has_key(num) -> return
+    log_empty := true
+    if card.field("log") == .Ok(log) {
+        if log == .Array(entries) -> log_empty = entries.is_empty()
+    }
+    epoch := ""
+    if card.field("epoch") == .Ok(field) -> epoch = field.text() ?? ""
+    phase := ""
+    if card.field("phase") == .Ok(field) -> phase = field.text() ?? ""
+    cards[num] = TruthCardState{epoch: epoch, phase: phase, log_empty: log_empty}
+}
+fn truth_tower_cards(root: String) -> [Int: TruthCardState] {
+    cards := [Int: TruthCardState]{}
+    live :: truth_process.cmd([String]{"node", "Tools/tower/tower.mjs", "card", "list", "--json"}).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("run Tower projection")
+    assert(live.success, "Tower projection failed: {live.errors}")
+    live_json :: truth_json.parse(live.output) ?? panic("parse live Tower JSON")
+    if live_json == {
+        .Array(entries) -> {
+            loop card in entries -> truth_ingest_card(&cards, card, false)
+        }
+        else -> panic("live Tower projection must be an array")
+    }
+    // Original missing/unreadable history is optional; malformed readable JSON
+    // is not. A non-array/missing `cards` field contributes no historical cards.
+    if truth_files.read(truth_files.join(root, ".tower/history.json")) == .Ok(raw) {
+        hist :: truth_json.parse(raw) ?? panic("parse Tower history")
+        if hist.field("cards") == .Ok(field) {
+            if field == .Array(entries) {
+                loop card in entries -> truth_ingest_card(&cards, card, true)
+            }
+        }
+    }
+    cards
+}
+fn run() {
+    root :: truth_process.args()[0]
+    raw :: truth_files.read(truth_files.join(root, "Docs/proposals/jetpack/truth-matrix.md")) ?? panic("read truth matrix")
+    rows :: truth_matrix_rows(raw)
+    git :: truth_process.cmd([String]{"git", "rev-parse", "--path-format=absolute", "--git-common-dir"}).cwd(root).stdout(.Capture).stderr(.Capture).run() ?? panic("locate Git common dir")
+    assert(git.success, "cannot locate live Git common dir")
+    live_root :: truth_files.dirname(git.output.trim().copy())
+    cards :: truth_tower_cards(live_root)
+    audited := rows.keys().to_list()
+    &audited.sort()
+    expected := [Int]{3, 5, 6, 13, 85, 90, 99, 139, 179, 185, 187, 188, 190, 191, 192, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 215, 229, 231, 232, 233, 234, 242, 330, 359, 361, 393, 394, 418, 419, 421, 424, 426, 476, 477, 478, 479, 539, 540, 541, 578, 582, 586, 605, 608, 611, 615}
+    &expected.sort()
+    assert_eq(audited, expected, "truth matrix audited set drifted")
+    loop item in cards {
+        if item.value.epoch == "e4" && item.value.phase == "done" {
+            assert(rows.has_key(item.key), "live E4 done cards missing from audit: #{item.key}")
+        }
+    }
+    reopened_cards :: [Int]{6, 330}
+    loop reopened in reopened_cards {
+        card :: cards.get(reopened) ?? panic("#{reopened} must remain reopened until its live successor lands")
+        assert_eq(card.phase, "ready", "#{reopened} must remain reopened until its live successor lands")
+    }
+    allowed :: [String]{"live", "compatibility-only", "model-only", "schema-only", "fixture-only"}
+    loop item in rows {
+        num :: item.key
+        row :: item.value
+        card :: cards.get(num) ?? panic("#{num}: card missing from Tower")
+        assert(allowed.contains(row.class), "#{num}: bad class {row.class}")
+        assert(row.evidence.bytes().len() >= 8, "#{num}: evidence is not specific")
+        assert(truth_evidence_resolves(root, row.evidence), "#{num}: evidence does not resolve: {row.evidence}")
+        assert(!row.boundary.trim().is_empty(), "#{num}: empty completion boundary")
+        if num != 418 -> assert(!card.log_empty, "#{num}: done/reclassified claim has no Tower evidence log")
+        if row.class != "live" {
+            successors :: truth_card_refs(row.boundary)
+            assert(!successors.is_empty(), "#{num}: non-live row needs successor")
+            active := false
+            loop successor in successors {
+                if cards.get(successor) == .Val(state) {
+                    if state.phase != "done" && state.phase != "frozen" -> active = true
+                }
+            }
+            assert(active, "#{num}: named successors are absent, done, or frozen")
+        }
+    }
+}

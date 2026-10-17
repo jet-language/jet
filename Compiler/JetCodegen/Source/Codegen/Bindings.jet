@@ -1,7 +1,7 @@
 // Lower checked destructuring bindings without re-evaluating the initializer.
 use jet_foundation.[
     MIRAccess,
-    MIRConstant,
+    mir_integer_constant,
     MIRCopyFact,
     MIRIndexKind,
     MIROperation,
@@ -9,6 +9,7 @@ use jet_foundation.[
     MIRPanicLoc,
     MIRPanicLocal,
     MIRPlaceID,
+    MIRProjection,
     Span,
     TDestructureBinding,
     TExpr,
@@ -17,57 +18,162 @@ use jet_foundation.[
     mir_source_file_id,
 ]
 
-fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span) {
+// D-MEM-COPYSEM1: a copying destructure of a read parameter's place, or of a
+// place whose root the bindings' scope leaves alone
+// (jet_codegen_stable_element_lets), binds each immutable name as a read
+// alias of its field in place: each read holds what the copy would, and a
+// consuming use copies the field (jet_codegen_unmovable_place).
+fn jet_codegen_lower_field_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, temp: TLocal, init: TExpr, move_fields: Bool, binds: [TDestructureBinding], span: Span) {
+    if !move_fields && jet_codegen_scope_end_close_function(builder, program, init.ty) == None {
+        if jet_codegen_destructure_window(&builder, program, init, binds, span) == .Val(window) {
+            _ := &builder.read_windows.add(window.value, true)
+            loop binding in binds {
+                field_type := jet_codegen_checked_host_field_type(builder, program, init.ty, binding.field)
+                field_id := jet_codegen_host_field_id(builder, program, init.ty, binding.field)
+                field_place := jet_codegen_project_window_place(&builder, program, window, MIRProjection.Field{field: field_id, span: span}, field_type, span)
+                _ := jet_codegen_bind_local_alias(&builder, program, binding.local, field_type, field_place, false)
+            }
+            return
+        }
+    }
     subject := if {
+        !move_fields && jet_codegen_scope_end_close_function(builder, program, init.ty) != None -> {
+            source_place := jet_codegen_lower_expression_place(&builder, program, init, MIRAccess.Read)
+            place := if source_place == {
+                .Val(existing) -> existing
+                .None -> {
+                    value := jet_codegen_lower_expr(&builder, program, init)
+                    owner := jet_codegen_bind_local(&builder, program, temp, init.ty, true, None, None, false)
+                    _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: owner, value: value})
+                    jet_codegen_place_access(&builder, program, owner, MIRAccess.Read)
+                }
+            }
+            jet_codegen_emit_value(&builder, program, span, init.ty, MIROperation.ReadPlace{place: place})
+        }
         move_fields -> {
-            source_place := jet_codegen_lower_expression_place(&builder, init, MIRAccess.Move)
+            source_place := jet_codegen_lower_expression_place(&builder, program, init, MIRAccess.Move)
             if source_place == {
-                .Val(place) -> jet_codegen_emit_value(&builder, span, init.ty, MIROperation.MovePlace{place: place})
-                .None -> jet_codegen_lower_expr(&builder, init)
+                .Val(place) -> jet_codegen_emit_value(&builder, program, span, init.ty, MIROperation.MovePlace{place: place})
+                .None -> jet_codegen_lower_expr(&builder, program, init)
             }
         }
-        else -> jet_codegen_lower_expr(&builder, init)
+        else -> jet_codegen_lower_expr(&builder, program, init)
     }
     temporary := MIRPlaceID?{None}
     if move_fields {
-        place := jet_codegen_bind_local(&builder, temp, init.ty, true, None, None, false)
-        move_place := jet_codegen_place_access(&builder, place, MIRAccess.Move)
-        _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: move_place, value: subject})
+        place := jet_codegen_bind_local(&builder, program, temp, init.ty, true, None, None, false)
+        move_place := jet_codegen_place_access(&builder, program, place, MIRAccess.Move)
+        _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: move_place, value: subject})
         temporary = Val(move_place)
     }
     loop binding in binds {
-        field_type := jet_codegen_checked_host_field_type(builder, init.ty, binding.field)
-        field_id := jet_codegen_host_field_id(builder, init.ty, binding.field)
+        field_type := jet_codegen_checked_host_field_type(builder, program, init.ty, binding.field)
+        field_id := jet_codegen_host_field_id(builder, program, init.ty, binding.field)
         value := if temporary == {
             .Val(place) -> {
-                field_place := jet_codegen_project_field_place(&builder, place, span, field_type, field_id)
-                jet_codegen_emit_value(&builder, span, field_type, MIROperation.MovePlace{place: field_place})
+                field_place := jet_codegen_project_field_place(&builder, program, place, span, field_type, field_id)
+                jet_codegen_emit_value(&builder, program, span, field_type, MIROperation.MovePlace{place: field_place})
             }
             .None -> {
-                projected := jet_codegen_emit_value(&builder, span, field_type, MIROperation.Field{base: subject, field: field_id})
-                jet_codegen_emit_value(&builder, span, field_type, MIROperation.Copy{value: projected, fact: MIRCopyFact.Materialize})
+                projected := jet_codegen_emit_value(&builder, program, span, field_type, MIROperation.Field{base: subject, field: field_id})
+                jet_codegen_emit_value(&builder, program, span, field_type, MIROperation.Copy{value: projected, fact: MIRCopyFact.Materialize})
             }
         }
-        destination := jet_codegen_bind_local(&builder, binding.local, field_type, binding.local.mutable, None, None, false)
-        _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: destination, value: value})
+        destination := jet_codegen_bind_local(&builder, program, binding.local, field_type, binding.local.mutable, None, None, false)
+        _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: destination, value: value})
+    }
+    if temporary == .Val(place) -> jet_codegen_finish_owned_destructure(&builder, program, place, init.ty, binds, span)
+}
+
+// The read window a copying destructure aliases: every name is immutable and
+// `init` names a read parameter's place or a stable place.
+fn jet_codegen_destructure_window(builder: &JetCodegenBuilder, program: JetCodegenProgram, init: TExpr, binds: [TDestructureBinding], span: Span) -> MIRPlaceID? {
+    loop binding in binds {
+        if binding.local.mutable || binding.local.generated -> return None
+    }
+    window :: jet_codegen_read_window_place(&builder, program, init)
+    if window != None -> return window
+    if builder.stable_element_lets.get(jet_codegen_destructure_key(span)) != (Val(true)) -> return None
+    jet_codegen_stable_window_place(&builder, program, init)
+}
+
+// Retire the whole-owner cleanup after moving fields; omitted fields still
+// belong to this scope and get their own cleanup, never a read of the partial owner.
+// Rust: LowerCtx::finish_owned_destructure.
+fn jet_codegen_finish_owned_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, binds: [TDestructureBinding], span: Span) {
+    frame :: builder.cleanup_frames.len() - 1
+    before :: builder.cleanup_frames[frame].actions.len()
+    original := Int?{None}
+    loop (position, action) in builder.cleanup_frames[frame].actions {
+        if action == .DropPlace(record) {
+            if record.place == place -> original = Val(position)
+        }
+    }
+    jet_codegen_set_drop_live(&builder, program, place, false)
+    owner :: jet_codegen_field_owner_type(ty)
+    if owner == {
+        .Tuple(fields) -> {
+            loop field in fields -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.name, binds, span)
+        }
+        .Named(name) | .Apply(name, _) -> {
+            identity :: jet_codegen_find_nominal_identity(program.modules, builder.function.module_identity, name, builder.generic_type_names)
+            if identity == {
+                .Val(nominal_identity) -> {
+                    loop semantic_module in program.modules {
+                        if semantic_module.module_identity != nominal_identity.module_identity -> next
+                        loop nominal in semantic_module.nominals {
+                            if nominal.symbol.name != nominal_identity.name -> next
+                            loop field in nominal.fields {
+                                if !field.computed -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.symbol.name, binds, span)
+                            }
+                        }
+                    }
+                }
+                .None -> {
+                    fields :: jet_codegen_compiler_owned_record_fields(name) ?? panic("missing checked destructure owner")
+                    loop field in fields -> jet_codegen_register_omitted_destructure_field(&builder, program, place, ty, field.name, binds, span)
+                }
+            }
+        }
+        else -> panic("checked destructure owner has no fields")
+    }
+    // Drop registrations append; retiring the whole owner leaves each omitted
+    // field's canonical cleanup in the frame without a positional insertion API.
+    added :: builder.cleanup_frames[frame].actions.len() - before
+    if original == {
+        .Val(position) -> _ := &builder.cleanup_frames[frame].actions.remove(position, .Slot)
+        .None -> if added != 0 -> panic("owned destructure has no original cleanup position")
     }
 }
 
-fn jet_codegen_lower_list_destructure(builder: &JetCodegenBuilder, init: TExpr, count: Int, elements: [TLocal], span: Span) {
-    subject := jet_codegen_lower_expr(&builder, init)
+
+// Rust: LowerCtx::register_omitted_destructure_field.
+fn jet_codegen_register_omitted_destructure_field(builder: &JetCodegenBuilder, program: JetCodegenProgram, place: MIRPlaceID, ty: Type, name: String, binds: [TDestructureBinding], span: Span) {
+    loop binding in binds {
+        if binding.field == name -> return
+    }
+    field_type :: jet_codegen_checked_host_field_type(builder, program, ty, name)
+    field_id :: jet_codegen_host_field_id(builder, program, ty, name)
+    field_place :: jet_codegen_project_field_place(&builder, program, place, span, field_type, field_id)
+    jet_codegen_register_drop_live(&builder, program, field_place, field_type, jet_codegen_ownership(field_type), true)
+}
+
+
+fn jet_codegen_lower_list_destructure(builder: &JetCodegenBuilder, program: JetCodegenProgram, init: TExpr, count: Int, elements: [TLocal], span: Span) {
+    subject := jet_codegen_lower_expr(&builder, program, init)
     element_type := if init.ty == {
         .List(element) | .FixedList(element, _) -> element
         else -> init.ty
     }
-    checked_location := jet_codegen_assignment_panic_location(&builder, span, false)
+    checked_location := jet_codegen_assignment_panic_location(&builder, program, span, false)
     location := MIRPanicLoc{file: mir_source_file_id(checked_location.file), line: checked_location.line, column: checked_location.column}
     context := MIRPanicContext{function: checked_location.function, source_line: checked_location.source_line, caret: checked_location.caret, locals: [MIRPanicLocal]{}}
-    call := jet_codegen_index_route(&builder, MIRIndexKind.List, MIRAccess.Read, jet_codegen_failure_carrier_for_type(element_type))
+    call := jet_codegen_index_route(&builder, program, MIRIndexKind.List, MIRAccess.Read, jet_codegen_failure_carrier_for_type(element_type))
     loop (index, local) in elements {
         if index >= count -> break
-        index_value := jet_codegen_emit_value(&builder, span, Type.Int, MIROperation.Constant{value: MIRConstant.Int{value: index, width: None, spelling: None}})
-        projected := jet_codegen_emit_value(&builder, span, element_type, MIROperation.Index{call: call, base: subject, index: index_value, kind: MIRIndexKind.List, access: MIRAccess.Read, location: location, context: context})
-        destination := jet_codegen_bind_local(&builder, local, element_type, local.mutable, None, None, false)
-        _ := jet_codegen_emit(&builder, span, None, MIROperation.WritePlace{place: destination, value: projected})
+        index_value := jet_codegen_emit_value(&builder, program, span, Type.Int, MIROperation.Constant{value: mir_integer_constant(index, None, None)})
+        projected := jet_codegen_emit_value(&builder, program, span, element_type, MIROperation.Index{call: call, base: subject, index: index_value, kind: MIRIndexKind.List, access: MIRAccess.Read, location: location, context: context})
+        destination := jet_codegen_bind_local(&builder, program, local, element_type, local.mutable, None, None, false)
+        _ := jet_codegen_emit(&builder, program, span, None, MIROperation.WritePlace{place: destination, value: projected})
     }
 }

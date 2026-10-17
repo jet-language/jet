@@ -4,61 +4,61 @@
 // remains the detailed diagnostic surface, and this selects the facts that
 // answer the common provenance question in one screen.
 
-pub struct WhyLocation {
-    pub path: String
-    pub line: Int?
-    pub text: String?
+struct WhyLocation {
+    path: String
+    line: Int?
+    text: String?
 
     fn not_found() -> WhyLocation Never! {
         WhyLocation{path: "not found", line: None, text: None}
     }
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["path"] = DataTree.Text(self.path)
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["path"] = Dyn.Text(self.path)
         object["line"] = store_explain_optional_int(self.line)
         object["text"] = if self.text == {
-            .Val(text) -> DataTree.Text(text)
-            .None -> DataTree.Null
+            .Val(text) -> Dyn.Text(text)
+            .None -> Dyn.Null
         }
-        DataTree.Object(object)
+        Dyn.Object(object)
     }
 }
 
-pub struct WhyRequesting {
-    pub env_file: WhyLocation
-    pub lock_file: WhyLocation
+struct WhyRequesting {
+    env_file: WhyLocation
+    lock_file: WhyLocation
 }
 
-pub struct WhyOrigin {
-    pub catalog: String
-    pub endpoint: String
-    pub cache_endpoint: String
-    pub signature_chain: String
-    pub source: String
-    pub source_digest: String
+struct WhyOrigin {
+    catalog: String
+    endpoint: String
+    cache_endpoint: String
+    signature_chain: String
+    source: String
+    source_digest: String
 }
 
-pub struct WhyTrust {
-    pub grade: String
-    pub reason: String
+struct WhyTrust {
+    grade: String
+    reason: String
 }
 
-pub struct WhyDisk {
-    pub bytes: Int?
-    pub objects: Int
+struct WhyDisk {
+    bytes: Int?
+    objects: Int
 }
 
-pub struct PackageWhy {
-    pub query: String
-    pub package: String
-    pub available: Bool
-    pub requesting: WhyRequesting
-    pub origin: WhyOrigin
-    pub trust: WhyTrust
-    pub disk: WhyDisk
-    pub dependents: [String]
-    pub receipt: String
+struct PackageWhy {
+    query: String
+    package: String
+    available: Bool
+    requesting: WhyRequesting
+    origin: WhyOrigin
+    trust: WhyTrust
+    disk: WhyDisk
+    dependents: [String]
+    receipt: String
 
     fn from_explain(roots: HangarRoots, explanation: PackageExplain) -> PackageWhy StoreError! {
         package :: if explanation.entry == {
@@ -108,34 +108,34 @@ pub struct PackageWhy {
         })
     }
 
-    fn to_json(self) -> String Never! {
-        requesting := [String: DataTree]{}
+    fn to_json(self) -> String ReportError! {
+        requesting := [String: Dyn]{}
         requesting["env_file"] = self.requesting.env_file.to_tree()
         requesting["lock_file"] = self.requesting.lock_file.to_tree()
-        origin := [String: DataTree]{}
-        origin["catalog"] = DataTree.Text(self.origin.catalog)
-        origin["endpoint"] = DataTree.Text(self.origin.endpoint)
-        origin["cache_endpoint"] = DataTree.Text(self.origin.cache_endpoint)
-        origin["signature_chain"] = DataTree.Text(self.origin.signature_chain)
-        origin["source"] = DataTree.Text(self.origin.source)
-        origin["source_digest"] = DataTree.Text(self.origin.source_digest)
-        trust := [String: DataTree]{}
-        trust["grade"] = DataTree.Text(self.trust.grade)
-        trust["reason"] = DataTree.Text(self.trust.reason)
-        disk := [String: DataTree]{}
+        origin := [String: Dyn]{}
+        origin["catalog"] = Dyn.Text(self.origin.catalog)
+        origin["endpoint"] = Dyn.Text(self.origin.endpoint)
+        origin["cache_endpoint"] = Dyn.Text(self.origin.cache_endpoint)
+        origin["signature_chain"] = Dyn.Text(self.origin.signature_chain)
+        origin["source"] = Dyn.Text(self.origin.source)
+        origin["source_digest"] = Dyn.Text(self.origin.source_digest)
+        trust := [String: Dyn]{}
+        trust["grade"] = Dyn.Text(self.trust.grade)
+        trust["reason"] = Dyn.Text(self.trust.reason)
+        disk := [String: Dyn]{}
         disk["bytes"] = store_explain_optional_int(self.disk.bytes)
-        disk["objects"] = DataTree.Int(self.disk.objects)
-        payload := [String: DataTree]{}
-        payload["query"] = DataTree.Text(self.query)
-        payload["package"] = DataTree.Text(self.package)
-        payload["available"] = DataTree.Bool(self.available)
-        payload["requesting"] = DataTree.Object(requesting)
-        payload["origin"] = DataTree.Object(origin)
-        payload["trust"] = DataTree.Object(trust)
-        payload["disk"] = DataTree.Object(disk)
+        disk["objects"] = Dyn.Int(self.disk.objects)
+        payload := [String: Dyn]{}
+        payload["query"] = Dyn.Text(self.query)
+        payload["package"] = Dyn.Text(self.package)
+        payload["available"] = Dyn.Bool(self.available)
+        payload["requesting"] = Dyn.Object(requesting)
+        payload["origin"] = Dyn.Object(origin)
+        payload["trust"] = Dyn.Object(trust)
+        payload["disk"] = Dyn.Object(disk)
         payload["dependents"] = pkg_json_texts(self.dependents)
-        payload["receipt"] = DataTree.Text(self.receipt)
-        StatusEnvelope.new("why", true).with_field("why", DataTree.Object(payload)).json()
+        payload["receipt"] = Dyn.Text(self.receipt)
+        StatusEnvelope.new("why", true).with_field("why", Dyn.Object(payload)).json()
     }
 
     fn text(self) -> String Never! {
@@ -155,8 +155,8 @@ pub struct PackageWhy {
 
 // The facts on the one-screen `why` surface; read-only like the detailed
 // explanation it projects.
-pub fn store_why_package(roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
-    found :: store_explain_package(roots, query, ExplainLens.All)
+fn store_why_package(verification: &StoreVerification, roots: HangarRoots, query: String) -> PackageWhy? StoreError! {
+    found :: store_explain_package(&verification, roots, query, ExplainLens.All)
     explanation :: found ?? return Ok(None)
     Ok(Val(PackageWhy.from_explain(roots, explanation)))
 }

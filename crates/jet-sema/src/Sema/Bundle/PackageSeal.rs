@@ -658,6 +658,9 @@ pub(super) fn map_edges(summary: &mut EffectSummary, map: &dyn Fn(&str) -> Strin
     for obligation in &mut summary.autodiff_obligations {
         obligation.target = map(&obligation.target);
     }
+    for site in &mut summary.shared_sites {
+        site.initializer = map(&site.initializer);
+    }
     for fact in &mut summary.discarded_results {
         fact.callee = map(&fact.callee);
     }
@@ -729,6 +732,7 @@ pub(super) fn encode_summary(summary: &EffectSummary) -> Result<RecordValue, Str
         authority_delegations,
         callback_obligations,
         autodiff_obligations,
+        shared_sites,
         compute_calls,
         autodiff_safe_panic,
         autodiff_unsafe_panic,
@@ -826,6 +830,15 @@ pub(super) fn encode_summary(summary: &EffectSummary) -> Result<RecordValue, Str
                     })
                     .collect(),
             ),
+        ),
+        (
+            "shared_sites",
+            RecordValue::List(shared_sites.iter().map(|site| record_map([
+                ("initializer", RecordValue::str(site.initializer.as_str())),
+                ("member", RecordValue::str(site.member.as_str())),
+                ("source", RecordValue::str(site.source.as_str())),
+                ("span", span_value(site.span)),
+            ])).collect()),
         ),
         (
             "compute_calls",
@@ -972,6 +985,14 @@ pub(super) fn decode_summary(value: &RecordValue) -> Result<EffectSummary, Recor
             Ok(AutodiffObligation {
                 method: text(entry, "method")?,
                 target: text(entry, "target")?,
+                span: span_of(entry.field("span")?)?,
+            })
+        })?,
+        shared_sites: list(value, "shared_sites", |entry| {
+            Ok(crate::Sema::Effects::SharedSiteObligation {
+                initializer: text(entry, "initializer")?,
+                member: text(entry, "member")?,
+                source: text(entry, "source")?,
                 span: span_of(entry.field("span")?)?,
             })
         })?,

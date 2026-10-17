@@ -64,7 +64,7 @@ pub(super) fn query_row_field<'a>(row: &'a CtValue, field: &str) -> Option<&'a C
             .map(|(_, value)| value),
         CtValue::Enum { type_name, .. } if matches!(
             type_name.as_str(),
-            "DataTree" | "TOML" | "YAML" | "CSV"
+            "Dyn" | "TOML" | "YAML" | "CSV"
         ) => {
             match super::JSONInterp::json_payload(row, "Object") {
                 Some(CtValue::Map(entries)) => entries.iter().find_map(|(key, value)| match key {
@@ -88,7 +88,7 @@ pub(super) fn query_cell_text(value: &CtValue) -> String {
             type_name,
             variant,
             args,
-        } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") => {
+        } if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") => {
             match variant.as_str() {
                 "Null" => String::new(),
                 _ => args
@@ -100,9 +100,9 @@ pub(super) fn query_cell_text(value: &CtValue) -> String {
         CtValue::Str(text) => text.clone(),
         CtValue::Int(value) => value.to_string(),
         CtValue::BigInt(value) => value.to_string_rep(),
-        CtValue::Float(value) => value.to_json(),
+        CtValue::Float(value) => value.render(),
         CtValue::Bool(value) => value.to_string(),
-        _ => super::JSONInterp::render_json_pretty(value, false, 0),
+        _ => super::JSONInterp::display_query_cell(value),
     }
 }
 fn query_cell_sql_value(value: &CtValue) -> Option<sql_query::JetSqlValue> {
@@ -122,10 +122,10 @@ fn query_cell_sql_value(value: &CtValue) -> Option<sql_query::JetSqlValue> {
             type_name,
             variant,
             args,
-        } if matches!(type_name.as_str(), "DataTree" | "TOML" | "YAML" | "CSV") => {
+        } if matches!(type_name.as_str(), "Dyn" | "TOML" | "YAML" | "CSV") => {
             match variant.as_str() {
                 "Null" => Some(sql_query::JetSqlValue::Null),
-                "Bool" | "Int" | "Number" | "Float" | "TypedText" | "Text" => args
+                "Bool" | "Int" | "Number" | "Float" | "Text" => args
                     .first()
                     .and_then(|(_, value)| query_cell_sql_value(value)),
                 _ => Some(sql_query::JetSqlValue::Text(query_cell_text(value))),
@@ -349,6 +349,20 @@ fn data_loader_error_value(kind: &str, operation: &str, reason: impl Into<String
 
 fn data_loader_failure(kind: &str, operation: &str, reason: impl Into<String>) -> CtValue {
     CtValue::failed(Box::new(data_loader_error_value(kind, operation, reason)))
+}
+
+fn data_json_failure(error: jet_foundation::EncodingJson::EncodingError) -> CtValue {
+    let reason = error.reason.clone();
+    let cause = super::JSONInterp::text_encoding_error_value(error);
+    CtValue::failed(Box::new(ct_struct("DataError", vec![
+        ("kind", data_loader_enum("DataErrorKind", "Unsupported")),
+        ("operation", CtValue::Str("data.loader".to_string())),
+        ("row", CtValue::absent(Type::Int)),
+        ("column", CtValue::absent(Type::Int)),
+        ("index", CtValue::absent(Type::Int)),
+        ("reason", CtValue::Str(reason)),
+        ("cause", CtValue::Present(Box::new(cause))),
+    ])))
 }
 
 fn data_loader_kernel_failure(
@@ -665,29 +679,6 @@ fn data_loader_format(format: &str) -> Option<&'static str> {
     }
 }
 
-fn data_loader_format_for_locator(locator: &str) -> Result<String, CtValue> {
-    let path = locator
-        .split(|character| character == '?' || character == '#')
-        .next()
-        .unwrap_or(locator);
-    let path = path.rsplit_once('/').map_or(path, |(_, path)| path);
-    let Some(extension) = path.rsplit_once('.').map(|(_, extension)| extension) else {
-        return Err(data_loader_failure(
-            "Bridge",
-            "data.load",
-            "source has no core format; import a provider package",
-        ));
-    };
-    data_loader_format(extension)
-        .map(str::to_string)
-        .ok_or_else(|| {
-            data_loader_failure(
-                "Bridge",
-                "data.load",
-                format!("format `{extension}` is provider-owned; import its package"),
-            )
-        })
-}
 
 fn data_kernel_limits_safe() -> DataKernelLimits {
     DataKernelLimits {
@@ -1528,17 +1519,7 @@ fn data_typed_tree(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "TypedText" => {
-            super::JSONInterp::json_variant(
-                "Text",
-                args.first().map(|(_, value)| data_typed_tree(value)),
-            )
-        }
-        CtValue::Enum {
-            type_name,
-            variant,
-            args,
-        } if type_name == "DataTree" => CtValue::Enum {
+        } if type_name == "Dyn" => CtValue::Enum {
             type_name: type_name.clone(),
             variant: variant.clone(),
             args: args
@@ -1613,36 +1594,36 @@ fn data_arrow_limits(
     })
 }
 
-fn data_arrow_tree_value(value: jet_foundation::DataTree::DataTree) -> CtValue {
+fn data_arrow_tree_value(value: jet_foundation::Dyn::Dyn) -> CtValue {
     match value {
-        jet_foundation::DataTree::DataTree::Null => super::JSONInterp::json_variant("Null", None),
-        jet_foundation::DataTree::DataTree::Bool(value) => {
+        jet_foundation::Dyn::Dyn::Null => super::JSONInterp::json_variant("Null", None),
+        jet_foundation::Dyn::Dyn::Bool(value) => {
             super::JSONInterp::json_variant("Bool", Some(CtValue::Bool(value)))
         }
-        jet_foundation::DataTree::DataTree::Int(value) => {
-            super::JSONInterp::json_variant("Int", Some(CtValue::Int(value)))
+        jet_foundation::Dyn::Dyn::Int(value) => {
+            super::JSONInterp::json_variant("Int", Some(super::Builtins::exact_int_value(value.to_big())))
         }
-        jet_foundation::DataTree::DataTree::Float(value) => super::JSONInterp::json_variant(
+        jet_foundation::Dyn::Dyn::Float(value) => super::JSONInterp::json_variant(
             "Float",
             Some(CtValue::Float(CtFloat::f64(value))),
         ),
-        jet_foundation::DataTree::DataTree::Number(value) => {
+        jet_foundation::Dyn::Dyn::Number(value) => {
             super::JSONInterp::json_variant("Number", Some(CtValue::Str(value)))
         }
-        jet_foundation::DataTree::DataTree::TypedText(value)
-        | jet_foundation::DataTree::DataTree::Text(value) => {
+        jet_foundation::Dyn::Dyn::Text(value) => {
             super::JSONInterp::json_variant("Text", Some(CtValue::Str(value)))
         }
-        jet_foundation::DataTree::DataTree::Bytes(value) => {
+        jet_foundation::Dyn::Dyn::Bytes(value) => {
             super::JSONInterp::json_variant("Bytes", Some(CtValue::Bytes(value)))
         }
-        jet_foundation::DataTree::DataTree::Array(values) => data_dynamic_array(
+        jet_foundation::Dyn::Dyn::DateTime(_) => unreachable!("Arrow temporal cells are typed text"),
+        jet_foundation::Dyn::Dyn::Array(values) => data_dynamic_array(
             values
                 .into_iter()
                 .map(data_arrow_tree_value)
                 .collect(),
         ),
-        jet_foundation::DataTree::DataTree::Object(fields) => data_dynamic_object(
+        jet_foundation::Dyn::Dyn::Object(fields) => data_dynamic_object(
             fields
                 .into_iter()
                 .map(|(key, value)| (key, data_arrow_tree_value(value)))
@@ -1697,7 +1678,7 @@ fn data_dynamic_tree(
         )
     })?;
     let tree = match format {
-        "json" => super::JSONInterp::parse_json_typed_ordered(&text).map_err(|error| {
+        "json" => super::JSONInterp::parse_json(&text).map_err(|error| {
             data_loader_failure(
                 "Decode",
                 "data.loader.json",
@@ -1718,7 +1699,7 @@ fn data_dynamic_tree(
                         format!("max_output_rows {} exceeded", limits.max_output_rows),
                     ));
                 }
-                let value = super::JSONInterp::parse_json_typed_ordered(line).map_err(|error| {
+                let value = super::JSONInterp::parse_json(line).map_err(|error| {
                     data_loader_failure(
                         "Decode",
                         "data.loader.jsonl",
@@ -1787,7 +1768,7 @@ fn data_dynamic_tree(
                                 .get(index)
                                 .map(|value| {
                                     super::JSONInterp::json_variant(
-                                        "TypedText",
+                                        "Text",
                                         Some(CtValue::Str(value.clone())),
                                     )
                                 })
@@ -1861,11 +1842,11 @@ fn data_dynamic_scalar_type(value: &CtValue) -> (&'static str, bool) {
             type_name,
             variant,
             ..
-        } if type_name == "DataTree" => match variant.as_str() {
+        } if type_name == "Dyn" => match variant.as_str() {
             "Null" => ("null", true),
             "Bool" => ("bool", false),
             "Number" => ("float", false),
-            "TypedText" | "Text" => ("text", false),
+            "Text" => ("text", false),
             "Array" => ("array", false),
             "Object" => ("object", false),
             _ => ("Any", false),
@@ -2075,7 +2056,7 @@ fn data_dynamic_canonical(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Object" => {
+        } if type_name == "Dyn" && variant == "Object" => {
             let Some(CtValue::Struct {
                 type_name: object_type,
                 fields,
@@ -2097,7 +2078,7 @@ fn data_dynamic_canonical(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Array" => {
+        } if type_name == "Dyn" && variant == "Array" => {
             let Some(CtValue::List(values)) = args.first().map(|(_, value)| value) else {
                 return value.clone();
             };
@@ -2185,8 +2166,14 @@ fn data_snapshot_dynamic(
     } else {
         data_dynamic_canonical(&value)
     };
-    let canonical =
-        super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+    let canonical = match super::JSONInterp::render_ordered_dyn(&canonical_value, false, 0) {
+        Ok(text) => text.into_bytes(),
+        Err(error) => {
+            let failure = data_json_failure(error);
+            data_loader_fail_value(loader, &failure, "data.loader");
+            return Err(failure);
+        }
+    };
     let schema = data_schema_value(&tree, &loader.state.format);
     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
         Some(CtValue::Str(value)) => value.clone(),
@@ -2304,9 +2291,9 @@ fn data_state_plain_tree(value: &CtValue) -> CtValue {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" => match variant.as_str() {
+        } if type_name == "Dyn" => match variant.as_str() {
             "Null" => CtValue::Unit,
-            "Bool" | "Int" | "Float" | "Text" | "TypedText" | "Bytes" => args
+            "Bool" | "Int" | "Float" | "Text" | "Bytes" => args
                 .first()
                 .map(|(_, value)| data_state_plain_tree(value))
                 .unwrap_or(CtValue::Unit),
@@ -2588,7 +2575,7 @@ fn data_state_encode_tree(value: &CtValue) -> Result<CtValue, CtValue> {
         CtValue::Failed(CtReport::Clean(_)) | CtValue::Unit => {
             Ok(super::JSONInterp::json_variant("Null", None))
         }
-        CtValue::Enum { type_name, .. } if type_name == "DataTree" => Ok(value.clone()),
+        CtValue::Enum { type_name, .. } if type_name == "Dyn" => Ok(value.clone()),
         CtValue::Enum { .. } | CtValue::Failed(CtReport::Told(_)) => Err(data_loader_failure(
             "Decode",
             "data.loader",
@@ -2663,8 +2650,14 @@ fn data_snapshot_dynamic_in_state(
     } else {
         data_dynamic_canonical(&value)
     };
-    let canonical =
-        super::JSONInterp::render_ordered_datatree(&canonical_value, false, 0).into_bytes();
+    let canonical = match super::JSONInterp::render_ordered_dyn(&canonical_value, false, 0) {
+        Ok(text) => text.into_bytes(),
+        Err(error) => {
+            let failure = data_json_failure(error);
+            data_loader_fail_value(loader, &failure, "data.loader");
+            return Err(failure);
+        }
+    };
     let schema = data_schema_value(&tree, &loader.state.format);
     let schema_id = match struct_field(&schema, "DataSchema", "identity") {
         Some(CtValue::Str(value)) => value.clone(),
@@ -2753,6 +2746,9 @@ pub fn eval_data_call_in_state(
     data_plan: Option<&jet_foundation::MIR::MirDataPlan>,
     span: Span,
 ) -> Option<Result<CtValue, Diagnostic>> {
+    if module == "core.data.plot" && method == "__plot_aggregate_none" {
+        return Some(Ok(plot_aggregate_none_value()));
+    }
     // D-QUERY-RETAIN1=A: receiver Core rows carry an empty module. The
     // `Query`/`DataGroupedQuery` carrier is argument 0; callbacks are MIR
     // standalone closures invoked through the shared closure host. The
@@ -2815,7 +2811,7 @@ pub fn eval_data_call_in_state(
     if module == "core.data"
         && matches!(
             method,
-            "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value"
+            "file" | "file_member" | "url" | "database" | "value"
         )
     {
         return Some(data_loader_constructor_in_state(
@@ -3009,75 +3005,6 @@ fn data_loader_constructor_in_state(
     let operation = format!("core.data.{method}");
     let (kind, locator, member, parameters, format, authority, limits, payload, seed) =
         match method {
-            "load" => {
-                let locator = data_loader_string_arg(args, 0, method, span)?;
-                let limits = data_limits_from_value(args.get(1));
-                let format = match data_loader_format_for_locator(&locator) {
-                    Ok(format) => format,
-                    Err(error) => return Ok(error),
-                };
-                let kind = if locator.starts_with("http://")
-                    || locator.starts_with("https://")
-                {
-                    jet_foundation::PreludeDataFlow::LoaderKind::URL
-                } else {
-                    jet_foundation::PreludeDataFlow::LoaderKind::File
-                };
-                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
-                    "network"
-                } else {
-                    "local"
-                };
-                let authority = match data_loader_authority(scope, "") {
-                    Ok(authority) => authority,
-                    Err(error) => return Ok(error),
-                };
-                (
-                    kind,
-                    locator,
-                    String::new(),
-                    Vec::new(),
-                    format,
-                    authority,
-                    limits,
-                    None,
-                    None,
-                )
-            }
-            "load_default" => {
-                let locator = data_loader_string_arg(args, 0, method, span)?;
-                let format = match data_loader_format_for_locator(&locator) {
-                    Ok(format) => format,
-                    Err(error) => return Ok(error),
-                };
-                let kind = if locator.starts_with("http://")
-                    || locator.starts_with("https://")
-                {
-                    jet_foundation::PreludeDataFlow::LoaderKind::URL
-                } else {
-                    jet_foundation::PreludeDataFlow::LoaderKind::File
-                };
-                let scope = if kind == jet_foundation::PreludeDataFlow::LoaderKind::URL {
-                    "network"
-                } else {
-                    "local"
-                };
-                let authority = match data_loader_authority(scope, "") {
-                    Ok(authority) => authority,
-                    Err(error) => return Ok(error),
-                };
-                (
-                    kind,
-                    locator,
-                    String::new(),
-                    Vec::new(),
-                    format,
-                    authority,
-                    data_kernel_limits_safe(),
-                    None,
-                    None,
-                )
-            }
             "file" => {
                 let path = data_loader_string_arg(args, 0, method, span)?;
                 let format = data_loader_string_arg(args, 1, method, span)?;
@@ -3187,7 +3114,10 @@ fn data_loader_constructor_in_state(
                     .cloned()
                     .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                 let limits = data_limits_from_value(args.get(1));
-                let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+                let text = match super::JSONInterp::render_ordered_dyn(&value, false, 0) {
+                    Ok(text) => text,
+                    Err(error) => return Ok(data_json_failure(error)),
+                };
                 let authority = match data_loader_authority("local", "") {
                     Ok(authority) => authority,
                     Err(error) => return Ok(error),
@@ -3480,73 +3410,10 @@ pub(super) fn eval_data_loader_call(
 ) -> Option<Result<CtValue, Diagnostic>> {
     let operation = format!("{module}.{method}");
     match (module, method) {
-        ("core.data", "load" | "load_default" | "file" | "file_member" | "url" | "database" | "value") => {
+        ("core.data", "file" | "file_member" | "url" | "database" | "value") => {
             let result = (|| -> Result<CtValue, Diagnostic> {
                 let (kind, locator, member, parameters, format, authority, limits, payload, seed) =
                     match method {
-                        "load" => {
-                            let locator = data_loader_string_arg(args, 0, method, span)?;
-                            let limits = data_limits_from_value(args.get(1));
-                            let format = match data_loader_format_for_locator(&locator) {
-                                Ok(format) => format,
-                                Err(error) => return Ok(error),
-                            };
-                            let kind = if locator.starts_with("http://")
-                                || locator.starts_with("https://")
-                            {
-                                jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            } else {
-                                jet_foundation::PreludeDataFlow::LoaderKind::File
-                            };
-                            let scope = if kind
-                                == jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            {
-                                "network"
-                            } else {
-                                "local"
-                            };
-                            let authority = match data_loader_authority(scope, "") {
-                                Ok(authority) => authority,
-                                Err(error) => return Ok(error),
-                            };
-                            (
-                                kind,
-                                locator,
-                                String::new(),
-                                Vec::new(),
-                                format,
-                                authority,
-                                limits,
-                                None,
-                                None,
-                            )
-                        }
-                        "load_default" => {
-                            let locator = data_loader_string_arg(args, 0, method, span)?;
-                            let format = match data_loader_format_for_locator(&locator) {
-                                Ok(format) => format,
-                                Err(error) => return Ok(error),
-                            };
-                            let kind = if locator.starts_with("http://")
-                                || locator.starts_with("https://")
-                            {
-                                jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            } else {
-                                jet_foundation::PreludeDataFlow::LoaderKind::File
-                            };
-                            let scope = if kind
-                                == jet_foundation::PreludeDataFlow::LoaderKind::URL
-                            {
-                                "network"
-                            } else {
-                                "local"
-                            };
-                            let authority = match data_loader_authority(scope, "") {
-                                Ok(authority) => authority,
-                                Err(error) => return Ok(error),
-                            };
-                            (kind, locator, String::new(), Vec::new(), format, authority, data_kernel_limits_safe(), None, None)
-                        }
                         "file" => {
                             let path = data_loader_string_arg(args, 0, method, span)?;
                             let format = data_loader_string_arg(args, 1, method, span)?;
@@ -3616,7 +3483,10 @@ pub(super) fn eval_data_loader_call(
                                 .cloned()
                                 .ok_or_else(|| unsupported("`data.value()` is missing value", span))?;
                             let limits = data_limits_from_value(args.get(1));
-                            let text = super::JSONInterp::render_ordered_datatree(&value, false, 0);
+                            let text = match super::JSONInterp::render_ordered_dyn(&value, false, 0) {
+                                Ok(text) => text,
+                                Err(error) => return Ok(data_json_failure(error)),
+                            };
                             let authority = match data_loader_authority("local", "") {
                                 Ok(authority) => authority,
                                 Err(error) => return Ok(error),
@@ -4600,6 +4470,10 @@ fn plot_channel_value(channel: data_plot_rt::JetDataPlotChannel) -> CtValue {
 
 fn plot_aggregate_value(aggregate: data_plot_rt::JetDataPlotAggregate) -> CtValue {
     plot_enum_value("JetDataPlotAggregate", aggregate.as_str())
+}
+
+pub(crate) fn plot_aggregate_none_value() -> CtValue {
+    plot_enum_value("JetDataPlotAggregate", &format!("{:?}", data_plot_rt::jet_data_plot_aggregate_none()))
 }
 
 fn plot_filter_op_value(op: data_plot_rt::JetDataPlotFilterOp) -> CtValue {

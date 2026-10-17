@@ -1,0 +1,17 @@
+# Port of tests/data_bridges.rs:105-150; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/data_bridges_declare_costs_and_fail_closed
+requires: tool:cc
+requires: tool:ar
+step: jet build main.jet
+exit: 0
+step: {work}/.jet/build/main
+exit: 0
+stdout: !~ "bridge-ready" # original ed77c235f tests/data_bridges.rs:118 not contains predicate
+stdout: ~ "py.* path=unavailable copy=owned-copy ownership=python-sidecar trust=untrusted-foreign fallback=none" # original ed77c235f tests/data_bridges.rs:122 contains predicate
+stdout: ~ "r.* path=unavailable copy=owned-copy ownership=r-sidecar trust=untrusted-foreign fallback=none" # original ed77c235f tests/data_bridges.rs:126 contains predicate
+stdout: ~ "gpu.* path=unavailable copy=device-transfer ownership=device-buffer trust=untrusted-accelerator fallback=none" # original ed77c235f tests/data_bridges.rs:130 contains predicate
+stdout: ~ "py: Bridge require_bridge: py.* unavailable" # original ed77c235f tests/data_bridges.rs:134 contains predicate
+stdout: ~ "r: Bridge require_bridge: r.* unavailable" # original ed77c235f tests/data_bridges.rs:138 contains predicate
+stdout: ~ "gpu: Bridge require_bridge: gpu.* unavailable" # original ed77c235f tests/data_bridges.rs:142 contains predicate
+stdout: ~ "nope: InvalidArgument require_bridge" # original ed77c235f tests/data_bridges.rs:146 contains predicate

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 use tir_support::{
-    build_and_run, build_and_run_full, have_rustc, interpreter_run, run_default_multi,
+    build_and_run, build_and_run_full, have_rustc, default_run, run_default_multi,
 };
 
 static RESTART_SEQ: AtomicU64 = AtomicU64::new(0);
@@ -54,7 +54,7 @@ fn service_runtime_exports_typed_counters_on_all_tiers() {
     );
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("services_observability_interpreter", &source);
+        default_run("services_observability_interpreter", &source);
     assert_eq!(
         interpreter_code, 0,
         "interpreter observability dogfood failed: {interpreter_stderr}"
@@ -100,13 +100,13 @@ fn run() {
     tree.start() ?? panic("start")
 
     first :: runtime.send(endpoint, "order", key: "order-1") ?? panic("first")
-    id :: receipt_id(~first)
-    receipt :: (~first).receipt() ?? panic("receipt")
-    history :: (~first).events() ?? panic("events")
+    id :: receipt_id(first.copy())
+    receipt :: (first.copy()).receipt() ?? panic("receipt")
+    history :: (first.copy()).events() ?? panic("events")
     print("audit:{receipt.show().contains(\"DeliveryReceipt\")}:{history.len()}")
     print("first:accepted")
     recovered := services.runtime(store, retention: retention)
-    recovered_duplicate :: recovered.retry(~id) ?? panic("recover")
+    recovered_duplicate :: recovered.retry(id.copy()) ?? panic("recover")
     print("recovered:{receipt_kind(^recovered_duplicate)}")
     delivered :: tree.receive(endpoint) ?? panic("deliver")
     print("delivered:{delivered}")
@@ -118,13 +118,13 @@ fn run() {
     duplicate :: recovered.send(endpoint, "order", key: "order-1") ?? panic("duplicate")
     print("duplicate:{receipt_kind(^duplicate)}")
 
-    retained :: runtime.retain(~id) ?? panic("retain")
+    retained :: runtime.retain(id.copy()) ?? panic("retain")
     print("retain:{receipt_kind(^retained)}")
-    retry :: recovered.retry(~id) ?? panic("retry")
+    retry :: recovered.retry(id.copy()) ?? panic("retry")
     print("retry:{receipt_kind(^retry)}")
     redelivered :: tree.receive(endpoint) ?? panic("redeliver")
     print("redelivered:{redelivered}")
-    runtime.commit(~id) ?? panic("redelivery commit")
+    runtime.commit(id.copy()) ?? panic("redelivery commit")
     dead :: runtime.dead_letter(id) ?? panic("dead")
     print("dead:{receipt_kind(^dead)}")
     tree.stop() ?? panic("stop")
@@ -169,7 +169,7 @@ fn service_authority_receipts_match_default_run() {
 #[test]
 fn service_authority_receipts_match_interpreter() {
     let (code, stdout, stderr) =
-        interpreter_run("services_authority_interpreter", AUTHORITY_SOURCE);
+        default_run("services_authority_interpreter", AUTHORITY_SOURCE);
     assert_eq!(
         code, 0,
         "interpreter service authority run failed: {stderr}"
@@ -210,8 +210,8 @@ fn run() {
     tree.start() ?? panic("start")
 
     accepted :: runtime.send(endpoint, "accepted", key: "accepted") ?? panic("accepted")
-    receipt :: (~accepted).receipt() ?? panic("receipt")
-    events :: (~accepted).events() ?? panic("events")
+    receipt :: (accepted.copy()).receipt() ?? panic("receipt")
+    events :: (accepted.copy()).events() ?? panic("events")
     print("audit:{receipt.show().contains(\"DeliveryReceipt\")}:{events.len()}")
     accepted.status() ?? panic("accepted status")
 
@@ -250,7 +250,7 @@ fn durable_lifecycle_audit_matches_aot_default_and_interpreter() {
     assert_eq!(jit_stdout, DURABLE_AUDIT_OUTPUT);
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("services_durable_audit_interpreter", DURABLE_AUDIT_SOURCE);
+        default_run("services_durable_audit_interpreter", DURABLE_AUDIT_SOURCE);
     assert_eq!(
         interpreter_code, 0,
         "interpreter durable audit failed: {interpreter_stderr}"
@@ -300,7 +300,7 @@ fn run() {
         print("restarted:{tree.restarts(endpoint) ?? panic("restarts")}")
         receipt :: runtime.send(endpoint, "order", key: "order-restart") ?? panic("recover")
         retry :: runtime.retry(receipt) ?? panic("retry")
-        retry_copy :: ~retry
+        retry_copy :: retry.copy()
         print(receipt_kind(^retry_copy))
         message :: tree.receive(endpoint) ?? panic("receive")
         print(message)
@@ -407,7 +407,7 @@ fn run_restart_process(bin: &Path, store: &Path, phase: &str, id: Option<&str>) 
 fn run_restart_default_process(dir: &Path, store: &Path, phase: &str, id: Option<&str>) -> String {
     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
     command
-        .args(["run", "restart.jet", "--trace-tiers"])
+        .args(["run", "restart.jet"])
         .current_dir(dir)
         .env("NO_COLOR", "1")
         .env("JET_SERVICE_AUTH_STORE", store)
@@ -1086,7 +1086,7 @@ fn run() {}
 "#,
     )
     .unwrap();
-    let (diagnostics, _, facts) =
+    let (diagnostics, _, facts, _) =
         jet::Driver::check_file_with_effect_facts(entry.to_str().unwrap(), None, false);
     assert!(
         !diagnostics
@@ -1124,7 +1124,7 @@ fn workflow_wait_methods_replay_their_history() {
     assert_eq!(jit_stdout, stdout, "default workflow wait replay diverged");
 
     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-        interpreter_run("services_workflow_wait_interpreter", WORKFLOW_WAIT_SOURCE);
+        default_run("services_workflow_wait_interpreter", WORKFLOW_WAIT_SOURCE);
     assert_eq!(
         interpreter_code, 0,
         "interpreter workflow wait run failed: {interpreter_stderr}"
@@ -1156,7 +1156,7 @@ fn run() {
     temp :: testing.temp_dir("workflow-sleep-cancel")
     store_path :: Path.from(temp).join("workflow.log").to_string()
     (ready, started) :: channel<Int>()
-    task_handle :: task sleeping_workflow(~store_path, ready)
+    task_handle :: task sleeping_workflow(store_path.copy(), ready)
     started.receive() ?? panic("workflow did not start")
     task_handle.cancel()
     result :: task_handle.join()
@@ -1201,7 +1201,7 @@ fn workflow_sleep_cancellation_is_recorded() {
     );
     assert_eq!(jit_stdout, stdout, "default workflow cancellation diverged");
 
-    let (interpreter_code, interpreter_stdout, interpreter_stderr) = interpreter_run(
+    let (interpreter_code, interpreter_stdout, interpreter_stderr) = default_run(
         "services_workflow_sleep_cancel_interpreter",
         WORKFLOW_SLEEP_CANCEL_SOURCE,
     );
@@ -1384,7 +1384,7 @@ fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_default
 #[test]
 fn service_rollout_drain_handoff_orders_endpoint_gate_and_new_generation_interpreter() {
     let (code, stdout, stderr) =
-        interpreter_run("services_drain_handoff_interpreter", DRAIN_HANDOFF_SOURCE);
+        default_run("services_drain_handoff_interpreter", DRAIN_HANDOFF_SOURCE);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, DRAIN_HANDOFF_OUTPUT);
 }
@@ -1477,7 +1477,7 @@ fn run() {
     tree.start() ?? panic("start")
 
     receipt :: runtime.send(endpoint, "pending", key: "pending") ?? panic("send")
-    id :: receipt_id(~receipt)
+    id :: receipt_id(receipt.copy())
     print("sent:{receipt_kind(^receipt)}")
     print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
     print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
@@ -1517,7 +1517,7 @@ fn runtime_receipt_pins_pending_shard_across_handoff_default_run() {
 
 #[test]
 fn runtime_receipt_pins_pending_shard_across_handoff_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
+    let (code, stdout, stderr) = default_run(
         "services_runtime_handoff_pending_interpreter",
         RUNTIME_HANDOFF_PENDING_SOURCE,
     );
@@ -1643,7 +1643,7 @@ fn durable_retry_is_the_only_explicit_redelivery_default_run() {
 #[test]
 fn durable_retry_is_the_only_explicit_redelivery_interpreter() {
     let (code, stdout, stderr) =
-        interpreter_run("services_durable_retry_interpreter", DURABLE_RETRY_SOURCE);
+        default_run("services_durable_retry_interpreter", DURABLE_RETRY_SOURCE);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, DURABLE_RETRY_OUTPUT);
 }
@@ -1706,7 +1706,7 @@ fn tree_durable_send_during_drain_is_rejected_before_admission_default_run() {
 
 #[test]
 fn tree_durable_send_during_drain_is_rejected_before_admission_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
+    let (code, stdout, stderr) = default_run(
         "services_tree_drain_reject_interpreter",
         TREE_DRAIN_REJECT_SOURCE,
     );
@@ -2165,7 +2165,7 @@ fn grouped_durable_partition_reconciles_under_default_run() {
 
 #[test]
 fn grouped_durable_partition_reconciles_in_interpreter() {
-    let (code, stdout, stderr) = interpreter_run(
+    let (code, stdout, stderr) = default_run(
         "services_partition_reconcile_interpreter",
         PARTITION_RECONCILE_SOURCE,
     );
@@ -2231,12 +2231,12 @@ fn run() {
     tree.start() ?? panic("start")
 
     accepted :: runtime.send(endpoint, "accepted", key: "same") ?? panic("accept")
-    accepted_state :: state_name(~accepted)
+    accepted_state :: state_name(accepted.copy())
     print("accept:{accepted_state}")
     duplicate :: runtime.send(endpoint, "accepted", key: "same") ?? panic("duplicate")
-    duplicate_id :: (~duplicate).show()
-    accepted_id :: (~accepted).show()
-    duplicate_state :: state_name(~duplicate)
+    duplicate_id :: (duplicate.copy()).show()
+    accepted_id :: (accepted.copy()).show()
+    duplicate_state :: state_name(duplicate.copy())
     print("duplicate:{duplicate_id == accepted_id}:{duplicate_state}")
     conflict :: runtime.send(endpoint, "different", key: "same")
     if conflict == {
@@ -2250,9 +2250,9 @@ fn run() {
     print("delivered:{delivered}")
     runtime.commit(accepted) ?? panic("commit")
     retained :: runtime.retain(duplicate) ?? panic("retain")
-    retained_receipt :: (~retained).receipt() ?? panic("retained receipt")
+    retained_receipt :: (retained.copy()).receipt() ?? panic("retained receipt")
     retained_text :: "{retained_receipt}"
-    retained_events :: (~retained).events() ?? panic("retained events")
+    retained_events :: (retained.copy()).events() ?? panic("retained events")
     retention_kept := retained_text.contains("retention_until=-1") == false
     retained_state :: state_name(^retained)
     print("retention:{retention_kept}:{retained_events.len()}:{retained_state}")
@@ -2261,15 +2261,15 @@ fn run() {
     retry_first :: tree.receive(endpoint) ?? panic("retry first")
     print("retry_first:{retry_first}")
     retry :: runtime.retry(retry_source) ?? panic("retry")
-    retry_receipt :: (~retry).receipt() ?? panic("retry receipt")
+    retry_receipt :: (retry.copy()).receipt() ?? panic("retry receipt")
     retry_text :: "{retry_receipt}"
-    retry_events :: (~retry).events() ?? panic("retry events")
+    retry_events :: (retry.copy()).events() ?? panic("retry events")
     retried := retry_text.contains("attempts=1")
-    retry_state :: state_name(~retry)
+    retry_state :: state_name(retry.copy())
     print("retry_state:{retry_state}:{retried}:{retry_events.len()}")
     retry_second :: tree.receive(endpoint) ?? panic("retry second")
     print("retry_second:{retry_second}")
-    retry_copy :: ~retry
+    retry_copy :: retry.copy()
     runtime.commit(retry) ?? panic("retry commit")
     retry_done :: state_name(^retry_copy)
     print("retry_done:{retry_done}")
@@ -2287,7 +2287,7 @@ fn run() {
     short_runtime := service.runtime(delivery_path, retention: Duration.milliseconds(1) ?? panic("short retention"))
     expiring :: short_runtime.send(endpoint, "expire", key: "expire") ?? panic("expire source")
     time.sleep(Duration.milliseconds(10) ?? panic("sleep"))
-    expiry_events :: (~expiring).events() ?? panic("expiry events")
+    expiry_events :: (expiring.copy()).events() ?? panic("expiry events")
     expiry_state :: state_name(^expiring)
     print("expiry:{expiry_state}:{expiry_events.len()}")
 
@@ -2303,13 +2303,13 @@ fn run() {
     }
     tree.reconcile_worker(endpoint) ?? panic("reconcile")
     recovered :: runtime.send(endpoint, "partition", key: "partition") ?? panic("partition recovery")
-    recovered_state :: state_name(~recovered)
+    recovered_state :: state_name(recovered.copy())
     print("partition_recovery:{recovered_state}")
     partition_delivery :: tree.receive(endpoint) ?? panic("partition delivery")
     print("partition_delivery:{partition_delivery}")
-    recovered_copy :: ~recovered
+    recovered_copy :: recovered.copy()
     runtime.commit(recovered) ?? panic("partition commit")
-    recovered_events :: (~recovered_copy).events() ?? panic("recovered events")
+    recovered_events :: (recovered_copy.copy()).events() ?? panic("recovered events")
     recovered_state_done :: state_name(^recovered_copy)
     print("partition_done:{recovered_state_done}:{recovered_events.len()}")
 
@@ -2373,7 +2373,7 @@ fn run() {
         print("accepted:{id}")
     } else if phase == "deliver" {
         delivery :: runtime.send(endpoint, "crash", key: "crash") ?? panic("deliver lookup")
-        id :: (~delivery).show()
+        id :: (delivery.copy()).show()
         state :: state_name(^delivery)
         print("before:{id}:{state}")
         received :: tree.receive(endpoint) ?? panic("receive")
@@ -2381,18 +2381,18 @@ fn run() {
         print("crash_window:open")
     } else {
         recovered :: runtime.send(endpoint, "crash", key: "crash") ?? panic("recover lookup")
-        recovered_id :: (~recovered).show()
-        recovered_state :: state_name(~recovered)
+        recovered_id :: (recovered.copy()).show()
+        recovered_state :: state_name(recovered.copy())
         print("recovered:{recovered_id}:{recovered_state}")
         retry :: runtime.retry(recovered) ?? panic("recover retry")
-        retry_id :: (~retry).show()
-        retry_state :: state_name(~retry)
-        retry_copy :: ~retry
+        retry_id :: (retry.copy()).show()
+        retry_state :: state_name(retry.copy())
+        retry_copy :: retry.copy()
         print("retry:{retry_id}:{retry_state}")
         received :: tree.receive(endpoint) ?? panic("replay receive")
         print("received:{received}")
         runtime.commit(retry) ?? panic("replay commit")
-        history :: (~retry_copy).events() ?? panic("replay history")
+        history :: (retry_copy.copy()).events() ?? panic("replay history")
         replayed_state :: state_name(^retry_copy)
         print("replayed:{replayed_state}:{history.len()}")
         print("same_identity:{recovered_id == retry_id}")
@@ -2423,4 +2423,109 @@ fn durable_lifecycle_crash_window_recovers_and_replays_one_identity() {
             && recovered.contains(":Delivering\nretry:Accepted\nreceived:crash\nreplayed:Delivered:5\n"),
         "crash-window replay did not rebuild the signed history: {recovered}"
     );
+}
+
+#[test]
+fn state_store_metadata_policy_matches_all_tiers() {
+    let scratch = common::Scratch::new("service_state_store_metadata");
+    fs::write(scratch.path.join("state"), b"state").unwrap();
+    let root = scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+package { authority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } } }
+use core.service as service
+fn policy_reason(error: ServiceError) -> String Never! {
+    if error == .Policy(reason) -> return reason
+    panic("expected policy refusal")
+}
+fn run() {
+    service.state_store("__ROOT__/state") ?? panic("existing file")
+    print("file")
+    service.state_store("__ROOT__/absent/store") ?? panic("absent file")
+    print("absent")
+    if service.state_store("__ROOT__") == {
+        .Err(error) -> print(policy_reason(error) == "service state store is not a regular file; repair or replace the state store before retrying")
+        .Ok(_) -> panic("directory accepted as state store")
+    }
+    if service.state_store("__ROOT__/state/child") == {
+        .Err(error) -> {
+            reason :: policy_reason(error)
+            print(reason.starts_with("cannot inspect service state store: "))
+            print(reason.ends_with("; repair or replace the state store before retrying"))
+        }
+        .Ok(_) -> panic("non-directory path component accepted")
+    }
+}
+"#.replace("__ROOT__", &root);
+    tir_support::assert_tiers_agree("state_store_metadata", &source, "file\nabsent\ntrue\ntrue\ntrue\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn state_store_keeps_lexical_symlink_ancestor_before_dotdot_on_all_tiers() {
+    let scratch = common::Scratch::new("service_state_store_lexical_link");
+    fs::create_dir(scratch.path.join("real")).unwrap();
+    std::os::unix::fs::symlink(scratch.path.join("real"), scratch.path.join("link")).unwrap();
+    let root = scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+    let source = r#"
+package { authority: { holds: { allow: [FS.Read, IO, Mem.Alloc] } } }
+use core.service as service
+fn run() {
+    if service.state_store("__ROOT__/link/../store") == {
+        .Err(.Policy(reason)) -> print(reason == "service state parent is a symlink: __ROOT__/link; repair or replace the state store before retrying")
+        .Err(_) -> panic("wrong refusal kind")
+        .Ok(_) -> panic("lexical symlink ancestor disappeared")
+    }
+}
+"#.replace("__ROOT__", &root);
+    tir_support::assert_tiers_agree("state_store_lexical_link", &source, "true\n");
+}
+
+#[test]
+fn source_worker_slot_keeps_checked_function_item_and_moves_the_mailbox() {
+    let scratch = common::Scratch::new("service_worker_source_slot");
+    fs::write(scratch.path.join("package.jet"), "name: \"worker-slot\"\nversion: \"0.1.0\"\n").unwrap();
+    let source = r#"
+use core.service as service
+fn named_worker() {}
+fn run() {
+    tree := service.tree("slot")
+    endpoint :: tree.worker("worker", named_worker, capacity: 2) ?? panic("worker")
+    tree.group("group", ["worker"]) ?? panic("group")
+    tree.start() ?? panic("start")
+    tree.send(endpoint, "message") ?? panic("send")
+    assert((tree.mailbox_depth(endpoint) ?? panic("depth")) == 1)
+    tree.fail_worker(endpoint) ?? panic("failure")
+    assert((tree.restarts(endpoint) ?? panic("restarts")) == 1)
+    tree.stop() ?? panic("stop")
+}
+"#;
+    let entry = scratch.path.join("main.jet");
+    fs::write(&entry, source).unwrap();
+    let shown = entry.to_string_lossy();
+    let output = jet::compile_with_path(source, &shown).unwrap_or_else(|diagnostics| {
+        panic!("{}", jet::render_diagnostics(&shown, source, &diagnostics))
+    });
+    assert!(output.rust.contains("JetServiceWorkerHandler)"), "missing checked fn() forward");
+    assert!(output.rust.contains("service worker failed: {{}}") || output.rust.contains("service worker failed: {}"));
+    assert!(output.rust.contains("jet_services_raw_group_push("), "existing source-owned group hop changed");
+    let mut pushed = false;
+    let mut replaced = false;
+    for line in output.rust.lines() {
+        for (symbol, position, seen) in [
+            ("jet_services_raw_worker_push(", 5, &mut pushed),
+            ("jet_services_raw_worker_write_mailbox(", 2, &mut replaced),
+        ] {
+            if line.contains(&format!("fn {}", symbol)) { continue; }
+            if let Some((_, arguments)) = line.split_once(symbol) {
+                let mailbox = arguments.split(',').nth(position).expect("checked mailbox argument");
+                assert!(!mailbox.contains(".clone()"), "Mailbox::clone forks the channel: {line}");
+                *seen = true;
+            }
+        }
+    }
+    assert!(pushed && replaced, "source worker and restart must move their mailboxes");
+    if have_rustc() {
+        let (status, _, stderr) = build_and_run_full("worker_mailbox_move", "main", source);
+        assert_eq!(status, 0, "{stderr}");
+    }
 }

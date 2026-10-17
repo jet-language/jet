@@ -1,0 +1,12 @@
+# Original tests/semindex.rs:1205-1228; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_projects_omitted_inferred_effects.fixture
+step: jet inspect semindex inferred_effect_signature.jet --json
+json: stdout doc $.semindex.effects[?function="announce"][0].inferred = ["IO"]
+json: stdout doc $.semindex.effects[?function="announce"][0].callees = []
+json: stdout doc $.semindex.effects[?function="announce"][0].provenance #= 1
+json: stdout doc $.semindex.effects[?function="announce"][0].provenance[0].effect = "IO"
+json: stdout doc $.semindex.effects[?function="announce"][0].provenance[0].call_path = ["announce"]
+json: stdout doc $.semindex.effects[?function="announce"][0].provenance[0].spans #= 1
+json: stdout doc $.semindex.effects[?function="run"][0].provenance[0].call_path = ["run","inferred_effect_signature::announce"]
+json: stdout doc $.semindex.effects[?function="run"][0].provenance[0].spans #= 2

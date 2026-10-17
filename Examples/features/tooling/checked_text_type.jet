@@ -6,8 +6,8 @@ Token :: distinct String
 impl Token.CheckedText {
     type Error = TextError
 
-    fn check(text: String) TextError! -[]> {
-        if text == "" { return Err(TextError.Empty) }
+    fn check(text: String) -[]> TextError! {
+        if text == "" -> return Err(TextError.Empty)
         return Ok(())
     }
 
@@ -26,6 +26,8 @@ fn run() {
     literal :: Token{"accepted {7}"}
     show(literal)
 
-    dynamic :: Token.from("accepted")
-    dynamic ? value -> show(value) ! error -> print("rejected")
+    if Token.from("accepted") == {
+        .Ok(value) -> show(value)
+        .Err(error) -> print("rejected")
+    }
 }

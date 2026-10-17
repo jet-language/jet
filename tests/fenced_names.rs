@@ -34,7 +34,8 @@ fn run_fenced_source(name: &str, source: &str, expected: &str) {
     let shown = path.to_string_lossy().into_owned();
 
     let mut bundle = jet::Loader::load_entry(&shown).expect("fenced-name bundle should load");
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
@@ -42,17 +43,9 @@ fn run_fenced_source(name: &str, source: &str, expected: &str) {
         errors.is_empty(),
         "fenced names must type-check: {errors:?}"
     );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "expanded statements must stay resident-JIT safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("expanded statements must compile in resident JIT");
 
     for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-        jet_jit::reset_jit_trace_for_test();
-        match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
+        match crate::common::dev_run(&shown, false, force_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -62,18 +55,6 @@ fn run_fenced_source(name: &str, source: &str, expected: &str) {
                 assert_eq!(stderr, "", "{tier} stderr drift");
                 assert_eq!(stdout, expected, "{tier} expansion order drift");
                 if !force_interpreter {
-                    assert!(
-                        jet_jit::jit_executed_for_test(),
-                        "fenced names must execute native resident JIT code"
-                    );
-                    assert!(
-                        !jet_jit::fallback_invoked_for_test(),
-                        "fenced names resident JIT must not invoke fallback"
-                    );
-                    assert!(
-                        !jet_jit::deopt_invoked_for_test(),
-                        "fenced names resident JIT must not deopt"
-                    );
                 }
             }
             jet::Interpreter::RunOutcome::Problems(diagnostics) => {

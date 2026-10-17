@@ -1,0 +1,295 @@
+// D-ADOPT-GUEST1=A: the sema-owned native guest boundary (Rust
+// crates/jet-sema/src/Sema/Guest.rs). Per-callable `#Import(c)` declarations
+// and `#Export(c)` functions are the same C-shaped record in opposite
+// directions; their signatures obey the C-safe type law before any body is
+// checked, and every native symbol of the guest surface is unique.
+use jet_foundation.[
+    Diagnostic,
+    Func,
+    Marker,
+    Param,
+    Span,
+    Type,
+    type_name,
+]
+
+// Rust `is_guest_import_marker`: the ratified `#Import(c)` spelling.
+fn sema_marker_is_guest_import(marker: Marker) -> Bool Never! {
+    !marker.negated && marker.name == "Import" && sema_marker_c_argument(marker)
+}
+
+// Rust `is_guest_import`: a function carrying the per-callable `#Import(c)`.
+fn sema_function_is_guest_import(function: Func) -> Bool Never! {
+    loop marker in function.markers {
+        if sema_marker_is_guest_import(marker) -> return true
+    }
+    false
+}
+
+// Rust `is_guest_export`: a function carrying `#Export(c)`.
+fn sema_function_is_guest_export(function: Func) -> Bool Never! {
+    loop marker in function.markers {
+        if sema_marker_is_guest_export(marker) -> return true
+    }
+    false
+}
+
+// Rust `guest_import_symbol`: the fixed C symbol the parser stored as the
+// `#Import(c)` marker's compile-time fact. A missing or empty value is an
+// invalid declaration (the parser reported E3212), never an import.
+fn sema_guest_import_symbol(function: Func) -> String? Never! {
+    loop marker in function.markers {
+        if !sema_marker_is_guest_import(marker) -> next
+        if marker.ct == .Val(value) {
+            if value == .Str(symbol) && symbol != "" -> return Val(symbol)
+        }
+        return None
+    }
+    None
+}
+
+// Rust `guest_export_native_symbol`: the one native spelling of an exported
+// C symbol, shared by sema, Library output and bindings.
+fn sema_guest_export_native_symbol(name: String) -> String Never! {
+    bytes := [U8]{}
+    loop byte in name.bytes() {
+        n :: Int.from_u8(byte)
+        if (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95 {
+            &bytes.push(byte)
+        } else {
+            &bytes.push(U8{95})
+        }
+    }
+    symbol := String.from_bytes(bytes) ?? ""
+    if symbol == "" || (Int.from_u8(bytes[0]) >= 48 && Int.from_u8(bytes[0]) <= 57) -> symbol = "_{symbol}"
+    symbol
+}
+
+// Rust GuestScalar: the closed scalar projection of native Library artifacts.
+enum SemaGuestScalar {
+    Int
+    Float
+    Bool
+    Text
+}
+
+fn sema_guest_scalar(ty: Type) -> SemaGuestScalar? Never! {
+    if ty == {
+        .Int -> Val(SemaGuestScalar.Int)
+        .Float -> Val(SemaGuestScalar.Float)
+        .Bool -> Val(SemaGuestScalar.Bool)
+        .String -> Val(SemaGuestScalar.Text)
+        else -> None
+    }
+}
+
+// Rust `scalar_shape`: one scalar kind shared by every parameter and the return.
+fn sema_guest_scalar_shape(params: [Param], return_type: Type?) -> SemaGuestScalar? Never! {
+    shape := SemaGuestScalar?{None}
+    loop parameter in params {
+        next_shape :: sema_guest_scalar(parameter.ty) ?? return None
+        if shape == .Val(existing) && existing != next_shape -> return None
+        shape = Val(next_shape)
+    }
+    returned :: return_type ?? return None
+    next_shape :: sema_guest_scalar(returned) ?? return None
+    if shape == .Val(existing) && existing != next_shape -> return None
+    Val(next_shape)
+}
+
+// Rust `export_boundary_return_type`: the success value an export publishes;
+// Optional and `Never` carriers keep their written type.
+fn sema_guest_export_return_type(return_type: Type?) -> Type? Never! {
+    written :: return_type ?? return None
+    if written == .Result(ok, _) -> return Val(ok)
+    Val(written)
+}
+
+// Rust `check_c_signature`: E3203 for a parameter or return without a stable
+// C ABI, E3202 for a by-value pointer return. Registers nothing.
+fn sema_guest_check_c_signature(graph: SemaRegistrationGraph, module_index: Int, function: Func, diagnostics: &[Diagnostic]) -> Bool {
+    module_identity :: graph.modules[module_index].module_identity
+    handles :: [SemaCheckedForeignHandle]{}
+    valid := true
+    loop parameter_index in 0..<function.params.len() {
+        if !sema_checked_foreign_type(graph, function.params[parameter_index].ty, module_identity, true, false, handles, [String]{}) {
+            &diagnostics.push(sema_checked_foreign_type_error(function.params[parameter_index].ty, function.params[parameter_index].ty_span, true))
+            valid = false
+        }
+    }
+    if function.return_type == .Val(return_type) {
+        return_span :: function.return_type_span ?? function.name_span
+        pointer_return :: if return_type == {
+            .Apply(name, _) -> name == "Ptr"
+            else -> false
+        }
+        if {
+            pointer_return -> {
+                &diagnostics.push(sema_error("E3202", return_span, "Type `{type_name(return_type)}` cannot cross the C boundary here.", "C FFI allows by-value scalars and `String` in ordinary code; pointers and other gated types need `use core.mem` and an `#Unsafe` region", "Move the call inside `#Unsafe`, or change the type to a C-safe value type."))
+                valid = false
+            }
+            !sema_checked_foreign_type(graph, return_type, module_identity, true, false, handles, [String]{}) -> {
+                &diagnostics.push(sema_checked_foreign_type_error(return_type, return_span, true))
+                valid = false
+            }
+            else -> {}
+        }
+    }
+    valid
+}
+
+// Rust `ExternFn::hidden_c_bridge_compatible` for a per-callable import: it is
+// never generated and has no opaque handles, so it crosses the resident
+// bridge only with Read/Write scalar or `String` values and such a return.
+fn sema_guest_import_bridge_value(ty: Type) -> Bool Never! {
+    ty == Type.String || sema_checked_foreign_bridge_scalar_type(ty)
+}
+
+fn sema_guest_import_bridge_compatible(function: Func) -> Bool Never! {
+    if sema_guest_import_symbol(function) == None -> return false
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].convention == {
+            .Read | .Write -> {
+                if !sema_guest_import_bridge_value(function.params[parameter_index].ty) -> return false
+            }
+            else -> return false
+        }
+    }
+    if function.return_type == .Val(returned) -> sema_guest_import_bridge_value(returned) else -> true
+}
+
+// Rust `library_component_type_is_safe`: native Library rich values use the
+// canonical byte carrier; named records and enums are admitted only when every
+// nested payload has a closed, checked shape.
+fn sema_guest_library_component_type(graph: SemaRegistrationGraph, module_identity: String, ty: Type, seen: &[String:Bool]) -> Bool {
+    if ty == {
+        .Int | .Float | .Bool | .String | .Char | .IntN(_, _) | .Float32 -> true
+        .List(inner) | .Option(inner) | .FixedList(inner, _) | .InlineRange(inner, _, _) | .Tagged(_, inner) -> sema_guest_library_component_type(graph, module_identity, inner, &seen)
+        .Result(ok, err) -> sema_guest_library_component_type(graph, module_identity, ok, &seen) && sema_guest_library_component_type(graph, module_identity, err, &seen)
+        .Named(name) -> sema_guest_library_component_named(graph, module_identity, ty, name, &seen)
+        else -> false
+    }
+}
+
+// The `Type::Named` arm: a registered struct, enum, distinct or alias whose
+// every nested payload is itself a closed shape; a recursive name is not.
+fn sema_guest_library_component_named(graph: SemaRegistrationGraph, module_identity: String, ty: Type, name: String, seen: &[String:Bool]) -> Bool {
+    if seen.get(name) == .Val(seen_before) && seen_before -> return false
+    row :: sema_type_resolve_nominal_row(graph, ty, module_identity) ?? return false
+    owner :: graph.modules[row.module_index].module_identity
+    seen[name] = true
+    safe := false
+    if graph.modules[row.module_index].nominals[row.row].source == .SourceAST(item) {
+        if item == {
+            .Struct(definition) -> {
+                safe = true
+                loop field in definition.fields {
+                    if !sema_guest_library_component_type(graph, owner, field.ty, &seen) {
+                        safe = false
+                        break
+                    }
+                }
+            }
+            .Enum(definition) -> {
+                safe = true
+                loop variant in definition.variants {
+                    variant_safe :: if variant.payload == {
+                        .Unit -> true
+                        .Single(payload, _) -> sema_guest_library_component_type(graph, owner, payload, &seen)
+                        .Named(fields) -> loop field in fields {
+                            if !sema_guest_library_component_type(graph, owner, field.ty, &seen) -> break false
+                        } ?? true
+                    }
+                    if !variant_safe {
+                        safe = false
+                        break
+                    }
+                }
+            }
+            .Distinct(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.base, &seen)
+            .TypeAlias(definition) -> safe = sema_guest_library_component_type(graph, owner, definition.target, &seen)
+            else -> {}
+        }
+    }
+    seen[name] = false
+    safe
+}
+
+// Rust `library_component_signature_is_safe`.
+fn sema_guest_library_component_signature(graph: SemaRegistrationGraph, module_identity: String, function: Func) -> Bool {
+    return_type :: function.return_type ?? return false
+    seen := [String:Bool]{}
+    if !sema_guest_library_component_type(graph, module_identity, return_type, &seen) -> return false
+    loop parameter_index in 0..<function.params.len() {
+        if !sema_guest_library_component_type(graph, module_identity, function.params[parameter_index].ty, &seen) -> return false
+    }
+    true
+}
+
+// Rust `record_guest_symbol`: one native symbol in the bundle-wide guest
+// namespace (E1341 on a second owner).
+fn sema_guest_record_symbol(symbols: &[String:String], symbol: String, owner: String, kind: String, name: String, span: Span?, diagnostics: &[Diagnostic]) {
+    description :: "{kind} `{name}` in module `{owner}`"
+    if symbols.get(symbol) == .Val(previous) {
+        &diagnostics.push(sema_error_optional("E1341", span, "{previous} and {description} use the same C symbol `{symbol}`", "the native guest call surface must map every imported, exported, and generated C symbol unambiguously before codegen", "rename one declaration or its native symbol string"))
+    }
+    symbols[symbol] = description
+}
+
+// Rust CheckInner `check_guest_import_surface` (every module),
+// `check_guest_export_surface` (the entry module) and
+// `check_guest_symbol_collisions` (the bundle), after registration and
+// before any body is checked.
+fn sema_guest_check_surfaces(graph: &SemaRegistrationGraph) {
+    entry_index :: sema_registration_module_index(graph, graph.entry_module_identity) ?? -1
+    failed := false
+    loop module_index in 0..<graph.modules.len() {
+        diagnostics := [Diagnostic]{}
+        loop item in graph.modules[module_index].program.items {
+            if item == .Func(function) {
+                if sema_guest_import_symbol(function) != None {
+                    if !sema_guest_check_c_signature(graph, module_index, function, &diagnostics) {
+                        failed = true
+                    } else if !sema_guest_import_bridge_compatible(function) {
+                        &diagnostics.push(sema_error("E1341", function.name_span, "guest import `{function.name}` cannot use the resident hidden C bridge", "per-callable imports have no direct C-module wrapper fallback", "use a read-only scalar or String bridge signature"))
+                        failed = true
+                    }
+                }
+                if module_index == entry_index && sema_function_is_guest_export(function) && !sema_guest_library_component_signature(graph, graph.modules[module_index].module_identity, function) {
+                    if !sema_guest_check_c_signature(graph, module_index, function, &diagnostics) -> failed = true
+                }
+            }
+        }
+        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
+    }
+    symbols := [String:String]{}
+    has_text_export := false
+    loop module_index in 0..<graph.modules.len() {
+        diagnostics := [Diagnostic]{}
+        owner :: graph.modules[module_index].module_name
+        loop item in graph.modules[module_index].program.items {
+            if item == {
+                .Func(function) -> {
+                    if sema_guest_import_symbol(function) == .Val(symbol) -> sema_guest_record_symbol(&symbols, symbol, owner, "guest imports", function.name, Val(function.name_span), &diagnostics)
+                    if module_index == entry_index && sema_function_is_guest_export(function) {
+                        if sema_guest_scalar_shape(function.params, sema_guest_export_return_type(function.return_type)) == (Val(SemaGuestScalar.Text)) -> has_text_export = true
+                        sema_guest_record_symbol(&symbols, sema_guest_export_native_symbol(function.name), owner, "Library exports", function.name, Val(function.name_span), &diagnostics)
+                    }
+                }
+                .CModule(c_module) -> {
+                    loop foreign in c_module.functions -> sema_guest_record_symbol(&symbols, foreign.rust_path, owner, "C module imports", foreign.name, Val(foreign.name_span), &diagnostics)
+                }
+                else -> {}
+            }
+        }
+        if diagnostics.len() > 0 -> failed = true
+        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, module_index, diagnostic)
+    }
+    if has_text_export {
+        diagnostics := [Diagnostic]{}
+        sema_guest_record_symbol(&symbols, "jet_text_free", "<generated>", "generated C symbol", "jet_text_free", None, &diagnostics)
+        if diagnostics.len() > 0 -> failed = true
+        loop diagnostic in diagnostics -> sema_registration_push_graph_diagnostic(&graph, -1, diagnostic)
+    }
+    if failed -> graph.complete = false
+}

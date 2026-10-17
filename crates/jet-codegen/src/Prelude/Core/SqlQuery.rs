@@ -275,7 +275,7 @@ fn unquote(value: &str) -> String {
     value.to_string()
 }
 
-fn identifier(value: Option<&String>, role: &str) -> Result<String, String> {
+fn identifier(value: Option<&str>, role: &str) -> Result<String, String> {
     let value = value.ok_or_else(|| sql_error(format!("SQL {role} is missing")))?;
     let raw = value.trim();
     let quoted = raw.len() >= 2
@@ -309,7 +309,7 @@ fn parse_alias(tokens: &[String], cursor: &mut usize) -> Result<Option<String>, 
         .is_some_and(|token| token.eq_ignore_ascii_case("as"))
     {
         *cursor += 1;
-        let alias = identifier(tokens.get(*cursor), "SELECT alias")?;
+        let alias = identifier(tokens.get(*cursor).map(String::as_str), "SELECT alias")?;
         *cursor += 1;
         return Ok(Some(alias));
     }
@@ -317,7 +317,7 @@ fn parse_alias(tokens: &[String], cursor: &mut usize) -> Result<Option<String>, 
         .get(*cursor)
         .is_some_and(|token| token != "," && !clause_keyword(token))
     {
-        let alias = identifier(tokens.get(*cursor), "SELECT alias")?;
+        let alias = identifier(tokens.get(*cursor).map(String::as_str), "SELECT alias")?;
         *cursor += 1;
         return Ok(Some(alias));
     }
@@ -367,7 +367,7 @@ fn parse_select_item(tokens: &[String], cursor: &mut usize) -> Result<JetSqlSele
         }
         None
     } else {
-        let field = identifier(tokens.get(*cursor), "aggregate column")?;
+        let field = identifier(tokens.get(*cursor).map(String::as_str), "aggregate column")?;
         *cursor += 1;
         Some(field)
     };
@@ -518,6 +518,12 @@ where
         Err(sql_error(format!("{label} references unknown field `{field}`")))
     })
 }
+pub fn jet_data_query_validate_fields_raw(fields: &[String], sql: &str) -> Result<(), String> {
+    let query = parse_sql_query(sql)?;
+    validate_sql_query_schema(
+        &query, |field| fields.iter().any(|known| known == field), "analytics query",
+    )
+}
 
 /// Parse the checked SQL surface. It supports wildcard or explicit field
 /// projections, COUNT/SUM/AVG/MIN/MAX, WHERE, GROUP BY (including ordinals),
@@ -554,7 +560,7 @@ pub fn parse_sql_query(sql: &str) -> Result<JetSqlQuery, String> {
         return Err(sql_error("SQL query needs `FROM source` after its projection"));
     }
     cursor += 1;
-    let source = identifier(tokens.get(cursor), "source after FROM")?;
+    let source = identifier(tokens.get(cursor).map(String::as_str), "source after FROM")?;
     cursor += 1;
     let mut query = JetSqlQuery {
         source,
@@ -572,7 +578,7 @@ pub fn parse_sql_query(sql: &str) -> Result<JetSqlQuery, String> {
                 return Err(sql_error("SQL query has an out-of-order or repeated WHERE clause"));
             }
             stage = 1;
-            let field = identifier(tokens.get(cursor + 1), "WHERE field")?;
+            let field = identifier(tokens.get(cursor + 1).map(String::as_str), "WHERE field")?;
             let operator = tokens
                 .get(cursor + 2)
                 .ok_or_else(|| sql_error("SQL WHERE needs `field operator value`"))?

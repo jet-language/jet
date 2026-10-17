@@ -13,7 +13,7 @@ nix_builder_scratch_sequence := 0
 // provider diagnostic contract as substitution; the route itself is visible
 // only in the producer provenance.
 #Error
-pub enum NativeNixBuildError {
+enum NativeNixBuildError {
     SandboxUnavailable(String)
     Invalid(String)
     Failed(String)
@@ -80,17 +80,17 @@ impl NativeNixBuildError -> ProviderError {
 }
 
 // One output after the builder ran, before Hangar promotion.
-pub struct NativeNixOutput {
-    pub name: String
-    pub store_path: String
-    pub path: String
-    pub digest: String
+struct NativeNixOutput {
+    name: String
+    store_path: String
+    path: String
+    digest: String
 }
 
 // A private build tree under the Hangar build scratch root, marked live for
 // scratch sweeps and removed once its outputs are promoted or rejected.
-pub struct NixBuildScratch {
-    pub path: String
+struct NixBuildScratch {
+    path: String
 
     fn new(hangar: String, drv_path: String) -[FS, Env]> NixBuildScratch NativeNixBuildError! {
         nix_builder_create_real_directory(hangar, "Hangar root")
@@ -112,16 +112,16 @@ pub struct NixBuildScratch {
 
 // The native builder result. Its scratch keeps the output paths alive until
 // the caller promotes this result into Hangar.
-pub struct NativeNixBuild {
-    pub drv_path: String
-    pub outputs: [String: NativeNixOutput]
-    pub sandbox_mechanism: String
-    pub sandbox_policy: String
-    scratch: NixBuildScratch
+struct NativeNixBuild {
+    drv_path: String
+    outputs: [String: NativeNixOutput]
+    sandbox_mechanism: String
+    sandbox_policy: String
+    priv scratch: NixBuildScratch
 }
 
 // Execute one evaluated derivation in the shared native sandbox.
-pub fn provider_nix_build_derivation(roots: HangarRoots, source_dir: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time.Wait]> NativeNixBuild NativeNixBuildError! {
+fn provider_nix_build_derivation(roots: HangarRoots, source_dir: String, evaluation: NixNativeDerivation) -[FS, Env, Exec, Time.Wait]> NativeNixBuild NativeNixBuildError! {
     status :: foundation_native_sandbox_status()
     if !status.available -> return Err(NativeNixBuildError.SandboxUnavailable(status.reason))
     nix_builder_validate_source_dir(source_dir)
@@ -183,7 +183,7 @@ fn nix_builder_rewrite_output_paths(value: String, evaluation: NixNativeDerivati
 // Read one repository flake, evaluate its bounded package output and admit
 // the result through the native builder. The file is source input, never a
 // pinned output fixture.
-pub fn provider_nix_build_repository_output(verification: &StoreVerification, roots: HangarRoots, project_dir: String, flake_path: String, system: String, attribute: String, reference: String, version: String) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry NativeNixBuildError! {
+fn provider_nix_build_repository_output(verification: &StoreVerification, roots: HangarRoots, project_dir: String, flake_path: String, system: String, attribute: String, reference: String, version: String) -[FS, Env, Exec, Time, Time.Wait]> StoreEntry NativeNixBuildError! {
     nix_builder_validate_source_dir(project_dir)
     project :: files.canonicalize(project_dir) ?? return Err(NativeNixBuildError.Invalid("canonicalizing project source: {err}"))
     info :: files.stat(flake_path) ?? return Err(NativeNixBuildError.Invalid("flake source `{flake_path}`: {err}"))
@@ -201,7 +201,7 @@ pub fn provider_nix_build_repository_output(verification: &StoreVerification, ro
 // Promote a native build through the same Nix Store registration as
 // substituted outputs; the build scratch is removed once the projection has
 // moved every output into Hangar (or refused them).
-pub fn provider_nix_admit_built_derivation(verification: &StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
+fn provider_nix_admit_built_derivation(verification: &StoreVerification, roots: HangarRoots, build: NativeNixBuild, reference: String, version: String) -[FS, Env, Time]> StoreEntry NativeNixBuildError! {
     admitted :: nix_builder_admit(&verification, roots, build, reference, version)
     build.scratch.remove()
     admitted
@@ -345,5 +345,5 @@ fn nix_builder_make_tree_writable(path: String) Never! -[FS]> {
         entries :: files.list_dir(path) ?? [DirEntry]{}
         loop entry in entries -> nix_builder_make_tree_writable(entry.path)
     }
-    files.set_mode(path, info.mode | 0o700).drop("an unwritable node is left for the scratch sweep")
+    files.set_mode(path, (info.mode).bit_or(0o700)).drop("an unwritable node is left for the scratch sweep")
 }

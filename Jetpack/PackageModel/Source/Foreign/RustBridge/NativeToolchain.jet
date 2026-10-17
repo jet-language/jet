@@ -5,21 +5,21 @@
 // silent fallback to another host tool.
 
 // One resolved native compiler or archiver for inline C/C++ bodies.
-pub struct NativeTool {
-    pub path: String
-    pub identity: String
-    pub target_arg: String?
+struct NativeTool {
+    path: String
+    identity: String
+    target_arg: String?
 }
 
 // The exact tools inline C/C++ bodies compile and archive with.
-pub struct InlineNativeToolchain {
-    pub target: String
-    pub cc: NativeTool?
-    pub cxx: NativeTool?
-    pub ar: NativeTool
+struct InlineNativeToolchain {
+    target: String
+    cc: NativeTool?
+    cxx: NativeTool?
+    ar: NativeTool
 }
 
-pub fn pkg_ffi_cxx_runtime_for_target(target: String) -> String Never! {
+fn pkg_ffi_cxx_runtime_for_target(target: String) -> String Never! {
     if {
         target.contains("apple") || target.contains("darwin") -> "c++"
         target.contains("windows-msvc") -> "msvcprt"
@@ -27,7 +27,7 @@ pub fn pkg_ffi_cxx_runtime_for_target(target: String) -> String Never! {
     }
 }
 
-pub fn pkg_ffi_proof_suffix_for_target(target: String) -> String Never! {
+fn pkg_ffi_proof_suffix_for_target(target: String) -> String Never! {
     if {
         target.contains("windows") -> "dll"
         target.contains("apple") || target.contains("darwin") -> "dylib"
@@ -35,7 +35,7 @@ pub fn pkg_ffi_proof_suffix_for_target(target: String) -> String Never! {
     }
 }
 
-pub fn pkg_ffi_undefined_symbol_flag_for_target(target: String) -> String Never! {
+fn pkg_ffi_undefined_symbol_flag_for_target(target: String) -> String Never! {
     if target.contains("apple") || target.contains("darwin") -> "-Wl,-undefined,error" else -> "-Wl,--no-undefined"
 }
 
@@ -119,7 +119,7 @@ fn pkg_ffi_inline_toolchain_identity(toolchain: InlineNativeToolchain) -> String
 // `<rustc path>\n<rustc -vV output>`: the Rust toolchain every bridge key
 // and shared target dir is keyed by. Callers resolve it once per bridge
 // build and pass it on; the toolchain cannot change under a running build.
-pub fn pkg_ffi_native_toolchain_identity() -[Env, Exec, Time.Wait]> String Never! {
+fn pkg_ffi_native_toolchain_identity() -[Env, Exec, Time.Wait]> String Never! {
     rustc :: sys.get("RUSTC") ?? "rustc"
     version := "unavailable"
     if process.cmd([String]{rustc, "-vV"}).run() == .Ok(receipt) {
@@ -129,7 +129,7 @@ pub fn pkg_ffi_native_toolchain_identity() -[Env, Exec, Time.Wait]> String Never
 }
 
 // The target triple: `JET_BUILD_TARGET` when set, else rustc's host line.
-pub fn pkg_ffi_host_target() -[Env, Exec, Time.Wait]> String Never! {
+fn pkg_ffi_host_target() -[Env, Exec, Time.Wait]> String Never! {
     if sys.get("JET_BUILD_TARGET") == .Val(target) {
         if target.trim() != "" -> return target
     }

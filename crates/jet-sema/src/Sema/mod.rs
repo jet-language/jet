@@ -393,17 +393,12 @@ pub(crate) fn solve_inferred_failure(
                 .collect()
         })
         .collect();
-    let members: Vec<Vec<usize>> = (0..module_count)
-        .map(|module_idx| name_ledger.namespace_siblings(module_idx).collect())
-        .collect();
     let owner_of = |module: usize, leaf: &str| {
         if declared[module].contains(leaf) {
             return Some(module);
         }
-        members[module]
-            .iter()
-            .copied()
-            .find(|&member| declared[member].contains(leaf))
+        name_ledger.namespace_owner(module, leaf)
+            .filter(|&member| declared[member].contains(leaf))
     };
     let resolved: Vec<Vec<(&str, Vec<Option<(usize, &str)>>)>> = candidates
         .iter()
@@ -653,6 +648,13 @@ impl UnitFact {
 #[derive(Clone)]
 pub(crate) struct TypeRegistry {
     types: HashMap<String, TypeDef>,
+    /// Exact ledger authority intersected with declarations loaded from that Core file.
+    source_owned_types: HashSet<&'static str>,
+    core_source_module: Option<&'static jet_foundation::CoreModuleExports::CoreSourceModule>,
+    /// Source methods on native carriers, separate from nominal declarations.
+    opaque_methods: HashMap<String, HashMap<String, MethodSig>>,
+    /// Validated operator-hook signatures, never ordinary name-only members.
+    operator_signatures: HashMap<String, MethodSig>,
     /// D-FAILURE-FOUNDATION1=A: user-named types carrying `#Error` may be
     /// used as explicit callable failure domains.
     error_types: HashSet<String>,
@@ -682,6 +684,19 @@ pub(crate) struct TypeRegistry {
 }
 
 impl TypeRegistry {
+    pub(crate) fn source_owns_type(&self, name: &str) -> bool {
+        self.source_owned_types.contains(name)
+    }
+
+    pub(crate) fn source_owns_impl(&self, name: &str) -> bool {
+        self.core_source_module.is_some_and(|source| source.impl_types.contains(&name))
+            && crate::Sema::CheckerCoreLib::core_type_known(name)
+    }
+
+    pub(crate) fn reserves_type_name(&self, name: &str) -> bool {
+        crate::Collections::is_reserved_type(name) && !self.source_owns_type(name)
+    }
+
 
     pub(crate) fn receipt_section(&self, type_name: &str) -> Option<&ReceiptSectionMeta> {
         self.receipt_sections.get(type_name)
@@ -860,6 +875,9 @@ impl TypeRegistry {
     }
 
     fn method(&self, type_name: &str, method: &str) -> Option<&MethodSig> {
+        if let Some(signature) = self.opaque_methods.get(type_name).and_then(|methods| methods.get(method)) {
+            return Some(signature);
+        }
         match self.types.get(type_name) {
             Some(TypeDef::Struct { methods, .. }) | Some(TypeDef::Enum { methods, .. }) => {
                 methods.get(method)
@@ -891,11 +909,6 @@ impl TypeRegistry {
     /// D-DIST1: true when `name` is a registered distinct type.
     pub(crate) fn is_distinct(&self, name: &str) -> bool {
         matches!(self.types.get(name), Some(TypeDef::Distinct { .. }))
-    }
-
-    /// D-TYPEALIAS1: true when `name` is a registered transparent type alias.
-    pub(crate) fn is_type_alias(&self, name: &str) -> bool {
-        matches!(self.types.get(name), Some(TypeDef::Alias { .. }))
     }
 
     pub(crate) fn type_alias(&self, name: &str) -> Option<(&[crate::AST::TypeParam], &Type)> {
@@ -1414,6 +1427,8 @@ struct LoopValueFrame {
     label: Option<String>,
     kind: LoopValueKind,
     ty: Option<Type>,
+    /// Moves already present at entry are not executed by this loop.
+    moved_before: FlowFacts::Facts<FlowFacts::Moved>,
 }
 
 /// D-MEM1 S9 / #649: one source-level fact graph for every borrowed window.
@@ -1463,6 +1478,17 @@ pub(crate) struct CallPlaceAccess {
 #[derive(Debug, Clone, Default)]
 pub(crate) struct CallAccessFrame {
     accesses: Vec<CallPlaceAccess>,
+}
+
+/// D-COPY-DEFAULT1=A: one unmarked take argument the checker moved as its
+/// name's last use. `reported` keeps one E0209 per site when several later
+/// uses reach it.
+#[derive(Debug, Clone)]
+pub(crate) struct ImplicitTakeSite {
+    name: String,
+    callee: String,
+    ty: Type,
+    reported: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1517,6 +1543,8 @@ pub(crate) struct ViewFact {
     /// Order the window was opened in. The prover reports the newest window
     /// that matches, so the order has to survive the store, not the container.
     seq: usize,
+    /// Exclusive pattern payload reborrows its parent loan, not a second owner.
+    reborrow_parent: Option<usize>,
     /// Owner operation that invalidated storage, when invalidation is allowed
     /// to happen (arena reset). Ordinary owner writes/moves are rejected.
     invalidated: Option<(String, Span)>,
@@ -1648,6 +1676,7 @@ mod view_fact_graph_tests {
     fn fact(owner_span: usize, scope_len: usize, kind: ViewKind) -> ViewFact {
         ViewFact {
             seq: 0,
+            reborrow_parent: None,
             binding_span: Span::new(owner_span + 10, owner_span + 11),
             output_path: Vec::new(),
             place: ViewPlace {
@@ -1906,6 +1935,8 @@ impl Clone for SharedFlag {
 #[derive(Clone)]
 pub(crate) struct ModuleState {
     module_path: String,
+    /// Canonical loader provenance, independent of the human display path.
+    is_core_source: bool,
     source: String,
     package_scope: String,
     module_alias: String,
@@ -1913,6 +1944,10 @@ pub(crate) struct ModuleState {
     /// is the producer for `Type.reflect()` and direct registered fact reads;
     /// no reflection lookup table is kept beside it.
     items: Vec<crate::AST::Item>,
+    /// Final immutable declaration projection shared by normal and fragment lowering.
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
+    /// Actual module owning the original parsed Prelude error declarations.
+    compiler_builtin_error_owner: Option<usize>,
     /// The bundle-wide build fact snapshot, copied into each module state so
     /// the checker can fold facts without an engine or global lookup.
     build_facts: jet_foundation::Facts::BuildFactSnapshot,
@@ -1925,10 +1960,10 @@ pub(crate) struct ModuleState {
     exact_int_reachable: SharedFlag,
     /// D-NEVER1=C: names whose checked bodies have no returning path. This is
     /// a compiler-only bottom fact; it never becomes a public `Never` type.
-    diverging_functions: std::collections::HashSet<String>,
+    diverging_functions: std::sync::Arc<std::collections::HashSet<String>>,
     /// D-SHAPE-PLACE1=A: `(function, parameter index)` pairs whose list write
     /// parameter is proven length-preserving, so a range window may fill it.
-    fixed_length_write_params: std::collections::HashSet<(String, usize)>,
+    fixed_length_write_params: std::sync::Arc<std::collections::HashSet<(String, usize)>>,
     funcs: HashMap<String, FuncSig>,
     registry: TypeRegistry,
     consts: HashMap<String, Type>,
@@ -1945,7 +1980,7 @@ pub(crate) struct ModuleState {
     trait_reg: TraitRegistry,
     /// D-FACTMODEL1=A: the one erased fact registry visible to body folds.
     /// State rows and checked graphs are compile-time metadata only.
-    fact_registry: jet_foundation::Facts::FactRegistry,
+    fact_registry: std::sync::Arc<jet_foundation::Facts::FactRegistry>,
     policy_declarations: Vec<crate::Policy::PolicyDeclaration>,
     /// D-STRUCT-POLICY1=A: one bundle-local nominal setting table shared by
     /// marker and `apply` validation.
@@ -1991,6 +2026,17 @@ pub(crate) struct ModuleState {
     /// D-NAME-WALK1=A: inline-module `pub use` of a Core item. The first
     /// value is the Core module and the second is the original member name.
     inline_reexport_core: HashMap<(String, String), (String, String)>,
+    /// Comptime fragment memos, open only while body checking holds every
+    /// state final: this module's projection as a module a fragment loads,
+    /// and as the evaluating module of its own bodies.
+    fragment_rows: CheckerCore::FragmentMemo<CheckerCore::FragmentModuleRows>,
+    fragment_facts: CheckerCore::FragmentMemo<crate::AST::MirFragmentNominalFacts>,
+}
+
+impl ModuleState {
+    fn nominal_items(&self) -> impl Iterator<Item = &crate::AST::Item> {
+        self.items.iter()
+    }
 }
 
 /// D-INTBIG1: whether a checked type carries Jet's default exact `Int`.
@@ -2104,15 +2150,23 @@ pub(crate) struct Checker<'a> {
     /// partial-root move report there; the complete field place is checked first.
     suppress_partial_move_root_read: bool,
     loop_depth: usize,
-    /// D-COPY-DEFAULT1=A: while a `return` or `break` value is checked, the
-    /// loop depth that exit lands at, paired with the depth it was set at. A
-    /// move there is the last use for every loop it leaves, so it is not a
-    /// reuse on a later iteration.
-    loop_exit_depth: Option<(usize, usize)>,
     /// D-COPY-DEFAULT1=A: unmarked move sites that a later use turned into
-    /// shares. After the body check each site becomes `~name`; the paired
+    /// shares. After the body check each site becomes `name.copy()`; the paired
     /// E0121 is reported only if that site cannot be found in the body.
     share_sites: Vec<(Span, Diagnostic)>,
+    /// D-COPY-DEFAULT1=A: unmarked arguments to a take parameter that the
+    /// checker moved as their name's last use, keyed by the argument span.
+    /// A later use that reaches one reports E0209 there (pass a copy with
+    /// `.copy()`) instead of turning it into a share.
+    implicit_take_sites: HashMap<Span, ImplicitTakeSite>,
+    /// D-CALLSITE-MARK1=A: lambdas whose body takes a captured name with
+    /// `^`, keyed by the lambda span, with that capture's name. The take
+    /// moves the capture into the lambda, so the lambda runs at most once.
+    once_lambda_sites: HashMap<Span, String>,
+    /// D-CALLSITE-MARK1=A: bindings that hold such a lambda, keyed by the
+    /// binding's definition span. A call moves the binding, so a second
+    /// call on any path reports E0121 naming the taken capture.
+    once_lambdas: HashMap<Span, String>,
     /// D-LOOP-SUBJECT1=A: active bindingless collecting-loop subjects.
     implicit_loop_subject_depth: usize,
     /// D-SUBJECT-COHERE1=A: active subject-shorthand lambda scopes.
@@ -2168,6 +2222,7 @@ pub(crate) struct Checker<'a> {
     /// D-AUTODIFF1: named differentiated functions whose solved effect rows
     /// must be checked after the bundle effect graph closes.
     fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+    fx_shared_sites: Vec<Effects::SharedSiteObligation>,
     /// D-AUTODIFF1: compute consumers used by this function body.
     fx_compute_calls: Vec<Effects::ComputeCallFact>,
     /// D-AUTODIFF1: a `?? panic` directly attached to a Tensor-returning
@@ -2305,10 +2360,10 @@ pub(crate) struct Checker<'a> {
     /// Card #1440: NoElse-terminated dispatch chains already coverage-checked
     /// (chain span starts) — every level shares one span, the outermost wins.
     noelse_chains_checked: HashSet<usize>,
-    /// D-RESULT-DECON2=B: the parser keeps one receiver in both fixed Result
-    /// pattern tests. Cache its checked type and elaborated expression by source
-    /// span so sema checks effects and ownership once while both lowered copies
-    /// retain the same resolved call metadata.
+    /// The parser keeps one receiver in every pattern test of a Result or
+    /// owned-subject table. Cache its checked type and elaborated expression by
+    /// source span so effects and ownership are checked once while lowered
+    /// copies retain the same resolved metadata.
     result_handler_subject_types: HashMap<usize, (Type, Expr)>,
     /// D-OUTCOME-SHAPE1=A: subject span starts of value-form pattern chains
     /// that handle a `T? E!` failure themselves; their `.Val`/`.None` levels
@@ -2343,7 +2398,7 @@ pub(crate) struct Checker<'a> {
     /// binding so codegen can place and lifetime-order its inline backing.
     allow_fixed_constructor: bool,
     /// D-MEM-COPYSEM1: true while inferring a string-view fact for a direct
-    /// non-owning operation, the operand of `~`, or a read-only view entering
+    /// non-owning operation, the operand of `.copy()`, or a read-only view entering
     /// an owning destination. The general `Expr::Ident` arm reports E2307
     /// when this is false and `copies: .Explicit` has disabled materialization.
     allow_string_view_read: bool,
@@ -2352,6 +2407,10 @@ pub(crate) struct Checker<'a> {
     /// True only while checking a lambda body. Distinguishes an escaping lambda
     /// from the checker's ordinary top-level default escape policy.
     in_lambda_body: bool,
+    /// Scope depth of the innermost lambda body's own scope (0 outside any
+    /// lambda). A name declared below it is a capture, which a call inside
+    /// the body never moves without `^`.
+    lambda_scope_floor: usize,
     /// Builtin mutating receivers discovered while inferring the current
     /// lambda body. The builtin table supplies the mutation fact; inline
     /// callbacks fold these roots into `LambdaMeta::mut_captures`.
@@ -2387,6 +2446,11 @@ pub(crate) struct Checker<'a> {
     /// The carrier discovered for the current open callback, if its body has
     /// reached a fallible callee.
     failure_carrier: Option<Type>,
+    /// The expected success row of the open callback whose failure carrier is
+    /// being inferred. `ret` stays reserved for that carrier (open until a
+    /// fallible callee supplies it), so an explicit `return` in the callback
+    /// checks its value against this row, exactly as the value tail does.
+    failure_carrier_success: Option<Type>,
     /// True while the root expression is being checked as a statement. A
     /// dispatch nested in a value expression must keep value-tail checking;
     /// only the statement root may make a braced arm's tail Unit.
@@ -2399,6 +2463,8 @@ pub(crate) struct Checker<'a> {
     /// HTTP handlers are retained by the server and invoked on request
     /// workers, so captured state must cross the `Send + Sync` boundary.
     http_handler_depth: usize,
+    http_routes: HashSet<(String, String, String)>,
+    http_mux_aliases: HashMap<String, String>,
     /// True while checking the callback stored by `core.sys.on_interrupt`.
     /// This boundary retains a callback for asynchronous signal delivery and
     /// therefore needs stricter capture facts than an ordinary higher-order call.
@@ -2549,6 +2615,7 @@ struct ErasedScopeSnapshot {
     fx_authority_delegations: Vec<Effects::AuthorityDelegation>,
     fx_callback_obligations: Vec<CallbackObligation>,
     fx_autodiff_obligations: Vec<Effects::AutodiffObligation>,
+    fx_shared_sites: Vec<Effects::SharedSiteObligation>,
     fx_compute_calls: Vec<Effects::ComputeCallFact>,
     fx_autodiff_safe_panic: bool,
     fx_autodiff_unsafe_panic: bool,
@@ -2605,15 +2672,19 @@ struct ErasedScopeSnapshot {
     allow_string_view_read: bool,
     lambda_escapes: bool,
     in_lambda_body: bool,
+    lambda_scope_floor: usize,
     inferred_lambda_mut_captures: HashSet<String>,
     lambda_params_are_lending_views: bool,
     is_task_spawn: bool,
     task_body_propagates: bool,
     failure_carrier_inference: bool,
     failure_carrier: Option<Type>,
+    failure_carrier_success: Option<Type>,
     statement_expr_inference: bool,
     statement_expr_root_depth: Option<usize>,
     http_handler_depth: usize,
+    http_routes: HashSet<(String, String, String)>,
+    http_mux_aliases: HashMap<String, String>,
     interrupt_callback_depth: usize,
     lambda_param_mutable: bool,
     lambda_param_is_secret_loan: bool,
@@ -2678,6 +2749,7 @@ impl<'a> Checker<'a> {
             fx_authority_delegations: self.fx_authority_delegations.clone(),
             fx_callback_obligations: self.fx_callback_obligations.clone(),
             fx_autodiff_obligations: self.fx_autodiff_obligations.clone(),
+            fx_shared_sites: self.fx_shared_sites.clone(),
             fx_compute_calls: self.fx_compute_calls.clone(),
             fx_autodiff_safe_panic: self.fx_autodiff_safe_panic,
             fx_autodiff_unsafe_panic: self.fx_autodiff_unsafe_panic,
@@ -2734,15 +2806,19 @@ impl<'a> Checker<'a> {
             allow_string_view_read: self.allow_string_view_read,
             lambda_escapes: self.lambda_escapes,
             in_lambda_body: self.in_lambda_body,
+            lambda_scope_floor: self.lambda_scope_floor,
             inferred_lambda_mut_captures: self.inferred_lambda_mut_captures.clone(),
             lambda_params_are_lending_views: self.lambda_params_are_lending_views,
             is_task_spawn: self.is_task_spawn,
             task_body_propagates: self.task_body_propagates,
             failure_carrier_inference: self.failure_carrier_inference,
             failure_carrier: self.failure_carrier.clone(),
+            failure_carrier_success: self.failure_carrier_success.clone(),
             statement_expr_inference: self.statement_expr_inference,
             statement_expr_root_depth: self.statement_expr_root_depth,
             http_handler_depth: self.http_handler_depth,
+            http_routes: self.http_routes.clone(),
+            http_mux_aliases: self.http_mux_aliases.clone(),
             interrupt_callback_depth: self.interrupt_callback_depth,
             lambda_param_mutable: self.lambda_param_mutable,
             lambda_param_is_secret_loan: self.lambda_param_is_secret_loan,
@@ -2806,6 +2882,7 @@ impl<'a> Checker<'a> {
         self.fx_authority_delegations = snapshot.fx_authority_delegations;
         self.fx_callback_obligations = snapshot.fx_callback_obligations;
         self.fx_autodiff_obligations = snapshot.fx_autodiff_obligations;
+        self.fx_shared_sites = snapshot.fx_shared_sites;
         self.fx_compute_calls = snapshot.fx_compute_calls;
         self.fx_autodiff_safe_panic = snapshot.fx_autodiff_safe_panic;
         self.fx_autodiff_unsafe_panic = snapshot.fx_autodiff_unsafe_panic;
@@ -2862,15 +2939,19 @@ impl<'a> Checker<'a> {
         self.allow_string_view_read = snapshot.allow_string_view_read;
         self.lambda_escapes = snapshot.lambda_escapes;
         self.in_lambda_body = snapshot.in_lambda_body;
+        self.lambda_scope_floor = snapshot.lambda_scope_floor;
         self.inferred_lambda_mut_captures = snapshot.inferred_lambda_mut_captures;
         self.lambda_params_are_lending_views = snapshot.lambda_params_are_lending_views;
         self.is_task_spawn = snapshot.is_task_spawn;
         self.task_body_propagates = snapshot.task_body_propagates;
         self.failure_carrier_inference = snapshot.failure_carrier_inference;
         self.failure_carrier = snapshot.failure_carrier;
+        self.failure_carrier_success = snapshot.failure_carrier_success;
         self.statement_expr_inference = snapshot.statement_expr_inference;
         self.statement_expr_root_depth = snapshot.statement_expr_root_depth;
         self.http_handler_depth = snapshot.http_handler_depth;
+        self.http_routes = snapshot.http_routes;
+        self.http_mux_aliases = snapshot.http_mux_aliases;
         self.interrupt_callback_depth = snapshot.interrupt_callback_depth;
         self.lambda_param_mutable = snapshot.lambda_param_mutable;
         self.lambda_param_is_secret_loan = snapshot.lambda_param_is_secret_loan;
@@ -3005,6 +3086,27 @@ impl<'a> Checker<'a> {
         }
     }
 
+    fn namespace_function_owner(&self, name: &str) -> Option<usize> {
+        let owner = self.name_ledger.namespace_owner(self.module_idx, name)?;
+        self.modules?.get(owner)?.funcs.contains_key(name).then_some(owner)
+    }
+
+    pub(crate) fn has_file_function(&self, name: &str) -> bool {
+        self.unqualified_file.contains_key(name) || self.namespace_function_owner(name).is_some()
+    }
+
+    pub(crate) fn file_function_binding(&self, name: &str) -> Option<(String, usize)> {
+        self.unqualified_file.get(name).cloned()
+            .or_else(|| self.namespace_function_owner(name).map(|owner| (name.to_owned(), owner)))
+    }
+
+    pub(crate) fn const_type(&self, name: &str) -> Option<&Type> {
+        self.consts.get(name).or_else(|| {
+            let owner = self.name_ledger.namespace_owner(self.module_idx, name)?;
+            self.modules?.get(owner)?.consts.get(name)
+        })
+    }
+
     pub(crate) fn unit_fact_for_type(&self, ty: &Type) -> Option<(String, UnitFact)> {
         let Type::Named(name) = ty else { return None };
         if let Some(fact) = self.registry.unit_fact(name) {
@@ -3028,8 +3130,9 @@ impl<'a> Checker<'a> {
             return Some((canonical, fact));
         }
         let mut owner = None;
-        for (index, module) in modules.iter().enumerate() {
-            if module.registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf) {
+        for declaration in self.name_ledger.declarations_named(leaf) {
+            let index = declaration.module;
+            if modules[index].registry.is_unit_type(leaf) && self.type_is_pub_in(index, leaf) {
                 if owner.is_some_and(|previous| previous != index) {
                     return None;
                 }
@@ -3127,6 +3230,14 @@ impl<'a> Checker<'a> {
                 return false;
             }
         }
+        // A generic codec bound uses the same structural and imported-nominal
+        // contract as an ordinary encode/decode call, not a second trait test.
+        if bound == crate::Generics::ENCODE {
+            return self.is_encodable(ty);
+        }
+        if bound == crate::Generics::DECODE {
+            return self.is_decodable(ty);
+        }
         self.trait_reg.type_implements_trait(ty, bound)
     }
 
@@ -3179,6 +3290,7 @@ impl<'a> Checker<'a> {
                     resolved_ret: Some(destination_ty.clone()),
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 };
                 return true;
             }
@@ -3469,6 +3581,7 @@ mod CheckerInline;
 mod CheckerItems;
 mod CheckerKernel;
 mod CheckerMarkers;
+pub mod MarkerModules;
 mod CheckerOwnership;
 mod CheckerPatchable;
 mod CheckerSchedule;
@@ -3485,6 +3598,7 @@ mod BudgetSpecs;
 pub mod Effects;
 mod FFI;
 mod FlowFacts;
+pub(crate) mod Footprint;
 pub mod GateLedger;
 mod Guest;
 pub mod HotSwap;
@@ -3572,6 +3686,34 @@ pub use WebPartition::checked_web_bucket;
 // D-OSTARGET1=A: native OS platform gating (mixed-axis + unmatched-call).
 pub(crate) use MemberSpread::desugar_member_spreads;
 pub(crate) use OSTarget::{check_os_target, desugar_os_switches};
+
+/// The canonical eligibility boundary for generated precondition sampling.
+pub fn is_contract_sampling_candidate(function: &crate::AST::Func) -> bool {
+    !function.pre.is_empty() && !function.params.is_empty()
+}
+
+pub fn has_contract_sampling_candidates(items: &[crate::AST::Item]) -> bool {
+    items.iter().any(|item| match item {
+        crate::AST::Item::Func(function) => is_contract_sampling_candidate(function),
+        crate::AST::Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| has_contract_sampling_candidates(body)),
+        _ => false,
+    })
+}
+
+/// File-target test discovery excludes sibling and imported source files.
+pub fn has_test_blocks_in_items(items: &[crate::AST::Item]) -> bool {
+    items.iter().any(|item| match item {
+        crate::AST::Item::Test(_) => true,
+        crate::AST::Item::CodeModule(module) => module
+            .body
+            .as_ref()
+            .is_some_and(|body| has_test_blocks_in_items(body)),
+        _ => false,
+    })
+}
 
 // Public entry points (preserve `jet::Sema::<item>` paths).
 pub use Bundle::{
@@ -3676,4 +3818,19 @@ pub fn block_free_reads_and_calls(
     Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap, &mut called);
     read.extend(mut_cap);
     (read, called)
+}
+
+/// [`block_free_var_reads`], with the subset of those names the block
+/// writes: assigns, passes as a write argument, lends as a write place, or
+/// captures for writing.
+pub fn block_free_reads_and_writes(
+    stmts: &[crate::AST::Stmt],
+) -> (HashSet<String>, HashSet<String>) {
+    let mut bound = HashSet::new();
+    let mut read = HashSet::new();
+    let mut mut_cap = HashSet::new();
+    let mut called = HashSet::new();
+    Captures::block_collect_captures(stmts, &mut bound, &mut read, &mut mut_cap, &mut called);
+    read.extend(mut_cap.iter().cloned());
+    (read, mut_cap)
 }

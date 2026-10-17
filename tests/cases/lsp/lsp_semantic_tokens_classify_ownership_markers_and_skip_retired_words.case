@@ -1,0 +1,39 @@
+# Port of tests/lsp.rs:4599-4783; exact source bytes and original test algorithm.
+# PENDING-GRAMMAR(batch-three/four), PENDING-SEAM(read_bytes).
+env: S5_EDITED=0
+fixture: lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.fixture
+session lsp content-length: jet self lsp
+stderr: null
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"capabilities\":{}}}"
+recv lsp
+stdout: ~ "ownership" # original predicate
+stdout: ~ "decorator" # original predicate
+stdout: ~ "move" # original predicate
+stdout: ~ "writeBorrow" # original predicate
+stdout: ~ "copy" # original predicate
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"initialized\",\"params\":{}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didOpen\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_semantic_highlight_stage4.jet\",\"languageId\":\"jet\",\"version\":1,\"text\":\"#Test(\\\"semantic\\\") {\\n}\\n#Unsafe(\\\"audit\\\") fn archive(name: ^String, slot: &Int) -> String {\\n    saved :: copy name\\n    return saved\\n}\\nfn clean(x: Int) -[]> Int { return x }\\nfn retain(window: View<Int>) -> View<Int> { return window }\\nfn run() {\\n    old :: 1\\n    while :: 2\\n    for :: 3\\n    mut borrowed\\n    take borrowed\\n    view borrowed\\n    borrowed.read()\\n    text := \\\"view .view stays string content\\\"\\n    // view and .view stay comment content\\n    next()\\n    cursor.next()\\n    loop {\\n        value :: maybe() ?? next\\n        nested :: (maybe() ?? next)\\n        consume(maybe() ?? next, 1)\\n        escaped :: maybe() ?? (next)\\n        next\\n    }\\n    outer :: loop { next(outer) }\\n}\\nfn next() -> Int { return 1 }\\n\"}}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"textDocument/semanticTokens/full\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_semantic_highlight_stage4.jet\"}}}"
+recv lsp
+stdout: ~ "\"id\":2" # original predicate
+stdout: ~ "\"data\"" # original predicate
+capture: response = text stdout
+write: response.json lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.response.template
+step: jet test claims
+env: S5_SOURCE={work}/original.source
+env: S5_RESPONSE={work}/response.json
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"textDocument/didChange\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_semantic_highlight_stage4.jet\",\"version\":2},\"contentChanges\":[{\"range\":{\"start\":{\"line\":15,\"character\":13},\"end\":{\"line\":15,\"character\":17}},\"rangeLength\":4,\"text\":\"view\"}]}}"
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"textDocument/semanticTokens/full\",\"params\":{\"textDocument\":{\"uri\":\"file:///tmp/lsp_semantic_highlight_stage4.jet\"}}}"
+recv lsp until stdout: ~ "\"id\":3"
+capture: response = text stdout
+write: response.json lsp_semantic_tokens_classify_ownership_markers_and_skip_retired_words.response.template
+step: jet test claims
+env: S5_SOURCE={work}/edited.source
+env: S5_RESPONSE={work}/response.json
+env: S5_EDITED=1
+send lsp: "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"shutdown\",\"params\":{}}"
+recv lsp
+send lsp: "{\"jsonrpc\":\"2.0\",\"method\":\"exit\",\"params\":{}}"
+close lsp
+exit: any # original ignored child.wait status

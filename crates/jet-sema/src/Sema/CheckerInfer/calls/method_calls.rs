@@ -4,11 +4,12 @@ use crate::Generics::e0901;
 use crate::Sema::Checker;
 use crate::Sema::{json_ty, result_ty};
 use crate::Sema::CheckerCoreLib::{
+    data_nominal_leaf,
     alloc_method_return, app_method_return, args_spec_method_return, binary_reader_method_return,
     civil_time_method_contract, civil_time_method_return, core_generic_struct_field,
-    data_renamed_to_datatree, datatree_method_return, db_value_method_return, decode_error_ty,
+    data_renamed_to_dyn, dyn_method_return, db_value_method_return, decode_error_ty,
     devserver_method_return, email_method_return, encoding_handle_method_return,
-    expiring_method_return, file_handle_method_return, http_nominal_leaf, http_type_method_return,
+    file_handle_method_return, http_nominal_leaf, http_type_method_return,
     is_allocator_type, is_db_value_type_name, is_geometry_type, is_json_type_name, is_layout_axis_type,
     is_layout_type, is_math_type,
     is_reflect_type_name, is_simd_lane_type, job_queue_method_return,
@@ -18,8 +19,8 @@ use crate::Sema::CheckerCoreLib::{
     parsed_args_method_return, path_method_return, process_child_method_return,
     process_spec_method_return, process_stdin_method_return, process_stream_method_return,
     reflect_method_return, regex_method_return, require_exact_labels, require_net_method_labels,
-    simd_reduce_markers, sketch_method_return, sketch_type_name, terminal_session_method_return,
-    text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty, url_mime_method_return,
+    simd_reduce_markers, terminal_session_method_return,
+    text_cursor_method_return, u8_ty, ui_backend_method_return, unit_ty,
     web_method_return, wrong_core_arity, geometry_is_delta, geometry_is_point, geometry_method_return,
     geometry_space, geometry_static_arg_types, geometry_static_return_with_owner,
     geometry_transform_diagnostic,
@@ -141,6 +142,40 @@ impl<'a> Checker<'a> {
             "this `{}` value has no instance method named `{method}`",
             Self::receiver_method_label(receiver_ty)
         )
+    }
+
+    fn builtin_method_arity_diagnostic(
+        receiver_ty: &Type,
+        method: &str,
+        actual: usize,
+        span: Span,
+    ) -> Option<Diagnostic> {
+        // Read the same arity-keyed table as successful method resolution.
+        let mut first = None;
+        let mut last = 0;
+        for arity in 0..=8 {
+            if Collections::builtin_method_return(receiver_ty, method, arity, false).is_some() {
+                if arity == actual {
+                    return None;
+                }
+                first.get_or_insert(arity);
+                last = arity;
+            }
+        }
+        let first = first?;
+        let expected = if first == last {
+            format!("{first} argument{}", if first == 1 { "" } else { "s" })
+        } else {
+            format!("{first} to {last} arguments")
+        };
+        let label = Self::receiver_method_label(receiver_ty);
+        Some(Diagnostic::error(
+            "E0104",
+            format!("`{label}.{method}` expects {expected}, got {actual}"),
+            format!("`{label}` has a `{method}` method, but no form of it takes {actual} arguments"),
+            format!("Call `.{method}(…)` with {expected}."),
+            Some(span),
+        ))
     }
 
     fn missing_instance_method_diagnostic(
@@ -618,39 +653,6 @@ fn is_http_route_registration(type_name: &str, method: &str) -> bool {
     }
 }
 
-impl<'a> Checker<'a> {
-    fn http_handler_param_count(&self, expr: &Expr) -> Option<usize> {
-        match expr {
-            Expr::Paren(inner, _) => self.http_handler_param_count(inner),
-            Expr::Lambda(lambda) => Some(lambda.params.len()),
-            Expr::Ident(name, _) => {
-                self.funcs
-                    .get(name)
-                    .map(|sig| sig.params.len())
-                    .or_else(|| {
-                        self.lookup(name).and_then(|info| match &info.ty {
-                            Type::Fn { params, .. } => Some(params.len()),
-                            _ => None,
-                        })
-                    })
-            }
-            _ => None,
-        }
-    }
-
-    fn http_route_is_fixed_path(&self, expr: &Expr) -> Option<bool> {
-        let crate::Comptime::CtValue::Str(pattern) = self.evaluate_constant(expr)? else {
-            return None;
-        };
-        Some(
-            Syntax::validate_http_route_pattern(&pattern).is_ok()
-                && pattern.split('/').skip(1).all(|segment| {
-                    !segment.starts_with(Syntax::HTTP_ROUTE_PARAM_PREFIX)
-                        && !segment.starts_with(Syntax::HTTP_ROUTE_CATCH_ALL_PREFIX)
-                }),
-        )
-    }
-}
 
 fn http_route_json_type(body: &LambdaBody, request_params: &HashSet<String>) -> Option<Type> {
     let mut found = None;
@@ -708,6 +710,135 @@ fn http_route_find_struct_in_items<'a>(
 }
 
 impl<'a> Checker<'a> {
+    pub(crate) fn http_route_declared_verb(declaration: &crate::AST::MarkerDecl) -> Option<&'static str> {
+        match declaration.name.as_str() {
+            "Get" => Some("get"), "Post" => Some("post"), "Put" => Some("put"),
+            "Delete" => Some("delete"), "Patch" => Some("patch"), "Head" => Some("head"),
+            "Options" => Some("options"), _ => None,
+        }
+    }
+
+    fn http_route_marker_verb(&self, marker: &crate::AST::Marker) -> Option<&'static str> {
+        if marker.negated { return None; }
+        let (declaring_module, span) = marker.declaration?;
+        let module = self.modules?.get(declaring_module)?;
+        let source = jet_foundation::CoreModuleExports::core_source_module("core.http.server")?;
+        if module.module_alias != source.alias { return None; }
+        let declaration = crate::Sema::MarkerModules::declaration_by_span(&module.items, span)?;
+        Self::http_route_declared_verb(declaration)
+    }
+
+    /// D-HTTP-ROUTE-EXPOSE1=A: compile-time reflection over the one explicitly
+    /// mounted value, expanded into the same calls that value routes check.
+    pub(crate) fn expand_http_mount(&mut self, expression: &mut Expr) -> bool {
+        let Expr::MethodCall { receiver, method, method_span, args, .. } = expression else {
+            return false;
+        };
+        if method != "mount" || args.len() != 1 {
+            return false;
+        }
+        let diagnostic_start = self.diags.len();
+        let (mux_type, value_type) = self.with_erased_scope(|checker| {
+            (checker.infer(receiver), checker.infer(&mut args[0].expr))
+        });
+        self.diags.truncate(diagnostic_start);
+        if mux_type != Some(Type::Named("HTTPMux".to_string())) {
+            return false;
+        }
+        let span = *method_span;
+        let Some(Type::Named(name) | Type::Apply { name, .. }) = value_type else {
+            self.diags.push(Diagnostic::error("E2805",
+                "mux.mount needs an ordinary struct".to_string(),
+                "only the explicitly mounted struct's tagged methods contribute routes".to_string(),
+                "pass a struct value with #server.Get or another core.http.server verb marker".to_string(), Some(span)));
+            return true;
+        };
+        let (namespace, leaf) = self.struct_type_name_parts(&name);
+        let definition = self.struct_owner_module(leaf, namespace).and_then(|owner| {
+            let items = if owner == self.module_idx { self.items }
+                else { self.modules?.get(owner)?.items.as_slice() };
+            http_route_find_struct_in_items(items, leaf).map(|definition| (definition.clone(), owner))
+        });
+        let Some((definition, owner)) = definition else {
+            self.diags.push(Diagnostic::error("E2805",
+                format!("mux.mount needs an ordinary struct, not `{name}`"),
+                "only the explicitly mounted struct's tagged methods contribute routes".to_string(),
+                "pass a struct value with #server.Get or another core.http.server verb marker".to_string(), Some(span)));
+            return true;
+        };
+        let source_owner = self.canonical_nominal_name(owner, &definition.name);
+        let mux_name = format!("\0jet.http.mount.mux.{}", span.start);
+        let value_name = format!("\0jet.http.mount.value.{}", span.start);
+        if let Expr::Ident(original, _) = receiver.as_ref() {
+            let original = self.http_mux_aliases.get(original).unwrap_or(original).clone();
+            self.http_mux_aliases.insert(mux_name.clone(), original);
+        }
+        let binding = |name: String, init: Expr| crate::AST::Stmt::Val(crate::AST::Binding {
+            mutable: false, markers: Vec::new(), reactive_upgrade: false,
+            meta: None, name, name_span: span, sigil_span: None, pattern: None,
+            ty: None, ty_span: None, init, is_comptime: false, ct: None,
+            uninit: false, arena_view: false, string_view: false,
+            gc_promotion: None, gc_transferred: false,
+        });
+        let argument = |expr: Expr, argument_span: Span| CallArg {
+            convention: AccessConvention::Read, expr, span: argument_span,
+            flags: CallArgFlags::default(), label: None, spread: false,
+        };
+        let method_call = |receiver: Expr, method: String, args: Vec<CallArg>, method_span: Span| Expr::MethodCall {
+            receiver: Box::new(receiver), method, method_span,
+            owner_type_args: Vec::new(), type_args: Vec::new(), args,
+            recv_type: None, resolved_ret: None, operator_rhs: None, checked_widen: false,
+            checked_callee: None,
+        };
+        let mut body = vec![binding(mux_name.clone(), (**receiver).clone()),
+            binding(value_name.clone(), args[0].expr.clone())];
+        for function in &definition.methods {
+            for marker in &function.markers {
+                let Some(verb) = self.http_route_marker_verb(marker) else { continue; };
+                if function.params.first().is_none_or(|parameter| parameter.name != "self" || parameter.convention != AccessConvention::Read)
+                    || !function.type_params.is_empty() {
+                    self.diags.push(Diagnostic::error("E2805",
+                        format!("HTTP route method `{}` needs read-only self and a concrete signature", function.name),
+                        "mounted handlers retain shared state and are called on request workers".to_string(),
+                        format!("write `fn {}(self, ...)` without method type parameters; use Shared<T> for mutable shared state", function.name), Some(marker.span)));
+                    continue;
+                }
+                let [crate::AST::MarkerCallArg::Expr(path)] = marker.args.as_slice() else { continue; };
+                let params = function.params.iter().skip(1).map(|parameter| crate::AST::LambdaParam {
+                    name: parameter.name.clone(), name_span: parameter.name_span,
+                    ty: Some(parameter.ty.clone()), ty_span: None,
+                }).collect();
+                let invocation_args = function.params.iter().skip(1).map(|parameter| {
+                    let mut arg = argument(Expr::Ident(parameter.name.clone(), parameter.name_span), parameter.name_span);
+                    arg.convention = parameter.convention;
+                    arg
+                }).collect();
+                let invocation = method_call(Expr::Ident(value_name.clone(), span), function.name.clone(), invocation_args, function.name_span);
+                let handler = Expr::Lambda(Box::new(crate::AST::Lambda {
+                    take_names: Vec::new(), params,
+                    effects: None, body: LambdaBody::Expr(Box::new(invocation)),
+                    span: marker.span, meta: crate::AST::LambdaMeta {
+                        http_route_source: Some(format!("{source_owner}::{}", function.name)),
+                        ..crate::AST::LambdaMeta::default()
+                    },
+                }));
+                body.push(crate::AST::Stmt::Expr(method_call(Expr::Ident(mux_name.clone(), span),
+                    verb.to_string(), vec![argument(path.clone(), marker.span), argument(handler, marker.span)], marker.span)));
+            }
+        }
+        *expression = Expr::CallValue {
+            callee: Box::new(Expr::Lambda(Box::new(crate::AST::Lambda {
+                take_names: Vec::new(), params: Vec::new(),
+                effects: None, body: LambdaBody::Block(body),
+                span, meta: crate::AST::LambdaMeta::default(),
+            }))),
+            args: Vec::new(), span,
+        };
+        true
+    }
+}
+
+impl<'a> Checker<'a> {
     fn http_route_handler_shape(
         &self,
         expr: &Expr,
@@ -720,17 +851,28 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|param| Some((param.name.clone(), param.ty.clone()?)))
                     .collect::<Option<Vec<_>>>()?,
-                match &lambda.body {
-                    LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
-                    LambdaBody::Block(body) => LambdaBody::Block(body.clone()),
+                if let Some(source) = &lambda.meta.http_route_source {
+                    let (owner, method) = source.rsplit_once("::")?;
+                    let (namespace, leaf) = self.struct_type_name_parts(owner);
+                    let owner = self.struct_owner_module(leaf, namespace)?;
+                    let items = if owner == self.module_idx { self.items }
+                        else { self.modules?.get(owner)?.items.as_slice() };
+                    let definition = http_route_find_struct_in_items(items, leaf)?;
+                    let function = definition.methods.iter().find(|function| function.name == method)?;
+                    LambdaBody::Block(function.body.clone())
+                } else {
+                    match &lambda.body {
+                        LambdaBody::Expr(expr) => LambdaBody::Expr(expr.clone()),
+                        LambdaBody::Block(body) => LambdaBody::Block(body.clone()),
+                    }
                 },
             )),
             Expr::Ident(name, _) => {
                 let function = http_route_find_func_in_items(self.items, name).or_else(|| {
-                    self.modules
-                        .into_iter()
-                        .flat_map(|modules| modules.iter())
-                        .find_map(|module| http_route_find_func_in_items(&module.items, name))
+                    let (original, owner) = self.unqualified_file.get(name)
+                        .map(|(original, owner)| (original.as_str(), *owner))
+                        .or_else(|| self.namespace_function_owner(name).map(|owner| (name.as_str(), owner)))?;
+                    http_route_find_func_in_items(&self.modules?.get(owner)?.items, original)
                 })?;
                 Some((
                     function
@@ -747,10 +889,9 @@ impl<'a> Checker<'a> {
 
     fn http_route_struct_fields(&self, name: &str) -> Option<HashSet<String>> {
         let definition = http_route_find_struct_in_items(self.items, name).or_else(|| {
-            self.modules
-                .into_iter()
-                .flat_map(|modules| modules.iter())
-                .find_map(|module| http_route_find_struct_in_items(&module.items, name))
+            let (namespace, leaf) = Self::split_type_name(name);
+            let owner = self.struct_owner_module(leaf, namespace)?;
+            http_route_find_struct_in_items(&self.modules?.get(owner)?.items, leaf)
         })?;
         Some(
             definition
@@ -782,6 +923,27 @@ impl<'a> Checker<'a> {
         self.lambda_escapes = saved_escapes;
     }
 
+    fn check_http_route_registration(
+        &mut self,
+        receiver: &Expr,
+        method: &str,
+        args: &mut [crate::AST::CallArg],
+        span: Span,
+    ) {
+        if let (Some(root), Some(CtValue::Str(pattern))) =
+            (expr_root_ident(receiver), args.first().and_then(|arg| self.evaluate_constant(&arg.expr)))
+        {
+            let root = self.http_mux_aliases.get(root).map_or(root, String::as_str);
+            if !self.http_routes.insert((root.to_string(), method.to_string(), pattern.clone())) {
+                self.diags.push(Diagnostic::error("E2804",
+                    format!("Two routes both match `{} {pattern}`.", method.to_uppercase()),
+                    "a duplicate route makes dispatch ambiguous; mounted and value routes share one ordered list".to_string(),
+                    "remove one registration or use a distinct method and path".to_string(), Some(span)));
+            }
+        }
+        self.check_http_router_contract(method, args, span);
+    }
+
     fn check_http_router_contract(
         &mut self,
         method: &str,
@@ -794,12 +956,6 @@ impl<'a> Checker<'a> {
             return;
         }
         self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-        let Some(CtValue::Str(pattern)) = self.evaluate_constant(&args[0].expr) else {
-            return;
-        };
-        if Syntax::validate_http_route_pattern(&pattern).is_err() {
-            return;
-        }
         let Some((handler_params, body)) = self.http_route_handler_shape(&args[1].expr) else {
             return;
         };
@@ -810,6 +966,21 @@ impl<'a> Checker<'a> {
                 .collect(),
         );
         self.expect_http_handler_arg(method, 1, &expected_handler, &mut args[1]);
+        let Some(CtValue::Str(pattern)) = self.evaluate_constant(&args[0].expr) else {
+            for (name, ty) in &handler_params {
+                if matches!(ty, Type::Named(name) if name == "HTTPRequest") || self.is_decodable(ty) {
+                    continue;
+                }
+                self.diags.push(Diagnostic::error("E2805",
+                    format!("dynamic HTTP route input `{name}` cannot decode text into handler type `{}`", ty.show()),
+                    "route inputs use the same checked Decode capability as request decoding".to_string(),
+                    "use a decodable input type or implement Decode".to_string(), Some(args[1].expr.span())));
+            }
+            return;
+        };
+        if Syntax::validate_http_route_pattern(&pattern).is_err() {
+            return;
+        }
         let mut request_params = HashSet::new();
         let mut typed = Vec::new();
         for (name, ty) in &handler_params {
@@ -863,6 +1034,17 @@ impl<'a> Checker<'a> {
                     format!("declare one `{name}: T` handler input"),
                     Some(args[0].expr.span()),
                 ));
+            }
+            for (_, ty) in typed.iter().filter(|(candidate, _)| candidate == name) {
+                if !self.is_decodable(ty) {
+                    self.diags.push(Diagnostic::error(
+                        "E2805",
+                        format!("HTTP route `{pattern}` path field `{name}` cannot decode text into handler type `{}`", ty.show()),
+                        "path parameters use the same checked Decode capability as request decoding".to_string(),
+                        format!("give `{}` a `Decode` implementation, or use a decodable parameter type", ty.show()),
+                        Some(args[0].expr.span()),
+                    ));
+                }
             }
         }
         let path_set = path_names.iter().cloned().collect::<HashSet<_>>();
@@ -973,6 +1155,117 @@ fn inline_range_literal(expr: &Expr) -> Option<(crate::Numeric::CtBigInt, Span)>
 }
 
 impl<'a> Checker<'a> {
+    /// D-ALLOC-D: `mem.Fixed.new(size:)` / `mem.Fixed.over(&bytes)` validation.
+    /// Shared by the `core.mem` constructor-sentinel route and the
+    /// `Fixed`-typed receiver route, so neither skips the E0103 checks.
+    fn check_fixed_constructor(
+        &mut self,
+        method: &str,
+        args: &mut Vec<crate::AST::CallArg>,
+        span: Span,
+    ) {
+        if !self.allow_fixed_constructor {
+            self.diags.push(Diagnostic::error(
+                "E0103",
+                format!("`Fixed.{method}` must directly initialize a lexical binding"),
+                "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration".to_string(),
+                format!("write `fixed :: mem.Fixed.{method}(…)`"),
+                Some(span),
+            ));
+        }
+        if args.len() != 1 {
+            self.diags.push(Diagnostic::error(
+                "E0103",
+                format!("`Fixed.{method}` takes exactly one argument"),
+                if method == "new" {
+                    "the inline backing size must be a positive compile-time integer".to_string()
+                } else {
+                    "the backing must be one mutable fixed-size byte array".to_string()
+                },
+                if method == "new" {
+                    "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
+                } else {
+                    "write `fixed :: mem.Fixed.over(&bytes)` with the write-access marker `&`".to_string()
+                },
+                Some(span),
+            ));
+            for arg in args.iter_mut() {
+                self.infer(&mut arg.expr);
+            }
+            return;
+        }
+        let inferred = self.infer(&mut args[0].expr);
+        if method == "new" {
+            let direct_size = match &args[0].expr {
+                Expr::Int(value, _, _, _) => Some(*value),
+                Expr::ComptimeName {
+                    value: Some(CtValue::Int(value)),
+                    ..
+                } => Some(*value),
+                Expr::Ident(name, _) => match self.current_ct_globals().get(name) {
+                    Some(CtValue::Int(value)) => Some(*value),
+                    _ => None,
+                },
+                _ => None,
+            };
+            if !self.defer_ct_evaluation {
+                let size = direct_size.or_else(|| {
+                    let evaluated = {
+                        let globals = self.current_ct_globals();
+                        crate::Comptime::evaluate_owned_with_imports_opts_collecting(
+                            &args[0].expr,
+                            self.ct_checked_funcs_for_evaluation(),
+                            self.ct_externs,
+                            self.ct_base_dir,
+                            globals.as_ref(),
+                            self.core_imports,
+                            self.gates,
+                            0,
+                            None,
+                        )
+                    };
+                    match evaluated {
+                        Ok((CtValue::Int(value), inputs)) => {
+                            self.ct_embed_inputs.extend(inputs);
+                            Some(value)
+                        }
+                        _ => None,
+                    }
+                });
+                if let Some(size) = size.filter(|size| *size > 0) {
+                    let arg_span = args[0].expr.span();
+                    args[0].expr = Expr::Int(size, arg_span, None, None);
+                } else {
+                    self.diags.push(Diagnostic::error(
+                        "E0103",
+                        "`Fixed.new` needs a positive compile-time byte size".to_string(),
+                        "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
+                        "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
+                        Some(args[0].expr.span()),
+                    ));
+                }
+            }
+        } else {
+            let fixed_bytes = matches!(
+                inferred,
+                Some(Type::FixedList { elem, len, .. })
+                    if len.literal_value().is_some_and(|len| len > 0)
+                        && matches!(*elem, Type::IntN { signed: false, bits: 8 })
+            );
+            let direct_mutable_buffer = args[0].convention == AccessConvention::Write
+                && matches!(&args[0].expr, Expr::Ident(..));
+            if !fixed_bytes || !direct_mutable_buffer {
+                self.diags.push(Diagnostic::error(
+                    "E0103",
+                    "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
+                    "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
+                    "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`".to_string(),
+                    Some(args[0].expr.span()),
+                ));
+            }
+        }
+    }
+
     fn check_http_route_constant(
         &mut self,
         type_name: &str,
@@ -1029,6 +1322,34 @@ impl<'a> Checker<'a> {
     }
 
 
+    /// D-COPY-WORD1=A: `receiver.copy()` parses as an ordinary method call;
+    /// sema decides what it means by name resolution. A receiver that names
+    /// a declared type (`Recipe.copy()`, `List<Int>.copy()`,
+    /// `alias.Type.copy()`) keeps associated-function lookup; every other
+    /// receiver is a value and gets the built-in copy. The Jet half mirrors
+    /// this in `sema_expr_copy_receiver_names_type`.
+    pub(crate) fn copy_receiver_names_type(&self, receiver: &Expr, owner_type_args: &[Type]) -> bool {
+        if !owner_type_args.is_empty() {
+            return true;
+        }
+        let names_value = |name: &str| {
+            self.binder_ref_types.contains_key(name)
+                || self.lookup(name).is_some()
+                || self.consts.contains_key(name)
+                || self.funcs.contains_key(name)
+        };
+        match receiver {
+            Expr::Ident(name, _) => !names_value(name) && self.registry.contains(name),
+            Expr::Field(base, _, _) => matches!(
+                base.as_ref(),
+                Expr::Ident(alias, _)
+                    if !names_value(alias)
+                        && (self.imports.contains_key(alias) || self.core_imports.contains_key(alias))
+            ),
+            _ => false,
+        }
+    }
+
     pub(crate) fn infer_method_call(
         &mut self,
         receiver: &mut Box<Expr>,
@@ -1039,7 +1360,10 @@ impl<'a> Checker<'a> {
         args: &mut Vec<crate::AST::CallArg>,
         recv_type_out: &mut Option<String>,
         resolved_ret_out: &mut Option<Type>,
+        operator_rhs_out: &mut Option<Type>,
+        checked_callee_out: &mut Option<String>,
     ) -> Option<Type> {
+        *checked_callee_out = None;
         if let Some(path) = checker_hardware_path(receiver, &self.core_imports) {
             let is_board = self
                 .core_imports
@@ -1135,7 +1459,7 @@ impl<'a> Checker<'a> {
         // ordinary receiver walk tries to treat `alias.module` as a value.
         if let Expr::Field(base, inline_module, _) = receiver.as_ref() {
             if let Expr::Ident(alias, alias_span) = base.as_ref() {
-                if let Some(&module_idx) = self.imports.get(alias) {
+                if let Some(&module_idx) = self.imports.get(alias).filter(|_| self.lookup(alias).is_none()) {
                     let is_inline_module = self.modules.is_some_and(|modules| {
                         modules[module_idx].code_modules.contains_key(inline_module)
                     });
@@ -1150,6 +1474,32 @@ impl<'a> Checker<'a> {
                             args,
                             resolved_ret_out,
                         );
+                    }
+                }
+            }
+        }
+        // An imported type is a namespace owner, not a runtime field receiver.
+        // Use the ordinary declaration-owned associated-method checker so
+        // visibility, generics and the checked callee remain unchanged.
+        if let Expr::Field(base, leaf, _) = receiver.as_ref() {
+            if let Expr::Ident(alias, alias_span) = base.as_ref() {
+                if self.lookup(alias).is_none() && self.imports.contains_key(alias) {
+                    if let Some(owner) = self.struct_owner_module(leaf, Some(alias)) {
+                        if self.modules.is_some_and(|modules| {
+                            modules[owner].registry.method(leaf, method).is_some()
+                        }) {
+                            let type_name = self.canonical_nominal_name(owner, leaf);
+                            if !self.name_ledger.visible(self.module_idx, owner, leaf) {
+                                self.diags.push(crate::Sema::Diagnostics::private_item(leaf, span));
+                            }
+                            self.record_import_alias_reference(alias, *alias_span);
+                            let ret = self.check_static_method(
+                                &type_name, method, span, owner_type_args, type_args, args,
+                                checked_callee_out,
+                            );
+                            *resolved_ret_out = ret.clone();
+                            return ret;
+                        }
                     }
                 }
             }
@@ -1282,7 +1632,7 @@ impl<'a> Checker<'a> {
             self.borrow_ctx = true;
             let recv_ty = self.infer(receiver)?;
             if let Type::Named(ref n) = recv_ty {
-                if let Some(base) = self.registry.distinct_base(n).cloned() {
+                if let Some(base) = self.distinct_base_for_reader(n) {
                     if !crate::Sema::knowledge_gate_allows(
                         crate::Sema::KnowledgePlane::Range,
                         crate::Sema::KnowledgeGate::RawProjection,
@@ -1379,14 +1729,12 @@ impl<'a> Checker<'a> {
                 {
                     let full = format!("{prefix}.{leaf}");
                     if self.registry.method(&full, method).is_some() {
-                        return self.check_static_method(
-                            &full,
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method(&full,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                 }
             }
@@ -1396,9 +1744,11 @@ impl<'a> Checker<'a> {
         // method-call receiver is `Field(Ident(alias), leaf)`; resolve to the submodule
         // `<ns>.<leaf>` as a core call. Guarded by `is_known_core_module`, so it fires only
         // for real submodules (e.g. `core.encoding.json`), never plain field access.
-        if let Expr::Field(base, leaf, _) = &**receiver {
-            if let Expr::Ident(alias, alias_span) = &**base {
-                if let Some(ns) = self.core_imports.get(alias).cloned() {
+        if let Expr::Field(base, leaf_storage, _) = &mut **receiver {
+            if let Expr::Ident(alias_storage, alias_span) = &mut **base {
+                let alias = &*alias_storage;
+                let leaf = &*leaf_storage;
+                if let Some(ns) = self.core_imports.get(alias).filter(|_| self.lookup(alias).is_none()).cloned() {
                     self.record_import_alias_reference(alias, *alias_span);
                     if ns == "core.net.tls" && leaf == "ClientConfig" && method == "default" {
                         if !args.is_empty() {
@@ -1501,31 +1851,18 @@ impl<'a> Checker<'a> {
                         if let Some(arg) = args.first_mut() {
                             self.expect_core_arg(&format!("KeyUnlock.{method}"), 0, &expected, arg);
                         }
+                        // The constructor mints the source-owned `KeyUnlock`
+                        // record that `prepare_import_wrapped` declares, so the
+                        // value carries that canonical identity on every call path.
+                        let unlock = self
+                            .core_source_owner_module(&ns, "KeyUnlock")
+                            .map(|owner| {
+                                Type::Named(self.canonical_nominal_name(owner, "KeyUnlock"))
+                            })
+                            .unwrap_or_else(|| Type::Named("KeyUnlock".to_string()));
                         **receiver = Expr::Ident("KeyUnlock".to_string(), span);
-                        *resolved_ret_out = Some(Type::Named("KeyUnlock".to_string()));
-                        return Some(Type::Named("KeyUnlock".to_string()));
-                    }
-                    // D-SOLVER-LIB1=A: `Solver` is a runtime handle, not a
-                    // declared Core struct, so its constructor must be claimed
-                    // before the generic Core type-item static route below.
-                    if ns == "core.compute.solve" && leaf == Syntax::SOLVER_TYPE && method == "new"
-                    {
-                        if args.len() != 1 {
-                            self.diags.push(Diagnostic::error(
-                                "E0101",
-                                format!("`Solver.new` takes 1 argument, got {}", args.len()),
-                                "solver construction needs one deterministic seed".to_string(),
-                                "write `Solve.Solver.new(seed)`".to_string(),
-                                Some(span),
-                            ));
-                        }
-                        for a in args.iter_mut() {
-                            self.infer(&mut a.expr);
-                        }
-                        let ret = Type::Named(Syntax::SOLVER_TYPE.to_string());
-                        *recv_type_out = Some(Syntax::SOLVER_TYPE.to_string());
-                        *resolved_ret_out = Some(ret.clone());
-                        return Some(ret);
+                        *resolved_ret_out = Some(unlock.clone());
+                        return Some(unlock);
                     }
                     // `core.game` constructors mint runtime handles (GameScene,
                     // GameReplay, GameBackend) that `game.run` and codegen's
@@ -1604,7 +1941,11 @@ impl<'a> Checker<'a> {
                         }
                     }
                     if crate::Sema::CheckerCoreLib::core_module_type_item(&ns, leaf) {
-                        let type_name = if matches!(
+                        let type_name = if let Some(owner) =
+                            self.core_source_enum_owner_module(&ns, leaf)
+                        {
+                            self.canonical_nominal_name(owner, leaf)
+                        } else if matches!(
                             ns.as_str(),
                             "core.http" | "core.http.client" | "core.http.server"
                         ) {
@@ -1620,7 +1961,17 @@ impl<'a> Checker<'a> {
                         } else {
                             leaf.clone()
                         };
+                        // Preserve the source spellings for enum constructors before
+                        // replacing the receiver, without cloning either AST string.
+                        let alias = std::mem::take(alias_storage);
+                        let leaf = std::mem::take(leaf_storage);
                         **receiver = Expr::Ident(type_name.clone(), span);
+                        if type_name == "Fixed" && matches!(method, "new" | "over") {
+                            *recv_type_out = Some(type_name.clone());
+                            *resolved_ret_out = Some(Type::Named(type_name.clone()));
+                            self.check_fixed_constructor(method, args, span);
+                            return Some(Type::Named(type_name));
+                        }
                         // `core.mem` allocator fields are constructor sentinels, not
                         // ordinary static types. Preserve the checked return fact on
                         // the call node before the generic static-method fallback.
@@ -1722,10 +2073,14 @@ impl<'a> Checker<'a> {
                                         Some(args[2].expr.span()),
                                     ));
                             }
-                            let ret = Type::Apply {
-                                name: "ExpiringSecret".to_string(),
-                                args: vec![value_ty],
-                            };
+                            let owner = self.core_source_owner_module(&ns, &type_name)?;
+                            let source_name = self.canonical_nominal_name(owner, &type_name);
+                            let ret = self.check_static_method(
+                                &source_name, method, span, owner_type_args, type_args, args, checked_callee_out,
+                            )?;
+                            // Ordinary static lowering uses the checked source identity,
+                            // never the retired native ExpiringSecretNew carrier.
+                            *receiver = Box::new(Expr::Ident(source_name, receiver.span()));
                             let ret =
                                 if crate::Sema::Diagnostics::is_deterministic_clock_type(&clock_ty)
                                 {
@@ -1736,7 +2091,7 @@ impl<'a> Checker<'a> {
                                 } else {
                                     ret
                                 };
-                            *recv_type_out = Some("ExpiringSecret".to_string());
+                            *recv_type_out = None;
                             *resolved_ret_out = Some(ret.clone());
                             return Some(ret);
                         }
@@ -1795,10 +2150,6 @@ impl<'a> Checker<'a> {
                                         &mut args[1],
                                     );
                                 }
-                                Some(ty.clone())
-                            }
-                            ("Body", "json", 1) => {
-                                self.infer(&mut args[0].expr);
                                 Some(ty.clone())
                             }
                             ("Body", "form" | "multipart", 1) => {
@@ -1860,6 +2211,13 @@ impl<'a> Checker<'a> {
                             *resolved_ret_out = ret.clone();
                             return ret;
                         }
+                        if is_json_type_name(&type_name) {
+                            if let Some(ret) = self.check_core_json_lit(method, args, span) {
+                                **receiver = Expr::Ident(type_name.clone(), span);
+                                *resolved_ret_out = Some(ret.clone());
+                                return Some(ret);
+                            }
+                        }
                         // Module-qualified payload constructors such as
                         // `encoding.DataEvent.Key("name")` rewrite to a type
                         // ident above, then parse as method calls. Resolve them
@@ -1870,19 +2228,24 @@ impl<'a> Checker<'a> {
                                 .map(|v| v.contains_key(method))
                                 .unwrap_or(false);
                             if has_variant {
-                                let saved: Vec<Expr> = args
-                                    .iter_mut()
-                                    .map(|a| {
-                                        std::mem::replace(
-                                            &mut a.expr,
-                                            Expr::Int(0, a.span, None, None),
-                                        )
-                                    })
+                                let enum_name = if jet_foundation::CoreModuleExports::core_source_modules()
+                                    .iter().any(|source| source.module == ns.as_str())
+                                {
+                                    let requested = format!("{alias}.{leaf}");
+                                    // Keep unresolved source spelling for the
+                                    // ordinary missing-enum diagnostic; never
+                                    // substitute a bare carrier for its owner.
+                                    self.import_qualified_nominal(&requested).unwrap_or(requested)
+                                } else {
+                                    // Genuine native-only enums retain their
+                                    // existing checked intrinsic type identity.
+                                    type_name.clone()
+                                };
+                                let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
+                                    .map(super::super::enum_literal_call_arg)
                                     .collect();
-                                let mut enum_args: Vec<EnumLitArg> =
-                                    saved.into_iter().map(EnumLitArg::Positional).collect();
                                 let ty = self.check_enum_lit(
-                                    &type_name,
+                                    &enum_name,
                                     method,
                                     &mut enum_args,
                                     span,
@@ -1893,74 +2256,78 @@ impl<'a> Checker<'a> {
                                         arg.expr = expr;
                                     }
                                 }
-                                // Leave recv_type unset. TIR lowers
-                                // `DataEvent.Key(...)` only when the receiver
-                                // is a type ident and recv_type is None.
-                                **receiver = Expr::Ident(type_name.clone(), span);
+                                // Leave recv_type unset: this is a checked
+                                // enum constructor, not a value receiver.
+                                **receiver = Expr::Ident(enum_name, span);
                                 return Some(ty);
                             }
                         }
-                        return self.check_static_method(
-                            &type_name,
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method(&type_name,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding" && leaf == "EncodingLimits" && method == "safe" {
-                        return self.check_static_method(
-                            "EncodingLimits",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("EncodingLimits",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding.cbor" && leaf == "CBOROptions" && method == "safe" {
-                        return self.check_static_method(
-                            "CBOROptions",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("CBOROptions",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.encoding.xml"
                         && (leaf == "XMLLimits" || leaf == "XMLParseOptions")
                         && method == "safe"
                     {
-                        return self.check_static_method(
-                            leaf,
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method(leaf,
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.email" && leaf == "Limits" && method == "safe" {
-                        return self.check_static_method(
-                            "Limits",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("Limits",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
                     }
                     if ns == "core.data" && leaf == "DataLimits" && method == "safe" {
-                        return self.check_static_method(
-                            "DataLimits",
-                            method,
-                            span,
-                            owner_type_args,
-                            type_args,
-                            args,
-                        );
+                        return self.check_static_method("DataLimits",
+                        method,
+                        span,
+                        owner_type_args,
+                        type_args,
+                        args, checked_callee_out);
+                    }
+                    if let Some(owner) = self.core_source_owner_module(&ns, leaf) {
+                        if self.modules.is_some_and(|states|
+                            states[owner].registry.method(leaf, method).is_some())
+                            && jet_foundation::CoreModuleExports::core_modules().iter()
+                                .find(|declaration| declaration.module == ns)
+                                .is_some_and(|declaration|
+                                    declaration.type_exports.iter().any(|(name, _)| *name == leaf))
+                        {
+                            let source_name = self.canonical_nominal_name(owner, leaf);
+                            let ret = self.check_static_method(
+                                &source_name, method, span, owner_type_args, type_args, args, checked_callee_out,
+                            );
+                            **receiver = Expr::Ident(source_name, span);
+                            *resolved_ret_out = ret.clone();
+                            return ret;
+                        }
                     }
                 }
             }
@@ -1974,6 +2341,7 @@ impl<'a> Checker<'a> {
                 if let Some(&mod_idx) = self
                     .inline_reexport_foreign
                     .get(&(inline_alias.clone(), leaf.clone()))
+                    .filter(|_| self.lookup(inline_alias).is_none())
                 {
                     return self.infer_import_call(
                         inline_alias,
@@ -1990,65 +2358,79 @@ impl<'a> Checker<'a> {
         }
         // Direct grouped imports bind a type name to its owning Core module.
         // Resolve constructors on that alias before the module-call fallback;
-        // otherwise `use core.encoding.[DataTree]` is misread as
+        // otherwise `use core.encoding.[Dyn]` is misread as
         // `core.encoding.Bool`.
         if let Expr::Ident(alias, alias_span) = &**receiver {
-            if let (Some(module), Some(item)) = (
+            if let (None, Some(module), Some(item)) = (
+                self.lookup(alias),
                 self.core_imports.get(alias).cloned(),
                 self.core_item_imports.get(alias).cloned(),
             ) {
                 if is_json_type_name(&item) {
                     if let Some(ret) = self.check_core_json_lit(method, args, span) {
+                        self.record_import_alias_reference(alias, *alias_span);
+                        **receiver = Expr::Ident(item, span);
                         *resolved_ret_out = Some(ret.clone());
                         return Some(ret);
                     }
                 }
-                if module == "core.encoding"
-                    && matches!(item.as_str(), "DataEvent" | "EncodingErrorKind" | "EncodingFormat")
+                let enum_identity = if let Some(owner) =
+                    self.core_source_enum_owner_module(&module, &item)
                 {
-                    let has_variant = self
-                        .resolve_enum_variants_cloned(&item)
-                        .is_some_and(|variants| variants.contains_key(method));
-                    if has_variant {
-                        let saved: Vec<Expr> = args
-                            .iter_mut()
-                            .map(|arg| {
-                                std::mem::replace(
-                                    &mut arg.expr,
-                                    Expr::Int(0, arg.span, None, None),
-                                )
-                            })
-                            .collect();
-                        let mut enum_args: Vec<EnumLitArg> =
-                            saved.into_iter().map(EnumLitArg::Positional).collect();
-                        let ty = self.check_enum_lit(
-                            &item,
-                            method,
-                            &mut enum_args,
-                            span,
-                            Some(span),
-                        );
-                        for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
-                            if let EnumLitArg::Positional(expr) = enum_arg {
-                                arg.expr = expr;
-                            }
+                    self.modules.is_some_and(|states|
+                        states[owner].registry.enum_variants(&item)
+                            .is_some_and(|variants| variants.contains_key(method)))
+                        .then(|| self.canonical_nominal_name(owner, &item))
+                } else {
+                    crate::Sema::CheckerCoreLib::core_native_enum_variant_names(
+                        &module, &item,
+                    ).filter(|variants| variants.contains(&method)).map(|_| item.clone())
+                };
+                if let Some(identity) = enum_identity {
+                    self.record_import_alias_reference(alias, *alias_span);
+                    let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
+                        .map(super::super::enum_literal_call_arg).collect();
+                    let ty = self.check_enum_lit(
+                        &identity,
+                        method,
+                        &mut enum_args,
+                        span,
+                        Some(span),
+                    );
+                    for (arg, enum_arg) in args.iter_mut().zip(enum_args) {
+                        if let EnumLitArg::Positional(expr) = enum_arg {
+                            arg.expr = expr;
                         }
-                        **receiver = Expr::Ident(item, span);
-                        *resolved_ret_out = Some(ty.clone());
-                        return Some(ty);
                     }
+                    **receiver = Expr::Ident(identity, span);
+                    *resolved_ret_out = Some(ty.clone());
+                    return Some(ty);
                 }
                 if module == "core.encoding" && item == "EncodingLimits" && method == "safe" {
-                    let ret = self.check_static_method(
-                        &item,
-                        method,
-                        span,
-                        owner_type_args,
-                        type_args,
-                        args,
-                    );
+                    let ret = self.check_static_method(&item,
+                    method,
+                    span,
+                    owner_type_args,
+                    type_args,
+                    args, checked_callee_out);
                     *resolved_ret_out = ret.clone();
                     return ret;
+                }
+                // Source-owned Core records retain their ordinary associated
+                // methods; an imported type alias is not a module receiver.
+                if let Some(owner) = self.core_source_owner_module(&module, &item) {
+                    if self.modules.is_some_and(|states|
+                        states[owner].registry.method(&item, method).is_some())
+                    {
+                        let source_name = self.canonical_nominal_name(owner, &item);
+                        self.record_import_alias_reference(alias, *alias_span);
+                        let ret = self.check_static_method(
+                            &source_name, method, span, owner_type_args, type_args, args, checked_callee_out,
+                        );
+                        **receiver = Expr::Ident(source_name, span);
+                        *resolved_ret_out = ret.clone();
+                        return ret;
+                    }
                 }
                 if module == "core.crypto"
                     && item == "Secret"
@@ -2056,14 +2438,12 @@ impl<'a> Checker<'a> {
                 {
                     self.record_import_alias_reference(alias, *alias_span);
                     **receiver = Expr::Ident(item.clone(), span);
-                    let ret = self.check_static_method(
-                        &item,
-                        method,
-                        span,
-                        owner_type_args,
-                        type_args,
-                        args,
-                    );
+                    let ret = self.check_static_method(&item,
+                    method,
+                    span,
+                    owner_type_args,
+                    type_args,
+                    args, checked_callee_out);
                     *resolved_ret_out = ret.clone();
                     return ret;
                 }
@@ -2091,7 +2471,7 @@ impl<'a> Checker<'a> {
             return ret;
         }
         if let Expr::Ident(alias, alias_span) = &**receiver {
-            if let Some(module) = self.core_imports.get(alias).cloned() {
+            if let Some(module) = self.core_imports.get(alias).filter(|_| self.lookup(alias).is_none()).cloned() {
                 self.inferred_call_type_args = None;
                 let ret = self.infer_core_call(
                     &module,
@@ -2109,7 +2489,7 @@ impl<'a> Checker<'a> {
                 }
                 return ret;
             }
-            if let Some(&mod_idx) = self.imports.get(alias) {
+            if let Some(&mod_idx) = self.imports.get(alias).filter(|_| self.lookup(alias).is_none()) {
                 self.inferred_call_type_args = None;
                 let ret = self.infer_import_call(
                     alias,
@@ -2126,7 +2506,7 @@ impl<'a> Checker<'a> {
             }
             // D-MOD2: inline code module call — `math.double(x)` where `math` is an
             // inline `module math { … }` in this file. Resolve via mangled name.
-            if let Some(canonical) = self.code_modules.get(alias.as_str()) {
+            if let Some(canonical) = self.code_modules.get(alias.as_str()).filter(|_| self.lookup(alias).is_none()) {
                 let mangled = jet_foundation::Names::member_name(canonical, method);
                 self.inferred_call_type_args = None;
                 let ret = self.infer_code_module_call(
@@ -2336,9 +2716,9 @@ impl<'a> Checker<'a> {
                 return Some(builder_ty);
             }
             // D-SERDE13=B: `Data.Text(x)` etc. — the retired spelling of the value
-            // tree. Point at `DataTree` (no alias, I8) before generic resolution.
+            // tree. Point at `Dyn` (no alias, I8) before generic resolution.
             if type_name == "Data" {
-                self.diags.push(data_renamed_to_datatree(*type_span));
+                self.diags.push(data_renamed_to_dyn(*type_span));
                 for a in args.iter_mut() {
                     self.infer(&mut a.expr);
                 }
@@ -2372,41 +2752,6 @@ impl<'a> Checker<'a> {
                 return Some(result_ty);
             }
             if self.lookup(type_name).is_none()
-                && type_name == crate::Syntax::EXPIRING_VALUE_TYPE
-                && method == "new"
-            {
-                if args.len() != 3 {
-                    self.diags
-                        .push(wrong_core_arity("ExpiringValue.new", 3, args.len(), span));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                    return None;
-                }
-                let value_ty = self
-                    .infer(&mut args[0].expr)
-                    .unwrap_or(Type::Named("Unknown".to_string()));
-                self.expect_core_arg(
-                    "ExpiringValue.new",
-                    1,
-                    &Type::Named(crate::Syntax::DURATION_TYPE.to_string()),
-                    &mut args[1],
-                );
-                self.expect_core_arg(
-                    "ExpiringValue.new",
-                    2,
-                    &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                    &mut args[2],
-                );
-                let ret = Type::Apply {
-                    name: crate::Syntax::EXPIRING_VALUE_TYPE.to_string(),
-                    args: vec![value_ty],
-                };
-                *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
-                *resolved_ret_out = Some(ret.clone());
-                return Some(ret);
-            }
-            if self.lookup(type_name).is_none()
                 && matches!(type_name.as_str(), "SigningKey" | "X25519SecretKey")
                 && method == "generate"
             {
@@ -2426,7 +2771,7 @@ impl<'a> Checker<'a> {
                     Type::Named("CryptoError".to_string()),
                 ));
             }
-            // D-ENC-DYN1=A+: `DataTree`/`JSON`/`TOML`/`YAML`/`CSV` name the one dynamic
+            // D-ENC-DYN1=A+: `Dyn`/`JSON`/`TOML`/`YAML`/`CSV` name the one dynamic
             // value; they are reserved core type names (a user type may not redefine them).
             // TIR lowers both constructors from `resolved_ret`; the checked
             // dynamic-value type is carried on the call node here, never
@@ -2512,12 +2857,9 @@ impl<'a> Checker<'a> {
                     .map(|v| v.contains_key(method))
                     .unwrap_or(false);
                 if has_variant {
-                    let saved: Vec<Expr> = args
-                        .iter_mut()
-                        .map(|a| std::mem::replace(&mut a.expr, Expr::Int(0, a.span, None, None)))
+                    let mut enum_args: Vec<EnumLitArg> = args.iter_mut()
+                        .map(super::super::enum_literal_call_arg)
                         .collect();
-                    let mut enum_args: Vec<EnumLitArg> =
-                        saved.into_iter().map(EnumLitArg::Positional).collect();
                     let ty =
                         self.check_enum_lit(type_name, method, &mut enum_args, span, Some(span));
                     for (a, ea) in args.iter_mut().zip(enum_args) {
@@ -2541,16 +2883,16 @@ impl<'a> Checker<'a> {
                 && method == "safe")
                 || (!distinct_numeric_conversion
                     && self.resolve_method_sig(type_name, method).is_some())
+                || (matches!(method, "from" | "raw" | "encode_hole")
+                    && self.is_checked_text_type_name(type_name))
             {
                 self.record_static_time_effect(type_name, method, span);
-                let ret = self.check_static_method(
-                    type_name,
-                    method,
-                    span,
-                    owner_type_args,
-                    type_args,
-                    args,
-                );
+                let ret = self.check_static_method(type_name,
+                method,
+                span,
+                owner_type_args,
+                type_args,
+                args, checked_callee_out);
                 let ret = if type_name == crate::Syntax::CLOCK_TYPE && method == "system" {
                     ret.map(crate::Sema::Diagnostics::system_clock_type)
                 } else {
@@ -2581,7 +2923,23 @@ impl<'a> Checker<'a> {
             // Keep this aligned with TIR's static-call shadow check so sema
             // never accepts code that lowering must reject.
             if self.lookup(type_name).is_none() {
-                if let Some(ty) = builtin_type_from_ident(type_name) {
+                if let Some(mut ty) = builtin_type_from_ident(type_name) {
+                    // Generic collection statics retain their written owner
+                    // argument. A contextual success type refines only an
+                    // omitted argument; the bare builtin default is last.
+                    if let Type::List(inner) = &mut ty {
+                        if let Some(element) = owner_type_args.first() {
+                            **inner = self.resolve_type(element.clone());
+                        } else {
+                            let expected = match &self.expected_type {
+                                Some(Type::Result { ok, .. }) => Some(ok.as_ref()),
+                                other => other.as_ref(),
+                            };
+                            if let Some(Type::List(element)) = expected {
+                                **inner = (**element).clone();
+                            }
+                        }
+                    }
                     if let Some(ret) =
                         Collections::builtin_method_return(&ty, method, args.len(), true)
                     {
@@ -3278,14 +3636,12 @@ impl<'a> Checker<'a> {
             // returned above; an unknown one follows the ordinary E0102
             // method diagnostic instead of reinterpreting the type as a value.
             if self.lookup(type_name).is_none() && builtin_type_from_ident(type_name).is_some() {
-                return self.check_static_method(
-                    type_name,
-                    method,
-                    span,
-                    owner_type_args,
-                    type_args,
-                    args,
-                );
+                return self.check_static_method(type_name,
+                method,
+                span,
+                owner_type_args,
+                type_args,
+                args, checked_callee_out);
             }
         }
         // D-VALIDATE1: `Validate.over(s).check(...)` and `.finish()` are
@@ -3438,6 +3794,19 @@ impl<'a> Checker<'a> {
             self.allow_string_view_read = false;
         }
         let recv_ty = recv_ty?;
+        // D-MEM-COPYSEM1: any other method reads the view through a `String`
+        // receiver, so the bare `&str` window is copied into one (the default
+        // owning copy). The `&str` string kernels (`starts_with`, `ends_with`,
+        // `contains`) read the window in place.
+        if !recv_is_exempt_view
+            && !matches!(method, "starts_with" | "ends_with" | "contains")
+            && !self.copies_explicit()
+            && matches!(receiver.as_ref(), Expr::Ident(n, _) if self.is_string_view(n))
+        {
+            let span = receiver.span();
+            let old = std::mem::replace(receiver.as_mut(), Expr::Absent(span));
+            **receiver = Expr::Copy(Box::new(old), span);
+        }
         let receiver_is_clock = crate::Sema::Diagnostics::is_clock_type(&recv_ty);
         let clock_is_deterministic =
             crate::Sema::Diagnostics::is_deterministic_clock_type(&recv_ty);
@@ -3447,12 +3816,20 @@ impl<'a> Checker<'a> {
                 if matches!(marker, crate::AST::TagMarker::Internal(crate::AST::InternalTag::DeterministicClock))
                     && matches!(
                         inner.as_ref(),
-                        Type::Apply { name, .. } if name == "ExpiringSecret"
+                        Type::Apply { name, .. }
+                            if name == "ExpiringSecret"
+                                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret"))
                     )
         );
         // Most fact tags are type-transparent. These compiler-owned tags
         // carry method policy and must survive through method lookup.
         let recv_ty = match recv_ty {
+            Type::Tagged {
+                marker: crate::AST::TagMarker::Internal(crate::AST::InternalTag::SystemClock),
+                inner,
+            } if matches!(inner.as_ref(), Type::Named(name) | Type::Apply { name, .. }
+                if self.core_source_declares_method(name, method)) => *inner,
             Type::Tagged { marker, inner }
                 if matches!(
                     marker,
@@ -3566,9 +3943,7 @@ impl<'a> Checker<'a> {
                         || core_generic_struct_field(name, Syntax::METHOD_CALL, args).is_some()
                 }
                 Type::TraitObject(traits) => traits.iter().any(|trait_name| {
-                    self.trait_reg
-                        .traits
-                        .get(trait_name)
+                    self.trait_reg.trait_info(trait_name)
                         .is_some_and(|trait_def| {
                             trait_def.methods.contains_key(Syntax::METHOD_CALL)
                         })
@@ -3753,14 +4128,14 @@ impl<'a> Checker<'a> {
             }
         }
         // D-SERDE16=A: public, target-directed Decode dispatch from an ordinary
-        // DataTree subtree. This is the spelling generated derives emit too.
+        // Dyn subtree. This is the spelling generated derives emit too.
         if matches!(&recv_ty, Type::Named(n) if Syntax::is_data_type_name(n))
-            && method == Syntax::METHOD_DATATREE_DECODE
+            && method == Syntax::METHOD_DYN_DECODE
         {
             *recv_type_out = Some(Syntax::TYPE_DATA.to_string());
             if !args.is_empty() || type_args.len() != 1 {
                 self.diags
-                    .push(wrong_core_arity("DataTree.decode<T>", 0, args.len(), span));
+                    .push(wrong_core_arity("Dyn.decode<T>", 0, args.len(), span));
                 for arg in args.iter_mut() {
                     self.infer(&mut arg.expr);
                 }
@@ -3774,7 +4149,7 @@ impl<'a> Checker<'a> {
                     "E0905",
                     format!("`{shown}` does not implement `Decode`"),
                     format!(
-                        "`DataTree.decode<{shown}>()` can only call the type's Decode contract"
+                        "`Dyn.decode<{shown}>()` can only call the type's Decode contract"
                     ),
                     format!("derive `Decode` on `{shown}`, or write `impl {shown}.Decode`"),
                     Some(span),
@@ -4375,11 +4750,7 @@ impl<'a> Checker<'a> {
                     }
                 } else if handle_ty == "JSONLWriter" && method == "write" {
                     if let Some(arg) = args.first_mut() {
-                        self.expect_core_arg("write", 0, &Type::Named("DataTree".to_string()), arg);
-                    }
-                } else if handle_ty == "CSVWriter" && method == "write" {
-                    if let Some(arg) = args.first_mut() {
-                        self.expect_core_arg("write", 0, &Type::List(Box::new(Type::String)), arg);
+                        self.expect_core_arg("write", 0, &Type::Named("Dyn".to_string()), arg);
                     }
                 } else if handle_ty == "CBORWriter" && method == "write" {
                     if let Some(arg) = args.first_mut() {
@@ -4627,7 +4998,7 @@ impl<'a> Checker<'a> {
             args: type_args,
         } = &recv_ty
         {
-            if name == "DataStream" && method == "next" {
+            if data_nominal_leaf(name) == Some("DataStream") && method == "next" {
                 if !args.is_empty() {
                     self.diags
                         .push(wrong_core_arity("DataStream.next", 0, args.len(), span));
@@ -4650,50 +5021,19 @@ impl<'a> Checker<'a> {
         // service method. Keep the checked #Job identity and payload type at
         // this boundary; the provider/codegen layers only marshal the result.
         if let Type::Named(queue_type) = &recv_ty {
-            if queue_type == "JobQueue" {
-                let Some(method_ret) = job_queue_method_return(&recv_ty, method, args.len()) else {
+            if (queue_type == "JobQueue"
+                || (jet_foundation::CoreModuleExports::core_source_owns_type(queue_type)
+                    && queue_type.rsplit("::").next() == Some("JobQueue")))
+                && matches!(method, "enqueue" | "delay")
+            {
+                let Some(method_ret) = job_queue_method_return(&Type::Named("JobQueue".to_string()), method, args.len()) else {
                     // Unknown methods continue to ordinary receiver lookup so
                     // user diagnostics and suggestions remain intact.
                     return None;
                 };
-                *recv_type_out = Some(queue_type.clone());
-                let mutating = matches!(
-                    method,
-                    "enqueue"
-                        | "delay"
-                        | "claim"
-                        | "heartbeat"
-                        | "acknowledge"
-                        | "fail"
-                        | "cancel"
-                        | "dead_letter"
-                        | "recover_expired"
-                        | "pause"
-                        | "resume"
-                        | "wait"
-                        | "prune"
-                );
-                self.record_call_receiver_access(
-                    receiver,
-                    if mutating {
-                        AccessConvention::Write
-                    } else {
-                        AccessConvention::Read
-                    },
-                    span,
-                );
-                let expected = match method {
-                    "enqueue" => 2,
-                    "delay" => 3,
-                    "receipt" | "events" => 1,
-                    "inspect" | "claim" => 2,
-                    "heartbeat" => 1,
-                    "acknowledge" | "fail" => 2,
-                    "cancel" | "dead_letter" => 2,
-                    "recover_expired" | "status" | "pause" | "resume" | "prune" => 0,
-                    "wait" => 1,
-                    _ => unreachable!(),
-                };
+                *recv_type_out = Some("JobQueue".to_string());
+                self.record_call_receiver_access(receiver, AccessConvention::Write, span);
+                let expected = if method == "enqueue" { 2 } else { 3 };
                 let Some(ret) = method_ret else {
                     self.diags
                         .push(wrong_core_arity(method, expected, args.len(), span));
@@ -4715,14 +5055,6 @@ impl<'a> Checker<'a> {
                         "JobQueue.delay",
                         args,
                         &[(2, "for")],
-                        span,
-                        &mut self.diags,
-                    );
-                } else if matches!(method, "cancel" | "dead_letter") && args.len() == 3 {
-                    require_exact_labels(
-                        &format!("JobQueue.{method}"),
-                        args,
-                        &[(2, "lease_token")],
                         span,
                         &mut self.diags,
                     );
@@ -4748,12 +5080,11 @@ impl<'a> Checker<'a> {
                                     .and_then(|mangled| find_job(self.items, mangled))
                             })
                             .or_else(|| {
-                                self.unqualified_file
-                                    .get(job_name)
+                                self.file_function_binding(job_name)
                                     .and_then(|(function_name, module_idx)| {
                                         self.modules
-                                            .and_then(|modules| modules.get(*module_idx))
-                                            .and_then(|module| find_job(&module.items, function_name))
+                                            .and_then(|modules| modules.get(module_idx))
+                                            .and_then(|module| find_job(&module.items, &function_name))
                                     })
                             }),
                         _ => None,
@@ -4815,101 +5146,9 @@ impl<'a> Checker<'a> {
                             self.expect_core_arg("JobQueue.delay", 2, &Type::Named("Duration".to_string()), arg);
                         }
                     }
-                    "receipt" | "events" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::String, arg);
-                        }
-                    }
-                    "inspect" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::Int, arg);
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(method, 1, &Type::Bool, arg);
-                        }
-                    }
-                    "claim" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::String, arg);
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(method, 1, &Type::Int, arg);
-                        }
-                    }
-                    "heartbeat" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("JobQueueClaim".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    "acknowledge" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("JobQueueClaim".to_string()),
-                                arg,
-                            );
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(
-                                method,
-                                1,
-                                &Type::Named("JobResult".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    "fail" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("JobQueueClaim".to_string()),
-                                arg,
-                            );
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(
-                                method,
-                                1,
-                                &Type::Named("JobError".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    "cancel" | "dead_letter" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(method, 0, &Type::String, arg);
-                        }
-                        if let Some(arg) = args.get_mut(1) {
-                            self.expect_core_arg(method, 1, &Type::String, arg);
-                        }
-                        if let Some(arg) = args.get_mut(2) {
-                            self.expect_core_arg(
-                                method,
-                                2,
-                                &Type::Option(Box::new(Type::String)),
-                                arg,
-                            );
-                        }
-                    }
-                    "wait" => {
-                        if let Some(arg) = args.get_mut(0) {
-                            self.expect_core_arg(
-                                method,
-                                0,
-                                &Type::Named("Duration".to_string()),
-                                arg,
-                            );
-                        }
-                    }
-                    _ => {}
+                    _ => unreachable!("only enqueue/delay retain the checked #Job contract"),
                 }
+                let ret = self.resolve_type(ret);
                 *resolved_ret_out = Some(ret.clone());
                 return Some(ret);
             }
@@ -4942,7 +5181,7 @@ impl<'a> Checker<'a> {
             {
                 self.check_http_route_constant(handle_ty, method, args);
                 if is_http_route_registration(handle_ty, method) {
-                    self.check_http_router_contract(method, args, span);
+                    self.check_http_route_registration(receiver, method, args, span);
                 } else if handle_ty == "HTTPMux" && method == "middleware" {
                     if args.len() != 1 {
                         self.diags
@@ -5185,14 +5424,6 @@ impl<'a> Checker<'a> {
             *recv_type_out = Some("Loadable".to_string());
             return ret;
         }
-        // D-APPROX1=A: method calls on sketch data structures.
-        if let Some(ret) = sketch_method_return(&recv_ty, method, args) {
-            for a in args.iter_mut() {
-                self.infer(&mut a.expr);
-            }
-            *recv_type_out = Some(sketch_type_name(&recv_ty).unwrap_or("Sketch").to_string());
-            return ret;
-        }
         // D-NETDEP1=A / D-HTTPLIB1=A: method calls on HTTP types.
         if matches!(&recv_ty, Type::Named(name) if name == "Body") {
             let error = Type::Named("HTTPError".to_string());
@@ -5339,28 +5570,7 @@ impl<'a> Checker<'a> {
                     "get" | "post" | "put" | "delete" | "patch" | "head" | "options"
                 )
             {
-                if args.len() != 2 {
-                    self.diags
-                        .push(wrong_core_arity(method, 2, args.len(), span));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                } else {
-                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-                    let handler_params = if self.http_handler_param_count(&args[1].expr) == Some(0)
-                        && self.http_route_is_fixed_path(&args[0].expr) == Some(true)
-                    {
-                        Vec::new()
-                    } else {
-                        vec![Type::Named("HTTPRequest".to_string())]
-                    };
-                    self.expect_http_handler_arg(
-                        method,
-                        1,
-                        &http_handler_type(handler_params),
-                        &mut args[1],
-                    );
-                }
+                self.check_http_route_registration(receiver, method, args, span);
             } else if matches!(
                 &recv_ty,
                 Type::Named(name) if name == "HTTPRequest" || name == "HTTPResponse"
@@ -5421,28 +5631,6 @@ impl<'a> Checker<'a> {
                 _ => None,
             };
             *resolved_ret_out = ret.clone();
-            return ret;
-        }
-        // D-URL1=A: method calls on typed MIME values.
-        if let Some(ret) = url_mime_method_return(&recv_ty, method, args) {
-            let recv_name = match &recv_ty {
-                Type::Named(n) => n.as_str(),
-                _ => "",
-            };
-            match (recv_name, method, args.len()) {
-                ("MIME", "param", 1) => {
-                    self.expect_core_arg(method, 0, &Type::String, &mut args[0]);
-                }
-                _ => {
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                }
-            }
-            *recv_type_out = Some(match &recv_ty {
-                Type::Named(n) => n.clone(),
-                _ => "MIME".to_string(),
-            });
             return ret;
         }
         // D-EMAIL-SMTP-SURFACE1=A: exact envelope access/replacement methods.
@@ -5867,106 +6055,7 @@ impl<'a> Checker<'a> {
             if handle_ty_s == "Fixed" && matches!(method, "new" | "over") {
                 *recv_type_out = Some(handle_ty_s.clone());
                 *resolved_ret_out = Some(Type::Named(handle_ty_s.clone()));
-                if !self.allow_fixed_constructor {
-                    self.diags.push(Diagnostic::error(
-                            "E0103",
-                            format!("`Fixed.{method}` must directly initialize a lexical binding"),
-                            "the Fixed handle borrows inline storage whose lifetime and drop order are fixed at its declaration".to_string(),
-                            format!("write `fixed :: mem.Fixed.{method}(…)`"),
-                            Some(span),
-                        ));
-                }
-                if args.len() != 1 {
-                    self.diags.push(Diagnostic::error(
-                            "E0103",
-                            format!("`Fixed.{method}` takes exactly one argument"),
-                            if method == "new" {
-                                "the inline backing size must be a positive compile-time integer".to_string()
-                            } else {
-                                "the backing must be one mutable fixed-size byte array".to_string()
-                            },
-                            if method == "new" {
-                                "write `fixed :: mem.Fixed.new(size: 4096)`".to_string()
-                            } else {
-                                "write `fixed :: mem.Fixed.over(&bytes)` with the write-access marker `&`".to_string()
-                            },
-                            Some(span),
-                        ));
-                    for arg in args.iter_mut() {
-                        self.infer(&mut arg.expr);
-                    }
-                    return Some(Type::Named(handle_ty_s));
-                }
-                let inferred = self.infer(&mut args[0].expr);
-                if method == "new" {
-                    let direct_size = match &args[0].expr {
-                        Expr::Int(value, _, _, _) => Some(*value),
-                        Expr::ComptimeName {
-                            value: Some(CtValue::Int(value)),
-                            ..
-                        } => Some(*value),
-                        Expr::Ident(name, _) => match self.current_ct_globals().get(name) {
-                            Some(CtValue::Int(value)) => Some(*value),
-                            _ => None,
-                        },
-                        _ => None,
-                    };
-                    if !self.defer_ct_evaluation {
-                        let size = direct_size.or_else(|| {
-                            let evaluated = {
-                                let globals = self.current_ct_globals();
-                                crate::Comptime::evaluate_owned_with_imports_opts_collecting(
-                                    &args[0].expr,
-                                    self.ct_checked_funcs_for_evaluation(),
-                                    self.ct_externs,
-                                    self.ct_base_dir,
-                                    globals.as_ref(),
-                                    self.core_imports,
-                                    self.gates,
-                                    0,
-                                    None,
-                                )
-                            };
-                            match evaluated {
-                                Ok((CtValue::Int(value), inputs)) => {
-                                    self.ct_embed_inputs.extend(inputs);
-                                    Some(value)
-                                }
-                                _ => None,
-                            }
-                        });
-                        if let Some(size) = size.filter(|size| *size > 0) {
-                            let arg_span = args[0].expr.span();
-                            args[0].expr = Expr::Int(size, arg_span, None, None);
-                        } else {
-                            self.diags.push(Diagnostic::error(
-                                    "E0103",
-                                    "`Fixed.new` needs a positive compile-time byte size".to_string(),
-                                    "runtime-sized storage cannot become an inline fixed array in the current stack frame".to_string(),
-                                    "use a positive literal or comptime integer, e.g. `mem.Fixed.new(size: 4096)`".to_string(),
-                                    Some(args[0].expr.span()),
-                                ));
-                        }
-                    }
-                } else {
-                    let fixed_bytes = matches!(
-                        inferred,
-                        Some(Type::FixedList { elem, len, .. })
-                            if len.literal_value().is_some_and(|len| len > 0)
-                                && matches!(*elem, Type::IntN { signed: false, bits: 8 })
-                    );
-                    let direct_mutable_buffer = args[0].convention == AccessConvention::Write
-                        && matches!(&args[0].expr, Expr::Ident(..));
-                    if !fixed_bytes || !direct_mutable_buffer {
-                        self.diags.push(Diagnostic::error(
-                                "E0103",
-                                "`Fixed.over` needs one mutable fixed-size byte buffer".to_string(),
-                                "the allocator exclusively borrows that exact inline buffer until the Fixed handle is closed".to_string(),
-                                "bind `[Byte#N]` storage, then write `fixed :: mem.Fixed.over(&storage)` with the write-access marker `&`".to_string(),
-                                Some(args[0].expr.span()),
-                            ));
-                    }
-                }
+                self.check_fixed_constructor(method, args, span);
                 return Some(Type::Named(handle_ty_s));
             }
             if let Some(ret) =
@@ -6044,7 +6133,7 @@ impl<'a> Checker<'a> {
             }
             // D-FOUND-REALTIME1=A: callback streams own a typed, bounded
             // lifecycle surface; receipt/deadline reads do not block.
-            if handle_ty == "RealtimeStream" {
+            if handle_ty == "RealtimeStream" && self.resolve_opaque_method_sig(handle_ty, method).is_none() {
                 if let Some(ret) = crate::Sema::realtime_stream_method_return(method, args.len()) {
                     for arg in args.iter_mut() {
                         self.infer(&mut arg.expr);
@@ -6256,6 +6345,8 @@ impl<'a> Checker<'a> {
             other => other,
         };
         if let Type::Named(handle_ty) = handle_receiver {
+            let source_owned = self.source_owns_nominal(handle_ty)
+                || self.core_source_declares_method(handle_ty, method);
             // D-AUTHORITY-NAME1=A / D-AUTHORITY-WORD2=E: the carried
             // Authority value is ordinary data. Its only instance family is
             // the Prelude `with`/`without` narrowing pair.
@@ -6275,7 +6366,7 @@ impl<'a> Checker<'a> {
             // element type comes from the `[T]` arg, mirroring the ambient
             // `random.pick`/`random.shuffle`. Resolve element-aware here (the
             // `builtin_method_return` table only carries Int placeholders).
-            if handle_ty == crate::Syntax::RNG_TYPE
+            if !source_owned && handle_ty == crate::Syntax::RNG_TYPE
                 && matches!(method, "pick" | "weighted_pick" | "sample" | "shuffle")
             {
                 let handle_ty = handle_ty.clone();
@@ -6289,11 +6380,9 @@ impl<'a> Checker<'a> {
                 "Clock"
                     | "RNG"
                     | crate::Syntax::DETERMINISTIC_WORLD_TYPE
-                    | "Fake"
                     | "Duration"
-                    | "Solver"
                     | "TestSuite"
-            ) {
+            ) && !source_owned {
                 if let Some(ret) =
                     Collections::builtin_method_return(&recv_ty, method, args.len(), false)
                 {
@@ -6394,7 +6483,9 @@ impl<'a> Checker<'a> {
         // Arithmetic is the ordinary operator surface; the old named
         // add/sub/mul/div methods are not a second spelling.
         if let Type::Apply { name, .. } = &recv_ty {
-            if name == crate::Syntax::TYPE_MEASUREMENT
+            if (name == crate::Syntax::TYPE_MEASUREMENT
+                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/units/units.jet::Measurement")))
                 && matches!((method, args.len()), ("value" | "uncertainty", 0))
             {
                 *recv_type_out = Some(crate::Syntax::TYPE_MEASUREMENT.to_string());
@@ -6410,30 +6501,23 @@ impl<'a> Checker<'a> {
         // The actual dispatch (`finish_pool_add` etc.) already lives in
         // `finish_builtin_method`, reached the same way Signal/Derived reach it.
         if let Type::Apply { name, .. } = &recv_ty {
-            if name == crate::Syntax::EXPIRING_VALUE_TYPE {
-                if method == "force" {
-                    self.diags.push(Diagnostic::error(
-                            "E0511",
-                            "`ExpiringValue.force` bypasses expiry checking".to_string(),
-                            "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
-                            "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
-                            Some(span),
-                        ));
-                }
-                if let Some(ret) = expiring_method_return(&recv_ty, method, args.len()) {
-                    if method == "get" && args.len() == 1 {
-                        self.expect_core_arg(
-                            "get",
-                            0,
-                            &Type::Named(crate::Syntax::CLOCK_TYPE.to_string()),
-                            &mut args[0],
-                        );
-                    }
-                    *recv_type_out = Some(crate::Syntax::EXPIRING_VALUE_TYPE.to_string());
-                    return ret;
-                }
+            if method == "force" && (name == crate::Syntax::EXPIRING_VALUE_TYPE
+                || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/time/time.jet::ExpiringValue")))
+            {
+                self.diags.push(Diagnostic::error(
+                    "E0511",
+                    "`ExpiringValue.force` bypasses expiry checking".to_string(),
+                    "TTL-wrapped values must use fallible `get(clock)` so expired access is handled explicitly".to_string(),
+                    "use `match item.get(clock) { .Ok(v) -> …; .Err(Expired) -> … }` instead".to_string(),
+                    Some(span),
+                ));
+                return None;
             }
-            if name == "ExpiringSecret" && method == "with" {
+            let source_expiring_secret =
+                jet_foundation::CoreModuleExports::core_source_owns_type(name)
+                    && name.ends_with("::Core/crypto/vault.jet::ExpiringSecret");
+            if (name == "ExpiringSecret" || source_expiring_secret) && method == "with" {
                 if !expiring_clock_is_deterministic {
                     self.record_effect(Effect::Time.name(), span);
                     if self.in_pure && self.det_suppress == 0 {
@@ -6446,11 +6530,17 @@ impl<'a> Checker<'a> {
                     _ => unreachable!(),
                 };
                 let result = self.finish_expiring_secret_with(&inner, args, span);
-                *recv_type_out = Some("ExpiringSecret".to_string());
-                return result.map(|ok| Type::Result {
-                    ok: Box::new(ok),
-                    err: Box::new(Type::Named("Expired".to_string())),
-                });
+                if !source_expiring_secret {
+                    *recv_type_out = Some("ExpiringSecret".to_string());
+                    return result.map(|ok| Type::Result {
+                        ok: Box::new(ok),
+                        err: Box::new(Type::Named("Expired".to_string())),
+                    });
+                }
+                // Preserve the existing non-escaping read-loan check, but
+                // let ordinary registered method inference/lowering invoke
+                // the source body (no callback crosses a Rust host leaf).
+                result?;
             }
             if name == "Pool" {
                 if let Some(ret) =
@@ -6583,7 +6673,8 @@ impl<'a> Checker<'a> {
         // same closed return oracle.  This is the sema boundary that rejects
         // a mismatched transform middle space before any backend sees it.
         if let Some(base) = recv_ty.base_name() {
-            if is_geometry_type(base) && !self.registry.contains(base) {
+            if is_geometry_type(base)
+                && (!self.registry.contains(base) || jet_foundation::CoreModuleExports::core_source_owns_type(base)) {
                 let args_len = args.len();
                 let mut arg_types = Vec::with_capacity(args_len);
                 for (idx, arg) in args.iter_mut().enumerate() {
@@ -6592,7 +6683,7 @@ impl<'a> Checker<'a> {
                         && matches!(
                             &recv_ty,
                             Type::Apply { name, .. }
-                                if matches!(name.as_str(), "Transform" | "Transform2")
+                                if matches!(crate::Sema::geometry_nominal_leaf(name), "Transform" | "Transform2")
                         )
                         && args_len == 2;
                     if depth_arg {
@@ -6647,7 +6738,7 @@ impl<'a> Checker<'a> {
                                 } else {
                                     expected
                                 };
-                                let operation = format!("{base}.{method}");
+                                let operation = format!("{}.{method}", crate::Sema::geometry_nominal_leaf(base));
                                 self.diags.push(Diagnostic::from_row(
                                     "E2520",
                                     &[
@@ -6789,16 +6880,12 @@ impl<'a> Checker<'a> {
                 let known_method = bounds
                     .iter()
                     .find_map(|trait_name| {
-                        self.trait_reg
-                            .traits
-                            .get(trait_name)
+                        self.trait_reg.trait_info(trait_name)
                             .and_then(|info| info.methods.get(method))
                             .map(|msig| (trait_name.clone(), msig.clone()))
                     })
                     .or_else(|| {
-                        self.trait_reg
-                            .traits
-                            .iter()
+                        self.trait_reg.trait_infos()
                             .filter_map(|(trait_name, info)| {
                                 info.methods.get(method).map(|msig| (trait_name, msig))
                             })
@@ -6887,13 +6974,16 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        // D-SERDE-ACCESS=B: accessor methods on Data/JSON/DataTree.
+        // D-SERDE-ACCESS=B: accessor methods on Data/JSON/Dyn.
         if let Type::Named(ref tn) = recv_ty {
             if is_json_type_name(tn) {
-                if let Some(ret) = datatree_method_return(method, args.len()) {
+                if let Some(ret) = dyn_method_return(method, args.len()) {
+                    if method == "remove" {
+                        self.check_mutating_method_receiver(receiver, method, span);
+                    }
                     let json_ret = match ret {
                         Type::Result { ok, err } => Type::Result {
-                            ok: if matches!(*ok, Type::Named(ref n) if n == "DataTree") {
+                            ok: if matches!(*ok, Type::Named(ref n) if n == "Dyn") {
                                 Box::new(json_ty())
                             } else {
                                 ok
@@ -6902,20 +6992,31 @@ impl<'a> Checker<'a> {
                         },
                         other => other,
                     };
+                    let saved = self.expected_type.take();
                     for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
+                        let expected = match method {
+                            "has" | "remove" | "field" => Some(Type::String),
+                            "at" => Some(Type::Int),
+                            "equal_unordered" => Some(json_ty()),
+                            _ => None,
+                        };
+                        let got = match expected.as_ref() {
+                            Some(want) => self.infer_with_expected(&mut a.expr, want),
+                            None => self.infer(&mut a.expr),
+                        };
+                        if let (Some(want), Some(got)) = (expected.as_ref(), got.as_ref()) {
+                            self.check_type_assignable(want, got, a.span);
+                        }
+                        if method == "get" && got.as_ref().is_some_and(|ty| *ty != Type::String && *ty != Type::Int) {
+                            self.diags.push(Diagnostic::error("E0505",
+                                "Dyn.get requires a String key or Int index".to_string(),
+                                "Dyn reads object keys and array positions".to_string(),
+                                "use a String or Int".to_string(), Some(a.span)));
+                        }
                     }
-                    *recv_type_out = Some(tn.clone());
+                    self.expected_type = saved;
+                    *recv_type_out = Some("Dyn".to_string());
                     return Some(json_ret);
-                }
-            }
-            if tn == "DataTree" {
-                if let Some(ret) = datatree_method_return(method, args.len()) {
-                    for a in args.iter_mut() {
-                        self.infer(&mut a.expr);
-                    }
-                    *recv_type_out = Some("DataTree".to_string());
-                    return Some(ret);
                 }
             }
             // D-DBDRIVER1: accessor methods on `DBValue` (`.int()`/`.text()`/
@@ -7395,7 +7496,7 @@ impl<'a> Checker<'a> {
         // reducers return `Query<Group<K, V>>`; the key and value types are the
         // ordinary callback result types, never a String/Float projection.
         if let Type::Apply { name: head, args: query_args } = &recv_ty {
-            if head == "DataTracked" && query_args.len() == 2 {
+            if data_nominal_leaf(head) == Some("DataTracked") && query_args.len() == 2 {
                 let row = query_args[0].clone();
                 let key = query_args[1].clone();
                 match method {
@@ -7454,7 +7555,7 @@ impl<'a> Checker<'a> {
                     return Some(ret);
                 }
             }
-            if head == "DataWatch" && query_args.len() == 1 {
+            if data_nominal_leaf(head) == Some("DataWatch") && query_args.len() == 1 {
                 let row = query_args[0].clone();
                 match method {
                     "get" => {
@@ -7493,7 +7594,7 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            if head == "Query" && query_args.len() == 1 {
+            if data_nominal_leaf(head) == Some("Query") && query_args.len() == 1 {
                 let row = query_args[0].clone();
                 match method {
                     "filter" | "sort_by" => {
@@ -7519,7 +7620,7 @@ impl<'a> Checker<'a> {
                             self.expect_core_arg(method, 0, &callback_ty, callback);
                         }
                         let ret = Type::Apply {
-                            name: "Query".to_string(),
+                            name: head.clone(),
                             args: vec![row],
                         };
                         *recv_type_out = Some("Query".to_string());
@@ -7536,7 +7637,7 @@ impl<'a> Checker<'a> {
                             .and_then(|callback| self.infer_query_callback(method, &row, callback))
                             .unwrap_or_else(|| row.clone());
                         let ret = Type::Apply {
-                            name: "Query".to_string(),
+                            name: head.clone(),
                             args: vec![value],
                         };
                         *recv_type_out = Some("Query".to_string());
@@ -7552,7 +7653,7 @@ impl<'a> Checker<'a> {
                             let other_ty = self.infer(&mut other.expr);
                             match other_ty.as_ref().map(Type::without_user_tags) {
                                 Some(Type::Apply { name, args })
-                                    if name == "Query" && args.len() == 1 =>
+                                    if data_nominal_leaf(name) == Some("Query") && args.len() == 1 =>
                                 {
                                     Some(args[0].clone())
                                 }
@@ -7585,7 +7686,7 @@ impl<'a> Checker<'a> {
                             right_row
                         };
                         let ret = Type::Apply {
-                            name: "Query".to_string(),
+                            name: head.clone(),
                             args: vec![Type::Apply {
                                 name: "DataJoin".to_string(),
                                 args: vec![row, joined_right],
@@ -7654,7 +7755,7 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            if head == "DataGroupedQuery" && query_args.len() == 2 {
+            if data_nominal_leaf(head) == Some("DataGroupedQuery") && query_args.len() == 2 {
                 let row = query_args[0].clone();
                 let key = query_args[1].clone();
                 let value = match method {
@@ -7787,13 +7888,59 @@ impl<'a> Checker<'a> {
                 return self.finish_option_zip(a_inner, args, span, resolved_ret_out);
             }
         }
+        // Int.abs is the canonical exact-Int source function, not the
+        // width-polymorphic math builtin (which can select a Float route).
+        if recv_ty == Type::Int && method == "abs" {
+            if !args.is_empty() {
+                self.diags.push(wrong_core_arity("Int.abs", 0, args.len(), span));
+                for arg in args.iter_mut() {
+                    self.infer(&mut arg.expr);
+                }
+                return None;
+            }
+            let source = jet_foundation::CoreModuleExports::core_source_module("core.math")
+                .expect("canonical core.math source module");
+            let owner = self.name_ledger.module_by_alias(source.alias)
+                .filter(|&index| self.modules.is_some_and(|modules|
+                    modules[index].registry.core_source_module
+                        .is_some_and(|loaded| loaded.path == source.path)));
+            let Some(owner) = owner else {
+                self.diags.push(Diagnostic::error(
+                    "E0003",
+                    "Int.abs source module is not loaded".to_string(),
+                    "this receiver operation executes core.math.abs on exact Int values".to_string(),
+                    "load the registered Core math source module".to_string(),
+                    Some(span),
+                ));
+                return None;
+            };
+            let receiver_span = receiver.span();
+            let receiver_expr = std::mem::replace(receiver.as_mut(), Expr::Absent(receiver_span));
+            let mut source_args = vec![CallArg {
+                convention: AccessConvention::Read,
+                expr: receiver_expr,
+                span: receiver_span,
+                flags: CallArgFlags::default(),
+                label: None,
+                spread: false,
+            }];
+            let result = self.infer_import_call(
+                source.alias, owner, "abs", span, span, type_args,
+                &mut source_args, resolved_ret_out,
+            );
+            **receiver = source_args.remove(0).expr;
+            if result.is_some() {
+                *recv_type_out = Some("Int".to_string());
+            }
+            return result;
+        }
         // Compiler-private String source methods keep the existing primitive
         // contract and borrow/mutation checks, but mark the call for typed
         // source lowering. The source registry is intentionally consulted only
         // for the canonical primitive, never for user nominal types.
         if matches!(&recv_ty, Type::String)
             && self.modules.map_or(false, |modules| {
-                crate::Sema::Registration::core_string_source_method(modules, method)
+                crate::Sema::Registration::core_string_source_method(modules, self.name_ledger, method)
                     .is_some()
             })
         {
@@ -7809,7 +7956,10 @@ impl<'a> Checker<'a> {
                 return result;
             }
         }
-        if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false) {
+        if let Some(ret) = Collections::builtin_method_return(&recv_ty, method, args.len(), false)
+            .filter(|_| !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
+                if self.source_owns_nominal(name) || self.core_source_declares_method(name, method)
+                    || self.resolve_opaque_method_sig(name, method).is_some())) {
             let nominal_recv = match &recv_ty {
                 Type::Named(name) => Some(name.as_str()),
                 Type::Apply { name, args } if name == "Atomic" && args.len() == 1 => {
@@ -7918,9 +8068,7 @@ impl<'a> Checker<'a> {
             // them. First match wins (S48 single-trait dispatch is the n=1 case of
             // this loop, unchanged).
             let sig = trait_names.iter().find_map(|tn| {
-                self.trait_reg
-                    .traits
-                    .get(tn)
+                self.trait_reg.trait_info(tn)
                     .and_then(|t| t.methods.get(method))
                     .map(|msig| (tn.clone(), msig.clone()))
             });
@@ -7985,6 +8133,55 @@ impl<'a> Checker<'a> {
             self.diags.push(Diagnostic::from_row("E0340", &[], Some(span)));
             return None;
         }
+        // Operator hooks use operand-pair identity even with explicit dot syntax.
+        // Their signatures are not ordinary name-only method candidates.
+        let operator_trait = jet_foundation::Traits::operator_hook_trait(method);
+        let mut call_access = self.call_access_frame();
+        let mut pre_inferred_operator = None;
+        let mut operator_signature = None;
+        if let Some(trait_name) = operator_trait.filter(|_| args.len() == 1) {
+            let (owner_type, _, traits) = self.capability_type_context(&recv_ty);
+            if traits.operator_impls.iter().any(|row| row.left == owner_type.name() && row.trait_name == trait_name)
+                || self.has_source_operator_left(&recv_ty, trait_name) {
+                let rhs_place_type = self.place_expr_type(&args[0].expr).unwrap_or(Type::Bool);
+                let rhs = self.with_call_access(&mut call_access, |checker| {
+                    checker.check_call_argument_access(&mut args[0], AccessConvention::Read, &rhs_place_type, true);
+                    checker.borrow_ctx = true;
+                    let inferred = checker.infer(&mut args[0].expr);
+                    checker.check_call_argument_captures(&args[0].expr);
+                    inferred
+                })?;
+                let (rhs_type, _, _) = self.capability_type_context(&rhs);
+                let (owner_type, registry, traits) = self.capability_type_context(&recv_ty);
+                let source_row = self.source_operator_row(&recv_ty, trait_name, &rhs);
+                if let Some(row) = source_row.map(|(_, row)| row).or_else(|| traits.operator_impl_for(&owner_type, trait_name, &rhs_type)) {
+                    let key = jet_foundation::Traits::operator_method_identity(&row.left, trait_name, method, &row.rhs);
+                    let owner = source_row.map(|(owner, _)| owner).unwrap_or_else(|| match &recv_ty {
+                        Type::Named(name) | Type::Apply { name, .. } => {
+                            let (namespace, leaf) = self.struct_type_name_parts(name);
+                            self.struct_owner_module(leaf, namespace).unwrap_or(self.module_idx)
+                        }
+                        _ => self.module_idx,
+                    });
+                    let registry = source_row.and_then(|(owner, _)| self.modules.map(|modules| &modules[owner].registry)).unwrap_or(registry);
+                    let signature = registry.operator_signatures.get(&key).cloned();
+                    if let Some(mut signature) = signature {
+                        self.qualify_method_signature(owner, &row.left, &mut signature);
+                        *operator_rhs_out = Some(self.qualify_method_type(owner, &row.rhs, &std::collections::HashSet::new()));
+                        operator_signature = Some((owner, signature));
+                    }
+                }
+                if operator_signature.is_none() {
+                    let diagnostic = self.missing_instance_method_diagnostic(
+                        method, &recv_ty, None,
+                        Self::missing_receiver_method_why(&recv_ty, method), span,
+                    );
+                    self.diags.push(diagnostic);
+                    return None;
+                }
+                pre_inferred_operator = Some([Some(rhs)]);
+            }
+        }
         // Built-in value types have no user `struct`/`enum` registry entry,
         // but their method names still come from the canonical collection
         // table. Keep their ordinary missing-method errors on E0311 so the
@@ -7992,20 +8189,24 @@ impl<'a> Checker<'a> {
         // that only nominal values can have methods. `Iter` retains its
         // materializer-specific E0102 recovery below.
         let builtin_methods = Collections::builtin_method_names(&recv_ty);
-        if !builtin_methods.is_empty()
+        if operator_signature.is_none() && !builtin_methods.is_empty()
+            && !matches!(&recv_ty, Type::Named(name) | Type::Apply { name, .. }
+                if self.source_owns_nominal(name) || self.core_source_declares_method(name, method)
+                    || self.resolve_opaque_method_sig(name, method).is_some())
             && !matches!(
                 &recv_ty,
                 Type::Apply { name, .. }
                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER
             )
         {
-            let diagnostic = self.missing_instance_method_diagnostic(
-                method,
-                &recv_ty,
-                None,
-                Self::missing_receiver_method_why(&recv_ty, method),
-                span,
-            );
+            let diagnostic = Self::builtin_method_arity_diagnostic(&recv_ty, method, args.len(), span)
+                .unwrap_or_else(|| self.missing_instance_method_diagnostic(
+                    method,
+                    &recv_ty,
+                    None,
+                    Self::missing_receiver_method_why(&recv_ty, method),
+                    span,
+                ));
             self.diags.push(diagnostic);
             for a in args.iter_mut() {
                 self.infer(&mut a.expr);
@@ -8031,6 +8232,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
             },
+            _ if operator_signature.is_some() => recv_ty.name(),
             _ => {
                 let diagnostic = self.missing_instance_method_diagnostic(
                     method,
@@ -8048,38 +8250,40 @@ impl<'a> Checker<'a> {
         };
         let (_, dispatch_type_name) = self.struct_type_name_parts(&type_name);
         let display_type_name = self.display_type_name(&type_name, None);
-        // Reserved generic core records do not live in the ordinary struct
-        // registry. Their function-valued fields still use the same field
-        // call surface as user structs (`vjp_run.pull(seed)`).
-        if let Type::Apply {
-            name,
-            args: type_args,
-        } = &recv_ty
-        {
-            if let Some(field_ty) = core_generic_struct_field(name, method, type_args) {
-                if matches!(field_ty, Type::Fn { .. }) {
-                    *recv_type_out = Some(dispatch_type_name.to_string());
-                    let mut callee =
-                        Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
-                    let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
-                    let call_span = Span::new(span.start, end);
-                    return self.infer_call_value(&mut callee, args, call_span);
-                }
+        let field_name = method;
+        let source_identity = if method == "bool" && args.len() == 1 {
+            let (namespace, leaf) = self.struct_type_name_parts(&type_name);
+            self.struct_owner_module(leaf, namespace)
+                .map(|owner| self.canonical_nominal_name(owner, leaf))
+        } else {
+            None
+        };
+        let method = jet_foundation::CoreModuleExports::core_source_receiver_method(
+            source_identity.as_deref().unwrap_or(&type_name), method, args.len(),
+        );
+        // D-MEMBER-NAMESPACE1=A: existence, not visibility or call validity,
+        // selects the method namespace. Only an absent method permits a
+        // callable field; normalize it to the existing function-value route
+        // so lowering consumes sema's selection instead of guessing by name.
+        let method_signature = operator_signature.or_else(|| self.resolve_method_sig(&type_name, method));
+        if method_signature.is_none() {
+            let core_field = match &recv_ty {
+                Type::Apply { name, args } => core_generic_struct_field(name, field_name, args),
+                _ => None,
+            };
+            let callable_field = core_field.as_ref().is_some_and(|ty| matches!(ty, Type::Fn { .. }))
+                || self.struct_fields_for_type_name(&type_name).is_some_and(|fields| {
+                    fields.iter().any(|(name, _, ty)| name == field_name && matches!(ty, Type::Fn { .. }))
+                });
+            if callable_field {
+                *recv_type_out = Some(Syntax::INTERNAL_CALL_VALUE.to_string());
+                let base = std::mem::replace(receiver, Box::new(Expr::Absent(span)));
+                *receiver = Box::new(Expr::Field(base, field_name.to_string(), span));
+                let end = args.last().map(|arg| arg.expr.span().end).unwrap_or(span.end);
+                return self.infer_call_value(receiver, args, Span::new(span.start, end));
             }
         }
-        if let Some(fields) = self.struct_fields_for_type_name(&type_name) {
-            if let Some((_, _, field_ty)) = fields.iter().find(|(fname, _, _)| fname == method) {
-                if matches!(field_ty, Type::Fn { .. }) {
-                    *recv_type_out = Some(dispatch_type_name.to_string());
-                    let mut callee =
-                        Box::new(Expr::Field(receiver.clone(), method.to_string(), span));
-                    let end = args.last().map(|a| a.expr.span().end).unwrap_or(span.end);
-                    let call_span = Span::new(span.start, end);
-                    return self.infer_call_value(&mut callee, args, call_span);
-                }
-            }
-        }
-        let Some((owner_mod, mut msig)) = self.resolve_method_sig(&type_name, method) else {
+        let Some((owner_mod, mut msig)) = method_signature else {
             let iter_elem = match &recv_ty {
                 Type::Apply { name, args }
                     if name == Syntax::TYPE_ITER || name == Syntax::TYPE_VIEW_ITER =>
@@ -8275,6 +8479,7 @@ impl<'a> Checker<'a> {
         }
         let raw_protocol_return = self.raw_protocol_return_for_method(&type_name, method);
         // D-APILABEL1=A: bind before inference — see `bind_method_args`.
+        let method_diagnostics = self.diags.len();
         if !self.bind_method_args(method, &msig, args, span) {
             let (resolved_ret, return_type) =
                 self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
@@ -8283,7 +8488,6 @@ impl<'a> Checker<'a> {
             return ret;
         }
         self.normalize_method_variadic_call(method, &msig, args, span);
-        let mut call_access = self.call_access_frame();
         let pre_inferred_method = self.instantiate_method_type_args(
             dispatch_type_name,
             method,
@@ -8333,9 +8537,8 @@ impl<'a> Checker<'a> {
                             ),
                             "this function has read access only and does not own the value; the move marker `^` is required".to_string(),
                             format!(
-                                "call it on a copy: `({}{}).{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
-                                Syntax::SIGIL_COPY,
-                                n,
+                                "call it on a copy: `{}.{}(...)` — or take ownership with the move marker `^`: `{}: {}{}`",
+                                Syntax::copy_call(n),
                                 method,
                                 n,
                                 Syntax::SIGIL_MOVE,
@@ -8380,9 +8583,17 @@ impl<'a> Checker<'a> {
             Some(receiver),
             args,
             span,
-            pre_inferred_method.as_deref(),
+            pre_inferred_operator.as_ref().map(|types| types.as_slice())
+                .or(pre_inferred_method.as_deref()),
             Some(call_access),
         )?;
+        if !self.diags[method_diagnostics..]
+            .iter()
+            .any(|diagnostic| diagnostic.severity == crate::Diagnostics::Severity::Error)
+        {
+            *checked_callee_out =
+                self.checked_method_callee(owner_mod, method_type_name, &method_name);
+        }
         let (resolved_ret, return_type) =
             self.checked_return_types(msig.return_type.clone(), raw_protocol_return);
         let ret = Some(return_type);

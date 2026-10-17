@@ -98,7 +98,7 @@ fn provider_add_catalog_json(path: String, names: &[String]) Never! -[FS]> {
 
 // Catalog names from strings, arrays, and objects' `name`, `packages`,
 // `records`, `catalog`, and `recipes` fields.
-fn provider_add_catalog_value(value: DataTree, names: &[String]) Never! {
+fn provider_add_catalog_value(value: Dyn, names: &[String]) Never! {
     if value == {
         .Text(name) -> {
             if provider_is_catalog_name(name) -> &names.push(name)
@@ -106,7 +106,9 @@ fn provider_add_catalog_value(value: DataTree, names: &[String]) Never! {
         .Array(values) -> {
             loop item in values -> provider_add_catalog_value(item, &names)
         }
-        .Object(fields) -> {
+        .Object(pairs) -> {
+            fields := [String: Dyn]{}
+            loop pair in pairs -> fields[pair.key] = pair.value
             if fields.get("name") == {
                 .Val(found) -> {
                     if pkg_json_text(found) == {
@@ -279,7 +281,8 @@ fn provider_report_import_gap(file: String, gap: ImportGap) Never! -[IO]> {
         "the bounded importer could not prove a catalog package for this input",
         "review the generated env.jet and use the nearest catalog candidate `{candidate}` if it fits",
     )
-    term.stderr().write_line("Warning [{diagnostic.code}]: {diagnostic.what}; nearest catalog candidate: `{candidate}`").drop("warnings are best-effort output")
+    stderr_handle := term.stderr()
+    &stderr_handle.write_line("Warning [{diagnostic.code}]: {diagnostic.what}; nearest catalog candidate: `{candidate}`").drop("warnings are best-effort output")
 }
 
 // Carriage returns and newlines as spaces.
@@ -395,7 +398,7 @@ fn provider_write_then_rename(temporary: String, path: String, contents: String)
 }
 
 // `jetpack import`: returns the exit code.
-pub fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtures: String?, local_catalog: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn provider_cmd_import(theme: Theme, dir: String, requested: String?, fixtures: String?, local_catalog: String?) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     source_path :: if provider_import_source_path(dir, requested) == {
         .Ok(path) -> path
         .Err(error) -> {

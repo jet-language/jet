@@ -1,0 +1,8 @@
+# PORT tests/web_app.rs::web_app_routes_from_exhaustive; request helper63-95 ported verbatim algorithm.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no run/reference proof.
+fixture: web_app_routes_from_exhaustive.fixture
+step: jet explain --web-graph --json {work}/app.jet
+exit: 0
+stdout.strip_whitespace: ~ "\"path\":\"/\"" # Original contains predicate.
+stdout.strip_whitespace: ~ "/orders/:id" # Original contains predicate.
+stdout.strip_whitespace: !~ "_helper" # Original negative predicate.

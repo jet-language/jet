@@ -58,7 +58,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // a local. (A const used as an arithmetic operand resolves to `None` in
             // `ast_operand_is_integer` — `env.ty_of(const)` is `None` — exactly as the AST
             // path's `operand_is_integer`, so the overflow trap is never wrongly claimed.)
-            (cx.consts.contains_key(name) && !locals.contains(name))
+            (cx.fact_consts(name).is_some() && !locals.contains(name))
                 || locals.contains(name)
                 // D-NARG-D2: the shared sema call binder replaces an omitted
                 // default's earlier-parameter reference with a compiler-private
@@ -90,20 +90,21 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
         // structural `PatternMatches` test.
         Expr::PatternTest {
             subject, pattern, ..
-        } if pattern.has_nested_pattern() => expr_in_subset(subject, cx, locals),
+        } if pattern.has_nested_pattern() => expr_in_subset(subject, cx, locals)
+            && !pattern.any_value_expr(&mut |value| !expr_in_subset(value, cx, locals)),
         // D-TAG1: a binding-free variant/group pattern test in EXPRESSION position
         // (`hot :: d == .Fire`, `d == .Fire.Burn` inside `&&`, …) lowers to a plain
         // Bool `matches!` (`TExprKind::PatternMatches`). Admission needs a known
         // variant name; lowering resolves the owner from the checked subject type,
         // so a user enum variant spelled like a builtin (`Int`, `Char`) and a
-        // `DataTree`/`Key` subject with the same name each keep their own owner.
+        // `Dyn`/`Key` subject with the same name each keep their own owner.
         Expr::PatternTest {
             subject,
             pattern: Pattern::Variant {
                 variant, bindings, ..
             },
             ..
-        } if bindings.is_empty() && cx.variant_owner.contains_key(variant) =>
+        } if bindings.is_empty() && cx.fact_variant_owner(variant).is_some() =>
         {
             expr_in_subset(subject, cx, locals)
         }
@@ -170,7 +171,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // (`emit_call`, env-contains-name branch) emits `(place)(args)` with args
             // lowered PLAINLY (`emit_call_args(.., None, ..)`). Cover it: the name is a
             // local (not a const) and every arg is in-subset + unlabeled.
-            if locals.contains(&c.name) && !cx.consts.contains_key(&c.name) {
+            if locals.contains(&c.name) && !cx.fact_consts(&c.name).is_some() {
                 return c.args.iter().all(|a| expr_in_subset(&a.expr, cx, locals));
             }
             // `print` is the one builtin the subset covers (one or more args —
@@ -281,7 +282,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 && cx.sigs.contains_key(&c.name)
                 && !cx.extern_funcs.contains_key(&c.name)
                 && !cx.unqualified_inline.contains_key(&c.name)
-                && !cx.unqualified_file.contains_key(&c.name)
+                && !cx.fact_unqualified_file(&c.name).is_some()
                 && !cx.inline_import_names.contains(&c.name);
             // c109 Phase 23: a DISTINCT-type constructor `UserId(expr)` (D-DIST1) is a
             // bare `Expr::Call` whose name is a distinct type (not in `cx.sigs` — so the
@@ -291,28 +292,28 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             // Sema validated the single-arg base-typed shape (E2 distinct checks); we admit
             // it when the name is a known distinct type, not shadowed by a local.
             let is_distinct_ctor =
-                !locals.contains(&c.name) && cx.distinct_types.contains_key(&c.name);
+                !locals.contains(&c.name) && cx.fact_distinct_types(&c.name).is_some();
             // D-SIMD2 / D-LINALG1: a built-in math-type constructor `F32x4(a,b,c,d)` /
             // `Vec3(x,y,z)` / `Mat3(…)`. Lowers to the prelude `jet_math_<T>_new(…)`.
             let is_math_ctor = !locals.contains(&c.name)
                 && crate::Sema::is_math_type(&c.name)
-                && !cx.type_names.contains(&c.name);
+                && !cx.fact_type_name(&c.name);
             let is_precise_ctor = !locals.contains(&c.name)
                 && (c.name == crate::Syntax::TYPE_DECIMAL
                     || c.name == crate::Syntax::TYPE_FRACTION
                     || c.name == crate::Syntax::TYPE_COMPLEX)
-                && !cx.type_names.contains(&c.name);
+                && !cx.fact_type_name(&c.name);
             // D-TYPEDTEXT1=D / D-BOUND-HEAD1=A: the synthetic typed-head call
             // sema rewrote a typed literal into (see `lower_expr`'s matching case).
             let is_typed_text_ctor = !locals.contains(&c.name)
                 && Syntax::typed_head_kind(&c.name)
                     .is_some_and(|kind| kind.is_interpolated_template())
-                && !cx.type_names.contains(&c.name);
+                && !cx.fact_type_name(&c.name);
             // D-REGEX-LIT1=D: sema rewrites a checked Regex typed literal to
             // this compiler-owned one-argument constructor.
             let is_regex_literal_ctor = !locals.contains(&c.name)
                 && c.name == Syntax::TYPE_REGEX
-                && !cx.type_names.contains(&c.name);
+                && !cx.fact_type_name(&c.name);
             // D-TYPE2-UNCERT1=A: sema types the canonical lowercase
             // `measurement(value, uncertainty: u)` constructor. Lowering maps
             // that source spelling to the one internal Measurement Core route.
@@ -341,7 +342,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     || cx.inline_import_names.contains(&c.name));
             let is_unqual_file = !locals.contains(&c.name)
                 && !cx.extern_funcs.contains_key(&c.name)
-                && cx.unqualified_file.contains_key(&c.name)
+                && cx.fact_unqualified_file(&c.name).is_some()
                 && !cx.inline_import_names.contains(&c.name);
             // c109 Phase 13: a callee with a **Fn-typed parameter** is now covered.
             // The arg routes through `emit_call_args`'s `Box::new(…) as <fn-type>`
@@ -608,7 +609,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 // `enum_variants` row). The lowerer still emits the ordinary
                 // unit `EnumLit`, and `Cx::rust_type` owns the carrier spelling.
                 if !locals.contains(enum_name)
-                    && !cx.type_names.contains(enum_name)
+                    && !cx.fact_type_name(enum_name)
                     && matches!(resolved_enum, "FontStyle" | "GlyphShaper")
                     && jet_foundation::CoreModuleExports::core_enum_variants(resolved_enum)
                         .is_some_and(|variants| variants.contains(&member.as_str()))
@@ -616,10 +617,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                     return true;
                 }
                 if enum_name == "DataEvent"
-                    && matches!(
-                        member.as_str(),
-                        "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd"
-                    )
+                    && matches!(crate::Sema::data_event_payload(member), Some(None))
                 {
                     return true;
                 }
@@ -636,7 +634,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 if !locals.contains(enum_name)
                     && (enum_is_covered(resolved_enum, cx)
                         || crate::Codegen::core_rust_type_name(resolved_enum).is_some())
-                    && cx.enum_variants.get(resolved_enum).is_some_and(|variants| {
+                    && cx.fact_enum_variants(resolved_enum).is_some_and(|variants| {
                         variants.iter().any(|(name, payload)| {
                             name == member && matches!(payload, crate::AST::VariantPayload::Unit)
                         })
@@ -650,7 +648,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 // `variant_owner == enum_name` check; the canonical identity is the
                 // only Rust head the TIR may emit for a foreign enum.
                 if !locals.contains(enum_name)
-                    && cx.variant_owner.get(member).is_some_and(|owner| {
+                    && cx.fact_variant_owner(member).is_some_and(|owner| {
                         owner.rsplit("::").next() == Some(enum_name) && enum_is_covered(owner, cx)
                     })
                 {
@@ -693,7 +691,7 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
                 // reproduces this exactly (`lower_expr`'s Ident arm already inlines the
                 // const string; the Field arm wraps it). A comptime const can hold a
                 // struct or enum value; either way the field read is byte-identical.
-                if !locals.contains(enum_name) && cx.consts.contains_key(enum_name) {
+                if !locals.contains(enum_name) && cx.fact_consts(enum_name).is_some() {
                     return true;
                 }
                 // A non-local ident receiver that is NOT a covered enum / comptime const
@@ -861,14 +859,12 @@ fn expr_in_subset_inner(e: &Expr, cx: &Cx, locals: &HashSet<String>) -> bool {
             }
             if !enum_is_covered(resolved_type, cx)
                 && !(crate::Codegen::core_rust_type_name(resolved_type).is_some()
-                    && cx.enum_variants.contains_key(resolved_type))
+                    && cx.fact_enum_variants(resolved_type).is_some())
             {
                 return false;
             }
             // Defensive: the variant must belong to this enum (sema guaranteed it).
-            if !cx
-                .enum_variants
-                .get(resolved_type)
+            if !cx.fact_enum_variants(resolved_type)
                 .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
             {
                 return false;
@@ -1056,15 +1052,14 @@ fn is_binder_ref_name(name: &str) -> bool {
         && slot.chars().all(|ch| ch.is_ascii_digit())
 }
 
-/// c109 Phase 13: is `name` a bare top-level function used as a VALUE? It must be a
-/// non-local, non-const name in `cx.fn_types` whose type is a `Type::Fn`. Such a name
-/// emits `emit_named_fn_value`'s `Box::new(move |…| __jet_<name>(…)) as <fn-type>`
-/// (Source/Codegen/Statement.rs). A const (inlined value) or an unqualified module
-/// import is NOT a fn-value, so this stays narrow.
+/// Is `name` a checked top-level function used as a value? Lexical locals and
+/// constants shadow function declarations. Implicit namespace functions carry
+/// their defining-module binding in the shared facts; explicit member imports
+/// retain their existing lowering path.
 pub(crate) fn ident_is_named_fn_value(name: &str, cx: &Cx, locals: &HashSet<String>) -> bool {
     !locals.contains(name)
-        && !cx.consts.contains_key(name)
-        && matches!(cx.fn_types.get(name), Some(Type::Fn { .. }))
+        && !cx.fact_consts(name).is_some()
+        && matches!(cx.fact_fn_types(name), Some(Type::Fn { .. }))
 }
 
 /// c109 Phase 8/15: is a `??` fallback right-hand side in-subset? `Value` and early

@@ -1,0 +1,15 @@
+# HAND-PORT tests/jetpack_engine.rs:4206-4262 selected_workspace_run_requires_typed_environment_trust
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: selected_workspace_run_requires_typed_environment_trust.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+step: jetpack run -p hello --no-color --offline -- true
+cwd: project
+env: HOME={work}/home
+exit: 2
+stderr: ~ "E1255" # original contains predicate
+file: project/escaped absent
+

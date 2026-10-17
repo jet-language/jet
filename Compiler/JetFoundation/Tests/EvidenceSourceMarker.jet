@@ -1,0 +1,77 @@
+// 4c7227ad5: evidence diagnostic source marker admits only 0 and 1; assemble with Compiler and run.
+fn evidence_marker_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("evidence source marker contract: {name}")
+}
+
+fn evidence_marker_record(diagnostic_source: EvidenceSource?) -> EvidenceRecord {
+    source :: EvidenceSource{path: "test.jet", line: U32{1}, column: U32{1}}
+    identity :: evidence_identity_for_record("test-run", "addition", EvidenceProducerKind.Test, EvidenceKind.Unit, source, U64{1}, "")
+    record := evidence_record_new(identity, EvidenceKind.Unit, EvidenceProducerKind.Test, EvidenceOutcome.Passed, U64{1}, source, evidence_build_empty(), evidence_revision_empty())
+    value := record
+    value.diagnostics = [EvidenceDiagnostic]{EvidenceDiagnostic{code: "E0001", message: "message", source: diagnostic_source}}
+    value
+}
+
+fn evidence_marker_encode(record: EvidenceRecord) -> [U8] {
+    out := [U8]{}
+    if evidence_encode_record(record, &out) == {
+        .Ok(_) -> {}
+        .Err(error) -> panic("evidence source marker encode: {error.message}")
+    }
+    out
+}
+
+fn evidence_marker_with(bytes: [U8], at: Int, marker: U8) -> [U8] {
+    out := [U8]{}
+    loop index in 0..<bytes.len() {
+        if index == at {
+            &out.push(marker)
+        } else {
+            &out.push(bytes[index])
+        }
+    }
+    out
+}
+
+// Empty string when the bytes decode; otherwise the codec's refusal message.
+fn evidence_marker_decode_error(bytes: [U8]) -> String {
+    cursor := evidence_cursor(bytes, 0, U64.MAX)
+    if evidence_decode_record(&cursor) == {
+        .Ok(_) -> ""
+        .Err(error) -> error.message
+    }
+}
+
+fn run() {
+    none_bytes := evidence_marker_encode(evidence_marker_record(None))
+    some_bytes := evidence_marker_encode(evidence_marker_record(Val(EvidenceSource{path: "source.jet", line: U32{3}, column: U32{4}})))
+
+    // Everything before the diagnostic's source marker is identical, so the
+    // first differing byte is the marker itself.
+    at := -1
+    loop index in 0..<none_bytes.len() {
+        if at == -1 && none_bytes[index] != some_bytes[index] {
+            at = index
+        }
+    }
+    evidence_marker_require(at >= 0, "marker byte located")
+
+    zero_cursor := evidence_cursor(none_bytes, 0, U64.MAX)
+    if evidence_decode_record(&zero_cursor) == {
+        .Ok(decoded) -> evidence_marker_require(decoded.record.diagnostics[0].source == None, "marker 0 decodes without source")
+        .Err(error) -> panic("evidence source marker contract: marker 0 refused: {error.message}")
+    }
+
+    one_cursor := evidence_cursor(some_bytes, 0, U64.MAX)
+    if evidence_decode_record(&one_cursor) == {
+        .Ok(decoded) -> evidence_marker_require(decoded.record.diagnostics[0].source == (Val(EvidenceSource{path: "source.jet", line: U32{3}, column: U32{4}})), "marker 1 decodes source")
+        .Err(error) -> panic("evidence source marker contract: marker 1 refused: {error.message}")
+    }
+
+    two := evidence_marker_with(none_bytes, at, U8{2})
+    evidence_marker_require(evidence_marker_decode_error(two) == "unknown evidence diagnostic source marker 2", "marker 2 refused")
+
+    high := evidence_marker_with(none_bytes, at, U8{255})
+    evidence_marker_require(evidence_marker_decode_error(high) == "unknown evidence diagnostic source marker 255", "marker 255 refused")
+    print("evidence source marker: passed")
+}

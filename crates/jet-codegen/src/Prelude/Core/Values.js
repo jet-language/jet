@@ -288,13 +288,23 @@ function jet_show(value) {
 }
 
 // D-FMT-PLAIN1=A / I9: decimal formatting is one Prelude rail on the JS
-// adapter too. BigInt stays exact; Number carries the Float path.
+// adapter too. BigInt stays exact; Number carries the Float path. Rulings
+// #4588, the same steps as Prelude/Core/Fmt.rs `fixed_half_away`: round
+// `value * 10^places` half away from zero, never print a negative zero, and
+// past the exact Int range round the value's exact expansion instead.
 function jet_fmt_decimal(value, precision) {
   const number = Number(value);
   if (Number.isNaN(number)) return "NaN";
   if (number === Infinity) return "inf";
   if (number === -Infinity) return "-inf";
-  return jet_fmt_fixed_even(number, Math.max(0, Number(precision)));
+  const places = Math.max(0, Number(precision));
+  let scale = 1;
+  for (let index = 0; index < places && Number.isFinite(scale); index += 1) scale *= 10;
+  const rounded = Math.round(Math.abs(number * scale));
+  const text = rounded < 2 ** 63
+    ? jet_fmt_point(BigInt(rounded).toString(), places)
+    : jet_fmt_fixed_exact(Math.abs(number), places);
+  return number < 0 && /[1-9]/.test(text) ? `-${text}` : text;
 }
 
 function jet_fmt_quantity(value) {
@@ -305,15 +315,13 @@ function jet_fmt_quantity(value) {
   return String(number).replace(/\.0$/, "");
 }
 
-// Rust's fixed formatter uses nearest-even at an exact decimal tie. Rebuild
-// the finite Number as an integer over a power of two, scale by 10^places,
-// and round the rational quotient so the Web rail does not inherit toFixed's
-// different half-away behavior.
-function jet_fmt_fixed_even(number, places) {
+// Rebuild a finite, non-negative Number as an integer over a power of two,
+// scale by 10^places, and round the exact rational quotient half away from
+// zero (Fmt.rs `exact_fixed_half_away`).
+function jet_fmt_fixed_exact(number, places) {
   const bits = new ArrayBuffer(8);
   const view = new DataView(bits);
-  const negative = number < 0 || Object.is(number, -0);
-  view.setFloat64(0, Math.abs(number), false);
+  view.setFloat64(0, number, false);
   const high = view.getUint32(0, false);
   const low = view.getUint32(4, false);
   const exponent = (high >>> 20) & 0x7ff;
@@ -330,18 +338,18 @@ function jet_fmt_fixed_even(number, places) {
   else denominator <<= BigInt(-binaryExponent);
   numerator *= 10n ** BigInt(places);
   let whole = numerator / denominator;
-  const remainder = numerator % denominator;
-  const twice = remainder * 2n;
-  if (twice > denominator || (twice === denominator && (whole & 1n) === 1n)) {
-    whole += 1n;
-  }
-  let digits = whole.toString();
-  if (places === 0) return `${negative ? "-" : ""}${digits}`;
+  if ((numerator % denominator) * 2n >= denominator) whole += 1n;
+  return jet_fmt_point(whole.toString(), places);
+}
+
+// Place the decimal point `places` digits from the right of `digits`.
+function jet_fmt_point(digits, places) {
+  if (places === 0) return digits;
   if (digits.length <= places) {
     digits = `${"0".repeat(places + 1 - digits.length)}${digits}`;
   }
   const split = digits.length - places;
-  return `${negative ? "-" : ""}${digits.slice(0, split)}.${digits.slice(split)}`;
+  return `${digits.slice(0, split)}.${digits.slice(split)}`;
 }
 
 function jet_fmt_grouped(value, precision) {
@@ -458,9 +466,10 @@ function jet_debug(value) {
   return String(value);
 }
 
-// D-FMT-PRETTY1=A: the JS copy of the shared Prelude's canonical Debug layout.
-// It scans quoted text before treating braces as structure, so a string value
-// cannot change the shape of its own pretty output.
+// D-FMT-PRETTY1=A: the JS copy of the shared Prelude's canonical Debug layout:
+// one item per line with commas between items (rulings #4588). It scans quoted
+// text before treating braces as structure, so a string value cannot change
+// the shape of its own pretty output.
 function jet_fmt_pretty(value) {
   return jet_pretty_fragment(String(value), 0);
 }
@@ -478,12 +487,10 @@ function jet_pretty_fragment(value, indent) {
   if (open === "[" && (body.trim() === ":" || body.trim().toLowerCase() === "redacted")) {
     return value;
   }
-  let out = prefix.length === 0 ? "" : `${prefix} `;
-  out += open;
-  for (const item of jet_split_top_level(body)) {
-    out += `\n${" ".repeat(indent + 2)}${jet_pretty_fragment(item, indent + 2)}`;
-  }
-  return `${out}\n${" ".repeat(indent)}${close}`;
+  const inner = " ".repeat(indent + 2);
+  const items = jet_split_top_level(body).map((item) => `${inner}${jet_pretty_fragment(item, indent + 2)}`);
+  const head = prefix.length === 0 ? open : `${prefix} ${open}`;
+  return `${head}\n${items.join(",\n")}\n${" ".repeat(indent)}${close}`;
 }
 
 function jet_close_for(open) {
@@ -598,7 +605,7 @@ function jet_notes(outcome) {
   if (!Array.isArray(report.notes)) throw new Error("carrier report has no notes value");
   return report.notes.slice();
 }
-// Canonical typed DataTree decoding and accessors for the Web adapter. MIR
+// Canonical typed Dyn decoding and accessors for the Web adapter. MIR
 // supplies a checked shape descriptor; conversion and FieldError policy stay
 // with the other value carriers in this Prelude module.
 function jet_codec_decode_ok(value) {
@@ -631,15 +638,23 @@ function jet_codec_tree_payload(tree) {
   return tree && Array.isArray(tree.values) ? tree.values[0] : undefined;
 }
 
-function jet_datatree_kind(tree) {
+// #4602: decoding is strict. A Text leaf parses into a scalar only while a
+// text-native source (environment, CSV cells, route parameters) decodes.
+let jet_text_cells_depth = 0;
+
+function jet_decode_text_cells(decode) {
+  jet_text_cells_depth += 1;
+  try { return decode(); } finally { jet_text_cells_depth -= 1; }
+}
+
+function jet_dyn_kind(tree) {
   switch (tree?.tag) {
     case "Null": return "null";
     case "Bool": return "Bool";
     case "Int": return "Int";
     case "Float": return "Float";
     case "Number": return "number";
-    case "TypedText":
-    case "Text": return "text";
+    case "Text": return "Text";
     case "Bytes": return "Bytes";
     case "Array": return "a list";
     case "Object": return "an object";
@@ -647,12 +662,12 @@ function jet_datatree_kind(tree) {
   }
 }
 
-function jet_datatree_array_items(tree) {
+function jet_dyn_array_items(tree) {
   const payload = jet_codec_tree_payload(tree);
   return Array.isArray(payload) ? payload : null;
 }
 
-function jet_datatree_object_entries(tree) {
+function jet_dyn_object_entries(tree) {
   const payload = jet_codec_tree_payload(tree);
   if (payload instanceof Map) return Array.from(payload.entries());
   if (Array.isArray(payload)) {
@@ -666,7 +681,7 @@ function jet_datatree_object_entries(tree) {
   return null;
 }
 
-function jet_datatree_render(tree) {
+function jet_dyn_render(tree) {
   switch (tree?.tag) {
     case "Null": return "null";
     case "Bool": return jet_codec_tree_payload(tree) ? "true" : "false";
@@ -675,29 +690,28 @@ function jet_datatree_render(tree) {
       catch (_) { return String(jet_codec_tree_payload(tree)); }
     case "Float": return jet_float_display(jet_codec_tree_payload(tree));
     case "Number": return String(jet_codec_tree_payload(tree));
-    case "TypedText":
     case "Text": return JSON.stringify(String(jet_codec_tree_payload(tree)));
     case "Bytes": {
       const bytes = jet_codec_tree_payload(tree);
       return Array.isArray(bytes) ? `[${bytes.join(",")}]` : "[]";
     }
     case "Array": {
-      const items = jet_datatree_array_items(tree);
-      return items == null ? "[]" : `[${items.map((item) => jet_datatree_render(item)).join(",")}]`;
+      const items = jet_dyn_array_items(tree);
+      return items == null ? "[]" : `[${items.map((item) => jet_dyn_render(item)).join(",")}]`;
     }
     case "Object": {
-      const entries = jet_datatree_object_entries(tree);
+      const entries = jet_dyn_object_entries(tree);
       return entries == null
         ? "{}"
-        : `{${entries.map(([key, value]) => `${JSON.stringify(key)}:${jet_datatree_render(value)}`).join(",")}}`;
+        : `{${entries.map(([key, value]) => `${JSON.stringify(key)}:${jet_dyn_render(value)}`).join(",")}}`;
     }
     default: return String(tree?.tag ?? "value");
   }
 }
 
-function jet_datatree_field(tree, name) {
+function jet_dyn_field(tree, name) {
   const key = String(name);
-  const entries = jet_datatree_object_entries(tree);
+  const entries = jet_dyn_object_entries(tree);
   if (tree?.tag === "Object" && entries != null) {
     const found = entries.find((entry) => entry[0] === key);
     if (found) return { tag: "Ok", values: [found[1]] };
@@ -708,12 +722,12 @@ function jet_datatree_field(tree, name) {
   }
   return {
     tag: "Err",
-    values: [[{ path: key, reason: `expected object, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: key, reason: `expected object, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_at(tree, index) {
-  const items = jet_datatree_array_items(tree);
+function jet_dyn_at(tree, index) {
+  const items = jet_dyn_array_items(tree);
   const raw = String(index);
   if (tree?.tag === "Array" && items != null) {
     let position;
@@ -733,7 +747,7 @@ function jet_datatree_at(tree, index) {
   }
   return {
     tag: "Err",
-    values: [[{ path: `[${raw}]`, reason: `expected array, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: `[${raw}]`, reason: `expected array, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
@@ -767,36 +781,36 @@ function jet_codec_i64(value) {
   }
 }
 
-function jet_datatree_int(tree) {
+function jet_dyn_int(tree) {
   let value = null;
-  if (tree?.tag === "Int") value = jet_codec_i64(jet_codec_tree_payload(tree));
-  else if (tree?.tag === "Number") value = jet_codec_i64(jet_codec_json_exact_integer(jet_codec_tree_payload(tree)));
+  if (tree?.tag === "Int") value = BigInt(jet_codec_tree_payload(tree));
+  else if (tree?.tag === "Number") value = jet_codec_json_exact_integer(jet_codec_tree_payload(tree));
   if (value != null) return { tag: "Ok", values: [value] };
   return {
     tag: "Err",
-    values: [[{ path: "", reason: `expected int, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: "", reason: `expected int, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_text(tree) {
-  if (tree?.tag === "Text" || tree?.tag === "TypedText") {
+function jet_dyn_text(tree) {
+  if (tree?.tag === "Text") {
     return { tag: "Ok", values: [String(jet_codec_tree_payload(tree))] };
   }
   return {
     tag: "Err",
-    values: [[{ path: "", reason: `expected text, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: "", reason: `expected text, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_bool(tree) {
+function jet_dyn_bool(tree) {
   if (tree?.tag === "Bool") return { tag: "Ok", values: [Boolean(jet_codec_tree_payload(tree))] };
   return {
     tag: "Err",
-    values: [[{ path: "", reason: `expected bool, got ${jet_datatree_render(tree)}` }]],
+    values: [[{ path: "", reason: `expected bool, got ${jet_dyn_render(tree)}` }]],
   };
 }
 
-function jet_datatree_float(tree) {
+function jet_dyn_float(tree) {
   let value = null;
   if (tree?.tag === "Float") {
     const number = Number(jet_codec_tree_payload(tree));
@@ -811,14 +825,13 @@ function jet_datatree_float(tree) {
   if (value != null) return { tag: "Ok", values: [value] };
   const reason = tree?.tag === "Int" && !Number.isFinite(Number(jet_codec_tree_payload(tree)))
     ? "expected float, got out-of-range Int"
-    : `expected float, got ${jet_datatree_render(tree)}`;
+    : `expected float, got ${jet_dyn_render(tree)}`;
   return { tag: "Err", values: [[{ path: "", reason }]] };
 }
 
-function jet_datatree_to_text(tree) {
+function jet_dyn_to_text(tree) {
   switch (tree?.tag) {
     case "Text":
-    case "TypedText":
     case "Number":
       return jet_option_some(String(jet_codec_tree_payload(tree)));
     case "Int":
@@ -832,7 +845,7 @@ function jet_datatree_to_text(tree) {
   }
 }
 
-function jet_datatree_equal_unordered(left, right) {
+function jet_dyn_equal_unordered(left, right) {
   if (left?.tag !== right?.tag) return false;
   switch (left?.tag) {
     case "Null": return true;
@@ -846,7 +859,6 @@ function jet_datatree_equal_unordered(left, right) {
       return !Number.isNaN(l) && !Number.isNaN(r) && l === r;
     }
     case "Number":
-    case "TypedText":
     case "Text":
       return jet_codec_tree_payload(left) === jet_codec_tree_payload(right);
     case "Bytes": {
@@ -855,19 +867,19 @@ function jet_datatree_equal_unordered(left, right) {
       return Array.isArray(l) && Array.isArray(r) && l.length === r.length && l.every((v, i) => v === r[i]);
     }
     case "Array": {
-      const l = jet_datatree_array_items(left);
-      const r = jet_datatree_array_items(right);
+      const l = jet_dyn_array_items(left);
+      const r = jet_dyn_array_items(right);
       return l != null && r != null && l.length === r.length
-        && l.every((v, i) => jet_datatree_equal_unordered(v, r[i]));
+        && l.every((v, i) => jet_dyn_equal_unordered(v, r[i]));
     }
     case "Object": {
-      const l = jet_datatree_object_entries(left);
-      const r = jet_datatree_object_entries(right);
+      const l = jet_dyn_object_entries(left);
+      const r = jet_dyn_object_entries(right);
       if (l == null || r == null || l.length !== r.length) return false;
       const used = new Array(r.length).fill(false);
       return l.every(([key, value]) => {
         const index = r.findIndex((entry, i) => !used[i] && entry[0] === key
-          && jet_datatree_equal_unordered(value, entry[1]));
+          && jet_dyn_equal_unordered(value, entry[1]));
         if (index < 0) return false;
         used[index] = true;
         return true;
@@ -878,19 +890,13 @@ function jet_datatree_equal_unordered(left, right) {
 }
 
 function jet_codec_typed_string(tree) {
-  if (tree?.tag === "Text" || tree?.tag === "TypedText") {
+  if (tree?.tag === "Text") {
     return jet_codec_decode_ok(String(jet_codec_tree_payload(tree)));
   }
   if (tree?.tag === "Number") {
     return jet_codec_decode_error("", `expected Text, found number ${String(jet_codec_tree_payload(tree))}`);
   }
-  if (tree?.tag === "Int") {
-    try { return jet_codec_decode_ok(BigInt(jet_codec_tree_payload(tree)).toString()); }
-    catch (_) { return jet_codec_decode_error("", "expected Text, found Int"); }
-  }
-  if (tree?.tag === "Float") return jet_codec_decode_ok(jet_float_display(jet_codec_tree_payload(tree)));
-  if (tree?.tag === "Bool") return jet_codec_decode_ok(jet_codec_tree_payload(tree) ? "true" : "false");
-  return jet_codec_decode_error("", `expected Text, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Text, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_int(tree) {
@@ -913,21 +919,14 @@ function jet_codec_typed_int(tree) {
       ? jet_codec_decode_error("", `expected Int, found number ${raw}`)
       : jet_codec_decode_ok(value);
   }
-  if (tree?.tag === "TypedText") {
-    const raw = String(jet_codec_tree_payload(tree));
-    const value = /^[+-]?\d+$/.test(raw.trim()) ? BigInt(raw.trim()) : null;
-    return value == null
-      ? jet_codec_decode_error("", `expected Int, found text ${JSON.stringify(raw)}`)
-      : jet_codec_decode_ok(value);
-  }
   if (tree?.tag === "Text") {
-    const raw = String(jet_codec_tree_payload(tree)).trim();
-    const value = /^[+-]?\d+$/.test(raw) ? BigInt(raw) : null;
+    const raw = String(jet_codec_tree_payload(tree));
+    const value = jet_text_cells_depth > 0 && /^[+-]?\d+$/.test(raw.trim()) ? BigInt(raw.trim()) : null;
     return value == null
       ? jet_codec_decode_error("", `expected Int, found text ${JSON.stringify(raw)}`)
       : jet_codec_decode_ok(value);
   }
-  return jet_codec_decode_error("", `expected Int, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Int, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_float(tree) {
@@ -943,31 +942,32 @@ function jet_codec_typed_float(tree) {
       ? jet_codec_decode_ok(value)
       : jet_codec_decode_error("", "expected Float, found out-of-range Int");
   }
-  if (tree?.tag === "Number" || tree?.tag === "Text") {
-    const raw = String(jet_codec_tree_payload(tree)).trim();
+  if (tree?.tag === "Number") {
+    const raw = String(jet_codec_tree_payload(tree));
     const value = Number(raw);
+    return Number.isFinite(value)
+      ? jet_codec_decode_ok(value)
+      : jet_codec_decode_error("", `expected Float, found out-of-range number ${raw}`);
+  }
+  if (tree?.tag === "Text") {
+    const raw = String(jet_codec_tree_payload(tree));
+    const value = jet_text_cells_depth > 0 && raw.trim() !== "" ? Number(raw.trim()) : NaN;
     return Number.isFinite(value)
       ? jet_codec_decode_ok(value)
       : jet_codec_decode_error("", `expected Float, found text ${JSON.stringify(raw)}`);
   }
-  if (tree?.tag === "TypedText") {
-    return jet_codec_decode_error("", `expected Float, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
-  }
-  return jet_codec_decode_error("", `expected Float, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Float, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_bool(tree) {
   if (tree?.tag === "Bool") return jet_codec_decode_ok(Boolean(jet_codec_tree_payload(tree)));
   if (tree?.tag === "Text") {
-    const raw = String(jet_codec_tree_payload(tree)).trim();
-    if (raw === "true") return jet_codec_decode_ok(true);
-    if (raw === "false") return jet_codec_decode_ok(false);
+    const raw = String(jet_codec_tree_payload(tree));
+    if (jet_text_cells_depth > 0 && raw.trim() === "true") return jet_codec_decode_ok(true);
+    if (jet_text_cells_depth > 0 && raw.trim() === "false") return jet_codec_decode_ok(false);
     return jet_codec_decode_error("", `expected Bool, found text ${JSON.stringify(raw)}`);
   }
-  if (tree?.tag === "TypedText") {
-    return jet_codec_decode_error("", `expected Bool, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
-  }
-  return jet_codec_decode_error("", `expected Bool, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Bool, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_char(tree) {
@@ -1005,9 +1005,6 @@ function jet_codec_typed_float32(tree) {
 }
 
 function jet_codec_typed_decimal(tree) {
-  if (tree?.tag === "TypedText") {
-    return jet_codec_decode_error("", `expected Decimal, found text ${JSON.stringify(jet_codec_tree_payload(tree))}`);
-  }
   if (tree?.tag === "Number" || tree?.tag === "Text") {
     const raw = String(jet_codec_tree_payload(tree));
     const trimmed = raw.trim();
@@ -1020,7 +1017,7 @@ function jet_codec_typed_decimal(tree) {
     const raw = BigInt(jet_codec_tree_payload(tree)).toString();
     return jet_codec_decode_ok(jet_decimal_from_str(raw));
   }
-  return jet_codec_decode_error("", `expected Decimal, found ${jet_datatree_kind(tree)}`);
+  return jet_codec_decode_error("", `expected Decimal, found ${jet_dyn_kind(tree)}`);
 }
 
 function jet_codec_typed_temporal(tree, descriptor) {
@@ -1043,9 +1040,7 @@ function jet_codec_typed_temporal(tree, descriptor) {
 
 function jet_codec_encode_int(value) {
   const integer = BigInt(value);
-  return integer >= JET_I64_MIN && integer <= JET_I64_MAX
-    ? { tag: "Int", values: [integer] }
-    : { tag: "Number", values: [integer.toString()] };
+  return { tag: "Int", values: [integer] };
 }
 
 function jet_codec_encode_typed(value, descriptor) {
@@ -1063,7 +1058,7 @@ function jet_codec_encode_typed(value, descriptor) {
       return { tag: "Text", values: [String(value)] };
     case "range":
       return jet_codec_encode_typed(value, descriptor.base);
-    case "datatree":
+    case "dyn":
       return value;
     case "date":
     case "local_date":
@@ -1136,7 +1131,7 @@ function jet_codec_typed_value(tree, descriptor) {
         ? result
         : jet_codec_decode_error("", `value is outside Int(${descriptor.lo}..${descriptor.hi})`);
     }
-    case "datatree": return jet_codec_decode_ok(tree);
+    case "dyn": return jet_codec_decode_ok(tree);
     case "date":
     case "local_date":
     case "local_time":
@@ -1162,9 +1157,9 @@ function jet_codec_typed_value(tree, descriptor) {
     case "fixed_list": {
       let items;
       if (descriptor.element?.byte && tree?.tag === "Bytes") items = jet_codec_tree_payload(tree);
-      else if (tree?.tag === "Array") items = jet_datatree_array_items(tree);
+      else if (tree?.tag === "Array") items = jet_dyn_array_items(tree);
       if (!Array.isArray(items)) {
-        return jet_codec_decode_error("", `expected a list, found ${jet_datatree_kind(tree)}`);
+        return jet_codec_decode_error("", `expected a list, found ${jet_dyn_kind(tree)}`);
       }
       if (descriptor.kind === "fixed_list" && BigInt(items.length) !== BigInt(descriptor.length)) {
         return jet_codec_decode_error("", `expected a fixed list of length ${descriptor.length}, found ${items.length}`);
@@ -1184,9 +1179,9 @@ function jet_codec_typed_value(tree, descriptor) {
       if (descriptor.key?.kind !== "string") {
         return jet_codec_decode_error("", "comptime maps require String keys");
       }
-      const entries = jet_datatree_object_entries(tree);
+      const entries = jet_dyn_object_entries(tree);
       if (tree?.tag !== "Object" || entries == null) {
-        return jet_codec_decode_error("", `expected an object, found ${jet_datatree_kind(tree)}`);
+        return jet_codec_decode_error("", `expected an object, found ${jet_dyn_kind(tree)}`);
       }
       const values = new Map();
       const errors = [];

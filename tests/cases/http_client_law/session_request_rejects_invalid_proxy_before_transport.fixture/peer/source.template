@@ -1,0 +1,20 @@
+use core.net as net
+use core.files as files
+use core.time as time
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
+    files.write_atomic("{work}/addr.txt", address.bytes()) ?? panic("publish")
+    // The original probes only AFTER its AOT client exits.
+    loop !files.exists("{work}/client.done") { time.sleep(1) }
+    if &listener.accept(deadline: 0s) == {
+        .Ok(_) -> panic("invalid session proxy reached the origin")
+        .Err(error) -> {
+            if error == {
+                .Timeout -> {}
+                else -> panic("immediate accept error is not WouldBlock")
+            }
+        }
+    }
+}

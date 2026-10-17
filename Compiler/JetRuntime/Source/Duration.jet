@@ -1,0 +1,91 @@
+// Restore the constructor policy from 7c42badbb^ Core/time/runtime/
+// top_math_random_time.jet and kernel_duration.jet at the native C ABI.
+// D-TIMERES1 / D-SHAPE-DURATIONCONVERT1: narrow exact Int without a trap,
+// checked positive-unit multiplication, and an owned RangeError on failure.
+// At the C ABI a Duration crosses as its ns exact-Int word (CAbiRoutes
+// `Duration { ns: native(word) }` in, `jet_int_from_i64(d.ns)` out); the
+// native handle (TimeGlue) is built from that word by the caller.
+fn runtime_duration_error(error: I64) -> I64 {
+    reason :: rt_static_text("duration is outside the supported range")
+    time_glue_store(error, jet_rt_record_new_range_error(reason))
+    I64{0}
+}
+fn runtime_duration_scale(unit: I64) -> I64 {
+    if (unit == I64{0}) -> return I64{1}
+    if (unit == I64{1}) -> return I64{1000}
+    if (unit == I64{2}) -> return I64{1000000}
+    if (unit == I64{3}) -> return I64{1000000000}
+    if (unit == I64{4}) -> return I64{60000000000}
+    if (unit == I64{5}) -> return I64{3600000000000}
+    // CAbiRoutes range_stop: malformed compiler-owned unit tags are
+    // a native argument stop, not a user RangeError or a new unit.
+    trap_native_index_range_stop()
+    I64{0}
+}
+#Export(c) fn jet_duration_from_int(value: I64, unit: I64, output: I64, error: I64) -> I64 {
+    scale :: runtime_duration_scale(unit)
+    if (scale == I64{0}) -> return I64{0}
+    // The C adapter borrows its exact-Int input; no retain/drop is needed.
+    // jet_int_owned_to_i64 is a trapping conversion, so use the same existing
+    // magnitude check and projection directly for this fallible boundary.
+    raw := value
+    if !int_inline(value) {
+        bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+        if !int_fits(value, bound) -> return runtime_duration_error(error)
+        raw = int_word(value)
+    }
+    // All declared scales are positive. Truncation towards zero gives exact
+    // admissible endpoints, including I64.MIN; multiplication cannot overflow
+    // after these comparisons. This is kernel_duration.scale's checked_mul.
+    minimum :: I64{-9223372036854775807 - 1}
+    maximum :: I64{9223372036854775807}
+    if raw < minimum / scale || raw > maximum / scale -> return runtime_duration_error(error)
+    // CAbiRoutes:19658 writes the ns as an owned exact-Int word.
+    time_glue_store(output, jet_int_owned_from_i64(raw * scale))
+    I64{1}
+}
+
+// MathRandomTime.rs:165 jet_duration_ns_value: d.ns, through the C adapter's
+// native(a0) (range stop beyond i64) and jet_int_from_i64 (owned word).
+#Export(c) fn jet_duration_ns_value(value: I64) -> I64 {
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    jet_int_owned_from_i64(ns)
+}
+
+// MathRandomTime.rs:186 / Duration.rs:187 difference: saturating i64 sub.
+#Export(c) fn jet_duration_difference(left: I64, right: I64) -> I64 {
+    a :: host_native_int(left)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    b :: host_native_int(right)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (b < I64{0} && a > I64{9223372036854775807} + b) -> return jet_int_owned_from_i64(I64{9223372036854775807})
+    if (b > I64{0} && a < I64{-9223372036854775807 - 1} + b) -> return jet_int_owned_from_i64(I64{-9223372036854775807 - 1})
+    jet_int_owned_from_i64(a - b)
+}
+
+// CAbiRoutes:31752 source duration addition: raw i64 words, saturating.
+#Export(c) fn jet_i64_saturating_add(left: I64, right: I64) -> I64 { datetime_saturating_add(left, right) }
+
+// Core/Duration.rs:56-74 jet_duration_kernel_total_in: the fixed unit names
+// resolve to nanoseconds; an unknown unit reads 0.0. The C adapter lends the
+// exact-Int ns word and the unit text; neither is consumed.
+fn runtime_duration_unit_ns(unit: I64) -> I64 {
+    if (jet_rt_string_eq(unit, rt_static_text("nanosecond")) || jet_rt_string_eq(unit, rt_static_text("nanoseconds")) || jet_rt_string_eq(unit, rt_static_text("ns"))) -> return I64{1}
+    if (jet_rt_string_eq(unit, rt_static_text("microsecond")) || jet_rt_string_eq(unit, rt_static_text("microseconds")) || jet_rt_string_eq(unit, rt_static_text("us")) || jet_rt_string_eq(unit, rt_static_text("µs"))) -> return I64{1000}
+    if (jet_rt_string_eq(unit, rt_static_text("millisecond")) || jet_rt_string_eq(unit, rt_static_text("milliseconds")) || jet_rt_string_eq(unit, rt_static_text("ms"))) -> return I64{1000000}
+    if (jet_rt_string_eq(unit, rt_static_text("second")) || jet_rt_string_eq(unit, rt_static_text("seconds")) || jet_rt_string_eq(unit, rt_static_text("s"))) -> return I64{1000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("minute")) || jet_rt_string_eq(unit, rt_static_text("minutes")) || jet_rt_string_eq(unit, rt_static_text("min"))) -> return I64{60000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("hour")) || jet_rt_string_eq(unit, rt_static_text("hours")) || jet_rt_string_eq(unit, rt_static_text("h"))) -> return I64{3600000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("day")) || jet_rt_string_eq(unit, rt_static_text("days")) || jet_rt_string_eq(unit, rt_static_text("d"))) -> return I64{86400000000000}
+    if (jet_rt_string_eq(unit, rt_static_text("week")) || jet_rt_string_eq(unit, rt_static_text("weeks")) || jet_rt_string_eq(unit, rt_static_text("w"))) -> return I64{604800000000000}
+    I64{0}
+}
+#Export(c) fn jet_duration_total_in(value: I64, unit: I64) -> Float {
+    // CAbiRoutes native(a0): an exact Int outside i64 is the shared range stop.
+    ns :: host_native_int(value)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return Float{0.0}
+    scale :: runtime_duration_unit_ns(unit)
+    if (scale == I64{0}) -> return Float{0.0}
+    Float{ns} / Float{scale}
+}

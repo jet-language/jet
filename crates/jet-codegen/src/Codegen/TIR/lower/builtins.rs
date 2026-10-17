@@ -420,7 +420,7 @@ pub(crate) fn resolve_builtin_op(
                 "len" | "is_empty" | "clear" | "capacity" | "position" | "eof" | "rewind" | "flush"
                 | "close" | "shutdown" | "get_buffer" | "buffer" | "to_string" | "string" | "trim"
                 | "trim_start" | "trim_end" | "to_lower" | "to_upper" | "to_title" | "title"
-                | "clone" | "copy" | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii"
+                | "clone" | "lines" | "first" | "next" | "read_byte" | "read" | "is_ascii"
                 | "parse",
                 0,
             )
@@ -522,7 +522,7 @@ pub(crate) fn resolve_builtin_op(
         ("remove", 1) => Some(ListRemoveMode::Value),
         ("remove", 2) => match args.get(1).map(|arg| &arg.expr) {
             Some(Expr::EnumLit { variant, .. }) => remove_mode_variant(variant),
-            Some(Expr::Ident(name, _)) => match cx.const_values.get(name) {
+            Some(Expr::Ident(name, _)) => match cx.fact_const_values(name) {
                 Some(crate::AST::CtValue::Enum {
                     type_name, variant, ..
                 }) if type_name == crate::Syntax::TYPE_REMOVE_BY => remove_mode_variant(variant),
@@ -630,6 +630,7 @@ pub(crate) fn resolve_builtin_op(
             method: "reverse".to_string(),
         },
         ("reverse", 0) => TBuiltinOp::Reverse,
+        ("__swap", 2) => TBuiltinOp::SwapList,
         // D-SET-DECLINE1=C: guard ahead of the unconditional List `sort` arm
         // below — Set.sort() returns a fresh List instead of mutating in place.
         ("sort", 0) if is_set => TBuiltinOp::SetSort,
@@ -756,7 +757,7 @@ pub(crate) fn resolve_builtin_op(
         ("is_ascii", 0) if is_string => TBuiltinOp::StringIsAscii,
         ("to_title", 0) if is_string => TBuiltinOp::StringToTitle,
         (
-            "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase" | "copy"
+            "count_bytes" | "is_lower" | "is_upper" | "capitalize" | "swapcase"
             | "normalize" | "isalnum" | "isalpha" | "isascii" | "isdecimal" | "isdigit"
             | "isidentifier" | "isnumeric" | "isprintable" | "isspace" | "istitle" | "islower"
             | "isupper" | "lower" | "upper" | "title" | "casefold",
@@ -822,10 +823,6 @@ pub(crate) fn resolve_builtin_op(
         }
         ("slice", 2) => TBuiltinOp::ListSlice,
         ("slice", 1) if is_map => TBuiltinOp::MapSliceKeys,
-        ("copy", 0) if is_map => TBuiltinOp::MapCopy,
-        ("copy", 0) if is_set => TBuiltinOp::SetCopy,
-        ("copy", 0) if is_bit_set => TBuiltinOp::BitSetCopy,
-        ("copy", 0) => TBuiltinOp::ListCopy,
         ("equal", 1) if is_map => TBuiltinOp::MapEqual,
         ("equal", 1) if is_set => TBuiltinOp::SetEqual,
         ("equal", 1) => TBuiltinOp::ListEqual,
@@ -1084,6 +1081,7 @@ pub(crate) fn resolve_builtin_op(
             | TBuiltinOp::MapPopFirst
             | TBuiltinOp::ExtendList
             | TBuiltinOp::Reverse
+            | TBuiltinOp::SwapList
             | TBuiltinOp::Sort
             | TBuiltinOp::Clear
             | TBuiltinOp::SetInsert
@@ -1246,8 +1244,10 @@ pub(crate) fn resolve_closure_op(
         }
         "scan" if is_sequence && has_args(2) => TClosureOp::Scan,
         "fold" if is_map && has_args(2) => TClosureOp::MapFold,
-        "fold" if is_view && has_args(2) => TClosureOp::ViewFold,
-        "fold" if (is_list || is_iter) && has_args(2) => TClosureOp::Fold,
+        // A list folds through the borrowed view route: the step reads each
+        // element (`&T`), so the receiver is never copied to be consumed.
+        "fold" if (is_view || is_list) && has_args(2) => TClosureOp::ViewFold,
+        "fold" if is_iter && has_args(2) => TClosureOp::Fold,
         "position" if is_sequence && has_args(1) => TClosureOp::Position,
         "min_by" if is_sequence && has_args(1) => TClosureOp::MinBy,
         "max_by" if is_sequence && has_args(1) => TClosureOp::MaxBy,

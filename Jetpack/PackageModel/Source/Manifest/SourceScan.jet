@@ -3,16 +3,18 @@
 // that output references follow. Paths are `/`-separated strings.
 
 // One parsed package source file.
-pub struct ParsedSource {
-    pub path: String
-    pub program: Program
+struct ParsedSource {
+    path: String
+    program: Program
 }
 
-// Parse every checked file with the compiler front end (inline package
-// carriers masked); None when any file fails to read, lex, or parse.
-pub fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
+// Parse every checked source file with the compiler front end (inline
+// package carriers masked); None when any file fails to read, lex, or parse.
+// A listing's `package.jet` is the manifest, not a source, and is skipped.
+fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! {
     out := [ParsedSource]{}
     loop file in source_files {
+        if pkg_path_file_name(file.relative) == PACKAGE_FILE -> next
         text :: file.text() ?? return None
         masked :: pkg_mask_inline_package_source(text) ?? return None
         lexed :: lex(masked.source.bytes())
@@ -25,7 +27,7 @@ pub fn pkg_parse_sources(source_files: [CheckedFile]) -> [ParsedSource]? Never! 
 }
 
 // The one top-level function named `wanted`, or None when absent or repeated.
-pub fn pkg_unique_top_level_function(program: Program, wanted: String) -> Func? Never! {
+fn pkg_unique_top_level_function(program: Program, wanted: String) -> Func? Never! {
     found := Func?{None}
     loop item in program.items {
         if item == .Func(function) {
@@ -39,7 +41,7 @@ pub fn pkg_unique_top_level_function(program: Program, wanted: String) -> Func? 
 
 // `ImportDecl::import_alias`: the written alias, else the default derived
 // from the import kind.
-pub fn pkg_import_alias(import: ImportDecl) -> String Never! {
+fn pkg_import_alias(import: ImportDecl) -> String Never! {
     if import.alias != "" -> return import.alias
     if import.kind == {
         .File(path, _) -> path.cut_last("/")?.after ?? path
@@ -56,26 +58,26 @@ fn pkg_import_is_unqualified(import: ImportDecl) -> Bool Never! {
 }
 
 // The parent directory of a `/` path (`Path::parent`), "" for a bare name.
-pub fn pkg_path_parent(path: String) -> String Never! {
+fn pkg_path_parent(path: String) -> String Never! {
     parts :: path.cut_last("/") ?? return ""
     if parts.before == "" && path.starts_with("/") -> return "/"
     parts.before
 }
 
-pub fn pkg_path_file_name(path: String) -> String Never! {
+fn pkg_path_file_name(path: String) -> String Never! {
     parts :: path.cut_last("/") ?? return path
     parts.after
 }
 
-pub fn pkg_path_join(base: String, tail: String) -> String Never! {
-    if tail.starts_with("/") -> return ~tail
-    if base == "" -> return ~tail
+fn pkg_path_join(base: String, tail: String) -> String Never! {
+    if tail.starts_with("/") -> return tail.copy()
+    if base == "" -> return tail.copy()
     if base.ends_with("/") -> return "{base}{tail}"
     "{base}/{tail}"
 }
 
 // Lexical normalization: drop `.`, resolve `..` by popping.
-pub fn pkg_normalize_discovery_path(path: String) -> String Never! {
+fn pkg_normalize_discovery_path(path: String) -> String Never! {
     absolute :: path.starts_with("/")
     parts := [String]{}
     loop part in path.split("/") {
@@ -127,10 +129,10 @@ fn pkg_import_target_paths(root: String, importer: String, kind: ImportKind) -> 
 }
 
 // `Path::with_extension`'s stem: the path without its final `.ext`.
-pub fn pkg_path_without_extension(path: String) -> String Never! {
+fn pkg_path_without_extension(path: String) -> String Never! {
     name :: pkg_path_file_name(path)
     dot :: name.cut_last(".") ?? return path
-    if dot.before == "" -> return ~path
+    if dot.before == "" -> return path.copy()
     stem :: pkg_binder_slice(path, 0, path.bytes().len() - name.bytes().len())
     "{stem}{dot.before}"
 }
@@ -151,7 +153,7 @@ fn pkg_resolved_import_targets(root: String, source: ParsedSource, kind: ImportK
 
 // Every import target whose alias is `wanted`, following the in-project
 // import graph from root-level files.
-pub fn pkg_reachable_import_module_targets(root: String, wanted: String, sources: [ParsedSource]) -> [String] Never! {
+fn pkg_reachable_import_module_targets(root: String, wanted: String, sources: [ParsedSource]) -> [String] Never! {
     pending := [String]{}
     loop source in sources {
         if pkg_path_parent(source.path) == root -> &pending.push(source.path)
@@ -159,7 +161,7 @@ pub fn pkg_reachable_import_module_targets(root: String, wanted: String, sources
     visited := [String]{}
     targets := [String]{}
     loop pending.len() > 0 {
-        path :: ~pending[pending.len() - 1]
+        path :: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
         normalized :: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next
@@ -189,12 +191,12 @@ fn pkg_find_parsed_source(sources: [ParsedSource], path: String) -> ParsedSource
 }
 
 // Every file transitively imported by `source`, normalized and sorted.
-pub fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [ParsedSource]) -> [String] Never! {
+fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [ParsedSource]) -> [String] Never! {
     pending := [String]{source.path}
     visited := [String]{}
     imported := [String]{}
     loop pending.len() > 0 {
-        path :: ~pending[pending.len() - 1]
+        path :: pending[pending.len() - 1].copy()
         pending = pending[0..<pending.len() - 1]
         normalized :: pkg_normalize_discovery_path(path)
         if visited.contains(normalized) -> next
@@ -216,7 +218,7 @@ pub fn pkg_imported_source_paths(root: String, source: ParsedSource, sources: [P
 
 // 1-based lines of every top-level `fn <wanted>`, skipping strings and
 // comments.
-pub fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! {
+fn pkg_top_level_function_lines(source: String, wanted: String) -> [Int] Never! {
     raw :: "{source} ".bytes()
     depth := 0
     token_start := -1
@@ -324,7 +326,7 @@ fn pkg_is_build_entry(function: Func) -> Bool Never! {
 // shape; None when the source does not lex (the Driver reports it). The
 // check-mode parse keeps its recovered program even with parser diagnostics
 // (Rust `parse_for_check_with_source`).
-pub fn pkg_real_build_entry_lines(source: String, candidates: [Int]) -> [Int]? Never! {
+fn pkg_real_build_entry_lines(source: String, candidates: [Int]) -> [Int]? Never! {
     masked :: pkg_mask_inline_package_source(source) ?? return None
     text :: masked.source
     lexed :: lex(text.bytes())

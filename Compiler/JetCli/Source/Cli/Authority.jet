@@ -1,0 +1,305 @@
+// The application authority check of the Jet-hosted `jet build` and
+// `jet run` (Source/CmdCompile.rs `resolve_application_authority`; the
+// policy carrier is jet-foundation Authority.rs `ApplicationAuthority` and
+// jet-pkg-model EffectBudget.rs `project_application_effects` and
+// `application_policy_diagnostic`). The program's required effects are the
+// checked entry's solved effect row; its policy is the beginner floor, the
+// entry package's `authority.holds`, and the `--allow`/`--deny` rows of this
+// invocation. A required right the policy denies, or one it leaves
+// undecided, stops the command with E1803 before anything is built.
+use jet_driver.[
+    JetDriverAuthorityPolicy,
+    JetDriverCompileResult,
+]
+use jet_foundation.[
+    Diagnostic,
+    diagnostic_from_registry,
+]
+use jet_sema.[
+    sema_effect_grantable_roots,
+    sema_effect_without_deny_only,
+]
+
+// D-AUTH-AMBIENT1=A: a program with no authority row may print, allocate, and
+// read its own arguments.
+JET_CLI_AMBIENT_BASIC_EFFECTS :: [String]{"IO", "Mem.Alloc", "Exec.Args"}
+JET_CLI_APPLICATION_DEFAULT :: "application default"
+JET_CLI_PACKAGE_DEFAULT :: "package.jet default"
+
+// One application's authority: the sema fact (`required`) and the policy
+// facts (`granted`, `denied`, and the policy's name), each a sorted set.
+struct JetCLIAuthority {
+    required: [String]
+    granted: [String]
+    denied: [String]
+    authority: String
+}
+
+// The `--allow` and `--deny` rows of this invocation, canonical and in
+// argv order (Source/main.rs `parse_authority_flags`).
+struct JetCLIInvocationAuthority {
+    allow: [String]
+    deny: [String]
+}
+
+enum JetCLIVerdict { Allowed Denied Missing }
+
+// A sorted set of the values (Rust `BTreeSet<String>`).
+fn jet_cli_sorted_set(values: [String]) -> [String] Never! {
+    sorted := [String]{}
+    loop value in values {
+        if sorted.contains(value) -> next
+        index := sorted.len()
+        &sorted.push(value)
+        loop index > 0 && sorted[index - 1] > value {
+            sorted[index] = sorted[index - 1]
+            index -= 1
+        }
+        sorted[index] = value
+    }
+    sorted
+}
+
+// Root segment of a dotted right (`FS.Read` -> `FS`).
+fn jet_cli_right_root(right: String) -> String Never! {
+    right.split(".").to_list()[0]
+}
+
+// Authority.rs `parse_root`: the canonical spelling of a known root, matched
+// without regard to ASCII case.
+fn jet_cli_parse_root(right: String) -> String? Never! {
+    root :: jet_cli_ascii_lower(jet_cli_right_root(right))
+    if root == "panic" -> return Val("Panic")
+    if root == "mem" -> return Val("Mem")
+    loop known in sema_effect_grantable_roots() {
+        if jet_cli_ascii_lower(known) == root -> return Val(known)
+    }
+    None
+}
+
+// Authority.rs `parse_right`: a right with its root canonical and its leaf
+// spelling kept; `Panic` has no leaves.
+fn jet_cli_parse_right(raw: String) -> String? Never! {
+    right :: raw.trim()
+    root :: jet_cli_parse_root(right) ?? return None
+    if root == "Panic" && right != "Panic" -> return None
+    parts :: right.split(".").to_list()
+    if parts.len() == 1 -> return Val(root)
+    Val("{root}{right.slice(parts[0].len()..<right.len())}")
+}
+
+// Authority.rs `covers`: a bound covers itself and every descendant; a
+// resource-qualified bound (`FS.Read:/data`) only across a `/` boundary.
+fn jet_cli_right_covers(raw_bound: String, raw_right: String) -> Bool Never! {
+    bound :: jet_cli_parse_right(raw_bound) ?? raw_bound.trim()
+    right :: jet_cli_parse_right(raw_right) ?? raw_right.trim()
+    if right == bound -> return true
+    if !right.starts_with(bound) || right.len() == bound.len() -> return false
+    next_byte :: right.bytes()[bound.bytes().len()]
+    if bound.contains(":") -> return next_byte == (U8{47})
+    next_byte == (U8{46}) || next_byte == (U8{58}) || next_byte == (U8{47})
+}
+
+fn jet_cli_covers_any(bounds: [String], right: String) -> Bool Never! {
+    loop bound in bounds {
+        if jet_cli_right_covers(bound, right) -> return true
+    }
+    false
+}
+
+fn jet_cli_answer(authority: JetCLIAuthority, right: String) -> JetCLIVerdict Never! {
+    if jet_cli_covers_any(authority.denied, right) -> return JetCLIVerdict.Denied
+    if jet_cli_covers_any(authority.granted, right) -> return JetCLIVerdict.Allowed
+    JetCLIVerdict.Missing
+}
+
+// Canonical policy rows (EffectBudget.rs `policy_effects`).
+fn jet_cli_policy_effects(names: [String]) -> [String] Never! {
+    rights := [String]{}
+    loop name in names {
+        if jet_cli_parse_right(name) == .Val(right) -> &rights.push(right)
+    }
+    jet_cli_sorted_set(rights)
+}
+
+// EffectBudget.rs `project_application_effects` plus CmdCompile.rs
+// `merge_invocation_authority`.
+fn jet_cli_application_authority(result: JetDriverCompileResult, invocation: JetCLIInvocationAuthority?) -> JetCLIAuthority Never! {
+    required := [String]{}
+    if result.mir == .Val(program) {
+        if result.entry_function == .Val(entry) {
+            loop function in program.functions {
+                if function.id == entry -> required = function.effects.solved
+            }
+        }
+    }
+    authority := JetCLIAuthority{required: jet_cli_sorted_set(required), granted: jet_cli_sorted_set(JET_CLI_AMBIENT_BASIC_EFFECTS), denied: [String]{}, authority: JET_CLI_APPLICATION_DEFAULT}
+    policy :: result.authority_policy ?? JetDriverAuthorityPolicy{manifest_path: None, allow: None, deny: None}
+    if policy.manifest_path != None {
+        if policy.allow == None && policy.deny == None {
+            authority.authority = JET_CLI_PACKAGE_DEFAULT
+        } else {
+            authority.granted = jet_cli_policy_effects(policy.allow ?? [String]{})
+            authority.denied = jet_cli_policy_effects(policy.deny ?? [String]{})
+            authority.authority = "package.jet authority.holds"
+        }
+    }
+    if invocation == .Val(rows) {
+        granted := authority.granted
+        loop right in rows.allow -> &granted.push(right)
+        denied := authority.denied
+        loop right in rows.deny -> &denied.push(right)
+        authority.granted = jet_cli_sorted_set(granted)
+        authority.denied = jet_cli_sorted_set(denied)
+        authority.authority = "{authority.authority} + CLI invocation"
+    }
+    authority
+}
+
+// Required rights with no policy verdict. Deny-only rights (the Panic and Mem
+// roots and the Time.Wait leaf; jet-foundation Authority.rs `is_deny_only`)
+// may be denied but never need a grant (Authority.rs `undecided_effects`).
+fn jet_cli_undecided(authority: JetCLIAuthority) -> [String] Never! {
+    rights := [String]{}
+    loop right in authority.required {
+        if sema_effect_without_deny_only([String]{right}).len() > 0 && jet_cli_answer(authority, right) == JetCLIVerdict.Missing -> &rights.push(right)
+    }
+    rights
+}
+
+fn jet_cli_denied_required(authority: JetCLIAuthority) -> [String] Never! {
+    rights := [String]{}
+    loop right in authority.required {
+        if jet_cli_answer(authority, right) == JetCLIVerdict.Denied -> &rights.push(right)
+    }
+    rights
+}
+
+fn jet_cli_is_application_default(authority: JetCLIAuthority) -> Bool Never! {
+    authority.authority.starts_with(JET_CLI_APPLICATION_DEFAULT)
+}
+
+fn jet_cli_is_beginner_floor(authority: JetCLIAuthority) -> Bool Never! {
+    jet_cli_is_application_default(authority) || authority.authority.starts_with(JET_CLI_PACKAGE_DEFAULT)
+}
+
+// The complete `allow:` row a beginner-floor program must write.
+fn jet_cli_inline_allow_row(authority: JetCLIAuthority) -> [String] Never! {
+    rights := [String]{}
+    loop right in authority.required {
+        if jet_cli_right_root(right) != "Panic" -> &rights.push(right)
+    }
+    rights
+}
+
+// Authority.rs `effect_action`: plain words for what using `right` does.
+fn jet_cli_effect_action(raw: String) -> String Never! {
+    right :: jet_cli_parse_right(raw) ?? raw.trim()
+    if right == {
+        "FS.Read" -> return "reads files"
+        "FS.Write" -> return "writes files"
+        "Exec.Exit" -> return "ends its own process"
+        "Time.Wait" -> return "waits"
+        "Mem.Alloc" -> return "allocates memory"
+        "DB.Read" -> return "reads a database"
+        "DB.Write" -> return "writes a database"
+        "Rand.Draw" -> return "draws random numbers"
+        "Exec.Args" -> return "reads its arguments"
+        else -> {}
+    }
+    if jet_cli_right_root(right) == {
+        "IO" -> "prints text or reads input"
+        "FS" -> "reads and writes files"
+        "Net" -> "uses the network"
+        "Exec" -> "starts other programs"
+        "Env" -> "reads environment variables"
+        "Time" -> "reads the clock"
+        "Rand" -> "draws random numbers"
+        "DB" -> "uses a database"
+        "Log" -> "writes logs"
+        "GPU" -> "uses the GPU"
+        "FFI" -> "calls foreign code"
+        "Browser" -> "uses browser APIs"
+        "Secret" -> "reads secrets"
+        "Mem" -> "allocates memory"
+        "Panic" -> "can stop with a panic"
+        else -> "uses an undeclared authority"
+    }
+}
+
+fn jet_cli_policy_owner(authority: JetCLIAuthority) -> String Never! {
+    name :: authority.authority
+    if {
+        jet_cli_is_application_default(authority) -> "the default for a file with no package block"
+        name.starts_with(JET_CLI_PACKAGE_DEFAULT) -> "package.jet (which has no authority block)"
+        name.starts_with("package.jet") -> "package.jet"
+        name.starts_with("inline Package") -> "this file's package block"
+        name.starts_with("jet repl") || name.starts_with("REPL") -> "this REPL session"
+        else -> "`{name}`"
+    }
+}
+
+// Authority.rs `policy_why`.
+fn jet_cli_policy_why(authority: JetCLIAuthority) -> String Never! {
+    denied :: jet_cli_denied_required(authority)
+    rights :: if denied.len() == 0 -> jet_cli_undecided(authority) else -> denied
+    verdict :: if denied.len() == 0 -> "has not allowed that yet" else -> "denies that"
+    actions := [String]{}
+    loop right in rights {
+        action :: jet_cli_effect_action(right)
+        if !actions.contains(action) -> &actions.push(action)
+    }
+    phrase := "uses no authority"
+    if actions.len() == 1 -> phrase = actions[0]
+    if actions.len() > 1 {
+        head := [String]{}
+        loop index in 0..<(actions.len() - 1) -> &head.push(actions[index])
+        phrase = "{head.join(", ")} and {actions[actions.len() - 1]}"
+    }
+    "This program {phrase}, and {jet_cli_policy_owner(authority)} {verdict}."
+}
+
+// Authority.rs `policy_fix`.
+fn jet_cli_policy_fix(authority: JetCLIAuthority) -> String Never! {
+    undecided :: jet_cli_undecided(authority)
+    if undecided.len() > 0 && jet_cli_is_application_default(authority) {
+        return "declare the complete row `allow: [{jet_cli_inline_allow_row(authority).join(", ")}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal"
+    }
+    step := ""
+    if {
+        undecided.len() == 0 -> step = "adjust the denial in `authority.holds.deny`"
+        jet_cli_is_beginner_floor(authority) -> step = "add the complete row `allow: [{jet_cli_inline_allow_row(authority).join(", ")}]` under `authority.holds` in `package.jet`"
+        else -> step = "add `allow: [{undecided.join(", ")}]` under `authority.holds` in `package.jet`"
+    }
+    "{step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
+}
+
+fn jet_cli_rights_or_none(rights: [String]) -> String Never! {
+    if rights.len() == 0 -> "none" else -> rights.join(", ")
+}
+
+// Authority.rs `policy_facts`: the structured detail `--json` reports.
+fn jet_cli_policy_facts(authority: JetCLIAuthority) -> String Never! {
+    "authority_facts:required_effects={jet_cli_rights_or_none(authority.required)}; granted_effects={jet_cli_rights_or_none(authority.granted)}; denied_effects={jet_cli_rights_or_none(authority.denied)}; denied_required_effects={jet_cli_rights_or_none(jet_cli_denied_required(authority))}; undecided_effects={jet_cli_rights_or_none(jet_cli_undecided(authority))}; authority={authority.authority}"
+}
+
+// E1803 when the policy denies or leaves undecided a required right
+// (Authority.rs `policy_refusal`; EffectBudget.rs
+// `application_policy_diagnostic`). A file with no package manifest leads its
+// Fix with the exact `--allow` invocation of `command`.
+fn jet_cli_authority_refusal(authority: JetCLIAuthority, file: String, command: String) -> Diagnostic? Never! {
+    denied :: jet_cli_denied_required(authority)
+    undecided :: jet_cli_undecided(authority)
+    if denied.len() == 0 && undecided.len() == 0 -> return None
+    what :: if denied.len() == 0 -> "application authority is undecided for `{undecided.join(", ")}`" else -> "application authority denies `{denied.join(", ")}`"
+    diagnostic := diagnostic_from_registry("E1803", None, what, jet_cli_policy_why(authority), jet_cli_policy_fix(authority))
+    if denied.len() == 0 && jet_cli_is_application_default(authority) {
+        fix :: diagnostic.fix
+        rest :: if fix.len() == 0 -> "" else -> "{jet_cli_ascii_lower(fix.slice(0..<1))}{fix.slice(1..<fix.len())}"
+        diagnostic.fix = "run `jet {command} --allow={undecided.join(",")} {file}` to allow it for this run, or {rest}"
+    }
+    diagnostic.detail = Val(jet_cli_policy_facts(authority))
+    diagnostic.denial_kind = Val("authority")
+    diagnostic.scope_chain = [String]{authority.authority}
+    Val(diagnostic)
+}

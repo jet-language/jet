@@ -182,7 +182,7 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
         .IO(message) -> assert_eq(message, "{io}")
         else -> panic("a wrapped IOError must lift to IngestError.IO")
     }
-    loop error in [StoreError]{
+    loop error in ([StoreError]{
         StoreError.NotFound("missing object"),
         StoreError.AlreadyExists("existing object"),
         StoreError.PermissionDenied("protected object"),
@@ -190,7 +190,7 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
         StoreError.Interrupted("interrupted ingest"),
         StoreError.Other("other failure"),
         StoreError.LifecycleConflict(expected: None, current: None),
-    } {
+    }) {
         uplift :: store_ingest_store_error(error)
         if uplift == {
             .IO(message) -> assert_eq(message, error.message())
@@ -248,8 +248,8 @@ fn store_test_assert_nothing_published(verification: &StoreVerification, roots: 
     files.remove_all(files.join(roots.hangar_dir(), "closure-db")) ?? panic("remove closure db")
     retry :: store_test_ingest_fixture(&verification, roots, "retry-crash", [String: String]{"out": "retry"}, [String]{})
     assert(retry.deduplicated)
-    assert_eq((files.stat(object) ?? panic("stat")).mode & 146, 0)
-    assert_eq((files.stat(files.join(object, "payload")) ?? panic("stat")).mode & 146, 0)
+    assert_eq(((files.stat(object) ?? panic("stat")).mode).bit_and(146), 0)
+    assert_eq(((files.stat(files.join(object, "payload")) ?? panic("stat")).mode).bit_and(146), 0)
     assert(files.is_file(files.join(files.join(roots.hangar_dir(), retry.entry.id), "meta.json")))
     assert((store_closure_graph(&verification, roots) ?? panic("graph")).records.has_key(retry.entry.id))
     store_test_drop_roots(roots)

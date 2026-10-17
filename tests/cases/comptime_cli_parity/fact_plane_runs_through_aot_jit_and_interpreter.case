@@ -1,0 +1,18 @@
+# Port of comptime_cli_parity.rs::fact_plane_runs_through_aot_jit_and_interpreter; every original stem and native tier retained.
+# PENDING-GRAMMAR: step env and cwd.
+fixture: fixtures/fact_plane_runs_through_aot_jit_and_interpreter
+step: jet build fact_plane.jet
+cwd: {work}/comptime_fact_plane
+env: JET_STORE_DIR={work}/comptime_fact_plane/cache/aot
+step: built
+cwd: {work}/comptime_fact_plane
+stdout: = ../../../Examples/features/expected/comptime/fact_plane.out
+step: jet run fact_plane.jet
+cwd: {work}/comptime_fact_plane
+env: JET_STORE_DIR={work}/comptime_fact_plane/cache/build
+stdout: = ../../../Examples/features/expected/comptime/fact_plane.out
+step: jet run --interpret fact_plane.jet
+cwd: {work}/comptime_fact_plane
+env: JET_STORE_DIR={work}/comptime_fact_plane/cache/interpret/build
+stdout: = ../../../Examples/features/expected/comptime/fact_plane.out
+stderr: !~ E2201 # Original rejects interpreter deoptimization.

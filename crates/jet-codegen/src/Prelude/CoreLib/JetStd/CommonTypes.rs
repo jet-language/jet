@@ -287,6 +287,7 @@ pub enum DataEvent {
     Number(String),
     Text(String),
     Bytes(Vec<u8>),
+    DateTime(super::JetZonedDateTime),
     ArrayStart,
     ArrayEnd,
     ObjectStart,
@@ -443,17 +444,6 @@ pub struct CSVReader {
     pub(crate) eof: bool,
     pub(crate) record_index: i64,
 }
-pub struct CSVWriter {
-    pub(crate) output: super::JetFileWriter,
-    pub(crate) limits: EncodingLimits,
-    pub(crate) terminal: Option<EncodingError>,
-    pub(crate) total: i64,
-    pub(crate) record_index: i64,
-    pub(crate) finished: bool,
-    // D-ENCSTREAM-SURFACE1: record CRLF is stream closure; finish emits it.
-    // Drop without finish leaves the last row unterminated on the wire.
-    pub(crate) pending_crlf: bool,
-}
 pub struct XMLReader {
     pub(crate) input: super::JetFileReader,
     pub(crate) limits: EncodingLimits,
@@ -504,10 +494,15 @@ pub struct CBORWriter {
     pub(crate) allocation: super::JetEncodingAllocationBudget,
 }
 
+// ProcessSpec is unconditional; its retained descriptor carrier belongs to
+// the common owner closure, not the optional filesystem operation fragment.
+pub(crate) use super::JetProcessDirectory;
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProcessSpec {
     pub cmd: Vec<String>,
     pub cwd: Option<String>,
+    pub(crate) inherited_directories: Vec<JetProcessDirectory>,
     pub env_clear: bool,
     pub env_set: Vec<(String, String)>,
     pub env_remove: Vec<String>,
@@ -835,7 +830,7 @@ pub enum DataStreamInner {
     },
     Provider {
         format: DataFormat,
-        rows: Vec<DataTree>,
+        rows: Vec<Dyn>,
         cursor: usize,
     },
 }
@@ -872,7 +867,7 @@ impl DataSchema {
     ///
     /// Missing fields and explicit nulls are nullable. Conflicting concrete
     /// types widen to `Any`, while integers and floats share `float`.
-    pub fn infer(tree: &DataTree, format: DataFormat) -> Self {
+    pub fn infer(tree: &Dyn, format: DataFormat) -> Self {
         fn merge_type(left: &'static str, right: &'static str) -> (&'static str, bool) {
             if left == right {
                 return (
@@ -901,22 +896,23 @@ impl DataSchema {
             }
             ("Any", false)
         }
-        fn value_type(value: &DataTree) -> &'static str {
+        fn value_type(value: &Dyn) -> &'static str {
             match value {
-                DataTree::Null => "null",
-                DataTree::Bool(_) => "bool",
-                DataTree::Int(_) => "int",
-                DataTree::Float(_) | DataTree::Number(_) => "float",
-                DataTree::TypedText(_) | DataTree::Text(_) => "text",
-                DataTree::Bytes(_) => "bytes",
-                DataTree::Array(_) => "array",
-                DataTree::Object(_) => "object",
+                Dyn::Null => "null",
+                Dyn::Bool(_) => "bool",
+                Dyn::Int(_) => "int",
+                Dyn::Float(_) | Dyn::Number(_) => "float",
+                Dyn::Text(_) => "text",
+                Dyn::Bytes(_) => "bytes",
+                Dyn::DateTime(_) => "datetime",
+                Dyn::Array(_) => "array",
+                Dyn::Object(_) => "object",
             }
         }
         fn absorb(
             fields: &mut std::collections::BTreeMap<String, (&'static str, bool)>,
             name: String,
-            value: &DataTree,
+            value: &Dyn,
             nullable: bool,
         ) {
             let current_type = value_type(value);
@@ -932,20 +928,20 @@ impl DataSchema {
 
         let mut fields = std::collections::BTreeMap::<String, (&'static str, bool)>::new();
         match tree {
-            DataTree::Object(entries) => {
+            Dyn::Object(entries) => {
                 for (name, value) in entries {
-                    absorb(&mut fields, name.clone(), value, matches!(value, DataTree::Null));
+                    absorb(&mut fields, name.clone(), value, matches!(value, Dyn::Null));
                 }
             }
-            DataTree::Array(values) => {
+            Dyn::Array(values) => {
                 let mut rows_seen = 0usize;
                 for value in values {
-                    let DataTree::Object(entries) = value else {
+                    let Dyn::Object(entries) = value else {
                         absorb(
                             &mut fields,
                             "$".to_string(),
                             value,
-                            rows_seen > 0 || matches!(value, DataTree::Null),
+                            rows_seen > 0 || matches!(value, Dyn::Null),
                         );
                         rows_seen = rows_seen.saturating_add(1);
                         continue;
@@ -959,7 +955,7 @@ impl DataSchema {
                             &mut fields,
                             name.clone(),
                             value,
-                            rows_seen > 0 || matches!(value, DataTree::Null),
+                            rows_seen > 0 || matches!(value, Dyn::Null),
                         );
                     }
                     for name in fields
@@ -979,7 +975,7 @@ impl DataSchema {
                 &mut fields,
                 "$".to_string(),
                 value,
-                matches!(value, DataTree::Null),
+                matches!(value, Dyn::Null),
             ),
         }
         let columns = fields
@@ -2818,13 +2814,6 @@ pub struct Rng {
     pub state: u64,
 }
 
-// Deterministic fake-data capability. `locale` is a closed
-// code: 0 = en, 1 = de. The Prelude owns all generation semantics.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Fake {
-    pub state: u64,
-    pub locale: u8,
-}
 
 // D-SOLVER-LIB1=A: explicit finite solver state. This first slice records
 // ordinary Bool constraints in insertion order; no hidden backtracking.
@@ -4149,12 +4138,19 @@ pub fn jet_int_from_radix(text: &str, radix: i64) -> Result<i64, String> {
     JetBigInt::from_radix(text, radix).map(jet_int_pack)
 }
 
+#[inline]
 pub fn jet_int_to_i64(value: i64) -> Option<i64> {
     if !jet_int_is_tagged(value) {
         Some(value)
     } else {
-        jet_int_big_value(value)?.try_i64()
+        jet_int_to_i64_slow(value)
     }
+}
+
+#[cold]
+#[inline(never)]
+fn jet_int_to_i64_slow(value: i64) -> Option<i64> {
+    jet_int_big_value(value)?.try_i64()
 }
 
 pub fn jet_int_to_i128(value: i64) -> Option<i128> {
@@ -4785,10 +4781,6 @@ pub fn jet_int_saturating_mul(left: i64, right: i64) -> i64 {
     jet_int_mul(left, right)
 }
 
-pub fn jet_int_int_pow(left: i64, right: i64) -> i64 {
-    jet_int_checked_pow(left, right).unwrap_or_else(|| jet_int_from_i64(0))
-}
-
 pub fn jet_int_gcd(left: i64, right: i64) -> i64 {
     let left = jet_int_value(left);
     let right = jet_int_value(right);
@@ -4814,6 +4806,17 @@ impl JetNativeIntResult for i64 {
     #[inline(always)]
     fn into_owned_int(self) -> jet_foundation::Numeric::JetInt {
         jet_foundation::Numeric::JetInt::from_i64(self)
+    }
+}
+
+impl JetNativeIntResult for usize {
+    #[inline(always)]
+    fn into_owned_int(self) -> jet_foundation::Numeric::JetInt {
+        match i64::try_from(self) {
+            Ok(value) => jet_foundation::Numeric::JetInt::from_i64(value),
+            Err(_) => jet_foundation::Numeric::JetInt::from_big(
+                jet_foundation::Numeric::CtBigInt::from_u64(self as u64)),
+        }
     }
 }
 
@@ -4844,10 +4847,42 @@ impl JetNativeIntArgument for i64 {
     }
 }
 
+impl JetNativeIntArgument for usize {
+    #[inline(always)]
+    fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
+        let number = match value.to_i64() {
+            Some(number) => i128::from(number),
+            None => value.to_big().try_i128()
+                .ok_or_else(|| "exact Int does not fit the native usize ABI".to_string())?,
+        };
+        usize::try_from(number)
+            .map_err(|_| "exact Int does not fit the native usize ABI".to_string())
+    }
+}
+
 impl JetNativeIntArgument for jet_foundation::Numeric::JetInt {
     #[inline(always)]
     fn from_owned_int(value: jet_foundation::Numeric::JetInt) -> Result<Self, String> {
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod native_usize_tests {
+    use super::*;
+
+    #[test]
+    fn native_count_slots_round_trip_without_signed_wrap() {
+        for number in [0, 596, usize::MAX] {
+            let exact = jet_int_owned_from_native_result(number);
+            assert_eq!(jet_int_owned_into_native::<usize>(exact).unwrap(), number);
+        }
+        assert!(jet_int_owned_into_native::<usize>(
+            jet_foundation::Numeric::JetInt::from_i64(-1)).is_err());
+        let overflow = jet_foundation::Numeric::CtBigInt::from_u64(usize::MAX as u64)
+            .add(&jet_foundation::Numeric::CtBigInt::from_int(1));
+        assert!(jet_int_owned_into_native::<usize>(
+            jet_foundation::Numeric::JetInt::from_big(overflow)).is_err());
     }
 }
 
@@ -4856,6 +4891,67 @@ pub fn jet_int_owned_into_native<T: JetNativeIntArgument>(
     value: jet_foundation::Numeric::JetInt,
 ) -> Result<T, String> {
     T::from_owned_int(value)
+}
+
+// Checked optionals are outcomes; host slots may declare either that carrier
+// or Rust Option. The declared slot chooses the shape, just as for native Int.
+pub trait JetNativeOptionalArgument<T>: Sized {
+    fn from_optional(value: Result<T, JetAbsent>) -> Self;
+}
+
+impl<T> JetNativeOptionalArgument<T> for Option<T> {
+    #[inline(always)]
+    fn from_optional(value: Result<T, JetAbsent>) -> Self { value.ok() }
+}
+
+impl<T> JetNativeOptionalArgument<T> for Result<T, JetAbsent> {
+    #[inline(always)]
+    fn from_optional(value: Result<T, JetAbsent>) -> Self { value }
+}
+
+#[inline(always)]
+pub fn jet_optional_into_native<T, U: JetNativeOptionalArgument<T>>(value: Result<T, JetAbsent>) -> U {
+    U::from_optional(value)
+}
+
+pub trait JetNativeOptionalResult<T> {
+    fn into_optional(self) -> Result<T, JetAbsent>;
+}
+
+impl<T> JetNativeOptionalResult<T> for Option<T> {
+    #[inline(always)]
+    fn into_optional(self) -> Result<T, JetAbsent> { self.ok_or(JetAbsent) }
+}
+
+impl<T> JetNativeOptionalResult<T> for Result<T, JetAbsent> {
+    #[inline(always)]
+    fn into_optional(self) -> Result<T, JetAbsent> { self }
+}
+
+#[inline(always)]
+pub fn jet_optional_from_native<T>(value: impl JetNativeOptionalResult<T>) -> Result<T, JetAbsent> {
+    value.into_optional()
+}
+
+#[cfg(test)]
+mod native_optional_abi_tests {
+    use super::*;
+
+    #[test]
+    fn native_optional_slots_preserve_presence_and_declared_shape() {
+        let present: Option<i64> = jet_optional_into_native(
+            Ok(jet_foundation::Numeric::JetInt::from_i64(7))
+                .map(|value| jet_int_owned_into_native(value).unwrap()),
+        );
+        assert_eq!(present, Some(7));
+        let absent: Option<i64> = jet_optional_into_native(Err::<i64, _>(JetAbsent));
+        assert_eq!(absent, None);
+        let outcome: Result<i64, JetAbsent> = jet_optional_into_native(Ok(9));
+        assert!(matches!(outcome, Ok(9)));
+        assert!(matches!(jet_optional_from_native(present), Ok(7)));
+        assert!(jet_optional_from_native(absent).is_err());
+        assert!(matches!(jet_optional_from_native(outcome), Ok(9)));
+    }
 }
 
 // A native kernel's count map (`JetMap<K, i64>`, shared with the resident JIT)
@@ -4893,11 +4989,86 @@ pub(crate) fn jet_int_owned_from_raw_result(value: i64) -> jet_foundation::Numer
     unsafe { jet_foundation::Numeric::JetInt::from_raw_owned(value) }
 }
 
+/// #4566: exact-Int storage (`[Int#N]`, `[Int]`) copied and released in
+/// bulk. One vectorised scan (`JetInt::all_inline`) finds whether any
+/// element owns a node; when none does, the copy is a `memcpy` and the
+/// release frees only the buffer. Otherwise each element clones or drops as
+/// usual, so the meaning never changes.
+pub(crate) trait JetIntBulk: Sized {
+    fn jet_int_bulk_clone(&self) -> Self;
+    fn jet_int_bulk_drop(self);
+}
+
+impl<const N: usize> JetIntBulk for [jet_foundation::Numeric::JetInt; N] {
+    #[inline(always)]
+    fn jet_int_bulk_clone(&self) -> Self {
+        if jet_foundation::Numeric::JetInt::all_inline(self) {
+            // SAFETY: no element owns a node, so the bitwise copy is a
+            // second owner of nothing.
+            unsafe { std::ptr::read(self) }
+        } else {
+            self.clone()
+        }
+    }
+
+    #[inline(always)]
+    fn jet_int_bulk_drop(self) {
+        if jet_foundation::Numeric::JetInt::all_inline(&self) {
+            std::mem::forget(self);
+        } else {
+            drop(self);
+        }
+    }
+}
+
+impl JetIntBulk for Vec<jet_foundation::Numeric::JetInt> {
+    #[inline]
+    fn jet_int_bulk_clone(&self) -> Self {
+        if !jet_foundation::Numeric::JetInt::all_inline(self) {
+            return self.clone();
+        }
+        let mut copy = Vec::with_capacity(self.len());
+        // SAFETY: the copy has room for every element, and no element owns a
+        // node, so the bitwise copies own nothing.
+        unsafe {
+            std::ptr::copy_nonoverlapping(self.as_ptr(), copy.as_mut_ptr(), self.len());
+            copy.set_len(self.len());
+        }
+        copy
+    }
+
+    #[inline]
+    fn jet_int_bulk_drop(mut self) {
+        if jet_foundation::Numeric::JetInt::all_inline(&self) {
+            // SAFETY: no element owns a node, so forgetting them leaks
+            // nothing; dropping the empty vector frees the buffer.
+            unsafe { self.set_len(0) };
+        }
+        drop(self);
+    }
+}
+
+/// #4566: `xs.clear()` on `[Int]` storage. One vectorised scan
+/// (`JetInt::all_inline`) finds whether any element owns a node; when none
+/// does, the elements are forgotten (they own nothing) and the buffer stays.
+/// Otherwise each element drops as usual, so the meaning never changes.
+#[inline]
+pub(crate) fn jet_int_list_clear(list: &mut Vec<jet_foundation::Numeric::JetInt>) {
+    if jet_foundation::Numeric::JetInt::all_inline(list) {
+        // SAFETY: length 0 is within capacity, and no element owns a node,
+        // so forgetting them leaks nothing.
+        unsafe { list.set_len(0) };
+    } else {
+        list.clear();
+    }
+}
+
 #[inline(always)]
 fn jet_int_owned_raw(value: &jet_foundation::Numeric::JetInt) -> i64 {
     value.to_raw()
 }
 
+#[inline(always)]
 pub fn jet_int_owned_from_i64(value: i64) -> jet_foundation::Numeric::JetInt {
     jet_foundation::Numeric::JetInt::from_i64(value)
 }
@@ -4959,11 +5130,11 @@ pub fn jet_int_owned_from_radix(
         .map(jet_int_owned_from_raw_result)
 }
 
+#[inline(always)]
 pub fn jet_int_owned_to_i64(
     value: &jet_foundation::Numeric::JetInt,
 ) -> Result<i64, String> {
-    jet_int_to_i64(jet_int_owned_raw(value))
-        .ok_or_else(|| "exact Int does not fit the native i64 ABI".to_string())
+    value.to_native_i64().map_err(str::to_owned)
 }
 
 pub fn jet_int_owned_to_f64(value: &jet_foundation::Numeric::JetInt) -> f64 {
@@ -6565,6 +6736,8 @@ impl super::JetShow for IOError {
             IOError::Closed(context) => (5, context),
             IOError::Protocol(context) => (6, context),
             IOError::Other(context) => (7, context),
+            IOError::AlreadyExists(context) => (9, context),
+            IOError::Unsupported(context) => (10, context),
             IOError::ResourceLimit(limit) => {
                 return format!("process resource limit exceeded: {}", limit.jet_show());
             }
@@ -6593,6 +6766,8 @@ impl super::JetDebug for IOError {
             IOError::Closed(context) => ("Closed", context),
             IOError::Protocol(context) => ("Protocol", context),
             IOError::Other(context) => ("Other", context),
+            IOError::AlreadyExists(context) => ("AlreadyExists", context),
+            IOError::Unsupported(context) => ("Unsupported", context),
             IOError::ResourceLimit(limit) => {
                 return crate::jet_debug_variant("ResourceLimit", Some(limit.jet_debug()));
             }
@@ -6810,14 +6985,6 @@ impl super::JetDebug for Clock {
 impl super::JetShow for Rng {
     fn jet_show(&self) -> String {
         format!("RNG {{ .. }}")
-    }
-}
-impl super::JetShow for Fake {
-    fn jet_show(&self) -> String {
-        format!(
-            "Fake {{ locale: {} }}",
-            if self.locale == 1 { "de" } else { "en" }
-        )
     }
 }
 impl super::JetShow for Solver {

@@ -3,7 +3,7 @@
 // `include!` this exact source instead of re-encoding the logic in Rust a
 // second time (I9 — semantics live only in Prelude/**; JIT hosts marshal
 // args/results and call the same Prelude function).
-fn jet_std_io_input(prompt: Option<&String>) -> Result<String, jet_std::IOError> {
+fn jet_std_io_input(prompt: Option<&str>) -> Result<String, jet_std::IOError> {
     if let Some(p) = prompt {
         if jet_fault_should_fail("IO.Write") {
             return Err(jet_std::IOError::other(
@@ -44,7 +44,6 @@ fn jet_std_io_readline() -> Result<String, jet_std::IOError> {
 }
 
 fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
-    use std::io::Read;
     if jet_fault_should_fail("IO.Read") {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -52,21 +51,12 @@ fn jet_std_io_read_all_input() -> Result<String, jet_std::IOError> {
             "fault injected: IO.Read",
         ));
     }
-    let mut input = String::new();
-    std::io::stdin()
-        .read_to_string(&mut input)
-        .map_err(|error| {
-            jet_std::IOError::other(
-                jet_std::IOOperation::Read,
-                Some("stdin".to_string()),
-                error,
-            )
-        })?;
-    Ok(input)
+    jet_std_io_read_all_raw().map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), error)
+    })
 }
 
-fn jet_std_io_read_until(delim: &String) -> Result<String, jet_std::IOError> {
-    use std::io::Read;
+fn jet_std_io_read_until(delim: &str) -> Result<String, jet_std::IOError> {
     if delim.is_empty() {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -81,15 +71,29 @@ fn jet_std_io_read_until(delim: &String) -> Result<String, jet_std::IOError> {
             "fault injected: IO.Read",
         ));
     }
+    jet_std_io_read_until_raw(delim).map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), error)
+    })
+}
+
+fn jet_std_io_read_all_raw() -> std::io::Result<String> {
+    use std::io::Read;
+    let mut input = String::new();
+    std::io::stdin().read_to_string(&mut input)?;
+    Ok(input)
+}
+
+fn jet_std_io_read_until_raw(delim: &str) -> std::io::Result<String> {
+    use std::io::Read;
     let needle = delim.as_bytes();
     let mut stdin = std::io::stdin().lock();
     let mut out = Vec::new();
     let mut window = Vec::new();
     let mut buf = [0u8; 1];
     loop {
-        match stdin.read(&mut buf) {
-            Ok(0) => break,
-            Ok(_) => {
+        match stdin.read(&mut buf)? {
+            0 => break,
+            _ => {
                 out.push(buf[0]);
                 window.push(buf[0]);
                 if window.len() > needle.len() {
@@ -100,26 +104,12 @@ fn jet_std_io_read_until(delim: &String) -> Result<String, jet_std::IOError> {
                     break;
                 }
             }
-            Err(e) => {
-                return Err(jet_std::IOError::other(
-                    jet_std::IOOperation::Read,
-                    Some("stdin".to_string()),
-                    e,
-                ))
-            }
         }
     }
-    String::from_utf8(out).map_err(|e| {
-        jet_std::IOError::other(
-            jet_std::IOOperation::Read,
-            Some("stdin".to_string()),
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e),
-        )
-    })
+    String::from_utf8(out).map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
 }
 
 fn jet_std_io_take(n: i64) -> Result<Vec<u8>, jet_std::IOError> {
-    use std::io::Read;
     if n < 0 {
         return Err(jet_std::IOError::other(
             jet_std::IOOperation::Read,
@@ -134,11 +124,15 @@ fn jet_std_io_take(n: i64) -> Result<Vec<u8>, jet_std::IOError> {
             "fault injected: IO.Read",
         ));
     }
+    jet_std_io_take_raw(n).map_err(|error| {
+        jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), error)
+    })
+}
+
+fn jet_std_io_take_raw(n: i64) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
     let mut buf = vec![0u8; n as usize];
-    let read = std::io::stdin()
-        .lock()
-        .read(&mut buf)
-        .map_err(|e| jet_std::IOError::other(jet_std::IOOperation::Read, Some("stdin".to_string()), e))?;
+    let read = std::io::stdin().lock().read(&mut buf)?;
     buf.truncate(read);
     Ok(buf)
 }

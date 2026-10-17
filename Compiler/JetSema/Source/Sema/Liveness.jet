@@ -11,11 +11,31 @@ use jet_foundation.[
     Program,
     Span,
     TextEdit,
+    MIRStructureFact,
+    MIRStructureFactKind,
     diagnostic_with_edit,
 ]
 
-pub fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String]) -> [Diagnostic] {
-    diagnostics := [Diagnostic]{}
+struct SemaLivenessVerdict {
+    code: String
+    diagnostic: Diagnostic
+    fact: MIRStructureFact
+}
+
+struct SemaLivenessResult {
+    diagnostics: [Diagnostic]
+    facts: [MIRStructureFact]
+}
+
+fn sema_liveness_verdict(code: String, name: String, source: String, span: Span, detail: String, diagnostic: Diagnostic, verdicts: &[SemaLivenessVerdict]) Never! {
+    &verdicts.push(SemaLivenessVerdict{
+        code: code,
+        diagnostic: diagnostic,
+        fact: MIRStructureFact{kind: MIRStructureFactKind.Liveness, subject: name, source: source, span: span, status: "unreachable", detail: detail, gate: None},
+    })
+}
+
+fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String], source: String, verdicts: &[SemaLivenessVerdict]) {
     loop declaration in program.imports {
         if declaration.is_pub || declaration.is_package_pub -> next
         if declaration.kind == {
@@ -24,7 +44,7 @@ pub fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String])
                 explicit_alias :: declaration.alias_span.start > declaration.span.start
                 span :: if explicit_alias -> declaration.alias_span else -> declaration.span
                 edit :: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: span, new_text: ""}
-                sema_liveness_note_import(program, foreign_aliases, declaration.alias, span, edit, &diagnostics)
+                sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, edit, &verdicts)
             }
             .Module(_, path_span) -> {
                 // `use core.files as files` renames the alias; an unaliased
@@ -32,7 +52,7 @@ pub fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String])
                 explicit_alias :: declaration.alias_span.start >= path_span.end
                 span :: if explicit_alias -> declaration.alias_span else -> Span{start: path_span.end - declaration.alias.len(), end: path_span.end}
                 edit :: if explicit_alias -> TextEdit{span: span, new_text: "_{declaration.alias}"} else -> TextEdit{span: declaration.span, new_text: ""}
-                sema_liveness_note_import(program, foreign_aliases, declaration.alias, span, edit, &diagnostics)
+                sema_liveness_note_import(program, foreign_aliases, declaration.alias, source, span, edit, &verdicts)
             }
             .Unqualified(_, module_alias_span, items, _, _) -> {
                 loop (index, item) in items {
@@ -44,19 +64,18 @@ pub fn sema_liveness_unused_imports(program: Program, foreign_aliases: [String])
                     }
                     // A member without `as` keeps its path: `mem` becomes `mem as _mem`.
                     replacement :: if item.alias == None -> "{local} as _{local}" else -> "_{local}"
-                    sema_liveness_note_import(program, foreign_aliases, local, span, TextEdit{span: span, new_text: replacement}, &diagnostics)
+                    sema_liveness_note_import(program, foreign_aliases, local, source, span, TextEdit{span: span, new_text: replacement}, &verdicts)
                 }
             }
         }
     }
-    diagnostics
 }
 
-fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: String, span: Span, edit: TextEdit, diagnostics: &[Diagnostic]) Never! {
+fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: String, source: String, span: Span, edit: TextEdit, verdicts: &[SemaLivenessVerdict]) Never! {
     if name == "" || name.starts_with("_") || span.start >= span.end -> return
     if program.used_import_names.contains(name) || foreign_aliases.contains(name) -> return
     diagnostic :: sema_lint("L0103", span, "Import `{name}` is never used.", "An unused import adds a name and dependency to the file without contributing to checked code.", "Remove the import, or rename `{name}` to `_{name}` when the import is intentionally kept.")
-    &diagnostics.push(diagnostic_with_edit(diagnostic, edit))
+    sema_liveness_verdict("L0103", name, source, span, "import is never read", diagnostic_with_edit(diagnostic, edit), &verdicts)
 }
 
 // ---------------------------------------------------------------------------
@@ -68,11 +87,11 @@ fn sema_liveness_note_import(program: Program, foreign_aliases: [String], name: 
 // entry, jobs, wasm exports) are never reported. Only snapshot (user) modules
 // are judged; every module's references count.
 
-pub struct SemaLivenessCandidate {
-    pub module_index: Int
-    pub body: Span
-    pub package_identity: String
-    pub private: Bool
+struct SemaLivenessCandidate {
+    module_index: Int
+    body: Span
+    package_identity: String
+    private: Bool
 }
 
 fn sema_liveness_ignored(name: String) -> Bool Never! {
@@ -95,11 +114,18 @@ fn sema_liveness_removable(function: Func) -> Bool Never! {
     function.body.len() == 0 && function.meta == None && function.markers.len() == 0 && function.external_type == None && function.inline_foreign == None && function.undo == None && function.web_marker == None && function.pre.len() == 0 && function.post.len() == 0 && !function.compiler_generated && !function.is_unsafe && !function.is_pure && !function.is_reactive && !function.is_replayable && !function.is_job && function.every == None && !function.is_must_use && function.kernel == None
 }
 
-fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: &[String:Bool], graph: SemaRegistrationGraph, source_index: Int, key: String, site: Span) Never! {
+fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: &[String:Bool], graph: SemaRegistrationGraph, source_index: Int, key: String, site: Span, caller_key: String) Never! {
     candidate :: candidates.get(key) ?? return
     if source_index == candidate.module_index {
-        // A private function's own body never keeps it alive.
-        if candidate.private && site.start >= candidate.body.start && site.end <= candidate.body.end -> return
+        // Specialization can carry a sibling's call site into this module's
+        // checked rows. Byte offsets from two files are not caller identities.
+        if candidate.private {
+            if caller_key != "" {
+                if caller_key == key -> return
+            } else {
+                if site.start >= candidate.body.start && site.end <= candidate.body.end -> return
+            }
+        }
         if candidate.private -> reached[key] = true
         return
     }
@@ -107,9 +133,9 @@ fn sema_liveness_note_site(candidates: [String:SemaLivenessCandidate], reached: 
     if !candidate.private || sema_registration_package_is_namespace(candidate.package_identity) -> reached[key] = true
 }
 
-pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> [Diagnostic] {
-    diagnostics := [Diagnostic]{}
-    if modules.len() != graph.modules.len() -> return diagnostics
+fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult]) -> SemaLivenessResult {
+    verdicts := [SemaLivenessVerdict]{}
+    if modules.len() != graph.modules.len() -> return SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
     candidates := [String:SemaLivenessCandidate]{}
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
@@ -128,15 +154,21 @@ pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraph
     }
     reached := [String:Bool]{}
     loop (source_index, checked) in modules {
-        loop reference in checked.name_references -> sema_liveness_note_site(candidates, &reached, graph, source_index, reference.symbol.id.key, reference.span)
+        loop reference in checked.name_references -> sema_liveness_note_site(candidates, &reached, graph, source_index, reference.symbol.id.key, reference.span, "")
         loop call in checked.call_facts {
             callee :: call.callee ?? next
-            sema_liveness_note_site(candidates, &reached, graph, source_index, callee.key, call.span)
+            sema_liveness_note_site(candidates, &reached, graph, source_index, callee.key, call.span, call.caller_key)
         }
     }
     loop (module_index, module_row) in graph.modules {
         if module_row.source_origin != SemaSourceOrigin.Snapshot -> next
-        start :: diagnostics.len()
+        start :: verdicts.len()
+        foreign_aliases := [String]{}
+        loop edge in graph.edges {
+            if edge.source_module_identity != module_row.module_identity -> next
+            if edge.foreign_binding == .Val(binding) -> &foreign_aliases.push(binding.alias)
+        }
+        sema_liveness_unused_imports(module_row.program, foreign_aliases, module_row.module_path, &verdicts)
         loop function in module_row.functions {
             symbol :: function.symbol
             candidate :: candidates.get(symbol.id.key) ?? next
@@ -144,31 +176,48 @@ pub fn sema_liveness_structure(graph: SemaRegistrationGraph, modules: [SemaGraph
             if candidate.private {
                 edit :: if sema_liveness_removable(function.declaration) -> TextEdit{span: function.declaration.span, new_text: ""} else -> TextEdit{span: symbol.span, new_text: "_{symbol.name}"}
                 diagnostic :: sema_lint("L0104", symbol.span, "Private function `{symbol.name}` is never called or used as a value.", "A private function with no reachable reference is dead code; public functions stay exempt because other modules may use them.", "Remove the function, or rename `{symbol.name}` to `_{symbol.name}` when it is intentional.")
-                &diagnostics.push(diagnostic_with_edit(diagnostic, edit))
+                sema_liveness_verdict("L0104", symbol.name, module_row.module_path, symbol.span, "private function is never reached", diagnostic_with_edit(diagnostic, edit), &verdicts)
             } else {
-                sema_liveness_unreachable_export(symbol.name, symbol.span, &diagnostics)
+                sema_liveness_unreachable_export(symbol.name, module_row.module_path, symbol.span, &verdicts)
             }
         }
         loop constant in module_row.constants {
             symbol :: constant.symbol
             candidate :: candidates.get(symbol.id.key) ?? next
             if candidate.module_index != module_index || reached.get(symbol.id.key) != None -> next
-            sema_liveness_unreachable_export(symbol.name, symbol.span, &diagnostics)
+            sema_liveness_unreachable_export(symbol.name, module_row.module_path, symbol.span, &verdicts)
         }
-        sema_liveness_unreachable_reexports(graph, module_index, &diagnostics)
-        sema_attach_diagnostic_source_locations(&diagnostics, start, module_row.source_segments)
+        sema_liveness_unreachable_reexports(graph, module_index, &verdicts)
+        loop position in start..<verdicts.len() {
+            verdicts[position].diagnostic = sema_diagnostic_with_source_location(verdicts[position].diagnostic, module_row.source_segments)
+        }
     }
-    diagnostics
+    &verdicts.sort_by((left: SemaLivenessVerdict, right: SemaLivenessVerdict) -> {
+        source :: left.fact.source <=> right.fact.source
+        if source != Ordering.Equal -> source else -> {
+            start :: left.fact.span.start <=> right.fact.span.start
+            if start != Ordering.Equal -> start else -> {
+                code :: left.code <=> right.code
+                if code != Ordering.Equal -> code else -> left.fact.subject <=> right.fact.subject
+            }
+        }
+    })
+    result := SemaLivenessResult{diagnostics: [Diagnostic]{}, facts: [MIRStructureFact]{}}
+    loop verdict in verdicts {
+        &result.diagnostics.push(verdict.diagnostic)
+        &result.facts.push(verdict.fact)
+    }
+    result
 }
 
-fn sema_liveness_unreachable_export(name: String, span: Span, diagnostics: &[Diagnostic]) {
-    diagnostic :: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; library `pub` remains open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
-    &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "_{name}"}))
+fn sema_liveness_unreachable_export(name: String, source: String, span: Span, verdicts: &[SemaLivenessVerdict]) {
+    diagnostic :: sema_lint("L0105", span, "Package export `{name}` is unreachable.", "The package's explicit import graph and application roots contain no consumer for this package-scoped export; a library's public items remain open to external consumers.", "Remove the export, or rename `{name}` to `_{name}` when it is intentional.")
+    sema_liveness_verdict("L0105", name, source, span, "package export is unreachable", diagnostic_with_edit(diagnostic, TextEdit{span: span, new_text: "_{name}"}), &verdicts)
 }
 
 // `pub(package) use m.[name]` is reached when another module of the package
 // imports `name` through this module.
-fn sema_liveness_unreachable_reexports(graph: SemaRegistrationGraph, module_index: Int, diagnostics: &[Diagnostic]) {
+fn sema_liveness_unreachable_reexports(graph: SemaRegistrationGraph, module_index: Int, verdicts: &[SemaLivenessVerdict]) {
     module_row :: graph.modules[module_index]
     loop import in module_row.imports {
         if !import.declaration.is_package_pub -> next
@@ -193,7 +242,7 @@ fn sema_liveness_unreachable_reexports(graph: SemaRegistrationGraph, module_inde
                     } ?? false
                     if found -> break true
                 } ?? false
-                if !consumed -> sema_liveness_unreachable_export(local, span, &diagnostics)
+                if !consumed -> sema_liveness_unreachable_export(local, module_row.module_path, span, &verdicts)
             }
         }
     }

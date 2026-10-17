@@ -1,0 +1,17 @@
+# PORT tests/repl.rs:1101-1140 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(read_bytes); runtime PENDING-SAME-HEAD.
+refused: read_bytes
+fixture: repl_native_run_uses_stdin_snapshot_not_replaced_temp_path.fixture
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+session app raw: jet repl
+unset: JET_REPL_HISTORY
+await: dir state/jet timeout 2s every 10ms
+sleep: 50ms
+write: {tmp}/__jet_repl_run_{pid:app}_0.jet repl_native_run_uses_stdin_snapshot_not_replaced_temp_path.fixture/hostile.jet.txt
+send app: repl_native_run_uses_stdin_snapshot_not_replaced_temp_path.fixture/input.in
+close app
+exit: 0
+remove: {tmp}/__jet_repl_run_{pid:app}_0.jet
+stdout: ~ "authoritative" # Original stdin-snapshot execution rs1133.
+stdout: !~ "replaced" # Original replaced-temp-path rejection rs1137.

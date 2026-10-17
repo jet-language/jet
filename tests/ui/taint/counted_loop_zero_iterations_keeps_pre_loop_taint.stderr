@@ -1,0 +1,26 @@
+Error [E1321]: Output entry `run` has the wrong callable contract
+  --> tests/ui/taint/counted_loop_zero_iterations_keeps_pre_loop_taint.jet:4:1
+    |
+  4 | fn run(n: Int) {
+    | ^^^^^^^^^^^^^^^^
+ Why: An Executable takes zero or one typed CLI parameter and returns `()` or `() ?`
+ Fix: Declare the entry as `fn run()` or `fn run() ()?`
+More: jet-lang.dev/e/E1321
+
+Error [E1004]: `core.process` has no item `run`
+  --> counted_loop_zero_iterations_keeps_pre_loop_taint.jet:9:13
+    |
+  9 |     process.run(["echo", value]) ?? return Err("test")
+    |             ^^^
+ Why: Standard library modules expose a fixed set of public items
+ Fix: Use one of: ProcessSignal, args, argv, check, cmd, current_pid, cwd, env, env_get, exit, on_signal, pipeline, run_spec, status_ok, stdin_text, which, Completed, ProcessReceipt, ProcessSpec, arg, args_extend, call, capture, check_call, check_output, combined_output, env_get_or, env_keys, env_set, env_truthy, failed, getoutput, getstatusoutput, list2cmdline, shell, signal_number, stderr_lines, stdout_lines, exited
+More: jet-lang.dev/e/E1004
+
+Error [E0721]: A `Input` value is denied at `process.run`
+  --> tests/ui/taint/counted_loop_zero_iterations_keeps_pre_loop_taint.jet:9:13
+    |
+  9 |     process.run(["echo", value]) ?? return Err("test")
+    |             ^^^
+ Why: The declaration for `Input` denies `Exec`, which covers this destination
+ Fix: Remove the destination use, or pass the value through a matching `#Scrub(Input)` function
+More: jet-lang.dev/e/E0721

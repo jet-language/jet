@@ -1,0 +1,28 @@
+# HAND-PORT tests/allocator_families.rs:968-1004 program_allocator_example_matches_aot_default_and_interpreter
+# PENDING-GRAMMAR: approved batch-two/four forms, no runtime parity claim.
+fixture: program_allocator_example_matches_aot_default_and_interpreter.fixture
+env: NO_COLOR=1
+requires: tool:rustc
+copy: source program
+mkdir: cache-default
+mkdir: cache-interpreter
+mkdir: cache-aot
+step: jet run run.jet
+cwd: program
+env: JET_STORE_DIR={work}/cache-default
+exit: 0
+stdout: = program_allocator_example_matches_aot_default_and_interpreter.stdout.expected
+file: source/.jet absent # original predicate
+step: jet run --interpret run.jet
+cwd: program
+env: JET_STORE_DIR={work}/cache-interpreter
+exit: 0
+stdout: = program_allocator_example_matches_aot_default_and_interpreter.stdout.expected
+file: source/.jet absent # original predicate
+step: jet run --release run.jet
+cwd: program
+env: JET_STORE_DIR={work}/cache-aot
+exit: 0
+stdout: = program_allocator_example_matches_aot_default_and_interpreter.stdout.expected
+file: source/.jet absent # original predicate
+

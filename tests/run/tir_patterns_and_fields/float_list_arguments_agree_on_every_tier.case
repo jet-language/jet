@@ -1,0 +1,14 @@
+# Port of tests/tir_patterns_and_fields.rs:448-488.
+# ORACLE-LITERAL tests/tir_patterns_and_fields.rs:469; decoded original bytes, never blessed.
+# Explicit interpreter-only duplicate assertions retire under D-EXEC1; supported compiled tiers retain the same oracle.
+# Entry src bytes are unchanged; main.jet -> run.jet is Golden's project entry spelling. No original path assertion is affected.
+# PENDING-KIT: documented Golden build/built steps need the kit's pseudo-build parse fix.
+step: jet run run.jet
+exit: 0
+stdout: = float_list_arguments_agree_on_every_tier.out
+stderr: !~ E0956 # Original default-run no-deoptimization assertion.
+step: build
+exit: 0
+step: built
+exit: 0
+stdout: = float_list_arguments_agree_on_every_tier.out

@@ -1,0 +1,16 @@
+# PORT tests/pkg.rs::git_dep_rejects_option_url_before_ls_remote_execution:4901-4903; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/git_dep_rejects_option_url_before_ls_remote_execution
+requires: os:unix
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+chmod: bin/git 0755
+step: jet fetch
+env: PATH={work}/bin:{env:PATH}
+env: JET_TEST_GIT_INVOKED={work}/git-url-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+file: git-url-invoked absent
+file: .jet absent

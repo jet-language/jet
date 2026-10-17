@@ -49,6 +49,10 @@ impl<'a> Checker<'a> {
         let inferred = self.infer(e);
         self.expected_type = saved_expected;
         if let Some(t) = inferred {
+            if crate::Sema::CheckerCoreLib::is_dyn_type(&t) {
+                self.diags.push(Diagnostic::from_row("E0170", &[], Some(e.span())));
+                return;
+            }
             if t != Type::Bool {
                 self.diags.push(Diagnostic::error(
                     "E0110",

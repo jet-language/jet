@@ -5,15 +5,15 @@
 
 // A derivation materialized to Nix-compatible store paths. `outputs` holds
 // each output's store path with its fixed-output method and hash.
-pub struct NixNativeDerivation {
-    pub name: String
-    pub drv_path: String
-    pub outputs: [String: NixDerivationOutput]
-    pub builder: String
-    pub args: [String]
-    pub env: [String: String]
+struct NixNativeDerivation {
+    name: String
+    drv_path: String
+    outputs: [String: NixDerivationOutput]
+    builder: String
+    args: [String]
+    env: [String: String]
     // Sorted and unique.
-    pub input_sources: [String]
+    input_sources: [String]
 
     fn output_path(self, name: String) -> String? Never! {
         output :: self.outputs.get(name) ?? return None
@@ -28,8 +28,8 @@ pub struct NixNativeDerivation {
     }
 }
 
-pub struct NixNativeBoundary {
-    manifest: NixEvalOracleManifest
+struct NixNativeBoundary {
+    priv manifest: NixEvalOracleManifest
 
     // The committed oracle manifest; evaluation is refused unless it is
     // product-ready.
@@ -120,7 +120,7 @@ fn nix_materialize_derivation(evaluation: NixEvalDerivation) -> NixNativeDerivat
     loop name in unresolved.output_names() {
         output :: unresolved.outputs[name]
         path :: if output.is_fixed() -> nix_make_fixed_output_path(store_dir, nix_output_path_name(evaluation.name, name), output.method_algo, output.hash_hex) else -> nix_make_output_path(store_dir, name, modulo.get(name) ?? return Err(NixError.DrvPath("missing derivation modulo hash for output {name}")), evaluation.name)
-        outputs[name] = NixDerivationOutput{name: ~name, path: ~path, method_algo: output.method_algo, hash_hex: output.hash_hex}
+        outputs[name] = NixDerivationOutput{name: name.copy(), path: path.copy(), method_algo: output.method_algo, hash_hex: output.hash_hex}
         env[name] = path
     }
     drv :: NixDerivation{outputs, input_drvs: [NixInputDrv]{}, input_srcs, platform: evaluation.system, builder: evaluation.builder, args: evaluation.args, env: nixeval_key_ordered(env)}

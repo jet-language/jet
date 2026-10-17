@@ -1,0 +1,32 @@
+// Private audited pointer-word calls; the provider is the same amalgamation
+// used by libsqlite3-sys 0.28.0, never an ambient system SQLite.
+use core.mem
+use c.[sqlite3 as sql]
+
+#Import module c.sqlite3 {
+    fn open(filename: String, database: &U64, flags: I32, vfs: U64) -> I32 = "sqlite3_open_v2"
+    fn exec(database: U64, text: String, callback: U64, data: U64, error: &U64) -> I32 = "sqlite3_exec"
+    fn prepare(database: U64, text: String, bytes: I32, statement: &U64, tail: &U64) -> I32 = "sqlite3_prepare_v2"
+    fn step(statement: U64) -> I32 = "sqlite3_step"
+    fn column(statement: U64, index: I32) -> I64 = "sqlite3_column_int64"
+    fn finalize(statement: U64) -> I32 = "sqlite3_finalize"
+    fn close(database: U64) -> I32 = "sqlite3_close"
+}
+
+fn run() {
+    #Unsafe("exclusive out-slots hold SQLite pointers; zero words mean null, SQL is NUL-terminated for each borrowed call, and each live pointer is finalized/closed once") {
+        database := U64{0}
+        if (sql.open(":memory:", &database, I32{6}, U64{0}) != I32{0}) -> panic("SQLite open failed")
+        error := U64{0}
+        if (sql.exec(database, "create table items(value integer); insert into items values (19), (23);", U64{0}, U64{0}, &error) != I32{0}) -> panic("SQLite create/insert failed")
+        statement := U64{0}
+        tail := U64{0}
+        if (sql.prepare(database, "select sum(value) from items", I32{-1}, &statement, &tail) != I32{0}) -> panic("SQLite prepare failed")
+        if (sql.step(statement) != I32{100}) -> panic("SQLite select returned no row")
+        if (sql.column(statement, I32{0}) != I64{42}) -> panic("SQLite select value differed")
+        if (sql.step(statement) != I32{101}) -> panic("SQLite select did not complete")
+        if (sql.finalize(statement) != I32{0}) -> panic("SQLite finalize failed")
+        if (sql.close(database) != I32{0}) -> panic("SQLite close failed")
+    }
+    print("sqlite-memory=42")
+}

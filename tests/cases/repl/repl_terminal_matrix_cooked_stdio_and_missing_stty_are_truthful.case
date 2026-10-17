@@ -1,0 +1,36 @@
+# PORT tests/repl.rs:2948-3019, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+fixture: repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful.fixture
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+step: jet repl
+pty: stdout,stderr
+stdin: repl_terminal_matrix_cooked_stdio_and_missing_stty_are_truthful.fixture/pipe.in
+limit: time=8
+exit: 0
+stdout: ~ "interactive keys require a TTY" # Original substring predicate rs2977.
+stdout: !~ "Tab complete" # Original no unavailable keys rs2981.
+stdout: ~ "1 user> " # Original substring predicate rs2985.
+stdout: ~ "2 : Int" # Original substring predicate rs2985.
+step missing_stty: jet repl
+pty: true
+env: PATH=/definitely-missing
+limit: time=8
+pty-send: "1 + 1\r:quit\r" after 200ms
+exit: 0
+stdout: ~ "interactive keys require a TTY" # Original substring predicate rs2977.
+stdout: !~ "Tab complete" # Original no unavailable keys rs2981.
+stdout: ~ "1 user> " # Original substring predicate rs2985.
+stdout: ~ "2 : Int" # Original substring predicate rs2985.
+mkdir: project
+step stdout_file: jet repl
+pty: stdin,stderr
+stdout: file project/stdout.txt
+limit: time=8
+pty-send: "3 + 4\r:quit\r" after 200ms
+exit: 0
+stdout: ~ "interactive keys require a TTY" # Original substring predicate rs3011.
+file: project/stdout.txt ~ "1 user> " # Original redirected stdout conjunction rs3015.
+file: project/stdout.txt ~ "7 : Int" # Original redirected stdout conjunction rs3015.

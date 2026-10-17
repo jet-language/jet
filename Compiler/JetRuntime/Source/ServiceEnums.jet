@@ -1,0 +1,51 @@
+// Services.rs:39-44,92-96,977-1003: private native enum8 owners.
+// Reuse EncodingABI/EncodingErrors, not Rust boxes or source registrations.
+#Export(c) fn jet_rt_handle_clone_jet_service_restart(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_service_restart(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_service_restart(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
+#Export(c) fn jet_rt_handle_clone_jet_service_delivery(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_service_delivery(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_service_delivery(a: I64, b: I64) -> Bool { encoding_enum_eq(a, b) }
+fn service_restart_label(target: I64, ordinal: I64) {
+    if {
+        (ordinal == I64{0}) -> {
+            rt_text_push_word(target, I64{7948697689580203599}, I64{8}) // OneForOn
+            rt_text_push_word(target, I64{101}, I64{1})
+        }
+        (ordinal == I64{1}) -> {
+            rt_text_push_word(target, I64{7800641851830398543}, I64{8}) // OneForAl
+            rt_text_push_word(target, I64{108}, I64{1})
+        }
+        (ordinal == I64{2}) -> {
+            rt_text_push_word(target, I64{5724760424733435218}, I64{8}) // RestForO
+            rt_text_push_word(target, I64{25966}, I64{2})
+        }
+        else -> rt_record_variant_panic()
+    }
+}
+fn service_delivery_label(target: I64, ordinal: I64) {
+    if {
+        (ordinal == I64{0}) -> {
+            rt_text_push_word(target, I64{7948699906469622849}, I64{8}) // AtMostOn
+            rt_text_push_word(target, I64{25955}, I64{2})
+        }
+        (ordinal == I64{1}) -> {
+            rt_text_push_word(target, I64{4712291754910577988}, I64{8}) // DurableA
+            rt_text_push_word(target, I64{7948699906236304500}, I64{8}) // tLeastOn
+            rt_text_push_word(target, I64{25955}, I64{2})
+        }
+        else -> rt_record_variant_panic()
+    }
+}
+#Export(c) fn jet_rt_handle_show_jet_service_restart(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    service_restart_label(target, encoding_word(value + ENCODING_ENUM_TAG))
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_service_restart(value: I64) -> I64 { jet_rt_handle_show_jet_service_restart(value) }
+#Export(c) fn jet_rt_handle_show_jet_service_delivery(value: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    service_delivery_label(target, encoding_word(value + ENCODING_ENUM_TAG))
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_display_jet_service_delivery(value: I64) -> I64 { jet_rt_handle_show_jet_service_delivery(value) }

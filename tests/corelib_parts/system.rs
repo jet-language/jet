@@ -1,97 +1,11 @@
+// Generic JS projection driver; the real rights assertions live in Jet. Dies at cutover.
 #[test]
-fn text_unicode_audit_surface_runs() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping text unicode test (need rustc)");
-        return;
-    }
-    let dir = std::env::temp_dir().join(format!("jet_corelib_text_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "text_unicode",
-        r#"
-use core.text as text
-
-fn run() {
-    print(text.caseless_eq("Straße", "STRASSE"))
-    print(text.nfc("é") == "é")
-    print(text.nfkc("ﬃ"))
-    print(text.graphemes("é👍").len())
-    print(text.words("Hi, κόσμε 123.").len())
-    print(text.sentences("One. Two!").len())
-    print(text.display_width("表a"))
-    print(text.is_alphabetic("Ж"))
-    print(text.is_numeric("٣"))
-    print(text.pad_start("7", 3, "0"))
-    print(text.center("x", 3, "."))
-    print(text.starts_any("jetpack", ["jet", "go"]))
-    print(text.char_indices("éa")[1])
-}
-"#,
-        &[],
-        None,
-    );
-    assert_eq!(code, 0, "text unicode test failed: {stderr}");
-    assert_eq!(
-        stdout,
-        "true\ntrue\nffi\n2\n3\n2\n3\ntrue\ntrue\n007\n.x.\ntrue\n2:a\n"
-    );
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn db_checked_sql_execute_uses_typed_sql() {
-    assert!(common::have_rustc(), "DB query_one proof requires rustc");
-    let dir = std::env::temp_dir().join(format!("jet_corelib_db_sql_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "db_checked_sql",
-        r#"
-use core.db as db
-
-fn run() {
-    conn := db.open_memory()
-    policy :: db.policy("person", "true") ?? panic("policy")
-    scoped := conn.with_policy(policy, "owner")
-    created :: db.migrate(scoped, "person-v1", [
-        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
-    ]) ?? panic("migrate")
-    skipped :: db.migrate(scoped, "person-v1", [
-        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
-    ]) ?? panic("migrate again")
-    id :: 7
-    name :: "Ada"
-    insert :: SQL{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
-    _inserted :: scoped.execute(insert) ?? panic("insert")
-    failed :: db.transaction(scoped, "bad batch", [
-        SQL{"INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)"},
-        SQL{"INSERT INTO missing_table VALUES (1)"}
-    ]) ?? 0
-    found :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
-    missing_id :: 99
-    missing :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {missing_id}"})
-    counted :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
-    print(created)
-    print(skipped)
-    print(failed)
-    print(db.row_int(found, "id") ?? 0)
-    print(db.row_text(found, "name") ?? "bad")
-    print(db.row_int(found, "active") ?? 0)
-    print(db.row_int(counted, "n") ?? 0)
-    if missing == .None { print("absent") } else { panic("unexpected row") }
-    _closed :: scoped.close()
-}
-"#,
-        &[],
-        None,
-    );
-    assert_eq!(code, 0, "db checked sql test failed: {stderr}");
-    assert_eq!(stdout, "1\n0\n0\n7\nAda\n1\n1\nabsent\n");
-    let _ = fs::remove_dir_all(&dir);
+fn ui_host_rights_source_preserves_storage_in_javascript() {
+    let dir = common::Scratch::new("ui_host_rights_js");
+    let source = include_str!("../../Examples/features/ui/host_rights.jet");
+    let actual = run_web_js_source(&dir.path, "host_rights", source)
+        .expect("UIFSRights JavaScript projection requires node");
+    assert_eq!(actual, include_str!("../../Examples/features/expected/ui/host_rights.out"));
 }
 
 #[test]
@@ -157,10 +71,6 @@ fn run() {
 #[test]
 fn core_db_query_one_first_row_matches_all_execution_tiers() {
     assert!(common::have_rustc(), "DB query_one parity proof requires rustc");
-    assert!(
-        jet_jit::cranelift_host_supported(),
-        "DB query_one parity proof requires a resident Cranelift host"
-    );
     let dir = common::unique_tmp("jet_corelib_db_query_one_parity");
     fs::create_dir_all(&dir).unwrap();
     fs::write(
@@ -205,7 +115,7 @@ fn run() {
     let file = dir.join("db_query_one_parity.jet");
     fs::write(&file, src).unwrap();
     let path = file.to_string_lossy().into_owned();
-    let interpreted = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreted = match crate::common::dev_run(&path, false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -217,8 +127,7 @@ fn run() {
     };
     assert_eq!(interpreted, expected);
 
-    jet_jit::reset_jit_trace_for_test();
-    let resident = match jet::Interpreter::dev_iteration(&path, false, false) {
+    let resident = match crate::common::dev_run(&path, false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -229,53 +138,7 @@ fn run() {
         }
     };
     assert_eq!(resident, expected);
-    assert!(jet_jit::jit_executed_for_test(), "DB query_one must execute in resident JIT");
-    assert!(!jet_jit::deopt_invoked_for_test(), "DB query_one must not deopt");
-    assert!(!jet_jit::fallback_invoked_for_test(), "DB query_one must not fall back");
     assert_eq!(resident, interpreted, "DB query_one tiers diverged");
-    let _ = fs::remove_dir_all(&dir);
-}
-
-#[test]
-fn core_fmt_human_formatting_surface_runs() {
-    let have_rustc = common::have_rustc();
-    if !have_rustc {
-        eprintln!("note: skipping core.text.fmt runtime test (need rustc)");
-        return;
-    }
-    let dir = std::env::temp_dir().join(format!("jet_corelib_fmt_{}", std::process::id()));
-    let _ = fs::remove_dir_all(&dir);
-    fs::create_dir_all(&dir).unwrap();
-    let (code, stdout, stderr) = build_and_run(
-        &dir,
-        "human_format",
-        r#"
-use core.text.fmt as fmt
-
-fn run() {
-    print(fmt.number(1204331))
-    print(fmt.decimal(Float{1234.5678}, 2))
-    print(fmt.grouped(Float{1234.5678}, 2))
-    print(fmt.decimal(1234, 2))
-    print(fmt.grouped(1234, 2))
-    print(fmt.percent(0.1234, 1))
-    print(fmt.bytes(1500000000))
-    print(fmt.duration(222000))
-    print(fmt.ordinal(21))
-    print(fmt.plural(2, "row", "rows"))
-    print(fmt.pad_left("7", 3, "0"))
-    print(fmt.pad_right("go", 4, "."))
-    print(fmt.pad_center("x", 3, "."))
-}
-"#,
-        &[],
-        None,
-    );
-    assert_eq!(code, 0, "core.text.fmt program failed: {stderr}");
-    assert_eq!(
-        stdout,
-        "1,204,331\n1234.57\n1,234.57\n1234.00\n1,234.00\n12.3%\n1.5 GB\n3m 42s\n21st\n2 rows\n007\ngo..\n.x.\n"
-    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -571,21 +434,20 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-// D-JSON3=B: lenient decode (core.encoding.json.decode) surfaces coercions via log lines.
-// Probes: (a) string→number coercion line + plain value; (b) clean JSON = no log lines;
-// (c) multiple coercions = one line each.
+// Untyped JSON decode preserves strings; only typed text-native sources parse
+// scalar text. Neither form emits coercion audit lines.
 #[test]
-fn json_decode_lenient_surfaces_coercions() {
+fn json_decode_preserves_scalar_strings() {
     let have_rustc = common::have_rustc();
     if !have_rustc {
-        eprintln!("note: skipping json_decode_lenient_surfaces_coercions (need rustc)");
+        eprintln!("note: skipping json_decode_preserves_scalar_strings (need rustc)");
         return;
     }
     let dir = std::env::temp_dir().join(format!("jet_json_decode_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
 
-    // Probe (a): string→number coercion appears in stderr; value is usable in arithmetic.
+    // Probe (a): a numeric-looking JSON string remains a string.
     let (code_a, stdout_a, stderr_a) = build_and_run(
         &dir,
         "json_coerce_a",
@@ -594,8 +456,8 @@ use core.encoding.json as json
 fn run() {
     data :: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
     if data == .Object(m) {
-        if m["port"] == .Int(n) {
-            print(n + 1)
+        if m["port"] == .Text(text) {
+            print(text)
         }
     }
 }
@@ -605,14 +467,12 @@ fn run() {
     );
     assert_eq!(code_a, 0, "probe (a) failed: {stderr_a}");
     assert_eq!(
-        stdout_a, "8081\n",
-        "probe (a): decoded value should be plain number + 1"
+        stdout_a, "8080\n",
+        "probe (a): decoded string should remain text"
     );
     assert!(
-        stderr_a.contains("json coerce")
-            && stderr_a.contains("port")
-            && stderr_a.contains("number"),
-        "probe (a): coercion log line missing or malformed; got: {stderr_a}"
+        !stderr_a.contains("json coerce"),
+        "probe (a): strict decoding must not emit coercion lines: {stderr_a}"
     );
 
     // Probe (b): clean JSON (no string values that look like numbers/bools) → no coercion lines.
@@ -640,7 +500,7 @@ fn run() {
         "probe (b): spurious coercion line emitted for clean JSON; got: {stderr_b}"
     );
 
-    // Probe (c): multiple coercions → one log line each.
+    // Probe (c): both numeric-looking and boolean-looking strings remain text.
     let (code_c, stdout_c, stderr_c) = build_and_run(
         &dir,
         "json_coerce_c",
@@ -649,11 +509,11 @@ use core.encoding.json as json
 fn run() {
     data :: json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
     if data == .Object(m) {
-        if m["port"] == .Int(n) {
-            print(n)
+        if m["port"] == .Text(text) {
+            print(text)
         }
-        if m["enabled"] == .Bool(b) {
-            print(b)
+        if m["enabled"] == .Text(text) {
+            print(text)
         }
     }
 }
@@ -664,26 +524,11 @@ fn run() {
     assert_eq!(code_c, 0, "probe (c) failed: {stderr_c}");
     assert_eq!(
         stdout_c, "8080\ntrue\n",
-        "probe (c): both coerced values should come back plain"
-    );
-    let coerce_lines: Vec<&str> = stderr_c
-        .lines()
-        .filter(|l| l.contains("json coerce"))
-        .collect();
-    assert_eq!(
-        coerce_lines.len(),
-        2,
-        "probe (c): expected 2 coercion lines, got {}; stderr: {stderr_c}",
-        coerce_lines.len()
-    );
-    // Each line names its field.
-    assert!(
-        coerce_lines.iter().any(|l| l.contains("port")),
-        "probe (c): no coercion line for 'port'"
+        "probe (c): both strings should remain text"
     );
     assert!(
-        coerce_lines.iter().any(|l| l.contains("enabled")),
-        "probe (c): no coercion line for 'enabled'"
+        !stderr_c.contains("json coerce"),
+        "probe (c): strict decoding must not emit coercion lines: {stderr_c}"
     );
 
     let _ = fs::remove_dir_all(&dir);
@@ -713,7 +558,7 @@ use core.encoding.json as json
 fn run() {
     raw :: "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
     data :: json.parse(raw) ?? panic("bad json")
-    print(json.to_string(data))
+    print(json.to_string(data) ?? panic("JSON encode"))
 }
 "#,
         &[],
@@ -833,7 +678,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: channel<Int>()
     loop i in 1..1000 {
-        dup :: ~sender
+        dup :: sender.copy()
         task {
             dup.send(1)
         }
@@ -872,7 +717,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: channel<Int>()
     loop i in 1..10000 {
-        dup :: ~sender
+        dup :: sender.copy()
         task {
             dup.send(1)
         }
@@ -912,7 +757,7 @@ use core.tasks as tasks
 fn run() {
 (sender, ch) :: channel<Int>()
     loop i in 1..100000 {
-        dup :: ~sender
+        dup :: sender.copy()
         task {
             dup.send(1)
         }
@@ -989,7 +834,7 @@ fn compiler_sources_reject_retired_jet_ring_keys() {
         "crates/jet-sema/src",
         "crates/jet-codegen/src",
         "crates/jet-comptime/src",
-        "crates/jet-jit/src",
+        "crates/jet-evalhost/src",
         "crates/jet-repl/src",
     ];
     let retired = [

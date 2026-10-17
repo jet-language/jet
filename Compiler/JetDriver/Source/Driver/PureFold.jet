@@ -81,7 +81,7 @@ struct JetDriverPureFoldCandidates {
 // program through one machine that evaluates every candidate (never a copy
 // per evaluation), drops the synthetics again, and only then writes the
 // folded constants, so every evaluation of a round sees the same program.
-pub fn jet_driver_fold_pure_calls(program: ^MIRProgram) -> MIRProgram {
+fn jet_driver_fold_pure_calls(program: ^MIRProgram) -> MIRProgram {
     declined := [String:Bool]{}
     folded := jet_driver_pure_fold_rounds(^program, &declined, 0)
     jet_driver_pure_fold_resolve_joins(&folded)
@@ -96,7 +96,7 @@ fn jet_driver_pure_fold_rounds(program: ^MIRProgram, declined: &[String:Bool], r
     base_len :: folding.functions.len()
     loop synthetic in candidates.functions -> &folding.functions.push(synthetic)
     synthetic_ids := (loop site in candidates.sites -> site.synthetic)
-    (result, values) := jet_eval_pure_functions(^folding, synthetic_ids, jet_eval_default_config())
+    (result, values) := jet_eval_pure_functions(^folding, synthetic_ids)
     loop result.functions.len() > base_len -> _ := &result.functions.pop()
     changed := false
     loop (index, site) in candidates.sites {

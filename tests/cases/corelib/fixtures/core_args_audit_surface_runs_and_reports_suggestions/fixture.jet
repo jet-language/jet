@@ -1,0 +1,23 @@
+
+use core.args as args
+
+fn run() {
+    spec :: args.spec()
+        .flag_short("verbose", "v", "print extra detail")
+        .option_env("profile", "config profile", "NAME", "JET_ARGS_PROFILE")
+        .option_int("jobs", "worker count", "N")
+        .repeat("tag", "classification tag", "TAG")
+    parsed :: spec.parse(["tool", "-vv", "--jobs", "8", "--tag", "a", "--tag=b"]) ?? panic("parse failed")
+    print(parsed.flag("verbose"))
+    print(parsed.option("profile") ?? "")
+    print(parsed.option_int("jobs") ?? 0)
+    print(parsed.options("tag").len())
+    if spec.parse(["tool", "--verbse"]) == {
+        .Ok(_) -> {
+            print("unexpected")
+        }
+        .Err(e) -> {
+            print(e)
+        }
+    }
+}

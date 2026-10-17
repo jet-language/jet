@@ -1,0 +1,341 @@
+// Receipt facts are constructed from the exact borrowed plain spec, including
+// environment-secret redaction and Rust's framed input/policy digest material.
+fn process_execution_sort_unique(list: I64) {
+    data :: fd_word(list, I64{16})
+    i := I64{1}
+    loop i < fd_word(list, I64{0}) {
+        j := i
+        loop j > (I64{0}) {
+            a :: fd_word(data, (j - I64{1}) * I64{8})
+            b :: fd_word(data, j * I64{8})
+            if (jet_rt_string_compare(a, b) <= I64{0}) -> break
+            fd_put(data, j * I64{8}, a)
+            fd_put(data, (j - I64{1}) * I64{8}, b)
+            j -= I64{1}
+        }
+        i += I64{1}
+    }
+    read := I64{0}
+    write := I64{0}
+    loop read < fd_word(list, I64{0}) {
+        value :: fd_word(data, read * I64{8})
+        if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) { jet_rt_string_drop(value) } else {
+            fd_put(data, write * I64{8}, value)
+            write += I64{1}
+        }
+        read += I64{1}
+    }
+    fd_put(list, I64{0}, write)
+}
+fn process_execution_join(list: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    at := I64{0}
+    loop at < fd_word(list, I64{0}) {
+        if (at != I64{0}) -> jet_rt_string_builder_push(text, rt_static_text("\n"))
+        jet_rt_string_builder_push(text, fd_word(fd_word(list, I64{16}), at * I64{8}))
+        at += I64{1}
+    }
+    jet_rt_string_builder_finish(text)
+}
+fn process_execution_hash(text: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{608}, I64{8})
+    jet_rt_native_sha256(rt_text_data(text), rt_text_len(text), scratch, scratch + I64{32})
+    result :: jet_rt_string_builder_new()
+    digits :: rt_static_text("0123456789abcdef")
+    at := I64{0}
+    loop at < (I64{32}) {
+        byte :: rt_text_byte(scratch + at)
+        rt_text_append(result, rt_text_data(digits) + (byte >> I64{4}), I64{1})
+        rt_text_append(result, rt_text_data(digits) + byte.bit_and(I64{15}), I64{1})
+        at += I64{1}
+    }
+    jet_rt_free(scratch, I64{608}, I64{8})
+    jet_rt_string_builder_finish(result)
+}
+fn process_execution_input_digest(spec: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, rt_static_text("jet-process-input-v1\n"))
+    cmd :: fd_word(spec, PROCESS_SPEC_CMD)
+    at := I64{0}
+    loop at < fd_word(cmd, I64{0}) {
+        word :: fd_word(fd_word(cmd, I64{16}), at * I64{8})
+        rt_text_push_number(text, rt_text_len(word))
+        jet_rt_string_builder_push(text, rt_static_text(":"))
+        jet_rt_string_builder_push(text, word)
+        jet_rt_string_builder_push(text, rt_static_text("\n"))
+        at += I64{1}
+    }
+    material :: jet_rt_string_builder_finish(text)
+    digest :: process_execution_hash(material)
+    jet_rt_string_drop(material)
+    digest
+}
+fn process_execution_mode(mode: I64) -> I64 {
+    if (mode == PROCESS_STREAM_CAPTURE) -> rt_static_text("capture") else -> if (mode == HOST_PROCESS_STREAM_INHERIT) -> rt_static_text("inherit") else -> rt_static_text("stream")
+}
+fn process_execution_decimal(value: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    rt_text_push_number(text, value)
+    jet_rt_string_builder_finish(text)
+}
+fn process_execution_material_field(text: I64, key: I64, value: I64) {
+    jet_rt_string_builder_push(text, key)
+    jet_rt_string_builder_push(text, rt_static_text("="))
+    rt_text_push_number(text, rt_text_len(value))
+    jet_rt_string_builder_push(text, rt_static_text(":"))
+    jet_rt_string_builder_push(text, value)
+    jet_rt_string_builder_push(text, rt_static_text("\n"))
+}
+fn process_execution_limit_keys() -> I64 {
+    keys :: data_sequence_new(I64{5}, I64{8})
+    process_text_list_push(keys, rt_static_text("timeout-ms"))
+    process_text_list_push(keys, rt_static_text("output-limit"))
+    process_text_list_push(keys, rt_static_text("cpu-time-limit-ms"))
+    process_text_list_push(keys, rt_static_text("memory-limit-bytes"))
+    process_text_list_push(keys, rt_static_text("open-file-limit"))
+    keys
+}
+fn process_execution_policy_digest(spec: I64) -> I64 {
+    envkeys :: data_sequence_new(I64{0}, I64{8})
+    sets :: fd_word(spec, PROCESS_SPEC_ENV_SET)
+    removes :: fd_word(spec, PROCESS_SPEC_ENV_REMOVE)
+    at := I64{0}
+    loop at < fd_word(sets, I64{0}) + fd_word(removes, I64{0}) {
+        setting :: at < fd_word(sets, I64{0})
+        key :: if setting -> fd_word(fd_word(sets, I64{16}), at * I64{16}) else -> fd_word(fd_word(removes, I64{16}), (at - fd_word(sets, I64{0})) * I64{8})
+        name :: scheduler_text_concat(if setting -> rt_static_text("set:") else -> rt_static_text("remove:"), key)
+        process_text_list_push(envkeys, name)
+        jet_rt_string_drop(name)
+        at += I64{1}
+    }
+    process_execution_sort_unique(envkeys)
+    names :: process_execution_join(envkeys)
+    text :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(text, rt_static_text("jet-process-policy-v1\n"))
+    process_execution_material_field(text, rt_static_text("authority.rights"), rt_static_text(""))
+    process_execution_material_field(text, rt_static_text("network"), rt_static_text("deny"))
+    process_execution_material_field(text, rt_static_text("home"), rt_static_text("deny"))
+    process_execution_material_field(text, rt_static_text("secrets"), rt_static_text("deny"))
+    process_execution_material_field(text, rt_static_text("devices"), rt_static_text("deny"))
+    process_execution_material_field(text, rt_static_text("inherited-handles"), rt_static_text("deny"))
+    process_execution_material_field(text, rt_static_text("environment"), if (fd_word(spec, PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255}) != I64{0}) -> rt_static_text("explicit-only") else -> rt_static_text("inherited"))
+    cwd :: fd_word(spec, PROCESS_SPEC_CWD)
+    process_execution_material_field(text, rt_static_text("cwd"), if (cwd == I64{0}) -> rt_static_text("<unspecified-cwd>") else -> cwd)
+    keys :: process_execution_limit_keys()
+    at = I64{0}
+    loop at < (I64{5}) {
+        box :: fd_word(spec, PROCESS_SPEC_TIMEOUT + at * I64{8})
+        value :: if (box == I64{0}) -> jet_rt_string_clone(rt_static_text("")) else -> process_execution_decimal(fd_word(box, I64{0}))
+        process_execution_material_field(text, fd_word(fd_word(keys, I64{16}), at * I64{8}), value)
+        jet_rt_string_drop(value)
+        at += I64{1}
+    }
+    process_text_list_drop(keys, false)
+    process_execution_material_field(text, rt_static_text("backend.limits"), rt_static_text("private-tmpfs-bytes=67108864"))
+    process_execution_material_field(text, rt_static_text("environment.keys"), names)
+    stdin :: fd_word(spec, PROCESS_SPEC_STDIN)
+    process_execution_material_field(text, rt_static_text("stdin"), if (stdin == I64{0}) -> rt_static_text("closed") else -> process_execution_mode(fd_word(stdin, I64{0})))
+    process_execution_material_field(text, rt_static_text("stdout"), process_execution_mode(fd_word(spec, PROCESS_SPEC_STDOUT)))
+    process_execution_material_field(text, rt_static_text("stderr"), process_execution_mode(fd_word(spec, PROCESS_SPEC_STDERR)))
+    process_execution_material_field(text, rt_static_text("detached"), if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) == I64{0}) -> rt_static_text("false") else -> rt_static_text("true"))
+    process_execution_material_field(text, rt_static_text("terminal"), if (fd_word(spec, PROCESS_SPEC_TERMINAL) == I64{0}) -> rt_static_text("none") else -> rt_static_text("requested"))
+    material :: jet_rt_string_builder_finish(text)
+    digest :: process_execution_hash(material)
+    jet_rt_string_drop(material)
+    jet_rt_string_drop(names)
+    process_text_list_drop(envkeys, false)
+    digest
+}
+fn process_execution_limits(spec: I64) -> I64 {
+    list :: data_sequence_new(I64{6}, I64{8})
+    process_text_list_push(list, rt_static_text("private-tmpfs-bytes=67108864"))
+    keys :: process_execution_limit_keys()
+    at := I64{0}
+    loop at < (I64{5}) {
+        box :: fd_word(spec, PROCESS_SPEC_TIMEOUT + at * I64{8})
+        value :: if (box == I64{0}) -> jet_rt_string_clone(rt_static_text("none")) else -> process_execution_decimal(fd_word(box, I64{0}))
+        prefix :: scheduler_text_concat(fd_word(fd_word(keys, I64{16}), at * I64{8}), rt_static_text("="))
+        entry :: scheduler_text_concat(prefix, value)
+        process_text_list_push(list, entry)
+        jet_rt_string_drop(value)
+        jet_rt_string_drop(prefix)
+        jet_rt_string_drop(entry)
+        at += I64{1}
+    }
+    process_text_list_drop(keys, false)
+    list
+}
+fn process_execution_secrets(spec: I64) -> I64 {
+    secrets :: data_sequence_new(I64{0}, I64{8})
+    sets :: fd_word(spec, PROCESS_SPEC_ENV_SET)
+    at := I64{0}
+    loop at < fd_word(sets, I64{0}) {
+        row :: fd_word(sets, I64{16}) + at * I64{16}
+        name :: jet_text_ascii_lower(fd_word(row, I64{0}))
+        secret :: jet_string_contains(name, rt_static_text("secret")) || jet_string_contains(name, rt_static_text("token")) || jet_string_contains(name, rt_static_text("password")) || jet_string_contains(name, rt_static_text("passwd")) || jet_string_contains(name, rt_static_text("credential")) || jet_string_contains(name, rt_static_text("key"))
+        if (secret && rt_text_len(fd_word(row, I64{8})) != I64{0}) -> process_text_list_push(secrets, fd_word(row, I64{8}))
+        jet_rt_string_drop(name)
+        at += I64{1}
+    }
+    // Stable descending length mirrors Rust sort_by_key(Reverse(length)).
+    data :: fd_word(secrets, I64{16})
+    at = I64{1}
+    loop at < fd_word(secrets, I64{0}) {
+        j := at
+        loop j > (I64{0}) && rt_text_len(fd_word(data, j * I64{8})) > rt_text_len(fd_word(data, (j - I64{1}) * I64{8})) {
+            value :: fd_word(data, j * I64{8})
+            fd_put(data, j * I64{8}, fd_word(data, (j - I64{1}) * I64{8}))
+            fd_put(data, (j - I64{1}) * I64{8}, value)
+            j -= I64{1}
+        }
+        at += I64{1}
+    }
+    read := I64{0}
+    write := I64{0}
+    loop read < fd_word(secrets, I64{0}) {
+        value :: fd_word(data, read * I64{8})
+        if (write != I64{0} && jet_rt_string_eq(value, fd_word(data, (write - I64{1}) * I64{8}))) { jet_rt_string_drop(value) } else {
+            fd_put(data, write * I64{8}, value)
+            write += I64{1}
+        }
+        read += I64{1}
+    }
+    fd_put(secrets, I64{0}, write)
+    secrets
+}
+fn process_execution_redact(text: I64, secrets: I64) -> I64 {
+    result := jet_rt_string_clone(text)
+    at := I64{0}
+    loop at < fd_word(secrets, I64{0}) {
+        next :: jet_string_replace(result, fd_word(fd_word(secrets, I64{16}), at * I64{8}), rt_static_text("<redacted>"))
+        jet_rt_string_drop(result)
+        result = next
+        at += I64{1}
+    }
+    result
+}
+fn process_execution_identity(spec: I64) -> I64 {
+    // Receipt resolution is best-effort and never turns successful execution
+    // into a Resolve failure. Snapshot PATH is independent of child overrides.
+    blank :: jet_std_process_cmd(I64{0}, I64{0})
+    scratch :: jet_rt_alloc(I64{176}, I64{8})
+    env :: process_execution_environment(blank, scratch + I64{128})
+    jet_rt_handle_drop_process_spec(blank)
+    command :: process_execution_first(spec)
+    direct :: process_execution_has(command, I64{47}) || process_execution_has(command, I64{92})
+    candidates :: if (direct || process_execution_env_get(env, rt_static_text("PATH")) == I64{0}) -> data_sequence_new(I64{0}, I64{8}) else -> process_execution_candidates(command, env)
+    if direct -> process_text_list_push(candidates, command)
+    process_text_list_drop(env, true)
+    found := I64{0}
+    at := I64{0}
+    loop at < fd_word(candidates, I64{0}) {
+        candidate :: fd_word(fd_word(candidates, I64{16}), at * I64{8})
+        name :: fd_c_path(candidate)
+        jet_process_path_stat_raw(name, scratch, scratch + I64{128})
+        if (fd_word(scratch, I64{128}) == I64{0} && fd_word(scratch, I64{16}).bit_and(I64{61440}) == I64{32768}) {
+            bytes :: jet_process_path_canonicalize_raw(name, scratch + I64{160}, scratch + I64{168}, scratch + I64{128})
+            if (bytes != I64{0}) {
+                found = rt_text_lossy(bytes, fd_word(scratch, I64{160}))
+                jet_rt_free(bytes, fd_word(scratch, I64{168}), I64{1})
+            }
+        }
+        jet_rt_free(name, rt_text_len(candidate) + I64{1}, I64{1})
+        if (found != I64{0}) -> break
+        at += I64{1}
+    }
+    jet_rt_free(scratch, I64{176}, I64{8})
+    process_text_list_drop(candidates, false)
+    if (found == I64{0}) -> jet_rt_string_clone(process_execution_first(spec)) else -> found
+}
+fn process_execution_receipt(child: I64, status: I64) -> I64 {
+    spec :: fd_word(child, I64{24})
+    receipt :: jet_rt_alloc(I64{144}, I64{8})
+    coll_zero(receipt, I64{144})
+    signal :: status.bit_and(I64{127})
+    code :: if (signal == I64{0}) -> { (status >> I64{8}).bit_and(I64{255}) } else -> { I64{-1} }
+    fd_put(receipt, I64{0}, jet_int_owned_from_i64(code))
+    fd_put(receipt, I64{24}, if (status == I64{0}) -> { I64{1} } else -> { I64{0} })
+    if (signal != I64{0}) {
+        box :: jet_rt_alloc(I64{8}, I64{8})
+        fd_put(box, I64{0}, jet_int_owned_from_i64(signal))
+        fd_put(receipt, I64{32}, box)
+    }
+    fd_put(receipt, I64{40}, fd_word(child, I64{104}))
+    output :: rt_text_copy(rt_text_data(fd_word(child, I64{80})), rt_text_len(fd_word(child, I64{80})))
+    errors :: rt_text_copy(rt_text_data(fd_word(child, I64{88})), rt_text_len(fd_word(child, I64{88})))
+    secrets :: process_execution_secrets(spec)
+    fd_put(receipt, I64{8}, process_execution_redact(output, secrets))
+    fd_put(receipt, I64{16}, process_execution_redact(errors, secrets))
+    fd_put(receipt, I64{48}, process_execution_identity(spec))
+    argv :: data_sequence_new(I64{0}, I64{8})
+    cmd :: fd_word(spec, PROCESS_SPEC_CMD)
+    at := I64{0}
+    loop at < fd_word(cmd, I64{0}) {
+        word :: process_execution_redact(fd_word(fd_word(cmd, I64{16}), at * I64{8}), secrets)
+        process_text_list_push(argv, word)
+        jet_rt_string_drop(word)
+        at += I64{1}
+    }
+    fd_put(receipt, I64{56}, argv)
+    fd_put(receipt, I64{64}, process_execution_input_digest(spec))
+    fd_put(receipt, I64{72}, process_execution_policy_digest(spec))
+    fd_put(receipt, I64{80}, jet_rt_string_clone(rt_static_text("ambient")))
+    fd_put(receipt, I64{88}, data_sequence_new(I64{0}, I64{8}))
+    fd_put(receipt, I64{96}, jet_rt_string_clone(if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) -> rt_static_text("detached") else -> rt_static_text("contained")))
+    fd_put(receipt, I64{104}, process_execution_limits(spec))
+    outputs :: data_sequence_new(I64{3}, I64{8})
+    detached :: fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}
+    a :: scheduler_text_concat(rt_static_text("stdout="), if detached -> rt_static_text("discarded") else -> process_execution_mode(fd_word(spec, PROCESS_SPEC_STDOUT)))
+    b :: scheduler_text_concat(rt_static_text("stderr="), if detached -> rt_static_text("discarded") else -> process_execution_mode(fd_word(spec, PROCESS_SPEC_STDERR)))
+    process_text_list_push(outputs, a)
+    process_text_list_push(outputs, b)
+    jet_rt_string_drop(a)
+    jet_rt_string_drop(b)
+    captured :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(captured, rt_static_text("captured-bytes="))
+    rt_text_push_number(captured, rt_text_len(output) + rt_text_len(errors))
+    entry :: jet_rt_string_builder_finish(captured)
+    process_text_list_push(outputs, entry)
+    jet_rt_string_drop(entry)
+    fd_put(receipt, I64{112}, outputs)
+    fd_put(receipt, I64{120}, if (fd_word(secrets, I64{0}) != I64{0}) -> { I64{1} } else -> { I64{0} })
+    fd_put(receipt, I64{128}, jet_int_owned_from_i64(fd_word(process_execution_native(child), I64{8})))
+    fd_put(receipt, I64{136}, if (fd_word(child, I64{104}) != I64{0}) -> { process_raw_box(PROCESS_RESOURCE_WALL_TIME) } else -> { I64{0} })
+    jet_rt_string_drop(output)
+    jet_rt_string_drop(errors)
+    process_text_list_drop(secrets, false)
+    receipt
+}
+// String::from_utf8 is strict in both Rust collection lanes. The scanner's
+// negative width is Utf8Error.error_len; a truncated valid prefix has None.
+fn process_execution_validate_output(child: I64, err: I64) -> Bool {
+    stream := I64{1}
+    loop stream <= (I64{2}) {
+        text :: fd_word(child, if (stream == I64{1}) -> { I64{80} } else -> { I64{88} })
+        length :: rt_text_len(text)
+        data :: rt_text_data(text)
+        at := I64{0}
+        loop at < length {
+            width :: rt_text_valid_width(data + at, length - at, I64{1})
+            if (width < I64{0}) {
+                lead :: rt_text_byte(data + at)
+                expected :: if (lead >= I64{194} && lead <= I64{223}) -> { I64{2} } else -> { if (lead >= I64{224} && lead <= I64{239}) -> { I64{3} } else -> { if (lead >= I64{240} && lead <= I64{244}) -> { I64{4} } else -> { I64{1} } } }
+                cause :: jet_rt_string_builder_new()
+                if (expected > I64{1} && at - width == length) {
+                    jet_rt_string_builder_push(cause, rt_static_text("incomplete utf-8 byte sequence from index "))
+                    rt_text_push_number(cause, at)
+                } else {
+                    jet_rt_string_builder_push(cause, rt_static_text("invalid utf-8 sequence of "))
+                    rt_text_push_number(cause, -width)
+                    jet_rt_string_builder_push(cause, rt_static_text(" bytes from index "))
+                    rt_text_push_number(cause, at)
+                }
+                _ := host_io_other_take(HOST_IO_OP_READ, jet_rt_string_clone(if (stream == I64{1}) -> rt_static_text("process stdout") else -> rt_static_text("process stderr")), jet_rt_string_builder_finish(cause), err)
+                return false
+            }
+            at += width
+        }
+        stream += I64{1}
+    }
+    true
+}

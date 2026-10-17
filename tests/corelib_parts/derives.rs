@@ -79,11 +79,11 @@ struct Tagged<K> {
 
 fn run() {
     wi :: Wrap<Int>{ value: 7 }
-    print(json.to_string(wi))
+    print(json.to_string(wi) ?? panic("JSON encode"))
     back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
     print(back.value)
     id :: Tagged<Wrap<Int>>{ raw: 9, marker: None }
-    print(json.to_string(id))
+    print(json.to_string(id) ?? panic("JSON encode"))
     rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
     print(rid.raw)
 }
@@ -162,7 +162,7 @@ fn run() {
 // ── card #131 S1-bridge: hand-written `impl T.Encode` / `impl T.Decode` (D-SERDE2) ──
 // A hand codec passes sema and MUST produce Rust rustc accepts (I2). The Jet-facing
 // verbs `encode`/`decode` bridge internally to the Rust `__jet_Encode`/`__jet_Decode`
-// traits' `jet_encode(&self) -> DataTree` / `jet_decode(&DataTree) -> Result<Self, …>`.
+// traits' `jet_encode(&self) -> Dyn` / `jet_decode(&Dyn) -> Result<Self, …>`.
 // The impl uses a custom wire key (`"email"`, not the field name `addr`) so the round
 // trip can only succeed through the HAND methods, never a derive.
 #[test]
@@ -185,15 +185,15 @@ use core.encoding.json as json
 struct Email { addr: String }
 
 impl Email.Encode {
-    fn encode(self) -> DataTree {
-        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
-        return DataTree.Object(m)
+    fn encode(self) -> Dyn {
+        m :: [String:Dyn]{ "email": Dyn.Text(~self.addr) }
+        return Dyn.Object(m)
     }
 }
 
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email [FieldError]! {
-        f := &tree.field("email") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        f := &tree.field("email") ?? Dyn.Text("")
         s := f.text() ?? ""
         return Ok(Email{addr: s})
     }
@@ -201,7 +201,7 @@ impl Email.Decode {
 
 fn run() {
     e := Email{addr: "a@b.com"}
-    s := json.to_string(e)
+    s := json.to_string(e) ?? panic("JSON encode")
     print(s)
     back := json.decode<Email>(s) ?? panic("decode failed")
     print(back.addr)
@@ -217,7 +217,7 @@ fn run() {
 }
 
 /// D-SERDE2/D-SERDE16: the beginner `#Codable` request and the expert hand
-/// codec both feed the same DataTree protocol, so their wire bytes and decoded
+/// codec both feed the same Dyn protocol, so their wire bytes and decoded
 /// values agree for the same shape.
 #[test]
 fn derive_and_hand_written_codecs_share_one_engine() {
@@ -240,11 +240,11 @@ struct DerivedEmail { address: String }
 
 struct HandEmail { address: String }
 impl HandEmail.Encode {
-    fn encode(self) -> DataTree { DataTree.Object(["address": DataTree.Text(~self.address)]) }
+    fn encode(self) -> Dyn { Dyn.Object(["address": Dyn.Text(~self.address)]) }
 }
 impl HandEmail.Decode {
-    fn decode(tree: DataTree) -> HandEmail [FieldError]! {
-        field :: &tree.field("address") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> HandEmail [FieldError]! {
+        field :: &tree.field("address") ?? Dyn.Text("")
         address :: field.text() ?? ""
         return Ok(HandEmail{ address: address })
     }
@@ -253,8 +253,8 @@ impl HandEmail.Decode {
 fn run() {
     derived :: DerivedEmail{ address: "ada@jet" }
     hand :: HandEmail{ address: "ada@jet" }
-    derived_wire :: json.to_string(derived)
-    hand_wire :: json.to_string(hand)
+    derived_wire :: json.to_string(derived) ?? panic("JSON encode")
+    hand_wire :: json.to_string(hand) ?? panic("JSON encode")
     derived_bytes :: derived_wire.bytes()
     hand_bytes :: hand_wire.bytes()
     assert(derived_bytes == hand_bytes)
@@ -294,13 +294,13 @@ use core.encoding.json as json
 #Codable
 struct Boxed<T> { value: T }
 
-fn generic_encode<T: Encode>(value: T) -> String { json.to_string(value) }
+fn generic_encode<T: Encode>(value: T) -> String EncodingError! { json.to_string(value) }
 fn generic_decode<T: Decode>(wire: String) -> T [FieldError]! { json.decode<T>(wire) }
 
 fn run() {
     value :: Boxed<Int>{ value: 7 }
-    derived_wire :: json.to_string(value)
-    generic_wire :: generic_encode(value)
+    derived_wire :: json.to_string(value) ?? panic("JSON encode")
+    generic_wire :: generic_encode(value) ?? panic("generic JSON encode")
     derived_bytes :: derived_wire.bytes()
     generic_bytes :: generic_wire.bytes()
     assert(derived_bytes == generic_bytes)
@@ -319,13 +319,13 @@ fn run() {
     let _ = fs::remove_dir_all(&dir);
 }
 
-/// card #131: `DataTree.decode<T>()` dispatches primitive, container,
+/// card #131: `Dyn.decode<T>()` dispatches primitive, container,
 /// generated, and hand-written Decode implementations through one spelling.
 #[test]
-fn datatree_decode_dispatches_all_decode_impl_kinds() {
+fn dyn_decode_dispatches_all_decode_impl_kinds() {
     let have_rustc = common::have_rustc();
     if !have_rustc { return; }
-    let dir = std::env::temp_dir().join(format!("jet_datatree_decode_{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("jet_dyn_decode_{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).unwrap();
     let src = r#"
@@ -333,17 +333,17 @@ fn datatree_decode_dispatches_all_decode_impl_kinds() {
 struct Point { x: Int }
 struct Email { addr: String }
 impl Email.Decode {
-    fn decode(tree: DataTree) -> Email [FieldError]! {
-        value := &tree.field("address") ?? DataTree.Text("")
+    fn decode(tree: Dyn) -> Email [FieldError]! {
+        value := &tree.field("address") ?? Dyn.Text("")
         return Ok(Email{ addr: value.text() ?? "" })
     }
 }
 
 fn run() {
-    i_tree := DataTree.Int(41)
-    xs_tree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
-    p_tree := DataTree.Object(["x": DataTree.Int(7)])
-    e_tree := DataTree.Object(["address": DataTree.Text("a@b")])
+    i_tree := Dyn.Int(41)
+    xs_tree := Dyn.Array([Dyn.Int(1), Dyn.Int(2)])
+    p_tree := Dyn.Object(["x": Dyn.Int(7)])
+    e_tree := Dyn.Object(["address": Dyn.Text("a@b")])
     i := i_tree.decode<Int>() ?? panic("primitive")
     xs := xs_tree.decode<[Int]>() ?? panic("list")
     p := p_tree.decode<Point>() ?? panic("derive")
@@ -352,12 +352,12 @@ fn run() {
     print(e.addr)
 }
 "#;
-    let out = compile_temp("datatree_decode.jet", src);
+    let out = compile_temp("dyn_decode.jet", src);
     assert!(out.rust.contains("<i64 as __jet_Decode>::jet_decode"));
     assert!(out.rust.contains("<__jet_Point as __jet_Decode>::jet_decode"));
     assert!(out.rust.contains("<__jet_Email as __jet_Decode>::jet_decode"));
-    let (code, stdout, stderr) = build_and_run(&dir, "datatree_decode", src, &[], None);
-    assert_eq!(code, 0, "DataTree.decode dispatch failed: {stderr}");
+    let (code, stdout, stderr) = build_and_run(&dir, "dyn_decode", src, &[], None);
+    assert_eq!(code, 0, "Dyn.decode dispatch failed: {stderr}");
     assert_eq!(stdout, "50\na@b\n");
     let _ = fs::remove_dir_all(&dir);
 }
@@ -381,9 +381,9 @@ fn run() {
     a := Event.Idle
     b := Event.Count(3)
     c := Event.Named{ name: "x", enabled: true }
-    print(json.to_string(a))
-    print(json.to_string(b))
-    print(json.to_string(c))
+    print(json.to_string(a) ?? panic("JSON encode"))
+    print(json.to_string(b) ?? panic("JSON encode"))
+    print(json.to_string(c) ?? panic("JSON encode"))
     back := json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
     if back == .Count(n) { print(n) }
 }
@@ -415,15 +415,15 @@ fn run() {
     unit := Event.Idle
     tuple := Event.Count(3)
     named := Event.Named{ name: "x", enabled: true }
-    print(json.to_string(unit))
-    print(json.to_string(tuple))
-    print(json.to_string(named))
+    print(json.to_string(unit) ?? panic("JSON encode"))
+    print(json.to_string(tuple) ?? panic("JSON encode"))
+    print(json.to_string(named) ?? panic("JSON encode"))
     a := json.decode<Event>("{{\"type\":\"Idle\"}}") ?? panic("unit")
     b := json.decode<Event>("{{\"type\":\"Count\",\"value\":7}}") ?? panic("tuple")
     c := json.decode<Event>("{{\"type\":\"Named\",\"name\":\"y\",\"enabled\":false}}") ?? panic("named")
-    print(json.to_string(a))
-    print(json.to_string(b))
-    print(json.to_string(c))
+    print(json.to_string(a) ?? panic("JSON encode"))
+    print(json.to_string(b) ?? panic("JSON encode"))
+    print(json.to_string(c) ?? panic("JSON encode"))
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "tagged_enum", src, &[], None);
@@ -473,7 +473,7 @@ struct Record {
 
 fn run() {
     value := Record{ base: 4, note: None }
-    print(json.to_string(value))
+    print(json.to_string(value) ?? panic("JSON encode"))
     back := json.decode<Record>("{{\"base\":5,\"doubled\":999}}") ?? panic("decode")
     print(back.base)
     print(back.doubled)
@@ -567,9 +567,9 @@ fn run() {
     absent := Wire{ first: "a", second: "b", maybe: None, last: 4 }
     present := Wire{ first: "a", second: "b", maybe: Val("c"), last: 4 }
     arbitrary := [String:Int]{ "z": 1, "a": 2 }
-    print(json.to_string(absent))
-    print(json.to_string(present))
-    print(json.to_string(arbitrary))
+    print(json.to_string(absent) ?? panic("JSON encode"))
+    print(json.to_string(present) ?? panic("JSON encode"))
+    print(json.to_string(arbitrary) ?? panic("JSON encode"))
 }
 "#;
     let (code, stdout, stderr) = build_and_run(&dir, "struct_serde_order", src, &[], None);
@@ -705,14 +705,14 @@ fn generated_decode_dispatches_across_module_boundaries() {
     fs::create_dir_all(&dir).unwrap();
     let lib = r#"
 #Codable
-pub struct Address { pub city: String }
+struct Address { city: String }
 
 #Codable
-pub struct Order {
-    pub shipping: Address
-    pub quantities: [Int]
-    pub coupon: String?
-    pub labels: [String:Int]
+struct Order {
+    shipping: Address
+    quantities: [Int]
+    coupon: String?
+    labels: [String:Int]
 }
 
 "#;
@@ -749,9 +749,9 @@ derive T.RemoteLabel {
 }
 
 #LocalLabel
-pub struct RemoteType { pub value: Int }
+struct RemoteType { value: Int }
 
-pub fn remote_type_label() -> String {
+fn remote_type_label() -> String {
     value := RemoteType{ value: 2 }
     return value.local_label()
 }
@@ -898,7 +898,7 @@ fn user_derive_generic_impl_runs_in_aot_and_default_dev() {
 derive T.TypeName {
     info :: T.reflect()
     param :: info.type_params[0].name
-    fn get_value(self) -> @param { ~self.value }
+    fn get_value(self) -> @param { self.value.copy() }
     fn type_name(self) -> String { T.$name }
 }
 
@@ -918,7 +918,7 @@ fn run() {
 
     let file = dir.join("user_derive_generic.jet");
     fs::write(&file, src).unwrap();
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -929,7 +929,7 @@ fn run() {
         }
         other => panic!("generic user derive did not run in default dev: {other:?}"),
     }
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -953,7 +953,7 @@ fn run() {
 fn user_derive_generated_non_clonable_copy_is_rejected_in_sema() {
     let src = r#"
 derive T.CopyCallback {
-    fn duplicate(self) -> fn(Int) -> Int { ~self.callback }
+    fn duplicate(self) -> fn(Int) -> Int { self.callback.copy() }
 }
 
 #CopyCallback
@@ -1077,7 +1077,7 @@ fn structure_once_example_runs_aot_with_generated_meaning() {
 }
 
 /// #495 / I2: a field read from a bare (`Read`) parameter is still rooted in
-/// the borrowed parameter. The explicit `~` required by E0209 must produce
+/// the borrowed parameter. The explicit `.copy()` required by E0209 must produce
 /// owned values for both shallow and nested fields, compile through rustc, and
 /// run with the expected data.
 #[test]
@@ -1103,23 +1103,23 @@ fn pick() -> Int {
 }
 
 fn encoded(e: Email, i: Int) -> String {
-    shallow := DataTree.Text(~e.addr)
-    nested := DataTree.Text(~e.nested.text)
-    indexed := DataTree.Text(~e.items[0].text)
-    computed := DataTree.Text(~e.items[i + 1].text)
-    called := DataTree.Text(~e.items[pick()].text)
-    parenthesized := DataTree.Text(~e.items[-(-i)].text)
-    conditional := DataTree.Text(~e.items[if i == 0 -> 0 else -> 1].text)
+    shallow := Dyn.Text(~e.addr)
+    nested := Dyn.Text(~e.nested.text)
+    indexed := Dyn.Text(~e.items[0].text)
+    computed := Dyn.Text(~e.items[i + 1].text)
+    called := Dyn.Text(~e.items[pick()].text)
+    parenthesized := Dyn.Text(~e.items[-(-i)].text)
+    conditional := Dyn.Text(~e.items[if i == 0 -> 0 else -> 1].text)
     return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
 }
 
-fn slice_data(xs: [DataTree]) -> DataTree {
-    return DataTree.Array(xs[0..1])
+fn slice_data(xs: [Dyn]) -> Dyn {
+    return Dyn.Array(xs[0..1])
 }
 
 fn run() {
     e := Email{addr: "a@b.com", nested: Address{text: "inside"}, items: [Address{text: "zero"}, Address{text: "item"}]}
-    sliced := slice_data([DataTree.Text("slice0"), DataTree.Text("slice1")])
+    sliced := slice_data([Dyn.Text("slice0"), Dyn.Text("slice1")])
     print("{encoded(e, 0)}|{json.to_string(sliced)}")
 }
 "#,

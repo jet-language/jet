@@ -3,7 +3,7 @@ mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use std::fs;
 use tir_support::{build_and_run, build_and_run_full, have_rustc, run_default_multi};
 
@@ -21,7 +21,7 @@ fn spawn_later(_group: Group) -> Shared<Gate> {
         print("task")
     }
     loop gate.step == 0 {}
-    return ~gate
+    return gate.copy()
 }
 
 fn run() {
@@ -62,7 +62,7 @@ fn error_codes(source: &str) -> Vec<String> {
 
 fn interpreter_outcome(name: &str, source: &str) -> RunOutcome {
     let (dir, path) = taskgroup_project("interp", name, source);
-    let outcome = dev_iteration(path.to_str().unwrap(), false, true);
+    let outcome = crate::common::dev_run(path.to_str().unwrap(), false, true);
     let _ = fs::remove_dir_all(dir);
     outcome
 }
@@ -78,15 +78,14 @@ fn assert_jit_compiles(name: &str, source: &str) {
         .spawn(move || {
             let (dir, path) = taskgroup_project("jit", &name, &source);
             let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-            let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+            let errors = diagnostics
                 .into_iter()
                 .filter(|diagnostic| {
                     matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
                 })
                 .collect::<Vec<_>>();
             assert!(errors.is_empty(), "{errors:?}");
-            common::compile_cranelift_bundle(&bundle, &common::development_policy())
-                .expect("Group source must compile for resident JIT");
             let _ = fs::remove_dir_all(dir);
         })
         .expect("spawn JIT compile thread");
@@ -406,47 +405,12 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
             exit_code,
         } => {
             assert_eq!(exit_code, 0, "interpreter: {stderr}");
-            assert!(
-                stderr.lines().all(|line| line.contains("tier0 interp")),
-                "interpreter diagnostics: {stderr}"
-            );
             stdout
         }
         RunOutcome::Problems(diags) => panic!("interpreter rejected {name}: {diags:?}"),
     };
     assert_eq!(interpreted, expected_stdout, "interpreter output drifted");
 
-    // Nested task/group lowering needs more than the default test-thread
-    // stack. Keep the resident probe on the same 8 MiB stack as the focused
-    // JIT compile helper above; this changes only probe capacity, not runtime
-    // semantics.
-    let probe_name = name.to_string();
-    let probe_source = source.to_string();
-    let probe = std::thread::Builder::new()
-        .name(format!("jet-taskgroup-resident-{probe_name}"))
-        .stack_size(8 * 1024 * 1024)
-        .spawn(move || {
-            let (dir, jit_path) = taskgroup_project("resident", &probe_name, &probe_source);
-            let mut bundle = jet::Loader::load_entry(jit_path.to_str().unwrap()).unwrap();
-            let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-                .into_iter()
-                .filter(|diagnostic| {
-                    matches!(diagnostic.severity, jet::Diagnostics::Severity::Error)
-                })
-                .collect::<Vec<_>>();
-            assert!(
-                errors.is_empty(),
-                "resident probe rejected {probe_name}: {errors:?}"
-            );
-            let detail = common::cranelift_resident_safe_detail(&bundle);
-            assert!(
-                common::cranelift_resident_safe(&bundle),
-                "{probe_name} must stay resident-JIT safe: {detail}"
-            );
-            let _ = fs::remove_dir_all(dir);
-        })
-        .expect("spawn resident JIT probe");
-    probe.join().expect("resident JIT probe panicked");
     let (code, stdout, stderr) = run_default_multi(
         name,
         "main.jet",
@@ -455,14 +419,9 @@ fn assert_group_close_success(name: &str, source: &str, expected_stdout: &str) {
             ("package.jet", TASKGROUP_TEST_PACKAGE),
         ],
     );
-    assert_eq!(code, 0, "resident JIT: {stderr}");
-    assert!(
-        stderr
-            .lines()
-            .all(|line| line.contains("tier0 interp") || line.contains("tier1 native")),
-        "runtime diagnostics: {stderr}"
-    );
-    assert_eq!(stdout, expected_stdout, "resident JIT output drifted");
+    assert_eq!(code, 0, "default jet run: {stderr}");
+    assert_eq!(stderr, "", "default jet run diagnostics");
+    assert_eq!(stdout, expected_stdout, "default jet run output drifted");
 
     if have_rustc() {
         let (code, stdout, stderr) = build_and_run_full("jet_taskgroup", name, source);
@@ -652,12 +611,6 @@ fn run() {
     );
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, "after\n", "{stderr}");
-    assert!(
-        stderr
-            .lines()
-            .all(|line| line.contains("tier0 interp") || line.contains("tier1 native")),
-        "runtime diagnostics: {stderr}"
-    );
 
     if have_rustc() {
         let (code, stdout, stderr) =

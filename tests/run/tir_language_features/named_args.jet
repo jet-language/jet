@@ -1,0 +1,32 @@
+fn area(width: Int, height: Int) -> Int {
+    return (width * height)
+}
+fn connect(host: String, /, *, timeout seconds: Int{30}, tls: Bool{true}) -> String {
+    return "{host} t={seconds} tls={tls}"
+}
+fn identity<T>(value: T, *, note: String{"unused"}) -> T {
+    return value
+}
+fn force(*, force: Bool) -> Int { 1 }
+fn apply(action: fn(*, force: Bool) -> Int) -> Int {
+    return action(force: true)
+}
+struct Logger {
+    id: Int
+}
+impl Logger {
+    fn write(self, level: String, parts: ...String) -> String {
+        return [level, ...parts].join(" ")
+    }
+}
+fn run() {
+    print(area(width: 4, height: 3))
+    print(area(4, height: 3))
+    print(connect("db", tls: false, timeout: 5))
+    print(connect("db", tls: false))
+    print(identity<Int>(note: "generic", value: 7))
+    print(apply(force))
+    logger :: Logger{id: 0}
+    print(logger.write(parts: "a", level: "L"))
+    print(logger.write("M", "b", "c"))
+}

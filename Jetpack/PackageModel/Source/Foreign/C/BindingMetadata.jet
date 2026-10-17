@@ -10,8 +10,8 @@ C_BINDER_SCHEMA :: prep { "jet-c-bind-v1" }
 // Why a C binding input, sidecar, or link input was refused. Each refusal is
 // a user-facing diagnostic row.
 #Error
-pub struct CFFIError {
-    pub diagnostics: [Diagnostic]
+struct CFFIError {
+    diagnostics: [Diagnostic]
 }
 
 fn pkg_cffi_error(diagnostic: Diagnostic) -> CFFIError Never! {
@@ -24,9 +24,9 @@ fn pkg_cffi_e3208(header: String, lib: String, reason: String) -> Diagnostic Nev
 }
 
 // Handle facts and link closure collected over every binding of a program.
-pub struct CBindingMetadata {
-    pub handle_facts: [FFIHandleFact]
-    pub link_closure: FFILinkClosure
+struct CBindingMetadata {
+    handle_facts: [FFIHandleFact]
+    link_closure: FFILinkClosure
 
     fn empty() -> CBindingMetadata Never! {
         CBindingMetadata{handle_facts: [FFIHandleFact]{}, link_closure: FFILinkClosure.empty()}
@@ -68,7 +68,7 @@ fn pkg_cffi_canonical_link_closure(closure: LinkClosure) -> FFILinkClosure Never
 }
 
 // `<root>/.jet/bindings/<lang>/<lib>.<ext>`: the generated binding cache.
-pub fn pkg_cffi_binding_cache_file(project_root: String, language: ForeignLanguage, lib: String) -> String Never! {
+fn pkg_cffi_binding_cache_file(project_root: String, language: ForeignLanguage, lib: String) -> String Never! {
     extension :: if pkg_binder_descriptor(language) == {
         .Val(descriptor) -> descriptor.cache_extension
         .None -> FILE_EXT
@@ -105,7 +105,7 @@ fn pkg_cffi_split_nonblank(value: String, separator: String) -> [String] Never! 
 
 // A provenance artifact path: absolute as written, else beside the record.
 fn pkg_cffi_resolve_provenance_artifact(provenance_path: String, encoded: String) -> String Never! {
-    if files.is_absolute(encoded) -> return ~encoded
+    if files.is_absolute(encoded) -> return encoded.copy()
     parent :: files.dirname(provenance_path)
     files.join(if parent == "" -> "." else -> parent, encoded)
 }
@@ -131,7 +131,7 @@ fn pkg_cffi_parse_obligation(row: String) -> FFIBoundaryObligation ForeignBridge
 // beside `cache`: every recorded artifact must still hash to its digest,
 // the descriptor and effect root must be the language's own, and the
 // coverage digest must match its fields.
-pub fn pkg_cffi_read_boundary_facts(cache: String, expected_language: ForeignLanguage, expected_lib: String, loaded_lib: String) -[FS]> FFIBoundaryFacts ForeignBridgeError! {
+fn pkg_cffi_read_boundary_facts(cache: String, expected_language: ForeignLanguage, expected_lib: String, loaded_lib: String) -[FS]> FFIBoundaryFacts ForeignBridgeError! {
     path :: pkg_cffi_sidecar(cache, "provenance")
     provenance :: pkg_bridge_read_boundary_provenance(path)
     schema :: pkg_cffi_provenance_value(provenance, "boundary-schema")
@@ -204,7 +204,7 @@ fn pkg_cffi_metadata_escape(value: String) -> String Never! {
         }
         &out.push(U8{37})
         &out.push(digits[code >> 4])
-        &out.push(digits[code & 15])
+        &out.push(digits[(code).bit_and(15)])
     }
     String.from_bytes(out) ?? ""
 }
@@ -231,7 +231,7 @@ fn pkg_cffi_metadata_unescape(value: String) -> String ForeignBridgeError! {
         if index + 2 >= bytes.len() -> return Err(pkg_bridge_error("truncated percent escape"))
         high :: pkg_cffi_hex_value(Int.from_u8(bytes[index + 1])) ?? return Err(pkg_bridge_error("invalid percent escape"))
         low :: pkg_cffi_hex_value(Int.from_u8(bytes[index + 2])) ?? return Err(pkg_bridge_error("invalid percent escape"))
-        &out.push(U8{(high << 4) | low})
+        &out.push(U8{((high << 4)).bit_or(low)})
         index += 3
     }
     text :: String.from_bytes(out) ?? return Err(pkg_bridge_error("metadata contains invalid UTF-8"))
@@ -299,7 +299,7 @@ fn pkg_cffi_read_binding_metadata(cache: String, expected_lib: String) -[FS]> CB
 }
 
 // Write the typed C binding metadata produced by the C binder.
-pub fn pkg_cffi_write_c_binding_metadata(cache: String, handles: [HandleFact], closure: LinkClosure) -[FS, Env]> String ForeignBridgeError! {
+fn pkg_cffi_write_c_binding_metadata(cache: String, handles: [HandleFact], closure: LinkClosure) -[FS, Env]> String ForeignBridgeError! {
     facts := [FFIHandleFact]{}
     loop handle in handles -> &facts.push(pkg_cffi_canonical_handle_fact(handle))
     path :: pkg_cffi_binding_metadata_path(cache)
@@ -322,9 +322,9 @@ fn pkg_cffi_metadata_or_default(cache: String, lib: String) -[FS]> CBindingMetad
 
 // The binding caches that are compiler-owned locations; `#Bindgen` is legal
 // only in one of these generated directories (E3207).
-pub fn pkg_cffi_generated_cache_language(display: String) -> ForeignLanguage? Never! {
+fn pkg_cffi_generated_cache_language(display: String) -> ForeignLanguage? Never! {
     normalized :: display.replace("\\", "/")
-    loop language in ForeignLanguage.all() {
+    loop language in ForeignLanguage.registered() {
         if normalized.contains("{SOURCE_ROOT_DIR}/{language.bindings_subdir()}/") -> return Val(language)
     }
     None
@@ -332,7 +332,7 @@ pub fn pkg_cffi_generated_cache_language(display: String) -> ForeignLanguage? Ne
 
 // The cache of a generated foreign binding whose loaded library carries the
 // language's bridge prefix, and its source library name.
-pub fn pkg_cffi_generated_boundary_cache(project_root: String, language: ForeignLanguage, loaded_lib: String) -> (cache: String, lib: String) ForeignBridgeError! {
+fn pkg_cffi_generated_boundary_cache(project_root: String, language: ForeignLanguage, loaded_lib: String) -> (cache: String, lib: String) ForeignBridgeError! {
     prefix :: language.bridge_prefix()
     source_lib := loaded_lib
     if prefix != "" {
@@ -364,18 +364,18 @@ fn pkg_cffi_handle_keys(facts: [FFIHandleFact]) -> String Never! {
 // The unified C binding identity over the exact header and cache bytes, the
 // typed metadata, the pinned tools, and any declared local archive. The
 // header-only hash stays the quick rebind check; this is the link-time truth.
-pub fn pkg_cffi_c_binding_identity(project_root: String, lib: String, header: String, cache: String) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_cffi_c_binding_identity(project_root: String, lib: String, header: String, cache: String) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_cffi_c_binding_identity_with_entry(project_root, lib, header, cache, None)
 }
 
-pub fn pkg_cffi_c_binding_identity_with_entry(project_root: String, lib: String, header: String, cache: String, entry: String?) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_cffi_c_binding_identity_with_entry(project_root: String, lib: String, header: String, cache: String, entry: String?) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     header_path :: pkg_cffi_canonical_or_self(header)
     cache_path :: pkg_cffi_canonical_or_self(cache)
     header_bytes :: files.read_bytes(header_path) ?? return Err(pkg_bridge_error("could not read {header_path} for C binding identity: {err}"))
     cache_bytes :: files.read_bytes(cache_path) ?? return Err(pkg_bridge_error("could not read {cache_path} for C binding identity: {err}"))
     descriptor :: pkg_binder_descriptor(ForeignLanguage.C) ?? return Err(pkg_bridge_error("C binder descriptor is not registered"))
     identity := ForeignIdentityBuilder.new(FOREIGN_BRIDGE_IDENTITY_SCHEMA)
-    &identity.field("language", ForeignLanguage.C.root().bytes())
+    &identity.field("language", (ForeignLanguage.C).root().bytes())
     &identity.field("binder_schema", C_BINDER_SCHEMA.bytes())
     &identity.field("library", lib.bytes())
     &identity.field("abi", "c_{lib}".bytes())
@@ -401,11 +401,11 @@ pub fn pkg_cffi_c_binding_identity_with_entry(project_root: String, lib: String,
 // Publish the C binding's common provenance record beside its generated
 // cache, including the local archive bytes when a package names a local C
 // dependency, so a changed implementation cannot reuse a header-only cache.
-pub fn pkg_cffi_write_c_binding_provenance(project_root: String, lib: String, header: String, cache: String) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_cffi_write_c_binding_provenance(project_root: String, lib: String, header: String, cache: String) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_cffi_write_c_binding_provenance_with_boundary(project_root, lib, header, cache, None, None)
 }
 
-pub fn pkg_cffi_write_c_binding_provenance_with_entry(project_root: String, lib: String, header: String, cache: String, entry: String?) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
+fn pkg_cffi_write_c_binding_provenance_with_entry(project_root: String, lib: String, header: String, cache: String, entry: String?) -[FS, Env, Exec, Time.Wait]> String ForeignBridgeError! {
     pkg_cffi_write_c_binding_provenance_with_boundary(project_root, lib, header, cache, entry, None)
 }
 
@@ -425,7 +425,7 @@ fn pkg_cffi_write_c_binding_provenance_with_boundary(project_root: String, lib: 
     }
     cache_sha :: pkg_bridge_sha_file(cache_path)
     fields := [(name: String, value: String)]{
-        (name: "language", value: ForeignLanguage.C.root()),
+        (name: "language", value: (ForeignLanguage.C).root()),
         (name: "abi", value: "c_{lib}"),
         (name: "transport", value: "direct-c-abi"),
         (name: "binder-schema", value: C_BINDER_SCHEMA),
@@ -438,7 +438,17 @@ fn pkg_cffi_write_c_binding_provenance_with_boundary(project_root: String, lib: 
         (name: "ar", value: ar)
     }
     loop field in boundary.provenance_fields() -> &fields.push(field)
-    &fields.push((name: "handle-facts", value: pkg_cffi_handle_keys(metadata.handle_facts)))
+    // One `handle-fact` row per handle, the same repeated-row form the bridge
+    // provenance publisher uses: a stable key is itself a `key=value;...`
+    // record, and a header with several handles must not fold them into one
+    // multi-line value.
+    handle_keys := [String]{}
+    loop fact in metadata.handle_facts {
+        key :: fact.stable_key()
+        if !handle_keys.contains(key) -> &handle_keys.push(key)
+    }
+    &handle_keys.sort()
+    loop key in handle_keys -> &fields.push((name: "handle-fact", value: key))
     &fields.push((name: "link-closure", value: metadata.link_closure.stable_key()))
     if pkg_cffi_declared_c_dep_for_entry(lib, project_root, entry) == .Val(target) -> &fields.push((name: "dependency", value: target))
     loop input in pkg_cffi_local_c_archive_inputs(project_root, lib, entry) {

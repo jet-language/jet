@@ -1,0 +1,13 @@
+use core.files as files
+
+#Test("original slow header does not block normal client") {
+    port :: s5_web_port()
+    s5_web_wait_up(port, 30000)
+    slow :: net.tcp_connect("127.0.0.1:{port}") ?? panic("connect slow")
+    net.set_read_timeout(slow, 200) ?? panic("slow read timeout")
+    net.tcp_write_all_bytes(slow, [U8]{71}) ?? panic("write G")
+    // Rust TcpStream.flush is unbuffered; Core write_all_bytes sends directly.
+    response :: s5_web_get(port, "/__jet_dev_version", None) ?? panic("slow header must not block a normal client")
+    assert_eq(response.status, 200)
+    net.tcp_close(slow).drop("original socket drop ignores close errors")
+}

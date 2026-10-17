@@ -12,6 +12,7 @@ use jet_foundation.[
     Program,
     Span,
     Stmt,
+    policy_key_parse,
 ]
 use jet_lexer.[
     TOKEN_EOF,
@@ -25,7 +26,7 @@ use jet_lexer.[
 fn parser_policy_file_decl_ahead(state: &JetParserState) -> Bool Never! {
     if parser_current_kind(&state) != TOKEN_HASH -> return false
     name :: parser_lookahead(&state, 1)
-    if name.kind != TOKEN_IDENT || name.payload.decoded != "Policy" -> return false
+    if name.kind != TOKEN_IDENT || parser_value(state, name) != "Policy" -> return false
     if parser_kind_at(&state, 2) != TOKEN_LPAREN -> return false
     // D-CALLPOLICY2=C: a callable policy starts with a policy call.
     if parser_kind_at(&state, 3) == TOKEN_IDENT && parser_kind_at(&state, 4) == TOKEN_LPAREN -> return false
@@ -75,30 +76,6 @@ fn parser_policy_retired_memory(state: &JetParserState, name: String, span: Span
     }
     parser_add_error_code(&state, "E0355", span, "`{name}` is a retired memory policy", "memory floors are rights-tree prohibitions, not policy-marker arguments", "write {replacement} on the function signature")
     true
-}
-
-fn parser_policy_key(name: String) -> PolicyKey? {
-    if name == {
-        "unsafe" -> Val(PolicyKey.Unsafe)
-        "impure" -> Val(PolicyKey.Impure)
-        "nondeterministic" -> Val(PolicyKey.Nondeterministic)
-        "dependency_grant" -> Val(PolicyKey.DependencyGrant)
-        "build_flag" -> Val(PolicyKey.BuildFlag)
-        "session_flag" -> Val(PolicyKey.SessionFlag)
-        "trust_grant" -> Val(PolicyKey.TrustGrant)
-        "force_pin" -> Val(PolicyKey.ForcePin)
-        "taint_scrub" -> Val(PolicyKey.TaintScrub)
-        "duty_drop" -> Val(PolicyKey.DutyDrop)
-        "state_transition" -> Val(PolicyKey.StateTransition)
-        "precision_demotion" -> Val(PolicyKey.PrecisionDemotion)
-        "structure" -> Val(PolicyKey.Structure)
-        "lint_allow" -> Val(PolicyKey.LintAllow)
-        "gc" -> Val(PolicyKey.ScopedGC)
-        "explicit_units" -> Val(PolicyKey.ExplicitUnits)
-        "copies" -> Val(PolicyKey.Copies)
-        "sentries" -> Val(PolicyKey.Sentries)
-        else -> None
-    }
 }
 
 // One declaration per argument, or None after reporting the first refusal.
@@ -156,7 +133,7 @@ fn parser_policy_declarations_from_marker(state: &JetParserState, marker: Marker
             }
         }
         if parser_policy_retired_memory(&state, name, name_span, limit) -> return None
-        key :: parser_policy_key(name) ?? {
+        key :: policy_key_parse(name) ?? {
             parser_add_error_code(&state, "E0355", name_span, "`{name}` is not a scoped policy", "the compiler owns the closed policy registry and its scope rules", "use `gc`, `explicit_units`, `copies: .Explicit`, or `sentries: .Off`; write memory floors as `!Mem.*` effect denials")
             return None
         }

@@ -30,10 +30,10 @@ fn fft_radix2(re0: ^[Float], im0: ^[Float], n: Int) -> FFTBuffers {
         }
         j += bit
         if i < j {
-            tmp_re :: ~re[i]
+            tmp_re :: re[i].copy()
             re[i] = re[j]
             re[j] = tmp_re
-            tmp_im :: ~im[i]
+            tmp_im :: im[i].copy()
             im[i] = im[j]
             im[j] = tmp_im
         }
@@ -56,12 +56,12 @@ fn fft_radix2(re0: ^[Float], im0: ^[Float], n: Int) -> FFTBuffers {
             i = j
             loop i < n {
                 k := i + half
-                odd_re :: ~re[k]
-                odd_im :: ~im[k]
+                odd_re :: re[k].copy()
+                odd_im :: im[k].copy()
                 t_re :: w_re * odd_re - w_im * odd_im
                 t_im :: w_re * odd_im + w_im * odd_re
-                even_re :: ~re[i]
-                even_im :: ~im[i]
+                even_re :: re[i].copy()
+                even_im :: im[i].copy()
                 re[i] = even_re + t_re
                 im[i] = even_im + t_im
                 re[k] = even_re - t_re
@@ -113,7 +113,7 @@ fn check_fft(out: FFTBuffers, n: Int) -> Float {
 fn bench(n: Int) {
     input :: make_impulse(n)
     started :: time.instant()
-    output :: fft_radix2(~input.re, ~input.im, n)
+    output :: fft_radix2(input.re.copy(), input.im.copy(), n)
     finished :: time.instant()
     duration :: finished - started
     elapsed :: duration.in(.Nanoseconds)

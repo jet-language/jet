@@ -273,7 +273,7 @@ pub fn jet_acceleration_publish(
             source_end,
             decision,
         );
-        let payload = jet_std::render_datatree_json(&payload, false, 0);
+        let payload = jet_std::render_dyn_json(&payload, false, 0);
         jet_receipt_attach_encoded(
             &payload,
             &section_name,
@@ -290,8 +290,8 @@ fn jet_acceleration_receipt_payload(
     source_start: usize,
     source_end: usize,
     decision: &JetAccelerationDecision,
-) -> jet_std::DataTree {
-    let measurement = jet_std::DataTree::Object(vec![
+) -> jet_std::Dyn {
+    let measurement = jet_std::Dyn::Object(vec![
         (
             "bandwidth_floor_nanos".into(),
             jet_acceleration_int(decision.measurement.bandwidth_floor_nanos),
@@ -324,35 +324,35 @@ fn jet_acceleration_receipt_payload(
     ]);
     let pin = match decision.status {
         JetAccelerationGateStatus::Pinned(pin) => {
-            jet_std::DataTree::Text(pin.as_str().to_string())
+            jet_std::Dyn::Text(pin.as_str().to_string())
         }
-        _ => jet_std::DataTree::Null,
+        _ => jet_std::Dyn::Null,
     };
-    let decision = jet_std::DataTree::Object(vec![
+    let decision = jet_std::Dyn::Object(vec![
         ("measurement".into(), measurement),
         ("pin".into(), pin),
         (
             "status".into(),
-            jet_std::DataTree::Text(decision.status.as_str().to_string()),
+            jet_std::Dyn::Text(decision.status.as_str().to_string()),
         ),
         (
             "transform".into(),
-            jet_std::DataTree::Text(decision.transform.as_str().to_string()),
+            jet_std::Dyn::Text(decision.transform.as_str().to_string()),
         ),
     ]);
-    jet_std::DataTree::Object(vec![
+    jet_std::Dyn::Object(vec![
         ("decision".into(), decision),
         (
             "function".into(),
-            jet_std::DataTree::Text(function.to_string()),
+            jet_std::Dyn::Text(function.to_string()),
         ),
         (
             "loop_header".into(),
-            jet_std::DataTree::Int(i64::from(loop_header)),
+            jet_std::Dyn::Int(i64::from(loop_header).into()),
         ),
         (
             "source".into(),
-            jet_std::DataTree::Object(vec![
+            jet_std::Dyn::Object(vec![
                 ("end".into(), jet_acceleration_int(source_end)),
                 ("start".into(), jet_acceleration_int(source_start)),
             ]),
@@ -361,15 +361,15 @@ fn jet_acceleration_receipt_payload(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn jet_acceleration_int(value: impl TryInto<i64> + Copy) -> jet_std::DataTree {
-    jet_std::DataTree::Int(value.try_into().unwrap_or(i64::MAX))
+fn jet_acceleration_int(value: impl TryInto<i64> + Copy) -> jet_std::Dyn {
+    jet_std::Dyn::Int((value.try_into().unwrap_or(i64::MAX)).into())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn jet_acceleration_optional_int(value: Option<u64>) -> jet_std::DataTree {
+fn jet_acceleration_optional_int(value: Option<u64>) -> jet_std::Dyn {
     value
         .map(|value| jet_acceleration_int(value))
-        .unwrap_or(jet_std::DataTree::Null)
+        .unwrap_or(jet_std::Dyn::Null)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

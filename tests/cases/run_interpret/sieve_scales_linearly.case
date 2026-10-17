@@ -1,0 +1,66 @@
+# Port of tests/run_interpret.rs::sieve_scales_linearly (392-483); sources copied verbatim from original Rust literals/templates.
+# PENDING-SAME-HEAD; no runtime or snapshot receipt claimed.
+# PENDING-GRAMMAR(batch-four median elapsed); TestLead1 approved integer nanos and saturating multiplier.
+# original predicate: original measured via 10ms child poll loop; kit wall-clock timing resolution differs, verdict-level equivalent for the 10x bound.
+# ORIGINAL-TEST-BUG: original sets JET_STORE_DIR twice; preserve last-wins order.
+# Original unasserted stderr timing report is not a test verdict.
+fixture: fixtures/sieve_scales_linearly
+step warmup: jet run --interpret run.jet -- 10000
+env: JET_STORE_DIR={work}/run-cache
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+limit: time=30
+exit: 0
+stdout: = "count 1229\nlargest 9973\n"
+stderr: empty
+step small1: jet run --interpret run.jet -- 10000
+env: JET_STORE_DIR={work}/run-cache
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+limit: time=30
+exit: 0
+stdout: = "count 1229\nlargest 9973\n"
+stderr: empty
+step small2: jet run --interpret run.jet -- 10000
+env: JET_STORE_DIR={work}/run-cache
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+limit: time=30
+exit: 0
+stdout: = "count 1229\nlargest 9973\n"
+stderr: empty
+step small3: jet run --interpret run.jet -- 10000
+env: JET_STORE_DIR={work}/run-cache
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+limit: time=30
+exit: 0
+stdout: = "count 1229\nlargest 9973\n"
+stderr: empty
+step large1: jet run --interpret run.jet -- 100000
+env: JET_STORE_DIR={work}/run-cache
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+limit: time=30
+exit: 0
+stdout: = "count 9592\nlargest 99991\n"
+stderr: empty
+step large2: jet run --interpret run.jet -- 100000
+env: JET_STORE_DIR={work}/run-cache
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+limit: time=30
+exit: 0
+stdout: = "count 9592\nlargest 99991\n"
+stderr: empty
+step large3: jet run --interpret run.jet -- 100000
+env: JET_STORE_DIR={work}/run-cache
+env: JET_STORE_DIR={work}/store
+env: NO_COLOR=1
+limit: time=30
+exit: 0
+stdout: = "count 9592\nlargest 99991\n"
+stderr: empty
+elapsed: median [small1,small2,small3] > 0ns
+elapsed: median [large1,large2,large3] > 0ns
+elapsed: median [large1,large2,large3] < 10 * median [small1,small2,small3]

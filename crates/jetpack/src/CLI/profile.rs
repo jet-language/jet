@@ -9,7 +9,7 @@ use super::realize::{project_env_root, realize_ref_outcome, RealizeScope, RefOut
 use crate::Output::Theme;
 use crate::{EnvFile, ProviderFacts, RefSpec, Store, Syntax, JSON, SHA256};
 use jet_env_model::ModuleEval;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
@@ -867,9 +867,9 @@ fn ensure_collision_selection_current(
 }
 
 fn profile_tree_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -880,17 +880,17 @@ fn collision_record(
 ) -> io::Result<Option<(Option<String>, Vec<(String, String, String)>)>> {
     let value = JSON::parse(metadata).map_err(io::Error::other)?;
     let object = value.as_object().map_err(io::Error::other)?;
-    let Some(DataTree::Object(collisions)) = profile_tree_field(object, "collisions") else {
+    let Some(Dyn::Object(collisions)) = profile_tree_field(object, "collisions") else {
         return Ok(None);
     };
     let Some(record) = profile_tree_field(collisions, path) else {
         return Ok(None);
     };
-    let DataTree::Object(record) = record else {
+    let Dyn::Object(record) = record else {
         return Err(io::Error::other("profile collision record is not an object"));
     };
     let selected = match profile_tree_field(record, "selected") {
-        Some(DataTree::Null) | None => None,
+        Some(Dyn::Null) | None => None,
         Some(value) => Some(value.as_str().map_err(io::Error::other)?.to_string()),
     };
     let contenders = profile_tree_field(record, "contenders")
@@ -1386,7 +1386,7 @@ fn read_generation_record(state: &Path, generation: u64) -> io::Result<Generatio
     }
     let actual_generation = profile_tree_field(object, "generation")
         .and_then(|value| match value {
-            DataTree::Int(value) if *value > 0 => Some(*value as u64),
+            Dyn::Int(value) => value.to_u64().filter(|value| *value > 0),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile generation metadata lacks generation"))?;
@@ -1579,7 +1579,7 @@ fn read_current_pointer(state: &Path) -> io::Result<Option<CurrentPointer>> {
     }
     let generation = profile_tree_field(object, "generation")
         .and_then(|value| match value {
-            DataTree::Int(value) if *value > 0 => Some(*value as u64),
+            Dyn::Int(value) => value.to_u64().filter(|value| *value > 0),
             _ => None,
         })
         .ok_or_else(|| io::Error::other("profile current pointer lacks generation"))?;

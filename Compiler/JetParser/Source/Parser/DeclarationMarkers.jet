@@ -1,6 +1,7 @@
 // Shared marker projection bodies for declaration parsers. Keep the original
 // marker list on each AST node and return its newly computed typed projections.
 use jet_foundation.[
+    Call,
     EnumDef,
     EveryArg,
     EveryMarker,
@@ -15,6 +16,8 @@ use jet_foundation.[
     Span,
     StringMapEntry,
     StructDef,
+    StructLayout,
+    UnOp,
     ast_job_metadata,
     expr_span,
 ]
@@ -23,7 +26,7 @@ fn parser_marker_is_signed_auto_derive(name: String) -> Bool Never! {
     name == "Printable" || name == "Equatable" || name == "Debug" || name == "Comparable" || name == "Encode" || name == "Decode" || name == "Codable"
 }
 
-pub fn parser_split_type_markers(markers: [Marker]) -> (derives: [NamedSpan], serde_markers: [Marker]) Never! {
+fn parser_split_type_markers(markers: [Marker]) -> (derives: [NamedSpan], serde_markers: [Marker]) Never! {
     serde := [Marker]{}
     derives := [NamedSpan]{}
     loop marker in markers {
@@ -42,8 +45,8 @@ pub fn parser_split_type_markers(markers: [Marker]) -> (derives: [NamedSpan], se
     (derives: ^derives, serde_markers: ^serde)
 }
 
-pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Never! {
-    value.type_markers = ~markers
+fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Never! {
+    value.type_markers = markers.copy()
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
@@ -51,8 +54,8 @@ pub fn parser_apply_struct_type_markers(value: &StructDef, markers: [Marker]) Ne
     parser_apply_type_markers(&value, markers)
 }
 
-pub fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
-    value.type_markers = ~markers
+fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never! {
+    value.type_markers = markers.copy()
     (derives, serde_markers) := parser_split_type_markers(markers)
     value.serde_markers = serde_markers
     value.derives = derives
@@ -71,6 +74,153 @@ pub fn parser_apply_enum_type_markers(value: &EnumDef, markers: [Marker]) Never!
 
 fn parser_marker_shape_error(state: &JetParserState, marker: Marker) {
     parser_add_error_code(&state, "E0930", marker.span, "`#{marker.name}` arguments do not match its registered signature", "marker arguments use the same call grammar and typed signature as function arguments", "match the registered marker signature")
+}
+
+// D-REPRC1 / D-SOA1 / D-PLACE1 / D-LAYOUT-ALIGN1: the layout fact of a
+// struct's `#Layout(…)` marker, or the refusal of an enum's. `grouped` is the
+// `#[…]` list spelling (Rust `marker_groups.rs`), whose refusals are ordinary
+// errors; the bare `#Layout(…)` spelling (Rust `layout_type_def`) refuses
+// fatally, ending the declaration. `c` and `columnar` are supported,
+// `align(N)` / `align(target, N)` is the second argument of `#Layout(c)`, a
+// bare second identifier is an enum's C tag width, and `packed` and the
+// first-argument `align` stay reserved. Sema owns positivity, power-of-two,
+// and target facts. None when there is no layout fact.
+fn parser_layout_marker_fact(state: &JetParserState, markers: [Marker], grouped: Bool, is_enum: Bool) -> StructLayout? {
+    marker :: loop candidate in markers {
+        if candidate.name == "Layout" -> break candidate
+    } ?? return None
+    if grouped -> return parser_layout_grouped_fact(&state, marker, is_enum)
+    values :: parser_bind_marker_arguments(&state, marker, [String]{"kind", "tag"}, 1) ?? {
+        state.abort_mark = state.diagnostics.len()
+        return None
+    }
+    kind_expr :: values[0] ?? return None
+    if kind_expr == .Ident(variant, variant_span) {
+        tag_width := false
+        alignment := Int?{None}
+        alignment_span := Span?{None}
+        alignment_target := false
+        has_alignment := false
+        if values[1] == .Val(value) {
+            if value == .Ident(_, _) {
+                tag_width = true
+            } else if parser_layout_align_call(value) == .Val(call) {
+                has_alignment = true
+                alignment_target = call.args.len() == 2
+                argument :: call.args[if alignment_target -> 1 else -> 0].expr
+                if argument == .Int(number, number_span, _, _) && number >= 0 {
+                    alignment = Val(number)
+                    alignment_span = Val(number_span)
+                } else if argument == .Unary(op, operand, _) && op == UnOp.Neg && operand == .Int(_, _, _, _) {
+                    alignment_span = Val(expr_span(argument))
+                } else {
+                    parser_add_fatal_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value (or `target, N`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)` or `align(target, 2097152)`")
+                    return None
+                }
+            } else {
+                parser_marker_shape_error(&state, marker)
+                state.abort_mark = state.diagnostics.len()
+                return None
+            }
+        }
+        layout := StructLayout?{None}
+        if variant == {
+            "c" -> layout = Val(if alignment == .Val(bytes) -> StructLayout.CAligned{alignment: bytes, target: alignment_target} else -> StructLayout.C)
+            "columnar" -> {
+                if has_alignment {
+                    parser_add_fatal_code(&state, "E1105", alignment_span ?? marker.span, "`align` is only valid with `#Layout(c)`", "columnar layout has no C ABI alignment override", "use `#Layout(c, align(64))` or remove `align(…)`")
+                    return None
+                }
+                layout = Val(StructLayout.Columnar)
+            }
+            "packed" | "align" -> {
+                parser_add_fatal_code(&state, "E1105", variant_span, "`#Layout({variant})` is reserved and not yet supported", "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`", "use `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`")
+                return None
+            }
+            else -> {
+                parser_add_fatal_code(&state, "E1105", variant_span, "`#Layout({variant})` isn't a known layout variant", "the supported variants are `c`, `columnar`, and `c, align(N)` or `c, align(target, N)`", "write `#Layout(c)`, `#Layout(c, align(64))`, `#Layout(c, align(target, 2097152))`, or `#Layout(columnar)`")
+                return None
+            }
+        }
+        if is_enum {
+            if has_alignment || layout != Val(StructLayout.C) {
+                parser_add_fatal_code(&state, "E1105", variant_span, "Only plain C layout applies to enums.", "alignment is a struct ABI override; enum tags use the second bare layout argument.", "use `#Layout(c, I32)` or another enum tag width")
+            }
+            return None
+        }
+        if tag_width {
+            parser_add_fatal_code(&state, "E1105", marker.span, "A tag width applies only to enums.", "Structs have fields and padding but no discriminant tag.", "Remove `tag: …`, or put this layout on an enum.")
+            return None
+        }
+        return layout
+    }
+    parser_marker_shape_error(&state, marker)
+    state.abort_mark = state.diagnostics.len()
+    None
+}
+
+// Rust `marker_groups.rs`: `#Layout(…)` inside a `#[…]` list. Its arguments
+// are read positionally and its refusals do not end the declaration.
+fn parser_layout_grouped_fact(state: &JetParserState, marker: Marker, is_enum: Bool) -> StructLayout? {
+    second :: parser_marker_expression(marker, 1)
+    if is_enum {
+        if second == .Val(value) && parser_layout_align_call(value) != None {
+            parser_add_error_code(&state, "E1105", marker.span, "alignment overrides apply only to structs", "enum C layout uses its tag-width argument instead", "write `#Layout(c, I32)` on an enum")
+        }
+        return None
+    }
+    first :: parser_marker_expression(marker, 0) ?? return None
+    if first == .Ident(variant, _) {
+        has_alignment := false
+        alignment_target := false
+        alignment := Int?{None}
+        if second == .Val(value) {
+            if parser_layout_align_call(value) == .Val(call) {
+                has_alignment = true
+                alignment_target = call.args.len() == 2
+                argument :: call.args[if alignment_target -> 1 else -> 0].expr
+                if argument == .Int(number, _, _, _) && number >= 0 {
+                    alignment = Val(number)
+                } else if argument == .Unary(op, operand, _) && op == UnOp.Neg && operand == .Int(_, _, _, _) {
+                } else {
+                    parser_add_error_code(&state, "E1105", expr_span(argument), "`align` requires one integer byte value (or `align(target, N)`)", "`#Layout(c, align(N))` is compiler-owned ABI metadata", "write `align(64)` or `align(target, 2097152)`")
+                }
+            } else {
+                parser_add_error_code(&state, "E1105", expr_span(value), "the second `#Layout` argument must be `align(N)` or `align(target, N)`", "struct alignment is a positive power-of-two integer", "write `#Layout(c, align(64))` or `#Layout(c, align(target, 2097152))`")
+            }
+        }
+        if variant == {
+            "c" -> return Val(if alignment == .Val(bytes) -> StructLayout.CAligned{alignment: bytes, target: alignment_target} else -> StructLayout.C)
+            "columnar" -> {
+                if has_alignment -> parser_add_error_code(&state, "E1105", marker.span, "`align` is only valid with `#Layout(c)`", "columnar layout has no C ABI alignment override", "write `#Layout(c, align(64))`")
+                return Val(StructLayout.Columnar)
+            }
+            else -> return None
+        }
+    }
+    None
+}
+
+// `align(N)` or `align(target, N)`.
+fn parser_layout_align_call(value: Expr) -> Call? {
+    if value == .Call(call) && call.name == "align" {
+        if call.args.len() == 1 -> return Val(call)
+        if call.args.len() == 2 {
+            if call.args[0].expr == .Ident(name, _) && name == "target" -> return Val(call)
+        }
+    }
+    None
+}
+
+// The struct's `layout_span`: the marker, whenever a layout fact is set, and
+// for the grouped spelling whenever its first argument is an identifier.
+fn parser_layout_marker_span(markers: [Marker], grouped: Bool, layout: StructLayout?) -> Span? {
+    marker :: loop candidate in markers {
+        if candidate.name == "Layout" -> break candidate
+    } ?? return None
+    if layout != None -> return Val(marker.span)
+    if grouped && parser_marker_expression(marker, 0) == .Val(first) && first == .Ident(_, _) -> return Val(marker.span)
+    None
 }
 
 // Rust `marker_argument_bindings`: the argument bound to each named
@@ -337,7 +487,7 @@ fn parser_job_parallel(state: &JetParserState, marker: Marker, expression: Expr)
     None
 }
 
-pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> JobMetadata? {
+fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -> JobMetadata? {
     if marker.args.len() == 0 -> return None
     values :: parser_bind_marker_arguments(&state, marker, [String]{"scope", "packages", "cwd", "inputs", "outputs", "skip", "cache", "limits", "after", "parallel"}, 0) ?? return None
     metadata := ast_job_metadata()
@@ -399,7 +549,7 @@ pub fn parser_job_metadata_from_marker(state: &JetParserState, marker: Marker) -
     Val(metadata)
 }
 
-pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> EveryMarker? {
+fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -> EveryMarker? {
     values :: parser_bind_marker_arguments(&state, marker, [String]{"schedule"}, 1) ?? return None
     schedule :: values[0] ?? return None
     arg := if schedule == {
@@ -419,7 +569,7 @@ pub fn parser_every_marker_from_marker(state: &JetParserState, marker: Marker) -
     Val(EveryMarker{arg: arg, span: marker.span, resolved: None})
 }
 
-pub fn parser_project_function_job_markers(state: &JetParserState, function: &Func, markers: [Marker]) -> Bool {
+fn parser_project_function_job_markers(state: &JetParserState, function: &Func, markers: [Marker]) -> Bool {
     valid := true
     loop marker in markers {
         if marker.name == "Job" {

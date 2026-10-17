@@ -38,7 +38,7 @@ fn trust_test_io_reason(error: TrustError) -> String {
     }
 }
 
-fn trust_test_json_object(text: String) -> [String: DataTree] {
+fn trust_test_json_object(text: String) -> [String: Dyn] {
     if trust_json_parse(text) == {
         .Parsed(tree) -> trust_json_object(tree) ?? panic("expected a JSON object")
         .Failed(reason) -> panic("JSON should parse: {reason}")
@@ -265,9 +265,9 @@ TRUST_TEST_STAGE_A_LOCK :: prep { `{
   "flake-utils": { "inputs": { "systems": "systems" } },
   "systems": { "inputs": {} }
 }`)
-    through_root :: trust_flake_lock_node_name(Val(DataTree.Array([DataTree]{DataTree.Text("flake-utils"), DataTree.Text("systems")})), nodes, "root") ?? panic("the follow path should resolve")
+    through_root :: trust_flake_lock_node_name(Val(Dyn.Array([Dyn]{Dyn.Text("flake-utils"), Dyn.Text("systems")})), nodes, "root") ?? panic("the follow path should resolve")
     assert_eq(through_root, Val("systems"))
-    direct :: trust_flake_lock_node_name(Val(DataTree.Array([DataTree]{DataTree.Text("systems")})), nodes, "flake-utils") ?? panic("the direct reference should resolve")
+    direct :: trust_flake_lock_node_name(Val(Dyn.Array([Dyn]{Dyn.Text("systems")})), nodes, "flake-utils") ?? panic("the direct reference should resolve")
     assert_eq(direct, Val("systems"))
 }
 

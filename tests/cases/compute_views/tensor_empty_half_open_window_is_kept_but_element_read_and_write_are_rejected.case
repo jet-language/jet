@@ -1,0 +1,50 @@
+# tests/compute_views.rs::tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected
+# ORACLE-LITERAL: exact original source and expected bytes; PENDING-SAME-HEAD; runtime UNRUN.
+# Rust compiler availability and generated-Rust compilation helper requirements retire with Rust; native build retains AOT execution.
+fixture: tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build source-0.jet
+exit: 0
+step aot0: built
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate
+step default0: jet run source-0.jet
+stdin: null
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate
+step resident0: jet run source-0.jet
+stdin: null
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate
+step interpret0: jet run --interpret source-0.jet
+stdin: null
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate
+step: jet build source-1.jet
+exit: 0
+step aot1: built
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate
+step default1: jet run source-1.jet
+stdin: null
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate
+step resident1: jet run source-1.jet
+stdin: null
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate
+step interpret1: jet run --interpret source-1.jet
+stdin: null
+exit: nonzero
+stdout: = tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected.out
+stderr: ~ "the list has 0 items, so position 0 doesn't exist" # original ed77c235f tests/compute_views.rs:282 contains predicate

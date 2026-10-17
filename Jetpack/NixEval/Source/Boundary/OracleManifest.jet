@@ -172,15 +172,15 @@ struct NixEvalOracleDraft {
     }
 }
 
-pub struct NixEvalOracleManifest {
-    pub nix_version: String
-    pub nix_tag_object: String
-    pub nix_source_commit: String
-    builds: [String: NixEvalOracleBuild]
-    pub nixpkgs_revision: String
-    pub nixpkgs_last_modified: Int
-    pub nixpkgs_nar_hash: String
-    corpus_status: NixEvalCorpusStatus
+struct NixEvalOracleManifest {
+    nix_version: String
+    nix_tag_object: String
+    nix_source_commit: String
+    priv builds: [String: NixEvalOracleBuild]
+    nixpkgs_revision: String
+    nixpkgs_last_modified: Int
+    nixpkgs_nar_hash: String
+    priv corpus_status: NixEvalCorpusStatus
 
     fn embedded() -> NixEvalOracleManifest NixEvalError! {
         NixEvalOracleManifest.parse_and_validate(NIXEVAL_ORACLE_JSON)
@@ -223,10 +223,10 @@ pub struct NixEvalOracleManifest {
 }
 
 // An observed oracle build identity; both hashes are canonical SHA-256 SRI.
-pub struct NixEvalOracleIdentity {
-    system: String
-    build_nar_hash: String
-    executable_nar_hash: String
+struct NixEvalOracleIdentity {
+    priv system: String
+    priv build_nar_hash: String
+    priv executable_nar_hash: String
 
     fn new(system: String, build_nar_hash: String, executable_nar_hash: String) -> NixEvalOracleIdentity NixEvalError! {
         if !nixeval_is_canonical_sha256_sri(build_nar_hash) -> return Err(NixEvalError.MalformedSRI("build_nar_hash"))
@@ -235,8 +235,8 @@ pub struct NixEvalOracleIdentity {
     }
 }
 
-pub struct NixEvalVerifiedOracle {
-    pub system: String
+struct NixEvalVerifiedOracle {
+    system: String
 }
 
 fn nixeval_oracle_missing(path: String) -> NixEvalError Never! {
@@ -294,7 +294,7 @@ fn nixeval_oracle_optional_sri(document: NixEvalJSON, parent: [String: Int], key
 
 fn nixeval_oracle_exact_keys(parent: [String: Int], expected: [String], path: String) NixEvalError! {
     actual :: nixeval_sorted(parent.keys().to_list())
-    wanted := ~expected
+    wanted := expected.copy()
     &wanted.sort()
     if actual != wanted {
         return Err(NixEvalError.Manifest("`{path}` keys must be exactly {nixeval_debug_strings(wanted)}, got {nixeval_debug_strings(actual)}"))

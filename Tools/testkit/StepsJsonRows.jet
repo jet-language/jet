@@ -1,0 +1,44 @@
+use core.encoding.json as json
+
+fn kit_steps_json_row_expand(text: String, name: String, row: Dyn?, preview: Bool) -> String Err! {
+    prefix :: "{{{name}."
+    rest := text
+    result := ""
+    loop {
+        start :: kit_steps_byte_index(rest, prefix) ?? break
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, start, rest.count_bytes()), "}}") ?? return Err("JSON bound row path missing")
+        path :: "$.{kit_steps_byte_slice(rest, start + prefix.count_bytes(), start + end)}"
+        replacement := "0"
+        if !preview {
+            source :: row ?? return Err("JSON bound row path missing")
+            selected :: kit_steps_json_select(source, kit_steps_json_path(path) ?? return Err("JSON bound row path missing"), 0) ?? return Err("JSON bound row path missing")
+            if selected.len() != 1 -> return Err("JSON bound row path missing")
+            replacement = json.to_string(selected[0]) ?? return Err("JSON bound row encode: {err}")
+        }
+        result = "{result}{kit_steps_byte_slice(rest, 0, start)}{replacement}"
+        rest = kit_steps_byte_slice(rest, start + end + 1, rest.count_bytes())
+    }
+    Ok("{result}{rest}")
+}
+
+fn kit_steps_json_rows(text: String, assertion: KitAssertion) -> String? {
+    selected :: kit_steps_json_values(text, assertion.json_mode, assertion.json_path) ?? return Val("JSON each selection failed")
+    rows := [Dyn]{}
+    loop value in selected {
+        if value == { .Array(items) -> { loop item in items -> &rows.push(item) } else -> &rows.push(value) }
+    }
+    loop row in rows {
+        body := assertion.value
+        root :: "{{{assertion.extra}}}"
+        source := text
+        if body.starts_with(root) {
+            body = "${kit_steps_byte_slice(body, root.count_bytes(), body.count_bytes())}"
+            source = json.to_string(row) ?? return Val("JSON bound row encode: {err}")
+        }
+        expanded :: kit_steps_json_row_expand(body, assertion.extra, Val(row), false) ?? return Val("{err}")
+        inner :: kit_steps_json_assertion("stdout {assertion.json_mode} {expanded}") ?? return Val("JSON bound row predicate invalid")
+        failure :: kit_steps_json_test(source, inner.json_mode, inner.json_path, inner.json_op, inner.value)
+        if failure != None -> return failure
+    }
+    None
+}

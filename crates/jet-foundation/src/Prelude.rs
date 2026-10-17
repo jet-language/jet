@@ -127,7 +127,11 @@ fn parse(source: &'static str) -> Vec<Entry> {
         if line.is_empty() {
             continue;
         }
-        if let Some(rest) = line.strip_prefix("pub fn ") {
+        // A top-level `fn` starts its line; indented ones are trait members.
+        if let Some(rest) = line
+            .strip_prefix("fn ")
+            .filter(|_| !raw_line.starts_with(char::is_whitespace))
+        {
             if let Some(name) = rest
                 .split(['(', ' ', '{', '<'])
                 .next()

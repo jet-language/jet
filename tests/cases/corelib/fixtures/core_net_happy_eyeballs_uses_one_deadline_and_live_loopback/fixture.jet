@@ -1,0 +1,15 @@
+
+use core.net as net
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: net.listener_local_socket_addr(listener) ?? panic("address")
+    if net.tcp_connect_timeout(address, 0) == {
+        .Ok(_) -> panic("expired connect succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    client :: net.tcp_connect_happy("localhost", net.socket_port(address), 1000) ?? panic("happy connect")
+    server := &listener.accept() ?? panic("accept")
+    client.write_text("happy") ?? panic("write")
+    print(server.read_text(5) ?? panic("read"))
+}

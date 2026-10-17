@@ -1,0 +1,67 @@
+
+use core.encoding.json as json
+use core.data as data
+use core.files as fs
+
+#Codable
+struct ExactNumbers {
+    amount: Decimal
+    exponent: Decimal
+    whole: Decimal
+    tenth: Decimal
+    tenth_with_zero: Decimal
+    scientific_tenth: Decimal
+    adjacent_lo: Int
+    adjacent_hi: Int
+    large: Int
+    large_exp: Int
+}
+
+#Codable
+struct SmallI64 {
+    value: I64
+}
+
+#Codable
+struct ExactIntRow {
+    adjacent_hi: Int
+    large: Int
+}
+
+LIMITED_TEXT :: prep { "1{"0".repeat(1000000)}" }
+
+fn run() {
+    exact_text :: fs.read("@DIR@/exact.json") ?? panic("exact JSON read")
+    value :: json.decode<ExactNumbers>(exact_text) ?? panic("exact JSON decode")
+    print(value.amount.to_string())
+    print(value.exponent.to_string())
+    print(value.whole.to_string())
+    print(value.tenth.to_string())
+    print(value.tenth_with_zero.to_string())
+    print(value.scientific_tenth.to_string())
+    print(value.adjacent_lo.to_string())
+    print(value.adjacent_hi.to_string())
+    print(value.large.to_string())
+    print(value.large_exp.to_string())
+
+    stream_raw :: "{{\"adjacent_hi\":9007199254740993,\"large\":12345678901234567890123456789012345678901234567890}}"
+    rows :: data.json<ExactIntRow>("[{stream_raw}]") ?? panic("stream decode")
+    loop row in rows {
+        print(row.adjacent_hi.to_string())
+        print(row.large.to_string())
+    }
+
+    json.decode<SmallI64>("{{\"value\":9223372036854775808}}") ? _value -> { print("accepted") } ! _error -> { print("i64-overflow") }
+    json.decode<Float>("1e400") ? _value -> { print("accepted") } ! _error -> { print("nonfinite") }
+    json.decode<Decimal>("NaN") ? _value -> { print("accepted") } ! _error -> { print("nan-rejected") }
+    json.decode<Decimal>("Infinity") ? _value -> { print("accepted") } ! _error -> { print("infinity-rejected") }
+    json.decode<Int>("1.5") ? _value -> { print("accepted") } ! _error -> { print("fractional-rejected") }
+    json.decode<Decimal>("1e1000001") ? _value -> { print("accepted") } ! _error -> { print("exponent-limit") }
+    mismatch_text :: fs.read("@DIR@/mismatch.json") ?? panic("mismatch JSON read")
+    json.decode<ExactNumbers>(mismatch_text) ? _value -> { print("accepted") } ! _error -> { print("file-mismatch") }
+    mismatch_raw :: "{{\"amount\":\"12.340\",\"exponent\":1E-5,\"whole\":100,\"tenth\":0.1,\"tenth_with_zero\":0.10,\"scientific_tenth\":1e-1,\"adjacent_lo\":1,\"adjacent_hi\":1,\"large\":1,\"large_exp\":1}}"
+    json.decode<ExactNumbers>(mismatch_raw) ? _value -> { print("accepted") } ! _error -> { print("mismatch") }
+    data.json<ExactNumbers>("[{mismatch_raw}]") ? _value -> { print("accepted") } ! _error -> { print("stream-mismatch") }
+    json.decode<String>("123") ? _value -> { print("accepted") } ! _error -> { print("string-mismatch") }
+    json.decode<Decimal>(@limited_text) ? _value -> { print("accepted") } ! _error -> { print("limit") }
+}

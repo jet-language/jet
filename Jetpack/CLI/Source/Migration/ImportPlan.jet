@@ -6,19 +6,19 @@
 // fact that could not be carried losslessly stays a visible finding.
 
 // The importer's editable result.
-pub struct ImportPlan {
-    pub source_kind: String
-    pub packages: [ImportedPackage]
-    pub deps: [ImportedDep]
-    pub generated_files: [GeneratedFile]
-    pub adapters: [AdapterDraft]
-    pub ffi_stubs: [FFIStub]
-    pub todos: [ImportTodo]
-    pub migration: [MigrationStatus]
+struct ImportPlan {
+    source_kind: String
+    packages: [ImportedPackage]
+    deps: [ImportedDep]
+    generated_files: [GeneratedFile]
+    adapters: [AdapterDraft]
+    ffi_stubs: [FFIStub]
+    todos: [ImportTodo]
+    migration: [MigrationStatus]
     // One shared provider-fact record per imported provider reference.
     // Losses remain on the record so generated files cannot hide an
     // unresolved fact.
-    pub provider_facts: [String: ProviderFacts]
+    provider_facts: [String: ProviderFacts]
 
     fn empty(kind: String) -> ImportPlan Never! {
         ImportPlan{
@@ -119,43 +119,43 @@ pub struct ImportPlan {
     }
 }
 
-pub struct ImportedPackage {
-    pub name: String
-    pub version: String
+struct ImportedPackage {
+    name: String
+    version: String
 }
 
-pub struct ImportedDep {
-    pub name: String
-    pub provider_ref: String
-    pub locked_version: String
-    pub dev: Bool
+struct ImportedDep {
+    name: String
+    provider_ref: String
+    locked_version: String
+    dev: Bool
 }
 
-pub struct GeneratedFile {
-    pub path: String
-    pub contents: String
-    pub owned: Bool
+struct GeneratedFile {
+    path: String
+    contents: String
+    owned: Bool
 }
 
-pub struct AdapterDraft {
-    pub name: String
-    pub source: String
-    pub recipe: String
+struct AdapterDraft {
+    name: String
+    source: String
+    recipe: String
 }
 
-pub struct FFIStub {
-    pub path: String
-    pub symbol: String
+struct FFIStub {
+    path: String
+    symbol: String
 }
 
-pub struct ImportTodo {
-    pub source_path: String
-    pub message: String
-    pub suggested_surface: String?
+struct ImportTodo {
+    source_path: String
+    message: String
+    suggested_surface: String?
 }
 
 // Where one imported package stands on the way to a native replacement.
-pub enum MigrationStatus {
+enum MigrationStatus {
     ForeignDependencyRetained(name: String)
     AdapterWrapped(name: String)
     FFIStubGenerated(name: String)
@@ -166,7 +166,7 @@ pub enum MigrationStatus {
 
 // A regenerated file would overwrite a user edit.
 #Error
-pub enum ImportConflict {
+enum ImportConflict {
     UserEditedGeneratedLine(path: String)
 
     fn message(self) -> String Never! {
@@ -177,13 +177,13 @@ pub enum ImportConflict {
 }
 
 // TODO diagnostic codes await a ballot.
-pub fn cli_todo_diagnostics_need_ballot() -> Bool Never! {
+fn cli_todo_diagnostics_need_ballot() -> Bool Never! {
     true
 }
 
 // The generated contents when the file is new or unchanged; a user-edited
 // file is a conflict.
-pub fn cli_merge_generated_file(existing: String?, generated: GeneratedFile) -> String ImportConflict! {
+fn cli_merge_generated_file(existing: String?, generated: GeneratedFile) -> String ImportConflict! {
     current :: existing ?? return Ok(generated.contents)
     if current == generated.contents -> return Ok(generated.contents)
     Err(ImportConflict.UserEditedGeneratedLine{path: generated.path})

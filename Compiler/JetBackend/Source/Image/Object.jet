@@ -1,6 +1,6 @@
 // ELF64 relocatable object output for x86-64 Linux: the hosted image path.
 // The object holds the compiled functions in `.text`, the module data in
-// `.rodata`, and a global `main` that hands the entry function to the
+// `.data`, and a global `main` that hands the entry function to the
 // compiled runtime's `jet_rt_main`, which sets up the runtime, runs the entry
 // and returns the exit status. Every runtime call stays an undefined global
 // symbol with an `R_X86_64_PLT32` relocation, so the system linker binds it to
@@ -9,32 +9,63 @@
 //     cc program.o libjet_runtime_c.a -lpthread -ldl -lm -o program
 //
 // Calls between compiled functions are resolved inside `.text`; data
-// addresses are `R_X86_64_PC32` relocations against the `.rodata` section.
+// addresses are `R_X86_64_PC32` relocations against the `.data` section.
+// Pointer words in `.data` use R_X86_64_64 in `.rela.data` against the
+// same section symbol. The module data is writable: the entry function fills
+// the String slots of frozen statics with runtime handles before the program
+// runs (Lower/Statics.jet lower_static_fixups); nothing else writes it.
+// `.eh_frame` and the DWARF 5 sections (Image/Dwarf.jet) describe every
+// function's frame, source lines and variables.
 
 ELF64_SECTION_HEADER_SIZE :: prep { 64 }
 ELF64_SYMBOL_SIZE :: prep { 24 }
 ELF64_RELA_SIZE :: prep { 24 }
+ELF64_R_X86_64_64 :: prep { 1 }
 ELF64_R_X86_64_PC32 :: prep { 2 }
 ELF64_R_X86_64_PLT32 :: prep { 4 }
 
 // Section indices of the object, in header order.
 ELF64_OBJECT_TEXT :: prep { 1 }
 ELF64_OBJECT_RODATA :: prep { 2 }
-ELF64_OBJECT_RELA :: prep { 3 }
 ELF64_OBJECT_SYMTAB :: prep { 4 }
 ELF64_OBJECT_STRTAB :: prep { 5 }
 ELF64_OBJECT_SHSTRTAB :: prep { 6 }
-ELF64_OBJECT_SECTIONS :: prep { 8 }
+ELF64_OBJECT_EH_FRAME :: prep { 9 }
+ELF64_OBJECT_DEBUG_ABBREV :: prep { 11 }
+ELF64_OBJECT_DEBUG_INFO :: prep { 12 }
+ELF64_OBJECT_DEBUG_LINE :: prep { 14 }
+ELF64_OBJECT_DEBUG_LOCLISTS :: prep { 16 }
+ELF64_OBJECT_SECTIONS :: prep { 17 }
 
-struct X64ObjectRela { pub at: Int, pub symbol: Int, pub kind: Int, pub addend: Int }
+// Local symbols before the functions: null, then the section symbols
+// relocations name.
+ELF64_OBJECT_SYMBOL_TEXT :: prep { 1 }
+ELF64_OBJECT_SYMBOL_DATA :: prep { 2 }
+ELF64_OBJECT_SYMBOL_ABBREV :: prep { 3 }
+ELF64_OBJECT_SYMBOL_LINE :: prep { 4 }
+ELF64_OBJECT_SYMBOL_LOCLISTS :: prep { 5 }
+
+struct X64ObjectRela { at: Int, symbol: Int, kind: Int, addend: Int }
 
 struct X64ObjectSymbol {
-    pub name: String
+    name: String
     // (bind << 4) | type
-    pub info: Int
-    pub section: Int
-    pub value: Int
-    pub size: Int
+    info: Int
+    section: Int
+    value: Int
+    size: Int
+}
+
+// One section header after the null one: its contents and header fields.
+struct X64ObjectSection {
+    name: String
+    kind: Int
+    flags: Int
+    bytes: [U8]
+    link: Int
+    info: Int
+    align: Int
+    entry_size: Int
 }
 
 // Append `text` to a string table; returns its offset.
@@ -62,22 +93,58 @@ fn elf64_section_header(bytes: &[U8], name: Int, kind: Int, flags: Int, offset: 
     elf64_u64(&bytes, entry_size)
 }
 
-// `main`: `jet_rt_main(entry)`; its i32 result is the exit status. The push
-// keeps rsp 16-byte aligned at the call.
+// libc main transfers its raw argc/argv/envp before jet_rt_main(entry).
+// The push keeps rsp 16-byte aligned at all calls. Host constructors have
+// already run through the runtime object's init array.
 fn x64_object_main(entry: LIRFunctionID) -> X64CompiledFunction Never! {
     code := [U8]{}
     x64_push(&code, X64_RBX)
+    arguments_at :: x64_call_rel32(&code)
+    start_at :: x64_call_rel32(&code)
     entry_at :: x64_lea_rip(&code, X64_RDI)
     call_at :: x64_call_rel32(&code)
+    // Retain the runtime boundary's exit status while draining buffered output.
+    x64_mov_rr(&code, X64_RBX, X64_RAX)
+    flush_at :: x64_call_rel32(&code)
+    x64_mov_rr(&code, X64_RAX, X64_RBX)
     x64_pop(&code, X64_RBX)
     x64_ret(&code)
-    relocs :: [X64Reloc]{X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}}
+    relocs :: [X64Reloc]{X64Reloc{at: arguments_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_arguments"}}, X64Reloc{at: start_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_host_program_start"}}, X64Reloc{at: entry_at, target: X64RelocTarget.Function{id: entry}}, X64Reloc{at: call_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_main"}}, X64Reloc{at: flush_at, target: X64RelocTarget.Runtime{symbol: "jet_rt_stdout_flush"}}}
     X64CompiledFunction{id: LIRFunctionID{value: -1}, name: "main", code: code, relocs: relocs}
+}
+
+// `main`'s frame: after `push rbx` the CFA is rsp + 16 with rbx below the
+// return address; at the closing `ret`, after `pop rbx`, it is rsp + 8.
+fn x64_object_main_debug(main: X64CompiledFunction) -> X64FunctionDebug Never! {
+    cfi := [U8]{}
+    ret_at :: main.code.len() - 1
+    dwarf_cfa_advance(&cfi, 0, 1)
+    dwarf_cfa_def_cfa_offset(&cfi, 16)
+    dwarf_cfa_offset(&cfi, x64_dwarf_register(X64_RBX), 2)
+    dwarf_cfa_advance(&cfi, 1, ret_at)
+    dwarf_cfa_def_cfa_offset(&cfi, 8)
+    X64FunctionDebug{lines: [X64LineRow]{}, body: 0, cfi: cfi, ranges: [X64VariableRange]{}}
+}
+
+fn x64_object_rela_section(name: String, relas: [X64ObjectRela], target: Int) -> X64ObjectSection Never! {
+    bytes := [U8]{}
+    loop row in relas {
+        elf64_u64(&bytes, row.at)
+        elf64_u64(&bytes, (row.symbol << 32).bit_or(row.kind))
+        elf64_u64(&bytes, row.addend)
+    }
+    // RELA, INFO_LINK, against .symtab, for `target`.
+    X64ObjectSection{name: name, kind: 4, flags: 0x40, bytes: bytes, link: ELF64_OBJECT_SYMTAB, info: target, align: 8, entry_size: ELF64_RELA_SIZE}
+}
+
+// A DWARF section: PROGBITS, not loaded.
+fn x64_object_debug_section(name: String, bytes: [U8]) -> X64ObjectSection Never! {
+    X64ObjectSection{name: name, kind: 1, flags: 0, bytes: bytes, link: 0, info: 0, align: 1, entry_size: 0}
 }
 
 // Compile `program` into a relocatable object whose `main` runs `entry`,
 // which takes no parameters and returns nothing.
-pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
+fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
     if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
     signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
     returns_nothing := false
@@ -85,13 +152,56 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     if signature.params.len() != 0 || !returns_nothing -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"}}
     compiled :: x64_compile_module(program)
     if compiled.errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: compiled.errors}
-    functions := [X64CompiledFunction]{x64_object_main(entry)}
+    main :: x64_object_main(entry)
+    functions := [X64CompiledFunction]{main}
     loop function in compiled.functions -> &functions.push(function)
+    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
+    loop row in compiled.debug -> &debug.push(row)
 
+    x64_object_functions(program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
+}
+
+// JET_KEEP_GOING (the bootstrap native feed): x64_relocatable_object over
+// x64_compile_module_keep_going, whose every function is present (a trap
+// where compiling it failed), so the object is written whenever its own
+// writer succeeds. The result keeps the compile errors before the writer's;
+// it is never shipped. The module moves through the compile, uncopied.
+fn x64_relocatable_object_keep_going(program: ^LIRModule, entry: LIRFunctionID) -> X64ExecutableResult Never! {
+    if entry.value < 0 || entry.value >= program.functions.len() -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {entry.value} is not in the module"}}
+    signature :: lir_signature(program, program.functions[entry.value].signature) ?? return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function has no signature"}}
+    if signature.params.len() != 0 || signature.result != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"entry function {program.functions[entry.value].name} must take no parameters and return nothing"}}
+    kept :: x64_compile_module_keep_going(^program)
+    main :: x64_object_main(entry)
+    functions := [X64CompiledFunction]{main}
+    loop function in kept.compiled.functions -> &functions.push(function)
+    debug := [X64FunctionDebug]{x64_object_main_debug(main)}
+    loop row in kept.compiled.debug -> &debug.push(row)
+    written := x64_object_functions(kept.program, functions, debug, [X64RuntimeExport]{X64RuntimeExport{function: LIRFunctionID{value: -1}, symbol: "main"}})
+    errors := kept.compiled.errors.copy()
+    loop error in written.errors -> &errors.push(error)
+    written.errors = errors
+    written
+}
+
+// Shared section/relocation writer for hosted program and runtime objects.
+fn x64_object_functions(program: LIRModule, functions: [X64CompiledFunction], debug: [X64FunctionDebug], exports: [X64RuntimeExport]) -> X64ExecutableResult Never! {
+    exported := [Int:Bool]{}
+    export_names := [String:Bool]{}
+    function_rows := [Int:Int]{}
+    loop (index, function) in functions -> &function_rows.add(function.id.value, index).drop("compiled function IDs are unique")
+    loop entry_row in exports {
+        if function_rows.get(entry_row.function.value) == None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"export {entry_row.symbol}: function {entry_row.function.value} is not in the object"}}
+        if entry_row.symbol == "" || export_names.get(entry_row.symbol) != None -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{"empty or duplicate export symbol `{entry_row.symbol}`"}}
+        &export_names.add(entry_row.symbol, true).drop("checked absent above")
+        if exported.get(entry_row.function.value) == None -> &exported.add(entry_row.function.value, true).drop("checked absent above")
+    }
     // .text and .rodata contents.
     text := [U8]{}
     offsets := [Int]{}
     loop function in functions -> &offsets.push(x64_link_place(&text, function))
+    // Calls between functions are patched below as rel32 without per-site
+    // checks: every distance inside `.text` is below its length.
+    if !x64_fits_i32(text.len()) -> return X64ExecutableResult{bytes: [U8]{}, errors: [String]{".text is {text.len()} bytes; calls between its functions are rel32, which reaches at most 2147483647 bytes"}}
     rodata := [U8]{}
     data_offsets := [Int]{}
     rodata_align := 1
@@ -101,39 +211,56 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
         &data_offsets.push(rodata.len())
         loop byte in object.bytes -> &rodata.push(byte)
     }
+    data_relas := [X64ObjectRela]{}
+    data_errors := [String]{}
+    loop (index, object) in program.data {
+        loop reloc in object.relocs {
+            if reloc.offset < 0 || reloc.offset % 8 != 0 || reloc.offset > object.bytes.len() - 8 {
+                &data_errors.push("data {index}: relocation offset {reloc.offset} is not an aligned word in bounds")
+                next
+            }
+            if reloc.target.value < 0 || reloc.target.value >= data_offsets.len() {
+                &data_errors.push("data {index}: relocation target {reloc.target.value} is not in the object")
+                next
+            }
+            &data_relas.push(X64ObjectRela{at: data_offsets[index] + reloc.offset, symbol: ELF64_OBJECT_SYMBOL_DATA, kind: ELF64_R_X86_64_64, addend: data_offsets[reloc.target.value] + reloc.addend})
+        }
+    }
+    if data_errors.len() > 0 -> return X64ExecutableResult{bytes: [U8]{}, errors: data_errors}
 
-    // Symbols: null, the two section symbols, one local per function, then
-    // the globals (`main` and every runtime symbol the code calls).
+    // Symbols: null, section symbols, private functions, exported functions,
+    // then undefined runtime symbols. ELF requires all locals before globals.
     symbols := [X64ObjectSymbol]{
         X64ObjectSymbol{name: "", info: 0, section: 0, value: 0, size: 0},
         X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_TEXT, value: 0, size: 0},
         X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_RODATA, value: 0, size: 0},
+        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_ABBREV, value: 0, size: 0},
+        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_LINE, value: 0, size: 0},
+        X64ObjectSymbol{name: "", info: 3, section: ELF64_OBJECT_DEBUG_LOCLISTS, value: 0, size: 0},
     }
     loop (index, function) in functions {
-        if index > 0 -> &symbols.push(X64ObjectSymbol{name: function.name, info: 2, section: ELF64_OBJECT_TEXT, value: offsets[index], size: function.code.len()})
+        if exported.get(function.id.value) == None -> &symbols.push(X64ObjectSymbol{name: function.name, info: 2, section: ELF64_OBJECT_TEXT, value: offsets[index], size: function.code.len()})
     }
     first_global :: symbols.len()
-    &symbols.push(X64ObjectSymbol{name: "main", info: 0x12, section: ELF64_OBJECT_TEXT, value: offsets[0], size: functions[0].code.len()})
+    loop entry_row in exports {
+        index :: function_rows.get(entry_row.function.value) ?? panic("validated export function")
+        &symbols.push(X64ObjectSymbol{name: entry_row.symbol, info: 0x12, section: ELF64_OBJECT_TEXT, value: offsets[index], size: functions[index].code.len()})
+    }
     imports := [String]{}
     import_rows := [String:Int]{}
     relas := [X64ObjectRela]{}
     errors := [String]{}
-    // First offset per function ID, entry (index 0) excluded as before, so a
-    // call relocation is one map probe instead of a scan of every function.
     function_starts := [Int:Int]{}
-    loop (index, function) in functions {
-        if index > 0 && function_starts.get(function.id.value) == None -> &function_starts.add(function.id.value, offsets[index]).drop("checked absent above")
-    }
+    loop (index, function) in functions -> &function_starts.add(function.id.value, offsets[index]).drop("compiled function IDs are unique")
     loop (index, function) in functions {
         loop reloc in function.relocs {
             at :: offsets[index] + reloc.at
             if reloc.target == {
                 .Function(id) -> {
                     target :: function_starts.get(id.value) ?? -1
-                    if target < 0 {
-                        &errors.push("{function.name}: call to function {id.value}, which is not in the object")
-                    } else {
-                        x64_patch_rel32(&text, at, target)
+                    if {
+                        target < 0 -> &errors.push("{function.name}: call to function {id.value}, which is not in the object")
+                        else -> x64_patch_rel32(&text, at, target)
                     }
                 }
                 .Runtime(symbol) -> {
@@ -143,13 +270,12 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
                         &imports.push(symbol)
                         &import_rows.add(symbol, found).drop("checked absent above")
                     }
-                    &relas.push(X64ObjectRela{at: at, symbol: first_global + 1 + found, kind: ELF64_R_X86_64_PLT32, addend: -4})
+                    &relas.push(X64ObjectRela{at: at, symbol: first_global + exports.len() + found, kind: ELF64_R_X86_64_PLT32, addend: -4})
                 }
                 .Data(id) -> {
-                    if id.value >= 0 && id.value < data_offsets.len() {
-                        &relas.push(X64ObjectRela{at: at, symbol: 2, kind: ELF64_R_X86_64_PC32, addend: data_offsets[id.value] - 4})
-                    } else {
-                        &errors.push("{function.name}: data {id.value} is not in the module")
+                    if {
+                        id.value >= 0 && id.value < data_offsets.len() -> &relas.push(X64ObjectRela{at: at, symbol: ELF64_OBJECT_SYMBOL_DATA, kind: ELF64_R_X86_64_PC32, addend: data_offsets[id.value] - 4})
+                        else -> &errors.push("{function.name}: data {id.value} is not in the module")
                     }
                 }
             }
@@ -169,16 +295,60 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
         elf64_u64(&symtab, symbol.value)
         elf64_u64(&symtab, symbol.size)
     }
-    rela := [U8]{}
-    loop entry_row in relas {
-        elf64_u64(&rela, entry_row.at)
-        elf64_u64(&rela, (entry_row.symbol << 32) | entry_row.kind)
-        elf64_u64(&rela, entry_row.addend)
+    dwarf :: x64_dwarf_sections(program, functions, debug, offsets, text.len(), X64DwarfSymbols{
+        text: ELF64_OBJECT_SYMBOL_TEXT, abbrev: ELF64_OBJECT_SYMBOL_ABBREV, line: ELF64_OBJECT_SYMBOL_LINE, loclists: ELF64_OBJECT_SYMBOL_LOCLISTS,
+    })
+    // Header order is the ELF64_OBJECT_* indices; .shstrtab is filled below.
+    sections := [X64ObjectSection]{
+        // .text: PROGBITS, ALLOC | EXECINSTR
+        X64ObjectSection{name: ".text", kind: 1, flags: 6, bytes: text, link: 0, info: 0, align: X64_FUNCTION_ALIGN, entry_size: 0},
+        // .data: PROGBITS, WRITE + ALLOC
+        X64ObjectSection{name: ".data", kind: 1, flags: 3, bytes: rodata, link: 0, info: 0, align: rodata_align, entry_size: 0},
+        x64_object_rela_section(".rela.text", relas, ELF64_OBJECT_TEXT),
+        // .symtab: names in .strtab, locals before `first_global`
+        X64ObjectSection{name: ".symtab", kind: 2, flags: 0, bytes: symtab, link: ELF64_OBJECT_STRTAB, info: first_global, align: 8, entry_size: ELF64_SYMBOL_SIZE},
+        X64ObjectSection{name: ".strtab", kind: 3, flags: 0, bytes: strtab, link: 0, info: 0, align: 1, entry_size: 0},
+        X64ObjectSection{name: ".shstrtab", kind: 3, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
+        // .note.GNU-stack: empty, no flags: the stack is not executable.
+        X64ObjectSection{name: ".note.GNU-stack", kind: 1, flags: 0, bytes: [U8]{}, link: 0, info: 0, align: 1, entry_size: 0},
+        // .rela.data: absolute pointer words against the .data section symbol.
+        x64_object_rela_section(".rela.data", data_relas, ELF64_OBJECT_RODATA),
+        // .eh_frame: PROGBITS, ALLOC
+        X64ObjectSection{name: ".eh_frame", kind: 1, flags: 2, bytes: dwarf.eh_frame, link: 0, info: 0, align: 8, entry_size: 0},
+        x64_object_rela_section(".rela.eh_frame", dwarf.eh_relas, ELF64_OBJECT_EH_FRAME),
+        x64_object_debug_section(".debug_abbrev", dwarf.abbrev),
+        x64_object_debug_section(".debug_info", dwarf.info),
+        x64_object_rela_section(".rela.debug_info", dwarf.info_relas, ELF64_OBJECT_DEBUG_INFO),
+        x64_object_debug_section(".debug_line", dwarf.line),
+        x64_object_rela_section(".rela.debug_line", dwarf.line_relas, ELF64_OBJECT_DEBUG_LINE),
+        x64_object_debug_section(".debug_loclists", dwarf.loclists),
+    }
+    // Lifecycle priority is carried by the section name; equal priorities use
+    // lexical export symbols, never declaration order.
+    lifecycle_order := [Int]{}
+    loop (index, entry_row) in exports {
+        if entry_row.init_priority < 0 && entry_row.fini_priority < 0 -> next
+        at := lifecycle_order.len()
+        loop at > 0 && exports[lifecycle_order[at - 1]].symbol > entry_row.symbol -> at = at - 1
+        &lifecycle_order.insert(at, index)
+    }
+    loop index in lifecycle_order {
+        entry_row :: exports[index]
+        loop (kind, priority) in ([Int]{entry_row.init_priority, entry_row.fini_priority}) {
+            if priority < 0 -> next
+            digits := "{priority}"
+            loop digits.len() < 5 -> digits = "0{digits}"
+            name :: if kind == 0 -> ".init_array.{digits}" else -> ".fini_array.{digits}"
+            target :: sections.len() + 1
+            pointer := [U8]{}
+            elf64_u64(&pointer, 0)
+            &sections.push(X64ObjectSection{name: name, kind: if kind == 0 -> 14 else -> 15, flags: 3, bytes: pointer, link: 0, info: 0, align: 8, entry_size: 8})
+            &sections.push(x64_object_rela_section(".rela{name}", [X64ObjectRela]{X64ObjectRela{at: 0, symbol: first_global + index, kind: ELF64_R_X86_64_64, addend: 0}}, target))
+        }
     }
     shstrtab := [U8]{U8{0}}
-    names :: [String]{".text", ".rodata", ".rela.text", ".symtab", ".strtab", ".shstrtab", ".note.GNU-stack"}
-    name_offsets := [Int]{0}
-    loop name in names -> &name_offsets.push(elf64_string(&shstrtab, name))
+    name_offsets := [Int]{}
+    loop section in sections -> &name_offsets.push(elf64_string(&shstrtab, section.name))
 
     // File: header, section contents, section header table.
     bytes := [U8]{}
@@ -196,31 +366,23 @@ pub fn x64_relocatable_object(program: LIRModule, entry: LIRFunctionID) -> X64Ex
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, 0)
     elf64_u16(&bytes, ELF64_SECTION_HEADER_SIZE)
-    elf64_u16(&bytes, ELF64_OBJECT_SECTIONS)
+    elf64_u16(&bytes, sections.len() + 1)
     elf64_u16(&bytes, ELF64_OBJECT_SHSTRTAB)
-    contents :: [[U8]]{text, rodata, rela, symtab, strtab, shstrtab}
-    aligns :: [Int]{X64_FUNCTION_ALIGN, rodata_align, 8, 8, 1, 1}
     section_offsets := [Int]{}
-    loop (index, content) in contents {
-        elf64_pad(&bytes, aligns[index])
+    section_sizes := [Int]{}
+    loop (index, section) in sections {
+        contents :: if index + 1 == ELF64_OBJECT_SHSTRTAB -> shstrtab else -> section.bytes
+        elf64_pad(&bytes, section.align)
         &section_offsets.push(bytes.len())
-        loop byte in content -> &bytes.push(byte)
+        &section_sizes.push(contents.len())
+        loop byte in contents -> &bytes.push(byte)
     }
     elf64_pad(&bytes, 8)
     shoff :: bytes.len()
-    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{(shoff >> (8 * shift)) & 255}
+    loop shift in 0..<8 -> bytes[shoff_at + shift] = U8{((shoff >> (8 * shift))).bit_and(255)}
     elf64_section_header(&bytes, 0, 0, 0, 0, 0, 0, 0, 0, 0)
-    // .text: PROGBITS, ALLOC | EXECINSTR
-    elf64_section_header(&bytes, name_offsets[1], 1, 6, section_offsets[0], text.len(), 0, 0, X64_FUNCTION_ALIGN, 0)
-    // .rodata: PROGBITS, ALLOC
-    elf64_section_header(&bytes, name_offsets[2], 1, 2, section_offsets[1], rodata.len(), 0, 0, rodata_align, 0)
-    // .rela.text: RELA, INFO_LINK, against .symtab, for .text
-    elf64_section_header(&bytes, name_offsets[3], 4, 0x40, section_offsets[2], rela.len(), ELF64_OBJECT_SYMTAB, ELF64_OBJECT_TEXT, 8, ELF64_RELA_SIZE)
-    // .symtab: names in .strtab, locals before `first_global`
-    elf64_section_header(&bytes, name_offsets[4], 2, 0, section_offsets[3], symtab.len(), ELF64_OBJECT_STRTAB, first_global, 8, ELF64_SYMBOL_SIZE)
-    elf64_section_header(&bytes, name_offsets[5], 3, 0, section_offsets[4], strtab.len(), 0, 0, 1, 0)
-    elf64_section_header(&bytes, name_offsets[6], 3, 0, section_offsets[5], shstrtab.len(), 0, 0, 1, 0)
-    // .note.GNU-stack: empty, no flags: the stack is not executable.
-    elf64_section_header(&bytes, name_offsets[7], 1, 0, shoff, 0, 0, 0, 1, 0)
+    loop (index, section) in sections {
+        elf64_section_header(&bytes, name_offsets[index], section.kind, section.flags, section_offsets[index], section_sizes[index], section.link, section.info, section.align, section.entry_size)
+    }
     X64ExecutableResult{bytes: bytes, errors: [String]{}}
 }

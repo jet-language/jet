@@ -740,13 +740,13 @@ fn c_member_lists_resolve_each_library_and_alias_through_cffi() {
 
 module c_scope {
     use c.[c as lib]
-    pub fn call() -> Int {
+    fn call() -> Int {
         return lib.clamp(1, 2, 3)
     }
 }
 module m_scope {
     use c.[m as lib]
-    pub fn call() -> Int {
+    fn call() -> Int {
         return lib.version(1, 2, 3)
     }
 }
@@ -816,7 +816,7 @@ fn inline_foreign_alias_collision_is_rejected_in_one_scope() {
 
 module duplicate {
     use c.[c as lib, m as lib]
-    pub fn call() -> Int {
+    fn call() -> Int {
         return lib.first()
     }
 }
@@ -846,7 +846,7 @@ fn foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved() {
     fs::write(
         cache.join("plotly.jet"),
         format!(
-            "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n"
+            "// jet-ffi-descriptor={descriptor}\nfn scatter() -> Int {{\n    return 7\n}}\n"
         ),
     )
     .unwrap();
@@ -902,12 +902,12 @@ fn foreign_js_import_uses_generated_binding_cache_for_symbols() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() -> Int {\n    return 7\n}\n",
+        "fn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     fs::write(
         cache_dir.join("d3.jet"),
-        "pub fn select() -> Int {\n    return 8\n}\n",
+        "fn select() -> Int {\n    return 8\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -925,16 +925,16 @@ fn foreign_js_inline_member_list_uses_the_same_binding_cache() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() -> Int {\n    return 7\n}\n",
+        "fn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     fs::write(
         cache_dir.join("d3.jet"),
-        "pub fn select() -> Int {\n    return 8\n}\n",
+        "fn select() -> Int {\n    return 8\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
-    let src = "use js.[d3]\nmodule nested {\n    use js.[plotly as inner_plot]\n    pub fn inner() -> Int {\n        return inner_plot.scatter()\n    }\n}\nfn run() {\n    print(d3.select())\n    print(nested.inner())\n}\n";
+    let src = "use js.[d3]\nmodule nested {\n    use js.[plotly as inner_plot]\n    fn inner() -> Int {\n        return inner_plot.scatter()\n    }\n}\nfn run() {\n    print(d3.select())\n    print(nested.inner())\n}\n";
     fs::write(&main, src).unwrap();
 
     jet::compile_with_path(src, main.to_str().unwrap())
@@ -948,7 +948,7 @@ fn foreign_js_inline_pub_member_list_reexports_the_namespace() {
     fs::create_dir_all(&cache_dir).unwrap();
     fs::write(
         cache_dir.join("plotly.jet"),
-        "pub fn scatter() -> Int {\n    return 7\n}\n",
+        "fn scatter() -> Int {\n    return 7\n}\n",
     )
     .unwrap();
     let main = dir.join("main.jet");
@@ -1496,6 +1496,9 @@ fn run() {
         out.rust.contains("jetc_add_ints"),
         "expected the C symbol name in generated code"
     );
+    let user = common::strip_vetted_prelude_modules(&out.rust);
+    assert!(user.lines().all(|line| common::unsafe_keyword_columns(line).is_empty()),
+        "value-only C bindings must not emit raw C calls in user bodies");
 
     // Build + link against the C static library.
     let rs = root.join("main.rs");
@@ -1546,9 +1549,9 @@ fn run() {
     )
     .unwrap();
     let jit_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "jit.jet", "--trace-tiers"])
+        .args(["run", "jit.jet"])
         .current_dir(&root)
-        .env("JET_RUN_CACHE_DIR", root.join("run-cache"))
+        .env("JET_STORE_DIR", root.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("run every admitted hidden C-bridge signature");
@@ -1558,13 +1561,6 @@ fn run() {
         String::from_utf8_lossy(&jit_run.stdout),
         "7\n9\n42\n42\n2.5\n21.0\nhi\n"
     );
-    assert!(
-        jit_stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "{jit_stderr}"
-    );
-    assert!(!jit_stderr.contains("tier0 interp"), "{jit_stderr}");
     assert!(!jit_stderr.contains("unbound wrapper"), "{jit_stderr}");
     assert!(
         !jit_stderr.contains("unsupported signature"),
@@ -1631,11 +1627,14 @@ fn run() {
 
     let run = Command::new(binary).output().unwrap();
     let stderr = String::from_utf8_lossy(&run.stderr);
-    assert_eq!(run.status.code(), Some(1), "{stderr}");
+    assert_eq!(run.status.code(), Some(70), "{stderr}");
     assert!(
-        stderr.contains("Error [E1003]: A default Int value does not fit in the C i64 range"),
+        stderr.contains("Stop [E1003]: Integer value is outside destination width"),
         "{stderr}"
     );
+    assert_eq!(stderr.matches("Stop [E1003]").count(), 1, "{stderr}");
+    assert!(stderr.contains("Why: "), "{stderr}");
+    assert!(stderr.contains("Fix: "), "{stderr}");
     assert!(!stderr.contains("panicked at"), "{stderr}");
     let _ = fs::remove_dir_all(root);
 }
@@ -2064,7 +2063,7 @@ fn load(id: U64) -> Record StoreError! {
     #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
         p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
         status = store.store_load(id, p)
-        if Int.from_i32(status) == 0 { slot = ~p.* }
+        if Int.from_i32(status) == 0 { slot = p.copy().* }
     }
     if Int.from_i32(status) != 0 { return Err(StoreError.Status) }
     return Ok(slot)
@@ -2227,7 +2226,7 @@ fn cffi_string_returns_are_borrowed_non_null_utf8_and_copied() {
         });
         let wrapper = out
             .rust
-            .split_once("pub fn __jet_get() -> String {\n")
+            .split_once("fn __jet_get() -> String {\n")
             .unwrap_or_else(|| panic!("missing generated C wrapper for {name}"))
             .1
             .split_once("\n}\n")
@@ -2391,15 +2390,18 @@ fn cffi_string_param_emits_cstring_conversion() {
     let out = jet::compile_with_path(&src, main.to_str().unwrap())
         .unwrap_or_else(|d| panic!("string-param C FFI rejected:\n{:?}", d));
     assert!(
-        out.rust.contains("let c0 = std::ffi::CString::new"),
+        out.rust.contains("let cstring_0 = std::ffi::CString::new"),
         "wrapper must declare the CString temp for a String param; got:\n{}",
         out.rust
     );
     assert!(
-        out.rust.contains("strlib_slen(c0.as_ptr())"),
+        out.rust.contains("cstring_0.as_ptr()"),
         "wrapper must call through the declared temp; got:\n{}",
         out.rust
     );
+    let user = common::strip_vetted_prelude_modules(&out.rust);
+    assert!(user.lines().all(|line| common::unsafe_keyword_columns(line).is_empty()),
+        "String marshalling must stay in the safe generated C adapter");
     let _ = fs::remove_dir_all(&root);
 }
 
@@ -2499,6 +2501,26 @@ fn cffi_header_use_form_lowers_to_lib() {
         "header form must reach the demo bindgen surface"
     );
     let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn generated_c_nominals_share_the_imported_signature_owner() {
+    let root = common::unique_tmp("jet_cffi_nominal_owner");
+    let cache = root.join(".jet/bindings/c");
+    fs::create_dir_all(&cache).unwrap();
+    declare_local_c_dep(&root, "points");
+    build_local_c_provider(&root, "points",
+        "struct Point { long long x; }; struct Point points_echo(struct Point p) { return p; }\n");
+    fs::write(cache.join("points.jet"),
+        "#Layout(c)\npub struct Point { x: Int }\n#Bindgen module c.points.__bindgen__ { fn echo(p: Point) -> Point = \"points_echo\" }\n").unwrap();
+    let main = root.join("main.jet");
+    let src = "use c.points as p\nfn run() { value :: p.Point{x: 7}\n result: p.Point :: p.echo(value)\n print(result.x) }\n";
+    fs::write(&main, src).unwrap();
+    let mut bundle = jet::Loader::load_entry(main.to_str().unwrap()).unwrap();
+    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    assert!(diagnostics.iter().all(|d| d.severity != jet::Diagnostics::Severity::Error),
+        "generated C record types must qualify with their imported functions: {diagnostics:?}");
+    let _ = fs::remove_dir_all(root);
 }
 
 // ---------------------------------------------------------------------------

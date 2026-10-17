@@ -1,0 +1,29 @@
+
+use core.net as net
+use core.tasks as tasks
+use core.time as time
+
+fn run() {
+    socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind")
+    interest :: NetReadyInterest.Read
+    (ready_tx, ready_rx) :: channel<Int>()
+    waiter :: task {
+        ready_tx.send(1)
+        if socket.ready(interest, deadline: Duration.seconds(1) ?? panic("deadline")) == {
+            .Ok(_) -> panic("udp unexpectedly ready")
+            .Err(error) -> print(net.error_message(error))
+        }
+    }
+    _ready :: ready_rx.receive() ?? panic("ready")
+    time.sleep(10ms)
+    waiter.cancel()
+    waiter.join() ?? panic("udp readiness task failed")
+
+    closed :: net.udp_bind("127.0.0.1:0") ?? panic("closed bind")
+    closed.close() ?? panic("close")
+    closed.close() ?? panic("second close")
+    if net.udp_receive(closed, 1) == {
+        .Ok(_) -> panic("closed receive succeeded")
+        .Err(error) -> print(net.error_message(error))
+    }
+}

@@ -1,0 +1,19 @@
+
+use core.http.client as http
+use core.net.tls as tls
+use core.files as fs
+fn run() {
+    pem :: fs.read_bytes("{work}/tls/ca.cert.pem") ?? panic("ca")
+    roots :: tls.RootCertificates.from_pem(pem) ?? panic("roots")
+    base :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+    only13 :: base.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("tls13")
+    client13 :: http.Client.new().tls(only13).protocols(false, true, false)
+    if client13.send(http.request("GET", "https://localhost:{cap:version_port}/")) == {
+        .Ok(_) -> print("tls13-ok")
+        .Err(_) -> print("tls13-fail")
+    }
+    only12 :: base.with_version_bounds(min: .TLS12, max: .TLS12) ?? panic("tls12")
+    client12 :: http.Client.new().tls(only12).protocols(false, true, false)
+    resp :: client12.send(http.request("GET", "https://localhost:{cap:version_port}/")) ?? panic("tls12 send")
+    print(resp.status())
+}

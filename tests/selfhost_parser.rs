@@ -164,7 +164,7 @@ fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) {
     }
 }
 
-pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
+fn selfhost_parser_probe(source: [U8]) -> [Int] {
     parsed := parse_source(source)
     facts := [Int]{}
     &facts.push(parsed.diagnostics.len())
@@ -249,6 +249,8 @@ const CASES: &[(&str, &str)] = &[
     ("statement-marker-use-label", "#Off(use: x) {}"),
     ("optional-method-call", "f(a?.m(x))"),
     ("optional-method-chain", "f(a?.b?.m())"),
+    ("copy-callable-declaration", "fn copy(value: Float) -> Float Never! { value }\nfn run() { math.copy(Float{1.0}) }\n"),
+    ("retired-copy-expression", "fn run() { value :: copy other }\n"),
     // L0507 (#3681): exact diagnostic, source span, edit and refusal parity.
     ("arm-table-braced", "fn show(score: Int) {\n    if score >= 90 {\n        print(\"a\")\n    } else if score >= 80 {\n        print(\"b\")\n    } else {\n        print(\"c\")\n    }\n    print(\"done\")\n}\n"),
     ("arm-table-arrow", "fn run() {\n    if false -> print(\"a\") else if true -> print(\"b\") else -> print(\"c\")\n}\n"),
@@ -279,9 +281,20 @@ const CASES: &[(&str, &str)] = &[
     ("type-prefix-unit-contract", "fn save(id: Int) !SaveError {}"),
     ("type-prefix-value-contract", "fn load() -> Int !SaveError { return Ok(1) }"),
     ("type-prefix-union-contract", "fn load() -> Int !(SaveError | LoadError) { return Ok(1) }"),
-    ("bracket-range-access-marks", "f(values[0..1], &values[0..1], ~values[0..1])"),
+    ("bracket-range-access-marks", "f(values[0..1], &values[0..1], values[0..1].copy())"),
     // E0393 (#3743): the retired `name: Type :: value` binding.
     ("retired-typed-binding", "fn run() {\n    limit: U8 :: 250\n    print(limit)\n}\n"),
+    // D-VIS-MODULE1 (#4723): retired visibility spellings and their deleting edits; `pub use` stays the re-export.
+    ("vis-pub-use-reexport", "pub use helper.[touch]\nfn run() {}\n"),
+    ("vis-reexport-qualifier-retired", "pub(package) use helper.[touch]\nfn run() {}\n"),
+    ("vis-retired-pub-fn", "pub fn run() {}\n"),
+    ("vis-retired-pub-package-fn", "pub(package) fn run() {}\n"),
+    ("vis-foreign-private-fn", "private fn run() {}\n"),
+    ("vis-priv-on-fn", "priv fn run() {}\n"),
+    ("vis-priv-unknown-qualifier", "priv(crate) module helper {\n    fn touch() {}\n}\nfn run() {}\n"),
+    ("vis-field-priv-package", "struct S {\n    priv(package) x: Int\n}\nfn run() {}\n"),
+    ("vis-section-label", "pub:\nfn run() {}\n"),
+    ("vis-retired-file-marker", "#PubFile\nfn run() {}\n"),
 ];
 
 fn jet_byte_array_literal(source: &str) -> String {
@@ -369,15 +382,16 @@ struct Pass {
 }
 
 fn lower_bundle(bundle: &mut jet::AST::ProgramBundle, context: &str) -> MirProgram {
-    let diagnostics = jet::Sema::check_bundle(bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, nominals) =
+        jet::Sema::check_bundle_with_effect_facts(bundle, jet::Sema::CompileMode::Run);
     let errors = diagnostics.iter().filter(|row| row.severity == Severity::Error).collect::<Vec<_>>();
     assert!(errors.is_empty(), "{context}: checked parser fixture: {errors:#?}");
     let request = MirArtifactRequest::new(
-        MirArtifactTarget::Cranelift,
+        MirArtifactTarget::Interpreter,
         MirArtifactKind::NativeExecutable,
         MirArtifactBuildMode::Dev,
     );
-    jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    jet::Codegen::TIR::lower_checked_mir_program_for(bundle, &nominals, request)
         .unwrap_or_else(|error| panic!("{context}: canonical parser MIR: {error}"))
         .0
 }

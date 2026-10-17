@@ -1,0 +1,33 @@
+
+use core.sys as env
+use core.service as services
+
+fn rollout_worker() {}
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    tree := services.tree("rollout-restart")
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "rollout-events", 1, "reversible") ?? panic("state")
+    endpoint :: tree.worker("api", rollout_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if phase == "write" {
+        tree.directory_register("api", endpoint) ?? panic("directory")
+        tree.drain_worker(endpoint) ?? panic("drain")
+        print("handoff:{tree.handoff_generation() ?? panic("handoff")}")
+    } else {
+        current :: tree.directory_resolve("api") ?? panic("resolve")
+        print("generation:{tree.directory_generation()}")
+        print("current:{current.show()}")
+        print("receipt:{tree.upgrade_receipt() ?? panic("receipt")}")
+        stale :: tree.send(endpoint, "stale")
+        if stale == {
+            .Ok(_) -> { print("stale:accepted") }
+            .Err(_) -> { print("stale:rejected") }
+        }
+        current.send("after") ?? panic("after send")
+        print("after:{tree.receive(current) ?? panic("after receive")}")
+    }
+    tree.stop() ?? panic("stop")
+}

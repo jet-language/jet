@@ -748,8 +748,7 @@ impl<'a> Parser<'a> {
     /// D-META-STAGE1=B: true when the retired `#Known` spelling is at the
     /// cursor. It parses only far enough to teach the `@` form.
     pub(in crate::Parser) fn at_known_lead(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(name) if name == Syntax::RETIRED_MARKER_KNOWN)
+        self.unqualified_marker_name_at(self.pos) == Some(Syntax::RETIRED_MARKER_KNOWN)
     }
 
     /// D-META-STAGE1=B: `#Known` is retired. One teaching error covers all
@@ -1148,6 +1147,7 @@ fn desugar_layout_expr(layout_name: &str, e: &mut Expr) {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 };
                 return;
             }

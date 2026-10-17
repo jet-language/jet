@@ -1,0 +1,134 @@
+// Shared Native40 owner (#4828), embedded canonical sequence of mean/weight pairs.
+// Sketch.rs:61-122: do not replace the seed cumulative quirk with textbook t-digest.
+fn td_float(address: I64) -> Float { rt_f64_from_bits(data_tree_word(address)) }
+fn td_put(address: I64, value: Float) { data_tree_store(address, rt_f64_bits(value)) }
+fn td_partition(data: I64, length: I64, value: Float) -> I64 {
+    if (length == I64{0}) -> return I64{0}
+    // rustc1.97.1 slice::partition_point delegates to this binary_search_by shape.
+    // Unlike a lower-bound rewrite, this also preserves non-monotone NaN predicates.
+    size := length
+    base := I64{0}
+    loop size > (I64{1}) {
+        half :: size /% I64{2}
+        mid :: base + half
+        if (td_float(data + mid * TD_CENTROID_BYTES + TD_MEAN) < value) -> base = mid
+        size -= half
+    }
+    offset :: if (td_float(data + base * TD_CENTROID_BYTES + TD_MEAN) < value) -> I64{1} else -> I64{0}
+    base + offset
+}
+#Export(c) fn jet_t_digest_new() -> I64 {
+    value :: jet_rt_alloc(TD_BYTES, I64{8})
+    thread_zero(value, TD_BYTES)
+    sync_store(value + TD_REFS, I64{1})
+    data_tree_store(value + TD_SEQUENCE + DATA_SEQUENCE_DATA, I64{8})
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_t_digest(value: I64) -> I64 {
+    _ := sync_add(value + TD_REFS, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_drop_jet_t_digest(value: I64) {
+    if (value == I64{0}) -> return
+    if (sync_add(value + TD_REFS, I64{-1}) != I64{1}) -> return
+    sequence :: value + TD_SEQUENCE
+    capacity :: data_tree_word(sequence + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(data_tree_word(sequence + DATA_SEQUENCE_DATA), capacity * TD_CENTROID_BYTES, I64{8})
+    jet_rt_free(value, TD_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_show_jet_t_digest(_value: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    rt_text_push_word(text, I64{32777976662279252}, I64{7}) // TDigest
+    jet_rt_string_builder_finish(text)
+}
+#Export(c) fn jet_rt_native_tdigest_add(value: I64, sample: Float) {
+    sync_mutex_lock(value + TD_MUTEX)
+    sequence :: value + TD_SEQUENCE
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    index :: td_partition(data_tree_word(sequence + DATA_SEQUENCE_DATA), length, sample)
+    _ := data_sequence_reserve(sequence, TD_CENTROID_BYTES)
+    data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    at := length
+    loop at > index {
+        target :: data + at * TD_CENTROID_BYTES
+        source :: target - TD_CENTROID_BYTES
+        data_tree_store(target + TD_MEAN, data_tree_word(source + TD_MEAN))
+        data_tree_store(target + TD_WEIGHT, data_tree_word(source + TD_WEIGHT))
+        at -= I64{1}
+    }
+    td_put(data + index * TD_CENTROID_BYTES + TD_MEAN, sample)
+    td_put(data + index * TD_CENTROID_BYTES + TD_WEIGHT, Float{1.0})
+    next :: length + I64{1}
+    total := Float{-0.0}
+    at = I64{0}
+    loop at < next {
+        total += td_float(data + at * TD_CENTROID_BYTES + TD_WEIGHT)
+        at += I64{1}
+    }
+    write := I64{0}
+    cumulative := Float{0.0}
+    at = I64{0}
+    loop at < next {
+        source :: data + at * TD_CENTROID_BYTES
+        mean :: td_float(source + TD_MEAN)
+        weight :: td_float(source + TD_WEIGHT)
+        if (write == I64{0}) {
+            td_put(data + TD_MEAN, mean)
+            td_put(data + TD_WEIGHT, weight)
+            write = I64{1}
+            cumulative += weight
+        } else {
+            last :: data + (write - I64{1}) * TD_CENTROID_BYTES
+            quantile :: cumulative / total
+            limit :: Float{4.0} * total * quantile * (Float{1.0} - quantile) / Float{100.0}
+            bound :: if (limit > Float{1.0}) -> limit else -> Float{1.0}
+            old_weight :: td_float(last + TD_WEIGHT)
+            new_weight :: old_weight + weight
+            if (new_weight <= bound) {
+                td_put(last + TD_MEAN, (td_float(last + TD_MEAN) * old_weight + mean * weight) / new_weight)
+                td_put(last + TD_WEIGHT, new_weight)
+            } else {
+                target :: data + write * TD_CENTROID_BYTES
+                td_put(target + TD_MEAN, mean)
+                td_put(target + TD_WEIGHT, weight)
+                write += I64{1}
+                // Exact seed quirk: merging does NOT advance cumulative.
+                cumulative += weight
+            }
+        }
+        at += I64{1}
+    }
+    data_tree_store(sequence + DATA_SEQUENCE_LENGTH, write)
+    sync_mutex_unlock(value + TD_MUTEX)
+}
+#Export(c) fn jet_rt_native_tdigest_quantile(value: I64, quantile: Float) -> Float {
+    sync_mutex_lock(value + TD_MUTEX)
+    sequence :: value + TD_SEQUENCE
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    if (length == I64{0}) {
+        sync_mutex_unlock(value + TD_MUTEX)
+        return Float{0.0}
+    }
+    data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    total := Float{-0.0}
+    at := I64{0}
+    loop at < length {
+        total += td_float(data + at * TD_CENTROID_BYTES + TD_WEIGHT)
+        at += I64{1}
+    }
+    target :: quantile * total
+    cumulative := Float{0.0}
+    at = I64{0}
+    loop at < length {
+        cumulative += td_float(data + at * TD_CENTROID_BYTES + TD_WEIGHT)
+        if (cumulative >= target) {
+            result :: td_float(data + at * TD_CENTROID_BYTES + TD_MEAN)
+            sync_mutex_unlock(value + TD_MUTEX)
+            return result
+        }
+        at += I64{1}
+    }
+    result :: td_float(data + (length - I64{1}) * TD_CENTROID_BYTES + TD_MEAN)
+    sync_mutex_unlock(value + TD_MUTEX)
+    result
+}

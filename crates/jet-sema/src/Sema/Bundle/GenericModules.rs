@@ -727,10 +727,6 @@ fn specialize_struct(
     result
 }
 
-pub(super) fn clone_struct(source: &crate::AST::StructDef) -> crate::AST::StructDef {
-    source.clone()
-}
-
 fn specialize_enum(
     source: &crate::AST::EnumDef,
     alias: &str,
@@ -835,10 +831,6 @@ fn specialize_enum(
         .map(|(name, span)| (mapped_definition_name(name, &types), *span))
         .collect();
     result
-}
-
-pub(super) fn clone_enum(source: &crate::AST::EnumDef) -> crate::AST::EnumDef {
-    source.clone()
 }
 
 #[derive(Clone)]
@@ -1054,7 +1046,9 @@ fn expand_nested_generics_in_code_module(
     traits.register_synthetic_rollback();
     traits.register_synthetic_display_debug();
     traits.register_synthetic_close();
-    traits.register_synthetic_operators();
+    // Disposable bound-resolution prepass: its seeded rows never enter the
+    // checked registry; Pipeline registers the expanded items against bundle ownership.
+    traits.register_synthetic_operators(|_| false);
     traits.register_synthetic_iter_index();
     traits.register_synthetic_io();
     traits.register_synthetic_driver();
@@ -1971,7 +1965,9 @@ fn expand_alias(
         nested_traits.register_synthetic_rollback();
         nested_traits.register_synthetic_display_debug();
         nested_traits.register_synthetic_close();
-        nested_traits.register_synthetic_operators();
+        // This discarded template registry resolves bounds only; the final
+        // Pipeline registry reseeds against loaded Core ownership.
+        nested_traits.register_synthetic_operators(|_| false);
         nested_traits.register_synthetic_iter_index();
         nested_traits.register_synthetic_io();
         nested_traits.register_synthetic_driver();

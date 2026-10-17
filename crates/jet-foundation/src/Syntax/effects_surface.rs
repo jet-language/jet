@@ -31,6 +31,10 @@ pub const KW_EFFECT_DECL: &str = "effect";
 /// of the leaf; the Core registry, the ambient floor, and the leaf table read it.
 pub const EFFECT_LEAF_EXEC_ARGS: &str = "Exec.Args";
 
+/// D-AUTH-AMBIENT2=A: waiting on the program's own work. A deny-only leaf
+/// like the `Mem` root: inferred and forbiddable, never a requested grant.
+pub const EFFECT_LEAF_TIME_WAIT: &str = "Time.Wait";
+
 /// Prelude effect leaves. These make the supported FFI language names
 /// typo-checked without declarations in user code. The parent `FFI` root still
 /// covers every leaf through D-EFFTREE1 ancestor subsumption.
@@ -42,7 +46,7 @@ pub const BUILTIN_EFFECT_LEAVES: &[&str] = &[
     "Rand.Draw",
     "Exec.Exit",
     EFFECT_LEAF_EXEC_ARGS,
-    "Time.Wait",
+    EFFECT_LEAF_TIME_WAIT,
     "FFI.Go",
     "FFI.Java",
     "FFI.DotNet",

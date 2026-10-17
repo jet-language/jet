@@ -1,0 +1,44 @@
+# tests/debug.rs::canvas_debug_native_tier_never_falls_back_to_interpreter
+# Exact production WebHost Canvas requests/subclaims, original source unchanged.
+# PENDING-SAME-HEAD, runtime UNRUN. Core.net client mirrors the existing raw HTTP fixture pattern.
+fixture: canvas_debug_native_tier_never_falls_back_to_interpreter.fixture
+env: NO_COLOR=1
+step: jet build client/run.jet
+exit: 0
+copy: client/.jet/build/run canvas-client
+spawn canvas: jet dev jet_debug_canvas_native_protocol.jet --canvas --canvas-port 0
+env: JET_CANVAS_BROWSER=/definitely/missing/canvas-browser
+stdout: file canvas.stdout
+stderr: file canvas.stderr
+await: file canvas.stderr ~ "Canvas: http" timeout 60s every 50ms # transport readiness bridge: Source/CmdDevTools.rs:777-783 emits the Canvas URL on configured browser launch failure; retain the ported 60s/50ms gate
+capture: url = text file.after_first("Canvas: ").line(0) canvas.stderr
+capture: revision = sha256 file jet_debug_canvas_native_protocol.jet
+capture: original_source = text file jet_debug_canvas_native_protocol.jet
+write: request.json canvas_debug_native_tier_never_falls_back_to_interpreter.request.json
+step request: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+when request.stdout ~ "HTTP/1.1 200"
+stdout: ~ "\"tier\":\"native-lldb\"" # original contains predicate
+stdout: ~ "\"state\":\"running\"" # original contains predicate
+stdout: !~ "\"tier\":\"jet-dev-interpreter\"" # original contains predicate
+capture: session = text stdout.after_first("\"id\":\"canvas-debug-").split("\"", 0).prepend("canvas-debug-")
+write: request.json canvas_debug_native_tier_never_falls_back_to_interpreter.stop.json
+step stop: {work}/canvas-client
+env: S1_CANVAS_URL={cap:url}
+env: S1_METHOD=POST
+env: S1_PATH=/__jet_canvas/debug
+exit: 0
+stdout: ^= "HTTP/1.1 200" # original success vs expect_err projection
+stdout: ~ "\"state\":\"stopped\"" # original contains predicate
+end when
+when request.stdout !~ "HTTP/1.1 200"
+stdout: ~ "\"kind\":\"diagnostic\"" # original contains predicate
+stdout: !~ "rustc rejected" # original contains predicate
+end when
+file: jet_debug_canvas_native_protocol.jet = "{cap:original_source}"
+signal canvas: INT
+wait: canvas
+exit: any # original only asserts session/store/source predicates, not dev server shutdown status

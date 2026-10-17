@@ -1,0 +1,12 @@
+# HAND-PORT tests/jetpack_engine.rs:7466-7503 jetpack_import_flake_writes_env_and_lock_from_fixture
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: jetpack_import_flake_writes_env_and_lock_from_fixture.fixture
+step: jetpack import flake.nix --no-color --fixtures {work}/fixtures
+env: PATH=
+exit: 0
+file: env.jet = jetpack_import_flake_writes_env_and_lock_from_fixture.env.expected
+file: .jet/lock ~ "kind = \"package\"" # original predicate
+file: .jet/lock ~ "key = \"fd\"" # original predicate
+file: .jet/lock ~ "exact = \"fd@jetpack\"" # original predicate
+file: .jet/lock ~ "key = \"ripgrep\"" # original predicate
+

@@ -133,13 +133,12 @@ pub enum TokKind {
     Amp,
     Pipe,
     Caret,
-    /// D-SHAPE-COPY1=A: `~x` is the one copy sigil (supersedes D-CAP2/S4's
-    /// `copy` verb; was retired by D-MEM1 as the D-CAP7 write sigil, since
-    /// superseded by `&`).
+    /// D-COPY-WORD1=A: prefix `~x` is the retired copy sigil; it lexes only so
+    /// the parser can teach E0941 and its rewrite to `x.copy()`.
     Tilde,
-    /// D-XORSPELL1=A: `a ~| b` is bitwise exclusive-or.
+    /// D-SIGIL-ALGEBRA1=B: retired exclusive-or, lexed to teach `bit_xor`.
     TildePipe,
-    /// D-XORSPELL1=A: `a ~|= b` is exclusive-or-assign.
+    /// D-SIGIL-ALGEBRA1=B: retired exclusive-or assignment, lexed for E0398.
     TildePipeEq,
     /// Retired external-method connector. Longest-match before `~` so parser
     /// can teach E0325.
@@ -352,4 +351,124 @@ pub fn comments(toks: &[Token]) -> Vec<Token> {
         .filter(|t| is_comment(&t.kind))
         .cloned()
         .collect()
+}
+
+/// Compiler-internal Core demand from the existing canonical token stream.
+/// String payload and comments are not identifiers; interpolation expressions
+/// already carry their own canonical tokens and are visited without re-lexing.
+pub fn core_identifier_demand(tokens: &[Token]) -> jet_foundation::AST::CoreIdentifierDemand {
+    use jet_foundation::{CoreModuleExports, Prelude};
+
+    fn collect(
+        tokens: &[Token],
+        bare_names: &mut [bool],
+        prelude_entries: &[Prelude::Entry],
+        demand: &mut jet_foundation::AST::CoreIdentifierDemand,
+    ) {
+        for (index, token) in tokens.iter().enumerate() {
+            match &token.kind {
+                TokKind::Ident(name) => {
+                    demand.option_or_err |= name == "or_err";
+                    // Source-backed receiver candidates schedule their owner;
+                    // Sema still validates the canonical primitive identity.
+                    // Plain names and literal/comment payloads do not demand it.
+                    if name == "abs"
+                        && tokens[..index].iter().rev().find(|token| !is_comment(&token.kind))
+                            .is_some_and(|token| matches!(token.kind, TokKind::Dot | TokKind::QuestionDot))
+                        && !demand.bare_modules.contains(&"core.math")
+                    {
+                        demand.bare_modules.push("core.math");
+                    }
+                    for (index, bare) in CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().enumerate() {
+                        if name == bare.name || (name == "url" && bare.name == "URL") {
+                            bare_names[index] = true;
+                        }
+                    }
+                    if let Some(entry) = prelude_entries.iter().find(|entry| entry.name == name) {
+                        if let Prelude::Target::Core { module, .. } = entry.target {
+                            if !demand.prelude_modules.contains(&module) {
+                                demand.prelude_modules.push(module);
+                            }
+                        }
+                    }
+                }
+                TokKind::Str(parts) => {
+                    for part in parts {
+                        if let StrTokPart::Interp(nested) = part {
+                            collect(nested, bare_names, prelude_entries, demand);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    let mut demand = jet_foundation::AST::CoreIdentifierDemand::default();
+    let mut bare_names = [false; CoreModuleExports::CORE_BARE_SOURCE_MODULES.len()];
+    collect(tokens, &mut bare_names, Prelude::entries(), &mut demand);
+    for (index, bare) in CoreModuleExports::CORE_BARE_SOURCE_MODULES.iter().enumerate() {
+        if bare_names[index] && !demand.bare_modules.contains(&bare.module_name) {
+            demand.bare_modules.push(bare.module_name);
+        }
+    }
+    // Preserve the alias injector's existing BTreeSet module order.
+    demand.prelude_modules.sort_unstable();
+    demand
+}
+
+#[cfg(test)]
+mod core_identifier_demand_tests {
+    use crate::Lexer;
+
+    #[test]
+    fn core_identifier_demand_ignores_literal_and_comment_payloads() {
+        for source in [
+            "\"URL Perf RNG Vec2 url or_err Clock Path read_file\"",
+            "`URL Perf RNG Vec2 url or_err Clock Path read_file`",
+            "\"\"\"\nURL Perf RNG Vec2 url or_err Clock Path read_file\n\"\"\"",
+            "\"{{URL}} {{RNG}} {{or_err}}\"",
+            "// URL RNG url or_err\n/* Perf /* Vec2 */ Clock Path read_file */\n",
+            "#FFI(c) fn f() { \"\"\"URL RNG {Vec2} url or_err\"\"\" }",
+            "URLExtra prefixURL _URL 变量URL URL变量",
+        ] {
+            let (tokens, diagnostics) = Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            let demand = Lexer::core_identifier_demand(&tokens);
+            assert!(demand.bare_modules.is_empty(), "{source:?}: {demand:?}");
+            assert!(!demand.option_or_err, "{source:?}: {demand:?}");
+            assert!(demand.prelude_modules.is_empty(), "{source:?}: {demand:?}");
+        }
+    }
+
+    #[test]
+    fn exact_int_abs_receiver_demands_source_without_importing_a_bare_name() {
+        for source in ["value.abs()", "value?.abs()", "value. /* source */ abs()", "\"{value.abs()}\""] {
+            let (tokens, diagnostics) = Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            assert_eq!(Lexer::core_identifier_demand(&tokens).bare_modules, ["core.math"]);
+        }
+        for source in ["fn abs(value: Int) -> Int { value }", "\"value.abs()\"", "`value.abs()`", "// value.abs()\n"] {
+            let (tokens, diagnostics) = Lexer::lex(source);
+            assert!(diagnostics.is_empty(), "{source:?}: {diagnostics:?}");
+            assert!(Lexer::core_identifier_demand(&tokens).bare_modules.is_empty(), "{source:?}");
+        }
+    }
+
+    #[test]
+    fn core_identifier_demand_keeps_real_and_nested_interpolation_identifiers() {
+        let source = "\"literal URL {RNG} {\"Perf {Vec2}\"} {value.or_err(\"url\")}\"";
+        let (tokens, diagnostics) = Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let demand = Lexer::core_identifier_demand(&tokens);
+        assert_eq!(demand.bare_modules, ["core.testing", "core.math"]);
+        assert!(demand.option_or_err);
+
+        let (tokens, diagnostics) = Lexer::lex("Vec2 RNG Perf URL url value.or_err()");
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let demand = Lexer::core_identifier_demand(&tokens);
+        assert_eq!(demand.bare_modules, ["core.net.url", "core.perf", "core.testing", "core.math"]);
+        assert!(demand.option_or_err);
+        assert!(demand.prelude_modules.windows(2).all(|pair| pair[0] < pair[1]));
+    }
 }

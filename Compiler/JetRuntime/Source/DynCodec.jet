@@ -1,0 +1,500 @@
+// CAbiRoutes.rs:23802-24025 and EncodingTraits.rs:39-116. Native Dyn
+// uses DataABI, never the bootstrap Rust Box/enum layout. Scalar inputs borrow;
+// encoded owners retain exact Int/Text, FieldError.under clones each input.
+#Export(c) fn jet_rt_codec_encode_int(value: I64) -> I64 { jet_rt_record_new_dyn_int(value) }
+#Export(c) fn jet_rt_codec_encode_bool(value: U8) -> I64 { jet_rt_record_new_dyn_bool(value != U8{0}) }
+#Export(c) fn jet_rt_codec_encode_float(value: Float) -> I64 { jet_rt_record_new_dyn_float(value) }
+#Export(c) fn jet_rt_codec_encode_string(value: I64) -> I64 { jet_rt_record_new_dyn_text(value) }
+#Export(c) fn jet_raw_typed_text(value: I64) -> I64 { jet_rt_record_new_dyn_text(value) }
+#Export(c) fn jet_rt_codec_encode_char(value: I64) -> I64 {
+    // The existing scalar adapter replaces an invalid Unicode scalar with U+FFFD.
+    data_tree_new(DATA_TREE_TEXT, jet_rt_char_to_string(value))
+}
+fn codec_encode_word(value: I64) -> I64 { data_tree_new(DATA_TREE_INT, jet_int_owned_from_i64(value)) }
+#Export(c) fn jet_rt_codec_encode_u8(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{255})) }
+#Export(c) fn jet_rt_codec_encode_u16(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{65535})) }
+#Export(c) fn jet_rt_codec_encode_u32(value: I64) -> I64 { codec_encode_word(value.bit_and(I64{4294967295})) }
+#Export(c) fn jet_rt_codec_encode_u64(value: I64) -> I64 {
+    if (value >= I64{0}) -> return codec_encode_word(value)
+    // The C word carries unsigned bits, not a signed value or an exact-Int tag.
+    // Build its positive base-1e9 magnitude without text or a second Int owner.
+    node :: int_new(I64{3})
+    half := (value >> I64{1}).bit_and(I64{9223372036854775807})
+    at := I64{0}
+    loop half != (I64{0}) {
+        int_set(node, at, half % I64{1000000000})
+        half = half /% I64{1000000000}
+        at += I64{1}
+    }
+    int_store(node + I64{32}, at)
+    int_scale(node, I64{2}, value.bit_and(I64{1}))
+    data_tree_new(DATA_TREE_INT, int_tag(node))
+}
+fn codec_signed_word(value: I64, mask: I64, sign: I64) -> I64 {
+    low :: value.bit_and(mask)
+    codec_encode_word(if (low >= sign) -> low - mask - I64{1} else -> low)
+}
+#Export(c) fn jet_rt_codec_encode_i8(value: I64) -> I64 { codec_signed_word(value, I64{255}, I64{128}) }
+#Export(c) fn jet_rt_codec_encode_i16(value: I64) -> I64 { codec_signed_word(value, I64{65535}, I64{32768}) }
+#Export(c) fn jet_rt_codec_encode_i32(value: I64) -> I64 { codec_signed_word(value, I64{4294967295}, I64{2147483648}) }
+#Export(c) fn jet_rt_codec_encode_i64(value: I64) -> I64 { codec_encode_word(value) }
+fn codec_under_path(segment: I64, path: I64) -> I64 {
+    // FieldError.rs:18-26: empty child uses the segment, indexed child has no dot.
+    if (rt_text_len(path) == I64{0}) -> return jet_rt_string_clone(segment)
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, segment)
+    if (rt_text_byte(rt_text_data(path)) != I64{91}) -> rt_text_push_word(target, I64{46}, I64{1})
+    jet_rt_string_builder_push(target, path)
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_codec_under(segment: I64, errors: I64, length: I64, output: I64) -> I64 {
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * I64{8}, I64{8})
+    at := I64{0}
+    loop at < length {
+        source :: text_glue_word(errors + at * I64{8})
+        value :: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
+        text_glue_store(value + TEXT_FIELD_PATH, codec_under_path(segment, text_glue_word(source + TEXT_FIELD_PATH)))
+        text_glue_store(value + TEXT_FIELD_REASON, jet_rt_string_clone(text_glue_word(source + TEXT_FIELD_REASON)))
+        text_glue_store(data + at * I64{8}, value)
+        at += I64{1}
+    }
+    text_glue_store(output, data)
+    length
+}
+#Export(c) fn jet_rt_codec_parse_json(text: I64, ok: I64, errors: I64, count: I64) -> I64 {
+    // Reuse the strict compiler parser, not Core's distinct policy parser.
+    // EncodingTraits.rs:711-716 wraps its exact reason and optional line.
+    status :: jet_std_json_parse(text, ok, errors)
+    if (status != I64{0}) -> return status
+    error :: encoding_word(errors)
+    line :: if (encoding_word(error + ENCODING_ERROR_LINE_PRESENT) != I64{0}) -> encoding_word(error + ENCODING_ERROR_LINE) else -> I64{0}
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, rt_static_text("invalid JSON (line "))
+    rt_text_push_number(target, line)
+    jet_rt_string_builder_push(target, rt_static_text("): "))
+    jet_rt_string_builder_push(target, encoding_word(error + ENCODING_ERROR_REASON))
+    reason :: jet_rt_string_builder_finish(target)
+    jet_rt_handle_drop_encoding_error(error)
+    codec_fail(reason, errors, count)
+}
+
+// FieldError::one(reason) (FieldError.rs): one owned FieldError at the empty
+// path, as the owned List payload `err` with its length in `err_len`.
+// Consumes `reason`; returns the failure status 0.
+fn codec_fail(reason: I64, err: I64, err_len: I64) -> I64 {
+    field :: jet_rt_alloc(TEXT_FIELD_BYTES, I64{8})
+    text_glue_store(field + TEXT_FIELD_PATH, jet_rt_string_clone(rt_static_text("")))
+    text_glue_store(field + TEXT_FIELD_REASON, reason)
+    slot :: jet_rt_alloc(I64{8}, I64{8})
+    text_glue_store(slot, field)
+    text_glue_store(err, slot)
+    text_glue_store(err_len, I64{1})
+    I64{0}
+}
+
+// The canonical scalar Decode adapters (CAbiRoutes.rs jet_rt_codec_decode_*
+// over EncodingTraits.rs:185-430 and JetStd/Dyn.rs:406-566). Each borrows the
+// runtime Dyn; status 1 writes the owned value into `ok` (Bool as one byte),
+// status 0 writes codec_fail's one FieldError. Inside the text-cell scope a
+// Text leaf parses into an Int, Float or Bool; outside it, it fails.
+
+// JetStd/Dyn.rs:9-35: the thread-local text-cell scope a text-native source
+// (CSV cells, environment) decodes inside. The scalar word is the active flag;
+// a fresh attached thread starts outside the scope.
+codec_text_cells_key := I64{0}
+
+// runtime-init: 3
+#Export(c) fn jet_rt_codec_text_cells_init() {
+    if (codec_text_cells_key == I64{0}) -> codec_text_cells_key = jet_rt_tls_key_new(I64{0})
+}
+
+// jet_decode_text_cells: enter returns the previous state, which leave
+// restores, exactly as JetTextCellsScope's drop does.
+#Export(c) fn jet_rt_codec_text_cells_enter() -> I64 {
+    previous :: jet_rt_tls_get(codec_text_cells_key)
+    jet_rt_tls_set(codec_text_cells_key, I64{1})
+    previous
+}
+#Export(c) fn jet_rt_codec_text_cells_leave(previous: I64) { jet_rt_tls_set(codec_text_cells_key, previous) }
+
+fn codec_text_cells() -> Bool { jet_rt_tls_get(codec_text_cells_key) != I64{0} }
+
+// `text.trim() == literal` (Unicode White_Space trim, as str::trim).
+fn codec_trimmed_is(text: I64, literal: I64) -> Bool {
+    start :: numeric_trim_start(text)
+    end :: numeric_trim_end(text, start)
+    length :: rt_text_len(literal)
+    if (end - start != length) -> return false
+    data :: rt_text_data(text)
+    expected :: rt_text_data(literal)
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + start + at) != rt_text_byte(expected + at)) -> return false
+        at += I64{1}
+    }
+    true
+}
+
+// DynKind.rs dyn_kind over Dyn.rs dyn_kind_for; a borrowed static text.
+fn codec_kind(tree: I64) -> I64 {
+    kind :: data_tree_word(tree + DATA_TREE_TAG)
+    if (kind == DATA_TREE_NULL) -> return rt_static_text("null")
+    if (kind == DATA_TREE_BOOL) -> return rt_static_text("Bool")
+    if (kind == DATA_TREE_INT) -> return rt_static_text("Int")
+    if (kind == DATA_TREE_FLOAT) -> return rt_static_text("Float")
+    if (kind == DATA_TREE_NUMBER) -> return rt_static_text("number")
+    if (kind == DATA_TREE_TEXT) -> return rt_static_text("Text")
+    if (kind == DATA_TREE_BYTE_LIST) -> return rt_static_text("Bytes")
+    if (kind == DATA_TREE_DATETIME) -> return rt_static_text("DateTime")
+    if (kind == DATA_TREE_ARRAY) -> return rt_static_text("a list")
+    if (kind == DATA_TREE_OBJECT) -> return rt_static_text("an object")
+    rt_static_text("value")
+}
+
+// `{prefix}{found}`: a Text leaf is `text {:?}` (Rust str Debug), a Number
+// leaf `number {lexeme}` when `lexeme`, anything else its dyn_kind. Owned.
+fn codec_found(prefix: I64, tree: I64, lexeme: Bool) -> I64 {
+    kind :: data_tree_word(tree + DATA_TREE_TAG)
+    payload :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, prefix)
+    if (kind == DATA_TREE_TEXT) {
+        jet_rt_string_builder_push(target, rt_static_text("text "))
+        rt_text_push_rust_debug_str(target, payload)
+    } else if (lexeme && kind == DATA_TREE_NUMBER) {
+        jet_rt_string_builder_push(target, rt_static_text("number "))
+        jet_rt_string_builder_push(target, payload)
+    } else {
+        jet_rt_string_builder_push(target, codec_kind(tree))
+    }
+    jet_rt_string_builder_finish(target)
+}
+
+// `{prefix}{text}{suffix}`; owned.
+fn codec_framed(prefix: I64, text: I64, suffix: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, prefix)
+    jet_rt_string_builder_push(target, text)
+    jet_rt_string_builder_push(target, suffix)
+    jet_rt_string_builder_finish(target)
+}
+
+fn codec_reason(out: I64, reason: I64) -> I64 {
+    data_tree_store(out, reason)
+    I64{0}
+}
+
+// One mantissa digit of a decimal lexeme, counting the integer part's digits
+// first and then the fraction's (the '.' is skipped).
+fn codec_lexeme_digit(data: I64, start: I64, int_end: I64, frac_start: I64, index: I64) -> I64 {
+    whole :: int_end - start
+    address :: if (index < whole) -> data + start + index else -> data + frac_start + index - whole
+    rt_text_byte(address) - I64{48}
+}
+
+// JSONNumber.rs:109-189 json_decimal_lexeme then :316-339
+// json_exact_integer_text: the signed integer text of a mathematically
+// integral number lexeme. Status 1 writes the owned integer text into `out`;
+// status 0 writes the owned reason, in the Rust checks' order.
+fn codec_integer_text(lexeme: I64, out: I64) -> I64 {
+    data :: rt_text_data(lexeme)
+    start := numeric_trim_start(lexeme)
+    end :: numeric_trim_end(lexeme, start)
+    if (start == end) -> return codec_reason(out, jet_rt_string_clone(rt_static_text("empty decimal number")))
+    negative := false
+    sign :: rt_text_byte(data + start)
+    if (sign == I64{45} || sign == I64{43}) {
+        negative = sign == I64{45}
+        start += I64{1}
+    }
+    mark := start
+    loop mark < end && rt_text_byte(data + mark) != (I64{101}) && rt_text_byte(data + mark) != (I64{69}) -> mark += I64{1}
+    // The exponent is Rust's i64 FromStr: one optional sign, then at least
+    // one digit, within i64. Its exact value matters only up to the limit.
+    exponent := I64{0}
+    exponent_large := false
+    if (mark < end) {
+        at := mark + I64{1}
+        exponent_negative := false
+        if (at < end && (rt_text_byte(data + at) == I64{43} || rt_text_byte(data + at) == I64{45})) {
+            exponent_negative = rt_text_byte(data + at) == I64{45}
+            at += I64{1}
+        }
+        if (at == end) -> return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal exponent is out of range")))
+        limit :: if exponent_negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
+        magnitude := U64{0}
+        loop at < end {
+            digit :: rt_text_byte(data + at) - I64{48}
+            if (digit < I64{0} || digit > I64{9} || magnitude > (limit - U64{digit}) /% U64{10}) {
+                return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal exponent is out of range")))
+            }
+            magnitude = magnitude * U64{10} + U64{digit}
+            if (exponent > I64{1000000}) { exponent_large = true } else { exponent = exponent * I64{10} + digit }
+            at += I64{1}
+        }
+        if (exponent > I64{1000000}) -> exponent_large = true
+        if exponent_negative -> exponent = -exponent
+    }
+    dot := start
+    loop dot < mark && rt_text_byte(data + dot) != (I64{46}) -> dot += I64{1}
+    frac_start :: if (dot < mark) -> dot + I64{1} else -> mark
+    valid := !(dot == start && frac_start == mark)
+    at := start
+    loop at < mark {
+        byte :: rt_text_byte(data + at)
+        if (at != dot && (byte < I64{48} || byte > I64{57})) -> valid = false
+        at += I64{1}
+    }
+    if !valid -> return codec_reason(out, codec_framed(rt_static_text("invalid decimal number `"), lexeme, rt_static_text("`")))
+    raw :: (dot - start) + (mark - frac_start)
+    if (raw > I64{1000000}) -> return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal number exceeds the 1000000-digit limit")))
+    if exponent_large -> return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal exponent exceeds the ±1000000 limit")))
+    scale :: (mark - frac_start) - exponent
+    if (scale < I64{0} && raw - scale > I64{1000000}) -> return codec_reason(out, jet_rt_string_clone(rt_static_text("decimal number exceeds the 1000000-digit limit")))
+    first := I64{0}
+    loop first < raw && codec_lexeme_digit(data, start, dot, frac_start, first) == (I64{0}) -> first += I64{1}
+    if (first == raw) -> return codec_integral(out, jet_rt_string_clone(rt_static_text("0")))
+    keep := raw
+    if (scale > I64{0}) {
+        check := if (raw - first < scale) -> first else -> raw - scale
+        loop check < raw {
+            if (codec_lexeme_digit(data, start, dot, frac_start, check) != I64{0}) {
+                return codec_reason(out, codec_framed(rt_static_text("JSON number `"), lexeme, rt_static_text("` is not an exact integer")))
+            }
+            check += I64{1}
+        }
+        keep = raw - scale
+        if (keep <= first) -> return codec_integral(out, jet_rt_string_clone(rt_static_text("0")))
+    }
+    zeros :: if (scale < I64{0}) -> -scale else -> I64{0}
+    target :: rt_text_builder_with_capacity(keep - first + zeros + I64{1})
+    if negative -> rt_text_push_word(target, I64{45}, I64{1})
+    index := first
+    loop index < keep {
+        rt_text_push_word(target, codec_lexeme_digit(data, start, dot, frac_start, index) + I64{48}, I64{1})
+        index += I64{1}
+    }
+    loop index < keep + zeros {
+        rt_text_push_word(target, I64{48}, I64{1})
+        index += I64{1}
+    }
+    codec_integral(out, target)
+}
+
+fn codec_integral(out: I64, text: I64) -> I64 {
+    data_tree_store(out, text)
+    I64{1}
+}
+
+// i128 holds the exact Int: |value| <= 2^127 when negative, < 2^127 otherwise.
+fn codec_i128(value: I64) -> Bool {
+    if int_inline(value) -> return true
+    bound :: jet_rt_int_from_static(rt_text_data(rt_static_text("170141183460469231731687303715884105728")), I64{39})
+    order :: int_compare_abs(value, bound)
+    jet_rt_int_drop(bound)
+    if int_negative(value) -> order <= I64{0} else -> order < I64{0}
+}
+
+// jet_numeric_fixed_from_i128's range for fixed kind 0-3 (I8-I64), 4-7 (U8-U64).
+fn codec_fixed_fits(value: I64, kind: I64) -> Bool {
+    negative :: int_negative(value)
+    if (kind >= I64{4} && negative) -> return false
+    bound := U64{18446744073709551615}
+    if {
+        (kind == I64{0}) -> bound = if negative -> U64{128} else -> U64{127}
+        (kind == I64{1}) -> bound = if negative -> U64{32768} else -> U64{32767}
+        (kind == I64{2}) -> bound = if negative -> U64{2147483648} else -> U64{2147483647}
+        (kind == I64{3}) -> bound = if negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
+        (kind == I64{4}) -> bound = U64{255}
+        (kind == I64{5}) -> bound = U64{65535}
+        (kind == I64{6}) -> bound = U64{4294967295}
+        else -> {}
+    }
+    int_fits(value, bound)
+}
+
+// A Float Dyn decodes as an Int only when finite, integral and in
+// [-2^63, 2^63) (decode_int_with): its exact value, read from the IEEE word.
+struct CodecWhole { integral: Bool, value: I64 }
+fn codec_float_whole(bits: I64) -> CodecWhole {
+    exponent :: ((bits >> I64{52}).bit_and(I64{2047})) - I64{1023}
+    fraction :: bits.bit_and(I64{4503599627370495})
+    negative :: bits < I64{0}
+    if (exponent == I64{-1023} && fraction == I64{0}) -> return CodecWhole{integral: true, value: I64{0}}
+    if (exponent < I64{0} || exponent > I64{63}) -> return CodecWhole{integral: false, value: I64{0}}
+    if (exponent == I64{63}) -> return CodecWhole{integral: negative && fraction == I64{0}, value: I64{-9223372036854775808}}
+    significand :: fraction.bit_or(I64{4503599627370496})
+    if (exponent < I64{52}) {
+        shift :: I64{52} - exponent
+        if (significand.bit_and((I64{1} << shift) - I64{1}) != I64{0}) -> return CodecWhole{integral: false, value: I64{0}}
+        magnitude :: significand >> shift
+        return CodecWhole{integral: true, value: if negative -> -magnitude else -> magnitude}
+    }
+    magnitude :: significand << (exponent - I64{52})
+    CodecWhole{integral: true, value: if negative -> -magnitude else -> magnitude}
+}
+
+// Dyn.rs:462-495 decode_int_with, then for a fixed `kind` (0-7) the i128
+// projection and :412-449 jet_dyn_decode_fixed_integer's range check with its
+// `range` reason; kind -1 is the exact Int (EncodingTraits.rs:193-206).
+fn codec_decode_integer(tree: I64, kind: I64, range: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    kind_tag :: data_tree_word(tree + DATA_TREE_TAG)
+    payload :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    value := I64{0}
+    if (kind_tag == DATA_TREE_INT) {
+        if (kind >= I64{0} && !codec_i128(payload)) -> return codec_fail(jet_rt_string_clone(rt_static_text("exact Int is outside i128")), err, err_len)
+        value = jet_rt_int_clone(payload)
+    } else if (kind_tag == DATA_TREE_FLOAT) {
+        whole :: codec_float_whole(payload)
+        if !whole.integral -> return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
+        value = jet_int_owned_from_i64(whole.value)
+    } else if (kind_tag == DATA_TREE_NUMBER) {
+        if (codec_integer_text(payload, ok) == I64{0}) -> return codec_fail(data_tree_word(ok), err, err_len)
+        text :: data_tree_word(ok)
+        parsed :: jet_int_parse(text, ok, err)
+        jet_rt_string_drop(text)
+        if (parsed == I64{0}) {
+            jet_rt_string_drop(data_tree_word(err))
+            return codec_fail(codec_framed(rt_static_text("expected Int, found number "), payload, rt_static_text("")), err, err_len)
+        }
+        value = data_tree_word(ok)
+        if (kind >= I64{0} && !codec_i128(value)) {
+            jet_rt_int_drop(value)
+            return codec_fail(codec_framed(rt_static_text("expected Int, found number "), payload, rt_static_text("")), err, err_len)
+        }
+    } else if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+        // A text cell is the exact Int (CtBigInt::from_str) or i128 FromStr
+        // of the trimmed text; any failure names the original text.
+        if (jet_int_parse(payload, ok, err) == I64{0}) {
+            jet_rt_string_drop(data_tree_word(err))
+            return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
+        }
+        value = data_tree_word(ok)
+        if (kind >= I64{0} && !codec_i128(value)) {
+            jet_rt_int_drop(value)
+            return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
+        }
+    } else {
+        return codec_fail(codec_found(rt_static_text("expected Int, found "), tree, false), err, err_len)
+    }
+    if (kind < I64{0}) {
+        data_tree_store(ok, value)
+        return I64{1}
+    }
+    fits :: codec_fixed_fits(value, kind)
+    word :: int_word(value)
+    jet_rt_int_drop(value)
+    if !fits -> return codec_fail(jet_rt_string_clone(range), err, err_len)
+    data_tree_store(ok, word)
+    I64{1}
+}
+#Export(c) fn jet_rt_codec_decode_int(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{-1}, rt_static_text(""), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_i8(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{0}, rt_static_text("expected I8, found out-of-range Int"), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_i16(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{1}, rt_static_text("expected I16, found out-of-range Int"), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_i32(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{2}, rt_static_text("expected I32, found out-of-range Int"), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_i64(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{3}, rt_static_text("expected I64, found out-of-range Int"), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_u8(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{4}, rt_static_text("expected U8, found out-of-range Int"), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_u16(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{5}, rt_static_text("expected U16, found out-of-range Int"), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_u32(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{6}, rt_static_text("expected U32, found out-of-range Int"), ok, err, err_len)
+}
+#Export(c) fn jet_rt_codec_decode_u64(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    codec_decode_integer(tree, I64{7}, rt_static_text("expected U64, found out-of-range Int"), ok, err, err_len)
+}
+
+fn codec_finite(bits: I64) -> Bool { ((bits >> I64{52}).bit_and(I64{2047})) != I64{2047} }
+
+// Dyn.rs:502-531 decode_float; a Number lexeme is :570-580
+// decode_finite_lexeme. Lexemes carry no whitespace, so jet_float_parse's
+// trim is Rust's untrimmed str::parse::<f64> here.
+#Export(c) fn jet_rt_codec_decode_float(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    kind_tag :: data_tree_word(tree + DATA_TREE_TAG)
+    payload :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    if (kind_tag == DATA_TREE_FLOAT) {
+        data_tree_store(ok, payload)
+        return I64{1}
+    }
+    if (kind_tag == DATA_TREE_INT) {
+        bits :: rt_f64_bits(jet_int_owned_to_f64(payload))
+        if !codec_finite(bits) -> return codec_fail(jet_rt_string_clone(rt_static_text("expected float, got out-of-range Int")), err, err_len)
+        data_tree_store(ok, bits)
+        return I64{1}
+    }
+    if (kind_tag == DATA_TREE_NUMBER) {
+        if (jet_float_parse(payload, ok, err) == I64{0}) {
+            jet_rt_string_drop(data_tree_word(err))
+            return codec_fail(codec_framed(rt_static_text("expected Float, found number "), payload, rt_static_text("")), err, err_len)
+        }
+        if !codec_finite(data_tree_word(ok)) -> return codec_fail(codec_framed(rt_static_text("expected Float, found out-of-range number "), payload, rt_static_text("")), err, err_len)
+        return I64{1}
+    }
+    if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+        // The trimmed text's f64, kept only when finite.
+        if (jet_float_parse(payload, ok, err) == I64{0}) {
+            jet_rt_string_drop(data_tree_word(err))
+            return codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
+        }
+        if !codec_finite(data_tree_word(ok)) -> return codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
+        return I64{1}
+    }
+    codec_fail(codec_found(rt_static_text("expected Float, found "), tree, false), err, err_len)
+}
+
+// Dyn.rs:533-553 decode_bool; a text cell is exactly `true` or `false` once
+// trimmed.
+#Export(c) fn jet_rt_codec_decode_bool(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    kind_tag :: data_tree_word(tree + DATA_TREE_TAG)
+    payload :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    if (kind_tag == DATA_TREE_BOOL) {
+        rt_text_put(ok, if (payload != I64{0}) -> I64{1} else -> I64{0})
+        return I64{1}
+    }
+    if (kind_tag == DATA_TREE_TEXT && codec_text_cells()) {
+        if codec_trimmed_is(payload, rt_static_text("true")) {
+            rt_text_put(ok, I64{1})
+            return I64{1}
+        }
+        if codec_trimmed_is(payload, rt_static_text("false")) {
+            rt_text_put(ok, I64{0})
+            return I64{1}
+        }
+    }
+    codec_fail(codec_found(rt_static_text("expected Bool, found "), tree, false), err, err_len)
+}
+
+// Dyn.rs:555-566 decode_string.
+#Export(c) fn jet_rt_codec_decode_string(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    if (data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_TEXT) -> return codec_fail(codec_found(rt_static_text("expected Text, found "), tree, true), err, err_len)
+    data_tree_store(ok, jet_rt_string_clone(data_tree_word(tree + DATA_TREE_PAYLOAD)))
+    I64{1}
+}
+
+// EncodingTraits.rs:335-347: decode_string, then exactly one scalar.
+#Export(c) fn jet_rt_codec_decode_char(tree: I64, ok: I64, err: I64, err_len: I64) -> I64 {
+    if (data_tree_word(tree + DATA_TREE_TAG) != DATA_TREE_TEXT) -> return codec_fail(codec_found(rt_static_text("expected Text, found "), tree, true), err, err_len)
+    text :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    if (length > I64{0} && rt_text_width(data) == length) {
+        data_tree_store(ok, rt_text_decode(data))
+        return I64{1}
+    }
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, rt_static_text("expected a single Char, found "))
+    rt_text_push_rust_debug_str(target, text)
+    codec_fail(jet_rt_string_builder_finish(target), err, err_len)
+}

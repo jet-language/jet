@@ -1,0 +1,44 @@
+struct MetadataField { name: String }
+enum MetadataPayload {
+    Unit
+    Named(fields: [MetadataField])
+}
+struct MetadataVariant { name: String, payload: MetadataPayload }
+enum MetadataDefinitionKind { Enum(variants: [MetadataVariant]) }
+struct MetadataDefinition { key: String, kind: MetadataDefinitionKind }
+struct MetadataEmitter { definitions: [MetadataDefinition], rendered: Int }
+
+fn metadata_field_name(emitter: &MetadataEmitter, name: String) -> String Never! {
+    emitter.rendered += 1
+    name.copy()
+}
+
+fn render_metadata(emitter: &MetadataEmitter) -> [String] Never! {
+    definition := emitter.definitions[0].copy()
+    names := [String]{}
+    if definition.kind == .Enum(variants) {
+        loop variant in variants {
+            if variant.payload == .Named(fields) {
+                loop field in fields -> &names.push(metadata_field_name(&emitter, field.name))
+            }
+        }
+    }
+    names
+}
+
+fn run() Never! {
+    emitter := MetadataEmitter{
+        definitions: [MetadataDefinition]{MetadataDefinition{
+            key: "Choice",
+            kind: MetadataDefinitionKind.Enum{variants: [MetadataVariant]{MetadataVariant{
+                name: "Named",
+                payload: MetadataPayload.Named{fields: [MetadataField]{MetadataField{name: "first"}, MetadataField{name: "second"}}}
+            }}}
+        }},
+        rendered: 0
+    }
+    names := render_metadata(&emitter)
+    assert(names == [String]{"first", "second"})
+    assert(emitter.rendered == 2)
+    assert(emitter.definitions.len() == 1)
+}

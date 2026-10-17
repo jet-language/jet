@@ -1,0 +1,10 @@
+# tests/debug.rs::break_then_continue_stops_at_breakpoint
+# Public production debugger transcript; original source/commands unchanged, PENDING-SAME-HEAD.
+fixture: break_then_continue_stops_at_breakpoint.fixture
+env: NO_COLOR=1
+step: jet debug jet_debug_brk.jet
+stdin: break_then_continue_stops_at_breakpoint.stdin
+exit: any # original transcript-only helper asserts no process code
+stdout+stderr: ~ "breakpoint set  jet_debug_brk.jet:7" # original contains predicate
+stdout+stderr: ~ "7 |" # original contains predicate
+stdout+stderr: ~ "total = 6" # original contains predicate

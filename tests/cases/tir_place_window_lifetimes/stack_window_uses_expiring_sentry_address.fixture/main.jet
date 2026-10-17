@@ -1,0 +1,13 @@
+
+use core.mem
+fn run() {
+    value :: 17
+    cell :: value
+    #Unsafe("cell is live on this stack frame") {
+        addr :: mem.address_of(cell)
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+        via_volatile :: mem.volatile_read(pointer)
+        print(via_volatile)
+    }
+}

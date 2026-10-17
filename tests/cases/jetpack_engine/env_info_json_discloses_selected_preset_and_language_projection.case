@@ -1,0 +1,44 @@
+# HAND-PORT tests/jetpack_engine.rs:6301-6438 env_info_json_discloses_selected_preset_and_language_projection
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: env_info_json_discloses_selected_preset_and_language_projection.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+env: HOSTNAME=epoch5-host
+env: USER=epoch5-user
+step: jetpack env info --json --no-color
+cwd: project
+exit: 0
+stdout: ~ "\"preset\":\"host+user\"" # original contains predicate
+stdout: ~ "\"selected_presets\":[\"host\",\"user\"]" # original contains predicate
+stdout: ~ "\"active_environment\":\"dev\"" # original contains predicate
+stdout: ~ "\"active_environment_provenance\":[\"env.dev\"]" # original contains predicate
+stdout: ~ "\"language_catalog\"" # original contains predicate
+stdout: ~ "\"fingerprint\":\"" # original contains predicate
+stdout: ~ "\"language_projections\"" # original contains predicate
+stdout: ~ "\"host\":\"native\"" # original contains predicate
+stdout: ~ "\"platform\":\"x86_64-linux\"" # original contains predicate
+stdout: ~ "\"license\":\"Apache-2.0 OR MIT\"" # original contains predicate
+stdout: ~ "\"missing_tools\":[]" # original contains predicate
+stdout: ~ "\"included\"" # original contains predicate
+stdout: ~ "\"omitted\"" # original contains predicate
+stdout: ~ "\"name\":\"Zig\"" # original contains predicate
+stdout: ~ "\"zig@nixpkgs\"" # original contains predicate
+stdout: ~ "\"services\":[{\"name\":\"redis\"" # original contains predicate
+stdout: ~ "\"checks\":[],\"jobs\":[\"lint\"]" # original contains predicate
+stdout: !~ "\"tasks\":[\"lint\"]" # original negative contains predicate
+stdout: ~ "\"variables\":[{\"name\":\"MODE\"" # original contains predicate
+step: jetpack env info --json --no-color --env full
+cwd: project
+exit: 0
+stdout: ~ "\"active_environment\":\"full\"" # original contains predicate
+stdout: ~ "\"active_environment_provenance\":[\"env.full\"]" # original contains predicate
+stdout: ~ "\"fd@nixpkgs\"" # original contains predicate
+stdout: !~ "\"ripgrep@nixpkgs\"" # original negative contains predicate
+step: jetpack env info --no-color --env missing
+cwd: project
+exit: nonzero
+stderr: ~ "E1337" # original contains predicate
+stderr: ~ "environment module `missing` is not declared" # original contains predicate
+

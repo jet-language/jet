@@ -1,0 +1,22 @@
+# HAND-PORT tests/jetpack_engine.rs:8817-8849 jet_build_rejects_cache_after_manifest_semantics_change
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: jet_build_rejects_cache_after_manifest_semantics_change.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+write: jet-pkgs/package.jet manifest1.template
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+write: jet-pkgs/package.jet manifest2.template
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: nonzero
+stderr: ~ "E2604" # original contains predicate
+stderr: ~ "recipe identity verification" # original contains predicate
+

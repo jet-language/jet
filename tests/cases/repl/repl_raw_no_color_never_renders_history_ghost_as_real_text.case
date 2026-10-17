@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:2824-2840, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "alphabet := 1\r" after 200ms
+pty-send: "a" after 120ms
+pty-send: "\u0003" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout.after_last("2 user> "): !~ "alphabet := 1" # Original rsplit(last), whole-stream fallback if marker absent rs2835-2838.

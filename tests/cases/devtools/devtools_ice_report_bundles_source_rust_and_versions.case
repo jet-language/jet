@@ -1,0 +1,11 @@
+# Port of tests/devtools.rs:149-195. PENDING-SAME-HEAD; original source bytes and assertions preserved.
+fixture: fixtures/devtools_ice_report_bundles_source_rust_and_versions
+step: jet self devtools ice-report {work}/prog.jet
+capture: bundle stdout line ^= "wrote ICE report bundle to " # original ed77c235f tests/devtools.rs:168-171 finds the first prefixed line
+file: {cap:bundle} is-dir
+file: {cap:bundle}/source.jet is-file
+file: {cap:bundle}/generated.rs is-file
+file: {cap:bundle}/rustc.stderr is-file
+file: {cap:bundle}/versions.txt is-file
+file: {cap:bundle}/versions.txt ~ "jet " # original predicate: versions contains jet prefix
+file: {cap:bundle}/source.jet ~ "fn run()" # original predicate: bundled source contains run function

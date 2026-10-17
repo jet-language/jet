@@ -1,0 +1,20 @@
+
+enum Choice {
+    First(ViewMut<Int>)
+    Second(ViewMut<Int>)
+}
+
+fn inspect(choice: Choice) {
+    if choice == {
+        .First(selected) -> print(selected[0])
+        .Second(selected) -> print(selected[0])
+    }
+}
+
+fn run() {
+    values := [1, 2]
+    choice :: Choice.First(&values[0..1])
+    inspect(choice)
+}
+
+// KNOWN-FAILING function #4796: original Rust suite already red; this variant retains its original contract, not a skip.

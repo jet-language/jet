@@ -1,0 +1,58 @@
+use core.encoding.json as json
+use core.files as fs
+
+struct Event {
+    service: String
+    duration_ms: Int
+}
+
+struct Batch {
+    events: [Event]
+}
+
+struct Summary {
+    service: String
+    count: Int
+    total_ms: Int
+}
+
+struct Report {
+    total_events: Int
+    summaries: [Summary]
+}
+
+fn summarize(batch: Batch) -> Report {
+    services := [String]{}
+    loop event in batch.events {
+        if !services.contains(event.service) -> &services.push(event.service.copy())
+    }
+    &services.sort()
+    summaries := [Summary]{}
+    loop service in services {
+        count := 0
+        total_ms := 0
+        loop event in batch.events {
+            if event.service == service {
+                count += 1
+                total_ms += event.duration_ms
+            }
+        }
+        &summaries.push(Summary{service: service, count: count, total_ms: total_ms})
+    }
+    return Report{total_events: batch.events.len(), summaries: summaries}
+}
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    raw :: fs.read(input) ?? panic("cannot read input")
+    decoded :: json.decode<Batch>(raw) ?? {
+        print("invalid-json")
+        return
+    }
+    print(json.to_string(summarize(decoded)))
+}

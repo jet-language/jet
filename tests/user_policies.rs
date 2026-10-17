@@ -5,7 +5,7 @@ mod common;
 #[test]
 fn user_policy_declaration_and_custom_chain_parse_together() {
     let source = r#"
-pub policy audit(topic: String) {
+policy audit(topic: String) {
     wrap(call) { return call() }
 }
 
@@ -39,7 +39,7 @@ fn load_user() -> Int { 7 }
     ));
 
     let formatted = Formatter::format_source(source).expect("user policy source should format");
-    assert!(formatted.contains("pub policy audit(topic: String)"));
+    assert!(formatted.contains("policy audit(topic: String)"));
     assert!(formatted.contains("wrap(call)"));
 }
 
@@ -50,7 +50,7 @@ fn user_policy_apply_keeps_a_callable_binding() {
     let file = dir.join("main.jet");
     std::fs::write(
         &file,
-        r#"pub policy audit(topic: String) {
+        r#"policy audit(topic: String) {
     wrap(call) { return "{topic}:{call()}" }
 }
 
@@ -66,7 +66,7 @@ fn run() {
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-    match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(file.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             exit_code,
             stdout,

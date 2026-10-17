@@ -118,10 +118,10 @@ impl ApiSnapshot {
     }
 }
 
-/// The public function name in a `fn name(...) ...` line, or `None`.
+/// The public function name before its optional type parameters or parameter list.
 fn fn_name_of(line: &str) -> Option<String> {
     let rest = line.strip_prefix("fn ")?;
-    let end = rest.find('(').unwrap_or(rest.len());
+    let end = rest.find(['<', '(']).unwrap_or(rest.len());
     let name = rest[..end].trim();
     if name.is_empty() {
         None
@@ -341,6 +341,11 @@ pub fn canonical_fn_signature_with_effects(
             }
         });
     signature.push_str(&provenance);
+    // D-METHOD-FOOTPRINT1=A: a method publishes the receiver fields it may
+    // read or change (stated, else inferred); no entry means the whole record.
+    if let Some(fields) = f.self_param().and_then(|receiver| receiver.footprint.published()) {
+        signature.push_str(&format!(" ; footprint = self.[{}]", fields.join(", ")));
+    }
     let declared_never = f
         .return_type
         .as_ref()
@@ -834,8 +839,48 @@ fn collect_pub_fns(
                     );
                 }
             }
+            // D-METHOD-FOOTPRINT1=A: public inherent methods are API too; their
+            // signature carries the receiver footprint, so widening it is a
+            // reported API change.
+            Item::Struct(definition) if definition.is_pub && !definition.is_package_pub => {
+                collect_pub_methods(&definition.name, &definition.methods, solved, display_module, dimensions, out);
+            }
+            Item::Impl(implementation) if implementation.trait_name.is_none() => {
+                collect_pub_methods(&implementation.type_name, &implementation.methods, solved, display_module, dimensions, out);
+            }
             _ => {}
         }
+    }
+}
+
+fn collect_pub_methods(
+    owner: &str,
+    methods: &[Func],
+    solved: Option<&std::collections::HashMap<String, EffectSet>>,
+    display_module: Option<&str>,
+    dimensions: &ApiUnitDimensions,
+    out: &mut Vec<FrozenFn>,
+) {
+    let empty_effects = EffectSet::new();
+    for method in methods {
+        if !method.is_pub
+            || method.is_package_pub
+            || crate::Syntax::classify_identifier(&method.name)
+                != crate::Syntax::IdentifierClass::Ordinary
+        {
+            continue;
+        }
+        let effects = solved.map(|sets| {
+            sets.get(&super::effect_key(Some(owner), &method.name))
+                .unwrap_or(&empty_effects)
+        });
+        out.push(FrozenFn {
+            name: frozen_name(display_module, &format!("{owner}.{}", method.name)),
+            signature: qualify_api_signature(
+                display_module,
+                &canonical_fn_signature_with_effects(method, effects, dimensions),
+            ),
+        });
     }
 }
 
@@ -930,6 +975,7 @@ mod tests {
             variadic: false,
             variadic_bound_list: None,
             declared_view_from_names: None,
+            footprint: Default::default(),
         }
     }
 
@@ -1443,6 +1489,15 @@ mod tests {
             "1.0.0",
         );
         assert_ne!(read.capability_digest(), write.capability_digest());
+    }
+
+    #[test]
+    fn generic_function_name_round_trips_without_type_parameters() {
+        let text = "api_version = 1\npackage = mk\npublished_version = 0.1.0\nfn f<T>(x: &T) -> T\n";
+        let snapshot = ApiSnapshot::parse(text).unwrap();
+        assert_eq!(snapshot.funcs[0].name, "f");
+        assert_eq!(snapshot.funcs[0].signature, "fn f<T>(x: &T) -> T");
+        assert_eq!(ApiSnapshot::parse(&snapshot.write()).unwrap(), snapshot);
     }
 
     #[test]

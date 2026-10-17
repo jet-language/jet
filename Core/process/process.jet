@@ -12,12 +12,20 @@ package {
 use core as core
 use core.files as files
 
+// Exact ProcessSignal shape from JetStd/CommonTypes.rs. Signal arming shares
+// the one native interrupt dispatcher; source owns mask and failure policy.
+enum ProcessSignal {
+    Term
+    Hup
+    Int
+}
 
-pub fn args() -[Exec.Args]> [String] Never! { core.process.args() }
 
-pub fn argv() -[Exec.Args]> [String] Never! { core.process.argv() }
+fn args() -[Exec.Args]> [String] Never! { args_from_argv(argv()) }
 
-pub fn check(receipt: ProcessReceipt) IOError! {
+fn argv() -[Exec.Args]> [String] Never! { core.process.argv() }
+
+fn check(receipt: ProcessReceipt) IOError! {
     if receipt.success -> return Ok()
     limit_hit :: receipt.limit_hit
     if limit_hit == {
@@ -34,7 +42,7 @@ pub fn check(receipt: ProcessReceipt) IOError! {
         }))
     }
     cause := "process exited unsuccessfully: code={receipt.code}"
-    signal :: ~receipt.signal
+    signal :: receipt.signal.copy()
     if signal == {
         .None -> { _ := 0 }
         .Val(number) -> cause = "{cause}; signal={number}"
@@ -48,7 +56,7 @@ pub fn check(receipt: ProcessReceipt) IOError! {
 }
 
 
-pub fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
+fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> {
     child :: spec.stdin(.Stream).spawn()
     child.stdin.write(text)
     child.stdin.close()
@@ -56,63 +64,96 @@ pub fn stdin_text(spec: ProcessSpec, text: String) IOError! -[Exec, Time.Wait]> 
     check(receipt)
 }
 
-pub fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
+fn getoutput(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
     receipt :: spec.run()
     receipt.output
 }
 
-pub fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) IOError! {
+fn getstatusoutput(spec: ProcessSpec) -[Exec, Time.Wait]> (status: Int, output: String) IOError! {
     receipt :: spec.run()
     (status: receipt.code, output: combined_output(receipt))
 }
 
-pub fn shell(line: String) -[Exec, Env]> ProcessSpec Never! {
+fn shell(line: String) -[Exec, Env]> ProcessSpec Never! {
     if core.sys.family() == "windows" -> return cmd([String]{"cmd", "/C", line})
     cmd([String]{"sh", "-c", line})
 }
 
-pub fn arg(spec: ProcessSpec, extra: String) -> ProcessSpec Never! {
+fn arg(spec: ProcessSpec, extra: String) -> ProcessSpec Never! {
     spec.arg(extra)
 }
 
-pub fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
+fn args_extend(spec: ProcessSpec, extra: [String]) -> ProcessSpec Never! {
     spec.args_extend(extra)
 }
 
 
-pub fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! { core.process.cmd(argv) }
+fn cmd(argv: [String]) -[Exec]> ProcessSpec Never! {
+    fields :: default_fields(argv)
+    terminal :: fields.terminal ?? TerminalPolicy{size: TerminalSize{cols: 0, rows: 0}, mode: .Cooked}
+    has_stdin :: if fields.stdin == .Val(_) -> true else -> false
+    has_terminal :: if fields.terminal == .Val(_) -> true else -> false
+    #Unsafe("transfer a fully initialized Jet process plan into the temporary native ProcessSpec carrier; paired environment columns have equal length") {
+        return core.process.__spec_fields(fields.argv, fields.cwd != None, fields.cwd ?? "", fields.env_clear,
+            fields.env_names, fields.env_values, fields.env_remove,
+            has_stdin, fields.stdin ?? .Capture, fields.stdout, fields.stderr,
+            fields.timeout_ms != None, fields.timeout_ms ?? 0,
+            fields.output_limit != None, fields.output_limit ?? 0,
+            fields.cpu_time_limit_ms != None, fields.cpu_time_limit_ms ?? 0,
+            fields.memory_limit_bytes != None, fields.memory_limit_bytes ?? 0,
+            fields.open_file_limit != None, fields.open_file_limit ?? 0,
+            fields.detached, has_terminal, terminal,
+            fields.policy_wire != None, fields.policy_wire ?? "")
+    }
+}
 
-pub fn current_pid() -[Env]> Int Never! { core.sys.getpid() }
+fn current_pid() -[Env]> Int Never! { core.sys.getpid() }
 
-pub fn cwd(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.cwd(path) }
+fn cwd(spec: ProcessSpec, path: String) -> ProcessSpec Never! { spec.cwd(path) }
 
-pub fn env(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
+fn env(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
     spec.env(key, value)
 }
 
-pub fn env_get(name: String) -[Env]> String? Never! { core.sys.get(name) }
+fn env_get(name: String) -[Env]> String? Never! { core.sys.get(name) }
 
-pub fn exit(code: Int) -[Exec]> Never Never! {
+fn exit(code: Int) -[Exec]> Never Never! {
     core.process.exit(code)
     loop {}
 }
 
-pub fn on_signal(signal: ProcessSignal) Never! -[Exec]> { core.process.on_signal(signal) }
-
-pub fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
-    core.process.pipeline(steps)
+fn on_signal(signal: ProcessSignal) Never! -[Exec]> {
+    mask :: if signal == {
+        .Int -> 1
+        .Hup -> 2
+        .Term -> 4
+    }
+    if core.process.__signal_arm(mask) == {
+        .Ok(_) -> {}
+        .Err(message) -> panic("core.process.on_signal: {message}")
+    }
 }
 
-pub fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn pipeline(steps: [ProcessSpec]) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+    if steps.len() == 0 {
+        return Err(IOError.InvalidInput(IOContext{
+            operation: .Resolve, resource: None, os_code: None,
+            cause: Val("process.pipeline needs at least one command"),
+        }))
+    }
+    core.process.__pipeline_run(steps)
+}
+
+fn run_spec(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
-pub fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
+fn status_ok(receipt: ProcessReceipt) -> Bool Never! {
     receipt.success
 }
 
 
-pub fn which(name: String) -[FS, Env]> String? Never! {
+fn which(name: String) -[FS, Env]> String? Never! {
     if name.len() == 0 -> return None
     if contains_path_separator(name) || path_is_absolute(name) {
         if path_is_file(name) -> return Val(name)
@@ -139,13 +180,13 @@ fn path_is_absolute(path: String) -> Bool Never! {
 }
 
 fn path_is_file(path: String) -[FS]> Bool Never! {
-    stat :: core.files.stat(path) ?? return false
-    stat.is_file
+    row :: core.files.__stat_at(-1, path, false) ?? return false
+    row[0] == 0
 }
 
 fn path_join(base: String, name: String) -> String Never! {
-    if name.len() == 0 -> return ~base
-    if path_is_absolute(name) || base.len() == 0 -> return ~name
+    if name.len() == 0 -> return base.copy()
+    if path_is_absolute(name) || base.len() == 0 -> return name.copy()
     last :: base.bytes()[base.bytes().len() - 1]
     if last == (U8{47}) || last == (U8{92}) -> return "{base}{name}"
     "{base}/{name}"
@@ -159,51 +200,51 @@ fn path_separator_for_platform(family: String) -> U8 Never! {
 
 
 
-pub fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int IOError! {
+fn call(spec: ProcessSpec) -[Exec, Time.Wait]> Int IOError! {
     receipt :: spec.run()
     receipt.code
 }
 
-pub fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn capture(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run()
 }
 
-pub fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
+fn check_call(spec: ProcessSpec) -[Exec, Time.Wait]> ProcessReceipt IOError! {
     spec.run_checked()
 }
 
-pub fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
+fn check_output(spec: ProcessSpec) -[Exec, Time.Wait]> String IOError! {
     receipt :: check_call(spec)
     receipt.output
 }
 
 
-pub fn combined_output(receipt: ProcessReceipt) -> String Never! {
+fn combined_output(receipt: ProcessReceipt) -> String Never! {
     if receipt.output.len() == 0 -> return receipt.errors
     if receipt.errors.len() == 0 -> return receipt.output
     "{receipt.output}\n{receipt.errors}"
 }
 
-pub fn env_get_or(name: String, fallback: String) -[Env]> String Never! {
+fn env_get_or(name: String, fallback: String) -[Env]> String Never! {
     core.sys.get(name) ?? return fallback
 }
 
-pub fn env_keys() -[Env]> [String] EnvError! { core.sys.vars() }
+fn env_keys() -[Env]> [String] EnvError! { core.sys.vars() }
 
-pub fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
+fn env_set(spec: ProcessSpec, key: String, value: String) -> ProcessSpec Never! {
     spec.env(key, value)
 }
 
-pub fn env_truthy(name: String) -[Env]> Bool Never! {
+fn env_truthy(name: String) -[Env]> Bool Never! {
     value :: core.sys.get(name) ?? return false
     lowered :: core.text.lower(value)
     lowered == "1" || lowered == "true" || lowered == "yes" || lowered == "on"
 }
 
-pub fn failed(receipt: ProcessReceipt) -> Bool Never! { !receipt.success }
+fn failed(receipt: ProcessReceipt) -> Bool Never! { !receipt.success }
 
 
-pub fn list2cmdline(argv: [String]) -> String Never! {
+fn list2cmdline(argv: [String]) -> String Never! {
     out := ""
     first := true
     loop item in argv {
@@ -214,27 +255,23 @@ pub fn list2cmdline(argv: [String]) -> String Never! {
     out
 }
 
-pub fn signal_number(signal: ProcessSignal) -> Int Never! {
+fn signal_number(signal: ProcessSignal) -> Int Never! {
     if signal == {
-        .Interrupt -> 2
-        .Terminate -> 15
-        .Hangup -> 1
-        .Child -> 17
-        .User1 -> 10
-        .User2 -> 12
-        else -> 0
+        .Int -> 2
+        .Term -> 15
+        .Hup -> 1
     }
 }
 
-pub fn stderr_lines(receipt: ProcessReceipt) -> [String] Never! {
+fn stderr_lines(receipt: ProcessReceipt) -> [String] Never! {
     split_lines(receipt.errors)
 }
 
-pub fn stdout_lines(receipt: ProcessReceipt) -> [String] Never! {
+fn stdout_lines(receipt: ProcessReceipt) -> [String] Never! {
     split_lines(receipt.output)
 }
 
-pub fn exited(receipt: ProcessReceipt) -> Bool Never! {
+fn exited(receipt: ProcessReceipt) -> Bool Never! {
     receipt.signal == None && !receipt.timed_out
 }
 fn contains_path_separator(value: String) -> Bool Never! {
@@ -334,7 +371,7 @@ fn quote_arg(value: String) -> String {
             backslashes = backslashes - 1
         }
     }
-    String.from_bytes(out) ?? ~value
+    String.from_bytes(out) ?? value.copy()
 }
 
 fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
@@ -347,3 +384,97 @@ fn slice_u8(raw: [U8], start: Int, end: Int) -> [U8] Never! {
     out
 }
 
+
+fn args_from_argv(values: [String]) -> [String] Never! {
+    if values.len() < 2 -> return [String]{}
+    values[1..<values.len()]
+}
+
+#Test("process argument projection drops argv[0]") {
+    assert(args_from_argv([String]{}) == [String]{})
+    assert(args_from_argv([String]{"jet"}) == [String]{})
+    assert(args_from_argv([String]{"tool", "", "a b"}) == [String]{"", "a b"})
+}
+
+// Temporary native-carrier layout. This is not a second public builder API:
+// the canonical ProcessSpec stays opaque and its existing methods stay intact.
+struct ProcessFields {
+    argv: [String]
+    cwd: String?
+    env_clear: Bool
+    env_names: [String]
+    env_values: [String]
+    env_remove: [String]
+    stdin: ProcessStreamMode?
+    stdout: ProcessStreamMode
+    stderr: ProcessStreamMode
+    timeout_ms: Int?
+    output_limit: Int?
+    cpu_time_limit_ms: Int?
+    memory_limit_bytes: Int?
+    open_file_limit: Int?
+    detached: Bool
+    terminal: TerminalPolicy?
+    policy_wire: String?
+}
+
+fn default_fields(argv: [String]) -> ProcessFields Never! {
+    ProcessFields{
+        argv: argv, cwd: None, env_clear: false,
+        env_names: [String]{}, env_values: [String]{}, env_remove: [String]{},
+        stdin: None, stdout: .Capture, stderr: .Capture,
+        timeout_ms: None, output_limit: Val(67108864),
+        cpu_time_limit_ms: None, memory_limit_bytes: None, open_file_limit: None,
+        detached: false, terminal: None, policy_wire: None,
+    }
+}
+
+#Test("command defaults are Jet-owned and keep empty argv deferred to spawn") {
+    fields :: default_fields([String]{})
+    assert(fields.argv.len() == 0)
+    assert(fields.cwd == None && !fields.env_clear)
+    assert(fields.env_names.len() == 0 && fields.env_values.len() == 0 && fields.env_remove.len() == 0)
+    assert(fields.stdin == None && fields.stdout == .Capture && fields.stderr == .Capture)
+    assert(fields.timeout_ms == None)
+    assert_eq(fields.output_limit, Val(67108864))
+    assert(fields.cpu_time_limit_ms == None && fields.memory_limit_bytes == None && fields.open_file_limit == None)
+    assert(!fields.detached && fields.terminal == None && fields.policy_wire == None)
+}
+
+// Process stdout/stderr readers wait on the child execution boundary, not FS.
+fn __stdout_next_line(stream: ProcessStdoutStream) -[Exec, Time.Wait]> String? IOError! {
+    pipe_line(core.process.__stdout_line_bytes(stream))
+}
+
+fn __stderr_next_line(stream: ProcessStderrStream) -[Exec, Time.Wait]> String? IOError! {
+    pipe_line(core.process.__stderr_line_bytes(stream))
+}
+
+fn pipe_line(^input: [U8]) -> String? IOError! {
+    bytes := ^input
+    if bytes.len() == 0 -> return Ok(None)
+    trim_pipe_line(&bytes)
+    text :: String.from_bytes(^bytes) ?? return Err(IOError.Other(IOContext{
+        operation: .Read, resource: Val("process output"), os_code: None,
+        cause: Val("stream did not contain valid UTF-8"),
+    }))
+    Ok(Val(text))
+}
+
+fn trim_pipe_line(bytes: &[U8]) Never! {
+    if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{10}) {
+        _ :: &bytes.pop()
+        if bytes.len() > 0 && bytes[bytes.len() - 1] == (U8{13}) -> _ :: &bytes.pop()
+    }
+}
+
+#Test("pipe next_line preserves final bare CR and removes only one CR before LF") {
+    final := [U8]{120, 13}
+    trim_pipe_line(&final)
+    assert_eq(final, [U8]{120, 13})
+    crlf := [U8]{120, 13, 13, 10}
+    trim_pipe_line(&crlf)
+    assert_eq(crlf, [U8]{120, 13})
+    assert_eq(pipe_line([U8]{10}) ?? panic("empty line"), Val(""))
+    assert_eq(pipe_line([U8]{}) ?? panic("EOF"), None)
+}

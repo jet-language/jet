@@ -1,0 +1,15 @@
+# Port of tests/cli_parts/bindings.rs:897-954; sources copied verbatim.
+# PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
+# PENDING-GRAMMAR: is-file, file negative substring.
+fixture: fixtures/tcl_session
+step: jet inspect bind tcl {work}/eda.tcl --pkg eda
+exit: 0
+file: .jet/bindings/tcl/libjet_tcl_eda.a is-file
+file: .jet/bindings/tcl/eda.provenance is-file
+file: .jet/bindings/tcl/eda.jet ~ "String !TclError -[FFI.Tcl]>" # original predicate
+file: .jet/bindings/tcl/eda.jet ~ "pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }" # original predicate
+file: .jet/bindings/tcl/eda.jet !~ "=>" # original predicate
+step: jet run main.jet
+exit: 0
+stdout: = tcl_bind_runs_one_shot_and_persistent_typed_sessions.out
+stderr: !~ "foreign stack secret" # original predicate

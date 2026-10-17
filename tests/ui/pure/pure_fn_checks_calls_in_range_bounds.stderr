@@ -1,0 +1,10 @@
+Error [E3401]: `bad` calls the impure function `read_bound`
+  --> tests/ui/pure/pure_fn_checks_calls_in_range_bounds.jet:7:15
+    |
+  7 |     return 0..read_bound()
+    |               ^^^^^^^^^^
+ Why: `read_bound` is impure, but `bad` declares `-[]>`
+ Fix: Remove the call from `bad`, or drop the `-[]>` bound from `bad` so its effects are inferred
+ Denial: pure
+ Call chain: bad → read_bound
+More: jet-lang.dev/e/E3401

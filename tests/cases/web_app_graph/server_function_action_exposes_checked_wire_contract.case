@@ -1,0 +1,18 @@
+# Port of tests/web_app_graph.rs:50-74; runtime PENDING-SAME-HEAD.
+# Exact serializer crates/jet-foundation/src/App.rs474-795 (routes485-520, actions619-650, queries711-717, stores727, mounts735-750, policy769-791).
+# Wrapper $.web_app Source/CmdDevTools.rs4177-4184.
+# KNOWN-FAILING #4830: Jet Compiler/JetCli/Source/Cli/Front.jet829 returns not_ported.
+step: jet explain --web-graph {root}/Examples/features/web/web_app.jet --json
+exit: 0
+json: stdout doc $.web_app.actions[?name="save"] #>= 1
+json: stdout doc $.web_app.actions[?name="save"][0].input ~ "" # original typed String payload; must be a present string
+json: stdout doc $.web_app.actions[?name="save"][0].input != ""
+json: stdout doc $.web_app.actions[?name="save"][0].output ~ "" # original typed String payload; must be a present string
+json: stdout doc $.web_app.actions[?name="save"][0].output != ""
+json: stdout doc $.web_app.actions[?name="save"][0].error ~ "" # original typed String payload; must be a present string
+json: stdout doc $.web_app.actions[?name="save"][0].error != ""
+json: stdout doc $.web_app.actions[?name="save"][0].endpoint = "/actions/save"
+json: stdout doc $.web_app.actions[?name="save"][0].method = "POST"
+json: stdout doc $.web_app.actions[?name="save"][0].csrf = "same-origin"
+json: stdout doc $.web_app.actions[?name="save"][0].middleware = ["context","auth","csp","logging","observability"]
+

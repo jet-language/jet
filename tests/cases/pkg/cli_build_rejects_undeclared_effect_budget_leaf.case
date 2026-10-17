@@ -1,0 +1,10 @@
+# Port of tests/pkg.rs:2362-2389; source and expanded min_manifest verbatim.
+# PENDING-GRAMMAR(batch-four): mkdir.
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+copy: {root}/tests/cases/pkg/fixtures/manifests/effect-typo.txt package.jet
+copy: {root}/tests/cases/pkg/fixtures/sources/empty.txt run.jet
+step: jet build run.jet
+exit: nonzero
+stderr: ~ "E0750" # original predicate
+stderr: ~ "FS.Read" # original predicate

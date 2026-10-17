@@ -2,6 +2,7 @@
 // Each input row is [kind, byte_start, byte_end, first_char_is_uppercase].
 // Each output row is [event, raw_token_index, byte_position].
 use jet_foundation.[
+    Diagnostic,
     Span,
     diagnostic_from_registry,
 ]
@@ -168,8 +169,10 @@ K_HASH :: 106
 K_DOLLAR :: 107
 
 
+// Facts hold four ints per token, so `index * 4 < facts.len()` is the bound
+// check without a division on every call.
 fn kind_at(facts: [Int], index: Int) -> Int Never! {
-    if index < 0 || index >= facts.len() /% 4 -> return 0
+    if index < 0 || index * 4 >= facts.len() -> return 0
     return facts[index * 4]
 }
 
@@ -258,7 +261,7 @@ fn scope_member_starts_at(facts: [Int], index: Int) -> Bool Never! {
     if kind_at(facts, cursor) == K_LBRACE -> return true
     if kind_at(facts, cursor) != K_LPAREN -> return false
     depth := 0
-    loop cursor < facts.len() /% 4 {
+    loop cursor * 4 < facts.len() {
         kind :: kind_at(facts, cursor)
         if kind == K_LPAREN -> depth += 1
         if kind == K_RPAREN {
@@ -294,7 +297,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
     cursor := skip_comment_tokens(facts, index + 1)
     if kind_at(facts, cursor) == K_LBRACE {
         depth := 0
-        loop cursor < facts.len() /% 4 {
+        loop cursor * 4 < facts.len() {
             kind :: kind_at(facts, cursor)
             if kind == K_LBRACE -> depth += 1
             if kind == K_RBRACE {
@@ -328,7 +331,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
         cursor = skip_comment_tokens(facts, cursor)
         if kind_at(facts, cursor) == K_LPAREN {
             depth := 0
-            loop cursor < facts.len() /% 4 {
+            loop cursor * 4 < facts.len() {
                 kind :: kind_at(facts, cursor)
                 if kind == K_LPAREN -> depth += 1
                 if kind == K_RPAREN {
@@ -365,7 +368,7 @@ fn dispatch_arm_starts_at(source: [U8], facts: [Int], index: Int) -> Bool Never!
     if is_boolean_connector {
         guard_start :: facts[cursor * 4 + 1]
         depth := 0
-        loop cursor < facts.len() /% 4 {
+        loop cursor * 4 < facts.len() {
             kind :: kind_at(facts, cursor)
             is_open_delimiter :: if kind == {
                 K_LPAREN -> true
@@ -412,11 +415,11 @@ fn place_mark_starts_at(facts: [Int], index: Int) -> Bool Never! {
     return facts[index * 4 + 2] == facts[(index + 1) * 4 + 1]
 }
 
-pub fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
+fn terminator_events(source: [U8], facts: [Int]) -> [Int] Never! {
     events := [Int]{}
     last_code := -1
     index := 0
-    loop index < facts.len() /% 4 {
+    loop index * 4 < facts.len() {
         kind :: kind_at(facts, index)
         is_comment :: if kind == {
             K_LINE_COMMENT -> true
@@ -492,23 +495,28 @@ fn split_spelling(kind: Int) -> String Never! {
     }
 }
 
-fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
+fn lexed_with_terminators(facts: [Int], input: ^LexedTokens, events: [Int]) -> LexedTokens {
+    // A local owner: its fields move out and are refilled in place.
+    lexed := ^input
     tokens := [Token]{}
-    diagnostics := lexed.diagnostics
+    diagnostics := ^lexed.diagnostics
+    lexed.diagnostics = [Diagnostic]{}
+    // The payload tokens, last first: each one is moved over (popped), never
+    // copied, in the same order the index walk visited them.
+    remaining := ^lexed.tokens
+    lexed.tokens = [Token]{}
+    &remaining.reverse()
     event_index := 0
-    token_index := 0
     raw_index := 0
-    loop raw_index < facts.len() /% 4 {
-        loop event_index < events.len() /% 3 && events[event_index * 3 + 1] == raw_index {
+    fact_count :: facts.len() /% 4
+    event_count :: events.len() /% 3
+    loop raw_index < fact_count {
+        loop event_index < event_count && events[event_index * 3 + 1] == raw_index {
             event :: events[event_index * 3]
             at :: events[event_index * 3 + 2]
             if {
                 event == 1 -> {
-                    &tokens.push(Token{
-                        kind: K_SEMI,
-                        span: Span{start: at, end: at},
-                        payload: empty_payload(""),
-                    })
+                    &tokens.push(token_synthetic(K_SEMI, Span{start: at, end: at}))
                 }
                 else -> {
                     kind :: kind_at(facts, raw_index)
@@ -529,38 +537,40 @@ fn lexed_with_terminators(facts: [Int], lexed: ^Lexed, events: [Int]) -> Lexed {
         kind :: kind_at(facts, raw_index)
         start :: facts[raw_index * 4 + 1]
         end :: facts[raw_index * 4 + 2]
-        if token_index < lexed.tokens.len() {
-            token :: lexed.tokens[token_index]
+        if remaining.len() > 0 {
+            last :: remaining.len() - 1
             if {
-                token.kind == kind && token.span.start == start && token.span.end == end -> {
-                    &tokens.push(token)
-                    token_index += 1
+                remaining[last].kind == kind && remaining[last].span.start == start && remaining[last].span.end == end -> {
+                    moved :: &remaining.pop() ?? panic("a payload token was checked present")
+                    &tokens.push(moved)
                 }
                 else -> {
-                    if token.span.start <= start -> token_index += 1
+                    if remaining[last].span.start <= start -> _ := &remaining.pop()
                 }
             }
         }
         raw_index += 1
     }
-    Lexed{tokens: tokens, diagnostics: diagnostics}
+    LexedTokens{tokens: tokens, diagnostics: diagnostics}
 }
 
 fn lex_with_terminators(source: [U8], config_surface: Bool, allow_reserved_identifiers: Bool) -> Lexed {
+    tables := token_tables()
     facts :: raw_token_facts(source, config_surface)
-    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0)
+    raw :: lex_payload_from_facts(source, facts, config_surface, allow_reserved_identifiers, 0, &tables)
     events :: terminator_events(source, facts)
-    lexed_with_terminators(facts, ^raw, events)
+    lexed :: lexed_with_terminators(facts, ^raw, events)
+    Lexed{tokens: lexed.tokens, tables: tables, diagnostics: lexed.diagnostics}
 }
 
-pub fn lex(source: [U8]) -> Lexed {
+fn lex(source: [U8]) -> Lexed {
     lex_with_terminators(source, false, false)
 }
 
-pub fn lex_config(source: [U8]) -> Lexed {
+fn lex_config(source: [U8]) -> Lexed {
     lex_with_terminators(source, true, false)
 }
 
-pub fn lex_generated(source: [U8]) -> Lexed {
+fn lex_generated(source: [U8]) -> Lexed {
     lex_with_terminators(source, false, true)
 }

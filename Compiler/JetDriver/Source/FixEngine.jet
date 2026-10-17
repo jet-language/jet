@@ -1,0 +1,71 @@
+// Adapted from origin/port/compiler's FixEngine.jet (crates/jet-driver FixEngine).
+// Shared CLI/LSP edit applier: original UTF-8 spans, reject overlap before clamp,
+// stable same-point insertions, and one forward materialization.
+use jet_foundation.[Span, TextEdit]
+
+#Error
+enum JetDriverApplyError {
+    Overlap(first: Span, second: Span)
+}
+
+fn jet_driver_apply_edits(src: String, edits: [TextEdit]) -> String JetDriverApplyError! {
+    if edits.len() == 0 -> return Ok(src)
+    order := [Int]{}
+    loop index in 0..<edits.len() -> &order.push(index)
+    width := 1
+    loop width < order.len() {
+        merged := [Int]{}
+        start := 0
+        loop start < order.len() {
+            middle :: if start + width < order.len() -> start + width else -> order.len()
+            end :: if start + width * 2 < order.len() -> start + width * 2 else -> order.len()
+            left := start
+            right := middle
+            loop left < middle || right < end {
+                take_left := right >= end
+                if !take_left && left < middle {
+                    a :: edits[order[left]].span
+                    b :: edits[order[right]].span
+                    take_left = a.start < b.start || (a.start == b.start && a.end <= b.end)
+                }
+                if take_left {
+                    &merged.push(order[left])
+                    left += 1
+                } else {
+                    &merged.push(order[right])
+                    right += 1
+                }
+            }
+            start = end
+        }
+        order = merged
+        width *= 2
+    }
+    loop position in 1..<order.len() {
+        first :: edits[order[position - 1]].span
+        second :: edits[order[position]].span
+        if second.start < first.end {
+            return Err(JetDriverApplyError.Overlap{first: first, second: second})
+        }
+    }
+    bytes :: src.bytes()
+    out := [U8]{}
+    cursor := 0
+    loop index in order {
+        edit :: edits[index]
+        start :: if edit.span.start < bytes.len() -> edit.span.start else -> bytes.len()
+        bounded_end :: if edit.span.end < bytes.len() -> edit.span.end else -> bytes.len()
+        end :: if bounded_end > start -> bounded_end else -> start
+        if start < bytes.len() && (Int.from_u8(bytes[start]).bit_and(192)) == 128 {
+            panic("edit spans must be UTF-8 character boundaries")
+        }
+        if end < bytes.len() && (Int.from_u8(bytes[end]).bit_and(192)) == 128 {
+            panic("edit spans must be UTF-8 character boundaries")
+        }
+        loop position in cursor..<start -> &out.push(bytes[position])
+        loop byte in edit.new_text.bytes() -> &out.push(byte)
+        cursor = end
+    }
+    loop position in cursor..<bytes.len() -> &out.push(bytes[position])
+    Ok(String.from_bytes(out) ?? panic("edit spans must be UTF-8 character boundaries"))
+}

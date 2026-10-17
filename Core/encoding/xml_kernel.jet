@@ -1,0 +1,184 @@
+// Public XML adapters share the private engine's validation and lexical policy.
+use core.encoding.[Dyn]
+use core.encoding.xml.[XMLError, XMLReason, XMLParseOptions, XMLEntityPolicy, XMLEncoding, XMLLexicalPolicy, XMLCanonical, XMLCanonicalMode]
+use __core_encoding_xml_engine as xml
+use __core_encoding_stream as stream
+
+struct ErrorLocation { line: Int?, column: Int? }
+
+fn checked(value: Dyn) -> Dyn xml.XMLFault! {
+    validate_tree(value) ?? return Err(err)
+    xml.clean(value)
+}
+
+fn validate_tree(value: Dyn) xml.XMLFault! {
+    if value == {
+        .Null | .Bool(_) | .Int(_) | .Text(_) -> {}
+        .Array(values) -> { loop item in values -> validate_tree(item) ?? return Err(err) }
+        .Object(_) -> { loop entry in stream.object_entries(value) -> validate_tree(entry.value) ?? return Err(err) }
+        .Float(_) | .Bytes(_) -> {
+            return Err(shape_error("XML tree cannot contain non-integer numbers or Bytes values"))
+        }
+        else -> return Err(shape_error("internal JSON carrier escaped typed decode"))
+    }
+}
+
+fn shape_error(reason: String) -> xml.XMLFault Never! {
+    xml.XMLFault{kind: .Shape, offset: 0, line: None, column: None, path: "", reason: reason}
+}
+
+fn parse_document(text: String) -> Dyn xml.XMLFault! {
+    parsed :: xml.parse_document(text) ?? return Err(err)
+    xml.clean(parsed)
+}
+
+fn parse_document_with(text: String, options: xml.ParseOptions) -> Dyn xml.XMLFault! {
+    parsed :: xml.parse_document_with(text, options) ?? return Err(err)
+    xml.clean(parsed)
+}
+
+fn parse_document_bytes_with(bytes: [U8], options: xml.ParseOptions) -> Dyn xml.XMLFault! {
+    parsed :: xml.parse_document_bytes_with(bytes, options) ?? return Err(err)
+    xml.clean(parsed)
+}
+
+fn render_document(value: Dyn) -> String xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.render_document(tree)
+}
+
+fn render_document_bytes(value: Dyn, encoding: xml.RenderEncoding, lexical: xml.LexicalPolicy) -> [U8] xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.render_document_bytes(tree, encoding, lexical)
+}
+
+fn canonical_document(value: Dyn, options: xml.CanonicalOptions) -> String xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.canonical_document(tree, options)
+}
+
+fn document_root(value: Dyn) -> Dyn xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.document_root(tree)
+}
+
+fn expanded_name_parts(value: Dyn) -> (raw: String, prefix: String?, local: String, namespace_uri: String?) xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.expanded_name_parts(tree)
+}
+
+fn lookup_attribute(value: Dyn, name: String) -> String? xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.lookup_attribute(tree, name)
+}
+
+fn element_content(value: Dyn) -> [Dyn] xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.element_content(tree)
+}
+
+fn project_document_for_decode(value: Dyn) -> Dyn xml.XMLFault! {
+    tree :: checked(value) ?? return Err(err)
+    xml.project_document_for_decode(tree)
+}
+
+fn public_error(error: xml.XMLFault) -> XMLError Never! {
+    kind :: if error.kind == {
+        .InvalidEncoding -> XMLReason.InvalidEncoding
+        .Malformed -> XMLReason.Malformed
+        .MismatchedTag -> XMLReason.MismatchedTag
+        .InvalidName -> XMLReason.InvalidName
+        .Namespace -> XMLReason.Namespace
+        .DuplicateAttribute -> XMLReason.DuplicateAttribute
+        .Entity -> XMLReason.Entity
+        .EntityCycle -> XMLReason.EntityCycle
+        .Limit -> XMLReason.Limit
+        .Canonicalization -> XMLReason.Canonicalization
+        .Shape -> XMLReason.Shape
+        .Unsupported -> XMLReason.Unsupported
+    }
+    XMLError{kind: kind, byte_offset: Val(error.offset), line: error.line,
+        column: error.column, path: error.path, reason: error.reason}
+}
+
+fn parse_options(options: XMLParseOptions) -> xml.ParseOptions Never! {
+    entities :: if options.entities == {
+        .Preserve -> xml.EntityPolicy.Preserve
+        .Reject -> xml.EntityPolicy.Reject
+        .Resolve(values) -> xml.EntityPolicy.Resolve(values.copy())
+    }
+    limits :: options.limits
+    xml.ParseOptions{entities: entities, limits: xml.Limits{
+        max_depth: limits.max_depth, max_nodes: limits.max_nodes,
+        max_attributes_per_element: limits.max_attributes_per_element,
+        max_name_bytes: limits.max_name_bytes, max_text_bytes: limits.max_text_bytes,
+        max_entity_declarations: limits.max_entity_declarations,
+        max_entity_depth: limits.max_entity_depth,
+        max_entity_replacement_bytes: limits.max_entity_replacement_bytes}}
+}
+
+fn render_encoding(value: XMLEncoding) -> xml.RenderEncoding Never! {
+    if value == {
+        .UTF8 -> xml.RenderEncoding.UTF8
+        .UTF8BOM -> xml.RenderEncoding.UTF8Bom
+        .UTF16LE -> xml.RenderEncoding.UTF16Le
+        .UTF16BE -> xml.RenderEncoding.UTF16Be
+    }
+}
+
+fn lexical_policy(value: XMLLexicalPolicy) -> xml.LexicalPolicy Never! {
+    if value == {
+        .PreserveValid -> xml.LexicalPolicy.PreserveValid
+        .Deterministic -> xml.LexicalPolicy.Deterministic
+    }
+}
+
+fn canonical_options(value: XMLCanonical) -> xml.CanonicalOptions Never! {
+    mode :: if value.mode == {
+        .Inclusive11 -> xml.CanonicalMode.Inclusive11
+        .Exclusive10 -> xml.CanonicalMode.Exclusive10
+    }
+    xml.CanonicalOptions{mode: mode, comments: value.comments, inclusive_prefixes: value.inclusive_prefixes.copy()}
+}
+
+fn field_error(error: XMLError) -> [FieldError] Never! {
+    location := " at byte {error.byte_offset ?? 0}"
+    if error.line == .Val(line) {
+        if error.column == .Val(column) -> location = "{location} (line {line}, column {column})"
+        else { location = "{location} (line {line})" }
+    } else if error.column == .Val(column) {
+        location = "{location} (column {column})"
+    }
+    path := error.path
+    if path == "$" -> path = ""
+    else if path.starts_with("$.") -> path = path.slice(2, path.len())
+    else if path.starts_with("$") -> path = path.slice(1, path.len())
+    kind :: reason_name(error.kind)
+    [FieldError]{FieldError{path: path, reason: "XML {kind}{location}: {error.reason}"}}
+}
+
+fn reason_name(value: XMLReason) -> String Never! {
+    if value == {
+        .InvalidEncoding -> "InvalidEncoding"
+        .Malformed -> "Malformed"
+        .MismatchedTag -> "MismatchedTag"
+        .InvalidName -> "InvalidName"
+        .Namespace -> "Namespace"
+        .DuplicateAttribute -> "DuplicateAttribute"
+        .Entity -> "Entity"
+        .EntityCycle -> "EntityCycle"
+        .Limit -> "Limit"
+        .Canonicalization -> "Canonicalization"
+        .Shape -> "Shape"
+        .Unsupported -> "Unsupported"
+    }
+}
+
+#Test("XML validation rejects public floating point and byte tree carriers") {
+    loop value in ([Dyn]{Dyn.Float(1.5), Dyn.Bytes([U8]{1})}) {
+        if validate_tree(value) == {
+            .Err(error) -> assert(error.kind == xml.Reason.Shape)
+            .Ok(_) -> panic("non-XML public carrier was accepted")
+        }
+    }
+}

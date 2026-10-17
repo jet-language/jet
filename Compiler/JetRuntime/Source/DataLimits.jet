@@ -1,0 +1,115 @@
+// Native hand carriers, never Rust layouts. DataABI.jet owns the offsets.
+// EncodingTypes.rs:4-11 and CommonTypes.rs:797-803 derive Clone/PartialEq.
+// CAbiRoutes.rs:8838-8869,9470-9507: ctor Int args are borrowed and checked
+// by CAbi.native; Int getters return fresh owners. Data's encoding is consumed.
+fn data_limits_word(address: I64) -> I64 {
+    #Unsafe("address borrows an initialized word in a live native limits carrier") { return os_load_i64(address) }
+}
+fn data_limits_store(address: I64, value: I64) {
+    #Unsafe("address owns a writable word in a native limits carrier or getter out slot") { os_store_i64(address, value) }
+}
+#Export(c) fn jet_rt_handle_clone_encoding_limits(value: I64) -> I64 {
+    result :: jet_rt_alloc(ENCODING_LIMITS_BYTES, I64{8})
+    coll_copy(value, result, ENCODING_LIMITS_BYTES)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_encoding_limits(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, ENCODING_LIMITS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_encoding_limits(left: I64, right: I64) -> Bool {
+    if data_limits_word(left + ENCODING_LIMITS_BUFFER_BYTES) != data_limits_word(right + ENCODING_LIMITS_BUFFER_BYTES) -> return false
+    if data_limits_word(left + ENCODING_LIMITS_MAX_DEPTH) != data_limits_word(right + ENCODING_LIMITS_MAX_DEPTH) -> return false
+    if data_limits_word(left + ENCODING_LIMITS_MAX_ITEM_BYTES) != data_limits_word(right + ENCODING_LIMITS_MAX_ITEM_BYTES) -> return false
+    present :: data_limits_word(left + ENCODING_LIMITS_MAX_TOTAL_PRESENT)
+    if present != data_limits_word(right + ENCODING_LIMITS_MAX_TOTAL_PRESENT) -> return false
+    if (present != I64{0} && data_limits_word(left + ENCODING_LIMITS_MAX_TOTAL_BYTES) != data_limits_word(right + ENCODING_LIMITS_MAX_TOTAL_BYTES)) -> return false
+    if data_limits_word(left + ENCODING_LIMITS_MAX_EXPANSION_DEPTH) != data_limits_word(right + ENCODING_LIMITS_MAX_EXPANSION_DEPTH) -> return false
+    data_limits_word(left + ENCODING_LIMITS_MAX_EXPANSION_BYTES) == data_limits_word(right + ENCODING_LIMITS_MAX_EXPANSION_BYTES)
+}
+#Export(c) fn jet_rt_record_new_encoding_limits(buffer: I64, depth: I64, item: I64, total: I64, expansion_depth: I64, expansion_bytes: I64) -> I64 {
+    // Native conversion is borrowed and uses the shared exact CAbi stop site.
+    raw_buffer :: jet_int_owned_to_i64(buffer)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    raw_depth :: jet_int_owned_to_i64(depth)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    raw_item :: jet_int_owned_to_i64(item)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    raw_total :: if (total == I64{0}) -> I64{0} else -> jet_int_owned_to_i64(data_limits_word(total))
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    raw_expansion_depth :: jet_int_owned_to_i64(expansion_depth)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    raw_expansion_bytes :: jet_int_owned_to_i64(expansion_bytes)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(ENCODING_LIMITS_BYTES, I64{8})
+    data_limits_store(result + ENCODING_LIMITS_BUFFER_BYTES, raw_buffer)
+    data_limits_store(result + ENCODING_LIMITS_MAX_DEPTH, raw_depth)
+    data_limits_store(result + ENCODING_LIMITS_MAX_ITEM_BYTES, raw_item)
+    data_limits_store(result + ENCODING_LIMITS_MAX_TOTAL_PRESENT, if (total == I64{0}) -> I64{0} else -> I64{1})
+    data_limits_store(result + ENCODING_LIMITS_MAX_TOTAL_BYTES, raw_total)
+    data_limits_store(result + ENCODING_LIMITS_MAX_EXPANSION_DEPTH, raw_expansion_depth)
+    data_limits_store(result + ENCODING_LIMITS_MAX_EXPANSION_BYTES, raw_expansion_bytes)
+    result
+}
+#Export(c) fn jet_rt_record_get_encoding_limits_buffer_bytes(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + ENCODING_LIMITS_BUFFER_BYTES)) }
+#Export(c) fn jet_rt_record_get_encoding_limits_max_depth(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + ENCODING_LIMITS_MAX_DEPTH)) }
+#Export(c) fn jet_rt_record_get_encoding_limits_max_item_bytes(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + ENCODING_LIMITS_MAX_ITEM_BYTES)) }
+#Export(c) fn jet_rt_record_get_encoding_limits_max_total_bytes(value: I64, some: I64) -> I64 {
+    if (data_limits_word(value + ENCODING_LIMITS_MAX_TOTAL_PRESENT) == I64{0}) -> return I64{0}
+    data_limits_store(some, jet_int_owned_from_i64(data_limits_word(value + ENCODING_LIMITS_MAX_TOTAL_BYTES)))
+    I64{1}
+}
+#Export(c) fn jet_rt_record_get_encoding_limits_max_expansion_depth(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + ENCODING_LIMITS_MAX_EXPANSION_DEPTH)) }
+#Export(c) fn jet_rt_record_get_encoding_limits_max_expansion_bytes(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + ENCODING_LIMITS_MAX_EXPANSION_BYTES)) }
+#Export(c) fn jet_rt_handle_clone_data_limits(value: I64) -> I64 {
+    encoding :: jet_rt_handle_clone_encoding_limits(data_limits_word(value + DATA_LIMITS_ENCODING))
+    result :: jet_rt_alloc(DATA_LIMITS_BYTES, I64{8})
+    coll_copy(value, result, DATA_LIMITS_BYTES)
+    data_limits_store(result + DATA_LIMITS_ENCODING, encoding)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_data_limits(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_handle_drop_encoding_limits(data_limits_word(value + DATA_LIMITS_ENCODING))
+    jet_rt_free(value, DATA_LIMITS_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_data_limits(left: I64, right: I64) -> Bool {
+    if !jet_rt_handle_eq_encoding_limits(data_limits_word(left + DATA_LIMITS_ENCODING), data_limits_word(right + DATA_LIMITS_ENCODING)) -> return false
+    if data_limits_word(left + DATA_LIMITS_MAX_GROUPS) != data_limits_word(right + DATA_LIMITS_MAX_GROUPS) -> return false
+    if data_limits_word(left + DATA_LIMITS_MAX_SORT_ROWS) != data_limits_word(right + DATA_LIMITS_MAX_SORT_ROWS) -> return false
+    if data_limits_word(left + DATA_LIMITS_MAX_JOIN_ROWS) != data_limits_word(right + DATA_LIMITS_MAX_JOIN_ROWS) -> return false
+    data_limits_word(left + DATA_LIMITS_MAX_OUTPUT_ROWS) == data_limits_word(right + DATA_LIMITS_MAX_OUTPUT_ROWS)
+}
+#Export(c) fn jet_rt_record_new_data_limits(encoding: I64, groups: I64, sort_rows: I64, join_rows: I64, output_rows: I64) -> I64 {
+    raw_groups :: jet_int_owned_to_i64(groups)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_encoding_limits(encoding)
+        return I64{0}
+    }
+    raw_sort :: jet_int_owned_to_i64(sort_rows)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_encoding_limits(encoding)
+        return I64{0}
+    }
+    raw_join :: jet_int_owned_to_i64(join_rows)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_encoding_limits(encoding)
+        return I64{0}
+    }
+    raw_output :: jet_int_owned_to_i64(output_rows)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_encoding_limits(encoding)
+        return I64{0}
+    }
+    result :: jet_rt_alloc(DATA_LIMITS_BYTES, I64{8})
+    data_limits_store(result + DATA_LIMITS_ENCODING, encoding)
+    data_limits_store(result + DATA_LIMITS_MAX_GROUPS, raw_groups)
+    data_limits_store(result + DATA_LIMITS_MAX_SORT_ROWS, raw_sort)
+    data_limits_store(result + DATA_LIMITS_MAX_JOIN_ROWS, raw_join)
+    data_limits_store(result + DATA_LIMITS_MAX_OUTPUT_ROWS, raw_output)
+    result
+}
+#Export(c) fn jet_rt_record_get_data_limits_encoding(value: I64) -> I64 { jet_rt_handle_clone_encoding_limits(data_limits_word(value + DATA_LIMITS_ENCODING)) }
+#Export(c) fn jet_rt_record_get_data_limits_max_groups(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + DATA_LIMITS_MAX_GROUPS)) }
+#Export(c) fn jet_rt_record_get_data_limits_max_sort_rows(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + DATA_LIMITS_MAX_SORT_ROWS)) }
+#Export(c) fn jet_rt_record_get_data_limits_max_join_rows(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + DATA_LIMITS_MAX_JOIN_ROWS)) }
+#Export(c) fn jet_rt_record_get_data_limits_max_output_rows(value: I64) -> I64 { jet_int_owned_from_i64(data_limits_word(value + DATA_LIMITS_MAX_OUTPUT_ROWS)) }

@@ -40,7 +40,6 @@ pub fn canonical_program(prog: &Program) -> Vec<u8> {
         &prog.script_body,
         &prog.fenced_statements,
         &prog.web_target_ceiling,
-        &prog.pub_file,
         &prog.no_prelude,
         &prog.default_target,
         &prog.html_path,
@@ -70,7 +69,6 @@ fn canonical_simplify_program(prog: &Program) -> Vec<u8> {
         block_spans: prog.block_spans.clone(),
         fenced_statements: prog.fenced_statements.clone(),
         web_target_ceiling: prog.web_target_ceiling,
-        pub_file: prog.pub_file,
         no_prelude: prog.no_prelude,
         default_target: prog.default_target.clone(),
         html_path: prog.html_path.clone(),
@@ -683,6 +681,8 @@ fn apply_source_edits(src: &str, edits: &[TextEdit]) -> Option<String> {
         if edit.span.end > src.len()
             || edit.span.start > edit.span.end
             || edit.span.end > replaced_start
+            || !src.is_char_boundary(edit.span.start)
+            || !src.is_char_boundary(edit.span.end)
         {
             return None;
         }
@@ -925,7 +925,6 @@ fn format_program_with_tokens(
         indent: 0,
         pending_blank: false,
         trailing_comment_limit: usize::MAX,
-        pub_file: prog.pub_file,
         items: &prog.items,
         policy_declarations: &prog.policy_declarations,
         fenced_statements: &prog.fenced_statements,
@@ -942,10 +941,9 @@ fn format_program_with_tokens(
         .collect::<Vec<_>>();
     let has_ordered_file_rules = !ordered_file_rules.is_empty();
     let ordered_file_rules_precede_imports = ordered_file_rules.iter().any(|marker| {
-        marker.name == Syntax::MARKER_PUB_FILE || marker.name == Syntax::MARKER_NO_PRELUDE
+        marker.name == Syntax::MARKER_NO_PRELUDE
     });
-    let file_rule_count = usize::from(prog.pub_file)
-        + usize::from(prog.no_prelude)
+    let file_rule_count = usize::from(prog.no_prelude)
         + usize::from(prog.default_target.as_deref() == Some(crate::Syntax::BUILD_TARGET_WEB))
         + usize::from(prog.web_target_ceiling.is_some())
         + usize::from(prog.html_path.is_some());
@@ -963,10 +961,6 @@ fn format_program_with_tokens(
             }
             rule_index += 1;
         };
-        if prog.pub_file {
-            write_separator(&mut f);
-            f.write(Syntax::MARKER_PUB_FILE);
-        }
         if prog.no_prelude {
             write_separator(&mut f);
             f.write(Syntax::MARKER_NO_PRELUDE);
@@ -995,18 +989,6 @@ fn format_program_with_tokens(
         f.write("]");
         f.newline();
         first = false;
-    }
-    // D-VISDEFAULT2: `#PubFile` must precede any `priv`-qualified import in
-    // the rendered output — imports are formatted relative to `f.pub_file`
-    // (emitting a `priv` prefix when the file is public-by-default), so the
-    // literal `#PubFile` marker has to appear *before* the imports loop, not
-    // after it. Emitting it post-imports produced output that failed to
-    // reparse (`priv use …` with no preceding `#PubFile`) — a real fmt
-    // idempotence bug, not just a reordering of independent items.
-    if prog.pub_file && !grouped_file_rules && !has_ordered_file_rules {
-        first = false;
-        f.write(&format!("#{}", Syntax::MARKER_PUB_FILE));
-        f.newline();
     }
     // D-PRELUDEX1=A: `#NoPrelude` is a file-level directive; emit before imports
     // so fmt round-trips the opt-out at the top of the file.
@@ -1196,8 +1178,6 @@ struct Fmt<'a> {
     /// nested construct. Prevents an inner statement from claiming a comment
     /// that trails its enclosing expression on the same line.
     trailing_comment_limit: usize,
-    /// D-VISDEFAULT2=A: file uses `#PubFile` public-by-default visibility.
-    pub_file: bool,
     items: &'a [Item],
     policy_declarations: &'a [crate::Policy::PolicyDeclaration],
     /// D-EACH1=C authored forms corresponding to expanded AST statements.
@@ -1271,8 +1251,8 @@ fn line_of(src: &str, pos: usize) -> usize {
 fn item_span_start(item: &Item, src: &str) -> usize {
     match item {
         Item::Func(f) => func_decl_start(f, src),
-        Item::Struct(s) => type_decl_start(s.is_pub, s.name_span.start, "struct", src),
-        Item::Enum(e) => type_decl_start(e.is_pub, e.name_span.start, "enum", src),
+        Item::Struct(s) => type_decl_start(s.name_span.start, "struct", src),
+        Item::Enum(e) => type_decl_start(e.name_span.start, "enum", src),
         Item::Impl(i) => src[..i.type_span.start]
             .rfind("impl")
             .unwrap_or(i.type_span.start),
@@ -1300,7 +1280,7 @@ fn item_span_start(item: &Item, src: &str) -> usize {
         Item::ExternRust(b) => src[..b.crate_span.start]
             .rfind(Syntax::KW_EXTERN)
             .unwrap_or(b.span.start),
-        Item::Trait(t) => type_decl_start(t.is_pub, t.name_span.start, "trait", src),
+        Item::Trait(t) => type_decl_start(t.name_span.start, "trait", src),
         // D-QUAL2: tag declarations use their own span.
         Item::Tag(t) => t.span.start,
         Item::EffectDecl(declaration) => declaration.span.start,
@@ -1340,22 +1320,13 @@ fn item_span_start(item: &Item, src: &str) -> usize {
 fn func_decl_start(f: &Func, src: &str) -> usize {
     let before = &src[..f.name_span.start];
     let fn_pos = before.rfind("fn").unwrap_or(f.name_span.start);
-    let pos = if f.is_pub {
-        before[..fn_pos].rfind("pub").unwrap_or(fn_pos)
-    } else {
-        fn_pos
-    };
-    pos
+    fn_pos
 }
 
-fn type_decl_start(is_pub: bool, name_start: usize, kw: &str, src: &str) -> usize {
+fn type_decl_start(name_start: usize, kw: &str, src: &str) -> usize {
     let before = &src[..name_start];
     let kw_pos = before.rfind(kw).unwrap_or(name_start);
-    if is_pub {
-        before[..kw_pos].rfind("pub").unwrap_or(kw_pos)
-    } else {
-        kw_pos
-    }
+    kw_pos
 }
 
 fn item_span_end(item: &Item) -> usize {
@@ -2328,7 +2299,7 @@ pub fn format_source_with_options(
     // `parse_for_check` is the entry that reports the diagnostics
     // `parse_for_fmt` drops; a source it rejects outright is recovered too.
     let prog = match crate::Parser::parse_for_check_with_source(&toks, &migrated) {
-        Ok((prog, parse_diags)) => {
+        Ok((_, parse_diags)) => {
             // The retired callable/result arrow shapes preserve the function
             // body AST, so simplify may still run and canonicalize them. A
             // recovered control-body diagnostic does not: its AST is only a
@@ -2341,7 +2312,9 @@ pub fn format_source_with_options(
             {
                 options.simplify = false;
             }
-            prog
+            // Check parsing expands groups. Format the authored applications,
+            // preserving their names rather than printing the lowered stack.
+            crate::Parser::parse_for_fmt(&toks)?
         }
         Err(_) => {
             options.simplify = false;
@@ -2455,6 +2428,37 @@ mod tests {
         format_program, format_source, format_source_with_options,
         retired_interpolation_selector_edits, retired_type_edits, FormatOptions,
     };
+
+    #[test]
+    fn formatter_edits_refuse_non_utf8_boundaries() {
+        let edit = |start, end| super::TextEdit {
+            span: super::Span::new(start, end),
+            new_text: "a".to_owned(),
+        };
+        for (start, end) in [(1, 2), (0, 1), (0, 4), (2, 1)] {
+            assert_eq!(super::apply_source_edits("éx", &[edit(start, end)]), None);
+        }
+        assert_eq!(
+            super::apply_source_edits("éx", &[edit(0, 2)]),
+            Some("ax".to_owned())
+        );
+        for offset in 1..4 {
+            assert_eq!(super::apply_source_edits("🙂x", &[edit(0, offset)]), None);
+            assert_eq!(super::apply_source_edits("🙂x", &[edit(offset, 4)]), None);
+        }
+        assert_eq!(
+            super::apply_source_edits("🙂x", &[edit(0, 4)]),
+            Some("ax".to_owned())
+        );
+        assert_eq!(
+            super::apply_source_edits("éx", &[edit(3, 3)]),
+            Some("éxa".to_owned())
+        );
+        assert_eq!(
+            super::apply_source_edits("", &[edit(0, 0)]),
+            Some("a".to_owned())
+        );
+    }
 
     #[test]
     fn retired_selector_rewrites_through_the_parser_and_formatter() {

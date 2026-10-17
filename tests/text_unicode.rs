@@ -110,6 +110,193 @@ fn control_category_has_exact_utf8_scan_ranges() {
 }
 
 #[test]
+fn unicode_property_predicates_match_pinned_classes_in_both_tiers() {
+    if !common::have_rustc() {
+        eprintln!("note: rustc not found; skipping Unicode property tier parity");
+        return;
+    }
+    // Parameters keep the predicate calls in executable bodies, rather than
+    // testing only constant expressions folded from literal arguments.
+    let source = r#"
+use core.text as text
+fn alpha(value: String, expected: Bool) {
+    print(text.is_alphabetic(value) == expected)
+}
+fn numeric(value: String, expected: Bool) {
+    print(text.is_numeric(value) == expected)
+}
+fn run() {
+    alpha("", false)
+    alpha("Az", true)
+    alpha("A9", false)
+    alpha("µ", true)
+    alpha("×", false)
+    alpha("ͅ", true)
+    alpha("̀", false)
+    alpha(";", false)
+    alpha("Ⅻ", true)
+    alpha("𞀰", true)
+    alpha("𑶰", true)
+    alpha("Aͅ𑶰", true)
+    alpha("À", false)
+    numeric("", false)
+    numeric("09", true)
+    numeric("²", true)
+    numeric("¼", true)
+    numeric("Ⅻ", true)
+    numeric("٣", true)
+    numeric("𝟎", true)
+    numeric("𞓰", true)
+    numeric("𝋀", true)
+    numeric("2Ⅻ𝋀", true)
+    numeric("A", false)
+    numeric("×", false)
+    numeric("̀", false)
+    numeric("²A", false)
+    numeric("-2", false)
+}
+"#;
+    for tier in ["parity", "aot"] {
+        let (code, stdout, stderr) =
+            common::build_and_run("unicode_property_predicates", tier, source);
+        assert_eq!(code, 0, "Unicode property {tier} fixture failed: {stderr}");
+        assert_eq!(stdout, "true\n".repeat(28), "Unicode property {tier} mismatch");
+        assert!(stderr.is_empty(), "Unicode property {tier} stderr: {stderr}");
+    }
+}
+
+#[test]
+fn unicode_property_predicates_borrow_canonical_tables_in_checked_ir() {
+    use jet::Codegen::TIR::{TBuiltinOp, TExprKind, TStmt};
+    use jet_foundation::MIR::{
+        MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget,
+        MirAccess, MirCallee, MirCopyFact, MirOperation,
+    };
+
+    let scratch = common::Scratch::new("unicode_property_views");
+    fs::write(scratch.join("package.jet"), tir_support::TIR_TEST_PACKAGE).unwrap();
+    let entry = scratch.join("main.jet");
+    fs::write(
+        &entry,
+        r#"use core.text as text
+fn classify(value: String) {
+    print(text.is_alphabetic(value))
+    print(text.is_numeric(value))
+}
+fn run() { classify("Ⅻ") }
+"#,
+    )
+    .unwrap();
+    jet::run_compiler_work(|| {
+        let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
+            .expect("Unicode property view fixture should load");
+        let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+            .into_iter()
+            .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .collect::<Vec<_>>();
+        assert!(errors.is_empty(), "Unicode property view fixture rejected: {errors:#?}");
+        let request = MirArtifactRequest::new(
+            MirArtifactTarget::RustAot,
+            MirArtifactKind::NativeExecutable,
+            MirArtifactBuildMode::Dev,
+        );
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
+            .expect("Unicode property fixture should lower through TIR");
+        for (name, binding) in [
+            ("is_alphabetic", "bytes"),
+            ("is_numeric", "bytes"),
+            ("alphabetic_suffix", "window"),
+            ("numeric_suffix", "window"),
+        ] {
+            let function = tir
+                .funcs
+                .iter()
+                .find(|function| {
+                    function.source_file.ends_with("Core/text/text.jet")
+                        && function.name.ends_with(name)
+                })
+                .expect("predicate must retain its checked source body");
+            let init = function.body.iter().find_map(|statement| match statement {
+                TStmt::Let { name, init, .. } if name == binding => Some(init),
+                _ => None,
+            }).expect("predicate/suffix must retain its borrowed window");
+            assert!(matches!(&init.kind, TExprKind::BuiltinMethod {
+                op: TBuiltinOp::ViewNew { .. }, ..
+            }), "{name}.{binding} must lower to ViewNew, not an owning slice");
+            if binding == "window" {
+                assert_eq!(function.params[2].0, "table");
+                assert_eq!(function.params[2].2, jet::AST::AccessConvention::Read,
+                    "the suffix must borrow the table argument");
+            }
+        }
+        let protected_keys = tir.funcs.iter()
+            .filter(|function| function.source_file.ends_with("Core/text/text.jet")
+                && ["is_alphabetic", "is_numeric", "alphabetic_suffix", "numeric_suffix",
+                    "is_alpha_cp", "is_digit_cp", "unicode_scalar_at"].iter()
+                    .any(|name| function.name.ends_with(*name)))
+            .map(|function| function.key.clone())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(protected_keys.len(), 7, "all property/scalar bodies must reach TIR");
+        let mir = jet::Codegen::TIR::lower_tir_to_mir(tir)
+            .expect("Unicode property fixture should lower through MIR");
+        assert_eq!(mir.functions.iter()
+            .filter(|function| protected_keys.contains(&function.key)).count(),
+            protected_keys.len(), "all protected source bodies must reach MIR");
+        for (predicate, suffix, property) in [
+            ("is_alphabetic", "alphabetic_suffix", "UNICODE_ALPHABETIC"),
+            ("is_numeric", "numeric_suffix", "UNICODE_NUMERIC"),
+        ] {
+            let constant = mir
+                .constants
+                .iter()
+                .find(|constant| constant.name == property)
+                .expect("canonical property constant must reach MIR");
+            let function = mir.functions.iter()
+                .find(|function| protected_keys.contains(&function.key)
+                    && function.name.ends_with(predicate))
+                .expect("public predicate must reach MIR");
+            let target = mir.functions.iter()
+                .find(|function| protected_keys.contains(&function.key)
+                    && function.name.ends_with(suffix))
+                .expect("suffix body must reach MIR");
+            let global = function.blocks.iter().flat_map(|block| &block.instructions)
+                .find_map(|instruction| match &instruction.operation {
+                    MirOperation::Global { name } if name == &constant.key =>
+                        instruction.result,
+                    _ => None,
+                })
+                .expect("predicate must read the canonical property Global");
+            assert!(function.blocks.iter().flat_map(|block| &block.instructions)
+                .any(|instruction| match &instruction.operation {
+                    MirOperation::Call { callee: MirCallee::User(id), args, .. }
+                        if *id == target.id => args.len() == 3
+                            && args[2].value == global && args[2].access == MirAccess::Read,
+                    _ => false,
+                }), "canonical Global must be passed directly as a read table argument");
+        }
+        // Protect the edited bodies, without imposing a copy law on unrelated
+        // imported Core operations that legitimately materialize their results.
+        for function in mir.functions.iter()
+            .filter(|function| protected_keys.contains(&function.key))
+        {
+            for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+                if let MirOperation::Copy { value, fact } = &instruction.operation {
+                    assert_ne!(*fact, MirCopyFact::ViewMaterialize,
+                        "property/scalar windows must stay borrowed");
+                    if *fact == MirCopyFact::Materialize {
+                        let (_, ty, _, _) = function.values.iter()
+                            .find(|(id, _, _, _)| id == value)
+                            .expect("copy operand must have a checked MIR type");
+                        assert!(ty.list_element().is_none(),
+                            "property/scalar bodies must not clone list buffers");
+                    }
+                }
+            }
+        }
+    });
+}
+
+#[test]
 fn generated_rust_emits_only_the_unicode_tier_the_program_needs() {
     let hello = jet::compile(r#"fn run() { print("hello") }"#).expect("hello compiles");
     assert_eq!(
@@ -494,7 +681,6 @@ fn main() {
 
 #[test]
 fn unicode_grapheme_zwj_requires_pictographic_context_on_all_run_tiers() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let source = r#"
 use core.text as text
 
@@ -521,23 +707,16 @@ fn run() {
     )
     .expect("write ZWJ context authority");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
         }
-        if interpret {
-            command.arg("--interpret");
-        }
         let output = command
             .arg(&program)
             .current_dir(&scratch.path)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -563,23 +742,16 @@ fn unicode_text_audit_matches_golden_on_all_run_tiers() {
         .expect("read Unicode text audit golden");
     let scratch = common::Scratch::new("unicode_text_audit_tiers");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
         }
-        if interpret {
-            command.arg("--interpret");
-        }
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -606,23 +778,16 @@ fn wrap_semantics_audit_matches_golden_on_all_run_tiers() {
     .expect("read textwrap semantics audit golden");
     let scratch = common::Scratch::new("wrap_semantics_audit_tiers");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
         }
-        if interpret {
-            command.arg("--interpret");
-        }
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -647,23 +812,16 @@ fn string_from_bytes_matches_golden_on_all_run_tiers() {
         .expect("read String.from_bytes golden");
     let scratch = common::Scratch::new("string_from_bytes_tiers");
 
-    for (tier, release, interpret) in [
-        ("release", true, false),
-        ("default", false, false),
-        ("interpret", false, true),
-    ] {
+    for (tier, release) in [("release", true), ("default", false)] {
         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
         command.arg("run");
         if release {
             command.arg("--release");
         }
-        if interpret {
-            command.arg("--interpret");
-        }
         let output = command
             .arg(&example)
             .current_dir(root)
-            .env("JET_RUN_CACHE_DIR", scratch.join(&format!("{tier}-run")))
+            .env("JET_STORE_DIR", scratch.join(&format!("{tier}-run")))
             .env("JET_STORE_DIR", scratch.join(&format!("{tier}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -697,12 +855,6 @@ fn text_parser_helpers_preserve_optional_failure_across_tiers() {
             "default",
             tir_support::run_default_multi(
                 "text_parser_helpers_default", "main.jet", &files,
-            ),
-        ),
-        (
-            "interpreter",
-            tir_support::run_interpret_multi(
-                "text_parser_helpers_interpreter", "main.jet", &files,
             ),
         ),
     ] {

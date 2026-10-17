@@ -1,0 +1,22 @@
+// SETUP ONLY: dd holds ONE real FIFO writer open; Core FileWriter lacks raw-byte write.
+// Lead approved adapter for core-files-raw-write (StreamHandles.jet118-120); no subject substitute.
+use core.process as process
+use core.files as files
+use core.time as time
+fn run() {
+    child :: process.cmd([String]{"dd", "of={work}/upload.fifo", "bs=4096"}).stdin(.Stream).spawn() ?? panic("FIFO byte pipe")
+    first := [U8]{}
+    loop i in 0..<8192 { &first.push(U8{120}) }
+    child.stdin.write(String.from_bytes(first) ?? panic("first ASCII payload")) ?? panic("first exact FIFO payload")
+    deadline :: time.instant() + 5s
+    loop !files.exists("{work}/accepted") {
+        assert(time.instant() < deadline)
+        // Original yield_now: this is a synchronization poll, not a replacement readiness assertion.
+    }
+    rest := [U8]{}
+    loop i in 0..<32768 { &rest.push(U8{121}) }
+    child.stdin.write(String.from_bytes(rest) ?? panic("rest ASCII payload")) ?? panic("exact remainder")
+    child.stdin.close() ?? panic("FIFO EOF")
+    receipt :: child.wait() ?? panic("join FIFO pipe")
+    assert(receipt.success)
+}

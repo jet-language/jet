@@ -1,0 +1,11 @@
+# Port of tests/diagnostic_gate.rs::build_and_run_share_one_diagnostic_gate (190-219).
+# PENDING-GRAMMAR and PENDING-SAME-HEAD: original assertions; no runtime snapshot.
+fixture: pure.fixture
+env: NO_COLOR=1
+step build: jet build --json pure.jet
+exit: nonzero
+json: stderr doc $.reports[?code="E0927"] #>= 1
+step run: jet run --interpret --json pure.jet
+exit: nonzero
+json: stderr doc $.reports[*].code == build
+json: stderr doc $.reports #== build

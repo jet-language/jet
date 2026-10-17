@@ -1,0 +1,84 @@
+# tests/production_receipt.rs::production_failure_receipt_is_canonical_redacted_and_tier_stable
+# Every original mode/code/receipt field/redaction/byte-identity assertion; no captured oracle.
+fixture: production_failure_receipt_is_canonical_redacted_and_tier_stable.fixture
+env: JET_PRODUCTION_USER_DATA=PRODUCTION_RECEIPT_ENV_MARKER_755
+step tier0: jet run --interpret main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-0
+env: JET_STORE_DIR={work}/tier-0/cache
+exit: 70
+capture: report_tier0 = first-entry {work}/tier-0/.jet/reports child-is-file "receipt"
+file: {cap:report_tier0}/receipt ^= "jet-development-receipt-v1\n" # original ed77c235f tests/production_receipt.rs:73 starts_with receipt header
+file: {cap:report_tier0}/receipt ~ "closure\t\t" # original ed77c235f tests/production_receipt.rs:74 contains closure
+file: {cap:report_tier0}/receipt ~ "input\t" # original ed77c235f tests/production_receipt.rs:75 contains input
+file: {cap:report_tier0}/receipt ~ "failure-path\t636f6465\t4533303031" # original ed77c235f tests/production_receipt.rs:76 contains hex code E3001
+file: {cap:report_tier0}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574" # original ed77c235f tests/production_receipt.rs:77-81 contains hex file main.jet
+file: {cap:report_tier0}/receipt ~ "failure-path\t6c696e65\t32" # original ed77c235f tests/production_receipt.rs:82 contains hex line 2
+file: {cap:report_tier0}/receipt ~ "failure-path\t66756e6374696f6e\t72756e" # original ed77c235f tests/production_receipt.rs:83-87 contains hex function run
+file: {cap:report_tier0}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755" # original ed77c235f tests/production_receipt.rs:41,88-89 excludes source secret
+file: {cap:report_tier0}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755" # original ed77c235f tests/production_receipt.rs:42,88-89 excludes input secret
+file: {cap:report_tier0}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755" # original ed77c235f tests/production_receipt.rs:43,88-89 excludes environment secret
+copy: {cap:report_tier0}/receipt baseline.receipt
+step tier1: jet dev main.jet --watch=off -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-1
+env: JET_STORE_DIR={work}/tier-1/cache
+exit: 70
+capture: report_tier1 = first-entry {work}/tier-1/.jet/reports child-is-file "receipt"
+file: {cap:report_tier1}/receipt ^= "jet-development-receipt-v1\n" # original ed77c235f tests/production_receipt.rs:73 starts_with receipt header
+file: {cap:report_tier1}/receipt ~ "closure\t\t" # original ed77c235f tests/production_receipt.rs:74 contains closure
+file: {cap:report_tier1}/receipt ~ "input\t" # original ed77c235f tests/production_receipt.rs:75 contains input
+file: {cap:report_tier1}/receipt ~ "failure-path\t636f6465\t4533303031" # original ed77c235f tests/production_receipt.rs:76 contains hex code E3001
+file: {cap:report_tier1}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574" # original ed77c235f tests/production_receipt.rs:77-81 contains hex file main.jet
+file: {cap:report_tier1}/receipt ~ "failure-path\t6c696e65\t32" # original ed77c235f tests/production_receipt.rs:82 contains hex line 2
+file: {cap:report_tier1}/receipt ~ "failure-path\t66756e6374696f6e\t72756e" # original ed77c235f tests/production_receipt.rs:83-87 contains hex function run
+file: {cap:report_tier1}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755" # original ed77c235f tests/production_receipt.rs:41,88-89 excludes source secret
+file: {cap:report_tier1}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755" # original ed77c235f tests/production_receipt.rs:42,88-89 excludes input secret
+file: {cap:report_tier1}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755" # original ed77c235f tests/production_receipt.rs:43,88-89 excludes environment secret
+file: {cap:report_tier1}/receipt == baseline.receipt
+step tier2: jet dev main.jet --interpret --watch=off -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-2
+env: JET_STORE_DIR={work}/tier-2/cache
+exit: 70
+capture: report_tier2 = first-entry {work}/tier-2/.jet/reports child-is-file "receipt"
+file: {cap:report_tier2}/receipt ^= "jet-development-receipt-v1\n" # original ed77c235f tests/production_receipt.rs:73 starts_with receipt header
+file: {cap:report_tier2}/receipt ~ "closure\t\t" # original ed77c235f tests/production_receipt.rs:74 contains closure
+file: {cap:report_tier2}/receipt ~ "input\t" # original ed77c235f tests/production_receipt.rs:75 contains input
+file: {cap:report_tier2}/receipt ~ "failure-path\t636f6465\t4533303031" # original ed77c235f tests/production_receipt.rs:76 contains hex code E3001
+file: {cap:report_tier2}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574" # original ed77c235f tests/production_receipt.rs:77-81 contains hex file main.jet
+file: {cap:report_tier2}/receipt ~ "failure-path\t6c696e65\t32" # original ed77c235f tests/production_receipt.rs:82 contains hex line 2
+file: {cap:report_tier2}/receipt ~ "failure-path\t66756e6374696f6e\t72756e" # original ed77c235f tests/production_receipt.rs:83-87 contains hex function run
+file: {cap:report_tier2}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755" # original ed77c235f tests/production_receipt.rs:41,88-89 excludes source secret
+file: {cap:report_tier2}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755" # original ed77c235f tests/production_receipt.rs:42,88-89 excludes input secret
+file: {cap:report_tier2}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755" # original ed77c235f tests/production_receipt.rs:43,88-89 excludes environment secret
+file: {cap:report_tier2}/receipt == baseline.receipt
+step tier3: jet run main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-3
+env: JET_STORE_DIR={work}/tier-3/cache
+exit: 70
+capture: report_tier3 = first-entry {work}/tier-3/.jet/reports child-is-file "receipt"
+file: {cap:report_tier3}/receipt ^= "jet-development-receipt-v1\n" # original ed77c235f tests/production_receipt.rs:73 starts_with receipt header
+file: {cap:report_tier3}/receipt ~ "closure\t\t" # original ed77c235f tests/production_receipt.rs:74 contains closure
+file: {cap:report_tier3}/receipt ~ "input\t" # original ed77c235f tests/production_receipt.rs:75 contains input
+file: {cap:report_tier3}/receipt ~ "failure-path\t636f6465\t4533303031" # original ed77c235f tests/production_receipt.rs:76 contains hex code E3001
+file: {cap:report_tier3}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574" # original ed77c235f tests/production_receipt.rs:77-81 contains hex file main.jet
+file: {cap:report_tier3}/receipt ~ "failure-path\t6c696e65\t32" # original ed77c235f tests/production_receipt.rs:82 contains hex line 2
+file: {cap:report_tier3}/receipt ~ "failure-path\t66756e6374696f6e\t72756e" # original ed77c235f tests/production_receipt.rs:83-87 contains hex function run
+file: {cap:report_tier3}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755" # original ed77c235f tests/production_receipt.rs:41,88-89 excludes source secret
+file: {cap:report_tier3}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755" # original ed77c235f tests/production_receipt.rs:42,88-89 excludes input secret
+file: {cap:report_tier3}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755" # original ed77c235f tests/production_receipt.rs:43,88-89 excludes environment secret
+file: {cap:report_tier3}/receipt == baseline.receipt
+step tier4: jet run --release main.jet -- PRODUCTION_RECEIPT_INPUT_MARKER_755
+cwd: tier-4
+env: JET_STORE_DIR={work}/tier-4/cache
+exit: 70
+capture: report_tier4 = first-entry {work}/tier-4/.jet/reports child-is-file "receipt"
+file: {cap:report_tier4}/receipt ^= "jet-development-receipt-v1\n" # original ed77c235f tests/production_receipt.rs:73 starts_with receipt header
+file: {cap:report_tier4}/receipt ~ "closure\t\t" # original ed77c235f tests/production_receipt.rs:74 contains closure
+file: {cap:report_tier4}/receipt ~ "input\t" # original ed77c235f tests/production_receipt.rs:75 contains input
+file: {cap:report_tier4}/receipt ~ "failure-path\t636f6465\t4533303031" # original ed77c235f tests/production_receipt.rs:76 contains hex code E3001
+file: {cap:report_tier4}/receipt ~ "failure-path\t66696c65\t6d61696e2e6a6574" # original ed77c235f tests/production_receipt.rs:77-81 contains hex file main.jet
+file: {cap:report_tier4}/receipt ~ "failure-path\t6c696e65\t32" # original ed77c235f tests/production_receipt.rs:82 contains hex line 2
+file: {cap:report_tier4}/receipt ~ "failure-path\t66756e6374696f6e\t72756e" # original ed77c235f tests/production_receipt.rs:83-87 contains hex function run
+file: {cap:report_tier4}/receipt !~ "PRODUCTION_RECEIPT_SOURCE_MARKER_755" # original ed77c235f tests/production_receipt.rs:41,88-89 excludes source secret
+file: {cap:report_tier4}/receipt !~ "PRODUCTION_RECEIPT_INPUT_MARKER_755" # original ed77c235f tests/production_receipt.rs:42,88-89 excludes input secret
+file: {cap:report_tier4}/receipt !~ "PRODUCTION_RECEIPT_ENV_MARKER_755" # original ed77c235f tests/production_receipt.rs:43,88-89 excludes environment secret
+file: {cap:report_tier4}/receipt == baseline.receipt

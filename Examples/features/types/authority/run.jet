@@ -6,10 +6,11 @@ struct Holder {
     grant: Authority
 }
 
-fn run() -[Exec, Time.Wait]> {
-    #FX(grant: Exec, IO, Time.Wait) {
-        spec :: process.cmd(["echo", "authority"]).under(grant)
-        result :: process.run_spec(spec) ?? panic("authority process")
+fn run() -[Exec, IO]> {
+    #FX(grant: Exec, IO) {
+        // Consume the authority-bound specification inside this #FX region;
+        // do not retain a command builder beyond the scoped grant.
+        result :: process.run_spec(process.cmd(["echo", "authority"]).under(grant)) ?? panic("authority process")
         print(result.success)
     }
 }

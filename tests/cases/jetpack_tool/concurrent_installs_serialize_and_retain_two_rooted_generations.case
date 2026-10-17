@@ -1,0 +1,49 @@
+# Port of tests/jetpack_tool.rs:1084-1178; assertions preserved, pending same-head/case-grammar receipt.
+fixture: fixtures/concurrent_installs_serialize_and_retain_two_rooted_generations
+mkdir: root
+mkdir: home
+mkdir: project
+mkdir: fx
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: left-root
+mkdir: right-root
+mkdir: left-root/hangar/provider-fixture-left/bin
+copy: left left-root/hangar/provider-fixture-left/bin/left
+when os unix: chmod: left-root/hangar/provider-fixture-left/bin/left 0555
+when os unix: chmod: left-root/hangar/provider-fixture-left/bin 0555
+when os unix: chmod: left-root/hangar/provider-fixture-left 0555
+write: fx/nixpkgs-left.json left.json
+mkdir: right-root/hangar/provider-fixture-right/bin
+copy: right right-root/hangar/provider-fixture-right/bin/right
+when os unix: chmod: right-root/hangar/provider-fixture-right/bin/right 0555
+when os unix: chmod: right-root/hangar/provider-fixture-right/bin 0555
+when os unix: chmod: right-root/hangar/provider-fixture-right 0555
+write: fx/nixpkgs-right.json right.json
+spawn left: jetpack tool install left@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: JETPACK_ROOT={work}/left-root
+spawn right: jetpack tool install right@nixpkgs --no-color --offline --fixtures {work}/fx
+cwd: project
+env: JETPACK_ROOT={work}/right-root
+wait: left
+exit: 0
+wait: right
+exit: 0
+file: home/.jet/tools/profile.json ~ "\"current\": 2" # original contains predicate
+file: home/.jet/tools/generations/1/meta.json ~ "left" | ~ "right" # original disjunction
+file: home/.jet/tools/generations/2/meta.json ~ "left" # original contains predicate
+file: home/.jet/tools/generations/2/meta.json ~ "right" # original contains predicate
+file: home/.jet/tools/generations/1/complete is-file
+file: home/.jet/tools/generations/2/complete is-file
+capture: left = concat-files left-root/hangar/lifecycle-db/journal sorted
+capture: right = concat-files right-root/hangar/lifecycle-db/journal sorted
+cap:left.append("{cap:right}"): ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a31" # original OR; hex marker cannot span journal boundaries
+cap:left: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a32" # original lifecycle_wire sorted concatenation contains predicate
+cap:right: ~ "70726f66696c652d67656e65726174696f6e3a757365723a746f6f6c733a32" # original lifecycle_wire sorted concatenation contains predicate
+step: jetpack tool list --no-color
+cwd: project
+env: JETPACK_ROOT={work}/left-root
+exit: 0
+stdout: ~ "left" # original contains predicate
+stdout: ~ "right" # original contains predicate

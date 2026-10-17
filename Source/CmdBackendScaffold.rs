@@ -12,7 +12,7 @@ use std::process::exit;
 
 use jet::ExitCodes;
 use jet::Migrations::MigrationLock;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::EncodingJson::parse_json;
 use jet_foundation::Hex::{decode as decode_hex, encode as hex_bytes};
 use jet_foundation::JSON::json_escape as json_quote;
@@ -22,7 +22,9 @@ use crate::OutputMode;
 
 const RECEIPT_SCHEMA: &str = "jet-scaffold-v1";
 const MAX_RECEIPT_BYTES: usize = 1024 * 1024;
-const ROUTE_REGISTRATION: &str = ".routes(from: \"routes\")";
+// D-ROUTE-FILES2=A: scaffolds use the house PascalCase routes root.
+const ROUTES_ROOT: &str = "Routes";
+const ROUTE_REGISTRATION: &str = ".routes(from: \"Routes\")";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Operation {
@@ -391,7 +393,7 @@ fn render_files(
             validate_route(&route, mode);
             let relative = route_file_relative(&route, mode);
             (
-                vec![(relative, route_source(name, &route).into_bytes())],
+                vec![(relative, route_source(name).into_bytes())],
                 None,
                 Some(route),
             )
@@ -514,7 +516,7 @@ fn service_slice(
             ),
             (
                 route_file,
-                route_source(name, &route).into_bytes(),
+                route_source(name).into_bytes(),
             ),
             (
                 format!("models/model_{model_slug}.jet"),
@@ -790,7 +792,9 @@ fn has_routes_registration(source: &str) -> bool {
     let is_routes_literal = |index: usize| {
         matches!(
             tokens.get(index).map(|token| token.0.as_str()),
-            Some("\"routes\"") | Some("'routes'")
+            Some(literal) if literal.len() == ROUTES_ROOT.len() + 2
+                && literal[1..literal.len() - 1] == *ROUTES_ROOT
+                && (literal.starts_with('"') || literal.starts_with('\''))
         )
     };
     for index in 0..tokens.len() {
@@ -1381,18 +1385,18 @@ fn render_receipt_inputs(options: &Options) -> String {
     )
 }
 fn receipt_input_text(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     key: &str,
 ) -> Option<Option<String>> {
     match json_value(fields, key)? {
-        DataTree::Null => Some(None),
-        DataTree::Text(value) => Some(Some(value.clone())),
+        Dyn::Null => Some(None),
+        Dyn::Text(value) => Some(Some(value.clone())),
         _ => None,
     }
 }
 
-fn parse_receipt_inputs(value: &DataTree) -> Option<Options> {
-    let DataTree::Object(fields) = value else {
+fn parse_receipt_inputs(value: &Dyn) -> Option<Options> {
+    let Dyn::Object(fields) = value else {
         return None;
     };
     const KEYS: &[&str] = &["path", "model", "up", "down", "risk", "lock", "version"];
@@ -1414,9 +1418,9 @@ fn parse_receipt_inputs(value: &DataTree) -> Option<Options> {
         None => None,
     };
     let version = match json_value(fields, "version")? {
-        DataTree::Null => None,
-        DataTree::Int(value) if *value > 0 => Some(*value as u64),
-        DataTree::Number(value) => {
+        Dyn::Null => None,
+        Dyn::Int(value) => value.to_u64().filter(|value| *value > 0),
+        Dyn::Number(value) => {
             let value = value.parse::<u64>().ok()?;
             (value > 0).then_some(value)
         }
@@ -1489,7 +1493,7 @@ fn parse_receipt(
         return None;
     }
     let text = std::str::from_utf8(bytes).ok()?;
-    let DataTree::Object(fields) = parse_json(text, true).ok()? else {
+    let Dyn::Object(fields) = parse_json(text, true).ok()? else {
         return None;
     };
     const KEYS: &[&str] = &[
@@ -1539,7 +1543,7 @@ fn parse_receipt(
     } else {
         None
     };
-    let DataTree::Array(entries) = json_value(&fields, "files")? else {
+    let Dyn::Array(entries) = json_value(&fields, "files")? else {
         return None;
     };
     if entries.is_empty() || entries.len() > 1024 {
@@ -1548,7 +1552,7 @@ fn parse_receipt(
     let mut files = Vec::with_capacity(entries.len());
     let mut seen = BTreeSet::new();
     for entry in entries {
-        let DataTree::Object(entry_fields) = entry else {
+        let Dyn::Object(entry_fields) = entry else {
             return None;
         };
         if (entry_fields.len() != 2 && entry_fields.len() != 3)
@@ -1562,7 +1566,7 @@ fn parse_receipt(
         let digest = json_text(entry_fields, "digest")?.to_string();
         let before = match json_value(entry_fields, "before") {
             None => None,
-            Some(DataTree::Text(value)) => Some(decode_hex(value)?),
+            Some(Dyn::Text(value)) => Some(decode_hex(value)?),
             Some(_) => return None,
         };
         let is_app = app_relative.as_deref() == Some(path.as_str());
@@ -1615,17 +1619,17 @@ fn parse_receipt(
 
 
 fn json_value<'a>(
-    fields: &'a [(String, DataTree)],
+    fields: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     fields
         .iter()
         .find_map(|(field, value)| (field == key).then_some(value))
 }
 
-fn json_text<'a>(fields: &'a [(String, DataTree)], key: &str) -> Option<&'a str> {
+fn json_text<'a>(fields: &'a [(String, Dyn)], key: &str) -> Option<&'a str> {
     match json_value(fields, key)? {
-        DataTree::Text(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }
@@ -1674,7 +1678,7 @@ fn valid_receipt_file(
         .map(model_name)
         .unwrap_or_else(|| model_name(name));
     let expected_model = path == format!("models/model_{}.jet", slugify(&model));
-    let route_output = path.starts_with("routes/") && path.ends_with(".jet");
+    let route_output = path.starts_with(&format!("{ROUTES_ROOT}/")) && path.ends_with(".jet");
     match kind {
         ScaffoldKind::Route => route_output,
         ScaffoldKind::Job => expected_job,
@@ -1839,49 +1843,35 @@ fn validate_route(route: &str, mode: OutputMode) {
         );
     }
 }
+/// D-ROUTE-FILES2=A: `--path /order-items` writes `Routes/OrderItems.jet` (the
+/// house PascalCase spelling of the address words); `:id` writes `[ID]`. The
+/// file must map back to exactly the requested address under the one shared
+/// law (`jet_foundation::App::route_file_address`).
 fn route_file_relative(route: &str, mode: OutputMode) -> String {
-    if route == "/" {
-        return "routes/index.jet".to_string();
+    let mut file_segments = route
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| match segment.strip_prefix(':') {
+            Some(name) => format!("[{}]", jet::Syntax::to_pascal_acronym(name)),
+            None => jet::Syntax::to_pascal_acronym(&segment.replace('-', "_")),
+        })
+        .collect::<Vec<_>>();
+    // A last segment whose words are `index`/`page` would answer its folder.
+    if file_segments.last().is_none_or(|last| {
+        matches!(jet_foundation::App::route_file_words(last).as_str(), "index" | "page")
+    }) {
+        file_segments.push("Index".to_string());
     }
-    let segments = route.split('/').skip(1).collect::<Vec<_>>();
-    let mut file_segments = Vec::with_capacity(segments.len() + 1);
-    let mut append_index = false;
-    for (index, segment) in segments.iter().enumerate() {
-        let file_segment = if let Some(name) = segment.strip_prefix(':') {
-            format!("[{name}]")
-        } else if segment.starts_with('*') {
-            fail(
-                "E2456",
-                format!("route `{route}` cannot map to the file-routing scanner"),
-                "use a named `:param` route or add catch-all support to the canonical scanner first",
-                mode,
-            )
-        } else {
-            let final_segment = index + 1 == segments.len();
-            if segment.starts_with('[') && segment.ends_with(']')
-                || segment.contains('\\')
-                || segment.contains(':')
-            {
-                fail(
-                    "E2456",
-                    format!("route `{route}` cannot map to the file-routing scanner"),
-                    "use route segments representable by `routes/**/*.jet` convention paths",
-                    mode,
-                )
-            }
-            if final_segment
-                && (segment.starts_with('_') || *segment == "index" || *segment == "page")
-            {
-                append_index = true;
-            }
-            (*segment).to_string()
-        };
-        file_segments.push(file_segment);
+    let stem = file_segments.join("/");
+    if jet_foundation::App::route_file_address(&stem).ok().as_deref() != Some(route) {
+        fail(
+            "E2456",
+            format!("route `{route}` cannot be spelled as a page file name"),
+            "page file addresses are lowercase words joined by hyphens, with `:name` for one captured part (D-ROUTE-FILES2)",
+            mode,
+        )
     }
-    if append_index {
-        file_segments.push("index".to_string());
-    }
-    format!("routes/{}.jet", file_segments.join("/"))
+    format!("{ROUTES_ROOT}/{stem}.jet")
 }
 
 
@@ -1921,7 +1911,7 @@ fn {slug}_worker() {{
     job.enqueue("{name} job")
 }}
 
-pub fn run() {{
+fn run() {{
     tree := service.tree("{slug}")
     tree.set_delivery(service.delivery_durable()) ?? panic("delivery")
     endpoint :: tree.worker("{slug}", {slug}_worker, capacity: 1) ?? panic("worker")
@@ -1933,9 +1923,9 @@ pub fn run() {{
     )
 }
 
-fn route_source(name: &str, route: &str) -> String {
+fn route_source(name: &str) -> String {
     format!(
-        "use core.web as web\n\nfn page() -> WebPage {{ web.page(\"{name}\", \"<main><h1>{name}</h1></main>\") }}\n\n// route: {route}\n"
+        "use core.web as web\n\nfn page() -> WebPage {{ web.page(\"{name}\", \"<main><h1>{name}</h1></main>\") }}\n"
     )
 }
 
@@ -1946,16 +1936,16 @@ fn job_source(name: &str, slug: &str) -> String {
         r#"use core.jobs as jobs
 
 #Codable
-pub struct {payload} {{
+struct {payload} {{
     message: String
 }}
 
 #Job
-pub fn {slug}_job(payload: {payload}) {{
+fn {slug}_job(payload: {payload}) {{
     print(payload.message)
 }}
 
-pub fn enqueue(message: String) {{
+fn enqueue(message: String) {{
     queue := jobs.queue() ?? panic("queue")
     payload :: {payload}{{message: message}}
     receipt :: queue.enqueue({slug}_job, payload) ?? panic("enqueue")
@@ -1989,7 +1979,7 @@ fn model_name(name: &str) -> String {
 }
 
 fn model_source(model: &str) -> String {
-    format!("#Codable\npub struct {model} {{\n    pub id: Int\n}}\n")
+    format!("#Codable\nstruct {model} {{\n    id: Int\n}}\n")
 }
 
 fn test_source(name: &str, model: &str) -> String {

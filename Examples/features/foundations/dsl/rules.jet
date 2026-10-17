@@ -1,17 +1,18 @@
-pub enum Condition {
+// Rule predicates are data, not the built-in Condition synchronization handle.
+enum RulePredicate {
     AtLeast(Int)
     Equals(Int)
 }
 
-pub enum Action {
+enum Action {
     Add(Int)
     Set(Int)
 }
 
-pub struct Rule {
+struct Rule {
     name: String
     fact: String
-    condition: Condition
+    condition: RulePredicate
     action: Action
 }
 
@@ -32,36 +33,23 @@ fn parse_rule(source: String) -> Rule? {
     fact :: condition_words[0].trim()
     if fact == "" -> return None
     threshold :: Int.parse(condition_words[2].trim()) ?? return None
-    condition :: if condition_words[1].trim() == ">=" -> {
-        Condition.AtLeast(threshold)
-    } else if condition_words[1].trim() == "==" -> {
-        Condition.Equals(threshold)
-    } else -> {
-        return None
-
+    condition :: if condition_words[1].trim() == {
+        ">=" -> RulePredicate.AtLeast(threshold)
+        "==" -> RulePredicate.Equals(threshold)
+        else -> { return None }
     }
 
     amount :: Int.parse(action_words[1].trim()) ?? return None
-    action :: if action_words[0].trim() == "add" -> {
-        Action.Add(amount)
-    } else if action_words[0].trim() == "set" -> {
-        Action.Set(amount)
-    } else -> {
-        return None
-
+    action :: if action_words[0].trim() == {
+        "add" -> Action.Add(amount)
+        "set" -> Action.Set(amount)
+        else -> { return None }
     }
 
-    return Val(
-    Rule{
-        name: name,
-        fact: fact,
-        condition: condition,
-        action: action,
-    },
-    )
+    Val(Rule{name: name, fact: fact, condition: condition, action: action})
 }
 
-pub fn parse(source: String) -> [Rule]? {
+fn parse(source: String) -> [Rule]? {
     rules := [Rule]{}
     loop item in source.split(";") {
         line :: item.trim()
@@ -74,7 +62,7 @@ pub fn parse(source: String) -> [Rule]? {
     return Val(rules)
 }
 
-fn matches(condition: Condition, value: Int) -> Bool {
+fn matches(condition: RulePredicate, value: Int) -> Bool {
     if condition == {
         .AtLeast(limit) -> return value >= limit
         .Equals(expected) -> return value == expected
@@ -83,7 +71,7 @@ fn matches(condition: Condition, value: Int) -> Bool {
 }
 
 fn apply(facts: &[String:Int], fact: String, action: Action) -> String {
-    current :: facts.get(~fact) ?? 0
+    current :: facts.get(fact.copy()) ?? 0
     if action == {
         .Add(delta) -> {
             next :: current + delta
@@ -100,14 +88,12 @@ fn apply(facts: &[String:Int], fact: String, action: Action) -> String {
     return ""
 }
 
-pub fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
+fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
-        value :: facts.get(~rule.fact) ?? 0
-        if matches(~rule.condition, value) {
-            event :: apply(&facts, ~rule.fact, ~rule.action)
-            &events.push("{rule.name}:{event}")
-        } else { &events.push("{rule.name}:skip") }
+        value :: facts.get(rule.fact.copy()) ?? 0
+        event :: if matches(rule.condition.copy(), value) -> apply(&facts, rule.fact.copy(), rule.action.copy()) else -> "skip"
+        &events.push("{rule.name}:{event}")
     }
     return events
 }

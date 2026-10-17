@@ -7,7 +7,7 @@
 1	root:Core	non-teaching-test-data	none	I6	corpus-policy-inventory	#2396	core library package data is not teaching source
 1	root:Examples/features	canonical-teaching	feature	#2375	golden-and-dev-corpus	#2396	all nested feature examples are classified before any semantic rule
 1	root:Examples/features/basics	canonical-teaching	feature	#2375	golden-and-dev-corpus	#2396	feature examples retain their local lesson shape unless explicitly promoted to first-contact
-1	file:Examples/features/basics/hello.jet	canonical-teaching	first-contact	#2375	golden-and-dev-corpus	#2396	the flagship first program uses the implicit entry body
+1	file:Examples/features/basics/hello.jet	canonical-teaching	first-contact	D-ENTRY-SCRIPT1=C	golden-and-dev-corpus	#2396	the flagship first program uses the explicit fn run entry
 1	file:Examples/features/basics/first_hour.jet	canonical-teaching	typed-cli	#2378	golden-and-dev-corpus	#2396	the first-hour flagship uses the typed CLI entry
 1	file:Examples/features/basics/first_hour_expert.jet	expert-lesson	raw-cli	#2378	golden-and-dev-corpus	#2396	the paired expert lesson keeps the explicit raw process boundary
 1	root:Examples/features/cli	canonical-teaching	typed-cli	#2378	golden-and-dev-corpus	#2396	CLI examples use the typed entry recipe
@@ -26,6 +26,7 @@
 1	file:Examples/features/io/watcher.jet	canonical-teaching	raw-cli	#2378	golden-and-dev-corpus	#2396	watcher child arguments remain an explicit raw path
 1	root:Examples/features/concurrency	canonical-teaching	routine	#2375	golden-and-dev-corpus	#2396	routine concurrency examples use direct combinators when possible
 1	file:Examples/features/concurrency/shield_commit.jet	expert-lesson	expert	#2375	golden-and-dev-corpus	#2396	the shield lesson keeps a lexical group because its close joins the shielded loser
+1	file:Examples/features/concurrency/conformance_capsule.jet	expert-lesson	expert	#2375/D-SHIELDNAME1=A	golden-and-dev-corpus	#2396	the cancellation conformance lesson preserves a lexical join of the shielded race loser, like shield_commit
 1	file:Examples/features/concurrency/parallel_scan.jet	canonical-teaching	raw-cli	#2378	golden-and-dev-corpus	#2396	a variable-length file list keeps its explicit raw argv boundary
 1	file:Examples/features/concurrency/parallel_scan_expert.jet	expert-lesson	raw-cli	#2378	golden-and-dev-corpus	#2396	the expert variable-length file list keeps its explicit raw argv boundary
 1	root:Examples/features/effects	canonical-teaching	routine	#2375	golden-and-dev-corpus	#2396	routine effect examples keep only intentional contracts
@@ -34,6 +35,8 @@
 1	root:Examples/features/lowlevel	canonical-teaching	expert	#2375	golden-and-dev-corpus	#2396	low-level examples retain explicit boundary contracts
 1	root:Examples/features/crypto	expert-lesson	expert	#2375	golden-and-dev-corpus	#2396	crypto examples teach explicit security boundaries
 1	root:Examples/learn	canonical-teaching	first-contact	#2375	golden-and-dev-corpus	#2396	learn solutions are maintained teaching source
+1	file:Examples/learn/semantic_review/02_authority/base.package.jet	raw-protocol	package-manifest	D-CONF-PLANE1	golden-and-dev-corpus	#2396	named baseline Package snapshot is validated by the canonical manifest parser, not ordinary Jet AST
+1	file:Examples/learn/semantic_review/02_authority/head.package.jet	raw-protocol	package-manifest	D-CONF-PLANE1	golden-and-dev-corpus	#2396	named revised Package snapshot retains the FS-to-FS-and-Net authority change under canonical manifest validation
 1	root:Examples/suites	canonical-teaching	routine	#2375	suite-goldens	#2396	story suites are maintained teaching source
 1	root:Examples/interop	raw-protocol	generated	#2377	bindgen-registry	#2396	interop entry programs and caches are protocol-bound
 1	root:Examples/interop/cobol/fixture-state/bindings	generated-output	generated	#2377	bindgen-registry	#2396	Cobol generated Jet fixture is checked through its producer
@@ -56,6 +59,7 @@
 1	root:Examples/performance/receipts	non-teaching-test-data	none	#2375	performance-receipts	#2396	performance receipts are measured data
 1	root:Tools/perf	non-teaching-test-data	none	#2375	performance-receipts	#2396	performance programs and receipts are measured data
 1	root:Jetpack	canonical-teaching	dogfood	#2376	dogfood-gates	#2396	Jetpack dogfood is a maintained product recipe
+1	file:Jetpack/CLI/Source/Entry/Main.jet	raw-protocol	protocol	D-JPK-DISPATCH1=B	dogfood-gates	#2396	the engine process boundary forwards raw argv and handles the hidden version and sandbox-host protocols; it is not a user-facing typed CLI recipe
 1	root:Tools/tower	canonical-teaching	dogfood	#2376	dogfood-gates	#2396	Tower dogfood keeps named domain policies
 1	root:Tools/gauntlet	expert-lesson	none	#2375	gauntlet-harness	#2396	peer programs are inventory data except the named Jet recipe
 1	root:Tools/gauntlet/entries	canonical-teaching	typed-cli	#2378	gauntlet-harness	#2396	fixed-shape Jet gauntlet entries use typed CLI inputs
@@ -87,7 +91,9 @@
 
 [scope]
 # version rule selector reason
-1	entry-implicit	file:Examples/features/basics/hello.jet	first-contact entry is an implicit top-level body
+1	entry-explicit	root:Examples/features	ordinary-file execution belongs in an explicit fn run (D-ENTRY-SCRIPT1=C)
+1	entry-explicit	root:Examples/learn	maintained first-contact ordinary-file execution uses an explicit fn run
+1	entry-explicit	file:tests/agent_workloads/llm_digest/first_program.jet	maintained first-contact ordinary-file execution uses an explicit fn run
 1	first-hour-doc-recipe	file:Examples/features/types/typed_literal_forms.jet	the runnable typed-literal example uses the canonical runner
 1	raw-cli-fixed-shape	file:Examples/features/basics/first_hour.jet	first-hour CLI must stay typed
 1	raw-cli-fixed-shape	file:Jetpack/CLI/Source/Entry/Main.jet	Jetpack CLI uses the typed entry boundary
@@ -166,7 +172,7 @@
 1	dogfood-directory-setup	root:Jetpack	Jetpack directory setup is idempotent
 1	dogfood-directory-setup	file:Docs/site/generate.jet	Site output setup is idempotent
 1	dogfood-ascii	root:Jetpack	Jetpack ASCII folding uses the typed helper
-1	datatree-domain-policy	root:Tools/tower	Tower keeps explicit domain policy
+1	dyn-domain-policy	root:Tools/tower	Tower keeps explicit domain policy
 1	walk-files-filter	root:Jetpack	Jetpack traversal uses the file filter
 1	crypto-naming-fact	root:Examples/features/crypto	crypto examples use typed digest names
 
@@ -248,8 +254,8 @@
 # version finding rule owner proof
 1	Fdogjet-1	raw-cli-fixed-shape	#2396	dogfood/jetpack and workload gates
 1	Fdogjet-2	dogfood-path-containment	#2396	dogfood/jetpack gate
-1	Fdogjet-3	datatree-domain-policy	#2396	dogfood/tower gate
-1	Fdogjet-4	datatree-domain-policy	#2396	dogfood/tower gate
+1	Fdogjet-3	dyn-domain-policy	#2396	dogfood/tower gate
+1	Fdogjet-4	dyn-domain-policy	#2396	dogfood/tower gate
 1	Fdogjet-5	dogfood-json	#2396	dogfood/jetpack gate
 1	Fdogjet-6	dogfood-url-query	#2396	dogfood/jetpack gate
 1	Fdogjet-7	dogfood-list-equality	#2396	dogfood/jetpack gate
@@ -259,7 +265,7 @@
 1	Fentry-2	raw-cli-process-boundary	#2396	golden and CLI recipe gate
 1	Fentry-3	product-parser-regression	#2372	shared parser regression tests
 1	Fentry-4	raw-cli-fixed-shape	#2396	golden and CLI recipe gate
-1	Fex-core-1	entry-implicit	#2396	golden and dev corpus gate
+1	Fex-core-1	entry-explicit	#2396	golden and dev corpus gate
 1	Fex-core-2	raw-cli-builder-shape	#2396	golden and CLI recipe gate
 1	Fex-core-3	unit-scalar-rewrap	#2397	unit semantic tests
 1	Fex-core-4	compiler-loop-fact	#2373	typed UI snapshots
@@ -287,8 +293,8 @@
 
 [exception]
 # version rule selector site expected protocol reason
-1	entry-implicit	file:tests/ui/E-CALL-VALUE_call_result_not_called.jet	fn:run@0..0	1	fixture	negative diagnostic fixture retains explicit entry shape
 1	raw-cli-fixed-shape	file:tests/ui/args_spec_bad_parse_arity.jet	call:process.argv@0..0	1	fixture	negative CLI fixture exercises the parser boundary
 1	codable-structural	file:tests/ui/auto_derive_invalid_sign.jet	type:Codable@0..0	1	fixture	negative derive fixture exercises an invalid marker
 1	codable-structural	file:Examples/features/serde/json_typed.jet	type:ExactNumbers@309..321	1	expert-lesson	Decimal wire fidelity example keeps #Codable for its explicit codec lesson
-1	task-one-child	file:Examples/features/concurrency/shield_commit.jet	stmt:task.group@592..720	1	expert-lesson	the shield lesson requires the lexical group join to preserve the committed side effect
+1	task-one-child	file:Examples/features/concurrency/shield_commit.jet	stmt:task.group@699..827	1	expert-lesson	the shield lesson requires the lexical group join to preserve the committed side effect
+1	task-one-child	file:Examples/features/concurrency/conformance_capsule.jet	stmt:task.group@4382..4510	1	expert-lesson	#2375/D-SHIELDNAME1=A: the shield cell's lexical group joins the shielded race loser and preserves its committed side effect

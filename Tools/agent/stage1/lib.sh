@@ -46,10 +46,10 @@
 #
 # A compiler run sees only an explicit environment (env -i, see `jetc`): HOME,
 # PATH, TMPDIR, LC_ALL=C, the JET_BOOTSTRAP_* protocol, a private empty
-# JET_STORE_DIR per run, RUST_BACKTRACE and RUST_MIN_STACK. Nothing from the
-# caller's shell (JET_ADAPTER_*, JET_DEBUG_*, a shared record store) can make
-# two stages compile differently. Core sources are compiled into the binary
-# (jet_sema CORE_SOURCE_TEXTS), so no JET_TOOLCHAIN_ROOT is read.
+# JET_STORE_DIR per run, RUST_BACKTRACE and RUST_MIN_STACK. The native-feed
+# producer explicitly forwards its output/pack and collect-all policy below;
+# unrelated caller settings (JET_ADAPTER_*, JET_DEBUG_*, shared stores) stay out.
+# Core sources remain embedded in the same-source factory, not overlaid.
 
 JET_AGENT_TOOLS="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 JET_REPO="${JET_REPO:-$(cd "$JET_AGENT_TOOLS/../.." && pwd)}"
@@ -322,6 +322,11 @@ jetc() {
   # The compiler's streaming trace (crates/jet-driver/src/Trace.rs) passes through when requested.
   [ -n "${JET_TRACE_FILE:-}" ] && batch+=(JET_TRACE_FILE="$JET_TRACE_FILE")
   [ -n "${JET_TRACE_DETAIL:-}" ] && batch+=(JET_TRACE_DETAIL="$JET_TRACE_DETAIL")
+  # Native-feed policy is an explicit part of this request, not an ambient
+  # factory override. Preserve output identities and the real all-phases TSV.
+  for name in JET_FRONT_NATIVE_OUTPUT JET_FRONT_LIBRARY_OBJECT_OUTPUT JET_FRONT_LIBRARY_LIFECYCLE JET_FRONT_RUNTIME_PACK_OUTPUT JET_FRONT_RUNTIME_PLATFORM_INPUTS JET_RUNTIME_PACK JET_KEEP_GOING JET_KEEP_GOING_REPORT JET_KEEP_GOING_SKIP; do
+    if [ -n "${!name:-}" ]; then batch+=("$name=${!name}"); fi
+  done
   ( ulimit -c 0
     ulimit -s "${STAGE1_MAIN_STACK_KIB:-1048576}"
     exec systemd-run --user --slice=jetwork.slice --scope -q -p MemoryMax="${STAGE1_JETC_MEM:-20G}" -p MemorySwapMax=0 \

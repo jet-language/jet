@@ -1,0 +1,8 @@
+# Original tests/semindex.rs:1346-1362; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_indexes_generated_fenced_range_names.fixture
+step: jet inspect semindex fenced_range_names.jet --json
+json: stdout doc $.semindex.definitions[?leaf_name="t4"][0].detail.kind = "local"
+json: stdout doc $.semindex.definitions[?leaf_name="t4"][0].detail.mutable = false
+json: stdout doc $.semindex.definitions[?leaf_name="t4"][0].detail.type != null
+json: stdout doc $.semindex.references[?name="t4"] #= 1

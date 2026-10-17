@@ -1,0 +1,18 @@
+# PORT tests/repl.rs:2355-2373 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "items :: [1, 2, 3]\r" after 200ms
+pty-send: "items.f\t" after 120ms
+pty-send: "\u001b[B\u001b[B\r" after 150ms
+pty-send: "\u0003" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "filter" # Original candidates conjunction rs2366.
+stdout: ~ "filter_map" # Original candidates conjunction rs2366.
+stdout: ~ "items.find" # Original third selection rs2370.

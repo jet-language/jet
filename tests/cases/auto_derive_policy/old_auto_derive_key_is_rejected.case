@@ -1,0 +1,9 @@
+# PORT tests/auto_derive_policy.rs:505-531.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: old_auto_derive_key_is_rejected.fixture
+step: jet check main.jet --json
+exit: nonzero
+json: machine doc $.reports #= 1
+json: machine doc $.reports[0].code = "E1206"
+json: machine doc $.reports[0].what ~ "policy.auto_derive" # original ed77c235f tests/auto_derive_policy.rs:524 diagnostic.what.contains
+json: machine doc $.reports[0].fix ~ "policy.lints.deny" # original ed77c235f tests/auto_derive_policy.rs:528 diagnostic.fix.contains

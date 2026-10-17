@@ -1,0 +1,30 @@
+# PORT tests/auto_derive_policy.rs:245-327.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Split: ; compiler-lib LEDGER-ONLY helper lower_checked_mir_program_for RustAot NativeExecutable Dev, validate, conservative optimize expect success; generated-Rust byte-repeat equality/absdelta<=64 RETIRE, metrics print unasserted. Binary byte repeats/delta64 and stdout/exit relations executable; no private MIR admission projection
+fixture: auto_derive_keeps_compile_and_binary_measurements_stable.fixture
+step: jet build --release explicit/main.jet
+exit: 0
+capture: explicit_first = size file explicit/.jet/build/main
+step explicit_first: built
+exit: 0
+step: jet build --release explicit/main.jet
+exit: 0
+capture: explicit_repeat = size file explicit/.jet/build/main
+step explicit_repeat: built
+exit: 0
+stdout: == explicit_first
+cap:explicit_first: = "{cap:explicit_repeat}"
+step: jet build --release automatic/main.jet
+exit: 0
+capture: automatic_first = size file automatic/.jet/build/main
+step automatic_first: built
+exit: 0
+step: jet build --release automatic/main.jet
+exit: 0
+capture: automatic_repeat = size file automatic/.jet/build/main
+step automatic_repeat: built
+exit: 0
+stdout: == automatic_first
+cap:automatic_first: = "{cap:automatic_repeat}"
+stdout: == explicit_first
+cap:explicit_first: delta {cap:automatic_first} <= 64 # original ed77c235f tests/auto_derive_policy.rs:311,323-325 binary_bytes.abs_diff <= 64

@@ -1,0 +1,207 @@
+// Rust Text.rs:393-466 jet_text_graphemes (UAX #29 extended grapheme clusters)
+// and Text.rs:887-921 D-TEXTWIDTH1=B portable-default display width, over the
+// pinned Unicode 17.0.0 JUCD assets. One owner for core.text.graphemes /
+// display_width and the String padding methods (center/ljust/rjust/pad_*).
+use core.text.runtime.unicode_assets as width_assets
+use core.text.runtime.kernel_unicode_string as width_string
+use core.text.runtime.assets.unicode_general_category as width_category
+use core.text.runtime.assets.unicode_default_ignorable as width_ignorable
+use core.text.runtime.assets.unicode_east_asian_width as width_eaw
+use core.text.runtime.assets.unicode_grapheme_break as width_grapheme
+use core.text.runtime.assets.unicode_extended_pictographic as width_pictographic
+use core.text.runtime.assets.unicode_emoji as width_emoji
+use core.text.runtime.assets.unicode_emoji_presentation as width_emoji_presentation
+use core.text.runtime.assets.unicode_incb as width_incb
+
+// UTF-8 scalars; an invalid sequence decodes one byte as U+FFFD.
+fn decode_scalars(text: String) -> [Int] Never! {
+    raw :: width_string.utf8_bytes(text)
+    out := [Int]{}
+    i := 0
+    loop i < raw.len() {
+        first := Int.from_u8(raw[i])
+        width :: width_string.utf8_width_at(raw, i)
+        if width == 1 {
+            &out.push(if first < 128 -> first else -> 65533)
+            i = i + 1
+            next
+        }
+        cp := 0
+        if width == 2 -> cp = first.bit_and(31)
+        if width == 3 -> cp = first.bit_and(15)
+        if width == 4 -> cp = first.bit_and(7)
+        valid := true
+        k := 1
+        loop k < width {
+            byte := Int.from_u8(raw[i + k])
+            if byte < 128 || byte >= 192 {
+                valid = false
+                break
+            }
+            cp = (cp << 6).bit_or((byte.bit_and(63)))
+            k = k + 1
+        }
+        if !valid {
+            &out.push(65533)
+            i = i + 1
+            next
+        }
+        &out.push(cp)
+        i = i + width
+    }
+    out
+}
+
+fn encode_cps(cps: [Int]) -> String Never! {
+    out := [U8]{}
+    loop cp in cps -> width_string.append_cp(&out, cp)
+    String.from_bytes(out) ?? ""
+}
+
+// Rust Text.rs:429-466 jet_text_graphemes: GB11 keeps the Extended_Pictographic
+// state through Extend/ZWJ, GB12/13 use RI parity, and GB9c tracks InCB
+// Consonant [Extend|Linker]* Linker [Extend|Linker]* × Consonant.
+fn graphemes(text: String) -> [String] Never! {
+    cps :: decode_scalars(text)
+    if cps.len() == 0 -> return [String]{}
+    out := [String]{}
+    cluster := [Int]{cps[0]}
+    ri_run := if is_ri(cps[0]) -> 1 else -> 0
+    saw_pic := is_extended_pictographic(cps[0])
+    incb_pending := incb_class(cps[0]) == 2
+    incb_linker := false
+    loop i in 1..<cps.len() {
+        cur :: cps[i]
+        pc :: grapheme_class(cps[i - 1])
+        cc :: grapheme_class(cur)
+        incb :: incb_class(cur)
+        break_here :: if {
+            pc == 5 && saw_pic && is_extended_pictographic(cur) -> false
+            pc == 6 && cc == 6 -> ri_run % 2 == 0
+            incb_pending && incb_linker && incb == 2 -> false
+            else -> grapheme_break_classes(pc, cc)
+        }
+        if break_here {
+            &out.push(encode_cps(cluster))
+            cluster = [Int]{}
+        }
+        &cluster.push(cur)
+        ri_run = if cc == 6 -> ri_run + 1 else -> 0
+        if cc != 4 && cc != 5 -> saw_pic = is_extended_pictographic(cur)
+        if incb == 2 {
+            incb_pending = true
+            incb_linker = false
+        } else if incb == 1 {
+            if incb_pending -> incb_linker = true
+        } else if incb != 3 {
+            incb_pending = false
+            incb_linker = false
+        }
+    }
+    &out.push(encode_cps(cluster))
+    out
+}
+
+// Rust Text.rs:416-427 GB3-GB9b/GB999 over pinned Grapheme_Cluster_Break tags:
+// 1 CR, 2 LF, 3 Control, 4 Extend, 5 ZWJ, 6 RI, 7 Prepend, 8 SpacingMark,
+// 9 L, 10 V, 11 T, 12 LV, 13 LVT.
+fn grapheme_break_classes(pc: Int, cc: Int) -> Bool {
+    if pc == 1 && cc == 2 -> return false
+    if pc == 1 || pc == 2 || pc == 3 -> return true
+    if cc == 1 || cc == 2 || cc == 3 -> return true
+    if pc == 9 && (cc == 9 || cc == 10 || cc == 12 || cc == 13) -> return false
+    if (pc == 12 || pc == 10) && (cc == 10 || cc == 11) -> return false
+    if (pc == 13 || pc == 11) && cc == 11 -> return false
+    if cc == 4 || cc == 5 -> return false
+    if cc == 8 -> return false
+    if pc == 7 -> return false
+    true
+}
+
+// Rust Text.rs:393 Indic_Conjunct_Break: 0 None, 1 Linker, 2 Consonant, 3 Extend.
+fn incb_class(cp: Int) -> Int {
+    width_assets.asset_tag(width_incb.UNICODE_INCB, cp, 0)
+}
+fn grapheme_class(cp: Int) -> Int {
+    width_assets.asset_tag(width_grapheme.UNICODE_GRAPHEME_BREAK, cp, 0)
+}
+fn is_ri(cp: Int) -> Bool { grapheme_class(cp) == 6 }
+fn is_extended_pictographic(cp: Int) -> Bool {
+    width_assets.asset_contains(width_pictographic.UNICODE_EXTENDED_PICTOGRAPHIC, cp)
+}
+
+// Rust Text.rs:887-914 portable-default grapheme width. Emoji is not the
+// Extended_Pictographic property used by GB11, and VS16 alone is not wide.
+fn cluster_width(cps: [Int]) -> Int Never! {
+    if cps.len() == 0 -> return 0
+    category_asset :: width_category.UNICODE_GENERAL_CATEGORY
+    if width_assets.asset_tag(category_asset, cps[0], 8) == 0 -> return 0
+    keycap_base :: (cps[0] >= 48 && cps[0] <= 57) || cps[0] == 35 || cps[0] == 42
+    keycap :: keycap_base && ((cps.len() == 2 && cps[1] == 0x20E3) ||
+        (cps.len() == 3 && cps[1] == 0xFE0F && cps[2] == 0x20E3))
+    if keycap -> return 2
+    if cps.len() >= 2 && is_ri(cps[0]) && is_ri(cps[1]) -> return 2
+    eaw_asset :: width_eaw.UNICODE_EAST_ASIAN_WIDTH
+    emoji_asset :: width_emoji.UNICODE_EMOJI
+    presentation_asset :: width_emoji_presentation.UNICODE_EMOJI_PRESENTATION
+    ignorable_asset :: width_ignorable.UNICODE_DEFAULT_IGNORABLE
+    variation := false
+    emoji := false
+    visible := false
+    loop cp in cps {
+        if cp == 0xFE0F -> variation = true
+        if width_assets.asset_contains(emoji_asset, cp) -> emoji = true
+        if width_assets.asset_tag(eaw_asset, cp, 0) == 2 ||
+            width_assets.asset_contains(presentation_asset, cp) -> return 2
+        category :: width_assets.asset_tag(category_asset, cp, 8)
+        if category != 2 && category != 3 &&
+            !width_assets.asset_contains(ignorable_asset, cp) -> visible = true
+    }
+    if variation && emoji -> return 2
+    if !visible -> return 0
+    1
+}
+
+// Rust jet_text_display_width_default: summed default cluster widths.
+fn display_width(text: String) -> Int Never! {
+    total := 0
+    loop cluster in graphemes(text) -> total = total + cluster_width(decode_scalars(cluster))
+    total
+}
+
+// Rust Text.rs jet_text_fill_columns: `columns` display columns of the first
+// grapheme of `fill`, repeated whole, then spaces for the remainder. An empty
+// fill, or a zero-width or too-wide unit, fills with spaces.
+fn fill_columns(fill: String, columns: Int) -> String Never! {
+    n :: if columns < 0 -> 0 else -> columns
+    units :: graphemes(fill)
+    if units.len() == 0 -> return spaces(n)
+    unit :: units[0]
+    unit_width :: cluster_width(decode_scalars(unit))
+    if unit_width <= 0 || unit_width > n -> return spaces(n)
+    out := [U8]{}
+    loop _ in 0..<(n /% unit_width) {
+        loop b in width_string.utf8_bytes(unit) -> &out.push(b)
+    }
+    loop _ in 0..<(n %% unit_width) -> &out.push(U8{32})
+    String.from_bytes(out) ?? panic("fill columns are whole graphemes and ASCII spaces")
+}
+
+// Rust jet_text_pad_start/pad_end/center (Text.rs:1078-1135): pad `text` to
+// `width` display columns with fill_columns units, before (`left`), after
+// (`right`) or split floor-left (both). The one padding owner for
+// core.text.pad_start/pad_end/center, core.text.parse.ljust/rjust/center and
+// the String methods.
+fn pad(text: String, width: Int, fill: String, left: Bool, right: Bool) -> String Never! {
+    gap := width - display_width(text)
+    if gap < 0 -> gap = 0
+    before :: if left && right -> gap /% 2 else -> if left -> gap else -> 0
+    after :: gap - before
+    "{fill_columns(fill, before)}{text}{fill_columns(fill, after)}"
+}
+
+fn spaces(n: Int) -> String Never! {
+    out := [U8]{}
+    loop _ in 0..<n -> &out.push(U8{32})
+    String.from_bytes(out) ?? panic("spaces are ASCII")
+}

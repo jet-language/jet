@@ -1,0 +1,14 @@
+# Port of tests/jetpack_platform.rs:113-173; host gate is the original cfg(not linux).
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) !os-name and dir-readable.
+requires: os-name:!linux
+fixture: platform_tier_gate_accepts_data_only_output_without_executable_service.fixture
+mkdir: project
+write: project/env.jet platform_tier_gate_accepts_data_only_output_without_executable_service.env.template
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+step: jetpack build --no-color
+cwd: project
+exit: 0
+stderr: ~ "built 1 package(s)" # original data-only realization predicate
+when dir-readable package-root/leases: entries: package-root/leases = 0
+when dir-readable package-root/lease-service/leases: entries: package-root/lease-service/leases = 0

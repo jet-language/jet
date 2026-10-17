@@ -10,7 +10,7 @@ fn cli_empty_dash(value: String) -> String Never! {
 }
 
 // `jet search <query>`: local/offline package discovery (U26).
-pub fn cli_cmd_search(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_search(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query :: parsed.positional.get(0) ?? {
         theme.error("search needs a query", "`jet search` reads the local discovery index; it never fetches.", "write `jet search postgres`.")
@@ -32,7 +32,7 @@ pub fn cli_cmd_search(verification: &StoreVerification, theme: Theme, parsed: CL
 }
 
 // `jet info <ref>`: local/offline package metadata (U26).
-pub fn cli_cmd_info(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_info(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     query :: parsed.positional.get(0) ?? {
         theme.error("info needs a package ref", "`jet info` reads the local discovery index; it never fetches.", "write `jet info default.ripgrep`.")
@@ -99,7 +99,7 @@ fn cli_discovery_index(verification: &StoreVerification, cache: &WorkspaceDeclar
 // `jetpack override draft <ref> [--overlay] [--provider] [--channel]
 // [--patch] [--allow-unfree]`: draft reviewed workspace overlay policy; it
 // never records hidden override state.
-pub fn cli_cmd_override(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_override(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     action :: parsed.positional.get(0) ?? {
         theme.error("override needs an action", "`jetpack override` only drafts reviewed source policy; it never records hidden override state.", "write `jetpack override draft <ref> --patch <file>`.")
@@ -180,7 +180,7 @@ pub fn cli_cmd_override(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Ne
 }
 
 // `jet logs <package> [--json]`: the latest recorded build attempt.
-pub fn cli_cmd_logs(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_logs(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     package :: parsed.positional.get(0) ?? {
         theme.error("logs needs a package name", "`jet logs` prints the latest recorded build attempt for one package.", "write `jet logs weirdctl`.")
         return EXIT_USAGE
@@ -190,7 +190,8 @@ pub fn cli_cmd_logs(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, T
         if recipe_debug_latest_json(hangar, package) == {
             .Ok(found) -> {
                 text :: found ?? return cli_missing_logs(theme, package)
-                term.stdout().write(text).drop("log output is best-effort")
+                stdout_handle := term.stdout()
+                &stdout_handle.write(text).drop("log output is best-effort")
                 return EXIT_OK
             }
             .Err(error) -> return cli_read_logs_error(theme, error.message())
@@ -199,7 +200,8 @@ pub fn cli_cmd_logs(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, T
         if recipe_debug_latest(hangar, package) == {
             .Ok(found) -> {
                 attempt :: found ?? return cli_missing_logs(theme, package)
-                term.stdout().write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
+                stdout_handle := term.stdout()
+                &stdout_handle.write(recipe_debug_text_logs(attempt)).drop("log output is best-effort")
                 return EXIT_OK
             }
             .Err(error) -> return cli_read_logs_error(theme, error.message())
@@ -219,7 +221,7 @@ fn cli_read_logs_error(theme: Theme, reason: String) -[IO, Time.Wait]> Int Never
 
 // U27: after a failed build, open an interactive shell in the preserved,
 // verified build scratch.
-pub fn cli_shell_on_failed_build(theme: Theme, roots: HangarRoots, package: String) Never! -[IO, FS, Env, Exec, Time.Wait]> {
+fn cli_shell_on_failed_build(theme: Theme, roots: HangarRoots, package: String) Never! -[IO, FS, Env, Exec, Time.Wait]> {
     found :: recipe_debug_latest(roots.hangar_dir(), package) ?? return
     attempt :: found ?? return
     if attempt.status != "failed" || attempt.scratch_dir == "" -> return
@@ -235,7 +237,7 @@ pub fn cli_shell_on_failed_build(theme: Theme, roots: HangarRoots, package: Stri
 
 // The attempt's preserved scratch only when it is exactly the real
 // `<hangar>/failed-scratch/<id>` directory for this package.
-pub fn cli_verified_failed_scratch(roots: HangarRoots, attempt: BuildAttempt, package: String) -[FS, Env]> String? Never! {
+fn cli_verified_failed_scratch(roots: HangarRoots, attempt: BuildAttempt, package: String) -[FS, Env]> String? Never! {
     id :: attempt.id
     expected_prefix :: "{recipe_debug_safe_name(package)}-"
     if attempt.package != package || !id.starts_with(expected_prefix) || id == "" || id == "." || id == ".." || recipe_debug_safe_name(id) != id -> return None

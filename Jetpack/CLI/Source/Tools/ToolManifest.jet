@@ -7,7 +7,7 @@
 TOOL_MANIFEST_SCHEMA :: prep { "jet-user-tools-v1" }
 
 // The persisted marker of a channel policy (tool tiers and source policies).
-pub fn cli_tool_policy_marker(policy: ChannelPolicy) -> String Never! {
+fn cli_tool_policy_marker(policy: ChannelPolicy) -> String Never! {
     if policy == {
         .Pinned -> "pinned"
         .Manual -> "#latest"
@@ -16,7 +16,7 @@ pub fn cli_tool_policy_marker(policy: ChannelPolicy) -> String Never! {
 }
 
 // The channel policy a persisted marker names, or None for an unknown one.
-pub fn cli_tool_policy_from_marker(marker: String) -> ChannelPolicy? Never! {
+fn cli_tool_policy_from_marker(marker: String) -> ChannelPolicy? Never! {
     if marker == {
         "pinned" -> Val(ChannelPolicy.Pinned)
         "#latest" -> Val(ChannelPolicy.Manual)
@@ -26,23 +26,23 @@ pub fn cli_tool_policy_from_marker(marker: String) -> ChannelPolicy? Never! {
 }
 
 // One declared source of the user-tools profile.
-pub struct ToolManifestSource {
-    pub name: String
-    pub upstream: String
-    pub provider: ProviderKind
-    pub policy: ChannelPolicy
-    pub raw: String
+struct ToolManifestSource {
+    name: String
+    upstream: String
+    provider: ProviderKind
+    policy: ChannelPolicy
+    raw: String
 }
 
 // One declared tool: the reference as written, the exact reference the
 // current channel pin resolved it to, its movement tier, and its bins.
-pub struct ToolManifestEntry {
-    pub name: String
-    pub reference: String
-    pub resolved: String
-    pub tier: ChannelPolicy
-    pub bins: [String]
-    pub members: [String]
+struct ToolManifestEntry {
+    name: String
+    reference: String
+    resolved: String
+    tier: ChannelPolicy
+    bins: [String]
+    members: [String]
 
     // Canonical order: name, then resolved reference.
     fn before(self, other: ToolManifestEntry) -> Bool Never! {
@@ -51,9 +51,9 @@ pub struct ToolManifestEntry {
     }
 }
 
-pub struct ToolManifest {
-    pub sources: [ToolManifestSource]
-    pub tools: [ToolManifestEntry]
+struct ToolManifest {
+    sources: [ToolManifestSource]
+    tools: [ToolManifestEntry]
 
     fn empty() -> ToolManifest Never! {
         ToolManifest{sources: [ToolManifestSource]{}, tools: [ToolManifestEntry]{}}
@@ -65,13 +65,13 @@ pub struct ToolManifest {
         schema :: cli_json_string_field(root, "schema")
         profile :: cli_json_string_field(root, "profile")
         if schema != TOOL_MANIFEST_SCHEMA || profile != TOOL_PROFILE_NAME -> return Err(CLIError.Other("user-tools manifest schema or profile identity mismatch"))
-        source_values :: pkg_json_array(root.get("sources") ?? DataTree.Null) ?? return Err(CLIError.Other("user-tools manifest sources field is not an array"))
+        source_values :: pkg_json_array(root.get("sources") ?? Dyn.Null) ?? return Err(CLIError.Other("user-tools manifest sources field is not an array"))
         if source_values.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.Other("user-tools source count exceeds bound"))
         sources := [ToolManifestSource]{}
         source_names := [String]{}
         loop value in source_values -> &sources.push(cli_tool_parse_manifest_source(value, &source_names))
         &sources.sort_by((left: ToolManifestSource, right: ToolManifestSource) -> left.name <=> right.name)
-        tool_values :: pkg_json_array(root.get("tools") ?? DataTree.Null) ?? return Err(CLIError.Other("user-tools manifest tools field is not an array"))
+        tool_values :: pkg_json_array(root.get("tools") ?? Dyn.Null) ?? return Err(CLIError.Other("user-tools manifest tools field is not an array"))
         if tool_values.len() > TOOL_PROFILE_MAX_TOOLS -> return Err(CLIError.Other("user-tools tool count exceeds bound"))
         tools := [ToolManifestEntry]{}
         tool_names := [String]{}
@@ -116,7 +116,7 @@ pub struct ToolManifest {
     }
 }
 
-fn cli_tool_parse_manifest_source(value: DataTree, names: &[String]) -> ToolManifestSource CLIError! {
+fn cli_tool_parse_manifest_source(value: Dyn, names: &[String]) -> ToolManifestSource CLIError! {
     source :: pkg_json_object(value) ?? return Err(CLIError.Other("user-tools manifest source entry is not an object"))
     cli_json_expect_exact_keys(source, [String]{"name", "policy", "provider", "raw", "upstream"}, "user-tools manifest source")
     name :: cli_tool_bounded_json_string(source, "name")
@@ -131,7 +131,7 @@ fn cli_tool_parse_manifest_source(value: DataTree, names: &[String]) -> ToolMani
     Ok(ToolManifestSource{name: name, upstream: upstream, provider: provider, policy: policy, raw: migrated.canonical})
 }
 
-fn cli_tool_parse_manifest_entry(value: DataTree, names: &[String], seen_bins: &[String]) -> ToolManifestEntry CLIError! {
+fn cli_tool_parse_manifest_entry(value: Dyn, names: &[String], seen_bins: &[String]) -> ToolManifestEntry CLIError! {
     tool :: pkg_json_object(value) ?? return Err(CLIError.Other("user-tools manifest tool entry is not an object"))
     cli_json_expect_exact_keys(tool, [String]{"bins", "members", "name", "reference", "resolved", "tier"}, "user-tools manifest tool")
     name :: cli_tool_bounded_json_string(tool, "name")
@@ -156,7 +156,7 @@ fn cli_tool_parse_manifest_entry(value: DataTree, names: &[String], seen_bins: &
 }
 
 // A manifest string field: at most 4096 bytes and no NUL.
-fn cli_tool_bounded_json_string(object: [String: DataTree], key: String) -> String CLIError! {
+fn cli_tool_bounded_json_string(object: [String: Dyn], key: String) -> String CLIError! {
     value :: cli_json_string_field(object, key)
     if value.bytes().len() > TOOL_PROFILE_MAX_STRING || value.bytes().contains(U8{0}) -> return Err(CLIError.Other("profile field `{key}` exceeds bounds"))
     Ok(value)
@@ -172,7 +172,7 @@ fn cli_tool_manifest_provider(name: String) -> ProviderKind CLIError! {
 // The manifest reference for a tool installed at `raw` under `policy`: the
 // canonical ref, with the policy's channel selector added when the source
 // has none yet.
-pub fn cli_tool_manifest_ref(raw: String, policy: ChannelPolicy) -> String Never! {
+fn cli_tool_manifest_ref(raw: String, policy: ChannelPolicy) -> String Never! {
     canonical :: MigratedRef.persisted(raw).canonical
     source :: canonical.cut_last(REF_PROVIDER_AT)?.after ?? ""
     if policy == ChannelPolicy.Pinned || source.contains(REF_CHANNEL_MARKER) -> return canonical
@@ -185,7 +185,7 @@ pub fn cli_tool_manifest_ref(raw: String, policy: ChannelPolicy) -> String Never
 
 // A provider-first upstream (`github:owner/repo#v1`) as its canonical
 // package-first manifest ref.
-pub fn cli_tool_source_manifest_ref(upstream: String) -> String Never! {
+fn cli_tool_source_manifest_ref(upstream: String) -> String Never! {
     reference :: if upstream.split_once(REF_SEPARATOR) == {
         .Val(parts) -> "{parts.after}@{parts.before}"
         .None -> upstream
@@ -194,7 +194,7 @@ pub fn cli_tool_source_manifest_ref(upstream: String) -> String Never! {
 }
 
 // The manifest sources recorded from a realization source table.
-pub fn cli_tool_manifest_sources_from_table(table: SourceTable) -> [ToolManifestSource] Never! {
+fn cli_tool_manifest_sources_from_table(table: SourceTable) -> [ToolManifestSource] Never! {
     sources := [ToolManifestSource]{}
     loop decl in table.declarations() {
         &sources.push(ToolManifestSource{name: decl.name, upstream: decl.upstream, provider: decl.via, policy: table.channel_policy(decl.name), raw: cli_tool_source_manifest_ref(decl.upstream)})
@@ -202,18 +202,18 @@ pub fn cli_tool_manifest_sources_from_table(table: SourceTable) -> [ToolManifest
     sources
 }
 
-pub fn cli_canonical_tool_reference(reference: String) -> String Never! {
+fn cli_canonical_tool_reference(reference: String) -> String Never! {
     MigratedRef.persisted(reference).canonical
 }
 
 // The version a reference pins: its last channel selector without a `v`.
-pub fn cli_tool_reference_version(reference: String) -> String Never! {
+fn cli_tool_reference_version(reference: String) -> String Never! {
     version :: reference.cut_last(REF_CHANNEL_MARKER)?.after ?? reference
     version.removeprefix("v")
 }
 
 // The source name after a reference's last `@`, without its selector.
-pub fn cli_tool_source_name(reference: String) -> String? Never! {
+fn cli_tool_source_name(reference: String) -> String? Never! {
     source :: reference.cut_last(REF_PROVIDER_AT)?.after ?? return None
     Val(source.split_once(REF_CHANNEL_MARKER)?.before ?? source)
 }
@@ -222,7 +222,7 @@ pub fn cli_tool_source_name(reference: String) -> String? Never! {
 // becomes an exact package ref when the source channel advances, so Store
 // gets a new immutable reference instead of treating a changed channel as a
 // corrupted prior output.
-pub fn cli_refresh_manifest_tool_pins(manifest: &ToolManifest, table: SourceTable) Never! {
+fn cli_refresh_manifest_tool_pins(manifest: &ToolManifest, table: SourceTable) Never! {
     loop decl in table.declarations() {
         selector :: decl.upstream.cut_last(REF_CHANNEL_MARKER)?.after ?? next
         if selector == "" || selector == "latest" || selector == "main" || (selector.starts_with("v") && selector.ends_with(".x")) -> next

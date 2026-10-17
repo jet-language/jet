@@ -67,7 +67,7 @@ fn run() {
     lock_path :: files.join(root, "value.lock")
     shown_lock_path :: make_lock_path(lock_path)
     print(shown_lock_path == lock_path)
-    print(!files.exists(lock_path))
+    print(files.exists(lock_path))
 }
 "#
     .replace("__FIXTURE__", &fixture);
@@ -167,17 +167,18 @@ fn run() {
     let mir = jet::run_compiler_work(|| {
         let mut bundle = jet::Loader::load_entry(entry.to_str().expect("UTF-8 fixture path"))
             .expect("load file owner fixture");
-        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
+        let (diagnostics, _facts, nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diagnostics.into_iter()
             .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "checked file owner fixture: {errors:#?}");
         let request = MirArtifactRequest::new(
-            MirArtifactTarget::Cranelift,
+            MirArtifactTarget::Interpreter,
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         );
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request)
             .expect("checked file owner TIR");
         jet::Codegen::TIR::lower_tir_to_mir(tir).expect("file owner MIR")
     });
@@ -353,7 +354,7 @@ fn run() {
     lock :: files.lock(lock_path) ?? panic("lock")
     print(files.exists(lock_path))
     close(^lock)
-    print(!files.exists(lock_path))
+    print(files.exists(lock_path))
 
     // The old owner's lexical exit must not delete a new ordinary file at
     // the same path after its consuming close.
@@ -460,13 +461,14 @@ fn failed_replacement(root: String) -> String {
     old_path :: files.join(root, "old.lock")
     owner := files.lock(old_path) ?? panic("old lock")
     occupied :: files.join(root, "occupied.lock")
-    files.write(occupied, "occupied") ?? panic("occupy")
-    owner = files.lock(occupied) ?? {
+    contender :: files.lock(occupied) ?? panic("hold occupied")
+    owner = files.lock(occupied, timeout: Val(core.time.duration_ms(1))) ?? {
         print(files.exists(old_path))
+        close(^contender)
         files.remove(occupied) ?? panic("remove occupied")
         return old_path
     }
-    panic("lock of occupied path must fail")
+    panic("lock of held path must time out")
 }
 
 fn replace_aggregate_slot() {
@@ -485,7 +487,7 @@ fn run() {
     print(!files.exists(paths[1]))
     replace_moved_slot()
     old_lock :: failed_replacement("__ROOT__")
-    print(!files.exists(old_lock))
+    print(files.exists(old_lock))
     replace_aggregate_slot()
 }
 "#.replace("__ROOT__", &root);
@@ -579,17 +581,18 @@ fn run() {
     let mir = jet::run_compiler_work(|| {
         let mut bundle = jet::Loader::load_entry(entry.to_str().expect("UTF-8 fixture path"))
             .expect("load borrowed temporary fixture");
-        let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-            .into_iter()
+        let (diagnostics, _facts, nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let errors: Vec<_> = diagnostics.into_iter()
             .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
             .collect();
         assert!(errors.is_empty(), "checked borrowed temporary fixture: {errors:#?}");
         let request = MirArtifactRequest::new(
-            MirArtifactTarget::Cranelift,
+            MirArtifactTarget::Interpreter,
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         );
-        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, request)
+        let tir = jet::Codegen::TIR::lower_checked_tir_program_for(&bundle, &nominals, request)
             .expect("checked borrowed temporary TIR");
         let mir = jet::Codegen::TIR::lower_tir_to_mir(tir).expect("borrowed temporary MIR");
         jet_foundation::MIR::optimize_mir_program(

@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/budget.rs:660-685; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
+fixture: fixtures/failure
+step: jet budget check --annotations github
+exit: 1
+stdout: empty
+stderr: ~ "Error [E2907]: performance budget public-api regressed" # original predicate
+stderr: ~ "::error file=src/run.jet" # original predicate
+stderr: ~ "performance budget public-api regressed%0AWhy: measured estimator" # original predicate
+stderr: ~ "%0AFix: improve the measured behavior, inspect `jet budget check --verbose`, or record an explicit exception" # original predicate
+stderr: ~ "budgets failed: 1 budget failed · report " # original predicate

@@ -1,0 +1,39 @@
+use core.files as fs
+use core.encoding.json as json
+use core.http.client as http_client
+use core.http.server as http_server
+use core.net as net
+
+#Codable
+struct Request {
+    name: String
+    role: String
+}
+
+fn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {
+    request :: req.json<Request>() ?? return Ok(http_server.response(400, "invalid-json"))
+    if request.name == "" -> return Ok(http_server.response(422, "invalid-name"))
+    return Ok(http_server.response(200, "accepted|{request.name}|{request.role}"))
+}
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) (HTTPError | IOError | NetError | TaskFailure)! {
+    input :: args.input
+    body :: fs.read(input) ?? panic("cannot read input")
+    payload :: json.decode<Request>(body) ?? panic("cannot parse input")
+    listener :: net.tcp_listen("127.0.0.1:0")
+    address :: listener.local_addr()
+    mux :: http_server.mux()
+    mux.post("/agent", (req: HTTPRequest) -> handle(req))
+    t :: task { http_server.serve_once_listener(listener, mux) }
+    request :: http_client.request("POST", "http://{address}/agent")
+        .json(payload)
+    response :: request.send()
+    answer :: response.text()
+    print("{response.status()}|{answer}")
+    t.join()
+}

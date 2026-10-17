@@ -1,0 +1,9 @@
+# Port of tests/duration_runtime.rs:53-61. PENDING-SAME-HEAD; original source bytes and assertions preserved.
+# RETIRE-review override: formatter output is public, not a Rust-only unit.
+fixture: fixtures/formatter_preserves_duration_unit_calls
+step: jet fmt main.jet
+copy: main.jet once.jet
+step: jet fmt main.jet
+file: main.jet == once.jet
+file: main.jet ~ "Duration.seconds(1)" # original predicate: once/twice output contains constructor
+file: main.jet ~ "d.in(.Milliseconds)" # original predicate: once/twice output contains unit read

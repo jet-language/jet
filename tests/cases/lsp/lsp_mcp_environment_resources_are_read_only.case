@@ -1,0 +1,47 @@
+# Port of tests/lsp.rs:860-1004; original source bytes/order/assertions.
+# PENDING-SEAM(read_bytes): Main ballot + CoreState2 + kit batch three.
+# PENDING-GRAMMAR: collection, negated JSON filters, capture/write and named-stream equality.
+fixture: fixtures/lsp_mcp_environment_resources_are_read_only
+env: HOME=/test/home
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/0.json
+recv lsp
+stdout: ~ "\"protocolVersion\": \"2025-11-25\"" # original predicate; unrelated metadata varies
+stdout: ~ "\"resources\": {" # original predicate; unrelated metadata varies
+stdout: ~ "\"subscribe\": false" # original predicate; unrelated metadata varies
+stdout: ~ "\"listChanged\": false" # original predicate; unrelated metadata varies
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/1.json
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/2.json
+recv lsp
+stdout: ~ "jet://environment" # original predicate; unrelated metadata varies
+stdout: ~ "application/json" # original predicate; unrelated metadata varies
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/3.json
+recv lsp
+stdout: ~ "\"contents\"" # original predicate; unrelated metadata varies
+stdout: ~ "active_environment" # original predicate; unrelated metadata varies
+stdout: ~ "fixture" # original predicate; unrelated metadata varies
+stdout: ~ "generated.txt" # original predicate; unrelated metadata varies
+stdout: ~ "HOME" # original predicate; unrelated metadata varies
+stdout: ~ "lint_all" # original predicate; unrelated metadata varies
+stdout: !~ "/test/home" # original negative predicate; unrelated metadata varies
+capture: resource stdout doc $.result.contents[0].text
+step envinfo: jet env info --json --no-color
+env: HOME=/test/home
+exit: 0
+write: resource.json messages/lsp_mcp_environment_resources_are_read_only/resource.template
+json: file resource.json doc $ == envinfo.stdout
+file: .jet/services absent
+copy: invalid-env.txt env.jet
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/4.json
+recv lsp
+stdout: ~ "\"error\"" # original predicate; unrelated metadata varies
+stdout: ~ "-32002" # original predicate; unrelated metadata varies
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/5.json
+recv lsp
+stdout: ~ "\"error\"" # original predicate; unrelated metadata varies
+stdout: ~ "-32002" # original predicate; unrelated metadata varies
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/6.json
+recv lsp until $.id = 6
+send lsp: messages/lsp_mcp_environment_resources_are_read_only/7.json
+close lsp
+exit: 0

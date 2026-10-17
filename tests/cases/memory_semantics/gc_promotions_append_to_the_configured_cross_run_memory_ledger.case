@@ -1,0 +1,20 @@
+# Port of tests/memory_semantics.rs:502-573; source verbatim, ORACLE-LITERAL lines540/558.
+# PENDING-GRAMMAR(batch-four): capture-count and multiplicative numeric RHS.
+fixture: fixtures/gc
+env: NO_COLOR=1
+env: JET_MEMORY_LEDGER={work}/.jet/memory/ledger-v1.jsonl
+step first: jet run gc.jet
+exit: 0
+stdout: = gc.out
+capture: first_lines = lines file .jet/memory/ledger-v1.jsonl
+file: .jet/memory/ledger-v1.jsonl lines >= 1 # original predicate: first_rows > 0
+file: .jet/memory/ledger-v1.jsonl each-line ~ "\"kind\":\"gc\"" # original predicate
+file: .jet/memory/ledger-v1.jsonl each-line ~ "\"provenance\":\"" # original predicate
+step: jet run gc.jet
+exit: 0
+stdout: = gc.out
+file: .jet/memory/ledger-v1.jsonl lines = 2*{cap:first_lines} # original predicate
+step: jet audit memory --json
+exit: 0
+stdout: ~ "\"coverage\":\"exercised runs only\"" # original predicate
+json: stdout doc $.memory.witnesses = 2*{cap:first_lines} # original predicate

@@ -1,0 +1,29 @@
+# Port of tests/cli_parts/core.rs:862-932; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+fixture: fixtures/budget_artifact
+step: jet budget check --json
+exit: 0
+stderr: empty
+json: stdout canonical # original predicate
+json: stdout doc $ : object # original pattern
+json: stdout doc $.budget : object # canonical_field
+json: stdout doc $.budget.report : object # original pattern
+json: stdout doc $.budget.report.content : object # original pattern
+json: stdout doc $.budget.report.content.subject : object # original pattern
+json: stdout doc $.budget.report.content.subject.artifact : object # original pattern
+capture: bytes stdout doc $.budget.report.content.subject.artifact.bytes
+capture: digest stdout doc $.budget.report.content.subject.artifact.sha256
+json: stdout doc $.budget.report.content.subject.artifact.bytes : int # original predicate
+json: stdout doc $.budget.report.content.subject.artifact.sha256 : string # original predicate
+file: .jet/build/run size = {cap:bytes} # original predicate
+file: .jet/build/run sha256 = "{cap:digest}" # original predicate
+json: stdout doc $.budget.report.content.measurements : array # original pattern
+json: stdout doc $.budget.report.content.measurements[0] : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].samples : array # original pattern
+json: stdout doc $.budget.report.content.measurements[0].samples[0] : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].samples[0].num : int # original pattern
+json: stdout doc $.budget.report.content.measurements[0].samples[0].num == $.budget.report.content.subject.artifact.bytes # original predicate
+json: stdout doc $.budget.report.content.measurements[0].provider : object # original pattern
+json: stdout doc $.budget.report.content.measurements[0].provider.kind = "BuildArtifact"
+json: stdout doc $.budget.report.content.measurements[0].unit = "Bytes"

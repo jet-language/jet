@@ -1,0 +1,49 @@
+
+use core.encoding as encoding
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn terminal(writer: &cbor.CBORWriter, reason: String) -> Bool {
+    repeated :: writer.finish()
+    if repeated == {
+        .Err(error) -> return error.reason == reason
+        .Ok(_) -> return false
+    }
+    return false
+}
+
+fn close_array(writer: &cbor.CBORWriter) {
+    result :: writer.write(encoding.DataEvent.ArrayEnd)
+    if result == {
+        .Err(error) -> panic("{error.reason}")
+        .Ok(_) -> return
+    }
+}
+
+fn run() {
+    roomy := encoding.EncodingLimits.safe()
+    roomy.max_item_bytes = 9
+    output :: files.create("{work}/success.cbor") ?? panic("create")
+    writer := cbor.writer(^output, roomy) ?? panic("writer")
+    writer.write(encoding.DataEvent.ArrayStart) ?? panic("start")
+    loop _ in 0..7 { writer.write(encoding.DataEvent.Null) ?? panic("null") }
+    close_array(&writer)
+    writer.finish() ?? panic("finish")
+
+    tight := encoding.EncodingLimits.safe()
+    tight.max_item_bytes = 7
+    rejected_output :: files.create("{work}/rejected.cbor") ?? panic("create rejected")
+    rejected_writer := cbor.writer(^rejected_output, tight) ?? panic("rejected writer")
+    rejected_writer.write(encoding.DataEvent.ArrayStart) ?? panic("rejected start")
+    loop _ in 0..6 { rejected_writer.write(encoding.DataEvent.Null) ?? panic("accepted null") }
+    if rejected_writer.write(encoding.DataEvent.Null) == {
+        .Err(first) -> {
+            print(first.reason == "max_item_bytes 7 exceeded")
+            print(terminal(&rejected_writer, first.reason.copy()))
+        }
+        .Ok(_) -> {
+            print(false)
+            print(false)
+        }
+    }
+}

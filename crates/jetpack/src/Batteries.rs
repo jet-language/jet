@@ -11,7 +11,7 @@ use crate::SHA256;
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
-pub(crate) const SOURCE_NAME: &str = "batteries";
+pub const SOURCE_NAME: &str = "batteries";
 pub(crate) const UPSTREAM: &str = "embedded:batteries";
 
 #[derive(Debug, Clone, Copy)]
@@ -28,6 +28,19 @@ pub(crate) struct EmbeddedPackage {
 }
 
 include!(concat!(env!("OUT_DIR"), "/batteries_registry.rs"));
+
+/// The built-in source table that resolves `<slug>@batteries` refs — the same
+/// declaration `jetpack env --prep` adds to every project table.
+pub fn source_table() -> crate::RefSpec::SourceTable {
+    let mut table = crate::RefSpec::SourceTable::empty();
+    table.ensure_decl(SOURCE_NAME, UPSTREAM, crate::RefSpec::ProviderKind::Core);
+    table
+}
+
+/// Every first-party battery package slug in the embedded catalog.
+pub fn package_slugs() -> impl Iterator<Item = &'static str> {
+    PACKAGES.iter().map(|package| package.slug)
+}
 
 pub(crate) fn materialize_package(store_dir: &Path, slug: &str) -> Result<PathBuf, String> {
     let package = PACKAGES

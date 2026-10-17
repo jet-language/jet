@@ -1,0 +1,32 @@
+// HTTPMessage.rs:195-270: Clone/PartialEq/JetShow for five HTTP primitives.
+// Text wrappers are the E4 owner itself, not an extra box. Status and Version
+// own the EncodingABI one-word carrier; no Rust layout participates.
+#Export(c) fn jet_rt_handle_clone_jet_http_method(value: I64) -> I64 { jet_rt_string_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_http_method(value: I64) { jet_rt_string_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_http_method(left: I64, right: I64) -> Bool { jet_rt_string_eq(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_http_method(value: I64) -> I64 { jet_rt_string_clone(value) }
+#Export(c) fn jet_rt_handle_clone_jet_http_header_name(value: I64) -> I64 { jet_rt_string_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_http_header_name(value: I64) { jet_rt_string_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_http_header_name(left: I64, right: I64) -> Bool { jet_rt_string_eq(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_http_header_name(value: I64) -> I64 { jet_rt_string_clone(value) }
+#Export(c) fn jet_rt_handle_clone_jet_http_header_value(value: I64) -> I64 { jet_rt_string_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_http_header_value(value: I64) { jet_rt_string_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_http_header_value(left: I64, right: I64) -> Bool { jet_rt_string_eq(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_http_header_value(value: I64) -> I64 { jet_rt_string_clone(value) }
+#Export(c) fn jet_rt_handle_clone_jet_http_status(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_http_status(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_http_status(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_http_status(value: I64) -> I64 {
+    jet_rt_i64_to_string(encoding_word(value + ENCODING_ENUM_TAG))
+}
+#Export(c) fn jet_rt_handle_clone_jet_http_version(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_http_version(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_http_version(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_show_jet_http_version(value: I64) -> I64 {
+    ordinal :: encoding_word(value + ENCODING_ENUM_TAG)
+    if (ordinal == I64{0}) -> return display_literal(I64{3471766442030158920}, I64{8}) // HTTP/1.0
+    if (ordinal == I64{1}) -> return display_literal(I64{3543824036068086856}, I64{8}) // HTTP/1.1
+    if (ordinal == I64{2}) -> return display_literal(I64{55178792555592}, I64{6}) // HTTP/2
+    jet_rt_unreachable(I64{0}, I64{0})
+    I64{0} // unreachable provider terminates with status 101
+}

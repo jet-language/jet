@@ -93,7 +93,7 @@ fn store_explain_generation_packages(entry: StoreEntry, profile_name: String, nu
         &reports.push(ExplainReport.loss("{label} has unsupported metadata schema"))
         return
     }
-    packages :: pkg_json_array(object.get("packages") ?? DataTree.Null) ?? {
+    packages :: pkg_json_array(object.get("packages") ?? Dyn.Null) ?? {
         &reports.push(ExplainReport.loss("{label} metadata lacks packages"))
         return
     }
@@ -142,7 +142,7 @@ fn store_explain_generation_packages(entry: StoreEntry, profile_name: String, nu
 }
 
 // A string field of a JSON object, or None when absent or not a string.
-fn store_explain_json_text(object: [String: DataTree], field: String) -> String? Never! {
+fn store_explain_json_text(object: [String: Dyn], field: String) -> String? Never! {
     value :: object.get(field) ?? return None
     pkg_json_text(value)
 }

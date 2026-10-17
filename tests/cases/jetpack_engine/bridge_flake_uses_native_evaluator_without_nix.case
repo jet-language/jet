@@ -1,0 +1,32 @@
+# HAND-PORT tests/jetpack_engine.rs:6817-6933 bridge_flake_uses_native_evaluator_without_nix
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: bridge_flake_uses_native_evaluator_without_nix.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 0
+stdout: ~ "packages: [fd]" # original contains predicate
+json: file project/.jet/lock toml $.semantic_record[?key ^= "flake-evaluator-inventory:"] #= 17
+json: file project/.jet/lock toml $.semantic_record[?key ^= "flake-evaluator-inventory:"][?exact ~= "class=evaluable"] #= 10
+json: file project/.jet/lock toml $.semantic_record[?key ^= "flake-evaluator-inventory:"][?exact ~= "class=buildable"] #= 5
+json: file project/.jet/lock toml $.semantic_record[?key ^= "flake-evaluator-inventory:"][?exact ^= "status=skipped;"] #= 2
+json: file project/.jet/lock toml $.semantic_record[?key="flake-evaluator-inventory:dynamic-derivations"][?exact="status=skipped;class=skipped;reason=dynamic staging has a separate compatibility boundary"] #>= 1
+json: file project/.jet/lock toml $.semantic_record[?key="flake-evaluator-inventory:ifd"][?exact="status=skipped;class=skipped;reason=import-from-derivation requires a separate authority grant"] #>= 1
+json: file project/.jet/lock toml $.semantic_record[?key="flake-evaluator-inventory:fixed-output-fetchers"][?exact="status=covered;class=buildable;reason=explicit fetch authority returns verified canonical store paths"] #>= 1
+json: file project/.jet/lock toml $.semantic_record[?key="flake-evaluator-inventory:cross-system-packages"][?exact="status=covered;class=buildable;reason=explicit target authority projects pinned systems"] #>= 1
+json: file project/.jet/lock toml $.semantic_record[?key="flake-evaluator-inventory:external-flakes"][?exact="status=covered;class=evaluable;reason=explicit provider authority evaluates bounded external sources"] #>= 1
+json: file project/.jet/lock toml $.semantic_record[?key="flake-evaluator"][?exact="native-nix:2.34.8:b5aa0fbd538984f6e3d201be0005b4463d8b09f8:x86_64-linux"] #>= 1
+copy: project/.jet/lock before.lock
+write: project/flake.nix oversized.template
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 1
+stderr: ~ "E1256" # original contains predicate
+stderr: !~ "nix eval" # original negative contains predicate
+file: project/.jet/lock == before.lock
+

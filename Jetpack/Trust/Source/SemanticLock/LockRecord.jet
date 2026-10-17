@@ -5,7 +5,7 @@
 // package and toolchain sections. Human rationale never enters the machine
 // identity key.
 
-pub enum LockRecordKind {
+enum LockRecordKind {
     Package
     SourceRef
     WorkspaceMember
@@ -71,12 +71,12 @@ pub enum LockRecordKind {
     }
 }
 
-pub struct LockIdentity {
-    pub kind: LockRecordKind
-    pub key: String
-    pub exact: String
-    pub hash: String
-    pub platform: String
+struct LockIdentity {
+    kind: LockRecordKind
+    key: String
+    exact: String
+    hash: String
+    platform: String
 
     // `kind:key`: the merge and explain key.
     fn semantic_key(self) -> String Never! {
@@ -90,19 +90,19 @@ pub struct LockIdentity {
 }
 
 // Why a record exists and who asked for it. Never part of the identity.
-pub struct LockRationale {
-    pub owner_package: String
-    pub reason: String
-    pub source_ref: String
-    pub provider: String
-    pub channel_input: String
-    pub exact_output: String
-    pub policy_fingerprint: String
-    pub recipe_id: String
-    pub adapter_id: String
-    pub signature: String
-    pub cache_provenance: String
-    pub update_command: String
+struct LockRationale {
+    owner_package: String
+    reason: String
+    source_ref: String
+    provider: String
+    channel_input: String
+    exact_output: String
+    policy_fingerprint: String
+    recipe_id: String
+    adapter_id: String
+    signature: String
+    cache_provenance: String
+    update_command: String
 
     fn empty() -> LockRationale Never! {
         LockRationale{owner_package: "", reason: "", source_ref: "", provider: "", channel_input: "", exact_output: "", policy_fingerprint: "", recipe_id: "", adapter_id: "", signature: "", cache_provenance: "", update_command: ""}
@@ -128,11 +128,11 @@ pub struct LockRationale {
     }
 }
 
-pub struct SemanticRecord {
-    pub identity: LockIdentity
-    pub rationales: [LockRationale]
+struct SemanticRecord {
+    identity: LockIdentity
+    rationales: [LockRationale]
     // Fields written by a newer lock, kept by key for round trips.
-    pub future_fields: [String: String]
+    future_fields: [String: String]
 
     fn new(identity: LockIdentity, rationale: LockRationale) -> SemanticRecord Never! {
         SemanticRecord{identity, rationales: [LockRationale]{rationale}, future_fields: [String: String]{}}
@@ -140,22 +140,22 @@ pub struct SemanticRecord {
 }
 
 // One flake-style lock input with an optional `follows` edge (E4-JP13).
-pub struct LockInput {
-    pub name: String
-    pub url: String
-    pub follows: String
+struct LockInput {
+    name: String
+    url: String
+    follows: String
 }
 
 // Package pattern -> allowed source authorities (dependency-confusion guard).
-pub struct SourceMapEntry {
-    pub pattern: String
-    pub sources: [String]
+struct SourceMapEntry {
+    pattern: String
+    sources: [String]
 }
 
-pub struct SemanticLockFile {
-    pub records: [SemanticRecord]
-    pub inputs: [LockInput]
-    pub source_maps: [SourceMapEntry]
+struct SemanticLockFile {
+    records: [SemanticRecord]
+    inputs: [LockInput]
+    source_maps: [SourceMapEntry]
 
     fn empty() -> SemanticLockFile Never! {
         SemanticLockFile{records: [SemanticRecord]{}, inputs: [LockInput]{}, source_maps: [SourceMapEntry]{}}
@@ -190,7 +190,7 @@ pub struct SemanticLockFile {
             &self.records.push(new_record)
             return None
         }
-        previous :: ~self.records[found]
+        previous :: self.records[found].copy()
         kept := [SemanticRecord]{}
         loop index in 0..<self.records.len() {
             if index != found -> &kept.push(self.records[index])
@@ -227,7 +227,7 @@ pub struct SemanticLockFile {
         identity :: LockIdentity{kind: LockRecordKind.Package, key: logical_name, exact: provider_ref, hash, platform}
         provider :: if trust_text_split_first(provider_ref, TRUST_COLON) == {
             .Val(parts) -> parts.before
-            .None -> ~provider_ref
+            .None -> provider_ref.copy()
         }
         why := LockRationale.empty()
         why.owner_package = owner

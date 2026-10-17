@@ -1,0 +1,30 @@
+struct ScalarOwner {
+    parameter: Int?
+    parameters: [Int?]
+    changes: Int
+}
+fn consume_id(owner: &ScalarOwner, id: Int) {
+    owner.changes += id
+}
+fn consume_parameter(owner: &ScalarOwner) {
+    parameter :: owner.parameter.copy()
+    if parameter == .Val(id) -> consume_id(&owner, id)
+    indexed :: owner.parameters[0].copy()
+    if indexed == .Val(id) -> consume_id(&owner, id)
+}
+fn byte_count(bytes: View<U8>) -> Int {
+    bytes.len()
+}
+fn run() {
+    owner := ScalarOwner{parameter: Val(3), parameters: [Int?]{Val(4)}, changes: 0}
+    consume_parameter(&owner)
+    if owner.changes != 7 -> panic("detached scalar IDs changed")
+    expected :: Int?{Val(3)}
+    if expected != (Val(3)) -> panic("optional ID comparison changed")
+    index :: 2
+    if "jet_core_callable_2" != ("jet_core_callable_{index}") -> panic("symbol comparison changed")
+    bytes :: [U8]{U8{1}, U8{2}}
+    if byte_count(bytes[0..<bytes.len()]) != 2 -> panic("byte range view changed")
+    absent :: loop value in 0..<0 { break value } ?? -1
+    if absent != -1 -> panic("finite loop exhaustion changed")
+}

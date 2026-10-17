@@ -1,0 +1,348 @@
+// Reuses Core/text/runtime/float_format/{decoded,big,dragon}.jet at
+// e3ba3ff85, the pinned Rust core::num::flt2dec Dragon shortest algorithm.
+// Runtime storage is raw scratch, not exact Int or a Rust-backed collection.
+// Each Big32x40 slot has size@0 and forty zero-extended u32 limbs@8.
+// Products by <=1e9 fit signed I64, so digit generation needs no U128,
+// unsigned casts, allocator recursion or additional temporary allocations.
+fn float_big_limb(value: I64, index: I64) -> I64 { display_word(value + I64{8} + index * I64{8}) }
+
+fn float_big_put(value: I64, index: I64, limb: I64) {
+    display_store(value + I64{8} + index * I64{8}, limb)
+}
+
+fn float_big_init(value: I64, word: I64) {
+    i := I64{0}
+    loop i < (I64{40}) {
+        float_big_put(value, i, I64{0})
+        i += I64{1}
+    }
+    float_big_put(value, I64{0}, word.bit_and(I64{4294967295}))
+    float_big_put(value, I64{1}, word >> I64{32})
+    display_store(value, if (word >> I64{32} != I64{0}) -> I64{2} else if (word != I64{0}) -> I64{1} else -> I64{0})
+}
+
+fn float_big_copy(target: I64, source: I64) {
+    size :: display_word(source)
+    i := I64{0}
+    loop i < (I64{40}) {
+        float_big_put(target, i, if i < size -> float_big_limb(source, i) else -> I64{0})
+        i += I64{1}
+    }
+    display_store(target, size)
+}
+
+fn float_big_compare(a: I64, b: I64) -> I64 {
+    asize :: display_word(a)
+    bsize :: display_word(b)
+    i := if asize > bsize -> asize else -> bsize
+    loop i > (I64{0}) {
+        i -= I64{1}
+        av :: float_big_limb(a, i)
+        bv :: float_big_limb(b, i)
+        if av < bv -> return I64{-1}
+        if av > bv -> return I64{1}
+    }
+    I64{0}
+}
+
+fn float_big_less(a: I64, b: I64, inclusive: Bool) -> Bool {
+    order :: float_big_compare(a, b)
+    order < I64{0} || (inclusive && order == I64{0})
+}
+
+fn float_big_add(a: I64, b: I64) {
+    asize :: display_word(a)
+    bsize :: display_word(b)
+    size :: if asize > bsize -> asize else -> bsize
+    carry := I64{0}
+    i := I64{0}
+    loop i < size {
+        sum :: float_big_limb(a, i) + float_big_limb(b, i) + carry
+        float_big_put(a, i, sum.bit_and(I64{4294967295}))
+        carry = sum >> I64{32}
+        i += I64{1}
+    }
+    if {
+        (carry != I64{0}) -> {
+            float_big_put(a, size, carry)
+            display_store(a, size + I64{1})
+        }
+        else -> display_store(a, size)
+    }
+}
+
+fn float_big_sub(a: I64, b: I64) {
+    asize :: display_word(a)
+    bsize :: display_word(b)
+    size :: if asize > bsize -> asize else -> bsize
+    borrow := I64{0}
+    i := I64{0}
+    loop i < size {
+        rhs :: float_big_limb(b, i) + borrow
+        lhs :: float_big_limb(a, i)
+        borrow = if lhs < rhs -> I64{1} else -> I64{0}
+        float_big_put(a, i, lhs + (borrow << I64{32}) - rhs)
+        i += I64{1}
+    }
+    display_store(a, size)
+}
+
+fn float_big_mul(value: I64, factor: I64) {
+    size :: display_word(value)
+    carry := I64{0}
+    i := I64{0}
+    loop i < size {
+        product :: float_big_limb(value, i) * factor + carry
+        float_big_put(value, i, product.bit_and(I64{4294967295}))
+        carry = product >> I64{32}
+        i += I64{1}
+    }
+    if (carry != I64{0}) {
+        float_big_put(value, size, carry)
+        display_store(value, size + I64{1})
+    }
+}
+
+fn float_big_shift(value: I64, bits: I64) {
+    words :: bits /% I64{32}
+    rest :: bits % I64{32}
+    original :: display_word(value)
+    i := original
+    loop i > (I64{0}) {
+        i -= I64{1}
+        float_big_put(value, i + words, float_big_limb(value, i))
+    }
+    i = I64{0}
+    loop i < words {
+        float_big_put(value, i, I64{0})
+        i += I64{1}
+    }
+    size := original + words
+    if (rest > I64{0} && size > I64{0}) {
+        carry :: float_big_limb(value, size - I64{1}) >> (I64{32} - rest)
+        if (carry != I64{0}) {
+            float_big_put(value, size, carry)
+            size += I64{1}
+        }
+        i = original + words
+        loop i > words + (I64{1}) {
+            i -= I64{1}
+            limb :: (float_big_limb(value, i) << rest).bit_and(I64{4294967295})
+            float_big_put(value, i, limb.bit_or((float_big_limb(value, i - I64{1}) >> (I64{32} - rest))))
+        }
+        float_big_put(value, words, (float_big_limb(value, words) << rest).bit_and(I64{4294967295}))
+    }
+    display_store(value, size)
+}
+
+fn float_big_pow10(value: I64, power: I64) {
+    n := power
+    // Batching nine decimal powers keeps every product below 2^63, and
+    // avoids general big multiplication and copied cached-power owners.
+    loop n >= (I64{9}) {
+        float_big_mul(value, I64{1000000000})
+        n -= I64{9}
+    }
+    factor := I64{1}
+    loop n > (I64{0}) {
+        factor *= I64{10}
+        n -= I64{1}
+    }
+    if (factor != I64{1}) { float_big_mul(value, factor) }
+}
+
+fn float_leading_zeros(word: I64) -> I64 Never! {
+    n := I64{0}
+    value := word
+    if (value == I64{0}) { return I64{64} }
+    // Normalize to bit62 rather than bit63 so comparisons remain signed.
+    if (value < I64{2147483648}) {
+        value <<= I64{32}
+        n += I64{32}
+    }
+    if (value < I64{140737488355328}) {
+        value <<= I64{16}
+        n += I64{16}
+    }
+    if (value < I64{36028797018963968}) {
+        value <<= I64{8}
+        n += I64{8}
+    }
+    if (value < I64{576460752303423488}) {
+        value <<= I64{4}
+        n += I64{4}
+    }
+    if (value < I64{2305843009213693952}) {
+        value <<= I64{2}
+        n += I64{2}
+    }
+    if (value < I64{4611686018427387904}) { n += I64{1} }
+    n + I64{1}
+}
+
+fn float_digit(mant: I64, scale: I64, s2: I64, s4: I64, s8: I64) -> I64 {
+    digit := I64{48}
+    if (float_big_compare(mant, s8) >= I64{0}) {
+        float_big_sub(mant, s8)
+        digit += I64{8}
+    }
+    if (float_big_compare(mant, s4) >= I64{0}) {
+        float_big_sub(mant, s4)
+        digit += I64{4}
+    }
+    if (float_big_compare(mant, s2) >= I64{0}) {
+        float_big_sub(mant, s2)
+        digit += I64{2}
+    }
+    if (float_big_compare(mant, scale) >= I64{0}) {
+        float_big_sub(mant, scale)
+        digit += I64{1}
+    }
+    digit
+}
+
+fn float_round_up(digits: I64, length: I64) -> Bool {
+    i := length
+    loop i > (I64{0}) {
+        i -= I64{1}
+        digit :: display_byte(digits + i)
+        if (digit != I64{57}) {
+            display_put(digits + i, digit + I64{1})
+            i += I64{1}
+            loop i < length {
+                display_put(digits + i, I64{48})
+                i += I64{1}
+            }
+            return false
+        }
+    }
+    display_put(digits, I64{49})
+    i = I64{1}
+    loop i <= length {
+        display_put(digits + i, I64{48})
+        i += I64{1}
+    }
+    true
+}
+
+// Nonzero finite positive binary64 input. Output count@2656, exponent@2664
+// means the digit sequence represents digits * 10^(exponent-count).
+fn float_shortest(scratch: I64, bits: I64) {
+    fraction :: bits.bit_and(I64{4503599627370495})
+    exponent :: (bits >> I64{52}).bit_and(I64{2047})
+    mantissa := fraction << I64{1}
+    exp := I64{-1075}
+    upper := I64{1}
+    inclusive := true
+    if (exponent != I64{0}) {
+        full :: fraction.bit_or(I64{4503599627370496})
+        inclusive = (full.bit_and(I64{1})) == I64{0}
+        if {
+            (fraction == I64{0}) -> {
+                mantissa = full << I64{2}
+                upper = I64{2}
+                exp = exponent - I64{1077}
+            }
+            else -> {
+                mantissa = full << I64{1}
+                exp = exponent - I64{1076}
+            }
+        }
+    }
+    float_shortest_decoded(scratch, mantissa, exp, upper, inclusive)
+}
+
+// Binary32 decoder: 24-bit significand, bias 127, subnormal unit 2^-149.
+// Raw positive low32 input, never widened to binary64 before rounding.
+fn float32_shortest(scratch: I64, bits: I64) {
+    fraction :: bits.bit_and(I64{8388607})
+    exponent :: (bits >> I64{23}).bit_and(I64{255})
+    mantissa := fraction << I64{1}
+    exp := I64{-150}
+    upper := I64{1}
+    inclusive := true
+    if (exponent != I64{0}) {
+        full :: fraction.bit_or(I64{8388608})
+        inclusive = (full.bit_and(I64{1})) == I64{0}
+        if {
+            (fraction == I64{0}) -> {
+                mantissa = full << I64{2}
+                upper = I64{2}
+                exp = exponent - I64{152}
+            }
+            else -> {
+                mantissa = full << I64{1}
+                exp = exponent - I64{151}
+            }
+        }
+    }
+    float_shortest_decoded(scratch, mantissa, exp, upper, inclusive)
+}
+
+// The bounded Dragon arithmetic and tie rounding are shared by both widths.
+fn float_shortest_decoded(scratch: I64, mantissa: I64, exp: I64, upper: I64, inclusive: Bool) {
+    nbits :: I64{64} - float_leading_zeros(mantissa + upper - I64{1})
+    k := ((nbits + exp) * I64{1292913986}) >> I64{32}
+    mant :: scratch
+    minus :: scratch + I64{328}
+    plus :: scratch + I64{656}
+    scale :: scratch + I64{984}
+    sum :: scratch + I64{1312}
+    s2 :: scratch + I64{1640}
+    s4 :: scratch + I64{1968}
+    s8 :: scratch + I64{2296}
+    digits :: scratch + I64{2624}
+    float_big_init(mant, mantissa)
+    float_big_init(minus, I64{1})
+    float_big_init(plus, upper)
+    float_big_init(scale, I64{1})
+    if (exp < I64{0}) { float_big_shift(scale, -exp) } else {
+        float_big_shift(mant, exp)
+        float_big_shift(minus, exp)
+        float_big_shift(plus, exp)
+    }
+    if (k >= I64{0}) { float_big_pow10(scale, k) } else {
+        float_big_pow10(mant, -k)
+        float_big_pow10(minus, -k)
+        float_big_pow10(plus, -k)
+    }
+    float_big_copy(sum, mant)
+    float_big_add(sum, plus)
+    if float_big_less(scale, sum, inclusive) -> k += I64{1} else {
+        float_big_mul(mant, I64{10})
+        float_big_mul(minus, I64{10})
+        float_big_mul(plus, I64{10})
+    }
+    float_big_copy(s2, scale)
+    float_big_shift(s2, I64{1})
+    float_big_copy(s4, scale)
+    float_big_shift(s4, I64{2})
+    float_big_copy(s8, scale)
+    float_big_shift(s8, I64{3})
+    length := I64{0}
+    loop {
+        display_put(digits + length, float_digit(mant, scale, s2, s4, s8))
+        length += I64{1}
+        down :: float_big_less(mant, minus, inclusive)
+        float_big_copy(sum, mant)
+        float_big_add(sum, plus)
+        up :: float_big_less(scale, sum, inclusive)
+        if down || up {
+            if up {
+                float_big_shift(mant, I64{1})
+                if (!down || float_big_compare(mant, scale) >= I64{0}) {
+                    if float_round_up(digits, length) {
+                        length += I64{1}
+                        k += I64{1}
+                    }
+                }
+            }
+            display_store(scratch + I64{2656}, length)
+            display_store(scratch + I64{2664}, k)
+            return
+        }
+        float_big_mul(mant, I64{10})
+        float_big_mul(minus, I64{10})
+        float_big_mul(plus, I64{10})
+    }
+}

@@ -1,13 +1,13 @@
 // Provider-output JSON (Rust `jet_foundation::JSON::parse_lenient` and the
-// `DataTree` accessors provider parsers use). Known Nix store noise lines are
+// `Dyn` accessors provider parsers use). Known Nix store noise lines are
 // filtered before the strict Core parse and retained, so every later schema
 // error still shows the lines that were dropped.
 
 PROVIDER_JSON_MAX_BYTES :: prep { 1048576 }
 
-pub struct ProviderFilteredJSON {
-    pub value: DataTree
-    pub noise: [String]
+struct ProviderFilteredJSON {
+    value: Dyn
+    noise: [String]
 
     // A schema error with the filtered provider noise appended.
     fn diagnostic(self, error: String) -> String Never! {
@@ -22,7 +22,7 @@ pub struct ProviderFilteredJSON {
 
 // Parse provider output after dropping known noise lines; a parse failure is
 // `BadOutput` carrying the filtered noise.
-pub fn provider_json_parse_lenient(input: String) -> ProviderFilteredJSON ProviderError! {
+fn provider_json_parse_lenient(input: String) -> ProviderFilteredJSON ProviderError! {
     raw :: input.bytes()
     if raw.len() > PROVIDER_JSON_MAX_BYTES -> return Err(ProviderError.BadOutput("JSON input exceeds the 1 MiB limit"))
     kept := [U8]{}
@@ -49,25 +49,25 @@ pub fn provider_json_parse_lenient(input: String) -> ProviderFilteredJSON Provid
     }
 }
 
-// Rust `DataTree::get`: the value at `key`, or `missing key `key``. The
+// Rust `Dyn::get`: the value at `key`, or `missing key `key``. The
 // accessors fail with the Rust accessor's message text.
-fn provider_json_get(value: DataTree, key: String) -> DataTree ProviderReason! {
+fn provider_json_get(value: Dyn, key: String) -> Dyn ProviderReason! {
     object :: pkg_json_object(value) ?? return Err(ProviderReason{message: PKG_JSON_NOT_OBJECT})
     found :: object.get(key) ?? return Err(ProviderReason{message: "missing key `{key}`"})
     Ok(found)
 }
 
-fn provider_json_object(value: DataTree) -> [String: DataTree] ProviderReason! {
+fn provider_json_object(value: Dyn) -> [String: Dyn] ProviderReason! {
     object :: pkg_json_object(value) ?? return Err(ProviderReason{message: PKG_JSON_NOT_OBJECT})
     Ok(object)
 }
 
-fn provider_json_array(value: DataTree) -> [DataTree] ProviderReason! {
+fn provider_json_array(value: Dyn) -> [Dyn] ProviderReason! {
     items :: pkg_json_array(value) ?? return Err(ProviderReason{message: PKG_JSON_NOT_ARRAY})
     Ok(items)
 }
 
-fn provider_json_string(value: DataTree) -> String ProviderReason! {
+fn provider_json_string(value: Dyn) -> String ProviderReason! {
     text :: pkg_json_text(value) ?? return Err(ProviderReason{message: PKG_JSON_NOT_STRING})
     Ok(text)
 }

@@ -1,0 +1,155 @@
+// Canonical typed evidence (crates/jet-foundation/src/Evidence.rs): the
+// record shape and its outcome/expectation law. Evidence never implies a
+// stronger claim than the producer actually observed.
+
+enum EvidenceProducerKind { Test Prove Compile Runtime }
+
+enum EvidenceKind { Unit Contract Runtime Property Doctest }
+
+enum EvidenceFacet { All Refinements Effects Taint Contracts Tests Budgets Replay Solver }
+
+enum EvidenceOutcome { Proved Generated Passed Failed Checked Unchecked Unavailable Incomplete NotObserved Skipped Error }
+
+enum EvidenceExpectation { Ordinary ExpectedFailure }
+
+enum EvidenceCompleteness {
+    Complete
+    Incomplete(reason: String)
+    Unavailable(reason: String)
+}
+
+struct EvidenceIdentity {
+    report_id: String
+    claim_id: String
+    evidence_id: String
+}
+
+struct EvidenceSource {
+    path: String
+    line: U32
+    column: U32
+}
+
+struct EvidenceBuild {
+    toolchain: String
+    target: String
+    profile: String
+}
+
+struct EvidenceRevision {
+    source: String
+    build: String
+    revision: String
+}
+
+struct EvidenceAttachment {
+    name: String
+    value: String
+}
+
+struct EvidenceDiagnostic {
+    code: String
+    message: String
+    source: EvidenceSource?
+}
+
+struct EvidenceChainLink {
+    evidence_id: String
+    relation: String
+}
+
+struct EvidenceRecord {
+    identity: EvidenceIdentity
+    kind: EvidenceKind
+    facet: EvidenceFacet
+    producer: EvidenceProducerKind
+    outcome: EvidenceOutcome
+    expectation: EvidenceExpectation
+    count: U64
+    source: EvidenceSource
+    build: EvidenceBuild
+    revision: EvidenceRevision
+    detail: String
+    attachments: [EvidenceAttachment]
+    diagnostics: [EvidenceDiagnostic]
+    completeness: EvidenceCompleteness
+    chain: [EvidenceChainLink]
+    // Interned reason link; the containing report holds the canonical payload.
+    derivation: MIRDerivationRef?
+}
+
+#Error
+enum EvidenceExpectationError {
+    InvalidOutcome(expectation: EvidenceExpectation, outcome: EvidenceOutcome)
+}
+
+// Rust `EvidenceOutcome::as_str`.
+fn evidence_outcome_name(value: EvidenceOutcome) -> String Never! {
+    if value == {
+        .Proved -> "proved"
+        .Generated -> "generated"
+        .Passed -> "passed"
+        .Failed -> "failed"
+        .Checked -> "checked"
+        .Unchecked -> "unchecked"
+        .Unavailable -> "unavailable"
+        .Incomplete -> "incomplete"
+        .NotObserved -> "not_observed"
+        .Skipped -> "skipped"
+        .Error -> "error"
+    }
+}
+
+// Rust `EvidenceOutcome::is_failure`.
+fn evidence_outcome_is_failure(value: EvidenceOutcome) -> Bool Never! {
+    if value == {
+        .Failed | .Error -> true
+        else -> false
+    }
+}
+
+// Rust `EvidenceOutcome::is_incomplete`.
+fn evidence_outcome_is_incomplete(value: EvidenceOutcome) -> Bool Never! {
+    if value == {
+        .Unavailable | .Incomplete | .NotObserved | .Skipped -> true
+        else -> false
+    }
+}
+
+// Rust `EvidenceExpectation::as_str`.
+fn evidence_expectation_name(value: EvidenceExpectation) -> String Never! {
+    if value == {
+        .Ordinary -> "ordinary"
+        .ExpectedFailure -> "expected_failure"
+    }
+}
+
+// Rust `EvidenceExpectation::validate`: an expected failure describes only a
+// failed or (unexpectedly) passed observation.
+fn evidence_expectation_validate(expectation: EvidenceExpectation, outcome: EvidenceOutcome) EvidenceExpectationError! {
+    if expectation == EvidenceExpectation.ExpectedFailure && outcome != EvidenceOutcome.Failed && outcome != EvidenceOutcome.Passed {
+        return Err(EvidenceExpectationError.InvalidOutcome{expectation: expectation, outcome: outcome})
+    }
+}
+
+// Rust `Display for EvidenceExpectationError`.
+fn evidence_expectation_error_text(error: EvidenceExpectationError) -> String Never! {
+    if error == {
+        .InvalidOutcome(expectation, outcome) -> "evidence expectation {evidence_expectation_name(expectation)} cannot describe outcome {evidence_outcome_name(outcome)}"
+    }
+}
+
+// Rust `EvidenceRecord::validate`.
+fn evidence_record_validate(record: EvidenceRecord) EvidenceExpectationError! {
+    evidence_expectation_validate(record.expectation, record.outcome)
+}
+
+// Rust `EvidenceRecord::is_expected_failure`.
+fn evidence_record_is_expected_failure(record: EvidenceRecord) -> Bool Never! {
+    record.outcome == EvidenceOutcome.Failed && record.expectation == EvidenceExpectation.ExpectedFailure
+}
+
+// Rust `EvidenceRecord::is_unexpected_pass`.
+fn evidence_record_is_unexpected_pass(record: EvidenceRecord) -> Bool Never! {
+    record.outcome == EvidenceOutcome.Passed && record.expectation == EvidenceExpectation.ExpectedFailure
+}

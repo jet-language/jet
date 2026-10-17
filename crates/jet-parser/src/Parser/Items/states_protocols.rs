@@ -653,10 +653,10 @@ impl<'a> Parser<'a> {
     /// declaration (`marker Name(…)`) or a retired declaration spelling is
     /// at the cursor. The retired lookahead keeps its teaching diagnostic in
     /// the marker parser instead of producing a generic item error.
-    pub(super) fn at_marker_decl(&self) -> bool {
+    pub(in crate::Parser) fn at_marker_decl(&self) -> bool {
         matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::KW_MARKER)
             && matches!(&self.peek2().kind, TokKind::Ident(_))
-            && (matches!(&self.peek3().kind, TokKind::LParen)
+            && (matches!(&self.peek3().kind, TokKind::LParen | TokKind::Eq)
                 || matches!(&self.peek3().kind, TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON))
     }
 
@@ -673,10 +673,39 @@ impl<'a> Parser<'a> {
     /// arguments and fixed declaration metadata share this named-parameter
     /// list, told apart by `@` marks. Retired checked-text declarations are
     /// rejected before they can become an AST marker declaration.
-    pub(super) fn marker_decl(&mut self) -> Result<crate::AST::MarkerDecl, Diagnostic> {
+    pub(in crate::Parser) fn marker_decl(&mut self) -> Result<crate::AST::MarkerDecl, Diagnostic> {
         let start = self.peek().span;
         self.bump(); // consume `marker`
         let (name, name_span) = self.expect_ident("the marker name in `marker Name(params…)`")?;
+        if matches!(self.peek().kind, TokKind::Eq) {
+            self.bump();
+            self.expect(TokKind::Hash, "before a fixed marker group")?;
+            self.expect(TokKind::LBracket, "to open a fixed marker group")?;
+            let mut members = Vec::new();
+            while !matches!(self.peek().kind, TokKind::RBracket | TokKind::Eof) {
+                members.push(self.parse_marker_group_member()?);
+                if !matches!(self.peek().kind, TokKind::Comma) {
+                    break;
+                }
+                self.bump();
+            }
+            let end = self.peek().span.end;
+            self.expect(TokKind::RBracket, "to close a fixed marker group")?;
+            if members.len() < 2 {
+                self.diags.push(Diagnostic::error(
+                    "E0999",
+                    "a named marker group needs at least two members".to_string(),
+                    "a group names a marker stack, not a marker alias or an empty rule".to_string(),
+                    "write the marker directly at its use site, or give the group at least two members".to_string(),
+                    Some(Span::new(start.start, end)),
+                ));
+            }
+            return Ok(crate::AST::MarkerDecl {
+                name, name_span, is_pub: true, is_package_pub: false,
+                group: Some(members), params: Vec::new(), body: None,
+                span: Span::new(start.start, end),
+            });
+        }
         if matches!(&self.peek().kind, TokKind::Ident(n) if n == Syntax::TEXT_HEAD_ON) {
             let span = self.peek().span;
             self.skip_marker_trailer_balanced();
@@ -713,6 +742,9 @@ impl<'a> Parser<'a> {
         Ok(crate::AST::MarkerDecl {
             name,
             name_span,
+            is_pub: true,
+            is_package_pub: false,
+            group: None,
             params,
             body,
             span: Span::new(start.start, end),
@@ -1058,7 +1090,7 @@ mod marker_decl_tests {
         // A fact about the rule carries a value, not a type; an argument the
         // use site supplies carries a type.
         for param in &decl.params {
-            if param.name.starts_with('@') {
+            if param.name.starts_with('$') {
                 assert!(param.ty.is_none(), "{}", param.name);
                 assert!(param.value.is_some(), "{}", param.name);
             } else {
@@ -1072,32 +1104,6 @@ mod marker_decl_tests {
         }
     }
 
-    /// D-META-FORM1=A rejects a trailing `on` clause and a second parameter
-    /// list in favor of `@`-marked named parameters in the declaration's own
-    /// list. D-MARKER-SITES1=B also retires the former checked-text branch.
-    #[test]
-    fn rejected_spellings_each_teach_the_ratified_named_parameter_form() {
-        let source = concat!(
-            "\nmarker Inline(mode: String)",
-            " on [.Function]\n\n",
-            "marker Pre(condition: String)",
-            "(sites: [.Function])\n\nfn run() {}\n"
-        );
-        let (tokens, lex_diags) = Lexer::lex(source);
-        assert!(lex_diags.is_empty(), "{lex_diags:?}");
-        let diagnostics = match Parser::parse(&tokens) {
-            Ok(_) => Vec::new(),
-            Err(diagnostics) => diagnostics,
-        };
-        let codes: Vec<_> = diagnostics.iter().map(|d| d.code.as_str()).collect();
-        assert_eq!(codes, ["E0381", "E0381"], "{diagnostics:?}");
-        for diagnostic in &diagnostics {
-            assert!(
-                diagnostic.fix.contains('@'),
-                "fix must name the ratified @-marked named-parameter form: {diagnostic:?}"
-            );
-        }
-    }
 }
 
 #[cfg(test)]

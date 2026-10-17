@@ -1,0 +1,8 @@
+# Port of tests/build_entry.rs:3062-3103; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/unsupported_workspace_policy_allow_is_e3503
+step: jet build run.jet --gate impure=allow --json
+exit: nonzero
+json: machine doc $.reports[?code="E3503"] #>= 1
+json: machine doc $.reports[?code="E3503"][?why~="policy.allow"] #>= 1 # original contains
+file: stamp absent

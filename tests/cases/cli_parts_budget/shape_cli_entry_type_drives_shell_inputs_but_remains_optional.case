@@ -1,0 +1,54 @@
+# Port of tests/cli_parts/budget.rs:1290-1399; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
+# PENDING-GRAMMAR: count-lines (batch-four)
+fixture: fixtures/typed_optional
+step: jet run --profile=debug typed.jet -- --name Ada --verbose
+exit: 0
+stdout: = shape_cli_entry_type_drives_shell_inputs_but_remains_optional.out
+step: jet run --profile=debug typed.jet -- --help
+exit: 0
+stdout: ~ "--name" # original predicate
+stdout: ~ "person to greet" # original predicate
+stdout: ~ "--retries" # original predicate
+stdout: ~ "--verbose" # original predicate
+stdout: count-lines trim_start ^= "--help" = 1 # original predicate
+step: jet self completions bash --for build/typed
+exit: 0
+stdout: = shape-cli-bash.out
+stdout: ~ "help" # original predicate
+stdout: ~ "name" # original predicate
+stdout: ~ "retries" # original predicate
+stdout: ~ "verbose" # original predicate
+stdout: !~ "Ada" # original predicate
+step: jet self completions zsh --for build/typed
+exit: 0
+stdout: = shape-cli-zsh.out
+stdout: ~ "help" # original predicate
+stdout: ~ "name" # original predicate
+stdout: ~ "retries" # original predicate
+stdout: ~ "verbose" # original predicate
+stdout: !~ "Ada" # original predicate
+step: jet self completions fish --for build/typed
+exit: 0
+stdout: = shape-cli-fish.out
+stdout: ~ "help" # original predicate
+stdout: ~ "name" # original predicate
+stdout: ~ "retries" # original predicate
+stdout: ~ "verbose" # original predicate
+stdout: !~ "Ada" # original predicate
+step: jet self completions powershell --for build/typed
+exit: 0
+stdout: = shape-cli-powershell.out
+stdout: ~ "help" # original predicate
+stdout: ~ "name" # original predicate
+stdout: ~ "retries" # original predicate
+stdout: ~ "verbose" # original predicate
+stdout: !~ "Ada" # original predicate
+step: jet run --profile=debug plain.jet
+exit: 0
+stdout: = plain.out
+step: jet self completions bash --for build/plain
+exit: 0
+stdout: = shape-cli-plain.out
+stdout: ~ "--help" # original predicate
+stdout: !~ "--name" # original predicate

@@ -16,7 +16,7 @@ use jet_foundation::JitBackend::RunOutcome;
 use jet_foundation::MIR::{
     MirArtifactId, MirArtifactTarget, MirFunctionId, MirProgram, MirRuntimeValue,
 };
-use jet_jit::SourceResources::{
+use jet_evalhost::SourceResources::{
     SourceResourceLease, SourceResourceRetireError, SourceResourceSession,
 };
 use std::path::Path;
@@ -96,7 +96,7 @@ pub(crate) struct BootstrapJetCompileResult<SourceProgram = (), RuntimeConfig = 
 }
 
 pub(crate) type BootstrapSourceResume =
-    Box<dyn Fn(&mut jet_jit::SourceDeoptRequest) -> Result<jet_jit::SourceDeoptReply, String> + 'static>;
+    Box<dyn Fn(&mut jet_evalhost::SourceEntryRequest) -> Result<jet_evalhost::SourceEntryReply, String> + 'static>;
 pub(crate) type BootstrapSourceResumeFactory<'a, SourceProgram, RuntimeConfig> =
     Box<dyn FnOnce(SourceProgram, RuntimeConfig, SourceResourceLease) -> BootstrapSourceResume + 'a>;
 
@@ -130,7 +130,7 @@ pub(crate) struct BootstrapRunOutput<BackendOutput, SourceProgram = (), RuntimeC
 /// Source-root liveness and never treats a strong-count snapshot as retirement.
 #[derive(Debug)]
 pub(crate) enum BootstrapRunCompletionFinish {
-    Ready(Vec<jet_jit::SourceExecutionCompletion>),
+    Ready(Vec<jet_evalhost::SourceExecutionCompletion>),
     Pending {
         retirement_requested: bool,
         retained_roots: usize,
@@ -138,7 +138,7 @@ pub(crate) enum BootstrapRunCompletionFinish {
         pending_jobs: usize,
     },
     Complete {
-        failures: Vec<jet_jit::JetTaskFailure>,
+        failures: Vec<jet_evalhost::JetTaskFailure>,
     },
 }
 
@@ -146,27 +146,106 @@ pub(crate) enum BootstrapRunCompletionFinish {
 pub(crate) enum BootstrapRunCompletionFinishError {
     Retirement {
         error: SourceResourceRetireError,
-        completions: Vec<jet_jit::SourceExecutionCompletion>,
-        callback_failures: Vec<jet_jit::JetTaskFailure>,
+        completions: Vec<jet_evalhost::SourceExecutionCompletion>,
+        callback_failures: Vec<jet_evalhost::JetTaskFailure>,
     },
     State(String),
-    Unrouted(jet_jit::SourceExecutionCompletion),
+    Unrouted(jet_evalhost::SourceExecutionCompletion),
+}
+
+/// Private same-producer admission, retained by the outer invocation and every
+/// factory/callback adapter. It is not a Core schema or a user-selected library.
+#[derive(Clone, Copy)]
+pub(crate) struct HostBootstrapRuntimeAdmission {
+    library: &'static jet_codegen::ParentRuntimeLibrary::RuntimeLibrary,
+}
+
+impl HostBootstrapRuntimeAdmission {
+    pub(crate) fn library(&self) -> &'static jet_codegen::ParentRuntimeLibrary::RuntimeLibrary {
+        self.library
+    }
+
+    fn embedded() -> Result<Option<Self>, &'static str> {
+        use jet_codegen::ParentRuntimeLibrary::{self, Refusal};
+        let Some(record) = ParentRuntimeLibrary::embedded_admission() else {
+            return Ok(None);
+        };
+        // Check the two independently embedded producer identities agree before
+        // admit can execute a constructor. Never trust a receipt's self-hash.
+        if jet_foundation::SHA256::sha256(record.receipt_bytes) != record.expected_receipt_sha256 {
+            return Err(Refusal::RuntimeLibraryReceiptHashMismatch.key());
+        }
+        let receipt = jet_foundation::JSON::parse_json(
+            std::str::from_utf8(record.receipt_bytes)
+                .map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch.key())?,
+        ).map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch.key())?;
+        let library_hash = receipt.get("librarySHA256")
+            .and_then(|value| value.as_str())
+            .map_err(|_| Refusal::RuntimeLibraryReceiptHashMismatch.key())?;
+        const HEX: &[u8; 16] = b"0123456789abcdef";
+        if library_hash.len() != 64 || record.expected_library_sha256.iter().enumerate().any(|(index, byte)| {
+            library_hash.as_bytes()[index * 2] != HEX[usize::from(byte >> 4)]
+                || library_hash.as_bytes()[index * 2 + 1] != HEX[usize::from(byte & 15)]
+        }) {
+            return Err(Refusal::RuntimeLibraryLibraryHashMismatch.key());
+        }
+        let relative = Path::new(record.library_install_relative);
+        if relative.as_os_str().is_empty()
+            || relative.components().any(|part| !matches!(part, std::path::Component::Normal(_)))
+        {
+            return Err(Refusal::RuntimeLibraryLoadFailed.key());
+        }
+        // The installation root is the running host's directory, not cwd, an
+        // environment override, or a runtime receipt sidecar.
+        let executable = std::env::current_exe()
+            .map_err(|_| Refusal::RuntimeLibraryLoadFailed.key())?;
+        let installation = executable.parent()
+            .ok_or(Refusal::RuntimeLibraryLoadFailed.key())?;
+        let library = ParentRuntimeLibrary::admit(
+            &installation.join(relative), record.receipt_bytes, &record.expected_receipt_sha256,
+        ).map_err(|error| error.key())?;
+        if library.receipt_identity() != &record.expected_receipt_sha256
+            || library.library_identity() != &record.expected_library_sha256
+        {
+            return Err(Refusal::RuntimeLibraryIdentityMismatch.key());
+        }
+        Ok(Some(Self { library }))
+    }
+}
+
+#[cfg(all(test, not(jet_parent_runtime_admission)))]
+mod parent_runtime_admission_tests {
+    use super::*;
+
+    #[test]
+    fn absent_producer_does_not_admit_an_alternate_runtime() {
+        let owner = BootstrapRunCompletionOwner::new(
+            jet_evalhost::SourceExecutionCompletionScope::new(),
+        );
+        assert!(owner.parent_runtime_admission().unwrap().is_none());
+        let callback_owner = owner.clone();
+        assert!(std::sync::Arc::ptr_eq(
+            &owner.runtime_admission, &callback_owner.runtime_admission,
+        ));
+        assert!(callback_owner.parent_runtime_admission().unwrap().is_none());
+    }
 }
 
 #[derive(Default)]
 struct BootstrapRunCallbackJobState {
     complete: bool,
-    failures: Vec<jet_jit::JetTaskFailure>,
+    failures: Vec<jet_evalhost::JetTaskFailure>,
     failures_delivered: bool,
 }
 
 #[derive(Clone)]
 pub(crate) struct BootstrapRunCompletionOwner {
-    scope: jet_jit::SourceExecutionCompletionScope,
+    scope: jet_evalhost::SourceExecutionCompletionScope,
     resources: Option<SourceResourceSession>,
-    callback_jobs: Option<std::sync::Arc<dyn jet_jit::SourceCallbacks::SourceCallbackJobOwner>>,
+    callback_jobs: Option<std::sync::Arc<dyn jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>>,
     callback_job_state: std::sync::Arc<std::sync::Mutex<BootstrapRunCallbackJobState>>,
     allow_resource_retirement: bool,
+    runtime_admission: std::sync::Arc<std::sync::OnceLock<Result<Option<HostBootstrapRuntimeAdmission>, &'static str>>>,
 }
 
 impl std::fmt::Debug for BootstrapRunCompletionOwner {
@@ -181,13 +260,14 @@ impl std::fmt::Debug for BootstrapRunCompletionOwner {
 }
 
 impl BootstrapRunCompletionOwner {
-    pub(crate) fn new(scope: jet_jit::SourceExecutionCompletionScope) -> Self {
+    pub(crate) fn new(scope: jet_evalhost::SourceExecutionCompletionScope) -> Self {
         Self {
             scope,
             resources: None,
             callback_jobs: None,
             callback_job_state: std::sync::Arc::default(),
             allow_resource_retirement: false,
+            runtime_admission: std::sync::Arc::default(),
         }
     }
 
@@ -201,9 +281,9 @@ impl BootstrapRunCompletionOwner {
     pub(crate) fn register_callback_jobs(
         &mut self,
         callback_jobs: std::sync::Arc<
-            dyn jet_jit::SourceCallbacks::SourceCallbackJobOwner,
+            dyn jet_evalhost::SourceCallbacks::SourceCallbackJobOwner,
         >,
-    ) -> Result<(), std::sync::Arc<dyn jet_jit::SourceCallbacks::SourceCallbackJobOwner>> {
+    ) -> Result<(), std::sync::Arc<dyn jet_evalhost::SourceCallbacks::SourceCallbackJobOwner>> {
         if self.callback_jobs.is_some() {
             return Err(callback_jobs);
         }
@@ -211,8 +291,17 @@ impl BootstrapRunCompletionOwner {
         Ok(())
     }
 
-    pub(crate) fn completion_scope(&self) -> jet_jit::SourceExecutionCompletionScope {
+    pub(crate) fn completion_scope(&self) -> jet_evalhost::SourceExecutionCompletionScope {
         self.scope.clone()
+    }
+
+    pub(crate) fn parent_runtime_admission(
+        &self,
+    ) -> Result<Option<HostBootstrapRuntimeAdmission>, BootstrapHostCodecError> {
+        self.runtime_admission.get_or_init(HostBootstrapRuntimeAdmission::embedded)
+            .as_ref().copied().map_err(|key| BootstrapHostCodecError::InvalidMetadata(
+                format!("E0956: {key}: parent Jet runtime admission refused"),
+            ))
     }
 
     /// Call after consuming returned runtime values and retiring escaped
@@ -237,11 +326,11 @@ impl BootstrapRunCompletionOwner {
                     Some(callback_jobs) => {
                         callback_jobs.close_admission();
                         match callback_jobs.drain() {
-                        jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
+                        jet_evalhost::SourceCallbacks::SourceCallbackJobDrainOutcome::Pending {
                             open_callback_sessions,
                             pending_jobs,
                         } => (open_callback_sessions, pending_jobs, true),
-                        jet_jit::SourceCallbacks::SourceCallbackJobDrainOutcome::Complete {
+                        jet_evalhost::SourceCallbacks::SourceCallbackJobDrainOutcome::Complete {
                             failures,
                         } => {
                             state.complete = true;
@@ -276,7 +365,9 @@ impl BootstrapRunCompletionOwner {
             });
         };
         let (retirement_requested, retained_roots) = self.resource_liveness()?;
-        if retained_roots != 0 || !retirement_requested {
+        // A consumed factory result can authorize the first retirement request.
+        // Permission is not a prior request, and neither replaces root liveness.
+        if retained_roots != 0 || (!retirement_requested && !self.allow_resource_retirement) {
             return Ok(BootstrapRunCompletionFinish::Pending {
                 retirement_requested,
                 retained_roots,
@@ -353,7 +444,7 @@ impl BootstrapRunCompletionOwner {
     }
     fn take_callback_failures(
         &self,
-    ) -> Result<Vec<jet_jit::JetTaskFailure>, BootstrapRunCompletionFinishError> {
+    ) -> Result<Vec<jet_evalhost::JetTaskFailure>, BootstrapRunCompletionFinishError> {
         let mut state = self
             .callback_job_state
             .lock()
@@ -404,13 +495,13 @@ pub(crate) enum BootstrapRunError {
         retirement: SourceResourceRetireError,
     },
     ResourceRetirement(SourceResourceRetireError),
-    SourceExecution(jet_jit::SourceDeoptError),
+    SourceExecution(jet_evalhost::SourceEntryError),
     SourceExecutionResourceRetirement {
-        execution: jet_jit::SourceDeoptError,
+        execution: jet_evalhost::SourceEntryError,
         retirement: SourceResourceRetireError,
     },
-    SourceExecutionRetirement(jet_jit::SourceExecutionRetirementError),
-    UnroutedCompletion(jet_jit::SourceExecutionCompletion),
+    SourceExecutionRetirement(jet_evalhost::SourceExecutionRetirementError),
+    UnroutedCompletion(jet_evalhost::SourceExecutionCompletion),
     WithCompletionOwner {
         error: Box<BootstrapRunError>,
         completion_owner: BootstrapRunCompletionOwner,
@@ -695,7 +786,7 @@ pub(crate) fn run_bootstrap_artifact<BackendOutput, SourceProgram, RuntimeConfig
     BootstrapRunOutput<BackendOutput, SourceProgram, RuntimeConfig>,
     BootstrapRunError,
 > {
-    let scope = jet_jit::SourceExecutionCompletionScope::new();
+    let scope = jet_evalhost::SourceExecutionCompletionScope::new();
     let mut completion_owner = BootstrapRunCompletionOwner::new(scope.clone());
     let result = scope.with_current(|| {
         run_bootstrap_artifact_inner(
@@ -748,7 +839,7 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
         MirFunctionId,
         &AuthorizedSourceSnapshot,
     ) -> Result<Vec<u8>, BootstrapHostCodecError>,
-    completion_scope: &jet_jit::SourceExecutionCompletionScope,
+    completion_scope: &jet_evalhost::SourceExecutionCompletionScope,
     completion_owner: &mut BootstrapRunCompletionOwner,
 ) -> Result<
     BootstrapRunOutput<BackendOutput, SourceProgram, RuntimeConfig>,
@@ -937,13 +1028,12 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
             };
         };
         let resume = source_resume_factory(source_program, runtime_config, root_lease);
-        let execution = match jet_jit::execute_source_entry(
+        let execution = match jet_evalhost::execute_source_entry(
             &program,
             artifact,
             entry_function,
             resources.clone(),
             Vec::new(),
-            &config.execution.release_devtools_policy,
             resume,
         ) {
             Ok(execution) => execution,
@@ -1232,8 +1322,8 @@ fn run_bootstrap_artifact_inner<BackendOutput, SourceProgram, RuntimeConfig>(
 }
 
 fn record_source_completions(
-    scope: &jet_jit::SourceExecutionCompletionScope,
-    completions: Vec<jet_jit::SourceExecutionCompletion>,
+    scope: &jet_evalhost::SourceExecutionCompletionScope,
+    completions: Vec<jet_evalhost::SourceExecutionCompletion>,
 ) -> Result<(), BootstrapRunError> {
     for completion in completions {
         scope.record(completion);
@@ -1243,7 +1333,7 @@ fn record_source_completions(
 
 fn retire_bootstrap_resources(
     resources: Option<SourceResourceSession>,
-    completion_scope: &jet_jit::SourceExecutionCompletionScope,
+    completion_scope: &jet_evalhost::SourceExecutionCompletionScope,
 ) -> Result<(), BootstrapRunError> {
     if let Some(resources) = resources {
         let completions = resources
@@ -1508,4 +1598,55 @@ pub(crate) fn bootstrap_artifact_build_id(
             "cannot compute private compiler artifact identity: {error}"
         ))
     })
+}
+
+#[cfg(test)]
+mod completion_owner_tests {
+    use super::{BootstrapRunCompletionFinish, BootstrapRunCompletionOwner, SourceResourceSession};
+
+    fn finish_until_settled(owner: &BootstrapRunCompletionOwner) -> BootstrapRunCompletionFinish {
+        loop {
+            match owner.finish().expect("finish a bootstrap completion owner") {
+                BootstrapRunCompletionFinish::Ready(completions) => drop(completions),
+                settled => return settled,
+            }
+        }
+    }
+
+    // The AOT factory lease hands back its Source resource session without a
+    // retirement request (factory and optimizer-evidence modes). An owner
+    // allowed to retire must retire it, not report Pending forever.
+    #[test]
+    fn allowed_owner_retires_an_unrequested_resource_session() {
+        let scope = jet_evalhost::SourceExecutionCompletionScope::new();
+        let mut owner = BootstrapRunCompletionOwner::new(scope);
+        let resources = SourceResourceSession::new();
+        owner.set_resources(resources.clone());
+        assert!(matches!(
+            finish_until_settled(&owner),
+            BootstrapRunCompletionFinish::Pending { retirement_requested: false, retained_roots: 0, .. }
+        ));
+        owner.allow_resource_retirement();
+        match finish_until_settled(&owner) {
+            BootstrapRunCompletionFinish::Complete { failures } => assert!(failures.is_empty()),
+            other => panic!("an allowed owner left its resources unretired: {other:?}"),
+        }
+        assert!(resources.arena().is_retired().expect("retirement state"));
+    }
+
+    #[test]
+    fn allowed_owner_waits_for_retained_roots() {
+        let scope = jet_evalhost::SourceExecutionCompletionScope::new();
+        let mut owner = BootstrapRunCompletionOwner::new(scope);
+        let resources = SourceResourceSession::new();
+        owner.set_resources(resources.clone());
+        owner.allow_resource_retirement();
+        let root = resources.retain_root().expect("retain a Source root");
+        assert!(matches!(
+            finish_until_settled(&owner),
+            BootstrapRunCompletionFinish::Pending { retained_roots: 1, .. }
+        ));
+        drop(root);
+        assert!(matches!(finish_until_settled(&owner), BootstrapRunCompletionFinish::Complete { .. }));
+    }
 }

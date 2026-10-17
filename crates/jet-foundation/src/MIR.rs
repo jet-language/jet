@@ -21,7 +21,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
-pub const MIR_SCHEMA_VERSION: u16 = 6;
+pub const MIR_SCHEMA_VERSION: u16 = 7;
 
 macro_rules! mir_id {
     ($name:ident) => {
@@ -158,6 +158,16 @@ impl MirOwnership {
             last_use: false,
             gc_root: false,
         }
+    }
+
+    /// Semantic Copy does not imply that a physical carrier is dropless.
+    pub const fn copy_value() -> Self {
+        Self { drop: MirDropKind::Value, ..Self::copy() }
+    }
+
+    pub const fn is_runtime_owned(&self) -> bool {
+        !matches!(self.drop, MirDropKind::None)
+            && !matches!(self.mode, MirOwnershipMode::ReadBorrow | MirOwnershipMode::WriteBorrow)
     }
     /// Owned semantic values carry the ordinary drop obligation.
     #[allow(non_upper_case_globals)]
@@ -1520,6 +1530,10 @@ fn layout_for_kind(kind: &MirTypeKind) -> MirLayout {
                             bits: 32,
                         }
                         | MirTypeKind::IntN {
+                            signed: true,
+                            bits: 64,
+                        }
+                        | MirTypeKind::IntN {
                             signed: false,
                             bits: 32,
                         }
@@ -1895,7 +1909,6 @@ pub struct MirEffectFacts {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct MirTargetApplicability {
     pub rust_aot: bool,
-    pub cranelift: bool,
     pub interpreter: bool,
     pub web: bool,
 }
@@ -2804,7 +2817,7 @@ impl MirDecisionLedger {
         let root = crate::JSON::parse_json(payload)
             .map_err(|()| "decision ledger payload is not valid JSON".to_string())?;
         let root_fields = match root {
-            crate::DataTree::DataTree::Object(fields) => {
+            crate::Dyn::Dyn::Object(fields) => {
                 fields.into_iter().collect::<BTreeMap<_, _>>()
             }
             _ => return Err("decision ledger payload must be an object".to_string()),
@@ -2812,7 +2825,7 @@ impl MirDecisionLedger {
         if root_fields.len() != 3
             || !matches!(
                 root_fields.get("schema"),
-                Some(crate::DataTree::DataTree::Text(schema))
+                Some(crate::Dyn::Dyn::Text(schema))
                     if schema == "jet.mir.decisions.v1"
             )
         {
@@ -2826,7 +2839,7 @@ impl MirDecisionLedger {
         let rows_value = root_fields
             .get("rows")
             .ok_or_else(|| "decision ledger payload has no rows".to_string())?;
-        let crate::DataTree::DataTree::Array(rows_value) = rows_value else {
+        let crate::Dyn::Dyn::Array(rows_value) = rows_value else {
             return Err("decision ledger payload rows must be an array".to_string());
         };
         if rows_value.len() > 4096 {
@@ -2953,10 +2966,10 @@ fn decision_row_json(row: &MirDecisionRow) -> String {
 }
 
 fn decision_object(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
     label: &str,
-) -> Result<BTreeMap<String, crate::DataTree::DataTree>, String> {
-    let crate::DataTree::DataTree::Object(fields) = value else {
+) -> Result<BTreeMap<String, crate::Dyn::Dyn>, String> {
+    let crate::Dyn::Dyn::Object(fields) = value else {
         return Err(format!("{label} must be an object"));
     };
     let fields = fields.iter().cloned().collect::<BTreeMap<_, _>>();
@@ -2964,12 +2977,12 @@ fn decision_object(
 }
 
 fn decision_text(
-    fields: &BTreeMap<String, crate::DataTree::DataTree>,
+    fields: &BTreeMap<String, crate::Dyn::Dyn>,
     key: &str,
     label: &str,
 ) -> Result<String, String> {
     crate::JSON::json_get(
-        &crate::DataTree::DataTree::Object(
+        &crate::Dyn::Dyn::Object(
             fields.iter().map(|(key, value)| (key.clone(), value.clone())).collect(),
         ),
         key,
@@ -2980,7 +2993,7 @@ fn decision_text(
 }
 
 fn decision_u64(
-    fields: &BTreeMap<String, crate::DataTree::DataTree>,
+    fields: &BTreeMap<String, crate::Dyn::Dyn>,
     key: &str,
     label: &str,
 ) -> Result<u64, String> {
@@ -2988,7 +3001,7 @@ fn decision_u64(
         .get(key)
         .ok_or_else(|| format!("{label} has invalid `{key}`"))?;
     match value {
-        crate::DataTree::DataTree::Text(value) => value
+        crate::Dyn::Dyn::Text(value) => value
             .parse::<u64>()
             .map_err(|_| format!("{label} has invalid `{key}`")),
         _ => Err(format!("{label} has invalid `{key}`")),
@@ -2996,19 +3009,19 @@ fn decision_u64(
 }
 
 fn decision_optional_u64(
-    fields: &BTreeMap<String, crate::DataTree::DataTree>,
+    fields: &BTreeMap<String, crate::Dyn::Dyn>,
     key: &str,
     label: &str,
 ) -> Result<Option<u64>, String> {
     match fields.get(key) {
-        Some(crate::DataTree::DataTree::Null) => Ok(None),
+        Some(crate::Dyn::Dyn::Null) => Ok(None),
         Some(_) => decision_u64(fields, key, label).map(Some),
         None => Err(format!("{label} has no `{key}`")),
     }
 }
 
 fn parse_decision_identity(
-    value: &crate::DataTree::DataTree,
+    value: &crate::Dyn::Dyn,
 ) -> Result<MirDecisionIdentity, String> {
     let fields = decision_object(value, "decision identity")?;
     const KEYS: [&str; 7] = [
@@ -3034,7 +3047,7 @@ fn parse_decision_identity(
     })
 }
 
-fn parse_decision_span(value: &crate::DataTree::DataTree) -> Result<Span, String> {
+fn parse_decision_span(value: &crate::Dyn::Dyn) -> Result<Span, String> {
     let fields = decision_object(value, "decision span")?;
     if fields.len() != 2 || !fields.contains_key("start") || !fields.contains_key("end") {
         return Err("decision span has missing or unsafe fields".to_string());
@@ -3073,21 +3086,21 @@ fn parse_decision_disposition(value: &str) -> Option<MirDecisionDisposition> {
 }
 
 fn parse_decision_optional_identity(
-    value: Option<&crate::DataTree::DataTree>,
+    value: Option<&crate::Dyn::Dyn>,
 ) -> Result<Option<MirDecisionIdentity>, String> {
     match value {
-        None | Some(crate::DataTree::DataTree::Null) => Ok(None),
+        None | Some(crate::Dyn::Dyn::Null) => Ok(None),
         Some(value) => parse_decision_identity(value).map(Some),
     }
 }
 
 fn parse_decision_optional_edit(
-    value: Option<&crate::DataTree::DataTree>,
+    value: Option<&crate::Dyn::Dyn>,
 ) -> Result<Option<MirDecisionEdit>, String> {
     let Some(value) = value else {
         return Err("decision row has no `edit`".to_string());
     };
-    if matches!(value, crate::DataTree::DataTree::Null) {
+    if matches!(value, crate::Dyn::Dyn::Null) {
         return Ok(None);
     }
     let fields = decision_object(value, "decision edit")?;
@@ -3105,12 +3118,12 @@ fn parse_decision_optional_edit(
 }
 
 fn parse_decision_optional_ref(
-    value: Option<&crate::DataTree::DataTree>,
+    value: Option<&crate::Dyn::Dyn>,
 ) -> Result<Option<DerivationRef>, String> {
     let Some(value) = value else {
         return Err("decision row has no `derivation_ref`".to_string());
     };
-    if matches!(value, crate::DataTree::DataTree::Null) {
+    if matches!(value, crate::Dyn::Dyn::Null) {
         return Ok(None);
     }
     let fields = decision_object(value, "decision derivation reference")?;
@@ -3124,7 +3137,7 @@ fn parse_decision_optional_ref(
     )?)))
 }
 
-fn parse_decision_row(value: &crate::DataTree::DataTree) -> Result<MirDecisionRow, String> {
+fn parse_decision_row(value: &crate::Dyn::Dyn) -> Result<MirDecisionRow, String> {
     let fields = decision_object(value, "decision row")?;
     const KEYS: [&str; 16] = [
         "derivation_disposition",
@@ -3180,7 +3193,7 @@ fn parse_decision_row(value: &crate::DataTree::DataTree) -> Result<MirDecisionRo
     row.derivation = parse_decision_optional_ref(fields.get("derivation_ref"))?;
     row.identity = parse_decision_optional_identity(fields.get("identity"))?;
     row.evidence_method = match fields.get("evidence_method") {
-        Some(crate::DataTree::DataTree::Null) => None,
+        Some(crate::Dyn::Dyn::Null) => None,
         Some(value) => {
             let method = crate::JSON::json_str(value)
                 .ok_or_else(|| "decision row has invalid `evidence_method`".to_string())?;
@@ -3192,7 +3205,7 @@ fn parse_decision_row(value: &crate::DataTree::DataTree) -> Result<MirDecisionRo
         None => return Err("decision row has no `evidence_method`".to_string()),
     };
     row.derivation_disposition = match fields.get("derivation_disposition") {
-        Some(crate::DataTree::DataTree::Null) => None,
+        Some(crate::Dyn::Dyn::Null) => None,
         Some(value) => {
             let disposition = crate::JSON::json_str(value).ok_or_else(|| {
                 "decision row has invalid `derivation_disposition`".to_string()
@@ -3565,6 +3578,8 @@ pub enum MirScopeKind {
     Impure,
     Reactive,
     Shield,
+    /// Compiler-owned cleanup of an already delivered stop; not a user Shield.
+    StopCleanup,
     Region,
     Policy,
     TaskGroup,
@@ -3618,11 +3633,56 @@ pub struct MirCaptureParam {
     pub ty: MirType,
     pub access: MirAccess,
     pub ownership: MirOwnership,
+    /// Address-only capture: its result may anchor a place, never an SSA use.
+    pub place_only: bool,
 }
 #[derive(Debug, Clone)]
 pub enum MirCaptureOperand {
     Value(MirValueId),
     Place(MirPlaceId),
+}
+
+/// Native roots borrow the storage cell, not the source-owned value.
+/// Each permission names its checked MIR operation rather than a host selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirRetainedRootCellAction {
+    Read,
+    Write,
+    Move,
+    Initialize,
+    Replace,
+    Cleanup,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirRetainedRootCellGrant {
+    pub function: MirFunctionId,
+    pub operation: MirOpId,
+    pub place: MirPlaceId,
+    pub action: MirRetainedRootCellAction,
+}
+
+#[derive(Debug, Clone)]
+pub struct MirRetainedRootLivePlace {
+    pub place: MirPlaceId,
+    pub live: MirPlaceId,
+    pub value_type: MirType,
+    pub drop_kind: MirDropKind,
+}
+
+#[derive(Debug, Clone)]
+pub struct MirRetainedRootCellBinding {
+    /// The checked SymbolID key, not the binding's spelling.
+    pub declaration: String,
+    pub ty: MirType,
+    pub place: MirPlaceId,
+    pub capture_value: MirValueId,
+    pub capture_slot: usize,
+    pub access: MirAccess,
+    pub ownership: MirOwnership,
+    pub live_places: Vec<MirRetainedRootLivePlace>,
+    pub grants: Vec<MirRetainedRootCellGrant>,
+    pub cleanup_identity: String,
 }
 
 
@@ -3634,6 +3694,8 @@ pub struct MirLocal {
     pub span: Span,
     pub ty: MirType,
     pub place: MirPlaceId,
+    /// The SSA definition writes this same owning cell, never a second copy.
+    pub ssa_value: Option<MirValueId>,
     pub mutable: bool,
     pub ownership: MirOwnership,
     pub comptime: bool,
@@ -3682,6 +3744,13 @@ pub enum MirProjection {
     Range {
         range: MirValueId,
         location: MirPanicLoc,
+        span: Span,
+    },
+    /// A read window selected by one checked map lookup. The lookup stores
+    /// `Ptr<V>?`, never a copied V; an optional entry exposes the logical V?.
+    MapLookup {
+        lookup: MirValueId,
+        optional: bool,
         span: Span,
     },
 }
@@ -3888,9 +3957,11 @@ impl MirBinaryOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MirConstKey {
     Int(i64),
+    /// Canonical decimal outside i64; use `from_bigint` at value boundaries.
+    BigInt(String),
     String(String),
     Bool(bool),
     Char(char),
@@ -3903,6 +3974,96 @@ pub enum MirConstKey {
         type_name: String,
         variant: String,
     },
+}
+
+impl MirConstKey {
+    pub fn from_bigint(value: &crate::Numeric::CtBigInt) -> Self {
+        match value.try_i64() {
+            Some(number) => Self::Int(number),
+            None => Self::BigInt(value.to_string_rep()),
+        }
+    }
+
+    fn rank(&self) -> u8 {
+        match self {
+            Self::Int(_) | Self::BigInt(_) => 0,
+            Self::String(_) => 1,
+            Self::Bool(_) => 2,
+            Self::Char(_) => 3,
+            Self::Tuple(_) => 4,
+            Self::Struct { .. } => 5,
+            Self::Enum { .. } => 6,
+        }
+    }
+}
+
+impl PartialOrd for MirConstKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for MirConstKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        match (self, other) {
+            (Self::Int(left), Self::Int(right)) => left.cmp(right),
+            (Self::BigInt(left), Self::BigInt(right)) => {
+                let left_negative = left.starts_with('-');
+                let right_negative = right.starts_with('-');
+                if left_negative != right_negative {
+                    return right_negative.cmp(&left_negative);
+                }
+                let order = left.len().cmp(&right.len()).then_with(|| left.cmp(right));
+                if left_negative { order.reverse() } else { order }
+            }
+            (Self::BigInt(value), Self::Int(_)) => {
+                if value.starts_with('-') { Ordering::Less } else { Ordering::Greater }
+            }
+            (Self::Int(_), Self::BigInt(value)) => {
+                if value.starts_with('-') { Ordering::Greater } else { Ordering::Less }
+            }
+            (Self::String(left), Self::String(right)) => left.cmp(right),
+            (Self::Bool(left), Self::Bool(right)) => left.cmp(right),
+            (Self::Char(left), Self::Char(right)) => left.cmp(right),
+            (Self::Tuple(left), Self::Tuple(right)) => left.cmp(right),
+            (Self::Struct { type_name: left_name, fields: left }, Self::Struct { type_name: right_name, fields: right }) => {
+                left_name.cmp(right_name).then_with(|| left.cmp(right))
+            }
+            (Self::Enum { type_name: left_name, variant: left }, Self::Enum { type_name: right_name, variant: right }) => {
+                left_name.cmp(right_name).then_with(|| left.cmp(right))
+            }
+            _ => self.rank().cmp(&other.rank()),
+        }
+    }
+}
+
+/// Core-owned publication sites share the canonical `Global` storage path.
+/// The initializer's declaration identity, never a use location, keys a site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirSharedLifetime {
+    Process,
+    World,
+    Thread,
+    Attempt,
+}
+
+impl MirSharedLifetime {
+    pub fn core_member(name: &str) -> Option<Self> {
+        match name {
+            "__process_shared" => Some(Self::Process),
+            "__world_shared" => Some(Self::World),
+            "__thread_shared" => Some(Self::Thread),
+            "__attempt_shared" => Some(Self::Attempt),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MirSharedSite {
+    pub initializer: MirFunctionId,
+    pub lifetime: MirSharedLifetime,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -3922,6 +4083,8 @@ pub enum MirConstant {
     String(String),
     Bytes(Vec<u8>),
     Unit,
+    /// A lazy, typed Shared owner, not a literal handle or user storage word.
+    SharedSite(MirSharedSite),
     BigInt(String),
     List(Vec<MirConstant>),
     Map(BTreeMap<MirConstKey, MirConstant>),
@@ -4231,7 +4394,6 @@ pub enum MirPatternPosition {
     OptionBinding,
     Arm,
     VariantPath,
-    DataEntries { temp: MirLocalId },
 }
 
 #[derive(Debug, Clone)]
@@ -4272,9 +4434,25 @@ pub enum MirPatternShape {
         alternatives: Vec<MirPatternShape>,
         span: Span,
     },
+    /// D-DESTRUCT1 / D-PAT-RECORD1: field tests on a struct value. Field
+    /// names resolve against the subject's checked owner when the test is
+    /// lowered, so a struct pattern nested at any depth needs no owner here.
     Struct {
         fields: Vec<MirPatternField>,
         rest: Option<Span>,
+        span: Span,
+    },
+    /// D-PAT-RECORD1: one length test, then one item test per written item.
+    /// `rest` admits longer lists; its name binds the remaining items.
+    List {
+        items: Vec<MirPatternBinding>,
+        rest: Option<MirListPatternRest>,
+        span: Span,
+    },
+    /// D-PAT-MAP1: one lookup per key; exact unless `rest`.
+    Map {
+        entries: Vec<MirMapPatternEntry>,
+        rest: bool,
         span: Span,
     },
     Text(Vec<MirTextPatternPart>, Span),
@@ -4294,20 +4472,44 @@ pub enum MirPatternBinding {
     },
     /// S31: a nested pattern tests this payload slot.
     Nested(Box<MirPatternShape>),
+    /// D-PAT-RECORD1 / D-PAT-MAP1: the slot equals this checked value.
+    Value(MirValueId),
 }
 
 #[derive(Debug, Clone)]
 pub enum MirPatternField {
     Bind {
-        field: MirFieldId,
+        field: String,
         local: String,
         span: Span,
     },
     Value {
-        field: MirFieldId,
+        field: String,
         value: MirValueId,
         span: Span,
     },
+    /// D-PAT-RECORD1: the field matches a nested pattern.
+    Nested {
+        field: String,
+        shape: Box<MirPatternShape>,
+        span: Span,
+    },
+}
+
+/// D-PAT-RECORD1: the `..` / `..name` of a list pattern.
+#[derive(Debug, Clone)]
+pub struct MirListPatternRest {
+    pub name: Option<String>,
+    pub span: Span,
+}
+
+/// D-PAT-MAP1: one `key: slot` / `key?: slot` entry.
+#[derive(Debug, Clone)]
+pub struct MirMapPatternEntry {
+    pub key: MirValueId,
+    pub optional: bool,
+    pub slot: MirPatternBinding,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4769,10 +4971,6 @@ pub struct MirReflectField {
 
 #[derive(Debug, Clone)]
 pub enum MirSemanticOp {
-    DataEntriesToMap {
-        call: MirPreludeCallId,
-        local: MirLocalId,
-    },
     MathBuiltin {
         type_id: MirTypeId,
         call: MirPreludeCallId,
@@ -4819,7 +5017,6 @@ pub enum MirSemanticOp {
         type_id: MirTypeId,
         fields: Vec<(MirFieldId, MirValueId)>,
         extra: Option<MirStructExtra>,
-        trait_coercion: Option<MirTypeId>,
         boxed_fields: Vec<MirFieldId>,
     },
     /// Projection of a task-local Cell read/edit guard. Paths are checked
@@ -5057,7 +5254,6 @@ pub enum MirSemanticOp {
 impl MirSemanticOp {
     pub fn value_uses(&self) -> Vec<MirValueId> {
         match self {
-            Self::DataEntriesToMap { .. } => Vec::new(),
             Self::MathBuiltin { args, .. }
             | Self::PreciseBuiltin { args, .. }
             | Self::TaskGroup { tasks: args, .. }
@@ -5168,11 +5364,14 @@ impl MirSemanticOp {
 
 impl MirSemanticOp {
     pub fn prelude_calls(&self) -> Vec<MirPreludeCallId> {
+        self.prelude_call_slots().into_iter().flatten().collect()
+    }
+
+    fn prelude_call_slots(&self) -> [Option<MirPreludeCallId>; 2] {
         match self {
             Self::Print { call, .. }
             | Self::AmbientInput { call, .. }
             | Self::RequireStop { call, .. }
-            | Self::DataEntriesToMap { call, .. }
             | Self::LayoutCompare { call, .. }
             | Self::SharedGuardMap { call, .. }
             | Self::SharedGuardWait { call, .. }
@@ -5197,20 +5396,18 @@ impl MirSemanticOp {
             | Self::Select { call, .. }
             | Self::HostCall { call, .. }
             | Self::TextPatternMatch { call, .. }
-            | Self::BinaryPatternMatch { call, .. } => vec![*call],
+            | Self::BinaryPatternMatch { call, .. } => [Some(*call), None],
             Self::CarrierFact { call, .. }
             | Self::GcEdit { call, .. }
             | Self::TypedTextInterp { call, .. }
-            | Self::CCallback { call, .. } => vec![*call],
+            | Self::CCallback { call, .. } => [Some(*call), None],
             Self::CellGuardProject {
                 map_call,
                 split_call,
                 ..
-            } => std::iter::once(*map_call)
-                .chain(split_call.iter().copied())
-                .collect(),
-            Self::SharedGuardSplit { call, map_call, .. } => vec![*call, *map_call],
-            _ => Vec::new(),
+            } => [Some(*map_call), *split_call],
+            Self::SharedGuardSplit { call, map_call, .. } => [Some(*call), Some(*map_call)],
+            _ => [None, None],
         }
     }
 
@@ -5246,13 +5443,7 @@ impl MirSemanticOp {
         match self {
             Self::MathBuiltin { type_id, .. }
             | Self::PreciseBuiltin { type_id, .. } => vec![*type_id],
-            Self::StructLiteral {
-                type_id,
-                trait_coercion,
-                ..
-            } => std::iter::once(*type_id)
-                .chain(trait_coercion.iter().copied())
-                .collect(),
+            Self::StructLiteral { type_id, .. } => vec![*type_id],
             Self::StaticPreludeCall {
                 args,
                 owner_type_args,
@@ -5518,7 +5709,7 @@ impl MirLoopSourceKind {
 /// without one (`verify_mir_legality` checks the fact against the type).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum MirCopyFact {
-    /// The programmer wrote `~x`.
+    /// The programmer wrote `x.copy()`.
     Explicit,
     /// D-MEM-COPYSEM1: an owning destination filled from a value its scope keeps.
     Materialize,
@@ -5543,13 +5734,88 @@ impl MirCopyFact {
         }
     }
 
-    /// An implicit copy (materialize or share) of a Copy-ABI value is a
-    /// bitwise read; the user's `~` and view materialization keep their fact.
-    pub fn for_ownership(self, mode: MirOwnershipMode) -> Self {
+    /// Only a NoDrop Copy carrier can strip an implicit physical clone.
+    /// Explicit and view-materializing copies retain their original fact.
+    pub fn for_ownership(self, ownership: &MirOwnership) -> Self {
         match self {
-            Self::Materialize | Self::Share if mode == MirOwnershipMode::Copy => Self::Scalar,
+            Self::Materialize | Self::Share
+                if ownership.mode == MirOwnershipMode::Copy && ownership.drop == MirDropKind::None => Self::Scalar,
             fact => fact,
         }
+    }
+}
+
+#[cfg(test)]
+mod runtime_copy_ownership_tests {
+    use super::{
+        MirCopyFact, MirCoreClosureKind, MirDropKind, MirOperation, MirOwnership,
+        MirOwnershipMode, MirPreludeCallId, MirSemanticOp, MirSiteId,
+        MirTaskGroupKind, MirValueConsumption, MirValueId,
+    };
+
+    #[test]
+    fn semantic_copy_and_physical_ownership_are_independent() {
+        let exact_int = MirOwnership::copy_value();
+        assert_eq!(exact_int.mode, MirOwnershipMode::Copy);
+        assert_eq!(exact_int.drop, MirDropKind::Value);
+        assert!(exact_int.is_runtime_owned());
+        assert!(!MirOwnership::copy().is_runtime_owned());
+        assert!(MirOwnership::Owned.is_runtime_owned());
+        for mode in [MirOwnershipMode::ReadBorrow, MirOwnershipMode::WriteBorrow] {
+            assert!(!MirOwnership { mode, ..exact_int }.is_runtime_owned());
+        }
+    }
+
+    #[test]
+    fn resource_copies_keep_their_physical_clone_fact() {
+        let exact_int = MirOwnership::copy_value();
+        let plain_word = MirOwnership::copy();
+        for fact in [MirCopyFact::Materialize, MirCopyFact::Share] {
+            assert_eq!(fact.for_ownership(&exact_int), fact);
+            assert_eq!(fact.for_ownership(&plain_word), MirCopyFact::Scalar);
+        }
+        assert_eq!(MirCopyFact::Explicit.for_ownership(&plain_word), MirCopyFact::Explicit);
+    }
+
+    #[test]
+    fn handle_consumption_uses_checked_receiver_first_mask() {
+        let receiver = MirValueId(1);
+        let payload = MirValueId(2);
+        let call = MirPreludeCallId(3);
+        let operation = MirOperation::Semantic(MirSemanticOp::HandleMethod {
+            call, receiver, args: vec![payload],
+            frame_schedule: None, frame_schedule_derivation: None,
+        });
+        assert_eq!(operation.consumption_route(), Some(call));
+        assert_eq!(operation.value_consumption(receiver, &[true, false]), MirValueConsumption::No);
+        assert_eq!(operation.value_consumption(payload, &[true, false]),
+            MirValueConsumption::Yes { requires_owner: false });
+        assert_eq!(operation.value_consumption(receiver, &[false, true]),
+            MirValueConsumption::Yes { requires_owner: true });
+        assert_eq!(operation.value_consumption(payload, &[false, true]), MirValueConsumption::No);
+        assert_eq!(operation.value_consumption(payload, &[]), MirValueConsumption::No);
+    }
+
+    #[test]
+    fn task_group_and_spawn_transfer_their_owner_operands_only() {
+        let owner = MirValueId(1);
+        let borrowed_label = MirValueId(2);
+        for kind in [MirTaskGroupKind::All, MirTaskGroupKind::Any, MirTaskGroupKind::Race] {
+            let operation = MirOperation::Semantic(MirSemanticOp::TaskGroup {
+                call: MirPreludeCallId(3), kind, tasks: vec![owner],
+            });
+            assert_eq!(operation.value_consumption(owner, &[]),
+                MirValueConsumption::Yes { requires_owner: true });
+            assert_eq!(operation.value_consumption(borrowed_label, &[]), MirValueConsumption::No);
+        }
+        let operation = MirOperation::Semantic(MirSemanticOp::CoreClosureCall {
+            call: MirPreludeCallId(3), kind: MirCoreClosureKind::Spawn,
+            values: vec![borrowed_label], closure: Some(owner),
+            site: MirSiteId(4), label: String::new(),
+        });
+        assert_eq!(operation.value_consumption(owner, &[]),
+            MirValueConsumption::Yes { requires_owner: true });
+        assert_eq!(operation.value_consumption(borrowed_label, &[]), MirValueConsumption::No);
     }
 }
 
@@ -5598,6 +5864,14 @@ pub enum MirOperation {
     },
     BuildMap {
         entries: Vec<(MirValueId, MirValueId)>,
+    },
+    /// D-PAT-MAP1: one lookup returning V's read address, or absence.
+    MapLookup {
+        map: MirPlaceId,
+        key: MirValueId,
+        /// Table-local lazy state: None before the first reached arm, then
+        /// Some(lookup), including a cached absent result.
+        cache: MirPlaceId,
     },
     EnumIs {
         subject: MirValueId,
@@ -5723,6 +5997,182 @@ pub enum MirOperation {
     Drop { value: MirValueId, kind: MirDropKind },
 }
 
+/// Canonical physical-consumption facts shared by verification, last-use
+/// selection and SSA retirement. A prospective `Through` traversal is not
+/// necessarily a physical carrier transfer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirValueConsumption {
+    Yes { requires_owner: bool },
+    Through { transfers: bool },
+    No,
+}
+
+impl MirValueConsumption {
+    pub const fn transfers(self) -> bool {
+        match self {
+            Self::Yes { .. } => true,
+            Self::Through { transfers } => transfers,
+            Self::No => false,
+        }
+    }
+}
+
+pub fn mir_call_arg_consumes(arg: &MirCallArg) -> bool {
+    !(arg.implicit_clone || arg.shared_auto_clone || arg.widen_fixed_to_list)
+        && (arg.access == MirAccess::Move || arg.owned_last_use)
+}
+
+fn mir_call_value_consumption(args: &[MirCallArg], value: MirValueId) -> MirValueConsumption {
+    if args.iter().any(|arg| arg.value == value && mir_call_arg_consumes(arg)) {
+        MirValueConsumption::Yes { requires_owner: true }
+    } else {
+        MirValueConsumption::No
+    }
+}
+
+impl MirOperation {
+    /// The checked route's receiver-first borrow mask is resolved once by the
+    /// caller. No operation or operand collection is copied by this query.
+    pub fn value_consumption(&self, value: MirValueId, borrow_mask: &[bool]) -> MirValueConsumption {
+        use MirValueConsumption::{No, Through, Yes};
+        match self {
+            Self::Move { value: taken } | Self::TraitBox { value: taken, .. } => {
+                if *taken == value { Yes { requires_owner: true } } else { No }
+            }
+            Self::Drop { value: taken, kind } => {
+                if *taken == value && *kind != MirDropKind::None { Yes { requires_owner: true } } else { No }
+            }
+            Self::WritePlace { value: stored, .. } | Self::ReplacePlace { value: stored, .. }
+            | Self::Present { value: stored } | Self::ResultOk { value: stored } | Self::ResultErr { value: stored } => {
+                if *stored == value { Yes { requires_owner: false } } else { No }
+            }
+            Self::BuildList { values, .. } => {
+                if values.contains(&value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::BuildMap { entries } => {
+                if entries.iter().any(|(key, item)| *key == value || *item == value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Struct { fields, .. } | Self::Tuple { fields, .. }
+            | Self::Semantic(MirSemanticOp::StructLiteral { fields, .. }) => {
+                if fields.iter().any(|(_, field)| *field == value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Enum { args, .. } => {
+                if args.iter().any(|arg| arg.value == value) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Phi { incoming } => {
+                if incoming.iter().any(|(_, source)| *source == value) { Through { transfers: true } } else { No }
+            }
+            Self::AttachTag { value: carried, .. } => {
+                if *carried == value { Through { transfers: true } } else { No }
+            }
+            Self::Convert { value: carried, conversion, .. } => {
+                if *carried == value && matches!(conversion, MirConversion::Transparent | MirConversion::SendFn) {
+                    Through { transfers: true }
+                } else { No }
+            }
+            Self::Copy { value: source, fact } => {
+                if *source == value && !matches!(fact, MirCopyFact::Explicit | MirCopyFact::ViewMaterialize) {
+                    Through { transfers: false }
+                } else { No }
+            }
+            Self::OptionValue { subject: source } | Self::ResultValue { subject: source, .. }
+            | Self::EnumPayload { subject: source, .. } => {
+                if *source == value { Through { transfers: false } } else { No }
+            }
+            Self::Call { args, .. } | Self::IndirectCall { args, .. } | Self::CoreCall { args, .. }
+            | Self::Semantic(
+                MirSemanticOp::StaticPreludeCall { args, .. } | MirSemanticOp::HardwareCall { args, .. }
+                | MirSemanticOp::ClosureMethod { args, .. } | MirSemanticOp::HostCall { args, .. }
+                | MirSemanticOp::AllocNew { args, .. },
+            ) => mir_call_value_consumption(args, value),
+            Self::LoopIterInit { collection, by_value, .. } => {
+                if *collection == value && *by_value { Yes { requires_owner: false } } else { No }
+            }
+            Self::Closure { captures, .. } => {
+                if captures.iter().any(|capture| matches!(capture, MirCaptureOperand::Value(captured) if *captured == value)) {
+                    Yes { requires_owner: false }
+                } else { No }
+            }
+            Self::Semantic(MirSemanticOp::TaskGroup { tasks, .. }) => {
+                if tasks.contains(&value) { Yes { requires_owner: true } } else { No }
+            }
+            Self::Semantic(MirSemanticOp::CoreClosureCall {
+                kind: MirCoreClosureKind::Spawn, closure, ..
+            }) => {
+                if *closure == Some(value) { Yes { requires_owner: true } } else { No }
+            }
+            Self::Semantic(MirSemanticOp::HandleMethod { receiver, args, .. }) => {
+                if *receiver == value && borrow_mask.first() == Some(&false) {
+                    Yes { requires_owner: true }
+                } else if args.iter().enumerate().any(|(index, arg)| {
+                    *arg == value && borrow_mask.get(index + 1) == Some(&false)
+                }) { Yes { requires_owner: false } } else { No }
+            }
+            Self::Semantic(MirSemanticOp::BuiltinMethod { receiver, args, .. }) => {
+                if *receiver != value && args.iter().enumerate().any(|(index, arg)| {
+                    *arg == value && borrow_mask.get(index + 1) == Some(&false)
+                }) { Yes { requires_owner: false } } else { No }
+            }
+            _ => No,
+        }
+    }
+
+    /// Checked route whose positional mask participates in physical consumption.
+    pub fn consumption_route(&self) -> Option<MirPreludeCallId> {
+        match self {
+            Self::Semantic(MirSemanticOp::BuiltinMethod { call, .. }
+                | MirSemanticOp::HandleMethod { call, .. }) => Some(*call),
+            _ => None,
+        }
+    }
+
+    /// Canonical checked argument access metadata.
+    pub fn call_args(&self) -> &[MirCallArg] {
+        match self {
+            Self::Call { args, .. } | Self::IndirectCall { args, .. } | Self::CoreCall { args, .. }
+            | Self::Semantic(
+                MirSemanticOp::StaticPreludeCall { args, .. } | MirSemanticOp::HardwareCall { args, .. }
+                | MirSemanticOp::ClosureMethod { args, .. } | MirSemanticOp::HostCall { args, .. }
+                | MirSemanticOp::AllocNew { args, .. },
+            ) => args,
+            _ => &[],
+        }
+    }
+
+    /// Places an operation writes, moves, resizes or opens for writing.
+    pub fn mutated_places(&self) -> Vec<MirPlaceId> {
+        let mut places = Vec::new();
+        match self {
+            Self::WritePlace { place, .. } | Self::ReplacePlace { place, .. }
+            | Self::MovePlace { place } | Self::InitializeUninit { place } => places.push(*place),
+            Self::AddressOf { place, access: MirAccess::Write } => places.push(*place),
+            Self::Semantic(MirSemanticOp::BuiltinMethod { receiver_place: Some(place), .. })
+            | Self::Semantic(MirSemanticOp::CursorTakePattern { receiver_place: place, .. })
+            | Self::Semantic(MirSemanticOp::ReaderTakePattern { receiver_place: place, .. }) => places.push(*place),
+            _ => {}
+        }
+        places.extend(self.call_args().iter().filter(|arg|
+            matches!(arg.access, MirAccess::Write | MirAccess::Move)
+        ).filter_map(|arg| arg.place));
+        places
+    }
+}
+
+impl MirTerminator {
+    pub fn value_consumption(&self, value: MirValueId) -> MirValueConsumption {
+        // The destination phi performs a break's physical transfer.
+        if let Self::Break { value: returned, .. } = self {
+            return if *returned == Some(value) { MirValueConsumption::Through { transfers: false } } else { MirValueConsumption::No };
+        }
+        let transferred = match self {
+            Self::Return { value: returned } => *returned == Some(value),
+            Self::Yield { value: yielded, .. } => *yielded == value,
+            _ => false,
+        };
+        if transferred { MirValueConsumption::Yes { requires_owner: false } } else { MirValueConsumption::No }
+    }
+}
+
 impl MirOperation {
     pub fn value_uses(&self) -> Vec<MirValueId> {
         let mut out = Vec::new();
@@ -5779,6 +6229,7 @@ impl MirOperation {
                     out.push(*value);
                 }
             }
+            Self::MapLookup { key, .. } => out.push(*key),
             Self::ProjectMembers { base, .. } | Self::Field { base, .. } => out.push(*base),
             Self::Index { base, index, .. } => {
                 out.push(*base);
@@ -6300,7 +6751,6 @@ pub enum MirArtifactKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MirArtifactTarget {
     RustAot,
-    Cranelift,
     Interpreter,
     Web,
 }
@@ -6367,7 +6817,6 @@ impl MirArtifactTarget {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::RustAot => "rust-aot",
-            Self::Cranelift => "cranelift",
             Self::Interpreter => "interpreter",
             Self::Web => "web",
         }
@@ -6735,6 +7184,9 @@ pub struct MirForeign {
     pub close_function: Option<MirFunctionId>,
     pub close_foreign: Option<MirForeignId>,
     pub undo_function: Option<MirFunctionId>,
+    /// D-MEM-SENTRY1: the declaration's own `#Unsafe("reason")` gate for an
+    /// audited inline foreign function. Every call runs inside its sentry scope.
+    pub unsafe_gate: Option<MirUnsafeGate>,
 }
 #[derive(Debug, Clone)]
 pub struct MirInstruction {
@@ -6761,6 +7213,16 @@ pub struct MirSwitchArm {
     pub span: Span,
 }
 
+/// Stop points of the unified execution host (#4720; design doc "Stop
+/// points"). `Check` delivers a pending session interrupt where every live
+/// value is initialized; `Propagate` directly follows a can-stop operation and
+/// reads only a stop that operation already delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MirPollKind {
+    Check,
+    Propagate,
+}
+
 #[derive(Debug, Clone)]
 pub enum MirTerminator {
     Jump { target: MirBlockId },
@@ -6774,6 +7236,10 @@ pub enum MirTerminator {
     Break { target: MirBlockId, value: Option<MirValueId> },
     Continue { target: MirBlockId },
     Unreachable { reason: String },
+    /// `resume` continues; `stop` runs canonical cleanup and ends in `Stopped`.
+    Poll { kind: MirPollKind, resume: MirBlockId, stop: MirBlockId },
+    /// Leaves the function with the stop still delivered and no result written.
+    Stopped,
 }
 
 impl MirTerminator {
@@ -6781,6 +7247,7 @@ impl MirTerminator {
         match self {
             Self::Jump { target } | Self::Continue { target } => vec![*target],
             Self::Yield { resume, cancel, .. } => vec![*resume, *cancel],
+            Self::Poll { resume, stop, .. } => vec![*resume, *stop],
             Self::Branch { then_target, else_target, .. } => vec![*then_target, *else_target],
             Self::Switch { arms, otherwise, .. } => arms
                 .iter()
@@ -6788,7 +7255,7 @@ impl MirTerminator {
                 .chain(std::iter::once(*otherwise))
                 .collect(),
             Self::Break { target, .. } => vec![*target],
-            Self::Return { .. } | Self::Unreachable { .. } => Vec::new(),
+            Self::Return { .. } | Self::Unreachable { .. } | Self::Stopped => Vec::new(),
         }
     }
 
@@ -6802,7 +7269,11 @@ impl MirTerminator {
                 value.iter().copied().collect()
             }
             Self::Yield { value, .. } => vec![*value],
-            Self::Jump { .. } | Self::Continue { .. } | Self::Unreachable { .. } => Vec::new(),
+            Self::Jump { .. }
+            | Self::Continue { .. }
+            | Self::Unreachable { .. }
+            | Self::Poll { .. }
+            | Self::Stopped => Vec::new(),
         }
     }
 }
@@ -6870,6 +7341,333 @@ pub struct MirFunction {
     pub foreign_language: Option<String>,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum MirStorageRoot<'a> {
+    Local(MirLocalId),
+    Value(MirValueId),
+    Static(&'a str),
+}
+
+fn mir_place_storage_root(place: &MirPlace) -> MirStorageRoot<'_> {
+    match &place.base {
+        MirPlaceBase::Local(local) => MirStorageRoot::Local(*local),
+        MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value)
+        | MirPlaceBase::Temporary(value) => MirStorageRoot::Value(*value),
+        MirPlaceBase::Static(name) => MirStorageRoot::Static(name),
+    }
+}
+
+fn mir_snapshot_type_may_borrow(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::Int | MirTypeKind::Float | MirTypeKind::Bool | MirTypeKind::String
+        | MirTypeKind::Char | MirTypeKind::IntN { .. } | MirTypeKind::Float32
+        | MirTypeKind::Measure(_) => false,
+        MirTypeKind::Tagged { inner, .. } | MirTypeKind::InlineRange { base: inner, .. }
+        | MirTypeKind::Quantity { base: inner, .. } | MirTypeKind::List(inner)
+        | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner)
+        | MirTypeKind::FixedList { elem: inner, .. } => mir_snapshot_type_may_borrow(inner),
+        MirTypeKind::Map { key, value } => mir_snapshot_type_may_borrow(key) || mir_snapshot_type_may_borrow(value),
+        MirTypeKind::Result { ok, err } => mir_snapshot_type_may_borrow(ok) || mir_snapshot_type_may_borrow(err),
+        MirTypeKind::Tuple(fields) => fields.iter().any(|(_, ty)| mir_snapshot_type_may_borrow(ty)),
+        MirTypeKind::Union(members) => members.iter().any(mir_snapshot_type_may_borrow),
+        // Nominal layouts and callable captures are unavailable to this
+        // function-local proof, so their borrowed dependencies are retained.
+        _ => true,
+    }
+}
+
+fn mir_snapshot_dependence_carrier(operation: &MirOperation, ty: &MirType, ownership: MirOwnership) -> bool {
+    matches!(ownership.mode, MirOwnershipMode::ReadBorrow | MirOwnershipMode::WriteBorrow)
+        || matches!(operation, MirOperation::ReadPlace(_) | MirOperation::MovePlace { .. }
+            | MirOperation::Move { .. } | MirOperation::Phi { .. } | MirOperation::AttachTag { .. }
+            | MirOperation::Closure { .. }
+            | MirOperation::Convert { conversion: MirConversion::Transparent | MirConversion::SendFn, .. })
+        || mir_snapshot_type_may_borrow(ty)
+}
+
+/// Conservative CFG snapshot stability. Dependence includes SSA aliases and
+/// storage holders; uncertain aliases/effects retain the original owned read.
+fn mir_read_snapshot_unstable(
+    function: &MirFunction,
+    candidates: &HashSet<MirValueId>,
+    routes: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> HashSet<MirValueId> {
+    if function.is_unsafe {
+        return candidates.clone();
+    }
+    let values: HashMap<_, _> = function.values.iter().enumerate()
+        .map(|(row, (id, ..))| (*id, row)).collect();
+    let places: HashMap<_, _> = function.places.iter().enumerate()
+        .map(|(row, place)| (place.id, row)).collect();
+    let blocks: HashMap<_, _> = function.blocks.iter().enumerate()
+        .map(|(row, block)| (block.id, row)).collect();
+    let deadlines: HashMap<_, _> = function.scopes.iter()
+        .filter_map(|scope| scope.deadline.map(|value| (scope.id, value))).collect();
+    let roots: Vec<_> = function.places.iter().map(mir_place_storage_root).collect();
+    let mut edges = vec![Vec::new(); function.values.len()];
+    let mut origins = vec![Vec::new(); function.values.len()];
+    let mut owners: HashMap<_, Vec<usize>> = HashMap::new();
+    let mut ssa_owners: HashMap<MirValueId, Vec<usize>> = HashMap::new();
+    let mut stored: HashMap<_, Vec<usize>> = HashMap::new();
+    let mut work = Vec::new();
+    let mut queued = vec![false; function.values.len()];
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let MirOperation::WritePlace { place, value }
+                | MirOperation::ReplacePlace { place, value } = &instruction.operation
+            {
+                if let (Some(&position), Some(&source)) = (places.get(place), values.get(value)) {
+                    stored.entry(roots[position]).or_default().push(source);
+                }
+            }
+            let Some(target) = instruction.result.and_then(|result| values.get(&result).copied()) else {
+                continue;
+            };
+            if let MirOperation::ReadPlace(place) = &instruction.operation {
+                if candidates.contains(&function.values[target].0) {
+                    if let Some(&position) = places.get(place) {
+                        owners.entry(roots[position]).or_default().push(target);
+                        if let MirStorageRoot::Value(value) = roots[position] {
+                            ssa_owners.entry(value).or_default().push(target);
+                        }
+                        origins[target].push(target);
+                        queued[target] = true;
+                        work.push(target);
+                    }
+                }
+            }
+            if !mir_snapshot_dependence_carrier(&instruction.operation, &function.values[target].1, function.values[target].3) {
+                continue;
+            }
+            for operand in instruction.operation.value_uses() {
+                if let Some(&source) = values.get(&operand) {
+                    edges[source].push(target);
+                }
+            }
+            for place in operation_places(&instruction.operation) {
+                let Some(&position) = places.get(&place) else { continue };
+                match function.places[position].base {
+                    MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value)
+                    | MirPlaceBase::Temporary(value) => {
+                        if let Some(&source) = values.get(&value) {
+                            edges[source].push(target);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let Some(target) = instruction.result.and_then(|result| values.get(&result).copied()) else {
+                continue;
+            };
+            if !mir_snapshot_dependence_carrier(&instruction.operation, &function.values[target].1, function.values[target].3) {
+                continue;
+            }
+            for place in operation_places(&instruction.operation) {
+                let Some(&position) = places.get(&place) else { continue };
+                if let Some(sources) = stored.get(&roots[position]) {
+                    for &source in sources {
+                        edges[source].push(target);
+                    }
+                }
+            }
+        }
+    }
+    let mut members: HashSet<_> = work.iter().map(|&row| (row, row)).collect();
+    let mut cursors = vec![0; function.values.len()];
+    let mut head = 0;
+    while head < work.len() {
+        let row = work[head];
+        head += 1;
+        queued[row] = false;
+        while cursors[row] < origins[row].len() {
+            let origin = origins[row][cursors[row]];
+            cursors[row] += 1;
+            for &target in &edges[row] {
+                if members.insert((target, origin)) {
+                    origins[target].push(origin);
+                    if !queued[target] {
+                        queued[target] = true;
+                        work.push(target);
+                    }
+                }
+            }
+        }
+    }
+    let mut incoming = vec![HashSet::<usize>::new(); function.blocks.len()];
+    let mut reached = vec![false; function.blocks.len()];
+    let mut block_queued = vec![false; function.blocks.len()];
+    let mut block_work = Vec::new();
+    let Some(&entry) = blocks.get(&function.entry) else { return candidates.clone() };
+    reached[entry] = true;
+    block_queued[entry] = true;
+    block_work.push(entry);
+    for drop in &function.drops {
+        if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
+            if let Some(&row) = blocks.get(&target) {
+                if !block_queued[row] {
+                    reached[row] = true;
+                    block_queued[row] = true;
+                    block_work.push(row);
+                }
+            }
+        }
+    }
+    let mut unstable = HashSet::new();
+    head = 0;
+    while head < block_work.len() {
+        let row = block_work[head];
+        head += 1;
+        block_queued[row] = false;
+        let mut dirty = incoming[row].clone();
+        let block = &function.blocks[row];
+        for instruction in &block.instructions {
+            let uses = instruction.operation.value_uses();
+            let mask = instruction.operation.consumption_route()
+                .and_then(|call| routes.get(&call))
+                .map_or(&[][..], |route| route.signature.borrow_mask.as_slice());
+            for &operand in &uses {
+                let Some(&source) = values.get(&operand) else { continue };
+                if function.values[source].3.is_runtime_owned()
+                    && instruction.operation.value_consumption(operand, mask).transfers()
+                {
+                    if let Some(owner_origins) = ssa_owners.get(&operand) {
+                        dirty.extend(owner_origins);
+                    }
+                }
+            }
+            for place in instruction.operation.mutated_places() {
+                let Some(&position) = places.get(&place) else { continue };
+                if let Some(owner_origins) = owners.get(&roots[position]) {
+                    dirty.extend(owner_origins);
+                    if matches!(instruction.operation, MirOperation::AddressOf { access: MirAccess::Write, .. }) {
+                        unstable.extend(owner_origins.iter().map(|&origin| function.values[origin].0));
+                    }
+                }
+                if let Some(sources) = stored.get(&roots[position]) {
+                    for &source in sources {
+                        unstable.extend(origins[source].iter().map(|&origin| function.values[origin].0));
+                    }
+                }
+                match function.places[position].base {
+                    MirPlaceBase::Parameter(value) | MirPlaceBase::Capture(value)
+                    | MirPlaceBase::Temporary(value) => {
+                        if let Some(&source) = values.get(&value) {
+                            unstable.extend(origins[source].iter().map(|&origin| function.values[origin].0));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for arg in instruction.operation.call_args() {
+                if matches!(arg.access, MirAccess::Write | MirAccess::Move) {
+                    if let Some(&source) = values.get(&arg.value) {
+                        unstable.extend(origins[source].iter().map(|&origin| function.values[origin].0));
+                    }
+                }
+            }
+            if matches!(&instruction.operation,
+                MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. }
+                | MirOperation::Semantic(MirSemanticOp::StaticPreludeCall { .. }
+                    | MirSemanticOp::ClosureMethod { .. } | MirSemanticOp::CoreClosureCall { .. }
+                    | MirSemanticOp::HostCall { .. } | MirSemanticOp::HardwareCall { .. })
+            ) {
+                dirty.extend(candidates.iter().filter_map(|id| values.get(id).copied()));
+            }
+            if matches!(instruction.operation, MirOperation::ReadPlace(_)) {
+                if let Some(result) = instruction.result.filter(|id| candidates.contains(id)) {
+                    if let Some(&origin) = values.get(&result) {
+                        dirty.remove(&origin);
+                    }
+                }
+            }
+            for operand in uses {
+                if let Some(&source) = values.get(&operand) {
+                    unstable.extend(origins[source].iter().filter(|origin| dirty.contains(origin))
+                        .map(|&origin| function.values[origin].0));
+                }
+            }
+            if let MirOperation::ScopeEnter { scope, .. } = instruction.operation {
+                if let Some(&source) = deadlines.get(&scope).and_then(|value| values.get(value)) {
+                    unstable.extend(origins[source].iter().filter(|origin| dirty.contains(origin))
+                        .map(|&origin| function.values[origin].0));
+                }
+            }
+        }
+        for operand in block.terminator.value_uses() {
+            if let Some(&source) = values.get(&operand) {
+                unstable.extend(origins[source].iter().filter(|origin| dirty.contains(origin))
+                    .map(|&origin| function.values[origin].0));
+            }
+        }
+        for target in block.terminator.targets() {
+            let Some(&successor) = blocks.get(&target) else { continue };
+            let old_len = incoming[successor].len();
+            incoming[successor].extend(&dirty);
+            let changed = !reached[successor] || incoming[successor].len() != old_len;
+            reached[successor] = true;
+            if changed && !block_queued[successor] {
+                block_queued[successor] = true;
+                block_work.push(successor);
+            }
+        }
+    }
+    unstable
+}
+
+/// Refine post-last-use place reads once, before every backend. A borrowed read
+/// must not transfer ownership or observe an owner mutation before its last use.
+pub fn mir_refine_function_ownership(function: &mut MirFunction, prelude: &[MirPreludeCall]) -> usize {
+    let candidates: std::collections::HashSet<_> = function.blocks.iter()
+        .flat_map(|block| &block.instructions)
+        .filter(|instruction| matches!(instruction.operation, MirOperation::ReadPlace(_)))
+        .filter_map(|instruction| instruction.result)
+        .collect();
+    if candidates.is_empty() {
+        return 0;
+    }
+    let routes: std::collections::HashMap<_, _> = prelude.iter().map(|call| (call.id, call)).collect();
+    let mut transferred = std::collections::HashSet::new();
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            let mask = instruction.operation.consumption_route()
+                .and_then(|call| routes.get(&call))
+                .map_or(&[][..], |row| row.signature.borrow_mask.as_slice());
+            for value in instruction.operation.value_uses() {
+                if candidates.contains(&value) && instruction.operation.value_consumption(value, mask).transfers() {
+                    transferred.insert(value);
+                }
+            }
+        }
+        for value in block.terminator.value_uses() {
+            if candidates.contains(&value) && block.terminator.value_consumption(value).transfers() {
+                transferred.insert(value);
+            }
+        }
+    }
+    let eligible: HashSet<_> = function.values.iter()
+        .filter(|(id, _, _, ownership)| candidates.contains(id)
+            && !transferred.contains(id) && ownership.is_runtime_owned())
+        .map(|(id, ..)| *id).collect();
+    if eligible.is_empty() {
+        return 0;
+    }
+    let unstable = mir_read_snapshot_unstable(function, &eligible, &routes);
+    let mut changed = 0;
+    for (_, _, _, ownership) in function.values.iter_mut().filter(|(id, _, _, _)|
+        eligible.contains(id) && !unstable.contains(id)
+    ) {
+        if ownership.is_runtime_owned() {
+            *ownership = MirOwnership::from_access(MirAccess::Read);
+            changed += 1;
+        }
+    }
+    changed
+}
+
 impl MirFunction {
     pub fn test_scope_member(&self, scope: MirScopeId) -> Option<&MirTestScopeMember> {
         self.blocks.iter().find_map(|block| {
@@ -6924,8 +7722,6 @@ pub struct MirCoreCall {
     pub symbol: CoreCallSymbol,
     pub coverage_bits: u8,
     pub aot_direct: bool,
-    pub jit_direct: bool,
-    pub jit_symbol: Option<String>,
     /// The registry's raw-machine-word `Int` result fact
     /// (`CoreCallRecord::native_int_result`).
     pub native_int_result: bool,
@@ -6957,8 +7753,6 @@ impl MirCoreCall {
             symbol: record.symbol,
             coverage_bits: record.coverage.bits(),
             aot_direct: record.aot_direct,
-            jit_direct: record.jit_direct,
-            jit_symbol: record.jit_symbol.map(str::to_string),
             native_int_result: record.native_int_result,
             marker: record.marker,
         }
@@ -6997,7 +7791,6 @@ pub enum MirRuntimePartId {
     Browser,
     Args,
     Reflect,
-    AuthTokens,
     AuthSession,
     Sync,
     Services,
@@ -7032,7 +7825,6 @@ impl MirRuntimePartId {
             Self::Browser => "browser",
             Self::Args => "args",
             Self::Reflect => "reflect",
-            Self::AuthTokens => "auth-tokens",
             Self::AuthSession => "auth-session",
             Self::Sync => "sync",
             Self::Services => "services",
@@ -7049,6 +7841,8 @@ pub struct MirNameFacts {
     pub aliases: Vec<crate::Names::NameAlias>,
     pub references: Vec<crate::Names::NameReference>,
     pub structure_facts: Vec<crate::Names::StructureFact>,
+    /// Source-facing paths are semantic-check metadata, not emitted identities.
+    pub display_paths: Vec<crate::Names::NameDisplayPath>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -7065,6 +7859,8 @@ pub struct MirPackageFacts {
     pub active_os: String,
     pub inferred_layer: String,
     pub allocator: String,
+    /// Parsed hosted program policy; emitters never recover it from debug text.
+    pub program_allocator: crate::TargetMachine::AllocatorPolicy,
     /// Package version selected by checked build facts.
     pub package_version: String,
     /// Artifact target selected for this MIR request.
@@ -7100,6 +7896,8 @@ pub struct MirUnreachable {
 #[derive(Debug, Clone)]
 pub struct MirProgram {
     pub cffi: MirCffiFacts,
+    /// Explicit native-runtime ABI mode; seed producers always leave this false.
+    pub native_pack: bool,
     pub schema_version: u16,
     pub package_identity: String,
     pub facts: MirPackageFacts,
@@ -7288,6 +8086,8 @@ fn canonical_terminator(terminator: &MirTerminator) -> &'static str {
         MirTerminator::Break { .. } => "Break",
         MirTerminator::Continue { .. } => "Continue",
         MirTerminator::Unreachable { .. } => "Unreachable",
+        MirTerminator::Poll { .. } => "Poll",
+        MirTerminator::Stopped => "Stopped",
     }
 }
 
@@ -7321,6 +8121,7 @@ fn operation_kind(operation: &MirOperation) -> &'static str {
         MirOperation::PatternMatched { .. } => "PatternMatched",
         MirOperation::ProjectMembers { .. } => "ProjectMembers",
         MirOperation::Index { .. } => "Index",
+        MirOperation::MapLookup { .. } => "MapLookup",
         MirOperation::Slice { .. } => "Slice",
         MirOperation::Range { .. } => "Range",
         MirOperation::Field { .. } => "Field",
@@ -7603,9 +8404,8 @@ impl MirProgram {
             target_facts.push((
                 format!("function.{}.targets", function.id.0),
                 format!(
-                    "rust_aot={},cranelift={},interpreter={},web={}",
+                    "rust_aot={},interpreter={},web={}",
                     applicability.rust_aot,
-                    applicability.cranelift,
                     applicability.interpreter,
                     applicability.web
                 ),
@@ -7888,7 +8688,7 @@ impl MirProgram {
             validate_mir_type(&field.field.ty, &type_ids)?;
         }
 
-        let mut prelude_ids = HashSet::new();
+        let mut prelude_ids = HashMap::new();
         for call in &self.prelude_calls {
             validate_call_fallibility(&call.fallibility, &type_ids)?;
             if call.id.0 == 0 {
@@ -7897,7 +8697,7 @@ impl MirProgram {
                     span: None,
                 });
             }
-            if !prelude_ids.insert(call.id) {
+            if prelude_ids.insert(call.id, call).is_some() {
                 return Err(MirValidationError::DuplicateId {
                     kind: "Prelude call",
                     id: call.id.0,
@@ -8294,6 +9094,16 @@ fn validate_function_types(
     }
     for capture in &function.capture_params {
         validate_mir_type(&capture.ty, type_ids)?;
+        if capture.place_only
+            && !matches!((capture.access, capture.ownership.mode),
+                (MirAccess::Read, MirOwnershipMode::ReadBorrow)
+                | (MirAccess::Write, MirOwnershipMode::WriteBorrow))
+        {
+            return Err(MirValidationError::InvalidOperation {
+                function: function.id,
+                message: "place-only capture must lend a borrowed address".to_string(),
+            });
+        }
     }
     for (slot, capture) in function.capture_params.iter().enumerate() {
         if capture.slot != slot {
@@ -8328,7 +9138,7 @@ fn validate_function(
     function_ids: &HashSet<MirFunctionId>,
     function_rows: &HashMap<MirFunctionId, &MirFunction>,
     core_ids: &HashSet<MirCoreCallId>,
-    prelude_ids: &HashSet<MirPreludeCallId>,
+    prelude_ids: &HashMap<MirPreludeCallId, &MirPreludeCall>,
     callback_ids: &HashSet<MirCallbackId>,
     foreign_ids: &HashSet<MirForeignId>,
     type_ids: &HashSet<MirTypeId>,
@@ -8395,7 +9205,7 @@ fn validate_function(
                     ..
                 } => {
                     for call in std::iter::once(call).chain(write_call.iter()) {
-                        if !prelude_ids.contains(call) {
+                        if !prelude_ids.contains_key(call) {
                             return Err(MirValidationError::MissingPreludeCall {
                                 function: function.id,
                                 call: *call,
@@ -8426,6 +9236,14 @@ fn validate_function(
                         return Err(MirValidationError::MissingSourceFile {
                             function: function.id,
                             source_file: location.file,
+                        });
+                    }
+                }
+                MirProjection::MapLookup { .. } => {
+                    if place.access != MirAccess::Read {
+                        return Err(MirValidationError::InvalidOperation {
+                            function: function.id,
+                            message: "map pattern lookup windows must be read-only".to_string(),
                         });
                     }
                 }
@@ -8583,6 +9401,9 @@ fn validate_function(
                             )
                                 && declared_values.get(value).copied() == Some(&capture.ty)
                         }
+                        // Place access is the strongest any operation needs
+                        // (`Move` covers `Write`): a local whose scope-end
+                        // cleanup moves it still lends a write capture.
                         MirCaptureOperand::Place(place) => place_rows
                             .get(place)
                             .is_some_and(|row| {
@@ -8593,7 +9414,7 @@ fn validate_function(
                                     )
                                     && row.ty == capture.ty
                                     && (capture.access != MirAccess::Write
-                                        || row.access == MirAccess::Write)
+                                        || row.access != MirAccess::Read)
                             }),
                     };
                     if !matches {
@@ -8606,7 +9427,7 @@ fn validate_function(
                 }
             }
             for call in operation_prelude_calls(&instruction.operation) {
-                if !prelude_ids.contains(&call) {
+                if !prelude_ids.contains_key(&call) {
                     return Err(MirValidationError::MissingPreludeCall {
                         function: function.id,
                         call,
@@ -8678,6 +9499,28 @@ fn validate_function(
             value: *value,
         });
     }
+    // Check every place, including an unused row. Only the Capture base is
+    // an address association; an index/range or another base is an SSA use.
+    for place in &function.places {
+        for (position, value) in place_value_uses(place).enumerate() {
+            if let Some(&(definition_block, definition_index)) = values.get(&value) {
+                let definition = &function.blocks[blocks[&definition_block]].instructions[definition_index];
+                validate_capture_value_use(
+                    function,
+                    definition,
+                    position == 0 && matches!(place.base, MirPlaceBase::Capture(_)),
+                )?;
+            }
+        }
+    }
+    for scope in &function.scopes {
+        if let Some(value) = scope.deadline {
+            if let Some(&(definition_block, definition_index)) = values.get(&value) {
+                let definition = &function.blocks[blocks[&definition_block]].instructions[definition_index];
+                validate_capture_value_use(function, definition, false)?;
+            }
+        }
+    }
     let dominators = MirDominators::compute(function, [function.entry]);
     for block in &function.blocks {
         for (index, instruction) in block.instructions.iter().enumerate() {
@@ -8689,16 +9532,16 @@ fn validate_function(
                         return Err(MirValidationError::InvalidTerminator { function: function.id, block: *predecessor });
                     }
                     // Defined anywhere in the predecessor precedes its exit.
-                    ensure_use(function, &values, &dominators, &blocks, *predecessor, usize::MAX, *value, instruction.span)?;
+                    ensure_use(function, &values, &dominators, &blocks, *predecessor, usize::MAX, *value, instruction.span, false)?;
                 }
             } else {
                 for value in instruction.operation.value_uses() {
-                    ensure_use(function, &values, &dominators, &blocks, block.id, index, value, instruction.span)?;
+                    ensure_use(function, &values, &dominators, &blocks, block.id, index, value, instruction.span, false)?;
                 }
             }
             for place_id in operation_places(&instruction.operation) {
                 if let Some(place) = place_rows.get(&place_id) {
-                    for value in place_value_uses(place) {
+                    for (position, value) in place_value_uses(place).enumerate() {
                         ensure_use(
                             function,
                             &values,
@@ -8708,13 +9551,14 @@ fn validate_function(
                             index,
                             value,
                             instruction.span,
+                            position == 0 && matches!(place.base, MirPlaceBase::Capture(_)),
                         )?;
                     }
                 }
             }
         }
         for value in block.terminator.value_uses() {
-            ensure_use(function, &values, &dominators, &blocks, block.id, block.instructions.len(), value, block.span)?;
+            ensure_use(function, &values, &dominators, &blocks, block.id, block.instructions.len(), value, block.span, false)?;
         }
         if let MirTerminator::Yield { value, .. } = &block.terminator {
             let Some(generator) = &function.generator else {
@@ -8743,6 +9587,359 @@ fn validate_function(
         if let MirDropEdge::Failure(target) | MirDropEdge::Unwind(target) = drop.edge {
             if !blocks.contains_key(&target) {
                 return Err(MirValidationError::InvalidDropEdge { function: function.id, block: target });
+            }
+        }
+    }
+    validate_stop_points(function, &blocks, &declared_values, &place_rows, &dominators, prelude_ids)
+}
+
+/// Rust MIR stores the checked numeric policy in dispatch, not a separate
+/// overflow field. TIR routes::binary_route selects a Panic Prelude route
+/// for checked arithmetic and Primitive for proven-total arithmetic.
+pub fn mir_binary_can_trap(
+    dispatch: &MirBinaryDispatch,
+    mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    match dispatch {
+        MirBinaryDispatch::Primitive => false,
+        MirBinaryDispatch::Prelude { call, .. } => effect(*call) == Some(Effect::Panic),
+    }
+}
+
+/// Fact selectors shared by the producer, verifier, and native consumer.
+/// Registering a place or a liveness flag does not evaluate its projections.
+pub fn mir_operation_stop_operand(operation: &MirOperation) -> Option<MirValueId> {
+    match operation {
+        MirOperation::Unary { op: MirUnaryOp::Neg, value } => Some(*value),
+        _ => None,
+    }
+}
+
+pub fn mir_operation_stop_place(operation: &MirOperation) -> Option<MirPlaceId> {
+    match operation {
+        MirOperation::ReadPlace(place) | MirOperation::MovePlace { place }
+            | MirOperation::WritePlace { place, .. } | MirOperation::ReplacePlace { place, .. } => Some(*place),
+        _ => None,
+    }
+}
+
+pub fn mir_fixed_neg_can_trap(ty: &MirType) -> bool {
+    match ty.kind() {
+        MirTypeKind::IntN { bits, .. } => *bits > 0 && *bits <= 64,
+        MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. }
+            | MirTypeKind::Tagged { inner: base, .. } => mir_fixed_neg_can_trap(base),
+        _ => false,
+    }
+}
+
+/// Whether `operation` can stop (unified host/stop contract, #4720): it runs
+/// user or Core code, invokes a callback, or waits. Mirrors MIR.jet
+/// `mir_operation_can_stop`.
+pub fn mir_operation_can_stop(
+    operation: &MirOperation,
+    operand_type: Option<&MirType>,
+    accessed_place: Option<&MirPlace>,
+    mut effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    if let MirOperation::Binary { dispatch, .. } = operation {
+        return mir_binary_can_trap(dispatch, effect);
+    }
+    if mir_operation_stop_operand(operation).is_some() && operand_type.is_some_and(mir_fixed_neg_can_trap) {
+        return true;
+    }
+    if mir_operation_stop_place(operation).is_some() {
+        let writing = matches!(operation, MirOperation::WritePlace { .. } | MirOperation::ReplacePlace { .. });
+        if accessed_place.is_some_and(|place| place.projections.iter().any(|projection| {
+            let MirProjection::Index { call, write_call, .. } = projection else { return false; };
+            effect(*call) == Some(Effect::Panic)
+                || (writing && write_call.is_some_and(|call| effect(call) == Some(Effect::Panic)))
+        })) {
+            return true;
+        }
+    }
+    if operation_prelude_calls(operation).any(|call| effect(call) == Some(Effect::Panic)) {
+        return true;
+    }
+    match operation {
+        MirOperation::Call { .. } | MirOperation::IndirectCall { .. } | MirOperation::CoreCall { .. }
+            | MirOperation::ScopeExit { .. } => true,
+        MirOperation::LoopIterInit { .. } | MirOperation::LoopIterAdvance { .. } => true,
+        MirOperation::Semantic(semantic) => matches!(
+            semantic,
+            MirSemanticOp::ClosureMethod { .. }
+                | MirSemanticOp::CoreClosureCall { .. }
+                | MirSemanticOp::PluginInvoke { .. }
+                | MirSemanticOp::TaskGroup { .. }
+                | MirSemanticOp::Select { .. }
+                | MirSemanticOp::PolicyFunction { .. }
+                | MirSemanticOp::InterruptFunction { .. }
+                | MirSemanticOp::HostCall { .. }
+                | MirSemanticOp::RequireStop { .. }
+        ),
+        _ => false,
+    }
+}
+
+/// User/Core/callback operations may panic through the code they invoke;
+/// ScopeExit by itself only forwards an already-delivered stop.
+pub fn mir_operation_can_panic(
+    operation: &MirOperation,
+    operand_type: Option<&MirType>,
+    accessed_place: Option<&MirPlace>,
+    effect: impl FnMut(MirPreludeCallId) -> Option<Effect>,
+) -> bool {
+    !matches!(operation, MirOperation::ScopeExit { .. })
+        && mir_operation_can_stop(operation, operand_type, accessed_place, effect)
+}
+
+/// Stop points (mirrors JetOptimizer Legality.jet mir_pass_validate_stop_points).
+/// A Propagate poll directly follows a can-stop operation, and every read,
+/// projection or drop of that operation's result (phi inputs by their incoming
+/// edge) is dominated by the resume edge. A function that ends in Stopped has
+/// closed every Shield scope it opened on each path to it.
+fn validate_stop_points(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+    value_types: &HashMap<MirValueId, &MirType>,
+    place_rows: &HashMap<MirPlaceId, &MirPlace>,
+    dominators: &MirDominators,
+    prelude_rows: &HashMap<MirPreludeCallId, &MirPreludeCall>,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    let mut stopped = false;
+    for block in &function.blocks {
+        match &block.terminator {
+            MirTerminator::Poll { kind, resume, stop } => {
+                if resume == stop {
+                    return Err(invalid("MIR poll resumes and stops on the same block"));
+                }
+                if *kind == MirPollKind::Propagate {
+                    let Some(last) = block.instructions.last().filter(|last| mir_operation_can_stop(&last.operation,
+                        mir_operation_stop_operand(&last.operation).and_then(|value| value_types.get(&value).copied()),
+                        mir_operation_stop_place(&last.operation).and_then(|place| place_rows.get(&place).copied()),
+                        |call| prelude_rows.get(&call).and_then(|row| row.effect))) else {
+                        return Err(invalid("MIR Propagate poll does not follow a can-stop operation"));
+                    };
+                    if let Some(result) = last.result {
+                        validate_resume_uses(function, place_rows, dominators, result, *resume)?;
+                    }
+                    validate_consumed_stop_uses(function, blocks, &last.operation, *stop)?;
+                }
+            }
+            MirTerminator::Stopped => stopped = true,
+            _ => {}
+        }
+    }
+    if stopped {
+        validate_stop_shields(function, blocks, value_types, place_rows, prelude_rows)?;
+    }
+    validate_stop_cleanup_scopes(function, blocks)?;
+    Ok(())
+}
+
+/// StopCleanup is a typed, LIFO owner on a stop edge, not a cancellation
+/// mask. Every path restores its token before leaving the cleanup graph.
+fn validate_stop_cleanup_scopes(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation {
+        function: function.id, message: message.to_string(),
+    };
+    let mut entries: HashMap<MirScopeId, usize> = function.scopes.iter()
+        .filter(|scope| scope.kind == MirScopeKind::StopCleanup)
+        .map(|scope| (scope.id, 0)).collect();
+    if entries.is_empty() { return Ok(()); }
+    for block in &function.blocks {
+        for instruction in &block.instructions {
+            if let MirOperation::ScopeEnter { scope, test_member } = &instruction.operation {
+                if let Some(count) = entries.get_mut(scope) {
+                    *count += 1;
+                    if *count != 1 || test_member.is_some() {
+                        return Err(invalid("MIR StopCleanup must have one compiler-owned entry"));
+                    }
+                }
+            }
+        }
+    }
+    if entries.values().any(|count| *count != 1) {
+        return Err(invalid("MIR StopCleanup must have one compiler-owned entry"));
+    }
+    let mut state_at = HashMap::from([(function.entry, (false, Vec::<MirScopeId>::new()))]);
+    let mut pending = vec![function.entry];
+    while let Some(id) = pending.pop() {
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        let (unwinding, mut scopes) = state_at[&id].clone();
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } if entries.contains_key(scope) => {
+                    if !unwinding {
+                        return Err(invalid("MIR StopCleanup appears outside a stop edge"));
+                    }
+                    scopes.push(*scope);
+                }
+                MirOperation::ScopeExit { scope } if entries.contains_key(scope) => {
+                    if scopes.pop() != Some(*scope) {
+                        return Err(invalid("MIR StopCleanup leave does not match its active token"));
+                    }
+                }
+                _ => {}
+            }
+        }
+        if !scopes.is_empty() {
+            match block.terminator {
+                MirTerminator::Poll { .. } =>
+                    return Err(invalid("MIR StopCleanup recursively polls")),
+                MirTerminator::Stopped | MirTerminator::Return { .. } | MirTerminator::Yield { .. } =>
+                    return Err(invalid("MIR exit leaves a StopCleanup token open")),
+                _ => {}
+            }
+        }
+        for target in block.terminator.targets() {
+            let stopped = unwinding || matches!(&block.terminator,
+                MirTerminator::Poll { stop, .. } if *stop == target);
+            match state_at.get(&target) {
+                Some((old_stopped, old_scopes)) if *old_stopped != stopped || old_scopes != &scopes =>
+                    return Err(invalid("MIR StopCleanup state differs between paths into a block")),
+                Some(_) => {}
+                None => {
+                    state_at.insert(target, (stopped, scopes.clone()));
+                    pending.push(target);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A consuming call has already taken its arguments when it delivers a stop.
+/// Replaying that cleanup on the stop edge would close the same owner twice.
+fn validate_consumed_stop_uses(
+    function: &MirFunction,
+    blocks: &HashMap<MirBlockId, usize>,
+    operation: &MirOperation,
+    stop: MirBlockId,
+) -> Result<(), MirValidationError> {
+    let args = match operation {
+        MirOperation::Call { args, .. } | MirOperation::IndirectCall { args, .. }
+        | MirOperation::CoreCall { args, .. } => args.as_slice(),
+        _ => &[],
+    };
+    let thunk = match operation {
+        MirOperation::IndirectCall { callee, .. } => Some(*callee),
+        _ => None,
+    };
+    if thunk.is_none() && !args.iter().any(|arg| arg.access == MirAccess::Move) {
+        return Ok(());
+    }
+    let mut pending = vec![stop];
+    let mut seen = HashSet::new();
+    while let Some(id) = pending.pop() {
+        if !seen.insert(id) { continue; }
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        for instruction in &block.instructions {
+            let reused_thunk = matches!(&instruction.operation,
+                MirOperation::IndirectCall { callee, .. } if Some(*callee) == thunk);
+            if reused_thunk || args.iter().filter(|arg| arg.access == MirAccess::Move)
+                .any(|arg| instruction.operation.value_uses().contains(&arg.value)) {
+                return Err(MirValidationError::InvalidOperation {
+                    function: function.id,
+                    message: "MIR stop edge reuses an already-consumed cleanup input".to_string(),
+                });
+            }
+        }
+        pending.extend(block.terminator.targets());
+    }
+    Ok(())
+}
+
+fn validate_resume_uses(
+    function: &MirFunction,
+    place_rows: &HashMap<MirPlaceId, &MirPlace>,
+    dominators: &MirDominators,
+    result: MirValueId,
+    resume: MirBlockId,
+) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    for block in &function.blocks {
+        let resumed = dominators.dominates(resume, block.id);
+        for instruction in &block.instructions {
+            if let MirOperation::Phi { incoming } = &instruction.operation {
+                if incoming.iter().any(|(predecessor, value)| *value == result && !dominators.dominates(resume, *predecessor)) {
+                    return Err(invalid("MIR phi reads a can-stop result on an edge its resume edge does not dominate"));
+                }
+                continue;
+            }
+            if resumed {
+                continue;
+            }
+            if instruction.operation.value_uses().contains(&result) {
+                return Err(invalid("MIR reads or drops a can-stop result outside its resume edge"));
+            }
+            let projected = operation_places(&instruction.operation)
+                .into_iter()
+                .filter_map(|place| place_rows.get(&place))
+                .any(|place| place_value_uses(place).any(|value| value == result));
+            if projected {
+                return Err(invalid("MIR place projection reads a can-stop result outside its resume edge"));
+            }
+        }
+        if !resumed && block.terminator.value_uses().contains(&result) {
+            return Err(invalid("MIR terminator reads a can-stop result outside its resume edge"));
+        }
+    }
+    Ok(())
+}
+
+/// Cancellation masks contain only propagation for Panic-capable operations.
+/// All paths agree on depth; stopped exits close every mask.
+fn validate_stop_shields(function: &MirFunction, blocks: &HashMap<MirBlockId, usize>, value_types: &HashMap<MirValueId, &MirType>, place_rows: &HashMap<MirPlaceId, &MirPlace>, prelude_calls: &HashMap<MirPreludeCallId, &MirPreludeCall>) -> Result<(), MirValidationError> {
+    let invalid = |message: &str| MirValidationError::InvalidOperation { function: function.id, message: message.to_string() };
+    let shields: HashSet<MirScopeId> =
+        function.scopes.iter().filter(|scope| matches!(scope.kind, MirScopeKind::Shield | MirScopeKind::Transaction)).map(|scope| scope.id).collect();
+    if shields.is_empty() {
+        return Ok(());
+    }
+    let mut depth_at = HashMap::from([(function.entry, 0i64)]);
+    let mut pending = vec![function.entry];
+    while let Some(id) = pending.pop() {
+        let Some(&index) = blocks.get(&id) else { continue };
+        let block = &function.blocks[index];
+        let mut depth = depth_at[&id];
+        for instruction in &block.instructions {
+            match &instruction.operation {
+                MirOperation::ScopeEnter { scope, .. } if shields.contains(scope) => depth += 1,
+                MirOperation::ScopeExit { scope } if shields.contains(scope) => depth -= 1,
+                _ => {}
+            }
+        }
+        if depth > 0 {
+            if let MirTerminator::Poll { kind, .. } = &block.terminator {
+                if *kind == MirPollKind::Check {
+                    return Err(invalid("MIR cancellation check appears inside a cancellation mask"));
+                }
+                if !block.instructions.last().is_some_and(|last|
+                    mir_operation_can_panic(&last.operation,
+                        mir_operation_stop_operand(&last.operation).and_then(|value| value_types.get(&value).copied()),
+                        mir_operation_stop_place(&last.operation).and_then(|place| place_rows.get(&place).copied()),
+                        |call| prelude_calls.get(&call).and_then(|row| row.effect))) {
+                    return Err(invalid("MIR masked propagation does not follow a Panic-capable operation"));
+                }
+            }
+        }
+        if matches!(block.terminator, MirTerminator::Stopped) && depth != 0 {
+            return Err(invalid("MIR Stopped leaves a Shield scope open"));
+        }
+        for target in block.terminator.targets() {
+            match depth_at.get(&target) {
+                Some(&seen) if seen != depth => return Err(invalid("MIR Shield depth differs between paths into a block")),
+                Some(_) => {}
+                None => {
+                    depth_at.insert(target, depth);
+                    pending.push(target);
+                }
             }
         }
     }
@@ -8899,6 +10096,7 @@ fn ensure_use(
     use_index: usize,
     value: MirValueId,
     span: Span,
+    address_anchor: bool,
 ) -> Result<(), MirValidationError> {
     let Some((definition_block, definition_index)) = values.get(&value).copied() else {
         return Err(MirValidationError::MissingValue { function: function.id, value });
@@ -8911,6 +10109,26 @@ fn ensure_use(
     };
     if !valid || !blocks.contains_key(&definition_block) {
         return Err(MirValidationError::UseBeforeDefinition { function: function.id, value, span });
+    }
+    let definition = &function.blocks[blocks[&definition_block]].instructions[definition_index];
+    validate_capture_value_use(function, definition, address_anchor)?;
+    Ok(())
+}
+
+fn validate_capture_value_use(
+    function: &MirFunction,
+    definition: &MirInstruction,
+    address_anchor: bool,
+) -> Result<(), MirValidationError> {
+    if !address_anchor {
+        if let MirOperation::Capture { slot } = &definition.operation {
+            if function.capture_params.get(*slot).is_some_and(|capture| capture.place_only) {
+                return Err(MirValidationError::InvalidOperation {
+                    function: function.id,
+                    message: "place-only Capture result is used as an SSA value".to_string(),
+                });
+            }
+        }
     }
     Ok(())
 }
@@ -8927,6 +10145,7 @@ fn place_value_uses(place: &MirPlace) -> impl Iterator<Item = MirValueId> + '_ {
         match projection {
             MirProjection::Index { index, .. } => Some(*index),
             MirProjection::Range { range, .. } => Some(*range),
+            MirProjection::MapLookup { lookup, .. } => Some(*lookup),
             MirProjection::Field { .. }
             | MirProjection::Deref { .. }
             | MirProjection::Payload { .. } => None,
@@ -8943,6 +10162,7 @@ fn operation_places(operation: &MirOperation) -> Vec<MirPlaceId> {
         | MirOperation::AddressOf { place, .. }
         | MirOperation::WritePlace { place, .. }
         | MirOperation::ReplacePlace { place, .. } => vec![*place],
+        MirOperation::MapLookup { map, cache, .. } => vec![*map, *cache],
         MirOperation::Closure { captures, .. } => captures
             .iter()
             .filter_map(|capture| match capture {
@@ -8960,7 +10180,6 @@ fn operation_places(operation: &MirOperation) -> Vec<MirPlaceId> {
 
 fn operation_locals(operation: &MirOperation) -> Vec<MirLocalId> {
     match operation {
-        MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => vec![*local],
         MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
             context.locals.iter().map(|(_, local)| *local).collect()
         }
@@ -8999,8 +10218,8 @@ fn operation_core_calls(operation: &MirOperation) -> Vec<MirCoreCallId> {
         _ => Vec::new(),
     }
 }
-fn operation_prelude_calls(operation: &MirOperation) -> Vec<MirPreludeCallId> {
-    match operation {
+fn operation_prelude_calls(operation: &MirOperation) -> impl Iterator<Item = MirPreludeCallId> {
+    let slots = match operation {
         MirOperation::Call {
             callee: MirCallee::Prelude(route),
             ..
@@ -9018,18 +10237,19 @@ fn operation_prelude_calls(operation: &MirOperation) -> Vec<MirPreludeCallId> {
         | MirOperation::LoopIterHasNext { call: route, .. }
         | MirOperation::LoopIterValue { call: route, .. }
         | MirOperation::LoopIterAdvance { call: route, .. }
-        => vec![*route],
+        => [Some(*route), None],
         MirOperation::Convert {
             conversion: MirConversion::Prelude { call, .. },
             ..
-        } => vec![*call],
+        } => [Some(*call), None],
         MirOperation::Binary {
             dispatch: MirBinaryDispatch::Prelude { call, .. },
             ..
-        } => vec![*call],
-        MirOperation::Semantic(operation) => operation.prelude_calls(),
-        _ => Vec::new(),
-    }
+        } => [Some(*call), None],
+        MirOperation::Semantic(operation) => operation.prelude_call_slots(),
+        _ => [None, None],
+    };
+    slots.into_iter().flatten()
 }
 
 fn operation_types(operation: &MirOperation) -> Vec<MirTypeId> {
@@ -9146,6 +10366,40 @@ fn operation_source_files(operation: &MirOperation) -> Vec<MirSourceFileId> {
         MirOperation::Semantic(operation) => operation.source_file_uses(),
         _ => Vec::new(),
     }
+}
+
+/// Resolve private Core hooks through checked identities, never short names.
+/// Consumers prepare the selected IDs once before executing or emitting.
+pub fn mir_source_value_hook(
+    program: &MirProgram,
+    ty: &MirType,
+    operation: &str,
+) -> Option<MirFunctionId> {
+    let owner = match &ty.kind {
+        MirTypeKind::Tagged { inner, .. } => return mir_source_value_hook(program, inner, operation),
+        MirTypeKind::Apply { name, .. } => name,
+        _ => return None,
+    };
+    let hook = crate::CoreModuleExports::core_source_value_hook(&owner.name, operation)?;
+    let mut selected = None;
+    for function in &program.functions {
+        let MirFunctionForm::Method { owner: method_owner, self_access: Some(MirAccess::Read) } = &function.form else {
+            continue;
+        };
+        let MirTypeKind::Apply { name, .. } = &method_owner.kind else {
+            continue;
+        };
+        if name.id != owner.id || name.name != owner.name
+            || function.name.rsplit("::").next() != Some(hook)
+        {
+            continue;
+        }
+        if selected.is_some() {
+            return None;
+        }
+        selected = Some(function.id);
+    }
+    selected
 }
 
 pub use crate::MIROptimization::{

@@ -42,7 +42,7 @@ impl<'a> Parser<'a> {
             "a `#Import(c)` declaration needs one non-empty symbol string".to_string(),
             "the Jet signature is checked by sema and the string after `=` names the stable C symbol"
                 .to_string(),
-            "write `#Import(c) fn name(args) Return = \"c_symbol\"`".to_string(),
+            "write `#Import(c) fn name(args) -> Return = \"c_symbol\"`".to_string(),
             Some(span),
         )
     }
@@ -274,6 +274,7 @@ impl<'a> Parser<'a> {
             let kind = CModuleKind::Extern;
             let module = self.c_module_after_kind(marker.span, kind)?;
             self.bind_rule_fact(
+                &marker.name,
                 marker.name_span,
                 Some(module.span),
                 crate::Policy::RuleSite::Module,
@@ -285,6 +286,7 @@ impl<'a> Parser<'a> {
             let kind = CModuleKind::Bindgen;
             let module = self.c_module_after_kind(marker.span, kind)?;
             self.bind_rule_fact(
+                &marker.name,
                 marker.name_span,
                 Some(module.span),
                 crate::Policy::RuleSite::Module,

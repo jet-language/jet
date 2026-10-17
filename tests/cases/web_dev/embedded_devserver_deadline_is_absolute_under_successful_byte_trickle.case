@@ -1,0 +1,17 @@
+# Original tests/web_dev.rs:3625-3722; exact32successful writes, empty response,9s<=elapsed<11.5s.
+# D-NET-IO-KIND1 NOT-A-BALLOT rev2 corrected plan: one task write+200ms read32times; final read has remainder of12s; Timeout continues only during trickle; earlyclose fails; Reset|Aborted|EOF union maps to emptyread or ConnectionReset.
+# PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw); core-net-io-kind PORTED.
+fixture: embedded_devserver_deadline_is_absolute_under_successful_byte_trickle.fixture
+env: S5_PORT={free-port:web}
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+write: app.jet app.source
+session app raw: jet dev app.jet
+stderr: null
+recv app line until ^= "App preview: " timeout 60s
+capture: served = text stdout.strip_prefix_lines("App preview: ").line(0).split("://",1).split("/",0).after_last(":")
+json: cap:served doc $ = {free-port:web}
+step: jet test claims
+exit: 0
+signal app: KILL
+close app
+exit: any # original KillOnDrop ignores child status

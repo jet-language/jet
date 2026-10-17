@@ -1,0 +1,53 @@
+// Shared object-first fixture transport. runtime-pack.txt is supplied only by
+// the runner's explicit JET_RUNTIME_PACK handoff; admission belongs to the
+// composed gate and its fresh same-FINAL receipt, never a historical search.
+use core.files as files
+
+fn test_pack_bytes() -> [U8] {
+    path :: (files.read("runtime-pack.txt") ?? panic("runtime-pack.txt must name an admitted fresh Jet pack")).trim()
+    files.read_bytes(path) ?? panic("cannot read the explicit runtime pack {path}")
+}
+
+// The runtime main calls Unit entries. Preserve the old scalar exit contract
+// with an actual Jet-authored LIR function, compiled by the same backend as the
+// witness: call the checked scalar entry, widen its integer result, then exit
+// through the real Jet process provider after runtime initialization.
+fn test_pack_entry(program: &LIRModule, entry: LIRFunctionID) -> LIRFunctionID Never! {
+    assert(entry.value >= 0 && entry.value < program.functions.len())
+    signature :: lir_signature(program, program.functions[entry.value].signature) ?? panic("entry has no signature")
+    assert(signature.params.len() == 0)
+    if signature.result == None -> return entry.copy()
+    result :: signature.result ?? panic("scalar entry has no result")
+    assert(result.class == LIRABIClass.Integer && result.size <= 8)
+    unit :: LIRSignatureID{value: program.signatures.len()}
+    exit :: LIRSignatureID{value: unit.value + 1}
+    &program.signatures.push(LIRSignature{id: unit, convention: LIRCallConv.SystemV, params: [LIRLayout]{}, result: None})
+    &program.signatures.push(LIRSignature{id: exit, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_word()}, result: None})
+    value :: LIRValueID{value: 0}
+    word :: LIRValueID{value: 1}
+    adapter :: LIRFunctionID{value: program.functions.len()}
+    &program.functions.push(LIRFunction{id: adapter, name: "fixture_word_entry", signature: unit, values: [LIRValue]{
+        LIRValue{id: value, layout: result, drop: LIRDrop.Trivial, jet_type: None},
+        LIRValue{id: word, layout: lir_layout_word(), drop: LIRDrop.Trivial, jet_type: None},
+    }, blocks: [LIRBlock]{LIRBlock{id: LIRBlockID{value: 0}, params: [LIRValueID]{}, insts: [LIRInst]{
+        LIRInst.Call{dst: Val(value), signature: signature.id, callee: LIRCallee.Function{id: entry}, args: [LIRValueID]{}},
+        LIRInst.Convert{dst: word, src: value},
+        LIRInst.Call{dst: None, signature: exit, callee: LIRCallee.Runtime{symbol: "jet_rt_process_exit"}, args: [LIRValueID]{word}},
+    }, terminator: LIRTerminator.Return{value: None}, lines: [Int]{0, 0, 0, 0}}}, debug: lir_function_debug_none()})
+    adapter
+}
+
+fn test_pack_link(name: String, object: ^X64ExecutableResult) -> X64ExecutableResult {
+    if object.errors.len() > 0 -> return object
+    files.write_bytes("{name}.o", object.bytes) ?? panic("cannot write {name}.o")
+    x64_link_executable([String]{"{name}.o", "explicit-runtime-pack"}, ^[[U8]]{^object.bytes, test_pack_bytes()})
+}
+
+fn test_pack_write(name: String, object: ^X64ExecutableResult) -> Bool {
+    linked :: test_pack_link(name, ^object)
+    loop error in linked.errors -> print("native {name}: {error}")
+    if linked.errors.len() > 0 -> return false
+    files.write_bytes("{name}.exe", linked.bytes) ?? panic("cannot write {name}.exe")
+    files.set_mode("{name}.exe", 0o755) ?? panic("cannot make {name}.exe executable")
+    true
+}

@@ -1,0 +1,95 @@
+// PluginWire.rs:45-50 derived Clone/PartialEq/Debug, :65-68 Display.
+// DBPluginWire.rs:4-11: show/display message only; debug is full Rust derive.
+#Export(c) fn jet_rt_handle_clone_plugin_error(value: I64) -> I64 {
+    kind :: data_tree_word(value + PLUGIN_ERROR_TAG)
+    result :: jet_rt_alloc(PLUGIN_ERROR_BYTES, I64{8})
+    data_tree_store(result + PLUGIN_ERROR_TAG, kind)
+    data_tree_store(result + PLUGIN_ERROR_FAULT, jet_rt_handle_clone_plugin_fault(data_tree_word(value + PLUGIN_ERROR_FAULT)))
+    data_tree_store(result + PLUGIN_ERROR_LIMIT, if kind == PLUGIN_ERROR_BUDGET -> data_tree_word(value + PLUGIN_ERROR_LIMIT) else -> I64{0})
+    result
+}
+#Export(c) fn jet_rt_handle_drop_plugin_error(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_handle_drop_plugin_fault(data_tree_word(value + PLUGIN_ERROR_FAULT))
+    jet_rt_free(value, PLUGIN_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_plugin_error(left: I64, right: I64) -> Bool {
+    kind :: data_tree_word(left + PLUGIN_ERROR_TAG)
+    if kind != data_tree_word(right + PLUGIN_ERROR_TAG) -> return false
+    // Budget { limit, fault } has this order in PluginWire.rs:49.
+    if kind == PLUGIN_ERROR_BUDGET && data_tree_word(left + PLUGIN_ERROR_LIMIT) != data_tree_word(right + PLUGIN_ERROR_LIMIT) -> return false
+    jet_rt_handle_eq_plugin_fault(data_tree_word(left + PLUGIN_ERROR_FAULT), data_tree_word(right + PLUGIN_ERROR_FAULT))
+}
+#Export(c) fn jet_rt_handle_display_plugin_error(value: I64) -> I64 {
+    fault :: data_tree_word(value + PLUGIN_ERROR_FAULT)
+    jet_rt_string_clone(data_tree_word(fault + PLUGIN_FAULT_MESSAGE))
+}
+#Export(c) fn jet_rt_handle_show_plugin_error(value: I64) -> I64 { jet_rt_handle_display_plugin_error(value) }
+fn plugin_frame_debug(target: I64, frame: I64) {
+    // "PluginFrame { function: "
+    rt_text_push_word(target, I64{8234390367679900752}, I64{8})
+    rt_text_push_word(target, I64{8459484663258639713}, I64{8})
+    rt_text_push_word(target, I64{2322289982652572526}, I64{8})
+    rt_text_push_rust_debug_str(target, data_tree_word(frame + PLUGIN_FRAME_FUNCTION))
+    // ", component: "
+    rt_text_push_word(target, I64{7957702681909469228}, I64{8})
+    rt_text_push_word(target, I64{138419662437}, I64{5})
+    rt_text_push_rust_debug_str(target, data_tree_word(frame + PLUGIN_FRAME_COMPONENT))
+    // ", offset: "
+    rt_text_push_word(target, I64{8387236764689834028}, I64{8})
+    rt_text_push_word(target, I64{8250}, I64{2})
+    rt_text_push_number(target, data_tree_word(frame + PLUGIN_FRAME_OFFSET))
+    rt_text_push_word(target, I64{32032}, I64{2}) // " }"
+}
+fn plugin_fault_debug(target: I64, fault: I64) {
+    // "PluginFault { export: "
+    rt_text_push_word(target, I64{7009411269035125840}, I64{8})
+    rt_text_push_word(target, I64{8675375970396695669}, I64{8})
+    rt_text_push_word(target, I64{35435433848688}, I64{6})
+    rt_text_push_rust_debug_str(target, data_tree_word(fault + PLUGIN_FAULT_EXPORT))
+    // ", message: "
+    rt_text_push_word(target, I64{7449362198107594796}, I64{8})
+    rt_text_push_word(target, I64{2112101}, I64{3})
+    rt_text_push_rust_debug_str(target, data_tree_word(fault + PLUGIN_FAULT_MESSAGE))
+    // ", frames: ["
+    rt_text_push_word(target, I64{8315172552308039724}, I64{8})
+    rt_text_push_word(target, I64{5972026}, I64{3})
+    frames :: data_tree_word(fault + PLUGIN_FAULT_FRAMES)
+    length :: data_tree_word(frames + DATA_SEQUENCE_LENGTH)
+    data :: data_tree_word(frames + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (at != I64{0}) -> rt_text_push_word(target, I64{8236}, I64{2})
+        plugin_frame_debug(target, data + at * PLUGIN_FRAME_BYTES)
+        at += I64{1}
+    }
+    rt_text_push_word(target, I64{8200285}, I64{3}) // "] }"
+}
+fn plugin_limit_debug(target: I64, limit: I64) {
+    if {
+        (limit == I64{0}) -> rt_text_push_word(target, I64{1818588486}, I64{4})
+        (limit == I64{1}) -> rt_text_push_word(target, I64{133532402672973}, I64{6})
+        (limit == I64{2}) -> rt_text_push_word(target, I64{435610083668}, I64{5})
+        (limit == I64{3}) -> rt_text_push_word(target, I64{1701669204}, I64{4})
+        else -> rt_text_push_word(target, I64{1701996887}, I64{4})
+    }
+}
+#Export(c) fn jet_rt_handle_debug_plugin_error(value: I64) -> I64 {
+    kind :: data_tree_word(value + PLUGIN_ERROR_TAG)
+    target :: jet_rt_string_builder_new()
+    if kind == PLUGIN_ERROR_BUDGET {
+        // "Budget { limit: "
+        rt_text_push_word(target, I64{8872219244795032898}, I64{8})
+        rt_text_push_word(target, I64{2322296554018925600}, I64{8})
+        plugin_limit_debug(target, data_tree_word(value + PLUGIN_ERROR_LIMIT))
+        rt_text_push_word(target, I64{4212110802899312684}, I64{8}) // ", fault: "
+        rt_text_push_word(target, I64{32}, I64{1})
+    } else if kind == PLUGIN_ERROR_GUEST {
+        rt_text_push_word(target, I64{44480617346375}, I64{6})
+    } else if kind == PLUGIN_ERROR_DENIED {
+        rt_text_push_word(target, I64{11369385791743300}, I64{7})
+    } else { rt_text_push_word(target, I64{11386969320219972}, I64{7}) }
+    plugin_fault_debug(target, data_tree_word(value + PLUGIN_ERROR_FAULT))
+    if kind == PLUGIN_ERROR_BUDGET { rt_text_push_word(target, I64{32032}, I64{2}) } else { rt_text_push_word(target, I64{41}, I64{1}) }
+    target
+}

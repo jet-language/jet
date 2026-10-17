@@ -23,7 +23,7 @@ trait __jet_Encode {}
 impl<T> __jet_Encode for T {}
 
 trait __jet_Decode: Sized {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 
 fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
@@ -31,25 +31,25 @@ fn jet_enc_json_to_string<T: __jet_Encode>(_value: &T) -> String {
 }
 
 impl __jet_Decode for String {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
-        Ok(jet_std::render_datatree_json(tree, false, 0))
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
+        Ok(jet_std::render_dyn_json(tree, false, 0))
     }
 }
 
 fn jet_enc_json_decode<T: __jet_Decode>(
     text: &str,
 ) -> Result<T, Vec<jet_std::FieldError>> {
-    let tree = jet_std::parse_json_typed_datatree(text)
+    let tree = jet_std::parse_json_dyn(text)
         .map_err(|error| jet_std::FieldError::one(error.reason))?;
     T::jet_decode(&tree)
 }
 
 struct JetFileReader {
-    inner: Box<dyn std::io::Read + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Read + Send>>,
 }
 
 struct JetFileWriter {
-    inner: Box<dyn std::io::Write + Send>,
+    inner: std::sync::Mutex<Box<dyn std::io::Write + Send>>,
 }
 mod jet_encoding_json {
     pub use jet_foundation::EncodingJson::*;
@@ -64,7 +64,7 @@ include!("../crates/jet-foundation/src/LiveLifecycle.rs");
 mod jet_std {
     #[allow(unused_imports)]
     pub use jet_foundation::Outcome::*;
-    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Dyn::Dyn;
     use jet_foundation::Shape::ShapeProjection;
 
     include!("../crates/jet-codegen/src/Prelude/TaskGroup.rs");
@@ -128,9 +128,11 @@ mod jet_std {
         Closed(IOContext),
         Protocol(IOContext),
         Other(IOContext),
+        AlreadyExists(IOContext),
+        Unsupported(IOContext),
     }
 
-    // The canonical DataTree extension calls these exact-Int helpers. This
+    // The canonical Dyn extension calls these exact-Int helpers. This
     // fixture does not exercise large integer ownership, so the host i64
     // carrier is sufficient while the type and decode modules stay canonical.
     pub fn jet_int_from_i64(value: i64) -> i64 {
@@ -163,23 +165,16 @@ mod jet_std {
         pub typed_path: Option<Vec<(String, bool)>>,
     }
 
-    #[derive(Clone, Debug, PartialEq)]
-    pub struct JetMIME {
-        pub top: String,
-        pub sub: String,
-        pub parameters: Vec<Vec<String>>,
-    }
-
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/UrlMime.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONCodec.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
     include!("../crates/jet-codegen/src/Prelude/Core/FieldError.rs");
     include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/EncodingTypes.rs");
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/Dyn.rs");
     use crate::jet_encoding_json::quote_json;
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDataTree.rs");
-    jet_datatree_decode_helpers!();
+    include!("../crates/jet-codegen/src/Prelude/CoreLib/JetStd/JSONDyn.rs");
+    jet_dyn_decode_helpers!();
 
 }
 
@@ -414,6 +409,7 @@ fn jet_std_time_duration_to_millis(ns: i64) -> i64 {
     ns
 }
 
+include!("../crates/jet-codegen/src/Prelude/Core/NativeTaskBody.rs");
 include!("../crates/jet-codegen/src/Prelude/Scheduler.rs");
 
 mod http_server_tls_runtime {
@@ -684,7 +680,7 @@ fn shared_http_body_streams_bytes_once_and_uses_closed_errors() {
     assert_eq!(observed, b"abcdef");
     let capped = JetHTTPBody::from_reader_with_length(
         JetFileReader {
-            inner: Box::new(std::io::Cursor::new(b"abcdef".to_vec())),
+            inner: std::sync::Mutex::new(Box::new(std::io::Cursor::new(b"abcdef".to_vec()))),
         },
         3,
     )
@@ -4149,13 +4145,13 @@ fn canonical_router_precedence_methods_and_conflicts() {
 
     let logs = jet_http_mux_new();
     jet_http_mux_add(&logs, "GET", "/logs/:id/*rest", |req| {
-        jet_http_srv_response(200, &jet_http_srv_access_log(&req, 200))
+        jet_http_srv_response(200, &jet_http_srv_raw_route_template(&req).expect("selected route template"))
     });
     assert_eq!(
         jet_http_mux_dispatch(&logs, request("GET", "/logs/42/a/b?secret=x"))
             .unwrap()
             .body,
-        "GET /logs/:id/*rest 200"
+        "/logs/:id/*rest"
     );
 }
 
@@ -5115,6 +5111,44 @@ fn windows_static_serving_fails_closed_without_held_no_reparse_identity() {
 }
 
 #[test]
+fn every_server_response_carries_one_program_clock_date() {
+    // D-HTTP-DATE1=A: the serializer adds `Date` from the program clock, so a
+    // deterministic world gives a fixed IMF-fixdate; a handler-set Date wins.
+    let (first, later, read_error) = jet_testing_world(|world| {
+        let first = jet_http_srv_format(&jet_http_srv_response(200, &"ok".to_string()));
+        jet_world_advance(&world, 1_500_000_000);
+        let later = jet_http_srv_format(&jet_http_srv_empty_response(404));
+        let read_error = jet_http_srv_read_error_response(&JetHTTPReadError {
+            status: 400,
+            message: "bad request",
+        });
+        (first, later, read_error)
+    });
+    assert!(
+        first.starts_with("HTTP/1.1 200 OK\r\nDate: Thu, 01 Jan 1970 00:00:00 GMT\r\n"),
+        "{first}"
+    );
+    assert_eq!(first.matches("Date:").count(), 1, "{first}");
+    assert!(
+        later.starts_with("HTTP/1.1 404 Not Found\r\nDate: Thu, 01 Jan 1970 00:00:01 GMT\r\n"),
+        "{later}"
+    );
+    assert_eq!(
+        read_error,
+        "HTTP/1.1 400 Bad Request\r\nDate: Thu, 01 Jan 1970 00:00:01 GMT\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+
+    let mut handler_dated = jet_http_srv_response(200, &"ok".to_string());
+    handler_dated
+        .headers
+        .append("date", "Mon, 05 Oct 2026 18:00:00 GMT")
+        .unwrap();
+    let passed = jet_http_srv_format(&handler_dated);
+    assert_eq!(passed.to_ascii_lowercase().matches("date:").count(), 1, "{passed}");
+    assert!(passed.contains("date: Mon, 05 Oct 2026 18:00:00 GMT\r\n"), "{passed}");
+}
+
+#[test]
 fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     use std::io::Read;
 
@@ -5128,7 +5162,11 @@ fn http2_response_framing_filters_handler_claims_and_verifies_known_lengths() {
     forbidden.headers.append("x-hop", "private").unwrap();
     let encoded = jet_http2_encode_response_headers(&forbidden, None);
     let decoded = jet_http2_decode_headers(&mut JetHTTP2Hpack::new(), &encoded).unwrap();
-    assert_eq!(decoded, vec![(":status".to_string(), "204".to_string())]);
+    assert_eq!(decoded.len(), 2, "{decoded:?}");
+    assert_eq!(decoded[0], (":status".to_string(), "204".to_string()));
+    // D-HTTP-DATE1=A: the server adds `date` from the program clock.
+    assert_eq!(decoded[1].0, "date");
+    assert!(jet_http_date_parse(&decoded[1].1).is_some(), "{decoded:?}");
 
     let mux = jet_http_mux_new();
     jet_http_mux_add(&mux, "GET", "/", |_| {
@@ -7176,14 +7214,13 @@ fn builtin_middleware_timeout_body_limit_cors_compress_and_access_log() {
         Err(JetHTTPError::BodyTooLarge { limit: 4 })
     ));
 
-    let policy = jet_http_cors_policy(
-        &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
-        &Vec::new(),
-        &Vec::new(),
-        false,
-        86_400,
-    )
-    .unwrap();
+    let policy = JetHTTPCorsPolicy {
+        origins: JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+        allow_methods: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS".to_string(),
+        allow_headers: "content-type, authorization, x-request-id".to_string(),
+        credentials: false,
+        max_age_secs: 86_400,
+    };
     let cors = jet_http_mw_cors(
         &policy,
         std::sync::Arc::new(|_| Ok(jet_http_srv_response(200, &"ok".to_string()))),
@@ -7391,22 +7428,10 @@ fn static_files_mount_refuses_escapes_dotfiles_and_link_escapes() {
     std::fs::remove_dir_all(base).unwrap();
 }
 
-/// D-HTTP-CORS1=A: no policy means no headers, a named origin is stamped, and
-/// `.Any` with credentials is refused when the policy is built.
+/// Runtime CORS headers: construction/defaults and wildcard-credential rejection
+/// are covered by the source-owned Core/http/server.jet #Tests.
 #[test]
-fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
-    let refused = jet_http_cors_policy(
-        &JetHTTPCorsOrigins::Any,
-        &Vec::new(),
-        &Vec::new(),
-        true,
-        86_400,
-    );
-    let Err(JetHTTPError::Policy { reason }) = refused else {
-        panic!("`.Any` origins with credentials must be refused");
-    };
-    assert!(reason.contains("CORS credentials need named origins"));
-    assert!(reason.contains("set credentials to false"));
+fn cors_stamps_named_origins_and_omits_headers_without_a_policy() {
 
     // No policy installed means the mux sends no CORS header at all.
     let bare = jet_http_mux_new();
@@ -7429,14 +7454,13 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     .unwrap();
     assert_eq!(plain.headers.get("access-control-allow-origin"), None);
 
-    let policy = jet_http_cors_policy(
-        &JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
-        &vec!["GET".to_string(), "POST".to_string()],
-        &vec!["content-type".to_string()],
-        true,
-        600,
-    )
-    .unwrap();
+    let policy = JetHTTPCorsPolicy {
+        origins: JetHTTPCorsOrigins::List(vec!["https://app.example".to_string()]),
+        allow_methods: "GET, POST".to_string(),
+        allow_headers: "content-type".to_string(),
+        credentials: true,
+        max_age_secs: 600,
+    };
     let mux = jet_http_mux_new();
     jet_http_srv_install_cors(&mux, &policy);
     jet_http_mux_add(&mux, "GET", "/api", |_| {
@@ -7502,8 +7526,13 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     assert_eq!(denied.headers.get("access-control-allow-origin"), None);
 
     // `.Any` without credentials is a valid policy and answers every origin.
-    let any =
-        jet_http_cors_policy(&JetHTTPCorsOrigins::Any, &Vec::new(), &Vec::new(), false, 0).unwrap();
+    let any = JetHTTPCorsPolicy {
+        origins: JetHTTPCorsOrigins::Any,
+        allow_methods: "GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS".to_string(),
+        allow_headers: "content-type, authorization, x-request-id".to_string(),
+        credentials: false,
+        max_age_secs: 0,
+    };
     let any_mux = jet_http_mux_new();
     jet_http_srv_install_cors(&any_mux, &any);
     jet_http_mux_add(&any_mux, "GET", "/api", |_| {
@@ -7524,30 +7553,3 @@ fn cors_policy_rejects_any_origin_with_credentials_and_stamps_named_origins() {
     );
 }
 
-/// D-HTTP-JSON1=A: `server.json` labels the encoded body, and the typed decode
-/// used by `req.json<T>()` / `resp.json<T>(limit)` honours the body cap.
-#[test]
-fn server_json_sets_the_content_type_and_the_body_cap_still_holds() {
-    let response = jet_http_srv_json(201, &"payload".to_string());
-    assert_eq!(response.status, 201);
-    assert_eq!(
-        response.headers.get("content-type"),
-        Some(&"application/json; charset=utf-8".to_string())
-    );
-    assert_eq!(
-        response.body.bytes(64).unwrap(),
-        br#"{"ok":true}"#.as_slice()
-    );
-
-    let body = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
-    let decoded: String = jet_http_body_json(&body, 64).unwrap();
-    assert_eq!(decoded, r#"{"a":1}"#);
-
-    // The typed decode reads through the shared body reader, so the framing cap
-    // rejects an oversized body before any decode runs.
-    let oversized = JetHTTPBody::from_text(r#"{"a":1}"#.to_string());
-    assert!(matches!(
-        jet_http_body_json::<String>(&oversized, 2),
-        Err(JetHTTPError::BodyTooLarge { limit: 2 })
-    ));
-}

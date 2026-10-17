@@ -25,6 +25,7 @@ pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess,
             resolved_ret,
             operator_rhs,
             checked_widen,
+            checked_callee,
         } => Expr::MethodCall {
             receiver: Box::new(mark_at_maximal_place(*receiver, access, start)),
             method,
@@ -36,6 +37,7 @@ pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess,
             resolved_ret,
             operator_rhs,
             checked_widen,
+            checked_callee,
         },
         Expr::Field(base, member, span) if contains_method_call(&base) => {
             Expr::Field(Box::new(mark_at_maximal_place(*base, access, start)), member, span)
@@ -71,6 +73,46 @@ pub(super) fn mark_at_maximal_place(expr: Expr, access: crate::AST::PlaceAccess,
     }
 }
 
+impl<'a> Parser<'a> {
+    /// D-COPY-WORD1=A: E0941 for the retired prefix copy sigil. The Safe fix
+    /// rewrites `~operand` to `operand.copy()` (parenthesized when the operand
+    /// is not a postfix chain); without source text the fix stays prose.
+    fn retired_copy_sigil(&self, sigil: Span, operand: &Expr) -> Diagnostic {
+        let full = Span::new(sigil.start, operand.span().end);
+        let operand_text = self
+            .source
+            .as_deref()
+            .and_then(|source| source.get(sigil.end..full.end))
+            .map(str::trim)
+            .filter(|text| !text.is_empty());
+        let replacement = Syntax::copy_call_source(operand_text.unwrap_or("x"));
+        let diagnostic = Diagnostic::error(
+            "E0941",
+            format!(
+                "the `{}` copy sigil is retired; a copy is the method `{}`",
+                Syntax::SIGIL_COPY_RETIRED,
+                Syntax::copy_call("x")
+            ),
+            "Jet has exactly one spelling for a deliberate copy, the built-in method `.copy()` \
+             (D-COPY-WORD1), so a copy reads as a word and chains like any method"
+                .to_string(),
+            format!("write `{replacement}`"),
+            Some(sigil),
+        );
+        if operand_text.is_none() {
+            return diagnostic;
+        }
+        diagnostic.with_edit_grade(
+            crate::Diagnostics::TextEdit {
+                span: full,
+                new_text: replacement,
+            },
+            crate::Diagnostics::FixApplicability::Safe,
+            crate::Diagnostics::FixSafety::BehaviorPreserving,
+        )
+    }
+}
+
 /// True when a projection chain passes through a method call, so a leading
 /// mark belongs to the place that call receives rather than to the chain.
 pub(super) fn contains_method_call(expr: &Expr) -> bool {
@@ -86,10 +128,9 @@ pub(super) fn contains_method_call(expr: &Expr) -> bool {
 /// D-CONC-SHARE1=A: decide whether `shared` opens a shared-cell construction
 /// (`shared expr`) or is an ordinary identifier. The keyword is contextual, so
 /// this is a closed allow-list of tokens that begin the constructed value —
-/// a name, a literal, a list/typed literal, or an inferred brace literal. Anything
-/// else (a binding sigil, an operator, a `.`, a separator, a call `(`) leaves
-/// `shared` as a plain name, which keeps existing bindings and arguments
-/// spelled `shared` legal.
+/// a name, a literal, a list/typed literal, a grouped operand, or an inferred
+/// brace literal. A binding sigil, operator, `.`, or separator leaves `shared`
+/// as a plain name.
 pub(super) fn starts_shared_operand(kind: &TokKind) -> bool {
     matches!(
         kind,
@@ -105,6 +146,7 @@ pub(super) fn starts_shared_operand(kind: &TokKind) -> bool {
             | TokKind::KwSelf
             | TokKind::LBracket
             | TokKind::LBrace
+            | TokKind::LParen
     )
 }
 
@@ -196,7 +238,9 @@ impl<'a> Parser<'a> {
             }
             return Ok(OrFallback::Continue(self.bump().span));
         }
-        let e = self.expr_range(allow_struct_lit)?;
+        // D-FALLBACK-CHAIN1=A: `??` groups from the right, so `a ?? b ?? c`
+        // is `a ?? (b ?? c)`: the value fallback is itself a fallback chain.
+        let e = self.expr_or_fallback(allow_struct_lit)?;
         if let Expr::Call(call) = &e {
             if call.name == Syntax::BUILTIN_PANIC {
                 return Ok(OrFallback::Panic {
@@ -293,6 +337,17 @@ impl<'a> Parser<'a> {
                 }
                 self.pos = save;
                 self.diags.truncate(saved_diags);
+            }
+
+            if self.guard_table_has_statement_arm() {
+                match self.stmt() {
+                    Ok(statement) => body.push(statement),
+                    Err(diagnostic) => {
+                        self.diags.push(diagnostic);
+                        self.sync_stmt();
+                    }
+                }
+                continue;
             }
 
             // As with value-if blocks, speculate on a trailing ordinary
@@ -486,7 +541,7 @@ impl<'a> Parser<'a> {
         let Some(op) = op else { return Ok(lhs) };
         let op_span = self.bump().span;
         if op == BinOp::Eq {
-            if let Some(pat) = self.try_pattern_rhs(allow_struct_lit)? {
+            if let Some(pat) = self.try_comparison_pattern_rhs(allow_struct_lit)? {
                 let span = Span::new(lhs.span().start, pat_span(&pat).end.max(op_span.end));
                 return Ok(Expr::PatternTest {
                     subject: Box::new(lhs),
@@ -599,46 +654,88 @@ impl<'a> Parser<'a> {
         )
     }
 
-    /// D-BITOREXPR1=A: `|` is bitwise OR in value position. Keep it above
-    /// comparisons; type position has its own `|` union grammar.
+    pub(in crate::Parser) fn teach_arithmetic_method(
+        &mut self,
+        method: &str,
+        lhs: Span,
+        rhs: Span,
+        operator: Span,
+        compound: bool,
+    ) {
+        let whole = Span::new(lhs.start, rhs.end);
+        let mut diagnostic = Diagnostic::error(
+            "E0398",
+            format!("this arithmetic spelling is retired; use `{method}`"),
+            "marks express ownership and outcomes; arithmetic uses named methods (D-SIGIL-ALGEBRA1=B)".to_string(),
+            format!("write `value.{method}(other)`{}", if compound { " and assign the result back" } else { "" }),
+            Some(operator),
+        );
+        if let Some(source) = self.source.as_deref() {
+            if let (Some(left), Some(right)) = (
+                source.get(lhs.start..lhs.end),
+                source.get(rhs.start..rhs.end),
+            ) {
+                let new_text = if compound {
+                    format!("{left} = ({left}).{method}({right})")
+                } else {
+                    format!("({left}).{method}({right})")
+                };
+                diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit { span: whole, new_text });
+            }
+        }
+        self.diags.push(diagnostic);
+    }
+
+    /// Parse retired arithmetic only to offer a precedence-preserving repair.
     pub(in crate::Parser) fn expr_bitor(
         &mut self,
         allow_struct_lit: bool,
     ) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let mut lhs = self.expr_bitxor(allow_struct_lit)?;
         while matches!(self.peek().kind, TokKind::Pipe)
             && !matches!(self.peek2().kind, TokKind::Gt)
         {
+            let left_end = self.prev_end();
             let op_span = self.bump().span;
+            let right_start = self.peek().span.start;
             let rhs = self.expr_bitxor(allow_struct_lit)?;
-            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            let span = Span::new(start, self.prev_end());
+            self.teach_arithmetic_method("bit_or", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
             lhs = Expr::Binary(BinOp::BitOr, Box::new(lhs), Box::new(rhs), span);
         }
         Ok(lhs)
     }
 
-    /// D-XORSPELL1=A: `~|` is bitwise exclusive-or, in the precedence slot
-    /// the old `^` spelling held.
+    /// The retired XOR precedence is retained only for its structured repair.
     pub(in crate::Parser) fn expr_bitxor(
         &mut self,
         allow_struct_lit: bool,
     ) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let mut lhs = self.expr_bitand(allow_struct_lit)?;
         while matches!(self.peek().kind, TokKind::TildePipe) {
+            let left_end = self.prev_end();
             let op_span = self.bump().span;
+            let right_start = self.peek().span.start;
             let rhs = self.expr_bitand(allow_struct_lit)?;
-            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            let span = Span::new(start, self.prev_end());
+            self.teach_arithmetic_method("bit_xor", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
             lhs = Expr::Binary(BinOp::BitXor, Box::new(lhs), Box::new(rhs), span);
         }
         Ok(lhs)
     }
 
     fn expr_bitand(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let mut lhs = self.expr_shift(allow_struct_lit)?;
         while matches!(self.peek().kind, TokKind::Amp) {
+            let left_end = self.prev_end();
             let op_span = self.bump().span;
+            let right_start = self.peek().span.start;
             let rhs = self.expr_shift(allow_struct_lit)?;
-            let span = Span::new(lhs.span().start, rhs.span().end.max(op_span.end));
+            let span = Span::new(start, self.prev_end());
+            self.teach_arithmetic_method("bit_and", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
             lhs = Expr::Binary(BinOp::BitAnd, Box::new(lhs), Box::new(rhs), span);
         }
         Ok(lhs)
@@ -725,7 +822,7 @@ impl<'a> Parser<'a> {
             TokKind::Bang => {
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
-                let full = Span::new(span.start, inner.span().end);
+                let full = Span::new(span.start, self.prev_end());
                 Ok(Expr::Unary(UnOp::Not, Box::new(inner), full))
             }
             TokKind::Ident(n)
@@ -846,37 +943,38 @@ impl<'a> Parser<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 })
             }
-            // D-SHAPE-COPY1=A: `~x` — the one copy sigil, a prefix-verb
-            // expression form. Legal on any expression; most useful on a named
-            // binding. `.clone()` is not user-typable Jet syntax (I8).
+            // D-COPY-WORD1=A: prefix `~x` is retired — a copy is the built-in
+            // method `x.copy()`. Teach with a Safe rewrite, then recover as
+            // Expr::Copy so parsing continues.
             TokKind::Tilde => {
                 let span = self.bump().span;
                 let inner = self.expr_unary(allow_struct_lit)?;
                 let full = Span::new(span.start, inner.span().end);
+                let diagnostic = self.retired_copy_sigil(span, &inner);
+                self.diags.push(diagnostic);
                 Ok(Expr::Copy(Box::new(inner), full))
             }
-            // D-SHAPE-COPY1=A: the `copy` word is retired — copy is now the
-            // `~` sigil (was D-CAP2/S4). Teach, then recover as Expr::Copy so
-            // parsing continues.
+            // D-SHAPE-COPY1=A / D-COPY-WORD1=A: the `copy` word is retired —
+            // copy is the method `x.copy()` (was D-CAP2/S4). Teach, then
+            // recover as Expr::Copy so parsing continues.
             TokKind::KwCopy => {
                 let span = self.bump().span;
                 self.diags.push(Diagnostic::error(
                     "E0991",
                     format!(
-                        "`{}` is now the `{}` sigil",
+                        "`{}` is now the method `{}`",
                         Syntax::KW_COPY,
-                        Syntax::SIGIL_COPY
+                        Syntax::copy_call("x")
                     ),
+                    "Jet has exactly one spelling for a copy — the built-in method \
+                         `.copy()` (D-COPY-WORD1) — so all code reads the same"
+                        .to_string(),
                     format!(
-                        "Jet has exactly one spelling for a copy — the `{}` sigil \
-                             (D-SHAPE-COPY1) — so all code reads the same",
-                        Syntax::SIGIL_COPY
-                    ),
-                    format!(
-                        "write `{}name` in place of `{} name`",
-                        Syntax::SIGIL_COPY,
+                        "write `{}` in place of `{} name`",
+                        Syntax::copy_call("name"),
                         Syntax::KW_COPY
                     ),
                     Some(span),
@@ -943,6 +1041,7 @@ impl<'a> Parser<'a> {
                     resolved_ret: None,
                     operator_rhs: None,
                     checked_widen: false,
+                    checked_callee: None,
                 })
             }
             // D-ENUMDOT2=A: `.Variant`, `.Variant(arg)`, or `.Variant.{ field: val }` in
@@ -1087,19 +1186,47 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-EXPSEM1=A: infix `^` raises to a power. It binds tighter than
-    /// every other binary operator and tighter than unary minus, so
-    /// `-3 ^ 2` is `-(3 ^ 2)`. It is right-associative and its exponent
-    /// runs back through the unary level, so `2 ^ 3 ^ 2` is `2 ^ (3 ^ 2)`
-    /// and `2 ^ -1` reads the negative exponent.
+    /// Parse retired power with its original associativity for the repair.
     fn expr_pow(&mut self, allow_struct_lit: bool) -> Result<Expr, Diagnostic> {
+        let start = self.peek().span.start;
         let base = self.expr_postfix(allow_struct_lit)?;
+        if matches!(self.peek().kind, TokKind::Star)
+            && matches!(self.peek2().kind, TokKind::Star)
+            && self.peek2().span.start == self.peek().span.end
+        {
+            let base_span = Span::new(start, self.prev_end());
+            let first = self.bump().span;
+            let power_span = Span::new(first.start, self.bump().span.end);
+            let mut diagnostic = Diagnostic::from_row("E0396", &[], Some(power_span));
+            if self.source.is_some() {
+                match self.expr_unary(allow_struct_lit) {
+                    Ok(rhs) => {
+                        let rhs_span = rhs.span();
+                        let source = self.source.as_deref().expect("source-backed repair");
+                        if let (Some(left), Some(right)) = (
+                            source.get(base_span.start..base_span.end),
+                            source.get(rhs_span.start..rhs_span.end),
+                        ) {
+                            diagnostic = diagnostic.with_edit(crate::Diagnostics::TextEdit {
+                                span: Span::new(base_span.start, rhs_span.end),
+                                new_text: format!("({left}).pow({right})"),
+                            });
+                        }
+                    }
+                    Err(error) => self.diags.push(error),
+                }
+            }
+            return Err(diagnostic);
+        }
         if !matches!(self.peek().kind, TokKind::Caret) {
             return Ok(base);
         }
+        let left_end = self.prev_end();
         let op_span = self.bump().span;
+        let right_start = self.peek().span.start;
         let exponent = self.expr_unary(allow_struct_lit)?;
-        let span = Span::new(base.span().start, exponent.span().end.max(op_span.end));
+        let span = Span::new(start, self.prev_end());
+        self.teach_arithmetic_method("pow", Span::new(start, left_end), Span::new(right_start, span.end), op_span, false);
         Ok(Expr::Binary(
             BinOp::Pow,
             Box::new(base),

@@ -185,11 +185,3 @@ fn run() {
 fn live_inspector_reads_default_resident_jit_tasks_without_payloads() {
     live_inspector_reads_tasks_without_payloads(&["run", "--observe"], "jet_live_inspect_jit");
 }
-
-#[test]
-fn live_inspector_reads_ambient_interpreter_tasks_without_payloads() {
-    live_inspector_reads_tasks_without_payloads(
-        &["run", "--interpret", "--observe"],
-        "jet_live_inspect_interpreter",
-    );
-}

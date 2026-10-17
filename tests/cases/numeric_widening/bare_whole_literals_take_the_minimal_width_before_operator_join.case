@@ -1,0 +1,29 @@
+# HAND-PORT tests/numeric_widening.rs:488-537 bare_whole_literals_take_the_minimal_width_before_operator_join
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# ORACLE-LITERAL; original numeric tier helper asserts exit/stdout only; all three invalid bounds and exact rendered conjunctions retained, closed U64 format! expansion.
+fixture: bare_whole_literals_take_the_minimal_width_before_operator_join.fixture
+env: NO_COLOR=1
+step valid/default: jet run valid/main.jet
+exit: 0
+stdout: = bare_whole_literals_take_the_minimal_width_before_operator_join.stdout.expected
+step valid/interpret: jet run --interpret valid/main.jet
+exit: 0
+stdout: = bare_whole_literals_take_the_minimal_width_before_operator_join.stdout.expected
+step: jet build --profile=debug valid/main.jet
+exit: 0
+step valid/aot: built
+exit: 0
+stdout: = bare_whole_literals_take_the_minimal_width_before_operator_join.stdout.expected
+step: jet check invalid-0/main.jet
+exit: nonzero
+stderr: ~ "[E1003]" # original rendered predicate
+stderr: ~ "U8" # original rendered predicate
+stderr: ~ "255" # original rendered predicate
+step: jet check invalid-1/main.jet
+exit: nonzero
+stderr: ~ "[E1003]" # original rendered predicate
+stderr: ~ "A `U64` holds 0..18446744073709551615" # original rendered predicate
+step: jet check invalid-2/main.jet
+exit: nonzero
+stderr: ~ "[E1003]" # original rendered predicate
+stderr: ~ "An `I64` holds -9223372036854775808..9223372036854775807" # original rendered predicate

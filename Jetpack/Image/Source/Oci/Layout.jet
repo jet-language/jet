@@ -25,27 +25,27 @@ IMAGE_MAX_LAYER_PATH_BYTES :: prep { 100 }
 
 // One file layered into the image, relative to the image root (no leading
 // `/`), e.g. `usr/local/bin/myapp`. `mode` is the tar entry's permission bits.
-pub struct LayerFile {
-    pub path: String
-    pub data: [U8]
-    pub mode: Int
+struct LayerFile {
+    path: String
+    data: [U8]
+    mode: Int
 }
 
 // Everything needed to build one `.Oci` image (Rust `BuildSpec`). Pure data;
 // `files` need not be sorted because the build sorts by path.
-pub struct OCIBuildSpec {
-    pub files: [LayerFile]
+struct OCIBuildSpec {
+    files: [LayerFile]
     // The single platform represented by this OCI layout.
-    pub platform: String
+    platform: String
     // The container `Entrypoint`, e.g. `["/usr/local/bin/myapp"]`.
-    pub entrypoint: [String]
-    pub env: [ImageEnvVar]
+    entrypoint: [String]
+    env: [ImageEnvVar]
     // `expose:` TCP ports, rendered as `"<port>/tcp"` keys.
-    pub expose: [Int]
+    expose: [Int]
     // D-ENV-IMAGE1: the non-root container user.
-    pub user: Int
+    user: Int
     // D-ENV-IMAGE1: optional `CMD-SHELL` health command.
-    pub healthcheck: String?
+    healthcheck: String?
 
     // Rust `BuildSpec::default()`.
     fn defaults() -> OCIBuildSpec Never! {
@@ -62,12 +62,12 @@ pub struct OCIBuildSpec {
 }
 
 // Where a successful build landed and the manifest digest naming it.
-pub struct OCIBuiltImage {
-    pub out_dir: String
+struct OCIBuiltImage {
+    out_dir: String
     // `sha256:<hex>`: the image manifest's own digest.
-    pub manifest_digest: String
+    manifest_digest: String
     // Total bytes across the layer, config, and manifest blobs.
-    pub total_bytes: Int
+    total_bytes: Int
 }
 
 struct OCILayerDescriptor {
@@ -75,12 +75,12 @@ struct OCILayerDescriptor {
     digest: String
     size: Int
 
-    fn tree(self) -> DataTree Never! {
-        fields := [String: DataTree]{}
-        fields["mediaType"] = DataTree.Text(self.media_type)
-        fields["digest"] = DataTree.Text(self.digest)
-        fields["size"] = DataTree.Int(self.size)
-        DataTree.Object(fields)
+    fn tree(self) -> Dyn Never! {
+        fields := [String: Dyn]{}
+        fields["mediaType"] = Dyn.Text(self.media_type)
+        fields["digest"] = Dyn.Text(self.digest)
+        fields["size"] = Dyn.Int(self.size)
+        Dyn.Object(fields)
     }
 }
 
@@ -109,13 +109,13 @@ enum OCINode {
 
 // Build the OCI layout into `out_dir` (created if absent). `ref_name` is the
 // human label recorded in `index.json`; it never enters a digest.
-pub fn image_build(spec: OCIBuildSpec, out_dir: String, ref_name: String) -[FS, Env]> OCIBuiltImage ImageError! {
+fn image_build(spec: OCIBuildSpec, out_dir: String, ref_name: String) -[FS, Env]> OCIBuiltImage ImageError! {
     image_build_with_base(spec, out_dir, ref_name, None)
 }
 
 // Build an OCI layout and append the new layer to a local OCI base layout. The
 // base is a directory obtained through a separately verified transport.
-pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: String, base: String?) -[FS, Env]> OCIBuiltImage ImageError! {
+fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: String, base: String?) -[FS, Env]> OCIBuiltImage ImageError! {
     image_ensure_real_layout_directory(out_dir)
     architecture :: image_oci_architecture(spec.platform)
     layer_files :: image_sorted_layer_files(spec.files)
@@ -138,11 +138,11 @@ pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: Stri
     }
     &diff_ids.push("sha256:{layer_digest}")
 
-    config_json :: image_config_json(spec, diff_ids, architecture)
+    config_json :: image_config_json(spec, diff_ids, architecture) ?? return Err(err)
     config_digest :: pkg_sha256_hex(config_json.bytes())
 
     &layers.push(OCILayerDescriptor{media_type: IMAGE_MEDIA_TYPE_LAYER, digest: "sha256:{layer_digest}", size: layer_tar.len()})
-    manifest_json :: image_manifest_json(config_digest, config_json.bytes().len(), layers)
+    manifest_json :: image_manifest_json(config_digest, config_json.bytes().len(), layers) ?? return Err(err)
     manifest_digest :: pkg_sha256_hex(manifest_json.bytes())
 
     files.create_dir_all(image_blob_dir(out_dir))
@@ -164,7 +164,7 @@ pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: Stri
     image_write_layout_file(files.join(out_dir, "oci-layout"), "{{\"imageLayoutVersion\":\"{IMAGE_LAYOUT_VERSION}\"}}".bytes())
 
     Ok(OCIBuiltImage{
-        out_dir: ~out_dir,
+        out_dir: out_dir.copy(),
         manifest_digest: "sha256:{manifest_digest}",
         total_bytes: layer_tar.len() + config_json.bytes().len() + manifest_json.bytes().len()
     })
@@ -173,7 +173,7 @@ pub fn image_build_with_base(spec: OCIBuildSpec, out_dir: String, ref_name: Stri
 // Copy a validated local OCI layout to another local layout root. Every
 // regular file is compared before reuse; symlinks and special files are never
 // allowed. This is the local half of `--push`.
-pub fn image_copy_layout(source: String, destination: String) ImageError! -[FS, Env, Rand]> {
+fn image_copy_layout(source: String, destination: String) ImageError! -[FS, Env, Rand]> {
     _ :: image_load_base(source)
     if source == destination -> return
     canonical_source :: files.canonicalize(source)
@@ -309,64 +309,65 @@ fn image_link_new_blob(temporary: String, path: String, digest: String, data: [U
 }
 
 fn image_write_index(out_dir: String, manifest_digest: String, manifest_size: Int, ref_name: String) ImageError! -[FS, Env]> {
-    annotations := [String: DataTree]{}
-    annotations["org.opencontainers.image.ref.name"] = DataTree.Text(ref_name)
-    descriptor := [String: DataTree]{}
-    descriptor["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_MANIFEST)
-    descriptor["digest"] = DataTree.Text("sha256:{manifest_digest}")
-    descriptor["size"] = DataTree.Int(manifest_size)
-    descriptor["annotations"] = DataTree.Object(annotations)
-    index := [String: DataTree]{}
-    index["schemaVersion"] = DataTree.Int(2)
-    index["manifests"] = DataTree.Array([DataTree]{DataTree.Object(descriptor)})
-    image_write_layout_file(files.join(out_dir, "index.json"), image_json_text(DataTree.Object(index)).bytes())
+    annotations := [String: Dyn]{}
+    annotations["org.opencontainers.image.ref.name"] = Dyn.Text(ref_name)
+    descriptor := [String: Dyn]{}
+    descriptor["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
+    descriptor["digest"] = Dyn.Text("sha256:{manifest_digest}")
+    descriptor["size"] = Dyn.Int(manifest_size)
+    descriptor["annotations"] = Dyn.Object(annotations)
+    index := [String: Dyn]{}
+    index["schemaVersion"] = Dyn.Int(2)
+    index["manifests"] = Dyn.Array([Dyn]{Dyn.Object(descriptor)})
+    text :: image_json_text(Dyn.Object(index)) ?? return Err(err)
+    image_write_layout_file(files.join(out_dir, "index.json"), text.bytes())
 }
 
 // The OCI image config: `architecture`/`os`/`config`/`rootfs` only. No
 // `created` or `history`, because an embedded timestamp breaks determinism.
-fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String Never! {
-    env := [DataTree]{}
-    loop entry in image_sorted_env(spec.env) -> &env.push(DataTree.Text("{entry.key}={entry.value}"))
-    entrypoint := [DataTree]{}
-    loop argument in spec.entrypoint -> &entrypoint.push(DataTree.Text(argument))
-    exposed := [String: DataTree]{}
-    loop port in image_sorted_unique_ints(spec.expose) -> exposed["{port}/tcp"] = DataTree.Object([String: DataTree]{})
-    container := [String: DataTree]{}
-    container["Env"] = DataTree.Array(env)
-    container["ExposedPorts"] = DataTree.Object(exposed)
-    container["Entrypoint"] = DataTree.Array(entrypoint)
-    container["User"] = DataTree.Text("{spec.user}")
+fn image_config_json(spec: OCIBuildSpec, diff_ids: [String], architecture: String) -> String ImageError! {
+    env := [Dyn]{}
+    loop entry in image_sorted_env(spec.env) -> &env.push(Dyn.Text("{entry.key}={entry.value}"))
+    entrypoint := [Dyn]{}
+    loop argument in spec.entrypoint -> &entrypoint.push(Dyn.Text(argument))
+    exposed := [String: Dyn]{}
+    loop port in image_sorted_unique_ints(spec.expose) -> exposed["{port}/tcp"] = Dyn.Object([String: Dyn]{})
+    container := [String: Dyn]{}
+    container["Env"] = Dyn.Array(env)
+    container["ExposedPorts"] = Dyn.Object(exposed)
+    container["Entrypoint"] = Dyn.Array(entrypoint)
+    container["User"] = Dyn.Text("{spec.user}")
     if spec.healthcheck == .Val(command) {
-        health := [String: DataTree]{}
-        health["Test"] = DataTree.Array([DataTree]{DataTree.Text("CMD-SHELL"), DataTree.Text(command)})
-        container["Healthcheck"] = DataTree.Object(health)
+        health := [String: Dyn]{}
+        health["Test"] = Dyn.Array([Dyn]{Dyn.Text("CMD-SHELL"), Dyn.Text(command)})
+        container["Healthcheck"] = Dyn.Object(health)
     }
-    ids := [DataTree]{}
-    loop digest in diff_ids -> &ids.push(DataTree.Text(digest))
-    rootfs := [String: DataTree]{}
-    rootfs["type"] = DataTree.Text("layers")
-    rootfs["diff_ids"] = DataTree.Array(ids)
-    document := [String: DataTree]{}
-    document["architecture"] = DataTree.Text(architecture)
-    document["os"] = DataTree.Text(IMAGE_OS)
-    document["config"] = DataTree.Object(container)
-    document["rootfs"] = DataTree.Object(rootfs)
-    image_json_text(DataTree.Object(document))
+    ids := [Dyn]{}
+    loop digest in diff_ids -> &ids.push(Dyn.Text(digest))
+    rootfs := [String: Dyn]{}
+    rootfs["type"] = Dyn.Text("layers")
+    rootfs["diff_ids"] = Dyn.Array(ids)
+    document := [String: Dyn]{}
+    document["architecture"] = Dyn.Text(architecture)
+    document["os"] = Dyn.Text(IMAGE_OS)
+    document["config"] = Dyn.Object(container)
+    document["rootfs"] = Dyn.Object(rootfs)
+    image_json_text(Dyn.Object(document))
 }
 
-fn image_manifest_json(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String Never! {
-    config := [String: DataTree]{}
-    config["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_CONFIG)
-    config["digest"] = DataTree.Text("sha256:{config_digest}")
-    config["size"] = DataTree.Int(config_size)
-    descriptors := [DataTree]{}
+fn image_manifest_json(config_digest: String, config_size: Int, layers: [OCILayerDescriptor]) -> String ImageError! {
+    config := [String: Dyn]{}
+    config["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_CONFIG)
+    config["digest"] = Dyn.Text("sha256:{config_digest}")
+    config["size"] = Dyn.Int(config_size)
+    descriptors := [Dyn]{}
     loop layer in layers -> &descriptors.push(layer.tree())
-    manifest := [String: DataTree]{}
-    manifest["schemaVersion"] = DataTree.Int(2)
-    manifest["mediaType"] = DataTree.Text(IMAGE_MEDIA_TYPE_MANIFEST)
-    manifest["config"] = DataTree.Object(config)
-    manifest["layers"] = DataTree.Array(descriptors)
-    image_json_text(DataTree.Object(manifest))
+    manifest := [String: Dyn]{}
+    manifest["schemaVersion"] = Dyn.Int(2)
+    manifest["mediaType"] = Dyn.Text(IMAGE_MEDIA_TYPE_MANIFEST)
+    manifest["config"] = Dyn.Object(config)
+    manifest["layers"] = Dyn.Array(descriptors)
+    image_json_text(Dyn.Object(manifest))
 }
 
 // The OCI architecture for a Jet platform key.
@@ -504,7 +505,7 @@ fn image_read_text(path: String) -[FS]> String ImageError! {
 fn image_read_blob(root: String, digest: String) -[FS]> [U8] ImageError! {
     if image_node(root) != OCINode.Directory -> return Err(image_invalid("OCI layout root is not a real directory"))
     hex :: image_digest_hex(digest)
-    cursor := ~root
+    cursor := root.copy()
     components :: [String]{"blobs", "sha256", hex}
     loop component in components {
         cursor = files.join(cursor, component)
@@ -523,14 +524,19 @@ fn image_read_blob(root: String, digest: String) -[FS]> [U8] ImageError! {
     Ok(bytes)
 }
 
-fn image_object(value: DataTree, label: String) -> [String: DataTree] ImageError! {
+fn image_object(value: Dyn, label: String) -> [String: Dyn] ImageError! {
     if value == {
-        .Object(fields) -> Ok(fields)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(fields) -> {
+            members := [String: Dyn]{}
+            loop pair in fields -> members[pair.key] = pair.value
+            Ok(members)
+        }
         else -> Err(image_invalid("{label} is not an object"))
     }
 }
 
-fn image_array(value: DataTree?, label: String) -> [DataTree] ImageError! {
+fn image_array(value: Dyn?, label: String) -> [Dyn] ImageError! {
     found :: value ?? return Err(image_invalid("{label} is not an array"))
     if found == {
         .Array(values) -> Ok(values)
@@ -538,7 +544,7 @@ fn image_array(value: DataTree?, label: String) -> [DataTree] ImageError! {
     }
 }
 
-fn image_string_field(object: [String: DataTree], field_name: String) -> String ImageError! {
+fn image_string_field(object: [String: Dyn], field_name: String) -> String ImageError! {
     found :: object.get(field_name) ?? return Err(image_invalid("OCI object field `{field_name}` is not a string"))
     if found == .Text(value) {
         if value != "" -> return Ok(value)
@@ -546,7 +552,7 @@ fn image_string_field(object: [String: DataTree], field_name: String) -> String 
     Err(image_invalid("OCI object field `{field_name}` is not a string"))
 }
 
-fn image_number_field(object: [String: DataTree], field_name: String) -> Int ImageError! {
+fn image_number_field(object: [String: Dyn], field_name: String) -> Int ImageError! {
     refusal :: image_invalid("OCI object field `{field_name}` is not a non-negative integer")
     value :: object.get(field_name) ?? return Err(refusal)
     if value == .Int(whole) {
@@ -574,8 +580,9 @@ fn image_digest_for(bytes: [U8]) -> String Never! {
     "sha256:{pkg_sha256_hex(bytes)}"
 }
 
-fn image_json_text(value: DataTree) -> String Never! {
-    json.to_string(value) ?? panic("compact JSON rendering of a DataTree is total")
+fn image_json_text(value: Dyn) -> String ImageError! {
+    text :: json.to_string(value) ?? return Err(ImageError.InvalidData(err.reason))
+    Ok(text)
 }
 
 // Read a regular file (never through a final link) of at most `limit` bytes.
@@ -665,14 +672,14 @@ fn image_with_extension(path: String, extension: String) -> String Never! {
     raw :: name.bytes()
     dot := raw.len() - 1
     loop dot > 0 && Int.from_u8(raw[dot]) != 46 -> dot -= 1
-    stem :: if dot > 0 -> pkg_bytes_text(raw, 0, dot) else -> ~name
+    stem :: if dot > 0 -> pkg_bytes_text(raw, 0, dot) else -> name.copy()
     files.with_name(path, "{stem}.{extension}")
 }
 
 // Component-wise `Path::starts_with`.
 fn image_path_starts_with(path: String, prefix: String) -> Bool Never! {
     if path == prefix -> return true
-    base :: if prefix.ends_with("/") -> ~prefix else -> "{prefix}/"
+    base :: if prefix.ends_with("/") -> prefix.copy() else -> "{prefix}/"
     path.starts_with(base)
 }
 
@@ -701,7 +708,7 @@ fn image_ensure_real_layout_directory(path: String) ImageError! -[FS, Env]> {
 }
 
 // Rust `sorted_env`: key-sorted, with the last value for a repeated key.
-pub fn image_sorted_env(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
+fn image_sorted_env(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
     by_key := [String: String]{}
     loop entry in entries -> by_key[entry.key] = entry.value
     keys := by_key.keys().to_list()
@@ -710,7 +717,7 @@ pub fn image_sorted_env(entries: [ImageEnvVar]) -> [ImageEnvVar] Never! {
 }
 
 fn image_sorted_unique_ints(values: [Int]) -> [Int] Never! {
-    sorted := ~values
+    sorted := values.copy()
     &sorted.sort()
     unique := [Int]{}
     loop value in sorted {

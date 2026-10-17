@@ -1,0 +1,19 @@
+# Port of tests/build_entry.rs:4001-4062; sources verbatim.
+# PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/build_entry_program_runs_the_same_on_every_tier
+step: jet check run.jet --json
+exit: 0
+json: machine doc $.ok = true
+step: jet run run.jet --interpret
+exit: 0
+stdout: = "runtime program\n"
+stderr: empty
+step: jet run run.jet 
+exit: 0
+stdout: = "runtime program\n"
+stderr: empty
+when tool rustc: step: jet build run.jet
+when tool rustc: step: built
+when tool rustc: exit: 0
+when tool rustc: stdout: = "runtime program\n"
+when tool rustc: stderr: empty

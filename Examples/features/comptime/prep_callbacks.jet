@@ -1,0 +1,24 @@
+// A compile-time fold runs list callbacks in the frame that calls them: each
+// callback reads the folding function's own locals and parameters, and the
+// folded constants equal the run-time results.
+fn scaled_sum(values: [Int], factor: Int) -> Int {
+    offset :: factor * 10
+    total := 0
+    loop value in values.map(item -> item * factor + offset) {
+        total += value
+    }
+    total
+}
+
+fn kept_over(values: [Int], floor: Int) -> Int {
+    limit :: floor + 1
+    values.filter(item -> item > limit).len()
+}
+
+SUMMED :: prep { scaled_sum([1, 2, 3], 2) }
+KEPT :: prep { kept_over([1, 5, 3, 9, 4], 2) }
+
+fn run() {
+    print("{SUMMED} {KEPT}")
+    print("{scaled_sum([1, 2, 3], 2)} {kept_over([1, 5, 3, 9, 4], 2)}")
+}

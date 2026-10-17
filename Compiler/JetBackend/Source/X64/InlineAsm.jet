@@ -1,0 +1,287 @@
+// Strict Intel-template assembler for audited #FFI(asm) leaves. Never guess an
+// encoding: an unsupported form produces no executable bytes. Register binding
+// is fixed and the write mask rejects placeholders read after their input died.
+struct X64AsmResult {
+    code: [U8]
+    regs: [Int]
+    result: Int
+    error: String?
+}
+
+struct X64AsmState {
+    code: [U8]
+    names: [String]
+    written: [Bool]
+    depth: Int
+    result: Int
+}
+
+struct X64AsmMemory {
+    base: Int
+    disp: Int
+}
+
+fn x64_asm_register(text: String) -> Int Never! {
+    if text == {
+        "rax" -> 0
+        "rcx" -> 1
+        "rdx" -> 2
+        "rsi" -> 6
+        "rdi" -> 7
+        "r8" -> 8
+        "r9" -> 9
+        "r10" -> 10
+        "r11" -> 11
+        else -> -1
+    }
+}
+
+fn x64_asm_byte_register(text: String) -> Int Never! {
+    if text == {
+        "al" -> 0
+        "cl" -> 1
+        "dl" -> 2
+        "sil" -> 6
+        "dil" -> 7
+        "r8b" -> 8
+        "r9b" -> 9
+        "r10b" -> 10
+        "r11b" -> 11
+        else -> -1
+    }
+}
+
+fn x64_asm_reg(s: X64AsmState, text: String, read: Bool) -> Int Never! {
+    operand :: text.trim()
+    if operand.starts_with("{{") && operand.ends_with("}}") {
+        tail :: operand.after("{{")
+        loop (i, input) in s.names {
+            if !tail.starts_with(input) -> next
+            suffix :: tail.after(input)
+            if suffix != "}}" -> next
+            reg :: LIR_ASM_INPUTS[i]
+            if read && s.written[reg] -> return -1
+            return reg
+        }
+        return -1
+    }
+    x64_asm_register(operand)
+}
+
+fn x64_asm_memory(s: X64AsmState, text: String, size: String) -> X64AsmMemory? Never! {
+    prefix :: "{size} ptr ["
+    if !text.starts_with(prefix) || !text.ends_with("]") -> return None
+    inner :: text.slice(prefix.len(), text.len() - 1).trim()
+    parts :: inner.split("+").to_list()
+    if parts.len() > 2 -> return None
+    base :: x64_asm_reg(s, parts[0], true)
+    if base < 0 -> return None
+    disp := 0
+    if parts.len() == 2 -> disp = Int.parse(parts[1].trim()) ?? return None
+    if !x64_fits_i32(disp) -> return None
+    Val(X64AsmMemory{base: base, disp: disp})
+}
+
+// System V may clobber every XMM register. This recognizes only a
+// declaration, never an integer operand or an XMM instruction encoding.
+fn x64_asm_xmm_clobber(text: String) -> Bool Never! {
+    if text == {
+        "xmm0" | "xmm1" | "xmm2" | "xmm3" | "xmm4" | "xmm5" | "xmm6" | "xmm7" | "xmm8" | "xmm9" | "xmm10" | "xmm11" | "xmm12" | "xmm13" | "xmm14" | "xmm15" -> true
+        else -> false
+    }
+}
+
+fn x64_asm_line(s: &X64AsmState, line: String) -> String? Never! {
+    parts :: line.split(";").to_list()
+    instruction :: parts[0].trim()
+    if instruction == "" {
+        if parts.len() > 1 {
+            comment :: parts[1].trim()
+            if comment.starts_with("clobbers ") {
+                loop token in comment.slice(9, comment.len()).replace(",", " ").split(" ") {
+                    if token != "" && x64_asm_register(token) < 0 && !x64_asm_xmm_clobber(token) {
+                        return Val("unsupported clobber register")
+                    }
+                }
+            } else if comment.starts_with("->") -> return Val("return anchor has no instruction")
+        }
+        return None
+    }
+    // Normalize horizontal whitespace, leaving the operand grammar strict.
+    tokens := [String]{}
+    loop token in instruction.replace("\t", " ").split(" ") {
+        if token != "" -> &tokens.push(token)
+    }
+    mnemonic := tokens[0]
+    rest := tokens.slice(1, tokens.len()).join(" ")
+    if mnemonic == "lock" {
+        if rest.starts_with("cmpxchg ") {
+            mnemonic = "cmpxchg"
+            rest = rest.slice(8, rest.len())
+        } else if rest.starts_with("xadd ") {
+            mnemonic = "xadd"
+            rest = rest.slice(5, rest.len())
+        } else {
+            return Val("unsupported lock instruction")
+        }
+    } else if mnemonic == "cmpxchg" || mnemonic == "xadd" -> return Val("atomic instruction requires lock")
+    operands :: rest.split(",").to_list()
+    first :: operands[0].trim()
+    second :: if operands.len() == 2 -> operands[1].trim() else -> ""
+    written := -1
+    if mnemonic == "push" || mnemonic == "pop" || mnemonic == "call" {
+        if operands.len() != 1 -> return Val("expected one register operand")
+        reg :: x64_asm_reg(s, first, mnemonic != "pop")
+        if reg < 0 {
+            return Val("unsupported register or operand read after its bound register was written")
+        }
+        if mnemonic == "push" {
+            x64_push(&s.code, reg)
+            s.depth += 1
+        } else if mnemonic == "pop" {
+            if s.depth == 0 -> return Val("pop reads outside the template stack")
+            x64_pop(&s.code, reg)
+            s.depth -= 1
+            written = reg
+        } else {
+            if s.depth % 2 != 0 -> return Val("call requires a 16-byte aligned stack")
+            x64_call_reg(&s.code, reg)
+            loop r in 0..<16 {
+                if lir_asm_register(r) -> s.written[r] = true
+            }
+        }
+    } else if mnemonic == "syscall" || mnemonic == "pause" {
+        if rest != "" -> return Val("instruction takes no operands")
+        x64_byte(&s.code, if mnemonic == "syscall" -> 0x0f else -> 0xf3)
+        x64_byte(&s.code, if mnemonic == "syscall" -> 0x05 else -> 0x90)
+        if mnemonic == "syscall" {
+            s.written[0] = true
+            s.written[1] = true
+            s.written[11] = true
+        }
+    } else if mnemonic == "mov" || mnemonic == "movzx" {
+        if operands.len() != 2 -> return Val("expected two operands")
+        dst :: x64_asm_reg(s, first, false)
+        src :: x64_asm_reg(s, second, true)
+        // rsp is read-only here: template-owned pushed words can be passed
+        // to syscalls. No other explicit frame-register use is admitted.
+        if mnemonic == "mov" && dst >= 0 && second == "rsp" {
+            if s.depth == 0 -> return Val("rsp address requires template-owned pushed storage")
+            x64_mov_rr(&s.code, dst, X64_RSP)
+            s.written[dst] = true
+            loop comment in parts.slice(1, parts.len()) {
+                if comment.trim().starts_with("->") {
+                    return Val("rsp address cannot be a return anchor")
+                }
+            }
+            return None
+        }
+        if dst >= 0 {
+            if mnemonic == "mov" && first == "rax" && second == "qword ptr gs:[0]" {
+                // The sole admitted segment operand: TCB self pointer at GS:0.
+                gs_bytes :: [U8]{0x65, 0x48, 0x8b, 0x04, 0x25, 0, 0, 0, 0}
+                loop byte in gs_bytes -> &s.code.push(byte)
+            } else if mnemonic == "mov" && src >= 0 -> x64_mov_rr(&s.code, dst, src) else if x64_asm_memory(s, second, if mnemonic == "mov" -> "qword" else -> "byte") == .Val(mem) {
+                if mnemonic == "mov" -> x64_load(&s.code, dst, mem.base, mem.disp) else {
+                    x64_load_u8(&s.code, dst, mem.base, mem.disp)
+                }
+            } else if mnemonic == "mov" {
+                imm :: Int.parse(second) ?? return Val("unsupported source or operand read after its bound register was written")
+                if imm < -9223372036854775808 || imm > 9223372036854775807 {
+                    return Val("immediate is outside a machine word")
+                }
+                x64_mov_ri(&s.code, dst, imm)
+            } else {
+                return Val("unsupported source or operand read after its bound register was written")
+            }
+            written = dst
+        } else if mnemonic == "mov" && src >= 0 && x64_asm_memory(s, first, "qword") == .Val(mem) {
+            x64_store(&s.code, mem.base, mem.disp, src)
+        } else if mnemonic == "mov" && x64_asm_byte_register(second) >= 0 && x64_asm_memory(s, first, "byte") == .Val(mem) {
+            byte_reg :: x64_asm_byte_register(second)
+            x64_store_u8(&s.code, mem.base, mem.disp, byte_reg)
+        } else { return Val("unsupported mov operands or stale placeholder") }
+    } else if mnemonic == "or" {
+        if operands.len() != 2 -> return Val("expected two register operands")
+        dst :: x64_asm_reg(s, first, true)
+        src :: x64_asm_reg(s, second, true)
+        if dst < 0 || src < 0 -> return Val("unsupported register or stale placeholder")
+        x64_alu_rr(&s.code, X64Alu.Or, dst, src)
+        written = dst
+    } else if mnemonic == "cmpxchg" || mnemonic == "xchg" || mnemonic == "xadd" {
+        if operands.len() != 2 -> return Val("expected memory and register operands")
+        mem :: x64_asm_memory(s, first, "qword") ?? return Val("unsupported atomic address or stale placeholder")
+        reg :: x64_asm_reg(s, second, true)
+        if reg < 0 || (mnemonic == "cmpxchg" && mem.disp != 0) {
+            return Val("unsupported atomic operand")
+        }
+        if mnemonic != "xchg" -> x64_byte(&s.code, 0xf0)
+        x64_rex(&s.code, true, reg, mem.base)
+        if mnemonic == "cmpxchg" {
+            x64_byte(&s.code, 0x0f)
+            x64_byte(&s.code, 0xb1)
+        } else if mnemonic == "xadd" {
+            x64_byte(&s.code, 0x0f)
+            x64_byte(&s.code, 0xc1)
+        } else {
+            x64_byte(&s.code, 0x87)
+        }
+        x64_modrm_mem(&s.code, reg, mem.base, mem.disp)
+        written = if mnemonic == "cmpxchg" -> X64_RAX else -> reg
+    } else { return Val("unsupported mnemonic `{mnemonic}`") }
+    if written >= 0 -> s.written[written] = true
+    loop comment in parts.slice(1, parts.len()) {
+        if comment.trim() == "-> return" {
+            if s.result >= 0 -> return Val("multiple return anchors")
+            s.result = x64_asm_reg(s, first, false)
+            if s.result < 0 || written != s.result {
+                return Val("return anchor must name the written destination register")
+            }
+        } else if comment.trim().starts_with("->") -> return Val("unsupported return annotation")
+    }
+    None
+}
+
+fn x64_assemble_template(template: String, names: [String], returns: Bool) -> X64AsmResult Never! {
+    regs := [Int]{}
+    if names.len() > LIR_ASM_INPUTS.len() {
+        return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: more than seven operands")}
+    }
+    loop (i, _) in names -> &regs.push(LIR_ASM_INPUTS[i])
+    s := X64AsmState{code: [U8]{}, names: names, written: [Bool]{}, depth: 0, result: -1}
+    loop _ in 0..<16 -> &s.written.push(false)
+    lines :: template.split("\n").to_list()
+    i := 0
+    loop i < lines.len() {
+        raw :: lines[i]
+        if raw.trim() == "test rax, rax" {
+            // Clone's child stack is not the parent's template stack. Admit
+            // only this closed, non-returning child rail, never arbitrary
+            // labels/branches or frame mutations. jnz skips all 17 child bytes.
+            child :: [String]{"test rax, rax", "jnz 2f", "pop rax", "pop rdi", "and rsp, -16", "call rax", "xor edi, edi", "mov eax, 60", "syscall", "2:"}
+            if i < 3 || lines[i - 3].trim() != "mov r8, 0" || lines[i - 2].trim() != "mov rax, 56" || lines[i - 1].trim() != "syscall" || s.depth != 6 || i + child.len() > lines.len() {
+                return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: clone child rail requires the audited clone prologue")}
+            }
+            loop (j, expected) in child {
+                if lines[i + j].trim() != expected {
+                    return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: unsupported clone child rail")}
+                }
+            }
+            child_bytes :: [U8]{0x48, 0x85, 0xc0, 0x75, 0x11, 0x58, 0x5f, 0x48, 0x83, 0xe4, 0xf0, 0xff, 0xd0, 0x31, 0xff, 0xb8, 0x3c, 0, 0, 0, 0x0f, 0x05}
+            loop byte in child_bytes -> &s.code.push(byte)
+            i += child.len()
+            next
+        }
+        if x64_asm_line(&s, raw.trim()) == .Val(reason) {
+            return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: {reason} (line {i + 1}: {raw.trim()})")}
+        }
+        i += 1
+    }
+    if s.depth != 0 {
+        return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: unbalanced push/pop")}
+    }
+    if returns != (s.result >= 0) {
+        return X64AsmResult{code: [U8]{}, regs: regs, result: -1, error: Val("inline asm: return anchor disagrees with the function signature")}
+    }
+    X64AsmResult{code: s.code, regs: regs, result: s.result, error: None}
+}

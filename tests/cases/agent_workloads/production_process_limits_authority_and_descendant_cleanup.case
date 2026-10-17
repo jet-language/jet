@@ -1,0 +1,24 @@
+# HAND-PORT tests/agent_workloads.rs:2461-2544 production_process_limits_authority_and_descendant_cleanup
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original default/release policy matrix exact stdout and Linux gone-or-zombie descendant deadline2s/poll10ms; source bytes verbatim.
+requires: os-name:linux
+fixture: production_process_limits_authority_and_descendant_cleanup.fixture
+env: NO_COLOR=1
+step default: jet run process_policy.jet
+limit: time=120
+exit: 0
+stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
+capture: child = text file.trim child.pid
+cap:child: is-u32 # original ed77c235f tests/agent_workloads.rs:2530-2534 child PID trim then parse::<u32>().unwrap
+repeat while process {cap:child} proc-readable-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
+end repeat
+remove: child.pid
+step release: jet run --release process_policy.jet
+limit: time=120
+exit: 0
+stdout: = production_process_limits_authority_and_descendant_cleanup.stdout.expected
+capture: release_child = text file.trim child.pid
+cap:release_child: is-u32 # original ed77c235f tests/agent_workloads.rs:2530-2534 release child PID trim then parse::<u32>().unwrap
+repeat while process {cap:release_child} proc-readable-nonzombie timeout 2s every 10ms fail "timed-out process left descendant"
+end repeat
+remove: child.pid

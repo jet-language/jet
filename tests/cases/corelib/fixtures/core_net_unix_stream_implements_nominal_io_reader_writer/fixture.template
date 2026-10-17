@@ -1,0 +1,58 @@
+
+use core.net as net
+use core.tasks as tasks
+
+fn receive<T: Reader>(&stream: T, limit: Int) -[IO]> [U8] IOError! {
+    return stream.read(limit)
+}
+
+fn send_four<T: Writer>(&stream: T) -[IO]> Int IOError! {
+    first :: stream.write([1, 2])
+    stream.write_all([3, 4])
+    return Ok(first)
+}
+
+fn run() {
+    listener :: net.unix_listen("{work}/stream.sock") ?? panic("listen")
+    server :: task {
+        stream := net.unix_accept(listener) ?? panic("accept")
+        if receive(&stream, 0) == {
+            .Ok(_) -> panic("zero limit looked like EOF")
+            .Err(error) -> {
+                if error == {
+                    .InvalidInput(context) -> print(if context.operation == .Read -> "invalid" else -> "wrong-operation")
+                    else -> { print("wrong-error") }
+                }
+            }
+        }
+        first :: receive(&stream, 2) ?? panic("first read")
+        second :: receive(&stream, 2) ?? panic("second read")
+        print("read:{first.len()}+{second.len()}")
+        eof :: receive(&stream, 2) ?? panic("eof")
+        if eof.len() == 0 { print("eof") }
+        net.unix_write_all_bytes(&stream, [9]) ?? panic("reply")
+        net.unix_close(&stream) ?? panic("server close")
+    }
+    client := net.unix_connect("{work}/stream.sock") ?? panic("connect")
+    first_count :: send_four(&client) ?? panic("write")
+    print("wrote:{first_count}")
+    net.unix_shutdown(&client, .Write) ?? panic("half close")
+    reply :: receive(&client, 1) ?? panic("reply")
+    print("reply:{reply.len()}")
+    if net.unix_write_all_bytes(&client, [5]) == {
+        .Ok(_) -> panic("write after half-close succeeded")
+        .Err(error) -> print(if net.error_operation(error) == "unix write" -> "half-closed" else -> "wrong-half-close")
+    }
+    net.unix_close(&client) ?? panic("close")
+    net.unix_close(&client) ?? panic("second close")
+    if receive(&client, 1) == {
+        .Ok(_) -> panic("closed read succeeded")
+        .Err(error) -> {
+            if error == {
+                .Closed(context) -> print(if context.operation == .Read -> "closed" else -> "wrong-close-operation")
+                else -> { print("wrong-close-error") }
+            }
+        }
+    }
+    server.join() ?? panic("server task failed")
+}

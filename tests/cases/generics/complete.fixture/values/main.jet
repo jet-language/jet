@@ -1,0 +1,13 @@
+
+enum Mode { Fast Safe }
+module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
+    fn value() -> Int { return count }
+}
+module same :: keyed(true, 3, 'a', "x", Mode.Fast)
+module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
+module different_bool :: keyed(false, 3, 'a', "x", Mode.Fast)
+module different_int :: keyed(true, 4, 'a', "x", Mode.Fast)
+module different_char :: keyed(true, 3, 'b', "x", Mode.Fast)
+module different_string :: keyed(true, 3, 'a', "y", Mode.Fast)
+module different_enum :: keyed(true, 3, 'a', "x", Mode.Safe)
+fn run() {}

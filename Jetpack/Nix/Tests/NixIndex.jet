@@ -51,7 +51,7 @@ fn nix_test_document_for(record: NixIndexRecordWire) -> NixIndexDocument {
 
 // Rust `MapTransport`: fixed responses by URL.
 fn nix_test_map_transport(values: [String: [U8]]) -> NixIndexTransport {
-    responses :: ~values
+    responses :: values.copy()
     NixIndexTransport{get_bounded: (url: String, max_bytes: Int) -[Net, Time.Wait]> {
         value :: responses.get(url) ?? return Err(NixIndexError.Transport("missing test URL {url}"))
         if value.len() > max_bytes -> return Err(NixIndexError.Invalid("test response exceeded bound"))
@@ -313,7 +313,7 @@ fn nix_test_generation_rejected(client: NixIndexClient, generation: Int, issued:
     nix_index_verify_index_signature(public_key, "test-key", signature, built.decoded) ?? panic("the real bytes verify")
     forged := built.decoded
     position :: forged.len() - 2
-    forged[position] = U8{Int.from_u8(forged[position]) ~| 1}
+    forged[position] = U8{(Int.from_u8(forged[position])).bit_xor(1)}
     if nix_index_verify_index_signature(public_key, "test-key", signature, forged) == {
         .Ok(_) -> panic("mutated bytes must not verify")
         else -> {}

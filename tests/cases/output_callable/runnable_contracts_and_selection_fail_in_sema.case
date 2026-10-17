@@ -1,0 +1,39 @@
+# tests/output_callable.rs::runnable_contracts_and_selection_fail_in_sema
+# Exact original sources/predicates; runtime UNRUN.
+fixture: runnable_contracts_and_selection_fail_in_sema.fixture
+env: NO_COLOR=1
+step: jet check --json probe0/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet check --json probe1/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet check --json probe2/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet check --json probe3/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet run --json probe4/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+json: machine doc $.reports[?code="E1321"] #= 1
+json: machine doc $.reports[?code="E0101"] #>= 1
+step: jet run --json probe5/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E0101"] #>= 1
+step: jet run --json probe6/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E0101"] #>= 1
+step: jet run --json --output release probe7/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet run --json probe8/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet run --json probe9/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1
+step: jet run --json probe10/main.jet
+exit: nonzero
+json: machine doc $.reports[?code="E1321"] #>= 1

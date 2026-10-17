@@ -1,0 +1,89 @@
+# Port of tests/polyglot_systems.rs:1079-1098 (jvm) and all original helpers381-1076.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# Direct needs_native/session_result(s,c)/Finished/program-finished/42: ledger-only PENDING-SEAM(debug-lib), no CLI substitute.
+requires: os:unix
+fixture: mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.fixture
+write: jvm/package.jet mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.package.template
+step: jet run observe/tools.jet
+exit: 0
+capture: cc stdout doc $.cc
+capture: ar stdout doc $.ar
+capture: clang stdout doc $.clang
+capture: strip stdout doc $.strip
+capture: nm stdout doc $.nm
+capture: javac stdout doc $.javac
+capture: node stdout doc $.node
+capture: python3 stdout doc $.python3
+capture: java_home stdout doc $.java_home
+capture: libjvm stdout doc $.libjvm
+capture: strip_flag stdout doc $.strip_flag
+file: {cap:libjvm} is-file # original JAVA_HOME embedded runtime assertion542-547
+step: jet inspect bind java Counter.java --pkg counter
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+file: jvm/.jet/bindings/java/counter.jet is-file
+file: jvm/.jet/bindings/java/counter.provenance ~ "schema=jet-ffi-bridge-provenance-v1\n" # original common provenance
+file: jvm/.jet/bindings/java/counter.provenance line ^= "identity=" # original any line starts identity
+file: jvm/.jet/bindings/java/counter.jvm-path is-file
+step: jet check run.jet
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+step: jet build --profile=debug run.jet
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+step: jet test --coverage --profile=debug run.jet
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+stdout+stderr: ~ "coverage:" # original coverage report
+step: jet run --profile=debug run.jet
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.out
+step: jet perf run run.jet --profile=debug --out {work}/jvm/profile.jettrace
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+file: jvm/profile.jettrace ~ "\"schema\":\"jet.trace\"" # original ed77c235f tests/polyglot_systems.rs:666 shared workflow trace contains schema; JVM call929
+file: jvm/profile.jettrace ~ "run.jet" # original ed77c235f tests/polyglot_systems.rs:667 shared workflow trace contains source name; JVM call929
+file: jvm/profile.jettrace ~ "source_identity" # original ed77c235f tests/polyglot_systems.rs:668 shared workflow trace contains source identity; JVM call929
+file: jvm/profile.jettrace !~ "__jet_" # original ed77c235f tests/polyglot_systems.rs:669 shared workflow trace excludes host wrappers; JVM call929
+step: jet perf view profile.jettrace --json
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+stdout: ~ "\"kind\":\"jet.trace.view\"" # original ed77c235f tests/polyglot_systems.rs:680 shared workflow view contains kind; JVM call929
+stdout: ~ "\"flamegraph\":" # original ed77c235f tests/polyglot_systems.rs:681 shared workflow view contains flamegraph; JVM call929
+copy: jvm/Counter.java source.before
+append: jvm/Counter.java "\n// stale binding source\n"
+step: jet run run.jet
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: nonzero
+stdout+stderr: ~ "E3208" # original mixed_assert_failed_with helper422-428
+copy: source.before jvm/Counter.java
+capture: stale = text file.replace("value += amount", "value += amount + 1") jvm/Counter.java
+write: jvm/Counter.java = "{cap:stale}"
+step: jet inspect bind java Counter.java --pkg counter
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+step: jet run --profile=debug run.jet
+cwd: jvm
+env: NO_COLOR=1
+env: JAVA_HOME={cap:java_home}
+exit: 0
+stdout: = mixed_repo_edit_test_debug_profile_and_recovery_workflows.jvm.edited.out

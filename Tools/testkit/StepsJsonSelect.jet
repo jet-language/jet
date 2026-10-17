@@ -1,0 +1,213 @@
+use core.encoding.json as json
+use core.encoding.toml as toml
+
+fn kit_steps_json_projection_valid(part: String) -> Bool {
+    if !part.starts_with("{{") || !part.ends_with("}}") -> return false
+    names := [String]{}
+    loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
+        name :: raw.trim().copy()
+        if name == "" || name.contains(".") || name.contains("[") || name.contains(" ") || kit_expect_named(names, name) -> return false
+        &names.push(name)
+    }
+    names.len() > 0
+}
+
+fn kit_steps_json_filter(part: String) -> KitJSONFilter? {
+    if !part.starts_with("?") -> return None
+    quoted := false
+    escaped := false
+    depth := 0
+    loop (index, byte) in part.bytes() {
+        if index == 0 -> next
+        code :: Int.from_u8(byte)
+        if quoted {
+            if escaped -> escaped = false
+            else if code == 92 -> escaped = true
+            else if code == 34 -> quoted = false
+            next
+        }
+        if code == 34 {
+            quoted = true
+            next
+        }
+        if code == 91 -> depth += 1
+        if code == 93 -> depth -= 1
+        if depth != 0 -> next
+        rest :: kit_steps_byte_slice(part, index, part.count_bytes())
+        operator := ""
+        width := 0
+        loop candidate in ["!~=", "~=", "!=", ">=", "<=", "^=", "$=", "!~", "~", ">", "<", "="] {
+            if operator == "" && rest.starts_with(candidate) {
+                operator = candidate
+                width = candidate.len()
+            }
+        }
+        if operator == "" && rest.starts_with(" in ") {
+            operator = "in"
+            width = 4
+        }
+        if operator == "" -> next
+        key :: kit_steps_byte_slice(part, 1, index).trim().copy()
+        if kit_steps_json_path("$.{key}") == None -> return None
+        literal :: kit_steps_byte_slice(rest, width, rest.count_bytes()).trim().copy()
+        if literal.starts_with("@.") -> return Val(KitJSONFilter{key: key, op: operator, expected: Dyn.Null, reference: kit_steps_byte_slice(literal, 1, literal.count_bytes())})
+        expected :: json.parse(literal) ?? return None
+        if operator == "in" && kit_steps_json_type(expected) != "array" -> return None
+        return Val(KitJSONFilter{key: key, op: operator, expected: expected})
+    }
+    None
+}
+
+fn kit_steps_json_filter_matches(value: Dyn, filter: KitJSONFilter) -> Bool {
+    parts :: kit_steps_json_path("$.{filter.key}") ?? return false
+    values :: kit_steps_json_select(value, parts, 0) ?? return filter.op == "!=" || filter.op == "!~" || filter.op == "!~="
+    expected := filter.expected
+    if filter.reference != "" {
+        other :: kit_steps_json_select(value, kit_steps_json_path("${filter.reference}") ?? return false, 0) ?? return false
+        if other.len() != 1 -> return false
+        expected = other[0]
+    }
+    op :: if filter.op == "~=" -> "~" else if filter.op == "!~=" -> "!~" else -> filter.op
+    text :: if expected == { .Text(needle) -> needle else -> "" }
+    loop actual in values {
+        if kit_steps_json_leaf(actual, op, expected, text, 0) == None -> return true
+    }
+    false
+}
+
+fn kit_steps_json_select(value: Dyn, parts: [String], depth: Int) -> [Dyn]? {
+    if depth == parts.len() -> return Val([value])
+    part :: parts[depth]
+    if part.starts_with(".") || part.starts_with("\"") {
+        key := if part.starts_with(".") -> kit_steps_byte_slice(part, 1, part.count_bytes()) else -> ""
+        if part.starts_with("\"") {
+            decoded :: json.parse(part) ?? return None
+            key = if decoded == { .Text(text) -> text else -> { return None } }
+        }
+        if value == {
+            .Object(_) -> {
+                child :: value.get(key) ?? return None
+                return kit_steps_json_select(child, parts, depth + 1)
+            }
+            else -> return None
+        }
+    }
+    if part.starts_with("{{") {
+        if value == {
+            .Object(_) -> {
+                projected := [(key: String, value: Dyn)]{}
+                loop raw in kit_steps_byte_slice(part, 1, part.count_bytes() - 1).split(",") {
+                    name :: raw.trim().copy()
+                    child :: value.get(name) ?? return None
+                    &projected.push((key: name, value: child))
+                }
+                return kit_steps_json_select(Dyn.Object(projected), parts, depth + 1)
+            }
+            else -> return None
+        }
+    }
+    if value == {
+        .Array(items) -> {
+            if part.starts_with("?") {
+                filter :: kit_steps_json_filter(part) ?? return None
+                selected := [Dyn]{}
+                loop item in items {
+                    if kit_steps_json_filter_matches(item, filter) -> &selected.push(item)
+                }
+                if selected.len() == 0 -> return Val([Dyn]{})
+                return kit_steps_json_select(Dyn.Array(selected), parts, depth + 1)
+            }
+            if part == "*" {
+                if items.len() == 0 -> return Val([Dyn]{})
+                selected := [Dyn]{}
+                loop item in items {
+                    values :: kit_steps_json_select(item, parts, depth + 1) ?? return None
+                    loop child in values -> &selected.push(child)
+                }
+                return Val(selected)
+            }
+            raw :: Int.parse(part) ?? return None
+            index :: if raw < 0 -> items.len() + raw else -> raw
+            if index < 0 || index >= items.len() -> return None
+            return kit_steps_json_select(items[index], parts, depth + 1)
+        }
+        else -> return None
+    }
+}
+
+fn kit_steps_json_values(text: String, mode: String, path: String) -> [Dyn]? {
+    parts :: kit_steps_json_path(path) ?? return None
+    tree := Dyn.Null
+    if mode == "doc" || mode.starts_with("doc[zero ") -> tree = json.parse(text) ?? return None
+    else if mode == "toml" -> tree = toml.parse(text) ?? return None
+    else if mode == "ndjson" {
+        records := [Dyn]{}
+        loop raw in text.split("\n") {
+            line :: raw.trim().copy()
+            if line == "" -> next
+            record :: json.parse(line) ?? return None
+            if kit_steps_json_type(record) != "object" -> return None
+            &records.push(record)
+        }
+        tree = Dyn.Array(records)
+    } else -> return None
+    if mode.starts_with("doc[zero ") {
+        if !mode.ends_with("]") -> return None
+        tree = kit_steps_json_zero(tree, kit_steps_byte_slice(mode, 9, mode.count_bytes() - 1))
+    }
+    kit_steps_json_select(tree, parts, 0)
+}
+
+fn kit_steps_json_size(value: Dyn) -> Int? {
+    if value == {
+        .Array(items) -> Val(items.len())
+        .Object(fields) -> Val(fields.len())
+        else -> None
+    }
+}
+
+fn kit_steps_json_relation(actual: String, assertion: KitAssertion, history: [KitCapturedStep]) -> String? {
+    target :: kit_steps_count_label(assertion.value)
+    reference :: if target == "" -> assertion.value else -> target
+    label :: kit_steps_relation_label(reference)
+    stream :: kit_steps_relation_stream(reference, assertion.stream)
+    factor :: if target == "" -> 1 else -> Int.parse(kit_steps_byte_slice(assertion.value, 0, kit_steps_byte_index(assertion.value, "*") ?? 0)) ?? 0
+    previous := String?{None}
+    index := history.len()
+    loop index > 0 {
+        index -= 1
+        capture :: history[index]
+        if capture.label == label {
+            previous = Val(kit_steps_select_stream(capture.raw_stdout, capture.raw_stderr, stream))
+            break
+        }
+    }
+    expected_text :: previous ?? return Val("JSON relation label missing: {label}")
+    left :: kit_steps_json_values(actual, assertion.json_mode, assertion.json_path) ?? return Val("JSON relation current path missing")
+    transformed :: kit_steps_transform(expected_text, assertion.transform) ?? return Val("prior JSON subject transform failed")
+    right :: kit_steps_json_values(transformed, assertion.json_mode, assertion.json_path) ?? return Val("JSON relation prior path missing")
+    if left.len() == 0 || right.len() == 0 -> return Val("JSON relation filter selected no values")
+    if left.len() != right.len() -> return Val("JSON relation selection lengths differ")
+    loop i in 0..<left.len() {
+        if assertion.json_op == "#==" || assertion.json_op == "#>=" {
+            a :: kit_steps_json_size(left[i]) ?? return Val("JSON count relation needs an array or object")
+            b :: kit_steps_json_size(right[i]) ?? return Val("JSON count relation needs an array or object")
+            if (assertion.json_op == "#==" && a != factor * b) || (assertion.json_op == "#>=" && a < factor * b) -> return Val("JSON count relation differs")
+        } else if !kit_steps_json_equal(left[i], right[i]) -> return Val("JSON relation values differ")
+    }
+    None
+}
+
+fn kit_steps_json_scalar(text: String, mode: String, path: String) -> String Err! {
+    values :: kit_steps_json_values(text, mode, path) ?? return Err("capture JSON path missing or not scalar")
+    if values.len() != 1 -> return Err("capture JSON path missing or not scalar")
+    value :: values[0]
+    if value == {
+        .Text(scalar) -> Ok(scalar)
+        .Null | .Bool(_) | .Int(_) | .Float(_) | .Number(_) -> {
+            encoded :: json.to_string(value) ?? return Err("capture JSON encode: {err}")
+            Ok(encoded)
+        }
+        else -> Err("capture JSON path missing or not scalar")
+    }
+}

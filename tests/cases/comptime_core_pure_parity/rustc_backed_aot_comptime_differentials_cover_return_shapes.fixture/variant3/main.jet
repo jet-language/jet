@@ -1,0 +1,15 @@
+use core.encoding.xml as xml
+fn xml_shape_reason(tree: Dyn) -> String {
+    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {
+        Ok(_) -> return "unexpected success"
+        Err(error) -> return error.reason
+    }
+    return "unreachable"
+}
+EXPECTED :: prep { xml_shape_reason(Dyn.Float(1.5)) }
+
+fn run() {
+    actual :: xml_shape_reason(Dyn.Float(1.5))
+    print("{EXPECTED}")
+    print("{actual}")
+}

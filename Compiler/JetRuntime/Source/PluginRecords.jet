@@ -1,0 +1,122 @@
+// PluginWire.rs:28-43; CAbiRoutes.rs:8496-8505,11755-11797.
+#Export(c) fn jet_rt_record_new_plugin_frame(function: I64, component: I64, offset: I64) -> I64 {
+    raw :: jet_int_owned_to_i64(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    frame :: jet_rt_alloc(PLUGIN_FRAME_BYTES, I64{8})
+    data_tree_store(frame + PLUGIN_FRAME_FUNCTION, jet_rt_string_clone(function))
+    data_tree_store(frame + PLUGIN_FRAME_COMPONENT, jet_rt_string_clone(component))
+    data_tree_store(frame + PLUGIN_FRAME_OFFSET, raw)
+    frame
+}
+#Export(c) fn jet_rt_record_get_plugin_frame_function(frame: I64) -> I64 { jet_rt_string_clone(data_tree_word(frame + PLUGIN_FRAME_FUNCTION)) }
+#Export(c) fn jet_rt_record_get_plugin_frame_component(frame: I64) -> I64 { jet_rt_string_clone(data_tree_word(frame + PLUGIN_FRAME_COMPONENT)) }
+#Export(c) fn jet_rt_record_get_plugin_frame_offset(frame: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(frame + PLUGIN_FRAME_OFFSET)) }
+fn plugin_frame_clone_into(source: I64, target: I64) {
+    data_tree_store(target + PLUGIN_FRAME_FUNCTION, jet_rt_string_clone(data_tree_word(source + PLUGIN_FRAME_FUNCTION)))
+    data_tree_store(target + PLUGIN_FRAME_COMPONENT, jet_rt_string_clone(data_tree_word(source + PLUGIN_FRAME_COMPONENT)))
+    data_tree_store(target + PLUGIN_FRAME_OFFSET, data_tree_word(source + PLUGIN_FRAME_OFFSET))
+}
+fn plugin_frame_drop_fields(frame: I64) {
+    jet_rt_string_drop(data_tree_word(frame + PLUGIN_FRAME_FUNCTION))
+    jet_rt_string_drop(data_tree_word(frame + PLUGIN_FRAME_COMPONENT))
+}
+#Export(c) fn jet_rt_handle_clone_plugin_frame(frame: I64) -> I64 {
+    result :: jet_rt_alloc(PLUGIN_FRAME_BYTES, I64{8})
+    plugin_frame_clone_into(frame, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_plugin_frame(frame: I64) {
+    if (frame == I64{0}) -> return
+    plugin_frame_drop_fields(frame)
+    jet_rt_free(frame, PLUGIN_FRAME_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_plugin_frame(left: I64, right: I64) -> Bool {
+    if !jet_rt_string_eq(data_tree_word(left + PLUGIN_FRAME_FUNCTION), data_tree_word(right + PLUGIN_FRAME_FUNCTION)) -> return false
+    if !jet_rt_string_eq(data_tree_word(left + PLUGIN_FRAME_COMPONENT), data_tree_word(right + PLUGIN_FRAME_COMPONENT)) -> return false
+    data_tree_word(left + PLUGIN_FRAME_OFFSET) == data_tree_word(right + PLUGIN_FRAME_OFFSET)
+}
+#Export(c) fn jet_rt_record_seq_list_rec_plugin_frame_new(capacity: I64) -> I64 { data_sequence_new(capacity, PLUGIN_FRAME_BYTES) }
+#Export(c) fn jet_rt_record_seq_list_rec_plugin_frame_len(sequence: I64) -> I64 { data_tree_word(sequence + DATA_SEQUENCE_LENGTH) }
+#Export(c) fn jet_rt_record_seq_list_rec_plugin_frame_get(sequence: I64, index: I64) -> I64 {
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    // CAbiRoutes.rs:8501 indexes vec[index as usize]: fatal foreign OOB,
+    // not the Jet language panic used by Dyn's own sequence policy.
+    if (index < I64{0} || index >= length) -> rt_seq_index_oob_stop(length, index)
+    data_tree_word(sequence + DATA_SEQUENCE_DATA) + index * PLUGIN_FRAME_BYTES
+}
+#Export(c) fn jet_rt_record_seq_list_rec_plugin_frame_push(sequence: I64, frame: I64) {
+    target :: data_sequence_reserve(sequence, PLUGIN_FRAME_BYTES)
+    // Move fields into inline storage, consume only the source shell.
+    coll_copy(frame, target, PLUGIN_FRAME_BYTES)
+    jet_rt_free(frame, PLUGIN_FRAME_BYTES, I64{8})
+    data_tree_store(sequence + DATA_SEQUENCE_LENGTH, data_tree_word(sequence + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+fn plugin_frames_clone(sequence: I64) -> I64 {
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    result :: data_sequence_new(length, PLUGIN_FRAME_BYTES)
+    source :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    target :: data_tree_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        plugin_frame_clone_into(source + at * PLUGIN_FRAME_BYTES, target + at * PLUGIN_FRAME_BYTES)
+        at += I64{1}
+    }
+    data_tree_store(result + DATA_SEQUENCE_LENGTH, length)
+    result
+}
+fn plugin_frames_drop(sequence: I64) {
+    length :: data_tree_word(sequence + DATA_SEQUENCE_LENGTH)
+    capacity :: data_tree_word(sequence + DATA_SEQUENCE_CAPACITY)
+    data :: data_tree_word(sequence + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        plugin_frame_drop_fields(data + at * PLUGIN_FRAME_BYTES)
+        at += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * PLUGIN_FRAME_BYTES, I64{8})
+    jet_rt_free(sequence, DATA_SEQUENCE_BYTES, I64{8})
+}
+fn plugin_frames_eq(left: I64, right: I64) -> Bool {
+    length :: data_tree_word(left + DATA_SEQUENCE_LENGTH)
+    if length != data_tree_word(right + DATA_SEQUENCE_LENGTH) -> return false
+    a :: data_tree_word(left + DATA_SEQUENCE_DATA)
+    b :: data_tree_word(right + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if !jet_rt_handle_eq_plugin_frame(a + at * PLUGIN_FRAME_BYTES, b + at * PLUGIN_FRAME_BYTES) -> return false
+        at += I64{1}
+    }
+    true
+}
+#Export(c) fn jet_rt_record_new_plugin_fault(export_name: I64, message: I64, frames: I64) -> I64 {
+    fault :: jet_rt_alloc(PLUGIN_FAULT_BYTES, I64{8})
+    data_tree_store(fault + PLUGIN_FAULT_EXPORT, jet_rt_string_clone(export_name))
+    data_tree_store(fault + PLUGIN_FAULT_MESSAGE, jet_rt_string_clone(message))
+    data_tree_store(fault + PLUGIN_FAULT_FRAMES, frames)
+    fault
+}
+#Export(c) fn jet_rt_record_get_plugin_fault_export(fault: I64) -> I64 { jet_rt_string_clone(data_tree_word(fault + PLUGIN_FAULT_EXPORT)) }
+#Export(c) fn jet_rt_record_get_plugin_fault_message(fault: I64) -> I64 { jet_rt_string_clone(data_tree_word(fault + PLUGIN_FAULT_MESSAGE)) }
+#Export(c) fn jet_rt_record_get_plugin_fault_frames(fault: I64) -> I64 { data_tree_word(fault + PLUGIN_FAULT_FRAMES) }
+#Export(c) fn jet_rt_handle_clone_plugin_fault(fault: I64) -> I64 {
+    result :: jet_rt_alloc(PLUGIN_FAULT_BYTES, I64{8})
+    data_tree_store(result + PLUGIN_FAULT_EXPORT, jet_rt_string_clone(data_tree_word(fault + PLUGIN_FAULT_EXPORT)))
+    data_tree_store(result + PLUGIN_FAULT_MESSAGE, jet_rt_string_clone(data_tree_word(fault + PLUGIN_FAULT_MESSAGE)))
+    data_tree_store(result + PLUGIN_FAULT_FRAMES, plugin_frames_clone(data_tree_word(fault + PLUGIN_FAULT_FRAMES)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_plugin_fault(fault: I64) {
+    if (fault == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(fault + PLUGIN_FAULT_EXPORT))
+    jet_rt_string_drop(data_tree_word(fault + PLUGIN_FAULT_MESSAGE))
+    plugin_frames_drop(data_tree_word(fault + PLUGIN_FAULT_FRAMES))
+    jet_rt_free(fault, PLUGIN_FAULT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_plugin_fault(left: I64, right: I64) -> Bool {
+    if !jet_rt_string_eq(data_tree_word(left + PLUGIN_FAULT_EXPORT), data_tree_word(right + PLUGIN_FAULT_EXPORT)) -> return false
+    if !jet_rt_string_eq(data_tree_word(left + PLUGIN_FAULT_MESSAGE), data_tree_word(right + PLUGIN_FAULT_MESSAGE)) -> return false
+    plugin_frames_eq(data_tree_word(left + PLUGIN_FAULT_FRAMES), data_tree_word(right + PLUGIN_FAULT_FRAMES))
+}
+#Export(c) fn jet_rt_handle_clone_plugin_limit(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_plugin_limit(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_plugin_limit(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }

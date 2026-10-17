@@ -269,7 +269,7 @@ pub fn generate_with_descriptor_and_overlay(
                     if managed_callback_param_index(&proto, &catalog).is_some() {
                         lines.push_str("    fn ");
                         lines.push_str(&proto.name);
-                        lines.push_str("(callback: fn(FfiCallbackEvent<I64>)) FfiCallbackRegistration = ");
+                        lines.push_str("(callback: fn(FfiCallbackEvent<I64>)) -> FfiCallbackRegistration = ");
                         lines.push_str(&crate::JSON::quote(&proto.name));
                         lines.push('\n');
                     }
@@ -280,7 +280,7 @@ pub fn generate_with_descriptor_and_overlay(
                     }
                     if proto.name == "emit_async" {
                         lines.push_str(
-                            "    fn emit_async(value: I64) Task<I64 ! String> = \"__jet_ffi_emit_async\"\n",
+                            "    fn emit_async(value: I64) -> Task<I64 ! String> = \"__jet_ffi_emit_async\"\n",
                         );
                     }
                 }
@@ -679,6 +679,10 @@ fn parse_callback_alias(decl: &str) -> Option<(String, String)> {
 }
 
 fn parse_scalar_or_alias_typedef(decl: &str) -> Option<(String, String)> {
+    // A split declaration keeps the whitespace before it (the newline after
+    // the previous `;`), so the `typedef` keyword offset holds only once the
+    // declaration is trimmed.
+    let decl = decl.trim();
     let mut tokens = decl.split_whitespace();
     if tokens.next()? != "typedef" || decl.contains('{') || decl.contains('(') {
         return None;
@@ -1349,7 +1353,7 @@ impl BoundType {
             Self::Named(name) => name.clone(),
             Self::Array(element) => format!("[{}]", element.render()),
             Self::Optional(value) => format!("{}?", value.render()),
-            Self::Dynamic => "DataTree".to_string(),
+            Self::Dynamic => "Dyn".to_string(),
         }
     }
 }
@@ -3631,7 +3635,7 @@ fn add_xml_record(builder: &mut SchemaBuilder, preferred: &str, nodes: &[&XmlNod
     if mixed_count > 0 {
         fields.push(FieldSeed {
             wire_name: "$content".to_string(),
-            ty: BoundType::Scalar("DataTree"),
+            ty: BoundType::Scalar("Dyn"),
             optional: simple_count > 0,
             note: None,
         });
@@ -4844,7 +4848,7 @@ fn inference_rules(format: &str) -> &'static [&'static str] {
             "NOT NULL and PRIMARY KEY columns stay required; supported constraints are validated.",
         ],
         "xml" => &[
-            "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as DataTree.",
+            "XML attributes use @ wire keys; simple content uses $text and mixed content keeps ordered $content as Dyn.",
             "Nested elements become records; repeated child elements become arrays.",
         ],
         "proto" => &[
@@ -5105,7 +5109,7 @@ mod tests {
         "#;
         let result = generate(header, "arrays").unwrap();
         assert!(result.source.contains(
-            "#Layout(c)\npub struct Sample {\n    value: U32,\n    ratio: Float,\n}"
+            "#Layout(c)\nstruct Sample {\n    value: U32,\n    ratio: Float,\n}"
         ));
         assert!(result
             .source
@@ -5129,6 +5133,27 @@ mod tests {
     }
 
     #[test]
+    fn scalar_typedef_after_a_line_break_resolves_counted_pointers() {
+        // Every declaration after the first starts with the newline that
+        // followed the previous `;`; the typedef target must not swallow it.
+        let header = r#"
+            void reset(void);
+            typedef unsigned int codepoint_t;
+            void add_codepoints(const codepoint_t *text, int text_length);
+            void fill(codepoint_t *out, unsigned int out_count);
+        "#;
+        let result = generate(header, "codepoints").unwrap();
+        assert!(result
+            .source
+            .contains("fn add_codepoints(text: [U32], text_length: Int) = \"add_codepoints\"\n"));
+        assert!(result
+            .source
+            .contains("fn fill(out: &[U32], out_count: Int) = \"fill\"\n"));
+        assert_eq!(result.bound, vec!["reset", "add_codepoints", "fill"]);
+        assert!(result.skipped.is_empty());
+    }
+
+    #[test]
     fn binds_declarations_inside_extern_c_wrapper() {
         let header = r#"
             #ifdef __cplusplus
@@ -5144,7 +5169,7 @@ mod tests {
         "#;
         let result = generate(header, "wrapped").unwrap();
         assert!(result.source.contains(
-            "#Layout(c)\npub struct Sample {\n    value: U32,\n}"
+            "#Layout(c)\nstruct Sample {\n    value: U32,\n}"
         ));
         assert!(result
             .source
@@ -5211,7 +5236,7 @@ mod tests {
             int gzclose(gzFile file);
         "#;
         let result = generate(header, "zlib").unwrap();
-        assert!(result.source.contains("pub struct GzFile {}"));
+        assert!(result.source.contains("struct GzFile {}"));
         assert!(result
             .source
             .contains("#Close(gzclose)\nfn gzopen(path: String, mode: String) -> GzFile = \"gzopen\"\n"));

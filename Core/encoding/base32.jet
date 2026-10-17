@@ -4,41 +4,155 @@
 // Decoding follows D-ENCBASE-STRICT1: edition 2027+ decoders are strict
 // RFC 4648 (uppercase symbols, complete padding, zero unused bits, no
 // whitespace) and report `invalid base32 at byte <N>: <reason>`; edition 2026
-// keeps the compatibility parser. The codec kernels are the host rows, so
-// every execution tier runs the same decoder; these members forward to them.
+// keeps the compatibility parser. Encoders and decoders are pure Jet; the
+// compiler supplies only the already-resolved package edition.
 use core as core
 
 #Error
-pub struct Base32Error {
-    pub reason: String
+struct Base32Error {
+    reason: String
+    impl Display {
+        fn display(self) -> String { self.reason }
+    }
+    impl Debug {
+        fn debug(^self) -> String { self.reason }
+    }
 }
 
 impl Base32Error {
-    pub fn new(reason: String) -> Base32Error Never! { Base32Error{reason: reason} }
+    fn new(reason: String) -> Base32Error Never! { Base32Error{reason: reason} }
 }
 
-pub fn encode(data: [U8]) -> String Never! { core.encoding.base32.b32encode(data) }
+fn encode(data: [U8]) -> String Never! { encode_alphabet(data, "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567") }
 
 /// Decode the canonical padded RFC 4648 alphabet.
-pub fn decode(text: String) -> [U8] Base32Error! {
-    if core.encoding.base32.b32decode(text) == {
-        .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(Base32Error{reason: reason})
-    }
+fn decode(text: String) -> [U8] Base32Error! {
+    decode_for_edition(text, core.encoding.__edition())
 }
 
-pub fn is_base32(text: String) -> Bool Never! {
+fn is_base32(text: String) -> Bool Never! {
     decode(text) == .Ok(_)
 }
 
-pub fn b32encode(data: [U8]) -> String Never! { encode(data) }
-pub fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
+fn b32encode(data: [U8]) -> String Never! { encode(data) }
+fn b32decode(text: String) -> [U8] Base32Error! { decode(text) }
 
-pub fn b32hexencode(data: [U8]) -> String Never! { core.encoding.base32.b32hexencode(data) }
+fn b32hexencode(data: [U8]) -> String Never! { encode_alphabet(data, "0123456789ABCDEFGHIJKLMNOPQRSTUV") }
 
-pub fn b32hexdecode(text: String) -> [U8] Base32Error! {
-    if core.encoding.base32.b32hexdecode(text) == {
-        .Ok(value) -> return Ok(value)
-        .Err(reason) -> return Err(Base32Error{reason: reason})
+fn b32hexdecode(text: String) -> [U8] Base32Error! {
+    standard :: "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".bytes()
+    canonical := [U8]{}
+    loop b in text.bytes() {
+        n :: Int.from_u8(b)
+        if n >= 48 && n <= 57 -> &canonical.push(standard[n - 48])
+        else if n >= 65 && n <= 86 -> &canonical.push(standard[n - 65 + 10])
+        else if n == 61 -> &canonical.push(b)
+        else -> return Err(Base32Error{reason: "invalid Base32hex character"})
     }
+    decode(String.from_bytes(canonical) ?? "")
+}
+
+fn encode_alphabet(data: [U8], alphabet: String) -> String Never! {
+    chars :: alphabet.bytes()
+    out := [U8]{}
+    buffer := 0
+    bits := 0
+    loop b in data {
+        buffer = (buffer << 8).bit_or(Int.from_u8(b))
+        bits += 8
+        loop bits >= 5 {
+            bits -= 5
+            &out.push(chars[(buffer >> bits).bit_and(31)])
+        }
+        buffer = buffer.bit_and(((1 << bits) - 1))
+    }
+    if bits > 0 -> &out.push(chars[(buffer << (5 - bits)).bit_and(31)])
+    loop out.len() %% 8 != 0 -> &out.push(U8{61})
+    String.from_bytes(out) ?? ""
+}
+
+#Test("base32 encoder vectors") {
+    assert(encode([U8]{}) == "")
+    assert(encode("f".bytes()) == "MY======")
+    assert(encode("fo".bytes()) == "MZXQ====")
+    assert(encode("foo".bytes()) == "MZXW6===")
+    assert(encode("foob".bytes()) == "MZXW6YQ=")
+    assert(encode("fooba".bytes()) == "MZXW6YTB")
+    assert(encode("foobar".bytes()) == "MZXW6YTBOI======")
+    assert(b32hexencode("foobar".bytes()) == "CPNMUOJ1E8======")
+}
+
+fn decode_error(offset: Int, reason: String) -> Base32Error Never! {
+    Base32Error{reason: "invalid base32 at byte {offset}: {reason}"}
+}
+
+fn decode_for_edition(text: String, edition: Int) -> [U8] Base32Error! {
+    strict :: edition >= 2027
+    raw :: text.bytes()
+    count := 0
+    padding := 0
+    pad_start := -1
+    last := -1
+    out := [U8]{}
+    buffer := 0
+    bits := 0
+    loop i in 0..<raw.len() {
+        n :: Int.from_u8(raw[i])
+        whitespace :: n == 32 || n == 9 || n == 10 || n == 12 || n == 13 || (strict && n == 11)
+        if whitespace {
+            if strict -> return Err(decode_error(i, "ASCII whitespace is not allowed"))
+            next
+        }
+        if n == 61 {
+            if !strict -> next
+            if pad_start < 0 -> pad_start = i
+            padding += 1
+            next
+        }
+        if strict && pad_start >= 0 -> return Err(decode_error(i, "padding may appear only at the end"))
+        value := -1
+        if n >= 65 && n <= 90 -> value = n - 65
+        else if !strict && n >= 97 && n <= 122 -> value = n - 97
+        else if n >= 50 && n <= 55 -> value = n - 50 + 26
+        if value < 0 {
+            digits :: "0123456789ABCDEF".bytes()
+            pair :: String.from_bytes([U8]{digits[n >> 4], digits[n.bit_and(15)]}) ?? ""
+            return Err(decode_error(i, "byte 0x{pair} is not in the base32 alphabet"))
+        }
+        last = i
+        count += 1
+        buffer = (buffer << 5).bit_or(value)
+        bits += 5
+        if bits >= 8 {
+            bits -= 8
+            &out.push(U8{(buffer >> bits).bit_and(255)})
+        }
+        buffer = buffer.bit_and(((1 << bits) - 1))
+    }
+    if !strict || (count == 0 && padding == 0) -> return Ok(out)
+    eof :: if pad_start >= 0 -> pad_start else -> last + 1
+    remainder :: (count + padding) %% 8
+    if remainder == 1 -> return Err(decode_error(eof, "encoded length cannot represent whole bytes"))
+    if remainder != 0 -> return Err(decode_error(eof, "expected {8 - remainder} padding characters"))
+    tail :: count %% 8
+    expected :: if tail == 2 -> 6 else if tail == 4 -> 4 else if tail == 5 -> 3 else if tail == 7 -> 1 else -> 0
+    if padding > 0 {
+        if tail == 0 || (padding > expected && expected > 0) -> return Err(decode_error(pad_start, "unexpected padding"))
+        if expected == 0 || padding < expected -> return Err(decode_error(pad_start, "expected {expected} padding characters"))
+    } else if tail != 0 {
+        if expected == 0 -> return Err(decode_error(eof, "encoded length cannot represent whole bytes"))
+        return Err(decode_error(eof, "expected {expected} padding characters"))
+    }
+    if bits > 0 && buffer != 0 -> return Err(decode_error(last, "non-zero unused bits"))
+    Ok(out)
+}
+
+#Test("base32 edition-selected decode policy") {
+    assert_eq(decode_for_edition("MZXW6===", 2027), Ok("foo".bytes()))
+    assert_eq(decode_for_edition("mzxw6", 2026), Ok("foo".bytes()))
+    assert(decode_for_edition("mzxw6", 2027) == .Err(_))
+    assert(decode_for_edition("MY", 2027) == .Err(_))
+    assert(decode_for_edition("MZ======", 2027) == .Err(_))
+    assert_eq(decode_for_edition("M Y======", 2026), Ok("f".bytes()))
+    assert(decode_for_edition("M Y======", 2027) == .Err(_))
 }

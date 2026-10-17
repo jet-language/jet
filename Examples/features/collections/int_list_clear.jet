@@ -1,0 +1,26 @@
+// Clearing a list of Ints empties it whether its values are small or too large
+// for one machine word. Pushes after a clear start from an empty list, and an
+// Int copied out of the list before the clear keeps its value.
+fn refill(out: &[Int], seed: Int, count: Int) {
+    &out.clear()
+    loop i in 0..<count -> &out.push(seed + i)
+}
+
+fn run() {
+    xs := [Int]{}
+    refill(&xs, 1, 3)
+    print(xs)
+    big :: 9223372036854775807 * 4
+    &xs.push(big)
+    kept :: xs[3].copy()
+    refill(&xs, 10, 2)
+    print(xs)
+    print(kept)
+    &xs.clear()
+    print(xs.len())
+    &xs.push(big + 1)
+    &xs.push(-big)
+    &xs.clear()
+    &xs.push(7)
+    print(xs)
+}

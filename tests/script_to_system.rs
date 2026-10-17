@@ -408,30 +408,6 @@ fn script_to_system_continuity_preserves_one_source() {
         "the direct lens should report the unselected dev helper:\n{}",
         compiler_text(&direct)
     );
-    let interpreted = run_jet_ok(
-        &scratch.path,
-        &cache,
-        "direct-run-interpreter",
-        &["run", "--interpret", "run.jet", "--", "--minutes", "1"],
-    );
-    assert_eq!(interpreted.status.code(), direct.status.code());
-    assert_eq!(interpreted.stdout, direct.stdout);
-    assert_eq!(interpreted.stdout, EXPECTED_STDOUT);
-    assert_eq!(interpreted.stderr, direct.stderr);
-    record_receipt(
-        &cache,
-        "proof",
-        "interpreter-parity",
-        Duration::ZERO,
-        "ok",
-        &format!(
-            "exit={:?} stdout_sha256={} stderr_sha256={} exact=true",
-            interpreted.status.code(),
-            bytes_digest(&interpreted.stdout),
-            bytes_digest(&interpreted.stderr),
-        ),
-    );
-
     let dev = run_jet_ok(&scratch.path, &cache, "dev", &["dev", "run.jet"]);
     assert_eq!(dev.stdout, EXPECTED_STDOUT);
     assert_source_preserved(
@@ -482,7 +458,7 @@ fn script_to_system_continuity_preserves_one_source() {
         &scratch.path,
         "support-source",
         &scratch.join("support/support.jet"),
-        "pub fn spare() -> Int { 7 }\n",
+        "fn spare() -> Int { 7 }\n",
     );
     run_jet_ok(
         &scratch.path,
@@ -1084,7 +1060,7 @@ fn script_to_system_continuity_preserves_one_source() {
     assert!(scratch.join("package/env.jet").is_file());
     assert_eq!(
         fs::read_to_string(scratch.join("package/env.jet")).unwrap(),
-        "pub development :: Config{\n    environments: {\n    development: Environment{ tools: [\"git\"] },\n}\n}\n"
+        "development :: Config{\n    environments: {\n    development: Environment{ tools: [\"git\"] },\n}\n}\n"
     );
     assert!(!fs::read_to_string(scratch.join("package.jet"))
         .unwrap()
@@ -1133,7 +1109,7 @@ fn script_to_system_continuity_preserves_one_source() {
         &scratch.path,
         &cache,
         "fold-env-check",
-        &["Fold", "package/env.jet", "--check"],
+        &["fold", "package/env.jet", "--check"],
     );
     assert!(String::from_utf8_lossy(&fold_check.stdout).contains("No files changed."));
     assert_eq!(
@@ -1172,7 +1148,7 @@ fn script_to_system_continuity_preserves_one_source() {
         &scratch.path,
         &cache,
         "fold-env",
-        &["Fold", "package/env.jet"],
+        &["fold", "package/env.jet"],
     );
     assert_eq!(
         transition_graph(&fold), graph_before_fold.fingerprint,
@@ -1269,7 +1245,6 @@ fn script_to_system_continuity_preserves_one_source() {
     for label in [
         "aot-build",
         "aot-build-after-library-output",
-        "interpreter-parity",
         "native-library-build",
         "clean-aot-rebuild",
         "clean-native-library-rebuild",

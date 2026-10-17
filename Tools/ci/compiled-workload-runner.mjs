@@ -1034,7 +1034,6 @@ function jetBuild(project, source, target = "", embeddedInput = "", task) {
   args.push(path.relative(project, staged.entry).split(path.sep).join("/"));
   const env = {
     JET_STORE_DIR: path.join(project, ".jet-store"),
-    JET_RUN_CACHE_DIR: path.join(project, ".jet-run-cache"),
     JET_FFI_CACHE_DIR: path.join(project, ".jet-ffi-cache"),
     CARGO_NET_OFFLINE: "true",
     ...(target === "aarch64-unknown-linux-gnu" ? {
@@ -1680,7 +1679,6 @@ for (const task of manifest) {
       jitProject,
       {
         JET_STORE_DIR: path.join(jitProject, ".jet-store"),
-        JET_RUN_CACHE_DIR: path.join(jitProject, ".jet-run-cache"),
       },
     );
     checked(jit, expected, taskId + "/jet/jit");

@@ -1,0 +1,123 @@
+// Private carriers from UiCarriersABI, seed Ui.rs:436-755 derive traits.
+// Color tags are zero-based here (unlike Node's optional inline color).
+fn ui_tui_color_payload(kind: I64, word: I64) -> I64 { if (kind == I64{2}) -> word.bit_and(I64{16777215}) else -> word.bit_and(I64{255}) }
+fn ui_tui_color_copy(source: I64, target: I64) {
+    kind :: ui_carrier_word(source + UI_CARRIER_TUI_COLOR_TAG)
+    ui_carrier_store(target + UI_CARRIER_TUI_COLOR_TAG, kind)
+    ui_carrier_store(target + UI_CARRIER_TUI_COLOR_PAYLOAD, ui_tui_color_payload(kind, ui_carrier_word(source + UI_CARRIER_TUI_COLOR_PAYLOAD)))
+}
+#Export(c) fn jet_rt_handle_clone_jet_tui_color(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_TUI_COLOR_BYTES, I64{8})
+    ui_tui_color_copy(value, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_tui_color(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TUI_COLOR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_tui_color(a: I64, b: I64) -> Bool {
+    kind :: ui_carrier_word(a + UI_CARRIER_TUI_COLOR_TAG)
+    kind == ui_carrier_word(b + UI_CARRIER_TUI_COLOR_TAG) && ui_tui_color_payload(kind, ui_carrier_word(a + UI_CARRIER_TUI_COLOR_PAYLOAD)) == ui_tui_color_payload(kind, ui_carrier_word(b + UI_CARRIER_TUI_COLOR_PAYLOAD))
+}
+#Export(c) fn jet_rt_handle_clone_jet_tui_constraint(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_TUI_CONSTRAINT_BYTES, I64{8})
+    kind :: ui_carrier_word(value + UI_CARRIER_TUI_CONSTRAINT_TAG)
+    payload :: ui_carrier_word(value + UI_CARRIER_TUI_CONSTRAINT_PAYLOAD)
+    ui_carrier_store(result + UI_CARRIER_TUI_CONSTRAINT_TAG, kind)
+    ui_carrier_store(result + UI_CARRIER_TUI_CONSTRAINT_PAYLOAD, if (kind == I64{4}) -> payload.bit_and(I64{65535}) else -> payload)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_tui_constraint(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TUI_CONSTRAINT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_tui_constraint(a: I64, b: I64) -> Bool {
+    kind :: ui_carrier_word(a + UI_CARRIER_TUI_CONSTRAINT_TAG)
+    if (kind != ui_carrier_word(b + UI_CARRIER_TUI_CONSTRAINT_TAG)) -> return false
+    x :: ui_carrier_word(a + UI_CARRIER_TUI_CONSTRAINT_PAYLOAD)
+    y :: ui_carrier_word(b + UI_CARRIER_TUI_CONSTRAINT_PAYLOAD)
+    if (kind == I64{4}) -> return (x.bit_and(I64{65535})) == (y.bit_and(I64{65535}))
+    rt_f64_from_bits(x) == rt_f64_from_bits(y)
+}
+#Export(c) fn jet_rt_handle_clone_jet_tui_list_state(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_TUI_LIST_STATE_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_TUI_LIST_STATE_SELECTED, ui_carrier_word(value + UI_CARRIER_TUI_LIST_STATE_SELECTED))
+    ui_carrier_store(result + UI_CARRIER_TUI_LIST_STATE_OFFSET, ui_carrier_word(value + UI_CARRIER_TUI_LIST_STATE_OFFSET))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_tui_list_state(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TUI_LIST_STATE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_tui_list_state(a: I64, b: I64) -> Bool {
+    ui_carrier_word(a + UI_CARRIER_TUI_LIST_STATE_SELECTED) == ui_carrier_word(b + UI_CARRIER_TUI_LIST_STATE_SELECTED) && ui_carrier_word(a + UI_CARRIER_TUI_LIST_STATE_OFFSET) == ui_carrier_word(b + UI_CARRIER_TUI_LIST_STATE_OFFSET)
+}
+fn ui_tui_optional_color_copy(source: I64, target: I64) {
+    present :: ui_carrier_bool(source)
+    ui_carrier_store(target, present)
+    if {
+        (present != I64{0}) -> ui_tui_color_copy(source + I64{8}, target + I64{8})
+        else -> {
+            ui_carrier_store(target + I64{8}, I64{0})
+            ui_carrier_store(target + I64{16}, I64{0})
+        }
+    }
+}
+fn ui_tui_optional_color_eq(a: I64, b: I64) -> Bool {
+    present :: ui_carrier_bool(a)
+    if (present != ui_carrier_bool(b)) -> return false
+    present == I64{0} || jet_rt_handle_eq_jet_tui_color(a + I64{8}, b + I64{8})
+}
+#Export(c) fn jet_rt_handle_clone_jet_tui_style(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_TUI_STYLE_BYTES, I64{8})
+    ui_tui_optional_color_copy(value + UI_CARRIER_TUI_STYLE_FOREGROUND, result + UI_CARRIER_TUI_STYLE_FOREGROUND)
+    ui_tui_optional_color_copy(value + UI_CARRIER_TUI_STYLE_BACKGROUND, result + UI_CARRIER_TUI_STYLE_BACKGROUND)
+    offset := UI_CARRIER_TUI_STYLE_BOLD
+    loop offset <= UI_CARRIER_TUI_STYLE_UNDERLINE {
+        ui_carrier_store(result + offset, ui_carrier_bool(value + offset))
+        offset += I64{8}
+    }
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_tui_style(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TUI_STYLE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_tui_style(a: I64, b: I64) -> Bool {
+    if !ui_tui_optional_color_eq(a + UI_CARRIER_TUI_STYLE_FOREGROUND, b + UI_CARRIER_TUI_STYLE_FOREGROUND) -> return false
+    if !ui_tui_optional_color_eq(a + UI_CARRIER_TUI_STYLE_BACKGROUND, b + UI_CARRIER_TUI_STYLE_BACKGROUND) -> return false
+    offset := UI_CARRIER_TUI_STYLE_BOLD
+    loop offset <= UI_CARRIER_TUI_STYLE_UNDERLINE {
+        if (ui_carrier_bool(a + offset) != ui_carrier_bool(b + offset)) -> return false
+        offset += I64{8}
+    }
+    true
+}
+#Export(c) fn jet_rt_handle_field_jet_tui_style_bold(value: I64) -> I64 { value + UI_CARRIER_TUI_STYLE_BOLD }
+#Export(c) fn jet_rt_handle_field_jet_tui_style_dim(value: I64) -> I64 { value + UI_CARRIER_TUI_STYLE_DIM }
+#Export(c) fn jet_rt_handle_field_jet_tui_style_underline(value: I64) -> I64 { value + UI_CARRIER_TUI_STYLE_UNDERLINE }
+#Export(c) fn jet_rt_handle_clone_jet_tui_capabilities(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_TUI_CAPABILITIES_BYTES, I64{8})
+    ui_carrier_store(result + UI_CARRIER_TUI_CAPABILITIES_PROFILE, ui_carrier_word(value + UI_CARRIER_TUI_CAPABILITIES_PROFILE))
+    offset := UI_CARRIER_TUI_CAPABILITIES_COLOR
+    loop offset <= UI_CARRIER_TUI_CAPABILITIES_CLIPBOARD {
+        ui_carrier_store(result + offset, ui_carrier_bool(value + offset))
+        offset += I64{8}
+    }
+    ui_carrier_store(result + UI_CARRIER_TUI_CAPABILITIES_WIDTH, ui_carrier_word(value + UI_CARRIER_TUI_CAPABILITIES_WIDTH))
+    ui_carrier_store(result + UI_CARRIER_TUI_CAPABILITIES_HEIGHT, ui_carrier_word(value + UI_CARRIER_TUI_CAPABILITIES_HEIGHT))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_tui_capabilities(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_TUI_CAPABILITIES_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_tui_capabilities(a: I64, b: I64) -> Bool {
+    if (ui_carrier_word(a + UI_CARRIER_TUI_CAPABILITIES_PROFILE) != ui_carrier_word(b + UI_CARRIER_TUI_CAPABILITIES_PROFILE)) -> return false
+    offset := UI_CARRIER_TUI_CAPABILITIES_COLOR
+    loop offset <= UI_CARRIER_TUI_CAPABILITIES_CLIPBOARD {
+        if (ui_carrier_bool(a + offset) != ui_carrier_bool(b + offset)) -> return false
+        offset += I64{8}
+    }
+    ui_carrier_word(a + UI_CARRIER_TUI_CAPABILITIES_WIDTH) == ui_carrier_word(b + UI_CARRIER_TUI_CAPABILITIES_WIDTH) && ui_carrier_word(a + UI_CARRIER_TUI_CAPABILITIES_HEIGHT) == ui_carrier_word(b + UI_CARRIER_TUI_CAPABILITIES_HEIGHT)
+}
+#Export(c) fn jet_rt_handle_field_jet_tui_capabilities_color(value: I64) -> I64 { value + UI_CARRIER_TUI_CAPABILITIES_COLOR }
+#Export(c) fn jet_rt_handle_field_jet_tui_capabilities_unicode(value: I64) -> I64 { value + UI_CARRIER_TUI_CAPABILITIES_UNICODE }
+#Export(c) fn jet_rt_handle_field_jet_tui_capabilities_mouse(value: I64) -> I64 { value + UI_CARRIER_TUI_CAPABILITIES_MOUSE }
+#Export(c) fn jet_rt_handle_field_jet_tui_capabilities_resize(value: I64) -> I64 { value + UI_CARRIER_TUI_CAPABILITIES_RESIZE }
+#Export(c) fn jet_rt_handle_field_jet_tui_capabilities_clipboard(value: I64) -> I64 { value + UI_CARRIER_TUI_CAPABILITIES_CLIPBOARD }

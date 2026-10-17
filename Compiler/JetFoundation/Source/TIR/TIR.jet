@@ -4,7 +4,7 @@
 
 TIR_SCHEMA_VERSION :: 8
 
-pub enum TAddressLifetime {
+enum TAddressLifetime {
     Stack
     Heap
     Static
@@ -13,51 +13,51 @@ pub enum TAddressLifetime {
     Unknown
 }
 
-pub struct TIntegerBounds {
-    pub lo: Int
-    pub hi: Int
+struct TIntegerBounds {
+    lo: Int
+    hi: Int
 }
 
-pub fn integer_bounds_exact(value: Int) -> TIntegerBounds Never! {
+fn integer_bounds_exact(value: Int) -> TIntegerBounds Never! {
     TIntegerBounds{lo: value, hi: value}
 }
 
-pub struct TLocal {
-    pub name: String
-    pub symbol_id: SymbolID?{None}
-    pub span: Span
-    pub generated: Bool
-    pub deref: Bool
-    pub address_lifetime: TAddressLifetime?
-    pub persist_key: String?
-    pub persist_ty: Type?
-    pub mutable: Bool
-    pub string_bytes_source: TLocal?
-    pub integer_bounds: TIntegerBounds?
-    pub uninit_scalar: Bool
-    pub uninit_fixed: Bool
-    pub direct_closure: Bool
+struct TLocal {
+    name: String
+    symbol_id: SymbolID?{None}
+    span: Span
+    generated: Bool
+    deref: Bool
+    address_lifetime: TAddressLifetime?
+    persist_key: String?
+    persist_ty: Type?
+    mutable: Bool
+    string_bytes_source: TLocal?
+    integer_bounds: TIntegerBounds?
+    uninit_scalar: Bool
+    uninit_fixed: Bool
+    direct_closure: Bool
 }
 
-pub fn tir_user_local(name: String, span: Span) -> TLocal Never! {
+fn tir_user_local(name: String, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
 }
 
-pub fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
+fn tir_symbol_local(name: String, span: Span, symbol_id: SymbolID) -> TLocal Never! {
     local := tir_user_local(name, span)
     local.symbol_id = Val(symbol_id)
     local
 }
 
-pub fn tir_generated_local(name: String, span: Span) -> TLocal Never! {
+fn tir_generated_local(name: String, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: true, deref: false, address_lifetime: None, persist_key: None, persist_ty: None, mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
 }
 
-pub fn tir_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
+fn tir_persistent_local(name: String, module_name: String, ty: Type, span: Span) -> TLocal Never! {
     TLocal{name: name, span: span, generated: false, deref: false, address_lifetime: Val(TAddressLifetime.Static), persist_key: Val("{module_name}::{name}"), persist_ty: Val(ty), mutable: false, string_bytes_source: None, integer_bounds: None, uninit_scalar: false, uninit_fixed: false, direct_closure: false}
 }
 
-pub enum TBinaryOp {
+enum TBinaryOp {
     Add
     Sub
     Mul
@@ -82,11 +82,11 @@ pub enum TBinaryOp {
     Or
 }
 
-pub enum TUnaryOp {
+enum TUnaryOp {
     Neg
     Not
 }
-pub enum TIndexKind {
+enum TIndexKind {
     Unknown
     List
     Range
@@ -98,7 +98,7 @@ pub enum TIndexKind {
     Pool
 }
 
-pub enum TStrFormat {
+enum TStrFormat {
     Display
     Debug
     Pretty
@@ -114,51 +114,51 @@ pub enum TStrFormat {
     Unit(format: TUnitFormat)
 }
 
-pub enum TUnitFormat {
+enum TUnitFormat {
     Symbol
     Name
     Bare
 }
 
-pub enum TStrPart {
+enum TStrPart {
     Literal(text: String)
     Interpolation(value: TExpr, format: TStrFormat)
 }
 
-pub struct TCallArg {
-    pub value: TExpr
-    pub template_items: [SymbolID]
-    pub borrow: Bool
-    pub mut_borrow: Bool
-    pub clone: Bool
-    pub arc_clone: Bool
-    pub fn_coerce: TFnCoerce?
-    pub widen_to_vec: Bool
-    pub widen_to_union: Type?
-    pub box_as_trait: Type?
-    pub label: String?
-    pub spread: Bool
+struct TCallArg {
+    value: TExpr
+    template_items: [SymbolID]
+    borrow: Bool
+    mut_borrow: Bool
+    clone: Bool
+    arc_clone: Bool
+    fn_coerce: TFnCoerce?
+    widen_to_vec: Bool
+    widen_to_union: Type?
+    box_as_trait: Type?
+    label: String?
+    spread: Bool
 }
 
-pub struct TFnCoerce {
-    pub ty: Type
-    pub already_boxed: Bool
+struct TFnCoerce {
+    ty: Type
+    already_boxed: Bool
 }
 
-pub struct TFieldRef {
-    pub owner: SymbolID?
-    pub field: SymbolID
-    pub name: String
-    pub ty: Type
-    pub boxed: Bool
+struct TFieldRef {
+    owner: SymbolID?
+    field: SymbolID
+    name: String
+    ty: Type
+    boxed: Bool
 }
 
-pub struct TEnumArg {
-    pub value: TExpr
-    pub clone: Bool
-    pub move: Bool
+struct TEnumArg {
+    value: TExpr
+    clone: Bool
+    move: Bool
 }
-pub enum TAllocCtor {
+enum TAllocCtor {
     Arena
     Bump
     Pool
@@ -166,18 +166,18 @@ pub enum TAllocCtor {
     FixedOver
 }
 
-pub enum TEnumPayload {
+enum TEnumPayload {
     Unit
     Positional(args: [TEnumArg])
     Named(fields: [TNamedEnumArg])
 }
 
-pub struct TNamedEnumArg {
-    pub name: String
-    pub value: TEnumArg
+struct TNamedEnumArg {
+    name: String
+    value: TEnumArg
 }
 
-pub enum TPatternShape {
+enum TPatternShape {
     Variant(variant: String, bindings: [TPatternBinding], leading_dot: Bool, span: Span)
     // S31: `inner` is a nested payload pattern (`.Val(.Rect(w, h))`).
     Present(binding: String, binding_span: Span, inner: TNestedPattern?, span: Span)
@@ -187,69 +187,109 @@ pub enum TPatternShape {
     Range(lo: Int, hi: Int, span: Span)
     Or(alternatives: [TPatternShape], span: Span)
     Struct(fields: [TPatternField], rest: Span?, span: Span)
+    List(items: [TPatternBinding], rest: TListPatternRest?, span: Span)
+    Map(entries: [TMapPatternEntry], rest: Bool, span: Span)
     Text(parts: [TTextPatternPart], span: Span)
     Binary(parts: [TBinaryPatternPart], span: Span)
 }
 
 // S31: a checked nested payload pattern with the payload type's owner.
-pub struct TNestedPattern {
-    pub shape: TPatternShape
-    pub enum_type: SymbolID?
+struct TNestedPattern {
+    shape: TPatternShape
+    enum_type: SymbolID?
 }
 
-pub enum TPatternPosition {
+enum TPatternPosition {
     Binding
     OptionBinding
     Arm
     VariantPath
-    DataEntries(temp: String)
 }
-pub struct TPatternBindingFact {
-    pub name: String
-    pub span: Span
-    pub ty: Type
-    pub mutable: Bool
-    pub symbol_id: SymbolID?
-}
-
-pub struct TPattern {
-    pub shape: TPatternShape
-    pub bindings: [TPatternBindingFact]
-    pub enum_type: SymbolID?
-    pub position: TPatternPosition
-    pub mutable: Bool
-    pub boxed: Bool
+struct TPatternBindingFact {
+    name: String
+    span: Span
+    ty: Type
+    mutable: Bool
+    symbol_id: SymbolID?
 }
 
-pub enum TPatternBinding {
+struct TPattern {
+    shape: TPatternShape
+    bindings: [TPatternBindingFact]
+    enum_type: SymbolID?
+    position: TPatternPosition
+    mutable: Bool
+    boxed: Bool
+}
+
+enum TPatternBinding {
     Wildcard
     Bind(name: String, span: Span)
     Range(lo: Int, hi: Int)
     Nested(pattern: TNestedPattern)
+    Value(value: TExpr)
 }
 
-pub enum TPatternField {
+enum TPatternField {
     Bind(field: String, local: String, span: Span)
     Value(field: String, value: TExpr, span: Span)
+    Nested(field: String, pattern: TNestedPattern, span: Span)
 }
 
-pub enum TTextPatternPart {
+struct TListPatternRest {
+    name: String?
+    span: Span
+}
+
+struct TMapPatternEntry {
+    key: TExpr
+    optional: Bool
+    slot: TPatternBinding
+    span: Span
+}
+
+// Logical key identity ignores source spelling and resolved constant aliases.
+fn tir_pattern_key_identity(key: TExpr) -> String? Never! {
+    if key.kind == {
+        .IntLit(value, _) -> Val("int:{value}")
+        .StrLit(value) -> Val("text:{value}")
+        .BoolLit(value) -> Val("bool:{value}")
+        .CharLit(value) -> Val("char:{value}")
+        .ConstRef(symbol) -> Val("constant:{symbol.key}")
+        .EnumLit(owner, variant, _) -> Val("enum:{owner}:{variant}")
+        .Unary(op, value) -> {
+            if op == TUnaryOp.Neg && value.kind == .IntLit(number, _) -> Val("int:{-number}") else -> None
+        }
+        .CtLit(value) -> if value == {
+            .Int(number) -> Val("int:{number}")
+            .BigInt(number) -> Val("int:{number}")
+            .String(text) -> Val("text:{text}")
+            .Bool(flag) -> Val("bool:{flag}")
+            .Char(character) -> Val("char:{character}")
+            .Enum(owner, variant, _) -> Val("enum:{owner}:{variant}")
+            else -> None
+        }
+        else -> None
+    }
+}
+
+enum TTextPatternPart {
     Literal(value: String)
     Hole(name: String, ty: Type, span: Span)
 }
 
-pub enum TBinaryPatternPart {
+enum TBinaryPatternPart {
     Literal(value: [U8])
     Bits(name: String, width: Int, big_endian: Bool, ty: Type, span: Span)
     Rest(name: String, ty: Type, span: Span)
 }
 
-pub struct TMatchArm {
-    pub pattern: TPattern
-    pub body: [TStmt]
+struct TMatchArm {
+    pattern: TPattern
+    body: [TStmt]
 }
 
-pub enum TIfCond {
+enum TIfCond {
     Plain(value: TExpr)
     And(left: TIfCond, right: TIfCond)
     IfLet(pattern: TPattern, subj: TExpr)
@@ -258,13 +298,13 @@ pub enum TIfCond {
     WithPrelude(prelude: [TStmt], cond: TIfCond)
 }
 
-pub enum TLetWrapper {
+enum TLetWrapper {
     Plain
     Resource
     AutomaticRoot
 }
 
-pub enum TLetTy {
+enum TLetTy {
     Inferred
     StrView
     Annotated(ty: Type, wrapper: TLetWrapper)
@@ -272,49 +312,49 @@ pub enum TLetTy {
     SendFn(ty: Type)
 }
 
-pub struct TGCPromotion {
-    pub span: Span
-    pub scope: String
-    pub policy_provenance: String
-    pub reason: String
-    pub edges: [TGCPromotionEdge]
-    pub collection_len: Int?
+struct TGCPromotion {
+    span: Span
+    scope: String
+    policy_provenance: String
+    reason: String
+    edges: [TGCPromotionEdge]
+    collection_len: Int?
 }
 
-pub struct TGCPromotionEdge {
-    pub binding: String
-    pub slot: String
-    pub group: Int
+struct TGCPromotionEdge {
+    binding: String
+    slot: String
+    group: Int
 }
 
 
-pub enum TContractKind { Pre Post }
-pub enum TContractDisposition { Check Proven Stripped }
+enum TContractKind { Pre Post }
+enum TContractDisposition { Check Proven Stripped }
 
-pub struct TContract {
-    pub kind: TContractKind
-    pub condition: TExpr
-    pub message: TExpr
-    pub file: String
-    pub line: Int
-    pub span: Span
-    pub disposition: TContractDisposition
+struct TContract {
+    kind: TContractKind
+    condition: TExpr
+    message: TExpr
+    file: String
+    line: Int
+    span: Span
+    disposition: TContractDisposition
 }
 
-pub struct TContractResult {
-    pub carrier_ty: Type
-    pub binding_ty: Type
-    pub carrier_local: TLocal
-    pub binding_local: TLocal
-    pub mode: TContractResultMode
+struct TContractResult {
+    carrier_ty: Type
+    binding_ty: Type
+    carrier_local: TLocal
+    binding_local: TLocal
+    mode: TContractResultMode
 }
 
-pub struct TDestructureBinding {
-    pub local: TLocal
-    pub field: String
+struct TDestructureBinding {
+    local: TLocal
+    field: String
 }
 
-pub enum TStmt {
+enum TStmt {
     Contract(contract: TContract)
     ContractScope(pre: [TContract], body: [TStmt], post: [TContract], result: TContractResult, span: Span)
     Let(local: TLocal, let_ty: TLetTy, init: TExpr, gc_promotion: TGCPromotion?, gc_transferred: Bool, span: Span)
@@ -367,58 +407,59 @@ pub enum TStmt {
     SourceSpan(span: Span)
 }
 
-pub struct TRangeArm {
-    pub lo: Int
-    pub hi: Int
-    pub body: [TStmt]
+struct TRangeArm {
+    lo: Int
+    hi: Int
+    body: [TStmt]
 }
 
-pub struct TMixedArm {
-    pub condition: TExpr
-    pub body: [TStmt]
+struct TMixedArm {
+    condition: TExpr
+    body: [TStmt]
 }
 
-pub struct TIndexFieldAssign {
-    pub base: TExpr
-    pub index: TExpr
-    pub is_map: Bool
-    pub index_proven: Bool
-    pub field: String
-    pub field_ty: Type
-    pub op: TBinaryOp?
-    pub value: TExpr
-    pub clone_value: Bool
-    pub line: Int
+struct TIndexFieldAssign {
+    base: TExpr
+    index: TExpr
+    is_map: Bool
+    index_proven: Bool
+    field: String
+    field_ty: Type
+    op: TBinaryOp?
+    value: TExpr
+    clone_value: Bool
+    line: Int
 }
 
-pub struct TContextGuard {
-    pub field: String
-    pub value: TExpr
+struct TContextGuard {
+    field: String
+    value: TExpr
 }
 
-pub struct TTransactionSnapshot {
-    pub local: TLocal
-    pub rollback_type: Type?
-    pub snapshot_method: TMethodRef?
-    pub restore_method: TMethodRef?
+struct TTransactionSnapshot {
+    local: TLocal
+    rollback_type: Type?
+    snapshot_method: TMethodRef?
+    restore_method: TMethodRef?
 }
 
 
-pub struct TUnsafeGate {
-    pub file: String
-    pub line: Int
-    pub reason: String
-    pub enabled: Bool
-    pub fenced: Bool
+struct TUnsafeGate {
+    file: String
+    line: Int
+    reason: String
+    enabled: Bool
+    fenced: Bool
 }
 
-pub struct TComptimeMapEntry {
-    pub key: TComptimeKey
-    pub value: TComptimeValue
+struct TComptimeMapEntry {
+    key: TComptimeKey
+    value: TComptimeValue
 }
 
-pub enum TComptimeKey {
+enum TComptimeKey {
     Int(value: Int)
+    BigInt(decimal: String)
     String(value: String)
     Bool(value: Bool)
     Char(value: Int)
@@ -427,27 +468,35 @@ pub enum TComptimeKey {
     Enum(type_name: String, variant: String)
 }
 
-pub struct TComptimeKeyField {
-    pub name: String
-    pub key: TComptimeKey
+fn tir_comptime_integer_key(number: Int) -> TComptimeKey Never! {
+    if mir_integer_constant(number, None, None) == {
+        .Int(value, _, _) -> TComptimeKey.Int{value: value}
+        .BigInt(decimal) -> TComptimeKey.BigInt{decimal: decimal}
+        else -> panic("integer key materialization is not an integer")
+    }
 }
 
-pub struct TComptimeField {
-    pub name: String
-    pub value: TComptimeValue
+struct TComptimeKeyField {
+    name: String
+    key: TComptimeKey
 }
 
-pub struct TComptimeEnumArg {
-    pub name: String?
-    pub value: TComptimeValue
+struct TComptimeField {
+    name: String
+    value: TComptimeValue
 }
 
-pub enum TComptimeReport {
+struct TComptimeEnumArg {
+    name: String?
+    value: TComptimeValue
+}
+
+enum TComptimeReport {
     Clean(ty: Type)
     Told(value: TComptimeValue)
 }
 
-pub enum TComptimeValue {
+enum TComptimeValue {
     Int(value: Int)
     Float(value: Float, bits: Int)
     Bool(value: Bool)
@@ -464,23 +513,23 @@ pub enum TComptimeValue {
     Unit
     Closure(value: TLambda)
 }
-pub enum TUnitRoundingMode {
+enum TUnitRoundingMode {
     TowardZero
     Floor
     Ceiling
     NearestEven
 }
-pub struct TUnitRounding { pub mode: TUnitRoundingMode, pub digits: TExpr }
+struct TUnitRounding { mode: TUnitRoundingMode, digits: TExpr }
 
 // #4318: the copy fact of a call argument sema marked for copying (MIRRust
 // call_arg_copy_fact): a shared-reference retain is a share; an owning
 // parameter filled from a value the caller keeps materializes (D-MEM-COPYSEM1).
-pub fn tir_call_arg_copy_fact(shared: Bool) -> MIRCopyFact Never! {
+fn tir_call_arg_copy_fact(shared: Bool) -> MIRCopyFact Never! {
     if shared -> return MIRCopyFact.Share
     MIRCopyFact.Materialize
 }
 
-pub enum TExprKind {
+enum TExprKind {
     IntLit(value: Int, width: TIntegerWidth?)
     FloatLit(value: Float)
     BoolLit(value: Bool)
@@ -493,6 +542,7 @@ pub enum TExprKind {
     Uninit
     CtLit(value: TComptimeValue)
     ConstRef(symbol: SymbolID)
+    GlobalShared(initializer: SymbolID, lifetime: MIRSharedLifetime)
     Call(callee: SymbolID, type_args: [Type], args: [TCallArg])
     IndirectCall(callee: TExpr, type_args: [Type], args: [TCallArg], signature: Type)
     MethodCall(receiver: TExpr, method: TMethodRef, type_args: [Type], args: [TCallArg])
@@ -514,7 +564,7 @@ pub enum TExprKind {
     Binary(op: TBinaryOp, overflow: Bool, line: Int, lhs: TExpr, rhs: TExpr)
     CompareChain(operands: [TExpr], operators: [TBinaryOp], hooks: [Bool])
     Unary(op: TUnaryOp, operand: TExpr)
-    StructLit(fields: [TStructFieldValue], extra: TStructExtra?, as_trait: TCoercionTarget?)
+    StructLit(fields: [TStructFieldValue], extra: TStructExtra?)
     Field(receiver: TExpr, field: TFieldRef)
     Index(base: TExpr, index: TExpr, kind: TIndexKind, access: AccessConvention, checked_call: SymbolID?, location: TPanicLoc)
     Slice(base: TExpr, start: TExpr, end: TExpr, range: TExpr?, location: TPanicLoc)
@@ -542,7 +592,6 @@ pub enum TExprKind {
     HostCall(call: THostCall)
     AllocNew(ctor: TAllocCtor, args: [TCallArg])
     EnumLit(enum_type: String, variant: String, payload: TEnumPayload)
-    DataEntriesToMap(local: TLocal)
     JSONLit(variant: String, arg: TExpr?, clone_arg: Bool)
     DBValueLit(variant: String, arg: TExpr?, clone_arg: Bool)
     ListLit(values: [TExpr])
@@ -603,47 +652,50 @@ pub enum TExprKind {
     Never(reason: String)
 }
 
-pub struct TExpr {
-    pub ty: Type
-    pub kind: TExprKind
-    pub span: Span
-    pub integer_bounds: TIntegerBounds?
-    pub cost: TCostFact?
+struct TExpr {
+    ty: Type
+    kind: TExprKind
+    span: Span
+    integer_bounds: TIntegerBounds?
+    cost: TCostFact?
+    // The checked goal card, kept apart from the fallback type used to
+    // continue checking an unconstrained `todo` (D-TOOL2).
+    goal_expected_type: String?{None}
 }
 
-pub struct TIntegerWidth {
-    pub signed: Bool
-    pub bits: Int
+struct TIntegerWidth {
+    signed: Bool
+    bits: Int
 }
 
-pub struct TStructFieldValue {
-    pub field: TFieldRef
-    pub value: TExpr
-    pub boxed: Bool
+struct TStructFieldValue {
+    field: TFieldRef
+    value: TExpr
+    boxed: Bool
 }
 
-pub struct TMapEntry {
-    pub key: TExpr
-    pub value: TExpr
+struct TMapEntry {
+    key: TExpr
+    value: TExpr
 }
-pub struct TNamedExpr {
-    pub name: String
-    pub value: TExpr
+struct TNamedExpr {
+    name: String
+    value: TExpr
 }
 
-pub enum TListSpreadPart {
+enum TListSpreadPart {
     Element(value: TExpr)
     Spread(value: TExpr)
 }
 
-pub enum TErasureReason {
+enum TErasureReason {
     CompileTimeOnly
     Disabled
     ExpandedBeforeLowering
     SemanticIndexOnly
 }
 
-pub enum TBranchClass {
+enum TBranchClass {
     Bool2
     Enum
     DenseInt
@@ -652,7 +704,7 @@ pub enum TBranchClass {
     Mixed
 }
 
-pub enum TForInMethod {
+enum TForInMethod {
     Chars
     LinesFile
     LinesStdin
@@ -662,7 +714,7 @@ pub enum TForInMethod {
     Iterable(coll_type: String, iter_type: String, iter_symbol: String, next_symbol: String, item_type: Type)
 }
 
-pub enum TScopeMemberKind {
+enum TScopeMemberKind {
     Setup
     ExpectFail(code: String?, message: String?)
     Timeout(duration: TExpr)
@@ -670,28 +722,28 @@ pub enum TScopeMemberKind {
     Skip
 }
 
-pub enum TPreludeArg {
+enum TPreludeArg {
     Jet(ty: Type)
     HostUsize
 }
 
-pub enum TStaticOwner {
+enum TStaticOwner {
     User(name: String)
     Prelude(rooted: Bool, path: String, generics: [TPreludeArg])
 }
 
-pub enum TModuleCallForm {
+enum TModuleCallForm {
     Qualified(rust_module: String, rust_function: String)
     InlineMangled(mangled: String)
 }
 
-pub struct TExternArg {
-    pub value: TExpr
-    pub clone: Bool
-    pub mut_borrow: Bool
+struct TExternArg {
+    value: TExpr
+    clone: Bool
+    mut_borrow: Bool
 }
 
-pub enum TOrFallback {
+enum TOrFallback {
     Value(value: TExpr)
     Return(value: TExpr?)
     Panic(message: TExpr, location: TPanicLoc)
@@ -701,29 +753,19 @@ pub enum TOrFallback {
     ContinueLabel(label: String)
 }
 
-pub enum THelperKind {
-    ClockNew
-    ClockSystem
-}
 
-pub enum THostArg {
-    Expr(value: TExpr)
-    Borrow(value: TExpr)
-    Lambda(value: TLambda)
-}
-
-pub enum TMatchProbe {
+enum TMatchProbe {
     IsSome
     Unwrap
 }
 
-pub enum TOptionProbe {
+enum TOptionProbe {
     IsSome
     Unwrap
     Field(name: String)
 }
 
-pub enum TTypedTextForm {
+enum TTypedTextForm {
     SQLRaw
     HTMLRaw
     ShRaw
@@ -732,7 +774,7 @@ pub enum TTypedTextForm {
     HTMLText
 }
 
-pub enum TGCEditKind {
+enum TGCEditKind {
     Clear
     Pop
     RemoveIndex
@@ -743,8 +785,7 @@ pub enum TGCEditKind {
     EdgeSlot
 }
 
-pub enum THostCall {
-    Helper(helper: String, kind: THelperKind, args: [THostArg])
+enum THostCall {
     Method(receiver: TExpr, method: String, args: [TExpr])
     CarrierFact(receiver: TExpr, field: String, notes: Bool)
     CellGuardProject(receiver: TExpr, paths: [[String]], result_type: Type, editable: Bool, edit_paths_disjoint: Bool)
@@ -765,12 +806,10 @@ pub enum THostCall {
     ExpectSnapshot(value: TExpr, snap_path: String)
     EnvSet(name: TExpr, value: TExpr, location: TPanicLoc)
     NumericBounds(ty: Type, member: String)
-    ExpiringSecretNew(value: TExpr, duration: TExpr, clock: TExpr, element: Type)
-    ExpiringValueNew(value: TExpr, duration: TExpr, clock: TExpr)
     CCallback(symbol: String, lambda: TLambda, ret: Type?, managed: Bool, plan_digest: String?, callback_identity: String?)
 }
 
-pub enum TCoreClosureKind {
+enum TCoreClosureKind {
     Spawn(group: TExpr?, site: Int, label: String?, executable: TLambda)
     Realtime(rate: TExpr, frames: TExpr, executable: TLambda)
     Serve(address: TExpr, executable: TLambda)
@@ -786,14 +825,14 @@ pub enum TCoreClosureKind {
     UIReactiveRender(executable: TLambda, site: Int)
 }
 
-pub enum TFnValueKind {
+enum TFnValueKind {
     NamedFn(name: String?, lambda: TLambda?)
     Policy(fn_type: Type, policy_args: [TCallArg], policy_conventions: [AccessConvention], wrapper_name: String?, captures: [TCapture], callee: TExpr)
     Call(callee: TExpr, args: [TCallArg])
     Send(value: TExpr)
 }
 
-pub enum TClosureOp {
+enum TClosureOp {
     EditDisjoint
     Map
     MapMut
@@ -850,36 +889,37 @@ pub enum TClosureOp {
     ViewMap
 }
 
-pub enum THardwareCall {
+enum THardwareCall {
     RegisterRead(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
     RegisterWrite(profile_id: String, block: String, register: String, width: MIRRegisterWidth)
     DMAStart(profile_id: String, channel: String, buffer_ty: Type)
     DMAWait(profile_id: String, channel: String, buffer_ty: Type)
 }
-pub struct TDBTableFact {
-    pub table_id: String
-    pub read: Bool
-    pub write: Bool
+struct TDBTableFact {
+    table_id: String
+    read: Bool
+    write: Bool
 }
 
-pub struct TDBQueryMetadata {
-    pub source_file: String
-    pub source_span: Span
-    pub statement_identity: String
-    pub table_facts: [TDBTableFact]
+struct TDBQueryMetadata {
+    source_file: String
+    source_span: Span
+    statement_identity: String
+    table_facts: [TDBTableFact]
 }
 
-pub struct TCanonicalField {
-    pub name: String
-    pub ty: Type
+struct TCanonicalField {
+    name: String
+    ty: Type
 }
 
-pub enum THandleOp {
+enum THandleOp {
     Hardware(operation: THardwareCall)
     DevServerMethod(method: String)
     ReceiptAttach
     DurationNew(unit: String, float: Bool)
     FileReaderReadLine
+    FileReaderRead
     FileReaderPath
     MappedFileWindow
     MappedFileWindowLen
@@ -888,6 +928,8 @@ pub enum THandleOp {
     MappedFileIsEmpty
     FileWriterWriteLine
     FileWriterFlush
+    FileWriterWriteAll
+    FileWriterFsync
     FileWriterPath
     JSONReaderNext
     JSONWriterWrite
@@ -897,7 +939,6 @@ pub enum THandleOp {
     JSONLWriterWrite
     JSONLWriterFlush
     JSONLWriterFinish
-    CSVReaderNext
     DataStreamNext
     StreamWithEventTime
     StreamWithEventTimeNs
@@ -907,9 +948,6 @@ pub enum THandleOp {
     XMLWriterWrite
     XMLWriterFlush
     XMLWriterFinish
-    CSVWriterWrite
-    CSVWriterFlush
-    CSVWriterFinish
     CBORReaderNext
     CBORWriterWrite
     CBORWriterFlush
@@ -925,10 +963,6 @@ pub enum THandleOp {
     StderrWriteBytes
     StderrFlush
     StderrIsTTY
-    ClockNow
-    ClockTick
-    ClockAdvance
-    ClockWait
     WorldNow
     WorldAdvance
     WorldWaitIdle
@@ -939,15 +973,6 @@ pub enum THandleOp {
     RealtimeIsCancelled
     HistoryRNGNextU64
     HistoryRNGBelow
-    FakeLocale
-    FakeName
-    FakeEmail
-    FakeHost
-    FakeAddress
-    SolverNew
-    SolverRequire
-    SolverFailureCount
-    SolverStatus
     GameSceneNew
     GameReplayRecord
     GameBackendHeadless
@@ -1102,26 +1127,33 @@ pub enum THandleOp {
     EventMethod(method: String)
     FFICallbackEventStop
     WatchMethod(method: String, callback_index: Int?)
-    MeasurementMethod(method: String)
     LayoutMethod(method: String)
     LoadableMethod(method: String)
-    ExpiringMethod(method: String)
-    SketchMethod(sketch: String, method: String)
     CivilTimeMethod(kind: String, method: String)
-    URLMIMEMethod(kind: String, method: String)
     EmailMethod(method: String)
     RegexMethod(kind: String, method: String)
     HTTPClientMethod(kind: String, method: String)
     HTTPServerMethod(kind: String, method: String)
-    DataTreeField
-    DataTreeAt
-    DataTreeInt
-    DataTreeText
-    DataTreeBool
-    DataTreeFloat
-    DataTreeToText
-    DataTreeEqualUnordered
-    DataTreeDecode(ty: Type)
+    DynField
+    DynAt
+    DynInt
+    DynText
+    DynBool
+    DynFloat
+    DynToText
+    DynEqualUnordered
+    DynDecode(ty: Type)
+    DynIndexKey(site: String, location: TPanicLoc)
+    DynIndexAt(site: String, location: TPanicLoc)
+    DynGetKey
+    DynGetAt
+    DynHas
+    DynKeys
+    DynLen(site: String, location: TPanicLoc)
+    DynRemove
+    DynBinary(op: String, site: String, location: TPanicLoc)
+    DynCompare(op: String, site: String, location: TPanicLoc)
+    DynSetPath(keys: [Bool], site: String, location: TPanicLoc)
     SerdeEncode
     JSONField
     JSONAt
@@ -1144,7 +1176,6 @@ pub enum THandleOp {
     PathWalk
     UIBackendMethod(method: String)
     AppMethod(method: String, args_len: Int)
-    WebVirtualWindowFacts
     DBWithPolicy
     DBPoolAcquire
     DBPoolAcquireDeadline
@@ -1206,25 +1237,25 @@ pub enum THandleOp {
     Method(name: String)
 }
 
-pub enum TListRemoveMode {
+enum TListRemoveMode {
     Value
     Slot
     Dynamic
 }
 
-pub enum TZipMode {
+enum TZipMode {
     Strict
     Short
     Pad
 }
 
-pub enum TZipFillMode {
+enum TZipFillMode {
     DefaultNone
     Common
     Columns
 }
 
-pub enum TBuiltinOp {
+enum TBuiltinOp {
     AtomicMethod(method: String)
     LenString
     LenList
@@ -1258,6 +1289,7 @@ pub enum TBuiltinOp {
     Contains
     IndexOf
     Reverse
+    SwapList
     Sort
     SortDesc
     OrderingThen
@@ -1335,7 +1367,6 @@ pub enum TBuiltinOp {
     IterCompare
     IterSplit(tuple_struct: String)
     ListSlice
-    ListCopy
     ListEqual
     ListBinarySearch
     ListUnion
@@ -1343,7 +1374,6 @@ pub enum TBuiltinOp {
     ListDifference
     ListRandom
     ListMinMax(tuple_struct: String)
-    MapCopy
     MapEqual
     MapFirst
     MapToList(tuple_struct: String)
@@ -1410,7 +1440,6 @@ pub enum TBuiltinOp {
     BitSetRemove
     BitSetCount
     BitSetToList
-    BitSetCopy
     BitSetNew
     ByteBufferNew
     ByteBufferFrom
@@ -1447,24 +1476,20 @@ pub enum TBuiltinOp {
     GetDisjointWrite
 }
 
-pub enum TStructExtra {
+enum TStructExtra {
     HTTPRequestParams
 }
 
-pub struct TCoercionTarget {
-    pub trait_symbol: SymbolID
-    pub concrete_type: SymbolID
+
+struct TMethodRef {
+    symbol: SymbolID
+    name: String
+    mangled: Bool
+    trait_owner: SymbolID?
+    operator_identity: String?
 }
 
-pub struct TMethodRef {
-    pub symbol: SymbolID
-    pub name: String
-    pub mangled: Bool
-    pub trait_owner: SymbolID?
-    pub operator_identity: String?
-}
-
-pub enum TNumericOp {
+enum TNumericOp {
     Predicate(name: String)
     BitCount(method: String, width: Int)
     CastAs(dst_rust: String)
@@ -1479,28 +1504,28 @@ pub enum TNumericOp {
     EuclideanRem(line: Int)
 }
 
-pub enum TRequireKind {
+enum TRequireKind {
     Require(cond: TExpr, msg: TExpr?)
     RequireEq(left: TExpr, right: TExpr)
     Panic(msg: TExpr)
 }
 
-pub struct TPanicLoc {
-    pub file: String
-    pub source_line: String
-    pub line: Int
-    pub column: Int
-    pub caret: Int
-    pub function: String
-    pub locals: [TPanicLocal]
+struct TPanicLoc {
+    file: String
+    source_line: String
+    line: Int
+    column: Int
+    caret: Int
+    function: String
+    locals: [TPanicLocal]
 }
 
-pub struct TPanicLocal {
-    pub display_name: String
-    pub local: TLocal
+struct TPanicLocal {
+    display_name: String
+    local: TLocal
 }
 
-pub enum TTryConvert {
+enum TTryConvert {
     NoConversion
     ProtocolExit
     Never
@@ -1509,79 +1534,78 @@ pub enum TTryConvert {
     WidenUnion(enum_name: String, tag: String)
 }
 
-pub enum TFailureCarrier {
+enum TFailureCarrier {
     Infallible
     Result(success: Type, error: Type)
     Optional(value: Type)
     Diverges(value: Type)
 }
 
-pub struct TEffectSpan {
-    pub name: String
-    pub span: Span
+struct TEffectSpan {
+    name: String
+    span: Span
 }
 
-pub struct TEffectFacts {
-    pub direct: [String]
-    pub solved: [String]
-    pub call_edges: [String]
-    pub maximal: Bool
-    pub direct_spans: [TEffectSpan]
+struct TEffectFacts {
+    direct: [String]
+    solved: [String]
+    call_edges: [String]
+    maximal: Bool
+    direct_spans: [TEffectSpan]
 }
 
-pub struct TTargetApplicability {
-    pub rust_aot: Bool
-    pub cranelift: Bool
-    pub interpreter: Bool
-    pub web: Bool
+struct TTargetApplicability {
+    rust_aot: Bool
+    interpreter: Bool
+    web: Bool
 }
 
-pub enum TVisibility {
+enum TVisibility {
     Private
     Package
     Public
 }
 
-pub struct TForeignProvenance {
-    pub language: String
-    pub abi: String
-    pub symbol: String
-    pub span: Span
+struct TForeignProvenance {
+    language: String
+    abi: String
+    symbol: String
+    span: Span
 }
 
-pub struct TGenericParam {
-    pub name: String
-    pub bounds: [SymbolID]
+struct TGenericParam {
+    name: String
+    bounds: [SymbolID]
 }
-pub struct TDeclarationFacts {
-    pub type_defs: [TTypeDef]
-    pub traits: [TTraitDef]
-    pub impls: [TImplDef]
-    pub constants: [TConstantDef]
-    pub core_builtin_owners: [TCoreBuiltinOwner]
+struct TDeclarationFacts {
+    type_defs: [TTypeDef]
+    traits: [TTraitDef]
+    impls: [TImplDef]
+    constants: [TConstantDef]
+    core_builtin_owners: [TCoreBuiltinOwner]
 }
 
 
-pub enum TDeclarationOwnership {
+enum TDeclarationOwnership {
     Owned
     ReadBorrow
     WriteBorrow
     Move
 }
-pub struct TCoreBuiltinOwner {
-    pub symbol: SymbolID
-    pub module_identity: String?
-    pub name: String
-    pub ownership: TDeclarationOwnership
+struct TCoreBuiltinOwner {
+    symbol: SymbolID
+    module_identity: String?
+    name: String
+    ownership: TDeclarationOwnership
 }
 
-pub enum TStructLayout {
+enum TStructLayout {
     C
     CAligned(alignment: Int, target: Bool)
     Columnar
 }
 
-pub enum TCEnumTag {
+enum TCEnumTag {
     CInt
     U8
     I8
@@ -1593,47 +1617,47 @@ pub enum TCEnumTag {
     I64
 }
 
-pub struct TLayoutAlignmentFact {
-    pub requested_alignment: Int
-    pub effective_alignment: Int
-    pub target_mode: Bool
-    pub target_profile: String
-    pub fact_identity: String
+struct TLayoutAlignmentFact {
+    requested_alignment: Int
+    effective_alignment: Int
+    target_mode: Bool
+    target_profile: String
+    fact_identity: String
 }
 
-pub struct TShapeFieldNames {
-    pub text: String
-    pub json: String?
-    pub cbor: String?
-    pub csv: String?
-    pub toml: String?
-    pub yaml: String?
-    pub xml: String?
-    pub args: String
-    pub env: String
-    pub db: String?
-    pub layout: String?
+struct TShapeFieldNames {
+    text: String
+    json: String?
+    cbor: String?
+    csv: String?
+    toml: String?
+    yaml: String?
+    xml: String?
+    args: String
+    env: String
+    db: String?
+    layout: String?
 }
 
-pub struct TIntegerRange {
-    pub lo: Int
-    pub hi: Int
+struct TIntegerRange {
+    lo: Int
+    hi: Int
 }
 
-pub enum TSerdeAttributeKind {
+enum TSerdeAttributeKind {
     RenameAll
     Tag
     Untagged
     DenyUnknownFields
 }
 
-pub struct TSerdeAttribute {
-    pub kind: TSerdeAttributeKind
-    pub value: String?
-    pub span: Span
+struct TSerdeAttribute {
+    kind: TSerdeAttributeKind
+    value: String?
+    span: Span
 }
 
-pub enum TCLIValueKind {
+enum TCLIValueKind {
     Bool
     Int
     Float
@@ -1641,342 +1665,349 @@ pub enum TCLIValueKind {
     Path
 }
 
-pub enum TCLIDefault {
+enum TCLIDefault {
     TypeDefault
     Value(value: TComptimeValue)
     Recorded(value: String)
 }
 
-pub enum TCLIInputShape {
+enum TCLIInputShape {
     Flag
     Value(kind: TCLIValueKind, optional: Bool, default: TCLIDefault?)
 }
 
-pub struct TFunctionRef {
-    pub key: String
-    pub module_identity: String
-    pub name: String
-    pub span: Span
-    pub visibility: TVisibility
+struct TFunctionRef {
+    key: String
+    module_identity: String
+    name: String
+    span: Span
+    visibility: TVisibility
 }
-pub struct TCLIBinding {
-    pub name: String
-    pub span: Span
-    pub function_key: String
-    pub markers: [String]
-}
-
-pub struct TCLIInput {
-    pub field: String
-    pub flag: String
-    pub short: String?
-    pub env: String?
-    pub help: String
-    pub metavar: String?
-    pub shape: TCLIInputShape
-    pub positional: Int?
-    pub variadic: Bool
+struct TCLIBinding {
+    name: String
+    span: Span
+    function_key: String
+    markers: [String]
 }
 
-
-pub struct TCLICommand {
-    pub name: String
-    pub description: String?
-    pub function: TFunctionRef?
-    pub receiver: String?
-    pub inputs: [TCLIInput]
+struct TCLIInput {
+    field: String
+    flag: String
+    short: String?
+    env: String?
+    help: String
+    metavar: String?
+    shape: TCLIInputShape
+    positional: Int?
+    variadic: Bool
 }
 
-pub struct TCLIEntry {
-    pub record_inputs: Bool
-    pub description: String?
-    pub inputs: [TCLIInput]
-    pub commands: [TCLICommand]
-    pub standard: Bool
-    pub version: String?
+
+struct TCLICommand {
+    name: String
+    description: String?
+    function: TFunctionRef?
+    receiver: String?
+    inputs: [TCLIInput]
 }
 
-pub struct TField {
-    pub name: String
-    pub shape_names: TShapeFieldNames
-    pub skip: Bool
-    pub ty: Type
-    pub span: Span
-    pub public: Bool
-    pub package_public: Bool
-    pub computed: Bool
-    pub has_default: Bool
-    pub redact: Bool
+struct TCLIEntry {
+    record_inputs: Bool
+    description: String?
+    inputs: [TCLIInput]
+    commands: [TCLICommand]
+    standard: Bool
+    version: String?
 }
 
-pub enum TVariantPayload {
+struct TField {
+    name: String
+    shape_names: TShapeFieldNames
+    skip: Bool
+    ty: Type
+    span: Span
+    public: Bool
+    package_public: Bool
+    computed: Bool
+    has_default: Bool
+    redact: Bool
+}
+
+enum TVariantPayload {
     Unit
     Single(value: Type)
     Named(fields: [TField])
 }
 
-pub struct TVariant {
-    pub name: String
-    pub wire_name: String
-    pub span: Span
-    pub payload: TVariantPayload
-    pub discriminant: Int?
+struct TVariant {
+    name: String
+    wire_name: String
+    span: Span
+    payload: TVariantPayload
+    discriminant: Int?
 }
 
-pub enum TTypeDefKind {
+enum TTypeDefKind {
     Struct(fields: [TField], methods: [String])
     Enum(variants: [TVariant], methods: [String])
     Distinct(base: Type, range: TIntegerRange?)
     Alias(target: Type)
     UnitFamily(members: [String])
 }
-pub enum TCompilerBuiltin { DefaultErr }
+enum TCompilerBuiltin { DefaultErr }
 
 
-pub struct TTypeDef {
-    pub module_identity: String
-    pub key: String
-    pub name: String
-    pub span: Span
-    pub public: Bool
-    pub package_public: Bool
-    pub generic_params: [TGenericParam]
-    pub derives: [String]
-    pub auto_derive_default: Bool
-    pub auto_printable: Bool
-    pub published_schema: Bool
-    pub single_use: Bool
-    pub must_use: Bool
-    pub layout: TStructLayout?
-    pub c_layout_tag: TCEnumTag?
-    pub enum_layout: LayoutFacts?
-    pub layout_alignment: TLayoutAlignmentFact?
-    pub serde: [TSerdeAttribute]
-    pub cli_bindings: [TCLIBinding]
-    pub cli: TCLIEntry?
-    pub ownership: TDeclarationOwnership
-    pub boxed_edges: [String]
-    pub compiler_builtin: TCompilerBuiltin?
-    pub kind: TTypeDefKind
+struct TTypeDef {
+    module_identity: String
+    key: String
+    name: String
+    span: Span
+    public: Bool
+    package_public: Bool
+    generic_params: [TGenericParam]
+    derives: [String]
+    auto_derive_default: Bool
+    auto_printable: Bool
+    published_schema: Bool
+    single_use: Bool
+    must_use: Bool
+    layout: TStructLayout?
+    c_layout_tag: TCEnumTag?
+    enum_layout: LayoutFacts?
+    layout_alignment: TLayoutAlignmentFact?
+    serde: [TSerdeAttribute]
+    cli_bindings: [TCLIBinding]
+    cli: TCLIEntry?
+    ownership: TDeclarationOwnership
+    boxed_edges: [String]
+    compiler_builtin: TCompilerBuiltin?
+    kind: TTypeDefKind
 }
 
-pub struct TAssociatedTypeDecl {
-    pub name: String
-    pub span: Span
+struct TAssociatedTypeDecl {
+    name: String
+    span: Span
 }
 
-pub struct TAssociatedTypeValue {
-    pub name: String
-    pub ty: Type
-    pub span: Span
+struct TAssociatedTypeValue {
+    name: String
+    ty: Type
+    span: Span
 }
 
-pub struct TDeclarationParam {
-    pub index: Int
-    pub name: String
-    pub span: Span
-    pub ty: Type
-    pub access: AccessConvention
-    pub ownership: TDeclarationOwnership
-    pub public_label: String
-    pub variadic: Bool
-    pub default_present: Bool
+struct TDeclarationParam {
+    index: Int
+    name: String
+    span: Span
+    ty: Type
+    access: AccessConvention
+    ownership: TDeclarationOwnership
+    public_label: String
+    variadic: Bool
+    default_present: Bool
 }
 
-pub struct TTraitMethod {
-    pub key: String
-    pub name: String
-    pub span: Span
-    pub self_access: AccessConvention?
-    pub params: [TDeclarationParam]
-    pub declared_return: Type?
-    pub return_type: Type
-    pub failure: TFailureCarrier
-    pub is_pure: Bool
-    pub declared_effects: [TEffectSpan]?
-    pub return_view_provenance: ViewProvenanceMap?
-    pub declared_return_view_provenance: ViewProvenanceMap?
-    pub default_function_key: String?
+struct TTraitMethod {
+    key: String
+    name: String
+    span: Span
+    self_access: AccessConvention?
+    params: [TDeclarationParam]
+    declared_return: Type?
+    return_type: Type
+    failure: TFailureCarrier
+    is_pure: Bool
+    declared_effects: [TEffectSpan]?
+    return_view_provenance: ViewProvenanceMap?
+    declared_return_view_provenance: ViewProvenanceMap?
+    default_function_key: String?
 }
 
-pub struct TTraitDef {
-    pub module_identity: String
-    pub key: String
-    pub name: String
-    pub span: Span
-    pub visibility: TVisibility
-    pub associated_types: [TAssociatedTypeDecl]
-    pub methods: [TTraitMethod]
+struct TTraitDef {
+    module_identity: String
+    key: String
+    name: String
+    span: Span
+    visibility: TVisibility
+    associated_types: [TAssociatedTypeDecl]
+    methods: [TTraitMethod]
 }
 
-pub enum TTargetOS {
+enum TTargetOS {
     Linux
     MacOS
     Windows
 }
 
-pub enum TOperatorMarker {
+enum TOperatorMarker {
     Commutative
 }
 
-pub struct TImplDef {
-    pub module_identity: String
-    pub key: String
-    pub span: Span
-    pub self_type: Type
-    pub trait_name: String?
-    pub trait_ref: String?
-    pub associated_types: [TAssociatedTypeValue]
-    pub methods: [String]
-    pub delegation_field: String?
-    pub compiler_generated: Bool
-    pub serde: TSerdeCodec?
-    pub operator_rhs: Type?
-    pub operator_marker: TOperatorMarker?
-    pub target_os: TTargetOS?
+struct TImplDef {
+    module_identity: String
+    key: String
+    span: Span
+    self_type: Type
+    trait_name: String?
+    trait_ref: String?
+    associated_types: [TAssociatedTypeValue]
+    methods: [String]
+    delegation_field: String?
+    compiler_generated: Bool
+    serde: TSerdeCodec?
+    operator_rhs: Type?
+    operator_marker: TOperatorMarker?
+    target_os: TTargetOS?
 }
 
-pub struct TConstantDef {
-    pub module_identity: String
-    pub key: String
-    pub name: String
-    pub span: Span
-    pub visibility: TVisibility
-    pub ty: Type
-    pub is_comptime: Bool
-    pub is_storage: Bool
-    pub value: TComptimeValue
+struct TConstantDef {
+    module_identity: String
+    key: String
+    name: String
+    span: Span
+    visibility: TVisibility
+    ty: Type
+    is_comptime: Bool
+    is_storage: Bool
+    value: TComptimeValue
 }
 
 
-pub struct TCaptureFacts {
-    pub escapes: Bool
-    pub needs_fn_mut: Bool
-    pub mutable: [String]
-    pub cloned: [String]
-    pub frozen: [String]
-    pub materialized: [String]
-    pub moved: [String]
+struct TCaptureFacts {
+    escapes: Bool
+    needs_fn_mut: Bool
+    mutable: [String]
+    cloned: [String]
+    frozen: [String]
+    materialized: [String]
+    moved: [String]
 }
 
-pub struct TLambda {
-    pub executable: TLambdaBody
-    pub source_span: Span
-    pub frame_schedule: FrameSchedule?
-    pub frame_schedule_derivation: DerivationRef?
-    pub capture_facts: TCaptureFacts
-    pub failure_carrier: TFailureCarrier
-    pub effects: TEffectFacts
-    pub host_param_conventions: [AccessConvention]?
-    pub source_params: [String]
-    pub source_param_symbols: [SymbolID]
-    pub jit_name: String
-    pub param_types: [Type]
-    pub ret: Type?
-    pub is_move: Bool
-    pub boxed: Bool
-    pub rc: Bool
-    pub arc: Bool
-    pub captures: [TCapture]
-    pub materialized_captures: [String]
-    pub frozen_captures: [String]
-    pub uses_stack_sentry: Bool
+struct TLambda {
+    executable: TLambdaBody
+    source_span: Span
+    frame_schedule: FrameSchedule?
+    frame_schedule_derivation: DerivationRef?
+    capture_facts: TCaptureFacts
+    failure_carrier: TFailureCarrier
+    effects: TEffectFacts
+    host_param_conventions: [AccessConvention]?
+    source_params: [String]
+    source_param_symbols: [SymbolID]
+    jit_name: String
+    param_types: [Type]
+    ret: Type?
+    is_move: Bool
+    boxed: Bool
+    rc: Bool
+    arc: Bool
+    captures: [TCapture]
+    materialized_captures: [String]
+    frozen_captures: [String]
+    uses_stack_sentry: Bool
 }
 
-pub enum TLambdaBody {
+enum TLambdaBody {
     Expr(value: TExpr)
     Block(body: [TStmt])
     SharedBlock(body: [TStmt])
 }
 
-pub struct TCapture {
-    pub source: String
-    pub local: TLocal
-    pub ty: Type
+struct TCapture {
+    source: String
+    local: TLocal
+    ty: Type
 }
 
-pub struct TWebParamReconstruction {
-    pub local: TLocal
-    pub ty: Type
-    pub fields: [TWebParamField]
+struct TWebParamReconstruction {
+    local: TLocal
+    ty: Type
+    fields: [TWebParamField]
 }
 
-pub struct TWebParamField {
-    pub field: String
-    pub parameter: String
-    pub ty: Type
+struct TWebParamField {
+    field: String
+    parameter: String
+    ty: Type
 }
 
 
-pub struct TFunc {
-    pub name: String
-    pub module_name: String
-    pub module_identity: String
-    pub key: String
-    pub source_file: String
-    pub source_span: Span
-    pub failure_carrier: TFailureCarrier
-    pub effects: TEffectFacts
-    pub target_applicability: TTargetApplicability
-    pub web_bucket: WebBucket?
-    pub web_marker: WebPartitionMarker?
-    pub visibility: TVisibility
-    pub foreign: TForeignProvenance?
-    pub params: [TParameter]
-    pub web_param_reconstructions: [TWebParamReconstruction]
-    pub ret: Type?
-    pub gc_return: Bool
-    pub gc_scope: Bool
-    pub return_view_provenance: ViewProvenanceMap?
-    pub generic_params: [TGenericParam]
-    pub clone_types: [Type]
-    pub is_main: Bool
-    pub line: Int
-    pub synthetic: Bool
-    pub is_unsafe: Bool
-    pub unsafe_gate: TUnsafeGate?
-    pub is_pure: Bool
-    pub memo_bound: Int?
-    pub memo_unbounded: Bool
-    pub is_reactive: Bool
-    pub reactive_upgrades: [String]
-    pub is_inline: Bool
-    pub is_inline_always: Bool
-    pub is_scalar: Bool
-    pub kernel_proof: KernelProof?
-    pub memo_field: String?
-    pub uses_stack_sentry: Bool
-    pub body: [TStmt]
-    pub kind: TFuncKind
+struct TOriginProjection {
+    receiver: String?
+    span: Span
+    value: TComptimeValue
 }
 
-pub struct TParameter {
-    pub local: TLocal
-    pub name: String
-    pub span: Span
-    pub ty: Type
-    pub convention: AccessConvention
-    pub public_label: String
-    pub zone: ParamZone
-    pub default: TExpr?
-    pub variadic: Bool
+struct TFunc {
+    name: String
+    module_name: String
+    module_identity: String
+    key: String
+    source_file: String
+    source_span: Span
+    failure_carrier: TFailureCarrier
+    effects: TEffectFacts
+    target_applicability: TTargetApplicability
+    web_bucket: WebBucket?
+    web_marker: WebPartitionMarker?
+    visibility: TVisibility
+    foreign: TForeignProvenance?
+    params: [TParameter]
+    web_param_reconstructions: [TWebParamReconstruction]
+    ret: Type?
+    gc_return: Bool
+    gc_scope: Bool
+    return_view_provenance: ViewProvenanceMap?
+    generic_params: [TGenericParam]
+    clone_types: [Type]
+    is_main: Bool
+    line: Int
+    synthetic: Bool
+    is_unsafe: Bool
+    unsafe_gate: TUnsafeGate?
+    is_pure: Bool
+    memo_bound: Int?
+    memo_unbounded: Bool
+    is_reactive: Bool
+    reactive_upgrades: [String]
+    is_inline: Bool
+    is_inline_always: Bool
+    is_scalar: Bool
+    kernel_proof: KernelProof?
+    memo_field: String?
+    uses_stack_sentry: Bool
+    body: [TStmt]
+    kind: TFuncKind
+    origin_facts: [TOriginProjection]{[TOriginProjection]{}}
 }
 
-pub enum TContractResultMode { Direct ResultPayload OptionPayload }
-pub enum TSerdeCodec { Encode Decode }
+struct TParameter {
+    local: TLocal
+    name: String
+    span: Span
+    ty: Type
+    convention: AccessConvention
+    public_label: String
+    zone: ParamZone
+    default: TExpr?
+    variadic: Bool
+}
 
-pub enum TFuncKind {
+enum TContractResultMode { Direct ResultPayload OptionPayload }
+enum TSerdeCodec { Encode Decode }
+
+enum TFuncKind {
     TopLevel
     Method(self_convention: AccessConvention?, owner_type: Type)
     TraitMethod(is_unsafe: Bool, self_convention: AccessConvention?, owner_type: Type, trait_name: SymbolID, serde_codec: TSerdeCodec?)
 }
 
-pub enum TPlace {
+enum TPlace {
     Local(local: TLocal)
     Expr(value: TExpr)
 }
 
-pub enum TCostKind {
+enum TCostKind {
     ViewMaterialization
     CollectionCopyOnWrite
     ExactIntSpill
@@ -1984,41 +2015,41 @@ pub enum TCostKind {
     RepresentationFallback
 }
 
-pub enum TCostState {
+enum TCostState {
     SemanticRemainder
     OptimizerRemoved
 }
 
-pub struct TCostFact {
-    pub kind: TCostKind
-    pub state: TCostState
+struct TCostFact {
+    kind: TCostKind
+    state: TCostState
 }
 
-pub enum TFactExclusivity {
+enum TFactExclusivity {
     Unknown
     Shared
     Exclusive
     Move
 }
 
-pub enum TFactPurity {
+enum TFactPurity {
     Unknown
     Pure
     Impure
 }
 
-pub struct TFactChannel {
-    pub ty: Type?
-    pub integer_bounds: TIntegerBounds?
-    pub exclusivity: TFactExclusivity
-    pub purity: TFactPurity
-    pub no_cross_iteration_deps: Bool
-    pub comptime_value: TComptimeValue?
-    pub cost: TCostFact?
+struct TFactChannel {
+    ty: Type?
+    integer_bounds: TIntegerBounds?
+    exclusivity: TFactExclusivity
+    purity: TFactPurity
+    no_cross_iteration_deps: Bool
+    comptime_value: TComptimeValue?
+    cost: TCostFact?
 }
 
-pub fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
-    facts := TFactChannel{ty: Val(expression.ty), integer_bounds: expression.integer_bounds, exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: expression.cost}
+fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
+    facts := TFactChannel{ty: Val(expression.ty), integer_bounds: tir_cost_integer_bounds(expression), exclusivity: TFactExclusivity.Unknown, purity: TFactPurity.Unknown, no_cross_iteration_deps: false, comptime_value: None, cost: tir_cost_fact(expression)}
     facts.exclusivity = if expression.kind == {
         .Borrow(_, access) | .AddressOf(_, access, _) -> if {
             access == AccessConvention.Write -> TFactExclusivity.Exclusive
@@ -2039,7 +2070,7 @@ pub fn tir_expr_facts(expression: TExpr) -> TFactChannel Never! {
     facts
 }
 
-pub fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel Never! {
+fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel Never! {
     facts := tir_expr_facts(argument.value)
     facts.exclusivity = if {
         argument.mut_borrow -> TFactExclusivity.Exclusive
@@ -2052,7 +2083,7 @@ pub fn tir_call_arg_facts(argument: TCallArg) -> TFactChannel Never! {
     facts
 }
 
-pub fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
+fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
     if expression.kind == {
         .Local(local) -> {
             if local.address_lifetime != None -> return local.address_lifetime ?? TAddressLifetime.Unknown
@@ -2074,13 +2105,25 @@ pub fn tir_expr_address_lifetime(expression: TExpr) -> TAddressLifetime Never! {
     TAddressLifetime.Unknown
 }
 
-pub fn tir_pattern_children(pattern: TPattern) -> [TExpr] Never! {
+fn tir_pattern_children(pattern: TPattern) -> [TExpr] Never! {
     tir_pattern_shape_children(pattern.shape)
 }
 
 fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
     children := [TExpr]{}
     if shape == {
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> {
+            loop slot in slots {
+                loop child in tir_pattern_slot_children(slot) -> &children.push(child)
+            }
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> loop child in tir_pattern_shape_children(nested.shape) -> &children.push(child)
+        }
+        .Map(entries, _, _) -> loop entry in entries {
+            &children.push(entry.key)
+            loop child in tir_pattern_slot_children(entry.slot) -> &children.push(child)
+        }
         .Or(alternatives, _) -> {
             loop alternative in alternatives {
                 loop child in tir_pattern_shape_children(alternative) -> &children.push(child)
@@ -2090,6 +2133,7 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
             loop field in fields {
                 if field == {
                     .Value(_, value, _) -> &children.push(value)
+                    .Nested(_, inner, _) -> loop child in tir_pattern_shape_children(inner.shape) -> &children.push(child)
                     else -> {}
                 }
             }
@@ -2099,7 +2143,15 @@ fn tir_pattern_shape_children(shape: TPatternShape) -> [TExpr] Never! {
     children
 }
 
-pub fn tir_if_cond_children(condition: TIfCond) -> [TExpr] Never! {
+fn tir_pattern_slot_children(slot: TPatternBinding) -> [TExpr] Never! {
+    if slot == {
+        .Value(value) -> [TExpr]{value}
+        .Nested(inner) -> tir_pattern_shape_children(inner.shape)
+        else -> [TExpr]{}
+    }
+}
+
+fn tir_if_cond_children(condition: TIfCond) -> [TExpr] Never! {
     children := [TExpr]{}
     if condition == {
         .Plain(value) -> &children.push(value)
@@ -2171,7 +2223,7 @@ fn tir_else_children_into(children: &[TExpr], else_body: [TStmt]?) Never! {
     }
 }
 
-pub fn tir_stmt_children(statement: TStmt) -> [TExpr] Never! {
+fn tir_stmt_children(statement: TStmt) -> [TExpr] Never! {
     children := [TExpr]{}
     if statement == {
         .Contract(contract) -> {
@@ -2375,21 +2427,10 @@ fn tir_list_spread_children(parts: [TListSpreadPart]) -> [TExpr] Never! {
     children
 }
 
-fn tir_host_arg_children(argument: THostArg) -> [TExpr] Never! {
-    children := [TExpr]{}
-    if argument == {
-        .Expr(value) | .Borrow(value) -> &children.push(value)
-        .Lambda(value) -> loop child in tir_lambda_children(value) -> &children.push(child)
-    }
-    children
-}
 
 fn tir_host_call_children(call: THostCall) -> [TExpr] Never! {
     children := [TExpr]{}
     if call == {
-        .Helper(_, _, args) -> loop argument in args {
-            loop child in tir_host_arg_children(argument) -> &children.push(child)
-        }
         .Method(receiver, _, args) -> {
             &children.push(receiver)
             loop value in args -> &children.push(value)
@@ -2414,16 +2455,6 @@ fn tir_host_call_children(call: THostCall) -> [TExpr] Never! {
         .EnvSet(name, value, _) -> {
             &children.push(name)
             &children.push(value)
-        }
-        .ExpiringSecretNew(value, duration, clock, _) -> {
-            &children.push(value)
-            &children.push(duration)
-            &children.push(clock)
-        }
-        .ExpiringValueNew(value, duration, clock) -> {
-            &children.push(value)
-            &children.push(duration)
-            &children.push(clock)
         }
         .CCallback(_, lambda, _, _, _, _) -> loop child in tir_lambda_children(lambda) -> &children.push(child)
         else -> {}
@@ -2481,7 +2512,7 @@ fn tir_core_closure_children(kind: TCoreClosureKind) -> [TExpr] Never! {
 
     children
 }
-pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
+fn tir_expr_children(expression: TExpr) -> [TExpr] {
     children := [TExpr]{}
     if expression.kind == {
         .StrLit(parts) -> loop part in parts {
@@ -2517,7 +2548,7 @@ pub fn tir_expr_children(expression: TExpr) -> [TExpr] {
         }
         .CompareChain(operands, _, _) -> loop value in operands -> &children.push(value)
         .Unary(_, operand) -> &children.push(operand)
-        .StructLit(fields, _, _) -> loop field in fields -> &children.push(field.value)
+        .StructLit(fields, _) -> loop field in fields -> &children.push(field.value)
         .Field(receiver, _) -> &children.push(receiver)
         .Index(base, index, _, _, _, _) | .IndexRead(base, index, _, _, _) -> {
             &children.push(base)
@@ -2695,7 +2726,7 @@ fn tir_fn_value_children(kind: TFnValueKind) -> [TExpr] Never! {
     children
 }
 
-pub fn tir_func_facts(function: TFunc) -> TFactChannel Never! {
+fn tir_func_facts(function: TFunc) -> TFactChannel Never! {
     TFactChannel{
         ty: function.ret
         integer_bounds: None

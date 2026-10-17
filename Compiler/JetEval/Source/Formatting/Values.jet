@@ -8,15 +8,109 @@
 // fail closed.
 use jet_foundation.[
     MIRStringFormat,
+    MIRFunctionID,
     MIRType,
     MIRVariantPayload,
     Span,
     TComptimeKey,
     TComptimeKeyField,
     TComptimeValue,
+    foundation_debug_quoted,
 ]
 
-pub fn jet_eval_format_string_value_full(
+fn jet_eval_source_value_hook(machine: JetEvalMachine, ty: MIRType, operation: String) -> MIRFunctionID? Never! {
+    if ty.kind == {
+        .Tagged(_, inner) -> jet_eval_source_value_hook(machine, inner, operation)
+        .Apply(owner, _) -> if operation == {
+            "clone" -> machine.rows.source_clone_hooks.get(owner.id.value)
+            "debug" -> machine.rows.source_debug_hooks.get(owner.id.value)
+            else -> machine.rows.source_show_hooks.get(owner.id.value)
+        }
+        else -> None
+    }
+}
+
+fn jet_eval_render_runtime_value(machine: &JetEvalMachine, value: JetEvalRuntimeValue, format: MIRStringFormat, value_ty: MIRType?, span: Span) -> String? {
+    if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    if value_ty == .Val(ty) {
+        if ty.kind == .Tagged(_, inner) -> return jet_eval_render_runtime_value(&machine, value, format, Val(inner), span)
+        if format == .Display || format == .Debug {
+            operation :: if format == .Debug -> "debug" else -> "show"
+            if jet_eval_source_value_hook(machine, ty, operation) == .Val(id) {
+                result :: jet_eval_invoke(&machine, id, [JetEvalRuntimeValue]{value}, [JetEvalRuntimeValue]{}, span) ?? return None
+                if result == .Data(.String(text)) -> return Val(text)
+                jet_eval_drop_value(&machine, result, span)
+                jet_eval_compiler_fail(&machine, span, "source value renderer did not return String")
+                return None
+            }
+            if value == .Result(ok, child) {
+                child_ty :: jet_eval_host_option_child_type(&machine, Val(ty), ok, span) ?? return None
+                shown :: jet_eval_render_runtime_value(&machine, child, format, Val(child_ty), span) ?? return None
+                if format == .Display && ok -> return Val(shown)
+                return Val(if ok -> "Val({shown})" else -> "Err({shown})")
+            }
+            if value == .Aggregate(aggregate) {
+                if aggregate == {
+                    .List(values) -> {
+                        child_ty :: jet_eval_host_sequence_element_type(&machine, Val(ty), span) ?? return None
+                        rendered := [String]{}
+                        loop child in values -> &rendered.push(jet_eval_render_runtime_value(&machine, child, format, Val(child_ty), span) ?? return None)
+                        return Val("[{rendered.join(", ")}]")
+                    }
+                    .Map(entries) -> {
+                        if ty.kind == .Map(key_ty, child_ty) {
+                            rendered := [String]{}
+                            loop entry in entries {
+                                key :: jet_eval_render_runtime_value(&machine, entry.key, format, Val(key_ty), span) ?? return None
+                                child :: jet_eval_render_runtime_value(&machine, entry.value, format, Val(child_ty), span) ?? return None
+                                &rendered.push("{key}: {child}")
+                            }
+                            return Val(jet_eval_format_debug_map(rendered))
+                        }
+                    }
+                    .Struct(name, fields) -> {
+                        rendered := [String]{}
+                        loop field in fields {
+                            if format == .Debug && jet_eval_format_memo_field(field.name) -> next
+                            if format == .Display && (field.name == "on_click" || field.name == "on_drop") -> next
+                            child_ty :: jet_eval_host_struct_field_type(&machine, Val(ty), field.name, span) ?? return None
+                            child :: jet_eval_render_runtime_value(&machine, field.value, format, Val(child_ty), span) ?? return None
+                            &rendered.push("{jet_eval_format_source_name(field.name)}: {child}")
+                        }
+                        leaf :: jet_eval_format_source_name(name)
+                        if rendered.len() == 0 -> return Val(if format == .Debug -> "{leaf} {{}}" else -> name)
+                        return Val("{leaf} {{ {rendered.join(", ")} }}")
+                    }
+                    .Enum(name, variant, args) -> {
+                        rendered := [String]{}
+                        labeled := true
+                        loop arg in args { if arg.name == None -> labeled = false }
+                        loop (index, arg) in args {
+                            child_ty :: jet_eval_host_enum_arg_type(&machine, Val(ty), variant, arg.name, index, span) ?? return None
+                            child :: jet_eval_render_runtime_value(&machine, arg.value, format, Val(child_ty), span) ?? return None
+                            if arg.name == .Val(label) {
+                                &rendered.push(if format == .Debug && labeled -> "{jet_eval_format_source_name(label)}: {child}" else -> "{label} = {child}")
+                            } else {
+                                &rendered.push(child)
+                            }
+                        }
+                        if format == .Debug {
+                            leaf :: jet_eval_format_source_name(variant)
+                            if rendered.len() == 0 -> return Val(leaf)
+                            return Val(if labeled -> "{leaf} {{ {rendered.join(", ")} }}" else -> "{leaf}({rendered.join(", ")})")
+                        }
+                        if rendered.len() == 0 -> return Val("{name}::{variant}")
+                        return Val("{name}::{variant}({rendered.join(", ")})")
+                    }
+                }
+            }
+        }
+    }
+    data :: jet_eval_data(value, &machine, span) ?? return None
+    jet_eval_format_string_value_full(&machine, data, format, value_ty, span)
+}
+
+fn jet_eval_format_string_value_full(
     machine: &JetEvalMachine,
     value: TComptimeValue,
     format: MIRStringFormat,
@@ -105,7 +199,7 @@ fn jet_eval_format_debug(machine: &JetEvalMachine, value: TComptimeValue, span: 
 
 fn jet_eval_format_source_name(name: String) -> String Never! {
     if name.starts_with("__jet_") -> return name.slice(6, name.len())
-    ~name
+    name.copy()
 }
 
 fn jet_eval_format_memo_field(name: String) -> Bool Never! {
@@ -119,8 +213,8 @@ fn jet_eval_format_core_renderer(name: String) -> Bool Never! {
     if name == {
         "MIME" | "Path" | "Complex" | "Fraction" | "Decimal" | "DateTime" | "LocalDate" | "LocalTime" | "Date" | "Duration" -> true
         "Period" | "Zone" | "ZonedDateTime" | "Instant" | "Envelope" | "Address" | "Message" | "Attachment" | "URL" -> true
-        "ServiceWorkflow" | "ServiceUpgradeReceipt" | "EncodingError" | "FieldError" | "DataError" | "Measurement" -> true
-        "HyperLogLog" | "TDigest" | "CountMinSketch" | "ReservoirSampler" | "DataTree" | "IOError" -> true
+        "ServiceWorkflow" | "ServiceUpgradeReceipt" | "EncodingError" | "FieldError" | "DataError" -> true
+        "Dyn" | "IOError" -> true
         else -> false
     }
 }
@@ -130,19 +224,19 @@ fn jet_eval_format_char_text(code: Int) -> String Never! {
     if {
         code < 128 -> &bytes.push(U8{code})
         code < 2048 -> {
-            &bytes.push(U8{192 | (code >> 6)})
-            &bytes.push(U8{128 | (code & 63)})
+            &bytes.push(U8{(192).bit_or((code >> 6))})
+            &bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
         }
         code < 65536 -> {
-            &bytes.push(U8{224 | (code >> 12)})
-            &bytes.push(U8{128 | ((code >> 6) & 63)})
-            &bytes.push(U8{128 | (code & 63)})
+            &bytes.push(U8{(224).bit_or((code >> 12))})
+            &bytes.push(U8{(128).bit_or((((code >> 6)).bit_and(63)))})
+            &bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
         }
         else -> {
-            &bytes.push(U8{240 | (code >> 18)})
-            &bytes.push(U8{128 | ((code >> 12) & 63)})
-            &bytes.push(U8{128 | ((code >> 6) & 63)})
-            &bytes.push(U8{128 | (code & 63)})
+            &bytes.push(U8{(240).bit_or((code >> 18))})
+            &bytes.push(U8{(128).bit_or((((code >> 12)).bit_and(63)))})
+            &bytes.push(U8{(128).bit_or((((code >> 6)).bit_and(63)))})
+            &bytes.push(U8{(128).bit_or(((code).bit_and(63)))})
         }
     }
     String.from_bytes(bytes) ?? ""
@@ -152,33 +246,6 @@ fn jet_eval_format_push_text(out: &[U8], text: String) Never! {
     loop byte in text.bytes() -> &out.push(byte)
 }
 
-// Rust `{:?}` of a str (quote 34) or char (quote 39): `char::escape_debug`
-// for the ASCII escapes; other scalars are copied through.
-fn jet_eval_format_debug_quoted(text: String, quote: Int) -> String Never! {
-    out := [U8]{}
-    &out.push(U8{quote})
-    loop byte in text.bytes() {
-        code :: Int.from_u8(byte)
-        if {
-            code == 92 -> jet_eval_format_push_text(&out, "\\\\")
-            code == quote -> {
-                &out.push(U8{92})
-                &out.push(U8{quote})
-            }
-            code == 10 -> jet_eval_format_push_text(&out, "\\n")
-            code == 13 -> jet_eval_format_push_text(&out, "\\r")
-            code == 9 -> jet_eval_format_push_text(&out, "\\t")
-            code == 0 -> jet_eval_format_push_text(&out, "\\0")
-            code < 32 || code == 127 -> {
-                hex :: code.to_radix(16)
-                jet_eval_format_push_text(&out, "\\u{{{hex}}}")
-            }
-            else -> &out.push(byte)
-        }
-    }
-    &out.push(U8{quote})
-    String.from_bytes(out) ?? text
-}
 
 fn jet_eval_format_bytes_list(bytes: [U8]) -> String Never! {
     parts :: loop byte in bytes -> "{Int.from_u8(byte)}"
@@ -402,8 +469,8 @@ fn jet_eval_format_core_debug(value: TComptimeValue) -> JetEvalFormatShown Never
         .BigInt(decimal) -> JetEvalFormatShown.Text{value: decimal}
         .Float(number, bits) -> jet_eval_format_float_debug(number, bits)
         .Bool(flag) -> JetEvalFormatShown.Text{value: if flag -> "true" else -> "false"}
-        .Char(code) -> JetEvalFormatShown.Text{value: jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39)}
-        .String(text) -> JetEvalFormatShown.Text{value: jet_eval_format_debug_quoted(text, 34)}
+        .Char(code) -> JetEvalFormatShown.Text{value: foundation_debug_quoted(jet_eval_format_char_text(code), 39)}
+        .String(text) -> JetEvalFormatShown.Text{value: foundation_debug_quoted(text, 34)}
         .Bytes(bytes) -> JetEvalFormatShown.Text{value: jet_eval_format_bytes_list(bytes)}
         .List(values) -> {
             rendered := [String]{}
@@ -461,17 +528,18 @@ fn jet_eval_format_plain_enum(machine: &JetEvalMachine, type_name: String) -> Bo
 fn jet_eval_format_key_debug(key: TComptimeKey) -> String Never! {
     if key == {
         .Int(number) -> "Int({number})"
-        .String(text) -> "String({jet_eval_format_debug_quoted(text, 34)})"
+        .BigInt(decimal) -> "BigInt({foundation_debug_quoted(decimal, 34)})"
+        .String(text) -> "String({foundation_debug_quoted(text, 34)})"
         .Bool(flag) -> if flag -> "Bool(true)" else -> "Bool(false)"
-        .Char(code) -> "Char({jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39)})"
+        .Char(code) -> "Char({foundation_debug_quoted(jet_eval_format_char_text(code), 39)})"
         .Tuple(fields) -> "Tuple([{jet_eval_format_key_fields_debug(fields)}])"
-        .Struct(type_name, fields) -> "Struct {{ type_name: {jet_eval_format_debug_quoted(type_name, 34)}, fields: [{jet_eval_format_key_fields_debug(fields)}] }}"
-        .Enum(type_name, variant) -> "Enum {{ type_name: {jet_eval_format_debug_quoted(type_name, 34)}, variant: {jet_eval_format_debug_quoted(variant, 34)} }}"
+        .Struct(type_name, fields) -> "Struct {{ type_name: {foundation_debug_quoted(type_name, 34)}, fields: [{jet_eval_format_key_fields_debug(fields)}] }}"
+        .Enum(type_name, variant) -> "Enum {{ type_name: {foundation_debug_quoted(type_name, 34)}, variant: {foundation_debug_quoted(variant, 34)} }}"
     }
 }
 
 fn jet_eval_format_key_fields_debug(fields: [TComptimeKeyField]) -> String Never! {
-    parts :: loop field in fields -> "({jet_eval_format_debug_quoted(field.name, 34)}, {jet_eval_format_key_debug(field.key)})"
+    parts :: loop field in fields -> "({foundation_debug_quoted(field.name, 34)}, {jet_eval_format_key_debug(field.key)})"
     parts.join(", ")
 }
 
@@ -481,7 +549,7 @@ fn jet_eval_format_mir_show(value: TComptimeValue) -> String? {
         .Int(number) -> Val("{number}")
         .Float(number, _) -> Val(jet_eval_format_float_plain(number))
         .Bool(flag) -> Val(if flag -> "true" else -> "false")
-        .Char(code) -> Val(jet_eval_format_debug_quoted(jet_eval_format_char_text(code), 39))
+        .Char(code) -> Val(foundation_debug_quoted(jet_eval_format_char_text(code), 39))
         .String(text) -> Val(text)
         .BigInt(decimal) -> Val(decimal)
         .Bytes(bytes) -> Val(jet_eval_format_bytes_list(bytes))

@@ -17,7 +17,7 @@ STORE_NIX_TRUST_KEY_CONFIG :: prep { "trust/nix-cache-v1.ed25519.pub" }
 STORE_NIX_STORE_HASH_ALPHABET :: prep { "0123456789abcdfghijklmnpqrsvwxyz" }
 
 // Which admission check refused a closure.
-pub enum NixCacheErrorKind {
+enum NixCacheErrorKind {
     Metadata
     WrongKey
     Signature
@@ -49,9 +49,9 @@ pub enum NixCacheErrorKind {
 
 // The one native Nix cache admission failure (diagnostic E1350).
 #Error
-pub struct NixCacheError {
-    pub kind: NixCacheErrorKind
-    pub detail: String
+struct NixCacheError {
+    kind: NixCacheErrorKind
+    detail: String
 
     fn new(kind: NixCacheErrorKind, detail: String) -> NixCacheError Never! {
         NixCacheError{kind, detail}
@@ -86,25 +86,25 @@ fn store_nix_io_error(kind: NixCacheErrorKind, error: IOError) -> NixCacheError 
 }
 
 // Signed narinfo plus the exact bytes that were verified for it.
-pub struct FetchedInfo {
-    pub info: NixNarInfo
-    pub fingerprint: [U8]
-    pub key_id: String
-    pub signature: [U8]
+struct FetchedInfo {
+    info: NixNarInfo
+    fingerprint: [U8]
+    key_id: String
+    signature: [U8]
 }
 
-pub struct CacheInfo {
-    pub store_dir: String
+struct CacheInfo {
+    store_dir: String
 }
 
 // One configured binary cache: its endpoint, the keys it must be signed by,
 // and a client restricted to public (HTTPS) or loopback (HTTP) destinations.
 // The client pins each host's checked addresses for its lifetime, which is the
 // DNS-rebinding defence Rust implemented with pre-resolved socket addresses.
-pub struct CacheEndpoint {
-    pub endpoint: String
-    pub trusted_keys: [NixPublicKey]
-    client: HTTPClient
+struct CacheEndpoint {
+    endpoint: String
+    trusted_keys: [NixPublicKey]
+    priv client: HTTPClient
 
     fn from_roots(roots: HangarRoots) -[FS]> CacheEndpoint NixCacheError! {
         endpoint_path :: files.join(roots.root, STORE_NIX_ENDPOINT_CONFIG)
@@ -214,12 +214,12 @@ pub struct CacheEndpoint {
 
 // Counts and hashes compressed response bytes while enforcing the signed
 // byte cap; decoders read the NAR stream through it.
-pub struct HashingReader {
-    reader: Body
-    pub limit: Int
-    pub count: Int
-    hasher: crypto.Hasher
-    progress: ProgressHandle?
+struct HashingReader {
+    priv reader: Body
+    limit: Int
+    count: Int
+    priv hasher: crypto.Hasher
+    priv progress: ProgressHandle?
 
     fn new(reader: ^Body, limit: Int, progress: ProgressHandle?) -> HashingReader Never! {
         HashingReader{reader, limit, count: 0, hasher: crypto.Hasher.new(), progress}

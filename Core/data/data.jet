@@ -14,7 +14,11 @@ use core.files.[FileReader]
 use core.math as math
 use core.encoding as encoding
 use core.encoding.[EncodingError, EncodingLimits]
+use core.encoding.json as json_codec
+use core.encoding.csv as csv_codec
+use __core_encoding_stream as encoding_stream
 use core.crypto.[sha256]
+use core.sys as sys
 module arrow
 
 module loader
@@ -25,8 +29,8 @@ module plot
 
 module sketch
 
-#Equatable
-pub enum DataFormat {
+#[Comparable, Equatable]
+enum DataFormat {
     CSV
     JSON
     JSONL
@@ -35,7 +39,8 @@ pub enum DataFormat {
 }
 
 
-pub enum DataErrorKind {
+#Equatable
+enum DataErrorKind {
     Decode
     Limit
     IO
@@ -51,24 +56,57 @@ pub enum DataErrorKind {
     WrongOwner
     StaleRevision
     InvalidValue
+    impl Display {
+        fn display(self) -> String { data_error_kind_text(self) }
+    }
+    impl Debug {
+        fn debug(^self) -> String { data_error_kind_text(self) }
+    }
 }
 
-#Error
-pub struct DataError {
-    pub kind: DataErrorKind
-    pub operation: String
-    pub row: Int?
-    pub column: Int?
-    pub index: Int?
-    pub reason: String
-    pub cause: EncodingError?
+fn data_error_kind_text(kind: DataErrorKind) -> String Never! {
+    if kind == {
+        .Decode -> "Decode"
+        .Limit -> "Limit"
+        .IO -> "IO"
+        .Empty -> "Empty"
+        .InvalidArgument -> "InvalidArgument"
+        .NonFinite -> "NonFinite"
+        .Overflow -> "Overflow"
+        .State -> "State"
+        .Bridge -> "Bridge"
+        .Unsupported -> "Unsupported"
+        .DuplicateKey -> "DuplicateKey"
+        .MissingKey -> "MissingKey"
+        .WrongOwner -> "WrongOwner"
+        .StaleRevision -> "StaleRevision"
+        .InvalidValue -> "InvalidValue"
+    }
+}
+
+#[Equatable, Error]
+struct DataError {
+    kind: DataErrorKind
+    operation: String
+    row: Int?
+    column: Int?
+    index: Int?
+    reason: String
+    cause: EncodingError?
+}
+
+impl DataError.Display {
+    fn display(self) -> String { data_error_text(self) }
+}
+impl DataError.Debug {
+    fn debug(^self) -> String { data_error_text(self) }
 }
 
 impl DataError {
-    pub fn new(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
+    fn new(kind: DataErrorKind, message: String, path: String) -> DataError Never! {
         return DataError{
             kind: kind,
-            operation: ~path,
+            operation: path.copy(),
             row: None,
             column: None,
             index: None,
@@ -89,6 +127,14 @@ fn data_error(kind: DataErrorKind, message: String, operation: String) -> DataEr
     }
 }
 
+fn data_error_text(error: DataError) -> String Never! {
+    text := "{data_error_kind_text(error.kind)} {error.operation}"
+    if error.row == .Val(row) -> text = "{text}, row {row}"
+    if error.column == .Val(column) -> text = "{text}, column {column}"
+    if error.index == .Val(index) -> text = "{text}, index {index}"
+    "{text}: {error.reason}"
+}
+
 fn data_error_at(kind: DataErrorKind, message: String, operation: String, index: Int) -> DataError Never! {
     DataError{
         kind: kind,
@@ -107,19 +153,20 @@ fn nonfinite(value: Float) -> Bool Never! {
 }
 
 
-pub struct DataLineOptions {
-    pub title: String
-    pub x_label: String
-    pub y_label: String
-    pub markers: Bool
-    pub reference: Float?
-    pub style: String
-    pub color: String
-    pub legend: String
+struct DataLineOptions {
+    title: String
+    x_label: String
+    y_label: String
+    markers: Bool
+    reference: Float?
+    style: String
+    color: String
+    legend: String
 }
 
 
-pub enum DataFreshness {
+#Comparable
+enum DataFreshness {
     Pending
     Fresh
     Stale
@@ -127,8 +174,8 @@ pub enum DataFreshness {
     Offline
     Cancelled
 }
-#Equatable
-pub enum DataInvalidationCause {
+#[Comparable, Equatable]
+enum DataInvalidationCause {
     NoCause
     Loader
     Input
@@ -140,185 +187,221 @@ pub enum DataInvalidationCause {
 }
 
 
-pub struct DataStatus {
-    pub step: String
-    pub path: String
-    pub clone_value: String
-    pub ownership: String
-    pub trust: String
-    pub fallback: String
-    pub replacement: String
+#Equatable
+struct DataStatus {
+    step: String
+    path: String
+    clone_value: String
+    ownership: String
+    trust: String
+    fallback: String
+    replacement: String
 }
 
 
-pub struct DataLimits {
-    pub encoding: EncodingLimits
-    pub max_groups: Int
-    pub max_sort_rows: Int
-    pub max_join_rows: Int
-    pub max_output_rows: Int
-}
-
-
-
-pub struct DataAuthority {
-    pub scope: String
-    pub revision: String
-}
-
-pub struct DataSourceIdentity {
-    pub kind: DataLoaderKind
-    pub locator: String
-    pub member: String
-    pub parameters: [String]
-}
-
-pub struct DataSnapshotIdentity {
-    pub id: String
-    pub source: String
-    pub content: String
-    pub schema: String
-    pub format: DataFormat
-}
-
-pub struct DataProvenance {
-    pub source: DataSourceIdentity
-    pub format: DataFormat
-    pub authority: DataAuthority
-}
-
-pub struct DataColumn {
-    pub id: String
-    pub name: String
-    pub type_name: String
-    pub nullable: Bool
-}
-
-pub struct DataSchema {
-    pub identity: String
-    pub format: DataFormat
-    pub columns: [DataColumn]
-    pub projection: String?
-}
-
-pub struct DataSnapshot<T> {
-    pub value: T
-    pub identity: DataSnapshotIdentity
-    pub provenance: DataProvenance
-    pub schema: DataSchema
-    pub status: DataLoaderStatus
-    pub content: [U8]
-}
-
-pub struct DataLoader<T> {
-    pub source: DataSourceIdentity
-    pub format: DataFormat
-    pub authority: DataAuthority
-    pub limits: DataLimits
-    pub payload: [U8]?
-    pub last_good: [U8]?
-    pub cancelled: Bool
-    pub offline: Bool
-    pub status: DataLoaderStatus
-}
-
-pub struct DataLoaderStatus {
-    pub identity: String
-    pub freshness: DataFreshness
-    pub invalidated_by: DataInvalidationCause
-    pub error: String
-    pub cleanup: String
-    pub buffered_bytes: Int
-    pub backpressure: Bool
-    pub last_good: Bool
-}
-
-pub struct DataWatchStatus {
-    pub mode: String
-    pub revision: Int
-    pub retained_rows: Int
-    pub recomputations: Int
-    pub active: Bool
-    pub generation: Int
-    pub dirty: Bool
-    pub error: String
-    pub freshness_ms: Int
-    pub invalidation_cause: String
-    pub refreshing: Bool
-    pub cancelled: Bool
-}
-
-pub struct DataStream<T> {
-    pub items: [T]
-    pub index: Int
-    pub cancelled: Bool
+#Equatable
+struct DataLimits {
+    encoding: EncodingLimits
+    max_groups: Int
+    max_sort_rows: Int
+    max_join_rows: Int
+    max_output_rows: Int
 }
 
 
 
-
-pub struct DataPivotCell {
-    pub row_key: String
-    pub column_key: String
-    pub count: Int
-    pub sum: Float
-    pub mean: Float
-}
-pub struct DataSummary {
-    pub count: Int
-    pub sum: Float
-    pub mean: Float
-    pub min: Float
-    pub max: Float
-    pub median: Float
-    pub variance: Float
-    pub stddev: Float
+struct DataAuthority {
+    scope: String
+    revision: String
 }
 
-pub struct DataJoin<L, R> {
-    pub left: L
-    pub right: R
+struct DataSourceIdentity {
+    kind: DataLoaderKind
+    locator: String
+    member: String
+    parameters: [String]
 }
 
-pub struct JetDataPlot<T> {
-    pub rows: [T]
-    pub plan: JetDataPlotPlan
+struct DataSnapshotIdentity {
+    id: String
+    source: String
+    content: String
+    schema: String
+    format: DataFormat
 }
 
-pub struct Group<K, V> {
-    pub key: K
-    pub value: V
+struct DataProvenance {
+    source: DataSourceIdentity
+    format: DataFormat
+    authority: DataAuthority
 }
 
-pub struct Query<T> {
-    pub rows: [T]
-    pub sql: String
-    pub operations: [String]
+struct DataColumn {
+    id: String
+    name: String
+    type_name: String
+    nullable: Bool
 }
 
-pub struct DataTracked<T, K> {
-    pub snapshot: DataSnapshot<[T]>
+struct DataSchema {
+    identity: String
+    format: DataFormat
+    columns: [DataColumn]
+    projection: String?
 }
 
-pub struct DataWatch<T> {
-    pub query: Query<T>
-    pub status: DataWatchStatus
+struct DataSnapshot<T> {
+    value: T
+    identity: DataSnapshotIdentity
+    provenance: DataProvenance
+    schema: DataSchema
+    status: DataLoaderStatus
+    content: [U8]
 }
 
-pub enum JetDataPlotMark {
-    Bar
+struct DataLoader<T> {
+    source: DataSourceIdentity
+    format: DataFormat
+    authority: DataAuthority
+    limits: DataLimits
+    payload: [U8]?
+    last_good: [U8]?
+    cancelled: Bool
+    offline: Bool
+    status: DataLoaderStatus
+}
+
+#Comparable
+struct DataLoaderStatus {
+    identity: String
+    freshness: DataFreshness
+    invalidated_by: DataInvalidationCause
+    error: String
+    cleanup: String
+    buffered_bytes: Int
+    backpressure: Bool
+    last_good: Bool
+}
+
+#Equatable
+struct DataWatchStatus {
+    mode: String
+    revision: Int
+    retained_rows: Int
+    recomputations: Int
+    active: Bool
+    generation: Int
+    dirty: Bool
+    error: String
+    freshness_ms: Int
+    invalidation_cause: String
+    refreshing: Bool
+    cancelled: Bool
+    impl Display {
+        fn display(self) -> String { data_watch_status_text(self) }
+    }
+    impl Debug {
+        fn debug(^self) -> String { data_watch_status_text(self) }
+    }
+}
+
+fn data_watch_status_text(status: DataWatchStatus) -> String Never! {
+    "DataWatchStatus{{mode: {status.mode}, revision: {status.revision}, retained_rows: {status.retained_rows}, recomputations: {status.recomputations}, active: {status.active}, generation: {status.generation}, dirty: {status.dirty}, error: {status.error}, freshness_ms: {status.freshness_ms}, invalidation_cause: {status.invalidation_cause}, refreshing: {status.refreshing}, cancelled: {status.cancelled}}}"
+}
+
+struct DataStream<T> {
+    items: [T]
+    index: Int
+    cancelled: Bool
+}
+
+
+
+
+struct DataPivotCell {
+    row_key: String
+    column_key: String
+    count: Int
+    sum: Float
+    mean: Float
+}
+#Equatable
+struct DataSummary {
+    count: Int
+    sum: Float
+    mean: Float
+    min: Float
+    max: Float
+    median: Float
+    variance: Float
+    stddev: Float
+}
+
+struct DataJoin<L, R> {
+    left: L
+    right: R
+}
+
+struct JetDataPlot<T> {
+    rows: [T]
+    plan: JetDataPlotPlan
+}
+
+struct Group<K, V> {
+    key: K
+    value: V
+}
+
+struct Query<T> {
+    rows: [T]
+    sql: String
+    operations: [String]
+}
+
+struct DataTracked<T, K> {
+    snapshot: DataSnapshot<[T]>
+}
+
+struct DataWatch<T> {
+    query: Query<T>
+    status: DataWatchStatus
+}
+
+#Comparable
+enum JetDataPlotMark {
     Line
+    Bar
     Point
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Line -> "line"
+            .Bar -> "bar"
+            .Point -> "point"
+        }
+    }
 }
 
-pub enum JetDataPlotChannel {
+#Comparable
+enum JetDataPlotChannel {
     X
     Y
     Color
     Size
+    Text
+    Detail
+    fn as_str(self) -> String Never! {
+        if self == {
+            .X -> "x"
+            .Y -> "y"
+            .Color -> "color"
+            .Size -> "size"
+            .Text -> "text"
+            .Detail -> "detail"
+        }
+    }
 }
 
-pub enum JetDataPlotAggregate {
+enum JetDataPlotAggregate {
     Sum
     Mean
     Count
@@ -326,179 +409,248 @@ pub enum JetDataPlotAggregate {
     Max
 }
 
-pub enum JetDataPlotFilterOp {
-    Eq
-    Ne
-    Lt
-    Le
-    Gt
-    Ge
+#Comparable
+enum JetDataPlotFilterOp {
+    Equal
+    NotEqual
+    Less
+    LessEqual
+    Greater
+    GreaterEqual
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Equal -> "eq"
+            .NotEqual -> "ne"
+            .Less -> "lt"
+            .LessEqual -> "lte"
+            .Greater -> "gt"
+            .GreaterEqual -> "gte"
+        }
+    }
 }
 
-pub enum JetDataPlotValue {
+enum JetDataPlotValue {
     Number
     Text
     Bool
 }
 
-pub enum JetDataPlotTransform {
+enum JetDataPlotTransform {
     Identity
     Filter
     Aggregate
 }
 
-pub enum JetDataPlotScaleKind {
+#Comparable
+enum JetDataPlotScaleKind {
     Linear
     Log
     Band
+    Point
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Linear -> "linear"
+            .Log -> "log"
+            .Band -> "band"
+            .Point -> "point"
+        }
+    }
+    fn needs_numeric(self) -> Bool Never! { self == .Linear || self == .Log }
 }
 
-pub enum JetDataPlotDomain {
+enum JetDataPlotDomain {
     Auto
     Explicit
 }
 
-pub enum JetDataPlotLegendPosition {
+#Comparable
+enum JetDataPlotLegendPosition {
     Top
+    Right
     Bottom
     Left
-    Right
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Top -> "top"
+            .Right -> "right"
+            .Bottom -> "bottom"
+            .Left -> "left"
+        }
+    }
 }
 
-pub enum JetDataPlotFacetKind {
-    Wrap
-    Grid
+#Comparable
+enum JetDataPlotFacetKind {
+    Row
+    Column
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Row -> "row"
+            .Column -> "column"
+        }
+    }
 }
 
-pub enum JetDataPlotInteraction {
+#Comparable
+enum JetDataPlotInteraction {
     Hover
     Select
+    Zoom
     Pan
+    Brush
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Hover -> "hover"
+            .Select -> "select"
+            .Zoom -> "zoom"
+            .Pan -> "pan"
+            .Brush -> "brush"
+        }
+    }
 }
 
-pub enum JetDataPlotBackend {
-    SVG
-    Text
+#Comparable
+enum JetDataPlotBackend {
+    Terminal
+    Browser
+    Native
+    Export
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Terminal -> "terminal"
+            .Browser -> "browser"
+            .Native -> "native"
+            .Export -> "export"
+        }
+    }
 }
 
-pub enum JetDataPlotSupport {
-    Full
-    Partial
+#Comparable
+enum JetDataPlotSupport {
+    Supported
+    Degraded
     Unsupported
+    fn as_str(self) -> String Never! {
+        if self == {
+            .Supported -> "supported"
+            .Degraded -> "degraded"
+            .Unsupported -> "unsupported"
+        }
+    }
 }
 
-pub enum JetDataPlotErrorKind {
+enum JetDataPlotErrorKind {
     Schema
     Encoding
     Render
 }
 
-pub enum JetDataPlotRenderFormat {
+enum JetDataPlotRenderFormat {
     SVG
     Text
     JSON
 }
 
-pub struct JetDataPlotField {
-    pub name: String
-    pub kind: JetDataPlotValue
+struct JetDataPlotField {
+    name: String
+    kind: JetDataPlotValue
 }
 
-pub struct JetDataPlotSchema {
-    pub fields: [JetDataPlotField]
+struct JetDataPlotSchema {
+    fields: [JetDataPlotField]
 }
 
-pub struct JetDataPlotSourceFacts {
-    pub rows: Int
-    pub columns: Int
+struct JetDataPlotSourceFacts {
+    rows: Int
+    columns: Int
 }
 
-pub struct JetDataPlotEncoding {
-    pub x: String
-    pub y: String
-    pub mark: JetDataPlotMark
+struct JetDataPlotEncoding {
+    x: String
+    y: String
+    mark: JetDataPlotMark
 }
 
-pub struct JetDataPlotScale {
-    pub kind: JetDataPlotScaleKind
-    pub field: String
+struct JetDataPlotScale {
+    kind: JetDataPlotScaleKind
+    field: String
 }
 
-pub struct JetDataPlotAxis {
-    pub field: String
-    pub title: String
+struct JetDataPlotAxis {
+    field: String
+    title: String
 }
 
-pub struct JetDataPlotLegend {
-    pub position: JetDataPlotLegendPosition
+struct JetDataPlotLegend {
+    position: JetDataPlotLegendPosition
 }
 
-pub struct JetDataPlotFacet {
-    pub kind: JetDataPlotFacetKind
-    pub field: String
+struct JetDataPlotFacet {
+    kind: JetDataPlotFacetKind
+    field: String
 }
 
-pub struct JetDataPlotLayer {
-    pub mark: JetDataPlotMark
-    pub encoding: JetDataPlotEncoding
+struct JetDataPlotLayer {
+    mark: JetDataPlotMark
+    encoding: JetDataPlotEncoding
 }
 
-pub struct JetDataPlotAccessibility {
-    pub title: String
-    pub summary: String
+struct JetDataPlotAccessibility {
+    title: String
+    summary: String
 }
 
-pub struct JetDataPlotLayout {
-    pub width: Int
-    pub height: Int
+struct JetDataPlotLayout {
+    width: Int
+    height: Int
 }
 
-pub struct JetDataPlotCapability {
-    pub backend: JetDataPlotBackend
-    pub support: JetDataPlotSupport
+struct JetDataPlotCapability {
+    backend: JetDataPlotBackend
+    support: JetDataPlotSupport
 }
 
 #Error
-pub struct JetDataPlotError {
-    pub kind: JetDataPlotErrorKind
-    pub message: String
+struct JetDataPlotError {
+    kind: JetDataPlotErrorKind
+    message: String
 }
 
-pub struct JetDataPlotColumn {
-    pub name: String
-    pub values: [String]
+struct JetDataPlotColumn {
+    name: String
+    values: [String]
 }
 
-pub struct JetDataPlotSelectedRow {
-    pub index: Int
+struct JetDataPlotSelectedRow {
+    index: Int
 }
 
-pub struct JetDataPlotInspection {
-    pub text: String
+struct JetDataPlotInspection {
+    text: String
 }
 
-pub struct JetDataPlotRender {
-    pub format: JetDataPlotRenderFormat
-    pub body: String
+struct JetDataPlotRender {
+    format: JetDataPlotRenderFormat
+    body: String
 }
 
-pub struct JetDataPlotProjection {
-    pub start: Int
-    pub end: Int
+struct JetDataPlotProjection {
+    start: Int
+    end: Int
 }
 
-pub struct JetDataPlotPlan {
-    pub mark: JetDataPlotMark
-    pub labels: [String]
-    pub values: [Float]
-    pub layout: JetDataPlotLayout
-    pub encoding: JetDataPlotEncoding
-    pub schema: JetDataPlotSchema
+struct JetDataPlotPlan {
+    mark: JetDataPlotMark
+    labels: [String]
+    values: [Float]
+    layout: JetDataPlotLayout
+    encoding: JetDataPlotEncoding
+    schema: JetDataPlotSchema
 }
 
 // Typed data declarations and provider-backed boundaries.
 impl DataLimits {
-    pub fn safe() -> DataLimits Never! {
+    fn safe() -> DataLimits Never! {
         DataLimits{
             encoding: encoding.EncodingLimits.safe(),
             max_groups: 100000,
@@ -509,57 +661,132 @@ impl DataLimits {
     }
 }
 
-pub fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
+fn track<T, K>(rows: [T], _key: fn(T) -> K) -> DataTracked<T, K> DataError! {
     Ok(DataTracked<T, K>{snapshot: snapshot_from_rows<T>(rows)})
 }
 
-pub fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn file<T>(path: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, "", [String]{}, format, "local", limits)
 }
 
-pub fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn file_member<T>(path: String, member: String, format: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.File, path, member, [String]{}, format, "local", limits)
 }
 
-pub fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn url<T>(href: String, format: String, authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.URL, href, "", [String]{}, format, authority, limits)
 }
 
-pub fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
+fn database<T>(query: String, parameters: [String], authority: String, limits: DataLimits) -> DataLoader<T> DataError! {
     make_loader<T>(DataLoaderKind.Database, query, "", parameters, "json", authority, limits)
 }
 
-pub fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
-    core.data.value<T>(value, limits)
+fn value<T: Encode>(value: T, limits: DataLimits) -> DataLoader<T> DataError! {
+    payload := [U8]{}
+    data_loader_render(&payload, value.encode())
+    data_loader_check_payload(limits, payload.len(), "data.value") ?? return Err(err)
+    kind := DataLoaderKind.Value
+    locator := "value"
+    member := ""
+    parameters := [String]{}
+    format := DataFormat.JSON
+    owned_limits := limits.copy()
+    authority := DataAuthority{scope: "local", revision: ""}
+    loader := core.mem.__loader_new<T>(^kind, ^locator, ^member, ^parameters, ^format, ^owned_limits, ^authority) ?? return Err(err)
+    loader.payload = Val(payload)
+    Ok(loader)
 }
 
-pub fn load_default<T>(locator: String) -> DataLoader<T> DataError! {
-    core.data.load_default<T>(locator)
+/// Infer a core format from the final path extension, without reading the
+/// source. Query/fragment suffixes do not participate in format detection.
+fn load_default<T>(locator: String) -[FS, Net, DB]> DataLoader<T> DataError! {
+    load<T>(locator, DataLimits.safe())
 }
 
-pub fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
-    core.data.load<T>(locator, limits)
+fn load<T>(locator: String, limits: DataLimits) -[FS, Net, DB]> DataLoader<T> DataError! {
+    format :: locator_format(locator)
+    if locator.starts_with("http://") || locator.starts_with("https://") {
+        if url<T>(locator, format, "network", limits) == {
+            .Ok(loader) -> return Ok(loader)
+            .Err(error) -> return Err(load_format_error(error, format))
+        }
+    }
+    if file<T>(locator, format, limits) == {
+        .Ok(loader) -> Ok(loader)
+        .Err(error) -> Err(load_format_error(error, format))
+    }
 }
 
-pub fn csv<T: Decode>(text: String) -> [T] DataError! {
-    rows :: core.data.csv<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "CSV decode failed", "csv"))
-    Ok(rows)
+fn load_format_error(error: DataError, format: String) -> DataError Never! {
+    if error.kind == .InvalidArgument && error.reason == "unknown data format" {
+        return data_error(DataErrorKind.Bridge, "format `{format}` is provider-owned; import its package", "data.loader")
+    }
+    error.copy()
 }
 
-pub fn json<T: Decode>(text: String) -> [T] DataError! {
-    rows :: core.data.json<T>(text) ?? return Err(data_error(DataErrorKind.Decode, "JSON decode failed", "json"))
-    Ok(rows)
+fn locator_format(locator: String) -> String DataError! {
+    path :: locator.split("?").to_list()[0].split("#").to_list()[0]
+    segments :: path.split("/").to_list()
+    name :: segments[segments.len() - 1]
+    parts :: name.split(".").to_list()
+    if parts.len() < 2 {
+        return Err(data_error(DataErrorKind.Bridge, "source has no core format; import a provider package", "data.load"))
+    }
+    parts[parts.len() - 1]
 }
 
-pub fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
+#Test("load discovers the final path extension before query and fragment") {
+    local :: load_default<Int>("dir.with.dot/items.CSV?version=.json#part") ?? panic("local loader")
+    assert_eq(local.source.locator, "dir.with.dot/items.CSV?version=.json#part")
+    assert(local.format == .CSV)
+    remote :: load_default<Int>("https://example.test/items.ndjson#part.json") ?? panic("remote loader")
+    assert(remote.source.kind == .URL)
+    assert(remote.format == .JSONL)
+    assert_eq(remote.authority.scope, "network")
+    assert_eq(remote.limits.max_output_rows, 1000000)
+}
+
+#Test("load does not infer a format from a directory or query") {
+    if load_default<Int>("dir.csv/items?format=.json") == {
+        .Ok(_) -> panic("extensionless source accepted")
+        .Err(error) -> {
+            assert(error.kind == .Bridge)
+            assert_eq(error.operation, "data.load")
+            assert_eq(error.reason, "source has no core format; import a provider package")
+        }
+    }
+    if load_default<Int>("items.txt") == {
+        .Ok(_) -> panic("provider format accepted")
+        .Err(error) -> {
+            assert(error.kind == .Bridge)
+            assert_eq(error.operation, "data.loader")
+            assert_eq(error.reason, "format `txt` is provider-owned; import its package")
+        }
+    }
+}
+
+fn csv<T: Decode>(text: String) -> [T] [FieldError]! {
+    csv_codec.decode<T>(text)
+}
+
+fn json<T: Decode>(text: String) -> [T] [FieldError]! {
+    json_codec.decode<[T]>(text)
+}
+
+#Test("typed data JSON reuses exact number decoding") {
+    rows :: json<Int>("[9007199254740993,1e2,-9007199254740993]") ?? panic("typed data JSON")
+    assert_eq(rows, [Int]{9007199254740993, 100, -9007199254740993})
+}
+
+fn csv_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
     core.data.csv_reader<T>(^reader, limits)
 }
 
-pub fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
+fn json_reader<T: Decode>(reader: ^FileReader, limits: DataLimits) -> DataStream<T> DataError! {
     core.data.json_reader<T>(^reader, limits)
 }
 
-pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
+fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> DataSnapshot<T> DataError! {
     if loader.cancelled {
         return Err(data_error(DataErrorKind.State, "loader was cancelled before snapshot", loader.source.locator))
     }
@@ -567,11 +794,11 @@ pub fn snapshot<T: [Encode, Decode]>(loader: &DataLoader<T>) -[FS, Net, DB]> Dat
 }
 
 
-pub fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema(rows) }
+fn schema<T>(rows: [T]) -> [DataColumn] Never! { core.data.schema<T>(rows) }
 
-pub fn count<T>(rows: [T]) -> Int Never! { rows.len() }
+fn count<T>(rows: [T]) -> Int Never! { rows.len() }
 
-pub fn describe(values: [Float]) -> DataSummary DataError! {
+fn describe(values: [Float]) -> DataSummary DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "describe of empty data is undefined", "describe"))
     total := Float{0.0}
     if compensated_sum(values, "describe") == {
@@ -603,11 +830,11 @@ pub fn describe(values: [Float]) -> DataSummary DataError! {
 }
 
 
-pub fn sum(values: [Float]) -> Float DataError! {
+fn sum(values: [Float]) -> Float DataError! {
     compensated_sum(values, "sum")
 }
 
-pub fn mean(values: [Float]) -> Float DataError! {
+fn mean(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "mean of empty data is undefined", "mean"))
     total := Float{0.0}
     if compensated_sum(values, "mean") == {
@@ -619,7 +846,7 @@ pub fn mean(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(mean_value))
 }
 
-pub fn min(values: [Float]) -> Float DataError! {
+fn min(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "min of empty data is undefined", "min"))
     first :: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "min"))
@@ -631,7 +858,7 @@ pub fn min(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(out))
 }
 
-pub fn max(values: [Float]) -> Float DataError! {
+fn max(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "max of empty data is undefined", "max"))
     first :: values[0]
     if nonfinite(first) -> return Err(data_error(DataErrorKind.NonFinite, "numeric input must be finite", "max"))
@@ -643,7 +870,7 @@ pub fn max(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(out))
 }
 
-pub fn variance(values: [Float]) -> Float DataError! {
+fn variance(values: [Float]) -> Float DataError! {
     if values.len() == 0 -> return Err(data_error(DataErrorKind.Empty, "variance of empty data is undefined", "variance"))
     mean_value := Float{0.0}
     m2 := Float{0.0}
@@ -663,7 +890,7 @@ pub fn variance(values: [Float]) -> Float DataError! {
     Ok(normalize_zero(result))
 }
 
-pub fn stddev(values: [Float]) -> Float DataError! {
+fn stddev(values: [Float]) -> Float DataError! {
     value := Float{0.0}
     if variance(values) == {
         .Ok(result) -> value = result
@@ -675,11 +902,11 @@ pub fn stddev(values: [Float]) -> Float DataError! {
 
 }
 
-pub fn median(values: [Float]) -> Float DataError! {
+fn median(values: [Float]) -> Float DataError! {
     quantile(values, Float{0.5})
 }
 
-pub fn quantile(values: [Float], q: Float) -> Float DataError! {
+fn quantile(values: [Float], q: Float) -> Float DataError! {
     if nonfinite(q) || q < (Float{0.0}) || q > (Float{1.0}) {
         return Err(data_error(DataErrorKind.InvalidArgument, "quantile q must be in 0.0 through 1.0", "quantile"))
     }
@@ -691,7 +918,7 @@ pub fn quantile(values: [Float], q: Float) -> Float DataError! {
     }
     sorted := sort_floats(values)
     pos := q * Float{sorted.len() - 1}
-    lo := Int{pos}
+    lo := Int.from_float(pos) ?? panic("quantile position must be finite")
     hi := lo
     if (Float{lo}) < pos -> hi = lo + 1
     if hi >= sorted.len() -> hi = sorted.len() - 1
@@ -702,7 +929,7 @@ pub fn quantile(values: [Float], q: Float) -> Float DataError! {
     Ok(normalize_zero(result))
 }
 
-pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
+fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     if window < 1 -> return Err(data_error(DataErrorKind.InvalidArgument, "rolling width must be positive", "rolling_mean"))
     limits := DataLimits.safe()
     if values.len() > limits.max_output_rows -> return Err(data_error(DataErrorKind.Limit, "max_output_rows exceeded", "rolling_mean"))
@@ -728,11 +955,7 @@ pub fn rolling_mean(values: [Float], window: Int) -> [Float] DataError! {
     Ok(out)
 }
 
-pub fn query<T>(rows: [T]) -> Query<T> Never! {
-    Query<T>{rows: rows, sql: "", operations: [String]{"scan"}}
-}
-
-pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
+fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
@@ -769,7 +992,7 @@ pub fn inner_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_
     Ok(out)
 }
 
-pub fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
+fn left_join<T, U>(left: [T], right: [U], left_key: fn(T) -> String, right_key: fn(U) -> String) -> [DataJoin<T, U?>] DataError! {
     limits := DataLimits.safe()
     left_keys := [String]{}
     right_keys := [String]{}
@@ -818,7 +1041,7 @@ fn join_key_counts(keys: [String]) -> [String:Int] Never! {
     counts
 }
 
-pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
+fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> String, value_fn: fn(T) -> Float) -> [DataPivotCell] DataError! {
     limits := DataLimits.safe()
     cells := [DataPivotCell]{}
     loop index in 0..<rows.len() {
@@ -831,7 +1054,7 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
         }
         found := -1
         loop cell_index in 0..<cells.len() {
-            if text_compare(~cells[cell_index].row_key, ~row_name) == 0 && text_compare(~cells[cell_index].column_key, ~column_name) == 0 {
+            if text_compare(cells[cell_index].row_key, row_name) == 0 && text_compare(cells[cell_index].column_key, column_name) == 0 {
                 found = cell_index
                 break
             }
@@ -840,7 +1063,7 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
             if cells.len() >= limits.max_groups {
                 return Err(data_error(DataErrorKind.Limit, "max_groups exceeded", "pivot_sum"))
             }
-            &cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: ~amount, mean: amount})
+            &cells.push(DataPivotCell{row_key: row_name, column_key: column_name, count: 1, sum: amount.copy(), mean: amount})
             next
         }
         cell := cells[found]
@@ -866,43 +1089,43 @@ pub fn pivot_sum<T>(rows: [T], row_key: fn(T) -> String, column_key: fn(T) -> St
     Ok(cells)
 }
 
-pub fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
+fn plot<T: Encode>(rows: [T]) -> JetDataPlot<T> DataError! {
     core.data.plot<T>(rows)
 }
 
-pub fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
+fn inspect<T>(plot: JetDataPlot<T>) -> JetDataPlotInspection DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(JetDataPlotInspection{text: plot_inspection_text(plan, plot.rows.len())})
 }
 
-pub fn inspect_json<T>(plot: JetDataPlot<T>) -> String DataError! {
+fn inspect_json<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(plot_plan_json(plan))
 }
 
-pub fn text<T>(plot: JetDataPlot<T>) -> String DataError! {
+fn text<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(render_plot_text(plan))
 }
 
-pub fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
+fn svg<T>(plot: JetDataPlot<T>) -> String DataError! {
     plan :: normalize_plot_plan(plot.plan)
     Ok(render_plot_svg(plan))
 }
 
-pub fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
-    render<T>(plot, JetDataPlotBackend.SVG)
+fn show<T>(plot: JetDataPlot<T>) -> JetDataPlotRender DataError! {
+    render<T>(plot, JetDataPlotBackend.Browser)
 }
 
-pub fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
+fn render<T>(plot: JetDataPlot<T>, backend: JetDataPlotBackend) -> JetDataPlotRender DataError! {
     plan :: normalize_plot_plan(plot.plan)
-    if backend == JetDataPlotBackend.Text {
+    if backend == JetDataPlotBackend.Terminal {
         return Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.Text, body: render_plot_text(plan)})
     }
     Ok(JetDataPlotRender{format: JetDataPlotRenderFormat.SVG, body: render_plot_svg(plan)})
 }
 
-pub fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
+fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
@@ -920,7 +1143,7 @@ pub fn bar_text(groups: [Group<String, Int>]) -> String DataError! {
     Ok(render_bar_text(labels, values))
 }
 
-pub fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
+fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
     labels := [String]{}
     values := [Float]{}
     loop index in 0..<groups.len() {
@@ -938,7 +1161,7 @@ pub fn bar_svg(groups: [Group<String, Int>]) -> String DataError! {
     Ok(render_bar_svg(labels, values))
 }
 
-pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
+fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _ :: validate_line_options(options, "line_text")
     labels := [String]{}
     values := [Float]{}
@@ -953,7 +1176,7 @@ pub fn line_text(groups: [Group<String, Float>], options: DataLineOptions) -> St
     Ok(render_line_options_text(labels, values, options))
 }
 
-pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
+fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> String DataError! {
     _ :: validate_line_options(options, "line_svg")
     labels := [String]{}
     values := [Float]{}
@@ -968,39 +1191,116 @@ pub fn line_svg(groups: [Group<String, Float>], options: DataLineOptions) -> Str
     Ok(render_line_options_svg(labels, values, options))
 }
 
-pub fn status() -> [DataStatus] Never! { core.data.status() }
+/// Native facts and live, explicitly opted-in bridge availability.
+fn status() -[FS, Env]> [DataStatus] Never! {
+    rows := [DataStatus]{}
+    native_steps :: [String]{"core.data.csv", "core.data.stats", "core.data.query", "core.data.stream", "core.data.schema", "core.data.json"}
+    loop step in native_steps {
+        &rows.push(DataStatus{step: step, path: "native", clone_value: "none", ownership: "jet", trust: "native", fallback: "none", replacement: "native"})
+    }
+    bridge_steps :: [String]{"py.*", "r.*", "gpu.*"}
+    loop step in bridge_steps -> &rows.push(bridge_status(step))
+    rows
+}
 
-pub fn require_bridge(provider: String) DataError! {
-    core.data.require_bridge(provider)
+fn require_bridge(provider: String) DataError! -[FS, Env]> {
+    step :: bridge_provider(provider) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data bridge provider `{provider}`; expected py, r, or gpu", "require_bridge"))
+    facts :: bridge_status(step)
+    if facts.path == "available" -> return Ok(())
+    return Err(data_error(DataErrorKind.Bridge, "{step} unavailable (clone_value={facts.clone_value}, ownership={facts.ownership}, trust={facts.trust}, fallback={facts.fallback}, replacement={facts.replacement})", "require_bridge"))
+}
+
+fn bridge_provider(provider: String) -> String? Never! {
+    name := trim(provider)
+    loop name.ends_with(".") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 1]) ?? ""
+    if name.ends_with(".*") -> name = String.from_bytes(name.bytes()[0..<name.bytes().len() - 2]) ?? ""
+    name = upper(name)
+    if name == "PY" || name == "PYTHON" -> return Val("py.*")
+    if name == "R" -> return Val("r.*")
+    if name == "GPU" || name == "CUDA" || name == "METAL" || name == "VULKAN" || name == "WEBGPU" -> return Val("gpu.*")
+    None
+}
+
+fn bridge_status(step: String) -[FS, Env]> DataStatus Never! {
+    path := "unavailable"
+    if step == "r.*" && bridge_tool_on_path("Rscript") {
+        if sys.get("JET_DATA_R_BRIDGE") == .Val(enabled) {
+            if enabled == "1" -> path = "available"
+        }
+    }
+    if step == "py.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "python-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data native lists/query/stats"}
+    if step == "r.*" -> return DataStatus{step: step, path: path, clone_value: "owned-copy", ownership: "r-sidecar", trust: "untrusted-foreign", fallback: "none", replacement: "core.data Query<T> typed round-trip"}
+    DataStatus{step: step, path: path, clone_value: "device-transfer", ownership: "device-buffer", trust: "untrusted-accelerator", fallback: "none", replacement: "core.data / Tensor native CPU path"}
+}
+
+fn bridge_tool_on_path(tool: String) -[FS, Env]> Bool Never! {
+    // Keep opaque native path bytes: PATH need not be UTF-8.
+    path :: core.sys.__host_env("PATH") ?? return false
+    windows :: sys.is_windows()
+    delimiter :: if windows -> U8{59} else -> U8{58}
+    directory := [U8]{}
+    quoted := false
+    index := 0
+    loop {
+        at_end :: index == path.len()
+        if !at_end {
+            b :: path[index]
+            index += 1
+            if windows && b == (U8{34}) {
+                quoted = !quoted
+                next
+            }
+            if b != delimiter || quoted {
+                &directory.push(b)
+                next
+            }
+        }
+        if directory.len() > 0 {
+            last :: directory[directory.len() - 1]
+            drive_relative :: windows && directory.len() == 2 && directory[1] == (U8{58})
+            if last != (U8{47}) && (!windows || last != (U8{92})) && !drive_relative {
+                &directory.push(if windows -> U8{92} else -> U8{47})
+            }
+        }
+        loop b in tool.bytes() -> &directory.push(b)
+        is_file := false
+        #Unsafe("native path bytes originate from the host environment and are split at ASCII boundaries") {
+            is_file = core.data.__host_path_is_file(directory) ?? false
+        }
+        if is_file -> return true
+        if at_end -> break
+        directory = [U8]{}
+    }
+    false
 }
 
 fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, parameters: [String], format_name: String, authority_name: String, limits: DataLimits) -> DataLoader<T> DataError! {
-    if !valid_encoding_limits(~limits.encoding) {
+    if !valid_encoding_limits(limits.encoding) {
         return Err(data_error(DataErrorKind.Limit, "encoding limits are outside their safe ranges", "data.loader"))
     }
     if limits.max_groups <= 0 || limits.max_sort_rows <= 0 || limits.max_join_rows <= 0 || limits.max_output_rows <= 0 {
         return Err(data_error(DataErrorKind.InvalidArgument, "data limits must be positive", "data.loader"))
     }
-    if !valid_public_text(~locator, false) {
+    if !valid_public_text(locator, false) {
         return Err(data_error(DataErrorKind.InvalidArgument, "source locator is invalid", "data.loader"))
     }
-    if member.len() > 0 && !valid_public_text(~member, false) {
+    if member.len() > 0 && !valid_public_text(member, false) {
         return Err(data_error(DataErrorKind.InvalidArgument, "archive member is invalid", "data.loader"))
     }
     if kind != DataLoaderKind.File && member.len() > 0 {
         return Err(data_error(DataErrorKind.InvalidArgument, "only file loaders may carry an archive member", "data.loader"))
     }
     loop parameter in parameters {
-        if !valid_public_text(~parameter, true) {
+        if !valid_public_text(parameter, true) {
             return Err(data_error(DataErrorKind.InvalidArgument, "loader parameter is invalid", "data.loader"))
         }
     }
-    if !valid_public_text(~authority_name, false) || !valid_authority(~authority_name) {
+    if !valid_public_text(authority_name, false) || !valid_authority(authority_name) {
         return Err(data_error(DataErrorKind.InvalidArgument, "loader authority is invalid", "data.loader"))
     }
     format :: parse_format(format_name) ?? return Err(data_error(DataErrorKind.InvalidArgument, "unknown data format", "data.loader"))
     source := DataSourceIdentity{kind: kind, locator: public_locator(kind, locator), member: member, parameters: public_parameters(parameters)}
-    authority := DataAuthority{scope: ~authority_name, revision: ""}
+    authority := DataAuthority{scope: authority_name.copy(), revision: ""}
     status := DataLoaderStatus{
         identity: "",
         freshness: DataFreshness.Pending,
@@ -1026,7 +1326,7 @@ fn make_loader<T>(kind: DataLoaderKind, locator: String, member: String, paramet
 
 fn public_parameters(values: [String]) -> [String] Never! {
     out := [String]{}
-    loop value in values -> &out.push(public_parameter(~value))
+    loop value in values -> &out.push(public_parameter(value))
     out
 }
 
@@ -1038,8 +1338,8 @@ fn public_parameter(value: String) -> String Never! {
     key :: trim(parts[0])
     if key.len() == 0 -> return "value-{sha256(normalized.bytes()).hex()}"
     parameter_value :: parts[1]
-    upper_key :: upper(~key)
-    upper_value :: upper(~parameter_value)
+    upper_key :: upper(key)
+    upper_value :: upper(parameter_value)
     sensitive_key := upper_key.contains("PASSWORD") || upper_key.contains("PASSWD") || upper_key.contains("PWD") || upper_key.contains("SECRET") || upper_key.contains("TOKEN") || upper_key.contains("CREDENTIAL") || upper_key.contains("AUTH") || upper_key.contains("API_KEY") || upper_key.contains("APIKEY") || upper_key.contains("ACCESS_KEY") || upper_key.contains("ACCESS-TOKEN") || upper_key.contains("SIGNATURE") || upper_key.contains("COOKIE") || upper_key.contains("SESSION") || upper_key.contains("PRIVATE_KEY") || upper_key.contains("PRIVATE-KEY") || upper_key.contains("BEARER")
     sensitive_value := upper_value.starts_with("BEARER ") || upper_value.starts_with("BASIC ") || upper_value.starts_with("-----BEGIN") || upper_value.starts_with("PASSWORD=") || upper_value.starts_with("SECRET=") || upper_value.starts_with("TOKEN=") || upper_value.starts_with("CREDENTIAL=") || upper_value.starts_with("AUTHORIZATION=")
     if sensitive_key || sensitive_value -> return "{key}=<redacted>"
@@ -1048,7 +1348,7 @@ fn public_parameter(value: String) -> String Never! {
 
 fn public_locator(kind: DataLoaderKind, locator: String) -> String Never! {
     if kind == DataLoaderKind.Database -> return "query-{sha256(locator.bytes()).hex()}"
-    if kind != DataLoaderKind.URL -> return ~locator
+    if kind != DataLoaderKind.URL -> return locator.copy()
     fragment_parts :: locator.split("#").to_list()
     without_fragment :: fragment_parts[0]
     query_parts :: without_fragment.split("?").to_list()
@@ -1063,7 +1363,7 @@ fn public_locator(kind: DataLoaderKind, locator: String) -> String Never! {
     }
     if query_parts.len() == 1 -> return base
     public_query := [String]{}
-    loop parameter in query_parts[1].split("&") -> &public_query.push(public_parameter(~parameter))
+    loop parameter in query_parts[1].split("&") -> &public_query.push(public_parameter(parameter))
     "{base}?{public_query.join("&")}"
 }
 
@@ -1093,7 +1393,7 @@ fn valid_public_text(text: String, allow_empty: Bool) -> Bool Never! {
 }
 
 fn valid_authority(text: String) -> Bool Never! {
-    normalized := upper(~text)
+    normalized := upper(text)
     if normalized.starts_with("BEARER ") || normalized.starts_with("BASIC ") -> return false
     if normalized.starts_with("PASSWORD=") || normalized.starts_with("SECRET=") || normalized.starts_with("TOKEN=") || normalized.starts_with("CREDENTIAL=") || normalized.starts_with("AUTHORIZATION=") -> return false
     loop byte in text.bytes() {
@@ -1103,13 +1403,16 @@ fn valid_authority(text: String) -> Bool Never! {
 }
 
 fn parse_format(name: String) -> DataFormat? Never! {
-    normalized := upper(trim(name))
+    normalized := upper(name)
     if normalized == {
         "CSV" -> Val(DataFormat.CSV)
         "JSON" -> Val(DataFormat.JSON)
         "JSONL" -> Val(DataFormat.JSONL)
+        "NDJSON" -> Val(DataFormat.JSONL)
         "PARQUET" -> Val(DataFormat.Parquet)
         "ARROW" -> Val(DataFormat.Arrow)
+        "ARROW-IPC" -> Val(DataFormat.Arrow)
+        "FEATHER" -> Val(DataFormat.Arrow)
         else -> None
     }
 }
@@ -1318,7 +1621,7 @@ fn scale_between(value: Float, minimum: Float, maximum: Float, extent: Int) -> I
     ratio := (value - minimum) / (maximum - minimum)
     if ratio <= (Float{0.0}) -> return 0
     if ratio >= (Float{1.0}) -> return extent
-    Int{ratio * Float{extent}}
+    Int.from_float(ratio * Float{extent}) ?? panic("plot coordinate must be finite")
 }
 
 
@@ -1442,7 +1745,7 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
     loop i in 0..<n {
         x := left + plot_w /% 2
         if n > 1 -> x = left + plot_w * i /% (n - 1)
-        y := top + Int{(maximum - values[i]) * Float{plot_h} / (maximum - minimum)}
+        y := top + (Int.from_float((maximum - values[i]) * Float{plot_h} / (maximum - minimum)) ?? panic("plot coordinate must be finite"))
         if i > 0 -> points = "{points} "
         points = "{points}{x},{y}"
     }
@@ -1454,13 +1757,13 @@ fn render_line_options_svg(labels: [String], values: [Float], options: DataLineO
         loop i in 0..<n {
             x := left + plot_w /% 2
             if n > 1 -> x = left + plot_w * i /% (n - 1)
-            y := top + Int{(maximum - values[i]) * Float{plot_h} / (maximum - minimum)}
+            y := top + (Int.from_float((maximum - values[i]) * Float{plot_h} / (maximum - minimum)) ?? panic("plot coordinate must be finite"))
             out = "{out}<circle cx=\"{x}\" cy=\"{y}\" r=\"4\" fill=\"{xml_escape(options.color)}\"/>"
         }
     }
     if options.reference != None {
         reference :: options.reference ?? Float{0.0}
-        y := top + Int{(maximum - reference) * Float{plot_h} / (maximum - minimum)}
+        y := top + (Int.from_float((maximum - reference) * Float{plot_h} / (maximum - minimum)) ?? panic("plot reference must be finite"))
         out = "{out}<line x1=\"{left}\" y1=\"{y}\" x2=\"{w - right}\" y2=\"{y}\" stroke=\"#888\" stroke-dasharray=\"4 4\"/>"
     }
     loop i in 0..<n {
@@ -1523,3 +1826,165 @@ fn upper(text: String) -> String Never! {
     }
     String.from_bytes(out) ?? ""
 }
+
+#Test("Plot aggregate absence is the native enum constructor") {
+    none :: plot.__plot_aggregate_none()
+    assert(none == plot.__plot_aggregate_none())
+    assert(none != JetDataPlotAggregate.Sum)
+}
+
+// Native DataFlow.rs::jet_data_loader_canonical_tree sorts object keys by
+// UTF-8 lexical order, but keeps Debug float spelling and exact Number text.
+fn data_loader_put_text(out: &[U8], text: String) Never! {
+    loop index in 0..<text.count_bytes() -> &out.push(encoding_stream.byte_at(text, index))
+}
+
+fn data_loader_put_control(out: &[U8], value: Int) Never! {
+    &out.push(U8{92})
+    &out.push(U8{117})
+    &out.push(U8{48})
+    &out.push(U8{48})
+    hex :: "0123456789abcdef"
+    &out.push(encoding_stream.byte_at(hex, value >> 4))
+    &out.push(encoding_stream.byte_at(hex, value.bit_and(15)))
+}
+
+fn data_loader_quote(out: &[U8], text: String) Never! {
+    &out.push(U8{34})
+    index := 0
+    loop index < text.count_bytes() {
+        byte :: encoding_stream.byte_at(text, index)
+        n :: Int.from_u8(byte)
+        if n == 34 || n == 92 {
+            &out.push(U8{92})
+            &out.push(byte)
+        } else if n == 10 || n == 13 || n == 9 {
+            &out.push(U8{92})
+            &out.push(if n == 10 -> U8{110} else if n == 13 -> U8{114} else -> U8{116})
+        } else if n < 32 || n == 127 {
+            data_loader_put_control(&out, n)
+        } else if n == 194 && index + 1 < text.count_bytes() && Int.from_u8(encoding_stream.byte_at(text, index + 1)) <= 159 {
+            // Rust char::is_control includes the C1 scalars U+0080..U+009F.
+            index += 1
+            data_loader_put_control(&out, Int.from_u8(encoding_stream.byte_at(text, index)))
+        } else {
+            &out.push(byte)
+        }
+        index += 1
+    }
+    &out.push(U8{34})
+}
+
+fn data_loader_render(out: &[U8], tree: encoding.Dyn) Never! {
+    #Unsafe("inspect existing private Decode carriers only inside checked Core data source") {
+        if tree == .Number(text) {
+            data_loader_put_text(&out, text)
+            return
+        }
+        if tree == .Bytes(bytes) {
+            &out.push(U8{91})
+            loop (index, byte) in bytes {
+                if index != 0 -> &out.push(U8{44})
+                data_loader_put_text(&out, "{byte}")
+            }
+            &out.push(U8{93})
+            return
+        }
+    }
+    if tree == {
+        .Null -> data_loader_put_text(&out, "null")
+        .Bool(value) -> data_loader_put_text(&out, if value -> "true" else -> "false")
+        .Int(value) -> data_loader_put_text(&out, "{value}")
+        .Float(value) -> data_loader_put_text(&out, "{value:Debug}")
+        .Text(value) -> data_loader_quote(&out, value)
+        .Array(values) -> {
+            &out.push(U8{91})
+            loop (index, value) in values {
+                if index != 0 -> &out.push(U8{44})
+                data_loader_render(&out, value)
+            }
+            &out.push(U8{93})
+        }
+        .Object(_) -> {
+            // Sort the owned entries directly; the comparator captures no tree.
+            entries := encoding_stream.object_entries(tree)
+            &entries.sort_by((left: (key: String, value: Dyn), right: (key: String, value: Dyn)) -> left.key <=> right.key)
+            &out.push(U8{123})
+            loop (position, entry) in entries {
+                if position != 0 -> &out.push(U8{44})
+                data_loader_quote(&out, entry.key)
+                &out.push(U8{58})
+                data_loader_render(&out, entry.value)
+            }
+            &out.push(U8{125})
+        }
+        else -> panic("unknown native Dyn carrier")
+    }
+}
+
+fn data_loader_check_payload(limits: DataLimits, bytes: Int, operation: String) DataError! {
+    if bytes > limits.encoding.max_item_bytes -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_item_bytes is {limits.encoding.max_item_bytes}", operation))
+    if limits.encoding.max_total_bytes == .Val(limit) {
+        if bytes > limit -> return Err(data_error(.Limit, "payload is {bytes} bytes; max_total_bytes is {limit}", operation))
+    }
+    Ok(())
+}
+
+#Encode
+struct DataLoaderPortRecord {
+    z: Float
+    a: String
+}
+
+#Test("value loader preserves canonical payload and user-record return type") {
+    record :: DataLoaderPortRecord{z: Float{2.0}, a: "x"}
+    loader :: value<DataLoaderPortRecord>(record, DataLimits.safe()) ?? panic("value loader")
+    payload :: loader.payload ?? panic("value payload")
+    assert_eq(payload, [U8]{123, 34, 97, 34, 58, 34, 120, 34, 44, 34, 122, 34, 58, 50, 46, 48, 125})
+    assert_eq(loader.source.kind, DataLoaderKind.Value)
+    assert_eq(loader.source.locator, "value")
+    assert_eq(loader.authority.scope, "local")
+    assert_eq(loader.format, DataFormat.JSON)
+    assert(loader.last_good == None)
+    assert(!loader.cancelled)
+    assert(!loader.offline)
+
+    limits := DataLimits.safe()
+    limits.encoding.max_item_bytes = 1
+    limits.encoding.buffer_bytes = 1
+    if value<String>("x", limits) == {
+        .Err(error) -> {
+            assert(error.kind == .Limit)
+            assert_eq(error.operation, "data.value")
+            assert_eq(error.reason, "payload is 3 bytes; max_item_bytes is 1")
+        }
+        else -> panic("value payload limit must precede constructor validation")
+    }
+}
+
+#Test("value canonical strings retain native C0 and C1 control escaping") {
+    text :: encoding_stream.text_from_bytes([U8]{8, 127, 194, 128, 194, 159, 9}) ?? panic("control text")
+    out := [U8]{}
+    data_loader_quote(&out, text)
+    assert_eq(out, [U8]{34, 92, 117, 48, 48, 48, 56, 92, 117, 48, 48, 55, 102, 92, 117, 48, 48, 56, 48, 92, 117, 48, 48, 57, 102, 92, 116, 34})
+}
+
+#Test("data CSV and JSON preserve malformed input field-error strings") {
+    if csv<Int>("n\n\"7\"x") == {
+        .Err(errors) -> {
+            assert_eq(errors.len(), 1)
+            assert_eq(errors[0].path, "")
+            assert_eq(errors[0].reason, "E2701: CSV row 2, line 2, column 4 — only quote, comma, CRLF, LF, or EOF may follow a closing quote")
+        }
+        else -> panic("malformed CSV accepted")
+    }
+    if json<Int>("[1e]") == {
+        .Err(errors) -> {
+            assert_eq(errors.len(), 1)
+            assert_eq(errors[0].path, "")
+            assert_eq(errors[0].reason, "invalid JSON (line 1): bad number")
+        }
+        else -> panic("malformed JSON accepted")
+    }
+}
+

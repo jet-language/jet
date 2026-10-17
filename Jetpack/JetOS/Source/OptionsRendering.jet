@@ -3,7 +3,7 @@
 // BLOCKED #4262 integration until shared Encoding/Json.jet lands in main
 // Compiler/ after stage 2; no worktree dependency is registered in Bootstrap.
 
-pub fn jetos_shell_single_quote(value: String) -> String Never! {
+fn jetos_shell_single_quote(value: String) -> String Never! {
     parts := [String]{"'"}
     loop scalar in value.chars() {
         text :: "{scalar}"
@@ -13,7 +13,7 @@ pub fn jetos_shell_single_quote(value: String) -> String Never! {
     parts.join("")
 }
 
-pub fn jetos_option_value(system: SystemPlan, keys: [String]) -> String? Never! {
+fn jetos_option_value(system: SystemPlan, keys: [String]) -> String? Never! {
     loop key in keys {
         if jetos_resolved_option_value(system, key) == .Val(value) -> return Val(value)
     }
@@ -27,14 +27,14 @@ fn jetos_raw_option_value(system: SystemPlan, key: String) -> String? Never! {
     None
 }
 
-pub fn jetos_resolved_option_value(system: SystemPlan, key: String) -> String? Never! {
+fn jetos_resolved_option_value(system: SystemPlan, key: String) -> String? Never! {
     resolved :: jetos_resolved_option(system, key) ?? return None
     Val(resolved.value)
 }
 
 // Rust :80-117: metadata is first-writer, shared by ALL same-key contenders.
 // This is not a per-contender tier parser: equal priorities pick the last writer.
-pub fn jetos_resolved_option(system: SystemPlan, key: String) -> JetOSResolvedOption? Never! {
+fn jetos_resolved_option(system: SystemPlan, key: String) -> JetOSResolvedOption? Never! {
     tier :: if jetos_raw_option_value(system, "{key}.tier") == {
         .Val(value) -> jetos_clean_symbol(value)
         .None -> "Normal"
@@ -47,14 +47,14 @@ pub fn jetos_resolved_option(system: SystemPlan, key: String) -> JetOSResolvedOp
     loop index in 0..<system.options.len() {
         option :: system.options[index]
         if option.key == key {
-            &contenders.push(JetOSOptionContender{value: jetos_clean_value(option.value), tier: ~tier, priority: priority, source_order: index, winner: false})
+            &contenders.push(JetOSOptionContender{value: jetos_clean_value(option.value), tier: tier.copy(), priority: priority, source_order: index, winner: false})
         }
     }
     if contenders.len() == 0 -> return None
     // All contenders have the metadata priority; source order is increasing.
     winner_index :: contenders.len() - 1
     contenders[winner_index].winner = true
-    value :: ~contenders[winner_index].value
+    value :: contenders[winner_index].value.copy()
     Val(JetOSResolvedOption{key: key, value: value, tier: tier, priority: priority, contenders: contenders})
 }
 
@@ -82,11 +82,11 @@ fn jetos_parse_i64(text: String) -> Int? Never! {
     Val(number)
 }
 
-pub fn jetos_is_option_priority_metadata(key: String) -> Bool Never! {
+fn jetos_is_option_priority_metadata(key: String) -> Bool Never! {
     key.ends_with(".tier") || key.ends_with(".priority") || key.ends_with(".override") || key.ends_with(".disabled")
 }
 
-pub fn jetos_option_type(value: String) -> String Never! {
+fn jetos_option_type(value: String) -> String Never! {
     trimmed :: value.trim()
     if trimmed.starts_with("[") -> return "List"
     if trimmed == "true" || trimmed == "false" -> return "Bool"
@@ -95,7 +95,7 @@ pub fn jetos_option_type(value: String) -> String Never! {
     "String"
 }
 
-pub fn jetos_option_default(namespace: String) -> String Never! {
+fn jetos_option_default(namespace: String) -> String Never! {
     if namespace == {
         "network" -> "dhcp-and-closed-firewall"
         "services" -> "disabled"
@@ -109,7 +109,7 @@ pub fn jetos_option_default(namespace: String) -> String Never! {
     }
 }
 
-pub fn jetos_option_doc(key: String) -> String Never! {
+fn jetos_option_doc(key: String) -> String Never! {
     namespace :: if key.split_once(".") == {
         .Val(parts) -> parts.before
         .None -> key
@@ -131,7 +131,7 @@ pub fn jetos_option_doc(key: String) -> String Never! {
     }
 }
 
-pub fn jetos_prefixed_options(system: SystemPlan, prefix: String) -> [(key: String, value: String)] Never! {
+fn jetos_prefixed_options(system: SystemPlan, prefix: String) -> [(key: String, value: String)] Never! {
     rows := [(key: String, value: String)]{}
     loop option in system.options {
         if option.key.starts_with(prefix) -> &rows.push((key: option.key.removeprefix(prefix), value: jetos_clean_value(option.value)))
@@ -139,19 +139,19 @@ pub fn jetos_prefixed_options(system: SystemPlan, prefix: String) -> [(key: Stri
     rows
 }
 
-pub fn jetos_option_rows_json(rows: [(key: String, value: String)]) -> String Never! {
+fn jetos_option_rows_json(rows: [(key: String, value: String)]) -> String Never! {
     parts := [String]{}
     loop row in rows -> &parts.push("{{\n  \"key\": {foundation_json_quote(row.key)},\n  \"value\": {foundation_json_quote(row.value)}\n}}")
     parts.join(",")
 }
 
-pub fn jetos_strings_json(values: [String]) -> String Never! {
+fn jetos_strings_json(values: [String]) -> String Never! {
     parts := [String]{}
     loop value in values -> &parts.push(foundation_json_quote(value))
     parts.join(",")
 }
 
-pub fn jetos_boot_profile(system: SystemPlan) -> JetOSBootProfile Never! {
+fn jetos_boot_profile(system: SystemPlan) -> JetOSBootProfile Never! {
     loader :: if jetos_option_value(system, [String]{"boot.loader"}) == {
         .Val(value) -> jetos_clean_symbol(value)
         .None -> "Limine"
@@ -167,7 +167,7 @@ pub fn jetos_boot_profile(system: SystemPlan) -> JetOSBootProfile Never! {
     return JetOSBootProfile{loader: loader, kernel: kernel, init: init, initrd_modules: modules}
 }
 
-pub fn jetos_collect_names(system: SystemPlan, namespace: String) -> [String] Never! {
+fn jetos_collect_names(system: SystemPlan, namespace: String) -> [String] Never! {
     prefix :: "{namespace}."
     names := [String]{}
     loop option in system.options {
@@ -181,7 +181,7 @@ pub fn jetos_collect_names(system: SystemPlan, namespace: String) -> [String] Ne
     names
 }
 
-pub fn jetos_user_names(system: SystemPlan) -> [String] Never! {
+fn jetos_user_names(system: SystemPlan) -> [String] Never! {
     names := jetos_collect_names(system, "users")
     loop name in jetos_collect_names(system, "user") {
         if !names.contains(name) -> &names.push(name)
@@ -190,7 +190,7 @@ pub fn jetos_user_names(system: SystemPlan) -> [String] Never! {
     names
 }
 
-pub fn jetos_render_user_profile_json(system: SystemPlan, user: String) -> String Never! {
+fn jetos_render_user_profile_json(system: SystemPlan, user: String) -> String Never! {
     home :: jetos_option_value(system, [String]{"user.{user}.home", "users.{user}.home"}) ?? "/home/{user}"
     shell :: if jetos_option_value(system, [String]{"user.{user}.shell", "users.{user}.shell"}) == {
         .Val(value) -> jetos_package_path_or_literal(value)
@@ -211,13 +211,13 @@ pub fn jetos_render_user_profile_json(system: SystemPlan, user: String) -> Strin
     jetos_render_user_profile_json_parts(user, home, shell, jetos_strings_json(packages), jetos_strings_json(services), file_rows.join(","))
 }
 
-pub fn jetos_render_user_profile_json_parts(user: String, home: String, shell: String, packages_json: String, services_json: String, files_json: String) -> String Never! {
+fn jetos_render_user_profile_json_parts(user: String, home: String, shell: String, packages_json: String, services_json: String, files_json: String) -> String Never! {
     "{{\"kind\":\"jetos.user-generation\",\"user\":{foundation_json_quote(user)},\"home\":{foundation_json_quote(home)},\"shell\":{foundation_json_quote(shell)},\"packages\":[{packages_json}],\"services\":[{services_json}],\"files\":[{files_json}],\"standalone_commands\":[\"plan\",\"build\",\"switch\",\"rollback\",\"prove\"],\"proof\":\"user-generation-ready\"}}"
 }
 
 // Rust :338-367: quotes toggle literally (even escaped quotes); brackets are
 // stripped only as a matching outer pair. Commas inside quotes stay in one item.
-pub fn jetos_parse_list_items(value: String) -> [String] Never! {
+fn jetos_parse_list_items(value: String) -> [String] Never! {
     trimmed := value.trim() // #4303: temporary owned String allocation; revert with view emitter fix.
     inner :: if trimmed.starts_with("[") && trimmed.ends_with("]") && trimmed.len() >= 2 -> trimmed.removeprefix("[").removesuffix("]") else -> value
     items := [String]{}
@@ -243,25 +243,25 @@ pub fn jetos_parse_list_items(value: String) -> [String] Never! {
 
 // This Rust projection strips ONLY the exact packages. prefix; it does not
 // classify or resolve a package reference or consult a source table.
-pub fn jetos_package_path_or_literal(value: String) -> String Never! {
+fn jetos_package_path_or_literal(value: String) -> String Never! {
     if value.starts_with("packages.") -> return "/run/current-system/sw/bin/{value.removeprefix("packages.")}"
-    ~value
+    value.copy()
 }
 
-pub fn jetos_service_extra(service: ServicePlan, keys: [String]) -> String? Never! {
+fn jetos_service_extra(service: ServicePlan, keys: [String]) -> String? Never! {
     loop field in service.extra {
         if keys.contains(field.key) -> return Val(jetos_clean_value(field.value))
     }
     None
 }
 
-pub fn jetos_clean_value(value: String) -> String Never! {
+fn jetos_clean_value(value: String) -> String Never! {
     trimmed := value.trim() // #4303: temporary owned String allocation; revert with view emitter fix.
     if trimmed.len() >= 2 && trimmed.starts_with("\"") && trimmed.ends_with("\"") -> return trimmed.removeprefix("\"").removesuffix("\"")
     trimmed
 }
 
-pub fn jetos_clean_symbol(value: String) -> String Never! {
+fn jetos_clean_symbol(value: String) -> String Never! {
     trimmed := jetos_clean_value(value).trim()
     loop trimmed.starts_with(".") -> trimmed = trimmed.removeprefix(".")
     trimmed.removeprefix("users.")
@@ -274,7 +274,7 @@ fn jetos_ascii_alphanumeric(text: String) -> Bool Never! {
     (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
 }
 
-pub fn jetos_safe_filename(value: String) -> String Never! {
+fn jetos_safe_filename(value: String) -> String Never! {
     parts := [String]{}
     loop scalar in value.chars() {
         text :: "{scalar}"
@@ -283,7 +283,7 @@ pub fn jetos_safe_filename(value: String) -> String Never! {
     parts.join("")
 }
 
-pub fn jetos_safe_identifier(value: String) -> String Never! {
+fn jetos_safe_identifier(value: String) -> String Never! {
     parts := [String]{}
     loop scalar in value.chars() {
         text :: "{scalar}"
@@ -296,7 +296,7 @@ pub fn jetos_safe_identifier(value: String) -> String Never! {
     out
 }
 
-pub fn jetos_clean_bool_json(value: String) -> String Never! {
+fn jetos_clean_bool_json(value: String) -> String Never! {
     cleaned :: jetos_clean_symbol(value)
     // Rust eq_ignore_ascii_case, not Unicode case folding.
     if cleaned.len() != 4 -> return "false"
@@ -306,7 +306,7 @@ pub fn jetos_clean_bool_json(value: String) -> String Never! {
     "false"
 }
 
-pub fn jetos_render_proof(system: SystemPlan, realized: [JetOSRealizedPackage], plan: EnvPlan) -> String Never! {
+fn jetos_render_proof(system: SystemPlan, realized: [JetOSRealizedPackage], plan: EnvPlan) -> String Never! {
     risks :: jetos_risk_classes(system)
     risk :: if risks.len() == 0 -> "low" else -> risks.join(", ")
     parts := [String]{"jetos proof for {system.name}\n", "target: {system.target}\n", "risk: {risk}\n", "plan: pass\n", "packages:\n"}
@@ -322,7 +322,7 @@ pub fn jetos_render_proof(system: SystemPlan, realized: [JetOSRealizedPackage], 
     parts.join("")
 }
 
-pub fn jetos_risk_classes(system: SystemPlan) -> [String] Never! {
+fn jetos_risk_classes(system: SystemPlan) -> [String] Never! {
     risks := [String]{}
     loop option in system.options {
         key :: option.key

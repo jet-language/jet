@@ -6,88 +6,13 @@ use std::path::Path;
 use std::sync::OnceLock;
 
 use crate::AST::{
-    AccessConvention, ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, ProgramBundle, Stmt,
-    StructDef, Type,
+    ComptimeInput, CtFloat, CtKey, CtReport, Expr, Func, MirFragmentNominalFacts,
+    ProgramBundle, Stmt, StructDef, Type,
 };
-use crate::Comptime::{CtValue, DebugHook, DevSink, PurityStage, ReplAuthorizer};
+use crate::Comptime::{CtValue, DevSink, PurityStage, ReplAuthorizer};
 use crate::Diagnostics::{Diagnostic, Span};
 use jet_foundation::MIR::{MirConstKey, MirRuntimeValue, MirType, MirTypeKind};
 use jet_foundation::Numeric::CtBigInt;
-
-/// Loaded source-owned Core signature projected into a comptime fragment.
-#[derive(Clone, Debug)]
-pub struct MirFragmentCoreSourceSignature {
-    /// Generic parameter names in declaration order.
-    pub type_params: Vec<String>,
-    /// Checked parameter conventions and types in declaration order.
-    pub params: Vec<(AccessConvention, Type)>,
-    /// Declared return type, if the function returns a value.
-    pub return_type: Option<Type>,
-}
-
-/// Loaded source module whose bodies a comptime fragment lowers on demand,
-/// exactly as runtime lowering does for a reachable call: a source-owned Core
-/// module, or a user file module a `prep` initializer reaches.
-#[derive(Clone, Debug)]
-pub struct MirFragmentCoreSourceModule {
-    /// Loader alias of the defining module (`CoreSourceModule::alias`).
-    pub alias: String,
-    /// Checked module identity. Lowered bodies and the call sites that reach
-    /// them share this owner in their semantic key.
-    pub module_identity: String,
-    /// The defining module's own `use core... as alias` table.
-    pub core_imports: HashMap<String, String>,
-    /// Every top-level function of the module by name, private helpers
-    /// included, so a demanded body can call its same-module helpers.
-    pub functions: HashMap<String, Func>,
-    /// Every top-level constant of the module, so a demanded body reads its
-    /// same-module tables (`C_SHA256_K[t]`) as runtime lowering does.
-    pub constants: Vec<crate::AST::ConstDef>,
-    /// User file module: its own `use` aliases, source alias to the imported
-    /// module's `core_source_bodies` key (its loader alias). Empty for Core.
-    pub module_imports: HashMap<String, String>,
-    /// User file module: member-imported functions (`use c.[f]`), local name
-    /// to (`core_source_bodies` key, function name). Empty for Core.
-    pub imported_functions: HashMap<String, (String, String)>,
-    /// User file module: declared signatures of its cross-module callees,
-    /// keyed by (source alias or local name, function name).
-    pub import_signatures: HashMap<(String, String), MirFragmentCoreSourceSignature>,
-    /// User file module: its source type spellings (`Point`, `c.Shape`) to
-    /// canonical `package::module::Type` identities. Empty for Core.
-    pub nominal_identities: HashMap<String, String>,
-}
-
-/// Checked nominal facts retained for a comptime fragment.
-///
-/// Sema owns the source-to-canonical projection and the checked declaration
-/// rows. The fragment lowerer consumes these facts without rediscovering an
-/// imported owner from erased `CtValue` data.
-#[derive(Clone, Debug, Default)]
-pub struct MirFragmentNominalFacts {
-    /// Source spellings (including import-qualified and selective-import
-    /// names) to canonical `package::module::Type` identities.
-    pub nominal_identities: HashMap<String, String>,
-    /// Source import alias to the target module's loader alias.
-    pub import_modules: HashMap<String, String>,
-    /// Canonical nominal identity to the target module's loader alias.
-    pub foreign_modules: HashMap<String, String>,
-    /// Canonical imported struct identity to its checked declaration row.
-    pub structs: HashMap<String, StructDef>,
-    /// Checked enum declarations, including their payload shapes.
-    pub enums: HashMap<String, crate::AST::EnumDef>,
-    /// Loaded source signatures for imported source-owned Core members.
-    pub core_source_sigs: HashMap<(String, String), MirFragmentCoreSourceSignature>,
-    /// Loaded source-owned Core modules keyed by Core module path
-    /// (`core.math`); the owner of every `core_source_sigs` row is here.
-    /// Shared: every evaluation request clones these facts.
-    pub core_source_bodies: std::sync::Arc<HashMap<String, MirFragmentCoreSourceModule>>,
-    /// The evaluated module's member-imported user functions (`use b.[f]`):
-    /// local name to (`core_source_bodies` key, function name).
-    pub imported_functions: HashMap<String, (String, String)>,
-    /// Declared signatures of the evaluated module's user-module callees,
-    /// keyed by (source alias or local name, function name).
-    pub import_signatures: HashMap<(String, String), MirFragmentCoreSourceSignature>,
-}
 
 pub struct ExprEvalRequest<'a> {
     pub data_pipeline: &'a mut crate::Comptime::DataPipelineState,
@@ -129,7 +54,7 @@ pub struct ExprEvalRequest<'a> {
     pub sink: Option<&'a mut DevSink>,
     /// Checked nominal identities and imported struct rows for fragment
     /// lowering. `None` is used by callers without an active module scope.
-    pub checked_nominals: Option<MirFragmentNominalFacts>,
+    pub checked_nominals: Option<std::sync::Arc<MirFragmentNominalFacts>>,
     pub repl_mode: bool,
     pub repl_grants: &'a [CtValue],
     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
@@ -141,7 +66,7 @@ pub struct ExprEvalRequest<'a> {
     /// `None` for pure const evaluation, which has no caller scope to update.
     pub mutated: Option<&'a mut HashMap<String, CtValue>>,
 }
-pub struct BlockEvalRequest<'a, 'debug> {
+pub struct BlockEvalRequest<'a> {
     pub data_pipeline: &'a mut crate::Comptime::DataPipelineState,
     pub stmts: &'a [Stmt],
     pub funcs: &'a HashMap<String, &'a Func>,
@@ -166,7 +91,7 @@ pub struct BlockEvalRequest<'a, 'debug> {
     pub sink: Option<&'a mut DevSink>,
     /// Checked nominal identities and imported struct rows for fragment
     /// lowering. `None` is used by callers without an active module scope.
-    pub checked_nominals: Option<MirFragmentNominalFacts>,
+    pub checked_nominals: Option<std::sync::Arc<MirFragmentNominalFacts>>,
     pub repl_mode: bool,
     pub repl_authorizer: Option<&'a mut dyn ReplAuthorizer>,
     pub gates: jet_foundation::Policy::GateSet,
@@ -176,12 +101,6 @@ pub struct BlockEvalRequest<'a, 'debug> {
     /// on the gated fragment dispatcher.
     pub runtime_execution: bool,
     pub computed_fields: &'a HashMap<(String, String), &'a Expr>,
-    /// Optional source debugger carried through the canonical MIR evaluator.
-    /// The evaluator owns statement order; the interpreter only supplies the
-    /// observation hook.
-    pub debugger: Option<&'debug mut dyn DebugHook>,
-    pub debug_function: String,
-    pub debug_depth: usize,
     /// D-CTEFFECT1 Tier-1 inputs recorded by the canonical host surface.
     pub embed_inputs: Option<&'a mut Vec<ComptimeInput>>,
 }
@@ -200,6 +119,7 @@ pub enum StmtOutcome {
 pub struct Hooks {
     pub run_bundle: fn(
         &ProgramBundle,
+        &[std::sync::Arc<MirFragmentNominalFacts>],
         &mut DevSink,
         jet_foundation::Policy::GateSet,
     ) -> Result<CtValue, Diagnostic>,
@@ -208,13 +128,14 @@ pub struct Hooks {
     /// defaults while keeping the direct dev/test seam.
     pub run_bundle_at_stage: fn(
         &ProgramBundle,
+        &[std::sync::Arc<MirFragmentNominalFacts>],
         &mut DevSink,
         jet_foundation::Policy::GateSet,
         PurityStage,
     ) -> Result<CtValue, Diagnostic>,
     pub eval_expr: fn(&mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic>,
     pub eval_block:
-        for<'a, 'debug> fn(&mut BlockEvalRequest<'a, 'debug>) -> Result<StmtOutcome, Diagnostic>,
+        for<'a> fn(&mut BlockEvalRequest<'a>) -> Result<StmtOutcome, Diagnostic>,
 }
 
 static HOOKS: OnceLock<Hooks> = OnceLock::new();
@@ -231,10 +152,11 @@ fn hooks() -> &'static Hooks {
 
 pub fn run_bundle(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<MirFragmentNominalFacts>],
     sink: &mut DevSink,
     gates: jet_foundation::Policy::GateSet,
 ) -> Result<CtValue, Diagnostic> {
-    (hooks().run_bundle)(bundle, sink, gates)
+    (hooks().run_bundle)(bundle, checked_nominals, sink, gates)
 }
 
 /// Run a whole program through an explicit purity stage. Runtime/deopt must
@@ -242,11 +164,12 @@ pub fn run_bundle(
 /// expression/block seams, which retain their build-time gate.
 pub fn run_bundle_at_stage(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<MirFragmentNominalFacts>],
     sink: &mut DevSink,
     gates: jet_foundation::Policy::GateSet,
     stage: PurityStage,
 ) -> Result<CtValue, Diagnostic> {
-    (hooks().run_bundle_at_stage)(bundle, sink, gates, stage)
+    (hooks().run_bundle_at_stage)(bundle, checked_nominals, sink, gates, stage)
 }
 
 /// Evaluate the pure projection subset directly on values already owned by a
@@ -452,8 +375,8 @@ pub fn eval_expr(req: &mut ExprEvalRequest<'_>) -> Result<CtValue, Diagnostic> {
     (hooks().eval_expr)(req)
 }
 
-pub fn eval_block<'a, 'debug>(
-    req: &mut BlockEvalRequest<'a, 'debug>,
+pub fn eval_block<'a>(
+    req: &mut BlockEvalRequest<'a>,
 ) -> Result<StmtOutcome, Diagnostic> {
     (hooks().eval_block)(req)
 }
@@ -471,6 +394,9 @@ fn conversion_error(message: impl Into<String>, span: Span) -> Diagnostic {
 pub(super) fn mir_to_ct_key(key: &MirConstKey) -> CtKey {
     match key {
         MirConstKey::Int(value) => CtKey::Int(*value),
+        MirConstKey::BigInt(value) => CtKey::from_value(CtValue::BigInt(
+            CtBigInt::from_str(value).expect("canonical MIR integer key"),
+        )).expect("integer key"),
         MirConstKey::String(value) => CtKey::Str(value.clone()),
         MirConstKey::Bool(value) => CtKey::Bool(*value),
         MirConstKey::Char(value) => CtKey::Char(*value),
@@ -497,6 +423,7 @@ pub(super) fn mir_to_ct_key(key: &MirConstKey) -> CtKey {
 pub(super) fn ct_to_mir_key(key: CtKey) -> MirConstKey {
     match key {
         CtKey::Int(value) => MirConstKey::Int(value),
+        CtKey::BigInt(value) => MirConstKey::from_bigint(&value),
         CtKey::Str(value) => MirConstKey::String(value),
         CtKey::Bool(value) => MirConstKey::Bool(value),
         CtKey::Char(value) => MirConstKey::Char(value),

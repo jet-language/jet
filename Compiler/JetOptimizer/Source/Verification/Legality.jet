@@ -10,6 +10,7 @@ use jet_foundation.[
     MIRCallbackID,
     MIRCallee,
     MIRCoreCall,
+    MIRConstant,
     MIRCoreCallID,
     MIRDataPlan,
     MIRFailureCarrier,
@@ -36,6 +37,7 @@ use jet_foundation.[
     MIRProgram,
     MIRScope,
     MIRScopeID,
+    MIRScopeKind,
     MIRSemanticOp,
     MIRSourceFileID,
     MIRSymbol,
@@ -49,10 +51,21 @@ use jet_foundation.[
     MIR_DATA_PLAN_SCHEMA_VERSION,
     MIR_SCHEMA_VERSION,
     Span,
+    mir_operation_can_stop,
+    mir_operation_can_panic,
+    mir_operation_stop_operand,
+    mir_operation_stop_place,
     mir_operation_place_uses,
     mir_operation_prelude_calls,
     mir_operation_type_uses,
     mir_operation_value_uses,
+    MIRValueConsumption,
+    mir_operation_consumption_route,
+    mir_operation_value_consumption,
+    mir_terminator_value_consumption,
+    mir_value_consumption_transfers,
+    mir_value_consumption_requires_owner,
+    mir_runtime_owned_ownership,
     mir_semantic_op_place_uses,
     mir_semantic_op_prelude_calls,
     mir_semantic_op_type_uses,
@@ -68,6 +81,30 @@ use jet_foundation.[
     mir_type_same_checked_type,
     mir_view_copy_kind,
 ]
+
+fn mir_pass_nested_shared_site(value: MIRConstant) -> Bool Never! {
+    if value == {
+        .SharedSite(_) -> return true
+        .List(values) -> {
+            loop item in values { if mir_pass_nested_shared_site(item) -> return true }
+        }
+        .Map(entries) -> {
+            loop entry in entries { if mir_pass_nested_shared_site(entry.value) -> return true }
+        }
+        .Struct(_, fields) -> {
+            loop field in fields { if mir_pass_nested_shared_site(field.value) -> return true }
+        }
+        .Enum(_, _, args) -> {
+            loop arg in args { if mir_pass_nested_shared_site(arg.value) -> return true }
+        }
+        .Present(inner) -> return mir_pass_nested_shared_site(inner)
+        .Failed(report) -> {
+            if report == .Told(inner) -> return mir_pass_nested_shared_site(inner)
+        }
+        else -> {}
+    }
+    false
+}
 
 // Program-wide rows stay fixed during one validation. Their identities are
 // indexed once, so each operation reference is a keyed lookup, not a scan.
@@ -154,24 +191,80 @@ fn mir_pass_validate_program_scan(program: MIRProgram, pass: MIROptimizationPass
         &failures.push(mir_pass_error(pass, .InvalidSchema, None, Span{start: 0, end: 0}, "MIR schema version does not match the canonical schema"))
         return failures
     }
-    tables :: mir_pass_legality_tables(program)
-    seen_functions := [U64:Bool]{}
-    loop function in program.functions {
-        failure := MIROptimizationError?{None}
-        if {
-            function.id.value == 0 -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))
-            seen_functions.get(function.id.value) != None -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function identity is duplicated"))
-            else -> {
-                &seen_functions.add(function.id.value, true).drop("checked absent above")
-                failure = mir_pass_validate_function(function, pass, tables)
+    site_initializers := [U64:Bool]{}
+    loop constant in program.constants {
+        problem := String?{None}
+        if constant.value == {
+            .SharedSite(site) -> {
+                initializer := MIRFunction?{None}
+                loop function in program.functions {
+                    if function.id == site.initializer {
+                        initializer = Val(function)
+                        break
+                    }
+                }
+                if initializer == .Val(function) {
+                    shared :: if constant.ty.kind == {
+                        .Shared(_) -> true
+                        else -> false
+                    }
+                    top_level :: if function.form == {
+                        .TopLevel -> true
+                        else -> false
+                    }
+                    if constant.is_storage || !shared
+                        || function.module_id != constant.module_id || function.params.len() != 0
+                        || function.generic_params.len() != 0 || function.capture_params.len() != 0
+                        || function.failure != .Infallible || !mir_type_same_checked_type(function.return_type, constant.ty)
+                        || function.kind != .Jet || !top_level
+                        || constant.key != "shared-site:{site.initializer.value}"
+                        || site_initializers.get(site.initializer.value) != None {
+                        problem = Val("invalid checked Core publication site")
+                    }
+                    loop effect_name in function.effects.solved {
+                        if effect_name != "Mem" -> problem = Val("impure checked Core publication initializer")
+                    }
+                } else {
+                    problem = Val("publication site initializer missing")
+                }
+                &site_initializers.add(site.initializer.value, true).drop("duplicate is reported above")
             }
+            else -> if mir_pass_nested_shared_site(constant.value) -> problem = Val("publication site nested in constant value")
         }
+        if problem == .Val(message) {
+            &failures.push(mir_pass_error(pass, .InvalidSchema, None, constant.span, message))
+            return failures
+        }
+    }
+    tables :: mir_pass_legality_tables(program)
+    identities :: mir_pass_identity_failures(program, pass)
+    loop (position, function) in program.functions {
+        failure := identities[position]
+        if failure == None -> failure = mir_pass_validate_function(function, pass, tables)
         if failure == .Val(error) {
             &failures.push(error)
             if !all -> return failures
         }
     }
     failures
+}
+
+// Per function, in program order: the error that stands in for its
+// validation when its stable identity is zero or repeats an earlier one,
+// else None (the function is validated).
+fn mir_pass_identity_failures(program: MIRProgram, pass: MIROptimizationPassID) -> [MIROptimizationError?] {
+    identities := [MIROptimizationError?]{}
+    seen_functions := [U64:Bool]{}
+    loop function in program.functions {
+        failure := MIROptimizationError?{None}
+        if {
+            function.id.value == 0 -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function has a zero stable identity"))
+            seen_functions.get(function.id.value) != None -> failure = Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, "MIR function identity is duplicated"))
+            else -> &seen_functions.add(function.id.value, true).drop("checked absent above")
+        }
+        &identities.push(failure)
+    }
+    identities
 }
 
 // Rust: crates/jet-foundation/src/MIR.rs::validate_function
@@ -182,14 +275,15 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
 
     // Every identity set and definition row is keyed, so each check is a
     // map probe instead of a scan of the rows seen so far.
-    seen_blocks := [U64:Bool]{}
+    seen_blocks := [U64:Int]{}
     seen_operations := [U64:Bool]{}
     definition_rows := [U64:MIRPassDefinition]{}
     result_types := [U64:MIRType]{}
+    block_index := 0
     loop block in function.blocks {
         if block.id.value == 0 -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block has a zero stable identity"))
         if seen_blocks.get(block.id.value) != None -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block identity is duplicated"))
-        &seen_blocks.add(block.id.value, true).drop("checked absent above")
+        &seen_blocks.add(block.id.value, block_index).drop("checked absent above")
         if block.span.start > block.span.end -> return Val(mir_pass_error(pass, .InvalidCFG, Val(function.id), block.span, "MIR block span is inverted"))
         index := 0
         loop instruction in block.instructions {
@@ -210,6 +304,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
 
             index += 1
         }
+        block_index += 1
     }
     definitions :: MIRPassDefinitions{values: definition_rows, places: mir_pass_place_rows(function), metadata: mir_pass_value_rows(function)}
 
@@ -241,6 +336,7 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
             }
             loop value in mir_operation_value_uses(instruction.operation) {
                 if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), instruction.span, "MIR operation reads an undefined SSA value"))
+                if mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), instruction.span, "place-only Capture result is used as an SSA value"))
             }
             loop place in mir_pass_operation_place_refs(instruction.operation) {
                 loop value in mir_pass_place_value_uses(function.places, definitions.places, place) {
@@ -259,16 +355,22 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
         }
         loop value in mir_terminator_value_uses(block.terminator) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), block.span, "MIR terminator reads an undefined SSA value"))
+            if mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), block.span, "place-only Capture result is used by a terminator"))
         }
     }
     loop place in function.places {
+        position := 0
         loop value in mir_pass_place_value_uses(function.places, definitions.places, place.id) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), place.span, "MIR place base or projection reads an undefined SSA value"))
+            address_anchor :: position == 0 && (if place.base == .Capture(_) -> true else -> false)
+            if !address_anchor && mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), place.span, "place-only Capture result is used by a place base or projection"))
+            position += 1
         }
     }
     loop scope in function.scopes {
         if scope.deadline == .Val(value) {
             if !mir_pass_definition_exists(definitions, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), scope.span, "MIR scope deadline reads an undefined SSA value"))
+            if mir_pass_value_is_place_only_capture(function, definitions, seen_blocks, value) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), scope.span, "place-only Capture result is used as a scope deadline"))
         }
     }
 
@@ -317,9 +419,257 @@ fn mir_pass_validate_function(function: MIRFunction, pass: MIROptimizationPassID
             if !mir_pass_dominates(dominance, definition.block, block.id) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), block.span, "MIR terminator use is not dominated by its definition"))
         }
     }
+    stop_failure :: mir_pass_validate_stop_points(function, definitions, dominance, tables)
+    if stop_failure == .Val(message) -> return Val(mir_pass_error(pass, .InvalidDefUse, Val(function.id), function.span, message))
     semantic_failure := mir_pass_validate_function_legality(function, tables, definitions)
     if semantic_failure == .Val(message) {
         return Val(mir_pass_error(pass, .InvalidSchema, Val(function.id), function.span, message))
+    }
+    None
+}
+
+// The existing definition/block indexes locate the typed Capture fact without
+// adding a second set of SSA identities or rescanning the function body.
+fn mir_pass_value_is_place_only_capture(function: MIRFunction, definitions: MIRPassDefinitions, blocks: [U64:Int], value: MIRValueID) -> Bool Never! {
+    definition :: mir_pass_find_definition(definitions, value) ?? return false
+    block :: blocks.get(definition.block.value) ?? return false
+    instruction :: function.blocks[block].instructions[definition.index]
+    if instruction.operation == .Capture(slot) {
+        if slot >= 0 && slot < function.capture_params.len() -> return function.capture_params[slot].place_only
+    }
+    false
+}
+
+fn mir_pass_stop_operand_type(function: MIRFunction, definitions: MIRPassDefinitions, operation: MIROperation) -> MIRType? Never! {
+    value :: mir_operation_stop_operand(operation) ?? return None
+    mir_pass_value_type(function, definitions, value)
+}
+
+fn mir_pass_stop_accessed_place(function: MIRFunction, definitions: MIRPassDefinitions, operation: MIROperation) -> MIRPlace? Never! {
+    place :: mir_operation_stop_place(operation) ?? return None
+    at :: definitions.places.get(place.value) ?? return None
+    Val(function.places[at])
+}
+
+// Stop points (unified host/stop contract, #4720). A Propagate poll directly
+// follows a can-stop operation, and every read, projection or drop of that
+// operation's result (phi inputs by their incoming edge) is dominated by the
+// resume edge: the stop path never touches a result the operation may have
+// left uninitialized. A function that ends in Stopped has closed every Shield
+// scope it opened on each path to it.
+// Rust: crates/jet-foundation/src/MIR.rs::validate_stop_points
+fn mir_pass_validate_stop_points(function: MIRFunction, definitions: MIRPassDefinitions, dominance: MIRPassDominance, tables: MIRPassLegalityTables) -> String? {
+    stopped := false
+    loop block in function.blocks {
+        if block.terminator == {
+            .Poll(kind, resume, stop) -> {
+                if resume == stop -> return Val("MIR poll resumes and stops on the same block")
+                if kind == .Propagate {
+                    count :: block.instructions.len()
+                    if count == 0 -> return Val("MIR Propagate poll does not follow a can-stop operation")
+                    last :: block.instructions[count - 1]
+                    if !mir_operation_can_stop(last.operation, mir_pass_stop_operand_type(function, definitions, last.operation), mir_pass_stop_accessed_place(function, definitions, last.operation), tables.prelude_calls, tables.prelude_positions) -> return Val("MIR Propagate poll does not follow a can-stop operation")
+                    if last.result == .Val(result) {
+                        failure :: mir_pass_validate_resume_uses(function, definitions, dominance, result, resume)
+                        if failure != None -> return failure
+                    }
+                    consumed_failure :: mir_pass_validate_consumed_stop_uses(function, dominance, last.operation, stop)
+                    if consumed_failure != None -> return consumed_failure
+                }
+            }
+            .Stopped -> stopped = true
+            else -> {}
+        }
+    }
+    if stopped {
+        failure :: mir_pass_validate_stop_shields(function, definitions, tables)
+        if failure != None -> return failure
+    }
+    mir_pass_validate_stop_cleanup_scopes(function, dominance)
+}
+
+struct MIRPassStopCleanupState {
+    unwinding: Bool
+    scopes: [U64]
+}
+
+// StopCleanup restores a genuine runtime token, independently of Shield depth.
+// Rust: MIR.rs::validate_stop_cleanup_scopes.
+fn mir_pass_validate_stop_cleanup_scopes(function: MIRFunction, dominance: MIRPassDominance) -> String? {
+    entries := [U64:Int]{}
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.StopCleanup -> &entries.add(scope.id.value, 0).drop("scope identities are unique")
+    }
+    if entries.len() == 0 -> return None
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .ScopeEnter(scope, member) && entries.get(scope.value) == .Val(count) {
+                if count != 0 || member != None -> return Val("MIR StopCleanup must have one compiler-owned entry")
+                _ := &entries.add(scope.value, 1)
+            }
+        }
+    }
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.StopCleanup && entries.get(scope.id.value) != Val(1) -> return Val("MIR StopCleanup must have one compiler-owned entry")
+    }
+    state_at := [U64:MIRPassStopCleanupState]{}
+    &state_at.add(function.entry.value, MIRPassStopCleanupState{unwinding: false, scopes: [U64]{}}).drop("the entry block is seeded once")
+    pending := [MIRBlockID]{function.entry}
+    loop pending.len() > 0 {
+        id :: &pending.pop() ?? function.entry
+        position :: dominance.positions.get(id.value) ?? next
+        block :: function.blocks[position]
+        state :: state_at.get(id.value) ?? MIRPassStopCleanupState{unwinding: false, scopes: [U64]{}}
+        scopes := state.scopes.copy()
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .ScopeEnter(scope, _) -> {
+                    if entries.get(scope.value) != None {
+                        if !state.unwinding -> return Val("MIR StopCleanup appears outside a stop edge")
+                        &scopes.push(scope.value)
+                    }
+                }
+                .ScopeExit(scope) -> {
+                    if entries.get(scope.value) != None && &scopes.pop() != Val(scope.value) -> return Val("MIR StopCleanup leave does not match its active token")
+                }
+                else -> {}
+            }
+        }
+        if scopes.len() > 0 {
+            if block.terminator == {
+                .Poll(_, _, _) -> return Val("MIR StopCleanup recursively polls")
+                .Stopped | .Return(_) | .Yield(_, _) -> return Val("MIR exit leaves a StopCleanup token open")
+                else -> {}
+            }
+        }
+        loop target in mir_terminator_targets(block.terminator) {
+            unwinding := state.unwinding
+            if block.terminator == .Poll(_, _, stop) && target == stop -> unwinding = true
+            if state_at.get(target.value) == .Val(seen) {
+                if seen.unwinding != unwinding || seen.scopes != scopes -> return Val("MIR StopCleanup state differs between paths into a block")
+            } else {
+                &state_at.add(target.value, MIRPassStopCleanupState{unwinding: unwinding, scopes: scopes.copy()}).drop("checked absent above")
+                &pending.push(target)
+            }
+        }
+    }
+    None
+}
+
+// Rust validate_consumed_stop_uses: a consuming cleanup cannot be replayed.
+fn mir_pass_validate_consumed_stop_uses(function: MIRFunction, dominance: MIRPassDominance, operation: MIROperation, stop: MIRBlockID) -> String? {
+    args :: if operation == {
+        .Call(_, values, _) | .IndirectCall(_, values, _) | .CoreCall(_, _, values, _, _, _) -> values
+        else -> [MIRCallArg]{}
+    }
+    thunk :: if operation == .IndirectCall(callee, _, _) -> Val(callee) else -> MIRValueID?{None}
+    moved := [MIRValueID]{}
+    loop arg in args {
+        if arg.access == .Move -> &moved.push(arg.value)
+    }
+    if moved.len() == 0 && thunk == None -> return None
+    pending := [MIRBlockID]{stop}
+    seen := [U64:Bool]{}
+    loop pending.len() > 0 {
+        id :: &pending.pop() ?? panic("stop-use worklist underflow")
+        if seen.get(id.value) != None -> next
+        _ := &seen.add(id.value, true)
+        position :: dominance.positions.get(id.value) ?? next
+        block :: function.blocks[position]
+        loop instruction in block.instructions {
+            if instruction.operation == .IndirectCall(cleanup_callee, _, _) {
+                if thunk == (Val(cleanup_callee)) -> return Val("MIR stop edge reuses an already-consumed cleanup input")
+            }
+            uses :: mir_operation_value_uses(instruction.operation)
+            loop value in moved {
+                if uses.contains(value) -> return Val("MIR stop edge reuses an already-consumed cleanup input")
+            }
+        }
+        loop target in mir_terminator_targets(block.terminator) -> &pending.push(target)
+    }
+    None
+}
+
+fn mir_pass_validate_resume_uses(function: MIRFunction, definitions: MIRPassDefinitions, dominance: MIRPassDominance, result: MIRValueID, resume: MIRBlockID) -> String? {
+    loop block in function.blocks {
+        resumed :: mir_pass_dominates(dominance, resume, block.id)
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .Phi(incoming) -> {
+                    loop row in incoming {
+                        if row.value == result && !mir_pass_dominates(dominance, resume, row.block) -> return Val("MIR phi reads a can-stop result on an edge its resume edge does not dominate")
+                    }
+                }
+                else -> {
+                    if !resumed {
+                        loop value in mir_operation_value_uses(instruction.operation) {
+                            if value == result -> return Val("MIR reads or drops a can-stop result outside its resume edge")
+                        }
+                        loop place in mir_pass_operation_place_refs(instruction.operation) {
+                            loop value in mir_pass_place_value_uses(function.places, definitions.places, place) {
+                                if value == result -> return Val("MIR place projection reads a can-stop result outside its resume edge")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !resumed {
+            loop value in mir_terminator_value_uses(block.terminator) {
+                if value == result -> return Val("MIR terminator reads a can-stop result outside its resume edge")
+            }
+        }
+    }
+    None
+}
+
+// Cancellation masks may contain only propagation points for Panic-capable
+// operations. Every path agrees on depth; stopped exits close every mask.
+fn mir_pass_validate_stop_shields(function: MIRFunction, definitions: MIRPassDefinitions, tables: MIRPassLegalityTables) -> String? {
+    shields := [U64:Bool]{}
+    any_shield := false
+    loop scope in function.scopes {
+        if scope.kind == MIRScopeKind.Shield || scope.kind == MIRScopeKind.Transaction {
+            &shields.add(scope.id.value, true).drop("scope identities are unique")
+            any_shield = true
+        }
+    }
+    if !any_shield -> return None
+    positions := [U64:Int]{}
+    loop (position, block) in function.blocks -> &positions.add(block.id.value, position).drop("block identities are unique")
+    depth_at := [U64:Int]{}
+    &depth_at.add(function.entry.value, 0).drop("the entry block is seeded once")
+    pending := [MIRBlockID]{function.entry}
+    loop pending.len() > 0 {
+        id :: &pending.pop() ?? function.entry
+        position :: positions.get(id.value) ?? next
+        block :: function.blocks[position]
+        depth := depth_at.get(id.value) ?? 0
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .ScopeEnter(scope, _) -> {
+                    if shields.get(scope.value) != None -> depth += 1
+                }
+                .ScopeExit(scope) -> {
+                    if shields.get(scope.value) != None -> depth -= 1
+                }
+                else -> {}
+            }
+        }
+        if depth > 0 && block.terminator == .Poll(kind, _, _) {
+            if kind == .Check -> return Val("MIR cancellation check appears inside a cancellation mask")
+            last :: block.instructions.last() ?? return Val("MIR masked propagation has no operation")
+            if !mir_operation_can_panic(last.operation, mir_pass_stop_operand_type(function, definitions, last.operation), mir_pass_stop_accessed_place(function, definitions, last.operation), tables.prelude_calls, tables.prelude_positions) -> return Val("MIR masked propagation does not follow a Panic-capable operation")
+        }
+        if block.terminator == .Stopped && depth != 0 -> return Val("MIR Stopped leaves a Shield scope open")
+        loop target in mir_terminator_targets(block.terminator) {
+            if depth_at.get(target.value) == .Val(seen) {
+                if seen != depth -> return Val("MIR Shield depth differs between paths into a block")
+            } else {
+                &depth_at.add(target.value, depth).drop("checked absent above")
+                &pending.push(target)
+            }
+        }
     }
     None
 }
@@ -348,16 +698,32 @@ fn mir_pass_validate_function_legality(
         if capture.slot != capture_slot || capture.name == "" -> return Val("capture slot or name is not canonical")
         if !mir_pass_type_valid(capture.ty) -> return Val("capture type has invalid MIR layout")
         if !mir_pass_ownership_valid(capture.ownership) -> return Val("capture ownership/drop metadata is inconsistent")
+        if capture.place_only && !((capture.access == MIRAccess.Read && capture.ownership.mode == MIROwnershipMode.ReadBorrow) || (capture.access == MIRAccess.Write && capture.ownership.mode == MIROwnershipMode.WriteBorrow)) -> return Val("place-only capture must lend a borrowed address")
         capture_slot += 1
     }
     loop value in function.values {
         if !mir_pass_type_valid(value.ty) -> return Val("SSA value type has invalid MIR layout")
         if !mir_pass_ownership_valid(value.ownership) -> return Val("SSA value ownership/drop metadata is inconsistent")
     }
+    bound_values := [U64:Bool]{}
+    bound_locals := [U64:MIRValueID]{}
     loop local in function.locals {
         if !mir_pass_type_valid(local.ty) -> return Val("local type has invalid MIR layout")
         if !mir_pass_ownership_valid(local.ownership) -> return Val("local ownership/drop metadata is inconsistent")
         if definitions.places.get(local.place.value) == None -> return Val("local references a missing place")
+        if local.ssa_value == .Val(value) {
+            if bound_values.get(value.value) != None -> return Val("SSA value is associated with more than one local cell")
+            if definitions.values.get(value.value) == None -> return Val("SSA-bound local references a missing definition")
+            metadata :: definitions.metadata.get(value.value) ?? return Val("SSA-bound local references missing value facts")
+            fact :: function.values[metadata]
+            if !mir_runtime_owned_ownership(fact.ownership) -> return Val("SSA-bound local does not name a physical owner")
+            if !mir_type_same_checked_type(local.ty, fact.ty) || local.ownership.mode != fact.ownership.mode || local.ownership.drop != fact.ownership.drop -> return Val("SSA-bound local changes its definition's type or ownership")
+            root :: definitions.places.get(local.place.value) ?? return Val("SSA-bound local has no root place")
+            if function.places[root].base != (.Local{local: local.id}) || function.places[root].projections.len() != 0 -> return Val("SSA-bound local does not name its whole local cell")
+            if local.uninit || local.is_comptime || local.arena_view || local.string_view -> return Val("SSA-bound owner uses another storage mechanism")
+            _ := &bound_values.add(value.value, true)
+            _ := &bound_locals.add(local.id.value, value)
+        }
     }
     loop place in function.places {
         place_failure := mir_pass_validate_place(place, function, tables, definitions)
@@ -367,6 +733,33 @@ fn mir_pass_validate_function_legality(
 
     loop block in function.blocks {
         loop instruction in block.instructions {
+            if instruction.result == .Val(value) {
+                if bound_values.get(value.value) != None {
+                    if instruction.operation == {
+                        .Parameter(_, _) | .Capture(_) -> return Val("SSA-bound local duplicates parameter or capture storage")
+                        else -> {}
+                    }
+                    loop place in mir_operation_place_uses(instruction.operation) {
+                        row :: definitions.places.get(place.value) ?? return Val("SSA-bound definition references a missing place")
+                        if function.places[row].base == .Local(local) {
+                            if bound_locals.get(local.value) == (Val(value)) -> return Val("SSA-bound definition reads its own uninitialized cell")
+                        }
+                    }
+                }
+            }
+            written := MIRPlaceID?{None}
+            if instruction.operation == {
+                .WritePlace(place, _) | .ReplacePlace(place, _) | .InitializeUninit(place) -> written = Val(place)
+                else -> {}
+            }
+            if written == .Val(place) {
+                row :: definitions.places.get(place.value) ?? return Val("storage writer references a missing place")
+                if function.places[row].projections.len() == 0 {
+                    if function.places[row].base == .Local(local) {
+                        if bound_locals.get(local.value) != None -> return Val("SSA-bound local has a writer other than its definition")
+                    }
+                }
+            }
             operation_failure := mir_pass_validate_operation_legality(
                 instruction.operation,
                 instruction.span,
@@ -381,7 +774,7 @@ fn mir_pass_validate_function_legality(
     if drop_failure != None -> return drop_failure
     copy_failure := mir_pass_validate_copy_facts(function, definitions)
     if copy_failure != None -> return copy_failure
-    move_failure := mir_pass_validate_moves(function, definitions)
+    move_failure := mir_pass_validate_moves(function, definitions, tables)
     if move_failure != None -> return move_failure
     host_failure := mir_pass_validate_host_callbacks(function, tables)
     if host_failure != None -> return host_failure
@@ -468,7 +861,7 @@ fn mir_pass_validate_failure_carrier(carrier: MIRFailureCarrier) -> String? {
 
 fn mir_pass_ownership_valid(ownership: MIROwnership) -> Bool Never! {
     if ownership.mode == {
-        .Copy -> ownership.drop == .NoDrop && !ownership.moved
+        .Copy -> (ownership.drop == .NoDrop || ownership.drop == .Value) && !ownership.moved
         .Owned -> ownership.drop == .Value || ownership.drop == .ForeignHandle
         .Shared -> ownership.drop == .Shared
         .ReadBorrow -> ownership.drop == .NoDrop || ownership.drop == .View
@@ -540,11 +933,13 @@ fn mir_pass_setter_route_arity(kind: MIRIndexKind) -> Int Never! {
 
 fn mir_pass_validate_panic_context(context: MIRPanicContext, function: MIRFunction) -> String? {
     if context.function == "" -> return Val("panic context has no function")
-    seen := [MIRLocalID]{}
+    // A read alias (`count :: rows`) reports under its own name while sharing
+    // the owner's local, so the report key is the name, not the local.
+    seen := [String]{}
     loop local in context.locals {
         if local.name == "" -> return Val("panic context has an unnamed local")
-        if mir_pass_local_id_seen(seen, local.local) -> return Val("panic context local is duplicated")
-        &seen.push(local.local)
+        if seen.contains(local.name) -> return Val("panic context local is duplicated")
+        &seen.push(local.name)
         found := false
         loop candidate in function.locals {
             if candidate.id == local.local -> found = true
@@ -636,6 +1031,11 @@ fn mir_pass_validate_place(
                 if !mir_pass_source_file_id_exists(tables, location.file) -> return Val("place range window panic location references an unknown source file")
                 if span.start > span.end -> return Val("place range window span is inverted")
             }
+            .MapLookup(lookup, _, span) -> {
+                if !mir_pass_definition_exists(definitions, lookup) -> return Val("map lookup window value is undefined")
+                if place.access != MIRAccess.Read -> return Val("map lookup windows are read-only")
+                if span.start > span.end -> return Val("map lookup window span is inverted")
+            }
         }
     }
     None
@@ -684,7 +1084,7 @@ fn mir_pass_operation_place_refs(operation: MIROperation) -> [MIRPlaceID] Never!
 fn mir_pass_semantic_field_uses(operation: MIRSemanticOp) -> [MIRFieldID] Never! {
     fields := [MIRFieldID]{}
     if operation == {
-        .StructLiteral(_, values, _, _, boxed) -> {
+        .StructLiteral(_, values, _, boxed) -> {
             loop value in values -> &fields.push(value.field)
             loop field in boxed -> &fields.push(field)
         }
@@ -747,9 +1147,10 @@ fn mir_pass_validate_call_args(
         }
         ownership :: mir_pass_value_ownership(function, definitions, arg.value) ?? return Val("call argument ownership metadata is missing")
         source :: mir_pass_value_type(function, definitions, arg.value) ?? return Val("call argument type metadata is missing")
-        // Rust `verify_call_args`: `box_as_trait` on a value that already is
-        // a trait object is not a consuming coercion.
-        boxes_trait :: arg.box_as_trait != None && !mir_pass_type_is_trait_object(source)
+        // A plain Read trait formal borrows its source. Only an owning trait
+        // conversion consumes it; already-trait values need no conversion.
+        borrows_trait :: arg.access == .Read && !arg.authority_boundary && !arg.implicit_clone && !arg.shared_auto_clone && !arg.widen_fixed_to_list && arg.widen_to_union == None && arg.fn_coercion == None
+        boxes_trait :: arg.box_as_trait != None && !mir_pass_type_is_trait_object(source) && !borrows_trait
         consumes_coercion :: arg.fn_coercion != None || arg.widen_to_union != None || boxes_trait
         if consumes_coercion && ownership.mode != .Copy && arg.access != .Move && !arg.implicit_clone && !arg.shared_auto_clone && !arg.owned_last_use {
             return Val("coercion consumes a non-Copy call argument")
@@ -792,6 +1193,7 @@ fn mir_pass_core_symbol_matches(core_symbol: CoreCallSymbol, route_symbol: MIRSy
                 else -> false
             }
         }
+        .SourceOwned -> false
     }
 }
 
@@ -884,11 +1286,6 @@ fn mir_pass_validate_semantic_operation(
                 if !mir_pass_source_file_id_exists(tables, loc.file) -> return Val("overflow location references an unknown source file")
             }
         }
-        .DataEntriesToMap(_, local) -> {
-            found := false
-            loop candidate in function.locals { if candidate.id == local -> found = true }
-            if !found -> return Val("data-entry map operation references a missing local")
-        }
         .MathBuiltin(_, call, _) -> {
             route :: mir_pass_prelude(tables, call) ?? return Val("numeric builtin route is missing")
             if route.family != .MathBuiltin -> return Val("math builtin route family is inconsistent")
@@ -975,6 +1372,7 @@ fn mir_pass_validate_semantic_operation(
             if gc_failure != None -> return gc_failure
         }
         .TypedTextInterp(call, kind, literals, holes, trusted) -> {
+            if kind == .URL -> return Val("URL recipes must call core.net.url.literal")
             route :: mir_pass_prelude(tables, call) ?? return Val("typed text route is missing")
             route_shape := mir_pass_typed_text_route_shape(kind)
             if !mir_pass_route_matches(route, .StaticPrelude, "core.typed_text", route_shape.member, route_shape.symbol, route_shape.arity, route_shape.borrow_mask, .Value) -> return Val("typed text route metadata is inconsistent")
@@ -1049,10 +1447,10 @@ fn mir_pass_validate_semantic_operation(
 }
 
 struct MIRPassRouteShape {
-    pub member: String
-    pub symbol: String
-    pub arity: Int
-    pub borrow_mask: [Bool]
+    member: String
+    symbol: String
+    arity: Int
+    borrow_mask: [Bool]
 }
 
 fn mir_pass_type_is_result(ty: MIRType) -> Bool Never! {
@@ -1091,7 +1489,6 @@ fn mir_pass_typed_text_route_shape(kind: MIRTypedHeadKind) -> MIRPassRouteShape 
         .SQL -> MIRPassRouteShape{member: "sql_interpolate", symbol: "jet_typed_sql_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
         .HTML -> MIRPassRouteShape{member: "html_interpolate", symbol: "jet_typed_html_interpolate", arity: 3, borrow_mask: [Bool]{true, false, true}}
         .Sh -> MIRPassRouteShape{member: "sh_interpolate", symbol: "jet_typed_sh_interpolate", arity: 2, borrow_mask: [Bool]{true, false}}
-        .URL -> MIRPassRouteShape{member: "url_literal", symbol: "jet_std::jet_typed_url_literal", arity: 2, borrow_mask: [Bool]{true, false}}
         .Path -> MIRPassRouteShape{member: "path_literal", symbol: "jet_typed_path_literal", arity: 2, borrow_mask: [Bool]{true, false}}
         else -> MIRPassRouteShape{member: "datetime_literal", symbol: "jet_typed_datetime_literal", arity: 2, borrow_mask: [Bool]{true, false}}
     }
@@ -1240,6 +1637,7 @@ fn mir_pass_validate_operation_legality(
         if definitions.places.get(place.value) == None -> return Val("operation references a missing place")
     }
     if operation == {
+        .Constant(value) -> if mir_pass_nested_shared_site(value) -> return Val("publication site nested in constant value")
         .Semantic(semantic) -> return mir_pass_validate_semantic_operation(semantic, span, function, tables, definitions)
         .Binary(_, dispatch, _, _, _) -> {
             if dispatch == {
@@ -1547,10 +1945,10 @@ fn mir_pass_validate_drops(function: MIRFunction, definitions: MIRPassDefinition
 }
 
 struct MIRPassMoveEvent {
-    pub value: MIRValueID
-    pub block: MIRBlockID
-    pub index: Int
-    pub span: Span
+    value: MIRValueID
+    block: MIRBlockID
+    index: Int
+    span: Span
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::call_arg_consumes (a
@@ -1607,9 +2005,9 @@ fn mir_pass_precedes(first_block: MIRBlockID, first_index: Int, second_block: MI
 
 // One move or reinitializing write of a place path, grouped by path root.
 struct MIRPassPlaceEvent {
-    pub projections: [String]
-    pub block: MIRBlockID
-    pub index: Int
+    projections: [String]
+    block: MIRBlockID
+    index: Int
 }
 
 // Rust: crates/jet-foundation/src/MIROptimization.rs::mir_place_path (root)
@@ -1648,6 +2046,7 @@ fn mir_pass_place_projection_keys(place: MIRPlace) -> [String] Never! {
                 .Enum(owner, _, variant_index) -> "9:{owner.value}:{variant_index}"
             }
             .Range(range, _, _) -> "10:{range.value}"
+            .MapLookup(lookup, optional, _) -> "{if optional -> 12 else -> 11}:{lookup.value}"
         }
         &keys.push(key)
     }
@@ -1664,14 +2063,75 @@ fn mir_pass_place_path_is_prefix(prefix: [String], path: [String]) -> Bool Never
     true
 }
 
+// Rust: crates/jet-foundation/src/MIROptimization.rs::partial_move_remainder_drops
+// Whole-owner MovePlace results that only feed a releasing Drop: the
+// scope-end cleanup of an owner. After a field of that owner was moved
+// (`x := ^run.graph`) the cleanup releases the remaining fields, which the
+// emitters' partial-move plans do.
+fn mir_pass_remainder_drops(function: MIRFunction, definitions: MIRPassDefinitions) -> [U64:Bool] Never! {
+    // 0: no user seen yet; 1: every user so far is a releasing Drop; 2: another user.
+    states := [U64:Int]{}
+    candidates := [U64]{}
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == {
+                .MovePlace(place_id) -> {
+                    if instruction.result == .Val(result) {
+                        if mir_pass_defined_place(function, definitions, place_id) == .Val(place) {
+                            if place.projections.len() == 0 {
+                                states[result.value] = 0
+                                &candidates.push(result.value)
+                            }
+                        }
+                    }
+                }
+                else -> {}
+            }
+        }
+    }
+    remainder := [U64:Bool]{}
+    if candidates.len() == 0 -> return remainder
+    loop block in function.blocks {
+        loop instruction in block.instructions {
+            releases := false
+            released := MIRValueID{value: 0}
+            if instruction.operation == {
+                .Drop(value, kind) -> {
+                    releases = kind != .NoDrop
+                    released = value
+                }
+                else -> {}
+            }
+            loop value in mir_operation_value_uses(instruction.operation) {
+                if states.get(value.value) == .Val(state) {
+                    if state != 2 {
+                        states[value.value] = if releases && released.value == value.value -> 1 else -> 2
+                    }
+                }
+            }
+        }
+        loop value in mir_terminator_value_uses(block.terminator) {
+            if states.get(value.value) != None -> states[value.value] = 2
+        }
+    }
+    loop key in candidates {
+        if states.get(key) == .Val(state) {
+            if state == 1 -> remainder[key] = true
+        }
+    }
+    remainder
+}
+
 // Rust: crates/jet-foundation/src/MIROptimization.rs::verify_moves_and_borrows
 // (`has_live_move` for a move use). A move of a path conflicts with an
 // earlier move of an overlapping path that precedes it, unless a write of a
 // prefix of the moved path between them reinitialized it. Moves on disjoint
-// branches (one place moved in each dispatch arm) never conflict.
-fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlaceEvent], path: [String], block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> Bool Never! {
+// branches (one place moved in each dispatch arm) never conflict. The
+// remainder drop of a partly moved owner releases only the fields still in
+// place, so only an earlier move of the owner itself conflicts with it.
+fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlaceEvent], path: [String], remainder_drop: Bool, block: MIRBlockID, index: Int, dominance: MIRPassDominance) -> Bool Never! {
     loop earlier in moved {
-        overlaps :: mir_pass_place_path_is_prefix(earlier.projections, path) || mir_pass_place_path_is_prefix(path, earlier.projections)
+        overlaps :: mir_pass_place_path_is_prefix(earlier.projections, path) || (!remainder_drop && mir_pass_place_path_is_prefix(path, earlier.projections))
         if !overlaps || !mir_pass_precedes(earlier.block, earlier.index, block, index, dominance) -> next
         restored := false
         loop write in reinitialized {
@@ -1688,11 +2148,13 @@ fn mir_pass_move_is_live(moved: [MIRPassPlaceEvent], reinitialized: [MIRPassPlac
 fn mir_pass_validate_moves(
     function: MIRFunction,
     definitions: MIRPassDefinitions,
+    tables: MIRPassLegalityTables,
 ) -> String? {
     reachable :: mir_pass_reachable(function)
     reachable_rows := [U64:Bool]{}
     loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
     dominators :: mir_pass_dominators(function)
+    remainder_drops :: mir_pass_remainder_drops(function, definitions)
     // A value is consumed at most once (checked below), so one event per value.
     consumed := [U64:MIRPassMoveEvent]{}
     // Place moves and reinitializing writes, grouped by path root and
@@ -1738,11 +2200,6 @@ fn mir_pass_validate_moves(
         if reachable_rows.get(block.id.value) != None {
             index := 0
             loop instruction in block.instructions {
-                loop value in mir_operation_value_uses(instruction.operation) {
-                    if consumed.get(value.value) == .Val(event) {
-                        if mir_pass_event_dominates(event, block.id, index, dominators) -> return Val("MIR value is used after it was moved or dropped")
-                    }
-                }
                 loop place_id in mir_pass_operation_place_refs(instruction.operation) {
                     place_option := mir_pass_defined_place(function, definitions, place_id)
                     if place_option == .Val(place) {
@@ -1770,7 +2227,9 @@ fn mir_pass_validate_moves(
                                 root :: mir_pass_place_root(place)
                                 moved_at :: if move_slots.get(root) == .Val(slot) -> moves[slot] else -> [MIRPassPlaceEvent]{}
                                 written_at :: if write_slots.get(root) == .Val(slot) -> writes[slot] else -> [MIRPassPlaceEvent]{}
-                                if mir_pass_move_is_live(moved_at, written_at, mir_pass_place_projection_keys(place), block.id, index, dominators) -> return Val("place is moved more than once")
+                                remainder_drop := false
+                                if instruction.result == .Val(result) -> remainder_drop = remainder_drops.get(result.value) != None
+                                if mir_pass_move_is_live(moved_at, written_at, mir_pass_place_projection_keys(place), remainder_drop, block.id, index, dominators) -> return Val("place is moved more than once")
                                 if place.base == {
                                     .Static(_) -> {
                                         if place.projections.len() != 0 -> return Val("static move place has a projection")
@@ -1817,7 +2276,7 @@ fn mir_pass_validate_moves(
                 }
                 loop value in mir_pass_consumed_values(instruction.operation) {
                     ownership :: mir_pass_value_ownership(function, definitions, value) ?? return Val("consumed value has no ownership metadata")
-                    if ownership.mode == .Copy || ownership.mode == .ReadBorrow || ownership.mode == .WriteBorrow -> return Val("copy or borrowed value is consumed")
+                    if !mir_runtime_owned_ownership(ownership) -> return Val("dropless or borrowed value is consumed")
                     if consumed.get(value.value) != None -> return Val("value is consumed more than once")
                     &consumed.add(value.value, MIRPassMoveEvent{value: value, block: block.id, index: index, span: instruction.span}).drop("checked absent above")
                 }
@@ -1899,11 +2358,6 @@ fn mir_pass_host_callback_consumer(operation: MIROperation, tables: MIRPassLegal
     route.family == .StaticPrelude || route.family == .ClosureMethod || route.family == .Host
 }
 
-fn mir_pass_local_id_seen(rows: [MIRLocalID], id: MIRLocalID) -> Bool Never! {
-    loop row in rows { if row == id -> return true }
-    false
-}
-
 fn mir_pass_place_id_seen(rows: [MIRPlaceID], id: MIRPlaceID) -> Bool Never! {
     loop row in rows { if row == id -> return true }
     false
@@ -1939,4 +2393,146 @@ fn mir_pass_operation_mutably_borrows_place(operation: MIROperation, id: MIRPlac
         else -> {}
     }
     false
+}
+
+// Physical SSA ownership is checked independently of place-path moves. A
+// resource can be consumed on disjoint branches, but not used on any path
+// after a transfer. Definitions reset their life on each loop iteration.
+fn mir_pass_consumption_mask(tables: MIRPassLegalityTables, operation: MIROperation) -> [Bool] Never! {
+    if mir_operation_consumption_route(operation) == Val(call) {
+        row :: tables.prelude_positions.get(call.value) ?? return [Bool]{}
+        return tables.prelude_calls[row].signature.borrow_mask
+    }
+    [Bool]{}
+}
+
+fn mir_pass_consume_value(function: MIRFunction, definitions: MIRPassDefinitions, moved: &[U64:Bool], value: MIRValueID, consumption: MIRValueConsumption, check: Bool) -> String? Never! {
+    if !mir_value_consumption_transfers(consumption) -> return None
+    ownership :: mir_pass_value_ownership(function, definitions, value) ?? return Val("consumed value has no ownership metadata")
+    if !mir_runtime_owned_ownership(ownership) {
+        if check && mir_value_consumption_requires_owner(consumption) -> return Val("dropless or borrowed value is consumed")
+        return None
+    }
+    if check && (moved.get(value.value) ?? false) -> return Val("value is consumed more than once")
+    _ := &moved.add(value.value, true)
+    None
+}
+
+fn mir_pass_consumption_step(function: MIRFunction, definitions: MIRPassDefinitions, tables: MIRPassLegalityTables, block: MIRBasicBlock, moved: &[U64:Bool], check: Bool) -> String? Never! {
+    loop instruction in block.instructions {
+        if instruction.operation == .Phi(_) {
+            if instruction.result == .Val(defined) -> _ := &moved.remove(defined.value)
+            next
+        }
+        uses :: mir_operation_value_uses(instruction.operation)
+        if check {
+            loop value in uses {
+                if moved.get(value.value) ?? false -> return Val("MIR value is used after it was moved or dropped")
+            }
+            if instruction.operation == .ScopeEnter(scope, _) {
+                loop metadata in function.scopes {
+                    if metadata.id == scope && metadata.deadline == .Val(value) {
+                        if moved.get(value.value) ?? false -> return Val("MIR scope deadline uses a moved or dropped value")
+                    }
+                }
+            }
+        }
+        if instruction.result == .Val(defined) -> _ := &moved.remove(defined.value)
+        mask :: mir_pass_consumption_mask(tables, instruction.operation)
+        loop value in uses {
+            consumption :: mir_operation_value_consumption(instruction.operation, value, mask)
+            failure :: mir_pass_consume_value(function, definitions, &moved, value, consumption, check)
+            if failure != None -> return failure
+        }
+    }
+    loop value in mir_terminator_value_uses(block.terminator) {
+        if check && (moved.get(value.value) ?? false) -> return Val("MIR terminator uses a moved or dropped value")
+        consumption :: mir_terminator_value_consumption(block.terminator, value)
+        failure :: mir_pass_consume_value(function, definitions, &moved, value, consumption, check)
+        if failure != None -> return failure
+    }
+    None
+}
+
+fn mir_pass_consumption_edge(function: MIRFunction, definitions: MIRPassDefinitions, from: MIRBlockID, target: MIRBasicBlock, moved: &[U64:Bool], check: Bool) -> String? Never! {
+    loop instruction in target.instructions {
+        if instruction.operation == .Phi(incoming) {
+            loop edge in incoming {
+                if edge.block != from -> next
+                if check && (moved.get(edge.value.value) ?? false) -> return Val("MIR phi takes a moved or dropped value")
+                consumption :: mir_operation_value_consumption(instruction.operation, edge.value, [Bool]{})
+                failure :: mir_pass_consume_value(function, definitions, &moved, edge.value, consumption, check)
+                if failure != None -> return failure
+            }
+        }
+    }
+    None
+}
+
+fn mir_pass_validate_consumption(function: MIRFunction, definitions: MIRPassDefinitions, tables: MIRPassLegalityTables) -> String? Never! {
+    positions := [U64:Int]{}
+    states := [[U64:Bool]]{}
+    reached := [Bool]{}
+    queued := [Bool]{}
+    loop (position, block) in function.blocks {
+        _ := &positions.add(block.id.value, position)
+        &states.push([U64:Bool]{})
+        &reached.push(false)
+        &queued.push(false)
+    }
+    entry :: positions.get(function.entry.value) ?? return Val("consumption entry is missing")
+    work := [Int]{entry}
+    reached[entry] = true
+    queued[entry] = true
+    loop drop in function.drops {
+        if drop.edge == {
+            .Failure(target) | .Unwind(target) -> {
+                root :: positions.get(target.value) ?? return Val("consumption cleanup root is missing")
+                if !reached[root] {
+                    reached[root] = true
+                    queued[root] = true
+                    &work.push(root)
+                }
+            }
+            else -> {}
+        }
+    }
+    head := 0
+    loop head < work.len() {
+        position := work[head]
+        head += 1
+        queued[position] = false
+        current := states[position].copy()
+        _ := mir_pass_consumption_step(function, definitions, tables, function.blocks[position], &current, false)
+        loop target in mir_terminator_targets(function.blocks[position].terminator) {
+            destination :: positions.get(target.value) ?? return Val("consumption target is missing")
+            edge := current.copy()
+            _ := mir_pass_consumption_edge(function, definitions, function.blocks[position].id, function.blocks[destination], &edge, false)
+            changed := !reached[destination]
+            reached[destination] = true
+            loop (value, present) in edge {
+                if present && !(states[destination].get(value) ?? false) {
+                    _ := &states[destination].add(value, true)
+                    changed = true
+                }
+            }
+            if changed && !queued[destination] {
+                queued[destination] = true
+                &work.push(destination)
+            }
+        }
+    }
+    loop (position, block) in function.blocks {
+        if !reached[position] -> next
+        current := states[position].copy()
+        failure :: mir_pass_consumption_step(function, definitions, tables, block, &current, true)
+        if failure != None -> return failure
+        loop target in mir_terminator_targets(block.terminator) {
+            destination :: positions.get(target.value) ?? return Val("consumption target is missing")
+            edge := current.copy()
+            edge_failure :: mir_pass_consumption_edge(function, definitions, block.id, function.blocks[destination], &edge, true)
+            if edge_failure != None -> return edge_failure
+        }
+    }
+    None
 }

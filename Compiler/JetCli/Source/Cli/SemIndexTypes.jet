@@ -1,0 +1,363 @@
+// The semantic index's stable query types (crates/jet-semindex/src/Types.rs
+// and the `SymKind`/`SymDef`/`SymRef` records Build.rs walks into). The index
+// is versioned independently of its consumers: `jet inspect semindex`,
+// `jet inspect expand`, and `jet doc` read these rows; LSP hover and inlay
+// projections have no Jet consumer and are not part of this port.
+use jet_foundation.[
+    AccessConvention,
+    CallablePolicy,
+    DerivationRecord,
+    EffectRowEntry,
+    FailureContract,
+    NamedSpan,
+    ParamZone,
+    Span,
+    Type,
+    ViewProvenanceMap,
+    failure_contract_effective_type,
+    failure_contract_source,
+    type_name,
+]
+
+// Types.rs `SCHEMA_VERSION`: bump when the exported fact shape changes
+// incompatibly.
+JET_CLI_SEMINDEX_SCHEMA_VERSION :: 20
+
+// Types.rs `CallableFactUnavailable`: the typed reason a checked projection
+// cannot supply a later metadata value.
+struct JetCLISemUnavailable {
+    required_stage: String
+    reason: String
+}
+
+// Types.rs `CallableDefaultFact`: a source-text projection of a declared
+// default; its prepared value is unavailable.
+struct JetCLISemDefault {
+    source_text: String
+    source: Span
+}
+
+// One public call slot (Types.rs `CallableParameterFact` plus the Build.rs
+// `SymKind::Function` parallel rows it is assembled from).
+struct JetCLISemParam {
+    name: String
+    ty: Type
+    source: Span
+    label: String
+    zone: ParamZone
+    variadic: Bool
+    access: AccessConvention
+    default: JetCLISemDefault?
+}
+
+// Build.rs `SymKind::Function`. `failure_contract` is `None` exactly when
+// `failure_unavailable` explains why (`CallableFactAvailability`); the same
+// holds for `generic_parameters`.
+struct JetCLISemCallable {
+    params: [JetCLISemParam]
+    signature_facts_available: Bool
+    return_type: Type?
+    failure_contract: FailureContract?
+    failure_unavailable: JetCLISemUnavailable?
+    foreign_boundary: Bool
+    effects: [EffectRowEntry]?
+    effect_via: NamedSpan?
+    policies: [CallablePolicy]
+    generic_parameters: [String]?
+    generic_unavailable: JetCLISemUnavailable?
+}
+
+struct JetCLISemField {
+    name: String
+    ty: Type
+}
+
+// Build.rs `SymKind`.
+enum JetCLISemKind {
+    Module
+    Function(callable: JetCLISemCallable)
+    Struct(fields: [JetCLISemField], derives: [String])
+    Enum(variants: [String], derives: [String])
+    Trait
+    Tag
+    Type(derives: [String])
+    Const
+    EnumVariant(parent: String)
+    Field(ty: Type, parent: String)
+    Local(mutable: Bool, ty: Type?)
+    Param(ty: Type)
+}
+
+// Build.rs `SymDef`; `qualified_name` is the canonical display path
+// (Symbols.rs `canonical_symbol_name`) the walk records with the definition.
+struct JetCLISemDef {
+    identity: String
+    name: String
+    qualified_name: String
+    def_span: Span
+    module_path: String
+    kind: JetCLISemKind
+}
+
+// Types.rs `DefinitionAnchor`.
+struct JetCLISemAnchor {
+    module_path: String
+    kind: String
+    def_span: Span
+    semantic_identity: String?
+}
+
+// Types.rs `CompilerFact`.
+struct JetCLISemCompilerFact {
+    name: String
+    kind: String
+    type_name: String
+}
+
+// Build.rs `SymRef` / Types.rs `SymbolRef`.
+struct JetCLISemRef {
+    name: String
+    span: Span
+    module_path: String
+    scope_identity: String?
+    target: JetCLISemAnchor?
+    fact: JetCLISemCompilerFact?
+}
+
+// Types.rs `CallEdge`.
+struct JetCLISemCall {
+    caller: String
+    callee: String
+    module_path: String
+    span: Span
+}
+
+// Types.rs `MemberFact`. `kind` is `field`, `variant`, or `method`;
+// `origin` is `type_body`, `inherent_impl`, `trait_impl`, or
+// `trait_requirement`, with `origin_trait` naming the trait of the last two.
+struct JetCLISemMember {
+    owner: String
+    name: String
+    identity: String
+    kind: String
+    origin: String
+    origin_trait: String
+    signature: String
+    module_path: String
+    span: Span
+}
+
+// Types.rs `EffectProvenance`.
+struct JetCLISemEffectProvenance {
+    effect_name: String
+    call_path: [String]
+    spans: [Span]
+}
+
+// Types.rs `EffectFact`.
+struct JetCLISemEffect {
+    function: String
+    direct: [String]
+    callees: [String]
+    inferred: [String]
+    maximal: Bool
+    provenance: [JetCLISemEffectProvenance]
+}
+
+// Types.rs `ArithmeticOperationFact`.
+struct JetCLISemArithmetic {
+    operation: String
+    policy: String
+    module_path: String
+    operation_span: Span
+    scope_span: Span
+}
+
+// Types.rs `StructuralNode`; `slot_kind` is `scalar` or `list`.
+struct JetCLISemNode {
+    id: Int
+    parent: Int?
+    slot: String
+    slot_kind: String
+    ordinal: Int
+    class: String
+    shape: String
+    module_path: String
+    span: Span
+}
+
+// Types.rs `StructuralSlotBoundary`.
+struct JetCLISemSlotBoundary {
+    parent: Int
+    slot: String
+    module_path: String
+    span: Span
+}
+
+// Types.rs `BypassFact`; `kind` is the stable `BypassKind::as_str` word.
+struct JetCLISemBypass {
+    kind: String
+    site: String
+    detail: String
+    module_path: String
+    span: Span
+}
+
+// Types.rs `DefinitionFact`.
+struct JetCLISemDefinitionFact {
+    stable_id: String
+    signature_id: String
+    content_id: String
+    human_identity: String
+    name: String
+    kind: String
+    module_path: String
+    span: Span
+}
+
+// Types.rs `TraitContractFact`; an associated type with no `ty` is a
+// requirement (`type Item`).
+struct JetCLISemAssociatedType {
+    name: String
+    ty: String?
+}
+
+struct JetCLISemTraitContract {
+    trait_name: String
+    associated_types: [JetCLISemAssociatedType]
+    methods: [String]
+}
+
+// Types.rs `InstanceApplicationFact` and `InstanceFact`.
+struct JetCLISemInstanceApplication {
+    name: String
+    module_path: String
+    semantic_identity: String
+    span: Span
+}
+
+struct JetCLISemInstance {
+    name: String
+    module_path: String
+    fingerprint: String
+    full_key_hex: String
+    template_definition_id: String
+    template_span: Span
+    arguments: [String]
+    argument_values: [String]
+    argument_provenance: [[String]]
+    applications: [JetCLISemInstanceApplication]
+    exported_members: [String]
+}
+
+// Types.rs `OutputEntryFact` and `OutputFact`.
+struct JetCLISemOutputEntry {
+    identity: String
+    name: String
+    module_path: String
+    definition_span: Span
+    reference_span: Span
+    params: [String]
+    return_type: String?
+    failure_contract: String
+    failure_source: String
+    authority: String
+    effects: [String]
+}
+
+struct JetCLISemOutput {
+    binding: String
+    kind: String
+    name: String
+    module_path: String
+    span: Span
+    entry: JetCLISemOutputEntry
+}
+
+// Types.rs `StateNodeFact`, `StateTransitionFact`, `StateGraphFact`.
+struct JetCLISemStateNode {
+    name: String
+    terminal: Bool
+    reachable: Bool?
+    span: Span
+}
+
+struct JetCLISemStateTransition {
+    operation: String
+    from: String?
+    to: String
+}
+
+struct JetCLISemStateGraph {
+    owner: String
+    module_path: String
+    states: [JetCLISemStateNode]
+    transitions: [JetCLISemStateTransition]
+}
+
+// One converted definition (Types.rs `SymbolDef`): the walk's record plus
+// the per-definition facts `convert_defs` attaches.
+struct JetCLISemDefinition {
+    def: JetCLISemDef
+    view_provenance: ViewProvenanceMap?
+    derives: [String]
+    nominal_base: String?
+    trait_contracts: [JetCLISemTraitContract]
+}
+
+// Types.rs `SemIndex`: the versioned index over one checked program. Its
+// effect projection (EffectBudget.rs `EffectProjection`) is the application
+// authority of the same checked program `jet build` authorizes.
+struct JetCLISemIndex {
+    definitions: [JetCLISemDefinition]
+    definition_facts: [JetCLISemDefinitionFact]
+    derivations: [DerivationRecord]
+    instances: [JetCLISemInstance]
+    outputs: [JetCLISemOutput]
+    state_graphs: [JetCLISemStateGraph]
+    effect_projection: JetCLIAuthority
+    references: [JetCLISemRef]
+    calls: [JetCLISemCall]
+    effects: [JetCLISemEffect]
+    arithmetic: [JetCLISemArithmetic]
+    members: [JetCLISemMember]
+    nodes: [JetCLISemNode]
+    slot_boundaries: [JetCLISemSlotBoundary]
+    bypasses: [JetCLISemBypass]
+}
+
+// `CallableSignatureFact::failure_contract_name`.
+fn jet_cli_sem_failure_contract_name(callable: JetCLISemCallable) -> String? Never! {
+    contract :: callable.failure_contract ?? return None
+    Val(type_name(failure_contract_effective_type(contract)))
+}
+
+// `CallableSignatureFact::failure_source_name`.
+fn jet_cli_sem_failure_source_name(callable: JetCLISemCallable) -> String? Never! {
+    contract :: callable.failure_contract ?? return None
+    Val(failure_contract_source(contract))
+}
+
+// `CallableParameterFact::access_name`.
+fn jet_cli_sem_access_name(access: AccessConvention) -> String Never! {
+    if access == {
+        .Read -> "read"
+        .Write -> "write"
+        .Move -> "move"
+    }
+}
+
+// `CallableParameterFact::zone_name`.
+fn jet_cli_sem_zone_name(zone: ParamZone) -> String Never! {
+    if zone == {
+        .PositionalOnly -> "positional_only"
+        .Either -> "either"
+        .LabelOnly -> "label_only"
+    }
+}
+
+// The callable a definition carries, when it is a function.
+fn jet_cli_sem_callable(definition: JetCLISemDef) -> JetCLISemCallable? Never! {
+    if definition.kind == .Function(callable) -> return Val(callable)
+    None
+}

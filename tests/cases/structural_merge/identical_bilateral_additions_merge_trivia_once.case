@@ -1,0 +1,11 @@
+# PORT tests/structural_merge.rs::identical_bilateral_additions_merge_trivia_once
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: identical_bilateral_additions_merge_trivia_once.fixture
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/merged.jet
+exit: 0
+file: merged.jet count "fn helper" = 1 # original ed77c235f tests/structural_merge.rs:392 source.matches count
+file: merged.jet count "ours note" = 1 # original ed77c235f tests/structural_merge.rs:393 source.matches count
+step: jet merge --structural {work}/base.jet {work}/ours_distinct.jet {work}/theirs_distinct.jet --out {work}/must-not-exist.jet --json
+exit: 1
+file: must-not-exist.jet absent
+stderr: ~ "inter_item_trivia" # Original contains predicate.

@@ -1,0 +1,75 @@
+// tests/build_entry.rs:2095-2169, exact original concurrent builds and duplicate env override.
+// PENDING-SEAM(package-tests): canonical Jetpack package test staging after gate 2.
+// The two builders use their own run-cache, NOT the holder store (original lines 2129-2131).
+// #4838: target the single holder source FILE, never its directory (per-file package replay).
+use core.process as concurrent_process
+
+fn store_concurrent_await(path: String) {
+    deadline :: time.instant() + time.duration_ms(120000)
+    loop !files.exists(path) {
+        if time.instant() >= deadline -> panic("concurrent store holder coordination timed out: {path}")
+        time.sleep(time.duration_ms(10))
+    }
+}
+
+fn store_concurrent_holder() {
+    root :: sys.get("JET_TEST_STORE_HOLDER") ?? return
+    holder :: ArtifactStore.open(ArtifactStoreConfig.new(root).with_reserve_bytes(0)) ?? panic("open shared store lock holder")
+    owner :: ArtifactProcessIdentity.current() ?? panic("current process identity")
+    lock :: files.join(holder.root(), "locks/store.lock")
+    files.write(lock, "jet.store.v1|lock|{owner.pid()}|{owner.start()}\n") ?? panic("hold shared store lock")
+    files.write(files.join(root, "ready"), "ready") ?? panic("holder ready")
+    store_concurrent_await(files.join(root, "release"))
+    files.remove(lock) ?? panic("release shared store lock")
+}
+
+#Test("S2 concurrent store live holder") {
+    store_concurrent_holder()
+}
+
+fn store_concurrent_build_spec(jet: String, scratch: String, store: String) -> ProcessSpec {
+    concurrent_process.cmd([String]{jet, "build", "main.jet"}).cwd(scratch)
+        .env("JET_STORE_DIR", store)
+        .env("JET_STORE_RESERVE_BYTES", "0")
+        .env("JET_STORE_DIR", files.join(scratch, "run-cache"))
+        .env("NO_COLOR", "1")
+}
+
+// Called only by the main test, never by the holder's filtered invocation.
+fn store_concurrent_original() {
+    if sys.get("JET_TEST_STORE_HOLDER") != None -> return
+    jet :: sys.get("JET_BIN") ?? panic("JET_BIN must name the admitted test jet")
+    tests :: sys.get("JET_TEST_STORE_FILE") ?? "Jetpack/Store/Tests/PkgIntegrationConcurrent.jet"
+    left :: files.tmpdir("concurrent-build-left-") ?? panic("left scratch")
+    right :: files.tmpdir("concurrent-build-right-") ?? panic("right scratch")
+    scratches :: [String]{left, right}
+    loop scratch in scratches {
+        files.write(files.join(scratch, "package.jet"), "name: \"concurrent-build\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\n") ?? panic("package source")
+        files.write(files.join(scratch, "main.jet"), "\nfn run() {{\n    print(\"shared store\")\n}}\n") ?? panic("main source")
+    }
+    store :: files.join(left, "store")
+    holder := concurrent_process.cmd([String]{jet, "test", tests, "--filter", "S2 concurrent store live holder"})
+        .env("JET_TEST_STORE_HOLDER", store).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn holder")
+    store_concurrent_await(files.join(store, "ready"))
+    left_child := store_concurrent_build_spec(jet, left, store).spawn() ?? panic("spawn left concurrent build")
+    right_child := store_concurrent_build_spec(jet, right, store).spawn() ?? panic("spawn right concurrent build")
+    time.sleep(time.duration_ms(3000))
+    files.write(files.join(store, "release"), "release") ?? panic("release holder")
+    holder_result :: &holder.wait() ?? panic("join holder")
+    assert(holder_result.success, "holder failed: {holder_result.output} {holder_result.errors}")
+    left_build :: &left_child.wait() ?? panic("wait left build")
+    right_build :: &right_child.wait() ?? panic("wait right build")
+    assert(left_build.success, "left concurrent build failed: {left_build.output} {left_build.errors}")
+    assert(right_build.success, "right concurrent build failed: {right_build.output} {right_build.errors}")
+    loop scratch in scratches {
+        result :: concurrent_process.cmd([String]{files.join(scratch, ".jet/build/main")}).cwd(scratch).stdout(.Capture).stderr(.Capture).run() ?? panic("run concurrent build binary")
+        assert(result.success, "binary failed: {result.output} {result.errors}")
+        assert_eq(result.output.trim(), "shared store")
+    }
+    files.remove_all(left).drop("left scratch cleanup")
+    files.remove_all(right).drop("right scratch cleanup")
+}
+
+#Test("concurrent_jet_builds_share_store_lock_and_run") {
+    store_concurrent_original()
+}

@@ -1,0 +1,35 @@
+// Source/CmdInspect.rs canonical_pass_status_value: retain actual compiler
+// boundary records. No journal rows are reconstructed from decision rows.
+use jet_foundation.[CanonicalPassRecord, CANONICAL_PASS_SCHEMA, CANONICAL_PASS_PROTOCOL]
+fn jet_cli_canonical_snapshot(payload: String) -> JetCLIStatusValue {
+    jet_cli_status_value_parse(payload) ?? jet_cli_status_text(payload)
+}
+fn jet_cli_canonical_route(record: CanonicalPassRecord, process: String) -> JetCLIStatusValue {
+    jet_cli_status_object([
+        jet_cli_status_field("schema", jet_cli_status_text(CANONICAL_PASS_SCHEMA)),
+        jet_cli_status_field("protocol", jet_cli_status_text(CANONICAL_PASS_PROTOCOL)),
+        jet_cli_status_field("stage", jet_cli_status_text(record.stage)),
+        jet_cli_status_field("operation_id", jet_cli_status_text(record.operation_id)),
+        jet_cli_status_field("occurrence", jet_cli_status_int(record.occurrence)),
+        jet_cli_status_field("order", jet_cli_status_int(record.order)),
+        jet_cli_status_field("source", jet_cli_status_object([
+            jet_cli_status_field("path", jet_cli_status_text(record.source)),
+            jet_cli_status_field("process", jet_cli_status_text(process)),
+        ])),
+        jet_cli_status_field("input", jet_cli_status_object([
+            jet_cli_status_field("representation", jet_cli_status_text(record.input_representation)),
+            jet_cli_status_field("canonical_payload", jet_cli_canonical_snapshot(record.input_payload)),
+            jet_cli_status_field("identity", jet_cli_canonical_snapshot(record.input_identity)),
+        ])),
+        jet_cli_status_field("output", jet_cli_status_object([
+            jet_cli_status_field("representation", jet_cli_status_text(record.output_representation)),
+            jet_cli_status_field("canonical_payload", jet_cli_canonical_snapshot(record.output_payload)),
+            jet_cli_status_field("identity", jet_cli_canonical_snapshot(record.output_identity)),
+        ])),
+        jet_cli_status_field("premises", jet_cli_status_texts(record.premises)),
+        jet_cli_status_field("disposition", jet_cli_status_text(record.disposition)),
+    ])
+}
+fn jet_cli_canonical_routes(records: [CanonicalPassRecord], process: String) -> [JetCLIStatusValue] {
+    loop record in records -> jet_cli_canonical_route(record, process)
+}

@@ -1,7 +1,7 @@
 // D-WATCH-SCOPE1=A/comment: core.watcher owns file/process/port watch handles.
 package {
     name: "watcher"
-    authority: { holds: { allow: [Env, Exec, Exec.Args, FS, FS.Read, FS.Write, IO, Mem.Alloc, Net, Time.Wait] } }
+    authority: { holds: { allow: [Env, Exec, Exec.Args, FS, FS.Read, FS.Write, IO, Mem.Alloc, Net, Time] } }
 }
 
 use core.event as event
@@ -53,7 +53,7 @@ fn run() {
     if fs.exists(root) -> fs.remove_all(root) ?? panic("cleanup failed")
     fs.create_dir_all(root) ?? panic("mkdir failed")
     nested :: Path.from(root).join("nested")
-    fs.create_dir_all(nested) ?? panic("nested mkdir failed")
+    fs.create_dir_all(nested.to_string()) ?? panic("nested mkdir failed")
     created :: nested.join("note.txt")
     scope :: event.scope()
     files :: watcher.files(root) ?? panic("watch files failed")

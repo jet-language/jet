@@ -1,0 +1,102 @@
+# HAND-PORT tests/lib_use.rs:185-244 executable_is_not_importable
+# PENDING-SEAM(hangar-verified-realization): exact assertions; no runtime parity claim.
+fixture: executable_is_not_importable.fixture
+refused: hangar-verified-realization
+# /// Realize a `core` package from a local `path:` source repo into `hangar`,
+# /// recording it in the store exactly as `jetpack env --prep` would. Offline; no Nix.
+# fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::VerifiedRealization {
+#     let store_dir = roots.hangar_dir();
+#     fs::create_dir_all(&store_dir).unwrap();
+#     let upstream = format!("path:{}", repo.to_string_lossy());
+#     let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
+#     let spec = classify_in(&format!("{pkg}@mine"), &table).unwrap();
+#     let ctx = Ctx {
+#         fixtures: None,
+#         store_dir: &store_dir,
+#         offline: true,
+#         project_dir: None,
+#         nix_index: None,
+#         nix_roots: None,
+#         allow_local_nix_catalog: false,
+#     };
+#     Store::realize_verified(
+#         roots,
+#         &ctx,
+#         Store::RealizeRequest::Package {
+#             spec: &spec,
+#             table: &table,
+#         },
+#     )
+#     .expect("library realizes and records offline")
+# }
+# #[test]
+# fn executable_is_not_importable() {
+#     let s = Scratch::new("exe");
+#     let hangar_root = s.join("hangar-root");
+#     fs::create_dir_all(&hangar_root).unwrap();
+#     let roots = Roots {
+#         root: hangar_root.clone(),
+#         dev_mode: true,
+#     };
+# 
+#     // Producer repo: an `executable` package `deploy` with a prebuilt bin/.
+#     let producer = s.join("deploy-src");
+#     write(
+#         &producer.join("package.jet"),
+#         "name: \"deploy\"\nversion: \"0.1.0\"\npackages: { deploy: executable }\n",
+#     );
+#     write(&producer.join("deploy.jet"), "module deploy { }\n");
+#     write(&producer.join("bin/deploy"), "#!/bin/sh\necho deploying\n");
+# 
+#     let realized = realize_into_hangar(&roots, &producer, "deploy");
+#     let entry = realized.metadata();
+#     assert!(
+#         !entry.bin.is_empty(),
+#         "an executable stages a PATH bin: {entry:?}"
+#     );
+# 
+#     let consumer = s.join("app");
+#     write(
+#         &consumer.join("package.jet"),
+#         "name: \"app\"\nversion: \"0.1.0\"\ndeps: { deploy: acme/deploy/abc123@github }\n",
+#     );
+#     write(
+#         &consumer.join("main.jet"),
+#         "use deploy\nfn run() {\n    print(\"hi\")\n}\n",
+#     );
+#     fs::create_dir_all(consumer.join(".jet/build")).unwrap();
+# 
+#     let out = Command::new(jet_bin())
+#         .args(["run", "main.jet"])
+#         .current_dir(&consumer)
+#         .env("JETPACK_ROOT", &hangar_root)
+#         .output()
+#         .unwrap();
+#     assert!(!out.status.success(), "use of an executable must fail");
+#     let stderr = String::from_utf8_lossy(&out.stderr);
+#     // Pin the exact product copy (I4: the message IS the UX).
+#     assert!(stderr.contains("E0982"), "stderr: {stderr}");
+#     assert!(
+#         stderr.contains("`deploy` is an executable package, so it can't be used with `use`"),
+#         "what line: {stderr}"
+#     );
+#     assert!(
+#         stderr.contains("an `executable` package installs a binary on your PATH"),
+#         "why line: {stderr}"
+#     );
+#     assert!(
+#         stderr.contains("change `deploy` to `library` in `package.jet`"),
+#         "fix line: {stderr}"
+#     );
+# }
+env: JETPACK_ROOT={work}/hangar-root
+mkdir: hangar-root
+mkdir: app/.jet/build
+step: jet run main.jet
+cwd: app
+exit: nonzero
+stderr: ~ "E0982" # original predicate
+stderr: ~ "`deploy` is an executable package, so it can't be used with `use`" # original predicate
+stderr: ~ "an `executable` package installs a binary on your PATH" # original predicate
+stderr: ~ "change `deploy` to `library` in `package.jet`" # original predicate
+

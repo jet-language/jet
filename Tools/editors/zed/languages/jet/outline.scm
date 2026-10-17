@@ -1,10 +1,31 @@
-(function_def name: (identifier) @name) @item
-(struct_def name: (type_identifier) @name) @item
-(enum_def name: (type_identifier) @name) @item
-(trait_def name: (type_identifier) @name) @item
-(tag_def name: (type_identifier) @name) @item
-(impl_block type: (type_identifier) @name) @item
-(distinct_def name: (type_identifier) @name) @item
-(comptime_stmt name: (_) @name) @item
-(module_def name: (module_path) @name) @item
-(migration_block type: (type_identifier) @name) @item
+(function_def
+  "fn" @context
+  name: (_) @name) @item
+
+(struct_def
+  "struct" @context
+  name: (_) @name) @item
+
+(enum_def
+  "enum" @context
+  name: (_) @name) @item
+
+(trait_def
+  "trait" @context
+  name: (_) @name) @item
+
+(tag_def
+  "tag" @context
+  name: (_) @name) @item
+
+(impl_block
+  "impl" @context
+  type: (_) @name) @item
+
+(module_def
+  "module" @context
+  name: (_) @name) @item
+
+(decl_head
+  keyword: (identifier) @context
+  name: (type_identifier) @name) @item

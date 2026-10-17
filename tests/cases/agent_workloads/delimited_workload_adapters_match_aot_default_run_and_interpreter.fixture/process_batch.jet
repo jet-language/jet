@@ -1,0 +1,36 @@
+use core.files as fs
+use core.encoding.csv as csv
+use core.process as process
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    text :: fs.read(input) ?? panic("cannot read input")
+    rows :: csv.rows(
+        text, delimiter: "\t", header: true, skip_blank: true
+    ) ?? panic("cannot parse input")
+    loop row in rows {
+        fields :: row.fields
+        line_number :: row.line
+        if fields.len() != 4 -> panic("bad process row {line_number}")
+        label :: fields[0]
+        program :: fields[1]
+        arguments :: fields[2]
+        timeout_ms :: Int.parse(fields[3]) ?? panic("bad timeout")
+        timeout :: Duration.milliseconds(timeout_ms) ?? panic("bad timeout")
+        argv := [String]{program.copy()}
+        loop argument in arguments.split("|") -> &argv.push(argument)
+        result :: process.cmd(argv)
+            .stdout(.Capture)
+            .stderr(.Capture)
+            .timeout(timeout)
+            .run() ?? panic("process failed")
+        if result.timed_out -> print("{label}|timeout") else {
+            print("{label}|exit={result.code}|stdout={result.output.trim()}")
+        }
+    }
+}

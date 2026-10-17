@@ -1,0 +1,21 @@
+// CmdStatus cache parser/rendering, assembled with Compiler's source closure.
+fn run() Never! {
+    if jet_cli_cache_parse([String]{"prune", "--to=+1024", "--json"}) != .Ok(JetCLICacheRequest.Prune{bytes: 1024}) -> panic("cache prune parse")
+    if jet_cli_cache_parse([String]{"limit", "--host", "4MiB"}) != .Ok(JetCLICacheRequest.Limit{bytes: 4194304}) -> panic("cache limit parse")
+    if jet_cli_cache_parse([String]{"status", "--host=1"}) == {
+        .Err(error) -> { if error.message != "`jet cache status` does not take a size option" -> panic("cache status options") }
+        .Ok(_) -> panic("cache status options")
+    }
+    if jet_cli_cache_parse([String]{"limit", "--host=1", "--to=2"}) == {
+        .Err(error) -> { if error.message != "`jet cache` accepts one size option" -> panic("cache repeated size") }
+        .Ok(_) -> panic("cache repeated size")
+    }
+    if jet_cli_cache_size("18446744073709551616") == .Ok(_) || jet_cli_cache_size("-0") == .Ok(_) -> panic("cache size u64 grammar")
+    if jet_cli_cache_format_size(0) != "0 B" || jet_cli_cache_format_size(1024) != "1 KiB" || jet_cli_cache_format_size(1536) != "1.5 KiB" || jet_cli_cache_format_size(4194304) != "4 MiB" -> panic("Rust cache human size bytes")
+    report :: ArtifactPruneReport{target_bytes: 0, before_bytes: 3, after_bytes: 3, removed: [ArtifactEntryStatus]{}, pinned_bytes: 3, blocked: true}
+    rendered :: jet_cli_cache_prune(report, true)
+    expected :: "{{\"schema\":\"jet.status/v1\",\"action\":\"cache.prune\",\"ok\":true,\"reports\":[],\"cache\":{{\"after_bytes\":3,\"before_bytes\":3,\"blocked\":true,\"freed_bytes\":0,\"pinned_bytes\":3,\"removed_entries\":0,\"target_bytes\":0}}}}\n"
+    if rendered.stdout != expected || rendered.stderr != "" || rendered.exit_code != 0 -> panic("actual Rust live-lease prune JSON")
+    text :: jet_cli_cache_prune(report, false)
+    if text.stdout != "prune      3 B -> 3 B (target 0 B)\nremoved    0 entries · freed 0 B\npinned     3 B\nresult     target blocked by live leases\n" -> panic("blocked cache prune text")
+}

@@ -1,0 +1,162 @@
+# PORT tests/repl.rs:2879-2945, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+# Original matrix row auto/20, rs2882-2926.
+step auto_20: jet repl
+pty: true size 24x20
+unset: NO_COLOR
+unset: FORCE_COLOR
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: ~ "\u001b[1;96m" # Original exact color bool for auto/20 rs2922-2925.
+# Original matrix row always/20, rs2882-2926.
+step always_20: jet repl --color=always
+pty: true size 24x20
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: NO_COLOR=
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: ~ "\u001b[1;96m" # Original exact color bool for always/20 rs2922-2925.
+# Original matrix row never/20, rs2882-2926.
+step never_20: jet repl --color=never
+pty: true size 24x20
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: FORCE_COLOR=1
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: !~ "\u001b[1;96m" # Original exact color bool for never/20 rs2922-2925.
+# Original matrix row empty-NO_COLOR/20, rs2882-2926.
+step empty_NO_COLOR_20: jet repl
+pty: true size 24x20
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: NO_COLOR=
+env: FORCE_COLOR=1
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: !~ "\u001b[1;96m" # Original exact color bool for empty-NO_COLOR/20 rs2922-2925.
+# Original matrix row FORCE_COLOR/20, rs2882-2926.
+step FORCE_COLOR_20: jet repl
+pty: true size 24x20
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: FORCE_COLOR=1
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: ~ "\u001b[1;96m" # Original exact color bool for FORCE_COLOR/20 rs2922-2925.
+# Original matrix row auto/120, rs2882-2926.
+step auto_120: jet repl
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: ~ "\u001b[1;96m" # Original exact color bool for auto/120 rs2922-2925.
+# Original matrix row always/120, rs2882-2926.
+step always_120: jet repl --color=always
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: NO_COLOR=
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: ~ "\u001b[1;96m" # Original exact color bool for always/120 rs2922-2925.
+# Original matrix row never/120, rs2882-2926.
+step never_120: jet repl --color=never
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: FORCE_COLOR=1
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: !~ "\u001b[1;96m" # Original exact color bool for never/120 rs2922-2925.
+# Original matrix row empty-NO_COLOR/120, rs2882-2926.
+step empty_NO_COLOR_120: jet repl
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: NO_COLOR=
+env: FORCE_COLOR=1
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: !~ "\u001b[1;96m" # Original exact color bool for empty-NO_COLOR/120 rs2922-2925.
+# Original matrix row FORCE_COLOR/120, rs2882-2926.
+step FORCE_COLOR_120: jet repl
+pty: true size 24x120
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: FORCE_COLOR=1
+limit: time=8
+pty-send: "1 + 1\r" after 200ms
+pty-send: "\u0004" after 120ms
+exit: 0
+stdout: ~ "Tab" # Original substring predicate rs2913.
+stdout: ~ "F3" # Original substring predicate rs2914.
+stdout: !~ "interactive keys require a TTY" # Original raw-mode conjunction rs2915.
+stdout: ~ "2 : Int" # Original substring predicate rs2919.
+stdout: ~ "\u001b[1;96m" # Original exact color bool for FORCE_COLOR/120 rs2922-2925.
+step: jet repl
+pty: stdout,stderr
+stdin: null
+limit: time=8
+exit: 0
+

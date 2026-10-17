@@ -37,14 +37,14 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     changes :: publication_diff_public_api(old, [PublicAPIItem]{})
     assert_eq(changes.len(), 1)
     assert_eq(changes[0].item_name, "parse")
-    assert_eq(changes[0].description, "pub fn `parse` was removed\n   | fn parse(raw: String) -> Int\n   | (removed)")
+    assert_eq(changes[0].description, "fn `parse` was removed\n   | fn parse(raw: String) -> Int\n   | (removed)")
 }
 #Test("publication api_diff_detects_changed_signature") {
     old :: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Int")}
     new :: [PublicAPIItem]{publication_diff_test_function("parse", "fn parse(raw: String) -> Float")}
     changes :: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 1)
-    assert_eq(changes[0].description, "pub fn `parse` changed signature\n   | was: fn parse(raw: String) -> Int\n   | now: fn parse(raw: String) -> Float")
+    assert_eq(changes[0].description, "fn `parse` changed signature\n   | was: fn parse(raw: String) -> Int\n   | now: fn parse(raw: String) -> Float")
 }
 #Test("publication api_diff_no_change") {
     api :: [PublicAPIItem]{publication_diff_test_function("greet", "fn greet(name: String)")}
@@ -72,22 +72,22 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     new :: [PublicAPIItem]{publication_diff_test_function("f", "C"), publication_diff_test_function("f", "A"), publication_diff_test_function("f", "B")}
     changes :: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 1)
-    assert_eq(changes[0].description, "pub fn `f` changed signature\n   | was: A\n   | now: C")
+    assert_eq(changes[0].description, "fn `f` changed signature\n   | was: A\n   | now: C")
 }
 #Test("publication api diff does not reserve a later old signature match") {
     old :: [PublicAPIItem]{publication_diff_test_function("f", "A"), publication_diff_test_function("f", "B")}
     new :: [PublicAPIItem]{publication_diff_test_function("f", "B")}
     changes :: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 2)
-    assert_eq(changes[0].description, "pub fn `f` changed signature\n   | was: A\n   | now: B")
-    assert_eq(changes[1].description, "pub fn `f` was removed\n   | B\n   | (removed)")
+    assert_eq(changes[0].description, "fn `f` changed signature\n   | was: A\n   | now: B")
+    assert_eq(changes[1].description, "fn `f` was removed\n   | B\n   | (removed)")
 }
 #Test("publication api diff kind and name are both identity") {
     old :: [PublicAPIItem]{publication_diff_test_item("trait", "Render", "same"), publication_diff_test_function("before", "same")}
     new :: [PublicAPIItem]{publication_diff_test_item("struct", "Render", "same"), publication_diff_test_function("after", "same")}
     changes :: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 2)
-    assert_eq(changes[0].description, "pub trait `Render` was removed\n   | same\n   | (removed)")
+    assert_eq(changes[0].description, "trait `Render` was removed\n   | same\n   | (removed)")
     assert_eq(changes[1].item_name, "before")
     assert(changes[1].description.contains("was removed"))
 }
@@ -96,9 +96,9 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     new :: [PublicAPIItem]{publication_diff_test_function("f", "X"), publication_diff_test_function("f", "Y")}
     changes :: publication_diff_public_api(old, new)
     assert_eq(changes.len(), 3)
-    assert_eq(changes[0].description, "pub fn `f` changed signature\n   | was: A\n   | now: X")
+    assert_eq(changes[0].description, "fn `f` changed signature\n   | was: A\n   | now: X")
     assert_eq(changes[1].item_name, "gone")
-    assert_eq(changes[2].description, "pub fn `f` changed signature\n   | was: B\n   | now: Y")
+    assert_eq(changes[2].description, "fn `f` changed signature\n   | was: B\n   | now: Y")
 }
 #Test("publication pre_publish_gate_blocked_on_minor_with_break") {
     gate :: publication_diff_test_gate(true, true, publication_diff_test_changes(), .Minor)
@@ -179,14 +179,14 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     assert(diagnostic.fix.contains("2.0.0"))
 }
 #Test("publication diff diagnostic bytes and canonical metadata") {
-    change :: PublicationBreakingChange{description: "pub fn `parse` was removed\n   | fn parse()\n   | (removed)", item_name: "parse"}
+    change :: PublicationBreakingChange{description: "fn `parse` was removed\n   | fn parse()\n   | (removed)", item_name: "parse"}
     registry :: publication_e2601("1.2.0", .Minor, change, 2)
     assert_eq(registry.what, "This release is tagged 1.2.0 but removes public API")
-    assert_eq(registry.why, "1.2.0 is a minor bump, which promises no breaking changes. Callers pinned to ^1.0 would stop compiling.\n  pub fn `parse` was removed\n   | fn parse()\n   | (removed)")
+    assert_eq(registry.why, "1.2.0 is a minor bump, which promises no breaking changes. Callers pinned to ^1.0 would stop compiling.\n  fn `parse` was removed\n   | fn parse()\n   | (removed)")
     assert_eq(registry.fix, "Bump to 2.0.0, or restore `parse` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.")
     local :: publication_e1218("1.0.0", "1.2.0", .Minor, change, 2)
     assert_eq(local.what, "Publishing 1.2.0 after 1.0.0 is a minor bump but breaks the public API")
-    assert_eq(local.why, "A minor bump promises callers no breaking changes, but the public API changed since 1.0.0:\n  pub fn `parse` was removed\n   | fn parse()\n   | (removed)")
+    assert_eq(local.why, "A minor bump promises callers no breaking changes, but the public API changed since 1.0.0:\n  fn `parse` was removed\n   | fn parse()\n   | (removed)")
     assert_eq(local.fix, "Bump to 2.0.0 (a major release), or restore `parse` (a deprecated shim counts).")
     diagnostics :: [Diagnostic]{registry, local}
     loop diagnostic in diagnostics {
@@ -226,6 +226,6 @@ fn publication_diff_test_semver(text: String) -> PublicationSemVer Never! {
     assert_eq(changes.len(), 5)
     loop index in 0..<old.len() {
         assert_eq(changes[index].item_name, old[index].name)
-        assert_eq(changes[index].description, "pub {old[index].kind} `{old[index].name}` changed signature\n   | was: {old[index].signature}\n   | now: {new[index].signature}")
+        assert_eq(changes[index].description, "public {old[index].kind} `{old[index].name}` changed signature\n   | was: {old[index].signature}\n   | now: {new[index].signature}")
     }
 }

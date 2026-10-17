@@ -1,0 +1,28 @@
+# tests/encoding_parity.rs::cbor_codable_bodies_match_aot_resident_and_forced_deopt
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: cbor_codable_bodies_match_aot_resident_and_forced_deopt.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: jet check probe/run.jet
+exit: 0
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: lines = 2 # original iterator consumes exactly two lines
+capture: resident = text stdout.line(0)
+stdout.line(1): = "{cap:resident}" # original ed77c235f tests/encoding_parity.rs:802-805 second iterator line equals resident first line
+cap:resident: $= "|decoded|11" # original ends_with
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot

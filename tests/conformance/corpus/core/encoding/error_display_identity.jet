@@ -1,0 +1,56 @@
+// #4834: reason-only errors format identically and HexError has one identity.
+use core.encoding as encoding
+use core.encoding.hex as hex
+use core.encoding.base32 as base32
+use core.encoding.base64 as base64
+use core.crypto.uuid as uuid
+
+fn root_hex(error: hex.HexError) -> encoding.HexError Never! { error }
+fn alias_hex(error: encoding.HexError) -> hex.HexError Never! { error }
+
+fn run() {
+    if hex.decode("!") == {
+        .Err(error) -> {
+            canonical :: root_hex(error)
+            alias :: alias_hex(canonical)
+            assert_eq("{alias}", alias.reason)
+            assert_eq("{alias:Debug}", alias.reason)
+        }
+        .Ok(_) -> panic("invalid hex accepted")
+    }
+    if encoding.hex_to_bytes("!") == {
+        .Err(error) -> {
+            alias :: alias_hex(error)
+            assert_eq("{alias}", alias.reason)
+            assert_eq("{alias:Debug}", alias.reason)
+        }
+        .Ok(_) -> panic("invalid root hex accepted")
+    }
+    reason :: "reason λ"
+    root_constructed :: encoding.HexError.new(reason)
+    alias_constructed :: hex.HexError.new(reason)
+    assert_eq(root_hex(alias_constructed).reason, root_constructed.reason)
+    assert_eq(alias_hex(root_constructed).reason, reason)
+    if base32.decode("!") == {
+        .Err(error) -> {
+            assert_eq("{error}", error.reason)
+            assert_eq("{error:Debug}", error.reason)
+        }
+        .Ok(_) -> panic("invalid base32 accepted")
+    }
+    if base64.decode("!") == {
+        .Err(error) -> {
+            assert_eq("{error}", error.reason)
+            assert_eq("{error:Debug}", error.reason)
+        }
+        .Ok(_) -> panic("invalid base64 accepted")
+    }
+    if uuid.parse("!") == {
+        .Err(error) -> {
+            assert_eq("{error}", error.reason)
+            assert_eq("{error:Debug}", error.reason)
+        }
+        .Ok(_) -> panic("invalid UUID accepted")
+    }
+    print("reason-only Display/Debug and canonical HexError identity passed")
+}

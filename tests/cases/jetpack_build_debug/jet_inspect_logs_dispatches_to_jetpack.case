@@ -1,0 +1,9 @@
+# Port of tests/jetpack_build_debug.rs:147-174. PENDING-SAME-HEAD, PENDING-GRAMMAR(batch-four).
+fixture: fixtures/jet_inspect_logs_dispatches_to_jetpack
+mkdir: root
+env: JETPACK_ROOT={work}/root
+step: jetpack build --no-color
+exit: any # original setup build result was discarded
+step: jet inspect logs weirdctl --json --no-color
+exit: 0
+stdout: ~ "\"steps\"" # original contains predicate, literal bytes

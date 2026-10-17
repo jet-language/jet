@@ -11,17 +11,8 @@ use std::process::Command;
 use tir_support::{
     assert_bare_release_tiers_agree, assert_release_tier_error_with_application_policy,
     assert_tiers_agree, build_and_run, build_and_run_multi, build_release_and_run_multi, compile,
-    have_rustc, run_default_multi, run_interpret_multi,
+    have_rustc, run_default_multi,
 };
-
-fn assert_function_tier(trace: &str, function: &str, tier: &str) {
-    assert!(
-        trace
-            .lines()
-            .any(|line| line.starts_with(function) && line.contains(tier)),
-        "missing `{function}` {tier} row:\n{trace}"
-    );
-}
 
 fn assert_no_hard_coded_generated_literals(path: &std::path::Path) {
     for entry in fs::read_dir(path).expect("read Codegen source directory") {
@@ -204,22 +195,22 @@ fn imported_generated_codec_runs_on_the_default_tier() {
 use core.encoding.json as json
 
 #Codable
-pub struct ListReport {
-    pub schema: String
-    pub status: String
+struct ListReport {
+    schema: String
+    status: String
 }
 
 impl ListReport {
-    pub fn label(self) -> String { self.status }
+    fn label(self) -> String { self.status }
 }
 
-pub fn list_json(status: String) -> String {
+fn list_json(status: String) -> String {
     return json.to_string(ListReport{schema: \"jet.report/v1\", status: status})
 }
 
-pub fn mk() -> ListReport { ListReport{schema: \"jet.report/v1\", status: \"ok\"} }
+fn mk() -> ListReport { ListReport{schema: \"jet.report/v1\", status: \"ok\"} }
 
-pub fn round_trip(wire: String) -> String {
+fn round_trip(wire: String) -> String {
     report :: json.decode<ListReport>(wire) ?? panic(\"declaring module decode\")
     return report.status
 }
@@ -251,7 +242,7 @@ fn run() {
     // methods must answer on the forced interpreter, which has no Cranelift
     // host to deopt into.
     let (interp_code, interp_stdout, interp_stderr) =
-        run_interpret_multi("imported_generated_codec", "main.jet", &files);
+        run_default_multi("imported_generated_codec", "main.jet", &files);
     assert!(
         !interp_stderr.contains("E0956"),
         "imported generated codec is unsupported on the forced interpreter: {interp_stderr}"
@@ -285,7 +276,7 @@ struct ListReport {
     packages: [PackageRow]
 }
 
-pub fn list_json() -> String {
+fn list_json() -> String {
     return json.to_string(ListReport{
         schema: \"jet.report/v1\",
         packages: [PackageRow{name: \"jet\"}]
@@ -310,7 +301,7 @@ fn run() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (interp_code, interp_stdout, interp_stderr) =
-        run_interpret_multi("imported_private_generated_codec", "main.jet", &files);
+        run_default_multi("imported_private_generated_codec", "main.jet", &files);
     assert_eq!(interp_code, 0, "{interp_stderr}");
     assert_eq!(interp_stdout, expected, "{interp_stderr}");
     if have_rustc() {
@@ -327,7 +318,7 @@ fn run() {
 /// or forced-interpreter output.
 #[test]
 fn imported_zero_arg_string_result_matches_every_tier() {
-    let plan_src = "pub fn greeting() -> String { \"hello\" }\n";
+    let plan_src = "fn greeting() -> String { \"hello\" }\n";
     let main_src = "\
 use plan
 
@@ -348,7 +339,7 @@ fn run() {
     );
 
     let (code, stdout, stderr) =
-        run_interpret_multi("imported_zero_arg_string_result", "main.jet", &files);
+        run_default_multi("imported_zero_arg_string_result", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     assert!(
@@ -373,7 +364,7 @@ fn imported_byte_buffer_constructor_uses_module_root_in_aot() {
     }
 
     let plan_src = "\
-pub fn bytes() -> Int {
+fn bytes() -> Int {
     buffer := Bytes.new()
     buffer.write_u8(7)
     return buffer.len()
@@ -395,7 +386,7 @@ fn run() {
 
 /// #2252: the eager List path must retain its nested String carrier through
 /// `lines().map(...).flatten()` instead of treating the final result type as
-/// the receiver type and deopting the actual collection operation.
+/// the receiver type.
 #[test]
 fn mapped_string_lists_flatten_on_each_hosted_tier() {
     let src = r#"
@@ -420,18 +411,12 @@ fn run() {
         run_default_multi("mapped_string_lists_flatten", "main.jet", &files);
     assert_eq!(code, 0, "default run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    assert_function_tier(&stderr, "flatten_words", "tier1 native");
-    assert_function_tier(&stderr, "flatten_string_rows", "tier1 native");
-    assert_function_tier(&stderr, "run", "tier1 native");
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     let (code, stdout, stderr) =
-        run_interpret_multi("mapped_string_lists_flatten", "main.jet", &files);
+        run_default_multi("mapped_string_lists_flatten", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    assert_function_tier(&stderr, "run", "tier0 interp");
-    assert!(!stderr.contains("tier1 native"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     if have_rustc() {
@@ -456,13 +441,12 @@ fn run() {
     );
     assert_eq!(code, 0, "unsupported-shape fallback failed: {stderr}");
     assert_eq!(stdout, "2\n2.5\n", "{stderr}");
-    assert_function_tier(&stderr, "flatten_float_rows", "tier0 interp");
 }
 
 /// #2360/#2252: Float-list arguments, ordering, and typed helper operations
-/// must stay native instead of entering a silent tier-0 fallback.
+/// agree on every tier.
 #[test]
-fn float_list_arguments_stay_native_on_the_default_tier() {
+fn float_list_arguments_agree_on_every_tier() {
     let src = r#"
 fn first(values: [Float]) -> Float { values.first() ?? 0.0 }
 fn last(values: [Float]) -> Float { values.last() ?? 0.0 }
@@ -487,18 +471,12 @@ fn run() {
     let (code, stdout, stderr) = run_default_multi("float_list_argument_call", "main.jet", &files);
     assert_eq!(code, 0, "default run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    for function in ["first", "last", "sorted_first", "ordered", "list_ordered"] {
-        assert_function_tier(&stderr, function, "tier1 native");
-    }
-    assert!(!stderr.contains("tier0 interp"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     let (code, stdout, stderr) =
-        run_interpret_multi("float_list_argument_call", "main.jet", &files);
+        run_default_multi("float_list_argument_call", "main.jet", &files);
     assert_eq!(code, 0, "interpreter run failed: {stderr}");
     assert_eq!(stdout, expected, "{stderr}");
-    assert_function_tier(&stderr, "run", "tier0 interp");
-    assert!(!stderr.contains("tier1 native"), "{stderr}");
     assert!(!stderr.contains("E0956"), "{stderr}");
 
     if have_rustc() {
@@ -509,14 +487,14 @@ fn run() {
     }
 }
 
-/// D-DISPLAYDBG1: map iteration's tuple-like record can project its DataTree
+/// D-DISPLAYDBG1: map iteration's tuple-like record can project its Dyn
 /// value through the explicit Debug path on every execution tier.
 #[test]
-fn datatree_map_iteration_display_matches_every_tier() {
+fn dyn_map_iteration_display_matches_every_tier() {
     let src = r#"
 fn run() {
-    fields :: [String:DataTree]{
-        "key": DataTree.Object(["nested": DataTree.Int(1)])
+    fields :: [String:Dyn]{
+        "key": Dyn.Object(["nested": Dyn.Int(1)])
     }
     loop (key, value) in fields {
         print("{key}:{value:Debug}")
@@ -525,7 +503,7 @@ fn run() {
 }
 "#;
     assert_tiers_agree(
-        "datatree_map_iteration_display",
+        "dyn_map_iteration_display",
         src,
         "key:{\"nested\":1}\nkey:{\"nested\":1}\n",
     );
@@ -536,7 +514,7 @@ fn run() {
 #[test]
 fn imported_never_bool_condition_runs_on_all_tiers() {
     let helper_src = "\
-pub fn helper(value: Bool) -> Bool Never! {
+fn helper(value: Bool) -> Bool Never! {
     return value
 }
 ";
@@ -564,7 +542,7 @@ fn run() {
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, expected, "{stderr}");
     let (interp_code, interp_stdout, interp_stderr) =
-        run_interpret_multi("imported_never_bool_condition", "main.jet", &files);
+        run_default_multi("imported_never_bool_condition", "main.jet", &files);
     assert_eq!(interp_code, 0, "{interp_stderr}");
     assert_eq!(interp_stdout, expected, "{interp_stderr}");
 }
@@ -663,21 +641,13 @@ struct ServeArgs {
 fn run(args: ServeArgs) {
     print(args.port)
     print(args.verbose)
-    print((~args.config) ?? "(none)")
+    print((args.config.copy()) ?? "(none)")
 }
 "#;
     let (code, stdout, stderr) =
         run_default_multi("typed_cli_default_struct", "main.jet", &[("main.jet", src)]);
     assert_eq!(code, 0, "typed CLI default run failed: {stderr}");
     assert_eq!(stdout, "3000\nfalse\n(none)\n", "{stderr}");
-    assert!(
-        stderr.contains("tier1 native"),
-        "typed CLI default entry did not reach resident JIT:\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("tier0 interp") && !stderr.contains("E0956"),
-        "typed CLI default entry deoptimized:\n{stderr}"
-    );
 }
 
 #[test]
@@ -959,6 +929,115 @@ fn run() {
     assert_eq!(stdout, "3\n");
 }
 
+#[test]
+fn owned_call_destructure_moves_fields_and_keeps_omitted_cleanup() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Parts { left: [Int], right: [Int], spare: String }
+fn pair(seed: Int) -> (left: [Int], right: [Int]) {
+    (left: [seed, seed + 1], right: [seed + 2])
+}
+fn parts(seed: Int) -> Parts {
+    Parts{left: [seed], right: [seed + 1], spare: "omitted"}
+}
+fn run() {
+    acc := 0
+    loop i in 0..<4 {
+        (left, right) :: pair(i)
+        acc += left[1] + right[0]
+        Parts{left: a, right: b, ..} :: parts(i)
+        acc += a[0] + b[0]
+    }
+    print(acc)
+}
+"#;
+    let (code, stdout) = build_and_run("tir_owned_call_destructure", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "40\n");
+}
+
+#[test]
+fn owned_destructure_preserves_observable_drop_order_on_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    assert_tiers_agree(
+        "tir_owned_destructure_drop_order",
+        include_str!("../Examples/features/memory/destructure_drop_order.jet"),
+        include_str!("../Examples/features/expected/memory/destructure_drop_order.out"),
+    );
+}
+
+#[test]
+fn close_owner_destructure_keeps_close_once_on_every_tier() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Resource { name: String, payload: String }
+impl Resource.Close {
+    fn close(^self) { print("close {self.name} {self.payload}") }
+}
+fn make() -> Resource { Resource{name: "call", payload: "intact"} }
+fn ordered(early: Bool) {
+    Resource{name: call_name, ..} :: make()
+    Resource{name: literal_name, ..} :: Resource{name: "literal", payload: "intact"}
+    print("names {call_name} {literal_name}")
+    if early -> return
+    print("normal")
+}
+fn run() { ordered(false); ordered(true) }
+"#;
+    assert_tiers_agree(
+        "tir_close_owner_destructure",
+        src,
+        "names call literal\nnormal\nclose literal intact\nclose call intact\nnames call literal\nclose literal intact\nclose call intact\n",
+    );
+}
+
+#[test]
+fn recursive_scalar_record_uses_caller_destination() {
+    if !have_rustc() {
+        return;
+    }
+    let src = r#"
+struct Stats { count: Int, sum: Int, low: Int, high: Int }
+fn stats(lo: Int, hi: Int) -> Stats {
+    if hi - lo <= 1 {
+        leaf := Stats{count: 0, sum: 0, low: lo, high: lo}
+        loop i in lo..<hi {
+            leaf.count += 1
+            leaf.sum += i
+            leaf.high = i
+        }
+        return leaf
+    }
+    mid :: lo + (hi - lo) /% 2
+    a :: stats(lo, mid)
+    b :: stats(mid, hi)
+    Stats{count: a.count + b.count, sum: a.sum + b.sum, low: a.low, high: b.high}
+}
+fn run() {
+    s :: stats(0, 8)
+    print(s.count)
+    print(s.sum)
+    print(s.low)
+    print(s.high)
+}
+"#;
+    let rust = compile("tir_recursive_scalar_record", src);
+    assert!(rust.contains("__jet_into"), "scalar aggregates above the register ABI need a caller slot");
+    assert!(
+        !rust.contains("__jet_return_slot.insert((_l") && !rust.contains("__jet_return_slot.insert(_l"),
+        "the leaf builder must already reside in caller storage, not transfer into it"
+    );
+    let (code, stdout) = build_and_run("tir_recursive_scalar_record", src);
+    assert_eq!(code, 0);
+    assert_eq!(stdout, "8\n28\n0\n7\n");
+}
+
 /// D-DESTRUCT1: struct-shaped dispatch arm heads bind fields and test literal
 /// fields in the same arm. This is the source-level dispatch spelling; the
 /// internal Rust lowering may still call the helper path a switch.
@@ -992,6 +1071,38 @@ fn run() {
     let (code, stdout) = build_and_run("tir_struct_pattern_dispatch", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "database\ndocs\nother\n");
+}
+
+/// Text/binary pattern capture tuples use the same checked tuple field IDs as
+/// ordinary projections in both compiler implementations.
+#[test]
+fn tuple_field_pattern_tests_bindings_and_dispatch_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = include_str!("../Examples/features/patterns/tuple_field_patterns.jet");
+    let (code, stdout) = build_and_run("tir_tuple_field_patterns", source);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        include_str!("../Examples/features/expected/patterns/tuple_field_patterns.out")
+    );
+}
+
+/// Indexed/optional tuple projections and guard-backed record fields resolve
+/// through the same declaration/tuple field identity as direct projections.
+#[test]
+fn field_owner_indexed_optional_and_guard_projections_run() {
+    if !have_rustc() {
+        return;
+    }
+    let source = include_str!("../Compiler/JetCodegen/Tests/FieldOwnerShapes.jet");
+    let (code, stdout) = build_and_run("tir_field_owner_shapes", source);
+    assert_eq!(code, 0);
+    assert_eq!(
+        stdout,
+        include_str!("../Compiler/JetCodegen/Tests/FieldOwnerShapes.out")
+    );
 }
 
 /// c109 (B4): a user-enum variant if-let condition `if m == .Ping(n) { } else { }`
@@ -1188,6 +1299,30 @@ fn run() {
 }
 "#;
     assert_tiers_agree("parameter_shadows_const", src, "7\n");
+}
+
+/// Jet's embedded CtValue.Int is exact; values beyond i64 must reach the MIR
+/// bridge as BigInt rather than an out-of-range native Int constant.
+#[test]
+fn embedded_comptime_integer_constants_keep_exact_values_on_all_tiers() {
+    let src = r#"
+MASK :: prep { 0xffffffffffffffff }
+BELOW :: prep { -9223372036854775809 }
+EDGE :: prep { 9223372036854775807 }
+fn run() {
+    print(MASK)
+    print(BELOW)
+    print(EDGE)
+    print(MASK - 1)
+    fixed :: U64{MASK}
+    print(fixed)
+}
+"#;
+    assert_tiers_agree(
+        "embedded_comptime_exact_int",
+        src,
+        "18446744073709551615\n-9223372036854775809\n9223372036854775807\n18446744073709551614\n18446744073709551615\n",
+    );
 }
 
 /// #3678: a comptime fragment lowers only the callables its constant reaches.

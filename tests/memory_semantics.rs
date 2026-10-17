@@ -107,27 +107,6 @@ fn memory_denial_example_matches_all_hosted_tiers() {
 }
 
 #[test]
-fn memory_denial_matches_the_dev_interpreter_path() {
-    let root = common::unique_tmp("jet_memory_denial_dev");
-    std::fs::create_dir_all(&root).unwrap();
-    let entry = root.join("main.jet");
-    std::fs::write(&entry, MEMORY_DENIAL_SOURCE).unwrap();
-    let output = Command::new(jet())
-        .args(["dev", entry.to_str().unwrap(), "--interpret", "--watch=off"])
-        .current_dir(&root)
-        .env("NO_COLOR", "1")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "dev rejected the memory denial source: {}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(String::from_utf8_lossy(&output.stdout), "memory denial\n");
-    let _ = std::fs::remove_dir_all(root);
-}
-
-#[test]
 fn memory_denial_matches_comptime() {
     let compiled = jet::compile(MEMORY_COMPTIME_SOURCE).expect("comptime source compiles");
     assert!(compiled.rust.contains("memory denial"));
@@ -204,6 +183,26 @@ fn row(kind: &str, code: &str, repairs: &[&str]) -> String {
 }
 
 #[test]
+fn memo_statistics_before_and_after_calls_use_one_store() {
+    let source = r#"
+#Memo fn square(value: Int) -[]> Int { value * value }
+fn run() {
+    initial :: square.cache()
+    print("{initial.hits},{initial.misses},{initial.size},{initial.bound}")
+    print(square(7))
+    print(square(7))
+    final :: square.cache()
+    print("{final.hits},{final.misses},{final.size},{final.bound}")
+}
+"#;
+    tir_support::assert_tiers_agree(
+        "memo_store_identity",
+        source,
+        "0,0,0,128\n49\n49\n1,1,1,128\n",
+    );
+}
+
+#[test]
 fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
     tir_support::assert_example_cli_tiers_agree(
         "memory/memoize",
@@ -221,7 +220,7 @@ fn memo_computed_and_view_copy_examples_agree_across_execution_tiers() {
     // line of this golden is a read window entering an owning slot — an
     // interpolation, an owned `String` parameter, and a returned `String` — so
     // AOT, default `jet run`, and the forced interpreter must agree byte for
-    // byte, not only on the explicit `~` spelling above.
+    // byte, not only on the explicit `.copy()` spelling above.
     tir_support::assert_example_cli_tiers_agree(
         "memory/string_view",
         include_str!("../Examples/features/expected/memory/string_view.out"),
@@ -332,8 +331,6 @@ fn one_table_names_the_shared_read_view_copy_kernel_for_every_tier() {
         crate_root.join("Codegen/MIRRust.rs"),
         crate_root.join("Codegen/MIRWeb.rs"),
         crate_root.join("Codegen/MIREval.rs"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("crates/jet-jit/src/jit/functions_compile.rs"),
     ] {
         let text = std::fs::read_to_string(&engine).unwrap();
         assert!(

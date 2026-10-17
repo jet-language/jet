@@ -1,0 +1,17 @@
+# Port of tests/jetpack_update_confirmation.rs:10-64; original source and channel fixture.
+# Runtime PENDING-SAME-HEAD.
+fixture: update_noninteractive_requires_yes_and_short_yes_applies.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+step: jetpack update --no-color --fixtures {work}/fixtures
+cwd: project
+exit: 2
+stderr: ~ "plan only; pass -y or --yes to apply in a non-interactive shell" # original predicate
+file: project/.jet/lock absent
+entries: package-root = 0 # original read_dir().next().is_none
+step: jetpack update --no-color -y --fixtures {work}/fixtures
+cwd: project
+exit: 0
+stderr: ~ "applying plan (--yes)" # original predicate
+stderr: !~ "Apply?" # original predicate
+file: project/.jet/lock ~ "exact = \"github:acme/tools#v1.2.0\"" # original predicate

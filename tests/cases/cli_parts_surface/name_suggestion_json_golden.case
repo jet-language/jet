@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/surface.rs:1006-1020; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/name
+step: jet check {work}/name.jet --json
+env: NO_COLOR=1
+normalize: replace "{work}/name.jet" "BAD.jet"
+normalize: replace "name.jet" "BAD.jet"
+exit: 1
+stdout: empty
+stderr: = name_suggestion_json.txt

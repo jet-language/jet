@@ -13,17 +13,17 @@ fn run() {
         .Ok(_) -> panic("address injection accepted")
         .Err(_) -> print("address-rejected")
     }
-    if email.message(~sender, [~recipient], [Address]{}, "hello\nBcc := stolen@example.com", "text", HTML{""}, [Attachment]{}) == {
+    if email.message(sender.copy(), [recipient.copy()], [Address]{}, "hello\nBcc := stolen@example.com", "text", HTML{""}, [Attachment]{}) == {
         .Ok(_) -> panic("header injection accepted")
         .Err(_) -> print("header-rejected")
     }
-    recipients := [~recipient]
+    recipients := [recipient.copy()]
     count := 1
     loop count < 101 {
-        &recipients.push(~recipient)
+        &recipients.push(recipient.copy())
         count += 1
     }
-    if email.message(~sender, recipients, [Address]{}, "subject", "text", HTML{""}, [Attachment]{}) == {
+    if email.message(sender.copy(), recipients, [Address]{}, "subject", "text", HTML{""}, [Attachment]{}) == {
         .Ok(_) -> panic("recipient bound ignored")
         .Err(_) -> print("recipient-bound")
     }
@@ -34,7 +34,7 @@ fn run() {
     }
     attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
     message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", HTML{"<b>html</b>"}, [attachment]) ?? panic("message")
-    first :: email.serialize(~message) ?? panic("serialize")
+    first :: email.serialize(message.copy()) ?? panic("serialize")
     second :: email.serialize(message) ?? panic("serialize twice")
     print(first == second)
     print(first.len())
@@ -47,7 +47,7 @@ fn run() {
     let file = dir.join("email_mime.jet");
     fs::write(&file, src).unwrap();
     for (tier, use_interpreter) in [("default dev", false), ("forced interpreter", true)] {
-        match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, use_interpreter) {
+        match crate::common::dev_run(file.to_str().unwrap(), false, use_interpreter) {
             jet::Interpreter::RunOutcome::Ran {
                 stdout,
                 stderr,

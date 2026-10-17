@@ -1,0 +1,25 @@
+// Sync.rs:75-79; CAbiRoutes.rs:1577-1587,12568-12576. Native Scope48:
+// raw backend u64 ID0, inline RowPolicy24@8, owned user Text*32, nullable
+// owned request-id Text*40. It does not own/close the backend connection.
+DB_SCOPE_BYTES :: prep { I64{48} }
+#Export(c) fn jet_rt_handle_clone_jet_db_scope(value: I64) -> I64 {
+    result :: jet_rt_alloc(DB_SCOPE_BYTES, I64{8})
+    rt_text_store(result, rt_text_word(value))
+    row_policy_copy_into(value + I64{8}, result + I64{8})
+    rt_text_store(result + I64{32}, jet_rt_string_clone(rt_text_word(value + I64{32})))
+    request :: rt_text_word(value + I64{40})
+    rt_text_store(result + I64{40}, if (request == I64{0}) -> I64{0} else -> jet_rt_string_clone(request))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_db_scope(value: I64) {
+    if (value == I64{0}) -> return
+    row_policy_drop_fields(value + I64{8})
+    jet_rt_string_drop(rt_text_word(value + I64{32}))
+    request :: rt_text_word(value + I64{40})
+    if (request != I64{0}) -> jet_rt_string_drop(request)
+    jet_rt_free(value, DB_SCOPE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_field_jet_db_scope_policy(value: I64) -> I64 { value + I64{8} }
+#Export(c) fn jet_rt_handle_field_jet_db_scope_user(value: I64, output: I64) {
+    row_policy_lend_text(rt_text_word(value + I64{32}), output)
+}

@@ -1,0 +1,8 @@
+// SETUP-PORT http_client_law.rs2890/2937: original ignored zero-byte wake connect, AFTER counter snapshot.
+use core.net as net
+fn run() {
+    if net.tcp_connect("{cap:addr}") == {
+        .Ok(stream) -> { _ :: stream.close() }
+        .Err(_) -> {}
+    }
+}

@@ -1721,6 +1721,8 @@ pub struct MarkerVocabulary {
     /// expansion and reflection) read this map; name-only consumers read the
     /// set above.
     declarations: BTreeMap<String, crate::AST::MarkerDecl>,
+    declaration_ids: BTreeMap<String, (usize, crate::Diagnostics::Span)>,
+    bound_declarations: Option<std::sync::Arc<BTreeMap<(usize, usize, usize), crate::AST::MarkerDecl>>>,
 }
 
 impl MarkerVocabulary {
@@ -1729,6 +1731,8 @@ impl MarkerVocabulary {
         Self {
             declared: names.into_iter().collect(),
             declarations: BTreeMap::new(),
+            declaration_ids: BTreeMap::new(),
+            bound_declarations: None,
         }
     }
 
@@ -1766,6 +1770,38 @@ impl MarkerVocabulary {
     /// `None` here.
     pub fn declaration(&self, name: &str) -> Option<&crate::AST::MarkerDecl> {
         self.declarations.get(name)
+    }
+
+    pub fn with_bound_declarations(
+        mut self,
+        declarations: std::sync::Arc<BTreeMap<(usize, usize, usize), crate::AST::MarkerDecl>>,
+    ) -> Self {
+        self.bound_declarations = Some(declarations);
+        self
+    }
+
+    pub fn declaration_for(&self, marker: &crate::AST::Marker) -> Option<&crate::AST::MarkerDecl> {
+        if let Some((module, span)) = marker.declaration {
+            return self.bound_declarations.as_ref()?.get(&(module, span.start, span.end));
+        }
+        self.declaration(&marker.name)
+    }
+
+    pub fn with_bound_names(mut self, names: impl IntoIterator<Item = String>) -> Self {
+        self.declared.extend(names);
+        self
+    }
+
+    pub fn add_names(&mut self, names: impl IntoIterator<Item = String>) {
+        self.declared.extend(names);
+    }
+
+    pub fn bind_declaration(&mut self, name: String, module: usize, span: crate::Diagnostics::Span) {
+        self.declaration_ids.insert(name, (module, span));
+    }
+
+    pub fn declaration_identity_for(&self, marker: &crate::AST::Marker) -> Option<(usize, crate::Diagnostics::Span)> {
+        marker.declaration.or_else(|| self.declaration_ids.get(&marker.name).copied())
     }
 
     /// Source-declared rule rows in deterministic name order.
@@ -2001,6 +2037,14 @@ pub fn applied_rule(name: &str) -> Option<&'static AppliedRule> {
     APPLIED_RULES.iter().find(|row| row.name == name)
 }
 
+/// The ratified group exclusions are identity-bearing gates, refusals and
+/// retired registry rows; applicability and argument checks stay at use.
+pub fn marker_group_member_forbidden(name: &str, negated: bool) -> bool {
+    negated
+        || matches!(name, "Unsafe" | "Impure" | "Nondeterministic" | "allow" | "Scrub" | "FX")
+        || applied_rule(name).is_some_and(|row| !matches!(row.status, RuleStatus::Active))
+}
+
 pub fn rule_allows(name: &str, site: RuleSite) -> bool {
     applied_rule(name).is_some_and(|row| row.sites.contains(&site))
 }
@@ -2156,7 +2200,6 @@ mod tests {
         assert!(!super::rule_allows("Codable", super::RuleSite::Function));
         assert!(!super::rule_allows("Doc", super::RuleSite::Block));
         assert!(!super::rule_allows("Region", super::RuleSite::File));
-        assert!(!super::rule_allows("PubFile", super::RuleSite::Field));
     }
 
     #[test]
@@ -2242,7 +2285,7 @@ mod tests {
         for name in ["Pre", "Post", "allow"] {
             assert!(row(name).repeatable, "{name} must be repeatable");
         }
-        for name in ["Inline", "Codable", "Job", "PubFile", "NoPrelude"] {
+        for name in ["Inline", "Codable", "Job", "NoPrelude"] {
             assert!(!row(name).repeatable, "{name} must not be repeatable");
         }
 
@@ -2351,6 +2394,7 @@ mod tests {
         let span = crate::Diagnostics::Span::new(0, 1);
         let marker = crate::AST::Marker {
             name: "Doc".to_string(),
+            declaration: None,
             negated: false,
             name_span: span,
             args: vec![crate::AST::MarkerCallArg::Expr(crate::AST::Expr::Str(

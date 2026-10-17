@@ -1,0 +1,33 @@
+# Port of tests/build_sandbox.rs:1325-1463; original7 commands, exact row output + host side effects.
+# PENDING-SAME-HEAD; no runtime proof. Nonblocking observer now accept(deadline:0s) with exact750ms/5ms polling.
+requires: os:unix
+fixture: fixtures/shared_hostile_corpus_uses_agent_executor_production_path
+copy: {root}/tests/fixtures/build_sandbox/hostile-corpus.tsv corpus.tsv
+write: {tmp}/host-secret = "host-only-secret"
+symlink: {tmp}/host-secret link
+step sandbox: jet os config sandbox status
+step: jet run tool.jet
+capture: ln = text stdout.trim
+step: jet build observer.jet
+spawn observer: {work}/.jet/build/observer {work}/port.txt
+await: file port.txt timeout 120s every 10ms
+capture: port = text file port.txt
+write: main.jet main.template
+step: jet run --release main.jet
+exit: 0
+stdout: lines = 14 # original ed77c235f tests/build_sandbox.rs:1430-1435 Rust lines count == seven cases * 2
+stdout.line(0): = "host-read" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(2): = "host-write" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(4): = "source-symlink" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(6): = "output-symlink" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(8): = "network-exfiltration" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(10): = "child-process" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+stdout.line(12): = "tmpfs-exhaustion" # original ed77c235f tests/build_sandbox.rs:1442-1443 lines[index * 2] == case_id
+when sandbox.stdout+stderr ~ "sandbox: Strong via": stdout.filter(!= "host-read" "host-write" "source-symlink" "output-symlink" "network-exfiltration" "child-process" "tmpfs-exhaustion"): lines = ["blocked","blocked","blocked","blocked","blocked","blocked","blocked"] # original ed77c235f tests/build_sandbox.rs:1437-1444 Strong per-case result equality
+when sandbox.stdout+stderr !~ "sandbox: Strong via": stdout.filter(!= "host-read" "host-write" "source-symlink" "output-symlink" "network-exfiltration" "child-process" "tmpfs-exhaustion"): lines = ["unsupported","unsupported","unsupported","unsupported","unsupported","unsupported","unsupported"] # original ed77c235f tests/build_sandbox.rs:1437-1444 non-Strong per-case result equality
+wait: observer
+exit: 0
+sleep: 100ms
+file: {tmp}/host-secret = "host-only-secret"
+file: {tmp}/host-marker absent
+step: jet run cleanup.jet -- {pid}

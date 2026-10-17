@@ -100,7 +100,7 @@ fn freestanding_allows_core_json() {
     let src = r#"use core.encoding.json as json
 
 fn run() {
-    s :: json.to_string("hello")
+    s :: json.to_string("hello") ?? panic("JSON encode")
     print(s)
 }
 "#;

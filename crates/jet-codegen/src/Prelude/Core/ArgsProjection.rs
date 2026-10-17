@@ -6,7 +6,7 @@
 /// D-SHAPE-ONE1=A: decode a typed value anywhere through the same builder
 /// used by `fn run(args: T)`. The parser remains the only argv reader; this
 /// adapter only marshals the shared host-neutral tree into the canonical
-/// `DataTree` consumed by `__jet_Decode`.
+/// `Dyn` consumed by `__jet_Decode`.
 fn jet_args_decode<T: __jet_Decode>(
     spec: &JetArgsSpec,
     argv: &Vec<String>,
@@ -27,21 +27,21 @@ fn jet_args_decode<T: __jet_Decode>(
     })?;
     let fields = fields
         .into_iter()
-        .map(|(name, value)| (name, jet_args_shape_value_to_datatree(value)))
+        .map(|(name, value)| (name, jet_args_shape_value_to_dyn(value)))
         .collect();
-    T::jet_decode(&jet_std::DataTree::Object(fields))
+    T::jet_decode(&jet_std::Dyn::Object(fields))
 }
 
-fn jet_args_shape_value_to_datatree(value: JetArgsShapeValue) -> jet_std::DataTree {
+fn jet_args_shape_value_to_dyn(value: JetArgsShapeValue) -> jet_std::Dyn {
     match value {
-        JetArgsShapeValue::Bool(value) => jet_std::DataTree::Bool(value),
-        JetArgsShapeValue::Int(value) => jet_std::DataTree::Int(value),
-        JetArgsShapeValue::Float(value) => jet_std::DataTree::Float(value),
-        JetArgsShapeValue::Text(value) => jet_std::DataTree::Text(value),
-        JetArgsShapeValue::Array(values) => jet_std::DataTree::Array(
+        JetArgsShapeValue::Bool(value) => jet_std::Dyn::Bool(value),
+        JetArgsShapeValue::Int(value) => jet_std::Dyn::Int((value).into()),
+        JetArgsShapeValue::Float(value) => jet_std::Dyn::Float(value),
+        JetArgsShapeValue::Text(value) => jet_std::Dyn::Text(value),
+        JetArgsShapeValue::Array(values) => jet_std::Dyn::Array(
             values
                 .into_iter()
-                .map(jet_args_shape_value_to_datatree)
+                .map(jet_args_shape_value_to_dyn)
                 .collect(),
         ),
     }
@@ -60,10 +60,10 @@ fn jet_config_merge<T: __jet_Encode + __jet_Decode>(
     flags: &T,
     settings: &T,
 ) -> Result<T, Vec<jet_std::FieldError>> {
-    let jet_std::DataTree::Object(flag_fields) = flags.jet_encode() else {
+    let jet_std::Dyn::Object(flag_fields) = flags.jet_encode() else {
         return Err(jet_std::FieldError::one("flags layer is not a record"));
     };
-    let jet_std::DataTree::Object(settings_fields) = settings.jet_encode() else {
+    let jet_std::Dyn::Object(settings_fields) = settings.jet_encode() else {
         return Err(jet_std::FieldError::one("settings layer is not a record"));
     };
     let fields = jet_args_merge_fields(spec, argv, names, flag_fields, settings_fields)
@@ -79,7 +79,7 @@ fn jet_config_merge<T: __jet_Encode + __jet_Decode>(
                 })
                 .collect::<Vec<_>>()
         })?;
-    T::jet_decode(&jet_std::DataTree::Object(fields))
+    T::jet_decode(&jet_std::Dyn::Object(fields))
 }
 
 #[derive(Clone)]

@@ -1,7 +1,7 @@
 // A real browser target: the companion HTML is the page under test.  The
 // endpoint and server are supplied by the browser harness, never fabricated by
 // this example.  All protocol and report values remain typed handles.
-#[Target(Web), HTML("browser_surface.html")]
+#[Target(Web), HTML(Path{"browser_surface.html"})]
 use core.web.browser as browser
 
 fn report_surface() {
@@ -84,7 +84,7 @@ fn browser_session(endpoint: String, page_url: String) {
     _downloads :: b.allow_downloads("build/browser-downloads")
 
     protocol :: b.protocol("cdp") ?? return
-    _protocol_result :: protocol.send("Runtime.evaluate", "{}")
+    _protocol_result :: protocol.send("Runtime.evaluate", "{{}}")
     trace :: b.trace()
     _trace_count :: trace.entry_count()
     _trace_redacted :: trace.redacted()
@@ -157,7 +157,7 @@ fn browser_session(endpoint: String, page_url: String) {
     main_frame :: page.main_frame() ?? return
     _frame_close :: main_frame.close()
     frames :: page.frames() ?? return
-    loop frame in frames -> {
+    loop frame in frames {
         _closed_frame :: frame.close()
     }
     _closed_page :: page.close()

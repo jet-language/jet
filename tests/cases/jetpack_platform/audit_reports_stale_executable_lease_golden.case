@@ -1,0 +1,8 @@
+# Port of tests/jetpack_platform.rs:483-511. Original interrupted bytes and committed golden.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) filter/append.
+fixture: audit_reports_stale_executable_lease_golden.fixture
+env: JETPACK_ROOT={work}/package-root
+step: jetpack audit --no-color
+exit: 0
+stderr.filter(~ "Leases:" "Lease Note:").append("\n"): = audit_reports_stale_executable_lease_golden.expected.bytes
+file: package-root/leases/4294967294-1-audit-stale is-dir

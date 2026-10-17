@@ -1,0 +1,16 @@
+// The first user propagation site is the origin, not the Core view body.
+fn lift() -> String Err! {
+    optional :: String?{None}
+    return optional.or_err("missing optional")
+}
+
+fn propagate() -> String Err! {
+    value :: lift() ?? {
+        return err
+    }
+    return Ok(value)
+}
+
+fn run() {
+    print(propagate())
+}

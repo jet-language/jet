@@ -1,0 +1,61 @@
+// Production parse/check/lower/optimization; no constructed record or MIR.
+fn canonical_query_require(ok: Bool, detail: String) Never! {
+    if !ok -> panic("CanonicalPassQuery: {detail}")
+}
+fn canonical_query_request() -> JetDriverCompileRequest {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/canonical-query", identity: "canonical-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/canonical-query/run.jet", relative_path: "run.jet", identity: "canonical-source", source: "fn run() {{ value := 1; answer := value + 2; print(answer) }}"}}, foreign_cache_files: []}}, entry_root_identity: "canonical-root", entry_path: "/canonical-query/run.jet"}
+    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request.adapter_mode = "canonical-pass"
+    request.adapter_operation_ids = [String]{"mir.exact-constant-folding", "mir.optimize-pipeline", "mir.pass-order-facts", "mir.lower-expression", "tir.lower-checked-program", "sema.desugar-os-switches", "tir.canonicalize-loop-forms"}
+    request
+}
+fn run() {
+    query :: jet_driver_optimization_query(canonical_query_request())
+    canonical_query_require(query.compile.complete && query.compile.internal_problem == None, "real compiler pipeline completes")
+    canonical_query_require(query.canonical_routes.len() > 0, "opt-in capture is produced by actual pass boundaries")
+    canonical_query_require(query.compile.emitted_source == None, "inspection does not emit or run")
+    occurrences := [String:Int]{}
+    fold := false
+    canonical_query_require(query.canonical_route_gaps.len() == 2, "only selected absent boundaries report gaps")
+    loop gap in query.canonical_route_gaps -> canonical_query_require(gap.status == "no Jet pass", "unavailability is explicit, not a journal record")
+    pipeline := false
+    checked_program := false
+    loop (index, row) in query.canonical_routes {
+        count :: (occurrences.get(row.operation_id) ?? 0) + 1
+        occurrences[row.operation_id] = count
+        canonical_query_require(row.order == index + 1 && row.occurrence == count, "execution order and per-operation occurrence")
+        canonical_query_require(row.premises.len() == 8 && row.source.len() > 0, "complete premises and canonical producer provenance")
+        canonical_query_require(foundation_parse_protocol_json(row.input_payload) != None && foundation_parse_protocol_json(row.input_identity) != None, "structured complete input snapshots")
+        canonical_query_require(foundation_parse_protocol_json(row.output_payload) != None && foundation_parse_protocol_json(row.output_identity) != None, "structured complete output snapshots")
+        if row.operation_id == "mir.exact-constant-folding" {
+            fold = true
+            canonical_query_require(row.input_representation == "mir" && row.output_representation == "mir", "optimizer snapshots canonical MIR")
+            canonical_query_require(row.input_payload != row.output_payload, "fold snapshot retains the actual rewrite")
+        }
+        if row.operation_id == "mir.optimize-pipeline" -> pipeline = true
+        if row.operation_id == "tir.lower-checked-program" {
+            checked_program = true
+            canonical_query_require(row.input_representation == "ast" && row.output_representation == "tir", "real checked lowering boundary")
+        }
+    }
+    canonical_query_require(fold && pipeline && checked_program, "every requested production boundary is delivered")
+    canonical_query_require((occurrences.get("mir.pass-order-facts") ?? 0) > 1, "occurrences are not invented from a phase counter")
+    again :: jet_driver_optimization_query(canonical_query_request())
+    canonical_query_require(again.canonical_routes.len() == query.canonical_routes.len(), "journal is invocation-owned and drained")
+    loop (index, row) in again.canonical_routes {
+        first :: query.canonical_routes[index]
+        canonical_query_require(row.operation_id == first.operation_id && row.order == first.order && row.occurrence == first.occurrence && row.input_payload == first.input_payload && row.output_payload == first.output_payload, "repeated compilation captures the same real boundaries")
+    }
+    disabled_request := canonical_query_request()
+    disabled_request.adapter_mode = ""
+    disabled :: jet_driver_optimization_query(^disabled_request)
+    canonical_query_require(disabled.compile.complete && disabled.canonical_routes.len() == 0 && disabled.canonical_route_gaps.len() == 0, "ordinary compile does not capture evidence or project adapter gaps")
+    enabled_mir :: query.compile.mir ?? panic("captured query lost MIR")
+    disabled_mir :: disabled.compile.mir ?? panic("ordinary query lost MIR")
+    canonical_query_require(mir_program_digest(enabled_mir) == mir_program_digest(disabled_mir), "capture does not alter compiler meaning")
+    failed_request := canonical_query_request()
+    failed_request.authorized_sources.roots[0].files[0].source = "fn run() {{ pirnt(\"hi\") }}"
+    failed :: jet_driver_optimization_query(^failed_request)
+    canonical_query_require(!failed.compile.complete && failed.compile.diagnostics.len() > 0 && failed.canonical_routes.len() == 0, "front-end failure cannot invent optimizer evidence")
+}

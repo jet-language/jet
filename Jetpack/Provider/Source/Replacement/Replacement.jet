@@ -5,10 +5,10 @@
 // is ratified separately as `policy.replacements` and `replacementProof:`.
 
 // A provider-qualified package identity.
-pub struct PackageIdentity {
-    pub provider: String
-    pub name: String
-    pub version: String
+struct PackageIdentity {
+    provider: String
+    name: String
+    version: String
 
     fn new(provider: String, name: String, version: String) -> PackageIdentity Never! {
         PackageIdentity{provider: provider, name: name, version: version}
@@ -21,7 +21,7 @@ pub struct PackageIdentity {
     }
 }
 
-pub enum ProofStatus {
+enum ProofStatus {
     Missing
     Failed
     Passed
@@ -29,16 +29,16 @@ pub enum ProofStatus {
 
 // A native package offered in place of a foreign one, with the proof that
 // makes it eligible.
-pub struct ReplacementCandidate {
-    pub foreign_identity: PackageIdentity
-    pub native_identity: PackageIdentity
-    pub covered_public_symbols: [String]
-    pub unsupported_symbols: [String]
-    pub license: String
-    pub platforms: [String]
-    pub proof_status: ProofStatus
-    pub proof_digest: String
-    pub proof_inputs: [String]
+struct ReplacementCandidate {
+    foreign_identity: PackageIdentity
+    native_identity: PackageIdentity
+    covered_public_symbols: [String]
+    unsupported_symbols: [String]
+    license: String
+    platforms: [String]
+    proof_status: ProofStatus
+    proof_digest: String
+    proof_inputs: [String]
 
     // A candidate that is listed but has no proof yet.
     fn visible_but_inactive(foreign_identity: PackageIdentity, native_identity: PackageIdentity) -> ReplacementCandidate Never! {
@@ -68,13 +68,13 @@ pub struct ReplacementCandidate {
     fn lock_record(self, owner_package: String, platform: String, policy_fingerprint: String) -> SemanticRecord Never! {
         foreign :: self.foreign_identity.ref_string()
         native :: self.native_identity.ref_string()
-        identity :: LockIdentity{kind: LockRecordKind.ReplacementOverlay, key: "{foreign}@{platform}", exact: ~native, hash: self.proof_digest, platform: platform}
+        identity :: LockIdentity{kind: LockRecordKind.ReplacementOverlay, key: "{foreign}@{platform}", exact: native.copy(), hash: self.proof_digest, platform: platform}
         rationale := LockRationale.empty()
         rationale.owner_package = owner_package
         rationale.reason = "native replacement overlay with passed compatibility proof"
-        rationale.source_ref = ~foreign
+        rationale.source_ref = foreign.copy()
         rationale.provider = self.native_identity.provider
-        rationale.exact_output = ~native
+        rationale.exact_output = native.copy()
         rationale.policy_fingerprint = policy_fingerprint
         rationale.adapter_id = "replacement-overlay"
         rationale.signature = self.proof_digest
@@ -91,11 +91,11 @@ pub struct ReplacementCandidate {
 }
 
 // One public API symbol with its effect and error shape.
-pub struct PublicSymbol {
-    pub name: String
-    pub signature: String
-    pub effects: [String]
-    pub errors: [String]
+struct PublicSymbol {
+    name: String
+    signature: String
+    effects: [String]
+    errors: [String]
 
     fn new(name: String, signature: String) -> PublicSymbol Never! {
         PublicSymbol{name: name, signature: signature, effects: [String]{}, errors: [String]{}}
@@ -115,13 +115,13 @@ pub struct PublicSymbol {
 }
 
 // Observed behavior of one example run.
-pub struct GoldenFixture {
-    pub name: String
-    pub stdout: String
-    pub stderr: String
-    pub exit_code: Int
-    pub files: [(path: String, content: String)]
-    pub side_effects: [String]
+struct GoldenFixture {
+    name: String
+    stdout: String
+    stderr: String
+    exit_code: Int
+    files: [(path: String, content: String)]
+    side_effects: [String]
 
     fn new(name: String, stdout: String) -> GoldenFixture Never! {
         GoldenFixture{name: name, stdout: stdout, stderr: "", exit_code: 0, files: [(path: String, content: String)]{}, side_effects: [String]{}}
@@ -137,12 +137,12 @@ pub struct GoldenFixture {
 }
 
 // The public surface of one package on which compatibility is proved.
-pub struct CompatibilitySurface {
-    pub identity: PackageIdentity
-    pub public_symbols: [PublicSymbol]
-    pub examples: [String]
-    pub goldens: [GoldenFixture]
-    pub platforms: [String]
+struct CompatibilitySurface {
+    identity: PackageIdentity
+    public_symbols: [PublicSymbol]
+    examples: [String]
+    goldens: [GoldenFixture]
+    platforms: [String]
 
     fn new(identity: PackageIdentity) -> CompatibilitySurface Never! {
         CompatibilitySurface{identity: identity, public_symbols: [PublicSymbol]{}, examples: [String]{}, goldens: [GoldenFixture]{}, platforms: [String]{}}
@@ -154,10 +154,10 @@ pub struct CompatibilitySurface {
     fn prove_against(self, foreign: CompatibilitySurface, platform: String) -> ProofReport Never! {
         failures := [ProofFailure]{}
         if foreign.platforms.len() > 0 && !foreign.platforms.contains(platform) {
-            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: ~platform, expected: foreign.platforms.join(","), found: "foreign surface unavailable"})
+            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: foreign.platforms.join(","), found: "foreign surface unavailable"})
         }
         if self.platforms.len() > 0 && !self.platforms.contains(platform) {
-            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: ~platform, expected: self.platforms.join(","), found: "native surface unavailable"})
+            &failures.push(ProofFailure{kind: ProofFailureKind.PlatformMismatch, name: platform.copy(), expected: self.platforms.join(","), found: "native surface unavailable"})
         }
         covered := [String]{}
         foreign_symbols :: provider_replacement_by_name(foreign.public_symbols)
@@ -167,23 +167,23 @@ pub struct CompatibilitySurface {
         loop name in foreign_names {
             expected :: foreign_symbols[name]
             found :: native_symbols.get(name) ?? {
-                &failures.push(ProofFailure{kind: ProofFailureKind.MissingPublicSymbol, name: ~name, expected: expected.signature, found: "missing"})
+                &failures.push(ProofFailure{kind: ProofFailureKind.MissingPublicSymbol, name: name.copy(), expected: expected.signature, found: "missing"})
                 next
             }
             if expected.signature != found.signature {
-                &failures.push(ProofFailure{kind: ProofFailureKind.SignatureMismatch, name: ~name, expected: expected.signature, found: found.signature})
+                &failures.push(ProofFailure{kind: ProofFailureKind.SignatureMismatch, name: name.copy(), expected: expected.signature, found: found.signature})
                 next
             }
             expected_effects :: provider_replacement_sorted_set(expected.effects)
             found_effects :: provider_replacement_sorted_set(found.effects)
             if expected_effects != found_effects {
-                &failures.push(ProofFailure{kind: ProofFailureKind.EffectMismatch, name: ~name, expected: expected_effects.join(","), found: found_effects.join(",")})
+                &failures.push(ProofFailure{kind: ProofFailureKind.EffectMismatch, name: name.copy(), expected: expected_effects.join(","), found: found_effects.join(",")})
                 next
             }
             expected_errors :: provider_replacement_sorted_set(expected.errors)
             found_errors :: provider_replacement_sorted_set(found.errors)
             if expected_errors != found_errors {
-                &failures.push(ProofFailure{kind: ProofFailureKind.ErrorShapeMismatch, name: ~name, expected: expected_errors.join(","), found: found_errors.join(",")})
+                &failures.push(ProofFailure{kind: ProofFailureKind.ErrorShapeMismatch, name: name.copy(), expected: expected_errors.join(","), found: found_errors.join(",")})
                 next
             }
             &covered.push(name)
@@ -192,9 +192,9 @@ pub struct CompatibilitySurface {
         loop golden in foreign.goldens {
             if native_goldens.get(golden.name) == {
                 .Val(native) -> {
-                    if native != golden -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: ~golden.name, expected: golden.fingerprint(), found: native.fingerprint()})
+                    if native != golden -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: golden.name.copy(), expected: golden.fingerprint(), found: native.fingerprint()})
                 }
-                .None -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: ~golden.name, expected: golden.fingerprint(), found: "missing"})
+                .None -> &failures.push(ProofFailure{kind: ProofFailureKind.GoldenOutputDiff, name: golden.name.copy(), expected: golden.fingerprint(), found: "missing"})
             }
         }
         &covered.sort()
@@ -204,7 +204,7 @@ pub struct CompatibilitySurface {
     }
 }
 
-pub enum ProofFailureKind {
+enum ProofFailureKind {
     MissingPublicSymbol
     SignatureMismatch
     EffectMismatch
@@ -213,21 +213,21 @@ pub enum ProofFailureKind {
     PlatformMismatch
 }
 
-pub struct ProofFailure {
-    pub kind: ProofFailureKind
-    pub name: String
-    pub expected: String
-    pub found: String
+struct ProofFailure {
+    kind: ProofFailureKind
+    name: String
+    expected: String
+    found: String
 }
 
-pub struct ProofReport {
-    pub foreign_identity: PackageIdentity
-    pub native_identity: PackageIdentity
-    pub platform: String
-    pub inputs: [String]
-    pub covered_public_symbols: [String]
-    pub failures: [ProofFailure]
-    pub digest: String
+struct ProofReport {
+    foreign_identity: PackageIdentity
+    native_identity: PackageIdentity
+    platform: String
+    inputs: [String]
+    covered_public_symbols: [String]
+    failures: [ProofFailure]
+    digest: String
 
     fn passed(self) -> Bool Never! {
         self.failures.len() == 0
@@ -259,7 +259,7 @@ pub struct ProofReport {
     }
 }
 
-pub enum ReplacementPolicyMode {
+enum ReplacementPolicyMode {
     Allow
     Deny
     Prefer
@@ -273,18 +273,18 @@ pub enum ReplacementPolicyMode {
     }
 }
 
-pub struct ReplacementPolicyRule {
-    pub foreign_identity: String
-    pub native_identity: String
-    pub mode: ReplacementPolicyMode
-    pub owner_package: String
-    pub fingerprint: String
+struct ReplacementPolicyRule {
+    foreign_identity: String
+    native_identity: String
+    mode: ReplacementPolicyMode
+    owner_package: String
+    fingerprint: String
 }
 
 // `policy.replacements`: per-pair rules over a default mode.
-pub struct ReplacementPolicy {
-    pub default_mode: ReplacementPolicyMode
-    pub rules: [ReplacementPolicyRule]
+struct ReplacementPolicy {
+    default_mode: ReplacementPolicyMode
+    rules: [ReplacementPolicyRule]
 
     // Deny everything.
     fn deny_all() -> ReplacementPolicy Never! {
@@ -316,20 +316,20 @@ pub struct ReplacementPolicy {
     }
 }
 
-pub enum ReplacementDecision {
+enum ReplacementDecision {
     Inactive(reason: String)
     Denied(reason: String)
     Active(ActiveReplacement)
 }
 
-pub struct ActiveReplacement {
-    pub foreign_call_site: String
-    pub native_identity: PackageIdentity
-    pub policy_mode: ReplacementPolicyMode
-    pub lock_record: SemanticRecord
+struct ActiveReplacement {
+    foreign_call_site: String
+    native_identity: PackageIdentity
+    policy_mode: ReplacementPolicyMode
+    lock_record: SemanticRecord
 }
 
-pub enum ImporterReplacementStatus {
+enum ImporterReplacementStatus {
     NoCandidate
     CandidateFound
     ProofFailed
@@ -338,12 +338,12 @@ pub enum ImporterReplacementStatus {
 }
 
 // One importer progress line about a package's native replacement.
-pub struct ImporterProgressFact {
-    pub foreign_identity: PackageIdentity
-    pub native_identity: PackageIdentity?
-    pub status: ImporterReplacementStatus
-    pub proof_digest: String
-    pub detail: String
+struct ImporterProgressFact {
+    foreign_identity: PackageIdentity
+    native_identity: PackageIdentity?
+    status: ImporterReplacementStatus
+    proof_digest: String
+    detail: String
 
     fn no_candidate(foreign_identity: PackageIdentity) -> ImporterProgressFact Never! {
         ImporterProgressFact{foreign_identity: foreign_identity, native_identity: None, status: ImporterReplacementStatus.NoCandidate, proof_digest: "", detail: "no native replacement candidate found"}
@@ -367,7 +367,7 @@ pub struct ImporterProgressFact {
 fn provider_replacement_by_name(symbols: [PublicSymbol]) -> [String: PublicSymbol] Never! {
     out := [String: PublicSymbol]{}
     loop symbol in symbols {
-        name :: ~symbol.name
+        name :: symbol.name.copy()
         out[name] = symbol
     }
     out
@@ -376,7 +376,7 @@ fn provider_replacement_by_name(symbols: [PublicSymbol]) -> [String: PublicSymbo
 fn provider_replacement_goldens_by_name(goldens: [GoldenFixture]) -> [String: GoldenFixture] Never! {
     out := [String: GoldenFixture]{}
     loop golden in goldens {
-        name :: ~golden.name
+        name :: golden.name.copy()
         out[name] = golden
     }
     out
@@ -418,17 +418,17 @@ fn provider_replacement_digest(parts: [String]) -> String Never! {
     hash := U64{0xcbf29ce484222325}
     loop part in parts {
         loop byte in part.bytes() {
-            hash ~|= U64{byte}
+            hash = (hash).bit_xor(U64{byte})
             hash = wrapping(hash * prime)
         }
-        hash ~|= U64{10}
+        hash = (hash).bit_xor(U64{10})
         hash = wrapping(hash * prime)
     }
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     shift := 60
     loop shift >= 0 {
-        &out.push(digits[Int{(hash >> shift) & U64{15}}])
+        &out.push(digits[Int{((hash >> shift)).bit_and(U64{15})}])
         shift -= 4
     }
     "proof-fnv64-{pkg_bytes_text(out, 0, out.len())}"

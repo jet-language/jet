@@ -635,6 +635,44 @@ function jet_map_get(base, key, file, line) {
   return base.get(key);
 }
 
+// Pattern windows borrow the selected value; no payload is copied here.
+function jet_pattern_map_lookup(map, key) {
+  const value = map.get(key);
+  return value !== undefined || map.has(key)
+    ? { tag: "Ok", values: [value] }
+    : { tag: "Err", values: [{ tag: "Absent", values: [] }] };
+}
+
+function jet_pattern_rest_window(base, range, file, line) {
+  const end = Number(jet_error_wasm_with_inputs(
+    [{ slot: JET_ERROR_WASM_FILE_SLOT, value: file, label: "file" }],
+    (wasm, handles) => wasm.jet_rt_view_end(
+      BigInt(range.start), BigInt(range.end), range.exclusive ? 1 : 0,
+      BigInt(base.length), handles[0].pointer, handles[0].length, BigInt(line),
+    ),
+  ));
+  const start = Number(range.start);
+  // An array proxy retains every array consumer's existing protocol while
+  // indexing the owner's storage. Only an ownership escape materializes it.
+  return new Proxy([], {
+    get(_target, key, receiver) {
+      if (key === "length") return end - start;
+      if (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)) {
+        const index = Number(key);
+        return index < end - start ? base[start + index] : undefined;
+      }
+      return Reflect.get(Array.prototype, key, receiver);
+    },
+    has(_target, key) {
+      if (typeof key === "string" && /^(0|[1-9][0-9]*)$/.test(key)) {
+        return Number(key) < end - start;
+      }
+      return key in Array.prototype;
+    },
+    set() { throw new TypeError("pattern rest windows are read-only"); },
+  });
+}
+
 class JetHostError extends Error {
   constructor(code, frame) {
     super(frame);

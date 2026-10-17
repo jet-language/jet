@@ -1,0 +1,49 @@
+// NumericConversion.rs:31-56, D-NUMWIDEN-CROSS1=E. Fixed-width source bits
+// cross into Float only if their discarded low bits are zero. All U64 values
+// are within F32's finite range, so accepted values need no narrowing round.
+// Native LowerRoute533 carries raw word, flags, borrowed E4 text, raw line;
+// the seed Rust CAbiRoutes17253 adapter uses its own JetCString text header.
+fn numeric_widen_stop(file: I64, line: I64) {
+    trap_header(I64{1})
+    // Exact JET_NUMERIC_WIDEN_TRAP text; generated little-endian word literals.
+    trap_write_word(I64{8461736369858766967}, I64{8})
+    trap_write_word(I64{7953747407922356845}, I64{8})
+    trap_write_word(I64{8317992806848425838}, I64{8})
+    trap_write_word(I64{8367810653513654387}, I64{8})
+    trap_write_word(I64{7883941909811455336}, I64{8})
+    trap_write_word(I64{8027794332106910817}, I64{8})
+    trap_write_word(I64{7956017139119322229}, I64{8})
+    trap_write_word(I64{8316287474279129191}, I64{8})
+    trap_write_word(I64{7237481}, I64{3})
+    trap_msg_message_end()
+    trap_context(sync_load(file), sync_load(file + I64{8}), trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+    trap_footer(I64{1})
+}
+
+#Export(c) fn jet_numeric_checked_widen_at(raw: I64, signed: Bool, target_f32: Bool, file: I64, line: I64) -> Float {
+    magnitude :: if (signed && raw < I64{0}) -> wrapping(I64{0} - raw) else -> raw
+    significant := I64{0}
+    trailing := I64{0}
+    remaining := magnitude
+    loop remaining != (I64{0}) {
+        significant += I64{1}
+        remaining = (remaining >> I64{1}).bit_and(I64{9223372036854775807})
+    }
+    remaining = magnitude
+    trailing_more := remaining != I64{0} && (remaining.bit_and(I64{1})) == I64{0}
+    loop trailing_more {
+        trailing += I64{1}
+        remaining = (remaining >> I64{1}).bit_and(I64{9223372036854775807})
+        trailing_more = remaining != I64{0} && (remaining.bit_and(I64{1})) == I64{0}
+    }
+    precision :: if target_f32 -> I64{24} else -> I64{53}
+    if (significant > precision && trailing < significant - precision) {
+        numeric_widen_stop(file, line)
+        loop { jet_rt_unreachable(I64{0}, I64{0}) }
+    }
+    if (signed || raw >= I64{0}) -> return Float{raw}
+    // Split unsigned conversion at bit63 without a U64->I64 checked cast.
+    // Acceptance above guarantees exact conversion, including this split.
+    half :: (raw >> I64{1}).bit_and(I64{9223372036854775807})
+    return Float{half} * Float{2} + Float{raw.bit_and(I64{1})}
+}

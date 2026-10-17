@@ -1,0 +1,696 @@
+// Scheduler.rs:3393-4123, native homogeneous payload channels.
+// State160: mutex0, refs8, queue len16/cap24/data32/head40, bound48,
+// owned meta56, recvwait64/sendwait72, reservations80, closed88/cancelled96,
+// kind104 (0 channel,1 timer,2 interval), delay112, senders120/receivers128,
+// observe136, recvwaitcount144/sendwaitcount152. Endpoint handles are the
+// opaque state pointer, each retaining one ref and one logical endpoint.
+// WaitNode24: next0, park8, flags16 (linked1, ever-woken2), under lock.
+// Single wake is Vec::pop (LIFO); close walks Vec insertion order (FIFO).
+
+fn channel_update(channel: I64) {
+    jet_rt_observe_channel_update(sync_load(channel + I64{136}), sync_load(channel + I64{16}), sync_load(channel + I64{152}), sync_load(channel + I64{144}), sync_load(channel + I64{88}))
+}
+
+fn channel_new(bound: I64, kind: I64, delay_ms: I64) -> I64 {
+    channel :: jet_rt_alloc(I64{160}, I64{8})
+    thread_zero(channel, I64{160})
+    sync_store(channel + I64{8}, I64{1})
+    sync_store(channel + I64{48}, bound)
+    sync_store(channel + I64{104}, kind)
+    sync_store(channel + I64{112}, delay_ms)
+    sync_store(channel + I64{128}, I64{1})
+    sync_store(channel + I64{136}, jet_rt_observe_channel_new(if (bound >= I64{0}) -> I64{1} else -> I64{0}, bound))
+    channel_update(channel)
+    channel
+}
+
+fn channel_retain(channel: I64) { _ := sync_add(channel + I64{8}, I64{1}) }
+
+fn channel_release(channel: I64) {
+    if (sync_add(channel + I64{8}, I64{-1}) != I64{1}) {
+        return
+    }
+    meta :: sync_load(channel + I64{56})
+    capacity :: sync_load(channel + I64{24})
+    data :: sync_load(channel + I64{32})
+    stride :: if (meta == I64{0}) -> I64{0} else -> coll_size(meta)
+    if (meta != I64{0}) {
+        jet_rt_session_shield_enter()
+        length :: sync_load(channel + I64{16})
+        head :: sync_load(channel + I64{40})
+        at := I64{0}
+        loop at < length {
+            coll_slot_drop(data + ((head + at) % capacity) * coll_size(meta), meta)
+            at += I64{1}
+        }
+        coll_meta_drop(meta)
+        jet_rt_session_shield_leave()
+    }
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
+    jet_rt_observe_channel_drop(sync_load(channel + I64{136}))
+    jet_rt_free(channel, I64{160}, I64{8})
+}
+
+fn channel_grow(channel: I64, needed: I64) {
+    capacity :: sync_load(channel + I64{24})
+    if (needed <= capacity) {
+        return
+    }
+    grown := if (capacity == I64{0}) -> I64{4} else -> capacity
+    loop grown < needed -> grown *= I64{2}
+    bound :: sync_load(channel + I64{48})
+    if (bound > I64{0} && grown > bound) { grown = bound }
+    meta :: sync_load(channel + I64{56})
+    stride :: coll_size(meta)
+    buffer :: jet_rt_alloc(grown * stride, I64{8})
+    data :: sync_load(channel + I64{32})
+    length :: sync_load(channel + I64{16})
+    head :: sync_load(channel + I64{40})
+    at := I64{0}
+    loop at < length {
+        coll_copy(data + ((head + at) % capacity) * stride, buffer + at * stride, coll_payload(meta))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
+    sync_store(channel + I64{24}, grown)
+    sync_store(channel + I64{32}, buffer)
+    sync_store(channel + I64{40}, I64{0})
+}
+
+fn channel_wait_add(channel: I64, node: I64, sending: Bool) {
+    offset :: if sending -> I64{72} else -> I64{64}
+    count :: if sending -> I64{152} else -> I64{144}
+    sync_store(node, sync_load(channel + offset))
+    sync_store(node + I64{16}, (sync_load(node + I64{16}).bit_and(I64{2})).bit_or(I64{1}))
+    sync_store(channel + offset, node)
+    _ := sync_add(channel + count, I64{1})
+}
+
+fn channel_wait_remove(channel: I64, node: I64, sending: Bool) {
+    if ((sync_load(node + I64{16}).bit_and(I64{1})) == I64{0}) {
+        return
+    }
+    link := channel + (if sending -> I64{72} else -> I64{64})
+    loop sync_load(link) != (I64{0}) {
+        if (sync_load(link) == node) {
+            sync_store(link, sync_load(node))
+            sync_store(node + I64{16}, sync_load(node + I64{16}).bit_and(I64{2}))
+            _ := sync_add(channel + (if sending -> I64{152} else -> I64{144}), I64{-1})
+            return
+        }
+        link = sync_load(link)
+    }
+}
+
+fn channel_wake_one(channel: I64, sending: Bool) {
+    offset :: if sending -> I64{72} else -> I64{64}
+    node :: sync_load(channel + offset)
+    if (node == I64{0}) {
+        return
+    }
+    sync_store(channel + offset, sync_load(node))
+    sync_store(node + I64{16}, I64{2})
+    _ := sync_add(channel + (if sending -> I64{152} else -> I64{144}), I64{-1})
+    sync_park_wake(sync_load(node + I64{8}))
+}
+
+fn channel_wake_all(channel: I64, sending: Bool) {
+    offset :: if sending -> I64{72} else -> I64{64}
+    node := sync_load(channel + offset)
+    sync_store(channel + offset, I64{0})
+    sync_store(channel + (if sending -> I64{152} else -> I64{144}), I64{0})
+    ordered := I64{0}
+    loop node != (I64{0}) {
+        following :: sync_load(node)
+        sync_store(node, ordered)
+        ordered = node
+        node = following
+    }
+    loop ordered != (I64{0}) {
+        following :: sync_load(ordered)
+        sync_store(ordered + I64{16}, I64{2})
+        sync_park_wake(sync_load(ordered + I64{8}))
+        ordered = following
+    }
+}
+
+// Return a consumed selector wake to a remaining receiver if another arm won.
+// Wake history survives re-registration; waiter layout remains 24 bytes.
+fn channel_select_remove(channel: I64, node: I64) {
+    sync_mutex_lock(channel)
+    woken :: (sync_load(node + I64{16}).bit_and(I64{2})) != I64{0}
+    channel_wait_remove(channel, node, false)
+    if (woken && sync_load(channel + I64{16}) != I64{0}) { channel_wake_one(channel, false) }
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+}
+
+fn channel_close(channel: I64, cancelled: Bool) {
+    sync_mutex_lock(channel)
+    sync_store(channel + I64{88}, I64{1})
+    if cancelled -> sync_store(channel + I64{96}, I64{1})
+    channel_wake_all(channel, false)
+    channel_wake_all(channel, true)
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+}
+
+fn channel_pop_locked(channel: I64, out: I64) -> Bool {
+    length :: sync_load(channel + I64{16})
+    if (length == I64{0}) { return false }
+    head :: sync_load(channel + I64{40})
+    meta :: sync_load(channel + I64{56})
+    coll_copy(sync_load(channel + I64{32}) + head * coll_size(meta), out, coll_payload(meta))
+    sync_store(channel + I64{40}, (head + I64{1}) % sync_load(channel + I64{24}))
+    sync_store(channel + I64{16}, length - I64{1})
+    channel_wake_one(channel, true)
+    true
+}
+
+// A parked owner allocates once per blocked operation, never on a fast send
+// or receive. The node cannot be freed until its link is removed under lock.
+fn channel_wait_new(slot: I64) -> I64 {
+    node :: jet_rt_alloc(I64{24}, I64{8})
+    thread_zero(node, I64{24})
+    sync_store(node + I64{8}, slot)
+    node
+}
+
+fn channel_receive(channel: I64, out: I64) -> Bool {
+    slot := I64{0}
+    node := I64{0}
+    reason := I64{0}
+    received := false
+    loop {
+        if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+        sync_mutex_lock(channel)
+        if channel_pop_locked(channel, out) {
+            received = true
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            break
+        }
+        if (sync_load(channel + I64{88}) != I64{0}) {
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            break
+        }
+        if (slot == I64{0}) {
+            slot = sync_park_new()
+            node = channel_wait_new(slot)
+            reason = channel_text(I64{0})
+        }
+        channel_wait_add(channel, node, false)
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        status :: scheduler_yield(reason, slot, I64{-1})
+        sync_mutex_lock(channel)
+        channel_wait_remove(channel, node, false)
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        if (status != I64{0}) { break }
+    }
+    if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
+    if (slot != I64{0}) { sync_park_drop(slot) }
+    if (reason != I64{0}) { jet_rt_string_drop(reason) }
+    received
+}
+
+#Export(c) fn jet_rt_native_channel(bounded: I64, capacity: I64, tx: I64, rx: I64) {
+    bound := I64{-1}
+    if ((bounded.bit_and(I64{255})) != I64{0}) {
+        bound = jet_int_owned_to_i64(capacity)
+        if (jet_scheduler_native_propagate() != I64{0}) -> return
+        // Public bound validation is owned by the current Core channel body;
+        // the scheduler reference itself defaults capacity.max(1).
+        if (bound < I64{1}) { bound = I64{1} }
+    }
+    channel :: channel_new(bound, I64{0}, I64{0})
+    sync_store(channel + I64{120}, I64{1})
+    channel_retain(channel)
+    sync_store(tx, channel)
+    sync_store(rx, channel)
+}
+
+#Export(c) fn jet_rt_native_sender_send(channel: I64, slot: I64, meta: I64) {
+    park := I64{0}
+    node := I64{0}
+    reason := I64{0}
+    accepted := false
+    loop {
+        if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+        sync_mutex_lock(channel)
+        if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            break
+        }
+        bound :: sync_load(channel + I64{48})
+        length :: sync_load(channel + I64{16})
+        reserved :: sync_load(channel + I64{80})
+        if (bound < I64{0} || length + reserved < bound) {
+            if (sync_load(channel + I64{56}) == I64{0}) {
+                sync_store(channel + I64{56}, coll_meta_copy(meta))
+            }
+            channel_grow(channel, length + reserved + I64{1})
+            target :: sync_load(channel + I64{32}) + ((sync_load(channel + I64{40}) + length) % sync_load(channel + I64{24})) * coll_size(meta)
+            coll_copy(slot, target, coll_payload(meta))
+            sync_store(channel + I64{16}, length + I64{1})
+            channel_wake_one(channel, false)
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            accepted = true
+            break
+        }
+        if (park == I64{0}) {
+            park = sync_park_new()
+            node = channel_wait_new(park)
+            reason = channel_text(I64{1})
+        }
+        channel_wait_add(channel, node, true)
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        status :: scheduler_yield(reason, park, I64{-1})
+        sync_mutex_lock(channel)
+        channel_wait_remove(channel, node, true)
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        if (status != I64{0}) { break }
+    }
+    if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
+    if (park != I64{0}) { sync_park_drop(park) }
+    if (reason != I64{0}) { jet_rt_string_drop(reason) }
+    if !accepted {
+        jet_rt_session_shield_enter()
+        coll_slot_drop(slot, meta)
+        jet_rt_session_shield_leave()
+    }
+}
+
+#Export(c) fn jet_rt_native_sender_close(channel: I64) { channel_close(channel, false) }
+
+#Export(c) fn jet_rt_native_receiver_close(channel: I64) { channel_close(channel, false) }
+
+#Export(c) fn jet_rt_native_sender_clone(channel: I64) -> I64 {
+    channel_retain(channel)
+    sync_mutex_lock(channel)
+    _ := sync_add(channel + I64{120}, I64{1})
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    channel
+}
+
+#Export(c) fn jet_rt_native_receiver_clone(channel: I64) -> I64 {
+    channel_retain(channel)
+    sync_mutex_lock(channel)
+    _ := sync_add(channel + I64{128}, I64{1})
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    channel
+}
+
+#Export(c) fn jet_rt_native_sender_drop(channel: I64) {
+    if (channel == I64{0}) {
+        return
+    }
+    sync_mutex_lock(channel)
+    if (sync_add(channel + I64{120}, I64{-1}) == I64{1}) {
+        sync_store(channel + I64{88}, I64{1})
+        channel_wake_all(channel, false)
+    }
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    channel_release(channel)
+}
+
+#Export(c) fn jet_rt_native_receiver_drop(channel: I64) {
+    if (channel == I64{0}) {
+        return
+    }
+    sync_mutex_lock(channel)
+    if (sync_add(channel + I64{128}, I64{-1}) == I64{1}) {
+        sync_store(channel + I64{88}, I64{1})
+        channel_wake_all(channel, true)
+    }
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    channel_release(channel)
+}
+
+#Export(c) fn jet_rt_native_receiver_is_ready(channel: I64) -> I64 {
+    sync_mutex_lock(channel)
+    ready :: sync_load(channel + I64{16}) != I64{0} || sync_load(channel + I64{88}) != I64{0}
+    sync_mutex_unlock(channel)
+    if ready -> I64{1} else -> I64{0}
+}
+
+#Export(c) fn jet_rt_native_receiver_try_receive(channel: I64, meta: I64) -> I64 {
+    sync_mutex_lock(channel)
+    result := I64{0}
+    if (sync_load(channel + I64{16}) != I64{0}) {
+        result = coll_slot_new(meta)
+        _ := channel_pop_locked(channel, result)
+    }
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    result
+}
+
+#Export(c) fn jet_rt_native_receiver_receive(channel: I64, out: I64) -> I64 {
+    if channel_receive(channel, out) -> return I64{1}
+    if (jet_rt_session_propagate() != I64{0}) { return I64{0} }
+    // Closed is zero-sized: preserve Box<Closed>'s non-null dangling owner.
+    sync_store(out, I64{1})
+    I64{0}
+}
+
+fn channel_iter_pull(channel: I64, out: I64) -> Bool { channel_receive(channel, out) }
+
+#Export(c) fn jet_rt_native_receiver_iter(channel: I64, by_value: I64, meta: I64) -> I64 {
+    receiver :: if ((by_value.bit_and(I64{255})) != I64{0}) -> channel else -> jet_rt_native_receiver_clone(channel)
+    iter_channel_new(receiver, meta)
+}
+
+// Prepared Source sends reserve before extracting an owned payload. The
+// reservation keeps only physical state alive, not a logical sender endpoint.
+// Reservation16 {state0,active8}, released exactly once by commit/drop.
+fn channel_reserve_send(channel: I64, meta: I64) -> I64 {
+    park := I64{0}
+    node := I64{0}
+    reason := I64{0}
+    reservation := I64{0}
+    loop {
+        if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+        sync_mutex_lock(channel)
+        if (sync_load(channel + I64{88}) != I64{0} || sync_load(channel + I64{128}) == I64{0}) {
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            break
+        }
+        length :: sync_load(channel + I64{16})
+        reserved :: sync_load(channel + I64{80})
+        bound :: sync_load(channel + I64{48})
+        if (bound < I64{0} || length + reserved < bound) {
+            if (sync_load(channel + I64{56}) == I64{0}) {
+                sync_store(channel + I64{56}, coll_meta_copy(meta))
+            }
+            channel_grow(channel, length + reserved + I64{1})
+            sync_store(channel + I64{80}, reserved + I64{1})
+            channel_retain(channel)
+            reservation = jet_rt_alloc(I64{16}, I64{8})
+            sync_store(reservation, channel)
+            sync_store(reservation + I64{8}, I64{1})
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            break
+        }
+        if (park == I64{0}) {
+            park = sync_park_new()
+            node = channel_wait_new(park)
+            reason = channel_text(I64{1})
+        }
+        channel_wait_add(channel, node, true)
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        status :: scheduler_yield(reason, park, I64{-1})
+        sync_mutex_lock(channel)
+        channel_wait_remove(channel, node, true)
+        channel_update(channel)
+        sync_mutex_unlock(channel)
+        if (status != I64{0}) { break }
+    }
+    if (node != I64{0}) { jet_rt_free(node, I64{24}, I64{8}) }
+    if (park != I64{0}) { sync_park_drop(park) }
+    if (reason != I64{0}) { jet_rt_string_drop(reason) }
+    reservation
+}
+
+fn channel_reservation_drop(reservation: I64) {
+    if (reservation == I64{0}) {
+        return
+    }
+    channel :: sync_load(reservation)
+    sync_mutex_lock(channel)
+    if (sync_load(reservation + I64{8}) != I64{0}) {
+        sync_store(reservation + I64{8}, I64{0})
+        _ := sync_add(channel + I64{80}, I64{-1})
+        channel_wake_one(channel, true)
+    }
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    jet_rt_free(reservation, I64{16}, I64{8})
+    channel_release(channel)
+}
+
+// False leaves payload ownership with the caller. No callback runs while the
+// state mutex is held, and already reserved capacity cannot be stolen.
+fn channel_reservation_commit(reservation: I64, slot: I64) -> Bool {
+    channel :: sync_load(reservation)
+    sync_mutex_lock(channel)
+    accepted :: sync_load(channel + I64{88}) == I64{0} && sync_load(channel + I64{128}) != I64{0}
+    _ := sync_add(channel + I64{80}, I64{-1})
+    sync_store(reservation + I64{8}, I64{0})
+    if {
+        accepted -> {
+            length :: sync_load(channel + I64{16})
+            meta :: sync_load(channel + I64{56})
+            target :: sync_load(channel + I64{32}) + ((sync_load(channel + I64{40}) + length) % sync_load(channel + I64{24})) * coll_size(meta)
+            coll_copy(slot, target, coll_payload(meta))
+            sync_store(channel + I64{16}, length + I64{1})
+            channel_wake_one(channel, false)
+        }
+        else -> channel_wake_one(channel, true)
+    }
+    channel_update(channel)
+    sync_mutex_unlock(channel)
+    jet_rt_free(reservation, I64{16}, I64{8})
+    channel_release(channel)
+    accepted
+}
+
+// Probe priorities are exactly recvs in source order, expired timer arms in
+// source order, then all-closed (when there are no timer arms).
+fn channel_select_probe(receivers: I64, count: I64, timer_data: I64, timer_count: I64, now: I64, arm: I64, value: I64) -> I64 {
+    closed := true
+    at := I64{0}
+    loop at < count {
+        channel :: sync_load(receivers + at * I64{8})
+        sync_mutex_lock(channel)
+        if (sync_load(channel + I64{16}) != I64{0}) {
+            payload :: coll_slot_new(sync_load(channel + I64{56}))
+            _ := channel_pop_locked(channel, payload)
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            sync_store(arm, jet_int_owned_from_i64(at))
+            sync_store(value, payload)
+            return I64{1}
+        }
+        if (sync_load(channel + I64{88}) == I64{0}) { closed = false }
+        sync_mutex_unlock(channel)
+        at += I64{1}
+    }
+    at = I64{0}
+    loop at < timer_count {
+        if (now >= sync_load(timer_data + at * I64{16})) {
+            sync_store(arm, jet_int_owned_from_i64(count + at))
+            sync_store(value, I64{0})
+            return I64{1}
+        }
+        at += I64{1}
+    }
+    if (closed && timer_count == I64{0}) { return I64{2} }
+    I64{0}
+}
+
+// Consumed select lists share one cleanup on stopped and completed paths.
+fn channel_select_drop_inputs(receivers: I64, count: I64, capacity: I64, converted: I64, timer_count: I64) {
+    at := I64{0}
+    loop at < count {
+        jet_rt_native_receiver_drop(sync_load(receivers + at * I64{8}))
+        at += I64{1}
+    }
+    if (capacity != I64{0}) { jet_rt_free(receivers, capacity * I64{8}, I64{8}) }
+    if (timer_count != I64{0}) { jet_rt_free(converted, timer_count * I64{16}, I64{8}) }
+}
+
+#Export(c) fn jet_rt_native_select_wait(recvs: I64, timers: I64, probing: I64, arm: I64, value: I64) {
+    count :: sync_load(recvs)
+    capacity :: sync_load(recvs + I64{8})
+    receivers :: sync_load(recvs + I64{16})
+    timer_count :: sync_load(timers)
+    timer_capacity :: sync_load(timers + I64{8})
+    durations :: sync_load(timers + I64{16})
+    thread_zero(recvs, I64{24})
+    thread_zero(timers, I64{24})
+    converted := I64{0}
+    if (timer_count != I64{0}) {
+        converted = jet_rt_alloc(timer_count * I64{16}, I64{8})
+        thread_zero(converted, timer_count * I64{16})
+    }
+    started :: sync_now_ns()
+    at := I64{0}
+    stopped := false
+    loop at < timer_count {
+        raw :: sync_load(durations + at * I64{8})
+        nanoseconds :: jet_int_owned_to_i64(raw)
+        jet_rt_int_drop(raw)
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            stopped = true
+            at += I64{1}
+            break
+        }
+        // duration.to_millis truncates towards zero; negative delays default0.
+        millis :: nanoseconds /% I64{1000000}
+        delay :: if (millis < I64{0}) -> I64{0} else -> millis * I64{1000000}
+        deadline :: if (delay > I64{9223372036854775807} - started) -> I64{9223372036854775807} else -> started + delay
+        sync_store(converted + at * I64{16}, deadline)
+        at += I64{1}
+    }
+    if stopped {
+        loop at < timer_count {
+            jet_rt_int_drop(sync_load(durations + at * I64{8}))
+            at += I64{1}
+        }
+        if (timer_capacity != I64{0}) { jet_rt_free(durations, timer_capacity * I64{8}, I64{8}) }
+        channel_select_drop_inputs(receivers, count, capacity, converted, timer_count)
+        return
+    }
+    if (timer_capacity != I64{0}) { jet_rt_free(durations, timer_capacity * I64{8}, I64{8}) }
+    park := I64{0}
+    registrations := I64{0}
+    result := if (count == I64{0} && timer_count == I64{0}) -> I64{3} else -> channel_select_probe(receivers, count, converted, timer_count, started, arm, value)
+    if (result == I64{0} && (probing.bit_and(I64{255})) == I64{0}) {
+        park = sync_park_new()
+        if (count != I64{0}) {
+            registrations = jet_rt_alloc(count * I64{24}, I64{8})
+            thread_zero(registrations, count * I64{24})
+        }
+        at = I64{0}
+        loop at < count {
+            channel :: sync_load(receivers + at * I64{8})
+            node :: registrations + at * I64{24}
+            sync_store(node + I64{8}, park)
+            sync_mutex_lock(channel)
+            channel_wait_add(channel, node, false)
+            channel_update(channel)
+            sync_mutex_unlock(channel)
+            at += I64{1}
+        }
+        at = I64{0}
+        loop at < timer_count {
+            sync_store(converted + at * I64{16} + I64{8}, scheduler_timer_schedule(sync_load(converted + at * I64{16}), park))
+            at += I64{1}
+        }
+        reason :: channel_text(I64{2})
+        loop {
+            if (scheduler_wait_point_cancel_check() != I64{0}) { break }
+            at = I64{0}
+            loop at < count {
+                channel :: sync_load(receivers + at * I64{8})
+                node :: registrations + at * I64{24}
+                sync_mutex_lock(channel)
+                if ((sync_load(node + I64{16}).bit_and(I64{1})) == I64{0}) {
+                    channel_wait_add(channel, node, false)
+                }
+                sync_mutex_unlock(channel)
+                at += I64{1}
+            }
+            // Reprobe after registration: close/send racing registration must
+            // never disappear between the initial probe and first park.
+            result = channel_select_probe(receivers, count, converted, timer_count, sync_now_ns(), arm, value)
+            if (result != I64{0}) { break }
+            if (scheduler_yield(reason, park, I64{-1}) != I64{0}) { break }
+        }
+        jet_rt_string_drop(reason)
+        at = I64{0}
+        loop at < count {
+            channel :: sync_load(receivers + at * I64{8})
+            channel_select_remove(channel, registrations + at * I64{24})
+            at += I64{1}
+        }
+        at = I64{0}
+        loop at < timer_count {
+            scheduler_timer_cancel(sync_load(converted + at * I64{16} + I64{8}))
+            at += I64{1}
+        }
+        if (count != I64{0}) { jet_rt_free(registrations, count * I64{24}, I64{8}) }
+        sync_park_drop(park)
+    }
+    channel_select_drop_inputs(receivers, count, capacity, converted, timer_count)
+    // The selected payload and arm have already transferred to the caller.
+    // Do not turn a completed selection into a stopped, uninitialized output.
+    if (result == I64{1}) {
+        return
+    }
+    if (jet_rt_session_propagate() != I64{0}) {
+        return
+    }
+    if (result == I64{3}) {
+        channel_fatal(I64{5})
+        return
+    }
+    if ((probing.bit_and(I64{255})) == I64{0} && result == I64{2}) {
+        channel_fatal(I64{4})
+        return
+    }
+    sync_store(arm, jet_int_owned_from_i64(I64{-1}))
+    sync_store(value, I64{0})
+}
+
+// The six exact E4 messages below are emitted without Core String values.
+fn channel_text(kind: I64) -> I64 {
+    length :: if (kind == I64{0}) -> I64{15} else if (kind == I64{1}) -> I64{12} else if (kind == I64{2}) -> I64{11} else if (kind == I64{3}) -> I64{36} else if (kind == I64{4}) -> I64{13} else -> I64{26}
+    text :: scheduler_text_new(length)
+    buffer :: sync_load(text)
+    if {
+        (kind == I64{0} || kind == I64{1}) -> {
+            sync_store(buffer, I64{2336353831671130211})
+            if {
+                (kind == I64{0}) -> sync_store(buffer + I64{8}, I64{28559167692432754})
+                else -> sync_store(buffer + I64{8}, I64{1684956531})
+            }
+        }
+        (kind == I64{2}) -> {
+            sync_store(buffer, I64{8583988860020352371})
+            sync_store(buffer + I64{8}, I64{7629153})
+        }
+        (kind == I64{3}) -> {
+            sync_store(buffer, I64{8223683306451986515})
+            sync_store(buffer + I64{8}, I64{2336927755350406757})
+            sync_store(buffer + I64{16}, I64{7598805615236769127})
+            sync_store(buffer + I64{24}, I64{8458156441480490607})
+            sync_store(buffer + I64{32}, I64{1684370547})
+        }
+        (kind == I64{4}) -> {
+            sync_store(buffer, I64{7142836979261793651})
+            sync_store(buffer + I64{8}, I64{431198793580})
+        }
+        else -> {
+            sync_store(buffer, I64{2322296528115098995})
+            sync_store(buffer + I64{8}, I64{2338332969558634350})
+            sync_store(buffer + I64{16}, I64{8243122732010005874})
+            sync_store(buffer + I64{24}, I64{25701})
+        }
+    }
+    text
+}
+
+fn channel_fatal(kind: I64) {
+    message :: channel_text(kind)
+    scheduler_fatal(message)
+}
+
+// MathTaskMem.rs:1080-1083: one-variant zero-sized Closed enum, deriving
+// Clone and PartialEq. ReactiveEventWatch.rs:2326-2329 shows exactly "Closed".
+// The generated C ABI emits these four operations (no Display/Debug adapter).
+#Export(c) fn jet_rt_handle_clone_closed(_value: I64) -> I64 { I64{1} }
+
+#Export(c) fn jet_rt_handle_drop_closed(_value: I64) {}
+
+#Export(c) fn jet_rt_handle_eq_closed(_left: I64, _right: I64) -> Bool { true }
+
+#Export(c) fn jet_rt_handle_show_closed(_value: I64) -> I64 {
+    text :: scheduler_text_new(I64{6})
+    sync_store(sync_load(text), I64{110386891156547})
+    text
+}

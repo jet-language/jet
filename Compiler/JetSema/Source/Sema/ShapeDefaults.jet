@@ -1,0 +1,42 @@
+// Retain the declaration-comptime result on the same AST field that owns it.
+// Schema.shape_fact_from_struct reads Field.default_ct, not source expressions.
+use jet_foundation.[Program, Item, TComptimeValue]
+
+fn sema_checked_shape_defaults(program: ^Program, registered: SemaRegistrationModule, values: [SemaComptimeItemValue]) -> Program Never! {
+    updated_program := ^program
+    defaults := [String:TComptimeValue]{}
+    loop value in values {
+        if value.module_identity != registered.module_identity || value.kind != SemaComptimeItemKind.FieldDefault {
+            next
+        }
+        if defaults.get(value.destination_key) == .None {
+            defaults[value.destination_key] = value.value
+        }
+    }
+    if defaults.len() == 0 -> return updated_program
+    loop index in 0..<updated_program.items.len() {
+        if updated_program.items[index] == .Struct(definition) {
+            nominal := SemaRegistrationNominal?{None}
+            loop candidate in registered.nominals {
+                if candidate.symbol.name == definition.name -> nominal = Val(candidate)
+            }
+            owner :: nominal ?? next
+            updated := definition.copy()
+            changed := false
+            loop field_index in 0..<updated.fields.len() {
+                field :: updated.fields[field_index]
+                if field.default_ct != None -> next
+                destination := ""
+                loop checked in owner.fields {
+                    if checked.symbol.name == field.name -> destination = checked.symbol.id.key
+                }
+                value :: defaults.get(destination) ?? next
+                retained :: sema_user_template_ct_value(value) ?? next
+                updated.fields[field_index].default_ct = Val(retained)
+                changed = true
+            }
+            if changed -> updated_program.items[index] = Item.Struct{value: updated}
+        }
+    }
+    updated_program
+}

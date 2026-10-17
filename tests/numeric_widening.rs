@@ -2,7 +2,7 @@ mod common;
 
 mod tir_support;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use std::fs;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -23,6 +23,54 @@ fn compile_ok(source: &str) -> jet::CompileOutput {
 fn compile_error(source: &str) -> String {
     let diagnostics = jet::compile(source).expect_err("numeric fixture unexpectedly compiled");
     jet::render_diagnostics("numeric_widening.jet", source, &diagnostics)
+}
+
+#[test]
+fn typed_literal_float_to_int_is_a_checked_type_error() {
+    for head in ["Int", "I64"] {
+        let source = format!("fn run() {{\n    value :: Float{{1.5}}\n    _ :: {head}{{value}}\n}}\n");
+        let diagnostics = jet::compile(&source).expect_err("Float typed body must not become an integer");
+        let errors: Vec<_> = diagnostics.iter()
+            .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
+            .collect();
+        assert_eq!(errors.len(), 1, "{diagnostics:#?}");
+        assert_eq!(errors[0].code, "E0112");
+        assert!(errors[0].fix.contains(&format!("{head}.from_float(value)")));
+        assert!(errors[0].fix.contains("math.round(value)"));
+    }
+}
+
+#[test]
+fn typed_literal_float_conversion_is_explicit_on_all_tiers() {
+    let source = r#"use core.math as math
+fn run() {
+    positive :: Float{1.5}
+    negative :: Float{-1.5}
+    print(math.round(positive))
+    print(math.round(negative))
+    print(Int.from_float(positive) ?? panic("finite conversion"))
+    print(Int.from_float(negative) ?? panic("finite conversion"))
+    print(Float{7})
+}
+"#;
+    assert_all_tiers("typed_literal_float_conversion", source, 0, "2\n-2\n1\n-1\n7.0\n");
+}
+
+/// #4590: the HLL source rounds its Float estimate to an Int (`math.round`),
+/// rather than relabelling the Float carrier as an exact-Int word, on every tier.
+#[test]
+fn hll_count_returns_an_integer_on_all_tiers() {
+    let source = r#"use core.data.sketch.hll as hll
+fn run() {
+    sketch := hll.new()
+    print(sketch.count())
+    &sketch.add("jet")
+    print(sketch.count())
+    &sketch.add("jet")
+    print(sketch.count())
+}
+"#;
+    assert_all_tiers("hll_count_integer", source, 0, "0\n1\n1\n");
 }
 
 fn write_program(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
@@ -46,7 +94,7 @@ fn write_program(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
 
 fn run_in_process(name: &str, files: &[(&str, &str)], force_interpreter: bool) -> RunOutcome {
     let path = write_program(name, files);
-    dev_iteration(path.to_str().unwrap(), false, force_interpreter)
+    crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter)
 }
 
 fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
@@ -64,20 +112,7 @@ fn run_interpreter(name: &str, source: &str) -> (i32, String, String) {
 
 fn run_resident(name: &str, files: &[(&str, &str)]) -> RunOutcome {
     let _trace_guard = JIT_TRACE_LOCK.lock().unwrap();
-    jet_jit::reset_jit_trace_for_test();
     let outcome = run_in_process(name, files, false);
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "{name} did not execute resident JIT code"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "{name} invoked the fallback tier"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test(),
-        "{name} deoptimized into the interpreter"
-    );
     outcome
 }
 
@@ -188,7 +223,7 @@ fn assert_trap_all_tiers(name: &str, source: &str) {
     fs::create_dir_all(&dir).unwrap();
     let path = dir.join("main.jet");
     fs::write(&path, source).unwrap();
-    match dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -355,7 +390,7 @@ impl Holder {
 }
 
 module numeric_helpers {
-    pub fn accept(value: Float) -[]> Float {
+    fn accept(value: Float) -[]> Float {
         return value
     }
 }
@@ -404,7 +439,7 @@ fn run() {
         (
             "helper.jet",
             r#"
-pub fn accept(value: Float) -[]> Float {
+fn accept(value: Float) -[]> Float {
     return value
 }
 "#,

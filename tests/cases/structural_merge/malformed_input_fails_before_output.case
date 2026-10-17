@@ -1,0 +1,7 @@
+# PORT tests/structural_merge.rs::malformed_input_fails_before_output
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: malformed_input_fails_before_output.fixture
+step: jet merge --structural {work}/base.jet {work}/base.jet {work}/bad.jet --out {work}/must-not-exist.jet
+exit: nonzero
+file: must-not-exist.jet absent
+stderr: ~ "did not pass parser and sema" # Original contains predicate.

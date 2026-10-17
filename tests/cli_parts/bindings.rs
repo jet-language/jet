@@ -654,9 +654,9 @@ func main() {}
         String::from_utf8_lossy(&bind.stderr)
     );
     let generated = fs::read_to_string(dir.join(".jet/bindings/go/handles.jet")).unwrap();
-    assert!(generated.contains("pub struct Handle { value: Int }"));
-    assert!(generated.contains("pub fn new_handle(value: Int) -> Handle {"));
-    assert!(generated.contains("pub fn consume_handle(handle: Handle) -> Int {"));
+    assert!(generated.contains("struct Handle { value: Int }"));
+    assert!(generated.contains("fn new_handle(value: Int) -> Handle {"));
+    assert!(generated.contains("fn consume_handle(handle: Handle) -> Int {"));
 
     fs::write(
         dir.join("main.jet"),
@@ -917,7 +917,7 @@ fn tcl_bind_runs_one_shot_and_persistent_typed_sessions() {
     let generated = fs::read_to_string(dir.join(".jet/bindings/tcl/eda.jet")).unwrap();
     assert!(generated.contains("String !TclError -[FFI.Tcl]>"));
     assert!(generated
-        .contains("pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }"));
+        .contains("fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }"));
     assert!(!generated.contains("=>"));
     fs::write(
         dir.join("main.jet"),
@@ -1320,7 +1320,7 @@ fn dart_bind_runs_jet_compute_and_dart_callback_in_process() {
     let contract = dir.join("callbacks.dart");
     let compute = dir.join("compute.jet");
     fs::write(&contract,"@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n@pragma('vm:entry-point')\ndouble dartHalf(double value) => value / 2;\n").unwrap();
-    fs::write(&compute,"use dart.callbacks as callbacks\n\npub fn compute(value: Int) -[FFI.Dart]> Int {\n    return callbacks.dart_double(value) ?? -1\n}\n\npub fn compute_float(value: Float) -[FFI.Dart]> Float {\n    return callbacks.dart_half(value) ?? -1.0\n}\n").unwrap();
+    fs::write(&compute,"use dart.callbacks as callbacks\n\nfn compute(value: Int) -[FFI.Dart]> Int {\n    return callbacks.dart_double(value) ?? -1\n}\n\nfn compute_float(value: Float) -[FFI.Dart]> Float {\n    return callbacks.dart_half(value) ?? -1.0\n}\n").unwrap();
     let bind = Command::new(jet())
         .args(["inspect", "bind", "dart"])
         .arg(&contract)
@@ -1403,7 +1403,7 @@ fn dart_bind_rejects_untyped_contract_as_e3208() {
 }
 
 #[test]
-fn powershell_bind_round_trips_datatree_state_and_cleans_workers() {
+fn powershell_bind_round_trips_dyn_state_and_cleans_workers() {
     if Command::new("pwsh").arg("--version").output().is_err() {
         return;
     }
@@ -1586,7 +1586,7 @@ BEGIN {
 }
 
 #[test]
-fn perl_bind_round_trips_datatree_state_timeout_and_cancellation() {
+fn perl_bind_round_trips_dyn_state_timeout_and_cancellation() {
     if Command::new("perl").arg("-v").output().is_err() {
         return;
     }

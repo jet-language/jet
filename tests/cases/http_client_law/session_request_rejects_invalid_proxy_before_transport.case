@@ -1,0 +1,21 @@
+# HAND-PORT tests/http_client_law.rs:138-172 session_request_rejects_invalid_proxy_before_transport
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# D-NET-NONBLOCKING1: accept(deadline:0s) checks queued connections and otherwise returns distinct NetError.Timeout (= WouldBlock). Exact original post-client probe and all client predicates; no seam/refused stub remains.
+# Peer is a real Jet Core.net fixture, waiting until the original AOT client has finished before a SINGLE immediate accept.
+fixture: session_request_rejects_invalid_proxy_before_transport.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step client: built
+exit: 0
+stdout: = session_request_rejects_invalid_proxy_before_transport.stdout.expected
+write: client.done = "finished"
+wait: peer
+exit: 0

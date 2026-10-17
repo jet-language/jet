@@ -1,0 +1,38 @@
+#Arithmetic(.Wrapping)
+fn wrapped(value: U8) -> U8 { return value + U8{1} }
+fn run() {}
+
+REFLECTION_APP :: Output.Executable{ name: "reflection", entry: reflection_probe }
+fn build(b: BuildContext) -> BuildPlan {
+    loop function in b.program.functions {
+        if function.name == "wrapped" {
+            operation :: function.arithmetic[0].operation
+            policy :: function.arithmetic[0].policy
+            
+    // Original tests/reflect.rs:85-87 first arithmetic scope_span is a record.
+    scope_start :: function.arithmetic[0].scope_span.start
+            
+    // Original tests/reflect.rs:85-87 first arithmetic scope_span is a record.
+    scope_end :: function.arithmetic[0].scope_span.end
+            b.generate("reflection_values") {
+                fn reflected_operation() -> String { return $operation }
+                fn reflected_policy() -> String { return $policy }
+                fn reflected_scope_start() -> Int { return $scope_start }
+                fn reflected_scope_end() -> Int { return $scope_end }
+            }
+            break
+        }
+    }
+    app :: b.add_executable("reflection", ["main.jet", ".jet/generated/reflection/reflection_values.jet"], [])
+    return b.plan(app)
+}
+fn reflection_probe() {
+    
+    // Original tests/reflect.rs:79-81 first arithmetic operation add.
+    print(reflected_operation())
+    
+    // Original tests/reflect.rs:82-84 first arithmetic policy .Wrapping.
+    print(reflected_policy())
+    _scope_start :: reflected_scope_start()
+    _scope_end :: reflected_scope_end()
+}

@@ -1,0 +1,37 @@
+# Port of comptime_cli_parity.rs:759-901; original body runs AOT/default only, despite its name.
+# PENDING-GRAMMAR: count, stream label equality, step env.
+fixture: fixtures/documented_cli_program_matches_aot_default_interpreter_and_goldens
+step: jet build subcommands.jet
+step root_aot: built --help
+stdout: ~ -v, --verbose # Original root-help containment.
+stdout: ~ --config CONFIG # Original root-help containment.
+stdout: ~ plan                     preview changes # Original root-help containment.
+stdout: ~ serve                    Start the service and listen for requests # Original root-help containment.
+stdout: ~ import                   Import one data file # Original root-help containment.
+stdout: count "--config" = 1 # Original help.matches("--config").count() == 1.
+step: jet run subcommands.jet -- --help
+stdout: == root_aot # Original AOT/default help equality.
+step serve_aot: built serve --help
+stdout: = ../../../Examples/features/expected/cli/subcommands.serve_help.out
+stdout: ~ --port PORT # Original command-help containment.
+stdout: ~ [default: 3000] # Original command-help containment.
+stdout: !~ --config # Original shared-config exclusion.
+step: jet run subcommands.jet -- serve --help
+stdout: == serve_aot # Original AOT/default command-help equality.
+step: built --config prod serve --port 8080
+stdout: = ../../../Examples/features/expected/cli/subcommands.serve.out
+step: jet run subcommands.jet -- --config prod serve --port 8080
+env: JET_STORE_DIR={work}/cache/subcommands.serve.out-run
+env: JET_STORE_DIR={work}/cache/subcommands.serve.out-build
+stdout: = ../../../Examples/features/expected/cli/subcommands.serve.out
+step: built plan --config prod
+stdout: = ../../../Examples/features/expected/cli/subcommands.plan.out
+step: jet run subcommands.jet -- plan --config prod
+env: JET_STORE_DIR={work}/cache/subcommands.plan.out-run
+env: JET_STORE_DIR={work}/cache/subcommands.plan.out-build
+stdout: = ../../../Examples/features/expected/cli/subcommands.plan.out
+step: jet run subcommands.jet -- --confg prod
+env: JET_STORE_DIR={work}/cache/unknown-run
+env: JET_STORE_DIR={work}/cache/unknown-build
+exit: nonzero
+stderr: ~ --config # Original unknown-flag suggestion containment.

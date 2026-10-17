@@ -1,0 +1,31 @@
+// Two #FFI(c) bodies share one C object: `bump` defines the counter and
+// `peek` declares it extern. Each body is its own translation unit; only the
+// whole inline bridge resolves `jet_fixture_shared_counter`.
+#[Unsafe("updates this program's private counter"), FFI(c)]
+fn fixture_bump(by: Int) -> Int {
+    """
+    #include <stdint.h>
+    int64_t jet_fixture_shared_counter = 0;
+    int64_t fixture_bump(int64_t by) { jet_fixture_shared_counter += by; return jet_fixture_shared_counter; }
+    """
+}
+
+#[Unsafe("reads the counter defined by fixture_bump"), FFI(c)]
+fn fixture_peek() -> Int {
+    """
+    #include <stdint.h>
+    extern int64_t jet_fixture_shared_counter;
+    int64_t fixture_peek(void) { return jet_fixture_shared_counter; }
+    """
+}
+
+fn run() {
+    total := 0
+    seen := 0
+    #Unsafe("the counter is private to these two bodies") {
+        total = fixture_bump(40)
+        total = fixture_bump(2)
+        seen = fixture_peek()
+    }
+    print("bump={total} peek={seen}")
+}

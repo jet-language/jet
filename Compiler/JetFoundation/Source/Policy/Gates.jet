@@ -1,0 +1,37 @@
+// Invocation gates are transport, not a second policy resolver (D-GATE-LAW1).
+use jet_foundation.[PolicyKey, PolicyValue, PolicyScope, PolicyDeclaration, EffectivePolicy, PolicyError, Span, policy_resolve, policy_key_is_audited_gate]
+
+struct GateSet {
+    allowed: [PolicyKey]{[PolicyKey]{}}
+    build_flag: Bool{false}
+    session_flag: Bool{false}
+}
+
+fn policy_gate_allows(gates: GateSet, key: PolicyKey) -> Bool Never! {
+    if !gates.allowed.contains(key) -> return false
+    if policy_resolve(key, [policy_invocation_declaration(key)]) == {
+        .Ok(_) -> true
+        .Err(_) -> false
+    }
+}
+
+fn policy_invocation_declaration(key: PolicyKey) -> PolicyDeclaration Never! {
+    PolicyDeclaration{key: key, value: PolicyValue.Allow, scope: PolicyScope.Block, span: Span{start: 0, end: 0}, target: None, source: "<invocation>"}
+}
+
+fn policy_resolve_with_gates(key: PolicyKey, declarations: [PolicyDeclaration], gates: GateSet) -> EffectivePolicy? PolicyError! {
+    effective :: policy_resolve(key, declarations)
+    if gates.allowed.contains(key) {
+        chain := declarations
+        &chain.push(policy_invocation_declaration(key))
+        _ :: policy_resolve(key, chain)
+    }
+    Ok(effective)
+}
+
+fn policy_default_gate_value(key: PolicyKey) -> PolicyValue Never! {
+    if key == PolicyKey.Unsafe -> return PolicyValue.Default
+    if policy_key_is_audited_gate(key) -> return PolicyValue.GateOnly
+    if key == PolicyKey.Sentries -> return PolicyValue.On
+    PolicyValue.Enabled
+}

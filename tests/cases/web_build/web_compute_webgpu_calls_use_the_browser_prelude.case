@@ -1,0 +1,17 @@
+# HAND-PORT tests/web_build.rs:4339-4359 web_compute_webgpu_calls_use_the_browser_prelude
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# All seven original JS markers and original fixture-helper manifest/artifact predicates.
+fixture: web_compute_webgpu_calls_use_the_browser_prelude.fixture
+env: NO_COLOR=1
+step: jet build --target web --json main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture predicate
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "navigator.gpu" # original web.js_app predicate
+file: .jet/build/app.js ~ "jet_compute_web_call(\"device_webgpu\"" # original web.js_app predicate
+file: .jet/build/app.js ~ "await jet_compute_web_call(\"add\"" # original web.js_app predicate
+file: .jet/build/app.js ~ "WebGPU kernel produced a non-finite F32 value" # original web.js_app predicate
+file: .jet/build/app.js ~ "await jet_compute_webgpu_read(output, output_len)" # original web.js_app predicate
+file: .jet/build/app.js ~ "Math.fround" # original web.js_app predicate
+file: .jet/build/app.js ~ "backend=webgpu" # original web.js_app predicate

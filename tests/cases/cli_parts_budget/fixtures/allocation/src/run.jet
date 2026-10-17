@@ -1,0 +1,29 @@
+use core.mem
+module perf.package {
+    budgets: [
+        Budget{
+            name: "arena-count",
+            scope: .Test("arena"),
+            metric: .AllocationCount,
+            provider: .AllocationProbe("arena"),
+            comparison: .AbsoluteFrom("local/arena"),
+            limit: .AtMost(2),
+            enforcement: .Warn,
+        },
+        Budget{
+            name: "arena-bytes",
+            scope: .Test("arena"),
+            metric: .AllocationBytes,
+            provider: .AllocationProbe("arena"),
+            comparison: .AbsoluteFrom("local/arena"),
+            limit: .AtMost(16B),
+            enforcement: .Warn,
+        },
+    ],
+}
+#Test("arena") { .measure {
+    arena :: mem.Arena.new()
+    value :: arena.alloc(42)
+    assert_eq(value, 42)
+} }
+fn run() {}

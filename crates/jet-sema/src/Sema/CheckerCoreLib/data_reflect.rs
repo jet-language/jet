@@ -1,28 +1,75 @@
 use super::core_types::{decode_error_ty, u8_ty};
 use crate::AST::Type;
 
-/// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `DataTree`. Every read
+/// A fixed data row accepts its canonical Core owner, never a same-leaf
+/// user-qualified nominal. Bare names remain the bootstrap row spelling.
+pub fn data_nominal_leaf(name: &str) -> Option<&str> {
+    if name.starts_with("<corelib>/Core/data::") {
+        return name.rsplit("::").next();
+    }
+    (!name.contains("::") && !name.contains('.')).then_some(name)
+}
+
+pub(crate) fn dyn_float_literal(expr: &crate::AST::Expr) -> bool {
+    use crate::AST::{Expr, UnOp};
+    match expr {
+        Expr::Float(_, _, false, Some(_)) => true,
+        Expr::Paren(inner, _) | Expr::Unary(UnOp::Neg, inner, _) => dyn_float_literal(inner),
+        _ => false,
+    }
+}
+
+pub(crate) fn dyn_member(name: &str) -> bool {
+    matches!(name, "get" | "has" | "keys" | "remove" | "len" | "decode" | "to_text"
+        | "field" | "at" | "int" | "float" | "text" | "bool" | "equal_unordered" | "encode")
+}
+
+pub(crate) fn dyn_call(receiver: crate::AST::Expr, method: &str, values: Vec<crate::AST::Expr>, ret: Type, span: crate::Diagnostics::Span) -> crate::AST::Expr {
+    use crate::AST::{AccessConvention, CallArg, CallArgFlags, Expr};
+    Expr::MethodCall {
+        receiver: Box::new(receiver),
+        method: method.to_string(),
+        method_span: span,
+        owner_type_args: Vec::new(),
+        type_args: Vec::new(),
+        args: values.into_iter().map(|expr| CallArg {
+            span: expr.span(), expr, convention: AccessConvention::Read,
+            flags: CallArgFlags::default(), label: None, spread: false,
+        }).collect(),
+        recv_type: Some("__DynOp__".to_string()),
+        resolved_ret: Some(ret),
+        operator_rhs: None,
+        checked_widen: false,
+        checked_callee: None,
+    }
+}
+
+/// D-SERDE-ACCESS=B + D-SERDE14=A: accessor methods on `Dyn`. Every read
 /// yields `T ![FieldError]` so automatic propagation composes with no mapping ceremony
 /// inside a hand `decode`; `.field` and `.at` fill `FieldError.path` from the
 /// segment they read. Scalar readers leave the path empty, so a containing
 /// decoder frames their result with `FieldError.under`.
-/// `.field(name)` → `DataTree ![FieldError]`
-/// `.at(i)` → `DataTree ![FieldError]`
+/// `.field(name)` → `Dyn ![FieldError]`
+/// `.at(i)` → `Dyn ![FieldError]`
 /// `.int()` → `Int ![FieldError]`
 /// `.text()` → `String ![FieldError]`
 /// `.bool()` → `Bool ![FieldError]`
 /// `.float()` → `Float ![FieldError]`
 /// `.to_text()` → `String?`
 /// `.equal_unordered(other)` → `Bool`
-pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
+pub fn dyn_method_return(method: &str, n_args: usize) -> Option<Type> {
     let decode_err = || Box::new(decode_error_ty());
     match (method, n_args) {
+        ("get" | "remove", 1) => Some(Type::Option(Box::new(Type::Named("Dyn".to_string())))),
+        ("has", 1) => Some(Type::Bool),
+        ("keys", 0) => Some(Type::List(Box::new(Type::String))),
+        ("len", 0) => Some(Type::Int),
         ("field", 1) => Some(Type::Result {
-            ok: Box::new(Type::Named("DataTree".to_string())),
+            ok: Box::new(Type::Named("Dyn".to_string())),
             err: decode_err(),
         }),
         ("at", 1) => Some(Type::Result {
-            ok: Box::new(Type::Named("DataTree".to_string())),
+            ok: Box::new(Type::Named("Dyn".to_string())),
             err: decode_err(),
         }),
         ("int", 0) => Some(Type::Result {
@@ -48,7 +95,7 @@ pub fn datatree_method_return(method: &str, n_args: usize) -> Option<Type> {
 }
 
 /// D-DBDRIVER1: accessor methods on `DBValue` — read back the tagged value a
-/// query bound or a row column carried. Mirrors `datatree_method_return`'s
+/// query bound or a row column carried. Mirrors `dyn_method_return`'s
 /// shape exactly (`Result<T, String>`); `int` stays 64-bit (never `Float`),
 /// while `blob` returns the exact `[U8]` payload.
 pub fn db_value_method_return(method: &str, n_args: usize) -> Option<Type> {
@@ -100,4 +147,22 @@ pub fn is_reflect_type_name(name: &str) -> bool {
         name,
         "Value" | "Field" | "TypeInfo" | "FieldInfo" | "MethodInfo"
     )
+}
+
+#[cfg(test)]
+mod data_nominal_tests {
+    use super::data_nominal_leaf;
+
+    #[test]
+    fn accepts_core_data_owners_without_erasing_user_nominals() {
+        assert_eq!(data_nominal_leaf("Query"), Some("Query"));
+        assert_eq!(
+            data_nominal_leaf("<corelib>/Core/data::Core/data/arrow.jet::DataArrowBatch"),
+            Some("DataArrowBatch")
+        );
+        assert_eq!(data_nominal_leaf("<corelib>/Core/data::Query"), Some("Query"));
+        assert_eq!(data_nominal_leaf("user::Query"), None);
+        assert_eq!(data_nominal_leaf("user.Query"), None);
+        assert_eq!(data_nominal_leaf("<corelib>/Core/database::Query"), None);
+    }
 }

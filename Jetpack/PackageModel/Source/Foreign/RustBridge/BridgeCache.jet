@@ -4,34 +4,34 @@
 // that bless a build, their verification, and the project lock projection
 // of the crates Cargo resolved.
 
-FFI_INLINE_BRIDGE_SCHEMA :: prep { "jet-inline-ffi-v10-asm-early-clobber" }
+FFI_INLINE_BRIDGE_SCHEMA :: prep { "jet-inline-ffi-v11-asm-stack-inputs" }
 // v2: artifact digests are recorded relative to the SHARED Cargo target dir
 // (#2075); a v1 sidecar fails verification and the bridge rebuilds.
 FFI_BRIDGE_ARTIFACTS_SCHEMA :: prep { "jet-ffi-artifacts-v2" }
 FFI_SHARED_DEPS_SCHEMA :: prep { "jet-ffi-shared-deps-v1" }
 
 // How the sandboxed Cargo build ran, recorded in provenance.
-pub struct CargoBridgeReceipt {
-    pub sandbox_class: String
-    pub sandbox_policy: String
-    pub compile_time_code: Bool
+struct CargoBridgeReceipt {
+    sandbox_class: String
+    sandbox_policy: String
+    compile_time_code: Bool
 }
 
 // Every input of one bridge cache key.
-pub struct RustBridgeKeyInputs {
-    pub entries: [ExternEntry]
-    pub deps: [String: String]
-    pub needs: RustBridgeNeeds
-    pub authority_needs: [String]
-    pub handle_facts: [FFIHandleFact]
-    pub record_source: String
-    pub link_closure: FFILinkClosure
-    pub selected_target: String
+struct RustBridgeKeyInputs {
+    entries: [ExternEntry]
+    deps: [String: String]
+    needs: RustBridgeNeeds
+    authority_needs: [String]
+    handle_facts: [FFIHandleFact]
+    record_source: String
+    link_closure: FFILinkClosure
+    selected_target: String
     // `pkg_ffi_native_toolchain_identity()`, resolved once per build.
-    pub rust_toolchain: String
-    pub native_toolchain: InlineNativeToolchain?
-    pub native_link_args: [String]
-    pub foundation_source_digest: String?
+    rust_toolchain: String
+    native_toolchain: InlineNativeToolchain?
+    native_link_args: [String]
+    foundation_source_digest: String?
 
     // The content-addressed key: every field that can change the generated
     // crate, its dependency graph, or the toolchain that builds it.
@@ -101,8 +101,10 @@ fn pkg_ffi_parquet_crate_specs() -> [FFICrateSpec] Never! {
 fn pkg_ffi_identity_crypto_runtimes(identity: &ForeignIdentityBuilder) Never! {
     &identity.field("standalone_outcome_runtime", pkg_ffi_standalone_outcome_runtime().bytes())
     &identity.field("encoding_errors_runtime", FFI_ENCODING_ERRORS_RUNTIME.bytes())
-    &identity.field("datatree_runtime", FFI_DATATREE_RUNTIME.bytes())
+    &identity.field("dyn_runtime", FFI_DYN_RUNTIME.bytes())
     &identity.field("encoding_json_runtime", FFI_ENCODING_JSON_RUNTIME.bytes())
+    &identity.field("encoding_types_runtime", FFI_ENCODING_TYPES_RUNTIME.bytes())
+    &identity.field("encoding_error_runtime", FFI_ENCODING_ERROR_RUNTIME.bytes())
     &identity.field("json_number_runtime", FFI_JSON_NUMBER_RUNTIME.bytes())
     &identity.field("runtime_diagnostic_core", FFI_RUNTIME_DIAGNOSTIC_CORE.bytes())
     &identity.field("crypto_runtime", FFI_CRYPTO_RUNTIME.bytes())
@@ -208,21 +210,21 @@ fn pkg_ffi_identity_static_link_inputs(identity: &ForeignIdentityBuilder, args: 
 // profile, and rustflags: the dependency graph compiles once instead of once
 // per key (#2075). Every artifact name embeds the key, including the helper
 // bins, so nothing collides in the shared dir.
-pub struct BridgePaths {
+struct BridgePaths {
     // Per-key inputs and lock.
-    pub cache_root: String
-    pub crate_name: String
+    cache_root: String
+    crate_name: String
     // Shared Cargo target dir (`CARGO_TARGET_DIR`).
-    pub target_dir: String
+    target_dir: String
     // `<target_dir>/<triple>/release`: every blessed artifact and the
     // digest sidecar that blesses it.
-    pub target: String
-    pub rlib: String
-    pub crypto_helper: String
-    pub secrets_helper: String
-    pub target_deps_dir: String
-    pub host_deps_dir: String
-    pub provenance: String
+    target: String
+    rlib: String
+    crypto_helper: String
+    secrets_helper: String
+    target_deps_dir: String
+    host_deps_dir: String
+    provenance: String
 }
 
 fn pkg_ffi_bridge_paths(key: String, selected_target: String, native_link_args: [String], rust_toolchain: String) -[Env]> BridgePaths Never! {

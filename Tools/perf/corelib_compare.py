@@ -158,7 +158,7 @@ def main() -> int:
         source_file = scratch / "source.jet"
         source_file.write_text(
             "use core.encoding.base64 as builtin_b64\n"
-            "pub fn encode(data: [U8]) -> String { builtin_b64.encode(data) }\n",
+            "fn encode(data: [U8]) -> String { builtin_b64.encode(data) }\n",
             encoding="utf-8",
         )
         rust_entry = scratch / "rust_builtin.jet"

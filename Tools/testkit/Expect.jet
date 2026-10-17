@@ -1,0 +1,98 @@
+use core.files as files
+
+
+fn kit_expect_verdict(status: String, detail: String) -> KitVerdict {
+    KitVerdict{status: status, detail: detail, diff: ""}
+}
+
+// A bounded whole-file unified hunk: exact comparison never trims stream bytes.
+fn kit_expect_unified(path: String, expected: String, actual: String) -> String {
+    out := "--- expected/{path}\n+++ actual\n@@ -1,{expected.split("\n").len()} +1,{actual.split("\n").len()} @@\n"
+    count := 0
+    loop line in expected.split("\n") {
+        if count >= 37 -> break
+        out = "{out}-{line}\n"
+        count += 1
+    }
+    loop line in actual.split("\n") {
+        if count >= 37 -> break
+        out = "{out}+{line}\n"
+        count += 1
+    }
+    out
+}
+
+fn kit_expect_diagnostics(text: String) -[]> Int Never! {
+    count := 0
+    loop line in text.split("\n") {
+        if line.starts_with("Error [") || line.starts_with("Warning [") || line.starts_with("Stop [") -> count += 1
+    }
+    count
+}
+
+fn kit_expect_named(ids: [String], id: String) -> Bool {
+    loop item in ids {
+        if item == id -> return true
+    }
+    false
+}
+
+fn kit_expect_bless_error(bless: KitBless, sharded: Bool) -> String {
+    if (bless.all || bless.ids.len() > 0) && sharded -> return "blessing is refused with --shard"
+    if bless.all && bless.reason.trim() == "" -> return "--bless-all requires --reason"
+    ""
+}
+
+fn kit_expect_exact_with_count(id: String, path: String, expected: String?, actual: String, bless: KitBless, count: fn(String) -[]> Int Never!) -> KitVerdict {
+    present := false
+    old := ""
+    if expected == {
+        .Val(value) -> {
+            old = value
+            present = true
+        }
+        .None -> { }
+    }
+    if present && old == actual -> return kit_expect_verdict("PASS", "")
+    if bless.first_tier && (bless.all || kit_expect_named(bless.ids, id)) {
+        if count(actual) < count(old) && !kit_expect_named(bless.allow_shrink, id) -> return kit_expect_verdict("REFUSED", "diagnostic shrink requires --allow-shrink {id}")
+        files.create_dir_all(files.dirname(path)) ?? return kit_expect_verdict("ERROR", "mkdir snapshot: {err}")
+        files.write_atomic(path, actual.bytes()) ?? return kit_expect_verdict("ERROR", "write snapshot: {err}")
+        return kit_expect_verdict("PASS", "blessed {path}")
+    }
+    if !present -> return kit_expect_verdict("FAIL", "missing expected stream: {path}")
+    KitVerdict{status: "FAIL", detail: "snapshot mismatch: {path}", diff: kit_expect_unified(path, old, actual)}
+}
+
+fn kit_expect_no_count(text: String) -[]> Int Never! { 0 }
+
+fn kit_expect_exact(id: String, path: String, expected: String?, actual: String, bless: KitBless, diagnostic: Bool) -> KitVerdict {
+    if diagnostic -> return kit_expect_exact_with_count(id, path, expected, actual, bless, (text: String) -[]> kit_expect_diagnostics(text))
+    kit_expect_exact_with_count(id, path, expected, actual, bless, (text: String) -[]> kit_expect_no_count(text))
+}
+
+fn kit_expect_exact_bytes(id: String, path: String, expected: [U8]?, actual: [U8], bless: KitBless) -> KitVerdict {
+    if expected == {
+        .Val(bytes) -> { if bytes == actual -> return kit_expect_verdict("PASS", "") }
+        .None -> {}
+    }
+    if bless.first_tier && (bless.all || kit_expect_named(bless.ids, id)) {
+        files.create_dir_all(files.dirname(path)) ?? return kit_expect_verdict("ERROR", "mkdir snapshot: {err}")
+        files.write_atomic(path, actual) ?? return kit_expect_verdict("ERROR", "write snapshot: {err}")
+        return kit_expect_verdict("PASS", "blessed {path}")
+    }
+    old :: expected ?? return kit_expect_verdict("FAIL", "missing expected stream: {path}")
+    old_text :: String.from_bytes(old) ?? return kit_expect_verdict("FAIL", "byte snapshot mismatch: {path}")
+    new_text :: String.from_bytes(actual) ?? return kit_expect_verdict("FAIL", "byte snapshot mismatch: {path}")
+    KitVerdict{status: "FAIL", detail: "snapshot mismatch: {path}", diff: kit_expect_unified(path, old_text, new_text)}
+}
+
+fn kit_expect_paths(actual: String, work: String, root: String, scratch: String) -> String {
+    actual.replace(work, "{{work}}").replace(scratch, "{{scratch}}").replace(root, "{{root}}")
+}
+
+fn kit_expect_argv0(actual: String, binary: String, source: String) -> String {
+    usage :: "Usage: {binary}"
+    start :: actual.index(usage) ?? return actual.copy()
+    "{actual.slice(0, start)}Usage: {source}{actual.slice(start + usage.len(), actual.len())}"
+}

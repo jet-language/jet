@@ -1,0 +1,16 @@
+# Port of tests/source_import.rs:127-188; original sources and every predicate retained.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: python_source_import_matches_python_oracle_fixed_corpus.fixture
+mkdir: python/app
+step: jet import py python/app
+exit: 0
+file: jet/app/corpus.jet = corpus.jet.bytes
+step: jet check jet/app/corpus.jet
+exit: 0
+step oracle: python3 -c "import runpy; runpy.run_path('python/app/corpus.py')['run']()"
+exit: 0
+stdout: = corpus.out
+step: jet run jet/app/corpus.jet
+exit: 0
+stdout: == oracle
+stderr: == oracle

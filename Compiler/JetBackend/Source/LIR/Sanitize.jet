@@ -1,0 +1,70 @@
+// Sanitize mode (#4619): AddressSanitizer checks in native code. Every Load
+// and Store whose base is not a stack slot of its own function is preceded by
+// a call to the ASan runtime's outlined check, `__asan_loadN` or
+// `__asan_storeN` (address, byte size). The ASan runtime reports a heap
+// overflow, a use after free or a wild access made by native code itself,
+// with a stack, where the uninstrumented object would read or corrupt memory
+// silently. Native frames carry no redzones, so stack slots are not checked.
+// An instrumented object links only with an ASan runtime (clang
+// -fsanitize=address); Compiler/JetBackend/Tests/run-sanitized.mjs links it.
+
+fn lir_sanitize_module(program: LIRModule) -> LIRModule Never! {
+    signatures := program.signatures
+    check :: LIRSignatureID{value: signatures.len()}
+    &signatures.push(LIRSignature{id: check, convention: LIRCallConv.SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: None})
+    functions := [LIRFunction]{}
+    loop function in program.functions -> &functions.push(lir_sanitize_function(function, check))
+    LIRModule{signatures: signatures, functions: functions, data: program.data, debug: program.debug}
+}
+
+fn lir_sanitize_function(function: LIRFunction, check: LIRSignatureID) -> LIRFunction Never! {
+    values := function.values
+    frame := [Bool]{}
+    loop value in function.values -> &frame.push(false)
+    loop block in function.blocks {
+        loop inst in block.insts {
+            if inst == .StackSlot(dst, _, _) -> frame[dst.value] = true
+        }
+    }
+    blocks := [LIRBlock]{}
+    loop block in function.blocks {
+        insts := [LIRInst]{}
+        lines := [Int]{}
+        loop (index, inst) in block.insts {
+            if inst == {
+                .Load(dst, base, offset) -> {
+                    if !frame[base.value] -> lir_sanitize_check(&values, &insts, check, "__asan_loadN", base, offset, function.values[dst.value].layout.size)
+                }
+                .Store(base, offset, value) -> {
+                    if !frame[base.value] -> lir_sanitize_check(&values, &insts, check, "__asan_storeN", base, offset, function.values[value.value].layout.size)
+                }
+                else -> {}
+            }
+            &insts.push(inst)
+            loop lines.len() < insts.len() -> &lines.push(opt_debug_line(block, index))
+        }
+        &lines.push(opt_debug_line(block, block.insts.len()))
+        &blocks.push(LIRBlock{id: block.id, params: block.params, insts: insts, terminator: block.terminator, lines: lines})
+    }
+    LIRFunction{id: function.id, name: function.name, signature: function.signature, values: values, blocks: blocks, debug: function.debug}
+}
+
+fn lir_sanitize_value(values: &[LIRValue], layout: LIRLayout) -> LIRValueID Never! {
+    id :: LIRValueID{value: values.len()}
+    &values.push(LIRValue{id: id, layout: layout, drop: LIRDrop.Trivial, jet_type: None})
+    id
+}
+
+// `call symbol(base + offset, size)` ahead of the access it checks.
+fn lir_sanitize_check(values: &[LIRValue], insts: &[LIRInst], check: LIRSignatureID, symbol: String, base: LIRValueID, offset: Int, size: Int) Never! {
+    address := base
+    if offset != 0 {
+        delta :: lir_sanitize_value(&values, lir_layout_word())
+        &insts.push(LIRInst.Const{dst: delta, value: offset})
+        address = lir_sanitize_value(&values, lir_layout_pointer())
+        &insts.push(LIRInst.PointerAdd{dst: address, base: base, offset: delta})
+    }
+    width :: lir_sanitize_value(&values, lir_layout_word())
+    &insts.push(LIRInst.Const{dst: width, value: size})
+    &insts.push(LIRInst.Call{dst: None, signature: check, callee: LIRCallee.Runtime{symbol: symbol}, args: [LIRValueID]{address, width}})
+}

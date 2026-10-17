@@ -68,7 +68,7 @@ pub(crate) fn place_span(expr: &Expr) -> Span {
     Span::new(start(expr).min(span.start), span.end)
 }
 
-fn is_window_type(ty: &Type) -> bool {
+pub(crate) fn is_window_type(ty: &Type) -> bool {
     match ty {
         Type::Apply { name, .. } => matches!(name.as_str(), "ViewMut" | "ComputeViewMut"),
         Type::Tagged { inner, .. } => is_window_type(inner),

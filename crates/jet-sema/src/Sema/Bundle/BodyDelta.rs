@@ -29,8 +29,9 @@ use crate::AST::{
     AccessConvention, ArithmeticMode, ArithmeticOperation, ArithmeticPolicyFact, BinOp, BindName,
     BindPattern, Binding, ByteTextPart, Call, CallArg, CallArgFlags, CtFloat, CtKey, CtReport,
     CtValue, EnumLitArg, Expr, ForKind, Func, IndexKind, InternalTag, LValue, OrFallback, Param,
-    ParamZone, PatSlot, Pattern, PlaceAccess, Stmt, StrFormat, StrPart, StructPatField, SwitchArm,
-    TagMarker, TryConvert, Type, TypedLitBody, UnOp, UnitFormat,
+    ParamZone, PatSlot, Pattern, PlaceAccess, ReceiverFootprint, Stmt, StrFormat, StrPart,
+    StructPatField, SwitchArm, TagMarker, TryConvert, Type, TypedLitBody, UnOp, UnitFormat,
+    ListPatRest, MapPatEntry,
 };
 use std::collections::{BTreeMap, HashSet};
 
@@ -566,6 +567,12 @@ codec_struct!(Param {
     variadic,
     variadic_bound_list,
     declared_view_from_names,
+    footprint,
+});
+
+codec_struct!(ReceiverFootprint {
+    declared,
+    inferred,
 });
 
 codec_enum!(ParamZone {
@@ -800,7 +807,8 @@ codec_enum!(Expr {
         recv_type,
         resolved_ret,
         operator_rhs,
-        checked_widen
+        checked_widen,
+        checked_callee
     },
     26 => StructLit { type_name, type_args, import_ns, as_trait, fields, inferred, span },
     27 => TypedLit { head, body, span },
@@ -928,7 +936,9 @@ codec_enum!(Pattern {
     4 => Err { binding, binding_span, inner, span },
     5 => Range { lo, hi, span },
     6 => Or(alternatives, span),
-    7 => Struct { fields, rest, span },
+    7 => Struct { type_name, fields, rest, span },
+    8 => List { items, rest, span },
+    9 => Map { entries, rest, span },
 });
 
 codec_enum!(PatSlot {
@@ -938,12 +948,17 @@ codec_enum!(PatSlot {
     3 => Nested(pattern),
     4 => Named { field, field_span, slot },
     5 => Rest(span),
+    6 => Value(value),
 });
 
 codec_enum!(StructPatField {
     0 => Bind { field, field_span, local, local_span },
     1 => Value { field, field_span, value },
+    2 => Nested { field, field_span, pattern },
 });
+
+codec_struct!(ListPatRest { span, name });
+codec_struct!(MapPatEntry { key, optional, slot, span });
 
 codec_enum!(OrFallback {
     0 => Value(value),
@@ -997,6 +1012,7 @@ codec_struct!(CtBigInt { negative, limbs });
 
 codec_enum!(CtKey {
     0 => Int(value),
+    7 => BigInt(value),
     1 => Str(value),
     2 => Bool(value),
     3 => Char(value),

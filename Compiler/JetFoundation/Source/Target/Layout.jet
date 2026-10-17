@@ -19,41 +19,41 @@ JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE :: prep { [Int]{
 } }
 
 // Size, alignment, and repeated-element stride for one physical value.
-pub struct ByteLayout {
-    pub size: Int
-    pub alignment: Int
-    pub stride: Int
+struct ByteLayout {
+    size: Int
+    alignment: Int
+    stride: Int
 }
 
 // Byte facts for one stored field or enum payload. Unknown physical facts are
 // represented by None in every numeric column; they are never approximated.
-pub struct FieldLayoutFacts {
-    pub name: String
-    pub offset: Int?
-    pub size: Int?
-    pub alignment: Int?
-    pub stride: Int?
+struct FieldLayoutFacts {
+    name: String
+    offset: Int?
+    size: Int?
+    alignment: Int?
+    stride: Int?
 }
 
 // The one physical-layout result consumed by sema/TIR/MIR and reflection.
-pub struct LayoutFacts {
-    pub bytes: ByteLayout?
-    pub fields: [FieldLayoutFacts]
+struct LayoutFacts {
+    bytes: ByteLayout?
+    fields: [FieldLayoutFacts]
 }
 
-pub struct CheckedLayoutFacts {
-    pub physical: LayoutFacts
-    pub alignment: MIRLayoutAlignmentFact?
+struct CheckedLayoutFacts {
+    physical: LayoutFacts
+    alignment: MIRLayoutAlignmentFact?
 }
 
-pub struct JetTargetLayout {
-    pub triple: String
-    pub pointer_size: Int
-    pub pointer_alignment: Int
-    pub facts: MIRLayoutCapabilityFacts
+struct JetTargetLayout {
+    triple: String
+    pointer_size: Int
+    pointer_alignment: Int
+    facts: MIRLayoutCapabilityFacts
 }
 
-pub enum JetLayoutAlignmentError {
+enum JetLayoutAlignmentError {
     Zero
     NotPowerOfTwo(requested: Int)
     PortableBaseline(requested: Int, baseline: Int)
@@ -61,19 +61,19 @@ pub enum JetLayoutAlignmentError {
     Unsupported(requested: Int, effective: Int, profile: String)
 }
 
-pub enum JetLayoutAlignmentResult {
+enum JetLayoutAlignmentResult {
     Accepted(value: MIRLayoutAlignmentFact)
     Rejected(error: JetLayoutAlignmentError)
 }
 
-pub enum JetLayoutStorageKind {
+enum JetLayoutStorageKind {
     Stack
     Global
     Heap
     ForeignByValue
 }
 
-pub enum JetLayoutStorageError {
+enum JetLayoutStorageError {
     MissingFacts(kind: JetLayoutStorageKind, profile: String)
     UnsupportedAlignment(kind: JetLayoutStorageKind, alignment: Int, profile: String)
     MissingSizeBound(kind: JetLayoutStorageKind)
@@ -83,12 +83,12 @@ pub enum JetLayoutStorageError {
     AddressExceeded(kind: JetLayoutStorageKind, end: Int, max_address: Int)
 }
 
-pub enum JetLayoutStorageResult {
+enum JetLayoutStorageResult {
     Accepted
     Rejected(error: JetLayoutStorageError)
 }
 
-pub enum JetCheckedLayoutResult {
+enum JetCheckedLayoutResult {
     Accepted(value: CheckedLayoutFacts)
     Rejected(error: JetLayoutAlignmentError)
 }
@@ -96,19 +96,19 @@ pub enum JetCheckedLayoutResult {
 // One source declaration in the canonical module-qualified layout registry.
 // The module identity is retained so raw field names can be resolved in the
 // declaration's own source namespace during recursive layout.
-pub struct TargetLayoutQualifiedItem {
-    pub qualified_name: String
-    pub module_identity: String
-    pub item: Item
+struct TargetLayoutQualifiedItem {
+    qualified_name: String
+    module_identity: String
+    item: Item
 }
 
 // One exact source-name resolution produced by sema. The owner is the
 // declaration's canonical identity, so aliases and imported paths remain
 // distinct even when they occur in the same module.
-pub struct TargetLayoutNameResolution {
-    pub owner_qualified_name: String
-    pub source_name: String
-    pub qualified_name: String
+struct TargetLayoutNameResolution {
+    owner_qualified_name: String
+    source_name: String
+    qualified_name: String
 }
 
 // The engine owns the selected target and the complete source-item registry.
@@ -116,19 +116,21 @@ pub struct TargetLayoutNameResolution {
 // required explicitly so sema cannot infer a host default. The registry's
 // name indexes (first row per name) are built once with the engine, not per
 // query (Rust `TargetLayoutEngine::new`).
-pub struct TargetLayoutEngine {
-    pub target: JetTargetLayout
-    pub items: [Item]
-    pub qualified_items: [TargetLayoutQualifiedItem]
-    pub name_resolutions: [TargetLayoutNameResolution]
-    pub item_positions: [String:Int]
-    pub qualified_positions: [String:Int]
-    pub resolution_positions: [String:Int]
+struct TargetLayoutEngine {
+    target: JetTargetLayout
+    items: [Item]
+    qualified_items: [TargetLayoutQualifiedItem]
+    name_resolutions: [TargetLayoutNameResolution]
+    item_positions: [String:Int]
+    qualified_positions: [String:Int]
+    resolution_positions: [String:Int]
 }
 
 // The target/profile and registry are fixed for this query. Completed byte
 // facts are keyed by registry row plus generic arguments, never by an active
 // recursion path. Cycle-dependent unknown results must not enter the memo.
+// Registry lookup indexes belong to TargetLayoutEngine and are reused across
+// queries; each query owns only its recursion tracking and completed layouts.
 struct JetTargetLayoutQuery {
     active: [String:Bool]
     cycle_hits: Int
@@ -150,7 +152,8 @@ fn jet_target_layout_query() -> JetTargetLayoutQuery Never! {
     }
 }
 
-pub fn jet_target_layout_support_unknown() -> MIRLayoutSupportFacts Never! {
+
+fn jet_target_layout_support_unknown() -> MIRLayoutSupportFacts Never! {
     MIRLayoutSupportFacts{
         proven: false,
         alignments: [Int]{},
@@ -174,7 +177,7 @@ fn jet_target_layout_support_exact(triple: String, address_bound: Int) -> MIRLay
 
 // Build an authoritative support row from a target-provided alignment set.
 // Empty rows are unknown; no caller may treat unknown as unlimited support.
-pub fn jet_target_layout_support_exact_rows(alignments: [Int], max_size: Int?, max_address: Int?, provenance: String) -> MIRLayoutSupportFacts Never! {
+fn jet_target_layout_support_exact_rows(alignments: [Int], max_size: Int?, max_address: Int?, provenance: String) -> MIRLayoutSupportFacts Never! {
     proven :: alignments.len() > 0
     MIRLayoutSupportFacts{
         proven: proven,
@@ -187,7 +190,7 @@ pub fn jet_target_layout_support_exact_rows(alignments: [Int], max_size: Int?, m
 }
 
 // Build the exact powers-of-two support row through one checked boundary.
-pub fn jet_target_layout_support_powers_through(max_alignment: Int, max_size: Int?, max_address: Int?, provenance: String) -> MIRLayoutSupportFacts Never! {
+fn jet_target_layout_support_powers_through(max_alignment: Int, max_size: Int?, max_address: Int?, provenance: String) -> MIRLayoutSupportFacts Never! {
     if max_alignment <= 0 || !jet_layout_is_power_of_two(max_alignment) -> return jet_target_layout_support_unknown()
     alignments := [Int]{}
     alignment := 1
@@ -200,7 +203,7 @@ pub fn jet_target_layout_support_powers_through(max_alignment: Int, max_size: In
     jet_target_layout_support_exact_rows(alignments, max_size, max_address, provenance)
 }
 
-pub fn jet_target_layout_support_with_abi(support: MIRLayoutSupportFacts, abi: String) -> MIRLayoutSupportFacts Never! {
+fn jet_target_layout_support_with_abi(support: MIRLayoutSupportFacts, abi: String) -> MIRLayoutSupportFacts Never! {
     MIRLayoutSupportFacts{
         proven: support.proven,
         alignments: support.alignments,
@@ -211,7 +214,7 @@ pub fn jet_target_layout_support_with_abi(support: MIRLayoutSupportFacts, abi: S
     }
 }
 
-pub fn jet_target_layout_supports_alignment(support: MIRLayoutSupportFacts, alignment: Int) -> Bool Never! {
+fn jet_target_layout_supports_alignment(support: MIRLayoutSupportFacts, alignment: Int) -> Bool Never! {
     if !support.proven || alignment <= 0 -> return false
     loop candidate in support.alignments {
         if candidate == alignment -> return true
@@ -223,7 +226,7 @@ fn jet_target_layout_known_triple(triple: String) -> Bool Never! {
     triple.starts_with("x86_64-") || triple.starts_with("aarch64-") || triple.starts_with("wasm32-") || triple.starts_with("i686-") || triple.starts_with("arm-") || triple.starts_with("armv7-") || triple.starts_with("thumb")
 }
 
-pub fn jet_target_layout_pointer_size(triple: String) -> Int Never! {
+fn jet_target_layout_pointer_size(triple: String) -> Int Never! {
     if triple.starts_with("wasm32-") || triple.starts_with("i686-") || triple.starts_with("arm-") || triple.starts_with("armv7-") || triple.starts_with("thumb") -> 4 else -> 8
 }
 
@@ -255,13 +258,13 @@ fn jet_target_layout_from_triple_and_version(triple: String, package_version: St
     }
 }
 
-pub fn jet_target_layout_from_triple(triple: String, package_version: String) -> JetTargetLayout Never! {
+fn jet_target_layout_from_triple(triple: String, package_version: String) -> JetTargetLayout Never! {
     jet_target_layout_from_triple_and_version(triple, package_version)
 }
 
 // Reuse the already selected driver machine. This is the only adapter allowed
 // to move machine layout facts into a physical layout engine.
-pub fn jet_target_layout_from_machine(machine: MIRTargetMachine) -> JetTargetLayout Never! {
+fn jet_target_layout_from_machine(machine: MIRTargetMachine) -> JetTargetLayout Never! {
     pointer_size :: jet_target_layout_pointer_size(machine.triple)
     JetTargetLayout{
         triple: machine.triple,
@@ -273,7 +276,7 @@ pub fn jet_target_layout_from_machine(machine: MIRTargetMachine) -> JetTargetLay
 
 // Same as the machine adapter for callers that retain only the selected
 // profile facts. The triple remains explicit and is never taken from the host.
-pub fn jet_target_layout_from_selected_facts(triple: String, facts: MIRLayoutCapabilityFacts) -> JetTargetLayout Never! {
+fn jet_target_layout_from_selected_facts(triple: String, facts: MIRLayoutCapabilityFacts) -> JetTargetLayout Never! {
     pointer_size :: jet_target_layout_pointer_size(triple)
     JetTargetLayout{
         triple: triple,
@@ -285,7 +288,7 @@ pub fn jet_target_layout_from_selected_facts(triple: String, facts: MIRLayoutCap
 
 fn jet_target_layout_u64_bytes(value: Int) -> [U8] Never! {
     bytes := [U8]{}
-    loop index in 0..<8 -> &bytes.push(U8{(value >> (8 * index)) & 255})
+    loop index in 0..<8 -> &bytes.push(U8{((value >> (8 * index))).bit_and(255)})
     bytes
 }
 
@@ -317,7 +320,7 @@ fn jet_target_layout_frame_support(bytes: &[U8], support: MIRLayoutSupportFacts)
     jet_target_layout_frame_string(&bytes, support.provenance)
 }
 
-pub fn jet_target_layout_cache_identity(facts: MIRLayoutCapabilityFacts) -> String Never! {
+fn jet_target_layout_cache_identity(facts: MIRLayoutCapabilityFacts) -> String Never! {
     bytes := [U8]{}
     jet_target_layout_frame_string(&bytes, facts.fact_version)
     jet_target_layout_frame_string(&bytes, facts.target_profile)
@@ -334,7 +337,7 @@ pub fn jet_target_layout_cache_identity(facts: MIRLayoutCapabilityFacts) -> Stri
     "{JET_TARGET_LAYOUT_FACT_VERSION}:{mir_sha256_hex_bytes(bytes)}"
 }
 
-pub fn jet_target_layout_check_alignment(target: JetTargetLayout, requested: Int, natural: Int, target_mode: Bool) -> JetLayoutAlignmentResult Never! {
+fn jet_target_layout_check_alignment(target: JetTargetLayout, requested: Int, natural: Int, target_mode: Bool) -> JetLayoutAlignmentResult Never! {
     if requested == 0 -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.Zero}
     if !jet_layout_is_power_of_two(requested) -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.NotPowerOfTwo{requested: requested}}
     if !target_mode && requested > JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX -> return JetLayoutAlignmentResult.Rejected{error: JetLayoutAlignmentError.PortableBaseline{requested: requested, baseline: JET_LAYOUT_PORTABLE_ALIGNMENT_BASELINE_MAX}}
@@ -350,7 +353,7 @@ pub fn jet_target_layout_check_alignment(target: JetTargetLayout, requested: Int
     }}
 }
 
-pub fn jet_target_layout_alignment_error_reason(error: JetLayoutAlignmentError) -> String Never! {
+fn jet_target_layout_alignment_error_reason(error: JetLayoutAlignmentError) -> String Never! {
     if error == {
         .Zero -> "zero does not establish an alignment boundary"
         .NotPowerOfTwo(_) -> "the value is not a power of two"
@@ -376,14 +379,14 @@ fn jet_target_layout_storage_kind_name(kind: JetLayoutStorageKind) -> String Nev
     "ForeignByValue"
 }
 
-pub fn jet_target_layout_storage_kind_name_lower(kind: JetLayoutStorageKind) -> String Never! {
+fn jet_target_layout_storage_kind_name_lower(kind: JetLayoutStorageKind) -> String Never! {
     if kind == JetLayoutStorageKind.Stack -> return "stack"
     if kind == JetLayoutStorageKind.Global -> return "global"
     if kind == JetLayoutStorageKind.Heap -> return "heap"
     "foreign by-value ABI"
 }
 
-pub fn jet_target_layout_storage_error_reason(error: JetLayoutStorageError) -> String Never! {
+fn jet_target_layout_storage_error_reason(error: JetLayoutStorageError) -> String Never! {
     if error == {
         .MissingFacts(kind, profile) -> "{jet_target_layout_storage_kind_name(kind)} placement facts are missing for target profile `{profile}`"
         .UnsupportedAlignment(kind, alignment, profile) -> "{jet_target_layout_storage_kind_name(kind)} placement does not support alignment {alignment} on target profile `{profile}`"
@@ -395,7 +398,7 @@ pub fn jet_target_layout_storage_error_reason(error: JetLayoutStorageError) -> S
     }
 }
 
-pub fn jet_target_layout_check_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, alignment: Int, size: Int, address: Int?) -> JetLayoutStorageResult Never! {
+fn jet_target_layout_check_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, alignment: Int, size: Int, address: Int?) -> JetLayoutStorageResult Never! {
     support :: jet_target_layout_support_for_storage(target, kind)
     if !support.proven -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.MissingFacts{kind: kind, profile: target.facts.target_profile}}
     if alignment <= 0 || !jet_target_layout_supports_alignment(support, alignment) -> return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.UnsupportedAlignment{kind: kind, alignment: alignment, profile: target.facts.target_profile}}
@@ -410,33 +413,33 @@ pub fn jet_target_layout_check_storage(target: JetTargetLayout, kind: JetLayoutS
     JetLayoutStorageResult.Accepted
 }
 
-pub fn jet_target_layout_check_array_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, count: Int, layout: ByteLayout, address: Int?) -> JetLayoutStorageResult Never! {
+fn jet_target_layout_check_array_storage(target: JetTargetLayout, kind: JetLayoutStorageKind, count: Int, layout: ByteLayout, address: Int?) -> JetLayoutStorageResult Never! {
     size :: jet_layout_checked_mul(layout.stride, count) ?? return JetLayoutStorageResult.Rejected{error: JetLayoutStorageError.AddressOverflow{kind: kind}}
     jet_target_layout_check_storage(target, kind, layout.alignment, size, address)
 }
 
-pub fn jet_target_layout_engine_from_machine_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], machine: MIRTargetMachine) -> TargetLayoutEngine Never! {
+fn jet_target_layout_engine_from_machine_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], machine: MIRTargetMachine) -> TargetLayoutEngine Never! {
     jet_target_layout_engine_with_registry(items, qualified_items, name_resolutions, jet_target_layout_from_machine(machine))
 }
 
-pub fn jet_target_layout_engine_from_selected_facts_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], triple: String, facts: MIRLayoutCapabilityFacts) -> TargetLayoutEngine Never! {
+fn jet_target_layout_engine_from_selected_facts_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], triple: String, facts: MIRLayoutCapabilityFacts) -> TargetLayoutEngine Never! {
     jet_target_layout_engine_with_registry(items, qualified_items, name_resolutions, jet_target_layout_from_selected_facts(triple, facts))
 }
 
-pub fn jet_target_layout_engine_from_machine(items: [Item], machine: MIRTargetMachine) -> TargetLayoutEngine Never! {
+fn jet_target_layout_engine_from_machine(items: [Item], machine: MIRTargetMachine) -> TargetLayoutEngine Never! {
     jet_target_layout_engine_from_machine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, machine)
 }
 
-pub fn jet_target_layout_engine_from_selected_facts(items: [Item], triple: String, facts: MIRLayoutCapabilityFacts) -> TargetLayoutEngine Never! {
+fn jet_target_layout_engine_from_selected_facts(items: [Item], triple: String, facts: MIRLayoutCapabilityFacts) -> TargetLayoutEngine Never! {
     jet_target_layout_engine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, jet_target_layout_from_selected_facts(triple, facts))
 }
 
-pub fn jet_target_layout_engine(items: [Item], target: JetTargetLayout) -> TargetLayoutEngine Never! {
+fn jet_target_layout_engine(items: [Item], target: JetTargetLayout) -> TargetLayoutEngine Never! {
     jet_target_layout_engine_with_registry(items, [TargetLayoutQualifiedItem]{}, [TargetLayoutNameResolution]{}, target)
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::new
-pub fn jet_target_layout_engine_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], target: JetTargetLayout) -> TargetLayoutEngine Never! {
+fn jet_target_layout_engine_with_registry(items: [Item], qualified_items: [TargetLayoutQualifiedItem], name_resolutions: [TargetLayoutNameResolution], target: JetTargetLayout) -> TargetLayoutEngine Never! {
     item_positions := [String:Int]{}
     loop position in 0..<items.len() {
         name :: jet_target_layout_item_name(items[position])
@@ -455,24 +458,24 @@ pub fn jet_target_layout_engine_with_registry(items: [Item], qualified_items: [T
     TargetLayoutEngine{target: target, items: items, qualified_items: qualified_items, name_resolutions: name_resolutions, item_positions: item_positions, qualified_positions: qualified_positions, resolution_positions: resolution_positions}
 }
 
-pub fn jet_target_layout_engine_target(engine: TargetLayoutEngine) -> JetTargetLayout Never! {
+fn jet_target_layout_engine_target(engine: TargetLayoutEngine) -> JetTargetLayout Never! {
     engine.target
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts
-pub fn jet_target_layout_struct_facts(engine: TargetLayoutEngine, definition: StructDef) -> LayoutFacts Never! {
+fn jet_target_layout_struct_facts(engine: TargetLayoutEngine, definition: StructDef) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     jet_target_layout_struct_facts_inner_named(engine, definition, definition.name, "", &query)
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::struct_facts
-pub fn jet_target_layout_struct_facts_in_module(engine: TargetLayoutEngine, definition: StructDef, module_identity: String) -> LayoutFacts Never! {
+fn jet_target_layout_struct_facts_in_module(engine: TargetLayoutEngine, definition: StructDef, module_identity: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     identity :: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
     jet_target_layout_struct_facts_inner_named(engine, definition, identity, identity, &query)
 }
 
-pub fn jet_target_layout_checked_struct_facts(engine: TargetLayoutEngine, definition: StructDef) -> JetCheckedLayoutResult Never! {
+fn jet_target_layout_checked_struct_facts(engine: TargetLayoutEngine, definition: StructDef) -> JetCheckedLayoutResult Never! {
     physical :: jet_target_layout_struct_facts(engine, definition)
     if definition.layout == {
         Val(layout) -> if layout == {
@@ -491,7 +494,7 @@ pub fn jet_target_layout_checked_struct_facts(engine: TargetLayoutEngine, defini
     JetCheckedLayoutResult.Accepted{value: CheckedLayoutFacts{physical: physical, alignment: None}}
 }
 
-pub fn jet_target_layout_enum_c_tag(definition: EnumDef) -> CEnumTag? {
+fn jet_target_layout_enum_c_tag(definition: EnumDef) -> CEnumTag? {
     marker :: loop candidate in definition.type_markers {
         if candidate.name == "Layout" -> break candidate
     } ?? return None
@@ -520,7 +523,7 @@ fn jet_target_layout_marker_expression(marker: Marker, index: Int) -> Expr? {
     if marker.args[index] == { .Expr(value) -> Val(value) else -> None }
 }
 
-pub fn jet_target_layout_mir_c_tag(enum_tag: CEnumTag) -> MIRCEnumTag Never! {
+fn jet_target_layout_mir_c_tag(enum_tag: CEnumTag) -> MIRCEnumTag Never! {
     if enum_tag == {
         .CInt -> MIRCEnumTag.CInt
         .U8 -> MIRCEnumTag.U8
@@ -535,20 +538,20 @@ pub fn jet_target_layout_mir_c_tag(enum_tag: CEnumTag) -> MIRCEnumTag Never! {
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::enum_facts
-pub fn jet_target_layout_enum_facts(engine: TargetLayoutEngine, definition: EnumDef) -> LayoutFacts Never! {
+fn jet_target_layout_enum_facts(engine: TargetLayoutEngine, definition: EnumDef) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     jet_target_layout_enum_facts_inner_named(engine, definition, definition.name, "", &query)
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::enum_facts
-pub fn jet_target_layout_enum_facts_in_module(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {
+fn jet_target_layout_enum_facts_in_module(engine: TargetLayoutEngine, definition: EnumDef, module_identity: String) -> LayoutFacts Never! {
     query := jet_target_layout_query()
     identity :: if module_identity == "" -> definition.name else -> "{module_identity}::{definition.name}"
     jet_target_layout_enum_facts_inner_named(engine, definition, identity, identity, &query)
 }
 
 // Rust: crates/jet-foundation/src/Layout.rs::TargetLayoutEngine::type_layout_inner
-pub fn jet_target_layout_type_facts(engine: TargetLayoutEngine, ty: Type) -> ByteLayout? {
+fn jet_target_layout_type_facts(engine: TargetLayoutEngine, ty: Type) -> ByteLayout? {
     query := jet_target_layout_query()
     jet_target_layout_type_inner(engine, ty, "", &query)
 }
@@ -716,6 +719,7 @@ fn jet_target_layout_type_inner(engine: TargetLayoutEngine, ty: Type, owner_qual
         .InlineRange(base, _, _) | .Tagged(_, base) | .Quantity(base, _) -> jet_target_layout_type_inner(engine, base, owner_qualified_name, &query)
         .Named(name) -> jet_target_layout_named_type(engine, name, [Type]{}, owner_qualified_name, &query)
         .Apply(name, args) -> {
+            if name == "Ptr" && args.len() == 1 -> return Val(ByteLayout{size: engine.target.pointer_size, alignment: engine.target.pointer_alignment, stride: engine.target.pointer_size})
             if jet_target_layout_is_atomic_name(name) -> return jet_target_layout_atomic_layout(engine, args)
             jet_target_layout_named_type(engine, name, args, owner_qualified_name, &query)
         }
@@ -739,7 +743,7 @@ fn jet_target_layout_atomic_layout(engine: TargetLayoutEngine, args: [Type]) -> 
 // Rust: none (Jet-only pass)
 fn jet_target_layout_resolved_name(engine: TargetLayoutEngine, owner_qualified_name: String, source_name: String) -> String Never! {
     key :: jet_target_layout_resolution_key(owner_qualified_name, source_name)
-    position :: engine.resolution_positions.get(key) ?? return ~source_name
+    position :: engine.resolution_positions.get(key) ?? return source_name.copy()
     engine.name_resolutions[position].qualified_name
 }
 
@@ -872,7 +876,7 @@ fn jet_target_layout_unknown(names: [String]) -> LayoutFacts Never! {
     LayoutFacts{bytes: None, fields: fields}
 }
 
-pub fn jet_target_layout_atomic_scalar_type(ty: Type) -> Bool Never! {
+fn jet_target_layout_atomic_scalar_type(ty: Type) -> Bool Never! {
     if ty == {
         .Bool | .Int -> true
         .IntN(_, bits) -> bits == 32 || bits == 64
@@ -885,7 +889,7 @@ pub fn jet_target_layout_atomic_scalar_type(ty: Type) -> Bool Never! {
     }
 }
 
-pub fn jet_target_layout_atomic_add_type(ty: Type) -> Bool Never! {
+fn jet_target_layout_atomic_add_type(ty: Type) -> Bool Never! {
     if !jet_target_layout_atomic_scalar_type(ty) -> return false
     if ty == {
         .Bool -> false
@@ -894,7 +898,7 @@ pub fn jet_target_layout_atomic_add_type(ty: Type) -> Bool Never! {
     }
 }
 
-pub fn jet_target_layout_supports_atomic_word(target: JetTargetLayout) -> Bool Never! {
+fn jet_target_layout_supports_atomic_word(target: JetTargetLayout) -> Bool Never! {
     target.triple.starts_with("x86_64-") || target.triple.starts_with("aarch64-") || target.triple.starts_with("wasm32-")
 }
 
@@ -918,7 +922,7 @@ fn jet_target_layout_ascii_lower(text: String) -> String Never! {
 }
 
 fn jet_layout_is_power_of_two(value: Int) -> Bool Never! {
-    value > 0 && (value & (value - 1)) == 0
+    value > 0 && ((value).bit_and((value - 1))) == 0
 }
 
 fn jet_layout_checked_add(left: Int, right: Int) -> Int? {
@@ -939,4 +943,22 @@ fn jet_layout_align_up(value: Int, alignment: Int) -> Int? {
     effective :: if alignment < 1 -> 1 else -> alignment
     padding :: jet_layout_checked_add(value, effective - 1) ?? return None
     Val((padding /% effective) * effective)
+}
+
+#Test("raw pointer layout uses the selected target without pointee layout") {
+    loop triple in ([String]{"x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"}) {
+        target :: jet_target_layout_from_triple(triple, "0.0.1")
+        engine :: jet_target_layout_engine([Item]{}, target)
+        pointer_size :: if triple.starts_with("wasm32-") -> 4 else -> 8
+        loop pointee in ([Type]{Type.Int, Type.Named{name: "UnresolvedPointee"}}) {
+            pointer :: Type.Apply{name: "Ptr", args: [Type]{pointee}}
+            layout :: jet_target_layout_type_facts(engine, pointer) ?? panic("raw pointer layout is missing")
+            assert(layout.size == pointer_size)
+            assert(layout.alignment == pointer_size)
+            assert(layout.stride == pointer_size)
+        }
+        loop args in ([[Type]]{[Type]{}, [Type]{Type.Int, Type.Bool}}) {
+            assert(jet_target_layout_type_facts(engine, Type.Apply{name: "Ptr", args: args}) == None)
+        }
+    }
 }

@@ -62,7 +62,7 @@ fn canvas_machine_output(action: &str, ok: bool, payload: &str) -> String {
     let payload = payload.trim();
     let value = jet_foundation::JSON::parse_json_with_limit(payload, CANVAS_PAYLOAD_LIMIT)
         .ok()
-        .and_then(|tree| StatusValue::from_data_tree(&tree).ok())
+        .and_then(|tree| StatusValue::from_dyn(&tree).ok())
         .unwrap_or_else(|| StatusValue::String(payload.to_owned()));
     StatusEnvelope::new(action, ok)
         .with_field("canvas", value)
@@ -965,7 +965,7 @@ fn command_receipt_json_for_entry_inner(entry: &Path, request: &str) -> Result<S
     let (success, exit_code, stdout, stderr, diagnostics) = if action_id == "canvas.command:check" {
         let abs = canonical_path(&source_path);
         let overlay = source_override.as_deref().map(|text| (abs.as_path(), text));
-        let (diags, _bundle, _facts) = jet_driver::Driver::check_file_with_effect_facts(
+        let (diags, _bundle, _facts, _) = jet_driver::Driver::check_file_with_effect_facts(
             &source_path.display().to_string(),
             overlay,
             true,

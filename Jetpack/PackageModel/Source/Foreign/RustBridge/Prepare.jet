@@ -5,15 +5,15 @@
 // never activate the bridge; the compiler itself stays dependency-free (I6).
 
 // The bridge for the host target (`JET_BUILD_TARGET` or rustc's host).
-pub fn pkg_ffi_prepare(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
+fn pkg_ffi_prepare(program: RustBridgeProgram) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
     pkg_ffi_prepare_for_target(program, pkg_ffi_host_target())
 }
 
 // The bridge for the driver's selected target. Native source, inline asm,
 // cache identity, Cargo, and the final rustc link agree on this exact triple.
-pub fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
+fn pkg_ffi_prepare_for_target(program: RustBridgeProgram, target: String) -[FS, Env, Exec, Time, Time.Wait]> FFILink? RustBridgeError! {
     record_defs :: pkg_ffi_collect_c_record_definitions(program)
-    collected :: pkg_ffi_collect_externs(program)
+    collected :: pkg_ffi_collect_externs(program, target)
     // Stale or cross-target assembly contracts are refused before any
     // target-specific link discovery. Web has no native provider either: a
     // wasm build reports the same checked-target diagnostic rather than

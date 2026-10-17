@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, BTreeSet, HashSet};
 /// own semantic part instead of inheriting an unrelated hosted service.
 // BEGIN GENERATED CORE DEPENDENCIES
 // Source: crates/jet-codegen/src/Prelude/Core.jet
-// Source SHA-256: 52f3012cfe34f96cac17edd361737a3c033242973dc425f0a0d015c766a26c87
+// Source SHA-256: 3d55444a7b90a9a5311af51ac393a296c5491bfa3efe2384f6d639c210f38562
 const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("app", &["core.web"]),
     ("core.devtools", &["core"]),
@@ -29,29 +29,30 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.collections.set", &["core.collections"]),
     ("core.compute", &["core.math", "core.text.fmt"]),
     ("core.compute.solve", &["core.compute", "core.math"]),
-    ("core.crypto", &["core", "core.files"]),
+    ("core.crypto", &["core", "core.files", "core.tasks"]),
     ("core.crypto.expert", &["core.crypto"]),
     ("core.crypto.random", &["core.crypto"]),
     ("core.crypto.uuid", &["core.crypto"]),
     ("core.crypto.vault", &["core.crypto"]),
-    ("core.data", &["core.encoding", "core.files"]),
+    ("core.data", &["core.encoding", "core.files", "core.sys"]),
     ("core.data.arrow", &["core.data", "core.encoding"]),
     ("core.data.loader", &["core.data"]),
     ("core.data.stream", &["core.data"]),
     ("core.data.plot", &["core.data"]),
     ("core.data.sketch", &["core.data"]),
-    ("core.data.sketch.cms", &["core.data"]),
-    ("core.data.sketch.hll", &["core.data", "core.math"]),
+    ("core.data.sketch.cms", &["core.data", "core.data.sketch"]),
+    ("core.data.sketch.hll", &["core.data", "core.math", "core.data.sketch"]),
     ("core.data.sketch.reservoir", &["core.data"]),
-    ("core.data.sketch.tdigest", &["core.data", "core.math"]),
+    ("core.data.sketch.tdigest", &["core.data"]),
     ("core.db", &["core.encoding"]),
+    ("core.db.sql", &["core.math", "core.sys"]),
     ("core.email", &["core.crypto", "core.crypto.expert", "core.encoding.base64", "core.encoding.hex", "core.net", "core.sys", "core.text"]),
     ("core.encoding", &["core"]),
     ("core.encoding.base32", &["core.encoding"]),
     ("core.encoding.base64", &["core.encoding", "core.encoding.hex", "core.encoding.base32"]),
     ("core.encoding.binary", &["core.math"]),
     ("core.encoding.cbor", &["core.encoding", "core.math"]),
-    ("core.encoding.csv", &["core.encoding"]),
+    ("core.encoding.csv", &["core.encoding", "core.data"]),
     ("core.encoding.hex", &["core.encoding"]),
     ("core.encoding.ini", &["core.encoding"]),
     ("core.encoding.json", &["core.encoding", "core.math"]),
@@ -59,7 +60,7 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.encoding.toml", &["core.encoding"]),
     ("core.encoding.xml", &["core.encoding"]),
     ("core.event", &["core.mem"]),
-    ("core.files", &["core.text", "core.sys"]),
+    ("core.files", &["core.text", "core.sys", "core.time"]),
     ("core.encoding.yaml", &["core.encoding", "core.encoding.json"]),
     ("core.files.path", &["core.files"]),
     ("core.game.raylib", &["core.game"]),
@@ -72,20 +73,21 @@ const PRELUDE_DEPENDENCY_EDGES: &[(&str, &[&str])] = &[
     ("core.mem", &["core"]),
     ("core.mod", &["core.compiler", "core.files"]),
     ("core.net.tls", &["core.crypto.random", "core.net"]),
-    ("core.net.url", &["core.net.mime"]),
+    ("core.net.url", &["core.net.mime", "core.text"]),
     ("core.net.ws", &["core.net", "core.net.url"]),
+    ("core.perf", &["core.math"]),
     ("core.prelude", &["core"]),
     ("core.process", &["core.files", "core.sys", "core.text"]),
     ("core.reactive", &["core.mem"]),
     ("core.reactive.loadable", &["core.reactive"]),
     ("core.reflect", &["core.text"]),
     ("core.regex", &["core.text"]),
-    ("core.service", &["core.net", "core.tasks"]),
+    ("core.service", &["core.net", "core.tasks", "core.crypto", "core.encoding"]),
     ("core.sync", &["core.data", "core.tasks"]),
-    ("core.sys", &["core.files"]),
+    ("core.sys", &["core.files", "core.process", "core.text.parse"]),
     ("core.tasks", &["core.time"]),
     ("core.term", &["core.files"]),
-    ("core.testing", &["core.files", "core.math.random", "core.time"]),
+    ("core.testing", &["core.files", "core.math.random", "core.sys", "core.time"]),
     ("core.text", &["core"]),
     ("core.text.fmt", &["core.text"]),
     ("core.text.html", &["core.text"]),
@@ -316,6 +318,11 @@ fn helper_layer(module: &str, helper: &str) -> Option<RuntimeLayer> {
                 | "from_addr"
                 | "volatile_read"
                 | "volatile_write"
+                | "__string_data"
+                | "__string_byte_len"
+                | "__bytes_pack"
+                | "__bytes_free"
+                | "__bytes_unpack"
                 | "address_of"
                 | "pin"
                 | "Pin"
@@ -382,6 +389,7 @@ fn helper_layer(module: &str, helper: &str) -> Option<RuntimeLayer> {
         )
         .then_some(RuntimeLayer::Alloc),
         "core.crypto" => match helper {
+            n if n.starts_with("__jetc_") => Some(RuntimeLayer::Std),
             "__nominal__"
             | "Secret"
             | "SigningKey"

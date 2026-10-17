@@ -1,0 +1,25 @@
+# HAND-PORT tests/compute_extended.rs:393-449 portable_accelerator_vulkan_operations_match_cpu_across_tiers
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# Exact original availability early return: env-key presence INCLUDING empty is enforced; all later tiers only when probe is available. Batch-four stream/env-set/when-block grammar approved by TestLead1. No fake availability result.
+fixture: portable_accelerator_vulkan_operations_match_cpu_across_tiers.fixture
+env: NO_COLOR=1
+step probe: jet run main.jet
+exit: 0
+capture: probe_error = text stderr
+when env-set JET_REQUIRE_VULKAN: when probe.stdout = "vulkan:unavailable\n": step: fail "Vulkan production path was not available: {cap:probe_error}"
+when probe.stdout != "vulkan:unavailable\n"
+stdout: = portable_accelerator_vulkan_operations_match_cpu_across_tiers.stdout.expected
+step default: jet run main.jet
+exit: 0
+stdout: = portable_accelerator_vulkan_operations_match_cpu_across_tiers.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = portable_accelerator_vulkan_operations_match_cpu_across_tiers.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = portable_accelerator_vulkan_operations_match_cpu_across_tiers.stdout.expected
+stderr: == default
+end when

@@ -102,6 +102,14 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         text: KW_DEFER,
         class: HighlightClass::KeywordControl,
     },
+    HighlightToken {
+        text: KW_NEXT,
+        class: HighlightClass::KeywordControl,
+    },
+    HighlightToken {
+        text: KW_YIELD,
+        class: HighlightClass::KeywordControl,
+    },
     // D-CONC-SPAWN1=D: only `task` is reserved; qualified selectors remain
     // spellings of the same surface without reserving bare `all`/`race`/etc.
     HighlightToken {
@@ -209,6 +217,11 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
     // D-VERDICT-1308-1: retired `comptime` is teaching-only, not highlighted.
     HighlightToken {
         text: KW_DISTINCT,
+        class: HighlightClass::KeywordDeclaration,
+    },
+    // D-FACTDECL1: compiler-fact declarations.
+    HighlightToken {
+        text: KW_FACT,
         class: HighlightClass::KeywordDeclaration,
     },
     HighlightToken {
@@ -720,10 +733,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::Sigil,
     },
     HighlightToken {
-        text: SIGIL_COPY,
-        class: HighlightClass::Sigil,
-    },
-    HighlightToken {
         text: SIGIL_SPREAD,
         class: HighlightClass::Sigil,
     },
@@ -859,27 +868,6 @@ pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
         class: HighlightClass::Operator,
     },
     HighlightToken {
-        text: OP_AMP_EQ,
-        class: HighlightClass::Operator,
-    },
-    HighlightToken {
-        text: OP_PIPE_EQ,
-        class: HighlightClass::Operator,
-    },
-    HighlightToken {
-        text: OP_CARET_EQ,
-        class: HighlightClass::Operator,
-    },
-    // D-XORSPELL1=A: exclusive-or and its compound.
-    HighlightToken {
-        text: OP_TILDE_PIPE,
-        class: HighlightClass::Operator,
-    },
-    HighlightToken {
-        text: OP_TILDE_PIPE_EQ,
-        class: HighlightClass::Operator,
-    },
-    HighlightToken {
         text: OP_SHL_EQ,
         class: HighlightClass::Operator,
     },
@@ -999,7 +987,7 @@ pub fn render_vscode_generated_highlights() -> String {
                     &mut out,
                     &mut first,
                     class.textmate_scope(),
-                    "(?<![.A-Za-z0-9_])as(?=\\s+[A-Za-z_][A-Za-z0-9_]*)",
+                    "(?<![.A-Za-z0-9_])(as)(?=\\s+[A-Za-z_][A-Za-z0-9_]*)",
                 );
             }
             if !rest.is_empty() {
@@ -1308,6 +1296,7 @@ use super::{
     BUILTIN_ASSERT, BUILTIN_ASSERT_EQ, BUILTIN_CHANNEL, BUILTIN_INPUT, BUILTIN_PRINT,
     COMPTIME_MARK, CTX_BLOCK, DURATION_TYPE, KW_ADD, KW_ALIAS, KW_AS, KW_BREAK, KW_CHANGE,
     KW_CONC_TASK, KW_DEFER, KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN,
+    KW_FACT, KW_NEXT, KW_YIELD,
     KW_FN, KW_FREEZE, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MARKER, KW_MIGRATION,
     KW_MODULE, KW_POLICY, KW_PREP, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_REACTIVE, KW_REMOVE, KW_RENAME,
     KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG,
@@ -1315,14 +1304,14 @@ use super::{
     KW_VALIDATE_BLOCK, KW_VIA, KW_WRAP, LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, MARKER_PREFIX,
     FACT_ROOT_BUILD, FACT_ROOT_PACKAGE, FACT_ROOT_PHASE, FACT_ROOT_PROGRAM, META_QUERY_SOURCE,
     META_QUERY_TYPES,
-    OP_AMP_EQ, OP_AND, OP_CARET_EQ, OP_COMPARE, OP_EQ, OP_FALLBACK, OP_GE, OP_GT, OP_LE, OP_LT,
+    OP_AND, OP_COMPARE, OP_EQ, OP_FALLBACK, OP_GE, OP_GT, OP_LE, OP_LT,
     OP_MEMBER_SPREAD, OP_MINUS, OP_MINUS_EQ, OP_NAMED_CTOR, OP_NE, OP_NOT,
     OP_OPTIONAL_CHAIN, OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PERCENT_PERCENT, OP_PERCENT_PERCENT_EQ,
-    OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_RANGE, OP_RANGE_EXCLUSIVE, OP_SHL,
+    OP_PIPE, OP_PLUS, OP_PLUS_EQ, OP_RANGE, OP_RANGE_EXCLUSIVE, OP_SHL,
     OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_SLASH_PERCENT, OP_SLASH_PERCENT_EQ,
-    OP_STAR, OP_STAR_EQ, OP_TILDE_PIPE, OP_TILDE_PIPE_EQ, OP_TRY_SUFFIX, OP_UNIFIED_ARROW,
+    OP_STAR, OP_STAR_EQ, OP_TRY_SUFFIX, OP_UNIFIED_ARROW,
     PROTO_CLIENT, PROTO_SERVER, READINESS_AFTER, RULE_PREFIX, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
-    SIGIL_COPY, SIGIL_FENCE_CLOSE, SIGIL_FENCE_OPEN, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE,
+    SIGIL_FENCE_CLOSE, SIGIL_FENCE_OPEN, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE,
     TASK_ALL, TASK_ANY, TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN, TASK_FAILURE_PANICKED,
     TASK_GROUP, TASK_JOIN, TASK_RACE, TYPE_BITS, TYPE_BOOL, TYPE_BTREE_MAP, TYPE_BUDGET,
     TYPE_BUDGET_APPLIES, TYPE_BYTES, TYPE_CHAR, TYPE_COMPLEX, TYPE_COMPUTED, TYPE_CONDITION,

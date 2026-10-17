@@ -68,7 +68,7 @@ end
 PKG_RUBY_RESERVED :: prep { [String]{"open", "cancel", "close", "decode_response", "Session", "RubyError"} }
 
 // Bind the top-level one-argument methods of the Ruby script at `path`.
-pub fn pkg_ruby_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
+fn pkg_ruby_bind(path: String, source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> ForeignBindResult ForeignBindError! {
     language :: WorkerLanguage.Ruby
     pkg_worker_require_supported_host(language, pkg_binder_host_is_unix())
     pkg_binder_require_lib_name(lib)
@@ -124,16 +124,16 @@ fn pkg_ruby_render_jet(lib: String, functions: [String]) -> String Never! {
     loop name in functions {
         &out.push("    fn {name}(handle: Int, input: String, deadline_ms: Int) -> String = \"{abi}_invoke_{name}\"\n")
     }
-    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\npub struct Session {{ value: Int }}\n#Error\npub enum RubyError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\npub fn close(^session: Session) {{ abi.close(session.value) }}\n\npub fn open() -> Session RubyError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(RubyError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\npub fn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n")
+    &out.push("}}\nuse c.{abi} as abi\nuse core.encoding.json as json\n\nstruct Session {{ value: Int }}\n#Error\nenum RubyError {{ NotRunning Timeout Cancelled Protocol CommandFailed Limit }}\n\nimpl Session.Close {{\n    fn close(^self) {{ abi.close(self.value) }}\n}}\n\nfn close(^session: Session) {{ abi.close(session.value) }}\n\nfn open() -> Session RubyError! {{\n    handle :: abi.open()\n    if abi.take_error() != 0 {{ return Err(RubyError.NotRunning) }}\n    return Ok(Session{{ value: handle }})\n}}\n\nfn cancel(session: Session) {{ abi.cancel(session.value) }}\n\n")
     &out.push(pkg_render_decode_response("RubyError", DecoderProtocol.StandardEnvelope))
     loop name in functions {
-        &out.push("pub fn {name}(session: Session, input: DataTree, deadline_ms: Int) -> DataTree RubyError! {{\n    raw :: abi.{name}(session.value, json.to_string(input), deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
+        &out.push("pub fn {name}(session: Session, input: Dyn, deadline_ms: Int) -> Dyn RubyError! {{\n    payload :: json.to_string(input) ?? return Err(RubyError.Protocol)\n    raw :: abi.{name}(session.value, payload, deadline_ms)\n    code :: abi.take_error()\n    return decode_response(raw, code)\n}}\n\n")
     }
     out.join("")
 }
 
 // The generated surface for the binder registry's rendering probe.
-pub fn pkg_ruby_render_probe() -> String Never! {
+fn pkg_ruby_render_probe() -> String Never! {
     pkg_ruby_render_jet("registry", [String]{"transform"})
 }
 

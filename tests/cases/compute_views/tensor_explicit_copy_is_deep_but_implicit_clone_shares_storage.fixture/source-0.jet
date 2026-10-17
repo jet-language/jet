@@ -1,0 +1,18 @@
+
+use core.compute as compute
+
+struct Holder { value: Tensor }
+
+fn run() {
+    tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
+    copied :: tensor.copy()
+    copied_edit :: &copied[0..1]
+    copied_edit[0] = 9.0
+    print(compute.to_list(tensor))
+    print(compute.to_list(copied))
+
+    holder := Holder{ value: tensor.copy() }
+    aliased :: holder.value
+    aliased_edit :: &aliased[0..1]
+    aliased_edit[0] = 8.0
+}

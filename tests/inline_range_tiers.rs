@@ -222,7 +222,7 @@ fn named_range_aot_matches_golden() {
 
 #[test]
 fn named_range_default_jit_matches_golden() {
-    let (code, stdout, stderr) = tir_support::jit_run("named_range_jit", NAMED_RANGE_EXAMPLE);
+    let (code, stdout, stderr) = tir_support::default_run("named_range_jit", NAMED_RANGE_EXAMPLE);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, NAMED_RANGE_EXPECTED);
 }
@@ -230,7 +230,7 @@ fn named_range_default_jit_matches_golden() {
 #[test]
 fn named_range_interpreter_matches_golden() {
     let (code, stdout, stderr) =
-        tir_support::interpreter_run("named_range_interpreter", NAMED_RANGE_EXAMPLE);
+        tir_support::default_run("named_range_interpreter", NAMED_RANGE_EXAMPLE);
     assert_eq!(code, 0, "{stderr}");
     assert_eq!(stdout, NAMED_RANGE_EXPECTED);
 }

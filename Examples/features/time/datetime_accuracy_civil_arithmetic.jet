@@ -28,10 +28,8 @@ fn shown(id: String, op: String, meta: String) -> String {
     if op == "diff_days" {
         left :: parse_date(field(meta, "a"))
         right :: parse_date(field(meta, "b"))
-        if id.split_once("diff_b") == {
-            return "{left.diff_days(right)}"
-        }
-        return "{right.diff_days(left)}"
+        if id.contains("diff_b") -> return "{right.diff_days(left)}"
+        return "{left.diff_days(right)}"
     }
     if op == "diff_days_antisymmetry" {
         left :: parse_date(field(meta, "a"))

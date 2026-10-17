@@ -1,0 +1,66 @@
+# Port of tests/source_import.rs:620-672, foreign_oracle524-602, numeric_lines606-614.
+# Native foreign program wrappers are exactly the original differential oracles, not test drivers.
+# PENDING-GRAMMAR(batch-four probes/numeric-lines); runtime PENDING-SAME-HEAD.
+fixture: enterprise_importers_match_foreign_oracle_where_toolchain_present.fixture
+when probe javac --version + java --version: step: javac demo/Math.java demo/Oracle.java
+when probe javac --version + java --version: cwd: java/oracle
+when probe javac --version + java --version: exit: 0
+mkdir: java/python/app
+when probe javac --version + java --version: step java_oracle: java demo.Oracle
+when probe javac --version + java --version: cwd: java/oracle
+when probe javac --version + java --version: exit: 0
+when probe javac --version + java --version: step: jet import java java/app
+when probe javac --version + java --version: cwd: java
+when probe javac --version + java --version: exit: 0
+when probe javac --version + java --version: step: jet run jet/app/program.jet
+when probe javac --version + java --version: cwd: java
+when probe javac --version + java --version: exit: 0
+when probe javac --version + java --version: stdout: numeric-lines == java_oracle # original ordered Vec<f64> equality
+mkdir: csharp/python/app
+when probe dotnet --version: step csharp_oracle: dotnet run --project oracle.csproj
+when probe dotnet --version: cwd: csharp/oracle
+when probe dotnet --version: env: DOTNET_CLI_HOME={work}/csharp/oracle
+when probe dotnet --version: env: DOTNET_NOLOGO=1
+when probe dotnet --version: env: DOTNET_CLI_TELEMETRY_OPTOUT=1
+when probe dotnet --version: exit: 0
+when probe dotnet --version: step: jet import csharp csharp/app
+when probe dotnet --version: cwd: csharp
+when probe dotnet --version: exit: 0
+when probe dotnet --version: step: jet run jet/app/program.jet
+when probe dotnet --version: cwd: csharp
+when probe dotnet --version: exit: 0
+when probe dotnet --version: stdout: numeric-lines == csharp_oracle # original ordered Vec<f64> equality
+mkdir: ts/python/app
+when probe node --version: step ts_oracle: node --experimental-strip-types --no-warnings {work}/ts/oracle/oracle.ts
+when probe node --version: exit: 0
+when probe node --version: step: jet import ts ts/app
+when probe node --version: cwd: ts
+when probe node --version: exit: 0
+when probe node --version: step: jet run jet/app/program.jet
+when probe node --version: cwd: ts
+when probe node --version: exit: 0
+when probe node --version: stdout: numeric-lines == ts_oracle # original ordered Vec<f64> equality
+mkdir: js/python/app
+when probe node --version: step js_oracle: node {work}/js/oracle/oracle.js
+when probe node --version: exit: 0
+when probe node --version: step: jet import js js/app
+when probe node --version: cwd: js
+when probe node --version: exit: 0
+when probe node --version: step: jet run jet/app/program.jet
+when probe node --version: cwd: js
+when probe node --version: exit: 0
+when probe node --version: stdout: numeric-lines == js_oracle # original ordered Vec<f64> equality
+mkdir: go/python/app
+when probe go version: step go_oracle: go run {work}/go/oracle/oracle.go
+when probe go version: env: GOCACHE={work}/go/oracle/gocache
+when probe go version: env: GOPATH={work}/go/oracle/gopath
+when probe go version: env: GOTOOLCHAIN=local
+when probe go version: exit: 0
+when probe go version: step: jet import go go/app
+when probe go version: cwd: go
+when probe go version: exit: 0
+when probe go version: step: jet run jet/app/program.jet
+when probe go version: cwd: go
+when probe go version: exit: 0
+when probe go version: stdout: numeric-lines == go_oracle # original ordered Vec<f64> equality
+probes-any: node --version | go version | dotnet --version | java --version + javac --version # original !matched.is_empty(): any failed available oracle/import/run/equality also FAILS

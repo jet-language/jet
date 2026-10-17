@@ -1,0 +1,14 @@
+# tests/regex.rs::bad_pattern_is_a_recoverable_error_not_a_crash at tests/regex.rs:144; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# ORACLE-LITERAL: original expected bytes; PENDING-SAME-HEAD; no captures blessed.
+# RETIRED helper subclaims: Rust FFI option/crate/unsafe text and rustc compilation, not Jet runtime assertions.
+# PENDING-GRAMMAR(batch-four): indexed .line(n) exactly preserves Rust lines()[n], permits extra output lines.
+fixture: bad_pattern_is_a_recoverable_error_not_a_crash.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stdout.trim: = bad_pattern_is_a_recoverable_error_not_a_crash.out # original ed77c235f tests/regex.rs:164 out.trim() == caught

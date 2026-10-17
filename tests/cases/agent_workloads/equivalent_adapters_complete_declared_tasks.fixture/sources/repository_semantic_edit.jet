@@ -1,0 +1,27 @@
+use core.sys as env
+use core.files as fs
+use core.term as io
+use core.process as process
+use core.time as time
+
+#CLI
+struct WorkloadArgs {
+    input: String
+}
+
+fn run(args: WorkloadArgs) {
+    input :: args.input
+    jet :: env.get("JET_CORPUS_JET") ?? panic("missing Jet CLI")
+    project := "project"
+    fs.copy_dir(input, project) ?? panic("cannot copy input project")
+    object := "{project}/migration.codemod.json"
+    result :: process.cmd([String]{jet.copy(), "inspect", "codemod", "apply", object, "--yes"})
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .timeout(Duration.seconds(30) ?? panic("bad timeout"))
+        .run() ?? panic("cannot run semantic codemod")
+    if result.timed_out || result.code != 0 -> panic("codemod failed: {result.errors}")
+    source :: fs.read("{project}/project/examples/main.jet") ?? panic("cannot read edited source")
+    print(source.trim())
+    fs.remove_all(project) ?? panic("cannot clean edited project")
+}

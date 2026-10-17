@@ -19,42 +19,42 @@ fn stream_error(kind: DataErrorKind, reason: String, operation: String) -> DataE
 // success.  Provider-owned decoders must construct DataStream<T> before these
 // operations are called, so this module never coerces a String into T.
 
-pub fn from_items<T>(items: ^[T]) -> DataStream<T> Never! {
+fn from_items<T>(items: ^[T]) -> DataStream<T> Never! {
     DataStream<T>{items: items, index: 0, cancelled: false}
 }
 
-pub fn next<T>(stream: &DataStream<T>) -> T? DataError! {
+fn next<T>(stream: &DataStream<T>) -> T? DataError! {
     if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
     if stream.index < 0 -> stream.index = 0
     if stream.index >= stream.items.len() -> return Ok(None)
-    value :: ~stream.items[stream.index]
+    value :: stream.items[stream.index].copy()
     stream.index = stream.index + 1
     Ok(Val(value))
 }
 
-pub fn collect<T>(stream: &DataStream<T>) -> [T] DataError! {
+fn collect<T>(stream: &DataStream<T>) -> [T] DataError! {
     if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
     out := [T]{}
     if stream.index < 0 -> stream.index = 0
     loop stream.index < stream.items.len() {
-        &out.push(~stream.items[stream.index])
+        &out.push(stream.items[stream.index].copy())
         stream.index = stream.index + 1
     }
     Ok(out)
 }
 
-pub fn cancel<T>(stream: &DataStream<T>) Never! {
+fn cancel<T>(stream: &DataStream<T>) Never! {
     stream.cancelled = true
 }
 
-pub fn skip<T>(stream: &DataStream<T>, count: Int) Never! {
+fn skip<T>(stream: &DataStream<T>, count: Int) Never! {
     if stream.cancelled || count <= 0 -> return
     if stream.index < 0 -> stream.index = 0
     available := stream.items.len() - stream.index
     if count >= available -> stream.index = stream.items.len() else -> stream.index = stream.index + count
 }
 
-pub fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
+fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
     if stream.cancelled -> return Err(stream_error(DataErrorKind.State, "stream was cancelled", "data.stream"))
     if count <= 0 -> return Ok([T]{})
     out := [T]{}
@@ -63,7 +63,7 @@ pub fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
     available := stream.items.len() - stream.index
     if remaining > available -> remaining = available
     loop remaining > 0 {
-        &out.push(~stream.items[stream.index])
+        &out.push(stream.items[stream.index].copy())
         stream.index = stream.index + 1
         remaining = remaining - 1
     }
@@ -71,7 +71,7 @@ pub fn take_n<T>(stream: &DataStream<T>, count: Int) -> [T] DataError! {
 }
 
 
-pub fn len<T>(stream: DataStream<T>) -> Int Never! {
+fn len<T>(stream: DataStream<T>) -> Int Never! {
     if stream.cancelled -> return 0
     if stream.index < 0 -> return stream.items.len()
     n := stream.items.len() - stream.index
@@ -79,4 +79,4 @@ pub fn len<T>(stream: DataStream<T>) -> Int Never! {
     n
 }
 
-pub fn is_empty<T>(stream: DataStream<T>) -> Bool Never! { len<T>(stream) == 0 }
+fn is_empty<T>(stream: DataStream<T>) -> Bool Never! { len<T>(stream) == 0 }

@@ -1,0 +1,17 @@
+# Port of tests/os_native.rs:677-693 and helper510-674 (default-failure). Source bytes verbatim.
+# SPLIT pty-termios-observation: full baseline/raw/secret-mode/restore claims ledger-only, not replaced by transcript checks.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+requires: os:unix
+requires: os-name:linux|android|macos|ios|freebsd|openbsd|netbsd
+refused: pty
+fixture: termios_pty_mode_and_restore_are_hostile_proven_across_native_tiers.default-failure.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+session child raw: jet run --quiet main.jet
+pty: true
+recv child until ~ "ready" within 60s
+pty-send: "x" after 0ms
+close child
+exit: nonzero
+stdout: ~ "injected terminal failure" # original complete PTY transcript predicate

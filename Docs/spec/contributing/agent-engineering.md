@@ -34,9 +34,29 @@ consumer, including expected output and harness lists. Preserve the program
 and its expected meaning instead of updating snapshots to hide a regression.
 Follow the [example procedure](examples.md).
 
+Fixtures that compile Prelude fragments directly must include their canonical
+dependency closure. For example, the scheduler's native callback boundary comes
+from `Prelude/Core/NativeTaskBody.rs`; missing task-body declarations are repaired
+by including that shared kernel, not by inventing fixture-only task flags or
+weakening the scheduler assertions.
+
 An unused declaration is not automatically dead code. Trace callers, generated
 uses, and approved Tower scope before deleting it. Conversely, a historical
 plan is not a reason to retain machinery that has no caller or contract.
+
+For D-COPY-WORD1 source migrations, use
+`node Tools/agent/migrate-copy-sigil.mjs --check` to list retired prefix-copy
+sites and package counts, or `--write` to migrate clean `.jet` files to
+`operand.copy()`. The token-aware pass preserves strings, raw strings,
+characters, comments, `prep` templates, other tilde operators, and deliberate
+E0941 diagnostic fixtures. Run `--self-test` for its lexical and operand-binding
+cases. Dirty files and concurrent-owner reservations are left untouched and
+listed by owner in `~/.cache/jet-dev/scratch/CopySigilMigration/dirty-files.tsv`;
+release an owned file only after committing its unrelated edits. Update source
+generators as well, so regeneration cannot reintroduce the retired sigil.
+Jet `.template` inputs are included in the same traversal. File owners can use
+`--owner-write /absolute/owned/file.jet [...]` after explicitly authorizing
+their own dirty-file edits; this mode rejects directory-wide writes.
 
 ## Keep verification honest
 

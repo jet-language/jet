@@ -1,0 +1,17 @@
+# tests/cli.rs::direct_launch_shebang_runs_executable_file
+# Original fixtures and exact assertions; PENDING-SAME-HEAD, runtime UNRUN.
+env: NO_COLOR=1
+requires: os:unix
+copy: {root}/Examples/features/cli/direct_launch.jet direct_launch.jet
+chmod: direct_launch.jet 755
+mkdir: bin
+symlink: {jet} bin/jet
+step direct: {work}/direct_launch.jet
+env: PATH={work}/bin:{env:PATH}
+exit: 0
+step via_jet: {jet} {work}/direct_launch.jet
+env: PATH={work}/bin:{env:PATH}
+exit: 0
+exit: == direct
+stdout: == direct
+stderr: == direct

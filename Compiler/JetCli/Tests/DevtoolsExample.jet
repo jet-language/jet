@@ -1,0 +1,16 @@
+// Actual Rust new-example source/output layout and accepted path grammar.
+fn run() Never! {
+ example :: jet_cli_devtools_example("topic/name") ?? panic("topic/name")
+ if example.path != "Examples/features/topic/name.jet" || example.expected_path != "Examples/features/expected/topic/name.out" -> panic("canonical golden paths")
+ expected_source :: "// TODO: describe Examples/features/topic/name.jet\nfn run() {{\n    print(\"scaffold: topic/name\")\n}}\n"
+ if example.source != expected_source || example.expected != "scaffold: topic/name\n" -> panic("exact Rust generated file bytes")
+ dotted :: jet_cli_devtools_example("topic/name.jet") ?? panic("extensions are not stripped")
+ if dotted.path != "Examples/features/topic/name.jet.jet" || dotted.expected != "scaffold: topic/name.jet\n" -> panic("Rust accepts dotted names verbatim")
+ nested :: jet_cli_devtools_example("topic/nested/name") ?? panic("split only first slash")
+ if nested.path != "Examples/features/topic/nested/name.jet" || nested.directory != "Examples/features/topic" -> panic("only topic directory is created")
+ absolute :: jet_cli_devtools_example("topic//tmp/example") ?? panic("Rust join semantics")
+ if absolute.path != "/tmp/example.jet" || absolute.expected_path != "/tmp/example.out" -> panic("absolute second component resets the path")
+ loop invalid in ([String]{"", "name", "/name", "topic/"}) {
+ if jet_cli_devtools_example(invalid) == .Ok(_) -> panic("requires two nonempty components")
+ }
+}

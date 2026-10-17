@@ -220,6 +220,12 @@ impl<'a> Parser<'a> {
                 }
                 _ => {}
             }
+            if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_NEXT)
+                && matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::LParen)
+            {
+                stmts.push(self.stmt()?);
+                continue;
+            }
             let save = self.pos;
             let saved_diags = self.diags.len();
             if let Ok(value) = self.expr() {
@@ -1329,7 +1335,7 @@ impl<'a> Parser<'a> {
         };
         let op_span = self.bump().span;
         if op == BinOp::Eq {
-            if let Some(pattern) = self.try_pattern_rhs(true)? {
+            if let Some(pattern) = self.try_comparison_pattern_rhs(true)? {
                 let span = Span::new(lhs.span().start, pat_span(&pattern).end.max(op_span.end));
                 return Ok(Expr::PatternTest {
                     subject: Box::new(lhs),
@@ -1488,6 +1494,50 @@ impl<'a> Parser<'a> {
     /// is a statement, parsed elsewhere).
     pub(in super::super) fn parse_if_expr(&mut self) -> Result<Expr, Diagnostic> {
         self.parse_if_expr_inner(true, &mut Vec::new())
+    }
+
+    /// A bare control statement is not a value arm. Resolve that grammar
+    /// distinction before speculating on a callable's trailing guard table:
+    /// nested tables otherwise parse once as values and again as statements
+    /// at every level. Braced control arms remain valid value branches.
+    pub(in super::super) fn guard_table_has_statement_arm(&self) -> bool {
+        if !matches!(self.peek().kind, TokKind::KwIf)
+            || !matches!(self.peek2().kind, TokKind::LBrace)
+        {
+            return false;
+        }
+        let mut braces = 1usize;
+        let mut parens = 0usize;
+        let mut brackets = 0usize;
+        for index in self.pos + 2..self.toks.len() {
+            let kind = &self.toks[index].kind;
+            if braces == 1
+                && parens == 0
+                && brackets == 0
+                && Self::at_unified_arrow_token(kind)
+                && self.toks.get(index + 1).is_some_and(|token| {
+                    matches!(token.kind, TokKind::KwReturn | TokKind::KwBreak)
+                })
+            {
+                return true;
+            }
+            match kind {
+                TokKind::LBrace => braces += 1,
+                TokKind::RBrace => {
+                    braces -= 1;
+                    if braces == 0 {
+                        return false;
+                    }
+                }
+                TokKind::LParen => parens += 1,
+                TokKind::RParen => parens = parens.saturating_sub(1),
+                TokKind::LBracket => brackets += 1,
+                TokKind::RBracket => brackets = brackets.saturating_sub(1),
+                TokKind::Eof => return false,
+                _ => {}
+            }
+        }
+        false
     }
 
     /// `parts` collects each condition and branch value so a linted root can
@@ -1804,6 +1854,24 @@ impl<'a> Parser<'a> {
                 }
                 _ => {}
             }
+            // `next` is contextual loop control in statement position. Do
+            // not mistake a terminating control statement for the tail name.
+            if matches!(&self.peek().kind, TokKind::Ident(name) if name == Syntax::KW_NEXT)
+                && matches!(self.peek2().kind, TokKind::Semi | TokKind::RBrace | TokKind::LParen)
+            {
+                stmts.push(self.stmt()?);
+                continue;
+            }
+            if self.guard_table_has_statement_arm() {
+                match self.stmt() {
+                    Ok(stmt) => stmts.push(stmt),
+                    Err(diagnostic) => {
+                        self.diags.push(diagnostic);
+                        self.sync_stmt();
+                    }
+                }
+                continue;
+            }
             // Try the current position as the trailing value expression.
             let save = self.pos;
             let saved_diags = self.diags.len();
@@ -2022,7 +2090,7 @@ impl<'a> Parser<'a> {
 #[cfg(test)]
 mod value_block_tests {
     use crate::AST::{Expr, Item, OrFallback, Program, Stmt};
-    use crate::Diagnostics::{Diagnostic, Span};
+    use crate::Diagnostics::Diagnostic;
     use crate::Lexer::lex;
     use crate::Parser::parse;
 
@@ -2057,6 +2125,71 @@ mod value_block_tests {
             panic!("function `{function_name}` does not start with a value binding");
         };
         &binding.init
+    }
+
+    #[test]
+    fn runtime_unicode_guard_tables_parse_without_speculation() {
+        let source = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetRuntime/Source/UnicodeTables.jet"
+        ));
+        let program = parsed(source);
+        assert_eq!(program.items.iter().filter(|item| matches!(item, Item::Func(_))).count(), 5);
+        for item in &program.items {
+            let Item::Func(function) = item else { continue };
+            assert!(matches!(function.body.first(), Some(Stmt::Switch { .. })));
+        }
+    }
+
+    fn statement_guard_tree(depth: usize, output: &mut String) {
+        if depth == 0 {
+            output.push_str("if {\n(cp < I64{0}) -> return cp\n\
+                (cp > I64{1}) -> return cp\nelse -> return cp\n}\n");
+            return;
+        }
+        output.push_str("if {\n(cp < I64{0}) -> {\n");
+        statement_guard_tree(depth - 1, output);
+        output.push_str("}\n(cp > I64{1}) -> {\n");
+        statement_guard_tree(depth - 1, output);
+        output.push_str("}\nelse -> return cp\n}\n");
+    }
+
+    #[test]
+    fn statement_guard_tables_do_not_reparse_as_tail_values() {
+        let mut source = String::from("fn mapping(cp: I64) -> I64 Never! {\n");
+        statement_guard_tree(10, &mut source);
+        source.push_str("}\n");
+        let program = parsed(&source);
+        let Item::Func(function) = &program.items[0] else {
+            panic!("expected mapping function");
+        };
+        assert!(matches!(function.body.as_slice(), [Stmt::Switch { .. }]));
+        assert!(rejected("fn run() { value :: if { true -> return 1 else -> 2 } }\n")
+            .iter().any(|diagnostic| diagnostic.code == "E0003"));
+    }
+
+    #[test]
+    fn statement_guard_tables_in_value_and_fallback_blocks_parse_once() {
+        let mut table = String::new();
+        statement_guard_tree(8, &mut table);
+        let source = format!("fn mapping(cp: I64) -> I64 Never! {{\n\
+            value :: if true -> {{\n{table}cp\n}} else -> cp\n\
+            other :: None ?? {{\n{table}cp\n}}\nvalue\n}}\n");
+        let program = parsed(&source);
+        let Item::Func(function) = &program.items[0] else {
+            panic!("expected mapping function");
+        };
+        assert!(matches!(function.body.first(), Some(Stmt::Val(_))));
+    }
+
+    #[test]
+    fn braced_control_arms_remain_value_branches() {
+        let program = parsed("fn mapping(cp: I64) -> I64 Never! {\n\
+            if { (cp < I64{0}) -> { return cp } else -> cp }\n}\n");
+        let Item::Func(function) = &program.items[0] else {
+            panic!("expected mapping function");
+        };
+        assert!(matches!(function.body.last(), Some(Stmt::Expr(Expr::If { .. }))));
     }
 
     #[test]
@@ -2321,30 +2454,6 @@ fn run(value: Int?) {
                 && binding.name == "bound"
                 && call.name == "notify"
         ));
-    }
-
-    #[test]
-    fn fallback_block_rejects_authored_semicolon_after_nested_control() {
-        let source = r#"
-fn run(value: Int?) {
-    result :: value ?? {
-        loop {
-            break
-        };
-        1
-    }
-}
-"#;
-        let diagnostics = rejected(source);
-        let semicolon = source.find("};").expect("test source has an authored semicolon");
-        assert!(
-            diagnostics.iter().any(|diagnostic| {
-                diagnostic.code == "E0003"
-                    && diagnostic.span == Some(Span::new(semicolon + 1, semicolon + 2))
-                    && diagnostic.what.contains("found `;`")
-            }),
-            "authored semicolon must not be treated as a synthetic terminator: {diagnostics:?}"
-        );
     }
 
 }

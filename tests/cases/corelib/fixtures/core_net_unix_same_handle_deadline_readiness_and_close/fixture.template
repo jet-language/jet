@@ -1,0 +1,25 @@
+
+use core.net as net
+
+fn run() {
+    listener :: net.unix_listen("{work}/same-handle.sock") ?? panic("listen")
+    budget :: Duration.seconds(1) ?? panic("budget")
+    client := net.unix_connect("{work}/same-handle.sock", deadline: budget) ?? panic("connect")
+    server := &listener.accept(deadline: budget) ?? panic("accept")
+    client.set_timeout(budget) ?? panic("persistent timeout")
+    both :: NetReadyInterest.ReadWrite
+    observed :: client.ready(both, deadline: budget) ?? panic("read-write readiness")
+    print(net.ready_readable(observed))
+    print(net.ready_writable(observed))
+    interest :: NetReadyInterest.Read
+    expired :: Duration.milliseconds(0) ?? panic("expired")
+    if client.ready(interest, deadline: expired) == {
+        .Ok(_) -> panic("expired readiness succeeded")
+        .Err(error) -> print(net.error_operation(error))
+    }
+    payload :: [U8]{ 7 }
+    client.write_all(payload, deadline: budget) ?? panic("write")
+    print(server.read(1, deadline: budget) ?? panic("read"))
+    client.close() ?? panic("close")
+    client.close() ?? panic("second close")
+}

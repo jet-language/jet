@@ -28,10 +28,16 @@ mod program_imports;
 pub use crate::Names::{mangle, mangle_generated, mangle_path, member_name, NameLedger};
 pub use program_imports::{
     core_import_maps, core_list_path, core_list_prefix, member_import_local, target_profile_path,
-    rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreListPath, ErrorConvDef,
+    rewrite_core_item_call, walk_imports, AppliedRuleApplication, CoreIdentifierDemand, CoreListPath, ErrorConvDef,
     FencedNames, FencedStatement, ForeignImportError, ForeignLanguage, ForeignNamespace,
     ImportBinding, ImportDecl, ImportKind, InlineVersion, LoadedModule, MigrationDecl, MigrationOp,
     PackageGuarantees, Program, ProgramBundle, TryConvert,
+};
+
+#[path = "AST/checked_nominals.rs"]
+mod checked_nominals;
+pub use checked_nominals::{
+    MirFragmentCoreSourceModule, MirFragmentCoreSourceSignature, MirFragmentNominalFacts,
 };
 
 #[path = "AST/items.rs"]
@@ -49,7 +55,7 @@ pub use items::{
     KernelMode, KernelMarker, KernelProof, Marker, MarkerDecl, MarkerDeclParam, MaturityTag,
     ModuleAliasDef, ModuleArg, ModuleDecl, ModuleInstanceApplication, ModuleInstanceIdentity,
     Namespace, OperatorMarker, OptionEntry, Param, ParamZone, PerfLit, PrepParam, ProfileLit, ProtocolDecl,
-    ProtocolDirection, ProtocolMessage, QuantityKind, SerdeWireShape, ServiceEntry, SourceDecl,
+    ProtocolDirection, ProtocolMessage, QuantityKind, ReceiverFootprint, SerdeWireShape, ServiceEntry, SourceDecl,
     StateDecl, StateTransition, StructDef, StructLayout, SystemField, SystemFieldValue, SystemLit,
     TagDef, TestDef, TraitDef, TraitImplBlock, TraitMethodSig, TypeAliasDef, TypeParam,
     UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance,
@@ -67,8 +73,8 @@ pub use devtools::{
 mod patterns;
 pub use patterns::{
     BinEndian, BinMatchPart, BinSpec, BindName, BindPattern, ConstAttr, ConstDef, EnumLitArg,
-    OrFallback, OutputCallableAuthority, OutputKind, PatSlot, Pattern, ResolvedOutput,
-    RustConstKind, StrMatchPart, StructPatField,
+    ListPatRest, MapPatEntry, OrFallback, OutputCallableAuthority, OutputKind, PatSlot, Pattern,
+    ResolvedOutput, RustConstKind, StrMatchPart, StructPatField,
 };
 
 #[path = "AST/statements.rs"]
@@ -76,7 +82,7 @@ mod statements;
 pub use statements::{
     is_subjectless_guard, noelse_terminated, readiness_head, switched_off,
     uses_classic_if_spelling, AutoVectorizationFacts, ElseBranch, IfStmt, ReadinessHead, Stmt,
-    SwitchArm,
+    SwitchArm, WalkNode,
 };
 
 #[path = "AST/lvalues.rs"]

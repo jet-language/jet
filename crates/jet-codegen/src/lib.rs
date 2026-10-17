@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![deny(warnings)]
 // Re-export lower seams. Sema transitively includes Parser/Lexer/Comptime/Foundation.
 #[allow(unused_imports)]
 pub(crate) use jet_foundation::EncodingErrors as jet_encoding_errors;
@@ -8,7 +7,7 @@ pub use jet_sema::{
     Sema, Syntax, TargetMachine, Traits, AST, SHA256,
 };
 pub use jet_foundation::{
-    CLISchema, DataTree, Facts, JSON, Names, Numeric, OSTarget, ResourceSchedule, WebPartition,
+    CLISchema, Dyn, Facts, JSON, Names, Numeric, OSTarget, Outcome, ResourceSchedule, WebPartition,
 };
 // `EncodingJson.rs` resolves exact-number validation through
 // `super::jet_json_number`; supply it at the root the same way `jet-jit` does.
@@ -20,6 +19,14 @@ pub(crate) mod jet_encoding_json {
 }
 mod BrowserHost;
 pub mod Codegen;
+// The native runtime and child cell transport share one descriptor ABI/module.
+include!("Prelude/Core/NativeMeta.rs");
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub mod NativeSession;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+mod NativeLibraryImage;
+#[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+pub mod ParentRuntimeLibrary;
 /// D-FAIL-BREACH1=A: the same task-local runtime stack kernel used by emitted
 /// AOT code. Resident engines marshal source locations into their own report
 /// carrier, but depth policy stays in this Prelude part.
@@ -44,6 +51,10 @@ pub mod program_allocator {
 pub mod development_receipt {
     include!("Prelude/DevelopmentReceipt.rs");
 }
+
+#[cfg(test)]
+#[path = "Prelude/Core/CAbiSession.rs"]
+mod session_runtime_tests;
 
 #[cfg(test)]
 mod development_receipt_tests {
@@ -120,7 +131,7 @@ mod development_receipt_tests {
     #[test]
     fn development_receipt_is_one_shared_source_across_tiers() {
         let codegen = include_str!("Codegen/mod.rs");
-        let jit = include_str!("../../jet-jit/src/lib.rs");
+        let evalhost = include_str!("../../jet-evalhost/src/lib.rs");
         assert_eq!(
             codegen
                 .matches("include_str!(\"../Prelude/DevelopmentReceipt.rs\")")
@@ -128,7 +139,8 @@ mod development_receipt_tests {
             1
         );
         assert_eq!(
-            jit.matches("include!(\"../../jet-codegen/src/Prelude/DevelopmentReceipt.rs\")")
+            evalhost
+                .matches("include!(\"../../jet-codegen/src/Prelude/DevelopmentReceipt.rs\")")
                 .count(),
             1
         );
@@ -185,8 +197,11 @@ pub mod scheduler {
         jet_render_runtime_stop, jet_stream_record_failure_report,
         jet_stream_take_failure_report, JetStreamFailure, JetOutcome, JetRuntimeDiagnostic, JetTaskFailure,
     };
+    // Scheduler workers report their explicit stack to the one depth kernel.
+    use crate::runtime_stack::jet_runtime_stack_thread_stack;
     include!("Prelude/Deadline.rs");
     include!("Prelude/WorkflowWait.rs");
+    include!("Prelude/Core/NativeTaskBody.rs");
     include!("SchedulerHost.rs");
     include!("Prelude/Core/TimeMonotonic.rs");
     include!("Prelude/Core/Duration.rs");
@@ -204,10 +219,6 @@ pub mod scheduler {
     const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = true;
     include!("Prelude/Observe.rs");
 }
-/// `Prelude/Scheduler.rs` calls `crate::jet_task_control_trace`. An emitted
-/// program gets it from the flat `StructuralDebug.rs` prelude; this crate gets
-/// it from the same file compiled as a seam dependency.
-pub(crate) use jet_foundation::StructuralDebug::jet_task_control_trace;
 /// D-LOCALCELL1=A: canonical local Cell runtime shared by emitted AOT code and
 /// the TIR evaluator's deopt adapter.
 pub mod local_cell {

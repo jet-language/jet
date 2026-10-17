@@ -75,39 +75,6 @@ impl Default for DevSink {
     }
 }
 
-/// D-DBG3: a source-level debugger driver. The interpreter calls
-/// [`DebugHook::at_stmt`] before executing each statement, passing the
-/// statement's source span, the current call depth, and the current local
-/// scope. The driver decides whether to pause (and run its `(jet)` prompt);
-/// it never touches generated Rust — every value it shows comes through the
-/// interpreter's own `CtValue::jet_show()` path (I2). `None` outside `jet debug`.
-pub trait DebugHook {
-    /// Called before a statement runs. `func` is the executing function name,
-    /// `depth` the user-function call depth (0 = `main`), `scope` the live
-    /// locals. The driver may print, prompt, and block; it returns when the
-    /// user resumes. An `Err` aborts the run (e.g. the user typed `quit`).
-    fn at_stmt(
-        &mut self,
-        func: &str,
-        depth: usize,
-        span: Span,
-        scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic>;
-
-    /// Called after a statement completes. A recorder uses this one bounded
-    /// receipt point to retain the locals produced by the act; ordinary
-    /// debugger hooks do nothing here.
-    fn after_stmt(
-        &mut self,
-        _func: &str,
-        _depth: usize,
-        _span: Span,
-        _scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        Ok(())
-    }
-}
-
 /// Concrete ambient operation reached by a REPL turn after arguments have
 /// been evaluated but before host state is touched (D-REPLCOREEFFECT1=A).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -169,26 +136,14 @@ pub(super) struct Interp<'a> {
     pub(super) sink: Option<&'a mut DevSink>,
     /// Checked nominal identities and imported struct rows for canonical
     /// comptime fragments. `None` is used outside an active module scope.
-    pub(super) checked_nominals: Option<super::MirBridge::MirFragmentNominalFacts>,
+    pub(super) checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
     /// D-META-EFFECT1: module alias → Core module path (e.g. `"math"` → `"core.math"`).
     /// Enables the comptime interpreter to evaluate effect-approved Core calls.
     /// Empty for contexts that have no `use` declarations (e.g. module-level consts).
     pub(super) core_imports: &'a HashMap<String, String>,
-    /// D-DBG3: `Some` under `jet debug` — the source-level debugger driver,
-    /// notified before every statement. `None` for every non-debug path
-    /// (comptime, `jet dev`, `jet repl`), so those keep their exact behavior.
-    pub(super) debugger: Option<&'a mut dyn DebugHook>,
     /// Explicit execution provenance for canonical MIR fragments. Runtime
     /// producers set this independently of comptime `#Impure` gate depth.
     pub(super) runtime_execution: bool,
-    /// D-DBG3: user-function call depth (0 = `main`/top level), threaded so the
-    /// debugger can implement `next` (step over a call) and `finish` (run to the
-    /// caller). Incremented around a user-function body in `eval_call`.
-    pub(super) depth: usize,
-    /// D-DBG3: the name of the function whose body is currently executing, for
-    /// the breakpoint banner (`in main()`). Top level / `main` until a call
-    /// swaps it.
-    pub(super) cur_func: String,
     /// D-CTEFFECT1: execution context for active `#Impure("reason") { … }`
     /// blocks. The source statement is the writer; sema's GateLedger reads
     /// that same statement. This depth only marshals the checked context to
@@ -422,13 +377,8 @@ impl<'a> Interp<'a> {
             impure_depth,
             runtime_execution: self.runtime_execution,
             embed_inputs,
-            debugger: self.debugger.take(),
-            debug_function: self.cur_func.clone(),
-            debug_depth: self.depth,
         };
-        let result = super::MirBridge::eval_block(&mut req);
-        self.debugger = req.debugger;
-        match result? {
+        match super::MirBridge::eval_block(&mut req)? {
             super::MirBridge::StmtOutcome::Done(new_scope) => {
                 *scope = new_scope;
                 Ok(Flow::Normal)
@@ -534,13 +484,7 @@ impl<'a> Interp<'a> {
         stmt: &Stmt,
         scope: &mut HashMap<String, CtValue>,
     ) -> Result<Flow, Diagnostic> {
-        if let Some(dbg) = self.debugger.take() {
-            let span = stmt.span();
-            let res = dbg.at_stmt(&self.cur_func, self.depth, span, scope);
-            self.debugger = Some(dbg);
-            res?;
-        }
-        let result = if self.repl_mode {
+        if self.repl_mode {
             if let Stmt::AuthorityScope {
                 caps,
                 binding,
@@ -573,14 +517,7 @@ impl<'a> Interp<'a> {
             }
         } else {
             self.exec_block(std::slice::from_ref(stmt), scope)
-        };
-        if let Some(dbg) = self.debugger.take() {
-            let span = stmt.span();
-            let after = dbg.after_stmt(&self.cur_func, self.depth, span, scope);
-            self.debugger = Some(dbg);
-            after?;
         }
-        result
     }
 
     /// Canonical evaluator entry for expressions (#777): lower to TIR, then eval.
@@ -646,7 +583,9 @@ impl<'a> Interp<'a> {
             embed_inputs,
             mutated: Some(&mut mutated),
         };
-        let result = super::MirBridge::eval_expr(&mut req);
+        let result = super::ForeignMemory::with_physical_globals(
+            self.globals, Some(&*scope), || super::MirBridge::eval_expr(&mut req),
+        );
         drop(req);
         // Keep whatever the expression changed about bindings this scope owns.
         // Anything else in `mutated` came from `globals` and is not ours.

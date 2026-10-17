@@ -1,0 +1,14 @@
+
+use core.encoding.json as json
+
+#[PublishedSchema, Codable]
+struct Config { port: Int  host: String }
+
+migration Config {
+    add host: String = "localhost"
+}
+
+fn run() {
+    value :: json.decode<Config>("{{\"port\":7}}") ?? panic("bad")
+    print("{value.port} {value.host}")
+}

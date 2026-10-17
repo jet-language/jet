@@ -1,0 +1,375 @@
+// Collection callback adapters. The parallel range scheduler is a raw runtime
+// leaf; all typed storage, ownership and result propagation stays in Jet.
+use jet_foundation.[MIRCallArg, MIRInstruction, MIROperation, MIRPreludeCall, MIRProgram, MIRTupleField, MIRType, MIRTypeKind, MIRValueID, mir_type_from_kind]
+
+struct LowerParallelShape {
+    input: MIRType
+    output: MIRType
+}
+
+fn lower_parallel_shape(ty: MIRType) -> LowerParallelShape? Never! {
+    if ty.kind == {
+        .Fn(signature) -> {
+            if signature.params.len() != 1 -> return None
+            output :: signature.ret ?? return None
+            Val(LowerParallelShape{input: signature.params[0], output: output})
+        }
+        .SendFn(params, ret, _) -> {
+            if params.len() != 1 -> return None
+            output :: ret ?? return None
+            Val(LowerParallelShape{input: params[0], output: output})
+        }
+        else -> None
+    }
+}
+
+// The caller lends the closure and input buffer through the joined range
+// walk. Output slots are disjoint, written once, and become owned afterwards.
+// env: closure at 0, input data at 8, output data at 16.
+fn lower_parallel_walk(p: MIRProgram, m: &LowerModule, f: &LowerFunction, closure: LIRValueID, closure_ty: MIRType, list: LIRValueID, output: LIRValueID, limit: LIRValueID) Never! {
+    env :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: env, size: 24, align: 8})
+    lower_emit(&f, LIRInst.Store{base: env, offset: 0, value: closure})
+    data :: lower_list_data(&f, list)
+    lower_emit(&f, LIRInst.Store{base: env, offset: 8, value: data})
+    lower_emit(&f, LIRInst.Store{base: env, offset: 16, value: output})
+    invoke :: lower_lazy_helper_address(&m, &f, "para.map.invoke", closure_ty)
+    length :: lower_list_word(&f, list, 0)
+    lower_call_runtime(&m, &f, "jet_rt_native_para_walk", [LIRValueID]{length, limit, env, invoke}, None)
+}
+
+fn lower_helper_parallel_map(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    shape :: lower_parallel_shape(glue.ty) ?? panic("parallel callback has a checked single-input type")
+    f := lower_helper_start(&m, glue, [LIRLayout]{lir_layout_pointer(), lir_layout_word(), lir_layout_word()}, None)
+    env :: f.open_params[0].copy()
+    begin :: f.open_params[1].copy()
+    end :: f.open_params[2].copy()
+    closure :: lower_pointer(&f)
+    input :: lower_pointer(&f)
+    output :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: closure, base: env, offset: 0})
+    lower_emit(&f, LIRInst.Load{dst: input, base: env, offset: 8})
+    lower_emit(&f, LIRInst.Load{dst: output, base: env, offset: 16})
+    head :: lower_new_block(&f)
+    body :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{begin})})
+    index :: lower_word(&f)
+    lower_start(&f, head, [LIRValueID]{index})
+    more :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Compare{dst: more, condition: LIRCondition.Lt, left: index, right: end})
+    lower_seal(&f, LIRTerminator.Branch{condition: more, then_target: lower_target(body, [LIRValueID]{}), else_target: lower_target(done, [LIRValueID]{})})
+    lower_start(&f, body, [LIRValueID]{})
+    source :: lower_list_address(&f, input, index, lower_list_stride(p, shape.input))
+    target :: lower_list_address(&f, output, index, lower_list_stride(p, shape.output))
+    item :: lower_read_at(p, &f, source, 0, shape.input) ?? panic("parallel input has storage")
+    value :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, shape.output) ?? panic("parallel output has storage")
+    // List Bool slots cross raw word-carrier boundaries; keep their padding
+    // deterministic even though the Bool itself is a one-byte value.
+    if shape.output.kind == .Bool {
+        zero :: lower_const(&f, 0)
+        lower_emit(&f, LIRInst.Store{base: target, offset: 0, value: zero})
+    }
+    lower_write_at(p, &f, target, 0, value, shape.output)
+    one :: lower_const(&f, 1)
+    next_index :: lower_word(&f)
+    lower_emit(&f, LIRInst.Binary{dst: next_index, op: LIRBinaryOp.Add, left: index, right: one})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(head, [LIRValueID]{next_index})})
+    lower_start(&f, done, [LIRValueID]{})
+    lower_seal(&f, LIRTerminator.Return{value: None})
+    lir_builder_finish(f.builder)
+}
+
+fn lower_parallel_method(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], row: MIRPreludeCall) -> Bool Never! {
+    symbol :: lower_runtime_symbol(row)
+    if symbol == "jet_list_para_filter" || symbol == "jet_list_para_partition" {
+        lower_parallel_flags(p, c, &m, &f, instruction, receiver, args, symbol == "jet_list_para_partition")
+        return true
+    }
+    if symbol == "jet_list_para_fold" {
+        lower_parallel_fold(p, c, &m, &f, instruction, receiver, args)
+        return true
+    }
+    if symbol != "jet_list_para_map" && symbol != "jet_list_try_map" -> return false
+    if symbol == "jet_list_try_map" {
+        lower_closure_try_map(p, c, &m, &f, instruction, receiver, args)
+        return true
+    }
+    if args.len() != 2 {
+        lower_fail(&m, &f, "para_map requires its checked closure and worker limit")
+        return true
+    }
+    closure_arg :: args[0]
+    closure_ty :: lower_value_type(c, closure_arg.value) ?? {
+        lower_fail(&m, &f, "para_map closure has no checked type")
+        return true
+    }
+    shape :: lower_parallel_shape(closure_ty) ?? {
+        lower_fail(&m, &f, "para_map closure has no checked single-input type")
+        return true
+    }
+    if lower_repr(p, shape.input) == .Absent || lower_repr(p, shape.output) == .Absent {
+        lower_fail(&m, &f, "para_map requires stored input and output elements")
+        return true
+    }
+    if lower_task_stop_body(p, c, m, closure_arg.value) {
+        lower_fail(&m, &f, "parallel callback with a checked stop across native frames is not lowered at O0 yet")
+        return true
+    }
+    list_ty :: lower_value_type(c, receiver) ?? {
+        lower_fail(&m, &f, "para_map receiver has no checked type")
+        return true
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? {
+        lower_fail(&m, &f, "para_map result has no checked type")
+        return true
+    }
+    list :: lower_use(&m, &f, receiver) ?? return true
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return true
+    limit :: lower_use(&m, &f, args[1].value) ?? return true
+    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
+    lower_storage_into(p, &f, dst, result_ty)
+    length :: lower_list_word(&f, list, 0)
+    data :: lower_list_buffer(&m, &f, length, lower_list_stride(p, shape.output))
+    lower_parallel_walk(p, &m, &f, closure, closure_ty, list, data, limit)
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 0, value: length})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 8, value: length})
+    lower_emit(&f, LIRInst.Store{base: dst, offset: 16, value: data})
+    lower_map_drop_value(p, &m, &f, list, list_ty)
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
+    true
+}
+
+// try_map stops at the first Err, drops the already-produced prefix and every
+// unused owned input, and transfers the exact error to the enclosing Result.
+fn lower_closure_try_map(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg]) Never! {
+    if args.len() != 1 -> return lower_fail(&m, &f, "try_map requires one checked callback")
+    list_ty :: lower_value_type(c, receiver) ?? return lower_fail(&m, &f, "try_map receiver has no checked type")
+    elem :: lower_list_element(list_ty) ?? return lower_fail(&m, &f, "try_map receiver is not a List")
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "try_map result has no checked type")
+    if result_ty.kind == {
+        .Result(_, _) -> {}
+        else -> return lower_fail(&m, &f, "try_map result is not a Result")
+    }
+    out_ty :: if result_ty.kind == .Result(ok, _) -> ok else -> panic("checked Result")
+    err_ty :: if result_ty.kind == .Result(_, err) -> err else -> panic("checked Result")
+    produced :: lower_list_element(out_ty) ?? return lower_fail(&m, &f, "try_map success is not a List")
+    closure_arg :: args[0]
+    closure_ty :: lower_value_type(c, closure_arg.value) ?? return lower_fail(&m, &f, "try_map callback has no checked type")
+    shape :: lower_parallel_shape(closure_ty) ?? return lower_fail(&m, &f, "try_map callback has no checked single-input type")
+    callback_result :: shape.output
+    if callback_result.kind == {
+        .Result(_, _) -> {}
+        else -> return lower_fail(&m, &f, "try_map callback does not return a Result")
+    }
+    list :: lower_use(&m, &f, receiver) ?? return
+    closure :: lower_use(&m, &f, closure_arg.value) ?? return
+    output :: lower_new_storage(p, &f, out_ty)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Store{base: output, offset: 0, value: zero})
+    lower_emit(&f, LIRInst.Store{base: output, offset: 8, value: zero})
+    lower_emit(&f, LIRInst.Store{base: output, offset: 16, value: zero})
+    box :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
+    lower_alloc(&m, &f, box, lower_box_size(p, result_ty))
+    merge :: lower_new_block(&f)
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? return lower_fail(&m, &f, "try_map input has no stored value")
+    outcome :: lower_call_closure_box(p, &m, &f, closure, [LIRValueID]{item}, callback_result) ?? return
+    selector :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: selector, base: outcome, offset: 0})
+    succeeded :: lower_flag(&f)
+    ok_selector :: lower_const(&f, lower_result_selector(true))
+    lower_emit(&f, LIRInst.Compare{dst: succeeded, condition: LIRCondition.Eq, left: selector, right: ok_selector})
+    success :: lower_new_block(&f)
+    failure :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: succeeded, then_target: lower_target(success, [LIRValueID]{}), else_target: lower_target(failure, [LIRValueID]{})})
+    lower_start(&f, failure, [LIRValueID]{})
+    lower_store_word(&f, box, 0, lower_result_selector(false))
+    target_error :: lower_address(&f, box, lower_result_payload_offset())
+    source_error :: lower_address(&f, outcome, lower_result_payload_offset())
+    lower_list_move(p, &f, target_error, source_error, err_ty)
+    lower_free_shell(&m, &f, outcome, lower_box_size(p, callback_result))
+    lower_map_drop_value(p, &m, &f, output, out_ty)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, success, [LIRValueID]{})
+    value :: lower_read_at(p, &f, outcome, lower_result_payload_offset(), produced) ?? return lower_fail(&m, &f, "try_map output has no stored value")
+    lower_call_helper(&m, &f, "list.push", out_ty, [LIRValueID]{output, value}, None)
+    lower_free_shell(&m, &f, outcome, lower_box_size(p, callback_result))
+    lower_each_end(&f, each, [LIRValueID]{})
+    lower_store_word(&f, box, 0, lower_result_selector(true))
+    lower_copy_bytes(&f, box, lower_result_payload_offset(), output, 0, lower_size(p, out_ty).size)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(merge, [LIRValueID]{})})
+    lower_start(&f, merge, [LIRValueID]{})
+    lower_map_drop_value(p, &m, &f, list, list_ty)
+    if closure_arg.access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    if instruction.result == None -> lower_map_drop_value(p, &m, &f, box, result_ty)
+}
+
+// These routes consume their receiver and moved callback. Owned reads from a
+// stable place must acquire their own value before an adapter drops it.
+fn lower_parallel_stored_operands(p: MIRProgram, operation: MIROperation) -> [MIRValueID] Never! {
+    stored := [MIRValueID]{}
+    if operation == .Semantic(.ClosureMethod(receiver, args, call)) {
+        row :: lower_prelude_row(p, call) ?? return stored
+        symbol :: lower_runtime_symbol(row)
+        if symbol != "jet_list_para_map" && symbol != "jet_list_try_map" && symbol != "jet_list_para_filter" && symbol != "jet_list_para_partition" && symbol != "jet_list_para_fold" -> return stored
+        &stored.push(receiver)
+        loop arg in args {
+            if arg.access == .Move -> &stored.push(arg.value)
+        }
+    }
+    stored
+}
+
+// Evaluate predicates in the canonical joined range scheduler, then move each
+// source item once into its source-ordered destination.
+fn lower_parallel_flags(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg], partition: Bool) Never! {
+    if args.len() != 1 -> return lower_fail(&m, &f, "parallel predicate requires one callback")
+    list_ty :: lower_value_type(c, receiver) ?? return
+    elem :: lower_list_element(list_ty) ?? return
+    closure_ty :: lower_value_type(c, args[0].value) ?? return
+    if lower_task_stop_body(p, c, m, args[0].value) -> return lower_fail(&m, &f, "parallel predicate with a checked stop across native frames is not lowered at O0 yet")
+    result_ty :: lower_checked_type(c, instruction) ?? return
+    list :: lower_use(&m, &f, receiver) ?? return
+    closure :: lower_use(&m, &f, args[0].value) ?? return
+    length :: lower_list_word(&f, list, 0)
+    flags :: lower_list_buffer(&m, &f, length, 8)
+    unlimited :: lower_const(&f, -1)
+    lower_parallel_walk(p, &m, &f, closure, closure_ty, list, flags, unlimited)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_pointer(&f)
+    lower_storage_into(p, &f, dst, result_ty)
+    false_list := dst
+    true_list := dst
+    if partition {
+        members :: lower_inline_members(p, result_ty)
+        if members.len() != 2 -> return lower_fail(&m, &f, "parallel partition requires its checked two-List tuple")
+        false_list = lower_address(&f, dst, members[0].offset)
+        true_list = lower_address(&f, dst, members[1].offset)
+    }
+    zero :: lower_const(&f, 0)
+    header_offsets :: [Int]{0, 8, 16}
+    loop offset in header_offsets {
+        lower_emit(&f, LIRInst.Store{base: true_list, offset: offset, value: zero})
+        if partition -> lower_emit(&f, LIRInst.Store{base: false_list, offset: offset, value: zero})
+    }
+    each :: lower_each_begin(p, &f, list, elem, [LIRValueID]{})
+    flag_at :: lower_list_address(&f, flags, each.at, 8)
+    keep :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Load{dst: keep, base: flag_at, offset: 0})
+    kept :: lower_new_block(&f)
+    rejected :: lower_new_block(&f)
+    join :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: keep, then_target: lower_target(kept, [LIRValueID]{}), else_target: lower_target(rejected, [LIRValueID]{})})
+    lower_start(&f, kept, [LIRValueID]{})
+    item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+    lower_call_helper(&m, &f, "list.push", list_ty, [LIRValueID]{true_list, item}, None)
+    lower_clear_at(p, &f, each.address, 0, elem)
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{})})
+    lower_start(&f, rejected, [LIRValueID]{})
+    if partition {
+        rejected_item :: lower_read_at(p, &f, each.address, 0, elem) ?? return
+        lower_call_helper(&m, &f, "list.push", list_ty, [LIRValueID]{false_list, rejected_item}, None)
+        lower_clear_at(p, &f, each.address, 0, elem)
+    }
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(join, [LIRValueID]{})})
+    lower_start(&f, join, [LIRValueID]{})
+    lower_each_end(&f, each, [LIRValueID]{})
+    lower_list_free_buffer(&m, &f, flags, length, 8)
+    lower_map_drop_value(p, &m, &f, list, list_ty)
+    if args[0].access == .Move -> lower_map_drop_value(p, &m, &f, closure, closure_ty)
+    if instruction.result == None -> lower_map_drop_value(p, &m, &f, dst, result_ty)
+}
+
+// The helper key records all checked callback types. env lends seed, step,
+// merge and input data at offsets 0,8,16,24 through the joined runtime call.
+fn lower_parallel_fold(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, receiver: MIRValueID, args: [MIRCallArg]) Never! {
+    if args.len() != 3 -> return lower_fail(&m, &f, "parallel fold requires seed, step and merge callbacks")
+    list_ty :: lower_value_type(c, receiver) ?? return
+    elem :: lower_list_element(list_ty) ?? return
+    result_ty :: lower_checked_type(c, instruction) ?? return
+    if lower_repr_layout(lower_repr(p, result_ty)) == None -> return lower_fail(&m, &f, "parallel fold accumulator has no storage")
+    fields := [MIRTupleField]{MIRTupleField{name: "element", ty: elem}, MIRTupleField{name: "result", ty: result_ty}}
+    env :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: env, size: 32, align: 8})
+    closures := [LIRValueID]{}
+    loop (index, arg) in args {
+        ty :: lower_value_type(c, arg.value) ?? return
+        if lower_task_stop_body(p, c, m, arg.value) -> return lower_fail(&m, &f, "parallel fold callback with a checked stop across native frames is not lowered at O0 yet")
+        &fields.push(MIRTupleField{name: "callback{index}", ty: ty})
+        closure :: lower_use(&m, &f, arg.value) ?? return
+        &closures.push(closure)
+        lower_emit(&f, LIRInst.Store{base: env, offset: index * 8, value: closure})
+    }
+    list :: lower_use(&m, &f, receiver) ?? return
+    data :: lower_list_data(&f, list)
+    lower_emit(&f, LIRInst.Store{base: env, offset: 24, value: data})
+    key :: mir_type_from_kind(MIRTypeKind.Tuple{fields: fields})
+    chunk :: lower_lazy_helper_address(&m, &f, "para.fold.chunk", key)
+    merge :: lower_lazy_helper_address(&m, &f, "para.fold.merge", key)
+    output :: lower_pointer(&f)
+    length :: lower_list_word(&f, list, 0)
+    lower_call_runtime(&m, &f, "jet_rt_native_para_fold", [LIRValueID]{length, env, chunk, merge}, Val(output))
+    value :: lower_read_at(p, &f, output, 0, result_ty) ?? return
+    if instruction.result != None {
+        dst :: lower_result(p, c, &m, &f, instruction) ?? return
+        if lower_is_inline(p, result_ty) {
+            lower_storage_into(p, &f, dst, result_ty)
+            lower_write_at(p, &f, dst, 0, value, result_ty)
+        } else {
+            lower_emit(&f, LIRInst.Move{dst: dst, src: value})
+        }
+    } else {
+        lower_map_drop_value(p, &m, &f, value, result_ty)
+    }
+    lower_free_shell(&m, &f, output, lower_size(p, result_ty).size)
+    lower_map_drop_value(p, &m, &f, list, list_ty)
+    loop (index, arg) in args {
+        if arg.access == .Move -> lower_map_drop_value(p, &m, &f, closures[index], fields[index + 2].ty)
+    }
+}
+
+fn lower_helper_parallel_fold(p: MIRProgram, m: &LowerModule, glue: LowerGlue) -> LIRFunction Never! {
+    fields :: if glue.ty.kind == .Tuple(rows) -> rows else -> panic("parallel fold helper key")
+    elem :: fields[0].ty
+    result_ty :: fields[1].ty
+    merging :: glue.helper == "para.fold.merge"
+    params :: if merging -> [LIRLayout]{lir_layout_pointer(), lir_layout_pointer(), lir_layout_pointer()} else -> [LIRLayout]{lir_layout_pointer(), lir_layout_word(), lir_layout_word()}
+    f := lower_helper_start(&m, glue, params, Val(lir_layout_pointer()))
+    env :: f.open_params[0].copy()
+    callback :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.Load{dst: callback, base: env, offset: if merging -> 16 else -> 0})
+    output :: lower_pointer(&f)
+    lower_alloc(&m, &f, output, lower_size(p, result_ty).size)
+    if merging {
+        left :: f.open_params[1].copy()
+        right :: f.open_params[2].copy()
+        a :: lower_read_at(p, &f, left, 0, result_ty) ?? panic("stored accumulator")
+        b :: lower_read_at(p, &f, right, 0, result_ty) ?? panic("stored accumulator")
+        value :: lower_call_closure_box(p, &m, &f, callback, [LIRValueID]{a, b}, result_ty) ?? panic("stored accumulator")
+        lower_write_at(p, &f, output, 0, value, result_ty)
+        if !lower_closure_param_moves(fields[4].ty, 0) -> lower_map_drop_value(p, &m, &f, a, result_ty)
+        if !lower_closure_param_moves(fields[4].ty, 1) -> lower_map_drop_value(p, &m, &f, b, result_ty)
+        lower_free_shell(&m, &f, left, lower_size(p, result_ty).size)
+        lower_free_shell(&m, &f, right, lower_size(p, result_ty).size)
+    } else {
+        seed :: lower_call_closure_box(p, &m, &f, callback, [LIRValueID]{}, result_ty) ?? panic("stored accumulator")
+        lower_write_at(p, &f, output, 0, seed, result_ty)
+        step :: lower_pointer(&f)
+        data :: lower_pointer(&f)
+        lower_emit(&f, LIRInst.Load{dst: step, base: env, offset: 8})
+        lower_emit(&f, LIRInst.Load{dst: data, base: env, offset: 24})
+        begin :: f.open_params[1].copy()
+        end :: f.open_params[2].copy()
+        each :: lower_sort_loop(&f, begin, end)
+        source :: lower_list_address(&f, data, each.at, lower_list_stride(p, elem))
+        item :: lower_read_at(p, &f, source, 0, elem) ?? panic("stored parallel input")
+        current :: lower_read_at(p, &f, output, 0, result_ty) ?? panic("stored accumulator")
+        value :: lower_call_closure_box(p, &m, &f, step, [LIRValueID]{current, item}, result_ty) ?? panic("stored accumulator")
+        if !lower_closure_param_moves(fields[3].ty, 0) -> lower_map_drop_value(p, &m, &f, current, result_ty)
+        lower_write_at(p, &f, output, 0, value, result_ty)
+        lower_each_end(&f, each, [LIRValueID]{})
+    }
+    lower_seal(&f, LIRTerminator.Return{value: Val(output)})
+    lir_builder_finish(f.builder)
+}

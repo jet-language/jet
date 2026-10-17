@@ -1,0 +1,112 @@
+// Controlled metadata-kernel inputs only: none of these rows is checked/run
+// evidence, and this fixture does not activate a Driver/CLI registry producer.
+use jet_foundation.[JobRegistry, JobScope, JobFact, Func, Param, Type, Expr, Item, Span, StrPart, Marker, MarkerCallArg, EveryMarker, ast_func, ast_program, ast_job_metadata]
+
+fn registry_function(name: String, scope: JobScope, after: [String], parallel: Int) -> Func Never! {
+    span :: Span{start: 0, end: 0}
+    function := ast_func(name, span, span)
+    function.is_job = true
+    metadata := ast_job_metadata()
+    metadata.scope = scope
+    metadata.after = after
+    metadata.parallel = Val(parallel)
+    function.job_metadata = Val(metadata)
+    function
+}
+fn registry_items(functions: [Func]) -> [Item] Never! {
+    loop function in functions -> Item.Func(function)
+}
+fn registry_names(rows: [View<JobFact>]) -> String Never! {
+    names :: loop row in rows -> row[0].name
+    names.join(" -> ")
+}
+fn registry_error(registry: JobRegistry, root: String) -> String Never! {
+    registry.dependency_closure(root) ?? return err.message
+    panic("controlled graph must fail")
+}
+fn registry_validation_error(registry: JobRegistry) -> String Never! {
+    registry.validate_graph() ?? return err.message
+    panic("controlled graph must fail validation")
+}
+fn registry_param(name: String, ty: Type, default: Expr?, variadic: Bool) -> Param Never! {
+    span :: Span{start: 0, end: 0}
+    Param{convention: .Read, root: false, name: name, name_span: span, public_label: None, zone: .Either, ty: ty, ty_span: span, default: default, variadic: variadic, variadic_bound_list: None, declared_view_from_names: None}
+}
+fn registry_optional(value: String?, expected: String) -> Bool Never! {
+    text :: value ?? return false
+    text == expected
+}
+fn run() {
+    registry :: JobRegistry.from_items(registry_items([Func]{
+        registry_function("root", .Dev, [String]{"left", "right"}, 1),
+        registry_function("right", .Ship, [String]{"leaf"}, 2),
+        registry_function("leaf", .Internal, [String]{}, 1),
+        registry_function("left", .Dev, [String]{"leaf"}, 1)
+    }))
+    assert(registry_names(registry.dependency_closure("root") ?? panic(err.message)) == "leaf -> left -> right -> root")
+    assert(registry_names(registry.visible_jobs()) == "root -> right -> left")
+    assert(registry.completion_words().join(" ") == "root right left")
+    registry.validate_graph() ?? panic(err.message)
+    assert(registry_error(registry, "absent") == "job graph references unknown job `absent`")
+
+    duplicate :: JobRegistry.from_items(registry_items([Func]{
+        registry_function("shared", .Internal, [String]{}, 1),
+        registry_function("shared", .Dev, [String]{}, 1),
+        registry_function("later", .Ship, [String]{}, 1)
+    }))
+    assert((duplicate.find("shared") ?? panic("find"))[0].scope == .Internal)
+    assert((duplicate.find_visible("shared") ?? panic("find_visible"))[0].scope == .Dev)
+    assert(duplicate.completion_words().join(" ") == "shared later")
+    assert(registry_error(duplicate, "shared") == "job `shared` has an ambiguous declaration")
+
+    cycle :: JobRegistry.from_items(registry_items([Func]{
+        registry_function("root", .Dev, [String]{"a"}, 1),
+        registry_function("a", .Dev, [String]{"b"}, 1),
+        registry_function("b", .Internal, [String]{"a"}, 1)
+    }))
+    assert(registry_error(cycle, "root") == "job graph contains a cycle: a -> b -> a")
+    invalid :: JobRegistry.from_items(registry_items([Func]{
+        registry_function("z", .Dev, [String]{}, 0),
+        registry_function("a", .Dev, [String]{"missing"}, 1)
+    }))
+    assert(registry_error(invalid, "z") == "job `z` declares a zero parallel bound")
+    assert(registry_validation_error(invalid) == "job graph references unknown job `missing`")
+
+    entry := ast_program()
+    entry.items = registry_items([Func]{registry_function("entry", .Dev, [String]{"helper"}, 1)})
+    helper := ast_program()
+    helper.items = registry_items([Func]{registry_function("helper", .Dev, [String]{}, 1)})
+    selected :: JobRegistry.for_entry([jet_foundation.Program]{entry, helper}, 0)
+    assert(selected.completion_words().join(" ") == "entry")
+    assert(registry_error(selected, "entry") == "job graph references unknown job `helper`")
+    assert(JobRegistry.for_entry([jet_foundation.Program]{entry, helper}, 2).jobs().len() == 0)
+
+    span :: Span{start: 0, end: 0}
+    function := registry_function("args", .Dev, [String]{}, 1)
+    function.params = [Param]{
+        registry_param("self", .Int, None, false),
+        registry_param("required", .String, None, false),
+        registry_param("flag", .Bool, None, false),
+        registry_param("optional", .Option(.String), None, false),
+        registry_param("rest", .String, None, true),
+        registry_param("unknown_default", .Int, Val(.Ident("later", span)), false),
+        registry_param("wrapped", .Int, Val(.Paren(.Int(7, span, None, None), span)), false),
+        registry_param("narrow", .Float32, Val(.Float(0.1, span, true, None)), false),
+        registry_param("wide", .Float, Val(.Float(1.0, span, false, None)), false)
+    }
+    function.markers = [Marker]{Marker{name: "Doc", negated: false, name_span: span, args: [MarkerCallArg]{.Expr(.Str([StrPart]{.Lit("first doc")}, span))}, arg_labels: [jet_foundation.CallLabel?]{None}, span: span, ct: None}}
+    function.every = Val(EveryMarker{arg: .Duration(None, Val(1.0), "s", span), span: span, resolved: None})
+    argument_registry :: JobRegistry.from_items(registry_items([Func]{function}))
+    facts :: argument_registry.jobs()
+    args :: facts[0].arguments
+    assert(args.len() == 8 && args[0].required && !args[1].required && !args[2].required && !args[3].required)
+    assert(!args[4].required && args[4].default == None)
+    assert(registry_optional(args[5].default, "7") && registry_optional(args[6].default, "0.1") && registry_optional(args[7].default, "1.0"))
+    assert(registry_optional(facts[0].doc, "first doc") && registry_optional(facts[0].schedule, "1s"))
+    function.every = Val(EveryMarker{arg: .Duration(None, Val(0.0000001), "s", span), span: span, resolved: None})
+    tiny :: JobRegistry.from_items(registry_items([Func]{function}))
+    assert(registry_optional(tiny.jobs()[0].schedule, "0.0000001s"))
+    function.every = Val(EveryMarker{arg: .WallClock("08:30", span), span: span, resolved: None})
+    daily :: JobRegistry.from_items(registry_items([Func]{function}))
+    assert(registry_optional(daily.jobs()[0].schedule, "day 08:30"))
+}

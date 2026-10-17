@@ -1,7 +1,7 @@
 package {
     name: "crypto_vault_keys"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, IO, Mem.Alloc, Secret] } }
+    authority: { holds: { allow: [Exec, IO, Mem.Alloc, Rand, Secret] } }
 }
 // D-CRYPTO-VAULT1=A: typed persistent keys are addressed by immutable KeyRef<T>
 // handles. Reading the current ref does not expose portable key material.
@@ -18,7 +18,7 @@ fn provision() -[Secret, IO]> {
 
 // Compile-time surface proof for the full safe lifecycle. The example's run
 // path remains read-only; applications call a mutation flow only when needed.
-fn lifecycle_surface() -[Secret]> {
+fn lifecycle_surface() -[Secret, Rand]> {
     key :: crypto.SigningKey.new_random() ?? return
     store_plan :: vault.prepare_store<crypto.SigningKey>("staged", ^key) ?? return
     store_write :: vault.authorize_write(&store_plan, "store generated signer") ?? return
@@ -47,6 +47,6 @@ fn expert_import_surface() -[Secret]> {
 }
 
 fn run() -[Secret, IO]> {
-    _current :: vault.current<crypto.SigningKey>("release")
+    _current :: vault.current<crypto.SigningKey>("release") ?? panic("read the current release signer")
     print("vault lifecycle ready")
 }

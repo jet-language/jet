@@ -1,0 +1,138 @@
+use core.encoding.json as json
+
+fn kit_steps_json_normalizer(value: String) -> KitJSONNormalization? {
+    reason :: kit_steps_byte_index(value, " #") ?? return None
+    if kit_steps_byte_slice(value, reason + 2, value.count_bytes()).trim() == "" -> return None
+    header :: kit_steps_words(kit_steps_byte_slice(value, 0, reason)) ?? return None
+    if header.len() != 5 || header[0] != "json" || header[3] != ":" -> return None
+    if header[1] != "stdout" && header[1] != "stderr" -> return None
+    if kit_steps_json_path(header[2]) == None -> return None
+    if !kit_expect_named(["string", "number", "int", "bool", "null", "array", "object"], header[4]) -> return None
+    Val(KitJSONNormalization{stream: header[1], path: header[2], kind: header[4]})
+}
+
+fn kit_steps_json_space(bytes: [U8], start: Int) -> Int {
+    i := start
+    loop i < bytes.len() {
+        byte :: Int.from_u8(bytes[i])
+        if byte != 32 && byte != 9 && byte != 10 && byte != 13 -> break
+        i += 1
+    }
+    i
+}
+
+// This scanner only locates spans in a document already validated by Core JSON.
+// It never decodes values, accepts syntax, or re-renders surrounding bytes.
+fn kit_steps_json_span_end(bytes: [U8], start: Int) -> Int {
+    first :: Int.from_u8(bytes[start])
+    quoted := first == 34
+    containers := if first == 91 || first == 123 -> 1 else -> 0
+    i := if quoted || containers > 0 -> start + 1 else -> start
+    loop i < bytes.len() {
+        byte :: Int.from_u8(bytes[i])
+        if quoted {
+            if {
+                byte == 92 -> i += 2
+                byte == 34 -> {
+                    quoted = false
+                    i += 1
+                    if containers == 0 -> return i
+                }
+                else -> i += 1
+            }
+            next
+        }
+        if containers == 0 {
+            if byte == 32 || byte == 9 || byte == 10 || byte == 13 || byte == 44 || byte == 93 || byte == 125 -> return i
+        } else {
+            if byte == 34 -> quoted = true
+            if byte == 91 || byte == 123 -> containers += 1
+            if byte == 93 || byte == 125 {
+                containers -= 1
+                if containers == 0 -> return i + 1
+            }
+        }
+        i += 1
+    }
+    i
+}
+
+fn kit_steps_json_collect_spans(bytes: [U8], tree: Dyn, parts: [String], depth: Int, start: Int, kind: String, normalizer: Int, spans: &[KitJSONSpan]) -> String? {
+    if depth == parts.len() {
+        actual :: kit_steps_json_type(tree)
+        if actual != kind && !(kind == "number" && actual == "int") -> return Val("JSON normalization type differs: expected {kind}, got {actual}")
+        &spans.push(KitJSONSpan{start: start, end: kit_steps_json_span_end(bytes, start), normalizer: normalizer})
+        return None
+    }
+    part :: parts[depth]
+    if tree == {
+        .Object(_) -> {
+            if !part.starts_with(".") -> return Val("JSON normalization selected a non-array")
+            position := kit_steps_json_space(bytes, start + 1)
+            loop position < bytes.len() && bytes[position] != (U8{125}) {
+                key_end :: kit_steps_json_span_end(bytes, position)
+                key_text :: String.from_bytes(bytes.slice(position, key_end)) ?? return Val("JSON normalization key decode failed")
+                key_tree :: json.parse(key_text) ?? return Val("JSON normalization key parse failed")
+                key :: if key_tree == { .Text(name) -> name else -> { return Val("JSON normalization key is not text") } }
+                child :: kit_steps_json_space(bytes, kit_steps_json_space(bytes, key_end) + 1)
+                if part == (".{key}") {
+                    value :: tree.get(key) ?? return Val("JSON normalization member missing: {part}")
+                    return kit_steps_json_collect_spans(bytes, value, parts, depth + 1, child, kind, normalizer, &spans)
+                }
+                position = kit_steps_json_space(bytes, kit_steps_json_span_end(bytes, child))
+                if position < bytes.len() && bytes[position] == (U8{44}) -> position = kit_steps_json_space(bytes, position + 1)
+            }
+            return Val("JSON normalization member missing: {part}")
+        }
+        .Array(items) -> {
+            wanted :: if part == "*" -> -1 else -> Int.parse(part) ?? return Val("JSON normalization selected a non-object")
+            if items.len() == 0 || wanted >= items.len() -> return Val("JSON normalization array selection is empty or missing")
+            position := kit_steps_json_space(bytes, start + 1)
+            loop (index, item) in items {
+                if wanted == -1 || index == wanted {
+                    error :: kit_steps_json_collect_spans(bytes, item, parts, depth + 1, position, kind, normalizer, &spans)
+                    if error != None -> return error
+                    if wanted != -1 -> return None
+                }
+                position = kit_steps_json_space(bytes, kit_steps_json_span_end(bytes, position)) + 1
+                position = kit_steps_json_space(bytes, position)
+            }
+            return None
+        }
+        else -> return Val("JSON normalization cannot descend into a scalar")
+    }
+}
+
+fn kit_steps_json_normalize(text: String, stream: String, rules: [KitJSONNormalization]) -> KitJSONResult {
+    applies := false
+    loop rule in rules {
+        if rule.stream == stream -> applies = true
+    }
+    if !applies -> return KitJSONResult{text: text, error: ""}
+    tree :: json.parse(text) ?? return KitJSONResult{text: "", error: "JSON normalization parse: {err}"}
+    bytes :: text.bytes()
+    spans := [KitJSONSpan]{}
+    start :: kit_steps_json_space(bytes, 0)
+    loop (index, rule) in rules {
+        if rule.stream != stream -> next
+        parts :: kit_steps_json_path(rule.path) ?? return KitJSONResult{text: "", error: "invalid JSON normalization path"}
+        error :: kit_steps_json_collect_spans(bytes, tree, parts, 0, start, rule.kind, index, &spans)
+        if error == {
+            .Val(message) -> return KitJSONResult{text: "", error: message}
+            .None -> {}
+        }
+    }
+    &spans.sort_by(span -> span.start)
+    pieces := [String]{}
+    position := 0
+    loop span in spans {
+        // An outer selected container already replaces any selected child.
+        if span.start < position -> next
+        &pieces.push(String.from_bytes(bytes.slice(position, span.start)) ?? panic("JSON span is not UTF-8"))
+        kind :: rules[span.normalizer].kind
+        &pieces.push("\"<<{kind}>>\"")
+        position = span.end
+    }
+    &pieces.push(String.from_bytes(bytes.slice(position, bytes.len())) ?? panic("JSON span is not UTF-8"))
+    KitJSONResult{text: pieces.join(""), error: ""}
+}

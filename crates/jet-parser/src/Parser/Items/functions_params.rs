@@ -2,15 +2,20 @@ use super::super::{
     AccessConvention, Diagnostic, EnumDef, Func, MetaAttr, Param, Parser, Span, StructDef, Syntax,
     TokKind, Type,
 };
-use crate::AST::{ParamZone, PatSlot, Pattern};
+use crate::AST::{Expr, ParamZone, PatSlot, Pattern};
 
 impl<'a> Parser<'a> {
     /// S83: parse either an ordinary parameter list or one bare variant head
     /// (`Circle(r: Float)`). The head keeps its payload params for sema's
     /// later table fold; no second pattern dialect is introduced.
     fn parse_func_params(&mut self) -> Result<(Vec<Param>, Option<Pattern>), Diagnostic> {
-        let is_head = matches!(self.peek().kind, TokKind::Ident(_))
-            && matches!(self.peek2().kind, TokKind::LParen | TokKind::RParen);
+        let is_head = match (&self.peek().kind, &self.peek2().kind) {
+            (TokKind::Ident(_), TokKind::LParen) => true,
+            (TokKind::Ident(name), TokKind::RParen) => {
+                name.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            }
+            _ => false,
+        };
         if !is_head {
             return Ok((self.parse_param_list()?, None));
         }
@@ -77,7 +82,14 @@ impl<'a> Parser<'a> {
         allow_guest_import_symbol: bool,
     ) -> Result<Func, Diagnostic> {
         let declaration_start = self.toks[self.pos.saturating_sub(1)].span.start;
-        let (mut name, mut name_span) = self.expect_ident("after `fn`")?;
+        // `copy` remains reserved in value position, but callable declarations
+        // must match the existing `.copy(...)` member spelling.
+        let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwCopy) {
+            let span = self.bump().span;
+            (Syntax::KW_COPY.to_string(), span)
+        } else {
+            self.expect_ident("after `fn`")?
+        };
         let external_type = if (matches!(self.peek().kind, TokKind::Dot)
             || matches!(self.peek().kind, TokKind::TildeTilde))
             && matches!(self.peek2().kind, TokKind::Ident(_))
@@ -713,7 +725,7 @@ impl<'a> Parser<'a> {
             "`#Import(c)` function uses a non-canonical body marker".to_string(),
             "`#Import(c)` binds a compile-time C symbol; `->` is a Jet function-body marker and cannot declare a foreign symbol"
                 .to_string(),
-            "write `#Import(c) fn name(args) Return = \"symbol\"`".to_string(),
+            "write `#Import(c) fn name(args) -> Return = \"symbol\"`".to_string(),
             Some(span),
         )
     }
@@ -1073,22 +1085,42 @@ impl<'a> Parser<'a> {
     }
 
     pub(super) fn param(&mut self) -> Result<Param, Diagnostic> {
-        let root_marker_span = if matches!(self.peek().kind, TokKind::Hash)
+        let root_marker = if matches!(self.peek().kind, TokKind::Hash)
             && matches!(&self.peek2().kind, TokKind::Ident(_))
         {
             let marker =
                 self.parse_registered_marker_at_site(crate::Policy::RuleSite::Parameter)?;
-            (marker.name == Syntax::MARKER_ROOT).then_some(marker.name_span)
+            Some(marker)
         } else {
             None
         };
-        let root = root_marker_span.is_some();
+        let root = root_marker.as_ref().is_some_and(|marker| marker.name == Syntax::MARKER_ROOT);
         let mut convention = self.parse_access_prefix();
         let (mut name, mut name_span) = if matches!(self.peek().kind, TokKind::KwSelf) {
             let span = self.bump().span;
             (Syntax::KW_SELF.to_string(), span)
         } else {
             self.expect_ident("for a parameter name")?
+        };
+        // D-METHOD-FOOTPRINT1=A: an expert receiver may state its field
+        // footprint with a field or the ratified member spread: `&self.log`,
+        // `&self.[log, hits]`. A consuming `^self` takes the whole value.
+        let declared_footprint = if name == Syntax::KW_SELF
+            && convention != AccessConvention::Move
+            && matches!(self.peek().kind, TokKind::Dot)
+        {
+            self.bump();
+            if matches!(self.peek().kind, TokKind::LBracket) {
+                let receiver = Expr::Ident(name.clone(), name_span);
+                match self.parse_member_spread(receiver, name_span.start)? {
+                    Expr::MemberSpread { members, .. } => Some(members),
+                    _ => unreachable!("member spread parses to MemberSpread"),
+                }
+            } else {
+                Some(vec![self.expect_field_name()?])
+            }
+        } else {
+            None
         };
         // D-APILABEL1=A: `timeout seconds: Int` — two adjacent identifiers
         // split the public call label from the local parameter name. The
@@ -1206,10 +1238,15 @@ impl<'a> Parser<'a> {
             variadic,
             variadic_bound_list,
             declared_view_from_names,
+            footprint: crate::AST::ReceiverFootprint {
+                declared: declared_footprint,
+                inferred: None,
+            },
         };
-        if let Some(marker_span) = root_marker_span {
+        if let Some(marker) = root_marker {
             self.bind_rule_fact(
-                marker_span,
+                &marker.name,
+                marker.name_span,
                 Some(param.name_span),
                 crate::Policy::RuleSite::Parameter,
             );
@@ -1360,6 +1397,7 @@ impl<'a> Parser<'a> {
                 let mut f = self.field()?;
                 for marker in &field_markers {
                     self.bind_rule_fact(
+                        &marker.name,
                         marker.name_span,
                         Some(f.name_span),
                         crate::Policy::RuleSite::Field,
@@ -1402,6 +1440,7 @@ impl<'a> Parser<'a> {
             span: Span::new(item_start, item_end),
             is_pub,
             is_package_pub,
+            compiler_builtin_error: false,
             name,
             name_span,
             type_params,

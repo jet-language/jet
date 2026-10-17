@@ -6,7 +6,7 @@ use crate::AST::{CtKey, CtValue, Type};
 
 // `Sync.rs` is shared verbatim with the AOT Prelude.  The comptime tier
 // supplies the same small host boundary that the emitted module gets from
-// `CoreLib/JetStd`: canonical DataTree values, FieldError lists, and Codable
+// `CoreLib/JetStd`: canonical Dyn values, FieldError lists, and Codable
 // traits.  The CRDT and policy algorithms themselves remain in the included
 // Prelude source.
 trait JetShow {
@@ -25,12 +25,12 @@ trait JetDisplay {
 
 #[allow(non_camel_case_types)]
 trait __jet_Encode {
-    fn jet_encode(&self) -> jet_std::DataTree;
+    fn jet_encode(&self) -> jet_std::Dyn;
 }
 
 #[allow(non_camel_case_types)]
 trait __jet_Decode: Sized {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
 }
 
 #[path = "SyncJetStd.rs"]
@@ -38,17 +38,17 @@ mod jet_std;
 // Values.rs is shared with the standalone AOT Prelude. Re-export only the
 // canonical formatter needed by that shared fragment.
 pub(crate) use self::jet_std::jet_int_to_string;
-// The Foundation carrier's tier-side accessors are a trait (`DataTree.rs`);
+// The Foundation carrier's tier-side accessors are a trait (`Dyn.rs`);
 // the included `Sync.rs` and the marshalling below call them by method syntax.
-use self::jet_std::JetDataTreeAccess;
+use self::jet_std::JetDynAccess;
 
-fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
+fn dyn_from_ct(value: &CtValue) -> Option<jet_std::Dyn> {
     fn object_pairs(
         fields: impl IntoIterator<Item = (String, CtValue)>,
-    ) -> Option<Vec<(String, jet_std::DataTree)>> {
+    ) -> Option<Vec<(String, jet_std::Dyn)>> {
         fields
             .into_iter()
-            .map(|(key, value)| Some((key, datatree_from_ct(&value)?)))
+            .map(|(key, value)| Some((key, dyn_from_ct(&value)?)))
             .collect()
     }
 
@@ -66,7 +66,7 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
     }
 
     // Map iteration lowers to a list of named tuple records before the
-    // enclosing DataTree object is built. Normalize that carrier here so the
+    // enclosing Dyn object is built. Normalize that carrier here so the
     // comptime renderer sees the same ordered object as AOT/JIT.
     fn list_object_pairs(values: &[CtValue]) -> Option<Vec<(String, CtValue)>> {
         values
@@ -101,86 +101,76 @@ fn datatree_from_ct(value: &CtValue) -> Option<jet_std::DataTree> {
             args,
         } if matches!(
             type_name.as_str(),
-            "DataTree" | "TOML" | "YAML" | "CSV"
+            "Dyn" | "TOML" | "YAML" | "CSV"
         ) =>
         {
             let payload = args.first().map(|(_, value)| value);
             match variant.as_str() {
-                "Null" => Some(jet_std::DataTree::Null),
+                "Null" => Some(jet_std::Dyn::Null),
                 "Bool" => match payload {
-                    Some(CtValue::Bool(value)) => Some(jet_std::DataTree::Bool(*value)),
+                    Some(CtValue::Bool(value)) => Some(jet_std::Dyn::Bool(*value)),
                     _ => None,
                 },
                 "Int" => match payload {
-                    Some(CtValue::Int(value)) => Some(jet_std::DataTree::Int(*value)),
-                    Some(CtValue::BigInt(value)) => value
-                        .try_i64()
-                        .map(jet_std::DataTree::Int)
-                        .or_else(|| Some(jet_std::DataTree::Number(value.to_string_rep()))),
+                    Some(CtValue::Int(value)) => Some(jet_std::Dyn::Int((*value).into())),
+                    Some(CtValue::BigInt(value)) => Some(jet_std::Dyn::Int(crate::Numeric::JetInt::from_big(value.clone()))),
                     _ => None,
                 },
                 "Float" => match payload {
-                    Some(CtValue::Float(value)) => Some(jet_std::DataTree::Float(value.as_f64())),
+                    Some(CtValue::Float(value)) => Some(jet_std::Dyn::Float(value.as_f64())),
                     _ => None,
                 },
                 "Number" => match payload {
-                    Some(CtValue::Str(value)) => Some(jet_std::DataTree::Number(value.clone())),
-                    _ => None,
-                },
-                "TypedText" => match payload {
-                    Some(CtValue::Str(value)) => Some(jet_std::DataTree::TypedText(value.clone())),
+                    Some(CtValue::Str(value)) => Some(jet_std::Dyn::Number(value.clone())),
                     _ => None,
                 },
                 "Text" => match payload {
-                    Some(CtValue::Str(value)) => Some(jet_std::DataTree::Text(value.clone())),
+                    Some(CtValue::Str(value)) => Some(jet_std::Dyn::Text(value.clone())),
                     _ => None,
                 },
                 "Bytes" => match payload {
-                    Some(CtValue::Bytes(value)) => Some(jet_std::DataTree::Bytes(value.clone())),
+                    Some(CtValue::Bytes(value)) => Some(jet_std::Dyn::Bytes(value.clone())),
                     _ => None,
                 },
                 "Array" => match payload {
                     Some(CtValue::List(values)) => values
                         .iter()
-                        .map(datatree_from_ct)
+                        .map(dyn_from_ct)
                         .collect::<Option<Vec<_>>>()
-                        .map(jet_std::DataTree::Array),
+                        .map(jet_std::Dyn::Array),
                     _ => None,
                 },
                 "Object" => match payload {
                     Some(CtValue::Map(fields)) => map_pairs(fields)
                         .and_then(object_pairs)
-                        .map(jet_std::DataTree::Object),
+                        .map(jet_std::Dyn::Object),
                     Some(CtValue::List(values)) => list_object_pairs(values)
                         .and_then(object_pairs)
-                        .map(jet_std::DataTree::Object),
+                        .map(jet_std::Dyn::Object),
                     Some(CtValue::Struct { type_name, fields }) if type_name == "JSONObject" => {
-                        object_pairs(fields.clone()).map(jet_std::DataTree::Object)
+                        object_pairs(fields.clone()).map(jet_std::Dyn::Object)
                     }
                     _ => None,
                 },
                 _ => None,
             }
         }
-        CtValue::Int(value) => Some(jet_std::DataTree::Int(*value)),
-        CtValue::BigInt(value) => value
-            .try_i64()
-            .map(jet_std::DataTree::Int)
-            .or_else(|| Some(jet_std::DataTree::Number(value.to_string_rep()))),
-        CtValue::Float(value) => Some(jet_std::DataTree::Float(value.as_f64())),
-        CtValue::Bool(value) => Some(jet_std::DataTree::Bool(*value)),
-        CtValue::Str(value) => Some(jet_std::DataTree::Text(value.clone())),
-        CtValue::Bytes(value) => Some(jet_std::DataTree::Bytes(value.clone())),
+        CtValue::Int(value) => Some(jet_std::Dyn::Int((*value).into())),
+        CtValue::BigInt(value) => Some(jet_std::Dyn::Int(crate::Numeric::JetInt::from_big(value.clone()))),
+        CtValue::Float(value) => Some(jet_std::Dyn::Float(value.as_f64())),
+        CtValue::Bool(value) => Some(jet_std::Dyn::Bool(*value)),
+        CtValue::Str(value) => Some(jet_std::Dyn::Text(value.clone())),
+        CtValue::Bytes(value) => Some(jet_std::Dyn::Bytes(value.clone())),
         CtValue::List(values) => values
             .iter()
-            .map(datatree_from_ct)
+            .map(dyn_from_ct)
             .collect::<Option<Vec<_>>>()
-            .map(jet_std::DataTree::Array),
+            .map(jet_std::Dyn::Array),
         CtValue::Map(fields) => map_pairs(fields)
             .and_then(object_pairs)
-            .map(jet_std::DataTree::Object),
+            .map(jet_std::Dyn::Object),
         CtValue::Struct { type_name, fields } if type_name == "JSONObject" => {
-            object_pairs(fields.clone()).map(jet_std::DataTree::Object)
+            object_pairs(fields.clone()).map(jet_std::Dyn::Object)
         }
         _ => None,
     }
@@ -201,22 +191,32 @@ fn field_errors_to_ct(errors: Vec<jet_std::FieldError>) -> CtValue {
     )
 }
 
-/// The evaluator marshals values; scalar projection policy stays on DataTree.
-pub fn datatree_to_text(value: &CtValue) -> Option<String> {
-    datatree_from_ct(value).and_then(|tree| tree.to_text())
+/// The evaluator marshals values; scalar projection policy stays on Dyn.
+pub fn dyn_to_text(value: &CtValue) -> Option<String> {
+    dyn_from_ct(value).and_then(|tree| tree.to_text())
 }
 
-/// Recursive comparison uses the same Prelude DataTree policy on every tier.
-pub fn datatree_equal_unordered(left: &CtValue, right: &CtValue) -> bool {
-    match (datatree_from_ct(left), datatree_from_ct(right)) {
+/// Recursive comparison uses the same Prelude Dyn policy on every tier.
+pub fn dyn_equal_unordered(left: &CtValue, right: &CtValue) -> bool {
+    match (dyn_from_ct(left), dyn_from_ct(right)) {
         (Some(left), Some(right)) => left.equal_unordered(&right),
         _ => false,
     }
 }
 
+/// The text-cell decode scope of the shared Prelude policy (#4602): only a
+/// text-native source's decode parses `Text` leaves into scalars.
+pub(super) fn decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+    jet_std::jet_decode_text_cells(decode)
+}
+
+pub(super) fn text_cells_active() -> bool {
+    jet_std::jet_text_cells_active()
+}
+
 /// Route comptime Int decoding through the shared Prelude coercion policy.
 pub(super) fn decode_int_ct(value: &CtValue) -> Result<CtValue, CtValue> {
-    let Some(tree) = datatree_from_ct(value) else {
+    let Some(tree) = dyn_from_ct(value) else {
         return Err(field_errors_to_ct(jet_std::FieldError::one(
             "expected Int, found value",
         )));
@@ -224,6 +224,7 @@ pub(super) fn decode_int_ct(value: &CtValue) -> Result<CtValue, CtValue> {
     jet_std::decode_int_with(
         &tree,
         crate::Numeric::CtBigInt::from_int,
+        |value| Ok(value.to_big()),
         |text| {
             crate::Numeric::CtBigInt::from_str(text).map_err(|error| error.to_string())
         },
@@ -240,12 +241,12 @@ pub(super) fn decode_int_n_ct(
     bits: u8,
     type_name: &str,
 ) -> Result<CtValue, CtValue> {
-    let Some(tree) = datatree_from_ct(value) else {
+    let Some(tree) = dyn_from_ct(value) else {
         return Err(field_errors_to_ct(jet_std::FieldError::one(
             "expected Int, found value",
         )));
     };
-    jet_std::jet_datatree_decode_fixed_integer(&tree, signed, bits, type_name)
+    jet_std::jet_dyn_decode_fixed_integer(&tree, signed, bits, type_name)
         .map(|value| {
             let exact = if let Ok(value) = i64::try_from(value) {
                 crate::Numeric::CtBigInt::from_int(value)
@@ -261,28 +262,29 @@ pub(super) fn decode_int_n_ct(
 
 
 impl __jet_Encode for String {
-    fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Text(self.clone())
+    fn jet_encode(&self) -> jet_std::Dyn {
+        jet_std::Dyn::Text(self.clone())
     }
 }
 
 impl __jet_Decode for String {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_string(tree)
     }
 }
 
 impl __jet_Encode for i64 {
-    fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Int(*self)
+    fn jet_encode(&self) -> jet_std::Dyn {
+        jet_std::Dyn::Int((*self).into())
     }
 }
 
 impl __jet_Decode for i64 {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_int_with(
             tree,
             |value| value,
+            |value| value.to_i64().ok_or_else(|| "exact Int is outside i64".to_owned()),
             |text| {
                 text.parse::<i64>()
                     .map_err(|_| "exact Int is outside i64".to_owned())
@@ -292,16 +294,17 @@ impl __jet_Decode for i64 {
 }
 
 impl __jet_Encode for u64 {
-    fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Int(*self as i64)
+    fn jet_encode(&self) -> jet_std::Dyn {
+        jet_std::Dyn::Int((*self).into())
     }
 }
 
 impl __jet_Decode for u64 {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_int_with(
             tree,
             |value| value,
+            |value| value.to_i64().ok_or_else(|| "exact Int is outside i64".to_owned()),
             |text| {
                 text.parse::<i64>()
                     .map_err(|_| "exact Int is outside i64".to_owned())
@@ -315,25 +318,25 @@ impl __jet_Decode for u64 {
 }
 
 impl __jet_Encode for bool {
-    fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Bool(*self)
+    fn jet_encode(&self) -> jet_std::Dyn {
+        jet_std::Dyn::Bool(*self)
     }
 }
 
 impl __jet_Decode for bool {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_bool(tree)
     }
 }
 
 impl __jet_Encode for f64 {
-    fn jet_encode(&self) -> jet_std::DataTree {
-        jet_std::DataTree::Float(*self)
+    fn jet_encode(&self) -> jet_std::Dyn {
+        jet_std::Dyn::Float(*self)
     }
 }
 
 impl __jet_Decode for f64 {
-    fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+    fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
         jet_std::decode_float(tree)
     }
 }
@@ -461,24 +464,6 @@ fn list_to_ct(l: &JetSyncList) -> CtValue {
                         })
                         .collect(),
                 ),
-            ),
-        ],
-    }
-}
-
-fn policy_to_ct(p: &JetRowPolicy) -> CtValue {
-    let compiled = jet_db_policy_compiled(p);
-    CtValue::Struct {
-        type_name: "RowPolicy".to_string(),
-        fields: vec![
-            ("table".to_string(), CtValue::Str(p.table.clone())),
-            ("expression".to_string(), CtValue::Str(p.expression.clone())),
-            (
-                "compiled".to_string(),
-                CtValue::Int(match compiled {
-                    jet_std::JetRowPolicyExpr::AllowAll => 0,
-                    jet_std::JetRowPolicyExpr::OwnerEqualsUser => 1,
-                }),
             ),
         ],
     }
@@ -900,38 +885,6 @@ pub fn sync_show_value(value: &CtValue) -> Option<String> {
     }
 }
 
-fn ct_to_policy(v: &CtValue, span: Span) -> Result<JetRowPolicy, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = v else {
-        return Err(unsupported("RowPolicy", span));
-    };
-    if type_name != "RowPolicy" && type_name != "JetRowPolicy" {
-        return Err(unsupported("RowPolicy", span));
-    }
-    let table = fields
-        .iter()
-        .find(|(n, _)| n == "table")
-        .and_then(|(_, v)| match v {
-            CtValue::Str(s) => Some(s.clone()),
-            _ => None,
-        })
-        .ok_or_else(|| unsupported("table", span))?;
-    let code = fields
-        .iter()
-        .find(|(n, _)| n == "compiled")
-        .and_then(|(_, v)| match v {
-            CtValue::Int(code) => Some(*code),
-            _ => None,
-        })
-        .ok_or_else(|| unsupported("compiled row policy", span))?;
-    let compiled = match code {
-        0 => jet_std::JetRowPolicyExpr::AllowAll,
-        1 => jet_std::JetRowPolicyExpr::OwnerEqualsUser,
-        _ => return Err(unsupported("compiled row policy", span)),
-    };
-    jet_db_policy_from_compiled(table, compiled)
-        .map_err(|_| unsupported("unsupported row policy", span))
-}
-
 pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diagnostic> {
     let one = |i: usize| {
         args.get(i)
@@ -1013,19 +966,6 @@ pub fn apply(method: &str, args: &[CtValue], span: Span) -> Result<CtValue, Diag
             &ct_to_list(one(1)?, span)?,
         ))),
         "list_show" => Ok(CtValue::Str(jet_sync_list_show(&ct_to_list(
-            one(0)?,
-            span,
-        )?))),
-        "policy_new" => Ok(match jet_db_policy_new(as_str(0)?, as_str(1)?) {
-            Ok(p) => CtValue::Present(Box::new(policy_to_ct(&p))),
-            Err(e) => CtValue::failed(Box::new(CtValue::Str(e))),
-        }),
-        "policy_allows" => Ok(CtValue::Bool(jet_db_policy_allows(
-            &ct_to_policy(one(0)?, span)?,
-            &as_str(1)?,
-            &as_str(2)?,
-        ))),
-        "policy_show" => Ok(CtValue::Str(jet_db_policy_show(&ct_to_policy(
             one(0)?,
             span,
         )?))),

@@ -1,0 +1,139 @@
+// Reachability belongs to sema: canonical identities, not source spellings.
+use jet_foundation.[Span, SymbolID, SymbolKind, WebPartitionMarker]
+
+struct SemaCostCoverage {
+    gaps: [String]
+    has_roots: Bool
+}
+
+struct SemaCostCallable {
+    key: String
+    label: String
+    name: String
+    module_identity: String
+    span: Span
+    definition: Span
+    generated: Bool
+    foreign: Bool
+    root: Bool
+}
+fn sema_cost_callable(function: SemaRegistrationFunction, module_identity: String, entry: String, selected: String?) -> SemaCostCallable Never! {
+    source :: function.declaration
+    root :: source.is_job || source.web_marker == (Val(WebPartitionMarker.WasmExport)) || (module_identity == entry && source.name == (selected ?? "run"))
+    SemaCostCallable{key: function.symbol.id.key, label: "{module_identity}:{function.symbol.name}", name: source.name, module_identity: module_identity, span: source.span, definition: source.name_span, generated: source.compiler_generated, foreign: function.abi.is_extern, root: root}
+}
+fn sema_cost_edge(edges: &[String:[String]], caller: String, callee: String) Never! {
+    rows := edges.get(caller) ?? [String]{}
+    &rows.push(callee)
+    edges[caller] = ^rows
+}
+// Returns every reachable non-foreign declaration lacking a complete checked
+// body/specialization. Unreachable templates are not grounds for refusal.
+fn sema_cost_coverage(registration: SemaRegistrationGraph, checked: SemaGraphResult, selected: String?) -> SemaCostCoverage {
+    callables := [SemaCostCallable]{}
+    positions := [String:Int]{}
+    module_rows := [String:[Int]]{}
+    declarations := [(module_identity: String, start: Int, end: Int, name: String):String]{}
+    loop module_row_index in 0..<registration.modules.len() {
+        first :: callables.len()
+        loop function_index in 0..<registration.modules[module_row_index].functions.len() -> &callables.push(sema_cost_callable(registration.modules[module_row_index].functions[function_index], registration.modules[module_row_index].module_identity, registration.entry_module_identity, selected))
+        loop nominal_index in 0..<registration.modules[module_row_index].nominals.len() {
+            loop function_index in 0..<registration.modules[module_row_index].nominals[nominal_index].methods.len() -> &callables.push(sema_cost_callable(registration.modules[module_row_index].nominals[nominal_index].methods[function_index], registration.modules[module_row_index].module_identity, registration.entry_module_identity, selected))
+            loop method_index in 0..<registration.modules[module_row_index].nominals[nominal_index].trait_methods.len() {
+                if registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].declaration.default_body == None -> next
+                source :: registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].declaration
+                &callables.push(SemaCostCallable{key: registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].symbol.id.key, label: "{registration.modules[module_row_index].module_identity}:{registration.modules[module_row_index].nominals[nominal_index].trait_methods[method_index].symbol.name}", name: source.name, module_identity: registration.modules[module_row_index].module_identity, span: source.span, definition: source.name_span, generated: false, foreign: false, root: false})
+            }
+        }
+        loop implementation_index in 0..<registration.modules[module_row_index].impls.len() {
+            loop function_index in 0..<registration.modules[module_row_index].impls[implementation_index].methods.len() -> &callables.push(sema_cost_callable(registration.modules[module_row_index].impls[implementation_index].methods[function_index], registration.modules[module_row_index].module_identity, registration.entry_module_identity, selected))
+        }
+        rows := [Int]{}
+        loop index in first..<callables.len() {
+            positions[callables[index].key] = index
+            declarations[(module_identity: callables[index].module_identity, start: callables[index].span.start, end: callables[index].span.end, name: callables[index].name)] = callables[index].key
+            &rows.push(index)
+        }
+        &rows.sort_by((left, right) -> (callables[left].span.start <=> callables[right].span.start).then(left <=> right))
+        module_rows[registration.modules[module_row_index].module_identity] = ^rows
+    }
+    loop module_row_index in 0..<registration.modules.len() {
+        loop constant_index in 0..<registration.modules[module_row_index].constants.len() {
+            if registration.modules[module_row_index].constants[constant_index].declaration.resolved_output == .Val(output) {
+                if !output.selected -> next
+                if output.module_id < 0 || output.module_id >= registration.modules.len() -> next
+                module_identity :: registration.modules[output.module_id].module_identity
+                loop index in (module_rows.get(module_identity) ?? [Int]{}) {
+                    if callables[index].definition == output.definition -> callables[index].root = true
+                }
+            }
+        }
+    }
+    covered := [String:Bool]{}
+    edges := [String:[String]]{}
+    loop module_row in checked.modules {
+        loop function in module_row.functions {
+            if function.generic_params.len() > 0 -> next
+            covered[function.key] = true
+            // Specializations retain the source declaration's module and span.
+            if declarations.get((module_identity: function.module_identity, start: function.source_span.start, end: function.source_span.end, name: function.name)) == .Val(key) -> covered[key] = true
+        }
+        loop call in module_row.call_facts {
+            if call.callee == .Val(target) -> sema_cost_edge(&edges, call.caller_key, target.key)
+        }
+        // Name references include stored function values and callback arguments,
+        // not only direct calls. Credit generated templates independently from
+        // the narrowest authored owner; their offsets may overlap authored code.
+        rows :: module_rows.get(module_row.module_identity) ?? [Int]{}
+        maximum := [Int]{}
+        end := 0
+        loop index in rows {
+            if callables[index].span.end > end -> end = callables[index].span.end
+            &maximum.push(end)
+        }
+        loop reference in module_row.name_references {
+            if reference.symbol.kind != SymbolKind.Function -> next
+            target :: reference.symbol.id.key
+            lo := 0
+            hi := rows.len()
+            loop lo < hi {
+                middle :: (lo + hi) /% 2
+                if callables[rows[middle]].span.start <= reference.span.start -> lo = middle + 1 else -> hi = middle
+            }
+            best := Int?{None}
+            width := 0
+            loop lo > 0 {
+                lo -= 1
+                if maximum[lo] < reference.span.end -> break
+                index :: rows[lo]
+                owner :: callables[index]
+                if owner.span.end < reference.span.end -> next
+                if owner.generated -> sema_cost_edge(&edges, owner.key, target)
+                else if best == None || owner.span.end - owner.span.start < width {
+                    best = Val(index)
+                    width = owner.span.end - owner.span.start
+                }
+            }
+            if best == .Val(index) -> sema_cost_edge(&edges, callables[index].key, target)
+        }
+    }
+    pending := [String]{}
+    seen := [String:Bool]{}
+    loop callable in callables { if callable.root -> &pending.push(callable.key) }
+    gaps := [String]{}
+    loop pending.len() > 0 {
+        key :: &pending.pop() ?? break
+        if seen.get(key) ?? false -> next
+        seen[key] = true
+        if positions.get(key) == .Val(index) {
+            callable :: callables[index]
+            if !callable.foreign && !(covered.get(key) ?? false) -> &gaps.push("{callable.label} (reachable sema-checked callable has no complete TIR body or specialization)")
+        }
+        // Intrinsics and foreign boundaries have no source body. Only source
+        // declarations participate here; injected conversion bodies are already
+        // covered by the checked graph's completeness and function identities.
+        loop target in (edges.get(key) ?? [String]{}) -> &pending.push(target)
+    }
+    &gaps.sort()
+    SemaCostCoverage{gaps: gaps, has_roots: seen.len() > 0}
+}

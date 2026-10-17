@@ -1,0 +1,16 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("generate declared source") {
+    action :: b.action(
+        "bad-gen",
+        [],
+        [".jet/generated/main/bad.jet"],
+        ["sh", "-c", "printf 'fn nope(' > .jet/generated/main/bad.jet"],
+        ["Exec", "FS"]
+        )
+        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

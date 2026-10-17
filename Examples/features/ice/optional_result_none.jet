@@ -1,0 +1,32 @@
+// #4745: each return uses this callable's optional success type, not ?Int.
+#Error
+enum Missing { Bad }
+
+struct Claim { text: String }
+
+fn explicit_none() -> String? Missing! {
+    return None
+}
+fn fallback_none(input: Int?) -> Claim? Missing! {
+    value :: input ?? return None
+    Val(Claim{text: "{value}"})
+}
+fn tail_none() -> [String]? Missing! {
+    None
+}
+fn explicit_ok() -> String? Missing! {
+    Ok(None)
+}
+fn run() {
+    first :: explicit_none() ?? panic("unexpected error")
+    second :: fallback_none(None) ?? panic("unexpected error")
+    third :: tail_none() ?? panic("unexpected error")
+    fourth :: explicit_ok() ?? panic("unexpected error")
+    present :: fallback_none(Val(7)) ?? panic("unexpected error")
+    print(first == None)
+    print(second == None)
+    print(third == None)
+    print(fourth == None)
+    claim :: present ?? panic("missing claim")
+    print(claim.text)
+}

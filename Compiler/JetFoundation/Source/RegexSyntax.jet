@@ -3,25 +3,25 @@
 
 REGEX_SYNTAX_USIZE_MAX :: prep { 0xffffffffffffffff }
 
-pub struct RegexSyntaxError {
-    pub offset: Int
-    pub reason: String
+struct RegexSyntaxError {
+    offset: Int
+    reason: String
 }
 
 struct RegexSyntaxCodepoint {
-    pub value: Int
-    pub width: Int
+    value: Int
+    width: Int
 }
 
 struct RegexSyntaxParser {
-    pub bytes: [U8]
-    pub byte_pos: Int
-    pub pos: Int
+    bytes: [U8]
+    byte_pos: Int
+    pos: Int
 }
 
 struct RegexSyntaxNumber {
-    pub value: Int
-    pub error: RegexSyntaxError?
+    value: Int
+    error: RegexSyntaxError?
 }
 
 fn regex_syntax_codepoint_at(bytes: [U8], offset: Int) -> RegexSyntaxCodepoint? {
@@ -30,17 +30,17 @@ fn regex_syntax_codepoint_at(bytes: [U8], offset: Int) -> RegexSyntaxCodepoint? 
     if first < 128 -> return Val(RegexSyntaxCodepoint{value: first, width: 1})
     if first < 224 {
         second :: Int.from_u8(bytes[offset + 1])
-        return Val(RegexSyntaxCodepoint{value: ((first & 31) << 6) | (second & 63), width: 2})
+        return Val(RegexSyntaxCodepoint{value: ((((first).bit_and(31)) << 6)).bit_or(((second).bit_and(63))), width: 2})
     }
     if first < 240 {
         second :: Int.from_u8(bytes[offset + 1])
         third :: Int.from_u8(bytes[offset + 2])
-        return Val(RegexSyntaxCodepoint{value: ((first & 15) << 12) | ((second & 63) << 6) | (third & 63), width: 3})
+        return Val(RegexSyntaxCodepoint{value: (((((first).bit_and(15)) << 12)).bit_or((((second).bit_and(63)) << 6))).bit_or(((third).bit_and(63))), width: 3})
     }
     second :: Int.from_u8(bytes[offset + 1])
     third :: Int.from_u8(bytes[offset + 2])
     fourth :: Int.from_u8(bytes[offset + 3])
-    Val(RegexSyntaxCodepoint{value: ((first & 7) << 18) | ((second & 63) << 12) | ((third & 63) << 6) | (fourth & 63), width: 4})
+    Val(RegexSyntaxCodepoint{value: ((((((first).bit_and(7)) << 18)).bit_or((((second).bit_and(63)) << 12))).bit_or((((third).bit_and(63)) << 6))).bit_or(((fourth).bit_and(63))), width: 4})
 }
 
 fn regex_syntax_peek(parser: RegexSyntaxParser) -> Int? {
@@ -213,8 +213,8 @@ fn regex_syntax_parse_class(parser: &RegexSyntaxParser) -> RegexSyntaxError? {
 }
 
 struct RegexSyntaxClassItem {
-    pub value: Bool
-    pub error: RegexSyntaxError?
+    value: Bool
+    error: RegexSyntaxError?
 }
 
 fn regex_syntax_parse_class_item(parser: &RegexSyntaxParser) -> RegexSyntaxClassItem Never! {
@@ -289,7 +289,7 @@ fn regex_syntax_parse_number(parser: &RegexSyntaxParser) -> RegexSyntaxNumber Ne
     RegexSyntaxNumber{value: value, error: None}
 }
 
-pub fn regex_syntax_validate(pattern: String) -> RegexSyntaxError? {
+fn regex_syntax_validate(pattern: String) -> RegexSyntaxError? {
     parser := RegexSyntaxParser{bytes: pattern.bytes(), byte_pos: 0, pos: 0}
     error :: regex_syntax_parse_alt(&parser, None)
     if error == Val(found) -> return Val(found)

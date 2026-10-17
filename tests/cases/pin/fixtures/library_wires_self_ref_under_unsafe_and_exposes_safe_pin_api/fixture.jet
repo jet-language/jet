@@ -1,0 +1,21 @@
+
+use core.mem
+
+struct SelfNode {
+    payload: Int
+    self_addr: Int
+}
+
+fn wire_self(node: &SelfNode) -> Pin<SelfNode> {
+    #Unsafe("node storage is fixed for the returned pin; self_addr names this place") {
+        node.self_addr = mem.address_of(node.payload)
+    }
+    return mem.pin(&node)
+}
+
+fn run() {
+    node := SelfNode{payload: 7, self_addr: 0}
+    pinned :: wire_self(&node)
+    pinned.payload += 1
+    print("{(pinned.payload)} {(pinned.self_addr != 0)}")
+}

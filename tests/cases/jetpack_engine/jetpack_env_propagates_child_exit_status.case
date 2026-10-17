@@ -1,0 +1,16 @@
+# HAND-PORT tests/jetpack_engine.rs:5826-5843 jetpack_env_propagates_child_exit_status
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: jetpack_env_propagates_child_exit_status.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack env --no-color --trust -- sh -c "exit 17"
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: 17
+

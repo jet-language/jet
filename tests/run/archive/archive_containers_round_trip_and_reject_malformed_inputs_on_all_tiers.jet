@@ -1,0 +1,18 @@
+
+use core.archive as archive
+
+fn run() {
+    data :: [U8]{72, 101, 108, 108, 111}
+    zip :: archive.create("hello.txt", data) ?? panic("create")
+    print(zip.len() > 0)
+    print((archive.zip_decompress(zip) ?? [U8]{}) == data)
+    print((archive.zip_names_json(zip) ?? "") == "[\"hello.txt\"]")
+
+    tar :: archive.tar_add([U8]{}, "hello.txt", data) ?? panic("tar_add")
+    print((archive.tar_get(tar, "hello.txt") ?? [U8]{}) == data)
+    print((archive.tar_names_json(tar) ?? "") == "[\"hello.txt\"]")
+
+    print(archive.zip_decompress([U8]{1, 2, 3}) == .Err(_))
+    print(archive.tar_get([U8]{1, 2, 3}, "hello.txt") == .Err(_))
+    print(archive.tar_names_json([U8]{}) == .Err(_))
+}

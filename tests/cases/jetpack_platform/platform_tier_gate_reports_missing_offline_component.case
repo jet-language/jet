@@ -1,0 +1,14 @@
+# Exact tests/jetpack_platform.rs:514-541; runtime PENDING-SAME-HEAD.
+fixture: platform_tier_gate_reports_missing_offline_component.fixture
+mkdir: package-root
+mkdir: fixtures
+mkdir: missing-tools
+write: fixtures/nixpkgs-native-jetpack.json nixpkgs-native-jetpack.template
+step: jetpack build native-jetpack@nixpkgs --no-color --offline
+env: JETPACK_ROOT={work}/package-root
+env: JETPACK_FIXTURES={work}/fixtures
+env: PATH={work}/missing-tools
+exit: nonzero
+stderr: ~ "Error [E1315]:" # original code
+stderr: ~ "does not exist" # original missing component
+when dir-readable package-root/hangar: entries: package-root/hangar name ^= "native-jetpack-" = 0

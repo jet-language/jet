@@ -42,14 +42,14 @@ fn pkg_lock_read_text(path: String) -[FS]> String LockError! {
 
 // The parsed project lock, or None when it is absent, unreadable, or
 // malformed.
-pub fn pkg_lock_load(project_root: String) -[FS]> LockFile? {
+fn pkg_lock_load(project_root: String) -[FS]> LockFile? {
     raw :: pkg_lock_read_text(pkg_lock_file_path(project_root)) ?? return None
     Val(pkg_lock_parse(raw) ?? return None)
 }
 
 // Load the project lock without turning malformed lock state into a cache
 // miss. Fully locked providers use this boundary before any catalog lookup.
-pub fn pkg_lock_load_strict(project_root: String) -[FS]> LockFile? LockError! {
+fn pkg_lock_load_strict(project_root: String) -[FS]> LockFile? LockError! {
     path :: pkg_lock_file_path(project_root)
     if pkg_lock_read_text(path) == {
         .Ok(raw) -> Ok(Val(pkg_lock_parse(raw)))
@@ -63,7 +63,7 @@ pub fn pkg_lock_load_strict(project_root: String) -[FS]> LockFile? LockError! {
 // Load a project lock with the registered diagnostic for each reader
 // outcome. A missing lock stays optional; a present unsupported or corrupt
 // lock stops the strict caller before it can resolve or write anything.
-pub fn pkg_lock_load_strict_with_path(project_root: String) -[FS]> LockFile? LockError! {
+fn pkg_lock_load_strict_with_path(project_root: String) -[FS]> LockFile? LockError! {
     path :: pkg_lock_file_path(project_root)
     if pkg_lock_read_text(path) == {
         .Ok(raw) -> Ok(Val(pkg_lock_parse_with_path(raw, path)))
@@ -99,12 +99,12 @@ fn pkg_lock_load_or_empty(project_root: String) -[FS]> LockFile {
 // Publish one complete canonical serialization without exposing a partially
 // written file. The size check runs before any temporary exists, so a
 // rejected lock never replaces the last good lock or leaves scratch bytes.
-pub fn pkg_lock_write_atomically(project_root: String, contents: [U8]) LockError! -[FS, Env, Time]> {
+fn pkg_lock_write_atomically(project_root: String, contents: [U8]) LockError! -[FS, Env, Time]> {
     path :: pkg_lock_file_path(project_root)
     if contents.len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid("internal error: refusing to write project lock `{path}`: serialized lock is {contents.len()} bytes, over the 1 MiB limit"))
     if foundation_write_file_nofollow_at_root(project_root, UNIFIED_LOCK_FILE, contents, None) == {
         .Ok(_) -> {}
-        .Err(error) -> return Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error}"))
+        .Err(error) -> return Err(LockError.Invalid("could not atomically publish project lock `{path}`: {error.error}"))
     }
 }
 
@@ -119,7 +119,7 @@ fn pkg_lock_publish_or_report(project_root: String, contents: String) -[FS, Env,
 
 // D-RINGLAYER1=A M2: persist the inferred runtime profile of the root
 // package after a build. A no-op when the lock or package is absent.
-pub fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, layer: MIRRuntimeLayer) -[FS, Env, Exec, Time, Time.Wait, IO]> {
+fn pkg_lock_record_inferred_layer(project_root: String, package_name: String, layer: MIRRuntimeLayer) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load(project_root) ?? return
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
@@ -134,7 +134,7 @@ pub fn pkg_lock_record_inferred_layer(project_root: String, package_name: String
 // D-JPK-CACHE1=A (A4): stamp a realized package's output envelope into the
 // lock after it is built, so cache substitution can be driven off the lock.
 // A no-op when the lock or the named package is absent.
-pub fn pkg_lock_record_envelope(project_root: String, package_name: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
+fn pkg_lock_record_envelope(project_root: String, package_name: String, envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load(project_root) ?? return
     loop index in 0..<lock.packages.len() {
         if lock.packages[index].name == package_name {
@@ -176,7 +176,7 @@ fn pkg_lock_envelope_output_is(package: LockedPackage, output_hash: String) -> B
 // complete closure record, creating the lock when the project has none. This
 // entry is the trust root a later offline replay matches before reusing the
 // Hangar copy. Upserts by package name.
-pub fn pkg_lock_record_nix_realization(project_root: String, name: String, version: String, reference_input: String, output: String, nix_closure: NixClosureRecord, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn pkg_lock_record_nix_realization(project_root: String, name: String, version: String, reference_input: String, output: String, nix_closure: NixClosureRecord, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     nix_closure.validate()
     envelope.validate_nix_catalog()
     if nix_closure.output != output || envelope.output_hash != output -> return Err(LockError.Invalid("Nix closure and envelope outputs must match the realized output digest"))
@@ -226,7 +226,7 @@ fn pkg_lock_reference_source_name(reference: String) -> String Never! {
 // Hangar projection that supplied the generated binding. Upserting by
 // foreign dependency name keeps a provider change visible and preserves the
 // receipt only when the identity and envelope are unchanged.
-pub fn pkg_lock_record_foreign_realization(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn pkg_lock_record_foreign_realization(project_root: String, name: String, version: String, language: ForeignLanguage, reference: String, output: String, envelope: LockEnvelope) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     lock := pkg_lock_load_for_update(project_root)
     lock.version = PKG_LOCK_VERSION
     source :: LockSource.Foreign{language: language, reference: reference, output: output}
@@ -248,7 +248,7 @@ pub fn pkg_lock_record_foreign_realization(project_root: String, name: String, v
 // only fills these records; it is never copied into a second lock schema. A
 // later bridge build replaces the earlier bridge records and leaves
 // user/provider records untouched.
-pub fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String, packages: [LockedPackage]) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String, packages: [LockedPackage]) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     if bridge_identity.trim() == "" -> return Err(LockError.Invalid("Rust bridge lock identity is empty"))
     if packages.len() == 0 -> return
     lock := pkg_lock_load_for_update(project_root)
@@ -270,28 +270,28 @@ pub fn pkg_lock_record_rust_bridge(project_root: String, bridge_identity: String
 // D-JPK-OFFLINE2=B: the complete recorded Nix realization for `reference`.
 // The output is a content digest, never a host path; the closure record
 // carries everything offline replay and cache validation need.
-pub fn pkg_lock_nix_realization(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? {
+fn pkg_lock_nix_realization(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? {
     found :: pkg_lock_nix_realization_strict(project_root, reference) ?? return None
     found
 }
 
 // Strict `pkg_lock_nix_realization`: a present but malformed lock is a
 // trust-state failure, never a cache miss.
-pub fn pkg_lock_nix_realization_strict(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
+fn pkg_lock_nix_realization_strict(project_root: String, reference: String) -[FS]> (closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
     found :: pkg_lock_locked_nix_package_strict(project_root, reference) ?? return Ok(None)
     Ok(Val((closure: found.closure, envelope: found.envelope)))
 }
 
 // The package identity with its complete portable Nix lock record; None
 // when the lock has no record for `reference`.
-pub fn pkg_lock_locked_nix_package(project_root: String, reference: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? {
+fn pkg_lock_locked_nix_package(project_root: String, reference: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? {
     found :: pkg_lock_locked_nix_package_strict(project_root, reference) ?? return None
     found
 }
 
 // Strict `pkg_lock_locked_nix_package`: a present but malformed lock is a
 // trust-state failure, never a cache miss.
-pub fn pkg_lock_locked_nix_package_strict(project_root: String, reference_input: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
+fn pkg_lock_locked_nix_package_strict(project_root: String, reference_input: String) -[FS]> (name: String, version: String, closure: NixClosureRecord, envelope: LockEnvelope)? LockError! {
     loaded :: pkg_lock_load_strict(project_root)
     lock :: loaded ?? return Ok(None)
     reference :: pkg_canonical_locked_ref(reference_input)
@@ -351,13 +351,13 @@ fn pkg_lock_same_realized_source(locked: LockSource, recorded: LockSource) -> Bo
 
 // Record an exact CRAN source closure and realized R library for offline
 // replay.
-pub fn pkg_lock_record_cran_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
+fn pkg_lock_record_cran_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source :: LockSource.Cran{reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority}
     pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_cran())
 }
 
 // Exact CRAN realization trust root for online integrity and offline replay.
-pub fn pkg_lock_cran_realization(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
+fn pkg_lock_cran_realization(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
     lock :: pkg_lock_load(project_root) ?? return None
     loop package in lock.packages {
         if package.source == {
@@ -374,14 +374,14 @@ pub fn pkg_lock_cran_realization(project_root: String, reference: String) -[FS]>
 }
 
 // Record an exact LuaRocks source closure and realized module tree.
-pub fn pkg_lock_record_luarocks_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
+fn pkg_lock_record_luarocks_realization(project_root: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source :: LockSource.LuaRocks{reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority}
     pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_luarocks())
 }
 
 // Exact LuaRocks realization trust root for online integrity and offline
 // replay.
-pub fn pkg_lock_luarocks_realization(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
+fn pkg_lock_luarocks_realization(project_root: String, reference: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
     lock :: pkg_lock_load(project_root) ?? return None
     loop package in lock.packages {
         if package.source == {
@@ -399,14 +399,14 @@ pub fn pkg_lock_luarocks_realization(project_root: String, reference: String) -[
 
 // Record one exact RubyGems/CPAN/Packagist closure under the shared lock
 // law.
-pub fn pkg_lock_record_registry_realization(project_root: String, registry: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
+fn pkg_lock_record_registry_realization(project_root: String, registry: String, name: String, version: String, reference: String, output: String, source_hash: String, repository: String, authority: String, dependencies: [String], envelope: LockEnvelope) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     source :: LockSource.Registry{registry: registry, reference: reference, output: output, source_hash: source_hash, repository: repository, authority: authority, tier: "not-applicable", gate_status: "not-applicable"}
     pkg_lock_record_source_realization(project_root, name, version, source, source_hash, dependencies, envelope, package -> package.is_registry(registry))
 }
 
 // Exact scripting-registry trust root for online drift checks and offline
 // replay.
-pub fn pkg_lock_registry_realization(project_root: String, registry: String, reference_input: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
+fn pkg_lock_registry_realization(project_root: String, registry: String, reference_input: String) -[FS]> (output: String, source_hash: String, repository: String, authority: String, envelope: LockEnvelope)? {
     lock :: pkg_lock_load(project_root) ?? return None
     reference :: pkg_canonical_locked_ref(reference_input)
     loop package in lock.packages {
@@ -427,7 +427,7 @@ pub fn pkg_lock_registry_realization(project_root: String, registry: String, ref
 // toolchain, keyed by channel. Unlike `pkg_lock_record_envelope` this creates
 // a minimal lock, since `jet update jet` / `jet init` may run before any
 // dependency lock exists.
-pub fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchain) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchain) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     toolchain.validate_completeness()
     loaded :: pkg_lock_load_strict(project_root)
     lock := loaded ?? LockFile.empty()
@@ -450,7 +450,7 @@ pub fn pkg_lock_record_toolchain(project_root: String, toolchain: LockedToolchai
 
 // D-BROWSER-AUTO1=A (#1187): upsert a project-locked browser binary by
 // engine.
-pub fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[FS, Env, Exec, Time, Time.Wait, IO]> {
+fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[FS, Env, Exec, Time, Time.Wait, IO]> {
     lock := pkg_lock_load_or_empty(project_root)
     lock.version = PKG_LOCK_VERSION
     replaced := false
@@ -466,14 +466,14 @@ pub fn pkg_lock_record_browser(project_root: String, browser: LockedBrowser) -[F
 }
 
 // D-JPK-CHANNEL1=A: read one named source channel lock.
-pub fn pkg_lock_locked_source_channel(project_root: String, name: String) -[FS]> LockedSourceChannel? {
+fn pkg_lock_locked_source_channel(project_root: String, name: String) -[FS]> LockedSourceChannel? {
     lock :: pkg_lock_load(project_root) ?? return None
     lock.find_source_channel(name)
 }
 
 // D-JPK-CHANNEL1=A: upsert a named source channel lock, keyed by source
 // name so moving a channel replaces the prior exact identity.
-pub fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceChannel) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
+fn pkg_lock_record_source_channel(project_root: String, input: LockedSourceChannel) LockError! -[FS, Env, Exec, Time, Time.Wait]> {
     source := input
     source.exact = pkg_canonical_locked_ref(source.exact)
     source.validate_completeness()

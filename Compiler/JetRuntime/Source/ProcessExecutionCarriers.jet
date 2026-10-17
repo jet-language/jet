@@ -1,0 +1,154 @@
+// ProcessReceipt144 and ProcessPlan72 native carriers. Every slot is one physical
+// 8-byte C-ABI word: Text and List<Text> fields are owned pointers to 24-byte
+// headers, ExactInt fields are owned Int words, the signal option is a box8 whose
+// word owns an ExactInt, and limit_hit is a nullable rawenum box8. Bool fields
+// are normalized 0/1 words. Borrowed getters lend headers and never transfer
+// ownership.
+fn process_flag_word(address: I64) -> I64 {
+    word :: encoding_word(address)
+    if (word.bit_and(I64{255})) == (I64{0}) -> { I64{0} } else -> { I64{1} }
+}
+fn process_optional_int_box_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(I64{8}, I64{8})
+    encoding_store(result, jet_rt_int_clone(encoding_word(value)))
+    result
+}
+fn process_optional_int_box_drop(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_int_drop(encoding_word(value))
+    jet_rt_free(value, I64{8}, I64{8})
+}
+fn process_optional_int_box_eq(a: I64, b: I64) -> Bool {
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    jet_int_compare(encoding_word(a), encoding_word(b)) == I64{0}
+}
+#Export(c) fn jet_rt_handle_clone_process_plan(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{72}, I64{8})
+    coll_copy(value, result, I64{72})
+    encoding_store(result, jet_rt_string_clone(encoding_word(value)))
+    encoding_store(result + I64{8}, process_text_list_clone(encoding_word(value + I64{8}), false))
+    encoding_store(result + I64{16}, jet_rt_string_clone(encoding_word(value + I64{16})))
+    encoding_store(result + I64{24}, jet_rt_string_clone(encoding_word(value + I64{24})))
+    encoding_store(result + I64{32}, jet_rt_string_clone(encoding_word(value + I64{32})))
+    encoding_store(result + I64{40}, process_text_list_clone(encoding_word(value + I64{40}), false))
+    encoding_store(result + I64{48}, jet_rt_string_clone(encoding_word(value + I64{48})))
+    encoding_store(result + I64{56}, process_text_list_clone(encoding_word(value + I64{56}), false))
+    encoding_store(result + I64{64}, process_text_list_clone(encoding_word(value + I64{64}), false))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_process_plan(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(encoding_word(value))
+    process_text_list_drop(encoding_word(value + I64{8}), false)
+    jet_rt_string_drop(encoding_word(value + I64{16}))
+    jet_rt_string_drop(encoding_word(value + I64{24}))
+    jet_rt_string_drop(encoding_word(value + I64{32}))
+    process_text_list_drop(encoding_word(value + I64{40}), false)
+    jet_rt_string_drop(encoding_word(value + I64{48}))
+    process_text_list_drop(encoding_word(value + I64{56}), false)
+    process_text_list_drop(encoding_word(value + I64{64}), false)
+    jet_rt_free(value, I64{72}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_process_plan(a: I64, b: I64) -> Bool {
+    if !jet_rt_string_eq(encoding_word(a), encoding_word(b)) -> return false
+    if !process_text_list_eq(encoding_word(a + I64{8}), encoding_word(b + I64{8}), false) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{16}), encoding_word(b + I64{16})) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{24}), encoding_word(b + I64{24})) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{32}), encoding_word(b + I64{32})) -> return false
+    if !process_text_list_eq(encoding_word(a + I64{40}), encoding_word(b + I64{40}), false) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{48}), encoding_word(b + I64{48})) -> return false
+    if !process_text_list_eq(encoding_word(a + I64{56}), encoding_word(b + I64{56}), false) -> return false
+    process_text_list_eq(encoding_word(a + I64{64}), encoding_word(b + I64{64}), false)
+}
+#Export(c) fn jet_rt_handle_field_process_plan_executable_identity(value: I64, out: I64) { coll_copy(encoding_word(value), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_plan_input_digest(value: I64, out: I64) { coll_copy(encoding_word(value + I64{16}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_plan_policy_digest(value: I64, out: I64) { coll_copy(encoding_word(value + I64{24}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_plan_backend(value: I64, out: I64) { coll_copy(encoding_word(value + I64{32}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_plan_descendants(value: I64, out: I64) { coll_copy(encoding_word(value + I64{48}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_show_process_plan(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(result, rt_static_text("ProcessPlan "))
+    rt_text_push_word(result, I64{123}, I64{1})
+    jet_rt_string_builder_push(result, rt_static_text(" executable: "))
+    jet_rt_string_builder_push(result, encoding_word(value))
+    jet_rt_string_builder_push(result, rt_static_text(", backend: "))
+    jet_rt_string_builder_push(result, encoding_word(value + I64{32}))
+    jet_rt_string_builder_push(result, rt_static_text(", policy_digest: "))
+    jet_rt_string_builder_push(result, encoding_word(value + I64{24}))
+    rt_text_push_word(result, I64{32}, I64{1})
+    rt_text_push_word(result, I64{125}, I64{1})
+    jet_rt_string_builder_finish(result)
+}
+#Export(c) fn jet_rt_handle_clone_process_receipt(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{144}, I64{8})
+    coll_copy(value, result, I64{144})
+    encoding_store(result, jet_rt_int_clone(encoding_word(value)))
+    encoding_store(result + I64{8}, jet_rt_string_clone(encoding_word(value + I64{8})))
+    encoding_store(result + I64{16}, jet_rt_string_clone(encoding_word(value + I64{16})))
+    encoding_store(result + I64{24}, process_flag_word(value + I64{24}))
+    encoding_store(result + I64{32}, process_optional_int_box_clone(encoding_word(value + I64{32})))
+    encoding_store(result + I64{40}, process_flag_word(value + I64{40}))
+    encoding_store(result + I64{48}, jet_rt_string_clone(encoding_word(value + I64{48})))
+    encoding_store(result + I64{56}, process_text_list_clone(encoding_word(value + I64{56}), false))
+    encoding_store(result + I64{64}, jet_rt_string_clone(encoding_word(value + I64{64})))
+    encoding_store(result + I64{72}, jet_rt_string_clone(encoding_word(value + I64{72})))
+    encoding_store(result + I64{80}, jet_rt_string_clone(encoding_word(value + I64{80})))
+    encoding_store(result + I64{88}, process_text_list_clone(encoding_word(value + I64{88}), false))
+    encoding_store(result + I64{96}, jet_rt_string_clone(encoding_word(value + I64{96})))
+    encoding_store(result + I64{104}, process_text_list_clone(encoding_word(value + I64{104}), false))
+    encoding_store(result + I64{112}, process_text_list_clone(encoding_word(value + I64{112}), false))
+    encoding_store(result + I64{120}, process_flag_word(value + I64{120}))
+    encoding_store(result + I64{128}, jet_rt_int_clone(encoding_word(value + I64{128})))
+    encoding_store(result + I64{136}, process_optional_raw_clone(encoding_word(value + I64{136})))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_process_receipt(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_int_drop(encoding_word(value))
+    jet_rt_string_drop(encoding_word(value + I64{8}))
+    jet_rt_string_drop(encoding_word(value + I64{16}))
+    process_optional_int_box_drop(encoding_word(value + I64{32}))
+    jet_rt_string_drop(encoding_word(value + I64{48}))
+    process_text_list_drop(encoding_word(value + I64{56}), false)
+    jet_rt_string_drop(encoding_word(value + I64{64}))
+    jet_rt_string_drop(encoding_word(value + I64{72}))
+    jet_rt_string_drop(encoding_word(value + I64{80}))
+    process_text_list_drop(encoding_word(value + I64{88}), false)
+    jet_rt_string_drop(encoding_word(value + I64{96}))
+    process_text_list_drop(encoding_word(value + I64{104}), false)
+    process_text_list_drop(encoding_word(value + I64{112}), false)
+    jet_rt_int_drop(encoding_word(value + I64{128}))
+    encoding_enum_drop(encoding_word(value + I64{136}))
+    jet_rt_free(value, I64{144}, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_process_receipt(a: I64, b: I64) -> Bool {
+    if jet_int_compare(encoding_word(a), encoding_word(b)) != (I64{0}) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{8}), encoding_word(b + I64{8})) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{16}), encoding_word(b + I64{16})) -> return false
+    if process_flag_word(a + I64{24}) != process_flag_word(b + I64{24}) -> return false
+    if !process_optional_int_box_eq(encoding_word(a + I64{32}), encoding_word(b + I64{32})) -> return false
+    if process_flag_word(a + I64{40}) != process_flag_word(b + I64{40}) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{48}), encoding_word(b + I64{48})) -> return false
+    if !process_text_list_eq(encoding_word(a + I64{56}), encoding_word(b + I64{56}), false) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{64}), encoding_word(b + I64{64})) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{72}), encoding_word(b + I64{72})) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{80}), encoding_word(b + I64{80})) -> return false
+    if !process_text_list_eq(encoding_word(a + I64{88}), encoding_word(b + I64{88}), false) -> return false
+    if !jet_rt_string_eq(encoding_word(a + I64{96}), encoding_word(b + I64{96})) -> return false
+    if !process_text_list_eq(encoding_word(a + I64{104}), encoding_word(b + I64{104}), false) -> return false
+    if !process_text_list_eq(encoding_word(a + I64{112}), encoding_word(b + I64{112}), false) -> return false
+    if process_flag_word(a + I64{120}) != process_flag_word(b + I64{120}) -> return false
+    if jet_int_compare(encoding_word(a + I64{128}), encoding_word(b + I64{128})) != (I64{0}) -> return false
+    process_optional_raw_eq(encoding_word(a + I64{136}), encoding_word(b + I64{136}))
+}
+#Export(c) fn jet_rt_handle_field_process_receipt_output(value: I64, out: I64) { coll_copy(encoding_word(value + I64{8}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_receipt_errors(value: I64, out: I64) { coll_copy(encoding_word(value + I64{16}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_receipt_executable_identity(value: I64, out: I64) { coll_copy(encoding_word(value + I64{48}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_receipt_input_digest(value: I64, out: I64) { coll_copy(encoding_word(value + I64{64}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_receipt_policy_digest(value: I64, out: I64) { coll_copy(encoding_word(value + I64{72}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_receipt_backend(value: I64, out: I64) { coll_copy(encoding_word(value + I64{80}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_receipt_descendants(value: I64, out: I64) { coll_copy(encoding_word(value + I64{96}), out, I64{24}) }
+#Export(c) fn jet_rt_handle_field_process_receipt_success(value: I64) -> I64 { value + I64{24} }
+#Export(c) fn jet_rt_handle_field_process_receipt_timed_out(value: I64) -> I64 { value + I64{40} }
+#Export(c) fn jet_rt_handle_field_process_receipt_redacted(value: I64) -> I64 { value + I64{120} }

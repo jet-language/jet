@@ -5,7 +5,7 @@
 // attempt, and cache admission records. Explaining never repairs: a missing,
 // unsafe, or mismatched proof is reported as a loss or a conflict.
 
-pub enum ExplainLens {
+enum ExplainLens {
     All
     WhyDepends
     WhatDepends
@@ -38,7 +38,7 @@ pub enum ExplainLens {
 
 // One persisted fact the explanation could not prove (`loss`) or two facts
 // that disagree (`conflict`).
-pub enum ExplainReportKind {
+enum ExplainReportKind {
     Loss
     Conflict
 
@@ -50,9 +50,9 @@ pub enum ExplainReportKind {
     }
 }
 
-pub struct ExplainReport {
-    pub kind: ExplainReportKind
-    pub message: String
+struct ExplainReport {
+    kind: ExplainReportKind
+    message: String
 
     fn loss(message: String) -> ExplainReport Never! {
         ExplainReport{kind: ExplainReportKind.Loss, message: message}
@@ -63,7 +63,7 @@ pub struct ExplainReport {
     }
 
     // A `jet.report/v3` finding (code E1340) plus its `kind`.
-    fn to_tree(self) -> DataTree Never! {
+    fn to_tree(self) -> Dyn Never! {
         conflict :: self.kind == ExplainReportKind.Conflict
         report :: ReportEnvelope.new(
             "tool",
@@ -76,245 +76,248 @@ pub struct ExplainReport {
         tree :: report.to_tree()
         if tree == {
             .Object(fields) -> {
-                extended := fields
-                extended["kind"] = DataTree.Text(self.kind.label())
-                DataTree.Object(extended)
+                extended := [(key: String, value: Dyn)]{}
+                loop pair in fields {
+                    if pair.key != "kind" -> &extended.push(pair)
+                }
+                &extended.push((key: "kind", value: Dyn.Text(self.kind.label())))
+                Dyn.Object(extended)
             }
             else -> tree
         }
     }
 }
 
-pub struct ExplainEntry {
-    pub id: String
-    pub name: String
-    pub version: String
-    pub reference: String
-    pub output_hash: String
-    pub output_path: String
-    pub bin_path: String
-    pub rlib_path: String
-    pub receipt: String
-    pub realized_at: Int
-    pub last_used_at: Int
+struct ExplainEntry {
+    id: String
+    name: String
+    version: String
+    reference: String
+    output_hash: String
+    output_path: String
+    bin_path: String
+    rlib_path: String
+    receipt: String
+    realized_at: Int
+    last_used_at: Int
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["id"] = DataTree.Text(self.id)
-        object["name"] = DataTree.Text(self.name)
-        object["version"] = DataTree.Text(self.version)
-        object["reference"] = DataTree.Text(self.reference)
-        object["output_hash"] = DataTree.Text(self.output_hash)
-        object["output_path"] = DataTree.Text(self.output_path)
-        object["bin_path"] = DataTree.Text(self.bin_path)
-        object["rlib_path"] = DataTree.Text(self.rlib_path)
-        object["receipt"] = DataTree.Text(self.receipt)
-        object["realized_at"] = DataTree.Int(self.realized_at)
-        object["last_used_at"] = DataTree.Int(self.last_used_at)
-        DataTree.Object(object)
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["id"] = Dyn.Text(self.id)
+        object["name"] = Dyn.Text(self.name)
+        object["version"] = Dyn.Text(self.version)
+        object["reference"] = Dyn.Text(self.reference)
+        object["output_hash"] = Dyn.Text(self.output_hash)
+        object["output_path"] = Dyn.Text(self.output_path)
+        object["bin_path"] = Dyn.Text(self.bin_path)
+        object["rlib_path"] = Dyn.Text(self.rlib_path)
+        object["receipt"] = Dyn.Text(self.receipt)
+        object["realized_at"] = Dyn.Int(self.realized_at)
+        object["last_used_at"] = Dyn.Int(self.last_used_at)
+        Dyn.Object(object)
     }
 }
 
-pub struct ExplainObject {
-    pub digest: String
-    pub path: String
-    pub external: Bool
-    pub known: Bool
-    pub owners: [String]
+struct ExplainObject {
+    digest: String
+    path: String
+    external: Bool
+    known: Bool
+    owners: [String]
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["digest"] = DataTree.Text(self.digest)
-        object["path"] = DataTree.Text(self.path)
-        object["external"] = DataTree.Bool(self.external)
-        object["known"] = DataTree.Bool(self.known)
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["digest"] = Dyn.Text(self.digest)
+        object["path"] = Dyn.Text(self.path)
+        object["external"] = Dyn.Bool(self.external)
+        object["known"] = Dyn.Bool(self.known)
         object["owners"] = pkg_json_texts(self.owners)
-        DataTree.Object(object)
+        Dyn.Object(object)
     }
 }
 
-pub struct ExplainGraph {
-    pub direct_dependencies: [ExplainObject]
-    pub dependencies: [ExplainObject]
-    pub direct_referrers: [ExplainObject]
-    pub referrers: [ExplainObject]
-    pub closure: [ExplainObject]
+struct ExplainGraph {
+    direct_dependencies: [ExplainObject]
+    dependencies: [ExplainObject]
+    direct_referrers: [ExplainObject]
+    referrers: [ExplainObject]
+    closure: [ExplainObject]
 
     fn empty() -> ExplainGraph Never! {
         ExplainGraph{direct_dependencies: [ExplainObject]{}, dependencies: [ExplainObject]{}, direct_referrers: [ExplainObject]{}, referrers: [ExplainObject]{}, closure: [ExplainObject]{}}
     }
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
         object["direct_dependencies"] = store_explain_objects_tree(self.direct_dependencies)
         object["dependencies"] = store_explain_objects_tree(self.dependencies)
         object["direct_referrers"] = store_explain_objects_tree(self.direct_referrers)
         object["referrers"] = store_explain_objects_tree(self.referrers)
         object["closure"] = store_explain_objects_tree(self.closure)
-        DataTree.Object(object)
+        Dyn.Object(object)
     }
 }
 
-fn store_explain_objects_tree(objects: [ExplainObject]) -> DataTree Never! {
-    items := [DataTree]{}
+fn store_explain_objects_tree(objects: [ExplainObject]) -> Dyn Never! {
+    items := [Dyn]{}
     loop object in objects -> &items.push(object.to_tree())
-    DataTree.Array(items)
+    Dyn.Array(items)
 }
 
-pub struct ExplainProfile {
-    pub profile: String
-    pub generation: Int
-    pub output_hash: String
-    pub provider_facts: ProviderFacts
+struct ExplainProfile {
+    profile: String
+    generation: Int
+    output_hash: String
+    provider_facts: ProviderFacts
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["profile"] = DataTree.Text(self.profile)
-        object["generation"] = DataTree.Int(self.generation)
-        object["output_hash"] = DataTree.Text(self.output_hash)
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["profile"] = Dyn.Text(self.profile)
+        object["generation"] = Dyn.Int(self.generation)
+        object["output_hash"] = Dyn.Text(self.output_hash)
         object["provider_facts"] = self.provider_facts.to_json_tree()
-        DataTree.Object(object)
+        Dyn.Object(object)
     }
 }
 
-pub struct ExplainProvider {
-    pub provider: String
-    pub immutable_source: String
-    pub source_digest: String
-    pub toolchain_facts: String
-    pub policy_facts: String
-    pub producer_facts: [String: String]
-    pub provider_facts: ProviderFacts?
-    pub locked_provider_facts: ProviderFacts?
-    pub profile_facts: [ExplainProfile]
-    pub native_document: String
+struct ExplainProvider {
+    provider: String
+    immutable_source: String
+    source_digest: String
+    toolchain_facts: String
+    policy_facts: String
+    producer_facts: [String: String]
+    provider_facts: ProviderFacts?
+    locked_provider_facts: ProviderFacts?
+    profile_facts: [ExplainProfile]
+    native_document: String
 
-    fn to_tree(self) -> DataTree Never! {
-        facts := [String: DataTree]{}
+    fn to_tree(self) -> Dyn Never! {
+        facts := [String: Dyn]{}
         fact_keys :: store_sorted_keys(self.producer_facts)
-        loop key in fact_keys -> facts[key] = DataTree.Text(self.producer_facts[key])
-        profiles := [DataTree]{}
+        loop key in fact_keys -> facts[key] = Dyn.Text(self.producer_facts[key])
+        profiles := [Dyn]{}
         loop profile in self.profile_facts -> &profiles.push(profile.to_tree())
-        object := [String: DataTree]{}
-        object["provider"] = DataTree.Text(self.provider)
-        object["immutable_source"] = DataTree.Text(self.immutable_source)
-        object["source_digest"] = DataTree.Text(self.source_digest)
-        object["toolchain_facts"] = DataTree.Text(self.toolchain_facts)
-        object["policy_facts"] = DataTree.Text(self.policy_facts)
-        object["producer_facts"] = DataTree.Object(facts)
+        object := [String: Dyn]{}
+        object["provider"] = Dyn.Text(self.provider)
+        object["immutable_source"] = Dyn.Text(self.immutable_source)
+        object["source_digest"] = Dyn.Text(self.source_digest)
+        object["toolchain_facts"] = Dyn.Text(self.toolchain_facts)
+        object["policy_facts"] = Dyn.Text(self.policy_facts)
+        object["producer_facts"] = Dyn.Object(facts)
         object["provider_facts"] = store_explain_facts_tree(self.provider_facts)
         object["locked_provider_facts"] = store_explain_facts_tree(self.locked_provider_facts)
-        object["profile_facts"] = DataTree.Array(profiles)
-        object["native_document"] = DataTree.Text(self.native_document)
-        DataTree.Object(object)
+        object["profile_facts"] = Dyn.Array(profiles)
+        object["native_document"] = Dyn.Text(self.native_document)
+        Dyn.Object(object)
     }
 }
 
-fn store_explain_facts_tree(facts: ProviderFacts?) -> DataTree Never! {
+fn store_explain_facts_tree(facts: ProviderFacts?) -> Dyn Never! {
     if facts == {
         .Val(found) -> found.to_json_tree()
-        .None -> DataTree.Null
+        .None -> Dyn.Null
     }
 }
 
-pub struct ExplainRoot {
-    pub kind: String
-    pub id: String
-    pub producer: String
-    pub phase: String
-    pub label: String
-    pub reference: String
-    pub targets: [String]
-    pub reason: String
+struct ExplainRoot {
+    kind: String
+    id: String
+    producer: String
+    phase: String
+    label: String
+    reference: String
+    targets: [String]
+    reason: String
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["kind"] = DataTree.Text(self.kind)
-        object["id"] = DataTree.Text(self.id)
-        object["producer"] = DataTree.Text(self.producer)
-        object["phase"] = DataTree.Text(self.phase)
-        object["label"] = DataTree.Text(self.label)
-        object["reference"] = DataTree.Text(self.reference)
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["kind"] = Dyn.Text(self.kind)
+        object["id"] = Dyn.Text(self.id)
+        object["producer"] = Dyn.Text(self.producer)
+        object["phase"] = Dyn.Text(self.phase)
+        object["label"] = Dyn.Text(self.label)
+        object["reference"] = Dyn.Text(self.reference)
         object["targets"] = pkg_json_texts(self.targets)
-        object["reason"] = DataTree.Text(self.reason)
-        DataTree.Object(object)
+        object["reason"] = Dyn.Text(self.reason)
+        Dyn.Object(object)
     }
 }
 
-pub struct ExplainLiveness {
-    pub live: Bool
-    pub roots: [ExplainRoot]
-    pub reason: String
+struct ExplainLiveness {
+    live: Bool
+    roots: [ExplainRoot]
+    reason: String
 
     fn empty() -> ExplainLiveness Never! {
         ExplainLiveness{live: false, roots: [ExplainRoot]{}, reason: ""}
     }
 
-    fn to_tree(self) -> DataTree Never! {
-        roots := [DataTree]{}
+    fn to_tree(self) -> Dyn Never! {
+        roots := [Dyn]{}
         loop root in self.roots -> &roots.push(root.to_tree())
-        object := [String: DataTree]{}
-        object["live"] = DataTree.Bool(self.live)
-        object["reason"] = DataTree.Text(self.reason)
-        object["roots"] = DataTree.Array(roots)
-        DataTree.Object(object)
+        object := [String: Dyn]{}
+        object["live"] = Dyn.Bool(self.live)
+        object["reason"] = Dyn.Text(self.reason)
+        object["roots"] = Dyn.Array(roots)
+        Dyn.Object(object)
     }
 }
 
-pub struct ExplainAttempt {
-    pub id: String
-    pub package: String
-    pub reference: String
-    pub provider: String
-    pub status: String
-    pub failed_step: Int
-    pub scratch_dir: String
-    pub log_dir: String
+struct ExplainAttempt {
+    id: String
+    package: String
+    reference: String
+    provider: String
+    status: String
+    failed_step: Int
+    scratch_dir: String
+    log_dir: String
 
     fn from_attempt(attempt: BuildAttempt) -> ExplainAttempt Never! {
         ExplainAttempt{id: attempt.id, package: attempt.package, reference: attempt.reference, provider: attempt.provider, status: attempt.status, failed_step: attempt.failed_step, scratch_dir: attempt.scratch_dir, log_dir: attempt.log_dir}
     }
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["id"] = DataTree.Text(self.id)
-        object["package"] = DataTree.Text(self.package)
-        object["reference"] = DataTree.Text(self.reference)
-        object["provider"] = DataTree.Text(self.provider)
-        object["status"] = DataTree.Text(self.status)
-        object["failed_step"] = DataTree.Int(self.failed_step)
-        object["scratch_dir"] = DataTree.Text(self.scratch_dir)
-        object["log_dir"] = DataTree.Text(self.log_dir)
-        DataTree.Object(object)
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["id"] = Dyn.Text(self.id)
+        object["package"] = Dyn.Text(self.package)
+        object["reference"] = Dyn.Text(self.reference)
+        object["provider"] = Dyn.Text(self.provider)
+        object["status"] = Dyn.Text(self.status)
+        object["failed_step"] = Dyn.Int(self.failed_step)
+        object["scratch_dir"] = Dyn.Text(self.scratch_dir)
+        object["log_dir"] = Dyn.Text(self.log_dir)
+        Dyn.Object(object)
     }
 }
 
-pub struct ExplainCacheAdmission {
-    pub role: String
-    pub decision: String
-    pub builder: String
-    pub provenance: String
-    pub receipt_version: Int?
-    pub receipt_expires_unix: Int?
-    pub reason: String
+struct ExplainCacheAdmission {
+    role: String
+    decision: String
+    builder: String
+    provenance: String
+    receipt_version: Int?
+    receipt_expires_unix: Int?
+    reason: String
 
-    fn to_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["role"] = DataTree.Text(self.role)
-        object["decision"] = DataTree.Text(self.decision)
-        object["builder"] = DataTree.Text(self.builder)
-        object["provenance"] = DataTree.Text(self.provenance)
+    fn to_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["role"] = Dyn.Text(self.role)
+        object["decision"] = Dyn.Text(self.decision)
+        object["builder"] = Dyn.Text(self.builder)
+        object["provenance"] = Dyn.Text(self.provenance)
         object["receipt_version"] = store_explain_optional_int(self.receipt_version)
         object["receipt_expires_unix"] = store_explain_optional_int(self.receipt_expires_unix)
-        object["reason"] = DataTree.Text(self.reason)
-        DataTree.Object(object)
+        object["reason"] = Dyn.Text(self.reason)
+        Dyn.Object(object)
     }
 }
 
-fn store_explain_optional_int(value: Int?) -> DataTree Never! {
+fn store_explain_optional_int(value: Int?) -> Dyn Never! {
     if value == {
-        .Val(number) -> DataTree.Int(number)
-        .None -> DataTree.Null
+        .Val(number) -> Dyn.Int(number)
+        .None -> Dyn.Null
     }
 }
 
@@ -326,80 +329,80 @@ fn store_explain_optional_int_text(value: Int?) -> String Never! {
     }
 }
 
-pub struct ExplainRebuild {
-    pub decision: String
-    pub reason: String
-    pub action_key: String
-    pub cache_identity: [String: String]
-    pub cache_admissions: [ExplainCacheAdmission]
-    pub checks: [String: String]
-    pub attempt: ExplainAttempt?
+struct ExplainRebuild {
+    decision: String
+    reason: String
+    action_key: String
+    cache_identity: [String: String]
+    cache_admissions: [ExplainCacheAdmission]
+    checks: [String: String]
+    attempt: ExplainAttempt?
 
     fn empty() -> ExplainRebuild Never! {
         ExplainRebuild{decision: "", reason: "", action_key: "", cache_identity: [String: String]{}, cache_admissions: [ExplainCacheAdmission]{}, checks: [String: String]{}, attempt: None}
     }
 
-    fn to_tree(self) -> DataTree Never! {
-        admissions := [DataTree]{}
+    fn to_tree(self) -> Dyn Never! {
+        admissions := [Dyn]{}
         loop admission in self.cache_admissions -> &admissions.push(admission.to_tree())
-        object := [String: DataTree]{}
-        object["decision"] = DataTree.Text(self.decision)
-        object["reason"] = DataTree.Text(self.reason)
-        object["action_key"] = DataTree.Text(self.action_key)
+        object := [String: Dyn]{}
+        object["decision"] = Dyn.Text(self.decision)
+        object["reason"] = Dyn.Text(self.reason)
+        object["action_key"] = Dyn.Text(self.action_key)
         object["cache_identity"] = store_explain_sorted_text_map(self.cache_identity)
-        object["cache_admissions"] = DataTree.Array(admissions)
+        object["cache_admissions"] = Dyn.Array(admissions)
         object["checks"] = store_explain_sorted_text_map(self.checks)
         object["attempt"] = if self.attempt == {
             .Val(attempt) -> attempt.to_tree()
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
-        DataTree.Object(object)
+        Dyn.Object(object)
     }
 }
 
 // A text map as an object in key order (Rust `BTreeMap`).
-fn store_explain_sorted_text_map(map: [String: String]) -> DataTree Never! {
-    object := [String: DataTree]{}
+fn store_explain_sorted_text_map(map: [String: String]) -> Dyn Never! {
+    object := [String: Dyn]{}
     keys :: store_sorted_keys(map)
-    loop key in keys -> object[key] = DataTree.Text(map[key])
-    DataTree.Object(object)
+    loop key in keys -> object[key] = Dyn.Text(map[key])
+    Dyn.Object(object)
 }
 
-pub struct PackageExplain {
-    pub schema: String
-    pub query: String
-    pub lens: String
-    pub entry: ExplainEntry?
-    pub provider: ExplainProvider?
-    pub graph: ExplainGraph
-    pub liveness: ExplainLiveness
-    pub rebuild: ExplainRebuild
-    pub reports: [ExplainReport]
+struct PackageExplain {
+    schema: String
+    query: String
+    lens: String
+    entry: ExplainEntry?
+    provider: ExplainProvider?
+    graph: ExplainGraph
+    liveness: ExplainLiveness
+    rebuild: ExplainRebuild
+    reports: [ExplainReport]
 
     // The `jet.status/v1` `explain` object; any conflict makes `ok` false.
-    fn to_json(self) -> String Never! {
+    fn to_json(self) -> String ReportError! {
         conflicted := false
-        reports := [DataTree]{}
+        reports := [Dyn]{}
         loop report in self.reports {
             if report.kind == ExplainReportKind.Conflict -> conflicted = true
             &reports.push(report.to_tree())
         }
-        payload := [String: DataTree]{}
-        payload["query"] = DataTree.Text(self.query)
-        payload["lens"] = DataTree.Text(self.lens)
+        payload := [String: Dyn]{}
+        payload["query"] = Dyn.Text(self.query)
+        payload["lens"] = Dyn.Text(self.lens)
         payload["entry"] = if self.entry == {
             .Val(entry) -> entry.to_tree()
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         payload["provider"] = if self.provider == {
             .Val(provider) -> provider.to_tree()
-            .None -> DataTree.Null
+            .None -> Dyn.Null
         }
         payload["graph"] = self.graph.to_tree()
         payload["liveness"] = self.liveness.to_tree()
         payload["rebuild"] = self.rebuild.to_tree()
-        payload["reports"] = DataTree.Array(reports)
-        StatusEnvelope.new("explain", !conflicted).with_field("explain", DataTree.Object(payload)).json()
+        payload["reports"] = Dyn.Array(reports)
+        StatusEnvelope.new("explain", !conflicted).with_field("explain", Dyn.Object(payload)).json()
     }
 
     fn text(self) -> String Never! {
@@ -508,7 +511,8 @@ fn store_explain_empty_dash(value: String) -> String Never! {
 // records. None means neither a realized entry nor a recorded build attempt
 // exists for the query. The read-only listing preserves damaged state long
 // enough to report the missing proof instead of replaying recovery.
-pub fn store_explain_package(roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
+// Lifecycle and output proof use the caller's operation-scoped verifier.
+fn store_explain_package(verification: &StoreVerification, roots: HangarRoots, query: String, lens: ExplainLens) -> PackageExplain? StoreError! {
     entries :: store_list_read_only(roots)
     found :: store_explain_find_entry(entries, query)
     entry :: found ?? return store_explain_without_entry(roots, query, lens)
@@ -535,8 +539,8 @@ pub fn store_explain_package(roots: HangarRoots, query: String, lens: ExplainLen
         .None -> {}
     }
     graph_view :: store_explain_graph_projection(entries, entry, graph, &reports)
-    liveness :: store_explain_liveness_projection(roots, entry, graph, &reports)
-    rebuild :: store_explain_rebuild_projection(roots, entry, graph, provider, receipt_ok, &reports)
+    liveness :: store_explain_liveness_projection(&verification, roots, entry, graph, &reports)
+    rebuild :: store_explain_rebuild_projection(&verification, roots, entry, graph, provider, receipt_ok, &reports)
     Ok(Val(PackageExplain{schema: REPORT_SCHEMA, query: query, lens: lens.label(), entry: Val(store_explain_entry_projection(entry)), provider: provider, graph: graph_view, liveness: liveness, rebuild: rebuild, reports: reports}))
 }
 
@@ -683,14 +687,14 @@ fn store_explain_receipt_projection(roots: HangarRoots, entry: StoreEntry, graph
 // between the facts, the producer, and the entry reported.
 fn store_explain_provider_projection(entry: StoreEntry, reports: &[ExplainReport]) -> ExplainProvider? Never! {
     producer :: if ProducerRecord.decode(entry.producer_record) == {
-fn store_explain_liveness_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
+        .Ok(decoded) -> decoded
         .Err(error) -> {
             &reports.push(ExplainReport.loss("producer provenance is unavailable: {error.message()}"))
             return None
         }
     }
     facts := ProviderFacts?{None}
-    if store_lifecycle_snapshot(&verification, roots) == {
+    if producer.facts.get("provider-facts") == {
         .Val(raw) -> {
             if ProviderFacts.from_json(raw) == {
                 .Ok(decoded) -> {
@@ -807,7 +811,7 @@ fn store_explain_locked_provider_facts(entry: StoreEntry, reports: &[ExplainRepo
             store_explain_report_provider_validation(facts, "locked", &reports)
         }
         identity_ok := true
-fn store_explain_rebuild_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
+        if record.future_fields.get("provider-facts-digest") == {
             .Val(expected) -> {
                 actual :: facts.digest()
                 if matches_entry && expected != actual {
@@ -830,7 +834,7 @@ fn store_explain_rebuild_projection(verification: &StoreVerification, roots: Han
                 identity_ok = false
                 &reports.push(ExplainReport.conflict("locked provider identity hash disagrees for {record.identity.exact}: {record.identity.hash} vs {facts.digest()}"))
             }
-        if store_try_entry_output_hash(&verification, roots, entry) == {
+        }
         valid :: if facts.validate() == {
             .Ok(_) -> true
             else -> false
@@ -967,14 +971,14 @@ fn store_explain_owner_label(entries: [StoreEntry], record: ClosureRecord) -> St
 
 // Why the entry is live: the nearest project lock naming it, and every
 // active lifecycle root protecting it or its closure.
-fn store_explain_liveness_projection(roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
+fn store_explain_liveness_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, reports: &[ExplainReport]) -> ExplainLiveness Never! {
     reasons := [ExplainRoot]{}
     if store_explain_project_lock_matches(entry, &reports) {
         lock :: store_explain_nearest_lock()
         id :: lock ?? "nearest-project-lock"
         &reasons.push(ExplainRoot{kind: "project-lock", id: id, producer: "jetpack.lock", phase: "committed", label: "current project lock", reference: entry.reference, targets: [String]{entry.envelope.output_hash}, reason: "`{id}` names or hashes this package"})
     }
-    if store_lifecycle_snapshot(roots) == {
+    if store_lifecycle_snapshot(&verification, roots) == {
         .Ok(snapshot) -> {
             now :: LifecycleTimestamp.from_unix_seconds(store_broker_now_secs())
             root_ids :: snapshot.roots.keys().to_list()
@@ -1091,7 +1095,7 @@ fn store_explain_provider_is_usable(provider: ExplainProvider) -> Bool Never! {
 
 // Whether the stored output, its digest, the closure action record, the
 // producer provenance, and the receipt still support the realized result.
-fn store_explain_rebuild_projection(roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
+fn store_explain_rebuild_projection(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry, graph: ClosureGraph?, provider: ExplainProvider?, receipt_ok: Bool, reports: &[ExplainReport]) -> ExplainRebuild Never! {
     checks := [String: String]{}
     provider_usable :: if provider == {
         .Val(found) -> store_explain_provider_is_usable(found)
@@ -1114,7 +1118,7 @@ fn store_explain_rebuild_projection(roots: HangarRoots, entry: StoreEntry, graph
     // Some(true) matches, Some(false) mismatches, None unverifiable.
     output_digest := Bool?{None}
     if output_exists {
-        if store_try_entry_output_hash(roots, entry) == {
+        if store_try_entry_output_hash(&verification, roots, entry) == {
             .Ok(actual) -> {
                 if actual == entry.envelope.output_hash {
                     checks["output_digest"] = "matches"

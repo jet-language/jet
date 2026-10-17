@@ -21,13 +21,13 @@ fn module(path: &Path, source: &str) -> LoadedModule {
         path: path.to_path_buf(),
         display: path.display().to_string(),
         source: source.to_string(),
+        core_identifier_demand: Lexer::core_identifier_demand(&tokens),
         alias: path.file_stem().unwrap().to_string_lossy().into_owned(),
         imports: std::mem::take(&mut program.imports),
         items: std::mem::take(&mut program.items),
         script_body: std::mem::take(&mut program.script_body),
         block_spans: std::mem::take(&mut program.block_spans),
         web_target_ceiling: program.web_target_ceiling,
-        pub_file: program.pub_file,
         no_prelude: program.no_prelude,
         default_target: program.default_target.clone(),
         html_path: program.html_path.clone(),
@@ -54,8 +54,8 @@ fn bundle(root: &Path, lib_a: &str) -> ProgramBundle {
     let modules = vec![
         module(&root.join("main.jet"), "fn run() {\n    print(\"hi\")\n}\n"),
         module(&lib.join("a.jet"), lib_a),
-        module(&lib.join("b.jet"), "pub fn b() -> Int {\n    2\n}\n"),
-        module(Path::new("<corelib>/text.jet"), "pub fn len() -> Int {\n    0\n}\n"),
+        module(&lib.join("b.jet"), "fn b() -> Int {\n    2\n}\n"),
+        module(Path::new("<corelib>/text.jet"), "fn len() -> Int {\n    0\n}\n"),
     ];
     let mut name_ledger = NameLedger::default();
     name_ledger.set_module_namespace(1, lib.display().to_string());
@@ -86,45 +86,50 @@ fn bundle(root: &Path, lib_a: &str) -> ProgramBundle {
     }
 }
 
-const LIB_A: &str = "pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn helper() -> Int {\n    1\n}\n";
+const LIB_A: &str = "fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n\nfn helper() -> Int {\n    1\n}\n";
 
 #[test]
 fn item_fingerprints_ignore_whitespace_and_comments() {
-    let plain = only_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
+    let plain = only_item("fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
     let spaced = only_item(
-        "// adds two numbers\n\n\npub fn add(a: Int,   b: Int) -> Int {\n\n    // the sum\n    a  +  b\n}\n",
+        "// adds two numbers\n\n\nfn add(a: Int,   b: Int) -> Int {\n\n    // the sum\n    a  +  b\n}\n",
     );
     assert_eq!(item_source_fingerprint(&plain), item_source_fingerprint(&spaced));
     assert_eq!(
-        item_interface_fingerprint(&plain, false),
-        item_interface_fingerprint(&spaced, false)
+        item_interface_fingerprint(&plain),
+        item_interface_fingerprint(&spaced)
     );
 }
 
 #[test]
 fn body_edit_keeps_interface_fingerprint_and_signature_edit_changes_it() {
-    let plain = only_item("pub fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
-    let body = only_item("pub fn add(a: Int, b: Int) -> Int {\n    b + a\n}\n");
-    let signature = only_item("pub fn add(a: Int, b: Int, c: Int) -> Int {\n    a + b\n}\n");
+    let plain = only_item("fn add(a: Int, b: Int) -> Int {\n    a + b\n}\n");
+    let body = only_item("fn add(a: Int, b: Int) -> Int {\n    b + a\n}\n");
+    let signature = only_item("fn add(a: Int, b: Int, c: Int) -> Int {\n    a + b\n}\n");
     assert_ne!(item_source_fingerprint(&plain), item_source_fingerprint(&body));
     assert_eq!(
-        item_interface_fingerprint(&plain, false),
-        item_interface_fingerprint(&body, false)
+        item_interface_fingerprint(&plain),
+        item_interface_fingerprint(&body)
     );
     assert_ne!(
-        item_interface_fingerprint(&plain, false),
-        item_interface_fingerprint(&signature, false)
+        item_interface_fingerprint(&plain),
+        item_interface_fingerprint(&signature)
     );
     // Generic bodies are templates importers instantiate, so they stay in the
     // interface.
-    let generic = only_item("pub fn same<T>(x: T) -> T {\n    x\n}\n");
-    let generic_body = only_item("pub fn same<T>(x: T) -> T {\n    y :: x\n    y\n}\n");
+    let generic = only_item("fn same<T>(x: T) -> T {\n    x\n}\n");
+    let generic_body = only_item("fn same<T>(x: T) -> T {\n    y :: x\n    y\n}\n");
     assert_ne!(
-        item_interface_fingerprint(&generic, false),
-        item_interface_fingerprint(&generic_body, false)
+        item_interface_fingerprint(&generic),
+        item_interface_fingerprint(&generic_body)
     );
-    // A private function is not part of the interface.
-    assert_eq!(item_interface_fingerprint(&only_item("fn hidden() -> Int {\n    1\n}\n"), false), None);
+    // A `priv module` is not part of the interface (D-VIS-MODULE1).
+    assert_eq!(
+        item_interface_fingerprint(&only_item(
+            "priv module hidden {\n    fn value() -> Int {\n        1\n    }\n}\n"
+        )),
+        None
+    );
 }
 
 #[test]
@@ -176,14 +181,15 @@ fn digests_are_equal_across_checkout_paths_and_edits_cut_off_correctly() {
     assert_ne!(comment_source, source);
     assert_eq!(comment_interface, interface);
 
-    // A private body edit and a new private function keep the interface.
-    let private = LIB_A.replace("    1\n", "    2\n") + "\nfn other() -> Int {\n    3\n}\n";
+    // A body edit and a new `priv module` keep the interface.
+    let private = LIB_A.replace("    1\n", "    2\n")
+        + "\npriv module internal {\n    fn other() -> Int {\n        3\n    }\n}\n";
     assert_eq!(digests("/work/a/project", &private).1, interface);
 
     // A public signature edit, or a new public function, changes it.
     let signature = LIB_A.replace("b: Int) -> Int", "b: Int) -> Float");
     assert_ne!(digests("/work/a/project", &signature).1, interface);
-    let added = format!("{LIB_A}\npub fn more() -> Int {{\n    4\n}}\n");
+    let added = format!("{LIB_A}\nfn more() -> Int {{\n    4\n}}\n");
     assert_ne!(digests("/work/a/project", &added).1, interface);
 
     // An inferred fact importers depend on changes the digest through the

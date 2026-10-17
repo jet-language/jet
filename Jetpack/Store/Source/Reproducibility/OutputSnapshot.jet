@@ -7,7 +7,7 @@
 // in path order; the first disagreement becomes the durable evidence.
 
 // Which property two outputs of one action first disagreed on.
-pub enum DifferenceKind {
+enum DifferenceKind {
     ActionIdentity
     CanonicalOutput
     NodeKind
@@ -55,14 +55,14 @@ pub enum DifferenceKind {
     }
 }
 
-pub struct FirstDifference {
-    pub path: String
-    pub kind: DifferenceKind
-    pub left: String
-    pub right: String
+struct FirstDifference {
+    path: String
+    kind: DifferenceKind
+    left: String
+    right: String
 }
 
-pub enum ObservedNodeKind {
+enum ObservedNodeKind {
     Directory
     Symlink
     File
@@ -76,13 +76,13 @@ pub enum ObservedNodeKind {
     }
 }
 
-pub struct NodeObservation {
-    pub kind: ObservedNodeKind
-    pub mode: Int
-    pub digest: String?
-    pub target: String?
-    pub hardlink: String?
-    pub xattrs: [String]
+struct NodeObservation {
+    kind: ObservedNodeKind
+    mode: Int
+    digest: String?
+    target: String?
+    hardlink: String?
+    xattrs: [String]
 
     // `kind=…;mode=…;digest=…;target=…;hardlink=…;xattrs=…` evidence text.
     fn value(self) -> String Never! {
@@ -95,9 +95,9 @@ pub struct NodeObservation {
 
 // One output's canonical digest plus every observed node, keyed by the
 // node's path relative to the output root (`""` is the root itself).
-pub struct OutputSnapshot {
-    pub digest: String
-    pub nodes: [String: NodeObservation]
+struct OutputSnapshot {
+    digest: String
+    nodes: [String: NodeObservation]
 }
 
 fn store_repro_invalid(detail: String) -> StoreError Never! { StoreError.InvalidData(detail) }
@@ -192,8 +192,8 @@ fn store_repro_read_file_digest(path: String) -[FS]> String StoreError! {
 }
 
 fn store_repro_metadata_fingerprint(info: files.Stat) -> String Never! {
-    modified :: info.modified.unix_ns
-    changed :: info.changed.unix_ns
+    modified :: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+    changed :: info.changed.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
     "{info.id.device}:{info.id.inode}:{info.size}:{modified /% 1000000000}:{modified % 1000000000}:{changed /% 1000000000}:{changed % 1000000000}:{info.mode}"
 }
 
@@ -309,10 +309,10 @@ fn store_repro_json_map(map: [String: String]) -> String Never! {
     json.canonical(store_repro_text_object(map)) ?? panic("value is not canonical JSON")
 }
 
-fn store_repro_text_object(map: [String: String]) -> DataTree Never! {
-    object := [String: DataTree]{}
-    loop entry in map -> object[entry.key] = DataTree.Text(entry.value)
-    DataTree.Object(object)
+fn store_repro_text_object(map: [String: String]) -> Dyn Never! {
+    object := [String: Dyn]{}
+    loop entry in map -> object[entry.key] = Dyn.Text(entry.value)
+    Dyn.Object(object)
 }
 
 fn store_repro_path_display(path: String) -> String Never! {

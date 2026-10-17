@@ -18,7 +18,7 @@ fn pkg_binders_test_dart_rejection(source: String) -> String Never! {
     assert_eq(functions[0].name, "dartDouble")
     assert_eq(functions[0].jet, "dart_double")
     assert_eq(functions[0].params[0].name, "some_value")
-    assert(pkg_dart_render_jet("callbacks", functions).contains("pub fn dart_double(some_value: Int)"))
+    assert(pkg_dart_render_jet("callbacks", functions).contains("fn dart_double(some_value: Int)"))
     assert(pkg_dart_render_host("callbacks.dart", "callbacks", functions).contains("contract.dartDouble"))
     assert(pkg_dart_render_host("/tmp/callbacks with #.dart", "callbacks", functions).contains("file:///tmp/callbacks%20with%20%23.dart"))
 }
@@ -50,7 +50,7 @@ fn pkg_binders_test_dart_rejection(source: String) -> String Never! {
     functions :: pkg_dart_parse("@pragma('vm:entry-point')\nint dartDouble(int value) => value * 2;\n@pragma('vm:entry-point')\ndouble dartHalf(double value) => value / 2;\n") ?? panic("the Dart contract parses")
     jet :: pkg_dart_render_jet("callbacks", functions)
     assert(jet.contains("fn dart_double(value: Int) -> Int ="))
-    assert(jet.contains("pub fn dart_double(value: Int) -[FFI.Dart]> Int DartError!"))
+    assert(jet.contains("fn dart_double(value: Int) -[FFI.Dart]> Int DartError!"))
     assert(jet.contains("fn dart_half(value: Float) -> Float ="))
     assert(!jet.contains("=>"))
     c :: pkg_dart_render_c("callbacks", functions)

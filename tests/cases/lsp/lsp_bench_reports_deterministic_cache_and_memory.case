@@ -1,0 +1,17 @@
+# Original tests/lsp.rs:5877-5911; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+# Exact public main.rs3057-3060 -> LSP::run_bench(src,10,200) -> SAME measure_bench(src,10).
+# Original cold/warm timings are UNASSERTED; do not add timing budget.
+copy: {root}/Examples/features/collections/wordcount.jet wordcount-source.txt
+capture: sourcebytes = size file wordcount-source.txt
+step: jet self lsp --bench
+exit: 0
+json: stdout.split("hits=", 1).split(" ", 0).trim doc $ = 1
+json: stdout.split("recomputes=", 1).split(" ", 0).trim doc $ = 11
+json: stdout.split("live-inputs=", 1).split(" ", 0).trim doc $ = 2
+json: stdout.split("live-memos=", 1).split(" ", 0).trim doc $ = 1
+json: stdout.split("item-hits=", 1).split(" ", 0).trim doc $ = 10
+json: stdout.split("item-recomputes=", 1).split(" ", 0).trim doc $ = 1
+json: stdout.split("live-input-bytes=", 1).split(" ", 0).trim doc $ = {cap:sourcebytes}+37
+json: stdout.split("live-items=", 1).split(" ", 0).trim doc $ > 0
+json: stdout.split("live-item-bytes=", 1).split(" ", 0).trim doc $ >= {cap:sourcebytes}

@@ -1,0 +1,88 @@
+
+use core.sync as sync
+use app
+
+fn run() {
+    // Three replicas edit one document while apart.  Comparing the two merge
+    // orders alone is not convergence: a merge that keeps each replica's own
+    // copy passes that and still never agrees on a document.  So also assert
+    // the text itself, which only holds if every edit survived in one reading.
+    base :: sync.text_new("r1", "hello world")
+    text_a :: sync.text_edit(base, "r1", 5, 0, ",")
+    text_b :: sync.text_edit(base, "r2", 11, 0, "!")
+    text_c :: sync.text_edit(base, "r3", 0, 5, "goodbye")
+    ab :: sync.text_show(sync.text_merge(text_a, text_b))
+    print("text_commutes:{ab == sync.text_show(sync.text_merge(text_b, text_a))}")
+    print("text_merged:{ab}")
+    abc :: sync.text_merge(sync.text_merge(text_a, text_b), text_c)
+    a_bc :: sync.text_merge(text_a, sync.text_merge(text_b, text_c))
+    print("text_associates:{sync.text_show(abc) == sync.text_show(a_bc)}")
+    print("text_idempotent:{sync.text_show(sync.text_merge(abc, abc)) == sync.text_show(abc)}")
+    print("text_all_edits:{sync.text_show(abc)}")
+    print("text_clock:{sync.text_metadata(abc)}")
+    // A second replica inserting mid-document must land where it was typed,
+    // not where its own write count happens to fall.  Renaming the replicas
+    // must not move a character, so the same edit is repeated under names
+    // that sort the other way.
+    print("mid_low:{sync.text_show(sync.text_edit(sync.text_new("r1", "ab"), "r2", 1, 0, "Z"))}")
+    print("mid_high:{sync.text_show(sync.text_edit(sync.text_new("r9", "ab"), "r2", 1, 0, "Z"))}")
+    collision_base :: sync.text_new("fork", "a")
+    collision_left :: sync.text_edit(collision_base, "fork", 1, 0, "b")
+    collision_right :: sync.text_edit(collision_base, "fork", 1, 0, "c")
+    print("text_collision:{sync.text_show(sync.text_merge(collision_left, collision_right))}")
+
+    left :: sync.map_set(sync.map_new(), "k", "left")
+    right :: sync.map_set(sync.map_new(), "k", "right")
+    lr :: sync.map_show(sync.map_merge(left, right))
+    rl :: sync.map_show(sync.map_merge(right, left))
+    print("map_converges:{lr == rl}")
+
+    list_a0 :: sync.list_push(sync.list_new(), "r2", "b")
+    list_a :: sync.list_push(list_a0, "r1", "a")
+    list_b0 :: sync.list_push(sync.list_new(), "r1", "a")
+    list_b :: sync.list_push(list_b0, "r2", "b")
+    print("list_converges:{sync.list_show(sync.list_merge(list_a, list_b)) == sync.list_show(sync.list_merge(list_b, list_a))}")
+
+    counter0 :: sync.counter_new("r1", 2)
+    counter :: sync.counter_inc(counter0, "r1", 3)
+    merged_counter :: sync.counter_merge(counter, counter)
+    print("counter_idempotent:{sync.counter_value(merged_counter)}")
+
+    invalid :: sync.policy_new("tickets", "owner == admin")
+    if invalid == {
+        .Ok(_) -> { print("invalid_policy:accepted") }
+        .Err(_) -> { print("invalid_policy:rejected") }
+    }
+    policy :: sync.policy_new("tickets", "owner == user") ?? panic("policy")
+    print("owner_allowed:{sync.policy_allows(policy, "alice", "alice")}")
+    print("owner_denied:{sync.policy_allows(policy, "alice", "bob")}")
+    public :: sync.policy_new("public", "true") ?? panic("public policy")
+    print("public_allowed:{sync.policy_allows(public, "alice", "bob")}")
+
+    invalid_text :: sync.text_new("", "x")
+    print("invalid_text:{sync.text_show(invalid_text)}")
+
+    first :: app.sync(lr, over: "sync-laws")
+    second :: app.sync(rl, over: "sync-laws")
+    print(first)
+    print(second)
+
+    merge_first :: app.sync("SyncMap(a=1)", over: "sync-merge-laws")
+    merge_second :: app.sync("SyncMap(b=2)", over: "sync-merge-laws")
+    merge_duplicate :: app.sync("SyncMap(a=1)", over: "sync-merge-laws")
+    malformed :: app.sync("SyncMap(a=1", over: "sync-merge-laws")
+    print(merge_first)
+    print(merge_second)
+    print(merge_duplicate)
+    print(malformed)
+    conflict_first :: app.sync("SyncMap(k=left)", over: "sync-conflict-laws")
+    conflict_second :: app.sync("SyncMap(k=right)", over: "sync-conflict-laws")
+    conflict_duplicate :: app.sync("SyncMap(k=left)", over: "sync-conflict-laws")
+    print(conflict_first)
+    print(conflict_second)
+    print(conflict_duplicate)
+    noncanonical_list :: app.sync("SyncList(r2:b|r1:a)", over: "sync-canonical-list-laws")
+    noncanonical_counter :: app.sync("PNCounter(r=+01/-0)", over: "sync-canonical-counter-laws")
+    print(noncanonical_list)
+    print(noncanonical_counter)
+}

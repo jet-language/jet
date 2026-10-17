@@ -1,4 +1,15 @@
 #[test]
+fn raw_c_imports_and_module_binding_mutability_are_byte_exact_and_idempotent() {
+    let source = include_str!("fixtures/fmt_import_c_bindings.jet");
+    let once = jet::format_source(source).expect("runtime declarations should format");
+    assert_eq!(once, source, "imports and binding sigils must be preserved");
+    assert_eq!(
+        jet::format_source(&once).expect("runtime declarations should reformat"),
+        once
+    );
+}
+
+#[test]
 fn qualified_variant_heads_round_trip_through_protocol_expansion() {
     let literal_source = "fn make() -[]> Payment.Client { return Payment.Client{_token: 0} }\n";
     let literal = jet::format_source(literal_source).expect("qualified literal should format");
@@ -74,7 +85,7 @@ fn generic_module_and_library_bodies_round_trip_retired_signatures() {
     let generic = include_str!("../Examples/features/modules/generic_modules.jet");
     let formatted = jet::format_source(generic).expect("generic module should format");
     assert!(
-        formatted.contains("pub fn slot(k: K) -> Slot { Slot.Value(k) }"),
+        formatted.contains("fn slot(k: K) -> Slot { Slot.Value(k) }"),
         "generic module callable was not canonicalized:\n{formatted}"
     );
     assert_eq!(

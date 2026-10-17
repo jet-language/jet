@@ -1,0 +1,12 @@
+
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("alpha") {
+        fn alpha() {}
+    }
+    b.generate("alpha") {
+        fn beta() {}
+        }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])
+    return b.plan(app)
+}
+fn run() {}

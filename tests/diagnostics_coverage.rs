@@ -17,7 +17,7 @@
 
 mod common;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
@@ -370,84 +370,6 @@ fn walk_rs(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
     }
 }
 
-fn runtime_stop_calls(source: &str) -> Vec<Vec<&str>> {
-    let needle = "set_runtime_stop(";
-    let mut calls = Vec::new();
-    let mut search_from = 0;
-    while let Some(offset) = source[search_from..].find(needle) {
-        let start = search_from + offset + needle.len();
-        let bytes = source.as_bytes();
-        let mut args = Vec::new();
-        let mut arg_start = start;
-        let mut parens = 0usize;
-        let mut brackets = 0usize;
-        let mut braces = 0usize;
-        let mut string = false;
-        let mut escaped = false;
-        let mut end = None;
-        for index in start..bytes.len() {
-            let byte = bytes[index];
-            if string {
-                if escaped {
-                    escaped = false;
-                } else if byte == b'\\' {
-                    escaped = true;
-                } else if byte == b'"' {
-                    string = false;
-                }
-                continue;
-            }
-            match byte {
-                b'"' => string = true,
-                b'(' => parens += 1,
-                b')' if parens > 0 => parens -= 1,
-                b')' => {
-                    args.push(source[arg_start..index].trim());
-                    end = Some(index);
-                    break;
-                }
-                b'[' => brackets += 1,
-                b']' => brackets = brackets.saturating_sub(1),
-                b'{' => braces += 1,
-                b'}' => braces = braces.saturating_sub(1),
-                b',' if parens == 0 && brackets == 0 && braces == 0 => {
-                    args.push(source[arg_start..index].trim());
-                    arg_start = index + 1;
-                }
-                _ => {}
-            }
-        }
-        let Some(end) = end else { break };
-        calls.push(args);
-        search_from = end + 1;
-    }
-    calls
-}
-
-#[test]
-fn jit_collections_use_ice_for_internals_and_canonical_runtime_messages() {
-    let source = read(&root().join("crates/jet-jit/src/Collections.rs"));
-    assert!(
-        !source.contains("set_trap("),
-        "Collections.rs must not convert adapter invariants into runtime traps"
-    );
-
-    let direct_messages: Vec<_> = runtime_stop_calls(&source)
-        .into_iter()
-        .filter_map(|args| args.get(2).copied())
-        .filter(|wording| {
-            wording
-                .trim_start_matches('&')
-                .trim_start()
-                .starts_with('"')
-        })
-        .collect();
-    assert!(
-        direct_messages.is_empty(),
-        "Collections.rs must pass canonical or returned messages to set_runtime_stop, not direct wording literals: {direct_messages:?}"
-    );
-}
-
 /// All codes registered in the typed compile-time diagnostic rows.
 fn registered_codes() -> BTreeSet<String> {
     jet_foundation::Registry::diagnostic_rows()
@@ -462,7 +384,7 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
     let active_runtime = rows
         .iter()
         .filter(|row| {
-            row.stage == "runtime"
+            row.has_stage("runtime")
                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
         })
         .collect::<Vec<_>>();
@@ -492,7 +414,7 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
     }
 
     for row in rows.iter().filter(|row| {
-        row.stage != "runtime" || row.status != jet_foundation::Registry::DiagnosticStatus::Active
+        !row.has_stage("runtime") || row.status != jet_foundation::Registry::DiagnosticStatus::Active
     }) {
         let report = jet_foundation::Outcome::jet_render_runtime_stop(
             row.code,
@@ -521,6 +443,42 @@ fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
     );
     assert_eq!(unknown.exit_code, 101);
     assert_eq!(unknown.source, "host");
+}
+
+#[test]
+fn sentry_metadata_uses_the_returned_fault_exit_code() {
+    use jet_foundation::Outcome::{
+        jet_render_runtime_sentry, jet_render_runtime_sentry_with_context,
+    };
+
+    for code in ["R0801", "R0802", "R0803"] {
+        for report in [
+            jet_render_runtime_sentry(
+                code, "probe.jet", 7, "probe gate", "read", "valid_ptr", "runtime probe",
+            ),
+            jet_render_runtime_sentry_with_context(
+                code, "probe.jet", 7, "probe gate", "read", "valid_ptr", "runtime probe",
+                "false", Some("tokenizer"), Some(true),
+            ),
+        ] {
+            assert_eq!(report.code, code);
+            assert_eq!(report.source, "runtime");
+            assert_eq!(report.exit_code, 70);
+            let metadata = report.rendered.lines()
+                .filter_map(|line| line.strip_prefix("exit: "))
+                .collect::<Vec<_>>();
+            assert_eq!(metadata, [report.exit_code.to_string()], "{code}: {}", report.rendered);
+            assert!(report.obligation.is_some());
+        }
+    }
+
+    let unknown = jet_render_runtime_sentry(
+        "__unknown_runtime_sentry__", "probe.jet", 7, "probe gate",
+        "read", "valid_ptr", "runtime probe",
+    );
+    assert_eq!(unknown.exit_code, 101);
+    assert_eq!(unknown.source, "host");
+    assert!(!unknown.rendered.lines().any(|line| line.starts_with("exit: ")));
 }
 
 #[test]
@@ -1861,7 +1819,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_edit = matches!(
                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-                Some(DataTree::Array(edits)) if !edits.is_empty()
+                Some(Dyn::Array(edits)) if !edits.is_empty()
             );
             if !has_edit {
                 failures.push(format!("{}:{} — {fix}", path.display(), line + 1));
@@ -1869,7 +1827,7 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_applicability = matches!(
                 jet_foundation::JSON::json_get(&report, "applicability"),
-                Some(DataTree::Text(value) | DataTree::TypedText(value))
+                Some(Dyn::Text(value))
                     if value == "safe" || value == "suggested"
             );
             if !has_applicability {
@@ -1881,10 +1839,10 @@ fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
             }
             let has_safety = matches!(
                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-                Some(DataTree::Array(edits))
+                Some(Dyn::Array(edits))
                     if edits.iter().all(|edit| matches!(
                         jet_foundation::JSON::json_get(edit, "safety"),
-                        Some(DataTree::Text(value) | DataTree::TypedText(value))
+                        Some(Dyn::Text(value))
                             if [
                                 jet_foundation::Report::FixSafety::Formatting,
                                 jet_foundation::Report::FixSafety::BehaviorPreserving,

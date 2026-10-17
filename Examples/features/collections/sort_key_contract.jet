@@ -1,10 +1,10 @@
 // Card #3378: the existing sort-key contract, pinned before any cached-key,
 // unstable or ThenBy spelling is considered.
 // - `sort_by` with a key closure is stable: equal keys keep input order.
-// - The key closure is an ordinary effectful call. Every call runs, in the
-//   sort's order; nothing is cached. The CollectionLaw.SortBy row leaves the
-//   count and order unspecified; this golden records what the current kernel
-//   does on every tier.
+// - The key closure is an ordinary effectful call. The canonical kernel
+//   evaluates keys once in input order, then compares the retained keys.
+//   The CollectionLaw.SortBy row leaves count and order unspecified; this
+//   golden records the current implementation on every tier.
 // - A fallible key stops the sort at the first Err; the list is left unsorted.
 // - Descending primary plus ascending secondary keys compose through one
 //   comparator closure returning `Ordering`.
@@ -37,6 +37,76 @@ fn failing_key(n: Int) -> Int KeyError! {
 }
 
 fn unit() {}
+
+// #4884: records carry owning text, not only scalar sort positions.
+struct NamedKey {
+    team: Int
+    label: String
+}
+
+struct OwnedNamedKey {
+    team: Int
+    label: String
+}
+
+impl OwnedNamedKey.Close {
+    fn close(^self) { print("close named key: {self.label}") }
+}
+
+fn tuple_key(j: Job) -> (team: Int, cost: Int) KeyError! {
+    Ok((team: j.team, cost: j.cost))
+}
+
+fn named_key(j: Job) -> NamedKey KeyError! {
+    Ok(NamedKey{team: j.team, label: j.name})
+}
+
+fn named_key_failure(j: Job, calls: &Int) -> OwnedNamedKey KeyError! {
+    calls += 1
+    if j.name == "c" -> return Err(KeyError{message: "named key refused c"})
+    Ok(OwnedNamedKey{team: j.team, label: "label-{j.name}"})
+}
+
+fn large_rows(count: Int, equal: Bool) -> [Job] {
+    rows := [Job]{}
+    loop index in 0..<count {
+        row := Job{name: "job-{index}", team: if equal -> 0 else -> (count - index - 1) % 17, cost: index}
+        &rows.push(^row)
+    }
+    ^rows
+}
+
+fn large_key(j: Job, calls: &Int) -> Int {
+    calls += 1
+    j.team
+}
+
+fn large_compare(a: Job, b: Job, calls: &Int) -> Ordering {
+    calls += 1
+    a.team <=> b.team
+}
+
+fn large_stable(rows: [Job], count: Int, equal: Bool) -> Bool {
+    if rows.len() != count -> return false
+    seen := [Bool]{}
+    loop index in 0..<count -> &seen.push(false)
+    previous_team := -1
+    previous_cost := -1
+    loop index in 0..<rows.len() {
+        team :: rows[index].team
+        cost :: rows[index].cost
+        if cost < 0 || cost >= count -> return false
+        if seen[cost] -> return false
+        seen[cost] = true
+        expected_team :: if equal -> 0 else -> (count - cost - 1) % 17
+        if team != expected_team -> return false
+        if team < previous_team || (team == previous_team && cost <= previous_cost) -> return false
+        if rows[index].name != "job-{cost}" -> return false
+        previous_team = team
+        previous_cost = cost
+    }
+    true
+}
 
 fn run() {
     // (a) stable order: equal keys keep their input order.
@@ -82,4 +152,62 @@ fn run() {
     last :: jobs.max_by((j: Job) -> j.team) ?? Job{name: "-", team: 0, cost: 0}
     print("max_by team tie: {last.name}")
     print("stable first of team 2: {stable[2].name}")
+
+    // Both inline tuple and owning named keys exceed one scalar word.
+    // Fallible Ok payloads must move before their Result shell is freed.
+    tuples := jobs.copy()
+    &tuples.sort_by((j: Job) -> (team: j.team, cost: j.cost))
+    print("tuple key: {show(tuples)}")
+    try_tuples := jobs.copy()
+    &try_tuples.sort_by((j: Job) -> tuple_key(j)) ?? { assert(false, "tuple key") }
+    print("fallible tuple key: {show(try_tuples)}")
+    named := jobs.copy()
+    &named.sort_by((j: Job) -> NamedKey{team: j.team, label: j.name})
+    print("named key: {show(named)}")
+    try_named := jobs.copy()
+    &try_named.sort_by((j: Job) -> named_key(j)) ?? { assert(false, "named key") }
+    print("fallible named key: {show(try_named)}")
+    // Normal key retirement follows sorted key order; an Err retires only
+    // the initialized prefix in input order.
+    closed := jobs.copy()
+    &closed.sort_by((j: Job) -> OwnedNamedKey{team: j.team, label: "label-{j.name}"})
+    print("owning key close order: {show(closed)}")
+    partial := jobs.copy()
+    partial_calls := 0
+    &partial.sort_by((j: Job) -> named_key_failure(j, &partial_calls)) ?? {
+        print("named failure: {err.message}")
+        unit()
+    }
+    print("named after failure: {show(partial)} calls={partial_calls}")
+
+    cycle := [Job]{
+        {name: "job-0", team: 2, cost: 0},
+        {name: "job-1", team: 0, cost: 1},
+        {name: "job-2", team: 1, cost: 2},
+    }
+    &cycle.sort_by((j: Job) -> j.team)
+    print("owning three-cycle: {show(cycle)}")
+
+    // Unequal final runs and many equal keys. A quadratic index insertion
+    // sort exceeds the comparison bound; timing is deliberately not tested.
+    large := large_rows(4097, false)
+    key_calls := 0
+    &large.sort_by((j: Job) -> large_key(j, &key_calls))
+    assert(large_stable(large, 4097, false) && key_calls == 4097)
+    print("large keyed stable: {large_stable(large, 4097, false)} calls={key_calls}")
+    compared := large_rows(4097, false)
+    comparisons := 0
+    &compared.sort_by((a: Job, b: Job) -> large_compare(a, b, &comparisons))
+    assert(large_stable(compared, 4097, false) && comparisons <= 4097 * 13)
+    print("large comparator stable: {large_stable(compared, 4097, false)} bounded={comparisons <= 4097 * 13}")
+    equal := large_rows(2048, true)
+    &equal.sort_by((a: Job, b: Job) -> a.team <=> b.team)
+    assert(large_stable(equal, 2048, true))
+    print("large all-equal stable: {large_stable(equal, 2048, true)}")
+
+    empty := [Job]{}
+    &empty.sort_by((a: Job, b: Job) -> a.team <=> b.team)
+    single := large_rows(1, true)
+    &single.sort_by((j: Job) -> j.team)
+    print("sort boundaries: {empty.len()} {large_stable(single, 1, true)}")
 }

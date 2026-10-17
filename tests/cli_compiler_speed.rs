@@ -3,7 +3,7 @@ mod common;
 #[cfg(unix)]
 mod production_path {
     use super::common::Scratch;
-    use jet_foundation::DataTree::DataTree;
+    use jet_foundation::Dyn::Dyn;
     use jet_foundation::JSON::{json_get, json_int, json_str, parse};
     use std::env;
     use std::fs;
@@ -33,15 +33,15 @@ mod production_path {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(path)
     }
 
-    fn json_field<'a>(value: &'a DataTree, key: &str) -> &'a DataTree {
+    fn json_field<'a>(value: &'a Dyn, key: &str) -> &'a Dyn {
         json_get(value, key).unwrap_or_else(|| panic!("missing JSON field {key}"))
     }
 
-    fn json_text<'a>(value: &'a DataTree, key: &str) -> &'a str {
+    fn json_text<'a>(value: &'a Dyn, key: &str) -> &'a str {
         json_str(json_field(value, key)).unwrap_or_else(|| panic!("JSON field {key} is not text"))
     }
 
-    fn json_number(value: &DataTree, key: &str) -> i64 {
+    fn json_number(value: &Dyn, key: &str) -> i64 {
         json_int(json_field(value, key))
             .unwrap_or_else(|| panic!("JSON field {key} is not numeric"))
     }
@@ -384,8 +384,8 @@ mod production_path {
         .unwrap();
 
         for args in [
-            vec!["run", "--trace-tiers", "main.jet"],
-            vec!["dev", "--watch=off", "--trace-tiers", "main.jet"],
+            vec!["run", "main.jet"],
+            vec!["dev", "--watch=off", "main.jet"],
         ] {
             let output = Command::new(jet())
                 .args(&args)
@@ -393,7 +393,7 @@ mod production_path {
                 .env("JET_STORE_DIR", scratch.join("store"))
                 .env("JET_STORE_CAP_BYTES", "21474836480")
                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
-                .env("JET_RUN_CACHE_DIR", scratch.join("jit-cache"))
+                .env("JET_STORE_DIR", scratch.join("jit-cache"))
                 .env("NO_COLOR", "1")
                 .output()
                 .unwrap();
@@ -406,18 +406,6 @@ mod production_path {
                 String::from_utf8_lossy(&output.stdout)
             );
             assert_eq!(output.stdout, b"default-profile\n", "{} output", args[0]);
-            assert!(
-                trace
-                    .lines()
-                    .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-                "{} did not use the default fast production lens:\n{trace}",
-                args[0]
-            );
-            assert!(
-                !trace.contains("tier0 interp"),
-                "{} default route deoptimized:\n{trace}",
-                args[0]
-            );
         }
 
         let tools = scratch.join("tools");
@@ -499,7 +487,7 @@ mod production_path {
                 .env("JET_STORE_CAP_BYTES", "21474836480")
                 .env("JET_STORE_RESERVE_BYTES", "2147483648")
                 .env(
-                    "JET_RUN_CACHE_DIR",
+                    "JET_STORE_DIR",
                     scratch.path.join(format!("{tag}-run-cache")),
                 )
                 .env("NO_COLOR", "1")
@@ -519,11 +507,7 @@ mod production_path {
             ],
             "dev",
         );
-        let interpreter = invoke(
-            &["run", "--interpret", "run.jet", "--", "seed_data"],
-            "interpreter",
-        );
-        for (label, output) in [("run", &run), ("dev", &dev), ("interpreter", &interpreter)] {
+        for (label, output) in [("run", &run), ("dev", &dev)] {
             assert_eq!(
                 output.status.code(),
                 Some(0),
@@ -536,11 +520,7 @@ mod production_path {
                 "{label} named-job output diverged"
             );
         }
-        assert_eq!(run.stdout, dev.stdout, "JIT/dev named-job output diverged");
-        assert_eq!(
-            run.stdout, interpreter.stdout,
-            "JIT/interpreter named-job output diverged"
-        );
+        assert_eq!(run.stdout, dev.stdout, "run/dev named-job output diverged");
 
         let unknown = invoke(
             &[
@@ -1700,10 +1680,10 @@ fn run() {
             .unwrap();
         fs::write(
             scratch.join("helper.jet"),
-            "pub fn double(value: Int) -> Int { value * 2 }\n\
-             pub fn label(value: Int) -> String { value }\n\
-             pub fn ratio(total: Int, count: Int) -> Int { total / count + missing }\n\
-             pub fn flag(value: Int) -> Bool { value + 1 }\n",
+            "fn double(value: Int) -> Int { value * 2 }\n\
+             fn label(value: Int) -> String { value }\n\
+             fn ratio(total: Int, count: Int) -> Int { total / count + missing }\n\
+             fn flag(value: Int) -> Bool { value + 1 }\n",
         )
         .unwrap();
         fs::write(

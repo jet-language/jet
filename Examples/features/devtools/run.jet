@@ -29,7 +29,7 @@ fn panel_lines(state: State) -> [UINode] {
     }
 }
 
-#DevPanel pub fn panel(state: State) -> UINode { return ui.box(panel_lines(state)) }
+#DevPanel fn panel(state: State) -> UINode { return ui.box(panel_lines(state)) }
 
 fn publish_selection(selected_value: String) {
     devtools.publish(field: .selected, value: selected_value)
@@ -44,11 +44,11 @@ fn render_panel(tree: UINode) {
 
 fn run() {
     selected_value :: "overview"
-    publish_selection(~selected_value)
+    publish_selection(selected_value.copy())
     devtools.publish(field: .event_count, value: 1)
-    state :: State{selected: ~selected_value, event_count: 1}
-    summary :: state_summary(~state)
-    render_panel(panel(~state))
+    state :: State{selected: selected_value.copy(), event_count: 1}
+    summary :: state_summary(state.copy())
+    render_panel(panel(state.copy()))
     print("DevtoolsDogfood: {summary}")
 }
 
@@ -60,11 +60,11 @@ fn run() {
 
 #Test("devtools panel renders bounded selected state") {
     state :: State{selected: "overview", event_count: 1}
-    tree :: panel(~state)
+    tree :: panel(state.copy())
     backend := ui.null_backend()
     size :: backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
     assert(size.width > 0.0)
     assert(size.width <= 80.0)
     assert(size.height <= 24.0)
-    assert_eq(state_summary(~state), "overview/1")
+    assert_eq(state_summary(state.copy()), "overview/1")
 }

@@ -2,107 +2,110 @@ use core as core
 
 // core.game.raylib — display-gated raylib bridge (D-RAYLIB1=A).
 //
-// This module owns no host fallback.  Window, input, drawing, texture, and
-// audio state are provider-owned; availability is exposed through the
-// provider's typed handles and status queries rather than fabricated locally.
-pub struct RaylibWindow {
-    pub width: Int
-    pub height: Int
-    pub title: String
-    pub open: Bool
-    pub drawing: Bool
-    pub should_close: Bool
-    pub fps: Int
-    pub commands: [String]
+// Window, input, drawing, and texture operations use the existing registered
+// raw host bindings. The descriptor-backed Jet FFI rail replaces those leaves
+// at native cutover; display availability is never fabricated by source.
+struct RaylibWindow {
+    width: Int
+    height: Int
+    title: String
+    open: Bool
+    drawing: Bool
+    should_close: Bool
+    fps: Int
+    commands: [String]
 }
 
-pub struct RaylibColor {
-    pub r: Int
-    pub g: Int
-    pub b: Int
-    pub a: Int
+struct RaylibColor {
+    r: Int
+    g: Int
+    b: Int
+    a: Int
 }
 
-pub struct RaylibTextureAtlas {
-    pub path: String
+struct RaylibTextureAtlas {
+    path: String
 }
 
-pub struct RaylibSound {
-    pub path: String
+struct RaylibSound {
+    path: String
 }
 
-pub fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor Never! {
+fn color(r: Int, g: Int, b: Int, a: Int) -> RaylibColor Never! {
     RaylibColor{r: clamp8(r), g: clamp8(g), b: clamp8(b), a: clamp8(a)}
 }
 
-pub fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow Never! {
-    w := clamp_dimension(width)
-    h := clamp_dimension(height)
-    core.game.raylib.window_open(w, h, title)
+fn window_open(width: Int, height: Int, title: String) -[GPU]> RaylibWindow Never! {
+    core.game.raylib.__window_open(width, height, title)
 }
 
-pub fn window_should_close(window: RaylibWindow) -[GPU]> Bool Never! {
-    core.game.raylib.window_should_close(window)
+fn window_should_close(window: RaylibWindow) -[GPU]> Bool Never! {
+    core.game.raylib.__window_should_close(window)
 }
 
-pub fn window_ready(window: RaylibWindow) -[GPU]> Bool Never! {
-    core.game.raylib.window_ready(window)
+fn window_ready(window: RaylibWindow) -[GPU]> Bool Never! {
+    core.game.raylib.__window_ready(window)
 }
 
-pub fn close_window(window: RaylibWindow) Never! -[GPU]> {
-    core.game.raylib.close_window(window)
+fn close_window(window: RaylibWindow) Never! -[GPU]> {
+    core.game.raylib.__close_window(window)
 }
 
-pub fn begin_drawing(window: RaylibWindow) Never! -[GPU]> {
-    core.game.raylib.begin_drawing(window)
+fn begin_drawing(window: RaylibWindow) Never! -[GPU]> {
+    core.game.raylib.__begin_drawing(window)
 }
 
-pub fn end_drawing() Never! -[GPU]> {
-    core.game.raylib.end_drawing()
+fn end_drawing() Never! -[GPU]> {
+    core.game.raylib.__end_drawing()
 }
 
-pub fn clear_background(color: RaylibColor) Never! -[GPU]> {
-    core.game.raylib.clear_background(color)
+fn clear_background(color: RaylibColor) Never! -[GPU]> {
+    core.game.raylib.__clear_background(color)
 }
 
-pub fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
-    core.game.raylib.draw_rectangle(x, y, width, height, color)
+fn draw_rectangle(x: Int, y: Int, width: Int, height: Int, color: RaylibColor) Never! -[GPU]> {
+    core.game.raylib.__draw_rectangle(x, y, width, height, color)
 }
 
-pub fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) Never! -[GPU]> {
-    core.game.raylib.draw_text(text, x, y, size, color)
+fn draw_text(text: String, x: Int, y: Int, size: Int, color: RaylibColor) Never! -[GPU]> {
+    core.game.raylib.__draw_text(text, x, y, size, color)
 }
 
-pub fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) Never! -[GPU]> {
-    core.game.raylib.draw_sprite(atlas, source, x, y)
+fn draw_sprite(atlas: RaylibTextureAtlas, source: String, x: Int, y: Int) Never! -[GPU]> {
+    core.game.raylib.__draw_sprite(atlas, source, x, y)
 }
 
-pub fn set_target_fps(fps: Int) Never! -[GPU]> {
-    core.game.raylib.set_target_fps(clamp_fps(fps))
+fn set_target_fps(fps: Int) Never! -[GPU]> {
+    core.game.raylib.__set_target_fps(clamp_fps(fps))
 }
 
-pub fn key_down(key: String) -[GPU]> Bool Never! {
-    core.game.raylib.key_down(key)
+fn key_down(key: String) -[GPU]> Bool Never! {
+    if key_code(key) < 0 -> return false
+    core.game.raylib.__key_down(key)
 }
 
-pub fn gamepad_down(gamepad: Int, button: String) -[GPU]> Bool Never! {
-    core.game.raylib.gamepad_down(gamepad, button)
+fn gamepad_down(gamepad: Int, button: String) -[GPU]> Bool Never! {
+    if gamepad < 0 || gamepad > 2147483647 || button_code(button) < 0 -> return false
+    core.game.raylib.__gamepad_down(gamepad, button)
 }
 
-pub fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float Never! {
-    core.game.raylib.gamepad_axis(gamepad, axis)
+fn gamepad_axis(gamepad: Int, axis: String) -[GPU]> Float Never! {
+    if gamepad < 0 || gamepad > 2147483647 || axis_code(axis) < 0 -> return 0.0
+    core.game.raylib.__gamepad_axis(gamepad, axis)
 }
 
-pub fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
-    core.game.raylib.load_texture_atlas(path)
+fn load_texture_atlas(path: String) -[FS, GPU]> RaylibTextureAtlas Never! {
+    core.game.raylib.__load_texture_atlas(path)
 }
 
-pub fn load_sound(path: String) -[FS, GPU]> RaylibSound Never! {
-    core.game.raylib.load_sound(path)
+// Sound handles retain the supplied path. Acceptance is the existing non-empty
+// path contract; it does not claim that native audio was submitted.
+fn load_sound(path: String) -[FS, GPU]> RaylibSound Never! {
+    RaylibSound{path: path.copy()}
 }
 
-pub fn play_sound(sound: RaylibSound) -[GPU]> Bool Never! {
-    core.game.raylib.play_sound(sound)
+fn play_sound(sound: RaylibSound) -[GPU]> Bool Never! {
+    !sound.path.is_empty()
 }
 
 fn clamp8(value: Int) -> Int {
@@ -111,14 +114,92 @@ fn clamp8(value: Int) -> Int {
     value
 }
 
-fn clamp_dimension(value: Int) -> Int {
-    if value < 1 -> return 1
-    if value > 2147483647 -> return 2147483647
-    value
-}
 
 fn clamp_fps(value: Int) -> Int {
     if value < 1 -> return 1
     if value > 240 -> return 240
     value
+}
+
+fn key_code(key: String) -> Int Never! {
+    if key == {
+        "Space" | "space" -> 32
+        "Enter" | "enter" -> 257
+        "Escape" | "escape" | "Esc" | "esc" -> 256
+        "Right" | "right" -> 262
+        "Left" | "left" -> 263
+        "Down" | "down" -> 264
+        "Up" | "up" -> 265
+        "A" | "a" -> 65
+        "D" | "d" -> 68
+        "S" | "s" -> 83
+        "W" | "w" -> 87
+        else -> -1
+    }
+}
+
+fn button_code(button: String) -> Int Never! {
+    if button == {
+        "A" | "a" | "South" | "south" | "RightFaceDown" | "right_face_down" -> 7
+        "B" | "b" | "East" | "east" | "RightFaceRight" | "right_face_right" -> 6
+        "X" | "x" | "West" | "west" | "RightFaceLeft" | "right_face_left" -> 8
+        "Y" | "y" | "North" | "north" | "RightFaceUp" | "right_face_up" -> 5
+        "DPadUp" | "dpad_up" | "LeftFaceUp" | "left_face_up" -> 1
+        "DPadRight" | "dpad_right" | "LeftFaceRight" | "left_face_right" -> 2
+        "DPadDown" | "dpad_down" | "LeftFaceDown" | "left_face_down" -> 3
+        "DPadLeft" | "dpad_left" | "LeftFaceLeft" | "left_face_left" -> 4
+        "LeftShoulder" | "left_shoulder" | "LeftTrigger1" | "left_trigger_1" -> 9
+        "LeftTrigger" | "left_trigger" | "LeftTrigger2" | "left_trigger_2" -> 10
+        "RightShoulder" | "right_shoulder" | "RightTrigger1" | "right_trigger_1" -> 11
+        "RightTrigger" | "right_trigger" | "RightTrigger2" | "right_trigger_2" -> 12
+        "Back" | "back" | "MiddleLeft" | "middle_left" -> 13
+        "Start" | "start" | "Middle" | "middle" -> 14
+        "Guide" | "guide" | "MiddleRight" | "middle_right" -> 15
+        "LeftThumb" | "left_thumb" -> 16
+        "RightThumb" | "right_thumb" -> 17
+        "Left" | "left" -> 18
+        "Right" | "right" -> 19
+        else -> -1
+    }
+}
+
+fn axis_code(axis: String) -> Int Never! {
+    if axis == {
+        "LeftX" | "left_x" | "leftx" -> 0
+        "LeftY" | "left_y" | "lefty" -> 1
+        "RightX" | "right_x" | "rightx" -> 2
+        "RightY" | "right_y" | "righty" -> 3
+        "LeftTrigger" | "left_trigger" | "lefttrigger" -> 4
+        "RightTrigger" | "right_trigger" | "righttrigger" -> 5
+        else -> -1
+    }
+}
+
+#Test("raylib input code spellings and integer gates stay exact") {
+    assert_eq(key_code("Esc"), 256)
+    assert_eq(key_code("SPACE"), -1)
+    assert_eq(button_code("right_face_down"), 7)
+    assert_eq(button_code("right_trigger_2"), 12)
+    assert_eq(button_code("RightThumb"), 17)
+    assert_eq(button_code("RIGHTTHUMB"), -1)
+    assert_eq(axis_code("lefttrigger"), 4)
+    assert_eq(axis_code("RIGHTX"), -1)
+    assert_eq(clamp_fps(0), 1)
+    assert_eq(clamp_fps(241), 240)
+}
+
+#Test("raylib sound acceptance") {
+    empty :: load_sound("")
+    named :: load_sound("sound.wav")
+    assert(!play_sound(empty) && play_sound(named) && named.path == "sound.wav")
+}
+
+#Test("color channel bounds") {
+    c :: color(-1, 0, 255, 256)
+    assert(c.r == 0 && c.g == 0 && c.b == 255 && c.a == 255)
+}
+
+#Test("color retains channels") {
+    c :: color(13, 57, 101, 149)
+    assert(c.r == 13 && c.g == 57 && c.b == 101 && c.a == 149)
 }

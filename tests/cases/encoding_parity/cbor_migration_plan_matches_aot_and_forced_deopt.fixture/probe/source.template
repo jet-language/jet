@@ -1,0 +1,75 @@
+
+use core.encoding.cbor as cbor
+use core.text as text
+
+#Codable
+struct ScoreRank { value: Int }
+
+// v1 wire shape: legacyId, name, score: Int
+// v2 removes legacyId; v3 renames name and converts score; v4 adds hostName.
+#[PublishedSchema, Codable, RenameAll(camel)]
+struct Profile {
+    display_name: String
+    score: ScoreRank
+    host_name: String
+}
+
+migration Profile {
+    remove legacy_id
+}
+
+migration Profile {
+    rename name -> display_name
+    change score: Int -> ScoreRank via { (n) -> ScoreRank{ value: n } }
+}
+
+migration Profile {
+    add host_name: String = "localhost"
+}
+
+fn decode_old() -[]> String {
+    bytes :: [U8]{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x18, 0x5f,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
+    return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
+}
+
+fn forced_deopt() -[]> String {
+    if text.casefold("Straße") != "strasse" { panic("casefold") }
+    bytes :: [U8]{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x18, 0x5f,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    profile :: cbor.decode<Profile>(bytes.copy()) ?? panic("decode")
+    return "{profile.display_name}|{profile.score.value}|{profile.host_name}"
+}
+
+fn failed_change() -[]> String {
+    bytes :: [U8]{
+        0xa3,
+        0x64, 0x6e, 0x61, 0x6d, 0x65,
+        0x63, 0x41, 0x64, 0x61,
+        0x65, 0x73, 0x63, 0x6f, 0x72, 0x65,
+        0x63, 0x62, 0x61, 0x64,
+        0x68, 0x6c, 0x65, 0x67, 0x61, 0x63, 0x79, 0x49, 0x64,
+        0x09
+    }
+    cbor.decode<Profile>(bytes.copy()) ? _value -> return "accepted" ! error -> return "{error[0].path}:{error[0].reason}"
+}
+
+fn run() {
+    print(forced_deopt())
+    print(failed_change())
+}

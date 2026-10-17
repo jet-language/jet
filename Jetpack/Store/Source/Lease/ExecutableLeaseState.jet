@@ -20,14 +20,14 @@ LEASE_RECEIPT_BYTE_BOUND :: prep { 131072 }
 
 // A snapshot request and the owner lock that must stay held until the
 // receipt is accepted and the process handoff completes.
-pub struct PreparedLeaseSnapshot {
-    pub request: LeaseRequest
-    pub owner_lock: RuntimeLock
+struct PreparedLeaseSnapshot {
+    request: LeaseRequest
+    owner_lock: RuntimeLock
 }
 
-pub struct ExecutableLeaseProtocol {
-    root: String
-    key: TrustKey
+struct ExecutableLeaseProtocol {
+    priv root: String
+    priv key: TrustKey
 
     fn open(root: String) -[FS, Env, Rand]> ExecutableLeaseProtocol IOError! {
         store_lease_ensure_real_directory(root, "Jetpack root")
@@ -54,12 +54,12 @@ pub struct ExecutableLeaseProtocol {
     // store's broader hangar lock: the one boundary for owner acquisition,
     // publication, release and recovery, even for callers holding a hangar
     // lock themselves.
-    fn lease_state_lock(self) -[FS, Env]> RuntimeLock IOError! {
+    fn lease_state_lock(self) -[FS, Env, Time]> RuntimeLock IOError! {
         env_runtime_lock(self.service_dir(), LEASE_STATE_SCOPE)
     }
 
     // Hold the returned lock for the lifetime of the process handoff.
-    fn acquire_owner(self, lease_id: String) -[FS, Env]> RuntimeLock IOError! {
+    fn acquire_owner(self, lease_id: String) -[FS, Env, Time]> RuntimeLock IOError! {
         state :: self.lease_state_lock()
         record :: self.record_dir(lease_id)
         owner :: env_acquire_lease_lock(record, LEASE_OWNER_LOCK_SCOPE)
@@ -80,7 +80,7 @@ pub struct ExecutableLeaseProtocol {
         store_lease_owner_scope(lease_id)
     }
 
-    fn prepare_snapshot(self, lease_id: String, owner_scope: String, snapshot_root: String, package: String, version: String, reference: String, output_digest: String, members: [LeaseMember]) -[FS, Env, Rand]> PreparedLeaseSnapshot IOError! {
+    fn prepare_snapshot(self, lease_id: String, owner_scope: String, snapshot_root: String, package: String, version: String, reference: String, output_digest: String, members: [LeaseMember]) -[FS, Env, Rand, Time]> PreparedLeaseSnapshot IOError! {
         owner_lock :: self.acquire_owner(lease_id)
         request :: self.request(LeaseOperation.Acquire, lease_id, 1, owner_scope, snapshot_root, package, version, reference, output_digest, "", members)
         Ok(PreparedLeaseSnapshot{request, owner_lock})
@@ -105,7 +105,7 @@ pub struct ExecutableLeaseProtocol {
     // The client-to-service boundary: verify the frame, the owner lock, the
     // locked digest and the snapshot before publishing an immutable
     // complete receipt.
-    fn accept_snapshot(self, frame: [U8], locked_output_digest: String, snapshot_root: String) -[FS, Env, Rand]> LeaseReceipt IOError! {
+    fn accept_snapshot(self, frame: [U8], locked_output_digest: String, snapshot_root: String) -[FS, Env, Rand, Time]> LeaseReceipt IOError! {
         state :: self.lease_state_lock()
         receipt :: self.accept_snapshot_unlocked(frame, locked_output_digest, snapshot_root)
         close(^state)
@@ -171,7 +171,7 @@ pub struct ExecutableLeaseProtocol {
         if actual != receipt.output_digest -> return Err(store_lease_invalid("executable lease receipt digest no longer matches"))
     }
 
-    fn release(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env]> {
+    fn release(self, lease_id: String, generation: Int, owner_scope: String) IOError! -[FS, Env, Time]> {
         state :: self.lease_state_lock()
         self.release_unlocked(lease_id, generation, owner_scope)
         close(^state)
@@ -190,7 +190,7 @@ pub struct ExecutableLeaseProtocol {
         store_lease_remove_owned_tree(files.join(files.join(record, "generations"), "{generation}"))
     }
 
-    fn reap_empty_record(self, lease_id: String) -[FS, Env]> Bool IOError! {
+    fn reap_empty_record(self, lease_id: String) -[FS, Env, Time]> Bool IOError! {
         state :: self.lease_state_lock()
         reaped :: self.reap_empty_record_unlocked(lease_id)
         close(^state)
@@ -217,7 +217,7 @@ pub struct ExecutableLeaseProtocol {
     // Unknown or lock-damaged state stays untouched. The container sweep is
     // here, beside receipt recovery, so no caller can apply a weaker liveness
     // rule to the same executable snapshot.
-    fn recover_stale_leases(self) -[FS, Env, Rand]> Int IOError! {
+    fn recover_stale_leases(self) -[FS, Env, Rand, Time]> Int IOError! {
         state :: self.lease_state_lock()
         swept :: self.recover_stale_leases_unlocked()
         close(^state)

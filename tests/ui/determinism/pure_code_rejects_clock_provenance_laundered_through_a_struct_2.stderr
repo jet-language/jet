@@ -1,0 +1,19 @@
+Error [E3403]: `Clock comparison` is non-deterministic and cannot appear in a pure evaluation.
+  --> pure_code_rejects_clock_provenance_laundered_through_a_struct_2.jet:6:19
+    |
+  6 |     return holder.clock == holder.clock
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+ Why: Pure evaluation must produce the same result on every machine (D-PURE2).
+ Fix: Remove this call, or remove the enclosing function's explicit empty effect bound.
+ Denial: pure
+ Call chain: Clock comparison
+More: jet-lang.dev/e/E3403
+
+Error [E0312]: `Clock` doesn't support `==`
+  --> pure_code_rejects_clock_provenance_laundered_through_a_struct_2.jet:6:19
+    |
+  6 |     return holder.clock == holder.clock
+    |                   ^^^^^^^^^^^^^^^^^^^^^
+ Why: Value equality requires the Equatable trait
+ Fix: Add `#Equatable` before the type, implement `Equatable` by hand, or compare individual fields
+More: jet-lang.dev/e/E0312

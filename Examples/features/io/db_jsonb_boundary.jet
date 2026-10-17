@@ -30,7 +30,7 @@ fn run() {
     db.migrate(scoped, "jsonb-v1", [SQL{"CREATE TABLE readings (id INTEGER PRIMARY KEY, body BLOB)"}]) ?? panic("create failed")
 
     original :: Reading{sensor: "ünit-7", count: 2, big: 9007199254740993, ratio: 0.1, ok: true, tags: ["a", "b"], note: None}
-    text :: json.to_string(original)
+    text :: json.to_string(original) ?? panic("JSON encode")
     print("json in:  {text}")
     scoped.execute(SQL{"INSERT INTO readings (body) VALUES (jsonb({text}))"}) ?? panic("insert failed")
     // A row-policy scope admits only statements over its table, so every
@@ -48,7 +48,7 @@ fn run() {
     print("json out: {back_text}")
 
     back :: json.decode<Reading>(back_text) ?? panic("decode failed")
-    print("round trip identical: {json.to_string(back) == text}")
+    print("round trip identical: {(json.to_string(back) ?? panic("JSON encode")) == text}")
     print("big exact: {back.big == 9007199254740993}")
     print("sensor: {back.sensor}, ratio: {back.ratio}, note: {back.note ?? "(none)"}")
 

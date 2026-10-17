@@ -69,6 +69,41 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// D-OP-CALL1=A: `name(...)` where `name` is a value that is not a
+    /// function. Name the value's type and the methods it does have; the
+    /// Jet half builds the same text in `sema_call_not_callable_value`.
+    pub(crate) fn not_callable_value_diagnostic(&self, name: &str, ty: &Type, span: Span) -> Diagnostic {
+        let type_name = match ty {
+            Type::Named(n) => Some(n.as_str()),
+            Type::Apply { name, .. } => Some(name.as_str()),
+            _ => None,
+        };
+        let methods = type_name.map(|n| self.registry.method_names(n)).unwrap_or_default();
+        let shown = ty.show();
+        let (why, fix) = match methods.first() {
+            Some(first) => (
+                format!(
+                    "parentheses call functions and lambdas only; `{shown}` has the methods {}",
+                    methods.join(", ")
+                ),
+                format!(
+                    "call one of its methods, such as `{name}.{first}(…)`, or write a method that returns a lambda"
+                ),
+            ),
+            None => (
+                "parentheses call functions and lambdas only".to_string(),
+                format!("remove the parentheses after `{name}`, or bind a function or lambda to call"),
+            ),
+        };
+        Diagnostic::error(
+            "E0803",
+            format!("`{name}` is {shown}, not a function"),
+            why,
+            fix,
+            Some(span),
+        )
+    }
+
     pub(crate) fn infer_call_value(
         &mut self,
         callee: &mut Box<Expr>,
@@ -150,6 +185,17 @@ impl<'a> Checker<'a> {
                     self.check_deprecation(name, dep, span);
                 }
                 self.check_foreign_transaction_call(&sig, name, span);
+            }
+        }
+        // D-CALLSITE-MARK1=A: a lambda that takes a capture with `^` runs
+        // once; its call moves the binding, so a later call is E0121.
+        if let Expr::Ident(name, name_span) = callee.as_ref() {
+            let once = self
+                .lookup(name)
+                .and_then(|info| self.once_lambdas.get(&info.def_span))
+                .is_some();
+            if once {
+                self.mark_moved_exact(name.clone(), *name_span, "its first call");
             }
         }
         match effect_bound {
@@ -319,6 +365,7 @@ impl<'a> Checker<'a> {
                 Some(span),
             ));
         }
+        let named_elsewhere = Self::args_named_elsewhere(args);
         for (i, arg) in args.iter_mut().enumerate() {
             if let Some(param_ty) = params.get(i) {
                 let param_convention = metadata
@@ -327,7 +374,11 @@ impl<'a> Checker<'a> {
                     .unwrap_or(AccessConvention::Read);
                 let saved = self.expected_type.clone();
                 let saved_borrow = self.borrow_ctx;
-                self.expected_type = Some(param_ty.clone());
+                self.expected_type = if self.borrowed_trait_parameter(param_ty, param_convention) {
+                    None
+                } else {
+                    Some(param_ty.clone())
+                };
                 // A `&name` argument grants the place itself, and a write
                 // parameter is a borrow slot; never copy either.
                 self.borrow_ctx = arg.convention == AccessConvention::Write
@@ -346,7 +397,10 @@ impl<'a> Checker<'a> {
                         self.widen_numeric_argument(&mut arg.expr, got, param_ty, param_convention);
                     let got =
                         self.lift_optional_argument(&mut arg.expr, got, param_ty, param_convention);
-                    let boxes_as_trait = self.trait_slot_accepts(param_ty, &got);
+                    let boxes_as_trait = param_convention != AccessConvention::Write
+                        && self.trait_slot_accepts(param_ty, &got);
+                    let trait_identity = self.is_trait_parameter(param_ty)
+                        && self.trait_parameter_identity(param_ty, &got);
                     let callable_shape_compatible = matches!(param_ty, Type::Fn { .. })
                         && matches!(&got, Type::Fn { .. })
                         && fn_types_compatible(param_ty, &got);
@@ -375,11 +429,17 @@ impl<'a> Checker<'a> {
                     let callable_compatible = callable_shape_compatible
                         && Type::obligations_satisfy(param_ty, &got)
                         && !missing_strict_contract;
-                    if boxes_as_trait {
+                    if boxes_as_trait && param_convention == AccessConvention::Move {
                         self.note_move_if_direct_ident(&arg.expr, "the call");
                     }
                     let type_mismatch =
-                        if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {
+                        if self.is_trait_parameter(param_ty)
+                            && param_convention == AccessConvention::Write
+                        {
+                            !trait_identity
+                        } else if trait_identity {
+                            false
+                        } else if matches!(param_ty, Type::Fn { .. }) && matches!(&got, Type::Fn { .. }) {
                             !callable_compatible
                         } else {
                             !Type::compute_tensor_compatible(param_ty, &got)
@@ -405,6 +465,8 @@ impl<'a> Checker<'a> {
                     param_convention,
                     param_ty,
                     arg,
+                    &call_access,
+                    named_elsewhere.get(i).copied().unwrap_or(false),
                 );
             } else {
                 self.infer(&mut arg.expr);

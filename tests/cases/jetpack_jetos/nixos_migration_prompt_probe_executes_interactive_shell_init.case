@@ -1,0 +1,41 @@
+# Port tests/jetpack_jetos.rs:3286-3311; Rust include_str extraction RETIREs.
+# KNOWN-FAILING #4842: Jet JetOS missing public migrate compare-nixos/render_configuration_nix.
+# Public root `jet` command (NOT a root-user/euid precondition).
+# SETUP-PORT observer copies only generated configuration.nix before the ORIGINAL
+# verbatim C tool receives identical argv/env/stdin and exec exit-status passthrough.
+# nixos_backend.rs1090 writes backend before1099 require_offline_inputs invokes nix;
+# generated PS1 is CONFIGURATION_HEAD799-802, not a guessed snapshot.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+requires: os-name:linux
+requires: tool:cc
+requires: tool:bash
+fixture: nixos_migration_prompt_probe_executes_interactive_shell_init.fixture
+mkdir: package-root
+mkdir: tools/original
+mkdir: tool-outputs
+copy: {root}/tests/fixtures/jetpack-config-real project
+copy: {root}/tests/cases/jetpack_jetos/os_migrate_compare_nixos_is_explicit_and_proof_gated.fixture/migration-tool.c migration-tool.c
+step: cc -std=c11 -O0 migration-tool.c -o tools/migration-tool
+exit: 0
+hardlink: tools/migration-tool tools/original/nix
+hardlink: tools/migration-tool tools/qemu-system-x86_64
+hardlink: tools/migration-tool tools/qemu-img
+chmod: tools/nix 0755
+step: jet os migrate compare-nixos halcyon-gnome --out {work}/published --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: JET_TEST_TOOL_ROOT={work}/tool-outputs
+env: JET_TEST_REQUIRE_COMPOSED_METADATA=1
+env: JET_TEST_JET={jet}
+env: JET_TEST_COPY={work}/copy.jet
+env: JET_TEST_CONFIG_COPY={work}/configuration.nix
+env: JET_TEST_DELEGATE={work}/tools/original/nix
+env: PATH={work}/tools:{env:PATH|}
+exit: 0
+file: configuration.nix ~ "programs.bash.promptInit = lib.mkAfter" # generated shell-init product
+capture: prompt = text file.trim_lines.filter(^= "PS1=") configuration.nix
+cap:prompt: lines = 1
+write: bashrc = "{cap:prompt}\nexport PS1\n"
+step: bash --noprofile --rcfile {work}/bashrc -i -c "printf '%s' \"$PS1\""
+exit: 0
+stdout: = "NixOS comparison $ "

@@ -1,0 +1,41 @@
+
+use core.sys as env
+use core.service as services
+
+fn replay_worker() {}
+
+fn run() {
+    store_path :: env.get("JET_SERVICE_AUTH_STORE") ?? panic("store")
+    phase :: env.get("JET_SERVICE_AUTH_PHASE") ?? panic("phase")
+    tree := services.tree("workflow-replay")
+    store :: services.state_store(store_path) ?? panic("state store")
+    tree.set_state_event_log(store, "workflow-events", 1, "reversible") ?? panic("state")
+    tree.worker("worker", replay_worker, capacity: 1) ?? panic("worker")
+    tree.start() ?? panic("start")
+    if phase == "mismatch" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_step(run_id, "ship") ?? panic("replay mismatch accepted")
+    } else if phase == "activity-mismatch" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity mismatch accepted")
+    } else if phase == "completion-mismatch" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("completion mismatch accepted")
+    } else if phase == "write" {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("workflow")
+        tree.workflow_step(run_id, "charge") ?? panic("charge")
+        tree.workflow_step(run_id, "ship") ?? panic("ship")
+        tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity")
+        tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry")
+        tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete")
+        print("written:{tree.workflow_history(run_id) ?? panic("history")}")
+    } else {
+        run_id :: tree.workflow_start("checkout", 1) ?? panic("replay")
+        tree.workflow_step(run_id, "charge") ?? panic("charge replay")
+        tree.workflow_step(run_id, "ship") ?? panic("ship replay")
+        tree.workflow_activity(run_id, "charge", "charge-1", 2) ?? panic("activity replay")
+        tree.workflow_activity_retry(run_id, "charge-1", TaskOutcome.Panicked("timeout")) ?? panic("retry replay")
+        tree.workflow_activity_complete(run_id, "charge-1", TaskOutcome.Finished) ?? panic("complete replay")
+        print("replayed:{tree.workflow_history(run_id) ?? panic("history")}")
+    }
+}

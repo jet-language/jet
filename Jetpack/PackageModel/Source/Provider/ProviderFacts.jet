@@ -6,10 +6,12 @@
 // native document or hide a field it cannot prove. This record is the one
 // identity/provenance seam consumed by package profiles and semantic locks.
 
+use core.encoding.json as pkg_provider_json_core
+
 PROVIDER_FACTS_SCHEMA :: prep { "jet-provider-facts-v1" }
 PROVIDER_EXACT_SELECTOR_LOSS :: prep { "external provider references must retain an exact version, revision, or digest" }
 
-pub enum ProviderFactValue {
+enum ProviderFactValue {
     Null
     Bool(Bool)
     Number(String)
@@ -18,21 +20,21 @@ pub enum ProviderFactValue {
     Map([String: ProviderFactValue])
 
     // The value as a tree; map keys in byte order.
-    fn to_json_tree(self) -> DataTree Never! {
+    fn to_json_tree(self) -> Dyn Never! {
         if self == {
-            .Null -> DataTree.Null
-            .Bool(value) -> DataTree.Bool(value)
+            .Null -> Dyn.Null
+            .Bool(value) -> Dyn.Bool(value)
             .Number(text) -> pkg_provider_number_tree(text)
-            .Text(text) -> DataTree.Text(text)
+            .Text(text) -> Dyn.Text(text)
             .List(values) -> {
-                items := [DataTree]{}
+                items := [Dyn]{}
                 loop value in values -> &items.push(value.to_json_tree())
-                DataTree.Array(items)
+                Dyn.Array(items)
             }
             .Map(values) -> {
-                object := [String: DataTree]{}
-                loop key in pkg_provider_sorted_keys(values.keys().to_list()) -> object[key] = values[key].to_json_tree()
-                DataTree.Object(object)
+                object := [(key: String, value: Dyn)]{}
+                loop key in pkg_provider_sorted_keys(values.keys().to_list()) -> &object.push((key: key, value: values[key].to_json_tree()))
+                Dyn.Object(object)
             }
         }
     }
@@ -43,13 +45,12 @@ pub enum ProviderFactValue {
     }
 
     // Every tree is a fact value; numbers keep their decimal text.
-    fn from_json_tree(value: DataTree) -> ProviderFactValue Never! {
+    fn from_json_tree(value: Dyn) -> ProviderFactValue Never! {
         if value == {
             .Null -> ProviderFactValue.Null
             .Bool(flag) -> ProviderFactValue.Bool(flag)
             .Int(number) -> ProviderFactValue.Number("{number}")
             .Float(number) -> ProviderFactValue.Number("{number}")
-            .Number(text) -> ProviderFactValue.Number(text)
             .Text(text) -> ProviderFactValue.Text(text)
             .Array(items) -> {
                 values := [ProviderFactValue]{}
@@ -58,27 +59,29 @@ pub enum ProviderFactValue {
             }
             .Object(fields) -> {
                 values := [String: ProviderFactValue]{}
-                loop key in pkg_provider_sorted_keys(fields.keys().to_list()) -> values[key] = ProviderFactValue.from_json_tree(fields[key])
+                loop pair in fields -> values[pair.key] = ProviderFactValue.from_json_tree(pair.value)
                 ProviderFactValue.Map(values)
             }
+            // Native byte/date carriers expose text through the public accessor.
+            else -> ProviderFactValue.Text(value.to_text() ?? "")
         }
     }
 }
 
-pub struct ProviderLoss {
-    pub key: String
-    pub reason: String
-    pub source: String
+struct ProviderLoss {
+    key: String
+    reason: String
+    source: String
 
-    fn to_json_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["key"] = DataTree.Text(~self.key)
-        object["reason"] = DataTree.Text(~self.reason)
-        object["source"] = DataTree.Text(~self.source)
-        DataTree.Object(object)
+    fn to_json_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["key"] = Dyn.Text(self.key.copy())
+        object["reason"] = Dyn.Text(self.reason.copy())
+        object["source"] = Dyn.Text(self.source.copy())
+        Dyn.Object(object)
     }
 
-    fn from_json_tree(value: DataTree) -> ProviderLoss ProviderFactsError! {
+    fn from_json_tree(value: Dyn) -> ProviderLoss ProviderFactsError! {
         object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         Ok(ProviderLoss{
             key: pkg_provider_required_text(object, "key", "loss lacks key"),
@@ -88,22 +91,22 @@ pub struct ProviderLoss {
     }
 }
 
-pub struct ProviderConflict {
-    pub key: String
-    pub left: String
-    pub right: String
-    pub source: String
+struct ProviderConflict {
+    key: String
+    left: String
+    right: String
+    source: String
 
-    fn to_json_tree(self) -> DataTree Never! {
-        object := [String: DataTree]{}
-        object["key"] = DataTree.Text(~self.key)
-        object["left"] = DataTree.Text(~self.left)
-        object["right"] = DataTree.Text(~self.right)
-        object["source"] = DataTree.Text(~self.source)
-        DataTree.Object(object)
+    fn to_json_tree(self) -> Dyn Never! {
+        object := [String: Dyn]{}
+        object["key"] = Dyn.Text(self.key.copy())
+        object["left"] = Dyn.Text(self.left.copy())
+        object["right"] = Dyn.Text(self.right.copy())
+        object["source"] = Dyn.Text(self.source.copy())
+        Dyn.Object(object)
     }
 
-    fn from_json_tree(value: DataTree) -> ProviderConflict ProviderFactsError! {
+    fn from_json_tree(value: Dyn) -> ProviderConflict ProviderFactsError! {
         object :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         Ok(ProviderConflict{
             key: pkg_provider_required_text(object, "key", "conflict lacks key"),
@@ -117,24 +120,24 @@ pub struct ProviderConflict {
 // Why a provider-fact carrier fails its lossless identity contract or its
 // JSON form.
 #Error
-pub struct ProviderFactsError {
-    pub message: String
+struct ProviderFactsError {
+    message: String
 }
 
-pub struct ProviderFacts {
-    pub provider: String
-    pub reference: String
-    pub target: String
-    pub selector: ProviderSelector
-    pub resolved_source: String
-    pub profile: String
-    pub profile_provenance: String
-    pub facts: [String: ProviderFactValue]
-    pub provenance: [String: String]
-    pub native_format: String
-    pub native_document: String
-    pub losses: [ProviderLoss]
-    pub conflicts: [ProviderConflict]
+struct ProviderFacts {
+    provider: String
+    reference: String
+    target: String
+    selector: ProviderSelector
+    resolved_source: String
+    profile: String
+    profile_provenance: String
+    facts: [String: ProviderFactValue]
+    provenance: [String: String]
+    native_format: String
+    native_document: String
+    losses: [ProviderLoss]
+    conflicts: [ProviderConflict]
 
     // Rust `Default`: the core profile carrier.
     fn core_profile() -> ProviderFacts Never! {
@@ -168,11 +171,11 @@ pub struct ProviderFacts {
             losses: [ProviderLoss]{},
             conflicts: [ProviderConflict]{}
         }
-        name :: ~facts.provider
-        target :: ~facts.target
+        name :: facts.provider.copy()
+        target :: facts.target.copy()
         &facts.add_fact("provider.name", ProviderFactValue.Text(name), "ref")
         &facts.add_fact("provider.target", ProviderFactValue.Text(target), "ref")
-        selector_text :: ~facts.selector.raw
+        selector_text :: facts.selector.raw.copy()
         if selector_text != "" -> &facts.add_fact("provider.selector", ProviderFactValue.Text(selector_text), "ref")
         if explicit_provider != "" && authority.provider.trim() != "" && explicit_provider != authority.provider {
             // Named sources such as `@default` are source authorities, not
@@ -421,61 +424,54 @@ pub struct ProviderFacts {
 
     // The carrier as a tree: fields in schema order, facts and provenance
     // keyed in byte order.
-    fn to_json_tree(self) -> DataTree Never! {
-        facts := [String: DataTree]{}
+    fn to_json_tree(self) -> Dyn Never! {
+        facts := [String: Dyn]{}
         loop key in pkg_provider_sorted_keys(self.facts.keys().to_list()) -> facts[key] = self.facts[key].to_json_tree()
-        provenance := [String: DataTree]{}
-        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = DataTree.Text(~self.provenance[key])
-        losses := [DataTree]{}
+        provenance := [String: Dyn]{}
+        loop key in pkg_provider_sorted_keys(self.provenance.keys().to_list()) -> provenance[key] = Dyn.Text(self.provenance[key].copy())
+        losses := [Dyn]{}
         loop loss in self.losses -> &losses.push(loss.to_json_tree())
-        conflicts := [DataTree]{}
+        conflicts := [Dyn]{}
         loop conflict in self.conflicts -> &conflicts.push(conflict.to_json_tree())
-        object := [String: DataTree]{}
-        object["schema"] = DataTree.Text(PROVIDER_FACTS_SCHEMA)
-        object["provider"] = DataTree.Text(~self.provider)
-        object["reference"] = DataTree.Text(~self.reference)
-        object["target"] = DataTree.Text(~self.target)
+        object := [String: Dyn]{}
+        object["schema"] = Dyn.Text(PROVIDER_FACTS_SCHEMA)
+        object["provider"] = Dyn.Text(self.provider.copy())
+        object["reference"] = Dyn.Text(self.reference.copy())
+        object["target"] = Dyn.Text(self.target.copy())
         object["selector"] = self.selector.to_json_tree()
-        object["resolved_source"] = DataTree.Text(~self.resolved_source)
-        object["profile"] = DataTree.Text(~self.profile)
-        object["profile_provenance"] = DataTree.Text(~self.profile_provenance)
-        object["facts"] = DataTree.Object(facts)
-        object["provenance"] = DataTree.Object(provenance)
-        object["native_format"] = DataTree.Text(~self.native_format)
-        object["native_document"] = DataTree.Text(~self.native_document)
-        object["losses"] = DataTree.Array(losses)
-        object["conflicts"] = DataTree.Array(conflicts)
-        DataTree.Object(object)
+        object["resolved_source"] = Dyn.Text(self.resolved_source.copy())
+        object["profile"] = Dyn.Text(self.profile.copy())
+        object["profile_provenance"] = Dyn.Text(self.profile_provenance.copy())
+        object["facts"] = Dyn.Object(facts)
+        object["provenance"] = Dyn.Object(provenance)
+        object["native_format"] = Dyn.Text(self.native_format.copy())
+        object["native_document"] = Dyn.Text(self.native_document.copy())
+        object["losses"] = Dyn.Array(losses)
+        object["conflicts"] = Dyn.Array(conflicts)
+        Dyn.Object(object)
     }
 
     fn to_json(self) -> String Never! {
         pkg_json_render(self.to_json_tree())
     }
 
-    fn from_json(text: String) -> ProviderFacts ProviderFactsError! {
-        if pkg_json_parse_protocol(text) == {
-            .Parsed(tree) -> return ProviderFacts.from_json_tree(tree)
-            .Failed(reason) -> return Err(ProviderFactsError{message: reason})
-        }
-    }
-
-    fn from_json_tree(value: DataTree) -> ProviderFacts ProviderFactsError! {
+    fn from_json_tree(value: Dyn) -> ProviderFacts ProviderFactsError! {
         root :: pkg_json_object(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_OBJECT})
         schema :: pkg_provider_required_text(root, "schema", "provider facts lack `schema`")
         if schema != PROVIDER_FACTS_SCHEMA -> return Err(ProviderFactsError{message: "provider facts have an unsupported schema"})
         selector :: ProviderSelector.from_json_tree(root.get("selector"))
-        fact_fields :: pkg_json_object(root.get("facts") ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `facts` is not an object"})
+        fact_fields :: pkg_json_object(root.get("facts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `facts` is not an object"})
         facts := [String: ProviderFactValue]{}
         loop key in pkg_provider_sorted_keys(fact_fields.keys().to_list()) -> facts[key] = ProviderFactValue.from_json_tree(fact_fields[key])
-        provenance_fields :: pkg_json_object(root.get("provenance") ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `provenance` is not an object"})
+        provenance_fields :: pkg_json_object(root.get("provenance") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `provenance` is not an object"})
         provenance := [String: String]{}
         loop key in pkg_provider_sorted_keys(provenance_fields.keys().to_list()) {
             provenance[key] = pkg_json_text(provenance_fields[key]) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
         }
-        loss_values :: pkg_json_array(root.get("losses") ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `losses` is not an array"})
+        loss_values :: pkg_json_array(root.get("losses") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `losses` is not an array"})
         losses := [ProviderLoss]{}
         loop item in loss_values -> &losses.push(ProviderLoss.from_json_tree(item))
-        conflict_values :: pkg_json_array(root.get("conflicts") ?? DataTree.Null) ?? return Err(ProviderFactsError{message: "provider facts `conflicts` is not an array"})
+        conflict_values :: pkg_json_array(root.get("conflicts") ?? Dyn.Null) ?? return Err(ProviderFactsError{message: "provider facts `conflicts` is not an array"})
         conflicts := [ProviderConflict]{}
         loop item in conflict_values -> &conflicts.push(ProviderConflict.from_json_tree(item))
         Ok(ProviderFacts{
@@ -528,23 +524,28 @@ fn pkg_provider_check_details(details: ProviderSelectorDetails, owner: String) P
 }
 
 // The text at `key`; `missing` names an absent key.
-fn pkg_provider_required_text(object: [String: DataTree], key: String, missing: String) -> String ProviderFactsError! {
+fn pkg_provider_required_text(object: [String: Dyn], key: String, missing: String) -> String ProviderFactsError! {
     value :: object.get(key) ?? return Err(ProviderFactsError{message: missing})
     text :: pkg_json_text(value) ?? return Err(ProviderFactsError{message: PKG_JSON_NOT_STRING})
     Ok(text)
 }
 
-// A number fact's tree: an integer, else a float, else its lexical text.
-fn pkg_provider_number_tree(text: String) -> DataTree Never! {
+// A number fact's tree: an integer, else a float, else the JSON reader's
+// exact-number carrier for its lexical text (Core builds that carrier only
+// through the reader), else the text itself.
+fn pkg_provider_number_tree(text: String) -> Dyn Never! {
     if Int.parse(text) == {
-        .Ok(number) -> return DataTree.Int(number)
+        .Ok(number) -> return Dyn.Int(number)
         .Err(_) -> {}
     }
     if Float.parse(text) == {
-        .Ok(number) -> return DataTree.Float(number)
+        .Ok(number) -> return Dyn.Float(number)
         .Err(_) -> {}
     }
-    DataTree.Number(text)
+    if pkg_provider_json_core.parse(text) == {
+        .Ok(tree) -> tree
+        .Err(_) -> Dyn.Text(text.copy())
+    }
 }
 
 fn pkg_provider_sorted_keys(keys: [String]) -> [String] Never! {

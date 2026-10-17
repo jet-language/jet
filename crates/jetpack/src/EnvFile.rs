@@ -7,7 +7,7 @@
 //! // env.jet — a Jetpack project environment (dev-shell descriptor)
 //! use jetpack as pkg
 //!
-//! pub fn shell() -> [JSON] {
+//! fn shell() -> [JSON] {
 //!     return [
 //!         pkg.source("nixpkgs"),
 //!         pkg.packages(["ripgrep", "fd", "claude-code"]),
@@ -149,7 +149,7 @@ impl EnvFile {
             "// {file} — a Jetpack project environment\n\
              use jetpack as pkg\n\
              \n\
-             pub fn shell() -> [JSON] {{\n\
+             fn shell() -> [JSON] {{\n\
              \x20   return [\n\
              {body}\n\
              \x20   ]\n\
@@ -421,7 +421,7 @@ mod tests {
 
     const SAMPLE: &str = r#"
 use jetpack as pkg
-pub fn shell() -> [JSON] {
+fn shell() -> [JSON] {
     return [
         pkg.source("nixpkgs"),
         pkg.packages(["ripgrep", "fd", "claude-code"]),
@@ -432,7 +432,7 @@ pub fn shell() -> [JSON] {
 
     const NAMED: &str = r#"
 use jetpack as pkg
-pub fn shell() -> [JSON] {
+fn shell() -> [JSON] {
     return [
         pkg.source("stable", "NixOS/nixpkgs/nixos-24.05@github"),
         pkg.source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"),
@@ -478,7 +478,7 @@ pub fn shell() -> [JSON] {
         // name→source package index lives in the repo's `pkg.jet`, not here.
         let repo = r#"
 use jetpack as pkg
-pub fn shell() -> [JSON] {
+fn shell() -> [JSON] {
     return [
         pkg.source("mine", "./jet-pkgs", "core"),
         pkg.packages(["hello@mine"])
@@ -500,7 +500,7 @@ pub fn shell() -> [JSON] {
     fn render_roundtrips_named() {
         let ef = parse(NAMED);
         let rendered = ef.render();
-        assert!(rendered.contains("pub fn shell() -> [JSON]"));
+        assert!(rendered.contains("fn shell() -> [JSON]"));
         assert!(rendered.contains("pkg.packages([\"ripgrep@stable\", \"neovim@unstable\"]),"));
         let ef2 = parse(&rendered);
         assert_eq!(ef.named, ef2.named);

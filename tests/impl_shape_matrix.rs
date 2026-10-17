@@ -217,7 +217,7 @@ fn assert_matrix_cells() {
                 row.owner
             );
         }
-        let print_call = format!("print(~{})", row.binding);
+        let print_call = format!("print({}.copy())", row.binding);
         assert_eq!(
             SOURCE.matches(print_call.as_str()).count(),
             1,
@@ -225,8 +225,13 @@ fn assert_matrix_cells() {
             row.owner
         );
     }
+    let direct_print_cells = SOURCE
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("print(") && line.ends_with(".copy())"))
+        .count();
     assert_eq!(
-        SOURCE.matches("print(~").count(),
+        direct_print_cells,
         ROWS.len(),
         "source must have one direct print cell per row"
     );
@@ -345,30 +350,22 @@ fn impl_shape_matrix_covers_all_contexts_and_resolution_seams() {
         "EquatableOwner must retain the derived-Equatable matrix shape"
     );
 
-    let compiled = jet::compile_with_path(SOURCE, path.to_str().unwrap())
+    jet::compile_with_path(SOURCE, path.to_str().unwrap())
         .expect("matrix AOT codegen");
 
     // The closed matrix is the admission oracle; executable tier parity below
     // is the consumer-facing proof of its rendering behavior.
     assert_aot_and_admission_contract(&registry, &explicit, &local);
 
-    // This runs the same fixture through release/AOT and the default Cranelift
-    // tier. It is the executable half of the observable contract and golden gate.
+    // This runs the same fixture through release/AOT and the default `jet run`
+    // (build + exec). It is the executable half of the observable contract and
+    // golden gate; the direct default run below pins its exit and stdout.
     tir_support::assert_example_cli_tiers_agree("traits/impl_shape_matrix", EXPECTED);
 
-    // The ordinary three-mode helper proves output parity, but it does not
-    // prove that the default run stayed on the resident seam. Trace the same
-    // fixture once so the matrix cannot pass through tier 0 only.
     let (code, stdout, stderr) =
-        tir_support::jit_run_traced("impl_shape_matrix_native", SOURCE);
+        tir_support::default_run("impl_shape_matrix_native", SOURCE);
     assert_eq!(code, 0, "default `jet run` failed for impl_shape_matrix: {stderr}");
     assert_eq!(stdout, EXPECTED);
-    assert!(
-        stderr
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "impl_shape_matrix did not execute on the resident JIT: {stderr}"
-    );
 }
 
 #[test]

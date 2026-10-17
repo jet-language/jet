@@ -1,0 +1,223 @@
+// EncodingTypes.rs:29-80 field order and derive(Clone,PartialEq,Eq).
+// CAbiRoutes.rs:9394-9466 descriptor ABI: exact-Int inputs borrow, Text clones,
+// optional Int lends a word; Error ctor consumes cause, getters clone it.
+// CommonTypes.rs:182-217 and Core/EncodingError.rs:8-28 own all three renders.
+fn encoding_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized aligned word in a live encoding carrier or option input") { return os_load_i64(address) }
+}
+fn encoding_store(address: I64, value: I64) {
+    #Unsafe("owns a writable aligned word in a fresh encoding carrier or caller output") { os_store_i64(address, value) }
+}
+fn encoding_enum_clone(value: I64) -> I64 {
+    result :: jet_rt_alloc(ENCODING_ENUM_BYTES, I64{8})
+    encoding_store(result + ENCODING_ENUM_TAG, encoding_word(value + ENCODING_ENUM_TAG))
+    result
+}
+fn encoding_enum_drop(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, ENCODING_ENUM_BYTES, I64{8})
+}
+fn encoding_enum_eq(left: I64, right: I64) -> Bool {
+    encoding_word(left + ENCODING_ENUM_TAG) == encoding_word(right + ENCODING_ENUM_TAG)
+}
+#Export(c) fn jet_rt_handle_clone_encoding_format(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_encoding_format(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_encoding_format(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_encoding_error_kind(value: I64) -> I64 { encoding_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_encoding_error_kind(value: I64) { encoding_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_encoding_error_kind(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+fn encoding_optional_input(pointer: I64) -> I64 {
+    if (pointer == I64{0}) -> I64{0} else -> jet_int_owned_to_i64(encoding_word(pointer))
+}
+fn encoding_optional_get(value: I64, present: I64, field: I64, some: I64) -> I64 {
+    if (encoding_word(value + present) == I64{0}) -> return I64{0}
+    encoding_store(some, jet_int_owned_from_i64(encoding_word(value + field)))
+    I64{1}
+}
+fn encoding_optional_eq(left: I64, right: I64, present: I64, field: I64) -> Bool {
+    a :: encoding_word(left + present)
+    a == encoding_word(right + present) && (a == I64{0} || encoding_word(left + field) == encoding_word(right + field))
+}
+#Export(c) fn jet_rt_record_new_encoding_cause(kind: I64, os_code: I64, message: I64) -> I64 {
+    // Validate exact Int before allocation or ownership changes (CAbi native()).
+    code :: encoding_optional_input(os_code)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    result :: jet_rt_alloc(ENCODING_CAUSE_BYTES, I64{8})
+    encoding_store(result + ENCODING_CAUSE_KIND, jet_rt_string_clone(kind))
+    encoding_store(result + ENCODING_CAUSE_OS_PRESENT, if (os_code == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(result + ENCODING_CAUSE_OS_CODE, code)
+    encoding_store(result + ENCODING_CAUSE_MESSAGE, jet_rt_string_clone(message))
+    result
+}
+#Export(c) fn jet_rt_handle_clone_encoding_cause(value: I64) -> I64 {
+    result :: jet_rt_alloc(ENCODING_CAUSE_BYTES, I64{8})
+    encoding_store(result + ENCODING_CAUSE_KIND, jet_rt_string_clone(encoding_word(value + ENCODING_CAUSE_KIND)))
+    encoding_store(result + ENCODING_CAUSE_OS_PRESENT, encoding_word(value + ENCODING_CAUSE_OS_PRESENT))
+    encoding_store(result + ENCODING_CAUSE_OS_CODE, encoding_word(value + ENCODING_CAUSE_OS_CODE))
+    encoding_store(result + ENCODING_CAUSE_MESSAGE, jet_rt_string_clone(encoding_word(value + ENCODING_CAUSE_MESSAGE)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_encoding_cause(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(encoding_word(value + ENCODING_CAUSE_KIND))
+    jet_rt_string_drop(encoding_word(value + ENCODING_CAUSE_MESSAGE))
+    jet_rt_free(value, ENCODING_CAUSE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_encoding_cause(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(encoding_word(left + ENCODING_CAUSE_KIND), encoding_word(right + ENCODING_CAUSE_KIND)) &&
+        encoding_optional_eq(left, right, ENCODING_CAUSE_OS_PRESENT, ENCODING_CAUSE_OS_CODE) &&
+        jet_rt_string_eq(encoding_word(left + ENCODING_CAUSE_MESSAGE), encoding_word(right + ENCODING_CAUSE_MESSAGE))
+}
+#Export(c) fn jet_rt_record_get_encoding_cause_kind(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + ENCODING_CAUSE_KIND)) }
+#Export(c) fn jet_rt_record_get_encoding_cause_message(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + ENCODING_CAUSE_MESSAGE)) }
+#Export(c) fn jet_rt_record_get_encoding_cause_os_code(value: I64, some: I64) -> I64 {
+    encoding_optional_get(value, ENCODING_CAUSE_OS_PRESENT, ENCODING_CAUSE_OS_CODE, some)
+}
+#Export(c) fn jet_rt_record_new_encoding_error(format: I64, kind: I64, offset: I64, line: I64, column: I64, path: I64, reason: I64, cause: I64) -> I64 {
+    // CAbiRoutes9466 range_stop, followed by native() in source field order.
+    if (format < I64{0} || format > I64{6} || kind < I64{0} || kind > I64{5}) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) {
+            // The optional cause is adopted; seed unwinding drops it even
+            // when validation stops before storing it in the result.
+            jet_rt_handle_drop_encoding_cause(cause)
+            return I64{0}
+        }
+    }
+    raw_offset :: jet_int_owned_to_i64(offset)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_encoding_cause(cause)
+        return I64{0}
+    }
+    raw_line :: encoding_optional_input(line)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_encoding_cause(cause)
+        return I64{0}
+    }
+    raw_column :: encoding_optional_input(column)
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        jet_rt_handle_drop_encoding_cause(cause)
+        return I64{0}
+    }
+    result :: jet_rt_alloc(ENCODING_ERROR_BYTES, I64{8})
+    encoding_store(result + ENCODING_ERROR_FORMAT, format)
+    encoding_store(result + ENCODING_ERROR_KIND, kind)
+    encoding_store(result + ENCODING_ERROR_OFFSET, raw_offset)
+    encoding_store(result + ENCODING_ERROR_LINE_PRESENT, if (line == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(result + ENCODING_ERROR_LINE, raw_line)
+    encoding_store(result + ENCODING_ERROR_COLUMN_PRESENT, if (column == I64{0}) -> I64{0} else -> I64{1})
+    encoding_store(result + ENCODING_ERROR_COLUMN, raw_column)
+    encoding_store(result + ENCODING_ERROR_PATH, jet_rt_string_clone(path))
+    encoding_store(result + ENCODING_ERROR_REASON, jet_rt_string_clone(reason))
+    encoding_store(result + ENCODING_ERROR_CAUSE, cause) // takes the optional owned handle, never clones m7
+    result
+}
+#Export(c) fn jet_rt_handle_clone_encoding_error(value: I64) -> I64 {
+    result :: jet_rt_alloc(ENCODING_ERROR_BYTES, I64{8})
+    at := I64{0}
+    loop at < ENCODING_ERROR_PATH {
+        encoding_store(result + at, encoding_word(value + at))
+        at += I64{8}
+    }
+    encoding_store(result + ENCODING_ERROR_PATH, jet_rt_string_clone(encoding_word(value + ENCODING_ERROR_PATH)))
+    encoding_store(result + ENCODING_ERROR_REASON, jet_rt_string_clone(encoding_word(value + ENCODING_ERROR_REASON)))
+    cause :: encoding_word(value + ENCODING_ERROR_CAUSE)
+    encoding_store(result + ENCODING_ERROR_CAUSE, if (cause == I64{0}) -> I64{0} else -> jet_rt_handle_clone_encoding_cause(cause))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_encoding_error(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(encoding_word(value + ENCODING_ERROR_PATH))
+    jet_rt_string_drop(encoding_word(value + ENCODING_ERROR_REASON))
+    jet_rt_handle_drop_encoding_cause(encoding_word(value + ENCODING_ERROR_CAUSE))
+    jet_rt_free(value, ENCODING_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_encoding_error(left: I64, right: I64) -> Bool {
+    if (encoding_word(left + ENCODING_ERROR_FORMAT) != encoding_word(right + ENCODING_ERROR_FORMAT)) -> return false
+    if (encoding_word(left + ENCODING_ERROR_KIND) != encoding_word(right + ENCODING_ERROR_KIND)) -> return false
+    if (encoding_word(left + ENCODING_ERROR_OFFSET) != encoding_word(right + ENCODING_ERROR_OFFSET)) -> return false
+    if !encoding_optional_eq(left, right, ENCODING_ERROR_LINE_PRESENT, ENCODING_ERROR_LINE) -> return false
+    if !encoding_optional_eq(left, right, ENCODING_ERROR_COLUMN_PRESENT, ENCODING_ERROR_COLUMN) -> return false
+    if !jet_rt_string_eq(encoding_word(left + ENCODING_ERROR_PATH), encoding_word(right + ENCODING_ERROR_PATH)) -> return false
+    if !jet_rt_string_eq(encoding_word(left + ENCODING_ERROR_REASON), encoding_word(right + ENCODING_ERROR_REASON)) -> return false
+    a :: encoding_word(left + ENCODING_ERROR_CAUSE)
+    b :: encoding_word(right + ENCODING_ERROR_CAUSE)
+    if (a == I64{0} || b == I64{0}) -> return a == b
+    jet_rt_handle_eq_encoding_cause(a, b)
+}
+#Export(c) fn jet_rt_record_get_encoding_error_format(value: I64) -> I64 { encoding_word(value + ENCODING_ERROR_FORMAT) }
+#Export(c) fn jet_rt_record_get_encoding_error_kind(value: I64) -> I64 { encoding_word(value + ENCODING_ERROR_KIND) }
+#Export(c) fn jet_rt_record_get_encoding_error_byte_offset(value: I64) -> I64 { jet_int_owned_from_i64(encoding_word(value + ENCODING_ERROR_OFFSET)) }
+#Export(c) fn jet_rt_record_get_encoding_error_line(value: I64, some: I64) -> I64 { encoding_optional_get(value, ENCODING_ERROR_LINE_PRESENT, ENCODING_ERROR_LINE, some) }
+#Export(c) fn jet_rt_record_get_encoding_error_column(value: I64, some: I64) -> I64 { encoding_optional_get(value, ENCODING_ERROR_COLUMN_PRESENT, ENCODING_ERROR_COLUMN, some) }
+#Export(c) fn jet_rt_record_get_encoding_error_path(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + ENCODING_ERROR_PATH)) }
+#Export(c) fn jet_rt_record_get_encoding_error_reason(value: I64) -> I64 { jet_rt_string_clone(encoding_word(value + ENCODING_ERROR_REASON)) }
+#Export(c) fn jet_rt_record_get_encoding_error_cause(value: I64, some: I64) -> I64 {
+    cause :: encoding_word(value + ENCODING_ERROR_CAUSE)
+    if (cause == I64{0}) -> return I64{0}
+    encoding_store(some, jet_rt_handle_clone_encoding_cause(cause))
+    I64{1}
+}
+fn encoding_format_label(target: I64, ordinal: I64) {
+    if {
+        (ordinal == I64{0}) -> rt_text_push_word(target, I64{1313821514}, I64{4}) // JSON
+        (ordinal == I64{1}) -> rt_text_push_word(target, I64{327731336010}, I64{5}) // JSONL
+        (ordinal == I64{2}) -> rt_text_push_word(target, I64{5657411}, I64{3}) // CSV
+        (ordinal == I64{3}) -> rt_text_push_word(target, I64{1280134996}, I64{4}) // TOML
+        (ordinal == I64{4}) -> rt_text_push_word(target, I64{1280131417}, I64{4}) // YAML
+        (ordinal == I64{5}) -> rt_text_push_word(target, I64{5000536}, I64{3}) // XML
+        else -> rt_text_push_word(target, I64{1380926019}, I64{4}) // CBOR; ctor checked tag
+    }
+}
+fn encoding_kind_label(target: I64, ordinal: I64) {
+    if {
+        (ordinal == I64{0}) -> rt_text_push_word(target, I64{132359960557907}, I64{6}) // Syntax
+        (ordinal == I64{1}) -> {
+            rt_text_push_word(target, I64{7310575174812004948}, I64{8}) // Truncate
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (ordinal == I64{2}) -> {
+            rt_text_push_word(target, I64{8245933071047814741}, I64{8}) // Unsuppor
+            rt_text_push_word(target, I64{6579572}, I64{3})
+        }
+        (ordinal == I64{3}) -> rt_text_push_word(target, I64{499984984396}, I64{5}) // Limit
+        (ordinal == I64{4}) -> rt_text_push_word(target, I64{20297}, I64{2}) // IO
+        else -> rt_text_push_word(target, I64{435744240723}, I64{5}) // State; ctor checked tag
+    }
+}
+// One ladder for encoding-family diagnostics. The caller streams format/kind
+// labels into target first, avoiding temporary text owners for static labels.
+// Core/EncodingError.rs:8-28; optional fields are independent; cause is omitted.
+fn encoding_error_render_tail(target: I64, offset: I64, line_present: I64, line: I64, column_present: I64, column: I64, path: I64, reason: I64) -> I64 {
+    rt_text_push_word(target, I64{7310601557487411488}, I64{8}) // " at byte"
+    rt_text_push_word(target, I64{32}, I64{1})
+    rt_text_push_number(target, offset)
+    if (line_present != I64{0}) {
+        rt_text_push_word(target, I64{9118724144242732}, I64{7}) // ", line "
+        rt_text_push_number(target, line)
+    }
+    if (column_present != I64{0}) {
+        rt_text_push_word(target, I64{7957145225219219500}, I64{8}) // ", column"
+        rt_text_push_word(target, I64{32}, I64{1})
+        rt_text_push_number(target, column)
+    }
+    if (rt_text_len(path) != I64{0}) {
+        rt_text_push_word(target, I64{9122048314974252}, I64{7}) // ", path "
+        jet_rt_string_builder_push(target, path)
+    }
+    rt_text_push_word(target, I64{8250}, I64{2}) // ": "
+    jet_rt_string_builder_push(target, reason)
+    jet_rt_string_builder_finish(target)
+}
+#Export(c) fn jet_rt_handle_show_encoding_error(value: I64) -> I64 {
+    // EncodingError.rs8-28: no cause text, independent line/column, omit empty path.
+    target :: jet_rt_string_builder_new()
+    encoding_format_label(target, encoding_word(value + ENCODING_ERROR_FORMAT))
+    rt_text_push_word(target, I64{32}, I64{1})
+    encoding_kind_label(target, encoding_word(value + ENCODING_ERROR_KIND))
+    encoding_error_render_tail(target, encoding_word(value + ENCODING_ERROR_OFFSET),
+        encoding_word(value + ENCODING_ERROR_LINE_PRESENT), encoding_word(value + ENCODING_ERROR_LINE),
+        encoding_word(value + ENCODING_ERROR_COLUMN_PRESENT), encoding_word(value + ENCODING_ERROR_COLUMN),
+        encoding_word(value + ENCODING_ERROR_PATH), encoding_word(value + ENCODING_ERROR_REASON))
+}
+#Export(c) fn jet_rt_handle_display_encoding_error(value: I64) -> I64 { jet_rt_handle_show_encoding_error(value) }
+#Export(c) fn jet_rt_handle_debug_encoding_error(value: I64) -> I64 { jet_rt_handle_show_encoding_error(value) }

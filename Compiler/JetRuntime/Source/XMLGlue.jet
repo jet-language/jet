@@ -1,0 +1,167 @@
+// CommonTypes.rs:222-279 and XmlOptions.rs:52-70 derive Clone/PartialEq.
+// CAbiRoutes.rs:12198-12237/12292-12307: borrowed exact Int, cloned text.
+// XMLABI.jet owns native offsets; no Rust layout or allocation is accepted.
+fn xml_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized aligned word in a live XML carrier or optional input") { return os_load_i64(address) }
+}
+fn xml_store(address: I64, value: I64) {
+    #Unsafe("owns a writable aligned word in a fresh XML carrier or caller output") { os_store_i64(address, value) }
+}
+fn xml_enum_clone(value: I64) -> I64 {
+    result :: jet_rt_alloc(XML_ENUM_BYTES, I64{8})
+    xml_store(result + XML_ENUM_TAG, xml_word(value + XML_ENUM_TAG))
+    result
+}
+fn xml_enum_drop(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, XML_ENUM_BYTES, I64{8})
+}
+fn xml_enum_eq(left: I64, right: I64) -> Bool { xml_word(left + XML_ENUM_TAG) == xml_word(right + XML_ENUM_TAG) }
+#Export(c) fn jet_rt_handle_clone_xml_reason(value: I64) -> I64 { xml_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_xml_reason(value: I64) { xml_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_xml_reason(left: I64, right: I64) -> Bool { xml_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_xml_encoding(value: I64) -> I64 { xml_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_xml_encoding(value: I64) { xml_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_xml_encoding(left: I64, right: I64) -> Bool { xml_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_xml_lexical_policy(value: I64) -> I64 { xml_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_xml_lexical_policy(value: I64) { xml_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_xml_lexical_policy(left: I64, right: I64) -> Bool { xml_enum_eq(left, right) }
+fn xml_optional_input(pointer: I64) -> I64 {
+    if (pointer == I64{0}) -> I64{0} else -> jet_int_owned_to_i64(xml_word(pointer))
+}
+fn xml_optional_get(value: I64, present: I64, field: I64, some: I64) -> I64 {
+    if (xml_word(value + present) == I64{0}) -> return I64{0}
+    xml_store(some, jet_int_owned_from_i64(xml_word(value + field)))
+    I64{1}
+}
+fn xml_optional_eq(left: I64, right: I64, present: I64, field: I64) -> Bool {
+    a :: xml_word(left + present)
+    a == xml_word(right + present) && (a == I64{0} || xml_word(left + field) == xml_word(right + field))
+}
+#Export(c) fn jet_rt_record_new_xml_error(kind: I64, byte_offset: I64, line: I64, column: I64, path: I64, reason: I64) -> I64 {
+    if (kind < I64{0} || kind > I64{11}) -> trap_native_index_range_stop()
+    raw_byte :: xml_optional_input(byte_offset)
+    raw_line :: xml_optional_input(line)
+    raw_column :: xml_optional_input(column)
+    result :: jet_rt_alloc(XML_ERROR_BYTES, I64{8})
+    xml_store(result + XML_ERROR_KIND, kind)
+    xml_store(result + XML_ERROR_BYTE_PRESENT, if (byte_offset == I64{0}) -> I64{0} else -> I64{1})
+    xml_store(result + XML_ERROR_BYTE, raw_byte)
+    xml_store(result + XML_ERROR_LINE_PRESENT, if (line == I64{0}) -> I64{0} else -> I64{1})
+    xml_store(result + XML_ERROR_LINE, raw_line)
+    xml_store(result + XML_ERROR_COLUMN_PRESENT, if (column == I64{0}) -> I64{0} else -> I64{1})
+    xml_store(result + XML_ERROR_COLUMN, raw_column)
+    xml_store(result + XML_ERROR_PATH, jet_rt_string_clone(path))
+    xml_store(result + XML_ERROR_REASON, jet_rt_string_clone(reason))
+    result
+}
+#Export(c) fn jet_rt_handle_clone_xml_error(value: I64) -> I64 {
+    result :: jet_rt_alloc(XML_ERROR_BYTES, I64{8})
+    at := I64{0}
+    loop at < XML_ERROR_PATH {
+        xml_store(result + at, xml_word(value + at))
+        at += I64{8}
+    }
+    xml_store(result + XML_ERROR_PATH, jet_rt_string_clone(xml_word(value + XML_ERROR_PATH)))
+    xml_store(result + XML_ERROR_REASON, jet_rt_string_clone(xml_word(value + XML_ERROR_REASON)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_xml_error(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(xml_word(value + XML_ERROR_PATH))
+    jet_rt_string_drop(xml_word(value + XML_ERROR_REASON))
+    jet_rt_free(value, XML_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_xml_error(left: I64, right: I64) -> Bool {
+    xml_word(left + XML_ERROR_KIND) == xml_word(right + XML_ERROR_KIND) &&
+        xml_optional_eq(left, right, XML_ERROR_BYTE_PRESENT, XML_ERROR_BYTE) &&
+        xml_optional_eq(left, right, XML_ERROR_LINE_PRESENT, XML_ERROR_LINE) &&
+        xml_optional_eq(left, right, XML_ERROR_COLUMN_PRESENT, XML_ERROR_COLUMN) &&
+        jet_rt_string_eq(xml_word(left + XML_ERROR_PATH), xml_word(right + XML_ERROR_PATH)) &&
+        jet_rt_string_eq(xml_word(left + XML_ERROR_REASON), xml_word(right + XML_ERROR_REASON))
+}
+#Export(c) fn jet_rt_record_get_xml_error_kind(value: I64) -> I64 { xml_word(value + XML_ERROR_KIND) }
+#Export(c) fn jet_rt_record_get_xml_error_byte_offset(value: I64, some: I64) -> I64 { xml_optional_get(value, XML_ERROR_BYTE_PRESENT, XML_ERROR_BYTE, some) }
+#Export(c) fn jet_rt_record_get_xml_error_line(value: I64, some: I64) -> I64 { xml_optional_get(value, XML_ERROR_LINE_PRESENT, XML_ERROR_LINE, some) }
+#Export(c) fn jet_rt_record_get_xml_error_column(value: I64, some: I64) -> I64 { xml_optional_get(value, XML_ERROR_COLUMN_PRESENT, XML_ERROR_COLUMN, some) }
+#Export(c) fn jet_rt_record_get_xml_error_path(value: I64) -> I64 { jet_rt_string_clone(xml_word(value + XML_ERROR_PATH)) }
+#Export(c) fn jet_rt_record_get_xml_error_reason(value: I64) -> I64 { jet_rt_string_clone(xml_word(value + XML_ERROR_REASON)) }
+fn xml_reason_label(target: I64, ordinal: I64) {
+    // Debug enum labels in CommonTypes.rs:223-236, in CAbi ordinal order.
+    if {
+        (ordinal == I64{0}) -> {
+            rt_text_push_word(target, I64{5000237400500629065}, I64{8})
+            rt_text_push_word(target, I64{29113321536840558}, I64{7})
+        }
+        (ordinal == I64{1}) -> {
+            rt_text_push_word(target, I64{7308623593077498189}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (ordinal == I64{2}) -> {
+            rt_text_push_word(target, I64{7521983764435790157}, I64{8})
+            rt_text_push_word(target, I64{444014552165}, I64{5})
+        }
+        (ordinal == I64{3}) -> {
+            rt_text_push_word(target, I64{5648755746841980489}, I64{8})
+            rt_text_push_word(target, I64{6647137}, I64{3})
+        }
+        (ordinal == I64{4}) -> {
+            rt_text_push_word(target, I64{7161128523421016398}, I64{8})
+            rt_text_push_word(target, I64{101}, I64{1})
+        }
+        (ordinal == I64{5}) -> {
+            rt_text_push_word(target, I64{8386093285582599492}, I64{8})
+            rt_text_push_word(target, I64{8458438990456176997}, I64{8})
+            rt_text_push_word(target, I64{25972}, I64{2})
+        }
+        (ordinal == I64{6}) -> rt_text_push_word(target, I64{133540892405317}, I64{6})
+        (ordinal == I64{7}) -> {
+            rt_text_push_word(target, I64{8737961242921299525}, I64{8})
+            rt_text_push_word(target, I64{6646883}, I64{3})
+        }
+        (ordinal == I64{8}) -> rt_text_push_word(target, I64{499984984396}, I64{5})
+        (ordinal == I64{9}) -> {
+            rt_text_push_word(target, I64{7017568567410188611}, I64{8})
+            rt_text_push_word(target, I64{7957695015159490924}, I64{8})
+        }
+        (ordinal == I64{10}) -> rt_text_push_word(target, I64{435677128787}, I64{5})
+        else -> {
+            rt_text_push_word(target, I64{8245933071047814741}, I64{8})
+            rt_text_push_word(target, I64{6579572}, I64{3})
+        }
+    }
+}
+#Export(c) fn jet_rt_handle_show_xml_error(value: I64) -> I64 {
+    // CommonTypes.rs249-279 -> Core/EncodingError.rs8-28: byte absent = 0;
+    // optional line/column independent; empty path omitted; no quoting.
+    target :: jet_rt_string_builder_new()
+    rt_text_push_word(target, I64{541871448}, I64{4}) // "XML "
+    xml_reason_label(target, xml_word(value + XML_ERROR_KIND))
+    offset :: if (xml_word(value + XML_ERROR_BYTE_PRESENT) == I64{0}) -> I64{0} else -> xml_word(value + XML_ERROR_BYTE)
+    encoding_error_render_tail(target, offset,
+        xml_word(value + XML_ERROR_LINE_PRESENT), xml_word(value + XML_ERROR_LINE),
+        xml_word(value + XML_ERROR_COLUMN_PRESENT), xml_word(value + XML_ERROR_COLUMN),
+        xml_word(value + XML_ERROR_PATH), xml_word(value + XML_ERROR_REASON))
+}
+#Export(c) fn jet_rt_handle_display_xml_error(value: I64) -> I64 { jet_rt_handle_show_xml_error(value) }
+#Export(c) fn jet_rt_handle_debug_xml_error(value: I64) -> I64 { jet_rt_handle_show_xml_error(value) }
+#Export(c) fn jet_rt_record_new_xml_render_options(encoding: I64, lexical: I64) -> I64 {
+    if (encoding < I64{0} || encoding > I64{3} || lexical < I64{0} || lexical > I64{1}) -> trap_native_index_range_stop()
+    result :: jet_rt_alloc(XML_RENDER_BYTES, I64{8})
+    xml_store(result + XML_RENDER_ENCODING, encoding)
+    xml_store(result + XML_RENDER_LEXICAL, lexical)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_xml_render_options(value: I64) -> I64 {
+    result :: jet_rt_alloc(XML_RENDER_BYTES, I64{8})
+    xml_store(result + XML_RENDER_ENCODING, xml_word(value + XML_RENDER_ENCODING))
+    xml_store(result + XML_RENDER_LEXICAL, xml_word(value + XML_RENDER_LEXICAL))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_xml_render_options(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, XML_RENDER_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_xml_render_options(left: I64, right: I64) -> Bool {
+    xml_word(left + XML_RENDER_ENCODING) == xml_word(right + XML_RENDER_ENCODING) && xml_word(left + XML_RENDER_LEXICAL) == xml_word(right + XML_RENDER_LEXICAL)
+}
+#Export(c) fn jet_rt_record_get_xml_render_options_encoding(value: I64) -> I64 { xml_word(value + XML_RENDER_ENCODING) }
+#Export(c) fn jet_rt_record_get_xml_render_options_lexical(value: I64) -> I64 { xml_word(value + XML_RENDER_LEXICAL) }

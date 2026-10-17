@@ -1,0 +1,23 @@
+// D-CODEGEN-HINTS1=A: each marker expresses one independent intent.
+#Inline
+fn hint(value: Int) -> Int { return value + 1 }
+
+#Inline(.Always)
+fn promised(value: Int) -> Int { return value + 1 }
+
+#Scalar
+fn scalar(value: Int) -> Int { return value + 1 }
+
+#Kernel(.parallel)
+fn kernel(value: Int) -> Int { return value + 1 }
+
+#Static STORED :: prep { 7 }
+#Inline COPIED :: prep { 8 }
+
+fn run() {
+    print("hint:{hint(6)}")
+    print("promised:{promised(6)}")
+    print("scalar:{scalar(6)}")
+    print("kernel:{kernel(6)}")
+    print("storage:{STORED}:{COPIED}")
+}

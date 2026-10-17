@@ -14,16 +14,16 @@ STORE_CACHE_MAX_INFO_BYTES :: prep { 1048576 }
 STORE_CACHE_TRUST_KEY_MAX_BYTES :: prep { 4096 }
 
 // One host-owned cache role binding.
-pub struct CacheBinding {
-    pub role: String
+struct CacheBinding {
+    role: String
     // Ordered, host-owned mirror endpoints. The order is semantic.
-    pub mirrors: [String]
+    mirrors: [String]
     // Host path to the trust key. The key bytes are never serialized in the
     // binding and never returned by inspection APIs.
-    pub trust_key: String
-    pub credential_provider: String?
+    trust_key: String
+    credential_provider: String?
     // Separate write authority. Read bindings cannot publish by accident.
-    pub allow_write: Bool
+    allow_write: Bool
 
     fn validate(self) StoreError! {
         store_cache_validate_component(self.role, "cache role")
@@ -102,14 +102,14 @@ pub struct CacheBinding {
 
     // Status object of one binding: role, mirrors, credential label, write.
     fn status_fields(self) -> StatusFields Never! {
-        StatusFields.new().with("role", DataTree.Text(self.role)).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", DataTree.Bool(self.allow_write))
+        StatusFields.new().with("role", Dyn.Text(self.role)).with("mirrors", report_texts(self.mirrors)).with("credential_provider", report_optional_text(self.credential_provider)).with("write", Dyn.Bool(self.allow_write))
     }
 }
 
 // Bind one host-owned cache role. Endpoint and trust policy are deliberately
 // not read from environment variables or repository files. Without an
 // explicit key, the role's default key is created once and pinned.
-pub fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], trust_key: String?, credential_provider: String?, allow_write: Bool) -> CacheBinding StoreError! {
+fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], trust_key: String?, credential_provider: String?, allow_write: Bool) -> CacheBinding StoreError! {
     requested_key :: trust_key ?? files.join(files.join(roots.root, "trust"), "cache-{role}.key")
     binding :: CacheBinding{
         role: role,
@@ -147,7 +147,7 @@ pub fn store_bind_cache(roots: HangarRoots, role: String, mirrors: [String], tru
 }
 
 // Read one role's binding and re-check its pinned trust key.
-pub fn store_read_cache_binding(roots: HangarRoots, role: String) -> CacheBinding StoreError! {
+fn store_read_cache_binding(roots: HangarRoots, role: String) -> CacheBinding StoreError! {
     path :: store_cache_binding_path(roots, role)
     metadata :: files.stat(path)
     if metadata.is_symlink || !metadata.is_file || metadata.size > STORE_CACHE_MAX_BINDING_BYTES {
@@ -162,7 +162,7 @@ pub fn store_read_cache_binding(roots: HangarRoots, role: String) -> CacheBindin
 
 // Every bound role in file-name order. A malformed binding is an error, not
 // an unbound role.
-pub fn store_list_cache_bindings(roots: HangarRoots) -> [CacheBinding] StoreError! {
+fn store_list_cache_bindings(roots: HangarRoots) -> [CacheBinding] StoreError! {
     directory :: store_cache_bindings_dir(roots)
     entries :: files.list_dir(directory) ?? {
         if err == {
@@ -204,7 +204,7 @@ fn store_cache_validate_binding_trust(roots: HangarRoots, binding: CacheBinding)
 }
 
 // Remove one role's binding; false when it was not bound.
-pub fn store_remove_cache_binding(roots: HangarRoots, role: String) -> Bool StoreError! {
+fn store_remove_cache_binding(roots: HangarRoots, role: String) -> Bool StoreError! {
     path :: store_cache_binding_path(roots, role)
     _lock :: env_runtime_lock(roots.root, "cache-config")
     observed :: store_archive_lstat(path)
@@ -399,10 +399,10 @@ fn store_cache_now_seconds() -> Int Never! {
 
 // Make every directory in a tree writable (Rust `set_readonly(false)`: all
 // write bits) so a sealed tree can be removed. A missing path is fine.
-pub fn store_make_tree_writable_for_removal(path: String) StoreError! {
+fn store_make_tree_writable_for_removal(path: String) StoreError! {
     metadata :: store_archive_lstat_ok(path) ?? return
     if metadata.is_dir {
-        files.set_mode(path, metadata.mode | STORE_MODE_WRITE_BITS)
+        files.set_mode(path, (metadata.mode).bit_or(STORE_MODE_WRITE_BITS))
         loop child in files.list_dir(path) -> store_make_tree_writable_for_removal(child.path)
     }
 }
@@ -410,26 +410,26 @@ pub fn store_make_tree_writable_for_removal(path: String) StoreError! {
 // Validate then seal a locally produced output before it becomes reusable.
 // Files keep executable bits but lose all write bits; directories are sealed
 // bottom-up. Canonical archive validation rejects external hardlinks first.
-pub fn store_seal_local_output(path: String) StoreError! {
+fn store_seal_local_output(path: String) StoreError! {
     pkg_try_output_hash_of(path)
     store_seal_node(path)
 }
 
 // Clear every write bit through a tree, leaving already-sealed nodes and
 // symlinks untouched.
-pub fn store_seal_node(path: String) StoreError! {
+fn store_seal_node(path: String) StoreError! {
     metadata :: files.stat(path)
     if metadata.is_symlink -> return
     if metadata.is_dir {
         loop child in files.list_dir(path) -> store_seal_node(child.path)
     }
-    sealed_mode :: metadata.mode - (metadata.mode & STORE_MODE_WRITE_BITS)
+    sealed_mode :: metadata.mode - ((metadata.mode).bit_and(STORE_MODE_WRITE_BITS))
     if sealed_mode == metadata.mode -> return
     files.set_mode(path, sealed_mode)
 }
 
 // Make a tree durable: every file and directory, children first.
-pub fn store_fsync_tree(path: String) StoreError! {
+fn store_fsync_tree(path: String) StoreError! {
     metadata :: files.stat(path)
     if metadata.is_symlink -> return
     if metadata.is_dir {
@@ -439,13 +439,13 @@ pub fn store_fsync_tree(path: String) StoreError! {
 }
 
 // `jet.status/v1` for `cache bind`.
-pub fn store_cache_binding_json(binding: CacheBinding) -> String Never! {
+fn store_cache_binding_json(binding: CacheBinding) -> String ReportError! {
     StatusEnvelope.new("cache-bind", true).with_fields(binding.status_fields()).json()
 }
 
 // `jet.status/v1` for `cache list`.
-pub fn store_cache_bindings_json(bindings: [CacheBinding]) -> String Never! {
-    values := [DataTree]{}
+fn store_cache_bindings_json(bindings: [CacheBinding]) -> String ReportError! {
+    values := [Dyn]{}
     loop binding in bindings -> &values.push(report_status_object(binding.status_fields()))
-    StatusEnvelope.new("cache-list", true).with_fields(StatusFields.new().with("bindings", DataTree.Array(values))).json()
+    StatusEnvelope.new("cache-list", true).with_fields(StatusFields.new().with("bindings", Dyn.Array(values))).json()
 }

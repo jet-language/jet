@@ -1,0 +1,26 @@
+# HAND-PORT tests/web_build.rs:4200-4258 web_events_and_storage_roundtrip
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original source/JS harness; every runtime/JS marker and source path/hash/qualified-symbol predicate retained against the LIVE public hex traceMap schema (BrowserTrace.rs400-510).
+requires: tool:node
+fixture: web_events_and_storage_roundtrip.fixture
+env: NO_COLOR=1
+step: jet build --target=web tests/fixtures/web_api.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 assertion
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original helper manifest assertion
+file: .jet/build/app.wasm is-file
+file: .jet/build/app.js ~ "jetDom.on(\"#new-task\", \"input\"" # original JS marker
+file: .jet/build/app.js ~ "\"init$handler0\"" # original JS marker
+file: .jet/build/app.js !~ "__JET_INLINE_HANDLER__" # original absent marker
+file: .jet/build/jet_dom_runtime.js ~ "const handlerSymbol = String(symbol)" # original runtime predicate
+file: .jet/build/jet_dom_runtime.js ~ "perfRecord(handlerSymbol, \"event\"" # original runtime predicate
+file: .jet/build/jet_dom_runtime.js !~ "symbol || jetDomScopeName" # original absent fallback
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: = web_events_and_storage_roundtrip.stdout.expected
+copy: trace.mjs .jet/build/trace.mjs
+step: node trace.mjs
+cwd: .jet/build
+exit: 0

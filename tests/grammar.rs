@@ -833,7 +833,7 @@ fn run() {
 #[test]
 fn parse_bracket_collection_types_and_semicolon_list_items() {
     let src = r#"
-pub fn shell() -> [JSON] {
+fn shell() -> [JSON] {
     return [
         JSON.Null;
     ];

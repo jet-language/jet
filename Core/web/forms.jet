@@ -7,20 +7,20 @@ C_MAX_FORM_FIELDS :: 256
 C_MAX_FORM_TEXT :: 1048576
 
 #Error
-pub enum WebFormError {
+enum WebFormError {
     Invalid
     Missing
     Validation
 }
 
-pub enum WebFormValueType {
+enum WebFormValueType {
     String
     Int
     Bool
     Float
 }
 
-pub enum WebFormControl {
+enum WebFormControl {
     Text
     Email
     URL
@@ -31,7 +31,7 @@ pub enum WebFormControl {
     Hidden
 }
 
-pub enum WebFormStatus {
+enum WebFormStatus {
     Idle
     Dirty
     Validating
@@ -41,96 +41,97 @@ pub enum WebFormStatus {
     Error
 }
 
-pub enum WebFormValidationTiming {
+enum WebFormValidationTiming {
     Immediate
     Debounced
     OnBlur
 }
 
-pub struct WebFormFieldSpec {
-    pub name: String
-    pub value_type: WebFormValueType
-    pub required: Bool
-    pub default: String?
-    pub label: String
-    pub control: WebFormControl
-    pub group: String?
-    pub wire_name: String
+struct WebFormFieldSpec {
+    name: String
+    value_type: WebFormValueType
+    required: Bool
+    default: String?
+    label: String
+    control: WebFormControl
+    group: String?
+    wire_name: String
 }
 
-pub struct WebFormFieldState {
-    pub name: String
-    pub value_type: WebFormValueType
-    pub required: Bool
-    pub value: String
-    pub touched: Bool
-    pub validating: Bool
-    pub errors: [String]
+struct WebFormFieldState {
+    name: String
+    value_type: WebFormValueType
+    required: Bool
+    value: String
+    touched: Bool
+    validating: Bool
+    errors: [String]
 }
 
-pub struct WebForm {
-    pub action: String
-    pub method: String
-    pub fields: [WebFormFieldState]
-    pub status: WebFormStatus
-    pub form_error: String
-    pub focused: String
+struct WebForm {
+    action: String
+    method: String
+    fields: [WebFormFieldState]
+    status: WebFormStatus
+    form_error: String
+    focused: String
 }
 
-pub struct WebFormState {
-    pub status: WebFormStatus
-    pub fields: [String:WebFormFieldState]
-    pub action: String
-    pub method: String
-    pub result: String
-    pub error: String
-    pub submission_count: Int
+struct WebFormState {
+    status: WebFormStatus
+    fields: [String:WebFormFieldState]
+    action: String
+    method: String
+    result: String
+    error: String
+    submission_count: Int
 }
 
-pub struct WebFormInput {
-    pub type_name: String
-    pub fields: [WebFormFieldSpec]
+struct WebFormInput {
+    type_name: String
+    fields: [WebFormFieldSpec]
 }
 
-pub struct WebFormTyped {
-    pub form: WebForm
-    pub action: String
-    pub input: WebFormInput
+struct WebFormTyped {
+    form: WebForm
+    action: String
+    input: WebFormInput
 }
 
-pub struct WebFormActionError {
-    pub field_errors: [String:[String]]
-    pub form_errors: [String]
+#Error
+struct WebFormActionError {
+    field_errors: [String:[String]]
+    form_errors: [String]
 }
 
-pub struct WebFormDecodedInput {
-    pub type_name: String
-    pub values: [String:String]
-    pub wire_values: [String:String]
+struct WebFormDecodedInput {
+    type_name: String
+    values: [String:String]
+    wire_values: [String:String]
 }
 
-pub struct WebFormValidationChain {
-    pub form: WebFormTyped
-    pub field: String
-    pub valid: Bool
+struct WebFormValidationChain {
+    form: WebFormTyped
+    field: String
+    valid: Bool
 }
 
-pub struct WebFormValidation {
-    pub form: WebFormTyped
-    pub pending: Bool
+struct WebFormValidation {
+    form: WebFormTyped
+    pending: Bool
 }
 
-pub struct WebFormTypedSubmission {
-    pub form: WebFormTyped
-    pub pending: Bool
+struct WebFormTypedSubmission {
+    form: WebFormTyped
+    pending: Bool
 }
 
-pub struct WebFormErrorState {
-    pub fields: [String:[String]]
-    pub form: [String]
+struct WebFormErrorState {
+    fields: [String:[String]]
+    form: [String]
 }
 
-pub enum WebFormLifecycleStatus {
+enum WebFormLifecycleStatus {
     Idle
     Pending
     Submitting
@@ -139,33 +140,33 @@ pub enum WebFormLifecycleStatus {
     Cancelled
 }
 
-pub struct WebFormLifecycle {
-    pub status: WebFormLifecycleStatus
-    pub result: String
-    pub error: String
-    pub generation: Int
+struct WebFormLifecycle {
+    status: WebFormLifecycleStatus
+    result: String
+    error: String
+    generation: Int
 }
 
-pub fn new(action: String) -> WebForm Never! {
+fn new(action: String) -> WebForm Never! {
     WebForm{action: action, method: "POST", fields: [WebFormFieldState]{}, status: WebFormStatus.Idle, form_error: "", focused: ""}
 }
 
-pub fn field(form: WebForm, name: String, kind: String, required: Bool) -> WebForm WebFormError! {
-    if name.len() == 0 || name.len() > 128 || !valid_name(~name) || !valid_kind(~kind) -> return Err(WebFormError.Invalid)
-    out := ~form
+fn field(form: WebForm, name: String, kind: String, required: Bool) -> WebForm WebFormError! {
+    if name.len() == 0 || name.len() > 128 || !valid_name(name) || !valid_kind(kind) -> return Err(WebFormError.Invalid)
+    out := form.copy()
     loop item in out.fields {
         if item.name == name -> return Err(WebFormError.Invalid)
     }
     if out.fields.len() >= C_MAX_FORM_FIELDS -> return Err(WebFormError.Invalid)
-    &out.fields.push(WebFormFieldState{name: ~name, value_type: parse_kind(~kind), required: required, value: "", touched: false, validating: false, errors: [String]{}})
+    &out.fields.push(WebFormFieldState{name: name.copy(), value_type: parse_kind(kind), required: required, value: "", touched: false, validating: false, errors: [String]{}})
     Ok(out)
 }
 
-pub fn set(form: &WebForm, name: String, value: String) WebFormError! {
+fn set(form: &WebForm, name: String, value: String) WebFormError! {
     if value.len() > C_MAX_FORM_TEXT -> return Err(WebFormError.Invalid)
     loop i in 0..<form.fields.len() {
         if form.fields[i].name == name {
-            form.fields[i].value = ~value
+            form.fields[i].value = value.copy()
             form.fields[i].errors = [String]{}
             form.fields[i].touched = true
             form.fields[i].validating = false
@@ -176,13 +177,13 @@ pub fn set(form: &WebForm, name: String, value: String) WebFormError! {
     return Err(WebFormError.Missing)
 }
 
-pub fn blur(form: &WebForm, name: String) WebFormError! {
+fn blur(form: &WebForm, name: String) WebFormError! {
     found := false
     valid := false
     loop field in form.fields {
         if field.name == name {
             found = true
-            valid = validate_field_form(&form, ~name)
+            valid = validate_field_form(&form, name)
             break
         }
     }
@@ -193,51 +194,51 @@ pub fn blur(form: &WebForm, name: String) WebFormError! {
     return Ok()
 }
 
-pub fn validate(form: &WebForm) WebFormError! {
+fn validate(form: &WebForm) WebFormError! {
     if !apply_validation(&form) -> return Err(WebFormError.Validation)
     return Ok()
 }
 
-pub fn validate_async(form: WebForm) -> WebForm Never! {
-    out := ~form
+fn validate_async(form: WebForm) -> WebForm Never! {
+    out := form.copy()
     out.status = WebFormStatus.Validating
     out
 }
 
-pub fn submit(form: &WebForm) -> String WebFormError! {
+fn submit(form: &WebForm) -> String WebFormError! {
     if !apply_validation(&form) -> return Err(WebFormError.Validation)
     form.status = WebFormStatus.Submitted
-    html(~form)
+    html(form)
 }
 
-pub fn no_script(form: WebForm) -> String WebFormError! { html(form) }
-pub fn html(form: WebForm) -> String Never! { render_html(form) }
-pub fn show(form: WebForm) -> String Never! { render_html(form) }
+fn no_script(form: WebForm) -> String WebFormError! { html(form) }
+fn html(form: WebForm) -> String Never! { render_html(form) }
+fn show(form: WebForm) -> String Never! { render_html(form) }
 
-pub fn input(name: String, fields: [WebFormFieldSpec]) -> WebFormInput WebFormError! {
-    if !valid_name(~name) || fields.len() == 0 || fields.len() > C_MAX_FORM_FIELDS -> return Err(WebFormError.Invalid)
+fn input(name: String, fields: [WebFormFieldSpec]) -> WebFormInput WebFormError! {
+    if !valid_name(name) || fields.len() == 0 || fields.len() > C_MAX_FORM_FIELDS -> return Err(WebFormError.Invalid)
     names := [String]{}
     wires := [String]{}
     loop field in fields {
         if !valid_name(field.name) || !valid_name(field.wire_name) -> return Err(WebFormError.Invalid)
         if field.default == .Val(default) {
-            if default.len() > C_MAX_FORM_TEXT || has_control_text(~default) -> return Err(WebFormError.Invalid)
+            if default.len() > C_MAX_FORM_TEXT || has_control_text(default) -> return Err(WebFormError.Invalid)
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return Err(WebFormError.Invalid)
         &names.push(field.name)
         &wires.push(field.wire_name)
     }
-    Ok(WebFormInput{type_name: ~name, fields: copy_fields(fields)})
+    Ok(WebFormInput{type_name: name.copy(), fields: copy_fields(fields)})
 }
 
-pub fn input_rename(input: WebFormInput, old_name: String, new_name: String) -> WebFormInput WebFormError! {
+fn input_rename(input: WebFormInput, old_name: String, new_name: String) -> WebFormInput WebFormError! {
     if !valid_name(new_name) -> return Err(WebFormError.Invalid)
-    out := ~input
+    out := input.copy()
     renamed := false
     loop i in 0..<out.fields.len() {
         if out.fields[i].name == old_name {
-            out.fields[i].name = ~new_name
-            out.fields[i].wire_name = ~new_name
+            out.fields[i].name = new_name.copy()
+            out.fields[i].wire_name = new_name.copy()
             renamed = true
         }
     }
@@ -246,7 +247,7 @@ pub fn input_rename(input: WebFormInput, old_name: String, new_name: String) -> 
     Ok(out)
 }
 
-pub fn input_exclude(input: WebFormInput, name: String) -> WebFormInput WebFormError! {
+fn input_exclude(input: WebFormInput, name: String) -> WebFormInput WebFormError! {
     if name.len() == 0 -> return Err(WebFormError.Invalid)
     fields := [WebFormFieldSpec]{}
     found := false
@@ -255,22 +256,22 @@ pub fn input_exclude(input: WebFormInput, name: String) -> WebFormInput WebFormE
     }
     if !found -> return Err(WebFormError.Missing)
     if !fields_valid(fields) -> return Err(WebFormError.Invalid)
-    Ok(WebFormInput{type_name: ~input.type_name, fields: fields})
+    Ok(WebFormInput{type_name: input.type_name.copy(), fields: fields})
 }
 
-pub fn input_group(input: WebFormInput, prefix: String, suffix: String) -> WebFormInput WebFormError! {
+fn input_group(input: WebFormInput, prefix: String, suffix: String) -> WebFormInput WebFormError! {
     if prefix.len() == 0 && suffix.len() == 0 -> return Err(WebFormError.Invalid)
     fields := [WebFormFieldSpec]{}
     loop item in input.fields {
         &fields.push(WebFormFieldSpec{name: "{prefix}{item.name}{suffix}", value_type: item.value_type, required: item.required, default: item.default, label: item.label, control: item.control, group: item.group, wire_name: "{prefix}{item.wire_name}{suffix}"})
     }
     if !fields_valid(fields) -> return Err(WebFormError.Invalid)
-    Ok(WebFormInput{type_name: ~input.type_name, fields: fields})
+    Ok(WebFormInput{type_name: input.type_name.copy(), fields: fields})
 }
 
-pub fn input_replace(input: WebFormInput, name: String, replacement: WebFormFieldSpec) -> WebFormInput WebFormError! {
+fn input_replace(input: WebFormInput, name: String, replacement: WebFormFieldSpec) -> WebFormInput WebFormError! {
     if !valid_name(name) || !valid_name(replacement.name) || !valid_name(replacement.wire_name) -> return Err(WebFormError.Invalid)
-    out := ~input
+    out := input.copy()
     found := false
     loop i in 0..<out.fields.len() {
         if out.fields[i].name == name {
@@ -280,21 +281,21 @@ pub fn input_replace(input: WebFormInput, name: String, replacement: WebFormFiel
     }
     if !found -> return Err(WebFormError.Missing)
     if !fields_valid(out.fields) -> return Err(WebFormError.Invalid)
-    Ok(~out)
+    Ok(out.copy())
 }
 
-pub fn typed(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
+fn typed(input: WebFormInput, action: String) -> WebFormTyped WebFormError! {
     if action.len() == 0 || action.len() > C_MAX_FORM_TEXT || !fields_valid(input.fields) -> return Err(WebFormError.Invalid)
     states := states_from_specs(input.fields)
-    Ok(WebFormTyped{form: WebForm{action: ~action, method: "POST", fields: states, status: WebFormStatus.Idle, form_error: "", focused: ""}, action: action, input: input})
+    Ok(WebFormTyped{form: WebForm{action: action.copy(), method: "POST", fields: states, status: WebFormStatus.Idle, form_error: "", focused: ""}, action: action, input: input})
 }
 
-pub fn typed_set(form: &WebFormTyped, name: String, value: String) WebFormError! {
+fn typed_set(form: &WebFormTyped, name: String, value: String) WebFormError! {
     set(&form.form, name, value)
 }
 
-pub fn typed_set_async_validator(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String)) WebFormError! {
-    _ :: ~timing
+fn typed_set_async_validator(form: &WebFormTyped, name: String, timing: WebFormValidationTiming, delay_ms: Int, validator: fn(String)) WebFormError! {
+    _ :: timing.copy()
     _ :: delay_ms
     if name.len() == 0 -> return Err(WebFormError.Missing)
     loop i in 0..<form.form.fields.len() {
@@ -302,7 +303,7 @@ pub fn typed_set_async_validator(form: &WebFormTyped, name: String, timing: WebF
             if form.form.fields[i].value.len() > C_MAX_FORM_TEXT -> return Err(WebFormError.Invalid)
             form.form.fields[i].validating = true
             form.form.status = WebFormStatus.Validating
-            validator(~form.form.fields[i].value)
+            validator(form.form.fields[i].value.copy())
             form.form.fields[i].validating = false
             valid := validate_field_form(&form.form, name)
             if valid -> form.form.status = WebFormStatus.Dirty else -> form.form.status = WebFormStatus.Invalid
@@ -312,54 +313,54 @@ pub fn typed_set_async_validator(form: &WebFormTyped, name: String, timing: WebF
     return Err(WebFormError.Missing)
 }
 
-pub fn typed_set_action<E>(form: WebFormTyped, handler: fn(WebFormDecodedInput) -> String E!) E! {
+fn typed_set_action<E>(form: WebFormTyped, handler: fn(WebFormDecodedInput) -> String E!) E! {
     decoded :: decoded_from_input(form)
     _ :: handler(decoded)
 }
 
-pub fn action_error() -> WebFormActionError Never! { WebFormActionError{field_errors: [String:[String]]{}, form_errors: [String]{}} }
-pub fn action_field_error(error: WebFormActionError, field: String, message: String) -> WebFormActionError Never! {
-    if field.len() == 0 || field.len() > 128 || message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return ~error
-    out := ~error
+fn action_error() -> WebFormActionError Never! { WebFormActionError{field_errors: [String:[String]]{}, form_errors: [String]{}} }
+fn action_field_error(error: WebFormActionError, field: String, message: String) -> WebFormActionError Never! {
+    if field.len() == 0 || field.len() > 128 || message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return error.copy()
+    out := error.copy()
     existing :: out.field_errors.get(field)
     if existing == None {
-        _ :: &out.field_errors.add(~field, [String]{~message})
+        _ :: &out.field_errors.add(field.copy(), [String]{message.copy()})
     } else {
-        errors := ~existing
+        errors := existing.copy()
         if errors.len() >= C_MAX_FORM_FIELDS -> return out
-        &errors.push(~message)
-        _ :: &out.field_errors.add(~field, errors)
+        &errors.push(message.copy())
+        _ :: &out.field_errors.add(field.copy(), errors)
     }
     out
 }
 
-pub fn action_form_error(error: WebFormActionError, message: String) -> WebFormActionError Never! {
-    if message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return ~error
-    out := ~error
-    if out.form_errors.len() < C_MAX_FORM_FIELDS -> &out.form_errors.push(~message)
+fn action_form_error(error: WebFormActionError, message: String) -> WebFormActionError Never! {
+    if message.len() == 0 || message.len() > C_MAX_FORM_TEXT -> return error.copy()
+    out := error.copy()
+    if out.form_errors.len() < C_MAX_FORM_FIELDS -> &out.form_errors.push(message.copy())
     out
 }
 
 
-pub fn typed_blur(form: &WebFormTyped, name: String) WebFormError! { blur(&form.form, name) }
-pub fn typed_validate(form: &WebFormTyped) WebFormError! { validate(&form.form) }
-pub fn typed_validate_async(form: WebFormTyped) -> WebFormValidation Never! {
-    out := ~form
+fn typed_blur(form: &WebFormTyped, name: String) WebFormError! { blur(&form.form, name) }
+fn typed_validate(form: &WebFormTyped) WebFormError! { validate(&form.form) }
+fn typed_validate_async(form: WebFormTyped) -> WebFormValidation Never! {
+    out := form.copy()
     out.form.status = WebFormStatus.Validating
     WebFormValidation{form: out, pending: true}
 }
 
-pub fn typed_validate_field(form: WebFormTyped, name: String, timing: WebFormValidationTiming, validator: fn(String)) -> WebFormValidationChain Never! {
-    _ :: ~timing
-    out := ~form
+fn typed_validate_field(form: WebFormTyped, name: String, timing: WebFormValidationTiming, validator: fn(String)) -> WebFormValidationChain Never! {
+    _ :: timing.copy()
+    out := form.copy()
     valid := false
     loop i in 0..<out.form.fields.len() {
         if out.form.fields[i].name == name {
             out.form.fields[i].validating = true
             out.form.status = WebFormStatus.Validating
-            validator(~out.form.fields[i].value)
+            validator(out.form.fields[i].value.copy())
             out.form.fields[i].validating = false
-            valid = validate_field_form(&out.form, ~name)
+            valid = validate_field_form(&out.form, name)
             if valid -> out.form.status = WebFormStatus.Dirty else -> out.form.status = WebFormStatus.Invalid
             break
         }
@@ -367,91 +368,91 @@ pub fn typed_validate_field(form: WebFormTyped, name: String, timing: WebFormVal
     WebFormValidationChain{form: out, field: name, valid: valid}
 }
 
-pub fn typed_validation_render(chain: WebFormValidationChain) -> String Never! {
+fn typed_validation_render(chain: WebFormValidationChain) -> String Never! {
     if chain.valid -> return "{chain.field}:valid"
     "{chain.field}:invalid"
 }
 
-pub fn typed_submit(form: &WebFormTyped) -> String WebFormError! {
+fn typed_submit(form: &WebFormTyped) -> String WebFormError! {
     if !apply_validation(&form.form) -> return Err(WebFormError.Validation)
     form.form.status = WebFormStatus.Submitted
-    typed_html(~form)
+    typed_html(form)
 }
-pub fn typed_no_script(form: &WebFormTyped) -> String WebFormError! { typed_html(~form) }
-pub fn typed_submit_async(form: WebFormTyped) -> WebFormTypedSubmission Never! {
-    out := ~form
+fn typed_no_script(form: &WebFormTyped) -> String WebFormError! { typed_html(form) }
+fn typed_submit_async(form: WebFormTyped) -> WebFormTypedSubmission Never! {
+    out := form.copy()
     out.form.status = WebFormStatus.Submitting
     WebFormTypedSubmission{form: out, pending: true}
 }
 
-pub fn typed_post(form: WebFormTyped, body: String) -> String WebFormError! {
-    if body.len() > C_MAX_FORM_BYTES || !valid_encoding(~body) -> return Err(WebFormError.Invalid)
-    decoded :: decode_typed_input(form.input, ~body) ?? return Err(WebFormError.Invalid)
+fn typed_post(form: WebFormTyped, body: String) -> String WebFormError! {
+    if body.len() > C_MAX_FORM_BYTES || !valid_encoding(body) -> return Err(WebFormError.Invalid)
+    decoded :: decode_typed_input(form.input, body) ?? return Err(WebFormError.Invalid)
     encode_typed_input(form.input, decoded)
 }
 
-pub fn typed_decode_post(form: WebFormTyped, body: String) -> WebFormDecodedInput WebFormError! {
-    if body.len() > C_MAX_FORM_BYTES || !valid_encoding(~body) -> return Err(WebFormError.Invalid)
-    decode_typed_input(form.input, ~body) ?? return Err(WebFormError.Invalid)
+fn typed_decode_post(form: WebFormTyped, body: String) -> WebFormDecodedInput WebFormError! {
+    if body.len() > C_MAX_FORM_BYTES || !valid_encoding(body) -> return Err(WebFormError.Invalid)
+    decode_typed_input(form.input, body) ?? return Err(WebFormError.Invalid)
 }
 
-pub fn typed_html(form: WebFormTyped) -> String Never! { render_typed_html(form) }
-pub fn typed_show(form: WebFormTyped) -> String Never! { render_typed_html(form) }
+fn typed_html(form: WebFormTyped) -> String Never! { render_typed_html(form) }
+fn typed_show(form: WebFormTyped) -> String Never! { render_typed_html(form) }
 
-pub fn typed_state(form: WebFormTyped) -> String Never! { status_name(form.form.status) }
-pub fn typed_lifecycle(form: WebFormTyped) -> WebFormLifecycle Never! { lifecycle(form.form.status) }
+fn typed_state(form: WebFormTyped) -> String Never! { status_name(form.form.status) }
+fn typed_lifecycle(form: WebFormTyped) -> WebFormLifecycle Never! { lifecycle(form.form.status) }
 
-pub fn typed_errors(form: WebFormTyped) -> WebFormErrorState Never! {
+fn typed_errors(form: WebFormTyped) -> WebFormErrorState Never! {
     names := [String:[String]]{ }
     loop field in form.form.fields {
-        if field.errors.len() > 0 -> _ :: &names.add(~field.name, ~field.errors)
+        if field.errors.len() > 0 -> _ :: &names.add(field.name.copy(), field.errors.copy())
     }
     form_errors := [String]{}
-    if form.form.form_error.len() > 0 -> &form_errors.push(~form.form.form_error)
+    if form.form.form_error.len() > 0 -> &form_errors.push(form.form.form_error.copy())
     WebFormErrorState{fields: names, form: form_errors}
 }
 
-pub fn typed_focus(form: &WebFormTyped, name: String) WebFormError! {
+fn typed_focus(form: &WebFormTyped, name: String) WebFormError! {
     if name.len() == 0 -> return Err(WebFormError.Missing)
     loop item in form.form.fields {
         if item.name == name {
-            form.form.focused = ~name
+            form.form.focused = name.copy()
             return Ok()
         }
     }
     return Err(WebFormError.Missing)
 }
 
-pub fn typed_cancel(form: &WebFormTyped) Never! {
+fn typed_cancel(form: &WebFormTyped) Never! {
     form.form.status = WebFormStatus.Idle
     form.form.form_error = ""
 }
 
-pub fn typed_select_field(form: WebFormTyped, name: String) -> WebFormFieldState WebFormError! {
+fn typed_select_field(form: WebFormTyped, name: String) -> WebFormFieldState WebFormError! {
     loop field in form.form.fields {
-        if field.name == name -> return Ok(~field)
+        if field.name == name -> return Ok(field.copy())
     }
     return Err(WebFormError.Missing)
 }
 
-pub fn typed_validation_wait(validation: &WebFormValidation) WebFormError! {
+fn typed_validation_wait(validation: &WebFormValidation) WebFormError! {
     result :: validate(&validation.form.form)
     validation.pending = false
     result
 }
 
-pub fn typed_validation_cancel(validation: &WebFormValidation) Never! {
+fn typed_validation_cancel(validation: &WebFormValidation) Never! {
     validation.pending = false
     validation.form.form.status = WebFormStatus.Idle
 }
 
-pub fn typed_submission_wait(submission: &WebFormTypedSubmission) -> String WebFormError! {
+fn typed_submission_wait(submission: &WebFormTypedSubmission) -> String WebFormError! {
     result :: typed_submit(&submission.form)
     submission.pending = false
     result
 }
 
-pub fn typed_submission_cancel(submission: &WebFormTypedSubmission) Never! {
+fn typed_submission_cancel(submission: &WebFormTypedSubmission) Never! {
     submission.pending = false
     submission.form.form.status = WebFormStatus.Idle
 }
@@ -462,8 +463,8 @@ fn render_typed_html(form: WebFormTyped) -> String Never! {
         errors := [String]{}
         loop field in form.form.fields {
             if field.name == spec.name {
-                value = ~field.value
-                errors = ~field.errors
+                value = field.value.copy()
+                errors = field.errors.copy()
                 break
             }
         }
@@ -533,7 +534,7 @@ fn apply_validation(form: &WebForm) -> Bool Never! {
         err := validation_error(form.fields[i])
         form.fields[i].errors = [String]{}
         if err.len() > 0 {
-            &form.fields[i].errors.push(~err)
+            &form.fields[i].errors.push(err.copy())
             ok = false
         }
         form.fields[i].touched = true
@@ -548,7 +549,7 @@ fn validate_field_form(form: &WebForm, name: String) -> Bool Never! {
         if form.fields[i].name == name {
             err := validation_error(form.fields[i])
             form.fields[i].errors = [String]{}
-            if err.len() > 0 -> &form.fields[i].errors.push(~err)
+            if err.len() > 0 -> &form.fields[i].errors.push(err.copy())
             form.fields[i].touched = true
             return err.len() == 0
         }
@@ -606,8 +607,8 @@ fn decoded_from_input(form: WebFormTyped) -> WebFormDecodedInput {
                 break
             }
         }
-        _ :: &values.add(~spec.name, ~value)
-        _ :: &wire_values.add(~spec.wire_name, ~value)
+        _ :: &values.add(spec.name.copy(), value.copy())
+        _ :: &wire_values.add(spec.wire_name.copy(), value.copy())
     }
     WebFormDecodedInput{type_name: form.input.type_name, values: values, wire_values: wire_values}
 }
@@ -639,8 +640,8 @@ fn decode_typed_input(input: WebFormInput, body: String) -> WebFormDecodedInput?
             if contains_name(seen, key) -> return None
             index := wire_index(input.fields, key)
             if index < 0 -> return None
-            states[index].value = ~value
-            &seen.push(~key)
+            states[index].value = value.copy()
+            &seen.push(key.copy())
         }
     }
     loop i in 0..<input.fields.len() {
@@ -652,8 +653,8 @@ fn decode_typed_input(input: WebFormInput, body: String) -> WebFormDecodedInput?
     loop i in 0..<input.fields.len() {
         spec :: input.fields[i]
         value :: states[i].value
-        _ :: &values.add(~spec.name, ~value)
-        _ :: &wire_values.add(~spec.wire_name, ~value)
+        _ :: &values.add(spec.name.copy(), value.copy())
+        _ :: &wire_values.add(spec.wire_name.copy(), value.copy())
     }
     Val(WebFormDecodedInput{type_name: input.type_name, values: values, wire_values: wire_values})
 }
@@ -749,7 +750,7 @@ fn fields_valid(fields: [WebFormFieldSpec]) -> Bool Never! {
         if !valid_name(field.name) || !valid_name(field.wire_name) -> return false
         if field.label.len() > C_MAX_FORM_TEXT -> return false
         if field.default == .Val(default) {
-            if default.len() > C_MAX_FORM_TEXT || has_control_text(~default) -> return false
+            if default.len() > C_MAX_FORM_TEXT || has_control_text(default) -> return false
         }
         if contains_name(names, field.name) || contains_name(wires, field.wire_name) -> return false
         &names.push(field.name)

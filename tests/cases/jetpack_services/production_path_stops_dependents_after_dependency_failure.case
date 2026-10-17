@@ -1,0 +1,20 @@
+# Port of tests/jetpack_services.rs:1487-1535. PENDING-GRAMMAR(batch-four).
+requires: os-name:linux
+fixture: production_path_stops_dependents_after_dependency_failure.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH={work}/bin:{env:PATH}
+env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+env: JETPACK_SERVICE_HEALTH_TIMEOUT_MS=1500
+mkdir: root
+mkdir: home
+copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+mkdir: state
+chmod: bin/systemd-run 755
+chmod: bin/systemctl 755
+step: jetpack services up --no-color
+file: .jet/services/api/pid is-file
+await: file .jet/services/api/pid absent timeout 5s every 50ms
+await: file .jet/services/api/supervisor.error ~ "dependency `database` failed" timeout 5s every 50ms # original ed77c235f tests/jetpack_services.rs:1518 wait_for_file_contains helper658-672 tests dependency failure with 5s deadline and 50ms sleep
+file: .jet/services/api/lifecycle ~ "recovery=dependency-failed" # original ed77c235f tests/jetpack_services.rs:1519-1523 lifecycle contains recovery=dependency-failed
+step: jetpack services down --no-color

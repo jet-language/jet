@@ -1,0 +1,15 @@
+# PORT tests/repl.rs:2395-2406 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "use core.math as math\r" after 200ms
+pty-send: "math.sqrt\u001bOP" after 150ms
+pty-send: "\u0003" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "core.math.sqrt" # Original F1 member documentation rs2403.

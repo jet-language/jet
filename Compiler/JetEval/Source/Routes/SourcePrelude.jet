@@ -18,17 +18,17 @@ use jet_foundation.[
     stable_id,
 ]
 
-pub struct JetEvalSourceTarget {
-    pub function: MIRFunctionID
-    pub route: MIRPreludeCallID
-    pub signature: MIRCallSignature
-    pub fallibility: MIRCallFallibility
-    pub abi: MIRPreludeABI
-    pub module_name: String
-    pub member: String
+struct JetEvalSourceTarget {
+    function: MIRFunctionID
+    route: MIRPreludeCallID
+    signature: MIRCallSignature
+    fallibility: MIRCallFallibility
+    abi: MIRPreludeABI
+    module_name: String
+    member: String
 }
 
-pub enum JetEvalSourceLookup {
+enum JetEvalSourceLookup {
     Unavailable
     Invalid(reason: String)
     Target(value: JetEvalSourceTarget)
@@ -38,7 +38,7 @@ pub enum JetEvalSourceLookup {
 // selector. Checked MIR keeps selectors on the BuildString part, so no
 // Prelude row is interned for them; the function's own arity and interpreter
 // applicability are the ABI facts that remain to check.
-pub fn jet_eval_source_member_function(program: MIRProgram, member: String, arity: Int) -> MIRFunctionID? {
+fn jet_eval_source_member_function(program: MIRProgram, member: String, arity: Int) -> MIRFunctionID? {
     function :: jet_eval_source_find_function(program, member) ?? return None
     if function.arity != arity || !function.interpreter -> return None
     Val(function.id)
@@ -50,7 +50,7 @@ pub fn jet_eval_source_member_function(program: MIRProgram, member: String, arit
 // `display`/`debug` are evaluator-owned structural renderers (MIREval
 // `display_core_pure_value` / `mir_show` / CorePureParity `debug`), so their
 // rows fall through to the Prelude dispatcher.
-pub fn jet_eval_source_lookup(program: MIRProgram, row: MIRPreludeCall) -> JetEvalSourceLookup Never! {
+fn jet_eval_source_lookup(program: MIRProgram, row: MIRPreludeCall) -> JetEvalSourceLookup Never! {
     source_member :: jet_eval_source_member(row) ?? {
         if row.module_name == "core.text.fmt" && row.member != "display" && row.member != "debug" -> return JetEvalSourceLookup.Invalid{reason: "Core formatting route has no source-backed evaluator target"}
         return JetEvalSourceLookup.Unavailable
@@ -82,7 +82,8 @@ struct JetEvalSourceFunction {
 fn jet_eval_source_find_function(program: MIRProgram, member: String) -> JetEvalSourceFunction? {
     fmt_modules := [Int]{}
     loop index in 0..<program.modules.len() {
-        if program.modules[index].name == "core_text_fmt" && program.modules[index].path == "Core/text/fmt.jet" -> &fmt_modules.push(index)
+        path :: program.modules[index].path
+        if program.modules[index].name == "core_text_fmt" && (path == "Core/text/fmt.jet" || path.ends_with("/Core/text/fmt.jet")) -> &fmt_modules.push(index)
     }
     loop index in 0..<program.functions.len() {
         loop position in 0..<fmt_modules.len() {
@@ -149,7 +150,7 @@ fn jet_eval_source_member(row: MIRPreludeCall) -> String? {
 // symbol, family, ABI, and stable identity are the same registry facts used by
 // jet_codegen_add_binary_prelude; the caller supplies the operation's checked
 // arity rather than inventing a route.
-pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> MIRPreludeCall? {
+fn jet_eval_exact_integer_row(member: String, arity: Int) -> MIRPreludeCall? {
     supported :: if member == {
         "add" | "sub" | "mul" | "div" | "rem" | "floor_div" | "mod" | "pow" | "shl" | "shr" | "bit_and" | "bit_or" | "bit_xor" | "div_euclid" | "rem_euclid" -> true
         else -> false
@@ -180,7 +181,7 @@ pub fn jet_eval_exact_integer_row(member: String, arity: Int) -> MIRPreludeCall?
 // Comparison primitives use the checked core.compare BuiltinMethod row even
 // when MIR keeps the operation structural. This descriptor mirrors the
 // registered route exactly; it does not define a second comparison policy.
-pub fn jet_eval_exact_compare_row(member: String) -> MIRPreludeCall? {
+fn jet_eval_exact_compare_row(member: String) -> MIRPreludeCall? {
     supported :: if member == {
         "eq" | "ne" | "lt" | "gt" | "le" | "ge" | "compare" -> true
         else -> false

@@ -1,0 +1,35 @@
+// Rust Parser::output_def / output_defaults_def: these carry semantic tags,
+// not a runtime record/type constructor interpretation in the CLI.
+fn parser_output_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
+    parser_kind_at(&state, offset) == TOKEN_IDENT && parser_kind_at(&state, offset + 1) == TOKEN_COLON_COLON && parser_kind_at(&state, offset + 2) == TOKEN_IDENT && parser_value_at(&state, offset + 2) == "Output" && parser_kind_at(&state, offset + 3) == TOKEN_DOT
+}
+fn parser_output_defaults_ahead_at(state: &JetParserState, offset: Int) -> Bool Never! {
+    parser_kind_at(&state, offset) == TOKEN_IDENT && parser_value_at(&state, offset) == "defaults" && parser_kind_at(&state, offset + 1) == TOKEN_COLON
+}
+fn parser_parse_output(state: &JetParserState, modifiers: ParsedItemModifiers) -> ConstDef {
+    name :: parser_expect_name(&state, "for the Output name")
+    parser_expect(&state, TOKEN_COLON_COLON, "after the Output name")
+    owner :: parser_expect_name(&state, "for the Output constructor")
+    parser_expect(&state, TOKEN_DOT, "between `Output` and its kind")
+    variant :: parser_expect_name(&state, "for the Output kind")
+    if parser_current_kind(&state) != TOKEN_LBRACE -> parser_add_error_here(&state, "expected named Output fields", "Output facts have stable named fields", "write `Output.Executable{{ name: \"app\", entry: run }}`")
+    args :: parser_parse_variant_args(&state, 0, true)
+    end :: parser_previous_end(state)
+    span :: Span{start: owner.span.start, end: end}
+    value :: Expr.EnumLit{type_name: "Output", variant: parser_value(state, variant), variant_span: Val(variant.span), args: args, leading_dot: false, span: span}
+    result := ast_const(parser_value(state, name), name.span, Span{start: name.span.start, end: end}, value)
+    result.ty = Val(Type.Named{name: "Output"})
+    result.is_pub = modifiers.is_pub
+    result.is_package_pub = modifiers.is_package_pub
+    parser_finish_statement(&state)
+    result
+}
+fn parser_parse_output_defaults(state: &JetParserState) -> ConstDef {
+    name :: parser_expect_name(&state, "for Output defaults")
+    parser_expect(&state, TOKEN_COLON, "after `defaults`")
+    value :: parser_parse_expression(&state, 1, 0)
+    result := ast_const(parser_value(state, name), name.span, Span{start: name.span.start, end: value.span.end}, value.expr)
+    result.ty = Val(Type.Named{name: "__OutputDefaults"})
+    parser_finish_statement(&state)
+    result
+}

@@ -1,0 +1,195 @@
+// Assemble with the real Driver/Sema hook. Wire projections below use declared
+// fixture counter inputs; they are not claimed measurements of a checked program.
+// The snapshot is fixture input to the real loader, not a fabricated Sema
+// module or graph. These are CLISeams' ABI/empty-source ownership cases.
+fn try_service_request(core_sources: [JetDriverCoreSource]) -> JetDriverCompileRequest {
+    source :: "use core.devtools as tools\nfn serve() -> Int {{ 7 }}"
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{
+            canonical_path: "/try-service-fixture",
+            identity: "try-service-root",
+            allow_hardlinks: false,
+            files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/try-service-fixture/main.jet", relative_path: "main.jet", identity: "try-service-file", source: source}},
+            foreign_cache_files: [JetDriverAuthorizedSourceFile]{},
+        }},
+        entry_root_identity: "try-service-root",
+        entry_path: "/try-service-fixture/main.jet",
+    }
+    request := jet_cli_driver_request(snapshot, core_sources, Val(1), JetDriverCompileMode.Doc)
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request
+}
+fn try_service_ownership(request: ^JetDriverCompileRequest, expected_source_rows: Int) {
+    session := jet_driver_compiler_queries_new()
+    source :: request.authorized_sources.roots[0].files[0].source
+    parsed :: jet_cli_try_parse(source) ?? panic("actual service input")
+    checked :: jet_driver_compiler_queries_check_disk(&session, parsed, ^request)
+    assert(checked.complete && checked.internal_problem == None && jet_cli_errors(checked.diagnostics).len() == 0)
+    if checked.product == {
+        .CheckedCompilerValue(_) -> panic("retained mode must not construct the opaque compiler value")
+        .Failed -> panic("actual catalog ownership must survive registration")
+        .RetainedCheckedProjection(projection) -> {
+            assert(projection.source_modules.len() == expected_source_rows)
+            assert(projection.compile.doc_modules.len() >= expected_source_rows)
+            assert(projection.schema_ingress != None && projection.entry_module != None)
+            index :: jet_cli_checked_semindex(projection.compile)
+            baseline := JetCLITryChecked{checked: checked, index: Val(index), sources: [String:String]{"/try-service-fixture/main.jet": source}, entry_source: source}
+            plan :: JetCLITryPlan{name: "Ownership", entry: "/try-service-fixture/main.jet", action: JetCLITryAction.Rename{from: "serve", to: "renamed"}}
+            changes :: jet_cli_try_stage(plan, &baseline) ?? panic("actual catalog rename")
+            operations :: jet_cli_try_semantic_ops(plan, &baseline) ?? panic("actual catalog semantic operation")
+            assert(changes.len() == 1 && changes[0].before == source.bytes())
+            assert(changes[0].after == source.replace("serve", "renamed").bytes())
+            assert(operations.len() == 1 && operations[0].kind == "rename" && operations[0].targets.len() == 1)
+            assert(operations[0].targets[0].module_path == "/try-service-fixture/main.jet")
+        }
+    }
+}
+fn run() {
+    try_service_ownership(^try_service_request([JetDriverCoreSource]{}), 1)
+    try_service_ownership(^try_service_request([JetDriverCoreSource]{
+        JetDriverCoreSource{module_name: "core.devtools", alias: "core_devtools_fixture", path: "Core/devtools-fixture.jet", owner: "", owned_members: [String]{}, runtime: false, source: ""},
+        JetDriverCoreSource{module_name: "core.devtools.fixture_private", alias: "core_devtools_fixture_private", path: "Core/devtools-fixture-private.jet", owner: "core.devtools", owned_members: [String]{}, runtime: false, source: ""},
+    }), 3)
+    path :: "/project/main.jet"
+    changes :: [JetCLISourceChange]{JetCLISourceChange{path: path, before: "fn run() {{ 1 }}\n".bytes(), after: "fn run() {{ 2 }}\n".bytes()}}
+    plan :: JetCLITryPlan{name: "Sample", entry: path, action: JetCLITryAction.Edits{edits: [JetCLITryEdit]{JetCLITryEdit{path: path, edit: TextEdit{span: Span{start: 11, end: 12}, new_text: "2"}}}}}
+    verdict :: JetCLITryVerdict{diagnostics: [Diagnostic]{}, claims_rechecked: 2, claims_reused: 5}
+    receipt :: jet_cli_try_receipt(plan.name, changes, verdict)
+    assert(receipt == "try-ea90da779060")
+    plain :: jet_cli_try_output(plan, verdict, receipt, false, false, "fn run() {{ 2 }}\n")
+    assert(plain.stdout == "try `Sample`: verdict clean\n  claims re-checked: 2 · claims reused: 5\n  receipt: try-ea90da779060\n  rolled back (default): working tree is byte-identical\n")
+    assert(plain.stderr == "" && plain.exit_code == JET_DRIVER_EXIT_OK)
+    kept :: jet_cli_try_output(plan, verdict, receipt, true, false, "fn run() {{ 2 }}\n")
+    assert(kept.stdout == "try `Sample`: verdict clean\n  claims re-checked: 2 · claims reused: 5\n  receipt: try-ea90da779060\n  kept: working tree now contains the staged bytes\n")
+    json :: jet_cli_try_output(plan, verdict, receipt, false, true, "fn run() {{ 2 }}\n")
+    assert(json.stdout == "{{\"schema\":\"jet.status/v1\",\"action\":\"try\",\"ok\":true,\"reports\":[],\"name\":\"Sample\",\"kept\":false,\"claims_rechecked\":2,\"claims_reused\":5,\"receipt_id\":\"try-ea90da779060\"}}\n")
+    assert(json.stderr == "" && json.exit_code == JET_DRIVER_EXIT_OK)
+
+    assert((jet_cli_try_counter_delta(4, 9) ?? panic("actual monotonic delta")) == 5)
+    assert((jet_cli_try_counter_delta(4, 4) ?? panic("actual unchanged delta")) == 0)
+    if jet_cli_try_counter_delta(4, 3) == {
+        .Ok(_) -> panic("decreasing counters must not become a zero measurement")
+        .Err(problem) -> if problem == {
+            .Read(_) -> panic("counter invariant must preserve the internal fault route")
+            .Output(output) -> {
+                assert(output.stdout == "")
+                assert(output.stderr.contains("incremental body counters decreased within one try invocation"))
+                assert(output.exit_code != JET_DRIVER_EXIT_OK)
+            }
+        }
+    }
+
+    queries := jet_driver_compiler_queries_new()
+    cold :: jet_driver_compiler_queries_stats(&queries)
+    assert(cold.item_hits == 0 && cold.item_recomputes == 0 && cold.live_items == 0)
+    jet_driver_compiler_queries_set_document(&queries, "/project/z.jet", "old")
+    jet_driver_compiler_queries_set_document(&queries, "/project/a.jet", "first")
+    jet_driver_compiler_queries_set_document(&queries, "/project/z.jet", "new")
+    documents :: jet_driver_compiler_queries_documents(&queries)
+    assert(documents.len() == 2)
+    assert(documents[0].path == "/project/a.jet" && documents[0].source == "first")
+    assert(documents[1].path == "/project/z.jet" && documents[1].source == "new")
+    jet_driver_compiler_queries_clear_measurement(&queries)
+    clean :: jet_driver_compiler_queries_stats(&queries)
+    assert(clean.item_hits == cold.item_hits && clean.item_recomputes == cold.item_recomputes)
+
+    root :: "{cli_sys.temp_dir()}/jet-try-{cli_process.current_pid()}"
+    cli_files.create_dir_all(root) ?? panic("try fixture root")
+    entry :: "{root}/run.jet"
+    plan_file :: "{root}/edit.json"
+    original :: "fn unchanged() -> Int {{ 7 }}\nfn changed() -> Int {{ 1 }}\nfn run() {{\n    unchanged()\n    changed()\n}}\n"
+    cli_files.write(entry, original) ?? panic("try original")
+    at :: original.find("{{ 1 }}") ?? panic("fixture edit")
+    cli_files.write(plan_file, "{{\"version\":1,\"name\":\"Body\",\"entry\":\"run.jet\",\"edits\":[{{\"path\":\"run.jet\",\"start\":{at + 2},\"end\":{at + 3},\"new_text\":\"2\"}}]}}") ?? panic("try plan")
+    parsed :: jet_cli_try_read_plan(plan_file) ?? panic("try plan parsing")
+    text_session := jet_driver_compiler_queries_new()
+    text_baseline :: jet_cli_try_check(&text_session, entry, false) ?? panic("actual text query branch")
+    assert(text_baseline.checked.complete && text_baseline.checked.internal_problem == None)
+    assert(text_baseline.index == None && text_baseline.sources.len() == 0)
+    assert(text_baseline.entry_source == original)
+    session := jet_driver_compiler_queries_new()
+    baseline := jet_cli_try_check(&session, entry, true) ?? panic("actual retained baseline")
+    assert(baseline.checked.complete && baseline.checked.internal_problem == None)
+    assert(baseline.index != None && baseline.sources[jet_cli_try_canonical(entry)] == original)
+    before :: jet_driver_compiler_queries_stats(&session)
+    staged :: jet_cli_try_stage(parsed, &baseline) ?? panic("try stage")
+    assert(staged.len() == 1 && staged[0].before == original.bytes())
+    replacement :: String.from_bytes(staged[0].after) ?? panic("fixture source")
+    assert(replacement == original.replace("{{ 1 }}", "{{ 2 }}"))
+    // The original graph/index/source ownership remains authoritative even if
+    // the disk is changed after the one baseline check. There is no reindex.
+    rename :: JetCLITryPlan{name: "Rename", entry: entry, action: JetCLITryAction.Rename{from: "changed", to: "renamed"}}
+    renamed :: jet_cli_try_stage(rename, &baseline) ?? panic("same-graph rename")
+    rename_ops :: jet_cli_try_semantic_ops(rename, &baseline) ?? panic("same-graph rename operations")
+    assert(renamed.len() == 1 && renamed[0].before == original.bytes())
+    assert(renamed[0].after == original.replace("changed", "renamed").bytes())
+    assert(rename_ops.len() == 1 && rename_ops[0].kind == "rename" && rename_ops[0].targets.len() >= 1)
+    cli_files.write(entry, original.replace("changed", "intruder")) ?? panic("ownership witness mutation")
+    same_rename :: jet_cli_try_stage(rename, &baseline) ?? panic("retained source, not reread")
+    same_ops :: jet_cli_try_semantic_ops(rename, &baseline) ?? panic("retained index, not rebuild")
+    assert(same_rename[0].before == renamed[0].before && same_rename[0].after == renamed[0].after)
+    assert(same_ops[0].targets[0].stable_id == rename_ops[0].targets[0].stable_id)
+    assert(same_ops[0].targets[0].before == rename_ops[0].targets[0].before)
+    same_counts :: jet_driver_compiler_queries_stats(&session)
+    assert(same_counts.item_hits == before.item_hits && same_counts.item_recomputes == before.item_recomputes)
+    broken := baseline
+    broken.sources = [String:String]{}
+    if jet_cli_try_stage(rename, &broken) == {
+        .Ok(_) -> panic("missing checked ownership must not reread the changed disk")
+        .Err(problem) -> if problem == {
+            .Read(_) -> panic("missing checked ownership is an internal invariant")
+            .Output(output) -> assert(output.stderr.contains("the retained rename index lost its original source ownership"))
+        }
+    }
+    cli_files.write(entry, original) ?? panic("restore original ownership witness")
+    measured :: jet_cli_try_verdict(&session, before, entry, staged, replacement) ?? panic("actual incremental verdict")
+    assert(jet_cli_errors(measured.diagnostics).len() == 0)
+    assert(measured.claims_rechecked >= 1 && measured.claims_reused >= 1)
+    assert((cli_files.read(entry) ?? panic("original after speculation")) == original)
+    rolled :: jet_cli_try_run(plan_file, false, true)
+    assert(rolled.exit_code == JET_DRIVER_EXIT_OK && rolled.stderr == "")
+    assert((cli_files.read(entry) ?? panic("rolled back original")) == original)
+    committed :: jet_cli_try_run(plan_file, true, true)
+    assert(committed.exit_code == JET_DRIVER_EXIT_OK && committed.stderr == "")
+    assert((cli_files.read(entry) ?? panic("kept source")) == replacement)
+    operations :: jet_cli_sem_ops_for_file(entry, jet_cli_source_hash(replacement.bytes()))
+    assert(operations.len() == 1 && operations[0].kind == "rewrite")
+
+    cli_files.write(plan_file, "{{\"entry\":\"run.jet\",\"operation\":\"unsupported\"}}") ?? panic("unsupported plan")
+    refused :: jet_cli_try_run(plan_file, false, true)
+    expected :: jet_cli_try_fail("try plan operation `unsupported` is not supported")
+    assert(refused.stdout == expected.stdout && refused.stderr == expected.stderr && refused.exit_code == expected.exit_code)
+    cli_files.write(plan_file, "{{\"entry\":\"run.jet\",\"edits\":[],\"extra\":true}}") ?? panic("empty plan")
+    empty :: jet_cli_try_run(plan_file, false, false)
+    assert(empty.stderr == jet_cli_try_fail("try plan needs at least one edit").stderr)
+    cli_files.write_bytes(plan_file, [U8]{255}) ?? panic("actual malformed UTF-8 plan")
+    invalid_message :: "could not read try plan `{plan_file}`: stream did not contain valid UTF-8"
+    if jet_cli_try_read_plan(plan_file) == {
+        .Ok(_) -> panic("malformed plan bytes must not become a source or JSON value")
+        .Err(problem) -> assert(problem.message == invalid_message)
+    }
+    invalid_utf8 :: jet_cli_try_run(plan_file, false, true)
+    invalid_expected :: jet_cli_try_fail(invalid_message)
+    assert(invalid_utf8.stdout == invalid_expected.stdout && invalid_utf8.stderr == invalid_expected.stderr && invalid_utf8.exit_code == invalid_expected.exit_code)
+    cli_files.write_bytes(plan_file, [U8]{}) ?? panic("actual empty UTF-8 plan")
+    if jet_cli_try_read_plan(plan_file) == {
+        .Ok(_) -> panic("empty UTF-8 is valid text, not a valid JSON plan")
+        .Err(problem) -> assert(problem.message.starts_with("invalid try plan JSON: "))
+    }
+    bom := [U8]{239, 187, 191}
+    &bom.extend("{{\"entry\":\"run.jet\",\"edits\":[]}}".bytes())
+    cli_files.write_bytes(plan_file, bom) ?? panic("actual BOM plan")
+    if jet_cli_try_read_plan(plan_file) == {
+        .Ok(_) -> panic("the canonical JSON reader rejects the BOM, not the UTF-8 decoder")
+        .Err(problem) -> assert(problem.message.starts_with("invalid try plan JSON: "))
+    }
+    missing_plan :: "{root}/missing-plan.json"
+    if jet_cli_try_read_plan(missing_plan) == {
+        .Ok(_) -> panic("missing plan must fail before decoding")
+        .Err(problem) -> {
+            assert(problem.message.starts_with("could not read try plan `{missing_plan}`: "))
+            assert(!problem.message.contains("stream did not contain valid UTF-8"))
+        }
+    }
+    cli_files.remove_all(root).drop("try fixture cleanup")
+}

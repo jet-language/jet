@@ -1,0 +1,67 @@
+// D-UNIONTYPE1=A: anonymous unions are structural enum sugar.
+// Named enums stay the documenting public form; convert with match.
+enum Payload {
+    Name(String)
+    Count(Int)
+}
+
+fn describe(value: Int | String) -> String {
+    copied :: value.copy()
+    if copied == {
+        .Int(n) -> { return "n={n}" }
+        .String(s) -> { return "s={s}" }
+    }
+    return "unknown"
+}
+
+fn take_number(n: Int | String) -> String { describe(n) }
+
+fn as_named(value: Int | String) -> Payload {
+    copied :: value.copy()
+    if copied == {
+        .Int(n) -> {
+            return .Count(n)
+
+        }
+        .String(s) -> {
+            return .Name(s)
+
+        }
+    }
+}
+
+fn from_named(payload: Payload) -> Int | String {
+    if payload == {
+        .Count(n) -> {
+            return n
+
+        }
+        .Name(s) -> {
+            return s
+
+        }
+    }
+}
+
+fn hold(v: Int | String) -> Int | String { v.copy() }
+
+#Codable
+struct Box {
+    value: Int | String
+}
+
+fn run() {
+    print(describe(7))
+    print(take_number("hi"))
+    mixed :: hold(3)
+    print(describe(mixed))
+    named :: as_named("x")
+    value :: from_named(named)
+    print(describe(value))
+    packed :: Box{value: 9}
+    boxed :: packed.value
+    if boxed == {
+        .Int(n) -> print("box={n}")
+        .String(s) -> print("box={s}")
+    }
+}

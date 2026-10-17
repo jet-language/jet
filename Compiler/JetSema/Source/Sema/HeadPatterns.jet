@@ -18,9 +18,9 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaHeadPatternDesugarResult {
-    pub programs: [Program]
-    pub complete: Bool
+struct SemaHeadPatternDesugarResult {
+    programs: [Program]
+    complete: Bool
 }
 
 struct SemaHeadPatternVariant {
@@ -41,7 +41,7 @@ enum SemaHeadPatternOrderedItem {
 
 fn sema_head_pattern_pattern_span(pattern: Pattern) -> Span {
     if pattern == {
-        .Variant(_, _, _, span) | .Present(_, _, _, span) | .Absent(span) | .Ok(_, _, _, span) | .Err(_, _, _, span) | .Range(_, _, span) | .Or(_, span) | .Struct(_, _, span) | .StrMatch(_, span) | .BinMatch(_, span) -> span
+        .Variant(_, _, _, span) | .Present(_, _, _, span) | .Absent(span) | .Ok(_, _, _, span) | .Err(_, _, _, span) | .Range(_, _, span) | .Or(_, span) | .Struct(_, _, span, _) | .List(_, _, span) | .Map(_, _, span) | .StrMatch(_, span) | .BinMatch(_, span) -> span
     }
 }
 
@@ -162,6 +162,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
         variadic: false,
         variadic_bound_list: None,
         declared_view_from_names: None,
+        declared_footprint: None,
     }}
     folded.body = [Stmt]{Stmt.Switch{subject: subject, arms: arms, else_body: None, span: folded.name_span}}
     folded.span = full_span
@@ -171,7 +172,7 @@ fn sema_head_pattern_fold_function(heads: [Func], variants: [SemaHeadPatternVari
     folded
 }
 
-pub fn sema_head_patterns_desugar_modules(programs: [Program], diagnostics: &[Diagnostic]) -> SemaHeadPatternDesugarResult {
+fn sema_head_patterns_desugar_modules(programs: [Program], diagnostics: &[Diagnostic]) -> SemaHeadPatternDesugarResult {
     variants := [SemaHeadPatternVariant]{}
     loop program in programs {
         loop item in program.items {

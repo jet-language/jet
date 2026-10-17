@@ -1,0 +1,16 @@
+# PORT tests/repl.rs:617-654; original predicate forms, literal inputs, no blessed snapshot.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four).
+# CLI banner: crates/jet-repl/src/Render.rs24-37; prompts: Render.rs67-74, lib.rs2528-2535.
+# No assertion needle appears in the fixed banner/prompt; no stripping/projection.
+# lib.rs2469-2470: cooked floor mirrors transcript; EOF does not append :quit.
+fixture: repl_stream_break_runs_deferred_close.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_stream_break_runs_deferred_close.fixture/input.txt
+exit: any # original library predicate did not assert process status
+stdout|stderr: ~ "before" # original predicate
+stdout|stderr: ~ "value: 1" # original predicate
+stdout|stderr: ~ "closed: stream" # original predicate
+stdout: !~ "after" # original predicate
+stderr: !~ "after" # original predicate

@@ -11,7 +11,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::path::Path;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, json_get, json_int, json_str, parse_json};
 use jet_foundation::SHA256::{sha256_file_hex, sha256_hex};
 
@@ -49,21 +49,28 @@ impl LineMap {
                 pending = rest.trim().parse::<usize>().ok();
             }
         }
-        let jet_body_end = if rust_src
-            .lines()
-            .any(|line| line.trim_start().starts_with("pub fn __jet_run("))
-        {
-            let mut in_jet_entry = false;
-            rust_src.lines().enumerate().find_map(|(index, line)| {
-                if line.trim_start().starts_with("pub fn __jet_run(") {
-                    in_jet_entry = true;
-                    return None;
-                }
-                (in_jet_entry && line.starts_with("fn main(")).then_some(index + 1)
-            })
-        } else {
-            None
-        };
+        // Lines from the generated `fn main` wrapper on belong to no Jet
+        // statement. It follows the lowered entry it calls (its MIR link
+        // name), so it bounds the Jet body only when that entry precedes it.
+        let lines = rust_src.lines().collect::<Vec<_>>();
+        let jet_body_end = lines
+            .iter()
+            .position(|line| line.starts_with("fn main("))
+            .and_then(|main| {
+                let entry = lines[main + 1..]
+                    .iter()
+                    .take_while(|line| !line.starts_with('}'))
+                    .find_map(|line| entry_call_name(line))?;
+                let header = format!("fn {entry}(");
+                lines[..main]
+                    .iter()
+                    .any(|line| {
+                        let line = line.trim_start();
+                        line.starts_with(&header)
+                            || line.strip_prefix("pub ").is_some_and(|line| line.starts_with(&header))
+                    })
+                    .then_some(main + 1)
+            });
         LineMap {
             rust_to_jet,
             jet_to_rust,
@@ -109,7 +116,7 @@ impl LineMap {
     }
 
     /// The first marked rust line AT OR AFTER `rust_line` — used to place the
-    /// initial breakpoint at the generated `__jet_run` body's first real
+    /// initial breakpoint at the lowered Jet entry body's first real
     /// statement by `-f -l` (line-based) rather than `-n main` (name-based,
     /// which can resolve to more than one symbol and land with no source line
     /// at all).
@@ -117,23 +124,28 @@ impl LineMap {
         self.rust_to_jet.range(rust_line..).next().map(|(k, _)| *k)
     }
 
-    /// The rust line to set the INITIAL breakpoint on: `__jet_run`'s first real
-    /// statement. Rust still has a tiny `fn main` wrapper, but the Jet user's
-    /// code lives in `__jet_run`, which carries the line markers. Shared by the terminal session
-    /// (`Native.rs`) and the DAP `launch` handler (`Dap.rs`) so both use the
-    /// same file:line breakpoint, never the ambiguous `-n main`.
+    /// The rust line to set the INITIAL breakpoint on: the Jet entry's first
+    /// real statement. Rust has a small `fn main` wrapper that calls the
+    /// lowered entry function (its MIR link name, e.g. `__jet__…crun`); the
+    /// Jet user's code lives there and carries the line markers. Shared by the
+    /// terminal session (`Native.rs`) and the DAP `launch` handler (`Dap.rs`)
+    /// so both use the same file:line breakpoint, never the ambiguous
+    /// `-n main`.
     pub(crate) fn main_entry_line(&self, rust_src: &str) -> Option<usize> {
-        let entry_header = rust_src
-            .lines()
-            .position(|l| l.trim_start().starts_with("pub fn __jet_run("))
-            .or_else(|| {
-                rust_src
-                    .lines()
-                    .position(|l| l.trim_start().starts_with("fn main("))
-            })
-            .map(|i| i + 1)
-            .unwrap_or(1);
-        self.first_at_or_after(entry_header)
+        let lines = rust_src.lines().collect::<Vec<_>>();
+        let main = lines
+            .iter()
+            .position(|l| l.trim_start().starts_with("fn main("))?;
+        let entry = lines[main + 1..]
+            .iter()
+            .take_while(|l| !l.starts_with('}'))
+            .find_map(|l| entry_call_name(l))?;
+        let header = format!("fn {entry}(");
+        let entry_header = lines.iter().position(|l| {
+            let l = l.trim_start();
+            l.starts_with(&header) || l.strip_prefix("pub ").is_some_and(|l| l.starts_with(&header))
+        })?;
+        self.first_at_or_after(entry_header + 1)
     }
 
     /// Persist the exact source-to-generated table used by a native debug
@@ -235,7 +247,7 @@ impl LineMap {
         }
         let entries = json_get(&root, "entries")
             .and_then(|value| match value {
-                DataTree::Array(values) => Some(values),
+                Dyn::Array(values) => Some(values),
                 _ => None,
             })
             .ok_or_else(|| "debugger map has no entries".to_string())?;
@@ -274,6 +286,15 @@ impl LineMap {
             jet_body_end: expected.jet_body_end,
         })
     }
+}
+
+/// The lowered Jet entry a generated `fn main` line calls: the first
+/// `__jet…(` identifier on that line.
+fn entry_call_name(line: &str) -> Option<&str> {
+    let start = line.find("__jet")?;
+    let rest = &line[start..];
+    let end = rest.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))?;
+    rest[end..].starts_with('(').then(|| &rest[..end])
 }
 
 fn source_file_matches(actual: &str, expected: &str) -> bool {
@@ -325,10 +346,13 @@ mod tests {
 
     #[test]
     fn generated_entry_wrapper_is_not_projected_as_jet() {
-        let rust = "pub fn __jet_run() {\n    // jet:line 2\n    let x = 1;\n}\nfn main() {\n    __jet_run();\n}\n";
+        let rust = "fn __jet__d_c_cx_djet_c_crun() -> () {\n    // jet:line 2\n    let x = 1;\n}\n\
+                    fn main() {\n    jet_std_env_init();\n    jet_runtime_boundary(|| {\n        \
+                    let _ = __jet__d_c_cx_djet_c_crun();\n    });\n}\n";
         let map = LineMap::build(rust);
         assert_eq!(map.jet_line_for(3), Some(2));
         assert_eq!(map.jet_line_for(5), None);
+        assert_eq!(map.main_entry_line(rust), Some(3));
     }
 
     #[test]

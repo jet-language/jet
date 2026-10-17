@@ -1,0 +1,28 @@
+
+use core.db as db
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    _ :: db.migrate(scoped, "person-v1", [
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}
+    ]) ?? panic("create")
+    _ :: scoped.execute(
+        SQL{"INSERT INTO person (id, name) VALUES (7, 'Ada')"}
+    ) ?? panic("insert")
+    present :: scoped.query_one(
+        SQL{"SELECT id, name FROM person WHERE id = 7"}
+    )
+    if present == {
+        .Val(_) -> {
+            print("present")
+        }
+        .None -> { panic("present row absent") }
+    }
+    absent :: scoped.query_one(
+        SQL{"SELECT id, name FROM person WHERE id = 99"}
+    )
+    if absent == .None { print("absent") } else { panic("absent row present") }
+    _closed :: scoped.close()
+}

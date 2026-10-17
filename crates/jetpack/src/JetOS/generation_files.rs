@@ -30,7 +30,7 @@ use super::user_flatpak_perf::{
 };
 use crate::Store;
 use crate::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_env_model::ModuleEval::{EnvPlan, ServicePlan, SystemPlan};
 use jet_env_model::AST::{Expr, Item, StrPart};
 use jet_env_model::{Lexer, Parser, Syntax};
@@ -414,7 +414,7 @@ fn validate_source_proof(
         }
     }
     let real_tier = match proof.get("real_tier").map_err(invalid_generation)? {
-        DataTree::Bool(value) => *value,
+        Dyn::Bool(value) => *value,
         _ => return Err(invalid_generation("generation source tier is not boolean")),
     };
     if real_tier != flags.real_tier {
@@ -568,7 +568,7 @@ fn import_find_directory(import: &Expr) -> std::io::Result<String> {
     Ok(path)
 }
 
-fn json_string(value: &DataTree, key: &str) -> std::io::Result<String> {
+fn json_string(value: &Dyn, key: &str) -> std::io::Result<String> {
     value
         .get(key)
         .map_err(invalid_generation)?

@@ -1,0 +1,24 @@
+# Original tests/never_return.rs:15-21; verbatim input and asserted predicates.
+# PENDING-SAME-HEAD; expected files are original asserted constants, not blessed captures.
+fixture: declared_never_example_is_byte_identical_on_aot_jit_and_interpreter.fixture
+env: JETPACK_ENV=1
+step aot: jet run --release {root}/Examples/features/functions/never_return.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache-aot
+env: JETPACK_ROOT={work}/jetpack-aot
+exit: 0
+stdout: = expected.out
+step default: jet run {root}/Examples/features/functions/never_return.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_ROOT={work}/jetpack-default
+exit: 0
+stdout: = expected.out
+stdout: == aot
+step interpreter: jet run --interpret {root}/Examples/features/functions/never_return.jet
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache-interpreter
+env: JETPACK_ROOT={work}/jetpack-interpreter
+exit: 0
+stdout: = expected.out
+stdout: == aot

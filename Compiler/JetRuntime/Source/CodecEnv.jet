@@ -1,0 +1,545 @@
+// Typed environment config decode with a checked native Decode callback
+// (FSIoEnvOsTesting.rs:529-632 jet_std_env_decode over EnvConfig.rs, the
+// D-CONFIG-ENV1 rules): read the project-relative dotenv file, overlay the
+// logical environment, keep the prefixed allowed names, nest `__` segments,
+// rename by the target's checked env names, decode inside the text-cell scope
+// and frame every failure with its source variable. Word lists are the typed
+// CSV kernel's [len, cap, data] (CodecCSV.jet).
+
+fn env_lower(byte: I64) -> I64 { if (byte >= I64{65} && byte <= I64{90}) -> byte + I64{32} else -> byte }
+
+// ASCII case-insensitive equality of two byte ranges (str::eq_ignore_ascii_case).
+fn env_fold_equal(left: I64, left_length: I64, right: I64, right_length: I64) -> Bool {
+    if (left_length != right_length) -> return false
+    at := I64{0}
+    loop at < left_length {
+        if (env_lower(rt_text_byte(left + at)) != env_lower(rt_text_byte(right + at))) -> return false
+        at += I64{1}
+    }
+    true
+}
+
+fn env_fold_text(left: I64, right: I64) -> Bool { env_fold_equal(rt_text_data(left), rt_text_len(left), rt_text_data(right), rt_text_len(right)) }
+
+// An owned copy of `length` bytes at `data`, ASCII-folded by `mode`
+// (0 unchanged, 1 upper, 2 lower).
+fn env_copy(data: I64, length: I64, mode: I64) -> I64 {
+    target :: rt_text_builder_with_capacity(length + I64{1})
+    at := I64{0}
+    loop at < length {
+        byte := rt_text_byte(data + at)
+        if (mode == I64{1} && byte >= I64{97} && byte <= I64{122}) -> byte -= I64{32}
+        if (mode == I64{2}) -> byte = env_lower(byte)
+        rt_text_push_word(target, byte, I64{1})
+        at += I64{1}
+    }
+    target
+}
+
+// str::trim of a byte range: an owned String.
+fn env_trimmed(data: I64, length: I64) -> I64 {
+    raw :: rt_text_copy(data, length)
+    start :: numeric_trim_start(raw)
+    end :: numeric_trim_end(raw, start)
+    result :: rt_text_slice(raw, start, end)
+    jet_rt_string_drop(raw)
+    result
+}
+
+fn env_utf8(data: I64, length: I64) -> Bool {
+    at := I64{0}
+    loop at < length {
+        width :: rt_text_valid_width(data + at, length - at, I64{1})
+        if (width < I64{0}) -> return false
+        at += width
+    }
+    true
+}
+
+fn env_contains(text: I64, byte: I64) -> I64 {
+    data :: rt_text_data(text)
+    at := I64{0}
+    loop at < rt_text_len(text) {
+        if (rt_text_byte(data + at) == byte) -> return at
+        at += I64{1}
+    }
+    I64{-1}
+}
+
+// EnvConfig.rs:129-131.
+fn env_name_valid(name: I64) -> Bool { rt_text_len(name) != I64{0} && env_contains(name, I64{61}) < I64{0} && env_contains(name, I64{0}) < I64{0} }
+
+// An empty allowlist admits every name.
+fn env_allowed(allow: I64, name: I64) -> Bool {
+    count :: trap_word(allow)
+    if (count == I64{0}) -> return true
+    at := I64{0}
+    loop at < count {
+        if env_fold_text(trap_word(trap_word(allow + I64{16}) + at * I64{8}), name) -> return true
+        at += I64{1}
+    }
+    false
+}
+
+// EnvConfig.rs:133-144: quotes are stripped; otherwise ` #` starts a comment.
+// Consumes `value`; owned.
+fn env_dotenv_value(value: I64) -> I64 {
+    data :: rt_text_data(value)
+    length :: rt_text_len(value)
+    if (length >= I64{2}) {
+        first :: rt_text_byte(data)
+        last :: rt_text_byte(data + length - I64{1})
+        if ((first == I64{34} && last == I64{34}) || (first == I64{39} && last == I64{39})) {
+            result :: rt_text_copy(data + I64{1}, length - I64{2})
+            jet_rt_string_drop(value)
+            return result
+        }
+    }
+    at := I64{0}
+    loop at + (I64{1}) < length {
+        if (rt_text_byte(data + at) == I64{32} && rt_text_byte(data + at + I64{1}) == I64{35}) {
+            end := at
+            loop end > (I64{0}) && numeric_is_trailing_space(data, end) -> end -= rt_text_width_before(data, end)
+            result :: rt_text_copy(data, end)
+            jet_rt_string_drop(value)
+            return result
+        }
+        at += I64{1}
+    }
+    value
+}
+
+// Whether the scalar ending at byte `end` is White_Space (str::trim_end).
+fn numeric_is_trailing_space(data: I64, end: I64) -> Bool {
+    start := end - I64{1}
+    loop start > (I64{0}) && (rt_text_byte(data + start).bit_and(I64{192})) == (I64{128}) -> start -= I64{1}
+    unicode_is_white_space(rt_text_decode(data + start))
+}
+
+fn rt_text_width_before(data: I64, end: I64) -> I64 {
+    start := end - I64{1}
+    loop start > (I64{0}) && (rt_text_byte(data + start).bit_and(I64{192})) == (I64{128}) -> start -= I64{1}
+    end - start
+}
+
+// The ordered map EnvConfig.rs keys by the ASCII-uppercased name: each row is
+// [upper key, name, value], all owned; a repeated key replaces its row.
+fn env_values_put(values: I64, name: I64, value: I64) {
+    key :: env_copy(rt_text_data(name), rt_text_len(name), I64{1})
+    at := I64{0}
+    loop at < trap_word(values) {
+        row :: csv_words_get(values, at)
+        if jet_rt_string_eq(trap_word(row), key) {
+            jet_rt_string_drop(key)
+            jet_rt_string_drop(trap_word(row + I64{8}))
+            jet_rt_string_drop(trap_word(row + I64{16}))
+            trap_store(row + I64{8}, name)
+            trap_store(row + I64{16}, value)
+            return
+        }
+        at += I64{1}
+    }
+    row :: jet_rt_alloc(I64{24}, I64{8})
+    trap_store(row, key)
+    trap_store(row + I64{8}, name)
+    trap_store(row + I64{16}, value)
+    csv_words_push(values, row)
+}
+
+// The dotenv lines (str::lines: LF-terminated, a trailing CR removed).
+// 0 on success, otherwise the owned "invalid .env line N" reason.
+fn env_dotenv_load(text: I64, allow: I64, values: I64) -> I64 {
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    start := I64{0}
+    index := I64{0}
+    loop start < length {
+        end := start
+        loop end < length && rt_text_byte(data + end) != (I64{10}) -> end += I64{1}
+        next_start :: end + I64{1}
+        if (end > start && rt_text_byte(data + end - I64{1}) == I64{13}) -> end -= I64{1}
+        index += I64{1}
+        line :: env_trimmed(data + start, end - start)
+        start = next_start
+        line_data := rt_text_data(line)
+        line_length := rt_text_len(line)
+        if (line_length == I64{0} || rt_text_byte(line_data) == I64{35}) {
+            jet_rt_string_drop(line)
+            next
+        }
+        if (line_length >= I64{7} && rt_text_equal_bytes(line_data, rt_text_data(rt_static_text("export ")), I64{7})) {
+            line_data += I64{7}
+            line_length -= I64{7}
+        }
+        split := I64{0}
+        loop split < line_length && rt_text_byte(line_data + split) != (I64{61}) -> split += I64{1}
+        if (split == line_length) {
+            jet_rt_string_drop(line)
+            target :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(target, rt_static_text("invalid .env line "))
+            rt_text_push_number(target, index)
+            return jet_rt_string_builder_finish(target)
+        }
+        name :: env_trimmed(line_data, split)
+        if (!env_name_valid(name) || !env_allowed(allow, name)) {
+            jet_rt_string_drop(name)
+            jet_rt_string_drop(line)
+            next
+        }
+        value :: env_dotenv_value(env_trimmed(line_data + split + I64{1}, line_length - split - I64{1}))
+        jet_rt_string_drop(line)
+        env_values_put(values, name, value)
+    }
+    I64{0}
+}
+
+// The logical environment snapshot: pairs whose name and value are both
+// UTF-8 (FSIoEnvOsTesting.rs:567-571), valid and allowed, in stored order.
+fn env_process_load(allow: I64, values: I64) {
+    jet_rt_logical_env_seed()
+    snapshot :: csv_words_new()
+    shared_acquire(logical_env_root, false)
+    entry := rt_text_word(logical_env_root + I64{56})
+    loop entry != (I64{0}) {
+        key :: rt_text_word(entry + I64{8})
+        key_length :: rt_text_word(entry + I64{16})
+        value :: rt_text_word(entry + I64{24})
+        value_length :: rt_text_word(entry + I64{32})
+        if (env_utf8(key, key_length) && env_utf8(value, value_length)) {
+            csv_words_push(snapshot, rt_text_copy(key, key_length))
+            csv_words_push(snapshot, rt_text_copy(value, value_length))
+        }
+        entry = rt_text_word(entry)
+    }
+    shared_release(logical_env_root, false)
+    at := I64{0}
+    loop at < trap_word(snapshot) {
+        name :: csv_words_get(snapshot, at)
+        value :: csv_words_get(snapshot, at + I64{1})
+        if (env_name_valid(name) && env_allowed(allow, name)) {
+            env_values_put(values, name, value)
+        } else {
+            jet_rt_string_drop(name)
+            jet_rt_string_drop(value)
+        }
+        at += I64{2}
+    }
+    csv_words_free(snapshot)
+}
+
+// Rows in ascending key order (the BTreeMap iteration).
+fn env_values_sort(values: I64) {
+    data :: trap_word(values + I64{16})
+    at := I64{1}
+    loop at < trap_word(values) {
+        row :: trap_word(data + at * I64{8})
+        hole := at
+        loop hole > (I64{0}) && jet_rt_string_compare(trap_word(trap_word(data + (hole - I64{1}) * I64{8})), trap_word(row)) > (I64{0}) {
+            trap_store(data + hole * I64{8}, trap_word(data + (hole - I64{1}) * I64{8}))
+            hole -= I64{1}
+        }
+        trap_store(data + hole * I64{8}, row)
+        at += I64{1}
+    }
+}
+
+fn env_values_free(values: I64) {
+    at := I64{0}
+    loop at < trap_word(values) {
+        row :: csv_words_get(values, at)
+        jet_rt_string_drop(trap_word(row))
+        jet_rt_string_drop(trap_word(row + I64{8}))
+        jet_rt_string_drop(trap_word(row + I64{16}))
+        jet_rt_free(row, I64{24}, I64{8})
+        at += I64{1}
+    }
+    csv_words_free(values)
+}
+
+// The `__`-separated, ASCII-lowercased, non-empty segments of `rest`.
+fn env_segments(data: I64, length: I64) -> I64 {
+    segments :: csv_words_new()
+    start := I64{0}
+    at := I64{0}
+    loop at <= length {
+        boundary :: at == length || (at + I64{1} < length && rt_text_byte(data + at) == I64{95} && rt_text_byte(data + at + I64{1}) == I64{95})
+        if boundary {
+            if (at > start) -> csv_words_push(segments, env_copy(data + start, at - start, I64{2}))
+            if (at == length) -> break
+            at += I64{2}
+            start = at
+            next
+        }
+        at += I64{1}
+    }
+    segments
+}
+
+// The names map is `env=key` lines (the checked shape names of T's fields).
+// Whether `name` (or its unprefixed rest) is a field's env name: its key.
+fn env_renamed(names: I64, name: I64, rest: I64, rest_length: I64) -> I64 {
+    data :: rt_text_data(names)
+    length :: rt_text_len(names)
+    start := I64{0}
+    loop start < length {
+        end := start
+        loop end < length && rt_text_byte(data + end) != (I64{10}) -> end += I64{1}
+        split := start
+        loop split < end && rt_text_byte(data + split) != (I64{61}) -> split += I64{1}
+        if (env_fold_equal(rt_text_data(name), rt_text_len(name), data + start, split - start) || env_fold_equal(rest, rest_length, data + start, split - start)) {
+            return rt_text_copy(data + split + I64{1}, end - split - I64{1})
+        }
+        start = end + I64{1}
+    }
+    I64{0}
+}
+
+// EnvConfig.rs jet_env_insert_tree over the borrowed runtime Dyn object
+// `tree`; consumes `value`.
+fn env_tree_insert(tree: I64, segments: I64, from: I64, value: I64) {
+    entries :: data_tree_word(tree + DATA_TREE_PAYLOAD)
+    segment :: csv_words_get(segments, from)
+    last :: from + I64{1} == trap_word(segments)
+    length :: data_tree_word(entries + DATA_SEQUENCE_LENGTH)
+    data :: data_tree_word(entries + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        slot :: data + at * DATA_TREE_ENTRY_BYTES
+        if env_fold_text(data_tree_word(slot + DATA_TREE_ENTRY_KEY), segment) {
+            child :: data_tree_word(slot + DATA_TREE_ENTRY_VALUE)
+            if last {
+                jet_rt_handle_drop_dyn(child)
+                data_tree_store(slot + DATA_TREE_ENTRY_VALUE, jet_rt_record_new_dyn_text(value))
+                jet_rt_string_drop(value)
+                return
+            }
+            if (data_tree_word(child + DATA_TREE_TAG) == DATA_TREE_OBJECT) {
+                env_tree_insert(child, segments, from + I64{1}, value)
+                return
+            }
+        }
+        at += I64{1}
+    }
+    if last {
+        data_sequence_push(entries, segment, jet_rt_record_new_dyn_text(value), true)
+        jet_rt_string_drop(value)
+        return
+    }
+    child :: data_tree_new(DATA_TREE_OBJECT, data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
+    env_tree_insert(child, segments, from + I64{1}, value)
+    data_sequence_push(entries, segment, child, true)
+}
+
+// EnvConfig.rs:120-127: any `.`/`[`/`]` segment naming a secret.
+fn env_secret_path(path: I64) -> Bool {
+    data :: rt_text_data(path)
+    length :: rt_text_len(path)
+    start := I64{0}
+    at := I64{0}
+    loop at <= length {
+        separator :: at == length || rt_text_byte(data + at) == I64{46} || rt_text_byte(data + at) == I64{91} || rt_text_byte(data + at) == I64{93}
+        if separator {
+            size :: at - start
+            if (env_fold_equal(data + start, size, rt_text_data(rt_static_text("secret")), I64{6}) || env_fold_equal(data + start, size, rt_text_data(rt_static_text("password")), I64{8}) || env_fold_equal(data + start, size, rt_text_data(rt_static_text("token")), I64{5}) || env_fold_equal(data + start, size, rt_text_data(rt_static_text("key")), I64{3})) -> return true
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    false
+}
+
+// EnvConfig.rs:100-118: replaces one FieldError's reason in place.
+fn env_frame_error(error: I64, origins: I64) {
+    path :: text_glue_word(error + TEXT_FIELD_PATH)
+    reason :: text_glue_word(error + TEXT_FIELD_REASON)
+    target :: jet_rt_string_builder_new()
+    origin := I64{-1}
+    at := I64{0}
+    loop at < trap_word(origins) && origin < (I64{0}) {
+        if env_fold_text(csv_words_get(origins, at + I64{1}), path) {
+            origin = at
+        }
+        at += I64{2}
+    }
+    if (origin >= I64{0}) {
+        jet_rt_string_builder_push(target, rt_static_text("E2416: env var "))
+        jet_rt_string_builder_push(target, csv_words_get(origins, origin))
+        jet_rt_string_builder_push(target, rt_static_text(" -> "))
+    } else {
+        jet_rt_string_builder_push(target, rt_static_text("E2416: config field "))
+    }
+    jet_rt_string_builder_push(target, path)
+    jet_rt_string_builder_push(target, rt_static_text(": "))
+    jet_rt_string_builder_push(target, if env_secret_path(path) -> rt_static_text("secret value rejected") else -> reason)
+    text_glue_store(error + TEXT_FIELD_REASON, jet_rt_string_builder_finish(target))
+    jet_rt_string_drop(reason)
+}
+
+// EnvConfig.rs:13-19: neither absolute nor containing a `..` component.
+fn env_file_relative(file: I64) -> Bool {
+    data :: rt_text_data(file)
+    length :: rt_text_len(file)
+    if (length > I64{0} && rt_text_byte(data) == I64{47}) -> return false
+    start := I64{0}
+    at := I64{0}
+    loop at <= length {
+        if (at == length || rt_text_byte(data + at) == I64{47}) {
+            if (at - start == I64{2} && rt_text_byte(data + start) == I64{46} && rt_text_byte(data + start + I64{1}) == I64{46}) -> return false
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    true
+}
+
+// std::fs::read_to_string: status 1 with the owned text, 0 when absent
+// (NotFound), -1 with the owned io::Error Display reason in `out`.
+fn env_read_file(file: I64, out: I64) -> I64 {
+    name :: fd_c_path(file)
+    fd :: host_call(I64{2}, name, I64{524288}, I64{0})
+    fd_c_path_drop(name, file)
+    if (fd == I64{-2}) -> return I64{0}
+    if (fd < I64{0}) {
+        trap_store(out, host_errno_cause(-fd))
+        return I64{-1}
+    }
+    builder :: jet_rt_string_builder_new()
+    buffer :: jet_rt_alloc(I64{8192}, I64{8})
+    failure := I64{0}
+    loop {
+        count :: host_call(I64{0}, fd, buffer, I64{8192})
+        if (count == I64{-4}) -> next
+        if (count <= I64{0}) {
+            failure = count
+            break
+        }
+        rt_text_append(builder, buffer, count)
+    }
+    jet_rt_free(buffer, I64{8192}, I64{8})
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    text :: jet_rt_string_builder_finish(builder)
+    if (failure < I64{0}) {
+        jet_rt_string_drop(text)
+        trap_store(out, host_errno_cause(-failure))
+        return I64{-1}
+    }
+    if !env_utf8(rt_text_data(text), rt_text_len(text)) {
+        jet_rt_string_drop(text)
+        trap_store(out, jet_rt_string_clone(rt_static_text("stream did not contain valid UTF-8")))
+        return I64{-1}
+    }
+    trap_store(out, text)
+    I64{1}
+}
+
+fn env_fail(prefix: I64, middle: I64, suffix: I64, errors: I64, errors_len: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    jet_rt_string_builder_push(target, prefix)
+    jet_rt_string_builder_push(target, middle)
+    jet_rt_string_builder_push(target, suffix)
+    codec_fail(jet_rt_string_builder_finish(target), errors, errors_len)
+}
+
+// invoke is the checked tree Decode callback (Codecs.jet "codec.tree.decode"):
+// (borrowed tree, value out, status out, errors out, length out) -> 0.
+#Export(c) fn jet_rt_codec_env(prefix: I64, file: I64, allow: I64, names: I64, invoke: I64, value: I64, errors: I64, errors_len: I64) -> I64 {
+    if !env_file_relative(file) -> return codec_fail(jet_rt_string_clone(rt_static_text("E2416: Dotenv.file must be project-relative")), errors, errors_len)
+    values :: csv_words_new()
+    if (rt_text_len(file) != I64{0}) {
+        out :: jet_rt_alloc(I64{8}, I64{8})
+        status :: env_read_file(file, out)
+        if (status < I64{0}) {
+            reason :: trap_word(out)
+            jet_rt_free(out, I64{8}, I64{8})
+            env_values_free(values)
+            target :: jet_rt_string_builder_new()
+            jet_rt_string_builder_push(target, rt_static_text("E2416: cannot read Dotenv.file `"))
+            jet_rt_string_builder_push(target, file)
+            jet_rt_string_builder_push(target, rt_static_text("`: "))
+            jet_rt_string_builder_push(target, reason)
+            jet_rt_string_drop(reason)
+            return codec_fail(jet_rt_string_builder_finish(target), errors, errors_len)
+        }
+        if (status == I64{1}) {
+            text :: trap_word(out)
+            failure :: env_dotenv_load(text, allow, values)
+            jet_rt_string_drop(text)
+            if (failure != I64{0}) {
+                jet_rt_free(out, I64{8}, I64{8})
+                env_values_free(values)
+                result :: env_fail(rt_static_text("E2416: "), failure, rt_static_text(""), errors, errors_len)
+                jet_rt_string_drop(failure)
+                return result
+            }
+        }
+        jet_rt_free(out, I64{8}, I64{8})
+    }
+    env_process_load(allow, values)
+    env_values_sort(values)
+    tree :: data_tree_new(DATA_TREE_OBJECT, data_sequence_new(I64{0}, DATA_TREE_ENTRY_BYTES))
+    origins :: csv_words_new()
+    plen :: rt_text_len(prefix)
+    at := I64{0}
+    loop at < trap_word(values) {
+        row :: csv_words_get(values, at)
+        at += I64{1}
+        name :: trap_word(row + I64{8})
+        data :: rt_text_data(name)
+        length :: rt_text_len(name)
+        // name.get(prefix.len()..): a char boundary, folded prefix, non-empty rest.
+        if (plen > length || (plen < length && (rt_text_byte(data + plen).bit_and(I64{192})) == I64{128})) -> next
+        if !env_fold_equal(data, plen, rt_text_data(prefix), plen) -> next
+        if (plen == length) -> next
+        segments := env_segments(data + plen, length - plen)
+        if (trap_word(segments) == I64{0}) {
+            csv_words_free(segments)
+            next
+        }
+        key :: env_renamed(names, name, data + plen, length - plen)
+        if (key != I64{0}) {
+            csv_record_free(segments)
+            segments = csv_words_new()
+            csv_words_push(segments, key)
+        }
+        joined :: jet_rt_string_builder_new()
+        index := I64{0}
+        loop index < trap_word(segments) {
+            if (index != I64{0}) -> rt_text_push_word(joined, I64{46}, I64{1})
+            jet_rt_string_builder_push(joined, csv_words_get(segments, index))
+            index += I64{1}
+        }
+        csv_words_push(origins, jet_rt_string_clone(name))
+        csv_words_push(origins, jet_rt_string_builder_finish(joined))
+        env_tree_insert(tree, segments, I64{0}, jet_rt_string_clone(trap_word(row + I64{16})))
+        csv_record_free(segments)
+    }
+    env_values_free(values)
+    outs :: jet_rt_alloc(I64{24}, I64{8})
+    coll_zero(outs, I64{24})
+    scope :: jet_rt_codec_text_cells_enter()
+    consumed :: csv_invoke(invoke, tree, value, outs, outs + I64{8}, outs + I64{16})
+    jet_rt_codec_text_cells_leave(scope)
+    jet_rt_handle_drop_dyn(tree)
+    succeeded :: trap_word(outs) != I64{0}
+    found :: trap_word(outs + I64{8})
+    count :: trap_word(outs + I64{16})
+    jet_rt_free(outs, I64{24}, I64{8})
+    if (jet_scheduler_native_propagate() != I64{0}) {
+        csv_record_free(origins)
+        return I64{0}
+    }
+    if (consumed != I64{0}) -> panic("typed env decode lends its Dyn input")
+    if succeeded {
+        csv_record_free(origins)
+        return I64{1}
+    }
+    index := I64{0}
+    loop index < count {
+        env_frame_error(trap_word(found + index * I64{8}), origins)
+        index += I64{1}
+    }
+    csv_record_free(origins)
+    trap_store(errors, found)
+    trap_store(errors_len, count)
+    I64{0}
+}

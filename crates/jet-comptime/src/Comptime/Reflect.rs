@@ -324,10 +324,12 @@ pub fn build_dimension_info(dimension: &Dimension) -> CtValue {
     )
 }
 
+/// Reflected ranges are distinct-type bounds, which are inclusive
+/// (D-RANGETYPE1), so the `Range` row's `exclusive` field is always false.
 fn build_range_value(start: CtValue, end: CtValue) -> CtValue {
     ct_struct(
         crate::Syntax::TYPE_RANGE,
-        &[("start", start), ("end", end)],
+        &[("start", start), ("end", end), ("exclusive", CtValue::Bool(false))],
     )
 }
 
@@ -1107,7 +1109,7 @@ fn marker_info(
     // marker-only table beside it. A marker is the row whose target is written
     // code, so its signature rides on the row.
     let row = jet_foundation::Registry::row(&marker.name).and_then(|row| row.rule);
-    let declaration = vocabulary.and_then(|vocabulary| vocabulary.declaration(&marker.name));
+    let declaration = vocabulary.and_then(|vocabulary| vocabulary.declaration_for(marker));
     let bindings = row.and_then(|row| row.signature.marker_argument_bindings(marker));
     let args = marker
         .args
@@ -1115,7 +1117,7 @@ fn marker_info(
         .enumerate()
         .map(|(index, argument)| {
             let declaration_parameter = vocabulary
-                .and_then(|vocabulary| vocabulary.declaration(&marker.name))
+                .and_then(|vocabulary| vocabulary.declaration_for(marker))
                 .and_then(|declaration| {
                     marker
                         .arg_labels
@@ -3358,6 +3360,7 @@ mod tests {
     fn type_info_includes_methods_and_type_params() {
         let s = StructDef {
             span: span(),
+            compiler_builtin_error: false,
             is_pub: true,
             is_package_pub: false,
             name: "Point".to_string(),

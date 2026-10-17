@@ -30,22 +30,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// D-VISDEFAULT2=A: is the cursor at `#PubFile`?
-    pub(super) fn at_pub_file(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_PUB_FILE)
-    }
-
     /// D-PRELUDEX1=A: is the cursor at `#NoPrelude`?
     pub(super) fn at_no_prelude(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::MARKER_NO_PRELUDE)
+        self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_NO_PRELUDE)
     }
 
     /// S43 (D-CASING1 follow-on): true when the cursor is at the `#Test` marker.
     pub(in crate::Parser) fn at_test_def(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == Syntax::KW_TEST)
+        self.unqualified_marker_name_at(self.pos) == Some(Syntax::KW_TEST)
     }
 
     /// Parse `#Test "name" { … }` (D-CASING1 follow-on). The bare lowercase
@@ -59,6 +51,7 @@ impl<'a> Parser<'a> {
             test.expected_fail_expr = arguments.parameter(2).cloned();
             test.marker_name_span = marker.span;
             self.bind_rule_fact(
+                &marker.name,
                 marker.name_span,
                 Some(test.span),
                 crate::Policy::RuleSite::Test,
@@ -100,6 +93,7 @@ impl<'a> Parser<'a> {
             body,
         };
         self.bind_rule_fact(
+            &marker.name,
             marker.name_span,
             Some(test.span),
             crate::Policy::RuleSite::Test,
@@ -163,8 +157,7 @@ impl<'a> Parser<'a> {
 
     /// D-CLAIM-BENCH1=A: true when cursor is at the retired `#Bench` spelling.
     pub(in crate::Parser) fn at_bench_def(&self) -> bool {
-        matches!(self.peek().kind, TokKind::Hash)
-            && matches!(&self.peek2().kind, TokKind::Ident(n) if n == "Bench")
+        self.unqualified_marker_name_at(self.pos) == Some("Bench")
     }
 
     /// `#Bench` is no longer an AST item. Consume its marker head and

@@ -1,0 +1,36 @@
+# HAND-PORT tests/tir_control_and_data.rs:371-434 value_blocks_keep_early_exits_and_reject_statement_tails
+# PENDING-KIT; PENDING-GRAMMAR; original assertions, no historical failing captures.
+# Every original valid tier comparison and all three invalid cases+first matching span presence retained; independent packages.
+fixture: value_blocks_keep_early_exits_and_reject_statement_tails.fixture
+env: NO_COLOR=1
+step default: jet run valid/main.jet
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_ROOT={work}/jetpack-default
+exit: 0
+stdout: = value_blocks_keep_early_exits_and_reject_statement_tails.stdout.expected
+step interpret: jet run --interpret valid/main.jet
+env: JET_STORE_DIR={work}/cache-interpret
+env: JETPACK_ROOT={work}/jetpack-interpret
+exit: 0
+stdout: = value_blocks_keep_early_exits_and_reject_statement_tails.stdout.expected
+stderr: == default
+step: jet build --profile=debug valid/main.jet
+env: JET_STORE_DIR={work}/cache-aot
+env: JETPACK_ROOT={work}/jetpack-aot
+exit: 0
+step aot: built
+exit: 0
+stdout: = value_blocks_keep_early_exits_and_reject_statement_tails.stdout.expected
+stderr: == default
+step: jet check --json invalid-0/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0114"] #>= 1
+json: stdout doc $.reports[?code="E0114"][0].span != null # original first matching diagnostic.span.is_some()
+step: jet check --json invalid-1/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0003"] #>= 1
+json: stdout doc $.reports[?code="E0003"][0].span != null # original first matching diagnostic.span.is_some()
+step: jet check --json invalid-2/main.jet
+exit: nonzero
+json: stdout doc $.reports[?code="E0114"] #>= 1
+json: stdout doc $.reports[?code="E0114"][0].span != null # original first matching diagnostic.span.is_some()

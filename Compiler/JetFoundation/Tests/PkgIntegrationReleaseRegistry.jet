@@ -1,0 +1,20 @@
+// Compiler-library acceptance ports from tests/release_gates.rs.
+// Run after compiler-package assembly; no alternate registry or public API.
+#Test("ga_every_diagnostic_has_explain") {
+    missing := [String]{}
+    loop row in diagnostic_registry_rows() {
+        if diagnostic_explanation(row.code) == None -> &missing.push(row.code)
+    }
+    assert_eq(missing.len(), 0)
+}
+
+#Test("core_encoding_migrations_use_one_marker_payload") {
+    encode :: core_marker_application("core.encoding.cbor", "encode") ?? panic("cbor.encode deprecation")
+    assert_eq(encode.since, "2027")
+    assert_eq(encode.replacement, "cbor.to_bytes")
+    assert_eq(encode.removed_in, Val("2028"))
+    decode :: core_marker_application("core.encoding.cbor", "decode") ?? panic("cbor.decode deprecation")
+    assert_eq(decode.since, "2027")
+    assert_eq(decode.replacement, "cbor.parse")
+    assert_eq(decode.removed_in, Val("2028"))
+}

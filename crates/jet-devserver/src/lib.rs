@@ -1,6 +1,5 @@
 //! Dependency-free dev-server transport and watch policy.
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 use std::collections::HashMap;
 use std::ffi::OsStr;

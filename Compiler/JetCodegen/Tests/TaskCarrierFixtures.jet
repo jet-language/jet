@@ -1,0 +1,18 @@
+// #4790 / #4870: a join retains the checked Task element on both compiler halves.
+fn task_carrier_expect(element: Type, symbol: String) Never! {
+    task_type := Type.Apply{name: "Task", args: [Type]{element}}
+    join_type := sema_taskgroup_failure_result(element)
+    carrier := jet_codegen_failure_carrier_for_type(join_type)
+    route := jet_codegen_handle_task_route(task_type, carrier)
+    group_element :: sema_taskgroup_task_element(task_type) ?? panic("task group rejected checked Task")
+    if group_element != element -> panic("task group flattened the checked Task element")
+    if route.symbol != symbol -> panic("task join route disagrees with checked sema result")
+}
+
+fn run() {
+    task_carrier_expect(Type.Int, "jet_std::JetTask::join")
+    task_carrier_expect(Type.Result{ok: Type.String, err: Type.Named{name: "Never"}}, "jet_std::JetTask::join")
+    task_carrier_expect(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "Never"}}, "jet_std::JetTask::join")
+    task_carrier_expect(Type.Result{ok: Type.Result{ok: Type.Int, err: Type.String}, err: Type.Named{name: "Never"}}, "jet_std::JetTask::join")
+    print("task carriers: passed")
+}

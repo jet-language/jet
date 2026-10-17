@@ -1,0 +1,30 @@
+// Memo.rs:74-80 Clone; CAbiRoutes.rs:10703-10728 borrowed ctor/getters.
+#Export(c) fn jet_rt_record_new_jet_memo_stats(hits: I64, misses: I64, size: I64, bound: I64) -> I64 {
+    h :: jet_int_owned_to_i64(hits)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    m :: jet_int_owned_to_i64(misses)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    s :: jet_int_owned_to_i64(size)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    value :: jet_rt_alloc(MEMO_STATS_BYTES, I64{8})
+    data_tree_store(value + MEMO_STATS_HITS, h)
+    data_tree_store(value + MEMO_STATS_MISSES, m)
+    data_tree_store(value + MEMO_STATS_SIZE, s)
+    data_tree_store(value + MEMO_STATS_BOUND, jet_rt_string_clone(bound))
+    value
+}
+#Export(c) fn jet_rt_record_get_jet_memo_stats_hits(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MEMO_STATS_HITS)) }
+#Export(c) fn jet_rt_record_get_jet_memo_stats_misses(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MEMO_STATS_MISSES)) }
+#Export(c) fn jet_rt_record_get_jet_memo_stats_size(value: I64) -> I64 { jet_int_owned_from_i64(data_tree_word(value + MEMO_STATS_SIZE)) }
+#Export(c) fn jet_rt_record_get_jet_memo_stats_bound(value: I64) -> I64 { jet_rt_string_clone(data_tree_word(value + MEMO_STATS_BOUND)) }
+#Export(c) fn jet_rt_handle_clone_jet_memo_stats(value: I64) -> I64 {
+    result :: jet_rt_alloc(MEMO_STATS_BYTES, I64{8})
+    coll_copy(value, result, MEMO_STATS_BOUND)
+    data_tree_store(result + MEMO_STATS_BOUND, jet_rt_string_clone(data_tree_word(value + MEMO_STATS_BOUND)))
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_memo_stats(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_string_drop(data_tree_word(value + MEMO_STATS_BOUND))
+    jet_rt_free(value, MEMO_STATS_BYTES, I64{8})
+}

@@ -1,0 +1,12 @@
+# Original tests/semindex.rs:368-401; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_projects_arithmetic_policy_and_exact_scope.fixture
+step: jet inspect semindex arithmetic_policy.jet --json
+json: stdout doc $.semindex.arithmetic[0].operation = "add"
+json: stdout doc $.semindex.arithmetic[0].policy = "Wrapping"
+capture: opstart stdout doc $.semindex.arithmetic[0].operation_span.start
+json: stdout doc $.semindex.arithmetic[0].scope_span.start < {cap:opstart}
+stdout: ~ "\"arithmetic\":[{" # original predicate
+stdout: ~ "\"policy\":\"Wrapping\"" # original predicate
+step: jet check arithmetic_policy.jet
+exit: 0

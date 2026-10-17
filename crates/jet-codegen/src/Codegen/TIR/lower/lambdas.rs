@@ -53,12 +53,12 @@ pub(crate) fn spawn_label(lam: &Lambda, cx: &Cx, env: &LowerEnv) -> Option<Strin
         expr = inner;
     }
     match expr {
-        Expr::Call(call) if matches!(cx.fn_types.get(&call.name), Some(Type::Fn { .. })) => {
+        Expr::Call(call) if matches!(cx.fact_fn_types(&call.name), Some(Type::Fn { .. })) => {
             Some(call.name.clone())
         }
         Expr::Ident(name, _)
             if !env.locals.contains_key(name)
-                && matches!(cx.fn_types.get(name), Some(Type::Fn { .. })) =>
+                && matches!(cx.fact_fn_types(name), Some(Type::Fn { .. })) =>
         {
             Some(name.clone())
         }
@@ -443,7 +443,7 @@ fn lower_lambda_expecting_with_host_borrow(
             lam_env.clear_view_marks(name);
         }
     }
-    // Taken resources (`owned :: ~next`) are neither cloned nor moved-captured in
+    // Taken resources (`owned :: next.copy()`) are neither cloned nor moved-captured in
     // sema — AOT relies on Rust lexical capture. Cranelift needs an explicit pack.
     {
         let param_names: HashSet<&str> = lam.params.iter().map(|p| p.name.as_str()).collect();
@@ -554,6 +554,12 @@ fn lower_lambda_expecting_with_host_borrow(
     capture_facts.cloned.extend(extra_cloned.iter().cloned());
     capture_facts.cloned.extend(handle_shares.iter().cloned());
     capture_facts.moved.retain(|name| !extra_cloned.contains(name));
+    // A taken (`^name`) resource stays with its cleanup guard, and a slot
+    // this producer clones or shares is not the binding itself: neither
+    // moves as a taken capture.
+    capture_facts.taken.retain(|name| {
+        !env.is_resource(name) && !extra_cloned.contains(name) && !handle_shares.contains(name)
+    });
     TLambda {
         executable,
         source_span: lam.span,

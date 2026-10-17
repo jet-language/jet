@@ -1,0 +1,13 @@
+# HAND-PORT tests/compute_extended.rs:333-350 data_series_feeds_the_same_compute_tensor_path
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# Original assert_aot_and_default_parity: required substring only, exact default-vs-AOT bytes; no stderr oracle.
+fixture: data_series_feeds_the_same_compute_tensor_path.fixture
+env: NO_COLOR=1
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: ~ "data_tensor:[2.0, 4.0, 6.0]" # original predicate
+step default: jet run main.jet
+exit: 0
+stdout: == aot

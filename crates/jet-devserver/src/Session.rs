@@ -35,7 +35,7 @@ use crate::SessionRecording::{
 
 
 use jet_foundation::HotSwap::{HotSwapDecision, StateRetentionDecision};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json, parse_json_with_limit};
 use jet_foundation::Persist::PersistRejectReason;
 use crate::CapturePolicy::{CaptureFaultFact, CaptureIdentity, CaptureSkip, CaptureStartFact};
@@ -1676,8 +1676,8 @@ impl ResidentDevSession {
         };
         let clear = object
             .get("clear")
-            .is_some_and(|value| matches!(value, DataTree::Bool(true)))
-            || matches!(object.get("selection"), Some(DataTree::Null));
+            .is_some_and(|value| matches!(value, Dyn::Bool(true)))
+            || matches!(object.get("selection"), Some(Dyn::Null));
         let panel_id = field("panel_id").or_else(|| field("target"));
         let item_key = field("item_key")
             .or_else(|| field("source_id"))
@@ -1784,8 +1784,8 @@ impl ResidentDevSession {
             .get("cursor")
             .or_else(|| object.get("sequence"));
         let sequence = match cursor_value {
-            None | Some(DataTree::Null) => None,
-            Some(DataTree::Object(cursor)) => {
+            None | Some(Dyn::Null) => None,
+            Some(Dyn::Object(cursor)) => {
                 let cursor = cursor.iter().cloned().collect::<BTreeMap<_, _>>();
                 match cursor.get("sequence") {
                     Some(value) => Some(
@@ -2558,17 +2558,17 @@ fn unix_time_ms() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
-fn json_string(value: &DataTree) -> Option<&str> {
+fn json_string(value: &Dyn) -> Option<&str> {
     match value {
-        DataTree::Text(value) | DataTree::TypedText(value) => Some(value),
+        Dyn::Text(value) => Some(value),
         _ => None,
     }
 }
 
-fn json_u64(value: &DataTree) -> Option<u64> {
+fn json_u64(value: &Dyn) -> Option<u64> {
     match value {
-        DataTree::Int(value) if *value >= 0 => (*value).try_into().ok(),
-        DataTree::Float(value)
+        Dyn::Int(value) => value.to_u64(),
+        Dyn::Float(value)
             if value.fract() == 0.0 && *value >= 0.0 && *value <= u64::MAX as f64 =>
         {
             Some(*value as u64)
@@ -2627,27 +2627,21 @@ fn game_change_fact_json(fact: &jet_foundation::Game::JetGameChangeFact) -> Stri
     )
 }
 
-pub(crate) fn render_json(value: &DataTree) -> String {
+pub(crate) fn render_json(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => value.to_string(),
-        DataTree::Number(value) => value.clone(),
-        DataTree::TypedText(value) | DataTree::Text(value) => json_value(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => format!(
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => value.to_string(),
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => json_value(value),
+        Dyn::Bytes(values) => json_value(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => json_value(&value.to_rfc3339()),
+        Dyn::Array(values) => format!(
             "[{}]",
             values.iter().map(render_json).collect::<Vec<_>>().join(",")
         ),
-        DataTree::Object(values) => format!(
+        Dyn::Object(values) => format!(
             "{{{}}}",
             values
                 .iter()
@@ -2657,9 +2651,9 @@ pub(crate) fn render_json(value: &DataTree) -> String {
         ),
     }
 }
-fn object_map(value: &DataTree) -> Option<BTreeMap<String, DataTree>> {
+fn object_map(value: &Dyn) -> Option<BTreeMap<String, Dyn>> {
     match value {
-        DataTree::Object(values) => Some(values.iter().cloned().collect()),
+        Dyn::Object(values) => Some(values.iter().cloned().collect()),
         _ => None,
     }
 }
@@ -2679,7 +2673,7 @@ fn request_bool(text: &str, key: &str) -> bool {
     };
     object_map(&value)
         .and_then(|object| object.get(key).cloned())
-        .is_some_and(|value| matches!(value, DataTree::Bool(true)))
+        .is_some_and(|value| matches!(value, Dyn::Bool(true)))
 }
 
 fn set_if_present(target: &mut String, value: &str) {
@@ -2701,17 +2695,17 @@ fn idle_debugger() -> DebuggerSnapshot {
 fn json_string_any(text: &str, key: &str) -> Option<String> {
     let value = parse_json(text).ok()?;
 
-    fn find(value: &DataTree, key: &str) -> Option<String> {
+    fn find(value: &Dyn, key: &str) -> Option<String> {
         match value {
-            DataTree::Object(object) => {
-                if let Some(DataTree::Text(value) | DataTree::TypedText(value)) =
+            Dyn::Object(object) => {
+                if let Some(Dyn::Text(value)) =
                     object.iter().find_map(|(name, value)| (name == key).then_some(value))
                 {
                     return Some(value.clone());
                 }
                 object.iter().find_map(|(_, value)| find(value, key))
             }
-            DataTree::Array(values) => values.iter().find_map(|value| find(value, key)),
+            Dyn::Array(values) => values.iter().find_map(|value| find(value, key)),
             _ => None,
         }
     }
@@ -2722,10 +2716,10 @@ fn json_string_any(text: &str, key: &str) -> Option<String> {
 fn find_debugger_snapshot(text: &str) -> Option<DebuggerSnapshot> {
     let value = parse_json(text).ok()?;
 
-    fn find(value: &DataTree) -> Option<DebuggerSnapshot> {
+    fn find(value: &Dyn) -> Option<DebuggerSnapshot> {
         match value {
-            DataTree::Object(object) => {
-                if let Some(DataTree::Text(session_id) | DataTree::TypedText(session_id)) =
+            Dyn::Object(object) => {
+                if let Some(Dyn::Text(session_id)) =
                     object.iter().find_map(|(name, value)| (name == "id").then_some(value))
                 {
                     if session_id.starts_with("canvas-debug-") {
@@ -2734,7 +2728,7 @@ fn find_debugger_snapshot(text: &str) -> Option<DebuggerSnapshot> {
                                 .iter()
                                 .find_map(|(name, value)| (name == key).then_some(value))
                                 .and_then(|value| match value {
-                                    DataTree::Text(value) | DataTree::TypedText(value) => {
+                                    Dyn::Text(value) => {
                                         Some(value.clone())
                                     }
                                     _ => None,
@@ -2752,7 +2746,7 @@ fn find_debugger_snapshot(text: &str) -> Option<DebuggerSnapshot> {
                 }
                 object.iter().find_map(|(_, value)| find(value))
             }
-            DataTree::Array(values) => values.iter().find_map(find),
+            Dyn::Array(values) => values.iter().find_map(find),
             _ => None,
         }
     }
@@ -2864,7 +2858,7 @@ mod tests {
         session.mark_last_good("accepted-revision", "web-build-2");
         session.record_debug_response(
             r#"{"schema_version":1,"revision":"accepted-revision","source_id":"helper.jet","commands":["s"]}"#,
-            r#"{"schema":"jet.report/v1","canvas":{"protocol":"jet.canvas.debug","session":{"id":"canvas-debug-1","state":"running","tier":"jet-dev-interpreter","source_id":"helper.jet","revision":"accepted-revision"}}}"#,
+            r#"{"schema":"jet.report/v1","canvas":{"protocol":"jet.canvas.debug","session":{"id":"canvas-debug-1","state":"running","tier":"native-recorded","source_id":"helper.jet","revision":"accepted-revision"}}}"#,
         );
 
         session.drop_client("canvas-a");

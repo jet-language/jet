@@ -1,0 +1,22 @@
+// These are real compiled Jet runners with the native box/out16 call shape.
+// The driver only supplies their relocated code addresses and exercises the
+// actual runtime suite producers, never a synthetic TestSuite carrier.
+#Export(c) fn jet_rt_test_suite_fixture_first(_box: I64, out: I64) -> I64 {
+    trap_store(out, I64{-9223372036854775808})
+    trap_store(out + I64{8}, I64{17})
+    I64{0}
+}
+
+#Export(c) fn jet_rt_test_suite_fixture_second(_box: I64, out: I64) -> I64 {
+    trap_store(out, I64{9223372036854775807})
+    trap_store(out + I64{8}, I64{-3})
+    I64{0}
+}
+
+#Export(c) fn jet_rt_test_suite_fixture_release(box: I64) -> I64 {
+    jet_rt_free(box, I64{24}, I64{8})
+    I64{0}
+}
+
+#Export(c) fn jet_rt_test_suite_fixture_state() -> I64 { test_suite_state() }
+#Export(c) fn jet_rt_test_suite_fixture_key() -> I64 { test_suite_key }

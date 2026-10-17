@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { documentationPolicyErrors } from "./check-agent-doc-flags.mjs";
+import { documentationPolicyErrors, nodeSourceFlags } from "./check-agent-doc-flags.mjs";
 
 test("operational headings and task state are rejected with source locations", () => {
   const errors = documentationPolicyErrors("Docs/spec/example.md", [
@@ -29,4 +29,21 @@ test("an unrelated fence cannot hide subsequent operational content", () => {
   ].join("\n"));
   assert.equal(errors.length, 1);
   assert.match(errors[0], /^Docs\/spec\/example\.md:5:/);
+});
+
+test("argv dispatch maps and flag comparisons are accepted, unrelated strings are not", () => {
+  const source = `
+    const names = { '--subject': 'subject', '--root': 'root' };
+    const help = { '--retired': 'old' };
+    for (const arg of argv) {
+      if (!(arg in names) && !['--format'].includes(arg)) throw Error('unknown');
+    }
+    const flag = process.argv[i];
+    if (flag === '--dry-run') continue;
+    const key = { '--jet': 'jet', '--runtime-dir': 'runtime', '--out': 'out' }[flag];
+    const command = ['--spawn-only'];
+    // if (arg === '--comment-only') {}
+  `;
+  assert.deepEqual([...nodeSourceFlags(source)].sort(),
+    ['--dry-run', '--format', '--jet', '--out', '--root', '--runtime-dir', '--subject']);
 });

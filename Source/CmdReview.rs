@@ -12,7 +12,7 @@ use jet::Diagnostics::{json_str as json_string, Diagnostic};
 use jet::ExitCodes;
 use jet::Sema::GateLedger::GateLedger;
 use jet_foundation::Report::{StatusEnvelope, StatusFields, StatusValue};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_str, parse};
 use jet_semindex::{
     review_semantic_ops_with_receipts, semantic_ops_for_file, ReviewSemanticOp, SemIndex,
@@ -1159,7 +1159,7 @@ fn read_receipt(path: Option<&Path>) -> Result<Receipt, String> {
     })
 }
 
-fn parse_derivation_claim(object: &[(String, DataTree)]) -> Result<DerivationClaim, String> {
+fn parse_derivation_claim(object: &[(String, Dyn)]) -> Result<DerivationClaim, String> {
     let id = string_field(object, "id").ok_or("derivation has no id")?;
     Ok(DerivationClaim {
         id,
@@ -1177,12 +1177,12 @@ fn parse_derivation_claim(object: &[(String, DataTree)]) -> Result<DerivationCla
 }
 
 fn parse_derivation_identity(
-    value: Option<&DataTree>,
+    value: Option<&Dyn>,
 ) -> Result<jet_foundation::Facts::DerivationIdentity, String> {
     let Some(value) = value else {
         return Ok(jet_foundation::Facts::DerivationIdentity::new("", "", "", ""));
     };
-    if matches!(value, DataTree::Null) {
+    if matches!(value, Dyn::Null) {
         return Ok(jet_foundation::Facts::DerivationIdentity::new("", "", "", ""));
     }
     let object = value
@@ -1197,12 +1197,12 @@ fn parse_derivation_identity(
 }
 
 fn parse_derivation_observation(
-    value: Option<&DataTree>,
+    value: Option<&Dyn>,
 ) -> Result<Option<jet_foundation::Facts::DerivationObservation>, String> {
     let Some(value) = value else {
         return Ok(None);
     };
-    if matches!(value, DataTree::Null) {
+    if matches!(value, Dyn::Null) {
         return Ok(None);
     }
     let object = value
@@ -1220,7 +1220,7 @@ fn parse_derivation_observation(
 }
 
 fn string_array_field(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     field: &str,
 ) -> Result<Vec<String>, String> {
     let Some(value) = object_field(object, field) else {
@@ -1240,13 +1240,13 @@ fn string_array_field(
 }
 
 fn derivation_for_evidence(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     table: &BTreeMap<String, DerivationClaim>,
 ) -> Result<Option<DerivationClaim>, String> {
     let Some(value) = object_field(object, "derivation") else {
         return Ok(None);
     };
-    if matches!(value, DataTree::Null) {
+    if matches!(value, Dyn::Null) {
         return Ok(None);
     }
     let derivation = value
@@ -1264,7 +1264,7 @@ fn derivation_for_evidence(
 }
 
 fn observation_for_evidence(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     derivation: Option<&DerivationClaim>,
     outcome: &str,
     state: &str,
@@ -1273,7 +1273,7 @@ fn observation_for_evidence(
     let derivation = derivation?;
     let contract = object_field(object, "contract")
         .map(canonical_json)
-        .or_else(|| string_field(object, "claim").map(|value| canonical_json(&DataTree::Text(value))))
+        .or_else(|| string_field(object, "claim").map(|value| canonical_json(&Dyn::Text(value))))
         .unwrap_or_default();
     let inputs = object_field(object, "inputs")
         .or_else(|| object_field(object, "property"))
@@ -1289,8 +1289,8 @@ fn observation_for_evidence(
             } else {
                 Some(format!(
                     "{{\"build\":{},\"target\":{}}}",
-                    canonical_json(&DataTree::Text(derivation.identity.build.clone())),
-                    canonical_json(&DataTree::Text(derivation.identity.target.clone()))
+                    canonical_json(&Dyn::Text(derivation.identity.build.clone())),
+                    canonical_json(&Dyn::Text(derivation.identity.target.clone()))
                 ))
             }
         })
@@ -1351,7 +1351,7 @@ fn is_proven_derivation(derivation: &DerivationClaim) -> bool {
         )
     )
 }
-fn claim_key(object: &[(String, DataTree)]) -> String {
+fn claim_key(object: &[(String, Dyn)]) -> String {
     for field in ["claimId", "claim"] {
         if let Some(value) = string_field(object, field) {
             return format!("{field}:{value}");
@@ -1383,7 +1383,7 @@ fn claim_key(object: &[(String, DataTree)]) -> String {
     parts.join("|")
 }
 
-fn contract_identity(value: &DataTree) -> String {
+fn contract_identity(value: &Dyn) -> String {
     let Ok(object) = value.as_object() else {
         return canonical_json(value);
     };
@@ -2255,23 +2255,17 @@ fn claim_value(claim: &Claim) -> StatusValue {
             ),
     )
 }
-fn canonical_json(value: &DataTree) -> String {
+fn canonical_json(value: &Dyn) -> String {
     match value {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => value.to_string(),
-        DataTree::Float(value) => value.to_string(),
-        DataTree::Number(value) => value.clone(),
-        DataTree::TypedText(value) | DataTree::Text(value) => json_string(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(|value| value.to_string())
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => format!(
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string(),
+        Dyn::Float(value) => value.to_string(),
+        Dyn::Number(value) => value.clone(),
+        Dyn::Text(value) => json_string(value),
+        Dyn::Bytes(values) => json_string(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => json_string(&value.to_rfc3339()),
+        Dyn::Array(values) => format!(
             "[{}]",
             values
                 .iter()
@@ -2279,7 +2273,7 @@ fn canonical_json(value: &DataTree) -> String {
                 .collect::<Vec<_>>()
                 .join(",")
         ),
-        DataTree::Object(values) => values
+        Dyn::Object(values) => values
             .iter()
             .map(|(key, value)| format!("{}:{}", json_string(key), canonical_json(value)))
             .collect::<Vec<_>>()
@@ -2287,11 +2281,11 @@ fn canonical_json(value: &DataTree) -> String {
     }
 }
 
-fn object_field<'a>(object: &'a [(String, DataTree)], field: &str) -> Option<&'a DataTree> {
+fn object_field<'a>(object: &'a [(String, Dyn)], field: &str) -> Option<&'a Dyn> {
     object.iter().find_map(|(key, value)| (key == field).then_some(value))
 }
 
-fn string_field(object: &[(String, DataTree)], field: &str) -> Option<String> {
+fn string_field(object: &[(String, Dyn)], field: &str) -> Option<String> {
     object_field(object, field).and_then(json_str).map(str::to_string)
 }
 

@@ -1,0 +1,30 @@
+# HAND-PORT tests/jetpack_engine.rs:4587-4620 no_nix_unindexed_nixpkgs_package_reports_e1349
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: no_nix_unindexed_nixpkgs_package_reports_e1349.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: catalog
+artifact: peer
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source unindexed -
+await: file peer.port timeout 30s
+capture: port = text file peer.port
+step: jetpack build postgres@nixpkgs --no-color
+cwd: project
+env: PATH=
+exit: 2
+stderr: ~ "E1349" # original contains predicate
+stderr: ~ "postgres" # original contains predicate
+stderr: ~ "not covered" # original contains predicate
+stderr: !~ "E1272" # original negative contains predicate
+stderr: !~ "E1256" # original negative contains predicate
+stderr: !~ "couldn't run `nix`" # original negative contains predicate
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0
+

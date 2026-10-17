@@ -140,6 +140,7 @@ JetEval 19.9k, JetOptimizer 6.2k, JetDriver 6.1k, JetFoundation 41.0k
 
 | Rust has | Jet has | Gap | Size | Blocks self-hosting |
 |---|---|---|---|---|
+| Atomic patch-field scalar initialization (`CheckerItems.rs:3190,3262`, `atomic_field_inner`) | Normal struct literals ported by #4801; JetSema has no patch-literal producer | #4801 pending patch-literal parity: reuse the same Atomic inner expected type when patch literals are ported | S | n |
 | #3708 failure-set solve | lambda-local failure inference only | S1 | L | n (y if Core drops explicit `Never!`) |
 | Inferred failure unions | none | S2 | M | n |
 | Tail value checked against written return; E0113 value wording | tails not return-checked (RatDiscard) | S3 | M | n |
@@ -316,3 +317,34 @@ an owner ruling before it counts as a port.
 - Must `jet fmt` (P3) and the dev-loop analyses (SD7) move before the freeze?
 - Should the 49 retired-status teaching rows the Rust parser still lists be
   ported or dropped (P2)?
+
+## Core-port checker seams (owner directive #29)
+
+Compiler-owned `TextError{message: String}` and `RangeError{reason: String}`
+use the same record shape for construction and field access. Their literal
+rows are authored in `core_constructable_fields` and generated into Jet's
+`CORE_RECORD_LITERAL_ROWS`; source declarations are not fabricated for them.
+`core_failure_record_literal_user.jet` keeps user construction rejected with
+E0119; `CoreFailureRecordFixtures.jet` exercises the real parser and checker
+with both Core and user module origins. The generated `core_only` literal
+visibility does not affect public field reads. The Rust checker bridge
+exists only while the seed compiles Core and dies at cutover.
+
+`run-tier-parity-fixtures.mjs` is the manifest-driven continuation of the
+Atomic field runner: it checks the same source with supplied Rust and Jet
+compiler CLIs and records each actual exit and diagnostic code set. The
+`assemble` mode retains the whole-production fixture assembler and selects
+the fixture entry and arguments from the manifest, not a shadow checker.
+
+Loaded Core nominal declarations keep their canonical owner identity through
+member imports, qualified imports and generic heads. `Rect` in a signature,
+a `[Rect]` list and a constructor result therefore names one declaration;
+the `imported-rect-identity` row in `core-ownership-cases.json` checks the same
+UI source in both compiler tiers. Jet's registration graph already preserves
+the nominal symbol; the seed import resolver no longer collapses it to a leaf.
+
+Core source aliases, paths, members and exported type names now have one Jet
+view in Foundation's generated `CoreSourceOwned.jet`. JetCli reads that row
+set when loading bodies; JetSema can use the same registration authority
+without depending on JetCli. The generator's `--check` covers both the shared
+ownership rows and the CLI effect-source projection.

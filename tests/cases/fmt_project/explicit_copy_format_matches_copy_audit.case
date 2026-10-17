@@ -1,0 +1,10 @@
+# Port of tests/fmt_project.rs::explicit_copy_format_matches_copy_audit (795-840).
+# PENDING-SAME-HEAD: original predicates, no reference snapshot or blessing.
+fixture: explicit_copy_format_matches_copy_audit.fixture
+step: jet audit copies --json {work}/main.jet
+exit: 0
+stdout: ~ "\"action\":\"audit.copies\"" # original predicate
+stdout: ~ "\"kind\":\"implicit\"" # original predicate
+step: jet fmt --explicit-copies {work}/main.jet
+exit: 0
+file: main.jet ~ "return ~domain" # original predicate

@@ -90,7 +90,7 @@ fn env_transition_source_entries(source: String) -> [TransitionSourceEntry] Neve
 fn env_transition_source_field(raw: String) -> String? Never! {
     text :: env_transition_trim_semicolons(env_transition_strip_comments(raw).trim()).trim()
     if text.split_once("::") == .Val(binding) {
-        left :: binding.before.trim().removeprefix("pub ").trim()
+        left :: binding.before.trim()
         if binding.after.trim_start().starts_with("Config") -> return Val("::{left}")
     }
     bytes :: text.bytes()
@@ -161,6 +161,27 @@ fn env_transition_field_value(raw: String, field: String) -> String? Never! {
     parts :: text.split_once(":") ?? return None
     if parts.before.trim() != field -> return None
     Val(parts.after.trim())
+}
+
+// A System extraction must name an authored Output exactly once, whether the
+// author used the outputs record or the canonical standalone Output binding.
+fn env_transition_require_output_declaration(entries: [TransitionSourceEntry], name: String, path: String) EnvironmentError! {
+    loop entry in entries {
+        if entry.field != Val("outputs") -> next
+        value :: env_transition_field_value(entry.raw, "outputs") ?? return Err(env_transition_error("outputs has no value in {path}"))
+        body :: env_transition_record_body(value) ?? return Err(env_transition_error("outputs in {path} is not a record"))
+        matches :: loop child in env_transition_source_entries(body) if child.field == Val(name) -> child
+        if matches.len() != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
+        _ :: env_transition_field_value(matches[0].raw, name) ?? return Err(env_transition_error("outputs.{name} has no value in {path}"))
+        return
+    }
+    count := 0
+    loop entry in entries {
+        if entry.field != Val(name) -> next
+        value :: env_transition_field_value(entry.raw, name) ?? next
+        if value.trim_start().starts_with("Output ::") -> count += 1
+    }
+    if count != 1 -> return Err(env_transition_error("outputs.{name} must be declared exactly once in {path}"))
 }
 
 // The body of an inline `name :: Config{...}` entry.
@@ -300,8 +321,12 @@ fn env_transition_add_member_reference(source: String, existing: [MemberRef], de
 }
 
 fn env_transition_render_config(name: String, field: String, value: String) -> String Never! {
-    if field == "raw" -> return "pub {name} :: Config{{\n{value.trim()}\n}}\n"
-    "pub {name} :: Config{{\n    {field}: {value.trim()}\n}}\n"
+    if field == "raw" -> return "{name} :: Config{{\n{value.trim()}\n}}\n"
+    "{name} :: Config{{\n    {field}: {value.trim()}\n}}\n"
+}
+
+fn env_transition_render_fleet_config(host: String, system: String) -> String Never! {
+    "pub home :: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\"\n            hosts: {{ {host}: system.{system} }}\n        }}\n    }}\n}}\n"
 }
 
 fn env_transition_render_member_package(name: String, body: String) -> String Never! {

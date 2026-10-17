@@ -1,0 +1,15 @@
+# Port of tests/help_pty.rs:183-244. PENDING-GRAMMAR(batch-four); exact original inputs/delays/predicates.
+requires: os:unix
+refused: pty
+normalize: replace "\r" ""
+step: sh -c "JET_HELP_SHELL_PREFILL=1 '{jet}' '?' --color=never > '{work}/picked'; printf '\\nJET_HELP_CAPTURED\\n'"
+pty: true
+pty-send: "\r" after 150ms
+pty-send: "\r" after 150ms
+pty-close: after 150ms
+exit: 0
+stdout: ~ "command palette" # original predicate: transcript contains these exact bytes
+stdout: ~ "JET_HELP_CAPTURED" # original predicate: transcript contains these exact bytes
+file: picked = shell-prefill-picked.out
+stdout: !~ "ready to copy" # original predicate: transcript does not contain these bytes
+stdout: !~ "Hello, Jet!" # original predicate: transcript does not contain these bytes

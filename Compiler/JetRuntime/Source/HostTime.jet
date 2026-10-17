@@ -1,0 +1,215 @@
+// Raw host facts only. Core owns clock selection, civil arithmetic and clamps.
+// One native process-relative monotonic epoch mirrors TimeMonotonic::EPOCH;
+// scheduler deadlines/Sync still use their existing absolute clocks.
+// Root32: SyncOnce0, epoch seconds8, epoch nanoseconds16, provider TLS key24.
+time_host_root := I64{0}
+// runtime-init: 4
+#Export(c) fn jet_rt_time_host_init() {
+    if (time_host_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{32}, I64{8})
+    thread_zero(root, I64{32})
+    // Registry creation is a startup fact; do not sample the host epoch until
+    // the first host-monotonic call (provider setup must not move that origin).
+    sync_store(wrapping(root + I64{24}), jet_rt_tls_key_new(I64{0}))
+    time_host_root = root
+}
+fn rt_time_monotonic_provider_get() -> I64 {
+    jet_rt_tls_get(sync_load(wrapping(time_host_root + I64{24})))
+}
+fn rt_time_monotonic_provider_set(provider: I64) -> I64 {
+    key :: sync_load(wrapping(time_host_root + I64{24}))
+    previous :: jet_rt_tls_get(key)
+    jet_rt_tls_set(key, provider)
+    previous
+}
+fn time_clock_read(clock: I64) -> I64 {
+    scratch :: wrapping(thread_base() + I64{232})
+    #Unsafe("clock_gettime synchronously writes the calling thread's two scratch words") {
+        result :: os_syscall_i64(I64{228}, clock, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+        if (result != I64{0}) -> jet_rt_unreachable(I64{0}, I64{0})
+    }
+    scratch
+}
+fn time_seconds_magnitude(seconds: I64) -> I64 {
+    word :: jet_int_owned_from_i64(seconds)
+    if (seconds >= I64{0}) -> return word
+    magnitude :: jet_int_sub(I64{0}, word)
+    jet_rt_int_drop(word)
+    magnitude
+}
+#Export(c) fn jet_time_raw_wall_sample(seconds_out: I64, nanos_out: I64, before_out: I64) {
+    scratch :: time_clock_read(I64{0})
+    seconds :: sync_load(scratch)
+    nanos :: sync_load(wrapping(scratch + I64{8}))
+    before :: seconds < I64{0}
+    magnitude := I64{0}
+    part := nanos
+    if before {
+        if (nanos == I64{0}) { magnitude = time_seconds_magnitude(seconds) } else {
+            // POSIX (-1s,+250ms) is 750ms before the epoch, not 1.25s.
+            magnitude = jet_int_owned_from_i64(-(seconds + I64{1}))
+            part = I64{1000000000} - nanos
+        }
+    } else { magnitude = jet_int_owned_from_i64(seconds) }
+    sync_store(seconds_out, magnitude)
+    sync_store(nanos_out, part)
+    #Unsafe("before_out lends the tuple's one writable Bool byte") { os_store_u8(before_out, if before -> I64{1} else -> I64{0}) }
+}
+// Both exact-Int Core samples and bounded Realtime samples borrow this one
+// process epoch. The returned TCB words hold elapsed seconds/nanoseconds.
+fn time_host_monotonic_sample() -> I64 {
+    root :: time_host_root
+    if sync_once_enter(root) {
+        sample :: time_clock_read(I64{1})
+        sync_store(wrapping(root + I64{8}), sync_load(sample))
+        sync_store(wrapping(root + I64{16}), sync_load(wrapping(sample + I64{8})))
+        sync_once_complete(root)
+    }
+    sample :: time_clock_read(I64{1})
+    seconds := sync_load(sample) - sync_load(wrapping(root + I64{8}))
+    nanos := sync_load(wrapping(sample + I64{8})) - sync_load(wrapping(root + I64{16}))
+    if (nanos < I64{0}) {
+        seconds = seconds - I64{1}
+        nanos = nanos + I64{1000000000}
+    }
+    // std Instant elapsed saturates a backwards clock to Duration::ZERO.
+    if (seconds < I64{0}) {
+        seconds = I64{0}
+        nanos = I64{0}
+    }
+    sync_store(sample, seconds)
+    sync_store(sample + I64{8}, nanos)
+    sample
+}
+fn time_host_monotonic_i64() -> I64 {
+    sample :: time_host_monotonic_sample()
+    seconds :: sync_load(sample)
+    nanos :: sync_load(sample + I64{8})
+    if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) -> return I64{9223372036854775807}
+    seconds * I64{1000000000} + nanos
+}
+#Export(c) fn jet_time_raw_host_monotonic_ns() -> I64 {
+    sample :: time_host_monotonic_sample()
+    seconds :: sync_load(sample)
+    nanos :: sync_load(sample + I64{8})
+    seconds_word :: jet_int_owned_from_i64(seconds)
+    whole :: jet_int_mul(seconds_word, I64{1000000000})
+    jet_rt_int_drop(seconds_word)
+    result :: jet_int_add(whole, nanos)
+    jet_rt_int_drop(whole)
+    result
+}
+fn time_optional_i64(present: Bool, output: I64) -> I64 {
+    if !present -> return I64{0}
+    // World and provider callbacks expose raw i64 facts. Core Int? owns its
+    // canonical L4 word, including spills for i64 extrema.
+    value :: jet_int_owned_from_i64(sync_load(output))
+    sync_store(output, value)
+    I64{1}
+}
+#Export(c) fn jet_time_raw_world_wall_ms(output: I64) -> I64 {
+    time_optional_i64(world_wall_ms(output), output)
+}
+#Export(c) fn jet_time_raw_world_monotonic_ns(output: I64) -> I64 {
+    time_optional_i64(world_monotonic_ns(output), output)
+}
+#Export(c) fn jet_time_raw_controlled_monotonic_ns(output: I64) -> I64 {
+    time_optional_i64(controlled_monotonic_ns(output), output)
+}
+#Export(c) fn jet_time_raw_wall_override_ms(output: I64) -> I64 {
+    replay_name :: scheduler_msg_replay()
+    replay :: rt_env_get(replay_name)
+    jet_rt_string_drop(replay_name)
+    scratch :: wrapping(thread_base() + I64{248})
+    parsed := deadline_parse_i64(replay, scratch)
+    jet_rt_string_drop(replay)
+    if !parsed {
+        epoch_name :: scheduler_msg_epoch()
+        epoch :: rt_env_get(epoch_name)
+        jet_rt_string_drop(epoch_name)
+        parsed = deadline_parse_i64(epoch, scratch)
+        jet_rt_string_drop(epoch)
+    }
+    if !parsed -> return I64{0}
+    sync_store(output, jet_int_owned_from_i64(sync_load(scratch)))
+    I64{1}
+}
+// std::env::var_os(...).to_string_lossy(): startup bytes, NOT the Core overlay.
+#Export(c) fn jet_time_raw_zone_env(name: I64, output: I64) -> I64 {
+    value :: rt_env_get_lossy(name)
+    if (value == I64{0}) -> return I64{0}
+    sync_store(output, value)
+    I64{1}
+}
+#Export(c) fn jet_time_raw_zone_file_bytes(path: I64, data_out: I64, length_out: I64) -> I64 {
+    length :: rt_text_len(path)
+    source :: rt_text_data(path)
+    at := I64{0}
+    #Unsafe("path lends length bytes; std file open rejects embedded NUL") {
+        loop at < length {
+            if (os_load_u8(wrapping(source + at)) == I64{0}) -> return I64{0}
+            at = at + I64{1}
+        }
+    }
+    name :: jet_rt_alloc(length + I64{1}, I64{1})
+    rt_text_bytes_copy(name, source, length)
+    #Unsafe("name owns its trailing NUL byte") { os_store_u8(wrapping(name + length), I64{0}) }
+    fd :: host_call(I64{2}, name, I64{524288}, I64{0})
+    jet_rt_free(name, length + I64{1}, I64{1})
+    if (fd < I64{0}) -> return I64{0}
+    capacity := I64{8192}
+    bytes := jet_rt_alloc(capacity, I64{8})
+    used := I64{0}
+    failed := false
+    loop {
+        if (used == capacity) {
+            grown :: capacity * I64{2}
+            next_bytes :: jet_rt_alloc(grown, I64{8})
+            rt_text_bytes_copy(next_bytes, bytes, used)
+            jet_rt_free(bytes, capacity, I64{8})
+            bytes = next_bytes
+            capacity = grown
+        }
+        count :: host_call(I64{0}, fd, wrapping(bytes + used), capacity - used)
+        if (count == I64{-4}) { next }
+        if (count < I64{0}) {
+            failed = true
+            break
+        }
+        if (count == I64{0}) -> break
+        used = used + count
+    }
+    _ := host_call(I64{3}, fd, I64{0}, I64{0})
+    if failed {
+        jet_rt_free(bytes, capacity, I64{8})
+        return I64{0}
+    }
+    data := I64{0}
+    if (used != I64{0}) {
+        if (RT_HOST_U8_STRIDE == I64{1} && used == capacity) { data = bytes } else {
+            data = jet_rt_alloc(used * RT_HOST_U8_STRIDE, I64{8})
+            at = I64{0}
+            #Unsafe("bytes lends used initialized bytes; data owns used native U8 elements") {
+                loop at < used {
+                    host_u8_put(data, at, os_load_u8(wrapping(bytes + at)))
+                    at = at + I64{1}
+                }
+            }
+        }
+    }
+    if (data != bytes) -> jet_rt_free(bytes, capacity, I64{8})
+    sync_store(data_out, data)
+    sync_store(length_out, used)
+    I64{1}
+}
+// The native platform seed embeds no TZif assets (only wasm does). Returning
+// absent here is the actual platform fact; Core then searches its zone roots.
+#Export(c) fn jet_time_raw_embedded_zone_bytes(name: I64, data_out: I64, length_out: I64) -> I64 { I64{0} }
+// TimeSleep.rs:57 core.time.__sleep_ns: the shared scheduler owns the wait
+// policy (deadline checks, clamping, cancellation). Duration.ns is an exact
+// Int word; a Duration always fits i64, so the conversion never stops.
+#Export(c) fn jet_std_time_sleep_duration_ns(nanos: I64) {
+    native :: host_native_int(nanos)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    jet_task_sleep_duration_ns_defaulted(native)
+}

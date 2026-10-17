@@ -1,0 +1,18 @@
+
+use core.encoding.json as json
+#Codable
+enum Event {
+    Idle
+    Count(Int)
+    Named(name: String, enabled: Bool)
+}
+fn run() {
+    a := Event.Idle
+    b := Event.Count(3)
+    c := Event.Named{ name: "x", enabled: true }
+    print(json.to_string(a))
+    print(json.to_string(b))
+    print(json.to_string(c))
+    back := json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
+    if back == .Count(n) { print(n) }
+}

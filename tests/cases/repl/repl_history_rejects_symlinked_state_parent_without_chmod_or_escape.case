@@ -1,0 +1,17 @@
+# PORT tests/repl.rs:170-199 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-GRAMMAR(batch-four); runtime PENDING-SAME-HEAD.
+fixture: repl_history_rejects_symlinked_state_parent_without_chmod_or_escape.fixture
+env: NO_COLOR=1
+requires: os:unix
+mkdir: root
+mkdir: outside
+chmod: outside 0755
+symlink: {work}/outside root/linked
+step: jet repl
+env: XDG_STATE_HOME={work}/root/linked/state
+unset: JET_REPL_HISTORY
+stdin: repl_history_rejects_symlinked_state_parent_without_chmod_or_escape.fixture/input.in
+exit: any # Original status unasserted rs183-196.
+stderr: ~ "session-only history" # Original fallback substring rs186.
+file: outside/state absent
+file: outside mode = 0755

@@ -2,11 +2,12 @@
 // sliced and parsed as static sugar (`default.ripgrep`, `"mine@hello"`,
 // `Pkg.adapt(...)` adapters with their finite recipes), not re-derived from
 // comptime values.
+use core.files as envmodel_sugar_files
 
 // The packages and adapter packages one `packages:` field declares.
-pub struct ExtractedPackages {
-    pub packages: [Pkg]
-    pub adapters: [AdapterPlan]
+struct ExtractedPackages {
+    packages: [Pkg]
+    adapters: [AdapterPlan]
 }
 
 // One `name: value` argument of a sugar call, both halves trimmed.
@@ -17,7 +18,7 @@ struct SugarField {
 
 // Pull the package list out of a `packages: [ … ]` field by slicing its
 // source text and reusing the tested sugar parser.
-pub fn envmodel_extract_packages(value: Expr, src: String) -> ExtractedPackages EnvModelEvalError! {
+fn envmodel_extract_packages(value: Expr, src: String) -> ExtractedPackages EnvModelEvalError! {
     span :: if value == {
         .ListLit(_, span) -> span
         else -> { return Err(envmodel_packages_not_a_list(expr_span(value))) }
@@ -117,7 +118,7 @@ fn envmodel_parse_recipe(written: String) -> AdapterRecipe EnvModelEvalError! {
             if args.trim() == "" -> return Err(envmodel_adapter_shape())
             envmodel_sugar_validate_fields(args, [String]{RECIPE_FIELD_BIN, RECIPE_FIELD_AS, RECIPE_FIELD_AS_NAME})
             bin :: envmodel_sugar_named_string(args, RECIPE_FIELD_BIN) ?? return Err(envmodel_adapter_shape())
-            as_name :: envmodel_sugar_named_string(args, RECIPE_FIELD_AS) ?? envmodel_sugar_named_string(args, RECIPE_FIELD_AS_NAME) ?? envmodel_sugar_file_name(bin)
+            as_name :: envmodel_sugar_named_string(args, RECIPE_FIELD_AS) ?? (envmodel_sugar_named_string(args, RECIPE_FIELD_AS_NAME) ?? envmodel_sugar_file_name(bin))
             return Ok(AdapterRecipe.Prebuilt{bin: bin, as_name: as_name})
         }
         .None -> {}
@@ -127,8 +128,8 @@ fn envmodel_parse_recipe(written: String) -> AdapterRecipe EnvModelEvalError! {
 
 // Rust `Path::file_name` of a `/`-separated path, or the path itself.
 fn envmodel_sugar_file_name(path: String) -> String Never! {
-    name :: files.basename(path)
-    if name == "" || name == "." || name == ".." -> return path
+    name :: envmodel_sugar_files.basename(path)
+    if name == "" || name == "." || name == ".." -> return path.copy()
     name
 }
 
@@ -268,7 +269,7 @@ fn envmodel_sugar_named_string(args: String, key: String) -> String? Never! {
 // an unknown escape.
 fn envmodel_sugar_unquote(raw: String) -> String? Never! {
     if !raw.starts_with("\"") || !raw.ends_with("\"") || raw.len() < 2 -> return None
-    characters :: raw.removeprefix("\"").removesuffix("\"").chars().to_list()
+    characters :: raw.removeprefix("\"").removesuffix("\"").chars()
     out := ""
     index := 0
     loop index < characters.len() {
@@ -279,9 +280,9 @@ fn envmodel_sugar_unquote(raw: String) -> String? Never! {
             marker :: "{characters[index]}"
             index += 1
             decoded := String?{None}
-            loop escape in ESCAPES {
-                if escape.marker == marker {
-                    decoded = Val(escape.decoded)
+            loop slot in 0..<ESCAPE_MARKERS.len() {
+                if ESCAPE_MARKERS[slot] == marker {
+                    decoded = Val(ESCAPE_DECODED[slot])
                     break
                 }
             }

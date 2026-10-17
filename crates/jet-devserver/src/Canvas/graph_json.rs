@@ -268,10 +268,7 @@ fn next_function_start(src: &str, offset: usize) -> usize {
     let mut cursor = offset.min(src.len());
     for line in src[cursor..].split_inclusive('\n') {
         let trimmed = line.trim_start();
-        if trimmed.starts_with("fn ")
-            || trimmed.starts_with("pub fn ")
-            || trimmed.starts_with("pub(package) fn ")
-        {
+        if trimmed.starts_with("fn ") {
             return cursor + line.len() - trimmed.len();
         }
         cursor += line.len();
@@ -862,7 +859,7 @@ fn function_metadata_json(src: &str, f: &AST::Func, visibility: &'static str) ->
     format!(
         "{{\"name\":{},\"signature\":{},\"visibility\":{},\"docs\":{},\"pure\":{},\"unsafe\":{},\"effects\":[{}],\"effect_via\":{},\"returns\":{},\"params\":[{}],\"meta\":{},\"source_span\":{},\"edit_affordances\":[\"rename_function\",\"edit_function_signature\",\"create_function\",\"source_jump\"]}}",
         json_str(&f.name),
-        json_str(&function_signature_text(src, f, visibility)),
+        json_str(&function_signature_text(src, f)),
         json_str(visibility),
         json_str(&doc_comment_before(src, f.name_span.start)),
         if f.is_pure { "true" } else { "false" },
@@ -892,13 +889,8 @@ pub(super) fn ledger_function_visibility(
     }
 }
 
-fn function_signature_text(src: &str, f: &AST::Func, visibility: &'static str) -> String {
+fn function_signature_text(src: &str, f: &AST::Func) -> String {
     let mut out = String::new();
-    match visibility {
-        "package" => out.push_str("pub(package) "),
-        "public" => out.push_str("pub "),
-        _ => {}
-    }
     out.push_str("fn ");
     out.push_str(&f.name);
     out.push('(');

@@ -38,7 +38,7 @@ use crate::Codegen::TIR::tir_add_pattern_bindings;
 use crate::Codegen::TIR::tir_recv_jet_ty;
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_json_variant;
-use crate::Codegen::{is_data_tree_subject, is_key_subject};
+use crate::Codegen::{is_dyn_subject, is_key_subject};
 use crate::Codegen::mangle;
 use crate::Codegen::mangle_generated;
 use crate::Codegen::{variant_binding_types, variant_binding_types_for_enum};
@@ -55,7 +55,7 @@ use std::rc::Rc;
 pub(crate) fn lower_value_block(stmts: &[Stmt], cx: &Cx, env: &mut LowerEnv) -> Vec<TStmt> {
     if matches!(
         stmts.last(),
-        Some(Stmt::Switch { .. } | Stmt::ComptimeSwitch { .. })
+        Some(Stmt::Switch { .. } | Stmt::ComptimeSwitch { .. } | Stmt::Unsafe { .. })
     ) {
         let mut rewritten = stmts.to_vec();
         rewrite_function_value_tails(&mut rewritten);
@@ -100,6 +100,9 @@ fn rewrite_function_value_tails(body: &mut Vec<Stmt>) {
                 rewrite_function_value_tails(else_body);
             }
         }
+        // Sema checks an audited `#Unsafe` tail as a value block
+        // (`check_value_tail`), so its own final line is the callable's value.
+        Some(Stmt::Unsafe { body, .. }) => rewrite_function_value_tails(body),
         _ => {}
     }
 }
@@ -117,7 +120,7 @@ pub(crate) fn return_type_has_value(ty: &Type) -> bool {
 pub(crate) fn encoding_reader_item_type(name: &str) -> Option<Type> {
     match name {
         "JSONReader" | "CBORReader" => Some(Type::Named("DataEvent".to_string())),
-        "JSONLReader" | "XMLReader" => Some(Type::Named("DataTree".to_string())),
+        "JSONLReader" | "XMLReader" => Some(Type::Named("Dyn".to_string())),
         "CSVReader" => Some(Type::Named("CSVRow".to_string())),
         _ => None,
     }
@@ -254,13 +257,13 @@ pub(super) fn is_binding_free_user_variant_pattern_test(pattern: &Pattern, cx: &
     match pattern {
         Pattern::Variant {
             variant, bindings, ..
-        } => bindings.is_empty() && cx.variant_owner.contains_key(variant),
+        } => bindings.is_empty() && cx.fact_variant_owner(variant).is_some(),
         _ => false,
     }
 }
 
 /// The enum that owns a binding-free variant test. The checked subject type
-/// decides first: a `DataTree`/`Key` subject keeps its prelude owner even when a
+/// decides first: a `Dyn`/`Key` subject keeps its prelude owner even when a
 /// user enum declares the same variant name, and a user enum subject keeps its
 /// own owner even when the variant is spelled like a builtin (`Int`, `Char`, …).
 fn binding_free_variant_owner(
@@ -269,35 +272,41 @@ fn binding_free_variant_owner(
     subject_enum: Option<String>,
     variant: &str,
 ) -> Option<String> {
-    if is_data_tree_subject(cx, subject_ty) {
+    if is_dyn_subject(cx, subject_ty) {
         return Some(Syntax::TYPE_DATA.to_string());
     }
     if is_key_subject(cx, subject_ty) {
         return Some(Syntax::TYPE_KEY.to_string());
     }
-    subject_enum.or_else(|| cx.variant_owner.get(variant).cloned())
+    subject_enum.or_else(|| cx.fact_variant_owner(variant).cloned())
 }
 
 /// The enum named by a checked subject type when that enum declares `variant`.
 /// A Core source enum imported by module (`ArchiveError`) is registered under
-/// its canonical module identity, so the canonical owner is the fallback.
+/// its canonical module identity, so the canonical owner is the fallback. An
+/// alias spelling (`types.Kind`) the shared facts resolve names their key.
 fn checked_subject_enum(cx: &Cx, subject_ty: &Type, variant: &str) -> Option<String> {
     let (Type::Named(name) | Type::Apply { name, .. }) = subject_ty else {
         return None;
     };
     let declares = |owner: &str| {
-        cx.enum_variants
-            .get(owner)
-            .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
-            || jet_foundation::CoreModuleExports::core_enum_variants(owner)
-                .is_some_and(|variants| variants.contains(&variant))
+        let declared = cx.fact_enum_key(owner).filter(|key| {
+            cx.fact_enum_variants(key)
+                .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
+        });
+        if let Some(key) = declared {
+            return Some(key.to_string());
+        }
+        // Compiler-created enum declarations share the canonical owner/menu
+        // contract even when they have no Core source or Cx enum entry.
+        (jet_foundation::CoreModuleExports::core_enum_variants(owner)
+            .is_some_and(|variants| variants.contains(&variant))
+            || crate::Codegen::TIR::tir_to_mir_types::compiler_owned_enum_variants(owner)
+                .is_some_and(|variants| variants.contains(&variant)))
+            .then(|| owner.to_string())
     };
     let resolved = cx.core_qualified_rust_type_name(name).unwrap_or(name.as_str());
-    if declares(resolved) {
-        return Some(resolved.to_string());
-    }
-    let canonical = crate::Codegen::TIR::canonical_enum_owner(cx, name);
-    declares(&canonical).then_some(canonical)
+    declares(resolved).or_else(|| declares(&crate::Codegen::TIR::canonical_enum_owner(cx, name)))
 }
 
 pub(super) fn lower_binding_free_variant_pattern_test(
@@ -317,7 +326,7 @@ pub(super) fn lower_binding_free_variant_pattern_test(
     // variant path; anything else tests as a match-arm head.
     let position = match &enum_type {
         Some(type_name)
-            if cx.enum_variants.get(type_name).is_some_and(|variants| {
+            if cx.fact_enum_variants(type_name).is_some_and(|variants| {
                 variants.iter().any(|(candidate, _)| candidate == variant)
             }) =>
         {
@@ -364,7 +373,7 @@ pub(super) fn lower_if_let_subject(
 ) -> TExpr {
     // Sema protects ordinary owning-position field reads with an implicit `Copy`
     // whose span is exactly the wrapped field span. A take-self method owns that
-    // field, so an if-let may move it. Preserve an explicitly written `~field`
+    // field, so an if-let may move it. Preserve an explicitly written `field.copy()`
     // (its span starts at the sigil) and every borrowed-root copy.
     let lowered_subject = match subject {
         Expr::Copy(inner, copy_span)
@@ -524,6 +533,14 @@ fn lower_if_cond_impl(
     (combined, bindings, prefixes)
 }
 
+fn pattern_uses_result_carrier(pattern: &Pattern) -> bool {
+    match pattern {
+        Pattern::Ok { .. } | Pattern::Err { .. } => true,
+        Pattern::Or(alternatives, _) => alternatives.iter().any(pattern_uses_result_carrier),
+        _ => false,
+    }
+}
+
 fn lower_if_cond_atom(
     cond: &Expr,
     cx: &Cx,
@@ -545,7 +562,16 @@ fn lower_if_cond_atom(
         ..
     } = cond
     {
-        let subj = lower_if_expr(subject, cx, env, cached);
+        let subj = if pattern_uses_result_carrier(pattern) {
+            let _cache_scope = cached.then(|| super::expressions::ExprCacheScope::enter());
+            let fallback_subject = env.fallback_subject;
+            env.fallback_subject = true;
+            let subj = lower_if_let_subject(subject, cx, env, false);
+            env.fallback_subject = fallback_subject;
+            subj
+        } else {
+            lower_if_let_subject(subject, cx, env, cached)
+        };
         // Checked bundles always carry the owner layout. An isolated comptime
         // fragment may not (the implicit binding fold); return the same typed
         // lowering failure as the statement-level variant path so that fold
@@ -560,9 +586,12 @@ fn lower_if_cond_atom(
             };
             (TIfCond::Plain(violation), Vec::new(), Vec::new())
         };
-        let enum_type = match resolved_enum_subject_type(cx, &subj.ty) {
-            Ok(enum_type) => enum_type,
-            Err(reason) => return or_pattern_invariant(reason),
+        let enum_type = match subj.ty.without_user_tags() {
+            Type::Option(_) | Type::Result { .. } => None,
+            _ => match resolved_enum_subject_type(cx, &subj.ty) {
+                Ok(enum_type) => Some(enum_type),
+                Err(reason) => return or_pattern_invariant(reason),
+            },
         };
         let mut binding_env = clone_env(env);
         if let Err(reason) = tir_add_pattern_bindings(cx, pattern, &mut binding_env, Some(&subj.ty))
@@ -583,12 +612,17 @@ fn lower_if_cond_atom(
             .collect();
         return (
             TIfCond::IfLet {
-                pattern: TPattern::from_ast(
+                pattern: TPattern::from_ast_with_values(
                     pattern.clone(),
-                    Some(enum_type),
-                    TPatternPosition::Binding,
+                    enum_type,
+                    if matches!(subj.ty.without_user_tags(), Type::Option(_)) {
+                        TPatternPosition::OptionBinding
+                    } else {
+                        TPatternPosition::Binding
+                    },
                     false,
                     false,
+                    |value| lower_expr(value, cx, env),
                 ),
                 subj,
             },
@@ -686,13 +720,11 @@ fn lower_if_cond_atom(
     }
     // D-ENC-DYN1=A+: a dynamic `Data` variant if-let (`if data == Object(entries)` /
     // `if n == Int(v)`). The Rust if-let pattern is `{root}jet_std::DataTree::<Variant>(…)`;
-    // the binding's type comes from `core_json_pattern_types`. Scalars/`Array` bind their
-    // inner field directly. `Object` is special: `DataTree::Object` is ordered
-    // `Vec<(String, DataTree)>`, but the user-facing payload is a `Map<String, Data>`, so
-    // the pattern binds the pairs to a temp and a then-body prefix `let` collects them into
-    // a `BTreeMap` (the value the body sees).
+    // the binding's type comes from `core_json_pattern_types`. Every variant binds its
+    // inner field directly; `Object` binds its ordered `[(key, value)]` pair list
+    // (D-DATATREE-ORDER1=A).
     //
-    // D-UNIONTYPE1=A: anonymous-union member tags collide with DataTree (`Int`/`Float`/…).
+    // D-UNIONTYPE1=A: anonymous-union member tags collide with Dyn (`Int`/`Float`/…).
     // Resolve the subject first and prefer the generated `__JetUnion_*` if-let whenever
     // the scrutinee is a union — same ownership fact `lower_enum_match` already uses.
     if let Expr::PatternTest {
@@ -702,15 +734,15 @@ fn lower_if_cond_atom(
                 variant,
                 bindings,
                 leading_dot: _,
-                span: pat_span,
+                span: _,
             },
         ..
     } = cond
     {
         let subj = lower_if_let_subject(subject, cx, env, cached);
         // DataEvent shares variant names (`Int`, `Float`, …) with the dynamic
-        // DataTree surface. Once sema has resolved the subject to DataEvent, use
-        // that enum's prelude pattern and payload facts instead of the DataTree
+        // Dyn surface. Once sema has resolved the subject to DataEvent, use
+        // that enum's prelude pattern and payload facts instead of the Dyn
         // heuristic below.
         if matches!(&subj.ty, Type::Named(name) if name == "DataEvent") {
             let enum_type = Some("DataEvent".to_string());
@@ -783,8 +815,8 @@ fn lower_if_cond_atom(
                 );
             }
         }
-        if is_json_variant(variant) && is_data_tree_subject(cx, &subj.ty) {
-            // DataTree dispatch is valid for unit and wildcard payload arms as
+        if is_json_variant(variant) && is_dyn_subject(cx, &subj.ty) {
+            // Dyn dispatch is valid for unit and wildcard payload arms as
             // well as bound payloads. Keep all three forms in TIR so statement
             // dispatch cannot fall through to the unsupported PatternTest
             // expression path (card #2356).
@@ -818,38 +850,9 @@ fn lower_if_cond_atom(
                 let ty = crate::Sema::core_json_pattern_types(variant)
                     .and_then(|ts| ts.into_iter().next());
                 let place = TLocal::user(name);
-                if variant == "Object" {
-                    let obj_tmp = jet_format!("{jet_prefix}obj{}", pat_span.start);
-                    let map_ty = ty.expect("checked DataTree Object payload type");
-                    let prefix = TStmt::Let {
-                        name: name.clone(),
-                        kw: "let",
-                        let_ty: crate::Codegen::TIR::TLetTy::plain(map_ty.clone()),
-                        init: TExpr {
-                            ty: map_ty.clone(),
-                            kind: TExprKind::DataEntriesToMap(TLocal::generated(&obj_tmp)),
-                        },
-                        gc_promotion: None,
-                        gc_transferred: false,
-                    };
-                    return (
-                        TIfCond::IfLet {
-                            pattern: TPattern::from_ast(
-                                pattern.clone(),
-                                Some(Syntax::TYPE_DATA.to_string()),
-                                TPatternPosition::DataEntries { temp: obj_tmp },
-                                false,
-                                false,
-                            ),
-                            subj,
-                        },
-                        vec![(name.clone(), place, Some(map_ty))],
-                        vec![prefix],
-                    );
-                }
                 // The wire subject decides the owner. A user/anonymous enum may
                 // export the same tag (`Int`, `Text`, …), so the name-only
-                // binding emitter cannot safely recover DataTree ownership.
+                // binding emitter cannot safely recover Dyn ownership.
                 return (
                     TIfCond::IfLet {
                         pattern: TPattern::arm(
@@ -867,7 +870,7 @@ fn lower_if_cond_atom(
         // pattern is the same `emit_if_let_pattern` (`__jet_E::__jet_V(user_b)`), and the
         // binding's type is the variant's first payload type from `variant_binding_types`
         // (the same total fact `add_pattern_bindings` reads on the AST path).
-        if !(is_json_variant(variant) && is_data_tree_subject(cx, &subj.ty)) {
+        if !(is_json_variant(variant) && is_dyn_subject(cx, &subj.ty)) {
             let subject_enum = checked_subject_enum(cx, &subj.ty, variant);
             let enum_type = binding_free_variant_owner(cx, &subj.ty, subject_enum, variant);
             let payload_tys = enum_type
@@ -895,12 +898,13 @@ fn lower_if_cond_atom(
             if !bindings.is_empty() {
                 return (
                     TIfCond::IfLet {
-                        pattern: TPattern::from_ast(
+                        pattern: TPattern::from_ast_with_values(
                             pattern.clone(),
                             enum_type,
                             TPatternPosition::Binding,
                             false,
                             false,
+                            |value| lower_expr(value, cx, env),
                         ),
                         subj,
                     },
@@ -919,7 +923,7 @@ fn lower_if_cond_atom(
         let subject_enum = checked_subject_enum(cx, &subj.ty, variant);
         let subject_owned_unit_variant = bindings.is_empty()
             && subject_enum.is_some()
-            && !is_data_tree_subject(cx, &subj.ty)
+            && !is_dyn_subject(cx, &subj.ty)
             && !is_key_subject(cx, &subj.ty);
         if subject_owned_unit_variant || is_binding_free_user_variant_pattern_test(pattern, cx) {
             let enum_type = binding_free_variant_owner(cx, &subj.ty, subject_enum, variant);
@@ -931,6 +935,16 @@ fn lower_if_cond_atom(
                 Vec::new(),
                 Vec::new(),
             );
+        }
+    }
+    if let Expr::PatternTest { subject, pattern, .. } = cond {
+        if matches!(pattern, Pattern::List { .. } | Pattern::Map { .. })
+            || matches!(pattern, Pattern::Struct { .. }) && pattern.has_nested_pattern()
+        {
+            let subj = lower_if_let_subject(subject, cx, env, cached);
+            let bindings = nested_pattern_if_bindings(cx, env, pattern, &subj.ty);
+            let pattern = TPattern::binding_with_values(pattern.clone(), |value| lower_expr(value, cx, env));
+            return (TIfCond::IfLet { pattern, subj }, bindings, Vec::new());
         }
     }
     // D-DESTRUCT1: value-dispatch expression chains are represented as nested
@@ -1086,7 +1100,7 @@ fn lower_if_cond_atom(
             pattern,
             Pattern::Present { .. } | Pattern::Ok { .. } | Pattern::Err { .. }
         ) {
-            let subj = if matches!(pattern, Pattern::Ok { .. } | Pattern::Err { .. }) {
+            let subj = if pattern_uses_result_carrier(pattern) {
                 // Result patterns inspect the carrier itself. Normal value
                 // lowering consumes a plain helper's carrier through `Try`;
                 // isolate the worklist cache and lower this subject under the
@@ -1172,9 +1186,9 @@ fn lower_if_cond_atom(
             if pattern.has_nested_pattern() {
                 let bindings = nested_pattern_if_bindings(cx, env, pattern, &subj.ty);
                 let pattern = if matches!(&subj.ty, Type::Option(_)) {
-                    TPattern::option_binding(pattern.clone())
+                    TPattern::option_binding_with_values(pattern.clone(), |value| lower_expr(value, cx, env))
                 } else {
-                    TPattern::binding(pattern.clone())
+                    TPattern::binding_with_values(pattern.clone(), |value| lower_expr(value, cx, env))
                 };
                 return (TIfCond::IfLet { pattern, subj }, bindings, Vec::new());
             }
@@ -1248,7 +1262,7 @@ fn lower_if_cond_atom(
 
 fn struct_pattern_field_expr(subject: TExpr, field: &str, field_ty: Type, cx: &Cx) -> TExpr {
     let boxed = match &subject.ty {
-        Type::Named(name) => cx.boxed_edges.contains(&(name.clone(), field.to_string())),
+        Type::Named(name) => cx.fact_box_edge(&name, &field),
         _ => false,
     };
     TExpr {
@@ -1310,8 +1324,11 @@ pub(crate) fn lower_switch<'a>(
         {
             return lower_readiness_switch(arms, else_body, cx, env);
         }
-        return lower_guard_switch(arms, else_body, env, None);
+        return lower_guard_switch(arms, else_body, env, None, 0);
     }
+    // Sema proves an else-less subject table covers its subject (E0307), so
+    // the guard chain's miss path is the checked exhaustive dead end.
+    let covered_line = cx.src_line_col(span.start).0;
     // S31: nested payload patterns test and bind through the short-circuit
     // TIfCond chain; MIR lowers each nested test structurally on every tier.
     // A non-identifier subject is evaluated once into a compiler local that
@@ -1321,17 +1338,12 @@ pub(crate) fn lower_switch<'a>(
         .any(|arm| crate::Codegen::TIR::arm_has_nested_pattern(&arm.cond))
     {
         if matches!(subject, Expr::Ident(..)) {
-            return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
+            return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())), covered_line);
         }
         let name = jet_format!("{jet_prefix}switch_subject_{}", subject.span().start);
-        let carrier = arms.iter().any(|arm| {
-            matches!(
-                &arm.cond,
-                Expr::PatternTest {
-                    pattern: Pattern::Ok { .. } | Pattern::Err { .. },
-                    ..
-                }
-            )
+        let carrier = arms.iter().any(|arm| match &arm.cond {
+            Expr::PatternTest { pattern, .. } => pattern_uses_result_carrier(pattern),
+            _ => false,
         });
         let fallback_subject = env.fallback_subject;
         env.fallback_subject = carrier || fallback_subject;
@@ -1340,7 +1352,7 @@ pub(crate) fn lower_switch<'a>(
         let ty = init.ty.clone();
         env.bind(&name, TLocal::generated(&name), Some(ty.clone()));
         let local_subject = Expr::Ident(name.clone(), subject.span());
-        return lower_guard_switch(arms, else_body, env, Some((subject, local_subject))).map_stmt(
+        return lower_guard_switch(arms, else_body, env, Some((subject, local_subject)), covered_line).map_stmt(
             move |stmt| {
                 let TStmt::If {
                     cond,
@@ -1379,17 +1391,17 @@ pub(crate) fn lower_switch<'a>(
         return lower_mixed_switch(subject, arms, else_body, class, cx, env);
     }
     // `DataTree` is a prelude enum whose variants have a specialized if-let
-    // lowering (`Object` binds ordered entries and materializes the public map
-    // view). A non-identifier dispatch subject is represented in the AST with
+    // lowering (`Object` binds its ordered pair list). A non-identifier
+    // dispatch subject is represented in the AST with
     // the parser's private `it` pattern subject, so preserve the real subject
     // while lowering these arms instead of sending them through the generic
     // user-enum match path. A user enum may declare the same variant names
     // (`Int`, `Text`, …); an identifier subject whose checked type is not
-    // `DataTree` takes the enum-match path below.
+    // `Dyn` takes the enum-match path below.
     let data_subject = match subject {
         Expr::Ident(name, _) => env
             .ty_of(name)
-            .is_none_or(|ty| is_data_tree_subject(cx, &ty)),
+            .is_none_or(|ty| is_dyn_subject(cx, &ty)),
         _ => true,
     };
     if data_subject
@@ -1400,7 +1412,7 @@ pub(crate) fn lower_switch<'a>(
             })
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
+        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())), covered_line);
     }
     // Shape B: all arm-head ranges + else → if/else chain (`emit_mixed_switch`).
     if else_body.is_some()
@@ -1430,7 +1442,7 @@ pub(crate) fn lower_switch<'a>(
                 || arm_guarded_variant_pattern(cx, &a.cond, subject).is_some()
         })
     {
-        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())));
+        return lower_guard_switch(arms, else_body, env, Some((subject, subject.clone())), covered_line);
     }
     let class = classify_branch(subject, arms, cx);
     // Shape D (c109 Phase 15): all arms are plain comparison/Bool conds — or D-IF3 range
@@ -1837,6 +1849,8 @@ fn lower_guard_switch<'a>(
     // The switch subject as written and the expression each arm's head
     // pattern test reads instead.
     subject_override: Option<(&'a Expr, Expr)>,
+    // Source line of an else-less subject table's covered dead end.
+    covered_line: usize,
 ) -> LowerStmtPlan<'a> {
     // The chain is wrapped from the last arm back toward the first, so the deferred
     // bodies run in reverse source order. Prepare each condition immediately before
@@ -1876,10 +1890,19 @@ fn lower_guard_switch<'a>(
         arm_states.push(state);
     }
     let has_else = else_body.is_some();
+    let covered = !has_else && subject_override.is_some();
     deferred_stmt(bodies, move |lowered| {
         let mut lowered = lowered.into_iter();
         let mut chain = if has_else {
             lowered.next().expect("guard else body was deferred")
+        } else if covered {
+            // Rust `lower_enum_match` / Jet `sema_stmt_check_switch`: the miss
+            // path of a covered else-less table is unreachable, so it never
+            // falls through to the code after the table.
+            vec![TStmt::ExprStmt(TExpr {
+                ty: Type::Named("Unit".to_string()),
+                kind: TExprKind::Unreachable { line: covered_line },
+            })]
         } else {
             Vec::new()
         };

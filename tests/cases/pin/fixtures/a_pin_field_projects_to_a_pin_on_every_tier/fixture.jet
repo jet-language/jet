@@ -1,0 +1,20 @@
+
+use core.mem
+
+struct Node {
+    payload: Int
+    hops: Int
+}
+
+struct Queue {
+    label: String
+    head: Pin<Node>
+}
+
+fn run() {
+    node := Node{payload: 41, hops: 0}
+    pinned :: mem.pin(&node)
+    pinned.hops += 1
+    queue :: Queue{label: "ready", head: mem.pin(&node)}
+    print("{(queue.label)} {(queue.head.payload)} {(queue.head.hops)}")
+}

@@ -1,0 +1,15 @@
+// SETUP-PORT tests/common/mod.rs:960-1000: exact native-tool record, no assertions.
+use core.files as files
+use core.crypto as crypto
+use core.encoding.json as json
+fn run(args: [String]) {
+    catalog :: args[0]
+    root :: args[1]
+    files.create_dir_all(catalog) ?? panic("catalog")
+    artifact :: files.join(root, "native-tool")
+    files.write(artifact, "#!/bin/sh\necho native catalog\n") ?? panic("native artifact")
+    if core.sys.is_unix() -> files.chmod(artifact, 0o755) ?? panic("mode")
+    digest :: crypto.sha256(files.read_bytes(artifact) ?? panic("read")).hex()
+    url :: json.to_string(Dyn.Text("file://{artifact}"))
+    files.write(files.join(catalog, "recipes-v1.json"), "{{\"schema\":1,\"recipes\":[{{\"name\":\"native-tool\",\"version\":\"1.0.0\",\"kind\":\"prebuilt\",\"url\":{url},\"sha256\":\"{digest}\",\"bin\":\"native-tool\"}}]}}") ?? panic("recipe")
+}

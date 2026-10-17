@@ -1,0 +1,14 @@
+# Port of tests/cli_parts/surface.rs:1861-1885; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/bad
+step piped: jet check {work}/bad.jet
+env: NO_COLOR=1
+unset: NO_COLOR
+exit: any # original predicate: status not asserted
+stderr: !~ "\u001b" # original predicate
+step: jet check {work}/bad.jet
+env: NO_COLOR=1
+exit: any # original predicate: status not asserted
+stderr: !~ "\u001b" # original predicate
+stderr: == piped

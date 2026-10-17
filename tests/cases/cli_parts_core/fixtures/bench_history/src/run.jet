@@ -1,0 +1,17 @@
+module perf.package {
+    budgets: [Budget{
+        name: "parse",
+        scope: .Test("parse"),
+        metric: .BenchTime(.P50),
+        provider: .BenchMeasurement("parse"),
+        comparison: .RelativeTo("ci/linux"),
+        limit: .RegressionAtMost(100pct),
+        enforcement: .Warn,
+    }],
+}
+#Test("parse") { .measure {
+    total := 0
+    loop value in 0..100 { total = total + value }
+    assert_eq(total, 5050)
+} }
+fn run() {}

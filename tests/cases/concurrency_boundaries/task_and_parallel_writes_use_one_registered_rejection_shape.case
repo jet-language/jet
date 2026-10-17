@@ -1,0 +1,16 @@
+# tests/concurrency_boundaries.rs::task_and_parallel_writes_use_one_registered_rejection_shape at tests/concurrency_boundaries.rs:358; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Sources copied verbatim; original predicates; PENDING-SAME-HEAD (heavy lane paused).
+fixture: task_and_parallel_writes_use_one_registered_rejection_shape.fixture
+env: NO_COLOR=1
+step check1: jet check source-1.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership
+json: stdout doc $.reports[?code="E1101"][0].what ~ "task capture" # original predicate
+capture: task-why stdout doc $.reports[?code="E1101"][0].why
+capture: task-fix stdout doc $.reports[?code="E1101"][0].fix
+step check2: jet check source-2.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E1101"] #>= 1 # original predicate: code membership
+json: stdout doc $.reports[?code="E1101"][0].what ~ "parallel worker" # original predicate
+json: stdout doc $.reports[?code="E1101"][0].why = {cap:task-why}
+json: stdout doc $.reports[?code="E1101"][0].fix = {cap:task-fix}

@@ -97,6 +97,7 @@ fn shared_access_call(handle: Expr, method: &str, body: LambdaBody, span: Span) 
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     }
 }
 
@@ -129,18 +130,6 @@ fn hoisted_rhs_binding(init: Expr, span: Span) -> Stmt {
     })
 }
 
-fn edit_field_stmt(field: &str, op: Option<BinOp>, op_span: Span, value: Expr, span: Span) -> Stmt {
-    Stmt::Assign {
-        target: LValue::Field {
-            base: Box::new(payload(span)),
-            field: field.to_string(),
-            span,
-        },
-        op,
-        op_span,
-        value,
-    }
-}
 
 #[derive(Debug)]
 struct SharedPoll {
@@ -483,52 +472,48 @@ impl<'a> Checker<'a> {
         true
     }
 
-    /// D-CONC-SHARE1=A: rewrite `handle.field <op>= value` on a `Shared<T>`
-    /// handle into the locked edit. Returns `true` when `stmt` was rewritten.
-    ///
+    /// Rewrite the complete projected write through a Shared payload into one
+    /// locked edit. A field or index below the cell must remain a place inside
+    /// that callback, never a locked read followed by mutation of its copy.
     /// When the value also reads another shared cell, the write goes through a
     /// synthesized one-statement transaction outside an explicit transaction,
     /// so the commit acquires in address order instead of nesting one cell's
     /// lock inside another's. Inside `#Transact`, it joins that outer commit.
-    pub(crate) fn desugar_shared_field_write(&mut self, stmt: &mut Stmt) -> bool {
-        let Stmt::Assign {
-            target: LValue::Field { base, field, span },
-            op,
-            op_span,
-            value,
-        } = stmt
-        else {
+    pub(crate) fn desugar_shared_place_write(&mut self, stmt: &mut Stmt) -> bool {
+        let Stmt::Assign { target, value, .. } = stmt else {
             return false;
         };
-        if !self.place_type_is_shared(base) {
+        let (base, span) = match target {
+            LValue::Field { base, span, .. } | LValue::Index { base, span, .. } => {
+                (&mut **base, *span)
+            }
+            LValue::Local { .. } => return false,
+        };
+        let Some(handle) = self.take_shared_place_root(base) else {
             return false;
-        }
-        let span = *span;
-        let op = *op;
-        let op_span = *op_span;
-        let field = field.clone();
+        };
         let other_cells = self.value_touches_another_shared_cell(value);
-        // A deferred edit runs at commit, while every participant already has
-        // its write lock. Evaluate shared RHS reads in the transaction body so
-        // they cannot re-enter a lock held by that edit. The wrapper is a real
-        // implicit transaction outside an authored block; inside one, lowering
-        // erases the nested wrapper to a plain joined block.
-        let needs_implicit_transaction = other_cells;
-        let handle = std::mem::replace(&mut **base, Expr::Absent(span));
-        let value = std::mem::replace(value, Expr::Absent(span));
-        *stmt = if needs_implicit_transaction {
+        let assignment = std::mem::replace(stmt, Stmt::Expr(Expr::Absent(span)));
+        *stmt = if other_cells {
+            let Stmt::Assign {
+                target,
+                op,
+                op_span,
+                value,
+            } = assignment else {
+                unreachable!("shared place is an assignment")
+            };
             let body = vec![
                 hoisted_rhs_binding(value, span),
                 Stmt::Expr(shared_access_call(
                     handle,
                     "edit",
-                    LambdaBody::Block(vec![edit_field_stmt(
-                        &field,
+                    LambdaBody::Block(vec![Stmt::Assign {
+                        target,
                         op,
                         op_span,
-                        Expr::Ident(SHARED_HOISTED_RHS.to_string(), span),
-                        span,
-                    )]),
+                        value: Expr::Ident(SHARED_HOISTED_RHS.to_string(), span),
+                    }]),
                     span,
                 )),
             ];
@@ -543,11 +528,24 @@ impl<'a> Checker<'a> {
             Stmt::Expr(shared_access_call(
                 handle,
                 "edit",
-                LambdaBody::Block(vec![edit_field_stmt(&field, op, op_span, value, span)]),
+                LambdaBody::Block(vec![assignment]),
                 span,
             ))
         };
         true
+    }
+
+    fn take_shared_place_root(&self, place: &mut Expr) -> Option<Expr> {
+        if self.place_type_is_shared(place) {
+            let span = place.span();
+            return Some(std::mem::replace(place, payload(span)));
+        }
+        match place {
+            Expr::Field(base, ..) | Expr::Index { base, .. } | Expr::Paren(base, _) => {
+                self.take_shared_place_root(base)
+            }
+            _ => None,
+        }
     }
 
     /// Does this value expression read a shared cell anywhere inside it? The

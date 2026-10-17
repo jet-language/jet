@@ -376,6 +376,23 @@ fn check_exits_0_when_clean() {
     );
 }
 
+#[test]
+fn raw_c_imports_and_module_bindings_remain_clean_through_cli() {
+    let source = include_str!("fixtures/fmt_import_c_bindings.jet");
+    let dir = tmpdir(&line!().to_string());
+    let file = write(&dir, "runtime.jet", source);
+    for args in [vec!["fmt"], vec!["fmt"], vec!["fmt", "--check"]] {
+        let out = Command::new(jet())
+            .args(args)
+            .arg(&file)
+            .current_dir(&dir)
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(0), "{out:?}");
+        assert_eq!(read(&file), source, "CLI must preserve declaration bytes");
+    }
+}
+
 /// `jet fmt --check` lists the changed path on stdout (sorted).
 #[test]
 fn check_lists_changed_paths() {
@@ -791,7 +808,7 @@ fn check_json_output() {
 /// into `owner`'s buffer, and returning it through a `String` (a non-view
 /// slot) outlives that buffer, so the checker inserts an owning copy. The
 /// audit must list exactly that implicit copy, and `--explicit-copies` must
-/// spell it `~domain` at the same span.
+/// spell it `domain.copy()` at the same span.
 #[test]
 fn explicit_copy_format_matches_copy_audit() {
     let dir = tmpdir(&line!().to_string());
@@ -836,12 +853,12 @@ fn run() { print(make()) }
         "explicit-copy formatting failed\nstderr: {}",
         String::from_utf8_lossy(&formatted.stderr)
     );
-    assert!(read(&file).contains("return ~domain"), "{}", read(&file));
+    assert!(read(&file).contains("return domain.copy()"), "{}", read(&file));
 }
 
 /// #3738: `jet audit <file.jet>` and `jet fmt --explicit-copies` read one
 /// copy-site list. The audit reports exactly `expected_sites` (never a struct
-/// declaration name), fmt writes `~` there and leaves the declaration alone,
+/// declaration name), fmt writes `.copy()` there and leaves the declaration alone,
 /// and the result checks clean under `#Policy(copies: .Explicit)` and prints
 /// what the unmarked program printed.
 fn assert_explicit_copy_probe(tag: &str, source: &str, expected_sites: &[&str], marked: &[&str]) {
@@ -955,7 +972,7 @@ fn run() {
         &line!().to_string(),
         source,
         &["7:16", "16:37"],
-        &["User{name: ~name", "tags: ~names}"],
+        &["User{name: name.copy()", "tags: names.copy()}"],
     );
 }
 
@@ -981,7 +998,7 @@ fn run() {
         &line!().to_string(),
         source,
         &["9:21"],
-        &["Holder{xs: ~a}"],
+        &["Holder{xs: a.copy()}"],
     );
 }
 

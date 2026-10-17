@@ -1,0 +1,28 @@
+// Native text runtime contract: UTF-8 byte/scalar seams, builder ownership,
+// comparisons, empty delimiters, and rightmost overlapping rsplit matches.
+fn run() {
+    text :: "Aé€😀z"
+    print("chars={text.len()} bytes={text.count_bytes()}")
+    print(text.slice(1..<4))
+    print(text.slice(4..<5))
+    print("é" < "€")
+    print("Jet" == "Jet")
+    print(text.contains("€😀"))
+    print(text.starts_with(""))
+    print(text.ends_with("😀z"))
+    print("one:two:three".after(":"))
+    print("one:two:three".before(":"))
+    print("unchanged".after("missing"))
+    print(" trim ".trim())
+    loop piece in "a,,b,".split(",") -> print("split=[{piece}]")
+    loop piece in "é😀".split("") -> print("empty=[{piece}]")
+    loop piece in "ababa".split("aba") -> print("forward=[{piece}]")
+    loop piece in "ababa".rsplit("aba") -> print("reverse=[{piece}]")
+    loop piece in ",a,".split(",") -> print("ends=[{piece}]")
+    loop piece in ",a,".rsplit(",") -> print("rends=[{piece}]")
+    loop piece in "é😀é".split("é") -> print("scalar=[{piece}]")
+    loop piece in "é😀é".rsplit("é") -> print("rscalar=[{piece}]")
+    loop piece in "é😀".rsplit("") -> print("rempty=[{piece}]")
+    loop piece in "".split("") -> print("blank=[{piece}]")
+    loop piece in "".rsplit("") -> print("rblank=[{piece}]")
+}

@@ -1,0 +1,14 @@
+// Lowering shares only the invocation's opt-in journal. No host/environment
+// access and no process-global state enters canonical lowering.
+use jet_foundation.[CanonicalPassSnapshot, canonical_pass_requested, canonical_pass_record]
+
+fn jet_codegen_journal_requested(program: JetCodegenProgram, operation: String) -> Bool Never! {
+    storage :: program.canonical_journal ?? return false
+    permit :: storage.guard_read()
+    canonical_pass_requested(permit.value, operation)
+}
+fn jet_codegen_journal_record(program: JetCodegenProgram, operation: String, source: String, input: CanonicalPassSnapshot, output: CanonicalPassSnapshot) Never! {
+    storage :: program.canonical_journal ?? return
+    permit := storage.guard_edit()
+    canonical_pass_record(&permit.value, "lowering", operation, source, input, output, "preserve")
+}

@@ -1,0 +1,13 @@
+# tests/project_check.rs::explicit_file_uses_owning_project_context at tests/project_check.rs:489; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: explicit_file_uses_owning_project_context.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step: jet check --verbose src/main.jet
+cwd: {work}/owning_context
+env: JET_RECEIPT_BYPASS=1
+normalize: replace "{work}/owning_context" "<fixture>"
+exit: 0
+stdout: ~ "scope=explicit-file" # original predicate
+stderr: !~ "E2393" # original predicate
+stdout.filter(^= "proof: ").append("\n"): = explicit_file_uses_owning_project_context.owning_context.expected # original ed77c235f tests/project_check.rs:197-208 proof-prefix projection with final newline and507-508 exact owning-context snapshot

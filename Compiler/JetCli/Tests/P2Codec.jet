@@ -1,0 +1,110 @@
+// Contract fixture for the canonical L2 source assembler, following the
+// JetParser ContractFixtures convention: replace the host entry with this run.
+use core.encoding.base64 as p2_base64
+
+fn p2_require(ok: Bool, name: String) Never! {
+    if !ok -> panic("P2 codec contract failed: {name}")
+}
+
+fn p2_canonical() Never! {
+    parsed :: canonical_json_parse("{{}}\n".bytes()) ?? panic("canonical empty object")
+    p2_require(canonical_json_bytes(parsed) == "{{}}\n".bytes(), "canonical bytes roundtrip")
+    loop invalid in
+        ([String]{"{{}}", "{{}}\n\n", " {{}}\n", "{{\"a\":1,\"a\":2}}\n", "{{\"a\":01}}\n", "{{\"a\":1.0}}\n", "{{\"a\":\"\\ud800\"}}\n"}), {
+        rejected :: if canonical_json_parse(invalid.bytes()) == {
+            .Ok(_) -> false
+            .Err(_) -> true
+        }
+        p2_require(rejected, "reject noncanonical or malformed input")
+    }
+    large :: canonical_json_parse("{{\"a\":18446744073709551616}}\n".bytes()) ?? panic("exact canonical integer")
+    p2_require(canonical_json_bytes(large) == "{{\"a\":18446744073709551616}}\n".bytes(), "integer precision retained")
+}
+
+fn p2_receipt() Never! {
+    section :: jet_cli_receipt_section_new("regression", "Result", "{{\"a\":{{\"b\":1}}}}\n".bytes()) ?? panic("valid section")
+    receipt := JetCLIReceipt{
+        claim: JetCLIReceiptClaim{verb: "prove", key: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", inputs: [JetCLIReceiptInput]{}},
+        status: -17,
+        stdout: [U8]{255, 0, 1},
+        stderr: [U8]{},
+        sections: [JetCLIReceiptSection]{section},
+        consumed: [JetCLIRecordLink]{JetCLIRecordLink{kind: "replay", artifact_id: "replay-a"}},
+        produced: [JetCLIRecordLink]{JetCLIRecordLink{kind: "proof", artifact_id: "proof-a"}},
+        digest: "",
+    }
+    receipt.digest = jet_cli_receipt_digest(receipt)
+    encoded :: jet_cli_receipt_encode(receipt) ?? panic("receipt encode")
+    decoded :: jet_cli_receipt_decode(encoded) ?? panic("receipt decode")
+    p2_require(decoded.status == -17 && decoded.stdout == receipt.stdout, "i32 status and raw output bytes")
+    p2_require(decoded.sections.len() == 1 && decoded.produced[0].kind == "proof", "typed extensions preserved")
+    p2_require((jet_cli_receipt_encode(decoded) ?? [U8]{}) == encoded, "wire bytes roundtrip")
+    tampered := encoded
+    tampered[tampered.len() - 1] = if tampered[tampered.len() - 1] == (U8{48}) -> U8{49} else -> U8{48}
+    rejected :: if jet_cli_receipt_decode(tampered) == {
+        .Ok(_) -> false
+        .Err(error) -> error.message == "receipt digest does not authenticate its body"
+    }
+    p2_require(rejected, "digest rejects changed bytes")
+    record :: JetCLIReceiptSectionRecord{claim_key: receipt.claim.key, parent_digest: receipt.digest, section: section}
+    record_bytes :: jet_cli_receipt_section_record_encode(record) ?? panic("section record encode")
+    restored :: jet_cli_receipt_section_record_decode(record_bytes) ?? panic("section record decode")
+    p2_require(jet_cli_receipt_section_record_identity(record) == jet_cli_receipt_section_record_identity(restored), "append-only section identity")
+    after :: jet_cli_receipt_section_new("regression", "Result", "{{\"a\":{{\"b\":2}}}}\n".bytes()) ?? panic("after section")
+    diffs :: jet_cli_receipt_diff_sections([JetCLIReceiptSection]{section}, [JetCLIReceiptSection]{after}) ?? panic("section diff")
+    p2_require(diffs.len() == 1 && jet_cli_receipt_field_diff_render(diffs[0]) == "regression.a.b: 1 -> 2", "nested deterministic field diff")
+    projection :: jet_cli_receipt_query_sections([JetCLIReceiptSection]{section}, None) ?? panic("section query")
+    p2_require(canonical_json_bytes(projection) == "{{\"regression\":{{\"a\":{{\"b\":1}}}}}}\n".bytes(), "section query projection")
+}
+
+fn p2_record() Never! {
+    entry :: JetCLIRecordIndexEntry{
+        identity: JetCLIRecordIdentity{target_inputs_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", tool_version: "0.1.0", engine: "mir-v1"},
+        kind: "replay",
+        artifact_id: "replay-a",
+        path: ".jet/replays/replay-a.jetreplay",
+        consumed: [JetCLIRecordLink]{},
+        produced: [JetCLIRecordLink]{},
+        capture: "safe",
+        size: 32,
+        recorded_sequence: 1,
+        saved: false,
+    }
+    line :: jet_cli_record_index_to_jsonl(entry) ?? panic("record encode")
+    decoded :: jet_cli_record_index_parse_line(line) ?? panic("record decode")
+    p2_require((jet_cli_record_index_to_jsonl(decoded) ?? "") == line, "record canonical JSONL roundtrip")
+    p2_require(jet_cli_record_entry_is_disposable(decoded), "ordinary replay disposable")
+    saved := decoded
+    saved.saved = true
+    p2_require(!jet_cli_record_entry_is_disposable(saved), "saved replay retained")
+    bad := decoded
+    bad.path = ".jet/../outside/replay-a"
+    rejected :: if jet_cli_record_entry_normalize(bad) == {
+        .Ok(_) -> false
+        .Err(error) -> error.message == "record index path contains an unsafe component"
+    }
+    p2_require(rejected, "index path traversal refused")
+    index := jet_cli_record_index_new(U64{1024}) ?? panic("record index")
+    jet_cli_record_index_update(&index, decoded) ?? panic("record update")
+    retained :: jet_cli_record_index_save_replay(&index, decoded.artifact_id, decoded.identity, ".jet/replays/saved.jetreplay", U64{64}) ?? panic("save replay")
+    p2_require(retained.saved && retained.path == ".jet/replays/saved.jetreplay" && retained.size == U64{64} && retained.recorded_sequence == decoded.recorded_sequence, "save replay preserves row identity and sequence")
+}
+
+// Captured from dev-595e0dca3, prove sample.jet --json, in an isolated
+// scratch root with a 1 GiB AS cap. Rust exited 101 and still published this
+// authenticated whole-invocation receipt (1009 bytes, status 101).
+fn p2_rust_wire() Never! {
+    wire :: p2_base64.decode("amV0LXJlY2VpcHQtdjIAAAAAAAAAAAVwcm92ZQAAAAAAAABAMDlhMTg4YTEyYzZkNWFjZDAwMWQyNGJhMjUxY2YyMGIxZTRlYjdiYzA4YjNiYzE0OGU5NTRhNjNhNjNjNDNjYwAAAAAAAAAEAAAAZQAAAAAAAAAIAAAAAAAAAAEAAAAAAAAAQC9ob21lL25hdGUvLmNhY2hlL2pldC1kZXYvc2NyYXRjaC9Tb2xDTEkyL3JlZi9zdWNjZXNzL3NhbXBsZS5qZXQAAAAAAAAAQGM3MTk2ZWM5MTNiMDA3OTNkOTI1MTE1MjUxNGFjYzIxNmI2NmYzOGM4MGRhNTI1OWFjMjI0MzJiYzcwZDFkNTEAAAAAAAACiXsic2NoZW1hIjoiamV0LnN0YXR1cy92MSIsImFjdGlvbiI6InByb3ZlIiwib2siOmZhbHNlLCJyZXBvcnRzIjpbeyJzY2hlbWEiOiJqZXQucmVwb3J0L3YzIiwibW9tZW50IjoiY29tcGlsZSIsInNldmVyaXR5IjoiZXJyb3IiLCJjb2RlIjoiRTIxMDUiLCJ3aGF0IjoiRmFpbGVkIHRvIGluZGV4IC5qZXRwcm9vZjogY291bGQgbm90IGNvbnN0cnVjdCBwcm9vZiByZWNvcmQ6IHJlY29yZCBpbmRleCBwYXRoIG11c3Qgc3RheSB1bmRlciBgLmpldC88YXJ0aWZhY3Qta2luZD5gIiwid2h5IjoiVGhlIHJlcXVlc3RlZCBgamV0IHByb3ZlYCBvcGVyYXRpb24gY291bGQgbm90IGJlIGNvbXBsZXRlZCIsImZpeCI6IkNoZWNrIGBqZXQgcHJvdmUgLS1oZWxwYCBhbmQgcmV0cnkiLCJkZXRhaWwiOm51bGwsImRlbmlhbF9raW5kIjpudWxsLCJjYWxsX2NoYWluIjpbXSwic2NvcGVfY2hhaW4iOltdLCJuZWFyZXN0X2dyYW50aW5nX3Njb3BlIjpudWxsLCJmaWxlIjpudWxsLCJsaW5lIjpudWxsLCJjb2wiOm51bGwsInNwYW4iOm51bGwsIm5vX2ZpeF9yZWFzb24iOnsia2luZCI6ImJlaGF2aW9yIiwibmV4dCI6IkNvcnJlY3QgdGhlIG5hbWVkIHByb2JsZW0sIHRoZW4gcnVuIHRoZSBjb21tYW5kIGFnYWluLiJ9LCJjYXVzZSI6W10sImNsZWFycyI6MH1dfQoAAAAAAAAAAAAAAAAAAABANTlkN2FiMWZkYzQwNzllYzc2NTMzN2EwNzE2OTQ3N2JkNzM3ODFlZjc2NmNmMzc1MDIxYzlhMmFmZjI5MzY3Ng==") ?? panic("Rust wire fixture base64")
+    receipt :: jet_cli_receipt_decode(wire) ?? panic("Rust receipt authentication")
+    p2_require(receipt.status == 101 && receipt.claim.verb == "prove", "Rust receipt status and verb")
+    p2_require(receipt.digest == "59d7ab1fdc4079ec765337a07169477bd73781ef766cf375021c9a2aff293676", "Rust receipt body digest")
+    p2_require((jet_cli_receipt_encode(receipt) ?? [U8]{}) == wire, "byte-identical Rust receipt re-encode")
+}
+
+fn run() Never! {
+    p2_canonical()
+    p2_receipt()
+    p2_record()
+    p2_rust_wire()
+    print("P2 canonical receipts, sections and record codecs: passed")
+}

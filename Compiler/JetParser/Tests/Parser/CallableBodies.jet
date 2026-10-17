@@ -1,0 +1,143 @@
+// Rust: crates/jet-parser/src/Parser/mod.rs:2382
+#Test("lambda_callable_interface_parses_only_parameters_and_effects") {
+    parsed :: parser_test_program(`fn run() {
+    f :: (n: Int) -[IO]> { print(n) }
+}
+`)
+    initializer :: parser_test_binding(parser_test_function(parsed, "run")).init
+    initializer == .Lambda(lambda) ?? panic("stored lambda")
+    effects :: lambda.effects ?? panic("lambda effect row")
+    names := [String]{}
+    loop entry in effects -> &names.push(entry.name)
+    assert_eq(names, [String]{"IO"})
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:2421
+#Test("lambda_return_annotations_teach_without_rejecting_struct_bodies") {
+    loop source in [
+        `fn run() { f :: (n: Int) Int -> n }`,
+        `fn run() { f :: (n: Int) Int MyError! -[]> Ok(n) }`,
+        `fn run() { f :: (n: Int) Never! -[]> n }`,
+        `fn run() { f :: (n: Int) -> Point MyError! { n } }`,
+        `fn run() { f :: (n: Int) -> Point !Error { n } }`,
+        `fn run() { f :: (n: Int) -> Point { total := n + 1
+ total } }`
+    ] -> _ :: parser_test_diagnostic(parser_test_errors(source), "E0399")
+    diagnostics :: parser_test_errors(`fn run() {
+    f :: (n: Int) -> Point {
+        total := n + 1
+        total
+    }
+}
+`)
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E0399")
+    loop source in [
+        `fn run() { f :: (x: Int) -> Point{x} }`,
+        `fn run() { f :: (x: Int) -> Point{x: x} }`,
+        `fn run() { f :: x -[]> Point{x} }`,
+        `fn run() { f :: (x: Int) -[]> Point{x: x} }`,
+        `fn run() { f :: (n: Int) -> Point { n + 1 } }`
+    ] -> _ :: parser_test_program(source)
+}
+
+// Rust: crates/jet-parser/src/Parser/mod.rs:2503
+#Test("braced_one_expression_bodies_keep_leading_dot_and_todo_values") {
+    parsed :: parser_test_program(`fn ok() -> Int Err! { .Ok(1) }
+fn hole() -> Int { #Todo }
+fn run() {}
+`)
+    ok :: parser_test_function(parsed, "ok").body
+    hole :: parser_test_function(parsed, "hole").body
+    assert_eq(ok.len(), 1)
+    assert_eq(hole.len(), 1)
+    assert(if ok[0] == { .Expr(.EnumLit(_, _, _, _, leading_dot, _)) -> leading_dot else -> false })
+    assert(if hole[0] == { .Expr(.Todo(_, _)) -> true else -> false })
+}
+
+// Rust: crates/jet-parser/src/Parser/Expressions/patterns.rs:13
+#Test("shared_match_part_walk_parses_text_and_bytes") {
+    _ :: parser_test_program(`
+fn run() {
+    text :: "prefix-42-suffix"
+    if text == {
+        "prefix-{value}-suffix" -> print(value)
+        else -> print("miss")
+    }
+    bytes :: [U8]{ 7 }
+    if bytes == {
+        [U8]{"{value:U8}"} -> print(value)
+        else -> print("miss")
+    }
+}
+`)
+}
+
+// Rust: crates/jet-parser/src/Parser/Items/distinct_units_structs.rs:1336
+#Test("standard_units_source_parses_with_unique_members_and_provenance") {
+    parsed :: parse_generated_source(PARSER_TEST_UNITS_SOURCE.bytes())
+    assert(parsed.diagnostics.is_empty())
+    families := [UnitFamilyDef]{}
+    loop item in parsed.program.items { if item == .UnitFamily(family) -> &families.push(family) }
+    assert_eq(families.len(), 32)
+    degree := false
+    dalton := false
+    mmhg := false
+    square := false
+    cubic := false
+    loop family in families {
+        names := [String]{}
+        loop member in family.members {
+            assert(!names.contains(member.name))
+            &names.push(member.name)
+            assert(member.scale.numerator != 0)
+            if member.name == "degree" -> degree = if member.scale_provenance == { .SymbolicPi(_, _) -> true else -> false }
+            if member.name == "dalton" -> dalton = if member.scale_provenance == { .Measured(_, _, _) -> true else -> false }
+            if member.name == "mmHg" -> mmhg = if member.scale_provenance == { .Conventional(_, _) -> true else -> false }
+            if member.name == "square_kilometer" -> square = member.scale.numerator == 1000000 && member.scale.denominator == 1
+            if member.name == "cubic_kilometer" -> cubic = member.scale.numerator == 1000000000 && member.scale.denominator == 1
+            assert(member.name != "kilosquare_meter" && member.name != "kilocubic_meter")
+        }
+    }
+    assert(degree && dalton && mmhg && square && cubic)
+}
+
+fn parser_test_statement_guard_tree(depth: Int) -> String Never! {
+    if depth == 0 {
+        return `if {
+(cp < I64{0}) -> return cp
+(cp > I64{1}) -> return cp
+else -> return cp
+}
+`
+    }
+    child :: parser_test_statement_guard_tree(depth - 1)
+    "if {{\n(cp < I64{{0}}) -> {{\n{child}}}\n(cp > I64{{1}}) -> {{\n{child}}}\nelse -> return cp\n}}\n"
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs
+#Test("statement_guard_tables_do_not_reparse_as_tail_values") {
+    table :: parser_test_statement_guard_tree(10)
+    parsed :: parser_test_program("fn mapping(cp: I64) -> I64 Never! {{\n{table}}}\n")
+    body :: parser_test_function(parsed, "mapping").body
+    assert_eq(body.len(), 1)
+    assert(if body[0] == { .Switch(_, _, _, _) -> true else -> false })
+    _ :: parser_test_diagnostic(parser_test_errors(`fn run() { value :: if { true -> return 1 else -> 2 } }`), "E0003")
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs
+#Test("statement_guard_tables_in_value_and_fallback_blocks_parse_once") {
+    table :: parser_test_statement_guard_tree(8)
+    parsed :: parser_test_program("fn mapping(cp: I64) -> I64 Never! {{\nvalue :: if true -> {{\n{table}cp\n}} else -> cp\nother :: None ?? {{\n{table}cp\n}}\nvalue\n}}\n")
+    _ :: parser_test_binding(parser_test_function(parsed, "mapping"))
+}
+
+// Rust: crates/jet-parser/src/Parser/Statements/conditionals.rs
+#Test("braced_control_arms_remain_value_branches") {
+    parsed :: parser_test_program(`fn mapping(cp: I64) -> I64 Never! {
+    if { (cp < I64{0}) -> { return cp } else -> cp }
+}
+`)
+    body :: parser_test_function(parsed, "mapping").body
+    assert(if body[body.len() - 1] == { .Expr(.If(_, _, _, _, _, _)) -> true else -> false })
+}

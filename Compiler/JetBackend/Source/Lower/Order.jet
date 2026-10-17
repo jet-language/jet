@@ -1,0 +1,61 @@
+// Runtime-owned ordered values keep the shared runtime's ordering law. Core
+// records are marshalled through their existing adapters, never compared by
+// pointer address or by a backend reconstruction of their fields.
+use jet_foundation.[MIRProgram, MIRType]
+
+fn lower_order_runtime(p: MIRProgram, ty: MIRType) -> String? {
+    if ty.kind == .Apply(name, args) {
+        if args.len() != 0 -> return None
+        runtime :: lower_runtime_handle(name.name) ?? return None
+        if !lower_repr_is_handle(lower_repr(p, ty)) && lower_record_handle(p, ty) == None -> return None
+        if runtime.runtime == "Duration" -> return Val("Duration")
+        if lower_runtime_route("{runtime.runtime}::compare_value") != None -> return Val(runtime.runtime)
+    }
+    None
+}
+
+fn lower_runtime_order(p: MIRProgram, m: &LowerModule, f: &LowerFunction, ty: MIRType, left: LIRValueID, right: LIRValueID, less: LIRValueID, same: LIRValueID) Never! {
+    runtime :: lower_order_runtime(p, ty) ?? return lower_fail(&m, &f, "runtime ordering has no checked route")
+    a := left
+    b := right
+    temporary :: lower_record_handle(p, ty) != None
+    if temporary {
+        a = lower_record_to_runtime(p, &m, &f, ty, runtime, left)
+        b = lower_record_to_runtime(p, &m, &f, ty, runtime, right)
+    }
+    if runtime == "Duration" {
+        // The record getter returns each ns as an owned exact Int.
+        x :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+        y :: lower_new_value(&f, lir_layout_word(), LIRDrop.Runtime{symbol: "jet_rt_int_drop"}, None)
+        lower_call_runtime(&m, &f, "jet_rt_record_get_duration_ns", [LIRValueID]{a}, Val(x))
+        lower_call_runtime(&m, &f, "jet_rt_record_get_duration_ns", [LIRValueID]{b}, Val(y))
+        lower_exact_compare(&m, &f, less, LIRCondition.Lt, x, y)
+        lower_exact_compare(&m, &f, same, LIRCondition.Eq, x, y)
+        lower_emit(&f, LIRInst.Drop{value: x})
+        lower_emit(&f, LIRInst.Drop{value: y})
+    } else {
+        route :: lower_runtime_route("{runtime}::compare_value") ?? return
+        order :: lower_word(&f)
+        lower_call_runtime(&m, &f, route.export, [LIRValueID]{a, b}, Val(order))
+        // The existing route carries Ordering as Less=0, Equal=1, Greater=2.
+        equal :: lower_const(&f, 1)
+        lower_emit(&f, LIRInst.Compare{dst: less, condition: .Lt, left: order, right: equal})
+        lower_emit(&f, LIRInst.Compare{dst: same, condition: .Eq, left: order, right: equal})
+    }
+    if temporary {
+        lower_emit(&f, LIRInst.Drop{value: a})
+        lower_emit(&f, LIRInst.Drop{value: b})
+    }
+}
+
+fn lower_order_condition(f: &LowerFunction, dst: LIRValueID, condition: LIRCondition, order: LowerMapOrder) Never! {
+    if condition == .Lt -> return lower_emit(&f, LIRInst.Move{dst: dst, src: order.less})
+    if condition == .Eq -> return lower_emit(&f, LIRInst.Move{dst: dst, src: order.same})
+    if condition == .Le -> return lower_logic(&f, dst, false, order.less, order.same)
+    no :: lower_const_flag(&f, 0)
+    if condition == .Ge -> return lower_emit(&f, LIRInst.Compare{dst: dst, condition: .Eq, left: order.less, right: no})
+    if condition == .Ne -> return lower_emit(&f, LIRInst.Compare{dst: dst, condition: .Eq, left: order.same, right: no})
+    le :: lower_flag(&f)
+    lower_logic(&f, le, false, order.less, order.same)
+    lower_emit(&f, LIRInst.Compare{dst: dst, condition: .Eq, left: le, right: no})
+}

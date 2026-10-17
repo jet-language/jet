@@ -2,14 +2,112 @@
 
 use crate::Diagnostics::{Diagnostic, Span};
 use crate::AST::{
-    ErrorConvDef, Expr, Func, ImportDecl, ImportKind, Item, LoadedModule, ProgramBundle, Stmt,
-    TryConvert,
+    ErrorConvDef, Expr, Func, ImportDecl, ImportKind, Item, LoadedModule, Program, ProgramBundle,
+    Stmt, TryConvert,
 };
 use jet_foundation::Prelude as CorePrelude;
-use jet_foundation::Prelude::Target;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::HashMap;
 
 const INTERNAL_PREFIX: &str = "__jet_prelude_";
+
+pub(crate) const ERROR_PRELUDE_MODULE_PATH: &str = "Prelude/Errors.jet";
+pub(crate) const ERROR_PRELUDE_SOURCE_PATH: &str = "jet:canonical-prelude/Prelude/Errors.jet";
+const ERROR_PRELUDE_SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Errors.jet");
+
+/// Original canonical nominal declarations and conversions share one parse.
+/// Registration retains these source rows and their declared private defaults.
+pub(crate) fn error_prelude_program() -> Result<&'static Program, &'static [Diagnostic]> {
+    static PARSED: std::sync::OnceLock<Result<Program, Vec<Diagnostic>>> = std::sync::OnceLock::new();
+    match PARSED.get_or_init(|| {
+        let (tokens, mut diagnostics) = crate::Lexer::lex_generated(ERROR_PRELUDE_SOURCE);
+        match crate::Parser::parse_with_source(&tokens, ERROR_PRELUDE_SOURCE) {
+            Ok(mut program) if diagnostics.is_empty() => {
+                for item in &mut program.items {
+                    if let Item::Struct(definition) = item {
+                        definition.compiler_builtin_error = true;
+                    }
+                }
+                Ok(program)
+            }
+            Ok(_) => Err(diagnostics),
+            Err(mut parse_diagnostics) => {
+                diagnostics.append(&mut parse_diagnostics);
+                Err(diagnostics)
+            }
+        }
+    }) {
+        Ok(program) => Ok(program),
+        Err(diagnostics) => Err(diagnostics.as_slice()),
+    }
+}
+
+/// Retain the original declarations in their own ordinary source context.
+/// The original parser mints the provenance; paths and aliases never select it.
+pub(crate) fn retain_error_prelude_module(bundle: &mut ProgramBundle) -> Result<usize, Vec<Diagnostic>> {
+    let program = error_prelude_program().map_err(<[Diagnostic]>::to_vec)?;
+    if !program.items.iter().any(|item| matches!(item,
+        Item::Struct(definition) if definition.compiler_builtin_error
+            && definition.name == crate::Syntax::TYPE_ERR))
+    {
+        return Err(vec![error_supplier_diagnostic("the original Prelude has no default-error declaration")]);
+    }
+    let mut retained = bundle.modules.iter().enumerate().filter_map(|(owner, module)|
+        module.items.iter().any(|item| matches!(item,
+            Item::Struct(definition) if definition.compiler_builtin_error)).then_some(owner));
+    if let Some(owner) = retained.next() {
+        if retained.next().is_some() {
+            return Err(vec![error_supplier_diagnostic("original Prelude declarations have multiple owners")]);
+        }
+        let module = &bundle.modules[owner];
+        if module.path != std::path::Path::new(ERROR_PRELUDE_SOURCE_PATH)
+            || module.display != ERROR_PRELUDE_MODULE_PATH
+            || module.source != ERROR_PRELUDE_SOURCE
+            || module.alias != crate::Syntax::generated_path(ERROR_PRELUDE_SOURCE_PATH)
+        {
+            return Err(vec![error_supplier_diagnostic("original Prelude provenance lost its source context")]);
+        }
+        return Ok(owner);
+    }
+    let alias = crate::Syntax::generated_path(ERROR_PRELUDE_SOURCE_PATH);
+    if bundle.modules.iter().any(|module|
+        module.path == std::path::Path::new(ERROR_PRELUDE_SOURCE_PATH) || module.alias == alias)
+    {
+        return Err(vec![error_supplier_diagnostic("an existing source collides with the original Prelude identity")]);
+    }
+    let owner = bundle.modules.len();
+    bundle.modules.push(LoadedModule {
+        path: std::path::PathBuf::from(ERROR_PRELUDE_SOURCE_PATH),
+        display: ERROR_PRELUDE_MODULE_PATH.to_owned(),
+        source: ERROR_PRELUDE_SOURCE.to_owned(),
+        core_identifier_demand: crate::Lexer::core_identifier_demand(
+            &crate::Lexer::lex_generated(ERROR_PRELUDE_SOURCE).0,
+        ),
+        alias,
+        imports: program.imports.clone(),
+        items: program.items.iter().filter(|item| matches!(item,
+            Item::Struct(definition) if definition.compiler_builtin_error)).cloned().collect(),
+        script_body: Vec::new(),
+        block_spans: program.block_spans.clone(),
+        web_target_ceiling: program.web_target_ceiling,
+        no_prelude: program.no_prelude,
+        default_target: program.default_target.clone(),
+        html_path: program.html_path.clone(),
+        policy_declarations: program.policy_declarations.clone(),
+        user_policy_declarations: program.user_policy_declarations.clone(),
+        rule_facts: program.rule_facts.clone(),
+    });
+    Ok(owner)
+}
+
+fn error_supplier_diagnostic(detail: &str) -> Diagnostic {
+    Diagnostic::error(
+        "E0003",
+        detail.to_owned(),
+        "default-error declarations retain their original compiler-private source owner".to_owned(),
+        "retain the canonical Prelude source and its parsed declaration provenance".to_owned(),
+        None,
+    )
+}
 
 /// D-FAIL-CONV2=A: open the standard library's own error family onto the default
 /// `Err`. The declarations are ordinary Jet source in `Prelude/Errors.jet`.
@@ -25,10 +123,10 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
     if module.no_prelude {
         return Vec::new();
     }
-    let (shipped, diagnostics) = shipped_error_conversions();
-    if shipped.is_empty() {
-        return diagnostics;
-    }
+    let original = match error_prelude_program() {
+        Ok(program) => program,
+        Err(diagnostics) => return diagnostics.to_vec(),
+    };
     // Keyed by the exercised source name. A source-owned Core error arrives
     // under its canonical identity; its conversion is the shipped declaration
     // for its leaf, bound to that identity so sema and codegen name one
@@ -42,7 +140,10 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
             let source = source.name();
             let target = target.name();
             let leaf = crate::Sema::Diagnostics::core_error_family_leaf(&source);
-            for conversion in &shipped {
+            for conversion in original.items.iter().filter_map(|item| match item {
+                Item::ErrorConv(conversion) => Some(conversion),
+                _ => None,
+            }) {
                 if leaf == conversion.from_ty && target == conversion.to_ty {
                     let mut bound = conversion.clone();
                     bound.from_ty = source.clone();
@@ -66,30 +167,9 @@ pub(crate) fn inject_exercised_error_conversions(module: &mut LoadedModule) -> V
         }
         module.items.push(Item::ErrorConv(conversion));
     }
-    diagnostics
+    Vec::new()
 }
 
-fn shipped_error_conversions() -> (Vec<ErrorConvDef>, Vec<Diagnostic>) {
-    const SOURCE: &str = include_str!("../../../jet-codegen/src/Prelude/Errors.jet");
-    let (tokens, mut diagnostics) = crate::Lexer::lex_generated(SOURCE);
-    match crate::Parser::parse(&tokens) {
-        Ok(program) => {
-            let conversions = program
-                .items
-                .into_iter()
-                .filter_map(|item| match item {
-                    Item::ErrorConv(conversion) => Some(conversion),
-                    _ => None,
-                })
-                .collect();
-            (conversions, diagnostics)
-        }
-        Err(mut parse_diagnostics) => {
-            diagnostics.append(&mut parse_diagnostics);
-            (Vec::new(), diagnostics)
-        }
-    }
-}
 
 fn walk_item_exprs(item: &mut Item, visit: &mut impl FnMut(&Expr)) {
     match item {
@@ -145,17 +225,7 @@ pub(crate) fn inject(bundle: &mut ProgramBundle) {
         if module.no_prelude {
             continue;
         }
-        let modules: BTreeSet<&'static str> = CorePrelude::entries()
-            .iter()
-            .filter_map(|entry| match entry.target {
-                Target::Core {
-                    module: core_module,
-                    ..
-                } if source_mentions_identifier(&module.source, entry.name) => Some(core_module),
-                _ => None,
-            })
-            .collect();
-        for core_module in modules {
+        for &core_module in &module.core_identifier_demand.prelude_modules {
             if module.imports.iter().any(|import| {
                 import.import_alias().starts_with(INTERNAL_PREFIX)
                     && import.core_module_path().as_deref() == Some(core_module)
@@ -214,11 +284,3 @@ pub(crate) fn is_prelude_name(name: &str) -> bool {
     CorePrelude::entry(name).is_some()
 }
 
-fn source_mentions_identifier(source: &str, name: &str) -> bool {
-    source.match_indices(name).any(|(start, _)| {
-        let before = source[..start].chars().next_back();
-        let after = source[start + name.len()..].chars().next();
-        !before.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-            && !after.is_some_and(|ch| ch.is_alphanumeric() || ch == '_')
-    })
-}

@@ -1,0 +1,19 @@
+# Port of tests/cli_parts/budget.rs:721-801; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
+# PENDING-GRAMMAR: JSON, is-file, canonical (batch-four).
+fixture: fixtures/update
+step: jet budget update --baseline ci/linux --bootstrap --reason "initial evidence" --json
+exit: 0
+json: stdout canonical # original predicate
+json: stdout doc $.budget.applied = false
+json: stdout doc $.budget.plan.requires_confirmation = false
+json: stdout doc $.budget.plan.rows #= 2
+json: stdout doc $.budget.plan.rows[0].operation = "create"
+json: stdout doc $.budget.plan.rows[0].artifact = "report"
+json: stdout doc $.budget.plan.rows[1].operation = "advance"
+json: stdout doc $.budget.plan.rows[1].artifact = "baseline"
+file: .jet absent
+step: jet budget update --baseline ci/linux --bootstrap --reason "initial evidence" --json --yes
+exit: 0
+stdout: ~ "\"applied\":true" # original predicate
+file: .jet/perf/baselines/names/ci/linux.json is-file

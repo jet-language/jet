@@ -1,0 +1,13 @@
+# Port of tests/data_bridges.rs:188-224; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/data_bridges_r_fails_closed_without_rscript_on_path
+requires: tool:cc
+requires: tool:ar
+step: jet build main.jet
+exit: 0
+step: {work}/.jet/build/main
+env: PATH=
+env: JET_DATA_R_BRIDGE=1
+exit: 0
+stdout: ~ "r.*:unavailable" # original ed77c235f tests/data_bridges.rs:221 contains predicate
+stdout: ~ "r:Bridge" # original ed77c235f tests/data_bridges.rs:222 contains predicate

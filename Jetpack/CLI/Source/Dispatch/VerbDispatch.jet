@@ -5,7 +5,7 @@
 // `studio`, `push`) are not part of this port.
 
 // Every verb this dispatcher routes.
-pub enum JetpackVerb {
+enum JetpackVerb {
     Doctor
     Env
     Use
@@ -72,9 +72,9 @@ pub enum JetpackVerb {
 
 // A retired top-level spelling that now belongs to `jet` or to an option:
 // why it moved and what to run instead.
-pub struct RetiredSpelling {
-    pub why: String
-    pub fix: String
+struct RetiredSpelling {
+    why: String
+    fix: String
 }
 
 fn cli_retired_shell_spelling(verb: String) -> RetiredSpelling? Never! {
@@ -135,13 +135,21 @@ fn cli_read_only_command(verb: String, parsed: CLIParsed) -> Bool Never! {
 }
 
 // Process entry after invocation setup. Returns the process exit code.
-pub fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_main(args: [String], invocation: DiagnosticInvocation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     verification := StoreVerification.new()
     // Bare `jetpack` is the keyboard-first dashboard; its own TTY guard keeps
     // the status-summary floor for pipes, CI, and redirected output.
     verb :: args.get(0) ?? return cli_run_dashboard(&verification)
     rest :: cli_tail(args, 1)
     if verb == "cc" || verb == "c++" -> return cli_cc_main(&verification, verb, rest)
+    // GateWriters.rs:266 / Source/main.rs:1537: invocation choices must
+    // be refused before migration, profile drift repair, or any command.
+    if pkg_check_invocation_flags(cli_current_dir(), cli_before_argument_separator(args)) == .Err(error) {
+        loop diagnostic in error.diagnostics {
+            terminal_write_output(diagnostics_render_all("command line", "", [Diagnostic]{diagnostic}))
+        }
+        return EXIT_USAGE
+    }
     parsed :: cli_parse_args_for(verb, rest)
     color :: if parsed.flags.json -> ColorChoice.Never else -> parsed.flags.color
     theme :: Theme.resolve_choice(color).with_invocation(invocation)
@@ -206,8 +214,8 @@ fn cli_dispatch_verb(verification: &StoreVerification, verb: JetpackVerb, theme:
         .Outdated -> cli_cmd_outdated(theme, parsed)
         .Search -> cli_cmd_search(&verification, theme, parsed)
         .Info -> cli_cmd_info(&verification, theme, parsed)
-        .Explain -> cli_cmd_explain(theme, parsed)
-        .Why -> cli_cmd_why(theme, parsed)
+        .Explain -> cli_cmd_explain(&verification, theme, parsed)
+        .Why -> cli_cmd_why(&verification, theme, parsed)
         .Logs -> cli_cmd_logs(theme, parsed)
         .ServiceProbe -> cli_cmd_service_probe(&verification, theme, parsed)
         .Override -> cli_cmd_override(theme, parsed)
@@ -219,7 +227,7 @@ fn cli_dispatch_verb(verification: &StoreVerification, verb: JetpackVerb, theme:
         .Profile -> cli_cmd_profile(&verification, theme, parsed)
         .Browser -> cli_cmd_browser(&verification, theme, parsed)
         .Help -> {
-            help_theme :: Theme.resolve_for(color, term.stdout().is_terminal())
+            help_theme :: Theme.resolve_for(color, term.stdout().is_tty())
             print(cli_usage_with_color(help_theme.color))
             EXIT_OK
         }

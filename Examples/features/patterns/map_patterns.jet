@@ -1,0 +1,53 @@
+// D-PAT-MAP1=A: exact keys by default, .. for extra keys, ?: for an optional.
+KEY :: prep { "name" }
+ALIAS :: prep { KEY }
+
+fn greet(user: [String: String]) -> String {
+    if user == ["name": name, "nick"?: nick, ..] -> return nick ?? name
+    return "no name"
+}
+
+fn exact(user: [String: String]) -> String {
+    if user == {
+        ["name": name, "nick"?: .Val(nick)] -> "both {name}/{nick}"
+        [ALIAS: name, "nick"?: .None] -> "only {name}"
+        [:] -> "empty"
+        else -> "extra or missing"
+    }
+}
+
+fn route(event: Dyn) -> String {
+    if event == {
+        .Object(["type": .Text("push"), "ref": .Text(ref), ..]) -> "deploy {ref}"
+        .Object(["type": .Text("push"), ..]) -> "push without ref"
+        .Object(["type": .Text(kind), ..]) -> "ignored {kind}"
+        else -> "not an event"
+    }
+}
+
+fn optional(user: [String: String]) -> String {
+    if user == {
+        ["nick"?: nick, ..] -> nick ?? "anonymous"
+    }
+}
+
+fn run() {
+    print(greet(["name": "Ana"]))
+    print(greet(["name": "Ana", "nick": "Annie", "extra": "yes"]))
+    print(greet(["nick": "Annie"]))
+    print(exact(["name": "Ana", "nick": "Annie"]))
+    print(exact(["name": "Ana"]))
+    print(exact([String: String]{}))
+    print(exact(["name": "Ana", "extra": "yes"]))
+    print(optional([String: String]{}))
+    print(optional(["nick": "Annie"]))
+    print(route(Dyn.Object(["type": Dyn.Text("push"), "ref": Dyn.Text("main")])) )
+    print(route(Dyn.Object(["type": Dyn.Text("push")])) )
+    print(route(Dyn.Object(["type": Dyn.Text("star"), "by": Dyn.Text("ana")])) )
+    print(route(Dyn.Array([Dyn.Int(1)])))
+    map :: [1: "one", 2: "two"]
+    if map == [0x1: one, 2: two] -> print("{one}/{two}")
+    print(map.len())
+    print(["a": 1] == ["a": 1])
+    print(["a": 1, "b": 2] == ["a": 1])
+}

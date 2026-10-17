@@ -1,0 +1,170 @@
+// Outcome execution journey: ONE dynamic TLS key, with the real Closure24
+// destructor. No private TCB offset or second report renderer.
+journey_tls_key := I64{0}
+journey_report_wire_word := I64{0}
+
+// Reviewed RuntimeIntrinsicSpec shape (5604a28ad): this reference body is
+// never lowered; the runtime-only checked-ID table binds the actual export.
+fn rt_journey_destructor_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// exports.list: allocator init 0 -> Host init 1 -> Thread init 2 (publishes
+// thread_tls_registry and attaches main) -> Journey init 3. Thus key/alloc
+// operations here cannot precede their actual providers' initialization.
+// runtime-init: 3
+#Export(c) fn jet_rt_journey_init() {
+    closure :: jet_rt_alloc(I64{24}, I64{8})
+    rt_text_store(closure, I64{1})
+    rt_text_store(closure + I64{8}, rt_journey_destructor_address())
+    rt_text_store(closure + I64{16}, I64{0})
+    journey_tls_key = jet_rt_tls_key_new(closure)
+    journey_report_wire_word = jet_rt_alloc(I64{8}, I64{8})
+    sync_store(journey_report_wire_word, I64{0})
+}
+fn journey_tls_value() -> I64 {
+    held := jet_rt_tls_get(journey_tls_key)
+    if (held == I64{0}) {
+        held = jet_rt_native_journey_new()
+        jet_rt_tls_set(journey_tls_key, held)
+    }
+    held
+}
+#Export(c) fn jet_journey_origin(file: I64, line: I64, column: I64, function: I64) {
+    jet_rt_native_journey_origin(journey_tls_value(), file, line, column, function)
+}
+#Export(c) fn jet_journey_frame_text(file: I64, line: I64, column: I64, function: I64, note: I64) {
+    jet_rt_native_journey_frame(journey_tls_value(), file, line, column, function, note)
+}
+#Export(c) fn jet_journey_reset() {
+    held :: jet_rt_tls_get(journey_tls_key)
+    if (held != I64{0}) -> jet_rt_native_journey_reset(held)
+}
+#Export(c) fn jet_journey_take_hops() -> I64 {
+    held :: jet_rt_tls_get(journey_tls_key)
+    jet_rt_tls_set(journey_tls_key, I64{0})
+    held
+}
+#Export(c) fn jet_journey_adopt(carried: I64) { jet_rt_native_journey_adopt(journey_tls_value(), carried) }
+#Export(c) fn jet_err_with_context_frame(error: I64, file: I64, line: I64, column: I64, function: I64, note: I64) -> I64 {
+    jet_rt_native_err_context_frame(error, journey_tls_value(), file, line, column, function, note)
+}
+#Export(c) fn jet_report_use_wire() { sync_store(journey_report_wire_word, I64{1}) }
+
+fn journey_env_word(word: I64, length: I64) -> I64 {
+    key :: jet_rt_string_builder_new()
+    rt_text_push_word(key, word, length)
+    value :: jet_rt_logical_env_get(key)
+    jet_rt_string_drop(key)
+    value
+}
+fn journey_env_present(key: I64) -> Bool {
+    jet_rt_logical_env_seed()
+    shared_acquire(logical_env_root, false)
+    // The get_os cell's raw lookup preserves presence even for non-UTF8
+    // values. Presence needs no payload copy or temporary allocation.
+    present :: logical_environment_find(rt_text_data(key), rt_text_len(key)) != I64{0}
+    shared_release(logical_env_root, false)
+    present
+}
+fn journey_auto_color(tty: Bool) -> Bool {
+    key :: jet_rt_string_builder_new()
+    rt_text_push_word(key, I64{5931043137586679630}, I64{8}) // NO_COLOR
+    no :: journey_env_present(key) // var_os presence: invalid UTF-8 counts.
+    jet_rt_string_drop(key)
+    if no -> return false
+    force :: jet_rt_string_builder_new()
+    rt_text_push_word(force, I64{5711513503522770758}, I64{8}) // FORCE_CO
+    rt_text_push_word(force, I64{5394252}, I64{3}) // LOR
+    forced :: journey_env_present(force)
+    jet_rt_string_drop(force)
+    if forced -> return true
+    tty
+}
+fn journey_stderr_columns(tty: Bool) -> I64 {
+    if !tty -> return I64{0}
+    value :: journey_env_word(I64{23448517117497155}, I64{7}) // COLUMNS
+    if (value == I64{0}) -> return I64{80}
+    trimmed :: rt_text_trim(value)
+    jet_rt_string_drop(value)
+    data :: rt_text_data(trimmed)
+    length :: rt_text_len(trimmed)
+    at := I64{0}
+    columns := I64{0}
+    valid := length != I64{0}
+    if (length != I64{0} && rt_text_byte(data) == I64{43}) -> at = I64{1}
+    if (at == length) -> valid = false
+    loop at < length {
+        digit :: rt_text_byte(data + at) - I64{48}
+        if (digit < I64{0} || digit > I64{9} || columns < I64{0} || columns > I64{1844674407370955161} || (columns == I64{1844674407370955161} && digit > I64{5})) {
+            valid = false
+            break
+        }
+        columns = wrapping(columns * I64{10} + digit)
+        at += I64{1}
+    }
+    jet_rt_string_drop(trimmed)
+    // usize accepts the full u64 range; every width above signed MAX gives
+    // the same unelided bytes, so cap only the renderer's arithmetic budget.
+    if (!valid || columns == I64{0}) -> return I64{80}
+    if (columns < I64{0}) -> I64{9223372036854775807} else -> columns
+}
+fn journey_trim_newlines(text: I64) -> I64 {
+    data :: rt_text_data(text)
+    length := rt_text_len(text)
+    loop {
+        if (length == I64{0}) -> break
+        if (rt_text_byte(data + length - I64{1}) != I64{10}) -> break
+        length -= I64{1}
+    }
+    rt_text_copy(data, length)
+}
+#Export(c) fn jet_error_report(error: I64) -> I64 {
+    journey :: jet_journey_take_hops()
+    report := I64{0}
+    if (sync_load(journey_report_wire_word) != I64{0}) {
+        report = jet_error_report_json(error, journey)
+        rt_text_push_scalar(report, I64{10})
+    } else {
+        root :: jet_render_err(error)
+        report = journey_trim_newlines(root)
+        jet_rt_string_drop(root)
+        rt_text_push_scalar(report, I64{10})
+        tty :: host_is_tty(I64{2})
+        trail :: jet_journey_render_styled(journey, journey_auto_color(tty), journey_stderr_columns(tty))
+        err_append(report, trail)
+        jet_rt_string_drop(trail)
+    }
+    jet_rt_native_journey_drop(journey)
+    report
+}
+#Export(c) fn jet_journey_report(text: I64) -> I64 {
+    trimmed :: journey_trim_newlines(text)
+    if (sync_load(journey_report_wire_word) != I64{0}) {
+        error :: jet_err_from_message(trimmed)
+        report :: jet_error_report(error)
+        jet_rt_handle_drop_jet_err(error)
+        jet_rt_string_drop(trimmed)
+        return report
+    }
+    journey :: jet_journey_take_hops()
+    rt_text_push_scalar(trimmed, I64{10})
+    tty :: host_is_tty(I64{2})
+    trail :: jet_journey_render_styled(journey, journey_auto_color(tty), journey_stderr_columns(tty))
+    err_append(trimmed, trail)
+    jet_rt_string_drop(trail)
+    jet_rt_native_journey_drop(journey)
+    trimmed
+}
+fn journey_entry_write_take(report: I64) {
+    _ := host_stderr_write(rt_text_data(report), rt_text_len(report))
+    jet_rt_string_drop(report)
+    jet_rt_process_exit(I64{1})
+}
+#Export(c) fn jet_entry_error_exit_jet(error: I64) {
+    report :: jet_error_report(error)
+    jet_rt_handle_drop_jet_err(error)
+    journey_entry_write_take(report)
+}
+#Export(c) fn jet_rt_entry_error_exit_err(error: I64) { jet_entry_error_exit_jet(error) }
+#Export(c) fn jet_rt_entry_error_exit(text: I64) { journey_entry_write_take(jet_journey_report(text)) }

@@ -1,0 +1,18 @@
+# Port of tests/fmt_project.rs::explicit_dir_reports_invalid_package_manifest (179-246).
+# PENDING-SAME-HEAD: original predicates, no reference snapshot or blessing.
+# Deliberately invalid package manifest (unknown dep reference).
+fixture: explicit_dir_reports_invalid_package_manifest.fixture
+copy: src/main.jet source.before
+copy: package.jet manifest.before
+step: jet fmt --check {work}
+exit: 1
+stderr: ~ package.jet # original predicate
+stdout: empty
+file: src/main.jet == source.before
+file: package.jet == manifest.before
+step: jet fmt {work}
+exit: 2
+file: src/main.jet == source.before
+file: package.jet == manifest.before
+step: jet fmt {work}/package.jet
+exit: 2

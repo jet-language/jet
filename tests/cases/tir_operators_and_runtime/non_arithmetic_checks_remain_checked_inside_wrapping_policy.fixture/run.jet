@@ -1,0 +1,22 @@
+
+use core.sys as env
+
+fn run() {
+    case :: Int.parse(env.get("JET_ARITHMETIC_CASE") ?? "0") ?? 0
+    raw :: Int.parse(env.get("JET_ARITHMETIC_VALUE") ?? "0") ?? 0
+    value :: U8.from_int(raw) ?? U8{0}
+    #Arithmetic(.Wrapping) {
+        if case == 0 {
+            #Arithmetic(.Checked) {
+                print(value + U8{100})
+            }
+        }
+        if case == 1 { print(U8{1} / value) }
+        if case == 2 { print(U8{1} << value) }
+        if case == 3 { print(U8{raw}) }
+        if case == 4 {
+            values :: [U8]{U8{10}, U8{20}}
+            print(values[raw])
+        }
+    }
+}

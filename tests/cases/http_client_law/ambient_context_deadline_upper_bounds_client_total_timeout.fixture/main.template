@@ -1,0 +1,12 @@
+
+use core.http.client as http
+use core.time as time
+fn run() {
+    client :: http.Client.new().timeouts(5000, 5000, 5000, 5000, 5000, 5000, 5000)
+    #Context(deadline: time.now() + 40) {
+        if client.send(http.request("GET", "http://{cap:addr}/slow")) == {
+            .Ok(_) -> print("ok")
+            .Err(_) -> print("timeout")
+        }
+    }
+}

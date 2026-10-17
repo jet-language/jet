@@ -311,10 +311,10 @@ pub(crate) fn check_game_frame_lambda(checker: &mut Checker<'_>, expression: &mu
 
 fn call_signature(checker: &Checker<'_>, name: &str) -> Option<crate::AST::FuncSig> {
     checker.funcs.get(name).cloned().or_else(|| {
-        checker
-            .modules
-            .and_then(|modules| modules.iter().find_map(|module| module.funcs.get(name)))
-            .cloned()
+        let (original, owner) = checker.unqualified_file.get(name)
+            .map(|(original, owner)| (original.as_str(), *owner))
+            .or_else(|| checker.namespace_function_owner(name).map(|owner| (name, owner)))?;
+        checker.modules?.get(owner)?.funcs.get(original).cloned()
     })
 }
 

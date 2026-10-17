@@ -1,0 +1,94 @@
+// Reused RtBurn3c draft literals: seed Layout.rs failure/label spellings.
+// Immutable process-lifetime UTF-8; twelve (pointer,length) pairs.
+layout_literal_root := I64{0}
+fn layout_literals_init() {
+    if (layout_literal_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{432}, I64{8})
+    coll_zero(root, I64{432})
+    layout_put(root, root + I64{192})
+    layout_put(root + I64{8}, I64{60})
+    layout_put(root + I64{16}, root + I64{256})
+    layout_put(root + I64{24}, I64{11})
+    layout_put(root + I64{32}, root + I64{272})
+    layout_put(root + I64{40}, I64{5})
+    layout_put(root + I64{48}, root + I64{280})
+    layout_put(root + I64{56}, I64{5})
+    layout_put(root + I64{64}, root + I64{288})
+    layout_put(root + I64{72}, I64{5})
+    layout_put(root + I64{80}, root + I64{296})
+    layout_put(root + I64{88}, I64{8})
+    layout_put(root + I64{96}, root + I64{304})
+    layout_put(root + I64{104}, I64{1})
+    layout_put(root + I64{112}, root + I64{312})
+    layout_put(root + I64{120}, I64{33})
+    layout_put(root + I64{128}, root + I64{352})
+    layout_put(root + I64{136}, I64{8})
+    layout_put(root + I64{144}, root + I64{360})
+    layout_put(root + I64{152}, I64{56})
+    layout_put(root + I64{160}, root + I64{416})
+    layout_put(root + I64{168}, I64{2})
+    layout_put(root + I64{176}, root + I64{424})
+    layout_put(root + I64{184}, I64{1})
+    layout_put(root + I64{192}, I64{7142837056739828076})
+    layout_put(root + I64{200}, I64{7955997360934579823})
+    layout_put(root + I64{208}, I64{8315178114391285876})
+    layout_put(root + I64{216}, I64{8314040875603683699})
+    layout_put(root + I64{224}, I64{7526676497326632224})
+    layout_put(root + I64{232}, I64{7594230288778030689})
+    layout_put(root + I64{240}, I64{8367816078057370739})
+    layout_put(root + I64{248}, I64{1936552549})
+    layout_put(root + I64{256}, I64{7593476291201757027})
+    layout_put(root + I64{264}, I64{2323566})
+    layout_put(root + I64{272}, I64{177121011744})
+    layout_put(root + I64{280}, I64{177121142816})
+    layout_put(root + I64{288}, I64{177121077280})
+    layout_put(root + I64{296}, I64{2915081738179278195})
+    layout_put(root + I64{304}, I64{41})
+    layout_put(root + I64{312}, I64{2338623228150377512})
+    layout_put(root + I64{320}, I64{7359004309904908648})
+    layout_put(root + I64{328}, I64{2334391151793234277})
+    layout_put(root + I64{336}, I64{7957695015494119283})
+    layout_put(root + I64{344}, I64{41})
+    layout_put(root + I64{352}, I64{2459093444274512236})
+    layout_put(root + I64{360}, I64{8029390865575714850})
+    layout_put(root + I64{368}, I64{7809920648090052128})
+    layout_put(root + I64{376}, I64{7598827579867603045})
+    layout_put(root + I64{384}, I64{7142872290280107631})
+    layout_put(root + I64{392}, I64{7598807775722237551})
+    layout_put(root + I64{400}, I64{8391171955404859246})
+    layout_put(root + I64{408}, I64{2322295501768712562})
+    layout_put(root + I64{416}, I64{8236})
+    layout_put(root + I64{424}, I64{46})
+    layout_literal_root = root
+}
+fn layout_append_literal(target: I64, kind: I64) {
+    entry :: layout_literal_root + kind * I64{16}
+    jet_rt_string_builder_push_static(target, layout_word(entry), layout_word(entry + I64{8}))
+}
+fn layout_append_index(target: I64, index: I64) {
+    divisor := I64{1}
+    loop divisor <= index /% (I64{10}) { divisor *= I64{10} }
+    remainder := index
+    loop divisor > (I64{0}) {
+        rt_text_push_scalar(target, I64{48} + remainder /% divisor)
+        remainder = remainder %% divisor
+        divisor = divisor /% I64{10}
+    }
+}
+fn layout_row_label(index: I64, op: I64) -> I64 {
+    target :: jet_rt_string_builder_new()
+    layout_append_literal(target, I64{1})
+    layout_append_index(target, index)
+    layout_append_literal(target, I64{2} + op)
+    target
+}
+fn layout_stop_owned(message: I64) {
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    // Task panic publishes Stop then returns. All callers must return immediately.
+    jet_rt_string_drop(message)
+}
+fn layout_term_overflow() {
+    target :: jet_rt_string_builder_new()
+    layout_append_literal(target, I64{0})
+    layout_stop_owned(target)
+}

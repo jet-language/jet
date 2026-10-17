@@ -1,0 +1,11 @@
+# Port of tests/feature_acceptance.rs:242-324. Sources verbatim; ORACLE-LITERAL original predicates.
+# Runtime PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four) where used.
+# SPLIT compiler-lib: lexer/window recursion and hostile probes21-97/255-305 in SEAMS.tsv.
+# Rust Syntax source assertions245-253 RETIRE.
+fixture: audited_discard.fixture
+step: jet run {root}/Examples/features/errors/discard_fallible.jet
+exit: 0
+stdout.trim: = audited_discard.expected.bytes.trim # original ed77c235f tests/feature_acceptance.rs:308-311 compares actual.trim with expected.trim; canonical RHS postfix transforms the existing expected.bytes snapshot
+file: empty.stderr ~ "E0407" # original fixture predicate
+file: empty.stderr ~ ".drop()" # original fixture predicate
+file: silence.stderr !~ "E0402" # original ed77c235f tests/feature_acceptance.rs:319-323 trim-empty OR not contains E0402 is exactly not contains E0402 because trim-empty text cannot contain that nonwhitespace needle

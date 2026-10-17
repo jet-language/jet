@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 
 const BATTERIES = {
-  json: { use: "use core.encoding.json as m", call: "m.to_string(DataTree.Int(42))" },
+  json: { use: "use core.encoding.json as m", call: "m.to_string(Dyn.Int(42)) ?? panic(err.reason)" },
   regex: { use: "use core.regex as m", call: "m.escape(\"4.2\")" },
   time: { use: "use core.time as m", call: "m.datetime(2024, 3, 1, 12, 34, 56)" },
   data: { use: "use core.data as m", call: "m.sum([40.0, 2.0])" },

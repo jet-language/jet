@@ -2,9 +2,9 @@
 // Module names classify conservatively; namespace spelling alone never adds a
 // dependency beyond the checked closure table below.
 
-pub struct JetRingLayerFact {
-    pub key: String
-    pub layer: MIRRuntimeLayer
+struct JetRingLayerFact {
+    key: String
+    layer: MIRRuntimeLayer
 }
 
 struct JetRingDependencyRow {
@@ -132,7 +132,7 @@ fn jet_ring_layer_rank(layer: MIRRuntimeLayer) -> Int Never! {
     }
 }
 
-pub fn jet_ring_layer_name(layer: MIRRuntimeLayer) -> String Never! {
+fn jet_ring_layer_name(layer: MIRRuntimeLayer) -> String Never! {
     if layer == {
         .Core -> "core"
         .Alloc -> "alloc"
@@ -140,7 +140,7 @@ pub fn jet_ring_layer_name(layer: MIRRuntimeLayer) -> String Never! {
     }
 }
 
-pub fn jet_ring_parse_manifest_layer(value: String) -> MIRRuntimeLayer? {
+fn jet_ring_parse_manifest_layer(value: String) -> MIRRuntimeLayer? {
     trimmed :: value.trim()
     if trimmed == {
         "core" -> Val(MIRRuntimeLayer.Core)
@@ -158,7 +158,7 @@ fn jet_ring_layer_of_module(module_name: String) -> MIRRuntimeLayer Never! {
     }
 }
 
-pub fn jet_ring_core_module_layer(module_name: String) -> MIRRuntimeLayer Never! {
+fn jet_ring_core_module_layer(module_name: String) -> MIRRuntimeLayer Never! {
     jet_ring_layer_of_module(module_name)
 }
 
@@ -204,7 +204,7 @@ fn jet_ring_helper_layer(module_name: String, helper: String) -> MIRRuntimeLayer
     }
 }
 
-pub fn jet_ring_core_usage_layer(usage: String) -> MIRRuntimeLayer Never! {
+fn jet_ring_core_usage_layer(usage: String) -> MIRRuntimeLayer Never! {
     if usage.starts_with("core::") {
         bytes :: usage.bytes()
         rest :: String.from_bytes(bytes.slice(6, bytes.len())) ?? ""
@@ -305,7 +305,7 @@ fn jet_ring_closure_order(rows: [JetRingLayerFact]) -> [Int] Never! {
 }
 
 // Rust: crates/jet-foundation/src/RingLayer.rs::classify_prelude_closure
-pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] Never! {
+fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] Never! {
     pending := [String]{}
     pending_keys := [String:Bool]{}
     classified := [String:Bool]{}
@@ -334,12 +334,12 @@ pub fn jet_ring_classify_prelude_closure(roots: [String]) -> [JetRingLayerFact] 
     ordered
 }
 
-pub fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] Never! {
+fn jet_ring_prelude_closure_keys(roots: [String]) -> [String] Never! {
     keys :: loop row in jet_ring_classify_prelude_closure(roots) -> row.key
     keys
 }
 
-pub fn jet_ring_prelude_closure_layer(roots: [String]) -> MIRRuntimeLayer Never! {
+fn jet_ring_prelude_closure_layer(roots: [String]) -> MIRRuntimeLayer Never! {
     layer := MIRRuntimeLayer.Core
     loop row in jet_ring_classify_prelude_closure(roots) {
         if jet_ring_layer_rank(row.layer) > jet_ring_layer_rank(layer) -> layer = row.layer
@@ -384,7 +384,6 @@ fn jet_ring_runtime_part_order(part: MIRRuntimePartID) -> Int Never! {
         .Browser -> 23
         .Args -> 24
         .Reflect -> 25
-        .AuthTokens -> 26
         .AuthSession -> 27
         .Sync -> 28
         .Services -> 29
@@ -409,7 +408,7 @@ fn jet_ring_insert_runtime_part(rows: &[MIRRuntimePartID], part: MIRRuntimePartI
     rows[index] = part
 }
 
-pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MIRRuntimePartID] Never! {
+fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MIRRuntimePartID] Never! {
     parts := [MIRRuntimePartID]{}
     if jet_ring_usage_matches(used_core, [String]{"core.event"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Event)
     if jet_ring_usage_matches(used_core, [String]{"core.rt", "core.realtime"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Realtime)
@@ -435,7 +434,6 @@ pub fn jet_ring_runtime_parts_for_used_core(used_core: [String]) -> [MIRRuntimeP
     if jet_ring_usage_matches(used_core, [String]{"core.web.browser", "core.web", "core.web.storage", "core.web.storage.local", "core.web.storage.session"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Browser)
     if jet_ring_usage_matches(used_core, [String]{"core.args"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Args)
     if jet_ring_usage_matches(used_core, [String]{"core.reflect", "core.compiler.lang"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Reflect)
-    if jet_ring_usage_matches(used_core, [String]{"core.auth"}) || jet_ring_has_runtime_part(parts, MIRRuntimePartID.Crypto) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.AuthTokens)
     if jet_ring_usage_matches(used_core, [String]{"core.auth", "app", "core.web"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.AuthSession)
     if jet_ring_usage_matches(used_core, [String]{"core.sync", "app", "core.web", "core.db"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Sync)
     if jet_ring_usage_matches(used_core, [String]{"core.service", "core.jobs"}) -> jet_ring_insert_runtime_part(&parts, MIRRuntimePartID.Services)

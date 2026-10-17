@@ -1,0 +1,14 @@
+# HAND-PORT tests/jetpack_engine.rs:4542-4585 typed_env_prebuilt_adapter_runs_from_path
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: typed_env_prebuilt_adapter_runs_from_path.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: chmod: project/vendor/weirdctl/weirdctl 755
+step: jetpack run --no-color -- weirdctl
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stdout.trim: = typed_env_prebuilt_adapter_runs_from_path.expected # original ed77c235f tests/jetpack_engine.rs:4584 stdout.trim equals weird ok
+

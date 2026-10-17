@@ -252,9 +252,8 @@ infers an edit from a timestamp or ambient cache file.
 Each compile candidate records source-tree and patch identities, cache
 scenario, compiler/Core digests, target, profile, backend, linker, host, one
 fixed warmup, twenty samples, process CPU-time variance, peak RSS, workload
-bytes, edit bytes, and resident-compiler phase totals. The `dev` profile uses
-the production Cranelift JIT lens; optimized `release` uses the rustc AOT
-lens. Missing or changed inputs, unsupported targets, incompatible
+bytes, edit bytes, and resident-compiler phase totals. Every profile uses the
+production rustc AOT build (D-EXEC2=A). Missing or changed inputs, unsupported targets, incompatible
 identities, partial timing, unsupported profiles, provider crashes, and
 deadlines are unavailable evidence or operation failures, never passes. The
 resident fixture accepts `dev`, `release`, `debug`, `ci`, and `small`, plus

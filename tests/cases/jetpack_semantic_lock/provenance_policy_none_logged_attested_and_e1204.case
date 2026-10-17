@@ -1,0 +1,14 @@
+# PORT tests/jetpack_semantic_lock.rs:56-136.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+fixture: provenance_policy_none_logged_attested_and_e1204.fixture
+# KNOWN-FAILING #4833: jet fetch and build --locked missing in Jet front-end.
+# Loader.rs3305-3346/3471 calls the original tree-hash verifier; expected hash literal unchanged.
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet fetch
+exit: 0
+capture: actual file .jet/lock toml $.package[?name="textkit"][0].content-hash
+capture: bad_lock = text file.replace("{cap:actual}", "sha256-not-the-tree") .jet/lock
+write: .jet/lock = "{cap:bad_lock}"
+step: jet build --locked run.jet
+exit: nonzero
+stdout+stderr: ~ "E1204" # original diagnostic.code equal E1204

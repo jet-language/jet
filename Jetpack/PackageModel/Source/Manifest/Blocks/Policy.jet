@@ -2,6 +2,7 @@
 // D-PACKAGE-POLICY-SCOPE1, D-ONCE-AUTODERIVE1, D-MEM-GUARANTEE1,
 // D-JPK-POLICYSURFACE1, D-JPK-FRESHNESS1, D-GRADE-POLICY1) and the standalone
 // organization policy document (Package/Blocks.rs).
+use core.math as policy_core_math
 
 fn pkg_bad_mem(detail: String) -> PackageParseError Never! {
     PackageParseError.BadMemoryPolicy{detail: detail}
@@ -16,7 +17,7 @@ fn pkg_bad_policy(detail: String) -> PackageParseError Never! {
 }
 
 // `policy.lints.deny` (D-LINTPOLICY1). `None` means no `lints:` block.
-pub fn pkg_parse_lints_policy(body: String) -> [String]? PackageParseError! {
+fn pkg_parse_lints_policy(body: String) -> [String]? PackageParseError! {
     if lint_parse_policy_lints(body) == {
         .Ok(lints) -> Ok(lints)
         .Err(error) -> {
@@ -28,7 +29,7 @@ pub fn pkg_parse_lints_policy(body: String) -> [String]? PackageParseError! {
 
 // The source-level policy declarations of a `policy:` body. Package-only
 // fields are skipped when `package_only_fields` is set.
-pub fn pkg_parse_policy(body: String, package_only_fields: Bool) -> [PolicyDeclaration] PackageParseError! {
+fn pkg_parse_policy(body: String, package_only_fields: Bool) -> [PolicyDeclaration] PackageParseError! {
     out := [PolicyDeclaration]{}
     seen := [PolicyKey]{}
     loop entry in pkg_key_value_entries(body) {
@@ -78,25 +79,25 @@ fn pkg_policy_unknown_key(name: String, raw: String, package_only_fields: Bool) 
 }
 
 // One `policy.sources` rule: a package pattern and its allowed sources.
-pub struct PolicySourceMap {
-    pub pattern: String
-    pub sources: [String]
+struct PolicySourceMap {
+    pattern: String
+    sources: [String]
 }
 
 // The package-policy fields that govern package metadata and team
 // ceilings (Rust returns them as one tuple).
-pub struct PackagePolicySurface {
-    pub licenses: [String]?
-    pub source_maps: [PolicySourceMap]
-    pub exceptions: [PackagePolicyException]
-    pub effects: [String: [String]]
-    pub unsafe_paths: [String]?
-    pub expert: Bool?
-    pub deps: [String]?
-    pub claims_min: ClaimsGrade?
+struct PackagePolicySurface {
+    licenses: [String]?
+    source_maps: [PolicySourceMap]
+    exceptions: [PackagePolicyException]
+    effects: [String: [String]]
+    unsafe_paths: [String]?
+    expert: Bool?
+    deps: [String]?
+    claims_min: ClaimsGrade?
 }
 
-pub fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface PackageParseError! {
+fn pkg_parse_package_policy_surface(body: String) -> PackagePolicySurface PackageParseError! {
     surface := PackagePolicySurface{licenses: None, source_maps: [PolicySourceMap]{}, exceptions: [PackagePolicyException]{}, effects: [String: [String]]{}, unsafe_paths: None, expert: None, deps: None, claims_min: None}
     seen_sources := [String]{}
     sources_seen := false
@@ -391,7 +392,7 @@ fn pkg_days_in_month(year: Int, month: Int) -> Int Never! {
 // conversion).
 fn pkg_days_from_civil(input_year: Int, input_month: Int, day: Int) -> Int Never! {
     year :: if input_month <= 2 -> input_year - 1 else -> input_year
-    era :: math.div_rem(if year >= 0 -> year else -> year - 399, 400).quot
+    era :: policy_core_math.div_rem(if year >= 0 -> year else -> year - 399, 400).quot
     year_of_era :: year - era * 400
     month :: if input_month > 2 -> input_month - 3 else -> input_month + 9
     day_of_year :: (153 * month + 2) /% 5 + day - 1
@@ -400,12 +401,12 @@ fn pkg_days_from_civil(input_year: Int, input_month: Int, day: Int) -> Int Never
 }
 
 // The package-only dependency guarantee dial (D-MEM-GUARANTEE1=A).
-pub struct GuaranteePolicy {
-    pub contain: [String]
-    pub harden: Bool
+struct GuaranteePolicy {
+    contain: [String]
+    harden: Bool
 }
 
-pub fn pkg_parse_guarantee_policy(body: String) -> GuaranteePolicy PackageParseError! {
+fn pkg_parse_guarantee_policy(body: String) -> GuaranteePolicy PackageParseError! {
     contain := [String]{}
     contain_seen := false
     harden_seen := false
@@ -435,7 +436,7 @@ pub fn pkg_parse_guarantee_policy(body: String) -> GuaranteePolicy PackageParseE
 
 // Parse a standalone organization policy file whose entire content is one
 // `policy: { … }` block (`JET_ORG_UNSAFE_POLICY`).
-pub fn pkg_parse_policy_document(text: String) -> [PolicyDeclaration] PackageParseError! {
+fn pkg_parse_policy_document(text: String) -> [PolicyDeclaration] PackageParseError! {
     stripped :: pkg_strip_comments(text).trim()
     if !stripped.starts_with(MANIFEST_BLOCK_POLICY) -> return Err(pkg_bad_mem("expected only `policy: {{ … }}`"))
     rest := stripped.removeprefix(MANIFEST_BLOCK_POLICY).trim_start()

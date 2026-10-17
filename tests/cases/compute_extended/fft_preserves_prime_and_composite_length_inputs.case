@@ -1,0 +1,18 @@
+# HAND-PORT tests/compute_extended.rs:42-68 fft_preserves_prime_and_composite_length_inputs
+# PENDING-SAME-HEAD runtimeGap=build/admission; PENDING-GRAMMAR, no historical failure captures blessed.
+# ORACLE-LITERAL (including original concat!); exact full tier parity.
+fixture: fft_preserves_prime_and_composite_length_inputs.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = fft_preserves_prime_and_composite_length_inputs.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = fft_preserves_prime_and_composite_length_inputs.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = fft_preserves_prime_and_composite_length_inputs.stdout.expected
+stderr: == default

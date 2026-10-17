@@ -13,20 +13,20 @@ enum DoctorRepair {
 }
 
 // One doctor finding. `kind` is `drift`, `stale stage`, or `orphan CAS`.
-pub struct HangarDoctorFinding {
-    pub kind: String
-    pub subject: String
-    pub detail: String
-    pub fixed: Bool
-    repair: DoctorRepair
+struct HangarDoctorFinding {
+    kind: String
+    subject: String
+    detail: String
+    fixed: Bool
+    priv repair: DoctorRepair
 }
 
-pub struct HangarDoctorReport {
-    pub objects: Int
-    pub seal_reused: Int
-    pub seal_resealed: Int
-    pub seal_reseal_needed: Int
-    pub findings: [HangarDoctorFinding]
+struct HangarDoctorReport {
+    objects: Int
+    seal_reused: Int
+    seal_resealed: Int
+    seal_reseal_needed: Int
+    findings: [HangarDoctorFinding]
 
     fn empty() -> HangarDoctorReport Never! {
         HangarDoctorReport{objects: 0, seal_reused: 0, seal_resealed: 0, seal_reseal_needed: 0, findings: [HangarDoctorFinding]{}}
@@ -63,7 +63,7 @@ struct DoctorScan {
 }
 
 // Rust `hangar_doctor`.
-pub fn store_hangar_doctor(verification: &StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
+fn store_hangar_doctor(verification: &StoreVerification, roots: HangarRoots, repair: Bool, offline: Bool) -[FS, Net, Env, Time, Time.Wait]> HangarDoctorReport StoreError! {
     if !repair {
         scan :: store_scan_hangar_doctor(&verification, roots, false)
         return Ok(scan.report)
@@ -236,7 +236,7 @@ fn store_doctor_hex8(value: Int) -> String Never! {
     digits :: "0123456789abcdef".bytes()
     out := [U8]{}
     shifts :: [Int]{28, 24, 20, 16, 12, 8, 4, 0}
-    loop shift in shifts -> &out.push(digits[(value >> shift) & 15])
+    loop shift in shifts -> &out.push(digits[((value >> shift)).bit_and(15)])
     pkg_bytes_text(out, 0, out.len())
 }
 

@@ -1,0 +1,58 @@
+// Port of tests/http_server_lifecycle.rs:1579-1684 against public Core APIs.
+// PENDING-SEAM(http-server-options): workers=1, admission_queue=8 setup.
+use core.http.server as server
+use core.net as net
+
+struct S6ResetCalls { value: Int }
+
+fn s6_reset_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+fn s6_reset_exchange(addr: String, lines: [String]) -> String {
+    stream :: net.tcp_connect(addr) ?? panic("connect")
+    stream.write_all(lines.join(s6_reset_crlf()).bytes()) ?? panic("request write")
+    net.tcp_shutdown(stream, NetShutdown.Write) ?? panic("finish request")
+    parts := [String]{}
+    loop {
+        part :: stream.read_text(8192) ?? panic("response read")
+        if part == "" -> break
+        &parts.push(part)
+    }
+    parts.join("")
+}
+
+#Test("205 preserves zero length and pipeline boundaries") {
+    calls :: shared S6ResetCalls{value: 0}
+    mux :: server.mux()
+    mux.get("/reset", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(205, "must-not-publish").header("Content-Length", "999").header("Transfer-Encoding", "chunked").header("X-Origin", "reset"))
+    })
+    mux.get("/next", (_req: HTTPRequest) -> {
+        calls.value = calls.value + 1
+        Ok(server.response(200, "next"))
+    })
+    bound :: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr :: bound.local_addr() ?? panic("address")
+    serving :: task { bound.serve() ?? panic("server") }
+    crlf :: s6_reset_crlf()
+    pipelined :: s6_reset_exchange(addr, [String]{"GET /reset HTTP/1.1", "Host: local", "", "GET /next HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    second :: pipelined.index_of("HTTP/1.1 200 OK")
+    assert(second >= 0, "successor response")
+    reset :: pipelined.slice(0..<second)
+    assert(reset.starts_with("HTTP/1.1 205 Reset Content"), "wrong 205 status: {pipelined}")
+    assert(reset.contains("Content-Length: 0{crlf}"), "205 was not zero-length: {pipelined}")
+    assert(!reset.to_lower().contains("transfer-encoding:"), "205 retained custom framing: {pipelined}")
+    assert(reset.contains("X-Origin: reset{crlf}"), "205 lost representation metadata: {pipelined}")
+    assert(reset.ends_with("{crlf}{crlf}"), "205 body shifted pipeline: {pipelined}")
+    assert(pipelined.slice(second..<pipelined.len()).ends_with("{crlf}{crlf}next"), "successor response misaligned: {pipelined}")
+    head :: s6_reset_exchange(addr, [String]{"HEAD /reset HTTP/1.1", "Host: local", "Connection: close", "", ""})
+    framed :: head.split_once("{crlf}{crlf}") ?? panic("HEAD 205 framing")
+    assert(framed.before.starts_with("HTTP/1.1 205 Reset Content"), head)
+    assert(framed.before.contains("Content-Length: 0{crlf}"), "HEAD metadata overrode 205: {head}")
+    assert(framed.after == "", "HEAD 205 emitted body bytes: {head}")
+    assert(calls.value == 3)
+    report :: bound.shutdown(30s) ?? panic("shutdown")
+    ^serving.join() ?? panic("server join")
+    assert(report.accepted == 2)
+    assert(report.completed == 2)
+}

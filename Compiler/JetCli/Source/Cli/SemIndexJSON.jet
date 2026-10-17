@@ -1,0 +1,326 @@
+// The stable JSON encoding of the semantic index
+// (crates/jet-semindex/src/JSON.rs `SemIndex::to_status_envelope` and the
+// `json_*` row encoders) and the `jet inspect semindex` text summary
+// (Source/CmdSemIndex.rs `run_semindex`).
+use jet_foundation.[
+    DerivationRecord,
+    Span,
+    ViewProvenance,
+    ViewProvenanceMap,
+    derivation_record_json,
+    failure_contract_effective_type,
+    failure_contract_source,
+    type_name,
+]
+
+fn jet_cli_sem_json_span(span: Span) -> String Never! {
+    "{{\"start\":{span.start},\"end\":{span.end}}}"
+}
+
+fn jet_cli_sem_json_bool(value: Bool) -> String Never! {
+    if value -> "true" else -> "false"
+}
+
+fn jet_cli_sem_json_optional(value: String?) -> String Never! {
+    text :: value ?? return "null"
+    jet_cli_json_string(text)
+}
+
+fn jet_cli_sem_json_strings(values: [String]) -> String Never! {
+    rendered :: loop value in values -> jet_cli_json_string(value)
+    "[{rendered.join(",")}]"
+}
+
+fn jet_cli_sem_json_unavailable(unavailable: JetCLISemUnavailable) -> String Never! {
+    "{{\"status\":\"unavailable\",\"required_stage\":{jet_cli_json_string(unavailable.required_stage)},\"reason\":{jet_cli_json_string(unavailable.reason)}}}"
+}
+
+// JSON.rs `json_view_provenance`.
+fn jet_cli_sem_json_view_provenance(output_path: [String], provenance: ViewProvenance) -> String Never! {
+    sources :: loop source_path in provenance.sources -> {
+        source :: if source_path.source == {
+            .Receiver -> "{{\"kind\":\"receiver\"}}"
+            .Parameter(index) -> "{{\"kind\":\"parameter\",\"index\":{index}}}"
+            .Static(module_path, name) -> "{{\"kind\":\"static\",\"module\":{jet_cli_json_string(module_path)},\"name\":{jet_cli_json_string(name)}}}"
+        }
+        projections :: loop projection in source_path.projections -> if projection == {
+            .Field(name) -> "{{\"kind\":\"field\",\"name\":{jet_cli_json_string(name)}}}"
+            .Index -> "{{\"kind\":\"index\"}}"
+            .Range -> "{{\"kind\":\"range\"}}"
+        }
+        "{{\"source\":{source},\"projections\":[{projections.join(",")}]}}"
+    }
+    "{{\"output_path\":{jet_cli_sem_json_strings(output_path)},\"sources\":[{sources.join(",")}],\"mutable\":{jet_cli_sem_json_bool(provenance.mutable)}}}"
+}
+
+fn jet_cli_sem_json_view_map(map: ViewProvenanceMap?) -> String Never! {
+    value :: map ?? return "[]"
+    rendered :: loop entry in value.entries -> jet_cli_sem_json_view_provenance(entry.slot, entry.value)
+    "[{rendered.join(",")}]"
+}
+
+// JSON.rs `json_callable_signature` (with JSON.rs `callable_signature`).
+fn jet_cli_sem_json_callable_signature(callable: JetCLISemCallable, view_provenance: ViewProvenanceMap?) -> String {
+    fields :: jet_cli_sem_json_callable_fields(callable, jet_cli_sem_json_view_map(view_provenance), "existing_callable_producer_needs_extension")
+    "{{{fields}}}"
+}
+
+// Shared fact encoding; expand uses its documented display form for views.
+fn jet_cli_sem_json_callable_fields(callable: JetCLISemCallable, views: String, producer: String) -> String {
+    parameters :: loop parameter in callable.params -> {
+        default := "null"
+        default_source := "null"
+        default_value := "null"
+        if parameter.default == .Val(value) {
+            default = jet_cli_json_string(value.source_text)
+            default_source = jet_cli_sem_json_span(value.source)
+            default_value = jet_cli_sem_json_unavailable(JetCLISemUnavailable{required_stage: "Prepared", reason: "the semindex producer does not evaluate callable defaults"})
+        }
+        "{{\"name\":{jet_cli_json_string(parameter.name)},\"label\":{jet_cli_json_string(parameter.label)},\"source\":{jet_cli_sem_json_span(parameter.source)},\"default\":{default},\"default_source\":{default_source},\"default_value\":{default_value},\"access\":{jet_cli_json_string(jet_cli_sem_access_name(parameter.access))},\"zone\":{jet_cli_json_string(jet_cli_sem_zone_name(parameter.zone))},\"type\":{jet_cli_json_string(type_name(parameter.ty))},\"variadic\":{jet_cli_sem_json_bool(parameter.variadic)}}}"
+    }
+    effects := "null"
+    effect_status := jet_cli_sem_json_unavailable(JetCLISemUnavailable{required_stage: "Typed", reason: "the checker has not published a checked callable effect row"})
+    effect_facts := "null"
+    if callable.effect_via == .Val(via) {
+        effects = jet_cli_sem_json_strings([String]{"via {via.name}"})
+        effect_status = "{{\"status\":\"checked\"}}"
+        effect_facts = "[{{\"kind\":\"via_parameter\",\"name\":{jet_cli_json_string(via.name)},\"source\":{jet_cli_sem_json_span(via.span)}}}]"
+    } else if callable.effects == .Val(rows) {
+        names :: loop row in rows -> row.name
+        facts :: loop row in rows -> "{{\"kind\":\"named\",\"name\":{jet_cli_json_string(row.name)},\"source\":{jet_cli_sem_json_span(row.span)}}}"
+        effects = jet_cli_sem_json_strings(names)
+        effect_status = "{{\"status\":\"checked\"}}"
+        effect_facts = "[{facts.join(",")}]"
+    }
+    errors := "null"
+    failure_contract := "null"
+    failure_source := "null"
+    failure_status := "null"
+    if callable.failure_contract == .Val(contract) {
+        effective :: failure_contract_effective_type(contract)
+        error_names := [String]{}
+        if effective == .Result(_, err) {
+            never := false
+            if err == .Named(name) {
+                if name == "Never" -> never = true
+            }
+            if !never -> &error_names.push(type_name(err))
+        }
+        errors = jet_cli_sem_json_strings(error_names)
+        failure_contract = jet_cli_json_string(type_name(effective))
+        failure_source = jet_cli_json_string(failure_contract_source(contract))
+        failure_status = "{{\"status\":\"checked\"}}"
+    } else if callable.failure_unavailable == .Val(unavailable) {
+        failure_status = jet_cli_sem_json_unavailable(unavailable)
+    }
+    generic_parameters := "null"
+    generic_status := "null"
+    if callable.generic_parameters == .Val(names) {
+        generic_parameters = jet_cli_sem_json_strings(names)
+        generic_status = "{{\"status\":\"checked\"}}"
+    } else if callable.generic_unavailable == .Val(unavailable) {
+        generic_status = jet_cli_sem_json_unavailable(unavailable)
+    }
+    return_type :: if callable.return_type == .Val(ty) -> jet_cli_json_string(type_name(ty)) else -> "null"
+    policies :: loop policy in callable.policies -> jet_cli_sem_policy_display(policy)
+    "\"parameters\":[{parameters.join(",")}],\"return_type\":{return_type},\"return_type_status\":\"checked\",\"effects\":{effects},\"effect_status\":{effect_status},\"effect_facts\":{effect_facts},\"errors\":{errors},\"failure_contract\":{failure_contract},\"failure_source\":{failure_source},\"failure_status\":{failure_status},\"returned_views\":{views},\"policies\":{jet_cli_sem_json_strings(policies)},\"generic_parameters\":{generic_parameters},\"generic_parameters_status\":{generic_status},\"metadata_producer_status\":{jet_cli_json_string(producer)}"
+}
+
+// JSON.rs `json_kind` over the `convert_kind` projection.
+fn jet_cli_sem_json_kind(kind: JetCLISemKind) -> String {
+    if kind == {
+        .Module -> "{{\"kind\":\"module\"}}"
+        .Function(callable) -> {
+            params :: loop parameter in callable.params -> "{{\"type\":{jet_cli_json_string(type_name(parameter.ty))}}}"
+            contract :: loop parameter in callable.params -> "{{\"label\":{jet_cli_json_string(parameter.label)},\"zone\":{jet_cli_json_string(jet_cli_sem_zone_name(parameter.zone))},\"variadic\":{jet_cli_sem_json_bool(parameter.variadic)}}}"
+            "{{\"kind\":\"function\",\"params\":[{params.join(",")}],\"call_contract\":[{contract.join(",")}],\"ret\":{jet_cli_sem_json_optional(jet_cli_sem_callable_ret(callable))}}}"
+        }
+        .Struct(fields, _) -> {
+            rendered :: loop field in fields -> "{{\"name\":{jet_cli_json_string(field.name)},\"type\":{jet_cli_json_string(type_name(field.ty))}}}"
+            "{{\"kind\":\"struct\",\"fields\":[{rendered.join(",")}]}}"
+        }
+        .Enum(variants, _) -> "{{\"kind\":\"enum\",\"variants\":{jet_cli_sem_json_strings(variants)}}}"
+        .Trait -> "{{\"kind\":\"trait\"}}"
+        .Tag -> "{{\"kind\":\"tag\"}}"
+        .Type(_) -> "{{\"kind\":\"type\"}}"
+        .Const -> "{{\"kind\":\"const\"}}"
+        .EnumVariant(parent) -> "{{\"kind\":\"enum_variant\",\"parent\":{jet_cli_json_string(parent)}}}"
+        .Field(ty, parent) -> "{{\"kind\":\"field\",\"type\":{jet_cli_json_string(type_name(ty))},\"parent\":{jet_cli_json_string(parent)}}}"
+        .Local(mutable, ty) -> {
+            shown :: if ty == .Val(value) -> jet_cli_json_string(type_name(value)) else -> "null"
+            "{{\"kind\":\"local\",\"mutable\":{jet_cli_sem_json_bool(mutable)},\"type\":{shown}}}"
+        }
+        .Param(ty) -> "{{\"kind\":\"param\",\"type\":{jet_cli_json_string(type_name(ty))}}}"
+    }
+}
+
+// JSON.rs `json_trait_contract`.
+fn jet_cli_sem_json_trait_contract(contract: JetCLISemTraitContract) -> String Never! {
+    associated :: loop entry in contract.associated_types -> "{{\"name\":{jet_cli_json_string(entry.name)},\"type\":{jet_cli_sem_json_optional(entry.ty)}}}"
+    "{{\"trait\":{jet_cli_json_string(contract.trait_name)},\"associated_types\":[{associated.join(",")}],\"methods\":{jet_cli_sem_json_strings(contract.methods)}}}"
+}
+
+// JSON.rs `json_def`.
+fn jet_cli_sem_json_def(definition: JetCLISemDefinition) -> String {
+    def :: definition.def
+    callable :: if def.kind == .Function(value) -> if value.signature_facts_available -> jet_cli_sem_json_callable_signature(value, definition.view_provenance) else -> "null" else -> "null"
+    contracts :: loop contract in definition.trait_contracts -> jet_cli_sem_json_trait_contract(contract)
+    identity :: jet_cli_sem_json_unavailable(JetCLISemUnavailable{required_stage: "Resolved", reason: "the semindex producer does not receive a checker-issued DeclarationHandle"})
+    "{{\"identity\":{jet_cli_json_string(def.identity)},\"metadata_declaration_identity\":{identity},\"name\":{jet_cli_json_string(def.qualified_name)},\"leaf_name\":{jet_cli_json_string(def.name)},\"module\":{jet_cli_json_string(def.module_path)},\"span\":{jet_cli_sem_json_span(def.def_span)},\"detail\":{jet_cli_sem_json_kind(def.kind)},\"view_provenance\":{jet_cli_sem_json_view_map(definition.view_provenance)},\"callable_signature\":{callable},\"derives\":{jet_cli_sem_json_strings(definition.derives)},\"nominal_base\":{jet_cli_sem_json_optional(definition.nominal_base)},\"trait_contracts\":[{contracts.join(",")}]}}"
+}
+
+// JSON.rs `json_ref`.
+fn jet_cli_sem_json_ref(reference: JetCLISemRef) -> String Never! {
+    target := "null"
+    if reference.target == .Val(anchor) {
+        target = "{{\"module\":{jet_cli_json_string(anchor.module_path)},\"kind\":{jet_cli_json_string(anchor.kind)},\"semantic_identity\":{jet_cli_sem_json_optional(anchor.semantic_identity)},\"span\":{jet_cli_sem_json_span(anchor.def_span)}}}"
+    }
+    fact := "null"
+    if reference.fact == .Val(value) {
+        fact = "{{\"name\":{jet_cli_json_string(value.name)},\"kind\":{jet_cli_json_string(value.kind)},\"type\":{jet_cli_json_string(value.type_name)}}}"
+    }
+    "{{\"name\":{jet_cli_json_string(reference.name)},\"module\":{jet_cli_json_string(reference.module_path)},\"scope_identity\":{jet_cli_sem_json_optional(reference.scope_identity)},\"target\":{target},\"fact\":{fact},\"span\":{jet_cli_sem_json_span(reference.span)}}}"
+}
+
+// JSON.rs `json_call`.
+fn jet_cli_sem_json_call(call: JetCLISemCall) -> String Never! {
+    "{{\"caller\":{jet_cli_json_string(call.caller)},\"callee\":{jet_cli_json_string(call.callee)},\"module\":{jet_cli_json_string(call.module_path)},\"span\":{jet_cli_sem_json_span(call.span)}}}"
+}
+
+// JSON.rs `json_effect`.
+fn jet_cli_sem_json_effect(fact: JetCLISemEffect) -> String Never! {
+    provenance :: loop origin in fact.provenance -> {
+        spans :: loop span in origin.spans -> jet_cli_sem_json_span(span)
+        "{{\"effect\":{jet_cli_json_string(origin.effect_name)},\"call_path\":{jet_cli_sem_json_strings(origin.call_path)},\"spans\":[{spans.join(",")}]}}"
+    }
+    "{{\"function\":{jet_cli_json_string(fact.function)},\"direct\":{jet_cli_sem_json_strings(fact.direct)},\"callees\":{jet_cli_sem_json_strings(fact.callees)},\"inferred\":{jet_cli_sem_json_strings(fact.inferred)},\"maximal\":{jet_cli_sem_json_bool(fact.maximal)},\"provenance\":[{provenance.join(",")}]}}"
+}
+
+// JSON.rs `json_arithmetic`.
+fn jet_cli_sem_json_arithmetic(fact: JetCLISemArithmetic) -> String Never! {
+    "{{\"operation\":{jet_cli_json_string(fact.operation)},\"policy\":{jet_cli_json_string(fact.policy)},\"module\":{jet_cli_json_string(fact.module_path)},\"operation_span\":{jet_cli_sem_json_span(fact.operation_span)},\"scope_span\":{jet_cli_sem_json_span(fact.scope_span)}}}"
+}
+
+// JSON.rs `json_origin`.
+fn jet_cli_sem_json_origin(member: JetCLISemMember) -> String Never! {
+    if member.origin == "trait_impl" || member.origin == "trait_requirement" -> return "{{\"kind\":{jet_cli_json_string(member.origin)},\"trait\":{jet_cli_json_string(member.origin_trait)}}}"
+    "{{\"kind\":{jet_cli_json_string(member.origin)}}}"
+}
+
+// JSON.rs `json_member`.
+fn jet_cli_sem_json_member(member: JetCLISemMember) -> String Never! {
+    "{{\"owner\":{jet_cli_json_string(member.owner)},\"name\":{jet_cli_json_string(member.name)},\"identity\":{jet_cli_json_string(member.identity)},\"kind\":{jet_cli_json_string(member.kind)},\"origin\":{jet_cli_sem_json_origin(member)},\"signature\":{jet_cli_json_string(member.signature)},\"module\":{jet_cli_json_string(member.module_path)},\"span\":{jet_cli_sem_json_span(member.span)}}}"
+}
+
+// JSON.rs `json_state_graph`.
+fn jet_cli_sem_json_state_graph(graph: JetCLISemStateGraph) -> String Never! {
+    states :: loop state in graph.states -> {
+        reachable :: if state.reachable == .Val(value) -> jet_cli_sem_json_bool(value) else -> "null"
+        "{{\"name\":{jet_cli_json_string(state.name)},\"terminal\":{jet_cli_sem_json_bool(state.terminal)},\"reachable\":{reachable},\"span\":{jet_cli_sem_json_span(state.span)}}}"
+    }
+    transitions :: loop transition in graph.transitions -> "{{\"operation\":{jet_cli_json_string(transition.operation)},\"from\":{jet_cli_sem_json_optional(transition.from)},\"to\":{jet_cli_json_string(transition.to)}}}"
+    "{{\"owner\":{jet_cli_json_string(graph.owner)},\"module\":{jet_cli_json_string(graph.module_path)},\"states\":[{states.join(",")}],\"transitions\":[{transitions.join(",")}]}}"
+}
+
+// JSON.rs `json_definition_fact`.
+fn jet_cli_sem_json_definition_fact(fact: JetCLISemDefinitionFact) -> String Never! {
+    "{{\"stable_id\":{jet_cli_json_string(fact.stable_id)},\"signature_id\":{jet_cli_json_string(fact.signature_id)},\"content_id\":{jet_cli_json_string(fact.content_id)},\"human_identity\":{jet_cli_json_string(fact.human_identity)},\"name\":{jet_cli_json_string(fact.name)},\"kind\":{jet_cli_json_string(fact.kind)},\"module\":{jet_cli_json_string(fact.module_path)},\"span\":{jet_cli_sem_json_span(fact.span)}}}"
+}
+
+// JSON.rs `json_instance`.
+fn jet_cli_sem_json_instance(instance: JetCLISemInstance) -> String Never! {
+    provenance :: loop values in instance.argument_provenance -> jet_cli_sem_json_strings(values)
+    applications :: loop application in instance.applications -> "{{\"name\":{jet_cli_json_string(application.name)},\"module_path\":{jet_cli_json_string(application.module_path)},\"semantic_identity\":{jet_cli_json_string(application.semantic_identity)},\"span\":{jet_cli_sem_json_span(application.span)}}}"
+    "{{\"name\":{jet_cli_json_string(instance.name)},\"module_path\":{jet_cli_json_string(instance.module_path)},\"fingerprint\":{jet_cli_json_string(instance.fingerprint)},\"full_key\":{jet_cli_json_string(instance.full_key_hex)},\"template_definition_id\":{jet_cli_json_string(instance.template_definition_id)},\"template_span\":{jet_cli_sem_json_span(instance.template_span)},\"arguments\":{jet_cli_sem_json_strings(instance.arguments)},\"argument_values\":{jet_cli_sem_json_strings(instance.argument_values)},\"argument_provenance\":[{provenance.join(",")}],\"applications\":[{applications.join(",")}],\"exported_members\":{jet_cli_sem_json_strings(instance.exported_members)}}}"
+}
+
+// JSON.rs `json_output`.
+fn jet_cli_sem_json_output(output: JetCLISemOutput) -> String Never! {
+    entry :: output.entry
+    "{{\"binding\":{jet_cli_json_string(output.binding)},\"kind\":{jet_cli_json_string(output.kind)},\"name\":{jet_cli_json_string(output.name)},\"module_path\":{jet_cli_json_string(output.module_path)},\"span\":{jet_cli_sem_json_span(output.span)},\"entry\":{{\"identity\":{jet_cli_json_string(entry.identity)},\"name\":{jet_cli_json_string(entry.name)},\"module_path\":{jet_cli_json_string(entry.module_path)},\"definition_span\":{jet_cli_sem_json_span(entry.definition_span)},\"reference_span\":{jet_cli_sem_json_span(entry.reference_span)},\"params\":{jet_cli_sem_json_strings(entry.params)},\"return_type\":{jet_cli_sem_json_optional(entry.return_type)},\"failure_contract\":{jet_cli_json_string(entry.failure_contract)},\"failure_source\":{jet_cli_json_string(entry.failure_source)},\"authority\":{jet_cli_json_string(entry.authority)},\"effects\":{jet_cli_sem_json_strings(entry.effects)}}}}}"
+}
+
+// EffectBudget.rs `render_effect_projection_object`.
+fn jet_cli_sem_json_effect_projection(projection: JetCLIAuthority) -> String Never! {
+    "{{\"required_effects\":{jet_cli_sem_json_strings(projection.required)},\"granted_effects\":{jet_cli_sem_json_strings(projection.granted)},\"denied_effects\":{jet_cli_sem_json_strings(projection.denied)},\"authority\":{jet_cli_json_string(projection.authority)}}}"
+}
+
+// The `semindex` payload of `SemIndex::to_status_envelope`. Standalone
+// source carries no package projection or workspace overlay policy.
+fn jet_cli_semindex_payload(index: JetCLISemIndex) -> String {
+    definitions :: loop definition in index.definitions -> jet_cli_sem_json_def(definition)
+    facts :: loop fact in index.definition_facts -> jet_cli_sem_json_definition_fact(fact)
+    derivations :: loop record in index.derivations -> derivation_record_json(record)
+    instances :: loop instance in index.instances -> jet_cli_sem_json_instance(instance)
+    outputs :: loop output in index.outputs -> jet_cli_sem_json_output(output)
+    graphs :: loop graph in index.state_graphs -> jet_cli_sem_json_state_graph(graph)
+    references :: loop reference in index.references -> jet_cli_sem_json_ref(reference)
+    calls :: loop call in index.calls -> jet_cli_sem_json_call(call)
+    effects :: loop fact in index.effects -> jet_cli_sem_json_effect(fact)
+    arithmetic :: loop fact in index.arithmetic -> jet_cli_sem_json_arithmetic(fact)
+    members :: loop member in index.members -> jet_cli_sem_json_member(member)
+    "{{\"schema_version\":{JET_CLI_SEMINDEX_SCHEMA_VERSION},\"definitions\":[{definitions.join(",")}],\"definition_facts\":[{facts.join(",")}],\"derivations\":[{derivations.join(",")}],\"instances\":[{instances.join(",")}],\"outputs\":[{outputs.join(",")}],\"state_graphs\":[{graphs.join(",")}],\"package_facts\":null,\"workspace_overlays\":null,\"effect_projection\":{jet_cli_sem_json_effect_projection(index.effect_projection)},\"references\":[{references.join(",")}],\"calls\":[{calls.join(",")}],\"effects\":[{effects.join(",")}],\"arithmetic\":[{arithmetic.join(",")}],\"members\":[{members.join(",")}]}}"
+}
+
+// `SemIndex::to_status_envelope().json()`: the `inspect.semindex` status
+// line. The payload is already canonical JSON, which the status `Float`
+// carrier writes verbatim.
+fn jet_cli_semindex_status_json(index: JetCLISemIndex) -> String {
+    jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("semindex", JetCLIStatusValue.Float{text: jet_cli_semindex_payload(index)})})
+}
+
+// EffectBudget.rs `render_effect_names`.
+fn jet_cli_effect_names(effects: [String]) -> String Never! {
+    if effects.len() == 0 -> return "none"
+    effects.join(", ")
+}
+
+// EffectBudget.rs `render_effect_projection_line`.
+fn jet_cli_effect_projection_line(projection: JetCLIAuthority) -> String Never! {
+    "required effects: {jet_cli_effect_names(projection.required)}; granted effects: {jet_cli_effect_names(projection.granted)}; denied effects: {jet_cli_effect_names(projection.denied)}; authority: {projection.authority}"
+}
+
+// CmdSemIndex.rs `run_semindex` text mode.
+fn jet_cli_semindex_text(index: JetCLISemIndex) -> String {
+    out := "semantic index (schema v{JET_CLI_SEMINDEX_SCHEMA_VERSION})\n"
+    out = "{out}  definitions: {index.definitions.len()}\n"
+    out = "{out}  references:  {index.references.len()}\n"
+    out = "{out}  call edges:  {index.calls.len()}\n"
+    out = "{out}  effects:     {index.effects.len()}\n"
+    out = "{out}effect roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n"
+    out = "{out}  arithmetic:  {index.arithmetic.len()}\n"
+    loop fact in index.arithmetic {
+        out = "{out}    fixed-width {fact.operation}: .{fact.policy}; scope = {fact.module_path}:{fact.scope_span.start}..{fact.scope_span.end}; operation = {fact.operation_span.start}..{fact.operation_span.end}\n"
+    }
+    out = "{out}failure contracts:\n"
+    loop definition in index.definitions {
+        callable :: jet_cli_sem_callable(definition.def) ?? next
+        if !callable.signature_facts_available -> next
+        failure :: jet_cli_sem_failure_contract_name(callable)
+        source :: jet_cli_sem_failure_source_name(callable)
+        if failure == .Val(failure_name) {
+            if source == .Val(source_name) {
+                out = "{out}  {definition.def.qualified_name}: {failure_name} ({source_name})\n"
+                next
+            }
+        }
+        out = "{out}  {definition.def.qualified_name}: unavailable\n"
+    }
+    out = "{out}nominal type contracts:\n"
+    loop definition in index.definitions {
+        base :: definition.nominal_base ?? next
+        out = "{out}  {definition.def.qualified_name}: distinct {base}\n"
+        loop contract in definition.trait_contracts {
+            out = "{out}    implements {contract.trait_name}\n"
+            loop entry in contract.associated_types {
+                if entry.ty == .Val(ty) {
+                    out = "{out}      type {entry.name} = {ty}\n"
+                } else {
+                    out = "{out}      type {entry.name}\n"
+                }
+            }
+            loop method in contract.methods -> out = "{out}      {method}\n"
+        }
+    }
+    "{out}note: pass --json for the full stable document\n"
+}

@@ -4050,6 +4050,9 @@ pub enum JetComputeError {
     Device(String),
     Unsupported(String),
     Arithmetic(String),
+    Singular(String),
+    Index(String),
+    Parse(String),
     Serialization(String),
 }
 
@@ -4062,6 +4065,9 @@ impl JetShow for JetComputeError {
             | JetComputeError::Device(m)
             | JetComputeError::Unsupported(m)
             | JetComputeError::Arithmetic(m)
+            | JetComputeError::Singular(m)
+            | JetComputeError::Index(m)
+            | JetComputeError::Parse(m)
             | JetComputeError::Serialization(m) => m.clone(),
         }
     }
@@ -7813,7 +7819,7 @@ fn jet_compute_inv(tensor: &JetTensor) -> Result<JetTensor, JetComputeError> {
             }
         }
         if a[pivot * width + i].abs() < 1e-15 {
-            return Err(JetComputeError::InvalidShape(
+            return Err(JetComputeError::Singular(
                 "matrix is singular".to_string(),
             ));
         }
@@ -7923,7 +7929,7 @@ fn jet_compute_solve(a: &JetTensor, b: &JetTensor) -> Result<JetTensor, JetCompu
             }
         }
         if augmented[best][pivot].abs() < 1e-15 {
-            return Err(JetComputeError::Arithmetic(
+            return Err(JetComputeError::Singular(
                 "solve coefficient matrix is singular".to_string(),
             ));
         }
@@ -9802,7 +9808,7 @@ fn jet_compute_serialize(tensor: &JetTensor) -> Result<String, JetComputeError> 
     Ok(format!("{body};checksum={checksum}"))
 }
 
-fn jet_compute_deserialize(payload: &String) -> Result<JetTensor, JetComputeError> {
+fn jet_compute_deserialize(payload: &str) -> Result<JetTensor, JetComputeError> {
     let mut fields = payload.split(';');
     let Some(shape_part) = fields.next() else {
         return Err(JetComputeError::InvalidShape(

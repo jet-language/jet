@@ -1,16 +1,30 @@
 use core as core
 use core.ui.host.[UIHostError, UIShortcut, UIShortcutBinding, UIShortcutDispatch]
 
-// core.ui.host.shortcuts — provider-backed shortcut registration/dispatch.
-pub fn binding(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostError! {
-    if action.trim() == "" -> return Err(UIHostError.InvalidRequest)
-    core.ui.host.shortcuts.binding(shortcut, action)
+// core.ui.host.shortcuts — pure binding policy and provider-backed dispatch.
+fn binding(shortcut: UIShortcut, action: String) -> UIShortcutBinding UIHostError! {
+    if action.len() == 0 -> return Err(UIHostError.InvalidRequest("shortcut action must not be empty"))
+    Ok(UIShortcutBinding{shortcut: shortcut, action: action, node: None})
 }
 
-pub fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
-    core.ui.host.shortcuts.register(binding)
+fn register(binding: UIShortcutBinding) -[IO]> UIShortcutBinding UIHostError! {
+    #Unsafe("Core shortcut registration uses the current retained provider's canonical action registry") {
+        core.ui.host.shortcuts.__register(binding)
+    }
 }
 
-pub fn dispatch(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
-    core.ui.host.shortcuts.dispatch(shortcut)
+fn dispatch(shortcut: UIShortcut) -[IO]> UIShortcutDispatch UIHostError! {
+    #Unsafe("Core shortcut dispatch uses the current retained provider's canonical action registry") {
+        core.ui.host.shortcuts.__dispatch(shortcut)
+    }
+}
+
+#Test("UI shortcut bindings preserve action bytes and absent node identity") {
+    key :: core.ui.host.shortcut(" A ", core.ui.host.UIShortcutModifiers{}) ?? panic("valid shortcut rejected")
+    bound :: binding(key, " ") ?? panic("space action rejected")
+    assert(bound.action == " " && bound.node == None && bound.shortcut == key)
+    if binding(key, "") == .Err(error) {
+        if error == .InvalidRequest(message) -> assert(message == "shortcut action must not be empty")
+        else -> panic("wrong shortcut binding error")
+    } else { panic("empty action accepted") }
 }

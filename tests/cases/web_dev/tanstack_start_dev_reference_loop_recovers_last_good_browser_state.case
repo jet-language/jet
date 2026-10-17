@@ -1,0 +1,15 @@
+# Original tests/web_dev.rs:629-680; verbatim sources and original predicates.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference-run or PASS claim.
+requires: tool:rustc
+requires: tool:node
+requires: tool:chromium
+env: CHROMIUM=chromium
+copy: {root}/Examples/features/web/tanstack_start/run.jet run.jet
+copy: {root}/Examples/features/web/tanstack_start/package.jet package.jet
+copy: {root}/Examples/features/web/tanstack_start/public/index.html public/index.html
+copy: {root}/Examples/features/web/tanstack_start/public/app.css public/app.css
+step: node {root}/Tools/web-dev-test/reference_app.mjs --metric error_to_fix --manifest {root}/Tools/agent-eval/dx/manifest.json --exercise --app tanstack-start-orders --jet-env {root}/Tools/agent/jet-env
+exit: 0
+stdout: ~ "REFERENCE_METRIC:error_to_fix" # original predicate
+stdout: ~ "diagnosis_ms=" # original predicate
+stdout: ~ "repair_ms=" # original predicate

@@ -5,7 +5,7 @@
 //! the tool that the user selected, and profile commands inspect metadata.
 
 use crate::{Syntax, JSON, SHA256};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeSet;
 use std::io;
 use std::path::{Component, Path};
@@ -144,7 +144,7 @@ pub(crate) fn parse_generation_metadata(
     text: &str,
     expected_generation: u64,
 ) -> io::Result<GenerationMetadata> {
-    let DataTree::Object(root) = JSON::parse(text).map_err(invalid)? else {
+    let Dyn::Object(root) = JSON::parse(text).map_err(invalid)? else {
         return Err(invalid("profile metadata root is not an object"));
     };
     expect_exact_keys(
@@ -170,7 +170,7 @@ pub(crate) fn parse_generation_metadata(
         return Err(invalid("tool generation metadata disagrees with path"));
     }
     let created_at = integer_field(&root, "created_at")?;
-    let Some(DataTree::Array(entries)) = tree_field(&root, "tools") else {
+    let Some(Dyn::Array(entries)) = tree_field(&root, "tools") else {
         return Err(invalid("profile tools field is not an array"));
     };
     if entries.len() > MAX_TOOLS {
@@ -178,7 +178,7 @@ pub(crate) fn parse_generation_metadata(
     }
     let mut tools = Vec::with_capacity(entries.len());
     for entry in entries {
-        let DataTree::Object(tool) = entry else {
+        let Dyn::Object(tool) = entry else {
             return Err(invalid("profile tool entry is not an object"));
         };
         expect_exact_keys(
@@ -425,16 +425,16 @@ fn write_string_array(out: &mut String, key: &str, values: &[String], comma: boo
 }
 
 fn tree_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
-) -> Option<&'a DataTree> {
+) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
 }
 
 fn expect_exact_keys(
-    object: &[(String, DataTree)],
+    object: &[(String, Dyn)],
     expected: &[&str],
     label: &str,
 ) -> io::Result<()> {
@@ -452,7 +452,7 @@ fn expect_exact_keys(
 }
 
 fn string_field<'a>(
-    object: &'a [(String, DataTree)],
+    object: &'a [(String, Dyn)],
     key: &str,
 ) -> io::Result<&'a str> {
     tree_field(object, key)
@@ -461,16 +461,16 @@ fn string_field<'a>(
         .map_err(invalid)
 }
 
-fn bounded_string(object: &[(String, DataTree)], key: &str) -> io::Result<String> {
+fn bounded_string(object: &[(String, Dyn)], key: &str) -> io::Result<String> {
     let value = string_field(object, key)?;
     validate_string(value)?;
     Ok(value.to_string())
 }
 
-fn integer_field(object: &[(String, DataTree)], key: &str) -> io::Result<u64> {
+fn integer_field(object: &[(String, Dyn)], key: &str) -> io::Result<u64> {
     match tree_field(object, key) {
-        Some(DataTree::Int(value)) if *value >= 0 => Ok(*value as u64),
-        Some(DataTree::Float(value))
+        Some(Dyn::Int(value)) => value.to_u64().ok_or_else(|| invalid(format!("profile field `{key}` is not an exact integer"))),
+        Some(Dyn::Float(value))
             if value.is_finite()
                 && *value >= 0.0
                 && value.fract() == 0.0
@@ -485,8 +485,8 @@ fn integer_field(object: &[(String, DataTree)], key: &str) -> io::Result<u64> {
     }
 }
 
-fn string_array(object: &[(String, DataTree)], key: &str) -> io::Result<Vec<String>> {
-    let Some(DataTree::Array(values)) = tree_field(object, key) else {
+fn string_array(object: &[(String, Dyn)], key: &str) -> io::Result<Vec<String>> {
+    let Some(Dyn::Array(values)) = tree_field(object, key) else {
         return Err(invalid(format!("profile field `{key}` is not an array")));
     };
     values

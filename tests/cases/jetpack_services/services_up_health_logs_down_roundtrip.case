@@ -1,0 +1,33 @@
+# Port of tests/jetpack_services.rs:158-243; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# PENDING-GRAMMAR(batch-four): mkdir, chmod and host-name conditional.
+fixture: services_up_health_logs_down_roundtrip.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+mkdir: root
+mkdir: home
+when os-name linux: mkdir: state
+when os-name linux: chmod: bin/systemd-run 755
+when os-name linux: chmod: bin/systemctl 755
+step: jetpack services up --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+step: jetpack services health --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+step: jetpack services wait fixture --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+stderr: ~ "service `fixture` is ready" # original predicate
+step: jetpack services logs fixture --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+exit: any # original predicate; only log contents asserted
+stdout: ~ "fixture-started" # original predicate
+step: jetpack services down --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+step: jetpack services health --no-color
+when os-name linux: env: PATH={work}/bin:{env:PATH}
+when os-name linux: env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+exit: nonzero

@@ -1,0 +1,50 @@
+// jet-debug EventObservation.rs: exact closed, payload-free event projection.
+// The snapshot codec calls this validator; transports cannot skip it.
+fn jet_cli_live_event_integer(event: Dyn, key: String, minimum: Int?) -> Int JetCLIReadError! {
+    if jet_cli_live_field(event, key) == .Val(.Int(number)) {
+        if minimum == .Val(bound) && number < bound {
+            message :: if bound == 0 -> "runtime event observation has negative `{key}`" else -> "runtime event observation has invalid `{key}`"
+            return Err(jet_cli_read_error(message))
+        }
+        return Ok(number)
+    }
+    Err(jet_cli_read_error("runtime event observation has invalid `{key}`"))
+}
+fn jet_cli_live_event_closed(event: Dyn, key: String, allowed: [String]) -> String JetCLIReadError! {
+    if jet_cli_live_field(event, key) == .Val(.Text(value)) {
+        if !allowed.contains(value) -> return Err(jet_cli_read_error("runtime event observation has unknown `{key}` value"))
+        return Ok(value)
+    }
+    Err(jet_cli_read_error("runtime event observation has invalid `{key}`"))
+}
+fn jet_cli_live_event_render(raw_sequence: Dyn?) -> String JetCLIReadError! {
+    events :: if raw_sequence == .Val(.Array(rows)) -> rows else -> { return Err(jet_cli_read_error("runtime observation has no event sequence")) }
+    if events.len() > 256 -> return Err(jet_cli_read_error("runtime event observation exceeds the 256-record limit"))
+    keys :: [String]{"sequence", "source", "event_id", "owner_id", "subscription_id", "dispatch_id", "lifecycle", "queued", "blocked", "running", "capacity", "overflow", "priority", "failure", "terminal"}
+    previous := 0
+    lines := [String]{}
+    loop event in events {
+        fields :: if event == .Object(fields) -> fields else -> { return Err(jet_cli_read_error("runtime event observation is not an object")) }
+        if fields.len() != 15 -> return Err(jet_cli_read_error("runtime event observation contains an unsafe or unknown field"))
+        loop field in fields { if !keys.contains(field.key) -> return Err(jet_cli_read_error("runtime event observation contains an unsafe or unknown field")) }
+        sequence :: jet_cli_live_event_integer(event, "sequence", Val(0))
+        if sequence <= previous -> return Err(jet_cli_read_error("runtime event observation sequence is not strictly increasing"))
+        previous = sequence
+        source :: jet_cli_live_event_closed(event, "source", [String]{"Event", "AsyncEvent", "DecisionHook"})
+        event_id :: jet_cli_live_event_integer(event, "event_id", Val(0))
+        owner_id :: jet_cli_live_event_integer(event, "owner_id", Val(0))
+        subscription_id :: jet_cli_live_event_integer(event, "subscription_id", Val(0))
+        dispatch_id :: jet_cli_live_event_integer(event, "dispatch_id", Val(0))
+        lifecycle :: jet_cli_live_event_closed(event, "lifecycle", [String]{"Subscribed", "Removed", "DispatchStarted", "Queued", "Backpressured", "Running", "HandlerStarted", "HandlerDelivered", "HandlerFailed", "HandlerContinue", "HandlerTransform", "HandlerCancel", "HandlerFail", "Terminal"})
+        queued :: jet_cli_live_event_integer(event, "queued", Val(-1))
+        blocked :: jet_cli_live_event_integer(event, "blocked", Val(-1))
+        running :: jet_cli_live_event_integer(event, "running", Val(-1))
+        capacity :: jet_cli_live_event_integer(event, "capacity", Val(0))
+        overflow :: jet_cli_live_event_closed(event, "overflow", [String]{"None", "Block", "DropNewest", "DropOldest"})
+        priority :: jet_cli_live_event_integer(event, "priority", None)
+        failure :: jet_cli_live_event_closed(event, "failure", [String]{"None", "Handler", "Panic"})
+        terminal :: jet_cli_live_event_closed(event, "terminal", [String]{"None", "Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded", "Continue", "Cancel", "Fail"})
+        &lines.push("sequence={sequence} source={source} event={event_id} owner={owner_id} subscription={subscription_id} dispatch={dispatch_id} lifecycle={lifecycle} queued={queued} blocked={blocked} running={running} capacity={capacity} overflow={overflow} priority={priority} failure={failure} terminal={terminal}")
+    }
+    Ok(lines.join("\n"))
+}

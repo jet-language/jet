@@ -1,6 +1,6 @@
 //! #1629 — runtime-tier E0956 uses the shared diagnostic voice.
 //!
-//! Default `jet run` shares the TIR evaluator with comptime. When that
+//! The in-process evaluator shares the TIR evaluator with comptime. When that
 //! evaluator hits an unsupported construct, every tier renders the same
 //! E0956 what/why/fix text.
 
@@ -8,22 +8,7 @@ use std::fs;
 
 mod common;
 
-use jet::Interpreter::run_jit_once;
-use jet_foundation::JitBackend::RunOutcome;
-
-fn skip_if_cranelift_host_unsupported() -> bool {
-    if jet_jit::cranelift_host_supported() {
-        false
-    } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-        panic!(
-            "cranelift-jit host path unsupported on this architecture \
-             (JET_REQUIRE_CRANELIFT_HOST=1)"
-        );
-    } else {
-        eprintln!("note: cranelift-jit host path unsupported; skipping run-tier diag assertion");
-        true
-    }
-}
+use jet::Interpreter::RunOutcome;
 
 #[test]
 fn e1112_row_text_matches_aot_run_and_interpreter() {
@@ -45,11 +30,11 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
 
     let aot = jet::compile_with_path(&src, &path)
         .expect_err("AOT front end must reject an empty task combinator");
-    let run = match run_jit_once(&path) {
+    let run = match crate::common::dev_run(&path, false, false) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E1112: {other:?}"),
+        other => panic!("jet run must reject E1112: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E1112: {other:?}"),
     };
@@ -76,7 +61,7 @@ fn e1112_row_text_matches_aot_run_and_interpreter_inner() {
     );
     assert_eq!(expected.len(), 3);
     assert!(expected.iter().all(|(code, ..)| code == "E1112"));
-    for (tier, diags) in [("default jet run", run), ("interpreter", interpreter)] {
+    for (tier, diags) in [("jet run", run), ("interpreter", interpreter)] {
         assert_eq!(
             shape(&diags),
             expected,
@@ -116,9 +101,6 @@ fn e0956_row_text_matches_aot_run_and_interpreter() {
 }
 
 fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
-    if skip_if_cranelift_host_unsupported() {
-        return;
-    }
     let file =
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui/comptime_panic.jet");
     let path = file.to_string_lossy().into_owned();
@@ -127,11 +109,11 @@ fn e0956_row_text_matches_aot_run_and_interpreter_inner() {
 
     let aot = jet::compile_with_path(&src, &path)
         .expect_err("AOT front end must reject the unsupported comptime construct");
-    let run = match run_jit_once(&path) {
+    let run = match crate::common::dev_run(&path, false, false) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E0956: {other:?}"),
+        other => panic!("jet run must reject E0956: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E0956: {other:?}"),
     };
@@ -205,11 +187,11 @@ fn e0999_row_fix_matches_aot_run_and_interpreter_inner() {
 
     let aot = jet::compile_with_path(&src, &path)
         .expect_err("AOT front end must reject a bare marker with brackets");
-    let run = match run_jit_once(&path) {
+    let run = match crate::common::dev_run(&path, false, false) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E0999: {other:?}"),
+        other => panic!("jet run must reject E0999: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E0999: {other:?}"),
     };
@@ -290,11 +272,11 @@ fn e0311_suggested_fix_matches_aot_run_and_interpreter_inner() {
 
     let aot =
         jet::compile_with_path(&src, &path).expect_err("AOT front end must reject missing methods");
-    let run = match run_jit_once(&path) {
+    let run = match crate::common::dev_run(&path, false, false) {
         RunOutcome::Problems(diags) => diags,
-        other => panic!("default jet run must reject E0311: {other:?}"),
+        other => panic!("jet run must reject E0311: {other:?}"),
     };
-    let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+    let interpreter = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("interpreter gate must reject E0311: {other:?}"),
     };
@@ -393,15 +375,7 @@ fn run() {}
     assert_eq!(expected.len(), 1);
     assert_eq!(expected[0].0, "ORG01");
 
-    let interpreter = match jet::Interpreter::run_interpreter_once_with_args(&path, &[]) {
-        RunOutcome::Problems(diags) => diags,
-        other => panic!("interpreter must reject the programmable build check: {other:?}"),
-    };
-    let jit = match jet::Interpreter::run_jit_once_with_args(&path, &[]) {
-        RunOutcome::Problems(diags) => diags,
-        other => panic!("Cranelift run must reject the programmable build check: {other:?}"),
-    };
-    let dev = match jet::Interpreter::dev_iteration(&path, false, false) {
+    let dev = match crate::common::dev_run(&path, false, true) {
         RunOutcome::Problems(diags) => diags,
         other => panic!("dev must reject the programmable build check: {other:?}"),
     };
@@ -409,8 +383,6 @@ fn run() {}
         .expect_err("web checking must reject the programmable build check");
 
     for (tier, diags) in [
-        ("Cranelift run", jit),
-        ("interpreter", interpreter),
         ("dev", dev),
         ("web", web),
     ] {
@@ -457,11 +429,11 @@ fn pattern_hole_reuse_reports_and_repairs_match_run_tiers() {
                 let report_path = jet::Diagnostics::ReportPath::from_path(&file);
                 let expected_json = jet::render_all_json(&report_path, &source, &aot);
                 assert_eq!(jet::render_diagnostics(&shown, &source, &aot), snapshot);
-                let run = match run_jit_once(&path) {
+                let run = match crate::common::dev_run(&path, false, false) {
                     RunOutcome::Problems(diags) => diags,
                     other => panic!("{position}: run must refuse the hole: {other:?}"),
                 };
-                let interpreter = match jet::Interpreter::dev_iteration(&path, false, true) {
+                let interpreter = match crate::common::dev_run(&path, false, true) {
                     RunOutcome::Problems(diags) => diags,
                     other => panic!("{position}: interpreter must refuse the hole: {other:?}"),
                 };

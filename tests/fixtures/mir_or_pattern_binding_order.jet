@@ -1,0 +1,31 @@
+enum ReorderedPatternProbe {
+    Policy(ignored: Int, args: [Int], callee: String)
+    Call(callee: String, args: [Int])
+}
+enum NestedLayoutProbe {
+    C
+    CAligned(value: Int, ignored: Int)
+    Other
+}
+fn reordered_bindings(value: ReorderedPatternProbe) {
+    if value == {
+        .Policy(_, args, callee) | .Call(callee, args) -> {
+            print(callee)
+            print(args.len())
+        }
+    }
+}
+fn nested_layout(value: NestedLayoutProbe?) -> Bool Never! {
+    if value == {
+        .Val(.C) | .Val(.CAligned(_, _)) -> true
+        else -> false
+    }
+}
+fn run() {
+    reordered_bindings(ReorderedPatternProbe.Policy{ignored: 1, args: [1, 2], callee: "policy"})
+    reordered_bindings(ReorderedPatternProbe.Call{callee: "call", args: [3]})
+    print(nested_layout(Val(NestedLayoutProbe.C)))
+    print(nested_layout(Val(NestedLayoutProbe.CAligned{value: 8, ignored: 0})))
+    print(nested_layout(None))
+    print(nested_layout(Val(NestedLayoutProbe.Other)))
+}

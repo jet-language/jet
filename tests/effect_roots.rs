@@ -51,6 +51,7 @@ authority: { holds: { deny: [FFI] } }
         name: "foreign-dep".to_string(),
         effects: EffectSet::from(leaves.map(str::to_string)),
         effect_sites: std::collections::BTreeMap::new(),
+        effect_witnesses: std::collections::BTreeMap::new(),
         panic_sites: Vec::new(),
         boundary_span: None,
     };
@@ -139,7 +140,7 @@ fn i9_aot_runs_the_ffi_leaf_row() {
 
 #[test]
 fn i9_jit_runs_the_ffi_leaf_row() {
-    let (code, stdout, stderr) = tir_support::jit_run("ffi_leaf_jit", FFI_LEAF_SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("ffi_leaf_jit", FFI_LEAF_SOURCE);
     assert_eq!(code, 0, "JIT stderr: {stderr}");
     assert_eq!(stdout, "ffi leaf\n");
 }
@@ -147,7 +148,7 @@ fn i9_jit_runs_the_ffi_leaf_row() {
 #[test]
 fn i9_interpreter_runs_the_ffi_leaf_row() {
     let (code, stdout, stderr) =
-        tir_support::interpreter_run("ffi_leaf_interpreter", FFI_LEAF_SOURCE);
+        tir_support::default_run("ffi_leaf_interpreter", FFI_LEAF_SOURCE);
     assert_eq!(code, 0, "interpreter stderr: {stderr}");
     assert_eq!(stdout, "ffi leaf\n");
 }

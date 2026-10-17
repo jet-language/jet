@@ -12,7 +12,7 @@
 // effect projections; it must not grow a second Core parser or renderer.
 
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
@@ -36,6 +36,9 @@ const OPERATIONS_DOC_PATH = "Docs/spec/reference/core-library.md";
 const OPERATIONS_BEGIN = "<!-- BEGIN GENERATED COLLECTION OPERATIONS -->";
 const OPERATIONS_END = "<!-- END GENERATED COLLECTION OPERATIONS -->";
 
+const RESERVED_SOURCE_PATH = "crates/jet-foundation/src/Collections.rs";
+const RESERVED_BEGIN = "// BEGIN GENERATED RESERVED TYPES";
+const RESERVED_END = "// END GENERATED RESERVED TYPES";
 const EFFECT_BEGIN = "// BEGIN GENERATED EFFECT DECLARATIONS";
 const EFFECT_END = "// END GENERATED EFFECT DECLARATIONS";
 const BUILD_EFFECT_BEGIN = "// BEGIN GENERATED BUILD EFFECT DECLARATIONS";
@@ -304,12 +307,13 @@ function writeEffects(source, facts) {
   writeFileSync(file(BUILD_EFFECTS_PATH), buildEffects);
 }
 
-// Collection operation rows: one `collection_op(...)` or `collection_law(...)`
-// call per line inside the marked Jet tables. The Jet compiler type-checks the
-// rows; this projection only checks table-level laws (unique receiver/method
-// keys and known laws) and renders the reference tables.
-const OPERATION_ROW = /collection_op\(CollectionReceivers\.(\w+), "(\w+)", (\d+), (\d+), CollectionAccess\.(\w+), \[CollectionArg\]\{([^}]*)\}, CollectionResult\.(\w+), (.+), CollectionLaw\.(\w+), "([^"]*)"\)/;
-const LAW_ROW = /collection_law\(CollectionLaw\.(\w+), "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)", "([^"]*)"\)/;
+// Collection operation rows: one `CollectionOperationRow{...}` or
+// `CollectionLawFacts{...}` literal per line inside the marked Jet tables. The
+// Jet compiler type-checks the rows; this projection only checks table-level
+// laws (unique receiver/method keys and known laws) and renders the reference
+// tables.
+const OPERATION_ROW = /^CollectionOperationRow\{receivers: CollectionReceivers\.(\w+), name: "(\w+)", minimum_arity: (\d+), maximum_arity: (\d+), access: CollectionAccess\.(\w+), args: \[CollectionArg\]\{([^}]*)\}, result: CollectionResult\.(\w+), op: (.+), law: CollectionLaw\.(\w+), empty: "([^"]*)", status: CollectionStatus\.(\w+)\},?$/;
+const LAW_ROW = /^CollectionLawFacts\{law: CollectionLaw\.(\w+), timing: "([^"]*)", result: "([^"]*)", callbacks: "([^"]*)", stop: "([^"]*)", failure: "([^"]*)", buffering: "([^"]*)"\},?$/;
 const RECEIVER_TEXT = {
   List: "`[T]`", Iter: "`Iter<T>`", View: "`View<T>`", Sequence: "`[T]`, `Iter<T>`",
   Map: "`[K:V]`", Set: "`Set<T>`", Rank: "`Rank<T>`", Bits: "`Bits`", Tally: "`Tally<T>`",
@@ -321,6 +325,7 @@ const ACCESS_TEXT = {
 };
 const ARG_TEXT = {
   Element: "item", Key: "key", Value: "value", Integer: "Int", Text: "String",
+  IntegerList: "[Int]", DisjointFn: "(ViewMut<item>, ViewMut<item>) -> T",
   RemoveBy: "RemoveBy", ElementList: "[item]", KeyList: "[key]", SameKind: "same kind",
   Entries: "map", Seed: "seed", ItemFn: "(item) -> T", ItemPredicate: "(item) -> Bool",
   PairPredicate: "(item, item) -> Bool", Accumulator: "(acc, item) -> acc",
@@ -333,7 +338,7 @@ const STATUS_TEXT = { Current: "current", SourceOnly: "source-only", Proposed: "
 
 function markedLines(source, begin, end) {
   const text = readSection(source, begin, end, OPERATIONS_SOURCE_PATH);
-  return text.split(/\r?\n/).slice(1, -1).map((line) => line.trim()).filter((line) => line.startsWith("collection_"));
+  return text.split(/\r?\n/).slice(1, -1).map((line) => line.trim()).filter((line) => line.startsWith("Collection"));
 }
 
 function parseOperationContract(source) {
@@ -348,8 +353,8 @@ function parseOperationContract(source) {
   const keys = new Set();
   for (const line of markedLines(source, "// BEGIN COLLECTION OPERATIONS", "// END COLLECTION OPERATIONS")) {
     const match = OPERATION_ROW.exec(line) ?? fail(`${OPERATIONS_SOURCE_PATH}: unreadable operation row: ${line}`);
-    const [, receivers, name, minimum, maximum, access, args, , , law, empty] = match;
-    const status = line.startsWith("collection_op_source_only(") ? "SourceOnly" : "Current";
+    const [, receivers, name, minimum, maximum, access, args, , , law, empty, status] = match;
+    if (!(status in STATUS_TEXT)) fail(`${OPERATIONS_SOURCE_PATH}: ${receivers}.${name} has unknown status ${status}`);
     if (!laws.has(law)) fail(`${OPERATIONS_SOURCE_PATH}: ${receivers}.${name} names unknown law ${law}`);
     const families = receivers === "Sequence" ? ["List", "Iter"] : [receivers];
     for (const family of families) {
@@ -382,6 +387,7 @@ function generatedOperationContract(source) {
   }
   lines.push("", "| Receiver | Operation | Receiver ownership | Law | Empty result | Status |", "| --- | --- | --- | --- | --- | --- |");
   for (const row of operations) {
+    if (row.name.startsWith("__")) continue; // Reserved embedded-Core seams are not public operations.
     const shown = row.args.map((arg, index) => (index < row.minimum ? ARG_TEXT[arg] : `[${ARG_TEXT[arg]}]`));
     lines.push(`| ${RECEIVER_TEXT[row.receivers]} | \`${row.name}(${shown.join(", ")})\` | ${ACCESS_TEXT[row.access]} | ${row.law} | ${row.empty} | ${STATUS_TEXT[row.status]} |`);
   }
@@ -419,6 +425,40 @@ function checkCoreRecordRows() {
 function writeCoreRecordRows() {
   writeFileSync(file(CORE_RECORD_ROWS_PATH), generatedCoreRecordRows(ROOT));
 }
+// E0106 shares the seed's reserved vocabulary; Core ownership remains a
+// registration fact, not an exception in either table.
+function generatedReservedTypes() {
+  const constants = new Map();
+  const syntax = file("crates/jet-foundation/src/Syntax");
+  for (const name of readdirSync(syntax).filter(name => name.endsWith(".rs"))) {
+    for (const match of readFileSync(path.join(syntax, name), "utf8").matchAll(/pub const (\w+): &str = "([^"]+)";/g)) {
+      constants.set(match[1], match[2]);
+    }
+  }
+  const source = read(RESERVED_SOURCE_PATH);
+  const body = source.match(/pub const RESERVED_TYPES: &\[&str\] = &\[([\s\S]*?)\];/)?.[1];
+  if (!body) fail(`${RESERVED_SOURCE_PATH}: missing RESERVED_TYPES`);
+  const names = body.replace(/\/\/[^\n]*/g, "").split(",").map(value => value.trim()).filter(Boolean).map(value => {
+    if (/^"[^"]+"$/.test(value)) return JSON.parse(value);
+    const key = value.match(/^Syntax::(\w+)$/)?.[1];
+    if (!key || !constants.has(key)) fail(`${RESERVED_SOURCE_PATH}: unresolved reserved type ${value}`);
+    return constants.get(key);
+  });
+  return [RESERVED_BEGIN, `// Source: ${RESERVED_SOURCE_PATH}; regenerate with gen-core-tables.mjs --write`,
+    `SEMA_RESERVED_TYPES :: [String]{${names.map(name => JSON.stringify(name)).join(", ")}}`, RESERVED_END].join("\n");
+}
+
+function checkReservedTypes() {
+  if (readSection(read(OPERATIONS_SOURCE_PATH), RESERVED_BEGIN, RESERVED_END, OPERATIONS_SOURCE_PATH) !== generatedReservedTypes()) {
+    fail(`${OPERATIONS_SOURCE_PATH}: reserved types are stale; run gen-core-tables.mjs --write`);
+  }
+}
+
+function writeReservedTypes() {
+  writeFileSync(file(OPERATIONS_SOURCE_PATH), replaceSection(read(OPERATIONS_SOURCE_PATH),
+    RESERVED_BEGIN, RESERVED_END, generatedReservedTypes(), OPERATIONS_SOURCE_PATH));
+}
+
 
 function check() {
   const source = read(EFFECT_SOURCE_PATH);
@@ -427,6 +467,7 @@ function check() {
   validatePublicDispatcher(core, publicDispatcherRows());
   checkEffects(source, facts);
   checkOperationContract();
+  checkReservedTypes();
   const coreSource = read(CORE_SOURCE_PATH);
   validateGeneratedViews(coreSource, core);
   checkCoreRecordRows();
@@ -439,6 +480,7 @@ function write() {
   const core = ensureCoreNames();
   writeEffects(source, facts);
   writeOperationContract();
+  writeReservedTypes();
   // CoreModuleExports.rs and RingLayer.rs use the existing Core generator;
   // this coordinator never reimplements that schema.
   writeCoreViews();

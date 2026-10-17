@@ -1,0 +1,8 @@
+# Original tests/semindex.rs:1364-1380; source bytes and predicates retained.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; not a runtime PASS.
+fixture: semindex_indexes_loop_label_definition_and_dot_exit_references.fixture
+step: jet inspect semindex loop_label_refs.jet --json
+json: stdout doc $.semindex.definitions[?leaf_name="outer"][0].detail.kind = "local"
+json: stdout doc $.semindex.definitions[?leaf_name="outer"][0].detail.mutable = false
+json: stdout doc $.semindex.definitions[?leaf_name="outer"][0].detail.type = null
+json: stdout doc $.semindex.references[?name="outer"] #= 2

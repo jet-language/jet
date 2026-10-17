@@ -691,7 +691,7 @@ fn budget_imported_declaration_reports_owning_module_location() {
     fs::write(dir.join("src/perf_defs.jet"), r#"module perf.package {
     budgets: [Budget{ name: "imported-api", scope: .Package, metric: .PublicApiItems, comparison: .Absolute, limit: .AtMost(0) }],
 }
-pub fn imported() {}
+fn imported() {}
 "#).unwrap();
     let out = Command::new(jet())
         .args(["budget", "check", "--annotations", "github"])
@@ -1483,10 +1483,10 @@ fn typed_cli_entry_accepts_an_imported_argument_type() {
     fs::write(
         dir.join("args.jet"),
         r#"#CLI
-pub struct RunArgs {
-    #Doc("person to greet") pub name: String
-    pub retries: Int{2}
-    pub verbose: Bool
+struct RunArgs {
+    #Doc("person to greet") name: String
+    retries: Int{2}
+    verbose: Bool
 }
 "#,
     )
@@ -1531,12 +1531,12 @@ fn colliding_imported_cli_type_resolution_stays_in_codegen_sync() {
     let dir = isolated_cwd("shape_cli_ambiguous_imported_type");
     fs::write(
         dir.join("cli.jet"),
-        "#CLI\npub struct RunArgs { pub name: String }\n",
+        "#CLI\nstruct RunArgs { name: String }\n",
     )
     .unwrap();
     fs::write(
         dir.join("plain.jet"),
-        "pub struct RunArgs { pub name: String }\n",
+        "struct RunArgs { name: String }\n",
     )
     .unwrap();
     fs::write(
@@ -1573,7 +1573,7 @@ fn local_cli_type_wins_over_same_named_import() {
     let dir = isolated_cwd("shape_cli_local_type_precedence");
     fs::write(
         dir.join("other.jet"),
-        "pub struct RunArgs { pub name: String }\n",
+        "struct RunArgs { name: String }\n",
     )
     .unwrap();
     fs::write(

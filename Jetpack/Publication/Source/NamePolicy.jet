@@ -4,24 +4,24 @@ PUBLICATION_NAME_POLICY_WARN_DISTANCE :: prep { 2 }
 PUBLICATION_NAME_POLICY_BLOCK_DISTANCE :: prep { 1 }
 PUBLICATION_RESERVED_SUFFIXES :: prep { [String]{"-fixed", "-patched", "-bin"} }
 
-pub struct PublicationNamePolicyThresholds {
-    pub warn_distance: Int{PUBLICATION_NAME_POLICY_WARN_DISTANCE}
-    pub block_distance: Int{PUBLICATION_NAME_POLICY_BLOCK_DISTANCE}
+struct PublicationNamePolicyThresholds {
+    warn_distance: Int{PUBLICATION_NAME_POLICY_WARN_DISTANCE}
+    block_distance: Int{PUBLICATION_NAME_POLICY_BLOCK_DISTANCE}
 }
 
-pub enum PublicationNamePolicyFinding {
+enum PublicationNamePolicyFinding {
     ReservedSuffix(String)
     Confusable(existing: String)
     EditDistance(existing: String, distance: Int)
 }
 
-pub enum PublicationNamePolicyDecision {
+enum PublicationNamePolicyDecision {
     Allow
     Warn(PublicationNamePolicyFinding)
     Block(PublicationNamePolicyFinding)
 }
 
-pub fn publication_name_finding_reason(finding: PublicationNamePolicyFinding) -> String Never! {
+fn publication_name_finding_reason(finding: PublicationNamePolicyFinding) -> String Never! {
     if finding == {
         .ReservedSuffix(suffix) -> "it ends with reserved suffix `{suffix}`"
         .Confusable(existing) -> "it is visually confusable with existing package `{existing}`"
@@ -29,7 +29,7 @@ pub fn publication_name_finding_reason(finding: PublicationNamePolicyFinding) ->
     }
 }
 
-pub fn publication_name_finding_reference(finding: PublicationNamePolicyFinding) -> String Never! {
+fn publication_name_finding_reference(finding: PublicationNamePolicyFinding) -> String Never! {
     if finding == {
         .ReservedSuffix(suffix) -> suffix
         .Confusable(existing) -> existing
@@ -37,23 +37,23 @@ pub fn publication_name_finding_reference(finding: PublicationNamePolicyFinding)
     }
 }
 
-pub fn publication_name_is_blocked(decision: PublicationNamePolicyDecision) -> Bool Never! {
+fn publication_name_is_blocked(decision: PublicationNamePolicyDecision) -> Bool Never! {
     if decision == {
         .Block(_) -> true
         else -> false
     }
 }
 
-pub fn publication_name_finding(decision: PublicationNamePolicyDecision) -> PublicationNamePolicyFinding? Never! {
+fn publication_name_finding(decision: PublicationNamePolicyDecision) -> PublicationNamePolicyFinding? Never! {
     if decision == {
         .Allow -> None
         .Warn(finding) | .Block(finding) -> Val(finding)
     }
 }
 
-pub fn publication_name_diagnostic(decision: PublicationNamePolicyDecision, name: String) -> Diagnostic? Never! {
+fn publication_name_diagnostic(decision: PublicationNamePolicyDecision, name: String) -> Diagnostic? Never! {
     code :: if decision == {
-        .Allow -> return None
+        .Allow -> { return None }
         .Warn(_) -> "L2608"
         .Block(_) -> "E2608"
     }
@@ -65,13 +65,13 @@ pub fn publication_name_diagnostic(decision: PublicationNamePolicyDecision, name
     }, None))
 }
 
-pub fn publication_assess_name(name: String, existing_names: [String]) -> PublicationNamePolicyDecision Never! {
+fn publication_assess_name(name: String, existing_names: [String]) -> PublicationNamePolicyDecision Never! {
     publication_assess_name_with_thresholds(name, existing_names, PublicationNamePolicyThresholds{})
 }
 
 // Rust assess_name_with_thresholds: confusable matches precede nearest-distance
 // findings, and distance ties use the original name's UTF-8 lexical ordering.
-pub fn publication_assess_name_with_thresholds(name: String, existing_names: [String], thresholds: PublicationNamePolicyThresholds) -> PublicationNamePolicyDecision Never! {
+fn publication_assess_name_with_thresholds(name: String, existing_names: [String], thresholds: PublicationNamePolicyThresholds) -> PublicationNamePolicyDecision Never! {
     warn_distance :: thresholds.warn_distance
     block_distance :: math.min(thresholds.block_distance, warn_distance)
     skeleton :: publication_confusable_skeleton(name)
@@ -115,7 +115,7 @@ pub fn publication_assess_name_with_thresholds(name: String, existing_names: [St
 
 // Rust edit_distance / edit_distance_at_most: two rows, with a band for the
 // bounded policy query. Reuse row storage instead of allocating once per scalar.
-pub fn publication_edit_distance(left: String, right: String) -> Int Never! {
+fn publication_edit_distance(left: String, right: String) -> Int Never! {
     limit :: math.max(left.len(), right.len())
     publication_edit_distance_at_most(left, right, limit) ?? panic("Levenshtein distance cannot exceed the maximum scalar length")
 }
@@ -149,7 +149,7 @@ fn publication_edit_distance_at_most(left: String, right: String, limit: Int) ->
     None
 }
 
-pub fn publication_confusable_skeleton(name: String) -> String Never! {
+fn publication_confusable_skeleton(name: String) -> String Never! {
     parts := [String]{}
     // Rust lowercases EACH scalar (not contextual whole-string casing), then
     // maps it through one scalar match: no per-scalar text or substring scans.

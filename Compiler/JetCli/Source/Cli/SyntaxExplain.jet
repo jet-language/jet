@@ -1,0 +1,257 @@
+// Offline syntax and policy branches of crates/jet-cli Explain.rs.
+// The dictionary is Jet-owned data; source-site policy/fact queries belong to the loader.
+use core.files as cli_files
+use core.sys as cli_sys
+use jet_foundation.[
+    CORE_MODULE_EXPORTS,
+    DiagnosticExplanation,
+    TAppliedRule,
+    TAppliedRuleSignature,
+    diagnostic_explanation_render,
+    diagnostic_registry_row,
+    marker_source_read,
+    policy_key_parse,
+    policy_key_name,
+]
+
+fn jet_cli_syntax_lookup(query: String) -> Int? Never! {
+    wanted :: jet_cli_ascii_lower(query.trim())
+    loop (index, row) in JET_CLI_SYNTAX_ROWS {
+        if wanted == row.query || wanted == row.display_query -> return Val(index)
+    }
+    None
+}
+
+fn jet_cli_syntax_display(row: JetCLISyntaxRow) -> String Never! {
+    if row.kind == JetCLISyntaxKind.Marker -> "#{row.token}" else -> row.token
+}
+
+fn jet_cli_syntax_plain_text(row: JetCLISyntaxRow) -> String Never! {
+    text := ""
+    loop (index, meaning) in row.meanings {
+        if index > 0 -> text = "{text}\n"
+        indent := ""
+        if meaning.position != "" {
+            text = "{text}{meaning.position}:\n"
+            indent = "  "
+        }
+        text = "{text}{indent}{meaning.text}\n{indent}Example:\n"
+        loop line in meaning.example.lines() -> text = "{text}{indent}  {line}\n"
+        if meaning.afterwards != "" -> text = "{text}{indent}Afterwards: {meaning.afterwards}\n"
+        if meaning.related_codes.len() > 0 -> text = "{text}{indent}Related: {meaning.related_codes.join(", ")}\n"
+    }
+    text
+}
+
+fn jet_cli_syntax_ascii_alphanumeric(code: Int) -> Bool Never! {
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122)
+}
+
+// Syntax/dictionary.rs looks_like_query: package references are not typo queries.
+fn jet_cli_syntax_query(query: String) -> Bool Never! {
+    text :: query.trim()
+    if text.starts_with("package-overlay:") -> return false
+    if text.contains("@") && !text.starts_with("@") -> return false
+    raw :: text.bytes()
+    colon := -1
+    loop (index, byte) in raw {
+        if byte == (U8{58}) {
+            colon = index
+            break
+        }
+    }
+    if colon > 0 && colon + 1 < raw.len() {
+        prefix := true
+        loop index in 0..<colon {
+            code :: Int.from_u8(raw[index])
+            if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 45 && code != 46 && code != 47 -> prefix = false
+        }
+        if prefix {
+            loop index in (colon + 1)..<raw.len() {
+                if jet_cli_syntax_ascii_alphanumeric(Int.from_u8(raw[index])) -> return false
+            }
+        }
+    }
+    if text.starts_with("@") || text.starts_with("#") || text.starts_with("::") || text.starts_with(":=") -> return true
+    loop byte in raw {
+        code :: Int.from_u8(byte)
+        if !jet_cli_syntax_ascii_alphanumeric(code) && code != 95 && code != 46 && code != 45 && code != 47 && code != 64 -> return true
+    }
+    false
+}
+
+fn jet_cli_syntax_nearest(query: String) -> String Never! {
+    wanted :: jet_cli_ascii_lower(query.trim())
+    best := -1
+    closest := -1
+    loop (index, row) in JET_CLI_SYNTAX_ROWS {
+        distance :: jet_cli_edit_distance(wanted, row.display_query)
+        if best < 0 || distance < best {
+            best = distance
+            closest = index
+        }
+    }
+    if closest < 0 -> "a registered syntax token" else -> jet_cli_syntax_display(JET_CLI_SYNTAX_ROWS[closest])
+}
+
+// Source queries must be selected before syntax typo classification.
+// Explain.rs build_fact_name: these names resolve against a loader-owned writer chain.
+fn jet_cli_explain_build_fact_name(query: String) -> String? Never! {
+    name :: jet_cli_ascii_lower(query.trim().removeprefix("$"))
+    fixed :: if name == {
+        "package.name" | "build.package.name" -> Val("Build.Package.Name")
+        "package.version" | "build.package.version" -> Val("Build.Package.Version")
+        "build.os" -> Val("Build.OS")
+        "build.profile" -> Val("Build.Profile")
+        "build.stamp.git" -> Val("Build.Stamp.Git")
+        "build.stamp.dirty" -> Val("Build.Stamp.Dirty")
+        "build.stamp.toolchain" -> Val("Build.Stamp.Toolchain")
+        "build.stamp.at" -> Val("Build.Stamp.At")
+        else -> None
+    }
+    if fixed != None -> return fixed
+    if !name.starts_with("build.settings.") -> return None
+    key :: name.removeprefix("build.settings.")
+    if key == "" || key.contains(".") -> return None
+    Val("Build.Settings.{key}")
+}
+
+// None leaves diagnostic, build-fact, and registration-row queries to their owners.
+fn jet_cli_explain_syntax(query: String, verbose: Bool, color: Bool, json: Bool) -> JetCLIPlan? Never! {
+    if jet_cli_syntax_lookup(query) == .Val(index) {
+        row :: JET_CLI_SYNTAX_ROWS[index]
+        meaning :: if row.meanings.len() > 0 -> row.meanings[0].text else -> ""
+        explanation :: DiagnosticExplanation{code: query.trim(), stage: "syntax registry", meaning: meaning, what: Val(jet_cli_syntax_plain_text(row).trim_end()), why: None, fix: None, example: None, retired: false}
+        if verbose && !json {
+            text :: "{diagnostic_explanation_render(explanation, color)}\nRegistry name: {row.registry_name}\nDecision: {row.decision}\n"
+            return Val(jet_cli_renderable(text, false))
+        }
+        return Val(jet_cli_explanation_output(explanation, color, json))
+    }
+    if jet_cli_syntax_query(query) {
+        row :: diagnostic_registry_row("E2106") ?? panic("syntax query diagnostic is registered")
+        closest :: jet_cli_syntax_nearest(query)
+        what :: row.what.replace("{{token}}", query)
+        fix :: row.fix.replace("{{closest}}", closest)
+        return Val(jet_cli_inspect_b_report("E2106", what, row.why, fix, color, json, JET_DRIVER_EXIT_USER_ERROR))
+    }
+    None
+}
+
+// Call only for a standalone query, after syntax lookup, as Explain.rs lookup does.
+fn jet_cli_explain_policy(query: String, color: Bool, json: Bool) -> JetCLIPlan? Never! {
+    key :: policy_key_parse(query.trim()) ?? return None
+    name :: policy_key_name(key)
+    explanation :: DiagnosticExplanation{code: name, stage: "policy", meaning: "compiler-owned scoped policy `{name}`", what: Val("`{name}` participates in the package → module → function → block policy ladder."), why: Val("one registry owns applicability, inheritance, conflicts, and provenance"), fix: Val("inspect the semantic index at the target site for the effective value and full declaration chain"), example: None, retired: false}
+    Val(jet_cli_explanation_output(explanation, color, json))
+}
+
+// The registered rule rows: Prelude/Markers.jet (the file the Rust host
+// embeds, MarkerSource.rs `MARKER_SOURCE`) read from the toolchain tree.
+enum JetCLIRuleRows {
+    Loaded(rules: [TAppliedRule])
+    Failed(plan: JetCLIPlan)
+}
+
+fn jet_cli_rule_rows(color: Bool, json: Bool) -[FS, Env]> JetCLIRuleRows Never! {
+    fix :: "set `{JET_CLI_TOOLCHAIN_ROOT_ENV}` to the Jet toolchain source tree, the directory that holds `Core/` and `crates/`"
+    toolchain :: cli_sys.get(JET_CLI_TOOLCHAIN_ROOT_ENV) ?? return JetCLIRuleRows.Failed{plan: jet_cli_inspect_b_fail("E2105", "`{JET_CLI_TOOLCHAIN_ROOT_ENV}` is not set, so the marker registry can't be read", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)}
+    path :: jet_cli_authority_path(toolchain, JET_CLI_MARKER_SOURCE_PATH)
+    markers :: cli_files.read(path) ?? return JetCLIRuleRows.Failed{plan: jet_cli_inspect_b_fail("E2105", "can't read the marker registry `{path}`: {err}", fix, color, json, JET_DRIVER_EXIT_USER_ERROR)}
+    JetCLIRuleRows.Loaded{rules: marker_source_read(markers)}
+}
+
+// Policy.rs `RuleSignature::render`: `(name: Type{default}, …, Variadic...)`.
+fn jet_cli_rule_signature_render(signature: TAppliedRuleSignature) -> String Never! {
+    parts := [String]{}
+    loop param in signature.params {
+        default :: if param.default_source == .Val(value) -> "{{{value}}}" else -> ""
+        &parts.push("{param.name}: {param.source_type}{default}")
+    }
+    if signature.variadic_source_type == .Val(source_type) -> &parts.push("{source_type}...")
+    "({parts.join(", ")})"
+}
+
+// Rust `{:?}` of a `&str`: quoted, with `\`, `"` and line controls escaped.
+fn jet_cli_rust_debug_str(value: String) -> String Never! {
+    "\"{value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\t", "\\t")}\""
+}
+
+// Explain.rs `marker_argument_declarations`: the `core.compiler.lang` menus
+// (Policy.rs `RULE_ARG_DECLARATIONS`) the signature names, sorted, once each.
+fn jet_cli_rule_argument_declarations(signature: TAppliedRuleSignature) -> String Never! {
+    menus := [String]{}
+    loop module_row in CORE_MODULE_EXPORTS {
+        if module_row.module_name == "core.compiler.lang" -> menus = module_row.members
+    }
+    named := [String]{}
+    loop param in signature.params -> &named.push(param.source_type)
+    if signature.variadic_source_type == .Val(source_type) -> &named.push(source_type)
+    declarations := [String]{}
+    loop name in named {
+        if menus.contains(name) -> &declarations.push(" `core.compiler.lang.{name}`")
+    }
+    &declarations.sort()
+    unique := [String]{}
+    loop declaration in declarations {
+        if unique.len() == 0 || unique[unique.len() - 1] != declaration -> &unique.push(declaration)
+    }
+    if unique.len() == 0 -> return ""
+    " Argument declarations: {unique.join(",")}."
+}
+
+// Explain.rs `rule_explanation`: one registered rule row's typed signature,
+// sites and status (D-MARK-FORM1=A: the signature says whether parentheses
+// may and must appear).
+fn jet_cli_rule_explanation(rule: TAppliedRule) -> DiagnosticExplanation Never! {
+    signature :: rule.signature
+    required := 0
+    loop param in signature.params {
+        if param.default_source == None -> required += 1
+    }
+    arguments :: if {
+        required > 0 || (signature.params.len() == 0 && signature.variadic != None) -> "required"
+        signature.params.len() > 0 || signature.variadic != None -> "optional"
+        else -> "none"
+    }
+    retired := false
+    status := "Active"
+    fix := "move the rule to one of its registered sites"
+    if rule.status == .Retired(replacement) {
+        retired = true
+        status = "Retired {{ replacement: {jet_cli_rust_debug_str(replacement)} }}"
+        fix = "replace it with `{replacement}`"
+    }
+    what :: "arguments: {arguments}; repeatable: {rule.repeatable}; status: {status}; attachment sites: [{rule.sites.join(", ")}].{jet_cli_rule_argument_declarations(signature)}"
+    DiagnosticExplanation{code: rule.name, stage: "rule applicability", meaning: "`#{rule.name}{jet_cli_rule_signature_render(signature)}`", what: Val(what), why: Val("resolution is {rule.resolution}; site-bound authority never becomes ambient policy"), fix: Val(fix), example: None, retired: retired}
+}
+
+fn jet_cli_rule_named(rules: [TAppliedRule], name: String) -> TAppliedRule? Never! {
+    loop rule in rules {
+        if rule.name == name -> return Val(rule)
+    }
+    None
+}
+
+// D-META-REG1=A (Explain.rs `lookup`): a marker syntax row with a registered
+// rule answers from that one row, never from the dictionary's placeholder, so
+// a retired marker is never shown as live. With `bare`, a query that is no
+// syntax row but names a registered rule row answers the same way (the
+// registration-table leaf of `lookup`). None leaves the query to the syntax
+// and policy branches.
+fn jet_cli_explain_rule(query: String, bare: Bool, color: Bool, json: Bool) -[FS, Env]> JetCLIPlan? Never! {
+    syntax :: jet_cli_syntax_lookup(query)
+    if syntax == None && !bare -> return None
+    name := query.trim()
+    if syntax == .Val(index) {
+        row :: JET_CLI_SYNTAX_ROWS[index]
+        if row.kind != JetCLISyntaxKind.Marker -> return None
+        name = row.token
+    }
+    rules :: if jet_cli_rule_rows(color, json) == {
+        .Loaded(rows) -> rows
+        .Failed(plan) -> { return Val(plan) }
+    }
+    rule :: jet_cli_rule_named(rules, name) ?? return None
+    Val(jet_cli_explanation_output(jet_cli_rule_explanation(rule), color, json))
+}

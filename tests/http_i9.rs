@@ -1,8 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 
-use jet::Interpreter::dev_iteration;
-use jet_foundation::JitBackend::RunOutcome;
+use jet::Interpreter::RunOutcome;
 
 mod common;
 
@@ -32,7 +31,7 @@ fn source_http_parsers_bound_body_before_one_copy_projection() {
         .expect("byte projection");
     assert!(slice.contains("raw.slice(start, end)"));
     assert!(!slice.contains("push("), "projection must not grow a second list");
-    assert!(!slice.contains("~out"), "projection must not copy the result again");
+    assert!(!slice.contains("out.copy()"), "projection must not copy the result again");
 }
 struct Output {
     stdout: String,
@@ -51,14 +50,9 @@ fn on_large_stack(work: impl FnOnce() + Send) {
     });
 }
 
-fn skip_if_cranelift_host_unsupported() -> bool {
-    if jet_jit::cranelift_host_supported() {
-        false
-    } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-        panic!("Cranelift host required but unavailable");
-    } else {
-        true
-    }
+/// The default `jet dev` iteration builds and executes, so it needs rustc.
+fn skip_without_rustc() -> bool {
+    !common::have_rustc()
 }
 
 fn run(source: &str, name: &str) -> Output {
@@ -75,8 +69,7 @@ fn run_with_mode(source: &str, name: &str, use_interpreter: bool) -> Output {
     .unwrap();
     let file = dir.join("main.jet");
     fs::write(&file, source).unwrap();
-    jet_jit::reset_jit_trace_for_test();
-    let outcome = dev_iteration(file.to_str().unwrap(), false, use_interpreter);
+    let outcome = crate::common::dev_run(file.to_str().unwrap(), false, use_interpreter);
     let output = match outcome {
         RunOutcome::Ran {
             stdout,
@@ -359,9 +352,8 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     state :: shared HandlerState{label: "before registration"}
     mux :: server.mux()
     mux.get("/zero", () -> Ok(server.response(200, "zero")))
-    mux.get("/items/:id", (req: HTTPRequest) -> {
+    mux.get("/items/:id", (id: String, req: HTTPRequest) -> {
         header :: &req.header("x-state") ?? "missing"
-        id :: req.param("id") ?? "missing"
         path :: req.path()
         return Ok(server.response(200, "{path}|{id}|{header}|{state.label}"))
     })
@@ -413,8 +405,8 @@ fn run() (HTTPError | NetError | TaskFailure)! {
     store :: shared [String:String]{}
     mux :: server.mux()
     mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
-    mux.put("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, true))
-    mux.get("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, false))
+    mux.put("/kv/:key", (key: String, req: HTTPRequest) -> kv(key, req, store, true))
+    mux.get("/kv/:key", (key: String, req: HTTPRequest) -> kv(key, req, store, false))
     mux.get("/shutdown", () -> reply(200, "{{\"bye\":true}}"))
     server_task :: task {
         server.serve_once_listener(listener, mux) ?? panic("serve")
@@ -887,9 +879,9 @@ fn run() (HTTPError | NetError | TaskFailure)! {
 
 #[test]
 fn http_text_projections_preserve_default_limits_and_body_lifecycle_on_all_supported_tiers() {
-    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_default_run = common::have_rustc();
     let has_rustc = common::have_rustc();
-    let tier_count = 1 + usize::from(has_cranelift) + usize::from(has_rustc);
+    let tier_count = 1 + usize::from(has_default_run) + usize::from(has_rustc);
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
     let address = listener.local_addr().expect("address");
     let server = std::thread::spawn(move || {
@@ -950,8 +942,8 @@ over=err:BodyTooLarge:1048576\n\
 binary=err:UnsupportedEncoding\n\
 truncated=err:IO:transport\n";
     on_large_stack(|| {
-        if has_cranelift {
-            let output = run_with_mode(&source, "http_i9_text_contract_jit", false);
+        if has_default_run {
+            let output = run_with_mode(&source, "http_i9_text_contract_default", false);
             assert_eq!(output.stdout, expected);
             assert_eq!(output.stderr, "");
             assert_eq!(output.exit_code, 0);
@@ -983,19 +975,17 @@ fn http_web_defaults_forced_deopt_uses_prelude_ambient() {
         assert!(output
             .stdout
             .contains("CORS credentials need named origins."));
-        assert!(jet_jit::deopt_invoked_for_test());
-        assert!(!jet_jit::fallback_invoked_for_test());
     });
 }
 
 #[test]
 fn http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers() {
-    if skip_if_cranelift_host_unsupported() {
+    if skip_without_rustc() {
         return;
     }
     on_large_stack(|| {
         for (use_interpreter, name) in [
-            (false, "http_i9_routes_jit"),
+            (false, "http_i9_routes_default"),
             (true, "http_i9_routes_interpreter"),
         ] {
             let output = run_with_mode(ROUTE_HANDLERS, name, use_interpreter);
@@ -1008,11 +998,11 @@ fn http_route_handlers_preserve_arity_context_and_errors_on_both_dev_tiers() {
 
 #[test]
 fn http_service_get_put_get_404_matches_across_aot_run_and_interpreter() {
-    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_default_run = common::have_rustc();
     let has_rustc = common::have_rustc();
     let mut modes = vec![(true, false, "http_i9_service_interpreter")];
-    if has_cranelift {
-        modes.insert(0, (false, false, "http_i9_service_jit"));
+    if has_default_run {
+        modes.insert(0, (false, false, "http_i9_service_default"));
     }
     if has_rustc {
         modes.push((false, true, "http_i9_service_aot"));
@@ -1044,13 +1034,13 @@ fn http_service_get_put_get_404_matches_across_aot_run_and_interpreter() {
 
 #[test]
 fn hostile_http_and_websocket_urls_are_rejected_on_both_dev_tiers() {
-    let modes = if jet_jit::cranelift_host_supported() {
+    let modes = if common::have_rustc() {
         vec![
-            (false, "http_i9_hostile_jit"),
+            (false, "http_i9_hostile_default"),
             (true, "http_i9_hostile_interpreter"),
         ]
-    } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-        panic!("Cranelift host required but unavailable");
+    } else if std::env::var("JET_REQUIRE_RUSTC").as_deref() == Ok("1") {
+        panic!("rustc required but unavailable");
     } else {
         vec![(true, "http_i9_hostile_interpreter")]
     };
@@ -1167,11 +1157,11 @@ fn run() -[IO, Net, Time.Wait]> {
 
 #[test]
 fn source_http_message_framing_is_status_aware_on_all_supported_tiers() {
-    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_default_run = common::have_rustc();
     let has_rustc = common::have_rustc();
     let mut modes = vec![(true, false, "http_i9_message_framing_interpreter")];
-    if has_cranelift {
-        modes.insert(0, (false, false, "http_i9_message_framing_jit"));
+    if has_default_run {
+        modes.insert(0, (false, false, "http_i9_message_framing_default"));
     }
     if has_rustc {
         modes.push((false, true, "http_i9_message_framing_aot"));
@@ -1196,16 +1186,7 @@ invalid-header-value=rejected:InvalidHeader\n";
                 }
             } else {
                 let output = run_with_mode(HTTP_SOURCE_FRAMING, name, use_interpreter);
-                if name == "http_i9_message_framing_jit" {
-                    assert!(
-                        jet_jit::jit_executed_for_test(),
-                        "{name} did not execute in resident Cranelift"
-                    );
-                    assert!(
-                        !jet_jit::deopt_invoked_for_test()
-                            && !jet_jit::fallback_invoked_for_test(),
-                        "{name} deopted to the interpreter or used fallback"
-                    );
+                if name == "http_i9_message_framing_default" {
                 }
                 output
             };
@@ -1246,11 +1227,11 @@ fn run() {
 
 #[test]
 fn source_boolean_short_circuit_guards_are_lazy_on_all_supported_tiers() {
-    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_default_run = common::have_rustc();
     let has_rustc = common::have_rustc();
     let mut modes = vec![(true, false, "http_i9_short_circuit_interpreter")];
-    if has_cranelift {
-        modes.insert(0, (false, false, "http_i9_short_circuit_jit"));
+    if has_default_run {
+        modes.insert(0, (false, false, "http_i9_short_circuit_default"));
     }
     if has_rustc {
         modes.push((false, true, "http_i9_short_circuit_aot"));
@@ -1273,16 +1254,7 @@ short-and-other=false\n";
                 }
             } else {
                 let output = run_with_mode(HTTP_SOURCE_SHORT_CIRCUIT, name, use_interpreter);
-                if name == "http_i9_short_circuit_jit" {
-                    assert!(
-                        jet_jit::jit_executed_for_test(),
-                        "{name} did not execute in resident Cranelift"
-                    );
-                    assert!(
-                        !jet_jit::deopt_invoked_for_test()
-                            && !jet_jit::fallback_invoked_for_test(),
-                        "{name} deopted to the interpreter or used fallback"
-                    );
+                if name == "http_i9_short_circuit_default" {
                 }
                 output
             };
@@ -1301,7 +1273,7 @@ short-and-other=false\n";
 
 #[test]
 fn hostile_http_response_lengths_are_rejected_on_both_dev_tiers() {
-    if skip_if_cranelift_host_unsupported() {
+    if skip_without_rustc() {
         return;
     }
 
@@ -1340,7 +1312,7 @@ fn run() {
 
     on_large_stack(|| {
         for (use_interpreter, name) in [
-            (false, "http_i9_oversized_response_jit"),
+            (false, "http_i9_oversized_response_default"),
             (true, "http_i9_oversized_response_interpreter"),
         ] {
             let output = run_with_mode(&source, name, use_interpreter);
@@ -1358,13 +1330,13 @@ fn run() {
 // `tests/http_client_law.rs` covers that separate, protocol-configured path.
 #[test]
 fn hostile_http_response_sinks_reject_streamed_overruns_on_both_dev_tiers() {
-    let modes = if jet_jit::cranelift_host_supported() {
+    let modes = if common::have_rustc() {
         vec![
-            (false, "http_i9_response_sinks_jit"),
+            (false, "http_i9_response_sinks_default"),
             (true, "http_i9_response_sinks_interpreter"),
         ]
-    } else if std::env::var("JET_REQUIRE_CRANELIFT_HOST").as_deref() == Ok("1") {
-        panic!("Cranelift host required but unavailable");
+    } else if std::env::var("JET_REQUIRE_RUSTC").as_deref() == Ok("1") {
+        panic!("rustc required but unavailable");
     } else {
         vec![(true, "http_i9_response_sinks_interpreter")]
     };
@@ -1414,13 +1386,13 @@ gzip-request=rejected:InvalidFraming\n";
 
 #[test]
 fn hostile_chunked_body_deadline_ends_request_on_both_dev_tiers() {
-    if skip_if_cranelift_host_unsupported() {
+    if skip_without_rustc() {
         return;
     }
 
     on_large_stack(|| {
         for (use_interpreter, name) in [
-            (false, "http_i9_chunked_deadline_jit"),
+            (false, "http_i9_chunked_deadline_default"),
             (true, "http_i9_chunked_deadline_interpreter"),
         ] {
             let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind port");
@@ -1512,11 +1484,11 @@ fn run() (HTTPError | NetError | TaskFailure)! {{
 }
 #[test]
 fn http_request_text_projections_preserve_body_contract_on_all_supported_tiers() {
-    let has_cranelift = jet_jit::cranelift_host_supported();
+    let has_default_run = common::have_rustc();
     let has_rustc = common::have_rustc();
     let mut modes = vec![(true, false, "http_i9_request_text_interpreter")];
-    if has_cranelift {
-        modes.insert(0, (false, false, "http_i9_request_text_jit"));
+    if has_default_run {
+        modes.insert(0, (false, false, "http_i9_request_text_default"));
     }
     if has_rustc {
         modes.push((false, true, "http_i9_request_text_aot"));

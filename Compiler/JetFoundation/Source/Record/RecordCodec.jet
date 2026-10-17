@@ -44,7 +44,7 @@ RECORD_TAG_DIGEST :: 8
 
 // One self-describing record value. `Map` fields may be given in any order;
 // the encoder writes them sorted by name bytes and rejects a repeated name.
-pub enum RecordValue {
+enum RecordValue {
     Null
     Bool(value: Bool)
     Int(value: Int)
@@ -55,41 +55,41 @@ pub enum RecordValue {
     Digest(value: [U8])
 }
 
-pub struct RecordField {
-    pub name: String
-    pub value: RecordValue
+struct RecordField {
+    name: String
+    value: RecordValue
 }
 
 // One tagged section: an indexed list of elements.
-pub struct RecordSection {
-    pub id: Int
-    pub elements: [RecordValue]
+struct RecordSection {
+    id: Int
+    elements: [RecordValue]
 }
 
 // A fully decoded record. `digest` is the trailing SHA-256, the record's
 // content digest.
-pub struct Record {
-    pub schema: String
-    pub sections: [RecordSection]
-    pub digest: [U8]
+struct Record {
+    schema: String
+    sections: [RecordSection]
+    digest: [U8]
 }
 
-pub struct RecordEncodeResult {
-    pub bytes: [U8]?
-    pub problem: String?
+struct RecordEncodeResult {
+    bytes: [U8]?
+    problem: String?
 }
 
-pub struct RecordDecodeResult {
-    pub record: Record?
-    pub problem: String?
+struct RecordDecodeResult {
+    record: Record?
+    problem: String?
 }
 
 // A verified record whose elements decode on demand. Section `s` has id
 // `ids[s]`; `bounds[firsts[s]..]` holds the start of each of its elements
 // followed by the end of the last one.
-pub struct RecordReader {
-    pub schema: String
-    pub digest: [U8]
+struct RecordReader {
+    schema: String
+    digest: [U8]
     bytes: [U8]
     strings: [String]
     ids: [Int]
@@ -98,32 +98,32 @@ pub struct RecordReader {
     bounds: [Int]
 }
 
-pub struct RecordReaderResult {
-    pub reader: RecordReader?
-    pub problem: String?
+struct RecordReaderResult {
+    reader: RecordReader?
+    problem: String?
 }
 
-pub struct RecordValueResult {
-    pub value: RecordValue?
-    pub problem: String?
+struct RecordValueResult {
+    value: RecordValue?
+    problem: String?
 }
 
 // ---------------------------------------------------------------- encoding
 
-pub fn record_put_uvarint(out: &[U8], value: Int) Never! {
+fn record_put_uvarint(out: &[U8], value: Int) Never! {
     rest := value
     loop {
-        low :: rest & 127
+        low :: (rest).bit_and(127)
         rest = rest >> 7
         if rest == 0 {
             &out.push(U8{low})
             return
         }
-        &out.push(U8{low | 128})
+        &out.push(U8{(low).bit_or(128)})
     }
 }
 
-pub fn record_put_str(out: &[U8], value: String) Never! {
+fn record_put_str(out: &[U8], value: String) Never! {
     bytes :: value.bytes()
     record_put_uvarint(&out, bytes.len())
     loop byte in bytes -> &out.push(byte)
@@ -134,11 +134,11 @@ fn record_zigzag(value: Int) -> Int Never! {
 }
 
 fn record_unzigzag(value: Int) -> Int Never! {
-    if value & 1 == 0 -> value >> 1 else -> 0 - (value >> 1) - 1
+    if (value).bit_and(1) == 0 -> value >> 1 else -> 0 - (value >> 1) - 1
 }
 
 // True when `left` sorts strictly before `right` by bytes.
-pub fn record_bytes_before(left: [U8], right: [U8]) -> Bool Never! {
+fn record_bytes_before(left: [U8], right: [U8]) -> Bool Never! {
     index := 0
     loop index < left.len() && index < right.len() {
         a :: Int.from_u8(left[index])
@@ -324,7 +324,7 @@ fn record_section_order(ids: [Int]) -> [Int] Never! {
 // ascending id order. A repeated section id, a repeated map key, an integer
 // outside i64, or a digest that is not 32 bytes is a problem, not bytes.
 // Rust: crates/jet-foundation/src/RecordCodec.rs::encode_record
-pub fn record_encode(schema: String, sections: [RecordSection]) -> RecordEncodeResult Never! {
+fn record_encode(schema: String, sections: [RecordSection]) -> RecordEncodeResult Never! {
     problems := [String]{}
     canonical := [RecordSection]{}
     ids := [Int]{}
@@ -364,7 +364,8 @@ pub fn record_encode(schema: String, sections: [RecordSection]) -> RecordEncodeR
         }
         loop byte in body -> &out.push(byte)
     }
-    checksum :: mir_sha256_bytes(out)
+    view :: out[0..<out.len()]
+    checksum :: mir_sha256_bytes(view)
     loop byte in checksum -> &out.push(byte)
     RecordEncodeResult{bytes: Val(out), problem: None}
 }
@@ -404,13 +405,13 @@ fn record_read_uvarint(bytes: [U8], cursor: &RecordCursor) -> Int Never! {
     loop {
         byte :: record_read_byte(bytes, &cursor)
         if cursor.problem != None -> return 0
-        low :: byte & 127
+        low :: (byte).bit_and(127)
         if shift == 63 && low > 1 {
             record_malformed(&cursor, "varint overflows u64")
             return 0
         }
-        value = value | (low << shift)
-        if byte & 128 == 0 {
+        value = (value).bit_or((low << shift))
+        if (byte).bit_and(128) == 0 {
             if byte == 0 && shift > 0 {
                 record_malformed(&cursor, "varint is not minimal")
                 return 0
@@ -471,14 +472,15 @@ fn record_reader_failure(problem: String) -> RecordReaderResult Never! {
 // Verify the checksum and framing and index every section. Element payloads
 // are not decoded until asked for.
 // Rust: crates/jet-foundation/src/RecordCodec.rs::RecordReader::open
-pub fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
+fn record_open(bytes: [U8]) -> RecordReaderResult Never! {
     if bytes.len() < 4 + RECORD_CHECKSUM_BYTES -> return record_reader_failure("record is truncated")
     body_end :: bytes.len() - RECORD_CHECKSUM_BYTES
     if Int.from_u8(bytes[0]) != 74 || Int.from_u8(bytes[1]) != 69 || Int.from_u8(bytes[2]) != 84 || Int.from_u8(bytes[3]) != 82 {
         return record_reader_failure("record magic is not `JETR`")
     }
     checksum :: bytes.slice(body_end, bytes.len())
-    if mir_sha256_bytes(bytes.slice(0, body_end)) != checksum -> return record_reader_failure("record checksum does not match its bytes")
+    body :: bytes[0..<body_end]
+    if mir_sha256_bytes(body) != checksum -> return record_reader_failure("record checksum does not match its bytes")
     cursor := RecordCursor{at: 4, end: body_end, problem: None}
     format :: record_read_uvarint(bytes, &cursor)
     if cursor.problem == None && format != RECORD_FORMAT -> return record_reader_failure("record format {format} is not supported")
@@ -533,7 +535,7 @@ fn record_section_elements(reader: RecordReader, section: Int) -> Int Never! {
 }
 
 // Number of elements in a section; `None` when the section is absent.
-pub fn record_element_count(reader: RecordReader, id: Int) -> Int? Never! {
+fn record_element_count(reader: RecordReader, id: Int) -> Int? Never! {
     section :: record_section_index(reader, id) ?? return None
     Val(record_section_elements(reader, section))
 }
@@ -607,14 +609,14 @@ fn record_section_element(reader: RecordReader, section: Int, index: Int) -> Rec
 }
 
 // Decode one element of one section.
-pub fn record_element(reader: RecordReader, id: Int, index: Int) -> RecordValueResult Never! {
+fn record_element(reader: RecordReader, id: Int, index: Int) -> RecordValueResult Never! {
     section :: record_section_index(reader, id) ?? return RecordValueResult{value: None, problem: Val("record section {id} is missing")}
     if index < 0 || index >= record_section_elements(reader, section) -> return RecordValueResult{value: None, problem: Val("record is malformed: section {id} has no element {index}")}
     record_section_element(reader, section, index)
 }
 
 // Decode a whole record.
-pub fn record_decode(bytes: [U8]) -> RecordDecodeResult Never! {
+fn record_decode(bytes: [U8]) -> RecordDecodeResult Never! {
     opened :: record_open(bytes)
     reader :: opened.reader ?? return RecordDecodeResult{record: None, problem: opened.problem}
     sections := [RecordSection]{}
@@ -635,13 +637,14 @@ pub fn record_decode(bytes: [U8]) -> RecordDecodeResult Never! {
 // The key hash shared with `jet_foundation::PackageIdentity`: SHA-256 over
 // each field as a uvarint UTF-8 byte length followed by its bytes, rendered
 // as lowercase hex. Digests enter as 64-character hex and counts as decimal.
-pub fn record_key_digest(fields: [String]) -> String Never! {
+fn record_key_digest(fields: [String]) -> String Never! {
     framed := [U8]{}
     loop field in fields -> record_put_str(&framed, field)
-    mir_sha256_hex_bytes(mir_sha256_bytes(framed))
+    view :: framed[0..<framed.len()]
+    mir_sha256_hex_bytes(mir_sha256_bytes(view))
 }
 
 // The store key of a blob record: lowercase hex SHA-256 of its whole bytes.
-pub fn record_blob_key(bytes: [U8]) -> String Never! {
+fn record_blob_key(bytes: View<U8>) -> String Never! {
     mir_sha256_hex_bytes(mir_sha256_bytes(bytes))
 }

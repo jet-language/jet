@@ -1,0 +1,47 @@
+// tests/fixtures/crypto_bridge_entropy.rs:350-369. PENDING-SAME-HEAD. Runtime UNRUN.
+// CryptoError payloads retire under D-CRYPTO-ERRFAM1=A; public tag mappings cite Core at assertion sites.
+use core.crypto as crypto
+use core.crypto.expert as expert
+use core.files as files
+fn filled(value: Int, count: Int) -> [U8] {
+    out := [U8]{}
+    loop _ in 0..<count -> &out.push((U8{value}))
+    out
+}
+fn cut(bytes: [U8], start: Int, end: Int) -> [U8] {
+    out := [U8]{}
+    loop i in start..<end -> &out.push(bytes[i])
+    out
+}
+fn hex(text: String) -> [U8] {
+    raw :: text.bytes()
+    out := [U8]{}
+    loop i in 0..<(raw.len() /% 2) {
+        a :: Int.from_u8(raw[2 * i])
+        b :: Int.from_u8(raw[2 * i + 1])
+        high :: if a <= 57 -> a - 48 else -> a - 87
+        low :: if b <= 57 -> b - 48 else -> b - 87
+        &out.push((U8{high * 16 + low}))
+    }
+    out
+}
+fn little(bytes: [U8], at: Int, width: Int) -> Int {
+    out := 0
+    loop i in 0..<width -> out = out | (Int.from_u8(bytes[at + i]) << (8 * i))
+    out
+}
+fn store_little(bytes: &[U8], at: Int, width: Int, value: Int) {
+    loop i in 0..<width -> bytes[at + i] = (U8{(value >> (8 * i)) & 255})
+}
+#Test("prior_crypto_suite_still_uses_live_entropy") {
+    plaintext :: "round trip".bytes()
+    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    envelope :: crypto.seal([recipient.public_key()], plaintext, [U8]{}) ?? panic("seal")
+    assert_eq(crypto.open(recipient, envelope, [U8]{}) ?? panic("open"), plaintext)
+    signing :: crypto.SigningKey.new_random() ?? panic("keygen")
+    assert_eq(signing.bytes.len(), 32)
+    assert_eq(signing.public_key().bytes.len(), 32)
+    password :: crypto.Secret.from_text("password")
+    stored :: crypto.password_hash(password) ?? panic("hash")
+    assert(crypto.password_verify(password, stored) ?? panic("verify"))
+}

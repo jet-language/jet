@@ -1,0 +1,17 @@
+// Both Rust and Jet semantic tiers must reject the non-#Job argument with:
+// E0112: `JobQueue.enqueue` expects a checked `#Job` function
+// why: the queue identity is attached to the declared #Job and cannot be selected by an arbitrary function value
+// fix: pass the name of a #Job function with exactly one payload parameter
+// The composed verifier records stderr; no diagnostic output is claimed here.
+use core.jobs as jobs
+
+fn ordinary(payload: String) { print(payload) }
+
+fn reject(queue: jobs.JobQueue) -[DB, Time]> {
+    _ :: &queue.enqueue(ordinary, "not a declared job") ?? return
+}
+
+fn run() {
+    queue :: jobs.queue() ?? return
+    reject(queue)
+}

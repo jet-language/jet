@@ -734,7 +734,7 @@ fn memory_fact_from_denial(denial: &str) -> Option<MemoryFact> {
 /// not that code: the auto-derived `encode`/`decode` codecs
 /// (`ImplDef::is_generated_serde`) and the structural `equal`/`compare`
 /// blocks (`TraitImplBlock::compiler_generated`) are attached by the package
-/// auto-derive default, and an auto-derived `encode` returns a `DataTree`
+/// auto-derive default, and an auto-derived `encode` returns a `Dyn`
 /// object built from a map literal — it allocates by construction. Rooting
 /// one would make a module-scope memory denial incompatible with declaring any
 /// struct at all.

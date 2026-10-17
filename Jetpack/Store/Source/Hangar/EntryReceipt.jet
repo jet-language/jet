@@ -11,14 +11,14 @@ store_receipt_sequence := 0
 // The caller keeps the returned digest in the package projection, so the
 // in-memory result, `meta.json`, closure record, and project lock all name
 // the same object.
-pub fn store_prepare_entry_receipt(roots: HangarRoots, entry: &StoreEntry) StoreError! {
+fn store_prepare_entry_receipt(roots: HangarRoots, entry: &StoreEntry) StoreError! {
     materialized :: store_materialize_receipt(roots, entry)
     entry.receipt = materialized.digest
 }
 
 // Prepare the package receipt and report whether this call published a new
 // receipt file. The admission transaction uses the status for rollback.
-pub fn store_prepare_entry_receipt_with_status(roots: HangarRoots, entry: &StoreEntry) -> Bool StoreError! {
+fn store_prepare_entry_receipt_with_status(roots: HangarRoots, entry: &StoreEntry) -> Bool StoreError! {
     materialized :: store_materialize_receipt(roots, entry)
     entry.receipt = materialized.digest
     Ok(materialized.wrote)
@@ -27,7 +27,7 @@ pub fn store_prepare_entry_receipt_with_status(roots: HangarRoots, entry: &Store
 // The receipt digest and whether this call actually wrote it. The recovery
 // counter needs the second half: an already-present receipt is not a
 // recovery, and the digest alone cannot tell the two apart.
-pub fn store_materialize_receipt(roots: HangarRoots, entry: StoreEntry) -> (digest: String, wrote: Bool) StoreError! {
+fn store_materialize_receipt(roots: HangarRoots, entry: StoreEntry) -> (digest: String, wrote: Bool) StoreError! {
     bytes :: store_render_receipt(entry).bytes()
     digest :: "sha256-{store_sha256_hex(bytes)}"
     if entry.receipt != "" && entry.receipt != digest {
@@ -80,7 +80,7 @@ fn store_receipt_write_new(path: String, bytes: [U8]) StoreError! {
 }
 
 // Sweep interrupted receipt publications; returns how many were removed.
-pub fn store_recover_receipt_staging(roots: HangarRoots) -> Int StoreError! {
+fn store_recover_receipt_staging(roots: HangarRoots) -> Int StoreError! {
     receipts :: files.join(roots.hangar_dir(), STORE_RECEIPTS_DIR)
     metadata :: files.stat(receipts) ?? return Ok(0)
     if metadata.is_symlink || !metadata.is_dir {
@@ -101,7 +101,7 @@ pub fn store_recover_receipt_staging(roots: HangarRoots) -> Int StoreError! {
 }
 
 // The canonical development receipt of one package realization.
-pub fn store_render_receipt(entry: StoreEntry) -> String Never! {
+fn store_render_receipt(entry: StoreEntry) -> String Never! {
     inputs := [JetDevelopmentReceiptInput]{
         store_receipt_input("package-name", entry.name),
         store_receipt_input("package-version", entry.version),
@@ -135,7 +135,7 @@ pub fn store_render_receipt(entry: StoreEntry) -> String Never! {
     }
     loop reference in store_sorted_unique(entry.references) -> &inputs.push(store_receipt_input("closure", reference))
     action :: store_entry_action_key(entry)
-    outputs_map := ~entry.named_outputs
+    outputs_map := entry.named_outputs.copy()
     outputs_map["out"] = entry.envelope.output_hash
     outputs := [JetDevelopmentReceiptInput]{}
     loop name in store_sorted_keys(outputs_map) -> &outputs.push(store_receipt_input(name, outputs_map[name]))

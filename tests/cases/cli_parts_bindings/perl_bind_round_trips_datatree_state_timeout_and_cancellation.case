@@ -1,0 +1,20 @@
+# Port of tests/cli_parts/bindings.rs:1588-1668; sources copied verbatim.
+# PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
+# Original example expected.out copied exactly; original cancellation C probe retained.
+# KNOWN-FAILING #4799: original copies missing Examples/interop/perl/main.jet after main->run cutover; retain failing copy and all later predicates.
+# PENDING-GRAMMAR: is-file, copy from {root}.
+requires: tool:perl
+fixture: fixtures/perl_roundtrip
+step: jet inspect bind perl {work}/ops.pl --pkg ops
+exit: 0
+file: .jet/bindings/perl/libjet_perl_ops.a is-file
+file: .jet/bindings/perl/ops_worker.pl is-file
+file: .jet/bindings/perl/ops.provenance is-file
+copy: {root}/Examples/interop/perl/main.jet main.jet
+step: jet run --profile=debug main.jet
+exit: 0
+stdout: = perl_bind_round_trips_datatree_state_timeout_and_cancellation.out
+step: cc cancel.c -L.jet/bindings/perl -l:libjet_perl_ops.a -lpthread -o cancel
+exit: 0
+step: {work}/cancel
+exit: 0

@@ -1,16 +1,41 @@
 // Backend-agnostic codec reachability over checked MIR (MIRRust
 // demanded_codec_impls). The candidates are derived serde impls
 // (compiler_generated with a codec) on a nominal type; every other function
-// is a root. A scanned body demands a candidate by calling one of its
-// methods, or by naming its nominal type anywhere inside a call's type
-// arguments: generic Prelude codecs such as `decode_typed<[T]>` reach the
-// impl through the codec trait. A demanded impl's methods are scanned in
-// turn. A backend skips every impl row whose flag is false; a missed demand
-// fails the backend's trait check, it never changes behavior.
-pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
+// is a root. A candidate is kept only for a checked use of its codec, the uses
+// sema checked as Encode/Decode obligations and MIR lowering made explicit:
+// - a call of one of its methods (`T.decode(tree)`, `value.encode()`);
+// - a codec-bounded runtime route (mir_codec_route_symbol: typed decode,
+//   `json.to_string`, HTTP JSON, jobs, sync, data, App handlers, ...)
+//   instantiated at a type named in its type arguments, operands or result;
+// - a user call whose callee's generic parameters are bounded by the codec,
+//   at the types in its type arguments, owner and operands;
+// - the signature of an export or job, whose generated wrapper decodes the
+//   inputs and encodes the result.
+// Demands are per codec; a demanded impl's methods are scanned in turn, so a
+// derived body demands its field types. Type arguments of a Core call keep
+// demanding both codecs, as do those of an indirect call. A backend skips
+// every impl row whose flag is false; a missed demand fails the backend's
+// trait check, it never changes behavior.
+
+// Runtime symbol families whose generic parameters carry a codec bound
+// (MIRRust CODEC_ROUTE_PREFIXES / CODEC_ROUTE_LEAVES; the Rust drift test
+// `codec_bounded_runtime_functions_are_codec_routes` checks the Prelude).
+MIR_CODEC_ROUTE_PREFIXES :: [String]{"jet_codec_", "jet_decode_", "jet_enc_", "jet_data_", "jet_db_", "jet_args_", "jet_config_", "jet_std_env_", "jet_http_", "jet_job_", "jet_receipt_", "jet_sync_", "jet_app_", "jet_web_", "jet_testing_", "jet_history_"}
+MIR_CODEC_ROUTE_LEAVES :: [String]{"call", "decode", "from_json", "loader", "snapshot", "register_type", "typed_factory"}
+
+// Nominal names demanded per codec, and candidate rows called directly, not
+// yet resolved.
+struct MIRCodecDemands {
+    encode: [String]
+    decode: [String]
+    rows: [Int]
+}
+
+fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
     keep := [Bool]{}
     by_method := [String:Int]{}
-    by_name := [String:[Int]]{}
+    encode_rows := [String:[Int]]{}
+    decode_rows := [String:[Int]]{}
     loop (index, implementation) in program.impls {
         nominal :: if implementation.self_type.kind == {
             .Apply(name, _) -> Val(name.name)
@@ -21,9 +46,24 @@ pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
         if !candidate -> next
         loop method in implementation.methods -> by_method["{method.value}"] = index
         name :: nominal ?? next
-        rows := by_name.get(name) ?? [Int]{}
-        &rows.push(index)
-        by_name[name] = rows
+        codec :: implementation.serde ?? next
+        if codec == MIRSerdeCodec.Decode {
+            rows := decode_rows.get(name) ?? [Int]{}
+            &rows.push(index)
+            decode_rows[name] = rows
+        } else {
+            rows := encode_rows.get(name) ?? [Int]{}
+            &rows.push(index)
+            encode_rows[name] = rows
+        }
+    }
+    codec_routes := [String:Bool]{}
+    loop call in program.prelude_calls {
+        if mir_codec_route_symbol(mir_symbol_name(call.symbol)) -> codec_routes["{call.id.value}"] = true
+    }
+    codec_core_calls := [String:Bool]{}
+    loop call in program.core_calls {
+        if mir_codec_route_symbol(core_call_symbol_name(call.symbol)) -> codec_core_calls["{call.id.value}"] = true
     }
     function_index := [String:Int]{}
     pending := [Int]{}
@@ -32,56 +72,34 @@ pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
         function_index[key] = index
         if by_method.get(key) == None -> &pending.push(index)
     }
-    seen_names := [String:Bool]{}
+    demands := MIRCodecDemands{encode: [String]{}, decode: [String]{}, rows: [Int]{}}
+    loop job in program.jobs {
+        if function_index.get("{job.function.value}") == .Val(found) -> mir_codec_demand_signature(&demands, program.functions[found])
+    }
+    loop artifact in program.artifacts {
+        loop export in artifact.exports {
+            if function_index.get("{export.function.value}") == .Val(found) -> mir_codec_demand_signature(&demands, program.functions[found])
+        }
+    }
+    seen_encode := [String:Bool]{}
+    seen_decode := [String:Bool]{}
     cursor := 0
     loop {
-        if cursor >= pending.len() -> break
-        current :: pending[cursor]
-        cursor += 1
-        names := [String]{}
         demanded := [Int]{}
-        loop block in program.functions[current].blocks {
-            loop instruction in block.instructions {
-                if instruction.operation == {
-                    .Call(callee, _, type_args) -> {
-                        if callee == {
-                            .User(id) | .Associated(id, _) | .Method(id, _) -> {
-                                if by_method.get("{id.value}") == .Val(row) -> &demanded.push(row)
-                            }
-                            else -> {}
-                        }
-                        loop ty in type_args -> mir_type_nominal_names(ty, &names)
-                    }
-                    .IndirectCall(_, _, type_args) -> {
-                        loop ty in type_args -> mir_type_nominal_names(ty, &names)
-                    }
-                    .CoreCall(_, _, _, type_args, _, _) -> {
-                        loop ty in type_args -> mir_type_nominal_names(ty, &names)
-                    }
-                    .Semantic(operation) -> {
-                        if operation == {
-                            .StaticPreludeCall(_, _, owner_type_args, type_args) -> {
-                                loop type_arg in owner_type_args {
-                                    if type_arg == {
-                                        .Type(ty) -> mir_type_nominal_names(ty, &names)
-                                        else -> {}
-                                    }
-                                }
-                                loop ty in type_args -> mir_type_nominal_names(ty, &names)
-                            }
-                            else -> {}
-                        }
-                    }
-                    else -> {}
-                }
-            }
-        }
-        loop name in names {
-            if seen_names.get(name) != None -> next
-            seen_names[name] = true
-            rows :: by_name.get(name) ?? [Int]{}
+        loop row in demands.rows -> &demanded.push(row)
+        loop name in demands.encode {
+            if seen_encode.get(name) != None -> next
+            seen_encode[name] = true
+            rows :: encode_rows.get(name) ?? [Int]{}
             loop row in rows -> &demanded.push(row)
         }
+        loop name in demands.decode {
+            if seen_decode.get(name) != None -> next
+            seen_decode[name] = true
+            rows :: decode_rows.get(name) ?? [Int]{}
+            loop row in rows -> &demanded.push(row)
+        }
+        demands = MIRCodecDemands{encode: [String]{}, decode: [String]{}, rows: [Int]{}}
         loop row in demanded {
             if keep[row] -> next
             keep[row] = true
@@ -89,8 +107,160 @@ pub fn mir_demanded_codec_impls(program: MIRProgram) -> [Bool] Never! {
                 if function_index.get("{method.value}") == .Val(found) -> &pending.push(found)
             }
         }
+        if cursor >= pending.len() -> break
+        current :: pending[cursor]
+        cursor += 1
+        loop block in program.functions[current].blocks {
+            loop instruction in block.instructions {
+                mir_codec_demand_instruction(&demands, program, program.functions[current], instruction, by_method, function_index, codec_routes, codec_core_calls)
+            }
+        }
     }
     keep
+}
+
+fn mir_codec_demand_instruction(demands: &MIRCodecDemands, program: MIRProgram, function: MIRFunction, instruction: MIRInstruction, by_method: [String:Int], function_index: [String:Int], codec_routes: [String:Bool], codec_core_calls: [String:Bool]) Never! {
+    if instruction.operation == {
+        .Call(callee, _, type_args) -> {
+            if callee == {
+                .User(id) | .Associated(id, _) | .Method(id, _) -> {
+                    if by_method.get("{id.value}") == .Val(row) -> &demands.rows.push(row)
+                    encode := false
+                    decode := false
+                    if function_index.get("{id.value}") == .Val(found) {
+                        loop param in program.functions[found].generic_params {
+                            if mir_bounds_require(param.bounds, "Encode") -> encode = true
+                            if mir_bounds_require(param.bounds, "Decode") -> decode = true
+                        }
+                    }
+                    if encode || decode {
+                        if callee == {
+                            .Associated(_, owner) | .Method(_, owner) -> mir_codec_demand_type(&demands, encode, decode, owner)
+                            else -> {}
+                        }
+                        mir_codec_demand_use(&demands, encode, decode, function, instruction, type_args)
+                    }
+                }
+                .Core(call) -> {
+                    if codec_core_calls.get("{call.value}") != None {
+                        mir_codec_demand_use(&demands, true, true, function, instruction, type_args)
+                    } else {
+                        loop ty in type_args -> mir_codec_demand_type(&demands, true, true, ty)
+                    }
+                }
+                .Prelude(call) -> {
+                    if codec_routes.get("{call.value}") != None {
+                        mir_codec_demand_use(&demands, true, true, function, instruction, type_args)
+                    } else {
+                        loop ty in type_args -> mir_codec_demand_type(&demands, true, true, ty)
+                    }
+                }
+                else -> {
+                    loop ty in type_args -> mir_codec_demand_type(&demands, true, true, ty)
+                }
+            }
+        }
+        .CoreCall(call, route, _, type_args, _, _) -> {
+            if codec_core_calls.get("{call.value}") != None || codec_routes.get("{route.value}") != None {
+                mir_codec_demand_use(&demands, true, true, function, instruction, type_args)
+            } else {
+                loop ty in type_args -> mir_codec_demand_type(&demands, true, true, ty)
+            }
+        }
+        .IndirectCall(_, _, type_args) -> {
+            loop ty in type_args -> mir_codec_demand_type(&demands, true, true, ty)
+        }
+        .Semantic(operation) -> {
+            routed := false
+            loop call in mir_semantic_op_prelude_calls(operation) {
+                if codec_routes.get("{call.value}") != None -> routed = true
+            }
+            if !routed -> return
+            type_args := [MIRType]{}
+            if operation == {
+                .StaticPreludeCall(_, _, owner_type_args, call_type_args) -> {
+                    loop type_arg in owner_type_args {
+                        if type_arg == {
+                            .Type(ty) -> mir_codec_demand_type(&demands, true, true, ty)
+                            else -> {}
+                        }
+                    }
+                    type_args = call_type_args
+                }
+                else -> {}
+            }
+            mir_codec_demand_use(&demands, true, true, function, instruction, type_args)
+        }
+        else -> {}
+    }
+}
+
+// Whether a runtime route's Rust symbol may require codec impls of the types
+// it is instantiated at.
+fn mir_codec_route_symbol(symbol: String) -> Bool Never! {
+    leaf :: mir_codec_leaf(symbol)
+    loop prefix in MIR_CODEC_ROUTE_PREFIXES {
+        if leaf.starts_with(prefix) -> return true
+    }
+    MIR_CODEC_ROUTE_LEAVES.contains(leaf)
+}
+
+// The last `::`- or `.`-separated segment of a symbol or trait name.
+fn mir_codec_leaf(name: String) -> String Never! {
+    path :: name.split("::").to_list()
+    last :: if path.len() == 0 -> name else -> path[path.len() - 1]
+    dotted :: last.split(".").to_list()
+    if dotted.len() == 0 -> last else -> dotted[dotted.len() - 1]
+}
+
+// Whether a generic parameter's bounds require the `codec` trait.
+fn mir_bounds_require(bounds: [MIRTraitRef], codec: String) -> Bool Never! {
+    loop bound in bounds {
+        leaf :: mir_codec_leaf(bound.name)
+        if leaf == codec || leaf == "Codable" -> return true
+    }
+    false
+}
+
+// Demand the chosen codecs of every nominal inside `ty`.
+fn mir_codec_demand_type(demands: &MIRCodecDemands, encode: Bool, decode: Bool, ty: MIRType) Never! {
+    names := [String]{}
+    mir_type_nominal_names(ty, &names)
+    loop name in names {
+        if encode -> &demands.encode.push(name)
+        if decode -> &demands.decode.push(name)
+    }
+}
+
+// A codec-bounded call instantiated by its type arguments, its operands (a
+// runtime generic infers its parameter from them) and its result (a decode
+// returns the parameter).
+fn mir_codec_demand_use(demands: &MIRCodecDemands, encode: Bool, decode: Bool, function: MIRFunction, instruction: MIRInstruction, type_args: [MIRType]) Never! {
+    loop ty in type_args -> mir_codec_demand_type(&demands, encode, decode, ty)
+    loop value in mir_operation_value_uses(instruction.operation) {
+        loop fact in function.values {
+            if fact.id.value == value.value {
+                mir_codec_demand_type(&demands, encode, decode, fact.ty)
+                break
+            }
+        }
+    }
+    if instruction.ty == .Val(ty) -> mir_codec_demand_type(&demands, encode, decode, ty)
+}
+
+// Every type an export or job wrapper decodes or encodes: its parameters, its
+// result and its failure carrier.
+fn mir_codec_demand_signature(demands: &MIRCodecDemands, function: MIRFunction) Never! {
+    loop param in function.params -> mir_codec_demand_type(&demands, true, true, param.ty)
+    mir_codec_demand_type(&demands, true, true, function.return_type)
+    if function.failure == {
+        .Result(success, error) -> {
+            mir_codec_demand_type(&demands, true, true, success)
+            mir_codec_demand_type(&demands, true, true, error)
+        }
+        .Optional(value) | .Diverges(value) -> mir_codec_demand_type(&demands, true, true, value)
+        else -> {}
+    }
 }
 
 // Every nominal type name inside `ty`, including type arguments and

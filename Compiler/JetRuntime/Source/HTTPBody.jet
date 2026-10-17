@@ -1,0 +1,422 @@
+// Runtime-private one-shot HTTP body. Core owns the public Empty/Text/Bytes
+// facade and the head/shared ownership around this move-only resource.
+// This is not a Rust JetHTTPBody/Arc layout and cannot be passed to Rust routes.
+//
+// Body128B, align8: refs0, transitionLock8, reserved16, payload24, reader32,
+// closer40, lengthKnown48, length56, contentType64, sourceKind72, taken80,
+// drained88, closed96, cursor104, remaining112, bounded120. Source kind alone
+// discriminates payload: -1 reader, 0 Empty/List, 1 Text/E4, 2 Bytes/List.
+// Chunks64B, align8: body0, max8, done16, reserved24, raw read descriptor32:
+// data32, capacity40, count48, error56. Only its single owner calls next/drop.
+// Reader code(box, descriptor) fills raw U8 bytes and count, or an owned error
+// detail in error56; returns zero or -6. Detail32B is plain data, not a boxed
+// Rust error: [source tag, I64 payload, E4 text or0, reserved0]. Source maps
+// every HTTPError variant without discarding Bridge errors or their payloads.
+// Closer code(box) closes its captured resource.
+// All closures have [refs,code,release] + captures; release frees the box.
+//
+// Private statuses (NOT diagnostics): 0 success/EOF; -1 BodyConsumed;
+// -5 Stopped; -6 owned source error detail.
+// Core alone validates limits and chooses typed errors/deferred-error behavior.
+// HTTPMessage.rs:675-717,749-805,884-898 define validation/take/drain/drop.
+// Scheduler.rs:941-945: Propagate observes a callee-delivered stop only; it
+// must not poll for a newly requested interrupt after initialized results.
+// Only a compiler/runtime defect reaches this assertion. Core source checks
+// public arguments first and constructs the same typed errors on every tier.
+fn http_body_require(condition: Bool) {
+    if condition {
+        return
+    }
+    message :: jet_rt_alloc(I64{24}, I64{8})
+    http_body_store(message, I64{7237111017133855816})
+    http_body_store(wrapping(message + I64{8}), I64{7957688353949753465})
+    http_body_store(wrapping(message + I64{16}), I64{121424789662052})
+    jet_rt_panic_message(message, I64{22})
+}
+
+fn http_body_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized word in the live body, chunks, closure, List or E4 allocation") {
+        return os_load_i64(address)
+    }
+}
+
+fn http_body_store(address: I64, value: I64) {
+    #Unsafe("owns the word, or holds the body's transition lock for this state field") {
+        os_store_i64(address, value)
+    }
+}
+
+fn http_body_cas(address: I64, expected: I64, desired: I64) -> I64 {
+    #Unsafe("atomic refcount, take/close flag or transition lock in a live body allocation") {
+        return os_cas_i64(address, expected, desired)
+    }
+}
+
+fn http_body_zero(size: I64) -> I64 {
+    pointer :: jet_rt_alloc(size, I64{8})
+    at := I64{0}
+    loop at < size {
+        http_body_store(wrapping(pointer + at), I64{0})
+        at = wrapping(at + I64{8})
+    }
+    pointer
+}
+
+// Critical sections contain only a few word accesses, never callbacks,
+// IO waits or allocations. L8a-1 owns the one futex Mutex implementation.
+fn http_body_lock(body: I64) { sync_mutex_lock(wrapping(body + I64{8})) }
+
+fn http_body_unlock(body: I64) { sync_mutex_unlock(wrapping(body + I64{8})) }
+
+fn http_body_retain(body: I64) {
+    count := http_body_word(body)
+    loop {
+        previous :: http_body_cas(body, count, wrapping(count + I64{1}))
+        if previous == count {
+            return
+        }
+        count = previous
+    }
+}
+
+fn http_body_unref(pointer: I64) -> Bool {
+    count := http_body_word(pointer)
+    loop {
+        previous :: http_body_cas(pointer, count, wrapping(count - I64{1}))
+        if previous == count -> return count == I64{1}
+        count = previous
+    }
+}
+
+fn http_body_stopped() -> Bool { jet_rt_session_propagate() != I64{0} }
+
+fn http_body_closure_drop(closure: I64) {
+    if (closure == I64{0}) {
+        return
+    }
+    if !http_body_unref(closure) {
+        return
+    }
+    release :: http_body_word(wrapping(closure + I64{16}))
+    #Unsafe("the last closure reference calls its generated release(box), which drops captures and frees the box") {
+        _ := os_call_address_i64(release, closure)
+    }
+    // Cleanup must still finish if a captured finalizer delivers a stop.
+    _ := http_body_stopped()
+}
+
+fn http_body_text_drop(text: I64) {
+    if (text == I64{0}) {
+        return
+    }
+    capacity :: http_body_word(wrapping(text + I64{16}))
+    if (capacity != I64{0}) { jet_rt_free(http_body_word(text), capacity, I64{1}) }
+    jet_rt_free(text, I64{24}, I64{8})
+}
+
+#Export(c) fn jet_rt_http_body_list_drop(list: I64) {
+    if (list == I64{0}) {
+        return
+    }
+    capacity :: http_body_word(wrapping(list + I64{8}))
+    if (capacity != I64{0}) {
+        jet_rt_free(http_body_word(wrapping(list + I64{16})), wrapping(capacity * RT_HOST_U8_STRIDE), I64{8})
+    }
+    jet_rt_free(list, I64{24}, I64{8})
+}
+
+// Plain error detail ownership accompanies status-6 only. Source tags and
+// payloads are opaque to this kernel; cleanup knows only the owned E4 field.
+#Export(c) fn jet_rt_http_body_error_drop(detail: I64) {
+    if (detail == I64{0}) {
+        return
+    }
+    http_body_text_drop(http_body_word(wrapping(detail + I64{16})))
+    jet_rt_free(detail, I64{32}, I64{8})
+}
+
+// Moves an E4 text for kind1 or a stride8 byte List for kinds0/2, and optional
+// content-type E4 text. Core validates the source enum and chooses the kind.
+#Export(c) fn jet_rt_http_body_from_payload(payload: I64, kind: I64, content_type: I64) -> I64 {
+    http_body_require(payload != I64{0} && kind >= I64{0} && kind <= I64{2})
+    body :: http_body_zero(I64{128})
+    length :: if (kind == I64{1}) -> http_body_word(wrapping(payload + I64{8})) else -> http_body_word(payload)
+    http_body_store(body, I64{1})
+    http_body_store(wrapping(body + I64{24}), payload)
+    http_body_store(wrapping(body + I64{48}), I64{1})
+    http_body_store(wrapping(body + I64{56}), length)
+    http_body_store(wrapping(body + I64{64}), content_type)
+    http_body_store(wrapping(body + I64{72}), kind)
+    http_body_store(wrapping(body + I64{88}), if (length == I64{0}) -> I64{1} else -> I64{0})
+    body
+}
+
+// Moves reader/closer closures and metadata. Only File Take uses bounded1;
+// Reader/Bridge length is advisory (HTTPMessage.rs:525-609). No FD is copied.
+#Export(c) fn jet_rt_http_body_from_reader(reader: I64, closer: I64, length_known: I64, length: I64, bounded: I64, content_type: I64) -> I64 {
+    http_body_require(reader != I64{0} && length >= I64{0} && (bounded == I64{0} || length_known != I64{0}))
+    body :: http_body_zero(I64{128})
+    http_body_store(body, I64{1})
+    http_body_store(wrapping(body + I64{32}), reader)
+    http_body_store(wrapping(body + I64{40}), closer)
+    http_body_store(wrapping(body + I64{48}), length_known)
+    http_body_store(wrapping(body + I64{56}), length)
+    http_body_store(wrapping(body + I64{64}), content_type)
+    http_body_store(wrapping(body + I64{72}), I64{-1})
+    http_body_store(wrapping(body + I64{88}), if (length_known != I64{0} && length == I64{0}) -> I64{1} else -> I64{0})
+    http_body_store(wrapping(body + I64{112}), length)
+    http_body_store(wrapping(body + I64{120}), bounded)
+    body
+}
+
+#Export(c) fn jet_rt_http_body_length_known(body: I64) -> I64 {
+    http_body_word(wrapping(body + I64{48}))
+}
+
+#Export(c) fn jet_rt_http_body_length(body: I64) -> I64 { http_body_word(wrapping(body + I64{56})) }
+
+#Export(c) fn jet_rt_http_body_content_type(body: I64) -> I64 {
+    http_body_word(wrapping(body + I64{64}))
+}
+
+#Export(c) fn jet_rt_http_body_source_kind(body: I64) -> I64 {
+    http_body_word(wrapping(body + I64{72}))
+}
+
+// Borrowed immutable payload for Core source projection, never ownership.
+#Export(c) fn jet_rt_http_body_source_payload(body: I64) -> I64 {
+    http_body_word(wrapping(body + I64{24}))
+}
+
+#Export(c) fn jet_rt_http_body_is_drained(body: I64) -> I64 {
+    http_body_lock(body)
+    drained :: http_body_word(wrapping(body + I64{88}))
+    http_body_unlock(body)
+    drained
+}
+
+// Core checks and takes under one exclusive Shared guard. This query does
+// not allocate or consume; the short body lock also serializes explicit close.
+#Export(c) fn jet_rt_http_body_is_taken(body: I64) -> I64 {
+    http_body_lock(body)
+    taken :: http_body_word(wrapping(body + I64{80}))
+    http_body_unlock(body)
+    taken
+}
+
+fn http_body_close(body: I64) -> I64 {
+    if (http_body_cas(wrapping(body + I64{96}), I64{0}, I64{1}) != I64{0}) { return I64{0} }
+    closer :: http_body_word(wrapping(body + I64{40}))
+    if (closer == I64{0}) { return I64{0} }
+    #Unsafe("the claimed closer code has the audited code(box) ABI, with no transition lock held") {
+        _ := os_call_address_i64(http_body_word(wrapping(closer + I64{8})), closer)
+    }
+    if http_body_stopped() -> I64{-5} else -> I64{0}
+}
+
+// Explicit close is idempotent. It consumes an unclaimed source and never
+// marks it drained: close then drop invokes the closer exactly once.
+#Export(c) fn jet_rt_http_body_close(body: I64) -> I64 {
+    http_body_lock(body)
+    http_body_store(wrapping(body + I64{80}), I64{1})
+    http_body_unlock(body)
+    http_body_close(body)
+}
+
+#Export(c) fn jet_rt_http_body_drop(body: I64) -> I64 {
+    if (body == I64{0}) { return I64{0} }
+    if !http_body_unref(body) -> return I64{0}
+    stopped :: http_body_close(body)
+    kind :: http_body_word(wrapping(body + I64{72}))
+    payload :: http_body_word(wrapping(body + I64{24}))
+    if {
+        (kind == I64{1}) -> http_body_text_drop(payload)
+        else -> jet_rt_http_body_list_drop(payload)
+    }
+    http_body_closure_drop(http_body_word(wrapping(body + I64{32})))
+    http_body_closure_drop(http_body_word(wrapping(body + I64{40})))
+    http_body_text_drop(http_body_word(wrapping(body + I64{64})))
+    jet_rt_free(body, I64{128}, I64{8})
+    if (stopped != I64{0} || http_body_stopped()) -> I64{-5} else -> I64{0}
+}
+
+// Core has already validated max and handles rejected arguments/deferred
+// TooLarge without invoking this leaf (HTTPMessage.rs:891-898).
+fn http_body_claim(body: I64, max: I64) -> I64 {
+    http_body_require(max > I64{0} && max <= I64{1073741824})
+    chunks :: http_body_zero(I64{64})
+    // Allocate before claiming the one-shot source, never inside a lock.
+    http_body_lock(body)
+    taken :: http_body_word(wrapping(body + I64{80}))
+    if (taken == I64{0}) { http_body_store(wrapping(body + I64{80}), I64{1}) }
+    http_body_unlock(body)
+    if (taken != I64{0}) {
+        jet_rt_free(chunks, I64{64}, I64{8})
+        return I64{0}
+    }
+    http_body_retain(body)
+    http_body_store(chunks, body)
+    http_body_store(wrapping(chunks + I64{8}), max)
+    chunks
+}
+
+// Raw ABI primitive: zero outword on failure, with the existing 0/-1 status.
+#Export(c) fn jet_rt_http_body_take(body: I64, max: I64, out: I64) -> I64 {
+    http_body_store(out, I64{0})
+    chunks :: http_body_claim(body, max)
+    http_body_store(out, chunks)
+    if (chunks == I64{0}) -> I64{-1} else -> I64{0}
+}
+
+// Core already checked is_taken under the SAME exclusive Shared guard.
+// A failed claim is a defect in that protocol, not a public BodyConsumed error.
+// Keep one allocation/claim algorithm; no layout-field scratch or heap outword.
+#Export(c) fn jet_rt_http_body_take_checked(body: I64, max: I64) -> I64 {
+    chunks :: http_body_claim(body, max)
+    http_body_require(chunks != I64{0})
+    chunks
+}
+
+fn http_body_drained(body: I64) {
+    http_body_lock(body)
+    http_body_store(wrapping(body + I64{88}), I64{1})
+    http_body_unlock(body)
+}
+
+fn http_body_list(count: I64) -> I64 {
+    list :: http_body_zero(I64{24})
+    data :: if (count == I64{0}) -> I64{0} else -> jet_rt_alloc(wrapping(count * RT_HOST_U8_STRIDE), I64{8})
+    http_body_store(list, count)
+    http_body_store(wrapping(list + I64{8}), count)
+    http_body_store(wrapping(list + I64{16}), data)
+    list
+}
+
+// out is a borrowed writable word. Return1 with an owned List, 0EOF, -6 with
+// an owned plain error detail, or another private negative status with out0.
+#Export(c) fn jet_rt_http_body_next(chunks: I64, out: I64) -> I64 {
+    http_body_store(out, I64{0})
+    if (http_body_word(wrapping(chunks + I64{16})) != I64{0}) { return I64{0} }
+    body :: http_body_word(chunks)
+    kind :: http_body_word(wrapping(body + I64{72}))
+    count := http_body_word(wrapping(chunks + I64{8}))
+    raw := I64{0}
+    cursor := I64{0}
+    if {
+        (kind == I64{-1}) -> {
+            if (http_body_word(wrapping(body + I64{120})) != I64{0}) {
+                remaining :: http_body_word(wrapping(body + I64{112}))
+                if count > remaining -> count = remaining
+            }
+            if (count != I64{0}) {
+                raw = http_body_word(wrapping(chunks + I64{32}))
+                if (raw == I64{0}) {
+                    raw = jet_rt_alloc(count, I64{1})
+                    http_body_store(wrapping(chunks + I64{32}), raw)
+                    http_body_store(wrapping(chunks + I64{40}), count)
+                }
+                http_body_store(wrapping(chunks + I64{48}), I64{0})
+                http_body_store(wrapping(chunks + I64{56}), I64{0})
+                // Advertise the remaining bounded capacity on every callback.
+                http_body_store(wrapping(chunks + I64{40}), count)
+                reader :: http_body_word(wrapping(body + I64{32}))
+                status := I64{0}
+                #Unsafe("reader code(box, descriptor) borrows exactly count writable U8 bytes; no body lock is held") {
+                    status = os_call_address_two_i64(http_body_word(wrapping(reader + I64{8})), reader, wrapping(chunks + I64{32}))
+                }
+                if http_body_stopped() {
+                    jet_rt_http_body_error_drop(http_body_word(wrapping(chunks + I64{56})))
+                    http_body_store(wrapping(chunks + I64{56}), I64{0})
+                    status = I64{-5}
+                }
+                if (status != I64{0}) {
+                    http_body_store(wrapping(chunks + I64{16}), I64{1})
+                    if (status == I64{-6}) {
+                        http_body_store(out, http_body_word(wrapping(chunks + I64{56})))
+                        http_body_store(wrapping(chunks + I64{56}), I64{0})
+                    }
+                    return status
+                }
+                count = http_body_word(wrapping(chunks + I64{48}))
+                http_body_require(count >= I64{0} && count <= http_body_word(wrapping(chunks + I64{40})))
+                if (http_body_word(wrapping(body + I64{120})) != I64{0}) {
+                    http_body_lock(body)
+                    remaining :: http_body_word(wrapping(body + I64{112}))
+                    http_body_store(wrapping(body + I64{112}), wrapping(remaining - count))
+                    http_body_unlock(body)
+                }
+            }
+        }
+        else -> {
+            http_body_lock(body)
+            cursor = http_body_word(wrapping(body + I64{104}))
+            remaining :: wrapping(http_body_word(wrapping(body + I64{56})) - cursor)
+            if count > remaining -> count = remaining
+            http_body_store(wrapping(body + I64{104}), wrapping(cursor + count))
+            http_body_unlock(body)
+        }
+    }
+    if (count == I64{0}) {
+        http_body_store(wrapping(chunks + I64{16}), I64{1})
+        http_body_drained(body)
+        return I64{0}
+    }
+    list :: http_body_list(count)
+    destination :: http_body_word(wrapping(list + I64{16}))
+    payload :: http_body_word(wrapping(body + I64{24}))
+    source :: if {
+        (kind == I64{-1}) -> raw
+        (kind == I64{1}) -> wrapping(http_body_word(payload) + cursor)
+        else -> wrapping(http_body_word(wrapping(payload + I64{16})) + wrapping(cursor * RT_HOST_U8_STRIDE))
+    }
+    at := I64{0}
+    loop at < count {
+        byte := I64{0}
+        if {
+            (kind == I64{-1} || kind == I64{1}) -> {
+                #Unsafe("the source holds count initialized UTF8 or raw reader bytes") {
+                    byte = os_load_u8(wrapping(source + at))
+                }
+            }
+            else -> byte = host_u8_get(source, at)
+        }
+        host_u8_put(destination, at, byte)
+        at = wrapping(at + I64{1})
+    }
+    http_body_store(out, list)
+    I64{1}
+}
+
+#Export(c) fn jet_rt_http_body_chunks_drop(chunks: I64) -> I64 {
+    if (chunks == I64{0}) { return I64{0} }
+    body :: http_body_word(chunks)
+    raw :: http_body_word(wrapping(chunks + I64{32}))
+    // The initial allocation used min(max, original bounded length). Its size
+    // is immutable even though descriptor capacity shrinks on later callbacks.
+    if (raw != I64{0}) {
+        max := http_body_word(wrapping(chunks + I64{8}))
+        if (http_body_word(wrapping(body + I64{120})) != I64{0}) {
+            length :: http_body_word(wrapping(body + I64{56}))
+            if max > length -> max = length
+        }
+        jet_rt_free(raw, max, I64{1})
+    }
+    jet_rt_http_body_error_drop(http_body_word(wrapping(chunks + I64{56})))
+    stopped := I64{0}
+    if (body != I64{0}) {
+        stopped = http_body_close(body)
+        dropped :: jet_rt_http_body_drop(body)
+        if (dropped != I64{0}) { stopped = dropped }
+    }
+    jet_rt_free(chunks, I64{64}, I64{8})
+    stopped
+}
+
+// Called only in the chosen HTTPS/STARTTLS/implicit-TLS branch. Plain HTTP
+// never reaches this registered E3001 stop (L2 panic-message path). The text
+// is the lowering's one native TLS refusal (generated trap_msg_native_tls).
+#Export(c) fn jet_rt_http_tls_refuse() {
+    message :: jet_rt_string_builder_new()
+    trap_build_msg_native_tls(message)
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+}

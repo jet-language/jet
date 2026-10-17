@@ -17,10 +17,11 @@ Jet code, and a generated item must pass the ordinary checker before it can
 become part of a program. The boundary is visible in source:
 
 - `prep { ... }` is the explicit shared-preparation block (D-PREP-SURFACE2=A).
-  Its body runs while building and emits no runtime code; compile-time
-  bindings made inside it keep their `@` names afterward. The ratified value
-  form, where the block's final expression supplies an ordinary value, is not
-  implemented yet: `name :: prep { ... }` is rejected with E0391. The retired
+  Its body runs while building and emits no runtime code. In the binding form
+  `name :: prep { ... }`, the final expression supplies the prepared value.
+  That value retains its checked initializer type: numeric widths, empty-list
+  element types, optional elements, and function return types are not inferred
+  again from the evaluator's erased value representation. The retired
   `@ { ... }` spelling teaches `prep { ... }` (E0388).
 - `@name :: expression` binds a value evaluated during compilation.
 - Compiler facts carry `$`: members of their subject such as `T.$fields`, or

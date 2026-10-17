@@ -138,12 +138,11 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
     for (mode, args) in [
         ("release", vec!["run", "--release", example()]),
         ("default", vec!["run", example()]),
-        ("interpret", vec!["run", "--interpret", example()]),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .current_dir(repo())
             .env("NO_COLOR", "1")
-            .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
+            .env("JET_STORE_DIR", cache.join(mode).join("run"))
             .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .args(args)
             .output()
@@ -176,14 +175,6 @@ fn liveness_facts_and_fixes_are_one_checked_result() {
         (
             "policy-jit",
             vec!["run", "tests/ui/lint_policy_liveness/run.jet"],
-        ),
-        (
-            "policy-interpreter",
-            vec![
-                "run",
-                "--interpret",
-                "tests/ui/lint_policy_liveness/run.jet",
-            ],
         ),
         (
             "policy-dev",

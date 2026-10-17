@@ -1,0 +1,35 @@
+# HAND-PORT tests/compute_extended.rs:372-391 portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu
+# PENDING-KIT; no runtime/reference proof.
+# Original helper release/default/interpret modes, independent stores, status0, exactly2 lines, real Vulkan accepted|rejected, nativeWebGPU rejected, exact stdout parity.
+fixture: portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu.fixture
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+mkdir: release-store
+mkdir: release-jetpack
+step release: jet run --release compute_vulkan_webgpu.jet
+env: JET_STORE_DIR={work}/release-store
+env: JETPACK_ROOT={work}/release-jetpack
+exit: 0
+stdout: lines = 2 # original ed77c235f tests/compute_extended.rs:378-383 stdout.lines count exactly2
+stdout.line(0): one-of portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu.fixture/vulkan.accepted.line.out portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu.fixture/vulkan.rejected.line.out # original ed77c235f tests/compute_extended.rs:384-387 indexed Vulkan line matches either real availability
+stdout.line(1): = "webgpu:rejected" # original ed77c235f tests/compute_extended.rs:388 indexed second line equality
+mkdir: default-store
+mkdir: default-jetpack
+step default: jet run compute_vulkan_webgpu.jet
+env: JET_STORE_DIR={work}/default-store
+env: JETPACK_ROOT={work}/default-jetpack
+exit: 0
+stdout: lines = 2 # original ed77c235f tests/compute_extended.rs:378-383 stdout.lines count exactly2
+stdout.line(0): one-of portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu.fixture/vulkan.accepted.line.out portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu.fixture/vulkan.rejected.line.out # original ed77c235f tests/compute_extended.rs:384-387 indexed Vulkan line matches either real availability
+stdout.line(1): = "webgpu:rejected" # original ed77c235f tests/compute_extended.rs:388 indexed second line equality
+stdout: == release
+mkdir: interpret-store
+mkdir: interpret-jetpack
+step interpret: jet run --interpret compute_vulkan_webgpu.jet
+env: JET_STORE_DIR={work}/interpret-store
+env: JETPACK_ROOT={work}/interpret-jetpack
+exit: 0
+stdout: lines = 2 # original ed77c235f tests/compute_extended.rs:378-383 stdout.lines count exactly2
+stdout.line(0): one-of portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu.fixture/vulkan.accepted.line.out portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu.fixture/vulkan.rejected.line.out # original ed77c235f tests/compute_extended.rs:384-387 indexed Vulkan line matches either real availability
+stdout.line(1): = "webgpu:rejected" # original ed77c235f tests/compute_extended.rs:388 indexed second line equality
+stdout: == release

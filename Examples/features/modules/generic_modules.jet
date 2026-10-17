@@ -8,25 +8,25 @@ module cache<K>(capacity: Int) {
 
     COMPUTED_SIZE :: prep { BASE + 1 }
 
-    pub struct Entry {
-        key: K
-        limit: Int -> capacity
+    struct Entry {
+        priv key: K
+        priv limit: Int -> capacity
     }
 
-    pub enum Slot {
+    enum Slot {
         Empty
         Value(K)
     }
 
-    pub fn entry(k: K) -> Entry { return Entry{key: k} }
+    fn entry(k: K) -> Entry { return Entry{key: k} }
 
-    pub fn slot(k: K) -> Slot { Slot.Value(k) }
+    fn slot(k: K) -> Slot { Slot.Value(k) }
 
-    pub fn key_of(k: K) -> String { return "key" }
+    fn key_of(k: K) -> String { return "key" }
 
-    pub fn describe() -> String { "generic cache" }
+    fn describe() -> String { "generic cache" }
 
-    pub fn size() -> Int { COMPUTED_SIZE }
+    fn size() -> Int { COMPUTED_SIZE }
 }
 
 // Forward alias chain: declaration order does not affect resolution.
@@ -43,7 +43,7 @@ module tier_zero(flag: Bool, count: Int, letter: Char, label: String, mode: Mode
     // A marker argument is fixed metadata; module value parameters reach the
     // body, not the marker.
     #Meta(category: "tier zero")
-    pub fn show() {
+    fn show() {
         print(flag)
         print(count)
         print(letter)
@@ -68,29 +68,29 @@ impl GoodToken.Token {
 // The annotation decides the kind: `Item` is a type slot because `Token` is a
 // trait, while `count` is an `Int` value slot. Their spelling follows that kind.
 module annotation_kinds<Item: Token>(count: Int) {
-    pub fn count() -> Int { count }
+    fn count() -> Int { count }
 }
 
 module kinds :: annotation_kinds<GoodToken>(8)
 
 module fixed_buffer<T>(capacity: Int) {
-    pub struct Buffer {
-        items: [T#capacity]
+    struct Buffer {
+        priv items: [T#capacity]
     }
 
-    pub fn echo(values: [T#capacity]) -> [T#capacity] { return ~values }
+    fn echo(values: [T#capacity]) -> [T#capacity] { return values.copy() }
 }
 
 module three_ints :: fixed_buffer<Int>(3)
 
 module local_laws<T> {
-    pub trait Reveal {
+    trait Reveal {
         type Output
         fn reveal(self) -> T
     }
 
-    pub struct Wrapped {
-        value: T
+    struct Wrapped {
+        priv value: T
     }
 
     impl Wrapped.Reveal {
@@ -99,11 +99,11 @@ module local_laws<T> {
         fn reveal(self) -> T { self.value }
     }
 
-    pub enum SourceErr {
+    enum SourceErr {
         Bad(T)
     }
 
-    pub enum TargetErr {
+    enum TargetErr {
         Wrapped(SourceErr)
     }
 

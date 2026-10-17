@@ -1,0 +1,12 @@
+
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+
+fn run() {
+    output :: files.create("{work}/csv/output.data") ?? panic("create")
+    writer :: csv.writer(^output) ?? panic("writer")
+    writer.write(["x", "y"]) ?? panic("write")
+    writer.finish() ?? panic("finish")
+    print(files.read("{work}/csv/output.data") ?? panic("read"))
+}

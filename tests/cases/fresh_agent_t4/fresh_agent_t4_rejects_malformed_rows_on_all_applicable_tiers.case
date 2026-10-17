@@ -1,0 +1,53 @@
+# HAND-PORT tests/fresh_agent_t4.rs:98-165 fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers
+# PENDING-GRAMMAR: approved batch-two/four forms, no runtime parity claim.
+fixture: fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.fixture
+env: NO_COLOR=1
+copy: input-fixtures/report.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 0
+stdout: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.valid.expected
+stderr: empty
+copy: input-fixtures/inputs/truncated.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 1
+stdout: empty
+stderr: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.truncated.tsv.expected
+copy: input-fixtures/inputs/empty-key.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 1
+stdout: empty
+stderr: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.empty-key.tsv.expected
+copy: input-fixtures/inputs/extra-column.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 1
+stdout: empty
+stderr: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.extra-column.tsv.expected
+copy: input-fixtures/inputs/unknown-key.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 1
+stdout: empty
+stderr: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.unknown-key.tsv.expected
+copy: input-fixtures/inputs/duplicate-key.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 1
+stdout: empty
+stderr: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.duplicate-key.tsv.expected
+copy: input-fixtures/inputs/invalid-count.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 1
+stdout: empty
+stderr: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.invalid-count.tsv.expected
+copy: input-fixtures/inputs/missing-required-key.tsv report.tsv
+step: jet run run.jet -- report.tsv
+env: JET_STORE_DIR={work}/cache-default
+exit: 1
+stdout: empty
+stderr: = fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers.missing-required-key.tsv.expected
+

@@ -1,0 +1,974 @@
+// Source counterpart of Host/EntryCodec.rs's checked recursive generator.
+// This produces candidate Source, not an executable image, a transport, or a
+// grant to publish. Its caller retains the ORIGINAL checked graph/catalog and
+// checks these fragments in the factory's actual source scope before lowering.
+// Missing owner projections are producer facts, not Jet language diagnostics.
+use jet_foundation.[
+    MIRAccess, MIRArtifactID, MIRArtifactKind, MIRFailureCarrier, MIRField,
+    MIRFieldID, MIRFunctionID, MIRFunctionKind, MIRFunctionForm, MIRModuleID,
+    MIROwnershipMode, MIRProgram, MIRType, MIRTypeDef, MIRVisibility,
+    Span, TTypeDef, Type, mir_field_id, mir_module_id, mir_type_id, mir_trait_id, mir_function_id, mir_sha256_hex, type_mir_identity_key,
+    mir_type_canonical_key, mir_type_same_checked_type, mir_measure_literal_value,
+]
+use jet_sema.[
+    SemaGraphModuleResult, SemaRegistrationGraph, sema_type_resolve_nominal_row, sema_type_resolve_declared_with_generics,
+]
+use jet_codegen.[jet_codegen_lower_type]
+use jet_backend.[LowerBindings, lower_subst_type]
+
+// One private Source error domain for supplier and generated codec calls.
+// This carries owned refusal text; it grants no runtime/provider authority.
+#Error
+struct BootstrapNativeCodecError {
+    message: String
+}
+
+// No offsets, word counts, borrowed process addresses or constructors live in
+// this schema. Values/LIR own physical layout and the normal Source call ABI.
+enum BootstrapNativeCodecIssueKind {
+    InvalidFactory
+    MissingCheckedDeclaration
+    MissingLegalOwnerProjection
+    MissingNativeOwnerProjection
+    MissingCheckedStructuralProjection
+}
+struct BootstrapNativeCodecIssue {
+    kind: BootstrapNativeCodecIssueKind
+    path: String
+    ty: MIRType?
+    detail: String
+}
+struct BootstrapNativeCodecField {
+    id: MIRFieldID?
+    name: String
+    child: Int
+}
+struct BootstrapNativeCodecVariant {
+    name: String
+    positional: Bool
+    fields: [BootstrapNativeCodecField]
+}
+enum BootstrapNativeCodecShape {
+    Pending
+    Scalar
+    Unit
+    Never
+    List(child: Int)
+    FixedList(child: Int, length: Int)
+    Map(key: Int, value: Int)
+    Option(child: Int)
+    Result(ok: Int, err: Int)
+    Record(name: String, fields: [BootstrapNativeCodecField])
+    Enum(name: String, variants: [BootstrapNativeCodecVariant])
+    Tuple(fields: [BootstrapNativeCodecField])
+    Blocked
+}
+struct BootstrapNativeCodecNode {
+    ty: MIRType
+    source_type: String
+    path: String
+    shape: BootstrapNativeCodecShape
+    closed: Bool
+}
+struct BootstrapNativeCodecState {
+    nodes: [BootstrapNativeCodecNode]
+    rows: [String:Int]
+    issues: [BootstrapNativeCodecIssue]
+    requester: Int
+    closure: [MIRModuleID]
+}
+struct BootstrapNativeCodecFragment {
+    ty: MIRType?
+    source: String
+}
+// Tiny OWN declaration facts captured from the original restored checked row
+// before Driver clears functions. This is not a factory admission authority.
+struct BootstrapNativeCodecFactoryDeclaration {
+    module_identity: String
+    key: String
+    name: String
+    source_file: String
+    source_span: Span
+    synthetic: Bool
+}
+struct BootstrapNativeCodecRoot {
+    artifact: MIRArtifactID
+    function: MIRFunctionID
+    request: MIRType
+    result: MIRType
+    module_identity: String
+    source_file: String
+    factory_key: String
+    mir_schema_version: Int
+    source_sha256: String
+}
+// A blocked plan still contains every CLOSED structural decoder/encoder pair.
+// It deliberately has no callable startup. Only the original checked caller
+// may admit a Complete candidate after ordinary Source checking/native lowering.
+enum BootstrapNativeEntryCodec {
+    Complete(root: BootstrapNativeCodecRoot, fragments: [BootstrapNativeCodecFragment], startup: String)
+    Blocked(root: BootstrapNativeCodecRoot?, fragments: [BootstrapNativeCodecFragment], issues: [BootstrapNativeCodecIssue])
+}
+
+fn bootstrap_native_codec_issue(state: &BootstrapNativeCodecState, kind: BootstrapNativeCodecIssueKind, path: String, ty: MIRType?, detail: String) Never! {
+    &state.issues.push(BootstrapNativeCodecIssue{kind: kind, path: path, ty: ty, detail: detail})
+}
+
+fn bootstrap_native_codec_definition(program: MIRProgram, ty: MIRType) -> Int? {
+    if ty.kind == .Apply(reference, _) {
+        found := Int?{None}
+        loop index in 0..<program.types.len() {
+            if program.types[index].id != reference.id -> next
+            if found != None -> return None
+            found = Val(index)
+        }
+        return found
+    }
+    None
+}
+
+fn bootstrap_native_codec_module(graph: SemaRegistrationGraph, id: MIRModuleID) -> Int? {
+    found := Int?{None}
+    loop index in 0..<graph.modules.len() {
+        if mir_module_id(graph.modules[index].module_identity) != id -> next
+        if found != None -> return None
+        found = Val(index)
+    }
+    found
+}
+
+struct BootstrapNativeCodecDeclarationRow {
+    module_row: Int
+    declaration_row: Int
+}
+fn bootstrap_native_codec_checked_declaration(modules: [SemaGraphModuleResult], definition: MIRTypeDef) -> BootstrapNativeCodecDeclarationRow? {
+    found := BootstrapNativeCodecDeclarationRow?{None}
+    loop module_index in 0..<modules.len() {
+        module_row :: modules[module_index]
+        if mir_module_id(module_row.module_identity) != definition.module_id -> next
+        loop declaration_index in 0..<module_row.declarations.type_defs.len() {
+            checked :: module_row.declarations.type_defs[declaration_index]
+            if checked.key != definition.key || checked.name != definition.name || checked.module_identity != module_row.module_identity -> next
+            if mir_type_id(checked.key) != definition.id -> next
+            if found != None -> return None
+            found = Val(BootstrapNativeCodecDeclarationRow{module_row: module_index, declaration_row: declaration_index})
+        }
+    }
+    found
+}
+
+// Resolve an ORIGINAL source spelling through the canonical legal resolver.
+// The name is not authority: the resolved original nominal and checked key,
+// module, ID and declaration all have to agree. No private sema helper is used.
+fn bootstrap_native_codec_spelling(graph: SemaRegistrationGraph, owner: Int, definition: MIRTypeDef, checked: TTypeDef) -> String? {
+    requester :: graph.modules[owner]
+    candidates := [String]{definition.name}
+    loop import in requester.imports {
+        loop binding in import.bindings {
+            if binding.symbol.name == definition.name || binding.original == definition.name -> &candidates.push(binding.local)
+        }
+        if import.declaration.alias != "" -> &candidates.push("{import.declaration.alias}.{definition.name}")
+    }
+    loop spelling in candidates {
+        row :: sema_type_resolve_nominal_row(graph, Type.Named{name: spelling}, requester.module_identity) ?? next
+        nominal :: graph.modules[row.module_index].nominals[row.row]
+        if nominal.symbol.name != checked.name || nominal.symbol.module_name != checked.module_identity -> next
+        // TTypeDef.key is the original qualified declaration key, not the
+        // symbol's spelling and not an EntryCodec inventory alias.
+        if graph.modules[row.module_index].module_identity != checked.module_identity -> next
+        if mir_module_id(checked.module_identity) != definition.module_id || mir_type_id(checked.key) != definition.id -> next
+        return Val(spelling)
+    }
+    None
+}
+
+// SAME public Source-to-MIR identity rule as Codegen/Types.jet: original
+// nominal declarations use their checked key; structural/application types
+// use type_mir_identity_key. This never calls an empty-module trait lowerer.
+fn bootstrap_native_codec_declared_type_matches(graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], declared: Type, owner: TTypeDef, actual: MIRType) -> Bool Never! {
+    canonical :: sema_type_resolve_declared_with_generics(graph, declared, owner.module_identity, owner.generic_params)
+    expected := mir_type_id(type_mir_identity_key(canonical))
+    nominal_name := String?{None}
+    if canonical == {
+        .Named(name) -> nominal_name = Val(name)
+        .Apply(name, arguments) -> { if arguments.len() == 0 -> nominal_name = Val(name) }
+        else -> {}
+    }
+    if nominal_name == .Val(name) {
+        loop parameter in owner.generic_params {
+            if parameter.name == name -> return actual.identity == Val(expected)
+        }
+        resolved := sema_type_resolve_nominal_row(graph, Type.Named{name: name}, owner.module_identity)
+        if resolved == .Val(row) {
+            nominal :: graph.modules[row.module_index].nominals[row.row]
+            count := 0
+            loop module_row in modules {
+                if module_row.module_identity != nominal.symbol.module_name -> next
+                loop declaration in module_row.declarations.type_defs {
+                    if declaration.module_identity != module_row.module_identity || declaration.name != nominal.symbol.name -> next
+                    expected = mir_type_id(declaration.key)
+                    count += 1
+                }
+            }
+            if count != 1 -> return false
+        }
+    }
+    actual.identity == Val(expected)
+}
+
+fn bootstrap_native_codec_is_builtin(ty: MIRType, name: String) -> Bool Never! {
+    canonical :: jet_codegen_lower_type(Type.Named{name: name})
+    if ty.identity != canonical.identity -> return false
+    if ty.kind == .Apply(reference, arguments) {
+        if canonical.kind == .Apply(builtin, builtin_arguments) -> return arguments.len() == 0 && builtin_arguments.len() == 0 && reference.id == builtin.id && reference.name == builtin.name
+    }
+    false
+}
+
+fn bootstrap_native_codec_is_byte_type(ty: MIRType) -> Bool Never! {
+    if ty.kind == {
+        .IntN(signed, bits) -> !signed && bits == 8
+        else -> false
+    }
+}
+
+// Only a NECESSARY refusal from the existing field-visibility law, never a
+// permission grant. Same-package/private access still requires Source check.
+fn bootstrap_native_codec_field_owner(state: &BootstrapNativeCodecState, graph: SemaRegistrationGraph, owner: TTypeDef, public: Bool, path: String, ty: MIRType) Never! {
+    owner_row :: bootstrap_native_codec_module(graph, mir_module_id(owner.module_identity)) ?? {
+        bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "field owner module is absent or ambiguous in original graph")
+        return
+    }
+    requester :: graph.modules[state.requester]
+    original_owner :: graph.modules[owner_row]
+    if !public && original_owner.module_identity != requester.module_identity && original_owner.package_identity != requester.package_identity -> bootstrap_native_codec_issue(&state, .MissingLegalOwnerProjection, path, Val(ty), "stored nonpublic field requires a real checked owning-module constructor/projector")
+}
+
+fn bootstrap_native_codec_children(shape: BootstrapNativeCodecShape) -> [Int] Never! {
+    children := [Int]{}
+    if shape == {
+        .List(child) | .FixedList(child, _) | .Option(child) -> &children.push(child)
+        .Tuple(fields) -> loop field in fields -> &children.push(field.child)
+        .Result(ok, err) | .Map(ok, err) -> {
+            &children.push(ok)
+            &children.push(err)
+        }
+        .Record(_, fields) -> loop field in fields -> &children.push(field.child)
+        .Enum(_, variants) -> loop variant in variants { loop field in variant.fields -> &children.push(field.child) }
+        else -> {}
+    }
+    children
+}
+
+// Reuse the EXISTING native checked substitution mechanism, including its
+// complete nested-signature, identity and layout law. One binding owner per
+// nominal application is read by all child walks; no interpreter or second
+// substitution implementation participates.
+fn bootstrap_native_codec_bindings(modules: [SemaGraphModuleResult], definition: MIRTypeDef, declared: TTypeDef, arguments: [MIRType]) -> LowerBindings BootstrapNativeCodecError! {
+    if arguments.len() != definition.generic_params.len() || arguments.len() != declared.generic_params.len() -> return Err(BootstrapNativeCodecError{message: "checked generic arity disagrees with original declaration"})
+    rows := [String:Int]{}
+    loop index in 0..<arguments.len() {
+        parameter :: definition.generic_params[index]
+        original :: declared.generic_params[index]
+        if parameter.name != original.name || parameter.bounds.len() != original.bounds.len() -> return Err(BootstrapNativeCodecError{message: "checked generic binder order/name/bounds disagree with original declaration"})
+        loop bound_index in 0..<original.bounds.len() {
+            matched := false
+            loop module_row in modules {
+                loop nominal in module_row.nominals {
+                    if nominal.symbol.id.key != original.bounds[bound_index].key -> next
+                    loop trait_row in module_row.declarations.traits {
+                        if trait_row.module_identity != nominal.symbol.module_name || trait_row.name != nominal.symbol.name -> next
+                        if parameter.bounds[bound_index].id == mir_trait_id(trait_row.key) && parameter.bounds[bound_index].name == trait_row.key -> matched = true
+                    }
+                }
+            }
+            if !matched -> return Err(BootstrapNativeCodecError{message: "checked generic bound has no matching original declared trait identity"})
+        }
+        if !&rows.add_new(parameter.name, index) -> return Err(BootstrapNativeCodecError{message: "checked generic binder is duplicated"})
+    }
+    Ok(LowerBindings{rows: ^rows, types: arguments})
+}
+
+// Field order/IDs come from the stored checked MIR fields, including defaulted
+// and private fields. There is no default-fill, computed-field omission, or
+// serialization annotation filter in the OWN factory codec.
+fn bootstrap_native_codec_fields(program: MIRProgram, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], state: &BootstrapNativeCodecState, definition: MIRTypeDef, checked: TTypeDef, fields: [MIRField], bindings: LowerBindings, path: String) -> [BootstrapNativeCodecField] {
+    output := [BootstrapNativeCodecField]{}
+    if checked.kind != .Struct(_, _) {
+        bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, None, "checked record declaration disagrees with MIR")
+        return output
+    }
+    if checked.kind == .Struct(source_fields, _) {
+        if fields.len() != source_fields.len() {
+            bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, None, "stored field count disagrees with original checked record")
+            return output
+        }
+        loop index in 0..<fields.len() {
+            field :: fields[index]
+            original :: source_fields[index]
+            if field.name != original.name || field.id != mir_field_id("{checked.key}::{original.name}") || field.computed != original.computed || field.public != original.public || field.package_public != original.package_public || field.has_default != original.has_default {
+                bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{field.name}", Val(field.ty), "stored field identity/order disagrees with original checked declaration")
+                return output
+            }
+            if !bootstrap_native_codec_declared_type_matches(graph, modules, original.ty, checked, field.ty) {
+                bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{field.name}", Val(field.ty), "stored field type disagrees with its original checked Source declaration")
+                return output
+            }
+            bootstrap_native_codec_field_owner(&state, graph, checked, original.public, "{path}.{field.name}", field.ty)
+            actual :: lower_subst_type(field.ty, bindings)
+            child :: bootstrap_native_codec_collect(program, graph, modules, &state, actual, "{path}.{field.name}")
+            &output.push(BootstrapNativeCodecField{id: Val(field.id), name: field.name, child: child})
+        }
+    }
+    output
+}
+
+fn bootstrap_native_codec_collect(program: MIRProgram, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], state: &BootstrapNativeCodecState, ty: MIRType, path: String) -> Int {
+    key :: mir_type_canonical_key(ty)
+    if state.rows.get(key) == .Val(index) {
+        if !mir_type_same_checked_type(state.nodes[index].ty, ty) -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "canonical row has a different checked type identity")
+        return index
+    }
+    index :: state.nodes.len()
+    _ := &state.rows.add(^key, index)
+    &state.nodes.push(BootstrapNativeCodecNode{ty: ty, source_type: "", path: path, shape: .Pending, closed: true})
+    issue_count :: state.issues.len()
+    source := ""
+    shape := BootstrapNativeCodecShape{Blocked}
+    if ty.kind == {
+        .Int -> {
+            source = "Int"
+            shape = .Scalar
+        }
+        .Float -> {
+            source = "Float"
+            shape = .Scalar
+        }
+        .Float32 -> {
+            source = "F32"
+            shape = .Scalar
+        }
+        .Bool -> {
+            source = "Bool"
+            shape = .Scalar
+        }
+        .Char -> {
+            source = "Char"
+            shape = .Scalar
+        }
+        .String -> {
+            source = "String"
+            shape = .Scalar
+        }
+        .IntN(signed, bits) -> {
+            if bits == 8 || bits == 16 || bits == 32 || bits == 64 {
+                prefix :: if signed -> "I" else -> "U"
+                source = "{prefix}{bits}"
+                shape = .Scalar
+            }
+        }
+        .Tuple(fields) -> {
+            if fields.len() == 0 {
+                source = "Unit"
+                shape = .Unit
+            } else {
+                projections := [BootstrapNativeCodecField]{}
+                names := [String]{}
+                loop field in fields {
+                    child :: bootstrap_native_codec_collect(program, graph, modules, &state, field.ty, "{path}.{field.name}")
+                    &projections.push(BootstrapNativeCodecField{id: None, name: field.name, child: child})
+                    &names.push("{field.name}: {state.nodes[child].source_type}")
+                }
+                source = "({names.join(", ")})"
+                shape = .Tuple(projections)
+            }
+        }
+        .List(inner) -> {
+            child :: bootstrap_native_codec_collect(program, graph, modules, &state, inner, "{path}[]")
+            source = "[{state.nodes[child].source_type}]"
+            shape = .List(child)
+        }
+        .FixedList(inner, measure) -> {
+            child :: bootstrap_native_codec_collect(program, graph, modules, &state, inner, "{path}[]")
+            if mir_measure_literal_value(measure) == .Val(length) {
+                if length >= 0 {
+                    source = "[{state.nodes[child].source_type}#{length}]"
+                    shape = .FixedList(child, length)
+                }
+            }
+        }
+        .Map(key_type, value_type) -> {
+            key_child :: bootstrap_native_codec_collect(program, graph, modules, &state, key_type, "{path}.key")
+            value_child :: bootstrap_native_codec_collect(program, graph, modules, &state, value_type, "{path}.value")
+            source = "[{state.nodes[key_child].source_type}:{state.nodes[value_child].source_type}]"
+            shape = .Map(key_child, value_child)
+            if key_type.kind != .String && key_type.kind != .Int && key_type.kind != .Bool && key_type.kind != .Char -> bootstrap_native_codec_issue(&state, .MissingCheckedStructuralProjection, "{path}.key", Val(key_type), "actual aggregate map key requires its checked canonical key projection")
+        }
+        .Option(inner) -> {
+            child :: bootstrap_native_codec_collect(program, graph, modules, &state, inner, "{path}?")
+            source = "({state.nodes[child].source_type})?"
+            shape = .Option(child)
+        }
+        .Result(ok, err) -> {
+            a :: bootstrap_native_codec_collect(program, graph, modules, &state, ok, "{path}.Ok")
+            b :: bootstrap_native_codec_collect(program, graph, modules, &state, err, "{path}.Err")
+            source = "({state.nodes[a].source_type}) ({state.nodes[b].source_type})!"
+            shape = .Result(a, b)
+        }
+        .Apply(reference, args) -> {
+            row := bootstrap_native_codec_definition(program, ty)
+            if row == .Val(definition_row) {
+                definition :: program.types[definition_row]
+                checked := bootstrap_native_codec_checked_declaration(modules, definition)
+                if checked == .Val(original_row) {
+                    original :: modules[original_row.module_row].declarations.type_defs[original_row.declaration_row]
+                    spelling := bootstrap_native_codec_spelling(graph, state.requester, definition, original)
+                    if spelling == .Val(name) {
+                        source = name
+                        bindings :: bootstrap_native_codec_bindings(modules, definition, original, args) ?? {
+                            bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), err.message.copy())
+                            state.nodes[index].shape = .Blocked
+                            state.nodes[index].closed = false
+                            return index
+                        }
+                        argument_names := [String]{}
+                        loop argument in args {
+                            child :: bootstrap_native_codec_collect(program, graph, modules, &state, argument, "{path}.type_argument")
+                            &argument_names.push(state.nodes[child].source_type)
+                        }
+                        if argument_names.len() != 0 -> source = "{name}<{argument_names.join(", ")}>"
+                        state.nodes[index].source_type = source
+                        if !state.closure.contains(definition.module_id) -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "nested checked owner is outside the selected artifact closure")
+                        if definition.kind == {
+                            .Struct(fields, _) -> {
+                                projected :: bootstrap_native_codec_fields(program, graph, modules, &state, definition, original, fields, bindings, path)
+                                shape = .Record(definition.name, projected)
+                            }
+                            .Enum(variants, _) -> {
+                                rows := [BootstrapNativeCodecVariant]{}
+                                if original.kind == .Enum(original_variants, _) {
+                                    if original_variants.len() != variants.len() -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "variant count disagrees with original checked declaration")
+                                    loop variant_index in 0..<variants.len() {
+                                        variant :: variants[variant_index]
+                                        if variant_index >= original_variants.len() -> next
+                                        if variant.name != original_variants[variant_index].name -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "variant identity/order disagrees with original checked declaration")
+                                        original_variant :: original_variants[variant_index]
+                                        fields := [BootstrapNativeCodecField]{}
+                                        positional := false
+                                        if variant.payload == {
+                                            .Unit -> if original_variant.payload != .Unit -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{variant.name}", Val(ty), "unit variant payload disagrees with original checked declaration")
+                                            .Single(inner) -> {
+                                                positional = true
+                                                if original_variant.payload == .Single(declared) {
+                                                    if !bootstrap_native_codec_declared_type_matches(graph, modules, declared, original, inner) -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{variant.name}", Val(inner), "variant payload type disagrees with original checked declaration")
+                                                } else {
+                                                    bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{variant.name}", Val(inner), "single variant payload shape disagrees with original checked declaration")
+                                                }
+                                                actual :: lower_subst_type(inner, bindings)
+                                                child :: bootstrap_native_codec_collect(program, graph, modules, &state, actual, "{path}.{variant.name}")
+                                                &fields.push(BootstrapNativeCodecField{id: None, name: "", child: child})
+                                            }
+                                            .Named(named) -> {
+                                                if original_variant.payload == .Named(declared_fields) {
+                                                    if named.len() != declared_fields.len() -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{variant.name}", Val(ty), "variant payload field count disagrees with original checked declaration")
+                                                    loop field_index in 0..<named.len() {
+                                                        field :: named[field_index]
+                                                        if field_index >= declared_fields.len() -> next
+                                                        declared :: declared_fields[field_index]
+                                                        if field.name != declared.name || field.id != mir_field_id("{original.key}::{variant.name}::{declared.name}") || field.computed != declared.computed || field.public != declared.public || field.package_public != declared.package_public || field.has_default != declared.has_default || !bootstrap_native_codec_declared_type_matches(graph, modules, declared.ty, original, field.ty) -> bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{variant.name}.{field.name}", Val(field.ty), "variant payload field identity/order/type/visibility disagrees with original checked declaration")
+                                                        bootstrap_native_codec_field_owner(&state, graph, original, declared.public, "{path}.{variant.name}.{field.name}", field.ty)
+                                                        actual :: lower_subst_type(field.ty, bindings)
+                                                        child :: bootstrap_native_codec_collect(program, graph, modules, &state, actual, "{path}.{variant.name}.{field.name}")
+                                                        &fields.push(BootstrapNativeCodecField{id: Val(field.id), name: field.name, child: child})
+                                                    }
+                                                } else {
+                                                    bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "{path}.{variant.name}", Val(ty), "named variant payload shape disagrees with original checked declaration")
+                                                }
+                                            }
+                                        }
+                                        &rows.push(BootstrapNativeCodecVariant{name: variant.name, positional: positional, fields: fields})
+                                    }
+                                    shape = .Enum(definition.name, rows)
+                                } else {
+                                    bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "checked enum declaration disagrees with MIR")
+                                }
+                            }
+                            else -> {}
+                        }
+                    } else {
+                        bootstrap_native_codec_issue(&state, .MissingLegalOwnerProjection, path, Val(ty), "no original legal Source spelling resolves to this checked owner in factory scope")
+                    }
+                } else {
+                    bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "checked owner declaration is absent or ambiguous")
+                }
+            } else if args.len() == 0 && bootstrap_native_codec_is_builtin(ty, "Unit") {
+                source = "Unit"
+                shape = .Unit
+            } else if args.len() == 0 && bootstrap_native_codec_is_builtin(ty, "Never") {
+                source = "Never"
+                shape = .Never
+            } else {
+                bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, path, Val(ty), "nominal ID has no unique retained checked definition")
+            }
+        }
+        .Shared(inner) -> {
+            // Census the actual payload as well as the missing physical owner.
+            bootstrap_native_codec_collect(program, graph, modules, &state, inner, "{path}.Shared")
+            bootstrap_native_codec_issue(&state, .MissingNativeOwnerProjection, path, Val(ty), "actual Shared owner/copy/drop projection requires the canonical child owner provider")
+        }
+        .Fn(_) | .SendFn(_, _, _) | .TraitObject(_) -> bootstrap_native_codec_issue(&state, .MissingNativeOwnerProjection, path, Val(ty), "actual callable/trait owner requires scoped canonical child service and native callable/copy/drop projection")
+        else -> {}
+    }
+    if shape == .Blocked && state.issues.len() == issue_count -> bootstrap_native_codec_issue(&state, .MissingCheckedStructuralProjection, path, Val(ty), "this checked structural projection has no Source codec producer")
+    state.nodes[index].source_type = source
+    state.nodes[index].shape = shape
+    state.nodes[index].closed = state.issues.len() == issue_count && shape != .Blocked
+    index
+}
+
+fn bootstrap_native_codec_close(state: &BootstrapNativeCodecState) Never! {
+    changed := true
+    loop changed {
+        changed = false
+        loop index in 0..<state.nodes.len() {
+            if !state.nodes[index].closed -> next
+            loop child in bootstrap_native_codec_children(state.nodes[index].shape) {
+                if !state.nodes[child].closed {
+                    state.nodes[index].closed = false
+                    changed = true
+                    break
+                }
+            }
+        }
+    }
+}
+
+fn bootstrap_native_codec_quote(text: String) -> String Never! {
+    escaped := [U8]{U8{34}}
+    loop byte in text.bytes() {
+        if Int.from_u8(byte) == {
+            34 | 92 -> {
+                &escaped.push(U8{92})
+                &escaped.push(byte)
+            }
+            10 -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{110})
+            }
+            13 -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{114})
+            }
+            9 -> {
+                &escaped.push(U8{92})
+                &escaped.push(U8{116})
+            }
+            else -> &escaped.push(byte)
+        }
+    }
+    &escaped.push(U8{34})
+    // Input is an existing String. Only ASCII escapes were inserted, so its
+    // Unicode bytes remain valid; no lossy per-byte UTF-8 conversion occurs.
+    String.from_bytes(^escaped) ?? panic("EntryCodec's escaped Source string lost valid UTF-8")
+}
+
+fn bootstrap_native_codec_decode_name(index: Int) -> String Never! { "__jet_owned_decode_{index}" }
+fn bootstrap_native_codec_encode_name(index: Int) -> String Never! { "__jet_owned_encode_{index}" }
+
+// These helpers consume owned DATA, never cells/addresses in another process.
+// A removed field's value is refilled before moving it, so LastUse does not
+// silently copy an owned aggregate projection. Partially decoded locals are
+// ordinary Source owners and are dropped on each typed early return.
+fn bootstrap_native_codec_helpers() -> String Never! {
+    lines := [String]{
+        "use jet_foundation.[TComptimeValue, TComptimeReport, TComptimeField, TComptimeEnumArg, TComptimeKey, TComptimeKeyField, TComptimeMapEntry]",
+        "fn __jet_owned_record_take(rows: &[TComptimeField], name: String) -> TComptimeValue BootstrapNativeCodecError! {{",
+        "    row := &rows.pop() ?? return Err(BootstrapNativeCodecError{{message: \"missing checked field\"}})",
+        "    if row.name != name -> return Err(BootstrapNativeCodecError{{message: \"field identity/order disagrees with checked record\"}})",
+        "    value := ^row.value",
+        "    row.value = TComptimeValue.Unit",
+        "    Ok(^value)",
+        "}}",
+        "fn __jet_owned_arg_take(rows: &[TComptimeEnumArg], name: String?) -> TComptimeValue BootstrapNativeCodecError! {{",
+        "    row := &rows.pop() ?? return Err(BootstrapNativeCodecError{{message: \"missing checked enum argument\"}})",
+        "    if row.name != name -> return Err(BootstrapNativeCodecError{{message: \"argument identity/order disagrees with checked enum\"}})",
+        "    value := ^row.value",
+        "    row.value = TComptimeValue.Unit",
+        "    Ok(^value)",
+        "}}",
+        "fn __jet_owned_u64(text: String) -> U64 BootstrapNativeCodecError! {{",
+        "    if text == \"\" -> return Err(BootstrapNativeCodecError{{message: \"empty fixed integer\"}})",
+        "    value := U64{{0}}",
+        "    loop byte in text.bytes() {{",
+        "        digit_int :: Int.from_u8(byte) - 48",
+        "        if digit_int < 0 || digit_int > 9 -> return Err(BootstrapNativeCodecError{{message: \"invalid fixed integer\"}})",
+        "        digit :: U64.from_int(digit_int) ?? return Err(BootstrapNativeCodecError{{message: \"invalid fixed integer digit\"}})",
+        "        if value > (U64{{18446744073709551615}} - digit) / U64{{10}} -> return Err(BootstrapNativeCodecError{{message: \"fixed integer overflow\"}})",
+        "        value = value * U64{{10}} + digit",
+        "    }}",
+        "    Ok(value)",
+        "}}",
+        "fn __jet_owned_character(code: Int) -> Char BootstrapNativeCodecError! {{",
+        "    if code < 0 || code > 1114111 || (code >= 55296 && code <= 57343) -> return Err(BootstrapNativeCodecError{{message: \"invalid Unicode scalar\"}})",
+        "    parts := [Int]{{}}",
+        "    if {{",
+        "        code < 128 -> &parts.push(code)",
+        "        code < 2048 -> {{ &parts.push(192 + code / 64); &parts.push(128 + code % 64) }}",
+        "        code < 65536 -> {{ &parts.push(224 + code / 4096); &parts.push(128 + (code / 64) % 64); &parts.push(128 + code % 64) }}",
+        "        else -> {{ &parts.push(240 + code / 262144); &parts.push(128 + (code / 4096) % 64); &parts.push(128 + (code / 64) % 64); &parts.push(128 + code % 64) }}",
+        "    }}",
+        "    bytes := [U8]{{}}",
+        "    loop part in parts -> &bytes.push(U8.from_int(part) ?? return Err(BootstrapNativeCodecError{{message: \"invalid Unicode byte\"}}))",
+        "    text :: String.from_bytes(^bytes) ?? return Err(BootstrapNativeCodecError{{message: \"invalid Unicode encoding\"}})",
+        "    chars := text.chars()",
+        "    Ok(&chars.pop() ?? return Err(BootstrapNativeCodecError{{message: \"missing Unicode character\"}}))",
+        "}}",
+        "fn __jet_owned_character_code(value: Char) -> Int BootstrapNativeCodecError! {{",
+        "    text :: value.to_string()",
+        "    bytes :: text.bytes()",
+        "    if bytes.len() < 1 || bytes.len() > 4 -> return Err(BootstrapNativeCodecError{{message: \"invalid Unicode character width\"}})",
+        "    first :: Int.from_u8(bytes[0])",
+        "    if bytes.len() == 1 -> return Ok(first)",
+        "    result := first - (if bytes.len() == 2 -> 192 else if bytes.len() == 3 -> 224 else -> 240)",
+        "    loop index in 1..<bytes.len() -> result = result * 64 + Int.from_u8(bytes[index]) - 128",
+        "    Ok(result)",
+        "}}",
+    }
+    "{lines.join("\n")}\n"
+}
+
+fn bootstrap_native_codec_scalar_decoder(node: BootstrapNativeCodecNode) -> String Never! {
+    if node.ty.kind == {
+        .Int -> "if ^value == {{ .Int(inner) -> Ok(inner) else -> Err(BootstrapNativeCodecError{{message: \"expected checked Int\"}}) }}"
+        .Bool -> "if ^value == {{ .Bool(inner) -> Ok(inner) else -> Err(BootstrapNativeCodecError{{message: \"expected checked Bool\"}}) }}"
+        .String -> "if ^value == {{ .String(inner) -> Ok(^inner) else -> Err(BootstrapNativeCodecError{{message: \"expected checked String\"}}) }}"
+        .Char -> "if ^value == {{ .Char(inner) -> __jet_owned_character(inner) else -> Err(BootstrapNativeCodecError{{message: \"expected checked Char\"}}) }}"
+        .Float -> "if ^value == {{ .Float(inner, bits) -> {{ if bits != 64 -> return Err(BootstrapNativeCodecError{{message: \"wrong checked float width\"}}); Ok(inner) }} else -> Err(BootstrapNativeCodecError{{message: \"expected checked Float\"}}) }}"
+        .Float32 -> "if ^value == {{ .Float(inner, bits) -> {{ if bits != 32 -> return Err(BootstrapNativeCodecError{{message: \"wrong checked float width\"}}); Ok(F32.from_float(inner) ?? return Err(BootstrapNativeCodecError{{message: \"invalid F32\"}})) }} else -> Err(BootstrapNativeCodecError{{message: \"expected checked F32\"}}) }}"
+        .IntN(signed, bits) -> {
+            if !signed && bits == 64 -> return "if ^value == {{ .BigInt(text) -> __jet_owned_u64(text) else -> Err(BootstrapNativeCodecError{{message: \"expected fixed integer decimal\"}}) }}"
+            "if ^value == {{ .BigInt(text) -> {{ inner :: Int.parse(text) ?? return Err(BootstrapNativeCodecError{{message: \"invalid fixed integer decimal\"}}); Ok({node.source_type}.from_int(inner) ?? return Err(BootstrapNativeCodecError{{message: \"fixed integer out of checked range\"}})) }} else -> Err(BootstrapNativeCodecError{{message: \"expected fixed integer decimal\"}}) }}"
+        }
+        else -> ""
+    }
+}
+
+fn bootstrap_native_codec_scalar_encoder(node: BootstrapNativeCodecNode) -> String Never! {
+    if node.ty.kind == {
+        .Int -> "Ok(TComptimeValue.Int{{value: value}})"
+        .Bool -> "Ok(TComptimeValue.Bool{{value: value}})"
+        .String -> "owned := value.copy(); Ok(TComptimeValue.String{{value: ^owned}})"
+        .Char -> "code :: __jet_owned_character_code(value) ?? return Err(^err); Ok(TComptimeValue.Char{{value: code}})"
+        .Float -> "Ok(TComptimeValue.Float{{value: value, bits: 64}})"
+        .Float32 -> "Ok(TComptimeValue.Float{{value: Float.from_f32(value), bits: 32}})"
+        .IntN(_, _) -> "Ok(TComptimeValue.BigInt{{decimal: value.to_string()}})"
+        else -> ""
+    }
+}
+
+fn bootstrap_native_codec_emit_decoder(node: BootstrapNativeCodecNode, index: Int, nodes: [BootstrapNativeCodecNode]) -> String Never! {
+    body := ""
+    if node.shape == {
+        .Scalar -> body = bootstrap_native_codec_scalar_decoder(node)
+        .Unit -> body = "if value != .Unit -> return Err(BootstrapNativeCodecError{{message: \"expected Unit\"}}); Ok(Unit)"
+        .Never -> body = "Err(BootstrapNativeCodecError{{message: \"Never has no owned value\"}})"
+        .List(child) | .FixedList(child, _) -> {
+            decode :: bootstrap_native_codec_decode_name(child)
+            bytes :: bootstrap_native_codec_is_byte_type(nodes[child].ty)
+            variant :: if bytes -> "Bytes" else -> "List"
+            if node.shape == .FixedList(_, length) {
+                statements := [String]{}
+                elements := [String]{}
+                loop position in 0..<length {
+                    expression :: if bytes -> "^item_{position}" else -> "{decode}(^item_{position}) ?? return Err(^err)"
+                    &statements.push("item_{position} := &rows.pop() ?? return Err(BootstrapNativeCodecError{{message: \"missing checked fixed-list item\"}})\nelement_{position} := {expression}")
+                    &elements.push("^element_{position}")
+                }
+                // Every child is an initialized independent Source owner.
+                // Construct the fixed aggregate ONLY after all decodes succeed.
+                body = "if ^value == {{\n.{variant}(items) -> {{\nrows := ^items\nif rows.len() != {length} -> return Err(BootstrapNativeCodecError{{message: \"wrong checked fixed-list length\"}})\n&rows.reverse()\n{statements.join("\n")}\nOk([{nodes[child].source_type}#{length}]{{{elements.join(", ")}}})\n}}\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked fixed list\"}})\n}}"
+            } else if bytes {
+                body = "if ^value == {{ .Bytes(items) -> Ok(^items) else -> Err(BootstrapNativeCodecError{{message: \"expected checked byte list\"}}) }}"
+            } else {
+                body = "if ^value == {{\n.List(items) -> {{\nrows := ^items\n&rows.reverse()\noutput := [{nodes[child].source_type}]{{}}\nloop rows.len() > 0 {{\nitem := &rows.pop() ?? return Err(BootstrapNativeCodecError{{message: \"missing checked list item\"}})\ndecoded := {decode}(^item) ?? return Err(^err)\n&output.push(^decoded)\n}}\nOk(^output)\n}}\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked list\"}})\n}}"
+            }
+        }
+        .Map(key_child, value_child) -> {
+            key_decode :: bootstrap_native_codec_decode_name(key_child)
+            value_decode :: bootstrap_native_codec_decode_name(value_child)
+            key_pattern :: if nodes[key_child].ty.kind == {
+                .Int -> ".Int(inner) -> TComptimeValue.Int{{value: inner}}"
+                .Bool -> ".Bool(inner) -> TComptimeValue.Bool{{value: inner}}"
+                .Char -> ".Char(inner) -> TComptimeValue.Char{{value: inner}}"
+                else -> ".String(inner) -> TComptimeValue.String{{value: ^inner}}"
+            }
+            body = "if ^value == {{\n.Map(items) -> {{\nrows := ^items\n&rows.reverse()\noutput := [{nodes[key_child].source_type}:{nodes[value_child].source_type}]{{}}\nloop rows.len() > 0 {{\n    row := &rows.pop() ?? return Err(BootstrapNativeCodecError{{message: \"missing checked map entry\"}})\n    raw_key := ^row.key\n    row.key = TComptimeKey.Int{{value: 0}}\n    key_data := if ^raw_key == {{ {key_pattern} else -> return Err(BootstrapNativeCodecError{{message: \"wrong checked map key kind\"}}) }}\n    key := {key_decode}(^key_data) ?? return Err(^err)\n    raw_value := ^row.value\n    row.value = TComptimeValue.Unit\n    decoded := {value_decode}(^raw_value) ?? return Err(^err)\n    if !&output.add_new(^key, ^decoded) -> return Err(BootstrapNativeCodecError{{message: \"duplicate checked map key\"}})\n}}\nOk(^output)\n}}\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked map\"}})\n}}"
+        }
+        .Option(child) -> {
+            decode :: bootstrap_native_codec_decode_name(child)
+            body = "if ^value == {{\n.Present(inner) -> {{ decoded := {decode}(^inner) ?? return Err(^err); Ok(Val(^decoded)) }}\n.Unit -> Ok(None)\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked option\"}})\n}}"
+        }
+        .Result(ok, error) -> {
+            decode_ok :: bootstrap_native_codec_decode_name(ok)
+            decode_error :: bootstrap_native_codec_decode_name(error)
+            body = "if ^value == {{\n.Present(inner) -> {{ decoded := {decode_ok}(^inner) ?? return Err(^err); Ok(Ok(^decoded)) }}\n.Failed(report) -> if ^report == {{ .Told(inner) -> {{ decoded := {decode_error}(^inner) ?? return Err(^err); Ok(Err(^decoded)) }} else -> Err(BootstrapNativeCodecError{{message: \"owned result requires Told payload\"}}) }}\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked result\"}})\n}}"
+        }
+        .Record(name, fields) -> {
+            declarations := [String]{}
+            constructor := [String]{}
+            loop position in 0..<fields.len() {
+                field :: fields[position]
+                decode :: bootstrap_native_codec_decode_name(field.child)
+                quoted :: bootstrap_native_codec_quote(field.name)
+                &declarations.push("item_{position} := __jet_owned_record_take(&rows, {quoted}) ?? return Err(^err)\nfield_{position} := {decode}(^item_{position}) ?? return Err(^err)")
+                &constructor.push("{field.name}: ^field_{position}")
+            }
+            quoted_name :: bootstrap_native_codec_quote(name)
+            body = "if ^value == {{\n.Struct(type_name, items) -> {{\n    rows := ^items\n    if type_name != {quoted_name} || rows.len() != {fields.len()} -> return Err(BootstrapNativeCodecError{{message: \"wrong checked record identity/count\"}})\n    &rows.reverse()\n    {declarations.join("\n")}\n    Ok({node.source_type}{{{constructor.join(", ")}}})\n}}\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked record\"}})\n}}"
+        }
+        .Tuple(fields) -> {
+            declarations := [String]{}
+            constructor := [String]{}
+            loop position in 0..<fields.len() {
+                field :: fields[position]
+                decode :: bootstrap_native_codec_decode_name(field.child)
+                &declarations.push("item_{position} := __jet_owned_record_take(&rows, {bootstrap_native_codec_quote(field.name)}) ?? return Err(^err)\nfield_{position} := {decode}(^item_{position}) ?? return Err(^err)")
+                &constructor.push("{field.name}: ^field_{position}")
+            }
+            // Foundation's tuple DATA carrier is a structural Struct; its
+            // string tag is not nominal identity or an owner permission.
+            body = "if ^value == {{\n.Struct(_, items) -> {{\nrows := ^items\nif rows.len() != {fields.len()} -> return Err(BootstrapNativeCodecError{{message: \"wrong checked tuple field count\"}})\n&rows.reverse()\n{declarations.join("\n")}\nOk(({constructor.join(", ")}))\n}}\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked tuple\"}})\n}}"
+        }
+        .Enum(name, variants) -> {
+            arms := [String]{}
+            loop variant in variants {
+                declarations := [String]{}
+                constructor := [String]{}
+                loop position in 0..<variant.fields.len() {
+                    field :: variant.fields[position]
+                    decode :: bootstrap_native_codec_decode_name(field.child)
+                    expected :: if variant.positional -> "None" else -> "Val({bootstrap_native_codec_quote(field.name)})"
+                    &declarations.push("item_{position} := __jet_owned_arg_take(&rows, {expected}) ?? return Err(^err)\nfield_{position} := {decode}(^item_{position}) ?? return Err(^err)")
+                    &constructor.push(if variant.positional -> "^field_{position}" else -> "{field.name}: ^field_{position}")
+                }
+                expression :: if variant.fields.len() == 0 -> "{node.source_type}.{variant.name}" else if variant.positional -> "{node.source_type}.{variant.name}({constructor.join(", ")})" else -> "{node.source_type}.{variant.name}{{{constructor.join(", ")}}}"
+                &arms.push("{bootstrap_native_codec_quote(variant.name)} -> {{\nif rows.len() != {variant.fields.len()} -> return Err(BootstrapNativeCodecError{{message: \"wrong checked enum argument count\"}})\n&rows.reverse()\n{declarations.join("\n")}\nOk({expression})\n}}")
+            }
+            body = "if ^value == {{\n.Enum(type_name, variant, items) -> {{\nrows := ^items\nif type_name != {bootstrap_native_codec_quote(name)} -> return Err(BootstrapNativeCodecError{{message: \"wrong checked enum identity\"}})\nif variant == {{\n{arms.join("\n")}\nelse -> Err(BootstrapNativeCodecError{{message: \"unknown checked enum variant\"}})\n}}\n}}\nelse -> Err(BootstrapNativeCodecError{{message: \"expected checked enum\"}})\n}}"
+        }
+        else -> {}
+    }
+    "fn {bootstrap_native_codec_decode_name(index)}(value: ^TComptimeValue) -> ({node.source_type}) BootstrapNativeCodecError! {{\n{body}\n}}\n"
+}
+
+fn bootstrap_native_codec_emit_encoder(node: BootstrapNativeCodecNode, index: Int) -> String Never! {
+    body := ""
+    if node.shape == {
+        .Scalar -> body = bootstrap_native_codec_scalar_encoder(node)
+        .Unit -> body = "Ok(TComptimeValue.Unit)"
+        .Never -> body = "if value == {{}}"
+        .List(child) | .FixedList(child, _) -> {
+            encode :: bootstrap_native_codec_encode_name(child)
+            body = "items := [TComptimeValue]{{}}\nloop item in value {{\n    encoded := {encode}(item) ?? return Err(^err)\n    &items.push(^encoded)\n}}\nOk(TComptimeValue.List{{values: ^items}})"
+            if node.ty.kind == .List(inner) {
+                if bootstrap_native_codec_is_byte_type(inner) -> body = "owned := ~value; Ok(TComptimeValue.Bytes{{value: ^owned}})"
+            }
+            if node.ty.kind == .FixedList(inner, _) {
+                if bootstrap_native_codec_is_byte_type(inner) -> body = "bytes := [U8]{{}}\nloop item in value -> &bytes.push(item)\nOk(TComptimeValue.Bytes{{value: ^bytes}})"
+            }
+        }
+        .Map(key_child, value_child) -> {
+            key_encode :: bootstrap_native_codec_encode_name(key_child)
+            value_encode :: bootstrap_native_codec_encode_name(value_child)
+            // Keys are converted by their SAME checked encoder; only the
+            // existing canonical key DATA carrier changes the enum tag.
+            body = "rows := [TComptimeMapEntry]{{}}\nloop (key, item) in value {{\n    key_data := {key_encode}(key) ?? return Err(^err)\n    key_value := if ^key_data == {{\n        .Int(inner) -> TComptimeKey.Int{{value: inner}}\n        .String(inner) -> TComptimeKey.String{{value: ^inner}}\n        .Bool(inner) -> TComptimeKey.Bool{{value: inner}}\n        .Char(inner) -> TComptimeKey.Char{{value: inner}}\n        else -> return Err(BootstrapNativeCodecError{{message: \"wrong checked map key projection\"}})\n    }}\n    encoded := {value_encode}(item) ?? return Err(^err)\n    &rows.push(TComptimeMapEntry{{key: ^key_value, value: ^encoded}})\n}}\nOk(TComptimeValue.Map{{entries: ^rows}})"
+        }
+        .Option(child) -> {
+            encode :: bootstrap_native_codec_encode_name(child)
+            body = "if value == {{\n.Val(inner) -> {{ encoded := {encode}(inner) ?? return Err(^err); Ok(TComptimeValue.Present{{value: ^encoded}}) }}\n.None -> Ok(TComptimeValue.Unit)\n}}"
+        }
+        .Result(ok, error) -> {
+            encode_ok :: bootstrap_native_codec_encode_name(ok)
+            encode_error :: bootstrap_native_codec_encode_name(error)
+            body = "if value == {{\n.Ok(inner) -> {{ encoded := {encode_ok}(inner) ?? return Err(^err); Ok(TComptimeValue.Present{{value: ^encoded}}) }}\n.Err(inner) -> {{ encoded := {encode_error}(inner) ?? return Err(^err); Ok(TComptimeValue.Failed{{report: TComptimeReport.Told{{value: ^encoded}}}}) }}\n}}"
+        }
+        .Record(name, fields) -> {
+            statements := [String]{"rows := [TComptimeField]{{}}"}
+            loop position in 0..<fields.len() {
+                field :: fields[position]
+                encode :: bootstrap_native_codec_encode_name(field.child)
+                &statements.push("encoded_{position} := {encode}(value.{field.name}) ?? return Err(^err)\n&rows.push(TComptimeField{{name: {bootstrap_native_codec_quote(field.name)}, value: ^encoded_{position}}})")
+            }
+            &statements.push("Ok(TComptimeValue.Struct{{type_name: {bootstrap_native_codec_quote(name)}, fields: ^rows}})")
+            body = statements.join("\n")
+        }
+        .Tuple(fields) -> {
+            statements := [String]{"rows := [TComptimeField]{{}}"}
+            loop position in 0..<fields.len() {
+                field :: fields[position]
+                encode :: bootstrap_native_codec_encode_name(field.child)
+                &statements.push("encoded_{position} := {encode}(value.{field.name}) ?? return Err(^err)\n&rows.push(TComptimeField{{name: {bootstrap_native_codec_quote(field.name)}, value: ^encoded_{position}}})")
+            }
+            &statements.push("Ok(TComptimeValue.Struct{{type_name: \"Tuple\", fields: ^rows}})")
+            body = statements.join("\n")
+        }
+        .Enum(name, variants) -> {
+            arms := [String]{}
+            loop variant in variants {
+                bindings := [String]{}
+                statements := [String]{"rows := [TComptimeEnumArg]{{}}"}
+                loop position in 0..<variant.fields.len() {
+                    field :: variant.fields[position]
+                    &bindings.push("field_{position}")
+                    encode :: bootstrap_native_codec_encode_name(field.child)
+                    expected :: if variant.positional -> "None" else -> "Val({bootstrap_native_codec_quote(field.name)})"
+                    &statements.push("encoded_{position} := {encode}(field_{position}) ?? return Err(^err)\n&rows.push(TComptimeEnumArg{{name: {expected}, value: ^encoded_{position}}})")
+                }
+                pattern :: if bindings.len() == 0 -> ".{variant.name}" else -> ".{variant.name}({bindings.join(", ")})"
+                &statements.push("Ok(TComptimeValue.Enum{{type_name: {bootstrap_native_codec_quote(name)}, variant: {bootstrap_native_codec_quote(variant.name)}, args: ^rows}})")
+                &arms.push("{pattern} -> {{\n{statements.join("\n")}\n}}")
+            }
+            body = "if value == {{\n{arms.join("\n")}\n}}"
+        }
+        else -> {}
+    }
+    // No Move parameter: read the entire owned result while detaching DATA.
+    "fn {bootstrap_native_codec_encode_name(index)}(value: {node.source_type}) -> TComptimeValue BootstrapNativeCodecError! {{\n{body}\n}}\n"
+}
+
+// Call only while original restored functions still exist. Direct indexed
+// projections copy four Strings, never materialize or retain a TFunc/body.
+fn bootstrap_native_codec_capture_factory(modules: [SemaGraphModuleResult], module_identity: String) -> BootstrapNativeCodecFactoryDeclaration BootstrapNativeCodecError! {
+    selected_module := Int?{None}
+    selected_function := Int?{None}
+    loop module_index in 0..<modules.len() {
+        if modules[module_index].module_identity != module_identity -> next
+        if selected_module != None -> return Err(BootstrapNativeCodecError{message: "original factory module is ambiguous"})
+        selected_module = Val(module_index)
+        loop function_index in 0..<modules[module_index].functions.len() {
+            if modules[module_index].functions[function_index].name != "jet_bootstrap_compile" -> next
+            if modules[module_index].functions[function_index].module_identity != module_identity || modules[module_index].functions[function_index].synthetic -> return Err(BootstrapNativeCodecError{message: "factory row disagrees with original checked module"})
+            if selected_function != None -> return Err(BootstrapNativeCodecError{message: "original checked factory is ambiguous"})
+            selected_function = Val(function_index)
+        }
+    }
+    module_row :: selected_module ?? return Err(BootstrapNativeCodecError{message: "original factory module is absent"})
+    function_row :: selected_function ?? return Err(BootstrapNativeCodecError{message: "original checked factory is absent"})
+    Ok(BootstrapNativeCodecFactoryDeclaration{module_identity: modules[module_row].functions[function_row].module_identity.copy(), key: modules[module_row].functions[function_row].key.copy(), name: modules[module_row].functions[function_row].name.copy(), source_file: modules[module_row].functions[function_row].source_file.copy(), source_span: modules[module_row].functions[function_row].source_span, synthetic: modules[module_row].functions[function_row].synthetic})
+}
+
+fn bootstrap_native_entry_codec_generate(program: MIRProgram, graph: SemaRegistrationGraph, modules: [SemaGraphModuleResult], declaration: BootstrapNativeCodecFactoryDeclaration, artifact: MIRArtifactID, entry: MIRFunctionID) -> BootstrapNativeEntryCodec {
+    state := BootstrapNativeCodecState{nodes: [BootstrapNativeCodecNode]{}, rows: [String:Int]{}, issues: [BootstrapNativeCodecIssue]{}, requester: -1, closure: [MIRModuleID]{}}
+    artifact_row := Int?{None}
+    loop index in 0..<program.artifacts.len() {
+        if program.artifacts[index].id != artifact -> next
+        if artifact_row != None {
+            bootstrap_native_codec_issue(&state, .InvalidFactory, "factory", None, "selected artifact ID is ambiguous")
+            return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+        }
+        artifact_row = Val(index)
+    }
+    selected :: artifact_row ?? {
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory", None, "selected artifact is absent or ambiguous")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    plan :: program.artifacts[selected]
+    if plan.kind != MIRArtifactKind.NativeExecutable && plan.kind != MIRArtifactKind.NativeLibrary {
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory", None, "selected artifact is not native")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    state.closure = plan.modules
+    function_row := Int?{None}
+    factory_count := 0
+    loop index in 0..<program.functions.len() {
+        candidate :: program.functions[index]
+        if candidate.name == "jet_bootstrap_compile" && plan.modules.contains(candidate.module_id) -> factory_count += 1
+        if candidate.id == entry {
+            if function_row != None {
+                bootstrap_native_codec_issue(&state, .InvalidFactory, "factory", None, "factory ID is ambiguous")
+                return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+            }
+            function_row = Val(index)
+        }
+    }
+    selected_function :: function_row ?? {
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory", None, "factory ID is absent")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    factory :: program.functions[selected_function]
+    if factory_count != 1 || factory.name != "jet_bootstrap_compile" || factory.kind != MIRFunctionKind.Jet || factory.form != MIRFunctionForm.TopLevel || factory.visibility != MIRVisibility.Private || !plan.modules.contains(factory.module_id) || !factory.target_applicability.rust_aot || factory.generic_params.len() != 0 || factory.capture_params.len() != 0 || factory.params.len() != 1 || factory.failure != MIRFailureCarrier.Infallible {
+        // The existing MIR applicability row is named rust_aot; it is NOT a
+        // Rust executor selection or a native lowering/transport receipt.
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory", None, "root is not the unique private owned non-generic native-applicable infallible Source factory")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    parameter :: factory.params[0]
+    if parameter.index != 0 || parameter.access != MIRAccess.Move || (parameter.ownership.mode != MIROwnershipMode.Owned && parameter.ownership.mode != MIROwnershipMode.Move) || parameter.variadic || parameter.default_present {
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory.request", Val(parameter.ty), "factory parameter must be exactly one OWN nonvariadic request without default")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    request_row :: bootstrap_native_codec_definition(program, parameter.ty) ?? {
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory.request", Val(parameter.ty), "request has no unique checked nominal definition")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    result_row :: bootstrap_native_codec_definition(program, factory.return_type) ?? {
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory.result", Val(factory.return_type), "result has no unique checked nominal definition")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    request :: program.types[request_row]
+    result :: program.types[result_row]
+    if request.name != "JetDriverCompileRequest" || result.name != "JetDriverCompileResult" || !plan.modules.contains(request.module_id) || !plan.modules.contains(result.module_id) {
+        bootstrap_native_codec_issue(&state, .InvalidFactory, "factory", None, "exact request/result nominals must belong to this artifact closure")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    requester :: bootstrap_native_codec_module(graph, factory.module_id) ?? {
+        bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "factory", None, "factory module does not resolve uniquely in original registration graph")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    // The declaration is OWN DATA captured before functions were cleared;
+    // same original graph and MIR identity must still agree independently.
+    identity :: "{declaration.key}|{declaration.source_file}|{declaration.source_span.start}|{declaration.source_span.end}"
+    if declaration.synthetic || declaration.name != factory.name || declaration.key != factory.key || declaration.module_identity != graph.modules[requester].module_identity || mir_module_id(declaration.module_identity) != factory.module_id || mir_function_id(identity) != factory.id {
+        bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "factory", None, "captured original checked factory declaration disagrees with actual MIR")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    source_row := Int?{None}
+    loop index in 0..<program.source_files.len() {
+        if program.source_files[index].id != factory.source_file -> next
+        if source_row != None {
+            bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "factory", None, "original factory source ID is ambiguous")
+            return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+        }
+        source_row = Val(index)
+    }
+    original_source :: source_row ?? {
+        bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "factory", None, "original factory source bytes are absent")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    if !graph.complete || program.source_files[original_source].path != declaration.source_file || factory.span != declaration.source_span {
+        bootstrap_native_codec_issue(&state, .MissingCheckedDeclaration, "factory", None, "original checked closure or factory source path/span disagrees with actual MIR")
+        return .Blocked(None, [BootstrapNativeCodecFragment]{}, ^state.issues)
+    }
+    state.requester = requester
+    root :: BootstrapNativeCodecRoot{artifact: artifact, function: entry, request: parameter.ty, result: factory.return_type, module_identity: graph.modules[requester].module_identity, source_file: program.source_files[original_source].path, factory_key: factory.key, mir_schema_version: program.schema_version, source_sha256: mir_sha256_hex(program.source_files[original_source].source)}
+    request_node :: bootstrap_native_codec_collect(program, graph, modules, &state, parameter.ty, "request")
+    result_node :: bootstrap_native_codec_collect(program, graph, modules, &state, factory.return_type, "result")
+    bootstrap_native_codec_close(&state)
+    fragments := [BootstrapNativeCodecFragment]{BootstrapNativeCodecFragment{ty: None, source: bootstrap_native_codec_helpers()}}
+    loop index in 0..<state.nodes.len() {
+        node :: state.nodes[index]
+        if !node.closed -> next
+        source :: "{bootstrap_native_codec_emit_decoder(node, index, state.nodes)}{bootstrap_native_codec_emit_encoder(node, index)}"
+        &fragments.push(BootstrapNativeCodecFragment{ty: Val(node.ty), source: source})
+    }
+    if state.issues.len() != 0 || !state.nodes[request_node].closed || !state.nodes[result_node].closed -> return .Blocked(Val(root), ^fragments, ^state.issues)
+    decode :: bootstrap_native_codec_decode_name(request_node)
+    encode :: bootstrap_native_codec_encode_name(result_node)
+    // Direct ordinary Source call: native Lower chooses the same retained
+    // factory callable and hidden result storage. No cell adapter is involved.
+    // Result stays owned here while the read encoder builds detached DATA;
+    // either return path retires it through normal Source drop exactly once.
+    startup :: "fn __jet_owned_source_factory(input: ^TComptimeValue) -> TComptimeValue BootstrapNativeCodecError! {{\n    request := {decode}(^input) ?? return Err(^err)\n    result := jet_bootstrap_compile(^request)\n    encoded := {encode}(result) ?? return Err(^err)\n    Ok(^encoded)\n}}\n"
+    .Complete(root, ^fragments, startup)
+}

@@ -1,5 +1,5 @@
 // #3819: a hand-written Decode that splits its text into a list runs when the
-// type is a field of a derived #Codable struct, on every tier.
+// type is a field of a structurally decoded struct, on every tier.
 use core.encoding.json as json
 
 struct Handle {
@@ -8,14 +8,13 @@ struct Handle {
 }
 
 impl Handle.Decode {
-    fn decode(tree: DataTree) -> Handle [FieldError]! {
+    fn decode(tree: Dyn) -> Handle [FieldError]! {
         text :: tree.text()
         parts :: text.split("@").to_list()
         return Ok(Handle{name: parts[0], host: parts[1]})
     }
 }
 
-#Codable
 struct Account {
     owner: Handle
 }

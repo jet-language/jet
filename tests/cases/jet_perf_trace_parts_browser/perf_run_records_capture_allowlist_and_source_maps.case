@@ -1,0 +1,11 @@
+# Port of tests/jet_perf_trace_parts/browser.rs:49-81.
+fixture: fixtures/capture
+step: jet perf run allow.jet --capture=urls,values --out {work}/allow.jettrace
+exit: 0
+file: allow.jettrace ~ "\"allowlist\":[\"urls\",\"values\"]" # original predicate
+file: allow.jettrace ~ "\"source_maps\":[{" # original predicate
+file: allow.jettrace ~ "\"kind\":\"jet\"" # original predicate
+file: allow.jettrace ~ "sourcesContent" # original predicate
+# perf view invokes the same artifact verifier used by the Rust original.
+step: jet perf view allow.jettrace
+exit: 0

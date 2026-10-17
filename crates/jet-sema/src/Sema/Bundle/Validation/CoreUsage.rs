@@ -106,16 +106,37 @@ pub(crate) fn collect_used_core(
                 format!("{core_module}::{core_item}"),
             );
         }
+        let core_owner = module
+            .is_core_source()
+            .then(|| jet_foundation::CoreModuleExports::core_source_module_by_alias(&module.alias))
+            .flatten()
+            .map(|source| source.module);
+        let sibling_calls = match core_owner {
+            Some(_) => core_source_sibling_calls(&module.items),
+            None => HashSet::new(),
+        };
         for item in &module.items {
             match item {
-                Item::Func(f) => collect_core_func(
-                    f,
-                    &module_imports,
-                    &states[idx].registry,
-                    &mut used,
-                    &mut spans,
-                    &mut ffi_cb,
-                ),
+                Item::Func(f) => match core_owner {
+                    Some(owner) => collect_core_source_func(
+                        f,
+                        owner,
+                        &sibling_calls,
+                        &module_imports,
+                        &states[idx].registry,
+                        &mut used,
+                        &mut spans,
+                        &mut ffi_cb,
+                    ),
+                    None => collect_core_func(
+                        f,
+                        &module_imports,
+                        &states[idx].registry,
+                        &mut used,
+                        &mut spans,
+                        &mut ffi_cb,
+                    ),
+                },
                 Item::Struct(s) => {
                     for field in &s.fields {
                         collect_core_field(
@@ -630,6 +651,98 @@ fn collect_core_func(
     collect_core_stmts(&function.body, imports, registry, used, spans, ffi_cb);
 }
 
+/// The top-level functions of a Core source module that another body of the
+/// same module names (calls or passes as a value). Self-recursion is not a
+/// sibling reference.
+fn core_source_sibling_calls(items: &[Item]) -> HashSet<&str> {
+    let names: HashSet<&str> = items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Func(function) => Some(function.name.as_str()),
+            _ => None,
+        })
+        .collect();
+    let mut called = HashSet::new();
+    let mut visit = |owner: &str, body: &[Stmt]| {
+        crate::Comptime::walk_stmt_expr_nodes_for_validation(body, &mut |expr| {
+            let referenced = match expr {
+                Expr::Call(call) => call.name.as_str(),
+                Expr::Ident(name, _) => name.as_str(),
+                _ => return,
+            };
+            if let Some(&name) = names.get(referenced) {
+                if name != owner {
+                    called.insert(name);
+                }
+            }
+        });
+    };
+    for item in items {
+        match item {
+            Item::Func(function) => visit(&function.name, &function.body),
+            Item::Struct(definition) => {
+                for method in &definition.methods {
+                    visit("", &method.body);
+                }
+                for block in &definition.trait_impls {
+                    for method in &block.methods {
+                        visit("", &method.body);
+                    }
+                }
+            }
+            Item::Enum(definition) => {
+                for method in &definition.methods {
+                    visit("", &method.body);
+                }
+                for block in &definition.trait_impls {
+                    for method in &block.methods {
+                        visit("", &method.body);
+                    }
+                }
+            }
+            Item::Impl(definition) => {
+                for method in &definition.methods {
+                    visit("", &method.body);
+                }
+            }
+            _ => {}
+        }
+    }
+    called
+}
+
+/// I1: a Core source wrapper restating its own compiler row
+/// (`pub fn gtk_backend() -> GtkBackend { core.ui.gtk_backend() }`) is not a
+/// use of that row. Whoever reaches the wrapper — user code, another module,
+/// or a sibling in this module — already notes `owner::name`. Counting the
+/// wrapper's own body would select the row's runtime part for every program
+/// that imports the module: the GTK `extern "C"` bridge for every `core.ui`
+/// program, though only `gtk_backend()` callers need it.
+#[allow(clippy::too_many_arguments)]
+fn collect_core_source_func(
+    function: &Func,
+    owner: &str,
+    sibling_calls: &HashSet<&str>,
+    imports: &HashMap<String, String>,
+    registry: &TypeRegistry,
+    used: &mut HashSet<String>,
+    spans: &mut HashMap<String, crate::Diagnostics::Span>,
+    ffi_cb: &mut HashSet<String>,
+) {
+    let mut body_used = HashSet::new();
+    let mut body_spans = HashMap::new();
+    collect_core_func(function, imports, registry, &mut body_used, &mut body_spans, ffi_cb);
+    if !sibling_calls.contains(function.name.as_str()) {
+        body_used.remove(&format!("{owner}::{}", function.name));
+    }
+    for usage in body_used {
+        if let Some(span) = body_spans.remove(&usage) {
+            spans.entry(usage.clone()).or_insert(span);
+        }
+        used.insert(usage);
+    }
+}
+
 fn collect_core_trait_method(
     method: &TraitMethodSig,
     imports: &HashMap<String, String>,
@@ -816,14 +929,10 @@ fn note_typed_head_core_usage(
     name: &str,
     span: Option<crate::Diagnostics::Span>,
 ) {
-    // D-REGEX-LIT1=D: `Regex.{"…"}` rewrites to the compiler-owned one-argument
-    // `Regex(pattern)` constructor, which lowers to `jet_std::jet_regex_literal`.
-    // No `use core.regex` import exists for the import walk to see, so a program
-    // whose only regex is a typed literal emitted that call with no `mod jet_std`
-    // at all (R10 pay-for-what-you-call) — rustc E0433 on generated code, an I2
-    // compiler bug. Record exactly what the import would have recorded.
+    // D-REGEX-LIT1=D: checked patterns lower through source core.regex.compile.
+    // A literal needs that source module even without an explicit import.
     if name == Syntax::TYPE_REGEX {
-        note_core_usage(used, spans, "core.regex::literal", span);
+        note_core_usage(used, spans, "core.regex::compile", span);
         return;
     }
     let Some(module) = Syntax::typed_head_kind(name)
@@ -1171,6 +1280,9 @@ pub(crate) fn collect_core_expr(
             recv_type,
             ..
         } => {
+            if method == Syntax::METHOD_OUTCOME_OR_ERR {
+                note_core_usage(used, spans, "core.prelude::option_or_err", Some(*method_span));
+            }
             // D-CONC-SPAWN1=D: bare `task expr`/`task.all|race|any { … }` parse
             // into a method call on the parser-private `INTERNAL_TASK_RECEIVER`
             // ident (set before sema ever runs), so this is available even
@@ -1198,6 +1310,9 @@ pub(crate) fn collect_core_expr(
             // the lane helpers.
             if let Some(recv_type) = recv_type {
                 note_builtin_math_type(recv_type, registry, used, spans, Some(*method_span));
+            }
+            if recv_type.as_deref() == Some("Int") && method == "abs" {
+                note_core_usage(used, spans, "core.math::abs", Some(*method_span));
             }
             if matches!(recv_type.as_deref(), Some("Float" | "F32"))
                 && matches!(
@@ -1430,6 +1545,20 @@ pub(crate) fn collect_core_expr(
                     "core.text.fmt::interpolation",
                     Some(c.name_span),
                 );
+            }
+            // D-DBG1=A: checking renamed a `debug(value)` trace to the internal
+            // trace call. Lowering writes its Debug-form line through the shared
+            // `core.term.eprint` row, so the trace reaches that row's Prelude
+            // part (`jet_std_io_eprint`) and the formatter even when the
+            // program never imports `core.term`.
+            if c.name == Syntax::INTERNAL_DEBUG_TRACE {
+                note_core_usage(
+                    used,
+                    spans,
+                    "core.text.fmt::interpolation",
+                    Some(c.name_span),
+                );
+                note_core_usage(used, spans, "core.term::eprint", Some(c.name_span));
             }
             for arg in &c.args {
                 // D-CABI-CALLBACK1: sema proved this named function is passed as

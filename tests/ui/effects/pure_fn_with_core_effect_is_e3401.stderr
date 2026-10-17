@@ -1,0 +1,10 @@
+Error [E3401]: `readit` calls the impure function `files.read`
+  --> pure_fn_with_core_effect_is_e3401.jet:3:46
+    |
+  3 | fn readit(p: String) -[]> String { return fs.read(p) ?? "" }
+    |                                              ^^^^
+ Why: `files.read` is impure, but `readit` declares `-[]>`
+ Fix: Remove the call from `readit`, or drop the `-[]>` bound from `readit` so its effects are inferred
+ Denial: pure
+ Call chain: readit → files.read
+More: jet-lang.dev/e/E3401

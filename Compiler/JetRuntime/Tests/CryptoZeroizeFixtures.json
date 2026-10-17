@@ -1,0 +1,16 @@
+{
+  "stdoutSha256": "df0a31f11777419b2e1c8727a78b5754a4c26251212ce804814ebc3e526db523",
+  "expectationProvenance": "Required initialized-span wipe contract; handwritten expected witness line, NOT captured native stdout",
+  "nativeExecution": "UNEXERCISED, owed at composed lower/audit/link/run",
+  "abi": { "symbol": "jet_crypto_zeroize", "arguments": "borrowed pointer and public element length", "stride": "RT_HOST_U8_STRIDE", "ownsOrFreesStorage": false },
+  "cases": ["seven initialized elements, inspect zeros through the same pointer and canaries", "non-null zero-length leaves buffer unchanged", "null pointer plus zero length", "borrowed storage stays live after return"],
+  "knownSeedDivergence": {
+    "source": "crates/jet-codegen/src/Prelude/Core/CAbiRoutes.rs:12825-12826 list_in copies borrowed words to Vec, then CryptoEntropy.rs:519-520 wipes that Vec copy",
+    "seedCallerStorage": "unchanged (source-derived, not a claimed execution receipt)",
+    "nativeCallerStorage": "must be zero in initialized span",
+    "reason": "Core __zeroize consumes bytes; native wipes actual moved storage, not a staging copy; public Unit output is unchanged",
+    "legacyMode": false,
+    "ruling": "RuntimeJet19 RtCrypto3 zeroize ABI ruling"
+  },
+  "residual": "Capacity slack is absent from pointer+length ABI and remains a marshaller-side wipe-before-release obligation; do not infer a capacity or free the owner"
+}

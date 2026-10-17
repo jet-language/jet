@@ -4,9 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
-use jet::JitBackend::JitBackend;
-use jet_jit::CraneliftBackend;
+use jet::Interpreter::RunOutcome;
 
 fn compile(name: &str, src: &str) -> (PathBuf, jet::CompileOutput) {
     let dir = std::env::temp_dir().join(format!("jet_env_overlay_{name}_{}", std::process::id()));
@@ -442,10 +440,10 @@ fn fallible_set_runtime_hook_is_typed_for_next_edition() {
     );
     let probe = r#"    jet_std_env_init();
     let invalid_name: Result<(), jet_std::EnvError> =
-        jet_std_env_set(&"".to_string(), &"value".to_string());
+        jet_std_env_try_set(&"".to_string(), &"value".to_string());
     assert!(matches!(invalid_name, Err(jet_std::EnvError::InvalidName)));
     let invalid_value: Result<(), jet_std::EnvError> =
-        jet_std_env_set(&"name".to_string(), &"bad\0value".to_string());
+        jet_std_env_try_set(&"name".to_string(), &"bad\0value".to_string());
     assert!(matches!(invalid_value, Err(jet_std::EnvError::InvalidValue)));
     jet_runtime_boundary(|| __jet_run());"#;
     let rust = out.rust.replacen(
@@ -540,21 +538,21 @@ fn run() {
 /// `io.terminal_width()` read Jet's logical table, so `env.get` returned the
 /// new value and the width did not.
 #[test]
-fn env_set_is_visible_identically_on_aot_jit_and_interpreter() {
-    if !common::have_rustc() || !jet_jit::cranelift_host_supported() {
-        eprintln!("note: rustc or the cranelift host is unavailable; skipping tier differential");
+fn env_set_is_visible_identically_on_aot_and_interpreter() {
+    if !common::have_rustc() {
+        eprintln!("note: rustc is unavailable; skipping tier differential");
         return;
     }
     std::thread::Builder::new()
         .name("env-owner-tier-parity".into())
         .stack_size(64 * 1024 * 1024)
-        .spawn(env_set_is_visible_identically_on_aot_jit_and_interpreter_inner)
+        .spawn(env_set_is_visible_identically_on_aot_and_interpreter_inner)
         .expect("spawn env tier-parity worker")
         .join()
         .expect("env tier-parity worker must not panic");
 }
 
-fn env_set_is_visible_identically_on_aot_jit_and_interpreter_inner() {
+fn env_set_is_visible_identically_on_aot_and_interpreter_inner() {
     let src = r#"
 use core.sys as env
 use core.term as io
@@ -585,45 +583,9 @@ fn run() {
     );
     let aot_stdout = String::from_utf8_lossy(&aot.stdout).into_owned();
 
-    // Tier 2 — resident JIT: compiled natively in this process, no deopt.
-    let mut bundle = jet::Loader::load_entry(&shown).expect("tier fixture must load");
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
-        .filter(|diag| matches!(diag.severity, jet::Diagnostics::Severity::Error))
-        .collect();
-    assert!(
-        errors.is_empty(),
-        "tier fixture must type-check: {errors:?}"
-    );
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "env fixture must be resident-JIT safe: {:?}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    let policy = common::development_policy();
-    jet_jit::reset_jit_trace_for_test();
-    let mut backend = CraneliftBackend::new();
-    let jit_stdout = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-        RunOutcome::Ran {
-            stdout, exit_code, ..
-        } => {
-            assert_eq!(exit_code, 0, "resident JIT exited non-zero");
-            stdout
-        }
-        RunOutcome::Problems(diags) => panic!("resident JIT did not run the fixture: {diags:?}"),
-    };
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "fixture did not execute in the resident JIT"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "resident JIT tier deopted or fell back, so it proves nothing about the JIT"
-    );
-
+    // Tier 2 — interpreter: same process, evaluator only.
     // Tier 3 — interpreter: same process, evaluator only.
-    jet_jit::reset_jit_trace_for_test();
-    let interpreted_stdout = match dev_iteration(&shown, false, true) {
+    let interpreted_stdout = match crate::common::dev_run(&shown, false, true) {
         RunOutcome::Ran {
             stdout, exit_code, ..
         } => {
@@ -632,16 +594,12 @@ fn run() {
         }
         RunOutcome::Problems(diags) => panic!("interpreter did not run the fixture: {diags:?}"),
     };
-    assert!(
-        !jet_jit::jit_executed_for_test(),
-        "the interpreter tier silently executed native JIT code"
-    );
 
     assert_eq!(
         aot_stdout, EXPECTED,
         "AOT drifted from the pinned observable"
     );
-    assert_eq!(jit_stdout, aot_stdout, "resident JIT diverged from AOT");
+
     assert_eq!(
         interpreted_stdout, aot_stdout,
         "interpreter diverged from AOT — `env.set` reached a different owner"

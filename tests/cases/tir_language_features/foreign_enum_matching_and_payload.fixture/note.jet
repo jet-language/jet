@@ -1,0 +1,20 @@
+enum NoteType { User Feedback Project Reference }
+struct Note {
+    name: String
+    note_type: NoteType
+    parent: String?
+}
+
+fn make_note(name: ^String, t: ^NoteType) -> Note {
+    return Note{name: name, note_type: t, parent: None}
+}
+fn kind_str(n: Note) -> String {
+    k :: n.note_type.copy()
+    if k == {
+        .User -> { return "user" }
+        .Feedback -> { return "feedback" }
+        .Project -> { return "project" }
+        .Reference -> { return "reference" }
+    }
+}
+fn run() { print("note") }

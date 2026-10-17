@@ -1,0 +1,208 @@
+// Rust Expr/Stmt preorder visitor, reused from origin/port/compiler.
+// A visit reads the original checked parser node; no source-text discovery.
+fn ast_visit_expr(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    visitor(expression)
+    if expression == {
+        .Str(parts, _) -> loop part in parts { if part == .Interp(value, _) -> ast_visit_expr(value, visitor) }
+        .ListLit(values, _) | .CompareChain(values, _, _, _) -> loop value in values -> ast_visit_expr(value, visitor)
+        .MemberSpread(value, _, _) | .Spread(value, _) | .Deref(value, _) | .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) | .OptField(value, _, _, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) | .Paren(value, _) | .Unary(_, value, _) | .Tainted(value, _, _) -> ast_visit_expr(value, visitor)
+        .Try(value, _, _, note) -> {
+            ast_visit_expr(value, visitor)
+            if note == .Val(note_value) -> ast_visit_expr(note_value, visitor)
+        }
+        .MapLit(entries, _) -> loop entry in entries {
+            ast_visit_expr(entry.key, visitor)
+            ast_visit_expr(entry.value, visitor)
+        }
+        .Index(base, index, _, _) -> {
+            ast_visit_expr(base, visitor)
+            ast_visit_expr(index, visitor)
+        }
+        .Slice(base, start, end, range, _) -> {
+            ast_visit_expr(base, visitor)
+            ast_visit_expr(start, visitor)
+            ast_visit_expr(end, visitor)
+            if range == .Val(value) -> ast_visit_expr(value, visitor)
+        }
+        .Range(left, right, _, _) | .Binary(_, left, right, _) -> {
+            ast_visit_expr(left, visitor)
+            ast_visit_expr(right, visitor)
+        }
+        .Call(call) -> ast_visit_call_args(call.args, visitor)
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+            ast_visit_expr(receiver, visitor)
+            ast_visit_call_args(args, visitor)
+        }
+        .StructLit(_, _, _, _, fields, _, _) -> loop field in fields -> ast_visit_expr(field.value, visitor)
+        .TypedLit(_, body, _) -> if body == {
+            .Fields(fields) -> loop field in fields -> ast_visit_expr(field.value, visitor)
+            .Elements(values) -> loop value in values -> ast_visit_expr(value, visitor)
+            .Entries(entries) -> loop entry in entries {
+                ast_visit_expr(entry.key, visitor)
+                ast_visit_expr(entry.value, visitor)
+            }
+            .Value(value) -> ast_visit_expr(value, visitor)
+            .ByteText(_) | .Empty -> {}
+        }
+        .EnumLit(_, _, _, args, _, _) -> loop argument in args {
+            if argument == { .Positional(value) | .Named(_, value) -> ast_visit_expr(value, visitor) }
+        }
+        .PatternTest(subject, pattern, _) -> {
+            ast_visit_expr(subject, visitor)
+            ast_visit_pattern(pattern, visitor)
+        }
+        .OrFallback(value, fallback, _, _) -> {
+            ast_visit_expr(value, visitor)
+            ast_visit_fallback(fallback, visitor)
+        }
+        .If(condition, then_body, then_value, else_body, else_value, _) -> {
+            ast_visit_expr(condition, visitor)
+            ast_visit_body(then_body, visitor, true)
+            ast_visit_expr(then_value, visitor)
+            ast_visit_body(else_body, visitor, true)
+            ast_visit_expr(else_value, visitor)
+        }
+        .TupleLit(fields, _, _) -> loop field in fields -> ast_visit_expr(field.value, visitor)
+        .Lambda(lambda) -> if lambda.body == {
+            .Expr(value) -> ast_visit_expr(value, visitor)
+            .Block(body) -> ast_visit_body(body, visitor, true)
+        }
+        .PtrFromAddr(_, _, _, address, _) -> ast_visit_expr(address, visitor)
+        else -> {}
+    }
+}
+fn ast_visit_body(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
+    loop statement in body -> ast_visit_statement(statement, visitor, nested_expression)
+}
+// Each arm is read in place.
+fn ast_visit_switch_arms(arms: [SwitchArm], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
+    loop arm in arms {
+        ast_visit_expr(arm.cond, visitor)
+        ast_visit_body(arm.body, visitor, nested_expression)
+    }
+}
+fn ast_visit_call_args(args: [CallArg], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop argument in args -> ast_visit_expr(argument.expr, visitor)
+}
+fn ast_visit_pattern(pattern: Pattern, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if pattern == {
+        .Or(alternatives, _) -> loop alternative in alternatives -> ast_visit_pattern(alternative, visitor)
+        .Struct(fields, _, _, _) -> loop field in fields {
+            if field == {
+                .Value(_, _, value) -> ast_visit_expr(value, visitor)
+                .Nested(_, _, inner) -> ast_visit_pattern(inner, visitor)
+                else -> {}
+            }
+        }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots -> ast_visit_pattern_slot(slot, visitor)
+        .Map(entries, _, _) -> loop entry in entries {
+            ast_visit_expr(entry.key, visitor)
+            ast_visit_pattern_slot(entry.slot, visitor)
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> ast_visit_pattern(nested, visitor)
+        }
+        else -> {}
+    }
+}
+fn ast_visit_pattern_slot(slot: PatSlot, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if slot == {
+        .Value(value) -> ast_visit_expr(value, visitor)
+        .Nested(inner) -> ast_visit_pattern(inner, visitor)
+        .Named(_, _, inner) -> ast_visit_pattern_slot(inner, visitor)
+        else -> {}
+    }
+}
+fn ast_visit_fallback(fallback: OrFallback, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    if fallback == {
+        .Value(value) -> ast_visit_expr(value, visitor)
+        .Block(body, value, _) -> {
+            ast_visit_body(body, visitor, true)
+            if value == .Val(value) -> ast_visit_expr(value, visitor)
+        }
+        .Return(value, _) -> if value == .Val(value) -> ast_visit_expr(value, visitor)
+        .Panic(_, args) -> ast_visit_call_args(args, visitor)
+        else -> {}
+    }
+}
+fn ast_visit_statement(statement: Stmt, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!, nested_expression: Bool) Never! {
+    if statement == {
+        .Expr(expression) | .DeferClose(expression, _) -> ast_visit_expr(expression, visitor)
+        .Val(binding) -> {
+            ast_visit_expr(binding.init, visitor)
+            if nested_expression && binding.pattern == .Val(.Refutable(pattern, fallback, _, _)) {
+                ast_visit_pattern(pattern, visitor)
+                ast_visit_fallback(fallback, visitor)
+            }
+        }
+        .Assign(target, _, _, value) -> {
+            if target == {
+                .Index(base, index, _, _) -> {
+                    ast_visit_expr(base, visitor)
+                    ast_visit_expr(index, visitor)
+                }
+                .Field(base, _, _) -> ast_visit_expr(base, visitor)
+                else -> {}
+            }
+            ast_visit_expr(value, visitor)
+        }
+        .Return(value, _) -> if value == .Val(value) -> ast_visit_expr(value, visitor)
+        .While(condition, body, _, _, _) -> {
+            ast_visit_expr(condition, visitor)
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        .For(_, _, _, kind, body, _, _, _, _) -> {
+            if kind == {
+                .Range(start, end, step, _) -> {
+                    ast_visit_expr(start, visitor)
+                    ast_visit_expr(end, visitor)
+                    if step == .Val(value) -> ast_visit_expr(value, visitor)
+                }
+                .In(collection, step) -> {
+                    ast_visit_expr(collection, visitor)
+                    if step == .Val(value) -> ast_visit_expr(value, visitor)
+                }
+            }
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
+            ast_visit_expr(subject, visitor)
+            ast_visit_switch_arms(arms, visitor, nested_expression)
+            if else_body == .Val(body) -> ast_visit_body(body, visitor, nested_expression)
+        }
+        .BreakValue(value, _) | .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> ast_visit_expr(value, visitor)
+        .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) | .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) | .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) | .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> ast_visit_body(body, visitor, nested_expression)
+        .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
+            if reason == .Val(value) -> ast_visit_expr(value, visitor)
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        .CountedLoop(init, condition, step, body, _, _, _) -> {
+            ast_visit_expr(init.init, visitor)
+            ast_visit_expr(condition, visitor)
+            if step == .Val(value) -> ast_visit_statement(value, visitor, nested_expression)
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        .TaskGroup(_, _, limit, body, _) -> {
+            if limit == .Val(value) -> ast_visit_expr(value, visitor)
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        .ContextBlock(fields, body, _) -> {
+            loop field in fields -> ast_visit_expr(field.value, visitor)
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        .AssumeDet(_, reason, body, _) -> {
+            ast_visit_expr(reason, visitor)
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        .ComptimeIf(condition, _, then_body, else_body, _, _) -> {
+            ast_visit_expr(condition, visitor)
+            ast_visit_body(then_body, visitor, nested_expression)
+            if else_body == .Val(body) -> ast_visit_body(body, visitor, nested_expression)
+        }
+        .ScopeMember(_, _, args, _, body, _, _, _) -> {
+            loop argument in args -> ast_visit_expr(argument, visitor)
+            ast_visit_body(body, visitor, nested_expression)
+        }
+        else -> {}
+    }
+}

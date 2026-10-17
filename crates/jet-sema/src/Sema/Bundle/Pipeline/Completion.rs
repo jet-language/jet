@@ -1,5 +1,5 @@
 use super::*;
-use super::super::Validation::check_ui_capabilities;
+use super::super::Validation::{attach_module_origin, check_ui_capabilities};
 
 pub(super) fn complete_bundle_check(
     bundle: &mut ProgramBundle,
@@ -17,6 +17,7 @@ pub(super) fn complete_bundle_check(
 ) -> (
     Vec<Diagnostic>,
     super::super::super::Effects::SemIndexEffectFacts,
+    std::sync::Arc<[std::sync::Arc<crate::AST::MirFragmentNominalFacts>]>,
 ) {
     let states: &[ModuleState] = &*states_mut;
     populate_name_ledger(bundle, &states, &mut name_ledger);
@@ -200,8 +201,10 @@ pub(super) fn complete_bundle_check(
             diags.push(no_run_error());
         }
     }
+    let entry_items = &bundle.modules[bundle.entry].items;
     match mode {
-        CompileMode::Test if !states.iter().any(|state| !state.tests.is_empty())
+        CompileMode::Test if !crate::Sema::has_test_blocks_in_items(entry_items)
+            && !crate::Sema::has_contract_sampling_candidates(entry_items)
             && !bundle.modules[bundle.entry].items.iter().any(|item| {
                 matches!(item, Item::Const(value) if value.resolved_output.as_ref().is_some_and(|output| output.selected && output.kind == crate::AST::OutputKind::Check))
             }) => {
@@ -283,7 +286,15 @@ pub(super) fn complete_bundle_check(
     } else {
         None
     };
+    let checked_nominals =
+        crate::Sema::CheckerCore::checked_comptime_nominals_for_modules(states_mut, &name_ledger);
+    for (state, facts) in states_mut.iter_mut().zip(checked_nominals.iter()) {
+        state.checked_nominals = Some(std::sync::Arc::clone(facts));
+    }
     let states: &[ModuleState] = &*states_mut;
+    // States and the name ledger's lookup tables stay final through every
+    // body below, so each module a comptime fragment loads projects once.
+    let fragment_modules = crate::Sema::CheckerCore::open_fragment_module_memos(states);
     let mut module_pending_diagnostics = Vec::with_capacity(bundle.modules.len());
     let mut sealed_nodes: Vec<(String, Vec<(String, EffectSummary)>)> = Vec::new();
     let mut sealed_inferred: HashMap<usize, HashSet<String>> = HashMap::new();
@@ -293,7 +304,9 @@ pub(super) fn complete_bundle_check(
             .module_alias(idx)
             .unwrap_or(&module.alias)
             .to_string();
-        if let Some(sealed) = seal.as_mut().and_then(|plan| plan.modules.get_mut(&idx)) {
+        if let Some(sealed) = seal.as_mut().and_then(|plan| plan.modules.get_mut(&idx))
+            .filter(|_| states[idx].compiler_builtin_error_owner != Some(idx))
+        {
             // A sealed module is not body-checked: its recorded item
             // summaries and module facts stand in for the checked bodies.
             global_addr_taken.extend(sealed.address_taken.iter().cloned());
@@ -382,6 +395,7 @@ pub(super) fn complete_bundle_check(
         effect_summaries.extend(local_summaries.clone());
         module_effect_summaries.push((module_alias, local_summaries));
     }
+    drop(fragment_modules);
     // #3708: every body is checked; infer the empty failure sets and settle
     // the E2404 obligations recorded against unannotated callees. The
     // module-qualified result lets E0433 treat a dropped call to an
@@ -434,6 +448,11 @@ pub(super) fn complete_bundle_check(
                 }
             }
         }
+        attach_module_origin(
+            module,
+            module_index == bundle.entry,
+            &mut diags[phase_diagnostic_start..],
+        );
         mark_failed_pending_functions(
             &diags[phase_diagnostic_start..],
             &module_pending_diagnostics[module_index],
@@ -445,6 +464,11 @@ pub(super) fn complete_bundle_check(
     for (module_index, module) in bundle.modules.iter().enumerate() {
         let phase_diagnostic_start = diags.len();
         apply_effect_via(&module.items, &mut effect_summaries, &mut diags);
+        attach_module_origin(
+            module,
+            module_index == bundle.entry,
+            &mut diags[phase_diagnostic_start..],
+        );
         mark_failed_pending_functions(
             &diags[phase_diagnostic_start..],
             &module_pending_diagnostics[module_index],
@@ -555,6 +579,9 @@ pub(super) fn complete_bundle_check(
         .filter(|(key, _)| module_aliases.iter().any(|prefix| key.starts_with(prefix)))
         .map(|(key, summary)| (key.clone(), summary.clone()))
         .collect::<HashMap<_, _>>();
+    super::super::super::Effects::check_shared_sites(
+        &validation_summaries, &public_solved, &mut diags,
+    );
     super::super::super::Effects::check_autodiff_purity(
         &validation_summaries,
         &public_solved,
@@ -600,7 +627,14 @@ pub(super) fn complete_bundle_check(
                 }
             })
             .collect::<HashMap<_, _>>();
-        check_effect_boundaries(&module.items, &local_solved, &local_summaries, &mut diags);
+        check_effect_boundaries(
+            &module.items,
+            &local_solved,
+            &local_summaries,
+            &bundle.modules,
+            (module_index == bundle.entry).then_some(bundle.entry),
+            &mut diags,
+        );
         let module_alias = name_ledger
             .module_alias(module_index)
             .unwrap_or(&module.alias);
@@ -618,6 +652,11 @@ pub(super) fn complete_bundle_check(
             module_alias,
             &public_reachability.nodes_with("secret", Effect::Secret.name()),
             &mut diags,
+        );
+        attach_module_origin(
+            module,
+            module_index == bundle.entry,
+            &mut diags[phase_diagnostic_start..],
         );
         mark_failed_pending_functions(
             &diags[phase_diagnostic_start..],
@@ -864,6 +903,12 @@ pub(super) fn complete_bundle_check(
                 .is_some_and(|origin| origin.is_core_source())
     });
     jet_foundation::Diagnostics::order_diagnostics_root_first(&mut diags);
+    for (state, module) in states_mut.iter_mut().zip(&bundle.modules) {
+        state.items.clone_from(&module.items);
+        super::CheckInner::count_program_copy(module.items.len());
+    }
+    let checked_nominals =
+        crate::Sema::CheckerCore::checked_comptime_nominals_for_modules(states_mut, &name_ledger);
     (
         diags,
         super::super::super::Effects::SemIndexEffectFacts {
@@ -876,6 +921,7 @@ pub(super) fn complete_bundle_check(
             web_app: app_graph,
             fact_registry,
         },
+        checked_nominals,
     )
 }
 fn suppress_duplicate_root_panic(

@@ -1,0 +1,33 @@
+# Port of comptime_cli_parity.rs:635-756. PENDING-GRAMMAR: step env and stream label equality.
+fixture: fixtures/job_runner_help_and_named_jobs_match_default_run_aot_and_goldens
+step default_help: jet run job_runner.jet
+env: JET_STORE_DIR={work}/cache/default-run
+env: JET_STORE_DIR={work}/cache/default-build
+stdout: = ../../../Examples/features/expected/devloop/job_runner.out
+step: jet build job_runner.jet
+env: JET_STORE_DIR={work}/cache/aot-build
+step: built
+stdout: = ../../../Examples/features/expected/devloop/job_runner.out
+stdout: == default_help # Original default/AOT byte equality.
+step: jet run job_runner.jet -- --help
+env: JET_STORE_DIR={work}/cache/job-help-run
+env: JET_STORE_DIR={work}/cache/job-help-build
+stdout: ~ greet # Original named-job help inclusion.
+stdout: !~ inspect # Original non-job exclusion.
+step: built --help
+stdout: ~ greet # Original named-job help inclusion.
+stdout: !~ inspect # Original non-job exclusion.
+step greet_default: jet run job_runner.jet -- greet
+env: JET_STORE_DIR={work}/cache/greet-run
+env: JET_STORE_DIR={work}/cache/greet-build
+stdout: = ../../../Examples/features/expected/devloop/job_runner.greet.out
+step: built greet
+stdout: = ../../../Examples/features/expected/devloop/job_runner.greet.out
+stdout: == greet_default # Original default/AOT byte equality.
+step seed_data_default: jet run job_runner.jet -- seed_data
+env: JET_STORE_DIR={work}/cache/seed_data-run
+env: JET_STORE_DIR={work}/cache/seed_data-build
+stdout: = ../../../Examples/features/expected/devloop/job_runner.seed_data.out
+step: built seed_data
+stdout: = ../../../Examples/features/expected/devloop/job_runner.seed_data.out
+stdout: == seed_data_default # Original default/AOT byte equality.

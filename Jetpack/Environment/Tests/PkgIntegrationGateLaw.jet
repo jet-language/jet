@@ -1,0 +1,39 @@
+// tests/gate_law.rs88-102: KNOWN-FAILING #4843, refusal before lock publication.
+// Exact E3415/key diagnostic restored by the #4843 owner's typed Gate error.
+// PENDING-SAME-HEAD nested package-test admission.
+
+#Test("workspace force and dependency grants refuse before lock publication") {
+    keys :: [String]{"force_pin", "dependency_grant"}
+    refused := [Bool]{}
+    absent := [Bool]{}
+    loop key in keys {
+        root :: env_wlock_test_dir("s5-gate-law-{key}")
+        files.write(files.join(root, "package.jet"), "name: \"law\"\nversion: \"0.1.0\"\npolicy: {{ {key}: .Forbid }}\n") ?? panic("original policy")
+        plan := WorkspacePlan.empty()
+        if key == "force_pin" {
+            plan.overlay_policy = pkg_parse_workspace_policy("module workspace {{ overlay audit {{ package(\"app\").version: Force(\"2\") }} }}\n") ?? panic("original force overlay")
+        } else {
+            &plan.overlay_policy.build_grants.push(BuildGrant{subject: "app", effects: [String]{"Exec"}})
+        }
+        cache := WorkspaceDeclarationCache.new()
+        denied :: if env_workspace_lock_write(&cache, root, plan) == {
+            .Err(error) -> if error == {
+                .Gate(gate) -> {
+                    found := false
+                    loop diagnostic in gate.diagnostics {
+                        if diagnostic.code == "E3415" && diagnostic.what.contains(key) -> found = true
+                    }
+                    found
+                }
+                else -> false
+            }
+            .Ok(_) -> false
+        }
+        &refused.push(denied)
+        &absent.push(!files.exists(files.join(root, UNIFIED_LOCK_FILE)))
+    }
+    loop index in 0..<keys.len() {
+        assert(refused[index], "{keys[index]} must refuse")
+        assert(absent[index], "{keys[index]} must not publish a lock")
+    }
+}

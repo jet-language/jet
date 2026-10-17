@@ -1,0 +1,22 @@
+# PORT tests/repl.rs:2576-2604, helper343-357 where used; exact bytes/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os:unix
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=8
+pty-send: "x := 1\r" after 200ms
+pty-send: "print(\"EFFECT_ONCE\")\r" after 120ms
+pty-send: "y :: x + 1\r" after 120ms
+pty-send: "\u0012" after 120ms
+pty-send: "1\r" after 120ms
+pty-send: "\r" after 120ms
+pty-send: "s" after 120ms
+pty-send: ":turns\r" after 150ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout.replace("\r", ""): count-lines = "EFFECT_ONCE" = 1 # Original removes all CR for exact-line count only rs2587-2594.
+stdout: ~ "skip and mark stale" # Original substring predicate rs2597.
+stdout: ~ "stale" # Original substring predicate rs2601.

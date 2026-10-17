@@ -1,0 +1,12 @@
+# PORT tests/structural_merge.rs::inter_item_trivia_three_way_merges_and_conflicts_honestly
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: inter_item_trivia_three_way_merges_and_conflicts_honestly.fixture
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/merged.jet
+exit: 0
+file: merged.jet ~ "ownership note" # Original contains predicate.
+file: merged.jet ~ "return 10" # Original contains predicate.
+file: merged.jet ~ "return 20" # Original contains predicate.
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs_trivia.jet --out {work}/trivia-conflict.jet --json
+exit: 1
+file: trivia-conflict.jet absent
+stderr: ~ "inter_item_trivia" # Original contains predicate.

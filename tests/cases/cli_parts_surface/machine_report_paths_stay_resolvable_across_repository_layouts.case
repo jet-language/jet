@@ -1,0 +1,77 @@
+# Port of tests/cli_parts/surface.rs:1022-1156; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/paths
+mkdir: runner
+mkdir: repo/.git
+mkdir: stray/.git
+step: jet check {work}/outside/bad.jet --json
+cwd: runner
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: lines = 1 # original predicate
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.file = "{work}/outside/bad.jet"
+step: jet check ../outside/bad.jet --json
+cwd: runner
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: lines = 1 # original predicate
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.file = "{work}/outside/bad.jet"
+step: jet check {work}/repo/src/bad.jet --json
+cwd: runner
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: lines = 1 # original predicate
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.file = "{work}/repo/src/bad.jet"
+step with_git: jet check {work}/stray/nested/bad.jet --json
+cwd: runner
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: lines = 1 # original predicate
+json: stderr doc $ valid # original predicate: parses
+remove: stray/.git
+step: jet check {work}/stray/nested/bad.jet --json
+cwd: runner
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: lines = 1 # original predicate
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.file == with_git
+json: stderr doc $.file = "{work}/stray/nested/bad.jet"
+step: jet check ../fix/bad.jet --json
+cwd: runner
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: lines = 1 # original predicate
+json: stderr doc $ valid # original predicate: parses
+json: stderr doc $.applicability = "safe"
+json: stderr doc $.fix_edits : array # original pattern
+json: stderr doc $.fix_edits #= 1
+json: stderr doc $.fix_edits[0] : object # original pattern
+json: stderr doc $.fix_edits[0].file == $.file
+json: stderr doc $.fix_edits[0].span : object # original pattern
+json: stderr doc $.fix_edits[0].span.start : int # original pattern
+json: stderr doc $.fix_edits[0].span.end : int # original pattern
+json: stderr doc $.fix_edits[0].new_text : string # original pattern
+json: stderr doc $.fix_edits[0].safety = "behavior-preserving"
+capture: edit_start stderr doc $.fix_edits[0].span.start
+capture: edit_end stderr doc $.fix_edits[0].span.end
+capture: edit_text stderr doc $.fix_edits[0].new_text
+capture: fixed = replace-range file fix/bad.jet {cap:edit_start} {cap:edit_end} {cap:edit_text}
+apply-edits: stderr doc $.fix_edits
+file: fix/bad.jet = "{cap:fixed}" # original predicate
+file: fix/bad.jet !~ "println" # original predicate
+step: jet fmt ../left/bad.jet ../right/bad.jet --json
+cwd: runner
+env: NO_COLOR=1
+exit: 2
+json: stderr ndjson $[*].file = ["{work}/left/bad.jet","{work}/right/bad.jet"]

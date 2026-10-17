@@ -1,0 +1,18 @@
+// D-COPY-DEFAULT1=A: `^` on any place below a collection element is E0225,
+// as `^` on the element itself is. The element keeps owning its fields, so
+// the value can only be a copy; the fix spells it with `.copy()`.
+struct Item {
+    tags: [String]
+}
+
+struct Shelf {
+    items: [Item]
+}
+
+fn run() {
+    items := [Item{tags: ["a"]}]
+    tags := ^items[0].tags
+    shelf := Shelf{items: [Item{tags: ["b"]}]}
+    nested := ^shelf.items[0].tags
+    print(tags.len() + nested.len() + items[0].tags.len())
+}

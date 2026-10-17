@@ -1,0 +1,23 @@
+// Exact max65536 bridge-read projection: HTTPMessage.rs746-773; every returned byte counted before the original InvalidFraming.
+use core.http.client as http
+fn run() {
+    client :: http.Client.new().protocols(true, false, true)
+    response :: client.send(http.request("GET", "http://{cap:addr}/h2")) ?? panic("send")
+    print(response.status())
+    received := 0
+    saw_error := false
+    loop chunk in response.body().chunks(65536) {
+        if chunk == {
+            .Ok(bytes) -> received += bytes.len()
+            .Err(error) -> {
+                if error == {
+                    .InvalidFraming -> { saw_error = true; print("InvalidFraming") }
+                    else -> panic("wrong error")
+                }
+                break
+            }
+        }
+    }
+    if !saw_error -> panic("HTTP/2 body overrun was accepted")
+    print(received)
+}

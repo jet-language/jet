@@ -1,0 +1,44 @@
+# HAND-PORT tests/jetpack_engine.rs:4088-4115 run_with_project_env_file_resolves_declared_packages
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: run_with_project_env_file_resolves_declared_packages.fixture
+env: NO_COLOR=1
+refused: hangar-verified-fixture
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn run_with_project_env_file_resolves_declared_packages() {
+#     let proj = Scratch::new("proj");
+#     let root = Scratch::new("root");
+#     let fixtures = Scratch::new("fixtures");
+#     let fastfetch_out = Scratch::new("fastfetch-out");
+#     write_fastfetch_fixture(&fixtures.path, &root.path, &fastfetch_out.path);
+#     // Declare one package, then run with no ref → it resolves from env.jet.
+#     fs::write(
+#         proj.join("env.jet"),
+#         "use jetpack as pkg\npub fn shell() -> [JSON] {\n    return [\n        pkg.source(\"nixpkgs\"),\n        pkg.packages([\"fastfetch\"])\n    ]\n}\n",
+#     )
+#     .unwrap();
+#     let output = jetpack()
+#         .args(["run", "--no-color", "--offline", "--", "true"])
+#         .current_dir(&proj.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack run --no-color --offline -- true
+cwd: project
+exit: 0
+stderr: ~ "fastfetch" # original contains predicate
+

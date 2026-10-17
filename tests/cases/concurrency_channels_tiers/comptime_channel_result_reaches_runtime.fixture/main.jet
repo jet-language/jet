@@ -1,0 +1,17 @@
+
+fn choose() -> Int {
+    (sender, receiver) :: channel<Int>()
+    sender.send(7)
+    result := 0
+    if {
+        value, receiver -> result = value
+        after 0ms -> result = -1
+    }
+    return result
+}
+
+FOLDED :: prep { choose() }
+
+fn run() {
+    print(FOLDED)
+}

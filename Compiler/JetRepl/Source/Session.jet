@@ -1,0 +1,137 @@
+// One checked, retained REPL pipeline: classify -> canonical statement checker
+// -> canonical incremental MIR lowering -> canonical JetEval run boundary.
+use jet_foundation.[Diagnostic, Func, MIRFunctionID, MIRProgram, MIRSourceFile, Span, TFunc, mir_source_file_id]
+use jet_lexer.[lex_generated, token_shift_spans]
+use jet_parser.parse_lexed_with_source
+use jet_sema.[ReplSetupError, SemaGraphModuleResult, SemaRegistrationGraph, SemaReplSession, SemaSourceOrigin, SemaSourceSegment, sema_registration_module_index, sema_repl_session_new, sema_repl_type_check_stmts, sema_repl_session_finalize]
+use jet_codegen.[JetCodegenReplSession, jet_codegen_repl_session_new, jet_codegen_repl_initial_program, jet_codegen_repl_append, jet_codegen_repl_close]
+use jet_eval.[JetEvalConfig, JetEvalReplSession, JetEvalReplStepResult, JetEvalRunBoundary, jet_eval_repl_session_new, jet_eval_repl_run_step, jet_eval_repl_session_close]
+
+struct ReplSession {
+    checker: SemaReplSession
+    lowering: JetCodegenReplSession
+    runtime: JetEvalReplSession
+    source: [U8]
+    line_starts: [Int]
+    source_files: [MIRSourceFile]
+    segments: [SemaSourceSegment]
+    root_source: String
+    step: Int
+    valid: Bool
+}
+
+enum ReplStepResult {
+    Evaluated(result: JetEvalReplStepResult, diagnostics: [Diagnostic])
+    Rejected(diagnostics: [Diagnostic])
+    CompilerIncomplete(reasons: [String])
+    Control(input: ReplInput)
+    InvalidSession(message: String)
+}
+
+fn repl_session_new(graph: ^SemaRegistrationGraph, modules: ^[SemaGraphModuleResult], source: Func, root: TFunc, program: ^MIRProgram, config: ^JetEvalConfig) -> ReplSession ReplSetupError! {
+    module_index :: sema_registration_module_index(graph, root.module_identity) ?? return Err(ReplSetupError{message: "REPL root module is absent from registration"})
+    functions := [TFunc]{}
+    loop module_row in modules {
+        loop function in module_row.functions -> &functions.push(function)
+    }
+    bytes := [U8]{}
+    loop file in program.source_files {
+        if file.path == root.source_file -> bytes = file.source.bytes()
+    }
+    lines := [Int]{0}
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{10}) -> &lines.push(index + 1)
+    }
+    files :: program.source_files
+    segments :: graph.modules[module_index].source_segments.copy()
+    checker :: sema_repl_session_new(^graph, modules.copy(), source, root)
+    lowering :: jet_codegen_repl_session_new(root, ^functions, ^modules, ^program)
+    initial :: jet_codegen_repl_initial_program(lowering)
+    root_id := MIRFunctionID?{None}
+    loop function in initial.functions {
+        if function.key == root.key -> root_id = Val(function.id)
+    }
+    entry :: root_id ?? return Err(ReplSetupError{message: "REPL root has no canonical MIR identity"})
+    runtime :: jet_eval_repl_session_new(^initial, ^config, entry)
+    valid :: runtime.valid
+    Ok(ReplSession{checker: ^checker, lowering: ^lowering, runtime: ^runtime, source: ^bytes, line_starts: ^lines, source_files: files, segments: segments, root_source: root.source_file, step: 0, valid: valid})
+}
+
+fn repl_session_step(session: &ReplSession, text: String) -> ReplStepResult {
+    if !session.valid {
+        return ReplStepResult.InvalidSession{message: "REPL runtime bindings were reset; create a new checked session before evaluating another input"}
+    }
+    session.step += 1
+    classified :: repl_classify(text, session.step)
+    input :: if classified == {
+        .Rejected(diagnostics) -> {
+            return ReplStepResult.Rejected{diagnostics: diagnostics}
+
+        }
+        .Accepted(input) -> input
+    }
+    if input == .Stmts(_, suppress, check_source) {
+        wrapper :: "// repl:{session.step}\nfn __repl__() {{\n{check_source}\n}}\n"
+        offset :: session.source.len()
+        lines_mark :: session.line_starts.len()
+        loop byte in wrapper.bytes() {
+            &session.source.push(byte)
+            if byte == (U8{10}) -> &session.line_starts.push(session.source.len())
+        }
+        lexed := lex_generated(wrapper.bytes())
+        loop index in 0..<lexed.tokens.len() -> token_shift_spans(&lexed.tokens[index], offset, &lexed.tables.literals)
+        parsed :: parse_lexed_with_source(lexed, session.source, session.line_starts)
+        if parsed.diagnostics.len() > 0 {
+            loop session.source.len() > offset -> _ :: &session.source.pop()
+            loop session.line_starts.len() > lines_mark -> _ :: &session.line_starts.pop()
+            return ReplStepResult.Rejected{diagnostics: parsed.diagnostics}
+        }
+        if parsed.program.items.len() != 1 {
+            return ReplStepResult.InvalidSession{message: "canonical REPL statement wrapper produced no unique function"}
+        }
+        if parsed.program.items[0] == .Func(function) {
+            path :: "repl:{session.step}"
+            local_lines := [Int]{0}
+            local_bytes :: wrapper.bytes()
+            loop index in 0..<local_bytes.len() {
+                if local_bytes[index] == (U8{10}) -> &local_lines.push(index + 1)
+            }
+            segments := session.segments
+            &segments.push(SemaSourceSegment{generated: Span{start: offset, end: session.source.len()}, source_file: path, source_start: 0, line_starts: local_lines, origin: SemaSourceOrigin.Snapshot})
+            checked :: sema_repl_type_check_stmts(&session.checker, function.body, segments)
+            if !checked.complete {
+                loop session.source.len() > offset -> _ :: &session.source.pop()
+                loop session.line_starts.len() > lines_mark -> _ :: &session.line_starts.pop()
+                if checked.diagnostics.len() == 0 {
+                    return ReplStepResult.CompilerIncomplete{reasons: checked.incomplete_reasons}
+                }
+                return ReplStepResult.Rejected{diagnostics: checked.diagnostics}
+            }
+            session.segments = ^segments
+            aggregate :: String.from_bytes(session.source) ?? panic("REPL input is valid UTF8")
+            loop position in 0..<session.source_files.len() {
+                if session.source_files[position].path == session.root_source {
+                    session.source_files[position].source = aggregate
+                }
+            }
+            &session.source_files.push(MIRSourceFile{id: mir_source_file_id(path), path: path, source: wrapper})
+            lowered :: jet_codegen_repl_append(&session.lowering, checked.root, checked.statements, checked.echo, session.source_files)
+            boundary :: JetEvalRunBoundary{function: lowered.root, block: lowered.boundary}
+            result :: jet_eval_repl_run_step(&session.runtime, ^lowered.program, boundary, if suppress -> None else -> lowered.echo)
+            if result.bindings_reset -> session.valid = false
+            return ReplStepResult.Evaluated{result: result, diagnostics: checked.diagnostics}
+        }
+    }
+    ReplStepResult.Control{input: input}
+}
+
+fn repl_session_close(session: &ReplSession) -> ReplStepResult {
+    if !session.valid {
+        return ReplStepResult.InvalidSession{message: "REPL session has already been retired"}
+    }
+    diagnostics :: sema_repl_session_finalize(&session.checker)
+    program :: jet_codegen_repl_close(&session.lowering)
+    result :: jet_eval_repl_session_close(&session.runtime, ^program)
+    session.valid = false
+    ReplStepResult.Evaluated{result: result, diagnostics: diagnostics}
+}

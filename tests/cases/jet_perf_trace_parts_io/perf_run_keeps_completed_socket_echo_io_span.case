@@ -1,0 +1,21 @@
+# Port of tests/jet_perf_trace_parts/io.rs:1-53; source copied verbatim.
+# Helper assertions expanded from support.rs:99-126 and217-251.
+# PENDING-GRAMMAR(batch-four): each-row binding, row-subject numeric relation, first matched task.
+# ORACLE-LITERAL echo-ping.out from original line48 trimmed equality (no newline).
+fixture: fixtures/socket-echo
+step: jet perf run socket_echo.jet --out {work}/socket-echo.jettrace
+exit: 0
+stdout.trim: = echo-ping.out # original predicate
+file: socket-echo.jettrace ~ "\"io\":[{" # original predicate: helper requires nonempty io array
+json: file socket-echo.jettrace doc $.content.io[?kind="tcp"] #>= 1 # original predicate
+json: file socket-echo.jettrace doc $.content.io[?wait in ["tcp accept","tcp accept readiness"]] #>= 1 # original predicate
+file: socket-echo.jettrace !~ "\"io\":[]" # original predicate
+json: file socket-echo.jettrace doc $.content.io[?wait="time sleep"] #= 0 # original predicate
+json: file socket-echo.jettrace doc $.content.io[?wait~="channel "] #= 0 # original predicate
+json: file socket-echo.jettrace doc $.content.io #>= 1 # original predicate: spans>0
+json: file socket-echo.jettrace doc each $.content.io[*] as r: $.content.tasks[?id={r.task_id}][0].state = "done"
+json: file socket-echo.jettrace doc each $.content.io[*] as r: $.content.tasks[?id={r.task_id}][0].wait = ""
+json: file socket-echo.jettrace doc each $.content.io[*] as r: {r}.end_ns > {r.start_ns} # original predicate
+json: file socket-echo.jettrace doc each $.content.io[*] as r: {r}.task_id >= 0 # original predicate: json_u64_after
+json: file socket-echo.jettrace doc each $.content.io[*] as r: {r}.start_ns >= 0 # original predicate: json_u64_after
+json: file socket-echo.jettrace doc each $.content.io[*] as r: {r}.end_ns >= 0 # original predicate: json_u64_after

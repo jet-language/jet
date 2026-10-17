@@ -28,7 +28,8 @@ fn run() {
         if response.status() == 200 && response.body().text(8192) == "ok" -> passed += 1
         client_i += 1
     }
-    ^server.join() ?? panic("server task failed")
+    completed :: ^server.join() ?? panic("server task failed")
+    completed ?? panic("server task failed")
     print("threshold={passed}/{requests}")
     if passed != requests -> panic("load threshold failed")
 }

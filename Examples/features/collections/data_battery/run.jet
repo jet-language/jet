@@ -111,7 +111,7 @@ fn run() {
     labeled_value :: data.cell(labeled_array, "south", "margin")
 
     svg :: data.plot_svg(counts) ?? panic("SVG plot")
-    png :: data.plot_png(counts)
+    png :: data.plot_png(counts) ?? panic("PNG plot: {err}")
     files.write(svg_path, svg) ?? panic("write SVG plot")
     files.write_bytes(png_path, png) ?? panic("write PNG plot")
     if !files.exists(svg_path) -> panic("SVG output missing")
@@ -139,7 +139,7 @@ fn run() {
         png_written: files.exists(png_path),
         bridge_statuses: bridge_statuses.len(),
     }
-    files.write(receipt_path, json.to_string(receipt)) ?? panic("write receipt")
+    files.write(receipt_path, json.to_string(receipt) ?? panic("JSON encode")) ?? panic("write receipt")
     if !files.exists(receipt_path) -> panic("receipt missing")
 
     // Unavailable paths stay explicit in source: core.data has no parquet

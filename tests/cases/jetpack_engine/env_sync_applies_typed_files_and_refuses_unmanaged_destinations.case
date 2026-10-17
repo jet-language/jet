@@ -1,0 +1,28 @@
+# HAND-PORT tests/jetpack_engine.rs:6527-6610 env_sync_applies_typed_files_and_refuses_unmanaged_destinations
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: env_sync_applies_typed_files_and_refuses_unmanaged_destinations.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+mkdir: blocked
+mkdir: blocked-root
+mkdir: blocked-home
+step: jetpack env sync --trust --yes --offline --no-color
+cwd: project
+env: HOME={work}/home
+exit: 0
+file: project/generated/config.txt = env_sync_applies_typed_files_and_refuses_unmanaged_destinations.generated.expected
+file: project/seed/config.txt = env_sync_applies_typed_files_and_refuses_unmanaged_destinations.kept.expected
+file: project/.jet/files/state is-file
+copy: project/env.jet blocked/env.jet
+step: jetpack env sync --trust --yes --offline --no-color
+cwd: blocked
+env: JETPACK_ROOT={work}/blocked-root
+env: HOME={work}/blocked-home
+exit: 2
+stderr: ~ "unmanaged destination" # original contains predicate
+file: blocked/generated/config.txt = env_sync_applies_typed_files_and_refuses_unmanaged_destinations.owned.expected
+file: blocked/.jet/files/state absent
+

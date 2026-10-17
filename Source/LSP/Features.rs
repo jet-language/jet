@@ -918,11 +918,10 @@ pub(crate) fn compute_signature_change_preview(
             ));
         }
     }
-    if declaration_source[..definition.def_span.start.min(declaration_source.len())]
-        .lines()
-        .last()
-        .is_some_and(|line| line.split_whitespace().any(|word| word == "pub"))
-    {
+    if !inside_priv_module(
+        &declaration_source,
+        definition.def_span.start.min(declaration_source.len()),
+    ) {
         preview
             .unknown
             .push("external_callers_outside_checked_workspace".to_string());
@@ -2401,11 +2400,11 @@ mod generic_instance_tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         let path = root.join("main.jet");
-        let source = "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule a :: value(3)\nmodule b :: value(3)\nfn run() { print(a.get())\nprint(b.get()) }\n";
+        let source = "module value(n: Int) { fn get() -> Int { return n } }\nmodule a :: value(3)\nmodule b :: value(3)\nfn run() { print(a.get())\nprint(b.get()) }\n";
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -2444,8 +2443,8 @@ mod generic_instance_tests {
         let main = root.join("main.jet");
         let left = root.join("left.jet");
         let right = root.join("right.jet");
-        let left_source = "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule same :: value(3)\nfn left_value() -> Int { return same.get() }\n";
-        let right_source = "module value(n: Int) { pub fn get() -> Int { return n } }\nmodule same :: value(4)\nfn right_value() -> Int { return same.get() }\n";
+        let left_source = "module value(n: Int) { fn get() -> Int { return n } }\nmodule same :: value(3)\nfn left_value() -> Int { return same.get() }\n";
+        let right_source = "module value(n: Int) { fn get() -> Int { return n } }\nmodule same :: value(4)\nfn right_value() -> Int { return same.get() }\n";
         std::fs::write(&main, "module left\nmodule right\nfn run() {}\n").unwrap();
         std::fs::write(&left, left_source).unwrap();
         std::fs::write(&right, right_source).unwrap();
@@ -2453,7 +2452,7 @@ mod generic_instance_tests {
         let shown_left = "left.jet".to_string();
         let shown_right = "right.jet".to_string();
         let mut bundle = crate::Loader::load_entry(&shown_main).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -2495,11 +2494,11 @@ mod generic_instance_tests {
         let library = root.join("library.jet");
         let main = root.join("main.jet");
         let source = "use \"./library\" as api\nfn run() { api.report() }\n";
-        std::fs::write(&library, "pub fn report() { print(\"library\") }\n").unwrap();
+        std::fs::write(&library, "fn report() { print(\"library\") }\n").unwrap();
         std::fs::write(&main, source).unwrap();
         let shown = main.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -2551,7 +2550,7 @@ mod generic_instance_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -3233,11 +3232,39 @@ fn source_symbol_is_exported(
     let Some(source) = sources.get(&symbol.module_path) else {
         return false;
     };
-    let start = line_start(source, span.start);
-    source.get(start..span.start).is_some_and(|prefix| {
-        prefix
-            .split_whitespace()
-            .any(|word| word == "pub" || word.starts_with("pub("))
+    span.start <= source.len() && !inside_priv_module(source, span.start)
+}
+
+/// D-VIS-MODULE1: every declaration is public unless it sits inside a
+/// `priv module` (or `priv(package) module`) body that encloses `offset`.
+fn inside_priv_module(source: &str, offset: usize) -> bool {
+    let head = &source[..offset];
+    ["priv module", "priv(package) module"].iter().any(|marker| {
+        head.match_indices(marker).any(|(start, _)| {
+            let Some(open) = source[start..].find('{').map(|at| start + at) else {
+                return false;
+            };
+            if open >= offset {
+                return false;
+            }
+            let mut depth = 0usize;
+            for (at, byte) in source.bytes().enumerate().skip(open) {
+                match byte {
+                    b'{' => depth += 1,
+                    b'}' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return offset < at;
+                        }
+                    }
+                    _ => {}
+                }
+                if at >= offset && depth > 0 {
+                    return true;
+                }
+            }
+            true
+        })
     })
 }
 
@@ -3631,7 +3658,7 @@ mod refactor_safety_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );
@@ -3675,7 +3702,7 @@ mod refactor_safety_tests {
         std::fs::write(&path, source).unwrap();
         let shown = path.to_string_lossy().into_owned();
         let mut bundle = crate::Loader::load_entry(&shown).unwrap();
-        let (diagnostics, facts) = crate::Sema::check_bundle_with_effect_facts(
+        let (diagnostics, facts, _) = crate::Sema::check_bundle_with_effect_facts(
             &mut bundle,
             crate::Sema::CompileMode::Check,
         );

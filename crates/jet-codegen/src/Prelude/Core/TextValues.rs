@@ -2,22 +2,8 @@
 // execution seam. Engines may marshal a carrier into these impls, but they do
 // not choose a container shape or re-encode an outcome's clean/told meaning.
 
-fn jet_text_list<I>(values: I) -> String
-where
-    I: IntoIterator<Item = String>,
-{
-    let mut out = String::from("[");
-    let mut first = true;
-    for value in values {
-        if !first {
-            out.push_str(", ");
-        }
-        out.push_str(&value);
-        first = false;
-    }
-    out.push(']');
-    out
-}
+// StructuralDebug is flattened into the same Prelude module. Resident
+// collection modules import its list kernel before including this fragment.
 
 fn jet_text_map<I>(entries: I) -> String
 where

@@ -1,0 +1,144 @@
+// D-GATE-LAW1=A: external writers share the checked Package carrier and
+// organization floor. Gates run before creating directories or process locks.
+
+#Error
+struct PackageGateError {
+    diagnostics: [Diagnostic]
+
+    fn message(self) -> String Never! {
+        messages := [String]{}
+        loop diagnostic in self.diagnostics -> &messages.push(diagnostic.what)
+        messages.join("; ")
+    }
+}
+
+// crates/jet-foundation/src/Policy.rs:1092 `gate_refusal`: the earliest
+// .Forbid wins, including when an inner declaration attempts to widen it.
+fn pkg_gate_refusal(key: PolicyKey, site: String, span: Span?, declarations: [PolicyDeclaration]) -> Diagnostic? Never! {
+    selected := PolicyDeclaration?{None}
+    loop declaration in declarations {
+        if declaration.key != key || declaration.value != PolicyValue.Forbid -> next
+        if selected == .Val(outer) {
+            if policy_scope_rank(outer.scope) <= policy_scope_rank(declaration.scope) -> next
+        }
+        selected = Val(declaration)
+    }
+    declaration :: selected ?? return None
+    Val(pkg_manifest_diagnostic_from_row("E3415", [ManifestEntry]{
+        ManifestEntry{key: "gate", value: policy_key_name(key)},
+        ManifestEntry{key: "site", value: site},
+        ManifestEntry{key: "policy", value: declaration.source}
+    }, span))
+}
+
+// crates/jet-driver/src/Loader.rs:2988 `load_organization_policy`.
+fn pkg_load_organization_gate_policy() -[FS, Env]> [PolicyDeclaration] PackageGateError! {
+    path :: sys.get("JET_ORG_UNSAFE_POLICY") ?? return Ok([PolicyDeclaration]{})
+    source :: files.read(path) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
+        "cannot read the configured organization gate policy",
+        "JET_ORG_UNSAFE_POLICY names `{path}`, but it could not be read: {err}",
+        "fix the policy path or remove the environment variable")}})
+    declarations := pkg_parse_policy_document(source) ?? return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
+        "the configured organization gate policy is malformed",
+        "`{path}` must contain a manifest-shaped `policy: {{ unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }}` block: {err:Debug}",
+        "fix the organization policy; configured policy never fails open")}})
+    wrong_shape := declarations.len() == 0
+    loop declaration in declarations {
+        if !policy_key_is_audited_gate(declaration.key) -> wrong_shape = true
+    }
+    if wrong_shape -> return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic_from_registry("E3109", None,
+        "the organization gate policy has the wrong shape",
+        "this admin input contains only the shared audited-gate fields",
+        "use `policy: {{ gate_kind: .Forbid }}` with any subset of the fourteen audited gate policy keys")}})
+    loop index in 0..<declarations.len() {
+        declarations[index].scope = PolicyScope.Organization
+        declarations[index].source = path
+    }
+    Ok(declarations)
+}
+
+// crates/jet-driver/src/Loader.rs:403 `project_gate_declarations`.
+fn pkg_project_gate_declarations(cache: &WorkspaceDeclarationCache, root: String) -[FS, Env]> [PolicyDeclaration] PackageGateError! {
+    declarations := pkg_load_organization_gate_policy()
+    loaded :: pkg_package_facts_for_root(&cache, root) ? found -> found ! error -> return Err(PackageGateError{diagnostics: [Diagnostic]{error.diagnostic}})
+    if loaded == .Val(facts) {
+        loop declaration in facts.policy.declarations {
+            projected := declaration
+            projected.source = facts.origin
+            &declarations.push(projected)
+        }
+    }
+    Ok(declarations)
+}
+
+// crates/jet-driver/src/Loader.rs:391 `check_project_gate`.
+fn pkg_check_project_gate(root: String, key: PolicyKey, site: String) PackageGateError! -[FS, Env]> {
+    cache := WorkspaceDeclarationCache.new()
+    declarations :: pkg_project_gate_declarations(&cache, root)
+    if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) -> return Err(PackageGateError{diagnostics: [Diagnostic]{diagnostic}})
+}
+
+// crates/jet-driver/src/GateWriters.rs:248 `invocation_gate_kind`.
+fn pkg_invocation_gate_key(argument: String) -> PolicyKey? Never! {
+    if argument == "--force" -> return Val(PolicyKey.ForcePin)
+    if argument == "--gate" || argument.starts_with("--gate=") || argument == "--allow" || argument.starts_with("--allow=") || argument == "--release" || argument == "--target" || argument == "--profile" || argument.starts_with("--target=") || argument.starts_with("--profile=") -> return Val(PolicyKey.BuildFlag)
+    if argument == "--deny" || argument.starts_with("--deny=") || argument == "--trust" || argument == "--online" || argument == "--try-anyway" || argument == "--interpret" || argument == "--offline" || argument == "--locked" -> return Val(PolicyKey.SessionFlag)
+    None
+}
+
+// crates/jet-driver/src/GateWriters.rs:266 `check_invocation_flags`.
+fn pkg_check_invocation_flags(root: String, args: [String]) PackageGateError! -[FS, Env]> {
+    gated := false
+    loop argument in args {
+        if pkg_invocation_gate_key(argument) != None -> gated = true
+    }
+    if !gated -> return Ok(())
+    cache := WorkspaceDeclarationCache.new()
+    declarations :: pkg_project_gate_declarations(&cache, root)
+    diagnostics := [Diagnostic]{}
+    loop argument in args {
+        key :: pkg_invocation_gate_key(argument) ?? next
+        site :: "command line ({argument})"
+        if pkg_gate_refusal(key, site, None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+        if argument == "--allow" || argument.starts_with("--allow=") {
+            if pkg_gate_refusal(PolicyKey.DependencyGrant, site, None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+        }
+    }
+    if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics})
+}
+
+// crates/jet-driver/src/GateWriters.rs:109 `is_forced_override`.
+fn pkg_is_forced_override(package: PackageOverride) -> Bool Never! {
+    if package.priority >= 100 -> return true
+    loop priority in package.field_priorities.values() {
+        if priority >= 100 -> return true
+    }
+    false
+}
+
+// crates/jetpack/src/WorkspaceLock.rs:25-49: refuse before process locking.
+fn pkg_check_workspace_overlay_gates(cache: &WorkspaceDeclarationCache, root: String, policy: OverlayPolicy) PackageGateError! -[FS, Env]> {
+    gated := false
+    loop overlay in policy.overlays {
+        loop package in overlay.packages {
+            if pkg_is_forced_override(package) -> gated = true
+        }
+    }
+    loop grant in policy.build_grants {
+        if grant.effects.len() > 0 -> gated = true
+    }
+    if !gated -> return Ok(())
+    declarations :: pkg_project_gate_declarations(&cache, root)
+    diagnostics := [Diagnostic]{}
+    loop overlay in policy.overlays {
+        loop package in overlay.packages {
+            if !pkg_is_forced_override(package) -> next
+            if pkg_gate_refusal(PolicyKey.ForcePin, "workspace.jet overlay {overlay.name} package {package.package} .Force", None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+        }
+    }
+    loop grant in policy.build_grants {
+        if grant.effects.len() == 0 -> next
+        if pkg_gate_refusal(PolicyKey.DependencyGrant, "workspace.jet build grant {grant.subject}", None, declarations) == .Val(diagnostic) -> &diagnostics.push(diagnostic)
+    }
+    if diagnostics.len() > 0 -> return Err(PackageGateError{diagnostics})
+}

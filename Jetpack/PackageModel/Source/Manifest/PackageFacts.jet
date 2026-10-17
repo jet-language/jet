@@ -4,7 +4,7 @@
 // structural (PackageParse.jet), composition deterministic (Compose.jet), and
 // filesystem resolution goes through the authority resolver (PackageLoad.jet).
 
-pub enum PackageOutputKind {
+enum PackageOutputKind {
     Library
     Executable
     Service
@@ -39,7 +39,7 @@ pub enum PackageOutputKind {
     }
 
     // The Rust `Debug` spelling (the variant name).
-    pub fn debug_name(self) -> String Never! {
+    fn debug_name(self) -> String Never! {
         if self == {
             .Library -> "Library"
             .Executable -> "Executable"
@@ -56,7 +56,7 @@ pub enum PackageOutputKind {
 
 // The checked structured payload of an output; arrays, objects, booleans,
 // and numbers keep their shape.
-pub enum OutputPayload {
+enum OutputPayload {
     Null
     Bool(Bool)
     Number(String)
@@ -65,12 +65,12 @@ pub enum OutputPayload {
     Object([String: OutputPayload])
 }
 
-pub struct OutputFact {
-    pub kind: PackageOutputKind
-    pub name: String
-    pub entry: String?
-    pub fields: [String: String]
-    pub payload: OutputPayload
+struct OutputFact {
+    kind: PackageOutputKind
+    name: String
+    entry: String?
+    fields: [String: String]
+    payload: OutputPayload
 
     // D-LIB-NAME1=A: `Library{ loadable: true }` requests a `.jetlib`.
     fn is_loadable(self) -> Bool Never! {
@@ -119,33 +119,26 @@ pub struct OutputFact {
     }
 }
 
-// One checked package runtime entry: the source file plus the callable the
-// output selects (a qualified entry contributes only its leaf function).
-pub struct CheckedPackageEntry {
-    pub file: CheckedFile
-    pub callable: String
-}
-
-pub struct ServiceFact {
-    pub enable: Bool
-    pub ports: [Int]
-    pub ready: String?
-    pub fields: [String: String]
+struct ServiceFact {
+    enable: Bool
+    ports: [Int]
+    ready: String?
+    fields: [String: String]
 
     fn default() -> ServiceFact Never! {
         ServiceFact{enable: false, ports: [Int]{}, ready: None, fields: [String: String]{}}
     }
 }
 
-pub struct EnvironmentFact {
-    pub name: String
-    pub tools: [String]
-    pub services: [String: ServiceFact]
-    pub secrets: [String: String]
-    pub fields: [String: String]
+struct EnvironmentFact {
+    name: String
+    tools: [String]
+    services: [String: ServiceFact]
+    secrets: [String: String]
+    fields: [String: String]
 }
 
-pub enum MemberRef {
+enum MemberRef {
     Path(String)
     Find(String)
 
@@ -157,7 +150,7 @@ pub enum MemberRef {
 }
 
 // D-GRADE1=D / D-GRADE-POLICY1=A: the one claims ladder.
-pub enum ClaimsGrade {
+enum ClaimsGrade {
     Unchecked
     Checked
     Examples(Int)
@@ -232,12 +225,12 @@ pub enum ClaimsGrade {
 
 // A typed projection of the evidence ledger for claims inspection. Failed
 // records never raise the grade or satisfy a floor.
-pub struct ClaimsProjection {
-    pub grade: ClaimsGrade
-    pub generated_attempts: Int
-    pub generated_successes: Int
-    pub examples_successes: Int
-    pub failed: Bool
+struct ClaimsProjection {
+    grade: ClaimsGrade
+    generated_attempts: Int
+    generated_successes: Int
+    examples_successes: Int
+    failed: Bool
 
     fn from_records(records: [EvidenceRecord]) -> ClaimsProjection Never! {
         generated_attempts := 0
@@ -247,8 +240,8 @@ pub struct ClaimsProjection {
         solver_proved := false
         checked := false
         loop record in records {
-            expected_failure :: record.is_expected_failure()
-            if (record.outcome.is_failure() && !expected_failure) || record.is_unexpected_pass() -> failed = true
+            expected_failure :: evidence_record_is_expected_failure(record)
+            if (evidence_outcome_is_failure(record.outcome) && !expected_failure) || evidence_record_is_unexpected_pass(record) -> failed = true
             if record.kind == EvidenceKind.Property && record.count > 0 {
                 if record.outcome == {
                     .Generated | .Passed | .Failed -> generated_attempts += record.count
@@ -256,14 +249,14 @@ pub struct ClaimsProjection {
                 }
                 if record.outcome == {
                     .Generated | .Passed -> {
-                        if !record.is_unexpected_pass() -> generated_successes += record.count
+                        if !evidence_record_is_unexpected_pass(record) -> generated_successes += record.count
                     }
                     else -> {}
                 }
             }
             if record.kind == {
                 .Unit | .Runtime | .Doctest -> {
-                    if record.outcome == EvidenceOutcome.Passed && !record.is_unexpected_pass() -> examples_successes += 1
+                    if record.outcome == EvidenceOutcome.Passed && !evidence_record_is_unexpected_pass(record) -> examples_successes += 1
                 }
                 else -> {}
             }
@@ -289,11 +282,11 @@ pub struct ClaimsProjection {
 
 // One source-owned package policy exception scoped to an exact
 // `package#version` identity.
-pub struct PackagePolicyException {
-    pub id: String
-    pub scope: String
-    pub reason: String
-    pub expires_at: Int
+struct PackagePolicyException {
+    id: String
+    scope: String
+    reason: String
+    expires_at: Int
 
     fn summary(self) -> String Never! {
         "id={self.id};scope={self.scope};reason={self.reason};expires={self.expires_at}"
@@ -306,26 +299,26 @@ pub struct PackagePolicyException {
 
 // D-POLICY-WORD1=A / D-TEAMPOLICY1=A: the package's non-memory governance
 // namespace. Memory denials live in `authority.holds.deny`.
-pub struct PackagePolicy {
-    pub declarations: [PolicyDeclaration]
+struct PackagePolicy {
+    declarations: [PolicyDeclaration]
     // `None` means no `lints:` block at all.
-    pub lints_deny: [String]?
+    lints_deny: [String]?
     // Closed effect ceilings keyed by project-relative module path; each set
     // is sorted, and an empty set is an explicit pure ceiling.
-    pub effects: [String: [String]]
+    effects: [String: [String]]
     // `None`: no unsafe rule; empty: `.Deny`; otherwise `.Paths([...])`.
-    pub unsafe_paths: [String]?
+    unsafe_paths: [String]?
     // `None`: no rule; false: `.Deny`; true: `.Allow`.
-    pub expert: Bool?
+    expert: Bool?
     // `None`: no dependency wall; otherwise the `.List([...])` allow-list.
-    pub deps: [String]?
-    pub claims_min: ClaimsGrade?
+    deps: [String]?
+    claims_min: ClaimsGrade?
     // D-MEM-GUARANTEE1=A: contained dependencies, sorted.
-    pub contain: [String]
-    pub harden: Bool
-    pub licenses: [String]?
-    pub source_maps: [PolicySourceMap]
-    pub exceptions: [PackagePolicyException]
+    contain: [String]
+    harden: Bool
+    licenses: [String]?
+    source_maps: [PolicySourceMap]
+    exceptions: [PackagePolicyException]
 
     fn default() -> PackagePolicy Never! {
         PackagePolicy{
@@ -374,18 +367,18 @@ pub struct PackagePolicy {
 
 // Why a package guarantee policy would widen.
 #Error
-pub struct PolicyTightenError {
-    pub message: String
+struct PolicyTightenError {
+    message: String
 }
 
 // D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: package-scope authority facts.
-pub struct PackageAuthority {
-    pub holds: AuthorityHolds
+struct PackageAuthority {
+    holds: AuthorityHolds
     // D-PLUGIN-AUTHORITY1: guest-declared requirements, never a host grant.
-    pub needs: [String]
-    pub grants: [PackageGrant]
-    pub trust: TrustPolicy?
-    pub providers: [ProviderAuthority]
+    needs: [String]
+    grants: [PackageGrant]
+    trust: TrustPolicy?
+    providers: [ProviderAuthority]
 
     fn default() -> PackageAuthority Never! {
         PackageAuthority{holds: AuthorityHolds.default(), needs: [String]{}, grants: [PackageGrant]{}, trust: None, providers: [ProviderAuthority]{}}
@@ -393,67 +386,67 @@ pub struct PackageAuthority {
 }
 
 // D-CONF-MODULE1=A: one `settings:` entry — a Tier-0 type and its default.
-pub struct SettingDecl {
-    pub ty: String
-    pub default: String
+struct SettingDecl {
+    ty: String
+    default: String
 }
 
-pub struct ConfigFacts {
-    pub name: String?
-    pub version: String?
-    pub source: String?
-    pub deps: [String: DepSource]
-    pub services: [String: ServiceFact]
-    pub outputs: [String: OutputFact]
-    pub environments: [String: EnvironmentFact]
-    pub defaults: [String: String]
-    pub origin: String
+struct ConfigFacts {
+    name: String?
+    version: String?
+    source: String?
+    deps: [String: DepSource]
+    services: [String: ServiceFact]
+    outputs: [String: OutputFact]
+    environments: [String: EnvironmentFact]
+    defaults: [String: String]
+    origin: String
 }
 
-pub struct PackageFacts {
-    pub name: String
-    pub version: String?
+struct PackageFacts {
+    name: String
+    version: String?
     // The optional Jet self-toolchain pin (D-JPK-TOOLCHAIN1).
-    pub jet: String?
-    pub source: String?
-    pub edition: String?
-    pub description: String?
-    pub license: String?
-    pub repository: String?
+    jet: String?
+    source: String?
+    edition: String?
+    description: String?
+    license: String?
+    repository: String?
     // D-ALLOC-PROGRAM1=A: the hosted whole-program allocator.
-    pub allocator: MIRAllocatorPolicy
-    pub targets: PackageTargets
+    allocator: MIRAllocatorPolicy
+    targets: PackageTargets
     // D-RINGLAYER1=A: optional runtime ceiling.
-    pub layer: MIRRuntimeLayer?
-    pub deps: [String: DepSource]
+    layer: MIRRuntimeLayer?
+    deps: [String: DepSource]
     // D-LIVE1: package-level development mode.
-    pub dev: DevPolicy
-    pub boundaries: [ImportBoundary]
-    pub packages: [PackageEntry]
-    pub services: [String: ServiceFact]
-    pub outputs: [String: OutputFact]
-    pub environments: [String: EnvironmentFact]
-    pub defaults: [String: String]
-    pub build_profiles: [BuildProfileDef]
+    dev: DevPolicy
+    boundaries: [ImportBoundary]
+    packages: [PackageEntry]
+    services: [String: ServiceFact]
+    outputs: [String: OutputFact]
+    environments: [String: EnvironmentFact]
+    defaults: [String: String]
+    build_profiles: [BuildProfileDef]
     // D-CTEFFECT1: standing capabilities granted to this package's `fn build`.
-    pub build_allow: [String]
+    build_allow: [String]
     // D-EFFBUDGET1: whether `authority.holds` is present at all.
-    pub effects_enabled: Bool
-    pub effects_allow: [String]?
-    pub effects_deny: [String]?
-    pub grants: [PackageGrant]
-    pub authority: PackageAuthority
-    pub policy: PackagePolicy
-    pub settings: [String: SettingDecl]
-    pub configs: [String]
+    effects_enabled: Bool
+    effects_allow: [String]?
+    effects_deny: [String]?
+    grants: [PackageGrant]
+    authority: PackageAuthority
+    policy: PackagePolicy
+    settings: [String: SettingDecl]
+    configs: [String]
     // Resolved file-backed Config paths, relative to the Package root.
-    pub resolved_config_paths: [String]
+    resolved_config_paths: [String]
     // Inline `name :: Config{ ... }` contributions by declared name.
-    pub inline_configs: [String: ConfigFacts]
-    pub members: [MemberRef]
+    inline_configs: [String: ConfigFacts]
+    members: [MemberRef]
     // Every successful contributor to a field, in composition order.
-    pub provenance: [String: [String]]
-    pub origin: String
+    provenance: [String: [String]]
+    origin: String
 
     fn default() -> PackageFacts Never! {
         PackageFacts{
@@ -525,7 +518,7 @@ pub struct PackageFacts {
 
     // Stable, checkout-portable digest of the composed typed facts used by
     // workspace locks; origins and provenance never enter it.
-    pub fn semantic_digest(self) -> String Never! {
+    fn semantic_digest(self) -> String Never! {
         pkg_sha256_hex(pkg_facts_semantic_text(self).bytes())
     }
 }

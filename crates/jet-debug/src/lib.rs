@@ -2,41 +2,30 @@
 //!
 //! The debugger steps your program at the **Jet source level** (I2): every
 //! breakpoint, step, frame, and value is in Jet terms. It never surfaces the
-//! generated Rust — values are shown through the interpreter's own
-//! `CtValue::jet_show()` path, the same bytes a `print` would produce.
+//! generated Rust by default.
 //!
-//! Backend (D-DBG3 step 1, the shipped vertical slice): the debugger drives the
-//! existing tree-walking interpreter (`crate::Comptime`) — the same engine
-//! behind `jet dev` and `jet repl`. It registers a [`DebugHook`] that the
-//! interpreter calls before every statement; the hook decides whether to pause
-//! and run the interactive `(jet)` prompt. Because it reuses the dev
-//! interpreter, it covers the same deterministic subset and declines the same
-//! boundary (FFI / tasks / `#Unsafe` / native std) with **E2203**, pointing at
-//! the native lldb-backed adapter shipped by D-DBG3 step 2.
+//! Backend (D-EXEC1/D-EXEC2): live sessions step the native debug build under
+//! LLDB — the `(jet)` terminal session ([`Native`]) or the Debug Adapter
+//! Protocol server editors launch ([`Dap`]); [`LineMap`] and [`Inferior`] are
+//! their shared building blocks. D-DX-DEBUGBACK1: `jet debug --record` records
+//! one complete native run, and the recorded-history browser in this module
+//! navigates that receipt (`--replay`, Canvas) without executing anything.
 //!
 //! Command surface (D-DBG3, ratified A): the prompt is `(jet)`; the step verbs
 //! are lldb-familiar `step` / `next` / `continue` / `finish` with single-letter
 //! aliases `s` / `n` / `c` / `f`. Recorded sessions add `back` and
-//! `reverse-continue`; live sessions add bounded `watch` and checked `fix`.
-//! A paused line shows a `<- here` caret and a one-line `locals:` dump;
-//! `help` lists every verb. Only Jet frames/lines and safe locals are shown by
-//! default (D-DBG2 — `--raw-frames` is the clearly marked native expert view).
+//! `reverse-continue`, `why`, and `when`. A paused line shows a `<- here`
+//! caret and a one-line `locals:` dump; `help` lists every verb. Only Jet
+//! frames/lines and safe locals are shown by default (D-DBG2 — `--raw-frames`
+//! is the clearly marked native expert view).
 //!
-//! I6: std-only — no DAP/JSON crate, no debugger library. The interactive loop
-//! reads stdin with `std::io`; tests drive it with a scripted-input transcript
-//! (`run_session`), the same shape as the REPL transcript tests.
-//!
-//! D-DBG3 step 2 (dap-debugger): the native backend lives in the sibling
-//! submodules below. [`LineMap`] and [`Inferior`] are the shared building
-//! blocks; [`Native`] is the `(jet)`-prompt terminal session; [`Dap`] is the
-//! Debug Adapter Protocol server editors (VS Code/Zed) launch instead.
+//! I6: std-only — no DAP/JSON crate, no debugger library.
 
 #![allow(non_snake_case)]
-#![deny(warnings)]
 
 // D-ARCH-SOURCE1=A: full debugger ownership lives here. Compiler semantics
 // enter through inward path-only seams; no root host dependency exists.
-pub use jet_driver::{Comptime, Diagnostics, Loader, Sema, Syntax, AST};
+pub use jet_driver::{Diagnostics, Loader, Sema, Syntax, AST};
 pub use jet_foundation::ExitCodes;
 
 mod Dap;
@@ -50,8 +39,7 @@ pub use EventObservation::render as render_event_observations;
 
 use std::collections::{HashMap, HashSet};
 
-use crate::Comptime::{CtValue, DebugHook, DevSink};
-use crate::Diagnostics::{span_line_col, Diagnostic, Span};
+use crate::Diagnostics::Diagnostic;
 
 /// One paused frame for the `backtrace` view: the executing function and the
 /// Jet line it is stopped on. Newest (innermost) frame last.
@@ -76,7 +64,7 @@ pub struct FrameSnapshot {
     pub line: usize,
 }
 
-/// Runtime-owned debugger state for the current paused interpreter frame.
+/// Runtime-owned debugger state for the currently selected paused frame.
 /// Canvas projects this instead of guessing from terminal text.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DebugSnapshot {
@@ -389,7 +377,7 @@ fn unquote_debug_text(raw: &str) -> String {
     text
 }
 
-/// One post-statement source event shared by the interpreter, native adapter,
+/// One post-statement source event shared by the native adapter,
 /// DAP server, Canvas, and replay receipts. Values are already projected into
 /// safe Jet terms; no generated-Rust addresses or host objects cross this seam.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -531,19 +519,6 @@ struct IndexedWrite {
     new_value: String,
 }
 
-#[derive(Clone, Debug)]
-struct PendingStatement {
-    function: String,
-    line: usize,
-    before: HashMap<String, ValueSnapshot>,
-}
-
-#[derive(Clone, Debug)]
-struct FixRequest {
-    source: String,
-    target: usize,
-}
-
 /// What the user asked the debugger to do next, set by a `(jet)` command and
 /// read by the hook to decide where to stop.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -570,9 +545,9 @@ enum IO {
     Scripted {
         inputs: std::collections::VecDeque<String>,
         out: String,
-        /// Keep the interpreter at the current stop when scripted input ends.
-        /// Canvas uses this to expose one live command boundary; transcript
-        /// tests retain the historical run-to-completion behavior.
+        /// Keep recorded history at the current stop when scripted input ends.
+        /// Canvas uses this to expose one command boundary; transcript
+        /// tests continue through the remaining recorded events.
         pause_on_input_end: bool,
     },
 }
@@ -609,69 +584,37 @@ impl IO {
     }
 }
 
-/// The interactive driver. Holds the breakpoint set, the pending resume mode,
-/// the source text (for the `<- here` caret and `list`), and the live call
-/// stack. Implements [`DebugHook`] so the interpreter can call it per statement.
+/// The recorded-history browser (D-DX-DEBUGBACK1). Holds the breakpoint and
+/// watch sets, the source text (for the `<- here` caret and `list`), and the
+/// authoritative recording it navigates; it never executes the program.
 struct Debugger {
     /// Jet line numbers the user set a breakpoint on (`break <line>`).
     breakpoints: HashSet<usize>,
-    /// What to do next; consumed/recomputed each time we pause.
-    resume: Resume,
     /// The entry file's source, for the `<- here` caret and the breakpoint banner.
     src: String,
     /// The file name shown in banners (e.g. `loops.jet`).
     file: String,
-    /// The path used to reload and semantically check a proposed source fix.
-    source_path: String,
-    /// Stable declaration/type/layout shape captured at the checkpoint.
-    checkpoint_shape: String,
-    /// The live call stack, innermost last. Updated each time the hook fires.
+    /// The call stack shown before the first recorded stop, innermost last.
     stack: Vec<Frame>,
     io: IO,
-    /// True once the program has stopped at least once, so the first pause
-    /// prints the full banner and later ones print just the moved line.
-    started: bool,
-    /// Set when the user typed `quit`: the hook returns E2204 to abort the run.
+    /// Set when the user typed `quit`.
     quit: bool,
-    /// Set when Canvas input ends at a live stop. This is an internal unwind
-    /// signal; the paused transcript is not a diagnostic.
+    /// Set when Canvas input ends at a recorded stop. The paused transcript is
+    /// not a diagnostic.
     paused: bool,
-    /// Structured state captured at the last real stop. This is separate from
-    /// the human transcript so program output cannot fabricate liveness.
+    /// Structured state captured at the last recorded stop. This is separate
+    /// from the human transcript so program output cannot fabricate liveness.
     snapshot: Option<DebugSnapshot>,
     /// Canonical event/stack/checkpoint/value history shared with native, DAP,
     /// Canvas, and receipt replay consumers.
     history: DebugHistory,
     /// Legacy receipt projection retained for the stable artifact API.
     recording: RecordedRun,
-    /// Replay receipts are authoritative; do not append live observations to
-    /// their captured act list.
-    recording_locked: bool,
-    /// Writes derived at statement boundaries. This is deliberately session
-    /// owned; no process-global watchpoint state exists.
-    writes: Vec<IndexedWrite>,
-    /// Scope captured before the currently executing statement.
-    pending: Option<PendingStatement>,
-    /// Session-scoped places whose writes should stop the next statement.
+    /// Session-scoped places whose writes stop `continue`.
     watches: HashSet<String>,
-    /// Monotonic statement sequence, including statements beyond the retention
-    /// cap. It prevents a capped receipt from repeating sequence numbers.
-    statement_sequence: u64,
-    /// True after the bounded history cap rejects another observation.
-    history_limit_reached: bool,
-    /// `Some(index)` means the prompt is viewing a retained post-statement
-    /// state; `None` means the interpreter is at its live boundary.
+    /// `Some(index)` means the prompt is viewing that recorded statement.
     history_cursor: Option<usize>,
-    /// True when this debugger is browsing an authoritative replay receipt
-    /// instead of driving an interpreter.
-    replay_mode: bool,
     replay_finished: bool,
-    /// A checked source edit requested a restart at this checkpoint.
-    fix_request: Option<FixRequest>,
-    /// Remaining statements to replay silently after a compatible fix.
-    rebind_remaining: Option<usize>,
-    rebind_prefix: Vec<RecordedAct>,
-    rebind_reached: bool,
 }
 
 impl Debugger {
@@ -680,59 +623,30 @@ impl Debugger {
         file: String,
         source_path: String,
         io: IO,
-        recording: Option<RecordedRun>,
+        recording: RecordedRun,
         checkpoint_shape: String,
     ) -> Self {
-        let (recording, recording_locked) = match recording {
-            Some(recording) => (recording, true),
-            None => (RecordedRun::default(), false),
-        };
-        let replay_mode = recording_locked;
-        let statement_sequence = recording.acts.last().map_or(0, |act| act.sequence);
-        let writes = derive_recorded_writes(&recording, &src);
         let source_identity = jet_foundation::SHA256::sha256_hex(
             format!("{}:{}", source_path, src).as_bytes(),
         );
-        let history =
-            DebugHistory::from_recorded_run(&recording, source_identity, checkpoint_shape.clone());
+        let history = DebugHistory::from_recorded_run(&recording, source_identity, checkpoint_shape);
         Debugger {
             breakpoints: HashSet::new(),
-            // Stop on the very first statement so the user lands inside `main`
-            // (lldb/gdb behavior: `run` halts at the entry breakpoint).
-            resume: Resume::Step,
             src,
             file,
-            source_path,
-            checkpoint_shape,
             stack: Vec::new(),
             io,
-            started: false,
             quit: false,
             paused: false,
             snapshot: None,
             recording,
             history,
-            recording_locked,
-            writes,
-            pending: None,
             watches: HashSet::new(),
-            statement_sequence,
-            history_limit_reached: false,
             history_cursor: None,
-            replay_mode,
             replay_finished: false,
-            fix_request: None,
-            rebind_remaining: None,
-            rebind_prefix: Vec::new(),
-            rebind_reached: !replay_mode && statement_sequence == 0,
         }
     }
 
-
-    /// 1-based Jet line for a span's start.
-    fn line_of(&self, span: Span) -> usize {
-        span_line_col(&self.src, span.start).0
-    }
 
     /// The text of a 1-based source line, without the trailing newline.
     fn source_line(&self, line: usize) -> &str {
@@ -776,67 +690,28 @@ impl Debugger {
         }
     }
 
-    /// Print the stop banner: the file:line, the function, a small source
-    /// window with a `<- here` caret on the current line, and the one-line
-    /// `locals:` dump (D-DBG3 layout).
-    fn show_stop(&mut self, line: usize, scope: &HashMap<String, CtValue>) {
-        if !self.started {
-            self.started = true;
-            let func = self
-                .stack
-                .last()
-                .map(|f| f.func.clone())
-                .unwrap_or_else(|| "run".to_string());
-            self.emit(&format!(
-                "breakpoint hit  {}:{}  in {}()",
-                self.file, line, func
-            ));
-        }
-        // A two-line window (prev + current) mirrors the plan's worked example.
-        for l in line.saturating_sub(1)..=line {
-            if l == 0 {
-                continue;
-            }
-            let text = self.source_line(l);
-            if text.is_empty() && l != line {
-                continue;
-            }
-            let caret = if l == line { "        <- here" } else { "" };
-            self.emit(&format!("   {} | {}{}", l, text.trim_end(), caret));
-        }
-        self.emit(&render_locals(scope));
-    }
-
-    /// Run the `(jet)` prompt until the user issues a resume verb (step/next/
-    /// continue/finish) or quits. `line`/`scope`/`depth` describe the current
-    /// stop. Returns once `self.resume` is set for the run to proceed.
-    fn prompt_loop(&mut self, line: usize, depth: usize, scope: &HashMap<String, CtValue>) {
+    /// Run the `(jet)` prompt over the recording until navigation runs past
+    /// its last act, the input ends, or the user quits. `depth` is the call
+    /// depth `next`/`finish` start from.
+    fn prompt_loop(&mut self, depth: usize) {
         loop {
             let cmd = match self.read_command() {
                 Some(c) => c,
                 None => {
+                    // Canvas owns the next command; transcripts and terminal
+                    // EOF finish the browse.
                     if self.io.pause_on_input_end() {
-                        // Canvas owns the next command. Unwind the current
-                        // interpreter invocation while retaining this stop.
                         self.paused = true;
-                    } else {
-                        // Transcript tests and terminal EOF run to completion.
-                        self.resume = Resume::Continue;
                     }
                     return;
                 }
             };
             if cmd.is_empty() {
-                // Bare Enter repeats the last step kind (lldb behavior): re-issue
-                // a single step.
-                if self.history_cursor.is_some() {
-                    if self.advance_history(Resume::Step) {
-                        return;
-                    }
-                    continue;
+                // Bare Enter repeats a single step (lldb behavior).
+                if self.advance_history(Resume::Step) {
+                    return;
                 }
-                self.resume = Resume::Step;
-                return;
+                continue;
             }
             let mut parts = cmd.split_whitespace();
             let verb = parts.next().unwrap_or("");
@@ -848,8 +723,7 @@ impl Debugger {
                 (None, _) => tail,
             };
 
-            if self.history_cursor.is_some() {
-                let resumed = match verb {
+            let resumed = match verb {
                     v if v == Syntax::DBG_STEP || v == "s" => self.advance_history(Resume::Step),
                     v if v == Syntax::DBG_NEXT || v == "n" => {
                         self.advance_history(Resume::Next { depth })
@@ -916,7 +790,7 @@ impl Debugger {
                     }
                     "fix" => {
                         self.cmd_fix();
-                        self.fix_request.is_some()
+                        false
                     }
                     v if v == Syntax::DBG_HELP || v == "h" => {
                         self.cmd_help();
@@ -933,98 +807,9 @@ impl Debugger {
                         ));
                         false
                     }
-                };
-                if resumed {
-                    return;
-                }
-                if self.replay_finished {
-                    return;
-                }
-                continue;
-            }
-
-            match verb {
-                v if v == Syntax::DBG_STEP || v == "s" => {
-                    self.resume = Resume::Step;
-                    return;
-                }
-                v if v == Syntax::DBG_NEXT || v == "n" => {
-                    self.resume = Resume::Next { depth };
-                    return;
-                }
-                v if v == Syntax::DBG_FINISH || v == "f" => {
-                    self.resume = Resume::Finish { depth };
-                    return;
-                }
-                v if v == Syntax::DBG_CONTINUE || v == "c" => {
-                    self.resume = Resume::Continue;
-                    return;
-                }
-                v if v == Syntax::DBG_BACK
-                    || v == "reverse"
-                    || v == "reverse-step"
-                    || v == "rstep" =>
-                {
-                    let steps = arg
-                        .and_then(|value| value.parse::<usize>().ok())
-                        .unwrap_or(1);
-                    self.reverse_step(steps);
-                }
-                v if v == Syntax::DBG_REVERSE_CONTINUE
-                    || v == "rcontinue"
-                    || v == "back-continue" =>
-                {
-                    self.reverse_continue();
-                }
-                v if v == Syntax::DBG_BREAK || v == "b" => {
-                    self.cmd_break(arg);
-                }
-                v if v == Syntax::DBG_LIST || v == "l" => {
-                    self.cmd_list(line);
-                }
-                v if v == Syntax::DBG_PRINT || v == "p" => {
-                    self.cmd_print(arg, scope);
-                }
-                v if v == Syntax::DBG_LOCALS => {
-                    let rendered = render_locals(scope);
-                    self.emit(&rendered);
-                }
-                v if v == Syntax::DBG_BACKTRACE || v == "bt" => {
-                    self.cmd_backtrace();
-                }
-                v if v == Syntax::DBG_WHY => {
-                    self.cmd_why(&query);
-                }
-                v if v == Syntax::DBG_WHEN => {
-                    self.cmd_when(&query);
-                }
-                v if v == Syntax::DBG_WATCH => {
-                    self.cmd_watch(&query);
-                    self.refresh_watch_baseline(scope);
-                }
-                v if v == Syntax::DBG_UNWATCH => {
-                    self.cmd_unwatch(&query);
-                    self.refresh_watch_baseline(scope);
-                }
-                v if v == Syntax::DBG_FIX => {
-                    self.cmd_fix();
-                    if self.fix_request.is_some() {
-                        return;
-                    }
-                }
-                v if v == Syntax::DBG_HELP || v == "h" => {
-                    self.cmd_help();
-                }
-                v if v == Syntax::DBG_QUIT || v == "q" => {
-                    self.quit = true;
-                    return;
-                }
-                other => {
-                    self.emit(&format!(
-                        "unknown command `{}` — type `help` for the verbs",
-                        other
-                    ));
-                }
+            };
+            if resumed || self.replay_finished {
+                return;
             }
         }
     }
@@ -1095,8 +880,8 @@ impl Debugger {
         self.show_history_stop(index);
     }
 
-    /// Move one virtual history step. Returns true when the prompt should
-    /// return to the interpreter (or complete a replay receipt).
+    /// Move one virtual history step. Returns true when the browse is
+    /// complete (navigation ran past the last recorded act).
     fn advance_history(&mut self, resume: Resume) -> bool {
         let Some(current) = self.history.cursor.or(self.history_cursor) else {
             return false;
@@ -1142,13 +927,7 @@ impl Debugger {
             self.show_history_stop(index);
             return false;
         }
-        if self.replay_mode {
-            self.replay_finished = true;
-            return true;
-        }
-        self.history.cursor = None;
-        self.history_cursor = None;
-        self.resume = resume;
+        self.replay_finished = true;
         true
     }
 
@@ -1204,13 +983,6 @@ impl Debugger {
                 self.file, write.line, write.old_value, write.new_value
             ));
         }
-    }
-
-    fn render_write(&self, write: &IndexedWrite) -> String {
-        format!(
-            "write: {}:{}  {} -> {}",
-            self.file, write.line, write.old_value, write.new_value
-        )
     }
 
     fn cmd_list_history(&mut self) {
@@ -1314,49 +1086,12 @@ impl Debugger {
             self.emit(&format!("no watchpoint named `{place}`"));
         }
     }
-    fn refresh_watch_baseline(&mut self, scope: &HashMap<String, CtValue>) {
-        if self.pending.is_some() {
-            let baseline = snapshot_places(scope, &self.watches);
-            if let Some(pending) = self.pending.as_mut() {
-                pending.before = baseline;
-            }
-        }
-    }
-
+    /// A recording is authoritative history; repairing source needs a new
+    /// native session (`jet debug <file>`), which rebuilds and relaunches.
     fn cmd_fix(&mut self) {
-        if self.replay_mode {
-            self.emit(
-                "fix unavailable: replay receipts are read-only; start a live debug session to repair source",
-            );
-            return;
-        }
-        let Ok(candidate_source) = std::fs::read_to_string(&self.source_path) else {
-            self.emit("fix rejected: the debug source could not be read");
-            return;
-        };
-        if candidate_source == self.src {
-            self.emit("fix unavailable: source is unchanged; edit the file and retry");
-            return;
-        }
-        let (_, _, candidate_shape) = match checked_bundle_for_fix(&self.source_path) {
-            Ok(value) => value,
-            Err(reason) => {
-                self.emit(&format!("fix rejected: {reason}"));
-                return;
-            }
-        };
-        if candidate_shape != self.checkpoint_shape {
-            self.emit(
-                "fix rejected: checkpoint incompatible (source type, layout, or authority changed); restart required",
-            );
-            return;
-        }
-        let target = self.history_count();
-        self.emit("checkpoint compatible");
-        self.fix_request = Some(FixRequest {
-            source: candidate_source,
-            target,
-        });
+        self.emit(
+            "fix unavailable: replay receipts are read-only; start a live debug session to repair source",
+        );
     }
 
     fn run_replay(
@@ -1392,7 +1127,7 @@ impl Debugger {
         self.history.cursor = Some(0);
         self.history_cursor = Some(0);
         self.show_history_stop(0);
-        self.prompt_loop(0, 0, &HashMap::new());
+        self.prompt_loop(0);
         if self.paused {
             let snapshot = self.snapshot.clone();
             let recording = self.recording.clone();
@@ -1433,33 +1168,6 @@ impl Debugger {
         )
     }
 
-    fn prepare_rebind(&mut self, source: String, target: usize) {
-        let target = target.min(self.recording.acts.len());
-        self.recording.acts.truncate(target);
-        self.writes
-            .retain(|write| write.sequence <= target as u64);
-        self.src = source;
-        self.history = DebugHistory::from_recorded_run(
-            &RecordedRun {
-                acts: self.recording.acts[..target].to_vec(),
-                decision_ledger: self.recording.decision_ledger.clone(),
-            },
-            jet_foundation::SHA256::sha256_hex(format!("{}:{}", self.source_path, self.src).as_bytes()),
-            self.checkpoint_shape.clone(),
-        );
-        self.history_cursor = None;
-        self.pending = None;
-        self.stack.clear();
-        self.snapshot = None;
-        self.started = false;
-        self.resume = Resume::Continue;
-        self.fix_request = None;
-        self.rebind_remaining = (target > 0).then_some(target);
-        self.rebind_prefix.clear();
-        self.rebind_reached = target == 0;
-        self.statement_sequence = target as u64;
-    }
-
     fn cmd_break(&mut self, arg: Option<&str>) {
         match arg.and_then(|a| a.parse::<usize>().ok()) {
             Some(n) if n >= 1 => {
@@ -1480,19 +1188,6 @@ impl Debugger {
             }
             let marker = if l == line { "->" } else { "  " };
             self.emit(&format!("{} {} | {}", marker, l, text.trim_end()));
-        }
-    }
-
-    fn cmd_print(&mut self, arg: Option<&str>, scope: &HashMap<String, CtValue>) {
-        match arg {
-            Some(name) => match scope.get(name) {
-                Some(v) => {
-                    let line = format!("{} = {}", name, v.jet_show());
-                    self.emit(&line);
-                }
-                None => self.emit(&format!("no local named `{}` in this frame", name)),
-            },
-            None => self.emit("print needs a name, e.g. `print total`"),
         }
     }
 
@@ -1607,264 +1302,7 @@ commands:
   quit, q        end the debug session";
         self.emit(text);
     }
-    fn stop_at(
-        &mut self,
-        func: &str,
-        depth: usize,
-        line: usize,
-        span: Span,
-        scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        self.snapshot = Some(DebugSnapshot {
-            function: func.to_string(),
-            line,
-            locals: snapshot_values(scope),
-            call_stack: self
-                .stack
-                .iter()
-                .map(|frame| FrameSnapshot {
-                    function: frame.func.clone(),
-                    line: frame.line,
-                })
-                .collect(),
-        });
-        self.show_stop(line, scope);
-        self.prompt_loop(line, depth, scope);
-        if self.fix_request.is_some() {
-            return Err(Diagnostic::error(
-                "E2205",
-                "debug checkpoint is ready for a checked source repair".to_string(),
-                "the debugger will replay the compatible prefix before continuing".to_string(),
-                "edit the source only after a stopped statement and use `fix` again if it changes shape"
-                    .to_string(),
-                Some(span),
-            ));
-        }
-        if self.paused {
-            return Err(Diagnostic::error(
-                "E2204",
-                "debug session paused at the Canvas command boundary".to_string(),
-                "Canvas keeps the source-level debugger stopped until the next command arrives"
-                    .to_string(),
-                "send another Canvas debug command or stop the session".to_string(),
-                None,
-            ));
-        }
-        if self.quit {
-            return Err(Diagnostic::error(
-                "E2204",
-                "debug session ended before the program finished".to_string(),
-                "you typed `quit` at the `(jet)` prompt, which stops the interpreted run".to_string(),
-                "run `jet debug <file>` again and use `continue` to run to the end, or `jet run <file>` to run without the debugger".to_string(),
-                Some(span),
-            ));
-        }
-        Ok(())
-    }
 
-}
-
-impl DebugHook for Debugger {
-    fn at_stmt(
-        &mut self,
-        func: &str,
-        depth: usize,
-        span: Span,
-        scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        let line = self.line_of(span);
-        self.pending = Some(PendingStatement {
-            function: func.to_string(),
-            line,
-            before: snapshot_places(scope, &self.watches),
-        });
-        // Keep the live call stack in sync: frame `depth` is this function at
-        // this line. Drop any deeper frames left by a returned callee, then
-        // update the current frame (or push it if we just descended).
-        self.stack.truncate(depth + 1);
-        if self.stack.len() <= depth {
-            self.stack.push(Frame {
-                func: func.to_string(),
-                line,
-            });
-        } else if let Some(top) = self.stack.last_mut() {
-            top.func = func.to_string();
-            top.line = line;
-        }
-
-        // A compatible source repair replays the prefix silently. It must not
-        // stop on old breakpoints or expose a candidate's duplicate output.
-        if self.rebind_remaining.is_some() {
-            return Ok(());
-        }
-
-        let hit_breakpoint = self.breakpoints.contains(&line);
-        let should_stop = match self.resume {
-            Resume::Step => true,
-            Resume::Next { depth: d } => depth <= d,
-            Resume::Finish { depth: d } => depth < d,
-            Resume::Continue => false,
-        } || hit_breakpoint;
-
-        if !should_stop {
-            return Ok(());
-        }
-        self.stop_at(func, depth, line, span, scope)
-    }
-
-    fn after_stmt(
-        &mut self,
-        func: &str,
-        depth: usize,
-        span: Span,
-        scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        let line = self.line_of(span);
-        let pending = self.pending.take();
-        let before = pending
-            .as_ref()
-            .map(|statement| &statement.before)
-            .cloned()
-            .unwrap_or_default();
-        let statement_function = pending
-            .as_ref()
-            .map_or(func, |statement| statement.function.as_str());
-        let statement_line = pending.as_ref().map_or(line, |statement| statement.line);
-        let after = snapshot_places(scope, &self.watches);
-
-        if let Some(remaining) = self.rebind_remaining {
-            let sequence = u64::try_from(self.rebind_prefix.len() + 1).unwrap_or(u64::MAX);
-            self.rebind_prefix.push(RecordedAct {
-                sequence,
-                function: statement_function.to_string(),
-                line: statement_line,
-                locals: snapshot_values(scope),
-            });
-            if remaining == 1 {
-                self.recording.acts = std::mem::take(&mut self.rebind_prefix);
-                self.writes = derive_recorded_writes(&self.recording, &self.src);
-                self.statement_sequence = sequence;
-                self.history = DebugHistory::from_recorded_run(
-                    &self.recording,
-                    jet_foundation::SHA256::sha256_hex(
-                        format!("{}:{}", self.source_path, self.src).as_bytes(),
-                    ),
-                    self.checkpoint_shape.clone(),
-                );
-                self.rebind_remaining = None;
-                self.rebind_reached = true;
-                self.resume = Resume::Step;
-            } else {
-                self.rebind_remaining = Some(remaining - 1);
-            }
-            return Ok(());
-        }
-        if self.recording_locked {
-            return Ok(());
-        }
-
-        self.statement_sequence = self.statement_sequence.saturating_add(1);
-        let sequence = self.statement_sequence;
-        let writes = diff_snapshots(
-            sequence,
-            statement_line,
-            &before,
-            &after,
-        );
-        let locals = snapshot_values(scope);
-        let event_writes = writes
-            .iter()
-            .map(|write| DebugWrite {
-                line: write.line,
-                place: write.place.clone(),
-                old_value: write.old_value.clone(),
-                new_value: write.new_value.clone(),
-            })
-            .collect::<Vec<_>>();
-        let event = DebugEvent {
-            sequence,
-            function: statement_function.to_string(),
-            line: statement_line,
-            depth,
-            stack: self
-                .stack
-                .iter()
-                .map(|frame| FrameSnapshot {
-                    function: frame.func.clone(),
-                    line: frame.line,
-                })
-                .collect(),
-            locals: locals.clone(),
-            writes: event_writes,
-        };
-        if !self.history.push(event) {
-            self.history_limit_reached = true;
-        } else {
-            self.recording.acts.push(RecordedAct {
-                sequence,
-                function: statement_function.to_string(),
-                line: statement_line,
-                locals,
-            });
-            self.writes.extend(writes.iter().cloned());
-        }
-        let watched: Vec<String> = writes
-            .iter()
-            .filter(|write| {
-                self.watches.iter().any(|watch| {
-                    watch == &write.place
-                        || write.place.starts_with(&format!("{watch}."))
-                        || watch.starts_with(&format!("{}.", write.place))
-                })
-            })
-            .map(|write| self.render_write(write))
-            .collect();
-        if !watched.is_empty() {
-            self.emit(&format!(
-                "watchpoint hit  {}:{}  ({} watched place change)",
-                self.file,
-                statement_line,
-                watched.len()
-            ));
-            for write in watched {
-                self.emit(&write);
-            }
-            self.stop_at(func, depth, line, span, scope)?;
-        }
-        Ok(())
-    }
-}
-
-/// Render the one-line `locals:` dump (D-DBG3): `locals:  a = 1   b = "hi"`.
-/// Names are shown in a stable (sorted) order so the transcript is
-/// deterministic. Values come through `jet_show` (I2 — Jet display, not Rust).
-fn render_locals(scope: &HashMap<String, CtValue>) -> String {
-    if scope.is_empty() {
-        return "locals:  (none)".to_string();
-    }
-    let mut names: Vec<&String> = scope.keys().collect();
-    names.sort();
-    let body: Vec<String> = names
-        .iter()
-        .map(|n| format!("{} = {}", n, scope[*n].jet_show()))
-        .collect();
-    format!("locals:  {}", body.join("   "))
-}
-
-fn snapshot_values(scope: &HashMap<String, CtValue>) -> Vec<ValueSnapshot> {
-    let mut names: Vec<&String> = scope.keys().collect();
-    names.sort();
-    names
-        .into_iter()
-        .map(|name| {
-            let value = &scope[name];
-            ValueSnapshot {
-                name: name.clone(),
-                type_name: value.jet_type().name(),
-                value: value.jet_show(),
-            }
-        })
-        .collect()
 }
 
 fn render_snapshot_locals(values: &[ValueSnapshot]) -> String {
@@ -1879,91 +1317,6 @@ fn render_snapshot_locals(values: &[ValueSnapshot]) -> String {
         .collect::<Vec<_>>()
         .join("   ");
     format!("locals:  {body}")
-}
-
-fn debug_path_segments(value: &str) -> Option<Vec<String>> {
-    let (root, mut suffix) = split_debug_expression(value)?;
-    let mut segments = vec![root.to_string()];
-    while !suffix.is_empty() {
-        if let Some(field) = suffix.strip_prefix('.') {
-            let end = field
-                .char_indices()
-                .find(|(_, c)| !c.is_ascii_alphanumeric() && *c != '_')
-                .map(|(index, _)| index)
-                .unwrap_or(field.len());
-            if end == 0 {
-                return None;
-            }
-            segments.push(field[..end].to_string());
-            suffix = &field[end..];
-        } else if let Some(index) = suffix.strip_prefix('[') {
-            let end = index.find(']')?;
-            if end == 0 || !index[..end].chars().all(|c| c.is_ascii_digit()) {
-                return None;
-            }
-            segments.push(format!("[{}]", &index[..end]));
-            suffix = &index[end + 1..];
-        } else {
-            return None;
-        }
-    }
-    Some(segments)
-}
-
-fn value_at_debug_path<'a>(
-    scope: &'a HashMap<String, CtValue>,
-    place: &str,
-) -> Option<&'a CtValue> {
-    let segments = debug_path_segments(place)?;
-    let mut value = scope.get(segments.first()?.as_str())?;
-    for segment in segments.iter().skip(1) {
-        if let Some(index) = segment
-            .strip_prefix('[')
-            .and_then(|index| index.strip_suffix(']'))
-            .and_then(|index| index.parse::<usize>().ok())
-        {
-            value = match value {
-                CtValue::List(values) => values.get(index)?,
-                _ => return None,
-            };
-            continue;
-        }
-        value = match value {
-            CtValue::Struct { fields, .. } => fields
-                .iter()
-                .find(|(name, _)| name == segment)
-                .map(|(_, value)| value)?,
-            CtValue::Enum { args, .. } => args
-                .iter()
-                .find(|(name, _)| name.as_deref() == Some(segment.as_str()))
-                .map(|(_, value)| value)?,
-            _ => return None,
-        };
-    }
-    Some(value)
-}
-
-fn snapshot_places(
-    scope: &HashMap<String, CtValue>,
-    watches: &HashSet<String>,
-) -> HashMap<String, ValueSnapshot> {
-    let mut values = snapshot_values(scope)
-        .into_iter()
-        .map(|value| (value.name.clone(), value))
-        .collect::<HashMap<_, _>>();
-    for place in watches {
-        if let Some(value) = value_at_debug_path(scope, place) {
-            values.insert(
-                place.clone(),
-                ValueSnapshot {
-                    name: place.clone(),
-                    type_name: value.jet_type().name(),
-                    value: value.jet_show(),
-                },
-            );
-        }
-    }
-    values
 }
 
 fn snapshot_map(values: &[ValueSnapshot]) -> HashMap<String, ValueSnapshot> {
@@ -2010,7 +1363,7 @@ fn diff_snapshots(
         .collect()
 }
 
-fn derive_recorded_writes(run: &RecordedRun, _src: &str) -> Vec<IndexedWrite> {
+fn derive_recorded_writes(run: &RecordedRun) -> Vec<IndexedWrite> {
     let mut writes = Vec::new();
     for (index, act) in run.acts.iter().enumerate() {
         let before = if index > 0
@@ -2032,7 +1385,7 @@ fn derive_recorded_writes(run: &RecordedRun, _src: &str) -> Vec<IndexedWrite> {
 }
 fn debug_writes_by_sequence(run: &RecordedRun) -> HashMap<u64, Vec<DebugWrite>> {
     let mut grouped = HashMap::new();
-    for write in derive_recorded_writes(run, "") {
+    for write in derive_recorded_writes(run) {
         grouped
             .entry(write.sequence)
             .or_insert_with(Vec::new)
@@ -2046,49 +1399,6 @@ fn debug_writes_by_sequence(run: &RecordedRun) -> HashMap<u64, Vec<DebugWrite>> 
     grouped
 }
 
-
-struct RecordingHook {
-    src: String,
-    history: DebugHistory,
-}
-
-impl DebugHook for RecordingHook {
-    fn at_stmt(
-        &mut self,
-        _func: &str,
-        _depth: usize,
-        _span: Span,
-        _scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        Ok(())
-    }
-
-    fn after_stmt(
-        &mut self,
-        func: &str,
-        depth: usize,
-        span: Span,
-        scope: &HashMap<String, CtValue>,
-    ) -> Result<(), Diagnostic> {
-        let sequence = u64::try_from(self.history.events.len() + 1).unwrap_or(u64::MAX);
-        let line = span_line_col(&self.src, span.start).0;
-        let event = DebugEvent {
-            sequence,
-            function: func.to_string(),
-            line,
-            depth,
-            stack: vec![FrameSnapshot {
-                function: func.to_string(),
-                line,
-            }],
-            locals: snapshot_values(scope),
-            writes: Vec::new(),
-        };
-        self.history.push(event);
-        Ok(())
-    }
-}
-
 /// Output and causal receipt produced by the source-level recording adapter.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RecordedExecution {
@@ -2099,102 +1409,14 @@ pub struct RecordedExecution {
     pub history: DebugHistory,
 }
 
-/// Run the interpreter once to produce the act snapshots attached to a named
-/// `--record` receipt. Unsupported programs return `Err` so the normal run
-/// path remains responsible for their existing execution adapter.
-pub fn record_run(file: &str, program_args: &[&str]) -> Result<RecordedExecution, String> {
-    jet_driver::run_compiler_work(|| {
-        let mut bundle = crate::Loader::load_entry(file).map_err(|_| "load failed".to_string())?;
-        let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Run);
-        if diags
-            .iter()
-            .any(|diag| matches!(diag.severity, crate::Diagnostics::Severity::Error))
-        {
-            return Err("semantic check failed".to_string());
-        }
-        if jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle).is_some() {
-            return Err("program is outside the source recording boundary".to_string());
-        }
-        let funcs = collect_funcs(&bundle);
-        if !program_args.is_empty() && funcs.values().any(|function| function.is_job) {
-            return Err("job dispatch is outside the source recording boundary".to_string());
-        }
-        let main = funcs
-            .get("run")
-            .copied()
-            .ok_or_else(|| "program has no `run` function".to_string())?;
-        let core_imports: HashMap<String, String> =
-            jet_driver::Codegen::core_imports_for_bundle(&bundle)
-                .into_iter()
-                .collect();
-        let src = bundle.modules[bundle.entry].source.clone();
-        let mut sink = DevSink::new();
-        let mut hook = RecordingHook {
-            src: src.clone(),
-            history: DebugHistory {
-                events: Vec::new(),
-                checkpoint: Some(DebugCheckpoint {
-                    source_identity: jet_foundation::SHA256::sha256_hex(
-                        format!("{}:{}", file, src).as_bytes(),
-                    ),
-                    shape: checkpoint_shape(&bundle),
-                    sequence: 0,
-                }),
-                cursor: None,
-                capped: false,
-                decision_ledger: None,
-            },
-        };
-        let argv = std::iter::once(file.to_string())
-            .chain(program_args.iter().map(|arg| (*arg).to_string()))
-            .collect::<Vec<_>>();
-        let result = crate::Comptime::with_runtime_argv(&argv, || {
-            crate::Comptime::run_main_debug(
-                main,
-                &funcs,
-                &bundle.project_root,
-                &core_imports,
-                &mut sink,
-                &mut hook,
-            )
-        });
-        let exit_code = sink.exit_code.unwrap_or_else(|| {
-            if result.is_ok() {
-                ExitCodes::OK
-            } else {
-                ExitCodes::USER_ERROR
-            }
-        });
-        let mut stderr = sink.stderr;
-        if let Err(diag) = result {
-            stderr.push_str(&format!("[{}] {}\n", diag.code, diag.what));
-        }
-        let mut history = hook.history;
-        let writes_by_sequence = debug_writes_by_sequence(&history.to_recorded_run());
-        for event in &mut history.events {
-            event.writes = writes_by_sequence
-                .get(&event.sequence)
-                .cloned()
-                .unwrap_or_default();
-        }
-        let run = history.to_recorded_run();
-        Ok(RecordedExecution {
-            stdout: sink.stdout,
-            stderr,
-            exit_code,
-            run,
-            history,
-        })
-    })
-}
-
-/// Load + check `file`, then run it under the debugger driving `io`. Returns
-/// the process exit code and the captured transcript (empty in interactive
-/// mode, where output already went to the terminal).
+/// Load + check `file`, then browse its recorded history driving `io`. The
+/// receipt's acts are authoritative; the checked source supplies only the
+/// line text and the checkpoint shape — nothing is executed. Returns the
+/// exit code and the captured transcript (empty in interactive mode).
 fn run_with_io(
     file: &str,
     mut io: IO,
-    recording: Option<RecordedRun>,
+    recording: RecordedRun,
 ) -> (i32, String, bool, Option<DebugSnapshot>, RecordedRun, DebugHistory) {
     let scripted = io.is_scripted();
     let checked = jet_driver::run_compiler_work(|| {
@@ -2243,26 +1465,6 @@ fn run_with_io(
             );
         }
     };
-    // The debugger steps the dev interpreter, so live sessions decline the
-    // same features `jet dev` does — but with E2203 (debug-specific): names
-    // `jet debug` and points at the real build (D-DBG3 step 2, the shipped
-    // native backend). A replay receipt is different: it is an authoritative
-    // source history, and the checked source is loaded only for identity and
-    // line/shape validation. Do not reject (or execute) a replay merely
-    // because the current source has a native-only live boundary.
-    if recording.is_none() {
-        if let Some(b) = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle) {
-            emit_diags(&mut io, file, &bundle.modules[bundle.entry].source, &[b]);
-            return (
-                ExitCodes::USER_ERROR,
-                io.into_output(),
-                false,
-                None,
-                RecordedRun::default(),
-                DebugHistory::default(),
-            );
-        }
-    }
     run_checked(&bundle, file, io, recording)
 }
 
@@ -2472,9 +1674,6 @@ fn checked_bundle_for_fix(
     if !errors.is_empty() {
         return Err(diagnostic_reason(&errors));
     }
-    if let Some(boundary) = jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle) {
-        return Err(format!("[{}] {}", boundary.code, boundary.what));
-    }
     let source = bundle.modules[bundle.entry].source.clone();
     let shape = checkpoint_shape(&bundle);
     Ok((bundle, source, shape))
@@ -2488,13 +1687,12 @@ pub(crate) fn native_checkpoint_shape(file: &str, source: &str) -> String {
         .unwrap_or_else(|| "native-debug-artifact".to_string())
 }
 
-/// Drive the interpreter with the debugger hook attached, then flush the
-/// program's own stdout/stderr around the debugger's `(jet)` session.
+/// Browse a checked recording at the `(jet)` prompt (D-DX-DEBUGBACK1).
 fn run_checked(
     bundle: &crate::AST::ProgramBundle,
     file: &str,
     mut io: IO,
-    recording: Option<RecordedRun>,
+    recording: RecordedRun,
 ) -> (i32, String, bool, Option<DebugSnapshot>, RecordedRun, DebugHistory) {
     let funcs = collect_funcs(bundle);
     if !funcs.contains_key("run") {
@@ -2525,162 +1723,11 @@ fn run_checked(
         .file_name()
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| file.to_string());
-    let scripted = io.is_scripted();
-    let mut dbg = Debugger::new(
-        src,
-        short,
-        file.to_string(),
-        io,
-        recording,
-        shape.clone(),
-    );
-    if dbg.replay_mode {
-        return dbg.run_replay();
-    }
-
-    let mut active_bundle: Option<crate::AST::ProgramBundle> = None;
-    let mut sink = DevSink::new();
-    let result: Result<(), Diagnostic> = loop {
-        let current_result = {
-            let current_bundle = active_bundle.as_ref().unwrap_or(bundle);
-            let funcs = collect_funcs(current_bundle);
-            let Some(main) = funcs.get("run").copied() else {
-                break Err(Diagnostic::error(
-                    "E2205",
-                    "fix removed the `run` entry function".to_string(),
-                    "a source repair must preserve the paused function and its callable shape"
-                        .to_string(),
-                    "restore `fn run` or restart the debug session".to_string(),
-                    None,
-                ));
-            };
-            let base_dir = &current_bundle.project_root;
-            let core_imports: HashMap<String, String> =
-                jet_driver::Codegen::core_imports_for_bundle(current_bundle)
-                    .into_iter()
-                    .collect();
-            sink = DevSink::new();
-            crate::Comptime::run_main_debug(
-                main,
-                &funcs,
-                base_dir,
-                &core_imports,
-                &mut sink,
-                &mut dbg,
-            )
-        };
-        if active_bundle.is_some() && !dbg.rebind_reached {
-            dbg.emit("fix rejected: compatible checkpoint was not reached by the edited source");
-            break Err(Diagnostic::error(
-                "E2205",
-                "debug source repair could not reach its checkpoint".to_string(),
-                "the edited source stopped before the recorded prefix completed".to_string(),
-                "restore the paused control-flow prefix or restart the debug session".to_string(),
-                None,
-            ));
-        }
-        let Some(request) = dbg.fix_request.take() else {
-            break current_result;
-        };
-        let (candidate_bundle, candidate_source, candidate_shape) =
-            match checked_bundle_for_fix(file) {
-                Ok(value) => value,
-                Err(reason) => {
-                    dbg.emit(&format!("fix rejected: {reason}"));
-                    break Err(Diagnostic::error(
-                        "E2205",
-                        "debug source repair could not be rebound".to_string(),
-                        reason,
-                        "leave the debugger paused and correct the source shape before retrying"
-                            .to_string(),
-                        None,
-                    ));
-                }
-            };
-        if candidate_source != request.source {
-            let reason = "the source changed again while the repair was being checked";
-            dbg.emit(&format!("fix rejected: {reason}"));
-            break Err(Diagnostic::error(
-                "E2205",
-                "debug source repair could not be rebound".to_string(),
-                reason.to_string(),
-                "retry `fix` from the same stopped checkpoint".to_string(),
-                None,
-            ));
-        }
-        if candidate_shape != shape {
-            let reason = "checkpoint incompatible (source type, layout, or authority changed)";
-            dbg.emit(&format!("fix rejected: {reason}"));
-            break Err(Diagnostic::error(
-                "E2205",
-                "debug source repair changed the checkpoint shape".to_string(),
-                reason.to_string(),
-                "restart the debug session after changing a declaration or authority boundary"
-                    .to_string(),
-                None,
-            ));
-        }
-        dbg.prepare_rebind(candidate_source, request.target);
-        active_bundle = Some(candidate_bundle);
-    };
-
-    // Flush the program's buffered output, then a completion line, then return
-    // the captured transcript (scripted) or write the terminal (interactive).
-    let code = match &result {
-        Ok(()) => ExitCodes::OK,
-        Err(_) => ExitCodes::USER_ERROR,
-    };
-    if scripted {
-        if !sink.stdout.is_empty() {
-            dbg.io.push_line(sink.stdout.trim_end_matches('\n'));
-        }
-        if !sink.stderr.is_empty() {
-            dbg.io.push_line(sink.stderr.trim_end_matches('\n'));
-        }
-        if dbg.paused {
-            let snapshot = dbg.snapshot.clone();
-            let recording = dbg.recording.clone();
-            let history = dbg.history.clone();
-            return (
-                ExitCodes::OK,
-                dbg.io.into_output(),
-                true,
-                snapshot,
-                recording,
-                history,
-            );
-        }
-        match &result {
-            Ok(()) => dbg.io.push_line("program finished"),
-            Err(d) => dbg.io.push_line(&format!("[{}] {}", d.code, d.what)),
-        }
-        let snapshot = dbg.snapshot.clone();
-        let recording = dbg.recording.clone();
-        let history = dbg.history.clone();
-        (
-            code,
-            dbg.io.into_output(),
-            false,
-            snapshot,
-            recording,
-            history,
-        )
-    } else {
-        print!("{}", sink.stdout);
-        eprint!("{}", sink.stderr);
-        match &result {
-            Ok(()) => println!("program finished"),
-            Err(d) => eprintln!("[{}] {}", d.code, d.what),
-        }
-        let snapshot = dbg.snapshot.clone();
-        let recording = dbg.recording.clone();
-        let history = dbg.history.clone();
-        (code, String::new(), false, snapshot, recording, history)
-    }
+    let mut dbg = Debugger::new(src, short, file.to_string(), io, recording, shape);
+    dbg.run_replay()
 }
 
-/// Collect top-level functions into the flat name→func map the interpreter
-/// expects (mirrors `Interpreter::collect_funcs`).
+/// Collect top-level functions into a flat name→func map (the `run` entry check).
 fn collect_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, &crate::AST::Func> {
     let mut funcs = HashMap::new();
     for module in &bundle.modules {
@@ -2693,34 +1740,11 @@ fn collect_funcs(bundle: &crate::AST::ProgramBundle) -> HashMap<String, &crate::
     funcs
 }
 
-/// `jet debug <file>` — the interactive entry point (D-DBG1). Loads, checks,
-/// and steps the program with a live `(jet)` prompt on stdin/stdout. Returns
-/// the process exit code.
-pub fn run_debug(file: &str) -> i32 {
-    let (code, _captured, _paused, _snapshot, _recording, _history) =
-        run_with_io(file, IO::Interactive, None);
-    code
-}
-
-/// Run one interactive debugger session and return the bounded act history
-/// produced by that same execution for a named replay capture.
-pub fn run_debug_recorded(file: &str) -> RecordedExecution {
-    let (exit_code, _captured, _paused, _snapshot, run, history) =
-        run_with_io(file, IO::Interactive, None);
-    RecordedExecution {
-        stdout: String::new(),
-        stderr: String::new(),
-        exit_code,
-        run,
-        history,
-    }
-}
-
 /// `jet debug --replay` query surface. The receipt's act snapshots are
 /// authoritative history: navigation never re-executes the recorded program.
 pub fn run_debug_with_recording(file: &str, recording: RecordedRun) -> i32 {
     let (code, _captured, _paused, _snapshot, _recording, _history) =
-        run_with_io(file, IO::Interactive, Some(recording));
+        run_with_io(file, IO::Interactive, recording);
     code
 }
 
@@ -2741,69 +1765,6 @@ pub struct SessionResult {
     pub history: DebugHistory,
 }
 
-/// Scripted debug session with a machine-readable outcome.
-pub fn run_session_result(file: &str, inputs: &[&str]) -> SessionResult {
-    jet_driver::run_compiler_work(|| {
-        let queue: std::collections::VecDeque<String> =
-            inputs.iter().map(|s| s.to_string()).collect();
-        let io = IO::Scripted {
-            inputs: queue,
-            out: String::new(),
-            pause_on_input_end: false,
-        };
-        let (code, transcript, _paused, snapshot, _recording, history) =
-            run_with_io(file, io, None);
-        let status = if code == ExitCodes::OK {
-            SessionStatus::Finished
-        } else {
-            SessionStatus::Failed
-        };
-        SessionResult {
-            status,
-            transcript,
-            snapshot,
-            history,
-        }
-    })
-}
-
-/// One live Canvas command boundary. The debugger pauses at the next stopped
-/// Jet source statement when `inputs` end, instead of treating EOF as
-/// `continue`. The Canvas server replays the bounded command history to resume
-/// the same deterministic source session on the next request.
-pub fn run_session_result_paused(file: &str, inputs: &[&str]) -> SessionResult {
-    jet_driver::run_compiler_work(|| {
-        let queue: std::collections::VecDeque<String> =
-            inputs.iter().map(|s| s.to_string()).collect();
-        let io = IO::Scripted {
-            inputs: queue,
-            out: String::new(),
-            pause_on_input_end: true,
-        };
-        let (code, transcript, paused, snapshot, _recording, history) =
-            run_with_io(file, io, None);
-        let status = if paused {
-            SessionStatus::Running
-        } else if code == ExitCodes::OK {
-            SessionStatus::Finished
-        } else {
-            SessionStatus::Failed
-        };
-        SessionResult {
-            status,
-            transcript,
-            snapshot,
-            history,
-        }
-    })
-}
-/// Record one complete source session. The returned history is the same event
-/// stream produced by that execution; replay consumers must not execute the
-/// source a second time to build their index.
-pub fn run_session_recorded(file: &str) -> SessionResult {
-    run_session_result(file, &[Syntax::DBG_CONTINUE])
-}
-
 /// Replay an existing source history using only debugger commands. The source
 /// is loaded for line/shape validation, but no program execution occurs.
 pub fn run_session_replay(
@@ -2820,7 +1781,7 @@ pub fn run_session_replay(
             pause_on_input_end: true,
         };
         let (code, transcript, paused, snapshot, _recording, replay_history) =
-            run_with_io(file, io, Some(history.to_recorded_run()));
+            run_with_io(file, io, history.to_recorded_run());
         let status = if paused {
             SessionStatus::Running
         } else if code == ExitCodes::OK {
@@ -2841,25 +1802,8 @@ pub fn run_session_replay(
     })
 }
 
-/// Scripted debug session for tests and golden transcripts. Feeds `inputs` to
-/// the `(jet)` prompt in order and returns the captured transcript (banners,
-/// `locals:` dumps, command echoes, program output, and the final marker).
-pub fn run_session(file: &str, inputs: &[&str]) -> String {
-    run_session_result(file, inputs).transcript
-}
-
-/// D-DBG3 step 2 (dap-debugger): whether this program needs the native backend
-/// — the interpreter's boundary scan (E2203) found an FFI/task/`#Unsafe`/
-/// native-std construct step-1 can't step through. `None` means the file
-/// couldn't even be loaded; the caller should fall through to [`run_debug`],
-/// which reports that error the normal way (no duplicated error path here).
-pub fn needs_native(file: &str) -> Option<bool> {
-    let bundle = crate::Loader::load_entry(file).ok()?;
-    Some(jet_driver::InterpreterBoundary::debug_boundary_scan(&bundle).is_some())
-}
-
-/// D-DBG3 step 2: the native lldb-backed `(jet)` terminal session — steps the
-/// FULL feature set (FFI/tasks/`#Unsafe`/native std) the interpreter declines.
+/// D-DBG3 / D-EXEC2: the native lldb-backed `(jet)` terminal session, the
+/// only live `jet debug` backend.
 /// `binary` is the already-built debug binary (full debuginfo); `rust_file`/
 /// `rust_src` are the generated Rust this build produced (with `// jet:line N`
 /// markers from `emit_bundle_dbg`); `jet_file`/`jet_src` are the original
@@ -2875,8 +1819,21 @@ pub fn run_native(
     Native::run(binary, rust_file, rust_src, jet_file, jet_src, raw_frames)
 }
 
-/// Scripted native session for tests (mirrors [`run_session`] for the native
-/// backend): feeds `inputs` to the `(jet)` prompt and returns the transcript.
+/// D-DX-DEBUGBACK1=A: record one complete native run of the already-built
+/// debug binary (see [`run_native`] for the arguments) as the replay receipt
+/// `jet debug --replay` browses.
+pub fn record_native(
+    binary: &std::path::Path,
+    rust_file: &str,
+    rust_src: &str,
+    jet_file: &str,
+    jet_src: &str,
+) -> Result<RecordedExecution, String> {
+    Native::record(binary, rust_file, rust_src, jet_file, jet_src)
+}
+
+/// Scripted native session for tests: feeds `inputs` to the `(jet)` prompt
+/// and returns the transcript.
 /// Callers should gate on lldb availability themselves before building a debug
 /// binary to hand in — this only reports "lldb missing" into the transcript.
 #[allow(clippy::too_many_arguments)]
@@ -2894,8 +1851,8 @@ pub fn run_native_scripted(
     )
 }
 
-/// Scripted native session with completion semantics matching
-/// [`run_session_result`].
+/// Scripted native session that reports [`SessionStatus`] alongside the
+/// transcript, snapshot, and history.
 #[allow(clippy::too_many_arguments)]
 pub fn run_native_session_result(
     binary: &std::path::Path,

@@ -59,11 +59,12 @@ pub use data_plan::{
 };
 pub use mir::{
     LowerError, lower_checked_mir_program_for, lower_checked_mir_program_for_with_debug,
-    lower_tir_to_mir,
+    lower_tir_to_mir, lower_native_tir_to_mir, lower_checked_native_mir_program_for,
 };
 use tir_to_mir_types::{
     TirDeclarations, lower_declarations_from_items_with_boxed_edges, lower_tir_declarations,
 };
+
 
 fn source_array_literal(
     definition: &crate::AST::ConstDef,
@@ -470,6 +471,7 @@ pub struct TirPackageFacts {
     pub active_os: String,
     pub inferred_layer: String,
     pub allocator: String,
+    pub program_allocator: jet_foundation::TargetMachine::AllocatorPolicy,
     pub web_app: Option<jet_foundation::App::AppGraph>,
     /// D-PLUGIN-AUTHORITY1: package-declared guest capability needs.
     pub authority_needs: Vec<String>,
@@ -649,12 +651,11 @@ fn collect_item_erasures(
 pub struct TirProgram {
     /// Stable package identity supplied by the checked bundle.
     pub package_identity: String,
-    /// D-MOD-CYCLE1=A: the entry's module identity and the call prefix its
-    /// package siblings use for it (`__jet_run::`). A sibling reaches an entry
-    /// function through the ordinary imported-call spelling, while the entry
-    /// lowers its own functions unprefixed; MIR resolves the first to the
-    /// second. `None` when the entry has no package siblings.
-    pub entry_sibling_calls: Option<(String, String)>,
+    /// The entry's canonical module identity and recorded qualified-call prefix
+    /// (`__jet_run::`). Both same-module calls and package siblings can use
+    /// that spelling; entry function rows retain their unprefixed names.
+    /// Only compiler fragments without a loaded entry have no alias.
+    pub entry_call_alias: Option<(String, String)>,
     pub facts: TirPackageFacts,
     /// Display path of the entry module retained for temporary diagnostics.
     pub source_file: String,
@@ -1469,7 +1470,7 @@ pub(crate) fn canonical_enum_owner(cx: &Cx, name: &str) -> String {
 }
 
 /// Seed monomorphize demand for generic Codable from encoding core calls and
-/// SerdeEncode/DataTreeDecode ops already present in lowered bodies.
+/// SerdeEncode/DynDecode ops already present in lowered bodies.
 fn collect_serde_codec_demands(
     funcs: &[TFunc],
     demands: &mut std::collections::BTreeMap<String, (Type, String, Vec<Type>)>,
@@ -1500,7 +1501,7 @@ fn collect_serde_codec_demands(
                 }
                 match op {
                     THandleOp::SerdeEncode => demand_serde_codec(demands, &recv.ty, "encode"),
-                    THandleOp::DataTreeDecode(target) => {
+                    THandleOp::DynDecode(target) => {
                         demand_serde_codec(demands, target, "decode")
                     }
                     _ => {}
@@ -1592,6 +1593,7 @@ fn lower_demanded_generic_methods(
     let mut pending = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
     collect_serde_codec_demands(funcs, &mut pending);
     let mut processed = std::collections::BTreeSet::new();
+    let mut foreign = std::collections::BTreeMap::new();
     while let Some((key, (owner_ty, method_name, method_type_args))) = pending.pop_first() {
         if !processed.insert(key.clone()) {
             continue;
@@ -1609,12 +1611,19 @@ fn lower_demanded_generic_methods(
             Type::Named(name) => (name.as_str(), &[]),
             _ => continue,
         };
+        let name = match name.rsplit_once("::") {
+            Some((owner, leaf)) if owner == cx.module_identity => leaf,
+            _ => name,
+        };
         let Some(params) = items.iter().find_map(|item| match item {
             Item::Struct(def) if def.name == name => Some(def.type_params.as_slice()),
             Item::Enum(def) if def.name == name => Some(def.type_params.as_slice()),
             Item::Distinct(def) if def.name == name => Some(&[]),
             _ => None,
         }) else {
+            if name.contains("::") {
+                foreign.insert(key, (owner_ty, method_name, method_type_args));
+            }
             continue;
         };
         let owner_subst: std::collections::HashMap<String, Type> = params
@@ -1686,6 +1695,12 @@ fn lower_demanded_generic_methods(
             } else if !method.type_params.is_empty() {
                 continue;
             }
+            // Imported generic callers revisit the demand worklist. A concrete
+            // method is owned by its instance key, not by the pass that found it.
+            let instance_key = function_semantic_key(&cx.module_identity, &key);
+            if funcs.iter().any(|function| function.key == instance_key) {
+                continue;
+            }
             let mut specialized = crate::Sema::specialize_function_types(method.clone(), &subst);
             let residual_type_params: std::collections::HashSet<String> = specialized
                 .type_params
@@ -1726,7 +1741,7 @@ fn lower_demanded_generic_methods(
                     lower_method_for_owner(
                         &specialized,
                         name,
-                        owner_ty.clone(),
+                        local_module_type(&cx.module_identity, &owner_ty),
                         cx,
                         generated_serde && specialized.compiler_generated,
                     )
@@ -1741,12 +1756,17 @@ fn lower_demanded_generic_methods(
                     )
                 }
             } else {
-                lower_method_for_owner(&specialized, name, owner_ty.clone(), cx, false)
+                lower_method_for_owner(
+                    &specialized, name, local_module_type(&cx.module_identity, &owner_ty), cx, false,
+                )
             };
             cx.current_type_params.replace(previous_type_params);
-            lowered.key = function_semantic_key(&lowered.module, &key);
+            if let TFuncKind::TraitMethod { owner_type, .. } = &mut lowered.kind {
+                *owner_type = local_module_type(&cx.module_identity, &owner_ty);
+            }
+            lowered.key = instance_key;
             set_lowered_method_name(&mut lowered, || key.clone());
-            // Nested SerdeEncode/DataTreeDecode inside this body may demand more.
+            // Nested SerdeEncode/DynDecode inside this body may demand more.
             collect_serde_codec_demands(std::slice::from_ref(&lowered), &mut pending);
             funcs.push(lowered);
         }
@@ -1756,6 +1776,7 @@ fn lower_demanded_generic_methods(
             }
         }
     }
+    cx.jit_method_calls.borrow_mut().extend(foreign);
     Ok(())
 }
 
@@ -1938,29 +1959,52 @@ fn generic_call_substitution(
     Some(subst)
 }
 
+/// Source parameter types keep their import spellings (`paths.Path`) while a
+/// checked call argument carries the imported nominal's canonical identity.
+/// Bind against that identity so a generic function whose other parameters
+/// name an imported type is specialized like any other.
+fn generic_template_param_types<'a>(
+    cx: &Cx,
+    params: impl Iterator<Item = &'a Type>,
+) -> Vec<Type> {
+    params
+        .map(|ty| {
+            ty.map_named_types(&|name| {
+                if name.contains("::") || !name.contains('.') {
+                    return None;
+                }
+                cx.imported_type_metadata_name(name)
+            })
+        })
+        .collect()
+}
+
+/// D-GENERIC-CALL1=A: sema records every checked instantiation, spelled or
+/// inferred, on the call node. Those type arguments are the instance
+/// identity. Rebinding the template against lowered argument values would
+/// read a call result's failure carrier (`Result<Expr<Bool>, Err>`) as its
+/// source type and silently skip the instance; module generics made the same
+/// cut in `demand_module_generic_function`. The lowered arguments are not
+/// consulted.
 pub(crate) fn demand_generic_free_function(
     cx: &Cx,
     name: &str,
-    args: &[TCallArg],
-    explicit_type_args: &[Type],
+    _args: &[TCallArg],
+    checked_type_args: &[Type],
 ) -> Option<String> {
     let type_param_names = cx.fn_type_param_order.get(name)?;
-    if type_param_names.is_empty() {
+    if type_param_names.is_empty() || checked_type_args.len() != type_param_names.len() {
         return None;
     }
-    let sig = cx.sigs.get(name)?;
-    let param_types = sig.iter().map(|(_, ty)| ty.clone()).collect::<Vec<_>>();
-    let shape = generic_call_shape(args, explicit_type_args);
-    let subst = generic_call_substitution(&param_types, type_param_names, &shape)?;
-    let type_args = type_param_names
+    let type_args = checked_type_args
         .iter()
-        .map(|param| subst.get(param).cloned())
-        .collect::<Option<Vec<_>>>()?;
+        .map(|ty| cx.expand_type_aliases(ty))
+        .collect::<Vec<_>>();
     cx.jit_generic_calls
         .borrow_mut()
         .entry(name.to_string())
         .or_default()
-        .push(shape);
+        .push(type_args.clone());
     Some(generic_free_function_instance_key(name, &type_args))
 }
 
@@ -2008,6 +2052,99 @@ pub(crate) fn demand_core_source_generic_function(
         .or_default()
         .push(type_args.clone());
     Some(generic_free_function_instance_key(method, &type_args))
+}
+
+/// Instantiate a module boundary signature from sema's recorded type arguments.
+/// In particular, a lambda must lower against `fn(Item)`, not the template's
+/// `fn(T)`: its coercion and demand shape both carry the concrete callable ABI.
+pub(crate) fn module_call_signature(
+    cx: &Cx,
+    key: &(String, String),
+    type_args: &[Type],
+) -> Option<Vec<(crate::AST::AccessConvention, Type)>> {
+    let sig = cx.fact_import_sigs(key)?;
+    let Some(generic) = cx.fact_import_generic(key) else {
+        return Some(sig.iter().map(|(conv, ty)| {
+            (*conv, cx.expand_type_aliases(ty).with_effective_fn_returns())
+        }).collect());
+    };
+    if generic.type_params.len() != type_args.len() {
+        return None;
+    }
+    let subst = generic
+        .type_params
+        .iter()
+        .cloned()
+        .zip(type_args.iter().map(|ty| canonical_module_type(cx, ty)))
+        .collect();
+    Some(sig.iter().map(|(conv, ty)| {
+        let instantiated = crate::Generics::substitute_type(ty, &subst);
+        (*conv, cx.expand_type_aliases(&instantiated).with_effective_fn_returns())
+    }).collect())
+}
+
+/// #4609: a call into another source module's generic function names the
+/// concrete instance its declaring module lowers
+/// (`specialize_module_generic_calls`) and returns that module's identity and
+/// the instance name; Ok(None) only when the target is not generic. Missing
+/// checked type arguments are an invariant failure, never an unspecialized call.
+/// Type arguments are recorded canonically for one instance key.
+pub(crate) fn demand_module_generic_function(
+    cx: &Cx,
+    sig_key: &(String, String),
+    function: &str,
+    explicit_type_args: &[Type],
+) -> Result<Option<(String, String)>, String> {
+    let Some(generic) = cx.fact_import_generic(sig_key) else {
+        return Ok(None);
+    };
+    if explicit_type_args.len() != generic.type_params.len() {
+        return Err(format!(
+            "checked generic target `{}::{function}` has no complete instance ({} type arguments, expected {})",
+            generic.module_identity, explicit_type_args.len(), generic.type_params.len()
+        ));
+    }
+    // Sema has already inferred and validated these arguments. Rebinding from
+    // lowered values would conflate a callable's carrier with its source type.
+    let type_args = explicit_type_args
+        .iter()
+        .map(|ty| canonical_module_type(cx, ty))
+        .collect::<Vec<_>>();
+    cx.jit_module_generic_calls
+        .borrow_mut()
+        .entry((generic.module_identity.clone(), function.to_string()))
+        .or_default()
+        .push(type_args.clone());
+    Ok(Some((
+        generic.module_identity.clone(),
+        generic_free_function_instance_key(function, &type_args),
+    )))
+}
+
+/// A type in the lowering module's spelling with each nominal that module
+/// declares qualified by its identity, the spelling every other module uses.
+fn canonical_module_type(cx: &Cx, ty: &Type) -> Type {
+    let qualify = |name: &str| {
+        (!name.contains("::") && cx.local_type_names.contains(name))
+            .then(|| format!("{}::{name}", cx.module_identity))
+    };
+    rewrite_apply_heads(&ty.map_named_types(&qualify), &|name| {
+        qualify(name).unwrap_or_else(|| name.to_string())
+    })
+}
+
+/// The reverse of `canonical_module_type` for the module `owner`: its own
+/// nominals return to the bare spelling its context declares them under.
+fn local_module_type(owner: &str, ty: &Type) -> Type {
+    let prefix = format!("{owner}::");
+    let localize = |name: &str| {
+        name.strip_prefix(&prefix)
+            .filter(|leaf| !leaf.contains("::"))
+            .map(str::to_string)
+    };
+    rewrite_apply_heads(&ty.map_named_types(&localize), &|name| {
+        localize(name).unwrap_or_else(|| name.to_string())
+    })
 }
 
 fn generic_free_function_template(items: &[Item], called_name: &str) -> Option<Func> {
@@ -2071,20 +2208,32 @@ fn specialize_generic_free_functions(items: &[Item], cx: &Cx, funcs: &mut Vec<TF
             if template.type_params.is_empty() || (variadic && unique.len() != 1) {
                 continue;
             }
-            let param_types = template
-                .params
-                .iter()
-                .map(|param| param.ty.clone())
-                .collect::<Vec<_>>();
             let type_param_names = template
                 .type_params
                 .iter()
                 .map(|param| param.name.clone())
                 .collect::<Vec<_>>();
+            let param_types = variadic.then(|| {
+                generic_template_param_types(cx, template.params.iter().map(|param| &param.ty))
+            });
             for actuals in unique {
-                let Some(subst) =
-                    generic_call_substitution(&param_types, &type_param_names, &actuals)
-                else {
+                // An ordinary generic call records sema's checked type
+                // arguments (`demand_generic_free_function`). A trait-bounded
+                // variadic's per-arity `JaiVarN` binders are synthesized after
+                // sema, so only its argument shape can bind them.
+                let subst = match &param_types {
+                    Some(param_types) => {
+                        generic_call_substitution(param_types, &type_param_names, &actuals)
+                    }
+                    None => (actuals.len() == type_param_names.len()).then(|| {
+                        type_param_names
+                            .iter()
+                            .cloned()
+                            .zip(actuals.iter().cloned())
+                            .collect::<std::collections::HashMap<_, _>>()
+                    }),
+                };
+                let Some(subst) = subst else {
                     continue;
                 };
                 let type_args = type_param_names
@@ -2150,9 +2299,10 @@ fn merge_core_source_generic_calls(target: &Cx, source: &Cx) {
 fn build_imported_generic_core_cx(
     bundle: &ProgramBundle,
     module_idx: usize,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     spawn_site_base: usize,
+    facts: &std::sync::Arc<crate::Codegen::Context::BundleCodegenFacts>,
 ) -> Cx {
     let imported = &bundle.modules[module_idx];
     let mut imported_cx = build_cx_items(
@@ -2164,7 +2314,7 @@ fn build_imported_generic_core_cx(
         &bundle.edition,
     );
     imported_cx.debug_linemap = debug_linemap;
-    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+    populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, facts);
     register_own_struct_shapes(&mut imported_cx, bundle, module_idx);
     crate::Codegen::Context::collect_iterable_hooks(&mut imported_cx, &imported.items);
     imported_cx.jit_local_call_prefix = Some(format!("{}::", mangle(&imported.alias)));
@@ -2185,6 +2335,26 @@ fn checked_imported_core_source_signature<'a>(
     signatures
         .get(&(source.module.to_string(), method.to_string()))
         .filter(|signature| signature.module_identity == owner)
+}
+
+/// Keep the boundary of instances lowered in an imported module's context
+/// under that module's canonical nominal identities, as its ordinary
+/// functions are (#4609).
+fn qualify_imported_instances(
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    owner: &str,
+    instances: &mut [TFunc],
+) {
+    for instance in instances {
+        for (_, ty, _) in &mut instance.params {
+            *ty = qualify_imported_type(bundle, module_idx, owner, &[], ty);
+        }
+        instance.ret = instance
+            .ret
+            .as_ref()
+            .map(|ty| qualify_imported_type(bundle, module_idx, owner, &[], ty));
+    }
 }
 
 fn lower_checked_core_source_generic_instance(
@@ -2287,7 +2457,7 @@ fn lower_core_source_generic_template(
 
 fn specialize_checked_core_source_generics(
     bundle: &ProgramBundle,
-    extern_funcs: &std::collections::HashMap<String, crate::Codegen::ExternFn>,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
     debug_linemap: bool,
     cx: &Cx,
     funcs: &mut Vec<TFunc>,
@@ -2302,10 +2472,7 @@ fn specialize_checked_core_source_generics(
         for ((owner, method), mut instantiations) in calls {
             instantiations.sort_by_key(|types| format!("{types:?}"));
             instantiations.dedup();
-            let module_idx = (0..bundle.modules.len())
-                .find(|index| {
-                    bundle.name_ledger.module_identity(*index).as_deref() == Some(owner.as_str())
-                })
+            let module_idx = bundle.name_ledger.module_by_identity(&owner)
                 .ok_or_else(|| {
                     LowerError::new(
                         crate::Diagnostics::Span::new(0, 0),
@@ -2319,6 +2486,7 @@ fn specialize_checked_core_source_generics(
                 extern_funcs,
                 debug_linemap,
                 spawn_lambdas.len(),
+                cx.bundle_facts.as_ref().expect("checked bundle context must share program facts"),
             );
             for type_args in instantiations {
                 let instance = generic_free_function_instance_key(&method, &type_args);
@@ -2345,6 +2513,150 @@ fn specialize_checked_core_source_generics(
                 ));
             }
             merge_core_source_generic_calls(cx, &imported_cx);
+        }
+    }
+}
+
+fn merge_module_generic_calls(target: &Cx, source: &Cx) {
+    let calls = std::mem::take(&mut *source.jit_module_generic_calls.borrow_mut());
+    let mut target_calls = target.jit_module_generic_calls.borrow_mut();
+    for (key, type_args) in calls {
+        target_calls.entry(key).or_default().extend(type_args);
+    }
+    target.jit_method_calls.borrow_mut().extend(
+        std::mem::take(&mut *source.jit_method_calls.borrow_mut()),
+    );
+}
+
+/// #4609: lower every instance of a source module's generic function that a
+/// call from another module demanded (`demand_module_generic_function`), in
+/// the declaring module's own context, until no lowered instance demands
+/// more. An entry-owned instance keeps the entry's bare spelling, like the
+/// entry's own specializations; an imported one takes the module's emitted
+/// prefix and canonical boundary types, like its ordinary functions.
+fn specialize_module_generic_calls(
+    bundle: &ProgramBundle,
+    extern_funcs: &std::sync::Arc<std::collections::HashMap<String, crate::Codegen::ExternFn>>,
+    debug_linemap: bool,
+    cx: &Cx,
+    funcs: &mut Vec<TFunc>,
+    spawn_lambdas: &mut Vec<TJitSpawnLambda>,
+) -> Result<(), LowerError> {
+    let facts = cx.bundle_facts.as_ref().expect("checked bundle context must share program facts");
+    let module_rows = (0..bundle.modules.len())
+        .filter_map(|index| {
+            bundle
+                .name_ledger
+                .module_identity(index)
+                .map(|identity| (identity, index))
+        })
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut processed = std::collections::HashSet::new();
+    loop {
+        let calls = std::mem::take(&mut *cx.jit_module_generic_calls.borrow_mut());
+        let methods = std::mem::take(&mut *cx.jit_method_calls.borrow_mut());
+        if calls.is_empty() && methods.is_empty() {
+            return Ok(());
+        }
+        for ((owner, function), mut instantiations) in calls {
+            instantiations.sort_by_key(|types| format!("{types:?}"));
+            instantiations.dedup();
+            let missing_target = || {
+                LowerError::new(
+                    crate::Diagnostics::Span::new(0, 0),
+                    format!("checked generic target `{owner}::{function}` has no loaded template"),
+                )
+            };
+            let module_idx = *module_rows.get(&owner).ok_or_else(missing_target)?;
+            let module = &bundle.modules[module_idx];
+            let template =
+                generic_free_function_template(&module.items, &function).ok_or_else(missing_target)?;
+            let entry = module_idx == bundle.entry;
+            let mut imported_cx = (!entry).then(|| {
+                build_imported_generic_core_cx(
+                    bundle,
+                    module_idx,
+                    extern_funcs,
+                    debug_linemap,
+                    spawn_lambdas.len(),
+                    facts,
+                )
+            });
+            for type_args in instantiations {
+                let instance = generic_free_function_instance_key(&function, &type_args);
+                let key = function_semantic_key(&owner, &instance);
+                if !processed.insert(key.clone()) || funcs.iter().any(|f| f.key == key) {
+                    continue;
+                }
+                if let Some(imported_cx) = imported_cx.as_mut() {
+                    imported_cx.jit_spawn_site_base = spawn_lambdas.len();
+                }
+                let module_cx = imported_cx.as_ref().unwrap_or(cx);
+                let local_args = if entry {
+                    type_args
+                        .iter()
+                        .map(|ty| local_module_type(&owner, ty))
+                        .collect::<Vec<_>>()
+                } else {
+                    type_args
+                };
+                let first_instance = funcs.len();
+                let (_, mut lowered) = lower_core_source_generic_template(
+                    template.clone(),
+                    &local_args,
+                    &instance,
+                    module_cx,
+                );
+                lowered.key = key;
+                lowered.name = if entry {
+                    instance
+                } else {
+                    format!("{}::{}", mangle(&module.alias), mangle(&instance))
+                };
+                funcs.push(lowered);
+                lower_demanded_generic_methods(&module.items, module_cx, funcs)?;
+                specialize_generic_free_functions(&module.items, module_cx, funcs);
+                if !entry {
+                    qualify_imported_instances(bundle, module_idx, &owner, &mut funcs[first_instance..]);
+                }
+                spawn_lambdas.extend(std::mem::take(
+                    &mut *module_cx.jit_spawn_lambdas.borrow_mut(),
+                ));
+            }
+            if let Some(imported_cx) = &imported_cx {
+                merge_core_source_generic_calls(cx, imported_cx);
+                merge_module_generic_calls(cx, imported_cx);
+            }
+        }
+        for (instance, (owner_ty, method, method_args)) in methods {
+            let name = match &owner_ty {
+                Type::Named(name) | Type::Apply { name, .. } => name,
+                _ => continue,
+            };
+            let Some(module_idx) = bundle.name_ledger.nominal_module(name) else {
+                continue;
+            };
+            let owner = crate::Codegen::Context::module_identity(bundle, module_idx);
+            let key = function_semantic_key(&owner, &instance);
+            if !processed.insert(key.clone()) || funcs.iter().any(|function| function.key == key) {
+                continue;
+            }
+            let module = &bundle.modules[module_idx];
+            let imported_cx = build_imported_generic_core_cx(
+                bundle, module_idx, extern_funcs, debug_linemap, spawn_lambdas.len(), facts,
+            );
+            imported_cx.jit_method_calls.borrow_mut().insert(
+                instance, (owner_ty, method, method_args),
+            );
+            let first_instance = funcs.len();
+            lower_demanded_generic_methods(&module.items, &imported_cx, funcs)?;
+            specialize_generic_free_functions(&module.items, &imported_cx, funcs);
+            qualify_imported_instances(bundle, module_idx, &owner, &mut funcs[first_instance..]);
+            spawn_lambdas.extend(std::mem::take(
+                &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
+            ));
+            merge_core_source_generic_calls(cx, &imported_cx);
+            merge_module_generic_calls(cx, &imported_cx);
         }
     }
 }
@@ -2393,7 +2705,7 @@ fn lower_imported_generated_codecs(
     bundle: &ProgramBundle,
     module_idx: usize,
     core_modules: &std::collections::HashSet<usize>,
-    reachable_bodies: &std::collections::HashSet<(usize, usize, usize)>,
+    reachable_bodies: &ReachableCoreBodies,
     cx: &Cx,
     funcs: &mut Vec<TFunc>,
 ) {
@@ -2436,8 +2748,8 @@ fn lower_imported_generated_codecs(
             .unwrap_or(&[]);
         for owner in imported_type_owners(bundle, module_idx) {
             let qualified = imported_type_name(&owner, &implementation.type_name);
-            if !cx.struct_fields.contains_key(&qualified)
-                && !cx.enum_variants.contains_key(&qualified)
+            if !cx.fact_struct_fields(&qualified).is_some()
+                && !cx.fact_enum_variants(&qualified).is_some()
             {
                 continue;
             }
@@ -2446,7 +2758,8 @@ fn lower_imported_generated_codecs(
                     core_modules,
                     reachable_bodies,
                     module_idx,
-                    method,
+                    Some(&implementation.type_name),
+                    &method.name,
                 ) {
                     continue;
                 }
@@ -2495,7 +2808,7 @@ pub struct MirFragmentContext<'a> {
     pub core_imports: &'a std::collections::HashMap<String, String>,
     pub structs: &'a std::collections::HashMap<String, &'a crate::AST::StructDef>,
     pub computed_fields: &'a std::collections::HashMap<(String, String), &'a crate::AST::Expr>,
-    pub checked_nominals: Option<&'a crate::Comptime::MirBridge::MirFragmentNominalFacts>,
+    pub checked_nominals: Option<&'a crate::AST::MirFragmentNominalFacts>,
     pub distinct_ranges: &'a std::collections::HashMap<String, Option<(i64, i64)>>,
     pub distinct_bases: &'a std::collections::HashMap<String, crate::AST::Type>,
     pub unit_families: &'a [crate::AST::UnitFamilyDef],
@@ -2717,7 +3030,7 @@ fn collect_fragment_core_callable(
 /// take the ordinary loaded-module route of `collect_fragment_core_callable`.
 fn collect_fragment_module_callable(
     expr: &crate::AST::Expr,
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     module_imports: &std::collections::HashMap<String, String>,
     imported_functions: &std::collections::HashMap<String, (String, String)>,
     locals: Option<&std::collections::HashMap<String, crate::AST::Type>>,
@@ -2734,15 +3047,27 @@ fn collect_fragment_module_callable(
             if is_local(alias.as_str()) {
                 return;
             }
-            let Some(module) = module_imports.get(alias) else {
-                return;
-            };
-            (module.as_str(), method.as_str())
+            if let Some((module, name)) = imported_functions.get(&format!("{alias}.{method}")) {
+                (module.as_str(), name.as_str())
+            } else {
+                let Some(module) = module_imports.get(alias) else { return };
+                (module.as_str(), method.as_str())
+            }
         }
         crate::AST::Expr::Call(call) if !is_local(call.name.as_str()) => {
             let Some((module, name)) = imported_functions.get(&call.name) else {
                 return;
             };
+            (module.as_str(), name.as_str())
+        }
+        crate::AST::Expr::Ident(name, _) if !is_local(name) => {
+            let Some((module, name)) = imported_functions.get(name) else { return };
+            (module.as_str(), name.as_str())
+        }
+        crate::AST::Expr::Field(receiver, name, _) => {
+            let crate::AST::Expr::Ident(alias, _) = receiver.as_ref() else { return };
+            if is_local(alias) { return }
+            let Some((module, name)) = imported_functions.get(&format!("{alias}.{name}")) else { return };
             (module.as_str(), name.as_str())
         }
         _ => return,
@@ -2767,14 +3092,14 @@ fn annotate_fragment_module_calls(
     function: &mut crate::AST::Func,
     signatures: &std::collections::HashMap<
         (String, String),
-        crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+        crate::AST::MirFragmentCoreSourceSignature,
     >,
     imported_functions: &std::collections::HashMap<String, (String, String)>,
 ) {
     if signatures.is_empty() {
         return;
     }
-    let checked_return = |signature: &crate::Comptime::MirBridge::MirFragmentCoreSourceSignature| {
+    let checked_return = |signature: &crate::AST::MirFragmentCoreSourceSignature| {
         signature.return_type.clone().unwrap_or_else(|| {
             jet_foundation::AST::FailureContract::from_return_type(None).effective_type()
         })
@@ -2810,7 +3135,7 @@ fn annotate_fragment_module_calls(
 fn collect_fragment_function_dependencies(
     function: &crate::AST::Func,
     current_owner: Option<&str>,
-    core_scope: Option<(&str, &crate::Comptime::MirBridge::MirFragmentCoreSourceModule)>,
+    core_scope: Option<(&str, &crate::AST::MirFragmentCoreSourceModule)>,
     context: &MirFragmentContext<'_>,
     out: &mut std::collections::BTreeSet<FragmentCallable>,
 ) {
@@ -2950,7 +3275,7 @@ fn fragment_callable_closure(
                 let Some(function) = source.functions.get(name) else {
                     continue;
                 };
-                core_scope = Some((module.as_str(), source));
+                core_scope = Some((module.as_str(), &**source));
                 (function, owner)
             }
         };
@@ -3250,9 +3575,14 @@ fn lower_mir_fragment(
     LowerError,
 > {
     let mut expr = expr.clone();
+    let mut requested_type_facts = std::collections::BTreeSet::new();
+    expr.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
     expr.for_each_expr_mut(lift_receiver_mark);
     let mut stmts = stmts.to_vec();
     lift_body_receiver_marks(&mut stmts);
+    for stmt in &mut stmts {
+        stmt.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
+    }
     let (expr, stmts) = (&expr, stmts.as_slice());
     let module = "__comptime".to_string();
     let name = "__fragment".to_string();
@@ -3490,6 +3820,7 @@ fn lower_mir_fragment(
         for (name, fields) in struct_fields {
             items.push(crate::AST::Item::Struct(crate::AST::StructDef {
                 span: empty_span,
+                compiler_builtin_error: false,
                 is_pub: false,
                 is_package_pub: false,
                 name: name.clone(),
@@ -3673,6 +4004,9 @@ fn lower_mir_fragment(
         for_each_item_body(item, |body| {
             lift_body_receiver_marks(body);
             normalize_fragment_body_patterns(body, &declared_variants);
+            for stmt in body {
+                stmt.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
+            }
         });
     }
     let mut cx = build_cx_items(
@@ -3680,10 +4014,19 @@ fn lower_mir_fragment(
         "",
         &file,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     if let Some(facts) = context.checked_nominals {
+        if facts.name_ledger.module_alias(facts.module_idx).is_some() {
+            cx.scope_names = Some(facts.name_ledger.body_snapshot());
+            cx.bundle_module = facts.module_idx;
+        }
+        for function in context.funcs.values() {
+            if let Some(signature) = facts.function_signatures.get(&function.name) {
+                cx.install_fragment_signature(function, signature);
+            }
+        }
         cx.import_mods = facts
             .import_modules
             .iter()
@@ -3696,7 +4039,7 @@ fn lower_mir_fragment(
             .collect();
         // Each signature names the loaded module whose body the fragment
         // lowers on demand, so the call keys the same target as at runtime.
-        cx.core_source_sigs = facts
+        cx.core_source_sigs = std::sync::Arc::new(facts
             .core_source_sigs
             .iter()
             .filter_map(|(key, signature)| {
@@ -3711,7 +4054,7 @@ fn lower_mir_fragment(
                     },
                 ))
             })
-            .collect();
+            .collect());
         cx.local_type_identities
             .extend(facts.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
@@ -3726,12 +4069,14 @@ fn lower_mir_fragment(
     }
     cx.module_identity = module.clone();
     cx.core_imports = context.core_imports.clone();
+    bind_fragment_type_facts(&mut cx, &items, &requested_type_facts, &context.target_layout);
+    cx.comptime_type_fact_target = Some(context.target_layout.clone());
+    let core_source_modules = std::sync::Arc::make_mut(&mut cx.core_source_modules);
     for (alias, module) in &cx.core_imports {
         if let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) {
             cx.import_mods
                 .insert(alias.clone(), crate::Codegen::mangle(source.alias));
-            cx.core_source_modules
-                .insert(module.clone(), source.alias.to_string());
+            core_source_modules.insert(module.clone(), source.alias.to_string());
         }
     }
     cx.const_values = context.globals.clone();
@@ -3954,6 +4299,35 @@ fn lower_mir_fragment(
     )
 }
 
+fn collect_fragment_type_fact(
+    expr: &crate::AST::Expr,
+    requested: &mut std::collections::BTreeSet<(String, String)>,
+) {
+    let crate::AST::Expr::Field(receiver, member, _) = expr else { return };
+    if crate::Syntax::compiler_fact_member(member).is_none() {
+        return;
+    }
+    if let Some((_, path)) = lower::compiler_fact_subject_path(receiver) {
+        requested.insert((path, member.clone()));
+    }
+}
+
+fn bind_fragment_type_facts(
+    cx: &mut Cx,
+    items: &[Item],
+    requested: &std::collections::BTreeSet<(String, String)>,
+    target: &jet_foundation::Layout::TargetLayout,
+) {
+    for (path, member) in requested {
+        let Some(read) = crate::Syntax::fact_read_kind(member) else { continue };
+        let identity = cx.local_type_identities.get(path).map(String::as_str).unwrap_or(path);
+        let Some(value) = crate::Comptime::reflect_type_fact_value_with_target_and_graph_and_facts(
+            items, identity, &cx.module_identity, target, None, None, read,
+        ) else { continue };
+        cx.comptime_type_facts.entry(path.clone()).or_default().insert(member.clone(), value);
+    }
+}
+
 /// Build the lowering context of one loaded source module for a comptime
 /// fragment, the way runtime lowering builds it for an imported module: the
 /// module's own functions and imports, its loader alias as the local call
@@ -3961,8 +4335,8 @@ fn lower_mir_fragment(
 /// file module also sees every checked nominal row by its canonical identity
 /// and spells its own and imported types through its identity table.
 fn fragment_core_source_cx(
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
-    source: &crate::Comptime::MirBridge::MirFragmentCoreSourceModule,
+    facts: &crate::AST::MirFragmentNominalFacts,
+    source: &crate::AST::MirFragmentCoreSourceModule,
     fragment_cx: &Cx,
 ) -> (Vec<Item>, Cx) {
     let user_module =
@@ -3983,7 +4357,15 @@ fn fragment_core_source_cx(
         .chain(source.constants.iter().cloned().map(Item::Const))
         .collect::<Vec<_>>();
     let function_count = items.len();
-    if user_module {
+    let mut requested_type_facts = std::collections::BTreeSet::new();
+    for item in &mut items {
+        for_each_item_body(item, |body| {
+            for stmt in body {
+                stmt.for_each_expr_mut(|expr| collect_fragment_type_fact(expr, &mut requested_type_facts));
+            }
+        });
+    }
+    if user_module || !requested_type_facts.is_empty() {
         items.extend(facts.structs.values().cloned().map(Item::Struct));
         items.extend(facts.enums.values().cloned().map(Item::Enum));
     }
@@ -3992,14 +4374,14 @@ fn fragment_core_source_cx(
         "",
         &source.module_identity,
         None,
-        &std::collections::HashMap::new(),
+        &std::sync::Arc::default(),
         "2026",
     );
     // A same-module constant read lowers to the `Global` key its declaration
     // row carries in the fragment program (`fragment_core_source_constants`),
     // exactly as `populate_cx_from_bundle` keys it for runtime lowering.
     for constant in &source.constants {
-        let Some(ty) = cx.const_types.get(&constant.name).cloned() else {
+        let Some(ty) = cx.fact_const_types(&constant.name).cloned() else {
             continue;
         };
         let row = tir_to_mir_types::lower_constant(constant, &source.module_identity);
@@ -4008,32 +4390,50 @@ fn fragment_core_source_cx(
     }
     cx.module_alias = source.alias.clone();
     cx.module_identity = source.module_identity.clone();
+    if let Some(owner) = facts.name_ledger.module_by_alias(&source.alias) {
+        cx.scope_names = Some(facts.name_ledger.body_snapshot());
+        cx.bundle_module = owner;
+    }
+    for function in source.functions.values() {
+        if let Some(signature) = source.function_signatures.get(&function.name) {
+            cx.install_fragment_signature(function, signature);
+        }
+    }
     cx.jit_local_call_prefix = Some(format!("{}::", mangle(&source.alias)));
     cx.core_source_sigs = fragment_cx.core_source_sigs.clone();
-    cx.core_source_modules = facts
+    cx.core_source_modules = std::sync::Arc::new(facts
         .core_source_bodies
         .iter()
         .map(|(module, loaded)| (module.clone(), loaded.alias.clone()))
-        .collect();
+        .collect());
     cx.core_imports = source.core_imports.clone();
     for (alias, module) in &source.core_imports {
         if let Some(loaded) = facts.core_source_bodies.get(module) {
             cx.import_mods.insert(alias.clone(), mangle(&loaded.alias));
         }
     }
+    install_fragment_module_imports(
+        &mut cx,
+        facts,
+        &source.module_imports,
+        &source.imported_functions,
+        &source.import_signatures,
+    );
     if user_module {
-        install_fragment_module_imports(
-            &mut cx,
-            facts,
-            &source.module_imports,
-            &source.imported_functions,
-            &source.import_signatures,
-        );
         cx.foreign_types = fragment_cx.foreign_types.clone();
-        cx.local_type_identities
-            .extend(source.nominal_identities.clone());
+        cx.local_type_identities.extend(source.nominal_identities.clone());
         cx.type_names.extend(facts.structs.keys().cloned());
         cx.type_names.extend(facts.enums.keys().cloned());
+    }
+    if !requested_type_facts.is_empty() {
+        if !user_module {
+            cx.local_type_identities.extend(source.nominal_identities.clone());
+        }
+        if let Some(target) = &fragment_cx.comptime_type_fact_target {
+            bind_fragment_type_facts(&mut cx, &items, &requested_type_facts, target);
+        }
+    }
+    if user_module || !requested_type_facts.is_empty() {
         // The nominal rows shape this context only; the fragment program
         // declares them once from its own item set.
         items.truncate(function_count);
@@ -4047,12 +4447,12 @@ fn fragment_core_source_cx(
 /// declared signature supplies the call's conventions and return.
 fn install_fragment_module_imports(
     cx: &mut Cx,
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     module_imports: &std::collections::HashMap<String, String>,
     imported_functions: &std::collections::HashMap<String, (String, String)>,
     signatures: &std::collections::HashMap<
         (String, String),
-        crate::Comptime::MirBridge::MirFragmentCoreSourceSignature,
+        crate::AST::MirFragmentCoreSourceSignature,
     >,
 ) {
     for (alias, module) in module_imports {
@@ -4062,8 +4462,17 @@ fn install_fragment_module_imports(
     }
     for (local, (module, name)) in imported_functions {
         if let Some(loaded) = facts.core_source_bodies.get(module) {
-            cx.unqualified_file
-                .insert(local.clone(), (mangle(&loaded.alias), name.clone()));
+            let binding = (mangle(&loaded.alias), name.clone());
+            if let Some((alias, member)) = local.rsplit_once('.') {
+                cx.reexport_calls.insert((alias.to_owned(), member.to_owned()), binding);
+            } else {
+                cx.unqualified_file.insert(local.clone(), binding);
+            }
+            if let (Some(function), Some(signature)) =
+                (loaded.functions.get(name), loaded.function_signatures.get(name))
+            {
+                cx.install_fragment_function_types(local, function, signature);
+            }
         }
     }
     for (key, signature) in signatures {
@@ -4077,7 +4486,7 @@ fn install_fragment_module_imports(
 /// name runtime lowering gives them, so `prep` code calls the same Core
 /// function a runtime call reaches.
 fn lower_fragment_core_source_bodies(
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     reachable: &std::collections::BTreeSet<FragmentCallable>,
     fragment_cx: &Cx,
     funcs: &mut Vec<TFunc>,
@@ -4122,7 +4531,7 @@ fn lower_fragment_core_source_bodies(
 /// Lower every checked instantiation of a source-owned Core generic function
 /// the fragment demanded, as runtime lowering does for imported Core modules.
 fn specialize_fragment_core_source_generics(
-    facts: &crate::Comptime::MirBridge::MirFragmentNominalFacts,
+    facts: &crate::AST::MirFragmentNominalFacts,
     fragment_cx: &Cx,
     funcs: &mut Vec<TFunc>,
 ) -> Result<(), LowerError> {
@@ -4332,7 +4741,6 @@ fn lower_mir_fragment_program(
         effects: TEffectFacts::default(),
         target_applicability: TTargetApplicability {
             rust_aot: false,
-            cranelift: false,
             interpreter: true,
             web: false,
         },
@@ -4368,7 +4776,7 @@ fn lower_mir_fragment_program(
     };
     let mut tir = TirProgram {
         package_identity: "comptime-fragment".to_string(),
-        entry_sibling_calls: None,
+        entry_call_alias: None,
         facts: TirPackageFacts::default(),
         source_file: file.clone(),
         source_text: String::new(),
@@ -4435,22 +4843,24 @@ fn lower_mir_fragment_program(
 /// Lower one explicitly requested checked artifact into analytical TIR.
 pub fn lower_checked_tir_program_for(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
 ) -> Result<TirProgram, LowerError> {
-    lower_checked_tir_program_for_with_debug(bundle, request, false)
+    lower_checked_tir_program_for_with_debug(bundle, checked_nominals, request, false)
 }
 
 /// Lower checked TIR with the native debug source-map markers enabled.
 pub fn lower_checked_tir_program_for_with_debug(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
     debug_linemap: bool,
 ) -> Result<TirProgram, LowerError> {
     if jet_foundation::CompilerStack::on_compiler_worker() {
-        return lower_checked_tir_program_on_stack(bundle, request, debug_linemap);
+        return lower_checked_tir_program_on_stack(bundle, checked_nominals, request, debug_linemap);
     }
     jet_foundation::CompilerStack::run_on_compiler_stack(|| {
-        lower_checked_tir_program_on_stack(bundle, request, debug_linemap)
+        lower_checked_tir_program_on_stack(bundle, checked_nominals, request, debug_linemap)
     })
 }
 
@@ -4471,6 +4881,7 @@ pub fn lower_checked_tir_program_for_with_debug(
 ///   MIR asks for the projection in the function's declaring module first.
 fn nominal_identity_projection(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
 ) -> std::collections::HashMap<String, String> {
     let mut claims: std::collections::HashMap<String, std::collections::HashSet<String>> =
         std::collections::HashMap::new();
@@ -4521,6 +4932,12 @@ fn nominal_identity_projection(
             claims.entry(spelling).or_default().insert(identity);
         }
     }
+    for facts in checked_nominals {
+        for (spelling, identity) in &facts.nominal_identities {
+            scoped.insert((facts.module_identity.clone(), spelling.clone()), identity.clone());
+            claims.entry(spelling.clone()).or_default().insert(identity.clone());
+        }
+    }
     let mut unique: std::collections::HashMap<_, _> = claims
         .into_iter()
         .filter_map(|(spelling, identities)| {
@@ -4532,6 +4949,16 @@ fn nominal_identity_projection(
     unique.extend(scoped.into_iter().map(|((module, spelling), identity)| {
         (format!("{module}::{spelling}"), identity)
     }));
+    for facts in checked_nominals {
+        for (identity, definition) in &facts.structs {
+            if !definition.compiler_builtin_error {
+                continue;
+            }
+            let leaf = identity.rsplit_once("::").map_or(identity.as_str(), |(_, leaf)| leaf);
+            unique.insert(format!("{}::{leaf}", facts.module_identity), identity.clone());
+            unique.insert(leaf.to_string(), identity.clone());
+        }
+    }
     unique
 }
 /// Select zero-argument entries by canonical module-qualified semantic keys.
@@ -5029,14 +5456,37 @@ fn collect_http_route_handlers(items: &[Item], out: &mut std::collections::HashS
 }
 fn lower_checked_tir_program_on_stack(
     bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
     request: MirArtifactRequest,
     debug_linemap: bool,
 ) -> Result<TirProgram, LowerError> {
+    if checked_nominals.len() != bundle.modules.len() {
+        return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing checked nominal module facts"));
+    }
+    for (module_idx, facts) in checked_nominals.iter().enumerate() {
+        if facts.module_idx != module_idx
+            || bundle.name_ledger.module_identity(module_idx).as_deref() != Some(facts.module_identity.as_str())
+        {
+            return Err(LowerError::new(crate::Diagnostics::Span::new(0, 0), "checked nominal module context disagrees with its bundle"));
+        }
+    }
     jet_foundation::PackageEdition::with_package_edition(&bundle.edition, || {
+        if checked_nominals.len() != bundle.modules.len()
+            || checked_nominals.iter().enumerate().any(|(idx, facts)| {
+                bundle.name_ledger.module_identity(idx).as_deref()
+                    != Some(facts.module_identity.as_str())
+            })
+        {
+            return Err(LowerError::new(
+                crate::Diagnostics::Span::new(0, 0),
+                "checked nominal facts are missing or belong to another module context",
+            ));
+        }
         let module = bundle.modules.get(bundle.entry).ok_or_else(|| {
             LowerError::new(crate::Diagnostics::Span::new(0, 0), "missing entry module")
         })?;
-        let extern_funcs = bundle_extern_funcs(bundle);
+        let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+        let extern_funcs = facts.extern_funcs();
         let mut cx = build_cx_items(
             &module.items,
             &module.source,
@@ -5046,11 +5496,14 @@ fn lower_checked_tir_program_on_stack(
             &bundle.edition,
         );
         cx.debug_linemap = debug_linemap;
-        populate_cx_from_bundle(&mut cx, bundle, bundle.entry);
+        populate_cx_from_bundle(&mut cx, bundle, bundle.entry, &facts);
         register_own_struct_shapes(&mut cx, bundle, bundle.entry);
         crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
         let type_shapes = collect_type_shapes(&module.items);
         let mut funcs = Vec::new();
+        // Prelude conversions are injected per checked module, but their
+        // canonical source/target symbol is shared by all of its callers.
+        let mut lowered_error_conversions = std::collections::HashSet::new();
         let include_tests = matches!(
             request.kind,
             jet_foundation::MIR::MirArtifactKind::TestExecutable
@@ -5105,7 +5558,7 @@ fn lower_checked_tir_program_on_stack(
         };
         let core_source_modules = core_source_module_indices(bundle);
         let reachable_core_bodies = if core_source_modules.is_empty() {
-            std::collections::HashSet::new()
+            Vec::new()
         } else {
             let app_graph = crate::Sema::extract_app_graph(bundle).0;
             let callables = cost_callables(bundle, app_graph.as_ref());
@@ -5159,7 +5612,12 @@ fn lower_checked_tir_program_on_stack(
                         &mut funcs,
                         &mut contract_rows,
                     );
-                    if f.inline_foreign.is_some() || !f.type_params.is_empty() {
+                    // D-VARARGBOUND1: a trait-bounded variadic is a template;
+                    // only its per-arity `__vaN` instances are callable.
+                    if f.inline_foreign.is_some()
+                        || !f.type_params.is_empty()
+                        || cx.variadic_bound_fns.contains_key(&f.name)
+                    {
                         continue;
                     }
                     // Resident `jet run` has no AST fallback. Lower sibling
@@ -5174,11 +5632,13 @@ fn lower_checked_tir_program_on_stack(
                 {
                     funcs.push(lower_test_item(test, &entry_module_identity, &cx));
                 }
+                // A checked error conversion always lowers, like a named fn or
+                // test: there is no AST fallback, so a subset gate here would
+                // drop a reachable `?` conversion body without a report.
                 Item::ErrorConv(ec) => {
-                    if !tir_covers_error_conv_body(&ec.body, &cx) {
-                        continue;
+                    if lowered_error_conversions.insert((ec.from_ty.as_str(), ec.to_ty.as_str())) {
+                        funcs.push(lower_error_conv(ec, &cx));
                     }
-                    funcs.push(lower_error_conv(ec, &cx));
                 }
                 Item::Struct(s) => {
                     if s.type_params.is_empty() {
@@ -5447,7 +5907,7 @@ fn lower_checked_tir_program_on_stack(
                 &bundle.edition,
             );
             imported_cx.debug_linemap = debug_linemap;
-            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx);
+            populate_cx_from_bundle(&mut imported_cx, bundle, module_idx, &facts);
             boxed_edges_by_module.insert(imported_owner.clone(), imported_cx.boxed_edges.clone());
             auto_printable_by_module
                 .insert(imported_owner.clone(), imported_cx.auto_printable.clone());
@@ -5498,7 +5958,8 @@ fn lower_checked_tir_program_on_stack(
                                 &core_source_modules,
                                 &reachable_core_bodies,
                                 module_idx,
-                                function,
+                                None,
+                                &function.name,
                             )
                         {
                             continue;
@@ -5578,11 +6039,16 @@ fn lower_checked_tir_program_on_stack(
                             if !function.type_params.is_empty() {
                                 continue;
                             }
+                            let declaration_name = jet_foundation::Names::member_name(
+                                &code_module.name,
+                                &function.name,
+                            );
                             if !should_lower_imported_core_body(
                                 &core_source_modules,
                                 &reachable_core_bodies,
                                 module_idx,
-                                function,
+                                None,
+                                &declaration_name,
                             ) {
                                 continue;
                             }
@@ -5590,10 +6056,7 @@ fn lower_checked_tir_program_on_stack(
                             // emitted `code_module__function` name. The final TIR
                             // symbol remains the imported module's Rust-qualified ABI.
                             let mut mangled_function = function.clone();
-                            mangled_function.name = jet_foundation::Names::member_name(
-                                &code_module.name,
-                                &function.name,
-                            );
+                            mangled_function.name = declaration_name;
                             let mut lowered = lower_func(&mangled_function, &imported_cx);
                             let binders = qualification_binders(&[], Some(function));
                             for (_, ty, _) in &mut lowered.params {
@@ -5650,7 +6113,8 @@ fn lower_checked_tir_program_on_stack(
                                     &core_source_modules,
                                     &reachable_core_bodies,
                                     module_idx,
-                                    method,
+                                    Some(name),
+                                    &method.name,
                                 ) {
                                     continue;
                                 }
@@ -5682,7 +6146,8 @@ fn lower_checked_tir_program_on_stack(
                                         &core_source_modules,
                                         &reachable_core_bodies,
                                         module_idx,
-                                        method,
+                                        Some(name),
+                                        &method.name,
                                     ) {
                                         continue;
                                     }
@@ -5721,18 +6186,16 @@ fn lower_checked_tir_program_on_stack(
                         let owner_module =
                             impl_owner_module(bundle, module_idx, &implementation.type_name);
                         let owner_items = &bundle.modules[owner_module].items;
-                        let owner_is_generic = owner_items.iter().any(|item| match item {
-                            Item::Struct(definition) => {
-                                definition.name == implementation.type_name
-                                    && !definition.type_params.is_empty()
+                        let owner_type_params = owner_items.iter().find_map(|item| match item {
+                            Item::Struct(definition) if definition.name == implementation.type_name => {
+                                Some(definition.type_params.as_slice())
                             }
-                            Item::Enum(definition) => {
-                                definition.name == implementation.type_name
-                                    && !definition.type_params.is_empty()
+                            Item::Enum(definition) if definition.name == implementation.type_name => {
+                                Some(definition.type_params.as_slice())
                             }
-                            _ => false,
-                        });
-                        if owner_is_generic || implementation.is_generated_serde {
+                            _ => None,
+                        }).unwrap_or_default();
+                        if implementation.is_generated_serde {
                             continue;
                         }
                         imported_cx.jit_local_call_prefix =
@@ -5740,11 +6203,24 @@ fn lower_checked_tir_program_on_stack(
                         for owner in imported_type_owners(bundle, owner_module) {
                             let qualified = imported_type_name(&owner, &implementation.type_name);
                             for method in &implementation.methods {
+                                // Generic public methods are materialized at
+                                // their checked instances. A registered private
+                                // value hook supplies the generic carrier's
+                                // native implementation itself, so keep its
+                                // checked owner binders rather than dropping it.
+                                if !owner_type_params.is_empty()
+                                    && !is_core_source_value_hook(
+                                        bundle, owner_module, &implementation.type_name, &method.name,
+                                    )
+                                {
+                                    continue;
+                                }
                                 if !should_lower_imported_core_body(
                                     &core_source_modules,
                                     &reachable_core_bodies,
                                     module_idx,
-                                    method,
+                                    Some(&implementation.type_name),
+                                    &method.name,
                                 ) {
                                     continue;
                                 }
@@ -5755,14 +6231,27 @@ fn lower_checked_tir_program_on_stack(
                                 if funcs.iter().any(|function| function.name == name) {
                                     continue;
                                 }
+                                let owner_type = if owner_type_params.is_empty() {
+                                    Type::Named(qualified.clone())
+                                } else {
+                                    Type::Apply {
+                                        name: qualified.clone(),
+                                        args: owner_type_params.iter()
+                                            .map(|param| Type::Named(param.name.clone())).collect(),
+                                    }
+                                };
                                 let mut lowered = lower_method_for_owner(
                                     method,
                                     &qualified,
-                                    Type::Named(qualified.clone()),
+                                    owner_type,
                                     &imported_cx,
                                     false,
                                 );
-                                let binders = qualification_binders(&[], Some(method));
+                                lowered.generic_params.extend(owner_type_params.iter().map(|param| TGenericParam {
+                                    name: param.name.clone(),
+                                    bounds: param.bounds.clone(),
+                                }));
+                                let binders = qualification_binders(owner_type_params, Some(method));
                                 lowered.ret = lowered.ret.as_ref().map(|ty| {
                                     qualify_imported_type(bundle, module_idx, &owner, &binders, ty)
                                 });
@@ -5783,7 +6272,8 @@ fn lower_checked_tir_program_on_stack(
                                 &core_source_modules,
                                 &reachable_core_bodies,
                                 module_idx,
-                                method,
+                                Some(&implementation.type_name),
+                                &method.name,
                             ) {
                                 continue;
                             }
@@ -5857,7 +6347,8 @@ fn lower_checked_tir_program_on_stack(
                                     &core_source_modules,
                                     &reachable_core_bodies,
                                     module_idx,
-                                    method,
+                                    Some(&implementation.type_name),
+                                    &method.name,
                                 ) {
                                     continue;
                                 }
@@ -5894,14 +6385,53 @@ fn lower_checked_tir_program_on_stack(
                             }
                         }
                     }
+                    Item::ErrorConv(conversion) => {
+                        if !lowered_error_conversions
+                            .insert((conversion.from_ty.as_str(), conversion.to_ty.as_str()))
+                        {
+                            continue;
+                        }
+                        // Typed `?` calls retain this canonical conversion
+                        // name, not an imported-module alias. Materialize the
+                        // checked body under that same name exactly once.
+                        let mut lowered = lower_error_conv(conversion, &imported_cx);
+                        let binders = qualification_binders(&[], None);
+                        for (_, ty, _) in &mut lowered.params {
+                            *ty = qualify_imported_type(
+                                bundle, module_idx, &imported_owner, &binders, ty,
+                            );
+                        }
+                        lowered.ret = lowered.ret.as_ref().map(|ty| {
+                            qualify_imported_type(
+                                bundle, module_idx, &imported_owner, &binders, ty,
+                            )
+                        });
+                        funcs.push(lowered);
+                    }
                     _ => {}
                 }
             }
+            // #4609: the generic functions and methods an imported module
+            // instantiates in its own bodies specialize in its own context,
+            // as the entry's do, under the module's canonical boundary types.
+            let first_instance = funcs.len();
+            lower_demanded_generic_methods(&imported.items, &imported_cx, &mut funcs)?;
+            specialize_generic_free_functions(&imported.items, &imported_cx, &mut funcs);
+            qualify_imported_instances(bundle, module_idx, &imported_owner, &mut funcs[first_instance..]);
             spawn_lambdas.extend(std::mem::take(
                 &mut *imported_cx.jit_spawn_lambdas.borrow_mut(),
             ));
             merge_core_source_generic_calls(&cx, &imported_cx);
+            merge_module_generic_calls(&cx, &imported_cx);
         }
+        specialize_module_generic_calls(
+            bundle,
+            &extern_funcs,
+            debug_linemap,
+            &cx,
+            &mut funcs,
+            &mut spawn_lambdas,
+        )?;
         specialize_checked_core_source_generics(
             bundle,
             &extern_funcs,
@@ -6297,6 +6827,7 @@ fn lower_checked_tir_program_on_stack(
         let canonical_calls = cx.jit_canonical_calls.borrow().clone();
         let declarations = lower_tir_declarations(
             bundle,
+            checked_nominals,
             &boxed_edges_by_module,
             &auto_printable_by_module,
             &auto_debug_by_module,
@@ -6332,13 +6863,10 @@ fn lower_checked_tir_program_on_stack(
         }
         let mut program = TirProgram {
             package_identity: bundle.build_facts.package_name.clone(),
-            entry_sibling_calls: (bundle.name_ledger.namespace_siblings(bundle.entry).next().is_some())
-                .then(|| {
-                    (
-                        entry_module_identity.clone(),
-                        format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
-                    )
-                }),
+            entry_call_alias: Some((
+                entry_module_identity.clone(),
+                format!("{}::", mangle(&bundle.modules[bundle.entry].alias)),
+            )),
             facts: TirPackageFacts {
                 project_root: bundle.project_root.display().to_string(),
                 used_core,
@@ -6346,6 +6874,7 @@ fn lower_checked_tir_program_on_stack(
                 active_os: format!("{:?}", bundle.active_os),
                 inferred_layer: format!("{:?}", bundle.inferred_layer),
                 allocator: format!("{:?}", bundle.program_allocator),
+                program_allocator: bundle.program_allocator.clone(),
                 web_app: crate::Sema::extract_app_graph(bundle).0,
                 authority_needs: bundle.package_guarantees.authority_needs.clone(),
                 hardware_use,
@@ -6378,7 +6907,7 @@ fn lower_checked_tir_program_on_stack(
             memo_dependencies,
             reflection_fields,
             reflect_paths,
-            nominal_identities: nominal_identity_projection(bundle),
+            nominal_identities: nominal_identity_projection(bundle, checked_nominals),
             struct_type_params,
             enum_variants,
             enum_variant_payload_types,
@@ -6617,8 +7146,8 @@ pub struct TWebParamReconstruction {
 }
 
 /// D-SERDE2 (card #131 S1-bridge): which built-in codec trait a hand impl method
-/// bridges to. `Encode` → `jet_encode(&self) -> jet_std::DataTree`; `Decode` →
-/// the static `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>`.
+/// bridges to. `Encode` → `jet_encode(&self) -> jet_std::Dyn`; `Decode` →
+/// the static `jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<FieldError>>`.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum SerdeCodec {
     Encode,
@@ -6659,8 +7188,8 @@ pub enum TFuncKind {
         /// D-SERDE2 (card #131 S1-bridge): a hand-written `impl T.Encode` /
         /// `impl T.Decode` method. The user writes the verbs `encode`/`decode`
         /// with Jet-facing signatures, but the Rust `__jet_Encode`/`__jet_Decode`
-        /// traits declare `jet_encode(&self) -> DataTree` /
-        /// `jet_decode(tree: &DataTree) -> Result<Self, [FieldError]>`. This bridges
+        /// traits declare `jet_encode(&self) -> Dyn` /
+        /// `jet_decode(tree: &Dyn) -> Result<Self, [FieldError]>`. This bridges
         /// the name + signature internally (I2: a sema-accepted hand impl must
         /// produce Rust rustc accepts). `None` for every ordinary trait method.
         serde: Option<SerdeCodec>,
@@ -6822,23 +7351,9 @@ pub enum TStructExtra {
     HTTPRequestParams,
 }
 
-/// A checked helper with a stable Prelude identity. The legacy `helper` spelling
-/// remains only for the old emitter until #2918.
-#[derive(Clone, Copy)]
-pub enum THelperKind {
-    ClockNew,
-    ClockSystem,
-}
-
 /// Host/prelude call assembled only in emit — structured pieces, no Rust source text.
 #[derive(Clone)]
 pub enum THostCall {
-    /// A checked helper route. `helper` is retained for the old emitter only.
-    Helper {
-        helper: String,
-        kind: THelperKind,
-        args: Vec<THostArg>,
-    },
     /// `(recv).{method}({args})`; `method` is a checked Jet identity and the
     /// MIR lowerer selects its explicit Prelude row from the receiver shape.
     Method {
@@ -6944,19 +7459,6 @@ pub enum THostCall {
     },
     /// Numeric bounds constant: `{rust_type(ty)}::{member}`.
     NumericBounds { ty: Type, member: String },
-    /// `ExpiringSecret::<T>::new(value, ttl.ms, clock observer)`.
-    ExpiringSecretNew {
-        value: Box<TExpr>,
-        duration: Box<TExpr>,
-        clock: Box<TExpr>,
-        elem: Type,
-    },
-    /// `jet_expiring_new(value, duration_ms, clock_now)`.
-    ExpiringValueNew {
-        value: Box<TExpr>,
-        duration: Box<TExpr>,
-        clock: Box<TExpr>,
-    },
     /// D-CABI-CALLBACK1: `extern "C" fn` wrapper around a lowered lambda.
     CCallback {
         symbol: String,
@@ -6988,15 +7490,6 @@ pub enum TGcEditKind {
 pub enum TMatchProbe {
     IsSome,
     Unwrap,
-}
-
-#[derive(Clone)]
-pub enum THostArg {
-    Expr(TExpr),
-    /// Wrap as `&(expr)`
-    Borrow(TExpr),
-    /// Pre-lowered lambda (structured); emit uses TLambda spelling.
-    Lambda(TLambda),
 }
 
 #[derive(Clone)]
@@ -7715,6 +8208,18 @@ pub enum TPatternShape {
         rest: Option<crate::Diagnostics::Span>,
         span: crate::Diagnostics::Span,
     },
+    /// D-PAT-RECORD1: `[first, ..rest]`.
+    List {
+        items: Vec<TPatternBinding>,
+        rest: Option<TListPatternRest>,
+        span: crate::Diagnostics::Span,
+    },
+    /// D-PAT-MAP1: `["type": .Text(kind), "nick"?: nick, ..]`.
+    Map {
+        entries: Vec<TMapPatternEntry>,
+        rest: bool,
+        span: crate::Diagnostics::Span,
+    },
     Text(Vec<TTextPatternPart>, crate::Diagnostics::Span),
     Binary(Vec<TBinaryPatternPart>, crate::Diagnostics::Span),
 }
@@ -7732,6 +8237,8 @@ pub enum TPatternBinding {
     },
     /// S31: a nested pattern tests this payload slot.
     Nested(Box<TPatternShape>),
+    /// D-PAT-RECORD1 / D-PAT-MAP1: the slot equals this value.
+    Value(Box<TExpr>),
 }
 
 #[derive(Clone)]
@@ -7746,6 +8253,28 @@ pub enum TPatternField {
         value: Box<TExpr>,
         span: crate::Diagnostics::Span,
     },
+    /// D-PAT-RECORD1: the field matches a nested pattern.
+    Nested {
+        field: String,
+        shape: Box<TPatternShape>,
+        span: crate::Diagnostics::Span,
+    },
+}
+
+/// D-PAT-RECORD1: the `..` / `..name` of a list pattern.
+#[derive(Clone)]
+pub struct TListPatternRest {
+    pub name: Option<String>,
+    pub span: crate::Diagnostics::Span,
+}
+
+/// D-PAT-MAP1: one map-pattern entry.
+#[derive(Clone)]
+pub struct TMapPatternEntry {
+    pub key: Box<TExpr>,
+    pub optional: bool,
+    pub slot: TPatternBinding,
+    pub span: crate::Diagnostics::Span,
 }
 
 #[derive(Debug, Clone)]
@@ -7785,7 +8314,6 @@ pub enum TPatternPosition {
     OptionBinding,
     Arm,
     VariantPath,
-    DataEntries { temp: String },
 }
 
 impl TPattern {
@@ -7797,11 +8325,11 @@ impl TPattern {
         boxed: bool,
     ) -> TPattern {
         assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
+            !pattern.any_value_expr(&mut |_| true),
+            "pattern value requires from_ast_with_values"
         );
         TPattern {
-            shape: Self::shape_from_ast(&pattern),
+            shape: Self::shape_from_ast(&pattern, &mut |_| unreachable!("pattern has no values")),
             enum_type,
             position,
             mutable,
@@ -7809,27 +8337,6 @@ impl TPattern {
         }
     }
 
-    fn invariant_pattern_value(span: crate::Diagnostics::Span) -> Box<TExpr> {
-        Box::new(TExpr {
-            ty: Type::Named(crate::Syntax::TYPE_NEVER.to_string()),
-            kind: TExprKind::InvariantViolation {
-                construct: "unlowered struct-pattern value".to_string(),
-                span,
-            },
-        })
-    }
-
-    fn contains_struct_value(pattern: &crate::AST::Pattern) -> bool {
-        match pattern {
-            crate::AST::Pattern::Struct { fields, .. } => fields
-                .iter()
-                .any(|field| matches!(field, crate::AST::StructPatField::Value { .. })),
-            crate::AST::Pattern::Or(alternatives, ..) => {
-                alternatives.iter().any(Self::contains_struct_value)
-            }
-            _ => false,
-        }
-    }
 
     pub(crate) fn from_ast_with_values<F>(
         pattern: crate::AST::Pattern,
@@ -7842,45 +8349,7 @@ impl TPattern {
     where
         F: FnMut(&crate::AST::Expr) -> TExpr,
     {
-        fn fill_values<F>(
-            shape: &mut TPatternShape,
-            pattern: &crate::AST::Pattern,
-            lower_value: &mut F,
-        ) where
-            F: FnMut(&crate::AST::Expr) -> TExpr,
-        {
-            match (shape, pattern) {
-                (
-                    TPatternShape::Struct { fields, .. },
-                    crate::AST::Pattern::Struct {
-                        fields: source_fields,
-                        ..
-                    },
-                ) => {
-                    for (field, source) in fields.iter_mut().zip(source_fields) {
-                        if let (
-                            TPatternField::Value { value, .. },
-                            crate::AST::StructPatField::Value { value: source, .. },
-                        ) = (field, source)
-                        {
-                            *value = Box::new(lower_value(source));
-                        }
-                    }
-                }
-                (
-                    TPatternShape::Or(alternatives, ..),
-                    crate::AST::Pattern::Or(source_alternatives, ..),
-                ) => {
-                    for (shape, source) in alternatives.iter_mut().zip(source_alternatives) {
-                        fill_values(shape, source, lower_value);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        let mut shape = Self::shape_from_ast(&pattern);
-        fill_values(&mut shape, &pattern, &mut lower_value);
+        let shape = Self::shape_from_ast(&pattern, &mut lower_value);
         TPattern {
             shape,
             enum_type,
@@ -7890,7 +8359,10 @@ impl TPattern {
         }
     }
 
-    fn shape_from_ast(pattern: &crate::AST::Pattern) -> TPatternShape {
+    fn shape_from_ast(
+        pattern: &crate::AST::Pattern,
+        lower_value: &mut dyn FnMut(&crate::AST::Expr) -> TExpr,
+    ) -> TPatternShape {
         match pattern {
             crate::AST::Pattern::Variant {
                 variant,
@@ -7901,22 +8373,7 @@ impl TPattern {
                 variant: variant.clone(),
                 bindings: bindings
                     .iter()
-                    .map(|binding| match binding {
-                        crate::AST::PatSlot::Wildcard => TPatternBinding::Wildcard,
-                        crate::AST::PatSlot::Bind { name, span } => TPatternBinding::Bind {
-                            name: name.clone(),
-                            span: *span,
-                        },
-                        crate::AST::PatSlot::Range { lo, hi } => {
-                            TPatternBinding::Range { lo: *lo, hi: *hi }
-                        }
-                        crate::AST::PatSlot::Nested(inner) => {
-                            TPatternBinding::Nested(Box::new(Self::shape_from_ast(inner)))
-                        }
-                        crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
-                            unreachable!("sema places named payload entries (D-PAT-NAMED-NEST1)")
-                        }
-                    })
+                    .map(|binding| Self::slot_from_ast(binding, lower_value))
                     .collect(),
                 leading_dot: *leading_dot,
                 span: *span,
@@ -7931,7 +8388,7 @@ impl TPattern {
                 binding_span: *binding_span,
                 inner: inner
                     .as_deref()
-                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
+                    .map(|inner| Box::new(Self::shape_from_ast(inner, lower_value))),
                 span: *span,
             },
             crate::AST::Pattern::Absent(span) => TPatternShape::Absent(*span),
@@ -7945,7 +8402,7 @@ impl TPattern {
                 binding_span: *binding_span,
                 inner: inner
                     .as_deref()
-                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
+                    .map(|inner| Box::new(Self::shape_from_ast(inner, lower_value))),
                 span: *span,
             },
             crate::AST::Pattern::Err {
@@ -7958,7 +8415,7 @@ impl TPattern {
                 binding_span: *binding_span,
                 inner: inner
                     .as_deref()
-                    .map(|inner| Box::new(Self::shape_from_ast(inner))),
+                    .map(|inner| Box::new(Self::shape_from_ast(inner, lower_value))),
                 span: *span,
             },
             crate::AST::Pattern::Range { lo, hi, span } => TPatternShape::Range {
@@ -7967,10 +8424,10 @@ impl TPattern {
                 span: *span,
             },
             crate::AST::Pattern::Or(alternatives, span) => TPatternShape::Or(
-                alternatives.iter().map(Self::shape_from_ast).collect(),
+                alternatives.iter().map(|inner| Self::shape_from_ast(inner, lower_value)).collect(),
                 *span,
             ),
-            crate::AST::Pattern::Struct { fields, rest, span } => TPatternShape::Struct {
+            crate::AST::Pattern::Struct { fields, rest, span, .. } => TPatternShape::Struct {
                 fields: fields
                     .iter()
                     .map(|field| match field {
@@ -7985,15 +8442,40 @@ impl TPattern {
                             span: *local_span,
                         },
                         crate::AST::StructPatField::Value {
-                            field, field_span, ..
+                            field, field_span, value,
                         } => TPatternField::Value {
                             field: field.clone(),
-                            value: Self::invariant_pattern_value(*field_span),
+                            value: Box::new(lower_value(value)),
+                            span: *field_span,
+                        },
+                        crate::AST::StructPatField::Nested {
+                            field, field_span, pattern,
+                        } => TPatternField::Nested {
+                            field: field.clone(),
+                            shape: Box::new(Self::shape_from_ast(pattern, lower_value)),
                             span: *field_span,
                         },
                     })
                     .collect(),
                 rest: *rest,
+                span: *span,
+            },
+            crate::AST::Pattern::List { items, rest, span } => TPatternShape::List {
+                items: items.iter().map(|slot| Self::slot_from_ast(slot, lower_value)).collect(),
+                rest: rest.as_ref().map(|rest| TListPatternRest {
+                    name: rest.name.as_ref().map(|(name, _)| name.clone()),
+                    span: rest.span,
+                }),
+                span: *span,
+            },
+            crate::AST::Pattern::Map { entries, rest, span } => TPatternShape::Map {
+                entries: entries.iter().map(|entry| TMapPatternEntry {
+                    key: Box::new(lower_value(&entry.key)),
+                    optional: entry.optional,
+                    slot: Self::slot_from_ast(&entry.slot, lower_value),
+                    span: entry.span,
+                }).collect(),
+                rest: rest.is_some(),
                 span: *span,
             },
             crate::AST::Pattern::StrMatch { parts, span } => TPatternShape::Text(
@@ -8044,6 +8526,26 @@ impl TPattern {
         }
     }
 
+    fn slot_from_ast(
+        slot: &crate::AST::PatSlot,
+        lower_value: &mut dyn FnMut(&crate::AST::Expr) -> TExpr,
+    ) -> TPatternBinding {
+        match slot {
+            crate::AST::PatSlot::Wildcard => TPatternBinding::Wildcard,
+            crate::AST::PatSlot::Bind { name, span } => TPatternBinding::Bind {
+                name: name.clone(), span: *span,
+            },
+            crate::AST::PatSlot::Range { lo, hi } => TPatternBinding::Range { lo: *lo, hi: *hi },
+            crate::AST::PatSlot::Nested(inner) => TPatternBinding::Nested(
+                Box::new(Self::shape_from_ast(inner, lower_value)),
+            ),
+            crate::AST::PatSlot::Value(value) => TPatternBinding::Value(Box::new(lower_value(value))),
+            crate::AST::PatSlot::Named { .. } | crate::AST::PatSlot::Rest(_) => {
+                unreachable!("sema places named payload entries (D-PAT-NAMED-NEST1)")
+            }
+        }
+    }
+
     fn binary_bits_type(width: u8) -> Type {
         let bits = if width <= 8 {
             8
@@ -8068,45 +8570,15 @@ impl TPattern {
     }
 
     pub fn arm(pattern: crate::AST::Pattern, enum_type: Option<String>) -> TPattern {
-        assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
-        );
-        TPattern {
-            shape: Self::shape_from_ast(&pattern),
-            enum_type,
-            position: TPatternPosition::Arm,
-            mutable: false,
-            boxed: false,
-        }
+        Self::from_ast(pattern, enum_type, TPatternPosition::Arm, false, false)
     }
 
     pub fn binding(pattern: crate::AST::Pattern) -> TPattern {
-        assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
-        );
-        TPattern {
-            shape: Self::shape_from_ast(&pattern),
-            enum_type: None,
-            position: TPatternPosition::Binding,
-            mutable: false,
-            boxed: false,
-        }
+        Self::from_ast(pattern, None, TPatternPosition::Binding, false, false)
     }
 
     pub fn option_binding(pattern: crate::AST::Pattern) -> TPattern {
-        assert!(
-            !Self::contains_struct_value(&pattern),
-            "struct-pattern value requires from_ast_with_values"
-        );
-        TPattern {
-            shape: Self::shape_from_ast(&pattern),
-            enum_type: None,
-            position: TPatternPosition::OptionBinding,
-            mutable: false,
-            boxed: false,
-        }
+        Self::from_ast(pattern, None, TPatternPosition::OptionBinding, false, false)
     }
     pub fn variant(&self) -> Option<&str> {
         match &self.shape {
@@ -8176,6 +8648,8 @@ impl TPattern {
             | TPatternShape::Err { span, .. }
             | TPatternShape::Range { span, .. }
             | TPatternShape::Struct { span, .. }
+            | TPatternShape::List { span, .. }
+            | TPatternShape::Map { span, .. }
             | TPatternShape::Text(_, span)
             | TPatternShape::Binary(_, span)
             | TPatternShape::Or(_, span) => *span,
@@ -8952,22 +9426,6 @@ fn collect_cost_fn_value(
     }
 }
 
-fn collect_cost_host_arg(
-    arg: &THostArg,
-    function: &str,
-    span: crate::Diagnostics::Span,
-    loop_depth: usize,
-    sites: &mut Vec<TCostSite>,
-) {
-    match arg {
-        THostArg::Expr(value) | THostArg::Borrow(value) => {
-            collect_cost_expr(value, function, span, loop_depth, sites);
-        }
-        THostArg::Lambda(lambda) => {
-            collect_cost_lambda(lambda, function, span, loop_depth, sites);
-        }
-    }
-}
 
 fn collect_cost_call_args(
     args: &[TCallArg],
@@ -9048,11 +9506,6 @@ fn collect_cost_expr_with_state_and_context(
             }
         }
         TExprKind::HostCall(host) => match host.as_ref() {
-            THostCall::Helper { args, .. } => {
-                for arg in args {
-                    collect_cost_host_arg(arg, function, expr_span, loop_depth, sites);
-                }
-            }
             THostCall::Method { recv, args, .. } => {
                 collect_cost_expr(recv, function, expr_span, loop_depth, sites);
                 for arg in args {
@@ -9098,21 +9551,6 @@ fn collect_cost_expr_with_state_and_context(
                 collect_cost_expr(name, function, expr_span, loop_depth, sites);
                 collect_cost_expr(value, function, expr_span, loop_depth, sites);
             }
-            THostCall::ExpiringSecretNew {
-                value,
-                duration,
-                clock,
-                ..
-            }
-            | THostCall::ExpiringValueNew {
-                value,
-                duration,
-                clock,
-            } => {
-                collect_cost_expr(value, function, expr_span, loop_depth, sites);
-                collect_cost_expr(duration, function, expr_span, loop_depth, sites);
-                collect_cost_expr(clock, function, expr_span, loop_depth, sites);
-            }
             THostCall::CCallback { lambda, .. } => {
                 collect_cost_lambda(lambda, function, expr_span, loop_depth, sites);
             }
@@ -9145,6 +9583,7 @@ fn collect_cost_expr_with_state_and_context(
         | TExprKind::RawOf(arg)
         | TExprKind::Clone(arg, _)
         | TExprKind::ExplicitCopy(arg)
+        | TExprKind::TraitBox { value: arg, .. }
         | TExprKind::MaterializeView(arg) => {
             collect_cost_expr(arg, function, expr_span, loop_depth, sites);
         }
@@ -9729,48 +10168,56 @@ struct TCostCallable {
     root: bool,
 }
 
-/// The checked source function of every callable declaration, keyed by its
-/// module and declaration span, with whether its owner type is generic. The
-/// cost passes ask once per callable, so the items are walked once per pass
-/// instead of once per question (which made `jet check` quadratic).
+/// The checked source body of every executable declaration, keyed by its
+/// module and canonical declaration name, with whether its owner is generic.
+/// Generated derives share provider-template spans; those offsets are source
+/// diagnostics, not executable identities. Walk each module once per pass.
 struct CostFunctionIndex<'a> {
-    functions: std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+    functions: Vec<std::collections::HashMap<String, (&'a Func, bool)>>,
 }
 
 impl<'a> CostFunctionIndex<'a> {
     fn new(bundle: &'a ProgramBundle) -> Self {
-        let mut functions = std::collections::HashMap::new();
-        for (module, data) in bundle.modules.iter().enumerate() {
-            index_cost_functions(&data.items, module, &mut functions);
+        let mut functions = Vec::with_capacity(bundle.modules.len());
+        for module in &bundle.modules {
+            let mut declarations = std::collections::HashMap::new();
+            index_cost_functions(&module.items, None, &mut declarations);
+            functions.push(declarations);
         }
         Self { functions }
     }
 
-    fn get(&self, module: usize, span: crate::Diagnostics::Span) -> Option<(&'a Func, bool)> {
-        self.functions.get(&(module, span)).copied()
+    fn get(&self, module: usize, name: &str) -> Option<(&'a Func, bool)> {
+        self.functions.get(module)?.get(name).copied()
     }
 }
 
 fn index_cost_functions<'a>(
     items: &'a [Item],
-    module: usize,
-    functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
+    prefix: Option<&str>,
+    functions: &mut std::collections::HashMap<String, (&'a Func, bool)>,
 ) {
-    // The first declaration at a span wins, as in a front-to-back search.
+    fn scoped_name(prefix: Option<&str>, name: &str) -> String {
+        prefix.map_or_else(
+            || name.to_string(),
+            |prefix| jet_foundation::Names::member_name(prefix, name),
+        )
+    }
     fn add<'a>(
-        functions: &mut std::collections::HashMap<(usize, crate::Diagnostics::Span), (&'a Func, bool)>,
-        module: usize,
+        functions: &mut std::collections::HashMap<String, (&'a Func, bool)>,
+        owner: &str,
         methods: impl IntoIterator<Item = &'a Func>,
         owner_is_generic: bool,
     ) {
         for function in methods {
-            functions
-                .entry((module, function.name_span))
-                .or_insert((function, owner_is_generic));
+            // Match Bundle::declare_method_names and NameLedger's winning
+            // declaration; never join two owners by their template offsets.
+            functions.insert(
+                format!("{owner}.{}", function.name),
+                (function, owner_is_generic),
+            );
         }
     }
-    // An `impl` extends a generic owner when this item list declares that
-    // owner with type parameters.
     let generic_owners = items
         .iter()
         .filter_map(|item| match item {
@@ -9785,42 +10232,105 @@ fn index_cost_functions<'a>(
         .collect::<std::collections::HashSet<_>>();
     for item in items {
         match item {
-            Item::Func(function) => add(functions, module, [function], false),
+            Item::Func(function) => {
+                functions.insert(scoped_name(prefix, &function.name), (function, false));
+            }
             Item::Struct(definition) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &definition.name),
                 definition.methods.iter().chain(
-                    definition
-                        .trait_impls
-                        .iter()
-                        .flat_map(|implementation| implementation.methods.iter()),
+                    definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter()
+                    }),
                 ),
                 !definition.type_params.is_empty(),
             ),
             Item::Enum(definition) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &definition.name),
                 definition.methods.iter().chain(
-                    definition
-                        .trait_impls
-                        .iter()
-                        .flat_map(|implementation| implementation.methods.iter()),
+                    definition.trait_impls.iter().flat_map(|implementation| {
+                        implementation.methods.iter()
+                    }),
                 ),
                 !definition.type_params.is_empty(),
             ),
             Item::Impl(implementation) => add(
                 functions,
-                module,
+                &scoped_name(prefix, &implementation.type_name),
                 &implementation.methods,
                 generic_owners.contains(implementation.type_name.as_str()),
             ),
-            Item::CodeModule(code_module) => {
-                if let Some(body) = &code_module.body {
-                    index_cost_functions(body, module, functions);
+            Item::CodeModule(module) => {
+                if let Some(body) = &module.body {
+                    let nested = scoped_name(prefix, &module.name);
+                    index_cost_functions(body, Some(&nested), functions);
                 }
             }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod cost_function_identity_tests {
+    use super::*;
+
+    #[test]
+    fn shared_derive_offsets_do_not_join_distinct_owner_bodies() {
+        let source = concat!(
+            "struct First { fn compare(self, other: First) -> Int Never! { 0 } }\n",
+            "struct Second { fn compare(self, other: Second) -> Int Never! { 1 } }\n",
+        );
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("method bodies parse");
+        let shared_span = match &program.items[0] {
+            Item::Struct(owner) => owner.methods[0].name_span,
+            _ => panic!("expected First"),
+        };
+        match &mut program.items[1] {
+            Item::Struct(owner) => owner.methods[0].name_span = shared_span,
+            _ => panic!("expected Second"),
+        }
+        let mut indexed = std::collections::HashMap::new();
+        index_cost_functions(&program.items, None, &mut indexed);
+        for (position, name) in ["First.compare", "Second.compare"].into_iter().enumerate() {
+            let Item::Struct(owner) = &program.items[position] else {
+                panic!("expected nominal owner");
+            };
+            let (body, generic) = indexed.get(name).expect("canonical body");
+            assert!(std::ptr::eq(*body, &owner.methods[0]));
+            assert!(!generic);
+        }
+        assert_eq!(indexed.len(), 2);
+    }
+
+    #[test]
+    fn scoped_executable_names_and_declaration_replacement_match_the_ledger() {
+        let source = "fn first() {}\nfn second() {}\n";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let mut program = crate::Parser::parse(&tokens).expect("functions parse");
+        let Item::Func(first) = &program.items[0] else {
+            panic!("expected first function");
+        };
+        let shared_span = first.name_span;
+        let Item::Func(second) = &mut program.items[1] else {
+            panic!("expected second function");
+        };
+        second.name = "first".to_string();
+        second.name_span = shared_span;
+        let mut indexed = std::collections::HashMap::new();
+        index_cost_functions(&program.items, Some("nested"), &mut indexed);
+        let Item::Func(second) = &program.items[1] else {
+            panic!("expected winning declaration");
+        };
+        let name = jet_foundation::Names::member_name("nested", "first");
+        let (body, generic) = indexed.get(&name).expect("scoped body");
+        assert!(std::ptr::eq(*body, second));
+        assert!(!generic);
+        assert_eq!(indexed.len(), 1);
     }
 }
 
@@ -9846,11 +10356,26 @@ fn collect_selected_cost_outputs(
     }
 }
 
+fn cost_callable_owner_and_name(callable: &TCostCallable) -> (&str, &str) {
+    if callable.method {
+        callable.declaration_name.rsplit_once('.')
+            .expect("checked method declaration has an owner")
+    } else {
+        ("", callable.declaration_name.as_str())
+    }
+}
+
 /// Lookup tables over one pass's cost callables. Reachability asks them once
 /// per checked name reference, so no question may rescan every callable.
-struct CostCallableIndex {
-    /// Module of each callable, by callable index.
-    modules: Vec<usize>,
+struct CostCallableIndex<'callable> {
+    /// Executable names borrow the immutable callable rows; no copied keys or
+    /// temporary canonical-name strings are needed by declaration queries.
+    by_name: Vec<
+        std::collections::HashMap<
+            &'callable str,
+            std::collections::HashMap<&'callable str, usize>,
+        >,
+    >,
     /// Callables by declaration span, in callable order.
     by_span: std::collections::HashMap<crate::Diagnostics::Span, Vec<usize>>,
     /// Callables by semantic identity (`module::name`), in callable order.
@@ -9906,12 +10431,22 @@ impl CostSpanList {
     }
 }
 
-impl CostCallableIndex {
-    fn new(bundle: &ProgramBundle, callables: &[TCostCallable]) -> Self {
+impl<'callable> CostCallableIndex<'callable> {
+    fn new(bundle: &ProgramBundle, callables: &'callable [TCostCallable]) -> Self {
         let mut by_span = std::collections::HashMap::<_, Vec<usize>>::new();
         let mut by_identity = std::collections::HashMap::<_, Vec<usize>>::new();
         let mut bodies = std::collections::HashMap::<String, CostBodySpans>::new();
+        let mut by_name: Vec<
+            std::collections::HashMap<
+                &'callable str,
+                std::collections::HashMap<&'callable str, usize>,
+            >,
+        > = (0..bundle.modules.len())
+            .map(|_| std::collections::HashMap::new())
+            .collect();
         for (index, callable) in callables.iter().enumerate() {
+            let (owner, name) = cost_callable_owner_and_name(callable);
+            by_name[callable.module].entry(owner).or_default().insert(name, index);
             by_span.entry(callable.declaration_span).or_default().push(index);
             if let Some(identity) = callable_semantic_identity(bundle, callable) {
                 by_identity.entry(identity).or_default().push(index);
@@ -9943,20 +10478,18 @@ impl CostCallableIndex {
             spans.generated.finish();
         }
         Self {
-            modules: callables.iter().map(|callable| callable.module).collect(),
+            by_name,
             by_span,
             by_identity,
             bodies,
         }
     }
 
-    /// The first callable declared at `span` in `module`.
-    fn declared(&self, module: usize, span: crate::Diagnostics::Span) -> Option<usize> {
-        self.by_span
-            .get(&span)?
-            .iter()
+    fn named(&self, module: usize, owner: Option<&str>, name: &str) -> Option<usize> {
+        self.by_name.get(module)?
+            .get(owner.unwrap_or(""))?
+            .get(name)
             .copied()
-            .find(|&index| self.modules[index] == module)
     }
 
     fn declared_at(&self, span: crate::Diagnostics::Span) -> &[usize] {
@@ -10023,7 +10556,7 @@ fn cost_callables(
         let function = if declaration.kind == "extern" {
             None
         } else {
-            functions.get(declaration.module, declaration.span)
+            functions.get(declaration.module, &declaration.name)
         };
         if declaration.kind != "extern" && function.is_none() {
             continue;
@@ -10152,9 +10685,10 @@ fn core_source_module_indices(bundle: &ProgramBundle) -> std::collections::HashS
                 });
             let private_source = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
                 .iter()
+                .map(|part| &part.source)
+                .chain(jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS)
                 .any(|part| {
-                    part.source.alias == module.alias
-                        && part.source.path == module.display.as_str()
+                    part.alias == module.alias && part.path == module.display.as_str()
                 });
             (public_source || private_source).then_some(index)
         })
@@ -10211,6 +10745,30 @@ fn checked_function_reference_identity(
     }
 }
 
+/// Reachability is computed over declarations, before concrete generic and
+/// operator instances are lowered. Retain the exact owner, stripping only the
+/// final balanced method/function argument list (never `<corelib>` or owner
+/// arguments).
+fn checked_callable_template_identity(identity: &str) -> &str {
+    if !identity.ends_with('>') {
+        return identity;
+    }
+    let mut depth = 0;
+    for (offset, byte) in identity.bytes().enumerate().rev() {
+        match byte {
+            b'>' => depth += 1,
+            b'<' => {
+                depth -= 1;
+                if depth == 0 {
+                    return &identity[..offset];
+                }
+            }
+            _ => {}
+        }
+    }
+    identity
+}
+
 fn is_checked_function_reference(reference: &jet_foundation::Names::NameReference) -> bool {
     reference.kind == "function" || checked_function_reference_identity(reference).is_some()
 }
@@ -10223,7 +10781,9 @@ fn callable_for_reference(
 ) -> Option<usize> {
     if reference.kind == "semantic" {
         let identity = checked_function_reference_identity(reference)?;
-        return index.with_identity(identity).first().copied();
+        return index.with_identity(identity).first().copied().or_else(|| {
+            index.with_identity(checked_callable_template_identity(identity)).first().copied()
+        });
     }
     if reference.kind != "function" {
         return None;
@@ -10289,18 +10849,18 @@ fn checked_core_source_signature<'a>(
     signatures.get(&(module.to_string(), method.to_string()))
 }
 
-fn checked_local_function_declaration_span(
+fn checked_local_function_declaration_name<'declaration>(
     module: usize,
     name: &str,
     resolved_return: Option<&Type>,
-    declaration: Option<&jet_foundation::Names::NameDeclaration>,
-) -> Option<crate::Diagnostics::Span> {
+    declaration: Option<&'declaration jet_foundation::Names::NameDeclaration>,
+) -> Option<&'declaration str> {
     let declaration = declaration?;
     (resolved_return.is_some()
         && declaration.module == module
         && declaration.name == name
         && declaration.kind == "function")
-        .then_some(declaration.span)
+        .then_some(declaration.name.as_str())
 }
 
 fn checked_local_function_call_target(
@@ -10309,13 +10869,13 @@ fn checked_local_function_call_target(
     module: usize,
     call: &crate::AST::Call,
 ) -> Option<usize> {
-    let declaration_span = checked_local_function_declaration_span(
+    let declaration_name = checked_local_function_declaration_name(
         module,
         &call.name,
         call.resolved_ret.as_ref(),
         bundle.name_ledger.declaration(module, &call.name),
     )?;
-    index.declared(module, declaration_span)
+    index.named(module, None, declaration_name)
 }
 
 // Direct Core-module syntax is sema-checked as a Core call and may not leave a
@@ -10333,9 +10893,11 @@ fn checked_core_source_call_edges(
     let core_modules = core_source_module_indices(bundle);
     let functions = CostFunctionIndex::new(bundle);
     let mut edges = Vec::new();
+    let part_targets = private_part_receiver_callables(bundle, index);
+    let format_targets = source_format_callables(bundle, index);
 
     for (caller_index, callable) in callables.iter().enumerate() {
-        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
+        let Some((function, _)) = functions.get(callable.module, &callable.declaration_name) else {
             continue;
         };
         let Some(imports) = core_imports.get(callable.module) else {
@@ -10344,8 +10906,62 @@ fn checked_core_source_call_edges(
         let Some(source_path) = bundle.name_ledger.module_path(callable.module) else {
             continue;
         };
+        let authored_math = jet_foundation::CoreModuleExports::core_source_module("core.math")
+            .is_some_and(|source| bundle.modules[callable.module].alias == source.alias
+                && bundle.modules[callable.module].display.as_str() == source.path);
+        let mut precise_families = [false; 3];
+        let mut int_abs = false;
+        // Source helper bodies have explicit checked calls. Their parameter
+        // names do not request every operation on the represented carrier.
+        if !authored_math {
+        for parameter in &function.params {
+            note_precise_source_type(&parameter.ty, &mut precise_families);
+        }
+        if let Some(returned) = &function.return_type {
+            note_precise_source_type(returned, &mut precise_families);
+        }
+        }
         for statement in &function.body {
-            statement.for_each_expr(&mut |expression: &Expr| match expression {
+            statement.for_each_expr(&mut |expression: &Expr| {
+                if matches!(expression, Expr::MethodCall { method, recv_type: Some(owner), .. } if method == "abs" && owner == "Int") {
+                    int_abs = true;
+                }
+                if !authored_math {
+                match expression {
+                    Expr::Call(call) => {
+                        if let Some(returned) = &call.resolved_ret {
+                            note_precise_source_type(returned, &mut precise_families);
+                        }
+                    }
+                    Expr::MethodCall { recv_type, resolved_ret, .. } => {
+                        if let Some(owner) = recv_type {
+                            note_precise_source_name(owner, &mut precise_families);
+                        }
+                        if let Some(returned) = resolved_ret {
+                            note_precise_source_type(returned, &mut precise_families);
+                        }
+                    }
+                    Expr::StructLit { type_name, .. } => {
+                        note_precise_source_name(type_name, &mut precise_families);
+                    }
+                    Expr::TypedLit { head: Some(ty), .. } => {
+                        note_precise_source_type(ty, &mut precise_families);
+                    }
+                    _ => {}
+                }
+                }
+                match expression {
+                Expr::Str(parts, _) => {
+                    for part in parts {
+                        if let crate::AST::StrPart::Interp(_, format) = part {
+                            if let Some(target) = source_format_member(format)
+                                .and_then(|member| format_targets.get(member))
+                            {
+                                edges.push((caller_index, *target));
+                            }
+                        }
+                    }
+                }
                 Expr::Call(call) if core_modules.contains(&callable.module) => {
                     if let Some(target) = checked_local_function_call_target(
                         bundle,
@@ -10360,14 +10976,39 @@ fn checked_core_source_call_edges(
                     receiver,
                     method,
                     resolved_ret,
+                    checked_callee,
                     ..
                 } => {
+                    if let Some(identity) = checked_callee {
+                        if let Some(&target) = index.with_identity(identity).first() {
+                            edges.push((caller_index, target));
+                        }
+                        // A checked executable identity cannot be re-resolved
+                        // through a receiver spelling or a template offset.
+                        // Missing bodies retain the existing lowering refusal.
+                        return;
+                    }
+                    // Private source-part receiver functions have no authored
+                    // method declaration, but still contribute call-graph edges.
+                    if let Some(target) = private_part_method_target(&part_targets, expression) {
+                        edges.push((caller_index, target));
+                        return;
+                    }
                     let Some(module) = checked_core_module_path_from_receiver(
                         receiver.as_ref(),
                         imports,
                         &bundle.name_ledger,
                         source_path,
-                    ) else {
+                    ).or_else(|| {
+                        // Perf's Prelude static spelling synthesizes the same
+                        // source call as an authored core.perf module call.
+                        matches!(receiver.as_ref(), Expr::Ident(name, _) if name == "Perf")
+                            .then(|| {
+                                bundle.name_ledger.declaration(callable.module, "Perf").is_none()
+                            })
+                            .filter(|builtin| *builtin)
+                            .map(|_| "core.perf".to_string())
+                    }) else {
                         return;
                     };
                     let Some(signature) = checked_core_source_signature(
@@ -10397,7 +11038,26 @@ fn checked_core_source_call_edges(
                     }
                 }
                 _ => {}
+                }
             });
+        }
+        if let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") {
+            for (target_index, target) in callables.iter().enumerate() {
+                if !bundle.modules.get(target.module).is_some_and(|module| {
+                    module.alias == source.alias && module.display.as_str() == source.path
+                }) {
+                    continue;
+                }
+                let Some(name) = target.source_name.as_deref() else { continue };
+                if int_abs && name == "abs" {
+                    edges.push((caller_index, target_index));
+                }
+                for (family, prefix) in ["__fraction_", "__decimal_", "__complex_"].iter().enumerate() {
+                    if precise_families[family] && name.starts_with(prefix) {
+                        edges.push((caller_index, target_index));
+                    }
+                }
+            }
         }
     }
     edges.sort_unstable();
@@ -10405,10 +11065,103 @@ fn checked_core_source_call_edges(
     edges
 }
 
+// Temporary bridge from the existing checked precise operation to its source
+// body. Both the bootstrap reachability closure and the MIR output gate use it.
+fn precise_source_helper(owner: &str, operation: &str) -> Option<&'static str> {
+    Some(match (owner, operation) {
+        ("Int", "abs") => "abs",
+        ("Fraction", "new") => "__fraction_new",
+        ("Fraction", "from_parts") => "__fraction_from_parts",
+        ("Fraction", "from_owned_parts") => "__fraction_from_owned_parts",
+        ("Fraction", "from_int") => "__fraction_from_int",
+        ("Fraction", "from_float") => "__fraction_from_float",
+        ("Fraction", "from_decimal") => "__decimal_to_fraction",
+        ("Fraction", "add") => "__fraction_add",
+        ("Fraction", "sub") => "__fraction_sub",
+        ("Fraction", "mul") => "__fraction_mul",
+        ("Fraction", "div") => "__fraction_div",
+        ("Fraction", "equal") => "__fraction_equal",
+        ("Fraction", "numerator") => "__fraction_numerator",
+        ("Fraction", "denominator") => "__fraction_denominator",
+        ("Fraction", "owned_numerator") => "__fraction_owned_numerator",
+        ("Fraction", "owned_denominator") => "__fraction_owned_denominator",
+        ("Fraction", "is_zero") => "__fraction_is_zero",
+        ("Fraction", "to_int") => "__fraction_to_int",
+        ("Fraction", "to_float") => "__fraction_to_float",
+        ("Fraction", "to_decimal") => "__fraction_to_decimal",
+        ("Fraction", "to_string") => "__fraction_to_string",
+        ("Decimal", "from_str") => "__decimal_from_str",
+        ("Decimal", "from_int") => "__decimal_from_int",
+        ("Decimal", "from_float") => "__decimal_from_float",
+        ("Decimal", "from_fraction") => "__decimal_from_fraction",
+        ("Decimal", "add") => "__decimal_add",
+        ("Decimal", "sub") => "__decimal_sub",
+        ("Decimal", "mul") => "__decimal_mul",
+        ("Decimal", "div") => "__decimal_div",
+        ("Decimal", "equal") => "__decimal_equal",
+        ("Decimal", "compare") => "__decimal_compare",
+        ("Decimal", "floor") => "__decimal_floor",
+        ("Decimal", "ceil") => "__decimal_ceil",
+        ("Decimal", "round") => "__decimal_round",
+        ("Decimal", "to_int") => "__decimal_to_int",
+        ("Decimal", "to_float") => "__decimal_to_float",
+        ("Decimal", "to_fraction") => "__decimal_to_fraction",
+        ("Decimal", "to_string") => "__decimal_to_string",
+        ("Complex", "abs") => "__complex_abs",
+        ("Complex", "from_parts") => "__complex_from_parts",
+        ("Complex", "add") => "__complex_add",
+        ("Complex", "sub") => "__complex_sub",
+        ("Complex", "mul") => "__complex_mul",
+        ("Complex", "div") => "__complex_div",
+        ("Complex", "to_string") => "__complex_to_string",
+        _ => return None,
+    })
+}
+
+fn note_precise_source_name(name: &str, families: &mut [bool; 3]) {
+    for (index, owner) in ["Fraction", "Decimal", "Complex"].iter().enumerate() {
+        if name == *owner || (jet_foundation::CoreModuleExports::core_source_owns_type(name)
+            && name.rsplit("::").next() == Some(*owner))
+        {
+            families[index] = true;
+        }
+    }
+}
+
+fn note_precise_source_type(ty: &Type, families: &mut [bool; 3]) {
+    match ty.without_user_tags() {
+        Type::Named(name) | Type::Apply { name, .. } => note_precise_source_name(name, families),
+        Type::Option(inner) | Type::Shared(inner) | Type::List(inner) => {
+            note_precise_source_type(inner, families);
+        }
+        Type::Result { ok, err } => {
+            note_precise_source_type(ok, families);
+            note_precise_source_type(err, families);
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod checked_function_reference_tests {
     use super::*;
 
+    #[test]
+    fn precise_checked_type_facts_bound_the_bootstrap_helper_family() {
+        let mut families = [false; 3];
+        note_precise_source_type(&Type::Named("Fraction".to_string()), &mut families);
+        assert_eq!(families, [true, false, false]);
+        let helpers = ["__fraction_mul", "__fraction_add", "__decimal_mul", "__complex_abs"];
+        let kept = helpers.into_iter().filter(|name| {
+            ["__fraction_", "__decimal_", "__complex_"].iter().enumerate()
+                .any(|(index, prefix)| families[index] && name.starts_with(prefix))
+        }).collect::<Vec<_>>();
+        assert_eq!(kept, ["__fraction_mul", "__fraction_add"]);
+        assert_eq!(precise_source_helper("Fraction", "mul"), Some("__fraction_mul"));
+        assert_eq!(precise_source_helper("Int", "abs"), Some("abs"));
+        assert_eq!(precise_source_helper("Int", "add"), None);
+        assert_eq!(precise_source_helper("Measurement", "mul"), None);
+    }
     #[test]
     fn core_module_function_reference_is_a_reachability_edge() {
         let reference = jet_foundation::Names::NameReference {
@@ -10425,6 +11178,17 @@ mod checked_function_reference_tests {
             Some("<corelib>/Core/http::Core/http/client.jet::request")
         );
         assert!(is_checked_function_reference(&reference));
+        assert_eq!(
+            checked_callable_template_identity(
+                "<corelib>/Core/data::Core/data/data.jet::DataErrorKind::Comparable::compare<DataErrorKind>"
+            ),
+            "<corelib>/Core/data::Core/data/data.jet::DataErrorKind::Comparable::compare"
+        );
+        assert_eq!(
+            checked_callable_template_identity("pkg::Box<Int>::convert<List<String>>"),
+            "pkg::Box<Int>::convert"
+        );
+        assert_eq!(checked_callable_template_identity("<corelib>/Core/data::run"), "<corelib>/Core/data::run");
     }
 
     #[test]
@@ -10515,16 +11279,16 @@ mod checked_function_reference_tests {
         let resolved_return = Type::String;
 
         assert_eq!(
-            checked_local_function_declaration_span(
+            checked_local_function_declaration_name(
                 3,
                 "trim_ascii",
                 Some(&resolved_return),
                 Some(&declaration),
             ),
-            Some(declaration_span)
+            Some("trim_ascii")
         );
         assert_eq!(
-            checked_local_function_declaration_span(3, "trim_ascii", None, Some(&declaration)),
+            checked_local_function_declaration_name(3, "trim_ascii", None, Some(&declaration)),
             None
         );
     }
@@ -10602,13 +11366,27 @@ fn test_reference_enabled(
         .map(|(_, _, included)| *included)
 }
 
+fn scoped_cost_owner<'name>(
+    prefix: Option<&str>,
+    name: &'name str,
+) -> std::borrow::Cow<'name, str> {
+    match prefix {
+        Some(prefix) => std::borrow::Cow::Owned(
+            jet_foundation::Names::member_name(prefix, name),
+        ),
+        None => std::borrow::Cow::Borrowed(name),
+    }
+}
+
 fn collect_trait_impl_callable_groups(
     items: &[Item],
     module: usize,
+    prefix: Option<&str>,
     index: &CostCallableIndex,
     groups: &mut Vec<Vec<usize>>,
 ) {
     fn push_group(
+        owner: &str,
         methods: &[crate::AST::Func],
         module: usize,
         index: &CostCallableIndex,
@@ -10616,7 +11394,7 @@ fn collect_trait_impl_callable_groups(
     ) {
         let indices = methods
             .iter()
-            .filter_map(|method| index.declared(module, method.name_span))
+            .filter_map(|method| index.named(module, Some(owner), &method.name))
             .collect::<Vec<_>>();
         if !indices.is_empty() {
             groups.push(indices);
@@ -10626,21 +11404,31 @@ fn collect_trait_impl_callable_groups(
     for item in items {
         match item {
             Item::Struct(definition) => {
+                if definition.trait_impls.is_empty() {
+                    continue;
+                }
+                let owner = scoped_cost_owner(prefix, &definition.name);
                 for implementation in &definition.trait_impls {
-                    push_group(&implementation.methods, module, index, groups);
+                    push_group(&owner, &implementation.methods, module, index, groups);
                 }
             }
             Item::Enum(definition) => {
+                if definition.trait_impls.is_empty() {
+                    continue;
+                }
+                let owner = scoped_cost_owner(prefix, &definition.name);
                 for implementation in &definition.trait_impls {
-                    push_group(&implementation.methods, module, index, groups);
+                    push_group(&owner, &implementation.methods, module, index, groups);
                 }
             }
             Item::Impl(implementation) if implementation.trait_name.is_some() => {
-                push_group(&implementation.methods, module, index, groups);
+                let owner = scoped_cost_owner(prefix, &implementation.type_name);
+                push_group(&owner, &implementation.methods, module, index, groups);
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
-                    collect_trait_impl_callable_groups(body, module, index, groups);
+                    let nested = scoped_cost_owner(prefix, &code_module.name);
+                    collect_trait_impl_callable_groups(body, module, Some(&nested), index, groups);
                 }
             }
             _ => {}
@@ -10648,30 +11436,47 @@ fn collect_trait_impl_callable_groups(
     }
 }
 
-/// D-SHAPE-RESOURCE1=A: a Core `Close` implementation is reached implicitly by
-/// scope-end cleanup of a live value, never through a source reference, so
-/// reference reachability alone would prune it and leave the automatic close
-/// without a lowered target. Collect its methods so they stay rooted.
-fn collect_core_close_callables(
+/// Core cleanup, formatting, equality and ordering implementations are invoked
+/// implicitly (scope exit, interpolation, `==`, `<`/`>=`/`<=>`), without an
+/// authored method reference. Keep their checked targets and normal callee
+/// closure, matching the authored Core-method roots in the Jet lowering.
+fn collect_core_implicit_trait_callables(
     items: &[Item],
     module: usize,
+    prefix: Option<&str>,
     index: &CostCallableIndex,
     out: &mut Vec<usize>,
 ) {
-    fn push_close(
+    fn push_implicit(
         trait_name: &str,
+        owner_name: &str,
+        prefix: Option<&str>,
         methods: &[crate::AST::Func],
         module: usize,
         index: &CostCallableIndex,
         out: &mut Vec<usize>,
     ) {
-        if trait_name.rsplit('.').next() != Some(crate::Syntax::TRAIT_CLOSE) {
+        if !matches!(
+            trait_name.rsplit('.').next(),
+            Some(
+                crate::Syntax::TRAIT_CLOSE
+                    | crate::Syntax::TRAIT_DISPLAY
+                    | crate::Syntax::TRAIT_DEBUG
+                    | crate::Syntax::TRAIT_EQUATABLE
+                    | crate::Syntax::TRAIT_COMPARABLE
+            )
+        ) {
             return;
         }
+        let owner = scoped_cost_owner(prefix, owner_name);
         out.extend(
             methods
                 .iter()
-                .filter_map(|method| index.declared(module, method.name_span)),
+                .filter(|method| {
+                    trait_name.rsplit('.').next() == Some(crate::Syntax::TRAIT_CLOSE)
+                        || !method.compiler_generated
+                })
+                .filter_map(|method| index.named(module, Some(&owner), &method.name)),
         );
     }
 
@@ -10679,27 +11484,61 @@ fn collect_core_close_callables(
         match item {
             Item::Struct(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &implementation.methods, module, index, out);
+                    push_implicit(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::Enum(definition) => {
                 for implementation in &definition.trait_impls {
-                    push_close(&implementation.trait_name, &implementation.methods, module, index, out);
+                    push_implicit(&implementation.trait_name, &definition.name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::Impl(implementation) => {
                 if let Some(trait_name) = &implementation.trait_name {
-                    push_close(trait_name, &implementation.methods, module, index, out);
+                    push_implicit(trait_name, &implementation.type_name, prefix, &implementation.methods, module, index, out);
                 }
             }
             Item::CodeModule(code_module) => {
                 if let Some(body) = &code_module.body {
-                    collect_core_close_callables(body, module, index, out);
+                    let nested = scoped_cost_owner(prefix, &code_module.name);
+                    collect_core_implicit_trait_callables(body, module, Some(&nested), index, out);
                 }
             }
             _ => {}
         }
     }
+}
+
+fn is_core_source_value_hook(bundle: &ProgramBundle, module: usize, owner: &str, name: &str) -> bool {
+    bundle.name_ledger.declared_identity(module, owner)
+        .is_some_and(|identity| {
+            ["clone", "show", "debug"].into_iter().any(|operation| {
+                jet_foundation::CoreModuleExports::core_source_value_hook(
+                    identity, operation,
+                ) == Some(name)
+            })
+        })
+}
+
+/// Synthesized precise operations have no authored call reference. Their
+/// source providers are a closed part of the existing operation registry,
+/// just like the implicit render/cleanup providers, not a prefix-wide grant.
+fn is_core_precise_source_target(bundle: &ProgramBundle, module: usize, name: &str) -> bool {
+    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.math") else {
+        return false;
+    };
+    let data = &bundle.modules[module];
+    if data.alias != source.alias || data.display.as_str() != source.path {
+        return false;
+    }
+    if precise_source_helper("Int", "abs") == Some(name) {
+        return true;
+    }
+    [("Fraction", "__fraction_"), ("Decimal", "__decimal_"), ("Complex", "__complex_")]
+        .into_iter()
+        .any(|(owner, prefix)| {
+            name.strip_prefix(prefix)
+                .is_some_and(|operation| precise_source_helper(owner, operation) == Some(name))
+        })
 }
 
 fn reachable_core_source_callables(
@@ -10739,29 +11578,30 @@ fn reachable_core_source_callables(
         let ffi_callback = callable_semantic_identity(bundle, callable)
             .is_some_and(|identity| bundle.ffi_callback_fns.contains(&identity));
         let sampled_contract = functions
-            .get(callable.module, callable.declaration_span)
+            .get(callable.module, &callable.declaration_name)
             .is_some_and(|(function, _)| {
                 !function.pre.is_empty() && !function.params.is_empty()
             });
-        // Keep private source-part bodies rooted because receiver resolution for
-        // those compiler-owned callables has no source declaration to reference.
-        let private_source = bundle
-            .modules
-            .get(callable.module)
-            .is_some_and(|module| {
-                jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
-                    .iter()
-                    .any(|part| {
-                        part.source.alias == module.alias
-                            && part.source.path == module.display.as_str()
-                    })
-            });
+        // Native implementations of source-owned value operations call private
+        // checked methods even when the caller's AST has no explicit call key
+        // (formatting, an aggregate Clone, or a transitive imported carrier).
+        // Root only the canonical hooks, then use the same callee closure as
+        // every other source body; do not retain the entire Core module.
+        let source_value_hook = is_core && callable.method && {
+            let (owner, name) = cost_callable_owner_and_name(callable);
+            is_core_source_value_hook(bundle, callable.module, owner, name)
+        };
+        let precise_source_target = is_core && !callable.method
+            && is_core_precise_source_target(
+                bundle, callable.module, cost_callable_owner_and_name(callable).1,
+            );
         callable.root |= !is_core
-            || (is_core && private_source)
             || artifact_export
             || selected_entry
             || ffi_callback
-            || sampled_contract;
+            || sampled_contract
+            || source_value_hook
+            || precise_source_target;
     }
 
     for ((source, start, end), reference) in bundle.name_ledger.references() {
@@ -10780,24 +11620,32 @@ fn reachable_core_source_callables(
             rooted[target].root = true;
         }
     }
+    let part_targets = private_part_receiver_callables(bundle, &lookup);
+    let format_targets = source_format_callables(bundle, &lookup);
+    if !part_targets.is_empty() || !format_targets.is_empty() {
+        for data in &bundle.modules {
+            root_test_private_part_methods(&data.items, include_tests, &part_targets, &format_targets, &mut rooted);
+        }
+    }
 
     // An imported Core trait implementation is emitted as one Rust impl. Once
     // any explicit method is live, its siblings are required to keep that impl
     // complete; an otherwise unreachable implementation stays pruned.
     let mut trait_impl_groups = Vec::new();
-    let mut close_callables = Vec::new();
+    let mut implicit_trait_callables = Vec::new();
     for (module, data) in bundle.modules.iter().enumerate() {
         if core_modules.contains(&module) {
             collect_trait_impl_callable_groups(
                 &data.items,
                 module,
+                None,
                 &lookup,
                 &mut trait_impl_groups,
             );
-            collect_core_close_callables(&data.items, module, &lookup, &mut close_callables);
+            collect_core_implicit_trait_callables(&data.items, module, None, &lookup, &mut implicit_trait_callables);
         }
     }
-    for index in close_callables {
+    for index in implicit_trait_callables {
         rooted[index].root = true;
     }
     let callees = cost_call_graph(bundle, &rooted, &lookup);
@@ -10821,32 +11669,172 @@ fn reachable_core_source_callables(
     }
 }
 
+// Formatting holes synthesize calls after the AST call graph is built. Their
+// source functions must be reached even when no authored fmt.member call exists.
+fn source_format_member(format: &crate::AST::StrFormat) -> Option<&'static str> {
+    use crate::AST::StrFormat;
+    Some(match format {
+        StrFormat::Grouped(_) => "grouped",
+        StrFormat::Hex(_) => "hex",
+        StrFormat::Sci(_) => "sci",
+        StrFormat::Percent(_) => "percent",
+        StrFormat::Pad { .. } => "pad",
+        StrFormat::PadLeft { .. } => "pad_left",
+        StrFormat::Bin => "bin",
+        StrFormat::Oct => "oct",
+        _ => return None,
+    })
+}
+
+fn source_format_callables<'a>(bundle: &'a ProgramBundle, index: &CostCallableIndex) -> std::collections::HashMap<&'a str, usize> {
+    let mut targets = std::collections::HashMap::new();
+    let Some(source) = jet_foundation::CoreModuleExports::core_source_module("core.text.fmt") else {
+        return targets;
+    };
+    let Some((module, data)) = bundle.modules.iter().enumerate().find(|(_, data)| data.alias == source.alias) else {
+        return targets;
+    };
+    for item in &data.items {
+        let Item::Func(function) = item else { continue };
+        if source.owned_members.contains(&function.name.as_str())
+            && Syntax::core_call("core.text.fmt", &function.name).is_none()
+        {
+            if let Some(target) = index.named(module, None, &function.name) {
+                targets.insert(function.name.as_str(), target);
+            }
+        }
+    }
+    targets
+}
+
+/// Receiver functions of compiler-private Core source parts, indexed by the
+/// checked receiver spelling and member name. These bodies stay prunable;
+/// only checked calls to them add edges or enabled-test roots.
+type PartReceiverCallables = std::collections::HashMap<String, std::collections::HashMap<String, usize>>;
+
+fn private_part_receiver_callables(bundle: &ProgramBundle, index: &CostCallableIndex) -> PartReceiverCallables {
+    let mut targets = PartReceiverCallables::new();
+    for (module, data) in bundle.modules.iter().enumerate() {
+        let is_part = jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS
+            .iter()
+            .any(|part| part.source.alias == data.alias && part.source.path == data.display.as_str());
+        if !is_part {
+            continue;
+        }
+        for item in &data.items {
+            let Item::Func(function) = item else { continue };
+            if function.is_pub {
+                continue;
+            }
+            let receiver = match function.params.first().map(|param| &param.ty) {
+                Some(Type::String) => crate::Syntax::TYPE_STRING,
+                Some(Type::Named(name)) => name.as_str(),
+                _ => continue,
+            };
+            if let Some(callable) = index.named(module, None, &function.name) {
+                targets
+                    .entry(receiver.to_string())
+                    .or_default()
+                    .entry(function.name.clone())
+                    .or_insert(callable);
+            }
+        }
+    }
+    targets
+}
+
+fn private_part_method_target(targets: &PartReceiverCallables, expression: &Expr) -> Option<usize> {
+    let Expr::MethodCall { method, recv_type: Some(receiver), .. } = expression else {
+        return None;
+    };
+    targets.get(receiver)?.get(method).copied()
+}
+
+/// Enabled tests have no callable row, so their implicit receiver and
+/// formatting calls contribute roots rather than call-graph edges.
+fn root_test_private_part_methods(
+    items: &[Item],
+    include_tests: bool,
+    targets: &PartReceiverCallables,
+    format_targets: &std::collections::HashMap<&str, usize>,
+    rooted: &mut [TCostCallable],
+) {
+    for item in items {
+        match item {
+            Item::Test(test) if include_tests && test.name.is_some() => {
+                for statement in &test.body {
+                    statement.for_each_expr(|expression| {
+                        if let Some(target) = private_part_method_target(targets, expression) {
+                            rooted[target].root = true;
+                        }
+                        if let Expr::Str(parts, _) = expression {
+                            for part in parts {
+                                if let crate::AST::StrPart::Interp(_, format) = part {
+                                    if let Some(target) = source_format_member(format)
+                                        .and_then(|member| format_targets.get(member))
+                                    {
+                                        rooted[*target].root = true;
+                                    }
+                                }
+                            }
+                        }
+                    });
+                }
+            }
+            Item::CodeModule(code_module) => {
+                if let Some(body) = &code_module.body {
+                    root_test_private_part_methods(body, include_tests, targets, format_targets, rooted);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Canonical source-body membership, grouped by module and owner. The empty
+/// owner holds free functions. Borrowed owner/name queries need no allocation.
+type ReachableCoreBodies = Vec<
+    std::collections::HashMap<String, std::collections::HashSet<String>>,
+>;
+
 fn reachable_core_source_bodies(
     callables: &[TCostCallable],
     core_modules: &std::collections::HashSet<usize>,
     reachable: &[bool],
-) -> std::collections::HashSet<(usize, usize, usize)> {
-    callables
-        .iter()
-        .zip(reachable)
-        .filter_map(|(callable, reachable)| {
-            (core_modules.contains(&callable.module) && *reachable).then_some((
-                callable.module,
-                callable.declaration_span.start,
-                callable.declaration_span.end,
-            ))
-        })
-        .collect()
+) -> ReachableCoreBodies {
+    let modules = core_modules.iter().max().map_or(0, |module| module + 1);
+    let mut bodies: ReachableCoreBodies = (0..modules)
+        .map(|_| std::collections::HashMap::new())
+        .collect();
+    for (callable, reachable) in callables.iter().zip(reachable) {
+        if !*reachable || !core_modules.contains(&callable.module) {
+            continue;
+        }
+        let (owner, name) = cost_callable_owner_and_name(callable);
+        let owners = &mut bodies[callable.module];
+        if let Some(names) = owners.get_mut(owner) {
+            names.insert(name.to_string());
+        } else {
+            let mut names = std::collections::HashSet::new();
+            names.insert(name.to_string());
+            owners.insert(owner.to_string(), names);
+        }
+    }
+    bodies
 }
 
 fn should_lower_imported_core_body(
     core_modules: &std::collections::HashSet<usize>,
-    reachable_bodies: &std::collections::HashSet<(usize, usize, usize)>,
+    reachable_bodies: &ReachableCoreBodies,
     module: usize,
-    function: &Func,
+    owner: Option<&str>,
+    name: &str,
 ) -> bool {
     !core_modules.contains(&module)
-        || reachable_bodies.contains(&(module, function.name_span.start, function.name_span.end))
+        || reachable_bodies
+            .get(module)
+            .and_then(|owners| owners.get(owner.unwrap_or("")))
+            .is_some_and(|names| names.contains(name))
 }
 
 fn lowered_cost_method_matches(lowered: &str, expected: &str) -> bool {
@@ -10866,28 +11854,23 @@ fn lowered_cost_function_matches(lowered: &str, expected: &str) -> bool {
 }
 
 fn cost_callable_lowered_name(bundle: &ProgramBundle, callable: &TCostCallable) -> Option<String> {
-    if callable.module == bundle.entry {
-        return Some(if callable.method {
-            callable.declaration_name.replace('.', "::")
-        } else {
-            callable.declaration_name.clone()
-        });
-    }
     if callable.method {
+        // Lowering names a method `{Owner}::{method}` with the owner's checked
+        // declaration name verbatim; a compiler-generated nested owner keeps
+        // its dot (`Employee.Patch::merge`, `Payment.Client::Hello`).
+        let (owner_type, method) = cost_callable_owner_and_name(callable);
+        if callable.module == bundle.entry {
+            return Some(format!("{owner_type}::{method}"));
+        }
         // D-MOD-CYCLE1=A: an impl in a package sibling lowers under the
         // identity of the file that declares its owner type.
-        let owner_type = callable
-            .declaration_name
-            .split('.')
-            .next()
-            .unwrap_or(&callable.declaration_name);
         let owner = bundle
             .name_ledger
             .module_identity(impl_owner_module(bundle, callable.module, owner_type))?;
-        return Some(format!(
-            "{owner}::{}",
-            callable.declaration_name.replace('.', "::")
-        ));
+        return Some(format!("{owner}::{owner_type}::{method}"));
+    }
+    if callable.module == bundle.entry {
+        return Some(callable.declaration_name.clone());
     }
     let module = bundle.modules.get(callable.module)?;
     let module_alias = bundle.name_ledger.module_alias(callable.module)?;
@@ -10997,7 +11980,7 @@ fn cost_error_conversion_gaps(
         if !is_reachable || callable.foreign {
             continue;
         }
-        let Some((function, _)) = functions.get(callable.module, callable.declaration_span) else {
+        let Some((function, _)) = functions.get(callable.module, &callable.declaration_name) else {
             continue;
         };
         collect_cost_typed_conversions(&function.body, &mut required);
@@ -11091,13 +12074,18 @@ fn cost_coverage_gaps(bundle: &ProgramBundle, program: &TirProgram) -> Vec<Strin
 /// Project typed cost facts from the frozen TIR.  Lowering remains the sole
 /// producer of the fact channel; CLI tooling and linting consume this one
 /// report instead of reconstructing cost from emitted Rust.
-pub fn cost_report(bundle: &ProgramBundle) -> Result<TCostReport, TCostReportError> {
+/// Nominal facts must be the retained result of checking this same bundle;
+/// cost tooling does not rebuild or substitute a second declaration context.
+pub fn cost_report(
+    bundle: &ProgramBundle,
+    checked_nominals: &[std::sync::Arc<crate::AST::MirFragmentNominalFacts>],
+) -> Result<TCostReport, TCostReportError> {
     let request = MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         MirArtifactBuildMode::Dev,
     );
-    let program = match lower_checked_tir_program_for(bundle, request) {
+    let program = match lower_checked_tir_program_for(bundle, checked_nominals, request) {
         Ok(program) => program,
         Err(error)
             if matches!(
@@ -11173,6 +12161,8 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
     let callables = cost_callables(bundle, app_graph.as_ref());
     let reachable = reachable_cost_callables(bundle, &callables);
     let mut contexts = std::collections::HashMap::new();
+    let facts = crate::Codegen::Context::BundleCodegenFacts::new(bundle);
+    let extern_funcs = facts.extern_funcs();
     let mut issues = Vec::new();
 
     for (index, callable) in callables.iter().enumerate() {
@@ -11200,7 +12190,6 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
             continue;
         };
         let cx = contexts.entry(callable.module).or_insert_with(|| {
-            let extern_funcs = bundle_extern_funcs(bundle);
             let mut cx = build_cx_items(
                 &module.items,
                 &module.source,
@@ -11209,7 +12198,7 @@ pub fn validate_tir_support(bundle: &ProgramBundle) -> Vec<TirCoverageIssue> {
                 &extern_funcs,
                 &bundle.edition,
             );
-            populate_cx_from_bundle(&mut cx, bundle, callable.module);
+            populate_cx_from_bundle(&mut cx, bundle, callable.module, &facts);
             register_own_struct_shapes(&mut cx, bundle, callable.module);
             crate::Codegen::Context::collect_iterable_hooks(&mut cx, &module.items);
             register_foreign_enum_variants(&mut cx, bundle, callable.module);
@@ -11535,9 +12524,11 @@ pub enum TExprKind {
     /// resolves the Rust static name; other engines look the value up by the
     /// same Jet name in their own const table.
     ConstRef(String),
-    /// D-ENC-DYN1: collect the ordered `Data` object entries a
-    /// `TPatternPosition::DataEntries` test captured into the user-visible map.
-    DataEntriesToMap(TLocal),
+    /// Checked Core-only publication; ownership and lifetime are semantic facts.
+    GlobalShared {
+        initializer: String,
+        lifetime: jet_foundation::MIR::MirSharedLifetime,
+    },
     /// Call to a plain top-level function. Each arg carries its emit decisions.
     Call {
         name: String,
@@ -11690,6 +12681,12 @@ pub enum TExprKind {
         op: UnOp,
         operand: Box<TExpr>,
     },
+    /// One checked owned concrete-to-trait coercion. The child retains its
+    /// original nominal identity and generic arguments until MIR lowering.
+    TraitBox {
+        value: Box<TExpr>,
+        target: Type,
+    },
     /// c109 Phase 3: a struct literal `S { f: v, … }`. The head type is `TExpr.ty`;
     /// each field carries its Jet name (emit mangles) and value. No clone/coercion
     /// at the literal site (mirrors the AST path).
@@ -11699,8 +12696,6 @@ pub enum TExprKind {
         /// c109 Phase 17: injected prelude fields (HTTPRequest route metadata).
         /// Structured — emit spells the Rust field lines.
         extra: Option<TStructExtra>,
-        /// c109 Phase 30: TRAIT-OBJECT coercion — `(trait, concrete owner)`.
-        as_trait: Option<(String, String)>,
     },
     /// c109 Phase 3: a struct field *read* `recv.field` in borrow position.
     /// `field` is the Jet field name (emit mangles / core-renames).
@@ -11788,7 +12783,7 @@ pub enum TExprKind {
     /// parameter/column value. Same shape as `JSONLit` (a FOREIGN prelude enum,
     /// not a user `EnumLit`), kept as its own node rather than reusing `JSONLit`
     /// because `DBValue` renders to a DIFFERENT prelude type (`jet_std::DBValue`,
-    /// not `jet_std::DataTree`) and has no recursive `Array`/`Object`-style
+    /// not `jet_std::Dyn`) and has no recursive `Array`/`Object`-style
     /// payload to special-case.
     DBValueLit {
         variant: String,
@@ -11911,11 +12906,11 @@ pub enum TExprKind {
     },
     /// c109 Phase 6: the sema-inserted `.clone()` on an owning non-Copy field read
     /// or borrowed value. This is ordinary sharing/cloning semantics. The
-    /// user-written `~` copy has its own `ExplicitCopy` node so a Tensor does not
+    /// user-written `.copy()` copy has its own `ExplicitCopy` node so a Tensor does not
     /// silently turn compiler-inserted clones into deep storage copies. The
     /// fact (#4318) is the sema decision behind the copy; MIR keeps it on `Copy`.
     Clone(Box<TExpr>, jet_foundation::MIR::MirCopyFact),
-    /// D-MEM1/D-CAP2: the explicit Jet `~` copy signal. Backends route Tensor
+    /// D-MEM1/D-CAP2: the explicit Jet `.copy()` copy signal. Backends route Tensor
     /// values through the shared Prelude copy operation; non-Tensor values keep
     /// their ordinary clone/materialization semantics.
     ExplicitCopy(Box<TExpr>),
@@ -11925,7 +12920,7 @@ pub enum TExprKind {
         place: Box<TExpr>,
         mutable: bool,
     },
-    /// D-MEM-COPYSEM1: an explicit `~` or an implicit read-only view crossing
+    /// D-MEM-COPYSEM1: an explicit `.copy()` or an implicit read-only view crossing
     /// an owning destination materializes the owned target through the shared
     /// Prelude. A plain `.clone()` is not sufficient for string views: cloning
     /// a `&str` hands back another `&str`, not the owned `String` needed to leave
@@ -12523,9 +13518,9 @@ pub enum TNumericOp {
 pub enum TClosureOp {
     /// Prove two indexes before lending their mutable views to one callback.
     EditDisjoint,
-    /// `map` on a list — `jet_list_map((recv).clone(), f)`.
+    /// `map` on a list — `jet_list_map(&recv, f)`.
     Map,
-    /// `map` on a list whose lambda is FnMut — `jet_list_map_mut((recv).clone(), f)`.
+    /// `map` on a list whose lambda is FnMut — `jet_list_map_mut(&recv, f)`.
     MapMut,
     /// Fallible `map` — the callback owns the failure row and the collection
     /// helper returns `Result<Collection<U>, E>`.
@@ -12601,7 +13596,8 @@ pub enum TClosureOp {
     FloatAddParaFold {
         f32: bool,
     },
-    /// `fold(init, f)` — `jet_list_fold((recv).clone(), init, f)`.
+    /// `iter.fold(init, f)` — `jet_list_fold(recv, init, f)`; a list or view
+    /// folds through the borrowed `ViewFold`.
     Fold,
     GroupBy,
     /// `count_by(f)` — `jet_list_count_by((recv).clone(), f)`.
@@ -12762,7 +13758,6 @@ impl TFailureCarrier {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TTargetApplicability {
     pub rust_aot: bool,
-    pub cranelift: bool,
     pub interpreter: bool,
     pub web: bool,
 }
@@ -12795,6 +13790,10 @@ pub struct TCaptureFacts {
     pub frozen: std::collections::BTreeSet<String>,
     pub materialized: std::collections::BTreeSet<String>,
     pub moved: std::collections::BTreeSet<String>,
+    /// `^name` captures (`Lambda::take_names`): the closure takes the
+    /// binding, which the scope never uses again (sema E0121), so a capture
+    /// the body only reads moves into the closure instead of copying.
+    pub taken: std::collections::BTreeSet<String>,
 }
 
 pub(crate) fn function_effect_facts(f: &crate::AST::Func) -> TEffectFacts {
@@ -12847,10 +13846,16 @@ pub(crate) fn function_has_plain_return(f: &crate::AST::Func) -> bool {
 }
 
 pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetApplicability {
+    if f.web_marker == Some(crate::WebPartition::WebPartitionMarker::JS) {
+        return TTargetApplicability {
+            rust_aot: false,
+            interpreter: false,
+            web: true,
+        };
+    }
     let Some(foreign) = f.inline_foreign.as_ref() else {
         return TTargetApplicability {
             rust_aot: true,
-            cranelift: true,
             interpreter: true,
             web: true,
         };
@@ -12859,11 +13864,10 @@ pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetAppl
         foreign.lang.to_ascii_lowercase().as_str(),
         "c" | "cpp" | "c++" | "asm" | "assembly"
     ) {
-        // Native inline bodies share the checked bridge across AOT, Cranelift,
-        // and the resident interpreter; Web has no native provider.
+        // Native inline bodies share the checked bridge across AOT and the
+        // interpreter; Web has no native provider.
         return TTargetApplicability {
             rust_aot: true,
-            cranelift: true,
             interpreter: true,
             web: false,
         };
@@ -12871,7 +13875,6 @@ pub(crate) fn function_target_applicability(f: &crate::AST::Func) -> TTargetAppl
     let web = foreign.lang.eq_ignore_ascii_case("js") || foreign.lang.eq_ignore_ascii_case("web");
     TTargetApplicability {
         rust_aot: true,
-        cranelift: false,
         interpreter: false,
         web,
     }
@@ -12905,6 +13908,7 @@ pub(crate) fn lambda_capture_facts(lam: &crate::AST::Lambda) -> TCaptureFacts {
         frozen: lam.meta.frozen_captures.iter().cloned().collect(),
         materialized: lam.meta.materialized_captures.iter().cloned().collect(),
         moved: lam.meta.moved_captures.iter().cloned().collect(),
+        taken: lam.take_names.iter().map(|(name, _)| name.clone()).collect(),
     }
 }
 
@@ -13177,6 +14181,8 @@ pub enum TBuiltinOp {
     IndexOf,
     /// `reverse()` → `(recv).reverse()`.
     Reverse,
+    /// Embedded Core-only storage move; no Clone or Close.
+    SwapList,
     /// `sort()` (no comparator) → `(recv).sort()`.
     Sort,
     /// `sort_desc()` → the shared descending Prelude kernel.
@@ -13351,7 +14357,6 @@ pub enum TBuiltinOp {
     },
     // #1477 List/Map non-closure surface
     ListSlice,
-    ListCopy,
     ListEqual,
     ListBinarySearch,
     ListUnion,
@@ -13361,7 +14366,6 @@ pub enum TBuiltinOp {
     ListMinMax {
         tuple_struct: String,
     },
-    MapCopy,
     MapEqual,
     MapFirst,
     MapToList {
@@ -13486,7 +14490,6 @@ pub enum TBuiltinOp {
     BitSetRemove,
     BitSetCount,
     BitSetToList,
-    BitSetCopy,
     BitSetNew,
     ByteBufferNew,
     ByteBufferFrom,
@@ -13596,6 +14599,7 @@ impl TBuiltinOp {
             | Self::MapPopFirst
             | Self::ExtendList
             | Self::Reverse
+            | Self::SwapList
             | Self::Sort
             | Self::SortDesc
             | Self::Clear
@@ -13626,6 +14630,7 @@ impl TBuiltinOp {
             | Self::DequeSplit
             | Self::SplitWrite { .. }
             | Self::GetDisjointWrite
+            | Self::ViewMutNew { .. }
             | Self::IterNext => true,
             Self::ByteBufferMethod { method } => matches!(
                 method.as_str(),
@@ -13762,6 +14767,8 @@ pub enum THandleOp {
     },
     /// FileReader: `read_line()` → `{root}jet_std_file_reader_read_line(&mut (recv))`.
     FileReaderReadLine,
+    /// #3593 FileReader: `read(max)` → `{root}jet_std_file_reader_read(&mut (recv), a0)`.
+    FileReaderRead,
     /// Read-only projection of the path retained by a live provider handle.
     FileReaderPath,
     /// D-FOUND-VIEW1=A: mapped-file byte window (`Result<View<[U8]>, IOError>`).
@@ -13778,6 +14785,10 @@ pub enum THandleOp {
     FileWriterWriteLine,
     /// FileWriter: `flush()` → `{root}jet_std_file_writer_flush(&mut (recv))`.
     FileWriterFlush,
+    /// #3593 FileWriter: `write_all(bytes)` → `{root}jet_std_file_writer_write_all(&mut (recv), &(a0))`.
+    FileWriterWriteAll,
+    /// #3593 FileWriter: `fsync()` → `{root}jet_std_file_writer_fsync(&mut (recv))`.
+    FileWriterFsync,
     /// Read-only projection of the path retained by a live provider handle.
     FileWriterPath,
     /// D-ENCSTREAM-SURFACE1=A: JSON pull reader/writer lifecycle.
@@ -13789,7 +14800,6 @@ pub enum THandleOp {
     JSONLWriterWrite,
     JSONLWriterFlush,
     JSONLWriterFinish,
-    CSVReaderNext,
     /// D-DATAFLOW1=A: typed pull `DataStream<T>.next()` → `?T !DataError`.
     DataStreamNext,
     /// D-FOUND-COREAPI1 / #2853: shared event-time stream operators.
@@ -13802,9 +14812,6 @@ pub enum THandleOp {
     XMLWriterWrite,
     XMLWriterFlush,
     XMLWriterFinish,
-    CSVWriterWrite,
-    CSVWriterFlush,
-    CSVWriterFinish,
     CBORReaderNext,
     CBORWriterWrite,
     CBORWriterFlush,
@@ -13824,14 +14831,6 @@ pub enum THandleOp {
     StderrIsTty,
     /// D-CMD-OVERRIDE1=C: `TestSuite.run()` calls the installed command runner.
     TestSuiteRun,
-    /// D-DET1 Clock: `now()` → `{root}jet_clock_now(&(recv))` (current ms, no advance).
-    ClockNow,
-    /// D-DET1 Clock: `tick(ms)` → `{root}jet_clock_tick(&mut (recv), a0)` (advance + read).
-    ClockTick,
-    /// D-DET-CAPAPI Clock: `advance(to_ms)` → `{root}jet_clock_advance(&mut (recv), a0)` (absolute set + read).
-    ClockAdvance,
-    /// D-DET-CAPAPI Clock: `wait(d)` → `{root}jet_clock_wait(&mut (recv), &(a0))` (advance by a Duration + read).
-    ClockWait,
     /// D-TEST-WORLD1=A: controlled world clock read in milliseconds.
     WorldNow,
     /// D-TEST-WORLD1=A: controlled world monotonic advance by Duration.
@@ -13878,20 +14877,6 @@ pub enum THandleOp {
     HistoryRngNextU64,
     /// D-TEST-STRATEGY1=A HistoryRng: `below(bound)` consumes the callback RNG.
     HistoryRngBelow,
-    /// D-TESTDATA1 Fake: locale and deterministic fake-data domain draws.
-    FakeLocale,
-    FakeName,
-    FakeEmail,
-    FakeHost,
-    FakeAddress,
-    /// D-SOLVER-LIB1=A: `Solver.new(seed)` → `{root}jet_solver_new(seed)`.
-    SolverNew,
-    /// D-SOLVER-LIB1=A: `solver.require(ok)` → `{root}jet_solver_require(&mut solver, ok)`.
-    SolverRequire,
-    /// D-SOLVER-LIB1=A: `solver.failure_count()` → `{root}jet_solver_failure_count(&solver)`.
-    SolverFailureCount,
-    /// D-SOLVER-LIB1=A: `solver.status()` → `{root}jet_solver_status(&solver)`.
-    SolverStatus,
     GameSceneNew,
     GameReplayRecord,
     GameBackendHeadless,
@@ -14146,12 +15131,6 @@ pub enum THandleOp {
         method: String,
         callback_index: Option<usize>,
     },
-    /// D-HONESTNUM1=A: `Measurement<Float>` arithmetic / accessors.
-    /// `.add(m)/.sub(m)/.mul(m)/.div(m)` → `(recv).<method>(a0)` → `JetMeasurement<f64>`.
-    /// `.value()/.uncertainty()` → `(recv).<method>()` → `f64`.
-    MeasurementMethod {
-        method: String,
-    },
     /// D-LAYOUT1 / D-LAYOUT-GATES1: an instance method on `LayoutHandle`
     /// (`.h`/`.v`/`.value`/`.suggest`/`.is_feasible`/`.conflict`) or
     /// `Constraint` (`.required`/`.strong`/`.medium`/`.weak`). Every Jet
@@ -14167,22 +15146,8 @@ pub enum THandleOp {
     LoadableMethod {
         method: String,
     },
-    /// D-SHAPE-CTORVERB1=C: generic `ExpiringValue<T>` fallible accessors.
-    ExpiringMethod {
-        method: String,
-    },
-    /// D-APPROX1=A: method call on a sketch data structure (HyperLogLog/TDigest/CMS/ReservoirSampler).
-    SketchMethod {
-        sketch: String,
-        method: String,
-    },
     /// D-TIMEDEPTH1=A: method call on a civil-time type (Date/DateTime).
     CivilTimeMethod {
-        kind: String,
-        method: String,
-    },
-    /// D-URL1=A: method call on URL/MIME value types.
-    UrlMimeMethod {
         kind: String,
         method: String,
     },
@@ -14205,25 +15170,36 @@ pub enum THandleOp {
         kind: String,
         method: String,
     },
-    /// D-SERDE-ACCESS=B: `DataTree.field(name)` → `(recv).field(&a0)`.
-    DataTreeField,
-    /// D-SERDE-ACCESS=B: `DataTree.at(i)` → `(recv).at(a0)`.
-    DataTreeAt,
-    /// D-SERDE-ACCESS=B: `DataTree.int()` → `(recv).int()`.
-    DataTreeInt,
-    /// D-SERDE-ACCESS=B: `DataTree.text()` → `(recv).text()`.
-    DataTreeText,
-    /// D-SERDE-ACCESS=B: `DataTree.bool()` → `(recv).bool()`.
-    DataTreeBool,
-    /// D-SERDE-ACCESS=B: `DataTree.float()` → `(recv).float()`.
-    DataTreeFloat,
-    /// D-DATATREE-ERGO1=A: `DataTree.to_text()` → `(recv).to_text()`.
-    DataTreeToText,
-    /// D-DATATREE-ERGO1=A: `DataTree.equal_unordered(other)` →
+    DynIndexKey { site: String, location: TPanicLoc },
+    DynIndexAt { site: String, location: TPanicLoc },
+    DynGetKey,
+    DynGetAt,
+    DynHas,
+    DynKeys,
+    DynRemove,
+    DynLen { site: String, location: TPanicLoc },
+    DynBinary { op: String, site: String, location: TPanicLoc },
+    DynCompare { op: String, site: String, location: TPanicLoc },
+    DynSetPath { keys: Vec<bool>, site: String, location: TPanicLoc },
+    /// D-SERDE-ACCESS=B: `Dyn.field(name)` → `(recv).field(&a0)`.
+    DynField,
+    /// D-SERDE-ACCESS=B: `Dyn.at(i)` → `(recv).at(a0)`.
+    DynAt,
+    /// D-SERDE-ACCESS=B: `Dyn.int()` → `(recv).int()`.
+    DynInt,
+    /// D-SERDE-ACCESS=B: `Dyn.text()` → `(recv).text()`.
+    DynText,
+    /// D-SERDE-ACCESS=B: `Dyn.bool()` → `(recv).bool()`.
+    DynBool,
+    /// D-SERDE-ACCESS=B: `Dyn.float()` → `(recv).float()`.
+    DynFloat,
+    /// D-DATATREE-ERGO1=A: `Dyn.to_text()` → `(recv).to_text()`.
+    DynToText,
+    /// D-DATATREE-ERGO1=A: `Dyn.equal_unordered(other)` →
     /// `(recv).equal_unordered(&a0)`.
-    DataTreeEqualUnordered,
+    DynEqualUnordered,
     /// D-SERDE16=A: `tree.decode<T>()` dispatches the public `T.Decode` protocol.
-    DataTreeDecode(Type),
+    DynDecode(Type),
     /// D-SERDE2=A: `value.encode()` dispatches the public Encode protocol.
     SerdeEncode,
     /// D-SERDE-ACCESS=B: same accessors on `JSON`/`Data`.
@@ -14270,8 +15246,6 @@ pub enum THandleOp {
         /// calls carry one extra lowered argument: the checked input binding.
         args_len: usize,
     },
-    /// D-WEBVIRTUAL1: project a virtual window through its canonical facts API.
-    WebVirtualWindowFacts,
     /// D-DBPOLICY-BIND1: bind a validated RowPolicy + user to a DBConnection.
     DBWithPolicy,
     /// D-DBPOOL1: bounded acquisition, readiness, draining, and receipt share
@@ -14461,4 +15435,4 @@ pub struct TFnCoerce {
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
-mod tests;
+pub(super) mod tests;

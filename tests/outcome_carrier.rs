@@ -34,7 +34,8 @@ fn run_jet(name: &str, src: &str) -> String {
         .spawn(move || {
             let path = file.to_str().unwrap();
             let mut bundle = jet::Loader::load_entry(path).expect("fixture should load");
-            let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+            let (diags, _facts, checked_nominals) =
+                jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
             assert!(
                 !diags
                     .iter()
@@ -44,8 +45,8 @@ fn run_jet(name: &str, src: &str) -> String {
             );
             match common::run_interpreter_checked_bundle(
                 &bundle,
+                &checked_nominals,
                 true,
-                jet::Interpreter::InterpreterInvocation::RunInterpret,
                 &common::development_policy(),
             ) {
                 jet::Interpreter::RunOutcome::Ran {
@@ -175,7 +176,7 @@ fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
     good :: rows.filter((row) -> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
-        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [label.copy()] })
     }
     return Ok(good)
 }
@@ -226,7 +227,7 @@ fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
     good :: rows.filter((row) -> row != "")
     broken :: rows.len() - good.len()
     if broken > 0 {
-        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [label.copy()] })
     }
     return Ok(good)
 }
@@ -272,7 +273,7 @@ fn run() {
     assert!(
         web.wasm_rust
             .contains("pub type JetOutcome<T, E> = Result<T, E>;")
-            && web.wasm_rust.contains("pub struct JetAbsent;"),
+            && web.wasm_rust.contains("struct JetAbsent;"),
         "the wasm module must include the one carrier file:\n{}",
         web.wasm_rust
     );
@@ -310,7 +311,7 @@ fn run() {
         .unwrap_or_else(|diags| panic!("web Err fixture rejected: {diags:?}"));
     let web = out.web.expect("web target must produce artifacts");
 
-    assert!(web.wasm_rust.contains("pub struct JetErr {"));
+    assert!(web.wasm_rust.contains("struct JetErr {"));
     assert!(web.wasm_rust.contains("jet_err("));
     assert!(web.wasm_rust.contains("jet_err_message"));
 
@@ -351,7 +352,8 @@ fn run() Err! {
     fs::write(&file, src).unwrap();
     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap())
         .expect("interpreter Err fixture should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
         diagnostics
             .iter()
@@ -361,8 +363,8 @@ fn run() Err! {
 
     match common::run_interpreter_checked_bundle(
         &bundle,
+        &checked_nominals,
         false,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &common::development_policy(),
     ) {
         jet::Interpreter::RunOutcome::Ran {

@@ -1,0 +1,60 @@
+// Rust TestingComparison.rs::compare_samples_with_discarded, adapted from
+// origin/port/compiler's TestingComparison.jet to the existing record model.
+// This is the verdict engine for all consumers, not a CLI-specific comparator.
+fn testing_compare_samples_with_discarded(relation: ObservationRelation, samples: [ComparisonSample], discarded_cases: Int) -> ComparisonRecord Never! {
+    record := ComparisonRecord{schema_version: U16{1}, status: ComparisonStatus.Empty, relation: relation, samples: samples, discarded_cases: discarded_cases, first_difference: None, reduced_counterexample: None, contamination: None, reason: None, universal_proof: false}
+    if record.samples.len() == 0 {
+        record.reason = Val(if discarded_cases == 0 -> "comparison corpus is empty" else -> "all comparison cases were discarded")
+        return record
+    }
+    loop sample in record.samples {
+        if !comparison_identity_is_complete(sample.identity) {
+            record.status = ComparisonStatus.InvalidOracle
+            record.reason = Val("comparison sample identity is incomplete")
+            return record
+        }
+    }
+    loop (index, sample) in record.samples {
+        if sample.reference_replay == .Val(replay) {
+            if replay != sample.reference {
+                record.status = ComparisonStatus.Contaminated
+                record.contamination = Val("reference observation changed on replay for case `{sample.identity.case_id}`")
+                record.reason = record.contamination
+                return record
+            }
+        }
+        if sample.candidate_replay == .Val(replay) {
+            if replay != sample.candidate {
+                record.status = ComparisonStatus.Contaminated
+                record.contamination = Val("candidate observation changed on replay for case `{sample.identity.case_id}`")
+                record.reason = record.contamination
+                return record
+            }
+        }
+        equal :: if relation == {
+            .TypedEquality -> sample.declared_equal
+            .OrderedEffects -> Val(sample.reference.raw == sample.candidate.raw && sample.reference.ordered_effects == sample.candidate.ordered_effects && sample.reference.cleanup == sample.candidate.cleanup && sample.reference.mutation == sample.candidate.mutation)
+            .TypedFailure -> Val(sample.reference.typed_failure == sample.candidate.typed_failure && sample.reference.raw == sample.candidate.raw)
+            .Custom(_) -> sample.declared_equal
+        } ?? {
+            record.status = ComparisonStatus.InvalidOracle
+            record.reason = Val("comparison relation did not declare a checked equality result")
+            return record
+        }
+        if !equal {
+            record.status = ComparisonStatus.Mismatch
+            record.first_difference = Val(index)
+            record.reduced_counterexample = Val(sample)
+            record.reason = Val("first differing observation is case `{sample.identity.case_id}`")
+            return record
+        }
+    }
+    if discarded_cases > 0 {
+        record.status = ComparisonStatus.InvalidOracle
+        record.reason = Val("comparison discarded cases and cannot claim equality")
+    } else {
+        record.status = ComparisonStatus.Matched
+        record.reason = Val("{record.samples.len()} observed case(s) matched under {observation_relation_as_str(record.relation)}")
+    }
+    record
+}

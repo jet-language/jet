@@ -4,6 +4,8 @@ use jet_foundation.[
     MIRBlockID,
     MIRBinaryOp,
     MIRConstant,
+    mir_integer_constant,
+    mir_integer_value,
     MIRFunction,
     MIRIntegerWidth,
     MIROperation,
@@ -11,6 +13,8 @@ use jet_foundation.[
     MIRProgram,
     MIRTerminator,
     MIRType,
+    MIRPlace,
+    MIRLocal,
     MIRUnaryOp,
     MIRValueFact,
     MIRValueID,
@@ -30,12 +34,19 @@ fn mir_pass_eliminate_unreachable(program: &MIRProgram) Never! {
 fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
     reachable :: mir_pass_reachable(function)
     reachable_rows := [U64:Bool]{}
+    old_block_count :: function.blocks.len()
     loop id in reachable -> &reachable_rows.add(id.value, true).drop("a block id may repeat")
+    // Unreachable blocks are dropped by moving the kept ones out and back
+    // (two pops keep their order); a block is never copied.
     kept_blocks := [MIRBasicBlock]{}
-    loop block in function.blocks {
-        if reachable_rows.get(block.id.value) != None -> &kept_blocks.push(block)
+    loop {
+        block :: &function.blocks.pop() ?? break
+        if reachable_rows.get(block.id.value) != None -> &kept_blocks.push(^block)
     }
-    function.blocks = kept_blocks
+    loop {
+        block :: &kept_blocks.pop() ?? break
+        &function.blocks.push(^block)
+    }
     // Live values and predecessors are keyed once per function instead of
     // rescanned per value and per block.
     live_values := [U64:Bool]{}
@@ -44,19 +55,66 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
             if instruction.result == .Val(result) -> &live_values.add(result.value, true).drop("a value id may repeat")
         }
     }
-    place_rows :: mir_pass_place_rows(function)
-    loop place in function.places {
-        loop value in mir_pass_place_value_uses(function.places, place_rows, place.id) -> &live_values.add(value.value, true).drop("a value id may repeat")
-    }
-    loop scope in function.scopes {
-        value :: scope.deadline ?? next
-        &live_values.add(value.value, true).drop("a value id may repeat")
+    if function.blocks.len() != old_block_count {
+        // Loop locals can alias indexed places rather than own storage.
+        // Remove dead aliases too; retain all real operation/drop roots.
+        live_places := [U64:Bool]{}
+        loop place in function.places {
+            if mir_pass_place_has_live_values(place, live_values) -> &live_places.add(place.id.value, true).drop("a place may repeat")
+        }
+        referenced_places := [U64:Bool]{}
+        loop action in function.drops -> &referenced_places.add(action.place.value, true).drop("a place may repeat")
+        loop block in function.blocks {
+            loop instruction in block.instructions {
+                loop place in mir_pass_operation_place_refs(instruction.operation) -> &referenced_places.add(place.value, true).drop("a place may repeat")
+            }
+        }
+        referenced_locals := [U64:Bool]{}
+        loop place in function.places {
+            if referenced_places.get(place.id.value) == None -> next
+            if place.base == {
+                .Local(local) -> &referenced_locals.add(local.value, true).drop("a local may repeat")
+                else -> {}
+            }
+        }
+        kept_locals := [MIRLocal]{}
+        loop {
+            local :: &function.locals.pop() ?? break
+            if live_places.get(local.place.value) != None || referenced_places.get(local.place.value) != None || referenced_locals.get(local.id.value) != None -> &kept_locals.push(^local)
+        }
+        live_locals := [U64:Bool]{}
+        loop {
+            local :: &kept_locals.pop() ?? break
+            &live_locals.add(local.id.value, true).drop("a local may repeat")
+            &referenced_places.add(local.place.value, true).drop("a place may repeat")
+            &function.locals.push(^local)
+        }
+        kept_places := [MIRPlace]{}
+        loop {
+            place :: &function.places.pop() ?? break
+            keep := referenced_places.get(place.id.value) != None
+            if !keep && live_places.get(place.id.value) != None {
+                if place.base == {
+                    .Local(local) -> keep = live_locals.get(local.value) != None
+                    else -> keep = true
+                }
+            }
+            if keep -> &kept_places.push(^place)
+        }
+        loop {
+            place :: &kept_places.pop() ?? break
+            &function.places.push(^place)
+        }
     }
     kept_values := [MIRValueFact]{}
-    loop value in function.values {
-        if live_values.get(value.id.value) != None -> &kept_values.push(value)
+    loop {
+        value :: &function.values.pop() ?? break
+        if live_values.get(value.id.value) != None -> &kept_values.push(^value)
     }
-    function.values = kept_values
+    loop {
+        value :: &kept_values.pop() ?? break
+        &function.values.push(^value)
+    }
     // Only phi operands change below, so the predecessor map stays exact.
     predecessors :: mir_pass_predecessor_map(function)
     block_index := 0
@@ -64,22 +122,46 @@ fn mir_pass_eliminate_unreachable_function(function: &MIRFunction) Never! {
         expected :: predecessors.get(function.blocks[block_index].id.value) ?? [MIRBlockID]{}
         expected_rows := [U64:Bool]{}
         loop predecessor in expected -> &expected_rows.add(predecessor.value, true).drop("a predecessor may repeat")
-        instructions := function.blocks[block_index].instructions
+        // Phi operands are rewritten in place; the block's instructions are
+        // read through a view, never copied out and written back.
         instruction_index := 0
-        loop instruction_index < instructions.len() {
-            instruction := instructions[instruction_index]
+        loop instruction_index < function.blocks[block_index].instructions.len() {
+            instruction :: function.blocks[block_index].instructions[instruction_index]
             if instruction.operation == {
                 .Phi(incoming) -> {
                     filtered :: loop row in incoming if expected_rows.get(row.block.value) != None -> row
-                    instructions[instruction_index].operation = MIROperation.Phi{incoming: filtered}
+                    function.blocks[block_index].instructions[instruction_index].operation = MIROperation.Phi{incoming: filtered}
                 }
                 else -> {}
             }
             instruction_index += 1
         }
-        function.blocks[block_index].instructions = instructions
         block_index += 1
     }
+}
+
+fn mir_pass_place_has_live_values(place: MIRPlace, live_values: [U64:Bool]) -> Bool Never! {
+    if place.base == {
+        .Parameter(value) | .Capture(value) | .Temporary(value) -> {
+            if live_values.get(value.value) == None -> return false
+        }
+        else -> {}
+    }
+    loop projection in place.projections {
+        if projection == {
+            .Index(_, index, _, _, _, _, _) -> {
+                if live_values.get(index.value) == None -> return false
+            }
+            .Range(range, _, _) -> {
+                if live_values.get(range.value) == None -> return false
+            }
+            .MapLookup(lookup, _, _) -> {
+                if live_values.get(lookup.value) == None -> return false
+            }
+            else -> {}
+        }
+    }
+    true
 }
 
 fn mir_pass_simplify_cfg_function(function: &MIRFunction) Never! {
@@ -91,9 +173,8 @@ fn mir_pass_simplify_cfg_function(function: &MIRFunction) Never! {
     mir_pass_forward_phi_joins(&function)
 }
 
-fn mir_pass_count_use(uses: &[String:Int], value: MIRValueID) Never! {
-    key :: "{value.value}"
-    &uses.add(key, (uses.get(key) ?? 0) + 1).drop("the count replaces the prior count")
+fn mir_pass_count_use(uses: &[U64:Int], value: MIRValueID) Never! {
+    &uses.add(value.value, (uses.get(value.value) ?? 0) + 1).drop("the count replaces the prior count")
 }
 
 // MIROptimization forward_phi_joins: a block that holds only a phi, is
@@ -104,18 +185,19 @@ fn mir_pass_count_use(uses: &[String:Int], value: MIRValueID) Never! {
 // joins. Nothing executes in a bypassed block (a function with `Normal` drop
 // actions runs them on every jump, so it is left alone), and
 // mir_pass_eliminate_unreachable removes the bypassed blocks and their phi
-// values. Linear in the function.
+// values. Linear in the function. Every table is keyed by the raw U64 ID;
+// none is iterated, so the key type does not affect the result.
 // Rust: crates/jet-foundation/src/MIROptimization.rs::forward_phi_joins
 fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
-    drop_targets := [String:Bool]{}
+    drop_targets := [U64:Bool]{}
     loop action in function.drops {
         if action.edge == {
             .Normal -> return
             .Return -> {}
-            .Failure(target) | .Unwind(target) -> &drop_targets.add("{target.value}", true).drop("a target may repeat")
+            .Failure(target) | .Unwind(target) -> &drop_targets.add(target.value, true).drop("a target may repeat")
         }
     }
-    uses := [String:Int]{}
+    uses := [U64:Int]{}
     place_rows :: mir_pass_place_rows(function)
     loop place in function.places {
         loop used in mir_pass_place_value_uses(function.places, place_rows, place.id) -> mir_pass_count_use(&uses, used)
@@ -123,8 +205,8 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
     loop scope in function.scopes {
         if scope.deadline == .Val(deadline) -> mir_pass_count_use(&uses, deadline)
     }
-    positions := [String:Int]{}
-    edges := [String:Int]{}
+    positions := [U64:Int]{}
+    edges := [U64:Int]{}
     // Scalar linked rows avoid copying a growing bucket for each source.
     phi_heads := [U64:Int]{}
     phi_next := [Int]{}
@@ -132,7 +214,7 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
     phi_instructions := [Int]{}
     phi_values := [MIRValueID]{}
     loop (position, block) in function.blocks {
-        &positions.add("{block.id.value}", position).drop("block ids are unique")
+        &positions.add(block.id.value, position).drop("block ids are unique")
         loop (instruction_index, instruction) in block.instructions {
             if instruction.operation == {
                 .Phi(incoming) -> {
@@ -152,23 +234,20 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
             }
         }
         loop used in mir_terminator_value_uses(block.terminator) -> mir_pass_count_use(&uses, used)
-        loop target in mir_terminator_targets(block.terminator) {
-            key :: "{target.value}"
-            &edges.add(key, (edges.get(key) ?? 0) + 1).drop("the count replaces the prior count")
-        }
+        loop target in mir_terminator_targets(block.terminator) -> &edges.add(target.value, (edges.get(target.value) ?? 0) + 1).drop("the count replaces the prior count")
     }
     // Bypassed block -> its phi value and the block it jumps to.
-    forward_values := [String:MIRValueID]{}
-    forward_targets := [String:MIRBlockID]{}
+    forward_values := [U64:MIRValueID]{}
+    forward_targets := [U64:MIRBlockID]{}
     loop block in function.blocks {
-        key :: "{block.id.value}"
+        key :: block.id.value
         if block.id == function.entry || drop_targets.get(key) != None || block.instructions.len() != 1 -> next
         instruction :: block.instructions[0]
         value :: instruction.result ?? next
         incoming :: mir_pass_phi_rows(instruction.operation) ?? next
         target :: mir_pass_jump_target(block.terminator) ?? next
-        if target == block.id || (uses.get("{value.value}") ?? 0) != 1 -> next
-        target_position :: positions.get("{target.value}") ?? next
+        if target == block.id || (uses.get(value.value) ?? 0) != 1 -> next
+        target_position :: positions.get(target.value) ?? next
         mentions := 0
         feeds := 0
         row_position := phi_heads.get(block.id.value) ?? -1
@@ -196,10 +275,10 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
         // Every predecessor reaches the block through its own plain jump, once,
         // and the phi names each predecessor once.
         if incoming.len() == 0 || (edges.get(key) ?? 0) != incoming.len() -> next
-        entering := [String:Bool]{}
+        entering := [U64:Bool]{}
         plain := true
         loop row in incoming {
-            source_key :: "{row.block.value}"
+            source_key :: row.block.value
             source :: positions.get(source_key) ?? -1
             if source < 0 || entering.get(source_key) != None {
                 plain = false
@@ -215,16 +294,16 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
     if forward_values.len() == 0 -> return
     // The outermost join each bypassed block reaches, each chain walked once.
     // A jump cycle of phi-only blocks leaves the function alone.
-    finals := [String:MIRBlockID]{}
+    finals := [U64:MIRBlockID]{}
     loop block in function.blocks {
-        start_key :: "{block.id.value}"
+        start_key :: block.id.value
         if forward_targets.get(start_key) == None -> next
-        path := [String]{}
-        on_path := [String:Bool]{}
+        path := [U64]{}
+        on_path := [U64:Bool]{}
         at := block.id
         end := block.id
         loop {
-            at_key :: "{at.value}"
+            at_key :: at.value
             if finals.get(at_key) != None {
                 end = finals.get(at_key) ?? at
                 break
@@ -240,25 +319,25 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
         }
         loop step in path -> &finals.add(step, end).drop("each block is resolved once")
     }
-    inner := [String:[MIRPhiIncoming]]{}
+    inner := [U64:[MIRPhiIncoming]]{}
     loop block_index in 0..<function.blocks.len() {
-        key :: "{function.blocks[block_index].id.value}"
+        key :: function.blocks[block_index].id.value
         if forward_values.get(key) != None {
             rows :: mir_pass_phi_rows(function.blocks[block_index].instructions[0].operation) ?? next
             &inner.add(key, rows).drop("block ids are unique")
             next
         }
         jump :: mir_pass_jump_target(function.blocks[block_index].terminator) ?? next
-        end :: finals.get("{jump.value}") ?? next
+        end :: finals.get(jump.value) ?? next
         function.blocks[block_index].terminator = MIRTerminator.Jump{target: end}
     }
     loop block_index in 0..<function.blocks.len() {
-        if forward_values.get("{function.blocks[block_index].id.value}") != None -> next
+        if forward_values.get(function.blocks[block_index].id.value) != None -> next
         loop instruction_index in 0..<function.blocks[block_index].instructions.len() {
             incoming :: mir_pass_phi_rows(function.blocks[block_index].instructions[instruction_index].operation) ?? next
             bypassed := false
             loop row in incoming {
-                phi :: forward_values.get("{row.block.value}") ?? next
+                phi :: forward_values.get(row.block.value) ?? next
                 if phi == row.value -> bypassed = true
             }
             if !bypassed -> next
@@ -275,7 +354,7 @@ fn mir_pass_forward_phi_joins(function: &MIRFunction) Never! {
                 row_block :: lists[top][cursors[top]].block
                 row_value :: lists[top][cursors[top]].value
                 cursors[top] = cursors[top] + 1
-                row_key :: "{row_block.value}"
+                row_key :: row_block.value
                 bypassed_row := false
                 if forward_values.get(row_key) == .Val(row_phi) -> bypassed_row = row_phi == row_value
                 if bypassed_row && inner.get(row_key) != None {
@@ -430,7 +509,7 @@ fn mir_pass_constant_put(constants: &[U64:MIRConstant], value: MIRValueID, const
 
 fn mir_pass_scalar_constant(constant: MIRConstant) -> MIRConstant? {
     if constant == {
-        .Int(value, width, _) -> Val(MIRConstant.Int{value: value, width: width, spelling: None})
+        .Int(value, width, _) -> Val(mir_integer_constant(value, width, None))
         .Bool(value) -> Val(MIRConstant.Bool{value: value})
         .Char(value) -> Val(MIRConstant.Char{value: value})
         else -> None
@@ -481,10 +560,11 @@ fn mir_pass_fold_unary(op: MIRUnaryOp, value: MIRConstant, ty: MIRType) -> MIRCo
         }
         .Neg -> {
             if value == {
-                .Int(number, width, _) -> {
+                .Int(payload, width, _) -> {
+                    number :: mir_integer_value(payload, width)
                     result :: mir_pass_checked_sub(0, number) ?? return None
                     output_width :: mir_pass_integer_width(ty, width)
-                    if mir_pass_fits_integer(result, output_width) -> Val(MIRConstant.Int{value: result, width: output_width, spelling: None}) else -> None
+                    if mir_pass_fits_integer(result, output_width) -> Val(mir_integer_constant(result, output_width, None)) else -> None
                 }
                 else -> None
             }
@@ -525,9 +605,11 @@ fn mir_pass_fold_binary(op: MIRBinaryOp, left: MIRConstant, right: MIRConstant, 
                 else -> None
             }
         }
-        .Int(left_value, left_width, _) -> {
+        .Int(left_payload, left_width, _) -> {
+            left_value :: mir_integer_value(left_payload, left_width)
             if right == {
-                .Int(right_value, _, _) -> {
+                .Int(right_payload, right_width, _) -> {
+                    right_value :: mir_integer_value(right_payload, right_width)
                     if op == {
                         .Eq -> Val(MIRConstant.Bool{value: left_value == right_value})
                         .Ne -> Val(MIRConstant.Bool{value: left_value != right_value})
@@ -538,7 +620,7 @@ fn mir_pass_fold_binary(op: MIRBinaryOp, left: MIRConstant, right: MIRConstant, 
                         else -> {
                             result :: mir_pass_integer_result(op, left_value, right_value) ?? return None
                             width :: mir_pass_integer_width(ty, left_width)
-                            if mir_pass_fits_integer(result, width) -> Val(MIRConstant.Int{value: result, width: width, spelling: None}) else -> None
+                            if mir_pass_fits_integer(result, width) -> Val(mir_integer_constant(result, width, None)) else -> None
                         }
                     }
                 }
@@ -561,9 +643,9 @@ fn mir_pass_integer_result(op: MIRBinaryOp, left: Int, right: Int) -> Int? {
         .FloorDiv -> mir_pass_floor_div(left, right)
         .Mod -> mir_pass_floor_mod(left, right)
         .Rem -> if right == 0 -> None else -> Val(left %% right)
-        .BitAnd -> Val(left & right)
-        .BitOr -> Val(left | right)
-        .BitXor -> Val(left ~| right)
+        .BitAnd -> Val((left).bit_and(right))
+        .BitOr -> Val((left).bit_or(right))
+        .BitXor -> Val((left).bit_xor(right))
         .Shl -> if right < 0 || right >= 63 -> None else -> mir_pass_checked_mul(left, 1 << right)
         .Shr -> {
             if right < 0 || right >= 63 -> return None

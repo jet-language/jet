@@ -1,0 +1,15 @@
+# tests/terminal.rs::stdout_write_bytes_is_byte_exact_and_ordered_with_print
+# Exact original helper/source predicates; PENDING-SAME-HEAD; runtime UNRUN.
+requires: os:unix
+fixture: stdout_write_bytes_is_byte_exact_and_ordered_with_print.fixture
+env: NO_COLOR=1
+step default: jet run --quiet bytes.jet
+stdin: null
+stdout: file {work}/default.out.bin
+exit: 0
+file: default.out.bin = stdout_write_bytes_is_byte_exact_and_ordered_with_print.out.bin # original raw output.stdout byte equality
+step release: jet run --quiet --release bytes.jet
+stdin: null
+stdout: file {work}/release.out.bin
+exit: 0
+file: release.out.bin = stdout_write_bytes_is_byte_exact_and_ordered_with_print.out.bin # original raw output.stdout byte equality

@@ -1,0 +1,14 @@
+# Port of tests/package_root_single_home.rs:89-170; original source/manifest bytes.
+# PENDING-SEAM: find_manifest_root/SemIndex name/WatchGraph/Canvas/LSP still full original; CLI companions do not replace nominal projections.
+fixture: fixtures/nested_entry_points_share_root_and_stale_diagnostic
+step: jet check src/nested/main.jet --json
+exit: 0
+json: machine doc $.reports[?code = "E1226"] #= 0
+remove: package.jet
+file: jet.toml = ""
+step: jet run --watch src/nested/main.jet
+exit: nonzero
+stderr: ~ "E1226"
+step: jet build src/nested/main.jet --json
+exit: nonzero
+json: machine doc $.reports[?code = "E1226"] #>= 1

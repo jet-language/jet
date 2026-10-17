@@ -11,6 +11,7 @@ use crate::Generics;
 use crate::Syntax;
 use crate::jet_generated_format as jet_format;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct UnitFact {
@@ -84,6 +85,82 @@ fn unit_fact(
     }
 }
 
+fn register_unit_family(
+    cx: &mut Cx,
+    family: &crate::AST::UnitFamilyDef,
+    owner: Option<&str>,
+    rust_module: Option<&str>,
+) {
+    let dimension = family.resolved_dimension.clone();
+    let affine = family.base.is_some()
+        && family.members.iter().any(|member| member.offset != crate::AST::UnitRatio::zero());
+    for definition in family.distinct_defs() {
+        let name = owner.map_or_else(|| definition.name.clone(),
+            |owner| format!("{owner}::{}", definition.name));
+        cx.type_names.insert(name.clone());
+        if let Some(rust_module) = rust_module {
+            cx.foreign_types.insert(name.clone(), rust_module.to_owned());
+        } else {
+            cx.local_type_names.insert(name.clone());
+        }
+        let numeric = definition.derives.iter()
+            .any(|(marker, _)| marker == crate::Syntax::MARKER_NUMERIC);
+        cx.distinct_types.insert(name.clone(), (definition.base.clone(), numeric));
+        let kind = definition.quantity.as_ref().map(|(_, kind)| *kind)
+            .or_else(|| {
+                if !affine { return Some(crate::AST::QuantityKind::Linear) }
+                family.members.iter().find_map(|member| {
+                    let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
+                    if definition.name == format!("{stem}Point") {
+                        Some(crate::AST::QuantityKind::Point)
+                    } else if definition.name == format!("{stem}Delta") {
+                        Some(crate::AST::QuantityKind::Delta)
+                    } else {
+                        None
+                    }
+                })
+            }).unwrap_or(crate::AST::QuantityKind::Linear);
+        if let Some(member) = unit_family_member_for_type(family, &definition.name, kind) {
+            cx.unit_labels.insert(name.clone(), unit_label(family, member));
+            if family.base.is_some() || dimension.is_some() {
+                cx.unit_facts.insert(name, unit_fact(family, member, dimension.clone(), kind));
+            }
+        }
+    }
+}
+
+fn register_bundle_erased_nominals(cx: &mut Cx, bundle: &ProgramBundle, owner: usize) {
+    let identity = module_identity(bundle, owner);
+    let rust_module = mangle(&bundle.modules[owner].alias);
+    for item in &bundle.modules[owner].items {
+        match item {
+            Item::TypeAlias(alias) => {
+                let binders: Vec<_> = alias.type_params.iter().map(|param| param.name.clone()).collect();
+                let target = crate::Codegen::TIR::qualify_imported_type(
+                    bundle, owner, &identity, &binders, &alias.target);
+                cx.type_aliases.insert(format!("{identity}::{}", alias.name),
+                    (alias.type_params.clone(), target));
+            }
+            Item::Distinct(definition) => {
+                let name = format!("{identity}::{}", definition.name);
+                cx.type_names.insert(name.clone());
+                cx.foreign_types.insert(name.clone(), rust_module.clone());
+                cx.distinct_types.insert(name.clone(), (
+                    super::Imports::qualify_imported_call_type(bundle, owner, "", &definition.base),
+                    definition.derives.iter().any(|(marker, _)| marker == Syntax::MARKER_NUMERIC),
+                ));
+                if let Some((lo, hi, _)) = definition.range {
+                    cx.distinct_ranges.insert(name, (lo, hi));
+                }
+            }
+            Item::UnitFamily(family) => {
+                register_unit_family(cx, family, Some(&identity), Some(&rust_module));
+            }
+            _ => {}
+        }
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct ExternFn {
     pub(crate) wrapper: String,
@@ -120,7 +197,280 @@ pub(crate) struct CoreSourceFunctionSignature {
     pub(crate) return_type: Option<Type>,
 }
 
+/// Immutable source-program metadata, constructed once and borrowed by every
+/// module context. Local lexical projections remain in `Cx`.
+pub(crate) struct BundleCodegenFacts {
+    names: jet_foundation::Names::NameLedger,
+    metadata: Cx,
+    functions: Vec<HashMap<String, BundleFunctionFacts>>,
+    rust_modules: HashMap<String, usize>,
+    constants: Vec<HashMap<String, BundleConstantFacts>>,
+    method_keys: HashMap<String, HashMap<String, (String, String)>>,
+    namespace_variants: HashMap<String, HashMap<String, Arc<String>>>,
+    boxed_edges: HashMap<String, HashSet<String>>,
+    boxed_by_module: Vec<HashSet<(String, String)>>,
+}
+
+struct BundleFunctionFacts {
+    params: Vec<(AccessConvention, Type)>,
+    ret: Option<Type>,
+    binding: (String, String),
+    value_type: Type,
+    source_type: Type,
+    contracts: (Vec<ContractClause>, Vec<ContractClause>),
+    /// #4609: the declaring module and type-parameter order of a generic
+    /// function, so a package-bound call names the same canonical instance an
+    /// imported one does.
+    generic: Option<super::Imports::ImportedGenericFunction>,
+}
+
+struct BundleConstantFacts {
+    key: String,
+    ty: Option<Type>,
+    value: Option<CtValue>,
+    rust_value: String,
+}
+
+fn function_value_type(function: &Func, params: Vec<Type>, ret: Type) -> Type {
+    Type::Fn {
+        params,
+        ret: Some(Box::new(ret)),
+        effect_bound: None,
+        param_contract: (!function.params.is_empty()).then(|| function.params.iter()
+            .map(|param| (param.call_label().to_owned(), param.zone)).collect()),
+        call_metadata: Some(crate::AST::FunctionCallMetadata {
+            names: function.params.iter().map(|param| param.name.clone()).collect(),
+            defaults: function.params.iter().map(|param| param.default.as_deref().cloned()).collect(),
+            variadic: function.params.iter().map(|param| param.variadic).collect(),
+            conventions: function.params.iter().map(|param| param.convention).collect(),
+            policies: function.markers.iter()
+                .find(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+                .and_then(|marker| crate::AST::CallablePolicyChain::parse(
+                    &marker.expr_args_owned()).ok()).unwrap_or_default(),
+        }),
+        return_view_provenance: function.return_view_provenance.clone(),
+    }
+}
+
+impl BundleCodegenFacts {
+    pub(crate) fn extern_funcs(&self) -> &Arc<HashMap<String, ExternFn>> {
+        &self.metadata.extern_funcs
+    }
+
+    pub(crate) fn new(bundle: &ProgramBundle) -> Arc<Self> {
+        let extern_funcs = bundle_extern_funcs(bundle);
+        let mut metadata = build_cx_items(&[], "", "", None, &extern_funcs, &bundle.edition);
+        metadata.devtools_registry = Arc::new(bundle.devtools_registry.clone());
+        metadata.opaque_handles = Arc::new(bundle.cffi.handle_facts.iter()
+            .map(|fact| fact.jet_name.clone()).collect());
+        let mut core_modules: HashMap<String, String> = bundle.modules.iter().filter_map(|module| {
+            jet_foundation::CoreModuleExports::core_source_module_by_alias(&module.alias)
+                .map(|source| (source.module.to_owned(), source.alias.to_owned()))
+        }).collect();
+        if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
+            jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
+        ) {
+            if bundle.modules.iter().any(|module| module.alias == part.source.alias) {
+                core_modules.insert(part.source.module.to_owned(), part.source.alias.to_owned());
+            }
+        }
+        metadata.core_source_modules = Arc::new(core_modules);
+        metadata.core_source_sigs = Arc::new(super::Imports::core_source_sig_map(bundle));
+        metadata.used_core = Arc::new(bundle.used_core.clone());
+        metadata.ffi_callback_fns = Arc::new(bundle.ffi_callback_fns.clone());
+        metadata.foreign_undos = bundle_foreign_undos(bundle);
+        metadata.hardware_profile = crate::Sema::target_hardware_profile(bundle).map(Arc::new);
+        metadata.hardware_profile_id = crate::Sema::target_hardware_profile_id(bundle).map(Arc::from);
+        // Preview calls and artifact caching share the complete build identity.
+        let mut preview_identity = b"jet-ui-preview-build-v1\0".to_vec();
+        bundle.build_facts.append_artifact_identity_bytes(&mut preview_identity);
+        for value in [
+            bundle.build_facts.profile.as_str(),
+            bundle.build_facts.stamp.toolchain.as_str(),
+            if bundle.build_facts.stamp.dirty { "dirty" } else { "clean" },
+            bundle.build_facts.package_name.as_str(),
+            bundle.build_facts.package_version.as_str(),
+        ] {
+            preview_identity.extend_from_slice(&(value.len() as u64).to_le_bytes());
+            preview_identity.extend_from_slice(value.as_bytes());
+        }
+        metadata.preview_build_id = Arc::from(format!("sha256-{}",
+            jet_foundation::SHA256::sha256_hex(&preview_identity)));
+        metadata.preview_revision = Arc::from(bundle.build_facts.stamp.git.clone()
+            .filter(|value| !value.is_empty())
+            .or_else(|| (!bundle.build_facts.stamp.at.is_empty())
+                .then(|| bundle.build_facts.stamp.at.clone()))
+            .unwrap_or_else(|| format!("{}:{}",
+                bundle.build_facts.package_name, bundle.build_facts.package_version)));
+        let mut namespace_variants: HashMap<&str, HashMap<String, Arc<String>>> = HashMap::new();
+        for owner in 0..bundle.modules.len() {
+            crate::Codegen::TIR::register_own_struct_shapes(&mut metadata, bundle, owner);
+            register_module_methods(&mut metadata, bundle, owner, owner);
+            register_bundle_erased_nominals(&mut metadata, bundle, owner);
+            // S48 trait slots are named across modules: record each declared
+            // trait under its checked identity (`Cx::is_trait_type_name`).
+            for item in &bundle.modules[owner].items {
+                if let Item::Trait(definition) = item {
+                    if let Some(identity) = bundle.name_ledger.declared_identity(owner, &definition.name) {
+                        metadata.trait_names.insert(identity.to_owned());
+                    }
+                }
+            }
+            if let Some(root) = bundle.name_ledger.module_namespace(owner) {
+                for item in &bundle.modules[owner].items {
+                    if let Item::Enum(definition) = item {
+                        let identity = Arc::new(bundle.name_ledger.nominal_identity(owner, &definition.name)
+                            .expect("checked enum must have a declaring module"));
+                        let variants = namespace_variants.entry(root).or_default();
+                        for variant in &definition.variants {
+                            variants.insert(variant.name.clone(), Arc::clone(&identity));
+                        }
+                        for group in &definition.groups {
+                            variants.insert(group.path.clone(), Arc::clone(&identity));
+                        }
+                    }
+                }
+            }
+        }
+        register_bundle_iter_index_hooks(&mut metadata, bundle);
+        let boxed = find_box_edges_for_names(metadata.struct_fields.keys()
+            .chain(metadata.enum_variants.keys()).filter(|name| name.contains("::"))
+            .map(String::as_str), &metadata);
+        let mut boxed_edges: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut boxed_by_module: Vec<HashSet<(String, String)>> =
+            (0..bundle.modules.len()).map(|_| HashSet::new()).collect();
+        for (owner, edge) in boxed {
+            if let Some(module) = bundle.name_ledger.nominal_module(&owner) {
+                boxed_by_module[module].insert((nominal_leaf(&owner).to_owned(), edge.clone()));
+            }
+            boxed_edges.entry(owner).or_default().insert(edge);
+        }
+        let namespace_variants = namespace_variants.into_iter()
+            .map(|(root, variants)| (root.to_owned(), variants)).collect();
+        let mut direct_c_functions = HashSet::new();
+        let mut functions = Vec::with_capacity(bundle.modules.len());
+        let mut constants = Vec::with_capacity(bundle.modules.len());
+        let mut rust_modules = HashMap::with_capacity(bundle.modules.len());
+        for (owner, module) in bundle.modules.iter().enumerate() {
+            let rust_module = mangle(&module.alias);
+            rust_modules.insert(rust_module.clone(), owner);
+            let identity = module_identity(bundle, owner);
+            let mut rows = HashMap::new();
+            let mut constant_rows = HashMap::new();
+            for item in &module.items {
+                match item {
+                    Item::Func(function) => {
+                        let params: Vec<(AccessConvention, Type)> = function.params.iter().map(|param| {
+                            let ty = if param.variadic {
+                                Type::List(Box::new(param.ty.clone()))
+                            } else {
+                                param.ty.clone()
+                            };
+                            (param.convention, super::Imports::qualify_imported_call_type(
+                                bundle, owner, "", &ty))
+                        }).collect();
+                        let ret = function.return_type.as_ref().map(|ty|
+                            super::Imports::qualify_imported_call_type(bundle, owner, "", ty));
+                        let value_type = function_value_type(function,
+                            params.iter().map(|(_, ty)| ty.with_effective_fn_returns()).collect(),
+                            super::Imports::qualify_imported_call_type(
+                                bundle, owner, "", &function.callable_value_return_type()));
+                        let mut source_type = value_type.clone();
+                        if let Type::Fn { ret: source_ret, .. } = &mut source_type {
+                            *source_ret = ret.clone().map(Box::new);
+                        }
+                        rows.insert(function.name.clone(), BundleFunctionFacts {
+                            params, ret, binding: (rust_module.clone(), function.name.clone()),
+                            value_type, source_type,
+                            contracts: (function.pre.clone(), function.post.clone()),
+                            generic: super::Imports::imported_generic_function(bundle, owner, function),
+                        });
+                        if crate::Sema::guest_import_function_signature(function).is_some() {
+                            metadata.foreign_call_keys.insert(format!("{rust_module}::{}", function.name),
+                                crate::Sema::guest_import_wrapper_name(&module.alias, &function.name));
+                        }
+                    }
+                    Item::Const(constant) => {
+                        let ty = super::TIR::source_constant_type(constant).map(|ty|
+                            super::Imports::qualify_imported_call_type(bundle, owner, "", &ty));
+                        let inline = constant.is_comptime
+                            && !matches!(constant.rust_kind, crate::AST::RustConstKind::Static);
+                        let rust_value = if inline {
+                            match (constant.ct.as_ref(), ty.as_ref()) {
+                                (Some(CtValue::List(values)), Some(Type::List(inner)))
+                                    if values.is_empty() => format!("Vec::<{}>::new()", metadata.rust_type(inner)),
+                                (Some(value), _) => value.serialize(),
+                                (None, _) => "Default::default()".to_owned(),
+                            }
+                        } else {
+                            format!("{rust_module}::{}", mangle(&constant.name).to_uppercase())
+                        };
+                        constant_rows.insert(constant.name.clone(), BundleConstantFacts {
+                            key: qualified_constant_key(&identity, &constant.name),
+                            ty,
+                            value: inline.then(|| constant.ct.clone()).flatten(),
+                            rust_value,
+                        });
+                    }
+                    Item::CModule(c_module) => {
+                        direct_c_functions.extend(c_module.functions.iter()
+                            .map(|function| format!("{rust_module}::{}", function.name)));
+                        for function in &c_module.functions {
+                            metadata.foreign_call_keys.insert(format!("{rust_module}::{}", function.name),
+                                format!("{identity}::{}", function.name));
+                        }
+                    }
+                    Item::ExternRust(block) => {
+                        for function in &block.functions {
+                            metadata.foreign_call_keys.insert(format!("{rust_module}::{}", function.name),
+                                format!("{identity}::{}", function.rust_path));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            functions.push(rows);
+            constants.push(constant_rows);
+        }
+        metadata.direct_c_functions = Arc::new(direct_c_functions);
+        let mut method_keys = HashMap::<String, HashMap<String, (String, String)>>::new();
+        for key in metadata.method_sigs.keys() {
+            method_keys.entry(key.0.clone()).or_default().insert(key.1.clone(), key.clone());
+        }
+        Arc::new(Self {
+            names: bundle.name_ledger.body_snapshot(), metadata, functions,
+            rust_modules, constants, method_keys, namespace_variants, boxed_edges, boxed_by_module,
+        })
+    }
+}
+
+macro_rules! shared_nominal_get {
+    ($method:ident, $field:ident, $ty:ty) => {
+        pub(crate) fn $method(&self, name: &str) -> Option<&$ty> {
+            self.$field.get(name).or_else(|| {
+                let key = self.shared_nominal_key(name);
+                if self.scope_names.is_some() {
+                    if let Some(value) = self.$field.get(key) { return Some(value) }
+                }
+                self.bundle_facts.as_ref()?.metadata.$field.get(key)
+            })
+        }
+    };
+    ($method:ident, $field:ident) => {
+        pub(crate) fn $method(&self, name: &str) -> bool {
+            self.$field.contains(name)
+                || (self.scope_names.is_some() && self.$field.contains(self.shared_nominal_key(name)))
+                || self.bundle_facts.as_ref().is_some_and(|facts|
+                    facts.metadata.$field.contains(self.shared_nominal_key(name)))
+        }
+    };
+}
+
 pub(crate) struct Cx {
+    pub(crate) bundle_facts: Option<Arc<BundleCodegenFacts>>,
+    pub(crate) bundle_module: usize,
+    /// An isolated comptime source scope borrows the same semantic name index.
+    pub(crate) scope_names: Option<jet_foundation::Names::NameLedger>,
     /// Top-level function name -> parameter conventions+types.
     pub(crate) sigs: HashMap<String, Vec<(AccessConvention, Type)>>,
     /// D-FAIL-TIER1: callable contract clauses, kept beside the callable
@@ -142,6 +492,8 @@ pub(crate) struct Cx {
     pub(crate) fn_bodies: HashMap<String, Vec<crate::AST::Stmt>>,
     /// Function name -> source parameter names for labeled compute transforms.
     pub(crate) fn_param_names: HashMap<String, Vec<String>>,
+    /// Checked declaration-default policy calls, in their authored order.
+    pub(crate) fn_policy_calls: HashMap<String, Vec<crate::AST::Call>>,
     /// `(TypeName, method)` -> parameter conventions+types (including `self`).
     pub(crate) method_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
     /// Method-owned type parameters in declaration order. Owner parameters are
@@ -152,6 +504,8 @@ pub(crate) struct Cx {
     /// for a unit-returning method). Used by TIR lowering to give a method-call
     /// expression its total result `Type` without re-inferring in codegen.
     pub(crate) method_rets: HashMap<(String, String), Option<Type>>,
+    method_contracts: HashMap<String, HashMap<String, (Vec<ContractClause>, Vec<ContractClause>)>>,
+    method_param_names: HashMap<String, HashMap<String, Vec<String>>>,
     pub(crate) consts: HashMap<String, String>,
     /// Source-level types for every module binding, including immutable
     /// runtime globals whose value is represented by a MIR global operation.
@@ -170,6 +524,10 @@ pub(crate) struct Cx {
     /// The evaluated value behind each comptime const, so lowering can hand a
     /// structured literal to every engine instead of the rendered Rust text.
     pub(crate) const_values: HashMap<String, CtValue>,
+    /// Direct nominal fact intrinsics bound by the comptime fragment caller.
+    /// Values use its selected target, not a runtime local or the compiler host.
+    pub(crate) comptime_type_facts: HashMap<String, HashMap<String, CtValue>>,
+    pub(crate) comptime_type_fact_target: Option<jet_foundation::Layout::TargetLayout>,
     pub(crate) type_names: HashSet<String>,
     /// D-SERDE2: source-level names of locally declared imported nominals map to
     /// their canonical bundle identities while lowering the declaring module.
@@ -202,7 +560,7 @@ pub(crate) struct Cx {
     pub(crate) receipt_sections: HashMap<String, ReceiptSectionFact>,
     /// D-DX-PLUGIN1=D: checked package-wide panel/publication catalog shared
     /// by TIR and every native/backend projection.
-    pub(crate) devtools_registry: jet_foundation::AST::DevtoolsRegistry,
+    pub(crate) devtools_registry: Arc<jet_foundation::AST::DevtoolsRegistry>,
     /// Current module's canonical package scope.
     pub(crate) devtools_package: String,
     /// Current module's canonical source-module path.
@@ -229,8 +587,9 @@ pub(crate) struct Cx {
     pub(crate) boxed_edges: HashSet<(String, String)>,
     pub(crate) cloneable: HashSet<String>,
     /// D-MIGRATE4: `migration TypeName { … }` blocks per type, in source order
-    /// (the chain, oldest step first). Read by `emit_struct_migration` to lower
-    /// the runtime step functions + silent decode migration chain-walker.
+    /// (the chain, oldest step first). Read by `Items::migration_blocks` for the
+    /// TIR codec migration plans; the runtime chain-walker is the derived
+    /// `Decode`'s Jet items (jet-sema `Registration/Serde.rs::struct_migration_decode`).
     pub(crate) migrations: HashMap<String, Vec<crate::AST::MigrationDecl>>,
     /// D-SOA1 / D-SOA-TIER1=A: struct names declared `#layout(columnar)`. A `[S]`
     /// of such a struct lowers to the Prelude-owned `JetColumnList<S>` over THE
@@ -271,16 +630,16 @@ pub(crate) struct Cx {
     /// Rust-name projection and can collide across packages.
     pub(crate) module_identity: String,
     /// Source-owned Core module -> private emitted module alias.
-    pub(crate) core_source_modules: HashMap<String, String>,
+    pub(crate) core_source_modules: Arc<HashMap<String, String>>,
     /// Loaded source signatures for imported source-owned Core functions,
     /// keyed by canonical Core module path and member.
-    pub(crate) core_source_sigs: HashMap<(String, String), CoreSourceFunctionSignature>,
+    pub(crate) core_source_sigs: Arc<HashMap<(String, String), CoreSourceFunctionSignature>>,
     /// Import alias -> Rust module name (`__jet_scoring`).
     pub(crate) import_mods: HashMap<String, String>,
     /// Generated C-module functions whose wrappers return their declared C
     /// value directly. They do not use the hidden Jet `Result` carrier.
     /// Keys use the emitted module/function path (`__jet_module::function`).
-    pub(crate) direct_c_functions: HashSet<String>,
+    pub(crate) direct_c_functions: Arc<HashSet<String>>,
     /// Canonical checked foreign identity for each source-level foreign call
     /// spelling.  The value is the Tir/MIR foreign row key, never a bridge
     /// wrapper name, so direct CModule calls resolve to typed `MirForeign`
@@ -288,7 +647,7 @@ pub(crate) struct Cx {
     pub(crate) foreign_call_keys: HashMap<String, String>,
     /// Opaque C handle nominal names whose ABI is a raw pointer at native
     /// boundaries. This is bundle metadata, not a source-level type heuristic.
-    pub(crate) opaque_handles: HashSet<String>,
+    pub(crate) opaque_handles: Arc<HashSet<String>>,
     /// Canonical cross-module nominal identity -> Rust module path. The key
     /// includes package and source-module identity; import aliases are only
     /// source lookup projections and never semantic type identities.
@@ -298,24 +657,27 @@ pub(crate) struct Cx {
     pub(crate) reexport_calls: HashMap<(String, String), (String, String)>,
     /// `(import alias, function)` -> parameter conventions for cross-module calls.
     pub(crate) import_sigs: HashMap<(String, String), Vec<(AccessConvention, Type)>>,
+    /// #4609: the generic targets among `import_sigs`, under the same keys.
+    pub(crate) import_generics:
+        HashMap<(String, String), crate::Codegen::Imports::ImportedGenericFunction>,
     /// c109 Phase 14: `(import alias, function)` -> the function's return type, so the
     /// TIR can carry a total result type for a cross-module call (mirrors `import_sigs`).
     pub(crate) import_rets: HashMap<(String, String), Option<Type>>,
     /// Import alias -> compiler-known core module (`core.files`, `core.encoding`, ...).
     pub(crate) core_imports: HashMap<String, String>,
     /// M10 helpers proven reachable by sema.
-    pub(crate) used_core: HashSet<String>,
+    pub(crate) used_core: Arc<HashSet<String>>,
     /// D-CABI-CALLBACK1: top-level function names sema proved are passed as a
     /// stable C callback symbol at some `#Import` call site. Emission keeps
     /// each Jet function's result carrier and gives it a raw `extern "C"`
     /// trampoline; this set identifies which adapters are needed.
-    pub(crate) ffi_callback_fns: HashSet<String>,
+    pub(crate) ffi_callback_fns: Arc<HashSet<String>>,
     /// Empty at the entry module, `super::` inside generated import modules.
     pub(crate) root_prefix: String,
     /// M7: rustc crate name for the FFI bridge (`jet_ffi_…`).
     pub(crate) ffi_crate: Option<String>,
     /// M7: Jet function name -> wrapper symbol and boundary kind in the FFI crate.
-    pub(crate) extern_funcs: HashMap<String, ExternFn>,
+    pub(crate) extern_funcs: Arc<HashMap<String, ExternFn>>,
     /// D-BOUND-UNDO1=A: foreign binding name -> compensating Jet function.
     /// Lowering reads this fact; engines only marshal the resulting rollback hook.
     pub(crate) foreign_undos: HashMap<String, String>,
@@ -368,9 +730,6 @@ pub(crate) struct Cx {
     /// `Traits::operator_method_identity`; unlike `method_sigs`, this table
     /// retains one entry for every RHS pair.
     pub(crate) operator_methods: HashMap<String, OperatorMethod>,
-    /// Imported trait definitions Rust method lookup must bring into scope,
-    /// keyed by generated module and trait name.
-    pub(crate) imported_traits: HashSet<(String, String)>,
     /// D-TXN-ROLLBACK layer 2: user types that implement the `Rollback` trait.
     /// Populated in `build_cx_items` from `Item::Impl` blocks with
     /// `trait_name == Some("Rollback")` and from inline `struct { impl Rollback }`.
@@ -429,6 +788,12 @@ pub(crate) struct Cx {
     pub(crate) jit_core_source_generic_calls: std::cell::RefCell<
         std::collections::BTreeMap<(String, String), Vec<Vec<Type>>>,
     >,
+    /// #4609: concrete instantiations of another source module's generic
+    /// functions, keyed by the declaring module identity and function; the
+    /// type arguments are canonical (module-qualified) nominal spellings.
+    pub(crate) jit_module_generic_calls: std::cell::RefCell<
+        std::collections::BTreeMap<(String, String), Vec<Vec<Type>>>,
+    >,
     /// Functions whose typed decode depends on the canonical TIR migration
     /// plan. The resident codec has no authority to reinterpret that plan.
     pub(crate) jit_canonical_deopt: std::cell::RefCell<HashSet<String>>,
@@ -470,8 +835,8 @@ pub(crate) struct Cx {
     /// D-DX-PREVIEW1: compiler-owned build/revision facts for inline previews.
     /// Adapters receive these values from checked bundle metadata; source calls
     /// never need to expose a public metadata argument.
-    pub(crate) preview_build_id: String,
-    pub(crate) preview_revision: String,
+    pub(crate) preview_build_id: Arc<str>,
+    pub(crate) preview_revision: Arc<str>,
     /// D-STM1=A (card #506): true while lowering the body of a `#Transact` block,
     /// so a `Shared<T>.edit(f)` inside it routes to the deferred `edit_txn` (the
     /// atomic Shared plane) instead of taking a lock immediately. Set/restored
@@ -484,8 +849,8 @@ pub(crate) struct Cx {
     pub(crate) stm_touched: std::cell::Cell<bool>,
     /// D-FOUND-BOARD1: selected target profile facts are fixed before TIR lowering.
     /// Hardware call nodes copy canonical IDs from this immutable sema projection.
-    pub(crate) hardware_profile: Option<jet_foundation::TargetMachine::TargetHardwareFacts>,
-    pub(crate) hardware_profile_id: Option<String>,
+    pub(crate) hardware_profile: Option<Arc<jet_foundation::TargetMachine::TargetHardwareFacts>>,
+    pub(crate) hardware_profile_id: Option<Arc<str>>,
 }
 
 /// D-ITER-HOOK: metadata for zero-copy `loop x in mytype` lowering.
@@ -504,16 +869,16 @@ pub(crate) struct IndexHook {
 }
 
 // D-ENC-DYN1=A+: the dynamic encoding value `Data` (+ aliases `JSON`/`TOML`/
-// `YAML`/`CSV`) is the user-facing face of `jet_std::DataTree`.
+// `YAML`/`CSV`) is the user-facing face of `jet_std::Dyn`.
 pub(crate) fn is_json_type_name(name: &str) -> bool {
     Syntax::is_data_type_name(name)
 }
 
-/// Whether a checked pattern subject is the dynamic `DataTree` value. User
+/// Whether a checked pattern subject is the dynamic `Dyn` value. User
 /// enums may declare the same variant names (`Int`, `Text`, `Null`, …), so a
-/// variant pattern takes the DataTree owner only from its subject type, never
+/// variant pattern takes the Dyn owner only from its subject type, never
 /// from the variant name alone.
-pub(crate) fn is_data_tree_subject(cx: &Cx, subject_ty: &Type) -> bool {
+pub(crate) fn is_dyn_subject(cx: &Cx, subject_ty: &Type) -> bool {
     match subject_ty.without_user_tags() {
         Type::Named(name) | Type::Apply { name, .. } => {
             is_json_type_name(name)
@@ -539,10 +904,13 @@ pub(crate) fn is_key_subject(cx: &Cx, subject_ty: &Type) -> bool {
 pub(crate) fn is_db_value_type_name(name: &str) -> bool {
     Syntax::is_db_value_type_name(name)
 }
-/// Core UI runtime carriers are generated at the crate root from the shared
-/// `CoreModuleExports` registry. Result aliases intentionally stay on their
-/// dedicated `JetUiServiceResult<...>` projections below.
-pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
+/// Core UI runtime carriers for the `core.ui`/`core.ui.host` type exports.
+/// Result aliases intentionally stay on their dedicated
+/// `JetUiServiceResult<...>` projections below. An export the root Prelude
+/// table spells (`UINode`, `Point`) keeps that carrier; every other one is the
+/// Prelude's `JetUi…` spelling with acronyms in word case (`UIIMEMode` ->
+/// `JetUiImeMode`, `UIFSGrant` -> `JetUiFsGrant`, `UINodeID` -> `JetUiNodeId`).
+pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<String> {
     const RESULT_ALIASES: &[&str] = &[
         "UIServiceResult",
         "UIFileFilterResult",
@@ -563,7 +931,7 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
     if RESULT_ALIASES.contains(&name) {
         return None;
     }
-    jet_foundation::CoreModuleExports::core_modules()
+    let exported = jet_foundation::CoreModuleExports::core_modules()
         .iter()
         .filter(|entry| matches!(entry.module, "core.ui" | "core.ui.host"))
         .any(|entry| {
@@ -571,8 +939,22 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
                 .type_exports
                 .iter()
                 .any(|&(type_name, _)| type_name == name)
-        })
-        .then_some(name)
+        });
+    if !exported {
+        return None;
+    }
+    if let Some(root) = root_prelude_rust_type_name(name) {
+        return Some(root.to_string());
+    }
+    let word = match name.strip_prefix("UI") {
+        Some(rest) => format!("Ui{rest}"),
+        None => name.to_string(),
+    };
+    let word = word.replace("IME", "Ime").replace("FS", "Fs");
+    Some(match word.strip_suffix("ID") {
+        Some(stem) => format!("Jet{stem}Id"),
+        None => format!("Jet{word}"),
+    })
 }
 
 /// Prelude values emitted at the generated crate root rather than under
@@ -580,10 +962,24 @@ pub(crate) fn core_ui_rust_type_name(name: &str) -> Option<&str> {
 /// always inserts `jet_std::`.
 pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
     match name {
+        "__TablePlan" => Some("JetTablePlan"),
         n if n == Syntax::TYPE_MEMO_STATS => Some("JetMemoStats"),
         n if n == Syntax::TYPE_AUTHORITY => Some("JetAuthority"),
         n if n == Syntax::DETERMINISTIC_WORLD_TYPE => Some("JetDeterministicWorld"),
         n if n == Syntax::TYPE_ERR => Some("JetErr"),
+        // The allocation-failure record is declared once at the Prelude root
+        // (PortableAlloc.rs); every Rust projection spells it `AllocError`.
+        n if n == Syntax::TYPE_ALLOC_ERROR => Some("AllocError"),
+        "__EvidenceRead" => Some("JetTestingEvidenceRead"),
+        "__TempFacts" => Some("JetTestingTempFacts"),
+        "__TempPath" => Some("JetTestingTempPath"),
+        "__TempRemove" => Some("JetTestingTempRemove"),
+        "__TempCreate" => Some("JetTestingTempCreate"),
+        "__JetcRaw" => Some("JetCryptoJetcRaw"),
+        "__JetcStat" => Some("JetCryptoJetcStat"),
+        "__LockCall" => Some("jet_std::JetFsLockCall"),
+        "__LockIdentity" => Some("jet_std::JetFsLockIdentity"),
+        "__LockWait" => Some("jet_std::JetFsLockWait"),
         "Transaction" => Some("JetTransaction"),
         "Counter" => Some("JetCounter"),
         "OrderedMap" => Some("JetOrderedMap"),
@@ -594,6 +990,8 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "Loadable" => Some("JetLoadable"),
         n if n == Syntax::TYPE_RANGE => Some("JetRange"),
         n if n == Syntax::TYPE_ITER => Some("JetIter"),
+        n if n == Syntax::TYPE_VIEW_ITER => Some("JetViewIter"),
+        n if n == Syntax::TYPE_COMPLEX => Some("JetComplex"),
         "Point" => Some("JetPoint"),
         "Size" => Some("JetSize"),
         "Rect" => Some("JetRect"),
@@ -610,16 +1008,10 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "NullBackend" => Some("JetNullBackend"),
         "TUIBackend" => Some("JetTuiBackend"),
         "GtkBackend" => Some("JetGtkBackend"),
-        // D-AUTH1=A: authentication carriers are Prelude-root values.
-        "Session" => Some("JetAuthSession"),
+        // D-AUTH1=A: the `app.auth` carrier is a Prelude-root value.
         "Auth" => Some("JetAuthApp"),
         // D-DBPOLICY-BIND1: RowPolicy is re-exported by the root Sync carrier.
         "RowPolicy" => Some("JetRowPolicy"),
-        // D-APPROX1=A: native sketch carriers are Prelude-root values.
-        "HyperLogLog" => Some("JetHyperLogLog"),
-        "TDigest" => Some("JetTDigest"),
-        "CountMinSketch" => Some("JetCountMinSketch"),
-        "ReservoirSampler" => Some("JetReservoirSampler"),
         "JetDate" | "JetInstant" | "JetLocalTime" | "JetDateTime" | "JetPeriod" | "JetZone"
         | "JetZonedDateTime" => Some(name),
         "WebMutationStatus" => Some("JetWebMutationStatus"),
@@ -664,8 +1056,6 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         "WebTableRow" => Some("JetWebTableRow"),
         "WebTablePage" => Some("JetWebTablePage"),
         "WebTable" => Some("JetWebTable"),
-        "WebVirtualViewport" => Some("JetWebVirtualViewport"),
-        "WebVirtualWindow" => Some("JetWebVirtualWindow"),
         "WebVirtualPlan" => Some("JetWebVirtualPlan"),
         "WebVirtualPlanViewport" => Some("JetWebVirtualPlanViewport"),
         "Atomic" => Some("JetAtomic"),
@@ -704,6 +1094,7 @@ pub(crate) fn root_prelude_rust_type_name(name: &str) -> Option<&str> {
         | "JetDataPlotColumn"
         | "JetDataPlot" => Some(name),
         n if job_queue_rust_type(n).is_some() => job_queue_rust_type(n),
+        n if game_handle_rust_type(n).is_some() => game_handle_rust_type(n),
         _ => net_handle_rust_type(name),
     }
 }
@@ -766,8 +1157,23 @@ pub(crate) fn core_source_type_leaf(name: &str) -> &str {
 pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
     // core.sync's policy list is source-owned (`allow`/`deny`). The root
     // database row policy is a different native carrier (`table`/`expression`).
-    if name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy") {
+    // A source-owned Core nominal (`source_module … types { … }`, e.g. the
+    // core.http message records whose leaves collide with the native server
+    // carriers) keeps its declared layout: no native carrier aliases it.
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
+        || jet_foundation::CoreModuleExports::core_source_owns_type(name)
+    {
         return None;
+    }
+    // D-SIGNAL1: core.reactive's `Computed<T>` (canonical derived value) and
+    // `Effect` lifecycle handle use the same runtime carriers as `Signal` /
+    // `Derived`. Matched by owner: `Effect` collides with core.compiler's enum.
+    if name.starts_with("<corelib>/Core/reactive::") {
+        match core_source_type_leaf(name) {
+            n if n == Syntax::TYPE_COMPUTED => return Some("JetDerived"),
+            n if n == Syntax::TYPE_EFFECT => return Some("JetReactiveEffect"),
+            _ => {}
+        }
     }
     // Core source nominals have a canonical <corelib>/...::Leaf identity;
     // only registered Core owners may use the Prelude's native type rows.
@@ -783,7 +1189,7 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         None => name,
     };
     match name {
-        n if is_json_type_name(n) => Some("DataTree"),
+        n if is_json_type_name(n) => Some("Dyn"),
         n if n == Syntax::TYPE_IO_ERROR || n == "IOError" => Some("IOError"),
         n if n == Syntax::TYPE_IO_CONTEXT => Some("IOContext"),
         n if n == Syntax::TYPE_IO_OPERATION => Some("IOOperation"),
@@ -835,27 +1241,16 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "EventConfigError" => Some("JetEventConfigError"),
         "TestSuite" => Some("JetTestSuite"),
         "TestComparison" => Some("JetTestComparison"),
-        // D-DET1: deterministic injected capability handles.
+        // D-DET1: deterministic injected capability handles. The source
+        // `RNG` handle's Prelude carrier is `jet_std::Rng`.
         "Clock" => Some("Clock"),
-        "RNG" => Some("RNG"),
-        "Fake" => Some("Fake"),
-        // D-SOLVER-LIB1=A: explicit finite solver state.
-        "Solver" => Some("Solver"),
+        "RNG" => Some("Rng"),
         // D-SHAPE-DURATION1/D-SHAPE-DURATIONCONVERT1: checked duration values.
         "Duration" => Some("Duration"),
         "DurationUnit" => Some("DurationUnit"),
         // D-FOUND-COREAPI1 / #2853: event-time late-event policy carrier.
         "LateEventDisposition" => Some("JetLateEventDisposition"),
         "RangeError" => Some("RangeError"),
-        "Instant" => Some("JetInstant"),
-        "Date" | "LocalDate" => Some("JetDate"),
-        "LocalTime" => Some("JetLocalTime"),
-        "DateTime" => Some("JetDateTime"),
-        "Period" => Some("JetPeriod"),
-        "Zone" => Some("JetZone"),
-        "ZonedDateTime" => Some("JetZonedDateTime"),
-        "URL" => Some("JetURL"),
-        "MIME" => Some("JetMIME"),
         "DataLoaderKind" => Some("DataLoaderKind"),
         "DataFormat" => Some("DataFormat"),
         "DataFreshness" => Some("DataFreshness"),
@@ -883,7 +1278,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-LSDIR1=A: fs.list_dir returns [DirEntry].
         "DirEntry" => Some("DirEntry"),
         // D-FSOPS1 / D-WATCH-SCOPE1: typed filesystem and watcher values.
-        "Stat" => Some("Stat"),
         "WalkEntry" => Some("WalkEntry"),
         "WatchEvent" => Some("WatchEvent"),
         // stdlib-api-laws D4: `WatchEvent`'s two closed field enums.
@@ -920,10 +1314,11 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "LogSpan" => Some("LogSpan"),
         // D-SERDE2 / D-VALIDATE-DECODE1: the value tree and accumulated typed
         // decode errors live in jet_std.
-        "DataTree" => Some("DataTree"),
+        "Dyn" => Some("Dyn"),
         "EncodingLimits" => Some("EncodingLimits"),
         "EncodingError" => Some("EncodingError"),
         "EncodingCause" => Some("EncodingCause"),
+        "__QueryRead" => Some("__QueryRead"),
         "EncodingFormat" => Some("EncodingFormat"),
         "EncodingErrorKind" => Some("EncodingErrorKind"),
         // D-VALIDATE1: the accumulated validation error lives in jet_std too.
@@ -947,13 +1342,13 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         "JSONLReader" => Some("JSONLReader"),
         "JSONLWriter" => Some("JSONLWriter"),
         "CSVReader" => Some("CSVReader"),
-        "CSVWriter" => Some("CSVWriter"),
         "CSVRow" => Some("CSVRow"),
         "XMLReader" => Some("XMLReader"),
         "XMLWriter" => Some("XMLWriter"),
         // D-DBPOLICY-BIND1: the policy carrier is emitted by the shared
         // Sync/Core prelude and is re-exported from the generated crate root.
         "RowPolicy" => Some("JetRowPolicy"),
+        "LiveQuery" => Some("JetLiveQuery"),
         // D-DBDRIVER1: the tagged SQL parameter/column value + its error type.
         "DBValue" => Some("DBValue"),
         "DBError" => Some("DBError"),
@@ -964,7 +1359,6 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
         // D-RAYLIB1=A: display-gated graphics bridge types.
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         // D-TYPEDSQL-SINK1=A: `SQL` is a checked `(String, Vec<DBValue>)`
         // carrier. It remains a known core value type for subset gating; the
@@ -1016,6 +1410,8 @@ pub(crate) fn core_rust_type_name(name: &str) -> Option<&'static str> {
 /// compiler-owned declaration rows use the bare leaf. Keep both forms on the
 /// same Rust spelling and do not let arbitrary qualified user names acquire
 /// the Core email carrier by leaf coincidence.
+/// Source `DKIMConfig` selects Rust `DkimConfig`; projection callers supply the
+/// hidden secret type parameter separately.
 pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
     let name = name
         .strip_prefix("<corelib>/Core/email::Core/email/email.jet::")
@@ -1030,6 +1426,9 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Message" => Some("Message"),
         "Attachment" => Some("Attachment"),
         "Envelope" => Some("Envelope"),
+        "__EmailAddressView" => Some("__EmailAddressView"),
+        "__EmailAttachmentView" => Some("__EmailAttachmentView"),
+        "__EmailMessageView" => Some("__EmailMessageView"),
         "SMTPSecurity" => Some("SMTPSecurity"),
         "RecipientPolicy" => Some("RecipientPolicy"),
         "RecipientReport" => Some("RecipientReport"),
@@ -1038,7 +1437,7 @@ pub(crate) fn core_email_rust_type_name(name: &str) -> Option<&'static str> {
         "Limits" => Some("Limits"),
         "SMTPAuth" => Some("SMTPAuth"),
         "TLSTrust" => Some("TLSTrust"),
-        "DKIMConfig" => Some("DKIMConfig"),
+        "DKIMConfig" => Some("DkimConfig"),
         "SMTPConfig" => Some("SMTPConfig"),
         "Mailer" => Some("Mailer"),
         _ => None,
@@ -1109,10 +1508,27 @@ pub(crate) fn layout_handle_rust_type(name: &str) -> Option<&'static str> {
     }
 }
 
+/// One native handle carrier row: the prelude Rust type and the carrier
+/// properties the emitter reads instead of matching type names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FileHandleCarrier {
+    pub(crate) rust: &'static str,
+    /// The carrier keeps its stream behind its own lock and every Core handle
+    /// op on it takes `&self`. Both checkers let such an op write through a
+    /// handle reached from a read binding, so a write borrow of a place
+    /// rooted at a Read parameter or capture lends `&T`.
+    pub(crate) interior_mutable_receiver: bool,
+}
+
 /// E2-M7: file handle types are top-level in the prelude (not in `jet_std`).
 /// The `core.files` and `core.term` source declarations of these handles are
-/// the checked names of the same native carriers.
-pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
+/// the checked names of the same native carriers, except a source-owned Core
+/// type (`Stdout`, `Stderr`, `StdinHandle`), which is its Jet declaration on
+/// every tier.
+pub(crate) fn file_handle_carrier(name: &str) -> Option<FileHandleCarrier> {
+    if jet_foundation::CoreModuleExports::core_source_owns_type(name) {
+        return None;
+    }
     let name = if name.starts_with("<corelib>/Core/files::Core/files/files.jet::")
         || name.starts_with("<corelib>/Core/term::Core/term/term.jet::")
     {
@@ -1120,45 +1536,54 @@ pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
     } else {
         name
     };
-    match name {
-        "FileReader" => Some("JetFileReader"),
-        "FileWriter" => Some("JetFileWriter"),
+    let (rust, interior_mutable_receiver) = match name {
+        // HandlesRaylib.rs: the stream sits in a `Mutex`.
+        "FileReader" => ("JetFileReader", true),
+        "FileWriter" => ("JetFileWriter", true),
         // FileLines is an internal sema marker; it should never appear in emitted Rust.
-        "FileLines" => Some("()"),
+        "FileLines" => ("()", false),
         // D-STDIN1=A: stdin handle types; StdinLines is an internal sema marker.
-        "StdinHandle" => Some("JetStdinReader"),
-        "StdinLines" => Some("()"),
+        "StdinHandle" => ("JetStdinReader", false),
+        "StdinLines" => ("()", false),
         // D-PROCESS1=A: these markers project the concrete shared handles on
         // ProcessChild. Keep their native storage types in generated Rust so
         // method receivers match the process prelude helpers.
-        "ProcessStdin" => Some("jet_std::ProcessStdinHandle"),
-        "ProcessStdoutStream" => Some("jet_std::ProcessStdoutStreamHandle"),
-        "ProcessStderrStream" => Some("jet_std::ProcessStderrStreamHandle"),
+        "ProcessStdin" => ("jet_std::ProcessStdinHandle", false),
+        "ProcessStdoutStream" => ("jet_std::ProcessStdoutStreamHandle", false),
+        "ProcessStderrStream" => ("jet_std::ProcessStderrStreamHandle", false),
         // ProcessLines is the `.lines()` loop-only marker.
-        "ProcessLines" => Some("()"),
+        "ProcessLines" => ("()", false),
         // D-COREIO1=A: standard stream handles.
-        "Stdout" => Some("JetStdout"),
-        "Stderr" => Some("JetStderr"),
+        "Stdout" => ("JetStdout", false),
+        "Stderr" => ("JetStderr", false),
         // D-PATHFS1: typed path handle.
-        "Path" => Some("JetPath"),
+        "Path" => ("JetPath", false),
         // D-FILESCOPE1=A: scoped filesystem handles are top-level prelude
         // values and are borrowed by scope-bound file operations.
-        "FileScope" => Some("JetFileScope"),
+        "FileScope" => ("JetFileScope", false),
         // D-DBDRIVER1: the SQLite connection handle wrapper.
-        "DBConnection" => Some("JetDbConnection"),
-        "DBScope" => Some("JetDbScope"),
-        "DBPool" => Some("JetDbPool<JetDbConnection>"),
-        "DBLease" => Some("JetDbLease<JetDbConnection>"),
-        "DBPoolReceipt" => Some("JetDbPoolReceipt"),
-        "DBPoolLifecycle" => Some("JetDbPoolLifecycle"),
+        "DBConnection" => ("JetDbConnection", false),
+        "DBScope" => ("JetDbScope", false),
+        "DBPool" => ("JetDbPool<JetDbConnection>", false),
+        "DBLease" => ("JetDbLease<JetDbConnection>", false),
+        "DBPoolReceipt" => ("JetDbPoolReceipt", false),
+        "DBPoolLifecycle" => ("JetDbPoolLifecycle", false),
         // D-DEP-WASM1=A / D-PLUGIN1=B (c81): the sandboxed WASM plugin handle.
-        "Plugin" => Some("JetPlugin"),
+        "Plugin" => ("JetPlugin", false),
         // D-LIB-CALLGRANT1=A: loaded libraries are opaque handles; the grant
         // is a small constructable prelude record.
-        "Mod" => Some("JetMod"),
-        "ModGrant" => Some("JetModGrant"),
-        _ => None,
-    }
+        "Mod" => ("JetMod", false),
+        "ModGrant" => ("JetModGrant", false),
+        _ => return None,
+    };
+    Some(FileHandleCarrier {
+        rust,
+        interior_mutable_receiver,
+    })
+}
+
+pub(crate) fn file_handle_rust_type(name: &str) -> Option<&'static str> {
+    file_handle_carrier(name).map(|carrier| carrier.rust)
 }
 
 /// D-RAYLIB1=A: raylib handle/value types are top-level prelude
@@ -1167,7 +1592,6 @@ pub(crate) fn raylib_handle_rust_type(name: &str) -> Option<&'static str> {
     match name {
         "RaylibWindow" => Some("RaylibWindow"),
         "RaylibColor" => Some("RaylibColor"),
-        "RaylibSound" => Some("RaylibSound"),
         "RaylibTextureAtlas" => Some("RaylibTextureAtlas"),
         _ => None,
     }
@@ -1219,6 +1643,27 @@ pub(crate) fn service_handle_rust_type(name: &str) -> Option<&'static str> {
         "DeliveryEvent" => Some("JetDeliveryEvent"),
         "TaskOutcome" => Some("JetTaskOutcome"),
         "TaskStatus" => Some("JetTaskStatus"),
+        // Allocation-only private transports; Services.rs native field cites.
+        // All seven bindings die at the Jet-runtime cutover.
+        "__TreeWorker" => Some("JetServiceWorker"), // Services.rs:954
+        "__TreeGroup" => Some("JetServiceGroup"), // Services.rs:955
+        "__TreeStateAdapter" => Some("JetServiceStateAdapter"), // Services.rs:957
+        "__TreeStateAuthority" => Some("JetServiceStateAuthority"), // Services.rs:958
+        "__TreeWorkflowState" => Some("JetServiceWorkflow"), // Services.rs:966
+        "__TreeTaskGroup" => Some("JetServiceTreeTaskGroup"), // Services.rs:970
+        "__TreeSupervisorState" => Some("JetServiceTreeSupervisorState"), // Services.rs:971
+        "__DeliveryFacts" => Some("JetServiceDeliveryFacts"),
+        "__DeliveryRecord" => Some("JetServiceDeliveryRecord"),
+        "__EndpointMailbox" => Some("JetServiceEndpointMailbox"),
+        "__MailboxRead" => Some("JetServiceMailboxRead"),
+        // Worker policy transports; exact native shapes, mechanical, dies at cutover.
+        "__WorkerMailbox" => Some("JetServiceMailbox"), // Services.rs:758-762
+        "__WorkerChannel" => Some("JetServiceWorkerChannel"), // Services.rs:761, exact Arc type alias
+        "__WorkerHandler" => Some("JetServiceWorkerHandler"), // Services.rs:821
+        "__WorkerStatus" => Some("JetServiceSupervisorStatus"), // Services.rs:123-130
+        "__WorkerTopologyKind" => Some("JetServiceTopologyKind"), // Services.rs:134-137
+        "__WorkerTopologyState" => Some("JetDevtoolsTopologySupervisorState"), // DevtoolsTopologyPanel.rs:62-70
+        "__WorkerRestartReason" => Some("JetDevtoolsTopologyRestartReason"), // DevtoolsTopologyPanel.rs:282-288
         _ => None,
     }
 }
@@ -1245,7 +1690,7 @@ pub(crate) fn net_handle_rust_type(name: &str) -> Option<&'static str> {
         "TLSCertificate" => Some("JetTLSCertificate"),
         "NetError" => Some("JetNetError"),
         "NetErrorDetail" => Some("JetNetErrorDetail"),
-        "NetDnsError" => Some("JetNetDnsError"),
+        "NetDNSError" => Some("JetNetDNSError"),
         "NetShutdown" => Some("JetNetShutdown"),
         "NetReadyInterest" => Some("JetNetReadyInterest"),
         "NetReady" => Some("JetNetReady"),
@@ -1299,6 +1744,349 @@ pub(crate) fn nominal_leaf(name: &str) -> &str {
 }
 
 impl Cx {
+    pub(crate) fn install_fragment_signature(
+        &mut self,
+        function: &Func,
+        signature: &crate::AST::MirFragmentCoreSourceSignature,
+    ) {
+        self.sigs.insert(function.name.clone(), signature.params.clone());
+        self.install_fragment_function_types(&function.name, function, signature);
+    }
+
+    pub(crate) fn install_fragment_function_types(
+        &mut self,
+        name: &str,
+        function: &Func,
+        signature: &crate::AST::MirFragmentCoreSourceSignature,
+    ) {
+        let value_type = function_value_type(function,
+            signature.params.iter().map(|(_, ty)| ty.with_effective_fn_returns()).collect(),
+            signature.value_return_type.clone());
+        let mut source_type = value_type.clone();
+        if let Type::Fn { ret, .. } = &mut source_type {
+            *ret = signature.return_type.clone().map(Box::new);
+        }
+        self.fn_types.insert(name.to_owned(), value_type);
+        self.fn_source_types.insert(name.to_owned(), source_type);
+    }
+
+    fn shared_nominal_key<'a>(&'a self, name: &'a str) -> &'a str {
+        if let Some(identity) = self.local_type_identities.get(name) {
+            return identity;
+        }
+        let Some(names) = self.bundle_facts.as_ref().map(|facts| &facts.names)
+            .or(self.scope_names.as_ref()) else { return name };
+        if let Some(identity) = names.declared_identity(self.bundle_module, name) {
+            return identity;
+        }
+        let binding = if let Some((namespace, leaf)) = name.rsplit_once('.') {
+            names.alias(self.bundle_module, namespace)
+                .and_then(|alias| alias.target_module).map(|owner| (owner, leaf))
+        } else {
+            names.alias(self.bundle_module, name).and_then(|alias| {
+                let owner = alias.target_module?;
+                let leaf = alias.target.strip_prefix(names.module_alias(owner)?)?
+                    .strip_prefix('.')?;
+                Some((owner, leaf))
+            })
+        };
+        if let Some((target, leaf)) = binding {
+            let owner = names.namespace_owner(target, leaf).unwrap_or(target);
+            if let Some(identity) = names.declared_identity(owner, leaf) { return identity }
+        }
+        if let Some(owner) = names.generated_type_owner(name) {
+            if let Some(identity) = names.declared_identity(owner, name) { return identity }
+        }
+        names.namespace_owner(self.bundle_module, name)
+            .and_then(|owner| names.declared_identity(owner, name)).unwrap_or(name)
+    }
+
+    shared_nominal_get!(fact_struct_fields, struct_fields, Vec<(String, Type)>);
+    shared_nominal_get!(fact_enum_variants, enum_variants, Vec<(String, VariantPayload)>);
+    shared_nominal_get!(fact_struct_type_params, struct_type_params, HashSet<String>);
+    shared_nominal_get!(fact_struct_type_param_order, struct_type_param_order, Vec<String>);
+    shared_nominal_get!(fact_computed_fields, computed_fields, HashSet<String>);
+    shared_nominal_get!(fact_memo_fields, memo_fields, HashMap<String, Type>);
+    shared_nominal_get!(fact_reflection_fields, reflection_fields, Vec<jet_foundation::Reflection::ReflectionField>);
+    shared_nominal_get!(fact_foreign_types, foreign_types, String);
+    shared_nominal_get!(fact_distinct_types, distinct_types, (Type, bool));
+    shared_nominal_get!(fact_distinct_ranges, distinct_ranges, (i64, i64));
+    shared_nominal_get!(fact_unit_facts, unit_facts, UnitFact);
+    shared_nominal_get!(fact_unit_labels, unit_labels, UnitLabel);
+    shared_nominal_get!(fact_type_aliases, type_aliases, (Vec<crate::AST::TypeParam>, Type));
+    shared_nominal_get!(fact_iterable_hook, iterable_hooks, IterableHook);
+    shared_nominal_get!(fact_index_hook, index_hooks, IndexHook);
+    shared_nominal_get!(fact_cloneable, cloneable);
+    shared_nominal_get!(fact_rollback_type, rollback_types);
+    shared_nominal_get!(fact_display_type, display_types);
+    shared_nominal_get!(fact_close_type, close_types);
+
+    /// The key `fact_enum_variants` finds `name` under: the spelling itself
+    /// in this module's own table, else the shared canonical identity an
+    /// alias (`types.Kind`) or imported leaf resolves to. A lowered owner is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_enum_key<'a>(&'a self, name: &'a str) -> Option<&'a str> {
+        if self.enum_variants.contains_key(name) {
+            return Some(name);
+        }
+        let key = self.shared_nominal_key(name);
+        let known = (self.scope_names.is_some() && self.enum_variants.contains_key(key))
+            || self.bundle_facts.as_ref()
+                .is_some_and(|facts| facts.metadata.enum_variants.contains_key(key));
+        known.then_some(key)
+    }
+
+    pub(crate) fn fact_box_edge(&self, owner: &str, edge: &str) -> bool {
+        if let Some(facts) = &self.bundle_facts {
+            let canonical = self.shared_nominal_key(owner);
+            if facts.metadata.type_names.contains(canonical) {
+                return facts.boxed_edges.get(canonical).is_some_and(|edges| edges.contains(edge));
+            }
+        }
+        self.boxed_edges.iter().any(|(name, field)| name == owner && field == edge)
+    }
+
+    fn fact_has_box_edges(&self, owner: &str) -> bool {
+        if let Some(facts) = &self.bundle_facts {
+            let canonical = self.shared_nominal_key(owner);
+            if facts.metadata.type_names.contains(canonical) {
+                return facts.boxed_edges.contains_key(canonical);
+            }
+        }
+        self.boxed_edges.iter().any(|(name, _)| name == owner)
+    }
+
+    pub(crate) fn fact_type_name(&self, name: &str) -> bool {
+        self.type_names.contains(name)
+            || (self.scope_names.is_some() && self.type_names.contains(self.shared_nominal_key(name)))
+            || self.bundle_facts.as_ref().is_some_and(|facts|
+            facts.metadata.type_names.contains(self.shared_nominal_key(name)))
+    }
+
+    fn namespace_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = facts.names.namespace_owner(self.bundle_module, name)?;
+        facts.functions.get(owner)?.get(name)
+    }
+
+    /// A package-namespace function declared by a sibling module. The current
+    /// module's own top-level functions also live in the package namespace,
+    /// but they are local items, never a cross-module binding.
+    fn namespace_sibling_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = facts.names.namespace_owner(self.bundle_module, name)?;
+        if owner == self.bundle_module {
+            return None;
+        }
+        facts.functions.get(owner)?.get(name)
+    }
+
+    fn namespace_constant(&self, name: &str) -> Option<&BundleConstantFacts> {
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = facts.names.namespace_owner(self.bundle_module, name)?;
+        facts.constants.get(owner)?.get(name)
+    }
+
+    pub(crate) fn fact_const_ref_keys(&self, name: &str) -> Option<&String> {
+        self.const_ref_keys.get(name)
+            .or_else(|| self.namespace_constant(name).map(|fact| &fact.key))
+    }
+
+    pub(crate) fn fact_const_ref_types(&self, name: &str) -> Option<&Type> {
+        self.const_ref_types.get(name)
+            .or_else(|| self.namespace_constant(name)?.ty.as_ref())
+    }
+
+    pub(crate) fn fact_const_types(&self, name: &str) -> Option<&Type> {
+        self.const_types.get(name).or_else(|| self.namespace_constant(name)?.ty.as_ref())
+    }
+
+    pub(crate) fn fact_const_values(&self, name: &str) -> Option<&CtValue> {
+        self.const_values.get(name).or_else(|| self.namespace_constant(name)?.value.as_ref())
+    }
+
+    pub(crate) fn fact_consts(&self, name: &str) -> Option<&String> {
+        self.consts.get(name).or_else(|| self.namespace_constant(name).map(|fact| &fact.rust_value))
+    }
+
+    pub(crate) fn fact_sigs(&self, name: &str) -> Option<&Vec<(AccessConvention, Type)>> {
+        self.sigs.get(name).or_else(|| self.namespace_function(name).map(|fact| &fact.params))
+    }
+
+    pub(crate) fn fact_unqualified_file(&self, name: &str) -> Option<&(String, String)> {
+        self.unqualified_file
+            .get(name)
+            .or_else(|| self.namespace_sibling_function(name).map(|fact| &fact.binding))
+    }
+
+    /// Checked facts of an unqualified package function, local or bound.
+    fn unqualified_function(&self, name: &str) -> Option<&BundleFunctionFacts> {
+        match self.unqualified_file.get(name) {
+            Some(binding) => self.bound_function(binding),
+            None => self.namespace_function(name),
+        }
+    }
+
+    pub(crate) fn fact_variant_owner(&self, variant: &str) -> Option<&String> {
+        self.variant_owner.get(variant).or_else(|| {
+            let facts = self.bundle_facts.as_ref()?;
+            let root = facts.names.module_namespace(self.bundle_module)?;
+            facts.namespace_variants.get(root)?.get(variant).map(Arc::as_ref)
+        })
+    }
+
+    pub(crate) fn fact_contract_sigs(&self, name: &str) -> Option<&(Vec<ContractClause>, Vec<ContractClause>)> {
+        self.contract_sigs.get(name).or_else(|| {
+            let facts = self.bundle_facts.as_ref()?;
+            if let Some((owner, method)) = name.rsplit_once("::") {
+                facts.metadata.method_contracts.get(self.shared_nominal_key(owner))?.get(method)
+            } else {
+                self.unqualified_function(name).map(|function| &function.contracts)
+            }
+        })
+    }
+
+    pub(crate) fn fact_fn_param_names(&self, name: &str) -> Option<&Vec<String>> {
+        self.fn_param_names.get(name).or_else(|| {
+            let facts = self.bundle_facts.as_ref()?;
+            if let Some((owner, method)) = name.rsplit_once("::") {
+                facts.metadata.method_param_names.get(self.shared_nominal_key(owner))?.get(method)
+            } else {
+                let function = self.unqualified_function(name)?;
+                let Type::Fn { call_metadata: Some(metadata), .. } = &function.value_type else { return None };
+                Some(&metadata.names)
+            }
+        })
+    }
+
+    fn shared_method_key(&self, key: &(String, String)) -> Option<&(String, String)> {
+        self.bundle_facts.as_ref()?.method_keys
+            .get(self.shared_nominal_key(&key.0))?.get(&key.1)
+    }
+
+    pub(crate) fn fact_method_type_params(&self, key: &(String, String)) -> Option<&Vec<crate::AST::TypeParam>> {
+        self.method_type_params.get(key).or_else(|| self.bundle_facts.as_ref()?.metadata
+            .method_type_params.get(self.shared_method_key(key)?))
+    }
+
+    pub(crate) fn fact_method_self_convs(&self, key: &(String, String)) -> Option<&AccessConvention> {
+        self.method_self_convs.get(key).or_else(|| self.bundle_facts.as_ref()?.metadata
+            .method_self_convs.get(self.shared_method_key(key)?))
+    }
+
+    pub(crate) fn fact_trait_method_traits(&self, key: &(String, String)) -> Option<&String> {
+        self.trait_method_traits.get(key).or_else(|| self.bundle_facts.as_ref()?.metadata
+            .trait_method_traits.get(self.shared_method_key(key)?))
+    }
+
+    pub(crate) fn fact_trait_method(&self, key: &(String, String)) -> bool {
+        self.trait_methods.contains(key) || self.bundle_facts.as_ref().is_some_and(|facts|
+            self.shared_method_key(key).is_some_and(|key| facts.metadata.trait_methods.contains(key)))
+    }
+
+    pub(crate) fn fact_operator_method(&self, key: &str) -> Option<&OperatorMethod> {
+        self.operator_methods.get(key)
+            .or_else(|| self.bundle_facts.as_ref()?.metadata.operator_methods.get(key))
+    }
+
+    pub(crate) fn fact_fn_types(&self, name: &str) -> Option<&Type> {
+        self.fn_types.get(name).or_else(|| self.namespace_function(name).map(|fact| &fact.value_type))
+    }
+
+    pub(crate) fn fact_fn_source_types(&self, name: &str) -> Option<&Type> {
+        self.fn_source_types.get(name).or_else(|| self.namespace_function(name).map(|fact| &fact.source_type))
+    }
+
+    pub(crate) fn function_value_name(&self, name: &str) -> String {
+        if !self.sigs.contains_key(name) {
+            if let Some((module, function)) = self.unqualified_file.get(name) {
+                return format!("{module}::{}", mangle(function));
+            }
+            if let Some(fact) = self.namespace_sibling_function(name) {
+                return format!("{}::{}", fact.binding.0, mangle(&fact.binding.1));
+            }
+        }
+        name.to_owned()
+    }
+
+    pub(crate) fn fact_foreign_call_key(&self, key: &str) -> Option<&String> {
+        self.foreign_call_keys.get(key)
+            .or_else(|| self.bundle_facts.as_ref()?.metadata.foreign_call_keys.get(key))
+    }
+
+    pub(crate) fn fact_foreign_undo(&self, key: &str) -> Option<&String> {
+        self.foreign_undos.get(key)
+            .or_else(|| self.bundle_facts.as_ref()?.metadata.foreign_undos.get(key))
+    }
+
+    pub(crate) fn fact_method_sigs(&self, key: &(String, String)) -> Option<&Vec<(AccessConvention, Type)>> {
+        self.method_sigs.get(key).or_else(|| {
+            let facts = self.bundle_facts.as_ref()?;
+            let key = facts.method_keys.get(self.shared_nominal_key(&key.0))?.get(&key.1)?;
+            facts.metadata.method_sigs.get(key)
+        })
+    }
+
+    pub(crate) fn fact_method_rets(&self, key: &(String, String)) -> Option<&Option<Type>> {
+        self.method_rets.get(key).or_else(|| {
+            let facts = self.bundle_facts.as_ref()?;
+            let key = facts.method_keys.get(self.shared_nominal_key(&key.0))?.get(&key.1)?;
+            facts.metadata.method_rets.get(key)
+        })
+    }
+
+    /// The owner key `fact_method_sigs`/`fact_method_rets` find `key` under:
+    /// the spelling itself when this module's own method tables declare it,
+    /// else the shared canonical identity an alias or imported leaf
+    /// (`Hasher` from `crypto.Hasher`) resolves to. A checked call target is
+    /// named by this key, never by the source spelling resolved through it.
+    pub(crate) fn fact_method_owner<'a>(&'a self, key: &'a (String, String)) -> Option<&'a str> {
+        if self.method_sigs.contains_key(key) || self.method_rets.contains_key(key) {
+            return Some(&key.0);
+        }
+        let facts = self.bundle_facts.as_ref()?;
+        let owner = self.shared_nominal_key(&key.0);
+        let method = facts.method_keys.get(owner)?.get(&key.1)?;
+        (facts.metadata.method_sigs.contains_key(method) || facts.metadata.method_rets.contains_key(method))
+            .then_some(owner)
+    }
+
+    /// The package-bound function a module call key names: `(module alias or
+    /// Rust module, function)`, or `(name, name)` for an unqualified call to a
+    /// package sibling (the key `fact_unqualified_file` lowers under).
+    fn bound_function(&self, key: &(String, String)) -> Option<&BundleFunctionFacts> {
+        let facts = self.bundle_facts.as_ref()?;
+        let target = facts.rust_modules.get(&key.0).copied()
+            .or_else(|| facts.names.alias(self.bundle_module, &key.0)
+                .and_then(|alias| alias.target_module));
+        let Some(target) = target else {
+            return if key.0 == key.1 { self.namespace_function(&key.1) } else { None };
+        };
+        let owner = facts.names.namespace_owner(target, &key.1).unwrap_or(target);
+        facts.functions.get(owner)?.get(&key.1)
+    }
+
+    pub(crate) fn fact_import_binding(&self, key: &(String, String)) -> Option<&(String, String)> {
+        self.bound_function(key).map(|function| &function.binding)
+    }
+
+    pub(crate) fn fact_import_sigs(&self, key: &(String, String)) -> Option<&Vec<(AccessConvention, Type)>> {
+        self.import_sigs.get(key).or_else(|| self.bound_function(key).map(|fact| &fact.params))
+    }
+
+    /// The generic target behind `fact_import_sigs(key)`, read from the same
+    /// source as that signature: the module's imports when they declare the
+    /// key, else the package-bound function.
+    pub(crate) fn fact_import_generic(&self, key: &(String, String)) -> Option<&super::Imports::ImportedGenericFunction> {
+        if self.import_sigs.contains_key(key) {
+            return self.import_generics.get(key);
+        }
+        self.bound_function(key)?.generic.as_ref()
+    }
+
+    pub(crate) fn fact_import_rets(&self, key: &(String, String)) -> Option<&Option<Type>> {
+        self.import_rets.get(key).or_else(|| self.bound_function(key).map(|fact| &fact.ret))
+    }
     /// Line-start index of `src`. Lowering asks for positions of nearly every
     /// expression, so the index is built once instead of scanning from byte 0
     /// per query (quadratic on large units).
@@ -1347,6 +2135,24 @@ impl Cx {
         if alias.is_empty() && self.local_type_names.contains(leaf) {
             return None;
         }
+        if let Some(facts) = self.bundle_facts.as_ref() {
+            let target = if alias.is_empty() {
+                facts.names.namespace_owner(self.bundle_module, leaf)
+            } else {
+                facts.names.alias(self.bundle_module, alias).and_then(|binding| binding.target_module)
+                    .and_then(|target| {
+                        facts.names.declaration(target, leaf).map(|_| target)
+                            .or_else(|| facts.names.namespace_owner(target, leaf))
+                    })
+            };
+            if let Some(target) = target.filter(|&target| facts.names.visible(self.bundle_module, target, leaf)) {
+                if let Some(identity) = facts.names.declared_identity(target, leaf) {
+                    if facts.metadata.foreign_types.contains_key(identity) {
+                        return Some(identity.to_owned());
+                    }
+                }
+            }
+        }
         let rust_mod = if alias.is_empty() {
             None
         } else if let Some(module) = self.import_mods.get(alias) {
@@ -1364,6 +2170,40 @@ impl Cx {
             .map(|(name, _)| name.clone());
         let identity = matches.next()?;
         matches.next().is_none().then_some(identity)
+    }
+
+    /// S48: whether a type spelling names a declared trait, local or
+    /// imported. An imported trait resolves through the name ledger to its
+    /// checked identity, exactly as `foreign_type_identity` resolves an
+    /// imported nominal; a local nominal with the same leaf wins.
+    pub(crate) fn is_trait_type_name(&self, name: &str) -> bool {
+        if self.trait_names.contains(name) {
+            return true;
+        }
+        let Some(facts) = self.bundle_facts.as_ref() else {
+            return false;
+        };
+        let traits = &facts.metadata.trait_names;
+        if traits.contains(name) {
+            return true;
+        }
+        let (alias, leaf) = name.split_once('.').unwrap_or(("", name));
+        if alias.is_empty() && self.local_type_names.contains(leaf) {
+            return false;
+        }
+        let target = if alias.is_empty() {
+            facts.names.namespace_owner(self.bundle_module, leaf)
+        } else {
+            facts.names.alias(self.bundle_module, alias).and_then(|binding| binding.target_module)
+                .and_then(|target| {
+                    facts.names.declaration(target, leaf).map(|_| target)
+                        .or_else(|| facts.names.namespace_owner(target, leaf))
+                })
+        };
+        target
+            .filter(|&target| facts.names.visible(self.bundle_module, target, leaf))
+            .and_then(|target| facts.names.declared_identity(target, leaf))
+            .is_some_and(|identity| traits.contains(identity))
     }
 
     pub(crate) fn imported_type_metadata_name(&self, name: &str) -> Option<String> {
@@ -1407,9 +2247,12 @@ impl Cx {
         if self.distinct_types.contains_key(name) {
             return Some(name.to_string());
         }
+        if self.fact_distinct_types(name).is_some() {
+            return Some(self.shared_nominal_key(name).to_owned());
+        }
         let (alias, leaf) = name.split_once('.')?;
         self.foreign_type_identity(alias, leaf)
-            .filter(|identity| self.distinct_types.contains_key(identity))
+            .filter(|identity| self.fact_distinct_types(identity).is_some())
     }
 
     /// Checked-text ownership may be lowered from a comptime fragment whose
@@ -1433,8 +2276,7 @@ impl Cx {
         let Some(identity) = self.distinct_type_identity(name) else {
             return false;
         };
-        self.distinct_types
-            .get(&identity)
+        self.fact_distinct_types(&identity)
             .is_some_and(|(base, _)| matches!(base, Type::String))
             && self
                 .method_sigs
@@ -1448,11 +2290,10 @@ impl Cx {
                 let Type::Named(name) = ty else {
                     return None;
                 };
-                self.unit_facts
-                    .get(name)
+                self.fact_unit_facts(name)
                     .or_else(|| {
                         self.imported_type_metadata_name(name)
-                            .and_then(|canonical| self.unit_facts.get(&canonical))
+                            .and_then(|canonical| self.fact_unit_facts(&canonical))
                     })
                     .and_then(|fact| fact.dimension.clone())
             })
@@ -1462,31 +2303,30 @@ impl Cx {
         let Type::Named(name) = ty else {
             return None;
         };
-        self.unit_labels.get(name).or_else(|| {
+        self.fact_unit_labels(name).or_else(|| {
             self.imported_type_metadata_name(name)
-                .and_then(|canonical| self.unit_labels.get(&canonical))
+                .and_then(|canonical| self.fact_unit_labels(&canonical))
         })
     }
 
     pub(crate) fn has_display_type(&self, name: &str) -> bool {
-        self.display_types.contains(name)
+        self.fact_display_type(name)
             || self
                 .imported_type_metadata_name(name)
-                .is_some_and(|canonical| self.display_types.contains(&canonical))
+                .is_some_and(|canonical| self.fact_display_type(&canonical))
     }
 
     pub(crate) fn has_close_type(&self, name: &str) -> bool {
-        self.close_types.contains(name)
+        self.fact_close_type(name)
             || self
                 .imported_type_metadata_name(name)
-                .is_some_and(|canonical| self.close_types.contains(&canonical))
+                .is_some_and(|canonical| self.fact_close_type(&canonical))
     }
 
     pub(crate) fn is_distinct_type_name(&self, name: &str) -> bool {
-        self.distinct_types.contains_key(name)
-            || self
-                .imported_type_metadata_name(name)
-                .is_some_and(|canonical| self.distinct_types.contains_key(&canonical))
+        self.fact_distinct_types(name).is_some()
+            || self.imported_type_metadata_name(name)
+                .is_some_and(|canonical| self.fact_distinct_types(&canonical).is_some())
     }
 
     pub(crate) fn quantity_unit_label(
@@ -1707,9 +2547,6 @@ impl Cx {
         }
         match (self.any_core_import_module(alias), leaf) {
             (Some("core.crypto"), leaf) => core_crypto_type_name(leaf),
-            (Some("core.auth"), "Claims") => Some("Claims"),
-            (Some("core.auth"), "AuthError") => Some("AuthError"),
-            (Some("core.auth"), "Session") => Some("Session"),
             (Some("core.auth"), "Auth") => Some("Auth"),
             (Some("core.sync"), "SyncText") => Some("SyncText"),
             (Some("core.sync"), "SyncCounter") => Some("SyncCounter"),
@@ -1731,7 +2568,7 @@ impl Cx {
             (Some("core.sys"), "EnvError") => Some("EnvError"),
             (Some("core.mem"), "AllocError") => Some("AllocError"),
             (Some("core.encoding"), "DataEvent") => Some("DataEvent"),
-            (Some("core.encoding"), "DataTree") => Some("DataTree"),
+            (Some("core.encoding"), "Dyn") => Some("Dyn"),
             (Some("core.encoding"), "EncodingLimits") => Some("EncodingLimits"),
             (Some("core.encoding"), "EncodingError") => Some("EncodingError"),
             (Some("core.encoding"), "EncodingCause") => Some("EncodingCause"),
@@ -1741,6 +2578,9 @@ impl Cx {
             (Some("core.email"), "Message") => Some("Message"),
             (Some("core.email"), "Attachment") => Some("Attachment"),
             (Some("core.email"), "Envelope") => Some("Envelope"),
+            (Some("core.email"), "__EmailAddressView") => Some("__EmailAddressView"),
+            (Some("core.email"), "__EmailAttachmentView") => Some("__EmailAttachmentView"),
+            (Some("core.email"), "__EmailMessageView") => Some("__EmailMessageView"),
             (Some("core.email"), "SMTPSecurity") => Some("SMTPSecurity"),
             (Some("core.email"), "Limits") => Some("Limits"),
             (Some("core.email"), "RecipientPolicy") => Some("RecipientPolicy"),
@@ -1761,8 +2601,12 @@ impl Cx {
             (Some("core.encoding.jsonl"), "JSONLReader") => Some("JSONLReader"),
             (Some("core.encoding.jsonl"), "JSONLWriter") => Some("JSONLWriter"),
             (Some("core.encoding.csv"), "CSVReader") => Some("CSVReader"),
-            (Some("core.encoding.csv"), "CSVWriter") => Some("CSVWriter"),
             (Some("core.encoding.csv"), "CSVRow") => Some("CSVRow"),
+            (Some("core.service"), "__DeliveryFacts") => Some("JetServiceDeliveryFacts"),
+            (Some("core.service"), "__DeliveryRecord") => Some("JetServiceDeliveryRecord"),
+            (Some("core.service"), "__EndpointMailbox") => Some("JetServiceEndpointMailbox"),
+            (Some("core.service"), "__MailboxRead") => Some("JetServiceMailboxRead"),
+            (Some("core.encoding.csv"), "__QueryRead") => Some("__QueryRead"),
             (Some("core.encoding.xml"), "XMLReader") => Some("XMLReader"),
             (Some("core.encoding.xml"), "XMLWriter") => Some("XMLWriter"),
             (Some("core.encoding.xml"), "XMLLimits") => Some("XMLLimits"),
@@ -1791,6 +2635,7 @@ impl Cx {
             (Some("core.jobs"), "JobQueueStatus") => Some("JobQueueStatus"),
             (Some("core.jobs"), "JobQueueState") => Some("JobQueueState"),
             (Some("core.jobs"), "JobQueueDeliveryPolicy") => Some("JobQueueDeliveryPolicy"),
+            (Some("core.time"), "Duration") => Some("Duration"),
             _ => None,
         }
     }
@@ -1805,13 +2650,13 @@ impl Cx {
         fn contains(cx: &Cx, ty: &Type, seen: &mut HashSet<String>) -> bool {
             match ty {
                 Type::Named(name) => {
-                    if cx.boxed_edges.iter().any(|(owner, _)| owner == name) {
+                    if cx.fact_has_box_edges(name) {
                         return true;
                     }
                     if !seen.insert(name.clone()) {
                         return false;
                     }
-                    let found = cx.struct_fields.get(name).is_some_and(|fields| {
+                    let found = cx.fact_struct_fields(name).is_some_and(|fields| {
                         fields
                             .iter()
                             .any(|(_, field_ty)| contains(cx, field_ty, seen))
@@ -1872,11 +2717,11 @@ impl Cx {
                     if !seen.insert(name.clone()) {
                         return false;
                     }
-                    let found = cx.struct_fields.get(name).is_some_and(|fields| {
+                    let found = cx.fact_struct_fields(name).is_some_and(|fields| {
                         fields
                             .iter()
                             .any(|(_, field_ty)| contains(cx, field_ty, seen))
-                    }) || cx.enum_variants.get(name).is_some_and(|variants| {
+                    }) || cx.fact_enum_variants(name).is_some_and(|variants| {
                         variants
                             .iter()
                             .any(|(_, payload)| payload_contains(cx, payload, seen))
@@ -1942,11 +2787,11 @@ impl Cx {
             if !seen.insert(name.to_string()) {
                 return false;
             }
-            let found = cx.struct_fields.get(name).is_some_and(|fields| {
+            let found = cx.fact_struct_fields(name).is_some_and(|fields| {
                 fields
                     .iter()
                     .any(|(_, ty)| contains(cx, ty, seen, mutable_only))
-            }) || cx.enum_variants.get(name).is_some_and(|variants| {
+            }) || cx.fact_enum_variants(name).is_some_and(|variants| {
                 variants
                     .iter()
                     .any(|(_, payload)| payload_contains(cx, payload, seen, mutable_only))
@@ -2031,10 +2876,9 @@ impl Cx {
             if !seen.insert(name.to_string()) {
                 return false;
             }
-            cx.struct_fields
-                .get(name)
+            cx.fact_struct_fields(name)
                 .is_some_and(|fields| fields.iter().any(|(_, ty)| contains(cx, ty, seen)))
-                || cx.enum_variants.get(name).is_some_and(|variants| {
+                || cx.fact_enum_variants(name).is_some_and(|variants| {
                     variants
                         .iter()
                         .any(|(_, payload)| payload_contains(cx, payload, seen))
@@ -2143,10 +2987,10 @@ impl Cx {
         for owner in owners {
             let mut names = Vec::new();
             let mut direct = false;
-            for (_, ty) in self.struct_fields.get(owner).into_iter().flatten() {
+            for (_, ty) in self.fact_struct_fields(owner).into_iter().flatten() {
                 walk(ty, &mut names, &mut direct);
             }
-            for (_, payload) in self.enum_variants.get(owner).into_iter().flatten() {
+            for (_, payload) in self.fact_enum_variants(owner).into_iter().flatten() {
                 match payload {
                     VariantPayload::Unit => {}
                     VariantPayload::Single(ty, _) => walk(ty, &mut names, &mut direct),
@@ -2207,10 +3051,9 @@ impl Cx {
         }
 
         fn definition_contains_view(cx: &Cx, name: &str) -> bool {
-            cx.struct_fields
-                .get(name)
+            cx.fact_struct_fields(name)
                 .is_some_and(|fields| fields.iter().any(|(_, ty)| cx.type_contains_view(ty)))
-                || cx.enum_variants.get(name).is_some_and(|variants| {
+                || cx.fact_enum_variants(name).is_some_and(|variants| {
                     variants.iter().any(|(_, payload)| match payload {
                         VariantPayload::Unit => false,
                         VariantPayload::Single(ty, _) => cx.type_contains_view(ty),
@@ -2334,8 +3177,7 @@ impl Cx {
     /// the column order the store was built with. A computed field is never a
     /// column (D-FIELDPOL1) and `struct_fields` already excludes it.
     pub(crate) fn columnar_column_index(&self, name: &str, field: &str) -> Option<usize> {
-        self.struct_fields
-            .get(name)?
+        self.fact_struct_fields(name)?
             .iter()
             .position(|(candidate, _)| candidate == field)
     }
@@ -2349,8 +3191,8 @@ impl Cx {
     /// D-TYPEALIAS1 / D-ALIAS-OP1=B: expand `alias Name<T> :: …` applications to their target type.
     pub(crate) fn expand_type_aliases(&self, ty: &Type) -> Type {
         match ty {
-            Type::Apply { name, args } if self.type_aliases.contains_key(name) => {
-                let (params, target) = self.type_aliases.get(name).unwrap();
+            Type::Apply { name, args } if self.fact_type_aliases(name).is_some() => {
+                let (params, target) = self.fact_type_aliases(name).unwrap();
                 let subst: HashMap<String, Type> = params
                     .iter()
                     .zip(args.iter())
@@ -2538,8 +3380,22 @@ impl Cx {
         }
     }
 
+    fn email_secret_rust_type(&self) -> String {
+        let key = self.struct_fields.keys().find(|key| {
+            key.starts_with("<corelib>/Core/crypto::") && key.ends_with("::Secret")
+        }).expect("email carriers require the checked core.crypto.Secret declaration");
+        self.rust_type(&Type::Named(key.clone()))
+    }
+
     pub(crate) fn rust_type(&self, ty: &Type) -> String {
         let ty = self.expand_type_aliases(ty);
+        if let Type::Named(name) = &ty {
+            if name.starts_with("<corelib>/Core/compute::") {
+                if let Some(native) = compute_handle_rust_type(core_source_type_leaf(name)) {
+                    return format!("{}{native}", self.root_prefix);
+                }
+            }
+        }
         if let Some((base, _)) = ty.quantity_parts() {
             return self.rust_type(base);
         }
@@ -2609,9 +3465,7 @@ impl Cx {
                 let identity = self
                     .foreign_type_identity("", name)
                     .expect("foreign identity was checked above");
-                let rust_mod = self
-                    .foreign_types
-                    .get(&identity)
+                let rust_mod = self.fact_foreign_types(&identity)
                     .expect("foreign identity must have a Rust module");
                 let leaf = nominal_leaf(&identity);
                 format!("{}{}::{}", self.root_prefix, rust_mod, mangle_path(leaf))
@@ -2653,15 +3507,6 @@ impl Cx {
             Type::Named(name) if name == Syntax::TYPE_ALLOC_ERROR => {
                 format!("{}AllocError", self.root_prefix)
             }
-            Type::Named(name) if name == "Claims" && !self.type_names.contains(name) => {
-                format!("{}JetAuthClaims", self.root_prefix)
-            }
-            Type::Named(name) if name == "AuthError" && !self.type_names.contains(name) => {
-                format!("{}JetAuthError", self.root_prefix)
-            }
-            Type::Named(name) if name == "Session" && !self.type_names.contains(name) => {
-                format!("{}JetAuthSession", self.root_prefix)
-            }
             Type::Named(name) if name == "Auth" && !self.type_names.contains(name) => {
                 format!("{}JetAuthApp", self.root_prefix)
             }
@@ -2699,27 +3544,6 @@ impl Cx {
             }
             // D-PENDING1=B: Loadable<Unknown, Unknown> placeholders — Rust infers the type.
             Type::Named(name) if name == "Unknown" => "_".to_string(),
-            // D-APPROX1=A: sketch types → opaque Rust structs.
-            Type::Named(name) if name == "HyperLogLog" => "JetHyperLogLog".to_string(),
-            Type::Named(name) if name == "TDigest" => "JetTDigest".to_string(),
-            Type::Named(name) if name == "CountMinSketch" => "JetCountMinSketch".to_string(),
-            Type::Named(name) if name == "ReservoirSampler" => "JetReservoirSampler".to_string(),
-            // D-TIMEDEPTH1=A: civil-time types → opaque Rust structs.
-            Type::Named(name) if name == "Date" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalDate" => "JetDate".to_string(),
-            Type::Named(name) if name == "LocalTime" => "JetLocalTime".to_string(),
-            Type::Named(name) if name == "DateTime" => "JetDateTime".to_string(),
-            Type::Named(name) if name == "Instant" => "JetInstant".to_string(),
-            Type::Named(name) if name == "Period" => "JetPeriod".to_string(),
-            Type::Named(name) if name == "Zone" => "JetZone".to_string(),
-            Type::Named(name) if name == "ZonedDateTime" => "JetZonedDateTime".to_string(),
-            // D-URL1=A: URL/MIME values live in the corelib prelude module.
-            Type::Named(name) if name == "URL" => {
-                format!("{}jet_std::JetURL", self.root_prefix)
-            }
-            Type::Named(name) if name == "MIME" => {
-                format!("{}jet_std::JetMIME", self.root_prefix)
-            }
             Type::Named(name)
                 if matches!(
                     name.as_str(),
@@ -2727,6 +3551,7 @@ impl Cx {
                         | "Message"
                         | "Attachment"
                         | "Envelope"
+                        | "__EmailAddressView" | "__EmailAttachmentView" | "__EmailMessageView"
                         | "SMTPSecurity"
                         | "RecipientPolicy"
                         | "RecipientReport"
@@ -2740,6 +3565,9 @@ impl Cx {
                     "Message" => "Message",
                     "Attachment" => "Attachment",
                     "Envelope" => "Envelope",
+                    "__EmailAddressView" => "__EmailAddressView",
+                    "__EmailAttachmentView" => "__EmailAttachmentView",
+                    "__EmailMessageView" => "__EmailMessageView",
                     "SMTPSecurity" => "SMTPSecurity",
                     "RecipientPolicy" => "RecipientPolicy",
                     "RecipientReport" => "RecipientReport",
@@ -2750,15 +3578,16 @@ impl Cx {
                 format!("{}jet_email::{rust}", self.root_prefix)
             }
             Type::Named(name) if name == "SMTPAuth" && !self.type_names.contains(name) => {
-                let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::SMTPAuth<{}::Secret>", self.root_prefix, ffi)
+                format!("{}jet_email::SMTPAuth<{}>", self.root_prefix, self.email_secret_rust_type())
             }
             Type::Named(name)
                 if matches!(name.as_str(), "DKIMConfig" | "SMTPConfig")
                     && !self.type_names.contains(name) =>
             {
                 let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
-                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, name, ffi)
+                let rust = core_email_rust_type_name(name)
+                    .expect("compiler-owned email config has a native carrier");
+                format!("{}jet_email::{}<{}::Secret>", self.root_prefix, rust, ffi)
             }
             Type::Named(name)
                 if matches!(name.as_str(), "TLSTrust" | "Mailer")
@@ -2806,7 +3635,11 @@ impl Cx {
             Type::Named(name)
                 if core_ui_rust_type_name(name).is_some() && !self.type_names.contains(name) =>
             {
-                format!("{}Jet{}", self.root_prefix, name)
+                format!(
+                    "{}{}",
+                    self.root_prefix,
+                    core_ui_rust_type_name(name).unwrap()
+                )
             }
             Type::Named(name)
                 if name == "UIFileFilterResult" && !self.type_names.contains(name) =>
@@ -3134,13 +3967,6 @@ impl Cx {
                     layout_handle_rust_type(name).unwrap()
                 )
             }
-            // D-TYPE2-IMAG1=A: Complex lives in the shared MathLibPure root,
-            // not in the JetStd namespace used by the older precise numerics.
-            Type::Named(name)
-                if name == Syntax::TYPE_COMPLEX && !self.type_names.contains(name) =>
-            {
-                format!("{}JetComplex", self.root_prefix)
-            }
             Type::Named(name)
                 if root_prelude_rust_type_name(name).is_some()
                     && !self.type_names.contains(name) =>
@@ -3171,10 +3997,7 @@ impl Cx {
                 if resolved == "AllocError" {
                     return format!("{}AllocError", self.root_prefix);
                 }
-                if resolved == "Claims"
-                    || resolved == "AuthError"
-                    || resolved == "Session"
-                    || resolved == "Auth"
+                if resolved == "Auth"
                     || resolved == "SyncText"
                     || resolved == "SyncCounter"
                     || resolved == "SyncMap"
@@ -3186,9 +4009,6 @@ impl Cx {
                     || resolved == "RowPolicy"
                 {
                     let rust = match resolved {
-                        "Claims" => "JetAuthClaims",
-                        "AuthError" => "JetAuthError",
-                        "Session" => "JetAuthSession",
                         "Auth" => "JetAuthApp",
                         "SyncText" => "JetSyncText",
                         "SyncCounter" => "JetSyncCounter",
@@ -3214,6 +4034,7 @@ impl Cx {
                         | "Message"
                         | "Attachment"
                         | "Envelope"
+                        | "__EmailAddressView" | "__EmailAttachmentView" | "__EmailMessageView"
                         | "SMTPSecurity"
                         | "RecipientPolicy"
                         | "RecipientReport"
@@ -3230,9 +4051,11 @@ impl Cx {
                 }
                 if matches!(resolved, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") {
                     let ffi = self.ffi_crate.as_deref().unwrap_or("jet_ffi");
+                    let rust = core_email_rust_type_name(resolved)
+                        .expect("qualified Core email config has a native carrier");
                     return format!(
                         "{}jet_email::{}<{}::Secret>",
-                        self.root_prefix, resolved, ffi
+                        self.root_prefix, rust, ffi
                     );
                 }
                 if resolved == "TLSTrust" || resolved == "Mailer" {
@@ -3557,14 +4380,6 @@ impl Cx {
                     self.rust_type(&args[1])
                 )
             }
-            // D-HONESTNUM1=A: Measurement<T> → jet_std::JetMeasurement<T>.
-            Type::Apply { name, args } if name == Syntax::TYPE_MEASUREMENT && !args.is_empty() => {
-                format!(
-                    "{}jet_std::JetMeasurement<{}>",
-                    self.root_prefix,
-                    self.rust_type(&args[0])
-                )
-            }
             Type::Apply { name, args } if name == Syntax::TYPE_SHARED_GUARD && args.len() == 1 => {
                 format!(
                     "{}jet_std::JetSharedGuard<{}>",
@@ -3616,29 +4431,19 @@ impl Cx {
             Type::Apply { name, args } if name == Syntax::TYPE_PIN && args.len() == 1 => {
                 format!("&mut {}", self.rust_type(&args[0]))
             }
-            // D-ITERTOOLS1=A: Iter<T> → JetIter<T> (must-use move-only lazy view).
-            Type::Apply { name, args } if name == Syntax::TYPE_ITER && args.len() == 1 => {
+            // D-ITERTOOLS1=A / D-FOUND-VIEW1=A: both lazy iterator carriers
+            // use the shared root projection; ViewIter retains its source owner.
+            Type::Apply { name, args }
+                if matches!(name.as_str(), Syntax::TYPE_ITER | Syntax::TYPE_VIEW_ITER)
+                    && args.len() == 1
+                    && !self.type_names.contains(name) =>
+            {
                 format!(
                     "{}{}<{}>",
                     self.root_prefix,
                     root_prelude_rust_type_name(name).expect("registered iterator carrier"),
                     self.rust_type(&args[0])
                 )
-            }
-            // D-FOUND-VIEW1=A: `ViewIter<T>` retains the source owner while
-            // yielding borrowed windows; its carrier is not an eager `Iter`.
-            Type::Apply { name, args } if name == Syntax::TYPE_VIEW_ITER && args.len() == 1 => {
-                format!("JetViewIter<{}>", self.rust_type(&args[0]))
-            }
-            // D-CORE-SECRETS1=A: generic TTL stays distinct from secret lifecycle.
-            Type::Apply { name, args }
-                if name == Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 =>
-            {
-                format!("JetExpiring<{}>", self.rust_type(&args[0]))
-            }
-            // D-TTLVAL1=A: the one secret-lifetime wrapper.
-            Type::Apply { name, args } if name == "ExpiringSecret" && args.len() == 1 => {
-                format!("JetExpiringSecret<{}>", self.rust_type(&args[0]))
             }
             // D-COLLBREADTH1=A: Set<T> → HashSet<T>, Queue<T> → VecDeque<T>.
             Type::Apply { name, args } if name == "Set" && !args.is_empty() => {
@@ -3904,7 +4709,7 @@ pub(crate) fn rust_param_type(cx: &Cx, convention: AccessConvention, ty: &Type) 
 
 #[cfg(test)]
 pub(crate) fn build_cx(prog: &Program, src: &str, file: &str) -> Cx {
-    let extern_funcs = extern_func_map(&prog.items, None, &[]);
+    let extern_funcs = Arc::new(extern_func_map(&prog.items, None, &[]));
     build_cx_items(&prog.items, src, file, None, &extern_funcs, "")
 }
 
@@ -4035,7 +4840,7 @@ fn foreign_undo_map(items: &[Item]) -> HashMap<String, String> {
     map
 }
 
-pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, ExternFn> {
+fn bundle_extern_funcs(bundle: &ProgramBundle) -> Arc<HashMap<String, ExternFn>> {
     let mut map = HashMap::new();
     for (module_idx, module) in bundle.modules.iter().enumerate() {
         let module_funcs = extern_func_map(
@@ -4068,12 +4873,11 @@ pub(crate) fn bundle_extern_funcs(bundle: &ProgramBundle) -> HashMap<String, Ext
             }
         }
     }
-    map
+    Arc::new(map)
 }
 
 pub(crate) fn bundle_foreign_undos(
     bundle: &ProgramBundle,
-    module_idx: usize,
 ) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for module in &bundle.modules {
@@ -4085,8 +4889,6 @@ pub(crate) fn bundle_foreign_undos(
             map.insert(format!("{module_prefix}::{binding}"), inverse);
         }
     }
-    // Bare calls resolve only within the module currently being lowered.
-    map.extend(foreign_undo_map(&bundle.modules[module_idx].items));
     map
 }
 
@@ -4273,9 +5075,17 @@ fn qualified_constant_key(module: &str, name: &str) -> String {
 /// Mirror the bundle-level import maps `emit_bundle` fills before lowering.
 /// `build_cx_items` alone leaves `core_imports` empty; without this, JIT
 /// lowering mis-gates `use core.tasks as tasks` channel calls.
-pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
+pub(crate) fn populate_cx_from_bundle(
+    cx: &mut Cx,
+    bundle: &ProgramBundle,
+    module_idx: usize,
+    facts: &Arc<BundleCodegenFacts>,
+) {
+    cx.bundle_facts = Some(Arc::clone(facts));
+    cx.bundle_module = module_idx;
+    cx.boxed_edges.extend(facts.boxed_by_module[module_idx].iter().cloned());
     use super::Imports::{
-        core_import_map, core_source_sig_map, foreign_type_map, import_mod_map, import_ret_map,
+        core_import_map, foreign_type_map, import_mod_map, import_ret_map,
         import_sig_map, inline_core_import_maps, inline_foreign_import_maps,
         inline_foreign_import_signature_maps, inline_foreign_reexport_maps,
         inline_foreign_reexport_signature_maps, inline_import_maps, nested_file_calls,
@@ -4285,6 +5095,64 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.import_mods = import_mod_map(bundle, module_idx);
     cx.module_alias = bundle.modules[module_idx].alias.clone();
     cx.module_identity = module_identity(bundle, module_idx);
+    // Project sema's checked serde capabilities as well as source bodies for
+    // mounted callbacks. Sema materializes every Encode/Decode capability —
+    // explicit, auto-derived, or hand-written — as an impl in the finished
+    // item list, so auto-derived records carry the same endpoint schema as
+    // explicitly derived records; marker spelling is not a capability test.
+    fn register_http_metadata(cx: &mut Cx, bundle: &ProgramBundle, owner: usize, module_idx: usize, items: &[Item]) {
+        let is_codec = |trait_name: &str| trait_name == Generics::ENCODE || trait_name == Generics::DECODE;
+        let codec_impls: HashSet<&str> = items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Impl(implementation) if implementation.trait_name.as_deref().is_some_and(is_codec) => {
+                    Some(implementation.type_name.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        for item in items {
+            match item {
+                Item::Struct(definition) => {
+                    if codec_impls.contains(definition.name.as_str())
+                        || definition.trait_impls.iter().any(|block| is_codec(&block.trait_name))
+                    {
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(owner, &definition.name) {
+                            let mut fields = jet_foundation::Reflection::fields(definition);
+                            for field in &mut fields {
+                                field.ty = super::Imports::qualify_imported_call_type(bundle, owner, "", &field.ty);
+                            }
+                            cx.codable_types.insert(identity.clone());
+                            cx.reflection_fields.insert(identity, fields);
+                        }
+                        if owner == module_idx {
+                            cx.codable_types.insert(definition.name.clone());
+                        }
+                    }
+                    for method in &definition.methods {
+                        let route_source = method.markers.iter().any(|marker| {
+                            let crate::Sema::MarkerModules::MarkerResolution::Found(resolved) =
+                                crate::Sema::MarkerModules::resolve_marker_application(bundle, owner, marker)
+                                else { return false; };
+                            jet_foundation::CoreModuleExports::core_source_module("core.http.server")
+                                .is_some_and(|source| bundle.modules[resolved.module].alias == source.alias)
+                        });
+                        if !route_source { continue; }
+                        if let Some(identity) = bundle.name_ledger.nominal_identity(owner, &definition.name) {
+                            cx.fn_bodies.insert(format!("{identity}::{}", method.name), method.body.clone());
+                        }
+                    }
+                }
+                Item::CodeModule(module) => {
+                    if let Some(body) = &module.body { register_http_metadata(cx, bundle, owner, module_idx, body); }
+                }
+                _ => {}
+            }
+        }
+    }
+    for (owner, module) in bundle.modules.iter().enumerate() {
+        register_http_metadata(cx, bundle, owner, module_idx, &module.items);
+    }
     // Match `qualified_key` used when constructing `TirConstantDef.key`.
     let module = cx.module_identity.clone();
     cx.const_ref_keys = cx
@@ -4306,32 +5174,11 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
             if reference.kind != "const" {
                 return None;
             }
-            let target_module = (0..bundle.modules.len()).find(|target_idx| {
-                bundle.name_ledger.module_path(*target_idx)
-                    == Some(reference.module_path.as_str())
-            })?;
-            let declaration = bundle.name_ledger.module_declarations(target_module).find(|declaration| {
-                declaration.span == reference.def_span && declaration.kind == "const"
-            })?;
-            let ty = bundle.modules[target_module]
-                .items
-                .iter()
-                .find_map(|item| match item {
-                    Item::Const(candidate) if candidate.name == declaration.name => {
-                        super::TIR::source_constant_type(candidate)
-                    }
-                    _ => None,
-                })?;
-            Some((
-                (*start, *end),
-                (
-                    qualified_constant_key(
-                        &module_identity(bundle, target_module),
-                        &declaration.name,
-                    ),
-                    ty,
-                ),
-            ))
+            let identity = reference.semantic_identity.as_deref()?;
+            let owner = facts.names.nominal_module(identity)?;
+            let (_, name) = identity.rsplit_once("::")?;
+            let constant = facts.constants.get(owner)?.get(name)?;
+            Some(((*start, *end), (constant.key.clone(), constant.ty.as_ref()?.clone())))
         })
         .collect();
     for alias in bundle.name_ledger.module_aliases(module_idx) {
@@ -4351,28 +5198,17 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         else {
             continue;
         };
-        let Some(definition) = bundle.name_ledger.declaration(target_module, target_name) else {
+        let owner = facts.names.namespace_owner(target_module, target_name).unwrap_or(target_module);
+        let Some(constant) = facts.constants.get(owner).and_then(|rows| rows.get(target_name)) else {
             continue;
         };
-        if definition.kind != "const" {
-            continue;
-        }
-        let key = qualified_constant_key(
-            &module_identity(bundle, target_module),
-            &definition.name,
-        );
-        cx.const_ref_keys.insert(alias.name.clone(), key);
-        if let Some(ty) = target.items.iter().find_map(|item| match item {
-            Item::Const(candidate) if candidate.name == definition.name => {
-                super::TIR::source_constant_type(candidate)
-            }
-            _ => None,
-        }) {
-            cx.const_ref_types.insert(alias.name.clone(), ty);
+        cx.const_ref_keys.insert(alias.name.clone(), constant.key.clone());
+        if let Some(ty) = &constant.ty {
+            cx.const_ref_types.insert(alias.name.clone(), ty.clone());
         }
     }
     // Bundle construction assigns the module identity after `build_cx_items`;
-    cx.devtools_registry = bundle.devtools_registry.clone();
+    cx.devtools_registry = Arc::clone(&facts.metadata.devtools_registry);
     if let Some(module) = bundle.name_ledger.module(module_idx) {
         cx.devtools_package = module.package.clone();
         cx.devtools_module = module.path.clone();
@@ -4381,51 +5217,25 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
         cx.devtools_module.clear();
     }
     cx.policy_declarations = bundle.modules[module_idx].policy_declarations.clone();
-    populate_cx_module_facts(cx, bundle, module_idx);
-    cx.opaque_handles = bundle
-        .cffi
-        .handle_facts
-        .iter()
-        .map(|fact| fact.jet_name.clone())
-        .collect();
-    cx.core_source_modules = bundle
-        .modules
-        .iter()
-        .filter_map(|module| {
-            jet_foundation::CoreModuleExports::core_source_module_by_alias(&module.alias)
-                .map(|source| (source.module.to_string(), source.alias.to_string()))
-        })
-        .collect();
-    if let Some(part) = jet_foundation::CoreSourceParts::core_private_source_part(
-        jet_foundation::CoreSourceParts::CORE_TEXT_STRING_OWNER,
-    ) {
-        if bundle
-            .modules
-            .iter()
-            .any(|module| module.alias == part.source.alias)
-        {
-            cx.core_source_modules.insert(
-                part.source.module.to_string(),
-                part.source.alias.to_string(),
-            );
-        }
-    }
-    cx.core_source_sigs = core_source_sig_map(bundle);
+    populate_cx_module_facts(cx, bundle, module_idx, facts);
+    cx.opaque_handles = Arc::clone(&facts.metadata.opaque_handles);
+    cx.core_source_modules = Arc::clone(&facts.metadata.core_source_modules);
+    cx.core_source_sigs = Arc::clone(&facts.metadata.core_source_sigs);
     cx.foreign_types = foreign_type_map(bundle, module_idx);
     crate::Codegen::TIR::register_imported_struct_shapes(cx, bundle, module_idx);
     update_cloneability_with_foreign_types(cx, &bundle.modules[module_idx].items);
     register_foreign_enum_variants(cx, bundle, module_idx);
     cx.reexport_calls = reexport_call_map(bundle, module_idx);
     let nested_calls = nested_file_calls(bundle, module_idx);
-    cx.import_sigs = import_sig_map(bundle, module_idx, &nested_calls);
+    (cx.import_sigs, cx.import_generics) = import_sig_map(bundle, module_idx, &nested_calls);
     cx.import_rets = import_ret_map(bundle, module_idx, &nested_calls);
     cx.core_imports = core_import_map(bundle, module_idx);
     register_bundle_reflect_paths(cx, bundle, module_idx);
     register_core_close_types(cx, bundle);
     register_core_import_surfaces(cx);
-    cx.used_core = bundle.used_core.clone();
-    cx.foreign_undos = bundle_foreign_undos(bundle, module_idx);
-    cx.ffi_callback_fns = bundle.ffi_callback_fns.clone();
+    cx.used_core = Arc::clone(&facts.metadata.used_core);
+    cx.foreign_undos = foreign_undo_map(&bundle.modules[module_idx].items);
+    cx.ffi_callback_fns = Arc::clone(&facts.metadata.ffi_callback_fns);
     register_bundle_unit_metadata(cx, bundle, module_idx);
     let (uinline, ufile) = unqualified_import_maps(bundle, module_idx, &nested_calls);
     cx.unqualified_inline = uinline;
@@ -4444,128 +5254,59 @@ pub(crate) fn populate_cx_from_bundle(cx: &mut Cx, bundle: &ProgramBundle, modul
     cx.inline_foreign_sigs = inline_foreign_sigs;
     cx.inline_foreign_rets = inline_foreign_rets;
     cx.inline_reexport_foreign = inline_foreign_reexport_maps(bundle, module_idx);
-    // Keep the preview identity on the same canonical target/build facts as
-    // artifact caching.  A readable tuple here would silently omit provider,
-    // closure, linker, dependency, or runtime-layer changes.
-    let mut preview_identity = b"jet-ui-preview-build-v1\0".to_vec();
-    bundle
-        .build_facts
-        .append_artifact_identity_bytes(&mut preview_identity);
-    for value in [
-        bundle.build_facts.profile.as_str(),
-        bundle.build_facts.stamp.toolchain.as_str(),
-        if bundle.build_facts.stamp.dirty {
-            "dirty"
-        } else {
-            "clean"
-        },
-        bundle.build_facts.package_name.as_str(),
-        bundle.build_facts.package_version.as_str(),
-    ] {
-        preview_identity.extend_from_slice(&(value.len() as u64).to_le_bytes());
-        preview_identity.extend_from_slice(value.as_bytes());
-    }
-    cx.preview_build_id = format!(
-        "sha256-{}",
-        jet_foundation::SHA256::sha256_hex(&preview_identity)
-    );
-    cx.preview_revision = bundle
-        .build_facts
-        .stamp
-        .git
-        .clone()
-        .filter(|value| !value.is_empty())
-        .or_else(|| {
-            (!bundle.build_facts.stamp.at.is_empty()).then(|| bundle.build_facts.stamp.at.clone())
-        })
-        .unwrap_or_else(|| {
-            format!(
-                "{}:{}",
-                bundle.build_facts.package_name, bundle.build_facts.package_version
-            )
-        });
+    cx.preview_build_id = Arc::clone(&facts.metadata.preview_build_id);
+    cx.preview_revision = Arc::clone(&facts.metadata.preview_revision);
     let (inline_foreign_reexport_sigs, inline_foreign_reexport_rets) =
         inline_foreign_reexport_signature_maps(bundle, module_idx);
     cx.inline_foreign_reexport_sigs = inline_foreign_reexport_sigs;
     cx.inline_foreign_reexport_rets = inline_foreign_reexport_rets;
     cx.package_edition = bundle.edition.clone();
-    cx.hardware_profile = crate::Sema::target_hardware_profile(bundle);
-    cx.hardware_profile_id = crate::Sema::target_hardware_profile_id(bundle);
+    cx.hardware_profile = facts.metadata.hardware_profile.clone();
+    cx.hardware_profile_id = facts.metadata.hardware_profile_id.clone();
 }
 
 /// Carry authoritative module ownership, imported callable metadata, and
 /// package-only guarantee facts into one codegen context. The name ledger owns
 /// declarations because loaded dependency items may also be present in a
 /// module's merged item list. Dependency ownership uses sema's longest-root rule.
-pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
-    cx.direct_c_functions = bundle
-        .modules
-        .iter()
-        .flat_map(|module| {
-            module.items.iter().filter_map(|item| {
-                let Item::CModule(c_module) = item else {
-                    return None;
-                };
-                Some(
-                    c_module
-                        .functions
-                        .iter()
-                        .map(|function| format!("{}::{}", mangle(&module.alias), function.name)),
-                )
-            })
-        })
-        .flatten()
-        .collect();
+pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize, facts: &Arc<BundleCodegenFacts>) {
+    cx.direct_c_functions = Arc::clone(&facts.metadata.direct_c_functions);
     cx.foreign_call_keys.clear();
-    for (foreign_module_idx, foreign_module) in bundle.modules.iter().enumerate() {
-        let identity = module_identity(bundle, foreign_module_idx);
-        let rust_module = mangle(&foreign_module.alias);
-        for item in &foreign_module.items {
-            match item {
-                Item::CModule(c_module) => {
-                    for function in &c_module.functions {
-                        let key = format!("{identity}::{}", function.name);
-                        cx.foreign_call_keys
-                            .insert(format!("{rust_module}::{}", function.name), key.clone());
-                        if foreign_module_idx == module_idx {
-                            cx.foreign_call_keys.insert(function.name.clone(), key);
-                        }
-                    }
+    let module = &bundle.modules[module_idx];
+    for item in &module.items {
+        match item {
+            Item::CModule(c_module) => {
+                for function in &c_module.functions {
+                    cx.foreign_call_keys.insert(function.name.clone(),
+                        format!("{}::{}", cx.module_identity, function.name));
                 }
-                Item::ExternRust(block) => {
-                    for function in &block.functions {
-                        let key = format!("{identity}::{}", function.rust_path);
-                        cx.foreign_call_keys
-                            .insert(format!("{rust_module}::{}", function.name), key.clone());
-                        if foreign_module_idx == module_idx {
-                            cx.foreign_call_keys.insert(function.name.clone(), key);
-                        }
-                    }
-                }
-                Item::Func(function)
-                    if crate::Sema::guest_import_function_signature(function).is_some() =>
-                {
-                    let wrapper = crate::Sema::guest_import_wrapper_name(
-                        &foreign_module.alias,
-                        &function.name,
-                    );
-                    cx.foreign_call_keys
-                        .insert(format!("{rust_module}::{}", function.name), wrapper.clone());
-                    if foreign_module_idx == module_idx {
-                        cx.foreign_call_keys.insert(function.name.clone(), wrapper);
-                    }
-                }
-                _ => {}
             }
+            Item::ExternRust(block) => {
+                for function in &block.functions {
+                    cx.foreign_call_keys.insert(function.name.clone(),
+                        format!("{}::{}", cx.module_identity, function.rust_path));
+                }
+            }
+            Item::Func(function)
+                if crate::Sema::guest_import_function_signature(function).is_some() =>
+            {
+                cx.foreign_call_keys.insert(function.name.clone(),
+                    crate::Sema::guest_import_wrapper_name(&module.alias, &function.name));
+            }
+            _ => {}
         }
     }
     cx.local_type_names
         .retain(|name| bundle.name_ledger.declaration(module_idx, name).is_some());
-    register_imported_methods(cx, bundle, module_idx);
     cx.package_hardened = bundle.package_guarantees.harden;
+    cx.dependency_fenced = module_dependency_fenced(bundle, module_idx);
+}
+
+/// D-MEM-GUARANTEE1: a module inside a contained (or hardened) dependency runs
+/// its `#Unsafe` gates fenced. The root package itself is never fenced.
+pub(crate) fn module_dependency_fenced(bundle: &ProgramBundle, module_idx: usize) -> bool {
     let Some(module) = bundle.modules.get(module_idx) else {
-        cx.dependency_fenced = false;
-        return;
+        return false;
     };
     let dependency = bundle
         .dep_roots
@@ -4579,9 +5320,9 @@ pub(crate) fn populate_cx_module_facts(cx: &mut Cx, bundle: &ProgramBundle, modu
                 .then_with(|| left_name.cmp(right_name))
         })
         .map(|(name, _)| name);
-    cx.dependency_fenced = dependency.is_some_and(|name| {
+    dependency.is_some_and(|name| {
         bundle.package_guarantees.harden || bundle.package_guarantees.contain.contains(name)
-    });
+    })
 }
 
 pub(crate) fn register_bundle_reflect_paths(
@@ -4589,113 +5330,44 @@ pub(crate) fn register_bundle_reflect_paths(
     bundle: &ProgramBundle,
     module_idx: usize,
 ) {
-    let paths = bundle.name_ledger.canonical_paths(module_idx);
-    for (name, path) in &paths {
-        cx.reflect_paths.insert(name.clone(), path.clone());
-    }
+    cx.reflect_paths.extend(bundle.name_ledger.canonical_paths(module_idx));
 }
 
-fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize) {
-    let mut imported: Vec<usize> = bundle.modules[module_idx]
-        .imports
-        .iter()
-        .filter_map(|import| {
-            // `use core.crypto as crypto` binds the source-owned Core module,
-            // whose inherent statics (`crypto.Hasher.new()`) are ordinary
-            // imported methods keyed by the declaring module's nominal.
-            if let Some(core_module) = import.core_module_path() {
-                return super::Imports::core_source_target(bundle, &core_module)
-                    .map(|(_, target)| target);
-            }
-            bundle
-                .name_ledger
-                .effective_alias(module_idx, &import.import_alias())?;
-            bundle.name_ledger.import_target(module_idx, import.span)
-        })
-        .collect();
-    imported.extend(
-        crate::Codegen::Imports::selective_nominal_targets(bundle, module_idx)
-            .into_iter()
-            .map(|(target, _)| target),
-    );
-    imported.sort_unstable();
-    imported.dedup();
-    imported.extend(
-        bundle.modules[module_idx]
-            .imports
-            .iter()
-            .flat_map(|import| {
-                super::Imports::foreign_list_targets(bundle, module_idx, import)
-                    .into_iter()
-                    .map(|(_, target)| target)
-            }),
-    );
-    imported.sort_unstable();
-    imported.dedup();
-    for target in imported {
-        let rust_mod = crate::Codegen::mangle(&bundle.modules[target].alias);
+
+fn register_module_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: usize, target: usize) {
         for item in &bundle.modules[target].items {
-            let (owner, methods): (&str, Vec<(&Func, Option<&str>, bool, Option<&Type>)>) =
+            let (owner, direct, trait_blocks, direct_trait, direct_rhs):
+                (&str, &[Func], &[crate::AST::TraitImplBlock], Option<&str>, Option<&Type>) =
                 match item {
-                    Item::Struct(definition) => {
-                        let mut methods = definition
-                            .methods
-                            .iter()
-                            .map(|method| (method, None, false, None))
-                            .collect::<Vec<_>>();
-                        methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-                            implementation.methods.iter().map(|method| {
-                                (
-                                    method,
-                                    Some(implementation.trait_name.as_str()),
-                                    implementation.compiler_generated,
-                                    implementation.operator_rhs.as_ref(),
-                                )
-                            })
-                        }));
-                        (&definition.name, methods)
-                    }
-                    Item::Enum(definition) => {
-                        let mut methods = definition
-                            .methods
-                            .iter()
-                            .map(|method| (method, None, false, None))
-                            .collect::<Vec<_>>();
-                        methods.extend(definition.trait_impls.iter().flat_map(|implementation| {
-                            implementation.methods.iter().map(|method| {
-                                (
-                                    method,
-                                    Some(implementation.trait_name.as_str()),
-                                    implementation.compiler_generated,
-                                    implementation.operator_rhs.as_ref(),
-                                )
-                            })
-                        }));
-                        (&definition.name, methods)
-                    }
-                    Item::Impl(definition) => (
-                        &definition.type_name,
-                        definition
-                            .methods
-                            .iter()
-                            .map(|method| {
-                                (
-                                    method,
-                                    definition.trait_name.as_deref(),
-                                    false,
-                                    definition.operator_rhs.as_ref(),
-                                )
-                            })
-                            .collect(),
-                    ),
+                    Item::Struct(definition) => (&definition.name, &definition.methods,
+                        &definition.trait_impls, None, None),
+                    Item::Enum(definition) => (&definition.name, &definition.methods,
+                        &definition.trait_impls, None, None),
+                    Item::Impl(definition) => (&definition.type_name, &definition.methods,
+                        &[], definition.trait_name.as_deref(), definition.operator_rhs.as_ref()),
                     _ => continue,
                 };
-            let owner_identity = bundle
-                .name_ledger
-                .nominal_identity(target, owner)
+            let owner_identity = crate::Codegen::TIR::canonical_nominal_from(bundle, target, owner)
+                .or_else(|| bundle.name_ledger.nominal_identity(target, owner))
                 .expect("name ledger must contain every loaded module");
+            for trait_name in direct_trait.into_iter()
+                .chain(trait_blocks.iter().map(|implementation| implementation.trait_name.as_str()))
+            {
+                let selected = match trait_name {
+                    Syntax::TRAIT_ROLLBACK => Some(&mut cx.rollback_types),
+                    Syntax::TRAIT_DISPLAY => Some(&mut cx.display_types),
+                    Syntax::TRAIT_DEBUG => Some(&mut cx.debug_types),
+                    Syntax::TRAIT_CLOSE => Some(&mut cx.close_types),
+                    _ => None,
+                };
+                if let Some(selected) = selected { selected.insert(owner_identity.clone()); }
+            }
             let owner_visible = bundle.name_ledger.visible(module_idx, target, owner);
-            for (method, trait_name, import_trait, operator_rhs) in methods {
+            let methods = direct.iter().map(|method| (method, direct_trait, direct_rhs))
+                .chain(trait_blocks.iter().flat_map(|implementation|
+                    implementation.methods.iter().map(|method|
+                        (method, Some(implementation.trait_name.as_str()), implementation.operator_rhs.as_ref()))));
+            for (method, trait_name, operator_rhs) in methods {
                 let method_visible = bundle.name_ledger.visible(
                     module_idx,
                     target,
@@ -4709,15 +5381,14 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                     cx.trait_methods.insert(key.clone());
                     cx.trait_method_traits
                         .insert(key.clone(), trait_name.to_string());
-                    if import_trait {
-                        cx.imported_traits
-                            .insert((rust_mod.clone(), trait_name.to_string()));
-                    }
                 }
                 if let Some(self_param) = method.params.iter().find(|p| p.name == Syntax::KW_SELF) {
                     cx.method_self_convs
                         .entry(key.clone())
                         .or_insert(self_param.convention);
+                }
+                if !method.type_params.is_empty() {
+                    cx.method_type_params.entry(key.clone()).or_insert_with(|| method.type_params.clone());
                 }
                 let imported_sig = method_sig_params(method)
                     .into_iter()
@@ -4731,18 +5402,12 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 cx.method_sigs
                     .entry(key.clone())
                     .or_insert_with(|| imported_sig.clone());
-                cx.contract_sigs
-                    .entry(format!("{}::{}", owner, method.name))
+                cx.method_contracts.entry(owner_identity.clone()).or_default()
+                    .entry(method.name.clone())
                     .or_insert_with(|| (method.pre.clone(), method.post.clone()));
-                cx.fn_param_names
-                    .entry(format!("{}::{}", owner, method.name))
-                    .or_insert_with(|| {
-                        method
-                            .params
-                            .iter()
-                            .map(|param| param.name.clone())
-                            .collect()
-                    });
+                cx.method_param_names.entry(owner_identity.clone()).or_default()
+                    .entry(method.name.clone())
+                    .or_insert_with(|| method.params.iter().map(|param| param.name.clone()).collect());
                 let imported_ret = method
                     .return_type
                     .as_ref()
@@ -4765,7 +5430,6 @@ fn register_imported_methods(cx: &mut Cx, bundle: &ProgramBundle, module_idx: us
                 }
             }
         }
-    }
 }
 
 fn register_core_close_types(cx: &mut Cx, bundle: &ProgramBundle) {
@@ -4780,8 +5444,7 @@ fn register_core_close_types(cx: &mut Cx, bundle: &ProgramBundle) {
         }
         cx.close_types.extend(names.iter().map(|name| (*name).to_string()));
         if let Some(source) = jet_foundation::CoreModuleExports::core_source_module(module) {
-            if let Some((index, _)) = bundle.modules.iter().enumerate()
-                .find(|(_, loaded)| loaded.alias == source.alias)
+            if let Some(index) = bundle.name_ledger.module_by_alias(source.alias)
             {
                 cx.close_types.extend(names.iter().filter_map(|name| {
                     bundle.name_ledger.nominal_identity(index, name)
@@ -4868,53 +5531,6 @@ pub(crate) fn register_core_import_surfaces(cx: &mut Cx) {
         cx.enum_variants
             .insert("ServiceError".to_string(), error_variants);
         cx.cloneable.insert("ServiceError".to_string());
-    }
-    if cx.core_imports.values().any(|module| module == "core.auth") {
-        let zero = Span::new(0, 0);
-        let field = |name: &str, ty: Type| VariantField {
-            name: name.to_string(),
-            name_span: zero,
-            ty,
-            ty_span: zero,
-        };
-        let mut variants = vec![
-            ("InvalidSignature".to_string(), VariantPayload::Unit),
-            ("WeakKey".to_string(), VariantPayload::Unit),
-            ("TokenExpired".to_string(), VariantPayload::Unit),
-        ];
-        variants.extend(
-            [
-                "MalformedToken",
-                "UnsupportedToken",
-                "MissingClaim",
-                "DecodeError",
-            ]
-            .into_iter()
-            .map(|name| (name.to_string(), VariantPayload::Single(Type::String, zero))),
-        );
-        variants.push((
-            "WrongAudience".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::String),
-            ]),
-        ));
-        variants.push((
-            "WrongIssuer".to_string(),
-            VariantPayload::Named(vec![
-                field("expected", Type::String),
-                field("actual", Type::Option(Box::new(Type::String))),
-            ]),
-        ));
-        // Keep the existing discriminants stable; append the new unit
-        // variant to the canonical AuthError surface.
-        variants.push(("TokenNotYetValid".to_string(), VariantPayload::Unit));
-        for (variant, _) in &variants {
-            cx.variant_owner
-                .insert(variant.clone(), "AuthError".to_string());
-        }
-        cx.enum_variants.insert("AuthError".to_string(), variants);
-        cx.cloneable.insert("AuthError".to_string());
     }
     if cx
         .core_imports
@@ -5331,10 +5947,13 @@ pub(crate) fn build_cx_items(
     src: &str,
     file: &str,
     link: Option<&FfiLink>,
-    extern_funcs: &HashMap<String, ExternFn>,
+    extern_funcs: &Arc<HashMap<String, ExternFn>>,
     package_edition: &str,
 ) -> Cx {
     let mut cx = Cx {
+        bundle_facts: None,
+        bundle_module: 0,
+        scope_names: None,
         sigs: HashMap::new(),
         contract_sigs: HashMap::new(),
         fn_types: HashMap::new(),
@@ -5342,14 +5961,19 @@ pub(crate) fn build_cx_items(
         fn_source_types: HashMap::new(),
         fn_bodies: HashMap::new(),
         fn_param_names: HashMap::new(),
+        fn_policy_calls: HashMap::new(),
         method_sigs: HashMap::new(),
         method_type_params: HashMap::new(),
         method_self_convs: HashMap::new(),
         method_rets: HashMap::new(),
+        method_contracts: HashMap::new(),
+        method_param_names: HashMap::new(),
         consts: HashMap::new(),
         const_types: HashMap::new(),
         persist_types: HashMap::new(),
         const_values: HashMap::new(),
+        comptime_type_facts: HashMap::new(),
+        comptime_type_fact_target: None,
         const_ref_keys: HashMap::new(),
         type_names: HashSet::new(),
         const_ref_types: HashMap::new(),
@@ -5387,24 +6011,25 @@ pub(crate) fn build_cx_items(
         file: file.to_string(),
         module_alias: String::new(),
         module_identity: String::new(),
-        core_source_modules: HashMap::new(),
-        core_source_sigs: HashMap::new(),
+        core_source_modules: Arc::new(HashMap::new()),
+        core_source_sigs: Arc::new(HashMap::new()),
         import_mods: HashMap::new(),
         trait_method_traits: HashMap::new(),
         operator_methods: HashMap::new(),
-        direct_c_functions: HashSet::new(),
+        direct_c_functions: Arc::new(HashSet::new()),
         foreign_call_keys: HashMap::new(),
-        opaque_handles: HashSet::new(),
+        opaque_handles: Arc::new(HashSet::new()),
         foreign_types: HashMap::new(),
         reexport_calls: HashMap::new(),
         import_sigs: HashMap::new(),
+        import_generics: HashMap::new(),
         import_rets: HashMap::new(),
         core_imports: HashMap::new(),
-        used_core: HashSet::new(),
-        ffi_callback_fns: HashSet::new(),
+        used_core: Arc::new(HashSet::new()),
+        ffi_callback_fns: Arc::new(HashSet::new()),
         root_prefix: String::new(),
         ffi_crate: link.map(|l| l.crate_name.clone()),
-        extern_funcs: extern_funcs.clone(),
+        extern_funcs: Arc::clone(extern_funcs),
         foreign_undos: foreign_undo_map(items),
         code_modules: items
             .iter()
@@ -5429,10 +6054,9 @@ pub(crate) fn build_cx_items(
         receipt_sections: HashMap::new(),
         devtools_package: String::new(),
         devtools_module: String::new(),
-        devtools_registry: jet_foundation::AST::DevtoolsRegistry::default(),
+        devtools_registry: Arc::new(jet_foundation::AST::DevtoolsRegistry::default()),
         inline_reexport_foreign: HashMap::new(),
         trait_methods: HashSet::new(),
-        imported_traits: HashSet::new(),
         rollback_types: HashSet::new(),
         display_types: HashSet::new(),
         debug_types: HashSet::new(),
@@ -5452,6 +6076,7 @@ pub(crate) fn build_cx_items(
         jit_method_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_core_source_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
+        jit_module_generic_calls: std::cell::RefCell::new(std::collections::BTreeMap::new()),
         jit_canonical_deopt: std::cell::RefCell::new(HashSet::new()),
         jit_canonical_calls: std::cell::RefCell::new(HashSet::new()),
         jit_local_call_prefix: None,
@@ -5462,8 +6087,8 @@ pub(crate) fn build_cx_items(
         active_os: crate::Syntax::OSTarget::host(),
         web_wasm_noncopy_int: false,
         package_edition: package_edition.to_string(),
-        preview_build_id: "unbound".to_string(),
-        preview_revision: "unbound".to_string(),
+        preview_build_id: Arc::from("unbound"),
+        preview_revision: Arc::from("unbound"),
         in_stm_transact: std::cell::Cell::new(false),
         stm_touched: std::cell::Cell::new(false),
         hardware_profile: None,
@@ -5504,6 +6129,10 @@ pub(crate) fn build_cx_items(
             ("cause".to_string(), Type::Option(Box::new(Type::String))),
         ],
     );
+    // The seeded Core record is a known nongeneric shape, not a shape
+    // whose parameter order is unavailable. Field lowering requires both.
+    cx.struct_type_param_order
+        .insert(Syntax::TYPE_IO_CONTEXT.to_string(), Vec::new());
     cx.cloneable.insert(Syntax::TYPE_IO_CONTEXT.to_string());
     cx.enum_variants.insert(
         Syntax::TYPE_IO_ERROR.to_string(),
@@ -5564,7 +6193,7 @@ pub(crate) fn build_cx_items(
     cx.struct_fields
         .insert("NetErrorDetail".to_string(), net_error_detail_fields);
     cx.cloneable.insert("NetErrorDetail".to_string());
-    for enum_name in ["NetDnsError", "NetError"] {
+    for enum_name in ["NetDNSError", "NetError"] {
         let mut variant_payloads = crate::Sema::core_net_error_variants(enum_name)
             .unwrap_or_else(|| panic!("missing canonical Core enum {enum_name}"));
         let ordered_names =
@@ -5820,28 +6449,6 @@ pub(crate) fn build_cx_items(
     }
     cx.cloneable.insert(Syntax::TYPE_REMOVE_BY.to_string());
 
-    // Inline foreign declarations keep their source return as the bridge ABI.
-    // D-STREAMYIELD1: a generator keeps its raw `Stream<T>` protocol return,
-    // exactly as its lowered TFunc does (`lower_func_with_web_boundary`), so a
-    // call's value type is the stream and never a `Result`-wrapped stream.
-    // Ordinary Jet functions use the implicit failure carrier instead.
-    fn callable_return_type(function: &Func) -> Type {
-        if function.inline_foreign.is_some() {
-            return function
-                .return_type
-                .clone()
-                .unwrap_or_else(|| Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
-        }
-        match &function.return_type {
-            Some(stream @ Type::Apply { name, args })
-                if name == Syntax::TYPE_STREAM && args.len() == 1 =>
-            {
-                stream.clone()
-            }
-            _ => function.effective_return_type(),
-        }
-    }
-
     for item in items {
         match item {
             Item::Func(f) => {
@@ -5854,6 +6461,23 @@ pub(crate) fn build_cx_items(
                     f.name.clone(),
                     f.params.iter().map(|param| param.name.clone()).collect(),
                 );
+                let policy_calls = f
+                    .markers
+                    .iter()
+                    .filter(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+                    .flat_map(|marker| marker.expr_args_owned())
+                    .filter_map(|argument| match argument {
+                        crate::AST::Expr::Call(policy)
+                            if !crate::AST::CallablePolicyChain::is_builtin(&policy.name) =>
+                        {
+                            Some(policy)
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+                if !policy_calls.is_empty() {
+                    cx.fn_policy_calls.insert(f.name.clone(), policy_calls);
+                }
                 cx.fn_type_params.insert(
                     f.name.clone(),
                     f.type_params.iter().map(|param| param.name.clone()).collect(),
@@ -5877,54 +6501,26 @@ pub(crate) fn build_cx_items(
                         })
                         .collect(),
                 );
-                cx.fn_types.insert(
-                    f.name.clone(),
-                    Type::Fn {
-                        params: f
-                            .params
-                            .iter()
-                            .map(|p| {
-                                let ty = if p.variadic {
-                                    Type::List(Box::new(p.ty.clone()))
-                                } else {
-                                    p.ty.clone()
-                                };
-                                ty.with_effective_fn_returns()
-                            })
-                            .collect(),
-                        ret: Some(Box::new(callable_return_type(f))),
-                        effect_bound: None,
-                        param_contract: (!f.params.is_empty()).then(|| {
-                            f.params
-                                .iter()
-                                .map(|p| (p.call_label().to_string(), p.zone))
-                                .collect()
-                        }),
-                        call_metadata: Some(crate::AST::FunctionCallMetadata {
-                            names: f.params.iter().map(|p| p.name.clone()).collect(),
-                            defaults: f
-                                .params
-                                .iter()
-                                .map(|p| p.default.as_deref().cloned())
-                                .collect(),
-                            variadic: f.params.iter().map(|p| p.variadic).collect(),
-                            conventions: f.params.iter().map(|p| p.convention).collect(),
-                            policies: f
-                                .markers
-                                .iter()
-                                .find(|marker| marker.name == crate::Syntax::MARKER_POLICY)
-                                .and_then(|marker| {
-                                    crate::AST::CallablePolicyChain::parse(
-                                        &marker.expr_args_owned(),
-                                    )
-                                    .ok()
-                                })
-                                .unwrap_or_default(),
-                        }),
-                        return_view_provenance: f.return_view_provenance.clone(),
-                    },
-                );
+                cx.fn_types.insert(f.name.clone(), function_value_type(f,
+                    f.params.iter().map(|param| {
+                        let ty = if param.variadic {
+                            Type::List(Box::new(param.ty.clone()))
+                        } else {
+                            param.ty.clone()
+                        };
+                        ty.with_effective_fn_returns()
+                    }).collect(), f.callable_value_return_type()));
                 cx.fn_bodies.insert(f.name.clone(), f.body.clone());
+                let policy_calls = f.markers.iter()
+                    .filter(|marker| marker.name == crate::Syntax::MARKER_POLICY)
+                    .flat_map(|marker| marker.expr_args_owned())
+                    .filter_map(|argument| match argument {
+                        crate::AST::Expr::Call(policy) if !crate::AST::CallablePolicyChain::is_builtin(&policy.name) => Some(policy),
+                        _ => None,
+                    }).collect::<Vec<_>>();
+                if !policy_calls.is_empty() {
+                    cx.fn_policy_calls.insert(f.name.clone(), policy_calls);
+                }
                 let source_fn_type = cx.fn_types.get(&f.name).cloned().map(|mut ty| {
                     if let Type::Fn { ret, .. } = &mut ty {
                         *ret = f.return_type.clone().map(Box::new);
@@ -6225,9 +6821,8 @@ pub(crate) fn build_cx_items(
             // D-QUAL2: a tag erases — it contributes no codegen names.
             Item::Tag(_) => {}
             // D-MIGRATE4: collect migration blocks per type (source order = the
-            // chain, oldest step first) so `emit_struct_migration` can emit the
-            // runtime step functions + chain-walker for decodable
-            // `#PublishedSchema` types. Types without blocks get nothing.
+            // chain, oldest step first) for the TIR codec migration plans of
+            // decodable `#PublishedSchema` types. Types without blocks get nothing.
             Item::Migration(m) => {
                 cx.migrations
                     .entry(m.type_name.clone())
@@ -6269,60 +6864,7 @@ pub(crate) fn build_cx_items(
             // D-QUAL3: each unit-family member registers as a `#Numeric` distinct
             // type erasing to `Float`.
             Item::UnitFamily(uf) => {
-                let dimension = uf.resolved_dimension.clone();
-                let affine = uf.base.is_some()
-                    && uf
-                        .members
-                        .iter()
-                        .any(|member| member.offset != crate::AST::UnitRatio::zero());
-                for d in uf.distinct_defs() {
-                    cx.type_names.insert(d.name.clone());
-                    cx.local_type_names.insert(d.name.clone());
-                    cx.distinct_types
-                        .insert(
-                            d.name.clone(),
-                            (
-                                d.base.clone(),
-                                d.derives
-                                    .iter()
-                                    .any(|(name, _)| name == crate::Syntax::MARKER_NUMERIC),
-                            ),
-                        );
-                    // Mirror sema `unit_fact`: derive Point/Delta from the type
-                    // name when `quantity` is unset (affine families).
-                    let kind = d
-                        .quantity
-                        .as_ref()
-                        .map(|(_, kind)| *kind)
-                        .or_else(|| {
-                            if !affine {
-                                return Some(crate::AST::QuantityKind::Linear);
-                            }
-                            uf.members.iter().find_map(|member| {
-                                let stem = crate::AST::UnitFamilyDef::type_name(&member.name);
-                                if d.name == format!("{stem}Point") {
-                                    Some(crate::AST::QuantityKind::Point)
-                                } else if d.name == format!("{stem}Delta") {
-                                    Some(crate::AST::QuantityKind::Delta)
-                                } else {
-                                    None
-                                }
-                            })
-                        })
-                        .unwrap_or(crate::AST::QuantityKind::Linear);
-                    if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
-                        cx.unit_labels
-                            .insert(d.name.clone(), unit_label(uf, member));
-                    }
-                    if uf.base.is_some() || dimension.is_some() {
-                        if let Some(member) = unit_family_member_for_type(uf, &d.name, kind) {
-                            cx.unit_facts.insert(
-                                d.name.clone(),
-                                unit_fact(uf, member, dimension.clone(), kind),
-                            );
-                        }
-                    }
-                }
+                register_unit_family(&mut cx, uf, None, None);
             }
             Item::CodeModule(cm) => {
                 // D-MOD2: register inline module alias and add mangled function sigs.
@@ -6373,7 +6915,7 @@ pub(crate) fn build_cx_items(
                                             ty.with_effective_fn_returns()
                                         })
                                         .collect(),
-                                    ret: Some(Box::new(callable_return_type(f))),
+                                    ret: Some(Box::new(f.callable_value_return_type())),
                                     effect_bound: None,
                                     return_view_provenance: f.return_view_provenance.clone(),
                                     param_contract: (!f.params.is_empty()).then(|| {
@@ -6821,6 +7363,66 @@ fn trait_impl_assoc_method(
     None
 }
 
+fn register_bundle_iter_index_hooks(cx: &mut Cx, bundle: &ProgramBundle) {
+    let mut implementations: HashMap<String, HashMap<&str,
+        (usize, &[(String, Span, Type)], &[Func])>> = HashMap::new();
+    for (module, loaded) in bundle.modules.iter().enumerate() {
+        for item in &loaded.items {
+            let (owner, direct, blocks) = match item {
+                Item::Impl(definition) => (definition.type_name.as_str(),
+                    definition.trait_name.as_deref().map(|name|
+                        (name, definition.assoc_type_impls.as_slice(), definition.methods.as_slice())),
+                    &[][..]),
+                Item::Struct(definition) => (definition.name.as_str(), None, definition.trait_impls.as_slice()),
+                Item::Enum(definition) => (definition.name.as_str(), None, definition.trait_impls.as_slice()),
+                _ => continue,
+            };
+            for (name, assoc, methods) in direct.into_iter().chain(blocks.iter().map(|block|
+                (block.trait_name.as_str(), block.assoc_type_impls.as_slice(), block.methods.as_slice())))
+            {
+                if !matches!(name, Syntax::TRAIT_ITERABLE | Syntax::TRAIT_ITERATOR | Syntax::TRAIT_INDEX) {
+                    continue;
+                }
+                let Some(identity) = crate::Codegen::TIR::canonical_nominal_from(bundle, module, owner)
+                    .or_else(|| bundle.name_ledger.nominal_identity(module, owner)) else { continue };
+                implementations.entry(identity).or_default().entry(name).or_insert((module, assoc, methods));
+            }
+        }
+    }
+    for (owner, traits) in &implementations {
+        if let Some(&(module, assoc, methods)) = traits.get(Syntax::TRAIT_ITERABLE) {
+            if methods.iter().any(|method| method.name == "iter") {
+                if let Some(iter) = assoc_type_impl(assoc, "Iter") {
+                    let iter = super::Imports::qualify_imported_call_type(bundle, module, "", iter);
+                    if let Type::Named(iter_owner) = &iter {
+                        if let Some(&(iter_module, iter_assoc, iter_methods)) = implementations
+                            .get(iter_owner).and_then(|traits| traits.get(Syntax::TRAIT_ITERATOR))
+                        {
+                            if iter_methods.iter().any(|method| method.name == "next") {
+                                if let Some(item) = assoc_type_impl(iter_assoc, "Item") {
+                                    cx.iterable_hooks.insert(owner.clone(), IterableHook {
+                                        iter_type: iter_owner.clone(),
+                                        item_type: super::Imports::qualify_imported_call_type(bundle, iter_module, "", item),
+                                        iter_symbol: format!("{owner}::{}::iter", Syntax::TRAIT_ITERABLE),
+                                        next_symbol: format!("{iter_owner}::{}::next", Syntax::TRAIT_ITERATOR),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(&(module, assoc, _)) = traits.get(Syntax::TRAIT_INDEX) {
+            if let (Some(_), Some(value)) = (assoc_type_impl(assoc, "Key"), assoc_type_impl(assoc, "Value")) {
+                cx.index_hooks.insert(owner.clone(), IndexHook {
+                    value_type: super::Imports::qualify_imported_call_type(bundle, module, "", value),
+                });
+            }
+        }
+    }
+}
+
 pub(crate) fn collect_iterable_hooks(cx: &mut Cx, items: &[Item]) {
     let mut iterable_pairs: Vec<(String, String)> = Vec::new();
     for item in items {
@@ -7037,7 +7639,6 @@ fn core_type_cloneable(name: &str) -> bool {
                 | "JSONLReader"
                 | "JSONLWriter"
                 | "CSVReader"
-                | "CSVWriter"
                 | "XMLReader"
                 | "XMLWriter"
                 | "CBORReader"
@@ -7066,7 +7667,7 @@ pub(crate) fn field_type_cloneable(
         }
         // c148: recognize both single-char heuristic and declared multi-char params.
         Type::Named(n) if Generics::is_type_var_name(n) || param_names.contains(n.as_str()) => true,
-        // D-SERDE: the dynamic data surface is the Clone-backed DataTree in
+        // D-SERDE: the dynamic data surface is the Clone-backed Dyn in
         // every canonical spelling, so records containing it can satisfy the
         // generated decoder's existing result-retention path.
         Type::Named(n) if is_json_type_name(n) || n == "Tensor" => true,
@@ -7116,8 +7717,8 @@ pub(crate) fn field_type_cloneable(
 }
 
 pub(crate) fn type_is_hashable_struct(s: &StructDef, types: &HashSet<String>) -> bool {
-    // D-BOUND-EVOLVE1=A: published records carry an ordered DataTree holder.
-    // DataTree intentionally has no Eq/Hash contract (it can contain Float),
+    // D-BOUND-EVOLVE1=A: published records carry an ordered Dyn holder.
+    // Dyn intentionally has no Eq/Hash contract (it can contain Float),
     // so the hidden holder must not make the source record claim those Rust
     // storage traits.
     if s.is_published_schema {
@@ -7210,6 +7811,16 @@ pub(crate) fn field_type_hashable(
 /// reach `owner` (same strongly connected component, or a self-loop on a type
 /// reachable from a root). Other shapes fall back to the path enumeration.
 pub(crate) fn find_box_edges(items: &[Item], cx: &Cx) -> HashSet<(String, String)> {
+    find_box_edges_for_names(items.iter().filter_map(|item| match item {
+        Item::Struct(definition) => Some(definition.name.as_str()),
+        Item::Enum(definition) => Some(definition.name.as_str()),
+        _ => None,
+    }), cx)
+}
+
+fn find_box_edges_for_names<'a>(
+    names: impl Iterator<Item = &'a str> + Clone, cx: &'a Cx,
+) -> HashSet<(String, String)> {
     fn targets(ty: &Type, cx: &Cx, out: &mut Vec<String>) {
         match ty {
             Type::Named(n) if cx.type_names.contains(n) => out.push(n.clone()),
@@ -7258,48 +7869,84 @@ pub(crate) fn find_box_edges(items: &[Item], cx: &Cx) -> HashSet<(String, String
     }
     // Out-edges of a type reached by name: the same maps `walk_type_edge` reads.
     let named_edges = |name: &str| -> Vec<(String, Vec<String>)> {
-        let mut edges = cx
-            .struct_fields
-            .get(name)
+        let mut edges = cx.fact_struct_fields(name)
             .map(|fields| field_edges(fields, cx))
             .unwrap_or_default();
-        if let Some(variants) = cx.enum_variants.get(name) {
+        if let Some(variants) = cx.fact_enum_variants(name) {
             edges.extend(variant_edges(variants, cx));
         }
         edges
     };
-    let mut roots: Vec<(String, Vec<(String, Vec<String>)>)> = Vec::new();
-    for item in items {
-        match item {
-            Item::Struct(s) => {
-                let fields = s
-                    .fields
-                    .iter()
-                    .map(|field| (field.name.clone(), field.ty.clone()))
-                    .collect::<Vec<_>>();
-                roots.push((s.name.clone(), field_edges(&fields, cx)));
-            }
-            Item::Enum(e) => {
-                let variants = e
-                    .variants
-                    .iter()
-                    .map(|variant| (variant.name.clone(), variant.payload.clone()))
-                    .collect::<Vec<_>>();
-                roots.push((e.name.clone(), variant_edges(&variants, cx)));
-            }
-            _ => {}
-        }
-    }
-    let exact = || {
+    let roots = names.clone().map(|owner| {
+        let edges = if let Some(fields) = cx.fact_struct_fields(owner) {
+            field_edges(fields, cx)
+        } else {
+            cx.fact_enum_variants(owner).map_or_else(Vec::new, |variants| variant_edges(variants, cx))
+        };
+        (owner.to_owned(), edges)
+    }).collect::<Vec<_>>();
+    let enumerate = || {
         let mut boxed = HashSet::new();
-        for item in items {
-            match item {
-                Item::Struct(s) => boxed.extend(find_struct_box_edges(s, cx)),
-                Item::Enum(e) => boxed.extend(find_enum_box_edges(e, cx)),
-                _ => {}
+        for owner in names.clone() {
+            let mut stack = vec![owner];
+            for (field, ty) in cx.fact_struct_fields(owner).into_iter().flatten() {
+                walk_type_edge(owner, field, ty, &mut stack, cx, &mut boxed);
+            }
+            for (variant, payload) in cx.fact_enum_variants(owner).into_iter().flatten() {
+                match payload {
+                    VariantPayload::Unit => {}
+                    VariantPayload::Single(ty, _) => walk_type_edge(owner, variant, ty, &mut stack, cx, &mut boxed),
+                    VariantPayload::Named(fields) => {
+                        for field in fields {
+                            let edge = format!("{variant}.{}", field.name);
+                            walk_type_edge(owner, &edge, &field.ty, &mut stack, cx, &mut boxed);
+                        }
+                    }
+                }
             }
         }
         boxed
+    };
+    // `enumerate` reads exactly the graph spanned from the roots by
+    // `named_edges`, and its union is independent of visit order. That
+    // canonical graph keys a per-thread memo: comptime fragment lowering
+    // rebuilds the same type set once per evaluated item (#4961).
+    let exact = || {
+        let mut roots = names.clone().collect::<Vec<_>>();
+        roots.sort_unstable();
+        roots.dedup();
+        let mut graph = std::collections::BTreeMap::new();
+        let mut pending = roots.iter().map(|root| root.to_string()).collect::<Vec<_>>();
+        while let Some(name) = pending.pop() {
+            if graph.contains_key(&name) {
+                continue;
+            }
+            let mut edges = named_edges(&name);
+            for (_, targets) in &mut edges {
+                targets.sort_unstable();
+            }
+            edges.sort_unstable();
+            pending.extend(edges.iter().flat_map(|(_, targets)| targets.iter().cloned()));
+            graph.insert(name, edges);
+        }
+        let mut key = String::new();
+        for root in roots {
+            key.push('\u{1}');
+            key.push_str(root);
+        }
+        for (name, edges) in graph {
+            key.push('\u{2}');
+            key.push_str(&name);
+            for (edge, targets) in edges {
+                key.push('\u{3}');
+                key.push_str(&edge);
+                for target in targets {
+                    key.push('\u{4}');
+                    key.push_str(&target);
+                }
+            }
+        }
+        memoized_box_edges(key, &enumerate)
     };
     let root_names = roots
         .iter()
@@ -7429,78 +8076,54 @@ pub(crate) fn find_box_edges(items: &[Item], cx: &Cx) -> HashSet<(String, String
     // enough to enumerate.
     #[cfg(debug_assertions)]
     if count <= 64 {
-        debug_assert_eq!(boxed, exact(), "SCC box edges differ from path enumeration");
+        debug_assert_eq!(boxed, enumerate(), "SCC box edges differ from path enumeration");
     }
     boxed
 }
 
-pub(crate) fn find_struct_box_edges(s: &StructDef, cx: &Cx) -> HashSet<(String, String)> {
-    let mut boxed = HashSet::new();
-    for f in &s.fields {
-        walk_type_edge(
-            &s.name,
-            &f.name,
-            &f.ty,
-            &mut vec![s.name.clone()],
-            cx,
-            &mut boxed,
-        );
+fn memoized_box_edges(
+    key: String,
+    enumerate: impl FnOnce() -> HashSet<(String, String)>,
+) -> HashSet<(String, String)> {
+    thread_local! {
+        static BOX_EDGES: std::cell::RefCell<HashMap<String, HashSet<(String, String)>>> =
+            std::cell::RefCell::new(HashMap::new());
     }
-    boxed
-}
-
-fn find_enum_box_edges(e: &EnumDef, cx: &Cx) -> HashSet<(String, String)> {
-    let mut boxed = HashSet::new();
-    for v in &e.variants {
-        match &v.payload {
-            VariantPayload::Unit => {}
-            VariantPayload::Single(t, _) => walk_type_edge(
-                &e.name,
-                &v.name,
-                t,
-                &mut vec![e.name.clone()],
-                cx,
-                &mut boxed,
-            ),
-            VariantPayload::Named(fs) => {
-                for f in fs {
-                    let key = format!("{}.{}", v.name, f.name);
-                    walk_type_edge(
-                        &e.name,
-                        &key,
-                        &f.ty,
-                        &mut vec![e.name.clone()],
-                        cx,
-                        &mut boxed,
-                    );
-                }
-            }
+    if let Some(boxed) = BOX_EDGES.with(|memo| memo.borrow().get(&key).cloned()) {
+        return boxed;
+    }
+    let boxed = enumerate();
+    BOX_EDGES.with(|memo| {
+        let mut memo = memo.borrow_mut();
+        if memo.len() >= 16 {
+            memo.clear();
         }
-    }
+        memo.insert(key, boxed.clone());
+    });
     boxed
 }
 
-fn walk_type_edge(
+fn walk_type_edge<'a>(
     owner: &str,
     edge: &str,
-    ty: &Type,
-    stack: &mut Vec<String>,
-    cx: &Cx,
+    ty: &'a Type,
+    stack: &mut Vec<&'a str>,
+    cx: &'a Cx,
     boxed: &mut HashSet<(String, String)>,
 ) {
     match ty {
         Type::Named(n) if cx.type_names.contains(n) => {
-            if stack.iter().any(|s| s == n) {
+            if stack.contains(&n.as_str()) {
                 boxed.insert((owner.to_string(), edge.to_string()));
                 return;
             }
-            stack.push(n.clone());
-            if let Some(fields) = cx.struct_fields.get(n) {
+            stack.push(n.as_str());
+            if let Some(fields) = cx.fact_struct_fields(n) {
                 for (fname, fty) in fields {
                     walk_type_edge(n, fname, fty, stack, cx, boxed);
                 }
             }
-            if let Some(vars) = cx.enum_variants.get(n) {
+            if let Some(vars) = cx.fact_enum_variants(n) {
                 for (vname, payload) in vars {
                     match payload {
                         VariantPayload::Unit => {}
@@ -7542,14 +8165,80 @@ mod tests {
     use super::*;
 
     #[test]
+    fn non_root_cycle_box_edges_are_memoized_per_root_set() {
+        // B <-> C is a multi-type cycle; with a single root it goes through
+        // the path-enumeration fallback, whose answer depends on the root.
+        let source = "struct A {\n    b: B?\n}\nstruct B {\n    c: C?\n}\nstruct C {\n    b: B?\n}\n";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
+        let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, source).unwrap();
+        let cx = build_cx_items(&program.items, source, "box-edges.jet", None, &Arc::default(), "2026");
+        let edge = |owner: &str, field: &str| (owner.to_string(), field.to_string());
+        let from_a = HashSet::from([edge("C", "b")]);
+        let from_c = HashSet::from([edge("B", "c")]);
+        for _ in 0..2 {
+            assert_eq!(find_box_edges_for_names(["A"].into_iter(), &cx), from_a);
+            assert_eq!(find_box_edges_for_names(["C"].into_iter(), &cx), from_c);
+        }
+        assert_eq!(
+            find_box_edges(&program.items, &cx),
+            HashSet::from([edge("B", "c"), edge("C", "b")]),
+        );
+    }
+
+    #[test]
+    fn acronym_nominal_carriers_keep_the_exact_prelude_identity() {
+        let jet = include_str!("../../../../Compiler/JetCodegen/Source/Emit/Types.jet");
+        for (name, rust, prelude) in [
+            ("NetDNSError", "JetNetDNSError", include_str!("../Prelude/CoreLib/Top/NetHTTP.rs")),
+            ("HTTPRequest", "JetHTTPRequest", include_str!("../Prelude/CoreLib/Top/HTTPMessage.rs")),
+            ("HTTPClient", "JetHTTPClient", include_str!("../Prelude/CoreLib/Top/HTTPClient.rs")),
+        ] {
+            assert_eq!(net_handle_rust_type(name), Some(rust));
+            assert!(jet.contains(&format!("\"{name}\" -> Val(\"{rust}\")")));
+            assert!(prelude.contains(&format!("struct {rust}")) || prelude.contains(&format!("enum {rust}")),
+                "nominal projection must resolve the exact Prelude declaration: {name}");
+        }
+        for name in ["IOError", "IOContext", "IOOperation"] {
+            assert_eq!(core_rust_type_name(name), Some(name));
+            assert!(jet.contains(&format!("\"{name}\"")));
+            let prelude = include_str!("../Prelude/CoreLib/JetStd/Open.rs");
+            assert!(prelude.contains(&format!("struct {name}")) || prelude.contains(&format!("enum {name}")));
+        }
+    }
+
+    #[test]
+    fn service_allocation_type_aliases_match_the_jet_mapper() {
+        let jet = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../Compiler/JetCodegen/Source/Emit/Types.jet"
+        ));
+        for (alias, rust, jet_case) in [
+            ("__TreeWorker", "JetServiceWorker", "\"__TreeWorker\" -> Val(\"JetServiceWorker\")"),
+            ("__TreeGroup", "JetServiceGroup", "\"__TreeGroup\" -> Val(\"JetServiceGroup\")"),
+            ("__TreeStateAdapter", "JetServiceStateAdapter", "\"__TreeStateAdapter\" -> Val(\"JetServiceStateAdapter\")"),
+            ("__TreeStateAuthority", "JetServiceStateAuthority", "\"__TreeStateAuthority\" -> Val(\"JetServiceStateAuthority\")"),
+            ("__TreeWorkflowState", "JetServiceWorkflow", "\"__TreeWorkflowState\" -> Val(\"JetServiceWorkflow\")"),
+            ("__TreeTaskGroup", "JetServiceTreeTaskGroup", "\"__TreeTaskGroup\" -> Val(\"JetServiceTreeTaskGroup\")"),
+            ("__TreeSupervisorState", "JetServiceTreeSupervisorState", "\"__TreeSupervisorState\" -> Val(\"JetServiceTreeSupervisorState\")"),
+        ] {
+            assert_eq!(service_handle_rust_type(alias), Some(rust));
+            assert!(jet.contains(jet_case), "paired Jet mapper differs for {alias}");
+        }
+    }
+
+    #[test]
     fn source_file_handles_use_the_native_owned_carriers() {
         let prefix = "<corelib>/Core/files::Core/files/files.jet::";
-        for (leaf, rust) in [
-            ("FileReader", "JetFileReader"),
-            ("FileWriter", "JetFileWriter"),
-            ("FileScope", "JetFileScope"),
+        for (leaf, rust, interior_mutable_receiver) in [
+            ("FileReader", "JetFileReader", true),
+            ("FileWriter", "JetFileWriter", true),
+            ("FileScope", "JetFileScope", false),
         ] {
-            assert_eq!(file_handle_rust_type(&format!("{prefix}{leaf}")), Some(rust));
+            assert_eq!(
+                file_handle_carrier(&format!("{prefix}{leaf}")),
+                Some(FileHandleCarrier { rust, interior_mutable_receiver })
+            );
         }
         assert_eq!(file_handle_rust_type("user::FileReader"), None);
     }
@@ -7571,6 +8260,33 @@ mod tests {
         assert!(crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(
             "<corelib>/Core/process::Core/process/process.jet::ProcessStreamMode"
         ));
+    }
+
+    #[test]
+    fn service_delivery_transport_aliases_match_the_jet_mapper() {
+        let jet = include_str!("../../../../Compiler/JetCodegen/Source/Emit/Types.jet");
+        for (alias, rust, jet_case) in [
+            ("__DeliveryFacts", "JetServiceDeliveryFacts", "\"__DeliveryFacts\" -> Val(\"JetServiceDeliveryFacts\")"),
+            ("__DeliveryRecord", "JetServiceDeliveryRecord", "\"__DeliveryRecord\" -> Val(\"JetServiceDeliveryRecord\")"),
+            ("__EndpointMailbox", "JetServiceEndpointMailbox", "\"__EndpointMailbox\" -> Val(\"JetServiceEndpointMailbox\")"),
+            ("__MailboxRead", "JetServiceMailboxRead", "\"__MailboxRead\" -> Val(\"JetServiceMailboxRead\")"),
+        ] {
+            assert_eq!(service_handle_rust_type(alias), Some(rust));
+            assert!(jet.contains(jet_case), "paired Jet mapper differs for {alias}");
+        }
+        for (alias, rust) in [
+            ("__EvidenceRead", "JetTestingEvidenceRead"),
+            ("__TempFacts", "JetTestingTempFacts"),
+            ("__TempPath", "JetTestingTempPath"),
+            ("__TempRemove", "JetTestingTempRemove"),
+            ("__TempCreate", "JetTestingTempCreate"),
+        ] {
+            assert_eq!(root_prelude_rust_type_name(alias), Some(rust));
+            assert!(
+                jet.contains(&format!("\"{alias}\" -> Val(\"{rust}\")")),
+                "paired Jet mapper differs for {alias}",
+            );
+        }
     }
 
     #[test]
@@ -7598,6 +8314,47 @@ mod tests {
     }
 
     #[test]
+    fn lazy_and_complex_root_carriers_preserve_namespace_and_prefix() {
+        let source = "fn run() {}\n";
+        let (tokens, diagnostics) = crate::Lexer::lex(source);
+        assert!(diagnostics.is_empty());
+        let program = crate::Parser::parse(&tokens).expect("parse");
+        let mut cx = build_cx(&program, source, "test.jet");
+        cx.root_prefix = "runtime::".to_string();
+        assert_eq!(root_prelude_rust_type_name(Syntax::TYPE_COMPLEX), Some("JetComplex"));
+        assert_eq!(root_prelude_rust_type_name(Syntax::TYPE_VIEW_ITER), Some("JetViewIter"));
+        assert_eq!(
+            cx.rust_type(&Type::Named(Syntax::TYPE_COMPLEX.to_string())),
+            "runtime::JetComplex"
+        );
+        assert_eq!(
+            cx.rust_type(&Type::Apply {
+                name: Syntax::TYPE_VIEW_ITER.to_string(),
+                args: vec![Type::Float],
+            }),
+            "runtime::JetViewIter<f64>"
+        );
+        for qualified in ["user::Complex", "user::ViewIter"] {
+            assert_eq!(root_prelude_rust_type_name(qualified), None);
+            cx.type_names.insert(qualified.to_string());
+            let named = cx.rust_type(&Type::Named(qualified.to_string()));
+            let applied = cx.rust_type(&Type::Apply {
+                name: qualified.to_string(),
+                args: vec![Type::Float],
+            });
+            assert!(!named.contains("JetComplex") && !named.contains("JetViewIter"));
+            assert!(!applied.contains("JetComplex") && !applied.contains("JetViewIter"));
+        }
+        cx.type_names.insert(Syntax::TYPE_COMPLEX.to_string());
+        cx.type_names.insert(Syntax::TYPE_VIEW_ITER.to_string());
+        assert!(!cx.rust_type(&Type::Named(Syntax::TYPE_COMPLEX.to_string())).contains("JetComplex"));
+        assert!(!cx.rust_type(&Type::Apply {
+            name: Syntax::TYPE_VIEW_ITER.to_string(),
+            args: vec![Type::Float],
+        }).contains("JetViewIter"));
+    }
+
+    #[test]
     fn type_alias_expansion_preserves_function_parameter_contract() {
         let source = "alias Callback<T> :: fn(*, force: T) -> Int\nfn run() {}\n";
         let (tokens, lex_diags) = crate::Lexer::lex(source);
@@ -7610,5 +8367,20 @@ mod tests {
             args: vec![Type::Bool],
         });
         assert_eq!(expanded.name(), "fn(*, force: Bool) -> Int");
+    }
+
+    #[test]
+    fn worker_policy_private_transports_match_existing_native_shapes() {
+        for (name, rust) in [
+            ("__WorkerMailbox", "JetServiceMailbox"),
+            ("__WorkerChannel", "JetServiceWorkerChannel"),
+            ("__WorkerHandler", "JetServiceWorkerHandler"),
+            ("__WorkerStatus", "JetServiceSupervisorStatus"),
+            ("__WorkerTopologyKind", "JetServiceTopologyKind"),
+            ("__WorkerTopologyState", "JetDevtoolsTopologySupervisorState"),
+            ("__WorkerRestartReason", "JetDevtoolsTopologyRestartReason"),
+        ] {
+            assert_eq!(service_handle_rust_type(name), Some(rust));
+        }
     }
 }

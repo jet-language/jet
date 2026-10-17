@@ -6,9 +6,9 @@
 PROVIDER_CORE_TREE_SCHEMA :: prep { "jet-core-source-tree-v2" }
 
 // The canonical Package that owns a request: its root and parsed facts.
-pub struct CanonicalPackage {
-    pub root: String
-    pub facts: PackageFacts
+struct CanonicalPackage {
+    root: String
+    facts: PackageFacts
 }
 
 // Resolve the canonical Package that owns a requested package/output. A
@@ -16,7 +16,7 @@ pub struct CanonicalPackage {
 // both the root marker and the addressed member marker. The member must win,
 // or the provider would compile the workspace root as the requested package
 // and silently lose the package boundary.
-pub fn provider_find_canonical_package(repo: String, requested: String) -[FS, Env]> CanonicalPackage? ProviderReason! {
+fn provider_find_canonical_package(repo: String, requested: String) -[FS, Env]> CanonicalPackage? ProviderReason! {
     root_marker :: files.join(repo, PACKAGE_FILE)
     info :: if files.stat(root_marker) == {
         .Ok(found) -> found
@@ -96,7 +96,7 @@ fn provider_collect_one_canonical_package(path: String, requested: String, seen:
 // The toolchain part of a cache identity. The host-specific cargo path never
 // enters it: a pinned executable is hashed, a PATH-resolved dev cargo is
 // identified by its version output.
-pub fn provider_toolchain_facts(toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String Never! {
+fn provider_toolchain_facts(toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String Never! {
     tool :: toolchain ?? return "missing"
     cargo_digest :: if files.read_bytes(tool.cargo) == {
         .Ok(bytes) -> pkg_sha256_hex(bytes)
@@ -115,7 +115,7 @@ fn provider_cargo_version_digest(cargo: String) -[Env, Exec, Time.Wait]> String 
 // Strict, path-independent identity of a core source closure. Unreadable,
 // non-file, and symlink nodes are refused instead of hashing a narrower tree
 // and reusing a stale object.
-pub fn provider_core_tree_fingerprint(root: String) -[FS]> String ProviderReason! {
+fn provider_core_tree_fingerprint(root: String) -[FS]> String ProviderReason! {
     provider_validate_core_source_tree(root)
     found := [(relative: String, path: String)]{}
     provider_collect_core_files(root, "", &found)
@@ -141,7 +141,7 @@ pub fn provider_core_tree_fingerprint(root: String) -[FS]> String ProviderReason
 fn provider_push_be(out: &[U8], value: Int, width: Int) Never! {
     shift := (width - 1) * 8
     loop shift >= 0 {
-        &out.push(U8{(value >> shift) & 255})
+        &out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
 }
@@ -166,7 +166,7 @@ fn provider_collect_core_files(root: String, relative: String, out: &[(relative:
 // The core recipe identity: the semantic build identity, not only the
 // manifest and tool name. The complete source closure is included so the same
 // manifest with a changed nested tree cannot reuse a stale realization.
-pub fn provider_core_recipe_identity(src_dir: String, package: String, manifest: PackageFacts?, kind: PackageKind, canonical: PackageFacts?, toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String ProviderReason! {
+fn provider_core_recipe_identity(src_dir: String, package: String, manifest: PackageFacts?, kind: PackageKind, canonical: PackageFacts?, toolchain: BuildToolchain?) -[FS, Env, Exec, Time.Wait]> String ProviderReason! {
     source_tree :: provider_core_tree_fingerprint(src_dir)
     has_cargo :: files.is_file(files.join(src_dir, "Cargo.toml"))
     artifact :: if {
@@ -254,7 +254,7 @@ fn provider_normalized_manifest_semantics(manifest: PackageFacts?) -> String Nev
 // The realize kind of a canonical output: libraries stage source,
 // executables and services go on PATH, and other output kinds have no core
 // realization kind.
-pub fn provider_canonical_package_kind(facts: PackageFacts, package: String) -> PackageKind? Never! {
+fn provider_canonical_package_kind(facts: PackageFacts, package: String) -> PackageKind? Never! {
     output :: if facts.outputs.get(package) == {
         .Val(found) -> found
         .None -> {
@@ -271,7 +271,7 @@ pub fn provider_canonical_package_kind(facts: PackageFacts, package: String) -> 
 
 // The canonical source directory, when it stays inside the Package root and
 // exists.
-pub fn provider_canonical_source_dir(repo: String, facts: PackageFacts) -[FS]> String? Never! {
+fn provider_canonical_source_dir(repo: String, facts: PackageFacts) -[FS]> String? Never! {
     relative :: facts.source ?? "."
     if !provider_is_contained_relative(relative) -> return None
     source :: files.join(repo, relative)
@@ -288,7 +288,7 @@ fn provider_is_contained_relative(path: String) -> Bool Never! {
 
 // The core source root and every node beneath it are real directories or
 // regular files.
-pub fn provider_validate_core_source_tree(root: String) ProviderReason! -[FS]> {
+fn provider_validate_core_source_tree(root: String) ProviderReason! -[FS]> {
     info :: files.stat(root) ?? return Err(ProviderReason{message: "{err}"})
     if info.is_symlink || !info.is_dir -> return Err(ProviderReason{message: "core source root is not a real directory: {root}"})
     entries :: files.list_dir(root) ?? return Err(ProviderReason{message: "{err}"})

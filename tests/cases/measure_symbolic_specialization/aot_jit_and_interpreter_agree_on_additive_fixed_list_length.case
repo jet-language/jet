@@ -1,0 +1,25 @@
+# HAND-PORT tests/measure_symbolic_specialization.rs:86 aot_jit_and_interpreter_agree_on_additive_fixed_list_length
+# PENDING-KIT; no historical failure captures blessed.
+# Exact original default/interpret/aot exit/stdout/stderr relational agreement; separate stores, rustc guard erased.
+fixture: aot_jit_and_interpreter_agree_on_additive_fixed_list_length.fixture
+env: NO_COLOR=1
+# ORACLE-LITERAL tests/measure_symbolic_specialization.rs original expected output bytes.
+step default: jet run main.jet
+env: JET_STORE_DIR={work}/cache-default
+env: JETPACK_ROOT={work}/jetpack-default
+exit: 0
+stdout: = aot_jit_and_interpreter_agree_on_additive_fixed_list_length.stdout.expected
+step interpret: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/cache-interpret
+env: JETPACK_ROOT={work}/jetpack-interpret
+exit: 0
+stdout: = aot_jit_and_interpreter_agree_on_additive_fixed_list_length.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+env: JET_STORE_DIR={work}/cache-aot
+env: JETPACK_ROOT={work}/jetpack-aot
+exit: 0
+step aot: built
+exit: 0
+stdout: = aot_jit_and_interpreter_agree_on_additive_fixed_list_length.stdout.expected
+stderr: == default

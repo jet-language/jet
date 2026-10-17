@@ -1,0 +1,392 @@
+// Structural Show/Display/Debug text and selected user-implementation precedence.
+use jet_foundation.[
+    MIRAccess, MIRAssociatedTypeValue, MIRConstant, MIRDropKind, MIREnumArg,
+    MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRImplDef, MIRImplID,
+    MIRModuleID, MIROperation, MIRProgram, MIRStringFormat, MIRStringPart,
+    MIRStringPartKind, MIRTargetApplicability, MIRTerminator, MIRTraitRef,
+    MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeKind, MIRValueID, MIRVariant,
+    MIRVariantPayload, mir_field_id, mir_function_id, mir_trait_id,
+    mir_type_from_kind, mir_type_id,
+]
+use jet_foundation.[MIRArtifactID, MIRArtifactKind, MIRArtifactTarget, MIRArtifactBuildMode, MIRExport, MIRForeignABI, MIRJobID, MIRLinkUnitID]
+use jet_backend.x64_runtime_library
+
+fn fx_display_type(name: String, kind: MIRTypeDefKind) -> MIRTypeDef Never! {
+    definition := fx_type_def(name, kind)
+    definition.auto_printable = true
+    definition
+}
+
+fn fx_render_interpolation(b: &FxBuilder, value: MIRValueID, format: MIRStringFormat) Never! {
+    text :: fx_owned(&b, fx_string(), MIROperation.BuildString{parts: [MIRStringPart]{MIRStringPart{kind: MIRStringPartKind.Interpolation{value: value, format: format}}}})
+    fx_print(&b, text)
+    fx_do(&b, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+}
+
+// enum Light { Red = 1, Green }
+// struct Point { n: Int, computed: String -> "ignored", label: String }
+// enum Packet { Empty, Item(Point), Named(n: Int, label: String) }
+// fn run() {
+//   print(Light.Green)
+//   p :: Point{n: 7, label: "hi"}; print(p); print("{p}")
+//   print(Packet.Item(p)); print(Packet.Named(n: 7, label: "named"))
+//   some :: Val(7); none :: None; print(some); print(none)
+//   print(Ok(7)); print(Err("bad")); print(Packet.Empty)
+// }
+// A String field or payload renders quoted, as the resident engine renders a nested String slot.
+// expect-stdout display: "Green\nPoint { n: 7, label: \"hi\" }\nPoint { n: 7, label: \"hi\" }\nItem(Point { n: 7, label: \"hi\" })\nNamed { n: 7, label: \"named\" }\n7\nnull\nOk(7)\nErr(bad)\nEmpty\n"
+fn fx_display() -> MIRProgram Never! {
+    point :: fx_named("Point")
+    light :: fx_named("Light")
+    packet :: fx_named("Packet")
+    types :: [MIRTypeDef]{
+        fx_display_type("Light", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "Red", wire_name: "Red", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: Val(1)},
+            MIRVariant{name: "Green", wire_name: "Green", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+        }, methods: [MIRFunctionID]{}}),
+        fx_display_type("Point", MIRTypeDefKind.Struct{fields: [MIRField]{
+            fx_field("Point", "n", fx_int()),
+            fx_stored_or_computed("Point", "computed", fx_string(), true),
+            fx_field("Point", "label", fx_string()),
+        }, methods: [MIRFunctionID]{}}),
+        fx_display_type("Packet", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "Empty", wire_name: "Empty", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+            MIRVariant{name: "Item", wire_name: "Item", span: fx_span(), payload: MIRVariantPayload.Single{value: point}, discriminant: None},
+            MIRVariant{name: "Named", wire_name: "Named", span: fx_span(), payload: MIRVariantPayload.Named{fields: [MIRField]{fx_field("Packet.Named", "n", fx_int()), fx_field("Packet.Named", "label", fx_string())}}, discriminant: None},
+        }, methods: [MIRFunctionID]{}}),
+    }
+    b := fx_builder()
+    green :: fx_copy(&b, light, MIROperation.Enum{type_id: mir_type_id("Light"), variant: "Green", args: [MIREnumArg]{}})
+    fx_print(&b, green)
+    seven :: fx_int_const(&b, 7)
+    label :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "hi"}})
+    p :: fx_owned(&b, point, MIROperation.Struct{type_id: mir_type_id("Point"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Point.n"), value: seven}, MIRFieldValue{field: mir_field_id("Point.label"), value: label}}})
+    fx_print(&b, p)
+    fx_render_interpolation(&b, p, MIRStringFormat.Display)
+    item :: fx_owned(&b, packet, MIROperation.Enum{type_id: mir_type_id("Packet"), variant: "Item", args: [MIREnumArg]{MIREnumArg{field: None, value: p, boxed: false}}})
+    fx_print(&b, item)
+    fx_do(&b, MIROperation.Drop{value: item, kind: MIRDropKind.Value})
+    named_label :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "named"}})
+    named :: fx_owned(&b, packet, MIROperation.Enum{type_id: mir_type_id("Packet"), variant: "Named", args: [MIREnumArg]{MIREnumArg{field: Val(mir_field_id("Packet.Named.n")), value: seven, boxed: false}, MIREnumArg{field: Val(mir_field_id("Packet.Named.label")), value: named_label, boxed: false}}})
+    fx_print(&b, named)
+    fx_do(&b, MIROperation.Drop{value: named, kind: MIRDropKind.Value})
+    option :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    some :: fx_owned(&b, option, MIROperation.Present{value: seven})
+    none :: fx_owned(&b, option, MIROperation.Absent)
+    fx_print(&b, some)
+    fx_print(&b, none)
+    fx_do(&b, MIROperation.Drop{value: some, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: none, kind: MIRDropKind.Value})
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_int(), err: fx_string()})
+    ok_value :: fx_owned(&b, result, MIROperation.ResultOk{value: seven})
+    fx_print(&b, ok_value)
+    fx_do(&b, MIROperation.Drop{value: ok_value, kind: MIRDropKind.Value})
+    bad :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "bad"}})
+    err_value :: fx_owned(&b, result, MIROperation.ResultErr{value: bad})
+    fx_print(&b, err_value)
+    fx_do(&b, MIROperation.Drop{value: err_value, kind: MIRDropKind.Value})
+    empty :: fx_owned(&b, packet, MIROperation.Enum{type_id: mir_type_id("Packet"), variant: "Empty", args: [MIREnumArg]{}})
+    fx_print(&b, empty)
+    fx_do(&b, MIROperation.Drop{value: empty, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, ^types)
+}
+
+fn fx_display_impl(name: String, trait_name: String, ty: MIRType, method: MIRFunctionID, ordinal: U64) -> MIRImplDef Never! {
+    MIRImplDef{id: MIRImplID{value: ordinal}, module_id: MIRModuleID{value: 0}, key: name, span: fx_span(), self_type: ty,
+        trait_ref: Val(MIRTraitRef{id: mir_trait_id(trait_name), name: trait_name}), associated_types: [MIRAssociatedTypeValue]{},
+        methods: [MIRFunctionID]{method}, delegation: None, compiler_generated: false, serde: None,
+        operator_marker: None, operator_rhs: None, target_os: None,
+        target_applicability: MIRTargetApplicability{rust_aot: true, interpreter: true, web: false}}
+}
+
+// #Printable struct Custom { n: Int }
+// impl Printable for Custom { fn show(self) -> String { "user show" } }
+// impl Display for Custom { fn display(self) -> String { "user display" } }
+// fn run() { c :: Custom{n: 7}; print(c); print("{c}"); print("{c:Debug}") }
+// expect-stdout display-custom: "user show\nuser display\nCustom { n: 7 }\n\"quoted\"\nVal(7)\nNone\nOk(7)\nErr(\"bad\")\n"
+fn fx_display_custom() -> MIRProgram Never! {
+    ty :: fx_named("Custom")
+    s := fx_builder()
+    fx_param(&s, "self", ty, fx_borrow()).drop("fixture receiver")
+    show_text :: fx_owned(&s, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "user show"}})
+    fx_block(&s, 0, MIRTerminator.Return{value: Val(show_text)})
+    show_function := fx_function("custom_show", s, fx_string())
+    show_function.name = "show"
+    d := fx_builder()
+    fx_param(&d, "self", ty, fx_borrow()).drop("fixture receiver")
+    display_text :: fx_owned(&d, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "user display"}})
+    fx_block(&d, 0, MIRTerminator.Return{value: Val(display_text)})
+    display_function := fx_function("custom_display", d, fx_string())
+    display_function.name = "display"
+    b := fx_builder()
+    seven :: fx_int_const(&b, 7)
+    custom :: fx_owned(&b, ty, MIROperation.Struct{type_id: mir_type_id("Custom"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Custom.n"), value: seven}}})
+    fx_print(&b, custom)
+    fx_render_interpolation(&b, custom, MIRStringFormat.Display)
+    fx_render_interpolation(&b, custom, MIRStringFormat.Debug)
+    quoted :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "quoted"}})
+    fx_render_interpolation(&b, quoted, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: quoted, kind: MIRDropKind.Value})
+    option :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    some :: fx_owned(&b, option, MIROperation.Present{value: seven})
+    none :: fx_owned(&b, option, MIROperation.Absent)
+    fx_render_interpolation(&b, some, MIRStringFormat.Debug)
+    fx_render_interpolation(&b, none, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: some, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: none, kind: MIRDropKind.Value})
+    result :: mir_type_from_kind(MIRTypeKind.Result{ok: fx_int(), err: fx_string()})
+    ok_value :: fx_owned(&b, result, MIROperation.ResultOk{value: seven})
+    bad :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "bad"}})
+    err_value :: fx_owned(&b, result, MIROperation.ResultErr{value: bad})
+    fx_render_interpolation(&b, ok_value, MIRStringFormat.Debug)
+    fx_render_interpolation(&b, err_value, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: ok_value, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: err_value, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: custom, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    program := fx_program([MIRFunction]{show_function, display_function, fx_function("run", b, fx_unit())}, [MIRTypeDef]{fx_display_type("Custom", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Custom", "n", fx_int())}, methods: [MIRFunctionID]{}})})
+    program.impls = [MIRImplDef]{fx_display_impl("custom Printable", "Printable", ty, mir_function_id("custom_show"), 1), fx_display_impl("custom Display", "Display", ty, mir_function_id("custom_display"), 2)}
+    program
+}
+
+// fn run() { names :: ["Ada", "say \"hi\""]; print(names); print("{names}"); print("{names:Debug}") }
+// A List renders each element in its own mode (TextValues.rs / Values.rs):
+// Show and Display leave Strings bare, Debug quotes and escapes them.
+// expect-stdout display-list: "[Ada, say \"hi\"]\n[Ada, say \"hi\"]\n[\"Ada\", \"say \\\"hi\\\"\"]\n"
+fn fx_display_list() -> MIRProgram Never! {
+    b := fx_builder()
+    ada :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "Ada"}})
+    said :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "say \"hi\""}})
+    names :: fx_owned(&b, mir_type_from_kind(MIRTypeKind.List{inner: fx_string()}), MIROperation.BuildList{values: [MIRValueID]{ada, said}, trait_coercion: None})
+    fx_print(&b, names)
+    fx_render_interpolation(&b, names, MIRStringFormat.Display)
+    fx_render_interpolation(&b, names, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: names, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+}
+
+// Compiler source use sites:
+// JetParser/Source/Parser/ExpressionForms/DecisionTables.jet:138 interpolates
+// BinOp; JetSema/Source/Sema/Comptime/BodyRequests.jet:205-213 debugs a list
+// of SemaComptimeBodyValue records containing Type enum payloads.
+// No explicit impl is present: these exercise the existing derived renderer
+// through the same owned-String helper call used by interpolation.
+// expect-stdout display-compiler-values: "Eq\nSemaComptimeBodyValue { key: \"entry\", ty: Named(\"Widget\") }\n[SemaComptimeBodyValue { key: \"entry\", ty: Named(\"Widget\") }]\n"
+fn fx_display_compiler_values() -> MIRProgram Never! {
+    op_ty :: fx_named("BinOp")
+    type_ty :: fx_named("Type")
+    row_ty :: fx_named("SemaComptimeBodyValue")
+    types :: [MIRTypeDef]{
+        fx_display_type("BinOp", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "Eq", wire_name: "Eq", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+            MIRVariant{name: "Ne", wire_name: "Ne", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+        }, methods: [MIRFunctionID]{}}),
+        fx_display_type("Type", MIRTypeDefKind.Enum{variants: [MIRVariant]{
+            MIRVariant{name: "String", wire_name: "String", span: fx_span(), payload: MIRVariantPayload.Unit, discriminant: None},
+            MIRVariant{name: "Named", wire_name: "Named", span: fx_span(), payload: MIRVariantPayload.Single{value: fx_string()}, discriminant: None},
+        }, methods: [MIRFunctionID]{}}),
+        fx_display_type("SemaComptimeBodyValue", MIRTypeDefKind.Struct{fields: [MIRField]{
+            fx_field("SemaComptimeBodyValue", "key", fx_string()),
+            fx_field("SemaComptimeBodyValue", "ty", type_ty),
+        }, methods: [MIRFunctionID]{}}),
+    }
+    b := fx_builder()
+    op :: fx_copy(&b, op_ty, MIROperation.Enum{type_id: mir_type_id("BinOp"), variant: "Eq", args: [MIREnumArg]{}})
+    fx_render_interpolation(&b, op, MIRStringFormat.Display)
+    name :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "Widget"}})
+    ty :: fx_owned(&b, type_ty, MIROperation.Enum{type_id: mir_type_id("Type"), variant: "Named", args: [MIREnumArg]{MIREnumArg{field: None, value: name, boxed: false}}})
+    key :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "entry"}})
+    row :: fx_owned(&b, row_ty, MIROperation.Struct{type_id: mir_type_id("SemaComptimeBodyValue"), fields: [MIRFieldValue]{
+        MIRFieldValue{field: mir_field_id("SemaComptimeBodyValue.key"), value: key},
+        MIRFieldValue{field: mir_field_id("SemaComptimeBodyValue.ty"), value: ty},
+    }})
+    fx_render_interpolation(&b, row, MIRStringFormat.Debug)
+    rows :: fx_owned(&b, mir_type_from_kind(MIRTypeKind.List{inner: row_ty}), MIROperation.BuildList{values: [MIRValueID]{row}, trait_coercion: None})
+    fx_render_interpolation(&b, rows, MIRStringFormat.Debug)
+    fx_do(&b, MIROperation.Drop{value: rows, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, types)
+}
+
+// The ordinary reference bodies return constants. Only the runtime driver
+// table may substitute them, and both System V Float boundaries are exercised.
+// expect-stdout runtime-bitcast: "true\n"
+fn fx_runtime_bitcast_module() -> LIRModule Never! {
+    word_ty :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    float_ty :: mir_type_from_kind(MIRTypeKind.Float)
+    bits_body := fx_builder()
+    fx_param(&bits_body, "value", float_ty, mir_copy_ownership()).drop("reference parameter")
+    constant_word :: fx_copy(&bits_body, word_ty, MIROperation.Constant{value: MIRConstant.Int{value: 123, width: None, spelling: None}})
+    fx_block(&bits_body, 0, MIRTerminator.Return{value: Val(constant_word)})
+    bits :: fx_function("rt_f64_bits", bits_body, word_ty)
+    float_body := fx_builder()
+    fx_param(&float_body, "bits", word_ty, mir_copy_ownership()).drop("reference parameter")
+    constant_float :: fx_numeric_float(&float_body, 123.0)
+    fx_block(&float_body, 0, MIRTerminator.Return{value: Val(constant_float)})
+    from_bits :: fx_function("rt_f64_from_bits", float_body, float_ty)
+    program :: fx_program([MIRFunction]{bits, from_bits}, [MIRTypeDef]{})
+    roots :: [MIRFunctionID]{bits.id, from_bits.id}
+    ordinary :: lir_lower_callables(program, roots)
+    if ordinary.issues.len() != 0 -> panic("ordinary reference functions refused")
+    loop function in ordinary.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Bitcast(_, _) -> panic("ordinary lowering enabled a runtime intrinsic")
+            }
+        }
+    }
+    intrinsics := [U64:LowerRuntimeIntrinsic]{}
+    &intrinsics.add(bits.id.value, LowerRuntimeIntrinsic.FloatBits).drop("distinct runtime ID")
+    &intrinsics.add(from_bits.id.value, LowerRuntimeIntrinsic.FloatFromBits).drop("distinct runtime ID")
+    lowered :: lir_lower_runtime_callables(program, roots, ^intrinsics)
+    if lowered.issues.len() != 0 -> panic("runtime scalar functions refused")
+    p := lowered.lir
+    bits_id :: lowered.callables.get(bits.id.value) ?? panic("reachable bits")
+    from_bits_id :: lowered.callables.get(from_bits.id.value) ?? panic("reachable from bits")
+    print_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: print_sig, convention: .SystemV, params: [LIRLayout]{lir_layout_bool()}, result: Val(lir_layout_pointer())})
+    line_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: line_sig, convention: .SystemV, params: [LIRLayout]{lir_layout_pointer(), lir_layout_word()}, result: None})
+    entry_sig :: LIRSignatureID{value: p.signatures.len()}
+    &p.signatures.push(LIRSignature{id: entry_sig, convention: .SystemV, params: [LIRLayout]{}, result: None})
+    entry := lir_builder(LIRFunctionID{value: p.functions.len()}, "run", entry_sig)
+    difference := lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Const{dst: difference, value: 0})
+    patterns :: [Int]{
+        0,
+        -9223372036854775808,
+        1,
+        -9223372036854775807,
+        0x000fffffffffffff,
+        0x0010000000000000,
+        0x3ff0000000000000,
+        0x7fefffffffffffff,
+        0x7ff0000000000000,
+        0xfff0000000000000,
+        0x7ff0000000000001,
+        0x7ff8000000000042,
+        0xfff8000000000042,
+    }
+    loop pattern in patterns {
+        word :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Const{dst: word, value: pattern})
+        floating :: lir_builder_value(&entry, lir_layout_float(), LIRDrop.Trivial, None)
+        lir_builder_push(&entry, LIRInst.Call{dst: Val(floating), signature: p.functions[from_bits_id.value].signature, callee: .Function{id: from_bits_id}, args: [LIRValueID]{word}})
+        roundtrip :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Call{dst: Val(roundtrip), signature: p.functions[bits_id.value].signature, callee: .Function{id: bits_id}, args: [LIRValueID]{floating}})
+        delta :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Binary{dst: delta, op: .Xor, left: word, right: roundtrip})
+        combined :: lir_builder_word(&entry)
+        lir_builder_push(&entry, LIRInst.Binary{dst: combined, op: .Or, left: difference, right: delta})
+        difference = combined
+    }
+    zero :: lir_builder_word(&entry)
+    lir_builder_push(&entry, LIRInst.Const{dst: zero, value: 0})
+    equal :: lir_builder_value(&entry, lir_layout_bool(), LIRDrop.Trivial, None)
+    lir_builder_push(&entry, LIRInst.Compare{dst: equal, condition: .Eq, left: difference, right: zero})
+    text :: lir_builder_value(&entry, lir_layout_pointer(), LIRDrop.Runtime{symbol: "jet_rt_string_drop"}, None)
+    lir_builder_push(&entry, LIRInst.Call{dst: Val(text), signature: print_sig, callee: .Runtime{symbol: "jet_rt_bool_to_string"}, args: [LIRValueID]{equal}})
+    lir_builder_push(&entry, LIRInst.Call{dst: None, signature: line_sig, callee: .Runtime{symbol: "jet_term_write_stdout_line"}, args: [LIRValueID]{text, zero}})
+    lir_builder_push(&entry, LIRInst.Drop{value: text})
+    lir_builder_seal(&entry, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    &p.functions.push(lir_builder_finish(entry))
+    p
+}
+
+fn fx_runtime_bitcast_refusals() -> Bool Never! {
+    program :: fx_runtime_bitcast_module()
+    function :: program.functions[0]
+    inst :: function.blocks[0].insts[0]
+    if lir_inst_def(inst) == .None || lir_inst_uses(inst).len() != 1 || lir_inst_consumes(inst).len() != 0 {
+        return false
+    }
+    if lir_lint_inst(program, function, inst).len() != 0 -> return false
+    if inst == .Bitcast(dst, src) {
+        layouts :: [LIRLayout]{
+            LIRLayout{size: 4, align: 4, class: .Integer},
+            LIRLayout{size: 4, align: 4, class: .Pointer},
+            LIRLayout{size: 8, align: 8, class: .Memory},
+        }
+        loop layout in layouts {
+            bad := function.copy()
+            bad.values[src.value].layout = layout
+            if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+            bad = function.copy()
+            bad.values[dst.value].layout = layout
+            if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        }
+        // Binary32 <-> Word is admitted; a bitcast is still not a
+        // Float32/Float64 conversion or a pointer reinterpretation.
+        binary32 :: LIRLayout{size: 4, align: 4, class: .Float}
+        cross_float := function.copy()
+        cross_float.values[dst.value].layout = binary32
+        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        cross_float = function.copy()
+        cross_float.values[src.value].layout = binary32
+        cross_float.values[dst.value].layout = lir_layout_float()
+        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        cross_float.values[dst.value].layout = lir_layout_pointer()
+        if lir_lint_inst(program, cross_float, inst).len() == 0 -> return false
+        bad := function.copy()
+        bad.values[src.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
+        if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        bad = function.copy()
+        bad.values[dst.value].drop = LIRDrop.Runtime{symbol: "jet_rt_string_drop"}
+        if lir_lint_inst(program, bad, inst).len() == 0 -> return false
+        return true
+    }
+    false
+}
+
+// Exercise the real library recognizer, not a guessed callback address.
+fn fx_journey_address_program(arity: Int, include_target: Bool) -> MIRProgram Never! {
+    word :: mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64})
+    reference := fx_builder()
+    zero :: fx_copy(&reference, word, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
+    fx_block(&reference, 0, MIRTerminator.Return{value: Val(zero)})
+    helper :: fx_function("rt_journey_destructor_address", reference, word)
+    target_body := fx_builder()
+    loop index in 0..<arity -> fx_param(&target_body, "arg{index}", word, mir_copy_ownership()).drop("reference callback parameter")
+    result :: fx_copy(&target_body, word, MIROperation.Constant{value: MIRConstant.Int{value: 0, width: None, spelling: None}})
+    fx_block(&target_body, 0, MIRTerminator.Return{value: Val(result)})
+    target := fx_function("jet_rt_journey_destructor", target_body, word)
+    source :: "#Export(c) fn jet_rt_journey_destructor("
+    target.span = Span{start: 0, end: source.bytes().len()}
+    functions := [MIRFunction]{helper}
+    exports := [MIRExport]{}
+    if include_target {
+        &functions.push(target)
+        &exports.push(MIRExport{symbol: "jet_rt_journey_destructor", function: target.id, abi: .C})
+    } else {
+        // A valid unrelated export gets past library validation before the
+        // Journey intrinsic's required target lookup refuses the program.
+        other := target.copy()
+        other.id = mir_function_id("unrelated")
+        other.name = "unrelated"
+        other.key = "unrelated"
+        other.span = Span{start: 0, end: "#Export(c) fn unrelated(".bytes().len()}
+        &functions.push(other)
+        &exports.push(MIRExport{symbol: "unrelated", function: other.id, abi: .C})
+    }
+    program := fx_program(functions, [MIRTypeDef]{})
+    program.source_files[0].source = if include_target -> source else -> "#Export(c) fn unrelated("
+    program.artifacts = [MIRArtifactPlan]{MIRArtifactPlan{
+        id: MIRArtifactID{value: 1}, kind: .NativeLibrary, name: "journey-test",
+        target: MIRArtifactTarget.RustAOT, mode: MIRArtifactBuildMode.Dev,
+        modules: [MIRModuleID]{}, links: [MIRLinkUnitID]{}, jobs: [MIRJobID]{},
+        runtime_parts: [MIRRuntimePartID]{}, exports: exports,
+        provider_identity: "", closure_identity: "", artifact_identity: "",
+        entry: None, harness: None,
+    }}
+    program
+}
+fn fx_journey_address_checks() -> Bool Never! {
+    missing :: x64_runtime_library(fx_journey_address_program(2, false), [String]{"unrelated"})
+    if missing.object.errors.len() != 1 || !missing.object.errors[0].contains("requires #Export(c) jet_rt_journey_destructor") -> return false
+    wrong :: x64_runtime_library(fx_journey_address_program(1, true), [String]{"jet_rt_journey_destructor"})
+    if wrong.object.errors.len() != 1 || !wrong.object.errors[0].contains("2 I64 parameters") -> return false
+    valid :: x64_runtime_library(fx_journey_address_program(2, true), [String]{"jet_rt_journey_destructor"})
+    valid.object.errors.len() == 0 && valid.object.bytes.len() != 0
+}

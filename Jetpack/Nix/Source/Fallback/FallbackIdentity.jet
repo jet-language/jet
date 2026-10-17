@@ -10,14 +10,14 @@ NIX_FALLBACK_PROVENANCE_FIELDS :: prep { [String]{"schema", "executable", "execu
 NIX_VERSION_OUTPUT_PREFIX :: prep { "nix (Nix) " }
 
 // All inputs that identify one permitted local Nix fallback evaluation.
-pub struct NixFallbackIdentity {
-    pub executable: String
-    pub executable_sha256: String
-    pub version: String
-    pub nixpkgs_revision: String
-    pub system: String
-    pub attr: [String]
-    pub lock_sha256: String
+struct NixFallbackIdentity {
+    executable: String
+    executable_sha256: String
+    version: String
+    nixpkgs_revision: String
+    system: String
+    attr: [String]
+    lock_sha256: String
 
     // Inspect one explicit executable and bind it to the exact project lock.
     // `source_name` is the lock's declared source name, never a live channel
@@ -52,9 +52,11 @@ pub struct NixFallbackIdentity {
     // Decode and revalidate the exact identity persisted in a lock or receipt.
     fn from_provenance(value: String) -[FS, Env]> NixFallbackIdentity NixError! {
         tree :: json.parse(value) ?? return Err(NixError.Fallback("invalid Nix fallback provenance: {err}"))
-        fields := [String: DataTree]{}
+        fields := [String: Dyn]{}
         if tree == {
-            .Object(entries) -> fields = entries
+            .Object(entries) -> {
+                loop pair in entries -> fields[pair.key] = pair.value
+            }
             else -> return Err(NixError.Fallback("Nix fallback provenance must be a JSON object"))
         }
         if fields.len() != NIX_FALLBACK_PROVENANCE_FIELDS.len() || !nix_fallback_has_every_field(fields) {
@@ -94,17 +96,17 @@ pub struct NixFallbackIdentity {
 
     // Machine-readable provenance stored with a Jetpack import and its lock.
     fn provenance(self) -> String Never! {
-        attrs := [DataTree]{}
-        loop segment in self.attr -> &attrs.push(DataTree.Text(segment))
-        pkg_json_render(DataTree.Object([
-            "schema": DataTree.Text(NIX_FALLBACK_PROVENANCE_SCHEMA),
-            "executable": DataTree.Text(self.executable),
-            "executable_sha256": DataTree.Text(self.executable_sha256),
-            "version": DataTree.Text(self.version),
-            "nixpkgs_revision": DataTree.Text(self.nixpkgs_revision),
-            "system": DataTree.Text(self.system),
-            "attr": DataTree.Array(attrs),
-            "lock_sha256": DataTree.Text(self.lock_sha256),
+        attrs := [Dyn]{}
+        loop segment in self.attr -> &attrs.push(Dyn.Text(segment))
+        pkg_json_render(Dyn.Object([
+            "schema": Dyn.Text(NIX_FALLBACK_PROVENANCE_SCHEMA),
+            "executable": Dyn.Text(self.executable),
+            "executable_sha256": Dyn.Text(self.executable_sha256),
+            "version": Dyn.Text(self.version),
+            "nixpkgs_revision": Dyn.Text(self.nixpkgs_revision),
+            "system": Dyn.Text(self.system),
+            "attr": Dyn.Array(attrs),
+            "lock_sha256": Dyn.Text(self.lock_sha256),
         ]))
     }
 
@@ -143,7 +145,7 @@ fn nix_fallback_canonical_executable(executable: String) -[FS, Env]> String NixE
     path :: files.canonicalize(executable) ?? return Err(NixError.Fallback("could not resolve Nix executable `{executable}`: {err}"))
     info :: files.stat(path) ?? return Err(NixError.Fallback("could not stat Nix executable `{path}`: {err}"))
     if !info.is_file -> return Err(NixError.Fallback("Nix executable `{path}` is not a regular file"))
-    if sys.family() != "windows" && info.mode & 0o111 == 0 -> return Err(NixError.Fallback("Nix executable `{path}` is not executable"))
+    if sys.family() != "windows" && (info.mode).bit_and(0o111) == 0 -> return Err(NixError.Fallback("Nix executable `{path}` is not executable"))
     Ok(path)
 }
 
@@ -177,31 +179,31 @@ fn nix_fallback_revision_from_locked_input(input: String) -> String NixError! {
     Ok(revision)
 }
 
-fn nix_fallback_has_every_field(fields: [String: DataTree]) -> Bool Never! {
+fn nix_fallback_has_every_field(fields: [String: Dyn]) -> Bool Never! {
     loop field in NIX_FALLBACK_PROVENANCE_FIELDS {
         if fields.get(field) == None -> return false
     }
     true
 }
 
-fn nix_fallback_provenance_text(fields: [String: DataTree], name: String) -> String NixError! {
+fn nix_fallback_provenance_text(fields: [String: Dyn], name: String) -> String NixError! {
     value :: fields.get(name) ?? return Err(NixError.Fallback("Nix fallback provenance is missing `{name}`"))
     nix_fallback_tree_text(value)
 }
 
-fn nix_fallback_tree_text(value: DataTree) -> String NixError! {
+fn nix_fallback_tree_text(value: Dyn) -> String NixError! {
     if value == {
         .Text(text) -> return Ok(text)
-        else -> return Err(NixError.Fallback("expected a DataTree string"))
+        else -> return Err(NixError.Fallback("expected a Dyn string"))
     }
 }
 
-fn nix_fallback_provenance_attr(fields: [String: DataTree]) -> [String] NixError! {
+fn nix_fallback_provenance_attr(fields: [String: Dyn]) -> [String] NixError! {
     value :: fields.get("attr") ?? return Err(NixError.Fallback("Nix fallback provenance is missing `attr`"))
-    items := [DataTree]{}
+    items := [Dyn]{}
     if value == {
         .Array(values) -> items = values
-        else -> return Err(NixError.Fallback("expected a DataTree array"))
+        else -> return Err(NixError.Fallback("expected a Dyn array"))
     }
     attr := [String]{}
     loop item in items -> &attr.push(nix_fallback_tree_text(item))

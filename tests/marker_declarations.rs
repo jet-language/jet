@@ -101,7 +101,6 @@ fn retired_marker_declaration_forms_are_confined_to_fixtures_and_history() {
                         | ".jet"
                         | ".tower"
                         | ".agent-worktrees"
-                        | "jit-aot-parity-report"
                         | "node_modules"
                         | "target"
                         | "build"
@@ -695,7 +694,7 @@ struct Section {
 
 fn quoted(value: String) -> String {
     trimmed :: value.trim()
-    pieces :: text.splitn(~trimmed, "\"", 3)
+    pieces :: text.splitn(trimmed.copy(), "\"", 3)
     if pieces.len() != 3 -> panic("expected quoted value")
     pieces.get(1) ?? panic("expected quoted value")
 }
@@ -710,7 +709,7 @@ fn run() {
         trimmed :: line.trim()
         if line.trim().is_empty() -> next
 
-        opening :: text.splitn(~trimmed, "[", 2)
+        opening :: text.splitn(trimmed.copy(), "[", 2)
         if opening.len() == 2 {
             rest :: opening.get(1) ?? panic("malformed section")
             closing :: text.splitn(rest, "]", 2)
@@ -723,7 +722,7 @@ fn run() {
         }
 
         if current < 0 -> panic("field before section")
-        pair :: text.splitn(~trimmed, "=", 2)
+        pair :: text.splitn(trimmed.copy(), "=", 2)
         if pair.len() != 2 -> panic("malformed field")
         key :: (pair.get(0) ?? "").trim()
         if key.is_empty() -> panic("empty field")
@@ -736,7 +735,7 @@ fn run() {
         loop field in sections[current].fields {
             if field.key == key -> panic("duplicate field {key} in section {sections[current].name}")
         }
-        &sections[current].fields.push(Field{key: ~key, value: value})
+        &sections[current].fields.push(Field{key: key.copy(), value: value})
     }
 
     loop section in sections {

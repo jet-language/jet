@@ -57,7 +57,7 @@ enum LockParseSection {
 }
 
 // Parse lock text into the canonical model.
-pub fn pkg_lock_parse(raw: String) -> LockFile LockError! {
+fn pkg_lock_parse(raw: String) -> LockFile LockError! {
     if raw.bytes().len() > PKG_MAX_LOCK_BYTES -> return Err(LockError.Invalid(pkg_lock_oversized_file_message()))
     parser := LockParser.new()
     lines :: raw.split("\n").to_list()
@@ -75,7 +75,7 @@ pub fn pkg_lock_parse(raw: String) -> LockFile LockError! {
 // Parse a lock read from `lock_path`. An unsupported format version is
 // distinct from corruption: the reader must not rewrite an input whose
 // required meanings it cannot establish.
-pub fn pkg_lock_parse_with_path(raw: String, lock_path: String) -> LockFile LockError! {
+fn pkg_lock_parse_with_path(raw: String, lock_path: String) -> LockFile LockError! {
     if pkg_lock_parse(raw) == {
         .Ok(lock) -> Ok(lock)
         .Err(error) -> if error == {
@@ -88,7 +88,7 @@ pub fn pkg_lock_parse_with_path(raw: String, lock_path: String) -> LockFile Lock
 // Identify a lock that claims workspace authority even when its typed parse
 // fails, so callers report the malformed/stale lock instead of treating it as
 // an ordinary package lock or an empty workspace.
-pub fn pkg_lock_looks_like_workspace_lock(raw: String) -> Bool Never! {
+fn pkg_lock_looks_like_workspace_lock(raw: String) -> Bool Never! {
     loop line_text in raw.split("\n") {
         line :: line_text.trim()
         if line == {

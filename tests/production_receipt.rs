@@ -43,12 +43,8 @@ fn production_failure_receipt_is_canonical_redacted_and_tier_stable() {
     let environment_secret = "PRODUCTION_RECEIPT_ENV_MARKER_755";
     let source = format!("// {source_secret}\nfn run() {{ panic(\"{input_secret}\") }}\n");
     let jet = PathBuf::from(env!("CARGO_BIN_EXE_jet"));
-    let mut modes = vec![vec!["run", "--interpret", "main.jet"]];
-    modes.push(vec!["dev", "main.jet", "--watch=off"]);
-    modes.push(vec!["dev", "main.jet", "--interpret", "--watch=off"]);
-    if jet_jit::cranelift_host_supported() {
-        modes.push(vec!["run", "main.jet"]);
-    }
+    let mut modes = vec![vec!["dev", "main.jet", "--watch=off"]];
+    modes.push(vec!["run", "main.jet"]);
     modes.push(vec!["run", "--release", "main.jet"]);
 
     let mut receipts = Vec::new();

@@ -1,0 +1,26 @@
+// Production journal capture; requires SolSema4's canonical pass producer.
+fn inspect_canonical_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("InspectCanonicalRoutes: {message}")
+}
+fn run() {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: "/inspect-routes", identity: "routes-root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "/inspect-routes/run.jet", relative_path: "run.jet", identity: "routes-source", source: "fn run() {{ value :: 2 + 3; print(value) }}"}}, foreign_cache_files: []}}, entry_root_identity: "routes-root", entry_path: "/inspect-routes/run.jet"}
+    request := jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+    request.host_facts.target_triple = Val("x86_64-unknown-linux-gnu")
+    request.schema_snapshots = Val([String:SchemaSnapshot]{})
+    request.adapter_mode = "parity"
+    request.adapter_operation_ids = ["mir.exact-constant-folding", "mir.optimize-pipeline"]
+    query :: jet_driver_optimization_query(^request)
+    inspect_canonical_require(query.compile.complete && query.canonical_routes.len() > 0, "actual compiler boundary journal")
+    routes :: jet_cli_canonical_routes(query.canonical_routes, "inspecting-process")
+    inspect_canonical_require(routes.len() == query.canonical_routes.len(), "one projection per actual record")
+    text :: jet_cli_status_json(routes[0])
+    inspect_canonical_require(text.contains("\"schema\":\"jet.canonical-pass-record.v1\"") && text.contains("\"protocol\":\"jet.canonical-pass.v1\"") && text.contains("\"process\":\"inspecting-process\""), "canonical schema and source process")
+    inspect_canonical_require(text.contains("\"canonical_payload\":") && text.contains("\"representation\":") && text.contains("\"identity\":") && text.contains("\"premises\":") && text.contains("\"disposition\":"), "actual snapshot facts retained")
+    ledger :: query.decisions ?? panic("missing decisions")
+    report :: jet_cli_decisions_report(ledger, "target", "run.jet", "dev", routes, query.canonical_route_gaps, true)
+    inspect_canonical_require(report.contains("\"canonical_routes\":[{{\"schema\":\"jet.canonical-pass-record.v1\""), "journal included in status envelope")
+    parsed :: jet_cli_canonical_snapshot("{{\"actual\":true}}")
+    inspect_canonical_require(jet_cli_status_json(parsed) == "{{\"actual\":true}}", "canonical payload remains a parsed value")
+    fallback :: jet_cli_canonical_snapshot("not a JSON snapshot")
+    inspect_canonical_require(jet_cli_status_json(fallback) == "\"not a JSON snapshot\"", "unparseable payload remains exact text")
+}

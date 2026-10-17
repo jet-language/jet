@@ -1,0 +1,108 @@
+// Derived field order: LinalgFns.rs:561-584 and MathTaskMem.rs:83-93.
+// CAbiRoutes.rs:9676-9697,11045-11059,11456-11507 ownership boundaries.
+// GeometryABI.jet alone owns offsets; Float lanes are f64, frames raw i64.
+fn geometry_word(address: I64) -> I64 {
+    #Unsafe("borrows an initialized aligned word inside a live native geometry carrier") { return os_load_i64(address) }
+}
+fn geometry_store(address: I64, value: I64) {
+    #Unsafe("owns a writable aligned word in a fresh native geometry carrier") { os_store_i64(address, value) }
+}
+fn geometry_clone(value: I64, bytes: I64) -> I64 {
+    result :: jet_rt_alloc(bytes, I64{8})
+    coll_copy(value, result, bytes)
+    result
+}
+fn geometry_drop(value: I64, bytes: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, bytes, I64{8})
+}
+fn geometry_float_equal(left: I64, right: I64, bytes: I64) -> Bool {
+    at := I64{0}
+    loop at < bytes {
+        // Never shortcut identity or compare bits: NaN != itself; -0 == +0.
+        if rt_f64_from_bits(geometry_word(left + at)) != rt_f64_from_bits(geometry_word(right + at)) -> return false
+        at += I64{8}
+    }
+    true
+}
+#Export(c) fn jet_rt_record_new_jet_coord2(x: Float, y: Float, frame_id: I64) -> I64 {
+    frame :: jet_int_owned_to_i64(frame_id)
+    result :: jet_rt_alloc(GEOMETRY_COORD_BYTES, I64{8})
+    geometry_store(result + GEOMETRY_COORD_X, rt_f64_bits(x))
+    geometry_store(result + GEOMETRY_COORD_Y, rt_f64_bits(y))
+    geometry_store(result + GEOMETRY_COORD_FRAME, frame)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_coord2(value: I64) -> I64 { geometry_clone(value, GEOMETRY_COORD_BYTES) }
+#Export(c) fn jet_rt_handle_drop_jet_coord2(value: I64) { geometry_drop(value, GEOMETRY_COORD_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_coord2(left: I64, right: I64) -> Bool {
+    geometry_float_equal(left, right, GEOMETRY_COORD_FRAME) && geometry_word(left + GEOMETRY_COORD_FRAME) == geometry_word(right + GEOMETRY_COORD_FRAME)
+}
+#Export(c) fn jet_rt_record_get_jet_coord2_x(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_COORD_X)) }
+#Export(c) fn jet_rt_record_get_jet_coord2_y(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_COORD_Y)) }
+#Export(c) fn jet_rt_record_get_jet_coord2_frame_id(value: I64) -> I64 { jet_int_owned_from_i64(geometry_word(value + GEOMETRY_COORD_FRAME)) }
+#Export(c) fn jet_rt_record_new_jet_transform2(m00: Float, m01: Float, m10: Float, m11: Float, tx: Float, ty: Float, from_frame: I64, to_frame: I64) -> I64 {
+    from :: jet_int_owned_to_i64(from_frame)
+    to :: jet_int_owned_to_i64(to_frame)
+    result :: jet_rt_alloc(GEOMETRY_TRANSFORM_BYTES, I64{8})
+    geometry_store(result + GEOMETRY_TRANSFORM_M00, rt_f64_bits(m00))
+    geometry_store(result + GEOMETRY_TRANSFORM_M01, rt_f64_bits(m01))
+    geometry_store(result + GEOMETRY_TRANSFORM_M10, rt_f64_bits(m10))
+    geometry_store(result + GEOMETRY_TRANSFORM_M11, rt_f64_bits(m11))
+    geometry_store(result + GEOMETRY_TRANSFORM_TX, rt_f64_bits(tx))
+    geometry_store(result + GEOMETRY_TRANSFORM_TY, rt_f64_bits(ty))
+    geometry_store(result + GEOMETRY_TRANSFORM_FROM, from)
+    geometry_store(result + GEOMETRY_TRANSFORM_TO, to)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_transform2(value: I64) -> I64 { geometry_clone(value, GEOMETRY_TRANSFORM_BYTES) }
+#Export(c) fn jet_rt_handle_drop_jet_transform2(value: I64) { geometry_drop(value, GEOMETRY_TRANSFORM_BYTES) }
+#Export(c) fn jet_rt_handle_eq_jet_transform2(left: I64, right: I64) -> Bool {
+    geometry_float_equal(left, right, GEOMETRY_TRANSFORM_FROM) &&
+        geometry_word(left + GEOMETRY_TRANSFORM_FROM) == geometry_word(right + GEOMETRY_TRANSFORM_FROM) &&
+        geometry_word(left + GEOMETRY_TRANSFORM_TO) == geometry_word(right + GEOMETRY_TRANSFORM_TO)
+}
+#Export(c) fn jet_rt_record_get_jet_transform2_m00(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_TRANSFORM_M00)) }
+#Export(c) fn jet_rt_record_get_jet_transform2_m01(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_TRANSFORM_M01)) }
+#Export(c) fn jet_rt_record_get_jet_transform2_m10(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_TRANSFORM_M10)) }
+#Export(c) fn jet_rt_record_get_jet_transform2_m11(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_TRANSFORM_M11)) }
+#Export(c) fn jet_rt_record_get_jet_transform2_tx(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_TRANSFORM_TX)) }
+#Export(c) fn jet_rt_record_get_jet_transform2_ty(value: I64) -> Float { rt_f64_from_bits(geometry_word(value + GEOMETRY_TRANSFORM_TY)) }
+#Export(c) fn jet_rt_record_get_jet_transform2_from_frame(value: I64) -> I64 { jet_int_owned_from_i64(geometry_word(value + GEOMETRY_TRANSFORM_FROM)) }
+#Export(c) fn jet_rt_record_get_jet_transform2_to_frame(value: I64) -> I64 { jet_int_owned_from_i64(geometry_word(value + GEOMETRY_TRANSFORM_TO)) }
+#Export(c) fn jet_rt_record_new_jet_ray2(origin: I64, direction: I64) -> I64 {
+    // CAbi consumes both Coord handles; native carrier retains those owners.
+    result :: jet_rt_alloc(GEOMETRY_RAY_BYTES, I64{8})
+    geometry_store(result + GEOMETRY_RAY_ORIGIN, origin)
+    geometry_store(result + GEOMETRY_RAY_DIRECTION, direction)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_ray2(value: I64) -> I64 {
+    jet_rt_record_new_jet_ray2(jet_rt_handle_clone_jet_coord2(geometry_word(value + GEOMETRY_RAY_ORIGIN)), jet_rt_handle_clone_jet_coord2(geometry_word(value + GEOMETRY_RAY_DIRECTION)))
+}
+#Export(c) fn jet_rt_handle_drop_jet_ray2(value: I64) {
+    if (value == I64{0}) -> return
+    jet_rt_handle_drop_jet_coord2(geometry_word(value + GEOMETRY_RAY_ORIGIN))
+    jet_rt_handle_drop_jet_coord2(geometry_word(value + GEOMETRY_RAY_DIRECTION))
+    jet_rt_free(value, GEOMETRY_RAY_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ray2(left: I64, right: I64) -> Bool {
+    jet_rt_handle_eq_jet_coord2(geometry_word(left + GEOMETRY_RAY_ORIGIN), geometry_word(right + GEOMETRY_RAY_ORIGIN)) &&
+        jet_rt_handle_eq_jet_coord2(geometry_word(left + GEOMETRY_RAY_DIRECTION), geometry_word(right + GEOMETRY_RAY_DIRECTION))
+}
+#Export(c) fn jet_rt_record_get_jet_ray2_origin(value: I64) -> I64 { jet_rt_handle_clone_jet_coord2(geometry_word(value + GEOMETRY_RAY_ORIGIN)) }
+#Export(c) fn jet_rt_record_get_jet_ray2_direction(value: I64) -> I64 { jet_rt_handle_clone_jet_coord2(geometry_word(value + GEOMETRY_RAY_DIRECTION)) }
+#Export(c) fn jet_rt_handle_clone_vec2(value: I64) -> I64 { geometry_clone(value, GEOMETRY_VEC2_BYTES) }
+#Export(c) fn jet_rt_handle_drop_vec2(value: I64) { geometry_drop(value, GEOMETRY_VEC2_BYTES) }
+#Export(c) fn jet_rt_handle_eq_vec2(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, GEOMETRY_VEC2_BYTES) }
+#Export(c) fn jet_rt_handle_clone_vec3(value: I64) -> I64 { geometry_clone(value, GEOMETRY_VEC3_BYTES) }
+#Export(c) fn jet_rt_handle_drop_vec3(value: I64) { geometry_drop(value, GEOMETRY_VEC3_BYTES) }
+#Export(c) fn jet_rt_handle_eq_vec3(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, GEOMETRY_VEC3_BYTES) }
+#Export(c) fn jet_rt_handle_clone_vec4(value: I64) -> I64 { geometry_clone(value, GEOMETRY_VEC4_BYTES) }
+#Export(c) fn jet_rt_handle_drop_vec4(value: I64) { geometry_drop(value, GEOMETRY_VEC4_BYTES) }
+#Export(c) fn jet_rt_handle_eq_vec4(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, GEOMETRY_VEC4_BYTES) }
+#Export(c) fn jet_rt_handle_clone_mat3(value: I64) -> I64 { geometry_clone(value, GEOMETRY_MAT3_BYTES) }
+#Export(c) fn jet_rt_handle_drop_mat3(value: I64) { geometry_drop(value, GEOMETRY_MAT3_BYTES) }
+#Export(c) fn jet_rt_handle_eq_mat3(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, GEOMETRY_MAT3_BYTES) }
+#Export(c) fn jet_rt_handle_clone_mat4(value: I64) -> I64 { geometry_clone(value, GEOMETRY_MAT4_BYTES) }
+#Export(c) fn jet_rt_handle_drop_mat4(value: I64) { geometry_drop(value, GEOMETRY_MAT4_BYTES) }
+#Export(c) fn jet_rt_handle_eq_mat4(left: I64, right: I64) -> Bool { geometry_float_equal(left, right, GEOMETRY_MAT4_BYTES) }

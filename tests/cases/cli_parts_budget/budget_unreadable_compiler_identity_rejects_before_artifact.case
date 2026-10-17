@@ -1,0 +1,12 @@
+# Port of tests/cli_parts/budget.rs:515-542; fixture sources copied verbatim.
+# PENDING-SAME-HEAD: original assertions authored; no runtime reference run.
+# PENDING-GRAMMAR: read-only source copy from {jet}; chmod is original setup, no retries
+fixture: fixtures/unreadable
+requires: os:unix
+copy: {jet} jet-unreadable
+chmod: jet-unreadable 111
+step: {work}/jet-unreadable budget check
+exit: 1
+stderr: ~ "cannot hash running compiler executable" # original predicate
+file: .jet absent
+file: .jet/build/run absent

@@ -1,0 +1,50 @@
+# HAND-PORT tests/jetpack_engine.rs:4622-4755 local_unofficial_nixpkgs_catalog_is_explicit_and_auditable
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: local_unofficial_nixpkgs_catalog_is_explicit_and_auditable.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: catalog
+artifact: peer
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source corrupt {work}/catalog
+await: file peer.port timeout 30s
+capture: port = text file peer.port
+step: jetpack env --prep --no-color --trust
+cwd: project
+env: PATH=
+exit: 2
+stdout+stderr: ~ "E1348" # original contains predicate
+stdout+stderr: !~ "local-unofficial" # original negative contains predicate
+step: jetpack env --prep --no-color --trust --local-nix-catalog {work}/catalog
+cwd: project
+env: PATH=
+exit: 0
+stdout+stderr: ~ "local-unofficial" # original contains predicate
+stdout+stderr: ~ "unverified" # original contains predicate
+stdout+stderr: ~ "name-to-store-path mapping is unverified" # original contains predicate
+file: project/.jet/lock ~ "catalog-tier = \"local-unofficial\"" # original contains predicate
+file: project/.jet/lock ~ "catalog-trust = \"unverified\"" # original contains predicate
+step: jetpack explain ripgrep@nixpkgs --json --no-color
+cwd: project
+exit: 0
+capture: id stdout doc $.explain.entry.id
+capture: receipt stdout doc $.explain.entry.receipt
+json: stdout doc $.explain.provider.provider = "nix"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+file: root/hangar/receipts/{cap:receipt} ~ "636174616c6f672d7472757374" # original contains predicate
+file: root/hangar/receipts/{cap:receipt} ~ "756e7665726966696564" # original contains predicate
+step: jetpack audit --no-color
+cwd: project
+exit: 0
+stdout+stderr: ~ "{cap:id}" # original contains predicate
+stdout+stderr: ~ "signature-chain: none" # original contains predicate
+stdout+stderr: ~ "objects without a Nix index signature chain" # original contains predicate
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0
+

@@ -4,8 +4,8 @@ use core.data.sketch.tdigest as td_mod
 use core.data.sketch.cms as cms_mod
 use core.data.sketch.reservoir as rs_mod
 
-// Sketches update in place, so each one is a mutable binding and every
-// update marks the write with `&`.
+// Sketches are plain values; write receivers update their private storage.
+// Cloning a sketch gives an independent value, including its sampler RNG state.
 fn run() {
     // HyperLogLog: cardinality estimator.
     // 3 distinct items + 1 duplicate → count ≈ 3.
@@ -39,4 +39,52 @@ fn run() {
     &rs.add("y")
     &rs.add("z")
     print(rs.sample().len())
+
+    // Reuse the source-composition regressions: display, independent clones, step
+    // quantiles, bounded probabilities, repeated observations and zero capacity.
+    digest := td_mod.new()
+    print(digest)
+    print("{digest}")
+    print(digest.quantile(0.5))
+    &digest.add(2.0)
+    clone := digest.copy()
+    &digest.add(1.0)
+    print(digest.quantile(0.5))
+    print(clone.quantile(0.51))
+    print(digest.quantile(-1.0))
+    print(digest.quantile(2.0))
+    repeated := td_mod.new()
+    loop _ in 0..<500 -> &repeated.add(1.0)
+    print(repeated.quantile(0.5))
+
+    cardinality := hll_mod.new()
+    &cardinality.add("apple")
+    clone_hll := cardinality.copy()
+    &clone_hll.add("banana")
+    &clone_hll.add("cherry")
+    &clone_hll.add("apple")
+    assert_eq(cardinality.count(), 1)
+    &cardinality.add("banana")
+    &cardinality.add("cherry")
+    print(cardinality)
+    frequencies := cms_mod.new()
+    &frequencies.add("hello")
+    &frequencies.add("world")
+    &frequencies.add("hello")
+    &frequencies.add("hello")
+    print(frequencies)
+    print(frequencies.count("hello"))
+    combined :: cms_mod.merge(frequencies, frequencies)
+    print(combined.count("hello"))
+    sample := rs_mod.new(3)
+    &sample.add("x")
+    &sample.add("y")
+    &sample.add("z")
+    print(sample)
+    print(sample.sample().len())
+    minimum := rs_mod.new(0)
+    &minimum.add("first")
+    &minimum.add("second")
+    print(minimum)
+    print(minimum.sample().len())
 }

@@ -462,7 +462,7 @@ pub const METHOD_DROP: &str = "drop"; // D-IGNORERET2 method; distinct from cons
 /// FOREIGN_* teaching-error words must NOT appear here — they are recognized only
 /// to emit a diagnostic, not valid syntax.
 pub const JET_KEYWORD_LIST: &[&str] = &[
-    // Core structure (S1, S18, D-VISDEFAULT2, S16, S50, U3)
+    // Core structure (S1, D-VIS-MODULE1, S16, S50, U3)
     KW_FN,
     KW_PUB,
     KW_PRIV,
@@ -470,13 +470,16 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_AS,
     KW_EXTERN,
     KW_MODULE,
+    KW_RUST,
     // Control flow (M1, S19, S23, M1/M2)
     KW_IF,
     KW_ELSE,
     KW_LOOP,
     KW_IN,
     KW_BREAK,
+    KW_NEXT,
     KW_RETURN,
+    KW_YIELD,
     KW_DEFER,
     // Types and declarations (M2, S30, S27, M2, S28, S55, S57, D-DIST1)
     KW_STRUCT,
@@ -489,7 +492,9 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_TAG,
     KW_EFFECT_DECL,
     KW_DERIVE,
-    // D-VERDICT-1308-1: `comptime` is retired teaching-only (E0374 → `@`).
+    // Preparation and compiler facts (D-PREP-SURFACE2, D-FACTDECL1).
+    KW_PREP,
+    KW_FACT,
     KW_DISTINCT,
     // Schema migrations (D-MIGRATE1 / D-MIGRATE2)
     KW_MIGRATION,
@@ -499,8 +504,8 @@ pub const JET_KEYWORD_LIST: &[&str] = &[
     KW_CHANGE,
     KW_VIA,
     // Ownership / borrow keywords (S10, M2). D-MEM1 retired KW_MUTATE/KW_MOVE
-    // in favor of the `&`/`^` sigils, and D-SHAPE-COPY1=A retired KW_COPY in
-    // favor of the `~` sigil — they live only as teaching errors (E0056/E0057/
+    // in favor of the `&`/`^` sigils, and D-SHAPE-COPY1=A retired KW_COPY (a
+    // copy is now the method `x.copy()`, D-COPY-WORD1=A) — they live only as teaching errors (E0056/E0057/
     // E0991) now, so none of them are in the keyword list. The retired
     // `ref[label]` field spelling (once taught via KW_STORED) is gone
     // outright with stored-reference fields (D-MEM1/S3) — `ref` is an
@@ -717,6 +722,7 @@ pub const IMPURE_BUILTINS: &[&str] = &[
 // old comments or docs; check Docs/spec/syntax-decisions.md for the live law
 // before trusting any comment that predates 2026-07-23.
 use super::{
+    KW_PREP, KW_NEXT, KW_FACT, KW_YIELD, KW_RUST,
     BUILTIN_INPUT, BUILTIN_PRINT, CTX_BLOCK, KW_ALIAS, KW_AS, KW_BREAK, KW_CONC_TASK, KW_DEFER,
     KW_DERIVE, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN, KW_FN, KW_FREEZE, KW_IF, KW_IMPL,
     KW_IMPURE, KW_IN, KW_IT, KW_JOB, KW_LOOP, KW_MARKER, KW_MODULE, KW_POLICY, KW_PRIV,

@@ -1,0 +1,17 @@
+use core.math as image_json_math
+
+#Test("image JSON maps non-finite values to the existing InvalidData error") {
+    numbers :: [Float]{image_json_math.nan(), image_json_math.infinity(), -image_json_math.infinity()}
+    loop number in numbers {
+        tree :: Dyn.Object([String: Dyn]{"nested": Dyn.Array([Dyn]{Dyn.Float(number)})})
+        if image_json_text(tree) == {
+            .Ok(_) -> panic("non-finite image JSON accepted")
+            .Err(error) -> {
+                if error == {
+                    .InvalidData(reason) -> assert_eq(reason, "JSON cannot encode a non-finite Float")
+                    else -> panic("image JSON must preserve InvalidData, not an IO error")
+                }
+            }
+        }
+    }
+}

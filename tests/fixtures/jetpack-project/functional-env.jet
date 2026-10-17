@@ -39,7 +39,7 @@ fn flatten_overlay(o: ^Overlay) -> [Package] {
     names :: o.packages
     source :: o.source
     loop name in names {
-        &out.push(pack_item(~source, ^name))
+        &out.push(pack_item(source.copy(), ^name))
     }
     return out
 }
@@ -96,11 +96,11 @@ fn prompt_json(label: ^String) -> JSON {
     m["label"] = JSON.Text(label)
     return JSON.Object(m)
 }
-pub fn shell() -> [JSON] {
+fn shell() -> [JSON] {
     pack :: Pack{sources: [nix_source("stable", "NixOS/nixpkgs/nixos-24.05@github"), nix_source("unstable", "NixOS/nixpkgs/nixpkgs-unstable@github"), core_source("mine", "./jet-pkgs")], overlays: [overlay("stable", ["ripgrep", "fd"]), overlay("unstable", ["neovim"]), overlay("mine", ["hello"])], prompt: "jetpack-fp"}
-    directives := source_directives(~pack.sources)
-    &directives.push(packages_json(~pack))
-    &directives.push(prompt_json(~pack.prompt))
+    directives := source_directives(pack.sources.copy())
+    &directives.push(packages_json(pack.copy()))
+    &directives.push(prompt_json(pack.prompt.copy()))
     return directives
 }
 fn run() {

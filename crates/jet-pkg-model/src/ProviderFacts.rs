@@ -4,12 +4,12 @@
 //! native document or hide a field it cannot prove.  This record is the one
 //! identity/provenance seam consumed by package profiles and semantic locks.
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use crate::JSON::{self};
 use crate::SHA256;
 use std::collections::BTreeMap;
 
-fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -51,25 +51,22 @@ impl ProviderFactValue {
         }
     }
 
-    fn from_json(value: &DataTree) -> Result<Self, String> {
+    fn from_json(value: &Dyn) -> Result<Self, String> {
         match value {
-            DataTree::Null => Ok(Self::Null),
-            DataTree::Bool(value) => Ok(Self::Bool(*value)),
-            DataTree::Int(value) => Ok(Self::Number(value.to_string())),
-            DataTree::Float(value) => Ok(Self::Number(value.to_string())),
-            DataTree::Number(value) => Ok(Self::Number(value.clone())),
-            DataTree::Text(value) | DataTree::TypedText(value) => Ok(Self::Text(value.clone())),
-            DataTree::Bytes(values) => values
-                .iter()
-                .map(|value| Ok(Self::Number(value.to_string())))
-                .collect::<Result<Vec<_>, String>>()
-                .map(Self::List),
-            DataTree::Array(values) => values
+            Dyn::Null => Ok(Self::Null),
+            Dyn::Bool(value) => Ok(Self::Bool(*value)),
+            Dyn::Int(value) => Ok(Self::Number(value.to_string())),
+            Dyn::Float(value) => Ok(Self::Number(value.to_string())),
+            Dyn::Number(value) => Ok(Self::Number(value.clone())),
+            Dyn::Text(value) => Ok(Self::Text(value.clone())),
+            Dyn::Bytes(values) => Ok(Self::Text(Dyn::bytes_text(values))),
+            Dyn::DateTime(value) => Ok(Self::Text(value.to_rfc3339())),
+            Dyn::Array(values) => values
                 .iter()
                 .map(Self::from_json)
                 .collect::<Result<Vec<_>, _>>()
                 .map(Self::List),
-            DataTree::Object(values) => values
+            Dyn::Object(values) => values
                 .iter()
                 .map(|(key, value)| Ok((key.clone(), Self::from_json(value)?)))
                 .collect::<Result<BTreeMap<_, _>, String>>()
@@ -77,7 +74,7 @@ impl ProviderFactValue {
         }
     }
 
-    pub fn from_json_value(value: &DataTree) -> Result<Self, String> {
+    pub fn from_json_value(value: &Dyn) -> Result<Self, String> {
         Self::from_json(value)
     }
 }
@@ -932,7 +929,7 @@ impl ProviderFacts {
         Self::from_json_value(&value)
     }
 
-    pub fn from_json_value(value: &DataTree) -> Result<ProviderFacts, String> {
+    pub fn from_json_value(value: &Dyn) -> Result<ProviderFacts, String> {
         let root = value.as_object()?;
         if field(root, "schema")
             .ok_or_else(|| "provider facts lack `schema`".to_string())?
@@ -949,14 +946,14 @@ impl ProviderFacts {
         };
         let selector = parse_selector_value(field(root, "selector"))?;
         let facts = match field(root, "facts") {
-            Some(DataTree::Object(values)) => values
+            Some(Dyn::Object(values)) => values
                 .iter()
                 .map(|(key, value)| Ok((key.clone(), ProviderFactValue::from_json(value)?)))
                 .collect::<Result<BTreeMap<_, _>, String>>()?,
             _ => return Err("provider facts `facts` is not an object".to_string()),
         };
         let provenance = match field(root, "provenance") {
-            Some(DataTree::Object(values)) => values
+            Some(Dyn::Object(values)) => values
                 .iter()
                 .map(|(key, value)| Ok((key.clone(), value.as_str()?.to_string())))
                 .collect::<Result<BTreeMap<_, _>, String>>()?,
@@ -1105,8 +1102,8 @@ fn selector_json(selector: &ProviderSelector) -> String {
     )
 }
 
-fn parse_selector_value(value: Option<&DataTree>) -> Result<ProviderSelector, String> {
-    let Some(DataTree::Object(object)) = value else {
+fn parse_selector_value(value: Option<&Dyn>) -> Result<ProviderSelector, String> {
+    let Some(Dyn::Object(object)) = value else {
         return Err("provider facts `selector` is not an object".to_string());
     };
     let string = |key: &str| {
@@ -1132,8 +1129,8 @@ fn parse_selector_value(value: Option<&DataTree>) -> Result<ProviderSelector, St
     })
 }
 
-fn parse_losses(value: Option<&DataTree>) -> Result<Vec<ProviderLoss>, String> {
-    let Some(DataTree::Array(values)) = value else {
+fn parse_losses(value: Option<&Dyn>) -> Result<Vec<ProviderLoss>, String> {
+    let Some(Dyn::Array(values)) = value else {
         return Err("provider facts `losses` is not an array".to_string());
     };
     values
@@ -1155,8 +1152,8 @@ fn parse_losses(value: Option<&DataTree>) -> Result<Vec<ProviderLoss>, String> {
         .collect()
 }
 
-fn parse_conflicts(value: Option<&DataTree>) -> Result<Vec<ProviderConflict>, String> {
-    let Some(DataTree::Array(values)) = value else {
+fn parse_conflicts(value: Option<&Dyn>) -> Result<Vec<ProviderConflict>, String> {
+    let Some(Dyn::Array(values)) = value else {
         return Err("provider facts `conflicts` is not an array".to_string());
     };
     values

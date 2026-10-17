@@ -2,8 +2,11 @@
 // The tail store and context frames are populated by sema_check_statements;
 // this module only reads those existing frames and the source AST.
 use jet_foundation.[
+    EnumLitArg,
     Expr,
     LValue,
+    Pattern,
+    PatSlot,
     Stmt,
 ]
 
@@ -12,28 +15,28 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
         .Ident(candidate, _) -> return candidate == name
         .Call(call) -> {
             if call.name == name -> return true
-            loop argument in call.args {
-                if sema_ownership_last_use_expr(argument.expr, name) -> return true
+            loop index in 0..<call.args.len() {
+                if sema_ownership_last_use_expr(call.args[index].expr, name) -> return true
             }
         }
         .CallValue(callee, args, _) -> {
             if sema_ownership_last_use_expr(callee, name) -> return true
-            loop argument in args {
-                if sema_ownership_last_use_expr(argument.expr, name) -> return true
+            loop index in 0..<args.len() {
+                if sema_ownership_last_use_expr(args[index].expr, name) -> return true
             }
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_ownership_last_use_expr(receiver, name) -> return true
-            loop argument in args {
-                if sema_ownership_last_use_expr(argument.expr, name) -> return true
+            loop index in 0..<args.len() {
+                if sema_ownership_last_use_expr(args[index].expr, name) -> return true
             }
         }
         .Unary(_, operand, _) | .Deref(operand, _) | .RawOf(operand, _) | .Copy(operand, _) | .Place(operand, _, _) | .Field(operand, _, _) | .OptField(operand, _, _, _, _) | .Tainted(operand, _, _) | .Present(operand, _) | .Paren(operand, _) | .Spread(operand, _) -> return sema_ownership_last_use_expr(operand, name)
         .PtrFromAddr(_, _, _, addr, _) -> return sema_ownership_last_use_expr(addr, name)
         .Binary(_, left, right, _) -> return sema_ownership_last_use_expr(left, name) || sema_ownership_last_use_expr(right, name)
         .CompareChain(operands, _, _, _) -> {
-            loop operand in operands {
-                if sema_ownership_last_use_expr(operand, name) -> return true
+            loop index in 0..<operands.len() {
+                if sema_ownership_last_use_expr(operands[index], name) -> return true
             }
         }
         .Try(value, _, _, context) -> {
@@ -48,57 +51,42 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
         }
         .Range(start, end, _, _) -> return sema_ownership_last_use_expr(start, name) || sema_ownership_last_use_expr(end, name)
         .ListLit(elements, _) -> {
-            loop element in elements {
-                if sema_ownership_last_use_expr(element, name) -> return true
+            loop index in 0..<elements.len() {
+                if sema_ownership_last_use_expr(elements[index], name) -> return true
             }
         }
         .MapLit(entries, _) -> {
-            loop entry in entries {
-                if sema_ownership_last_use_expr(entry.key, name) || sema_ownership_last_use_expr(entry.value, name) -> return true
+            loop index in 0..<entries.len() {
+                if sema_ownership_last_use_expr(entries[index].key, name) || sema_ownership_last_use_expr(entries[index].value, name) -> return true
             }
         }
         .TupleLit(fields, _, _) -> {
-            loop field in fields {
-                if sema_ownership_last_use_expr(field.value, name) -> return true
+            loop index in 0..<fields.len() {
+                if sema_ownership_last_use_expr(fields[index].value, name) -> return true
             }
         }
         .StructLit(_, _, _, _, fields, _, _) -> {
-            loop field in fields {
-                if sema_ownership_last_use_expr(field.value, name) -> return true
+            loop index in 0..<fields.len() {
+                if sema_ownership_last_use_expr(fields[index].value, name) -> return true
             }
         }
         .TypedLit(_, body, _) -> {
             if body == {
-                .Fields(fields) -> loop field in fields { if sema_ownership_last_use_expr(field.value, name) -> return true }
-                .Elements(elements) -> loop element in elements { if sema_ownership_last_use_expr(element, name) -> return true }
-                .Entries(entries) -> loop entry in entries { if sema_ownership_last_use_expr(entry.key, name) || sema_ownership_last_use_expr(entry.value, name) -> return true }
+                .Fields(fields) -> loop index in 0..<fields.len() { if sema_ownership_last_use_expr(fields[index].value, name) -> return true }
+                .Elements(elements) -> loop index in 0..<elements.len() { if sema_ownership_last_use_expr(elements[index], name) -> return true }
+                .Entries(entries) -> loop index in 0..<entries.len() { if sema_ownership_last_use_expr(entries[index].key, name) || sema_ownership_last_use_expr(entries[index].value, name) -> return true }
                 .Value(value) -> return sema_ownership_last_use_expr(value, name)
                 else -> {}
             }
         }
         .EnumLit(_, _, _, args, _, _) -> {
-            loop argument in args {
-                if argument == {
-                    .Positional(value) -> if sema_ownership_last_use_expr(value, name) -> return true
-                    .Named(_, value) -> if sema_ownership_last_use_expr(value, name) -> return true
-                }
+            loop index in 0..<args.len() {
+                if sema_ownership_last_use_enum_arg(args[index], name) -> return true
             }
         }
         .PatternTest(subject, pattern, _) -> {
             if sema_ownership_last_use_expr(subject, name) -> return true
-            if pattern == {
-                .Struct(fields, _, _) -> {
-                    loop field in fields {
-                        if field == {
-                            .Value(_, _, value) -> {
-                                if sema_ownership_last_use_expr(value, name) -> return true
-                            }
-                            else -> {}
-                        }
-                    }
-                }
-                else -> {}
-            }
+            if sema_ownership_last_use_pattern(pattern, name) -> return true
         }
         .Ok(value, _) | .Err(value, _) -> return sema_ownership_last_use_expr(value, name)
         .OrFallback(value, fallback, _, _) -> {
@@ -127,18 +115,22 @@ fn sema_ownership_last_use_expr(expr: Expr, name: String) -> Bool {
             }
         }
         .Str(parts, _) -> {
-            loop part in parts {
-                if part == {
-                    .Interp(value, _) -> {
-                        if sema_ownership_last_use_expr(value, name) -> return true
-                    }
-                    else -> {}
+            loop index in 0..<parts.len() {
+                if parts[index] == .Interp(value, _) {
+                    if sema_ownership_last_use_expr(value, name) -> return true
                 }
             }
         }
         else -> {}
     }
     false
+}
+
+fn sema_ownership_last_use_enum_arg(argument: EnumLitArg, name: String) -> Bool {
+    if argument == {
+        .Positional(value) -> return sema_ownership_last_use_expr(value, name)
+        .Named(_, value) -> return sema_ownership_last_use_expr(value, name)
+    }
 }
 
 fn sema_ownership_last_use_lvalue(target: LValue, name: String) -> Bool {
@@ -176,8 +168,10 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
         }
         .Switch(subject, arms, else_body, _) | .ComptimeSwitch(subject, arms, else_body, _) -> {
             if sema_ownership_last_use_expr(subject, name) -> return true
-            loop arm in arms {
-                if sema_ownership_last_use_expr(arm.cond, name) || sema_ownership_last_use_statements(arm.body, name) -> return true
+            // Arms, fields and statements are read in place by index: a loop
+            // element binding copied each one, its nested bodies included.
+            loop arm_index in 0..<arms.len() {
+                if sema_ownership_last_use_expr(arms[arm_index].cond, name) || sema_ownership_last_use_statements(arms[arm_index].body, name) -> return true
             }
             if else_body != None -> return sema_ownership_last_use_statements(else_body, name)
         }
@@ -198,7 +192,7 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
             if else_body != None -> return sema_ownership_last_use_statements(else_body, name)
         }
         .ContextBlock(fields, body, _) -> {
-            loop field in fields { if sema_ownership_last_use_expr(field.value, name) -> return true }
+            loop field_index in 0..<fields.len() { if sema_ownership_last_use_expr(fields[field_index].value, name) -> return true }
             return sema_ownership_last_use_statements(body, name)
         }
         .ScopeMember(_, _, _, _, body, _, _, _) -> return sema_ownership_last_use_statements(body, name)
@@ -208,8 +202,8 @@ fn sema_ownership_last_use_statement(statement: Stmt, name: String) -> Bool {
 }
 
 fn sema_ownership_last_use_statements(statements: [Stmt], name: String) -> Bool {
-    loop statement in statements {
-        if sema_ownership_last_use_statement(statement, name) -> return true
+    loop index in 0..<statements.len() {
+        if sema_ownership_last_use_statement(statements[index], name) -> return true
     }
     false
 }
@@ -218,7 +212,7 @@ fn sema_ownership_last_use_statements(statements: [Stmt], name: String) -> Bool 
 // answer: some enclosing tail frame reads `name` at or after its start). The
 // last reading statement of each body is computed once per name and reused,
 // instead of rewalking every remaining statement on each query.
-pub fn sema_ownership_name_live_after(name: String, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
+fn sema_ownership_name_live_after(name: String, tail_store: &SemaStatementTailStore, context: &SemaCheckContext) -> Bool {
     frame_index := context.lambda_statement_tails.len() - 1
     loop frame_index >= 0 {
         body_id :: context.lambda_statement_tails[frame_index].body_id
@@ -238,4 +232,44 @@ fn sema_ownership_tail_last_read(tail_store: &SemaStatementTailStore, body_id: I
     }
     tail_store.bodies[body_id].last_reads[name] = index
     index
+}
+
+fn sema_ownership_last_use_pattern(pattern: Pattern, name: String) -> Bool Never! {
+    if pattern == {
+        .Struct(fields, _, _, _) -> loop field in fields {
+            if field == {
+                // Braces keep the table's fallback outside the nested `if`.
+                .Value(_, _, value) -> {
+                    if sema_ownership_last_use_expr(value, name) -> return true
+                }
+                .Nested(_, _, nested) -> {
+                    if sema_ownership_last_use_pattern(nested, name) -> return true
+                }
+                else -> {}
+            }
+        }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> loop slot in slots {
+            if sema_ownership_last_use_slot(slot, name) -> return true
+        }
+        .Map(entries, _, _) -> loop entry in entries {
+            if sema_ownership_last_use_expr(entry.key, name) || sema_ownership_last_use_slot(entry.slot, name) -> return true
+        }
+        .Or(alternatives, _) -> loop alternative in alternatives {
+            if sema_ownership_last_use_pattern(alternative, name) -> return true
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> return sema_ownership_last_use_pattern(nested, name)
+        }
+        else -> {}
+    }
+    false
+}
+
+fn sema_ownership_last_use_slot(slot: PatSlot, name: String) -> Bool Never! {
+    if slot == {
+        .Value(value) -> sema_ownership_last_use_expr(value, name)
+        .Nested(pattern) -> sema_ownership_last_use_pattern(pattern, name)
+        .Named(_, _, inner) -> sema_ownership_last_use_slot(inner, name)
+        else -> false
+    }
 }

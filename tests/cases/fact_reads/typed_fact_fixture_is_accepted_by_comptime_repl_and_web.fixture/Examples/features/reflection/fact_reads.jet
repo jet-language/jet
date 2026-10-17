@@ -1,0 +1,86 @@
+// D-FACT-READ1=A: every compiler-held plane uses one typed `@` read.
+#Numeric
+Severity :: distinct Int(0..10)
+
+#UnitFamily(Length, dimension) { meter }
+
+tag Audited { deny: [Net] }
+
+struct PlaneFacts {
+    approximate: F32
+    shape: [Int#4]
+    classified: #Audited Int
+    callable: fn(value: Int, *, label: Bool) -> Int
+}
+
+struct Order {
+    state { Draft, Confirmed }
+
+    id: Int
+}
+
+fn send_report() {}
+
+fn sendability_for(cell: Cell<Int>) -> Bool {
+    known :: prep { cell.$sendability.known }
+    return known
+}
+
+RANGE :: prep { Severity.$range }
+
+EFFECTS :: prep { send_report.$effects }
+
+STATES :: prep { Order.$states }
+
+DIMENSION :: prep { Meter.$dimension }
+
+MEASURE :: prep { PlaneFacts.$measure }
+
+EXACTNESS :: prep { PlaneFacts.$exactness }
+
+CLASSIFICATION :: prep { PlaneFacts.$classification }
+
+OBLIGATION :: prep { PlaneFacts.$obligation }
+
+PACKAGE_NAME :: prep { $package.name }
+
+PACKAGE_VERSION :: prep { $package.version }
+
+OS :: prep { $build.os }
+
+PROFILE :: prep { $build.profile }
+
+SENDABILITY :: prep { Severity.$sendability }
+
+MOVEDNESS :: prep { Severity.$movedness }
+
+ATTRIBUTION :: prep { report.$attribution }
+
+ORIGIN :: prep { Severity.$origin }
+
+VIEW_PROVENANCE :: prep { send_report.$view_provenance }
+
+UNIT_SCALE :: prep { Meter.$unit_scale_provenance }
+
+MATURITY :: prep { send_report.$maturity }
+
+fn run() {
+    print(RANGE.start)
+    print(EFFECTS.values.len())
+    print(STATES[0].name)
+    print(DIMENSION.axes.len())
+    print(MEASURE.kind == "length")
+    print(EXACTNESS.kind == .Approximate)
+    print(CLASSIFICATION.name)
+    print(OBLIGATION.param_contract[0].zone == .Either)
+    print(PACKAGE_NAME)
+    print(PACKAGE_VERSION)
+    print(PROFILE)
+    print(SENDABILITY.known)
+    print(MOVEDNESS.known)
+    print(ATTRIBUTION.source)
+    print(ORIGIN.tracked)
+    print(VIEW_PROVENANCE.mutable)
+    cell :: Cell.new(1)
+    print(sendability_for(cell))
+}

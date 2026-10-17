@@ -1,0 +1,21 @@
+# Port of tests/lsp.rs:4871-4913; source bytes copied verbatim.
+# PENDING-GRAMMAR: generic framed sessions in TestW3b batch three; no reference snapshot needed for original predicates.
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_inlay_hints_include_scattered_method_breadcrumbs/0.json
+recv lsp
+stdout: ~ "inlayHintProvider" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_inlay_hints_include_scattered_method_breadcrumbs/1.json
+send lsp: messages/lsp_inlay_hints_include_scattered_method_breadcrumbs/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_inlay_hints_include_scattered_method_breadcrumbs/3.json
+recv lsp
+stdout: ~ "+ fn size() -[]> Int" # original predicate; other response fields contain variable metadata/paths
+stdout: ~ "+ fn render() -[]> String" # original predicate; other response fields contain variable metadata/paths
+send lsp: messages/lsp_inlay_hints_include_scattered_method_breadcrumbs/4.json
+recv lsp
+stdout: ~ "result" # original predicate; other response fields contain variable metadata/paths
+close lsp
+# Original transcript only waited; it did not assert process status.
+exit: any

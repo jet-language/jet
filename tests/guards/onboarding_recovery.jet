@@ -1,0 +1,19 @@
+use core.files as onboarding_files
+
+// DATA-document subclaims of tests/onboarding_recovery.rs:280-312.
+fn s2_onboarding_test_recovery_documents() {
+    guide :: onboarding_files.read("Docs/spec/guides/first-hour.md") ?? panic("read first-hour guide")
+    exercises :: onboarding_files.read("Docs/spec/guides/diagnostic-recovery.md") ?? panic("read diagnostic recovery")
+    guide_phrases :: [String]{"x86_64 Linux and x86_64 macOS", "platform-specific project track", "Installation fails", "repeat the install command", "Do not continue with a partial install", "The first install is offline", "reconnect and repeat the install", "The host is unsupported"}
+    loop phrase in guide_phrases {
+        assert(guide.contains(phrase), "first-hour recovery lost {phrase}")
+    }
+    exercise_phrases :: [String]{"uname -s", "uname -m", "nix --version", "Recover install and host failures", "If the install fails because the network is offline", "If the install succeeds but `jet` is not found", "shell and run `jet version`"}
+    loop phrase in exercise_phrases {
+        assert(exercises.contains(phrase), "diagnostic recovery lost {phrase}")
+    }
+}
+
+#Test("install_host_and_offline_failures_have_recovery_documents") {
+    s2_onboarding_test_recovery_documents()
+}

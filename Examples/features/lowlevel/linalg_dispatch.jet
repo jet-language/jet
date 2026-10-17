@@ -1,0 +1,26 @@
+// Every binary operator of the closed math family dispatches to its own
+// operation: vector add and sub on Vec2/Vec3/Vec4, Vec3 scalar mul, SIMD lane sub
+// and div, and the Mat3 * Vec3 and Mat4 * Vec4 transforms.
+fn run() {
+    p :: Vec2(1.0, 2.0)
+    q :: Vec2(3.0, 5.0)
+    print(Vec2{p + q}.to_array())
+    print(Vec2{q - p}.to_array())
+    a :: Vec3(1.0, 2.0, 3.0)
+    b :: Vec3(4.0, 5.0, 6.0)
+    print(Vec3{b - a}.to_array())
+    print(Vec3{a * 2.0}.to_array())
+    u :: Vec4(1.0, 2.0, 3.0, 4.0)
+    v :: Vec4(0.5, 0.5, 0.5, 0.5)
+    print(Vec4{u + v}.to_array())
+    print(Vec4{u - v}.to_array())
+    lanes :: F32x4(10.0, 20.0, 30.0, 40.0)
+    step :: F32x4(2.0, 4.0, 5.0, 8.0)
+    print(F32x4{lanes - step}.to_array())
+    print(F32x4{lanes / step}.to_array())
+    rotate :: Mat3(0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    print(Vec3{rotate * a}.to_array())
+    // Column-major translation by (10, 20, 30).
+    translate :: Mat4(1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 10.0, 20.0, 30.0, 1.0)
+    print(Vec4{translate * Vec4(1.0, 2.0, 3.0, 1.0)}.to_array())
+}

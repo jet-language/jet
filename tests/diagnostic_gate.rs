@@ -9,7 +9,7 @@ use std::process::{Command, Output};
 
 mod common;
 
-use jet::Interpreter::{dev_iteration, run_jit_once, RunOutcome};
+use jet::Interpreter::RunOutcome;
 
 fn codes(diags: &[jet::Diagnostics::Diagnostic]) -> BTreeSet<String> {
     diags.iter().map(|d| d.code.clone()).collect()
@@ -62,7 +62,7 @@ fn run_cli(project: &common::Scratch, cache: &str, args: &[&str]) -> Output {
         .args(args)
         .current_dir(&project.path)
         .env(
-            "JET_RUN_CACHE_DIR",
+            "JET_STORE_DIR",
             project.path.join(format!("cache/{cache}/run")),
         )
         .env(
@@ -112,9 +112,8 @@ fn warnings_never_choose_execution_exit_code() {
         ),
         ("l0202", L0202_SOURCE, "L0202", "0\n"),
     ];
-    let modes: [(&str, &[&str]); 4] = [
+    let modes: [(&str, &[&str]); 3] = [
         ("default", &["run", "main.jet"]),
-        ("interpret", &["run", "--interpret", "main.jet"]),
         ("release", &["run", "--release", "main.jet"]),
         ("dev", &["dev", "main.jet", "--watch=off"]),
     ];
@@ -204,7 +203,7 @@ fn build_and_run_share_one_diagnostic_gate() {
         codes(&build_err)
     );
 
-    match run_jit_once(path) {
+    match common::dev_run(path, false, false) {
         RunOutcome::Problems(run_err) => {
             assert_eq!(
                 codes(&build_err),
@@ -320,7 +319,7 @@ fn dev_path_reports_parse_teaching() {
     let file = dir.join("pure.jet");
     fs::write(&file, PURE_TEACHING).unwrap();
     let path = file.to_str().unwrap();
-    match dev_iteration(path, false, true) {
+    match crate::common::dev_run(path, false, true) {
         RunOutcome::Problems(diags) => {
             assert!(
                 diags.iter().any(|d| d.code == "E0927"),

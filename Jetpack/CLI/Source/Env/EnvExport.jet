@@ -8,7 +8,8 @@
 
 // Rust `print!`: stdout bytes with no added newline.
 fn cli_print_raw(text: String) Never! -[IO]> {
-    term.stdout().write(text).drop("a closed stdout cannot take the shell script")
+    stdout_handle := term.stdout()
+    &stdout_handle.write(text).drop("a closed stdout cannot take the shell script")
 }
 
 // `jet env hook <shell>` — pure text: installing the hook is a safe editor
@@ -94,7 +95,7 @@ fn cli_nonempty_env(name: String) -[Env]> String? Never! {
 // callback returns, after keeping the previous activation.
 #Error
 struct EnvExportStop {
-    pub code: Int
+    code: Int
 }
 
 // Realize, trust, compose, and render the activation of `root`. Every
@@ -118,7 +119,7 @@ fn cli_env_export_activate(verification: &StoreVerification, cache: &WorkspaceDe
     sensitive :: trust_is_typed_environment(plan.environment) || trust_is_trust_sensitive_ext(plan.refs, plan.secrets.len() > 0)
     trusted :: !sensitive || trust_is_environment_trusted(store, root, hash, plan.refs, plan.secrets, plan.environment)
     if !trusted {
-        if term.stdin().is_terminal() || parsed.flags.trust {
+        if term.stdin().is_tty() || parsed.flags.trust {
             if trust_gate_with_environment(theme, store, root, plan.refs, plan.table, plan.secrets, plan.environment, parsed.flags.trust) != None -> return Err(keep)
         } else {
             theme.detail("{ENV_FILE} here is not trusted — run `jet env` to approve it once")

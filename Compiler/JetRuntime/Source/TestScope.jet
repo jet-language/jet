@@ -1,0 +1,378 @@
+// Rust: crates/jet-codegen/src/Prelude/Core.rs:678-860.
+// One TestCapture TLS136 owns all these cells; never a second key or TCB slot.
+// expect rows=[scope, expected?, expectedMessage?, stopCode?, stopMessage?],
+// completed=[scope, ownedCode], timeouts=[scope, seconds, nanos, limit, depth].
+// Strings in rows are owned E4; arguments are borrowed; take transfers ownership.
+
+fn test_scope_clone(text: I64) -> I64 {
+    if (text == I64{0}) -> I64{0} else -> test_text_clone(text)
+}
+
+fn test_scope_push(list: I64, width: I64) -> I64 {
+    count :: trap_word(list)
+    thread_words_grow(list, count + width)
+    row :: trap_word(list + I64{16}) + count * I64{8}
+    thread_zero(row, width * I64{8})
+    trap_store(list, count + width)
+    row
+}
+
+// Ordered Vec::remove, not swap_remove: reverse searches must preserve order.
+fn test_scope_remove(list: I64, index: I64, width: I64) {
+    count :: trap_word(list)
+    data :: trap_word(list + I64{16})
+    at := index
+    loop at < count - width {
+        trap_store(data + at * I64{8}, trap_word(data + (at + width) * I64{8}))
+        at += I64{1}
+    }
+    trap_store(list, count - width)
+}
+
+fn test_scope_frame_drop(row: I64) {
+    at := I64{8}
+    loop at < (I64{40}) {
+        test_text_drop(trap_word(row + at))
+        at += I64{8}
+    }
+}
+
+fn test_scope_list_free(list: I64) {
+    capacity :: trap_word(list + I64{8})
+    if (capacity != I64{0}) -> jet_rt_free(trap_word(list + I64{16}), capacity * I64{8}, I64{8})
+}
+
+fn test_scope_expect_clear(state: I64) {
+    list :: state + I64{32}
+    count :: trap_word(list)
+    data :: trap_word(list + I64{16})
+    at := I64{0}
+    loop at < count {
+        test_scope_frame_drop(data + at * I64{8})
+        at += I64{5}
+    }
+    trap_store(list, I64{0})
+    completed :: state + I64{56}
+    at = I64{0}
+    loop at < trap_word(completed) {
+        test_text_drop(trap_word(trap_word(completed + I64{16}) + (at + I64{1}) * I64{8}))
+        at += I64{2}
+    }
+    trap_store(completed, I64{0})
+    trap_store(state + I64{80}, I64{0})
+}
+
+fn test_scope_failure_clear(state: I64) {
+    test_text_drop(trap_word(state + I64{120}))
+    test_text_drop(trap_word(state + I64{128}))
+    trap_store(state + I64{120}, I64{0})
+    trap_store(state + I64{128}, I64{0})
+}
+
+fn test_scope_state_drop(state: I64) {
+    test_scope_expect_clear(state)
+    test_scope_failure_clear(state)
+    test_scope_list_free(state + I64{32})
+    test_scope_list_free(state + I64{56})
+    test_scope_list_free(state + I64{88})
+}
+
+// Rust Core.rs:701-715: replacement drops the previous pair; take is atomic
+// with respect to this thread, writes both output words only when Some.
+#Export(c) fn jet_rt_testing_record_failure(message: I64, detail: I64) {
+    state :: test_state_ensure()
+    owned_message :: test_text_clone(message)
+    owned_detail :: test_text_clone(detail)
+    test_scope_failure_clear(state)
+    trap_store(state + I64{120}, owned_message)
+    trap_store(state + I64{128}, owned_detail)
+}
+
+#Export(c) fn jet_rt_testing_take_failure(output: I64) -> Bool {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return false
+    message :: trap_word(state + I64{120})
+    if (message == I64{0}) -> return false
+    trap_store(output, message)
+    trap_store(output + I64{8}, trap_word(state + I64{128}))
+    trap_store(state + I64{120}, I64{0})
+    trap_store(state + I64{128}, I64{0})
+    true
+}
+
+#Export(c) fn jet_rt_testing_clear_failure() {
+    state :: test_capture_state()
+    if (state != I64{0}) -> test_scope_failure_clear(state)
+}
+
+// Rust Core.rs:718-727.
+#Export(c) fn jet_rt_test_expect_fail_enter_scope(scope: I64, expected: I64, expected_message: I64) {
+    state :: test_state_ensure()
+    row :: test_scope_push(state + I64{32}, I64{5})
+    trap_store(row, scope)
+    trap_store(row + I64{8}, test_scope_clone(expected))
+    trap_store(row + I64{16}, test_scope_clone(expected_message))
+}
+
+// Rust Core.rs:729-752. Null denotes None; a live but unstopped frame stays.
+#Export(c) fn jet_rt_test_expect_fail_leave_scope(scope: I64) -> I64 {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return I64{0}
+    completed :: state + I64{56}
+    at := trap_word(completed)
+    loop at > (I64{0}) {
+        at -= I64{2}
+        row :: trap_word(completed + I64{16}) + at * I64{8}
+        if (trap_word(row) == scope) {
+            code :: trap_word(row + I64{8})
+            test_scope_remove(completed, at, I64{2})
+            return code
+        }
+    }
+    frames :: state + I64{32}
+    at = trap_word(frames)
+    loop at > (I64{0}) {
+        at -= I64{5}
+        row :: trap_word(frames + I64{16}) + at * I64{8}
+        if (trap_word(row) == scope) {
+            code :: trap_word(row + I64{24})
+            if (code == I64{0}) -> return I64{0}
+            trap_store(row + I64{24}, I64{0})
+            test_scope_frame_drop(row)
+            test_scope_remove(frames, at, I64{5})
+            return code
+        }
+    }
+    I64{0}
+}
+
+// Rust Core.rs:754-762: first stop wins on EVERY active expectation frame.
+#Export(c) fn jet_rt_test_record_stop(code: I64, message: I64) {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return
+    frames :: state + I64{32}
+    at := I64{0}
+    loop at < trap_word(frames) {
+        row :: trap_word(frames + I64{16}) + at * I64{8}
+        if (trap_word(row + I64{24}) == I64{0}) {
+            trap_store(row + I64{24}, test_text_clone(code))
+            trap_store(row + I64{32}, test_text_clone(message))
+        }
+        at += I64{5}
+    }
+}
+
+fn test_scope_stopped_index(state: I64) -> I64 {
+    frames :: state + I64{32}
+    at := trap_word(frames)
+    loop at > (I64{0}) {
+        at -= I64{5}
+        row :: trap_word(frames + I64{16}) + at * I64{8}
+        if (trap_word(row + I64{24}) != I64{0} && !test_scope_ordinary(trap_word(row + I64{8}))) -> return at
+    }
+    I64{-1}
+}
+
+// Rust Core.rs:763-773: scope zero is valid; Bool distinguishes it from None.
+#Export(c) fn jet_rt_test_expect_fail_stopped_scope(output: I64) -> Bool {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return false
+    if (trap_word(state + I64{80}) != I64{0}) -> return false
+    at :: test_scope_stopped_index(state)
+    if (at < I64{0}) -> return false
+    trap_store(output, trap_word(trap_word(state + I64{48}) + at * I64{8}))
+    true
+}
+
+fn test_scope_quoted(builder: I64, text: I64) {
+    quoted :: jet_rt_require_debug_string(text)
+    jet_rt_string_builder_push(builder, quoted)
+    test_text_drop(quoted)
+}
+
+// Rust Outcome.rs:2502-2524. Raw stop message substring, never rendered text.
+#Export(c) fn jet_rt_test_expect_fail_error(expected: I64, expected_message: I64, code: I64, message: I64) -> I64 {
+    stopped :: code != I64{0}
+    if stopped {
+        code_matches :: expected == I64{0} || jet_rt_string_eq(expected, code)
+        message_matches :: expected_message == I64{0} || jet_string_contains(message, expected_message)
+        if code_matches && message_matches -> return I64{0}
+    }
+    result :: jet_rt_string_builder_new()
+    test_scope_msg_expected(result)
+    if (expected != I64{0}) {
+        if stopped -> test_scope_msg_stop_code(result) else -> test_scope_msg_region_stop(result)
+        jet_rt_string_builder_push(result, expected)
+        if (expected_message != I64{0}) -> test_scope_msg_code_message(result)
+    } else {
+        if (expected_message != I64{0}) -> test_scope_msg_stop_message(result)
+        else -> test_scope_msg_region_fail(result)
+    }
+    if (expected_message != I64{0}) -> test_scope_quoted(result, expected_message)
+    if stopped {
+        test_scope_msg_got(result)
+        jet_rt_string_builder_push(result, code)
+        test_scope_msg_colon(result)
+        jet_rt_string_builder_push(result, message)
+    } else {
+        test_scope_msg_passed(result)
+    }
+    result
+}
+
+fn test_scope_fail(message: I64) {
+    jet_rt_panic_message(trap_word(message), trap_word(message + I64{8}))
+    test_text_drop(message)
+}
+
+// Rust Core.rs:775-806. Remove caught+children, clear parent stops, retain
+// timeouts entered outside the caught expectation, then enqueue completion.
+#Export(c) fn jet_rt_test_expect_fail_catch_scope(output: I64) -> Bool {
+    test_scope_catch(output, false)
+}
+
+fn test_scope_catch(output: I64, native: Bool) -> Bool {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return false
+    index :: test_scope_stopped_index(state)
+    if (index < I64{0}) -> return false
+    frames :: state + I64{32}
+    data :: trap_word(frames + I64{16})
+    row :: data + index * I64{8}
+    scope :: trap_word(row)
+    code :: trap_word(row + I64{24})
+    error :: jet_rt_test_expect_fail_error(trap_word(row + I64{8}), trap_word(row + I64{16}), code, trap_word(row + I64{32}))
+    trap_store(row + I64{24}, I64{0})
+    at := index
+    loop at < trap_word(frames) {
+        test_scope_frame_drop(data + at * I64{8})
+        at += I64{5}
+    }
+    trap_store(frames, index)
+    at = I64{0}
+    loop at < index {
+        parent :: data + at * I64{8}
+        test_text_drop(trap_word(parent + I64{24}))
+        test_text_drop(trap_word(parent + I64{32}))
+        trap_store(parent + I64{24}, I64{0})
+        trap_store(parent + I64{32}, I64{0})
+        at += I64{5}
+    }
+    if (error != I64{0}) {
+        test_text_drop(code)
+        trap_store(state + I64{80}, I64{1})
+        // A mismatch replaces the original stop, not first-stop-wins rejection.
+        if native -> scheduler_control_discard_stop(scheduler_control_current())
+        test_scope_fail(error)
+        return false
+    }
+    timeouts :: state + I64{88}
+    at = I64{0}
+    loop at < trap_word(timeouts) {
+        timer :: trap_word(timeouts + I64{16}) + at * I64{8}
+        if (trap_word(timer + I64{32}) > index /% I64{5}) -> test_scope_remove(timeouts, at, I64{5})
+        else -> at += I64{5}
+    }
+    completed :: test_scope_push(state + I64{56}, I64{2})
+    trap_store(completed, scope)
+    trap_store(completed + I64{8}, code)
+    trap_store(output, scope)
+    true
+}
+
+// Rust Core.rs:808-818.
+#Export(c) fn jet_rt_test_expect_fail_abort() {
+    state :: test_capture_state()
+    if (state != I64{0}) -> test_scope_expect_clear(state)
+}
+
+#Export(c) fn jet_rt_test_expect_fail_unmet(expected: I64, expected_message: I64) {
+    state :: test_state_ensure()
+    trap_store(state + I64{80}, I64{1})
+    test_scope_fail(jet_rt_test_expect_fail_error(expected, expected_message, I64{0}, I64{0}))
+}
+
+// Rust Core.rs:820-837. std::Instant is HOST monotonic even inside World.
+// Store seconds/nanos, not absolute ns, so a long uptime cannot overflow.
+#Export(c) fn jet_rt_test_timeout_enter(scope: I64, limit_ns: I64) {
+    state :: test_state_ensure()
+    sample :: time_clock_read(I64{1})
+    seconds :: trap_word(sample)
+    nanos :: trap_word(sample + I64{8})
+    row :: test_scope_push(state + I64{88}, I64{5})
+    trap_store(row, scope)
+    trap_store(row + I64{8}, seconds)
+    trap_store(row + I64{16}, nanos)
+    trap_store(row + I64{24}, limit_ns)
+    trap_store(row + I64{32}, trap_word(state + I64{32}) /% I64{5})
+}
+
+#Export(c) fn jet_rt_test_timeout_leave(scope: I64, output: I64) -> Bool {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return false
+    list :: state + I64{88}
+    at := trap_word(list)
+    loop at > (I64{0}) {
+        at -= I64{5}
+        row :: trap_word(list + I64{16}) + at * I64{8}
+        if (trap_word(row) == scope) {
+            sample :: time_clock_read(I64{1})
+            seconds := trap_word(sample) - trap_word(row + I64{8})
+            nanos := trap_word(sample + I64{8}) - trap_word(row + I64{16})
+            if (nanos < I64{0}) {
+                seconds -= I64{1}
+                nanos += I64{1000000000}
+            }
+            elapsed := I64{0}
+            if (seconds >= I64{0}) {
+                if (seconds > I64{9223372036} || (seconds == I64{9223372036} && nanos > I64{854775807})) -> elapsed = I64{9223372036854775807}
+                else -> elapsed = seconds * I64{1000000000} + nanos
+            }
+            trap_store(output, elapsed)
+            trap_store(output + I64{8}, trap_word(row + I64{24}))
+            test_scope_remove(list, at, I64{5})
+            return true
+        }
+    }
+    false
+}
+
+// Rust Core.rs:839-860 / Outcome.rs:2527-2528.
+#Export(c) fn jet_rt_test_timeout_abort() {
+    state :: test_capture_state()
+    if (state != I64{0}) -> trap_store(state + I64{88}, I64{0})
+}
+
+#Export(c) fn jet_rt_test_timeout_message(elapsed_ns: I64, limit_ns: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    test_scope_msg_timeout(text)
+    rt_text_push_number(text, elapsed_ns)
+    test_scope_msg_timeout_limit(text)
+    rt_text_push_number(text, limit_ns)
+    test_scope_msg_ns(text)
+    text
+}
+
+#Export(c) fn jet_rt_test_timeout_failure(elapsed_ns: I64, limit_ns: I64) {
+    test_scope_fail(jet_rt_test_timeout_message(elapsed_ns, limit_ns))
+}
+
+#Export(c) fn jet_rt_test_skip_scope(whole_test: Bool) {
+    if whole_test {
+        state :: test_state_ensure()
+        trap_store(state + I64{112}, I64{1})
+    }
+}
+
+#Export(c) fn jet_rt_test_take_whole_skip() -> Bool {
+    state :: test_capture_state()
+    if (state == I64{0}) -> return false
+    result :: trap_word(state + I64{112}) != I64{0}
+    trap_store(state + I64{112}, I64{0})
+    result
+}
+
+#Export(c) fn jet_rt_test_skip_abort() {
+    state :: test_capture_state()
+    if (state != I64{0}) -> trap_store(state + I64{112}, I64{0})
+}

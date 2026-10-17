@@ -1,0 +1,203 @@
+// REPL source classification. Rust: jet-repl lib.rs 1591-1634, 1709-1788,
+// 1839-1999. This adapter feeds the canonical parser; it owns no interpreter.
+use jet_foundation.[Diagnostic, Item, ParseResult, Stmt]
+use jet_lexer.lex
+use jet_parser.[parse_generated_source, parse_source]
+
+enum ReplInput {
+    Meta(command: String, argument: String?)
+    Stmts(body: [Stmt], suppress_echo: Bool, check_source: String)
+    Item(source: String)
+    Import(source: String)
+    Empty
+    Reject(feature: String)
+}
+
+enum ReplInputParse {
+    Accepted(input: ReplInput)
+    Rejected(diagnostics: [Diagnostic])
+}
+
+fn repl_skip_leading_comments(source: String) -> String Never! {
+    text := source
+    loop {
+        text = text.trim_start()
+        if !text.starts_with("//") && !text.starts_with("/*") -> return text
+        bytes :: text.bytes()
+        if text.starts_with("//") {
+            newline := Int?{None}
+            loop index in 0..<text.len() {
+                if bytes[index] == (U8{10}) {
+                    newline = Val(index)
+                    break
+                }
+            }
+            text = if newline == .Val(index) -> text.slice(index + 1..<text.len()) else -> ""
+            next
+        }
+        index := 2
+        depth := 1
+        loop depth > 0 {
+            if index >= text.len() -> return ""
+            if index + 1 < text.len() && bytes[index] == 47 && bytes[index + 1] == 42 {
+                depth += 1
+                index += 2
+            } else if index + 1 < text.len() && bytes[index] == 42 && bytes[index + 1] == 47 {
+                depth -= 1
+                index += 2
+            } else { index += 1 }
+        }
+        text = text.slice(index..<text.len())
+    }
+}
+
+fn repl_looks_like_item(source: String) -> Bool Never! {
+    text := repl_skip_leading_comments(source)
+    if text.starts_with("pub") -> text = text.slice(3..<text.len()).trim_start()
+    if text.starts_with("pure") -> text = text.slice(4..<text.len()).trim_start()
+    text.starts_with("fn ") || text.starts_with("fn(") || text.starts_with("struct ") || text.starts_with("enum ") || text.starts_with("trait ") || text.starts_with("impl ") || text.starts_with("const ") || text.starts_with("module ")
+}
+
+fn repl_looks_like_import(source: String) -> Bool Never! {
+    text := source.trim_start()
+    if text.starts_with("pub") -> text = text.slice(3..<text.len()).trim_start()
+    text.starts_with("use ") || text == "use"
+}
+
+fn repl_import_path(source: String) -> String? Never! {
+    text := source
+    if text.starts_with("pub ") -> text = text.slice(4..<text.len())
+    if !text.starts_with("use ") -> return None
+    rest :: text.slice(4..<text.len()).trim_start()
+    end := rest.len()
+    bytes :: rest.bytes()
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if byte == 9 || byte == 10 || byte == 11 || byte == 12 || byte == 13 || byte == 32 {
+            end = index
+            break
+        }
+    }
+    if end == 0 -> return None
+    loop end > 0 && bytes[end - 1] == 59 -> end -= 1
+    Val(rest.slice(0..<end))
+}
+
+fn repl_reject_feature(source: String) -> String? Never! {
+    text :: source.trim()
+    import :: repl_import_path(text)
+    if text.contains("#Unsafe") && !(text.contains("core.crypto.expert") || text.contains("core.crypto.vault") || text.contains("expert.")) {
+        return Val("`#Unsafe`")
+    }
+    if text.contains("extern rust") -> return Val("`extern rust`")
+    if text.contains("#Extern") || text.contains("#Bindgen") {
+        return Val("C-FFI (`#Extern`/`#Bindgen`)")
+    }
+    if text.contains("core.tasks") || text.contains("core.channels") {
+        return Val("tasks/channels (`core.tasks`)")
+    }
+    if text.contains("core.mem") -> return Val("`core.mem` (low-level memory tier)")
+    if text.contains("core.http") -> return Val("the HTTP client/server (`core.http`)")
+    if text.contains("core.db") -> return Val("`core.db` (SQLite)")
+    if import != Val("core.reactive.loadable") && text.contains("core.reactive") {
+        return Val("`core.reactive`")
+    }
+    if import != Val("core.crypto.expert") && text.contains("core.crypto") {
+        return Val("`core.crypto`")
+    }
+    if text.contains("core.auth") -> return Val("`core.auth` token verification")
+    if text.contains("core.log") -> return Val("`core.log`")
+    if text.contains("core.term") || text.contains("live {{") || text.contains("live{{") {
+        return Val("`core.term` / `live` blocks (terminal direct-input)")
+    }
+    None
+}
+
+fn repl_starts_with_stmt_keyword(text: String) -> Bool Never! {
+    text.contains("::") || text.contains(":=") || text.starts_with("return ") || text.starts_with("return") || text.starts_with("if ") || text.starts_with("loop ") || text.starts_with("break") || text.starts_with("continue") || text.starts_with("print(") || text.starts_with("eprint(")
+}
+
+fn repl_first_function_body(items: [Item]) -> [Stmt]? Never! {
+    if items.len() == 0 -> return None
+    if items[0] == .Func(function) -> return Val(function.body)
+    None
+}
+
+fn repl_classify(source: String, step: Int) -> ReplInputParse {
+    text :: source.trim()
+    if text == "" -> return ReplInputParse.Accepted{input: ReplInput.Empty}
+    if text.starts_with(":") {
+        rest :: text.slice(1..<text.len())
+        split := rest.len()
+        bytes :: rest.bytes()
+        loop index in 0..<bytes.len() {
+            if bytes[index] == 32 {
+                split = index
+                break
+            }
+        }
+        argument := String?{None}
+        if split < rest.len() {
+            tail :: rest.slice(split + 1..<rest.len()).trim()
+            if tail != "" -> argument = Val(tail)
+        }
+        return ReplInputParse.Accepted{input: ReplInput.Meta{command: rest.slice(0..<split), argument: argument}}
+    }
+    if text.starts_with("?") {
+        name :: text.slice(1..<text.len()).trim()
+        return ReplInputParse.Accepted{input: ReplInput.Meta{command: "?", argument: if name == "" -> None else -> Val(name)}}
+    }
+    if repl_reject_feature(text) == .Val(feature) {
+        return ReplInputParse.Accepted{input: ReplInput.Reject{feature: feature}}
+    }
+    if repl_looks_like_import(text) {
+        normalized :: text.trim_end()
+        full :: "// repl:{step}\n{normalized}\n"
+        parsed :: parse_source(full.bytes())
+        if parsed.diagnostics.len() > 0 {
+            return ReplInputParse.Rejected{diagnostics: parsed.diagnostics}
+        }
+        if parsed.program.items.len() == 0 && parsed.program.imports.len() > 0 {
+            return ReplInputParse.Accepted{input: ReplInput.Import{source: "{normalized}\n"}}
+        }
+    }
+    suppress :: text.ends_with(";") && !repl_looks_like_item(text) && !text.ends_with("}};")
+    if repl_looks_like_item(text) {
+        item_source :: "{text}\n"
+        parsed :: parse_source("// repl:{step}\n{item_source}".bytes())
+        if parsed.diagnostics.len() > 0 {
+            return ReplInputParse.Rejected{diagnostics: parsed.diagnostics}
+        }
+        return ReplInputParse.Accepted{input: ReplInput.Item{source: item_source}}
+    }
+    user_lexed :: lex(text.bytes())
+    if user_lexed.diagnostics.len() > 0 {
+        return ReplInputParse.Rejected{diagnostics: user_lexed.diagnostics}
+    }
+    plain_input :: text.trim_end()
+    plain_source :: "// repl:{step}\nfn __repl__() {{\n{plain_input}\n}}\n"
+    plain_attempt := ParseResult?{None}
+    if repl_starts_with_stmt_keyword(text) || suppress {
+        parsed :: parse_generated_source(plain_source.bytes())
+        if parsed.diagnostics.len() == 0 && repl_first_function_body(parsed.program.items) == .Val(body) {
+            if body.len() > 0 {
+                return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, check_source: plain_input}}
+            }
+        }
+        plain_attempt = Val(parsed)
+    }
+    echo_stmt :: "__repl_echo__ :: {text}"
+    echo_source :: "// repl:{step}\nfn __repl__() {{\n{echo_stmt}\n}}\n"
+    echo :: parse_generated_source(echo_source.bytes())
+    if echo.diagnostics.len() == 0 && repl_first_function_body(echo.program.items) == .Val(body) {
+        if body.len() > 0 {
+            return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, check_source: echo_stmt}}
+        }
+    }
+    plain :: plain_attempt ?? parse_generated_source(plain_source.bytes())
+    if plain.diagnostics.len() > 0 -> return ReplInputParse.Rejected{diagnostics: plain.diagnostics}
+    if repl_first_function_body(plain.program.items) == .Val(body) {
+        return ReplInputParse.Accepted{input: ReplInput.Stmts{body: body, suppress_echo: suppress, check_source: plain_input}}
+    }
+    ReplInputParse.Accepted{input: ReplInput.Empty}
+}

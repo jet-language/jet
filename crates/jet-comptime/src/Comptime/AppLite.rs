@@ -53,6 +53,9 @@ mod web_kernel {
             jet_render_runtime_stop, jet_stream_take_failure_report, JetRuntimeDiagnostic,
             JetTaskFailure, JetStreamFailure,
         };
+        // `Prelude/Core/RuntimeStack.rs` rides in with the scheduler, whose
+        // workers report their stack to it.
+        use jet_foundation::Outcome::JET_RUNTIME_STACK_LIMIT;
 
         pub(crate) fn jet_runtime_stop_with_context(
             code: &'static str,
@@ -68,6 +71,7 @@ mod web_kernel {
         pub(crate) mod jet_std {
             use super::JetShow;
             pub(crate) use jet_foundation::Outcome::{jet_outcome_of, JetTaskFailure};
+            use jet_foundation::EncodingJson::quote_json;
             pub(crate) use crate::Comptime::UrlLite::url_percent_decode_str
                 as jet_url_percent_decode_str;
             pub(crate) use crate::Comptime::UrlLite::url_percent_encode
@@ -123,7 +127,7 @@ mod web_kernel {
                 }
             }
 
-            pub use jet_foundation::DataTree::DataTree;
+            pub use jet_foundation::Dyn::Dyn;
 
             #[derive(Clone, Debug, PartialEq)]
             pub struct FieldError {
@@ -211,14 +215,18 @@ mod web_kernel {
                 pub redacted: bool,
             }
 
-            pub(crate) use crate::Comptime::UrlLite::JetMIME;
-
             /// Strict JSON validity through the one Foundation parser; the
             /// server-fn kernel only asks whether a body parses.
-            pub fn parse_json_typed_datatree(
+            pub fn parse_json_dyn(
                 text: &str,
-            ) -> Result<DataTree, jet_foundation::EncodingJson::Error> {
-                jet_foundation::EncodingJson::parse_json_typed(text, true)
+            ) -> Result<Dyn, jet_foundation::EncodingJson::Error> {
+                jet_foundation::EncodingJson::parse_json_exact_numbers(text, true)
+            }
+
+            /// The one text-cell decode scope (#4602), shared with the
+            /// comptime Prelude mirror so route parameters decode alike.
+            pub fn jet_decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+                crate::Comptime::SyncLite::decode_text_cells(decode)
             }
         }
 
@@ -227,11 +235,12 @@ mod web_kernel {
 
     use self::native_scheduler::jet_std;
     pub use self::native_scheduler::jet_std::{
-        DataTree, JetDerived, JetReactiveEffect, JetSignal, jet_reactive_effect,
+        Dyn, JetDerived, JetReactiveEffect, JetSignal, jet_reactive_effect,
         jet_reactive_effect_rooted,
     };
 
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/LiveQuery.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7LiveRaw.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/HTTPRoute.rs");
     include!("../../../jet-codegen/src/Prelude/Core/WebPending.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebRouter.rs");
@@ -240,40 +249,74 @@ mod web_kernel {
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebTable.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebVirtual.rs");
     include!("../../../jet-codegen/src/Prelude/CoreLib/Top/WebStore.rs");
+    include!("../../../jet-codegen/src/Prelude/CoreLib/Top/CoreSlice7WebRaw.rs");
 
     #[allow(non_camel_case_types)]
     pub trait __jet_Encode {
-        fn jet_encode(&self) -> jet_std::DataTree;
+        fn jet_encode(&self) -> jet_std::Dyn;
     }
 
     #[allow(non_camel_case_types)]
     pub trait __jet_Decode: Sized {
-        fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>>;
+        fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>>;
     }
 
     impl __jet_Encode for String {
-        fn jet_encode(&self) -> jet_std::DataTree {
-            jet_std::DataTree::Text(self.clone())
+        fn jet_encode(&self) -> jet_std::Dyn {
+            jet_std::Dyn::Text(self.clone())
         }
     }
 
     impl __jet_Decode for String {
-        fn jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<jet_std::FieldError>> {
+        fn jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<jet_std::FieldError>> {
             match tree {
-                jet_std::DataTree::Text(value) | jet_std::DataTree::TypedText(value) => {
-                    Ok(value.clone())
-                }
+                jet_std::Dyn::Text(value) => Ok(value.clone()),
                 _ => Err(jet_std::FieldError::one("expected Text")),
             }
         }
     }
 
-    pub fn jet_enc_json_to_string<T: __jet_Encode>(value: &T) -> String {
-        jet_foundation::EncodingJson::render_json(&value.jet_encode(), false, 0)
+    pub fn jet_enc_json_to_string<T: __jet_Encode>(
+        value: &T,
+    ) -> Result<String, jet_std::EncodingError> {
+        let tree = super::super::JSONInterp::from_json(value.jet_encode());
+        super::super::JSONInterp::render_ordered_dyn(&tree, false, 0).map_err(|error| {
+            jet_std::EncodingError::new(
+                jet_std::EncodingFormat::JSON,
+                jet_std::EncodingErrorKind::Unsupported,
+                error.byte_offset,
+                error.line,
+                error.column,
+                error.path,
+                error.reason,
+            )
+        })
+    }
+
+    include!("../../../jet-codegen/src/Prelude/Core/EncodingError.rs");
+
+    pub fn jet_enc_json_error_text(error: &jet_std::EncodingError) -> String {
+        let kind = match error.kind {
+            jet_std::EncodingErrorKind::Syntax => "Syntax",
+            jet_std::EncodingErrorKind::Truncated => "Truncated",
+            jet_std::EncodingErrorKind::Unsupported => "Unsupported",
+            jet_std::EncodingErrorKind::Limit => "Limit",
+            jet_std::EncodingErrorKind::IO => "IO",
+            jet_std::EncodingErrorKind::State => "State",
+        };
+        jet_encoding_error_kernel_show(
+            error.format.as_str(),
+            kind,
+            error.byte_offset,
+            error.line.as_ref().ok().copied(),
+            error.column.as_ref().ok().copied(),
+            &error.path,
+            &error.reason,
+        )
     }
 
     pub fn jet_enc_json_decode<T: __jet_Decode>(
-        value: &String,
+        value: &str,
     ) -> Result<T, Vec<jet_std::FieldError>> {
         let tree = jet_foundation::EncodingJson::parse_json(value, true)
             .map_err(|error| jet_std::FieldError::one(error.message))?;
@@ -434,7 +477,7 @@ mod http_kernel {
     use super::web_kernel::native_scheduler::jet_std;
     use super::web_kernel::{
         __jet_Decode, __jet_Encode, jet_app_ws_register, jet_app_ws_unregister,
-        jet_enc_json_decode, jet_enc_json_to_string, jet_runtime_stop,
+        jet_enc_json_decode, jet_enc_json_to_string, jet_enc_json_error_text, jet_runtime_stop,
     };
     use super::CtValue;
     use crate::AST::Type;
@@ -445,6 +488,20 @@ mod http_kernel {
     /// Prelude is one flat namespace, so the interpreter shares it too.
     use crate::Comptime::SyncLite::JetDbRequestScope;
 
+    impl JetShow for Vec<String> {
+        fn jet_show(&self) -> String {
+            jet_foundation::StructuralDebug::jet_text_list(self)
+        }
+    }
+
+    impl JetDebug for Vec<String> {
+        fn jet_debug(&self) -> String {
+            jet_foundation::StructuralDebug::jet_text_list(
+                self.iter().map(|origin| format!("{origin:?}")),
+            )
+        }
+    }
+
     fn jet_panic(file: &str, line: u32, message: &str) -> ! {
         jet_runtime_stop("E3001", file, i64::from(line), message)
     }
@@ -454,11 +511,11 @@ mod http_kernel {
     fn jet_log_emit(_level: &str, _message: &str, _fields: &[jet_std::LogField]) {}
 
     struct JetFileReader {
-        inner: std::io::BufReader<std::fs::File>,
+        inner: std::sync::Mutex<std::io::BufReader<std::fs::File>>,
         path: String,
     }
     struct JetFileWriter {
-        inner: std::io::BufWriter<std::fs::File>,
+        inner: std::sync::Mutex<std::io::BufWriter<std::fs::File>>,
         path: String,
     }
 
@@ -1059,42 +1116,37 @@ fn app_callback(
     }
 }
 
-fn tree_text(tree: &web_kernel::DataTree) -> Option<String> {
+fn tree_text(tree: &web_kernel::Dyn) -> Option<String> {
     match tree {
-        web_kernel::DataTree::Text(value) | web_kernel::DataTree::TypedText(value) => {
-            Some(value.clone())
-        }
-        web_kernel::DataTree::Int(value) => Some(value.to_string()),
-        web_kernel::DataTree::Float(value) => Some(value.to_string()),
-        web_kernel::DataTree::Bool(value) => Some(value.to_string()),
-        web_kernel::DataTree::Number(value) => Some(value.clone()),
+        web_kernel::Dyn::Text(value) => Some(value.clone()),
+        web_kernel::Dyn::Int(value) => Some(value.to_string()),
+        web_kernel::Dyn::Float(value) => Some(value.to_string()),
+        web_kernel::Dyn::Bool(value) => Some(value.to_string()),
+        web_kernel::Dyn::Number(value) => Some(value.clone()),
         _ => None,
     }
 }
 
-fn tree_to_untyped(tree: &web_kernel::DataTree, span: Span) -> Result<CtValue, String> {
+fn tree_to_untyped(tree: &web_kernel::Dyn, span: Span) -> Result<CtValue, String> {
     match tree {
-        web_kernel::DataTree::Null => Ok(CtValue::Unit),
-        web_kernel::DataTree::Bool(value) => Ok(CtValue::Bool(*value)),
-        web_kernel::DataTree::Int(value) => Ok(CtValue::Int(*value)),
-        web_kernel::DataTree::Float(value) => Ok(CtValue::Float(crate::AST::CtFloat::f64(*value))),
-        web_kernel::DataTree::Number(value) => value
+        web_kernel::Dyn::Null => Ok(CtValue::Unit),
+        web_kernel::Dyn::Bool(value) => Ok(CtValue::Bool(*value)),
+        web_kernel::Dyn::Int(value) => Ok(super::Builtins::exact_int_value(value.to_big())),
+        web_kernel::Dyn::Float(value) => Ok(CtValue::Float(crate::AST::CtFloat::f64(*value))),
+        web_kernel::Dyn::Number(value) => value
             .parse::<i64>()
             .map(CtValue::Int)
             .or_else(|_| value.parse::<f64>().map(|value| CtValue::Float(crate::AST::CtFloat::f64(value))))
             .map_err(|_| format!("invalid JSON number `{value}`")),
-        web_kernel::DataTree::TypedText(value) => {
-            let tree = parse_app_json_tree(value)?;
-            tree_to_untyped(&tree, span)
-        }
-        web_kernel::DataTree::Text(value) => Ok(CtValue::Str(value.clone())),
-        web_kernel::DataTree::Bytes(value) => Ok(CtValue::Bytes(value.clone())),
-        web_kernel::DataTree::Array(values) => values
+        web_kernel::Dyn::Text(value) => Ok(CtValue::Str(value.clone())),
+        web_kernel::Dyn::Bytes(value) => Ok(CtValue::Bytes(value.clone())),
+        web_kernel::Dyn::DateTime(_) => Err("Dyn.DateTime requires the AOT time payload boundary".to_owned()),
+        web_kernel::Dyn::Array(values) => values
             .iter()
             .map(|value| tree_to_untyped(value, span))
             .collect::<Result<Vec<_>, _>>()
             .map(CtValue::List),
-        web_kernel::DataTree::Object(values) => values
+        web_kernel::Dyn::Object(values) => values
             .iter()
             .map(|(name, value)| Ok((name.clone(), tree_to_untyped(value, span)?)))
             .collect::<Result<Vec<_>, String>>()
@@ -1130,13 +1182,13 @@ fn binding_ast_type(value: &str) -> Type {
 }
 
 fn decode_binding_tree(
-    tree: &web_kernel::DataTree,
+    tree: &web_kernel::Dyn,
     ty: &str,
     span: Span,
 ) -> Result<CtValue, String> {
     let (base, optional) = binding_type(ty);
     if optional {
-        if matches!(tree, web_kernel::DataTree::Null) {
+        if matches!(tree, web_kernel::Dyn::Null) {
             return Ok(CtValue::absent(binding_ast_type(ty)));
         }
         return decode_binding_tree(tree, &base, span)
@@ -1176,21 +1228,21 @@ fn decode_binding_tree(
     }
 }
 
-fn parse_app_json_tree(value: &str) -> Result<web_kernel::DataTree, String> {
+fn parse_app_json_tree(value: &str) -> Result<web_kernel::Dyn, String> {
     jet_foundation::EncodingJson::parse_json(value, true)
         .map(|tree| tree)
         .map_err(|error| error.message)
 }
 
 fn mir_tree_to_ct(
-    tree: &web_kernel::DataTree,
+    tree: &web_kernel::Dyn,
     ty: &jet_foundation::MIR::MirType,
     span: Span,
 ) -> Result<CtValue, String> {
     use jet_foundation::MIR::MirTypeKind;
     match ty.kind() {
         MirTypeKind::Option(inner) => {
-            if matches!(tree, web_kernel::DataTree::Null) {
+            if matches!(tree, web_kernel::Dyn::Null) {
                 Ok(CtValue::absent(crate::Comptime::MirBridge::mir_to_ast_type(inner)))
             } else {
                 mir_tree_to_ct(tree, inner, span).map(|value| CtValue::Present(Box::new(value)))
@@ -1206,7 +1258,7 @@ fn mir_tree_to_ct(
         MirTypeKind::String => decode_binding_tree(tree, "String", span),
         MirTypeKind::Char => decode_binding_tree(tree, "Char", span),
         MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
-            let web_kernel::DataTree::Array(values) = tree else {
+            let web_kernel::Dyn::Array(values) = tree else {
                 return Err(format!("route input is not a list: {tree:?}"));
             };
             values
@@ -1216,7 +1268,7 @@ fn mir_tree_to_ct(
                 .map(CtValue::List)
         }
         MirTypeKind::Map { value: value_ty, .. } => {
-            let web_kernel::DataTree::Object(values) = tree else {
+            let web_kernel::Dyn::Object(values) = tree else {
                 return Err(format!("route input is not an object: {tree:?}"));
             };
             values
@@ -1231,7 +1283,7 @@ fn mir_tree_to_ct(
                 .map(CtValue::Map)
         }
         MirTypeKind::Tuple(fields) => {
-            let web_kernel::DataTree::Object(values) = tree else {
+            let web_kernel::Dyn::Object(values) = tree else {
                 return Err(format!("route input is not a tuple object: {tree:?}"));
             };
             fields
@@ -1265,7 +1317,7 @@ fn mir_tree_to_ct(
 }
 
 fn decode_route_inputs(
-    trees: &[web_kernel::DataTree],
+    trees: &[web_kernel::Dyn],
     bindings: &[web_kernel::JetAppRouteBinding],
     types: &[jet_foundation::MIR::MirType],
     span: Span,
@@ -1287,7 +1339,7 @@ fn decode_route_inputs(
                 fields,
                 ..
             } => {
-                let web_kernel::DataTree::Object(values) = tree else {
+                let web_kernel::Dyn::Object(values) = tree else {
                     return Err("route search input is not an object".to_string());
                 };
                 fields
@@ -1311,8 +1363,9 @@ fn decode_route_inputs(
                     })
             }
             web_kernel::JetAppRouteBinding::Data => {
+                // Loader data is JSON text; the one JSON parser owns it.
                 let tree = match tree {
-                    web_kernel::DataTree::TypedText(value) => parse_app_json_tree(value)?,
+                    web_kernel::Dyn::Text(value) => parse_app_json_tree(value)?,
                     tree => tree.clone(),
                 };
                 mir_tree_to_ct(&tree, ty, span)
@@ -1417,18 +1470,18 @@ fn app_loader_callback(
 }
 
 fn ct_to_json_string(value: &CtValue) -> String {
-    fn tree(value: &CtValue) -> web_kernel::DataTree {
+    fn tree(value: &CtValue) -> web_kernel::Dyn {
         match value {
-            CtValue::Int(value) => web_kernel::DataTree::Int(*value),
-            CtValue::Float(value) => web_kernel::DataTree::Float(value.as_f64()),
-            CtValue::Bool(value) => web_kernel::DataTree::Bool(*value),
-            CtValue::Char(value) => web_kernel::DataTree::Text(value.to_string()),
-            CtValue::Str(value) => web_kernel::DataTree::Text(value.clone()),
-            CtValue::Bytes(value) => web_kernel::DataTree::Bytes(value.clone()),
+            CtValue::Int(value) => web_kernel::Dyn::Int((*value).into()),
+            CtValue::Float(value) => web_kernel::Dyn::Float(value.as_f64()),
+            CtValue::Bool(value) => web_kernel::Dyn::Bool(*value),
+            CtValue::Char(value) => web_kernel::Dyn::Text(value.to_string()),
+            CtValue::Str(value) => web_kernel::Dyn::Text(value.clone()),
+            CtValue::Bytes(value) => web_kernel::Dyn::Bytes(value.clone()),
             CtValue::List(values) => {
-                web_kernel::DataTree::Array(values.iter().map(tree).collect())
+                web_kernel::Dyn::Array(values.iter().map(tree).collect())
             }
-            CtValue::Map(values) => web_kernel::DataTree::Object(
+            CtValue::Map(values) => web_kernel::Dyn::Object(
                 values
                     .iter()
                     .filter_map(|(key, value)| match key {
@@ -1437,13 +1490,13 @@ fn ct_to_json_string(value: &CtValue) -> String {
                     })
                     .collect(),
             ),
-            CtValue::Struct { fields, .. } => web_kernel::DataTree::Object(
+            CtValue::Struct { fields, .. } => web_kernel::Dyn::Object(
                 fields.iter().map(|(key, value)| (key.clone(), tree(value))).collect(),
             ),
             CtValue::Enum { variant, .. } if variant == "Null" => {
-                web_kernel::DataTree::Null
+                web_kernel::Dyn::Null
             }
-            CtValue::Enum { args, .. } => web_kernel::DataTree::Object(
+            CtValue::Enum { args, .. } => web_kernel::Dyn::Object(
                 args.iter()
                     .filter_map(|(key, value)| {
                         key.as_ref().map(|key| (key.clone(), tree(value)))
@@ -1451,29 +1504,27 @@ fn ct_to_json_string(value: &CtValue) -> String {
                     .collect(),
             ),
             CtValue::Present(value) => tree(value),
-            CtValue::Failed(_) | CtValue::Unit => web_kernel::DataTree::Null,
-            CtValue::BigInt(value) => web_kernel::DataTree::Number(value.to_string_rep()),
-            CtValue::Closure(_) => web_kernel::DataTree::Null,
+            CtValue::Failed(_) | CtValue::Unit => web_kernel::Dyn::Null,
+            CtValue::BigInt(value) => web_kernel::Dyn::Number(value.to_string_rep()),
+            CtValue::Closure(_) => web_kernel::Dyn::Null,
         }
     }
-    fn render(tree: &web_kernel::DataTree) -> String {
+    fn render(tree: &web_kernel::Dyn) -> String {
         match tree {
-            web_kernel::DataTree::Null => "null".to_string(),
-            web_kernel::DataTree::Bool(value) => value.to_string(),
-            web_kernel::DataTree::Int(value) => value.to_string(),
-            web_kernel::DataTree::Float(value) => format!("{value:?}"),
-            web_kernel::DataTree::Number(value) => value.clone(),
-            web_kernel::DataTree::TypedText(value) | web_kernel::DataTree::Text(value) => {
+            web_kernel::Dyn::Null => "null".to_string(),
+            web_kernel::Dyn::Bool(value) => value.to_string(),
+            web_kernel::Dyn::Int(value) => value.to_string(),
+            web_kernel::Dyn::Float(value) => format!("{value:?}"),
+            web_kernel::Dyn::Number(value) => value.clone(),
+            web_kernel::Dyn::Text(value) => {
                 format!("{value:?}")
             }
-            web_kernel::DataTree::Bytes(values) => format!(
-                "[{}]",
-                values.iter().map(u8::to_string).collect::<Vec<_>>().join(",")
-            ),
-            web_kernel::DataTree::Array(values) => {
+            web_kernel::Dyn::Bytes(values) => format!("{:?}", web_kernel::Dyn::bytes_text(values)),
+            web_kernel::Dyn::DateTime(value) => format!("{:?}", value.to_rfc3339()),
+            web_kernel::Dyn::Array(values) => {
                 format!("[{}]", values.iter().map(render).collect::<Vec<_>>().join(","))
             }
-            web_kernel::DataTree::Object(values) => format!(
+            web_kernel::Dyn::Object(values) => format!(
                 "{{{}}}",
                 values
                     .iter()
@@ -1615,7 +1666,7 @@ pub fn app_method_runtime(
             let app = handle.0.mount(prefix, move |path| {
                 let _ = super::Methods::invoke_standalone_closure(
                     &callback,
-                    vec![CtValue::Str(path.clone())],
+                    vec![CtValue::Str(path.to_owned())],
                     span,
                 );
             });
@@ -2098,55 +2149,6 @@ fn web_query_mode(
 }
 
 
-fn web_virtual_window(value: web_kernel::JetWebVirtualWindow) -> CtValue {
-    CtValue::Struct {
-        type_name: "WebVirtualWindow".to_string(),
-        fields: vec![
-            ("total_count".to_string(), CtValue::Int(value.total_count)),
-            ("scroll_offset".to_string(), CtValue::Int(value.scroll_offset)),
-            ("viewport_size".to_string(), CtValue::Int(value.viewport_size)),
-            (
-                "estimated_item_size".to_string(),
-                CtValue::Int(value.estimated_item_size),
-            ),
-            ("overscan".to_string(), CtValue::Int(value.overscan)),
-            ("start".to_string(), CtValue::Int(value.start)),
-            ("end".to_string(), CtValue::Int(value.end)),
-            ("total_size".to_string(), CtValue::Int(value.total_size)),
-            ("measured_count".to_string(), CtValue::Int(value.measured_count)),
-        ],
-    }
-}
-
-fn web_virtual_window_value(
-    value: &CtValue,
-    span: Span,
-) -> Result<web_kernel::JetWebVirtualWindow, Diagnostic> {
-    let CtValue::Struct { type_name, fields } = value else {
-        return Err(unsupported("WebVirtualWindow", span));
-    };
-    if type_name != "WebVirtualWindow" {
-        return Err(unsupported("WebVirtualWindow", span));
-    }
-    let field = |name: &str| {
-        fields
-            .iter()
-            .find(|(field, _)| field == name)
-            .map(|(_, value)| value)
-            .ok_or_else(|| unsupported("WebVirtualWindow field", span))
-    };
-    Ok(web_kernel::JetWebVirtualWindow {
-        total_count: web_int(field("total_count")?, "total_count", span)?,
-        scroll_offset: web_int(field("scroll_offset")?, "scroll_offset", span)?,
-        viewport_size: web_int(field("viewport_size")?, "viewport_size", span)?,
-        estimated_item_size: web_int(field("estimated_item_size")?, "estimated_item_size", span)?,
-        overscan: web_int(field("overscan")?, "overscan", span)?,
-        start: web_int(field("start")?, "start", span)?,
-        end: web_int(field("end")?, "end", span)?,
-        total_size: web_int(field("total_size")?, "total_size", span)?,
-        measured_count: web_int(field("measured_count")?, "measured_count", span)?,
-    })
-}
 
 fn web_virtual_plan(value: web_kernel::JetWebVirtualPlan) -> CtValue {
     CtValue::Struct {
@@ -2322,8 +2324,49 @@ fn web_table_state(value: web_kernel::JetWebTableState) -> CtValue {
                 CtValue::List(value.selected_keys.into_iter().map(CtValue::Str).collect()),
             ),
             ("selection_anchor".to_string(), selection_anchor),
+            ("focus_key".to_string(), web_optional_string(value.focus_key)),
             ("page_mode".to_string(), web_table_page_mode(value.page_mode)),
         ],
+    }
+}
+
+fn web_table_state_value(value: &CtValue, span: Span) -> Result<web_kernel::JetWebTableState, Diagnostic> {
+    let field = |name| web_record_field(value, name, span);
+    let sort = match field("sort")? {
+        CtValue::Present(value) => Some(web_kernel::JetWebTableSort {
+            column: web_string(web_record_field(value, "column", span)?, "sort column", span)?,
+            direction: web_table_direction_value(web_record_field(value, "direction", span)?, span)?,
+        }),
+        CtValue::Failed(crate::AST::CtReport::Clean(_)) => None,
+        _ => return Err(unsupported("WebTableState sort", span)),
+    };
+    let filter = match field("filter")? {
+        CtValue::Present(value) => Some(web_kernel::JetWebTableFilter {
+            column: web_string(web_record_field(value, "column", span)?, "filter column", span)?,
+            value: web_string(web_record_field(value, "value", span)?, "filter value", span)?,
+        }),
+        CtValue::Failed(crate::AST::CtReport::Clean(_)) => None,
+        _ => return Err(unsupported("WebTableState filter", span)),
+    };
+    Ok(web_kernel::JetWebTableState {
+        sort, filter,
+        page_index: web_int(field("page_index")?, "page index", span)?,
+        page_size: web_int(field("page_size")?, "page size", span)?,
+        selected_keys: web_strings(field("selected_keys")?, "selected keys", span)?,
+        selection_anchor: web_optional_string_value(field("selection_anchor")?, span)?,
+        focus_key: web_optional_string_value(field("focus_key")?, span)?,
+        page_mode: match web_enum_variant(field("page_mode")?, "WebTablePageMode", span)? {
+            "Client" => web_kernel::JetWebTablePageMode::Client,
+            "Server" => web_kernel::JetWebTablePageMode::Server,
+            _ => return Err(unsupported("WebTablePageMode", span)),
+        },
+    })
+}
+
+fn web_counter(value: u64) -> CtValue {
+    match i64::try_from(value) {
+        Ok(value) => CtValue::Int(value),
+        Err(_) => CtValue::BigInt(jet_foundation::Numeric::CtBigInt::from_u64(value)),
     }
 }
 fn web_table_page(value: web_kernel::JetWebTablePage<CtValue>) -> CtValue {
@@ -2572,6 +2615,168 @@ pub fn apply_suite(
             .ok_or_else(|| unsupported(&format!("{module}.{method} argument {index}"), span))
     };
     match (module, method) {
+        ("core.web", "__live_stats_snapshot") => {
+            let value = web_kernel::jet_live_stats_snapshot_raw().map(
+                |(queries, active, refreshing, evictions, invalidations, pushes)|
+                    CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                        ("queries".into(), CtValue::Int(queries)), ("active".into(), CtValue::Int(active)),
+                        ("refreshing".into(), CtValue::Int(refreshing)), ("evictions".into(), web_counter(evictions)),
+                        ("invalidations".into(), web_counter(invalidations)), ("ws_pushes".into(), web_counter(pushes)),
+                    ] });
+            web_optional_value(value, result_type, span)
+        }
+        ("core.web", "__contract_stop") => {
+            web_kernel::jet_openapi_contract_stop_raw(&web_string(one(0)?, "OpenAPI error", span)?)
+        }
+        ("core.web.store", "__facts_snapshot") => {
+            let (generation, cursor, history, limit, events, enabled) =
+                web_kernel::jet_store_facts_snapshot_raw(web_store(one(0)?, span)?);
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                ("generation".into(), web_counter(generation)), ("cursor".into(), web_counter(cursor)),
+                ("history_length".into(), CtValue::Int(history)), ("history_limit".into(), CtValue::Int(limit)),
+                ("event_length".into(), CtValue::Int(events)), ("history_enabled".into(), CtValue::Bool(enabled)),
+            ] })
+        }
+        ("core.web.store", "__transact") => {
+            let store = web_store(one(0)?, span)?;
+            let action = web_string(one(1)?, "store action", span)?;
+            let fields = web_strings(one(2)?, "store fields", span)?;
+            let callback = one(3)?.clone();
+            Ok(web_store_transaction(web_kernel::jet_web_store_transaction(store, action, fields,
+                move || {
+                    super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
+                        .unwrap_or_else(|error| std::panic::panic_any(error));
+                })))
+        }
+        ("core.web.table", "__columns") => Ok(CtValue::List(
+            web_kernel::jet_table_columns_raw(web_table(one(0)?, span)?).into_iter()
+                .map(|column| opaque_web(WebTableColumnHandle(column))).collect())),
+        ("core.web.table", "__replace_columns") => {
+            let CtValue::List(values) = one(1)? else {
+                return Err(unsupported("table columns", span));
+            };
+            let columns = values.iter().map(|value| web_table_column(value, span).cloned())
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(opaque_web(WebTableHandle(web_kernel::jet_table_replace_columns_raw(
+                web_table(one(0)?, span)?, columns))))
+        }
+        ("core.web.table", "__state") => Ok(web_table_state(
+            web_kernel::jet_web_table_state(web_table(one(0)?, span)?))),
+        ("core.web.table", "__set_state") => {
+            web_kernel::jet_table_set_state_raw(web_table(one(0)?, span)?,
+                web_table_state_value(one(1)?, span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__alias") => Ok(opaque_web(WebTableHandle(
+            web_kernel::jet_table_alias_raw(web_table(one(0)?, span)?)))),
+        ("core.web.table", "__has_loader") => Ok(CtValue::Bool(
+            web_kernel::jet_table_has_loader_raw(web_table(one(0)?, span)?))),
+        ("core.web.table", "__invoke_loader") => web_result(
+            web_kernel::jet_table_invoke_loader_raw(web_table(one(0)?, span)?,
+                web_table_state_value(one(1)?, span)?).map(web_table_page)),
+        ("core.web.table", "__generation") => Ok(web_counter(
+            web_kernel::jet_table_generation_raw(web_table(one(0)?, span)?,
+                web_bool(one(1)?, "advance generation", span)?))),
+        ("core.web.table", "__query_facts") => {
+            let (index, size, server, sort, filter) = web_kernel::jet_table_query_facts_raw(
+                &web_table_state_value(one(0)?, span)?);
+            let sort = sort.map(|(column, descending)| CtValue::Present(Box::new(CtValue::Struct {
+                type_name: "tuple".to_string(), fields: vec![
+                    ("column".into(), CtValue::Str(column)), ("descending".into(), CtValue::Bool(descending)),
+                ],
+            })))
+                .unwrap_or_else(|| CtValue::absent(Type::Tuple(vec![
+                    ("column".into(), Box::new(Type::String)), ("descending".into(), Box::new(Type::Bool))])));
+            let filter = filter.map(|(column, value)| CtValue::Present(Box::new(CtValue::Struct {
+                type_name: "tuple".to_string(), fields: vec![
+                    ("column".into(), CtValue::Str(column)), ("value".into(), CtValue::Str(value)),
+                ],
+            })))
+                .unwrap_or_else(|| CtValue::absent(Type::Tuple(vec![
+                    ("column".into(), Box::new(Type::String)), ("value".into(), Box::new(Type::String))])));
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                ("index".into(), CtValue::Int(index)), ("size".into(), CtValue::Int(size)),
+                ("server".into(), CtValue::Bool(server)), ("sort".into(), sort), ("filter".into(), filter),
+            ] })
+        }
+        ("core.web.table", "__state_equal") => Ok(CtValue::Bool(
+            web_kernel::jet_table_state_equal_raw(&web_table_state_value(one(0)?, span)?,
+                &web_table_state_value(one(1)?, span)?))),
+        ("core.web.table", "__page_facts") => {
+            let (total, index, size, count, rows, keys) = web_kernel::jet_table_page_facts_raw(
+                &web_table_page_value(one(0)?, span)?);
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields:
+                ["total", "index", "size", "count", "rows", "keys"].into_iter()
+                    .zip([total, index, size, count, rows, keys])
+                    .map(|(name, value)| (name.into(), CtValue::Int(value))).collect()
+            })
+        }
+        ("core.web.table", "__commit_keys") => {
+            let callback = one(2)?.clone();
+            web_result(web_kernel::jet_table_commit_keys_raw(web_table(one(0)?, span)?,
+                &web_table_page_value(one(1)?, span)?, move |index, keys| {
+                    let value = super::Methods::invoke_standalone_closure(&callback,
+                        vec![CtValue::Int(index), CtValue::List(keys.iter().cloned().map(CtValue::Str).collect())], span)
+                        .unwrap_or_else(|error| std::panic::panic_any(error));
+                    callback_result_unit(value, span)
+                }).map(|()| CtValue::Unit))
+        }
+        ("core.web.table", "__loading_store") => {
+            web_kernel::jet_table_loading_store_raw(web_table(one(0)?, span)?,
+                web_bool(one(1)?, "table loading", span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__error_store") => {
+            web_kernel::jet_table_error_store_raw(web_table(one(0)?, span)?,
+                web_string(one(1)?, "table error", span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__page_store") => {
+            let page = match one(1)? {
+                CtValue::Present(page) => Some(web_table_page_value(page, span)?),
+                CtValue::Failed(crate::AST::CtReport::Clean(_)) => None,
+                _ => return Err(unsupported("optional table page", span)),
+            };
+            web_kernel::jet_table_page_store_raw(web_table(one(0)?, span)?, page);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__state_store") => {
+            web_kernel::jet_table_state_store_raw(web_table(one(0)?, span)?,
+                web_table_state_value(one(1)?, span)?);
+            Ok(CtValue::Unit)
+        }
+        ("core.web.table", "__has_key") => Ok(CtValue::Bool(
+            web_kernel::jet_table_has_key_raw(web_table(one(0)?, span)?))),
+        ("core.web.table", "__page_accessor_keys") => Ok(web_table_page(
+            web_kernel::jet_table_page_accessor_keys_raw(web_table(one(0)?, span)?,
+                web_table_page_value(one(1)?, span)?))),
+        ("core.web.table", "__page_keys") => Ok(CtValue::List(
+            web_kernel::jet_table_page_keys_raw(&web_table_page_value(one(0)?, span)?)
+                .into_iter().map(CtValue::Str).collect())),
+        ("core.web.table", "__page_replace_keys") => Ok(web_table_page(
+            web_kernel::jet_table_page_replace_keys_raw(web_table_page_value(one(0)?, span)?,
+                web_strings(one(1)?, "table page keys", span)?))),
+        ("core.web.table", "__column_info") => {
+            let (name, cell_type) = web_kernel::jet_table_column_info_raw(web_table_column(one(0)?, span)?);
+            Ok(CtValue::Struct { type_name: "tuple".to_string(), fields: vec![
+                ("name".into(), CtValue::Str(name)), ("cell_type".into(), CtValue::Str(cell_type)),
+            ] })
+        }
+        ("core.web.table", "__cell") => Ok(CtValue::Str(
+            web_kernel::jet_table_cell_raw(web_table_column(one(0)?, span)?, one(1)?))),
+        ("core.web.table", "__rows") => Ok(CtValue::List(
+            web_kernel::jet_table_rows_raw(web_table(one(0)?, span)?))),
+        ("core.web.table", "__row_key") => Ok(CtValue::Str(
+            web_kernel::jet_table_row_key_raw(web_table(one(0)?, span)?, one(1)?))),
+        ("core.web.table", "__make_page") => {
+            let CtValue::List(rows) = one(0)? else {
+                return Err(unsupported("table page rows", span));
+            };
+            Ok(web_table_page(web_kernel::jet_table_make_page_raw(rows.clone(),
+                web_strings(one(1)?, "table page keys", span)?,
+                web_int(one(2)?, "table total rows", span)?, web_int(one(3)?, "table page index", span)?,
+                web_int(one(4)?, "table page size", span)?, web_int(one(5)?, "table page count", span)?)))
+        }
         ("core.reactive", "effect") => {
             let callback = one(0)?.clone();
             Ok(opaque_web(web_kernel::jet_reactive_effect(move || {
@@ -2579,7 +2784,8 @@ pub fn apply_suite(
                     .unwrap_or_else(|error| std::panic::panic_any(error));
             })))
         }
-        ("core.ui", "reactive_render") => {
+        // D-REACTCORE1: `#Reactive { … }` roots its effect, like a UI mount.
+        ("core.ui", "reactive_render") | ("core.reactive", "scope") => {
             let callback = one(0)?.clone();
             web_kernel::jet_reactive_effect_rooted(move || {
                 super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
@@ -3414,42 +3620,6 @@ pub fn apply_suite(
             });
             Ok(CtValue::List(filtered))
         }
-        ("core.web.virtual", "window") => Ok(web_virtual_window(
-            web_kernel::jet_web_virtual_window(
-                web_int(one(0)?, "virtual total count", span)?,
-                web_int(one(1)?, "virtual scroll offset", span)?,
-                web_int(one(2)?, "virtual viewport size", span)?,
-                web_int(one(3)?, "virtual item size", span)?,
-                web_int(one(4)?, "virtual overscan", span)?,
-            ),
-        )),
-        ("core.web.virtual", "window_measured") => {
-            let measurements = web_ints(one(5)?, "virtual measurements", span)?;
-            Ok(web_virtual_window(web_kernel::jet_web_virtual_window_measured(
-                web_int(one(0)?, "virtual total count", span)?,
-                web_int(one(1)?, "virtual scroll offset", span)?,
-                web_int(one(2)?, "virtual viewport size", span)?,
-                web_int(one(3)?, "virtual item size", span)?,
-                web_int(one(4)?, "virtual overscan", span)?,
-                &measurements,
-            )))
-        }
-        ("core.web.virtual", "slice") => {
-            let CtValue::List(rows) = one(0)? else {
-                return Err(unsupported("virtual rows", span));
-            };
-            let window = web_virtual_window_value(one(1)?, span)?;
-            Ok(CtValue::List(web_kernel::jet_web_virtual_slice(rows, &window)))
-        }
-        ("core.web.virtual", "indices") => {
-            let window = web_virtual_window_value(one(0)?, span)?;
-            Ok(CtValue::List(
-                web_kernel::jet_web_virtual_indices(&window)
-                    .into_iter()
-                    .map(CtValue::Int)
-                    .collect(),
-            ))
-        }
         ("core.web.virtual", "plan") => Ok(web_virtual_plan(
             web_kernel::jet_web_virtual_plan(
                 web_int(one(0)?, "virtual total count", span)?,
@@ -3590,8 +3760,8 @@ pub fn apply_suite(
             let action = web_string(one(1)?, "store action", span)?;
             let fields = web_strings(one(2)?, "store changed fields", span)?;
             let callback = one(3)?.clone();
-            let update = move |state: &mut CtValue| {
-                super::Methods::invoke_standalone_closure_mut(&callback, state, span)
+            let update = move || {
+                super::Methods::invoke_standalone_closure(&callback, Vec::new(), span)
                     .unwrap_or_else(|error| std::panic::panic_any(error));
             };
             match method {

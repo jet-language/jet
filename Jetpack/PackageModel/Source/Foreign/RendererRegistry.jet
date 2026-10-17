@@ -5,7 +5,7 @@
 
 // Shared response protocol used by generated worker bindings: a
 // machine-readable response plus a human-readable explanation for the CLI.
-pub enum DecoderProtocol {
+enum DecoderProtocol {
     // Supervised workers return `{ok, value}` and use the shared status map.
     StandardEnvelope
     // The embedded Lua VM returns the encoded function value directly.
@@ -13,10 +13,10 @@ pub enum DecoderProtocol {
 }
 
 // The one response decoder a generated binding uses.
-pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String Never! {
+fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> String Never! {
     lines :: if protocol == {
         .StandardEnvelope -> [String]{
-            "fn decode_response(raw: String, code: Int) -> DataTree !{error} {{",
+            "fn decode_response(raw: String, code: Int) -> Dyn !{error} {{",
             "    if code == {{",
             "        1 -> {{ return Err({error}.NotRunning) }}",
             "        2 -> {{ return Err({error}.Timeout) }}",
@@ -26,13 +26,13 @@ pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> S
             "        else -> {{ return Err({error}.Protocol) }}",
             "    }}",
             "    response := json.parse(raw) ?? return Err({error}.Protocol)",
-            "    succeeded := (response.field(\"ok\") ?? DataTree.Bool(false)).bool() ?? false",
+            "    succeeded := (response.field(\"ok\") ?? Dyn.Bool(false)).bool() ?? false",
             "    if !succeeded -> return Err({error}.CommandFailed)",
-            "    return Ok(response.field(\"value\") ?? DataTree.Null)",
+            "    return Ok(response.field(\"value\") ?? Dyn.Null)",
             "}}"
         }
         .LuaRawJSON -> [String]{
-            "fn decode_response(raw: String, code: Int) -> DataTree !{error} {{",
+            "fn decode_response(raw: String, code: Int) -> Dyn !{error} {{",
             "    decode_status(code)",
             "    value := json.parse(raw) ?? return Err({error}.Protocol)",
             "    return Ok(value)",
@@ -43,7 +43,7 @@ pub fn pkg_render_decode_response(error: String, protocol: DecoderProtocol) -> S
 }
 
 // The Lua status adapter shared by response and table-view calls.
-pub fn pkg_render_lua_decode_status(error: String) -> String Never! {
+fn pkg_render_lua_decode_status(error: String) -> String Never! {
     lines :: [String]{
         "fn decode_status(code: Int) -> Bool !{error} {{",
         "    if code == 1 -> return Err({error}.NotRunning)",
@@ -61,12 +61,12 @@ pub fn pkg_render_lua_decode_status(error: String) -> String Never! {
 
 // One active generated response binder: its canonical descriptor key, its
 // response protocol, and the probe that renders a representative binding.
-pub struct RendererDescriptor {
-    pub language: ForeignLanguage
-    pub runtime: BinderRuntime
-    pub stub_kind: BindingStubKind
-    pub protocol: DecoderProtocol
-    pub render_probe: fn() -> String
+struct RendererDescriptor {
+    language: ForeignLanguage
+    runtime: BinderRuntime
+    stub_kind: BindingStubKind
+    protocol: DecoderProtocol
+    render_probe: fn() -> String
 }
 
 // One entry per active generated response binder.

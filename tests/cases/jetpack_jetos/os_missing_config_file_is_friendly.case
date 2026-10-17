@@ -1,0 +1,9 @@
+# Port of tests/jetpack_jetos.rs:2928-2939; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_missing_config_file_is_friendly.fixture
+mkdir: package-root
+env: JETPACK_ROOT={work}/package-root
+step: jet os build box@/definitely/not/here --no-color
+exit: 2
+stderr: = os_missing_config_file_is_friendly.fixture/expected.stderr
+

@@ -1,0 +1,11 @@
+
+use core.log as log
+
+fn run() {
+    log.set_sink("jsonl", "service.log")
+    s :: log.span("request")
+    log.enter(s)
+    log.info_fields("served", [log.field("route", "/"), log.int("status", 200), log.redact("token")])
+    log.close(s)
+    print("done")
+}

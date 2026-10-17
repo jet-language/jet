@@ -1,0 +1,9 @@
+use core.data as data
+rows :: [Int]{3, 1, 2}
+query :: data.query(rows)
+deferred :: query.filter((x) -> x > 10)
+deferred.plan()
+planned :: data.query(rows).filter((x) -> x > 1).sort_by((x) -> "{x}")
+planned.collect() ?? panic("collect")
+data.inner_join([1, 2, 1], [1, 1], (x) -> "{x}", (x) -> "{x}")
+data.left_join([1, 2], [1], (x) -> "{x}", (x) -> "{x}")

@@ -11,13 +11,16 @@ use jet_foundation.[
     Stmt,
     TExpr,
     TExprKind,
+    TIfCond,
     TPattern,
+    TPatternBinding,
     TPatternShape,
     TStmt,
     TextEdit,
     Type,
     diagnostic_with_edit,
     expr_span,
+    measure_literal_value,
     type_name,
 ]
 
@@ -35,7 +38,7 @@ fn sema_coverage_shape_keys(shape: TPatternShape, keys: &[String], ranges: &[Sem
         .Variant(variant, bindings, _, _) -> {
             loop binding in bindings {
                 if binding == {
-                    .Range(_, _) | .Nested(_) -> return
+                    .Range(_, _) | .Nested(_) | .Value(_) -> return
                     else -> {}
                 }
             }
@@ -47,7 +50,7 @@ fn sema_coverage_shape_keys(shape: TPatternShape, keys: &[String], ranges: &[Sem
         .Err(_, _, _, _) -> &keys.push("Err")
         .Range(lo, hi, _) -> &ranges.push(SemaIntegerRange{lo: lo, hi: hi})
         .Or(alternatives, _) -> loop alternative in alternatives -> sema_coverage_shape_keys(alternative, &keys, &ranges)
-        .Struct(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
+        .Struct(_, _, _) | .List(_, _, _) | .Map(_, _, _) | .Text(_, _) | .Binary(_, _) -> {}
     }
 }
 
@@ -58,7 +61,9 @@ fn sema_coverage_nested_part(shape: TPatternShape) -> (key: String, inner: TPatt
         .Ok(_, _, inner, _) -> if inner == .Val(nested) -> return Val((key: "Ok", inner: nested.shape))
         .Err(_, _, inner, _) -> if inner == .Val(nested) -> return Val((key: "Err", inner: nested.shape))
         .Variant(variant, bindings, _, _) -> {
-            if bindings.len() == 1 && bindings[0] == .Nested(nested) -> return Val((key: variant, inner: nested.shape))
+            if bindings.len() == 1 {
+                if bindings[0] == .Nested(nested) -> return Val((key: variant, inner: nested.shape))
+            }
         }
         else -> {}
     }
@@ -76,7 +81,7 @@ fn sema_coverage_collect_nested(shape: TPatternShape, key: String, inner: &[TPat
 }
 
 // The single payload type behind a head key, when nested coverage applies.
-fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaScopeEnvironment) -> Type? {
+fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Type? {
     if subject_ty == {
         .Option(inner) -> if key == "Val" -> return Val(inner)
         .Result(ok, err) -> {
@@ -84,14 +89,14 @@ fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaSc
             if key == "Err" -> return Val(err)
         }
         .Named(_) | .Apply(_, _) -> {
-            graph_option :: environment.registration_graph
-            graph :: graph_option ?? return None
-            nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return None
-            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            loop row in nominal.variants {
-                if row.symbol.name == key {
-                    types :: sema_pattern_variant_types(row.payload, nominal, subject_ty)
-                    if types.len() == 1 -> return Val(types[0])
+            if program.registration_graph == .Val(graph) {
+                nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? return None
+                nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                loop row in nominal.variants {
+                    if row.symbol.name == key {
+                        types :: sema_pattern_variant_types(row.payload, nominal, subject_ty)
+                        if types.len() == 1 -> return Val(types[0])
+                    }
                 }
             }
         }
@@ -108,7 +113,7 @@ fn sema_coverage_payload_type(subject_ty: Type, key: String, environment: SemaSc
 
 fn sema_coverage_is_closed(ty: Type) -> Bool Never! {
     if ty == {
-        .Named(_) | .Apply(_, _) | .Option(_) | .Result(_, _) | .Union(_) -> true
+        .Named(_) | .Apply(_, _) | .Option(_) | .Result(_, _) | .Union(_) | .List(_) | .FixedList(_, _) | .Map(_, _, _) -> true
         else -> false
     }
 }
@@ -131,7 +136,7 @@ fn sema_coverage_group_nested(shape: TPatternShape, groups: &[String:[TPatternSh
 // S31: the covered keys of a set of arm shapes over `subject_ty`. A head key
 // with only nested payload arms is covered when those nested arms jointly
 // cover its payload type (to any depth).
-fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, ranges: &[SemaIntegerRange]) -> [String] {
+fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: SemaScopeEnvironment, program: SemaProgramTables, ranges: &[SemaIntegerRange]) -> [String] {
     keys := [String]{}
     partial_keys := [String]{}
     groups := [String:[TPatternShape]]{}
@@ -142,12 +147,20 @@ fn sema_coverage_keys(subject_ty: Type, shapes: [TPatternShape], environment: Se
     key_set := sema_coverage_key_set(keys)
     loop key in partial_keys {
         if sema_coverage_leaf_covered(key_set, key) -> next
-        payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment) ?? next)
+        payload_ty :: sema_pattern_unwrap_tags(sema_coverage_payload_type(subject_ty, key, environment, program) ?? next)
         if !sema_coverage_is_closed(payload_ty) -> next
         inner :: groups.get(key) ?? [TPatternShape]{}
+        if payload_ty == .List(_) || payload_ty == .FixedList(_, _) || payload_ty == .Map(_, _, _) {
+            rows :: loop shape in inner -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
+            if sema_pattern_matrix_complete(rows, [Type]{payload_ty}, environment, program) {
+                &keys.push(key)
+                key_set[key] = true
+            }
+            next
+        }
         inner_ranges := [SemaIntegerRange]{}
-        inner_keys :: sema_coverage_keys(payload_ty, inner, environment, &inner_ranges)
-        if sema_coverage_missing(payload_ty, inner_keys, environment).len() == 0 {
+        inner_keys :: sema_coverage_keys(payload_ty, inner, environment, program, &inner_ranges)
+        if sema_coverage_missing(payload_ty, inner_keys, environment, program).len() == 0 {
             &keys.push(key)
             key_set[key] = true
         }
@@ -247,24 +260,24 @@ fn sema_coverage_compiler_enum(ty: Type) -> [String]? {
     None
 }
 
-fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment) -> [String] Never! {
+fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] Never! {
     missing := [String]{}
     if subject_ty == {
         .Named(_) | .Apply(_, _) -> {
-            graph_option :: environment.registration_graph
-            graph :: graph_option ?? return missing
-            nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? {
-                variants :: sema_coverage_compiler_enum(subject_ty) ?? return missing
-                loop variant in variants {
-                    if !sema_coverage_has_key(keys, variant) -> &missing.push(variant)
+            if program.registration_graph == .Val(graph) {
+                nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, subject_ty) ?? {
+                    variants :: sema_coverage_compiler_enum(subject_ty) ?? return missing
+                    loop variant in variants {
+                        if !sema_coverage_has_key(keys, variant) -> &missing.push(variant)
+                    }
+                    return missing
                 }
-                return missing
-            }
-            nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
-            if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
-            key_set :: sema_coverage_key_set(keys)
-            loop row in nominal.variants {
-                if !sema_coverage_leaf_covered(key_set, row.symbol.name) -> &missing.push(row.symbol.name)
+                nominal :: graph.modules[nominal_row.module_index].nominals[nominal_row.row]
+                if nominal.kind != SemaRegistrationNominalKind.Enum -> return missing
+                key_set :: sema_coverage_key_set(keys)
+                loop row in nominal.variants {
+                    if !sema_coverage_leaf_covered(key_set, row.symbol.name) -> &missing.push(row.symbol.name)
+                }
             }
         }
         .Option(_) -> {
@@ -288,14 +301,14 @@ fn sema_coverage_missing(subject_ty: Type, keys: [String], environment: SemaScop
 
 // D-OUTCOME-SHAPE1=A: a `T? E!` subject reports its missing success states
 // directly (`Val(...)`, `None`), never as `Ok(...)`.
-fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [String], environment: SemaScopeEnvironment) -> [String] {
+fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [String], environment: SemaScopeEnvironment, program: SemaProgramTables) -> [String] {
     missing := [String]{}
     if !sema_coverage_has_key(keys, "Ok") {
         inner := [TPatternShape]{}
         seen := [String]{}
         loop shape in shapes -> sema_coverage_collect_nested(shape, "Ok", &inner, &seen)
         inner_ranges := [SemaIntegerRange]{}
-        inner_keys :: sema_coverage_keys(ok, inner, environment, &inner_ranges)
+        inner_keys :: sema_coverage_keys(ok, inner, environment, program, &inner_ranges)
         if !sema_coverage_has_key(inner_keys, "Val") -> &missing.push("Val(...)")
         if !sema_coverage_has_key(inner_keys, "None") -> &missing.push("None")
     }
@@ -305,7 +318,7 @@ fn sema_coverage_three_state_missing(ok: Type, shapes: [TPatternShape], keys: [S
 
 // Port of the Rust checker's `check_pattern_coverage_complete`: reports E0307
 // for an else-less table whose checked pattern conditions leave a case open.
-pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
+fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
     table :: sema_coverage_table(conditions) ?? return
     // D-PARSESTR1 / D-BINPAT1 (Rust `report_refutable_pattern_without_else`):
     // a text or byte arm can always fail to match, so the table needs `else`.
@@ -329,8 +342,19 @@ pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Sp
         }
     }
     subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)
+    matrix := false
+    loop shape in table.shapes {
+        if sema_pattern_matrix_needed(shape) -> matrix = true
+    }
+    if matrix {
+        rows :: loop shape in table.shapes -> SemaPatternCoverageRow{cells: [SemaPatternCoverageCell]{SemaPatternCoverageCell.Shape{shape: shape}}}
+        if sema_pattern_matrix_complete(rows, [Type]{subject_ty}, environment, program) -> return
+        witness :: sema_pattern_collection_witness(subject_ty, rows, environment, program)
+        &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {witness}", "pattern arms must cover every collection shape", "add an arm for `{witness}` or an `else` arm"))
+        return
+    }
     ranges := [SemaIntegerRange]{}
-    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, &ranges)
+    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, program, &ranges)
     interval :: sema_coverage_integer_interval(subject_ty)
     if interval == .Val(bounds) {
         if sema_coverage_ranges_cover(ranges, bounds.lo, bounds.hi) -> return
@@ -340,10 +364,10 @@ pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Sp
         &diagnostics.push(sema_error("E0307", span, "this `if` over `{type_name(subject_ty)}` has no `else` arm — range arms can't cover every value", domain_note, "add `else -> {{ … }}` to handle values not matched by any range"))
         return
     }
-    missing := sema_coverage_missing(subject_ty, keys, environment)
+    missing := sema_coverage_missing(subject_ty, keys, environment, program)
     if subject_ty == .Result(ok, _) {
         ok_ty :: sema_pattern_unwrap_tags(ok)
-        if sema_pattern_is_option(ok_ty) -> missing = sema_coverage_three_state_missing(ok_ty, table.shapes, keys, environment)
+        if sema_pattern_is_option(ok_ty) -> missing = sema_coverage_three_state_missing(ok_ty, table.shapes, keys, environment, program)
     }
     if missing.len() == 0 -> return
     names :: missing.join(", ")
@@ -354,41 +378,141 @@ pub fn sema_coverage_check_table(conditions: [TExpr], multi_head: Bool, span: Sp
     &diagnostics.push(sema_error("E0307", span, "this `if` doesn't cover every case — missing: {names}", "every arm here is a pattern test, so each variant must appear once", "add an arm for: {names}"))
 }
 
+// Rust switches.rs `note_pattern_coverage`: an arm head that an earlier full
+// arm, or an ancestor group arm (D-TAG1), already covers is unreachable —
+// E0365 over an anonymous union subject, L0301 otherwise.
+fn sema_coverage_check_unreachable_arms(conditions: [TExpr], multi_head: Bool, diagnostics: &[Diagnostic]) {
+    table :: sema_coverage_table(conditions) ?? return
+    union_subject :: sema_pattern_unwrap_tags(table.subject.ty) == .Union(_)
+    covered := [String]{}
+    loop shape in table.shapes {
+        full := [String]{}
+        partial := [String]{}
+        sema_coverage_arm_heads(shape, &full, &partial)
+        heads := [String]{}
+        full_heads := [Bool]{}
+        loop name in full {
+            &heads.push(name)
+            &full_heads.push(true)
+        }
+        loop name in partial {
+            &heads.push(name)
+            &full_heads.push(false)
+        }
+        loop (index, variant) in heads {
+            already := false
+            loop earlier in covered {
+                if earlier == variant || variant.starts_with("{earlier}.") -> already = true
+            }
+            if {
+                already -> {
+                    what :: if multi_head -> "head `{variant}` is unreachable — an earlier head already handles it" else -> "arm `{variant}` is unreachable — that case is already handled"
+                    why :: if multi_head -> "multi-head declaration order selects the first matching head" else -> "every earlier arm already covers this pattern"
+                    fix :: if multi_head -> "remove this head or merge it with the earlier head" else -> "remove this arm or merge it with the one above"
+                    span :: sema_coverage_shape_span(shape)
+                    &diagnostics.push(if union_subject -> sema_error("E0365", span, what, why, fix) else -> sema_lint("L0301", span, what, why, fix))
+                }
+                full_heads[index] -> &covered.push(variant)
+            }
+        }
+    }
+}
+
+// Rust `collect_covered_variant_names` / `collect_partial_variant_names`: the
+// heads one arm covers fully, and the heads it only tests with a nested
+// payload pattern (S31). A range payload slot covers no head.
+fn sema_coverage_arm_heads(shape: TPatternShape, full: &[String], partial: &[String]) {
+    if shape == .Or(alternatives, _) {
+        loop alternative in alternatives -> sema_coverage_arm_heads(alternative, &full, &partial)
+        return
+    }
+    if shape == {
+        .Variant(variant, bindings, _, _) -> {
+            nested := false
+            ranged := false
+            loop binding in bindings {
+                if binding == {
+                    .Nested(_) -> nested = true
+                    .Range(_, _) -> ranged = true
+                    else -> {}
+                }
+            }
+            if nested {
+                &partial.push(variant)
+            } else if !ranged {
+                &full.push(variant)
+            }
+        }
+        .Present(_, _, inner, _) -> sema_coverage_push_head("Val", inner == None, &full, &partial)
+        .Absent(_) -> &full.push("None")
+        .Ok(_, _, inner, _) -> sema_coverage_push_head("Ok", inner == None, &full, &partial)
+        .Err(_, _, inner, _) -> sema_coverage_push_head("Err", inner == None, &full, &partial)
+        else -> {}
+    }
+}
+
+fn sema_coverage_push_head(head: String, full_cover: Bool, full: &[String], partial: &[String]) {
+    if full_cover {
+        &full.push(head)
+    } else {
+        &partial.push(head)
+    }
+}
+
+fn sema_coverage_shape_span(shape: TPatternShape) -> Span Never! {
+    if shape == {
+        .Variant(_, _, _, span) | .Present(_, _, _, span) | .Ok(_, _, _, span) | .Err(_, _, _, span) -> span
+        .Absent(span) -> span
+        .Range(_, _, span) | .Or(_, span) | .Struct(_, _, span) | .List(_, _, span) | .Map(_, _, span) | .Text(_, span) | .Binary(_, span) -> span
+    }
+}
+
 // A pattern arm lowered to an IfLet condition reads, for coverage, as the
 // pattern test it was checked from.
 fn sema_coverage_if_let_value(pattern: TPattern, subject: TExpr) -> TExpr Never! {
-    sema_tir_expr(Type.Bool, TExprKind.PatternMatches{subject: subject, pattern: pattern}, subject.span)
+    sema_tir_node(Type.Bool, TExprKind.PatternMatches{subject: subject, pattern: pattern}, subject.span)
 }
 
 // The value form arrives as a nested `if` chain sharing one span and ending in
 // `NoElse` (checked as `Never("no else arm")`). Collect its checked arm
 // conditions, or None when the chain has a real `else` value.
-pub fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr]? {
-    conditions := [TExpr]{head_condition}
-    current := else_value
-    loop {
-        if current.kind == {
-            .Never(reason) -> {
-                if reason == "no else arm" -> return Val(conditions)
-                return None
-            }
-            .IfExpr(cond, _, _, _, next_value) -> {
-                if current.span != span -> return None
-                if cond == {
-                    .Plain(value) -> &conditions.push(value)
-                    .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
-                    else -> return None
-                }
-                current = next_value
-            }
-            else -> return None
+// The chain is walked through read parameters (one frame per level), so
+// only the collected conditions are copied: holding each level in a local
+// copied the rest of the chain once per level.
+fn sema_coverage_noelse_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr]? {
+    // copy: the result owns each collected condition; the chain stays the caller's.
+    conditions := [TExpr]{head_condition.copy()}
+    if !sema_coverage_noelse_chain_collect(else_value, span, &conditions) -> return None
+    Val(conditions)
+}
+
+fn sema_coverage_noelse_chain_collect(current: TExpr, span: Span, conditions: &[TExpr]) -> Bool Never! {
+    if current.kind == {
+        .Never(reason) -> return reason == "no else arm"
+        .IfExpr(cond, _, _, _, next_value) -> {
+            if current.span != span -> return false
+            if !sema_coverage_chain_condition(cond, &conditions) -> return false
+            return sema_coverage_noelse_chain_collect(next_value, span, &conditions)
         }
+        else -> return false
     }
+}
+
+// Appends the checked condition of one chain level; false for a form the
+// coverage proof does not read.
+fn sema_coverage_chain_condition(cond: TIfCond, conditions: &[TExpr]) -> Bool Never! {
+    if cond == {
+        // copy: the result owns each collected condition.
+        .Plain(value) -> &conditions.push(value.copy())
+        .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
+        else -> return false
+    }
+    true
 }
 
 // True when this `if` level heads (or continues) an else-less dispatch chain:
 // the nested levels share its span and the last one ends in `NoElse`.
-pub fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool Never! {
+fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: Span) -> Bool Never! {
     if else_body.len() != 0 -> return false
     if else_value == {
         .NoElse(_) -> true
@@ -399,7 +523,7 @@ pub fn sema_coverage_is_noelse_chain(else_body: [Stmt], else_value: Expr, span: 
 
 // The statement form lowers the same chain to nested `TStmt.If` levels.
 // Walk the source chain beside it to collect the checked arm conditions.
-pub fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr]? {
+fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr]? {
     conditions := [TExpr]{}
     current_source := source
     current_lowered := lowered
@@ -433,7 +557,7 @@ pub fn sema_coverage_noelse_statement_conditions(source: Expr, lowered: TStmt) -
 
 // L0303 (#3716): the parser-recorded `else` arm of the dispatch table whose
 // chain levels all carry `span`.
-fn sema_coverage_else_arm(environment: SemaScopeEnvironment, span: Span) -> ElseArmSpan? {
+fn sema_coverage_else_arm(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> ElseArmSpan? {
     loop arm in environment.else_arms {
         if arm.table.start == span.start && arm.table.end == span.end -> return Val(arm)
     }
@@ -441,47 +565,44 @@ fn sema_coverage_else_arm(environment: SemaScopeEnvironment, span: Span) -> Else
 }
 
 // True when this `if` level belongs to a dispatch table with an `else` arm.
-pub fn sema_coverage_is_else_table(environment: SemaScopeEnvironment, span: Span) -> Bool {
-    sema_coverage_else_arm(environment, span) != None
+fn sema_coverage_is_else_table(environment: SemaScopeEnvironment, program: SemaProgramTables, span: Span) -> Bool {
+    sema_coverage_else_arm(environment, program, span) != None
 }
 
 // A closed set: an enum, `T?`, `T E!`, or a union. Numbers, text, and
 // structs stay open, so an `else` after their arms can still run.
-fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_coverage_is_closed_set(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if ty == {
         .Option(_) | .Result(_, _) | .Union(_) -> return true
         .Named(_) | .Apply(_, _) -> {}
         else -> return false
     }
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return false
-    nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
-    graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind == SemaRegistrationNominalKind.Enum
+    if program.registration_graph == .Val(graph) {
+        nominal_row :: sema_pattern_nominal_row(graph, environment.module_identity, ty) ?? return sema_coverage_compiler_enum(ty) != None
+        return graph.modules[nominal_row.module_index].nominals[nominal_row.row].kind == SemaRegistrationNominalKind.Enum
+    }
+    false
 }
 
 // The checked arm conditions of a value table with an `else` arm: every level
 // that shares the table's span, stopping at the `else` value.
-pub fn sema_coverage_else_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr] {
-    conditions := [TExpr]{head_condition}
-    current := else_value
-    loop {
-        if current.span != span -> return conditions
-        if current.kind == {
-            .IfExpr(cond, _, _, _, next_value) -> {
-                if cond == {
-                    .Plain(value) -> &conditions.push(value)
-                    .IfLet(pattern, subject) -> &conditions.push(sema_coverage_if_let_value(pattern, subject))
-                    else -> return conditions
-                }
-                current = next_value
-            }
-            else -> return conditions
-        }
+fn sema_coverage_else_chain_conditions(head_condition: TExpr, else_value: TExpr, span: Span) -> [TExpr] {
+    // copy: the result owns each collected condition; the chain stays the caller's.
+    conditions := [TExpr]{head_condition.copy()}
+    sema_coverage_else_chain_collect(else_value, span, &conditions)
+    conditions
+}
+
+fn sema_coverage_else_chain_collect(current: TExpr, span: Span, conditions: &[TExpr]) Never! {
+    if current.span != span -> return
+    if current.kind == .IfExpr(cond, _, _, _, next_value) {
+        if !sema_coverage_chain_condition(cond, &conditions) -> return
+        sema_coverage_else_chain_collect(next_value, span, &conditions)
     }
 }
 
 // The statement form of the same table, walked beside its lowered levels.
-pub fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr] {
+fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> [TExpr] {
     conditions := [TExpr]{}
     current_source := source
     current_lowered := lowered
@@ -513,15 +634,299 @@ pub fn sema_coverage_else_statement_conditions(source: Expr, lowered: TStmt) -> 
 // L0303 (#3716): an `else` after pattern arms that already cover a closed set
 // can never run, and a case added later would fall into it silently instead
 // of raising E0307. Report the arm with the Safe edit that deletes it.
-pub fn sema_coverage_check_redundant_else(conditions: [TExpr], span: Span, environment: SemaScopeEnvironment, diagnostics: &[Diagnostic]) {
-    arm :: sema_coverage_else_arm(environment, span) ?? return
+fn sema_coverage_check_redundant_else(conditions: [TExpr], span: Span, environment: SemaScopeEnvironment, program: SemaProgramTables, diagnostics: &[Diagnostic]) {
+    arm :: sema_coverage_else_arm(environment, program, span) ?? return
     table :: sema_coverage_table(conditions) ?? return
     subject_ty :: sema_pattern_unwrap_tags(table.subject.ty)
-    if !sema_coverage_is_closed_set(subject_ty, environment) -> return
+    if !sema_coverage_is_closed_set(subject_ty, environment, program) -> return
     ranges := [SemaIntegerRange]{}
-    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, &ranges)
-    if sema_coverage_missing(subject_ty, keys, environment).len() != 0 -> return
+    keys :: sema_coverage_keys(subject_ty, table.shapes, environment, program, &ranges)
+    if sema_coverage_missing(subject_ty, keys, environment, program).len() != 0 -> return
     shown :: type_name(subject_ty)
     diagnostic :: sema_lint("L0303", arm.arm, "this `else` can never run; every case of `{shown}` is already handled", "if a case is added to `{shown}` later, it would go to this `else` silently instead of the compiler asking you to handle it", "delete the `else` arm")
     &diagnostics.push(diagnostic_with_edit(diagnostic, TextEdit{span: arm.delete, new_text: ""}))
+}
+
+enum SemaPatternCoverageCell {
+    Any
+    Shape(shape: TPatternShape)
+    Refutable
+}
+
+struct SemaPatternCoverageRow {
+    cells: [SemaPatternCoverageCell]
+}
+
+struct SemaPatternCoverageConstructor {
+    name: String
+    payload: [Type]
+}
+
+fn sema_pattern_matrix_slot(slot: TPatternBinding) -> SemaPatternCoverageCell Never! {
+    if slot == {
+        .Bind(_, _) | .Wildcard -> SemaPatternCoverageCell.Any
+        .Nested(inner) -> SemaPatternCoverageCell.Shape{shape: inner.shape}
+        else -> SemaPatternCoverageCell.Refutable
+    }
+}
+
+fn sema_pattern_matrix_expand(rows: [SemaPatternCoverageRow]) -> [SemaPatternCoverageRow] Never! {
+    expanded := [SemaPatternCoverageRow]{}
+    loop row in rows {
+        if row.cells.len() > 0 && row.cells[0] == .Shape(shape) && shape == .Or(alternatives, _) {
+            loop alternative in alternatives {
+                cells := row.cells
+                cells[0] = SemaPatternCoverageCell.Shape{shape: alternative}
+                loop subrow in sema_pattern_matrix_expand([SemaPatternCoverageRow]{SemaPatternCoverageRow{cells: cells}}) -> &expanded.push(subrow)
+            }
+        } else {
+            &expanded.push(row)
+        }
+    }
+    expanded
+}
+
+fn sema_pattern_matrix_tail(types: [Type]) -> [Type] Never! {
+    tail := [Type]{}
+    loop (index, ty) in types {
+        if index > 0 -> &tail.push(ty)
+    }
+    tail
+}
+
+fn sema_pattern_matrix_append_tail(cells: [SemaPatternCoverageCell], row: SemaPatternCoverageRow) -> SemaPatternCoverageRow Never! {
+    result := cells
+    loop (index, cell) in row.cells {
+        if index > 0 -> &result.push(cell)
+    }
+    SemaPatternCoverageRow{cells: result}
+}
+
+fn sema_pattern_matrix_default(rows: [SemaPatternCoverageRow]) -> [SemaPatternCoverageRow] Never! {
+    defaults := [SemaPatternCoverageRow]{}
+    loop row in rows {
+        if row.cells.len() > 0 && row.cells[0] == .Any -> &defaults.push(sema_pattern_matrix_append_tail([SemaPatternCoverageCell]{}, row))
+    }
+    defaults
+}
+
+fn sema_pattern_matrix_list_rows(rows: [SemaPatternCoverageRow], length: Int, long: Bool) -> [SemaPatternCoverageRow] Never! {
+    specialized := [SemaPatternCoverageRow]{}
+    loop row in rows {
+        if row.cells.len() == 0 -> next
+        cells := [SemaPatternCoverageCell]{}
+        first :: row.cells[0]
+        if first == {
+            .Any -> loop _ in 0..<length -> &cells.push(SemaPatternCoverageCell.Any)
+            .Shape(shape) -> if shape == .List(items, rest, _) {
+                if rest == None && (long || items.len() != length) -> next
+                if items.len() > length -> next
+                loop index in 0..<length {
+                    &cells.push(if index < items.len() -> sema_pattern_matrix_slot(items[index]) else -> SemaPatternCoverageCell.Any)
+                }
+            } else {
+                next
+            }
+            .Refutable -> next
+        }
+        &specialized.push(sema_pattern_matrix_append_tail(cells, row))
+    }
+    specialized
+}
+
+fn sema_pattern_matrix_list_complete(rows: [SemaPatternCoverageRow], elem: Type, length: Int, long: Bool, tail: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    types := (loop _ in 0..<length -> elem)
+    loop ty in tail -> &types.push(ty)
+    sema_pattern_matrix_complete(sema_pattern_matrix_list_rows(rows, length, long), types, environment, program)
+}
+
+fn sema_pattern_matrix_list_limit(rows: [SemaPatternCoverageRow]) -> Int Never! {
+    limit := 0
+    loop row in rows {
+        if row.cells.len() > 0 && row.cells[0] == .Shape(shape) && shape == .List(items, _, _) {
+            if items.len() > limit -> limit = items.len()
+        }
+    }
+    limit
+}
+
+fn sema_pattern_matrix_map_total(shape: TPatternShape) -> Bool Never! {
+    if shape == .Map(entries, rest, _) {
+        if !rest -> return false
+        loop entry in entries {
+            if !entry.optional || sema_pattern_matrix_slot(entry.slot) != SemaPatternCoverageCell.Any -> return false
+        }
+        return true
+    }
+    false
+}
+
+fn sema_pattern_matrix_constructors(ty: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> [SemaPatternCoverageConstructor] Never! {
+    if ty == {
+        .Option(inner) -> {
+            return [SemaPatternCoverageConstructor]{
+                SemaPatternCoverageConstructor{name: "Val", payload: [Type]{inner}},
+                SemaPatternCoverageConstructor{name: "None", payload: [Type]{}},
+            }
+        }
+        .Result(ok, err) -> {
+            return [SemaPatternCoverageConstructor]{
+                SemaPatternCoverageConstructor{name: "Ok", payload: [Type]{ok}},
+                SemaPatternCoverageConstructor{name: "Err", payload: [Type]{err}},
+            }
+        }
+        else -> {}
+    }
+    names :: sema_coverage_missing(ty, [String]{}, environment, program)
+    constructors := [SemaPatternCoverageConstructor]{}
+    ignored := [Diagnostic]{}
+    loop name in names {
+        payload :: sema_pattern_payload(ty, name, environment, program, Span{start: 0, end: 0}, &ignored)
+        &constructors.push(SemaPatternCoverageConstructor{name: name, payload: payload.types})
+    }
+    constructors
+}
+
+fn sema_pattern_matrix_head(shape: TPatternShape) -> String? Never! {
+    if shape == {
+        .Variant(name, _, _, _) -> Val(name)
+        .Present(_, _, _, _) -> Val("Val")
+        .Absent(_) -> Val("None")
+        .Ok(_, _, _, _) -> Val("Ok")
+        .Err(_, _, _, _) -> Val("Err")
+        else -> None
+    }
+}
+
+fn sema_pattern_matrix_constructor_rows(rows: [SemaPatternCoverageRow], constructor: SemaPatternCoverageConstructor) -> [SemaPatternCoverageRow] Never! {
+    specialized := [SemaPatternCoverageRow]{}
+    loop row in rows {
+        if row.cells.len() == 0 -> next
+        cells := (loop _ in constructor.payload -> SemaPatternCoverageCell.Any)
+        if row.cells[0] == {
+            .Any -> {}
+            .Refutable -> next
+            .Shape(shape) -> {
+                head :: sema_pattern_matrix_head(shape) ?? next
+                if head != constructor.name && !constructor.name.starts_with("{head}.") -> next
+                if head == constructor.name {
+                    if shape == {
+                        .Variant(_, slots, _, _) -> loop (index, slot) in slots {
+                            if index < cells.len() -> cells[index] = sema_pattern_matrix_slot(slot)
+                        }
+                        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+                            if inner == .Val(nested) && cells.len() > 0 -> cells[0] = SemaPatternCoverageCell.Shape{shape: nested.shape}
+                        }
+                        else -> {}
+                    }
+                }
+            }
+        }
+        &specialized.push(sema_pattern_matrix_append_tail(cells, row))
+    }
+    specialized
+}
+
+fn sema_pattern_matrix_complete(written_rows: [SemaPatternCoverageRow], types: [Type], environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
+    if types.len() == 0 -> return written_rows.len() > 0
+    rows :: sema_pattern_matrix_expand(written_rows)
+    if rows.len() == 0 -> return false
+    tail :: sema_pattern_matrix_tail(types)
+    defaults :: sema_pattern_matrix_default(rows)
+    if sema_pattern_matrix_complete(defaults, tail, environment, program) -> return true
+    ty :: sema_pattern_unwrap_tags(types[0])
+    if ty == {
+        .List(elem) -> {
+            limit :: sema_pattern_matrix_list_limit(rows)
+            loop length in 0..limit {
+                if !sema_pattern_matrix_list_complete(rows, elem, length, false, tail, environment, program) -> return false
+            }
+            return sema_pattern_matrix_list_complete(rows, elem, limit + 1, true, tail, environment, program)
+        }
+        .FixedList(elem, measure) -> {
+            length :: measure_literal_value(measure) ?? return false
+            return sema_pattern_matrix_list_complete(rows, elem, length, false, tail, environment, program)
+        }
+        .Map(_, _, _) -> {
+            settled := [SemaPatternCoverageRow]{}
+            loop row in rows {
+                if row.cells.len() > 0 && row.cells[0] == .Shape(shape) && sema_pattern_matrix_map_total(shape) {
+                    &settled.push(sema_pattern_matrix_append_tail([SemaPatternCoverageCell]{}, row))
+                }
+            }
+            return sema_pattern_matrix_complete(settled, tail, environment, program)
+        }
+        else -> {}
+    }
+    if program.registration_graph == .Val(graph) && sema_pattern_nominal_row(graph, environment.module_identity, ty) == .Val(owner) {
+        nominal :: graph.modules[owner.module_index].nominals[owner.row]
+        if nominal.kind == SemaRegistrationNominalKind.Struct {
+            field_types := [Type]{}
+            generic_names :: loop parameter in nominal.generic_params -> parameter.name
+            args :: sema_pattern_subject_args(ty)
+            loop field in nominal.fields -> &field_types.push(sema_inference_substitute_type(field.ty, generic_names, args))
+            specialized := [SemaPatternCoverageRow]{}
+            loop row in rows {
+                if row.cells.len() == 0 -> next
+                cells := (loop _ in field_types -> SemaPatternCoverageCell.Any)
+                if row.cells[0] == .Shape(shape) && shape == .Struct(written, _, _) {
+                    loop (index, declared) in nominal.fields {
+                        loop field in written {
+                        if field == {
+                            .Bind(_, _, _) -> {}
+                            .Value(name, _, _) -> if name == declared.symbol.name -> cells[index] = SemaPatternCoverageCell.Refutable
+                            .Nested(name, nested, _) -> if name == declared.symbol.name -> cells[index] = SemaPatternCoverageCell.Shape{shape: nested.shape}
+                        }
+                        }
+                    }
+                } else if row.cells[0] != SemaPatternCoverageCell.Any -> next
+                &specialized.push(sema_pattern_matrix_append_tail(cells, row))
+            }
+            loop rest_ty in tail -> &field_types.push(rest_ty)
+            return sema_pattern_matrix_complete(specialized, field_types, environment, program)
+        }
+    }
+    constructors :: sema_pattern_matrix_constructors(ty, environment, program)
+    if constructors.len() == 0 -> return false
+    loop constructor in constructors {
+        payload := constructor.payload
+        loop rest_ty in tail -> &payload.push(rest_ty)
+        if !sema_pattern_matrix_complete(sema_pattern_matrix_constructor_rows(rows, constructor), payload, environment, program) -> return false
+    }
+    true
+}
+
+fn sema_pattern_collection_witness(ty: Type, rows: [SemaPatternCoverageRow], environment: SemaScopeEnvironment, program: SemaProgramTables) -> String Never! {
+    if ty == .List(elem) {
+        limit :: sema_pattern_matrix_list_limit(rows)
+        loop length in 0..limit {
+            if !sema_pattern_matrix_list_complete(rows, elem, length, false, [Type]{}, environment, program) {
+                items :: loop _ in 0..<length -> "_"
+                return "[{items.join(", ")}]"
+            }
+        }
+        return "[_, ..]"
+    }
+    if ty == .Map(_, _, _) -> return "a map with other keys"
+    "_"
+}
+
+fn sema_pattern_matrix_needed(shape: TPatternShape) -> Bool Never! {
+    if shape == {
+        .Struct(_, _, _) | .List(_, _, _) | .Map(_, _, _) -> true
+        .Variant(_, slots, _, _) -> {
+            loop slot in slots {
+                if slot == .Nested(inner) && sema_pattern_matrix_needed(inner.shape) -> return true
+            }
+            false
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> if inner == .Val(nested) -> sema_pattern_matrix_needed(nested.shape) else -> false
+        .Or(alternatives, _) -> {
+            loop alternative in alternatives {
+                if sema_pattern_matrix_needed(alternative) -> return true
+            }
+            false
+        }
+        else -> false
+    }
 }

@@ -1,0 +1,13 @@
+# Port of tests/cli_parts/commands.rs:266-277; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+# PENDING-GRAMMAR(batch-four): history filtered line predicates; pure source rustc availability guard erased for Jet-native execution.
+fixture: fixtures/test_json_result_unchanged_on_optional_history_failure
+requires: os:unix
+mkdir: .jet/records
+chmod: .jet/records 555
+step: jet test --json
+unset: JET_RECEIPT_BYPASS
+exit: 0
+stdout: !~ "history:" # original predicate
+stdout.trim_start: ^= "{" # original predicate
+chmod: .jet/records 755

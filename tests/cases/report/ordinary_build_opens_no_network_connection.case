@@ -1,0 +1,11 @@
+# tests/report.rs::ordinary_build_opens_no_network_connection
+# Original exact network-syscall predicates; PENDING-GRAMMAR(batch-four line predicates); PENDING-SAME-HEAD.
+requires: os:linux
+requires: tool:strace
+fixture: ordinary_build_opens_no_network_connection.fixture
+step: strace -V
+step build: strace -f -qq -e trace=network -o {work}/build.network.trace {jet} build main.jet
+exit: 0
+file.filter(where !~ "--- SIG"): build.network.trace each-line where (~ "socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0," && $= "= 0") || (~ "recvfrom(" && $= "\", 8, 0, NULL, NULL) = 0") || ~ "sendfile(" # original unexpected.is_empty
+capture: spawn_sockets = lines file.filter(where !~ "--- SIG").filter(where ~ "socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0," && $= "= 0") build.network.trace
+file.filter(where !~ "--- SIG").filter(where ~ "recvfrom(" && $= "\", 8, 0, NULL, NULL) = 0"): build.network.trace lines = {cap:spawn_sockets} # original spawn_sockets == spawn_replies

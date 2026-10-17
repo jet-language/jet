@@ -1,0 +1,52 @@
+# HAND-PORT tests/jetpack_engine.rs:4835-4968 local_catalog_mixes_native_recipe_and_nix_mapping
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: local_catalog_mixes_native_recipe_and_nix_mapping.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: catalog
+artifact: peer
+copy: {root}/Jetpack/Nix/Source/Index/IndexCodec.jet peer/IndexCodec.jet
+step: jet build peer
+exit: 0
+spawn peer: built serve {work}/root {work}/peer.port {work}/nar-source normal {work}/catalog
+await: file peer.port timeout 30s
+capture: port = text file peer.port
+step: jet run native-setup.jet -- {work}/catalog {work}/project
+exit: 0
+step: jetpack build --no-color --trust --local-nix-catalog {work}/catalog
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+file: project/.jet/lock ~ "catalog-tier = \"local-unofficial\"" # original contains predicate
+file: project/.jet/lock ~ "catalog-trust = \"unverified\"" # original contains predicate
+step: jetpack explain ripgrep@nixpkgs --json --no-color
+cwd: project
+exit: 0
+capture: id stdout doc $.explain.entry.id
+capture: receipt stdout doc $.explain.entry.receipt
+json: stdout doc $.explain.provider.provider = "nix"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+step: jetpack explain native-tool --json --no-color
+cwd: project
+exit: 0
+capture: id stdout doc $.explain.entry.id
+capture: receipt stdout doc $.explain.entry.receipt
+capture: out stdout doc $.explain.entry.output_path
+json: stdout doc $.explain.provider.provider = "jetpackage"
+json: stdout doc $.explain.provider.producer_facts["source.kind"] = "local-unofficial-catalog"
+json: stdout doc $.explain.provider.producer_facts["nix.index.tier"] = "local-unofficial"
+json: stdout doc $.explain.provider.producer_facts["nix.index.signature-chain"] = "none"
+json: stdout doc $.explain.provider.producer_facts !has "nix.drv_path" # original contains_key negation
+file: {cap:out}/bin/native-tool is-file
+file: root/hangar/receipts/{cap:receipt} ~ "756e7665726966696564" # original contains predicate
+step: jetpack audit --no-color
+cwd: project
+exit: 0
+stdout+stderr: ~ "{cap:id}" # original contains predicate
+step: built stop {cap:port}
+exit: 0
+wait: peer
+exit: 0
+

@@ -2,7 +2,7 @@
 //! + `core.encoding.json.{canonical,events}`, ported verbatim into the
 //! comptime/REPL tier-0 interpreter so they match AOT byte-for-byte (R12
 //! parity). Sources (std-only, I6, no changes to logic — only the target
-//! value type changes from `jet_std::DataTree` to the canonical `DataTree`
+//! value type changes from `jet_std::Dyn` to the canonical `Dyn`
 //! `CtValue` shape `JSONInterp.rs` established for `core.encoding.json`):
 //!
 //! - csv: `jet_ring_csv_parse`/`jet_ring_csv_render`,
@@ -19,8 +19,8 @@
 //!   same file.
 //!
 //! sema (`fixed_sigs.rs`) types `core.encoding.{toml,yaml,xml,cbor}`'s
-//! parsed value as the same `DataTree` type as `core.encoding.json` — AOT
-//! backs every one of these with the single `jet_std::DataTree`. Comptime
+//! parsed value as the same `Dyn` type as `core.encoding.json` — AOT
+//! backs every one of these with the single `jet_std::Dyn`. Comptime
 //! mirrors that with the same canonical `CtValue::Enum` (`JSONInterp::json_variant`/
 //! `json_payload`) every accessor method (`.field`/`.at`/...) already reads,
 //! so no new value machinery is needed — just new parse/render walkers that
@@ -65,12 +65,12 @@ fn encoding_error_struct(format: &str, line: i64, message: String) -> CtValue {
 
 // ── core.encoding.toml ──────────────────────────────────────────────────────
 // Ported from `TOML.rs`'s `pub mod toml`, target type swapped from
-// `DataTree` to the `JSON`-tagged `CtValue`.
+// `Dyn` to the `JSON`-tagged `CtValue`.
 
 #[derive(Clone, Debug, PartialEq)]
 enum TOMLValue {
     String(String),
-    Integer(i64),
+    Number(String),
     Float(f64),
     Boolean(bool),
     Datetime(String),
@@ -86,32 +86,24 @@ enum TOMLItem {
 
 pub(super) fn toml_parse(raw: &str) -> Result<CtValue, CtValue> {
     let mut p = TOMLParser {
-        chars: raw.chars().collect(),
-        pos: 0,
-        line: 1,
-        current_path_len: 0,
+        chars: raw.chars().collect(), pos: 0, line: 1, current_path_len: 0,
     };
     let mut items = Vec::new();
     loop {
         p.skip_between_statements();
-        if p.peek().is_none() {
-            break;
-        }
-        if let Some(item) = p
-            .statement()
-            .map_err(|e| encoding_error_struct("TOML", e.line as i64, e.message))?
-        {
-            if let TOMLItem::Header { path, .. } = &item {
-                p.current_path_len = path.len();
-            }
-            items.push(item);
+        if p.peek().is_none() { break; }
+        let line = p.line;
+        if let Some(item) = p.statement()
+            .map_err(|e| encoding_error_struct("TOML", e.line as i64, e.message))? {
+            if let TOMLItem::Header { path, .. } = &item { p.current_path_len = path.len(); }
+            items.push((line, item));
         }
     }
-    Ok(toml_assemble(items))
+    toml_assemble(items).map_err(|(line, message)| encoding_error_struct("TOML", line as i64, message))
 }
 
 // A tagged `JSON` `Object` whose payload keeps insertion order — AOT's
-// `DataTree::Object(Vec<…>)` does the same; a sorted `BTreeMap` reordered
+// `Dyn::Object(Vec<…>)` does the same; a sorted `BTreeMap` reordered
 // TOML keys (e.g. `port` before `title`) and broke #777 corpus differential.
 fn json_object(entries: Vec<(String, CtValue)>) -> CtValue {
     json_variant(
@@ -151,10 +143,10 @@ fn json_array_items(v: &CtValue) -> Option<Vec<CtValue>> {
     }
 }
 
-fn toml_assemble(items: Vec<TOMLItem>) -> CtValue {
+fn toml_assemble(items: Vec<(usize, TOMLItem)>) -> Result<CtValue, (usize, String)> {
     let mut root = json_object(Vec::new());
     let mut current: Vec<String> = Vec::new();
-    for item in items {
+    for (line, item) in items {
         match item {
             TOMLItem::Header { path, array } => {
                 if array {
@@ -165,17 +157,17 @@ fn toml_assemble(items: Vec<TOMLItem>) -> CtValue {
                 current = path;
             }
             TOMLItem::KeyVal { path, value } => {
-                toml_set_key(&mut root, &current, &path, toml_value_to_json(value));
+                toml_set_key(&mut root, &current, &path, toml_value_to_json(value)).map_err(|message| (line, message))?;
             }
         }
     }
-    root
+    Ok(root)
 }
 
 // Ensure a table exists at `path` (creating empty tables along the way, but
 // never clobbering a table that already has keys) — used for a bare
 // `[table]` header with no keys under it yet. A value-typed
-// re-implementation of the AOT version's `&mut DataTree` walk (which
+// re-implementation of the AOT version's `&mut Dyn` walk (which
 // mutates in place via live aliasing that doesn't fit an immutable-by-value
 // `CtValue` tree directly); behaviorally identical output (`descend into
 // the last element of an existing array-of-tables` included).
@@ -207,25 +199,26 @@ fn toml_ensure_table(node: &CtValue, path: &[String]) -> CtValue {
     json_object(entries)
 }
 
-fn toml_set_key(root: &mut CtValue, current: &[String], key_path: &[String], value: CtValue) {
+fn toml_set_key(root: &mut CtValue, current: &[String], key_path: &[String], value: CtValue) -> Result<(), String> {
     let mut full: Vec<String> = current.to_vec();
     full.extend_from_slice(&key_path[..key_path.len() - 1]);
     let fk = key_path[key_path.len() - 1].clone();
-    *root = toml_set_at_path(root, &full, &fk, value);
+    *root = toml_set_at_path(root, &full, &fk, value)?;
+    Ok(())
 }
 
 // Rebuild `root` with `value` set at `path.field`, creating tables along the
 // way. Recursive-by-value (immutable `CtValue`) rewrite of the AOT
-// `&mut DataTree` walk, which needs live mutable aliasing that doesn't fit a
+// `&mut Dyn` walk, which needs live mutable aliasing that doesn't fit a
 // value-typed `CtValue` tree as directly — behaviorally identical output.
-fn toml_set_at_path(root: &CtValue, path: &[String], field: &str, value: CtValue) -> CtValue {
+fn toml_set_at_path(root: &CtValue, path: &[String], field: &str, value: CtValue) -> Result<CtValue, String> {
     if path.is_empty() {
         let mut entries = json_object_entries(root).unwrap_or_default();
-        match entries.iter_mut().find(|(k, _)| k == field) {
-            Some(slot) => slot.1 = value,
-            None => entries.push((field.to_string(), value)),
+        if entries.iter().any(|(key, _)| key == field) {
+            return Err(format!("duplicate key `{field}`"));
         }
-        return json_object(entries);
+        entries.push((field.to_string(), value));
+        return Ok(json_object(entries));
     }
     let (seg, rest) = (path[0].clone(), &path[1..]);
     let mut entries = json_object_entries(root).unwrap_or_default();
@@ -236,20 +229,20 @@ fn toml_set_at_path(root: &CtValue, path: &[String], field: &str, value: CtValue
                 let mut items = json_array_items(&entries[idx].1).unwrap();
                 let last_idx = items.len().saturating_sub(1);
                 if let Some(last) = items.get(last_idx).cloned() {
-                    items[last_idx] = toml_set_at_path(&last, rest, field, value);
+                    items[last_idx] = toml_set_at_path(&last, rest, field, value)?;
                 }
                 entries[idx].1 = json_array(items);
             } else {
-                let updated = toml_set_at_path(&entries[idx].1, rest, field, value);
+                let updated = toml_set_at_path(&entries[idx].1, rest, field, value)?;
                 entries[idx].1 = updated;
             }
         }
         None => {
-            let child = toml_set_at_path(&json_object(Vec::new()), rest, field, value);
+            let child = toml_set_at_path(&json_object(Vec::new()), rest, field, value)?;
             entries.push((seg, child));
         }
     }
-    json_object(entries)
+    Ok(json_object(entries))
 }
 
 fn toml_push_array_table(root: &mut CtValue, path: &[String]) {
@@ -297,7 +290,7 @@ fn toml_push_array_at(root: &CtValue, path: &[String], field: &str) -> CtValue {
 fn toml_value_to_json(v: TOMLValue) -> CtValue {
     match v {
         TOMLValue::String(s) => json_variant("Text", Some(CtValue::Str(s))),
-        TOMLValue::Integer(n) => json_variant("Int", Some(CtValue::Int(n))),
+        TOMLValue::Number(text) => json_variant("Number", Some(CtValue::Str(text))),
         TOMLValue::Float(value) => json_variant("Float", Some(CtValue::Float(CtFloat::f64(value)))),
         TOMLValue::Boolean(b) => json_variant("Bool", Some(CtValue::Bool(b))),
         TOMLValue::Datetime(s) => json_variant("Text", Some(CtValue::Str(s))),
@@ -819,7 +812,11 @@ impl TOMLParser {
             }
             self.skip_inline_ws();
             let value = self.value(depth + 1)?;
-            entries.push((path.join("."), value));
+            let key = path.join(".");
+            if entries.iter().any(|(name, _)| name == &key) {
+                return Err(self.err(format!("duplicate key `{key}`")));
+            }
+            entries.push((key, value));
             self.skip_inline_ws();
             match self.bump() {
                 Some(',') => continue,
@@ -907,7 +904,6 @@ impl TOMLParser {
                 }
             }
         }
-        let mut is_float = false;
         while let Some(c) = self.peek() {
             match c {
                 '0'..='9' | '_' => {
@@ -915,25 +911,14 @@ impl TOMLParser {
                     self.pos += 1;
                 }
                 '.' | 'e' | 'E' | '+' | '-' => {
-                    is_float = true;
                     tok.push(c);
                     self.pos += 1;
                 }
                 _ => break,
             }
         }
-        let clean: String = tok.chars().filter(|c| *c != '_').collect();
-        if is_float {
-            clean
-                .parse::<f64>()
-                .map(TOMLValue::Float)
-                .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_number(&tok)))
-        } else {
-            clean
-                .parse::<i64>()
-                .map(TOMLValue::Integer)
-                .map_err(|_| self.err(jet_foundation::EncodingErrors::toml_invalid_number(&tok)))
-        }
+        jet_foundation::JSONNumber::number_lexeme(&tok).map(TOMLValue::Number)
+            .ok_or_else(|| self.err(jet_foundation::EncodingErrors::toml_invalid_number(&tok)))
     }
     fn radix_integer(&mut self) -> Result<TOMLValue, TOMLParseError> {
         self.bump();
@@ -958,8 +943,8 @@ impl TOMLParser {
         if tok.is_empty() {
             return Err(self.err(jet_foundation::EncodingErrors::TOML_EXPECTED_RADIX_DIGITS));
         }
-        i64::from_str_radix(&tok, radix)
-            .map(TOMLValue::Integer)
+        crate::Numeric::CtBigInt::from_radix(&tok, radix)
+            .map(|value| TOMLValue::Number(value.to_string_rep()))
             .map_err(|_| {
                 self.err(jet_foundation::EncodingErrors::toml_invalid_radix_integer(
                     radix, &tok,
@@ -995,7 +980,7 @@ fn quote_json_local(s: &str) -> String {
 
 // ── core.encoding.yaml ──────────────────────────────────────────────────────
 // Ported from `YAML.rs`'s `pub mod yaml`, target type swapped from
-// `DataTree` to the `JSON`-tagged `CtValue` (same convention as toml above).
+// `Dyn` to the `JSON`-tagged `CtValue` (same convention as toml above).
 
 pub(super) fn yaml_parse(raw: &str) -> Result<CtValue, CtValue> {
     let line_count = raw
@@ -1094,6 +1079,7 @@ impl YamlBudget {
 enum FlowError {
     Depth,
     Budget,
+    Syntax(String),
 }
 
 fn yaml_null(budget: &mut YamlBudget) -> Result<CtValue, ()> {
@@ -1116,7 +1102,7 @@ fn yaml_scalar_payload(value: &CtValue) -> Option<usize> {
         return integer.limbs.len().checked_mul(std::mem::size_of::<u32>());
     }
     Some(
-        ["Text", "Number", "TypedText"]
+        ["Text", "Number"]
             .iter()
             .find_map(|variant| match json_payload(value, variant) {
                 Some(CtValue::Str(text)) => Some(text.len()),
@@ -1133,7 +1119,7 @@ fn yaml_clone(value: &CtValue, budget: &mut YamlBudget) -> Result<CtValue, ()> {
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Null" && args.is_empty()
+        } if type_name == "Dyn" && variant == "Null" && args.is_empty()
     ) {
         budget.node(0)?;
     } else if let Some(CtValue::List(items)) = json_payload(value, "Array") {
@@ -1157,15 +1143,16 @@ fn yaml_clone(value: &CtValue, budget: &mut YamlBudget) -> Result<CtValue, ()> {
 }
 
 fn value_is_yaml_scalar(value: &CtValue) -> bool {
-    ["Bool", "Int", "Float", "Number", "TypedText", "Text"]
+    ["Bool", "Int", "Float", "Number", "Text"]
         .iter()
         .any(|variant| json_payload(value, variant).is_some())
 }
 
-fn yaml_flow_message(error: FlowError) -> &'static str {
+fn yaml_flow_message(error: FlowError) -> String {
     match error {
-        FlowError::Depth => "YAML value is nested too deeply",
-        FlowError::Budget => "YAML value exceeds its node or byte budget",
+        FlowError::Depth => "YAML value is nested too deeply".to_string(),
+        FlowError::Budget => "YAML value exceeds its node or byte budget".to_string(),
+        FlowError::Syntax(message) => message,
     }
 }
 struct YAMLParseError {
@@ -1331,6 +1318,9 @@ impl YAMLParser {
             } else {
                 self.parse_inline_value(rest, self.next_depth(depth)?)?
             };
+            if entries.iter().any(|(name, _)| name == &key) {
+                return Err(YAMLParseError { line: line_no, message: format!("duplicate key `{key}`") });
+            }
             entries.push((key, value));
         }
         self.object(entries)
@@ -1415,7 +1405,7 @@ impl YAMLParser {
                 .map(|(value, _)| value)
                 .map_err(|error| YAMLParseError {
                     line: self.pos.saturating_add(1),
-                    message: yaml_flow_message(error).to_string(),
+                    message: yaml_flow_message(error),
                 });
         }
         self.scalar(s)
@@ -1499,7 +1489,10 @@ fn yaml_parse_flow_at(
                 let next_depth = depth.checked_add(1).ok_or(FlowError::Depth)?;
                 let (v, nj) = yaml_parse_flow_at(chars, i, next_depth, budget)?;
                 i = nj;
-                let key = key.trim().to_string();
+                let key = yaml_unquote_key(key.trim());
+                if entries.iter().any(|(name, _)| name == &key) {
+                    return Err(FlowError::Syntax(format!("duplicate key `{key}`")));
+                }
                 budget.bytes(key.len()).map_err(|_| FlowError::Budget)?;
                 entries.push((key, v));
                 while i < chars.len() && chars[i].is_whitespace() {
@@ -1709,15 +1702,9 @@ fn yaml_scalar_value(s: &str) -> CtValue {
         }
         _ => {}
     }
-    if let Ok(n) = crate::Numeric::CtBigInt::from_str(s) {
-        return json_variant("Int", Some(super::Builtins::exact_int_value(n)));
-    }
-    if (s.contains('.') || s.contains('e') || s.contains('E'))
-        && s.chars()
-            .all(|c| c.is_ascii_digit() || matches!(c, '.' | 'e' | 'E' | '+' | '-'))
-    {
-        if let Ok(f) = s.parse::<f64>() {
-            return json_variant("Float", Some(CtValue::Float(CtFloat::f64(f))));
+    if s.starts_with(|ch: char| ch.is_ascii_digit() || matches!(ch, '-' | '+' | '.')) {
+        if let Some(text) = jet_foundation::JSONNumber::number_lexeme(s) {
+            return json_variant("Number", Some(CtValue::Str(text)));
         }
     }
     json_variant("Text", Some(CtValue::Str(s.to_string())))
@@ -1841,7 +1828,7 @@ fn yaml_needs_quote(s: &str) -> bool {
 
 // ── core.encoding.xml ────────────────────────────────────────────────────────
 // Runtime and comptime share one parser/folder. These adapters only translate
-// the ordinary DataTree algebra to and from comptime's tagged representation.
+// the ordinary Dyn algebra to and from comptime's tagged representation.
 fn xml_to_ct(value: jet_foundation::XmlPull::Value) -> CtValue {
     xml_value_to_ct(value)
 }
@@ -1898,7 +1885,7 @@ fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, 
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" && variant == "Null" && args.is_empty()
+        } if type_name == "Dyn" && variant == "Null" && args.is_empty()
     ) {
         return Ok(Value::Null);
     }
@@ -1926,7 +1913,7 @@ fn xml_value_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, 
             .collect();
         return Ok(Value::Object(converted?));
     }
-    Err("XML tree contains a non-DataTree value".to_string())
+    Err("XML tree contains a non-Dyn value".to_string())
 }
 
 pub(super) fn xml_from_ct(value: &CtValue) -> Result<jet_foundation::XmlPull::Value, String> {
@@ -2116,6 +2103,38 @@ fn xml_options(
     Ok(options)
 }
 
+fn xml_render_error_value(error: jet_foundation::XmlPull::Error) -> CtValue {
+    CtValue::Struct {
+        type_name: "XMLError".to_string(),
+        fields: vec![
+            (
+                "kind".to_string(),
+                CtValue::Enum {
+                    type_name: "XMLReason".to_string(),
+                    variant: format!("{:?}", error.kind),
+                    args: Vec::new(),
+                },
+            ),
+            (
+                "byte_offset".to_string(),
+                CtValue::Present(Box::new(CtValue::Int(error.offset as i64))),
+            ),
+            (
+                "line".to_string(),
+                error.line.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
+            ),
+            (
+                "column".to_string(),
+                error.column.map(|value| CtValue::Present(Box::new(CtValue::Int(value as i64))))
+                    .unwrap_or(CtValue::absent(Type::Int)),
+            ),
+            ("path".to_string(), CtValue::Str(error.path)),
+            ("reason".to_string(), CtValue::Str(error.reason)),
+        ],
+    }
+}
+
 fn xml_error_kind(kind: jet_foundation::XmlPull::Reason) -> &'static str {
     use jet_foundation::XmlPull::Reason;
     match kind {
@@ -2157,12 +2176,23 @@ pub(super) fn xml_shape_error_value(reason: String) -> CtValue {
     encoding_error_value_fields("XML", "Syntax", 0, None, None, String::new(), reason)
 }
 
-pub(super) fn xml_render(value: &CtValue) -> String {
-    xml_from_ct(value)
-        .and_then(|value| {
-            jet_foundation::XmlKernel::render_document(&value).map_err(|error| error.reason)
-        })
-        .unwrap_or_default()
+pub(super) fn xml_render(value: &CtValue) -> Result<String, CtValue> {
+    let converted = if json_payload(value, "Float").is_some() || json_payload(value, "Bytes").is_some() {
+        Err("XML tree cannot contain Float or Bytes values".to_string())
+    } else if json_payload(value, "Number").is_some() {
+        Err("internal JSON carrier escaped typed decode".to_string())
+    } else {
+        xml_from_ct(value)
+    };
+    let value = converted.map_err(|reason| xml_render_error_value(jet_foundation::XmlPull::Error {
+        kind: jet_foundation::XmlPull::Reason::Shape,
+        offset: 0,
+        line: None,
+        column: None,
+        path: String::new(),
+        reason,
+    }))?;
+    jet_foundation::XmlKernel::render_document(&value).map_err(xml_render_error_value)
 }
 
 pub(super) fn xml_root(document: &CtValue) -> Result<CtValue, CtValue> {
@@ -2288,7 +2318,29 @@ mod xml_tests {
     fn parse_render_preserves_element_open_lexical_snapshot() {
         let source = "<r xmlns='urn:\tfoo\r\nbar' a='x\t y\r\nz\ru\nv' b='&#xD;&#xA;&#x9;'/>";
         let tree = xml_parse(&source).expect("parse XML");
-        assert_eq!(xml_render(&tree), source);
+        assert_eq!(xml_render(&tree).expect("render XML"), source);
+    }
+
+    #[test]
+    fn xml_render_failure_preserves_native_error_carrier() {
+        let invalid = json_variant("Float", Some(CtValue::Float(CtFloat::f64(1.5))));
+        let actual = xml_render(&invalid).expect_err("invalid XML tree must not render empty text");
+        let expected = CtValue::Struct {
+            type_name: "XMLError".to_string(),
+            fields: vec![
+                ("kind".to_string(), CtValue::Enum {
+                    type_name: "XMLReason".to_string(),
+                    variant: "Shape".to_string(),
+                    args: Vec::new(),
+                }),
+                ("byte_offset".to_string(), CtValue::Present(Box::new(CtValue::Int(0)))),
+                ("line".to_string(), CtValue::absent(Type::Int)),
+                ("column".to_string(), CtValue::absent(Type::Int)),
+                ("path".to_string(), CtValue::Str(String::new())),
+                ("reason".to_string(), CtValue::Str("XML tree cannot contain Float or Bytes values".to_string())),
+            ],
+        };
+        assert_eq!(actual, expected);
     }
 
     #[test]
@@ -2399,7 +2451,7 @@ mod xml_tests {
         let parsed = || jet_foundation::XmlPull::parse_document(SOURCE).expect("parse XML");
         let assert_parity = |value: jet_foundation::XmlPull::Value, source: &str, label: &str| {
             let runtime = jet_foundation::XmlPull::render_document(&value).expect("runtime render");
-            let comptime = xml_render(&xml_to_ct(value));
+            let comptime = xml_render(&xml_to_ct(value)).expect("comptime render");
             assert_eq!(comptime, runtime, "{label}");
             assert_ne!(runtime, source, "{label} trusted stale raw");
         };
@@ -2474,7 +2526,7 @@ mod xml_tests {
 
 // ── core.encoding.cbor ──────────────────────────────────────────────────────
 // Ported from `EncodingCodecs.rs`'s `jet_cbor_*`/`jet_std_cbor_*`, target
-// type swapped from `DataTree` to the `JSON`-tagged `CtValue`.
+// type swapped from `Dyn` to the `JSON`-tagged `CtValue`.
 
 fn cbor_is_u8_list(ty: Option<&Type>) -> bool {
     matches!(
@@ -2565,7 +2617,7 @@ fn cbor_codable_value(
         CtValue::Failed(CtReport::Told(_)) => {
             Err("CBOR cannot encode a Result without an explicit Codable schema".to_string())
         }
-        CtValue::Enum { type_name, .. } if type_name != "DataTree" => Err(format!(
+        CtValue::Enum { type_name, .. } if type_name != "Dyn" => Err(format!(
             "CBOR comptime encoder does not own the Codable schema for enum `{type_name}`"
         )),
         _ => Ok(value.clone()),
@@ -2748,29 +2800,50 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
             type_name,
             variant,
             args,
-        } if type_name == "DataTree" => match variant.as_str() {
+        } if type_name == "Dyn" => match variant.as_str() {
             "Null" => Ok(jet_foundation::CborKernel::Value::Null),
             "Bool" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Bool(value)) => Ok(jet_foundation::CborKernel::Value::Bool(*value)),
-                _ => Err("DataTree.Bool has an invalid payload".to_string()),
+                _ => Err("Dyn.Bool has an invalid payload".to_string()),
             },
             "Int" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Int(value)) => Ok(jet_foundation::CborKernel::Value::Int(*value)),
-                _ => Err("DataTree.Int has an invalid payload".to_string()),
+                _ => Err("Dyn.Int has an invalid payload".to_string()),
             },
             "Float" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Float(value)) => {
                     Ok(jet_foundation::CborKernel::Value::Float(value.as_f64()))
                 }
-                _ => Err("DataTree.Float has an invalid payload".to_string()),
+                _ => Err("Dyn.Float has an invalid payload".to_string()),
             },
-            "Text" | "TypedText" => match args.first().map(|(_, value)| value) {
+            "Number" => match args.first().map(|(_, value)| value) {
+                // #4602: a number lexeme crosses as the CBOR number it spells.
+                Some(CtValue::Str(text)) => match text.parse::<i64>() {
+                    Ok(value) => Ok(jet_foundation::CborKernel::Value::Int(value)),
+                    Err(_) => match text.parse::<f64>() {
+                        Ok(value) if value.is_finite() => {
+                            Ok(jet_foundation::CborKernel::Value::Float(value))
+                        }
+                        _ => Err(format!(
+                            "number {text} is outside the CBOR Int and float64 range"
+                        )),
+                    },
+                },
+                _ => Err("Dyn.Number has an invalid payload".to_string()),
+            },
+            "Bytes" => match args.first().map(|(_, value)| value) {
+                Some(CtValue::Bytes(value)) => {
+                    Ok(jet_foundation::CborKernel::Value::Bytes(value.clone()))
+                }
+                _ => Err("Dyn.Bytes has an invalid payload".to_string()),
+            },
+            "Text" => match args.first().map(|(_, value)| value) {
                 Some(CtValue::Str(value)) => {
                     Ok(jet_foundation::CborKernel::Value::Text(value.clone()))
                 }
-                _ => Err("DataTree.Text has an invalid payload".to_string()),
+                _ => Err("Dyn.Text has an invalid payload".to_string()),
             },
-            _ => Err(format!("unsupported DataTree variant `{variant}`")),
+            _ => Err(format!("unsupported Dyn variant `{variant}`")),
         },
         CtValue::Enum { type_name, .. } => {
             Err(format!("CBOR encoder does not own enum `{type_name}`"))
@@ -2780,8 +2853,8 @@ fn cbor_kernel_value(value: &CtValue) -> Result<jet_foundation::CborKernel::Valu
     }
 }
 
-fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> CtValue {
-    match value {
+fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> Result<CtValue, CborFailure> {
+    Ok(match value {
         jet_foundation::CborKernel::Value::Null => json_variant("Null", None),
         jet_foundation::CborKernel::Value::Bool(value) => {
             json_variant("Bool", Some(CtValue::Bool(value)))
@@ -2795,17 +2868,23 @@ fn cbor_kernel_tree(value: jet_foundation::CborKernel::Value) -> CtValue {
         jet_foundation::CborKernel::Value::Text(value) => {
             json_variant("Text", Some(CtValue::Str(value)))
         }
-        jet_foundation::CborKernel::Value::Bytes(value) => CtValue::Bytes(value),
+        jet_foundation::CborKernel::Value::Bytes(value) => {
+            json_variant("Bytes", Some(CtValue::Bytes(value)))
+        }
+        jet_foundation::CborKernel::Value::DateTime(value) => json_variant(
+            "DateTime",
+            Some(super::Methods::dyn_datetime_value(value)),
+        ),
         jet_foundation::CborKernel::Value::Array(values) => {
-            json_array(values.into_iter().map(cbor_kernel_tree).collect())
+            json_array(values.into_iter().map(cbor_kernel_tree).collect::<Result<_, _>>()?)
         }
         jet_foundation::CborKernel::Value::Object(entries) => json_object(
             entries
                 .into_iter()
-                .map(|(key, value)| (key, cbor_kernel_tree(value)))
-                .collect(),
+                .map(|(key, value)| cbor_kernel_tree(value).map(|value| (key, value)))
+                .collect::<Result<_, _>>()?,
         ),
-    }
+    })
 }
 
 pub(super) fn cbor_encode(v: &CtValue) -> Result<Vec<u8>, CborFailure> {
@@ -2823,11 +2902,10 @@ pub(super) fn cbor_encode_canonical(v: &CtValue) -> Result<Vec<u8>, CborFailure>
 pub(super) fn cbor_decode(
     bytes: &[u8],
     options: &jet_foundation::CborKernel::Options,
-    allow_bytes: bool,
 ) -> Result<CtValue, CborFailure> {
-    jet_foundation::CborKernel::decode(bytes, options, allow_bytes)
-        .map(cbor_kernel_tree)
+    jet_foundation::CborKernel::decode(bytes, options)
         .map_err(cbor_kernel_error)
+        .and_then(cbor_kernel_tree)
 }
 
 #[cfg(test)]
@@ -2843,7 +2921,6 @@ mod cbor_tests {
         let cases = [
             (
                 &[0xff][..],
-                false,
                 "Syntax",
                 0,
                 "$",
@@ -2851,7 +2928,6 @@ mod cbor_tests {
             ),
             (
                 &[0x81][..],
-                false,
                 "Truncated",
                 1,
                 "$[0]",
@@ -2859,23 +2935,21 @@ mod cbor_tests {
             ),
             (
                 &[0xc0, 1][..],
-                false,
                 "Unsupported",
                 0,
                 "$",
-                "CBOR tags are unsupported",
+                "invalid CBOR date-time tag payload",
             ),
             (
                 &[1, 2][..],
-                false,
                 "TrailingData",
                 1,
                 "$",
                 "trailing CBOR data after root value",
             ),
         ];
-        for (wire, allow_bytes, kind, offset, path, reason) in cases {
-            let error = cbor_decode(wire, &safe(), allow_bytes).unwrap_err();
+        for (wire, kind, offset, path, reason) in cases {
+            let error = cbor_decode(wire, &safe()).unwrap_err();
             assert_eq!(
                 (
                     error.kind,
@@ -2888,7 +2962,7 @@ mod cbor_tests {
         }
         let mut strict = safe();
         strict.require_canonical = true;
-        let error = cbor_decode(&[0x18, 1], &strict, false).unwrap_err();
+        let error = cbor_decode(&[0x18, 1], &strict).unwrap_err();
         assert_eq!(
             (
                 error.kind,
@@ -2923,16 +2997,16 @@ pub(super) fn jsonl_parse(text: &str) -> Result<Vec<CtValue>, CtValue> {
     }
     Ok(out)
 }
-pub(super) fn jsonl_render(rows: &[CtValue]) -> String {
+pub(super) fn jsonl_render(rows: &[CtValue]) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
     let mut out = rows
         .iter()
         .map(|v| super::JSONInterp::render_json_pretty(v, false, 0))
-        .collect::<Vec<_>>()
+        .collect::<Result<Vec<_>, _>>()?
         .join("\n");
     if !out.is_empty() {
         out.push('\n');
     }
-    out
+    Ok(out)
 }
 
 // ── core.encoding.json: canonical / events ─────────────────────────────────
@@ -3020,7 +3094,7 @@ fn encoding_error_value(kind: &str, reason: impl Into<String>) -> CtValue {
     encoding_error_value_at("JSON", kind, 1, 1, reason)
 }
 
-fn encoding_error_value_fields(
+pub(super) fn encoding_error_value_fields(
     format: &str,
     kind: &str,
     byte_offset: i64,
@@ -3361,7 +3435,7 @@ fn jcs_tree(value: &CtValue, limits: &EncodingLimitsLite, depth: i64) -> Result<
         args,
     } = value
     {
-        if type_name == "DataTree" {
+        if type_name == "Dyn" {
             match variant.as_str() {
                 "Null" => return Ok(b"null".to_vec()),
                 "Bool" => {
@@ -3518,11 +3592,11 @@ pub(super) fn json_canonical_jcs(
         .map_err(|_| encoding_error_value("Unsupported", "canonical JSON output is not UTF-8"))
 }
 
-pub(super) fn json_canonical(v: &CtValue) -> String {
+pub(super) fn json_canonical(v: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
     super::JSONInterp::render_json_pretty(v, false, 0)
 }
-pub(super) fn json_events(v: &CtValue) -> String {
-    fn walk(path: String, t: &CtValue, out: &mut Vec<String>) {
+pub(super) fn json_events(v: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
+    fn walk(path: String, t: &CtValue, out: &mut Vec<String>) -> Result<(), jet_foundation::EncodingJson::EncodingError> {
         let here = if path.is_empty() {
             "$".to_string()
         } else {
@@ -3531,24 +3605,25 @@ pub(super) fn json_events(v: &CtValue) -> String {
         if let Some(entries) = json_object_entries(t) {
             out.push(format!("object_start {here}"));
             for (k, v) in &entries {
-                walk(format!("{}.{}", here, k), v, out);
+                walk(format!("{}.{}", here, k), v, out)?;
             }
             out.push(format!("object_end {here}"));
-            return;
+            return Ok(());
         }
         if let Some(items) = json_array_items(t) {
             out.push(format!("array_start {here}"));
             for (i, v) in items.iter().enumerate() {
-                walk(format!("{}[{}]", here, i), v, out);
+                walk(format!("{}[{}]", here, i), v, out)?;
             }
             out.push(format!("array_end {here}"));
-            return;
+            return Ok(());
         }
-        out.push(format!("value {here} {}", json_canonical(t)));
+        out.push(format!("value {here} {}", json_canonical(t)?));
+        Ok(())
     }
     let mut out = Vec::new();
-    walk(String::new(), v, &mut out);
-    out.join("\n")
+    walk(String::new(), v, &mut out)?;
+    Ok(out.join("\n"))
 }
 
 #[cfg(test)]
@@ -3610,5 +3685,32 @@ mod depth_tests {
             .collect::<Vec<_>>()
             .join(".");
         assert!(toml_parse(&format!("[{too_deep_header}]\nleaf = 0")).is_err());
+    }
+
+    #[test]
+    fn dyn_rules_reject_duplicate_keys_in_every_map_form() {
+        for text in ["a = 1\na = 2", "a = { x = 1, x = 2 }", "a.x = 1\n[a]\nx = 2"] {
+            assert!(toml_parse(text).is_err(), "comptime TOML accepted {text}");
+        }
+        for text in ["a: 1\na: 2", "{a: 1, a: 2}", "outer: {x: 1, x: 2}"] {
+            assert!(yaml_parse(text).is_err(), "comptime YAML accepted {text}");
+        }
+    }
+
+    #[test]
+    fn dyn_rules_preserve_huge_number_lexemes_before_typed_reads() {
+        let huge = "12345678901234567890123456789012345678901234567890";
+        for (text, expected) in [
+            (format!("a = {huge}"), format!("{{\"a\":{huge}}}")),
+            ("a = 1e400".to_string(), "{\"a\":1e400}".to_string()),
+        ] {
+            let value = toml_parse(&text).expect("comptime TOML number");
+            assert_eq!(super::super::JSONInterp::render_ordered_dyn(&value, false, 0).unwrap(), expected);
+        }
+        for text in [format!("a: {huge}"), "a: 1e400".to_string()] {
+            let value = yaml_parse(&text).expect("comptime YAML number");
+            assert!(super::super::JSONInterp::render_ordered_dyn(&value, false, 0).unwrap().contains(
+                if text.contains(huge) { huge } else { "1e400" }));
+        }
     }
 }

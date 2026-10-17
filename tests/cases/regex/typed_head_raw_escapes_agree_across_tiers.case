@@ -1,0 +1,16 @@
+# Port of tests/regex.rs::typed_head_raw_escapes_agree_across_tiers
+# ORACLE-LITERAL: original expected bytes; PENDING-SAME-HEAD; no captures blessed.
+# RETIRED helper subclaims: Rust FFI option/crate/unsafe text and rustc compilation, not Jet runtime assertions.
+# PENDING-GRAMMAR(batch-four): indexed .line(n) exactly preserves Rust lines()[n], permits extra output lines.
+fixture: typed_head_raw_escapes_agree_across_tiers.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step default: jet run run.jet
+exit: 0
+stdout: = typed_head_raw_escapes_agree_across_tiers.out
+step interpret: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default

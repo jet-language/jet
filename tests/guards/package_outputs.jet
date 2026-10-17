@@ -1,0 +1,21 @@
+// Port of tests/package_outputs.rs:46-58; subject is immutable Jet examples/manifest law.
+use core.files as s6_output_files
+
+#Test("outputs build example has no convention entry filename") {
+    root :: "Examples/features/packages/outputs_build"
+    assert(!s6_output_files.is_file("{root}/main.jet"))
+    assert(!s6_output_files.is_file("{root}/run.jet"))
+    assert(s6_output_files.is_file("{root}/service/service.jet"))
+    manifest :: s6_output_files.read("{root}/package.jet") ?? panic("read output manifest")
+    assert(manifest.contains("outputs:"), manifest)
+    assert(manifest.contains("entry: service.run"), manifest)
+}
+
+// The pre-run source-law half of package_outputs.rs:153-214.
+#Test("nested outputs entry has no fallback run callable") {
+    root :: "Examples/features/packages/outputs_nested"
+    assert(!s6_output_files.is_file("{root}/runner.jet"))
+    assert(s6_output_files.is_file("{root}/src/cli/main.jet"))
+    source :: s6_output_files.read("{root}/src/cli/main.jet") ?? panic("read nested entry")
+    assert(!source.contains("fn run"))
+}

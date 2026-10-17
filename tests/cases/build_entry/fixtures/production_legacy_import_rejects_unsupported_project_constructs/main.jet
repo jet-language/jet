@@ -1,0 +1,30 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("reject unsupported CMake import") {
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
+        imported :: b.legacy(
+            "cmake",
+            "cmake-import",
+            ["CMakeLists.txt"],
+            ["build/app"],
+            ["cmake", "--build", "build"],
+            ["Exec", "FS"],
+            tc,
+            [],
+            identity,
+            "generic",
+            [],
+            [],
+            [],
+            [],
+            [],
+            "cached",
+            "CMakeLists.txt"
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

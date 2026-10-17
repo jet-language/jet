@@ -1,0 +1,11 @@
+// D-INFER-PRIVATE1=A: Bytes is an ordinary public Dyn payload variant.
+fn run() {
+    source :: "fn run() {{ value :: Dyn.Bytes([U8]{{1}})\n if value == .Bytes(bytes) {{ print(bytes.len()) }}\n }}"
+    parsed :: parse_generated_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("public Dyn.Bytes fixture did not parse")
+    checked :: check_program(parsed.program, "user/fixture", "user/fixture/dyn_bytes.jet", [SemaSourceSegment]{})
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.code.starts_with("E") -> panic("public Dyn.Bytes pattern: {diagnostic.code}: {diagnostic.what}")
+    }
+    print("Public Dyn.Bytes patterns: passed")
+}

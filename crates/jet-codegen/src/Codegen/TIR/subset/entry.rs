@@ -1,5 +1,5 @@
 use super::refusal;
-use crate::AST::{Func, Stmt, Type};
+use crate::AST::{Func, Type};
 use crate::Codegen::Cx;
 use crate::Codegen::TIR::is_covered_enum_ty;
 use crate::Codegen::TIR::is_covered_struct_ty;
@@ -78,17 +78,6 @@ pub(crate) fn tir_covers(f: &Func, cx: &Cx) -> bool {
     f.body
         .iter()
         .all(|statement| stmt_in_subset(statement, cx, &mut locals))
-}
-
-/// c109: is an error-conversion `impl Old -> New { … }` body fully inside the TIR subset?
-/// The body has the Old value bound as `self`, returns the New type, and is emitted at
-/// indent 1 inside the `pub fn <conv>(user_self: Old) -> New` `emit_error_conv` opens.
-/// The signature/braces are fixed by `emit_error_conv`; only the body statements gate.
-pub(crate) fn tir_covers_error_conv_body(body: &[Stmt], cx: &Cx) -> bool {
-    refusal::begin();
-    let mut locals: HashSet<String> = HashSet::new();
-    locals.insert(Syntax::KW_SELF.to_string());
-    body.iter().all(|s| stmt_in_subset(s, cx, &mut locals))
 }
 
 /// c109 Phase 7: is this method (an inherent method of `type_name`) fully inside
@@ -219,7 +208,7 @@ pub(crate) fn tir_covers_trait_method(
     if !serde_generic_owner
         && !is_covered_struct_ty(&owner_ty, cx)
         && !is_covered_enum_ty(&owner_ty, cx)
-        && !cx.distinct_types.contains_key(type_name)
+        && !cx.fact_distinct_types(type_name).is_some()
         && !operator_on_builtin
     {
         refusal::note(refusal::UNCOVERED_OWNER, f.name_span);
@@ -230,7 +219,7 @@ pub(crate) fn tir_covers_trait_method(
     // falling back to a second code-generation path.
     // D-SERDE2 (card #131 S1-bridge): a hand `impl T.Decode` `decode` is a STATIC trait
     // method (no `self`) — the codec bridge in `emit_tir_trait_method` renders it as
-    // `jet_decode(tree: &jet_std::DataTree) -> Result<Self, Vec<FieldError>>` with no
+    // `jet_decode(tree: &jet_std::Dyn) -> Result<Self, Vec<FieldError>>` with no
     // receiver. Admit it (the general "static trait fn" exclusion below does not apply).
     let is_decode = trait_name == crate::Generics::DECODE;
     if !is_decode && !is_checked_text && !is_literal {

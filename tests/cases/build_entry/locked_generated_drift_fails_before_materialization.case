@@ -1,0 +1,11 @@
+# Port of tests/build_entry.rs:2748-2776; sources verbatim.
+# KNOWN-FAILING #4833 (Jet build --locked not ported). PENDING-SAME-HEAD; nominal subclaims below are not replaced by CLI success.
+fixture: fixtures/locked_generated_drift_fails_before_materialization
+step: jet build main.jet
+exit: 0
+copy: .jet/generated/main/value.jet before.generated
+copy: changed.jet main.jet
+step: jet build main.jet --locked --json
+exit: nonzero
+json: machine doc $.reports[?code="E3512"] #>= 1
+file: .jet/generated/main/value.jet == before.generated

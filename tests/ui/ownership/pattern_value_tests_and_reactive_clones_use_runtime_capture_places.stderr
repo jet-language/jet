@@ -1,0 +1,17 @@
+Error [E0327]: This `..` is redundant
+  --> pattern_value_tests_and_reactive_clones_use_runtime_capture_places.jet:14:43
+    |
+ 14 |             { count: values.len(), label, .. } -> print(label)
+    |                                           ^^
+ Why: The pattern already names every field of `Incident`
+ Fix: Remove `..` or leave out at least one field
+More: jet-lang.dev/e/E0327
+
+Error [E0204]: `values` is being changed in this call, so it can't be used again here
+  --> pattern_value_tests_and_reactive_clones_use_runtime_capture_places.jet:14:22
+    |
+ 14 |             { count: values.len(), label, .. } -> print(label)
+    |                      ^^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&values`) only once, or copy first with `~values`
+More: jet-lang.dev/e/E0204

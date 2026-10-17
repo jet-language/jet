@@ -26,15 +26,15 @@ NATIVE_FETCH_MAX_REDIRECTS :: prep { 5 }
 
 // The release a native ref resolves to. A fixture release carries the local
 // artifact that stands in for the download.
-pub struct NativeReleaseFacts {
-    pub version: String
-    pub release_tag: String
-    pub url: String
-    pub sha256: String
-    pub fixture_artifact: String?
+struct NativeReleaseFacts {
+    version: String
+    release_tag: String
+    url: String
+    sha256: String
+    fixture_artifact: String?
 }
 
-pub struct NativeReleaseProvider {
+struct NativeReleaseProvider {
     fn cache_expectation(self, verification: &StoreVerification, spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> CacheExpectation? Never! {
         if provider_cc_toolchain_is_reference(spec) -> return provider_cc_toolchain_cache_expectation(&verification, spec, ctx)
         provider_native_cache_expectation(spec, table, ctx)
@@ -120,7 +120,7 @@ fn provider_native_publish_release(spec: RefSpec, facts: NativeReleaseFacts, ide
     })
 }
 
-pub fn provider_native_cache_expectation(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> CacheExpectation? Never! {
+fn provider_native_cache_expectation(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> CacheExpectation? Never! {
     facts :: provider_native_release_facts(spec, table, ctx) ?? return None
     Val(CacheExpectation{
         identity: provider_plain_cache_identity(provider_native_source_fingerprint(facts), NATIVE_RECIPE_ID, ctx),
@@ -132,14 +132,14 @@ pub fn provider_native_cache_expectation(spec: RefSpec, table: SourceTable, ctx:
 // The artifact size already available in a fixture. Remote release metadata
 // carries no trusted size in the native recipe, so callers keep that total
 // unknown rather than printing a fabricated number.
-pub fn provider_native_download_size(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Int? ProviderError! {
+fn provider_native_download_size(spec: RefSpec, table: SourceTable, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Int? ProviderError! {
     facts :: provider_native_release_facts(spec, table, ctx) ?? return Err(err.into_provider(RegistryErrorKind.NativeRelease))
     path :: facts.fixture_artifact ?? return Ok(None)
     stat :: files.stat(path) ?? return Err(provider_native_error("could not stat fixture artifact: {err}"))
     Ok(Val(stat.size))
 }
 
-pub fn provider_native_catalog_cache_expectation(spec: RefSpec, recipe: NixNativeRecipe, ctx: ProviderCtx) -[FS, Env]> CacheExpectation Never! {
+fn provider_native_catalog_cache_expectation(spec: RefSpec, recipe: NixNativeRecipe, ctx: ProviderCtx) -[FS, Env]> CacheExpectation Never! {
     CacheExpectation{
         identity: provider_plain_cache_identity(recipe.canonical_json(), NATIVE_CATALOG_RECIPE_ID, ctx),
         owned_output: Val(provider_native_catalog_output_path(ctx.store_dir, recipe)),
@@ -147,14 +147,14 @@ pub fn provider_native_catalog_cache_expectation(spec: RefSpec, recipe: NixNativ
     }
 }
 
-pub fn provider_native_catalog_download_size(recipe: NixNativeRecipe) -[FS]> Int? ProviderError! {
+fn provider_native_catalog_download_size(recipe: NixNativeRecipe) -[FS]> Int? ProviderError! {
     if !recipe.url.starts_with("file://") -> return Ok(None)
     path :: recipe.url.removeprefix("file://")
     stat :: files.stat(path) ?? return Err(provider_native_catalog_error("could not stat native recipe artifact `{path}`: {err}"))
     Ok(Val(stat.size))
 }
 
-pub fn provider_native_realize_catalog_recipe(spec: RefSpec, recipe: NixNativeRecipe, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Realized ProviderError! {
+fn provider_native_realize_catalog_recipe(spec: RefSpec, recipe: NixNativeRecipe, ctx: ProviderCtx) -[FS, Env, Net, Time.Wait]> Realized ProviderError! {
     identity :: provider_native_catalog_cache_expectation(spec, recipe, ctx).identity
     out_dir :: provider_native_catalog_output_path(ctx.store_dir, recipe)
     if provider_registry_exists(out_dir) -> return Err(provider_native_catalog_error("unverified existing output {out_dir}; run `jet clean` before rebuilding"))
@@ -362,7 +362,7 @@ fn provider_native_fetch_release_metadata(requested: String?) -[Env, Net, Time.W
     if !provider_native_valid_version(version) -> return Err(RegistryError.Reason("GitHub release metadata has an invalid version"))
     assets_value :: object.get("assets") ?? return Err(RegistryError.Reason("GitHub release metadata has no assets"))
     assets :: pkg_json_array(assets_value) ?? return Err(RegistryError.Reason("GitHub release assets: {PKG_JSON_NOT_ARRAY}"))
-    found := [String: DataTree]?{None}
+    found := [String: Dyn]?{None}
     loop asset in assets {
         asset_object :: pkg_json_object(asset) ?? next
         name :: provider_native_json_text(asset_object, "name") ?? next
@@ -388,7 +388,7 @@ fn provider_native_fetch_release_metadata(requested: String?) -[Env, Net, Time.W
 }
 
 // Parse release metadata that must be a JSON object.
-fn provider_native_parse_object(text: String, label: String) -> [String: DataTree] RegistryError! {
+fn provider_native_parse_object(text: String, label: String) -> [String: Dyn] RegistryError! {
     tree :: if pkg_json_parse_protocol(text) == {
         .Parsed(value) -> value
         .Failed(reason) -> { return Err(RegistryError.Reason(reason)) }
@@ -397,13 +397,13 @@ fn provider_native_parse_object(text: String, label: String) -> [String: DataTre
     Ok(object)
 }
 
-fn provider_native_json_text(object: [String: DataTree], field: String) -> String? Never! {
+fn provider_native_json_text(object: [String: Dyn], field: String) -> String? Never! {
     value :: object.get(field) ?? return None
     pkg_json_text(value)
 }
 
 // A non-empty string field.
-fn provider_native_json_string(object: [String: DataTree], field: String) -> String RegistryError! {
+fn provider_native_json_string(object: [String: Dyn], field: String) -> String RegistryError! {
     value :: provider_native_json_text(object, field) ?? ""
     if value == "" -> return Err(RegistryError.Reason("release metadata field `{field}` is not a string"))
     Ok(value)
@@ -548,7 +548,7 @@ fn provider_native_read_bounded_file(path: String, limit: Int) -[FS]> [U8] Regis
 // Add the 0755 bits to the staged artifact.
 fn provider_native_make_executable(path: String) RegistryError! -[FS]> {
     stat :: files.stat(path) ?? return Err(RegistryError.Reason("could not stat executable: {err}"))
-    files.set_mode(path, stat.mode | 0o755) ?? return Err(RegistryError.Reason("could not mark executable: {err}"))
+    files.set_mode(path, (stat.mode).bit_or(0o755)) ?? return Err(RegistryError.Reason("could not mark executable: {err}"))
 }
 
 // Best-effort removal of an abandoned staging tree or file.

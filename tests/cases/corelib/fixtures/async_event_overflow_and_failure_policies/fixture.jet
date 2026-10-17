@@ -1,0 +1,112 @@
+
+use core.event as event
+use core.tasks as tasks
+
+fn panic_log_handler(n: Int) String! {
+    panic("log boom")
+    return .Err("unreachable")
+}
+
+fn panic_ignore_handler(n: Int) String! {
+    panic("ignore boom")
+    return .Err("unreachable")
+}
+
+fn run() {
+    newest_scope :: event.scope()
+    newest :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    (newest_started_tx, newest_started_rx) :: channel<Int>()
+    (newest_release_tx, newest_release_rx) :: channel<Int>()
+    newest.on(newest_scope, (n: Int) -> {
+        newest_started_tx.send(n.copy())
+        released_newest :: newest_release_rx.receive() ?? panic("release")
+    })
+    newest_first :: newest.emit_async(1)
+    newest_started_first :: newest_started_rx.receive() ?? panic("started")
+    newest_second :: newest.emit_async(2)
+    newest_third :: newest.emit_async(3)
+    newest_report :: newest_third.join()
+    print("newest={!newest_report.accepted() && newest_report.state() == .DroppedNewest}")
+    newest_release_tx.send(1)
+    newest_started_second :: newest_started_rx.receive() ?? panic("second")
+    newest_release_tx.send(2)
+    newest_first.join()
+    newest_second.join()
+
+    oldest_scope :: event.scope()
+    oldest :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .DropOldest }, .Collect) ?? panic("policy")
+    (oldest_started_tx, oldest_started_rx) :: channel<Int>()
+    (oldest_release_tx, oldest_release_rx) :: channel<Int>()
+    oldest.on(oldest_scope, (n: Int) -> {
+        oldest_started_tx.send(n.copy())
+        released_oldest :: oldest_release_rx.receive() ?? panic("release")
+    })
+    oldest_first :: oldest.emit_async(1)
+    oldest_started_first :: oldest_started_rx.receive() ?? panic("started")
+    oldest_evicted :: oldest.emit_async(2)
+    oldest_third :: oldest.emit_async(3)
+    oldest_report :: oldest_evicted.join()
+    print("oldest={oldest_report.accepted() && oldest_report.state() == .DroppedOldest}")
+    oldest_release_tx.send(1)
+    oldest_started_third :: oldest_started_rx.receive() ?? panic("third")
+    oldest_release_tx.send(3)
+    oldest_first.join()
+    oldest_third.join()
+
+    once_scope :: event.scope()
+    once_event :: event.async_result<Int, String>(AsyncPolicy{ capacity: 2, overflow: .Block }, .Collect) ?? panic("policy")
+    (once_started_tx, once_started_rx) :: channel<Int>()
+    (once_release_tx, once_release_rx) :: channel<Int>()
+    once_event.on_priority(once_scope, 10, (n: Int) -> {
+        if n == 1 {
+            once_started_tx.send(n.copy())
+            released_once :: once_release_rx.receive() ?? panic("release")
+        }
+    })
+    once_event.once(once_scope, (n: Int) -> {})
+    once_first :: once_event.emit_async(1)
+    once_started :: once_started_rx.receive() ?? panic("started")
+    once_second :: once_event.emit_async(2)
+    once_release_tx.send(1)
+    once_first_report :: once_first.join()
+    once_second_report :: once_second.join()
+    print("once first={once_first_report.delivered_handlers()} second={once_second_report.delivered_handlers()}")
+
+    failure_scope :: event.scope()
+    collect :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    collect.on_priority(failure_scope, 10, (n: Int) -> .Err("high"))
+    collect.on_priority(failure_scope, 0, (n: Int) -> .Err("low"))
+    collected :: collect.emit_async(1).join()
+    print("collect={collected.state() == .HandlerFailed} handlers={collected.delivered_handlers()} failures={collected.failures().len()}")
+    print(collected.trace().summary())
+
+    stop :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .StopFirst) ?? panic("policy")
+    stop.on_priority(failure_scope, 10, (n: Int) -> .Err("first"))
+    stop.on_priority(failure_scope, 0, (n: Int) -> {})
+    stopped :: stop.emit_async(1).join()
+    print("stop={stopped.state() == .HandlerFailed} handlers={stopped.delivered_handlers()} failures={stopped.failures().len()}")
+
+    log_errors :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    log_errors.on_priority(failure_scope, 10, (n: Int) -> .Err("logged secret"))
+    log_errors.on_priority(failure_scope, 0, (n: Int) -> {})
+    logged_error :: log_errors.emit_async(1).join()
+    print("log error={logged_error.state() == .Delivered} handlers={logged_error.delivered_handlers()} failures={logged_error.failures().len()} traced={logged_error.trace().summary().contains("failed")}")
+
+    ignore_errors :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    ignore_errors.on_priority(failure_scope, 10, (n: Int) -> .Err("ignored secret"))
+    ignore_errors.on_priority(failure_scope, 0, (n: Int) -> {})
+    ignored_error :: ignore_errors.emit_async(1).join()
+    print("ignore error={ignored_error.state() == .Delivered} handlers={ignored_error.delivered_handlers()} failures={ignored_error.failures().len()} traced={ignored_error.trace().summary().contains("failed")}")
+
+    panic_log :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Log) ?? panic("policy")
+    panic_log.on_priority(failure_scope, 10, (n: Int) -> panic_log_handler(n))
+    panic_log.on_priority(failure_scope, 0, (n: Int) -> {})
+    logged_panic :: panic_log.emit_async(1).join()
+    print("panic log={logged_panic.state() == .HandlerFailed} handlers={logged_panic.delivered_handlers()} failures={logged_panic.failures().len()} traced={logged_panic.trace().summary().contains("panic:log boom")}")
+
+    panic_ignore :: event.async_result<Int, String>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Ignore) ?? panic("policy")
+    panic_ignore.on_priority(failure_scope, 10, (n: Int) -> panic_ignore_handler(n))
+    panic_ignore.on_priority(failure_scope, 0, (n: Int) -> {})
+    ignored_panic :: panic_ignore.emit_async(1).join()
+    print("panic ignore={ignored_panic.state() == .HandlerFailed} handlers={ignored_panic.delivered_handlers()} failures={ignored_panic.failures().len()} traced={ignored_panic.trace().summary().contains("panic:ignore boom")}")
+}

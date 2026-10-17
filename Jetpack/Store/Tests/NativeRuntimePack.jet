@@ -1,0 +1,377 @@
+// Wire/provenance/store claims use small explicit fixture bytes. They do not
+// claim that the E2 runtime rail, candidate, native pack or #4896 seam ran.
+
+fn native_pack_test_roles(object: ObjectHandle) -> [NativeRuntimeRoleObject] Never! {
+    [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "provider-é", object}}
+}
+
+fn native_pack_test_subject(object: ObjectHandle) -> NativeRuntimePackSubject Never! {
+    NativeRuntimePackSubject{
+        runtime_source_revision: "0000000000000000000000000000000000000000",
+        runtime_source_tree: "1111111111111111111111111111111111111111",
+        pack_object: object, jet_object: object, remaining_native_archive: object, remaining_raw_leaf_archive: object,
+        runtime_sources: object, runtime_exports: object, runtime_imports: object, lifecycle: object,
+        generators: native_pack_test_roles(object), abi: native_pack_test_roles(object),
+        routes: native_pack_test_roles(object), providers: native_pack_test_roles(object),
+    }
+}
+
+fn native_pack_test_refused(bytes: [U8]) -> Bool {
+    if NativeRuntimePackIdentity.from_bytes(bytes) == {
+        .Err(_) -> true
+        .Ok(_) -> false
+    }
+}
+
+#Test("native runtime identity canonical exact large length") {
+    object :: ObjectHandle.new(ArtifactDigest.hash("é".bytes()), 9007199254740993)
+    identity :: NativeRuntimePackIdentity{subject: object, approval: object}
+    bytes :: identity.to_bytes() ?? panic("canonical identity")
+    assert_eq(NativeRuntimePackIdentity.from_bytes(bytes) ?? panic("decode"), identity)
+    text :: String.from_bytes(bytes) ?? panic("UTF-8")
+    assert(text.contains(":9007199254740993"), "length is an exact string, never a JSON number")
+    assert(native_pack_test_refused("{{ \"schema\":\"jet.native-runtime-pack-identity/v1\" }}".bytes()))
+    assert(native_pack_test_refused("{{\"schema\":\"x\",\"schema\":\"x\"}}".bytes()))
+}
+
+#Test("native runtime handles refuse aliases signs and bad fields") {
+    digest :: ArtifactDigest.hash("fixture".bytes()).to_hex()
+    loop length in ([String]{"", "-1", "+1", "01", "1.0", "18446744073709551616"}) {
+        if native_pack_handle("{digest}:{length}") == {
+            .Ok(_) -> panic("noncanonical handle accepted")
+            .Err(_) -> {}
+        }
+    }
+    if native_pack_handle("{digest}:18446744073709551615") == {
+        .Ok(value) -> assert_eq(value.length(), STORE_ARTIFACT_U64_MAX)
+        .Err(_) -> panic("full unsigned length rejected")
+    }
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-pack-identity/v1"), "subject": Dyn.Text("{digest}:1"), "approval": Dyn.Text("{digest}:1"), "path": Dyn.Text("native.key")})
+    assert(native_pack_test_refused(native_pack_encode(tree) ?? panic("encode")))
+}
+
+#Test("native runtime subject roles are unique and byte canonical") {
+    object :: ObjectHandle.from_bytes("fixture".bytes())
+    subject :: native_pack_test_subject(object)
+    bytes :: subject.to_bytes() ?? panic("encode subject")
+    assert_eq(NativeRuntimePackSubject.from_bytes(bytes) ?? panic("decode subject"), subject)
+    fields := if subject.to_tree() == {
+        .Object(values) -> values
+        else -> { panic("subject object") }
+    }
+    fields["providers"] = native_pack_roles_tree([NativeRuntimeRoleObject]{subject.providers[0], subject.providers[0]})
+    if NativeRuntimePackSubject.from_tree(Dyn.Object(fields)) == {
+        .Ok(_) -> panic("duplicate provider accepted")
+        .Err(_) -> {}
+    }
+}
+
+fn native_pack_test_receipt(store: ArtifactStore, id: String, invocation: ObjectHandle, inputs: [NativeRuntimeRoleObject], outputs: [NativeRuntimeRoleObject]) -[FS, Env, Exec, Time, Rand]> NativeRuntimeObservedStep {
+    log :: store.publish_blob("small codec fixture log\n".bytes()) ?? panic("log")
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-step-receipt/v1"), "id": Dyn.Text(id), "rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": native_pack_roles_tree(inputs), "outputs": native_pack_roles_tree(outputs), "log": native_pack_handle_tree(log)})
+    receipt :: store.publish_blob(native_pack_encode(tree) ?? panic("receipt codec")) ?? panic("receipt")
+    NativeRuntimeObservedStep{id, observed_rc: "0", invocation, inputs, outputs, receipt}
+}
+
+fn native_pack_test_lifecycle_entry(symbol: String, phase: String, priority: String, section: String, provider: ObjectHandle) -> Dyn {
+    Dyn.Object([String: Dyn]{"symbol": Dyn.Text(symbol), "phase": Dyn.Text(phase), "priority": Dyn.Text(priority), "section": Dyn.Text(section), "provider": native_pack_handle_tree(provider)})
+}
+
+fn native_pack_test_lifecycle(store: ArtifactStore, object: ObjectHandle) -[FS, Env, Exec, Time, Rand]> ObjectHandle {
+    // Schema fixtures only; these blobs are deliberately not real ELF evidence.
+    sections :: store.publish_blob("unit fixture sections, not ELF".bytes()) ?? panic("sections")
+    relocations :: store.publish_blob("unit fixture relocations, not ELF".bytes()) ?? panic("relocations")
+    entries :: [Dyn]{
+        native_pack_test_lifecycle_entry("jet_rt_alloc_init", "init", "0", ".init_array.00000", object),
+        native_pack_test_lifecycle_entry("jet_rt_host_init", "init", "1", ".init_array.00001", object),
+        native_pack_test_lifecycle_entry("jet_rt_stdout_flush", "fini", "1", ".fini_array.00001", object),
+    }
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-lifecycle-evidence/v1"), "pack": native_pack_handle_tree(object), "jet_object": native_pack_handle_tree(object), "entries": Dyn.Array(entries), "sections": native_pack_handle_tree(sections), "relocations": native_pack_handle_tree(relocations)})
+    store.publish_blob(native_pack_encode(tree) ?? panic("lifecycle codec")) ?? panic("lifecycle fixture")
+}
+
+fn native_pack_test_fixture(store: ArtifactStore, payload: String) -[FS, Env, Exec, Time, Rand]> (subject: NativeRuntimePackSubject, evidence: NativeRuntimePackEvidence, compiler: ObjectHandle) {
+    object :: store.publish_blob(payload.bytes()) ?? panic("object")
+    compiler :: store.publish_blob("compiler object fixture".bytes()) ?? panic("compiler")
+    invocation :: store.publish_blob("exact fixture invocation\n".bytes()) ?? panic("invocation")
+    job :: store.publish_blob("exact fixture job\n".bytes()) ?? panic("job")
+    generation :: store.publish_blob("{{\"final\":\"0000000000000000000000000000000000000000\",\"deterministic\":true}}".bytes()) ?? panic("generation")
+    raw_frontend :: store.publish_blob("{{\"raw_exit\":101}}".bytes()) ?? panic("raw frontend")
+    final_source_tree :: store.publish_blob("1111111111111111111111111111111111111111\n".bytes()) ?? panic("final tree")
+    known :: Dyn.Object([String: Dyn]{"role": Dyn.Text("provider-é"), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("known"), "object": native_pack_handle_tree(object)})})
+    produced :: Dyn.Object([String: Dyn]{"role": Dyn.Text("pack-input"), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text("pack")})})
+    build :: Dyn.Object([String: Dyn]{"id": Dyn.Text("build"), "expected_rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": Dyn.Array([Dyn]{known}), "outputs": Dyn.Array([Dyn]{Dyn.Text("pack"), Dyn.Text("generation"), Dyn.Text("raw_frontend"), Dyn.Text("final_source_tree")})})
+    consume :: Dyn.Object([String: Dyn]{"id": Dyn.Text("consume"), "expected_rc": Dyn.Text("0"), "invocation": native_pack_handle_tree(invocation), "inputs": Dyn.Array([Dyn]{produced}), "outputs": Dyn.Array([Dyn]{})})
+    artifacts := [Dyn]{}
+    loop role in ([String]{"pack_object", "jet_object", "remaining_native_archive", "remaining_raw_leaf_archive", "runtime_sources", "runtime_exports", "runtime_imports"}) {
+        &artifacts.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text("pack")})}))
+    }
+    evidence_roles := [Dyn]{}
+    loop role in ([String]{"generation", "raw_frontend", "final_source_tree"}) {
+        &evidence_roles.push(Dyn.Object([String: Dyn]{"role": Dyn.Text(role), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text("build"), "output": Dyn.Text(role)})}))
+    }
+    contract_tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-rail-contract/v1"), "job": native_pack_handle_tree(job), "proofq_name": Dyn.Text("unit-codec-fixture"), "steps": Dyn.Array([Dyn]{build, consume}), "artifacts": Dyn.Array(artifacts), "evidence": Dyn.Array(evidence_roles), "generators": Dyn.Array([Dyn]{known}), "abi": Dyn.Array([Dyn]{known}), "routes": Dyn.Array([Dyn]{known}), "providers": Dyn.Array([Dyn]{known})})
+    rail_contract :: store.publish_blob(native_pack_encode(contract_tree) ?? panic("contract codec")) ?? panic("contract")
+    admission_tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-rail-admission/v1"), "decision": Dyn.Text("approved"), "job": native_pack_handle_tree(job), "rail_contract": native_pack_handle_tree(rail_contract)})
+    admission :: store.publish_blob(native_pack_encode(admission_tree) ?? panic("admission codec")) ?? panic("admission")
+    proof_done :: store.publish_blob("0\n".bytes()) ?? panic("done")
+    first :: native_pack_test_receipt(store, "build", invocation, [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "provider-é", object}}, [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "pack", object}, NativeRuntimeRoleObject{role: "generation", object: generation}, NativeRuntimeRoleObject{role: "raw_frontend", object: raw_frontend}, NativeRuntimeRoleObject{role: "final_source_tree", object: final_source_tree}})
+    second :: native_pack_test_receipt(store, "consume", invocation, [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "pack-input", object}}, [NativeRuntimeRoleObject]{})
+    metadata :: store.publish_blob("name=unit-codec-fixture\nrc=0\nstart=10\nend=11\nkind=test\n".bytes()) ?? panic("metadata fixture")
+    terminal :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-proofq-terminal/v1"), "job": native_pack_handle_tree(job), "rail_contract": native_pack_handle_tree(rail_contract), "done": native_pack_handle_tree(proof_done), "proofq_metadata": native_pack_handle_tree(metadata), "proofq_name": Dyn.Text("unit-codec-fixture"), "runtime_source_revision": Dyn.Text("0000000000000000000000000000000000000000"), "runtime_source_tree": Dyn.Text("1111111111111111111111111111111111111111")})
+    proof_terminal :: store.publish_blob(native_pack_encode(terminal) ?? panic("terminal codec")) ?? panic("terminal fixture")
+    evidence :: NativeRuntimePackEvidence{admission, rail_contract, job, proof_done, proof_terminal, final_source_tree, generation, raw_frontend, steps: [NativeRuntimeObservedStep]{first, second}}
+    subject := native_pack_test_subject(object)
+    subject.lifecycle = native_pack_test_lifecycle(store, object)
+    (subject: subject, evidence: evidence, compiler: compiler)
+}
+
+fn native_pack_test_authorize(store: ArtifactStore, subject: ObjectHandle, evidence: NativeRuntimePackEvidence) -[FS, Env, Exec, Time, Rand]> ObjectHandle {
+    tree :: Dyn.Object([String: Dyn]{"schema": Dyn.Text("jet.native-runtime-publication-authorization/v1"), "decision": Dyn.Text("approved"), "subject": native_pack_handle_tree(subject), "rail_contract": native_pack_handle_tree(evidence.rail_contract), "admission": native_pack_handle_tree(evidence.admission)})
+    store.publish_blob(native_pack_encode(tree) ?? panic("authorization codec")) ?? panic("fixture authorization")
+}
+
+#Test("native runtime preparation authorization publication and immutable compiler binding") {
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
+    root :: store_artifact_test_root("native-pack")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
+    prepared :: native_runtime_pack_prepare(store, fixture.subject, fixture.evidence) ?? panic("prepare")
+    if store.lookup_artifact(NativeCandidateComposition.action_key(fixture.compiler)) == {
+        .Missing -> {}
+        else -> panic("preparation published a candidate")
+    }
+    authorization :: native_pack_test_authorize(store, prepared, fixture.evidence)
+    approval :: fixture.evidence.approval(prepared, authorization)
+    published :: native_runtime_pack_publish(store, fixture.subject, approval, fixture.compiler) ?? panic("publish")
+    repeated :: native_runtime_pack_publish(store, fixture.subject, approval, fixture.compiler) ?? panic("idempotent publish")
+    assert_eq(published.object, repeated.object)
+    loaded :: native_runtime_pack_load(store, fixture.compiler) ?? panic("verified loader")
+    assert_eq(loaded.subject, fixture.subject)
+    assert_eq(loaded.pack_bytes, "small codec fixture bytes".bytes())
+    assert_eq(loaded.objects[0], fixture.compiler)
+    assert_eq(loaded.objects[1], published.object)
+    reloaded :: native_runtime_pack_load(store, fixture.compiler) ?? panic("same verified reread")
+    assert_eq(reloaded.objects, loaded.objects)
+    assert_eq(reloaded.subject, loaded.subject)
+    assert_eq(reloaded.composition, loaded.composition)
+    assert_eq(reloaded.identity, loaded.identity)
+    assert_eq(reloaded.approval, loaded.approval)
+    loop object in ([ObjectHandle]{fixture.compiler, published.object, loaded.identity, loaded.approval, prepared, authorization, fixture.evidence.rail_contract, fixture.evidence.proof_done, fixture.evidence.proof_terminal, fixture.evidence.final_source_tree, fixture.evidence.admission, fixture.evidence.job, fixture.evidence.generation, fixture.evidence.raw_frontend, fixture.subject.jet_object, fixture.subject.remaining_native_archive, fixture.subject.remaining_raw_leaf_archive, fixture.subject.runtime_sources, fixture.subject.runtime_exports, fixture.subject.runtime_imports, fixture.subject.lifecycle, fixture.subject.pack_object}) {
+        assert(loaded.objects.contains(object))
+    }
+    loop step in fixture.evidence.steps {
+        assert(loaded.objects.contains(step.invocation))
+        assert(loaded.objects.contains(step.receipt))
+        log :: native_pack_check_step_receipt(native_pack_blob(store, step.receipt, &census) ?? panic("actual receipt"), step) ?? panic("actual stdout handle")
+        assert(loaded.objects.contains(log))
+        loop input in step.inputs -> assert(loaded.objects.contains(input.object))
+        loop output in step.outputs -> assert(loaded.objects.contains(output.object))
+    }
+    loop roles in ([ [NativeRuntimeRoleObject] ]{fixture.subject.generators, fixture.subject.abi, fixture.subject.routes, fixture.subject.providers}) {
+        loop role in roles -> assert(loaded.objects.contains(role.object))
+    }
+    lifecycle :: native_pack_fields(native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle, &census) ?? panic("actual lifecycle")) ?? panic("lifecycle JSON"), [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("actual lifecycle fields")
+    assert(loaded.objects.contains(native_pack_handle_field(lifecycle, "sections") ?? panic("sections")))
+    assert(loaded.objects.contains(native_pack_handle_field(lifecycle, "relocations") ?? panic("relocations")))
+    terminal :: native_pack_fields(native_pack_input_tree(native_pack_blob(store, fixture.evidence.proof_terminal, &census) ?? panic("actual terminal")) ?? panic("terminal JSON"), [String]{"schema", "job", "rail_contract", "done", "proofq_metadata", "proofq_name", "runtime_source_revision", "runtime_source_tree"}) ?? panic("actual terminal fields")
+    assert(loaded.objects.contains(native_pack_handle_field(terminal, "proofq_metadata") ?? panic("metadata")))
+    // Complete independent fixture-derived event order, preserving duplicate
+    // role handles and the repeated lifecycle read. Membership is insufficient.
+    expected := [ObjectHandle]{fixture.compiler, published.object, loaded.identity, prepared, loaded.approval, authorization, fixture.evidence.rail_contract, fixture.evidence.proof_done, fixture.evidence.proof_terminal, native_pack_handle_field(terminal, "proofq_metadata") ?? panic("metadata"), fixture.evidence.final_source_tree, fixture.evidence.admission, fixture.evidence.job, fixture.evidence.generation, fixture.evidence.raw_frontend}
+    loop step in fixture.evidence.steps {
+        &expected.push(step.invocation)
+        &expected.push(step.receipt)
+        &expected.push(native_pack_check_step_receipt(native_pack_blob(store, step.receipt, &census) ?? panic("receipt"), step) ?? panic("stdout"))
+        loop input in step.inputs -> &expected.push(input.object)
+        loop output in step.outputs -> &expected.push(output.object)
+    }
+    loop object in ([ObjectHandle]{fixture.subject.jet_object, fixture.subject.remaining_native_archive, fixture.subject.remaining_raw_leaf_archive, fixture.subject.runtime_sources, fixture.subject.runtime_exports, fixture.subject.runtime_imports, fixture.subject.lifecycle}) -> &expected.push(object)
+    loop roles in ([[NativeRuntimeRoleObject]]{fixture.subject.generators, fixture.subject.abi, fixture.subject.routes, fixture.subject.providers}) {
+        loop role in roles -> &expected.push(role.object)
+    }
+    &expected.push(fixture.subject.lifecycle)
+    &expected.push(native_pack_handle_field(lifecycle, "sections") ?? panic("sections"))
+    &expected.push(native_pack_handle_field(lifecycle, "relocations") ?? panic("relocations"))
+    &expected.push(fixture.subject.pack_object)
+    assert_eq(loaded.objects, expected)
+    assert_eq(native_pack_blob(store, fixture.evidence.raw_frontend, &census) ?? panic("raw status"), "{{\"raw_exit\":101}}".bytes())
+    changed := fixture.subject
+    changed.pack_object = store.publish_blob("unadmitted unrelated pack".bytes()) ?? panic("unrelated pack")
+    if native_runtime_pack_prepare(store, changed, fixture.evidence) == {
+        .Ok(_) -> panic("unrelated CAS pack bypassed admitted producer")
+        .Err(_) -> {}
+    }
+    next_fixture :: native_pack_test_fixture(store, "different approved pack")
+    next :: native_runtime_pack_prepare(store, next_fixture.subject, next_fixture.evidence) ?? panic("new subject")
+    next_authorization :: native_pack_test_authorize(store, next, next_fixture.evidence)
+    if native_runtime_pack_publish(store, next_fixture.subject, next_fixture.evidence.approval(next, next_authorization), fixture.compiler) == {
+        .Ok(_) -> panic("different runtime replaced immutable compiler binding")
+        .Err(error) -> {
+            if error == {
+                .Store(store_error) -> assert_eq(store_artifact_test_kind(store_error), "conflict")
+                else -> panic("wrong conflict error")
+            }
+        }
+    }
+    files.write_bytes(store.object_path(fixture.subject.pack_object), "corrupt".bytes()) ?? panic("corrupt")
+    if native_runtime_pack_load(store, fixture.compiler) == {
+        .Ok(_) -> panic("corrupt pack loaded")
+        .Err(_) -> {}
+    }
+    store_artifact_test_cleanup(root)
+}
+
+#Test("native runtime rejects red incomplete reordered and changed producer bytes") {
+    root :: store_artifact_test_root("native-pack-negative")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
+    loop rc in ([String]{"1\n", "125\n", "", "0"}) {
+        red := fixture.evidence
+        red.proof_done = store.publish_blob(rc.bytes()) ?? panic("red done")
+        if native_runtime_pack_prepare(store, fixture.subject, red) == {
+            .Ok(_) -> panic("red or nonterminal done admitted")
+            .Err(_) -> {}
+        }
+    }
+    changed := fixture.evidence
+    step := changed.steps[1]
+    step.inputs = [NativeRuntimeRoleObject]{NativeRuntimeRoleObject{role: "pack-input", object: fixture.compiler}}
+    changed.steps = [NativeRuntimeObservedStep]{changed.steps[0], step}
+    if native_runtime_pack_prepare(store, fixture.subject, changed) == {
+        .Ok(_) -> panic("consumer differs from actual producer")
+        .Err(_) -> {}
+    }
+    changed.steps = [NativeRuntimeObservedStep]{fixture.evidence.steps[1], fixture.evidence.steps[0]}
+    if native_runtime_pack_prepare(store, fixture.subject, changed) == {
+        .Ok(_) -> panic("reordered rail admitted")
+        .Err(_) -> {}
+    }
+    changed.steps = [NativeRuntimeObservedStep]{fixture.evidence.steps[0]}
+    if native_runtime_pack_prepare(store, fixture.subject, changed) == {
+        .Ok(_) -> panic("incomplete rail admitted")
+        .Err(_) -> {}
+    }
+    wrong_generation := fixture.evidence
+    wrong_generation.generation = store.publish_blob("{{\"final\":\"1111111111111111111111111111111111111111\",\"deterministic\":true}}".bytes()) ?? panic("wrong final")
+    if native_runtime_pack_prepare(store, fixture.subject, wrong_generation) == {
+        .Ok(_) -> panic("wrong runtime FINAL admitted")
+        .Err(_) -> {}
+    }
+    prepared :: native_runtime_pack_prepare(store, fixture.subject, fixture.evidence) ?? panic("prepare")
+    wrong_subject :: native_pack_test_authorize(store, fixture.compiler, fixture.evidence)
+    if native_runtime_pack_publish(store, fixture.subject, fixture.evidence.approval(prepared, wrong_subject), fixture.compiler) == {
+        .Ok(_) -> panic("authorization for another subject admitted")
+        .Err(_) -> {}
+    }
+    wrong_lifecycle := fixture.subject
+    wrong_lifecycle.lifecycle = native_pack_test_lifecycle(store, fixture.compiler)
+    if native_runtime_pack_prepare(store, wrong_lifecycle, fixture.evidence) == {
+        .Ok(_) -> panic("lifecycle inspection for another object admitted")
+        .Err(_) -> {}
+    }
+    store_artifact_test_cleanup(root)
+}
+
+#Test("native runtime rail refuses future cyclic and missing outputs") {
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
+    root :: store_artifact_test_root("native-pack-reference")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
+    contract :: NativeRuntimeRailContract.from_bytes(native_pack_blob(store, fixture.evidence.rail_contract, &census) ?? panic("contract")) ?? panic("decode")
+    produced := [String: [String]]{}
+    loop pair in ([String]{"future", "build"}) {
+        input :: Dyn.Object([String: Dyn]{"role": Dyn.Text("x"), "source": Dyn.Object([String: Dyn]{"kind": Dyn.Text("produced"), "step": Dyn.Text(pair), "output": Dyn.Text("missing")})})
+        fields :: [String: Dyn]{"inputs": Dyn.Array([Dyn]{input})}
+        if native_pack_rail_inputs(fields, "inputs", produced) == {
+            .Ok(_) -> panic("unresolved producer accepted")
+            .Err(_) -> {}
+        }
+        &produced.add("build", contract.steps[0].outputs).drop("first insertion or deliberately unchanged")
+    }
+    store_artifact_test_cleanup(root)
+}
+
+#Test("native runtime lifecycle section refuses padding priority and suffix aliases") {
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
+    root :: store_artifact_test_root("native-pack-lifecycle")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
+    tree :: native_pack_input_tree(native_pack_blob(store, fixture.subject.lifecycle, &census) ?? panic("lifecycle bytes")) ?? panic("lifecycle tree")
+    loop spelling in ([String]{".init_array.0", ".init_array.00001", ".init_array.00000.extra", ".init_array.000000", ".init_array. 00000", ".init_array.000é0", ".init_array.0000٠"}) {
+        fields := native_pack_fields(tree, [String]{"schema", "pack", "jet_object", "entries", "sections", "relocations"}) ?? panic("lifecycle fields")
+        entries := native_pack_array_field(fields, "entries") ?? panic("entries")
+        entry := native_pack_fields(entries[0], [String]{"symbol", "phase", "priority", "provider", "section"}) ?? panic("entry")
+        entry["section"] = Dyn.Text(spelling)
+        entries[0] = Dyn.Object(entry)
+        fields["entries"] = Dyn.Array(entries)
+        changed := fixture.subject
+        changed.lifecycle = store.publish_blob(native_pack_encode(Dyn.Object(fields)) ?? panic("alias codec")) ?? panic("alias fixture")
+        if native_runtime_pack_prepare(store, changed, fixture.evidence) == {
+            .Ok(_) -> panic("noncanonical lifecycle section accepted")
+            .Err(_) -> {}
+        }
+    }
+    store_artifact_test_cleanup(root)
+}
+
+#Test("native runtime lifecycle predicate covers every canonical decimal width") {
+    assert(native_pack_lifecycle_section_matches(".init_array.00000", "init", "0"))
+    assert(native_pack_lifecycle_section_matches(".init_array.00001", "init", "1"))
+    assert(native_pack_lifecycle_section_matches(".init_array.00010", "init", "10"))
+    assert(native_pack_lifecycle_section_matches(".init_array.00100", "init", "100"))
+    assert(native_pack_lifecycle_section_matches(".init_array.01000", "init", "1000"))
+    assert(native_pack_lifecycle_section_matches(".init_array.65535", "init", "65535"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00000", "fini", "0"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00001", "fini", "1"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00010", "fini", "10"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.00100", "fini", "100"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.01000", "fini", "1000"))
+    assert(native_pack_lifecycle_section_matches(".fini_array.65535", "fini", "65535"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.000é0", "init", "0"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.0000٠", "init", "0"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.00000.extra", "init", "0"))
+    assert(!native_pack_lifecycle_section_matches(".init_array.000000", "init", "0"))
+}
+
+#Test("native runtime read census refuses every corrupt transitive blob") {
+    root :: store_artifact_test_root("native-pack-read-census")
+    store :: store_artifact_test_store(root, 1024 * 1024)
+    fixture :: native_pack_test_fixture(store, "small codec fixture bytes")
+    prepared :: native_runtime_pack_prepare(store, fixture.subject, fixture.evidence) ?? panic("prepare")
+    authorization :: native_pack_test_authorize(store, prepared, fixture.evidence)
+    published :: native_runtime_pack_publish(store, fixture.subject, fixture.evidence.approval(prepared, authorization), fixture.compiler) ?? panic("publish")
+    loaded :: native_runtime_pack_load(store, fixture.compiler) ?? panic("initial actual census")
+    census := NativePackReadCensus{capture: false, objects: [ObjectHandle]{}}
+    loop object in loaded.objects {
+        bytes :: native_pack_blob(store, object, &census) ?? panic("original verified object")
+        path :: store.object_path(object)
+        files.write_bytes(path, "corrupt-census-fixture".bytes()) ?? panic("corrupt")
+        if native_runtime_pack_load(store, fixture.compiler) == {
+            .Ok(_) -> panic("corrupt transitive census object accepted")
+            .Err(_) -> {}
+        }
+        files.write_bytes(path, bytes) ?? panic("restore original actual bytes")
+        // lookup_artifact quarantines the action when its composition blob is
+        // invalid. Restore through the SAME canonical publication, not a fake
+        // AC file, before exercising independent missing-blob refusal.
+        if object == published.object {
+            repaired :: native_runtime_pack_publish(store, fixture.subject, fixture.evidence.approval(prepared, authorization), fixture.compiler) ?? panic("restore canonical action")
+            assert_eq(repaired.object, published.object)
+        }
+        files.remove(path) ?? panic("remove actual transitive blob")
+        if native_runtime_pack_load(store, fixture.compiler) == {
+            .Ok(_) -> panic("missing transitive census object accepted")
+            .Err(_) -> {}
+        }
+        files.write_bytes(path, bytes) ?? panic("restore missing actual blob")
+        if object == published.object {
+            repaired :: native_runtime_pack_publish(store, fixture.subject, fixture.evidence.approval(prepared, authorization), fixture.compiler) ?? panic("restore missing canonical action")
+            assert_eq(repaired.object, published.object)
+        }
+        reread :: native_runtime_pack_load(store, fixture.compiler) ?? panic("restored actual census")
+        assert_eq(reread.objects, loaded.objects)
+        assert_eq(reread.composition, published.object)
+    }
+    store_artifact_test_cleanup(root)
+}

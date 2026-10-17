@@ -1,0 +1,117 @@
+# HAND-PORT tests/jetpack_engine.rs:2719-2816 build_resolves_fixture_ref
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
+# #[test]
+# fn build_resolves_fixture_ref() {
+#     let root = Scratch::new("root");
+#     let out = jetpack()
+#         .args(["build", "fastfetch@nixpkgs", "--no-color", "--offline"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("PATH", "")
+#         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+#         .output()
+#         .unwrap();
+#     assert!(out.status.success());
+#     let stderr = String::from_utf8_lossy(&out.stderr);
+#     assert!(stderr.contains("fastfetch"), "stderr: {stderr}");
+#     assert!(stderr.contains("substituted"), "stderr: {stderr}");
+#     assert!(!stderr.contains("couldn't run `nix`"), "stderr: {stderr}");
+#     assert!(
+#         stderr.contains("/hangar/objects/sha256-"),
+#         "stderr: {stderr}"
+#     );
+# 
+#     let explained = jet()
+#         .args(["explain", "fastfetch", "--json", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+#         .output()
+#         .unwrap();
+#     assert!(
+#         explained.status.success(),
+#         "explain stderr: {}",
+#         String::from_utf8_lossy(&explained.stderr)
+#     );
+#     let stdout = String::from_utf8_lossy(&explained.stdout);
+#     assert!(stdout.contains("\"schema\":\"jet.report/v1\""));
+#     assert!(stdout.contains("\"moment\":\"tool\""));
+#     let explain_report = jetpack::JSON::parse(stdout.trim()).expect("package explain JSON");
+#     assert_eq!(json_string(&explain_report, "schema"), "jet.report/v1");
+#     assert_eq!(json_string(&explain_report, "moment"), "tool");
+#     assert_eq!(json_string(&explain_report, "action"), "explain");
+#     assert_eq!(json_string(&explain_report, "status"), "ok");
+#     assert!(stdout.contains("\"provider_facts\":"));
+#     assert!(stdout.contains("\"direct_dependencies\":"));
+#     assert!(stdout.contains("\"roots\":"));
+#     assert!(stdout.contains("\"decision\":\"realized\""), "{stdout}");
+#     assert!(stdout.contains("\"output_digest\":\"matches\""), "{stdout}");
+#     for lens in [
+#         "why-depends",
+#         "what-depends",
+#         "closure",
+#         "why-live",
+#         "rebuild",
+#     ] {
+#         let explained = jet()
+#             .args(["explain", lens, "fastfetch", "--json", "--no-color"])
+#             .env("JETPACK_ROOT", &root.path)
+#             .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+#             .output()
+#             .unwrap();
+#         assert!(
+#             explained.status.success(),
+#             "{lens} stderr: {}",
+#             String::from_utf8_lossy(&explained.stderr)
+#         );
+#         let stdout = String::from_utf8_lossy(&explained.stdout);
+#         assert!(stdout.contains(&format!("\"lens\":\"{lens}\"")), "{stdout}");
+#     }
+# 
+#     let roots = jetpack::Store::Roots {
+#         root: root.path.clone(),
+#         dev_mode: false,
+#     };
+#     let entry = jetpack::Store::list(&roots)
+#         .into_iter()
+#         .find(|entry| entry.name == "fastfetch")
+#         .expect("fixture build must publish fastfetch to the Store");
+#     make_writable(&entry.out);
+#     fs::write(Path::new(&entry.out).join("payload"), "tampered\n").unwrap();
+#     let rebuild = jet()
+#         .args(["explain", "rebuild", "fastfetch", "--json", "--no-color"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", example_fixtures(&root.path))
+#         .output()
+#         .unwrap();
+#     assert!(
+#         rebuild.status.success(),
+#         "rebuild explain stderr: {}",
+#         String::from_utf8_lossy(&rebuild.stderr)
+#     );
+#     let rebuild_stdout = String::from_utf8_lossy(&rebuild.stdout);
+#     let rebuild_report = jetpack::JSON::parse(rebuild_stdout.trim()).expect("rebuild JSON");
+#     assert_eq!(json_string(&rebuild_report, "schema"), "jet.report/v1");
+#     assert_eq!(json_string(&rebuild_report, "action"), "explain");
+#     assert!(rebuild_stdout.contains("\"severity\":\"warning\""));
+#     assert!(rebuild_stdout.contains("\"what\":"));
+#     assert!(rebuild_stdout.contains("\"decision\":\"rebuild-required\""));
+#     assert!(rebuild_stdout.contains("\"output_digest\":\"mismatch\""));
+#     assert!(rebuild_stdout.contains("\"kind\":\"loss\""));
+#     assert!(rebuild_stdout.contains("stored output digest differs"));
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build fastfetch@nixpkgs --no-color --offline
+cwd: project
+env: PATH=
+exit: 0
+stderr: ~ "fastfetch" # original contains predicate
+stderr: ~ "substituted" # original contains predicate
+stderr: ~ "/hangar/objects/sha256-" # original contains predicate
+stderr: !~ "couldn't run `nix`" # original negative contains predicate
+

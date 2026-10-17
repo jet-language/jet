@@ -1,0 +1,57 @@
+# HAND-PORT tests/jetpack_engine.rs:7927-7965 typed_module_example_builds_offline_end_to_end
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Verbatim original setup + ALL assertions, including the library observations. No passing reduced replacement.
+# #[test]
+# fn typed_module_example_builds_offline_end_to_end() {
+#     // I5: the committed jetpack-typed fixture is the executable spec
+#     // for the typed `module { … }` env surface (U3/U6/U8) including U4 import-tree
+#     // discovery. `jetpack env --prep` with no ref evaluates env.jet through `modeval`:
+#     // the `default` source merges to its pinned nixpkgs upstream,
+#     // `[default.ripgrep, default.fd]` gives two `Pkg` refs, and `imports:
+#     // find("./modules")` walks `modules/tools.jet` and folds its `default.jq`
+#     // into the same merge. All three realize from the committed fixtures, fully
+#     // offline. The store lives under a scratch JETPACK_ROOT, so nothing is
+#     // written back.
+#     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetpack-typed");
+#     let project = Scratch::new("typed-e2e-project");
+#     copy_dir_recursive(&source, &project.path);
+#     let root = Scratch::new("typed-e2e");
+#     let output = jetpack()
+#         .args(["build", "--no-color", "--offline"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env(
+#             "JETPACK_FIXTURES",
+#             realized_fixtures(&project.join("fixtures"), &root.path),
+#         )
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     let stderr = String::from_utf8_lossy(&output.stderr);
+#     for pkg in ["ripgrep", "fd", "jq"] {
+#         assert!(
+#             stderr.contains(pkg),
+#             "expected `{pkg}` in build output: {stderr}"
+#         );
+#     }
+#     assert!(stderr.contains("built 3 package(s)"), "stderr: {stderr}");
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build --no-color --offline
+cwd: project
+exit: 0
+stderr: ~ "ripgrep" # original contains predicate
+stderr: ~ "fd" # original contains predicate
+stderr: ~ "jq" # original contains predicate
+stderr: ~ "built 3 package(s)" # original contains predicate
+

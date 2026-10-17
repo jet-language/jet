@@ -1,0 +1,23 @@
+# HAND-PORT tests/jetpack_engine.rs:9342-9377 jet_hangar_du_counts_source_built_objects
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: jet_hangar_du_counts_source_built_objects.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack build --no-color
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: 0
+step: jetpack hangar du --no-color
+cwd: project
+env: HOME={work}/home
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "built" # original contains predicate
+stderr: ~ "1 built from source" # original contains predicate
+

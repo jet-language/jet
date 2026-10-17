@@ -27,7 +27,7 @@ enum EnvSubverb {
     }
 }
 
-pub fn cli_cmd_env(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_env(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     // D-JPK-VERIFYONCE1=A: one env command verifies each Hangar object once.
     store_arm_command_memo(&verification)
@@ -298,7 +298,7 @@ fn cli_project_catalog_binding(roots: HangarRoots, project_dir: String) -[FS, En
 }
 
 // The local catalog this project chose before, when it still exists.
-pub fn cli_remembered_project_catalog(roots: HangarRoots, project_dir: String) -[FS, Env]> String? Never! {
+fn cli_remembered_project_catalog(roots: HangarRoots, project_dir: String) -[FS, Env]> String? Never! {
     recorded :: files.read(cli_project_catalog_binding(roots, project_dir)) ?? return None
     catalog :: recorded.trim()
     if !files.is_dir(catalog) -> return None
@@ -408,7 +408,7 @@ fn cli_cmd_env_sync(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLI
 
 // The foreign flake/devenv file in `dir`, if either exists. `flake.nix` wins
 // when both are present.
-pub fn cli_foreign_flake_path(dir: String) -[FS]> String? Never! {
+fn cli_foreign_flake_path(dir: String) -[FS]> String? Never! {
     flake :: files.join(dir, FOREIGN_FLAKE_FILE)
     if files.is_file(flake) -> return Val(flake)
     devenv :: files.join(dir, FOREIGN_DEVENV_FILE)
@@ -420,7 +420,7 @@ pub fn cli_foreign_flake_path(dir: String) -[FS]> String? Never! {
 // through the typed `module env.*` surface or the Phase-1 `pkg.*` directive
 // surface. A malformed typed surface still counts as declared, so this never
 // masks that error by falling through to a foreign flake.
-pub fn cli_project_declares_env(dir: String) -[FS, Env]> Bool Never! {
+fn cli_project_declares_env(dir: String) -[FS, Env]> Bool Never! {
     src :: files.read(EnvFile.path_in(dir)) ?? return false
     if envmodel_is_module_surface(src) {
         plan :: envmodel_evaluate_env(src, dir) ?? return true

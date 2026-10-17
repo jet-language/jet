@@ -1,0 +1,27 @@
+
+use core.encoding.cbor as cbor
+
+fn run() {
+    options := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 100, require_canonical: false }
+    value := cbor.parse([130, 97, 120, 97, 121], options.copy()) ?? panic("definite parse")
+    indefinite := cbor.parse([159, 97, 120, 97, 121, 255], options.copy()) ?? panic("indefinite parse")
+    if cbor.parse([130, 97, 120], options) == {
+        .Ok(_) -> panic("truncated array accepted")
+        .Err(e) -> print(e.path == "$[1]" && e.reason == "CBOR value is missing")
+    }
+
+    roomy := cbor.CBOROptions{ max_depth: 256, max_items: 1000000, max_bytes: 256, require_canonical: false }
+    if cbor.parse([129, 130, 97, 120], roomy.copy()) == {
+        .Ok(_) -> panic("nested truncation accepted")
+        .Err(e) -> print(e.path == "$[0][1]" && e.reason == "CBOR value is missing")
+    }
+    if cbor.parse([162, 97, 97, 1, 97, 97, 2], roomy.copy()) == {
+        .Ok(_) -> panic("duplicate key accepted")
+        .Err(e) -> print(e.path == "$" && e.reason == "duplicate CBOR text map key")
+    }
+    if cbor.decode<[Int]>([129, 97, 120], roomy) == {
+        .Ok(_) -> panic("typed mismatch accepted")
+        .Err(e) -> print(e[0].path == "[0]" && e[0].reason.contains("expected Int"))
+    }
+    print(true)
+}

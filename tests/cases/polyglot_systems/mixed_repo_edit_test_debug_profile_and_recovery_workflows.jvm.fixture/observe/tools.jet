@@ -1,0 +1,24 @@
+// SETUP-PORT of tests/polyglot_systems.rs:381-386/515-528/532-549. No assertions; real tool discovery.
+use core.process as process
+use core.files as files
+use core.sys as sys
+use core.encoding.json as json
+use core.encoding.Dyn
+use core.text.parse as parse
+fn run() {
+    names :: [String]{"cc", "ar", "clang", "strip", "nm", "javac", "node", "python3"}
+    fields := [String]{}
+    javac := ""
+    loop name in names {
+        path :: process.which(name) ?? panic("mixed-repo production matrix requires {name}")
+        if name == "javac" -> javac = path
+        &fields.push("{json.to_string(Dyn.Text(name))}:{json.to_string(Dyn.Text(path))}")
+    }
+    home :: sys.get_env("JAVA_HOME") ?? files.dirname(files.dirname(javac))
+    runtime :: files.join(files.join(home, "lib/server"), if sys.name() == "macos" -> "libjvm.dylib" else -> "libjvm.so")
+    strip_flag :: if sys.name() == "macos" -> "-S" else -> "--strip-debug"
+    &fields.push("\"java_home\":{json.to_string(Dyn.Text(home))}")
+    &fields.push("\"libjvm\":{json.to_string(Dyn.Text(runtime))}")
+    &fields.push("\"strip_flag\":{json.to_string(Dyn.Text(strip_flag))}")
+    print("{{{parse.join(fields, ",")}}}")
+}

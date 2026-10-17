@@ -1,0 +1,21 @@
+# HAND-PORT tests/compute_extended.rs:28-40 linalg_and_fft_use_the_cpu_oracle
+# PENDING-GRAMMAR: approved batch-two/four forms, no runtime parity claim.
+fixture: linalg_and_fft_use_the_cpu_oracle.fixture
+env: NO_COLOR=1
+env: JETPACK_ENV=1
+step: jet run --release Examples/features/tooling/compute_linalg.jet
+env: JET_STORE_DIR={work}/cache-0-release
+env: JETPACK_ROOT={work}/jetpack-0-release
+exit: 0
+stdout: = linalg_and_fft_use_the_cpu_oracle.oracle0.expected
+step: jet run Examples/features/tooling/compute_linalg.jet
+env: JET_STORE_DIR={work}/cache-0-default
+env: JETPACK_ROOT={work}/jetpack-0-default
+exit: 0
+stdout: = linalg_and_fft_use_the_cpu_oracle.oracle0.expected
+step: jet run --interpret Examples/features/tooling/compute_linalg.jet
+env: JET_STORE_DIR={work}/cache-0-interpret
+env: JETPACK_ROOT={work}/jetpack-0-interpret
+exit: 0
+stdout: = linalg_and_fft_use_the_cpu_oracle.oracle0.expected
+

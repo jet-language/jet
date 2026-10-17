@@ -1,0 +1,93 @@
+
+use core.encoding.cbor as cbor
+use core.encoding.hex as hex
+use core.text as text
+
+struct Token { raw: String }
+
+impl Token.Encode {
+    fn encode(self) -> Dyn { Dyn.Text("wire") }
+}
+
+impl Token.Decode {
+    fn decode(tree: Dyn) -[]> Token ![FieldError] {
+        value :: tree.text()
+        if value != "wire" {
+            return Err([FieldError{ path: "$xml_event", reason: "bad token" }])
+        }
+        return Ok(Token{ raw: "decoded" })
+    }
+}
+
+#Codable
+enum Event {
+    Idle
+    Count(Int)
+}
+
+#Codable
+struct Wrap<T> {
+    value: T
+}
+
+#[Codable, RenameAll(camel)]
+struct Packet {
+    display_name: String
+    token: Token
+    event: Event
+    bytes: [U8]
+    numbers: [Int]
+    labels: [String:Int]
+    maybe: ?Int
+    score: Float
+    letter: Char
+}
+
+fn resident() -[]> String {
+    value := Packet{
+        display_name: "Ada",
+        token: Token{ raw: "ignored" },
+        event: Event.Count(7),
+        bytes: [222, 173],
+        numbers: [-2, 3],
+        labels: [String:Int]{ "x": 6 },
+        maybe: Val(8),
+        score: 1.5,
+        letter: 'Z'
+    }
+    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
+    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
+    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
+}
+
+fn forced_deopt(seed: String) -[]> String {
+    folded := text.casefold(seed)
+    if folded != "strasse" { panic("casefold") }
+    value := Packet{
+        display_name: "Ada",
+        token: Token{ raw: "ignored" },
+        event: Event.Count(7),
+        bytes: [222, 173],
+        numbers: [-2, 3],
+        labels: [String:Int]{ "x": 6 },
+        maybe: Val(8),
+        score: 1.5,
+        letter: 'Z'
+    }
+    encoded := cbor.to_bytes_canonical(value) ?? panic("encode")
+    decoded := cbor.decode<Packet>(encoded.copy()) ?? panic("decode {err}")
+    roundtrip := cbor.to_bytes_canonical(decoded) ?? panic("re-encode")
+    boxed := cbor.decode<Wrap<Int>>([U8]{ 0xa1, 0x65, 0x76, 0x61, 0x6c, 0x75, 0x65, 0x0b }) ?? panic("generic decode")
+    boxed_wire := cbor.to_bytes_canonical(boxed) ?? panic("generic encode")
+    boxed_back := cbor.decode<Wrap<Int>>(boxed_wire.copy()) ?? panic("generic roundtrip")
+    return "{hex.encode(encoded)}|{hex.encode(roundtrip)}|{decoded.token.raw}|{boxed_back.value}"
+}
+
+fn run() {
+    print(resident())
+    print(forced_deopt("Straße"))
+}

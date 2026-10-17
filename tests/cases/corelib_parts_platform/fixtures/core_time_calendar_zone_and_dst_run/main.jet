@@ -1,0 +1,17 @@
+
+use core.time as time
+use core.time as date
+
+fn run() {
+    zone :: time.zone("America/New_York") ?? panic("missing zone")
+    local :: time.zoned_local(date.new(2024, 3, 10), time.time(1, 30, 0), zone) ?? panic("local time")
+    print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    civil :: local.add_period(time.period_days(1))
+    day :: Duration.hours(24) ?? panic("duration")
+    absolute :: local.add_duration(day)
+    print(civil.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(local.to_datetime().format_rfc3339())
+    parsed :: time.parse_rfc3339("2024-03-10T06:30:00Z") ?? panic("bad parse")
+    print(parsed.in_zone(zone).format("yyyy-MM-dd HH:mm:ss VV XXX"))
+}

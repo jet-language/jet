@@ -1,0 +1,90 @@
+use core.files as files
+
+#Test("case labels compare both normalized streams and fail on unequal bytes") {
+    root :: cases_test_root("relations-streams")
+    cases_test_source(root, "equal", "step first: jet -c 'printf same; printf warning >&2'\nstep second: jet -c 'printf same; printf warning >&2'\nstdout: == first\nstderr: == first\n")
+    cases_test_source(root, "unequal", "step first: jet -c 'printf same'\nstep second: jet -c 'printf changed'\nstdout: == first\n")
+    cases_test_source(root, "paths", "step first: jet -c 'printf %s \"$1\"' scenario {{work}}\nstep second: jet -c 'printf %s \"$1\"' scenario {{work}}\nstdout: == first\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("equal"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("paths"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("unequal"), context)[0].verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove stream relation scratch")
+}
+
+#Test("case binary file relations and copies preserve every byte including non UTF8") {
+    root :: cases_test_root("relations-files")
+    tree :: files.join(root, "tests/cases/group/tree")
+    files.create_dir_all(tree) ?? panic("binary tree")
+    files.write_bytes(files.join(tree, "first.bin"), [U8{0}, U8{255}, U8{1}]) ?? panic("first bytes")
+    files.write_bytes(files.join(tree, "same.bin"), [U8{0}, U8{255}, U8{1}]) ?? panic("same bytes")
+    files.write_bytes(files.join(tree, "different.bin"), [U8{0}, U8{255}, U8{2}]) ?? panic("different bytes")
+    cases_test_source(root, "equal", "fixture: tree\nstep: jet -c 'exit 0'\nfile: first.bin == same.bin\nfile: first.bin != different.bin\ncopy: first.bin copies/first.bin\nfile: copies/first.bin == first.bin\n")
+    cases_test_source(root, "unequal", "fixture: tree\nstep: jet -c 'exit 0'\nfile: first.bin == different.bin\n")
+    cases_test_source(root, "equal-not-different", "fixture: tree\nstep: jet -c 'exit 0'\nfile: first.bin != same.bin\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("equal"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("unequal"), context)[0].verdict.status, "FAIL")
+    assert_eq(kit_cases_run(cases_test_entry("equal-not-different"), context)[0].verdict.status, "FAIL")
+    files.remove_all(root) ?? panic("remove file relation scratch")
+}
+
+#Test("case parser rejects duplicate unknown or self labels and unbuilt artifacts") {
+    assert(kit_steps_parse_case("step same: printf x\nstep same: printf x\n").error.contains("duplicate"))
+    assert(kit_steps_parse_case("step: printf x\nstdout: == missing\n").error.contains("label"))
+    assert(kit_steps_parse_case("step same: printf x\nstdout: == same\n").error.contains("label"))
+    assert(kit_steps_parse_case("step: built\n").error.contains("build"))
+    assert(kit_steps_parse_case("copy: ../outside saved\n").error != "")
+    assert(kit_steps_parse_case("copy: file ../outside\n").error != "")
+    assert(kit_steps_parse_case("step: printf x\nfile: ../outside == file\n").error != "")
+    assert(kit_steps_parse_case("step: printf x\nfile: file != ../outside\n").error != "")
+}
+
+#Test("golden reserved build and built parse separately from case orphan built") {
+    golden :: kit_steps_parse("step: build\nstep: built \"two words\"\n")
+    assert_eq(golden.error, "")
+    assert_eq(golden.steps[0].argv, ["build"])
+    assert_eq(golden.steps[1].argv, ["built", "two words"])
+    assert(kit_steps_parse_case("step: built \"two words\"\n").error != "")
+    assert_eq(kit_steps_parse_case("step: jet build run.jet\nstep: built \"two words\"\n").error, "")
+}
+
+#Test("case copy errors are reported without aborting the harness") {
+    root :: cases_test_root("relations-missing-copy")
+    cases_test_source(root, "missing", "copy: missing saved\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    result :: kit_cases_run(cases_test_entry("missing"), context)[0]
+    assert_eq(result.verdict.status, "ERROR")
+    assert(result.verdict.detail.contains("missing"))
+    files.remove_all(root) ?? panic("remove missing copy scratch")
+}
+
+#Test("case remove handles files trees and reports missing paths") {
+    root :: cases_test_root("relations-remove")
+    tree :: files.join(root, "tests/cases/group/tree/nested")
+    files.create_dir_all(tree) ?? panic("remove tree")
+    kit_exec_write(files.join(tree, "value"), "bytes")
+    kit_exec_write(files.join(root, "tests/cases/group/tree/file"), "bytes")
+    cases_test_source(root, "remove", "fixture: tree\nremove: file\nfile: file absent\nremove: nested\nfile: nested absent\n")
+    cases_test_source(root, "missing", "remove: missing\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("remove"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("missing"), context)[0].verdict.status, "ERROR")
+    assert(kit_steps_parse_case("remove: ../outside\n").error != "")
+    files.remove_all(root) ?? panic("remove action scratch")
+}
+
+#Test("case steps apply cwd step env and final unset independently") {
+    root :: cases_test_root("relations-environment")
+    tree :: files.join(root, "tests/cases/group/tree/nested")
+    files.create_dir_all(tree) ?? panic("cwd tree")
+    kit_exec_write(files.join(tree, "value"), "nested")
+    kit_exec_write(files.join(root, "tests/cases/group/nested.out"), "nested")
+    cases_test_source(root, "cwd", "fixture: tree\nstep: jet -c 'cat value'\ncwd: nested\nstdout: = nested.out\n")
+    cases_test_source(root, "env", "env: CASE_SCOPE=case\nstep: jet -c '[ \"$CASE_SCOPE\" = case ] && [ \"$JET_STORE_DIR\" = \"$1\" ] && [ -z \"${{JET_RECEIPT_BYPASS+x}}\" ]' scenario {{work}}/one\nenv: JET_STORE_DIR={{work}}/one\nunset: JET_RECEIPT_BYPASS\nstep: jet -c '[ \"$CASE_SCOPE\" = case ] && [ \"$JET_STORE_DIR\" = \"$1\" ] && [ \"$JET_RECEIPT_BYPASS\" = 1 ]' scenario {{work}}/two\nenv: JET_STORE_DIR={{work}}/two\n")
+    context :: cases_test_context(root, files.join(root, "scratch"))
+    assert_eq(kit_cases_run(cases_test_entry("cwd"), context)[0].verdict.status, "PASS")
+    assert_eq(kit_cases_run(cases_test_entry("env"), context)[0].verdict.status, "PASS")
+    assert(kit_steps_parse_case("step: printf x\ncwd: ../outside\n").error != "")
+    files.remove_all(root) ?? panic("remove environment scratch")
+}

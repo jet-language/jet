@@ -1,0 +1,216 @@
+// Checked graph queries share the Driver invocation; no CLI graph reconstruction.
+use jet_driver.[JetDriverCompileRequest, JetDriverBuildQueryScope, JetDriverBuildQueryResult, JetDriverOptimizationQueryResult, JetDriverVerbOutput, jet_driver_query_build_plan, jet_driver_present_diagnostics, jet_driver_build_plan_json, jet_driver_build_explanation, jet_driver_optimization_query, jet_driver_report_problems, JET_DRIVER_EXIT_OK, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[Diagnostic, DIAGNOSTIC_LINT, MIROptimizationDecision, MIRSourceFile]
+use core.build.[BuildGraphNode as InspectBuildGraphNode]
+use core.math as build_math
+
+fn jet_cli_build_vector(query: JetDriverOptimizationQueryResult, json: Bool) -> String Never! {
+    rows := [JetCLIStatusValue]{}
+    text := ""
+    // Build inspection uses MIR declaration order (CmdCompile.rs), whereas
+    // acceleration inspection intentionally sorts its function projection.
+    program :: query.compile.mir ?? panic("completed build vector query lost its MIR")
+    loop function in program.functions {
+        loop fact in function.optimization.vector_facts {
+            rule :: jet_cli_optimization_vector_rule(fact.rule)
+            layout :: jet_cli_optimization_vector_layout(fact.layout)
+            lane :: if fact.lane_width == .Val(width) -> "{width}" else -> "none"
+            decision :: if fact.decision == {
+                .Eligible -> "accepted"
+                .Rejected(reason) -> jet_cli_optimization_rejection(reason).code
+            }
+            if !json {
+                text += "vector\t{function.key}\t{fact.span.start}..{fact.span.end}\t{rule}\t{layout}\t{lane}\t{decision}\n"
+            } else {
+                &rows.push(jet_cli_status_object([
+                    jet_cli_status_field("function", jet_cli_status_text(function.key)),
+                    jet_cli_status_field("span", jet_cli_optimization_span(fact.span)),
+                    jet_cli_status_field("rule", jet_cli_status_text(rule)),
+                    jet_cli_status_field("layout", jet_cli_status_text(layout)),
+                    jet_cli_status_field("lane", jet_cli_status_text(lane)),
+                    jet_cli_status_field("decision", jet_cli_status_text(decision)),
+                ]))
+            }
+        }
+    }
+    if json -> jet_cli_status_json(jet_cli_status_array(rows)) else -> text
+}
+
+fn jet_cli_build_report(query: JetDriverBuildQueryResult, vector: String, subject: String?, json: Bool) -> String Never! {
+    plan :: query.plan ?? {
+        if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", JetCLIStatusValue.Null)])}\n"
+        return "default pipeline: no root fn build\n"
+    }
+    if subject == .Val(name) {
+        explanation :: jet_driver_build_explanation(plan, name)
+        if json -> return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("label", jet_cli_status_text(explanation.label)), jet_cli_status_field("provenance", jet_cli_status_texts(explanation.provenance))])}\n"
+        text := "{explanation.label}\n"
+        loop fact in explanation.provenance -> text += "  {fact}\n"
+        return text
+    }
+    if json {
+        payload :: jet_driver_build_plan_json(plan, vector)
+        build :: jet_cli_status_from_tree(report_status_value_parse(payload) ?? panic("checked build projection lost its JSON")) ?? panic("checked build projection lost its status value")
+        return "{jet_cli_status_render("inspect.build", true, [jet_cli_status_field("build", build)])}\n"
+    }
+    graph :: query.graph ?? panic("checked plan lost its graph")
+    text := ""
+    loop target in graph.targets -> text += "target\t{target.name}\t{target.kind}\n"
+    loop action in graph.actions -> text += "action\t{action.name}\t{action.outputs.join(",")}\n"
+    "{text}{vector}"
+}
+
+fn jet_cli_build_query_failure(request: JetDriverCompileRequest, query: JetDriverBuildQueryResult, file: String, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput Never! {
+    if query.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    diagnostics :: jet_driver_present_diagnostics(query.diagnostics, request.authorized_sources, [MIRSourceFile]{})
+    errors :: jet_cli_errors(diagnostics)
+    if errors.len() == 0 -> return jet_cli_ice("the checked build query stopped before completing `{file}`")
+    source := ""
+    loop root in request.authorized_sources.roots {
+        loop input in root.files {
+            if input.path == request.authorized_sources.entry_path -> source = input.source
+        }
+    }
+    shown := [Diagnostic]{}
+    loop diagnostic in diagnostics {
+        if verbose || diagnostic.severity != DIAGNOSTIC_LINT -> &shown.push(diagnostic)
+    }
+    report :: if json -> jet_cli_reports_status_json("diagnostics", false, jet_cli_report_cwd(), file, source, shown) else -> jet_driver_report_problems(file, source, shown, color, verbose)
+    return {stdout: if json -> report else -> "", stderr: if json -> "" else -> report, exit_code: JET_DRIVER_EXIT_USER_ERROR}
+}
+fn jet_cli_build_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, subject: String?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+    response := jet_driver_query_build_plan(^owned_request, &scope)
+    request := ^response.request
+    query := ^response.query
+    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
+    vector := if json -> "[]" else -> ""
+    if query.plan == .Val(_) && subject == None {
+        optimization :: jet_driver_optimization_query(^request)
+        // The reference omits vector rows on failed semantic lowering. An
+        // actual completed producer, never an absent provider, supplies [].
+        if optimization.compile.complete && optimization.compile.internal_problem == None -> vector = jet_cli_build_vector(optimization, json)
+    }
+    {stdout: jet_cli_build_report(query, vector, subject, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}
+
+// Exact IEEE-754 fixed-three formatting, including half-to-even and -0.
+// Multiplying the binary significand by 125 is exact in Int; 1000 = 125*8.
+// A floating multiply/round would double-round and diverge from Rust's {:.3}.
+fn jet_cli_build_duration(value: Float) -> String Never! {
+    bits :: build_math.to_bits(value)
+    raw_exponent :: (bits >> 52).bit_and(2047)
+    if raw_exponent == 2047 -> panic("build record duration must be finite")
+    significand := bits.bit_and(4503599627370495)
+    exponent := -1071
+    if raw_exponent != 0 {
+        significand += 4503599627370496
+        exponent = raw_exponent - 1072
+    }
+    scaled := significand * 125
+    if exponent < 0 {
+        shift :: -exponent
+        if shift > 60 -> scaled = 0
+        else {
+            divisor :: 1 << shift
+            quotient :: scaled /% divisor
+            remainder :: scaled % divisor
+            half :: divisor /% 2
+            scaled = quotient
+            if remainder > half || (remainder == half && quotient % 2 != 0) -> scaled += 1
+        }
+        exponent = 0
+    }
+    digits := [Int]{}
+    loop {
+        &digits.push(scaled % 10)
+        scaled /%= 10
+        if scaled == 0 -> break
+    }
+    loop exponent > 0 {
+        carry := 0
+        loop index in 0..<digits.len() {
+            doubled :: digits[index] * 2 + carry
+            digits[index] = doubled % 10
+            carry = doubled /% 10
+        }
+        if carry != 0 -> &digits.push(carry)
+        exponent -= 1
+    }
+    loop digits.len() < 4 -> &digits.push(0)
+    bytes := [U8]{}
+    if bits < 0 -> &bytes.push(U8{45})
+    index := digits.len()
+    loop index > 0 {
+        index -= 1
+        &bytes.push(U8{48 + digits[index]})
+        if index == 3 -> &bytes.push(U8{46})
+    }
+    String.from_bytes(bytes) ?? panic("decimal digits are ASCII")
+}
+
+// Host must supply this pair only after successful native object production and
+// CAS publication. A graph key is not an artifact/cache key: it omits target,
+// profile and runtime identity. Retain the verified object handle separately;
+// the current RecordIndex contract has no native-object link kind.
+struct JetCLICompileNodeObservation {
+    node: BuildNodeRecord
+    object: ObjectHandle
+}
+
+fn jet_cli_build_compile_observation(executed: InspectBuildGraphNode, duration_ms: Float, previous: BuildRecord?, object: ObjectHandle) -> JetCLICompileNodeObservation JetCLIReadError! {
+    if executed.kind != "compile" -> return Err(jet_cli_read_error("native object production requires a compile node"))
+    if duration_ms - duration_ms != 0.0 || duration_ms < 0.0 -> return Err(jet_cli_read_error("native compile duration is not a finite non-negative observation"))
+    // CmdCompile15122-15129 names the first canonical input when a prior
+    // authenticated record exists. It does not claim that input changed.
+    reason :: if {
+        previous == None -> "first-run"
+        executed.inputs.len() > 0 -> "input:{executed.inputs[0]}"
+        else -> "first-run"
+    }
+    return Ok(JetCLICompileNodeObservation{
+        node: BuildNodeRecord{kind: executed.kind, key: executed.key, subject: executed.subject, duration_ms: duration_ms, why_ran: reason, inputs: executed.inputs},
+        object: object,
+    })
+}
+
+// Only authenticated producer evidence can supply timing/rebuild reasons.
+// Static node keys are not execution receipts (no synthetic first-run rows).
+fn jet_cli_build_nodes_report(record: BuildRecord, json: Bool) -> String Never! {
+    rows := [JetCLIStatusValue]{}
+    text := ""
+    loop node in record.nodes {
+        duration :: jet_cli_build_duration(node.duration_ms)
+        if json {
+            &rows.push(jet_cli_status_object([
+                jet_cli_status_field("kind", jet_cli_status_text(node.kind)),
+                jet_cli_status_field("key", jet_cli_status_text(node.key)),
+                jet_cli_status_field("subject", jet_cli_status_text(node.subject)),
+                jet_cli_status_field("duration_ms", JetCLIStatusValue.Float{text: duration}),
+                jet_cli_status_field("why_ran", jet_cli_status_text(node.why_ran)),
+                jet_cli_status_field("inputs", jet_cli_status_texts(node.inputs)),
+            ]))
+        } else { text += "{node.kind}\t{node.key}\t{node.subject}\t{duration}\t{node.why_ran}\t{node.inputs.join(",")}\n" }
+    }
+    if json {
+        document :: jet_cli_status_object([
+            jet_cli_status_field("schema", jet_cli_status_text("jet.explain-build/v1")),
+            jet_cli_status_field("program", jet_cli_status_text(record.program)),
+            jet_cli_status_field("nodes", jet_cli_status_array(rows)),
+        ])
+        return "{jet_cli_status_json(document)}\n"
+    }
+    text
+}
+
+// The store-owning host resolves the canonical program and supplies the
+// authenticated last record. Missing evidence follows the existing gap path;
+// the Rust static zero-duration/first-run fallback is not execution evidence.
+fn jet_cli_build_nodes_host(owned_request: ^JetDriverCompileRequest, scope: &JetDriverBuildQueryScope, file: String, program: String, record: BuildRecord?, json: Bool, color: Bool, verbose: Bool) -> JetDriverVerbOutput {
+    response := jet_driver_query_build_plan(^owned_request, &scope)
+    request := ^response.request
+    query := ^response.query
+    if !query.complete || query.internal_problem != None -> return jet_cli_build_query_failure(request, query, file, json, color, verbose)
+    retained :: record ?? return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence is unavailable", jet_cli_why("E2104"), "run the selected build with a runtime that records authenticated build-node receipts", color, json, JET_DRIVER_EXIT_USER_ERROR))
+    if retained.program != program -> return jet_cli_execute(jet_cli_inspect_b_report("E2104", "build execution-node evidence belongs to another program", jet_cli_why("E2104"), "select the authenticated last-build record for this program", color, json, JET_DRIVER_EXIT_USER_ERROR))
+    return {stdout: jet_cli_build_nodes_report(retained, json), stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}

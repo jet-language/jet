@@ -14,15 +14,15 @@ TOOL_PROJECTION_STAGE_PREFIX :: prep { ".projection-" }
 TOOL_PROJECTION_STAGE_SUFFIX :: prep { ".partial" }
 
 // A live install's verified receipt and the lease that proves it.
-pub struct ToolLiveInstall {
-    pub receipt: ProfileInstallReceipt
-    pub lease: CacheLease
+struct ToolLiveInstall {
+    receipt: ProfileInstallReceipt
+    lease: CacheLease
 }
 
 // Copy every tool's executables into `generation_dir/bin`, record each
 // projection digest on the tool, and sync the directory. A live install
 // supplies its own lease; any other tool re-leases its checked StoreEntry.
-pub fn cli_materialize_generation_bins(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], live: ToolLiveInstall?) CLIError! -[FS, Env, Time]> {
+fn cli_materialize_generation_bins(verification: &StoreVerification, generation_dir: String, tools: &[InstalledUserTool], live: ToolLiveInstall?) CLIError! -[FS, Env, Time]> {
     bin_dir :: files.join(generation_dir, "bin")
     files.create_dir(bin_dir)
     projected := [String]{}
@@ -78,7 +78,7 @@ fn cli_tool_project_bins(bin_dir: String, tool: InstalledUserTool, lease: CacheL
         &projected.push(folded)
         destination :: files.join(bin_dir, physical)
         proof :: lease.copy_profile_executable(member, destination)
-        if sys.is_unix() && (proof.mode & TOOL_PROFILE_EXEC_BITS) == 0 -> return Err(CLIError.Other("profile projection is not executable"))
+        if sys.is_unix() && ((proof.mode).bit_and(TOOL_PROFILE_EXEC_BITS)) == 0 -> return Err(CLIError.Other("profile projection is not executable"))
         cli_make_profile_projection_read_only(destination)
         &digests.push(proof.digest)
     }
@@ -97,7 +97,7 @@ fn cli_validated_store_member(verification: &StoreVerification, tool: InstalledU
 // The generation's `bin` directory holds exactly the tools' physical names,
 // every member still resolves inside its checked StoreEntry, and every
 // projection matches its recorded digest (and is executable on Unix).
-pub fn cli_validate_generation_bins(verification: &StoreVerification, generation: Int, tools: [InstalledUserTool]) CLIError! -[FS, Env]> {
+fn cli_validate_generation_bins(verification: &StoreVerification, generation: Int, tools: [InstalledUserTool]) CLIError! -[FS, Env]> {
     bin_dir :: files.join(files.join(cli_tool_generations_dir(), "{generation}"), "bin")
     expected := [String]{}
     loop tool in tools {
@@ -113,7 +113,7 @@ pub fn cli_validate_generation_bins(verification: &StoreVerification, generation
             bin :: tool.bins[index]
             proof :: store_profile_file_proof(files.join(bin_dir, cli_physical_bin_name(bin)))
             if proof.digest != tool.member_digests[index] -> return Err(CLIError.Other("profile projection proof mismatch for `{bin}`"))
-            if sys.is_unix() && (proof.mode & TOOL_PROFILE_EXEC_BITS) == 0 -> return Err(CLIError.Other("profile projection is not executable for `{bin}`"))
+            if sys.is_unix() && ((proof.mode).bit_and(TOOL_PROFILE_EXEC_BITS)) == 0 -> return Err(CLIError.Other("profile projection is not executable for `{bin}`"))
         }
     }
 }
@@ -121,7 +121,7 @@ pub fn cli_validate_generation_bins(verification: &StoreVerification, generation
 // Stage the generation's projection of `bin` next to its profile name, then
 // rename it into place. A hard link shares the immutable bytes; a
 // permission refusal is reported as-is, any other link failure copies.
-pub fn cli_install_profile_projection(generation: Int, bin: String) CLIError! -[FS, Env]> {
+fn cli_install_profile_projection(generation: Int, bin: String) CLIError! -[FS, Env]> {
     cli_validate_bin_name(bin)
     physical :: cli_physical_bin_name(bin)
     source :: files.join(files.join(files.join(cli_tool_generations_dir(), "{generation}"), "bin"), physical)
@@ -146,19 +146,19 @@ pub fn cli_install_profile_projection(generation: Int, bin: String) CLIError! -[
 // Drop every write bit so the projected bytes stay read-only (Windows maps
 // this to the readonly attribute).
 fn cli_make_profile_projection_read_only(path: String) CLIError! -[FS]> {
-    mode :: files.stat(path).mode & TOOL_PROFILE_PERMISSION_BITS
-    files.set_mode(path, mode - (mode & TOOL_PROFILE_WRITE_BITS))
+    mode :: (files.stat(path).mode).bit_and(TOOL_PROFILE_PERMISSION_BITS)
+    files.set_mode(path, mode - ((mode).bit_and(TOOL_PROFILE_WRITE_BITS)))
 }
 
 // A write refused by permissions becomes the E1340 managed-tool failure.
-pub fn cli_managed_tool_write_error(bin: String, path: String, error: CLIError) -> CLIError Never! {
+fn cli_managed_tool_write_error(bin: String, path: String, error: CLIError) -> CLIError Never! {
     if !error.is_permission_denied() -> return error
     CLIError.ManagedTool("managed tool `{bin}` cannot write `{path}`: {error.message()}")
 }
 
 // Remove every `.projection-*.partial` a crashed publish left in the profile
 // bin directory; anything else there with that shape is refused.
-pub fn cli_recover_projection_staging() CLIError! -[FS, Env]> {
+fn cli_recover_projection_staging() CLIError! -[FS, Env]> {
     directory :: cli_user_bin_dir()
     info :: cli_stat_optional(directory) ?? return
     if info.is_symlink || !info.is_dir -> return Err(CLIError.Other("managed tool bin directory is not a real directory"))
@@ -171,7 +171,7 @@ pub fn cli_recover_projection_staging() CLIError! -[FS, Env]> {
 }
 
 // A metadata file of at most 1 MiB of UTF-8, read through one handle.
-pub fn cli_read_bounded(path: String) -[FS]> String CLIError! {
+fn cli_read_bounded(path: String) -[FS]> String CLIError! {
     reader := files.open(path)
     if reader.stat().size > TOOL_PROFILE_MAX_METADATA_BYTES -> return Err(CLIError.Other("profile metadata exceeds byte bound"))
     bytes := [U8]{}
@@ -186,14 +186,14 @@ pub fn cli_read_bounded(path: String) -[FS]> String CLIError! {
 }
 
 // Exclusive create (never replace), write, and fsync.
-pub fn cli_write_synced(path: String, bytes: [U8]) CLIError! -[FS]> {
+fn cli_write_synced(path: String, bytes: [U8]) CLIError! -[FS]> {
     writer := files.create(path, if_exists: CreateIfExists.Refuse)
     &writer.write_all(bytes)
     &writer.fsync()
 }
 
 // Atomically replace `destination` with the staged `partial`.
-pub fn cli_finalize_profile_pointer(partial: String, destination: String) CLIError! -[FS]> {
+fn cli_finalize_profile_pointer(partial: String, destination: String) CLIError! -[FS]> {
     files.rename(partial, destination, if_exists: RenameIfExists.Replace)
 }
 
@@ -214,7 +214,7 @@ fn cli_atomic_write_current_pointer(bytes: [U8]) CLIError! -[FS, Env]> {
 }
 
 // A no-follow stat, or None when nothing exists at `path`.
-pub fn cli_stat_optional(path: String) -[FS]> files.Stat? CLIError! {
+fn cli_stat_optional(path: String) -[FS]> files.Stat? CLIError! {
     if files.stat(path) == {
         .Ok(info) -> Ok(Val(info))
         .Err(error) -> if cli_io_error_is_not_found(error) -> Ok(None) else -> Err(CLIError.IO(error))

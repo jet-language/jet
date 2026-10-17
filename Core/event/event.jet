@@ -10,37 +10,49 @@ package {
 }
 
 use core as core
+use core.event.[Event, EventConfigError]
 
 // D-EVENT1 / D-EVENT2=A / D-EVENT-CONTINUE1=C:
-// the public event family is compiler-known and its runtime state belongs to
-// the provider. This module keeps the library spelling stable while forwarding
-// typed constructors; it must not manufacture a second string-backed event
-// model or turn an unavailable provider result into a successful value.
+// The provider owns listener cells, lifecycle and scheduler identities.
+// Source owns constructor composition and rejects invalid async capacities
+// before allocating provider state. Private leaves reuse existing host calls.
 
-pub fn scope() -> EventScope Never! {
-    core.event.scope()
+fn scope() -> EventScope Never! {
+    core.event.__scope_new()
 }
 
-pub fn new<T>() -> Event<T> Never! {
-    core.event.new<T>()
+fn new<T>() -> Event<T> Never! {
+    with_policy<T>(policy_sync())
 }
 
-pub fn with_policy<T>(policy: EventPolicy) -> Event<T> Never! {
-    core.event.with_policy<T>(policy)
+fn with_policy<T>(policy: EventPolicy) -> Event<T> Never! {
+    core.event.__event_with_policy<T>(policy)
 }
 
-pub fn hook<T, R>(fallback: R) -> Hook<T, R> Never! {
-    core.event.hook<T, R>(fallback)
+fn hook<T, R>(fallback: R) -> Hook<T, R> Never! {
+    core.event.__hook_new<T, R>(fallback)
 }
 
-pub fn decision_hook<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
-    core.event.decision_hook<T, E>(policy)
+fn decision_hook<T, E>(policy: HookPolicy) -> DecisionHook<T, E> Never! {
+    core.event.__decision_hook_new<T, E>(policy)
 }
 
-pub fn policy_sync() -> EventPolicy Never! {
-    core.event.policy_sync()
+fn policy_sync() -> EventPolicy Never! {
+    core.event.__policy_sync()
 }
 
-pub fn async_result<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
-    core.event.async_result<T, E>(policy, failures)
+fn async_result<T, E>(policy: AsyncPolicy, failures: FailurePolicy) -> AsyncEvent<T, E> EventConfigError! {
+    if policy.capacity <= 0 -> return Err(EventConfigError.InvalidCapacity)
+    core.event.__async_new<T, E>(policy, failures)
+}
+
+#Test("async constructors reject zero and negative capacities before allocation") {
+    capacities :: [Int]{0, -1, -9223372036854775808}
+    loop capacity in capacities {
+        policy :: AsyncPolicy{capacity: capacity, overflow: Overflow.Block}
+        if async_result<Int, String>(policy, FailurePolicy.Collect) == {
+            .Err(reason) -> assert_eq(reason, EventConfigError.InvalidCapacity)
+            .Ok(_) -> assert(false)
+        }
+    }
 }

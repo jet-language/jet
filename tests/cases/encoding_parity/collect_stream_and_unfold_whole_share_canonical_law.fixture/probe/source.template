@@ -1,0 +1,35 @@
+
+use core.encoding.json as json
+use core.encoding.cbor as cbor
+use core.encoding as encoding
+use core.files as files
+
+fn run() {
+    whole := json.parse("{{\"a\":1,\"b\":2}}") ?? panic("json")
+    canon := json.to_string(whole)
+    path := "@DIR@/round.json"
+    output :: files.create(path) ?? panic("create")
+    writer :: json.writer(^output, encoding.EncodingLimits.safe(), false) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("os")
+    writer.write(encoding.DataEvent.Key("a")) ?? panic("ka")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("va")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("kb")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("vb")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("oe")
+    writer.finish() ?? panic("finish")
+    collected := json.parse(files.read(path) ?? panic("read")) ?? panic("collect")
+    print(json.to_string(collected) == canon)
+    print(json.to_string(collected))
+
+    cbor_path := "@DIR@/round.cbor"
+    cbor_out :: files.create(cbor_path) ?? panic("cbor create")
+    cbor_writer :: cbor.writer(^cbor_out) ?? panic("cbor writer")
+    cbor_writer.write(encoding.DataEvent.ObjectStart) ?? panic("cs")
+    cbor_writer.write(encoding.DataEvent.Key("a")) ?? panic("ck")
+    cbor_writer.write(encoding.DataEvent.Int(1)) ?? panic("ci")
+    cbor_writer.write(encoding.DataEvent.ObjectEnd) ?? panic("ce")
+    cbor_writer.finish() ?? panic("cf")
+    whole_tree := Dyn.Object(["a": Dyn.Int(1)])
+    stream_bytes := files.read_bytes(cbor_path) ?? panic("cbor bytes")
+    print((cbor.to_bytes_canonical(whole_tree) ?? panic("canonical")) == stream_bytes)
+}

@@ -1,0 +1,26 @@
+// Host foreign-library declarations use the same inline/package parser as
+// source loading. C dependencies are not Jet source roots.
+use jet_lexer.[lex_config, token_decoded, TOKEN_STRING, TOKEN_RAW_STRING]
+
+struct JetDriverCDependency {
+    library: String
+    root: String
+    target: String
+}
+
+fn jet_driver_c_dependencies(snapshot: JetDriverAuthorizedSourceSnapshot) -> [JetDriverCDependency] {
+    declarations := [JetDriverCDependency]{}
+    diagnostics := [Diagnostic]{}
+    loop index in 0..<snapshot.roots.len() {
+        package :: jet_driver_parse_package_root(snapshot, index, &diagnostics)
+        loop dependency in package.dependencies {
+            if !dependency.source.starts_with("c@") -> next
+            target := dependency.source.removeprefix("c@").trim()
+            lexed :: lex_config(target.bytes())
+            tokens :: lexed.tokens
+            if tokens.len() > 0 && (tokens[0].kind == TOKEN_STRING || tokens[0].kind == TOKEN_RAW_STRING) -> target = token_decoded(lexed.tables, tokens[0])
+            &declarations.push(JetDriverCDependency{library: dependency.name, root: snapshot.roots[index].canonical_path, target: target})
+        }
+    }
+    declarations
+}

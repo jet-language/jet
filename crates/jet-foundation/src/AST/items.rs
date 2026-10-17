@@ -104,6 +104,11 @@ pub struct EffectDecl {
 pub struct MarkerDecl {
     pub name: String,
     pub name_span: Span,
+    /// D-MARKER-MODULE1=A: source rules and groups obey item visibility.
+    pub is_pub: bool,
+    pub is_package_pub: bool,
+    /// D-MARKER-GROUP1=A: a fixed group row, not a parameterized rule.
+    pub group: Option<Vec<Marker>>,
     pub params: Vec<MarkerDeclParam>,
     /// D-META-USER1=A / D-META-CODE1=A: absent means this rule only records
     /// its declaration facts; present means the body may reject or emit
@@ -1270,6 +1275,23 @@ impl Func {
         self.failure_contract().effective_type()
     }
 
+    /// Runtime callable values preserve foreign ABI and generator protocols;
+    /// ordinary functions use the effective implicit failure carrier.
+    pub fn callable_value_return_type(&self) -> Type {
+        if self.inline_foreign.is_some() {
+            return self.return_type.clone()
+                .unwrap_or_else(|| Type::Named(crate::Syntax::INTERNAL_UNIT_TYPE.to_owned()));
+        }
+        match &self.return_type {
+            Some(stream @ Type::Apply { name, args })
+                if name == crate::Syntax::TYPE_STREAM && args.len() == 1 =>
+            {
+                stream.clone()
+            }
+            _ => self.effective_return_type(),
+        }
+    }
+
     /// D-ENTRY-SCRIPT1=B: build the ordinary function used for a script's
     /// implicit entry. Keeping this as a normal `Func` preserves one entry
     /// mechanism through sema, TIR, AOT, JIT, and interpreter lowering.
@@ -1379,14 +1401,37 @@ pub fn app_entry_run_fn(items: &[Item]) -> Option<&Func> {
 ///
 /// `jet run` hands an `App`-returning entry to `App::serve`, which binds a
 /// listener and then serves: the program has no terminating output and no exit
-/// code of its own, in any tier. A differential harness reads this fact to keep
-/// such a program in its compile universe and out of its run universe, instead
-/// of discovering the same thing as a timeout.
+/// code of its own, in any tier. A program also declares this when the entry
+/// `jet run` executes is a checked `Output.Service` (selected, or naming the
+/// legacy `fn run`). A differential harness reads this fact to keep such a
+/// program in its compile universe and out of its run universe, instead of
+/// discovering the same thing as a timeout. Read it after sema has resolved
+/// Outputs.
 pub fn bundle_serves_until_stopped(bundle: &super::ProgramBundle) -> bool {
-    bundle
+    let Some(entry) = bundle.modules.get(bundle.entry) else {
+        return false;
+    };
+    if app_entry_run_fn(&entry.items).is_some() {
+        return true;
+    }
+    let outputs = bundle
         .modules
-        .get(bundle.entry)
-        .is_some_and(|module| app_entry_run_fn(&module.items).is_some())
+        .iter()
+        .flat_map(|module| module.items.iter())
+        .filter_map(|item| match item {
+            Item::Const(constant) => constant.resolved_output.as_ref(),
+            _ => None,
+        });
+    let mut legacy_run_service = false;
+    for output in outputs {
+        if output.selected {
+            return output.kind == super::OutputKind::Service;
+        }
+        legacy_run_service |= output.kind == super::OutputKind::Service
+            && output.module == bundle.entry
+            && output.source_name == "run";
+    }
+    legacy_run_service
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -1556,6 +1601,24 @@ pub fn inline_asm_register_known(target: &str, register: &str) -> bool {
         .is_some_and(|arch| arch.register_known(register))
 }
 
+#[cfg(test)]
+mod inline_assembly_register_tests {
+    use super::inline_asm_register_known;
+
+    #[test]
+    fn x86_64_sysv_vector_clobbers_are_audited_without_extra_features() {
+        for index in 0..16 {
+            assert!(inline_asm_register_known("x86_64-unknown-linux-gnu", &format!("xmm{index}")));
+        }
+        assert!(inline_asm_register_known("x86_64-unknown-linux-gnu", "%XMM15"));
+        for register in ["xmm16", "xmm31", "xmm00", "ymm0", "zmm0"] {
+            assert!(!inline_asm_register_known("x86_64-unknown-linux-gnu", register));
+        }
+        assert!(!inline_asm_register_known("i686-unknown-linux-gnu", "xmm0"));
+        assert!(!inline_asm_register_known("aarch64-unknown-linux-gnu", "xmm0"));
+    }
+}
+
 fn x86_64_register_known(register: &str) -> bool {
     matches!(
         register,
@@ -1619,6 +1682,22 @@ fn x86_64_register_known(register: &str) -> bool {
             | "r15d"
             | "r15w"
             | "r15b"
+            | "xmm0"
+            | "xmm1"
+            | "xmm2"
+            | "xmm3"
+            | "xmm4"
+            | "xmm5"
+            | "xmm6"
+            | "xmm7"
+            | "xmm8"
+            | "xmm9"
+            | "xmm10"
+            | "xmm11"
+            | "xmm12"
+            | "xmm13"
+            | "xmm14"
+            | "xmm15"
     )
 }
 
@@ -1810,6 +1889,32 @@ pub struct Param {
     /// later `corpus` param may be named by an earlier view param). Empty/`None`
     /// means no requirement.
     pub declared_view_from_names: Option<Vec<String>>,
+    /// D-METHOD-FOOTPRINT1=A: the receiver's field footprint. Empty on every
+    /// parameter except `self`.
+    pub footprint: ReceiverFootprint,
+}
+
+/// D-METHOD-FOOTPRINT1=A: the record fields a method reads or changes through
+/// `self`. `declared` is the expert receiver spelling `&self.log` /
+/// `&self.[log, hits]`; `inferred` is sema's body fact (`None` = the whole
+/// record). Callers and the API snapshot see `declared` when present.
+#[derive(Debug, Clone, Default)]
+pub struct ReceiverFootprint {
+    pub declared: Option<Vec<(String, Span)>>,
+    pub inferred: Option<Vec<String>>,
+}
+
+impl ReceiverFootprint {
+    /// The published field set, sorted; `None` means the whole record.
+    pub fn published(&self) -> Option<Vec<String>> {
+        let mut fields = match &self.declared {
+            Some(declared) => declared.iter().map(|(name, _)| name.clone()).collect(),
+            None => self.inferred.clone()?,
+        };
+        fields.sort();
+        fields.dedup();
+        Some(fields)
+    }
 }
 
 impl Param {
@@ -1849,6 +1954,11 @@ impl Param {
             } else {
                 Some(list.clone())
             };
+        }
+        // Sema canonicalizes a resolved bare trait name before codegen builds
+        // its context; the variadic template classification must survive that.
+        if let Type::TraitObject(bounds) = &self.ty {
+            return (!bounds.is_empty()).then(|| bounds.clone());
         }
         if let Type::Named(n) = &self.ty {
             if !n.is_empty() && is_trait_name(n) {
@@ -1957,6 +2067,9 @@ impl EnumDef {
 #[derive(Debug, Clone)]
 pub struct Marker {
     pub name: String,
+    /// A library group binds member names in its declaring module. This is
+    /// compiler-owned identity, never a user-written namespace or spelling.
+    pub declaration: Option<(usize, Span)>,
     /// D-AUTODERIVE-SYNTAX1=D: `!Trait` rejects only automatic generation.
     pub negated: bool,
     pub name_span: Span,
@@ -1994,6 +2107,10 @@ impl Marker {
 #[derive(Debug, Clone)]
 pub struct StructDef {
     pub span: Span,
+    /// Authenticated original canonical Prelude error declaration. Only the
+    /// compiler's exact embedded-source supplier sets this; parsing user or
+    /// generated caller source never grants builtin ownership.
+    pub compiler_builtin_error: bool,
     pub is_pub: bool,
     /// D-PUBPKG1=A: true for `pub(package) struct …`.
     pub is_package_pub: bool,
@@ -2444,7 +2561,7 @@ pub struct Field {
     pub default_ct: Option<CtValue>,
 }
 
-/// DataTree variant a derived decoder accepts at its outer wire boundary.
+/// Dyn variant a derived decoder accepts at its outer wire boundary.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SerdeWireShape {
     Null,
@@ -2454,7 +2571,7 @@ pub enum SerdeWireShape {
     Text,
     Array,
     Object,
-    /// Typed JSON keeps numeric lexemes in the internal `DataTree::Number`
+    /// Typed JSON keeps numeric lexemes in the internal `Dyn::Number`
     /// carrier so fixed-width decoders can validate without rounding.
     Number,
 }

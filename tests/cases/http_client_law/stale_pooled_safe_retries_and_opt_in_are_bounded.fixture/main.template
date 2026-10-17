@@ -1,0 +1,58 @@
+// COMPILE-ONLY public protocol companion. Never run without the retained reset readiness seam.
+// The original readiness points are SO_LINGER{1,0}, /proc/self/fd, poll(POLLERR) before each stale send.
+// No sleep or other timing heuristic replaces them. Full original in TestSlice4i/http_client_law.rs.original.rs.
+use core.http.client as http
+use core.http as message
+fn drain(response: HTTPResponse) -> [U8] {
+    out := [U8]{}
+    loop chunk in response.body().chunks(64) {
+        bytes :: chunk ?? panic("drain")
+        loop byte in bytes { &out.push(byte) }
+    }
+    return out
+}
+fn request(method: String, path: String) -> HTTPRequest {
+    return http.request(method, "http://127.0.0.1:1/{path}").timeout(2s).connect_timeout(2s).read_timeout(2s).total_timeout(2s).dns_timeout(2s).tls_timeout(2s).write_timeout(2s).first_byte_timeout(2s)
+}
+fn run() {
+    safe :: http.Client.new().protocols(false, true, false).timeouts(2000,2000,2000,2000,2000,2000,2000)
+    first :: safe.send(request("GET", "warm")) ?? panic("warm")
+    assert(!first.reused_connection())
+    assert_eq(drain(first), "w".bytes())
+    pooled :: safe.send(request("GET", "reuse")) ?? panic("reuse")
+    assert(pooled.reused_connection())
+    assert_eq(drain(pooled), "r".bytes())
+    // Exact reset-readiness point 1 retained in ledger; no executable stand-in.
+    retry :: safe.send(request("GET", "retry")) ?? panic("retry")
+    assert(!retry.reused_connection())
+    assert_eq(drain(retry), "ok".bytes())
+    // Reset-readiness point 2.
+    third :: safe.send(request("GET", "warm2")) ?? panic("warm2")
+    assert_eq(drain(third), "x".bytes())
+    // Reset-readiness point 3.
+    if safe.send(request("POST", "unsafe").body(message.Body.bytes("nope".bytes()))) == {
+        .Err(_) -> {}
+        else -> panic("Safe must refuse POST retry")
+    }
+    none :: http.Client.new().protocols(false, true, false).retries(.None).timeouts(2000,2000,2000,2000,2000,2000,2000)
+    fourth :: none.send(request("GET", "warm3")) ?? panic("warm3")
+    assert_eq(drain(fourth), "y".bytes())
+    // Reset-readiness point 4.
+    if none.send(request("GET", "again")) == {
+        .Err(_) -> {}
+        else -> panic("None must refuse GET retry")
+    }
+    fifth :: safe.send(request("GET", "warm4")) ?? panic("warm4")
+    assert_eq(drain(fifth), "z".bytes())
+    // Reset-readiness point 5.
+    if safe.send(request("PUT", "denied")) == {
+        .Err(_) -> {}
+        else -> panic("Safe must refuse PUT retry")
+    }
+    idem :: http.Client.new().protocols(false, true, false).retries(.Idempotent).timeouts(2000,2000,2000,2000,2000,2000,2000)
+    sixth :: idem.send(request("GET", "warm5")) ?? panic("warm5")
+    assert_eq(drain(sixth), "q".bytes())
+    // Reset-readiness point 6.
+    seventh :: idem.send(request("PUT", "allowed")) ?? panic("allowed")
+    assert_eq(drain(seventh), "ok".bytes())
+}

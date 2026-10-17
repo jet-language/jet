@@ -1,0 +1,36 @@
+// SETUP-PORT of tests/cli_parts/surface.rs:8-39. No test assertions.
+// rustc is original setup (not an availability guard); revisit when native backend lists targets.
+package {
+    name: "select-target"
+    authority: { holds: { allow: [Exec, FS, IO] } }
+}
+use core.process as process
+use core.files as files
+
+fn run() {
+    version :: process.cmd([String]{"rustc", "-vV"}).run() ?? panic("rustc must report its host target")
+    host := ""
+    found_host := false
+    loop line in version.output.split("\n") {
+        if line.starts_with("host: ") {
+            host = String.from_bytes(line.bytes().slice(6, line.bytes().len())) ?? panic("rustc host UTF8")
+            found_host = true
+            break
+        }
+    }
+    if !found_host -> panic("rustc -vV must include a host target")
+    candidates :: [String]{"wasm32-unknown-unknown", "aarch64-unknown-linux-gnu", "x86_64-pc-windows-gnu"}
+    loop candidate in candidates {
+        if candidate == host -> next
+        if process.cmd([String]{"rustc", "--print", "target-libdir", "--target", candidate}).run() == {
+            .Ok(output) -> {
+                if output.success && files.is_dir(output.output.trim().copy()) {
+                    print(candidate)
+                    return
+                }
+            }
+            .Err(_) -> { next }
+        }
+    }
+    panic("rustc must provide an installed non-host target")
+}

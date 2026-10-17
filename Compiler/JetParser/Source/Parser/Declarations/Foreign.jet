@@ -44,16 +44,16 @@ fn parser_foreign_plain_string(state: &JetParserState, context: String) -> Named
         return NamedSpan{name: "", span: token.span}
     }
     parser_bump(&state)
-    if token.payload.interpolations > 0 {
+    if parser_interpolations(state, token) > 0 {
         parser_add_error(&state, token.span, "foreign strings cannot interpolate", "FFI paths must be known before semantic checking", "write a plain string literal")
     }
-    NamedSpan{name: token.payload.decoded, span: token.span}
+    NamedSpan{name: parser_value(state, token), span: token.span}
 }
 
 fn parser_parse_extern_rust(state: &JetParserState) -> Item {
     start :: parser_bump(&state)
     rust :: parser_expect_name(&state, "after `extern`")
-    if rust.payload.decoded != "rust" {
+    if parser_value(state, rust) != "rust" {
         parser_add_error(&state, rust.span, "expected `rust` after `extern`", "this declaration imports Rust symbols", "write `extern rust \"crate\" {{ ... }}`")
     }
     crate_value :: parser_foreign_plain_string(&state, "after `extern rust`")
@@ -74,8 +74,9 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
     kind :: if marker.name == "Import" || marker.name == "Extern" -> CModuleKind.Extern else -> CModuleKind.Bindgen
     parser_expect(&state, TOKEN_KW_MODULE, "after `#{marker.name}` in a C module declaration")
     root :: parser_expect_name(&state, "after `module` in a C module path")
-    if root.payload.decoded != "c" {
-        parser_add_error(&state, root.span, "a C module path starts with `c.`, found `{root.payload.decoded}`", "C libraries are declared below the `c` module root", "write `#Import module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`")
+    root_name :: parser_value(state, root)
+    if root_name != "c" {
+        parser_add_error(&state, root.span, "a C module path starts with `c.`, found `{root_name}`", "C libraries are declared below the `c` module root", "write `#Import module c.<lib>` or `#Bindgen module c.<lib>.__bindgen__`")
     }
     parser_expect(&state, TOKEN_DOT, "after `c` in a C module path")
     lib :: parser_expect_name(&state, "as the C library name")
@@ -88,7 +89,7 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
         path_end = segment.span
         has_suffix = true
         if {
-            segment.payload.decoded == "__bindgen__" -> {
+            parser_value(state, segment) == "__bindgen__" -> {
                 has_bindgen_segment = true
             }
             else -> {
@@ -98,7 +99,8 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
     }
     path_span :: parser_cover(root.span, path_end)
     if kind == CModuleKind.Extern && has_bindgen_segment {
-        parser_add_error_code(&state, "E3206", path_span, "module path `c.{lib.payload.decoded}.__bindgen__` uses the reserved segment `__bindgen__`", "generated bindings live under `c.<lib>.__bindgen__`; user overlays use `#Import module c.<lib>`", "remove `.__bindgen__` and declare the overlay as `#Import module c.<lib>`")
+        lib_name :: parser_value(state, lib)
+        parser_add_error_code(&state, "E3206", path_span, "module path `c.{lib_name}.__bindgen__` uses the reserved segment `__bindgen__`", "generated bindings live under `c.<lib>.__bindgen__`; user overlays use `#Import module c.<lib>`", "remove `.__bindgen__` and declare the overlay as `#Import module c.<lib>`")
     }
     if kind == CModuleKind.Bindgen && !has_suffix {
         parser_add_error(&state, path_span, "a `#Bindgen` module path must end with `.__bindgen__`", "generated C binding caches live under the reserved `__bindgen__` module", "write `#Bindgen module c.<lib>.__bindgen__`")
@@ -109,7 +111,8 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
         parser_skip_semicolons(&state)
         if parser_current_kind(&state) == TOKEN_RBRACE || parser_current_kind(&state) == TOKEN_EOF -> break
         before := state.position
-        function :: parser_c_module_callback_metadata(parser_parse_extern_fn(&state, true), lib.payload.decoded)
+        lib_name :: parser_value(state, lib)
+        function :: parser_c_module_callback_metadata(parser_parse_extern_fn(&state, true), lib_name)
         &functions.push(function)
         if state.position == before {
             token :: parser_current(&state)
@@ -118,7 +121,7 @@ fn parser_parse_c_module(state: &JetParserState) -> Item {
         }
     }
     close :: parser_expect(&state, TOKEN_RBRACE, "to close the C module body")
-    Item.CModule{value: CModule{kind: kind, lib: lib.payload.decoded, path_span: path_span, functions: functions, span: parser_cover(marker.span, close.span)}}
+    Item.CModule{value: CModule{kind: kind, lib: parser_value(state, lib), path_span: path_span, functions: functions, span: parser_cover(marker.span, close.span)}}
 }
 
 fn parser_c_module_callback_metadata(function: ^ExternFn, lib: String) -> ExternFn Never! {
@@ -232,7 +235,7 @@ fn parser_parse_extern_fn(state: &JetParserState, allow_missing_semicolon: Bool)
         }
         else -> {}
     }
-    ExternFn{abi: abi, name: name.payload.decoded, name_span: name.span, params: params, return_type: return_type, return_type_span: return_span, rust_path: path.name, rust_path_span: path.span, generated: false, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: undo, close: close_name, span: parser_cover(start, end)}
+    ExternFn{abi: abi, name: parser_value(state, name), name_span: name.span, params: params, return_type: return_type, return_type_span: return_span, rust_path: path.name, rust_path_span: path.span, generated: false, callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None, undo: undo, close: close_name, span: parser_cover(start, end)}
 }
 
 fn parser_foreign_error(state: &JetParserState, span: Span, what: String, why: String, fix: String) {

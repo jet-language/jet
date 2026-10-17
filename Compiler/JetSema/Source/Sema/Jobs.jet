@@ -24,22 +24,21 @@ use jet_foundation.[
     type_name,
 ]
 
-pub struct SemaJobArtifactCheckResult {
-    pub fact: TJobFact?
-    pub schedule: EverySchedule?
-    pub diagnostics: [Diagnostic]
-    pub complete: Bool
+struct SemaJobArtifactCheckResult {
+    fact: TJobFact?
+    schedule: EverySchedule?
+    diagnostics: [Diagnostic]
+    complete: Bool
 }
 
-pub struct SemaJobScheduleResolution {
-    pub schedule: EverySchedule?
-    pub error: EveryScheduleError?
+struct SemaJobScheduleResolution {
+    schedule: EverySchedule?
+    error: EveryScheduleError?
 }
 
-fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment) -> SemaRegistrationUnitFact? {
-    graph_option :: environment.registration_graph
-    graph :: graph_option ?? return None
-    sema_expression_unit_literal_time_fact(suffix, graph)
+fn sema_job_schedule_unit(suffix: String, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaRegistrationUnitFact? {
+    if program.registration_graph == .Val(graph) -> return sema_expression_unit_literal_time_fact(suffix, graph)
+    None
 }
 
 fn sema_job_schedule_float_to_int(value: Float) -> Int Never! {
@@ -96,10 +95,10 @@ fn sema_job_schedule_wall_clock(text: String) -> SemaJobScheduleResolution Never
     return SemaJobScheduleResolution{schedule: Val(EverySchedule.WallClockTime{hour: hour, minute: minute}), error: None}
 }
 
-fn sema_job_resolve_every_arg(argument: EveryArg, environment: SemaScopeEnvironment) -> SemaJobScheduleResolution {
+fn sema_job_resolve_every_arg(argument: EveryArg, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaJobScheduleResolution {
     if argument == {
         .Duration(int, float, suffix, _) -> {
-            unit :: sema_job_schedule_unit(suffix, environment) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.UnknownDurationUnit)}
+            unit :: sema_job_schedule_unit(suffix, environment, program) ?? return SemaJobScheduleResolution{schedule: None, error: Val(EveryScheduleError.UnknownDurationUnit)}
             if int == .Val(value) {
                 nanos :: sema_job_schedule_duration_int(value, unit) ?? {
                     error := if value <= 0 -> EveryScheduleError.NonPositiveDuration else -> EveryScheduleError.DurationOutOfRange
@@ -204,18 +203,18 @@ fn sema_job_doc(function: Func) -> String? {
 
 fn sema_job_argument_facts(function: Func) -> [TJobArgumentFact] Never! {
     arguments := [TJobArgumentFact]{}
-    loop parameter in function.params {
-        if parameter.name != "self" -> &arguments.push(sema_job_parameter_fact(parameter))
+    loop parameter_index in 0..<function.params.len() {
+        if function.params[parameter_index].name != "self" -> &arguments.push(sema_job_parameter_fact(function.params[parameter_index]))
     }
     arguments
 }
 
-pub fn sema_check_job_artifact(function: Func, checked_function: TFunc, environment: SemaScopeEnvironment) -> SemaJobArtifactCheckResult {
+fn sema_check_job_artifact(function: Func, checked_function: TFunc, environment: SemaScopeEnvironment, program: SemaProgramTables) -> SemaJobArtifactCheckResult {
     diagnostics := [Diagnostic]{}
     schedule := EverySchedule?{None}
     complete := true
     if function.every == .Val(every) {
-        resolution := sema_job_resolve_every_arg(every.arg, environment)
+        resolution := sema_job_resolve_every_arg(every.arg, environment, program)
         schedule = resolution.schedule
         if resolution.error == .Val(reason) {
             &diagnostics.push(sema_job_schedule_error(reason, sema_job_every_error_span(every.arg)))
@@ -275,7 +274,7 @@ fn sema_job_duplicate_error(name: String, scope: JobScope, span: Span) -> Diagno
 
 /// E0928: a `#Job fn` takes a reserved name, or two jobs share one name in
 /// the same scope of a module.
-pub fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
+fn sema_check_job_names(items: [Item]) -> [Diagnostic] {
     diagnostics := [Diagnostic]{}
     seen_names := [String]{}
     seen_scopes := [JobScope]{}

@@ -1,0 +1,11 @@
+# Port of tests/corelib_parts/encoding_streams.rs::cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev; guest source unchanged.
+# Original encoding_streams.rs:2644-2647 and2656: exact line count40 and all lines true; byte-equal AOT/default outputs additionally checked below.
+fixture: fixtures/cbor_whole_hostile_byte_corpus_matches_aot_and_default_dev
+step aot: jet build fixture.jet
+step aot_run: built
+stdout: lines = ["true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"] # original predicate: exactly40 .lines(), all true
+stderr: empty
+step: jet run fixture.jet
+stdout: lines = ["true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true","true"] # original predicate: exactly40 .lines(), all true
+stdout: == aot_run
+stderr: empty

@@ -1,0 +1,54 @@
+
+use core.data as data
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+
+#Codable
+struct Event {
+    service: String
+    latency_ms: Float
+}
+
+fn write_fixture(path: String) {
+    output :: files.create(path) ?? panic("create")
+    writer :: csv.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(["service", "latency_ms"]) ?? panic("header")
+    writer.write(["api", "10.0"]) ?? panic("r1")
+    writer.write(["api", "20.0"]) ?? panic("r2")
+    writer.write(["db", "5.0"]) ?? panic("r3")
+    writer.write(["api", "30.0"]) ?? panic("r4")
+    &writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+}
+
+fn run() {
+    path :: "{work}/events.csv"
+    write_fixture(path)
+    input :: files.open(path) ?? panic("open")
+    limits := data.DataLimits.safe()
+    limits.max_groups = 1
+    limits.max_output_rows = 10
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
+    first :: reader.next() ?? panic("next")
+    print("first:{first.service}:{first.latency_ms}")
+    if data.query(reader)
+        .group_by((e) -> e.service)
+        .mean((e) -> e.latency_ms)
+        .collect() == {
+        .Ok(_) -> print("groups:ok")
+        .Err(error) -> print("groups:{error.operation}:{error.reason}")
+    }
+    if data.mean([Float]{}) == {
+        .Ok(_) -> print("mean:ok")
+        .Err(error) -> print("mean:{error.operation}:{error.reason}")
+    }
+    if data.quantile([1.0, 2.0], 1.5) == {
+        .Ok(_) -> print("q:ok")
+        .Err(error) -> print("q:{error.operation}:{error.reason}")
+    }
+    if data.rolling_mean([1.0, 2.0], 0) == {
+        .Ok(_) -> print("roll:ok")
+        .Err(error) -> print("roll:{error.operation}:{error.reason}")
+    }
+}

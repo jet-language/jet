@@ -1,0 +1,27 @@
+# tests/encoding_parity.rs::exact_typed_json_numbers_match_aot_default_run_and_interpreter
+# Original source bytes and assertions; PENDING-SAME-HEAD, runtime UNRUN.
+# Expected literals below come from the Rust assertions, not captured/blessed output.
+env: NO_COLOR=1
+fixture: exact_typed_json_numbers_match_aot_default_run_and_interpreter.fixture
+capture: source = text file.replace("@DIR@", "{work}/probe") probe/source.template
+write: probe/run.jet = "{cap:source}"
+step: python3 {root}/Examples/features/serde/json_typed.py
+exit: 0
+stdout: = "12.340\n0.00001\n12345678901234567890123456789012345678901234567890\naccepted-nonfinite:2\n"
+step: jet build probe/run.jet
+exit: 0
+step probe_aot: built
+cwd: probe
+exit: 0
+stdout: = "12.340\n0.00001\n100\n0.1\n0.10\n0.1\n9007199254740992\n9007199254740993\n12345678901234567890123456789012345678901234567890\n1000000000000000000000000000000\n9007199254740993\n12345678901234567890123456789012345678901234567890\ni64-overflow\nnonfinite\nnan-rejected\ninfinity-rejected\nfractional-rejected\nexponent-limit\nfile-mismatch\nmismatch\nstream-mismatch\nstring-mismatch\nlimit\n"
+stderr: empty
+step probe_dev: jet run probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot
+step: jet run --interpret probe/run.jet
+stdin: null
+exit: == probe_aot
+stdout: == probe_aot
+stderr: == probe_aot

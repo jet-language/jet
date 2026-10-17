@@ -1,0 +1,47 @@
+# tests/terminal.rs::error_report_matrix_tty_pipe_no_color_and_narrow_widths
+# Exact original helper/source predicates; PENDING-SAME-HEAD; runtime UNRUN.
+requires: os:unix
+fixture: error_report_matrix_tty_pipe_no_color_and_narrow_widths.fixture
+env: NO_COLOR=1
+step pipe: jet run --quiet Examples/features/errors/error_context.jet
+unset: NO_COLOR
+unset: FORCE_COLOR
+env: COLUMNS=40
+stdin: null
+exit: any
+stderr.replace("\r", ""): = error_report_pipe.txt
+stderr: !~ "\u001b"
+stderr: ~ "Examples/features/errors/error_context.jet:7"
+stderr.strip_sgr.line(0): = error_report_matrix_tty_pipe_no_color_and_narrow_widths.first-line
+step ansi: script -qfec "stty rows 24 cols 80; exec {jet} run --quiet Examples/features/errors/error_context.jet" /dev/null
+unset: NO_COLOR
+unset: FORCE_COLOR
+unset: COLUMNS
+stdin: null
+exit: == pipe
+stdout.replace("\r", ""): = error_report_tty_ansi.txt
+stdout.replace("\r", "").strip_sgr.line(0): = error_report_matrix_tty_pipe_no_color_and_narrow_widths.first-line
+stdout: ~ "\u001b"
+step plain: script -qfec "stty rows 24 cols 80; exec {jet} run --quiet Examples/features/errors/error_context.jet" /dev/null
+unset: NO_COLOR
+unset: FORCE_COLOR
+unset: COLUMNS
+env: NO_COLOR=
+stdin: null
+exit: == pipe
+stdout.replace("\r", ""): = error_report_tty_no_color.txt
+stdout.replace("\r", "").strip_sgr.line(0): = error_report_matrix_tty_pipe_no_color_and_narrow_widths.first-line
+stdout.replace("\r", "").strip_sgr: == ansi
+step narrow: script -qfec "stty rows 24 cols 40; export COLUMNS=40; exec {jet} run --quiet Examples/features/errors/error_context.jet" /dev/null
+unset: NO_COLOR
+unset: FORCE_COLOR
+unset: COLUMNS
+env: NO_COLOR=
+stdin: null
+exit: == pipe
+stdout.replace("\r", ""): = error_report_tty_narrow40.txt
+stdout.replace("\r", "").strip_sgr.line(0): = error_report_matrix_tty_pipe_no_color_and_narrow_widths.first-line
+stdout.replace("\r", ""): each-line where chars <= 40
+stdout: ~ "  1. parse_config (error_context.jet:7)"
+stdout: ~ "  2. load_config (error_context.jet:12)"
+stdout: ~ "  3. run (error_context.jet:16)"

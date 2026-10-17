@@ -1,0 +1,218 @@
+use core.process as process
+use core.files as files
+use core.sys as sys
+use core.time as time
+
+
+fn kit_exec_defaults() -> KitOptions {
+    KitOptions{suite: "golden", jet: sys.get("JET") ?? "", jetpack: "", tiers: ["o0", "o1", "o2"], filter: "", cases: "", shard_index: 1, shard_count: 1, sharded: false, timeout: 600, scratch: "", results: "", list: false, coverage: false, bless: KitBless{ids: [], all: false, reason: "", allow_shrink: [], first_tier: true}, error: ""}
+}
+
+
+fn kit_exec_select_ids(all_ids: [String], options: KitOptions) -> KitSelection {
+    requested := [String]{}
+    if options.cases != "" {
+        text :: files.read(options.cases) ?? return KitSelection{ids: [], error: "read cases file: {err}"}
+        loop raw in text.split("\n") {
+            id :: raw.trim().copy()
+            if id == "" || id.starts_with("#") -> next
+            if kit_expect_named(requested, id) -> return KitSelection{ids: [], error: "duplicate case ID: {id}"}
+            if !kit_expect_named(all_ids, id) -> return KitSelection{ids: [], error: "unknown case ID: {id}"}
+            &requested.push(id)
+        }
+    }
+    seen := [String]{}
+    loop id in options.bless.ids {
+        if kit_expect_named(seen, id) -> return KitSelection{ids: [], error: "duplicate bless ID: {id}"}
+        if !kit_expect_named(all_ids, id) -> return KitSelection{ids: [], error: "unknown bless ID: {id}"}
+        &seen.push(id)
+    }
+    selected := [String]{}
+    loop (index, id) in all_ids {
+        if requested.len() > 0 && !kit_expect_named(requested, id) -> next
+        if options.bless.ids.len() > 0 && !kit_expect_named(options.bless.ids, id) -> next
+        if options.filter != "" && !id.contains(options.filter) -> next
+        if index % options.shard_count != options.shard_index - 1 -> next
+        &selected.push(id)
+    }
+    KitSelection{ids: selected, error: ""}
+}
+
+fn kit_exec_failed(message: String) -> KitRun {
+    KitRun{stdout: "", stderr: "", code: -1, signal: None, timed_out: false, error: message}
+}
+
+fn kit_exec_base_value(name: String, env: KitEnv, scratch: String) -> String? {
+    if env.env_clear -> return None
+    if {
+        name == "JET_COMPILER_EXTENSION" -> None
+        name == "NO_COLOR" || name == "JET_RECEIPT_BYPASS" -> Val("1")
+        name == "CLICOLOR" -> Val("0")
+        name == "TERM" -> Val("dumb")
+        name == "JET_REPL_HISTORY" -> Val("off")
+        name == "JET_STORE_DIR" -> Val(files.join(env.scratch, "store"))
+        name == "JET_FFI_CACHE_DIR" -> if env.trace_node != "" -> sys.get(name) else -> Val(files.join(env.scratch, "ffi"))
+        name == "TMPDIR" || name == "TMP" || name == "TEMP" -> Val(files.join(scratch, "tmp"))
+        name == "JETPACK_ROOT" -> Val(files.join(scratch, "jetpack"))
+        name == "JET_SCHEMA_CACHE_DIR" -> Val(files.join(scratch, "schema"))
+        else -> sys.get(name)
+    }
+}
+
+// Inherit the caller's environment, removing only the compiler-extension hook.
+// Cache roots are run-wide; temporary, schema and jetpack roots are case-local.
+fn kit_exec_spec(env: KitEnv, argv: [String], cwd: String, scratch: String, overlay: [KitEnvVar]) -> ProcessSpec {
+    commands :: if env.trace_node != "" && env.trace_case != "" -> {
+        cache_override := kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? ""
+        loop variable in overlay {
+            if variable.name == "JET_FFI_CACHE_DIR" -> cache_override = variable.value ?? ""
+        }
+        marked := [String]{env.trace_node, files.join(env.root, "Tools/testkit/native-command.mjs"), "--case", env.trace_case, "--root", env.root, "--cwd", cwd, "--jet", env.jet, "--cache-root", env.trace_cache, "--ffi-cache", cache_override, "--"}
+        loop argument in argv -> &marked.push(argument)
+        marked
+    } else -> { argv }
+    spec := process.cmd(commands).cwd(cwd).stdout(.Capture).stderr(.Capture).stdin(.Stream).timeout(env.timeout)
+    if env.env_clear -> spec = spec.env_clear()
+    else {
+        spec = spec.env_remove("JET_COMPILER_EXTENSION")
+            .env("NO_COLOR", kit_exec_base_value("NO_COLOR", env, scratch) ?? "")
+            .env("CLICOLOR", kit_exec_base_value("CLICOLOR", env, scratch) ?? "")
+            .env("TERM", kit_exec_base_value("TERM", env, scratch) ?? "")
+            .env("JET_RECEIPT_BYPASS", kit_exec_base_value("JET_RECEIPT_BYPASS", env, scratch) ?? "")
+            .env("JET_REPL_HISTORY", kit_exec_base_value("JET_REPL_HISTORY", env, scratch) ?? "")
+            .env("JET_STORE_DIR", kit_exec_base_value("JET_STORE_DIR", env, scratch) ?? "")
+            .env("JET_FFI_CACHE_DIR", kit_exec_base_value("JET_FFI_CACHE_DIR", env, scratch) ?? "")
+            .env("TMPDIR", kit_exec_base_value("TMPDIR", env, scratch) ?? "")
+            .env("TMP", kit_exec_base_value("TMP", env, scratch) ?? "")
+            .env("TEMP", kit_exec_base_value("TEMP", env, scratch) ?? "")
+            .env("JETPACK_ROOT", kit_exec_base_value("JETPACK_ROOT", env, scratch) ?? "")
+            .env("JET_SCHEMA_CACHE_DIR", kit_exec_base_value("JET_SCHEMA_CACHE_DIR", env, scratch) ?? "")
+    }
+    if env.memory_limit > 0 -> spec = spec.memory_limit(env.memory_limit)
+    loop variable in overlay {
+        if variable.value == {
+            .Val(value) -> spec = spec.env(variable.name, value)
+            .None -> spec = spec.env_remove(variable.name)
+        }
+    }
+    spec
+}
+
+fn kit_exec_receipt(receipt: ProcessReceipt, elapsed_ns: Int, input_error: String) -> KitRun {
+    limit_hit :: if receipt.limit_hit == {
+        .Val(limit) -> if limit == {
+            .WallTime -> "time"
+            .CpuTime -> "cpu"
+            .Memory -> "memory"
+            .OpenFiles -> "open-files"
+            .Output -> "output"
+        }
+        .None -> ""
+    }
+    KitRun{stdout: receipt.output, stderr: receipt.errors, code: receipt.code,
+        signal: receipt.signal, timed_out: receipt.timed_out, error: input_error,
+        elapsed_ns: elapsed_ns, limit_hit: limit_hit}
+}
+
+fn kit_exec_invoke_with_env(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String, overlay: [KitEnvVar]) -> KitRun {
+    files.create_dir_all(files.join(scratch, "tmp")) ?? return kit_exec_failed("create child temp directory: {err}")
+    started :: time.instant()
+    child := kit_exec_spec(env, argv, cwd, scratch, overlay).spawn() ?? return kit_exec_failed("spawn: {err}")
+    input_error := ""
+    &child.stdin.write(stdin) ?? {
+        input_error = "stdin: {err}"
+        ()
+    }
+    child.stdin.close()
+    receipt :: child.wait() ?? return kit_exec_failed("wait: {err}")
+    kit_exec_receipt(receipt, started.elapsed().ns, input_error)
+}
+
+fn kit_exec_invoke(env: KitEnv, argv: [String], cwd: String, scratch: String, stdin: String) -> KitRun {
+    kit_exec_invoke_with_env(env, argv, cwd, scratch, stdin, [KitEnvVar]{})
+}
+
+fn kit_exec_process_failure(run: KitRun) -> KitVerdict? {
+    if run.error != "" -> return Val(kit_expect_verdict("ERROR", run.error))
+    if run.timed_out -> return Val(kit_expect_verdict("TIMEOUT", "wall-clock limit"))
+    if run.signal != None -> return Val(kit_expect_verdict("ERROR", "child terminated by signal"))
+    if run.code == 101 -> return Val(kit_expect_verdict("ERROR", "internal compiler error (exit 101)"))
+    None
+}
+
+fn kit_exec_write(path: String, contents: String) {
+    files.create_dir_all(files.dirname(path)) ?? panic("mkdir {path}: {err}")
+    files.write(path, contents) ?? panic("write {path}: {err}")
+}
+
+fn kit_exec_copy_file(source: String, destination: String) {
+    bytes :: files.read_bytes(source) ?? panic("read {source}: {err}")
+    files.create_dir_all(files.dirname(destination)) ?? panic("mkdir {destination}: {err}")
+    files.write_bytes(destination, bytes) ?? panic("copy {source}: {err}")
+    info :: files.stat(source) ?? panic("stat {source}: {err}")
+    files.chmod(destination, info.mode % 512) ?? panic("copy mode {source}: {err}")
+}
+
+
+fn kit_exec_optional(path: String) -> String? {
+    if !files.exists(path) -> return None
+    Val(files.read(path) ?? panic("read {path}: {err}"))
+}
+
+// Never copy compiler caches. Fixture state is authored, not build output.
+fn kit_exec_copy_tree(source: String, destination: String, fixture_state: Bool) {
+    files.create_dir_all(destination) ?? panic("mkdir {destination}: {err}")
+    entries :: files.list_dir(source) ?? panic("list {source}: {err}")
+    loop entry in entries {
+        if entry.name == ".jet" || entry.name == ".git" -> next
+        name :: if fixture_state && (entry.name == "state" || entry.name == "fixture-state") -> ".jet" else -> entry.name
+        target :: files.join(destination, name)
+        if entry.is_dir -> kit_exec_copy_tree(entry.path, target, fixture_state)
+        else -> kit_exec_copy_file(entry.path, target)
+    }
+}
+
+fn kit_exec_requires(requirement: String, env: KitEnv, work: String, scratch: String) -> KitVerdict? {
+    if requirement.starts_with("first-existing ") -> return None
+    if requirement.starts_with("path-exists:") {
+        path :: kit_steps_expand(requirement.slice(12, requirement.len()), env, work, scratch, "")
+        if !files.exists(files.join(work, path)) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+        return None
+    }
+    if requirement.starts_with("env:") {
+        assignment :: requirement.slice(4, requirement.len())
+        equals :: assignment.index("=") ?? -1
+        if equals <= 0 -> return Val(kit_expect_verdict("REFUSED", "invalid requires: {requirement}"))
+        name :: assignment.slice(0, equals)
+        value :: assignment.slice(equals + 1, assignment.len())
+        if (sys.get(name) ?? "") != value -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("os:") {
+        if !kit_steps_host_matches(sys.family(), requirement.slice(3, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("os-name:") {
+        if !kit_steps_host_matches(kit_steps_host_name(), requirement.slice(8, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("arch:") {
+        if !kit_steps_host_matches(kit_steps_host_arch(), requirement.slice(5, requirement.len())) -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("probe ") {
+        matched :: kit_steps_probe(requirement.slice(6, requirement.len()), env, work, scratch)
+        if !matched -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    } else if requirement.starts_with("tools-any ") || requirement.starts_with("probes-any ") {
+        probes :: requirement.starts_with("probes-any ")
+        body :: requirement.slice(if probes -> 11 else -> 10, requirement.len())
+        matched :: kit_steps_capability_any(body, probes, env, work, scratch)
+        if !matched -> return Val(kit_expect_verdict("FAIL", requirement))
+    } else {
+        argv := [String]{}
+        if {
+            requirement == "gtk4" -> argv = ["pkg-config", "--exists", "gtk4"]
+            requirement.starts_with("tool:") -> {
+                name :: requirement.slice(5, requirement.len())
+                if kit_steps_tool(name) == None -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+                return None
+            }
+            else -> return Val(kit_expect_verdict("REFUSED", "unknown host requirement: {requirement}"))
+        }
+        run :: kit_exec_invoke(env, argv, work, scratch, "")
+        if run.code != 0 || run.error != "" -> return Val(kit_expect_verdict("SKIP-HOST", requirement))
+    }
+    None
+}

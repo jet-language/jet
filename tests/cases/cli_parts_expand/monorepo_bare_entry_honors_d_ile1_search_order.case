@@ -1,0 +1,35 @@
+# Port of tests/cli_parts/expand.rs:1263-1361; exact original sources and assertions.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): setup actions and prepend/append line transforms.
+# Original expected artifact copied unchanged; combined stdout, not per-step snapshots.
+copy: {root}/Examples/features/packages/monorepo workspace
+step: jet run
+cwd: workspace
+env: NO_COLOR=1
+exit: 2
+stderr: ~ "ambiguous" # original predicate
+stderr: ~ "hello" # original predicate
+stderr: ~ "ranker" # original predicate
+stderr: !~ "hello\"" # original predicate
+stderr: !~ "ranker\"" # original predicate
+step: jet run -p hello
+cwd: workspace
+env: NO_COLOR=1
+exit: 0
+capture: hello = text stdout
+step: jet run -p ranker
+cwd: workspace
+env: NO_COLOR=1
+exit: 0
+stdout.prepend("{cap:hello}"): = monorepo.out # original predicate
+step: jet run
+cwd: workspace/packages/hello
+env: NO_COLOR=1
+exit: 0
+stdout: ~ "hello from the monorepo" # original predicate
+mkdir: outside
+step: jet run
+cwd: outside
+env: NO_COLOR=1
+exit: 2
+stderr: ~ "No file given and no `package.jet` found" # original predicate

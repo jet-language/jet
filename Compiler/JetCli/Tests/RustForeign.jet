@@ -1,0 +1,109 @@
+// Pure host contracts. Real parser declarations feed the production planner;
+// these tests do not prepare a helper, probe tools, spawn Cargo, or fake a cache.
+use jet_parser.[parse_source]
+use jet_driver.[JetDriverRustForeignEntry, JetDriverRustForeignFacts, JetDriverRustForeignPlan, jet_driver_rust_foreign_plan, jet_driver_rust_foreign_function, JET_DRIVER_RUST_FOREIGN_TARGET, JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE, JET_DRIVER_RUST_FOREIGN_DESCRIPTOR]
+use core.sys as rust_foreign_test_sys
+use jet_foundation.[mir_sha256_bytes, mir_sha256_hex_bytes]
+
+fn cli_rust_foreign_test_plan(name: String) -> JetDriverRustForeignPlan {
+    parsed :: parse_source("extern rust \"base64@0.22\" {{ fn {name}(s: String) -> String = \"base64::encode\" }}".bytes())
+    assert(parsed.diagnostics.len() == 0)
+    entries := [JetDriverRustForeignEntry]{}
+    loop item in parsed.program.items {
+        if item == .ExternRust(block) {
+            loop declaration in block.functions -> &entries.push(JetDriverRustForeignEntry{module_identity: "test-module", crate_spec: block.crate_spec, declaration: jet_driver_rust_foreign_function(declaration)})
+        }
+    }
+    assert(entries.len() == 1)
+    facts :: JetDriverRustForeignFacts{entries: entries, record_source: "", record_names: [String:String]{}}
+    jet_driver_rust_foreign_plan(facts, "rustc\nexplicit-identity", JET_DRIVER_RUST_FOREIGN_TARGET, "declared-link-inputs") ?? panic("production Rust helper plan: {err}")
+}
+fn cli_rust_foreign_test_digest(text: String) -> String Never! {
+    bytes :: text.bytes()
+    mir_sha256_hex_bytes(mir_sha256_bytes(bytes[0..<bytes.len()]))
+}
+fn cli_rust_foreign_test_detail(plan: JetDriverRustForeignPlan) Never! {
+    cache :: "/home/test/.cache/jet/ffi"
+    stderr :: "    Updating crates.io index\n     Locking 1 package\n      Adding base64 v0.22.1\n   Compiling base64 v0.22.1\n   Compiling {plan.crate_name} v0.0.0 ({cache}/{plan.key})\nerror[E0308]: mismatched types\n  --> {cache}/deps/{plan.shared_key}/{plan.target}/release/deps/{plan.crate_name}.rs:1:1\n  match std::panic::catch_unwind(|| generated wrapper bytes)\nwarning: build failed, waiting for other jobs to finish...\n\n"
+    detail :: jet_cli_rust_foreign_cargo_detail(stderr, plan, cache)
+    expected :: "       Compiling jet_ffi_<hash> v0.0.0 (~/.cache/jet/ffi/<hash>)\n    error[E0308]: mismatched types\n      --> ~/.cache/jet/ffi/deps/<hash>/{plan.target}/release/deps/jet_ffi_<hash>.rs:1:1\n      match std::panic::catch_unwind(<generated wrapper>)"
+    assert_eq(detail, expected)
+    assert(!detail.contains(plan.key) && !detail.contains(plan.shared_key))
+    assert(!detail.contains("Updating crates.io") && !detail.contains("Compiling base64"))
+    signature :: jet_cli_rust_foreign_cargo_error(plan, stderr, cache, true)
+    assert_eq(signature.code, "E0705")
+    assert_eq(signature.what, "the Rust item doesn't match the Jet signature at `encode` in `extern rust \"base64@0.22\"`")
+    assert(signature.why.contains("must name a safe Rust function"))
+    assert_eq(signature.why, "the `= \"rust::path\"` on an `extern rust` line must name a safe Rust function whose parameters and return type match what you wrote")
+    signature_detail :: signature.detail ?? panic("Cargo signature detail must be retained")
+    assert_eq(signature_detail, "  cargo said:\n{expected}")
+    assert_eq(signature.fix, "check the path and types on `encode` in `extern rust \"base64@0.22\"`, or pick a different Rust function")
+    // Metadata errors cannot be relabelled as a checked-signature mismatch.
+    metadata :: jet_cli_rust_foreign_cargo_error(plan, stderr, cache, false)
+    assert_eq(metadata.code, "E0704")
+    assert_eq(metadata.what, "couldn't fetch or build `base64@0.22`")
+    assert(metadata.why.starts_with("Cargo could not resolve or build this foreign crate bridge"))
+    assert_eq(metadata.fix, "check the crate version, network, and Cargo diagnostic, then try again")
+    loop diagnostic in ([String]{"E0308", "E0277", "E0061", "E0425", "cannot find", "mismatched types", "arguments to this function"}) {
+        assert_eq(jet_cli_rust_foreign_cargo_error(plan, diagnostic, cache, true).code, "E0705")
+    }
+    fetch :: jet_cli_rust_foreign_cargo_error(plan, "error: no matching package named base64 found", cache, true)
+    assert_eq(fetch.code, "E0704")
+    fetch_detail :: fetch.detail ?? panic("Cargo fetch detail must be retained")
+    assert_eq(fetch_detail, "  cargo said:\n    error: no matching package named base64 found")
+}
+fn cli_rust_foreign_test_provenance(plan: JetDriverRustForeignPlan) {
+    source :: "cache/{plan.key}"
+    toolchain :: "rustc\nexplicit-identity"
+    closure :: "declared-link-inputs"
+    digest :: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    assert_eq(cli_rust_foreign_test_digest("abc"), digest)
+    actual :: jet_cli_rust_foreign_provenance(plan, source, toolchain, closure, digest, false) ?? panic("production provenance formatter: {err}")
+    expected :: "schema=jet-ffi-bridge-provenance-v1\nidentity={plan.key}\ntarget={plan.target}\ncrate={plan.crate_name}\nsource={source}/Cargo.toml\nsource-digest={plan.key}\ncapabilities=exec:cargo\nsandbox=linux-bwrap\nsandbox-policy={JET_CLI_RUST_SANDBOX_POLICY}\ncompile-time-code=none\nbridge-descriptor=jet-inline-ffi-v10-asm-early-clobber\ntoolchain={cli_rust_foreign_test_digest(toolchain)}\ndescriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\nnative_helper_artifact_mode={JET_DRIVER_RUST_FOREIGN_ARTIFACT_MODE}\nshared-key={plan.shared_key}\nmanifest-digest={cli_rust_foreign_test_digest(plan.manifest)}\nwrapper-digest={cli_rust_foreign_test_digest(plan.source)}\nrecord-source-digest={cli_rust_foreign_test_digest(plan.record_source)}\nlink-closure={cli_rust_foreign_test_digest(closure)}\nartifact.lib{plan.crate_name}.a={digest}\n"
+    assert_eq(actual, expected)
+    assert_eq(actual.lines().len(), 20)
+    assert_eq(JET_CLI_RUST_ARTIFACT_SCHEMA, "jet-ffi-artifacts-v2")
+    assert(actual.contains("source-readonly,output-private-copy"))
+    assert(actual.contains("environment=clear") && actual.contains("cap-drop-all"))
+    present :: jet_cli_rust_foreign_provenance(plan, source, toolchain, closure, digest, true) ?? panic("compile-time-code provenance")
+    assert_eq(present, expected.replace("compile-time-code=none\n", "compile-time-code=present\n"))
+    other :: cli_rust_foreign_test_plan("other")
+    changed :: jet_cli_rust_foreign_provenance(other, "cache/{other.key}", toolchain, closure, digest, false) ?? panic("other production plan provenance")
+    assert(other.key != plan.key && other.shared_key == plan.shared_key)
+    assert(changed.contains("wrapper-digest={cli_rust_foreign_test_digest(other.source)}\n"))
+    assert(!changed.contains("wrapper-digest={cli_rust_foreign_test_digest(plan.source)}\n"))
+    assert(changed.contains("descriptor={JET_DRIVER_RUST_FOREIGN_DESCRIPTOR}\n"))
+    injected :: jet_cli_rust_foreign_provenance(plan, "cache\nidentity=forged", toolchain, closure, digest, false)
+    if injected == .Err(error) {
+        assert_eq(error.code, "E0704")
+        assert(error.what.contains("unrepresentable scalar field"))
+    } else { panic("provenance accepted a source-path row injection") }
+    assert(jet_cli_rust_foreign_hex(digest))
+    assert(!jet_cli_rust_foreign_hex(digest.to_upper()))
+    assert(!jet_cli_rust_foreign_hex("../artifact"))
+}
+fn cli_rust_foreign_test_environment() {
+    loop metadata in ([Bool]{true, false}) {
+        args :: jet_cli_rust_foreign_bwrap("bwrap", "/fixture/source", "/fixture/output", "", true, metadata) ?? panic("helper sandbox arguments: {err}")
+        offline := String?{None}
+        loop index in 0..<args.len() {
+            if args[index] == "--setenv" && index + 2 < args.len() && args[index + 1] == "CARGO_NET_OFFLINE" {
+                assert(offline == None)
+                offline = Val(args[index + 2].copy())
+            }
+        }
+        expected :: if metadata -> { rust_foreign_test_sys.get("CARGO_NET_OFFLINE") } else -> { String?{None} }
+        assert_eq(offline, expected)
+        assert(args.contains("--clearenv"))
+        assert(args.contains("--cap-drop"))
+        assert(args.contains("--assert-userns-disabled"))
+    }
+}
+fn run() {
+    plan :: cli_rust_foreign_test_plan("encode")
+    assert(plan.manifest.contains("crate-type = [\"staticlib\"]"))
+    assert(plan.source.contains("fn jet_ffi_encode_cabi("))
+    cli_rust_foreign_test_detail(plan)
+    cli_rust_foreign_test_provenance(plan)
+    cli_rust_foreign_test_environment()
+}

@@ -1,0 +1,34 @@
+
+use core.files as fs
+
+fn need(value: Int) {
+    print(value)
+}
+
+fn erased_refinement(value: Int?) {
+    #Off {
+        if value == .None {
+            return
+        }
+        need(value)
+    }
+    need(value)
+}
+
+fn erased_effect() -[IO]> {
+    #Off {
+        #FX(authority: FS) {
+            _text :: fs.read("missing") ?? ""
+        }
+    }
+    print("erased")
+}
+
+fn active_effect() -[IO]> {
+    #FX(authority: FS) {
+        _text :: fs.read("missing") ?? ""
+    }
+    print("active")
+}
+
+fn run() {}

@@ -347,9 +347,12 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                 }
             }
             Item::Enum(e) if !is_reserved_type(&e.name) => {
+                // A registered-Comparable enum (Core `DataErrorKind`) receives
+                // sema's `==`/`<` → `compare` dispatch, so its body must exist.
                 let comparable = enum_comparable
                     && (has_derive(&e.derives, crate::Generics::COMPARABLE)
-                        || auto.auto_comparable.contains(&e.name));
+                        || auto.auto_comparable.contains(&e.name)
+                        || auto.implements_trait(&e.name, crate::Generics::COMPARABLE));
                 let equatable = enum_equatable
                     && (has_derive(&e.derives, crate::Generics::EQUATABLE)
                         || auto.auto_equatable.contains(&e.name));
@@ -395,7 +398,8 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                 }
                 if distinct_comparable
                     && (has_derive(&d.derives, crate::Generics::COMPARABLE)
-                        || auto.auto_comparable.contains(&d.name))
+                        || auto.auto_comparable.contains(&d.name)
+                        || auto.implements_trait(&d.name, crate::Generics::COMPARABLE))
                     && missing(&d.name, crate::Generics::COMPARABLE)
                 {
                     generated.extend(expand_builtin_provider_body(
@@ -425,9 +429,13 @@ pub(in super::super) fn expand_builtin_derive_items_with_auto(
                             diags,
                         ));
                     }
+                    // A numeric unit is Comparable by registration; sema
+                    // dispatches its `==`/`<` (and a containing record's
+                    // derived bodies) to `compare`, so that body must exist.
                     if distinct_comparable
                         && (has_derive(&d.derives, crate::Generics::COMPARABLE)
-                            || auto.auto_comparable.contains(&d.name))
+                            || auto.auto_comparable.contains(&d.name)
+                            || auto.implements_trait(&d.name, crate::Generics::COMPARABLE))
                         && missing(&d.name, crate::Generics::COMPARABLE)
                     {
                         generated.extend(expand_builtin_provider_body(
@@ -616,6 +624,10 @@ mod tests {
         };
         let mut registry = TypeRegistry {
             types: std::collections::HashMap::new(),
+            source_owned_types: std::collections::HashSet::new(),
+            core_source_module: None,
+            opaque_methods: std::collections::HashMap::new(),
+            operator_signatures: std::collections::HashMap::new(),
             error_types: std::collections::HashSet::new(),
             unit_types: std::collections::HashSet::new(),
             unit_facts: std::collections::HashMap::new(),
@@ -656,6 +668,10 @@ mod tests {
         assert!(diags.is_empty(), "built-in derive diagnostics: {diags:?}");
         let mut registry = TypeRegistry {
             types: std::collections::HashMap::new(),
+            source_owned_types: std::collections::HashSet::new(),
+            core_source_module: None,
+            opaque_methods: std::collections::HashMap::new(),
+            operator_signatures: std::collections::HashMap::new(),
             error_types: std::collections::HashSet::new(),
             unit_types: std::collections::HashSet::new(),
             unit_facts: std::collections::HashMap::new(),

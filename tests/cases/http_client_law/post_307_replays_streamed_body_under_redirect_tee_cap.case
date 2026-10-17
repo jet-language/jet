@@ -1,0 +1,29 @@
+# HAND-PORT tests/http_client_law.rs:1681-1800 post_307_replays_streamed_body_under_redirect_tee_cap
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Verbatim original AOT Body.reader known98304/default redirect tee; exact firstPOST/from and replayPOST/to plus both content-length fields, positive4096 reads and64KiB first boundary, exact replay98304 count and seen flags; original whole96KiB p FIFO payload, final responseok and one redirect, exit0. Real mkfifo + lead-approved SETUP-only dd byte pipe; replaces no transport assertions; core-files-raw-write ledger note; no runtime/reference proof.
+requires: tool:mkfifo
+requires: tool:dd
+fixture: post_307_replays_streamed_body_under_redirect_tee_cap.fixture
+env: NO_COLOR=1
+step: mkfifo {work}/upload.fifo
+exit: 0
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: writer/main.jet writer/source.template
+step: jet build writer/main.jet
+exit: 0
+spawn writer: built
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = post_307_replays_streamed_body_under_redirect_tee_cap.stdout.expected
+wait: peer
+exit: 0
+wait: writer
+exit: 0

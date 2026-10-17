@@ -1,0 +1,100 @@
+use core.net as net
+use core.files as files
+use core.time as time
+PEER_CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+
+fn prefix(raw: [U8], want: [U8]) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop i in 0..<want.len() { if raw[i] != want[i] -> return false }
+    return true
+}
+fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop start in 0..<(raw.len() - want.len() + 1) {
+        same := true
+        loop i in 0..<want.len() {
+            n := Int.from_u8(raw[start + i])
+            if ascii_casefold && n >= 65 && n <= 90 -> n += 32
+            if n != Int.from_u8(want[i]) -> same = false
+        }
+        if same -> return true
+    }
+    return false
+}
+fn request_head(stream: TCPStream) -> [U8] {
+    // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    request := [U8]{}
+    loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
+        block :: stream.read(512) ?? panic("request read")
+        assert(block.len() > 0)
+        loop byte in block { &request.push(byte) }
+        assert(request.len() <= 65536)
+    }
+    return request
+}
+fn publish(listener: TCPListener, path: String) {
+    address :: listener.local_addr() ?? panic("address")
+    files.write_atomic(path, address.bytes()) ?? panic("publish address")
+}
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    publish(listener, "{work}/addr.txt")
+    stream0 :: &listener.accept() ?? panic("accept 0")
+    head0 :: request_head(stream0)
+    _ :: String.from_bytes(head0) ?? panic("original UTF8 request head")
+    assert(prefix(head0, "GET http://shop.example.co.uk/dir/seed HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(!contains_bytes(head0, "{PEER_CRLF}cookie:".bytes(), true))
+    stream0.write_all("HTTP/1.1 200 OK{PEER_CRLF}Set-Cookie: root=one; Domain=example.co.uk; Path=/; SameSite=Strict{PEER_CRLF}Set-Cookie: deep=one; Domain=example.co.uk; Path=/dir; SameSite=Strict{PEER_CRLF}Set-Cookie: alpha=one; Domain=example.co.uk; Path=/; SameSite=Strict{PEER_CRLF}Set-Cookie: beta=one; Domain=example.co.uk; Path=/; SameSite=Strict{PEER_CRLF}Set-Cookie: public=bad; Domain=co.uk; Path=/{PEER_CRLF}Set-Cookie: secure=bad; Domain=example.co.uk; Path=/; Secure{PEER_CRLF}Set-Cookie: expired=bad; Domain=example.co.uk; Path=/; Max-Age=0{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream0.close() ?? panic("close")
+    stream1 :: &listener.accept() ?? panic("accept 1")
+    head1 :: request_head(stream1)
+    _ :: String.from_bytes(head1) ?? panic("original UTF8 request head")
+    assert(prefix(head1, "GET http://other.example.co.uk/dir/start HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(contains_bytes(head1, "cookie: deep=one; root=one; alpha=one; beta=one{PEER_CRLF}".bytes(), true))
+    stream1.write_all("HTTP/1.1 302 Found{PEER_CRLF}Location: http://api.example.co.uk/dir/next{PEER_CRLF}Set-Cookie: alpha=two; Domain=example.co.uk; Path=/; SameSite=Strict{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream1.close() ?? panic("close")
+    stream2 :: &listener.accept() ?? panic("accept 2")
+    head2 :: request_head(stream2)
+    _ :: String.from_bytes(head2) ?? panic("original UTF8 request head")
+    assert(prefix(head2, "GET http://api.example.co.uk/dir/next HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(contains_bytes(head2, "cookie: deep=one; root=one; alpha=two; beta=one{PEER_CRLF}".bytes(), true))
+    stream2.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream2.close() ?? panic("close")
+    stream3 :: &listener.accept() ?? panic("accept 3")
+    head3 :: request_head(stream3)
+    _ :: String.from_bytes(head3) ?? panic("original UTF8 request head")
+    assert(prefix(head3, "GET http://evil.co.uk/start HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(!contains_bytes(head3, "{PEER_CRLF}cookie:".bytes(), true))
+    stream3.write_all("HTTP/1.1 302 Found{PEER_CRLF}Location: http://api.example.co.uk/cross-site{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream3.close() ?? panic("close")
+    stream4 :: &listener.accept() ?? panic("accept 4")
+    head4 :: request_head(stream4)
+    _ :: String.from_bytes(head4) ?? panic("original UTF8 request head")
+    assert(prefix(head4, "GET http://api.example.co.uk/cross-site HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(!contains_bytes(head4, "{PEER_CRLF}cookie:".bytes(), true))
+    stream4.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream4.close() ?? panic("close")
+    stream5 :: &listener.accept() ?? panic("accept 5")
+    head5 :: request_head(stream5)
+    _ :: String.from_bytes(head5) ?? panic("original UTF8 request head")
+    assert(prefix(head5, "GET http://seed.b.xn--55qx5d.cn/seed HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(!contains_bytes(head5, "{PEER_CRLF}cookie:".bytes(), true))
+    stream5.write_all("HTTP/1.1 200 OK{PEER_CRLF}Set-Cookie: idn_public=bad; Domain=xn--55qx5d.cn; Path=/{PEER_CRLF}Set-Cookie: idn_strict=good; Domain=b.xn--55qx5d.cn; Path=/; SameSite=Strict{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream5.close() ?? panic("close")
+    stream6 :: &listener.accept() ?? panic("accept 6")
+    head6 :: request_head(stream6)
+    _ :: String.from_bytes(head6) ?? panic("original UTF8 request head")
+    assert(prefix(head6, "GET http://a.xn--55qx5d.cn/start HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(!contains_bytes(head6, "{PEER_CRLF}cookie:".bytes(), true))
+    stream6.write_all("HTTP/1.1 302 Found{PEER_CRLF}Location: http://target.b.xn--55qx5d.cn/next{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream6.close() ?? panic("close")
+    stream7 :: &listener.accept() ?? panic("accept 7")
+    head7 :: request_head(stream7)
+    _ :: String.from_bytes(head7) ?? panic("original UTF8 request head")
+    assert(prefix(head7, "GET http://target.b.xn--55qx5d.cn/next HTTP/1.1{PEER_CRLF}".bytes()))
+    assert(!contains_bytes(head7, "{PEER_CRLF}cookie:".bytes(), true))
+    stream7.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+    stream7.close() ?? panic("close")
+}

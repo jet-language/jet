@@ -1,0 +1,41 @@
+# tests/debug.rs::dap_cli_keeps_running_state_transitions_on_the_production_wire
+# Original source and wire predicates; PENDING-GRAMMAR(batch-four), PENDING-SAME-HEAD; runtime UNRUN.
+# Native compiler rustc availability guard retires at Jet backend cutover.
+requires: tool:lldb
+fixture: dap_cli_keeps_running_state_transitions_on_the_production_wire.fixture
+env: NO_COLOR=1
+session dap content-length: jet debug --dap {work}/main.jet
+send dap: "{\"seq\":1,\"type\":\"request\",\"command\":\"initialize\",\"arguments\":{\"adapterID\":\"jet\",\"pathFormat\":\"path\"}}"
+send dap: "{\"seq\":2,\"type\":\"request\",\"command\":\"launch\",\"arguments\":{\"program\":\"{work}/main.jet\",\"stopOnEntry\":false,\"args\":[],\"env\":{}}}"
+recv dap until $.request_seq = 2 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "launch"
+json: stdout doc $.success = true
+send dap: "{\"seq\":3,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{}}"
+recv dap until $.request_seq = 3 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "restart"
+json: stdout doc $.success = true
+send dap: "{\"seq\":4,\"type\":\"request\",\"command\":\"configurationDone\",\"arguments\":{}}"
+recv dap until $.request_seq = 4 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "configurationDone"
+json: stdout doc $.success = true
+send dap: "{\"seq\":5,\"type\":\"request\",\"command\":\"restart\",\"arguments\":{}}"
+recv dap until $.request_seq = 5 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "restart"
+json: stdout doc $.success = true
+send dap: "{\"seq\":6,\"type\":\"request\",\"command\":\"setBreakpoints\",\"arguments\":{\"source\":{\"path\":\"{work}/main.jet\"},\"breakpoints\":[{\"line\":4}]}}"
+recv dap collect until ndjson $[?request_seq=6][?type="response"][?command="setBreakpoints"][?success=true] #>= 1 && ndjson $[?hitBreakpointIds=[1]] #>= 1 timeout 30s
+json: stdout ndjson $[?request_seq=6][0].type = "response"
+json: stdout ndjson $[?request_seq=6][0].command = "setBreakpoints"
+json: stdout ndjson $[?request_seq=6][0].success = true
+json: stdout ndjson $[?request_seq=6][0].body.breakpoints[?verified=true] #>= 1 # original verified substring in this response
+send dap: "{\"seq\":7,\"type\":\"request\",\"command\":\"disconnect\",\"arguments\":{}}"
+recv dap until $.request_seq = 7 timeout 30s every 100ms
+json: stdout doc $.type = "response"
+json: stdout doc $.command = "disconnect"
+json: stdout doc $.success = true
+close dap
+exit: 0

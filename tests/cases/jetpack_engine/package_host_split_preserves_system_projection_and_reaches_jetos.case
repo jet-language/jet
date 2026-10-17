@@ -1,0 +1,68 @@
+# HAND-PORT tests/jetpack_engine.rs:9772-9820 package_host_split_preserves_system_projection_and_reaches_jetos
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: package_host_split_preserves_system_projection_and_reaches_jetos.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+# Original library projection remainder retained below; public split/plan assertions execute independently.
+# #[test]
+# fn package_host_split_preserves_system_projection_and_reaches_jetos() {
+#     let project = Scratch::new("package-host-split-parity");
+#     fs::write(
+#         project.join("package.jet"),
+#         "name: \"demo\"\noutputs: { server: System{ name: \"halcyon\", target: linux.x64, packages: [ripgrep] } }\n",
+#     )
+#     .unwrap();
+# 
+#     let before_facts = jetpack::Package::PackageFacts::load(&project.path)
+#         .unwrap()
+#         .unwrap();
+#     let before = jet_env_model::ModuleEval::project_package_outputs(&before_facts).unwrap();
+#     let split = jet()
+#         .args(["split", "hosts", "server"])
+#         .current_dir(&project.path)
+#         .env("NO_COLOR", "1")
+#         .output()
+#         .unwrap();
+#     assert!(
+#         split.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&split.stderr)
+#     );
+# 
+#     let fleet_source = fs::read_to_string(project.join("package/fleet.jet")).unwrap();
+#     assert!(fleet_source.contains("system.halcyon"), "{fleet_source}");
+#     let after_facts = jetpack::Package::PackageFacts::load(&project.path)
+#         .unwrap()
+#         .unwrap();
+#     let after = jet_env_model::ModuleEval::project_package_outputs(&after_facts).unwrap();
+#     assert_eq!(before.systems, after.systems);
+#     assert_eq!(after.fleets[0].hosts[0].system, "halcyon");
+# 
+#     let plan = jet()
+#         .args(["os", "plan", "halcyon", "--json", "--no-color", "--offline"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", project.join("jet-root"))
+#         .output()
+#         .unwrap();
+#     assert!(
+#         plan.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&plan.stderr)
+#     );
+#     let plan_json = String::from_utf8_lossy(&plan.stdout);
+#     assert!(plan_json.contains("\"host\":\"halcyon\""), "{plan_json}");
+#     assert!(plan_json.contains("\"graph_identity\":\""), "{plan_json}");
+# }
+step: jet split hosts server
+cwd: project
+exit: 0
+file: project/package/fleet.jet ~ "system.halcyon" # original contains predicate
+step: jet os plan halcyon --json --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/project/jet-root
+exit: 0
+stdout: ~ "\"host\":\"halcyon\"" # original contains predicate
+stdout: ~ "\"graph_identity\":\"" # original contains predicate
+

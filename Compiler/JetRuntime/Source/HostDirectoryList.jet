@@ -1,0 +1,96 @@
+// FileHandles.rs:504-554: a fresh held-directory stream, raw name bytes,
+// no link following, and readdir's EOF/error termination convention.
+// Result<List<List<U8>>, IOError>: return tag, data/length/error out words.
+fn fs_directory_row(fd: I64, entry: I64, length: I64) -> I64 {
+    kind :: rt_text_byte(entry + I64{18})
+    directory := kind == I64{4}
+    if (kind == I64{0}) {
+        probe := I64{0}
+        #Unsafe("getdents supplies a live terminated name; openat describes the entry without following links") {
+            probe = os_syscall_i64(I64{257}, fd, entry + I64{19}, I64{2752512}, I64{0}, I64{0}, I64{0})
+        }
+        if (probe >= I64{0}) {
+            stat :: jet_rt_alloc(I64{144}, I64{8})
+            status := I64{0}
+            #Unsafe("the owned descriptor and full Linux stat buffer live through fstat and close") {
+                status = os_syscall_i64(I64{5}, probe, stat, I64{0}, I64{0}, I64{0}, I64{0})
+                _ := os_syscall_i64(I64{3}, probe, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+            }
+            directory = status >= I64{0} && (rt_text_word(stat + I64{24})).bit_and(I64{61440}) == I64{16384}
+            jet_rt_free(stat, I64{144}, I64{8})
+        }
+    }
+    data :: jet_rt_alloc((length + I64{1}) * RT_HOST_U8_STRIDE, I64{8})
+    host_u8_put(data, I64{0}, if directory -> I64{1} else -> I64{0})
+    at := I64{0}
+    loop at < length {
+        host_u8_put(data, at + I64{1}, rt_text_byte(entry + I64{19} + at))
+        at += I64{1}
+    }
+    data
+}
+#Export(c) fn jet_fs_directory_list(handle: I64, output: I64, length: I64, error: I64) -> I64 {
+    key :: host_native_int(handle)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    base :: fs_held_shown(key)
+    if (base == I64{0}) -> return fs_held_closed(HOST_IO_OP_READ, error)
+    fd :: fs_open_at(key, rt_static_text("."), I64{3}, I64{0}, I64{-1}, I64{0}, error)
+    jet_rt_string_drop(base)
+    if (fd < I64{0}) -> return I64{0}
+    scratch :: jet_rt_alloc(I64{8192}, I64{8})
+    data := I64{0}
+    count := I64{0}
+    capacity := I64{0}
+    loop {
+        got := I64{0}
+        #Unsafe("an owned fresh directory descriptor and writable getdents64 buffer") {
+            got = os_syscall_i64(I64{217}, fd, scratch, I64{8192}, I64{0}, I64{0}, I64{0})
+        }
+        // Rust's readdir loop treats a null entry as termination, including
+        // an underlying read error; do not introduce a different error rail.
+        if (got <= I64{0}) -> break
+        at := I64{0}
+        loop at < got {
+            entry :: scratch + at
+            record_length :: (rt_text_word(entry + I64{16})).bit_and(I64{65535})
+            bytes := I64{0}
+            loop rt_text_byte(entry + I64{19} + bytes) != (I64{0}) -> bytes += I64{1}
+            dot :: bytes == I64{1} && rt_text_byte(entry + I64{19}) == I64{46}
+            parent :: bytes == I64{2} && rt_text_byte(entry + I64{19}) == I64{46} && rt_text_byte(entry + I64{20}) == I64{46}
+            if !dot && !parent {
+                if (count == capacity) {
+                    next_capacity :: if (capacity == I64{0}) -> I64{16} else -> capacity * I64{2}
+                    next_data :: jet_rt_alloc(next_capacity * I64{24}, I64{8})
+                    if (count != I64{0}) -> coll_copy(data, next_data, count * I64{24})
+                    jet_rt_free(data, capacity * I64{24}, I64{8})
+                    data = next_data
+                    capacity = next_capacity
+                }
+                row :: fs_directory_row(fd, entry, bytes)
+                header :: data + count * I64{24}
+                rt_text_store(header, bytes + I64{1})
+                rt_text_store(header + I64{8}, bytes + I64{1})
+                rt_text_store(header + I64{16}, row)
+                count += I64{1}
+            }
+            at += record_length
+        }
+    }
+    #Unsafe("close the fresh stream descriptor once after reading") {
+        _ := os_syscall_i64(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    jet_rt_free(scratch, I64{8192}, I64{8})
+    // List result ABI publishes no capacity: return an exactly sized owner.
+    if (count != capacity) {
+        exact := I64{0}
+        if (count != I64{0}) {
+            exact = jet_rt_alloc(count * I64{24}, I64{8})
+            coll_copy(data, exact, count * I64{24})
+        }
+        jet_rt_free(data, capacity * I64{24}, I64{8})
+        data = exact
+    }
+    rt_text_store(output, data)
+    rt_text_store(length, count)
+    I64{1}
+}

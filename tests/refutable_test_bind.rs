@@ -123,3 +123,33 @@ fn run() {
 fn example_matches_aot_default_jit_and_interpreter() {
     tir_support::assert_example_cli_tiers_agree("patterns/refutable_test_bind", EXAMPLE_OUTPUT);
 }
+
+#[test]
+fn refutable_variant_owner_fixture_matches_all_tiers() {
+    const OUTPUT: &str =
+        include_str!("../Examples/features/expected/patterns/refutable_variant_owner.out");
+    tir_support::assert_example_cli_tiers_agree("patterns/refutable_variant_owner", OUTPUT);
+    tir_support::assert_awaited_web_tier(
+        "refutable-variant-owner",
+        include_str!("../Examples/features/patterns/refutable_variant_owner.jet"),
+        OUTPUT,
+    );
+}
+
+#[test]
+fn refutable_variants_use_the_subject_owner_not_the_variant_spelling() {
+    tir_support::assert_tiers_agree(
+        "refutable-distinct-owners",
+        r#"
+enum Number { Value(Int) }
+enum Word { Value(String) }
+fn run() {
+    Number.Value(7) == .Value(number) ?? panic("number")
+    Word.Value("seven") == .Value(word) ?? panic("word")
+    print(number)
+    print(word)
+}
+"#,
+        "7\nseven\n",
+    );
+}

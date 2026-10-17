@@ -1,0 +1,844 @@
+// Exact Int's one-word ABI: inline signed 63-bit payload, or bit62 | node.
+// Boxed carrier (repr(C), 48 bytes, align8): refs@0, retired_next@8,
+// negative@16 (0/1), limbs_ptr@24, len@32, cap@40. Limbs are u32 base
+// 1e9, least-significant first. Buffer layout is (cap*4,4); cap0 uses ptr4.
+// Nodes published to callers are immutable. Only refs changes atomically;
+// the Jet IntHazard domain owns final-owner retirement. Private
+// arithmetic workspaces have refs1 and never enter an atomic carrier slot.
+
+fn int_load(address: I64) -> I64 {
+    #Unsafe("borrow an initialized word in a live exact-Int carrier") {
+        return os_load_i64(address)
+    }
+}
+
+fn int_store(address: I64, value: I64) {
+    #Unsafe("write an initialized word in a uniquely owned exact-Int workspace") {
+        os_store_i64(address, value)
+    }
+}
+
+fn int_u32(address: I64) -> I64 {
+    #Unsafe("borrow four initialized bytes in a live limb buffer; no adjacent limb is read") {
+        return os_load_u8(address).bit_or((os_load_u8(address + I64{1}) << I64{8})).bit_or((os_load_u8(address + I64{2}) << I64{16})).bit_or((os_load_u8(address + I64{3}) << I64{24}))
+    }
+}
+
+fn int_put_u32(address: I64, value: I64) {
+    #Unsafe("write four bytes in a uniquely owned limb buffer; value is an unsigned 32-bit limb") {
+        os_store_u8(address, value.bit_and(I64{255}))
+        os_store_u8(address + I64{1}, (value >> I64{8}).bit_and(I64{255}))
+        os_store_u8(address + I64{2}, (value >> I64{16}).bit_and(I64{255}))
+        os_store_u8(address + I64{3}, (value >> I64{24}).bit_and(I64{255}))
+    }
+}
+
+fn int_inline(value: I64) -> Bool Never! {
+    value >= I64{-4611686018427387904} && value <= I64{4611686018427387903}
+}
+
+fn int_node(value: I64) -> I64 Never! { value.bit_and(I64{4611686018427387903}) }
+
+fn int_tag(node: I64) -> I64 Never! { node.bit_or(I64{4611686018427387904}) }
+
+fn int_negative(value: I64) -> Bool {
+    if int_inline(value) -> return value < I64{0}
+    int_load(int_node(value) + I64{16}) != I64{0}
+}
+
+fn int_len(value: I64) -> I64 {
+    if !int_inline(value) -> return int_load(int_node(value) + I64{32})
+    magnitude :: if (value < I64{0}) -> -value else -> value
+    if (magnitude >= I64{1000000000000000000}) { return I64{3} }
+    return if (magnitude >= I64{1000000000}) -> I64{2} else -> I64{1}
+}
+
+fn int_limb(value: I64, index: I64) -> I64 {
+    if index >= int_len(value) -> return I64{0}
+    if !int_inline(value) -> return int_u32(int_load(int_node(value) + I64{24}) + index * I64{4})
+    magnitude := if (value < I64{0}) -> -value else -> value
+    at := I64{0}
+    loop at < index {
+        magnitude = magnitude /% I64{1000000000}
+        at += I64{1}
+    }
+    magnitude % I64{1000000000}
+}
+
+fn int_new(cap: I64) -> I64 {
+    // Checking the full byte size before multiplication preserves allocator
+    // failure behavior without allowing a wrapped undersized allocation.
+    if (cap <= I64{0} || cap > I64{2305843009213693951}) { rt_trap_invalid_box_layout() }
+    node :: jet_rt_alloc(I64{48}, I64{8})
+    limbs :: jet_rt_alloc(cap * I64{4}, I64{4})
+    int_store(node, I64{1})
+    int_store(node + I64{8}, I64{0})
+    int_store(node + I64{16}, I64{0})
+    int_store(node + I64{24}, limbs)
+    int_store(node + I64{32}, I64{1})
+    int_store(node + I64{40}, cap)
+    at := I64{0}
+    loop at < cap {
+        int_put_u32(limbs + at * I64{4}, I64{0})
+        at += I64{1}
+    }
+    node
+}
+
+fn int_get(node: I64, index: I64) -> I64 { int_u32(int_load(node + I64{24}) + index * I64{4}) }
+
+fn int_set(node: I64, index: I64, limb: I64) {
+    int_put_u32(int_load(node + I64{24}) + index * I64{4}, limb)
+}
+
+fn int_free_node(node: I64) {
+    cap :: int_load(node + I64{40})
+    if (cap != I64{0}) { jet_rt_free(int_load(node + I64{24}), cap * I64{4}, I64{4}) }
+    jet_rt_free(node, I64{48}, I64{8})
+}
+
+fn int_discard(value: I64) {
+    // Only private arithmetic results reach here, never a borrowed owner or
+    // a carrier loaded from an atomic location (which needs hazard retirement).
+    if !int_inline(value) -> int_free_node(int_node(value))
+}
+
+fn int_normalize(node: I64) {
+    length := int_load(node + I64{32})
+    loop length > (I64{1}) && int_get(node, length - I64{1}) == (I64{0}) -> length -= I64{1}
+    int_store(node + I64{32}, length)
+    if (length == I64{1} && int_get(node, I64{0}) == I64{0}) { int_store(node + I64{16}, I64{0}) }
+}
+
+fn int_fits(value: I64, bound: U64) -> Bool {
+    length :: int_len(value)
+    magnitude := U64{0}
+    at := length
+    loop at > (I64{0}) {
+        at -= I64{1}
+        limb :: U64{int_limb(value, at)}
+        if (limb > bound || magnitude > (bound - limb) /% U64{1000000000}) { return false }
+        magnitude = magnitude * U64{1000000000} + limb
+    }
+    true
+}
+
+fn int_word(value: I64) -> I64 {
+    magnitude := I64{0}
+    at := int_len(value)
+    loop at > (I64{0}) {
+        at -= I64{1}
+        magnitude = wrapping(wrapping(magnitude * I64{1000000000}) + int_limb(value, at))
+    }
+    return if (int_negative(value)) -> wrapping(I64{0} - magnitude) else -> magnitude
+}
+
+fn int_pack(node: I64) -> I64 {
+    int_normalize(node)
+    tagged :: int_tag(node)
+    bound :: if int_negative(tagged) -> U64{4611686018427387904} else -> U64{4611686018427387903}
+    if !int_fits(tagged, bound) -> return tagged
+    value :: int_word(tagged)
+    int_free_node(node)
+    value
+}
+
+fn int_copy(value: I64, extra: I64) -> I64 {
+    length :: int_len(value)
+    node :: int_new(length + extra)
+    at := I64{0}
+    loop at < length {
+        int_set(node, at, int_limb(value, at))
+        at += I64{1}
+    }
+    int_store(node + I64{32}, length)
+    if int_negative(value) -> int_store(node + I64{16}, I64{1})
+    node
+}
+
+fn int_compare_abs(left: I64, right: I64) -> I64 {
+    ll :: int_len(left)
+    rl :: int_len(right)
+    if ll != rl -> return if (ll < rl) -> I64{-1} else -> I64{1}
+    at := ll
+    loop at > (I64{0}) {
+        at -= I64{1}
+        a :: int_limb(left, at)
+        b :: int_limb(right, at)
+        if a != b -> return if (a < b) -> I64{-1} else -> I64{1}
+    }
+    I64{0}
+}
+
+#Export(c) fn jet_int_compare(left: I64, right: I64) -> I64 {
+    if int_inline(left) && int_inline(right) {
+        if left == right -> return I64{0}
+        return if left < right -> I64{-1} else -> I64{1}
+    }
+    ln :: int_negative(left)
+    rn :: int_negative(right)
+    if ln != rn -> return if ln -> I64{-1} else -> I64{1}
+    order :: int_compare_abs(left, right)
+    if ln -> return -order
+    order
+}
+
+fn int_add_signed(left: I64, right: I64, subtract: Bool) -> I64 {
+    ln :: int_negative(left)
+    rn :: int_negative(right) != subtract
+    ll :: int_len(left)
+    rl :: int_len(right)
+    if ln == rn {
+        length :: if ll > rl -> ll else -> rl
+        node :: int_new(length + I64{1})
+        carry := I64{0}
+        at := I64{0}
+        loop at < length {
+            sum :: int_limb(left, at) + int_limb(right, at) + carry
+            int_set(node, at, sum % I64{1000000000})
+            carry = sum /% I64{1000000000}
+            at += I64{1}
+        }
+        int_set(node, length, carry)
+        int_store(node + I64{32}, length + I64{1})
+        if ln -> int_store(node + I64{16}, I64{1})
+        return int_pack(node)
+    }
+    order :: int_compare_abs(left, right)
+    if (order == I64{0}) { return I64{0} }
+    larger :: if (order > I64{0}) -> left else -> right
+    smaller :: if (order > I64{0}) -> right else -> left
+    length :: int_len(larger)
+    node :: int_new(length)
+    borrow := I64{0}
+    at := I64{0}
+    loop at < length {
+        difference := int_limb(larger, at) - int_limb(smaller, at) - borrow
+        borrow = I64{0}
+        if (difference < I64{0}) {
+            difference += I64{1000000000}
+            borrow = I64{1}
+        }
+        int_set(node, at, difference)
+        at += I64{1}
+    }
+    int_store(node + I64{32}, length)
+    if (if (order > I64{0}) -> ln else -> rn) { int_store(node + I64{16}, I64{1}) }
+    int_pack(node)
+}
+
+#Export(c) fn jet_int_add(left: I64, right: I64) -> I64 {
+    if int_inline(left) && int_inline(right) {
+        sum :: left + right
+        if int_inline(sum) -> return sum
+    }
+    int_add_signed(left, right, false)
+}
+
+#Export(c) fn jet_int_sub(left: I64, right: I64) -> I64 {
+    if int_inline(left) && int_inline(right) {
+        difference :: left - right
+        if int_inline(difference) -> return difference
+    }
+    int_add_signed(left, right, true)
+}
+
+#Export(c) fn jet_int_mul(left: I64, right: I64) -> I64 {
+    if (left == I64{0} || right == I64{0}) { return I64{0} }
+    if int_inline(left) && int_inline(right) {
+        a :: if (left < I64{0}) -> -left else -> left
+        b :: if (right < I64{0}) -> -right else -> right
+        bound :: if ((left < I64{0}) != (right < I64{0})) -> I64{4611686018427387904} else -> I64{4611686018427387903}
+        if a <= bound /% b -> return left * right
+    }
+    ll :: int_len(left)
+    rl :: int_len(right)
+    node :: int_new(ll + rl)
+    i := I64{0}
+    loop i < ll {
+        carry := I64{0}
+        j := I64{0}
+        loop j < rl {
+            product :: int_limb(left, i) * int_limb(right, j) + int_get(node, i + j) + carry
+            int_set(node, i + j, product % I64{1000000000})
+            carry = product /% I64{1000000000}
+            j += I64{1}
+        }
+        int_set(node, i + rl, carry)
+        i += I64{1}
+    }
+    int_store(node + I64{32}, ll + rl)
+    if int_negative(left) != int_negative(right) -> int_store(node + I64{16}, I64{1})
+    int_pack(node)
+}
+
+#Export(c) fn jet_int_owned_from_i64(value: I64) -> I64 {
+    if int_inline(value) -> return value
+    node :: int_new(I64{3})
+    // Negative division keeps I64.MIN representable throughout.
+    remaining := if (value > I64{0}) -> -value else -> value
+    at := I64{0}
+    loop remaining != (I64{0}) {
+        int_set(node, at, -(remaining %% I64{1000000000}))
+        remaining = -(remaining /% I64{-1000000000})
+        at += I64{1}
+    }
+    int_store(node + I64{32}, at)
+    if (value < I64{0}) { int_store(node + I64{16}, I64{1}) }
+    int_tag(node)
+}
+
+#Export(c) fn jet_rt_int_clone(value: I64) -> I64 {
+    if int_inline(value) -> return value
+    node :: int_node(value)
+    loop {
+        refs :: int_load(node)
+        if (refs <= I64{0} || refs == I64{9223372036854775807}) {
+            jet_rt_unreachable(I64{0}, I64{0})
+        }
+        old := I64{0}
+        #Unsafe("the caller holds an existing owner; atomic retain cannot race final-owner retirement") {
+            old = os_cas_i64(node, refs, refs + I64{1})
+        }
+        if old == refs -> return value
+    }
+}
+
+// Atomic slots must remove their owner before calling drop. A stale reader
+// may still hold a hazard, so final owners always use the ONE existing domain:
+// no hazard => immediate free; hazard => retired_next list, reclaimed when the
+// last reader clears its guard. Never create a second Jet retirement list.
+#Export(c) fn jet_rt_int_drop(value: I64) {
+    if int_inline(value) {
+        return
+    }
+    node :: int_node(value)
+    loop {
+        refs :: int_load(node)
+        if (refs <= I64{0}) { jet_rt_unreachable(I64{0}, I64{0}) }
+        next_refs :: refs - I64{1}
+        old := I64{0}
+        #Unsafe("the caller consumes one owner; atomic decrement publishes refs0 before shared-domain retirement") {
+            old = os_cas_i64(node, refs, next_refs)
+        }
+        if old != refs -> next
+        if (next_refs == I64{0}) {
+            #Unsafe("the final owner has reached zero; the remaining shared hazard domain decides immediate free or retirement") {
+                jet_rt_int_retire_zero(node)
+            }
+        }
+        return
+    }
+}
+
+// Report strings match ExactNumeric::failure_message and NumericConversion.
+fn int_stop(file: I64, file_len: I64, line: I64, reason: I64) {
+    if (reason == I64{4}) {
+        trap_native_index_range_root()
+        return
+    }
+    // ExactNumeric.rs:88-93 and NumericConversion.rs:115-116 own these
+    // raw reasons. Root rendering below remains byte-for-byte unchanged.
+    message :: jet_rt_alloc(I64{40}, I64{8})
+    length := I64{15}
+    if {
+        (reason == I64{0}) -> {
+            trap_store(message, I64{2334101988825262436})
+            trap_store(message + I64{8}, I64{31369502581094754})
+        }
+        (reason == I64{1}) -> {
+            length = I64{29}
+            trap_store(message, I64{7311146993653867854})
+            trap_store(message + I64{8}, I64{8389209267074589728})
+            trap_store(message + I64{16}, I64{8104338719519951136})
+            trap_store(message + I64{24}, I64{500068347503})
+        }
+        (reason == I64{2}) -> {
+            length = I64{19}
+            trap_store(message, I64{2334106421097295433})
+            trap_store(message + I64{8}, I64{8026294645210835059})
+            trap_store(message + I64{16}, I64{7630453})
+        }
+        (reason == I64{3}) -> {
+            length = I64{37}
+            trap_store(message, I64{8026576056014889302})
+            trap_store(message + I64{8}, I64{7594793504856765285})
+            trap_store(message + I64{16}, I64{8315162377463603316})
+            trap_store(message + I64{24}, I64{7957695015158704500})
+            trap_store(message + I64{32}, I64{435678704672})
+        }
+        else -> jet_rt_unreachable(I64{0}, I64{0})
+    }
+    published :: rt_task_panic_publish(message, length, I64{0})
+    jet_rt_free(message, I64{40}, I64{8})
+    if published -> return
+    trap_header(I64{1})
+    if {
+        (reason == I64{0}) -> trap_msg_divide_zero()
+        (reason == I64{1}) -> {
+            trap_write_word(I64{7311146993653867854}, I64{8})
+            trap_write_word(I64{8389209267074589728}, I64{8})
+            trap_write_word(I64{8104338719519951136}, I64{8})
+            trap_write_word(I64{500068347503}, I64{5})
+        }
+        (reason == I64{2}) -> {
+            trap_write_word(I64{2334106421097295433}, I64{8})
+            trap_write_word(I64{8026294645210835059}, I64{8})
+            trap_write_word(I64{7630453}, I64{3})
+        }
+        (reason == I64{3}) -> {
+            trap_write_word(I64{8026576056014889302}, I64{8})
+            trap_write_word(I64{7594793504856765285}, I64{8})
+            trap_write_word(I64{8315162377463603316}, I64{8})
+            trap_write_word(I64{7957695015158704500}, I64{8})
+            trap_write_word(I64{435678704672}, I64{5})
+        }
+        else -> jet_rt_unreachable(I64{0}, I64{0})
+    }
+    trap_msg_message_end()
+    trap_context(file, file_len, trap_line(line), I64{0}, I64{0}, I64{0}, I64{0}, I64{1}, I64{1})
+    trap_footer(I64{1})
+}
+
+#Export(c) fn jet_int_owned_to_i64(value: I64) -> I64 {
+    if int_inline(value) -> return value
+    bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if !int_fits(value, bound) {
+        int_stop(I64{0}, I64{0}, I64{0}, I64{4})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    int_word(value)
+}
+
+#Export(c) fn jet_int_checked_fixed(value: I64, kind: I64, file: I64, file_len: I64, line: I64) -> I64 {
+    if (kind < I64{0} || kind > I64{7}) {
+        int_stop(file, file_len, line, I64{3})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    negative :: int_negative(value)
+    if (kind >= I64{4} && negative) {
+        int_stop(file, file_len, line, I64{3})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    bound := U64{18446744073709551615}
+    if {
+        (kind == I64{0}) -> bound = if negative -> U64{128} else -> U64{127}
+        (kind == I64{1}) -> bound = if negative -> U64{32768} else -> U64{32767}
+        (kind == I64{2}) -> bound = if negative -> U64{2147483648} else -> U64{2147483647}
+        (kind == I64{3}) -> {
+            bound = if negative -> U64{9223372036854775808} else -> U64{9223372036854775807}
+        }
+        (kind == I64{4}) -> bound = U64{255}
+        (kind == I64{5}) -> bound = U64{65535}
+        (kind == I64{6}) -> bound = U64{4294967295}
+        else -> {}
+    }
+    if !int_fits(value, bound) {
+        int_stop(file, file_len, line, I64{3})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    int_word(value)
+}
+
+fn int_mul_small_into(node: I64, value: I64, factor: I64) {
+    length :: int_len(value)
+    carry := I64{0}
+    at := I64{0}
+    loop at < length {
+        product :: int_limb(value, at) * factor + carry
+        int_set(node, at, product % I64{1000000000})
+        carry = product /% I64{1000000000}
+        at += I64{1}
+    }
+    int_set(node, length, carry)
+    int_store(node + I64{32}, length + I64{1})
+    int_normalize(node)
+}
+
+fn int_sub_assign(node: I64, value: I64) {
+    length :: int_load(node + I64{32})
+    borrow := I64{0}
+    at := I64{0}
+    loop at < length {
+        difference := int_get(node, at) - int_limb(value, at) - borrow
+        borrow = I64{0}
+        if (difference < I64{0}) {
+            difference += I64{1000000000}
+            borrow = I64{1}
+        }
+        int_set(node, at, difference)
+        at += I64{1}
+    }
+    int_normalize(node)
+}
+
+// kind: trunc quotient/remainder, floor quotient/modulo, Euclid quotient/rest.
+fn int_division(left: I64, right: I64, file: I64, file_len: I64, line: I64, kind: I64) -> I64 {
+    if (right == I64{0}) {
+        int_stop(file, file_len, line, I64{0})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    if int_inline(left) && int_inline(right) {
+        initial_r :: left %% right
+        initial_q :: (left - initial_r) /% right
+        ln :: left < I64{0}
+        rn :: right < I64{0}
+        adjust :: initial_r != I64{0} && (((kind == I64{2} || kind == I64{3}) && ln != rn) || ((kind == I64{4} || kind == I64{5}) && ln))
+        if ((kind.bit_and(I64{1})) == I64{0}) {
+            delta :: if (!adjust) -> I64{0} else if (kind == I64{4} && rn) -> I64{1} else -> I64{-1}
+            return jet_int_owned_from_i64(initial_q + delta)
+        }
+        if !adjust -> return initial_r
+        return if (kind == I64{5} && rn) -> initial_r - right else -> initial_r + right
+    }
+    ll :: int_len(left)
+    rl :: int_len(right)
+    want_quotient :: (kind.bit_and(I64{1})) == I64{0}
+    quotient :: if want_quotient -> int_new(ll) else -> I64{0}
+    rest :: int_new(rl + I64{1})
+    product :: int_new(rl + I64{1})
+    at := ll
+    loop at > (I64{0}) {
+        at -= I64{1}
+        length :: int_load(rest + I64{32})
+        i := length
+        loop i > (I64{0}) {
+            int_set(rest, i, int_get(rest, i - I64{1}))
+            i -= I64{1}
+        }
+        int_set(rest, I64{0}, int_limb(left, at))
+        int_store(rest + I64{32}, length + I64{1})
+        int_normalize(rest)
+        lo := I64{0}
+        hi := I64{999999999}
+        loop lo < hi {
+            mid :: lo + (hi - lo + I64{1}) /% I64{2}
+            int_mul_small_into(product, right, mid)
+            if (int_compare_abs(int_tag(product), int_tag(rest)) <= I64{0}) { lo = mid } else {
+                hi = mid - I64{1}
+            }
+        }
+        if want_quotient -> int_set(quotient, at, lo)
+        if (lo != I64{0}) {
+            int_mul_small_into(product, right, lo)
+            int_sub_assign(rest, int_tag(product))
+        }
+    }
+    int_free_node(product)
+    ln :: int_negative(left)
+    rn :: int_negative(right)
+    nonzero :: !(int_load(rest + I64{32}) == I64{1} && int_get(rest, I64{0}) == I64{0})
+    if ln && nonzero -> int_store(rest + I64{16}, I64{1})
+    adjust :: nonzero && (((kind == I64{2} || kind == I64{3}) && ln != rn) || ((kind == I64{4} || kind == I64{5}) && ln))
+    if want_quotient {
+        int_store(quotient + I64{32}, ll)
+        if ln != rn -> int_store(quotient + I64{16}, I64{1})
+        int_free_node(rest)
+        initial :: int_pack(quotient)
+        if !adjust -> return initial
+        delta :: if (kind == I64{4} && rn) -> I64{1} else -> I64{-1}
+        result :: jet_int_add(initial, delta)
+        int_discard(initial)
+        return result
+    }
+    initial :: int_pack(rest)
+    if !adjust -> return initial
+    result :: if (kind == I64{5} && rn) -> jet_int_sub(initial, right) else -> jet_int_add(initial, right)
+    int_discard(initial)
+    result
+}
+
+#Export(c) fn jet_int_div(a: I64, b: I64, file: I64, len: I64, line: I64) -> I64 {
+    int_division(a, b, file, len, line, I64{0})
+}
+
+#Export(c) fn jet_int_rem(a: I64, b: I64, file: I64, len: I64, line: I64) -> I64 {
+    int_division(a, b, file, len, line, I64{1})
+}
+
+#Export(c) fn jet_int_floor_div(a: I64, b: I64, file: I64, len: I64, line: I64) -> I64 {
+    int_division(a, b, file, len, line, I64{2})
+}
+
+#Export(c) fn jet_int_mod(a: I64, b: I64, file: I64, len: I64, line: I64) -> I64 {
+    int_division(a, b, file, len, line, I64{3})
+}
+
+#Export(c) fn jet_int_div_euclid(a: I64, b: I64, file: I64, len: I64, line: I64) -> I64 {
+    int_division(a, b, file, len, line, I64{4})
+}
+
+#Export(c) fn jet_int_rem_euclid(a: I64, b: I64, file: I64, len: I64, line: I64) -> I64 {
+    int_division(a, b, file, len, line, I64{5})
+}
+
+fn int_div_small(node: I64, divisor: I64) -> I64 {
+    carry := I64{0}
+    at := int_load(node + I64{32})
+    loop at > (I64{0}) {
+        at -= I64{1}
+        current :: carry * I64{1000000000} + int_get(node, at)
+        int_set(node, at, current /% divisor)
+        carry = current % divisor
+    }
+    int_normalize(node)
+    carry
+}
+
+fn int_scale(node: I64, factor: I64, add: I64) {
+    length :: int_load(node + I64{32})
+    carry := add
+    at := I64{0}
+    loop at < length {
+        current :: int_get(node, at) * factor + carry
+        int_set(node, at, current % I64{1000000000})
+        carry = current /% I64{1000000000}
+        at += I64{1}
+    }
+    loop carry != (I64{0}) {
+        int_set(node, at, carry % I64{1000000000})
+        carry = carry /% I64{1000000000}
+        at += I64{1}
+    }
+    int_store(node + I64{32}, at)
+}
+
+fn int_shift_count(count: I64, file: I64, len: I64, line: I64) -> I64 {
+    if int_negative(count) || !int_fits(count, U64{9223372036854775807}) {
+        int_stop(file, len, line, I64{2})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    int_word(count)
+}
+
+#Export(c) fn jet_int_shl(value: I64, count: I64, file: I64, len: I64, line: I64) -> I64 {
+    bits :: int_shift_count(count, file, len, line)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (value == I64{0}) { return I64{0} }
+    if (int_inline(value) && bits < I64{63}) {
+        shifted :: value << bits
+        if (int_inline(shifted) && (shifted >> bits) == value) { return shifted }
+    }
+    node :: int_copy(value, bits /% I64{29} + I64{1})
+    remaining := bits
+    loop remaining > (I64{0}) {
+        step :: if (remaining > I64{29}) -> I64{29} else -> remaining
+        int_scale(node, I64{1} << step, I64{0})
+        remaining -= step
+    }
+    int_pack(node)
+}
+
+#Export(c) fn jet_int_shr(value: I64, count: I64, file: I64, len: I64, line: I64) -> I64 {
+    bits :: int_shift_count(count, file, len, line)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if int_inline(value) {
+        step :: if (bits > I64{63}) -> I64{63} else -> bits
+        return value >> step
+    }
+    node :: int_copy(value, I64{1})
+    remaining := bits
+    lost := false
+    loop remaining > (I64{0}) {
+        if (int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) { break }
+        step :: if (remaining > I64{29}) -> I64{29} else -> remaining
+        if (int_div_small(node, I64{1} << step) != I64{0}) { lost = true }
+        remaining -= step
+    }
+    if int_negative(value) && lost {
+        int_scale(node, I64{1}, I64{1})
+        int_store(node + I64{16}, I64{1})
+    }
+    int_pack(node)
+}
+
+#Export(c) fn jet_int_pow(value: I64, exponent: I64, file: I64, len: I64, line: I64) -> I64 {
+    if int_negative(exponent) {
+        int_stop(file, len, line, I64{1})
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    if (exponent == I64{0}) { return I64{1} }
+    if (value == I64{0} || value == I64{1}) { return value }
+    if (value == I64{-1}) {
+        return if ((int_limb(exponent, I64{0}).bit_and(I64{1})) == I64{0}) -> I64{1} else -> I64{-1}
+    }
+    // Exponents are arbitrary precision too; dividing their private copy by
+    // two avoids imposing an I64/u32 restriction absent in the Rust kernel.
+    small :: int_inline(exponent)
+    power :: if small -> I64{0} else -> int_copy(exponent, I64{0})
+    remaining := if small -> exponent else -> I64{0}
+    base := if int_inline(value) -> value else -> int_pack(int_copy(value, I64{0}))
+    result := I64{1}
+    loop {
+        active :: if small -> (remaining != I64{0}) else -> !(int_load(power + I64{32}) == I64{1} && int_get(power, I64{0}) == I64{0})
+        if !active -> break
+        bit :: if small -> remaining.bit_and(I64{1}) else -> int_div_small(power, I64{2})
+        if small -> remaining >>= I64{1}
+        if (bit != I64{0}) {
+            next_result :: jet_int_mul(result, base)
+            int_discard(result)
+            result = next_result
+        }
+        more :: if small -> (remaining != I64{0}) else -> (int_load(power + I64{32}) != I64{1} || int_get(power, I64{0}) != I64{0})
+        if more {
+            next_base :: jet_int_mul(base, base)
+            int_discard(base)
+            base = next_base
+        }
+    }
+    int_discard(base)
+    if !small -> int_free_node(power)
+    result
+}
+
+// Convert to finite two's-complement base2^32 words for infinite signed bit
+// operations. One extra sign word makes every result's sign unambiguous.
+fn int_binary(value: I64, width: I64) -> I64 {
+    buffer :: jet_rt_alloc(width * I64{4}, I64{4})
+    workspace :: int_copy(value, I64{0})
+    carry := I64{1}
+    at := I64{0}
+    negative :: int_negative(value)
+    loop at < width {
+        word := int_div_small(workspace, I64{4294967296})
+        if negative {
+            word = (I64{4294967295}.bit_xor(word)) + carry
+            carry = word >> I64{32}
+            word = word.bit_and(I64{4294967295})
+        }
+        int_put_u32(buffer + at * I64{4}, word)
+        at += I64{1}
+    }
+    int_free_node(workspace)
+    buffer
+}
+
+fn int_bitwise(left: I64, right: I64, kind: I64) -> I64 {
+    if int_inline(left) && int_inline(right) {
+        if (kind == I64{0}) { return left.bit_and(right) }
+        if (kind == I64{1}) { return left.bit_or(right) }
+        return left.bit_xor(right)
+    }
+    ll :: int_len(left)
+    rl :: int_len(right)
+    length :: if ll > rl -> ll else -> rl
+    width :: length * I64{30} /% I64{32} + I64{2}
+    a :: int_binary(left, width)
+    b :: int_binary(right, width)
+    at := I64{0}
+    loop at < width {
+        av :: int_u32(a + at * I64{4})
+        bv :: int_u32(b + at * I64{4})
+        word :: if (kind == I64{0}) -> av.bit_and(bv) else if (kind == I64{1}) -> av.bit_or(bv) else -> av.bit_xor(bv)
+        int_put_u32(a + at * I64{4}, word)
+        at += I64{1}
+    }
+    jet_rt_free(b, width * I64{4}, I64{4})
+    negative :: (int_u32(a + (width - I64{1}) * I64{4}).bit_and(I64{2147483648})) != I64{0}
+    if negative {
+        carry := I64{1}
+        at = I64{0}
+        loop at < width {
+            word :: (I64{4294967295}.bit_xor(int_u32(a + at * I64{4}))) + carry
+            carry = word >> I64{32}
+            int_put_u32(a + at * I64{4}, word.bit_and(I64{4294967295}))
+            at += I64{1}
+        }
+    }
+    node :: int_new(length + I64{1})
+    at = width
+    loop at > (I64{0}) {
+        at -= I64{1}
+        int_scale(node, I64{4294967296}, int_u32(a + at * I64{4}))
+    }
+    jet_rt_free(a, width * I64{4}, I64{4})
+    if negative -> int_store(node + I64{16}, I64{1})
+    int_pack(node)
+}
+
+#Export(c) fn jet_int_bit_and(a: I64, b: I64) -> I64 { int_bitwise(a, b, I64{0}) }
+
+#Export(c) fn jet_int_bit_or(a: I64, b: I64) -> I64 { int_bitwise(a, b, I64{1}) }
+
+#Export(c) fn jet_int_bit_xor(a: I64, b: I64) -> I64 { int_bitwise(a, b, I64{2}) }
+
+#Export(c) fn jet_rt_int_from_static(ptr: I64, len: I64) -> I64 {
+    // The lowering supplies validated decimal MIR constants, not user input.
+    at := I64{0}
+    negative := false
+    if (len > I64{0} && trap_byte(ptr) == I64{45}) {
+        negative = true
+        at = I64{1}
+    } else {
+        if (len > I64{0} && trap_byte(ptr) == I64{43}) { at = I64{1} }
+    }
+    if (len - at <= I64{18}) {
+        small := I64{0}
+        loop at < len {
+            digit :: trap_byte(ptr + at) - I64{48}
+            if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
+            small = small * I64{10} + digit
+            at += I64{1}
+        }
+        return if negative -> -small else -> small
+    }
+    node :: int_new((len - at) /% I64{9} + I64{1})
+    loop at < len {
+        digit :: trap_byte(ptr + at) - I64{48}
+        if (digit < I64{0} || digit > I64{9}) { jet_rt_unreachable(I64{0}, I64{0}) }
+        int_scale(node, I64{10}, digit)
+        at += I64{1}
+    }
+    if negative -> int_store(node + I64{16}, I64{1})
+    int_pack(node)
+}
+
+#Export(c) fn jet_int_owned_to_f64(value: I64) -> Float {
+    if int_inline(value) -> return Float{value}
+    bound :: if int_negative(value) -> U64{9223372036854775808} else -> U64{9223372036854775807}
+    if int_fits(value, bound) -> return Float{int_word(value)}
+    length :: int_len(value)
+    if (length > I64{35} || (length == I64{35} && int_limb(value, I64{34}) >= I64{1000})) {
+        infinity :: Float{1.0} / Float{0.0}
+        return if int_negative(value) -> -infinity else -> infinity
+    }
+    // Mirrors CtBigInt/JetBigInt's guard/sticky round-half-even projection;
+    // only the final <=53-bit integer crosses the machine numeric conversion.
+    node :: int_copy(value, I64{0})
+    top := I64{0}
+    bits := I64{0}
+    guard := false
+    sticky := false
+    loop !(int_load(node + I64{32}) == I64{1} && int_get(node, I64{0}) == I64{0}) {
+        bit :: int_div_small(node, I64{2})
+        if (bits < I64{53}) { top = top.bit_or(bit << bits) } else {
+            sticky = sticky || guard
+            guard = (top.bit_and(I64{1})) != I64{0}
+            top = (top >> I64{1}).bit_or((bit << I64{52}))
+        }
+        bits += I64{1}
+    }
+    int_free_node(node)
+    exponent := bits - I64{1}
+    if (bits > I64{53} && guard && (sticky || (top.bit_and(I64{1})) != I64{0})) {
+        top += I64{1}
+        if (top == I64{9007199254740992}) {
+            top >>= I64{1}
+            exponent += I64{1}
+        }
+    }
+    result := Float{top}
+    if (exponent > I64{1023}) {
+        return if (int_negative(value)) -> -(Float{1.0} / Float{0.0}) else -> Float{1.0} / Float{0.0}
+    }
+    if (bits > I64{53}) {
+        shift := exponent - I64{52}
+        scale := Float{2.0}
+        loop shift > (I64{0}) {
+            if ((shift.bit_and(I64{1})) != I64{0}) { result *= scale }
+            shift >>= I64{1}
+            if (shift != I64{0}) { scale *= scale }
+        }
+    }
+    return if (int_negative(value)) -> -result else -> result
+}

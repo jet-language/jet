@@ -1,0 +1,20 @@
+
+use core.mem
+struct Point {
+    x: Int
+    y: Int
+}
+fn run() {
+    bytes := [U8#128]{ uninit }
+    fixed :: mem.Fixed.over(&bytes)
+    value :: fixed.alloc(9)
+    point :: fixed.alloc(Point{x: 3, y: 4})
+    print(value)
+    print(point.x)
+    print(point.y)
+    &fixed.reset()
+    again :: fixed.alloc(10)
+    print(again)
+    &fixed.reset()
+    close(^fixed)
+}

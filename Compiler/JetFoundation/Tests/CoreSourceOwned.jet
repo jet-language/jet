@@ -1,0 +1,57 @@
+// Assemble with the canonical Compiler unit, replacing its host entry.
+fn core_source_owned_require(ok: Bool, message: String) Never! {
+    if !ok -> panic("Core SourceOwned: {message}")
+}
+fn run() Never! {
+    // CORE_CALLS rows are literal data; check-core-surface-ledger.mjs
+    // --hostile-fixtures proves a source-owned row keeps its declaration facts.
+    row :: CoreCallRecord{module_name: "core.ui.host", member: "shortcut", receiver_types: [String]{}, signature: CoreCallSignature{arity: 2, max_arity: 2, borrow_mask: [Bool]{true, false}}, frame_accesses: [CoreCallResourceAccess]{}, frame_completion: None, fallibility: CoreCallFallibility.Sema, effect_kind: None, capability: CoreCapabilityContract{kind: CoreCapabilityKind.Pure, provider: None, fallback: None, failure: None}, effect_leaf: None, sink_class: None, pure_route: CoreCallPureRoute.NoPureRoute, interpreter_route: CoreCallInterpreterRoute.NoRoute, symbol: CoreCallSymbol.SourceOwned, source_target: None, coverage: CoreCallCoverage{bits: CORE_CALL_COVERAGE_SEMA}, aot_direct: false, native_int_result: false, ui_capabilities: [String]{"UI.Shortcuts"}, marker: None, authority: None}
+    original := row.copy()
+    original.symbol = CoreCallSymbol.Prelude{name: "jet_ui_host_shortcut"}
+    original.interpreter_route = CoreCallInterpreterRoute.TypedIntrinsic
+    original.coverage = CoreCallCoverage{bits: CORE_CALL_COVERAGE_KNOWN}
+    original.aot_direct = true
+    core_source_owned_require(core_call_has_direct_symbol(original), "host row keeps its direct symbol")
+    core_source_owned_require(!core_call_has_direct_symbol(row) && row.interpreter_route == CoreCallInterpreterRoute.NoRoute, "no executable host route")
+    core_source_owned_require(if core_call_source_member(row) == {.Val(name) -> name == "shortcut" else -> false}, "default source export")
+    selected := row.copy()
+    selected.source_target = Val("__shortcut_entry")
+    core_source_owned_require(if core_call_source_member(selected) == {.Val(name) -> name == "__shortcut_entry" else -> false}, "normalized source export")
+    host_selected := original.copy()
+    host_selected.source_target = Val("__not_a_host_route")
+    core_source_owned_require(core_call_source_member(host_selected) == None, "non-source-owned row unchanged")
+    rows :: [CoreCallRecord]{row}
+    sema :: core_call_projection_in(rows, "core.ui.host", "shortcut", 1, 2)
+    core_source_owned_require(if sema == {.Row(_) -> true else -> false}, "sema projection retained")
+    projections :: [Int]{2, 4, 8, 16, 32}
+    loop projection in projections {
+        projected :: core_call_projection_in(rows, "core.ui.host", "shortcut", projection, 2)
+        rejected :: if projected == {
+            .Error(error) -> if error == {.Uncovered(_) -> true else -> false}
+            else -> false
+        }
+        core_source_owned_require(rejected, "executable projection rejected")
+    }
+    members :: [String]{"__stdio_write", "__stdio_bytes", "__stdio_flush", "__stdio_fault", "__stdout_terminal", "__stderr_terminal", "__stdin_line"}
+    string :: Type.String
+    boolean :: Type.Bool
+    bytes :: Type.List{element: Type.IntN{signed: false, bits: 8}}
+    optional_text :: Type.Option{inner: string}
+    parameters :: [[Type]]{
+        [Type]{string, boolean, boolean, boolean}, [Type]{bytes, boolean, boolean},
+        [Type]{boolean}, [Type]{string}, [Type]{}, [Type]{}, [Type]{},
+    }
+    returns :: [Type]{optional_text, optional_text, optional_text, boolean, boolean, boolean,
+        Type.Result{ok: optional_text, err: Type.Named{name: "IOError"}}}
+    loop index in 0..<members.len() {
+        member :: members[index]
+        signature :: core_call_typed_signature("core.term", member, parameters[index].len()) ?? panic("missing stdio signature: {member}")
+        core_source_owned_require((signature.return_type ?? panic("missing stdio return type")) == returns[index], "stdio return contract")
+        core_source_owned_require(signature.parameters.len() == parameters[index].len(), "stdio arity")
+        loop parameter in 0..<signature.parameters.len() {
+            core_source_owned_require(signature.parameters[parameter].ty == parameters[index][parameter], "stdio parameter type")
+            core_source_owned_require(signature.parameters[parameter].access == AccessConvention.Read, "stdio borrowed parameter")
+        }
+        core_source_owned_require(core_call_typed_signature("core.term", member, parameters[index].len() + 1) == None, "stdio excess arguments rejected")
+    }
+}

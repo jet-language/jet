@@ -1,0 +1,36 @@
+# tests/project_check.rs::project_check_json_rows_are_versioned_and_warm_stable at tests/project_check.rs:639; converter c4189f521f54bea78e49f62cb127d50ad22ac3e0
+# Original snapshots/predicates; PENDING-SAME-HEAD; no captures blessed.
+fixture: project_check_json_rows_are_versioned_and_warm_stable.fixture
+env: NO_COLOR=1
+env: TERM=dumb
+step cold: jet check --json --verbose
+cwd: {work}/entry_resolution
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+json: stdout doc $.contract = "jet.check/v1"
+json: stdout doc $.elapsed_ms : int # original predicate: Dyn::Int
+json: stdout doc $.elapsed_ms >= 0
+json: stdout doc $.rows : array # original predicate
+json: stdout doc $.rows #= 4
+json: stdout doc $.rows[?name="entry resolution"][0].status = "proven"
+json: stdout doc $.rows[?name="entry resolution"][0].diagnostic = "E2389"
+json: stdout doc $.rows[?name="module graph"][0].status = "proven"
+json: stdout doc $.rows[?name="module graph"][0].diagnostic = "E2390"
+json: stdout doc $.rows[?name="Core closure"][0].status = "proven"
+json: stdout doc $.rows[?name="Core closure"][0].diagnostic = "E2391"
+json: stdout doc $.rows[?name="tier lowering"][0].status = "proven"
+json: stdout doc $.rows[?name="tier lowering"][0].diagnostic = "E2392"
+elapsed: cold >= 1us # original ed77c235f tests/project_check.rs:648,684-686 as_micros() > 0
+step warm: jet check --json --verbose
+cwd: {work}/entry_resolution
+env: JET_RECEIPT_DIR={work}/receipts
+unset: JET_RECEIPT_BYPASS
+exit: 0
+json: stdout doc $.contract = "jet.check/v1"
+json: stdout doc $.elapsed_ms : int # original predicate: Dyn::Int
+json: stdout doc $.elapsed_ms >= 0
+json: stdout doc $.rows : array # original predicate
+stderr: ~ "ok: check current" # original predicate
+json: stdout doc $.rows == cold
+elapsed: warm >= 1us # original ed77c235f tests/project_check.rs:653,684-686 as_micros() > 0

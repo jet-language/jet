@@ -244,7 +244,7 @@ pub enum Event {
     DocumentEnd,
 }
 
-/// DataTree-compatible value used by both runtime and comptime adapters.
+/// Dyn-compatible value used by both runtime and comptime adapters.
 /// Keeping the fold here prevents either adapter from inventing a second XML
 /// tree or subtly changing event ordering.
 #[derive(Clone, Debug, PartialEq)]
@@ -884,7 +884,7 @@ fn lexical_value_to_wire(mut value: Value, encoding: WireEncoding) -> Value {
     value
 }
 
-/// Exact public `$xml_event` DataTree projection for a byte-backed stream item.
+/// Exact public `$xml_event` Dyn projection for a byte-backed stream item.
 pub fn stream_event_value(item: StreamEvent) -> Value {
     let encoding = item.encoding;
     let lex = |raw: Vec<u8>, semantic: Value| byte_lexical(raw, semantic);
@@ -4116,7 +4116,7 @@ mod tests {
     #[test]
     fn xml_10_namespaces_closed_tree_algebra_for_parse_surfaces() {
         // Criterion 1 corpus: XML 1.0 Fifth Edition + Namespaces 1.0 into the
-        // closed DataTree algebra across parse / parse_with / parse_bytes.
+        // closed Dyn algebra across parse / parse_with / parse_bytes.
         let source = "<?xml version='1.0' encoding='UTF-8'?>\n<!--prolog-->\n<root xmlns='urn:r' xmlns:p='urn:p' a='1' p:b='2'>text<!--c--><![CDATA[<x>]]><?go now?><p:child/>&amp;tail</root>\n";
         let tree = parse_document(source).expect("parse");
         let with = parse_document_with(source, &ParseOptions::safe()).expect("parse_with");

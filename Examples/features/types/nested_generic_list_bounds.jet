@@ -1,0 +1,21 @@
+// A bounded generic over a list calls another bounded generic with that list:
+// `T` is inferred from `[T]` at every level, for Int, String and Float.
+fn smaller<T: Comparable>(left: T, right: T) -> T { if left < right -> left.copy() else -> right.copy() }
+
+fn smallest<T: Comparable>(values: [T]) -> T {
+    best := values[0].copy()
+    loop value in values { best = smaller(best, value) }
+    best
+}
+
+fn wider<T: Comparable>(first: [T], second: [T]) -> T {
+    low_first :: smallest(first)
+    low_second :: smallest(second)
+    if low_first > low_second -> low_first.copy() else -> low_second.copy()
+}
+
+fn run() {
+    print(wider([4, 2, 9], [7, 3]))
+    print(wider(["pear", "fig"], ["kiwi", "lime"]))
+    print(wider([2.5, 1.5], [0.5]))
+}

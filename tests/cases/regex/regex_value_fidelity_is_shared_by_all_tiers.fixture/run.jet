@@ -1,0 +1,36 @@
+use core.regex as re
+
+fn run() {
+    rx :: Regex{"a"}
+    print(&rx.replace("a-a", "x"))
+    print(rx.replace_first("a-a", "x"))
+
+    print(Regex{""}.replace("abc", "x"))
+    zero_width :: Regex{""}.split("abc")
+    print(zero_width.len())
+    print(zero_width[1])
+    print(zero_width[2])
+    print(zero_width[3])
+    limited_zero_width :: Regex{""}.split_limit("abc", 3)
+    print(limited_zero_width.len())
+    print(limited_zero_width[2])
+
+    unicode_text :: "aé"
+    unicode_zero_width :: Regex{""}.split(unicode_text)
+    print(unicode_zero_width.len())
+    print(unicode_zero_width[1])
+    print(unicode_zero_width[2])
+    print(unicode_zero_width[3] == "")
+
+    m :: Regex{"(é)"}.match(unicode_text)
+    if m == Val(mat) {
+        print(mat.start())
+        print(mat.end())
+        print(mat.group_start(1) ?? -1)
+        print(mat.group_end(1) ?? -1)
+    }
+
+    ascii_parts :: re.split(Regex{"[\t-\r ]+"}, "a\tb\nc d")
+    print(ascii_parts.len())
+    print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
+}

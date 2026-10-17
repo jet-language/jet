@@ -1,4 +1,4 @@
-# Ordered Jetpack/<Area>/Tests sources. Each file declares column-zero `#Test("plain name") { ... }` claims.
+# Ordered Jetpack/<Area>/Tests and shared Compiler/JetFoundation/Tests sources. Each file declares column-zero `#Test("plain name") { ... }` claims.
 # check.sh --tests runs every claim on AOT (`jet test`) and on the default tier (`jet run`) through one
 # generated driver, so both tiers prove the same bodies (I9). Test scope members are not used.
 # Each area appends only under its own section header.
@@ -8,12 +8,16 @@ Jetpack/Foundation/Tests/Terminal.jet
 Jetpack/Foundation/Tests/TreeHashPublication.jet
 Jetpack/Foundation/Tests/NetFetchError.jet
 Jetpack/Foundation/Tests/PublicDestination.jet
+Jetpack/Foundation/Tests/PkgIntegrationAuxiliaryHash.jet
+Jetpack/Foundation/Tests/PkgIntegrationTreeHash.jet
+Jetpack/Foundation/Tests/ReportJSON.jet
 
 # == PackageModel ==
 Jetpack/PackageModel/Tests/Platform.jet
 Jetpack/PackageModel/Tests/RefSpec.jet
 Jetpack/PackageModel/Tests/Merge.jet
 Jetpack/PackageModel/Tests/OverlayPolicy.jet
+Jetpack/PackageModel/Tests/GatePolicy.jet
 Jetpack/PackageModel/Tests/BuildRecipe.jet
 Jetpack/PackageModel/Tests/Variant.jet
 Jetpack/PackageModel/Tests/ProviderSelector.jet
@@ -57,10 +61,27 @@ Jetpack/PackageModel/Tests/EnvelopeOutputHash.jet
 Jetpack/PackageModel/Tests/HangarRoots.jet
 Jetpack/PackageModel/Tests/LintPolicy.jet
 Jetpack/PackageModel/Tests/EffectBudget.jet
-Jetpack/PackageModel/Tests/JetLibStamp.jet
+Compiler/JetFoundation/Tests/Record/JetLib.jet
 Jetpack/PackageModel/Tests/PackageViews.jet
 Jetpack/PackageModel/Tests/EntryCarrier.jet
 Jetpack/PackageModel/Tests/BundleWire.jet
+Jetpack/PackageModel/Tests/AuthorityManifestIntegration.jet
+Jetpack/PackageModel/Tests/Materialize.jet
+Jetpack/PackageModel/Tests/PkgIntegrationBuildStamp.jet
+Jetpack/PackageModel/Tests/PkgIntegrationCffiDeps.jet
+Jetpack/PackageModel/Tests/PkgIntegrationCompleteness.jet
+Jetpack/PackageModel/Tests/PkgIntegrationContentHash.jet
+Jetpack/PackageModel/Tests/PkgIntegrationCppTarget.jet
+Jetpack/PackageModel/Tests/PkgIntegrationFFIRoots.jet
+Jetpack/PackageModel/Tests/PkgIntegrationFingerprint.jet
+Jetpack/PackageModel/Tests/PkgIntegrationManifest.jet
+Jetpack/PackageModel/Tests/PkgIntegrationNixLock.jet
+Jetpack/PackageModel/Tests/PkgIntegrationPolicyScope.jet
+Jetpack/PackageModel/Tests/PkgIntegrationReleasePolicy.jet
+Jetpack/PackageModel/Tests/PkgIntegrationRingLayer.jet
+Jetpack/PackageModel/Tests/PkgIntegrationSemanticProvenance.jet
+Jetpack/PackageModel/Tests/PkgIntegrationWorkspaceRefs.jet
+Jetpack/PackageModel/Tests/SourceStore.jet
 
 # == Publication ==
 Jetpack/Publication/Tests/SemVer.jet
@@ -77,6 +98,11 @@ Jetpack/Publication/Tests/RegistryTrustCache.jet
 Jetpack/Publication/Tests/RegistryOCI.jet
 Jetpack/Publication/Tests/RegistryMetadata.jet
 Jetpack/Publication/Tests/RegistryVerify.jet
+Jetpack/Publication/Tests/Fetch.jet
+Jetpack/Publication/Tests/EnginePolicy.jet
+Jetpack/Publication/Tests/PkgIntegrationHandAdvisorySetup.jet
+Jetpack/Publication/Tests/PkgIntegrationPolicy.jet
+Jetpack/Publication/Tests/PkgIntegrationRegistry.jet
 
 # == EnvModel ==
 Jetpack/EnvModel/Tests/EnvironmentFacts.jet
@@ -84,6 +110,13 @@ Jetpack/EnvModel/Tests/WorkspaceFile.jet
 Jetpack/EnvModel/Tests/ModuleEvalSupport.jet
 Jetpack/EnvModel/Tests/ModuleEvalEnv.jet
 Jetpack/EnvModel/Tests/ModuleEvalImages.jet
+Jetpack/EnvModel/Tests/CommittedImages.jet
+Jetpack/EnvModel/Tests/EngineSourceNames.jet
+Jetpack/EnvModel/Tests/PkgIntegrationFleet.jet
+Jetpack/EnvModel/Tests/PkgIntegrationFleetOverrides.jet
+Jetpack/EnvModel/Tests/PkgIntegrationTypedSecretMap.jet
+Jetpack/EnvModel/Tests/PkgIntegrationWorkspace.jet
+Jetpack/EnvModel/Tests/ShellParity.jet
 
 # == NixEval ==
 Jetpack/NixEval/Tests/NixJson.jet
@@ -101,6 +134,7 @@ Jetpack/Nix/Tests/NixIndex.jet
 
 # == TrustRoot ==
 Jetpack/TrustRoot/Tests/TrustRoot.jet
+Jetpack/TrustRoot/Tests/PkgIntegrationTrustRoot.jet
 
 # == Store ==
 Jetpack/Store/Tests/StoreTestSupport.jet
@@ -132,6 +166,15 @@ Jetpack/Store/Tests/NativeRuntimeCache.jet
 Jetpack/Store/Tests/BuildDebug.jet
 Jetpack/Store/Tests/Archive.jet
 Jetpack/Store/Tests/Cache.jet
+Jetpack/Store/Tests/EngineCacheNar.jet
+Jetpack/Store/Tests/EngineCachePublication.jet
+Jetpack/Store/Tests/EngineIndependentRoots.jet
+Jetpack/Store/Tests/EngineLifecycle.jet
+Jetpack/Store/Tests/EngineTrustReceipts.jet
+Jetpack/Store/Tests/NativeRuntimePack.jet
+Jetpack/Store/Tests/PkgIntegrationConcurrent.jet
+Jetpack/Store/Tests/PkgIntegrationNixCas.jet
+Jetpack/Store/Tests/PkgIntegrationPlatformSetup.jet
 
 # == Trust ==
 Jetpack/Trust/Tests/SemanticLock.jet
@@ -140,6 +183,8 @@ Jetpack/Trust/Tests/SemanticLockStore.jet
 Jetpack/Trust/Tests/TrustGate.jet
 Jetpack/Trust/Tests/JetPin.jet
 Jetpack/Trust/Tests/RepoSecrets.jet
+Jetpack/Trust/Tests/PkgIntegrationGateLaw.jet
+Jetpack/Trust/Tests/PkgIntegrationLock.jet
 
 # == Provider ==
 Jetpack/Provider/Tests/ProviderPlanFacts.jet
@@ -155,6 +200,11 @@ Jetpack/Provider/Tests/RegistryFetch.jet
 Jetpack/Provider/Tests/CranProvider.jet
 Jetpack/Provider/Tests/LuaRocksProvider.jet
 Jetpack/Provider/Tests/ScriptRegistries.jet
+Jetpack/Provider/Tests/EngineConformance.jet
+Jetpack/Provider/Tests/PkgIntegrationGraph.jet
+Jetpack/Provider/Tests/PkgIntegrationProvider.jet
+Jetpack/Provider/Tests/PkgIntegrationReplacement.jet
+Jetpack/Provider/Tests/PkgIntegrationWorkspaceErrors.jet
 
 # == Environment ==
 Jetpack/Environment/Tests/RuntimePolicy.jet
@@ -169,25 +219,30 @@ Jetpack/Environment/Tests/ShellHook.jet
 Jetpack/Environment/Tests/EnvDirectives.jet
 Jetpack/Environment/Tests/FileSync.jet
 Jetpack/Environment/Tests/Transition.jet
+Jetpack/Environment/Tests/PkgIntegrationGateLaw.jet
+Jetpack/Environment/Tests/PkgIntegrationNoDaemon.jet
+Jetpack/Environment/Tests/PkgIntegrationSemanticLock.jet
 
 # == Services ==
 Jetpack/Services/Tests/Services.jet
 
 # == Image ==
 Jetpack/Image/Tests/OciImage.jet
+Jetpack/Image/Tests/JSONUnsupported.jet
 
 # == Recipe ==
 Jetpack/Recipe/Tests/Recipe.jet
 Jetpack/Recipe/Tests/BuildToolchain.jet
 Jetpack/Recipe/Tests/ToolchainUpdate.jet
+Jetpack/Recipe/Tests/BuildSandbox.jet
+Jetpack/Recipe/Tests/BuildSandboxStore.jet
+Jetpack/Recipe/Tests/EngineStagedPlan.jet
+Jetpack/Recipe/Tests/PkgIntegrationHostile.jet
 
 # == JetOS ==
 Jetpack/JetOS/Tests/OptionsRendering.jet
 Jetpack/JetOS/Tests/Identity.jet
 Jetpack/JetOS/Tests/EtcBootFacts.jet
-Jetpack/JetOS/Tests/RootProjection.jet
-Jetpack/JetOS/Tests/SystemFacts.jet
-Jetpack/JetOS/Tests/UserFlatpakPerf.jet
 
 # == CLI ==
 Jetpack/CLI/Tests/MigrationCoverage.jet
@@ -217,3 +272,6 @@ Jetpack/CLI/Tests/ComposeEnv.jet
 Jetpack/CLI/Tests/GenerationMetadata.jet
 Jetpack/CLI/Tests/Tools.jet
 Jetpack/CLI/Tests/Dashboard.jet
+Jetpack/CLI/Tests/EngineImports.jet
+Jetpack/CLI/Tests/PkgIntegrationDogfood.jet
+Jetpack/CLI/Tests/PkgIntegrationImport.jet

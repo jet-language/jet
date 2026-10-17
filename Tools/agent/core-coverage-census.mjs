@@ -100,6 +100,11 @@ function resultType(source, tokens, at, module, localTypes) {
   return localTypes.has(first) && start === at - 1 ? `${module}.${spelling}` : spelling;
 }
 
+// Every declaration is public (D-VIS-MODULE1) except inside a `priv module`:
+// top-level functions, methods of structs, enums and impls, and the members of
+// a public inline module. Function types (`fn(Int) -> Int`), trait signatures
+// and functions local to a body are not inventoried.
+const PRIVATE_SCOPE = { name: null, kind: "priv module" };
 export function publicFunctions(path, source) {
   const module = moduleName(path);
   const tokens = lex(source);
@@ -110,14 +115,19 @@ export function publicFunctions(path, source) {
   let pendingOwner = null;
   for (let i = 0; i < tokens.length; i++) {
     const value = tokens[i].value;
-    if (["struct", "enum", "impl", "trait"].includes(value)) pendingOwner = tokens[i + 1]?.value;
+    if (["struct", "enum", "impl", "trait"].includes(value)) pendingOwner = { name: tokens[i + 1]?.value, kind: value };
+    if (value === "module") {
+      const qualified = tokens[i - 1]?.value === ")" && tokens[i - 4]?.value === "priv";
+      pendingOwner = tokens[i - 1]?.value === "priv" || qualified ? PRIVATE_SCOPE : { name: null, kind: "module" };
+    }
     if (value === "{") { scopes.push(pendingOwner); pendingOwner = null; }
     if (value === "}") scopes.pop();
-    if (value !== "pub" || tokens[i + 1]?.value !== "fn") continue;
-    const name = tokens[i + 2]?.value;
-    if (!identifier.test(name ?? "")) throw new Error(`unreadable public function in ${path}:${lineAt(source, tokens[i].offset)}`);
-    const owner = scopes.at(-1);
-    let at = afterGenerics(tokens, i + 3);
+    if (value !== "fn" || !identifier.test(tokens[i + 1]?.value ?? "") || !["(", "<"].includes(tokens[i + 2]?.value)) continue;
+    const scope = scopes.at(-1);
+    if (scopes.includes(PRIVATE_SCOPE) || (scopes.length > 0 && (!scope || scope.kind === "trait"))) continue;
+    const name = tokens[i + 1].value;
+    const owner = scope?.name;
+    let at = afterGenerics(tokens, i + 2);
     let depth = 0;
     do {
       if (tokens[at]?.value === "(") depth++;

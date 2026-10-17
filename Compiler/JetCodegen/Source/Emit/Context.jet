@@ -1,6 +1,9 @@
 // Jet-owned Rust source emission context. The emitter consumes complete MIR and
 // never asks the Rust compiler to rediscover checked policy.
 use jet_foundation.[
+    name_mangle,
+    CompilerThreads,
+    JET_RUST_DEBUG_ESCAPED_RANGES,
     MIRAccess,
     MIRCompilerBuiltin,
     MIRCoreCall,
@@ -24,6 +27,7 @@ use jet_foundation.[
     MIRTypeDef,
     MIRTypeID,
     MIRWebBucket,
+    MIRValueID,
     MIR_SCHEMA_VERSION,
     Span,
     mir_field_id,
@@ -31,22 +35,26 @@ use jet_foundation.[
     mir_type_same_checked_type,
 ]
 
-pub struct JetRustEmitConfig {
-    pub target: String
-    pub web_bucket: MIRWebBucket?
-    pub root_prefix: String
-    pub emit_types: Bool
-    pub emit_foreign: Bool
-    pub emit_metadata: Bool
+struct JetRustEmitConfig {
+    target: String
+    web_bucket: MIRWebBucket?
+    root_prefix: String
+    emit_types: Bool
+    emit_foreign: Bool
+    emit_metadata: Bool
     // The release devtools policy's local rail: persistent writes report to
     // the live value observer only while it is enabled.
-    pub local_rail: Bool
+    local_rail: Bool
     // JET_KEEP_GOING (jet_rust_emit_program_keep_going): every failure is
     // kept with the function being printed and emission runs to the end.
-    pub keep_going: Bool{false}
+    keep_going: Bool{false}
+    // The compiler threads function printing may use (D-JOBS1): more than
+    // one admitted thread prints the functions in consecutive parts, each on
+    // its own copy of the emission context, joined in program order.
+    threads: CompilerThreads
 }
 
-pub enum JetRustEmitFailureKind {
+enum JetRustEmitFailureKind {
     InvalidSchema
     MissingIdentity
     MissingRow
@@ -57,217 +65,268 @@ pub enum JetRustEmitFailureKind {
     InvalidControlFlow
 }
 
-pub struct JetRustEmitFailure {
-    pub kind: JetRustEmitFailureKind
-    pub code: String
-    pub message: String
-    pub detail: String
-    pub span: Span?
+struct JetRustEmitFailure {
+    kind: JetRustEmitFailureKind
+    code: String
+    message: String
+    detail: String
+    span: Span?
 }
 
 // One emission failure kept under `keep_going`, with the function being
 // printed when it happened (None outside a function body).
-pub struct JetRustEmitKeptFailure {
-    pub failure: JetRustEmitFailure
-    pub function: MIRFunctionID?
+struct JetRustEmitKeptFailure {
+    failure: JetRustEmitFailure
+    function: MIRFunctionID?
 }
 
-pub struct JetRustEmitCallableMetadata {
-    pub function: MIRFunctionID
-    pub source_name: String
-    pub symbol: String
-    pub parameter_types: [String]
-    pub parameter_access: [MIRAccess]
-    pub return_type: String
-    pub callable_type: String
+struct JetRustEmitCallableMetadata {
+    function: MIRFunctionID
+    source_name: String
+    symbol: String
+    parameter_types: [String]
+    parameter_access: [MIRAccess]
+    return_type: String
+    callable_type: String
 }
 
-pub struct JetRustEmitTypeMetadata {
-    pub ty: MIRTypeID
-    pub source_name: String
-    pub symbol: String
+struct JetRustEmitTypeMetadata {
+    ty: MIRTypeID
+    source_name: String
+    symbol: String
 }
 
-pub struct JetRustEmitFieldMetadata {
-    pub field: MIRFieldID
-    pub owner: MIRTypeID
-    pub source_name: String
-    pub symbol: String
+struct JetRustEmitFieldMetadata {
+    field: MIRFieldID
+    owner: MIRTypeID
+    source_name: String
+    symbol: String
 }
 
-pub struct JetRustEmitVariantMetadata {
-    pub owner: MIRTypeID
-    pub source_name: String
-    pub wire_name: String
-    pub symbol: String
-    pub payload_types: [String]
+struct JetRustEmitVariantMetadata {
+    owner: MIRTypeID
+    source_name: String
+    wire_name: String
+    symbol: String
+    payload_types: [String]
 }
 
-pub struct JetRustEmitTraitMetadata {
-    pub trait_id: MIRTraitID
-    pub key: String
-    pub name: String
-    pub symbol: String
+struct JetRustEmitTraitMetadata {
+    trait_id: MIRTraitID
+    key: String
+    name: String
+    symbol: String
 }
 
-pub struct JetRustEmitTraitMethodMetadata {
-    pub trait_id: MIRTraitID
-    pub method_id: MIRTraitMethodID
-    pub key: String
-    pub name: String
-    pub symbol: String
-    pub receiver_access: MIRAccess?
-    pub parameter_types: [String]
-    pub parameter_access: [MIRAccess]
-    pub return_type: String
+struct JetRustEmitTraitMethodMetadata {
+    trait_id: MIRTraitID
+    method_id: MIRTraitMethodID
+    key: String
+    name: String
+    symbol: String
+    receiver_access: MIRAccess?
+    parameter_types: [String]
+    parameter_access: [MIRAccess]
+    return_type: String
 }
 
-pub struct JetRustEmitManifest {
-    pub schema_version: Int
-    pub target: String
-    pub package_identity: String
-    pub type_count: Int
-    pub function_count: Int
-    pub foreign_count: Int
-    pub source_bytes: Int
-    pub function_symbols: [String:String]
-    pub type_symbols: [String:String]
-    pub field_symbols: [String:String]
-    pub variant_symbols: [String:String]
-    pub variant_source_names: [String:String]
-    pub variant_wire_names: [String:String]
-    pub type_metadata: [JetRustEmitTypeMetadata]
-    pub callable_metadata: [JetRustEmitCallableMetadata]
-    pub field_metadata: [JetRustEmitFieldMetadata]
-    pub variant_metadata: [JetRustEmitVariantMetadata]
-    pub traits: [JetRustEmitTraitMetadata]
-    pub trait_methods: [JetRustEmitTraitMethodMetadata]
+struct JetRustEmitManifest {
+    schema_version: Int
+    target: String
+    package_identity: String
+    type_count: Int
+    function_count: Int
+    foreign_count: Int
+    source_bytes: Int
+    function_symbols: [U64:String]
+    type_symbols: [U64:String]
+    field_symbols: [U64:String]
+    variant_symbols: [String:String]
+    variant_source_names: [String:String]
+    variant_wire_names: [String:String]
+    type_metadata: [JetRustEmitTypeMetadata]
+    callable_metadata: [JetRustEmitCallableMetadata]
+    field_metadata: [JetRustEmitFieldMetadata]
+    variant_metadata: [JetRustEmitVariantMetadata]
+    traits: [JetRustEmitTraitMetadata]
+    trait_methods: [JetRustEmitTraitMethodMetadata]
 }
 
-pub enum JetRustEmitResult {
+enum JetRustEmitResult {
     Complete(source: String, manifest: JetRustEmitManifest)
     Incomplete(failure: JetRustEmitFailure)
 }
 
 JET_RUST_EMIT_NO_CYCLE_FLOOR :: 9223372036854775807
 
-pub struct JetRustEmitContext {
-    pub program: MIRProgram
-    pub config: JetRustEmitConfig
-    pub function_names: [String:String]
-    pub type_names: [String:String]
-    pub type_by_name: [String:String]
-    pub trait_names: [String:String]
-    // Trait id keys of declared (not compiler-owned) traits used as a
+struct JetRustEmitContext {
+    program: MIRProgram
+    config: JetRustEmitConfig
+    function_names: [U64:String]
+    type_names: [U64:String]
+    // Zero-sized carriers for record parameters absent from stored fields.
+    record_phantoms: [U64:String]{[U64:String]{}}
+    type_by_name: [String:String]
+    trait_names: [U64:String]
+    // Trait id values of declared (not compiler-owned) traits used as a
     // single-bound trait object `Box<dyn T>`: each gets a clone-box
     // supertrait so the boxed value is Clone (MIRRust dyn_clone_traits).
-    pub dyn_clone_traits: [String:Bool]
-    pub field_names: [String:String]
-    pub variant_names: [String:String]
-    pub variant_source_names: [String:String]
-    pub variant_wire_names: [String:String]
-    pub foreign_names: [String:String]
-    pub failure: JetRustEmitFailure?
-    pub current_function: MIRFunctionID?
-    pub current_generic_params: [MIRGenericParam]
+    dyn_clone_traits: [U64:Bool]
+    field_names: [U64:String]
+    variant_names: [String:String]
+    variant_source_names: [String:String]
+    variant_wire_names: [String:String]
+    foreign_names: [U64:String]
+    failure: JetRustEmitFailure?
+    current_function: MIRFunctionID?
+    current_generic_params: [MIRGenericParam]
+    // Associated type names of the trait whose declaration is being emitted;
+    // inside it they spell `Self::<name>` (MIRRust trait_associated_types).
+    current_associated_types: [String]
     // `"function:param"` keys of list write parameters emitted as `&mut [T]`
     // because a caller fills them with a range write window.
-    pub window_params: [String:Bool]
+    window_params: [String:Bool]
     // Line starts and bytes of every source row, built once for panic,
     // stack-frame and coverage lines (rows looked up by file id).
-    pub source_index: JetCodegenSourceIndex
-    // First index into program.types per id key, canonical key and leaf name.
-    pub type_index_by_id: [String:Int]
-    pub type_index_by_key: [String:Int]
-    pub type_index_by_name: [String:Int]
+    source_index: JetCodegenSourceIndex
+    // First index into program.types per id value, canonical key and leaf name.
+    type_index_by_id: [U64:Int]
+    type_index_by_key: [String:Int]
+    type_index_by_name: [String:Int]
     // Indexes into program.types of every row whose canonical key or leaf
     // name is the spelling, in program order (a row whose key is its name
     // appears once), so constant spellings resolve without a whole-table scan.
-    pub type_rows_by_spelling: [String:[Int]]
-    // Indexes into program.impls of every impl with a trait, per trait id key,
-    // in program order.
-    pub impls_by_trait: [String:[Int]]
+    type_rows_by_spelling: [String:[Int]]
+    // Indexes into program.impls of every impl with a trait, per trait id
+    // value, in program order.
+    impls_by_trait: [U64:[Int]]
     // Indexes into program.impls of every impl with a trait, per trait name
     // (`trait_ref.name`), in program order (MIRRust user_impls_by_trait and
     // selected_trait_impl_for_type select by name).
-    pub impls_by_trait_name: [String:[Int]]
+    impls_by_trait_name: [String:[Int]]
     // Row indexes built once per program so per-instruction and per-type
     // lookups never rescan whole MIR tables: first row per function, foreign
     // and trait id; first and last program.fields row per field id and the
     // rows per owner; first and last type instance per identity; and the
     // key/name spellings of columnar-layout types.
-    pub function_index_by_id: [String:Int]
-    pub foreign_index_by_id: [String:Int]
-    pub trait_index_by_id: [String:Int]
-    pub field_index_by_id: [String:Int]
-    pub field_last_index_by_id: [String:Int]
-    pub field_rows_by_owner: [String:[Int]]
-    pub type_instance_first: [String:Int]
-    pub type_instance_last: [String:Int]
-    pub columnar_type_names: [String:Bool]
+    function_index_by_id: [U64:Int]
+    foreign_index_by_id: [U64:Int]
+    trait_index_by_id: [U64:Int]
+    field_index_by_id: [U64:Int]
+    field_last_index_by_id: [U64:Int]
+    field_rows_by_owner: [U64:[Int]]
+    type_instance_first: [U64:Int]
+    type_instance_last: [U64:Int]
+    columnar_type_names: [String:Bool]
     // First Core route row per id; first and last Prelude route row per id.
-    pub core_call_index_by_id: [String:Int]
-    pub prelude_call_first: [String:Int]
-    pub prelude_call_last: [String:Int]
+    core_call_index_by_id: [U64:Int]
+    prelude_call_first: [U64:Int]
+    prelude_call_last: [U64:Int]
     // Memoized derive-capability answers for closed type rows, keyed
     // "trait:type id" (MIRRust derive_capability_cache).
-    pub derive_capability_cache: [String:Bool]
+    derive_capability_cache: [String:Bool]
     // Lowest `visiting` index a cycle assumption reached in the current
     // derive-capability frame; JET_RUST_EMIT_NO_CYCLE_FLOOR when none.
-    pub derive_capability_cycle_floor: Int
+    derive_capability_cycle_floor: Int
     // Keys ("trait:type id") of closed rows found capable only under a cycle
     // assumption on a frame still open; each is cached once that frame
     // settles capable, and dropped when it settles incapable.
-    pub derive_capability_pending: [String]
-    // Function id keys of impl methods whose free function body is not
+    derive_capability_pending: [String]
+    // Per closed nominal query ("trait|nominal id|identity|name"): its
+    // verdict from the type's own impls and row, read before its fields
+    // expand (jet_rust_emit_derive_capability_gate). Kept only when the
+    // reading reported no failure.
+    derive_capability_gates: [String:Int]
+    // The `core.ui` and `core.ui.host` type exports that spell a Prelude
+    // `Jet*` carrier (jet_rust_emit_core_ui_type_names).
+    core_ui_type_names: [String:Bool]
+    // Function id values of impl methods whose free function body is not
     // emitted: printed natively inside their impl (derived Equatable and
     // Comparable) or owned by an undemanded derived codec impl
     // (mir_demanded_codec_impls).
-    pub skipped_methods: [String:Bool]
+    skipped_methods: [U64:Bool]
     // D-MEM-COPYSEM1 move facts of the function being printed
     // (jet_rust_emit_move_facts): values read once in their own block, and
     // moved enum subjects whose payload bindings take them apart once.
-    pub move_facts: JetRustEmitMoveFacts
+    move_facts: JetRustEmitMoveFacts
     // #4318 reference bindings of the function being printed
     // (jet_rust_emit_ref_bindings): binding locals held as `Option<&T>`.
-    pub ref_bindings: JetRustEmitRefBindings
+    ref_bindings: JetRustEmitRefBindings
     // Lookup rows of the function being printed (jet_rust_emit_body_index).
-    pub body_index: JetRustEmitBodyIndex
-    pub expected_test_exits: [U64:U64]
+    body_index: JetRustEmitBodyIndex
+    expected_test_exits: [U64:U64]
     // Ratio-use classification of the last queried function; rebuilt when
     // its function id changes (jet_rust_emit_is_unit_ratio_parameter).
-    pub unit_ratio_function: MIRFunctionID?
-    pub unit_ratio_parameters: [U64:Bool]
-    // Module id keys of the selected artifact plan (MIRRust module_selected),
+    unit_ratio_function: MIRFunctionID?
+    unit_ratio_parameters: [U64:Bool]
+    // Module id values of the selected artifact plan (MIRRust module_selected),
     // set by jet_rust_emit_program; every module is selected without a plan.
-    pub selected_modules: [String:Bool]
-    pub all_modules_selected: Bool
+    selected_modules: [U64:Bool]
+    all_modules_selected: Bool
     // Every failure, in order, under `config.keep_going`.
-    pub kept_failures: [JetRustEmitKeptFailure]{[JetRustEmitKeptFailure]{}}
+    kept_failures: [JetRustEmitKeptFailure]{[JetRustEmitKeptFailure]{}}
     // D-MEM-VIEWRET1 (#4392), MIRRust view_lifetime: the lifetime a View/ViewMut
     // carrier names while a callable signature renders its returned views and
     // their owners; "" renders the elided `&[T]` used everywhere else.
-    pub view_lifetime: String{""}
+    view_lifetime: String{""}
     // MIRRust view_carriers: the names and keys of declared types whose Rust
     // declaration takes the `'__jet_view` lifetime parameter.
-    pub view_carriers: [String:Bool]{[String:Bool]{}}
+    view_carriers: [String:Bool]{[String:Bool]{}}
+    // MIRRust plain_drop_types: the names and keys (mapped to `true`) of rows
+    // whose values own nothing but memory, so their slots may be declared at
+    // their definition (jet_rust_emit_collect_plain_drop_types).
+    plain_drop_types: [String:Bool]{[String:Bool]{}}
+    // Generic parameter names, per function id key, whose Rust bound needs
+    // `Clone` (jet_rust_emit_collect_clone_bounds).
+    clone_bounds: [String:[String]]{[String:[String]]{}}
 }
 
-pub struct JetRustEmitPayloadMember {
-    pub field: Int
-    pub result: MIRValueID
+struct JetRustEmitPayloadMember {
+    field: Int
+    result: MIRValueID
 }
 
-pub struct JetRustEmitMoveFacts {
-    pub single_use: [String:Bool]
+struct JetRustEmitMoveFacts {
+    single_use: [String:Bool]
     // Subject id key -> its payload bindings in block order.
-    pub payload_groups: [String:[JetRustEmitPayloadMember]]
+    payload_groups: [String:[JetRustEmitPayloadMember]]
     // Payload result id key -> its group's subject id key.
-    pub payload_subjects: [String:String]
+    payload_subjects: [String:String]
+    // #4566 in-place append (jet_rust_emit_plan_string_appends):
+    // concatenation result id key -> the place it appends to and the
+    // appended operand.
+    appends: [String:JetRustEmitStringAppend]
+    // The read and concatenation result id keys those appends replace; they
+    // emit nothing.
+    append_parts: [String:Bool]
+    // Literal-only strings read only as the right operand of a String
+    // concatenation or append: id key -> literal text, spelled in place as
+    // a static `&str`.
+    static_literals: [String:String]
+    // `place = ""` on an always-initialized String place (a write parameter
+    // or a field of a local): empty literal id key -> the place. The write
+    // empties the place and keeps its buffer.
+    clears: [String:MIRPlaceID]
+    // #4566 loop capacity hints (jet_rust_emit_plan_loop_reserves):
+    // "block:index" of the preheader instruction they follow -> the hints.
+    loop_reserves: [String:[JetRustEmitLoopReserve]]
+}
+
+struct JetRustEmitStringAppend {
+    place: MIRPlaceID
+    text: MIRValueID
+}
+
+// MIRRust LoopReserve: the list place and its trip count source, a range
+// cursor's remaining trips or a constant trip count.
+struct JetRustEmitLoopReserve {
+    list: MIRPlaceID
+    cursor: MIRValueID?
+    trips: Int
 }
 
 fn jet_rust_emit_empty_move_facts() -> JetRustEmitMoveFacts Never! {
-    JetRustEmitMoveFacts{single_use: [String:Bool]{}, payload_groups: [String:[JetRustEmitPayloadMember]]{}, payload_subjects: [String:String]{}}
+    JetRustEmitMoveFacts{single_use: [String:Bool]{}, payload_groups: [String:[JetRustEmitPayloadMember]]{}, payload_subjects: [String:String]{}, appends: [String:JetRustEmitStringAppend]{}, append_parts: [String:Bool]{}, static_literals: [String:String]{}, clears: [String:MIRPlaceID]{}, loop_reserves: [String:[JetRustEmitLoopReserve]]{}}
 }
 
 // MIRRust RefBindings (#4318): binding locals stored as a shared reference to
@@ -275,16 +334,17 @@ fn jet_rust_emit_empty_move_facts() -> JetRustEmitMoveFacts Never! {
 // binds one of them (their write borrows in place; they have no slot). Read
 // loops that walk their list in place map their cursor to the walked list
 // place; the collection values they walk have no slot.
-pub struct JetRustEmitRefBindings {
-    pub locals: [U64:Bool]
-    pub payloads: [U64:Bool]
-    pub cursors: [U64:MIRPlaceID]{[U64:MIRPlaceID]{}}
-    pub collections: [U64:Bool]{[U64:Bool]{}}
+struct JetRustEmitRefBindings {
+    locals: [U64:Bool]
+    payloads: [U64:Bool]
+    cursors: [U64:MIRPlaceID]{[U64:MIRPlaceID]{}}
+    collections: [U64:Bool]{[U64:Bool]{}}
 }
 
 fn jet_rust_emit_empty_ref_bindings() -> JetRustEmitRefBindings Never! {
     JetRustEmitRefBindings{locals: [U64:Bool]{}, payloads: [U64:Bool]{}}
 }
+
 
 // MIRRust borrowed_loop_candidates: one read loop that may walk its list in
 // place: its cursor, the collection it walks, the list place, and the
@@ -306,92 +366,97 @@ struct JetRustEmitRefSource {
 // Lookup rows of one function body (MIRRust FunctionIndex), keyed by id
 // value; the first row per id wins, as a linear scan would. Per-value
 // queries read them instead of rescanning the body.
-pub struct JetRustEmitBodyIndex {
+struct JetRustEmitBodyIndex {
     // The indexed function; None before any function is printed.
-    pub function: MIRFunctionID?
+    function: MIRFunctionID?
     // Block and instruction position of each value's definition.
-    pub definition_blocks: [U64:Int]
-    pub definition_positions: [U64:Int]
+    definition_blocks: [U64:Int]
+    definition_positions: [U64:Int]
     // Position of each value's function.values row.
-    pub value_rows: [U64:Int]
+    value_rows: [U64:Int]
     // Position of each block, and the coverage branch ordinals before it.
-    pub block_positions: [U64:Int]
-    pub branch_bases: [U64:Int]
+    block_positions: [U64:Int]
+    branch_bases: [U64:Int]
+    // FIRST Capture result per slot, and roots of actual checked Move places.
+    capture_values: [Int:MIRValueID]{[Int:MIRValueID]{}}
+    moved_captures: [U64:Bool]{[U64:Bool]{}}
     // MIRRust shared_capture_locals: locals held in one shared cell because a
     // non-Send closure writes them (jet_rust_emit_shared_capture_locals).
-    pub shared_locals: [U64:Bool]
+    shared_locals: [U64:Bool]
+    // SSA-bound locals name the existing value slot, including partial moves.
+    bound_local_values: [U64:MIRValueID]{[U64:MIRValueID]{}}
     // Every use of each value in body order, one row per user (MIRRust
     // FunctionIndex::uses): `use_slots` maps a value to its row list.
-    pub use_slots: [U64:Int]{[U64:Int]{}}
-    pub uses: [[JetRustEmitUse]]{[[JetRustEmitUse]]{}}
+    use_slots: [U64:Int]{[U64:Int]{}}
+    uses: [[JetRustEmitUse]]{[[JetRustEmitUse]]{}}
     // Position of each place's function.places row.
-    pub place_rows: [U64:Int]{[U64:Int]{}}
+    place_rows: [U64:Int]{[U64:Int]{}}
     // Predecessor block positions of each block, along terminator edges.
-    pub predecessors: [[Int]]{[[Int]]{}}
+    predecessors: [[Int]]{[[Int]]{}}
     // MIRRust local_writes / escaped_locals: per local, the instructions
     // that may change or release it, and the locals place-based tracking
     // cannot follow.
-    pub write_slots: [U64:Int]{[U64:Int]{}}
-    pub local_writes: [[JetRustEmitUse]]{[[JetRustEmitUse]]{}}
-    pub escaped_locals: [U64:Bool]{[U64:Bool]{}}
+    write_slots: [U64:Int]{[U64:Int]{}}
+    local_writes: [[JetRustEmitUse]]{[[JetRustEmitUse]]{}}
+    escaped_locals: [U64:Bool]{[U64:Bool]{}}
     // MIRRust parameter_writes / escaped_parameters: per parameter index, the
     // instructions that may change one of its places, with the place each
     // changes, and the parameters place-based tracking cannot follow or a
     // drop action releases a place of.
-    pub parameter_write_slots: [Int:Int]{[Int:Int]{}}
-    pub parameter_writes: [[JetRustEmitPlaceWrite]]{[[JetRustEmitPlaceWrite]]{}}
-    pub escaped_parameters: [Int:Bool]{[Int:Bool]{}}
+    parameter_write_slots: [Int:Int]{[Int:Int]{}}
+    parameter_writes: [[JetRustEmitPlaceWrite]]{[[JetRustEmitPlaceWrite]]{}}
+    escaped_parameters: [Int:Bool]{[Int:Bool]{}}
     // Temporary values whose own slot some instruction reads through a
     // projecting place (jet_rust_emit_inspected_only).
-    pub slot_read_values: [U64:Bool]{[U64:Bool]{}}
+    slot_read_values: [U64:Bool]{[U64:Bool]{}}
     // Places some instruction moves out of (MovePlace or a Move address).
-    pub moved_places: [U64:Bool]{[U64:Bool]{}}
+    moved_places: [U64:Bool]{[U64:Bool]{}}
     // Partial moves per root place base (jet_rust_emit_place_base_identity):
     // the field path of each move of a field place, in body order.
-    pub partial_slots: [String:Int]{[String:Int]{}}
-    pub partial_paths: [[[MIRFieldID]]]{[[[MIRFieldID]]]{}}
+    partial_slots: [String:Int]{[String:Int]{}}
+    partial_paths: [[[MIRFieldID]]]{[[[MIRFieldID]]]{}}
     // MIRRust FunctionIndex::stable_reads: jet_rust_emit_stable_local_read
     // answers per read value, computed on first query.
-    pub stable_reads: [U64:Bool]{[U64:Bool]{}}
+    stable_reads: [U64:Bool]{[U64:Bool]{}}
     // MIRRust FunctionIndex scopes / test_members: the position of each
     // scope's function.scopes row, and the block and instruction position of
     // the first ScopeEnter of each scope that carries a test member.
-    pub scope_rows: [U64:Int]{[U64:Int]{}}
-    pub test_member_blocks: [U64:Int]{[U64:Int]{}}
-    pub test_member_positions: [U64:Int]{[U64:Int]{}}
+    scope_rows: [U64:Int]{[U64:Int]{}}
+    test_member_blocks: [U64:Int]{[U64:Int]{}}
+    test_member_positions: [U64:Int]{[U64:Int]{}}
     // MIRRust history_binding: the borrowed Parameter/Capture results whose
     // users read the retained place itself (jet_rust_emit_place_bindings),
     // and the reads of a read parameter's place that only feed borrows
     // (MIRRust direct_borrow_only, jet_rust_emit_read_bindings).
-    pub bindings: [U64:JetRustEmitPlaceBinding]{[U64:JetRustEmitPlaceBinding]{}}
+    bindings: [U64:JetRustEmitPlaceBinding]{[U64:JetRustEmitPlaceBinding]{}}
 }
 
 // A value that names a place instead of holding a copy: the place a shared
 // borrow names, the place a unique borrow names (a Write Parameter/Capture
 // binding only), and whether its Rust carrier is `Copy` (an owned read is
 // then bitwise, else a clone).
-pub struct JetRustEmitPlaceBinding {
-    pub read: String
-    pub write: String?
-    pub bitwise: Bool
+struct JetRustEmitPlaceBinding {
+    read: String
+    write: String?
+    bitwise: Bool
 }
 
 // One use of a value: its block position and instruction position, or -1
 // for the block's terminator.
-pub struct JetRustEmitUse {
-    pub block: Int
-    pub instruction: Int
+struct JetRustEmitUse {
+    block: Int
+    instruction: Int
 }
 
 // One instruction that may change a parameter place, and that place.
-pub struct JetRustEmitPlaceWrite {
-    pub block: Int
-    pub instruction: Int
-    pub place: MIRPlaceID
+struct JetRustEmitPlaceWrite {
+    block: Int
+    instruction: Int
+    place: MIRPlaceID
 }
 
 fn jet_rust_emit_empty_body_index() -> JetRustEmitBodyIndex Never! {
-    JetRustEmitBodyIndex{function: None, definition_blocks: [U64:Int]{}, definition_positions: [U64:Int]{}, value_rows: [U64:Int]{}, block_positions: [U64:Int]{}, branch_bases: [U64:Int]{}, shared_locals: [U64:Bool]{}}
+    JetRustEmitBodyIndex{function: None, definition_blocks: [U64:Int]{}, definition_positions: [U64:Int]{}, value_rows: [U64:Int]{}, block_positions: [U64:Int]{}, branch_bases: [U64:Int]{}, capture_values: [Int:MIRValueID]{}, moved_captures: [U64:Bool]{}, shared_locals: [U64:Bool]{}}
 }
 
 fn jet_rust_emit_merge_generic_params(outer: [MIRGenericParam], inner: [MIRGenericParam]) -> [MIRGenericParam] Never! {
@@ -427,18 +492,11 @@ fn jet_rust_emit_sanitize(value: String) -> String Never! {
     if first >= (U8{48}) && first <= (U8{57}) -> "_{result}" else -> result
 }
 
-// Names::mangle: the Rust identifier of one Jet name. A comptime `$name`
-// becomes `ct_name`; every name takes the single `__jet_` machine prefix.
-fn jet_rust_emit_mangle(name: String) -> String Never! {
-    bytes :: name.bytes()
-    plain :: if name.starts_with("$") -> "ct_{String.from_bytes(~(bytes[1..<bytes.len()])) ?? ""}" else -> name
-    if plain.starts_with("__jet_") -> plain else -> "__jet_{plain}"
-}
 
 // MIRRust mangle_variant: a grouped leaf keeps its dotted identity through the
 // path encoding (`__jet_Net_dPing`); a flat variant takes the plain mangle.
 fn jet_rust_emit_mangle_variant(name: String) -> String Never! {
-    if name.contains(".") -> jet_rust_emit_generated_path(name) else -> jet_rust_emit_mangle(name)
+    if name.contains(".") -> jet_rust_emit_generated_path(name) else -> name_mangle(name)
 }
 
 fn jet_rust_emit_hex(value: Int) -> String Never! {
@@ -461,7 +519,7 @@ fn jet_rust_emit_hex(value: Int) -> String Never! {
 
 // Rust `char::escape_debug`: whether `{:?}` escapes a non-ASCII scalar.
 fn jet_rust_emit_debug_escaped(code: Int) -> Bool Never! {
-    ranges :: JET_RUST_EMIT_DEBUG_ESCAPED_RANGES
+    ranges :: JET_RUST_DEBUG_ESCAPED_RANGES
     low := 0
     high := ranges.len() /% 2
     loop low < high {
@@ -562,24 +620,24 @@ fn jet_rust_emit_fail(ctx: &JetRustEmitContext, kind: JetRustEmitFailureKind, co
 // ` in `<function key>`` for the function being printed, else empty.
 fn jet_rust_emit_current_function_label(ctx: JetRustEmitContext) -> String Never! {
     id :: ctx.current_function ?? return ""
-    index :: ctx.function_index_by_id.get(jet_rust_emit_id_key(id.value)) ?? return ""
+    index :: ctx.function_index_by_id.get(id.value) ?? return ""
     " in `{ctx.program.functions[index].key}`"
 }
 
 fn jet_rust_emit_function_name(ctx: &JetRustEmitContext, id: MIRFunctionID) -> String Never! {
-    if ctx.function_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
+    if ctx.function_names.get(id.value) == .Val(name) -> return name
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR function identity is missing from the emitter registry", "checked callees must resolve to one canonical source-emission symbol", None)
     "__jet_missing_function_{id.value}"
 }
 
 fn jet_rust_emit_type_name(ctx: &JetRustEmitContext, id: MIRTypeID) -> String Never! {
-    if ctx.type_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
+    if ctx.type_names.get(id.value) == .Val(name) -> return name
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR type identity is missing from the emitter registry", "checked nominal references must resolve to one canonical source-emission symbol", None)
     "__jet_missing_type_{id.value}"
 }
 
 fn jet_rust_emit_trait_name(ctx: &JetRustEmitContext, id: MIRTraitID) -> String Never! {
-    if ctx.trait_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
+    if ctx.trait_names.get(id.value) == .Val(name) -> return name
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR trait identity is missing from the emitter registry", "checked trait bounds must resolve to one canonical source-emission symbol", None)
     "__jet_missing_trait_{id.value}"
 }
@@ -590,7 +648,7 @@ fn jet_rust_emit_collect_dyn_clone_traits(ctx: &JetRustEmitContext, ty: MIRType)
     if ty.kind == {
         .TraitObject(bounds) -> {
             if bounds.len() != 1 -> return
-            key :: jet_rust_emit_id_key(bounds[0].id.value)
+            key :: bounds[0].id.value
             index :: ctx.trait_index_by_id.get(key) ?? return
             row :: ctx.program.traits[index]
             if jet_rust_emit_compiler_owned_trait(row.name) || jet_rust_emit_compiler_owned_trait(row.key) -> return
@@ -616,15 +674,15 @@ fn jet_rust_emit_collect_dyn_clone_traits(ctx: &JetRustEmitContext, ty: MIRType)
 }
 
 fn jet_rust_emit_field_name(ctx: &JetRustEmitContext, id: MIRFieldID) -> String Never! {
-    if ctx.field_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
+    if ctx.field_names.get(id.value) == .Val(name) -> return name
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR field identity is missing from the emitter registry", "checked field projections must resolve to one canonical source-emission symbol", None)
     "__jet_missing_field_{id.value}"
 }
 
 // MIRRust collect_type_fields: a native carrier keeps the Prelude field name.
 fn jet_rust_emit_register_field(ctx: &JetRustEmitContext, id: MIRFieldID, raw: String, native: Bool, span: Span) Never! {
-    key :: jet_rust_emit_id_key(id.value)
-    symbol :: if native -> raw else -> jet_rust_emit_mangle(raw)
+    key :: id.value
+    symbol :: if native -> raw else -> name_mangle(raw)
     prior :: ctx.field_names.get(key)
     if prior == .Val(existing) {
         if existing != symbol -> jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR field identity maps to conflicting symbols", "each checked field ID must retain one canonical source-emission name", Val(span))
@@ -650,7 +708,7 @@ fn jet_rust_emit_variant_name(ctx: &JetRustEmitContext, type_id: MIRTypeID, vari
 // mangle (MIRRust constant / typed_enum_constant).
 fn jet_rust_emit_variant_symbol(ctx: &JetRustEmitContext, definition: MIRTypeDef?, type_name: String, variant: String) -> String Never! {
     if definition == .Val(row) -> return "{jet_rust_emit_type_name(&ctx, row.id)}::{jet_rust_emit_variant_name(&ctx, row.id, variant)}"
-    native :: jet_rust_emit_has_native_type_projection(type_name)
+    native :: jet_rust_emit_has_native_type_projection(ctx, type_name)
     "{jet_rust_emit_named_type(&ctx, type_name)}::{if native -> variant else -> jet_rust_emit_mangle_variant(variant)}"
 }
 
@@ -668,7 +726,7 @@ fn jet_rust_emit_same_handle_type(left: MIRType, right: MIRType) -> Bool Never! 
 }
 
 fn jet_rust_emit_foreign_name(ctx: &JetRustEmitContext, id: MIRForeignID) -> String Never! {
-    if ctx.foreign_names.get(jet_rust_emit_id_key(id.value)) == .Val(name) -> return name
+    if ctx.foreign_names.get(id.value) == .Val(name) -> return name
     jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR foreign identity is missing from the emitter registry", "checked foreign calls must resolve to one canonical source-emission symbol", None)
     "__jet_missing_foreign_{id.value}"
 }
@@ -682,8 +740,8 @@ fn jet_rust_emit_foreign_name(ctx: &JetRustEmitContext, id: MIRForeignID) -> Str
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::collect_window_params
 fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Never! {
     // Last row per function id, matching the scan this index replaces.
-    function_index := [String:Int]{}
-    loop (index, function) in program.functions -> function_index[jet_rust_emit_id_key(function.id.value)] = index
+    function_index := [U64:Int]{}
+    loop (index, function) in program.functions -> function_index[function.id.value] = index
     // One walk records each list write parameter a caller fills with a range
     // window (a seed) and each one it fills with its own parameter (an edge
     // from that caller parameter). The windows are the seeds and everything
@@ -697,8 +755,8 @@ fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Nev
         // Built on the first write argument this function passes: first
         // place row per id, and the parameter index of each value whose
         // first producer is a `Parameter` (-1 otherwise).
-        place_rows := [String:Int]{}
-        parameter_values := [String:Int]{}
+        place_rows := [U64:Int]{}
+        parameter_values := [U64:Int]{}
         indexed := false
         loop block in function.blocks {
             loop instruction in block.instructions {
@@ -709,19 +767,19 @@ fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Nev
                         else -> {}
                     }
                     target_id :: target ?? next
-                    callee_index :: function_index.get(jet_rust_emit_id_key(target_id.value)) ?? next
+                    callee_index :: function_index.get(target_id.value) ?? next
                     loop (position, arg) in args {
                         if arg.access != MIRAccess.Write || position >= program.functions[callee_index].params.len() -> next
                         place_id :: arg.place ?? next
                         if !indexed {
                             loop (index, place) in function.places {
-                                key :: jet_rust_emit_id_key(place.id.value)
+                                key :: place.id.value
                                 if place_rows.get(key) == None -> place_rows[key] = index
                             }
                             loop scan_block in function.blocks {
                                 loop scan in scan_block.instructions {
                                     result :: scan.result ?? next
-                                    key :: jet_rust_emit_id_key(result.value)
+                                    key :: result.value
                                     if parameter_values.get(key) != None -> next
                                     parameter_values[key] = if scan.operation == {
                                         .Parameter(index, _) -> index
@@ -738,7 +796,7 @@ fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Nev
                         }
                         if !list_param -> next
                         key :: "{target_id.value}:{param.index}"
-                        place_index :: place_rows.get(jet_rust_emit_id_key(place_id.value)) ?? next
+                        place_index :: place_rows.get(place_id.value) ?? next
                         place :: function.places[place_index]
                         if place.projections.len() > 0 {
                             if place.projections[place.projections.len() - 1] == .Range(_, _, _) {
@@ -750,7 +808,7 @@ fn jet_rust_emit_collect_window_params(program: MIRProgram) -> [String:Bool] Nev
                         }
                         if place.projections.len() == 0 {
                             if place.base == .Parameter(value) {
-                                if parameter_values.get(jet_rust_emit_id_key(value.value)) == .Val(index) {
+                                if parameter_values.get(value.value) == .Val(index) {
                                     if index >= 0 {
                                         source :: "{function.id.value}:{index}"
                                         slot := forward_slots.get(source) ?? -1
@@ -790,32 +848,32 @@ fn jet_rust_emit_window_param(ctx: JetRustEmitContext, function: MIRFunctionID, 
 
 // The first function row with this id (ids are unique once the context is built).
 fn jet_rust_emit_function_index(ctx: JetRustEmitContext, id: MIRFunctionID) -> Int? {
-    ctx.function_index_by_id.get(jet_rust_emit_id_key(id.value))
+    ctx.function_index_by_id.get(id.value)
 }
 
 fn jet_rust_emit_foreign_index(ctx: JetRustEmitContext, id: MIRForeignID) -> Int? {
-    ctx.foreign_index_by_id.get(jet_rust_emit_id_key(id.value))
+    ctx.foreign_index_by_id.get(id.value)
 }
 
 fn jet_rust_emit_trait_index(ctx: JetRustEmitContext, id: MIRTraitID) -> Int? {
-    ctx.trait_index_by_id.get(jet_rust_emit_id_key(id.value))
+    ctx.trait_index_by_id.get(id.value)
 }
 
 // First (`first`) or last type-instance row whose identity is `id`.
 fn jet_rust_emit_type_instance(ctx: JetRustEmitContext, id: MIRTypeID, first: Bool) -> MIRType? {
-    key :: jet_rust_emit_id_key(id.value)
+    key :: id.value
     found :: if first -> ctx.type_instance_first.get(key) else -> ctx.type_instance_last.get(key)
     index :: found ?? return None
     Val(ctx.program.type_instances[index])
 }
 
 fn jet_rust_emit_core_index(ctx: JetRustEmitContext, id: MIRCoreCallID) -> Int? {
-    ctx.core_call_index_by_id.get(jet_rust_emit_id_key(id.value))
+    ctx.core_call_index_by_id.get(id.value)
 }
 
 // First (`first`) or last Prelude route row with this id.
 fn jet_rust_emit_prelude_route(ctx: JetRustEmitContext, id: MIRPreludeCallID, first: Bool) -> MIRPreludeCall? {
-    key :: jet_rust_emit_id_key(id.value)
+    key :: id.value
     found :: if first -> ctx.prelude_call_first.get(key) else -> ctx.prelude_call_last.get(key)
     index :: found ?? return None
     Val(ctx.program.prelude_calls[index])
@@ -843,12 +901,12 @@ fn jet_rust_emit_trait_rows(ctx: JetRustEmitContext, id: MIRTraitID) -> [MIRTrai
 
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::new
 fn jet_rust_emit_type_index(ctx: JetRustEmitContext, id: MIRTypeID) -> Int? {
-    ctx.type_index_by_id.get(jet_rust_emit_id_key(id.value))
+    ctx.type_index_by_id.get(id.value)
 }
 
 // program.fields rows with this id, first to last.
 fn jet_rust_emit_field_rows(ctx: JetRustEmitContext, id: MIRFieldID) -> [MIRFieldRow] Never! {
-    key :: jet_rust_emit_id_key(id.value)
+    key :: id.value
     first :: ctx.field_index_by_id.get(key) ?? return [MIRFieldRow]{}
     last :: ctx.field_last_index_by_id.get(key) ?? first
     if first == last -> return [MIRFieldRow]{ctx.program.fields[first]}
@@ -868,7 +926,7 @@ fn jet_rust_emit_source_row(ctx: JetRustEmitContext, id: MIRSourceFileID) -> Int
 // MIRRust is_compiler_owned_trait: traits whose Rust spelling the cached
 // runtime declares once; program trait rows only name them.
 fn jet_rust_emit_compiler_owned_trait(name: String) -> Bool Never! {
-    owned :: [String]{"Encode", "Decode", "Display", "Debug", "Equatable", "Comparable", "Close", "Index", "IndexMut", "Iterable", "Iterator", "Add", "Sub", "Mul", "Div", "Rollback"}
+    owned :: [String]{"Encode", "Decode", "Printable", "Display", "Debug", "Equatable", "Comparable", "Close", "Index", "IndexMut", "Iterable", "Iterator", "Add", "Sub", "Mul", "Div", "Rollback"}
     owned.contains(name)
 }
 
@@ -889,7 +947,7 @@ fn jet_rust_emit_compiler_trait_symbol(name: String) -> String Never! {
         name == "Div" -> "__jet_Div"
         name == "Index" -> "__jet_Index"
         name == "IndexMut" -> "__jet_IndexMut"
-        else -> jet_rust_emit_mangle(name)
+        else -> name_mangle(name)
     }
 }
 
@@ -898,19 +956,19 @@ fn jet_rust_emit_compiler_trait_symbol(name: String) -> String Never! {
 // during item traversal or metadata collection.
 // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs::new
 fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetRustEmitContext Never! {
-    functions := [String:String]{}
-    types := [String:String]{}
+    functions := [U64:String]{}
+    types := [U64:String]{}
     type_by_name := [String:String]{}
-    traits := [String:String]{}
-    fields := [String:String]{}
+    traits := [U64:String]{}
+    fields := [U64:String]{}
     variants := [String:String]{}
     variant_source_names := [String:String]{}
     variant_wire_names := [String:String]{}
-    foreigns := [String:String]{}
+    foreigns := [U64:String]{}
     // First-row indexes of program.types and the selected-trait impl rows, so
     // per-type derive queries do not rescan every row (MIRRust type_def_by_* /
     // impls_by_trait).
-    type_index_by_id := [String:Int]{}
+    type_index_by_id := [U64:Int]{}
     type_index_by_key := [String:Int]{}
     type_index_by_name := [String:Int]{}
     columnar_type_names := [String:Bool]{}
@@ -918,8 +976,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     spelling_keys := [String]{}
     spelling_rows := [[Int]]{}
     loop (index, definition) in program.types {
-        id_key :: jet_rust_emit_id_key(definition.id.value)
-        if type_index_by_id.get(id_key) == None -> type_index_by_id[id_key] = index
+        if type_index_by_id.get(definition.id.value) == None -> type_index_by_id[definition.id.value] = index
         if type_index_by_key.get(definition.key) == None -> type_index_by_key[definition.key] = index
         if type_index_by_name.get(definition.name) == None -> type_index_by_name[definition.name] = index
         spellings := [String]{definition.key}
@@ -946,32 +1003,29 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     }
     type_rows_by_spelling := [String:[Int]]{}
     loop slot in 0..<spelling_rows.len() -> type_rows_by_spelling[spelling_keys[slot]] = spelling_rows[slot]
-    function_index_by_id := [String:Int]{}
+    function_index_by_id := [U64:Int]{}
     loop (index, function) in program.functions {
-        key :: jet_rust_emit_id_key(function.id.value)
-        if function_index_by_id.get(key) == None -> function_index_by_id[key] = index
+        if function_index_by_id.get(function.id.value) == None -> function_index_by_id[function.id.value] = index
     }
-    foreign_index_by_id := [String:Int]{}
+    foreign_index_by_id := [U64:Int]{}
     loop (index, foreign) in program.foreign {
-        key :: jet_rust_emit_id_key(foreign.id.value)
-        if foreign_index_by_id.get(key) == None -> foreign_index_by_id[key] = index
+        if foreign_index_by_id.get(foreign.id.value) == None -> foreign_index_by_id[foreign.id.value] = index
     }
-    trait_index_by_id := [String:Int]{}
+    trait_index_by_id := [U64:Int]{}
     loop (index, trait_row) in program.traits {
-        key :: jet_rust_emit_id_key(trait_row.id.value)
-        if trait_index_by_id.get(key) == None -> trait_index_by_id[key] = index
+        if trait_index_by_id.get(trait_row.id.value) == None -> trait_index_by_id[trait_row.id.value] = index
     }
-    field_index_by_id := [String:Int]{}
-    field_last_index_by_id := [String:Int]{}
-    field_rows_by_owner := [String:[Int]]{}
-    field_owner_slots := [String:Int]{}
-    field_owner_keys := [String]{}
+    field_index_by_id := [U64:Int]{}
+    field_last_index_by_id := [U64:Int]{}
+    field_rows_by_owner := [U64:[Int]]{}
+    field_owner_slots := [U64:Int]{}
+    field_owner_keys := [U64]{}
     field_owner_rows := [[Int]]{}
     loop (index, row) in program.fields {
-        key :: jet_rust_emit_id_key(row.id.value)
+        key :: row.id.value
         if field_index_by_id.get(key) == None -> field_index_by_id[key] = index
         field_last_index_by_id[key] = index
-        owner_key :: jet_rust_emit_id_key(row.owner.value)
+        owner_key :: row.owner.value
         slot := field_owner_slots.get(owner_key) ?? -1
         if slot < 0 {
             slot = field_owner_rows.len()
@@ -982,29 +1036,29 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         &field_owner_rows[slot].push(index)
     }
     loop slot in 0..<field_owner_rows.len() -> field_rows_by_owner[field_owner_keys[slot]] = field_owner_rows[slot]
-    type_instance_first := [String:Int]{}
-    type_instance_last := [String:Int]{}
+    type_instance_first := [U64:Int]{}
+    type_instance_last := [U64:Int]{}
     loop (index, instance) in program.type_instances {
         identity :: instance.identity ?? next
-        key :: jet_rust_emit_id_key(identity.value)
+        key :: identity.value
         if type_instance_first.get(key) == None -> type_instance_first[key] = index
         type_instance_last[key] = index
     }
-    core_call_index_by_id := [String:Int]{}
+    core_call_index_by_id := [U64:Int]{}
     loop (index, row) in program.core_calls {
-        key :: jet_rust_emit_id_key(row.id.value)
+        key :: row.id.value
         if core_call_index_by_id.get(key) == None -> core_call_index_by_id[key] = index
     }
-    prelude_call_first := [String:Int]{}
-    prelude_call_last := [String:Int]{}
+    prelude_call_first := [U64:Int]{}
+    prelude_call_last := [U64:Int]{}
     loop (index, row) in program.prelude_calls {
-        key :: jet_rust_emit_id_key(row.id.value)
+        key :: row.id.value
         if prelude_call_first.get(key) == None -> prelude_call_first[key] = index
         prelude_call_last[key] = index
     }
-    impls_by_trait := [String:[Int]]{}
-    impl_trait_slots := [String:Int]{}
-    impl_trait_keys := [String]{}
+    impls_by_trait := [U64:[Int]]{}
+    impl_trait_slots := [U64:Int]{}
+    impl_trait_keys := [U64]{}
     impl_trait_rows := [[Int]]{}
     impls_by_trait_name := [String:[Int]]{}
     impl_name_slots := [String:Int]{}
@@ -1012,7 +1066,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     impl_name_rows := [[Int]]{}
     loop (index, implementation) in program.impls {
         if implementation.trait_ref == .Val(trait_ref) {
-            trait_key :: jet_rust_emit_id_key(trait_ref.id.value)
+            trait_key :: trait_ref.id.value
             slot := impl_trait_slots.get(trait_key) ?? -1
             if slot < 0 {
                 slot = impl_trait_rows.len()
@@ -1040,7 +1094,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         type_names: types,
         type_by_name: type_by_name,
         trait_names: traits,
-        dyn_clone_traits: [String:Bool]{},
+        dyn_clone_traits: [U64:Bool]{},
         field_names: fields,
         variant_names: variants,
         variant_source_names: variant_source_names,
@@ -1049,6 +1103,7 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         failure: None,
         current_function: None,
         current_generic_params: [MIRGenericParam]{},
+        current_associated_types: [String]{},
         window_params: jet_rust_emit_collect_window_params(program),
         source_index: jet_codegen_source_index(program.source_files),
         type_index_by_id: type_index_by_id,
@@ -1072,14 +1127,16 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         derive_capability_cache: [String:Bool]{},
         derive_capability_cycle_floor: JET_RUST_EMIT_NO_CYCLE_FLOOR,
         derive_capability_pending: [String]{},
-        skipped_methods: [String:Bool]{},
+        derive_capability_gates: [String:Int]{},
+        core_ui_type_names: jet_rust_emit_core_ui_type_names(),
+        skipped_methods: [U64:Bool]{},
         move_facts: jet_rust_emit_empty_move_facts(),
         ref_bindings: jet_rust_emit_empty_ref_bindings(),
         body_index: jet_rust_emit_empty_body_index(),
         expected_test_exits: [U64:U64]{},
         unit_ratio_function: None,
         unit_ratio_parameters: [U64:Bool]{},
-        selected_modules: [String:Bool]{},
+        selected_modules: [U64:Bool]{},
         all_modules_selected: true,
     }
     if ctx.program.schema_version != MIR_SCHEMA_VERSION {
@@ -1097,18 +1154,22 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
 
     loop function_index in 0..<ctx.program.functions.len() {
         function := ctx.program.functions[function_index]
-        key :: jet_rust_emit_id_key(function.id.value)
+        key :: function.id.value
         if ctx.function_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR function identity is duplicated", "each checked function must have one stable source-emission symbol", Val(function.span))
             return ctx
         }
         &ctx.function_names.add(key, jet_rust_emit_generated_path(function.key)).drop("the prior lookup proved this function key is new")
     }
-    native_type_keys := [String:Bool]{}
-    loop definition in ctx.program.types {
-        key :: jet_rust_emit_id_key(definition.id.value)
+    native_type_keys := [U64:Bool]{}
+    loop (definition_index, definition) in ctx.program.types {
+        key :: definition.id.value
         if ctx.type_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type identity is duplicated", "each nominal type must have one stable source-emission symbol", Val(definition.span))
+            return ctx
+        }
+        if ctx.type_index_by_key.get(definition.key) != Val(definition_index) {
+            jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR type definition key is duplicated", "each nominal type key must identify one checked declaration", Val(definition.span))
             return ctx
         }
         // MIRRust type_name/collect_type_fields: a Prelude carrier keeps its native
@@ -1117,13 +1178,13 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         // native projection resolves); its MIR key is module-qualified here, so
         // the checked builtin fact selects it.
         default_err :: definition.compiler_builtin == (Val(MIRCompilerBuiltin.DefaultErr))
-        native :: default_err || jet_rust_emit_has_native_type_projection(definition.key) || jet_rust_emit_vault_host_record(definition.key)
+        native :: default_err || jet_rust_emit_has_native_type_projection(ctx, definition.key) || jet_rust_emit_vault_host_record(definition.key)
         if native -> native_type_keys[key] = true
         symbol :: if definition.compiler_builtin == {
             .Val(builtin) -> {
                 if builtin == MIRCompilerBuiltin.DefaultErr -> "{ctx.config.root_prefix}JetErr" else -> jet_rust_emit_generated_path(definition.key)
             }
-            else -> if jet_rust_emit_has_native_type_projection(definition.key) -> jet_rust_emit_apply_type(&ctx, MIRNominalRef{id: definition.id, name: definition.key}, [MIRType]{}) else -> jet_rust_emit_generated_path(definition.key)
+            else -> if jet_rust_emit_has_native_type_projection(ctx, definition.key) -> jet_rust_emit_apply_type(&ctx, MIRNominalRef{id: definition.id, name: definition.key}, [MIRType]{}) else -> jet_rust_emit_generated_path(definition.key)
         }
         &ctx.type_names.add(key, symbol).drop("the prior lookup proved this type key is new")
         &ctx.type_by_name.add(definition.key, symbol).drop("a later same-named row takes the canonical key spelling")
@@ -1156,8 +1217,9 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
             else -> {}
         }
     }
+    ctx.record_phantoms = jet_rust_emit_record_phantoms(&ctx)
     loop trait_row in ctx.program.traits {
-        key :: jet_rust_emit_id_key(trait_row.id.value)
+        key :: trait_row.id.value
         if ctx.trait_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR trait identity is duplicated", "each checked trait must have one stable source-emission symbol", Val(trait_row.span))
             return ctx
@@ -1167,12 +1229,12 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
     }
     loop instance in ctx.program.type_instances -> jet_rust_emit_collect_dyn_clone_traits(&ctx, instance)
     loop foreign in ctx.program.foreign {
-        key :: jet_rust_emit_id_key(foreign.id.value)
+        key :: foreign.id.value
         if ctx.foreign_names.get(key) != None {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingIdentity, "E0003", "MIR foreign identity is duplicated", "each foreign declaration must have one stable source-emission symbol", Val(foreign.span))
             return ctx
         }
-        name :: if foreign.name.len() == 0 -> jet_rust_emit_generated_path(foreign.key) else -> jet_rust_emit_mangle(foreign.name)
+        name :: if foreign.name.len() == 0 -> jet_rust_emit_generated_path(foreign.key) else -> name_mangle(foreign.name)
         &ctx.foreign_names.add(key, name).drop("the prior lookup proved this foreign key is new")
     }
     // MIRRust RustEmitter::new: a structural tuple projects its members by
@@ -1182,16 +1244,18 @@ fn jet_rust_emit_context(program: MIRProgram, config: JetRustEmitConfig) -> JetR
         if instance.kind == .Tuple(members) {
             identity :: mir_type_identity_key(instance)
             loop (index, member) in members {
-                key :: jet_rust_emit_id_key(mir_field_id("{identity}::{member.name}").value)
+                key :: mir_field_id("{identity}::{member.name}").value
                 ctx.field_names[key] = "{index}"
             }
         }
     }
     loop row in ctx.program.fields {
-        if ctx.field_names.get(jet_rust_emit_id_key(row.id.value)) != None -> next
-        jet_rust_emit_register_field(&ctx, row.id, row.field.name, native_type_keys.get(jet_rust_emit_id_key(row.owner.value)) != None, row.field.span)
+        if ctx.field_names.get(row.id.value) != None -> next
+        jet_rust_emit_register_field(&ctx, row.id, row.field.name, native_type_keys.get(row.owner.value) != None, row.field.span)
     }
     ctx.view_carriers = jet_rust_emit_collect_view_carriers(&ctx)
+    ctx.plain_drop_types = jet_rust_emit_collect_plain_drop_types(&ctx)
+    ctx.clone_bounds = jet_rust_emit_collect_clone_bounds(&ctx)
     ctx
 }
 
@@ -1201,7 +1265,7 @@ fn jet_rust_emit_type_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitTypeMeta
     out := [JetRustEmitTypeMetadata]{}
     if !ctx.config.emit_types -> return out
     loop definition in ctx.program.types {
-        symbol :: ctx.type_names.get(jet_rust_emit_id_key(definition.id.value)) ?? {
+        symbol :: ctx.type_names.get(definition.id.value) ?? {
             jet_rust_emit_fail(&ctx, JetRustEmitFailureKind.MissingRow, "E0003", "MIR type identity is missing from the emitter registry", "type metadata must use the same canonical symbol as emitted type declarations", Val(definition.span))
             next
         }
@@ -1243,7 +1307,7 @@ fn jet_rust_emit_callable_metadata(ctx: &JetRustEmitContext) -> [JetRustEmitCall
             parameter_types: parameter_types,
             parameter_access: parameter_access,
             return_type: jet_rust_emit_type(&ctx, function.return_type),
-            callable_type: jet_rust_emit_callable_type_parts(&ctx, parameter_mir_types, parameter_access, Val(function.return_type)),
+            callable_type: jet_rust_emit_callable_type_parts(&ctx, parameter_mir_types, parameter_access, Val(function.return_type), function.return_view_provenance),
         })
         ctx.current_generic_params = previous_generic_params
     }
@@ -1363,7 +1427,7 @@ fn jet_rust_emit_result(ctx: &JetRustEmitContext, source: String) -> JetRustEmit
     if !ctx.config.keep_going {
         if ctx.failure == .Val(failure) -> return JetRustEmitResult.Incomplete{failure: failure}
     }
-    manifest :: JetRustEmitManifest{
+    manifest := JetRustEmitManifest{
         schema_version: ctx.program.schema_version,
         target: ctx.config.target,
         package_identity: ctx.program.package_identity,
@@ -1384,5 +1448,11 @@ fn jet_rust_emit_result(ctx: &JetRustEmitContext, source: String) -> JetRustEmit
         traits: trait_metadata,
         trait_methods: trait_method_metadata,
     }
-    JetRustEmitResult.Complete{source: source, manifest: manifest}
+    ingress :: jet_rust_emit_core_parent_ingress(&ctx, manifest) ?? {
+        failure :: jet_rust_emit_failure(JetRustEmitFailureKind.InvalidSchema, "E0003", "private Core parent ingress is missing checked Source ABI metadata", "the seed bridge binds only exact capture-free Source host callables and declared fields", None)
+        return JetRustEmitResult.Incomplete{failure: failure}
+    }
+    emitted :: if ingress.len() == 0 -> source else -> "{source}{ingress}"
+    manifest.source_bytes = bytes + ingress.bytes().len()
+    JetRustEmitResult.Complete{source: emitted, manifest: manifest}
 }

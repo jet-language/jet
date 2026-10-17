@@ -1,0 +1,17 @@
+Error [E2307]: `result` cannot be stored in a struct field without an owning copy
+  --> returned_string_view_field_cannot_outlive_local_owner.jet:7:27
+    |
+  7 |     return Domain{ value: result }
+    |                           ^^^^^^
+ Why: `result` is a zero-copy view into `email` (`.trim()`/`.after()`/`.before()`); this destination needs an owned `String`, and `copies: .Explicit` keeps the implicit materialization disabled
+ Fix: Write `~result` first, or remove `copies: .Explicit` to use the default owning copy
+More: jet-lang.dev/e/E2307
+
+Error [E2305]: This view points into `email`, which this function owns
+  --> returned_string_view_field_cannot_outlive_local_owner.jet:7:27
+    |
+  7 |     return Domain{ value: result }
+    |                           ^^^^^^
+ Why: `email` is made here and freed when the function returns, so a read window into it would outlive what owns it — there'd be nothing left to look at
+ Fix: Return an owned copy with `place.copy()` (for example `value[a..b].copy()`), or accept the source as a parameter so the caller keeps owning it
+More: jet-lang.dev/e/E2305

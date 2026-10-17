@@ -1,0 +1,117 @@
+use core.files as s3_unicode_files
+use core.text as s3_unicode_text
+use core.text.parse as s3_unicode_parse
+use core.text.fmt as s3_unicode_fmt
+
+fn s3_unicode_scalar(cp: Int) -> String Never! {
+    if cp < 0 || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff) -> return ""
+    bytes := [U8]{}
+    if cp < 128 {
+        &bytes.push(U8{cp})
+    } else if cp < 2048 {
+        &bytes.push(U8{192 | (cp >> 6)})
+        &bytes.push(U8{128 | (cp & 63)})
+    } else if cp < 65536 {
+        &bytes.push(U8{224 | (cp >> 12)})
+        &bytes.push(U8{128 | ((cp >> 6) & 63)})
+        &bytes.push(U8{128 | (cp & 63)})
+    } else {
+        &bytes.push(U8{240 | (cp >> 18)})
+        &bytes.push(U8{128 | ((cp >> 12) & 63)})
+        &bytes.push(U8{128 | ((cp >> 6) & 63)})
+        &bytes.push(U8{128 | (cp & 63)})
+    }
+    String.from_bytes(bytes) ?? panic("valid Unicode scalar encoding")
+}
+
+// Reuses Core.text.wrap's Unicode splitter and the public Core.text primitives.
+fn s3_unicode_split_ws(text: String) -> [String] Never! {
+    out := [String]{}
+    current := ""
+    loop scalar in s3_unicode_text.scalars(text) {
+        if s3_unicode_text.is_whitespace(scalar) {
+            if current.bytes().len() > 0 {
+                &out.push(current)
+                current = ""
+            }
+        } else {
+            current = "{current}{scalar}"
+        }
+    }
+    if current.bytes().len() > 0 -> &out.push(current)
+    out
+}
+
+// Original cps(): invalid hex/scalars are filtered out.
+fn s3_unicode_cps(field: String) -> String Never! {
+    out := ""
+    loop token in s3_unicode_split_ws(field) {
+        cp :: s3_unicode_parse.parse_int_base(token, 16) ?? next
+        scalar :: s3_unicode_scalar(cp)
+        out = "{out}{scalar}"
+    }
+    out
+}
+
+struct S3UnicodeBreak {
+    full: String,
+    segments: [String],
+}
+
+// Original parse_break(): malformed hex/scalar => None; empty => None.
+fn s3_unicode_break(line: String) -> S3UnicodeBreak? Never! {
+    full := ""
+    current := ""
+    segments := [String]{}
+    any := false
+    loop token in s3_unicode_split_ws(line) {
+        if token == "÷" {
+            if current != "" {
+                &segments.push(current.copy())
+                current = ""
+            }
+        } else if token != "×" {
+            cp :: s3_unicode_parse.parse_int_base(token, 16) ?? return None
+            scalar :: s3_unicode_scalar(cp)
+            if scalar == "" -> return None
+            full = "{full}{scalar}"
+            current = "{current}{scalar}"
+            any = true
+        }
+    }
+    if current != "" -> &segments.push(current)
+    if !any -> return None
+    Val(S3UnicodeBreak{full: full, segments: segments})
+}
+
+fn s3_unicode_clean(raw: String) -> String Never! {
+    // Rust raw.split('#').next().unwrap_or("").trim().
+    head :: s3_unicode_parse.split(raw, "#")[0]
+    head.trim().copy()
+}
+
+// Port of tests/text_unicode.rs:281-295: break-preserving word/sentence APIs,
+// NOT core.text.words/sentences, which filter/trim the boundaries.
+#Test fn s3_unicode_boundary_corpora() {
+    word_data :: s3_unicode_files.read_text("data/WordBreakTest.txt") ?? panic("missing word corpus")
+    word := 0
+    loop raw in word_data.lines() {
+        parsed :: s3_unicode_break(s3_unicode_clean(raw)) ?? next
+        assert_eq(s3_unicode_text.word_segments(parsed.full), parsed.segments, "break mismatch: {raw}")
+        word += 1
+    }
+    sentence_data :: s3_unicode_files.read_text("data/SentenceBreakTest.txt") ?? panic("missing sentence corpus")
+    sentence := 0
+    loop raw in sentence_data.lines() {
+        parsed :: s3_unicode_break(s3_unicode_clean(raw)) ?? next
+        assert_eq(s3_unicode_text.sentence_segments(parsed.full), parsed.segments, "break mismatch: {raw}")
+        sentence += 1
+    }
+    assert(word > 500 && sentence > 100)
+    // Exact last two fields of the original six-count stdout oracle.
+    print("{word} {sentence}")
+}
+
+fn run() {
+    s3_unicode_boundary_corpora()
+}

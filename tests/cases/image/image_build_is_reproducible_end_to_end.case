@@ -1,0 +1,12 @@
+# Port of tests/image.rs:333-353, write_project43-66 verbatim.
+# Original compares index.json byte-for-byte after deleting the complete image outputs.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: built-app.fixture
+env: NO_COLOR=1
+step: jetpack image server
+exit: 0
+copy: .jet/images/server/index.json first-index.json
+remove: .jet/images
+step: jetpack image server
+exit: 0
+file: .jet/images/server/index.json == first-index.json

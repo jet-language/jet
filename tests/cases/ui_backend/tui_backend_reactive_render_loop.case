@@ -1,0 +1,21 @@
+# Port of tests/ui_backend.rs:68-75; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+fixture: tui_backend_reactive_render_loop.fixture
+mkdir: release
+step: jet run --release run.jet
+env: JET_STORE_DIR={work}/release/cache
+env: JETPACK_ROOT={work}/release/jetpack
+env: JETPACK_ENV=1
+stdout: = ../../../Examples/features/expected/ui/ui_tui_reactive.out
+mkdir: default
+step: jet run run.jet
+env: JET_STORE_DIR={work}/default/cache
+env: JETPACK_ROOT={work}/default/jetpack
+env: JETPACK_ENV=1
+stdout: = ../../../Examples/features/expected/ui/ui_tui_reactive.out
+mkdir: interpret
+step: jet run --interpret run.jet
+env: JET_STORE_DIR={work}/interpret/cache
+env: JETPACK_ROOT={work}/interpret/jetpack
+env: JETPACK_ENV=1
+stdout: = ../../../Examples/features/expected/ui/ui_tui_reactive.out

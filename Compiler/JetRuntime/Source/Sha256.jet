@@ -1,0 +1,220 @@
+// Adapted without algorithm changes from
+// Core/crypto/runtime/kernel_sha256.jet:6-110@5933a61b2 (FIPS 180-4).
+// Borrowed raw byte spans; caller supplies 576 bytes of word-aligned scratch
+// (8 state words, 64 schedule words) and 32 writable digest bytes. No allocation,
+// padded-message copy, or owning Core list crosses this runtime boundary.
+// The runtime driver currently lacks addressable static tables; the fixed
+// round constants become one static table when it supports that storage.
+fn rt_sha256_k(round: I64) -> I64 {
+    if {
+        (round == I64{0}) -> I64{0x428a2f98}
+        (round == I64{1}) -> I64{0x71374491}
+        (round == I64{2}) -> I64{0xb5c0fbcf}
+        (round == I64{3}) -> I64{0xe9b5dba5}
+        (round == I64{4}) -> I64{0x3956c25b}
+        (round == I64{5}) -> I64{0x59f111f1}
+        (round == I64{6}) -> I64{0x923f82a4}
+        (round == I64{7}) -> I64{0xab1c5ed5}
+        (round == I64{8}) -> I64{0xd807aa98}
+        (round == I64{9}) -> I64{0x12835b01}
+        (round == I64{10}) -> I64{0x243185be}
+        (round == I64{11}) -> I64{0x550c7dc3}
+        (round == I64{12}) -> I64{0x72be5d74}
+        (round == I64{13}) -> I64{0x80deb1fe}
+        (round == I64{14}) -> I64{0x9bdc06a7}
+        (round == I64{15}) -> I64{0xc19bf174}
+        (round == I64{16}) -> I64{0xe49b69c1}
+        (round == I64{17}) -> I64{0xefbe4786}
+        (round == I64{18}) -> I64{0x0fc19dc6}
+        (round == I64{19}) -> I64{0x240ca1cc}
+        (round == I64{20}) -> I64{0x2de92c6f}
+        (round == I64{21}) -> I64{0x4a7484aa}
+        (round == I64{22}) -> I64{0x5cb0a9dc}
+        (round == I64{23}) -> I64{0x76f988da}
+        (round == I64{24}) -> I64{0x983e5152}
+        (round == I64{25}) -> I64{0xa831c66d}
+        (round == I64{26}) -> I64{0xb00327c8}
+        (round == I64{27}) -> I64{0xbf597fc7}
+        (round == I64{28}) -> I64{0xc6e00bf3}
+        (round == I64{29}) -> I64{0xd5a79147}
+        (round == I64{30}) -> I64{0x06ca6351}
+        (round == I64{31}) -> I64{0x14292967}
+        (round == I64{32}) -> I64{0x27b70a85}
+        (round == I64{33}) -> I64{0x2e1b2138}
+        (round == I64{34}) -> I64{0x4d2c6dfc}
+        (round == I64{35}) -> I64{0x53380d13}
+        (round == I64{36}) -> I64{0x650a7354}
+        (round == I64{37}) -> I64{0x766a0abb}
+        (round == I64{38}) -> I64{0x81c2c92e}
+        (round == I64{39}) -> I64{0x92722c85}
+        (round == I64{40}) -> I64{0xa2bfe8a1}
+        (round == I64{41}) -> I64{0xa81a664b}
+        (round == I64{42}) -> I64{0xc24b8b70}
+        (round == I64{43}) -> I64{0xc76c51a3}
+        (round == I64{44}) -> I64{0xd192e819}
+        (round == I64{45}) -> I64{0xd6990624}
+        (round == I64{46}) -> I64{0xf40e3585}
+        (round == I64{47}) -> I64{0x106aa070}
+        (round == I64{48}) -> I64{0x19a4c116}
+        (round == I64{49}) -> I64{0x1e376c08}
+        (round == I64{50}) -> I64{0x2748774c}
+        (round == I64{51}) -> I64{0x34b0bcb5}
+        (round == I64{52}) -> I64{0x391c0cb3}
+        (round == I64{53}) -> I64{0x4ed8aa4a}
+        (round == I64{54}) -> I64{0x5b9cca4f}
+        (round == I64{55}) -> I64{0x682e6ff3}
+        (round == I64{56}) -> I64{0x748f82ee}
+        (round == I64{57}) -> I64{0x78a5636f}
+        (round == I64{58}) -> I64{0x84c87814}
+        (round == I64{59}) -> I64{0x8cc70208}
+        (round == I64{60}) -> I64{0x90befffa}
+        (round == I64{61}) -> I64{0xa4506ceb}
+        (round == I64{62}) -> I64{0xbef9a3f7}
+        else -> I64{0xc67178f2}
+    }
+}
+fn rt_sha256_rotate(word: I64, shift: I64) -> I64 {
+    ((word >> shift).bit_or((word << (I64{32} - shift)))).bit_and(I64{0xffffffff})
+}
+fn rt_sha256_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, length: I64, at: I64, end: I64) -> I64 {
+    if (at < left_len) -> return rt_text_byte(left + at)
+    if (at < left_len + right_len) -> return rt_text_byte(right + at - left_len)
+    if (at < left_len + right_len + third_len) -> return rt_text_byte(third + at - left_len - right_len)
+    if (at < length) -> return rt_text_byte(fourth + at - left_len - right_len - third_len)
+    if (at == length) -> return I64{128}
+    if (at >= end - I64{8}) {
+        shift :: (end - I64{1} - at) * I64{8}
+        if (shift == I64{0}) -> return (length.bit_and(I64{31})) << I64{3}
+        return (length >> (shift - I64{3})).bit_and(I64{255})
+    }
+    I64{0}
+}
+// Four borrowed spans support HMAC/HKDF without concatenating secret input.
+// Guard the sum incrementally before any overflow; digest disjoint from inputs.
+fn rt_sha2_32_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64, short: Bool) {
+    if (left_len < I64{0} || right_len < I64{0} || third_len < I64{0} || fourth_len < I64{0} || left_len > I64{9223372036854775735} - right_len) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
+    }
+    first_two :: left_len + right_len
+    if (third_len > I64{9223372036854775735} - first_two) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
+    }
+    first_three :: first_two + third_len
+    if (fourth_len > I64{9223372036854775735} - first_three) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
+    }
+    length :: first_three + fourth_len
+    end :: ((length + I64{8}) / I64{64} + I64{1}) * I64{64}
+    if short {
+        rt_text_store(scratch, I64{0xc1059ed8})
+        rt_text_store(scratch + I64{8}, I64{0x367cd507})
+        rt_text_store(scratch + I64{16}, I64{0x3070dd17})
+        rt_text_store(scratch + I64{24}, I64{0xf70e5939})
+        rt_text_store(scratch + I64{32}, I64{0xffc00b31})
+        rt_text_store(scratch + I64{40}, I64{0x68581511})
+        rt_text_store(scratch + I64{48}, I64{0x64f98fa7})
+        rt_text_store(scratch + I64{56}, I64{0xbefa4fa4})
+    } else {
+        rt_text_store(scratch, I64{0x6a09e667})
+        rt_text_store(scratch + I64{8}, I64{0xbb67ae85})
+        rt_text_store(scratch + I64{16}, I64{0x3c6ef372})
+        rt_text_store(scratch + I64{24}, I64{0xa54ff53a})
+        rt_text_store(scratch + I64{32}, I64{0x510e527f})
+        rt_text_store(scratch + I64{40}, I64{0x9b05688c})
+        rt_text_store(scratch + I64{48}, I64{0x1f83d9ab})
+        rt_text_store(scratch + I64{56}, I64{0x5be0cd19})
+    }
+    schedule :: scratch + I64{64}
+    off := I64{0}
+    loop off < end {
+        t := I64{0}
+        loop {
+            if (t >= I64{16}) -> break
+            word := I64{0}
+            j := I64{0}
+            loop {
+                if (j >= I64{4}) -> break
+                word = (word << I64{8}).bit_or(rt_sha256_byte(left, left_len, right, right_len, third, third_len, fourth, length, off + t * I64{4} + j, end))
+                j += I64{1}
+            }
+            rt_text_store(schedule + t * I64{8}, word)
+            t += I64{1}
+        }
+        loop {
+            if (t >= I64{64}) -> break
+            x :: rt_text_word(schedule + (t - I64{15}) * I64{8})
+            y :: rt_text_word(schedule + (t - I64{2}) * I64{8})
+            s0 :: rt_sha256_rotate(x, I64{7}).bit_xor(rt_sha256_rotate(x, I64{18})).bit_xor((x >> I64{3}))
+            s1 :: rt_sha256_rotate(y, I64{17}).bit_xor(rt_sha256_rotate(y, I64{19})).bit_xor((y >> I64{10}))
+            rt_text_store(schedule + t * I64{8}, (rt_text_word(schedule + (t - I64{16}) * I64{8}) + s0 + rt_text_word(schedule + (t - I64{7}) * I64{8}) + s1).bit_and(I64{0xffffffff}))
+            t += I64{1}
+        }
+        a := rt_text_word(scratch)
+        b := rt_text_word(scratch + I64{8})
+        c := rt_text_word(scratch + I64{16})
+        d := rt_text_word(scratch + I64{24})
+        e := rt_text_word(scratch + I64{32})
+        f := rt_text_word(scratch + I64{40})
+        g := rt_text_word(scratch + I64{48})
+        h := rt_text_word(scratch + I64{56})
+        t = I64{0}
+        loop {
+            if (t >= I64{64}) -> break
+            s1 :: rt_sha256_rotate(e, I64{6}).bit_xor(rt_sha256_rotate(e, I64{11})).bit_xor(rt_sha256_rotate(e, I64{25}))
+            ch :: (e.bit_and(f)).bit_xor(((e.bit_xor(I64{0xffffffff})).bit_and(g)))
+            temp1 :: h + s1 + ch + rt_sha256_k(t) + rt_text_word(schedule + t * I64{8})
+            s0 :: rt_sha256_rotate(a, I64{2}).bit_xor(rt_sha256_rotate(a, I64{13})).bit_xor(rt_sha256_rotate(a, I64{22}))
+            maj :: (a.bit_and(b)).bit_xor((a.bit_and(c))).bit_xor((b.bit_and(c)))
+            h = g
+            g = f
+            f = e
+            e = (d + temp1).bit_and(I64{0xffffffff})
+            d = c
+            c = b
+            b = a
+            a = (temp1 + s0 + maj).bit_and(I64{0xffffffff})
+            t += I64{1}
+        }
+        rt_text_store(scratch, (rt_text_word(scratch) + a).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{8}, (rt_text_word(scratch + I64{8}) + b).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{16}, (rt_text_word(scratch + I64{16}) + c).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{24}, (rt_text_word(scratch + I64{24}) + d).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{32}, (rt_text_word(scratch + I64{32}) + e).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{40}, (rt_text_word(scratch + I64{40}) + f).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{48}, (rt_text_word(scratch + I64{48}) + g).bit_and(I64{0xffffffff}))
+        rt_text_store(scratch + I64{56}, (rt_text_word(scratch + I64{56}) + h).bit_and(I64{0xffffffff}))
+        off += I64{64}
+    }
+    at := I64{0}
+    output_length :: if short -> I64{28} else -> I64{32}
+    loop {
+        if (at >= output_length) -> break
+        word :: rt_text_word(scratch + (at / I64{4}) * I64{8})
+        rt_text_put(digest + at, (word >> (I64{24} - (at % I64{4}) * I64{8})).bit_and(I64{255}))
+        at += I64{1}
+    }
+    // The schedule holds secret-derived words for vault callers. Wipe before
+    // returning; the scratch owner is responsible for its eventual free.
+    at = I64{0}
+    loop {
+        if (at >= I64{576}) -> break
+        rt_text_store(scratch + at, I64{0})
+        at += I64{8}
+    }
+}
+fn rt_sha256_parts4(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, fourth: I64, fourth_len: I64, digest: I64, scratch: I64) {
+    rt_sha2_32_parts4(left, left_len, right, right_len, third, third_len, fourth, fourth_len, digest, scratch, false)
+}
+// SHA-224 is the same compression function, with its FIPS180-4 IV and output28.
+fn rt_crypto_sha224(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_sha2_32_parts4(input, length, I64{1}, I64{0}, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch, true)
+}
+fn rt_sha256_parts(left: I64, left_len: I64, right: I64, right_len: I64, digest: I64, scratch: I64) {
+    rt_sha256_parts4(left, left_len, right, right_len, I64{1}, I64{0}, I64{1}, I64{0}, digest, scratch)
+}
+#Export(c) fn jet_rt_native_sha256(bytes: I64, length: I64, digest: I64, scratch: I64) {
+    rt_sha256_parts(bytes, length, I64{1}, I64{0}, digest, scratch)
+}

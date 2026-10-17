@@ -6,10 +6,10 @@
 
 STORE_NIX_BASE32_ALPHABET :: prep { "0123456789abcdfghijklmnpqrsvwxyz" }
 
-pub struct NarSignature {
-    pub key_id: String
-    pub algorithm: String
-    pub sig_hex: String
+struct NarSignature {
+    key_id: String
+    algorithm: String
+    sig_hex: String
 
     fn from_trust(signature: TrustSignature) -> NarSignature Never! {
         NarSignature{key_id: signature.key_id, algorithm: signature.algorithm, sig_hex: signature.sig_hex}
@@ -17,19 +17,19 @@ pub struct NarSignature {
 }
 
 // Jet's local binary-cache narinfo, signed with a role's HMAC trust key.
-pub struct NarInfo {
-    pub store_path: String
-    pub url: String
-    pub compression: String
-    pub file_size: Int
-    pub nar_size: Int
-    pub nar_hash: String
-    pub references: [String]
-    pub deriver: String?
+struct NarInfo {
+    store_path: String
+    url: String
+    compression: String
+    file_size: Int
+    nar_size: Int
+    nar_hash: String
+    references: [String]
+    deriver: String?
     // Optional Nix content-addressing descriptor. It is signed with the
     // remaining narinfo fields and retained across endpoint round-trips.
-    pub ca: String?
-    pub signatures: [NarSignature]
+    ca: String?
+    signatures: [NarSignature]
 
     fn validate(self) StoreError! {
         store_nar_validate_store_path(self.store_path)
@@ -67,7 +67,7 @@ pub struct NarInfo {
 
     fn unsigned_text(self) -> String StoreError! {
         self.validate()
-        references := ~self.references
+        references := self.references.copy()
         &references.sort()
         out := ""
         out = "{out}{store_nar_line("StorePath", self.store_path)}"
@@ -89,7 +89,7 @@ pub struct NarInfo {
 
     fn to_text(self) -> String StoreError! {
         out := self.unsigned_text()
-        signatures := ~self.signatures
+        signatures := self.signatures.copy()
         &signatures.sort_by(signature -> signature.key_id)
         loop signature in signatures -> out = "{out}{store_nar_line("Sig", "{signature.key_id}:{signature.algorithm}:{signature.sig_hex}")}"
         Ok(out)
@@ -134,7 +134,7 @@ pub struct NarInfo {
     }
 
     fn signed(self, key: TrustKey) -> NarInfo StoreError! {
-        signed := ~self
+        signed := self.copy()
         signed.signatures = [NarSignature]{}
         signature :: key.sign(signed.unsigned_text().bytes())
         &signed.signatures.push(NarSignature.from_trust(signature))
@@ -152,7 +152,7 @@ pub struct NarInfo {
 }
 
 // Standard Nix binary-cache compression names.
-pub enum NixCompression {
+enum NixCompression {
     // `Compression: none`.
     Plain
     Zstd
@@ -179,16 +179,16 @@ pub enum NixCompression {
     }
 }
 
-pub struct NixNarInfoSignature {
-    pub key_id: String
+struct NixNarInfoSignature {
+    key_id: String
     // 64 signature bytes.
-    pub signature: [U8]
+    signature: [U8]
 }
 
-pub struct NixPublicKey {
-    pub key_id: String
+struct NixPublicKey {
+    key_id: String
     // 32 public-key bytes.
-    pub public_key: [U8]
+    public_key: [U8]
 
     fn parse(value: String) -> NixPublicKey StoreError! {
         pair :: value.split_once(":") ?? return Err(store_nar_invalid("Nix public key is missing its key name"))
@@ -201,18 +201,18 @@ pub struct NixPublicKey {
 
 // Standard Nix `.narinfo` metadata. Its signature covers only Nix's
 // canonical fingerprint, not the text serialization.
-pub struct NixNarInfo {
-    pub store_path: String
-    pub url: String
-    pub compression: NixCompression
-    pub file_hash: String?
-    pub file_size: Int?
-    pub nar_hash: String
-    pub nar_size: Int
-    pub references: [String]
-    pub deriver: String?
-    pub ca: String?
-    pub signatures: [NixNarInfoSignature]
+struct NixNarInfo {
+    store_path: String
+    url: String
+    compression: NixCompression
+    file_hash: String?
+    file_size: Int?
+    nar_hash: String
+    nar_size: Int
+    references: [String]
+    deriver: String?
+    ca: String?
+    signatures: [NixNarInfoSignature]
 
     fn parse(text: String) -> NixNarInfo StoreError! {
         if text.bytes().len() > STORE_NAR_MAX_INFO_BYTES -> return Err(store_nar_invalid("narinfo is too large"))
@@ -522,12 +522,12 @@ fn store_nar_validate_nix_url(value: String) StoreError! {
     }
 }
 
-pub fn store_nar_hash_matches(expected: String, bytes: [U8]) -> Bool Never! {
+fn store_nar_hash_matches(expected: String, bytes: [U8]) -> Bool Never! {
     decoded :: store_decode_sha256(expected) ?? return false
     decoded == crypto.sha256(bytes).bytes
 }
 
-pub fn store_normalize_nar_hash(value: String) -> String StoreError! {
+fn store_normalize_nar_hash(value: String) -> String StoreError! {
     bytes :: store_decode_sha256(value) ?? return Err(store_nar_invalid("Nix NarHash is not a SHA-256 digest"))
     Ok("sha256:{store_hex_bytes(bytes)}")
 }
@@ -540,7 +540,7 @@ fn store_nar_same_digest(left: String, right: String) -> Bool Never! {
 
 // The 32 digest bytes of `sha256:<hex>`, `sha256:<nix32>`, or
 // `sha256-<base64>`.
-pub fn store_decode_sha256(value: String) -> [U8]? Never! {
+fn store_decode_sha256(value: String) -> [U8]? Never! {
     if value.starts_with("sha256:") {
         text :: value.removeprefix("sha256:")
         raw :: text.bytes()
@@ -576,10 +576,10 @@ fn store_decode_nix_base32(value: String) -> [U8]? Never! {
         if digit < 0 -> return None
         bit :: (51 - index) * 5
         loop offset in 0..<5 {
-            if digit & (1 << offset) != 0 {
+            if (digit).bit_and((1 << offset)) != 0 {
                 target :: bit + offset
                 if target >= 256 -> return None
-                output[target /% 8] = output[target /% 8] | (1 << (target % 8))
+                output[target /% 8] = (output[target /% 8]).bit_or((1 << (target % 8)))
             }
         }
     }
@@ -596,7 +596,7 @@ fn store_encode_nix_base32(value: [U8]) -> String Never! {
         digit := 0
         loop offset in 0..<5 {
             target :: bit + offset
-            if target < 256 && (Int.from_u8(value[target /% 8]) & (1 << (target % 8))) != 0 -> digit = digit | (1 << offset)
+            if target < 256 && ((Int.from_u8(value[target /% 8])).bit_and((1 << (target % 8)))) != 0 -> digit = (digit).bit_or((1 << offset))
         }
         &out.push(alphabet[digit])
     }

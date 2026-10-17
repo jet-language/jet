@@ -1,0 +1,28 @@
+# Port of tests/comptime_cli_parity.rs::command_override_examples_match_aot_default_run_and_interpreter; exact original predicates, runtime UNRUN.
+requires: tool:rustc
+fixture: fixtures/command_override_examples_match_aot_default_run_and_interpreter
+step: jet run --release test_override.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/devloop/test_override.out
+step: jet run test_override.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/devloop/test_override.out
+step: jet dev test_override.jet --interpret --watch=off
+exit: 0
+stdout: = ../../../Examples/features/expected/devloop/test_override.out
+step: jet run --release bench_override.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/devloop/bench_override.out
+step: jet run bench_override.jet
+exit: 0
+stdout: = ../../../Examples/features/expected/devloop/bench_override.out
+step: jet dev bench_override.jet --interpret --watch=off
+exit: 0
+stdout: = ../../../Examples/features/expected/devloop/bench_override.out
+step: jet test test_override.jet --serial
+exit: 0
+stderr: ~ "jet test: using fn test override" # Original stderr contains override notice.
+step: jet test --help
+exit: 0
+stdout: ~ "--show-default" # Original help.contains.
+

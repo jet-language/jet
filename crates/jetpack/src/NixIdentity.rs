@@ -6,7 +6,7 @@
 //! may construct a fallback evaluation.
 
 use crate::{JSON, Lock, SHA256};
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -191,7 +191,7 @@ impl NixFallbackIdentity {
 
     /// Decode and revalidate the exact identity persisted in a lock/receipt.
     pub(crate) fn from_provenance(value: &str) -> Result<Self, NixFallbackError> {
-        let DataTree::Object(fields) = JSON::parse(value)
+        let Dyn::Object(fields) = JSON::parse(value)
             .map_err(|error| NixFallbackError::new(format!("invalid Nix fallback provenance: {error}")))?
         else {
             return Err(NixFallbackError::new(
@@ -387,7 +387,7 @@ fn revision_from_locked_input(input: &str) -> Result<String, NixFallbackError> {
 }
 
 fn string_field(
-    fields: &[(String, DataTree)],
+    fields: &[(String, Dyn)],
     name: &str,
 ) -> Result<String, NixFallbackError> {
     fields

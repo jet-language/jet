@@ -16,53 +16,58 @@ use core as core
 // `shape` is the provider seam: the host owns real shaping and returns a
 // canonical run.  `shape_with` is the explicit portable fallback for callers
 // that need deterministic, approximate advances without a shaping provider.
-pub enum FontStyle {
+enum FontStyle {
     Body
     Title
     Monospace
 }
 
-pub enum GlyphShaper {
+enum GlyphShaper {
     HarfBuzz
     HeadlessFallback
 }
 
-pub struct FontFace {
-    pub family: String
-    pub size: Float
-    pub style: FontStyle
+struct FontFace {
+    family: String
+    size: Float
+    style: FontStyle
 }
 
-pub struct Glyph {
-    pub id: Int
-    pub cluster: Int
-    pub x: Float
-    pub y: Float
-    pub advance_x: Float
-    pub advance_y: Float
+struct Glyph {
+    id: Int
+    cluster: Int
+    x: Float
+    y: Float
+    advance_x: Float
+    advance_y: Float
 }
 
-pub struct GlyphRun {
-    pub glyphs: [Glyph]
-    pub advance_x: Float
-    pub advance_y: Float
-    pub shaper: GlyphShaper
-    pub deterministic: Bool
-    pub approximate: Bool
+struct GlyphRun {
+    glyphs: [Glyph]
+    advance_x: Float
+    advance_y: Float
+    shaper: GlyphShaper
+    deterministic: Bool
+    approximate: Bool
 }
 
-pub fn system(style: FontStyle) -> FontFace Never! {
-    core.font.system(style)
+fn system(style: FontStyle) -> FontFace Never! {
+    if style == FontStyle.Monospace -> return FontFace{family: "monospace", size: 14.0, style: style}
+    if style == FontStyle.Title -> return FontFace{family: "system-ui", size: 24.0, style: style}
+    FontFace{family: "system-ui", size: 14.0, style: style}
 }
 
-pub fn shape(text: String, face: FontFace) -> GlyphRun Never! {
-    core.font.shape(text, face)
-}
-
-pub fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
+fn shape_with(face: FontFace, text: String) -> GlyphRun Never! {
     // This is the explicit opt-in for deterministic approximate metrics.
     // `shape` is the only path that requests the FontShaping capability.
     shape_fallback(face, text)
+}
+
+fn shape(text: String, face: FontFace) -> GlyphRun Never! {
+    if core.font.__shape_text(text, face) == {
+        .Ok(run) -> run
+        .Err(cause) -> panic("font shaping host contract failure: {cause}")
+    }
 }
 
 fn shape_fallback(face: FontFace, text: String) -> GlyphRun {
@@ -114,15 +119,15 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
     cp := 0
     if first >= 194 && first <= 223 {
         width = 2
-        cp = first & 31
+        cp = (first).bit_and(31)
     }
     if first >= 224 && first <= 239 {
         width = 3
-        cp = first & 15
+        cp = (first).bit_and(15)
     }
     if first >= 240 && first <= 244 {
         width = 4
-        cp = first & 7
+        cp = (first).bit_and(7)
     }
     if width == 0 || i + width > raw.len() -> return DecodePair{cp: 65533, next: i + 1}
 
@@ -140,7 +145,7 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
     loop k < width {
         byte :: Int.from_u8(raw[i + k])
         if byte < 128 || byte >= 192 -> return DecodePair{cp: 65533, next: i + 1}
-        cp = (cp << 6) | (byte & 63)
+        cp = ((cp << 6)).bit_or(((byte).bit_and(63)))
         k += 1
     }
     if cp > 0x10FFFF || (cp >= 0xD800 && cp <= 0xDFFF) {
@@ -149,3 +154,15 @@ fn decode_cp(raw: [U8], i: Int) -> DecodePair {
     DecodePair{cp: cp, next: i + width}
 }
 
+
+#Test("system font styles have canonical family and size defaults") {
+    body :: system(.Body)
+    title :: system(.Title)
+    mono :: system(.Monospace)
+    assert_eq(body.family, "system-ui")
+    assert_eq(body.size, 14.0)
+    assert_eq(title.family, "system-ui")
+    assert_eq(title.size, 24.0)
+    assert_eq(mono.family, "monospace")
+    assert_eq(mono.size, 14.0)
+}

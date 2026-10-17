@@ -311,8 +311,9 @@ fn run() {
 #[test]
 fn user_struct_named_noclone_is_still_cloneable() {
     // A user type literally named `NoClone` must not hit a hidden magic name —
-    // it's an Int-only struct, so it's cloneable, and passing it to a Move
-    // param without `^` is E0209 (D-MEM1/S2), not E0201 (can't-be-copied).
+    // it's an Int-only struct, so it's cloneable: passing it to a Move param
+    // without `^` while it is read again is E0209 (D-COPY-DEFAULT1=A), not
+    // E0201 (can't-be-copied).
     let src = r#"
 struct NoClone {
     n: Int
@@ -325,6 +326,7 @@ fn eat(v: ^NoClone) {
 fn run() {
     v :: NoClone{ n: 1 }
     eat(v)
+    print(v.n)
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
@@ -392,7 +394,7 @@ fn hyphenated_file_name_gets_sane_module_alias() {
     let dir = temp_project("hyphen");
     fs::write(
         dir.join("my-utils.jet"),
-        "pub fn helper() -> Int {\n    return 42\n}\n",
+        "fn helper() -> Int {\n    return 42\n}\n",
     )
     .unwrap();
     fs::write(
@@ -413,7 +415,7 @@ fn imported_struct_constructs_and_reads_fields() {
     let dir = temp_project("structs");
     fs::write(
         dir.join("shapes.jet"),
-        "pub struct Point {\n    pub x: Int\n    pub y: Int\n}\n",
+        "struct Point {\n    x: Int\n    y: Int\n}\n",
     )
     .unwrap();
     fs::write(
@@ -441,12 +443,12 @@ fn duplicate_file_stems_get_unique_module_names() {
     fs::create_dir_all(dir.join("b")).unwrap();
     fs::write(
         dir.join("a/util.jet"),
-        "pub fn one() -> Int {\n    return 1\n}\n",
+        "fn one() -> Int {\n    return 1\n}\n",
     )
     .unwrap();
     fs::write(
         dir.join("b/util.jet"),
-        "pub fn two() -> Int {\n    return 2\n}\n",
+        "fn two() -> Int {\n    return 2\n}\n",
     )
     .unwrap();
     fs::write(

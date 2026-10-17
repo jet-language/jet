@@ -1,0 +1,42 @@
+// Port of tests/http_server_lifecycle.rs:3855-3902 against public Core APIs.
+// PENDING-SEAM(http-server-options): workers=1, admission_queue=1,
+// read_header_timeout=1s, read_idle_timeout=1s, read_body_timeout=1s setup.
+use core.http.server as server
+use core.net as net
+use core.time as time
+
+#Test("shutdown grace cancels straggler and returns bounded report") {
+    (entered_tx, entered_rx) :: channel<Int>()
+    mux :: server.mux()
+    mux.get("/slow", (_req: HTTPRequest) -> {
+        entered_tx.send(1)
+        time.sleep(250ms)
+        Ok(server.response(200, "too late"))
+    })
+    bound :: server.bind("127.0.0.1:0", mux) ?? panic("bind")
+    addr :: bound.local_addr() ?? panic("address")
+    serving :: task { bound.serve() ?? panic("server") }
+    client :: net.tcp_connect(addr) ?? panic("connect")
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    client.write_all("GET /slow HTTP/1.1{crlf}Host: local{crlf}{crlf}".bytes()) ?? panic("write")
+    if {
+        _signal, entered_rx -> {}
+        after 1s -> panic("handler entered timeout")
+    }
+    started :: time.start()
+    report :: bound.shutdown(30ms) ?? panic("server shutdown")
+    ^serving.join() ?? panic("server join")
+    assert(time.elapsed(started) < 150ms)
+    assert(report.accepted == 1)
+    assert(report.completed == 0)
+    assert(report.cancelled == 1)
+    // Original read_to_string ignores I/O errors while retaining any prefix.
+    parts := [String]{}
+    loop {
+        part :: client.read_text(8192) ?? break
+        if part == "" -> break
+        &parts.push(part)
+    }
+    response :: parts.join("")
+    assert(!response.contains("200 OK"), "straggler published after cancellation: {response}")
+}

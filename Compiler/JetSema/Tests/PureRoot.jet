@@ -1,0 +1,13 @@
+// Runtime-root E3401 diagnostic contract; assemble with Compiler and run.
+fn run() {
+    direct :: sema_pure_root_diagnostic("evaluate", "print", [String]{}, Span{start: 4, end: 9})
+    direct_chain :: [String]{"evaluate", "print"}
+    if direct.code != "E3401" || direct.call_chain != direct_chain {
+        panic("direct pure-root diagnostic")
+    }
+    transitive :: sema_pure_root_diagnostic("evaluate", "core.io.write", [String]{"helper", "leaf"}, Span{start: 10, end: 20})
+    transitive_chain :: [String]{"evaluate", "helper", "leaf", "core.io.write"}
+    if transitive.code != "E3401" || transitive.call_chain != transitive_chain {
+        panic("transitive pure-root chain")
+    }
+}

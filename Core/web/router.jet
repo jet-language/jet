@@ -7,13 +7,13 @@ C_MAX_ROUTER_FIELDS :: 256
 
 
 #Error
-pub enum WebRouterError {
+enum WebRouterError {
     NotFound
     Callback
     Invalid
 }
 
-pub enum WebRouterValueType {
+enum WebRouterValueType {
     String
     Int
     Bool
@@ -21,19 +21,19 @@ pub enum WebRouterValueType {
     JSON
 }
 
-pub enum WebRouterSearchCodec {
+enum WebRouterSearchCodec {
     Query
     JSON
 }
 
-pub enum WebRouterCacheStatus {
+enum WebRouterCacheStatus {
     Fresh
     Stale
     Invalidated
     Collected
 }
 
-pub enum WebNavigationStatus {
+enum WebNavigationStatus {
     Idle
     Preloading
     Pending
@@ -42,55 +42,55 @@ pub enum WebNavigationStatus {
     Aborted
 }
 
-pub struct WebRouterField {
-    pub name: String
-    pub value: String
+struct WebRouterField {
+    name: String
+    value: String
 }
 
-pub struct WebNavigation {
-    pub path: String
-    pub name: String
-    pub params: [WebRouterField]
-    pub search: [WebRouterField]
-    pub status: WebNavigationStatus
+struct WebNavigation {
+    path: String
+    name: String
+    params: [WebRouterField]
+    search: [WebRouterField]
+    status: WebNavigationStatus
 }
 
-pub struct WebNavigationState {
-    pub path: String
-    pub status: WebNavigationStatus
+struct WebNavigationState {
+    path: String
+    status: WebNavigationStatus
 }
 
-pub struct WebRoute {
-    pub pattern: String
-    pub name: String
-    pub fields: [WebRouterField]
-    pub search_fields: [WebRouterField]
-    pub codec: WebRouterSearchCodec
-    pub response: String
-    pub not_found: Bool
+struct WebRoute {
+    pattern: String
+    name: String
+    fields: [WebRouterField]
+    search_fields: [WebRouterField]
+    codec: WebRouterSearchCodec
+    response: String
+    not_found: Bool
 }
 
-pub struct WebRouter {
-    pub routes: [WebRoute]
-    pub current: String
-    pub status: WebNavigationStatus
-    pub cache: [String]
-    pub cache_status: [WebRouterCacheStatus]
+struct WebRouter {
+    routes: [WebRoute]
+    current: String
+    status: WebNavigationStatus
+    cache: [String]
+    cache_status: [WebRouterCacheStatus]
 }
 
-pub fn new() -> WebRouter Never! {
+fn new() -> WebRouter Never! {
     WebRouter{routes: [WebRoute]{}, current: "/", status: WebNavigationStatus.Idle, cache: [String]{}, cache_status: [WebRouterCacheStatus]{}}
 }
 
-pub fn route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], handler: fn(WebNavigation) -> String) -> WebRouter WebRouterError! {
+fn route(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], handler: fn(WebNavigation) -> String) -> WebRouter WebRouterError! {
     add_route(router, pattern, fields, search, WebRouterSearchCodec.Query, handler, false)
 }
 
-pub fn route_with_search_codec(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String) -> WebRouter WebRouterError! {
+fn route_with_search_codec(router: WebRouter, pattern: String, fields: [WebRouterField], search: [WebRouterField], codec: WebRouterSearchCodec, handler: fn(WebNavigation) -> String) -> WebRouter WebRouterError! {
     add_route(router, pattern, fields, search, codec, handler, false)
 }
 
-pub fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter WebRouterError! {
+fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter WebRouterError! {
     loop existing in router.routes {
         if existing.pattern == "*" -> return Err(WebRouterError.Invalid)
     }
@@ -104,41 +104,41 @@ pub fn not_found(router: WebRouter, handler: fn(String) -> String) -> WebRouter 
     Ok(WebRouter{routes: routes, current: router.current, status: router.status, cache: router.cache, cache_status: router.cache_status})
 }
 
-pub fn navigate(router: WebRouter, path: String) -> WebNavigation WebRouterError! {
+fn navigate(router: WebRouter, path: String) -> WebNavigation WebRouterError! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
     nav :: match_path(router, path) ?? return Err(WebRouterError.NotFound)
     Ok(nav)
 }
 
-pub fn preload(router: &WebRouter, path: String) -> WebNavigation WebRouterError! {
+fn preload(router: &WebRouter, path: String) -> WebNavigation WebRouterError! {
     if path.len() == 0 || path.len() > C_MAX_ROUTER_PATH || !(valid_percent_encoding(path) ?? false) -> return Err(WebRouterError.Invalid)
-    nav := match_path(~router, path) ?? return Err(WebRouterError.NotFound)
+    nav := match_path(router, path) ?? return Err(WebRouterError.NotFound)
     nav.status = WebNavigationStatus.Preloading
-    router.current = ~path
+    router.current = path.copy()
     router.status = WebNavigationStatus.Preloading
     if cache_path(&router, path, WebRouterCacheStatus.Stale) < 0 -> return Err(WebRouterError.Invalid)
     Ok(nav)
 }
 
-pub fn abort(router: &WebRouter) -> Bool Never! {
+fn abort(router: &WebRouter) -> Bool Never! {
     if router.status != WebNavigationStatus.Preloading && router.status != WebNavigationStatus.Pending -> return false
     router.status = WebNavigationStatus.Aborted
     true
 }
 
-pub fn stale(router: WebRouter, path: String) -> Int Never! {
+fn stale(router: WebRouter, path: String) -> Int Never! {
     if cache_state(router, path) == WebRouterCacheStatus.Stale -> return 1
     0
 }
 
-pub fn invalidate(router: &WebRouter, path: String) -> Int Never! {
+fn invalidate(router: &WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
     _ :: cache_path(&router, path, WebRouterCacheStatus.Invalidated)
     1
 }
 
-pub fn collect(router: &WebRouter, path: String) -> Int Never! {
+fn collect(router: &WebRouter, path: String) -> Int Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 -> return 0
     _ :: cache_path(&router, path, WebRouterCacheStatus.Collected)
@@ -146,11 +146,11 @@ pub fn collect(router: &WebRouter, path: String) -> Int Never! {
 }
 
 
-pub fn current(router: WebRouter) -> WebNavigationState Never! {
+fn current(router: WebRouter) -> WebNavigationState Never! {
     WebNavigationState{path: router.current, status: router.status}
 }
 
-pub fn link(router: WebRouter, name: String, params: [String:String], search: [String:String]) -> String WebRouterError! {
+fn link(router: WebRouter, name: String, params: [String:String], search: [String:String]) -> String WebRouterError! {
     if name.len() == 0 -> return Err(WebRouterError.Invalid)
     loop r in router.routes {
         if r.name == name {
@@ -171,7 +171,7 @@ pub fn link(router: WebRouter, name: String, params: [String:String], search: [S
     Err(WebRouterError.NotFound)
 }
 
-pub fn cache_show(router: WebRouter) -> String Never! {
+fn cache_show(router: WebRouter) -> String Never! {
     out := ""
     loop i in 0..<router.cache.len() {
         if i > 0 -> out = "{out},"
@@ -180,7 +180,7 @@ pub fn cache_show(router: WebRouter) -> String Never! {
     out
 }
 
-pub fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus Never! {
+fn cache_state(router: WebRouter, path: String) -> WebRouterCacheStatus Never! {
     idx := cache_index(router.cache, path)
     if idx < 0 || idx >= router.cache_status.len() -> return WebRouterCacheStatus.Collected
     router.cache_status[idx]
@@ -318,12 +318,12 @@ fn query_fields(path: String, fields: [WebRouterField], codec: WebRouterSearchCo
     seen := [String]{}
     loop piece in split_amp(query) {
         if piece.len() == 0 -> return None
-        eq :: find_byte(~piece, 61)
-        if eq < 1 || !(valid_percent_encoding(~piece) ?? false) -> return None
-        key :: percent_decode(slice_text(~piece, 0, eq), true) ?? return None
-        value :: percent_decode(slice_text(~piece, eq + 1, piece.len()), true) ?? return None
+        eq :: find_byte(piece, 61)
+        if eq < 1 || !(valid_percent_encoding(piece) ?? false) -> return None
+        key :: percent_decode(slice_text(piece, 0, eq), true) ?? return None
+        value :: percent_decode(slice_text(piece, eq + 1, piece.len()), true) ?? return None
         if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
-        &seen.push(~key)
+        &seen.push(key.copy())
         &out.push(WebRouterField{name: key, value: value})
     }
     Val(out)
@@ -336,17 +336,17 @@ fn parse_json_query(text: String, fields: [WebRouterField]) -> [WebRouterField]?
     seen := [String]{}
     out := [WebRouterField]{}
     loop member in split_json_members(inner) {
-        piece := trim_json(~member)
+        piece := trim_json(member)
         if piece.len() == 0 -> return None
-        colon := find_byte(~piece, 58)
+        colon := find_byte(piece, 58)
         if colon <= 0 -> return None
-        key_text := trim_json(slice_text(~piece, 0, colon))
-        value_text := trim_json(slice_text(~piece, colon + 1, piece.len()))
+        key_text := trim_json(slice_text(piece, 0, colon))
+        value_text := trim_json(slice_text(piece, colon + 1, piece.len()))
         key :: json_unquote(key_text) ?? return None
         value :: json_unquote(value_text) ?? return None
-        if !valid_router_name(~key) || !field_name_allowed(fields, ~key) || contains_text(seen, ~key) || has_control_text(~value) -> return None
-        &seen.push(~key)
-        &out.push(WebRouterField{name: ~key, value: ~value})
+        if !valid_router_name(key) || !field_name_allowed(fields, key) || contains_text(seen, key) || has_control_text(value) -> return None
+        &seen.push(key.copy())
+        &out.push(WebRouterField{name: key.copy(), value: value.copy()})
     }
     Val(out)
 }
@@ -449,7 +449,7 @@ fn route_fields_valid(pattern: String, fields: [WebRouterField], search: [WebRou
         if raw.len() > 0 && raw[0] == (U8{58}) {
             name := slice_text(segment, 1, segment.len())
             if !valid_router_name(name) || contains_text(path_names, name) -> return false
-            &path_names.push(~name)
+            &path_names.push(name.copy())
         }
     }
     seen_fields := [String]{}
@@ -528,7 +528,7 @@ fn cache_path(router: &WebRouter, path: String, state: WebRouterCacheStatus) -> 
         return idx
     }
     if router.cache.len() >= 256 -> return -1
-    &router.cache.push(~path)
+    &router.cache.push(path.copy())
     &router.cache_status.push(state)
     router.cache.len() - 1
 }

@@ -94,34 +94,11 @@ fn without_package_imports(text: &str, core_imports: &mut std::collections::Hash
     kept
 }
 
-/// Lower a checked bundle through the canonical MIR/artifact seam used by
-/// resident JIT tests.  Keep the target and artifact identity together so
-/// callers cannot accidentally invoke a backend with a bundle or mismatched
-/// artifact.
-pub fn lower_cranelift_bundle(
-    bundle: &jet::AST::ProgramBundle,
-) -> Result<
-    (
-        jet_foundation::MIR::MirProgram,
-        jet_foundation::MIR::MirArtifactId,
-    ),
-    String,
-> {
-    jet::Codegen::TIR::lower_checked_mir_program_for(
-        bundle,
-        jet_foundation::MIR::MirArtifactRequest::new(
-            jet_foundation::MIR::MirArtifactTarget::Cranelift,
-            jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-            jet_foundation::MIR::MirArtifactBuildMode::Dev,
-        ),
-    )
-    .map_err(|error| error.to_string())
-}
-
-/// Lower a checked bundle for the interpreter backend while preserving the
-/// same canonical artifact contract as the resident JIT path.
+/// Lower a checked bundle for the interpreter backend through the canonical
+/// MIR/artifact seam, keeping the target and artifact identity together.
 pub fn lower_interpreter_bundle(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
 ) -> Result<
     (
         jet_foundation::MIR::MirProgram,
@@ -131,6 +108,7 @@ pub fn lower_interpreter_bundle(
 > {
     jet::Codegen::TIR::lower_checked_mir_program_for(
         bundle,
+        checked_nominals,
         jet_foundation::MIR::MirArtifactRequest::new(
             jet_foundation::MIR::MirArtifactTarget::Interpreter,
             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
@@ -144,208 +122,119 @@ pub fn development_policy() -> jet_pkg_model::Package::ReleaseDevtoolsPolicy {
     jet_pkg_model::Package::ReleaseDevtoolsPolicy::development()
 }
 
-pub fn cranelift_resident_safe(bundle: &jet::AST::ProgramBundle) -> bool {
-    lower_cranelift_bundle(bundle)
-        .map(|(program, _)| jet_jit::resident_jit_safe_program(&program))
-        .unwrap_or(false)
-}
-
-pub fn cranelift_resident_safe_detail(bundle: &jet::AST::ProgramBundle) -> String {
-    match lower_cranelift_bundle(bundle) {
-        Ok((program, _)) => jet_jit::resident_jit_safe_program_detail(&program),
-        Err(error) => error,
-    }
-}
-
-pub fn compile_cranelift_bundle(
+pub fn run_interpreter_checked_bundle(
     bundle: &jet::AST::ProgramBundle,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> Result<(), String> {
-    let (program, artifact) = lower_cranelift_bundle(bundle)?;
-    jet_jit::try_compile_program(&program, artifact, policy)
-}
-
-#[derive(Debug, Clone)]
-pub struct CraneliftTierPlan {
-    pub whole_interp: bool,
-    pub native: std::collections::BTreeSet<String>,
-    pub deopt: Vec<(String, String)>,
-    pub gap: Option<String>,
-    pub rows: Vec<jet_jit::TierRow>,
-}
-
-pub fn cranelift_tier_plan(bundle: &jet::AST::ProgramBundle) -> CraneliftTierPlan {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    let plan = jet_jit::plan_mir_tiers(&program, artifact);
-    let rows = plan.rows;
-    let function_name = |id| {
-        rows.iter()
-            .find(|row| row.function == id)
-            .map(|row| row.function_name.clone())
-            .unwrap_or_else(|| format!("function#{:?}", id))
-    };
-    CraneliftTierPlan {
-        whole_interp: plan.whole_program_deopt,
-        native: plan.native.into_iter().map(function_name).collect(),
-        deopt: plan
-            .deopt
-            .into_iter()
-            .map(|(id, reason)| (function_name(id), reason))
-            .collect(),
-        gap: plan.gap.map(|gap| format!("{gap:?}")),
-        rows,
-    }
-}
-
-pub fn cranelift_strict_run(
-    bundle: &jet::AST::ProgramBundle,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> Result<jet::Interpreter::RunOutcome, String> {
-    let (program, artifact) = lower_cranelift_bundle(bundle)?;
-    jet_jit::run_resident_strict_for_test(&program, artifact, policy)
-}
-
-pub fn cranelift_func_safety(
-    bundle: &jet::AST::ProgramBundle,
-    name: &str,
-) -> jet_jit::ResidentJitSafety {
-    let (program, _) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::resident_jit_func_safety_detail(&program, name)
-}
-
-pub fn cranelift_main_ops(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_dump_main_ops(&program, artifact)
-}
-pub fn cranelift_main_stmts(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_dump_main_stmts(&program, artifact)
-}
-
-pub fn cranelift_func_names(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, _) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_program_func_names(&program)
-}
-
-pub fn cranelift_spawn_stats(bundle: &jet::AST::ProgramBundle) -> (usize, usize) {
-    let (program, _) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_spawn_stats(&program)
-}
-
-pub fn cranelift_uncovered_detail(bundle: &jet::AST::ProgramBundle) -> Option<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_main_uncovered_detail(&program, artifact)
-}
-
-pub fn cranelift_mixed_switch_conds(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet_jit::jit_dump_mixed_switch_conds(&program, artifact)
-}
-
-pub fn run_cranelift_bundle(
-    backend: &mut jet_jit::CraneliftBackend,
-    bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet::JitBackend::JitBackend::run(backend, &program, artifact, try_anyway, policy)
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
+    jet::Interpreter::run_checked(&program, artifact, try_anyway, policy)
 }
 
-pub fn hot_swap_cranelift_bundle(
-    backend: &mut jet_jit::CraneliftBackend,
-    module_name: &str,
+/// Run a checked bundle through the in-process evaluator (the Canvas dev
+/// host), with its dev step budget.
+pub fn run_interpreted(
     bundle: &jet::AST::ProgramBundle,
-    try_anyway: bool,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet::JitBackend::JitBackend::hot_swap(
-        backend,
-        module_name,
-        &program,
-        artifact,
-        try_anyway,
+) -> jet::Interpreter::RunOutcome {
+    run_interpreter_checked_bundle(
+        bundle,
+        checked_nominals,
+        false,
         policy,
     )
 }
 
-pub fn run_interpreter_checked_bundle(
-    bundle: &jet::AST::ProgramBundle,
-    try_anyway: bool,
-    invocation: jet::Interpreter::InterpreterInvocation,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> jet::Interpreter::RunOutcome {
-    let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
-    jet::Interpreter::run_checked(&program, artifact, try_anyway, invocation, policy)
+/// One run of `file` on the tier a test names. `use_interpreter` selects the
+/// in-process evaluator — what the Canvas dev host iterates on. Otherwise the
+/// default `jet run` (build, then execute): its front end is the build front
+/// end, so a rejected program comes back as `Problems` carrying the same
+/// diagnostics `jet run` renders, and an accepted one runs as a child process
+/// (the default tier only exists behind the binary). `try_anyway` is an
+/// evaluator-only knob.
+pub fn dev_run(file: &str, try_anyway: bool, use_interpreter: bool) -> jet::Interpreter::RunOutcome {
+    if use_interpreter {
+        return jet::Interpreter::dev_iteration(file, try_anyway);
+    }
+    if let Err(diagnostics) = jet::compile_with_path("", file) {
+        if diagnostics
+            .iter()
+            .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
+        {
+            return jet::Interpreter::RunOutcome::Problems(diagnostics);
+        }
+    }
+    let scratch = Scratch::new("jet_default_run");
+    let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .arg("run")
+        .arg(file)
+        .env("JET_STORE_DIR", scratch.path.join("cache"))
+        .env("JETPACK_ROOT", scratch.path.join("jetpack"))
+        .env("JETPACK_ENV", "1")
+        .env("NO_COLOR", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("spawn default `jet run`");
+    jet::Interpreter::RunOutcome::Ran {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        exit_code: output.status.code().unwrap_or(-1),
+    }
 }
 
 pub fn run_interpreter_named_job(
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     file: &str,
     name: &str,
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     let args = vec![
         file.to_owned(),
-        jet_jit::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
+        jet_evalhost::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
         name.to_owned(),
     ];
-    jet_jit::with_program_args(&args, || {
+    jet_evalhost::with_program_args(&args, || {
         jet::Interpreter::dev_run_snapshot(
             &program,
             artifact,
             try_anyway,
-            jet::Interpreter::InterpreterInvocation::DevInterpret,
             policy,
         )
     })
 }
 
-pub fn restart_cranelift_bundle(
-    backend: &mut jet_jit::CraneliftBackend,
-    bundle: &jet::AST::ProgramBundle,
-    try_anyway: bool,
-    policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-) -> jet::Interpreter::RunOutcome {
-    let (program, artifact) =
-        lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-    jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
-}
-
 pub fn run_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::run(backend, &program, artifact, try_anyway, policy)
 }
 pub fn hot_swap_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
     module_name: &str,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::hot_swap(
         backend,
         module_name,
@@ -359,21 +248,14 @@ pub fn hot_swap_interpreter_bundle(
 pub fn restart_interpreter_bundle(
     backend: &mut jet::JitBackend::InterpreterBackend,
     bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
     try_anyway: bool,
     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
 ) -> jet::Interpreter::RunOutcome {
     let (program, artifact) =
-        lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
+        lower_interpreter_bundle(bundle, checked_nominals)
+            .expect("checked bundle must lower to interpreter MIR");
     jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
-}
-pub fn cranelift_lowers(bundle: &jet::AST::ProgramBundle) -> bool {
-    lower_cranelift_bundle(bundle).is_ok()
-}
-
-pub fn cranelift_lower_error(bundle: &jet::AST::ProgramBundle) -> String {
-    lower_cranelift_bundle(bundle)
-        .err()
-        .unwrap_or_else(|| "canonical Cranelift MIR lowering succeeded".to_owned())
 }
 
 // --- runaway-test guard rails -----------------------------------------------
@@ -821,8 +703,8 @@ pub fn unique_tmp(prefix: &str) -> PathBuf {
 //
 // An interactive example's checked-in golden is only reproducible against the
 // answers it was recorded with, and five suites feed those answers
-// (`tests/golden.rs`, `tests/terminal.rs`, `tests/jit_run.rs`,
-// `tests/corelib_parts/http_data.rs`, and the `tests/dev*.rs` batteries). They
+// (`tests/golden.rs`, `tests/terminal.rs`, `tests/corelib_parts/http_data.rs`,
+// and the `tests/dev*.rs` batteries). They
 // live here once. A second copy is how a golden and a harness drift apart while
 // neither one looks wrong on its own — and a harness that feeds nothing at all
 // silently compares a no-input run against a fed-input golden.
@@ -894,6 +776,23 @@ const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin {
     tty_only: "",
 };
 
+const TERMINAL_SOURCE_STDIN: ExampleStdin = ExampleStdin {
+    piped: "first\r\nsecond\n",
+    tty_only: "",
+};
+
+const TERMINAL_CONFIRM_STDIN: ExampleStdin = ExampleStdin {
+    piped: " YeS \r\n",
+    tty_only: "",
+};
+
+/// `loops/read_sentinel` answers: two lines, the blank sentinel, then a line
+/// the loop must never print because the sentinel already stopped it.
+const READ_SENTINEL_STDIN: ExampleStdin = ExampleStdin {
+    piped: "alpha\nbeta\n\nafter-sentinel\n",
+    tty_only: "",
+};
+
 /// The stdin an example needs, or `None` for the examples that read nothing.
 ///
 /// Keyed by example stem (`<topic>/<name>`) so a harness that already walks
@@ -909,6 +808,9 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
         "io/stdin_input" => Some(&STDIN_INPUT_STDIN),
         "io/stdin_read_all" => Some(&STDIN_READ_ALL_STDIN),
         "io/stdin_readline" => Some(&STDIN_READLINE_STDIN),
+        "io/terminal_source" => Some(&TERMINAL_SOURCE_STDIN),
+        "io/terminal_confirm" => Some(&TERMINAL_CONFIRM_STDIN),
+        "loops/read_sentinel" => Some(&READ_SENTINEL_STDIN),
         _ => None,
     }
 }
@@ -916,7 +818,7 @@ pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
 /// Run the built `jet` binary with `answers` on stdin and collect its output.
 ///
 /// A program that reads stdin needs a child process to read from. The
-/// in-process entry points (`dev_iteration`, `CraneliftBackend::run`) read the
+/// in-process entry points (`dev_iteration`) read the
 /// test binary's own fd 0, which every other test on every other thread
 /// shares, so there is nothing per-run to redirect there.
 pub fn jet_cli_output_with_stdin(args: &[&str], answers: &str) -> std::process::Output {
@@ -999,6 +901,7 @@ pub fn add_generated_rust(
     let prepared = if has_rust_ffi {
         jet_store::runtime::PreparedRuntime::inline(generated)
     } else {
+        let _build_lock = lock_shared_runtime_build(generated, rustc_flags);
         match jet_store::runtime::prepare(
             &store,
             std::ffi::OsStr::new("rustc"),
@@ -1027,6 +930,41 @@ pub fn add_generated_rust(
         .arg(path);
     prepared.add_rustc_args(command);
     prepared
+}
+
+/// When a suite shares one prebuilt runtime directory between its example
+/// processes (`JET_RUNTIME_PREBUILD_DIR`, set by `tests/golden.rs` to the
+/// `jet-runtime/` directory beside its binary), hold an exclusive lock per
+/// runtime/Core text while `prepare` runs. The first process to need a runtime
+/// compiles and exports it; the others wait, then link the exported rlib in
+/// place instead of compiling the same ~6 MB closure again. The OS drops the
+/// lock when its holder exits, so a killed process never wedges the key.
+fn lock_shared_runtime_build(generated: &str, rustc_flags: &[&str]) -> Option<fs::File> {
+    use std::hash::{Hash, Hasher};
+    let dir = std::env::var_os(jet_store::runtime::PREBUILD_EXPORT_ENV)
+        .filter(|dir| !dir.is_empty())
+        .map(PathBuf::from)?;
+    // The closure between the codegen markers is the runtime crate's whole
+    // input (`jet_store::runtime`); the flags are the rest of its identity.
+    let closure = &generated[generated.find("// jet:cached-runtime-begin\n")?..];
+    let end = closure
+        .find("// jet:cached-core-end\n")
+        .or_else(|| closure.find("// jet:cached-runtime-end\n"))?;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    closure[..end].hash(&mut hasher);
+    rustc_flags.hash(&mut hasher);
+    fs::create_dir_all(&dir)
+        .unwrap_or_else(|error| panic!("create prebuilt runtime dir {}: {error}", dir.display()));
+    let path = dir.join(format!(".build-{:016x}.lock", hasher.finish()));
+    let lock = fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .unwrap_or_else(|error| panic!("open runtime build lock {}: {error}", path.display()));
+    lock.lock()
+        .unwrap_or_else(|error| panic!("lock runtime build {}: {error}", path.display()));
+    Some(lock)
 }
 
 /// A throwaway directory under the shared disk-backed test scratch root,
@@ -1230,21 +1168,19 @@ pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
 }
 
 /// Text that only appears when a Rust control transfer killed a process instead
-/// of becoming a Jet report (R13 / D-JITUNWIND1, #1995 / #1997).
+/// of becoming a Jet report (R13, #1995 / #1997).
 ///
-/// One list, because the two checks that need it must not drift: the JIT
-/// boundary suite (`tests/jit_no_unwind_boundary.rs`) asserts a cancelled task
-/// never aborts, and the example-corpus gate refuses to *classify* an abort at
-/// all. `streams/generators` is why the second one exists — it died with
-/// `panic in a destructor during cleanup` and the gate filed it as the benign
-/// row `AOT exit 1`, so an abort became a shrink-only ledger entry instead of a
-/// failure.
+/// One list, so every check that refuses to classify an abort reads the same
+/// markers. `streams/generators` is why it exists — it died with
+/// `panic in a destructor during cleanup` and a corpus gate filed it as the
+/// benign row `AOT exit 1`, so an abort became a shrink-only ledger entry
+/// instead of a failure.
 ///
 /// The four families, which are four different defects:
 ///
 /// * `failed to initiate panic` is `_URC_END_OF_STACK`: phase 1 walked off the
-///   top of the stack without finding a handler, because `cranelift-jit`
-///   registers no unwind information for the code it emits.
+///   top of the stack without finding a handler, because a frame on the stack
+///   carried no unwind information.
 /// * `non-unwinding panic` / `panic in a function that cannot unwind` is an
 ///   `extern "C"` body's own abort-on-unwind shim.
 /// * `panic in a destructor during cleanup` is a second raise from drop glue
@@ -1623,7 +1559,16 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
             let Some(next) = bytes.get(at + 1).copied() else {
                 return false;
             };
-            next == b'\\' || !ident_continue(next) || bytes.get(at + 2) == Some(&b'\'')
+            // A non-ASCII char literal (`'™'`) closes after its whole UTF-8
+            // sequence, not after its lead byte; reading it as a lifetime
+            // would open a char literal at its closing quote instead.
+            let width = match next {
+                0xF0..=0xFF => 4,
+                0xE0..=0xEF => 3,
+                0xC0..=0xDF => 2,
+                _ => 1,
+            };
+            next == b'\\' || !ident_continue(next) || bytes.get(at + 1 + width) == Some(&b'\'')
         }
 
         fn matching_brace_end(bytes: &[u8], opening: usize) -> Option<usize> {
@@ -2043,6 +1988,9 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
     s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
     s = strip_vetted_module(&s, "jet_std_common_types");
     s = strip_vetted_module(&s, "jet_fs_chown");
+    s = strip_vetted_module(&s, "jet_fs_handles");
+    s = strip_vetted_module(&s, "jetc_fd_seed");
+    s = strip_vetted_module(&s, "jet_file_lock_native");
     s = strip_vetted_module(&s, "jet_std_math_task_mem");
     s = strip_vetted_module(&s, "jet_std_reactive_event_watch");
     s = strip_vetted_module(&s, "jet_std_ffi_callbacks");
@@ -2072,6 +2020,8 @@ pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
         s = next;
     }
     s = strip_vetted_module(&s, "jet_os_interrupt_ffi");
+    // The native comptime worker's protocol descriptor duplicate (Prelude/Core.rs).
+    s = strip_vetted_module(&s, "jet_native_comptime_channel");
     s = strip_mod(&s, "jet_os_interrupt");
     s = strip_raylib_bridge(&s);
     while s.contains("mod __jet___c_") {
@@ -2288,6 +2238,22 @@ unsafe { user_pointer() }
 }
 
 #[test]
+fn vetted_module_stripping_reads_non_ascii_char_literals() {
+    let generated = r#"
+fn entity(name: &str) -> Option<char> {
+    match name { "trade" => Some('™'), "mdash" => Some('—'), _ => None }
+}
+mod jet_gtk {
+    type Probe = unsafe extern "C" fn();
+}
+unsafe { user_pointer() }
+"#;
+    let stripped = strip_vetted_prelude_modules(generated);
+    assert!(!stripped.contains("mod jet_gtk"));
+    assert!(stripped.contains("unsafe { user_pointer() }"));
+}
+
+#[test]
 fn term_mode_stripping_removes_all_platform_variants_without_hiding_user_unsafe() {
     let generated = r#"
 #[cfg(unix)]
@@ -2327,6 +2293,8 @@ fn audited_source_markers_strip_only_registered_regions() {
         "jet_testing_history_foundation",
         "jet_testing_history_top",
         "jet_data_flow",
+        "jet_native_comptime_channel",
+        "jetc_fd_seed",
     ];
     let mut generated = String::new();
     for name in names {

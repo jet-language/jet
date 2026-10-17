@@ -1,0 +1,18 @@
+# HAND-PORT tests/db_policy.rs:204-211 typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# ORACLE-LITERAL; exact original scope/hostile/blob tier matrices.
+fixture: typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity.stdout.expected
+stderr: == default

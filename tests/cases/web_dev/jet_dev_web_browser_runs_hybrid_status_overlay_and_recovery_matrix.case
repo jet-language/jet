@@ -1,0 +1,24 @@
+# Original tests/web_dev.rs:1494-1584; verbatim sources and original predicates.
+# PENDING-GRAMMAR(batch-four); PENDING-SEAM(read_bytes/DFileRaw).
+fixture: jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix.fixture
+copy: {root}/tests/cases/web_dev/support.fixture/HTTP.jet claims/HTTP.jet
+env: S5_ROOT={work}
+requires: tool:node
+requires: tool:chromium
+requires: tool:script
+env: S5_PORT={free-port:web}
+session app raw: script -qfec "env NO_COLOR=1 {jet} dev app.jet --target=web --canvas --verbose --port={free-port:web}" browser-terminal.typescript
+stdout: null
+stderr: null
+step: jet test claims
+exit: 0
+step: node {root}/Tools/web-dev-test/hybrid.mjs --port {free-port:web} --source {work}/app.jet --terminal-transcript {work}/browser-terminal.typescript
+exit: 0
+stdout: ~ "PASS hybrid dev-server browser matrix" # original browser runner completion substring
+file: app.jet = edited.source
+capture: before = size file browser-terminal.typescript
+send app: "\u0003"
+wait app timeout 5s
+exit: 130
+capture: after = size file browser-terminal.typescript
+file.slice({cap:before},{cap:after}): browser-terminal.typescript ~ "\u001b[r" # original final_transcript[before_ctrl_c..].contains

@@ -1,0 +1,73 @@
+package {
+    name: "tooling_compute_autodiff"
+    version: "0.1.0"
+    authority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Panic, Rand, Secret, Time] } }
+}
+
+// D-COMPUTE-AUTODIFF1 / #1141–#1143: gradient/VJP/JVP, sparse CSR, SIMD tile, profile.
+use core.compute as compute
+
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
+
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    (dw, dx) :: compute.gradient(loss, w.copy(), x.copy())
+    print("grad:{compute.to_list(dw)}")
+    print("grad_x:{compute.to_list(dx)}")
+
+    d_loss :: compute.gradient(loss)
+    (transform_w, transform_x) :: d_loss(w.copy(), x.copy())
+    print("transform_w:{compute.to_list(transform_w)}")
+    print("transform_x:{compute.to_list(transform_x)}")
+
+    curvature :: compute.gradient(d_loss)
+    curvature_value :: curvature(w, x)
+    print("curvature_ww:{compute.to_list(curvature_value.w.w)}")
+    print("curvature_wx:{compute.to_list(curvature_value.w.x)}")
+    print("curvature_xw:{compute.to_list(curvature_value.x.w)}")
+    print("curvature_xx:{compute.to_list(curvature_value.x.x)}")
+
+    tw :: compute.ones([1]) ?? panic("tw")
+    tx :: compute.ones([1]) ?? panic("tx")
+    d_loss_jvp :: compute.jvp(loss)
+    (jvp_value, jvp_tangent) :: d_loss_jvp(w, x, tw, tx)
+    print("jvp_value:{compute.to_list(jvp_value)}")
+    print("jvp:{compute.to_list(jvp_tangent)}")
+
+    vjp_run :: compute.vjp(loss, w.copy(), x.copy())
+    print("vjp_value:{compute.to_list(vjp_run.value)}")
+    pull_fn :: vjp_run.pull
+    vjp_pull :: pull_fn(tw.copy())
+    print("vjp:{compute.to_list(vjp_pull.w)}")
+    print("vjp_grads_x:{compute.to_list(vjp_run.grads.x)}")
+
+    (vjp_value, vjp_pull_fn) :: compute.vjp(loss, w.copy(), x.copy())
+    vjp_pair :: vjp_pull_fn(tw.copy())
+    print("vjp_pair_value:{compute.to_list(vjp_value)}")
+    print("vjp_pair_pull_w:{compute.to_list(vjp_pair.w)}")
+
+    (value, selected) :: compute.value_and_gradient(loss, w.copy(), x.copy(), wrt: [w])
+    print("value:{compute.to_list(value)}")
+    print("selected_w:{compute.to_list(selected.w)}")
+
+    m := compute.matrix(2, 2, 0.0) ?? panic("m")
+    compute.set(&m, [0, 0], 1.0) ?? panic("set")
+    compute.set(&m, [1, 1], 2.0) ?? panic("set")
+    sp :: compute.to_sparse(m) ?? panic("sparse")
+    print("nnz:{compute.sparse_nnz(sp)}")
+    v :: compute.from_list([3.0, 4.0]) ?? panic("v")
+    mv :: compute.sparse_mv(sp, v) ?? panic("mv")
+    print("mv:{compute.to_list(mv)}")
+
+    tile :: compute.matmul_f32_tile(m, m) ?? panic("tile")
+    print("tile:{compute.numel(tile)}")
+    print("profile:{compute.profile_show()}")
+
+    stream :: compute.stream_new()
+    compute.stream_sync(stream) ?? panic("sync")
+    print(compute.stream_show(stream))
+
+    ok :: compute.kernel_bounds_ok([2, 2], [0, 1]) ?? panic("bounds")
+    print("bounds:{ok}")
+}

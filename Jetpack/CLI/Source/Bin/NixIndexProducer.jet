@@ -35,7 +35,7 @@ struct NixIndexStagedTarget {
 
 // Process entry: run `args` (without the program name) and return the exit
 // code, reporting a failure on stderr.
-pub fn cli_nix_index_main(args: [String]) -[FS, Env, IO]> Int {
+fn cli_nix_index_main(args: [String]) -[FS, Env, IO]> Int {
     if cli_nix_index_run(args) == {
         .Ok(_) -> 0
         .Err(error) -> {
@@ -158,11 +158,11 @@ fn cli_nix_index_released_unix(options: [String: String], release_metadata_path:
 
 // The local-import provenance binds the requested revision, system, and the
 // `local-unofficial` tier at its top level; nested matches do not count.
-fn cli_nix_index_validate_local_provenance(value: DataTree, revision: String, system: String) CLIToolError! {
-    object :: pkg_json_object(value) ?? [String: DataTree]{}
+fn cli_nix_index_validate_local_provenance(value: Dyn, revision: String, system: String) CLIToolError! {
+    object :: pkg_json_object(value) ?? [String: Dyn]{}
     expected :: [(field: String, value: String)]{(field: "revision", value: revision), (field: "system", value: system), (field: "trust_tier", value: "local-unofficial")}
     loop entry in expected {
-        found :: pkg_json_text(object.get(entry.field) ?? DataTree.Null) ?? ""
+        found :: pkg_json_text(object.get(entry.field) ?? Dyn.Null) ?? ""
         if found != entry.value || !object.has_key(entry.field) -> return Err(CLIToolError.new("local import provenance has the wrong top-level {entry.field}"))
     }
 }
@@ -209,15 +209,15 @@ fn cli_nix_index_verify_differential(args: [String]) CLIToolError! -[FS, IO]> {
         if expected.get(key) != actual.get(key) -> &mismatches.push(key)
     }
     status :: if mismatches.len() == 0 -> "passed" else -> "failed"
-    report :: json.to_string(DataTree.Object([
-        "schema": DataTree.Int(1),
-        "channel": DataTree.Text(channel),
-        "revision": DataTree.Text(revision),
-        "system": DataTree.Text(system),
-        "records_compared": DataTree.Int(compared.len()),
-        "mismatches": DataTree.Int(mismatches.len()),
-        "status": DataTree.Text(status)
-    ]))
+    report :: json.to_string(Dyn.Object([
+        "schema": Dyn.Int(1),
+        "channel": Dyn.Text(channel),
+        "revision": Dyn.Text(revision),
+        "system": Dyn.Text(system),
+        "records_compared": Dyn.Int(compared.len()),
+        "mismatches": Dyn.Int(mismatches.len()),
+        "status": Dyn.Text(status)
+    ])) ?? return Err(CLIToolError.new(err.reason))
     files.write(report_path, "{report}\n") ?? return Err(CLIToolError.new("write differential report: {err}"))
     if mismatches.len() > 0 -> return Err(CLIToolError.new("differential verification failed: {mismatches.len()} mismatches; see {report_path}"))
     print("differential verification passed: all records compared, zero mismatches")
@@ -392,7 +392,7 @@ fn cli_nix_index_read_store_paths(path: String) -[FS]> [String] CLIToolError! {
     Ok(cli_sorted_unique(lines))
 }
 
-fn cli_nix_index_read_json_input(path: String, limit: Int, label: String) -[FS]> DataTree CLIToolError! {
+fn cli_nix_index_read_json_input(path: String, limit: Int, label: String) -[FS]> Dyn CLIToolError! {
     bytes :: cli_nix_index_read_file(path, limit, label)
     text :: String.from_bytes(bytes) ?? return Err(CLIToolError.new("{label} is not UTF-8"))
     value :: json.parse(text) ?? return Err(CLIToolError.new("parse {label}: {err.reason}"))
@@ -449,7 +449,7 @@ fn cli_nix_index_publish_partial(partial: String, path: String, bytes: [U8]) CLI
 // ── Staged JSON evidence ──
 
 // Whether any text value anywhere in `value` equals `needle`.
-fn cli_nix_index_contains_string(value: DataTree, needle: String) -> Bool Never! {
+fn cli_nix_index_contains_string(value: Dyn, needle: String) -> Bool Never! {
     if value == {
         .Text(text) -> text == needle
         .Array(items) -> {
@@ -469,7 +469,7 @@ fn cli_nix_index_contains_string(value: DataTree, needle: String) -> Bool Never!
 }
 
 // Whether any object anywhere in `value` has `field` equal to `needle`.
-fn cli_nix_index_contains_field_string(value: DataTree, field: String, needle: String) -> Bool Never! {
+fn cli_nix_index_contains_field_string(value: Dyn, field: String, needle: String) -> Bool Never! {
     if value == {
         .Object(fields) -> {
             loop entry in fields {
@@ -489,7 +489,7 @@ fn cli_nix_index_contains_field_string(value: DataTree, field: String, needle: S
 }
 
 // Every text value of `field` anywhere in `value`.
-fn cli_nix_index_collect_named_strings(value: DataTree, field: String, values: &[String]) Never! {
+fn cli_nix_index_collect_named_strings(value: Dyn, field: String, values: &[String]) Never! {
     if value == {
         .Object(fields) -> {
             loop entry in fields {
@@ -510,7 +510,7 @@ fn cli_nix_index_collect_named_strings(value: DataTree, field: String, values: &
 }
 
 // Every `/nix/store/` text value anywhere in `value`.
-fn cli_nix_index_collect_store_paths(value: DataTree, paths: &[String]) Never! {
+fn cli_nix_index_collect_store_paths(value: Dyn, paths: &[String]) Never! {
     if value == {
         .Text(text) -> if text.starts_with("/nix/store/") && !paths.contains(text) -> &paths.push(text)
         .Array(items) -> {
@@ -566,7 +566,7 @@ fn cli_nix_index_find_json_integer(bytes: [U8], names: [String]) -> Int? Never! 
     cli_nix_index_find_integer(value, names)
 }
 
-fn cli_nix_index_find_integer(value: DataTree, names: [String]) -> Int? Never! {
+fn cli_nix_index_find_integer(value: Dyn, names: [String]) -> Int? Never! {
     if value == {
         .Object(fields) -> {
             loop entry in fields {

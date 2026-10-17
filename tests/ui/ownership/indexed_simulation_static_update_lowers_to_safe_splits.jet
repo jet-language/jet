@@ -1,0 +1,25 @@
+
+struct Particle { position: Int, velocity: Int }
+struct Tile { force: Int }
+
+fn run() {
+    particles := [Particle]{
+        Particle{ position: 10, velocity: 2 },
+        Particle{ position: 20, velocity: 3 },
+        Particle{ position: 30, velocity: 4 }
+    }
+    grid :: [Tile]{
+        Tile{ force: 5 },
+        Tile{ force: 7 },
+        Tile{ force: 11 }
+    }
+
+    middle_before :: particles[1].copy()
+    left :: &particles[0]
+    right :: &particles[2]
+    left.velocity += grid[0].force
+    right.velocity += grid[2].force
+    left.position += left.velocity
+    right.position += right.velocity
+    print("{left.position},{middle_before.position},{right.position}")
+}

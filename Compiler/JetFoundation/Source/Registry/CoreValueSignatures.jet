@@ -6,12 +6,12 @@ fn core_value_fn_none(params: [Type]) -> Type Never! {
     Type.Fn{params: params, ret: None, effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None}
 }
 
-pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
+fn core_value_fixed_signature(module_name: String, member: String) -> CoreTypedCallSignature? {
     read :: AccessConvention.Read
     write :: AccessConvention.Write
     moved :: AccessConvention.Move
     unit :: core_sig_named("Unit")
-    data :: core_sig_named("DataTree")
+    data :: core_sig_named("Dyn")
     io_error :: core_sig_named("IOError")
     encoding_error :: core_sig_named("EncodingError")
     list_u8 :: Type.List{element: Type.IntN{signed: false, bits: 8}}
@@ -30,6 +30,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
     }
 
     if module_name == "core.data" {
+        if member == "__host_path_is_file" -> return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(list_u8, read)}, Val(core_sig_result(Type.Bool, core_sig_named("EncodingCause")))))
         if core_sig_one_of(member, [String]{"sum", "mean", "min", "max", "median", "variance", "stddev"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(list_float, read),
@@ -435,7 +436,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
         if core_sig_one_of(member, [String]{"number", "bytes", "duration", "ordinal"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, Val(Type.String)))
         }
-        if core_sig_one_of(member, [String]{"decimal", "grouped", "percent", "sci"}) {
+        if core_sig_one_of(member, [String]{"decimal", "percent", "sci"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
                 core_sig_positional(Type.Float, read), core_sig_positional(Type.Int, read),
             }, Val(Type.String)))
@@ -494,7 +495,7 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
             }, Val(core_sig_result(data, xml_error))))
         }
         if member == "to_string" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(Type.String)))
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(data, read)}, Val(core_sig_result(Type.String, xml_error))))
         }
         if member == "to_bytes" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
@@ -567,11 +568,6 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
         if member == "file" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(url)))
         }
-        if member == "data" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{
-                core_sig_positional(core_sig_named("MIME"), read), core_sig_positional(Type.String, read),
-            }, Val(url)))
-        }
         if member == "query" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(string_pairs, read)}, Val(Type.String)))
         }
@@ -624,9 +620,6 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
         }
     }
     if module_name == "core.net.mime" {
-        if member == "parse" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(core_sig_result(core_sig_named("MIME"), Type.String))))
-        }
         if core_sig_one_of(member, [String]{"from_extension", "extension"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Option{inner: Type.String})))
         }
@@ -662,9 +655,6 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
         }
         if member == "smtp" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(core_sig_named("SMTPConfig"), read)}, Val(core_sig_result(core_sig_named("Mailer"), email_error))))
-        }
-        if member == "smtp_from_env" {
-            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(core_sig_result(core_sig_named("Mailer"), email_error))))
         }
     }
 
@@ -1035,10 +1025,25 @@ pub fn core_value_fixed_signature(module_name: String, member: String) -> CoreTy
         if member == "enabled" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, Val(Type.Bool)))
         }
-        if member == "set_trace_id" {
+        if core_sig_one_of(member, [String]{"set_trace_id", "__trace_store"}) {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
         }
         if member == "setup" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
+        }
+        if member == "__level_load" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Int)))
+        }
+        if member == "__disabled_load" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{}, Val(Type.Bool)))
+        }
+        if core_sig_one_of(member, [String]{"__level_store", "__format_store", "__sample_store", "__sample_count_store"}) {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Int, read)}, None))
+        }
+        if member == "__disabled_store" {
+            return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.Bool, read)}, None))
+        }
+        if member == "__sink_store" {
             return Val(core_sig(module_name, member, [CoreCallTypedParameter]{core_sig_positional(Type.String, read)}, None))
         }
     }

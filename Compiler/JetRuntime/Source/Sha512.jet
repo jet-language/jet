@@ -1,0 +1,219 @@
+// FIPS 180-4 SHA-512. Reuses Core/crypto/crypto.jet:1145-1298 arithmetic.
+// Internal borrowed byte input, disjoint output64, caller scratch704 aligned8.
+// The 80-word schedule/state are wiped before return; no allocation or padding copy.
+// Signed words carry bit patterns; logical shifts mask off sign extension.
+fn rt_crypto_shr64(value: I64, shift: I64) -> I64 {
+    (value >> shift).bit_and((I64{9223372036854775807} >> (shift - I64{1})))
+}
+fn rt_crypto_rotr64(value: I64, shift: I64) -> I64 {
+    rt_crypto_shr64(value, shift).bit_or((value << (I64{64} - shift)))
+}
+fn rt_crypto_word64(high: I64, low: I64) -> I64 { (high << I64{32}).bit_or(low) }
+fn rt_sha512_k(round: I64) -> I64 {
+    if {
+        (round == I64{0}) -> rt_crypto_word64(I64{0x428a2f98}, I64{0xd728ae22})
+        (round == I64{1}) -> rt_crypto_word64(I64{0x71374491}, I64{0x23ef65cd})
+        (round == I64{2}) -> rt_crypto_word64(I64{0xb5c0fbcf}, I64{0xec4d3b2f})
+        (round == I64{3}) -> rt_crypto_word64(I64{0xe9b5dba5}, I64{0x8189dbbc})
+        (round == I64{4}) -> rt_crypto_word64(I64{0x3956c25b}, I64{0xf348b538})
+        (round == I64{5}) -> rt_crypto_word64(I64{0x59f111f1}, I64{0xb605d019})
+        (round == I64{6}) -> rt_crypto_word64(I64{0x923f82a4}, I64{0xaf194f9b})
+        (round == I64{7}) -> rt_crypto_word64(I64{0xab1c5ed5}, I64{0xda6d8118})
+        (round == I64{8}) -> rt_crypto_word64(I64{0xd807aa98}, I64{0xa3030242})
+        (round == I64{9}) -> rt_crypto_word64(I64{0x12835b01}, I64{0x45706fbe})
+        (round == I64{10}) -> rt_crypto_word64(I64{0x243185be}, I64{0x4ee4b28c})
+        (round == I64{11}) -> rt_crypto_word64(I64{0x550c7dc3}, I64{0xd5ffb4e2})
+        (round == I64{12}) -> rt_crypto_word64(I64{0x72be5d74}, I64{0xf27b896f})
+        (round == I64{13}) -> rt_crypto_word64(I64{0x80deb1fe}, I64{0x3b1696b1})
+        (round == I64{14}) -> rt_crypto_word64(I64{0x9bdc06a7}, I64{0x25c71235})
+        (round == I64{15}) -> rt_crypto_word64(I64{0xc19bf174}, I64{0xcf692694})
+        (round == I64{16}) -> rt_crypto_word64(I64{0xe49b69c1}, I64{0x9ef14ad2})
+        (round == I64{17}) -> rt_crypto_word64(I64{0xefbe4786}, I64{0x384f25e3})
+        (round == I64{18}) -> rt_crypto_word64(I64{0x0fc19dc6}, I64{0x8b8cd5b5})
+        (round == I64{19}) -> rt_crypto_word64(I64{0x240ca1cc}, I64{0x77ac9c65})
+        (round == I64{20}) -> rt_crypto_word64(I64{0x2de92c6f}, I64{0x592b0275})
+        (round == I64{21}) -> rt_crypto_word64(I64{0x4a7484aa}, I64{0x6ea6e483})
+        (round == I64{22}) -> rt_crypto_word64(I64{0x5cb0a9dc}, I64{0xbd41fbd4})
+        (round == I64{23}) -> rt_crypto_word64(I64{0x76f988da}, I64{0x831153b5})
+        (round == I64{24}) -> rt_crypto_word64(I64{0x983e5152}, I64{0xee66dfab})
+        (round == I64{25}) -> rt_crypto_word64(I64{0xa831c66d}, I64{0x2db43210})
+        (round == I64{26}) -> rt_crypto_word64(I64{0xb00327c8}, I64{0x98fb213f})
+        (round == I64{27}) -> rt_crypto_word64(I64{0xbf597fc7}, I64{0xbeef0ee4})
+        (round == I64{28}) -> rt_crypto_word64(I64{0xc6e00bf3}, I64{0x3da88fc2})
+        (round == I64{29}) -> rt_crypto_word64(I64{0xd5a79147}, I64{0x930aa725})
+        (round == I64{30}) -> rt_crypto_word64(I64{0x06ca6351}, I64{0xe003826f})
+        (round == I64{31}) -> rt_crypto_word64(I64{0x14292967}, I64{0x0a0e6e70})
+        (round == I64{32}) -> rt_crypto_word64(I64{0x27b70a85}, I64{0x46d22ffc})
+        (round == I64{33}) -> rt_crypto_word64(I64{0x2e1b2138}, I64{0x5c26c926})
+        (round == I64{34}) -> rt_crypto_word64(I64{0x4d2c6dfc}, I64{0x5ac42aed})
+        (round == I64{35}) -> rt_crypto_word64(I64{0x53380d13}, I64{0x9d95b3df})
+        (round == I64{36}) -> rt_crypto_word64(I64{0x650a7354}, I64{0x8baf63de})
+        (round == I64{37}) -> rt_crypto_word64(I64{0x766a0abb}, I64{0x3c77b2a8})
+        (round == I64{38}) -> rt_crypto_word64(I64{0x81c2c92e}, I64{0x47edaee6})
+        (round == I64{39}) -> rt_crypto_word64(I64{0x92722c85}, I64{0x1482353b})
+        (round == I64{40}) -> rt_crypto_word64(I64{0xa2bfe8a1}, I64{0x4cf10364})
+        (round == I64{41}) -> rt_crypto_word64(I64{0xa81a664b}, I64{0xbc423001})
+        (round == I64{42}) -> rt_crypto_word64(I64{0xc24b8b70}, I64{0xd0f89791})
+        (round == I64{43}) -> rt_crypto_word64(I64{0xc76c51a3}, I64{0x0654be30})
+        (round == I64{44}) -> rt_crypto_word64(I64{0xd192e819}, I64{0xd6ef5218})
+        (round == I64{45}) -> rt_crypto_word64(I64{0xd6990624}, I64{0x5565a910})
+        (round == I64{46}) -> rt_crypto_word64(I64{0xf40e3585}, I64{0x5771202a})
+        (round == I64{47}) -> rt_crypto_word64(I64{0x106aa070}, I64{0x32bbd1b8})
+        (round == I64{48}) -> rt_crypto_word64(I64{0x19a4c116}, I64{0xb8d2d0c8})
+        (round == I64{49}) -> rt_crypto_word64(I64{0x1e376c08}, I64{0x5141ab53})
+        (round == I64{50}) -> rt_crypto_word64(I64{0x2748774c}, I64{0xdf8eeb99})
+        (round == I64{51}) -> rt_crypto_word64(I64{0x34b0bcb5}, I64{0xe19b48a8})
+        (round == I64{52}) -> rt_crypto_word64(I64{0x391c0cb3}, I64{0xc5c95a63})
+        (round == I64{53}) -> rt_crypto_word64(I64{0x4ed8aa4a}, I64{0xe3418acb})
+        (round == I64{54}) -> rt_crypto_word64(I64{0x5b9cca4f}, I64{0x7763e373})
+        (round == I64{55}) -> rt_crypto_word64(I64{0x682e6ff3}, I64{0xd6b2b8a3})
+        (round == I64{56}) -> rt_crypto_word64(I64{0x748f82ee}, I64{0x5defb2fc})
+        (round == I64{57}) -> rt_crypto_word64(I64{0x78a5636f}, I64{0x43172f60})
+        (round == I64{58}) -> rt_crypto_word64(I64{0x84c87814}, I64{0xa1f0ab72})
+        (round == I64{59}) -> rt_crypto_word64(I64{0x8cc70208}, I64{0x1a6439ec})
+        (round == I64{60}) -> rt_crypto_word64(I64{0x90befffa}, I64{0x23631e28})
+        (round == I64{61}) -> rt_crypto_word64(I64{0xa4506ceb}, I64{0xde82bde9})
+        (round == I64{62}) -> rt_crypto_word64(I64{0xbef9a3f7}, I64{0xb2c67915})
+        (round == I64{63}) -> rt_crypto_word64(I64{0xc67178f2}, I64{0xe372532b})
+        (round == I64{64}) -> rt_crypto_word64(I64{0xca273ece}, I64{0xea26619c})
+        (round == I64{65}) -> rt_crypto_word64(I64{0xd186b8c7}, I64{0x21c0c207})
+        (round == I64{66}) -> rt_crypto_word64(I64{0xeada7dd6}, I64{0xcde0eb1e})
+        (round == I64{67}) -> rt_crypto_word64(I64{0xf57d4f7f}, I64{0xee6ed178})
+        (round == I64{68}) -> rt_crypto_word64(I64{0x06f067aa}, I64{0x72176fba})
+        (round == I64{69}) -> rt_crypto_word64(I64{0x0a637dc5}, I64{0xa2c898a6})
+        (round == I64{70}) -> rt_crypto_word64(I64{0x113f9804}, I64{0xbef90dae})
+        (round == I64{71}) -> rt_crypto_word64(I64{0x1b710b35}, I64{0x131c471b})
+        (round == I64{72}) -> rt_crypto_word64(I64{0x28db77f5}, I64{0x23047d84})
+        (round == I64{73}) -> rt_crypto_word64(I64{0x32caab7b}, I64{0x40c72493})
+        (round == I64{74}) -> rt_crypto_word64(I64{0x3c9ebe0a}, I64{0x15c9bebc})
+        (round == I64{75}) -> rt_crypto_word64(I64{0x431d67c4}, I64{0x9c100d4c})
+        (round == I64{76}) -> rt_crypto_word64(I64{0x4cc5d4be}, I64{0xcb3e42b6})
+        (round == I64{77}) -> rt_crypto_word64(I64{0x597f299c}, I64{0xfc657e2a})
+        (round == I64{78}) -> rt_crypto_word64(I64{0x5fcb6fab}, I64{0x3ad6faec})
+        else -> rt_crypto_word64(I64{0x6c44198c}, I64{0x4a475817})
+    }
+}
+fn rt_sha512_byte(input: I64, length: I64, at: I64, end: I64) -> I64 {
+    if (at < length) -> return rt_text_byte(input + at)
+    if (at == length) -> return I64{128}
+    if (at >= end - I64{8}) {
+        shift :: (end - I64{1} - at) * I64{8}
+        if (shift == I64{0}) -> return (length.bit_and(I64{31})) << I64{3}
+        return (length >> (shift - I64{3})).bit_and(I64{255})
+    }
+    I64{0}
+}
+fn rt_sha512_parts3_byte(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, length: I64, at: I64, end: I64) -> I64 {
+    if (at < left_len) -> return rt_text_byte(left + at)
+    if (at < left_len + right_len) -> return rt_text_byte(right + at - left_len)
+    if (at < length) -> return rt_text_byte(third + at - left_len - right_len)
+    return rt_sha512_byte(I64{1}, length, at, end)
+}
+#Arithmetic(.Wrapping)
+fn rt_sha2_64_parts3(input: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64, short: Bool) {
+    if (left_len < I64{0} || right_len < I64{0} || third_len < I64{0} || left_len > I64{9223372036854775671} - right_len || left_len + right_len > I64{9223372036854775671} - third_len) {
+        jet_rt_unreachable(I64{0}, I64{0})
+        return
+    }
+    length :: left_len + right_len + third_len
+    if short {
+        rt_text_store(scratch, rt_crypto_word64(I64{0xcbbb9d5d}, I64{0xc1059ed8}))
+        rt_text_store(scratch + I64{8}, rt_crypto_word64(I64{0x629a292a}, I64{0x367cd507}))
+        rt_text_store(scratch + I64{16}, rt_crypto_word64(I64{0x9159015a}, I64{0x3070dd17}))
+        rt_text_store(scratch + I64{24}, rt_crypto_word64(I64{0x152fecd8}, I64{0xf70e5939}))
+        rt_text_store(scratch + I64{32}, rt_crypto_word64(I64{0x67332667}, I64{0xffc00b31}))
+        rt_text_store(scratch + I64{40}, rt_crypto_word64(I64{0x8eb44a87}, I64{0x68581511}))
+        rt_text_store(scratch + I64{48}, rt_crypto_word64(I64{0xdb0c2e0d}, I64{0x64f98fa7}))
+        rt_text_store(scratch + I64{56}, rt_crypto_word64(I64{0x47b5481d}, I64{0xbefa4fa4}))
+    } else {
+        rt_text_store(scratch, rt_crypto_word64(I64{0x6a09e667}, I64{0xf3bcc908}))
+        rt_text_store(scratch + I64{8}, rt_crypto_word64(I64{0xbb67ae85}, I64{0x84caa73b}))
+        rt_text_store(scratch + I64{16}, rt_crypto_word64(I64{0x3c6ef372}, I64{0xfe94f82b}))
+        rt_text_store(scratch + I64{24}, rt_crypto_word64(I64{0xa54ff53a}, I64{0x5f1d36f1}))
+        rt_text_store(scratch + I64{32}, rt_crypto_word64(I64{0x510e527f}, I64{0xade682d1}))
+        rt_text_store(scratch + I64{40}, rt_crypto_word64(I64{0x9b05688c}, I64{0x2b3e6c1f}))
+        rt_text_store(scratch + I64{48}, rt_crypto_word64(I64{0x1f83d9ab}, I64{0xfb41bd6b}))
+        rt_text_store(scratch + I64{56}, rt_crypto_word64(I64{0x5be0cd19}, I64{0x137e2179}))
+    }
+    end :: ((length + I64{16}) / I64{128} + I64{1}) * I64{128}
+    schedule :: scratch + I64{64}
+    off := I64{0}
+    loop off < end {
+        t := I64{0}
+        loop {
+            if (t >= I64{16}) -> break
+            word := I64{0}
+            j := I64{0}
+            loop {
+                if (j >= I64{8}) -> break
+                word = (word << I64{8}).bit_or(rt_sha512_parts3_byte(input, left_len, right, right_len, third, length, off + t * I64{8} + j, end))
+                j += I64{1}
+            }
+            rt_text_store(schedule + t * I64{8}, word)
+            t += I64{1}
+        }
+        loop {
+            if (t >= I64{80}) -> break
+            x :: rt_text_word(schedule + (t - I64{15}) * I64{8})
+            y :: rt_text_word(schedule + (t - I64{2}) * I64{8})
+            s0 :: rt_crypto_rotr64(x, I64{1}).bit_xor(rt_crypto_rotr64(x, I64{8})).bit_xor(rt_crypto_shr64(x, I64{7}))
+            s1 :: rt_crypto_rotr64(y, I64{19}).bit_xor(rt_crypto_rotr64(y, I64{61})).bit_xor(rt_crypto_shr64(y, I64{6}))
+            rt_text_store(schedule + t * I64{8}, rt_text_word(schedule + (t - I64{16}) * I64{8}) + s0 + rt_text_word(schedule + (t - I64{7}) * I64{8}) + s1)
+            t += I64{1}
+        }
+        a := rt_text_word(scratch)
+        b := rt_text_word(scratch + I64{8})
+        c := rt_text_word(scratch + I64{16})
+        d := rt_text_word(scratch + I64{24})
+        e := rt_text_word(scratch + I64{32})
+        f := rt_text_word(scratch + I64{40})
+        g := rt_text_word(scratch + I64{48})
+        h := rt_text_word(scratch + I64{56})
+        t = I64{0}
+        loop {
+            if (t >= I64{80}) -> break
+            s1 :: rt_crypto_rotr64(e, I64{14}).bit_xor(rt_crypto_rotr64(e, I64{18})).bit_xor(rt_crypto_rotr64(e, I64{41}))
+            ch :: (e.bit_and(f)).bit_xor(((e.bit_xor(I64{-1})).bit_and(g)))
+            temp1 :: h + s1 + ch + rt_sha512_k(t) + rt_text_word(schedule + t * I64{8})
+            s0 :: rt_crypto_rotr64(a, I64{28}).bit_xor(rt_crypto_rotr64(a, I64{34})).bit_xor(rt_crypto_rotr64(a, I64{39}))
+            maj :: (a.bit_and(b)).bit_xor((a.bit_and(c))).bit_xor((b.bit_and(c)))
+            h = g
+            g = f
+            f = e
+            e = d + temp1
+            d = c
+            c = b
+            b = a
+            a = temp1 + s0 + maj
+            t += I64{1}
+        }
+        rt_text_store(scratch, rt_text_word(scratch) + a)
+        rt_text_store(scratch + I64{8}, rt_text_word(scratch + I64{8}) + b)
+        rt_text_store(scratch + I64{16}, rt_text_word(scratch + I64{16}) + c)
+        rt_text_store(scratch + I64{24}, rt_text_word(scratch + I64{24}) + d)
+        rt_text_store(scratch + I64{32}, rt_text_word(scratch + I64{32}) + e)
+        rt_text_store(scratch + I64{40}, rt_text_word(scratch + I64{40}) + f)
+        rt_text_store(scratch + I64{48}, rt_text_word(scratch + I64{48}) + g)
+        rt_text_store(scratch + I64{56}, rt_text_word(scratch + I64{56}) + h)
+        off += I64{128}
+    }
+    at := I64{0}
+    output_length :: if short -> I64{48} else -> I64{64}
+    loop {
+        if (at >= output_length) -> break
+        word :: rt_text_word(scratch + (at / I64{8}) * I64{8})
+        rt_text_put(output + at, (word >> (I64{56} - (at % I64{8}) * I64{8})).bit_and(I64{255}))
+        at += I64{1}
+    }
+    rt_crypto_wipe(scratch, I64{704})
+}
+fn rt_crypto_sha512(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_sha2_64_parts3(input, length, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch, false)
+}
+fn rt_crypto_sha384(input: I64, length: I64, output: I64, scratch: I64) {
+    rt_sha2_64_parts3(input, length, I64{1}, I64{0}, I64{1}, I64{0}, output, scratch, true)
+}
+// Three borrowed spans for Ed25519's prefix||message / R||A||message hashes.
+fn rt_crypto_sha512_parts3(left: I64, left_len: I64, right: I64, right_len: I64, third: I64, third_len: I64, output: I64, scratch: I64) {
+    rt_sha2_64_parts3(left, left_len, right, right_len, third, third_len, output, scratch, false)
+}

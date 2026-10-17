@@ -1,0 +1,14 @@
+# Port of tests/prove.rs:828-890. Every original predicate retained; original fixture bytes copied from Rust literals.
+# Runtime verification PENDING-SAME-HEAD.
+fixture: prove_captures_contract_results_and_runtime_panics_structurally.fixture
+step: jet prove . --json
+exit: 70
+stdout: ~ "\"kind\":\"contract\",\"outcome\":\"passed\"" # original predicate
+stdout: ~ "\"kind\":\"contract\",\"outcome\":\"failed\"" # original predicate
+stdout: ~ "\"code\":\"E3005\"" # original predicate
+stdout: ~ "\"code\":\"E3001\"" # original predicate
+stdout: ~ "structured boom" # original predicate
+stdout: ~ "\"kind\":\"unit\",\"outcome\":\"failed\",\"producer\":\"jet-test\"" # original predicate
+stdout: ~ "\"unit\":{\"failed\":1" # original predicate
+stdout: ~ "\"path\":\"./d_later.jet\"" # original predicate
+stderr: empty # original predicate

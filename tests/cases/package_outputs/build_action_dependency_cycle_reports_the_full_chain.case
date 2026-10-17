@@ -1,0 +1,6 @@
+# Port of tests/package_outputs.rs:783-791 incl cycle_diagnostic():759-779.
+fixture: fixtures/cycle
+env: NO_COLOR=1
+step: jet build run.jet
+exit: nonzero
+stderr.filter(~ "build plan is invalid").line(0): ~ "`alpha` -> `gamma` -> `beta` -> `alpha`" # original ed77c235f tests/package_outputs.rs:759-779 selects the first diagnostic line and787-789 requires the exact cycle chain from736

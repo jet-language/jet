@@ -1,0 +1,17 @@
+Error [E2305]: Returned views need a stable owner relationship
+  --> open_dynamic_trait_view_dispatch_is_rejected.jet:6:21
+    |
+  6 |     return selector.select(left, right)
+    |                     ^^^^^^
+ Why: Each public `View`/`ViewMut` slot must name a bounded set of receiver, parameter, or static sources that stay live; this return did not prove those sources
+ Fix: Return a view derived from parameters or the receiver on every path, keep the view local, or return an owned copy with `.copy()`
+More: jet-lang.dev/e/E2305
+
+Error [E0743]: Dynamic call `Select::select` has no effect bound
+  --> tests/ui/ownership/open_dynamic_trait_view_dispatch_is_rejected.jet:6:21
+    |
+  6 |     return selector.select(left, right)
+    |                     ^^^^^^
+ Why: A trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound
+ Fix: Declare an effect row on `Select::select`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function
+More: jet-lang.dev/e/E0743

@@ -1,0 +1,16 @@
+
+use core.encoding.json as json
+struct Token { raw: String }
+impl Token.Encode {
+    fn encode(self) -> Dyn { Dyn.Text("wire") }
+}
+fn token() -> Token? { Val(Token{raw: "raw"}) }
+fn empty() -> Token? { None }
+fn run() {
+    print(json.to_string([Token{raw: "raw"}]))
+    print(json.to_string(token()))
+    print(json.to_string(empty()))
+    tokens := [String:Token]{}
+    tokens["a"] = Token{raw: "raw"}
+    print(json.to_string(tokens))
+}

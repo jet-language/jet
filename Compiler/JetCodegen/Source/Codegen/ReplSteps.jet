@@ -1,0 +1,133 @@
+// Incremental lowering uses the ordinary statement/expression builder. Root
+// lexical bindings and cleanup frames stay open across input boundaries.
+use jet_foundation.[MIRBlockID, MIRFunction, MIRFunctionID, MIRProgram, MIRSourceFile, MIRTerminator, MIRValueID, TExpr, TFunc, TStmt, Type]
+use jet_sema.[ReplSetupError, SemaGraphModuleResult]
+
+struct JetCodegenReplSession {
+    builder: JetCodegenBuilder
+    // The program-wide lowering inputs every builder call reads.
+    inputs: JetCodegenProgram
+    program: MIRProgram
+    root: MIRFunctionID
+}
+
+struct JetCodegenReplStep {
+    program: MIRProgram
+    root: MIRFunctionID
+    boundary: MIRBlockID
+    echo: MIRValueID?
+    closure_sources: [JetCodegenClosureSource]
+}
+
+fn jet_codegen_repl_session_new(root: TFunc, functions: ^[TFunc], modules: ^[SemaGraphModuleResult], program: ^MIRProgram) -> JetCodegenReplSession ReplSetupError! {
+    if root.params.len() != 0 || root.body.len() != 0 {
+        return Err(ReplSetupError{message: "REPL lowering requires an empty checked zero-parameter root"})
+    }
+    rows := functions
+    module_rows := modules
+    executable := program
+    field_symbols :: jet_codegen_field_symbol_index(module_rows)
+    source_index :: jet_codegen_source_index(executable.source_files)
+    function_index :: jet_codegen_function_index(^rows)
+    inputs :: jet_codegen_new_program(^function_index, ^module_rows, ^field_symbols, executable.source_files, ^source_index, executable.facts.edition)
+    builder :: jet_codegen_new_builder(jet_codegen_executable_function(root), inputs)
+    Ok(JetCodegenReplSession{builder: ^builder, inputs: ^inputs, program: ^executable, root: jet_codegen_function_id(root)})
+}
+
+fn jet_codegen_repl_pack(session: &JetCodegenReplSession) -> MIRProgram {
+    // Packing moves rows out of its builder; the session keeps lowering later
+    // input on its own builder, so pack a snapshot of it.
+    snapshot := session.builder
+    lowered := jet_codegen_pack_function(&snapshot, session.inputs, session.builder.function, Type.Named{name: "Unit"})
+    lowered.function.id = session.root
+    // The canonical open-block marker stays private to the mutable builder.
+    // Its executable snapshot is a real unreachable block that the retained
+    // evaluator suspends before entering, never an instruction it executes.
+    loop position in 0..<lowered.function.blocks.len() {
+        if jet_codegen_is_open_terminator(lowered.function.blocks[position].terminator) {
+            lowered.function.blocks[position].terminator = MIRTerminator.Unreachable{reason: "REPL suspended input boundary"}
+        }
+    }
+    functions := [MIRFunction]{lowered.function}
+    loop nested in lowered.nested_functions -> &functions.push(nested)
+    loop row in functions {
+        found := false
+        loop position in 0..<session.program.functions.len() {
+            if session.program.functions[position].id == row.id {
+                session.program.functions[position] = row
+                found = true
+                break
+            }
+        }
+        if !found -> &session.program.functions.push(row)
+    }
+    loop row in lowered.fields {
+        found := false
+        loop existing in session.program.fields {
+            if existing.id == row.id -> found = true
+        }
+        if !found -> &session.program.fields.push(row)
+    }
+    loop row in lowered.callbacks {
+        found := false
+        loop existing in session.program.callbacks {
+            if existing.id == row.id -> found = true
+        }
+        if !found -> &session.program.callbacks.push(row)
+    }
+    loop row in lowered.prelude_calls {
+        found := false
+        loop existing in session.program.prelude_calls {
+            if existing.id == row.id -> found = true
+        }
+        if !found -> &session.program.prelude_calls.push(row)
+    }
+    loop row in lowered.core_calls {
+        found := false
+        loop existing in session.program.core_calls {
+            if existing.id == row.id -> found = true
+        }
+        if !found -> &session.program.core_calls.push(row)
+    }
+    session.program.type_instances = jet_codegen_collect_type_instances(session.program.types, session.program.functions, [MIRFunction]{}, session.program.foreign, session.program.traits, session.program.impls, session.program.constants)
+    session.program
+}
+
+fn jet_codegen_repl_append(session: &JetCodegenReplSession, checked_root: TFunc, statements: [TStmt], echo: TExpr?, source_files: [MIRSourceFile]) -> JetCodegenReplStep {
+    session.builder.function.effects = checked_root.effects
+    session.inputs.source_files = source_files.copy()
+    session.inputs.source_index = jet_codegen_source_index(source_files)
+    session.program.source_files = source_files.copy()
+    // New drop flags are initialized at this turn's dominating block, not at
+    // the root entry that earlier turns have already executed.
+    root_entry :: session.builder.entry.copy()
+    session.builder.entry = session.builder.current
+    jet_codegen_lower_statements(&session.builder, session.inputs, statements)
+    value := MIRValueID?{None}
+    if echo == .Val(expression) && jet_codegen_current_is_open(session.builder, session.inputs) {
+        value = Val(jet_codegen_lower_expr(&session.builder, session.inputs, expression))
+    }
+    boundary :: jet_codegen_new_block(&session.builder, session.inputs, checked_root.source_span, "repl-input-boundary")
+    if jet_codegen_current_is_open(session.builder, session.inputs) {
+        jet_codegen_terminate(&session.builder, session.inputs, MIRTerminator.Jump{target: boundary})
+    }
+    jet_codegen_switch_block(&session.builder, session.inputs, boundary)
+    jet_codegen_seal_all_exit_chains(&session.builder, session.inputs)
+    session.builder.entry = root_entry
+    program :: jet_codegen_repl_pack(&session)
+    JetCodegenReplStep{program: ^program, root: session.root, boundary: boundary, echo: value, closure_sources: session.builder.closure_sources}
+}
+
+fn jet_codegen_repl_close(session: &JetCodegenReplSession) -> MIRProgram {
+    span :: session.builder.function.source_span.copy()
+    unit_ok :: jet_codegen_unit_never_return(&session.builder, session.inputs, span)
+    _ :: jet_codegen_terminate_with_owned_cleanup(&session.builder, session.inputs, MIRTerminator.Return{value: unit_ok}, -1)
+    jet_codegen_seal_all_exit_chains(&session.builder, session.inputs)
+    // Do not retroactively last-use-rewrite already executed instructions.
+    // Explicit source moves and the ordinary registered drop flags remain.
+    jet_codegen_repl_pack(&session)
+}
+
+fn jet_codegen_repl_initial_program(session: JetCodegenReplSession) -> MIRProgram Never! {
+    session.program
+}

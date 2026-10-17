@@ -1,0 +1,139 @@
+# HAND-PORT tests/jetpack_engine.rs:2968-3091 connected_receipt_reaches_lock_and_fails_closed_on_corruption
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: connected_receipt_reaches_lock_and_fails_closed_on_corruption.fixture
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
+# #[test]
+# fn connected_receipt_reaches_lock_and_fails_closed_on_corruption() {
+#     let project = Scratch::new("connected-receipt-project");
+#     let root = Scratch::new("connected-receipt-root");
+#     let fixtures = Scratch::new("connected-receipt-fixtures");
+#     let staging = Scratch::new("connected-receipt-staging");
+#     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+#     fs::write(
+#         project.join("env.jet"),
+#         "module dev { env.dev: Env{ packages: [nixpkgs.greet] } }\n",
+#     )
+#     .unwrap();
+# 
+#     let build = || {
+#         jetpack()
+#             .args(["build", "--no-color", "--offline"])
+#             .current_dir(&project.path)
+#             .env("JETPACK_ROOT", &root.path)
+#             .env("JETPACK_FIXTURES", &fixtures.path)
+#             .output()
+#             .unwrap()
+#     };
+#     let first = build();
+#     assert!(
+#         first.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&first.stderr)
+#     );
+# 
+#     let roots = jetpack::Store::Roots {
+#         root: root.path.clone(),
+#         dev_mode: false,
+#     };
+#     let entry = jetpack::Store::list_checked(&roots)
+#         .unwrap()
+#         .into_iter()
+#         .find(|entry| entry.name == "greet")
+#         .expect("production build must publish greet");
+#     assert!(entry.receipt.starts_with("sha256-"));
+#     let receipt_path = root.join("hangar/receipts").join(&entry.receipt);
+#     let receipt = fs::read(&receipt_path).unwrap();
+#     let receipt_text = String::from_utf8(receipt.clone()).unwrap();
+#     assert!(receipt_text.starts_with("jet-development-receipt-v1\n"));
+#     assert!(receipt_text.contains("act\t\t7061636b6167652d7265616c697a6174696f6e\t"));
+#     assert!(receipt_text.contains("closure\t\t7368613235362d"));
+#     for field in [
+#         "input\t",
+#         "action\t",
+#         "output\t",
+#         "activation-proof\t\t\n",
+#         "parent-generation\t\t\n",
+#     ] {
+#         assert!(
+#             receipt_text.contains(field),
+#             "missing {field:?}: {receipt_text}"
+#         );
+#     }
+#     assert!(receipt_text.contains("witness\t\t"));
+#     assert!(receipt_text.contains("outcome\t\t706173736564\t"));
+#     let lock = fs::read_to_string(project.join(".jet/lock")).unwrap();
+#     assert!(
+#         lock.contains(&format!("receipt = \"{}\"", entry.receipt)),
+#         "lock does not project receipt {}: {lock}",
+#         entry.receipt
+#     );
+#     let output = Path::new(&entry.out).join("bin/greet");
+#     let output_before_failure = fs::read(&output).unwrap();
+# 
+#     fs::write(&receipt_path, b"corrupt receipt").unwrap();
+#     let failed = build();
+#     assert!(!failed.status.success());
+#     let failure = format!(
+#         "{}{}",
+#         String::from_utf8_lossy(&failed.stdout),
+#         String::from_utf8_lossy(&failed.stderr)
+#     );
+#     assert!(
+#         failure.contains("receipt"),
+#         "corruption was not explained: {failure}"
+#     );
+#     assert_eq!(fs::read(&output).unwrap(), output_before_failure);
+# 
+#     fs::remove_file(&receipt_path).unwrap();
+#     let recovered = jetpack()
+#         .args(["hangar", "recover", "--no-color"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         recovered.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&recovered.stderr)
+#     );
+#     assert_eq!(fs::read(&receipt_path).unwrap(), receipt);
+#     let rebuilt = build();
+#     assert!(
+#         rebuilt.status.success(),
+#         "recovered receipt was not reusable: stdout={} stderr={}",
+#         String::from_utf8_lossy(&rebuilt.stdout),
+#         String::from_utf8_lossy(&rebuilt.stderr)
+#     );
+# 
+#     let orphan_bytes = b"orphan receipt";
+#     let orphan_digest = format!("sha256-{}", jetpack::SHA256::sha256_hex(orphan_bytes));
+#     let orphan_path = root.join("hangar/receipts").join(&orphan_digest);
+#     fs::write(&orphan_path, orphan_bytes).unwrap();
+#     let cleaned = jetpack()
+#         .args(["hangar", "clean", "--no-color", "--yes"])
+#         .current_dir(&project.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         cleaned.status.success(),
+#         "receipt cleanup failed: {}",
+#         String::from_utf8_lossy(&cleaned.stderr)
+#     );
+#     assert!(
+#         !orphan_path.exists(),
+#         "unreachable receipt was not collected"
+#     );
+#     assert_eq!(fs::read(&receipt_path).unwrap(), receipt);
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build --no-color --offline
+cwd: project
+exit: 0
+

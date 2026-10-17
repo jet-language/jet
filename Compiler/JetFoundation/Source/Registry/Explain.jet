@@ -3,19 +3,19 @@
 // Every registry row explains itself (I4: no code without an explain); a row
 // with a detailed what/why/fix template gets the richer essay.
 
-pub struct DiagnosticExplanation {
-    pub code: String
+struct DiagnosticExplanation {
+    code: String
     // Pipeline stage (`jet` / `parse` / `sema` / ...) from the registry row.
-    pub stage: String
+    stage: String
     // One-line meaning from the registry row (always present).
-    pub meaning: String
-    pub what: String?
-    pub why: String?
-    pub fix: String?
+    meaning: String
+    what: String?
+    why: String?
+    fix: String?
     // A short worked example for rows that need more than prose.
-    pub example: String?
+    example: String?
     // A retired code is kept only so old build logs stay readable.
-    pub retired: Bool
+    retired: Bool
 }
 
 fn diagnostic_explanation_example(code: String) -> String? Never! {
@@ -24,7 +24,7 @@ fn diagnostic_explanation_example(code: String) -> String? Never! {
 }
 
 // Look up one diagnostic code (surrounding space and letter case ignored).
-pub fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
+fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
     row :: diagnostic_registry_row(code.trim().to_upper()) ?? return None
     what := String?{None}
     why := String?{None}
@@ -48,7 +48,7 @@ pub fn diagnostic_explanation(code: String) -> DiagnosticExplanation? Never! {
 
 // Rust `str::lines`: split at `\n`, drop one `\r` before it, and yield no
 // empty line after a final line ending.
-pub fn diagnostic_text_lines(text: String) -> [String] Never! {
+fn diagnostic_text_lines(text: String) -> [String] Never! {
     bytes :: text.bytes()
     lines := [String]{}
     start := 0
@@ -66,7 +66,7 @@ pub fn diagnostic_text_lines(text: String) -> [String] Never! {
 
 // The essay with beginner-friendly headers; `color` styles the code line and
 // headers on a terminal.
-pub fn diagnostic_explanation_render(explanation: DiagnosticExplanation, color: Bool) -> String Never! {
+fn diagnostic_explanation_render(explanation: DiagnosticExplanation, color: Bool) -> String Never! {
     out := "{diagnostic_theme_accent(color, explanation.code)}\n\n"
     if explanation.retired {
         return "{out}This code is retired: it is no longer produced by the current\ncompiler, and is kept here only so old build logs stay readable.\n"
@@ -90,5 +90,5 @@ pub fn diagnostic_explanation_render(explanation: DiagnosticExplanation, color: 
         if explanation.stage.len() > 0 -> out = "{out}Stage: {explanation.stage}\n\n"
         out = "{out}A longer explanation will land with the detailed typed row.\n\n"
     }
-    "{out}This explanation comes from jet's diagnostics reference.\n"
+    if explanation.stage == "syntax registry" -> "{out}This explanation comes from Jet's syntax dictionary.\n" else -> "{out}This explanation comes from jet's diagnostics reference.\n"
 }

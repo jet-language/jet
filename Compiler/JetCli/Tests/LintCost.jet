@@ -1,0 +1,53 @@
+// Production collector, sema coverage and Driver query in the canonical unit.
+fn cli_cost_expr(kind: TExprKind, ty: Type, start: Int) -> TExpr Never! {
+    TExpr{ty: ty, kind: kind, span: Span{start: start, end: start + 1}, integer_bounds: None, cost: None}
+}
+fn cli_cost_request(source: String) -> JetDriverCompileRequest {
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{{canonical_path: "/cost-fixture", identity: "root", allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{{path: "/cost-fixture/main.jet", relative_path: "main.jet", identity: "source", source: source}}, foreign_cache_files: []}},
+        entry_root_identity: "root", entry_path: "/cost-fixture/main.jet",
+    }
+    jet_cli_driver_request(snapshot, [], Val(1), JetDriverCompileMode.Doc)
+}
+fn run() {
+    unknown :: cli_cost_expr(TExprKind.Local{local: tir_user_local("input", Span{start: 1, end: 2})}, Type.Int, 1)
+    two :: cli_cost_expr(TExprKind.IntLit{value: 2, width: None}, Type.Int, 2)
+    multiply :: cli_cost_expr(TExprKind.Binary{op: TBinaryOp.Mul, overflow: false, line: 1, lhs: unknown, rhs: two}, Type.Int, 3)
+    statement :: TStmt.ExprStmt{value: multiply, span: multiply.span}
+    condition :: cli_cost_expr(TExprKind.BoolLit{value: true}, Type.Bool, 4)
+    nested :: TStmt.While{label: None, condition: condition, body: [TStmt]{statement}, span: Span{start: 3, end: 5}}
+    sites := [TCostSite]{}
+    jet_codegen_cost_stmt(TStmt.Loop{label: None, body: [TStmt]{nested}, span: Span{start: 0, end: 6}}, "run", 0, &sites)
+    assert(sites.len() == 1 && sites[0].loop_depth == 2 && sites[0].span == multiply.span)
+    rows :: jet_cli_cost_diagnostics(TCostReport{sites: sites}, [])
+    assert(rows.len() == 1 && rows[0].code == "L2510" && rows[0].what.contains(tir_cost_operation(TCostKind.ExactIntSpill)))
+    deduped :: jet_cli_cost_diagnostics(TCostReport{sites: sites}, [Diagnostic]{rows[0], rows[0]})
+    assert(deduped.len() == 1)
+    removed := sites[0]
+    removed.state = TCostState.OptimizerRemoved
+    assert(jet_cli_cost_diagnostics(TCostReport{sites: [TCostSite]{removed}}, []).len() == 0)
+    materialized := sites[0]
+    materialized.kind = TCostKind.ViewMaterialization
+    assert(jet_cli_cost_diagnostics(TCostReport{sites: [TCostSite]{materialized}}, []).len() == 0)
+    retained :: cli_cost_expr(TExprKind.Present{value: two}, Type.Option{inner: Type.Int}, 5)
+    consumed := [TCostSite]{}
+    jet_codegen_cost_expr(retained, "run", 1, &consumed, true)
+    assert(consumed.len() == 0)
+    fallback :: cli_cost_expr(TExprKind.OrFallback{value: retained, fallback: TOrFallback.Value{value: two}, ambient_err: None}, Type.Int, 6)
+    jet_codegen_cost_expr(fallback, "run", 1, &consumed)
+    assert(consumed.len() == 1 && consumed[0].state == TCostState.OptimizerRemoved)
+    clean :: jet_driver_cost_query(cli_cost_request("fn run() {{ x :: 2; y :: x + 3; }}"))
+    assert(clean.compile.complete && clean.gaps.len() == 0 && clean.report != None)
+    bounded :: clean.report ?? panic("checked report")
+    assert(bounded.sites.len() > 0 && bounded.sites[0].state == TCostState.OptimizerRemoved)
+    missing_root :: jet_driver_cost_query(cli_cost_request("fn unused() {{ loop {{ x :: 1 + 2; break }} }}"))
+    assert(missing_root.report == Val(TCostReport{}))
+    unreachable :: jet_driver_cost_query(cli_cost_request("fn identity<T>(value: T) -> T {{ return value }}\nfn run() {{}}\n"))
+    assert(unreachable.compile.complete && unreachable.gaps.len() == 0 && unreachable.report != None)
+    reached :: jet_driver_cost_query(cli_cost_request("fn identity<T>(value: T) -> T {{ return value }}\nfn run() {{ value :: identity(1); }}\n"))
+    assert(reached.report == None && reached.gaps.len() > 0)
+    broken :: jet_driver_cost_query(cli_cost_request("fn run() -> Int {{ true }}"))
+    assert(broken.report == None && !broken.compile.complete && broken.compile.diagnostics.len() > 0)
+    nodes :: jet_cli_inspect_build_query("explain-build", [String]{"explain-build", "main.jet"}, false, true, None)
+    assert(nodes == .Inspect(_))
+}

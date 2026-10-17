@@ -96,7 +96,7 @@ fn run() {
     authority.with("FS.Write")
 }
 "#;
-    let (_, _, stderr) = tir_support::jit_run("authority_outside", source);
+    let (_, _, stderr) = tir_support::default_run("authority_outside", source);
     assert!(stderr.contains("E0712"), "JIT must report E0712: {stderr}");
 }
 
@@ -173,11 +173,7 @@ fn run() {{
         params = params,
     );
     let api = plugin_api_snapshot("large_args", "scale", "a0: Int", "Int");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier(
             "plugin_large_argument_list",
             &source,
@@ -460,10 +456,10 @@ fn run_plugin_resource_child(
     let mut child = command
         .spawn()
         .unwrap_or_else(|error| panic!("spawn isolated plugin {tier} child: {error}"));
-    // The release child first builds the plugin bridge crate (wasmtime) in
-    // its fresh store, so its bound covers a cold Cargo build; the guest's
+    // Default and release both build the plugin bridge crate (wasmtime) in
+    // a fresh store, so their bounds cover a cold Cargo build; the guest's
     // own fuel, memory and table guards are what stop the call itself.
-    let timeout = if tier == "release" {
+    let timeout = if matches!(tier, "default" | "release") {
         Duration::from_secs(900)
     } else {
         Duration::from_secs(10)
@@ -509,13 +505,7 @@ fn assert_plugin_failure_on_all_hosted_tiers(
     artifact: &Path,
     api_snapshot: &str,
 ) {
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    } else {
-        eprintln!("note: skipping AOT plugin resource witness (need rustc)");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (success, stdout, stderr) =
             run_plugin_resource_child(test_name, tier, source, artifact, api_snapshot);
         assert!(
@@ -630,13 +620,11 @@ fn plugin_failure_propagation_records_the_host_call_line_on_all_tiers() {
     let scratch = common::Scratch { path: root };
     let path = write_plugin_component(&scratch, "failure_guest.wasm",
         include_str!("../Examples/features/packages/plugin_failure/failure_guest.wat"));
-    let source = include_str!("../Examples/features/packages/plugin_failure/journey.jet")
+    let source = include_str!("fixtures/plugin_failure_journey.jet")
         .replace("Examples/features/packages/plugin_failure/failure_guest.wat", &path.to_string_lossy())
         .replace("FS.Read:Examples/features/packages/plugin_failure", &format!("FS.Read:{}", scratch.path.display()));
     let api = include_str!("../Examples/features/packages/plugin_failure/fixture-state/cache/api/plugin__failure_guest.api");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() { tiers.push("release"); }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier_in_package("plugin_journey", &source, tier, &path, api, PLUGIN_FAILURE_PACKAGE);
         assert_ne!(code, 0, "{tier} lost the guest failure");
         assert_eq!(stdout, "", "{tier} entered the success path");
@@ -665,9 +653,7 @@ fn plugin_guest_failure_reports_operation_boundary_and_kind_on_all_hosted_tiers(
         .replace("FS.Read:Examples/features/packages/plugin_failure", &format!("FS.Read:{}", scratch.path.display()));
     let api = include_str!("../Examples/features/packages/plugin_failure/fixture-state/cache/api/plugin__failure_guest.api");
     let expected = include_str!("../Examples/features/expected/packages/plugin_failure.out");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() { tiers.push("release"); }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier_in_package("plugin_causes", &source, tier, &path, api, PLUGIN_FAILURE_PACKAGE);
         assert_eq!(code, 0, "{tier} failed the typed plugin witness: {stderr}");
         assert_eq!(stderr, "", "{tier} unexpectedly propagated a handled failure");
@@ -1136,7 +1122,7 @@ fn authority_aot_runs_the_same_value() {
 
 #[test]
 fn authority_jit_runs_the_same_value() {
-    let (code, stdout, stderr) = tir_support::jit_run("authority_jit", AUTHORITY_VALUE_SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("authority_jit", AUTHORITY_VALUE_SOURCE);
     assert_eq!(code, 0, "JIT failed: {stderr}");
     assert_eq!(stdout, "authority\n");
 }
@@ -1144,7 +1130,7 @@ fn authority_jit_runs_the_same_value() {
 #[test]
 fn authority_dev_runs_the_same_value() {
     let (code, stdout, stderr) =
-        tir_support::interpreter_run("authority_dev", AUTHORITY_VALUE_SOURCE);
+        tir_support::default_run("authority_dev", AUTHORITY_VALUE_SOURCE);
     assert_eq!(code, 0, "dev/interpreter failed: {stderr}");
     assert_eq!(stdout, "authority\n");
 }
@@ -1252,11 +1238,7 @@ fn run() {{
         params = params,
     );
     let api = plugin_api_snapshot("zero_param", "zero", "", "Int");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier(
             "plugin_zero_param_overlarge_frame",
             &source,
@@ -1316,11 +1298,7 @@ fn run() {{
         root = root,
     );
     let api = plugin_api_snapshot("link", "zero", "", "Int");
-    let mut tiers = vec!["jit", "interpreter"];
-    if common::have_rustc() {
-        tiers.push("release");
-    }
-    for tier in tiers {
+    for tier in ["default", "interpreter", "release"] {
         let (code, stdout, stderr) = tir_support::run_plugin_tier(
             "plugin_symlink_outside_read_root",
             &source,
@@ -1359,7 +1337,7 @@ fn panel_lines(state: State) -> [UINode] {
 }
 
 #DevPanel
-pub fn panel(state: State) -> UINode {
+fn panel(state: State) -> UINode {
     return ui.box(panel_lines(state))
 }
 
@@ -1566,8 +1544,8 @@ fn package_default_run(tier: &[&str], path: &str, args: &[&str]) -> std::process
         .expect("jet run must start")
 }
 
-/// Default `jet run`, the AOT-built `--release` run, and the interpreter.
-const PACKAGE_DEFAULT_TIERS: [&[&str]; 3] = [&[], &["--release"], &["--interpret"]];
+/// Default `jet run` and the AOT-built `--release` run.
+const PACKAGE_DEFAULT_TIERS: [&[&str]; 2] = [&[], &["--release"]];
 
 #[test]
 fn package_without_authority_block_prints_and_reads_args_on_all_tiers() {

@@ -1,0 +1,92 @@
+use core.files as files
+
+fn s5_version(port: Int) -> String {
+    response :: s5_web_get(port, "/__jet_dev_version", None) ?? panic("GET version")
+    String.from_bytes_lossy(response.body).trim().copy()
+}
+
+fn s5_changed(port: Int, baseline: String, timeout_ms: Int) -> String {
+    started :: time.start()
+    loop {
+        if s5_web_get(port, "/__jet_dev_version", None) == .Val(response) {
+            if response.status == 200 {
+                version :: String.from_bytes_lossy(response.body).trim().copy()
+                if version != baseline && !version.is_empty() -> return version
+            }
+        }
+        assert(time.elapsed(started).ns <= timeout_ms * 1000000, "version never changed")
+        time.sleep(time.duration_ms(100))
+    }
+}
+
+fn s5_root() -> String { sys.get("S5_ROOT") ?? panic("root") }
+
+
+fn s5_try_symlink(target: String, path: String) -> Bool {
+    files.symlink(target, path) ?? return false
+    true
+}
+
+fn s5_remove_directory_link(path: String) {
+    files.remove_dir(path) ?? return files.remove(path)
+}
+
+#Test("original Windows hardlinks reparses renamed directories and publish recovery") {
+    port :: s5_web_port()
+    root :: s5_root()
+    s5_web_wait_up(port, 30000)
+    outside_static :: files.join(root, "outside-static.js")
+    build :: files.join(root, "build")
+    files.write(outside_static, "outside-static") ?? panic("outside static")
+    files.hard_link(outside_static, files.join(build, "hardlinked.js")) ?? panic("hardlink static")
+    hard :: s5_web_get(port, "/hardlinked.js", None) ?? panic("hardlinked GET")
+    assert_eq(hard.status, 400)
+    reparse :: files.join(build, "reparse.js")
+    if s5_try_symlink(outside_static, reparse) {
+        response :: s5_web_get(port, "/reparse.js", None) ?? panic("reparse GET")
+        assert_eq(response.status, 400)
+        files.remove(reparse).drop("original file-reparse cleanup ignores errors")
+    }
+    nested :: files.join(build, "nested")
+    parked :: files.join(build, "nested.parked")
+    outside_parent :: files.join(root, "outside-parent")
+    files.mkdir(nested, true) ?? panic("nested")
+    files.mkdir(outside_parent, true) ?? panic("outside parent")
+    files.write(files.join(nested, "race.js"), "inside-parent") ?? panic("inside race")
+    files.write(files.join(outside_parent, "race.js"), "outside-parent") ?? panic("outside race")
+    files.rename(nested, parked) ?? panic("park nested")
+    if s5_try_symlink(outside_parent, nested) {
+        response :: s5_web_get(port, "/nested/race.js", None) ?? panic("directory reparse GET")
+        assert_eq(response.status, 400)
+        s5_remove_directory_link(nested)
+    } else {
+        files.mkdir(nested, false) ?? panic("replacement nested")
+        files.write(files.join(nested, "race.js"), "replacement") ?? panic("replacement race")
+        response :: s5_web_get(port, "/nested/race.js", None) ?? panic("replacement GET")
+        assert_eq(response.status, 200)
+        assert_eq(response.body, "replacement".bytes())
+        files.remove_all(nested) ?? panic("remove replacement")
+    }
+    files.rename(parked, nested) ?? panic("restore nested")
+    outside :: files.join(root, "outside-output.js")
+    output :: files.join(root, "build/app.js")
+    source_path :: files.join(root, "app.jet")
+    files.write(outside, "outside-output") ?? panic("outside output")
+    files.remove(output) ?? panic("remove output")
+    files.hard_link(outside, output) ?? panic("hardlink output")
+    baseline :: s5_version(port)
+    source :: files.read(source_path) ?? panic("read source")
+    files.write(source_path, source.replace("host", "changed")) ?? panic("save changed")
+    started :: time.start()
+    loop time.elapsed(started).ns < 5000000000 {
+        assert_eq(s5_version(port), baseline)
+        time.sleep(time.duration_ms(100))
+    }
+    assert_eq(files.read_bytes(outside) ?? panic("outside bytes"), "outside-output".bytes())
+    assert_eq(files.read_bytes(output) ?? panic("output bytes"), "outside-output".bytes())
+    files.remove(output) ?? panic("remove hardlinked output")
+    files.write(source_path, source.replace("host", "recovered")) ?? panic("save recovered")
+    recovered :: s5_changed(port, baseline, 15000)
+    assert(recovered != baseline)
+    assert_eq(files.read_bytes(outside) ?? panic("outside recovery bytes"), "outside-output".bytes())
+}

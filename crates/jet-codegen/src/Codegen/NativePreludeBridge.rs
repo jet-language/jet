@@ -18,6 +18,7 @@ mod typed_text_prelude {
 }
 #[allow(dead_code)]
 mod time_prelude {
+    use crate::scheduler::jet_time_wall_override_ms;
     fn jet_scheduler_world_now_ms() -> Option<i64> {
         crate::scheduler::jet_scheduler_world_now_ms()
     }
@@ -340,16 +341,13 @@ fn is_native_route(symbol: &str) -> bool {
             | "jet_typed_html_interpolate"
             | "jet_typed_sh_interpolate"
             | "jet_term_write_stdout_line"
-            | "jet_std_io_eprint"
             | "jet_require"
             | "jet_require_eq"
             | "jet_panic_rich"
             | "jet_typed_path_literal"
             | "jet_typed_datetime_literal"
             | "jet_unit_conversion_exact"
-            | "jet_std::jet_unit_conversion_exact_measurement"
             | "jet_unit_conversion_rounded"
-            | "jet_std::jet_unit_conversion_rounded_measurement"
     ) || stdio_route(symbol).is_some()
 }
 
@@ -453,18 +451,6 @@ fn dispatch_route(
                 value: MirRuntimeValue::Unit,
                 stdout: frame.into_bytes(),
                 stderr: Vec::new(),
-            })
-        })();
-        return Some(result);
-    }
-    if symbol == "jet_std_io_eprint" {
-        let result = (|| -> Result<AmbientMirPreludeResult, Diagnostic> {
-            let text = text(&args, 0, span)?;
-            let frame = crate::terminal_runtime::jet_term_print_frame(text);
-            Ok(AmbientMirPreludeResult::Effect {
-                value: MirRuntimeValue::Unit,
-                stdout: Vec::new(),
-                stderr: frame.into_bytes(),
             })
         })();
         return Some(result);
@@ -689,7 +675,7 @@ fn dispatch_route(
             )
             .map(|value| outcome(Ok(fixed(i128::from(value)))))
             .unwrap_or_else(|_| outcome(Err("inline range value is outside its checked bounds".to_string()))),
-            "jet_unit_conversion_exact" | "jet_std::jet_unit_conversion_exact_measurement" => {
+            "jet_unit_conversion_exact" => {
                 let value = jet_foundation::jet_unit_conversion_exact(
                     float(&args, 0, span)?,
                     text(&args, 1, span)?,
@@ -698,21 +684,13 @@ fn dispatch_route(
                     text(&args, 4, span)?,
                 );
                 match value {
-                    Some(value) if symbol == "jet_unit_conversion_exact" => {
+                    Some(value) => {
                         MirRuntimeValue::Present(Box::new(decimal(value)))
                     }
-                    Some(value) => MirRuntimeValue::Present(Box::new(MirRuntimeValue::Struct {
-                        type_name: "Measurement".to_string(),
-                        fields: vec![
-                            ("value".to_string(), decimal(value)),
-                            ("uncertainty".to_string(), decimal(float(&args, 5, span)?)),
-                        ],
-                    })),
                     None => exact_option_none(result_ty.as_ref(), span)?,
                 }
             }
-            "jet_unit_conversion_rounded"
-            | "jet_std::jet_unit_conversion_rounded_measurement" => {
+            "jet_unit_conversion_rounded" => {
                 let mode = match integer(&args, 5, span)? {
                     0 => jet_foundation::UnitRoundingMode::TowardZero,
                     1 => jet_foundation::UnitRoundingMode::Floor,
@@ -730,14 +708,7 @@ fn dispatch_route(
                     integer(&args, 6, span)?,
                 );
                 match value {
-                    Ok(value) if symbol == "jet_unit_conversion_rounded" => outcome(Ok(decimal(value))),
-                    Ok(value) => outcome(Ok(MirRuntimeValue::Struct {
-                        type_name: "Measurement".to_string(),
-                        fields: vec![
-                            ("value".to_string(), decimal(value)),
-                            ("uncertainty".to_string(), decimal(float(&args, 7, span)?)),
-                        ],
-                    })),
+                    Ok(value) => outcome(Ok(decimal(value))),
                     Err(error) => outcome(Err(error.to_string())),
                 }
             }

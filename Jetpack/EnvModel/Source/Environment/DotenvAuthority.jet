@@ -1,0 +1,29 @@
+// Environment.rs `checked_dotenv_snapshot`: activation reads a declared
+// dotenv file through the pinned project authority. It needs the package
+// resolver (Core directory handles, D-CORE-FILEDIR1), so it stays out of the
+// Compiler unit's EnvModel block until D-FSDIR1 (#4697).
+
+// Open a declared dotenv file below a pinned project authority and return the
+// bytes read from that same descriptor. The caller must consume these snapshot
+// bytes rather than reopen the project pathname.
+fn envmodel_checked_dotenv_snapshot(root: String, relative: String) -[FS]> [U8] EnvironmentFactError! {
+    if !envmodel_normal_project_path(relative) {
+        return Err(EnvironmentFactError.new("dotenv path must be a normal project-relative path"))
+    }
+    resolver :: if AuthorityResolver.open(root) == {
+        .Ok(opened) -> opened
+        .Err(error) -> { return Err(EnvironmentFactError.new(error.message())) }
+    }
+    file :: if resolver.checked_file(relative) == {
+        .Ok(checked) -> checked
+        .Err(error) -> { return Err(EnvironmentFactError.new(error.message())) }
+    }
+    // D-CORE-FILESTAT1: the opened descriptor's link count.
+    info :: if file.handle.stat() == {
+        .Ok(stat) -> stat
+        .Err(error) -> { return Err(EnvironmentFactError.new("couldn't inspect dotenv file authority: {error}")) }
+    }
+    if info.links > 1 -> return Err(EnvironmentFactError.new("dotenv file must not be a hard link to another path"))
+    if resolver.revalidate_file(file) == .Err(error) -> return Err(EnvironmentFactError.new(error.message()))
+    Ok(file.bytes)
+}

@@ -1,0 +1,790 @@
+// Private mechanical ProcessSpec216, align8; NOT a public ProcessSpec alias.
+// cmd0; has_cwd8/cwd16; env_clear24; env_names32/env_values40/env_remove48;
+// has_stdin56/stdin64; stdout72/stderr80; has_timeout88/timeout96;
+// has_output_limit104/output_limit112; has_cpu120/cpu_ms128;
+// has_memory136/memory_bytes144; has_open152/open_files160; start_session168;
+// has_terminal176/terminal184; has_policy192/policy200; inherited_dirs208.
+// E4 texts and List24 [len,cap,data] headers are owned. Directory rows24:
+// retained FD72@0, target child fd@8, as_cwd@16. Terminal24: cols,rows,mode.
+// Optional absent children are zero; source prepares/validates all policy.
+// Launch borrows ExecCandidates32: count@0, NUL candidate column@8,
+// scriptFallback I64@16, searched I64@24 (Linux ignores searched), and Core's
+// NUL argv/env pointer columns. Source alone computes PATH and fallback policy.
+// no PATH search, environment read/write, authority, digest, or error policy.
+// Child72 shared carrier: mutex0,pid8,reaped16,status24,stdin32,stdout40,
+// stderr48,pty56,refs64. A native descriptor of -1 is absent/closed.
+// shared aliases; last release closes streams. Source owns kill/reap/drop
+// cleanup policy and calls the corresponding raw operations explicitly.
+// Launch stage facts: 0 success,1 prepare,2 fork,3 cwd,4 descriptor mapping,
+// 5 session/controlling terminal,6 resource limit,7 exec,8 handshake.
+// PTY prepare stages:9 openpt,10 unlockpt,11 slave peer,12 winsize,
+// 13 tcgetattr,14 tcsetattr. ErrorOut32 is shared with HostFiles.
+// WindowsLaunchFacts136 align8 (all borrowed for launch): appcontainer U32@0,
+// internetClient U32@4, name LENGTH-DELIMITED E4*@8 (not a NUL column);
+// grantCount I64@16, paths NUL UTF8/WTF8 column@24, access U32*@32,
+// inheritance U32*@40, mode U32*@48; job U32@56, hasCpu U32@60, cpuMs I64@64;
+// hasMemory U32@72, hasOpen U32@76, memoryBytes I64@80, openFiles I64@88;
+// pty U32@96, creationFlags U32@100, cols U16@104, rows U16@106, pad U32@108=0.
+// jobActiveProcesses U32@112, jobLimitFlags U32@116,
+// jobProcessMemory U64@120, jobMemory U64@128.
+// The Windows seed converts each column losslessly and owns OS sidecar
+// resources; Linux and macOS receive osFacts=0.
+fn spawn_text_list_clone(list: I64) -> I64 {
+    if (list == I64{0}) { return I64{0} }
+    length :: fd_word(list, I64{0})
+    out :: jet_rt_alloc(I64{24}, I64{8})
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(wrapping(length * I64{8}), I64{8})
+    fd_put(out, I64{0}, length)
+    fd_put(out, I64{8}, length)
+    fd_put(out, I64{16}, data)
+    at := I64{0}
+    loop at < length {
+        fd_put(data, wrapping(at * I64{8}), jet_rt_string_clone(fd_word(fd_word(list, I64{16}), wrapping(at * I64{8}))))
+        at = wrapping(at + I64{1})
+    }
+    out
+}
+
+fn spawn_list_free(list: I64, stride: I64) {
+    data :: fd_word(list, I64{16})
+    if (data != I64{0}) { jet_rt_free(data, wrapping(fd_word(list, I64{8}) * stride), I64{8}) }
+    jet_rt_free(list, I64{24}, I64{8})
+}
+
+fn spawn_text_list_drop(list: I64) {
+    if (list == I64{0}) {
+        return
+    }
+    at := I64{0}
+    loop at < fd_word(list, I64{0}) {
+        jet_rt_string_drop(fd_word(fd_word(list, I64{16}), wrapping(at * I64{8})))
+        at = wrapping(at + I64{1})
+    }
+    spawn_list_free(list, I64{8})
+}
+
+fn spawn_dirs_clone(list: I64) -> I64 {
+    if (list == I64{0}) { return I64{0} }
+    length :: fd_word(list, I64{0})
+    out :: jet_rt_alloc(I64{24}, I64{8})
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(wrapping(length * I64{24}), I64{8})
+    fd_put(out, I64{0}, length)
+    fd_put(out, I64{8}, length)
+    fd_put(out, I64{16}, data)
+    at := I64{0}
+    loop at < length {
+        source :: wrapping(fd_word(list, I64{16}) + at * I64{24})
+        target :: wrapping(data + at * I64{24})
+        fd_put(target, I64{0}, jet_fd_retain_raw(fd_word(source, I64{0})))
+        fd_put(target, I64{8}, fd_word(source, I64{8}))
+        fd_put(target, I64{16}, fd_word(source, I64{16}))
+        at = wrapping(at + I64{1})
+    }
+    out
+}
+
+// Consumes only the owned child pointers in the source-built mechanical row;
+// the caller retains its 216-byte packing storage. This is not __spec_fields.
+#Export(c) fn jet_process_spec_take_raw(words: I64) -> I64 {
+    spec :: jet_rt_alloc(I64{216}, I64{8})
+    rt_text_bytes_copy(spec, words, I64{216})
+    spec
+}
+
+#Export(c) fn jet_process_spec_clone_raw(spec: I64) -> I64 {
+    out :: jet_rt_alloc(I64{216}, I64{8})
+    rt_text_bytes_copy(out, spec, I64{216})
+    fd_put(out, I64{0}, spawn_text_list_clone(fd_word(spec, I64{0})))
+    fd_put(out, I64{16}, if (fd_word(spec, I64{16}) == I64{0}) -> I64{0} else -> jet_rt_string_clone(fd_word(spec, I64{16})))
+    fd_put(out, I64{32}, spawn_text_list_clone(fd_word(spec, I64{32})))
+    fd_put(out, I64{40}, spawn_text_list_clone(fd_word(spec, I64{40})))
+    fd_put(out, I64{48}, spawn_text_list_clone(fd_word(spec, I64{48})))
+    terminal :: fd_word(spec, I64{184})
+    if (terminal != I64{0}) {
+        copied :: jet_rt_alloc(I64{24}, I64{8})
+        rt_text_bytes_copy(copied, terminal, I64{24})
+        fd_put(out, I64{184}, copied)
+    }
+    fd_put(out, I64{200}, if (fd_word(spec, I64{200}) == I64{0}) -> I64{0} else -> jet_rt_string_clone(fd_word(spec, I64{200})))
+    fd_put(out, I64{208}, spawn_dirs_clone(fd_word(spec, I64{208})))
+    out
+}
+
+#Export(c) fn jet_process_spec_drop_raw(spec: I64) {
+    if (spec == I64{0}) {
+        return
+    }
+    spawn_text_list_drop(fd_word(spec, I64{0}))
+    jet_rt_string_drop(fd_word(spec, I64{16}))
+    spawn_text_list_drop(fd_word(spec, I64{32}))
+    spawn_text_list_drop(fd_word(spec, I64{40}))
+    spawn_text_list_drop(fd_word(spec, I64{48}))
+    terminal :: fd_word(spec, I64{184})
+    if (terminal != I64{0}) { jet_rt_free(terminal, I64{24}, I64{8}) }
+    jet_rt_string_drop(fd_word(spec, I64{200}))
+    dirs :: fd_word(spec, I64{208})
+    if (dirs != I64{0}) {
+        at := I64{0}
+        loop at < fd_word(dirs, I64{0}) {
+            jet_fd_drop_raw(fd_word(fd_word(dirs, I64{16}), wrapping(at * I64{24})))
+            at = wrapping(at + I64{1})
+        }
+        spawn_list_free(dirs, I64{24})
+    }
+    jet_rt_free(spec, I64{216}, I64{8})
+}
+
+// Prepare a CLOEXEC pipe; each half is immediately moved above every child
+// target before any fork or dup2. scratch borrows one eight-byte pipe2 output.
+fn spawn_pipe(scratch: I64, minimum: I64, read_out: I64, write_out: I64) -> I64 {
+    fd_put(scratch, I64{0}, I64{0})
+    result :: host_call(I64{293}, scratch, I64{524288}, I64{0})
+    if (result < I64{0}) { return result }
+    packed :: fd_word(scratch, I64{0})
+    a :: packed.bit_and(I64{4294967295})
+    b :: (packed >> I64{32}).bit_and(I64{4294967295})
+    x :: host_call(I64{72}, a, I64{1030}, minimum)
+    y :: if (x < I64{0}) -> x else -> host_call(I64{72}, b, I64{1030}, minimum)
+    _ := host_call(I64{3}, a, I64{0}, I64{0})
+    _ := host_call(I64{3}, b, I64{0}, I64{0})
+    if (y < I64{0}) {
+        if (x >= I64{0}) { _ := host_call(I64{3}, x, I64{0}, I64{0}) }
+        return y
+    }
+    fd_put(read_out, I64{0}, x)
+    fd_put(write_out, I64{0}, y)
+    I64{0}
+}
+
+fn spawn_dup_above(state: I64, minimum: I64) -> I64 {
+    fd_lock(state)
+    result :: if (fd_word(state, I64{16}) != I64{0}) -> I64{-9} else -> host_call(I64{72}, fd_word(state, I64{8}), I64{1030}, minimum)
+    fd_unlock(state)
+    result
+}
+
+fn spawn_close(number: I64) {
+    if (number >= I64{0}) { _ := host_call(I64{3}, number, I64{0}, I64{0}) }
+}
+
+fn spawn_child_new() -> I64 {
+    child :: jet_rt_alloc(I64{72}, I64{8})
+    fd_put(child, I64{0}, I64{0})
+    fd_put(child, I64{8}, I64{0})
+    fd_put(child, I64{16}, I64{0})
+    fd_put(child, I64{24}, I64{0})
+    fd_put(child, I64{32}, I64{-1})
+    fd_put(child, I64{40}, I64{-1})
+    fd_put(child, I64{48}, I64{-1})
+    fd_put(child, I64{56}, I64{-1})
+    fd_put(child, I64{64}, I64{1})
+    child
+}
+
+fn spawn_plan_close(plan: I64, count: I64) {
+    at := I64{0}
+    loop at < count {
+        spawn_close(fd_word(plan, wrapping(at * I64{16})))
+        at = wrapping(at + I64{1})
+    }
+}
+
+// Parent-only PTY setup mirrors ProcessPty.rs's posix_openpt/unlockpt/open
+// plus Term.rs configure_fd(cfmakeraw). Linux TIOCGPTPEER avoids libc's
+// process-global ptsname buffer without changing the opened slave.
+fn spawn_pty(terminal: I64, scratch: I64, minimum: I64, child: I64) -> I64 {
+    fd_put(scratch, I64{64}, I64{9})
+    fd_put(scratch, I64{96}, I64{7887052196584711215})
+    fd_put(scratch, I64{104}, I64{120})
+    master :: host_call(I64{2}, wrapping(scratch + I64{96}), I64{524546}, I64{0})
+    if (master < I64{0}) { return master }
+    fd_put(scratch, I64{0}, I64{0})
+    fd_put(scratch, I64{64}, I64{10})
+    result := host_call(I64{16}, master, I64{1074025521}, scratch)
+    slave := I64{-1}
+    if (result == I64{0}) {
+        fd_put(scratch, I64{64}, I64{11})
+        slave = host_call(I64{16}, master, I64{21569}, I64{524546})
+        if (slave < I64{0}) { result = slave }
+    }
+    if (result == I64{0}) {
+        fd_put(scratch, I64{64}, I64{12})
+        fd_put(scratch, I64{0}, (fd_word(terminal, I64{8}).bit_and(I64{65535})).bit_or(((fd_word(terminal, I64{0}).bit_and(I64{65535})) << I64{16})))
+        result = host_call(I64{16}, slave, I64{21524}, scratch)
+    }
+    if (result == I64{0}) {
+        fd_put(scratch, I64{64}, I64{13})
+        result = host_call(I64{16}, slave, I64{21505}, scratch)
+        if (result == I64{0}) {
+            if (fd_word(terminal, I64{16}) == HOST_TERMINAL_MODE_RAW) {
+                input_output :: fd_word(scratch, I64{0})
+                control_local :: fd_word(scratch, I64{8})
+                fd_put(scratch, I64{0}, (input_output.bit_and(I64{4294965780})).bit_or((((input_output >> I64{32}).bit_and(I64{4294967294})) << I64{32})))
+                fd_put(scratch, I64{8}, ((control_local.bit_and(I64{4294966991})).bit_or(I64{48})).bit_or((((control_local >> I64{32}).bit_and(I64{4294934452})) << I64{32})))
+                #Unsafe("Linux TCGETS initialized the 36-byte termios buffer; cfmakeraw sets VMIN=1, VTIME=0 in its control-character array") {
+                    os_store_u8(wrapping(scratch + I64{23}), I64{1})
+                    os_store_u8(wrapping(scratch + I64{22}), I64{0})
+                }
+            }
+            fd_put(scratch, I64{64}, I64{14})
+            result = host_call(I64{16}, slave, I64{21506}, scratch)
+        }
+    }
+    if (result == I64{0}) { fd_put(scratch, I64{64}, I64{1}) }
+    copied_master :: if (result < I64{0}) -> result else -> host_call(I64{72}, master, I64{1030}, minimum)
+    copied_slave :: if (copied_master < I64{0}) -> copied_master else -> host_call(I64{72}, slave, I64{1030}, minimum)
+    spawn_close(master)
+    spawn_close(slave)
+    if (copied_slave < I64{0}) {
+        if (copied_master >= I64{0}) { spawn_close(copied_master) }
+        return copied_slave
+    }
+    fd_put(child, I64{56}, copied_master)
+    copied_slave
+}
+
+fn spawn_cpu_seconds(milliseconds: I64) -> I64 {
+    // ProcessPty.rs max(0).saturating_add(999)/1000, after source normalization.
+    rounded :: if (milliseconds > I64{9223372036854774808}) -> I64{9223372036854775807} else -> wrapping(milliseconds + I64{999})
+    rounded /% I64{1000}
+}
+// glibc posix/execvpe.c on the pinned Linux floor: 0 stops, 1 continues,
+// 2 records EACCES and continues. Pure syscall errno facts, no source policy.
+fn spawn_exec_errno_class(result: I64) -> I64 {
+    if (result == I64{-13}) { return I64{2} }
+    if (result == I64{-2} || result == I64{-116} || result == I64{-20} || result == I64{-19} || result == I64{-110}) {
+        return I64{1}
+    }
+    I64{0}
+}
+
+// ONLY raw word loads/stores/syscalls are reachable after fork. In particular
+// there is no allocation, exact-Int/Text helper, mutex, or inherited TLS use.
+// Mirrors std::process's Unix fork+pre_exec path used by ProcessPty.rs.
+fn spawn_exec_child(plan: I64, count: I64, child: I64, scratch: I64, err_read: I64, err_write: I64, candidates: I64, argv: I64, envp: I64, fallback_argv: I64, cwd: I64, dirs: I64, session: Bool, terminal: Bool, cpu: Bool, memory: Bool, files: Bool) {
+    spawn_close(err_read)
+    spawn_close(fd_word(child, I64{32}))
+    spawn_close(fd_word(child, I64{40}))
+    spawn_close(fd_word(child, I64{48}))
+    spawn_close(fd_word(child, I64{56}))
+    result := I64{0}
+    stage := I64{4}
+    at := I64{0}
+    loop at < (I64{3}) {
+        source :: fd_word(plan, wrapping(at * I64{16}))
+        target :: fd_word(plan, wrapping(at * I64{16} + I64{8}))
+        if (source >= I64{0} && target >= I64{0}) {
+            result = host_call(I64{33}, source, target, I64{0})
+        }
+        if (result < I64{0}) { break }
+        at = wrapping(at + I64{1})
+    }
+    if (result >= I64{0} && cwd != I64{0}) {
+        stage = I64{3}
+        result = host_call(I64{80}, cwd, I64{0}, I64{0})
+    }
+    if (result >= I64{0}) {
+        stage = I64{5}
+        if !session -> result = host_call(I64{109}, I64{0}, I64{0}, I64{0})
+        if (result >= I64{0}) {
+            // std do_exec resets SIGPIPE after fd/cwd/process-group actions.
+            #Unsafe("rt_sigaction borrows four initialized stack words; no allocator, mutex or TLS is touched after fork") {
+                result = os_syscall_stack4_i64(I64{13}, I64{13}, I64{0}, I64{0}, I64{0}, I64{0}, I64{8})
+            }
+        }
+    }
+    // Held-directory pre_exec was registered first: each dup2 then its fchdir,
+    // after stdio/cwd/group/SIGPIPE and before the limits/session closure.
+    if (result >= I64{0}) {
+        at = I64{3}
+        loop at < count {
+            stage = I64{4}
+            source :: fd_word(plan, wrapping(at * I64{16}))
+            target :: fd_word(plan, wrapping(at * I64{16} + I64{8}))
+            result = host_call(I64{33}, source, target, I64{0})
+            if (result < I64{0}) { break }
+            row :: wrapping(fd_word(dirs, I64{16}) + (at - I64{3}) * I64{24})
+            if (fd_word(row, I64{16}) != I64{0}) {
+                stage = I64{3}
+                result = host_call(I64{81}, source, I64{0}, I64{0})
+                if (result < I64{0}) { break }
+            }
+            at = wrapping(at + I64{1})
+        }
+    }
+    if (result >= I64{0}) {
+        stage = I64{6}
+        if cpu -> result = host_call(I64{160}, I64{0}, wrapping(scratch + I64{16}), I64{0})
+        if (result >= I64{0} && memory) {
+            result = host_call(I64{160}, I64{9}, wrapping(scratch + I64{32}), I64{0})
+        }
+        if (result >= I64{0} && files) {
+            result = host_call(I64{160}, I64{7}, wrapping(scratch + I64{48}), I64{0})
+        }
+    }
+    if (result >= I64{0}) {
+        stage = I64{5}
+        if session -> result = host_call(I64{112}, I64{0}, I64{0}, I64{0})
+        if (result >= I64{0} && terminal) {
+            result = host_call(I64{16}, I64{0}, I64{21518}, I64{0})
+        }
+    }
+    spawn_plan_close(plan, count)
+    if (result >= I64{0}) {
+        stage = I64{7}
+        result = I64{-2}
+        denied := false
+        at = I64{0}
+        loop at < fd_word(candidates, I64{0}) {
+            name :: fd_word(fd_word(candidates, I64{8}), wrapping(at * I64{8}))
+            result = host_call(I64{59}, name, argv, envp)
+            if (result == I64{-8} && fallback_argv != I64{0}) {
+                fd_put(fallback_argv, I64{8}, name)
+                result = host_call(I64{59}, wrapping(scratch + I64{96}), fallback_argv, envp)
+            }
+            class :: spawn_exec_errno_class(result)
+            if (class == I64{0}) { break }
+            if (class == I64{2}) { denied = true }
+            at = wrapping(at + I64{1})
+        }
+        if (at == fd_word(candidates, I64{0}) && denied) { result = I64{-13} }
+    }
+    fd_put(scratch, I64{64}, stage)
+    fd_put(scratch, I64{72}, wrapping(I64{0} - result))
+    at = I64{0}
+    loop at < (I64{16}) {
+        sent :: host_call(I64{1}, err_write, wrapping(scratch + I64{64} + at), wrapping(I64{16} - at))
+        if (sent == I64{-4}) { next }
+        if (sent <= I64{0}) { break }
+        at = wrapping(at + sent)
+    }
+    _ := host_call(I64{231}, I64{127}, I64{0}, I64{0})
+}
+
+#Export(c) fn jet_process_spawn_raw(spec: I64, candidates: I64, argv: I64, envp: I64, os_facts: I64, error: I64) -> I64 {
+    dirs :: fd_word(spec, I64{208})
+    dir_count :: if (dirs == I64{0}) -> I64{0} else -> fd_word(dirs, I64{0})
+    count :: wrapping(dir_count + I64{3})
+    plan_size :: wrapping(count * I64{16})
+    plan :: jet_rt_alloc(plan_size, I64{8})
+    scratch :: jet_rt_alloc(I64{128}, I64{8})
+    child :: spawn_child_new()
+    // This target's source supplies osFacts=0, never a fake platform fallback.
+    fd_put(scratch, I64{64}, I64{1})
+    minimum := I64{3}
+    at := I64{0}
+    loop at < count {
+        fd_put(plan, wrapping(at * I64{16}), I64{-1})
+        fd_put(plan, wrapping(at * I64{16} + I64{8}), I64{-1})
+        at = wrapping(at + I64{1})
+    }
+    at = I64{0}
+    loop at < dir_count {
+        target :: fd_word(fd_word(dirs, I64{16}), wrapping(at * I64{24} + I64{8}))
+        if (target >= minimum) { minimum = wrapping(target + I64{1}) }
+        at = wrapping(at + I64{1})
+    }
+    err_read := I64{-1}
+    err_write := I64{-1}
+    result :: spawn_pipe(scratch, minimum, wrapping(scratch + I64{8}), wrapping(scratch + I64{112}))
+    failure := result
+    if (result == I64{0}) {
+        err_read = fd_word(scratch, I64{8})
+        err_write = fd_word(scratch, I64{112})
+    }
+    terminal :: fd_word(spec, I64{176}) != I64{0}
+    session :: fd_word(spec, I64{168}) != I64{0}
+    if (failure == I64{0} && terminal) {
+        slave :: spawn_pty(fd_word(spec, I64{184}), scratch, minimum, child)
+        if (slave < I64{0}) { failure = slave } else {
+            fd_put(plan, I64{0}, slave)
+            fd_put(plan, I64{8}, I64{0})
+            second :: host_call(I64{72}, slave, I64{1030}, minimum)
+            third :: if (second < I64{0}) -> second else -> host_call(I64{72}, slave, I64{1030}, minimum)
+            if (third < I64{0}) {
+                failure = third
+                if (second >= I64{0}) { spawn_close(second) }
+            } else {
+                fd_put(plan, I64{16}, second)
+                fd_put(plan, I64{24}, I64{1})
+                fd_put(plan, I64{32}, third)
+                fd_put(plan, I64{40}, I64{2})
+            }
+        }
+    }
+    if (failure == I64{0} && !terminal) {
+        index := I64{0}
+        loop index < (I64{3}) {
+            mode :: fd_word(spec, wrapping(I64{64} + index * I64{8}))
+            target :: wrapping(plan + index * I64{16})
+            // Null=3 is private prepared transport data, not a public enum arm.
+            if ((index == I64{0} && fd_word(spec, I64{56}) == I64{0}) || mode == I64{3}) {
+                fd_put(scratch, I64{96}, I64{7815273878500238383})
+                fd_put(scratch, I64{104}, I64{108})
+                null_fd :: host_call(I64{2}, wrapping(scratch + I64{96}), I64{524288}.bit_or((if (index == I64{0}) -> I64{0} else -> I64{1})), I64{0})
+                copied :: if (null_fd < I64{0}) -> null_fd else -> host_call(I64{72}, null_fd, I64{1030}, minimum)
+                spawn_close(null_fd)
+                if (copied < I64{0}) {
+                    failure = copied
+                    break
+                }
+                fd_put(target, I64{0}, copied)
+                fd_put(target, I64{8}, index)
+            } else if (mode != HOST_PROCESS_STREAM_INHERIT) {
+                pipe_result :: spawn_pipe(scratch, minimum, wrapping(scratch + I64{8}), wrapping(scratch + I64{112}))
+                if (pipe_result < I64{0}) {
+                    failure = pipe_result
+                    break
+                }
+                a :: fd_word(scratch, I64{8})
+                b :: fd_word(scratch, I64{112})
+                fd_put(target, I64{0}, if (index == I64{0}) -> a else -> b)
+                fd_put(target, I64{8}, index)
+                fd_put(child, wrapping(I64{32} + index * I64{8}), if (index == I64{0}) -> b else -> a)
+            }
+            index = wrapping(index + I64{1})
+        }
+    }
+    if (failure == I64{0}) {
+        at = I64{0}
+        loop at < dir_count {
+            row :: wrapping(fd_word(dirs, I64{16}) + at * I64{24})
+            copied :: spawn_dup_above(fd_word(row, I64{0}), minimum)
+            if (copied < I64{0}) {
+                failure = copied
+                break
+            }
+            target :: wrapping(plan + (at + I64{3}) * I64{16})
+            fd_put(target, I64{0}, copied)
+            fd_put(target, I64{8}, fd_word(row, I64{8}))
+            at = wrapping(at + I64{1})
+        }
+    }
+    fallback_argv := I64{0}
+    fallback_size := I64{0}
+    if (failure == I64{0} && fd_word(candidates, I64{0}) != I64{0} && fd_word(candidates, I64{16}) != I64{0}) {
+        // Parent-prepared /bin/sh NUL bytes and argv; child changes only argv[1].
+        fd_put(scratch, I64{96}, I64{29400045130965551})
+        argc := I64{0}
+        loop fd_word(argv, wrapping(argc * I64{8})) != (I64{0}) -> argc = wrapping(argc + I64{1})
+        slots :: if (argc <= I64{1}) -> I64{3} else -> wrapping(argc + I64{2})
+        fallback_size = wrapping(slots * I64{8})
+        fallback_argv = jet_rt_alloc(fallback_size, I64{8})
+        fd_put(fallback_argv, I64{0}, wrapping(scratch + I64{96}))
+        fd_put(fallback_argv, I64{8}, I64{0})
+        at = I64{1}
+        loop at < argc {
+            fd_put(fallback_argv, wrapping((at + I64{1}) * I64{8}), fd_word(argv, wrapping(at * I64{8})))
+            at = wrapping(at + I64{1})
+        }
+        fd_put(fallback_argv, wrapping((slots - I64{1}) * I64{8}), I64{0})
+    }
+    cwd :: if (failure != I64{0} || fd_word(spec, I64{8}) == I64{0}) -> I64{0} else -> fd_c_path(fd_word(spec, I64{16}))
+    cpu :: fd_word(spec, I64{120}) != I64{0}
+    memory :: fd_word(spec, I64{136}) != I64{0}
+    files :: fd_word(spec, I64{152}) != I64{0}
+    // Source-normalized fixed i64 limits; prepare only the requested syscalls.
+    if cpu {
+        seconds :: spawn_cpu_seconds(fd_word(spec, I64{128}))
+        fd_put(scratch, I64{16}, seconds)
+        fd_put(scratch, I64{24}, wrapping(seconds + I64{1}))
+    }
+    if memory {
+        fd_put(scratch, I64{32}, fd_word(spec, I64{144}))
+        fd_put(scratch, I64{40}, fd_word(spec, I64{144}))
+    }
+    if files {
+        fd_put(scratch, I64{48}, fd_word(spec, I64{160}))
+        fd_put(scratch, I64{56}, fd_word(spec, I64{160}))
+    }
+    pid := I64{-1}
+    stage := fd_word(scratch, I64{64})
+    if (failure == I64{0}) {
+        jet_rt_stdout_flush()
+        pid = host_call(I64{57}, I64{0}, I64{0}, I64{0})
+        if (pid == I64{0}) {
+            spawn_exec_child(plan, count, child, scratch, err_read, err_write, candidates, argv, envp, fallback_argv, cwd, dirs, session, terminal, cpu, memory, files)
+        }
+        if (pid < I64{0}) {
+            failure = pid
+            stage = I64{2}
+        } else {
+            spawn_close(err_write)
+            err_write = I64{-1}
+            fd_put(child, I64{8}, pid)
+            got := I64{0}
+            loop got < (I64{16}) {
+                read_count :: host_call(I64{0}, err_read, wrapping(scratch + I64{64} + got), wrapping(I64{16} - got))
+                if (read_count == I64{-4}) { next }
+                if (read_count < I64{0}) {
+                    failure = read_count
+                    stage = I64{8}
+                    break
+                }
+                if (read_count == I64{0}) { break }
+                got = wrapping(got + read_count)
+            }
+            if (failure == I64{0} && got != I64{0}) {
+                if (got == I64{16}) {
+                    stage = fd_word(scratch, I64{64})
+                    failure = wrapping(I64{0} - fd_word(scratch, I64{72}))
+                } else {
+                    stage = I64{8}
+                    failure = I64{-5}
+                }
+            }
+        }
+    }
+    spawn_plan_close(plan, count)
+    spawn_close(err_read)
+    spawn_close(err_write)
+    if (cwd != I64{0}) { fd_c_path_drop(cwd, fd_word(spec, I64{16})) }
+    if (fallback_argv != I64{0}) { jet_rt_free(fallback_argv, fallback_size, I64{8}) }
+    jet_rt_free(plan, plan_size, I64{8})
+    if (failure != I64{0}) {
+        if (pid > I64{0}) {
+            if (stage == I64{8}) { _ := host_call(I64{62}, pid, I64{9}, I64{0}) }
+            loop {
+                reaped :: host_call(I64{61}, pid, wrapping(scratch + I64{80}), I64{0})
+                if (reaped != I64{-4}) { break }
+            }
+        }
+        spawn_close(fd_word(child, I64{32}))
+        spawn_close(fd_word(child, I64{40}))
+        spawn_close(fd_word(child, I64{48}))
+        spawn_close(fd_word(child, I64{56}))
+        jet_rt_free(child, I64{72}, I64{8})
+    }
+    jet_rt_free(scratch, I64{128}, I64{8})
+    host_error_out(failure, stage, error)
+    if (failure == I64{0}) -> child else -> I64{0}
+}
+
+#Export(c) fn jet_process_retain_raw(child: I64) -> I64 {
+    sync_mutex_lock(child)
+    fd_put(child, I64{64}, wrapping(fd_word(child, I64{64}) + I64{1}))
+    sync_mutex_unlock(child)
+    child
+}
+
+#Export(c) fn jet_process_drop_raw(child: I64) {
+    if (child == I64{0}) {
+        return
+    }
+    sync_mutex_lock(child)
+    refs :: wrapping(fd_word(child, I64{64}) - I64{1})
+    fd_put(child, I64{64}, refs)
+    if (refs != I64{0}) {
+        sync_mutex_unlock(child)
+        return
+    }
+    spawn_close(fd_word(child, I64{32}))
+    spawn_close(fd_word(child, I64{40}))
+    spawn_close(fd_word(child, I64{48}))
+    spawn_close(fd_word(child, I64{56}))
+    jet_rt_free(child, I64{72}, I64{8})
+}
+
+#Export(c) fn jet_process_id_raw(child: I64) -> I64 { fd_word(child, I64{8}) }
+
+#Export(c) fn jet_process_wait_raw(child: I64, nohang: Bool, status: I64, error: I64) -> I64 {
+    pid :: fd_word(child, I64{8})
+    loop {
+        sync_mutex_lock(child)
+        reaped :: fd_word(child, I64{16})
+        if (reaped == I64{1}) {
+            fd_put(status, I64{0}, fd_word(child, I64{24}))
+            sync_mutex_unlock(child)
+            host_error_out(I64{0}, I64{0}, error)
+            return pid
+        }
+        if (reaped == I64{-1}) {
+            sync_mutex_unlock(child)
+            if nohang {
+                host_error_out(I64{0}, I64{0}, error)
+                return I64{0}
+            }
+            _ := sync_wait(wrapping(child + I64{16}), I64{4294967295}, I64{-1})
+            next
+        }
+        fd_put(child, I64{16}, I64{-1})
+        sync_mutex_unlock(child)
+        fd_put(status, I64{0}, I64{0})
+        result := I64{0}
+        loop {
+            result = host_call(I64{61}, pid, status, if nohang -> I64{1} else -> I64{0})
+            if (result != I64{-4}) { break }
+        }
+        sync_mutex_lock(child)
+        if (result > I64{0}) {
+            fd_put(child, I64{24}, fd_word(status, I64{0}).bit_and(I64{4294967295}))
+            compiler_process_record_exit_status(pid, fd_word(child, I64{24}))
+            fd_put(child, I64{16}, I64{1})
+        } else { fd_put(child, I64{16}, I64{0}) }
+        sync_mutex_unlock(child)
+        sync_wake(wrapping(child + I64{16}), I64{2147483647})
+        return fd_error(result, error)
+    }
+}
+
+#Export(c) fn jet_process_kill_raw(child: I64, signal: I64, group: Bool, error: I64) {
+    native_signal :: host_i32(signal)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    sync_mutex_lock(child)
+    pid :: fd_word(child, I64{8})
+    // std::process::Child::kill succeeds after its cached reap. Explicit
+    // group signalling can still clean descendants after their leader exits.
+    result :: if (!group && fd_word(child, I64{16}) == I64{1}) -> I64{0} else -> host_call(I64{62}, if group -> wrapping(I64{0} - pid) else -> pid, native_signal, I64{0})
+    sync_mutex_unlock(child)
+    _ := fd_error(result, error)
+}
+
+fn spawn_stream_offset(child: I64, stream: I64) -> I64 {
+    // Terminal stdin/stdout share the master, stderr stays absent.
+    if (fd_word(child, I64{56}) >= I64{0} && stream != I64{2}) { return I64{56} }
+    wrapping(I64{32} + stream * I64{8})
+}
+
+fn spawn_stream_dup(child: I64, stream: I64) -> I64 {
+    sync_mutex_lock(child)
+    offset :: spawn_stream_offset(child, stream)
+    original :: fd_word(child, offset)
+    result :: if (original < I64{0}) -> I64{-9} else -> host_call(I64{72}, original, I64{1030}, I64{3})
+    sync_mutex_unlock(child)
+    if (result >= I64{0} && offset == I64{56}) -> result.bit_or(I64{4294967296}) else -> result
+}
+
+fn spawn_stream_io(child: I64, stream: I64, bytes: I64, length: I64, number: I64, error: I64) -> I64 {
+    index :: host_native_int(stream)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    requested :: host_native_int(length)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    packed :: spawn_stream_dup(child, index)
+    if (packed < I64{0}) { return fd_error(packed, error) }
+    native :: packed.bit_and(I64{4294967295})
+    result := I64{0}
+    loop {
+        result = host_call(number, native, bytes, requested)
+        if (result != I64{-4}) { break }
+    }
+    spawn_close(native)
+    // Capture PTY-ness before blocking so an alias's concurrent close does
+    // not turn the Linux hung-up PTY EIO fact into a different source error.
+    if (number == I64{0} && result == I64{-5} && (packed.bit_and(I64{4294967296})) != I64{0}) {
+        result = I64{0}
+    }
+    fd_error(result, error)
+}
+
+#Export(c) fn jet_process_read_raw(child: I64, stream: I64, bytes: I64, length: I64, error: I64) -> I64 {
+    spawn_stream_io(child, stream, bytes, length, I64{0}, error)
+}
+
+#Export(c) fn jet_process_write_raw(child: I64, stream: I64, bytes: I64, length: I64, error: I64) -> I64 {
+    spawn_stream_io(child, stream, bytes, length, I64{1}, error)
+}
+
+#Export(c) fn jet_process_close_stream_raw(child: I64, stream: I64, error: I64) {
+    index :: host_native_int(stream)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    sync_mutex_lock(child)
+    offset :: spawn_stream_offset(child, index)
+    native :: fd_word(child, offset)
+    fd_put(child, offset, I64{-1})
+    result :: if (native < I64{0}) -> I64{0} else -> host_call(I64{3}, native, I64{0}, I64{0})
+    sync_mutex_unlock(child)
+    _ := fd_error(result, error)
+}
+
+#Export(c) fn jet_process_resize_raw(child: I64, cols: I64, rows: I64, error: I64) {
+    native_rows :: host_native_int(rows)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    native_cols :: host_native_int(cols)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return
+    size :: (native_rows.bit_and(I64{65535})).bit_or(((native_cols.bit_and(I64{65535})) << I64{16}))
+    sync_mutex_lock(child)
+    master :: fd_word(child, I64{56})
+    result := I64{-9}
+    if (master >= I64{0}) {
+        #Unsafe("ioctl borrows one stack word of source-validated winsize dimensions; no pointer escapes") {
+            result = os_ioctl_word_i64(master, I64{21524}, size)
+        }
+    }
+    sync_mutex_unlock(child)
+    _ := fd_error(result, error)
+}
+
+// Mechanical libc OS floor, ledgered like the resolver. realpath writes into
+// caller-owned Jet memory, never libc malloc, so allocator domains cannot mix.
+#Import(c) fn process_realpath(path: I64, buffer: I64) -> I64 = "realpath"
+
+#Export(c) fn jet_process_path_stat_raw(path: I64, facts: I64, error: I64) {
+    result := I64{0}
+    #Unsafe("source lends a NUL-terminated raw path including non-Unicode bytes and a writable 128-byte stat fact row") {
+        result = os_stat_facts_i64(I64{4}, path, facts)
+    }
+    _ := fd_error(result, error)
+}
+
+// Returns a compact byte buffer owned by the caller: length excludes NUL,
+// capacity is exactly 4096. Unpack once and free(buffer, capacity, 1), NOT len.
+#Export(c) fn jet_process_path_canonicalize_raw(path: I64, length: I64, capacity: I64, error: I64) -> I64 {
+    buffer :: jet_rt_alloc(I64{4096}, I64{1})
+    result := I64{0}
+    #Unsafe("the source-approved native NUL path and Jet-owned PATH_MAX buffer are live across the mechanical realpath call") {
+        result = process_realpath(path, buffer)
+    }
+    if (result == I64{0}) {
+        errno := I64{0}
+        #Unsafe("libc __errno_location returns this calling thread's live errno int; read only its initialized four bytes") {
+            at :: net_errno_location()
+            errno = os_load_u8(at).bit_or((os_load_u8(wrapping(at + I64{1})) << I64{8})).bit_or((os_load_u8(wrapping(at + I64{2})) << I64{16})).bit_or((os_load_u8(wrapping(at + I64{3})) << I64{24}))
+        }
+        jet_rt_free(buffer, I64{4096}, I64{1})
+        fd_put(length, I64{0}, I64{0})
+        fd_put(capacity, I64{0}, I64{0})
+        host_error_out(wrapping(I64{0} - errno), I64{0}, error)
+        return I64{0}
+    }
+    count := I64{0}
+    #Unsafe("successful realpath NUL-terminates its result within the PATH_MAX byte buffer") {
+        loop os_load_u8(wrapping(buffer + count)) != (I64{0}) -> count = wrapping(count + I64{1})
+    }
+    fd_put(length, I64{0}, count)
+    fd_put(capacity, I64{0}, I64{4096})
+    host_error_out(I64{0}, I64{0}, error)
+    buffer
+}
+
+#Export(c) fn jet_host_os_error_text_raw(_domain: I64, code: I64) -> I64 {
+    jet_sys_errno_text_raw(code)
+}
+
+// Transfers a pipe fd into an independently owned FD72. Terminal stdin and
+// stdout mirror the predecessor's try_clone(master): each view owns a dup,
+// while the terminal session keeps the original. -2 marks an already-taken
+// terminal view; it is never passed to a syscall.
+#Export(c) fn jet_process_take_stream_raw(child: I64, stream: I64, error: I64) -> I64 {
+    index :: host_native_int(stream)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    sync_mutex_lock(child)
+    offset :: wrapping(I64{32} + index * I64{8})
+    master :: fd_word(child, I64{56})
+    number := I64{-1}
+    failure := I64{0}
+    if (master >= I64{0} && index < I64{2}) {
+        if (fd_word(child, offset) != I64{-2}) {
+            number = host_call(I64{72}, master, I64{1030}, I64{3})
+            if (number < I64{0}) { failure = number } else { fd_put(child, offset, I64{-2}) }
+        }
+    } else {
+        number = fd_word(child, offset)
+        fd_put(child, offset, I64{-1})
+    }
+    sync_mutex_unlock(child)
+    host_error_out(failure, I64{0}, error)
+    if (failure < I64{0} || number < I64{0}) { return I64{0} }
+    state :: fd_new(number, I64{0}, false)
+    fd_put(state, I64{40}, I64{0})
+    state
+}

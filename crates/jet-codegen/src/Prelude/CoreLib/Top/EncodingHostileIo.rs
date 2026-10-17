@@ -222,14 +222,17 @@ fn jet_encoding_hostile_io_apply_interrupt(
     Err(std::io::ErrorKind::Interrupted.into())
 }
 
+// The codec owns its handle exclusively, so it reaches the stream through
+// `Mutex::get_mut` and never locks.
 fn jet_encoding_file_read(reader: &mut JetFileReader, buf: &mut [u8]) -> std::io::Result<usize> {
     if jet_fault_should_fail("FS.Read") {
         return Err(std::io::Error::other("fault injected: FS.Read"));
     }
+    let stream = reader.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Read;
         let cap = buf.len().min(JET_ENCODING_IO_CHUNK);
-        return reader.inner.read(&mut buf[..cap]);
+        return stream.read(&mut buf[..cap]);
     };
     jet_encoding_hostile_io_with(|state| {
         state.stats.read_calls += 1;
@@ -242,7 +245,7 @@ fn jet_encoding_file_read(reader: &mut JetFileReader, buf: &mut [u8]) -> std::io
             }
         }
         use std::io::Read;
-        let file = reader.inner.get_mut();
+        let file = stream.get_mut();
         let want = state.next_read_cap(plan, buf.len());
         let count = file.read(&mut buf[..want])?;
         if count == 0 {
@@ -263,10 +266,11 @@ fn jet_encoding_file_write_all(writer: &mut JetFileWriter, bytes: &[u8]) -> std:
     if jet_fault_should_fail("FS.Write") {
         return Err(std::io::Error::other("fault injected: FS.Write"));
     }
+    let stream = writer.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Write;
         for chunk in bytes.chunks(JET_ENCODING_IO_CHUNK) {
-            writer.inner.write_all(chunk)?;
+            stream.write_all(chunk)?;
         }
         return Ok(());
     };
@@ -281,7 +285,7 @@ fn jet_encoding_file_write_all(writer: &mut JetFileWriter, bytes: &[u8]) -> std:
             }
         }
         use std::io::Write;
-        let file = writer.inner.get_mut();
+        let file = stream.get_mut();
         let mut offset = 0usize;
         while offset < bytes.len() {
             let chunk = state.next_write_chunk(plan, bytes.len() - offset);
@@ -313,9 +317,10 @@ fn jet_encoding_file_flush(writer: &mut JetFileWriter) -> std::io::Result<()> {
     if jet_fault_should_fail("FS.Write") {
         return Err(std::io::Error::other("fault injected: FS.Write"));
     }
+    let stream = writer.inner.get_mut().unwrap_or_else(std::sync::PoisonError::into_inner);
     let Some(plan) = jet_encoding_hostile_io_plan() else {
         use std::io::Write;
-        return writer.inner.flush();
+        return stream.flush();
     };
     jet_encoding_hostile_io_with(|state| {
         state.stats.flush_calls += 1;
@@ -323,6 +328,6 @@ fn jet_encoding_file_flush(writer: &mut JetFileWriter) -> std::io::Result<()> {
             return Err(error);
         }
         use std::io::Write;
-        writer.inner.get_mut().flush()
+        stream.get_mut().flush()
     })
 }

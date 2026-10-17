@@ -1,0 +1,77 @@
+// Exact Atomic<Int>, Core/Atomic.rs:121-185/227-235/344-437.
+// Inline8 place owns ONE exact publication. Arguments are owned transfers;
+// load/add return independent owners. No fixed-width truncation or raw-word
+// equality: numerical CAS holds an observed owner until publication finishes.
+
+#Export(c) fn jet_rt_atomic_int_init(place: I64, value: I64) {
+    atomic_word_init(place, value)
+}
+#Export(c) fn jet_rt_atomic_int_load(place: I64) -> I64 { jet_rt_int_clone_atomic(place) }
+#Export(c) fn jet_rt_atomic_int_store(place: I64, value: I64) {
+    previous :: sync_swap(place, value)
+    jet_rt_int_drop(previous)
+}
+#Export(c) fn jet_rt_atomic_int_drop(place: I64) {
+    jet_rt_int_drop(sync_swap(place, I64{0}))
+}
+
+#Export(c) fn jet_rt_atomic_int_add(place: I64, delta: I64) -> I64 {
+    loop {
+        current :: jet_rt_int_clone_atomic(place)
+        next_value :: jet_int_add(current, delta)
+        if atomic_word_cas(place, current, next_value) {
+            // The cell takes next; remove its old owner. The retained current
+            // stays live and transfers to the caller as the OLD return value.
+            jet_rt_int_drop(current)
+            jet_rt_int_drop(delta)
+            return current
+        }
+        jet_rt_int_drop(next_value)
+        jet_rt_int_drop(current)
+    }
+}
+
+#Export(c) fn jet_rt_atomic_int_compare_exchange(place: I64, expected: I64, replacement: I64) -> Bool {
+    loop {
+        current :: jet_rt_int_clone_atomic(place)
+        if (jet_int_compare(current, expected) != I64{0}) {
+            jet_rt_int_drop(current)
+            jet_rt_int_drop(expected)
+            jet_rt_int_drop(replacement)
+            return false
+        }
+        if atomic_word_cas(place, current, replacement) {
+            jet_rt_int_drop(current) // removed publication owner
+            jet_rt_int_drop(current) // numeric-equality/ABA guard owner
+            jet_rt_int_drop(expected)
+            return true // replacement owner transfers into the cell
+        }
+        jet_rt_int_drop(current)
+    }
+}
+
+// Caller lends32 stack bytes: old0, refusedRequested8, scratchNext16/probed24.
+// Bool distinguishes valid OLD0 from refusal. Only success writes old0; only
+// refusal writes requested8. Lower lifts the latter through the canonical
+// AllocError constructor with allocator="exact-int", never a private carrier.
+// The bytes reflect the native physical request, NOT Rust Vec layout sizes.
+#Export(c) fn jet_rt_atomic_int_try_add(place: I64, delta: I64, result: I64) -> Bool {
+    int_store(result + I64{24}, I64{0})
+    loop {
+        current :: jet_rt_int_clone_atomic(place)
+        if !int_try_add(current, delta, result + I64{16}, result + I64{8}, result + I64{24}) {
+            jet_rt_int_drop(current)
+            jet_rt_int_drop(delta)
+            return false
+        }
+        next_value :: int_load(result + I64{16})
+        if atomic_word_cas(place, current, next_value) {
+            jet_rt_int_drop(current)
+            jet_rt_int_drop(delta)
+            int_store(result, current)
+            return true
+        }
+        jet_rt_int_drop(next_value)
+        jet_rt_int_drop(current)
+    }
+}

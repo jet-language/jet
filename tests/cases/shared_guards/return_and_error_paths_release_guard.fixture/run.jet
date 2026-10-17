@@ -1,0 +1,26 @@
+
+#Error
+enum EarlyExitError {
+    Stop
+}
+
+fn return_early(handle: Shared<Int>) {
+    guard :: handle.guard_edit()
+    guard.value += 1
+    return
+}
+
+fn fail_early(handle: Shared<Int>) -> Int EarlyExitError! {
+    guard :: handle.guard_edit()
+    guard.value += 1
+    return .Err(EarlyExitError.Stop)
+}
+
+fn run() {
+    cell := shared 0
+    return_early(cell)
+    _ :: fail_early(cell) ?? 0
+    guard :: cell.guard_edit()
+    guard.value += 1
+    print(guard.value)
+}

@@ -1,0 +1,113 @@
+// Reused metadata ownership/order from 78f5f6471 and reserved-name fix
+// 4d4c53097. Seed HostServices.rs:1516-1519,1616-1631; UiABI only.
+fn ui_optional_text_clone(value: I64) -> I64 {
+    if (value == I64{0}) -> I64{0} else -> jet_rt_string_clone(value)
+}
+fn ui_optional_text_drop(value: I64) {
+    if (value != I64{0}) -> jet_rt_string_drop(value)
+}
+fn ui_optional_text_eq(left: I64, right: I64) -> Bool {
+    if (left == I64{0} || right == I64{0}) -> return left == right
+    jet_rt_string_eq(left, right)
+}
+// Bool occupies a byte, not the uninitialized rest of its carrier word.
+fn ui_carrier_bool(address: I64) -> I64 { if ((ui_carrier_word(address).bit_and(I64{255})) == I64{0}) -> I64{0} else -> I64{1} }
+fn ui_borrow_text(value: I64, out: I64) {
+    ui_carrier_store(out, ui_carrier_word(value))
+    ui_carrier_store(out + I64{8}, ui_carrier_word(value + I64{8}))
+    ui_carrier_store(out + I64{16}, ui_carrier_word(value + I64{16}))
+}
+fn ui_accessibility_copy(value: I64, result: I64) {
+    ui_carrier_store(result + UI_ACCESSIBILITY_NAME, ui_optional_text_clone(ui_carrier_word(value + UI_ACCESSIBILITY_NAME)))
+    ui_carrier_store(result + UI_ACCESSIBILITY_DESCRIPTION, ui_optional_text_clone(ui_carrier_word(value + UI_ACCESSIBILITY_DESCRIPTION)))
+    length :: ui_carrier_word(value + UI_ACCESSIBILITY_LENGTH)
+    source :: ui_carrier_word(value + UI_ACCESSIBILITY_DATA)
+    data :: if (length == I64{0}) -> I64{0} else -> jet_rt_alloc(length * UI_STATE_BYTES, I64{8})
+    index := I64{0}
+    loop index < length {
+        state :: source + index * UI_STATE_BYTES
+        target :: data + index * UI_STATE_BYTES
+        state_kind :: ui_carrier_word(state)
+        ui_carrier_store(target, state_kind)
+        payload :: if {
+            state_kind == UI_STATE_VALUE -> jet_rt_string_clone(ui_carrier_word(state + UI_STATE_PAYLOAD))
+            state_kind == UI_STATE_EXPANDED || state_kind == UI_STATE_CHECKED || state_kind == UI_STATE_SELECTED -> ui_carrier_bool(state + UI_STATE_PAYLOAD)
+            else -> I64{0}
+        }
+        ui_carrier_store(target + UI_STATE_PAYLOAD, payload)
+        index += I64{1}
+    }
+    ui_carrier_store(result + UI_ACCESSIBILITY_LENGTH, length)
+    ui_carrier_store(result + UI_ACCESSIBILITY_CAPACITY, length)
+    ui_carrier_store(result + UI_ACCESSIBILITY_DATA, data)
+}
+#Export(c) fn jet_rt_handle_clone_jet_ui_accessibility(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_ACCESSIBILITY_BYTES, I64{8})
+    ui_accessibility_copy(value, result)
+    result
+}
+fn ui_accessibility_fields_drop(value: I64) {
+    ui_optional_text_drop(ui_carrier_word(value + UI_ACCESSIBILITY_NAME))
+    ui_optional_text_drop(ui_carrier_word(value + UI_ACCESSIBILITY_DESCRIPTION))
+    length :: ui_carrier_word(value + UI_ACCESSIBILITY_LENGTH)
+    capacity :: ui_carrier_word(value + UI_ACCESSIBILITY_CAPACITY)
+    data :: ui_carrier_word(value + UI_ACCESSIBILITY_DATA)
+    index := I64{0}
+    loop index < length {
+        state :: data + index * UI_STATE_BYTES
+        if (ui_carrier_word(state) == UI_STATE_VALUE) -> jet_rt_string_drop(ui_carrier_word(state + UI_STATE_PAYLOAD))
+        index += I64{1}
+    }
+    if (capacity != I64{0}) -> jet_rt_free(data, capacity * UI_STATE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_drop_jet_ui_accessibility(value: I64) {
+    if (value == I64{0}) -> return
+    ui_accessibility_fields_drop(value)
+    jet_rt_free(value, UI_ACCESSIBILITY_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ui_accessibility(left: I64, right: I64) -> Bool {
+    if !ui_optional_text_eq(ui_carrier_word(left + UI_ACCESSIBILITY_NAME), ui_carrier_word(right + UI_ACCESSIBILITY_NAME)) -> return false
+    if !ui_optional_text_eq(ui_carrier_word(left + UI_ACCESSIBILITY_DESCRIPTION), ui_carrier_word(right + UI_ACCESSIBILITY_DESCRIPTION)) -> return false
+    length :: ui_carrier_word(left + UI_ACCESSIBILITY_LENGTH)
+    if (length != ui_carrier_word(right + UI_ACCESSIBILITY_LENGTH)) -> return false
+    left_data :: ui_carrier_word(left + UI_ACCESSIBILITY_DATA)
+    right_data :: ui_carrier_word(right + UI_ACCESSIBILITY_DATA)
+    index := I64{0}
+    loop index < length {
+        a :: left_data + index * UI_STATE_BYTES
+        b :: right_data + index * UI_STATE_BYTES
+        state_kind :: ui_carrier_word(a)
+        if (state_kind != ui_carrier_word(b)) -> return false
+        if {
+            state_kind == UI_STATE_VALUE -> {
+                if !jet_rt_string_eq(ui_carrier_word(a + UI_STATE_PAYLOAD), ui_carrier_word(b + UI_STATE_PAYLOAD)) -> return false
+            }
+            state_kind == UI_STATE_EXPANDED || state_kind == UI_STATE_CHECKED || state_kind == UI_STATE_SELECTED -> {
+                if (ui_carrier_bool(a + UI_STATE_PAYLOAD) != ui_carrier_bool(b + UI_STATE_PAYLOAD)) -> return false
+            }
+        }
+        index += I64{1}
+    }
+    true
+}
+fn ui_shortcut_copy(value: I64, result: I64) {
+    ui_carrier_store(result + UI_SHORTCUT_KEY, jet_rt_string_clone(ui_carrier_word(value + UI_SHORTCUT_KEY)))
+    ui_carrier_store(result + UI_SHORTCUT_MODIFIERS, ui_carrier_word(value + UI_SHORTCUT_MODIFIERS).bit_and(I64{255}))
+}
+fn ui_shortcut_fields_drop(value: I64) {
+    jet_rt_string_drop(ui_carrier_word(value + UI_SHORTCUT_KEY))
+}
+#Export(c) fn jet_rt_handle_clone_jet_ui_shortcut(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_SHORTCUT_BYTES, I64{8})
+    ui_shortcut_copy(value, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_ui_shortcut(value: I64) {
+    if (value == I64{0}) -> return
+    ui_shortcut_fields_drop(value)
+    jet_rt_free(value, UI_SHORTCUT_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_ui_shortcut(left: I64, right: I64) -> Bool {
+    jet_rt_string_eq(ui_carrier_word(left + UI_SHORTCUT_KEY), ui_carrier_word(right + UI_SHORTCUT_KEY)) && (ui_carrier_word(left + UI_SHORTCUT_MODIFIERS).bit_and(I64{255})) == (ui_carrier_word(right + UI_SHORTCUT_MODIFIERS).bit_and(I64{255}))
+}
+#Export(c) fn jet_rt_handle_field_jet_ui_shortcut_key(value: I64, out: I64) { ui_borrow_text(ui_carrier_word(value + UI_SHORTCUT_KEY), out) }

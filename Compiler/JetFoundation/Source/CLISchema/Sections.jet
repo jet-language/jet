@@ -1,0 +1,274 @@
+// Canonical executable metadata carrier reader (CLISchema.rs:1647-1969).
+// All native size arithmetic is bounded by the reader's compiled target layout,
+// not by the file's class, a runtime environment variable, or an ISA name.
+CLI_SCHEMA_ELF_CLASS_1 :: U8{1}
+CLI_SCHEMA_ELF_CLASS_2 :: U8{2}
+
+fn read_executable(bytes: View<U8>, usize_max: U64) -> CLICommandSchema MetadataError! {
+    sections :: if {
+        cli_schema_bytes_start(bytes, [U8]{127, 69, 76, 70}) -> cli_schema_elf_sections(bytes, usize_max)
+        cli_schema_bytes_start(bytes, [U8]{77, 90}) -> cli_schema_pe_sections(bytes, usize_max)
+        cli_schema_is_mach(bytes) -> cli_schema_mach_sections(bytes, usize_max)
+        cli_schema_bytes_start(bytes, [U8]{0, 97, 115, 109}) -> cli_schema_wasm_sections(bytes, usize_max)
+        else -> { return Err(MetadataError.UnknownFormat) }
+    }
+    if sections.is_empty() -> return Err(MetadataError.Missing)
+    if sections.len() != 1 -> return Err(MetadataError.Duplicate)
+    decode_record(sections[0])
+}
+
+fn cli_schema_size_add(left: Int, right: Int, maximum: U64) -> Int? Never! {
+    bound :: Int.from_u64(maximum)
+    if left < 0 || right < 0 || right > bound || left > bound - right -> None else -> Val(left + right)
+}
+fn cli_schema_size_mul(left: Int, right: Int, maximum: U64) -> Int? Never! {
+    bound :: Int.from_u64(maximum)
+    if left < 0 || right < 0 || left > bound || right > bound -> return None
+    if right != 0 && left > bound /% right -> None else -> Val(left * right)
+}
+fn cli_schema_bounds(bytes: View<U8>, at: Int, length: Int, maximum: U64) -> View<U8> MetadataError! from bytes {
+    end :: cli_schema_size_add(at, length, maximum) ?? return Err(MetadataError.Malformed{why: "section range overflow"})
+    if end > bytes.len() -> return Err(MetadataError.Malformed{why: "section outside file"})
+    Ok(bytes[at..<end])
+}
+fn cli_schema_read_num(bytes: View<U8>, at: Int, width: Int, little: Bool, maximum: U64) -> U64 MetadataError! {
+    value :: cli_schema_bounds(bytes, at, width, maximum)
+    if width != 2 && width != 4 && width != 8 -> return Err(MetadataError.Malformed{why: "invalid integer width"})
+    number := U64{0}
+    loop index in 0..<width {
+        shift :: if little -> index * 8 else -> (width - index - 1) * 8
+        number = number.bit_or((U64.from_u8(value[index]) << shift))
+    }
+    Ok(number)
+}
+fn cli_schema_usize_num(value: U64, maximum: U64) -> Int MetadataError! {
+    if value > maximum -> return Err(MetadataError.Malformed{why: "file offset overflow"})
+    Ok(Int.from_u64(value))
+}
+// Validate and compare a borrowed, NUL-terminated section name. The canonical
+// reader rejects malformed UTF-8 even for an unrelated section. No name string
+// or byte-list allocation is needed to enforce that rule.
+fn cli_schema_c_name_is(bytes: View<U8>, expected: String) -> Bool MetadataError! {
+    end := bytes.len()
+    loop index in 0..<bytes.len() {
+        if bytes[index] == (U8{0}) {
+            end = index
+            break
+        }
+    }
+    name :: bytes[0..<end]
+    at := 0
+    loop at < end {
+        first :: Int.from_u8(name[at])
+        if first < 128 {
+            at += 1
+            next
+        }
+        width :: if {
+            first >= 194 && first <= 223 -> 2
+            first >= 224 && first <= 239 -> 3
+            first >= 240 && first <= 244 -> 4
+            else -> 0
+        }
+        if width == 0 || end - at < width -> return Err(MetadataError.Malformed{why: "section name is not UTF-8"})
+        second :: Int.from_u8(name[at + 1])
+        if (first == 224 && second < 160) || (first == 237 && second >= 160) || (first == 240 && second < 144) || (first == 244 && second >= 144) ->
+            return Err(MetadataError.Malformed{why: "section name is not UTF-8"})
+        loop index in 1..<width {
+            byte :: Int.from_u8(name[at + index])
+            if byte < 128 || byte >= 192 -> return Err(MetadataError.Malformed{why: "section name is not UTF-8"})
+        }
+        at += width
+    }
+    expected_bytes :: expected.bytes()
+    Ok(name.len() == expected_bytes.len() && cli_schema_bytes_start(name, expected_bytes))
+}
+
+fn cli_schema_elf_sections(bytes: View<U8>, maximum: U64) -> [View<U8>] MetadataError! from bytes {
+    if bytes.len() <= 4 -> return Err(MetadataError.Malformed{why: "truncated ELF header"})
+    class :: bytes[4]
+    if bytes.len() <= 5 -> return Err(MetadataError.Malformed{why: "invalid ELF byte order"})
+    little :: if bytes[5] == {
+        CLI_SCHEMA_ELF_CLASS_1 -> true
+        CLI_SCHEMA_ELF_CLASS_2 -> false
+        else -> { return Err(MetadataError.Malformed{why: "invalid ELF byte order"}) }
+    }
+    layout :: if class == {
+        CLI_SCHEMA_ELF_CLASS_1 -> (header: 52, shoff_at: 32, shentsize_at: 46, shnum_at: 48, shstr_at: 50, shoff_width: 4, sh_offset_at: 16, sh_size_at: 20, value_width: 4)
+        CLI_SCHEMA_ELF_CLASS_2 -> (header: 64, shoff_at: 40, shentsize_at: 58, shnum_at: 60, shstr_at: 62, shoff_width: 8, sh_offset_at: 24, sh_size_at: 32, value_width: 8)
+        else -> { return Err(MetadataError.Malformed{why: "unsupported ELF class"}) }
+    }
+    _ :: cli_schema_bounds(bytes, 0, layout.header, maximum)
+    shoff :: cli_schema_usize_num(cli_schema_read_num(bytes, layout.shoff_at, layout.shoff_width, little, maximum), maximum)
+    entsize :: cli_schema_usize_num(cli_schema_read_num(bytes, layout.shentsize_at, 2, little, maximum), maximum)
+    count :: cli_schema_usize_num(cli_schema_read_num(bytes, layout.shnum_at, 2, little, maximum), maximum)
+    names_index :: cli_schema_usize_num(cli_schema_read_num(bytes, layout.shstr_at, 2, little, maximum), maximum)
+    if count == 0 || entsize < layout.sh_size_at + layout.value_width || names_index >= count -> return Err(MetadataError.Malformed{why: "invalid ELF section table"})
+    table_length :: cli_schema_size_mul(entsize, count, maximum) ?? return Err(MetadataError.Malformed{why: "ELF section count overflow"})
+    _ :: cli_schema_bounds(bytes, shoff, table_length, maximum)
+    names_section :: cli_schema_elf_section(bytes, names_index, shoff, entsize, layout.sh_offset_at, layout.sh_size_at, layout.value_width, little, maximum)
+    names :: cli_schema_bounds(bytes, names_section.offset, names_section.size, maximum)
+    found := [View<U8>]{}
+    loop index in 0..<count {
+        section :: cli_schema_elf_section(bytes, index, shoff, entsize, layout.sh_offset_at, layout.sh_size_at, layout.value_width, little, maximum)
+        if section.name > names.len() -> return Err(MetadataError.Malformed{why: "ELF section name outside string table"})
+        if cli_schema_c_name_is(names[section.name..<names.len()], ELF_SECTION) -> &found.push(cli_schema_bounds(bytes, section.offset, section.size, maximum))
+    }
+    Ok(found)
+}
+fn cli_schema_elf_section(bytes: View<U8>, index: Int, shoff: Int, entsize: Int, sh_offset_at: Int, sh_size_at: Int, value_width: Int, little: Bool, maximum: U64) -> (name: Int, offset: Int, size: Int) MetadataError! {
+    relative :: cli_schema_size_mul(index, entsize, maximum) ?? return Err(MetadataError.Malformed{why: "ELF section offset overflow"})
+    base :: cli_schema_size_add(shoff, relative, maximum) ?? return Err(MetadataError.Malformed{why: "ELF section offset overflow"})
+    name :: cli_schema_usize_num(cli_schema_read_num(bytes, base, 4, little, maximum), maximum)
+    offset :: cli_schema_usize_num(cli_schema_read_num(bytes, base + sh_offset_at, value_width, little, maximum), maximum)
+    size :: cli_schema_usize_num(cli_schema_read_num(bytes, base + sh_size_at, value_width, little, maximum), maximum)
+    Ok((name: name, offset: offset, size: size))
+}
+fn cli_schema_pe_sections(bytes: View<U8>, maximum: U64) -> [View<U8>] MetadataError! from bytes {
+    pe :: cli_schema_usize_num(cli_schema_read_num(bytes, 0x3c, 4, true, maximum), maximum)
+    signature :: cli_schema_bounds(bytes, pe, 4, maximum)
+    if !cli_schema_bytes_start(signature, [U8]{80, 69, 0, 0}) -> return Err(MetadataError.Malformed{why: "bad PE signature"})
+    count :: cli_schema_usize_num(cli_schema_read_num(bytes, pe + 6, 2, true, maximum), maximum)
+    optional :: cli_schema_usize_num(cli_schema_read_num(bytes, pe + 20, 2, true, maximum), maximum)
+    base_table :: cli_schema_size_add(pe, 24, maximum) ?? return Err(MetadataError.Malformed{why: "PE section table overflow"})
+    table :: cli_schema_size_add(base_table, optional, maximum) ?? return Err(MetadataError.Malformed{why: "PE section table overflow"})
+    table_length :: cli_schema_size_mul(count, 40, maximum) ?? return Err(MetadataError.Malformed{why: "PE section count overflow"})
+    _ :: cli_schema_bounds(bytes, table, table_length, maximum)
+    found := [View<U8>]{}
+    loop index in 0..<count {
+        base :: table + index * 40
+        if !cli_schema_c_name_is(cli_schema_bounds(bytes, base, 8, maximum), PE_SECTION) -> next
+        size :: cli_schema_usize_num(cli_schema_read_num(bytes, base + 16, 4, true, maximum), maximum)
+        offset :: cli_schema_usize_num(cli_schema_read_num(bytes, base + 20, 4, true, maximum), maximum)
+        raw :: cli_schema_bounds(bytes, offset, size, maximum)
+        if raw.len() < 14 -> return Err(MetadataError.Malformed{why: "truncated PE metadata section"})
+        payload_len :: Int.from_u64(cli_schema_read_num(raw, 10, 4, true, maximum))
+        record_len :: cli_schema_size_add(46, payload_len, maximum) ?? return Err(MetadataError.Malformed{why: "record length overflow"})
+        record :: cli_schema_bounds(raw, 0, record_len, maximum)
+        trailing :: raw[record_len..<raw.len()]
+        if cli_schema_bytes_start(trailing, CLI_SCHEMA_MAGIC) -> return Err(MetadataError.Duplicate)
+        loop byte in trailing { if byte != (U8{0}) -> return Err(MetadataError.Malformed{why: "nonzero bytes after PE metadata record"}) }
+        &found.push(record)
+    }
+    Ok(found)
+}
+
+fn cli_schema_is_mach(bytes: View<U8>) -> Bool Never! {
+    if bytes.len() < 4 -> return false
+    ((bytes[0] == U8{206} || bytes[0] == U8{207}) && bytes[1] == U8{250} && bytes[2] == U8{237} && bytes[3] == U8{254}) || cli_schema_is_fat_mach(bytes)
+}
+fn cli_schema_is_fat_mach(bytes: View<U8>) -> Bool Never! {
+    if bytes.len() < 4 -> return false
+    (bytes[0] == U8{202} && bytes[1] == U8{254} && bytes[2] == U8{186} && (bytes[3] == U8{190} || bytes[3] == U8{191})) ||
+        ((bytes[0] == U8{190} || bytes[0] == U8{191}) && bytes[1] == U8{186} && bytes[2] == U8{254} && bytes[3] == U8{202})
+}
+fn cli_schema_mach_sections(bytes: View<U8>, maximum: U64) -> [View<U8>] MetadataError! from bytes {
+    if cli_schema_is_fat_mach(bytes) -> return cli_schema_fat_mach_sections(bytes, maximum)
+    is_64 :: cli_schema_bytes_start(bytes, [U8]{207, 250, 237, 254})
+    header :: if is_64 -> 32 else -> 28
+    _ :: cli_schema_bounds(bytes, 0, header, maximum)
+    count :: cli_schema_usize_num(cli_schema_read_num(bytes, 16, 4, true, maximum), maximum)
+    command := header
+    found := [View<U8>]{}
+    loop _ in 0..<count {
+        kind :: cli_schema_read_num(bytes, command, 4, true, maximum)
+        size :: cli_schema_usize_num(cli_schema_read_num(bytes, command + 4, 4, true, maximum), maximum)
+        if size < 8 -> return Err(MetadataError.Malformed{why: "invalid Mach-O load command size"})
+        _ :: cli_schema_bounds(bytes, command, size, maximum)
+        segment_kind :: if is_64 -> U64{25} else -> U64{1}
+        if kind == segment_kind {
+            nsects_at :: if is_64 -> 64 else -> 48
+            sections_at :: if is_64 -> 72 else -> 56
+            section_size :: if is_64 -> 80 else -> 68
+            file_offset_at :: if is_64 -> 48 else -> 40
+            section_len_at :: if is_64 -> 40 else -> 36
+            section_len_width :: if is_64 -> 8 else -> 4
+            nsects :: cli_schema_usize_num(cli_schema_read_num(bytes, command + nsects_at, 4, true, maximum), maximum)
+            span :: cli_schema_size_mul(nsects, section_size, maximum) ?? return Err(MetadataError.Malformed{why: "Mach-O section count overflow"})
+            needed :: cli_schema_size_add(sections_at, span, maximum) ?? return Err(MetadataError.Malformed{why: "Mach-O section count overflow"})
+            if needed > size -> return Err(MetadataError.Malformed{why: "Mach-O sections outside load command"})
+            loop index in 0..<nsects {
+                section :: command + sections_at + index * section_size
+                if cli_schema_c_name_is(cli_schema_bounds(bytes, section, 16, maximum), MACH_SECTION) {
+                    offset :: cli_schema_usize_num(cli_schema_read_num(bytes, section + file_offset_at, 4, true, maximum), maximum)
+                    length :: cli_schema_usize_num(cli_schema_read_num(bytes, section + section_len_at, section_len_width, true, maximum), maximum)
+                    &found.push(cli_schema_bounds(bytes, offset, length, maximum))
+                }
+            }
+        }
+        command = cli_schema_size_add(command, size, maximum) ?? return Err(MetadataError.Malformed{why: "Mach-O load command overflow"})
+    }
+    Ok(found)
+}
+fn cli_schema_fat_mach_sections(bytes: View<U8>, maximum: U64) -> [View<U8>] MetadataError! from bytes {
+    magic :: cli_schema_bounds(bytes, 0, 4, maximum)
+    little :: (magic[0] == U8{190} || magic[0] == U8{191}) && magic[1] == U8{186} && magic[2] == U8{254} && magic[3] == U8{202}
+    is_64 :: (magic[0] == U8{202} && magic[1] == U8{254} && magic[2] == U8{186} && magic[3] == U8{191}) ||
+        (magic[0] == U8{191} && magic[1] == U8{186} && magic[2] == U8{254} && magic[3] == U8{202})
+    count :: cli_schema_usize_num(cli_schema_read_num(bytes, 4, 4, little, maximum), maximum)
+    if count == 0 || count > 64 -> return Err(MetadataError.Malformed{why: "invalid universal Mach-O architecture count"})
+    entry_size :: if is_64 -> 32 else -> 20
+    table_length :: cli_schema_size_mul(count, entry_size, maximum) ?? return Err(MetadataError.Malformed{why: "universal Mach-O table overflow"})
+    _ :: cli_schema_bounds(bytes, 8, table_length, maximum)
+    canonical := View<U8>?{None}
+    loop index in 0..<count {
+        arch :: 8 + index * entry_size
+        width :: if is_64 -> 8 else -> 4
+        offset :: cli_schema_usize_num(cli_schema_read_num(bytes, arch + 8, width, little, maximum), maximum)
+        size :: cli_schema_usize_num(cli_schema_read_num(bytes, arch + 8 + width, width, little, maximum), maximum)
+        slice :: cli_schema_bounds(bytes, offset, size, maximum)
+        if cli_schema_is_fat_mach(slice) -> return Err(MetadataError.Malformed{why: "nested universal Mach-O slice"})
+        sections :: cli_schema_mach_sections(slice, maximum)
+        if sections.is_empty() -> return Err(MetadataError.Missing)
+        if sections.len() != 1 -> return Err(MetadataError.Duplicate)
+        if canonical == {
+            None -> canonical = Val(sections[0])
+            .Val(record) -> {
+                if record.len() != sections[0].len() -> return Err(MetadataError.Malformed{why: "universal Mach-O slices disagree"})
+                loop byte_index in 0..<record.len() {
+                    if record[byte_index] != sections[0][byte_index] -> return Err(MetadataError.Malformed{why: "universal Mach-O slices disagree"})
+                }
+                canonical = Val(record)
+            }
+        }
+    }
+    Ok([View<U8>]{canonical ?? return Err(MetadataError.Missing)})
+}
+fn cli_schema_wasm_leb(bytes: View<U8>, at: &Int, maximum: U64) -> Int MetadataError! {
+    value := U64{0}
+    shift := 0
+    bits :: if maximum <= (U64{0xffffffff}) -> 32 else -> 64
+    loop shift < 35 {
+        if at >= bytes.len() -> return Err(MetadataError.Malformed{why: "truncated Wasm LEB"})
+        byte :: bytes[at]
+        at += 1
+        if shift >= bits -> return Err(MetadataError.Malformed{why: "Wasm LEB overflow"})
+        // Rust's usize shift truncates high bits on a 32-bit reader.
+        value = (value.bit_or((U64.from_u8(byte.bit_and(U8{127})) << shift))).bit_and(maximum)
+        if byte.bit_and((U8{128})) == (U8{0}) -> return Ok(Int.from_u64(value))
+        shift += 7
+    }
+    Err(MetadataError.Malformed{why: "Wasm LEB too long"})
+}
+fn cli_schema_wasm_sections(bytes: View<U8>, maximum: U64) -> [View<U8>] MetadataError! from bytes {
+    header :: cli_schema_bounds(bytes, 0, 8, maximum)
+    if !cli_schema_bytes_start(header, [U8]{0, 97, 115, 109, 1, 0, 0, 0}) -> return Err(MetadataError.Malformed{why: "unsupported Wasm header"})
+    at := 8
+    found := [View<U8>]{}
+    loop at < bytes.len() {
+        id :: bytes[at]
+        at += 1
+        size :: cli_schema_wasm_leb(bytes, &at, maximum)
+        payload :: cli_schema_bounds(bytes, at, size, maximum)
+        at += size
+        if id == (U8{0}) {
+            name_at := 0
+            name_len :: cli_schema_wasm_leb(payload, &name_at, maximum)
+            name :: cli_schema_bounds(payload, name_at, name_len, maximum)
+            name_at += name_len
+            expected_name :: WASM_SECTION.bytes()
+            if name.len() == expected_name.len() && cli_schema_bytes_start(name, expected_name) -> &found.push(payload[name_at..<payload.len()])
+        }
+    }
+    Ok(found)
+}

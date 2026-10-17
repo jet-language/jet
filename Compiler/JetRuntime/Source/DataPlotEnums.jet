@@ -1,0 +1,52 @@
+// Native-private DataPlot unit-enum handles, not Rust or source/MIR layouts.
+// Declaration order: Prelude/CoreLib/Top/DataPlot.rs:270-344,749-754,
+// 866-871,914-917,1025-1031,1145-1168,1256-1262,2358-2361.
+// Descriptor ABI: CAbiRoutes.rs handle clone/drop/eq families (pointer words).
+// Record enum fields use raw declaration-order tags, never these handle pointers.
+fn data_plot_enum_clone(value: I64) -> I64 {
+    result :: jet_rt_alloc(DATA_PLOT_ENUM_BYTES, I64{8})
+    data_tree_store(result + DATA_PLOT_ENUM_TAG, data_tree_word(value + DATA_PLOT_ENUM_TAG))
+    result
+}
+fn data_plot_enum_drop(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, DATA_PLOT_ENUM_BYTES, I64{8})
+}
+fn data_plot_enum_eq(left: I64, right: I64) -> Bool {
+    data_tree_word(left + DATA_PLOT_ENUM_TAG) == data_tree_word(right + DATA_PLOT_ENUM_TAG)
+}
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_mark(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_mark(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_mark(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_channel(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_channel(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_channel(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_aggregate(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_aggregate(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_aggregate(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_filter_op(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_filter_op(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_filter_op(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_scale_kind(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_scale_kind(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_scale_kind(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_legend_position(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_legend_position(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_legend_position(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_facet_kind(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_facet_kind(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_facet_kind(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_interaction(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_interaction(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_interaction(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_backend(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_backend(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_backend(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_support(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_support(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_support(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_error_kind(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_error_kind(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_error_kind(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }
+#Export(c) fn jet_rt_handle_clone_jet_data_plot_render_format(value: I64) -> I64 { data_plot_enum_clone(value) }
+#Export(c) fn jet_rt_handle_drop_jet_data_plot_render_format(value: I64) { data_plot_enum_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_data_plot_render_format(left: I64, right: I64) -> Bool { data_plot_enum_eq(left, right) }

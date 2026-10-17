@@ -1,0 +1,16 @@
+# Port of tests/release_gates.rs::claims_projection_uses_canonical_release_source_and_fails_closed; all original predicates, runtime UNRUN.
+write: package.jet = "name: \"release_claims\"\nversion: \"0.1.0\"\n"
+write: run.jet = "fn run() {}\n"
+step: jet inspect claims run.jet --json
+exit: 0
+stdout: ~ "\"action\":\"inspect.claims\"" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"source\":\"manifest.capability_relation.rows\"" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"status\":\"prerelease\"" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"disposition\":\"current\"" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"readiness\":\"not-ready\"" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"compatibility_policy\":\"future-1.0\"" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"compatibility_policy_disposition\":\"planned\"" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"compatibility_policy_active\":false" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"release_ready\":false" # Original raw JSON string.contains; do not schema-normalize.
+stdout: ~ "\"claims\":[]" # Original raw JSON string.contains; do not schema-normalize.
+

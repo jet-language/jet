@@ -1,5 +1,25 @@
 #[test]
-fn perf_static_api_lowers_to_core_helpers() {
+fn web_virtual_window_uses_jet_source_carrier() {
+    let out = compile_temp(
+        "virtual_window_source.jet",
+        r#"
+use core.web.virtual as api
+fn run() {
+    window :: api.window_measured(100, 60, 40, 20, 1, [Int]{10, 30})
+    print(window.facts_json())
+    print(api.indices(window))
+    print(api.slice<Int>([Int]{0, 1, 2, 3, 4, 5, 6}, window))
+}
+"#,
+    );
+    assert!(!out.rust.contains("pub struct JetWebVirtualWindow"));
+    assert!(!out.rust.contains("pub struct JetWebVirtualViewport"));
+    assert!(!out.rust.contains("fn jet_web_virtual_window("));
+    assert!(!out.rust.contains("jet_web_virtual_window_facts"));
+}
+
+#[test]
+fn perf_static_api_lowers_to_jet_source() {
     let out = compile_temp(
         "perf_static.jet",
         r#"
@@ -11,10 +31,54 @@ fn run() {
 }
 "#,
     );
-    assert!(out.rust.contains("jet_perf_default_fidelity()"));
-    assert!(out.rust.contains("jet_perf_override_fidelity(0.25"));
-    assert!(out.rust.contains("jet_perf_fidelity()"));
-    assert!(out.rust.contains("jet_perf_reset_fidelity()"));
+    assert!(out.rust.contains("::default_fidelity()"));
+    assert!(out.rust.contains("::override_fidelity(0.25"));
+    assert!(out.rust.contains("::fidelity()"));
+    assert!(out.rust.contains("::reset_fidelity()"));
+    assert!(out.rust.contains("jet_perf_read_bits"));
+    assert!(out.rust.contains("jet_perf_write_bits"));
+    assert!(!out.rust.contains("fn jet_perf_override_fidelity"));
+    assert!(!out.rust.contains("fn jet_perf_reset_fidelity"));
+}
+
+/// #4745: a default argument belongs to its declaring module. `verify_jwt`'s
+/// `clock_skew: Duration{0ms}` must bind for a caller with no unit in scope.
+#[test]
+fn core_default_time_literal_binds_without_caller_units() {
+    compile_temp(
+        "default_units_absent.jet",
+        r#"
+use core.auth as auth
+
+fn run() -[Time]> {
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    verified :: auth.verify_jwt("a.b.c", key: key, audience: "api")
+    print(verified == .Err(_))
+}
+"#,
+    );
+}
+
+/// #4745: the caller's own `ms` unit must not rebind the callee's default.
+#[test]
+fn core_default_time_literal_ignores_caller_unit_of_same_name() {
+    let out = compile_temp(
+        "default_units_shadowed.jet",
+        r#"
+use core.auth as auth
+
+#UnitFamily(Lag) { ms }
+
+fn run() -[Time]> {
+    local :: 5ms
+    print(local.to_float())
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    verified :: auth.verify_jwt("a.b.c", key: key, audience: "api")
+    print(verified == .Err(_))
+}
+"#,
+    );
+    assert!(out.rust.contains("verify_jwt"), "the defaulted call must lower");
 }
 
 #[test]
@@ -142,7 +206,7 @@ fn run() {
     );
     let dev_path = dir.join("option_combinators.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: interpreted_stdout,
             stderr: interpreted_stderr,
@@ -156,8 +220,7 @@ fn run() {
             panic!("forced interpreter rejected option combinator fixture: {diagnostics:?}");
         }
     }
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: resident_stdout,
             stderr: resident_stderr,
@@ -166,18 +229,6 @@ fn run() {
             assert_eq!(exit_code, 0, "resident JIT failed: {resident_stderr}");
             assert_eq!(resident_stderr, "");
             assert_eq!(resident_stdout, stdout, "resident JIT output drifted");
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "option combinator fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "option combinator fixture must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "option combinator fixture must not fall back"
-            );
         }
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
             panic!("resident JIT rejected option combinator fixture: {diagnostics:?}");
@@ -285,7 +336,7 @@ fn run() {
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     ev.on(scope, (n: Int) -> {
-        started_tx.send(~n)
+        started_tx.send(n.copy())
         released :: release_rx.receive() ?? panic("release")
     })
     first :: ev.emit_async(1)
@@ -344,7 +395,7 @@ fn run() {
     (newest_started_tx, newest_started_rx) :: channel<Int>()
     (newest_release_tx, newest_release_rx) :: channel<Int>()
     newest.on(newest_scope, (n: Int) -> {
-        newest_started_tx.send(~n)
+        newest_started_tx.send(n.copy())
         released_newest :: newest_release_rx.receive() ?? panic("release")
     })
     newest_first :: newest.emit_async(1)
@@ -364,7 +415,7 @@ fn run() {
     (oldest_started_tx, oldest_started_rx) :: channel<Int>()
     (oldest_release_tx, oldest_release_rx) :: channel<Int>()
     oldest.on(oldest_scope, (n: Int) -> {
-        oldest_started_tx.send(~n)
+        oldest_started_tx.send(n.copy())
         released_oldest :: oldest_release_rx.receive() ?? panic("release")
     })
     oldest_first :: oldest.emit_async(1)
@@ -385,7 +436,7 @@ fn run() {
     (once_release_tx, once_release_rx) :: channel<Int>()
     once_event.on_priority(once_scope, 10, (n: Int) -> {
         if n == 1 {
-            once_started_tx.send(~n)
+            once_started_tx.send(n.copy())
             released_once :: once_release_rx.receive() ?? panic("release")
         }
     })
@@ -469,8 +520,8 @@ fn owner_teardown_task() -> Task<DispatchReport<String>> {
     (started_tx, started_rx) :: channel<Int>()
     (release_tx, release_rx) :: channel<Int>()
     ev.on(owner_scope, (n: Int) -> {
-        started_tx.send(~n)
-        held_sender :: ~release_tx
+        started_tx.send(n.copy())
+        held_sender :: release_tx.copy()
         released :: release_rx.receive() ?? panic("release")
     })
     running :: ev.emit_async(98)
@@ -485,7 +536,7 @@ fn run() {
     (cancel_started_tx, cancel_started_rx) :: channel<Int>()
     (cancel_release_tx, cancel_release_rx) :: channel<Int>()
     cancelled.on(cancel_scope, (n: Int) -> {
-        cancel_started_tx.send(~n)
+        cancel_started_tx.send(n.copy())
         released :: cancel_release_rx.receive() ?? panic("release")
     })
     cancel_running :: cancelled.emit_async(1)
@@ -507,7 +558,7 @@ fn run() {
     (queued_started_tx, queued_started_rx) :: channel<Int>()
     (queued_release_tx, queued_release_rx) :: channel<Int>()
     queued_deadline.on(queued_scope, (n: Int) -> {
-        queued_started_tx.send(~n)
+        queued_started_tx.send(n.copy())
         released :: queued_release_rx.receive() ?? panic("release")
     })
     queued_running :: queued_deadline.emit_async(10)
@@ -525,7 +576,7 @@ fn run() {
     (pending_started_tx, pending_started_rx) :: channel<Int>()
     (pending_release_tx, pending_release_rx) :: channel<Int>()
     pending_deadline.on(pending_scope, (n: Int) -> {
-        pending_started_tx.send(~n)
+        pending_started_tx.send(n.copy())
         released :: pending_release_rx.receive() ?? panic("release")
     })
     pending_running :: pending_deadline.emit_async(20)
@@ -949,7 +1000,7 @@ fn run() {
     );
     assert_eq!(stderr, "");
     let dev_path = dir.join("game_headless_dev.jet");
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: interpreted_stdout,
             stderr: interpreted_stderr,
@@ -1019,7 +1070,7 @@ fn run() {
 
     let dev_path = dir.join("data_eval_routes.jet");
     fs::write(&dev_path, source).unwrap();
-    match jet::Interpreter::dev_iteration(dev_path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(dev_path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: interpreted_stdout,
             stderr: interpreted_stderr,
@@ -1085,7 +1136,7 @@ fn run() {{
     let dev_path = dir.join("auth_session_security.jet");
     fs::write(&dev_path, &dev_source).unwrap();
     let shown_path = dev_path.to_string_lossy().to_string();
-    match jet::Interpreter::dev_iteration(&shown_path, false, true) {
+    match crate::common::dev_run(&shown_path, false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -1102,8 +1153,7 @@ fn run() {{
 
     let resident_source = source("tier-jit");
     fs::write(&dev_path, &resident_source).unwrap();
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(&shown_path, false, false) {
+    match crate::common::dev_run(&shown_path, false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -1117,14 +1167,6 @@ fn run() {{
             panic!("resident JIT rejected auth session security fixture: {diags:?}")
         }
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "auth session security fixture must execute resident JIT"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "auth session security fixture must not deopt or fall back"
-    );
     let _ = fs::remove_dir_all(&dir);
 }
 
@@ -1411,8 +1453,7 @@ fn run() {
     let path = dir.join("audience_shapes");
     fs::write(&path, &src).unwrap();
     let shown = path.to_string_lossy().into_owned();
-    jet_jit::reset_jit_trace_for_test();
-    let interpreted = match jet::Interpreter::dev_iteration(&shown, false, true) {
+    let interpreted = match crate::common::dev_run(&shown, false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -1422,12 +1463,9 @@ fn run() {
             panic!("audience-shape forced interpreter failed: {diags:?}")
         }
     };
-    assert!(!jet_jit::jit_executed_for_test());
-    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
     assert_eq!(interpreted, expected);
 
-    jet_jit::reset_jit_trace_for_test();
-    let resident = match jet::Interpreter::dev_iteration(&shown, false, false) {
+    let resident = match crate::common::dev_run(&shown, false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -1437,8 +1475,6 @@ fn run() {
             panic!("audience-shape resident JIT failed: {diags:?}")
         }
     };
-    assert!(jet_jit::jit_executed_for_test(), "auth parity must execute resident JIT");
-    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(), "auth parity must not deopt or fall back");
     assert_eq!(resident, expected);
     assert_eq!(resident, interpreted);
     assert_eq!(resident, aot_stdout);
@@ -1500,8 +1536,7 @@ fn run() {
     let path = dir.join("iat_boundaries");
     fs::write(&path, &src).unwrap();
     let shown = path.to_string_lossy().into_owned();
-    jet_jit::reset_jit_trace_for_test();
-    let interpreted = match jet::Interpreter::dev_iteration(&shown, false, true) {
+    let interpreted = match crate::common::dev_run(&shown, false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -1515,12 +1550,9 @@ fn run() {
             panic!("iat-boundary forced interpreter failed: {diags:?}")
         }
     };
-    assert!(!jet_jit::jit_executed_for_test());
-    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
     assert_eq!(interpreted, expected);
 
-    jet_jit::reset_jit_trace_for_test();
-    let resident = match jet::Interpreter::dev_iteration(&shown, false, false) {
+    let resident = match crate::common::dev_run(&shown, false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -1534,14 +1566,6 @@ fn run() {
             panic!("iat-boundary resident JIT failed: {diags:?}")
         }
     };
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "iat boundary parity must execute resident JIT"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-        "iat boundary parity must not deopt or fall back"
-    );
     assert_eq!(resident, expected);
     assert_eq!(resident, interpreted);
     assert_eq!(resident, aot_stdout);
@@ -1787,8 +1811,7 @@ fn run() {
     fs::write(&shown, &interpreter_src).unwrap();
     let shown_text = shown.to_string_lossy().into_owned();
     wait_until_unix_second_after(interpreter_fixture.equality_second);
-    jet_jit::reset_jit_trace_for_test();
-    let interpreted = match jet::Interpreter::dev_iteration(&shown_text, false, true) {
+    let interpreted = match crate::common::dev_run(&shown_text, false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -1798,8 +1821,6 @@ fn run() {
             panic!("clock forced interpreter failed: {diags:?}")
         }
     };
-    assert!(!jet_jit::jit_executed_for_test());
-    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test());
     assert_eq!(interpreted, expected);
 
     let resident_fixture = fresh_fixture();
@@ -1807,8 +1828,7 @@ fn run() {
     fs::write(&shown, &resident_src).unwrap();
     let shown_text = shown.to_string_lossy().into_owned();
     wait_until_unix_second_after(resident_fixture.equality_second);
-    jet_jit::reset_jit_trace_for_test();
-    let resident = match jet::Interpreter::dev_iteration(&shown_text, false, false) {
+    let resident = match crate::common::dev_run(&shown_text, false, false) {
         jet::Interpreter::RunOutcome::Ran { stdout, stderr, exit_code } => {
             assert_eq!(stderr, "");
             assert_eq!(exit_code, 0);
@@ -1818,8 +1838,6 @@ fn run() {
             panic!("clock resident JIT failed: {diags:?}")
         }
     };
-    assert!(jet_jit::jit_executed_for_test(), "clock auth must execute resident JIT");
-    assert!(!jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(), "clock auth must not deopt or fall back");
     assert_eq!(resident, expected);
     assert_eq!(resident, interpreted);
     assert_eq!(resident, aot_stdout);
@@ -1865,7 +1883,7 @@ fn tracked_origin_is_a_folded_optional_fact() {
     );
 
     fs::write(&source_path, src).unwrap();
-    match jet::Interpreter::dev_iteration(source_path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(source_path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: interpreted_stdout,
             stderr: interpreted_stderr,
@@ -1879,8 +1897,7 @@ fn tracked_origin_is_a_folded_optional_fact() {
             panic!("forced interpreter rejected origin fact fixture: {diagnostics:?}");
         }
     }
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(source_path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(source_path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout: resident_stdout,
             stderr: resident_stderr,
@@ -1889,18 +1906,6 @@ fn tracked_origin_is_a_folded_optional_fact() {
             assert_eq!(exit_code, 0, "resident JIT failed: {resident_stderr}");
             assert_eq!(resident_stderr, "");
             assert_eq!(resident_stdout, stdout, "resident JIT output drifted");
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "origin fact fixture must execute resident JIT"
-            );
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "origin fact fixture must not deopt"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test(),
-                "origin fact fixture must not fall back"
-            );
         }
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
                 panic!("resident JIT rejected origin fact fixture: {diagnostics:?}");
@@ -1950,21 +1955,14 @@ fn native_backend_stop_and_euclid_exports() {
             String::from_utf8_lossy(&output.stderr).into_owned(),
         )
     };
-    assert_eq!(run("values"), (0, "-4\n1\n\"a\\\"b\\n\"\n".to_string(), String::new()));
-    let context = "  --> main.jet:3 in run\n    |\n3 |     #require_eq(total, 2)\n    |     ^^^^^^^^^^^^^^^^^^^^^^^\n";
-    for (case, head) in [
-        ("euclid-by-zero", "Stop [E3010]: `divided by zero`\n  --> main.jet:6\n".to_string()),
-        (
-            "numeric-stop",
-            "Stop [E3010]: `This addition overflows the value's type (the result is outside its range)`\n  --> main.jet:7\n"
-                .to_string(),
-        ),
-        ("require", format!("Stop [E3001]: `panic: condition failed`\n{context}locals: total = 1\n")),
-        ("require-eq", format!("Stop [E3001]: `panic: expected: 2, got: 1`\n{context} Why:")),
-        ("panic", format!("Stop [E3001]: `panic: boom`\n{context} Why:")),
-    ] {
-        let (code, stdout, stderr) = run(case);
-        assert_eq!((code, stdout.as_str()), (70, ""), "{case}: {stderr}");
-        assert!(stderr.starts_with(&head), "{case}: expected the report to start with\n{head}\ngot:\n{stderr}");
-    }
+    assert_eq!(run("values"), (0, "-4\n1\n".to_string(), String::new()));
+    assert_eq!(run("text-carriers"), (0, String::new(), String::new()));
+    // Trap adapters now live in Jet. The explicit pack-linked driver proof
+    // keeps all its original cases; the seed Rust tier tests only its routes.
+    let (code, stdout, stderr) = run("euclid-by-zero");
+    assert_eq!((code, stdout.as_str()), (70, ""));
+    assert!(
+        stderr.starts_with("Stop [E3010]: `divided by zero`\n  --> main.jet:6\n"),
+        "{stderr}"
+    );
 }

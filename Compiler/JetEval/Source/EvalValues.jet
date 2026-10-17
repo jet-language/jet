@@ -11,6 +11,9 @@ use jet_foundation.[
     MIRComponentSignatureDescriptor,
     MIRConstKey,
     MIRConstant,
+    mir_integer_constant,
+    tir_comptime_integer_key,
+    mir_big_integer_key_compare,
     MIRCoreOwner,
     MIRDBQueryMetadata,
     MIRDerivationRef,
@@ -29,6 +32,8 @@ use jet_foundation.[
     MIRPreludeCallID,
     MIRProgram,
     MIRScopeID,
+    MIRSharedSite,
+    MIRSharedLifetime,
     MIRSelectKind,
     MIRTaskGroupKind,
     MIRTextPatternPart,
@@ -37,6 +42,7 @@ use jet_foundation.[
     MIRType,
     MIRTypeID,
     MIRValueID,
+    MIRProjection,
     Span,
     TComptimeEnumArg,
     TComptimeField,
@@ -49,18 +55,20 @@ use jet_foundation.[
     diagnostic_from_registry,
     mir_type_display_name,
     stable_id,
+    mir_source_value_hook,
 ]
 use jet_sema.[
     SemaRegistrationHostHooks,
 ]
 
-pub enum JetEvalRuntimeValue {
+enum JetEvalRuntimeValue {
     Moved
     Data(value: TComptimeValue)
     Absent(element: MIRType)
     Result(ok: Bool, value: JetEvalRuntimeValue)
     Closure(function: MIRFunctionID, captures: [JetEvalRuntimeValue])
     Address(frame: Int, place: MIRPlaceID, access: MIRAccess)
+    Window(owner: JetEvalRuntimeValue, path: JetEvalWindowPath)
     SharedCell(index: Int, access: MIRAccess)
     Shared(index: Int)
     SharedWeak(index: Int)
@@ -79,10 +87,17 @@ pub enum JetEvalRuntimeValue {
     // A loop walks it by `step`; it never materializes as data.
     Stream(values: [TComptimeValue], index: Int, step: Int, stages: [JetEvalRuntimeValue])
 }
-pub struct JetEvalCallbackRoot {
-    pub value: JetEvalRuntimeValue
-    pub reusable: Bool
-    pub invoked: Bool
+
+// Projection operands are frozen at acquisition, not read from a returned
+// callee frame. The path still uses the ordinary MIR projection semantics.
+struct JetEvalWindowPath {
+    projections: [MIRProjection]
+    operands: [U64:JetEvalRuntimeValue]
+}
+struct JetEvalCallbackRoot {
+    value: JetEvalRuntimeValue
+    reusable: Bool
+    invoked: Bool
 }
 
 // One owned logical reference per registry-naming runtime value. Each
@@ -93,103 +108,111 @@ pub struct JetEvalCallbackRoot {
 // Payload and ownership metadata use separate physical permits so retaining or
 // transferring a handle never waits on a payload guard. Every metadata
 // check-and-update runs under one edit permit.
-pub struct JetEvalSharedCellData {
-    pub value: JetEvalRuntimeValue
+struct JetEvalSharedCellData {
+    value: JetEvalRuntimeValue
 }
-pub struct JetEvalSharedCellMeta {
-    pub access: MIRAccess
-    pub aliases: Int
-    pub dropped: Bool
+struct JetEvalSharedCellMeta {
+    access: MIRAccess
+    aliases: Int
+    dropped: Bool
 }
-pub struct JetEvalSharedCell {
-    pub storage: Shared<JetEvalSharedCellData>
-    pub metadata: Shared<JetEvalSharedCellMeta>
+struct JetEvalSharedCell {
+    storage: Shared<JetEvalSharedCellData>
+    metadata: Shared<JetEvalSharedCellMeta>
 }
 
-pub struct JetEvalOutputEvent {
-    pub stdout: String
-    pub stderr: String
+struct JetEvalOutputEvent {
+    stdout: String
+    stderr: String
 }
-pub struct JetEvalOutputState {
-    pub events: [JetEvalOutputEvent]
+struct JetEvalOutputState {
+    events: [JetEvalOutputEvent]
 }
-pub struct JetEvalOutputContext {
-    pub storage: Shared<JetEvalOutputState>
+struct JetEvalOutputContext {
+    storage: Shared<JetEvalOutputState>
 }
 
 // Session-local canonical identity registry. Every machine of one session
 // (root, deopt resume, child tasks, native callbacks) shares this physical
 // storage; no machine sweeps it. Index and token allocation happens under one
 // registry edit permit so concurrent machines never collide.
-pub struct JetEvalRegistryData {
-    pub shared_cells: [JetEvalSharedCell]
-    pub foreign_tokens: [Int:JetEvalForeignToken]
-    pub next_foreign_token: Int
-    pub next_callback_lease: Int
-    pub next_machine_identity: Int
+struct JetEvalRegistryData {
+    shared_cells: [JetEvalSharedCell]
+    foreign_tokens: [Int:JetEvalForeignToken]
+    next_foreign_token: Int
+    next_callback_lease: Int
+    next_machine_identity: Int
+    // Fresh local evaluation cache only; runtime publication belongs to pinned Core.
+    comptime_shared_sites: [JetEvalComptimeSharedSiteEntry]{[JetEvalComptimeSharedSiteEntry]{}}
 }
-pub struct JetEvalRegistry {
-    pub storage: Shared<JetEvalRegistryData>
-    pub shared_runtime: JetEvalSharedRuntime
+struct JetEvalRegistry {
+    storage: Shared<JetEvalRegistryData>
+    shared_runtime: JetEvalSharedRuntime
 }
+
+struct JetEvalComptimeSharedSiteEntry {
+    site: MIRSharedSite
+    value: JetEvalRuntimeValue
+}
+
 // Transport-only Source task root. Native scheduling owns task control and
 // ambient context; this carrier owns exactly the callback root moved (FnOnce)
 // or retained (reusable) out of the parent machine plus the shared registry
 // handle. It deliberately contains no HostAdapter, Machine, frame, stack
 // address, or inventory list.
-pub struct JetEvalTaskRoot {
-    pub origin: JetEvalOwnedRoot
-    pub callback_lease: Int
-    pub callback: JetEvalCallbackRoot
+struct JetEvalTaskRoot {
+    origin: JetEvalOwnedRoot
+    callback_lease: Int
+    callback: JetEvalCallbackRoot
 }
 // Outcome of discharging one owned alias of a registry entry.
-pub enum JetEvalAliasRelease { Remaining Last Detached }
+enum JetEvalAliasRelease { Remaining Last Detached }
 
 
-pub struct JetEvalRuntimeMapEntry {
-    pub key: JetEvalRuntimeValue
-    pub value: JetEvalRuntimeValue
+struct JetEvalRuntimeMapEntry {
+    key: JetEvalRuntimeValue
+    value: JetEvalRuntimeValue
 }
-pub struct JetEvalRuntimeField {
-    pub name: String
-    pub value: JetEvalRuntimeValue
+struct JetEvalRuntimeField {
+    name: String
+    value: JetEvalRuntimeValue
 }
-pub struct JetEvalRuntimeEnumArg {
-    pub name: String?
-    pub value: JetEvalRuntimeValue
+struct JetEvalRuntimeEnumArg {
+    name: String?
+    value: JetEvalRuntimeValue
 }
-pub enum JetEvalRuntimeAggregate {
+enum JetEvalRuntimeAggregate {
     List(values: [JetEvalRuntimeValue])
     Map(entries: [JetEvalRuntimeMapEntry])
     Struct(type_name: String, fields: [JetEvalRuntimeField])
     Enum(type_name: String, variant: String, args: [JetEvalRuntimeEnumArg])
 }
 
-pub struct JetEvalHostMapEntry {
-    pub key: JetEvalHostValue
-    pub value: JetEvalHostValue
+struct JetEvalHostMapEntry {
+    key: JetEvalHostValue
+    value: JetEvalHostValue
 }
-pub struct JetEvalHostField {
-    pub name: String
-    pub value: JetEvalHostValue
+struct JetEvalHostField {
+    name: String
+    value: JetEvalHostValue
 }
-pub struct JetEvalHostEnumArg {
-    pub name: String?
-    pub value: JetEvalHostValue
+struct JetEvalHostEnumArg {
+    name: String?
+    value: JetEvalHostValue
 }
-pub struct JetEvalHostTypeFieldShape {
-    pub name: String
-    pub node: Int
+struct JetEvalHostTypeFieldShape {
+    name: String
+    node: Int
 }
-pub struct JetEvalHostTypeArgShape {
-    pub name: String?
-    pub node: Int
+struct JetEvalHostTypeArgShape {
+    name: String?
+    node: Int
 }
-pub struct JetEvalHostTypeVariantShape {
-    pub name: String
-    pub args: [JetEvalHostTypeArgShape]
+struct JetEvalHostTypeVariantShape {
+    name: String
+    args: [JetEvalHostTypeArgShape]
 }
-pub enum JetEvalHostTypeNode {
+enum JetEvalHostTypeNode {
     Scalar(ty: MIRType)
     Option(inner: Int)
     Result(ok: Int, error: Int)
@@ -201,61 +224,61 @@ pub enum JetEvalHostTypeNode {
     Closure(ty: MIRType, function: MIRFunctionID, captures: [Int])
     Handle(ty: MIRType, owner: JetEvalHostOwner)
 }
-pub struct JetEvalHostTypeShape {
-    pub root: Int
-    pub nodes: [JetEvalHostTypeNode]
+struct JetEvalHostTypeShape {
+    root: Int
+    nodes: [JetEvalHostTypeNode]
 }
 enum JetEvalHostCoreOwnerCheck { Missing Valid(owner: MIRCoreOwner) Invalid(message: String) }
-pub struct JetEvalNativeCallableBinding {
-    pub key: String
-    pub callable_type: MIRType
+struct JetEvalNativeCallableBinding {
+    key: String
+    callable_type: MIRType
 }
-pub enum JetEvalNativeBindingIdentity {
+enum JetEvalNativeBindingIdentity {
     Callable(binding: JetEvalNativeCallableBinding)
     Interface(receiver_type: MIRType)
 }
-pub struct JetEvalNativeInterfaceBinding {
-    pub trait_ref: MIRTraitRef
-    pub method_id: MIRTraitMethodID
-    pub method_name: String
-    pub receiver_type: MIRType
-    pub receiver_access: MIRAccess
+struct JetEvalNativeInterfaceBinding {
+    trait_ref: MIRTraitRef
+    method_id: MIRTraitMethodID
+    method_name: String
+    receiver_type: MIRType
+    receiver_access: MIRAccess
 }
-pub enum JetEvalNativeCallBinding {
+enum JetEvalNativeCallBinding {
     Callable(binding: JetEvalNativeCallableBinding)
     Interface(binding: JetEvalNativeInterfaceBinding)
 }
 
-pub struct JetEvalHostFixedBackingKey {
-    pub machine_identity: Int
-    pub frame: Int
-    pub function: MIRFunctionID
-    pub local: MIRLocalID
-    pub place: MIRPlaceID
+struct JetEvalHostFixedBackingKey {
+    machine_identity: Int
+    frame: Int
+    function: MIRFunctionID
+    local: MIRLocalID
+    place: MIRPlaceID
 }
-pub enum JetEvalHostFixedBackingSlot { Uninitialized Initialized(value: Int) }
-pub struct JetEvalHostFixedBackingStorage {
-    pub handle: MIRHandleID
-    pub raw: Int
+enum JetEvalHostFixedBackingSlot { Uninitialized Initialized(value: Int) }
+struct JetEvalHostFixedBackingStorage {
+    handle: MIRHandleID
+    raw: Int
     // Source registry token for this alias; never a provider storage ID.
-    pub token: Int
-    pub element_type: MIRType
-    pub length: Int
+    token: Int
+    element_type: MIRType
+    length: Int
 }
-pub struct JetEvalHostFixedBackingRequest {
-    pub key: JetEvalHostFixedBackingKey
-    pub element_type: MIRType
-    pub length: Int
-    pub span: Span
-    pub existing: JetEvalHostFixedBackingStorage?
+struct JetEvalHostFixedBackingRequest {
+    key: JetEvalHostFixedBackingKey
+    element_type: MIRType
+    length: Int
+    span: Span
+    existing: JetEvalHostFixedBackingStorage?
     // Present only on first materialization; this transfers initialized U8
     // slots once while preserving uninitialized slots as such.
-    pub initial_slots: [JetEvalHostFixedBackingSlot]
+    initial_slots: [JetEvalHostFixedBackingSlot]
 }
 // Read checks one bitmap slot. ReadArray/TakeArray mirror JetUninitFixed's
 // canonical full-array view/move operations; writes update provider-owned
 // initialization state, never deriving it from bytes written by Fixed.over.
-pub enum JetEvalHostFixedBackingOperation {
+enum JetEvalHostFixedBackingOperation {
     Read(index: Int)
     Write(index: Int, value: Int)
     ReadArray
@@ -264,14 +287,14 @@ pub enum JetEvalHostFixedBackingOperation {
 // Read/Write may report bounds failure; read operations may report an
 // uninitialized slot. Array operations only return bytes after all slots pass
 // the canonical readiness check.
-pub enum JetEvalHostFixedBackingAccessResult {
+enum JetEvalHostFixedBackingAccessResult {
     Byte(value: Int)
     Bytes(values: [Int])
     Unit
     OutOfBounds
     Uninitialized
 }
-pub enum JetEvalHostValue {
+enum JetEvalHostValue {
     Data(value: TComptimeValue)
     Handle(handle: MIRHandleID, raw: Int, owner: JetEvalHostOwner, payload: JetEvalHostValue)
     Absent(element: MIRType)
@@ -288,7 +311,7 @@ pub enum JetEvalHostValue {
 }
 // Canonical static MIR operands cross the existing host-call boundary as
 // typed metadata; they are never fabricated runtime values.
-pub enum JetEvalHostStaticOperand {
+enum JetEvalHostStaticOperand {
     TextPattern(parts: [MIRTextPatternPart])
     BinaryPattern(parts: [MIRBinaryPatternPart])
     CellGuardProject(paths: [[MIRFieldID]], editable: Bool, edit_paths_disjoint: Bool, split_route: MIRPreludeCall?)
@@ -299,22 +322,24 @@ pub enum JetEvalHostStaticOperand {
     HTTPRouterRegister(method: MIRHTTPMethod, handler_param_names: [String], contract_json: String, location: MIRPanicLoc)
     AllocNew(kind: MIRAllocatorKind, inline_size: Int?, checked_args: [MIRCallArg], physical_ranges: [JetEvalHostArgumentRange])
 }
-pub struct JetEvalHostArgumentRange {
-    pub start: Int
-    pub count: Int
+struct JetEvalHostArgumentRange {
+    start: Int
+    count: Int
 }
-pub enum JetEvalHostCallTarget {
+enum JetEvalHostCallTarget {
     Prelude(row: MIRPreludeCall)
+    SharedSite(site: MIRSharedSite, ty: MIRType)
+    SharedSiteReset(lifetime: MIRSharedLifetime)
     CursorTakePattern(receiver_place: MIRPlaceID, parts: [MIRTextPatternPart])
     ReaderTakePattern(receiver_place: MIRPlaceID, parts: [MIRBinaryPatternPart])
 }
 // One prepared native argument: the Source carrier (borrowed, still owned by
 // the call site), its host projection, and whether the checked call site lets
 // the native side consume it through a transfer receipt.
-pub struct JetEvalHostArgument {
-    pub value: JetEvalRuntimeValue
-    pub host: JetEvalHostValue
-    pub moved: Bool
+struct JetEvalHostArgument {
+    value: JetEvalRuntimeValue
+    host: JetEvalHostValue
+    moved: Bool
 }
 struct JetEvalPreparedCallArguments {
     values: [JetEvalRuntimeValue]
@@ -326,52 +351,52 @@ struct JetEvalPreparedValues {
 }
 
 
-pub struct JetEvalHostCoreOwner {
-    pub fact: MIRCoreOwner
-    pub ty: MIRType
+struct JetEvalHostCoreOwner {
+    fact: MIRCoreOwner
+    ty: MIRType
 }
 // Native identity is a checked Fn value or interface VALUE type. Method
 // identity belongs to JetEvalNativeCallBinding.Interface, not this retained
 // physical owner identity. `handle`/`raw` are the binding scope's real arena
 // capability, never a MIR identity.
-pub enum JetEvalHostOwner { Cursor Declared(ty: MIRType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) FixedBackingRoot(element_type: MIRType, length: Int) }
-pub enum JetEvalForeignTokenKind { Foreign Cursor Declared(ty: MIRType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) FixedBackingRoot(element_type: MIRType, length: Int) }
+enum JetEvalHostOwner { Cursor Declared(ty: MIRType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) FixedBackingRoot(element_type: MIRType, length: Int) }
+enum JetEvalForeignTokenKind { Foreign Cursor Declared(ty: MIRType) Core(owner: JetEvalHostCoreOwner) Native(binding: JetEvalNativeBindingIdentity) FixedBackingRoot(element_type: MIRType, length: Int) }
 
-pub struct JetEvalHostWriteback {
-    pub argument: Int
-    pub value: JetEvalHostValue
-}
-
-pub struct JetEvalEntryWriteback {
-    pub argument: Int
-    pub ty: MIRType
-    pub value: JetEvalRuntimeValue
+struct JetEvalHostWriteback {
+    argument: Int
+    value: JetEvalHostValue
 }
 
-pub struct JetEvalEntryWritebackBatch {
-    pub installed: Bool
-    pub writebacks: [JetEvalEntryWriteback]
-}
-pub struct JetEvalForeignTokenData {
-    pub payload: JetEvalRuntimeValue
-}
-pub struct JetEvalForeignTokenMeta {
-    pub handle: MIRHandleID
-    pub raw: Int
-    pub kind: JetEvalForeignTokenKind
-    pub aliases: Int
-    pub borrowed: Bool
-    pub closing: Bool
-    pub retired: Bool
-}
-pub struct JetEvalForeignToken {
-    pub storage: Shared<JetEvalForeignTokenData>
-    pub metadata: Shared<JetEvalForeignTokenMeta>
+struct JetEvalEntryWriteback {
+    argument: Int
+    ty: MIRType
+    value: JetEvalRuntimeValue
 }
 
-pub enum JetEvalErrorKind { Source Compiler Unsupported Fuel Ownership Effect ComptimePanic }
+struct JetEvalEntryWritebackBatch {
+    installed: Bool
+    writebacks: [JetEvalEntryWriteback]
+}
+struct JetEvalForeignTokenData {
+    payload: JetEvalRuntimeValue
+}
+struct JetEvalForeignTokenMeta {
+    handle: MIRHandleID
+    raw: Int
+    kind: JetEvalForeignTokenKind
+    aliases: Int
+    borrowed: Bool
+    closing: Bool
+    retired: Bool
+}
+struct JetEvalForeignToken {
+    storage: Shared<JetEvalForeignTokenData>
+    metadata: Shared<JetEvalForeignTokenMeta>
+}
 
-pub enum JetEvalHostOutcome {
+enum JetEvalErrorKind { Source Compiler Unsupported Fuel Ownership Effect ComptimePanic }
+
+enum JetEvalHostOutcome {
     Value(value: JetEvalHostValue)
     Effect(value: JetEvalHostValue, stdout: [U8], stderr: [U8])
     Control(value: JetEvalHostValue, stdout: [U8], stderr: [U8], exit_code: Int)
@@ -380,12 +405,12 @@ pub enum JetEvalHostOutcome {
     Failure(kind: JetEvalErrorKind, diagnostic: Diagnostic)
 }
 
-pub struct JetEvalInternalProblem {
-    pub span: Span?
-    pub message: String
+struct JetEvalInternalProblem {
+    span: Span?
+    message: String
 }
 
-pub enum JetEvalHostProjection {
+enum JetEvalHostProjection {
     Present
     Failed
     List(index: Int)
@@ -397,53 +422,53 @@ pub enum JetEvalHostProjection {
     HandlePayload
 }
 
-pub struct JetEvalHostTransfer {
-    pub argument: Int
-    pub path: [JetEvalHostProjection]
-    pub token: Int
-    pub handle: MIRHandleID
-    pub raw: Int
+struct JetEvalHostTransfer {
+    argument: Int
+    path: [JetEvalHostProjection]
+    token: Int
+    handle: MIRHandleID
+    raw: Int
 }
-pub struct JetEvalHostCallbackTransfer {
-    pub argument: Int
-    pub lease: Int
+struct JetEvalHostCallbackTransfer {
+    argument: Int
+    lease: Int
 }
-pub struct JetEvalHostFixedBackingTransfer {
-    pub argument: Int
-    pub backing_handle: MIRHandleID
-    pub backing_raw: Int
-    pub backing_owner: JetEvalHostOwner
-    pub lease: Int
-    pub owner_handle: MIRHandleID
-    pub owner_raw: Int
+struct JetEvalHostFixedBackingTransfer {
+    argument: Int
+    backing_handle: MIRHandleID
+    backing_raw: Int
+    backing_owner: JetEvalHostOwner
+    lease: Int
+    owner_handle: MIRHandleID
+    owner_raw: Int
 }
 struct JetEvalHostCallbackExchange {
     result: JetEvalRuntimeValue?
     adopted: Bool
 }
-pub struct JetEvalResultHostSharedTransfer {
-    pub path: [JetEvalHostProjection]
-    pub index: Int
-    pub owner_alias_token: Int
-    pub handle: MIRHandleID
-    pub raw: Int
-    pub generation: Int
-    pub type_identity: Int
-    pub physical_identity: Int
-    pub staged: Bool
-    pub transferred: Bool
-}
-
-pub struct JetEvalResultHostClosureTransfer {
-    pub path: [JetEvalHostProjection]
-    pub function: MIRFunctionID
-    pub capture_count: Int
+struct JetEvalResultHostSharedTransfer {
+    path: [JetEvalHostProjection]
+    index: Int
+    owner_alias_token: Int
+    handle: MIRHandleID
+    raw: Int
+    generation: Int
+    type_identity: Int
+    physical_identity: Int
+    staged: Bool
     transferred: Bool
 }
 
-pub enum JetEvalResultHostTransferCommitDisposition { Rejected Committed ConsumedFailure }
+struct JetEvalResultHostClosureTransfer {
+    path: [JetEvalHostProjection]
+    function: MIRFunctionID
+    capture_count: Int
+    transferred: Bool
+}
 
-pub struct JetEvalResultHostTransferReceipt {
+enum JetEvalResultHostTransferCommitDisposition { Rejected Committed ConsumedFailure }
+
+struct JetEvalResultHostTransferReceipt {
     machine_identity: Int
     transfers: [JetEvalHostTransfer]
     shared_transfers: [JetEvalResultHostSharedTransfer]
@@ -456,24 +481,24 @@ pub struct JetEvalResultHostTransferReceipt {
     active: Bool
 }
 
-pub struct JetEvalHostResult {
-    pub transfers: [JetEvalHostTransfer]
-    pub callback_transfers: [JetEvalHostCallbackTransfer]
-    pub fixed_backing_transfers: [JetEvalHostFixedBackingTransfer]
-    pub writebacks: [JetEvalHostWriteback]
-    pub outcome: JetEvalHostOutcome
+struct JetEvalHostResult {
+    transfers: [JetEvalHostTransfer]
+    callback_transfers: [JetEvalHostCallbackTransfer]
+    fixed_backing_transfers: [JetEvalHostFixedBackingTransfer]
+    writebacks: [JetEvalHostWriteback]
+    outcome: JetEvalHostOutcome
 }
 
-pub struct JetEvalError {
-    pub kind: JetEvalErrorKind
-    pub diagnostic: Diagnostic
+struct JetEvalError {
+    kind: JetEvalErrorKind
+    diagnostic: Diagnostic
 }
 // Callback output is a scoped transcript. Each host Effect/Control append
 // already publishes one event to the shared output context; the native owner
 // must merge this transcript into its local result only, never publish it a
 // second time.
  
-pub enum JetEvalCallbackOutcome {
+enum JetEvalCallbackOutcome {
     Value(value: JetEvalRuntimeValue)
     Failure(error: JetEvalError)
     InternalProblem(problem: JetEvalInternalProblem)
@@ -481,101 +506,124 @@ pub enum JetEvalCallbackOutcome {
     Exit(code: Int)
 }
 
-pub struct JetEvalCallbackResult {
-    pub outcome: JetEvalCallbackOutcome
-    pub stdout: String
-    pub stderr: String
+struct JetEvalCallbackResult {
+    outcome: JetEvalCallbackOutcome
+    stdout: String
+    stderr: String
 }
-pub struct JetEvalTaskCallbackInvokeResult {
-    pub root: JetEvalTaskRoot
-    pub result: JetEvalCallbackResult
-    pub reusable: Bool
+struct JetEvalTaskCallbackInvokeResult {
+    root: JetEvalTaskRoot
+    result: JetEvalCallbackResult
+    reusable: Bool
     // Fresh execution root that owns returned aliases independently of `root.origin`.
-    pub cleanup_root: JetEvalOwnedRoot
+    cleanup_root: JetEvalOwnedRoot
 }
 
 
+// The evaluator's host boundary. Compile-time evaluation holds the canonical
+// comptime rights row (D-META-EFFECT1 c3): memory-only work plus the embed
+// reads, so every call declares `FS.Read`. An undeclared dynamic dispatch
+// would be the maximal row (D-EFF2) and would make every checker path that
+// evaluates a constant reach every effect.
 trait JetEvalHostAdapter {
-    fn new_session(self) -> JetEvalHostAdapter
-    fn clone_adapter(self) -> JetEvalHostAdapter
-    fn poll_callbacks(self, machine: &JetEvalMachine) -> Bool
-    fn drain_callbacks(self, machine: &JetEvalMachine) -> Bool
-    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -> JetEvalHostResult?
-    fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -> JetEvalHostResult?
-    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -> JetEvalHostResult?
+    fn new_session(self) -[]> JetEvalHostAdapter
+    fn clone_adapter(self) -[]> JetEvalHostAdapter
+    fn poll_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool
+    fn drain_callbacks(self, machine: &JetEvalMachine) -[FS.Read]> Bool
+    fn host_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, static_operand: JetEvalHostStaticOperand?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, arg_shapes: [JetEvalHostTypeShape], span: Span) -[FS.Read]> JetEvalHostResult?
+    fn foreign_call(self, machine: &JetEvalMachine, row: MIRForeign, args: ^[JetEvalHostArgument], span: Span) -[FS.Read]> JetEvalHostResult?
+    fn handle_call(self, machine: &JetEvalMachine, operation: String, handle: MIRHandleID, raw: Int, span: Span) -[FS.Read]> JetEvalHostResult?
+    // Compiler-private TypedIntrinsic leaves, never a source-visible FFI cast.
+    // string_home receives selectors into the borrowed machine, not String bytes.
+    fn string_home(self, machine: &JetEvalMachine, request: JetEvalStringHomeRequest, span: Span) -[]> JetEvalStringHome?
+    fn bytes_pack(self, machine: &JetEvalMachine, bytes: [U8], span: Span) -[]> U64?
+    fn bytes_free(self, machine: &JetEvalMachine, pointer: U64, length: Int, span: Span) -[]> Bool
+    fn bytes_unpack(self, machine: &JetEvalMachine, pointer: U64, length: Int, span: Span) -[]> [U8]?
     // Cleanup-only path for Source backing-root refs and provisional owner
     // leases. A committed allocator lease is released by the allocator's
     // normal handle drop instead.
-    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MIRHandleID, raw: Int, lease: Int?, span: Span) -> JetEvalHostResult?
-    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -> JetEvalHostFixedBackingAccessResult?
-    fn physical_binding(self) -> JetEvalHostValue
-    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
-    fn channel_select(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
-    fn task_group(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
-    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -> JetEvalHostResult?
+    fn fixed_backing_release(self, machine: &JetEvalMachine, handle: MIRHandleID, raw: Int, lease: Int?, span: Span) -[]> JetEvalHostResult?
+    fn fixed_backing_access(self, machine: &JetEvalMachine, root: JetEvalHostFixedBackingStorage, operation: JetEvalHostFixedBackingOperation, span: Span) -[]> JetEvalHostFixedBackingAccessResult?
+    fn physical_binding(self) -[]> JetEvalHostValue
+    fn native_call(self, machine: &JetEvalMachine, binding: JetEvalNativeCallBinding, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[FS.Read]> JetEvalHostResult?
+    fn channel_select(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRSelectKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult?
+    fn task_group(self, machine: &JetEvalMachine, row: MIRPreludeCall, kind: MIRTaskGroupKind, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult?
+    fn shared_call(self, machine: &JetEvalMachine, operation: JetEvalSharedPhysicalOp, row: MIRPreludeCall, map_row: MIRPreludeCall?, shared: JetEvalRuntimeValue, guard: JetEvalRuntimeValue?, condition: JetEvalRuntimeValue?, args: ^[JetEvalHostArgument], result_shape: JetEvalHostTypeShape?, span: Span) -[]> JetEvalHostResult?
 }
 
-pub struct JetEvalConfig {
+// Installed only for a checked fn-build invocation. The ordinary comptime
+// adapter above deliberately cannot acquire network or wait rights.
+trait JetEvalBuildHostAdapter {
+    fn clone_adapter(self) -[]> JetEvalBuildHostAdapter
+    fn build_call(self, machine: &JetEvalMachine, target: JetEvalHostCallTarget, args: ^[JetEvalHostArgument], span: Span) -[FS.Read, Net, Time.Wait]> JetEvalHostResult?
+}
+
+struct JetEvalConfig {
     // Step budget for compile-time evaluation. Runtime execution (a program
     // run) has no step limit, like a built binary (D-INTERP-BUDGET1).
-    pub fuel: Int
-    pub max_call_depth: Int
-    pub max_collection_len: Int
-    pub globals: [String:TComptimeValue]
-    pub runtime_execution: Bool
-    pub host_adapter: JetEvalHostAdapter?
-    pub output_context: JetEvalOutputContext?
+    fuel: Int
+    max_call_depth: Int
+    max_collection_len: Int
+    globals: [String:TComptimeValue]
+    runtime_execution: Bool
+    host_adapter: JetEvalHostAdapter?
+    build_host_adapter: JetEvalBuildHostAdapter?{None}
+    output_context: JetEvalOutputContext?
     // Compiler-service callbacks live behind one Shared cell: a config copy
     // shares the hooks instead of copying function values.
-    pub host_hooks: Shared<SemaRegistrationHostHooks>
+    host_hooks: Shared<SemaRegistrationHostHooks>
 }
-pub fn jet_eval_default_config() -> JetEvalConfig Never! {
+fn jet_eval_default_config() -> JetEvalConfig Never! {
     JetEvalConfig{fuel: 10000000, max_call_depth: 1024, max_collection_len: 1000000, globals: [String:TComptimeValue]{}, runtime_execution: false, host_adapter: None, output_context: None, host_hooks: shared SemaRegistrationHostHooks{numeric_unit_conversion_exact: None, typed_boundary_literal_validate: None}}
 }
-pub struct JetEvalOwnedRoot {
-    pub program: MIRProgram
-    pub registry: JetEvalRegistry
+struct JetEvalOwnedRoot {
+    program: MIRProgram
+    registry: JetEvalRegistry
     config: JetEvalConfig
 }
-pub enum JetEvalOwnedRootDropDisposition { Cleaned ConsumedFailure }
-pub struct JetEvalOwnedRootDropResult {
-    pub disposition: JetEvalOwnedRootDropDisposition
-    pub failure: JetEvalError?
-    pub internal_problem: JetEvalInternalProblem?
-    pub stdout: String
-    pub stderr: String
+enum JetEvalOwnedRootDropDisposition { Cleaned ConsumedFailure }
+struct JetEvalOwnedRootDropResult {
+    disposition: JetEvalOwnedRootDropDisposition
+    failure: JetEvalError?
+    internal_problem: JetEvalInternalProblem?
+    stdout: String
+    stderr: String
 }
 
 
-pub struct JetEvalFrame {
-    pub function: MIRFunctionID
-    pub block: MIRBlockID
-    pub ip: Int
-    pub predecessor: MIRBlockID?
-    pub params: [JetEvalRuntimeValue]
-    pub captures: [JetEvalRuntimeValue]
-    pub values: [U64:JetEvalRuntimeValue]
-    pub borrowed_values: [U64:Bool]
-    pub locals: [U64:JetEvalRuntimeValue]
-    pub scopes: [MIRScopeID]
-    pub entry_accesses: [MIRAccess]
-    pub entry_shared_loans: [JetEvalSharedEntryLoan]
-    pub captures_borrowed: Bool
+struct JetEvalCallerSite { frame: Int, block: MIRBlockID, ip: Int }
+
+struct JetEvalFrame {
+    function: MIRFunctionID
+    block: MIRBlockID
+    ip: Int
+    predecessor: MIRBlockID?
+    params: [JetEvalRuntimeValue]
+    // Call-site provenance, never copied String storage.
+    caller_site: JetEvalCallerSite?
+    captures: [JetEvalRuntimeValue]
+    values: [U64:JetEvalRuntimeValue]
+    borrowed_values: [U64:Bool]
+    locals: [U64:JetEvalRuntimeValue]
+    scopes: [MIRScopeID]
+    entry_accesses: [MIRAccess]
+    entry_shared_loans: [JetEvalSharedEntryLoan]
+    captures_borrowed: Bool
 }
-pub struct JetEvalResumeRequest {
-    pub program: MIRProgram
-    pub config: JetEvalConfig
-    pub frames: [JetEvalFrame]
-    pub registry: JetEvalRegistry
-    pub callback_roots: [Int:JetEvalCallbackRoot]
-    pub steps: Int
-    pub stdout: String
-    pub stderr: String
-    pub soft_stop: Bool
-    pub exit_code: Int?
-    pub failure: JetEvalError?
-    pub internal_problem: JetEvalInternalProblem?
-    pub target_depth: Int
+struct JetEvalResumeRequest {
+    program: MIRProgram
+    config: JetEvalConfig
+    frames: [JetEvalFrame]
+    registry: JetEvalRegistry
+    callback_roots: [Int:JetEvalCallbackRoot]
+    steps: Int
+    stdout: String
+    stderr: String
+    soft_stop: Bool
+    exit_code: Int?
+    failure: JetEvalError?
+    internal_problem: JetEvalInternalProblem?
+    target_depth: Int
 }
 
 // A deopt caller transfers this exact Source-MIR machine snapshot into the
@@ -583,7 +631,7 @@ pub struct JetEvalResumeRequest {
 // callers must retain it until jet_eval_retire_result closes its roots. The
 // frames and callback roots are the only owned references; the registry is the
 // same session registry the suspended machine used.
-pub fn jet_eval_resume_request(
+fn jet_eval_resume_request(
     program: ^MIRProgram,
     config: ^JetEvalConfig,
     frames: ^[JetEvalFrame],
@@ -614,87 +662,93 @@ pub fn jet_eval_resume_request(
         target_depth: target_depth,
     }
 }
-pub struct JetEvalDeoptRequest {
-    pub function: MIRFunctionID
-    pub argc: Int
+struct JetEvalDeoptRequest {
+    function: MIRFunctionID
+    argc: Int
     // The first argc words are live; trailing ABI slots are retained verbatim.
-    pub args: [Int]
+    args: [Int]
 }
 
-pub fn jet_eval_deopt_request(function: MIRFunctionID, argc: Int, args: ^[Int]) -> JetEvalDeoptRequest Never! {
+fn jet_eval_deopt_request(function: MIRFunctionID, argc: Int, args: ^[Int]) -> JetEvalDeoptRequest Never! {
     JetEvalDeoptRequest{function: function, argc: argc, args: args}
 }
 
 
 
-pub struct JetEvalResult {
-    pub complete: Bool
-    pub value: JetEvalRuntimeValue?
-    pub session: JetEvalRuntimeSession?
-    pub stdout: String
-    pub stderr: String
-    pub output_context: JetEvalOutputContext?
-    pub steps: Int
-    pub soft_stop: Bool
-    pub exit_code: Int?
-    pub error: JetEvalError?
-    pub internal_problem: JetEvalInternalProblem?
+struct JetEvalResult {
+    complete: Bool
+    value: JetEvalRuntimeValue?
+    session: JetEvalRuntimeSession?
+    stdout: String
+    stderr: String
+    output_context: JetEvalOutputContext?
+    steps: Int
+    soft_stop: Bool
+    exit_code: Int?
+    error: JetEvalError?
+    internal_problem: JetEvalInternalProblem?
 }
 
-pub struct JetEvalRuntimeSession {
+struct JetEvalRuntimeSession {
     machine: JetEvalMachine
-    pub retired: Bool
+    retired: Bool
+    shared_site_attempt: Bool{false}
 }
 
 struct JetEvalMachine {
-    pub program: MIRProgram
+    program: MIRProgram
     // Row positions in `program`, built with the machine (see
     // jet_eval_program_rows); `program` is never re-ordered afterwards.
-    pub rows: JetEvalProgramRows
-    pub config: JetEvalConfig
-    pub registry: JetEvalRegistry
+    rows: JetEvalProgramRows
+    config: JetEvalConfig
+    registry: JetEvalRegistry
     // Session-unique machine identity; child tasks and native callbacks get
     // fresh identities while sharing the registry.
-    pub identity: Int
-    pub frames: [JetEvalFrame]
-    pub callback_roots: [Int:JetEvalCallbackRoot]
-    pub entry_access: MIRAccess?
-    pub entry_shared_loans: [JetEvalSharedEntryLoan]
-    pub steps: Int
-    pub stdout: String
-    pub stderr: String
-    pub soft_stop: Bool
-    pub exit_code: Int?
-    pub failure: JetEvalError?
-    pub internal_problem: JetEvalInternalProblem?
+    identity: Int
+    frames: [JetEvalFrame]
+    callback_roots: [Int:JetEvalCallbackRoot]
+    entry_access: MIRAccess?
+    entry_shared_loans: [JetEvalSharedEntryLoan]
+    steps: Int
+    // REPL turns bound nested calls/formatters too, while retaining runtime
+    // host dispatch; ordinary file execution remains unbounded.
+    bound_runtime_fuel: Bool{false}
+    stdout: String
+    stderr: String
+    soft_stop: Bool
+    exit_code: Int?
+    failure: JetEvalError?
+    internal_problem: JetEvalInternalProblem?
 }
 
-// Row positions in a checked program, built once per machine (and once per
-// program-only host-shape query) so evaluator lookups probe a map and borrow
-// the row instead of scanning, and copying, whole program tables. Id maps keep
-// the first row per id value; list maps keep every row in program order.
+// Row positions in a checked program, built once per machine or native host
+// shape context. Id maps keep the first row per id value; list maps keep every
+// row in program order. Shape contexts index only their projected tables.
 struct JetEvalProgramRows {
-    pub functions: [U64:Int]
-    pub fields: [U64:Int]
-    pub types: [U64:Int]
-    pub traits: [U64:Int]
-    pub handles: [U64:Int]
-    pub foreign: [U64:Int]
-    pub modules: [U64:Int]
-    pub source_files: [U64:Int]
-    pub core_calls: [U64:Int]
-    pub prelude_calls: [U64:Int]
-    pub constants: [String:Int]
+    functions: [U64:Int]
+    fields: [U64:Int]
+    types: [U64:Int]
+    traits: [U64:Int]
+    handles: [U64:Int]
+    foreign: [U64:Int]
+    modules: [U64:Int]
+    source_files: [U64:Int]
+    core_calls: [U64:Int]
+    prelude_calls: [U64:Int]
+    constants: [String:Int]
     // Rows of program.type_instances per identity value.
-    pub type_instances: [U64:[Int]]
+    type_instances: [U64:[Int]]
     // Rows of program.impls per implemented trait id value.
-    pub impls_by_trait: [U64:[Int]]
+    impls_by_trait: [U64:[Int]]
     // Rows of program.core_owners per nominal id value and per owner id value.
-    pub core_owners_by_nominal: [U64:[Int]]
-    pub core_owners_by_id: [U64:[Int]]
+    core_owners_by_nominal: [U64:[Int]]
+    core_owners_by_id: [U64:[Int]]
     // Per-function id rows, parallel to program.functions; each entry is
     // filled on the function's first lookup (jet_eval_function_rows_ready).
-    pub function_rows: [JetEvalFunctionRows]
+    function_rows: [JetEvalFunctionRows]
+    source_clone_hooks: [U64:MIRFunctionID]
+    source_show_hooks: [U64:MIRFunctionID]
+    source_debug_hooks: [U64:MIRFunctionID]
 }
 
 // Row positions in one function's id tables, so evaluator lookups for a
@@ -703,16 +757,17 @@ struct JetEvalProgramRows {
 // `*_next` lists chain each row to the next row with the same id (-1 ends a
 // chain), so first-, last-, and every-match lookups keep their meaning.
 struct JetEvalFunctionRows {
-    pub built: Bool
-    pub blocks: [U64:Int]
-    pub places: [U64:Int]
-    pub values: [U64:Int]
-    pub values_next: [Int]
-    pub locals: [U64:Int]
-    pub locals_next: [Int]
+    built: Bool
+    blocks: [U64:Int]
+    places: [U64:Int]
+    values: [U64:Int]
+    values_next: [Int]
+    locals: [U64:Int]
+    locals_next: [Int]
 }
 
 fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
+    shape_rows := jet_eval_program_shape_rows(program)
     functions := [U64:Int]{}
     loop index in 0..<program.functions.len() {
         key :: program.functions[index].id.value
@@ -723,30 +778,15 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         key :: program.fields[index].id.value
         if fields.get(key) == None -> fields[key] = index
     }
-    types := [U64:Int]{}
-    loop index in 0..<program.types.len() {
-        key :: program.types[index].id.value
-        if types.get(key) == None -> types[key] = index
-    }
     traits := [U64:Int]{}
     loop index in 0..<program.traits.len() {
         key :: program.traits[index].id.value
         if traits.get(key) == None -> traits[key] = index
     }
-    handles := [U64:Int]{}
-    loop index in 0..<program.handles.len() {
-        key :: program.handles[index].id.value
-        if handles.get(key) == None -> handles[key] = index
-    }
     foreign := [U64:Int]{}
     loop index in 0..<program.foreign.len() {
         key :: program.foreign[index].id.value
         if foreign.get(key) == None -> foreign[key] = index
-    }
-    modules := [U64:Int]{}
-    loop index in 0..<program.modules.len() {
-        key :: program.modules[index].id.value
-        if modules.get(key) == None -> modules[key] = index
     }
     source_files := [U64:Int]{}
     loop index in 0..<program.source_files.len() {
@@ -782,6 +822,68 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         &rows.push(index)
         impls_by_trait[trait_ref.id.value] = rows
     }
+    function_rows := [JetEvalFunctionRows]{}
+    loop _ in 0..<program.functions.len() {
+        &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
+    }
+    source_clone_hooks := [U64:MIRFunctionID]{}
+    source_show_hooks := [U64:MIRFunctionID]{}
+    source_debug_hooks := [U64:MIRFunctionID]{}
+    loop instance in program.type_instances {
+        if instance.kind == .Apply(owner, _) {
+            if source_clone_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "clone") == .Val(id) -> source_clone_hooks[owner.id.value] = id
+            }
+            if source_show_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "show") == .Val(id) -> source_show_hooks[owner.id.value] = id
+            }
+            if source_debug_hooks.get(owner.id.value) == None {
+                if mir_source_value_hook(program, instance, "debug") == .Val(id) -> source_debug_hooks[owner.id.value] = id
+            }
+        }
+    }
+    JetEvalProgramRows{
+        functions: functions,
+        fields: fields,
+        types: ^shape_rows.types,
+        traits: traits,
+        handles: ^shape_rows.handles,
+        foreign: foreign,
+        modules: ^shape_rows.modules,
+        source_files: source_files,
+        core_calls: core_calls,
+        prelude_calls: prelude_calls,
+        constants: constants,
+        type_instances: type_instances,
+        impls_by_trait: impls_by_trait,
+        core_owners_by_nominal: ^shape_rows.core_owners_by_nominal,
+        core_owners_by_id: ^shape_rows.core_owners_by_id,
+        function_rows: function_rows,
+        source_clone_hooks: source_clone_hooks,
+        source_show_hooks: source_show_hooks,
+        source_debug_hooks: source_debug_hooks,
+    }
+}
+
+// Native ABI shapes use only nominal definitions, Core registrations, source
+// modules and exact handle lifecycles. Keep the same duplicate-ID semantics as
+// the evaluator without indexing function signatures or type instances.
+fn jet_eval_program_shape_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
+    types := [U64:Int]{}
+    loop index in 0..<program.types.len() {
+        key :: program.types[index].id.value
+        if types.get(key) == None -> types[key] = index
+    }
+    handles := [U64:Int]{}
+    loop index in 0..<program.handles.len() {
+        key :: program.handles[index].id.value
+        if handles.get(key) == None -> handles[key] = index
+    }
+    modules := [U64:Int]{}
+    loop index in 0..<program.modules.len() {
+        key :: program.modules[index].id.value
+        if modules.get(key) == None -> modules[key] = index
+    }
     core_owners_by_nominal := [U64:[Int]]{}
     core_owners_by_id := [U64:[Int]]{}
     loop index in 0..<program.core_owners.len() {
@@ -799,24 +901,28 @@ fn jet_eval_program_rows(program: MIRProgram) -> JetEvalProgramRows Never! {
         &function_rows.push(JetEvalFunctionRows{built: false, blocks: [U64:Int]{}, places: [U64:Int]{}, values: [U64:Int]{}, values_next: [Int]{}, locals: [U64:Int]{}, locals_next: [Int]{}})
     }
     JetEvalProgramRows{
-        functions: functions,
-        fields: fields,
+        functions: [U64:Int]{},
+        fields: [U64:Int]{},
         types: types,
-        traits: traits,
+        traits: [U64:Int]{},
         handles: handles,
-        foreign: foreign,
+        foreign: [U64:Int]{},
         modules: modules,
-        source_files: source_files,
-        core_calls: core_calls,
-        prelude_calls: prelude_calls,
-        constants: constants,
-        type_instances: type_instances,
-        impls_by_trait: impls_by_trait,
+        source_files: [U64:Int]{},
+        core_calls: [U64:Int]{},
+        prelude_calls: [U64:Int]{},
+        constants: [String:Int]{},
+        type_instances: [U64:[Int]]{},
+        impls_by_trait: [U64:[Int]]{},
         core_owners_by_nominal: core_owners_by_nominal,
         core_owners_by_id: core_owners_by_id,
-        function_rows: function_rows,
+        function_rows: [JetEvalFunctionRows]{},
+        source_clone_hooks: [U64:MIRFunctionID]{},
+        source_show_hooks: [U64:MIRFunctionID]{},
+        source_debug_hooks: [U64:MIRFunctionID]{},
     }
 }
+
 
 
 fn jet_eval_registry_new() -> JetEvalRegistry Never! {
@@ -891,7 +997,7 @@ fn jet_eval_new_shared_cell(machine: JetEvalMachine, value: JetEvalRuntimeValue,
 
 // Alias inspection for fixtures and diagnostics: None for an unknown entry,
 // 0 once the entry is dropped or retired.
-pub fn jet_eval_shared_cell_aliases(machine: JetEvalMachine, index: Int) -> Int? {
+fn jet_eval_shared_cell_aliases(machine: JetEvalMachine, index: Int) -> Int? {
     cell :: jet_eval_registry_cell(machine, index) ?? return None
     metadata := cell.metadata
     permit :: metadata.guard_read()
@@ -899,7 +1005,7 @@ pub fn jet_eval_shared_cell_aliases(machine: JetEvalMachine, index: Int) -> Int?
     Val(permit.value.aliases)
 }
 
-pub fn jet_eval_foreign_token_aliases(machine: JetEvalMachine, token: Int) -> Int? {
+fn jet_eval_foreign_token_aliases(machine: JetEvalMachine, token: Int) -> Int? {
     state :: jet_eval_registry_token(machine, token) ?? return None
     metadata := state.metadata
     permit :: metadata.guard_read()
@@ -1018,16 +1124,16 @@ fn jet_eval_shared_cell_swap_payload(machine: &JetEvalMachine, index: Int, value
     storage := cell.storage
     permit :: storage.guard_edit()
     previous := permit.value.value
-    permit.value.value = ~value
+    permit.value.value = value.copy()
     Val(previous)
 }
 
-pub fn jet_eval_output_context_new() -> JetEvalOutputContext Never! {
+fn jet_eval_output_context_new() -> JetEvalOutputContext Never! {
     storage := shared JetEvalOutputState{events: [JetEvalOutputEvent]{}}
     JetEvalOutputContext{storage: storage}
 }
 
-pub fn jet_eval_output_context_events(context: JetEvalOutputContext) -> [JetEvalOutputEvent] Never! {
+fn jet_eval_output_context_events(context: JetEvalOutputContext) -> [JetEvalOutputEvent] Never! {
     storage := context.storage
     storage.events
 }
@@ -1070,7 +1176,7 @@ fn jet_eval_append_output(machine: &JetEvalMachine, stdout: [U8], stderr: [U8], 
 
 // Callback output was already published by jet_eval_append_output while the
 // callback executed. This merge only updates the enclosing session transcript.
-pub fn jet_eval_merge_callback_output(machine: &JetEvalMachine, stdout: String, stderr: String) Never! {
+fn jet_eval_merge_callback_output(machine: &JetEvalMachine, stdout: String, stderr: String) Never! {
     machine.stdout = "{machine.stdout}{stdout}"
     machine.stderr = "{machine.stderr}{stderr}"
 }
@@ -1357,7 +1463,7 @@ fn jet_eval_foreign_token_replace_payload(machine: JetEvalMachine, token: Int, p
     state :: jet_eval_registry_token(machine, token) ?? return false
     storage := state.storage
     permit :: storage.guard_edit()
-    permit.value.payload = ~payload
+    permit.value.payload = payload.copy()
     true
 }
 
@@ -1378,7 +1484,7 @@ fn jet_eval_foreign_handle_transfer_retire(machine: &JetEvalMachine, token: Int,
 
 fn jet_eval_runtime_contains_address(value: JetEvalRuntimeValue) -> Bool Never! {
     if value == {
-        .Address(_, _, _) -> return true
+        .Address(_, _, _) | .Window(_, _) -> return true
         .Result(_, nested) | .RuntimeFailure(nested, _) -> return jet_eval_runtime_contains_address(nested)
         .Closure(_, captures) -> loop capture in captures {
             if jet_eval_runtime_contains_address(capture) -> return true
@@ -1465,14 +1571,14 @@ fn jet_eval_validate_borrow(value: JetEvalRuntimeValue, machine: &JetEvalMachine
 
 fn jet_eval_borrow_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if !jet_eval_validate_borrow(value, &machine, span) -> return None
-    ~value
+    value.copy()
 }
 
 // Ownership-transferable check for values crossing to a native retained
 // callback or a child task: no stack place, no task-local runtime handle.
 fn jet_eval_value_transferable(machine: &JetEvalMachine, value: JetEvalRuntimeValue, span: Span) -> Bool {
     if value == {
-        .Address(_, _, _) -> {
+        .Address(_, _, _) | .Window(_, _) -> {
             jet_eval_ownership_fail(&machine, span, "native callback closure retains a stack place")
             return false
         }
@@ -1659,6 +1765,104 @@ fn jet_eval_copy_value(value: JetEvalRuntimeValue, machine: &JetEvalMachine, spa
     if !jet_eval_retain_value(&machine, value, span) -> return None
     Val(value)
 }
+
+// A MIR Copy is a semantic value copy. Frame/argument/address retention uses
+// copy_value above instead, and must never fork a borrowed receiver.
+fn jet_eval_semantic_copy(value: JetEvalRuntimeValue, ty: MIRType, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
+    if !jet_eval_validate_borrow(value, &machine, span) -> return None
+    if ty.kind == .Tagged(_, inner) -> return jet_eval_semantic_copy(value, inner, &machine, span)
+    if ty.kind == .Apply(owner, args) {
+        if machine.rows.source_clone_hooks.get(owner.id.value) == .Val(id) {
+            return jet_eval_invoke(&machine, id, [JetEvalRuntimeValue]{value}, [JetEvalRuntimeValue]{}, span)
+        }
+        if machine.rows.types.get(owner.id.value) == .Val(row) {
+            definition :: machine.program.types[row]
+            if definition.kind == .Alias(inner) {
+                child_ty :: jet_eval_host_substitute_type(inner, definition.generic_params, args)
+                return jet_eval_semantic_copy(value, child_ty, &machine, span)
+            }
+        }
+    }
+    if value == {
+        .Result(ok, child) -> {
+            child_ty :: jet_eval_host_option_child_type(&machine, Val(ty), ok, span) ?? return None
+            copied :: jet_eval_semantic_copy(child, child_ty, &machine, span) ?? return None
+            return Val(JetEvalRuntimeValue.Result{ok: ok, value: ^copied})
+        }
+        .Aggregate(aggregate) -> {
+            if aggregate == {
+                .List(values) -> {
+                    child_ty :: jet_eval_host_sequence_element_type(&machine, Val(ty), span) ?? return None
+                    copied := [JetEvalRuntimeValue]{}
+                    loop child in values {
+                        copied_child :: jet_eval_semantic_copy(child, child_ty, &machine, span) ?? {
+                            jet_eval_drop_values(&machine, copied, span)
+                            return None
+                        }
+                        &copied.push(^copied_child)
+                    }
+                    return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.List{values: ^copied}})
+                }
+                .Struct(name, fields) -> {
+                    copied := [JetEvalRuntimeField]{}
+                    loop field in fields {
+                        child_ty :: jet_eval_host_struct_field_type(&machine, Val(ty), field.name, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        child :: jet_eval_semantic_copy(field.value, child_ty, &machine, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        &copied.push(JetEvalRuntimeField{name: field.name, value: ^child})
+                    }
+                    return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Struct{type_name: name, fields: ^copied}})
+                }
+                .Enum(name, variant, args) -> {
+                    copied := [JetEvalRuntimeEnumArg]{}
+                    loop (index, arg) in args {
+                        child_ty :: jet_eval_host_enum_arg_type(&machine, Val(ty), variant, arg.name, index, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        child :: jet_eval_semantic_copy(arg.value, child_ty, &machine, span) ?? {
+                            loop prior in copied -> jet_eval_drop_value(&machine, prior.value, span)
+                            return None
+                        }
+                        &copied.push(JetEvalRuntimeEnumArg{name: arg.name, value: ^child})
+                    }
+                    return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Enum{type_name: name, variant: variant, args: ^copied}})
+                }
+                .Map(entries) -> {
+                    if ty.kind == .Map(key_ty, value_ty) {
+                        copied := [JetEvalRuntimeMapEntry]{}
+                        loop entry in entries {
+                            key :: jet_eval_semantic_copy(entry.key, key_ty, &machine, span) ?? {
+                                loop prior in copied {
+                                    jet_eval_drop_value(&machine, prior.key, span)
+                                    jet_eval_drop_value(&machine, prior.value, span)
+                                }
+                                return None
+                            }
+                            child :: jet_eval_semantic_copy(entry.value, value_ty, &machine, span) ?? {
+                                jet_eval_drop_value(&machine, key, span)
+                                loop prior in copied {
+                                    jet_eval_drop_value(&machine, prior.key, span)
+                                    jet_eval_drop_value(&machine, prior.value, span)
+                                }
+                                return None
+                            }
+                            &copied.push(JetEvalRuntimeMapEntry{key: ^key, value: ^child})
+                        }
+                        return Val(JetEvalRuntimeValue.Aggregate{value: JetEvalRuntimeAggregate.Map{entries: ^copied}})
+                    }
+                }
+            }
+        }
+        else -> {}
+    }
+    jet_eval_copy_value(value, &machine, span)
+}
 fn jet_eval_runtime_aggregate_data(value: JetEvalRuntimeAggregate, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if value == {
         .List(values) -> {
@@ -1735,6 +1939,12 @@ fn jet_eval_data(value: JetEvalRuntimeValue, machine: &JetEvalMachine, span: Spa
             return Val(TComptimeValue.Failed{report: TComptimeReport.Told{value: data}})
         }
         .Aggregate(aggregate) -> return jet_eval_runtime_aggregate_data(aggregate, &machine, span)
+        .Window(_, _) -> {
+            selected :: jet_eval_read_window(&machine, value, span) ?? return None
+            data := jet_eval_data(selected, &machine, span)
+            jet_eval_drop_value(&machine, selected, span)
+            return data
+        }
         .RuntimeFailure(_, _) -> {
             jet_eval_unsupported(&machine, span, "materializing a native runtime failure carrier")
             return None
@@ -1812,7 +2022,11 @@ fn jet_eval_decimal_value(value: String) -> TComptimeValue Never! {
     if normalized_option == None -> return TComptimeValue.BigInt{decimal: value}
     normalized :: normalized_option ?? return TComptimeValue.BigInt{decimal: value}
     parsed :: Int.parse(normalized) ?? return TComptimeValue.BigInt{decimal: normalized}
-    TComptimeValue.Int{value: parsed}
+    if mir_integer_constant(parsed, None, None) == {
+        .Int(number, _, _) -> TComptimeValue.Int{value: number}
+        .BigInt(decimal) -> TComptimeValue.BigInt{decimal: decimal}
+        else -> panic("decimal value materialization is not an integer")
+    }
 }
 
 
@@ -1827,7 +2041,11 @@ fn jet_eval_decimal_text(value: TComptimeValue) -> String? {
 
 fn jet_eval_data_key(value: TComptimeValue, machine: &JetEvalMachine, span: Span) -> TComptimeKey? {
     if value == {
-        .Int(number) -> return Val(TComptimeKey.Int{value: number})
+        .Int(number) -> return Val(tir_comptime_integer_key(number))
+        .BigInt(decimal) -> {
+            number :: Int.parse(decimal) ?? return None
+            return Val(tir_comptime_integer_key(number))
+        }
         .String(text) -> return Val(TComptimeKey.String{value: text})
         .Bool(flag) -> return Val(TComptimeKey.Bool{value: flag})
         .Char(character) -> return Val(TComptimeKey.Char{value: character})
@@ -1895,13 +2113,18 @@ fn jet_eval_insert_map_entry(entries: [TComptimeMapEntry], key: TComptimeKey, va
     output
 }
 
-// The total key order: variant rank (Int, String, Bool, Char, Tuple, Struct,
-// Enum), then payload. Rust: the derived `Ord` of MIR.rs::MirConstKey.
+// Exact Int carriers share numeric order; other kinds retain their MIR rank.
+// Rust: MIR.rs::MirConstKey::cmp.
 fn jet_eval_key_compare(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
     rank_order :: jet_eval_int_order(jet_eval_key_rank(left), jet_eval_key_rank(right))
     if rank_order != 0 -> return rank_order
     if left == .Int(left_number) {
         if right == .Int(right_number) -> return jet_eval_int_order(left_number, right_number)
+        if right == .BigInt(decimal) -> return if decimal.starts_with("-") -> 1 else -> -1
+    }
+    if left == .BigInt(decimal) {
+        if right == .BigInt(right_decimal) -> return mir_big_integer_key_compare(decimal, right_decimal)
+        if right == .Int(_) -> return if decimal.starts_with("-") -> -1 else -> 1
     }
     if left == .String(left_text) {
         if right == .String(right_text) -> return jet_eval_string_order(left_text, right_text)
@@ -1932,9 +2155,10 @@ fn jet_eval_key_compare(left: TComptimeKey, right: TComptimeKey) -> Int Never! {
     0
 }
 
+
 fn jet_eval_key_rank(key: TComptimeKey) -> Int Never! {
     if key == {
-        .Int(_) -> 0
+        .Int(_) | .BigInt(_) -> 0
         .String(_) -> 1
         .Bool(_) -> 2
         .Char(_) -> 3
@@ -1999,6 +2223,7 @@ fn jet_eval_replace_field(value: TComptimeValue, name: String, replacement: TCom
 
 fn jet_eval_constant_runtime(constant: MIRConstant, machine: &JetEvalMachine, span: Span) -> JetEvalRuntimeValue? {
     if constant == {
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .Failed(report) -> {
             if report == .Clean(ty) -> return Val(JetEvalRuntimeValue.Absent{element: ty})
             if report == .Told(value) {
@@ -2014,6 +2239,7 @@ fn jet_eval_constant_runtime(constant: MIRConstant, machine: &JetEvalMachine, sp
 
 fn jet_eval_constant_data(constant: MIRConstant, machine: &JetEvalMachine, span: Span) -> TComptimeValue? {
     if constant == {
+        .SharedSite(_) -> panic("publication site nested in MIR constant value")
         .Int(value, width, _) -> {
             if width == .Val(integer_width) -> return Val(jet_eval_integer_constant_value(value, integer_width.signed, integer_width.bits))
             return Val(jet_eval_decimal_value("{value}"))
@@ -2090,7 +2316,7 @@ fn jet_eval_integer_constant_value(value: Int, signed: Bool, bits: Int) -> TComp
     if signed -> return TComptimeValue.Int{value: value}
     if bits < 64 {
         mask :: if bits == 63 -> 9223372036854775807 else -> (1 << bits) - 1
-        return TComptimeValue.Int{value: value & mask}
+        return TComptimeValue.Int{value: (value).bit_and(mask)}
     }
     if value >= 0 -> return TComptimeValue.Int{value: value}
     // value + 2^63 lies in 0..<2^63; add 2^63 = 9223372036854775808 through
@@ -2103,7 +2329,8 @@ fn jet_eval_integer_constant_value(value: Int, signed: Bool, bits: Int) -> TComp
 
 fn jet_eval_key_from_mir(key: MIRConstKey) -> TComptimeKey Never! {
     if key == {
-        .Int(value) -> TComptimeKey.Int{value: value}
+        .Int(value) -> tir_comptime_integer_key(value)
+        .BigInt(decimal) -> tir_comptime_integer_key(Int.parse(decimal) ?? panic("invalid canonical MIR integer key"))
         .String(value) -> TComptimeKey.String{value: value}
         .Bool(value) -> TComptimeKey.Bool{value: value}
         .Char(value) -> TComptimeKey.Char{value: value}

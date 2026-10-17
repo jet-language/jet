@@ -13,8 +13,8 @@ DASHBOARD_KEYS_HINT :: prep { "r refresh · q quit" }
 
 // The alternate screen with a hidden cursor while the dashboard runs; the
 // normal screen and cursor come back at scope exit.
-pub struct DashboardAlternateScreen {
-    active: Bool
+struct DashboardAlternateScreen {
+    priv active: Bool
 
     fn enter() -[IO]> DashboardAlternateScreen Never! {
         cli_dashboard_write_stdout(cli_dashboard_screen_enter_sequence())
@@ -28,39 +28,39 @@ impl DashboardAlternateScreen.Close {
     }
 }
 
-pub fn cli_dashboard_screen_enter_sequence() -> String Never! {
+fn cli_dashboard_screen_enter_sequence() -> String Never! {
     esc :: terminal_esc()
     "{esc}{DASHBOARD_SCREEN_ENTER_CODES}{esc}{DASHBOARD_SCREEN_HIDE_CURSOR}{esc}{DASHBOARD_CLEAR_HOME}{esc}{DASHBOARD_CURSOR_HOME}"
 }
 
-pub fn cli_dashboard_screen_leave_sequence() -> String Never! {
+fn cli_dashboard_screen_leave_sequence() -> String Never! {
     esc :: terminal_esc()
     "{esc}{DASHBOARD_SCREEN_SHOW_CURSOR}{esc}{DASHBOARD_SCREEN_LEAVE_CODES}"
 }
 
 fn cli_dashboard_write_stdout(text: String) Never! -[IO]> {
-    out :: term.stdout()
-    out.write(text).drop("a closed stdout cannot take the dashboard")
-    out.flush().drop("a closed stdout cannot take the dashboard")
+    out := term.stdout()
+    &out.write(text).drop("a closed stdout cannot take the dashboard")
+    &out.flush().drop("a closed stdout cannot take the dashboard")
 }
 
 // Clear the screen and draw one frame from the top-left corner.
-pub fn cli_dashboard_redraw(frame: String) Never! -[IO]> {
+fn cli_dashboard_redraw(frame: String) Never! -[IO]> {
     esc :: terminal_esc()
     cli_dashboard_write_stdout("{esc}{DASHBOARD_CLEAR_HOME}{esc}{DASHBOARD_CURSOR_HOME}{frame}")
 }
 
 // `COLUMNS` when positive, the terminal's width when interactive, else 80.
-pub fn cli_dashboard_terminal_width() -[IO, Env]> Int Never! {
+fn cli_dashboard_terminal_width() -[IO, Env]> Int Never! {
     if sys.get("COLUMNS") == .Val(columns) {
         width :: cli_parse_u64(columns) ?? 0
         if width > 0 -> return width
     }
-    if cli_dashboard_interactive_mode(term.stdin().is_terminal(), term.stdout().is_terminal()) -> return term.terminal_width()
+    if cli_dashboard_interactive_mode(term.stdin().is_tty(), term.stdout().is_tty()) -> return term.terminal_width()
     80
 }
 
-pub fn cli_dashboard_render_frame_width(frame: DashboardFrame, width: Int, theme: Theme) -> String Never! {
+fn cli_dashboard_render_frame_width(frame: DashboardFrame, width: Int, theme: Theme) -> String Never! {
     if frame == {
         .Loading -> cli_dashboard_render_loading_width(width, theme.gray("reading store…"), theme)
         .Busy(stale) -> if stale == {
@@ -85,7 +85,7 @@ fn cli_dashboard_render_loading_width(width: Int, store_message: String, theme: 
 }
 
 // The compact summary for pipes, CI, and redirected output.
-pub fn cli_dashboard_render_status_summary(snapshot: DashboardSnapshot, theme: Theme) -[IO, Env]> String Never! {
+fn cli_dashboard_render_status_summary(snapshot: DashboardSnapshot, theme: Theme) -[IO, Env]> String Never! {
     width :: cli_dashboard_terminal_width()
     out := [String]{}
     cli_dashboard_push_line(&out, width, 0, theme.cyan("Jetpack status"))
@@ -99,7 +99,7 @@ pub fn cli_dashboard_render_status_summary(snapshot: DashboardSnapshot, theme: T
     out.join("")
 }
 
-pub fn cli_dashboard_render_width(snapshot: DashboardSnapshot, width: Int, theme: Theme) -> String Never! {
+fn cli_dashboard_render_width(snapshot: DashboardSnapshot, width: Int, theme: Theme) -> String Never! {
     cli_dashboard_render_width_with_note(snapshot, width, theme, None)
 }
 
@@ -224,7 +224,7 @@ fn cli_dashboard_activity_text(activity: DashboardActivity) -> String Never! {
 
 // Decimal units: whole bytes, then one decimal below 10 and none above,
 // rounding a tie to even (Rust float formatting).
-pub fn cli_dashboard_format_size(bytes: Int) -> String Never! {
+fn cli_dashboard_format_size(bytes: Int) -> String Never! {
     units :: [String]{"B", "KB", "MB", "GB", "TB"}
     unit := 0
     divisor := 1
@@ -246,7 +246,7 @@ fn cli_dashboard_round_even(value: Int, divisor: Int) -> Int Never! {
 }
 
 // Every control scalar (C0, DEL, C1) becomes `?`.
-pub fn cli_dashboard_sanitize(value: String) -> String Never! {
+fn cli_dashboard_sanitize(value: String) -> String Never! {
     out := [String]{}
     loop scalar in value.chars() {
         text :: "{scalar}"

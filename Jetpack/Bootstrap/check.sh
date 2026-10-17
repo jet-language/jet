@@ -13,6 +13,10 @@
 # area, and another writer's unfinished area cannot break an unrelated proof.
 # JETPACK_WORKER gives each concurrent writer its own scratch directory.
 #
+# Standalone engine assembly: `node Jetpack/Bootstrap/assemble.mjs hosted`
+# includes only implementation files plus Jetpack/main.jet. Emit that unit with
+# `jet emit --rust` for the interim split-per-area build, not the test driver.
+#
 # Every jet command runs in its own cgroup scope with a hard memory cap and no
 # swap, under a wall-clock timeout; AOT builds take one of a few shared slots.
 # Assembled units, logs and receipts stay under ~/.cache/jet-dev, never /tmp.
@@ -57,14 +61,16 @@ if (( each == 1 )); then
   parallel="${JETPACK_EACH_PARALLEL:-4}"
   base_worker="${JETPACK_WORKER:-lead}"
   summary="$HOME/.cache/jet-dev/jetpack-bootstrap/$base_worker-each.summary"
+  mkdir -p "$(dirname "$summary")"
   : > "$summary"
   while IFS= read -r area; do
     [[ -n "$area" ]] || continue
     while (( $(jobs -rp | wc -l) >= parallel )); do wait -n || true; done
     (
+      status=0
       JETPACK_WORKER="$base_worker-each-$area" env -u JETPACK_CHECK_SNAPSHOT bash "$bootstrap/check.sh" --area "$area" $([[ $with_tests == 1 ]] && echo --tests) \
-        > "$HOME/.cache/jet-dev/jetpack-bootstrap/$base_worker-each-$area.log" 2>&1
-      printf '%s %d\n' "$area" "$?" >> "$summary"
+        > "$HOME/.cache/jet-dev/jetpack-bootstrap/$base_worker-each-$area.log" 2>&1 || status=$?
+      printf '%s %d\n' "$area" "$status" >> "$summary"
     ) &
   done < <(node "$bootstrap/areas.mjs" populated)
   wait
@@ -104,10 +110,11 @@ else
 fi
 receipt="$scratch/check.receipt"
 mkdir -p "$scratch" "$HOME/.cache/jet-dev/jetpack-bootstrap/slots"
-# Pin one compiler for every stage: a hard link keeps this exact binary even if
-# cargo replaces target/debug/jet mid-proof (no extra disk; removed at exit).
+# Pin one compiler for every stage: a private copy keeps this exact binary even
+# if cargo replaces target/debug/jet mid-proof. JETPACK_JET_BIN often lives on
+# another filesystem than the scratch, so a hard link is not possible (removed at exit).
 jet_pinned="$scratch/jet-pinned"
-ln -f "$jet" "$jet_pinned"
+cp --reflink=auto -f "$jet" "$jet_pinned"
 jet_source="$jet"
 jet="$jet_pinned"
 trap 'rm -f "$JETPACK_CHECK_SNAPSHOT" "$jet_pinned"' EXIT

@@ -1,0 +1,18 @@
+# HAND-PORT tests/compute_extended.rs:260-302 f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# ORACLE-LITERAL (including original concat!); exact full tier parity.
+fixture: f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices.stdout.expected
+stderr: == default

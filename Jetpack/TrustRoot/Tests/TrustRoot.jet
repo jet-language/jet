@@ -159,7 +159,7 @@ fn trust_test_tamper(sig_hex: String) -> String {
     new_root.delegations = engine.root.delegations
     signed :: trust_test_sign_root(new_root, [TrustKey]{boot.keys[0], boot.keys[1]})
     &engine.update_root(signed, TrustedClock.Fixed(now)) ?? panic("rotate root")
-    assert_eq(engine.versions.get(MetadataRole.Root.label()), Val(2))
+    assert_eq(engine.versions.get((MetadataRole.Root).label()), Val(2))
     older := new_root
     older.version = 1
     signed_old :: trust_test_sign_root(older, [TrustKey]{boot.keys[0], boot.keys[1]})
@@ -302,4 +302,18 @@ fn trust_test_tamper(sig_hex: String) -> String {
     signed :: trust_test_sign_root(boot.engine.root, [TrustKey]{boot.keys[0], boot.keys[1]})
     reloaded :: TrustEngine.from_bootstrap_pin(boot.dir, signed, boot.engine.keyring, trust_test_policy_at(now), TrustedClock.Fixed(now)) ?? panic("reload from pin")
     assert_eq(reloaded.root_digest, boot.engine.root_digest)
+}
+
+// Exact bytes from Rust TrustRoot.rs:1584-1590; Core JSON preserves authored
+// object insertion order, including this manifest's terminal newline.
+#Test("public trust manifest empty key ceremony wire is exact") {
+    manifest :: trust_public_trust_manifest("jet-lang.dev", None, [PublicTrustKey]{}) ?? panic("render public manifest")
+    assert_eq(manifest, `{"schema":1,"domain":"jet-lang.dev","status":"awaiting-key-ceremony","root":null,"keys":[],"rotation":"offline threshold root rotation; publish a new manifest only after the old root verifies the new root"}` + "\n")
+}
+
+#Test("public trust manifest preserves its existing validation error") {
+    if trust_public_trust_manifest("", None, [PublicTrustKey]{}) == {
+        .Ok(_) -> panic("empty publication domain must fail")
+        .Err(error) -> assert_eq(error.message(), "public trust manifest domain is empty or contains whitespace")
+    }
 }

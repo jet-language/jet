@@ -1,0 +1,19 @@
+// Source nominal identity and return-type pins; Transform has no Display.
+use core.math as math
+TRANSFORM_NAME :: prep { Transform.$name }
+QUALIFIED_TRANSFORM_NAME :: prep { math.Transform.$name }
+fn transform(value: ^Transform<Screen, World>) -> math.Transform<Screen, World> { ^value }
+fn transform2(value: ^Transform2<F32, Screen, World>) -> math.Transform2<F32, Screen, World> { ^value }
+fn ray(value: ^Ray2<Float, Screen, World>) -> math.Ray2<Float, Screen, World> { ^value }
+fn float_then(a: Transform2<Float, Screen, World>, b: Transform2<Float, World, View>) -> Transform<Screen, View> TransformError! { a.then(b) }
+fn float_inverse(a: Transform2<Float, Screen, World>) -> Transform<World, Screen> TransformError! { a.inverse() }
+fn run() {
+    a :: Transform<Screen, World>.affine(1.0, 0.0, 0.0, 1.0, 2.0, 3.0, 1, 2)
+    b :: transform(a.copy())
+    print(TRANSFORM_NAME == QUALIFIED_TRANSFORM_NAME)
+    print(a == b)
+    narrow :: Transform2<F32, Screen, World>.affine(F32{1.0}, F32{0.0}, F32{0.0}, F32{1.0}, F32{2.0}, F32{3.0}, 1, 2)
+    assert_eq(transform2(^narrow).tx, 2.0)
+    r :: a.ray(ScreenPoint.new(1.0, 2.0)) ?? panic("ray")
+    print(ray(^r).origin.x)
+}

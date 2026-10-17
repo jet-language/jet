@@ -1,0 +1,21 @@
+# HAND-PORT tests/web_build.rs:3091-3160 web_wasm_try_returns_typed_journey
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original public predicates retained; generated-Rust-only structure assertions retire.
+requires: tool:node
+fixture: web_wasm_try_returns_typed_journey.fixture
+env: NO_COLOR=1
+step: jet build --target web main.jet
+exit: 0
+file: .jet/build/web.manifest.json ~ "\"status\": \"m2\"" # original build_web_fixture M2 predicate
+file: .jet/build/web.manifest.json ~ "\"partitions\"" # original build_web_fixture partitions predicate
+file: .jet/build/app.wasm is-file
+copy: harness.mjs .jet/build/harness.mjs
+step: node harness.mjs
+cwd: .jet/build
+exit: 0
+stdout: ~ "kind=JetError" # original contains predicate
+stdout: ~ "code=TRYFAIL" # original contains predicate
+stdout: ~ "read" # original contains predicate
+stdout: ~ "run" # original contains predicate
+stdout: ~ "Error [TRYFAIL]: try failed" # original contains predicate
+stderr: ~ "Error [TRYFAIL]: try failed" # original contains predicate

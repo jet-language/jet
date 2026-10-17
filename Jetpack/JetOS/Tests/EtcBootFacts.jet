@@ -236,8 +236,8 @@ fn jetos_identity_test_realized(verification: &StoreVerification, root: String, 
     assert_eq(files.read_bytes(files.join(generation, "boot/kernel")) ?? panic("kernel copy"), [U8]{127, 69, 76, 70, 0})
     assert_eq(files.read_bytes(files.join(generation, "boot/initrd")) ?? panic("initrd copy"), [U8]{31, 139, 0})
     if sys.family() != "windows" {
-        assert_eq((files.stat(files.join(generation, "boot/kernel")) ?? panic("kernel permissions")).mode & 511, 438)
-        assert_eq((files.stat(files.join(generation, "boot/initrd")) ?? panic("initrd permissions")).mode & 511, 511)
+        assert_eq(((files.stat(files.join(generation, "boot/kernel")) ?? panic("kernel permissions")).mode).bit_and(511), 438)
+        assert_eq(((files.stat(files.join(generation, "boot/initrd")) ?? panic("initrd permissions")).mode).bit_and(511), 511)
     }
     loop module_name in modules -> assert_eq(files.read(files.join(generation, "boot/modules/{module_name}")) ?? panic("copied module"), module_name)
     if jetos_copy_file_replace(kernel, files.join(root, "no-parent/kernel")) == {

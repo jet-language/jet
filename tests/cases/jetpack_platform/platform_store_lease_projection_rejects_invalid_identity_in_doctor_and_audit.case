@@ -1,0 +1,15 @@
+# Exact tests/jetpack_platform.rs:452-480; runtime PENDING-SAME-HEAD.
+mkdir: package-root/leases/not-a-lease
+step: jetpack doctor --json --offline
+env: JETPACK_ROOT={work}/package-root
+exit: 2
+stdout: ~ "\"name\":\"leases\"" # original doctor subject
+stdout: ~ "\"status\":\"broken\"" # original doctor status
+stdout: ~ "invalid identity" # original cause
+step: jetpack audit --no-color
+env: JETPACK_ROOT={work}/package-root
+exit: 2
+stderr: ~ "Error [E1340]:" # original code
+stderr: ~ "invalid identity" # original cause
+stderr: ~ "More: jet-lang.dev/e/E1340" # original more
+file: package-root/leases/not-a-lease is-dir

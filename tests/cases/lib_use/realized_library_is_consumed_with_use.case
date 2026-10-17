@@ -1,0 +1,98 @@
+# HAND-PORT tests/lib_use.rs:124-182 realized_library_is_consumed_with_use
+# PENDING-SEAM(hangar-verified-realization): exact assertions; no runtime parity claim.
+fixture: realized_library_is_consumed_with_use.fixture
+refused: hangar-verified-realization
+# /// Realize a `core` package from a local `path:` source repo into `hangar`,
+# /// recording it in the store exactly as `jetpack env --prep` would. Offline; no Nix.
+# fn realize_into_hangar(roots: &Roots, repo: &Path, pkg: &str) -> Store::VerifiedRealization {
+#     let store_dir = roots.hangar_dir();
+#     fs::create_dir_all(&store_dir).unwrap();
+#     let upstream = format!("path:{}", repo.to_string_lossy());
+#     let table = SourceTable::from_decls([("mine".to_string(), upstream, ProviderKind::Core)]);
+#     let spec = classify_in(&format!("{pkg}@mine"), &table).unwrap();
+#     let ctx = Ctx {
+#         fixtures: None,
+#         store_dir: &store_dir,
+#         offline: true,
+#         project_dir: None,
+#         nix_index: None,
+#         nix_roots: None,
+#         allow_local_nix_catalog: false,
+#     };
+#     Store::realize_verified(
+#         roots,
+#         &ctx,
+#         Store::RealizeRequest::Package {
+#             spec: &spec,
+#             table: &table,
+#         },
+#     )
+#     .expect("library realizes and records offline")
+# }
+# #[test]
+# fn realized_library_is_consumed_with_use() {
+#     let s = Scratch::new("ok");
+#     let hangar_root = s.join("hangar-root");
+#     fs::create_dir_all(&hangar_root).unwrap();
+#     let roots = Roots {
+#         root: hangar_root.clone(),
+#         dev_mode: true,
+#     };
+# 
+#     // Producer repo: a `library` package `jsonutil`. The package's identity is
+#     // its `module jsonutil` declaration (U10 discovery); its consumable code is
+#     // top-level `pub fn` in the module file (S16 module form).
+#     let producer = s.join("jsonutil-src");
+#     write(
+#         &producer.join("package.jet"),
+#         "name: \"jsonutil\"\nversion: \"0.1.0\"\npackages: { jsonutil: library }\n",
+#     );
+#     write(
+#         &producer.join("jsonutil.jet"),
+#         "module jsonutil { }\npub fn parse(raw: String) -> Int { 42 }\n",
+#     );
+# 
+#     let realized = realize_into_hangar(&roots, &producer, "jsonutil");
+#     let entry = realized.metadata();
+#     assert!(
+#         entry.bin.is_empty(),
+#         "a library stages no PATH bin: {entry:?}"
+#     );
+# 
+#     // Consumer project: declares the dependency, then `use`s the library. The
+#     // dep is a remote (git) ref — its source isn't on disk as a path dep, so the
+#     // resolver must find the realized package through the shared hangar (U17),
+#     // exercising the new extra search root rather than the M12.1 path-dep path.
+#     let consumer = s.join("app");
+#     write(
+#         &consumer.join("package.jet"),
+#         "name: \"app\"\nversion: \"0.1.0\"\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n",
+#     );
+#     write(
+#         &consumer.join("main.jet"),
+#         "use jsonutil\nfn run() {\n    print(jsonutil.parse(\"x\"))\n}\n",
+#     );
+#     fs::create_dir_all(consumer.join(".jet/build")).unwrap();
+# 
+#     let out = Command::new(jet_bin())
+#         .args(["run", "main.jet"])
+#         .current_dir(&consumer)
+#         .env("JETPACK_ROOT", &hangar_root)
+#         .output()
+#         .unwrap();
+#     let stdout = String::from_utf8_lossy(&out.stdout);
+#     let stderr = String::from_utf8_lossy(&out.stderr);
+#     assert!(
+#         out.status.success(),
+#         "jet run failed\nstdout: {stdout}\nstderr: {stderr}"
+#     );
+#     assert!(stdout.contains("42"), "stdout: {stdout}\nstderr: {stderr}");
+# }
+env: JETPACK_ROOT={work}/hangar-root
+mkdir: hangar-root
+mkdir: app/.jet/build
+step: jet run main.jet
+cwd: app
+exit: 0
+stdout: ~ "42" # original predicate
+

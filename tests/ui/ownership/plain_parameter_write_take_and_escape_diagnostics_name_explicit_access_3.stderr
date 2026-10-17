@@ -1,0 +1,8 @@
+Error [E0120]: `f` was not moved here, so it cannot be returned as-is
+  --> plain_parameter_write_take_and_escape_diagnostics_name_explicit_access_3.jet:2:57
+    |
+  2 | fn keep(f: fn(Int) -> Int) -[]> fn(Int) -> Int { return f }
+    |                                                         ^
+ Why: This function has read access only and does not own the value
+ Fix: Return a copy: `return f.copy()` — or take ownership with the move marker `^`: `f: ^fn(Int) -> Int`. To return borrowed data, declare `-> View<T> from f` and return a view derived from `f`
+More: jet-lang.dev/e/E0120

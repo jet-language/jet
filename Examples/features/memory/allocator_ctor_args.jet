@@ -1,0 +1,31 @@
+// Each allocator constructor keeps its own family, and its arguments are
+// evaluated once, in order, before the allocator exists.
+use core.mem
+
+fn sized(label: String, bytes: Int) -> Int {
+    print("size for {label}: {bytes}")
+    bytes
+}
+
+fn run() {
+    arena :: mem.Arena.new(capacity: sized("arena", 1024))
+    bump :: mem.Bump.new(capacity: sized("bump", 64))
+    pool :: mem.Pool.new(slots: sized("pool", 4))
+    one :: arena.alloc(1)
+    print(one)
+    two :: bump.alloc("two")
+    print(two)
+    three :: pool.alloc(3)
+    print(three)
+    fixed :: mem.Fixed.new(size: 40)
+    fixed.try_alloc(5) ? value -> {
+        print("fixed {value}")
+    }
+    ! error -> {
+        print("fixed failed {error.allocator}")
+    }
+    close(^arena)
+    close(^bump)
+    close(^pool)
+    close(^fixed)
+}

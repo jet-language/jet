@@ -1,0 +1,10 @@
+# Port of tests/cli_parts/bindings.rs:1487-1512; sources copied verbatim.
+# PENDING-SAME-HEAD: authored original predicates/oracles; runtime proof not run.
+# Exact original scrub snapshot; BAD.jet maps back to the normalized source path.
+requires: tool:pwsh
+fixture: fixtures/powershell_broken
+step: jet inspect bind pwsh {work}/broken.ps1 --pkg broken
+exit: nonzero
+stderr: = powershell_bind_launders_parse_failure_as_e3208.stderr
+stderr: !~ "Unexpected token" # original predicate
+stderr: !~ "broken.ps1:" # original predicate

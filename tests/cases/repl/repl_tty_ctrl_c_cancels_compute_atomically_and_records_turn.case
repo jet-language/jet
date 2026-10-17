@@ -1,0 +1,20 @@
+# PORT tests/repl.rs:1747-1797 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=6
+pty-send: "kept :: 42\r" after 200ms
+pty-send: "partial :: 1\u001b\rloop { }\u001b\r\r" after 150ms
+pty-send: "\u0003" after 300ms
+pty-send: "kept\rpartial\r:turns\r:quit\r" after 150ms
+exit: 0
+elapsed: raw < 3s
+stdout: ~ "Interrupted. External effects already performed were not rolled back." # Original notice rs1782.
+stdout: ~ "42 : Int" # Original prior binding rs1786.
+stdout: ~ "E0107" # Original partial-binding conjunction rs1790.
+stdout: ~ "partial" # Original partial-binding conjunction rs1790.
+stdout: ~ "#2 interrupted" # Original turn addressing rs1794.

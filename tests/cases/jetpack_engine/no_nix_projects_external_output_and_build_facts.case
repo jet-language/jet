@@ -1,0 +1,125 @@
+# HAND-PORT tests/jetpack_engine.rs:2856-2966 no_nix_projects_external_output_and_build_facts
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+env: NO_COLOR=1
+refused: store-ingest
+# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
+# #[test]
+# fn no_nix_projects_external_output_and_build_facts() {
+#     let root = Scratch::new("nix-projection-root");
+#     let fixtures = Scratch::new("nix-projection-fixtures");
+#     let staging = Scratch::new("nix-projection-output");
+#     let bin = staging.join("bin");
+#     fs::create_dir_all(&bin).unwrap();
+#     let executable = bin.join("greet");
+#     fs::write(&executable, "#!/bin/sh\necho projected\n").unwrap();
+#     #[cfg(unix)]
+#     {
+#         use std::os::unix::fs::PermissionsExt;
+#         fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+#     }
+#     // Nix outputs are sealed before their bytes are hashed. Keep this source
+#     // outside Hangar so the production projection, not a fixture object, is
+#     // what the build exercises.
+#     jetpack::Store::seal_local_output(&staging.path).unwrap();
+#     fs::write(
+#         fixtures.join("nixpkgs-greet.json"),
+#         format!(
+#             "[{{\"drvPath\":\"/nix/store/0fixture00000000000000000000-greet.drv\",\"outputs\":{{\"out\":{:?}}}}}]",
+#             staging.path.to_string_lossy()
+#         ),
+#     )
+#     .unwrap();
+# 
+#     let built = jetpack()
+#         .args(["build", "greet@nixpkgs", "--no-color", "--offline"])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .env("PATH", "")
+#         .output()
+#         .unwrap();
+#     assert!(
+#         built.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&built.stderr)
+#     );
+# 
+#     let roots = jetpack::Store::Roots::at(root.path.clone());
+#     let entry = jetpack::Store::list_checked(&roots)
+#         .unwrap()
+#         .into_iter()
+#         .find(|entry| entry.reference == "greet@nixpkgs")
+#         .expect("raw Nix output must publish through the Store");
+#     assert!(
+#         Path::new(&entry.out).starts_with(roots.hangar_dir().join("objects")),
+#         "Nix output escaped Hangar projection: {}",
+#         entry.out
+#     );
+#     assert!(
+#         staging.path.exists(),
+#         "projection must not mutate the source store"
+#     );
+#     let producer = jetpack::Store::ProducerRecord::decode(&entry.producer_record).unwrap();
+#     assert_eq!(producer.provider, "nix");
+#     assert_eq!(
+#         producer
+#             .facts
+#             .get("nix.projection.mode")
+#             .map(String::as_str),
+#         Some("canonical-hangar")
+#     );
+#     assert_eq!(
+#         producer.facts.get("nix.build.root").map(String::as_str),
+#         Some("/build")
+#     );
+#     assert_eq!(
+#         producer.facts.get("nix.build.home").map(String::as_str),
+#         Some("/homeless-shelter")
+#     );
+#     let provider_facts = jetpack::ProviderFacts::from_json(
+#         producer
+#             .facts
+#             .get("provider-facts")
+#             .expect("Nix production path must publish the shared provider carrier"),
+#     )
+#     .expect("Nix producer provider facts must decode");
+#     provider_facts
+#         .validate()
+#         .expect("Nix producer provider facts must remain lossless");
+#     assert_eq!(provider_facts.native_format, "json");
+#     assert!(provider_facts.native_document.contains("drvPath"));
+#     assert!(provider_facts.facts.contains_key("nix.native.document"));
+# 
+#     let entered = jetpack()
+#         .args(["env", "--no-color", "--trust", "--offline", "--fixtures"])
+#         .arg(&fixtures.path)
+#         .args([
+#             "-p",
+#             "greet",
+#             "--",
+#             "/bin/sh",
+#             "-c",
+#             "printf '%s|%s|%s|%s' \"$HOME\" \"$NIX_BUILD_TOP\" \"$TMPDIR\" \"$LC_ALL\"",
+#         ])
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("PATH", "")
+#         .output()
+#         .unwrap();
+#     assert!(
+#         entered.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&entered.stderr)
+#     );
+#     assert_eq!(
+#         String::from_utf8_lossy(&entered.stdout).trim(),
+#         "/homeless-shelter|/build|/build|C"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+step: jetpack build greet@nixpkgs --no-color --offline
+cwd: project
+exit: 0
+

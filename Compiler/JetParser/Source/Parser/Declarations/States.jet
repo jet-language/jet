@@ -16,11 +16,11 @@ use jet_lexer.[
 ]
 
 fn parser_state_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "state" && parser_kind_at(&state, 1) == TOKEN_IDENT
+    parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "state" && parser_kind_at(&state, 1) == TOKEN_IDENT
 }
 
 fn parser_state_section_ahead(state: &JetParserState) -> Bool Never! {
-    parser_current_kind(&state) == TOKEN_IDENT && parser_current(&state).payload.decoded == "state" && parser_kind_at(&state, 1) == TOKEN_LBRACE
+    parser_current_kind(&state) == TOKEN_IDENT && parser_value_at(&state, 0) == "state" && parser_kind_at(&state, 1) == TOKEN_LBRACE
 }
 
 fn parser_parse_state_decl(state: &JetParserState, modifiers: ParsedItemModifiers) -> StateDecl {
@@ -48,7 +48,7 @@ fn parser_state_names(state: &JetParserState) -> [NamedSpan] {
             next
         }
         name :: parser_expect_name(&state, "for a state name")
-        &states.push(NamedSpan{name: name.payload.decoded, span: name.span})
+        &states.push(NamedSpan{name: parser_value(state, name), span: name.span})
         if parser_current_kind(&state) == TOKEN_COMMA || parser_current_kind(&state) == TOKEN_SEMI -> parser_bump(&state)
     }
     states
@@ -56,12 +56,12 @@ fn parser_state_names(state: &JetParserState) -> [NamedSpan] {
 
 fn parser_state_dotted_name(state: &JetParserState, context: String) -> NamedSpan {
     first :: parser_expect_name(&state, context)
-    name := first.payload.decoded
+    name := parser_value(state, first)
     end := first.span
     loop parser_current_kind(&state) == TOKEN_DOT {
         parser_bump(&state)
         part :: parser_expect_name(&state, "after `.` in a declaration type name")
-        name = "{name}.{part.payload.decoded}"
+        name = "{name}.{parser_value(state, part)}"
         end = part.span
     }
     NamedSpan{name: name, span: parser_cover(first.span, end)}

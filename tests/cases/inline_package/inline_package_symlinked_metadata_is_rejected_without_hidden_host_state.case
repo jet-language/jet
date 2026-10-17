@@ -1,0 +1,16 @@
+# Port of tests/inline_package.rs:388-435; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/inline_package_symlinked_metadata_is_rejected_without_hidden_host_state
+file: workspace.jet = "module workspace { members: [] }\n"
+requires: os:unix
+symlink: outside-config.jet config.jet
+step: jet check run.jet --json
+env: JET_STORE_DIR={work}/cache-0
+env: JET_PACKAGE_STORE_DIR={work}/store-0
+env: JETPACK_ROOT={work}/jetpack-0
+env: JETPACK_ENV=1
+env: NO_COLOR=1
+exit: nonzero
+json: machine doc $.reports[0].code in ["E1334", "E1362"]
+file: outside-config.jet = "description: \"host-state\"\n"
+file: config.jet is-symlink

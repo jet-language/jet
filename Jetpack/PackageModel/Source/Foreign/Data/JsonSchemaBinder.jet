@@ -5,14 +5,14 @@
 // spelled with a fraction or exponent is a Float; a whole number is an Int.
 
 fn pkg_data_bind_json(input: String, root_name: String) -> SchemaBuilder DataBindError! {
-    value := DataTree.Null
+    value := Dyn.Null
     if json.parse(input) == {
         .Ok(parsed) -> value = parsed
         .Err(error) -> return Err(DataBindError{message: "malformed JSON: {error.reason}"})
     }
     if pkg_data_json_kind(value) != JSONBindKind.Object -> return Err(DataBindError{message: "JSON schema root must be an object"})
     builder := SchemaBuilder.new()
-    _ :: pkg_data_add_json_record(&builder, root_name, [DataTree]{value})
+    _ :: pkg_data_add_json_record(&builder, root_name, [Dyn]{value})
     Ok(builder)
 }
 
@@ -27,7 +27,7 @@ enum JSONBindKind {
     Other
 }
 
-fn pkg_data_json_kind(value: DataTree) -> JSONBindKind Never! {
+fn pkg_data_json_kind(value: Dyn) -> JSONBindKind Never! {
     if value == {
         .Null -> JSONBindKind.Null
         .Bool(_) -> JSONBindKind.Bool
@@ -41,9 +41,9 @@ fn pkg_data_json_kind(value: DataTree) -> JSONBindKind Never! {
 }
 
 // The one type every value shares, and whether any value is null.
-fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [DataTree], hint: String) -> (ty: BoundType, nullable: Bool) DataBindError! {
+fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [Dyn], hint: String) -> (ty: BoundType, nullable: Bool) DataBindError! {
     nullable := false
-    nonnull := [DataTree]{}
+    nonnull := [Dyn]{}
     loop value in values {
         if pkg_data_json_kind(value) == JSONBindKind.Null {
             nullable = true
@@ -71,8 +71,8 @@ fn pkg_data_json_values_type(builder: &SchemaBuilder, values: [DataTree], hint: 
 
 // A list over every element of every array; a nullable element type becomes
 // an optional element.
-fn pkg_data_json_array_type(builder: &SchemaBuilder, arrays: [DataTree], hint: String) -> BoundType DataBindError! {
-    elements := [DataTree]{}
+fn pkg_data_json_array_type(builder: &SchemaBuilder, arrays: [Dyn], hint: String) -> BoundType DataBindError! {
+    elements := [Dyn]{}
     loop value in arrays {
         items :: pkg_json_array(value) ?? next
         loop item in items -> &elements.push(item)
@@ -84,7 +84,7 @@ fn pkg_data_json_array_type(builder: &SchemaBuilder, arrays: [DataTree], hint: S
 }
 
 // Float when any number was spelled with a fraction or exponent, else Int.
-fn pkg_data_json_number_type(numbers: [DataTree]) -> BoundType Never! {
+fn pkg_data_json_number_type(numbers: [Dyn]) -> BoundType Never! {
     loop value in numbers {
         if value == {
             .Float(_) -> return BoundType.Scalar("Float")
@@ -96,9 +96,9 @@ fn pkg_data_json_number_type(numbers: [DataTree]) -> BoundType Never! {
 
 // One record over every object: the union of their keys in sorted order, a
 // key missing from any object is optional.
-fn pkg_data_add_json_record(builder: &SchemaBuilder, preferred: String, objects: [DataTree]) -> String DataBindError! {
+fn pkg_data_add_json_record(builder: &SchemaBuilder, preferred: String, objects: [Dyn]) -> String DataBindError! {
     record :: &builder.begin_record(preferred)
-    maps := [[String: DataTree]]{}
+    maps := [[String: Dyn]]{}
     keys := [String]{}
     loop value in objects {
         object :: pkg_json_object(value) ?? return Err(DataBindError{message: "JSON schema contains a non-object where an object was inferred"})
@@ -110,7 +110,7 @@ fn pkg_data_add_json_record(builder: &SchemaBuilder, preferred: String, objects:
     &keys.sort()
     fields := [FieldSeed]{}
     loop key in keys {
-        values := [DataTree]{}
+        values := [Dyn]{}
         optional := false
         loop object in maps {
             if object.get(key) == {

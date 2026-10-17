@@ -1,0 +1,17 @@
+
+use core.encoding.json as json
+
+#[Codable, DenyUnknownFields]
+struct Strict { name: String }
+
+fn run() {
+    if json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            loop error in errors {
+                print(error.path)
+                print(error.reason)
+            }
+        }
+    }
+}

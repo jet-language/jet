@@ -562,7 +562,10 @@ mod windows {
         io::Error::new(cause.kind(), format!("{operation}: {cause}"))
     }
 
-    fn hresult_error(operation: &str, status: i32) -> io::Error {
+    fn hresult_error(operation: &'static str, status: i32) -> io::Error {
+        #[cfg(jet_platform_seeds)]
+        return io::Error::new(io::ErrorKind::Other, crate::jet_platform_seed_abi::HresultCause { operation, status });
+        #[cfg(not(jet_platform_seeds))]
         io::Error::new(
             io::ErrorKind::Other,
             format!("{operation} failed with HRESULT 0x{:08x}", status as u32),
@@ -793,6 +796,22 @@ mod windows {
             Ok(Self(guard))
         }
 
+        #[cfg(jet_platform_seeds)]
+        fn create_prepared(facts: &crate::jet_platform_seed_abi::WindowsLaunchFacts136) -> io::Result<Self> {
+            let guard = HandleGuard::new(unsafe { CreateJobObjectW(std::ptr::null_mut(), std::ptr::null()) })?;
+            let mut limits: ExtendedLimitInformation = unsafe { std::mem::zeroed() };
+            limits.basic.limit_flags = facts.job_limit_flags;
+            limits.basic.active_process_limit = facts.job_active_processes;
+            limits.basic.per_process_user_time_limit = if facts.has_cpu != 0 { facts.cpu_ms.saturating_mul(10_000) } else { 0 };
+            limits.process_memory_limit = facts.job_process_memory as usize;
+            limits.job_memory_limit = facts.job_memory as usize;
+            if unsafe { SetInformationJobObject(guard.raw(), JOB_OBJECT_EXTENDED_LIMIT_INFORMATION,
+                (&mut limits as *mut ExtendedLimitInformation).cast(), std::mem::size_of_val(&limits) as u32) } == 0 {
+                return Err(error("SetInformationJobObject"));
+            }
+            Ok(Self(guard))
+        }
+
         fn assign(&self, process: Handle) -> io::Result<()> {
             // SAFETY: both handles remain live through the call.
             if unsafe { AssignProcessToJobObject(self.0.raw(), process) } == 0 {
@@ -951,6 +970,19 @@ mod windows {
         env: &[(std::ffi::OsString, std::ffi::OsString)],
         limits: ResourceLimits,
     ) -> io::Result<WindowsPtyProcess> {
+        spawn_prepared(config, make_wide(executable)?, command_line(executable, args)?,
+            cwd.map(make_wide).transpose()?, environment_block(env)?, Job::create(limits)?, 0)
+    }
+
+    #[cfg(jet_platform_seeds)]
+    pub(super) fn spawn_seed(application: Vec<u16>, command: Vec<u16>, current_directory: Option<Vec<u16>>,
+        environment: Vec<u16>, facts: &crate::jet_platform_seed_abi::WindowsLaunchFacts136) -> io::Result<WindowsPtyProcess> {
+        spawn_prepared(PtyConfig { cols: facts.cols as i64, rows: facts.rows as i64, raw: false },
+            application, command, current_directory, environment, Job::create_prepared(facts)?, facts.creation_flags)
+    }
+
+    fn spawn_prepared(config: PtyConfig, application: Vec<u16>, mut command: Vec<u16>,
+        current_directory: Option<Vec<u16>>, mut environment: Vec<u16>, job: Job, flags: u32) -> io::Result<WindowsPtyProcess> {
         let (input_read, input_write) = create_pipe()?;
         let (output_read, output_write) = create_pipe()?;
         // The parent ends never belong in a child handle table.
@@ -964,11 +996,6 @@ mod windows {
         // consumed by the child console's own mode; the pipe remains binary.
         let console = ConsoleGuard::create(config, input_read.raw(), output_write.raw())?;
 
-        let job = Job::create(limits)?;
-        let application = make_wide(executable)?;
-        let mut command = command_line(executable, args)?;
-        let current_directory = cwd.map(make_wide).transpose()?;
-        let mut environment = environment_block(env)?;
         let mut attributes = AttributeList::create()?;
         let console_handle = console.raw();
         attributes.update(
@@ -1017,7 +1044,7 @@ mod windows {
                 std::ptr::null_mut(),
                 std::ptr::null_mut(),
                 0,
-                EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                flags | EXTENDED_STARTUPINFO_PRESENT | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
                 environment.as_mut_ptr().cast(),
                 current_directory
                     .as_ref()
@@ -1237,6 +1264,13 @@ mod windows {
         Ok(())
     }
 
+    pub fn close_console(console: usize) {
+        if console != 0 {
+            // SAFETY: the caller transfers exactly one owned HPCON.
+            unsafe { ClosePseudoConsole(console as Handle) };
+        }
+    }
+
     pub fn is_terminal_eof(error: &io::Error) -> bool {
         matches!(
             error.kind(),
@@ -1333,6 +1367,12 @@ pub fn spawn(
     windows::spawn(config, executable, args, cwd, env, limits)
 }
 
+#[cfg(all(windows, jet_platform_seeds))]
+pub fn spawn_seed(application: Vec<u16>, command: Vec<u16>, cwd: Option<Vec<u16>>,
+    environment: Vec<u16>, facts: &crate::jet_platform_seed_abi::WindowsLaunchFacts136) -> io::Result<WindowsPtyProcess> {
+    windows::spawn_seed(application, command, cwd, environment, facts)
+}
+
 #[cfg(windows)]
 pub fn attach_job(
     process: std::os::windows::io::RawHandle,
@@ -1372,6 +1412,11 @@ pub fn interrupt(pid: u32, job: &File, input: Option<&File>) -> io::Result<()> {
 #[cfg(windows)]
 pub fn resize_console(console: usize, config: PtyConfig) -> io::Result<()> {
     windows::resize(console, config)
+}
+
+#[cfg(windows)]
+pub fn close_console(console: usize) {
+    windows::close_console(console)
 }
 
 pub fn signal_group(pid: u32, signal: i32) -> io::Result<()> {

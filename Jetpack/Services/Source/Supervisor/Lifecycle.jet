@@ -29,7 +29,7 @@ fn services_state_lock(project_dir: String) -[FS, Env]> RuntimeLock ServicesErro
 
 // Start `plan` if it is not already running. `env` composes the PATH the
 // project's realized packages live on, so a preset binary resolves.
-pub fn services_up_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
+fn services_up_one(host: ServiceHost, project_dir: String, env: ShellEnv, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Net, Rand, Time, Time.Wait]> {
     if sys.get(SERVICES_SUPERVISOR_ENV) != None {
         started :: services_start_one(host, project_dir, env, plan) ?? return Err(err)
         found :: started ?? return
@@ -581,7 +581,8 @@ fn services_collect_watch_stamps(project_dir: String, path: String, limit: Int, 
         info.is_symlink -> "link"
         else -> "other"
     }
-    services_push_watch_stamp(entries, limit, "{path}\t{kind}:{info.size}:{info.modified.unix_ns}")
+    modified_ns :: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")
+    services_push_watch_stamp(entries, limit, "{path}\t{kind}:{info.size}:{modified_ns}")
     if !info.is_dir -> return
     listed :: files.list_dir(path) ?? return Err(ServicesError.new("couldn't read watched directory `{path}`: {err}"))
     children := [String]{}
@@ -619,7 +620,7 @@ fn services_watch_changed_debounced(project_dir: String, paths: [String], stamps
 
 // Stop `plan` if a verified service process is on record: TERM, a bounded
 // grace wait, then KILL. A PID-only legacy record is dropped, never signalled.
-pub fn services_down_one(host: ServiceHost, project_dir: String, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Rand, Time, Time.Wait]> {
+fn services_down_one(host: ServiceHost, project_dir: String, plan: DevServicePlan) ServicesError! -[FS, Env, Exec, Rand, Time, Time.Wait]> {
     services_validate_service_name(plan.name)
     guard := env_acquire_lock(pkg_managed_dir(project_dir), SERVICES_STATE_LOCK_SCOPE) ?? return Err(ServicesError.new("couldn't lock service state: {err}"))
     dir :: services_service_dir(project_dir, plan.name)

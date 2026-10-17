@@ -38,15 +38,17 @@ fn lower_checked(source: &str) -> MirProgram {
     let entry = root.join("main.jet");
     std::fs::write(&entry, source).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
     jet::Codegen::TIR::lower_checked_mir_program_for(
         &bundle,
+        &nominals,
         MirArtifactRequest::new(
-            MirArtifactTarget::Cranelift,
+            MirArtifactTarget::Interpreter,
             MirArtifactKind::NativeExecutable,
             MirArtifactBuildMode::Dev,
         ),
@@ -209,6 +211,30 @@ fn checked_source_windows_lower_to_marked_mir() {
 }
 
 #[test]
+fn user_write_calls_keep_range_arguments_as_owner_places() {
+    let source = std::fs::read_to_string("Examples/features/memory/range_write_windows.jet").unwrap();
+    let mir = lower_checked(&source);
+    let mut range_calls = 0;
+    for function in &mir.functions {
+        for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
+            let MirOperation::Call { callee: jet_foundation::MIR::MirCallee::User(_), args, .. } =
+                &instruction.operation else { continue };
+            for arg in args {
+                if arg.access != jet_foundation::MIR::MirAccess::Write { continue; }
+                if arg.place.is_some_and(|id| function.places.iter().any(|place| {
+                    place.id == id && matches!(place.projections.last(),
+                        Some(jet_foundation::MIR::MirProjection::Range { .. }))
+                })) {
+                    range_calls += 1;
+                }
+            }
+        }
+    }
+    assert_eq!(range_calls, 2,
+        "both direct user calls must lend a range of their owner's list, not an owned slice");
+}
+
+#[test]
 fn evaluator_view_materialization_helpers_use_checked_jet_route() {
     let source = include_str!("../Compiler/JetEval/Source/Evaluator.jet");
     for helper in [
@@ -222,12 +248,12 @@ fn evaluator_view_materialization_helpers_use_checked_jet_route() {
         );
     }
     assert!(
-        source.contains("window :: value.after(\"\")\n    ~window"),
-        "String evaluator materialization must lower through checked Jet `~`"
+        source.contains("window :: value.after(\"\")\n    window.copy()"),
+        "String evaluator materialization must lower through checked Jet `.copy()`"
     );
     assert_eq!(
         source
-            .matches("window :: value[0..<value.len()]\n    ~window")
+            .matches("window :: value[0..<value.len()]\n    window.copy()")
             .count(),
         2,
         "List and Bytes evaluator materialization must use checked full windows"
@@ -236,7 +262,7 @@ fn evaluator_view_materialization_helpers_use_checked_jet_route() {
 
 const OWNED_WINDOW_SOURCE: &str = r#"
 fn own_first(values: [Int]) -> [Int] {
-    return ~values[0..0]
+    return values[0..0].copy()
 }
 
 fn run() {
@@ -248,7 +274,7 @@ fn run() {
     print(copied[0])
 
     nested := [[1, 2], [3, 4]]
-    nested_copy := ~nested[0..0]
+    nested_copy := nested[0..0].copy()
     nested[0][0] = 6
     nested_copy[0][0] = 7
     print(nested[0][0])
@@ -260,28 +286,28 @@ const EMPTY_STRING_AND_LIST_SOURCE: &str = r#"
 fn run() {
     empty_string := ""
     empty_text_view :: empty_string.after("")
-    owned_empty_text :: ~empty_text_view
+    owned_empty_text :: empty_text_view.copy()
     print(owned_empty_text.len())
 
     unicode_text := "π🙂"
     full_text_view :: unicode_text.after("")
-    owned_unicode_text :: ~full_text_view
+    owned_unicode_text :: full_text_view.copy()
     print(owned_unicode_text == "π🙂")
 
     empty_values := [Int]{}
     empty_values_view :: empty_values[0..<empty_values.len()]
-    owned_empty_values :: ~empty_values_view
+    owned_empty_values :: empty_values_view.copy()
     print(owned_empty_values.len())
 
     bytes := unicode_text.bytes()
     bytes_view :: bytes[0..<bytes.len()]
-    owned_bytes :: ~bytes_view
+    owned_bytes :: bytes_view.copy()
     print(owned_bytes.len())
 }
 "#;
 const LIST_STRING_SOURCE: &str = r#"
 fn copy_values(values: [String]) -> [String] {
-    return ~values[0..<values.len()]
+    return values[0..<values.len()].copy()
 }
 
 fn run() {
@@ -340,7 +366,7 @@ fn string_view_materialization_uses_string_kernel_and_list_view_uses_list_kernel
 fn run() {
     text := "  x  "
     view :: text.trim()
-    print(~view)
+    print(view.copy())
 }
 "#;
     let string_compiled = jet::compile(string_source).expect("String View materializes");
@@ -382,5 +408,113 @@ fn list_string_view_materialization_runs_on_awaited_web() {
         "view_copy_list_string_runtime_web",
         LIST_STRING_SOURCE,
         "source\ncopy\n",
+    );
+}
+
+const STRING_VIEW_RUNTIME_SOURCE: &str = r##"
+fn run() {
+    text := "  key  "
+    key :: text.trim()
+    counts := [String:Int]{}
+    counts[key] = 7
+    counts[key] = 9
+    print(counts["key"])
+    print(key.is_empty())
+    print(key.starts_with("k"))
+    print(key.ends_with("y"))
+    print(key.contains("e"))
+    print(key.count_bytes())
+    print(key.repeat(2))
+    print(key.replace("e", "a"))
+    print(key.slice(0, 2))
+    print(key.split("e").len())
+    print(key.lines().len())
+    print(key.chars().len())
+    print(["a", "b"].join(key))
+    whitespace := " \t "
+    empty :: whitespace.trim()
+    print(empty.is_empty())
+    print(empty.starts_with(""))
+    loop line in ["  # comment  ", "  value  "] {
+        trimmed :: line.trim()
+        if !trimmed.is_empty() && !trimmed.starts_with("#") -> print(~trimmed)
+    }
+}
+"##;
+
+#[test]
+fn string_view_runtime_read_leaves_accept_text_without_materialization() {
+    let compiled = jet::compile(STRING_VIEW_RUNTIME_SOURCE)
+        .expect("checked string views can lend text to runtime read parameters");
+    // Builtin receivers and indexed map writes borrow the same view carrier.
+    // Only the explicit ~trimmed above may materialize it.
+    for signature in [
+        "fn jet_string_is_empty(text: &str)",
+        "fn jet_string_repeat(text: &str,",
+        "fn jet_string_replace(text: &str, from: &str, to: &str)",
+        "fn jet_string_count_bytes(text: &str)",
+        "fn jet_string_split(s: &str,",
+        "fn jet_string_lines(s: &str)",
+        "fn jet_string_chars(s: &str)",
+        "fn jet_string_slice_builtin(s: &str,",
+    ] {
+        assert!(compiled.rust.contains(signature), "missing read ABI: {signature}");
+    }
+    assert!(
+        compiled.rust.contains("key: &str,\n    f: F,"),
+        "map update must borrow text and own its key only on insertion"
+    );
+    for line in compiled.rust.lines().filter(|line| {
+        !line.trim_start().starts_with("fn ")
+            && (line.contains("jet_map_update_string(")
+                || line.contains("jet_string_is_empty(")
+                || line.contains("jet_string_starts_with("))
+    }) {
+        assert!(!line.contains("jet_string_view_copy("), "{line}");
+    }
+}
+
+#[test]
+fn string_view_runtime_text_borrow_contract_covers_sibling_fragments() {
+    for (source, signature) in [
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/Core/Fmt.rs"),
+            "fn jet_fmt_pad(text: &str, width: i64, fill: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Text.rs"),
+            "fn jet_text_caseless_eq(a: &str, b: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/Core/Time.rs"),
+            "fn jet_time_parse_rfc3339(s: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/FSIoEnvOsTesting.rs"),
+            "fn jet_std_io_stdout_write(_s: &JetStdout, text: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/Core/CsvQueryRead.rs"),
+            "fn jet_data_query_read_bounded(path: &str, max: i64)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPClient.rs"),
+            "fn jet_http_client_request_new(method: &str, url: &str)",
+        ),
+        (
+            include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/NetHTTP.rs"),
+            "fn jet_net_dns_a_at(server: &str, name: &str, ms: i64)",
+        ),
+    ] {
+        assert!(source.contains(signature), "missing read ABI: {signature}");
+    }
+}
+
+#[test]
+fn string_view_runtime_reads_agree_across_native_tiers() {
+    tir_support::assert_tiers_agree(
+        "string_view_runtime_reads",
+        STRING_VIEW_RUNTIME_SOURCE,
+        "9\nfalse\ntrue\ntrue\ntrue\n3\nkeykey\nkay\nke\n2\n1\n3\nakeyb\ntrue\ntrue\nvalue\n",
     );
 }

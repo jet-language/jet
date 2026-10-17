@@ -1,0 +1,15 @@
+// Conversion heads constrain results, never the operands of inner arithmetic.
+fn conversion_exact(value: Int) { print(value) }
+fn conversion_byte(value: U8) { print(value) }
+fn conversion_float32(value: F32) { print(value) }
+fn run() {
+    word :: 513
+    conversion_exact(Int{I64{word}})
+    conversion_exact(Int{U64{word}})
+    conversion_byte(U8{word %% 256})
+    conversion_byte(U8{U64{word}.bit_and(U64{255})})
+    conversion_byte(U8{-(-word %% 256)})
+    f :: Float{1.5}
+    conversion_float32(F32{f})
+    print(Float{f + Float{0.5}})
+}

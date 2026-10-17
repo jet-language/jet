@@ -1,0 +1,184 @@
+// The actual library feed must use O1, not merely link its optimizer sources.
+// Its ELF bytes equal the canonical optimized object and differ from O0;
+// export IDs remain stable through the module pipeline.
+use jet_foundation.[MIRArtifactID, MIRArtifactKind, MIRArtifactTarget, MIRArtifactBuildMode, MIRExport, MIRForeignABI, MIRLinkUnitID, MIRJobID]
+use jet_backend.[lir_lower_callables, lir_optimize_module, x64_runtime_library, x64_runtime_object, X64RuntimeExport]
+
+fn fx_runtime_o1_check() -> Bool Never! {
+    b := fx_builder()
+    six :: fx_i64_const(&b, 6)
+    seven :: fx_i64_const(&b, 7)
+    answer :: fx_copy(&b, fx_i64(), MIROperation.Binary{op: MIRBinaryOp.Mul, dispatch: MIRBinaryDispatch.Primitive, overflow: MIRBinaryOverflow.Unchecked, left: six, right: seven})
+    fx_block(&b, 0, MIRTerminator.Return{value: Val(answer)})
+    function := fx_function("runtime_o1_answer", b, fx_i64())
+    source :: "#Export(c) fn runtime_o1_answer() -> I64 {{ I64{{6}} * I64{{7}} }}"
+    function.span = Span{start: 0, end: source.bytes().len()}
+    program := fx_program([MIRFunction]{function}, [MIRTypeDef]{})
+    program.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "runtime-o1.jet", source: source}}
+    export :: MIRExport{symbol: "runtime_o1_answer", function: function.id, abi: MIRForeignABI.C}
+    program.artifacts = [MIRArtifactPlan]{MIRArtifactPlan{
+        id: MIRArtifactID{value: 1}, kind: MIRArtifactKind.NativeLibrary,
+        name: "runtime-o1", target: MIRArtifactTarget.RustAOT, mode: MIRArtifactBuildMode.Dev,
+        modules: [MIRModuleID]{}, links: [MIRLinkUnitID]{}, jobs: [MIRJobID]{},
+        runtime_parts: [MIRRuntimePartID]{}, exports: [MIRExport]{export},
+        provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None,
+    }}
+    library :: x64_runtime_library(program, [String]{export.symbol})
+    loop error in library.object.errors -> print("runtime-o1: {error}")
+    if library.object.errors.len() != 0 -> return false
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{function.id})
+    if lowered.issues.len() != 0 -> return false
+    id :: lowered.callables.get(function.id.value) ?? return false
+    globals :: [X64RuntimeExport]{X64RuntimeExport{function: id, symbol: export.symbol}}
+    optimized :: lir_optimize_module(lowered.lir, 1)
+    if optimized.functions[id.value].id != id -> return false
+    if library.export_abis.len() != 1 -> return false
+    abi :: library.export_abis[0]
+    signature :: optimized.signatures[optimized.functions[id.value].signature.value]
+    if abi.symbol != export.symbol || abi.parameters != signature.params || abi.result != signature.result -> return false
+    expected :: x64_runtime_object(optimized, globals)
+    before :: x64_runtime_object(lowered.lir, globals)
+    if expected.errors.len() != 0 || before.errors.len() != 0 -> return false
+    if library.exports.len() != 1 || library.exports[0].function != function.id || library.exports[0].symbol != export.symbol -> return false
+    library.object.bytes == expected.bytes && library.object.bytes != before.bytes
+}
+
+// The Observe writer address is substituted only by the checked runtime
+// library feed. Missing exports and a valid-C but wrong callback arity refuse.
+fn fx_observe_address_program(mode: Int) -> MIRProgram Never! {
+    a := fx_builder()
+    zero :: fx_i64_const(&a, 0)
+    fx_block(&a, 0, MIRTerminator.Return{value: Val(zero)})
+    address := fx_function("rt_observe_writer_address", a, fx_i64())
+    r := fx_builder()
+    pointer :: fx_copy(&r, fx_i64(), MIROperation.Call{callee: MIRCallee.User{function: address.id}, args: [MIRCallArg]{}, type_args: [MIRType]{}})
+    fx_block(&r, 0, MIRTerminator.Return{value: Val(pointer)})
+    root := fx_function("observe_address_root", r, fx_i64())
+    root_source :: "#Export(c) fn observe_address_root() -> I64 {{ rt_observe_writer_address() }}\n"
+    address_source :: "fn rt_observe_writer_address() -> I64 {{ I64{{0}} }}\n"
+    root.span = Span{start: 0, end: root_source.bytes().len()}
+    address.span = Span{start: root_source.bytes().len(), end: root_source.bytes().len() + address_source.bytes().len()}
+    exports := [MIRExport]{MIRExport{symbol: root.name, function: root.id, abi: MIRForeignABI.C}}
+    functions := [MIRFunction]{root, address}
+    source := "{root_source}{address_source}"
+    if mode != 0 {
+        w := fx_builder()
+        argument :: fx_param(&w, "argument", fx_i64(), mir_copy_ownership())
+        if mode == 1 -> _ := fx_param(&w, "extra", fx_i64(), mir_copy_ownership())
+        fx_block(&w, 0, MIRTerminator.Return{value: Val(argument)})
+        writer := fx_function("jet_rt_observe_writer", w, fx_i64())
+        writer_source :: if mode == 1 -> "#Export(c) fn jet_rt_observe_writer(argument: I64, extra: I64) -> I64 {{ argument }}\n" else -> "#Export(c) fn jet_rt_observe_writer(argument: I64) -> I64 {{ argument }}\n"
+        writer.span = Span{start: source.bytes().len(), end: source.bytes().len() + writer_source.bytes().len()}
+        source = "{source}{writer_source}"
+        &exports.push(MIRExport{symbol: writer.name, function: writer.id, abi: MIRForeignABI.C})
+        &functions.push(writer)
+    }
+    program := fx_program(functions, [MIRTypeDef]{})
+    program.source_files = [MIRSourceFile]{MIRSourceFile{id: fx_source_file(), path: "observe-address.jet", source: source}}
+    program.artifacts = [MIRArtifactPlan]{MIRArtifactPlan{
+        id: MIRArtifactID{value: 1}, kind: MIRArtifactKind.NativeLibrary,
+        name: "observe-address", target: MIRArtifactTarget.RustAOT, mode: MIRArtifactBuildMode.Dev,
+        modules: [MIRModuleID]{}, links: [MIRLinkUnitID]{}, jobs: [MIRJobID]{},
+        runtime_parts: [MIRRuntimePartID]{}, exports: exports,
+        provider_identity: "", closure_identity: "", artifact_identity: "", entry: None, harness: None,
+    }}
+    program
+}
+
+fn fx_observe_address_checks() -> Bool Never! {
+    missing :: x64_runtime_library(fx_observe_address_program(0), [String]{"observe_address_root"})
+    named := false
+    loop error in missing.object.errors {
+        if error.contains("rt_observe_writer_address requires #Export(c) jet_rt_observe_writer") -> named = true
+    }
+    if !named || missing.object.bytes.len() != 0 -> return false
+    invalid :: x64_runtime_library(fx_observe_address_program(1), [String]{"observe_address_root", "jet_rt_observe_writer"})
+    named = false
+    loop error in invalid.object.errors {
+        if error.contains("jet_rt_observe_writer must export an infallible C function with 1 I64 parameters and an I64 result") -> named = true
+    }
+    if !named || invalid.object.bytes.len() != 0 -> return false
+    valid :: x64_runtime_library(fx_observe_address_program(2), [String]{"observe_address_root", "jet_rt_observe_writer"})
+    loop error in valid.object.errors -> print("observe-address: {error}")
+    valid.object.errors.len() == 0 && valid.object.bytes.len() > 0
+}
+
+// Consume the OS templates from the same checkout, not copied instruction
+// strings. These are the leaves used by Secret zeroize, sync load/store/CAS,
+// futex waits, and scheduler signal/control syscalls.
+fn fx_runtime_o1_asm(b: &LIRFunctionBuilder, name: String, names: [String], args: [LIRValueID], returns: Bool) -> Bool Never! {
+    span :: fx_asm_os_span(name)
+    body :: fx_asm_os_source().slice(span.start, span.end).split("\"\"\"").to_list()
+    if body.len() != 3 -> return false
+    assembled :: x64_assemble_template(body[1], names, returns)
+    if assembled.error != None -> return false
+    dst :: if returns -> Val(lir_builder_word(&b)) else -> None
+    lir_builder_push(&b, LIRInst.InlineAsm{dst: dst, args: args, regs: assembled.regs, result: assembled.result, code: assembled.code})
+    true
+}
+
+fn fx_runtime_o1_effects(function: LIRFunction) -> [String] Never! {
+    rows := [String]{}
+    loop block in function.blocks {
+        loop instruction in block.insts {
+            if instruction == {
+                .InlineAsm(_, args, regs, result, code) -> &rows.push("asm:{args.len()}:{regs}:{result}:{code}")
+                .FunctionAddress(_, target) -> &rows.push("address:{target.value}")
+                .Bitcast(dst, src) -> {
+                    target :: function.values[dst.value].layout
+                    source :: function.values[src.value].layout
+                    &rows.push("bitcast:{source}:{target}")
+                }
+                else -> {}
+            }
+        }
+    }
+    rows
+}
+
+fn fx_runtime_o1_effects_check() -> Bool Never! {
+    b := lir_builder(LIRFunctionID{value: 0}, "runtime-effects", LIRSignatureID{value: 0})
+    args := [LIRValueID]{}
+    loop _ in 0..<7 -> &args.push(lir_builder_word(&b))
+    floating :: lir_builder_value(&b, lir_layout_float(), LIRDrop.Trivial, None)
+    params := args.copy()
+    &params.push(floating)
+    zero :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Const{dst: zero, value: 0})
+    if !fx_runtime_o1_asm(&b, "os_store_u8", [String]{"address", "value"}, [LIRValueID]{args[0], zero}, false) -> return false
+    if !fx_runtime_o1_asm(&b, "os_load_i64", [String]{"address"}, [LIRValueID]{args[0]}, true) -> return false
+    if !fx_runtime_o1_asm(&b, "os_store_i64", [String]{"address", "value"}, [LIRValueID]{args[0], args[1]}, false) -> return false
+    if !fx_runtime_o1_asm(&b, "os_cas_i64", [String]{"address", "expected", "desired"}, [LIRValueID]{args[0], args[1], args[2]}, true) -> return false
+    if !fx_runtime_o1_asm(&b, "os_spin_pause", [String]{}, [LIRValueID]{}, false) -> return false
+    if !fx_runtime_o1_asm(&b, "os_syscall_i64", [String]{"number", "a1", "a2", "a3", "a4", "a5", "a6"}, args, true) -> return false
+    if !fx_runtime_o1_asm(&b, "os_syscall_stack4_i64", [String]{"number", "a1", "w0", "w1", "w2", "w3", "a4"}, args, true) -> return false
+    address :: lir_builder_value(&b, lir_layout_pointer(), LIRDrop.Trivial, None)
+    lir_builder_push(&b, LIRInst.FunctionAddress{dst: address, function: LIRFunctionID{value: 1}})
+    if !fx_runtime_o1_asm(&b, "os_store_i64", [String]{"address", "value"}, [LIRValueID]{args[0], address}, false) -> return false
+    bits :: lir_builder_word(&b)
+    lir_builder_push(&b, LIRInst.Bitcast{dst: bits, src: floating})
+    if !fx_runtime_o1_asm(&b, "os_store_i64", [String]{"address", "value"}, [LIRValueID]{args[0], bits}, false) -> return false
+    lir_builder_seal(&b, LIRBlockID{value: 0}, params, LIRTerminator.Return{value: Val(bits)})
+    target := lir_builder(LIRFunctionID{value: 1}, "runtime-address-target", LIRSignatureID{value: 1})
+    if !fx_runtime_o1_asm(&target, "os_spin_pause", [String]{}, [LIRValueID]{}, false) -> return false
+    lir_builder_seal(&target, LIRBlockID{value: 0}, [LIRValueID]{}, LIRTerminator.Return{value: None})
+    layouts :: loop _ in args -> lir_layout_word()
+    parameter_layouts := layouts.copy()
+    &parameter_layouts.push(lir_layout_float())
+    unit :: LIRModule{
+        signatures: [LIRSignature]{
+            LIRSignature{id: LIRSignatureID{value: 0}, params: parameter_layouts, result: Val(lir_layout_word()), convention: LIRCallConv.SystemV},
+            LIRSignature{id: LIRSignatureID{value: 1}, params: [LIRLayout]{}, result: None, convention: LIRCallConv.SystemV},
+        },
+        functions: [LIRFunction]{lir_builder_finish(b), lir_builder_finish(target)}, data: [LIRData]{},
+        debug: lir_module_debug_none(),
+    }
+    if lir_lint_module(unit).len() != 0 -> return false
+    optimized :: lir_optimize_module(unit, 1)
+    if lir_lint_module(optimized).len() != 0 -> return false
+    if optimized.functions.len() != 2 -> return false
+    before :: fx_runtime_o1_effects(unit.functions[0])
+    after :: fx_runtime_o1_effects(optimized.functions[0])
+    if before.len() != 11 || before != after -> return false
+    fx_runtime_o1_effects(unit.functions[1]) == fx_runtime_o1_effects(optimized.functions[1])
+}

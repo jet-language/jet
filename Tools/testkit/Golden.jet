@@ -1,0 +1,266 @@
+use core.files as files
+
+
+fn kit_golden_tiers() -> [KitTier] {
+    [KitTier{name: "o0", flags: [], direct: true},
+     KitTier{name: "o1", flags: [], direct: false},
+     KitTier{name: "o2", flags: ["--release"], direct: false}]
+}
+
+fn kit_golden_exists(path: String) -> Bool { files.exists(path) }
+
+fn kit_golden_collect(root: String, directory: String, expected_root: String, prefix: String) -> [KitEntry] {
+    entries := [KitEntry]{}
+    if !kit_golden_exists(files.join(root, directory)) -> return entries
+    children :: files.list_dir(files.join(root, directory)) ?? panic("discover {directory}: {err}")
+    loop child in children {
+        if child.name == "expected" || child.name.starts_with(".") -> next
+        shown :: files.join(directory, child.name)
+        if child.is_dir {
+            if kit_golden_exists(files.join(child.path, "package.jet")) || kit_golden_exists(files.join(child.path, "workspace.jet")) || kit_golden_exists(files.join(child.path, "run.jet")) {
+                if kit_golden_exists(files.join(child.path, "run.jet")) {
+                    stem :: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes())
+                    &entries.push(KitEntry{path: files.join(shown, "run.jet"), expected: files.join(expected_root, stem), project: shown, suite: "golden", mode: ""})
+                }
+                next
+            }
+            nested :: kit_golden_collect(root, shown, expected_root, prefix)
+            loop entry in nested -> &entries.push(entry)
+        } else if child.name.ends_with(".jet") && child.name != "package.jet" && child.name != "workspace.jet" {
+            // Examples' nested folders contain support modules, not flat entries.
+            // Runtime-test group folders may contain flat generated test cases.
+            if prefix == "Examples/features/" && directory.split("/").len() != 3 -> next
+            stem :: kit_steps_byte_slice(shown, prefix.count_bytes(), shown.count_bytes() - 4)
+            &entries.push(KitEntry{path: shown, expected: files.join(expected_root, stem), project: directory, suite: "golden", mode: ""})
+        }
+    }
+    entries
+}
+
+fn kit_golden_discover(root: String) -> [KitEntry] {
+    entries :: kit_golden_collect(root, "Examples/features", "Examples/features/expected", "Examples/features/")
+    additional :: kit_golden_collect(root, "tests/run", "tests/run", "tests/run/")
+    all := entries
+    loop entry in additional -> &all.push(entry)
+    &all.sort_by(entry -> entry.path)
+    all
+}
+
+// Same D-FAIL-EXIT1 oracle as the native comparator; unknown reports fail.
+fn kit_golden_failure_exit(expected: String, report: String) -> Int? {
+    if report.starts_with("Stop [") || report.starts_with("Error [E3003]:") -> return Val(70)
+    if report.starts_with("Runtime fault [R0801]:") || report.starts_with("Runtime fault [R0802]:") {
+        loop raw in report.split("\n") {
+            line :: raw.trim().copy()
+            if line.starts_with("exit:") && kit_steps_byte_slice(line, 5, line.count_bytes()).trim() != "70" -> return None
+        }
+        return Val(70)
+    }
+    prefix :: "Examples/features/expected/"
+    start :: expected.index(prefix) ?? return None
+    stem :: kit_steps_byte_slice(expected, start + prefix.count_bytes(), expected.count_bytes())
+    if report == "" -> return if stem == "io/log_fatal" -> Val(1) else -> None
+    if kit_expect_named(["errors/propagation_journey", "errors/propagation_journey_direct", "errors/propagation_journey_one_hop", "errors/propagation_journey_core", "errors/error_context", "errors/default_error_conversion", "errors/default_err_edge", "errors/fatal_exit", "serde/decode_error_exit", "crypto/crypto_error_run"], stem) -> return Val(1)
+    None
+}
+
+fn kit_golden_stream_verdict(id: String, expected: String, result: KitRun, bless: KitBless, argv0: String, source_name: String) -> KitVerdict {
+    failure :: kit_exec_process_failure(result)
+    if failure == {
+        .Val(value) -> return value
+        .None -> {}
+    }
+    error :: kit_exec_optional("{expected}.err.out")
+    if error == .Val(report) {
+        code :: kit_golden_failure_exit(expected, report) ?? return kit_expect_verdict("FAIL", "failure report has no exact exit oracle")
+        if result.code != code -> return kit_expect_verdict("FAIL", "exit {result.code}; expected {code}")
+        stdout :: kit_exec_optional("{expected}.out") ?? ""
+        output :: kit_expect_exact(id, "{expected}.out", Val(stdout), result.stdout, bless, false)
+        if output.status != "PASS" -> return output
+        return kit_expect_exact(id, "{expected}.err.out", error, result.stderr, bless, false)
+    }
+    if result.code != 0 -> return kit_expect_verdict("FAIL", "exit {result.code}; expected 0")
+    stdout := result.stdout
+    if argv0 != "" -> stdout = kit_expect_argv0(stdout, argv0, source_name)
+    verdict :: kit_expect_exact(id, "{expected}.out", kit_exec_optional("{expected}.out"), stdout, bless, false)
+    if verdict.status != "PASS" -> return verdict
+    stderr :: kit_exec_optional("{expected}.stderr.out")
+    if stderr != None -> return kit_expect_exact(id, "{expected}.stderr.out", stderr, result.stderr, bless, false)
+    verdict
+}
+
+fn kit_golden_source_name(entry: KitEntry) -> String {
+    file :: files.basename(entry.path)
+    file.slice(0, file.len() - 4)
+}
+
+fn kit_golden_tier_independent(plan: KitPlan) -> Bool {
+    if plan.steps.len() == 0 -> return false
+    loop step in plan.steps {
+        if step.argv[0] == "build" || step.argv[0] == "built" -> return false
+    }
+    true
+}
+
+fn kit_golden_build(entry: KitEntry, tier: KitTier, plan: KitPlan, env: KitEnv, source: String, work: String, scratch: String, step: KitStep) -> KitOutcome {
+    path :: if step.cwd == "" -> entry.path else -> files.join(source, entry.path)
+    args := [String]{env.jet, if tier.direct -> "check" else -> "build", path}
+    if !tier.direct {
+        loop flag in tier.flags -> &args.push(flag)
+    }
+    case_env :: kit_steps_environment(plan, env, work, scratch, "")
+    overlay :: kit_steps_step_environment(step, env, work, scratch, "", case_env)
+    cwd :: if step.cwd == "" -> source else -> files.join(work, kit_steps_expand(step.cwd, env, work, scratch, ""))
+    policy :: kit_steps_policy(step, env) ?? return KitOutcome{verdict: kit_expect_verdict("ERROR", "time limit outside Duration range"), run: kit_exec_failed("time limit outside Duration range")}
+    if step.isolate == "no-nix" {
+        args = kit_no_nix_argv(policy, args, scratch, step.isolate_network) ?? return KitOutcome{verdict: kit_expect_verdict("ERROR", "{err}"), run: kit_exec_failed("{err}")}
+    }
+    result :: kit_exec_invoke_with_env(policy, args, cwd, scratch, "", overlay)
+    failure :: kit_steps_failure(step, result)
+    if failure == {
+        .Val(value) -> return KitOutcome{verdict: value, run: result}
+        .None -> {}
+    }
+    if result.stderr.contains("Warning [L0507]") -> return KitOutcome{verdict: kit_expect_verdict("FAIL", "feature example emitted L0507"), run: result}
+    if result.code != 0 {
+        unsupported :: result.stderr.contains("Error [E2104]")
+        verdict :: kit_expect_verdict(if unsupported -> "UNSUPPORTED" else -> "FAIL", "front end/build exit {result.code}: {result.stderr}")
+        return KitOutcome{verdict: verdict, run: result}
+    }
+    KitOutcome{verdict: kit_expect_verdict("PASS", ""), run: result}
+}
+
+
+fn kit_golden_default_step(word: String) -> KitStep {
+    KitStep{argv: [word], stdin: "", exit: "0", assertions: []}
+}
+
+fn kit_golden_run_entry(entry: KitEntry, tier: KitTier, env: KitEnv, scratch: String, bless: KitBless) -> KitOutcome {
+    expected :: files.join(env.root, entry.expected)
+    plan := kit_steps_parse(kit_exec_optional("{expected}.case") ?? "")
+    last := kit_exec_failed("case has not run")
+    if plan.error != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", plan.error), run: last}
+    if plan.fixture != "" -> return KitOutcome{verdict: kit_expect_verdict("REFUSED", "golden fixture is the staged project; fixture: is case-only"), run: last}
+    source :: files.join(scratch, "source")
+    work :: files.join(source, entry.project)
+    kit_exec_copy_tree(files.join(env.root, entry.project), work, true)
+    if plan.steps.len() == 0 {
+        &plan.steps.push(kit_golden_default_step("build"))
+        if !plan.compile_only -> &plan.steps.push(kit_golden_default_step("built"))
+    }
+    last_explicit := false
+    loop assertion in plan.steps[plan.steps.len() - 1].assertions {
+        if assertion.stream == "stdout" || assertion.stream == "stderr" -> last_explicit = true
+    }
+    context := kit_steps_context(plan, entry.path, env, work, scratch, files.dirname(expected), bless)
+    context.golden = Val(KitGoldenStepCtx{entry: entry, tier: tier, source: source, expected: expected, last_explicit: last_explicit})
+    kit_steps_execute(context, kit_golden_step_hooks())
+}
+
+fn kit_golden_step_invoke(step: KitStep, index: Int, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
+    golden :: context.golden ?? panic("golden step context required")
+    plan :: context.plan
+    state := previous
+    if index == 0 {
+        if plan.compile_only {
+            loop row in plan.steps {
+                if row.argv[0] != "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "run: none cannot have runtime steps")}
+            }
+        }
+        can_create :: context.bless.first_tier && (context.bless.all || kit_expect_named(context.bless.ids, context.id))
+        if !plan.compile_only && !golden.last_explicit && !can_create && !kit_golden_exists("{golden.expected}.out") && !kit_golden_exists("{golden.expected}.err.out") -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "missing expected stream: {golden.expected}")}
+    }
+    command :: step.argv[0]
+    if command == "build" || (command == "built" && !state.built_once) {
+        if command == "build" && step.argv.len() != 1 -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build step takes no arguments")}
+        compiled :: kit_golden_build(golden.entry, golden.tier, plan, context.env, golden.source, context.work, context.scratch, step)
+        state.last = compiled.run
+        if compiled.verdict.status != "PASS" -> return KitStepResult{state: state, verdict: compiled.verdict}
+        state.built = if golden.tier.direct -> context.env.jet else -> kit_steps_artifact(golden.entry.path, golden.source, plan.artifact)
+        if !files.exists(state.built) -> return KitStepResult{state: state, verdict: kit_expect_verdict("ERROR", "CLI build artifact missing: {state.built}")}
+        state.built_once = true
+        if command == "build" -> return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    actual := step
+    if command == "built" && golden.tier.direct {
+        argv := [String]{context.env.jet, "run", golden.entry.path}
+        if step.argv.len() > 1 {
+            &argv.push("--")
+            loop arg in step.argv.slice(1, step.argv.len()) -> &argv.push(arg)
+        }
+        actual.argv = argv
+        if actual.cwd == "" -> actual.cwd = golden.source
+    }
+    if index == plan.steps.len() - 1 && actual.stdin == "" && kit_golden_exists("{golden.expected}.stdin") -> actual.stdin = "{golden.expected}.stdin"
+    kit_steps_invoke(actual, index, context, state)
+}
+
+fn kit_golden_step_check(step: KitStep, index: Int, context: KitStepCtx, state: KitStepState) -> KitVerdict {
+    golden :: context.golden ?? panic("golden step context required")
+    if state.last.stderr.contains("Warning [L0507]") -> return kit_expect_verdict("FAIL", "feature example emitted L0507")
+    checked := step
+    if step.argv[0] != "build" && index == context.plan.steps.len() - 1 && !golden.last_explicit {
+        normalized :: kit_expect_named(context.plan.normalize, "argv0")
+        name :: if normalized && step.argv[0] == "built" -> files.basename(state.built) else -> ""
+        streams := state.last
+        if state.json_stdout == .Val(text) -> streams.stdout = text
+        if state.json_stderr == .Val(text) -> streams.stderr = text
+        verdict :: kit_golden_stream_verdict(context.id, golden.expected, streams, context.bless, name, kit_golden_source_name(golden.entry))
+        if verdict.status != "PASS" -> return verdict
+        // Default stream comparison owns its expected failure exit. Explicit
+        // non-default exits and file assertions remain enforceable.
+        checked.exit = "{state.last.code}"
+        if step.exit != "0" -> checked.exit = step.exit
+    }
+    kit_steps_check(checked, context, state, kit_golden_source_name(golden.entry))
+}
+
+fn kit_golden_mark_tier_splits(results: &[KitCaseResult]) {
+    loop i in 0..<results.len() {
+        loop j in 0..<i {
+            if results[i].case != results[j].case -> next
+            a_pass :: results[i].status == "PASS" || results[i].status == "UNEXPECTED-PASS"
+            b_pass :: results[j].status == "PASS" || results[j].status == "UNEXPECTED-PASS"
+            a_fail :: results[i].status == "FAIL" || results[i].status == "KNOWN-FAILING"
+            b_fail :: results[j].status == "FAIL" || results[j].status == "KNOWN-FAILING"
+            if (a_pass && b_fail) || (a_fail && b_pass) {
+                results[i].detail = "tier-split: {results[i].detail}"
+                results[j].detail = "tier-split: {results[j].detail}"
+            }
+        }
+    }
+}
+
+fn kit_golden_discover_suite(context: KitCtx) -> [KitEntry] { kit_golden_discover(context.root) }
+
+fn kit_golden_run_suite(entry: KitEntry, context: KitCtx) -> [KitOutcome] {
+    source :: kit_exec_optional(files.join(context.root, "{entry.expected}.case")) ?? ""
+    plan :: kit_steps_parse(source)
+    annotation :: kit_cases_known_failure(entry, context.root, source)
+    independent :: kit_golden_tier_independent(plan)
+    results := [KitOutcome]{}
+    loop (index, tier_name) in context.options.tiers {
+        if independent && index > 0 -> next
+        tier := kit_golden_tiers()[0]
+        loop row in kit_golden_tiers() {
+            if row.name == tier_name -> tier = row
+        }
+        scratch :: files.join(context.scratch, "{index}")
+        files.create_dir_all(scratch) ?? {
+            &results.push(KitOutcome{verdict: kit_expect_verdict("ERROR", "tier scratch: {err}"), run: kit_exec_failed("{err}"), tier: tier_name})
+            next
+        }
+        bless := context.bless
+        bless.first_tier = index == 0
+        outcome := kit_golden_run_entry(entry, tier, context.env, scratch, bless)
+        outcome.tier = if independent -> "-" else -> tier_name
+        if context.env.trace_node == "" {
+            files.remove_all(scratch) ?? {
+                outcome.verdict = kit_expect_verdict("ERROR", "remove tier scratch: {err}")
+                ()
+            }
+        }
+        &results.push(kit_cases_known_verdict(outcome, annotation))
+    }
+    results
+}

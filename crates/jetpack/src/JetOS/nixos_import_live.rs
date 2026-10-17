@@ -13,7 +13,7 @@ use super::nixos_import::{
     NixosImportArgs, NixosImportPlan, NixosImportUser,
 };
 use crate::JSON;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
@@ -97,7 +97,7 @@ pub(super) fn live_import_plan(args: &NixosImportArgs) -> Result<Option<NixosImp
     Ok(Some(plan_from_live_facts(args, &host, root)?))
 }
 
-fn run_live_extractor(source: &Path, host: &str) -> Result<DataTree, String> {
+fn run_live_extractor(source: &Path, host: &str) -> Result<Dyn, String> {
     let attr = format!("{}#nixosConfigurations.{}.config", source.display(), host);
     let output = Command::new("nix")
         .args(["eval", "--json", &attr, "--apply", NIXOS_LIVE_EXTRACTOR])
@@ -120,33 +120,33 @@ fn run_live_extractor(source: &Path, host: &str) -> Result<DataTree, String> {
     JSON::parse(&text).map_err(|e| format!("parsing `nix eval` output failed: {e}"))
 }
 
-fn live_str(root: &[(String, DataTree)], key: &str) -> String {
+fn live_str(root: &[(String, Dyn)], key: &str) -> String {
     import_json_string(root, key).unwrap_or_default()
 }
 
-fn live_bool(root: &[(String, DataTree)], key: &str) -> bool {
-    matches!(import_json_value(root, key), Some(DataTree::Bool(true)))
+fn live_bool(root: &[(String, Dyn)], key: &str) -> bool {
+    matches!(import_json_value(root, key), Some(Dyn::Bool(true)))
 }
 
-fn live_num(root: &[(String, DataTree)], key: &str) -> Option<f64> {
+fn live_num(root: &[(String, Dyn)], key: &str) -> Option<f64> {
     match import_json_value(root, key) {
-        Some(DataTree::Int(n)) => Some(*n as f64),
-        Some(DataTree::Float(n)) => Some(*n),
-        Some(DataTree::Number(n)) => n.parse::<f64>().ok(),
+        Some(Dyn::Int(n)) => Some(n.to_f64()),
+        Some(Dyn::Float(n)) => Some(*n),
+        Some(Dyn::Number(n)) => n.parse::<f64>().ok(),
         _ => None,
     }
 }
 
-fn live_num_list(root: &[(String, DataTree)], key: &str) -> Vec<i64> {
+fn live_num_list(root: &[(String, Dyn)], key: &str) -> Vec<i64> {
     import_json_value(root, key)
         .and_then(|value| value.as_array().ok())
         .map(|values| {
             values
                 .iter()
                 .filter_map(|value| match value {
-                    DataTree::Int(n) => Some(*n),
-                    DataTree::Float(n) => Some(*n as i64),
-                    DataTree::Number(n) => n.parse::<i64>().ok(),
+                    Dyn::Int(n) => n.to_i64(),
+                    Dyn::Float(n) => Some(*n as i64),
+                    Dyn::Number(n) => n.parse::<i64>().ok(),
                     _ => None,
                 })
                 .collect()
@@ -412,7 +412,7 @@ fn merge_sourced_packages(
 fn plan_from_live_facts(
     args: &NixosImportArgs,
     host: &str,
-    root: &[(String, DataTree)],
+    root: &[(String, Dyn)],
 ) -> Result<NixosImportPlan, String> {
     let mut options: Vec<(String, String)> = Vec::new();
     let mut services: Vec<String> = Vec::new();
@@ -490,7 +490,7 @@ fn plan_from_live_facts(
                 .to_string(),
         );
     }
-    if let Some(DataTree::Object(sysctl)) = import_json_value(root, "sysctl") {
+    if let Some(Dyn::Object(sysctl)) = import_json_value(root, "sysctl") {
         for (key, value) in sysctl {
             // Values embedding store paths are NixOS machinery echoes (e.g.
             // `kernel.poweroff_cmd` from shutdown.nix), not configuration
@@ -498,16 +498,16 @@ fn plan_from_live_facts(
             // re-declaring them collides with the module that owns them.
             if matches!(
                 value,
-                DataTree::Text(s) | DataTree::TypedText(s) if s.contains("/nix/store/")
+                Dyn::Text(s) if s.contains("/nix/store/")
             ) {
                 continue;
             }
             let rendered = match value {
-                DataTree::Int(n) => render_live_number(*n as f64),
-                DataTree::Float(n) => render_live_number(*n),
-                DataTree::Number(n) => n.clone(),
-                DataTree::Bool(b) => b.to_string(),
-                DataTree::Text(s) | DataTree::TypedText(s) => import_render_string(s),
+                Dyn::Int(n) => n.to_string_rep(),
+                Dyn::Float(n) => render_live_number(*n),
+                Dyn::Number(n) => n.clone(),
+                Dyn::Bool(b) => b.to_string(),
+                Dyn::Text(s) => import_render_string(s),
                 other => {
                     omissions.push(format!(
                         "boot.kernel.sysctl.{key} has a shape jetos cannot encode yet: {other:?}"

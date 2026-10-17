@@ -3,15 +3,15 @@
 // scopes from the current directory, re-pin channel sources behind one
 // confirmation, and report channel freshness read-only.
 
-pub fn cli_render_channel_update_row(theme: Theme, scope: String, name: String, name_w: Int, before: String, after: String, package_count: Int, download_bytes: Int?) Never! -[IO, Time.Wait]> {
+fn cli_render_channel_update_row(theme: Theme, scope: String, name: String, name_w: Int, before: String, after: String, package_count: Int, download_bytes: Int?) Never! -[IO, Time.Wait]> {
     shown_after :: "{after}   {cli_package_noun(package_count)}, {cli_download_size(download_bytes)}"
     label :: "{terminal_pad_end(scope, 5)} {terminal_pad_end(name, name_w)}"
     theme.plan_row(PlanMark.Change, label, label.len(), before, shown_after)
 }
 
 // One confirmation shared by every scope of one `update` run.
-pub struct UpdateConfirmation {
-    pub decision: Bool?
+struct UpdateConfirmation {
+    decision: Bool?
 
     fn new() -> UpdateConfirmation Never! {
         UpdateConfirmation{decision: None}
@@ -27,17 +27,17 @@ pub struct UpdateConfirmation {
 
 // One channel source move: before and after pins, how many refs it serves,
 // and its download size when known.
-pub struct ProjectSourceUpdate {
-    pub source: ChannelSource
-    pub before: String
-    pub after: String
-    pub package_count: Int
-    pub download_bytes: Int?
+struct ProjectSourceUpdate {
+    source: ChannelSource
+    before: String
+    after: String
+    package_count: Int
+    download_bytes: Int?
 }
 
-pub struct ProjectUpdatePlan {
-    pub project_dir: String
-    pub updates: [ProjectSourceUpdate]
+struct ProjectUpdatePlan {
+    project_dir: String
+    updates: [ProjectSourceUpdate]
 }
 
 fn cli_package_noun(count: Int) -> String Never! {
@@ -62,12 +62,12 @@ fn cli_update_download_bytes(updates: [ProjectSourceUpdate]) -> Int? Never! {
 
 // Which scopes this `update` touches: explicit `--deps`/`--tools`, else the
 // `tools` word, else a named source, else both.
-pub struct UpdateScopes {
-    pub deps: Bool
-    pub tools: Bool
+struct UpdateScopes {
+    deps: Bool
+    tools: Bool
 }
 
-pub fn cli_update_scopes(parsed: CLIParsed) -> UpdateScopes Never! {
+fn cli_update_scopes(parsed: CLIParsed) -> UpdateScopes Never! {
     if parsed.flags.update_deps || parsed.flags.update_tools -> return UpdateScopes{deps: parsed.flags.update_deps, tools: parsed.flags.update_tools}
     if parsed.positional.get(0) == {
         .Val(word) -> if word == TOOL_PROFILE_NAME -> UpdateScopes{deps: false, tools: true} else -> UpdateScopes{deps: true, tools: false}
@@ -82,7 +82,7 @@ fn cli_project_scope_root(cache: &WorkspaceDeclarationCache) -[IO, FS, Env, Exec
     None
 }
 
-pub fn cli_cmd_update(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_update(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     confirmation := UpdateConfirmation.new()
     scopes :: cli_update_scopes(parsed)
@@ -132,7 +132,7 @@ fn cli_cmd_update_project(cache: &WorkspaceDeclarationCache, theme: Theme, parse
     cli_apply_project_update(theme, plan)
 }
 
-pub fn cli_plan_project_update(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CLIError! {
+fn cli_plan_project_update(cache: &WorkspaceDeclarationCache, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> ProjectUpdatePlan? CLIError! {
     if parsed.flags.offline && parsed.flags.local_nix_catalog == None -> return Err(CLIError.Reported(cli_offline_refusal(theme, "update")))
     plan :: cli_load_project_plan(&cache, theme)
     project_dir :: plan.project_root
@@ -198,7 +198,7 @@ pub fn cli_plan_project_update(cache: &WorkspaceDeclarationCache, theme: Theme, 
     Ok(Val(ProjectUpdatePlan{project_dir, updates}))
 }
 
-pub fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Never! -[IO, Time.Wait]> {
+fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Never! -[IO, Time.Wait]> {
     name_w := 8
     loop update in plan.updates {
         if update.source.name.len() > name_w -> name_w = update.source.name.len()
@@ -207,7 +207,7 @@ pub fn cli_render_project_update_plan(theme: Theme, plan: ProjectUpdatePlan) Nev
     if cli_update_download_bytes(plan.updates) == .Val(bytes) -> theme.download_line(bytes)
 }
 
-pub fn cli_apply_project_update(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
+fn cli_apply_project_update(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS, Env, Exec, Time, Time.Wait]> Int Never! {
     lock_diff := CLILockDiffGuard.new(theme, plan.project_dir)
     defer close(^lock_diff)
     &lock_diff.set_sizes(cli_sizes_from_bytes(cli_update_download_bytes(plan.updates), None))
@@ -233,7 +233,7 @@ pub fn cli_apply_project_update(theme: Theme, plan: ProjectUpdatePlan) -[IO, FS,
 
 // `jetpack outdated`: a read-only channel freshness report. It may query
 // metadata, but never writes `.jet/lock`.
-pub fn cli_cmd_outdated(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_outdated(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     if parsed.flags.offline -> return cli_offline_refusal(theme, "outdated")
     project_dir :: cli_current_dir()

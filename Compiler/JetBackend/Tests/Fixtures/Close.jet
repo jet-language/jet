@@ -1,0 +1,459 @@
+// #4792: instantiated ordinary drop must select Close, while the consuming
+// Close receiver's cleanup is structural-only. Moved fields are not live zeros.
+use jet_foundation.[MIRAccess, MIRBinaryOp, MIRBlockID, MIRConstant, MIRField, MIRFieldValue, MIRFunction, MIRFunctionID, MIRFunctionForm, MIRImplDef, MIROperation, MIROwnershipMode, MIRPlace, MIRPlaceBase, MIRPlaceID, MIRProjection, MIRProgram, MIRTerminator, MIRType, MIRTypeDef, MIRTypeDefKind, MIRTypeID, MIRTypeKind, MIRValueID, mir_field_id, mir_function_id, mir_type_from_kind, mir_type_id, mir_type_with_identity, mir_owned_ownership, mir_ownership_from_access]
+use jet_backend.[LIRCallee, LIRInst, LIRTerminator, lir_lower_callables, lir_lower_entry, lir_print_module, x64_relocatable_object]
+
+fn fx_close_secret(b: &FxBuilder, id: Int) -> MIRValueID Never! {
+    number :: fx_int_const(&b, id)
+    token :: fx_mono_text(&b, "owned")
+    fx_owned(&b, fx_named("Secret"), MIROperation.Struct{type_id: mir_type_id("Secret"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("Secret.id"), value: number}, MIRFieldValue{field: mir_field_id("Secret.token"), value: token}}})
+}
+
+fn fx_close_wrapper(b: &FxBuilder, ty: MIRType, value: MIRValueID) -> MIRValueID Never! {
+    fx_owned(&b, ty, MIROperation.Struct{type_id: mir_type_id("CloseWrapper"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("CloseWrapper.value"), value: value}}})
+}
+
+fn fx_close_method() -> MIRFunction Never! {
+    b := fx_builder()
+    ownership := mir_owned_ownership()
+    ownership.mode = MIROwnershipMode.Move
+    subject :: fx_param(&b, "self", fx_named("Secret"), ownership)
+    b.params[0].access = MIRAccess.Move
+    self_place :: MIRPlaceID{value: 500}
+    &b.places.push(MIRPlace{id: self_place, span: fx_span(), ty: fx_named("Secret"), base: MIRPlaceBase.Parameter{value: subject}, projections: [MIRProjection]{}, access: MIRAccess.Write, persist_key: None})
+    id :: fx_mono_field(&b, subject, "Secret", "id", fx_int())
+    fx_print(&b, id)
+    twenty_four :: fx_int_const(&b, 24)
+    trigger :: fx_compare(&b, MIRBinaryOp.Eq, id, twenty_four)
+    fx_block(&b, 0, MIRTerminator.Branch{condition: trigger, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    secondary :: fx_close_secret(&b, 25)
+    fx_mono_drop(&b, secondary)
+    rebound :: fx_close_secret(&b, 26)
+    fx_do(&b, MIROperation.ReplacePlace{place: self_place, value: rebound})
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: 2}})
+    released :: fx_owned(&b, fx_named("Secret"), MIROperation.MovePlace{place: self_place})
+    fx_mono_drop(&b, released)
+    fx_block(&b, 2, MIRTerminator.Return{value: None})
+    method := fx_function("secret_close", b, fx_unit())
+    method.name = "close"
+    method.form = MIRFunctionForm.Method{owner: fx_named("Secret"), self_access: Val(MIRAccess.Move)}
+    method
+}
+
+// expect-stdout close-generic: "11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n99\n27\n28\n"
+fn fx_close_generic() -> MIRProgram Never! {
+    secret :: fx_named("Secret")
+    wrapper :: fx_mono_apply("CloseWrapper", [MIRType]{secret})
+    plain_wrapper :: fx_mono_apply("CloseWrapper", [MIRType]{fx_int()})
+    wrapper_def := fx_type_def("CloseWrapper", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("CloseWrapper", "value", fx_mono_parameter("T"))}, methods: [MIRFunctionID]{}})
+    wrapper_def.generic_params = fx_mono_binders("T")
+    pair_def := fx_type_def("ClosePair", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("ClosePair", "first", fx_mono_parameter("T")), fx_field("ClosePair", "second", fx_mono_parameter("T"))}, methods: [MIRFunctionID]{}})
+    pair_def.generic_params = fx_mono_binders("T")
+    types :: [MIRTypeDef]{
+        fx_type_def("Secret", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("Secret", "id", fx_int()), fx_field("Secret", "token", fx_string())}, methods: [MIRFunctionID]{}}),
+        wrapper_def,
+        pair_def,
+    }
+    b := fx_builder()
+    first_secret :: fx_close_secret(&b, 11)
+    first :: fx_close_wrapper(&b, wrapper, first_secret)
+    fx_mono_drop(&b, first)
+    list_ty :: mir_type_from_kind(MIRTypeKind.List{inner: secret})
+    item0 :: fx_close_secret(&b, 12)
+    item1 :: fx_close_secret(&b, 13)
+    list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{item0, item1}, trait_coercion: None})
+    fx_mono_drop(&b, list)
+    // A projected replacement after take must skip the old cleared field.
+    slot :: fx_local(&b, "holder", wrapper, mir_owned_ownership())
+    field :: fx_field_place(&b, slot, "CloseWrapper.value", secret)
+    initial_secret :: fx_close_secret(&b, 14)
+    initial :: fx_close_wrapper(&b, wrapper, initial_secret)
+    fx_do(&b, MIROperation.WritePlace{place: slot, value: initial})
+    taken :: fx_owned(&b, secret, MIROperation.MovePlace{place: field})
+    fx_mono_drop(&b, taken)
+    next_secret :: fx_close_secret(&b, 15)
+    fx_do(&b, MIROperation.ReplacePlace{place: field, value: next_secret})
+    finished :: fx_owned(&b, wrapper, MIROperation.MovePlace{place: slot})
+    fx_mono_drop(&b, finished)
+    // Root replacement uses the same guard; subsequent redefinitions reset it.
+    second_secret :: fx_close_secret(&b, 16)
+    second :: fx_close_wrapper(&b, wrapper, second_secret)
+    fx_do(&b, MIROperation.WritePlace{place: slot, value: second})
+    second_taken :: fx_owned(&b, secret, MIROperation.MovePlace{place: field})
+    fx_mono_drop(&b, second_taken)
+    replacement_secret :: fx_close_secret(&b, 17)
+    replacement :: fx_close_wrapper(&b, wrapper, replacement_secret)
+    fx_do(&b, MIROperation.ReplacePlace{place: slot, value: replacement})
+    released :: fx_owned(&b, wrapper, MIROperation.MovePlace{place: slot})
+    fx_mono_drop(&b, released)
+    // Whole-owner slot transfer carries the partial-live bits.
+    other :: fx_local(&b, "other", wrapper, mir_owned_ownership())
+    third_secret :: fx_close_secret(&b, 18)
+    third :: fx_close_wrapper(&b, wrapper, third_secret)
+    fx_do(&b, MIROperation.WritePlace{place: slot, value: third})
+    third_taken :: fx_owned(&b, secret, MIROperation.MovePlace{place: field})
+    fx_mono_drop(&b, third_taken)
+    moved :: fx_owned(&b, wrapper, MIROperation.MovePlace{place: slot})
+    fx_do(&b, MIROperation.WritePlace{place: other, value: moved})
+    moved_again :: fx_owned(&b, wrapper, MIROperation.MovePlace{place: other})
+    fx_mono_drop(&b, moved_again)
+    // Nested path: replacing the ancestor drops only its still-live children.
+    nested_ty :: fx_mono_apply("CloseWrapper", [MIRType]{wrapper})
+    nested :: fx_local(&b, "nested", nested_ty, mir_owned_ownership())
+    nested_field :: fx_field_place(&b, nested, "CloseWrapper.value", wrapper)
+    leaf :: MIRPlaceID{value: fx_word(U64{500}, b.places.len())}
+    base :: b.places[b.places.len() - 1].base
+    &b.places.push(MIRPlace{id: leaf, span: fx_span(), ty: secret, base: base, projections: [MIRProjection]{MIRProjection.Field{field: mir_field_id("CloseWrapper.value"), span: fx_span()}, MIRProjection.Field{field: mir_field_id("CloseWrapper.value"), span: fx_span()}}, access: MIRAccess.Move, persist_key: None})
+    nested_secret :: fx_close_secret(&b, 19)
+    nested_inner :: fx_close_wrapper(&b, wrapper, nested_secret)
+    nested_value :: fx_close_wrapper(&b, nested_ty, nested_inner)
+    fx_do(&b, MIROperation.WritePlace{place: nested, value: nested_value})
+    nested_taken :: fx_owned(&b, secret, MIROperation.MovePlace{place: leaf})
+    fx_mono_drop(&b, nested_taken)
+    nested_next :: fx_close_secret(&b, 20)
+    nested_replacement :: fx_close_wrapper(&b, wrapper, nested_next)
+    fx_do(&b, MIROperation.ReplacePlace{place: nested_field, value: nested_replacement})
+    nested_owner :: fx_owned(&b, nested_ty, MIROperation.MovePlace{place: nested})
+    fx_mono_drop(&b, nested_owner)
+    // Conditional Option extraction: both arms close exactly once.
+    loop id in 21..<23 {
+        option_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: secret})
+        // Mark the consuming subject, as checked MIR does for a take.
+        inner :: fx_close_secret(&b, id)
+        moved_option :: fx_value(&b, option_ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.Present{value: inner})
+        condition :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: id == 21}})
+        start :: U64.from_int((id - 21) * 2) ?? U64{0}
+        fx_block(&b, start, MIRTerminator.Branch{condition: condition, then_target: MIRBlockID{value: start + 1}, else_target: MIRBlockID{value: start + 2}})
+        payload :: fx_owned(&b, secret, MIROperation.OptionValue{subject: moved_option})
+        fx_mono_drop(&b, payload)
+        fx_block(&b, start + 1, MIRTerminator.Jump{target: MIRBlockID{value: start + 2}})
+        fx_mono_drop(&b, moved_option)
+    }
+    // Ordinary Close with an owned container field exercises structural cleanup.
+    tail_secret :: fx_close_secret(&b, 23)
+    tail :: fx_close_wrapper(&b, wrapper, tail_secret)
+    fx_mono_drop(&b, tail)
+    last :: fx_close_secret(&b, 24)
+    fx_mono_drop(&b, last)
+    plain_value :: fx_int_const(&b, 99)
+    plain :: fx_close_wrapper(&b, plain_wrapper, plain_value)
+    plain_id :: fx_mono_field(&b, plain, "CloseWrapper", "value", fx_int())
+    fx_print(&b, plain_id)
+    fx_mono_drop(&b, plain)
+    // Taking one Close-bearing field preserves its still-live sibling.
+    pair_ty :: fx_mono_apply("ClosePair", [MIRType]{secret})
+    pair_slot :: fx_local(&b, "pair", pair_ty, mir_owned_ownership())
+    first_place :: fx_field_place(&b, pair_slot, "ClosePair.first", secret)
+    left :: fx_close_secret(&b, 27)
+    right :: fx_close_secret(&b, 28)
+    pair :: fx_owned(&b, pair_ty, MIROperation.Struct{type_id: mir_type_id("ClosePair"), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("ClosePair.first"), value: left}, MIRFieldValue{field: mir_field_id("ClosePair.second"), value: right}}})
+    fx_do(&b, MIROperation.WritePlace{place: pair_slot, value: pair})
+    moved_first :: fx_owned(&b, secret, MIROperation.MovePlace{place: first_place})
+    fx_mono_drop(&b, moved_first)
+    remainder :: fx_owned(&b, pair_ty, MIROperation.MovePlace{place: pair_slot})
+    fx_mono_drop(&b, remainder)
+    fx_block(&b, 4, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_close_method(), fx_function("run", b, fx_unit())}, ^types)
+    p.impls = [MIRImplDef]{fx_display_impl("Secret.Close", "Close", secret, mir_function_id("secret_close"), U64{4792})}
+    p
+}
+
+fn fx_close_escape_checks() -> Bool Never! {
+    p := fx_close_generic()
+    secret :: fx_named("Secret")
+    wrapper :: fx_mono_apply("CloseWrapper", [MIRType]{secret})
+    nested :: fx_mono_apply("CloseWrapper", [MIRType]{wrapper})
+    b := fx_builder()
+    slot :: fx_local(&b, "partial", wrapper, mir_owned_ownership())
+    field :: fx_field_place(&b, slot, "CloseWrapper.value", secret)
+    initial :: fx_close_secret(&b, 1)
+    built :: fx_close_wrapper(&b, wrapper, initial)
+    fx_do(&b, MIROperation.WritePlace{place: slot, value: built})
+    taken :: fx_owned(&b, secret, MIROperation.MovePlace{place: field})
+    fx_mono_drop(&b, taken)
+    partial :: fx_owned(&b, wrapper, MIROperation.MovePlace{place: slot})
+    escaped :: fx_close_wrapper(&b, nested, partial)
+    fx_mono_drop(&b, escaped)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p.functions = [MIRFunction]{fx_close_method(), fx_function("run", b, fx_unit())}
+    lowered :: lir_lower_entry(p, mir_function_id("run"))
+    loop issue in lowered.issues {
+        if issue.message == "partially moved owner escapes" -> return true
+    }
+    false
+}
+
+// The native self-host `jet_cli_script_dependency_roots` shape: an Optional
+// local of a Close-bearing value whose payload one arm takes, then a
+// replacement of the local. The replacement's partial drop of Option<Secret>
+// (lower_partial_drop_node) left an unbranched skip block for its unselected
+// shape, so the LIR lint failed "block bN is unreachable" and the function
+// lowered as a trap. The same two drops also produced a null check comparing
+// the Option<Secret> pointer with a word constant, and a Reown of the
+// partially released owner into a non-owning value (both LIR lint errors);
+// lowering through fx_report lints the whole function, so all three stay
+// covered. Both arms close each Secret exactly once.
+// expect-stdout close-option-replace: "30\n31\n"
+fn fx_close_option_replace() -> MIRProgram Never! {
+    p := fx_close_generic()
+    secret :: fx_named("Secret")
+    option_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: secret})
+    b := fx_builder()
+    slot :: fx_local(&b, "authority", option_ty, mir_owned_ownership())
+    first :: fx_close_secret(&b, 30)
+    held :: fx_owned(&b, option_ty, MIROperation.Present{value: first})
+    fx_do(&b, MIROperation.WritePlace{place: slot, value: held})
+    taking :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: MIRConstant.Bool{value: true}})
+    fx_block(&b, 0, MIRTerminator.Branch{condition: taking, then_target: MIRBlockID{value: 1}, else_target: MIRBlockID{value: 2}})
+    moved :: fx_value(&b, option_ty, mir_ownership_from_access(MIRAccess.Move), MIROperation.MovePlace{place: slot})
+    payload :: fx_owned(&b, secret, MIROperation.OptionValue{subject: moved})
+    fx_mono_drop(&b, payload)
+    fx_block(&b, 1, MIRTerminator.Jump{target: MIRBlockID{value: 2}})
+    second :: fx_close_secret(&b, 31)
+    next :: fx_owned(&b, option_ty, MIROperation.Present{value: second})
+    fx_do(&b, MIROperation.ReplacePlace{place: slot, value: next})
+    last :: fx_owned(&b, option_ty, MIROperation.MovePlace{place: slot})
+    fx_mono_drop(&b, last)
+    fx_block(&b, 2, MIRTerminator.Return{value: None})
+    p.functions = [MIRFunction]{fx_close_method(), fx_function("run", b, fx_unit())}
+    p
+}
+
+// A no-Close instantiation's emitted drop and machine bytes are unchanged by
+// the presence of unrelated Close impls in the same checked program.
+fn fx_close_plain_glue_checks() -> Bool Never! {
+    p := fx_close_generic()
+    ty :: fx_mono_apply("CloseWrapper", [MIRType]{fx_string()})
+    b := fx_builder()
+    text :: fx_mono_text(&b, "plain")
+    value :: fx_close_wrapper(&b, ty, text)
+    fx_mono_drop(&b, value)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p.functions = [MIRFunction]{fx_close_method(), fx_function("run", b, fx_unit())}
+    with_close :: lir_lower_entry(p, mir_function_id("run"))
+    p.impls = [MIRImplDef]{}
+    without_close :: lir_lower_entry(p, mir_function_id("run"))
+    if with_close.issues.len() != 0 || without_close.issues.len() != 0 -> return false
+    if lir_print_module(with_close.lir) != lir_print_module(without_close.lir) -> return false
+    left :: x64_relocatable_object(with_close.lir, with_close.entry ?? return false)
+    right :: x64_relocatable_object(without_close.lir, without_close.entry ?? return false)
+    left.errors.len() == 0 && right.errors.len() == 0 && left.bytes == right.bytes
+}
+
+// Force the inline receiver into one address-stable cell. Replacing self
+// changes bytes, not the cell address: the new Secret26 must still Close.
+// expect-stdout close-cell-rebind: "24\n25\n26\n"
+// expect-runtime-only close-cell-rebind
+fn fx_close_cell_rebind() -> MIRProgram Never! {
+    p := fx_close_generic()
+    method := fx_close_method()
+    probe := fx_builder()
+    probe.next = 1000
+    ptr :: fx_mono_apply("Ptr", [MIRType]{fx_named("Secret")})
+    fx_copy(&probe, ptr, MIROperation.RawAddressOf{place: MIRPlaceID{value: 500}}).drop("address forces a stable receiver cell")
+    &method.values.push(probe.values[0])
+    &method.blocks[0].instructions.push(probe.current[0])
+    b := fx_builder()
+    value :: fx_close_secret(&b, 24)
+    fx_mono_drop(&b, value)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p.functions = [MIRFunction]{method, fx_function("run", b, fx_unit())}
+    p
+}
+
+// Match both producer shapes: a generic instantiated field and a concrete one.
+// expect-stdout close-pair-remainder: "27\n28\n"
+fn fx_close_pair_remainder(generic: Bool) -> MIRProgram Never! {
+    p := fx_close_generic()
+    secret :: fx_named("Secret")
+    owner :: if generic -> "ClosePair" else -> "CloseDirectPair"
+    shape :: if generic -> fx_mono_apply(owner, [MIRType]{secret}) else -> fx_named(owner)
+    ty :: mir_type_with_identity(shape, mir_type_id("{owner}<Secret>"))
+    if !generic -> &p.types.push(fx_type_def(owner, MIRTypeDefKind.Struct{fields: [MIRField]{fx_field(owner, "first", secret), fx_field(owner, "second", secret)}, methods: [MIRFunctionID]{}}))
+    b := fx_builder()
+    slot :: fx_local(&b, "pair", ty, mir_owned_ownership())
+    first :: fx_field_place(&b, slot, "{owner}.first", secret)
+    left :: fx_close_secret(&b, 27)
+    right :: fx_close_secret(&b, 28)
+    pair :: fx_owned(&b, ty, MIROperation.Struct{type_id: mir_type_id(owner), fields: [MIRFieldValue]{MIRFieldValue{field: mir_field_id("{owner}.first"), value: left}, MIRFieldValue{field: mir_field_id("{owner}.second"), value: right}}})
+    fx_do(&b, MIROperation.WritePlace{place: slot, value: pair})
+    taken :: fx_owned(&b, secret, MIROperation.MovePlace{place: first})
+    fx_mono_drop(&b, taken)
+    remainder :: fx_owned(&b, ty, MIROperation.MovePlace{place: slot})
+    fx_mono_drop(&b, remainder)
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p.functions = [MIRFunction]{fx_close_method(), fx_function("run", b, fx_unit())}
+    p
+}
+
+// Assert the actual O0 LIR guard, not just a stdout expectation: the owner's
+// first-field Close call is dominated by its cleared private live-bit branch.
+// The sibling has one live ordinary Close call and the taken value one of its own.
+struct FxCloseDropCall { block: Int, offset: Int? }
+
+fn fx_close_pair_remainder_checks(generic: Bool) -> Bool Never! {
+    program :: fx_close_pair_remainder(generic)
+    owner_type := MIRTypeID?{None}
+    loop function in program.functions {
+        if function.id == mir_function_id("run") {
+            loop local in function.locals {
+                if local.name == "pair" -> owner_type = local.ty.identity.copy()
+            }
+        }
+    }
+    if owner_type == None -> return false
+    lowered :: lir_lower_callables(program, [MIRFunctionID]{mir_function_id("run")})
+    if lowered.issues.len() != 0 -> return false
+    entry :: lowered.entry ?? return false
+    root :: lowered.lir.functions[entry.value]
+    close := -1
+    loop function in lowered.lir.functions {
+        if function.name.ends_with("secret_close") -> close = function.id.value
+    }
+    if close < 0 -> return false
+    glue := [Int:Bool]{}
+    loop function in lowered.lir.functions {
+        loop block in function.blocks {
+            loop inst in block.insts {
+                if inst == .Call(_, _, callee, _) {
+                    if callee == .Function(target) && target.value == close -> &glue.add(function.id.value, true).drop("records the ordinary Close role")
+                }
+            }
+        }
+    }
+    owner := -1
+    loop block in root.blocks {
+        loop inst in block.insts {
+            // The Struct's checked type is the MIR pair local's type. Its
+            // StackSlot is the owner storage; unrelated equal-sized slots
+            // cannot match, and duplicate typed slots fail the assertion.
+            if inst == .StackSlot(dst, _, _) {
+                if root.values[dst.value].jet_type == owner_type {
+                    if owner >= 0 -> return false
+                    owner = dst.value
+                }
+            }
+        }
+    }
+    if owner < 0 || glue.len() == 0 -> return false
+    constants := [Int:Int]{}
+    memory := [Int:Int?]{}
+    origins := [Int:Int]{}
+    memory_origins := [Int:Int]{}
+    offsets := [Int:Int]{owner: 0}
+    reset := [Int:Bool]{}
+    cleared := [Int:Bool]{}
+    indices := [Int:Int]{}
+    calls := [FxCloseDropCall]{}
+    has_cleared_guard := false
+    loop (index, block) in root.blocks -> &indices.add(block.id.value, index).drop("indexes CFG blocks")
+    loop block in root.blocks {
+        loop inst in block.insts {
+            if inst == {
+                .Const(dst, value) -> &constants.add(dst.value, value).drop("records an SSA constant")
+                .Copy(dst, src) | .Move(dst, src) -> {
+                    if (constants.get(src.value).copy()) == .Val(value) -> &constants.add(dst.value, value).drop("copies a constant")
+                    if (origins.get(src.value).copy()) == .Val(origin) -> &origins.add(dst.value, origin).drop("copies live-bit provenance")
+                    if (offsets.get(src.value).copy()) == .Val(offset) -> &offsets.add(dst.value, offset).drop("copies owner-relative address")
+                }
+                .Binary(dst, op, left, right) -> {
+                    if op == .And {
+                        a :: (constants.get(left.value).copy()) ?? next
+                        b :: (constants.get(right.value).copy()) ?? next
+                        &constants.add(dst.value, a.bit_and(b)).drop("tracks live-bit conjunction")
+                        if (origins.get(right.value).copy()) == .Val(origin) -> &origins.add(dst.value, origin).drop("tracks transferred live-bit provenance")
+                    }
+                }
+                .PointerAdd(dst, base, offset) -> {
+                    start :: (offsets.get(base.value).copy()) ?? next
+                    amount :: (constants.get(offset.value).copy()) ?? next
+                    &offsets.add(dst.value, start + amount).drop("records owner-relative field address")
+                }
+                .Compare(dst, condition, left, right) -> {
+                    // Every owner-relative address is a non-null StackSlot address.
+                    if (offsets.get(left.value) != None && (constants.get(right.value) ?? -1) == 0) || (offsets.get(right.value) != None && (constants.get(left.value) ?? -1) == 0) {
+                        if condition == .Eq -> &constants.add(dst.value, 0).drop("the owner storage is not null")
+                        else if condition == .Ne -> &constants.add(dst.value, 1).drop("the owner storage is non-null")
+                    }
+                }
+                .Store(base, offset, value) -> {
+                    if offset != 0 -> next
+                    number :: constants.get(value.value).copy()
+                    &memory.add(base.value, number).drop("records the last private flag store")
+                    if number == .Val(bit) {
+                        if bit == 1 -> &reset.add(base.value, true).drop("records the flag becoming live")
+                        if bit == 0 && reset.get(base.value) != None -> &cleared.add(base.value, true).drop("records the move clearing a live flag")
+                    }
+                    origin :: (origins.get(value.value).copy()) ?? base.value
+                    &memory_origins.add(base.value, origin).drop("records flag transfer provenance")
+                }
+                .Load(dst, base, offset) -> {
+                    if offset != 0 -> next
+                    stored :: (memory.get(base.value).copy()) ?? next
+                    number :: stored ?? next
+                    &constants.add(dst.value, number).drop("reads the private live bit")
+                    origin :: (memory_origins.get(base.value).copy()) ?? base.value
+                    &origins.add(dst.value, origin).drop("records live-bit source")
+                }
+                .Call(_, _, callee, args) -> {
+                    if callee == .Function(target) {
+                        if glue.get(target.value) == None || args.len() != 1 -> next
+                        offset :: offsets.get(args[0].value).copy()
+                        &calls.push(FxCloseDropCall{block: block.id.value, offset: offset})
+                    }
+                }
+                else -> {}
+            }
+        }
+        if block.terminator == .Branch(condition, _, _) {
+            if (constants.get(condition.value) ?? -1) == 0 && origins.get(condition.value) != None {
+                origin :: (origins.get(condition.value).copy()) ?? return false
+                if cleared.get(origin) != None -> has_cleared_guard = true
+            }
+        }
+    }
+    if !has_cleared_guard -> return false
+    // Follow the real CFG, including the jump from the all-live arm into the
+    // ordinary owner drop. A zero flag makes that whole arm unreachable.
+    reachable := [Int:Bool]{}
+    queue := [Int]{root.blocks[0].id.value}
+    cursor := 0
+    loop cursor < queue.len() {
+        id :: queue[cursor]
+        cursor += 1
+        if reachable.get(id) != None -> next
+        &reachable.add(id, true).drop("visits a CFG block once")
+        index :: (indices.get(id).copy()) ?? return false
+        terminator :: root.blocks[index].terminator
+        if terminator == {
+            .Jump(target) -> &queue.push(target.block.value)
+            .Branch(condition, yes, no) -> {
+                bit :: (constants.get(condition.value).copy()) ?? -1
+                if bit != 0 -> &queue.push(yes.block.value)
+                if bit != 1 -> &queue.push(no.block.value)
+            }
+            else -> {}
+        }
+    }
+    first_calls := 0
+    second_calls := 0
+    taken_calls := 0
+    loop call in calls {
+        live :: reachable.get(call.block) != None
+        if call.offset == {
+            .Val(offset) -> {
+                if offset == 0 {
+                    if live -> return false
+                    first_calls += 1
+                } else if offset == 16 {
+                    if live -> second_calls += 1
+                } else {
+                    return false
+                }
+            }
+            .None -> if live -> taken_calls += 1
+            else -> return false
+        }
+    }
+    first_calls >= 1 && second_calls == 1 && taken_calls == 1
+}

@@ -1,0 +1,727 @@
+// Observe.rs:285-320,344-380,387-541. Native records contain only the
+// canonical identity/decision/event metadata, never payloads or Rust layouts.
+// Writer120: mutex0, exited8, sequence16, started24, CPU-present32/CPU40,
+// start-id48, identity56..88, directory96, path104, periodic-started112.
+// Value48: next0, canonical five E4 fields8..40 (rendered0 means None).
+// Event128: next0, canonical fifteen fields8..120, five owned E4 strings.
+fn observe_text_clone(value: I64) -> I64 {
+    if value == (I64{0}) -> return I64{0}
+    rt_text_copy(rt_text_data(value), rt_text_len(value))
+}
+fn observe_text_cmp(a: I64, b: I64) -> I64 {
+    al :: rt_text_len(a)
+    bl :: rt_text_len(b)
+    at := I64{0}
+    loop at < al && at < bl {
+        av :: trap_byte(rt_text_data(a) + at)
+        bv :: trap_byte(rt_text_data(b) + at)
+        if av != bv -> return av - bv
+        at += I64{1}
+    }
+    al - bl
+}
+fn observe_text_controls(value: I64) -> Bool {
+    if value == (I64{0}) -> return false
+    at := I64{0}
+    loop at < rt_text_len(value) {
+        cp :: rt_text_decode(rt_text_data(value) + at)
+        if cp < (I64{32}) || (cp >= I64{127} && cp <= I64{159}) -> return true
+        at += rt_text_width(rt_text_data(value) + at)
+    }
+    false
+}
+fn observe_value_drop(node: I64) {
+    at := I64{8}
+    loop at <= (I64{40}) {
+        text :: sync_load(node + at)
+        if text != (I64{0}) -> jet_rt_string_drop(text)
+        at += I64{8}
+    }
+    jet_rt_free(node, I64{48}, I64{8})
+}
+// The source carrier has exactly Foundation's JetLiveValueDecision fields:
+// value_id/type_identity/disposition/reason/rendered_value. Retain by copying
+// E4 text; the producer continues owning its source and optional text owner.
+#Export(c) fn jet_observe_record_live_value(source: I64) {
+    sync_mutex_lock(observe_root)
+    link := observe_root + I64{112}
+    id :: sync_load(source)
+    previous := I64{0}
+    loop sync_load(link) != (I64{0}) {
+        node :: sync_load(link)
+        order :: observe_text_cmp(sync_load(node + I64{8}), id)
+        if order >= (I64{0}) {
+            if order == (I64{0}) -> previous = node
+            break
+        }
+        link = node
+    }
+    if previous == (I64{0}) && sync_load(observe_root + I64{120}) >= (I64{4096}) {
+        sync_mutex_unlock(observe_root)
+        return
+    }
+    node :: jet_rt_alloc(I64{48}, I64{8})
+    sync_store(node, if previous == (I64{0}) -> sync_load(link) else -> sync_load(previous))
+    at := I64{0}
+    loop at < (I64{40}) {
+        sync_store(node + at + I64{8}, observe_text_clone(sync_load(source + at)))
+        at += I64{8}
+    }
+    sync_store(link, node)
+    if previous == (I64{0}) -> _ := sync_add(observe_root + I64{120}, I64{1})
+    sync_mutex_unlock(observe_root)
+    if previous != (I64{0}) -> observe_value_drop(previous)
+}
+fn observe_event_text_field(offset: I64) -> Bool {
+    offset == I64{8} || offset == I64{48} || offset == I64{88} || offset == I64{104} || offset == I64{112}
+}
+fn observe_event_drop(node: I64) {
+    at := I64{0}
+    loop at < (I64{120}) {
+        if observe_event_text_field(at) -> jet_rt_string_drop(sync_load(node + at + I64{8}))
+        at += I64{8}
+    }
+    jet_rt_free(node, I64{128}, I64{8})
+}
+// Source has canonical Event fields in Observe.rs:49-65 order; sequence is
+// assigned under the same lock as append, as the Rust VecDeque producer does.
+#Export(c) fn jet_observe_event(source: I64) {
+    node :: jet_rt_alloc(I64{128}, I64{8})
+    sync_store(node, I64{0})
+    at := I64{8}
+    loop at < (I64{120}) {
+        word :: sync_load(source + at)
+        sync_store(node + at + I64{8}, if observe_event_text_field(at) -> observe_text_clone(word) else -> word)
+        at += I64{8}
+    }
+    sync_mutex_lock(observe_root)
+    sync_store(node + I64{8}, sync_add(observe_root + I64{80}, I64{1}))
+    tail :: sync_load(observe_root + I64{96})
+    if tail == (I64{0}) -> sync_store(observe_root + I64{88}, node) else -> sync_store(tail, node)
+    sync_store(observe_root + I64{96}, node)
+    retired := I64{0}
+    if {
+        sync_load(observe_root + I64{104}) == (I64{256}) -> {
+            retired = sync_load(observe_root + I64{88})
+            sync_store(observe_root + I64{88}, sync_load(retired))
+        }
+        else -> _ := sync_add(observe_root + I64{104}, I64{1})
+    }
+    sync_mutex_unlock(observe_root)
+    if retired != (I64{0}) -> observe_event_drop(retired)
+}
+fn observe_record_ledger(ledger: I64) {
+    length :: rt_text_len(ledger)
+    if length < (I64{2}) || length > (I64{524288}) || observe_text_controls(ledger) -> return
+    data :: rt_text_data(ledger)
+    if trap_byte(data) != (I64{123}) || trap_byte(data + length - I64{1}) != (I64{125}) -> return
+    retained_ledger :: observe_text_clone(ledger)
+    sync_mutex_lock(observe_root)
+    old :: sync_swap(observe_root + I64{128}, retained_ledger)
+    sync_mutex_unlock(observe_root)
+    if old != (I64{0}) -> jet_rt_string_drop(old)
+}
+fn observe_cstring(text: I64) -> I64 {
+    length :: rt_text_len(text)
+    buffer :: jet_rt_alloc(length + I64{1}, I64{1})
+    rt_text_bytes_copy(buffer, rt_text_data(text), length)
+    trap_put(buffer + length, I64{0})
+    buffer
+}
+fn observe_syscall(number: I64, a: I64, b: I64, c: I64, d: I64) -> I64 {
+    #Unsafe("vetted Observe Linux file/clock syscalls borrow native buffers only for their duration") {
+        return os_syscall_i64(number, a, b, c, d, I64{0}, I64{0})
+    }
+}
+fn observe_read_file(path: I64) -> I64 {
+    name :: observe_cstring(path)
+    fd :: observe_syscall(I64{257}, I64{-100}, name, I64{524288}, I64{0})
+    jet_rt_free(name, rt_text_len(path) + I64{1}, I64{1})
+    if fd < (I64{0}) -> return I64{0}
+    result :: jet_rt_string_builder_new()
+    buffer :: jet_rt_alloc(I64{4096}, I64{8})
+    valid := true
+    loop {
+        count :: observe_syscall(I64{0}, fd, buffer, I64{4096}, I64{0})
+        if count == (I64{-4}) -> next
+        if count == (I64{0}) -> break
+        if count < (I64{0}) {
+            valid = false
+            break
+        }
+        rt_text_append(result, buffer, count)
+    }
+    _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+    jet_rt_free(buffer, I64{4096}, I64{8})
+    if !valid {
+        jet_rt_string_drop(result)
+        return I64{0}
+    }
+    result
+}
+fn observe_unsigned_less(a: I64, b: I64) -> Bool {
+    if (a < I64{0}) != (b < I64{0}) -> return b < I64{0}
+    a < b
+}
+fn observe_parse_unsigned(data: I64, length: I64, out: I64) -> Bool {
+    if length == (I64{0}) -> return false
+    value := I64{0}
+    at := I64{0}
+    loop at < length {
+        digit :: trap_byte(data + at) - I64{48}
+        if digit < (I64{0}) || digit > (I64{9}) -> return false
+        if observe_unsigned_less(I64{1844674407370955161}, value) || (value == I64{1844674407370955161} && digit > I64{5}) -> return false
+        value = wrapping(value * I64{10} + digit)
+        at += I64{1}
+    }
+    sync_store(out, value)
+    true
+}
+fn observe_unsigned_div(value: I64, divisor: I64) -> I64 {
+    if value >= (I64{0}) -> return value /% divisor
+    low :: value.bit_and(I64{9223372036854775807})
+    q :: I64{9223372036854775807} /% divisor
+    r :: I64{9223372036854775807} % divisor
+    // Divisors here come from positive AT_CLKTCK (normally100). Avoid adding
+    // the two remainders until their carry is resolved.
+    tail :: low % divisor
+    carry :: if tail >= (divisor - r - I64{1}) -> I64{1} else -> I64{0}
+    wrapping(q + low /% divisor + carry)
+}
+// Output32: owned start-id0, optional CPU-present8/CPU16, parsed temporary24.
+fn observe_process_facts(out: I64) {
+    thread_zero(out, I64{32})
+    start :: jet_rt_string_builder_new()
+    sync_store(out, start)
+    path := jet_rt_string_builder_new()
+    observe_msg_proc_stat(path)
+    stat :: observe_read_file(path)
+    jet_rt_string_drop(path)
+    if stat == (I64{0}) -> return
+    data :: rt_text_data(stat)
+    length :: rt_text_len(stat)
+    tail := I64{-1}
+    at := I64{0}
+    loop at + (I64{1}) < length {
+        if trap_byte(data + at) == (I64{41}) && trap_byte(data + at + I64{1}) == (I64{32}) -> tail = at + I64{2}
+        at += I64{1}
+    }
+    field := I64{0}
+    user := I64{0}
+    system := I64{0}
+    if tail < (I64{0}) {
+        jet_rt_string_drop(stat)
+        return
+    }
+    valid := true
+    at = tail
+    loop at < length {
+        loop at < length && trap_byte(data + at) <= (I64{32}) -> at += I64{1}
+        begin :: at
+        loop at < length && trap_byte(data + at) > (I64{32}) -> at += I64{1}
+        if at == begin -> break
+        if field == (I64{11}) || field == (I64{12}) {
+            parsed :: observe_parse_unsigned(data + begin, at - begin, out + I64{24})
+            valid = valid && parsed
+            if field == (I64{11}) -> user = sync_load(out + I64{24}) else -> system = sync_load(out + I64{24})
+        }
+        if field == (I64{19}) {
+            rt_text_append(start, data + begin, at - begin)
+            break
+        }
+        field += I64{1}
+    }
+    jet_rt_string_drop(stat)
+    if !valid || field != (I64{19}) -> return
+    path = jet_rt_string_builder_new()
+    observe_msg_proc_auxv(path)
+    aux :: observe_read_file(path)
+    jet_rt_string_drop(path)
+    if aux == (I64{0}) -> return
+    hz := I64{0}
+    at = I64{0}
+    loop at + (I64{16}) <= rt_text_len(aux) {
+        if sync_load(rt_text_data(aux) + at) == (I64{17}) {
+            hz = sync_load(rt_text_data(aux) + at + I64{8})
+            break
+        }
+        at += I64{16}
+    }
+    jet_rt_string_drop(aux)
+    ticks :: wrapping(user + system)
+    if hz <= (I64{0}) || observe_unsigned_less(ticks, user) || observe_unsigned_less(I64{18446744073}, ticks) -> return
+    sync_store(out + I64{8}, I64{1})
+    sync_store(out + I64{16}, observe_unsigned_div(wrapping(ticks * I64{1000000000}), hz))
+}
+fn observe_quote(builder: I64, text: I64) {
+    rt_text_push_scalar(builder, I64{34})
+    observe_escape(builder, text)
+    rt_text_push_scalar(builder, I64{34})
+}
+fn observe_bool(builder: I64, value: I64) {
+    if value != (I64{0}) -> observe_msg_yes(builder) else -> observe_msg_no(builder)
+}
+fn observe_array(list: I64, count: I64) -> I64 {
+    array :: jet_rt_alloc(count * I64{8}, I64{8})
+    node := list
+    at := I64{0}
+    loop at < count {
+        sync_store(array + at * I64{8}, node)
+        node = sync_load(node)
+        at += I64{1}
+    }
+    at = count /% I64{2}
+    loop at > (I64{0}) {
+        at -= I64{1}
+        observe_task_sift(array, count, at)
+    }
+    at = count
+    loop at > (I64{1}) {
+        at -= I64{1}
+        first :: sync_load(array)
+        sync_store(array, sync_load(array + at * I64{8}))
+        sync_store(array + at * I64{8}, first)
+        observe_task_sift(array, at, I64{0})
+    }
+    array
+}
+fn observe_contains_word(text: I64, word: I64, length: I64, prefix: Bool) -> Bool {
+    if text == (I64{0}) -> return false
+    limit :: rt_text_len(text) - length
+    at := I64{0}
+    loop at <= limit {
+        byte := I64{0}
+        loop byte < length && trap_byte(rt_text_data(text) + at + byte) == ((word >> (byte * I64{8})).bit_and(I64{255})) -> byte += I64{1}
+        if byte == length -> return true
+        if prefix -> return false
+        at += I64{1}
+    }
+    false
+}
+// Counters48: blocked0/channel8/time16/io24/cancelled32/running40.
+fn observe_tasks_json(builder: I64, counters: I64) {
+    count :: sync_load(observe_root + I64{32})
+    array :: observe_array(sync_load(observe_root + I64{24}), count)
+    at := I64{0}
+    loop at < count {
+        node :: sync_load(array + at * I64{8})
+        if at != (I64{0}) -> rt_text_push_scalar(builder, I64{44})
+        observe_msg_task_begin(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{8}))
+        observe_msg_parent(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{16}))
+        observe_msg_label(builder)
+        observe_escape(builder, sync_load(node + I64{32}))
+        observe_msg_spawn(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{24}))
+        observe_msg_state(builder)
+        state :: sync_load(node + I64{40})
+        if {
+            state == (I64{0}) -> observe_msg_queued(builder)
+            state == (I64{1}) -> observe_msg_running(builder)
+            state == (I64{2}) -> observe_msg_blocked(builder)
+            else -> observe_msg_paused(builder)
+        }
+        observe_msg_wait(builder)
+        wait :: sync_load(node + I64{48})
+        observe_escape(builder, wait)
+        observe_msg_deadline(builder)
+        if sync_load(node + I64{56}) != (I64{0}) -> observe_decimal_signed(builder, sync_load(node + I64{64})) else -> observe_msg_null(builder)
+        observe_msg_cancelled(builder)
+        cancelled :: sync_load(node + I64{72})
+        observe_bool(builder, cancelled)
+        rt_text_push_scalar(builder, I64{125})
+        if state == (I64{2}) {
+            _ := sync_add(counters, I64{1})
+            if observe_contains_word(wait, I64{2336353831671130211}, I64{8}, true) -> _ := sync_add(counters + I64{8}, I64{1})
+            if observe_contains_word(wait, I64{139140622708}, I64{5}, true) -> _ := sync_add(counters + I64{16}, I64{1})
+            if observe_contains_word(wait, I64{7365492}, I64{3}, false) || observe_contains_word(wait, I64{30243645579093358}, I64{7}, false) || observe_contains_word(wait, I64{2125673}, I64{3}, true) -> _ := sync_add(counters + I64{24}, I64{1})
+        }
+        if cancelled != (I64{0}) -> _ := sync_add(counters + I64{32}, I64{1})
+        if state == (I64{1}) -> _ := sync_add(counters + I64{40}, I64{1})
+        at += I64{1}
+    }
+    jet_rt_free(array, count * I64{8}, I64{8})
+}
+fn observe_channels_json(builder: I64) {
+    count := I64{0}
+    node := sync_load(observe_root + I64{40})
+    loop node != (I64{0}) {
+        count += I64{1}
+        node = sync_load(node)
+    }
+    array :: observe_array(sync_load(observe_root + I64{40}), count)
+    at := I64{0}
+    limit :: if count > (I64{4096}) -> I64{4096} else -> count
+    loop at < limit {
+        node = sync_load(array + at * I64{8})
+        if at != (I64{0}) -> rt_text_push_scalar(builder, I64{44})
+        observe_msg_channel_begin(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{8}))
+        observe_msg_depth(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{16}))
+        observe_msg_capacity(builder)
+        if sync_load(node + I64{24}) != (I64{0}) -> observe_decimal_unsigned(builder, sync_load(node + I64{32})) else -> observe_msg_null(builder)
+        observe_msg_send_waiters(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{40}))
+        observe_msg_recv_waiters(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{48}))
+        observe_msg_closed(builder)
+        observe_bool(builder, sync_load(node + I64{56}))
+        rt_text_push_scalar(builder, I64{125})
+        at += I64{1}
+    }
+    jet_rt_free(array, count * I64{8}, I64{8})
+}
+fn observe_values_json(builder: I64) {
+    node := sync_load(observe_root + I64{112})
+    first := true
+    loop node != (I64{0}) {
+        if !first -> rt_text_push_scalar(builder, I64{44})
+        first = false
+        observe_msg_value_begin(builder)
+        observe_escape(builder, sync_load(node + I64{8}))
+        observe_msg_value_type(builder)
+        observe_escape(builder, sync_load(node + I64{16}))
+        observe_msg_value_disposition(builder)
+        observe_escape(builder, sync_load(node + I64{24}))
+        observe_msg_value_reason(builder)
+        observe_escape(builder, sync_load(node + I64{32}))
+        observe_msg_value_rendered(builder)
+        rendered :: sync_load(node + I64{40})
+        if rendered == (I64{0}) -> observe_msg_null(builder) else -> observe_quote(builder, rendered)
+        rt_text_push_scalar(builder, I64{125})
+        node = sync_load(node)
+    }
+}
+fn observe_events_json(builder: I64) {
+    node := sync_load(observe_root + I64{88})
+    first := true
+    loop node != (I64{0}) {
+        if !first -> rt_text_push_scalar(builder, I64{44})
+        first = false
+        observe_msg_event_begin(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{8}))
+        observe_msg_event_source(builder)
+        rt_text_append(builder, rt_text_data(sync_load(node + I64{16})), rt_text_len(sync_load(node + I64{16})))
+        observe_msg_event_id(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{24}))
+        observe_msg_event_owner(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{32}))
+        observe_msg_event_subscription(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{40}))
+        observe_msg_event_dispatch(builder)
+        observe_decimal_unsigned(builder, sync_load(node + I64{48}))
+        observe_msg_event_lifecycle(builder)
+        rt_text_append(builder, rt_text_data(sync_load(node + I64{56})), rt_text_len(sync_load(node + I64{56})))
+        observe_msg_event_queued(builder)
+        observe_decimal_signed(builder, sync_load(node + I64{64}))
+        observe_msg_event_blocked(builder)
+        observe_decimal_signed(builder, sync_load(node + I64{72}))
+        observe_msg_event_running(builder)
+        observe_decimal_signed(builder, sync_load(node + I64{80}))
+        observe_msg_event_capacity(builder)
+        observe_decimal_signed(builder, sync_load(node + I64{88}))
+        observe_msg_event_overflow(builder)
+        rt_text_append(builder, rt_text_data(sync_load(node + I64{96})), rt_text_len(sync_load(node + I64{96})))
+        observe_msg_event_priority(builder)
+        observe_decimal_signed(builder, sync_load(node + I64{104}))
+        observe_msg_event_failure(builder)
+        rt_text_append(builder, rt_text_data(sync_load(node + I64{112})), rt_text_len(sync_load(node + I64{112})))
+        observe_msg_event_terminal(builder)
+        rt_text_append(builder, rt_text_data(sync_load(node + I64{120})), rt_text_len(sync_load(node + I64{120})))
+        rt_text_push_word(builder, I64{32034}, I64{2})
+        node = sync_load(node)
+    }
+}
+fn observe_snapshot(writer: I64, exit: I64) -> I64 {
+    text :: jet_rt_string_builder_new()
+    observe_msg_live_begin(text)
+    observe_escape(text, sync_load(writer + I64{56}))
+    observe_msg_live_source(text)
+    observe_escape(text, sync_load(writer + I64{64}))
+    observe_msg_live_build(text)
+    observe_escape(text, sync_load(writer + I64{72}))
+    observe_msg_live_revision(text)
+    observe_escape(text, sync_load(writer + I64{80}))
+    observe_msg_live_world(text)
+    observe_escape(text, sync_load(writer + I64{88}))
+    observe_msg_live_decisions(text)
+    sync_mutex_lock(observe_root)
+    ledger :: sync_load(observe_root + I64{128})
+    if ledger == (I64{0}) -> observe_msg_null(text) else -> rt_text_append(text, rt_text_data(ledger), rt_text_len(ledger))
+    observe_msg_live_values(text)
+    observe_values_json(text)
+    observe_msg_live_schema(text)
+    observe_decimal_unsigned(text, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
+    observe_msg_live_start(text)
+    observe_escape(text, sync_load(writer + I64{48}))
+    observe_msg_live_captured(text)
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(scratch, I64{48})
+    if observe_syscall(I64{228}, I64{0}, scratch, I64{0}, I64{0}) != (I64{0}) -> observe_decimal_unsigned(text, I64{0}) else -> observe_decimal_unsigned(text, sync_load(scratch) * I64{1000} + sync_load(scratch + I64{8}) /% I64{1000000})
+    thread_zero(scratch, I64{48})
+    observe_msg_live_tasks(text)
+    observe_tasks_json(text, scratch)
+    observe_msg_channels(text)
+    observe_channels_json(text)
+    observe_msg_live_events(text)
+    observe_events_json(text)
+    observe_msg_live_effects(text)
+    observe_decimal_unsigned(text, sync_load(observe_root + I64{32}) - sync_load(scratch))
+    observe_msg_live_waiting(text)
+    observe_decimal_unsigned(text, sync_load(scratch))
+    observe_msg_live_channel(text)
+    observe_decimal_unsigned(text, sync_load(scratch + I64{8}))
+    observe_msg_live_time(text)
+    observe_decimal_unsigned(text, sync_load(scratch + I64{16}))
+    observe_msg_live_io(text)
+    observe_decimal_unsigned(text, sync_load(scratch + I64{24}))
+    observe_msg_live_resources(text)
+    observe_decimal_unsigned(text, sync_load(observe_root + I64{48}))
+    observe_msg_live_running(text)
+    observe_decimal_unsigned(text, sync_load(scratch + I64{40}))
+    observe_msg_live_queued(text)
+    observe_decimal_unsigned(text, sync_load(observe_root + I64{56}))
+    observe_msg_live_cancelled(text)
+    observe_decimal_unsigned(text, sync_load(scratch + I64{32}))
+    sync_mutex_unlock(observe_root)
+    // These are the canonical Mem/Arena producer's three actual counters,
+    // not program allocation counts or inferred registry cardinalities.
+    jet_rt_mem_resources(scratch)
+    observe_msg_live_arenas(text)
+    observe_decimal_unsigned(text, sync_load(scratch))
+    observe_msg_live_allocs(text)
+    observe_decimal_unsigned(text, sync_load(scratch + I64{8}))
+    observe_msg_live_bytes(text)
+    observe_decimal_unsigned(text, sync_load(scratch + I64{16}))
+    observe_msg_live_runtime(text)
+    observe_decimal_unsigned(text, sync_now_ns() - sync_load(writer + I64{24}))
+    observe_process_facts(scratch)
+    observe_msg_live_cpu(text)
+    if {
+        (sync_load(writer + I64{32}) == I64{0} || sync_load(scratch + I64{8}) == I64{0}) -> observe_msg_null(text)
+        else -> {
+            start :: sync_load(writer + I64{40})
+            now :: sync_load(scratch + I64{16})
+            observe_decimal_unsigned(text, if observe_unsigned_less(now, start) -> I64{0} else -> wrapping(now - start))
+        }
+    }
+    jet_rt_string_drop(sync_load(scratch))
+    jet_rt_free(scratch, I64{48}, I64{8})
+    observe_msg_live_exit(text)
+    observe_bool(text, exit)
+    observe_msg_live_end(text)
+    text
+}
+fn observe_append_directory(target: I64, directory: I64) {
+    length :: rt_text_len(directory)
+    rt_text_append(target, rt_text_data(directory), length)
+    if length != (I64{0}) && trap_byte(rt_text_data(directory) + length - I64{1}) != (I64{47}) -> rt_text_push_scalar(target, I64{47})
+}
+
+// Holds the run mutex through staging+rename. A periodic publication that
+// loses to final publication cannot overwrite it; failed publication still
+// closes this run, matching Observe.rs:525-533.
+fn observe_publish(writer: I64, exit: I64) {
+    sync_mutex_lock(writer)
+    if sync_load(writer + I64{8}) != (I64{0}) {
+        sync_mutex_unlock(writer)
+        return
+    }
+    sequence :: wrapping(sync_load(writer + I64{16}) + I64{1})
+    sync_store(writer + I64{16}, sequence)
+    snapshot :: observe_snapshot(writer, exit)
+    stage :: jet_rt_string_builder_new()
+    directory :: sync_load(writer + I64{96})
+    observe_append_directory(stage, directory)
+    observe_msg_stage_head(stage)
+    observe_decimal_unsigned(stage, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
+    rt_text_push_scalar(stage, I64{45})
+    start :: sync_load(writer + I64{48})
+    rt_text_append(stage, rt_text_data(start), rt_text_len(start))
+    rt_text_push_scalar(stage, I64{45})
+    observe_decimal_unsigned(stage, sequence)
+    observe_msg_stage_tail(stage)
+    name :: observe_cstring(stage)
+    if rt_text_len(snapshot) <= (I64{1048576}) {
+        fd :: observe_syscall(I64{257}, I64{-100}, name, I64{524481}, I64{384})
+        if fd >= (I64{0}) {
+            at := I64{0}
+            loop at < rt_text_len(snapshot) {
+                written :: observe_syscall(I64{1}, fd, rt_text_data(snapshot) + at, rt_text_len(snapshot) - at, I64{0})
+                if written == (I64{-4}) -> next
+                if written <= (I64{0}) -> break
+                at += written
+            }
+            if at == rt_text_len(snapshot) && observe_syscall(I64{74}, fd, I64{0}, I64{0}, I64{0}) == (I64{0}) {
+                target :: observe_cstring(sync_load(writer + I64{104}))
+                _ := observe_syscall(I64{82}, name, target, I64{0}, I64{0})
+                jet_rt_free(target, rt_text_len(sync_load(writer + I64{104})) + I64{1}, I64{1})
+            }
+            _ := observe_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0})
+        }
+    }
+    _ := observe_syscall(I64{87}, name, I64{0}, I64{0}, I64{0})
+    jet_rt_free(name, rt_text_len(stage) + I64{1}, I64{1})
+    jet_rt_string_drop(stage)
+    jet_rt_string_drop(snapshot)
+    sync_store(writer + I64{8}, exit)
+    sync_mutex_unlock(writer)
+}
+fn observe_publish_exit() {
+    writer :: sync_load(observe_root + I64{72})
+    if writer != (I64{0}) -> observe_publish(writer, I64{1})
+}
+// Accepted startup identity is the five canonical nonempty control-free E4
+// fields, not an inferred identity. Directory is the host's actual temp_dir.
+// The caller performs JET_OBSERVE=1/environment identity agreement before entry.
+fn observe_live_start(identity: I64, directory: I64) -> I64 {
+    at := I64{0}
+    loop at < (I64{40}) {
+        value :: sync_load(identity + at)
+        if value == (I64{0}) || rt_text_len(value) == (I64{0}) || observe_text_controls(value) -> return I64{0}
+        at += I64{8}
+    }
+    facts :: jet_rt_alloc(I64{32}, I64{8})
+    observe_process_facts(facts)
+    sync_mutex_lock(observe_root)
+    writer := sync_load(observe_root + I64{72})
+    fresh :: writer == I64{0}
+    if fresh {
+        writer = jet_rt_alloc(I64{120}, I64{8})
+        thread_zero(writer, I64{120})
+        at = I64{0}
+        loop at < (I64{40}) {
+            sync_store(writer + I64{56} + at, observe_text_clone(sync_load(identity + at)))
+            at += I64{8}
+        }
+        sync_store(writer + I64{96}, observe_text_clone(directory))
+        sync_store(writer + I64{48}, sync_load(facts))
+        path :: jet_rt_string_builder_new()
+        observe_append_directory(path, directory)
+        observe_msg_path_head(path)
+        observe_decimal_unsigned(path, observe_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}))
+        observe_msg_path_tail(path)
+        sync_store(writer + I64{104}, path)
+        root := observe_task_find(I64{1})
+        if root == (I64{0}) {
+            root = jet_rt_alloc(I64{88}, I64{8})
+            thread_zero(root, I64{88})
+            sync_store(root, sync_load(observe_root + I64{24}))
+            sync_store(root + I64{8}, I64{1})
+            label :: jet_rt_string_builder_new()
+            observe_msg_root_label(label)
+            sync_store(root + I64{32}, label)
+            sync_store(root + I64{40}, I64{1})
+            sync_store(observe_root + I64{24}, root)
+            _ := sync_add(observe_root + I64{32}, I64{1})
+        }
+        sync_store(observe_root + I64{72}, writer)
+    }
+    sync_mutex_unlock(observe_root)
+    sync_mutex_lock(writer)
+    sync_store(writer + I64{24}, sync_now_ns())
+    sync_store(writer + I64{32}, sync_load(facts + I64{8}))
+    sync_store(writer + I64{40}, sync_load(facts + I64{16}))
+    sync_store(writer + I64{8}, I64{0})
+    if !fresh -> jet_rt_string_drop(sync_load(facts))
+    jet_rt_free(facts, I64{32}, I64{8})
+    sync_store(observe_root + I64{64}, I64{0})
+    sync_mutex_unlock(writer)
+    writer
+}
+
+// RuntimeLower resolves this checked function-address entry, never the body.
+fn rt_observe_writer_address() -> I64 {
+    loop { jet_rt_unreachable(I64{0}, I64{0}) }
+}
+
+// The periodic writer shares the same run lock and never publishes after
+// final publication until a resident host restarts the run.
+#Export(c) fn jet_rt_observe_writer(argument: I64) -> I64 {
+    writer :: argument
+    slot :: sync_park_new()
+    loop {
+        observe_publish(writer, I64{0})
+        sync_park(slot, I64{100000000})
+    }
+    I64{0}
+}
+
+fn observe_env_key(index: I64) -> I64 {
+    key :: jet_rt_string_builder_new()
+    if {
+        index == (I64{0}) -> observe_msg_env_session(key)
+        index == (I64{1}) -> observe_msg_env_source(key)
+        index == (I64{2}) -> observe_msg_env_build(key)
+        index == (I64{3}) -> observe_msg_env_revision(key)
+        else -> observe_msg_env_world(key)
+    }
+    key
+}
+
+// Observe.rs:683-700. Read the ONE logical Env cell, not startup environ.
+// All five supplied components must be present, nonempty, <=16KiB and Cc-free.
+#Export(c) fn jet_rt_observe_runtime_start_from_env() {
+    key :: jet_rt_string_builder_new()
+    observe_msg_env_observe(key)
+    enabled :: jet_rt_logical_env_get(key)
+    jet_rt_string_drop(key)
+    if enabled == (I64{0}) -> return
+    live :: rt_text_len(enabled) == I64{1} && trap_byte(rt_text_data(enabled)) == I64{49}
+    jet_rt_string_drop(enabled)
+    if !live -> return
+    inputs :: jet_rt_alloc(I64{56}, I64{8})
+    thread_zero(inputs, I64{56})
+    at := I64{0}
+    valid := true
+    loop at < (I64{5}) {
+        name :: observe_env_key(at)
+        value :: jet_rt_logical_env_get(name)
+        jet_rt_string_drop(name)
+        sync_store(inputs + at * I64{8}, value)
+        if {
+            value == (I64{0}) -> valid = false
+            else -> {
+                if rt_text_len(value) == (I64{0}) || rt_text_len(value) > (I64{16384}) || observe_text_controls(value) -> valid = false
+            }
+        }
+        at += I64{1}
+    }
+    if valid {
+        name :: jet_rt_string_builder_new()
+        observe_msg_env_tmpdir(name)
+        present :: jet_rt_logical_env_get_os(name, inputs + I64{40}, inputs + I64{48})
+        jet_rt_string_drop(name)
+        directory := I64{0}
+        if {
+            present == (I64{0}) -> {
+                directory = jet_rt_string_builder_new()
+                observe_msg_default_tmpdir(directory)
+            }
+            else -> {
+                // OS path bytes can be non-UTF8. This private buffer is used
+                // only for Linux path syscalls, never as a public String.
+                data :: sync_load(inputs + I64{40})
+                length :: sync_load(inputs + I64{48})
+                directory = rt_text_copy(data, length)
+                if length != (I64{0}) -> jet_rt_free(data, length, I64{1})
+            }
+        }
+        writer :: observe_live_start(inputs, directory)
+        jet_rt_string_drop(directory)
+        if writer != (I64{0}) && sync_cas(writer + I64{112}, I64{0}, I64{1}) == (I64{0}) {
+            handle :: thread_spawn(rt_observe_writer_address(), writer)
+            if handle < (I64{0}) -> scheduler_fatal(scheduler_msg_start_failed())
+            _ := thread_detach(handle)
+        }
+    }
+    at = I64{0}
+    loop at < (I64{5}) {
+        value :: sync_load(inputs + at * I64{8})
+        if value != (I64{0}) -> jet_rt_string_drop(value)
+        at += I64{1}
+    }
+    jet_rt_free(inputs, I64{56}, I64{8})
+}

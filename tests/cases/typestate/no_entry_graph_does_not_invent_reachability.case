@@ -1,0 +1,6 @@
+# Port of tests/typestate.rs::no_entry_graph_does_not_invent_reachability; original guest source preserved.
+# PENDING-GRAMMAR(batch-four): conditional assertion preserves lint_codes Err=>empty behavior.
+fixture: fixtures/no_entry_graph_does_not_invent_reachability
+step: jet check fixture.jet --json --verbose
+exit: any # original lint_codes returns empty on compile errors
+when exit == 0: json: stdout doc $.reports[?code="L0153"] #= 0 # original predicate: absent code

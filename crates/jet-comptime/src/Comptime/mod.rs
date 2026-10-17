@@ -20,6 +20,7 @@ pub mod AppLite;
 mod ArgsLite;
 pub mod AuthLite;
 pub mod Build;
+pub mod ForeignMemory;
 /// Host/builtin surface shared by the canonical TIR evaluator (#777) and
 /// any remaining policy wrappers (purity). Public so `jet-codegen`'s TIR
 /// eval can dispatch without a second builtin table.
@@ -63,7 +64,7 @@ pub mod ServicesLite;
 pub mod SyncLite;
 mod TextLite;
 pub use TextLite::file_reader_next_line;
-pub use TextLite::{mir_fs_lock, mir_fs_temp_dir, mir_fs_temp_file, MirFileOwner};
+pub use TextLite::{mir_fs_lock_owner_raw, mir_fs_temp_dir, mir_fs_temp_file, mir_fs_temp_dir_raw, mir_fs_temp_file_raw, MirFileOwner};
 pub mod MirBridge;
 pub mod Template;
 mod TypedDecode;
@@ -119,6 +120,8 @@ pub fn encode_typed_value_for_mir(
 ) -> Option<Result<CtValue, String>> {
     TypedDecode::encode_typed_value_with(ty, value, encode_nominal)
 }
+#[doc(hidden)]
+pub use Methods::dyn_datetime_value;
 pub use ArgsLite::{core_args_spec, eval_handle as eval_args_handle};
 pub use EventLite::{
     core_event_async_result, core_event_decision_hook, core_event_hook, core_event_new,
@@ -136,8 +139,7 @@ use crate::Syntax;
 use crate::AST::{EnumDef, Expr, Func, StructDef, Type};
 
 pub use Interpreter::{
-    runtime_argv, with_runtime_argv, DebugHook, DevSink, ReplAuthorizer, ReplEffectRequest,
-    REPL_FUEL_BUDGET,
+    runtime_argv, with_runtime_argv, DevSink, ReplAuthorizer, ReplEffectRequest, REPL_FUEL_BUDGET,
 };
 pub use Methods::{
     apply_core_call, apply_core_call_with_type, apply_core_call_without_ambient,
@@ -149,13 +151,12 @@ pub use Methods::{
     apply_repl_authorized_core_call_with_type, display_core_pure_value,
     eval_regex_replace_all_with, history_callback_fingerprint, history_command_schema_from_mir,
     jet_crypto_zeroize,
-    set_trace_id, sketch_add, with_world_rng_provider, HistoryCommandSchema,
+    set_trace_id, with_world_rng_provider, HistoryCommandSchema,
 };
 pub use Methods::{apply_seeded_rng_method, apply_seeded_rng_method_with_type};
 // I9: the TIR evaluator in jet-codegen calls this same fake-data kernel, so it
 // must be reachable from outside this crate. One kernel, every tier.
 pub use DataPipeline::DataPipelineState;
-pub use Methods::apply_fake_method;
 #[doc(hidden)]
 pub use Methods::{
     eval_build_time_io, eval_net_fetch, is_tier2_core_call, project_rejection,
@@ -271,10 +272,13 @@ pub fn evaluate_typed_head(
     let literal_refs = literals.iter().map(String::as_str).collect::<Vec<_>>();
     let shown_holes = render_typed_holes(holes, span)?;
     match kind {
-        Syntax::TypedHeadKind::URL => {
-            let url = UrlLite::typed_url_literal(literals, &shown_holes);
-            Ok(Methods::url_parts_to_ct(&url))
-        }
+        Syntax::TypedHeadKind::URL => Err(Diagnostic::error(
+            "E0003",
+            "URL recipes must call core.net.url.literal".to_string(),
+            "URL construction belongs to its checked Core source function".to_string(),
+            "report a typed URL that bypassed source-call lowering".to_string(),
+            Some(span),
+        )),
         Syntax::TypedHeadKind::Path => Ok(CtValue::Struct {
             type_name: Syntax::TYPE_PATH.to_string(),
             fields: vec![(
@@ -473,10 +477,7 @@ pub fn run_build_entry_with_policy(
         sink: None,
         checked_nominals: None,
         core_imports: &program.core_imports,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "build".to_string(),
         impure_depth: 0,
         gates,
         repl_mode: false,
@@ -498,7 +499,7 @@ pub fn run_build_entry_with_policy(
     let mut frame = HashMap::new();
     frame.insert(build.params[0].name.clone(), context.clone());
     let (call_result, package_inputs) =
-        with_package_read_context(base_dir, || interp.call_func("build", build, frame));
+        with_package_read_context(base_dir, || interp.call_func(build, frame));
     interp.embed_inputs.extend(package_inputs);
     let returned = match call_result {
         Ok(value) => value,
@@ -576,21 +577,37 @@ fn empty_method_traits() -> &'static HashMap<(String, String), String> {
     EMPTY_METHOD_TRAITS.get_or_init(HashMap::new)
 }
 
-pub fn render_datatree_for_tir(value: &CtValue) -> String {
-    JSONInterp::render_ordered_datatree(value, false, 0)
+pub fn render_dyn_for_tir(value: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
+    JSONInterp::render_ordered_dyn(value, false, 0)
 }
 
-pub fn render_datatree_pretty_for_tir(value: &CtValue) -> String {
-    JSONInterp::render_ordered_datatree(value, true, 0)
+pub fn render_dyn_pretty_for_tir(value: &CtValue) -> Result<String, jet_foundation::EncodingJson::EncodingError> {
+    JSONInterp::render_ordered_dyn(value, true, 0)
 }
 
-/// TIR typed JSON decode uses the ordered DataTree shape. Dynamic JSON keeps
-/// its BTreeMap shape, so this adapter is separate from `core.encoding.json.parse`.
+/// Marshal a text encoding result onto the language's existing report carrier.
+pub fn json_render_result_for_tir(
+    rendered: Result<String, jet_foundation::EncodingJson::EncodingError>,
+) -> CtValue {
+    match rendered {
+        Ok(text) => CtValue::Present(Box::new(CtValue::Str(text))),
+        Err(error) => CtValue::failed(Box::new(JSONInterp::text_encoding_error_value(error))),
+    }
+}
+
+/// TIR typed JSON decode and dynamic JSON parsing share the ordered Dyn shape.
 pub fn parse_ordered_json_for_tir(text: &str) -> CtValue {
-    match JSONInterp::parse_json_typed_ordered(text) {
+    match JSONInterp::parse_json(text) {
         Ok(value) => CtValue::Present(Box::new(value)),
         Err(error) => CtValue::failed(Box::new(JSONInterp::encoding_error_value(error))),
     }
+}
+
+/// The interpreter's text-cell decode scope (#4602): a text-native source
+/// (CSV cells, environment, route parameters) decodes inside it, so only
+/// there a `Text` leaf parses into a scalar.
+pub fn decode_text_cells<R>(decode: impl FnOnce() -> R) -> R {
+    SyncLite::decode_text_cells(decode)
 }
 
 /// TIR typed TOML decode parses with the codec's own parser; a failure is the
@@ -770,22 +787,27 @@ pub fn evaluate_closed_value_with_imports_opts_collecting_structs_and_facts<'a>(
     fact_items: &[crate::AST::Item],
     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
     fact_registry: &jet_foundation::Facts::FactRegistry,
-    checked_nominals: Option<&MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<&std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let closed = fold_build_facts(init, fact_items, build_facts, fact_registry);
-    // The checked projection carries every imported nominal, import alias and
-    // loaded source module; the evaluated module's own enum rows come from
-    // its items.
-    let mut nominal_facts = checked_nominals.cloned().unwrap_or_default();
-    for item in fact_items {
-        if let crate::AST::Item::Enum(definition) = item {
-            let mut row = definition.clone();
-            row.methods.clear();
-            row.trait_impls.clear();
-            row.derives.clear();
-            nominal_facts.enums.insert(row.name.clone(), row);
+    // Active modules already retain their original enum rows in the shared
+    // checked projection. Only an evaluation outside a module scope builds
+    // its local rows from the supplied original items.
+    let nominal_facts = if let Some(original) = checked_nominals {
+        std::sync::Arc::clone(original)
+    } else {
+        let mut local = crate::AST::MirFragmentNominalFacts::default();
+        for item in fact_items {
+            if let crate::AST::Item::Enum(definition) = item {
+                let mut row = definition.clone();
+                row.methods.clear();
+                row.trait_impls.clear();
+                row.derives.clear();
+                local.enums.insert(row.name.clone(), row);
+            }
         }
-    }
+        std::sync::Arc::new(local)
+    };
     evaluate_with_imports_opts_collecting_structs_and_methods(
         &closed,
         funcs,
@@ -1097,7 +1119,7 @@ fn evaluate_with_imports_opts_collecting_structs_and_methods<'a>(
     distinct_ranges: &HashMap<String, Option<(i64, i64)>>,
     distinct_bases: &HashMap<String, crate::AST::Type>,
     unit_families: &[crate::AST::UnitFamilyDef],
-    nominal_facts: Option<MirBridge::MirFragmentNominalFacts>,
+    nominal_facts: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     if initial_impure_depth == 0 {
@@ -1206,10 +1228,7 @@ pub fn run_main(
         sink: Some(sink),
         checked_nominals: None,
         core_imports: empty_imports(),
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "main".to_string(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: false,
@@ -1235,68 +1254,6 @@ pub fn run_main(
     }
 }
 
-/// D-DBG3: whole-program interpretation under the source-level debugger.
-/// Uses the same evaluator and buffered sink as [`run_main`], with a
-/// [`DebugHook`] attached and the runtime effect scope kept open: the driver
-/// is notified before every statement and may pause to run its `(jet)` prompt.
-/// The driver shows only Jet lines/locals — it never sees generated Rust.
-/// Returns the same E2202 (fuel) / E0956 (unsupported) stops, plus any abort
-/// the driver raises (e.g. the user typed `quit`, surfaced as E2204).
-pub fn run_main_debug(
-    main: &Func,
-    funcs: &HashMap<String, &Func>,
-    base_dir: &Path,
-    core_imports: &HashMap<String, String>,
-    sink: &mut DevSink,
-    debugger: &mut dyn DebugHook,
-) -> Result<(), Diagnostic> {
-    let mut interp = Interp {
-        funcs,
-        error_conversions: &[],
-        base_dir,
-        fuel: DEV_FUEL_BUDGET,
-        sink: Some(sink),
-        checked_nominals: None,
-        core_imports,
-        debugger: Some(debugger),
-        runtime_execution: true,
-        depth: 0,
-        cur_func: "main".to_string(),
-        // Runtime provenance is carried explicitly to the canonical evaluator;
-        // comptime gate depth stays closed in this producer.
-        impure_depth: 0,
-        gates: jet_foundation::Policy::GateSet::default(),
-        repl_mode: false,
-        repl_grants: Vec::new(),
-        repl_authorizer: None,
-        repl_interruptible: false,
-        embed_inputs: Vec::new(),
-        binding_types: HashMap::new(),
-        globals: empty_globals(),
-        methods: empty_methods(),
-        structs: empty_structs(),
-        computed_fields: empty_computed(),
-        distinct_ranges: empty_distinct(),
-        distinct_bases: empty_distinct_bases(),
-        migrations: empty_migrations(),
-        list_write_windows: HashMap::new(),
-        data_pipeline: DataPipeline::DataPipelineState::default(),
-    };
-    let mut scope = HashMap::new();
-    // Keep the whole function in one canonical TIR evaluation. The evaluator
-    // now owns every source-statement boundary, including nested calls and
-    // loop edges, so splitting the block would change program state.
-    match interp.exec_block(&main.body, &mut scope)? {
-        Interpreter::Flow::Return(_) => return Ok(()),
-        Interpreter::Flow::Normal
-        | Interpreter::Flow::Break
-        | Interpreter::Flow::Continue
-        | Interpreter::Flow::BreakLabel(_)
-        | Interpreter::Flow::ContinueLabel(_) => {}
-    }
-    Ok(())
-}
-
 /// REPL variant of `run_main`: uses a caller-supplied fuel cap so the REPL
 /// can enforce D-REPL-FUEL without patching DEV_FUEL_BUDGET. Returns the
 /// same E2202 (dev fuel stop) or E0956 (unsupported) errors; the REPL
@@ -1316,10 +1273,7 @@ pub fn run_main_with_fuel(
         sink: Some(sink),
         checked_nominals: None,
         core_imports: empty_imports(),
-        debugger: None,
         runtime_execution: true,
-        depth: 0,
-        cur_func: "main".to_string(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
@@ -1364,10 +1318,7 @@ pub fn run_repl_main_with_fuel<'a>(
         sink: Some(sink),
         checked_nominals: None,
         core_imports,
-        debugger: None,
         runtime_execution: true,
-        depth: 0,
-        cur_func: "main".to_string(),
         impure_depth: 1,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
         repl_mode: true,
@@ -1505,10 +1456,7 @@ fn run_repl_step_inner(
         sink: Some(sink),
         checked_nominals: None,
         core_imports,
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "main".to_string(),
         // D-REPLCOREEFFECT1=A: only a lexical `#FX` opens this depth.
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::allow(jet_foundation::Policy::PolicyKey::Impure),
@@ -1618,9 +1566,6 @@ pub fn run_block_with_imports(
             gates: jet_foundation::Policy::GateSet::default(),
             impure_depth: 0,
             runtime_execution: false,
-            debugger: None,
-            debug_function: String::new(),
-            debug_depth: 0,
             embed_inputs: None,
         })
     });
@@ -1812,7 +1757,7 @@ pub fn evaluate_owned_with_imports_opts_collecting_items<'a>(
     gates: jet_foundation::Policy::GateSet,
     initial_impure_depth: usize,
     items: &'a [crate::AST::Item],
-    checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
     mutated: Option<&mut HashMap<String, CtValue>>,
 ) -> Result<(CtValue, Vec<crate::AST::ComptimeInput>), Diagnostic> {
     let mut refs: HashMap<String, &Func> = funcs
@@ -1937,7 +1882,7 @@ pub fn expand_derive_body(
     type_info: CtValue,
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
-    checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
 ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
     let mut scope = HashMap::new();
     // `@name` is the canonical item-name splice for a derive target. Keep it
@@ -1969,7 +1914,7 @@ fn expand_template_body_with_nominals(
     initial_scope: &HashMap<String, CtValue>,
     funcs: &HashMap<String, &Func>,
     base_dir: &Path,
-    checked_nominals: Option<MirBridge::MirFragmentNominalFacts>,
+    checked_nominals: Option<std::sync::Arc<crate::AST::MirFragmentNominalFacts>>,
 ) -> Result<Vec<crate::AST::Item>, Diagnostic> {
     let mut scope = initial_scope.clone();
     let binding_types = scope
@@ -1984,10 +1929,7 @@ fn expand_template_body_with_nominals(
         sink: None,
         checked_nominals,
         core_imports: empty_imports(),
-        debugger: None,
         runtime_execution: false,
-        depth: 0,
-        cur_func: "derive".to_string(),
         impure_depth: 0,
         gates: jet_foundation::Policy::GateSet::default(),
         repl_mode: false,
@@ -2037,7 +1979,6 @@ pub fn format_template_items(items: Vec<crate::AST::Item>) -> String {
         block_spans: Vec::new(),
         fenced_statements: Vec::new(),
         web_target_ceiling: None,
-        pub_file: false,
         no_prelude: false,
         default_target: None,
         html_path: None,
@@ -2768,6 +2709,18 @@ fn expand_template_pattern(
     scope: &mut HashMap<String, CtValue>,
     subject: Option<&crate::AST::Expr>,
 ) -> Result<(), Diagnostic> {
+    fn expand_slot(
+        slot: &mut crate::AST::PatSlot,
+        interp: &mut Interpreter::Interp<'_>,
+        scope: &mut HashMap<String, CtValue>,
+    ) -> Result<(), Diagnostic> {
+        match slot {
+            crate::AST::PatSlot::Nested(pattern) => expand_template_pattern(pattern, interp, scope, None),
+            crate::AST::PatSlot::Named { slot, .. } => expand_slot(slot, interp, scope),
+            crate::AST::PatSlot::Value(value) => expand_template_expr(value, interp, scope),
+            _ => Ok(()),
+        }
+    }
     match pattern {
         crate::AST::Pattern::Or(patterns, _) => {
             for pattern in patterns {
@@ -2789,13 +2742,42 @@ fn expand_template_pattern(
         } => {
             *variant = expand_template_name(variant, *span, interp, scope)?;
             fill_derive_variant_bindings(variant, bindings, *span, scope, subject);
+            for slot in bindings {
+                expand_slot(slot, interp, scope)?;
+            }
         }
-        crate::AST::Pattern::Present { .. }
-        | crate::AST::Pattern::Absent(..)
-        | crate::AST::Pattern::Ok { .. }
-        | crate::AST::Pattern::Err { .. }
+        crate::AST::Pattern::Present { inner, .. }
+        | crate::AST::Pattern::Ok { inner, .. }
+        | crate::AST::Pattern::Err { inner, .. } => {
+            if let Some(inner) = inner {
+                expand_template_pattern(inner, interp, scope, None)?;
+            }
+        }
+        crate::AST::Pattern::Struct { type_name, fields, .. } => {
+            if let Some((name, span)) = type_name {
+                *name = expand_template_name(name, *span, interp, scope)?;
+            }
+            for field in fields {
+                match field {
+                    crate::AST::StructPatField::Value { value, .. } => expand_template_expr(value, interp, scope)?,
+                    crate::AST::StructPatField::Nested { pattern, .. } => expand_template_pattern(pattern, interp, scope, None)?,
+                    _ => {}
+                }
+            }
+        }
+        crate::AST::Pattern::List { items, .. } => {
+            for slot in items {
+                expand_slot(slot, interp, scope)?;
+            }
+        }
+        crate::AST::Pattern::Map { entries, .. } => {
+            for entry in entries {
+                expand_template_expr(&mut entry.key, interp, scope)?;
+                expand_slot(&mut entry.slot, interp, scope)?;
+            }
+        }
+        crate::AST::Pattern::Absent(..)
         | crate::AST::Pattern::Range { .. }
-        | crate::AST::Pattern::Struct { .. }
         | crate::AST::Pattern::BinMatch { .. } => {}
     }
     Ok(())
@@ -3433,6 +3415,7 @@ pub fn evaluate_checked_text_check<'a>(
         resolved_ret: None,
         operator_rhs: None,
         checked_widen: false,
+        checked_callee: None,
     };
     let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
         &check,
@@ -3471,7 +3454,7 @@ pub fn evaluate_checked_text_check<'a>(
 /// emitted pure method will build at runtime.
 pub fn evaluate_checked_text_hole<'a>(
     type_name: &str,
-    value: &crate::AST::Expr,
+    encoded: &crate::AST::Expr,
     funcs: &HashMap<String, &'a Func>,
     methods: &HashMap<(String, String), &'a Func>,
     structs: &HashMap<String, &'a crate::AST::StructDef>,
@@ -3480,26 +3463,14 @@ pub fn evaluate_checked_text_hole<'a>(
     base_dir: &Path,
     core_imports: &HashMap<String, String>,
 ) -> Result<String, Diagnostic> {
-    let span = value.span();
-    let call = crate::AST::Expr::MethodCall {
-        receiver: Box::new(crate::AST::Expr::Ident(type_name.to_string(), span)),
-        method: "encode_hole".to_string(),
-        method_span: span,
-        owner_type_args: Vec::new(),
-        type_args: Vec::new(),
-        args: vec![crate::AST::CallArg {
-            convention: crate::AST::AccessConvention::Read,
-            expr: value.clone(),
-            span,
-            flags: crate::AST::CallArgFlags::default(),
-            label: None,
-            spread: false,
-        }],
-        recv_type: Some(type_name.to_string()),
-        resolved_ret: Some(crate::AST::Type::String),
-        operator_rhs: None,
-        checked_widen: false,
-    };
+    let span = encoded.span();
+    let mut call = encoded.clone();
+    if let crate::AST::Expr::MethodCall { receiver, recv_type, .. } = &mut call {
+        // The borrowed evaluation tables belong to the declaration's module;
+        // retain the checked generic arguments while using that local owner.
+        **receiver = crate::AST::Expr::Ident(type_name.to_string(), span);
+        *recv_type = Some(type_name.to_string());
+    }
     let (value, _) = evaluate_with_imports_opts_collecting_structs_and_methods(
         &call,
         funcs,

@@ -1,0 +1,28 @@
+
+use core.testing as testing
+
+module perf.testing {
+    budgets: [Budget{
+        name: "parse",
+        scope: .Test("parse"),
+        metric: .BenchTime(.P50),
+        provider: .BenchMeasurement("parse"),
+        comparison: .AbsoluteFrom("local/testing-helpers"),
+        limit: .AtMost(5ms),
+        enforcement: .Warn,
+    }]
+}
+
+fn run() {
+    print(testing.fixture("fixture.txt"))
+    print(testing.golden("golden.txt", "gold"))
+    print(testing.snap("case", "snap"))
+    print(testing.corpus("corpus").len())
+    print(testing.temp_dir("case").len() > 0)
+    clock :: testing.fake_clock(99)
+    rng := testing.fake_rng(5)
+    print(clock.now())
+    print(rng.int(1, 4) >= 1)
+}
+
+#Test("parse") { .measure {} }

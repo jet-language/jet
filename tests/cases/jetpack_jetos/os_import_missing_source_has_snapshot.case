@@ -1,0 +1,7 @@
+# Port of tests/jetpack_jetos.rs:430-447; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_import_missing_source_has_snapshot.fixture
+step: jet os import /definitely/not/here --host halcyon --no-color
+exit: 2
+capture: expected = text file.trim_end expected.stderr
+stderr.trim_end: = "{cap:expected}"

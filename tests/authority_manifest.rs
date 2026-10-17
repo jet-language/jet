@@ -286,6 +286,7 @@ fn e1220_keeps_dependency_and_effect_provenance_after_key_move() {
         name: "netdep".to_string(),
         effects: jet::Sema::EffectSet::from(["Net".to_string()]),
         effect_sites: std::collections::BTreeMap::new(),
+        effect_witnesses: std::collections::BTreeMap::new(),
         panic_sites: Vec::new(),
         boundary_span: Some(jet::Diagnostics::Span::new(4, 12)),
     }];
@@ -390,7 +391,8 @@ fn i9_interpreter_runs_the_authority_project() {
     let entry = root.join("run.jet");
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap())
         .expect("interpreter front end accepts authority project");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(
         diagnostics.is_empty(),
         "interpreter sema changed authority meaning: {diagnostics:#?}"
@@ -398,8 +400,8 @@ fn i9_interpreter_runs_the_authority_project() {
 
     match common::run_interpreter_checked_bundle(
         &bundle,
+        &checked_nominals,
         true,
-        jet::Interpreter::InterpreterInvocation::RunInterpret,
         &common::development_policy(),
     ) {
         jet::Interpreter::RunOutcome::Ran {

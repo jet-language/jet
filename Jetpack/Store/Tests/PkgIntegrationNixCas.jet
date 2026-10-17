@@ -1,0 +1,308 @@
+// Exact tests/jetpack_nix_closure_replay.rs:606-1181. The archive oracle is
+// independent of the product decoder/encoder; it ports the ORIGINAL byte layout.
+use core.crypto as s3cas_crypto
+struct S3CasNode { kind: U8, path: [U8], mode: Int, bytes: [U8] }
+struct S3CasOutput { root_mode: Int, nodes: [S3CasNode] }
+struct S3CasReader {
+    bytes: [U8]
+    at: Int
+    fn take_bytes(&self, size: Int) -> [U8] {
+        result :: self.bytes[self.at..<(self.at + size)]
+        self.at += size
+        result
+    }
+    fn number(&self, size: Int) -> Int {
+        bytes :: &self.take_bytes(size)
+        value := 0
+        loop i in 0..<size -> value = value.bit_or(Int.from_u8(bytes[i]) << (8 * i))
+        value
+    }
+    fn field(&self) -> [U8] {
+        size :: &self.number(4)
+        &self.take_bytes(size)
+    }
+    fn output(&self) -> S3CasOutput {
+        mode :: &self.number(4)
+        count :: &self.number(4)
+        nodes := [S3CasNode]{}
+        loop _ in 0..<count {
+            kind :: (&self.take_bytes(1))[0]
+            path :: &self.field()
+            mode :: &self.number(4)
+            size :: &self.number(8)
+            payload :: &self.take_bytes(size)
+            &nodes.push(S3CasNode{kind: kind, path: path, mode: mode, bytes: payload})
+        }
+        S3CasOutput{root_mode: mode, nodes: nodes}
+    }
+}
+fn s3cas_add(out: &[U8], bytes: [U8]) { loop byte in bytes -> &out.push(byte) }
+fn s3cas_number(out: &[U8], value: Int, size: Int) {
+    loop i in 0..<size -> &out.push(U8{(value >> (8 * i)).bit_and(255)})
+}
+fn s3cas_field(out: &[U8], bytes: [U8]) {
+    s3cas_number(&out, bytes.len(), 4)
+    s3cas_add(&out, bytes)
+}
+fn s3cas_magic() -> [U8] {
+    bytes := "jet-hangar-archive-v1".bytes()
+    &bytes.push(U8{0})
+    bytes
+}
+fn s3cas_digest(bytes: [U8]) -> String { "sha256-{s3cas_crypto.sha256(bytes).hex()}" }
+fn s3cas_repeat(value: String, count: Int) -> String {
+    out := ""
+    loop _ in 0..<count -> out = "{out}{value}"
+    out
+}
+fn s3cas_read_output(bytes: [U8], expected: String) -> S3CasOutput {
+    reader := S3CasReader{bytes: bytes, at: s3cas_magic().len()}
+    _ :: &reader.field()
+    count :: &reader.number(4)
+    result := S3CasOutput?{None}
+    loop _ in 0..<count {
+        _ :: &reader.field()
+        digest :: &reader.field()
+        meta :: &reader.field()
+        output :: &reader.output()
+        if meta.len() == 0 && digest == expected.bytes() -> result = Val(output)
+    }
+    result ?? panic("generic archive must contain the requested output")
+}
+fn s3cas_encode(output: String, source: S3CasOutput, platform: String, revision: String, cache_key: String) -> [U8] {
+    canonical := [U8]{}
+    s3cas_number(&canonical, source.root_mode, 4)
+    loop node in source.nodes {
+        &canonical.push(node.kind)
+        s3cas_field(&canonical, node.path)
+        s3cas_number(&canonical, node.mode, 4)
+        s3cas_number(&canonical, node.bytes.len(), 8)
+        s3cas_add(&canonical, node.bytes)
+    }
+    member_hash :: s3cas_digest(canonical)
+    out := s3cas_magic()
+    s3cas_field(&out, output.bytes())
+    s3cas_number(&out, 1, 4)
+    s3cas_field(&out, output.bytes())
+    s3cas_field(&out, output.bytes())
+    s3cas_field(&out, [U8]{})
+    s3cas_number(&out, source.root_mode, 4)
+    s3cas_number(&out, source.nodes.len(), 4)
+    loop node in source.nodes {
+        &out.push(node.kind)
+        s3cas_field(&out, node.path)
+        s3cas_number(&out, node.mode, 4)
+        s3cas_number(&out, node.bytes.len(), 8)
+        s3cas_add(&out, node.bytes)
+    }
+    &out.push(U8{2})
+    s3cas_field(&out, output.bytes())
+    s3cas_field(&out, platform.bytes())
+    s3cas_field(&out, revision.bytes())
+    s3cas_field(&out, cache_key.bytes())
+    s3cas_number(&out, 1, 4)
+    s3cas_field(&out, output.bytes())
+    s3cas_field(&out, member_hash.bytes())
+    s3cas_number(&out, canonical.len(), 8)
+    s3cas_number(&out, 0, 4)
+    &out.push(U8{0})
+    out
+}
+fn s3cas_utf8(bytes: [U8]) -> String { String.from_bytes(bytes) ?? panic("archive UTF-8") }
+fn s3cas_replace_link(bytes: [U8], old: [U8], replacement: [U8]) -> [U8] {
+    assert(old.len() > 0)
+    assert_eq(old.len(), replacement.len())
+    magic :: s3cas_magic()
+    assert_eq(bytes[0..<magic.len()], magic)
+    reader := S3CasReader{bytes: bytes, at: magic.len()}
+    _ :: &reader.field()
+    count :: &reader.number(4)
+    assert_eq(count, 1, "fixture must contain one output object")
+    digest := [U8]{}
+    found := S3CasOutput?{None}
+    loop _ in 0..<count {
+        _ :: &reader.field()
+        object_digest :: &reader.field()
+        meta :: &reader.field()
+        output :: &reader.output()
+        if meta.len() == 0 {
+            digest = object_digest
+            found = Val(output)
+        }
+    }
+    assert_eq((&reader.take_bytes(1))[0], U8{2}, "fixture must carry a Nix manifest")
+    manifest :: &reader.field()
+    platform :: &reader.field()
+    revision :: &reader.field()
+    cache_key :: &reader.field()
+    members :: &reader.number(4)
+    loop _ in 0..<members {
+        _ :: &reader.field()
+        _ :: &reader.field()
+        _ :: &reader.number(8)
+        references :: &reader.number(4)
+        loop _ in 0..<references -> _ :: &reader.field()
+    }
+    assert(digest.len() > 0, "fixture must carry an output object")
+    assert_eq(digest, manifest)
+    output := found ?? panic("fixture must carry an output object")
+    matches := 0
+    loop i in 0..<output.nodes.len() {
+        if output.nodes[i].kind == (U8{2}) && output.nodes[i].bytes == old {
+            output.nodes[i].bytes = replacement
+            matches += 1
+        }
+    }
+    assert_eq(matches, 1, "archive must contain one symlink target")
+    s3cas_encode(s3cas_utf8(manifest), output, s3cas_utf8(platform), s3cas_utf8(revision), s3cas_utf8(cache_key))
+}
+fn s3cas_find(bytes: [U8], old: [U8], start: Int) -> Int {
+    if old.len() > bytes.len() - start -> return -1
+    loop at in start..<(bytes.len() - old.len() + 1) {
+        if bytes[at..<(at + old.len())] == old -> return at
+    }
+    -1
+}
+fn s3cas_replace_all(bytes: [U8], old: [U8], replacement: [U8]) -> (bytes: [U8], count: Int) {
+    assert(old.len() > 0)
+    assert_eq(old.len(), replacement.len())
+    out := [U8]{}
+    cursor := 0
+    count := 0
+    loop {
+        at :: s3cas_find(bytes, old, cursor)
+        if at < 0 -> break
+        s3cas_add(&out, bytes[cursor..<at])
+        s3cas_add(&out, replacement)
+        cursor = at + old.len()
+        count += 1
+    }
+    s3cas_add(&out, bytes[cursor..<bytes.len()])
+    (bytes: out, count: count)
+}
+fn s3cas_copy_nofollow(source: String, destination: String) {
+    metadata :: files.stat(source) ?? panic("source metadata")
+    if metadata.is_symlink {
+        files.symlink(files.read_link(source) ?? panic("link target"), destination) ?? panic("link")
+    } else if metadata.is_dir {
+        files.create_dir(destination) ?? panic("destination directory")
+        entries :: files.list_dir(source) ?? panic("entries")
+        loop entry in entries -> s3cas_copy_nofollow(entry.path, files.join(destination, entry.name))
+        files.chmod(destination, metadata.mode) ?? panic("directory permissions")
+    } else {
+        files.copy(source, destination) ?? panic("copy")
+        files.chmod(destination, metadata.mode) ?? panic("file permissions")
+    }
+}
+fn s3cas_roots(name: String) -> HangarRoots {
+    scratch :: files.temp_dir(name) ?? panic("scratch")
+    HangarRoots{root: scratch.path, dev_mode: false}
+}
+fn s3cas_closure(output: String) -> NixClosureRecord {
+    NixClosureRecord{channel: "nixpkgs-unstable", revision: s3cas_repeat("a", 40), system: pkg_host_platform(), index_authority: s3cas_repeat("b", 64), derivation: s3cas_repeat("c", 64), output: output, nar_hash: "sha256:{s3cas_repeat("d", 64)}", size: 1, compression: "none", references: [String]{}, upstream_proof: "sha256-{s3cas_repeat("e", 64)}", cache_key: s3cas_repeat("f", 64), project_cas_bundle: "sha256-{s3cas_repeat("0", 64)}"}
+}
+fn s3cas_envelope(output: String, platform: String) -> LockEnvelope {
+    LockEnvelope{output_hash: output, platform: platform, provenance: "integration-test", catalog_tier: "local-unofficial", catalog_trust: "unverified"}
+}
+fn s3cas_ctx(roots: HangarRoots, project: String) -> ProviderCtx {
+    ProviderCtx{fixtures: None, store_dir: roots.root, offline: true, project_dir: Val(project), nix_index: None, nix_roots: Val(roots), allow_local_nix_catalog: true}
+}
+#Test("nix_cas_build_and_import_preserve_absolute_links_but_generic_paths_reject_them") {
+    if sys.family() != "unix" -> return
+    verification := StoreVerification.new()
+    roots :: s3cas_roots("nix-cas-source-root")
+    source :: (files.temp_dir("nix-cas-source") ?? panic("source")).path
+    absolute_target :: "/nix/store/jet-closure-target"
+    relative_target :: s3cas_repeat("x", absolute_target.len())
+    files.write(files.join(source, relative_target), "link target payload\n") ?? panic("payload")
+    files.symlink(relative_target, files.join(source, "link")) ?? panic("relative link")
+    request :: IngestRequest{name: "link-fixture", version: "1.0.0", reference: "link-fixture@fixture", cache_identity: CacheIdentity{source_fingerprint: "source-fingerprint", recipe_fingerprint: "recipe-fingerprint", policy_fingerprint: "policy-fingerprint", platform: "x86_64-linux"}, references: [String]{}, outputs: [String:String]{"out": source}, signature: "", provenance: "integration-test", platform_artifact_kind: ""}
+    entry :: (store_ingest_tree(&verification, roots, request) ?? panic("ingest")).entry
+    generic :: store_export_unsigned_archive(roots, entry.reference, true) ?? panic("generic archive")
+    output :: s3cas_read_output(generic, entry.envelope.output_hash)
+    platform :: pkg_host_platform()
+    revision :: s3cas_repeat("a", 40)
+    cache_key :: s3cas_repeat("f", 64)
+    bundle :: s3cas_encode(entry.envelope.output_hash, output, platform, revision, cache_key)
+    absolute_source :: (files.temp_dir("nix-cas-absolute-digest") ?? panic("absolute source")).path
+    tree :: files.join(absolute_source, "tree")
+    s3cas_copy_nofollow(source, tree)
+    files.remove(files.join(tree, "link")) ?? panic("remove relative link")
+    files.symlink(absolute_target, files.join(tree, "link")) ?? panic("absolute link")
+    files.chmod(tree, output.root_mode) ?? panic("root mode")
+    loop node in output.nodes {
+        if node.kind != (U8{2}) -> files.chmod(files.join(tree, s3cas_utf8(node.path)), node.mode) ?? panic("node mode")
+    }
+    new_output :: pkg_try_output_hash_of_in_hangar(tree, roots.hangar_dir(), false) ?? panic("absolute digest")
+    assert(new_output != entry.envelope.output_hash)
+    changed :: s3cas_replace_all(bundle, entry.envelope.output_hash.bytes(), new_output.bytes())
+    assert(changed.count >= 2, "root and output digest must be rewritten")
+    absolute_bundle :: s3cas_replace_link(changed.bytes, relative_target.bytes(), absolute_target.bytes())
+    project :: (files.temp_dir("nix-cas-project") ?? panic("project")).path
+    bundle_dir :: files.join(project, ".jet/nix-cas")
+    files.create_dir_all(bundle_dir) ?? panic("bundle dir")
+    bundle_digest :: s3cas_digest(absolute_bundle)
+    files.write_bytes(files.join(bundle_dir, bundle_digest), absolute_bundle) ?? panic("bundle")
+    destination :: s3cas_roots("nix-cas-destination")
+    imported :: store_import_nix_cas_bundle(project, destination, bundle_digest) ?? panic("import")
+    assert_eq(imported.report.objects, 1)
+    assert_eq(imported.digests, [String]{new_output})
+    link :: files.join(files.join(files.join(destination.hangar_dir(), "objects"), new_output), "link")
+    assert_eq(files.read_link(link) ?? panic("imported link"), absolute_target)
+    closure := s3cas_closure(new_output)
+    closure.project_cas_bundle = bundle_digest
+    pkg_lock_record_nix_realization(project, "link-fixture", "1.0.0", "link-fixture@jetpack", new_output, closure, s3cas_envelope(new_output, platform)) ?? panic("lock")
+    spec :: RefSpec.classify("link-fixture@jetpack") ?? panic("classify")
+    table :: SourceTable.empty()
+    first :: store_realize_verified(&verification, destination, s3cas_ctx(destination, project), RealizeRequest.Package{spec: spec, table: table}) ?? panic("replay")
+    nix_entry :: first.metadata()
+    warm :: store_realize_verified(&verification, destination, s3cas_ctx(destination, project), RealizeRequest.Package{spec: spec, table: table}) ?? panic("warm replay")
+    expected := nix_entry
+    expected.realized_at = 0
+    expected.last_used_at = 0
+    warm_entry := warm.metadata()
+    warm_entry.realized_at = 0
+    warm_entry.last_used_at = 0
+    assert_eq(warm_entry, expected, "warm replay changed lock identity")
+    copied_project :: (files.temp_dir("nix-cas-copied-project") ?? panic("copied project")).path
+    copied_bundle :: files.join(copied_project, ".jet/nix-cas")
+    files.create_dir_all(copied_bundle) ?? panic("copied bundle dir")
+    files.copy(files.join(project, ".jet/lock"), files.join(copied_project, ".jet/lock")) ?? panic("copy lock")
+    files.copy(files.join(bundle_dir, bundle_digest), files.join(copied_bundle, bundle_digest)) ?? panic("copy bundle")
+    copied_roots :: s3cas_roots("nix-cas-copied-destination")
+    copied :: store_realize_verified(&verification, copied_roots, s3cas_ctx(copied_roots, copied_project), RealizeRequest.Package{spec: spec, table: table}) ?? panic("copied replay")
+    copied_identity := copied.metadata()
+    copied_identity.out = ""
+    copied_identity.bin = ""
+    copied_identity.rlib = ""
+    expected_identity := expected
+    expected_identity.out = ""
+    expected_identity.bin = ""
+    expected_identity.rlib = ""
+    assert_eq(copied_identity, expected_identity, "copied repository changed locked replay identity")
+    exported :: store_export_nix_cas_bundle(&verification, destination, nix_entry.reference) ?? panic("Nix export")
+    assert(s3cas_find(exported.bytes, absolute_target.bytes(), 0) >= 0, "Nix CAS export must retain the absolute target as link data")
+    if store_export_unsigned_archive(destination, nix_entry.reference, false) == {
+        .Ok(_) -> panic("generic absolute export accepted")
+        .Err(error) -> assert(error.message().contains("absolute symlinks are not portable Hangar archive nodes"))
+    }
+    generic_roots :: s3cas_roots("nix-cas-generic-absolute")
+    if store_import_archive(generic_roots, absolute_bundle, None, true) == {
+        .Ok(_) -> panic("generic absolute import accepted")
+        .Err(error) -> assert(error.message().contains("archive link target is absolute"))
+    }
+    escape :: "../{s3cas_repeat("x", relative_target.len() - 3)}".bytes()
+    control := relative_target.bytes()
+    control[relative_target.len() /% 2] = U8{1}
+    backslash := relative_target.bytes()
+    backslash[relative_target.len() /% 2] = U8{92}
+    targets :: [(label: String, target: [U8], message: String)]{(label: "escape", target: escape, message: "archive link target escapes its output root"), (label: "control", target: control, message: "archive link target is not portable"), (label: "backslash", target: backslash, message: "archive link target is not portable")}
+    loop hostile in targets {
+        bytes :: s3cas_replace_link(bundle, relative_target.bytes(), hostile.target)
+        hostile_roots :: s3cas_roots("nix-cas-generic-{hostile.label}")
+        if store_import_archive(hostile_roots, bytes, None, true) == {
+            .Ok(_) -> panic("hostile generic link accepted")
+            .Err(error) -> assert(error.message().contains(hostile.message))
+        }
+    }
+}

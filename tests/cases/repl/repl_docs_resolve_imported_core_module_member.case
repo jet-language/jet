@@ -1,0 +1,12 @@
+# PORT tests/repl.rs:2408-2415; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_docs_resolve_imported_core_module_member.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_docs_resolve_imported_core_module_member.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout|stderr: ~ "core.math.sqrt" # original predicate
+stdout|stderr: ~ "Source: core.math" # original predicate

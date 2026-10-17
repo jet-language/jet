@@ -210,12 +210,11 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
     for (mode, args) in [
         ("release", vec!["run", "--release", shown]),
         ("default", vec!["run", shown]),
-        ("interpret", vec!["run", "--interpret", shown]),
     ] {
         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
             .current_dir(repo())
             .env("NO_COLOR", "1")
-            .env("JET_RUN_CACHE_DIR", cache.join(mode).join("run"))
+            .env("JET_STORE_DIR", cache.join(mode).join("run"))
             .env("JET_STORE_DIR", cache.join(mode).join("build"))
             .args(args)
             .output()
@@ -232,7 +231,7 @@ fn structure_plane_keeps_parser_sema_tir_and_runtime_tier_parity() {
     let dev = Command::new(env!("CARGO_BIN_EXE_jet"))
         .current_dir(repo())
         .env("NO_COLOR", "1")
-        .env("JET_RUN_CACHE_DIR", cache.join("dev").join("run"))
+        .env("JET_STORE_DIR", cache.join("dev").join("run"))
         .env("JET_STORE_DIR", cache.join("dev").join("build"))
         .args(["dev", shown, "--watch=off"])
         .output()

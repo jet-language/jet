@@ -1,0 +1,13 @@
+# Port of tests/web_app_graph.rs:126-152; runtime PENDING-SAME-HEAD.
+# Exact serializer crates/jet-foundation/src/App.rs474-795 (routes485-520, actions619-650, queries711-717, stores727, mounts735-750, policy769-791).
+# Wrapper $.web_app Source/CmdDevTools.rs4177-4184.
+# KNOWN-FAILING #4830: Jet Compiler/JetCli/Source/Cli/Front.jet829 returns not_ported.
+fixture: query_graph_facts_keep_explicit_key_and_dependency_identity.fixture
+step: jet explain --web-graph app.jet --json
+exit: 0
+json: stdout doc $.web_app.queries #= 1
+json: stdout doc $.web_app.queries[0].key = "orders"
+json: stdout doc $.web_app.queries[0].footprint = "ext:orders"
+json: stdout doc $.web_app.queries[0].kind = "subscribe"
+json: stdout doc $.web_app.queries[0].source = "home"
+

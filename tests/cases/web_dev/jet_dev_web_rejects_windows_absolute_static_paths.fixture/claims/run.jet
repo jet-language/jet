@@ -1,0 +1,7 @@
+#Test("original Windows absolute paths fail closed on every host") {
+    paths :: [String]{"/C:/Windows/win.ini", "/C:\\Windows\\win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"}
+    loop requested in paths {
+        response :: s5_web_get(s5_web_port(), requested, None) ?? panic("Windows absolute static-path request failed")
+        assert_eq(response.status, 400)
+    }
+}

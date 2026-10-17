@@ -1,0 +1,12 @@
+// tests/pkg.rs:2713-2733 originally exercised the pkg crate's SHA256 helper.
+// Public mir_sha256_hex is its Jet counterpart; exact inputs/predicates remain.
+// PENDING-SEAM(compiler-lib): nested Tests packaging is post-gate-2.
+#Test("pkg integration sha256_empty_vector") {
+    hash :: mir_sha256_hex("")
+    assert_eq(hash, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+}
+#Test("pkg integration sha256_known_vector_matches_self") {
+    hash :: mir_sha256_hex("abc")
+    assert_eq(hash.len(), 64)
+    assert(hash.starts_with("ba7816bf8f01cfea"))
+}

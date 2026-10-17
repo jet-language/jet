@@ -1,0 +1,21 @@
+# HAND-PORT tests/jetdoc.rs:247-301 checked_text_contract_is_rendered_in_generated_docs
+# Original predicates; same-head kit verification pending.
+fixture: checked_text_contract_is_rendered_in_generated_docs.fixture
+env: NO_COLOR=1
+step: jet doc --json {work}/checked_text.jet
+exit: 0
+stdout: ~ "Pattern :: distinct String" # original predicate
+stdout: ~ "implements CheckedText" # original predicate
+stdout: ~ "type Error = PatternError" # original predicate
+stdout: ~ "encode_hole" # original predicate
+step: jet doc {work}/checked_text.jet
+exit: 0
+file: docs/index.md ~ "Pattern :: distinct String" # original predicate
+file: docs/index.md ~ "implements CheckedText" # original predicate
+file: docs/index.md ~ "type Error = PatternError" # original predicate
+file: docs/index.md ~ "encode_hole" # original predicate
+file: docs/index.html ~ "Pattern :: distinct String" # original predicate
+file: docs/index.html ~ "implements CheckedText" # original predicate
+file: docs/index.html ~ "type Error = PatternError" # original predicate
+file: docs/index.html ~ "encode_hole" # original predicate
+

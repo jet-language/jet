@@ -1,0 +1,42 @@
+// Source cases are shared with the Rust verification tier through the JSON
+// corpus. The assembly runner generates only calls into this production check.
+fn atomic_field_test_source(name: String, source: String, accepted: Bool, atomic: Bool) {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != 0 -> panic("{name}: parity source must parse")
+    checked :: check_program(parsed.program, "atomic_field_parity", "{name}.jet", [SemaSourceSegment]{})
+    errors := 0
+    loop diagnostic in checked.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> errors += 1
+    }
+    if accepted && errors != 0 -> panic("{name}: scalar initializer was rejected")
+    if !accepted && errors == 0 -> panic("{name}: invalid initializer was accepted")
+    if !accepted -> return
+    // check_program's standalone declaration-registration mode marks structs
+    // incomplete independently; require the whole function's checked TIR.
+    if checked.functions.len() != 1 -> panic("{name}: field function was not checked")
+    found := false
+    loop statement in checked.functions[0].body {
+        if statement == .Return(.Val(value), _) {
+            if value.kind == .StructLit(fields, _, _) {
+                if fields.len() != 1 -> panic("{name}: field order/count changed")
+                field :: fields[0]
+                if atomic {
+                    if sema_atomic_field_inner(field.field.ty) == None || field.value.ty != field.field.ty -> panic("{name}: field lost its Atomic carrier")
+                    if field.value.kind == .StaticCall(owner, _, method, _, args) {
+                        if owner == .Prelude(_, path, generics) {
+                            if path != "JetAtomic" || generics.len() != 1 || method.name != "new" || args.len() != 1 -> panic("{name}: wrong Atomic constructor")
+                        } else {
+                            panic("{name}: Atomic initializer must use canonical Prelude owner")
+                        }
+                    } else {
+                        panic("{name}: Atomic initializer must be a typed constructor")
+                    }
+                } else {
+                    if sema_atomic_field_inner(field.field.ty) != None -> panic("{name}: ordinary generic acquired an Atomic carrier")
+                }
+                found = true
+            }
+        }
+    }
+    if !found -> panic("{name}: checked record return is missing")
+}

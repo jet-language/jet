@@ -9,9 +9,9 @@
 STAGED_PLAN_FORMAT :: prep { "jet.staged-plan.v1" }
 
 // One exact input made visible to a finite staged plan action.
-pub struct PlanInput {
-    pub path: String
-    pub digest: String
+struct PlanInput {
+    path: String
+    digest: String
 
     fn new(path: String, digest: String) -> PlanInput Never! {
         PlanInput{path: path, digest: digest}
@@ -26,23 +26,23 @@ pub struct PlanInput {
 }
 
 // The only authority a staged plan action may observe.
-pub struct PlanAuthority {
-    pub tools: [String]
-    pub effects: [BuildEffect]
-    pub platform: String
+struct PlanAuthority {
+    tools: [String]
+    effects: [BuildEffect]
+    platform: String
 }
 
 // A typed finite action emitted by a staged plan action.
-pub struct PlanFragmentAction {
-    pub name: String
-    pub tool: String
-    pub args: [String]
-    pub inputs: [String]
-    pub outputs: [String]
-    pub env: [String: String]
-    pub effects: [BuildEffect]
-    pub dependencies: [String]
-    pub platform: String
+struct PlanFragmentAction {
+    name: String
+    tool: String
+    args: [String]
+    inputs: [String]
+    outputs: [String]
+    env: [String: String]
+    effects: [BuildEffect]
+    dependencies: [String]
+    platform: String
 
     fn new(name: String, tool: String) -> PlanFragmentAction Never! {
         PlanFragmentAction{name: name, tool: tool, args: [String]{}, inputs: [String]{}, outputs: [String]{}, env: [String: String]{}, effects: [BuildEffect]{}, dependencies: [String]{}, platform: ""}
@@ -50,8 +50,8 @@ pub struct PlanFragmentAction {
 }
 
 // Typed output of a finite staged plan action.
-pub struct BuildPlanFragment {
-    pub actions: [PlanFragmentAction]
+struct BuildPlanFragment {
+    actions: [PlanFragmentAction]
 
     fn canonical_bytes(self) -> [U8] Never! {
         writer := RecipeCanonicalWriter.new("jet.build-plan-fragment.v1")
@@ -95,12 +95,12 @@ pub struct BuildPlanFragment {
 
 // Metadata for one sandboxed plan action. The fragment is supplied only after
 // the action runs, then checked against this declaration before publication.
-pub struct StagedPlanAction {
-    pub name: String
-    pub stage: Int
-    pub stage_bound: Int
-    pub inputs: [PlanInput]
-    pub authority: PlanAuthority
+struct StagedPlanAction {
+    name: String
+    stage: Int
+    stage_bound: Int
+    inputs: [PlanInput]
+    authority: PlanAuthority
 
     fn new(name: String, stage: Int, stage_bound: Int, inputs: [PlanInput], authority: PlanAuthority) -> StagedPlanAction Never! {
         StagedPlanAction{name: name, stage: stage, stage_bound: stage_bound, inputs: inputs, authority: authority}
@@ -164,7 +164,7 @@ pub struct StagedPlanAction {
                 }
                 loop owned in output_owners {
                     if pkg_staged_paths_overlap(owned.output, output) {
-                        return Err(StagedPlanError.OutputConflict{first: owned.output, first_owner: owned.owner, second: ~output, second_owner: action.name})
+                        return Err(StagedPlanError.OutputConflict{first: owned.output, first_owner: owned.owner, second: output.copy(), second_owner: action.name})
                     }
                 }
                 &output_owners.push((output: output, owner: action.name))
@@ -182,7 +182,7 @@ pub struct StagedPlanAction {
         }
         loop action in pkg_staged_sorted_keys(dependencies) {
             loop dependency in dependencies[action] {
-                if !names.contains(dependency) -> return Err(StagedPlanError.UnknownDependency{action: ~action, dependency: dependency})
+                if !names.contains(dependency) -> return Err(StagedPlanError.UnknownDependency{action: action.copy(), dependency: dependency})
             }
         }
         pkg_staged_detect_cycle(dependencies)
@@ -230,13 +230,13 @@ pub struct StagedPlanAction {
 }
 
 // Exact facts written beside a staged fragment for offline replay.
-pub struct StagedPlanLock {
-    pub action_identity: String
-    pub fragment_digest: String
-    pub stage: Int
-    pub stage_bound: Int
-    pub inputs: [PlanInput]
-    pub authority: PlanAuthority
+struct StagedPlanLock {
+    action_identity: String
+    fragment_digest: String
+    stage: Int
+    stage_bound: Int
+    inputs: [PlanInput]
+    authority: PlanAuthority
 
     // The lock file text (`StagedPlanLock::encode`). Every set-like field is
     // sorted so the text is deterministic.
@@ -266,7 +266,7 @@ pub struct StagedPlanLock {
 
 // Why a staged plan declaration or fragment was rejected.
 #Error
-pub enum StagedPlanError {
+enum StagedPlanError {
     EmptyActionName
     InvalidStageBound
     StageOutOfBounds(stage: Int, bound: Int)

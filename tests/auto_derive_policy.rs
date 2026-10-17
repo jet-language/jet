@@ -1,15 +1,17 @@
-use jet::JitBackend::JitBackend;
 use std::process::Command;
 
 mod common;
 
-fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
+fn emit_native_aot(
+    bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
+) -> String {
     let request = jet_foundation::MIR::MirArtifactRequest::new(
         jet_foundation::MIR::MirArtifactTarget::RustAot,
         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
         jet_foundation::MIR::MirArtifactBuildMode::Dev,
     );
-    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
+    let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, checked_nominals, request)
         .expect("checked native artifact lowers through MIR");
     mir.validate()
         .expect("canonical MIR validates in auto-derive test");
@@ -23,10 +25,128 @@ fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
         &jet::Codegen::MIRRust::MirRustConfig {
             target: jet_foundation::Layout::TargetLayout::host(),
             target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
-            root_prefix: String::new(),
+            root_prefix: root_prefix.to_string(),
             execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
         },
     )
+}
+
+#[test]
+fn complex_unit_literals_use_registered_native_root_with_prefix() {
+    let bundle = checked_project(
+        "complex_root_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        include_str!("../Examples/features/types/unit_literals.jet"),
+    );
+    let rust = emit_native_aot_with_root_prefix(&bundle, "runtime::");
+    assert!(rust.contains("runtime::JetComplex"), "{rust}");
+    assert!(!rust.contains("runtime::__jet_Complex"), "{rust}");
+}
+
+#[test]
+fn checked_dkim_config_uses_the_native_head_with_any_root_prefix() {
+    let bundle = checked_project(
+        "dkim_carrier_projection",
+        "authority: { holds: { allow: [Mem.Alloc] } }",
+        r#"
+use core.email as email
+fn consume(value: email.DKIMConfig?) {}
+fn run() { consume(None) }
+"#,
+    );
+    for prefix in ["", "runtime::"] {
+        let rust = emit_native_aot_with_root_prefix(&bundle, prefix);
+        assert!(rust.contains(&format!("{prefix}jet_email::DkimConfig<")), "{rust}");
+        assert!(!rust.contains("jet_email::DKIMConfig"), "{rust}");
+    }
+}
+
+#[test]
+fn view_materialization_borrows_the_source_at_the_kernel_boundary() {
+    let bundle = checked_project(
+        "view_copy_supplier",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+fn copy_read(values: View<Int>) -> [Int] { ~values }
+fn copy_write(values: ViewMut<Int>) -> [Int] { ~values }
+fn copy_text(value: View<str>) -> String { ~value }
+fn run() {
+    fixed :: [Int#3]{1, 2, 3}
+    values := [Int]{4, 5, 6}
+    padded :: " text "
+    print(copy_read(fixed[0..1]))
+    print(copy_read(values[0..1]))
+    print(copy_write(&values[0..1]))
+    print(copy_text(padded.trim()))
+    print(fixed[0])
+    print(values[0])
+    print(padded)
+}
+"#,
+    );
+    let rust = emit_native_aot(&bundle);
+    for kernel in ["jet_view_copy(", "jet_string_view_copy("] {
+        let calls = rust
+            .lines()
+            .filter(|line| line.contains("__jet_v") && line.contains(kernel))
+            .collect::<Vec<_>>();
+        assert!(!calls.is_empty(), "missing {kernel} supplier:\n{rust}");
+        for call in calls {
+            assert!(!call.contains(".clone("), "supplier must not copy before {kernel}: {call}");
+            assert!(
+                call.contains(".as_ref()") || call.contains('&'),
+                "supplier must borrow into {kernel}: {call}"
+            );
+        }
+    }
+}
+
+#[test]
+fn checked_shell_text_uses_argv_carrier_with_any_root_prefix() {
+    let bundle = checked_project(
+        "shell_carrier_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+fn consume(command: Sh) { print("ready") }
+fn run() {
+    word :: "two words"
+    command :: Sh{"printf {word}"}
+    consume(command)
+}
+"#,
+    );
+    for prefix in ["", "runtime::"] {
+        let rust = emit_native_aot_with_root_prefix(&bundle, prefix);
+        assert!(rust.contains("Vec<String>"), "{rust}");
+        assert!(!rust.contains("jet_std::Sh"), "{rust}");
+        assert!(!rust.contains("__jet_Sh"), "{rust}");
+    }
+    if let Some((exit, stdout)) = aot_output(&bundle, "shell_carrier_projection_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, "ready\n");
+    }
+}
+
+#[test]
+fn qualified_user_shell_name_keeps_its_declared_carrier() {
+    let bundle = checked_project(
+        "user_shell_projection",
+        "authority: { holds: { allow: [IO, Mem.Alloc] } }",
+        r#"
+module user {
+    struct Sh { value: Int }
+}
+fn consume(command: user.Sh) { print(command.value) }
+fn run() { consume(user.Sh{value: 7}) }
+"#,
+    );
+    let rust = emit_native_aot(&bundle);
+    assert!(rust.contains("_c_cSh"), "{rust}");
+    assert!(!rust.contains("jet_std::Sh"), "{rust}");
+    if let Some((exit, stdout)) = aot_output(&bundle, "user_shell_projection_aot") {
+        assert_eq!(exit, 0);
+        assert_eq!(stdout, "7\n");
+    }
 }
 
 /// Number of `impl <rust_trait> for <type>` headers in generated Rust for the
@@ -61,17 +181,46 @@ fn loaded_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::
     jet::Loader::load_entry(entry.to_str().unwrap()).unwrap()
 }
 
-fn checked_bundle(mut bundle: jet::AST::ProgramBundle) -> jet::AST::ProgramBundle {
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+fn checked_bundle(mut bundle: jet::AST::ProgramBundle) -> (
+    jet::AST::ProgramBundle,
+    std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>,
+) {
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
-    bundle
+    (bundle, checked_nominals)
 }
 
-fn checked_project(name: &str, manifest_policy: &str, source: &str) -> jet::AST::ProgramBundle {
+fn checked_project(name: &str, manifest_policy: &str, source: &str) -> (
+    jet::AST::ProgramBundle,
+    std::sync::Arc<[std::sync::Arc<jet::AST::MirFragmentNominalFacts>]>,
+) {
     checked_bundle(loaded_project(name, manifest_policy, source))
+}
+
+#[test]
+fn imported_distinct_raw_projects_its_declaring_base() {
+    jet_foundation::CompilerStack::run_on_compiler_stack(|| {
+        for base in ["text", "record"] {
+            let entry = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/distinct-import-raw")
+                .join(base)
+                .join("run.jet");
+            let bundle = checked_bundle(jet::Loader::load_entry(entry.to_str().unwrap())
+                .expect("split distinct fixture loads"));
+            let request = jet_foundation::MIR::MirArtifactRequest::new(
+                jet_foundation::MIR::MirArtifactTarget::RustAot,
+                jet_foundation::MIR::MirArtifactKind::NativeExecutable,
+                jet_foundation::MIR::MirArtifactBuildMode::Dev,
+            );
+            let (mir, _) = jet::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
+                .unwrap_or_else(|error| panic!("{base} imported distinct fixture: {error}"));
+            mir.validate().expect("split distinct raw and generated equality validate");
+        }
+    });
 }
 
 fn project_diagnostics(name: &str, manifest_policy: &str, source: &str) -> Vec<String> {
@@ -119,7 +268,11 @@ struct AotMeasurement {
     binary_bytes: u64,
 }
 
-fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMeasurement> {
+fn aot_measurement(
+    bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
+    name: &str,
+) -> Option<AotMeasurement> {
     if !common::have_rustc() {
         return None;
     }
@@ -128,7 +281,7 @@ fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMe
     std::fs::create_dir_all(&dir).unwrap();
     let rust = dir.join("main.rs");
     let binary = dir.join("main_bin");
-    let generated = emit_native_aot(bundle);
+    let generated = emit_native_aot(bundle, checked_nominals);
     std::fs::write(&rust, &generated).unwrap();
     let built = Command::new("rustc")
         .args(["--edition", "2021", "-O"])
@@ -151,32 +304,33 @@ fn aot_measurement(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<AotMe
     })
 }
 
-fn aot_output(bundle: &jet::AST::ProgramBundle, name: &str) -> Option<(i32, String)> {
-    aot_measurement(bundle, name).map(|measurement| (measurement.exit, measurement.stdout))
+fn aot_output(
+    bundle: &jet::AST::ProgramBundle,
+    checked_nominals: &[std::sync::Arc<jet::AST::MirFragmentNominalFacts>],
+    name: &str,
+) -> Option<(i32, String)> {
+    aot_measurement(bundle, checked_nominals, name).map(|measurement| (measurement.exit, measurement.stdout))
 }
 
 #[test]
 fn signed_markers_gate_generated_traits_and_jit_behavior() {
-    let bundle = checked_project(
-        "signed",
-        "",
-        r#"
-#[!Debug, !Equatable, Printable]
-struct Mixed { value: Int }
-
-fn run() {
-    print(Mixed{ value: 7 })
-}
-"#,
-    );
-    let rust = emit_native_aot(&bundle);
+    let (bundle, checked_nominals) = checked_project("signed",
+    "",
+    r#"
+    #[!Debug, !Equatable, Printable]
+    struct Mixed { value: Int }
+    
+    fn run() {
+        print(Mixed{ value: 7 })
+    }
+    "#,);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert_eq!(impl_count(&rust, "JetShow", "Mixed"), 1);
     assert_eq!(impl_count(&rust, "JetDebug", "Mixed"), 0);
     assert_eq!(impl_count(&rust, "__jet_Equatable", "Mixed"), 0);
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &checked_nominals, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("signed auto-derive program did not run: {outcome:?}");
     };
@@ -185,16 +339,14 @@ fn run() {
 
 #[test]
 fn signed_codable_refuses_both_codec_directions() {
-    let bundle = checked_project(
-        "signed_codable",
-        "",
-        r#"
-#!Codable
-struct NoCodec { value: Int }
-
-fn run() {}
-"#,
-    );
+    let (bundle, checked_nominals) = checked_project("signed_codable",
+    "",
+    r#"
+    #!Codable
+    struct NoCodec { value: Int }
+    
+    fn run() {}
+    "#,);
     let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
     let facts = &facts[bundle.entry];
     assert!(!facts.auto_encode.contains("NoCodec"));
@@ -204,34 +356,31 @@ fn run() {}
 
 #[test]
 fn plain_struct_auto_codable_matches_all_execution_tiers() {
-    let bundle = checked_project(
-        "plain_codable",
-        "",
-        r#"
-use core.encoding.json as json
-
-struct Record { id: Int name: String }
-
-fn run() {
-    print(json.to_string(Record{ id: 7, name: "plain" }))
-}
-"#,
-    );
+    let (bundle, checked_nominals) = checked_project("plain_codable",
+    "",
+    r#"
+    use core.encoding.json as json
+    
+    struct Record { id: Int name: String }
+    
+    fn run() {
+        print(json.to_string(Record{ id: 7, name: "plain" }))
+    }
+    "#,);
     let expected = "{\"id\":7,\"name\":\"plain\"}\n";
-    if let Some((exit, stdout)) = aot_output(&bundle, "plain_codable_aot") {
+    if let Some((exit, stdout)) = aot_output(&bundle, &checked_nominals, "plain_codable_aot") {
         assert_eq!(exit, 0);
         assert_eq!(stdout, expected);
     }
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &checked_nominals, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("plain Codable program did not run in the default JIT: {outcome:?}");
     };
     assert_eq!(stdout, expected);
 
-    let outcome = jet::Interpreter::dev_iteration(
+    let outcome = crate::common::dev_run(
         project_dir("plain_codable")
             .join("main.jet")
             .to_str()
@@ -247,7 +396,7 @@ fn run() {
 
 #[test]
 fn auto_derive_keeps_compile_and_binary_measurements_stable() {
-    let explicit_bundle = checked_project(
+    let (explicit_bundle, explicit_nominals) = checked_project(
         "auto_measure_before",
         "",
         r#"
@@ -257,11 +406,11 @@ use core.encoding.json as json
 struct Record { id: Int name: String }
 
 fn run() {
-    print(json.to_string(Record{ id: 7, name: "plain" }))
+    print(json.to_string(Record{ id: 7, name: "plain" }) ?? panic("JSON encode"))
 }
 "#,
     );
-    let automatic_bundle = checked_project(
+    let (automatic_bundle, automatic_nominals) = checked_project(
         "auto_measure_after",
         "",
         r#"
@@ -270,20 +419,20 @@ use core.encoding.json as json
 struct Record { id: Int name: String }
 
 fn run() {
-    print(json.to_string(Record{ id: 7, name: "plain" }))
+    print(json.to_string(Record{ id: 7, name: "plain" }) ?? panic("JSON encode"))
 }
 "#,
     );
-    let Some(explicit) = aot_measurement(&explicit_bundle, "auto_measure_before_aot") else {
+    let Some(explicit) = aot_measurement(&explicit_bundle, &explicit_nominals, "auto_measure_before_aot") else {
         return;
     };
-    let Some(explicit_repeat) = aot_measurement(&explicit_bundle, "auto_measure_before_aot") else {
+    let Some(explicit_repeat) = aot_measurement(&explicit_bundle, &explicit_nominals, "auto_measure_before_aot") else {
         return;
     };
-    let Some(automatic) = aot_measurement(&automatic_bundle, "auto_measure_after_aot") else {
+    let Some(automatic) = aot_measurement(&automatic_bundle, &automatic_nominals, "auto_measure_after_aot") else {
         return;
     };
-    let Some(automatic_repeat) = aot_measurement(&automatic_bundle, "auto_measure_after_aot")
+    let Some(automatic_repeat) = aot_measurement(&automatic_bundle, &automatic_nominals, "auto_measure_after_aot")
     else {
         return;
     };
@@ -432,8 +581,8 @@ fn run() {}
     assert!(!facts.auto_decode.contains("Defaulted"));
     assert!(facts.auto_encode.contains("Explicit"));
     assert!(facts.auto_decode.contains("Explicit"));
-    let bundle = checked_bundle(bundle);
-    let rust = emit_native_aot(&bundle);
+    let (bundle, checked_nominals) = checked_bundle(bundle);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     assert_eq!(impl_count(&rust, "__jet_Encode", "Defaulted"), 0);
     assert_eq!(impl_count(&rust, "__jet_Decode", "Defaulted"), 0);
     assert_eq!(impl_count(&rust, "__jet_Encode", "Explicit"), 1);
@@ -442,45 +591,42 @@ fn run() {}
 
 #[test]
 fn generic_deny_list_refuses_auto_derive() {
-    let bundle = checked_project(
-        "package_off",
-        "policy: { lints: { deny: [auto_derive] } }",
-        r#"
-#[Printable, Equatable, Debug]
-struct Enabled { value: Int }
-
-struct Missing { value: Int }
-
-#!Debug
-struct Manual { value: Int }
-
-impl Manual.Debug {
-    fn debug(self) -> String { return "manual" }
-}
-
-fn run() {
-    a := Enabled{ value: 3 }
-    print(a)
-    print("{a:Debug}")
-    print(a == Enabled{ value: 3 })
-    print("{Manual{ value: 9 }:Debug}")
-}
-"#,
-    );
-    let rust = emit_native_aot(&bundle);
+    let (bundle, checked_nominals) = checked_project("package_off",
+    "policy: { lints: { deny: [auto_derive] } }",
+    r#"
+    #[Printable, Equatable, Debug]
+    struct Enabled { value: Int }
+    
+    struct Missing { value: Int }
+    
+    #!Debug
+    struct Manual { value: Int }
+    
+    impl Manual.Debug {
+        fn debug(self) -> String { return "manual" }
+    }
+    
+    fn run() {
+        a := Enabled{ value: 3 }
+        print(a)
+        print("{a:Debug}")
+        print(a == Enabled{ value: 3 })
+        print("{Manual{ value: 9 }:Debug}")
+    }
+    "#,);
+    let rust = emit_native_aot(&bundle, &checked_nominals);
     for rust_trait in ["JetShow", "JetDebug", "__jet_Equatable"] {
         assert_eq!(impl_count(&rust, rust_trait, "Enabled"), 1, "{rust_trait} Enabled");
         assert_eq!(impl_count(&rust, rust_trait, "Missing"), 0, "{rust_trait} Missing");
     }
-    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle, &bundle.name_ledger);
-    let facts = &facts[bundle.entry];
+    let facts = jet::Traits::TraitRegistry::bundle_auto_derives(&bundle.bundle, &bundle.bundle.name_ledger);
+    let facts = &facts[bundle.bundle.entry];
     assert!(!facts.auto_encode.contains("Missing"));
     assert!(!facts.auto_decode.contains("Missing"));
     assert_eq!(impl_count(&rust, "JetDebug", "Manual"), 1);
 
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &checked_nominals, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("package-off auto-derive program did not run: {outcome:?}");
     };
@@ -489,7 +635,7 @@ fn run() {
         "Enabled { value: 3 }\nEnabled { value: 3 }\ntrue\nmanual\n"
     );
 
-    let outcome = jet::Interpreter::dev_iteration(
+    let outcome = crate::common::dev_run(
         project_dir("package_off")
             .join("main.jet")
             .to_str()
@@ -606,7 +752,7 @@ fn run() {
     }
     for (tier, force_interpreter) in [("JIT", false), ("interpreter", true)] {
         let outcome =
-            jet::Interpreter::dev_iteration(entry.to_str().unwrap(), false, force_interpreter);
+            crate::common::dev_run(entry.to_str().unwrap(), false, force_interpreter);
         let jet::Interpreter::RunOutcome::Problems(diagnostics) = outcome else {
             panic!("{tier} bypassed sema: {outcome:?}");
         };
@@ -667,7 +813,7 @@ fn package_default_reaches_nested_and_dependency_modules() {
         "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
     )
     .unwrap();
-    std::fs::write(dep.join("dep.jet"), "pub struct DepType { value: Int }\n").unwrap();
+    std::fs::write(dep.join("dep.jet"), "struct DepType { value: Int }\n").unwrap();
     let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
     let mut by_module = std::collections::HashMap::new();
     for module in &bundle.modules {
@@ -744,7 +890,7 @@ fn run() {
         "name: \"dep\"\nversion: \"1\"\npolicy: { lints: { deny: [auto_derive] } }\n",
     )
     .unwrap();
-    std::fs::write(dep.join("dep.jet"), "pub struct Token { value: Int }\n").unwrap();
+    std::fs::write(dep.join("dep.jet"), "struct Token { value: Int }\n").unwrap();
     std::fs::write(
         open_dep.join("package.jet"),
         "name: \"open_dep\"\nversion: \"1\"\n",
@@ -752,7 +898,7 @@ fn run() {
     .unwrap();
     std::fs::write(
         open_dep.join("open_dep.jet"),
-        "pub struct Badge { pub value: Int }\n",
+        "struct Badge { value: Int }\n",
     )
     .unwrap();
 
@@ -809,7 +955,7 @@ fn run() {
     print("{envelope:Debug}")
     print(envelope == ImportedEnvelope{ badge: library.Badge{ value: 9 } })
     print(envelope < ImportedEnvelope{ badge: library.Badge{ value: 10 } })
-    wire :: json.to_string(envelope)
+    wire :: json.to_string(envelope) ?? panic("JSON encode")
     print(wire)
     decoded :: json.decode<ImportedEnvelope>(wire) ?? panic("decode")
     print(decoded == envelope)
@@ -887,8 +1033,9 @@ fn run() {
     ] {
         assert!(!selected.contains("Token"), "{selected:?}");
     }
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect();
     assert!(errors.is_empty(), "{errors:#?}");
@@ -911,19 +1058,18 @@ MapEnvelope { values: [\"one\": 1] }\n\
 UnionEnvelope { value: 3 }\n\
 UnionEnvelope { value: 3 }\n\
 true\n";
-    if let Some((exit, stdout)) = aot_output(&bundle, "same_named_types_aot") {
+    if let Some((exit, stdout)) = aot_output(&bundle, &checked_nominals, "same_named_types_aot") {
         assert_eq!(exit, 0);
         assert_eq!(stdout, expected);
     }
     let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let outcome = common::run_cranelift_bundle(&mut backend, &bundle, false, &policy);
+    let outcome = common::run_interpreted(&bundle, &checked_nominals, &policy);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the default JIT: {outcome:?}");
     };
     assert_eq!(stdout, expected);
     let outcome =
-        jet::Interpreter::dev_iteration(app.join("main.jet").to_str().unwrap(), false, true);
+        crate::common::dev_run(app.join("main.jet").to_str().unwrap(), false, true);
     let jet::Interpreter::RunOutcome::Ran { stdout, .. } = outcome else {
         panic!("same-name program did not run in the forced interpreter: {outcome:?}");
     };

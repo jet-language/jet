@@ -3,17 +3,17 @@
 // with the bound source; results cross with width checks and bounded strings.
 
 // A Tcl binding names the directory holding the embeddable runtime.
-pub struct TclBindResult {
-    pub source: String
-    pub archive: String
-    pub lib_dir: String
-    pub provenance: String
+struct TclBindResult {
+    source: String
+    archive: String
+    lib_dir: String
+    provenance: String
 }
 
 PKG_TCL_TOOL_ACTION :: prep { "rejected the Tcl binding bridge" }
 
 // Build the Tcl bridge seeded with `source` and render its Jet surface.
-pub fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> TclBindResult ForeignBindError! {
+fn pkg_tcl_bind(source: String, lib: String, cache: String) -[FS, Env, Exec, Time.Wait]> TclBindResult ForeignBindError! {
     pkg_binder_require_lib_name(lib)
     tclsh :: pkg_bridge_tool_path("tclsh") ?? return Err(ForeignBindError.ToolMissing("tclsh"))
     root :: pkg_binder_tool_root(tclsh) ?? return Err(ForeignBindError.ToolMissing("tclsh"))
@@ -62,34 +62,34 @@ PKG_TCL_JET :: prep { ```#Import module c.@@abi@@ {
 }
 use c.@@abi@@ as abi
 
-pub struct Session { value: Int }
-pub enum TclError { Eval }
+struct Session { value: Int }
+enum TclError { Eval }
 
-pub fn open() -[FFI.Tcl]> Session TclError! {
+fn open() -[FFI.Tcl]> Session TclError! {
     value :: abi.open()
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(Session{ value: value })
 }
 
-pub fn eval(session: Session, code: String) -[FFI.Tcl]> String TclError! {
+fn eval(session: Session, code: String) -[FFI.Tcl]> String TclError! {
     value :: abi.eval(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }
 
-pub fn eval_once(code: String) -[FFI.Tcl]> String TclError! {
+fn eval_once(code: String) -[FFI.Tcl]> String TclError! {
     value :: abi.eval_once(code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }
 
-pub fn eval_int(session: Session, code: String) -[FFI.Tcl]> Int TclError! {
+fn eval_int(session: Session, code: String) -[FFI.Tcl]> Int TclError! {
     value :: abi.eval_int(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
 }
 
-pub fn eval_float(session: Session, code: String) -[FFI.Tcl]> Float TclError! {
+fn eval_float(session: Session, code: String) -[FFI.Tcl]> Float TclError! {
     value :: abi.eval_float(session.value, code)
     if abi.take_error() != 0 -> return Err(TclError.Eval)
     return Ok(value)
@@ -99,7 +99,7 @@ impl Session.Close {
     fn close(^self) { abi.close(self.value) }
 }
 
-pub fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }
+fn close(session: ^Session) -[FFI.Tcl]> { abi.close(session.value) }
 ``` }
 
 // The thread-affine interpreter bridge. Holes: `abi` and the c-escaped `seed`.

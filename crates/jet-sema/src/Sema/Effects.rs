@@ -4,8 +4,8 @@
 //! ambient power its body exercises (network, filesystem, clock, …). The set is
 //! inferred per-function, propagated along the call graph (Koka-style rows), and
 //! **fully erased in codegen** (I3): effects are a compile-time proof with no
-//! runtime value, handler, or monad. A function whose inferred set is empty is
-//! pure (the ⊥ of the lattice).
+//! runtime value, handler, or monad. A function whose inferred grantable effect
+//! set is empty is pure; deny-only memory and panic facts remain in the row.
 //!
 //! This module owns the effect vocabulary, the per-function summary the checker
 //! accumulates during its walk, the shared fact-row traversal that turns those
@@ -317,11 +317,7 @@ pub fn package_policy_path_covers(rule: &str, path: &str) -> bool {
             .is_some_and(|suffix| suffix.starts_with('/'))
 }
 
-/// The subset of `inferred` NOT covered by any entry of `bound_set` — the
-/// tree-aware replacement for a flat `BTreeSet::difference` now that ancestor
-/// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
-/// inferred set within its declared bound" check (E0740/E0712/E0747/E0742).
-pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
+fn effect_is_deny_only(effect: &str) -> bool {
     // D-PANICROOT1=A: Panic is deny-only. It remains in the inferred row for
     // diagnostics, reachability, and `-[!Panic]>`, but never requires a
     // positive function bound or a `#FX` authority.
@@ -331,13 +327,20 @@ pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectS
     // has to enumerate them: allocation is not a right you request, it is one
     // you can be refused. Without this, every `-[IO]>` function that formats a
     // string reported E0740 for `Mem.Alloc`.
-    let deny_only = |effect: &str| {
-        let root = effect_root(effect);
-        root == Effect::Panic.name() || root == "Mem"
-    };
+    // D-AUTH-AMBIENT2=A: only the exact Time.Wait leaf is deny-only;
+    // clock observation and the Time root retain ordinary positive bounds.
+    let root = effect_root(effect);
+    root == Effect::Panic.name() || root == "Mem" || effect == TIME_WAIT_EFFECT
+}
+
+/// The subset of `inferred` NOT covered by any entry of `bound_set` — the
+/// tree-aware replacement for a flat `BTreeSet::difference` now that ancestor
+/// entries subsume their whole subtree (D-EFFTREE1). Used at every "is the
+/// inferred set within its declared bound" check (E0740/E0712/E0747/E0742).
+pub fn effects_uncovered(inferred: &EffectSet, bound_set: &EffectSet) -> EffectSet {
     let grantable = inferred
         .iter()
-        .filter(|effect| !deny_only(effect))
+        .filter(|effect| !effect_is_deny_only(effect))
         .cloned()
         .collect::<EffectSet>();
     let row = RightsRow::invocation(
@@ -919,6 +922,49 @@ pub struct DiscardedResultFact {
     pub failure_open: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct SharedSiteObligation {
+    pub initializer: String,
+    pub member: String,
+    pub source: String,
+    pub span: Span,
+}
+
+pub fn shared_site_diagnostic(member: &str, span: Span) -> Diagnostic {
+    Diagnostic::error(
+        "E0109",
+        format!("`core.mem.{member}` needs a direct Core initializer"),
+        "a publication site requires a non-generic, zero-argument, infallible module function declared in the same Core module, returning Shared<T>; its inferred effects may contain only Mem and its publication lifetime must be consistent".into(),
+        "pass the name of a same-module Shared initializer with no effects except allocation".into(),
+        Some(span),
+    )
+}
+
+pub fn check_shared_sites(
+    summaries: &HashMap<String, EffectSummary>,
+    solved: &HashMap<String, EffectSet>,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut sites = std::collections::BTreeMap::new();
+    let mut obligations = summaries.values()
+        .flat_map(|summary| summary.shared_sites.iter()).collect::<Vec<_>>();
+    obligations.sort_unstable_by(|left, right| {
+        (&left.source, left.span.start, left.span.end, &left.member)
+            .cmp(&(&right.source, right.span.start, right.span.end, &right.member))
+    });
+    for site in obligations {
+        let lifetime = jet_foundation::MIR::MirSharedLifetime::core_member(&site.member)
+            .expect("checked publication site has unknown lifetime");
+        let impure = solved.get(&site.initializer).map_or(true, |effects| {
+            effects.iter().any(|effect| effect != "Mem")
+        });
+        let first = sites.entry(&site.initializer).or_insert(lifetime);
+        if impure || *first != lifetime {
+            diagnostics.push(shared_site_diagnostic(&site.member, site.span));
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EffectSummary {
     pub direct: EffectSet,
@@ -950,6 +996,7 @@ pub struct EffectSummary {
     /// solved rows are checked after the shared effect graph closes, while
     /// compute's own GPU capability remains admissible for pure Tensor work.
     pub autodiff_obligations: Vec<AutodiffObligation>,
+    pub shared_sites: Vec<SharedSiteObligation>,
     /// Core compute consumers seen in each body; the autodiff post-pass uses
     /// this to reject operations that cannot preserve a Tensor trace.
     pub compute_calls: Vec<ComputeCallFact>,
@@ -1645,6 +1692,57 @@ mod inferred_purity_display_tests {
 }
 
 #[cfg(test)]
+mod deny_only_effect_tests {
+    use super::{effect_is_deny_only, effects_uncovered, EffectSet};
+
+    #[test]
+    fn deny_only_matching_uses_exact_roots() {
+        for effect in ["Mem", "Mem.Alloc", "Mem.Rc", "Panic", "Panic.Stop", "Time.Wait"] {
+            assert!(effect_is_deny_only(effect), "{effect}");
+        }
+        for effect in ["IO", "FS.Read", "Membrane", "PanicOther", "Time", "Time.Read", "Time.Wait.More"] {
+            assert!(!effect_is_deny_only(effect), "{effect}");
+        }
+    }
+
+    #[test]
+    fn empty_ceiling_excludes_deny_only_facts_without_erasing_them() {
+        let inferred = EffectSet::from([
+            "Mem.Alloc".to_string(),
+            "Mem.Rc".to_string(),
+            "Panic".to_string(),
+            "Time.Wait".to_string(),
+            "IO".to_string(),
+        ]);
+        assert_eq!(
+            effects_uncovered(&inferred, &EffectSet::new()),
+            EffectSet::from(["IO".to_string()])
+        );
+        assert_eq!(inferred.len(), 5);
+    }
+
+    #[test]
+    fn wait_keeps_negative_denials_without_widening_time() {
+        let inferred = EffectSet::from(["Time.Wait".to_string()]);
+        let row = super::RightsRow::invocation(
+            std::iter::empty::<&str>(),
+            ["Time.Wait"],
+            super::RightsProvenance::new("sema::test", "deny waiting"),
+        );
+        assert!(row.walk(&inferred, &[], &[]).denials.iter()
+            .any(|denial| denial.right == "Time.Wait"));
+        assert_eq!(
+            effects_uncovered(
+                &EffectSet::from(["Time.Wait".to_string(), "Time.Read".to_string()]),
+                &EffectSet::new(),
+            ),
+            EffectSet::from(["Time.Read".to_string()]),
+        );
+        assert!(inferred.contains("Time.Wait"));
+    }
+}
+
+#[cfg(test)]
 mod authority_root_tests {
     use super::parse_effect_name;
 
@@ -1742,8 +1840,8 @@ mod reachability_tests {
     }
 }
 
-/// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* body row is
-/// empty. Callees need not repeat `-[]>`; their solved row is the authority.
+/// D-EFFECT-OMIT1: an explicit empty row proves the *inferred* grantable body
+/// row is empty. Callees need not repeat `-[]>`; their solved row is the authority.
 /// D-CRYPTO-DIAG1 defers E2702 facts until this solved-effect phase completes.
 pub fn check_inferred_purity(
     items: &[crate::AST::Item],
@@ -1771,7 +1869,11 @@ pub fn check_inferred_purity(
             .map(str::to_owned)
             .unwrap_or_else(|| super::effect_key(owner, &f.name));
         let key = format!("{module_alias}::{identity}");
-        if solved.get(&key).map_or(true, EffectSet::is_empty) {
+        let ambient = solved
+            .get(&key)
+            .map(|effects| effects_uncovered(effects, &EffectSet::new()))
+            .unwrap_or_default();
+        if ambient.is_empty() {
             return;
         }
         let row = if f.is_comptime {
@@ -1786,16 +1888,19 @@ pub fn check_inferred_purity(
             ))
         };
         let Some(denial) = solved.get(&key).and_then(|effects| {
-            effects.iter().find_map(|effect| {
-                let path = reachability.path("effects", &key, effect)?;
-                (path.len() > 1).then(|| {
-                    let effects = Holds::from([effect.clone()]);
-                    row.walk(&effects, path, &[])
-                        .denials
-                        .into_iter()
-                        .next()
-                })?
-            })
+            effects
+                .iter()
+                .filter(|effect| !effect_is_deny_only(effect))
+                .find_map(|effect| {
+                    let path = reachability.path("effects", &key, effect)?;
+                    (path.len() > 1).then(|| {
+                        let effects = Holds::from([effect.clone()]);
+                        row.walk(&effects, path, &[])
+                            .denials
+                            .into_iter()
+                            .next()
+                    })?
+                })
         }) else {
             // Direct ambient operations are diagnosed while checking the body,
             // where their precise call span and API spelling are available.
@@ -1992,13 +2097,13 @@ pub fn check_inferred_purity(
     }
 }
 
-pub fn e0743(trait_method: &str, span: Span) -> Diagnostic {
+pub fn e0743(trait_method: &str, span: Option<Span>) -> Diagnostic {
     Diagnostic::error(
         "E0743",
         format!("dynamic call `{trait_method}` has no effect bound"),
         "a trait value can select any implementation at runtime, so an enclosing effect ceiling needs the trait method's declared upper bound".to_string(),
         format!("declare an effect row on `{trait_method}`, such as `-[]>` for pure dispatch, or move this dynamic call outside the bounded function"),
-        Some(span),
+        span,
     )
 }
 

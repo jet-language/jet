@@ -523,7 +523,7 @@ pub(crate) struct MoveOrigin {
     pub(crate) consumer: String,
     /// D-COPY-DEFAULT1=A: the unmarked plain-name sites that gave this
     /// cloneable binding away. A later use of the name turns every one of
-    /// them into a share (the checker materializes each as `~name`), so the
+    /// them into a share (the checker materializes each as `name.copy()`), so the
     /// earlier use was not the last one and the source stays usable. Empty
     /// for an exact `^` move and for a value that cannot be copied; those
     /// keep E0121.

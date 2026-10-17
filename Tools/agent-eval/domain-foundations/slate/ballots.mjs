@@ -475,7 +475,7 @@ export const slate = [
       inWild: 'MLflow runs carry typed metrics and params beside artifacts and the UI diffs two runs by field. Bazel\'s build event protocol and GitHub check runs attach typed outputs to one canonical record. Nobody keeps a second ledger.',
       options: [
         { key: 'A', name: 'Typed receipt sections declared by the program', detail: 'A #Receipt record is written under the program\'s receipt as a named typed section. Status, compare, and diff read it like built-in fields. Identity and the fixed fields never change.', code: '#Receipt("regression")\nstruct RegressionEvidence { slope: Float, r2: Float }\nfn run() {\n    fit :: ols(rows)\n    receipt.attach(RegressionEvidence{ slope: fit.slope, r2: fit.r2 })\n}' },
-        { key: 'B', name: 'Library JSON files next to the receipt', detail: 'Programs write sidecar files; tools ignore them.', code: 'files.write("evidence.json", json.to_string(fit))' },
+        { key: 'B', name: 'Library JSON files next to the receipt', detail: 'Programs write sidecar files; tools ignore them.', code: 'files.write("evidence.json", json.to_string(fit) ?? panic(err.reason))' },
         { key: 'C', name: 'Free-form key/value tags on the receipt', detail: 'Untyped string tags on the receipt.', code: 'receipt.tag("r2", "0.998")' },
       ],
       comparisons: [
@@ -494,12 +494,12 @@ export const slate = [
         gist: 'May a library attach its own typed evidence to Jet\'s receipt and query or diff it with the same tools?',
         lesson: 'Jet has one receipt for check, build, test, prove, and benchmarks, and one status view over it. A data pipeline, a training run, or a firmware build wants to say more: r-squared, loss curve, flash checksum. Today that evidence lives in printed JSON that jet status and jet perf compare never see. The receipt\'s fixed fields must not change.',
         trio: {
-          current: { note: 'prim-receipts probe: typed evidence stays outside the receipt', code: 'evidence :: RegressionEvidence{ slope: 1.9, r2: 0.998 }\nprint(json.to_string(evidence))       // a line of stdout\n$ jet status src/evidence.jet --json  // action, claim, reason, receipt, state\n$ jet perf compare baseline shifted   // wall trace only; typed values unseen' },
+          current: { note: 'prim-receipts probe: typed evidence stays outside the receipt', code: 'evidence :: RegressionEvidence{ slope: 1.9, r2: 0.998 }\nwire :: json.to_string(evidence) ?? panic(err.reason)\nprint(wire)                          // a line of stdout\n$ jet status src/evidence.jet --json  // action, claim, reason, receipt, state\n$ jet perf compare baseline shifted   // wall trace only; typed values unseen' },
           wild: { lang: 'Python (MLflow)', note: 'A run carries typed metrics beside the artifact; runs diff by field.', code: 'with mlflow.start_run():\n    mlflow.log_param("model", "ols")\n    mlflow.log_metric("r2", 0.998)\n    mlflow.log_artifact("fit.json")\n# mlflow runs compare <run_a> <run_b>' },
         },
         options: [
           { key: 'A', name: 'Typed receipt sections declared by the program', gist: 'A typed record rides the receipt; status and diff read it.', gains: ['Domain evidence is typed, queried, and diffed', 'One receipt, one status truth', 'Identity and fixed fields unchanged'], losses: [], proposed: { code: '// A: a #Receipt record is written under the program\'s receipt as a\n// named typed section; status, compare, and diff read it like built-ins\n#Receipt("regression")\nstruct RegressionEvidence { slope: Float, r2: Float }\nfn run() {\n    fit :: ols(rows)\n    receipt.attach(RegressionEvidence{ slope: fit.slope, r2: fit.r2 })\n}\n$ jet status --json          // ... "sections": { "regression": {...} }\n$ jet receipt diff base new  // regression.r2: 0.991 -> 0.998' } },
-          { key: 'B', name: 'Library JSON files next to the receipt', gist: 'Programs write sidecar files; tools ignore them.', gains: ['Nothing in core'], losses: ['Two truths', 'Tools stay blind', 'No identity check'], proposed: { code: '// B: a sidecar\nfiles.write("evidence.json", json.to_string(fit))' } },
+          { key: 'B', name: 'Library JSON files next to the receipt', gist: 'Programs write sidecar files; tools ignore them.', gains: ['Nothing in core'], losses: ['Two truths', 'Tools stay blind', 'No identity check'], proposed: { code: '// B: a sidecar\nfiles.write("evidence.json", json.to_string(fit) ?? panic(err.reason))' } },
           { key: 'C', name: 'Free-form key/value tags on the receipt', gist: 'Untyped string tags.', gains: ['Simplest to build'], losses: ['No schema', 'Diffs are string compares', 'Silent key typos'], proposed: { code: '// C: tags\nreceipt.tag("r2", "0.998")' } },
         ],
         recommendation: {

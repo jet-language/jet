@@ -1101,6 +1101,9 @@ fn map_err(err: JetComputeError) -> CtValue {
         JetComputeError::Unsupported(m) => ("Unsupported", m),
         JetComputeError::Arithmetic(m) => ("Arithmetic", m),
         JetComputeError::Serialization(m) => ("Serialization", m),
+        JetComputeError::Singular(m) => ("Singular", m),
+        JetComputeError::Index(m) => ("Index", m),
+        JetComputeError::Parse(m) => ("Parse", m),
     };
     CtValue::Enum {
         type_name: "ComputeError".to_string(),

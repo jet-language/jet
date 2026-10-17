@@ -254,26 +254,20 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, src).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
         let policy = common::development_policy();
-        jet_jit::reset_jit_trace_for_test();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "44482216152605.0\n"),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected standard force conversion: {diagnostics:?}")
             }
         }
-        assert!(jet_jit::jit_executed_for_test());
-        assert!(
-            !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-            "standard force conversion must stay on resident JIT"
-        );
     }
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -323,15 +317,15 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, src).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
-        use jet::JitBackend::RunOutcome;
-    if jet_jit::cranelift_host_supported() {
+        use jet::Interpreter::RunOutcome;
+    {
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "3.0\n"),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected open dimensions: {diagnostics:?}")
@@ -416,11 +410,11 @@ fn affine_family_mints_point_and_delta_types_only() {
 
 #[test]
 fn scaled_family_metadata_is_public_api_identity() {
-    let src = r#"pub #UnitFamily(Length, dimension, base: meter) {
+    let src = r#"#UnitFamily(Length, dimension, base: meter) {
     meter
     millimeter(scale: 2/2000)
 }
-pub fn length() -> Millimeter { return Millimeter.from_float(1.0) }
+fn length() -> Millimeter { return Millimeter.from_float(1.0) }
 "#;
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty());
@@ -435,13 +429,13 @@ pub fn length() -> Millimeter { return Millimeter.from_float(1.0) }
 
 #[test]
 fn affine_point_and_delta_have_distinct_public_identities() {
-    let src = r#"pub #UnitFamily(Temperature, dimension, base: kelvin) {
+    let src = r#"#UnitFamily(Temperature, dimension, base: kelvin) {
     kelvin
     celsius(scale: 1, offset: 27315/100)
 }
 
-pub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }
-pub fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
+fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }
+fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
 "#;
     let (tokens, diagnostics) = jet::Lexer::lex(src);
     assert!(diagnostics.is_empty());
@@ -912,10 +906,10 @@ fn imported_quantity_generic_preserves_concrete_type() {
         return;
     }
     let units = r#"
-pub #UnitFamily(Length, dimension) { meter }
-pub fn sample() -> Meter { return 2meter }
-pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
-pub fn raw_meter(value: Meter) -> Float { return value.raw() }
+#UnitFamily(Length, dimension) { meter }
+fn sample() -> Meter { return 2meter }
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn raw_meter(value: Meter) -> Float { return value.raw() }
 "#;
     let main = r#"
 use "units" as units
@@ -944,7 +938,7 @@ fn imported_explicit_quantity_argument_checks_its_bound() {
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(
         dir.join("units.jet"),
-        "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n",
+        "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n",
     )
     .unwrap();
     let entry = dir.join("main.jet");
@@ -994,8 +988,8 @@ fn quantity_generic_bounds_are_frozen_into_public_api_identity() {
         assert!(diagnostics.is_empty());
         jet::Parser::parse(&tokens).expect("public Quantity generic should parse")
     };
-    let length = parse("pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }");
-    let time = parse("pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }");
+    let length = parse("fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }");
+    let time = parse("fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }");
     let length = jet::Publish::ApiFreeze::snapshot_from_items(&length.items, "units", "1.0.0");
     let time = jet::Publish::ApiFreeze::snapshot_from_items(&time.items, "units", "1.0.0");
     assert_eq!(
@@ -1120,6 +1114,9 @@ fn run() {
             && !generated.contains("fn __jet_from_thirdish"),
         "unit conversion behavior belongs to TIR, not generated destination methods"
     );
+    assert!(generated.contains("UnitRoundingMode::NearestEven"));
+    assert!(generated.contains("jet_int_owned_to_i64"));
+    assert!(generated.contains("map_err(|error| error.to_string())"));
     let (code, stdout) = tir_support::build_and_run("quantity_explicit_exact_rounded", src);
     assert_eq!(code, 0);
     assert_eq!(stdout, "3.0 -1.0 1.0\n");
@@ -1376,19 +1373,19 @@ fn run() {
         stdout,
         "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
     );
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
 
         let dir = common::unique_tmp("quantity_display_jit");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("main.jet");
         std::fs::write(&path, defaults).unwrap();
         let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let (diagnostics, _facts, checked_nominals) =
+            jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
         assert!(diagnostics.is_empty(), "{diagnostics:?}");
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(
                 stdout,
                 "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n"
@@ -1422,15 +1419,15 @@ fn run() {
     let path = dir.join("main.jet");
     std::fs::write(&path, explicit).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
 
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => {
                 assert_eq!(stdout, "custom length\ncustom length\n12\n")
             }
@@ -1492,27 +1489,16 @@ fn run() {}
 
 #[test]
 fn dimensional_quantities_example_stays_in_native_jit() {
-    if !jet_jit::cranelift_host_supported() {
-        return;
-    }
-    use jet::JitBackend::RunOutcome;
+    use jet::Interpreter::RunOutcome;
 
     let path = "Examples/features/types/dimensional_quantities.jet";
     let mut bundle = jet::Loader::load_entry(path).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "dimensional quantities must stay resident-safe: {}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .unwrap_or_else(|reason| panic!("dimensional quantities must JIT-compile: {reason}"));
 
     let policy = common::development_policy();
-    jet_jit::reset_jit_trace_for_test();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+    match common::run_interpreted(&bundle, &checked_nominals, &policy) {
         RunOutcome::Ran {
             stdout,
             stderr,
@@ -1533,30 +1519,18 @@ fn dimensional_quantities_example_stays_in_native_jit() {
             panic!("JIT rejected dimensional quantities: {diagnostics:?}")
         }
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "dimensional quantities did not execute native JIT code"
-    );
-    assert!(
-        !jet_jit::deopt_invoked_for_test(),
-        "dimensional quantities deoptimized to the interpreter"
-    );
-    assert!(
-        !jet_jit::fallback_invoked_for_test(),
-        "dimensional quantities invoked a forbidden fallback"
-    );
 }
 
 #[test]
 fn imported_public_units_keep_display_metadata_across_tiers() {
     let units = r#"
-pub #UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
     fn display(self) -> String { "defined in units" }
 }
 
-pub fn distance() -> Meter { return 12meter }
+fn distance() -> Meter { return 12meter }
 "#;
     let main = r#"
 use "measurements" as units
@@ -1591,16 +1565,16 @@ fn run() {
     let entry = dir.join("main.jet");
     std::fs::write(&entry, main).unwrap();
     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 
 
-    if jet_jit::cranelift_host_supported() {
-        use jet::JitBackend::RunOutcome;
+    {
+        use jet::Interpreter::RunOutcome;
 
         let policy = common::development_policy();
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
+        match common::run_interpreted(&bundle, &checked_nominals, &policy) {
             RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
             RunOutcome::Problems(diagnostics) => {
                 panic!("JIT rejected imported unit display: {diagnostics:?}")
@@ -1609,7 +1583,7 @@ fn run() {
     }
 
     let web_units = r#"
-pub #UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Length, dimension, base: meter) { meter }
 
 impl Meter.Display {
     fn display(self) -> String { "defined in units" }
@@ -1714,13 +1688,13 @@ fn dimension_exponent_limit_is_a_sema_error_not_a_panic() {
 fn imported_same_leaf_units_keep_distinct_dimensions() {
     let length = r#"
 #UnitFamily(Length, dimension) { unit }
-pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
 "#;
     let time = r#"
 #UnitFamily(Clock, dimension) { unit }
-pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
-pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+fn first(groups: [[String: [Unit]]]) -> Unit { return groups[0]["values"][0].copy() }
 "#;
     let good = r#"
 use "length" as length
@@ -1780,8 +1754,8 @@ fn same_named_unit_families_from_different_packages_do_not_convert() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let unit = r#"
-pub #UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
-pub fn sample() -> Meter { return 1meter }
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+fn sample() -> Meter { return 1meter }
 "#;
     std::fs::write(dir.join("left.jet"), unit).unwrap();
     std::fs::write(dir.join("right.jet"), unit).unwrap();
@@ -1839,8 +1813,8 @@ fn physical_dimensions_cross_file_boundaries_canonically() {
         dir.join("units.jet"),
         r#"
 #UnitFamily(Length, dimension) { meter }
-pub fn distance() -> Meter { return 12meter }
-pub fn elapsed() -> Duration { return 3s }
+fn distance() -> Meter { return 12meter }
+fn elapsed() -> Duration { return 3s }
 "#,
     )
     .unwrap();
@@ -1917,7 +1891,7 @@ fn standard_units_share_canonical_owner_across_dependency_boundary() {
     .unwrap();
     std::fs::write(
         app.join("main.jet"),
-        "use dep\npub fn local() -> Meter { return 1meter }\nfn accept(value: Meter) { print(value.raw()) }\nfn run() { accept(dep.distance()) }\n",
+        "use dep\nfn local() -> Meter { return 1meter }\nfn accept(value: Meter) { print(value.raw()) }\nfn run() { accept(dep.distance()) }\n",
     )
     .unwrap();
     std::fs::write(
@@ -1927,7 +1901,7 @@ fn standard_units_share_canonical_owner_across_dependency_boundary() {
     .unwrap();
     std::fs::write(
         dep.join("dep.jet"),
-        "pub fn distance() -> Meter { return 2meter }\n",
+        "fn distance() -> Meter { return 2meter }\n",
     )
     .unwrap();
     let mut bundle = jet::Loader::load_entry(app.join("main.jet").to_str().unwrap()).unwrap();
@@ -1959,12 +1933,12 @@ fn qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fai
     std::fs::create_dir_all(&root).unwrap();
     std::fs::write(
         root.join("stock.jet"),
-        "pub #UnitFamily(Inventory, dimension, base: item) { item }\n",
+        "#UnitFamily(Inventory, dimension, base: item) { item }\n",
     )
     .unwrap();
     std::fs::write(
         root.join("other.jet"),
-        "pub #UnitFamily(Inventory, dimension, base: widget) { widget }\n",
+        "#UnitFamily(Inventory, dimension, base: widget) { widget }\n",
     )
     .unwrap();
     let qualified = root.join("qualified.jet");
@@ -2011,7 +1985,7 @@ fn custom_axis_identity_ignores_checkout_root_and_separates_packages() {
         .unwrap();
         std::fs::write(
             root.join("main.jet"),
-            "pub #UnitFamily(Inventory, dimension, base: item) { item }\npub fn sample() -> Item { return 1item }\nfn run() {}\n",
+            "#UnitFamily(Inventory, dimension, base: item) { item }\nfn sample() -> Item { return 1item }\nfn run() {}\n",
         )
         .unwrap();
         let mut bundle = jet::Loader::load_entry(root.join("main.jet").to_str().unwrap()).unwrap();

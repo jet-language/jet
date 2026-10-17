@@ -12,394 +12,995 @@ package {
 use core as core
 use core.crypto as crypto
 use core.crypto.expert as expert
+use core.crypto.random as random
 use core.encoding as encoding
 use core.encoding.json as json
+use core.sys as sys
 use core.time as time
-// core.auth — closed token verification and session cookies.
+// core.auth — closed token verification, sessions, magic links and OAuth
+// (D-AUTH1=A, D-AUTH2=A, D-AUTH-TOKENPOLICY1=A).
 //
-// JWT verification is strict HS256 with exact NumericDate claims. Password
-// hashes are provider-owned values verified by the auth provider. The direct
-// PASETO surface verifies v4.public with the local Ed25519 primitive; the
-// extended footer/implicit form is a host provider call.
+// JWT verification is strict HS256 with exact NumericDate claims; PASETO is
+// `v4.public` over the strict Ed25519 primitive. JSON goes through Jet's one
+// RFC 8259 parser and no token-controlled algorithm or purpose is dispatched.
+// Password hashes are opaque caller-supplied values compared in constant time.
+// Every session rule is Jet; the temporary host cell dies at cutover.
+
+/// Verification failure. Every variant and payload is part of the contract.
 #Error
-pub enum AuthError {
-    Rejected
-    Expired
-    Malformed
-    Unavailable
+enum AuthError {
+    MalformedToken(String)
+    UnsupportedToken(String)
+    InvalidSignature
+    WeakKey
+    MissingClaim(String)
+    WrongAudience(expected: String, actual: String)
+    WrongIssuer(expected: String, actual: String?)
+    TokenExpired
+    DecodeError(String)
+    TokenNotYetValid
 }
 
-pub struct Claims {
-    pub issuer: String
-    pub audience: String
-    pub subject: String
-    pub expires_at: Int
-    pub json: String
+/// Verified token claims. `audience` is the expected audience the token named.
+struct Claims {
+    subject: String?
+    audience: String
+    issuer: String?
+    expires_at: Int
+    not_before: Int?
+    issued_at: Int?
 }
 
-pub struct Session {
-    pub id: String
-    pub user_id: String
-    pub cookie: String
-    pub expires_at: Int
+/// A validated session. Neither its display nor its debug view prints the id
+/// or cookie bytes.
+struct Session {
+    #Redact id: String
+    user_id: String
+    #Redact cookie: String
+    expires_at: Int
+
+    impl Display {
+        fn display(self) -> String { session_show(self) }
+    }
 }
 
-pub struct Auth {
-    pub issuer: String
-}
+// ── Token verification ──────────────────────────────────────────────────────
+//
+// `issuer` is optional: omitting it skips the issuer check; any given value,
+// including "", must equal the token's `iss` claim. The skew is
+// signed nanoseconds and widens both the expiry and the not-before bound.
 
-pub fn verify_jwt(token: String, key: [U8], audience: String, issuer: String, clock_skew: Duration) -[Time]> Claims AuthError! {
-    token_raw :: (~token).bytes()
-    if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
-    if key.len() < 32 -> return Err(AuthError.Rejected)
-    if clock_skew.ns < 0 -> return Err(AuthError.Malformed)
-
-    parts :: split_dot_optional(token) ?? return Err(AuthError.Malformed)
+/// Verify a three-part HS256 JWT (key at least 32 bytes).
+fn verify_jwt(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}) -[Time]> Claims AuthError! {
+    if key.len() < 32 -> return Err(AuthError.WeakKey)
+    parts :: split_dot(token)
     if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 {
-        return Err(AuthError.Malformed)
+        return Err(AuthError.MalformedToken("JWT must have exactly three non-empty parts"))
     }
-    header_b :: b64url(parts[0]) ?? return Err(AuthError.Malformed)
-    payload_b :: b64url(parts[1]) ?? return Err(AuthError.Malformed)
-    sig_b :: b64url(parts[2]) ?? return Err(AuthError.Malformed)
-    if sig_b.len() != 32 -> return Err(AuthError.Malformed)
-    header :: String.from_bytes(header_b) ?? return Err(AuthError.Malformed)
-    payload :: String.from_bytes(payload_b) ?? return Err(AuthError.Malformed)
-    header_tree :: json.parse(header) ?? return Err(AuthError.Malformed)
-    payload_tree :: json.parse(payload) ?? return Err(AuthError.Malformed)
-    if !json_object(header_tree) || !json_object(payload_tree) -> return Err(AuthError.Malformed)
-    alg :: json_text(header_tree, "alg") ?? return Err(AuthError.Malformed)
-    if alg != "HS256" -> return Err(AuthError.Unavailable)
-
-    mac_src :: "{parts[0]}.{parts[1]}"
-    expect :: crypto.hmac_sha256(key, mac_src.bytes()) ?? return Err(AuthError.Rejected)
-    equal :: crypto.constant_time_equal_bytes(expect, sig_b) ?? return Err(AuthError.Rejected)
-    if equal == false -> return Err(AuthError.Rejected)
-
-    exp :: json_required_int(payload_tree, "exp") ?? return Err(AuthError.Malformed)
-    nbf := 0
-    if json_has(payload_tree, "nbf") {
-        nbf = json_required_int(payload_tree, "nbf") ?? return Err(AuthError.Malformed)
-    }
-    if json_has(payload_tree, "iat") {
-        _ :: json_required_int(payload_tree, "iat") ?? return Err(AuthError.Malformed)
-    }
-    iss :: json_optional_text(payload_tree, "iss") ?? return Err(AuthError.Malformed)
-    aud_text :: json_audience_text(payload_tree, "aud") ?? return Err(AuthError.Malformed)
-    sub :: json_optional_text(payload_tree, "sub") ?? return Err(AuthError.Malformed)
-    if audience.len() > 0 && !json_audience_matches(payload_tree, "aud", audience) -> return Err(AuthError.Rejected)
-    now :: time.unix_ns()
-    exp_ns :: unix_seconds_ns(exp) ?? return Err(AuthError.Malformed)
-    if exp <= 0 -> return Err(AuthError.Expired)
-    expiry :: add_leeway(exp_ns, clock_skew.ns) ?? return Err(AuthError.Malformed)
-    if now >= expiry -> return Err(AuthError.Expired)
-    if json_has(payload_tree, "nbf") {
-        nbf_ns :: unix_seconds_ns(nbf) ?? return Err(AuthError.Malformed)
-        earliest :: subtract_leeway(nbf_ns, clock_skew.ns) ?? return Err(AuthError.Malformed)
-        if now < earliest -> return Err(AuthError.Rejected)
-    }
-    claims_aud := aud_text
-    if audience.len() > 0 -> claims_aud = audience
-    Ok(Claims{issuer: iss, audience: claims_aud, subject: sub, expires_at: exp, json: payload})
+    header_bytes :: b64url_decode(parts[0])
+    header_text :: String.from_bytes(header_bytes) ?? return Err(AuthError.MalformedToken("JWT header is not valid UTF-8"))
+    header :: claims_object(header_text)
+    alg :: header_text_member(header, "alg") ?? return Err(AuthError.MalformedToken("JWT header requires text `alg`"))
+    if alg != "HS256" -> return Err(AuthError.UnsupportedToken("unsupported JWT algorithm `{alg}`"))
+    signature :: b64url_decode(parts[2]) ?? return Err(AuthError.InvalidSignature)
+    expected :: crypto.hmac_sha256(key, "{parts[0]}.{parts[1]}".bytes())
+    if !crypto.constant_time_equal_bytes(expected, signature) -> return Err(AuthError.InvalidSignature)
+    payload :: b64url_decode(parts[1])
+    token_claims(payload, audience, issuer, clock_skew.ns, time.unix_ns())
 }
 
-pub fn verify_paseto(token: String, key: [U8], audience: String) -[Time]> Claims AuthError! {
-    token_raw :: (~token).bytes()
-    if token_raw.len() == 0 || token_raw.len() > 1048576 -> return Err(AuthError.Malformed)
-    if key.len() != 32 || audience.len() == 0 || has_control(audience) || audience != trim_ascii(audience) {
-        return Err(AuthError.Rejected)
-    }
-    parts :: split_dot_optional(token) ?? return Err(AuthError.Malformed)
+/// Verify a `v4.public` PASETO with a 32-byte Ed25519 public key. `footer`
+/// must equal the token footer; `implicit` is the implicit assertion.
+fn verify_paseto(token: String, /, *, key: [U8], audience: String, issuer: String?{None}, clock_skew: Duration{0ms}, footer: [U8]{[U8]{}}, implicit: [U8]{[U8]{}}) -[Time]> Claims AuthError! {
+    if key.len() != 32 -> return Err(AuthError.WeakKey)
+    parts :: split_dot(token)
     if parts.len() < 3 || parts.len() > 4 || parts[0] != "v4" || parts[1] != "public" {
-        return Err(AuthError.Unavailable)
+        return Err(AuthError.UnsupportedToken("only PASETO v4.public is supported"))
     }
-    body :: b64url(parts[2]) ?? return Err(AuthError.Malformed)
-    if body.len() < 64 -> return Err(AuthError.Malformed)
-    footer := [U8]{}
+    body :: b64url_decode(parts[2])
+    if body.len() < 64 -> return Err(AuthError.MalformedToken("PASETO body is shorter than its signature"))
+    token_footer := [U8]{}
     if parts.len() == 4 {
-        footer = b64url(parts[3]) ?? return Err(AuthError.Malformed)
+        token_footer = b64url_decode(parts[3])
     }
-    message_len := body.len() - 64
-    message :: slice_u8(body, 0, message_len)
-    signature :: slice_u8(body, message_len, body.len())
-    signed :: paseto_pae(message, footer)
+    if !crypto.constant_time_equal_bytes(token_footer, footer) -> return Err(AuthError.InvalidSignature)
+    split :: body.len() - 64
+    message :: slice_u8(body, 0, split)
+    signature :: slice_u8(body, split, body.len())
+    signed :: paseto_pae(message, footer, implicit)
     verified := false
     #Unsafe("auth PASETO v4.public verification uses the fixed Ed25519 primitive") {
-        verified = expert.ed25519_verify_strict(key, signed, signature) ?? return Err(AuthError.Rejected)
+        verified = expert.ed25519_verify_strict(key, signed, signature) ?? false
     }
-    if !verified -> return Err(AuthError.Rejected)
-    payload :: String.from_bytes(message) ?? return Err(AuthError.Malformed)
-    payload_tree :: json.parse(payload) ?? return Err(AuthError.Malformed)
-    if !json_object(payload_tree) -> return Err(AuthError.Malformed)
-    exp :: json_required_int(payload_tree, "exp") ?? return Err(AuthError.Malformed)
-    nbf := 0
-    if json_has(payload_tree, "nbf") {
-        nbf = json_required_int(payload_tree, "nbf") ?? return Err(AuthError.Malformed)
-    }
-    if json_has(payload_tree, "iat") {
-        _ :: json_required_int(payload_tree, "iat") ?? return Err(AuthError.Malformed)
-    }
-    iss :: json_optional_text(payload_tree, "iss") ?? return Err(AuthError.Malformed)
-    sub :: json_optional_text(payload_tree, "sub") ?? return Err(AuthError.Malformed)
-    if !json_audience_matches(payload_tree, "aud", audience) -> return Err(AuthError.Rejected)
-    now :: time.unix_ns()
-    exp_ns :: unix_seconds_ns(exp) ?? return Err(AuthError.Malformed)
-    if exp <= 0 || now >= exp_ns -> return Err(AuthError.Expired)
-    if json_has(payload_tree, "nbf") {
-        nbf_ns :: unix_seconds_ns(nbf) ?? return Err(AuthError.Malformed)
-        if now < nbf_ns -> return Err(AuthError.Rejected)
-    }
-    Ok(Claims{issuer: iss, audience: audience, subject: sub, expires_at: exp, json: payload})
+    if !verified -> return Err(AuthError.InvalidSignature)
+    token_claims(message, audience, issuer, clock_skew.ns, time.unix_ns())
 }
 
-
-pub fn register_user(name: String, password: String) -[Rand, DB, Time]> Session AuthError! {
-    if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
-    core.auth.register_user(~name, ~password) ?? return Err(AuthError.Rejected)
-    ttl := 86400
-    now :: host_unix_s()
-    native :: core.auth.password_login(~name, ~password, now * 1000, ttl * 1000) ?? return Err(AuthError.Unavailable)
-    Ok(Session{
-        id: core.auth.session_id(native),
-        user_id: core.auth.session_user(native),
-        cookie: core.auth.session_cookie(native),
-        expires_at: now + ttl,
-    })
-}
- 
-pub fn password_login(name: String, password: String, ttl_s: Int, flags: Int) -[Rand, DB, Time]> Session AuthError! {
-    if !valid_identity(name) || !valid_password_hash(password) -> return Err(AuthError.Rejected)
-    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
-    if flags != 0 -> return Err(AuthError.Malformed)
-    now :: host_unix_s()
-    native :: core.auth.password_login(~name, ~password, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
-    user :: core.auth.session_user(native)
-    cookie :: core.auth.session_cookie(native)
-    id :: core.auth.session_id(native)
-    Ok(Session{id: id, user_id: user, cookie: cookie, expires_at: now + ttl_s})
-}
-
-
-pub fn oauth_begin(provider: String) -[DB]> String AuthError! {
-    if provider.len() == 0 || provider.len() > 128 || has_control(provider) || provider != trim_ascii(provider) -> return Err(AuthError.Malformed)
-    state :: core.auth.oauth_begin(provider) ?? return Err(AuthError.Unavailable)
-    Ok(state)
-}
-
-pub fn oauth_finish(state: String, assertion: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
-    if state.len() == 0 || assertion.len() == 0 -> return Err(AuthError.Malformed)
-    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
-    if has_control(state) || has_control(assertion) -> return Err(AuthError.Malformed)
-    if flags != 0 -> return Err(AuthError.Malformed)
-    now :: host_unix_s()
-    native :: core.auth.oauth_finish(state, assertion, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Unavailable)
-    Ok(Session{
-        id: core.auth.session_id(native),
-        user_id: core.auth.session_user(native),
-        cookie: core.auth.session_cookie(native),
-        expires_at: now + ttl_s,
-    })
-}
-
-pub fn magic_link_issue(email: String, ttl_s: Int, flags: Int) -[DB, Time]> String AuthError! {
-    if !valid_email(email) -> return Err(AuthError.Malformed)
-    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
-    if flags != 0 -> return Err(AuthError.Malformed)
-    now :: host_unix_s()
-    token :: core.auth.magic_link_issue(email, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Unavailable)
-    Ok(token)
-}
-
-pub fn magic_link_consume(token: String, ttl_s: Int, flags: Int) -[DB, Time]> Session AuthError! {
-    if token.len() == 0 || has_control(token) -> return Err(AuthError.Rejected)
-    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
-    if flags != 0 -> return Err(AuthError.Malformed)
-    now :: host_unix_s()
-    native :: core.auth.magic_link_consume(token, now * 1000, ttl_s * 1000) ?? return Err(AuthError.Rejected)
-    user :: core.auth.session_user(native)
-    cookie :: core.auth.session_cookie(native)
-    id :: core.auth.session_id(native)
-    Ok(Session{id: id, user_id: user, cookie: cookie, expires_at: now + ttl_s})
-}
-
-pub fn session_validate(cookie: String, ttl_s: Int) -[DB, Time]> Session AuthError! {
-    if cookie.len() == 0 || has_control(cookie) -> return Err(AuthError.Rejected)
-    if !valid_ttl(ttl_s) -> return Err(AuthError.Malformed)
-    id :: session_id_from_cookie(cookie) ?? return Err(AuthError.Malformed)
-    now :: host_unix_s()
-    native :: core.auth.session_validate(id, now * 1000) ?? return Err(AuthError.Rejected)
-    native_cookie :: core.auth.session_cookie(native)
-    equal :: crypto.constant_time_equal_bytes(cookie.bytes(), native_cookie.bytes()) ?? return Err(AuthError.Rejected)
-    if equal == false {
-        return Err(AuthError.Rejected)
-    }
-    Ok(Session{
-        id: core.auth.session_id(native),
-        user_id: core.auth.session_user(native),
-        cookie: native_cookie,
-        expires_at: now + ttl_s,
-    })
-}
-fn session_id_from_cookie(cookie: String) -> String? {
-    prefix := "jet_session="
-    if !starts(~cookie, prefix) -> return None
-    cookie_raw :: (~cookie).bytes()
-    raw :: slice_u8(cookie_raw, prefix.bytes().len(), cookie_raw.len())
-    semi := index_byte(raw, (U8{59}))
-    if semi < 1 -> return None
-    attrs :: slice_bytes(raw, semi, raw.len()) ?? return None
-    if attrs != "; HttpOnly; Secure; SameSite=Lax; Path=/" -> return None
-    id :: slice_bytes(raw, 0, semi) ?? return None
-    if !valid_session_id(id) -> return None
-    Val(id)
-}
-
-
-pub fn session_user(session: Session) -> String Never! { session.user_id }
-
-pub fn session_cookie(session: Session) -> String Never! { session.cookie }
-
-pub fn session_id(session: Session) -> String Never! { session.id }
-pub fn session_show(session: Session) -> String Never! {
-    cookie_len :: session.cookie.bytes().len()
-    return "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={cookie_len})"
-}
-
-
-
-fn b64url(text: String) -> [U8]? {
-    raw :: (~text).bytes()
-    if raw.len() == 0 || raw.len() %% 4 == 1 -> return None
-    decode_url_local(text)
-}
-
-fn decode_url_local(text: String) -> [U8]? {
-    // JWT/PASETO use the unpadded RFC 4648 URL alphabet. Reject padding,
-    // non-canonical trailing bits, and lengths that cannot form whole bytes.
-    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-    ab :: alphabet.bytes()
-    val := [Int]{}
-    loop i in 0..<256 -> &val.push(-1)
-    loop i in 0..<ab.len() -> val[Int.from_u8(ab[i])] = i
-    out := [U8]{}
-    acc := 0
-    bits := 0
-    loop b in text.bytes() {
-        n :: b
-        if n == 61 -> return None
-        v :: val[Int.from_u8(n)]
-        if v < 0 -> return None
-        acc = (acc << 6) | v
-        bits = bits + 6
-        if bits >= 8 {
-            bits = bits - 8
-            &out.push(to_u8(acc >> bits))
-            if bits == 0 {
-                acc = 0
-            } else {
-                acc = acc & ((1 << bits) - 1)
-            }
+/// Decode and check the claims object against `now_ns` (Unix nanoseconds).
+fn token_claims(payload: [U8], audience: String, issuer: String?, skew_ns: Int, now_ns: Int) -> Claims AuthError! {
+    text :: String.from_bytes(payload) ?? return Err(AuthError.MalformedToken("claims are not valid UTF-8"))
+    fields :: claims_object(text)
+    exp_claim :: int_claim(fields, text, "exp")
+    exp :: exp_claim ?? return Err(AuthError.MissingClaim("exp"))
+    subject :: text_claim(fields, "sub")
+    matched :: audience_claim(fields, audience)
+    actual_issuer :: text_claim(fields, "iss")
+    not_before :: int_claim(fields, text, "nbf")
+    issued_at :: int_claim(fields, text, "iat")
+    if issuer == {
+        .Val(expected) -> {
+            if !same_text(actual_issuer, expected) -> return Err(AuthError.WrongIssuer{expected: expected, actual: actual_issuer})
         }
+        .None -> {}
     }
-    if bits > 0 && (acc & ((1 << bits) - 1)) != 0 -> return None
-    Val(out)
+    // `Int` is exact, so the nanosecond bounds never round or wrap.
+    if now_ns >= exp * 1000000000 + skew_ns -> return Err(AuthError.TokenExpired)
+    if not_before == {
+        .Val(nbf) -> {
+            if now_ns < nbf * 1000000000 - skew_ns -> return Err(AuthError.TokenNotYetValid)
+        }
+        .None -> {}
+    }
+    Ok(Claims{subject: subject, audience: matched, issuer: actual_issuer, expires_at: exp, not_before: not_before, issued_at: issued_at})
 }
 
-fn json_object(tree: encoding.DataTree) -> Bool Never! {
+/// True when `actual` is present and equal to `expected`.
+fn same_text(actual: String?, expected: String) -> Bool Never! {
+    if actual == {
+        .Val(text) -> text == expected
+        .None -> false
+    }
+}
+
+/// The strict parse of a claims/header object; a parse failure keeps its reason.
+fn claims_object(text: String) -> encoding.Dyn AuthError! {
+    tree :: json.parse(text) ?? return Err(AuthError.DecodeError(err.reason))
+    if !is_object(tree) -> return Err(AuthError.MalformedToken("token JSON must be an object"))
+    Ok(tree)
+}
+
+fn is_object(tree: encoding.Dyn) -> Bool Never! {
     if tree == {
-        .Object(_) -> return true
-        else -> return false
-    }
-}
-
-fn json_text(tree: encoding.DataTree, key: String) -> String? {
-    value :: &tree.field(key) ?? return None
-    text :: value.text() ?? return None
-    Val(text)
-}
-
-fn json_optional_text(tree: encoding.DataTree, key: String) -> String? {
-    value :: &tree.field(key) ?? return Val("")
-    text :: value.text() ?? return None
-    Val(text)
-}
-fn json_has(tree: encoding.DataTree, key: String) -> Bool Never! {
-    if &tree.field(key) == {
-        .Ok(_) -> return true
-        .Err(_) -> return false
-    }
-}
-
-fn json_audience_text(tree: encoding.DataTree, key: String) -> String? {
-    value :: &tree.field(key) ?? return None
-    if value == {
-        .Text(text) -> return Val(text)
-        .Array(items) -> {
-            if items.len() == 0 -> return None
-            loop item in items {
-                text :: item.text() ?? return None
-                return Val(text)
-            }
-            return None
-        }
-        else -> return None
-    }
-}
-
-fn json_audience_matches(tree: encoding.DataTree, key: String, expected: String) -> Bool Never! {
-    value :: &tree.field(key) ?? return false
-    if value == {
-        .Text(text) -> return text == expected
-        .Array(items) -> {
-            if items.len() == 0 -> return false
-            loop item in items {
-                text :: item.text() ?? return false
-                if text == expected -> return true
-            }
-            return false
-        }
+        .Object(_) -> true
         else -> false
     }
 }
 
-fn json_required_int(tree: encoding.DataTree, key: String) -> Int? {
-    value :: &tree.field(key) ?? return None
-    number :: value.int() ?? return None
-    Val(number)
+fn member(tree: encoding.Dyn, name: String) -> encoding.Dyn? {
+    value :: &tree.field(name) ?? return None
+    Val(value)
 }
 
-
-fn unix_seconds_ns(seconds: Int) -> Int? {
-    if seconds > 9223372036 || seconds < -9223372036 -> return None
-    Val(seconds * 1000000000)
+fn header_text_member(tree: encoding.Dyn, name: String) -> String? {
+    value :: member(tree, name) ?? return None
+    text :: value.text() ?? return None
+    Val(text)
 }
 
-fn add_leeway(value: Int, leeway: Int) -> Int? {
-    if leeway < 0 || value > 9223372036854775807 - leeway -> return None
-    Val(value + leeway)
+fn text_claim(fields: encoding.Dyn, name: String) -> String? AuthError! {
+    value :: member(fields, name) ?? return Ok(None)
+    text :: value.text() ?? return Err(AuthError.MalformedToken("claim `{name}` must be text"))
+    Val(text)
 }
 
-fn subtract_leeway(value: Int, leeway: Int) -> Int? {
-    if leeway < 0 || value < -9223372036854775808 + leeway -> return None
-    Val(value - leeway)
-}
-
-fn split_dot_optional(text: String) -> [String]? {
-    out := [String]{}
-    cur := [U8]{}
-    loop b in text.bytes() {
-        if b == (U8{46}) {
-            part :: String.from_bytes(cur) ?? return None
-            &out.push(part)
-            cur = [U8]{}
-        } else { &cur.push(b) }
+/// A NumericDate claim. The value is read back from its source lexeme so `-0`
+/// and values outside the signed 64-bit range are rejected exactly.
+fn int_claim(fields: encoding.Dyn, text: String, name: String) -> Int? AuthError! {
+    value :: member(fields, name) ?? return Ok(None)
+    if value == {
+        .Int(_) -> {
+            lexeme :: number_lexeme(text, name) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
+            number :: json_i64(lexeme) ?? return Err(AuthError.MalformedToken("claim `{name}` must be an exact integer"))
+            Val(number)
+        }
+        else -> Err(AuthError.MalformedToken("claim `{name}` must be an integer"))
     }
-    part :: String.from_bytes(cur) ?? return None
-    &out.push(part)
+}
+
+/// `aud` is text or a non-empty text list that must contain `expected`.
+fn audience_claim(fields: encoding.Dyn, expected: String) -> String AuthError! {
+    value :: member(fields, "aud") ?? return Err(AuthError.MissingClaim("aud"))
+    values := [String]{}
+    if value == {
+        .Array(items) -> {
+            if items.len() == 0 -> return Err(AuthError.MalformedToken("claim `aud` must contain at least one text"))
+            loop item in items {
+                text :: item.text() ?? return Err(AuthError.MalformedToken("claim `aud` must contain only text"))
+                &values.push(text)
+            }
+        }
+        else -> {
+            text :: value.text() ?? return Err(AuthError.MalformedToken("claim `aud` must be text or a text list"))
+            &values.push(text)
+        }
+    }
+    loop candidate in values {
+        if candidate == expected -> return Ok(expected)
+    }
+    actual := ""
+    loop i in 0..<values.len() {
+        if i > 0 -> actual = "{actual},"
+        actual = "{actual}{values[i]}"
+    }
+    Err(AuthError.WrongAudience{expected: expected, actual: actual})
+}
+
+/// The numeric token of top-level member `name` in an already validated JSON
+/// object, or `None` when that member is not a number.
+fn number_lexeme(text: String, name: String) -> String? {
+    raw :: text.bytes()
+    pos := json_skip_ws(raw, 0)
+    if pos >= raw.len() || raw[pos] != (U8{123}) -> return None
+    pos = pos + 1
+    loop {
+        pos = json_skip_ws(raw, pos)
+        if pos >= raw.len() || raw[pos] == (U8{125}) -> return None
+        key :: json_string(raw, pos) ?? return None
+        pos = json_skip_ws(raw, key.next)
+        if pos >= raw.len() || raw[pos] != (U8{58}) -> return None
+        pos = json_skip_ws(raw, pos + 1)
+        if pos >= raw.len() -> return None
+        first :: Int.from_u8(raw[pos])
+        if first == 45 || (first >= 48 && first <= 57) {
+            end :: json_scalar_end(raw, pos)
+            if key.text == name -> return slice_bytes(raw, pos, end)
+            pos = end
+        } else {
+            pos = json_skip_value(raw, pos) ?? return None
+        }
+        pos = json_skip_ws(raw, pos)
+        if pos >= raw.len() || raw[pos] != (U8{44}) -> return None
+        pos = pos + 1
+    }
+}
+
+fn paseto_pae(message: [U8], footer: [U8], implicit: [U8]) -> [U8] Never! {
+    out := [U8]{}
+    pae_len(&out, 4)
+    pae_part(&out, "v4.public.".bytes())
+    pae_part(&out, message)
+    pae_part(&out, footer)
+    pae_part(&out, implicit)
+    out
+}
+
+fn pae_part(out: &[U8], bytes: [U8]) Never! {
+    pae_len(&out, bytes.len())
+    loop byte in bytes -> &out.push(byte)
+}
+
+fn pae_len(out: &[U8], value: Int) Never! {
+    n := value
+    loop _ in 0..<8 {
+        &out.push(to_u8(n))
+        n = n >> 8
+    }
+}
+
+/// Unpadded RFC 4648 base64url with canonical trailing bits; a failure is the
+/// `DecodeError` naming the reason.
+fn b64url_decode(text: String) -> [U8] AuthError! {
+    raw :: text.bytes()
+    loop b in raw {
+        if b64url_value(b) < 0 -> return Err(AuthError.DecodeError("invalid base64url character"))
+    }
+    if raw.len() %% 4 == 1 -> return Err(AuthError.DecodeError("invalid base64url length"))
+    out := [U8]{}
+    acc := 0
+    bits := 0
+    loop b in raw {
+        acc = ((acc << 6).bit_or(b64url_value(b))).bit_and(16777215)
+        bits = bits + 6
+        if bits >= 8 {
+            bits = bits - 8
+            &out.push(to_u8(acc >> bits))
+        }
+    }
+    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err(AuthError.DecodeError("non-canonical base64 trailing bits"))
+    Ok(out)
+}
+
+fn b64url_value(b: U8) -> Int Never! {
+    n :: Int.from_u8(b)
+    if {
+        n >= 65 && n <= 90 -> n - 65
+        n >= 97 && n <= 122 -> n - 71
+        n >= 48 && n <= 57 -> n + 4
+        n == 45 -> 62
+        n == 95 -> 63
+        else -> -1
+    }
+}
+
+// ── Session store ───────────────────────────────────────────────────────────
+//
+// All validation, expiry, comparison and retry policy is source below.
+// Until the world Shared root/reset seam lands, only the byte-cell operation
+// remains in the existing host. The source CAS replacement is preserved in
+// commit 82149c775 and must land with that seam, never as a parallel store.
+fn __store_load() -[DB]> [U8] Never! {
+    core.auth.__state_load()
+}
+
+fn __store_replace(expected: [U8], replacement: ^[U8]) -[DB]> Bool Never! {
+    core.auth.__state_replace(expected, ^replacement)
+}
+
+/// Register an identity with an already-computed password hash.
+fn register_user(user_id: String, password_hash: String) Err! -[DB]> {
+    if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
+    if password_hash.trim().len() == 0 || password_hash.len() > 4096 -> return Err("password hash is invalid")
+    delivery :: delivery_capability(user_id)
+    loop {
+        seen :: core.auth.__store_load()
+        records := decode_store(seen) ?? return Err("auth store is unavailable")
+        loop record in records {
+            if record.kind == 1 && record.a == user_id -> return Err("user `{user_id}` already registered")
+        }
+        &records.push(AuthRecord{kind: 1, a: user_id, b: password_hash, c: delivery ?? "", n: if delivery == None -> 0 else -> 1})
+        if core.auth.__store_replace(seen, encode_store(records)) -> return Ok()
+    }
+}
+
+/// Check the credentials and issue a session valid until `now_ms + ttl_ms`.
+fn password_login(user_id: String, password_hash: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
+    session :: new_session(user_id, now_ms, ttl_ms)
+    loop {
+        seen :: core.auth.__store_load()
+        records := decode_store(seen) ?? return Err("auth store is unavailable")
+        ok := false
+        loop record in records {
+            if record.kind == 1 && record.a == user_id && ct_text(record.b, password_hash) -> ok = true
+        }
+        if !ok -> return Err("invalid credentials")
+        &records.push(session_record(session))
+        if core.auth.__store_replace(seen, encode_store(records)) -> return Ok(session)
+    }
+}
+
+/// The live session named by `session_id` at `now_ms`.
+fn session_validate(session_id: String, now_ms: Int) -[DB]> Session Err! {
+    if !valid_session_id(session_id) -> return Err("missing: session")
+    records :: decode_store(core.auth.__store_load()) ?? return Err("auth store is unavailable")
+    loop record in records {
+        if record.kind == 2 && ct_text(record.a, session_id) {
+            if now_ms >= record.n -> return Err("token expired")
+            return Ok(Session{id: record.a, user_id: record.b, cookie: record.c, expires_at: record.n})
+        }
+    }
+    Err("missing: session")
+}
+
+/// Issue a single-use magic-link token for a registered delivery identity.
+fn magic_link_issue(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String Err! {
+    expires_at :: expiry(now_ms, ttl_ms)
+    if !valid_identifier(user_id, 512) -> return Err("user id is invalid")
+    delivery :: delivery_capability(user_id) ?? return Err("magic link requires a delivery-capable identity")
+    loop {
+        seen :: core.auth.__store_load()
+        records := decode_store(seen) ?? return Err("auth store is unavailable")
+        registered := false
+        loop record in records {
+            if record.kind == 1 && record.a == user_id && record.n == 1 && record.c == delivery -> registered = true
+        }
+        if !registered -> return Err("magic link requires a registered delivery identity")
+        token :: opaque_token("magic")
+        &records.push(AuthRecord{kind: 3, a: token, b: user_id, c: delivery, n: expires_at})
+        if core.auth.__store_replace(seen, encode_store(records)) -> return Ok(token)
+    }
+}
+
+/// Consume a live magic-link token once and issue its session.
+fn magic_link_consume(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> Session Err! {
+    _ :: expiry(now_ms, ttl_ms)
+    if !valid_identifier(token, 256) -> return Err("token expired")
+    loop {
+        seen :: core.auth.__store_load()
+        records :: decode_store(seen) ?? return Err("auth store is unavailable")
+        index :: find_live(records, 3, token, now_ms)
+        if index < 0 -> return Err("token expired")
+        entry :: records[index]
+        user_index := -1
+        loop i in 0..<records.len() {
+            if user_index < 0 && records[i].kind == 1 && records[i].a == entry.b -> user_index = i
+        }
+        if user_index < 0 -> return Err("magic link identity is no longer registered")
+        user :: records[user_index]
+        if user.n != 1 || user.c != entry.c -> return Err("magic link delivery identity is unavailable")
+        session :: new_session(entry.b, now_ms, ttl_ms)
+        next := without_index(records, index)
+        &next.push(session_record(session))
+        if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(session)
+    }
+}
+
+/// Start a provider-backed OAuth flow. The returned opaque state is also the
+/// OIDC nonce the provider assertion must carry.
+fn oauth_begin(provider: String) -[DB, Env, Time, Rand]> String Err! {
+    _ :: oauth_config(provider)
+    now_ms :: time.unix_ns() /% 1000000
+    expires_at :: checked_i64(now_ms + 600000) ?? return Err("OAuth state lifetime is out of range")
+    state :: opaque_token("oauth")
+    loop {
+        seen :: core.auth.__store_load()
+        records :: decode_store(seen) ?? return Err("auth store is unavailable")
+        // Drop expired states; at the cap the oldest live state gives way.
+        live := 0
+        loop record in records {
+            if record.kind == 4 && record.n > now_ms -> live = live + 1
+        }
+        drop_oldest := live >= 256
+        next := [AuthRecord]{}
+        loop record in records {
+            if record.kind != 4 {
+                &next.push(record)
+            } else if record.n > now_ms {
+                if drop_oldest {
+                    drop_oldest = false
+                } else {
+                    &next.push(record)
+                }
+            }
+        }
+        &next.push(AuthRecord{kind: 4, a: state, b: provider, c: state, n: expires_at})
+        if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(state)
+    }
+}
+
+/// Finish an OAuth flow with the provider's HS256 assertion.
+fn oauth_finish(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> Session Err! {
+    if !valid_identifier(state, 256) || assertion.len() == 0 -> return Err("OAuth completion is invalid")
+    loop {
+        seen :: core.auth.__store_load()
+        records :: decode_store(seen) ?? return Err("auth store is unavailable")
+        index :: find_live(records, 4, state, now_ms)
+        if index < 0 -> return Err("OAuth state is expired or unknown")
+        entry :: records[index]
+        config :: oauth_config(entry.b)
+        subject :: oauth_verify(entry.c, assertion, now_ms, config)
+        session :: new_session(subject, now_ms, ttl_ms)
+        next := without_index(records, index)
+        &next.push(session_record(session))
+        if core.auth.__store_replace(seen, encode_store(next)) -> return Ok(session)
+    }
+}
+
+fn session_user(session: Session) -> String Never! { session.user_id }
+
+fn session_cookie(session: Session) -> String Never! { session.cookie }
+
+fn session_id(session: Session) -> String Never! { session.id }
+
+/// A redacted summary: the id and cookie bytes are never printed.
+fn session_show(session: Session) -> String Never! {
+    "Session(id=<redacted>, user={session.user_id}, exp={session.expires_at}, cookie_len={session.cookie.bytes().len()})"
+}
+
+/// One store row. `kind` 1 = user (a id, b password hash, c delivery
+/// identity, n 1 when c is present), 2 = session (a id, b user, c cookie,
+/// n expiry ms), 3 = magic-link token (a token, b user, c delivery identity,
+/// n expiry ms), 4 = OAuth state (a state, b provider, c nonce, n expiry ms).
+struct AuthRecord {
+    kind: Int
+    a: String
+    b: String
+    c: String
+    n: Int
+}
+
+struct OAuthConfig {
+    secret: [U8]
+    issuer: String
+    audience: String
+}
+
+/// A fresh session: opaque `sess-<64 hex>` id and the one cookie shape.
+fn new_session(user_id: String, now_ms: Int, ttl_ms: Int) -[Rand]> Session {
+    expires_at :: expiry(now_ms, ttl_ms)
+    id :: opaque_token("sess")
+    Ok(Session{id: id, user_id: user_id, cookie: session_cookie_mint(id), expires_at: expires_at})
+}
+
+fn session_record(session: Session) -> AuthRecord Never! {
+    AuthRecord{kind: 2, a: session.id, b: session.user_id, c: session.cookie, n: session.expires_at}
+}
+
+/// The session cookie's HttpOnly/Secure/SameSite/Path defaults are ONE fact:
+/// every flow that mints a session builds its cookie here.
+fn session_cookie_mint(id: String) -> String Never! {
+    "jet_session={id}; HttpOnly; Secure; SameSite=Lax; Path=/"
+}
+
+fn opaque_token(prefix: String) -[Rand]> String {
+    hex :: random.token_hex(32) ?? return Err("cryptographic entropy is unavailable")
+    Ok("{prefix}-{hex}")
+}
+
+/// `now_ms + ttl_ms` in the signed 64-bit millisecond range; the lifetime
+/// must be positive.
+fn expiry(now_ms: Int, ttl_ms: Int) -> Int {
+    if ttl_ms <= 0 -> return Err("auth lifetime must be positive")
+    checked_i64(now_ms + ttl_ms) ?? return Err("auth lifetime is out of range")
+}
+
+fn checked_i64(value: Int) -> Int? {
+    if value > 9223372036854775807 || value < -9223372036854775808 -> return None
+    Val(value)
+}
+
+fn find_live(records: [AuthRecord], kind: Int, token: String, now_ms: Int) -> Int Never! {
+    loop i in 0..<records.len() {
+        if records[i].kind == kind && ct_text(records[i].a, token) && now_ms < records[i].n -> return i
+    }
+    -1
+}
+
+fn without_index(records: [AuthRecord], index: Int) -> [AuthRecord] Never! {
+    out := [AuthRecord]{}
+    loop i in 0..<records.len() {
+        if i != index -> &out.push(records[i])
+    }
+    out
+}
+
+fn ct_text(left: String, right: String) -> Bool Never! {
+    crypto.constant_time_equal_bytes(left.bytes(), right.bytes())
+}
+
+fn encode_store(records: [AuthRecord]) -> [U8] Never! {
+    out := [U8]{}
+    loop record in records {
+        &out.push(to_u8(record.kind))
+        put_field(&out, record.a)
+        put_field(&out, record.b)
+        put_field(&out, record.c)
+        put_field(&out, "{record.n}")
+    }
+    out
+}
+
+fn put_field(out: &[U8], text: String) Never! {
+    raw :: text.bytes()
+    n :: raw.len()
+    &out.push(to_u8(n))
+    &out.push(to_u8(n >> 8))
+    &out.push(to_u8(n >> 16))
+    &out.push(to_u8(n >> 24))
+    loop b in raw -> &out.push(b)
+}
+
+fn decode_store(raw: [U8]) -> [AuthRecord]? {
+    out := [AuthRecord]{}
+    pos := 0
+    loop pos < raw.len() {
+        kind :: Int.from_u8(raw[pos])
+        pos = pos + 1
+        fields := [String]{}
+        loop _ in 0..<4 {
+            if pos + 4 > raw.len() -> return None
+            n :: Int.from_u8(raw[pos]).bit_or((Int.from_u8(raw[pos + 1]) << 8)).bit_or((Int.from_u8(raw[pos + 2]) << 16)).bit_or((Int.from_u8(raw[pos + 3]) << 24))
+            pos = pos + 4
+            if pos + n > raw.len() -> return None
+            text :: slice_bytes(raw, pos, pos + n) ?? return None
+            &fields.push(text)
+            pos = pos + n
+        }
+        number :: Int.parse(fields[3]) ?? return None
+        &out.push(AuthRecord{kind: kind, a: fields[0], b: fields[1], c: fields[2], n: number})
+    }
     Val(out)
 }
 
+/// Rust `char::is_control` over UTF-8: C0, DEL and the C1 block U+0080..U+009F.
+fn has_unicode_control(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    loop i in 0..<raw.len() {
+        n :: Int.from_u8(raw[i])
+        if n < 32 || n == 127 -> return true
+        if n == 194 && i + 1 < raw.len() {
+            next :: Int.from_u8(raw[i + 1])
+            if next >= 128 && next <= 159 -> return true
+        }
+    }
+    false
+}
 
-fn contains(text: String, needle: String) -> Bool Never! { index_of(text, needle) >= 0 }
+/// A non-blank identifier of at most `max` bytes without control characters.
+fn valid_identifier(value: String, max: Int) -> Bool Never! {
+    value.trim().len() > 0 && value.bytes().len() <= max && !has_unicode_control(value)
+}
+
+fn valid_session_id(text: String) -> Bool Never! {
+    raw :: text.bytes()
+    if raw.len() != 69 || !starts(text, "sess-") -> return false
+    i := 5
+    loop i < raw.len() {
+        n :: Int.from_u8(raw[i])
+        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
+        i = i + 1
+    }
+    true
+}
+
+/// The delivery identity a magic link may be sent to: one `@`, a dot-atom
+/// local part of at most 64 bytes and a DNS domain of at most 253 bytes whose
+/// labels are 1..63 alphanumeric/hyphen bytes not starting or ending with `-`.
+fn delivery_capability(value: String) -> String? {
+    raw :: value.bytes()
+    if raw.len() > 254 -> return None
+    at := -1
+    ats := 0
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{64}) {
+            ats = ats + 1
+            if at < 0 -> at = i
+        }
+    }
+    if ats != 1 -> return None
+    local :: slice_bytes(raw, 0, at) ?? return None
+    domain :: slice_bytes(raw, at + 1, raw.len()) ?? return None
+    if local.len() == 0 || local.len() > 64 || starts(local, ".") || ends(local, ".") || index_of(local, "..") >= 0 -> return None
+    loop b in local.bytes() {
+        n :: Int.from_u8(b)
+        if !(is_alnum(n) || contains_byte("!#$%&'*+-/=?^_`{{|}}~.".bytes(), b)) -> return None
+    }
+    if domain.len() == 0 || domain.len() > 253 -> return None
+    loop label in split_dot(domain) {
+        if label.len() == 0 || label.len() > 63 || starts(label, "-") || ends(label, "-") -> return None
+        loop b in label.bytes() {
+            n :: Int.from_u8(b)
+            if !(is_alnum(n) || n == 45) -> return None
+        }
+    }
+    Val(value)
+}
+
+fn is_alnum(n: Int) -> Bool Never! {
+    (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122)
+}
+
+/// Provider secret and expected issuer/audience from the environment:
+/// `JET_OAUTH_<PROVIDER>_SECRET` (at least 32 bytes) is required; issuer and
+/// audience default to the provider name.
+fn oauth_config(provider: String) -[Env]> OAuthConfig {
+    raw :: provider.bytes()
+    if raw.len() == 0 || raw.len() > 64 -> return Err("OAuth provider is invalid")
+    upper := [U8]{}
+    loop b in raw {
+        n :: Int.from_u8(b)
+        if !(is_alnum(n) || n == 45 || n == 95) -> return Err("OAuth provider is invalid")
+        if n >= 97 && n <= 122 -> &upper.push(to_u8(n - 32)) else -> &upper.push(b)
+    }
+    suffix :: String.from_bytes(upper) ?? return Err("OAuth provider is invalid")
+    secret :: sys.get("JET_OAUTH_{suffix}_SECRET") ?? return Err("OAuth provider is not configured")
+    if secret.bytes().len() < 32 -> return Err("OAuth provider secret is too short")
+    issuer :: sys.get("JET_OAUTH_{suffix}_ISSUER") ?? provider
+    audience :: sys.get("JET_OAUTH_{suffix}_AUDIENCE") ?? provider
+    if !valid_identifier(issuer, 1024) || !valid_identifier(audience, 1024) -> return Err("OAuth provider metadata is invalid")
+    Ok(OAuthConfig{secret: secret.bytes(), issuer: issuer, audience: audience})
+}
+
+/// Verify an HS256 provider assertion bound to the stored state nonce and
+/// return its subject.
+fn oauth_verify(nonce: String, assertion: String, now_ms: Int, config: OAuthConfig) -> String {
+    if assertion.bytes().len() > 65536 -> return Err("OAuth assertion is too large")
+    parts :: split_dot(assertion)
+    if parts.len() != 3 || parts[0].len() == 0 || parts[1].len() == 0 || parts[2].len() == 0 -> return Err("OAuth assertion is malformed")
+    header_bytes :: oauth_b64(parts[0])
+    header :: String.from_bytes(header_bytes) ?? return Err("OAuth assertion header is not UTF-8")
+    payload_bytes :: oauth_b64(parts[1])
+    payload :: String.from_bytes(payload_bytes) ?? return Err("OAuth assertion payload is not UTF-8")
+    signature :: oauth_b64(parts[2])
+    header_claims :: oauth_claims(header)
+    if (header_claims.alg ?? "") != "HS256" -> return Err("OAuth assertion algorithm is not allowed")
+    expected :: crypto.hmac_sha256(config.secret, "{parts[0]}.{parts[1]}".bytes())
+    if !crypto.constant_time_equal_bytes(expected, signature) -> return Err("OAuth assertion signature is invalid")
+    claims :: oauth_claims(payload)
+    claim_nonce :: claims.nonce ?? return Err("OAuth assertion nonce is invalid")
+    if !ct_text(claim_nonce, nonce) -> return Err("OAuth assertion nonce is invalid")
+    if (claims.iss ?? "") != config.issuer -> return Err("OAuth assertion issuer is invalid")
+    if (claims.aud ?? "") != config.audience -> return Err("OAuth assertion audience is invalid")
+    // Rust integer division truncates toward zero.
+    now_s :: if now_ms >= 0 -> now_ms /% 1000 else -> 0 - ((0 - now_ms) /% 1000)
+    exp :: claims.exp ?? return Err("OAuth assertion expiry is missing")
+    if exp <= now_s -> return Err("OAuth assertion is expired")
+    if claims.iat == {
+        .Val(iat) -> {
+            horizon :: if now_s > 9223372036854775807 - 60 -> 9223372036854775807 else -> now_s + 60
+            if iat > horizon -> return Err("OAuth assertion was issued in the future")
+        }
+        .None -> {}
+    }
+    subject :: claims.sub ?? return Err("OAuth assertion subject is missing")
+    if !valid_identifier(subject, 512) -> return Err("OAuth assertion subject is invalid")
+    Ok(subject)
+}
+
+fn oauth_b64(text: String) -> [U8] {
+    raw :: text.bytes()
+    if raw.len() == 0 || raw.len() > 16384 || raw.len() %% 4 == 1 -> return Err("OAuth assertion encoding is invalid")
+    acc := 0
+    bits := 0
+    out := [U8]{}
+    loop b in raw {
+        v :: b64url_value(b)
+        if v < 0 -> return Err("OAuth assertion encoding is invalid")
+        acc = ((acc << 6).bit_or(v)).bit_and(16777215)
+        bits = bits + 6
+        if bits >= 8 {
+            bits = bits - 8
+            &out.push(to_u8(acc >> bits))
+        }
+    }
+    if bits != 0 && (acc.bit_and(((1 << bits) - 1))) != 0 -> return Err("OAuth assertion encoding is non-canonical")
+    Ok(out)
+}
+
+/// Claims an assertion header or payload may carry; a repeated claim is
+/// rejected.
+struct OAuthClaims {
+    alg: String?
+    nonce: String?
+    iss: String?
+    aud: String?
+    sub: String?
+    exp: Int?
+    iat: Int?
+}
+
+struct JSONText {
+    text: String
+    next: Int
+}
+
+fn oauth_claims(text: String) -> OAuthClaims {
+    raw :: text.bytes()
+    if raw.len() > 32768 -> return Err("OAuth assertion payload is too large")
+    claims := OAuthClaims{alg: None, nonce: None, iss: None, aud: None, sub: None, exp: None, iat: None}
+    pos := json_skip_ws(raw, 0)
+    if pos >= raw.len() || raw[pos] != (U8{123}) -> return Err("OAuth assertion payload is not an object")
+    pos = pos + 1
+    loop {
+        pos = json_skip_ws(raw, pos)
+        if pos < raw.len() && raw[pos] == (U8{125}) {
+            pos = pos + 1
+            break
+        }
+        key :: json_string(raw, pos) ?? return Err("OAuth assertion claim name is invalid")
+        pos = json_skip_ws(raw, key.next)
+        if pos >= raw.len() || raw[pos] != (U8{58}) -> return Err("OAuth assertion claim separator is invalid")
+        pos = json_skip_ws(raw, pos + 1)
+        name :: key.text
+        if name == "alg" || name == "nonce" || name == "iss" || name == "aud" || name == "sub" {
+            value :: json_string(raw, pos) ?? return Err("OAuth claim `{name}` must be text")
+            pos = value.next
+            duplicated := false
+            if {
+                name == "alg" -> {
+                    duplicated = claims.alg != None
+                    claims.alg = Val(value.text)
+                }
+                name == "nonce" -> {
+                    duplicated = claims.nonce != None
+                    claims.nonce = Val(value.text)
+                }
+                name == "iss" -> {
+                    duplicated = claims.iss != None
+                    claims.iss = Val(value.text)
+                }
+                name == "aud" -> {
+                    duplicated = claims.aud != None
+                    claims.aud = Val(value.text)
+                }
+                else -> {
+                    duplicated = claims.sub != None
+                    claims.sub = Val(value.text)
+                }
+            }
+            if duplicated -> return Err("OAuth claim `{name}` is duplicated")
+        } else if name == "exp" || name == "iat" {
+            end :: json_scalar_end(raw, pos)
+            token :: slice_bytes(raw, pos, end) ?? return Err("OAuth claim `{name}` must be an integer")
+            number :: json_i64(token) ?? return Err("OAuth claim `{name}` must be an integer")
+            pos = end
+            duplicated := false
+            if name == "exp" {
+                duplicated = claims.exp != None
+                claims.exp = Val(number)
+            } else {
+                duplicated = claims.iat != None
+                claims.iat = Val(number)
+            }
+            if duplicated -> return Err("OAuth claim `{name}` is duplicated")
+        } else {
+            pos = json_skip_value(raw, pos) ?? return Err("OAuth assertion claim value is invalid")
+        }
+        pos = json_skip_ws(raw, pos)
+        if pos < raw.len() && raw[pos] == (U8{44}) {
+            pos = pos + 1
+        } else if pos < raw.len() && raw[pos] == (U8{125}) {
+            pos = pos + 1
+            break
+        } else {
+            return Err("OAuth assertion object is invalid")
+        }
+    }
+    pos = json_skip_ws(raw, pos)
+    if pos != raw.len() -> return Err("OAuth assertion has trailing data")
+    Ok(claims)
+}
+
+fn json_ws(b: U8) -> Bool Never! {
+    n :: Int.from_u8(b)
+    n == 32 || n == 10 || n == 13 || n == 9
+}
+
+fn json_skip_ws(raw: [U8], start: Int) -> Int Never! {
+    pos := start
+    loop pos < raw.len() && json_ws(raw[pos]) -> pos = pos + 1
+    pos
+}
+
+/// End of a bare scalar: the first whitespace, `,`, `}` or `]`.
+fn json_scalar_end(raw: [U8], start: Int) -> Int Never! {
+    pos := start
+    loop pos < raw.len() {
+        n :: Int.from_u8(raw[pos])
+        if json_ws(raw[pos]) || n == 44 || n == 125 || n == 93 -> return pos
+        pos = pos + 1
+    }
+    pos
+}
+
+fn json_hex4(raw: [U8], start: Int) -> Int? {
+    if start + 4 > raw.len() -> return None
+    value := 0
+    loop i in start..<(start + 4) {
+        n :: Int.from_u8(raw[i])
+        digit :: if {
+            n >= 48 && n <= 57 -> n - 48
+            n >= 97 && n <= 102 -> n - 87
+            n >= 65 && n <= 70 -> n - 55
+            else -> -1
+        }
+        if digit < 0 -> return None
+        value = value * 16 + digit
+    }
+    Val(value)
+}
+
+fn push_scalar(out: &[U8], cp: Int) Never! {
+    if cp < 128 {
+        &out.push(to_u8(cp))
+    } else if cp < 2048 {
+        &out.push(to_u8((192).bit_or((cp >> 6))))
+        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+    } else if cp < 65536 {
+        &out.push(to_u8((224).bit_or((cp >> 12))))
+        &out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
+        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+    } else {
+        &out.push(to_u8((240).bit_or((cp >> 18))))
+        &out.push(to_u8((128).bit_or(((cp >> 12).bit_and(63)))))
+        &out.push(to_u8((128).bit_or(((cp >> 6).bit_and(63)))))
+        &out.push(to_u8((128).bit_or((cp.bit_and(63)))))
+    }
+}
+
+/// A JSON string starting at `start` (which must be `"`), with standard
+/// escapes and paired surrogates; raw control bytes are rejected.
+fn json_string(raw: [U8], start: Int) -> JSONText? {
+    if start >= raw.len() || raw[start] != (U8{34}) -> return None
+    pos := start + 1
+    out := [U8]{}
+    loop pos < raw.len() {
+        n :: Int.from_u8(raw[pos])
+        pos = pos + 1
+        if n == 34 {
+            text :: String.from_bytes(out) ?? return None
+            return Val(JSONText{text: text, next: pos})
+        }
+        if n < 32 -> return None
+        if n != 92 {
+            &out.push(to_u8(n))
+        } else {
+            if pos >= raw.len() -> return None
+            e :: Int.from_u8(raw[pos])
+            pos = pos + 1
+            if {
+                e == 34 || e == 92 || e == 47 -> &out.push(to_u8(e))
+                e == 98 -> &out.push(U8{8})
+                e == 102 -> &out.push(U8{12})
+                e == 110 -> &out.push(U8{10})
+                e == 114 -> &out.push(U8{13})
+                e == 116 -> &out.push(U8{9})
+                e == 117 -> {
+                    high :: json_hex4(raw, pos) ?? return None
+                    pos = pos + 4
+                    if high >= 55296 && high <= 56319 {
+                        if pos + 1 >= raw.len() || raw[pos] != (U8{92}) || raw[pos + 1] != (U8{117}) -> return None
+                        low :: json_hex4(raw, pos + 2) ?? return None
+                        pos = pos + 6
+                        if low < 56320 || low > 57343 -> return None
+                        push_scalar(&out, 65536 + ((high - 55296) << 10) + (low - 56320))
+                    } else {
+                        if high >= 56320 && high <= 57343 -> return None
+                        push_scalar(&out, high)
+                    }
+                }
+                else -> return None
+            }
+        }
+    }
+    None
+}
+
+/// Skip one claim value: a string, a bracket-balanced object/array (strings
+/// inside are validated) or a non-empty bare scalar.
+fn json_skip_value(raw: [U8], start: Int) -> Int? {
+    if start >= raw.len() -> return None
+    first :: Int.from_u8(raw[start])
+    if first == 34 {
+        value :: json_string(raw, start) ?? return None
+        return Val(value.next)
+    }
+    if first == 123 || first == 91 {
+        closers := [Int]{}
+        &closers.push(if first == 123 -> 125 else -> 93)
+        pos := start + 1
+        loop pos < raw.len() {
+            n :: Int.from_u8(raw[pos])
+            if n == 34 {
+                value :: json_string(raw, pos) ?? return None
+                pos = value.next
+            } else if n == 123 || n == 91 {
+                &closers.push(if n == 123 -> 125 else -> 93)
+                pos = pos + 1
+            } else if n == 125 || n == 93 {
+                if closers[closers.len() - 1] != n -> return None
+                _ := &closers.pop()
+                pos = pos + 1
+                if closers.len() == 0 -> return Val(pos)
+            } else {
+                pos = pos + 1
+            }
+        }
+        return None
+    }
+    end :: json_scalar_end(raw, start)
+    if end > start -> return Val(end)
+    None
+}
+
+/// A JSON integer within the signed 64-bit range; `-0` is rejected.
+fn json_i64(text: String) -> Int? {
+    raw :: text.bytes()
+    negative :: raw.len() > 0 && raw[0] == (U8{45})
+    start :: if negative -> 1 else -> 0
+    if start >= raw.len() -> return None
+    loop i in start..<raw.len() {
+        n :: Int.from_u8(raw[i])
+        if n < 48 || n > 57 -> return None
+    }
+    if negative && raw.len() == 2 && raw[1] == (U8{48}) -> return None
+    value :: Int.parse(text) ?? return None
+    checked_i64(value)
+}
+
+/// Split on `.` exactly like Rust `str::split`: empty parts are kept.
+fn split_dot(text: String) -> [String] Never! {
+    out := [String]{}
+    raw :: text.bytes()
+    start := 0
+    loop i in 0..<raw.len() {
+        if raw[i] == (U8{46}) {
+            &out.push(slice_bytes(raw, start, i) ?? "")
+            start = i + 1
+        }
+    }
+    &out.push(slice_bytes(raw, start, raw.len()) ?? "")
+    out
+}
 
 fn index_of(text: String, needle: String) -> Int Never! {
     hay :: text.bytes()
@@ -418,130 +1019,15 @@ fn index_of(text: String, needle: String) -> Int Never! {
 
 fn starts(text: String, prefix: String) -> Bool Never! { index_of(text, prefix) == 0 }
 
-fn drop_prefix(text: String, n: Int) -> String? {
+fn ends(text: String, suffix: String) -> Bool Never! {
     raw :: text.bytes()
-    if n < 0 || n > raw.len() -> return None
-    slice_bytes(raw, n, raw.len())
-}
-
-fn slice_bytes(raw: [U8], start: Int, end: Int) -> String? {
-    if start < 0 || end < start || end > raw.len() -> return None
-    out := [U8]{}
-    i := start
-    loop {
-        if i >= end {
-            text :: String.from_bytes(out) ?? return None
-            return Val(text)
-        }
-        &out.push(raw[i])
-        i = i + 1
-    }
-}
-
-fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
-    out := [U8]{}
-    i := start
-    loop {
-        if i >= end || i >= bytes.len() -> return ~out
-        &out.push(bytes[i])
-        i = i + 1
-    }
-}
-
-fn parse_int(text: String) -> Int? {
-    n := 0
-    any := false
-    loop b in text.bytes() {
-        d :: Int.from_u8(b)
-        if d < 48 || d > 57 -> return None
-        digit := d - 48
-        if n > (9223372036854775807 - digit) /% 10 -> return None
-        n = n * 10 + digit
-        any = true
-    }
-    if !any -> return None
-    Val(n)
-}
-fn valid_ttl(ttl_s: Int) -> Bool Never! {
-    ttl_s >= 1 && ttl_s <= 315360000
-}
-
-fn valid_session_id(text: String) -> Bool Never! {
-    raw := text.bytes()
-    if raw.len() != 69 || !starts(text, "sess-") -> return false
-    loop i in 5..<raw.len() {
-        b :: raw[i]
-        n :: Int.from_u8(b)
-        if !((n >= 48 && n <= 57) || (n >= 97 && n <= 102)) -> return false
+    tail :: suffix.bytes()
+    if tail.len() > raw.len() -> return false
+    start :: raw.len() - tail.len()
+    loop i in 0..<tail.len() {
+        if raw[start + i] != tail[i] -> return false
     }
     true
-}
-fn valid_identity(text: String) -> Bool Never! {
-    if text.len() == 0 || text.len() > 256 || has_control(text) || text != trim_ascii(text) -> return false
-    true
-}
-fn valid_password_hash(text: String) -> Bool Never! {
-    text.len() >= 8 && text.len() <= 4096 && !has_control(text) && text == trim_ascii(text)
-}
-
-fn valid_email(text: String) -> Bool Never! {
-    if text.len() < 3 || text.len() > 512 || has_control(text) || text != trim_ascii(text) -> return false
-    at := -1
-    raw := text.bytes()
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{64}) {
-            if at >= 0 -> return false
-            at = i
-        }
-    }
-    if at <= 0 || at >= raw.len() - 1 -> return false
-    local :: slice_bytes(raw, 0, at) ?? return false
-    domain :: slice_bytes(raw, at + 1, raw.len()) ?? return false
-    if local.len() > 64 || domain.len() > 253 || starts(local, ".") || starts(domain, ".") || ends(local, ".") || ends(domain, ".") || contains(local, "..") || contains(domain, "..") -> return false
-    loop b in local.bytes() {
-        n :: Int.from_u8(b)
-        if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || contains_byte([U8]{33,35,36,37,38,39,42,43,45,47,61,63,94,95,96,123,124,125,126}, b) || b == (U8{46})) -> return false
-    }
-    loop label in split_dot_parts(domain) {
-        if label.len() == 0 || label.len() > 63 || starts(label, "-") || ends(label, "-") -> return false
-        loop b in label.bytes() {
-            n :: Int.from_u8(b)
-            if !((n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 45) -> return false
-        }
-    }
-    true
-}
-
-fn trim_ascii(text: String) -> String Never! {
-    raw :: text.bytes()
-    start := 0
-    end := raw.len()
-    loop start < end {
-        n :: Int.from_u8(raw[start])
-        if n == 32 || n == 9 || n == 10 || n == 13 -> start = start + 1 else -> break
-    }
-    loop end > start {
-        n :: Int.from_u8(raw[end - 1])
-        if n == 32 || n == 9 || n == 10 || n == 13 -> end = end - 1 else -> break
-    }
-    slice_text(text, start, end)
-}
-fn slice_text(text: String, start: Int, end: Int) -> String Never! {
-    slice_bytes(text.bytes(), start, end) ?? ""
-}
-
-fn split_dot_parts(text: String) -> [String] Never! {
-    out := [String]{}
-    raw := text.bytes()
-    start := 0
-    loop i in 0..<raw.len() {
-        if raw[i] == (U8{46}) {
-            &out.push(slice_text(text, start, i))
-            start = i + 1
-        }
-    }
-    &out.push(slice_text(text, start, raw.len()))
-    out
 }
 
 fn contains_byte(values: [U8], value: U8) -> Bool Never! {
@@ -551,58 +1037,315 @@ fn contains_byte(values: [U8], value: U8) -> Bool Never! {
     false
 }
 
-fn has_control(text: String) -> Bool Never! {
-    loop b in text.bytes() {
-        n :: Int.from_u8(b)
-        if n < 32 || n == 127 -> return true
-    }
-    false
+fn slice_bytes(raw: [U8], start: Int, end: Int) -> String? {
+    if start < 0 || end < start || end > raw.len() -> return None
+    Val(String.from_bytes(slice_u8(raw, start, end)) ?? return None)
 }
 
-fn ends(text: String, suffix: String) -> Bool Never! {
-    raw := text.bytes()
-    tail := suffix.bytes()
-    if tail.len() > raw.len() -> return false
-    start := raw.len() - tail.len()
-    loop i in 0..<tail.len() {
-        if raw[start + i] != tail[i] -> return false
-    }
-    true
-}
-fn host_unix_s() -[Time]> Int Never! { time.unix_ns() /% 1000000000 }
-
-fn index_byte(bytes: [U8], needle: U8) -> Int Never! {
-    loop i in 0..<bytes.len() {
-        if bytes[i] == needle -> return i
-    }
-    -1
-}
-fn paseto_pae(message: [U8], footer: [U8]) -> [U8] Never! {
+fn slice_u8(bytes: [U8], start: Int, end: Int) -> [U8] Never! {
     out := [U8]{}
-    paseto_pae_len(&out, 4)
-    paseto_pae_part(&out, "v4.public.".bytes())
-    paseto_pae_part(&out, message)
-    paseto_pae_part(&out, footer)
-    paseto_pae_part(&out, [U8]{})
-    out
-}
-
-fn paseto_pae_part(out: &[U8], bytes: [U8]) Never! {
-    paseto_pae_len(&out, bytes.len())
-    loop byte in bytes -> &out.push(byte)
-}
-
-fn paseto_pae_len(out: &[U8], value: Int) Never! {
-    n := value
-    loop _ in 0..<8 {
-        &out.push(to_u8(n))
-        n = n >> 8
+    i := start
+    loop i < end && i < bytes.len() {
+        &out.push(bytes[i])
+        i = i + 1
     }
+    out
 }
 
 /// Low byte of `n`. The mask runs in `Int`, so a wide value never reaches the
 /// checked `U8{}` conversion.
 fn to_u8(n: Int) -> U8 Never! {
-    v :: n & 255
+    v :: (n).bit_and(255)
     (U8{v})
+}
+
+fn b64url_for_test(bytes: [U8]) -> String Never! {
+    alphabet :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".bytes()
+    out := [U8]{}
+    i := 0
+    loop i < bytes.len() {
+        first :: Int.from_u8(bytes[i])
+        second :: if i + 1 < bytes.len() -> Int.from_u8(bytes[i + 1]) else -> 0
+        third :: if i + 2 < bytes.len() -> Int.from_u8(bytes[i + 2]) else -> 0
+        &out.push(alphabet[first >> 2])
+        &out.push(alphabet[((first.bit_and(3)) << 4).bit_or((second >> 4))])
+        if i + 1 < bytes.len() -> &out.push(alphabet[((second.bit_and(15)) << 2).bit_or((third >> 6))])
+        if i + 2 < bytes.len() -> &out.push(alphabet[third.bit_and(63)])
+        i = i + 3
+    }
+    String.from_bytes(out) ?? ""
+}
+
+fn jwt_for_test(key: [U8], header: String, payload: String) -> String Never! {
+    signing_input :: "{b64url_for_test(header.bytes())}.{b64url_for_test(payload.bytes())}"
+    "{signing_input}.{b64url_for_test(crypto.hmac_sha256(key, signing_input.bytes()))}"
+}
+
+// Test renderings: each fallible call becomes one comparable line, so every
+// variant, payload and message is asserted exactly.
+fn auth_error_text(error: AuthError) -> String Never! {
+    if error == {
+        .MalformedToken(reason) -> "MalformedToken({reason})"
+        .UnsupportedToken(reason) -> "UnsupportedToken({reason})"
+        .InvalidSignature -> "InvalidSignature"
+        .WeakKey -> "WeakKey"
+        .MissingClaim(name) -> "MissingClaim({name})"
+        .WrongAudience(expected, actual) -> "WrongAudience({expected}|{actual})"
+        .WrongIssuer(expected, actual) -> "WrongIssuer({expected}|{actual ?? "<none>"})"
+        .TokenExpired -> "TokenExpired"
+        .DecodeError(reason) -> "DecodeError({reason})"
+        .TokenNotYetValid -> "TokenNotYetValid"
+    }
+}
+
+fn jwt_outcome(token: String, key: [U8], audience: String, issuer: String?{None}) -[Time]> String Never! {
+    if verify_jwt(token, key: key, audience: audience, issuer: issuer) == {
+        .Ok(claims) -> "ok:{claims.audience}"
+        .Err(error) -> auth_error_text(error)
+    }
+}
+
+fn paseto_outcome(token: String, key: [U8]) -[Time]> String Never! {
+    if verify_paseto(token, key: key, audience: "gateway") == {
+        .Ok(claims) -> "ok:{claims.audience}"
+        .Err(error) -> auth_error_text(error)
+    }
+}
+
+fn claims_outcome(text: String, skew_ns: Int, now_ns: Int) -> String Never! {
+    if token_claims(text.bytes(), "gateway", None, skew_ns, now_ns) == {
+        .Ok(claims) -> "ok:{claims.not_before ?? -1}"
+        .Err(error) -> auth_error_text(error)
+    }
+}
+
+fn b64url_outcome(text: String) -> String Never! {
+    if b64url_decode(text) == {
+        .Ok(bytes) -> "ok:{bytes.len()}"
+        .Err(error) -> auth_error_text(error)
+    }
+}
+
+fn oauth_claims_outcome(text: String) -> String Never! {
+    if oauth_claims(text) == {
+        .Ok(claims) -> "ok:{claims.alg ?? ""}:{claims.exp ?? 0}:{claims.sub ?? ""}"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn oauth_verify_outcome(nonce: String, assertion: String, now_ms: Int, config: OAuthConfig) -> String Never! {
+    if oauth_verify(nonce, assertion, now_ms, config) == {
+        .Ok(subject) -> "ok:{subject}"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn register_outcome(user_id: String, password_hash: String) -[DB]> String Never! {
+    if register_user(user_id, password_hash) == {
+        .Ok(_) -> "ok"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn login_outcome(user_id: String, password_hash: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String Never! {
+    if password_login(user_id, password_hash, now_ms, ttl_ms) == {
+        .Ok(session) -> "ok:{session.user_id}"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn validate_outcome(session_id: String, now_ms: Int) -[DB]> String Never! {
+    if session_validate(session_id, now_ms) == {
+        .Ok(session) -> "ok:{session.user_id}"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn issue_outcome(user_id: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String Never! {
+    if magic_link_issue(user_id, now_ms, ttl_ms) == {
+        .Ok(_) -> "ok"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn consume_outcome(token: String, now_ms: Int, ttl_ms: Int) -[DB, Rand]> String Never! {
+    if magic_link_consume(token, now_ms, ttl_ms) == {
+        .Ok(session) -> "ok:{session.user_id}"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn oauth_begin_outcome(provider: String) -[DB, Env, Time, Rand]> String Never! {
+    if oauth_begin(provider) == {
+        .Ok(_) -> "ok"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn oauth_finish_outcome(state: String, assertion: String, now_ms: Int, ttl_ms: Int) -[DB, Env, Rand]> String Never! {
+    if oauth_finish(state, assertion, now_ms, ttl_ms) == {
+        .Ok(session) -> "ok:{session.user_id}"
+        .Err(error) -> "{error}"
+    }
+}
+
+fn expiry_outcome(now_ms: Int, ttl_ms: Int) -> String Never! {
+    if expiry(now_ms, ttl_ms) == {
+        .Ok(value) -> "ok:{value}"
+        .Err(error) -> "{error}"
+    }
+}
+
+#Test("JWT errors keep their variants and payloads") {
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    header :: "{{\"alg\":\"HS256\",\"typ\":\"JWT\"}}"
+    assert(jwt_outcome("a.b.c", [U8]{1}, "gateway") == "WeakKey")
+    assert(jwt_outcome("a.b", key, "gateway") == "MalformedToken(JWT must have exactly three non-empty parts)")
+    assert(jwt_outcome("a*.b.c", key, "gateway") == "DecodeError(invalid base64url character)")
+    assert(jwt_outcome(jwt_for_test(key, "{{\"alg\":\"none\"}}", "{{}}"), key, "gateway") == "UnsupportedToken(unsupported JWT algorithm `none`)")
+    other_key :: "fedcba9876543210fedcba9876543210".bytes()
+    assert(jwt_outcome(jwt_for_test(other_key, header, "{{\"aud\":\"gateway\",\"exp\":4102444800}}"), key, "gateway") == "InvalidSignature")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":\"gateway\"}}"), key, "gateway") == "MissingClaim(exp)")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":\"gateway\",\"exp\":1.5}}"), key, "gateway") == "MalformedToken(claim `exp` must be an integer)")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":\"gateway\",\"exp\":9223372036854775808}}"), key, "gateway") == "MalformedToken(claim `exp` must be an exact integer)")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":[\"a\",\"b\"],\"exp\":4102444800}}"), key, "gateway") == "WrongAudience(gateway|a,b)")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":\"gateway\",\"exp\":4102444800}}"), key, "gateway", "partner") == "WrongIssuer(partner|<none>)")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":\"gateway\",\"exp\":10}}"), key, "gateway") == "TokenExpired")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":\"gateway\",\"exp\":4102444800,\"nbf\":4102444000}}"), key, "gateway") == "TokenNotYetValid")
+    assert(jwt_outcome(jwt_for_test(key, header, "{{\"aud\":\"gateway\",\"exp\":4102444800}}"), key, "gateway") == "ok:gateway")
+}
+
+#Test("JWT claims carry optional fields") {
+    key :: "0123456789abcdef0123456789abcdef".bytes()
+    token :: jwt_for_test(key, "{{\"alg\":\"HS256\"}}", "{{\"sub\":\"alice\",\"aud\":[\"x\",\"gateway\"],\"iss\":\"partner\",\"exp\":4102444800,\"iat\":-9223372036854775808}}")
+    claims :: verify_jwt(token, key: key, audience: "gateway", issuer: "partner", clock_skew: 5s) ?? panic("valid JWT")
+    assert((claims.subject ?? "") == "alice")
+    assert(claims.audience == "gateway")
+    assert((claims.issuer ?? "") == "partner")
+    assert(claims.expires_at == 4102444800)
+    assert(claims.not_before == None)
+    assert((claims.issued_at ?? 0) == -9223372036854775808)
+}
+
+#Test("NumericDate bounds keep nanoseconds") {
+    expiry_text :: "{{\"aud\":\"gateway\",\"exp\":10}}"
+    deadline :: 10 * 1000000000 + 7
+    assert(claims_outcome(expiry_text, 7, deadline - 1) == "ok:-1")
+    assert(claims_outcome(expiry_text, 7, deadline) == "TokenExpired")
+    nbf_text :: "{{\"aud\":\"gateway\",\"exp\":30,\"nbf\":20}}"
+    threshold :: 20 * 1000000000 - 7
+    assert(claims_outcome(nbf_text, 7, threshold - 1) == "TokenNotYetValid")
+    assert(claims_outcome(nbf_text, 7, threshold) == "ok:20")
+    assert(claims_outcome("{{\"aud\":\"gateway\",\"exp\":-0}}", 0, 0) == "MalformedToken(claim `exp` must be an exact integer)")
+}
+
+#Test("PASETO rejects every non v4.public form") {
+    key := [U8]{}
+    loop _ in 0..<32 -> &key.push(U8{1})
+    assert(paseto_outcome("v4.public.AA", [U8]{1}) == "WeakKey")
+    assert(paseto_outcome("v3.public.AA", key) == "UnsupportedToken(only PASETO v4.public is supported)")
+    assert(paseto_outcome("v4.local.AA", key) == "UnsupportedToken(only PASETO v4.public is supported)")
+    assert(paseto_outcome("v4.public.AA", key) == "MalformedToken(PASETO body is shorter than its signature)")
+    body :: b64url_for_test(slice_u8("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef".bytes(), 0, 64))
+    assert(paseto_outcome("v4.public.{body}.a2lk", key) == "InvalidSignature")
+    assert(paseto_outcome("v4.public.{body}", key) == "InvalidSignature")
+    assert(paseto_pae([U8]{7}, [U8]{}, [U8]{}).len() == 8 + 8 + 10 + 8 + 1 + 8 + 8)
+}
+
+#Test("base64url decoding is canonical") {
+    assert(b64url_outcome("AQ") == "ok:1")
+    assert(b64url_outcome("AR") == "DecodeError(non-canonical base64 trailing bits)")
+    assert(b64url_outcome("A") == "DecodeError(invalid base64url length)")
+    assert(b64url_outcome("A=") == "DecodeError(invalid base64url character)")
+}
+
+#Test("magic link delivery identity policy") {
+    long_label :: String.from_bytes(slice_u8("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".bytes(), 0, 63)) ?? ""
+    expected :: "user@{long_label}.example"
+    assert((delivery_capability(expected) ?? "") == expected)
+    assert(delivery_capability("user@{long_label}a.example") == None)
+    assert(delivery_capability("a@@example.com") == None)
+    assert(delivery_capability(".a@example.com") == None)
+    assert(delivery_capability("a..b@example.com") == None)
+    assert(delivery_capability("a@-example.com") == None)
+    assert(delivery_capability("a@example.com.") == None)
+    assert(delivery_capability("alice") == None)
+}
+
+#Test("identifier rejects blank and control text") {
+    assert(valid_identifier("alice", 512))
+    assert(!valid_identifier("", 512))
+    assert(!valid_identifier("　", 512))
+    assert(!valid_identifier(String.from_bytes([U8]{97, 194, 133, 98}) ?? "", 512))
+    assert(!valid_identifier("a\tb", 512))
+    assert(!valid_identifier("abcd", 3))
+}
+
+#Test("store rows round trip") {
+    rows := [AuthRecord]{}
+    &rows.push(AuthRecord{kind: 1, a: "alice@example.com", b: "argon2id:demo", c: "alice@example.com", n: 1})
+    &rows.push(AuthRecord{kind: 2, a: "sess-1", b: "alice@example.com", c: session_cookie_mint("sess-1"), n: 1700000000000})
+    &rows.push(AuthRecord{kind: 4, a: "oauth-1", b: "google", c: "", n: -5})
+    decoded :: decode_store(encode_store(rows)) ?? panic("store decode")
+    assert(decoded.len() == 3)
+    assert(decoded[1].c == "jet_session=sess-1; HttpOnly; Secure; SameSite=Lax; Path=/")
+    assert(decoded[1].n == 1700000000000)
+    assert(decoded[2].n == -5)
+    assert(decoded[2].c == "")
+    assert(decode_store([U8]{1, 9, 0, 0, 0}) == None)
+    empty :: decode_store([U8]{}) ?? panic("empty store")
+    assert(empty.len() == 0)
+}
+
+#Test("OAuth claims parser is strict") {
+    assert(oauth_claims_outcome("{{\"alg\":\"HS256\",\"x\":[1,{{\"y\":\"}}\"}}],\"exp\":-12,\"sub\":\"a\\u00e9\\ud83d\\ude00\"}}") == "ok:HS256:-12:aé😀")
+    assert(oauth_claims_outcome("{{\"alg\":\"a\",\"alg\":\"b\"}}") == "OAuth claim `alg` is duplicated")
+    assert(oauth_claims_outcome("{{\"exp\":-0}}") == "OAuth claim `exp` must be an integer")
+    assert(oauth_claims_outcome("{{\"exp\":9223372036854775808}}") == "OAuth claim `exp` must be an integer")
+    assert(oauth_claims_outcome("{{\"sub\":\"\\udc00\"}}") == "OAuth claim `sub` must be text")
+    assert(oauth_claims_outcome("{{}} x") == "OAuth assertion has trailing data")
+    assert(oauth_claims_outcome("[]") == "OAuth assertion payload is not an object")
+}
+
+#Test("OAuth assertion requires provider proof and state nonce") {
+    secret :: "01234567890123456789012345678901".bytes()
+    config :: OAuthConfig{secret: secret, issuer: "google", audience: "google"}
+    assertion :: jwt_for_test(secret, "{{\"alg\":\"HS256\",\"typ\":\"JWT\"}}", "{{\"iss\":\"google\",\"aud\":\"google\",\"sub\":\"alice\",\"nonce\":\"nonce-value\",\"exp\":1700000100,\"iat\":1700000000}}")
+    assert(oauth_verify_outcome("nonce-value", assertion, 1700000000000, config) == "ok:alice")
+    assert(oauth_verify_outcome("other", assertion, 1700000000000, config) == "OAuth assertion nonce is invalid")
+    assert(oauth_verify_outcome("nonce-value", assertion, 1700000100000, config) == "OAuth assertion is expired")
+    assert(oauth_verify_outcome("nonce-value", "a.b", 1700000000000, config) == "OAuth assertion is malformed")
+    wrong_issuer :: OAuthConfig{secret: secret, issuer: "github", audience: "google"}
+    assert(oauth_verify_outcome("nonce-value", assertion, 1700000000000, wrong_issuer) == "OAuth assertion issuer is invalid")
+}
+
+#Test("sessions, magic links and lifetimes follow one store") {
+    assert(register_outcome("tester@example.com", "argon2id:test") == "ok")
+    assert(register_outcome("tester@example.com", "argon2id:test") == "user `tester@example.com` already registered")
+    assert(register_outcome("", "argon2id:test") == "user id is invalid")
+    assert(login_outcome("tester@example.com", "wrong", 1000, 10) == "invalid credentials")
+    assert(login_outcome("tester@example.com", "argon2id:test", 1000, 0) == "auth lifetime must be positive")
+    assert(login_outcome("tester@example.com", "argon2id:test", 9223372036854775807, 1) == "auth lifetime is out of range")
+    session :: password_login("tester@example.com", "argon2id:test", 1000, 10) ?? panic("login")
+    assert(session.cookie == "jet_session={session.id}; HttpOnly; Secure; SameSite=Lax; Path=/")
+    assert(session.expires_at == 1010)
+    assert(validate_outcome(session.id, 1009) == "ok:tester@example.com")
+    assert(validate_outcome(session.id, 1010) == "token expired")
+    assert(validate_outcome("sess-1", 1000) == "missing: session")
+    token :: magic_link_issue("tester@example.com", 1000, 50) ?? panic("magic")
+    assert(consume_outcome(token, 1050, 10) == "token expired")
+    assert(consume_outcome(token, 1049, 10) == "ok:tester@example.com")
+    assert(consume_outcome(token, 1049, 10) == "token expired")
+    assert(issue_outcome("plain-user", 1000, 50) == "magic link requires a delivery-capable identity")
+    assert(oauth_begin_outcome("bad provider") == "OAuth provider is invalid")
+    assert(oauth_finish_outcome("", "x", 0, 1) == "OAuth completion is invalid")
+}
+
+#Test("session cookie and display redact the bearer") {
+    assert(session_cookie_mint("sess-x") == "jet_session=sess-x; HttpOnly; Secure; SameSite=Lax; Path=/")
+    shown :: session_show(Session{id: "sess-live-bearer", user_id: "alice", cookie: "jet_session=sess-live-bearer", expires_at: 42})
+    assert(shown == "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)")
+    assert(expiry_outcome(10, 0) == "auth lifetime must be positive")
+    assert(expiry_outcome(9223372036854775807, 1) == "auth lifetime is out of range")
+    assert(expiry_outcome(10, 5) == "ok:15")
 }

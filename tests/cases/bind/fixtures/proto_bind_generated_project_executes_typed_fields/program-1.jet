@@ -1,0 +1,32 @@
+
+use core.encoding.json as json
+
+fn run() {
+    canonical := "{{\"name\":\"jet\",\"stars\":4,\"active\":true,\"payload\":[74,101,116],\"created\":\"2024-01-02T03:04:05Z\",\"ttl\":7000000000}}"
+    wire := json.parse(canonical) ?? panic("parse")
+    repo := wire.decode<Repo>() ?? panic("decode")
+    encoded := repo.encode()
+    reencoded := json.to_string(encoded)
+    roundtrip_wire := json.parse(reencoded) ?? panic("reparse")
+    roundtrip := roundtrip_wire.decode<Repo>() ?? panic("decode roundtrip")
+    if roundtrip.name != repo.name { panic("name roundtrip") }
+    if roundtrip.stars != repo.stars { panic("stars roundtrip") }
+    if roundtrip.active != repo.active { panic("active roundtrip") }
+    if roundtrip.payload.len() != repo.payload.len() { panic("payload length roundtrip") }
+    if roundtrip.payload[0] != repo.payload[0] { panic("payload roundtrip") }
+    if roundtrip.payload[1] != repo.payload[1] { panic("payload roundtrip") }
+    if roundtrip.payload[2] != repo.payload[2] { panic("payload roundtrip") }
+    if roundtrip.created.format_rfc3339() != repo.created.format_rfc3339() {
+        panic("created roundtrip")
+    }
+    ttl := repo.ttl.in(.Seconds) ?? panic("ttl in")
+    roundtrip_ttl := roundtrip.ttl.in(.Seconds) ?? panic("ttl roundtrip")
+    if roundtrip_ttl != ttl { panic("ttl roundtrip") }
+    print(repo.name)
+    print(repo.stars)
+    print(repo.active)
+    print(repo.payload.len())
+    print(repo.payload[0])
+    print(repo.created.format_rfc3339())
+    print(ttl)
+}

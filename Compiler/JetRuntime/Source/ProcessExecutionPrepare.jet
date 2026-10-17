@@ -1,0 +1,240 @@
+// Plain ProcessSpec136 -> borrowed HostSpawn Spec216. No Rust layouts.
+fn process_execution_first(spec: I64) -> I64 {
+    cmd :: fd_word(spec, PROCESS_SPEC_CMD)
+    if (fd_word(cmd, I64{0}) == I64{0}) -> { I64{0} } else -> { fd_word(fd_word(cmd, I64{16}), I64{0}) }
+}
+fn process_execution_error(spec: I64, operation: I64, cause: I64, err: I64) -> I64 {
+    host_io_other_take(operation, process_optional_text_clone(process_execution_first(spec)), cause, err)
+}
+fn process_execution_invalid(spec: I64, cause: I64, err: I64) -> I64 {
+    compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, process_execution_first(spec), I64{0}, jet_rt_string_clone(cause), err)
+}
+fn process_execution_has(text: I64, byte: I64) -> Bool {
+    at := I64{0}
+    loop at < rt_text_len(text) {
+        if (rt_text_byte(rt_text_data(text) + at) == byte) -> return true
+        at += I64{1}
+    }
+    false
+}
+fn process_execution_env_remove(env: I64, key: I64) {
+    data :: fd_word(env, I64{16})
+    length :: fd_word(env, I64{0})
+    read := I64{0}
+    write := I64{0}
+    loop read < length {
+        row :: data + read * I64{16}
+        if jet_rt_string_eq(fd_word(row, I64{0}), key) {
+            jet_rt_string_drop(fd_word(row, I64{0}))
+            jet_rt_string_drop(fd_word(row, I64{8}))
+        } else {
+            fd_put(data + write * I64{16}, I64{0}, fd_word(row, I64{0}))
+            fd_put(data + write * I64{16}, I64{8}, fd_word(row, I64{8}))
+            write += I64{1}
+        }
+        read += I64{1}
+    }
+    fd_put(env, I64{0}, write)
+}
+fn process_execution_env_set(env: I64, key: I64, value: I64) {
+    process_execution_env_remove(env, key)
+    row :: data_sequence_reserve(env, I64{16})
+    fd_put(row, I64{0}, jet_rt_string_clone(key))
+    fd_put(row, I64{8}, jet_rt_string_clone(value))
+    fd_put(env, I64{0}, fd_word(env, I64{0}) + I64{1})
+}
+fn process_execution_environment(spec: I64, err: I64) -> I64 {
+    env :: data_sequence_new(I64{0}, I64{16})
+    if (fd_word(spec, PROCESS_SPEC_ENV_CLEAR).bit_and(I64{255}) == I64{0}) {
+        jet_rt_logical_env_seed()
+        shared_acquire(logical_env_root, false)
+        entry := fd_word(logical_env_root, I64{56})
+        loop entry != (I64{0}) {
+            key :: rt_text_copy(fd_word(entry, I64{8}), fd_word(entry, I64{16}))
+            value :: rt_text_copy(fd_word(entry, I64{24}), fd_word(entry, I64{32}))
+            process_execution_env_set(env, key, value)
+            jet_rt_string_drop(key)
+            jet_rt_string_drop(value)
+            entry = fd_word(entry, I64{0})
+        }
+        shared_release(logical_env_root, false)
+    }
+    sets :: fd_word(spec, PROCESS_SPEC_ENV_SET)
+    removes :: fd_word(spec, PROCESS_SPEC_ENV_REMOVE)
+    at := I64{0}
+    loop at < fd_word(sets, I64{0}) + fd_word(removes, I64{0}) {
+        setting :: at < fd_word(sets, I64{0})
+        row :: if setting -> fd_word(sets, I64{16}) + at * I64{16} else -> fd_word(removes, I64{16}) + (at - fd_word(sets, I64{0})) * I64{8}
+        key :: fd_word(row, I64{0})
+        value :: if setting -> { fd_word(row, I64{8}) } else -> { I64{0} }
+        invalid_name :: rt_text_len(key) == I64{0} || process_execution_has(key, I64{0}) || process_execution_has(key, I64{61})
+        if (invalid_name || (setting && process_execution_has(value, I64{0}))) {
+            process_text_list_drop(env, true)
+            kind :: process_raw_box(if invalid_name -> { I64{0} } else -> { I64{1} })
+            cause :: jet_rt_handle_show_env_error(kind)
+            encoding_enum_drop(kind)
+            _ := compiler_fs_error(HOST_IO_KIND_INVALID_INPUT, HOST_IO_OP_RESOLVE, key, I64{0}, cause, err)
+            return I64{0}
+        }
+        if setting { process_execution_env_set(env, key, value) } else { process_execution_env_remove(env, key) }
+        at += I64{1}
+    }
+    env
+}
+fn process_execution_env_get(env: I64, key: I64) -> I64 {
+    at := I64{0}
+    loop at < fd_word(env, I64{0}) {
+        row :: fd_word(env, I64{16}) + at * I64{16}
+        if jet_rt_string_eq(fd_word(row, I64{0}), key) -> return fd_word(row, I64{8})
+        at += I64{1}
+    }
+    I64{0}
+}
+fn process_execution_candidates(command: I64, env: I64) -> I64 {
+    list :: data_sequence_new(I64{0}, I64{8})
+    if (process_execution_has(command, I64{47}) || rt_text_len(command) == I64{0}) {
+        process_text_list_push(list, command)
+        return list
+    }
+    path :: process_execution_env_get(env, rt_static_text("PATH"))
+    search :: if (path == I64{0}) -> rt_static_text("/bin:/usr/bin") else -> path
+    start := I64{0}
+    at := I64{0}
+    loop at <= rt_text_len(search) {
+        if (at == rt_text_len(search) || rt_text_byte(rt_text_data(search) + at) == I64{58}) {
+            name :: jet_rt_string_builder_new()
+            if (at != start) {
+                rt_text_append(name, rt_text_data(search) + start, at - start)
+                jet_rt_string_builder_push(name, rt_static_text("/"))
+            }
+            jet_rt_string_builder_push(name, command)
+            text :: jet_rt_string_builder_finish(name)
+            process_text_list_push(list, text)
+            jet_rt_string_drop(text)
+            start = at + I64{1}
+        }
+        at += I64{1}
+    }
+    list
+}
+fn process_execution_nul_columns(list: I64) -> I64 {
+    length :: fd_word(list, I64{0})
+    columns :: jet_rt_alloc((length + I64{1}) * I64{8}, I64{8})
+    at := I64{0}
+    loop at < length {
+        fd_put(columns, at * I64{8}, fd_c_path(fd_word(fd_word(list, I64{16}), at * I64{8})))
+        at += I64{1}
+    }
+    fd_put(columns, length * I64{8}, I64{0})
+    columns
+}
+fn process_execution_nul_drop(columns: I64, list: I64) {
+    at := I64{0}
+    loop at < fd_word(list, I64{0}) {
+        jet_rt_free(fd_word(columns, at * I64{8}), rt_text_len(fd_word(fd_word(list, I64{16}), at * I64{8})) + I64{1}, I64{1})
+        at += I64{1}
+    }
+    jet_rt_free(columns, (fd_word(list, I64{0}) + I64{1}) * I64{8}, I64{8})
+}
+fn process_execution_pack(spec: I64) -> I64 {
+    held_cwd :: process_execution_held_cwd(spec)
+    mechanical :: jet_rt_alloc(I64{216}, I64{8})
+    coll_zero(mechanical, I64{216})
+    fd_put(mechanical, I64{0}, fd_word(spec, PROCESS_SPEC_CMD))
+    fd_put(mechanical, I64{8}, if (fd_word(spec, PROCESS_SPEC_CWD) == I64{0} || held_cwd) -> { I64{0} } else -> { I64{1} })
+    fd_put(mechanical, I64{16}, fd_word(spec, PROCESS_SPEC_CWD))
+    fd_put(mechanical, I64{56}, if (fd_word(spec, PROCESS_SPEC_STDIN) == I64{0}) -> { I64{0} } else -> { I64{1} })
+    fd_put(mechanical, I64{64}, if (fd_word(spec, PROCESS_SPEC_STDIN) == I64{0}) -> { I64{3} } else -> { fd_word(fd_word(spec, PROCESS_SPEC_STDIN), I64{0}) })
+    fd_put(mechanical, I64{72}, fd_word(spec, PROCESS_SPEC_STDOUT))
+    fd_put(mechanical, I64{80}, fd_word(spec, PROCESS_SPEC_STDERR))
+    field := PROCESS_SPEC_TIMEOUT
+    target := I64{88}
+    loop field <= PROCESS_SPEC_OPEN_FILE_LIMIT {
+        box :: fd_word(spec, field)
+        fd_put(mechanical, target, if (box == I64{0}) -> { I64{0} } else -> { I64{1} })
+        fd_put(mechanical, target + I64{8}, if (box == I64{0}) -> { I64{0} } else -> { fd_word(box, I64{0}) })
+        field += I64{8}
+        target += I64{16}
+    }
+    terminal :: fd_word(spec, PROCESS_SPEC_TERMINAL)
+    fd_put(mechanical, I64{168}, if (terminal != I64{0} || fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) -> { I64{1} } else -> { I64{0} })
+    fd_put(mechanical, I64{176}, if (terminal == I64{0}) -> { I64{0} } else -> { I64{1} })
+    fd_put(mechanical, I64{184}, terminal)
+    fd_put(mechanical, I64{208}, fd_word(spec, PROCESS_SPEC_DIRECTORIES))
+    if (fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {
+        fd_put(mechanical, I64{56}, I64{0})
+        fd_put(mechanical, I64{72}, I64{3})
+        fd_put(mechanical, I64{80}, I64{3})
+    }
+    mechanical
+}
+fn process_execution_launch_native(spec: I64, err: I64) -> I64 {
+    cmd :: fd_word(spec, PROCESS_SPEC_CMD)
+    if (fd_word(cmd, I64{0}) == I64{0}) {
+        _ := process_execution_invalid(spec, rt_static_text("process command needs at least one word"), err)
+        return I64{0}
+    }
+    at := I64{0}
+    loop at < fd_word(cmd, I64{0}) {
+        if process_execution_has(fd_word(fd_word(cmd, I64{16}), at * I64{8}), I64{0}) {
+            _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("nul byte found in provided data")), err)
+            return I64{0}
+        }
+        at += I64{1}
+    }
+    cwd :: fd_word(spec, PROCESS_SPEC_CWD)
+    if (cwd != I64{0} && !process_execution_held_cwd(spec) && process_execution_has(cwd, I64{0})) {
+        _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("nul byte found in provided data")), err)
+        return I64{0}
+    }
+    if (fd_word(spec, PROCESS_SPEC_TERMINAL) != I64{0} && fd_word(spec, PROCESS_SPEC_DETACHED).bit_and(I64{255}) != I64{0}) {
+        _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, jet_rt_string_clone(rt_static_text("terminal sessions cannot be detached")), err)
+        return I64{0}
+    }
+    env :: process_execution_environment(spec, err)
+    if (env == I64{0}) -> return I64{0}
+    env_list :: data_sequence_new(I64{0}, I64{8})
+    at = I64{0}
+    loop at < fd_word(env, I64{0}) {
+        row :: fd_word(env, I64{16}) + at * I64{16}
+        text :: jet_rt_string_builder_new()
+        jet_rt_string_builder_push(text, fd_word(row, I64{0}))
+        jet_rt_string_builder_push(text, rt_static_text("="))
+        jet_rt_string_builder_push(text, fd_word(row, I64{8}))
+        entry :: jet_rt_string_builder_finish(text)
+        process_text_list_push(env_list, entry)
+        jet_rt_string_drop(entry)
+        at += I64{1}
+    }
+    candidates :: process_execution_candidates(process_execution_first(spec), env)
+    process_text_list_drop(env, true)
+    candidate_columns :: process_execution_nul_columns(candidates)
+    argv :: process_execution_nul_columns(cmd)
+    envp :: process_execution_nul_columns(env_list)
+    facts :: jet_rt_alloc(I64{64}, I64{8})
+    fd_put(facts, I64{0}, fd_word(candidates, I64{0}))
+    fd_put(facts, I64{8}, candidate_columns)
+    fd_put(facts, I64{16}, I64{0}) // Rust Command does not run ENOEXEC scripts.
+    fd_put(facts, I64{24}, if (process_execution_has(process_execution_first(spec), I64{47})) -> { I64{0} } else -> { I64{1} })
+    mechanical :: process_execution_pack(spec)
+    child :: jet_process_spawn_raw(mechanical, facts, argv, envp, I64{0}, facts + I64{32})
+    if (child == I64{0}) -> _ := process_execution_error(spec, HOST_IO_OP_RESOLVE, host_errno_cause(fd_word(facts, I64{40})), err)
+    jet_rt_free(mechanical, I64{216}, I64{8})
+    process_execution_nul_drop(candidate_columns, candidates)
+    process_execution_nul_drop(argv, cmd)
+    process_execution_nul_drop(envp, env_list)
+    process_text_list_drop(candidates, false)
+    process_text_list_drop(env_list, false)
+    jet_rt_free(facts, I64{64}, I64{8})
+    child
+}
+fn process_execution_held_cwd(spec: I64) -> Bool {
+    dirs :: fd_word(spec, PROCESS_SPEC_DIRECTORIES)
+    if (dirs == I64{0}) -> return false
+    at := I64{0}
+    loop at < fd_word(dirs, I64{0}) {
+        if (fd_word(fd_word(dirs, I64{16}), at * I64{24} + I64{16}) != I64{0}) -> return true
+        at += I64{1}
+    }
+    false
+}

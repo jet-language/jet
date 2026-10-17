@@ -1,0 +1,15 @@
+# Port of tests/cffi.rs:2360-2397; exact asserted public behavior.
+# Runtime proof PENDING-SAME-HEAD; no output snapshot blessed.
+# Helpers cffi.rs:1286-1320 verbatim manifest/C-provider behavior.
+# RETIRE only 2 generated-Rust substring predicates; front-end acceptance and real C setup remain.
+requires: tool:cc|gcc|clang
+requires: tool:ar
+fixture: cffi_string_param_emits_cstring_conversion.fixture
+write: package.jet cffi_string_param_emits_cstring_conversion.package.template
+capture: cc = first-spawnable cc --version | gcc --version | clang --version
+step: {cap:cc} -c strlib.c -o strlib.o
+exit: 0
+step: ar rcs libstrlib.a strlib.o
+exit: 0
+step: jet check main.jet
+exit: 0

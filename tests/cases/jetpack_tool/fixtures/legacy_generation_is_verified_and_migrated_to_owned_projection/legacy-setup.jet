@@ -1,0 +1,29 @@
+// SETUP-PORT tests/jetpack_tool.rs:1281-1296; first matching Store metadata,
+// original template and Debug String (JSON-compatible) quoting; asserts nothing.
+use core.files
+use core.encoding.json
+fn field(text: String, key: String) -> String {
+    needle :: "\"" + key + "\": \""
+    parts :: text.split(needle)
+    if parts.len() < 2 -> panic("missing metadata key")
+    tail :: parts[1]
+    return tail.split("\"")[0]
+}
+fn run(store: String, hash: String, home: String) {
+    entries :: files.list_dir(store + "/hangar")
+    loop entry in entries {
+        path :: entry.path + "/meta.json"
+        if files.is_file(path.copy()) {
+            meta :: files.read(path)
+            if meta.contains("greet@nixpkgs") {
+                target :: field(meta, "bin") + "/greet"
+                template :: files.read("legacy.template")
+                legacy :: template.replace("OUTPUT_HASH", json.to_string(Dyn.Text(hash))).replace("TARGET_PATH", json.to_string(Dyn.Text(target)))
+                files.write_all(home + "/.jet/tools/generations/1/meta.json", legacy)
+                files.write_all(home + "/.jet/tools/generations/1/complete", "complete\n")
+                return
+            }
+        }
+    }
+    panic("greet Store metadata")
+}

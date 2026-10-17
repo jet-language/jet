@@ -26,8 +26,8 @@ build: {
     .expect("write profile fact manifest");
     let source = r#"
 module cache<K>(capacity: Int) {
-    pub struct Buffer { items: [K#capacity] }
-    pub fn slots() -> Int { capacity }
+    struct Buffer { items: [K#capacity] }
+    fn slots() -> Int { capacity }
 }
 PROFILE_SLOTS :: prep { $build.settings.cache_slots }
 module tuned :: cache<Int>($build.settings.cache_slots)
@@ -141,10 +141,10 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
             .current_dir(&root)
             .args(["dev", entry.to_str().expect("fact-value module path")])
             .arg(&profile_arg)
-            .args(["--interpret", "--watch=off"])
+            .arg("--watch=off")
             .env("NO_COLOR", "1")
             .output()
-            .expect("dev-interpret fact-value module under named profile");
+            .expect("dev fact-value module under named profile");
 
         // `--release` wins over `--profile`; `--set` keeps each named
         // profile's folded setting value while covering the release/AOT and
@@ -168,7 +168,7 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         for (tier, process) in [
             ("jet run --release", release),
             ("jet run", default),
-            ("jet dev --interpret", profile_dev),
+            ("jet dev", profile_dev),
         ] {
             assert_eq!(
                 process.status.code(),
@@ -214,14 +214,8 @@ fn generic_module_fact_value_example_has_profile_and_tier_parity() {
         ],
         vec!["run", entry.to_str().expect("fact-value module path")],
         vec![
-            "run",
-            "--interpret",
-            entry.to_str().expect("fact-value module path"),
-        ],
-        vec![
             "dev",
             entry.to_str().expect("fact-value module path"),
-            "--interpret",
             "--watch=off",
         ],
     ] {
@@ -249,14 +243,14 @@ BASE :: prep { 40 }
 
 module cache<K>(capacity: Int) {
     COMPUTED_SIZE :: prep { BASE + capacity }
-    pub struct Entry { items: [K#capacity] }
-    pub fn size() -> Int { COMPUTED_SIZE }
+    struct Entry { items: [K#capacity] }
+    fn size() -> Int { COMPUTED_SIZE }
 }
 
 module x :: cache<Int>(64)
 
 module plain_template<K> {
-    pub fn identity(value: K) -> K { value }
+    fn identity(value: K) -> K { value }
 }
 module plain :: plain_template<Int>
 
@@ -274,7 +268,7 @@ fn generic_module_diagnostics_hide_instance_mangling() {
     let diagnostics = jet::compile(
         r#"
 module box<T> {
-    pub struct Entry { value: T }
+    struct Entry { value: T }
 }
 module boxed :: box<Int>
 fn wrong(value: boxed.Entry) -> String { return value }
@@ -309,7 +303,7 @@ fn generic_modules_complete_instantiation() {
     let nested = r#"
 module outer<T>(count: Int) {
     module inner<U>(extra: Int) {
-        pub fn total(first: T, second: U) -> Int { return count + extra }
+        fn total(first: T, second: U) -> Int { return count + extra }
     }
     module closed :: inner<T>(count)
 }
@@ -334,11 +328,11 @@ module complete<T>(count: Int, label: String) {
     impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
     #Target(OS.Linux)
     impl Wrapped { fn linux_value(self) -> T { return self.value } }
-    module plain { pub fn value() -> Int { return count } }
-    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+    module plain { fn value() -> Int { return count } }
+    module nested<U> { fn keep(value: U) -> U { return value.copy() } }
     module nested_use :: nested<T>
     #Meta(category: label)
-    pub fn marked(value: ^#Marked T) -> #Marked T {
+    fn marked(value: ^#Marked T) -> #Marked T {
         #Meta(category: label)
         local := T{ value }
         return local
@@ -353,8 +347,8 @@ fn run() {}
         .unwrap_or_else(|diags| panic!("generic-module body substitution failed: {diags:#?}"));
 
     let distinct_generated_names = r#"
-module with_bar_baz<T> { pub struct BarBaz { value: T } }
-module with_baz<T> { pub struct Baz { value: T } }
+module with_bar_baz<T> { struct BarBaz { value: T } }
+module with_baz<T> { struct Baz { value: T } }
 module foo :: with_bar_baz<Int>
 module foo_bar :: with_baz<Int>
 fn run() {
@@ -379,12 +373,12 @@ fn run() {
     .expect("write generic-module package");
     std::fs::write(
         root.join("left.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
+        "module boxed<T>(n: Int) { fn value() -> Int { return n } }\n",
     )
     .expect("write left template");
     std::fs::write(
         root.join("right.jet"),
-        "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n",
+        "module boxed<T>(n: Int) { fn value() -> Int { return n } }\n",
     )
     .expect("write right template");
     let main = root.join("main.jet");
@@ -449,11 +443,11 @@ fn generic_module_local_bindings_shadow_substitution_values() {
     let source = r#"
 module box(capacity: Int) {
     BASE :: prep { capacity }
-    pub fn shadowed() -> Int {
+    fn shadowed() -> Int {
         base :: prep { 5 }
         return base
     }
-    pub fn plain_shadowed() -> Int {
+    fn plain_shadowed() -> Int {
         capacity := 5
         return capacity
     }
@@ -507,15 +501,15 @@ fn assert_nested_generic_module_execution() {
 module outer<T>(count: Int) {
     module plain {
         module inner<U> {
-            pub fn total(value: U) -> Int { return count }
+            fn total(value: U) -> Int { return count }
         }
         module closed :: inner<T>
         module forwarded :: closed
-        pub fn result(value: T) -> Int {
+        fn result(value: T) -> Int {
             return closed.total(value) + forwarded.total(value)
         }
     }
-    pub fn result(value: T) -> Int {
+    fn result(value: T) -> Int {
         return plain.result(value)
     }
 }
@@ -580,7 +574,7 @@ fn assert_closed_value_identity() {
     let source = r#"
 enum Mode { Fast Safe }
 module keyed(flag: Bool, count: Int, letter: Char, label: String, mode: Mode) {
-    pub fn value() -> Int { return count }
+    fn value() -> Int { return count }
 }
 module same :: keyed(true, 3, 'a', "x", Mode.Fast)
 module equivalent :: keyed(1 < 2, 1 + 2, 'a', "x", Mode.Fast)
@@ -650,6 +644,81 @@ fn generic_examples_build_and_run() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
+}
+
+#[test]
+fn generic_records_retain_unused_parameters_in_native_constructors() {
+    if !common::have_rustc() {
+        return;
+    }
+    let root = common::unique_tmp("generic_record_phantoms");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("package.jet"),
+        "name: \"generic_record_phantoms\"\nversion: \"1.0.0\"\n",
+    )
+    .unwrap();
+    let source = r#"
+struct Token<T> {}
+struct Plan<T> {
+    json: String
+    phantom: Int
+}
+struct Mixed<T, Value> {
+    values: [Value]
+}
+fn token<T>() -> Token<T> { Token<T>{} }
+fn plan<T>(json: ^String) -> Plan<T> {
+    Plan<T>{json: json, phantom: 7}
+}
+fn mixed<T, Value>(value: ^Value) -> Mixed<T, Value> {
+    Mixed<T, Value>{values: [Value]{value}}
+}
+CONSTANT :: prep { Plan<Int>{json: "constant", phantom: 9} }
+fn run() {
+    empty :: token<Int>()
+    another :: token<String>()
+    copy :: empty.copy()
+    item :: plan<Int>("literal")
+    values :: mixed<String, Int>(3)
+    print(item.json)
+    print(item.phantom)
+    print(values.values[0])
+    print(CONSTANT.json)
+}
+"#;
+    let entry = root.join("main.jet");
+    std::fs::write(&entry, source).unwrap();
+    let output = jet::compile_with_path(source, &entry.to_string_lossy())
+        .unwrap_or_else(|diagnostics| panic!("generic record fixture failed: {diagnostics:#?}"));
+    let user = common::strip_vetted_prelude_modules(&output.rust);
+    assert!(user.contains("core::marker::PhantomData<(__jet_T,)>"), "{user}");
+    assert!(
+        !user.contains("core::marker::PhantomData<(__jet_Value,)>"),
+        "the nested list field already stores Value: {user}"
+    );
+    assert!(
+        user.contains("__jet_generic_phantom: core::marker::PhantomData"),
+        "{user}"
+    );
+    let rust = root.join("main.rs");
+    let binary = root.join("main");
+    std::fs::write(&rust, output.rust).unwrap();
+    let compiled = Command::new("rustc")
+        .args(["--edition", "2021"])
+        .arg(&rust)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        compiled.status.success(),
+        "generic record constructors failed:\n{}",
+        String::from_utf8_lossy(&compiled.stderr)
+    );
+    let ran = Command::new(binary).output().unwrap();
+    assert!(ran.status.success(), "{}", String::from_utf8_lossy(&ran.stderr));
+    assert_eq!(String::from_utf8_lossy(&ran.stdout), "literal\n7\n3\nconstant\n");
 }
 
 #[test]
@@ -850,7 +919,7 @@ fn generic_call_formatter_keeps_adjacent_angles() {
 fn namespaced_generic_calls_support_explicit_and_inferred_arguments() {
     let source = r#"
 module helpers {
-    pub fn identity<T>(value: ^T) -> T {
+    fn identity<T>(value: ^T) -> T {
         return value
     }
 }
@@ -977,17 +1046,15 @@ fn run() {
     std::fs::write(&path, source).expect("write generic-free test source");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
         .expect("generic-free test source should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics
             .iter()
             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
         "generic-free test source should type-check: {diagnostics:?}"
     );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("generic free calls should compile in resident JIT");
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -999,10 +1066,6 @@ fn run() {
         }
         other => panic!("generic free call JIT run did not complete: {other:?}"),
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "generic free call test did not execute resident JIT"
-    );
     let _ = std::fs::remove_dir_all(root);
 }
 
@@ -1053,17 +1116,15 @@ fn run() {
     std::fs::write(&path, source).expect("write generic-method test source");
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap())
         .expect("generic-method test source should load");
-    let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
     assert!(
         diagnostics
             .iter()
             .all(|diagnostic| diagnostic.severity != jet::Diagnostics::Severity::Error),
         "generic-method test source should type-check: {diagnostics:?}"
     );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("generic methods should compile in resident JIT");
-    jet_jit::reset_jit_trace_for_test();
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, false) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, false) {
         jet::Interpreter::RunOutcome::Ran {
             stdout,
             stderr,
@@ -1075,9 +1136,65 @@ fn run() {
         }
         other => panic!("generic method JIT run did not complete: {other:?}"),
     }
-    assert!(
-        jet_jit::jit_executed_for_test(),
-        "generic method test did not execute resident JIT"
-    );
     let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn associated_aliases_in_nested_return_types_preserve_checked_impl_abi() {
+    if !common::have_rustc() {
+        return;
+    }
+    let source = r#"
+trait Indexed {
+    type Elem
+    fn at(self, i: Int) -> Elem?
+    fn count(self) -> Elem
+}
+struct Nums {
+    values: [Int]
+    impl Indexed {
+        type Elem = Int
+        fn at(self, i: Int) -> Int? { Val(self.values[i]) }
+        fn count(self) -> Int { self.values.len() }
+    }
+}
+fn run() {
+    nums :: Nums{values: [10, 20]}
+    print(nums.at(1) ?? -1)
+    print(nums.count() ?? -1)
+}
+"#;
+    let (code, stdout, stderr) =
+        common::build_and_run("jet_generic_abi", "associated_nested_return", source);
+    assert_eq!(code, 0, "{stderr}");
+    assert_eq!(stdout, "20\n2\n");
+}
+
+#[test]
+fn generic_codec_bounds_follow_structural_codec_contracts() {
+    let source = r#"
+#Codable
+struct Event { id: Int }
+fn round_trip<T: [Encode, Decode]>(value: T) -> T Never! { value }
+enum Cause { Manual }
+fn mark<T>(value: T, cause: Cause) -> T Never! { value }
+fn run() {
+    events :: round_trip<[Event]>([Event{id: 1}])
+    trees :: round_trip<[DataTree]>([DataTree.Null])
+    optional :: round_trip<Event?>(Val(Event{id: 2}))
+    mapped :: round_trip<[String:Event]>(["event": Event{id: 3}])
+    marked :: mark(events, .Manual)
+}
+"#;
+    jet::compile(source)
+        .unwrap_or_else(|diagnostics| panic!("structural codec bounds failed: {diagnostics:#?}"));
+
+    let diagnostics = jet::compile(
+        r#"
+struct Uncoded { id: Int }
+fn encode_value<T: Encode>(value: T) -> T Never! { value }
+fn run() { value :: encode_value<[Uncoded]>([Uncoded{id: 1}]) }
+"#,
+    ).expect_err("a collection of non-encodable values must still fail");
+    assert!(diagnostics.iter().any(|diagnostic| diagnostic.code == "E0905"));
 }

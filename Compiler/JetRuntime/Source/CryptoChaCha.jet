@@ -1,0 +1,142 @@
+// RFC 8439/draft-irtf-cfrg-xchacha ARX reused from
+// Core/crypto/expert.jet:292-363,428-467@5933a61b2.
+// Internal borrowed spans, caller scratch, no allocations or owning copies.
+fn rt_crypto_le32(input: I64) -> I64 {
+    rt_text_byte(input).bit_or((rt_text_byte(input + I64{1}) << I64{8})).bit_or((rt_text_byte(input + I64{2}) << I64{16})).bit_or((rt_text_byte(input + I64{3}) << I64{24}))
+}
+fn rt_crypto_put32(output: I64, word: I64) {
+    rt_text_put(output, word.bit_and(I64{255}))
+    rt_text_put(output + I64{1}, (word >> I64{8}).bit_and(I64{255}))
+    rt_text_put(output + I64{2}, (word >> I64{16}).bit_and(I64{255}))
+    rt_text_put(output + I64{3}, (word >> I64{24}).bit_and(I64{255}))
+}
+fn rt_chacha_rot(word: I64, shift: I64) -> I64 {
+    ((word << shift).bit_or((word >> (I64{32} - shift)))).bit_and(I64{0xffffffff})
+}
+fn rt_chacha_qr(state: I64, ai: I64, bi: I64, ci: I64, di: I64) {
+    ap :: state + ai * I64{8}
+    bp :: state + bi * I64{8}
+    cp :: state + ci * I64{8}
+    dp :: state + di * I64{8}
+    a := rt_text_word(ap)
+    b := rt_text_word(bp)
+    c := rt_text_word(cp)
+    d := rt_text_word(dp)
+    a = (a + b).bit_and(I64{0xffffffff})
+    d = rt_chacha_rot(d.bit_xor(a), I64{16})
+    c = (c + d).bit_and(I64{0xffffffff})
+    b = rt_chacha_rot(b.bit_xor(c), I64{12})
+    a = (a + b).bit_and(I64{0xffffffff})
+    d = rt_chacha_rot(d.bit_xor(a), I64{8})
+    c = (c + d).bit_and(I64{0xffffffff})
+    b = rt_chacha_rot(b.bit_xor(c), I64{7})
+    rt_text_store(ap, a)
+    rt_text_store(bp, b)
+    rt_text_store(cp, c)
+    rt_text_store(dp, d)
+}
+fn rt_chacha_setup(state: I64, key: I64) {
+    rt_text_store(state, I64{0x61707865})
+    rt_text_store(state + I64{8}, I64{0x3320646e})
+    rt_text_store(state + I64{16}, I64{0x79622d32})
+    rt_text_store(state + I64{24}, I64{0x6b206574})
+    i := I64{0}
+    loop {
+        if (i >= I64{8}) -> break
+        rt_text_store(state + I64{32} + i * I64{8}, rt_crypto_le32(key + i * I64{4}))
+        i += I64{1}
+    }
+}
+fn rt_chacha_rounds(state: I64) {
+    i := I64{0}
+    loop {
+        if (i >= I64{10}) -> break
+        rt_chacha_qr(state, I64{0}, I64{4}, I64{8}, I64{12})
+        rt_chacha_qr(state, I64{1}, I64{5}, I64{9}, I64{13})
+        rt_chacha_qr(state, I64{2}, I64{6}, I64{10}, I64{14})
+        rt_chacha_qr(state, I64{3}, I64{7}, I64{11}, I64{15})
+        rt_chacha_qr(state, I64{0}, I64{5}, I64{10}, I64{15})
+        rt_chacha_qr(state, I64{1}, I64{6}, I64{11}, I64{12})
+        rt_chacha_qr(state, I64{2}, I64{7}, I64{8}, I64{13})
+        rt_chacha_qr(state, I64{3}, I64{4}, I64{9}, I64{14})
+        i += I64{1}
+    }
+}
+// output64; scratch256 aligned8, disjoint and wiped on return. Counter0..2^32-1.
+fn rt_crypto_chacha_block(key: I64, nonce: I64, counter: I64, output: I64, scratch: I64) {
+    rt_chacha_setup(scratch, key)
+    rt_text_store(scratch + I64{96}, counter)
+    rt_text_store(scratch + I64{104}, rt_crypto_le32(nonce))
+    rt_text_store(scratch + I64{112}, rt_crypto_le32(nonce + I64{4}))
+    rt_text_store(scratch + I64{120}, rt_crypto_le32(nonce + I64{8}))
+    work :: scratch + I64{128}
+    rt_x25519_copy(work, scratch)
+    rt_chacha_rounds(work)
+    i := I64{0}
+    loop {
+        if (i >= I64{16}) -> break
+        rt_crypto_put32(output + i * I64{4}, (rt_text_word(work + i * I64{8}) + rt_text_word(scratch + i * I64{8})).bit_and(I64{0xffffffff}))
+        i += I64{1}
+    }
+    rt_crypto_wipe(scratch, I64{256})
+}
+// output32, nonce16, scratch128 aligned8; no feed-forward in HChaCha.
+fn rt_crypto_hchacha(key: I64, nonce: I64, output: I64, scratch: I64) {
+    rt_chacha_setup(scratch, key)
+    i := I64{0}
+    loop {
+        if (i >= I64{4}) -> break
+        rt_text_store(scratch + I64{96} + i * I64{8}, rt_crypto_le32(nonce + i * I64{4}))
+        i += I64{1}
+    }
+    rt_chacha_rounds(scratch)
+    i = I64{0}
+    loop {
+        if (i >= I64{4}) -> break
+        rt_crypto_put32(output + i * I64{4}, rt_text_word(scratch + i * I64{8}))
+        rt_crypto_put32(output + I64{16} + i * I64{4}, rt_text_word(scratch + I64{96} + i * I64{8}))
+        i += I64{1}
+    }
+    rt_crypto_wipe(scratch, I64{128})
+}
+// output may equal input (otherwise disjoint); caller scratch320 aligned8.
+// Return false for public length/counter overflow BEFORE writing output.
+fn rt_crypto_chacha_xor(key: I64, nonce: I64, counter: I64, input: I64, length: I64, output: I64, scratch: I64) -> Bool {
+    if (length < I64{0} || counter < I64{0} || counter > I64{0xffffffff}) {
+        rt_crypto_wipe(scratch, I64{320})
+        return false
+    }
+    blocks :: length / I64{64} + if (length % I64{64} == I64{0}) -> I64{0} else -> I64{1}
+    if (blocks > I64{0x100000000} - counter) {
+        rt_crypto_wipe(scratch, I64{320})
+        return false
+    }
+    block :: scratch + I64{256}
+    at := I64{0}
+    ctr := counter
+    loop at < length {
+        rt_crypto_chacha_block(key, nonce, ctr, block, scratch)
+        count := I64{64}
+        if (length - at < count) -> count = length - at
+        i := I64{0}
+        loop i < count {
+            rt_text_put(output + at + i, rt_text_byte(input + at + i).bit_xor(rt_text_byte(block + i)))
+            i += I64{1}
+        }
+        at += count
+        ctr += I64{1}
+    }
+    rt_crypto_wipe(scratch, I64{320})
+    true
+}
+// HChaCha key32 + zero32bit||nonce-tail64; caller scratch368 aligned8.
+fn rt_crypto_xchacha_xor(key: I64, nonce: I64, counter: I64, input: I64, length: I64, output: I64, scratch: I64) -> Bool {
+    subkey :: scratch + I64{320}
+    subnonce :: scratch + I64{352}
+    rt_crypto_hchacha(key, nonce, subkey, scratch)
+    rt_crypto_wipe(subnonce, I64{4})
+    rt_text_bytes_copy(subnonce + I64{4}, nonce + I64{16}, I64{8})
+    accepted :: rt_crypto_chacha_xor(subkey, subnonce, counter, input, length, output, scratch)
+    rt_crypto_wipe(scratch, I64{368})
+    accepted
+}

@@ -1,0 +1,29 @@
+# Port of tests/pkg.rs:8212-8250; init_clean_project helper243-263 source/setup retained.
+# The registry URL is a deliberately nonexistent LOCAL repo; no network is used.
+requires: tool:git
+mkdir: proj
+mkdir: store
+copy: {root}/tests/cases/pkg/fixtures/registry-clean/lonely/package.jet proj/package.jet
+copy: {root}/tests/cases/pkg/fixtures/registry-clean/lonely/run.jet proj/run.jet
+env: JET_REGISTRY_URL=file://{work}/nonexistent.git
+env: JET_REGISTRY_CACHE_DIR={work}/cache
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: git init -b main
+cwd: proj
+exit: any # original helper asserts command spawn only
+step: git config user.email test@jet.test
+cwd: proj
+exit: any # original helper asserts command spawn only
+step: git config user.name "Jet Test"
+cwd: proj
+exit: any # original helper asserts command spawn only
+step: git add .
+cwd: proj
+exit: any # original helper asserts command spawn only
+step: git commit -m init
+cwd: proj
+exit: any # original helper asserts command spawn only
+step: jet registry publish
+cwd: proj
+exit: nonzero
+stderr: ~ "E1235" # original predicate

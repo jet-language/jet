@@ -1,0 +1,86 @@
+
+use core.auth as auth
+
+fn run() {
+    key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo0MTAyNDQ0ODAwfQ.aBihvZ4ut-O20aTwM9SEvaQ2VTLJqsoiH1BHTZX3hcY", key: key, audience: "gateway") == {
+        .Ok(claims) -> { print("scalar:{claims.audience}") }
+        .Err(_) -> { print("scalar:rejected") }
+    }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOlsiZ2F0ZXdheSIsImJpbGxpbmciXSwiZXhwIjo0MTAyNDQ0ODAwfQ.VccaxqWXigPYDfqX8fNQrPfs33_TIvZU0wPae6_E6nc", key: key, audience: "gateway") == {
+        .Ok(claims) -> { print("list:{claims.audience}") }
+        .Err(_) -> { print("list:rejected") }
+    }
+    if auth.verify_jwt("WRONG_eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOlsiZ2F0ZXdheSIsImJpbGxpbmciXSwiZXhwIjo0MTAyNDQ0ODAwfQ.VccaxqWXigPYDfqX8fNQrPfs33_TIvZU0wPae6_E6nc", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("wrong:accepted") }
+        .Err(error) -> {
+            if error == {
+                .WrongAudience(expected, actual) -> { print("wrong:{expected}:{actual}") }
+                else -> { print("wrong:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOltdLCJleHAiOjQxMDI0NDQ4MDB9.mODfTNMexg_A7ouMAN-yA8kvxdiPjtGR2QXVe_kT134", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("empty:accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(_) -> { print("empty:malformed") }
+                else -> { print("empty:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOlsiZ2F0ZXdheSIsN10sImV4cCI6NDEwMjQ0NDgwMH0.22rQb1AOoHJ3qAqhX_3D8UsgSm2aDmMiQTMyPlvUMJE", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("mixed:accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(_) -> { print("mixed:malformed") }
+                else -> { print("mixed:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOltbImdhdGV3YXkiXV0sImV4cCI6NDEwMjQ0NDgwMH0.ZFHot9rDM4Sh24dsDYm1EneJzmqsRocT7lCwfq1Ye4U", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("nested:accepted") }
+        .Err(error) -> {
+            if error == {
+                .MalformedToken(_) -> { print("nested:malformed") }
+                else -> { print("nested:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo0MTAyNDQ0ODAwLCJuYmYiOjQxMDI0NDQ4MDB9.lpgnUYN-NY2TMpNbFkofvC6DwdYM5T6sz4H3-xMMqxw", key: key, audience: "gateway") == {
+        .Ok(_) -> { print("future-nbf:accepted") }
+        .Err(error) -> {
+            if error == {
+                .TokenNotYetValid -> { print("future-nbf:not-yet-valid") }
+                else -> { print("future-nbf:wrong-error") }
+            }
+        }
+    }
+    if auth.verify_jwt("eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJnYXRld2F5IiwiZXhwIjo0MTAyNDQ0ODAwLCJuYmYiOjE3MDAwMDAwMDB9.QJa_KYleHbreNAQuo9wEf0PfvFn8m089CdGFJbp_q8M", key: key, audience: "gateway") == {
+        .Ok(claims) -> {
+            if claims.not_before == {
+                .Val(value) -> { print("past-nbf:{value}") }
+                else -> { print("past-nbf:none") }
+            }
+        }
+        .Err(_) -> { print("past-nbf:rejected") }
+    }
+    public_key :: [U8]{ 198, 185, 67, 192, 34, 178, 159, 209, 168, 14, 60, 124, 14, 126, 172, 99, 191, 6, 53, 9, 101, 220, 114, 205, 7, 138, 24, 227, 74, 150, 126, 45 }
+    footer :: [U8]{ 107, 105, 100, 45, 49 }
+    implicit :: [U8]{ 116, 101, 110, 97, 110, 116, 45, 97 }
+    no_skew :: Duration.milliseconds(0) ?? panic("duration")
+    paseto := "v4.public.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB99cRKnMLYsWG_FHDSPR15TvgcHSv6gYcTBIy9ToyrtIMVWk4i5vp1sgI5rehiGKdAoyKHQ1zKXDe0It-WADRzAw.a2lkLTE"
+    if auth.verify_paseto(paseto, key: public_key, audience: "gateway", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
+        .Ok(claims) -> { print("paseto:{claims.audience}") }
+        .Err(_) -> { print("paseto:rejected") }
+    }
+    if auth.verify_paseto(paseto, key: public_key, audience: "billing", issuer: "partner", clock_skew: no_skew, footer: footer, implicit: implicit) == {
+        .Ok(_) -> { print("paseto-wrong:accepted") }
+        .Err(error) -> {
+            if error == {
+                .WrongAudience(expected, actual) -> { print("paseto-wrong:{expected}:{actual}") }
+                else -> { print("paseto-wrong:wrong-error") }
+            }
+        }
+    }
+}

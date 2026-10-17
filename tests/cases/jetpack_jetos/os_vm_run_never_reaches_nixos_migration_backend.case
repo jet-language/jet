@@ -1,0 +1,11 @@
+# Port of tests/jetpack_jetos.rs:3105-3137; original sources/predicates retained, runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_vm_run_never_reaches_nixos_migration_backend.fixture
+mkdir: package-root
+step: jet os vm run halcyon --disk halcyon.qcow2 --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 2
+stderr: !~ "E1291" # original product VM path must not reach NixOS backend
+file: package-root/systems/backend absent

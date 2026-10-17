@@ -4,9 +4,11 @@ pub(crate) fn jet_fmt_number(value: i64) -> String {
     comma_int(value)
 }
 
+/// Rulings #4588: fixed decimals round half away from zero and never print a
+/// negative zero (`decimal(0.125, 2)` is `0.13`, `decimal(-0.0001, 2)` is
+/// `0.00`).
 pub(crate) fn jet_fmt_decimal(value: f64, precision: i64) -> String {
-    let precision = precision.max(0) as usize;
-    format!("{:.*}", precision, value)
+    fixed_half_away(value, precision)
 }
 
 /// D-QUANTITY-PRINT1: quantity display trims only the incidental `.0` from
@@ -21,8 +23,90 @@ pub(crate) fn jet_fmt_quantity(value: f64) -> String {
 
 /// D-FMT-PLAIN1=A: explicit human grouping keeps the former decimal display.
 pub(crate) fn jet_fmt_grouped(value: f64, precision: i64) -> String {
+    comma_decimal(fixed_half_away(value, precision))
+}
+
+/// One rounding rule for every fixed-precision Float display, shared with
+/// `float_fixed` in Core/text/fmt.jet: round `value * 10^precision` (the scale
+/// built by repeated `* 10.0`) half away from zero. A rounded magnitude past
+/// the exact `Int` range falls back to the value's exact binary expansion,
+/// rounded half away from zero at the same place. Non-finite values keep their
+/// ordinary Float display.
+fn fixed_half_away(value: f64, precision: i64) -> String {
+    if !value.is_finite() {
+        return value.to_string();
+    }
     let precision = precision.max(0) as usize;
-    comma_decimal(format!("{:.*}", precision, value))
+    let mut scale = 1.0_f64;
+    for _ in 0..precision {
+        scale *= 10.0;
+        if scale.is_infinite() {
+            break;
+        }
+    }
+    let rounded = (value * scale).round().abs();
+    let mut text = if rounded < 9_223_372_036_854_775_808.0 {
+        let mut digits = (rounded as u64).to_string();
+        if precision > 0 {
+            if digits.len() <= precision {
+                digits.insert_str(0, &"0".repeat(precision + 1 - digits.len()));
+            }
+            digits.insert(digits.len() - precision, '.');
+        }
+        digits
+    } else {
+        exact_fixed_half_away(value.abs(), precision)
+    };
+    if value < 0.0 && text.bytes().any(|digit| matches!(digit, b'1'..=b'9')) {
+        text.insert(0, '-');
+    }
+    text
+}
+
+/// Rounds the exact decimal expansion of finite, non-negative `magnitude` half
+/// away from zero to `precision` fractional digits.
+fn exact_fixed_half_away(magnitude: f64, precision: usize) -> String {
+    let bits = magnitude.to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let fraction = bits & ((1_u64 << 52) - 1);
+    let (significand, power) = if exponent == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | (1_u64 << 52), exponent - 1075)
+    };
+    // A binary fraction with k fractional bits has exactly k fractional
+    // decimal digits, so formatting at k places is exact.
+    let fraction_digits = if significand == 0 {
+        0
+    } else {
+        (-(power + i64::from(significand.trailing_zeros()))).max(0) as usize
+    };
+    if fraction_digits <= precision {
+        return format!("{:.*}", precision, magnitude);
+    }
+    let mut digits = format!("{:.*}", fraction_digits, magnitude).into_bytes();
+    let dot = digits.len() - fraction_digits - 1;
+    let round_up = digits[dot + 1 + precision] >= b'5';
+    digits.truncate(if precision == 0 { dot } else { dot + 1 + precision });
+    if round_up {
+        let mut index = digits.len();
+        loop {
+            if index == 0 {
+                digits.insert(0, b'1');
+                break;
+            }
+            index -= 1;
+            match digits[index] {
+                b'.' => {}
+                b'9' => digits[index] = b'0',
+                _ => {
+                    digits[index] += 1;
+                    break;
+                }
+            }
+        }
+    }
+    String::from_utf8(digits).expect("fixed decimal digits are ASCII")
 }
 
 /// D-FMT-INTERP3=B: format an exact integer with fixed decimal places. The
@@ -150,15 +234,41 @@ fn jet_fmt_radix_decimal(value: &str, radix: u16, width: i64) -> String {
     out
 }
 
+/// Rulings #4588: normalized scientific notation with a plain exponent
+/// (`1.23e3`, `1.23e-3`). The mantissa uses the fixed-decimal rounding rule, and
+/// a mantissa that rounds up to ten renormalizes (`sci(9.999, 2)` is `1.00e1`).
+/// The same steps as `sci` in Core/text/fmt.jet, so every tier agrees.
 pub(crate) fn jet_fmt_sci(value: f64, precision: i64) -> String {
-    let precision = precision.max(0) as usize;
-    format!("{:.*e}", precision, value)
+    if !value.is_finite() {
+        return value.to_string();
+    }
+    if value == 0.0 {
+        return format!("{}e0", fixed_half_away(0.0, precision));
+    }
+    let mut magnitude = value.abs();
+    let mut exponent = 0_i64;
+    while magnitude >= 10.0 {
+        magnitude /= 10.0;
+        exponent += 1;
+    }
+    while magnitude < 1.0 {
+        magnitude *= 10.0;
+        exponent -= 1;
+    }
+    let mut mantissa = fixed_half_away(magnitude, precision);
+    if mantissa.starts_with("10") {
+        exponent += 1;
+        mantissa = fixed_half_away(magnitude / 10.0, precision);
+    }
+    let sign = if value < 0.0 { "-" } else { "" };
+    format!("{sign}{mantissa}e{exponent}")
 }
 
 /// D-FMT-PRETTY1=A: expand canonical Debug text without inspecting terminal
 /// width. Strings are skipped while scanning, so braces in a string value do
 /// not become structure. The canonical Debug renderer already owns field
-/// order, redaction, and collection ordering; this kernel only lays it out.
+/// order, redaction, and collection ordering; this kernel only lays it out:
+/// one item per line with commas between items (rulings #4588).
 pub(crate) fn jet_fmt_pretty(value: &str) -> String {
     pretty_fragment(value, 0)
 }
@@ -190,7 +300,10 @@ fn pretty_fragment(value: &str, indent: usize) -> String {
         out.push(' ');
     }
     out.push(open);
-    for item in split_top_level(body) {
+    for (index, item) in split_top_level(body).into_iter().enumerate() {
+        if index > 0 {
+            out.push(',');
+        }
         out.push('\n');
         out.push_str(&" ".repeat(indent + 2));
         out.push_str(&pretty_fragment(item, indent + 2));
@@ -314,6 +427,9 @@ pub(crate) fn jet_fmt_percent(value: f64, precision: i64) -> String {
     format!("{}%", jet_fmt_grouped(value * 100.0, precision))
 }
 
+/// Rulings #4588: SI units (1000), one decimal below 10 using the
+/// fixed-decimal rounding rule (`1536` is `1.5 KB`, `1000` is `1 KB`), and
+/// whole units rounded half away from zero at or above 10.
 pub(crate) fn jet_fmt_bytes(value: i64) -> String {
     let sign = if value < 0 { "-" } else { "" };
     let mut size = (value as f64).abs();
@@ -328,8 +444,8 @@ pub(crate) fn jet_fmt_bytes(value: i64) -> String {
     } else if size >= 10.0 {
         format!("{}{} {}", sign, size.round() as i64, units[unit])
     } else {
-        let shown = format!("{:.1}", size);
-        format!("{}{} {}", sign, shown.trim_end_matches(".0"), units[unit])
+        let shown = fixed_half_away(size, 1);
+        format!("{}{} {}", sign, shown.strip_suffix(".0").unwrap_or(&shown), units[unit])
     }
 }
 
@@ -377,26 +493,26 @@ pub(crate) fn jet_fmt_ordinal(value: i64) -> String {
     format!("{}{}", comma_int(value), suffix)
 }
 
-pub(crate) fn jet_fmt_plural(count: i64, singular: &String, plural: &String) -> String {
+pub(crate) fn jet_fmt_plural(count: i64, singular: &str, plural: &str) -> String {
     let word = if count.abs() == 1 { singular } else { plural };
     format!("{} {}", comma_int(count), word)
 }
 
-pub(crate) fn jet_fmt_pad(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad(text: &str, width: i64, fill: &str) -> String {
     jet_fmt_pad_right(text, width, fill)
 }
 
-pub(crate) fn jet_fmt_pad_left(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad_left(text: &str, width: i64, fill: &str) -> String {
     let need = pad_need(text, width);
     format!("{}{}", pad_fill(fill, need), text)
 }
 
-pub(crate) fn jet_fmt_pad_right(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad_right(text: &str, width: i64, fill: &str) -> String {
     let need = pad_need(text, width);
     format!("{}{}", text, pad_fill(fill, need))
 }
 
-pub(crate) fn jet_fmt_pad_center(text: &String, width: i64, fill: &String) -> String {
+pub(crate) fn jet_fmt_pad_center(text: &str, width: i64, fill: &str) -> String {
     let need = pad_need(text, width);
     let left = need / 2;
     let right = need - left;

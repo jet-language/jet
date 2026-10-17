@@ -1,0 +1,20 @@
+// ORACLE-PORT expected LifecycleRootProof expression tests/jetpack_jetos.rs:579-608,814-835.
+use core.files as files
+use core.process as process
+use core.encoding.json as json
+use core.encoding.Dyn
+fn run() {
+    args :: process.args()
+    assert(args.len() == 2)
+    root :: json.parse(files.read(args[0]) ?? panic("root bytes")) ?? panic("root JSON")
+    witness :: json.pointer(root, "/witness") ?? panic("witness")
+    _ :: witness.text() ?? panic("witness must be string")
+    targets :: json.pointer(root, "/output_digests") ?? panic("digests")
+    values :: if targets == {
+        .Array(values) -> values
+        else -> panic("digests must be array")
+    }
+    loop value in values -> _ :: value.text() ?? panic("target must be string")
+    result :: Dyn.Array([Dyn]{Dyn.Object([String:Dyn]{"kind": Dyn.Text("external-consumer"), "id": Dyn.Text(args[1]), "producer": Dyn.Text("jetos-generation"), "witness": witness, "targets": targets, "phase": Dyn.Text("committed")})})
+    print(json.to_string(result))
+}

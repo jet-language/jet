@@ -1,0 +1,16 @@
+// Native O1 cell int_map (collections, hash map): count residues of a
+// pseudo-random Int stream in a [Int:Int] map.
+fn run() {
+    counts := [Int:Int]{}
+    x := 12345
+    loop _ in 0..<2000000 {
+        x = (x * 1103515245 + 12345) % 2147483648
+        key :: x % 50000
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+    best := 0
+    loop (_, n) in counts {
+        if n > best -> best = n
+    }
+    print("keys {counts.len()} best {best}")
+}

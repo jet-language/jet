@@ -51,7 +51,7 @@ fn store_optimize_objects_cas_pool_plan(roots: HangarRoots) -[FS, Env]> CleanRep
             metadata :: files.stat(file)
             if metadata.is_symlink || !metadata.is_file || metadata.size == 0 -> next
             bytes :: files.read_bytes(file)
-            mode :: store_optimize_permission_identity(metadata) & 0o7555
+            mode :: (store_optimize_permission_identity(metadata)).bit_and(0o7555)
             cas_file :: files.join(cas, store_shared_cas_key(pkg_sha256_hex(bytes), mode))
             existing_found :: store_node_stat(cas_file)
             if existing_found == {
@@ -153,7 +153,7 @@ fn store_optimize_objects_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanRe
 // the readonly flag.
 fn store_optimize_permission_identity(metadata: Stat) -[Env]> Int Never! {
     if sys.is_windows() -> return if metadata.readonly -> 1 else -> 0
-    metadata.mode & 0o7777
+    (metadata.mode).bit_and(0o7777)
 }
 
 // Rust `same_file_inode`: both paths name one file (following links). Always
@@ -164,7 +164,7 @@ fn store_optimize_same_file(left: String, right: String) -[FS, Env]> Bool Never!
 
 // Rust `optimize_cas_pool`: the CAS-pool optimizer under the Hangar lock
 // (also run by `clean`).
-pub fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
+fn store_optimize_cas_pool(roots: HangarRoots) -[FS, Env, Time]> CleanReport StoreError! {
     hangar_lock :: env_runtime_lock(roots.root, "hangar")
     store_optimize_objects_cas_pool(roots)
 }
@@ -202,7 +202,7 @@ fn store_hardlink_replace(first: String, file: String) StoreError! -[FS, Env]> {
 
 // Rust `verify_hangar_object`: re-hash a Hangar object under the Hangar lock
 // with the CAS-peer hardlink law (Hangar-internal peers are accepted).
-pub fn store_verify_hangar_object(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+fn store_verify_hangar_object(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
     hangar_lock :: env_acquire_lock(roots.root, "hangar") ?? return Err(IngestError.IO("{err}"))
     store_verify_hangar_object_unlocked(&verification, roots, entry)
 }
@@ -210,7 +210,7 @@ pub fn store_verify_hangar_object(verification: &StoreVerification, roots: Hanga
 // Rust `verify_hangar_object_unlocked`: the closure graph must agree with the
 // record's primary, action key, references and output map; every named
 // output must re-hash to its recorded digest; every reference must exist.
-pub fn store_verify_hangar_object_unlocked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
+fn store_verify_hangar_object_unlocked(verification: &StoreVerification, roots: HangarRoots, entry: StoreEntry) IngestError! -[FS, Env, Time]> {
     hangar :: roots.hangar_dir()
     allow :: entry.platform_artifact_kind != ""
     graph :: store_lifecycle_closure_graph_unlocked(&verification, roots) ?? return Err(IngestError.Invalid(err.message()))

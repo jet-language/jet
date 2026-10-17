@@ -1,0 +1,49 @@
+use core.files as files
+
+fn s5_changed(port: Int, baseline: String, timeout_ms: Int) -> String {
+    started :: time.start()
+    loop {
+        if s5_web_get(port, "/__jet_dev_version", None) == .Val(response) {
+            if response.status == 200 {
+                version :: String.from_bytes_lossy(response.body).trim().copy()
+                if version != baseline && !version.is_empty() -> return version
+            }
+        }
+        assert(time.elapsed(started).ns <= timeout_ms * 1000000, "version never changed")
+        time.sleep(time.duration_ms(100))
+    }
+}
+
+fn s5_status(port: Int, state: String, timeout_ms: Int) -> String {
+    started :: time.start()
+    marker :: "\"state\":\"{state}\""
+    loop {
+        if s5_web_get(port, "/__jet_dev_status?client=tab-a", None) == .Val(response) {
+            body :: String.from_bytes_lossy(response.body)
+            if response.status == 200 && body.contains(marker) -> return body
+        }
+        assert(time.elapsed(started).ns <= timeout_ms * 1000000, "dev status never reached expected state")
+        time.sleep(time.duration_ms(100))
+    }
+}
+
+#Test("original first-save revision facts") {
+    port :: s5_web_port()
+    phase :: sys.get("S5_PHASE") ?? panic("phase")
+    if phase == "accepted" {
+        assert_eq(s5_changed(port, "1", 60000), "2")
+    } else if phase == "rejected" {
+        error :: s5_status(port, "error", 60000)
+        assert(error.contains("\"version\":2,"))
+        assert(error.contains("\"code\":\"E0003\""))
+        assert(error.contains("\"candidate\":3,"))
+        assert(error.contains("\"diagnostic_revision\":3,"))
+        assert(error.contains("\"accepted_revision\":2,"))
+        assert(error.contains((String.from_bytes([U8]{34,108,97,115,116,95,103,111,111,100,95,114,101,118,105,115,105,111,110,34,58,50,125}) ?? panic("literal UTF-8"))))
+    } else {
+        assert_eq(s5_changed(port, "2", 60000), "3")
+        ready :: s5_status(port, "ready", 10000)
+        assert(ready.contains("\"diagnostic_revision\":null,"))
+        assert(ready.contains("\"accepted_revision\":3,"))
+    }
+}

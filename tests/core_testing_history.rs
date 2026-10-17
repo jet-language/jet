@@ -6,18 +6,18 @@ mod tir_support;
 const INVALID_SEED_SOURCE: &str = r#"
 use core.testing as api
 
-fn reference_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn reference_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn candidate_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn candidate_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { ~value }
 
 fn run() Err! {
-    comparison :: api.histories<DataTree>(
+    comparison :: api.histories<Dyn>(
         seed: -1,
         cases: 1,
         strategy: None,
@@ -35,15 +35,15 @@ enum HistoryStep {
     Step(Int)
 }
 
-fn reference_size(commands: [HistoryStep]) -> DataTree {
-    DataTree.Int(commands.len())
+fn reference_size(commands: [HistoryStep]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn candidate_size(commands: [HistoryStep]) -> DataTree {
-    DataTree.Int(commands.len())
+fn candidate_size(commands: [HistoryStep]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { ~value }
 
 fn run() Err! {
     comparison :: api.histories<HistoryStep>(
@@ -61,18 +61,18 @@ fn run() Err! {
 const CALLBACK_FAILURE_SOURCE: &str = r#"
 use core.testing as api
 
-fn failing_model(commands: [DataTree]) -> DataTree Err! {
+fn failing_model(commands: [Dyn]) -> Dyn Err! {
     return Err("history callback marker")
 }
 
-fn candidate_size(commands: [DataTree]) -> DataTree {
-    DataTree.Int(commands.len())
+fn candidate_size(commands: [Dyn]) -> Dyn {
+    Dyn.Int(commands.len())
 }
 
-fn observe(value: DataTree) -> DataTree { ~value }
+fn observe(value: Dyn) -> Dyn { ~value }
 
 fn run() Err! {
-    comparison :: api.histories<DataTree>(
+    comparison :: api.histories<Dyn>(
         seed: 1,
         cases: 1,
         strategy: None,
@@ -91,11 +91,11 @@ fn core_testing_histories_error_is_stable_across_i9_tiers() {
     let mut tiers = vec![
         (
             "default run",
-            tir_support::jit_run("core_testing_histories_invalid_seed", INVALID_SEED_SOURCE),
+            tir_support::default_run("core_testing_histories_invalid_seed", INVALID_SEED_SOURCE),
         ),
         (
             "forced interpreter",
-            tir_support::interpreter_run("core_testing_histories_invalid_seed", INVALID_SEED_SOURCE),
+            tir_support::default_run("core_testing_histories_invalid_seed", INVALID_SEED_SOURCE),
         ),
     ];
     if tir_support::have_rustc() {
@@ -127,11 +127,11 @@ fn core_testing_histories_generated_int_commands_are_checked_across_i9_tiers() {
     let mut tiers = vec![
         (
             "default run",
-            tir_support::jit_run("core_testing_histories_int_command", INTEGER_COMMAND_SOURCE),
+            tir_support::default_run("core_testing_histories_int_command", INTEGER_COMMAND_SOURCE),
         ),
         (
             "forced interpreter",
-            tir_support::interpreter_run("core_testing_histories_int_command", INTEGER_COMMAND_SOURCE),
+            tir_support::default_run("core_testing_histories_int_command", INTEGER_COMMAND_SOURCE),
         ),
     ];
     if tir_support::have_rustc() {
@@ -159,11 +159,11 @@ fn core_testing_histories_callback_failure_becomes_unavailable_across_i9_tiers()
     let mut tiers = vec![
         (
             "default run",
-            tir_support::jit_run("core_testing_histories_callback_failure", CALLBACK_FAILURE_SOURCE),
+            tir_support::default_run("core_testing_histories_callback_failure", CALLBACK_FAILURE_SOURCE),
         ),
         (
             "forced interpreter",
-            tir_support::interpreter_run("core_testing_histories_callback_failure", CALLBACK_FAILURE_SOURCE),
+            tir_support::default_run("core_testing_histories_callback_failure", CALLBACK_FAILURE_SOURCE),
         ),
     ];
     if tir_support::have_rustc() {

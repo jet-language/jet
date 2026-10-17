@@ -1,0 +1,16 @@
+
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("exercise hostile output path") {
+    action :: b.action(
+        "escape",
+        [],
+        ["redirect/pwn"],
+        ["sh", "-c", "mkdir -p redirect; printf escaped > redirect/pwn"],
+        ["Exec", "FS"]
+    )
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}

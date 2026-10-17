@@ -173,6 +173,37 @@ function jet_ui_web_node(label, width, height, kind = "Custom", role, color) {
   };
 }
 
+// The source packer supplies every policy choice; this is only wire unpacking.
+function jet_ui_raw_node_transfer(label, width, height, roleTag, kindTag, children,
+  colorPresent, color, absentSlots, stylePresent, fgKind, fgWord, bgKind, bgWord, flags) {
+  if (Number(absentSlots) !== 63) throw new Error("invalid audited UI absent-slot carrier");
+  const roleNames = ["Button", "TextInput", "Label", "Container"];
+  const kindNames = ["Custom", "Text", "Box", "Button", "TextInput"];
+  const colorSlot = (kind, word) => {
+    word = Number(word);
+    switch (Number(kind)) {
+      case 0: return jet_ui_web_none();
+      case 1: return jet_ui_web_some(jet_ui_web_enum("ANSI16", word));
+      case 2: return jet_ui_web_some(jet_ui_web_enum("ANSI256", word));
+      case 3: return jet_ui_web_some(jet_ui_web_enum("RGB", word >>> 16, (word >>> 8) & 255, word & 255));
+      default: throw new Error("invalid audited UI color carrier");
+    }
+  };
+  flags = Number(flags);
+  return {
+    label, width, height,
+    role: Number(roleTag) === -1 ? jet_ui_web_none() : jet_ui_web_some(jet_ui_web_enum(roleNames[Number(roleTag)])),
+    accessibility: jet_ui_web_none(), ime: jet_ui_web_none(),
+    color: colorPresent ? jet_ui_web_some(color) : jet_ui_web_none(),
+    style: stylePresent ? jet_ui_web_some({
+      foreground: colorSlot(fgKind, fgWord), background: colorSlot(bgKind, bgWord),
+      bold: (flags & 1) !== 0, dim: (flags & 2) !== 0, underline: (flags & 4) !== 0,
+    }) : jet_ui_web_none(),
+    kind: jet_ui_web_enum(kindNames[Number(kindTag)]), children,
+    key: jet_ui_web_none(), on_click: null, on_drop: null, shortcut: jet_ui_web_none(),
+  };
+}
+
 function jet_ui_null() {
   if (typeof jetDom !== "undefined" && typeof jetDom.createBackend === "function") {
     return jetDom.createBackend();
@@ -191,52 +222,13 @@ function jet_ui_gtk() {
   return jet_ui_null();
 }
 
-function jet_ui_point(x, y) {
-  return { x: jet_ui_web_number(x), y: jet_ui_web_number(y) };
-}
 
-function jet_ui_size(width, height) {
-  return { width: jet_ui_web_number(width), height: jet_ui_web_number(height) };
-}
 
-function jet_ui_rect(x, y, width, height) {
-  return {
-    x: jet_ui_web_number(x),
-    y: jet_ui_web_number(y),
-    width: jet_ui_web_number(width),
-    height: jet_ui_web_number(height),
-  };
-}
 
-function jet_ui_constraint(minWidth, minHeight, maxWidth, maxHeight) {
-  return {
-    min_width: jet_ui_web_number(minWidth),
-    min_height: jet_ui_web_number(minHeight),
-    max_width: jet_ui_web_number(maxWidth),
-    max_height: jet_ui_web_number(maxHeight),
-  };
-}
 
-function jet_ui_node(label, width, height) {
-  return jet_ui_web_node(label, width, height);
-}
 
-function jet_ui_node_role(label, width, height, role) {
-  const canonicalRole = jet_ui_web_role(role);
-  const kind = canonicalRole?.tag === "Button"
-    ? "Button"
-    : canonicalRole?.tag === "TextInput" ? "TextInput" : "Custom";
-  return jet_ui_web_node(label, width, height, kind, canonicalRole);
-}
 
-function jet_ui_node_color(label, width, height, color) {
-  return jet_ui_web_node(label, width, height, "Custom", jet_ui_web_enum("Label"), color);
-}
 
-function jet_ui_text(text) {
-  const label = jet_ui_web_text(text);
-  return jet_ui_web_node(label, jet_ui_web_scalar_count(label), 1, "Text", jet_ui_web_enum("Label"));
-}
 
 function jet_ui_button(label) {
   const text = jet_ui_web_text(label);
@@ -259,13 +251,6 @@ function jet_ui_button_on_click(label, shortcut, accessibleLabel, handler) {
   return node;
 }
 
-function jet_ui_box(children) {
-  const list = Array.from(children ?? []);
-  return {
-    ...jet_ui_web_node("", list.reduce((width, child) => Math.max(width, jet_ui_web_number(child?.width)), 0), list.reduce((height, child) => height + jet_ui_web_number(child?.height), 0), "Box", jet_ui_web_enum("Container")),
-    children: list,
-  };
-}
 
 function jet_ui_reactive_render(body) {
   if (typeof body !== "function") throw new Error("core.ui.reactive_render requires a callback");
@@ -302,17 +287,12 @@ function jet_ui_playgrounds(values) {
   return { kind: "PreviewRegistry", previews: Array.from(values ?? []) };
 }
 
-function jet_ui_phone() {
-  return jet_ui_web_enum("Phone");
+function jet_ui_raw_viewport_transfer(device, width, height, scale) {
+  return { device: jet_ui_web_enum(["Phone", "Tablet", "Desktop"][Number(device)]),
+    width: Number(width), height: Number(height), scale: Number(scale) };
 }
 
-function jet_ui_tablet() {
-  return jet_ui_web_enum("Tablet");
-}
 
-function jet_ui_desktop() {
-  return jet_ui_web_enum("Desktop");
-}
 
 function jet_ui_preview_attach_compiler_source(
   preview,
@@ -344,36 +324,15 @@ function jet_ui_preview_attach_compiler_source(
   };
 }
 
-function jet_ui_key_event(code) {
-  return jet_ui_web_enum("Key", jet_ui_web_text(code));
+
+
+
+function jet_ui_raw_accessibility_transfer(node, accessibility, present) {
+  return { ...node, accessibility: present ? jet_ui_web_some(accessibility) : jet_ui_web_none() };
 }
 
-function jet_ui_resize_event(width, height) {
-  return jet_ui_web_enum("Resize", jet_ui_size(width, height));
-}
-
-function jet_ui_aria_role_button() {
-  return jet_ui_web_enum("Button");
-}
-
-function jet_ui_aria_role_text_input() {
-  return jet_ui_web_enum("TextInput");
-}
-
-function jet_ui_aria_role_label() {
-  return jet_ui_web_enum("Label");
-}
-
-function jet_ui_aria_role_container() {
-  return jet_ui_web_enum("Container");
-}
-
-function jet_ui_node_accessibility(node, accessibility) {
-  return { ...node, accessibility: jet_ui_web_some(accessibility) };
-}
-
-function jet_ui_node_shortcut(node, shortcut) {
-  return { ...node, shortcut: jet_ui_web_some(shortcut) };
+function jet_ui_raw_shortcut_transfer(node, shortcut, present) {
+  return { ...node, shortcut: present ? jet_ui_web_some(shortcut) : jet_ui_web_none() };
 }
 
 function jet_ui_text_input(state, ime) {
@@ -468,22 +427,6 @@ function jet_ui_host_file_filter(label, extensions, mimeTypes) {
   return jet_ui_web_ok({ label: name, extensions: extensionList, mime_types: mimeList });
 }
 
-function jet_ui_host_file_filter_text() {
-  return { label: "Text", extensions: ["txt"], mime_types: ["text/plain"] };
-}
-
-function jet_ui_host_fs_rights_read() {
-  return { bits: 1 };
-}
-
-function jet_ui_host_fs_rights_write() {
-  return { bits: 2 };
-}
-
-function jet_ui_host_fs_rights_read_write() {
-  return { bits: 3 };
-}
-
 function jet_ui_host_fs_grant(root, rights) {
   try {
     return jet_ui_web_ok({
@@ -495,27 +438,12 @@ function jet_ui_host_fs_grant(root, rights) {
   }
 }
 
-function jet_ui_host_open_request(grant) {
-  return {
-    kind: jet_ui_web_enum("Open"),
-    title: "Open File",
-    grant,
-    initial_directory: jet_ui_web_none(),
-    filters: [],
-    allow_multiple: false,
-  };
+function jet_ui_host_raw_request_transfer(kind, title, grant, directoryAbsent, filters, multiple) {
+  if (!directoryAbsent) throw new Error("audited request carrier has no directory payload");
+  return { kind: jet_ui_web_enum(["Open", "Save"][Number(kind)]), title, grant,
+    initial_directory: jet_ui_web_none(), filters, allow_multiple: multiple };
 }
 
-function jet_ui_host_save_request(grant) {
-  return {
-    kind: jet_ui_web_enum("Save"),
-    title: "Save File",
-    grant,
-    initial_directory: jet_ui_web_none(),
-    filters: [],
-    allow_multiple: false,
-  };
-}
 
 function jet_ui_web_validate_request(request, expectedKind) {
   const kind = request?.kind?.tag ?? request?.kind;

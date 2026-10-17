@@ -6,9 +6,9 @@
 // (JPK-TOOL-COLLIDE).
 
 // A projected bin and the executable member it copies.
-pub struct ToolBinPair {
-    pub bin: String
-    pub member: String
+struct ToolBinPair {
+    bin: String
+    member: String
 }
 
 // One moving source a user-tools update re-pins.
@@ -76,7 +76,7 @@ enum ProfileVerb {
 }
 
 // `jetpack tool <verb> …`
-pub fn cli_cmd_tool(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_tool(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cache := WorkspaceDeclarationCache.new()
     word :: parsed.positional.get(0) ?? {
         theme.error("`jetpack tool` needs a verb", "verbs are: {TOOL_VERBS.join(", ")} — persistent PATH management.", "try `jetpack use ripgrep -- rg --version`.")
@@ -100,7 +100,7 @@ pub fn cli_cmd_tool(verification: &StoreVerification, theme: Theme, parsed: CLIP
 // The standalone `~/.jet/tools` profile uses the same generation engine as
 // `jetpack tool install`, but its declaration is independent of any project
 // `env.jet`.
-pub fn cli_cmd_tool_profile(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_tool_profile(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     word :: parsed.positional.get(0) ?? {
         theme.error("`jetpack profile` needs a verb", "the standalone user-tools profile accepts plan, build, switch, rollback, or generations", "try `jetpack profile switch tools`")
         return EXIT_USAGE
@@ -288,11 +288,11 @@ fn cli_report_tool_profile_error(theme: Theme, error: CLIError) -[IO, Time.Wait]
 // Refresh the moving source pins recorded by the standalone user-tools
 // declaration. `#latest` reaches this path only through an explicit update;
 // `#auto` is also refreshed by profile realization.
-pub fn cli_update_user_tools(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_update_user_tools(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     cli_update_user_tools_with_plan(&verification, theme, parsed, &confirmation, false, () -> EXIT_OK)
 }
 
-pub fn cli_update_user_tools_with_plan(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_update_user_tools_with_plan(verification: &StoreVerification, theme: Theme, parsed: CLIParsed, confirmation: &UpdateConfirmation, has_other_plan: Bool, apply_other: fn() -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if parsed.flags.offline {
         theme.error("cannot update user-tools offline", "channel movement needs the configured source metadata or a captured fixture", "remove `--offline` and run `jetpack update tools` again")
         return EXIT_USAGE
@@ -439,7 +439,7 @@ fn cli_tool_uninstall(verification: &StoreVerification, theme: Theme, parsed: CL
 }
 
 // E1298 for a ref whose provider has no Hangar realization path yet.
-pub fn cli_reject_unavailable_provider(theme: Theme, raw: String) -[IO, Time.Wait]> Int? Never! {
+fn cli_reject_unavailable_provider(theme: Theme, raw: String) -[IO, Time.Wait]> Int? Never! {
     source :: raw.cut_last(REF_PROVIDER_AT)?.after ?? return None
     if !TOOL_EXTERNAL_PROVIDERS.contains(source) -> return None
     theme.error_coded(
@@ -497,7 +497,7 @@ fn cli_collect_jet_files(dir: String, out: &[String], depth: Int) Never! -[FS]> 
 
 // Every `#Job fn <name>` in `src`, allowing one marker such as `#Every(…)`
 // between `#Job` and `fn`.
-pub fn cli_task_names_in(src: String) -> [String] Never! {
+fn cli_task_names_in(src: String) -> [String] Never! {
     raw :: src.bytes()
     needle :: "#Job".bytes()
     fn_word :: "fn".bytes()
@@ -527,7 +527,7 @@ pub fn cli_task_names_in(src: String) -> [String] Never! {
 
 // The receipt's executables as bin/member pairs: `--as` renames (and keeps
 // only) the first; every name is validated and the pairs are sorted.
-pub fn cli_collect_receipt_bins(receipt: ProfileInstallReceipt, as_name: String?) -> [ToolBinPair] CLIError! {
+fn cli_collect_receipt_bins(receipt: ProfileInstallReceipt, as_name: String?) -> [ToolBinPair] CLIError! {
     bins := [ToolBinPair]{}
     loop member in receipt.executable_members {
         cli_validate_bin_name(member)
@@ -563,7 +563,7 @@ fn cli_collect_manifest_bins(receipt: ProfileInstallReceipt, entry: ToolManifest
 // Compare the manifest's recorded identity with the current generation.
 // Only bounded metadata is read: no ref is realized and no tool binary is
 // opened, so ordinary commands pay for neither a closure nor a hash.
-pub fn cli_check_user_tools_drift(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_check_user_tools_drift(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     if !files.is_file(cli_tool_manifest_path()) || !files.is_file(cli_tool_current_path()) -> return EXIT_OK
     manifest :: cli_read_tool_manifest() ?? return EXIT_OK
     installed :: cli_read_current_tools() ?? return EXIT_OK
@@ -592,7 +592,7 @@ pub fn cli_check_user_tools_drift(verification: &StoreVerification, theme: Theme
         theme.ok("moved user-tools pins to the installed identities")
         return EXIT_OK
     }
-    if !term.stdin().is_terminal() || !term.stderr().is_terminal() {
+    if !term.stdin().is_tty() || !term.stderr().is_tty() {
         theme.detail("move the pin with `jetpack update tools -y`")
         return EXIT_OK
     }

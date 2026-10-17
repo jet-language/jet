@@ -6,16 +6,16 @@ pub use jet_foundation::Outcome::*;
 use jet_foundation::Shape::ShapeProjection;
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/RowPolicy.rs");
 include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/WireOrder.rs");
-include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTreeKind.rs");
-// The carrier enum lives in Foundation (`jet_foundation::DataTree`); the
-// included `DataTree.rs` is the runtime extension over it, exactly as the AOT
+include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DynKind.rs");
+// The carrier enum lives in Foundation (`jet_foundation::Dyn`); the
+// included `Dyn.rs` is the runtime extension over it, exactly as the AOT
 // Prelude splice and the Cranelift host arrange it.
-pub use jet_foundation::DataTree::DataTree;
-// The one FieldError projection (I9): `DataTree.rs`'s `JetShow`/`JetDisplay`
+pub use jet_foundation::Dyn::Dyn;
+// The one FieldError projection (I9): `Dyn.rs`'s `JetShow`/`JetDisplay`
 // impls call it, exactly as the AOT Prelude and the Cranelift host do.
 include!("../../../jet-codegen/src/Prelude/Core/FieldError.rs");
-include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/DataTree.rs");
-jet_datatree_decode_helpers!();
+include!("../../../jet-codegen/src/Prelude/CoreLib/JetStd/Dyn.rs");
+jet_dyn_decode_helpers!();
 
 // I9 marshalling adapters for the exact-`Int` carrier (D-INTBIG1). AOT packs
 // out-of-range values into a std-only arena and the JIT parks them in its
@@ -70,27 +70,20 @@ fn quote_json(s: &str) -> String {
     out
 }
 
-pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> String {
+pub fn render_dyn_json(tree: &Dyn, pretty: bool, depth: usize) -> String {
     match tree {
-        DataTree::Null => "null".to_string(),
-        DataTree::Bool(value) => value.to_string(),
-        DataTree::Int(value) => jet_int_to_string(*value),
-        DataTree::Float(value) => {
+        Dyn::Null => "null".to_string(),
+        Dyn::Bool(value) => value.to_string(),
+        Dyn::Int(value) => value.to_string_rep(),
+        Dyn::Float(value) => {
             assert!(value.is_finite(), "JSON cannot encode a non-finite Float");
             format!("{:?}", value)
         }
-        DataTree::Number(text) => text.clone(),
-        DataTree::TypedText(text) => quote_json(text),
-        DataTree::Text(value) => quote_json(value),
-        DataTree::Bytes(values) => format!(
-            "[{}]",
-            values
-                .iter()
-                .map(u8::to_string)
-                .collect::<Vec<_>>()
-                .join(",")
-        ),
-        DataTree::Array(values) => {
+        Dyn::Number(text) => text.clone(),
+        Dyn::Text(value) => quote_json(value),
+        Dyn::Bytes(values) => quote_json(&Dyn::bytes_text(values)),
+        Dyn::DateTime(value) => quote_json(&value.to_rfc3339()),
+        Dyn::Array(values) => {
             if values.is_empty() {
                 return "[]".to_string();
             }
@@ -99,7 +92,7 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
                     "[{}]",
                     values
                         .iter()
-                        .map(|value| render_datatree_json(value, false, depth))
+                        .map(|value| render_dyn_json(value, false, depth))
                         .collect::<Vec<_>>()
                         .join(",")
                 );
@@ -108,11 +101,11 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
             let end = "  ".repeat(depth);
             let parts = values
                 .iter()
-                .map(|value| format!("{}{}", pad, render_datatree_json(value, true, depth + 1)))
+                .map(|value| format!("{}{}", pad, render_dyn_json(value, true, depth + 1)))
                 .collect::<Vec<_>>();
             format!("[\n{}\n{}]", parts.join(",\n"), end)
         }
-        DataTree::Object(fields) => {
+        Dyn::Object(fields) => {
             if fields.is_empty() {
                 return "{}".to_string();
             }
@@ -125,7 +118,7 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
                             format!(
                                 "{}:{}",
                                 quote_json(key),
-                                render_datatree_json(value, false, depth)
+                                render_dyn_json(value, false, depth)
                             )
                         })
                         .collect::<Vec<_>>()
@@ -141,7 +134,7 @@ pub fn render_datatree_json(tree: &DataTree, pretty: bool, depth: usize) -> Stri
                         "{}{}: {}",
                         pad,
                         quote_json(key),
-                        render_datatree_json(value, true, depth + 1)
+                        render_dyn_json(value, true, depth + 1)
                     )
                 })
                 .collect::<Vec<_>>();

@@ -1,0 +1,18 @@
+# HAND-PORT tests/jetpack_engine.rs:5248-5285 no_nix_mixed_env_realizes_core_then_reports_nix_hole
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: no_nix_mixed_env_realizes_core_then_reports_nix_hole.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: project
+mkdir: root
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack build --no-color
+cwd: project
+env: HOME={work}/home
+env: PATH=
+exit: 2
+stderr: ~ "E1272" # original predicate
+stderr: ~ "postgres@nixpkgs" # original predicate
+stderr.filter(~ "hello"): word = "built" # original predicate
+tree: root/hangar depth = 2 name = "meta.json" ~ "\"name\": \"hello\"" # original predicate
+

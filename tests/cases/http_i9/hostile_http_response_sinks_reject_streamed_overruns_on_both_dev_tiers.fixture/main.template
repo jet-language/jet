@@ -1,0 +1,52 @@
+
+use core.http.client as http
+
+fn consume(response: HTTPResponse) -> String Never! {
+    loop chunk in response.body().chunks(65536) {
+        if chunk == {
+            .Ok(_) -> {}
+            .Err(error) -> {
+                if error == .InvalidFraming -> return "rejected:InvalidFraming"
+                else -> return "wrong-error"
+            }
+            else -> return "unexpected"
+        }
+    }
+    return "accepted"
+}
+
+fn run() {
+    if http.get("http://{cap:addr}/close-get") == {
+        .Ok(response) -> print("close-get={consume(response)}")
+        .Err(_) -> print("close-get=request-error")
+        else -> print("close-get=unexpected")
+    }
+    close_request :: http.request("GET", "http://{cap:addr}/close-request").read_timeout(30000)
+    if close_request.send() == {
+        .Ok(response) -> print("close-request={consume(response)}")
+        .Err(_) -> print("close-request=request-error")
+        else -> print("close-request=unexpected")
+    }
+    if http.get("http://{cap:addr}/chunked-get") == {
+        .Ok(response) -> print("chunked-get={consume(response)}")
+        .Err(_) -> print("chunked-get=request-error")
+        else -> print("chunked-get=unexpected")
+    }
+    chunked_request :: http.request("GET", "http://{cap:addr}/chunked-request").read_timeout(30000)
+    if chunked_request.send() == {
+        .Ok(response) -> print("chunked-request={consume(response)}")
+        .Err(_) -> print("chunked-request=request-error")
+        else -> print("chunked-request=unexpected")
+    }
+    if http.get("http://{cap:addr}/gzip-get") == {
+        .Ok(response) -> print("gzip-get={consume(response)}")
+        .Err(_) -> print("gzip-get=request-error")
+        else -> print("gzip-get=unexpected")
+    }
+    gzip_request :: http.request("GET", "http://{cap:addr}/gzip-request").read_timeout(30000)
+    if gzip_request.send() == {
+        .Ok(response) -> print("gzip-request={consume(response)}")
+        .Err(_) -> print("gzip-request=request-error")
+        else -> print("gzip-request=unexpected")
+    }
+}

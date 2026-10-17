@@ -1,0 +1,26 @@
+
+use core.files as files
+
+fn run() {
+    reader :: files.open("unused") ?? panic("open")
+    writer :: files.create("unused") ?? panic("create")
+    lock :: files.lock("unused") ?? panic("lock")
+    temp_dir :: files.temp_dir("unused") ?? panic("temp dir")
+    temp_file :: files.temp_file("unused") ?? panic("temp file")
+
+    print(reader.fd)
+    print(writer.fd)
+    print(lock.fd)
+
+    reader.path = "forged"
+    writer.path = "forged"
+    lock.path = "forged"
+    temp_dir.path = "forged"
+    temp_file.path = "forged"
+
+    _ :: files.FileReader{path: "forged"}
+    _ :: files.FileWriter{path: "forged"}
+    _ :: files.FileLock{path: "forged"}
+    _ :: files.TempDir{path: "forged"}
+    _ :: files.TempFile{path: "forged"}
+}

@@ -10,6 +10,7 @@ use jet_foundation.[
     LValue,
     Lambda,
     NamedSpan,
+    PatSlot,
     Pattern,
     PlaceAccess,
     Span,
@@ -42,7 +43,14 @@ use jet_foundation.[
     type_identity_equal,
 ]
 
-fn sema_expression_lambda_binding_frame(name: String, use_span: Span, scopes: &SemaScopeTable) -> Int Never! {
+// The frame of the binding `name` that a use at `use_span` inside the lambda
+// entered at `frame` reads: the latest-declared one that is either the
+// lambda's own (frame `frame` or deeper) or visible from the lambda's frame.
+// A local of an enclosing block that already closed (a finished loop body
+// keeps its rows in the table) is out of scope at the lambda, as in Rust's
+// lexical `lookup`; counting it made a lambda local of the same name, whose
+// `if` block has since rolled back, read as an outer capture.
+fn sema_expression_lambda_binding_frame(name: String, use_span: Span, frame: Int, scopes: &SemaScopeTable) -> Int Never! {
     selected_frame := -1
     selected_start := -1
     // Only bindings named `name` can match; visit them in table order.
@@ -50,11 +58,23 @@ fn sema_expression_lambda_binding_frame(name: String, use_span: Span, scopes: &S
     loop position in 0..<scopes.name_positions[slot].len() {
         binding :: scopes.bindings[scopes.name_positions[slot][position]]
         if (binding.symbol.kind == SymbolKind.Local || binding.symbol.kind == SymbolKind.Parameter) && binding.symbol.span.start <= use_span.start && binding.symbol.span.start >= selected_start {
+            if binding.frame < frame && !sema_expression_lambda_frame_encloses(binding.frame, frame, scopes) -> next
             selected_frame = binding.frame
             selected_start = binding.symbol.span.start
         }
     }
     selected_frame
+}
+
+// Whether `ancestor` is `frame` or one of the frames enclosing it.
+fn sema_expression_lambda_frame_encloses(ancestor: Int, frame: Int, scopes: SemaScopeTable) -> Bool Never! {
+    current := frame
+    loop current >= 0 && current < scopes.frames.len() {
+        if current == ancestor -> return true
+        if current == 0 -> return false
+        current = scopes.frames[current].parent
+    }
+    false
 }
 
 fn sema_expression_lambda_lvalue_use_outer(target: LValue, frame: Int, params: [String], scopes: &SemaScopeTable) -> Bool {
@@ -75,7 +95,7 @@ fn sema_expression_lambda_pattern_use_outer(pattern: Pattern, frame: Int, params
             }
             false
         }
-        .Struct(fields, _, _) -> {
+        .Struct(fields, _, _, _) -> {
             index := 0
             loop index < fields.len() {
                 if fields[index] == .Value(_, _, value) {
@@ -83,10 +103,37 @@ fn sema_expression_lambda_pattern_use_outer(pattern: Pattern, frame: Int, params
                         return true
                     }
                 }
+                if fields[index] == .Nested(_, _, nested) {
+                    if sema_expression_lambda_pattern_use_outer(nested, frame, params, &scopes) -> return true
+                }
                 index += 1
             }
             false
         }
+        .Variant(_, slots, _, _) | .List(slots, _, _) -> {
+            loop slot in slots {
+                if sema_expression_lambda_slot_use_outer(slot, frame, params, &scopes) -> return true
+            }
+            false
+        }
+        .Map(entries, _, _) -> {
+            loop entry in entries {
+                if sema_expression_lambda_uses_outer(entry.key, frame, params, &scopes) || sema_expression_lambda_slot_use_outer(entry.slot, frame, params, &scopes) -> return true
+            }
+            false
+        }
+        .Present(_, _, inner, _) | .Ok(_, _, inner, _) | .Err(_, _, inner, _) -> {
+            if inner == .Val(nested) -> sema_expression_lambda_pattern_use_outer(nested, frame, params, &scopes) else -> false
+        }
+        else -> false
+    }
+}
+
+fn sema_expression_lambda_slot_use_outer(slot: PatSlot, frame: Int, params: [String], scopes: &SemaScopeTable) -> Bool {
+    if slot == {
+        .Value(value) -> sema_expression_lambda_uses_outer(value, frame, params, &scopes)
+        .Nested(inner) -> sema_expression_lambda_pattern_use_outer(inner, frame, params, &scopes)
+        .Named(_, _, inner) -> sema_expression_lambda_slot_use_outer(inner, frame, params, &scopes)
         else -> false
     }
 }
@@ -124,7 +171,7 @@ fn sema_expression_lambda_uses_outer(expr: Expr, frame: Int, params: [String], s
             false
         }
         .Ident(name, span) -> {
-            binding_frame := sema_expression_lambda_binding_frame(name, span, &scopes)
+            binding_frame := sema_expression_lambda_binding_frame(name, span, frame, &scopes)
             if binding_frame >= frame -> return false
             if binding_frame >= 0 -> return true
             index :: sema_scope_resolve_index(scopes, name)
@@ -208,7 +255,7 @@ fn sema_expression_lambda_uses_outer(expr: Expr, frame: Int, params: [String], s
             }
             false
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_expression_lambda_uses_outer(receiver, frame, params, &scopes) -> return true
             index := 0
             loop index < args.len() {
@@ -436,6 +483,12 @@ fn sema_expression_lambda_add_effect_facts(source: &SemaCheckContext, first_call
     loop index < source.call_facts.len() {
         fact := source.call_facts[index]
         if {
+            // Rust `direct_calls.rs`: a foreign body adds its one effect root.
+            fact.foreign_effect_root != None -> {
+                root :: fact.foreign_effect_root ?? ""
+                sema_expression_lambda_append_name(&direct, root)
+                &spans.push(TEffectSpan{name: root, span: fact.span})
+            }
             fact.callee != None -> {
                 callee :: fact.callee ?? SymbolID{key: ""}
                 sema_expression_lambda_append_name(&edges, callee.key)
@@ -478,7 +531,7 @@ fn sema_expression_lambda_bound_expr_use(expr: Expr, name: String) -> Bool {
                 if sema_expression_lambda_bound_expr_use(argument.expr, name) -> return true
             }
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_expression_lambda_bound_expr_use(receiver, name) -> return true
             loop argument in args {
                 if sema_expression_lambda_bound_expr_use(argument.expr, name) -> return true
@@ -615,7 +668,7 @@ fn sema_expression_lambda_bound_expr_non_direct_use(expr: Expr, name: String) ->
             }
             return false
         }
-        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, method, _, _, args, _) -> {
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, method, _, _, args, _) -> {
             if !(method == "call" && sema_expression_lambda_bound_direct_callee(receiver, name)) && sema_expression_lambda_bound_expr_use(receiver, name) -> return true
             loop argument in args {
                 if sema_expression_lambda_bound_expr_non_direct_use(argument.expr, name) -> return true
@@ -739,7 +792,7 @@ fn sema_expression_lambda_bound_expr_mut_use(expr: Expr, name: String) -> Bool {
                 if sema_expression_lambda_bound_expr_mut_use(argument.expr, name) -> return true
             }
         }
-        .MethodCall(receiver, _, _, _, _, args, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
+        .MethodCall(receiver, _, _, _, _, args, _, _, _, _, _) | .OptMethodCall(receiver, _, _, _, args, _) -> {
             if sema_expression_lambda_bound_expr_mut_use(receiver, name) -> return true
             loop argument in args {
                 if argument.convention == AccessConvention.Write && sema_expression_lambda_bound_expr_use(argument.expr, name) -> return true
@@ -826,7 +879,7 @@ fn sema_expression_lambda_bound_statements_mut_use(statements: [Stmt], name: Str
 // S47/M2: a direct-call-only bound lambda borrows the `:=` locals it writes, so
 // every write lands on the owner. Without a written local, copyable captures
 // are copied at closure creation (the escaping route).
-fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
+fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
     parameter_names := [String]{}
     loop parameter in lambda.params -> &parameter_names.push(parameter.name)
     used_indexes := [Int]{}
@@ -864,7 +917,7 @@ fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: Sem
     }
     position := 0
     loop position < used_indexes.len() {
-        candidate :: scopes.bindings[used_indexes[position]]
+        candidate :: sema_scope_binding_row(environment, scopes, used_indexes[position])
         mutated :: mutated_flags[position]
         position += 1
         if candidate.string_view -> return Val(false)
@@ -873,7 +926,7 @@ fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: Sem
         if sema_expression_lambda_is_view_type(capture_ty, candidate.string_view) -> return Val(false)
         shared_capture :: if capture_ty == .Shared(_) -> true else -> false
         if mutated && candidate.mutable && !shared_capture -> next
-        facts := sema_copy_classify(capture_ty, SemaCopyIntent.Clone, environment, context.generic_params, candidate.string_view)
+        facts := sema_copy_classify(capture_ty, SemaCopyIntent.Clone, environment, program, context.generic_params, candidate.string_view)
         if !facts.complete -> return None
         if facts.cloneable && !writes_local -> return Val(true)
         if facts.resource && !mutated -> return Val(true)
@@ -884,7 +937,7 @@ fn sema_expression_lambda_bound_capture_escapes(lambda: Lambda, environment: Sem
 // Borrowed-tail liveness is decided before the binding enters the scope.
 // Non-call uses escape immediately; direct-call-only uses use the native
 // capture classification rather than assuming capture-free identity.
-fn sema_expression_lambda_bound_escapes(binding: Binding, statements: [Stmt], start_index: Int, tail_store: &SemaStatementTailStore, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
+fn sema_expression_lambda_bound_escapes(binding: Binding, statements: [Stmt], start_index: Int, tail_store: &SemaStatementTailStore, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> Bool? {
     is_lambda :: if binding.init == .Lambda(_) -> true else -> false
     if !is_lambda -> return None
     saw_use := false
@@ -893,14 +946,15 @@ fn sema_expression_lambda_bound_escapes(binding: Binding, statements: [Stmt], st
     tail_count := context.lambda_statement_tails.len()
     last_tail := tail_count - 1
     loop tail_index < last_tail {
-        frame :: context.lambda_statement_tails[tail_index]
-        tail :: tail_store.bodies[frame.body_id]
-        if sema_expression_lambda_bound_tail_use(tail.statements, frame.start_index, binding.name, &saw_use) -> return Val(true)
+        // The tail body is read in place: binding it copied its statements.
+        body_id :: context.lambda_statement_tails[tail_index].body_id
+        tail_start :: context.lambda_statement_tails[tail_index].start_index
+        if sema_expression_lambda_bound_tail_use(tail_store.bodies[body_id].statements, tail_start, binding.name, &saw_use) -> return Val(true)
         tail_index += 1
     }
     if !saw_use -> return Val(true)
     if binding.init == .Lambda(lambda) {
-        return sema_expression_lambda_bound_capture_escapes(lambda, environment, &scopes, &context, &diagnostics)
+        return sema_expression_lambda_bound_capture_escapes(lambda, environment, program, &scopes, &context, &diagnostics)
     }
     None
 }
@@ -1120,7 +1174,7 @@ fn sema_expression_lambda_collect_tir_expr(value: TExpr, frame: Int, scopes: &Se
             sema_expression_lambda_collect_tir_expr(entry.key, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_expr(entry.value, frame, &scopes, &keys)
         }
-        .Try(item, _, _) | .Clone(item, _) | .ExplicitCopy(item) | .MaterializeView(item) | .Deref(item) | .RawOf(item) | .Present(item) | .Ok(item) | .Err(item) -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
+        .Try(item, _, _) | .Clone(item, _) | .ExplicitCopy(item) | .MaterializeView(item) | .Move(item) | .Deref(item) | .RawOf(item) | .Present(item) | .Ok(item) | .Err(item) -> sema_expression_lambda_collect_tir_expr(item, frame, &scopes, &keys)
         .TryWithContext(inner, note, _, _, _, _) -> {
             sema_expression_lambda_collect_tir_expr(inner, frame, &scopes, &keys)
             sema_expression_lambda_collect_tir_optional_expr(note, frame, &scopes, &keys)
@@ -1276,7 +1330,7 @@ fn sema_expression_lambda_is_view_type(ty: Type, string_view: Bool) -> Bool Neve
 }
 
 fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) -> Type Never! {
-    if statements.len() == 0 -> return ~fallback
+    if statements.len() == 0 -> return fallback.copy()
     index := statements.len() - 1
     loop index >= 0 {
         if statements[index] == {
@@ -1291,7 +1345,7 @@ fn sema_expression_lambda_block_value_type(statements: [TStmt], fallback: Type) 
         }
         index -= 1
     }
-    ~fallback
+    fallback.copy()
 }
 
 fn sema_expression_lambda_capture_diagnostic(name: String, ty: Type, span: Span) -> Diagnostic {
@@ -1319,7 +1373,7 @@ fn sema_expression_lambda_merge_context_facts(source: &SemaCheckContext, target:
     }
     index = body_source_start
     loop index < source.comptime_body_sources.len() {
-        &target.comptime_body_sources.push(source.comptime_body_sources[index])
+        sema_comptime_body_source_append(&target, source.comptime_body_sources[index])
         index += 1
     }
     index = compute_call_start
@@ -1359,15 +1413,15 @@ fn sema_expression_lambda_apply_capture_facts(state: &SemaOwnershipState, lambda
     true
 }
 
-fn sema_expression_lambda(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
-    sema_expression_lambda_with_host(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, false)
+fn sema_expression_lambda(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+    sema_expression_lambda_with_host(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, false)
 }
 
 // Rust builtin_methods.rs collection callbacks: an expected `Fn` whose result
 // is open (`ret: None`) adopts the callback's own result, whether a lambda or
 // a named function value; the collection method then checks that result
 // against its own callback contract (`open_ret` skips E0108).
-pub fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     previous_lambda_escapes := context.lambda_escapes
     context.lambda_escapes = Val(false)
     open_result := false
@@ -1377,30 +1431,30 @@ pub fn sema_expression_lambda_collection_callback(expr: Expr, expected: Type?, e
     if shorthand != None -> context.subject_shorthand_depth += 1
     source :: if shorthand == .Val(lambda) -> Expr.Lambda{lambda: lambda} else -> expr
     checked := if source == {
-        .Lambda(lambda) -> sema_expression_lambda_with_host(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, true)
-        else -> sema_check_expression(source, if open_result -> None else -> expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Lambda(lambda) -> sema_expression_lambda_with_host(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, false, false, false, true)
+        else -> sema_check_expression(source, if open_result -> None else -> expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
     if shorthand != None -> context.subject_shorthand_depth -= 1
     context.lambda_escapes = previous_lambda_escapes
     checked
 }
 
-pub fn sema_expression_lambda_host_callback(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_lambda_host_callback(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if expr == {
-        .Lambda(lambda) -> return sema_expression_lambda_with_host(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, true, write, false, false)
-        else -> sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Lambda(lambda) -> return sema_expression_lambda_with_host(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, true, write, false, false)
+        else -> sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
 }
 
-pub fn sema_expression_lambda_host_callback_stored(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
+fn sema_expression_lambda_host_callback_stored(expr: Expr, expected: Type?, write: Bool, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic]) -> TExpr? {
     if expr == {
-        .Lambda(lambda) -> return sema_expression_lambda_with_host(lambda, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics, true, write, true, false)
-        else -> sema_check_expression(expr, expected, environment, &scopes, &state, &tail_store, &context, &diagnostics)
+        .Lambda(lambda) -> return sema_expression_lambda_with_host(lambda, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics, true, write, true, false)
+        else -> sema_check_expression(expr, expected, environment, program, &scopes, &state, &tail_store, &context, &diagnostics)
     }
 }
 
 fn sema_expression_lambda_rewrite_arm_labels(arms: [SwitchArm], old_label: String, new_label: String) -> [SwitchArm] Never! {
-    updated := ~arms
+    updated := arms.copy()
     loop index in 0..<updated.len() {
         body := updated[index].body
         sema_expression_lambda_rewrite_loop_label(&body, old_label, new_label)
@@ -1411,7 +1465,7 @@ fn sema_expression_lambda_rewrite_arm_labels(arms: [SwitchArm], old_label: Strin
 
 fn sema_expression_lambda_rewrite_optional_labels(statements: [Stmt]?, old_label: String, new_label: String) -> [Stmt]? Never! {
     present :: statements ?? return None
-    body := ~present
+    body := present.copy()
     sema_expression_lambda_rewrite_loop_label(&body, old_label, new_label)
     Val(body)
 }
@@ -1571,11 +1625,11 @@ fn sema_expression_lambda_install_loop_label(lambda: &Lambda, label: NamedSpan) 
 // The lambda is checked in its own frame on the live scope table and rolled
 // back, instead of on a copy of the whole table (every module binding) per
 // lambda; no scope state of the lambda flows back to the enclosing table.
-fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
-    outer_return_type :: ~scopes.return_type
-    outer_failure_carrier :: ~scopes.failure_carrier
+fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, scopes: &SemaScopeTable, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
+    outer_return_type :: scopes.return_type.copy()
+    outer_failure_carrier :: scopes.failure_carrier.copy()
     lambda_mark :: sema_scope_mark(&scopes)
-    checked :: sema_expression_lambda_with_host_in_frame(lambda, expected, environment, &scopes, outer_return_type, outer_failure_carrier, &state, &tail_store, &context, &diagnostics, host_callback, host_write, host_stored, open_result)
+    checked :: sema_expression_lambda_with_host_in_frame(lambda, expected, environment, program, &scopes, outer_return_type, outer_failure_carrier, &state, &tail_store, &context, &diagnostics, host_callback, host_write, host_stored, open_result)
     sema_scope_rollback(&scopes, lambda_mark)
     checked
 }
@@ -1583,12 +1637,12 @@ fn sema_expression_lambda_with_host(lambda: Lambda, expected: Type?, environment
 // A lambda's written, expected and inferred returns are one type when they
 // agree in resolved form: an expected `[module::Name]` (resolved by the slot
 // that supplied it) and a body's bare `[Name]` name the same declaration.
-fn sema_expression_lambda_return_fits(required: Type, offered: Type, environment: SemaScopeEnvironment) -> Bool Never! {
+fn sema_expression_lambda_return_fits(required: Type, offered: Type, environment: SemaScopeEnvironment, program: SemaProgramTables) -> Bool Never! {
     if sema_type_assignable(required, offered) -> return true
-    sema_type_assignable(sema_expr_expected_type(required, environment), sema_expr_expected_type(offered, environment))
+    sema_type_assignable(sema_expr_expected_type(required, environment, program), sema_expr_expected_type(offered, environment, program))
 }
 
-fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, lambda_scopes: &SemaScopeTable, outer_return_type: Type?, outer_failure_carrier: TFailureCarrier?, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
+fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, environment: SemaScopeEnvironment, program: SemaProgramTables, lambda_scopes: &SemaScopeTable, outer_return_type: Type?, outer_failure_carrier: TFailureCarrier?, state: &SemaOwnershipState, tail_store: &SemaStatementTailStore, context: &SemaCheckContext, diagnostics: &[Diagnostic], host_callback: Bool, host_write: Bool, host_stored: Bool, open_result: Bool) -> TExpr? {
     lambda_work := lambda
     inline_loop := lambda_work.params.len() == 0 && (lambda_work.meta.collecting_loop || lambda_work.meta.result_loop)
     if inline_loop && lambda_work.meta.loop_label == .Val(named) -> sema_expression_lambda_install_loop_label(&lambda_work, named)
@@ -1656,6 +1710,12 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     lambda_parent_state := sema_ownership_state_snapshot(state)
     lambda_state := sema_ownership_state_snapshot(state)
     lambda_context := sema_check_context_snapshot(context)
+    // D-CONC-SPAWN1 (Rust `check_lambda`): this lambda is a `task` body when
+    // the spawn named it and no callable is expected of it. The fact and the
+    // propagation it harvests belong to this body alone, never a nested one.
+    task_body :: !inline_loop && expected == None && context.taskgroups.spawn_body
+    lambda_context.taskgroups.spawn_body = false
+    lambda_context.task_body_propagates = false
     if !inline_loop {
         lambda_context.loop_value_frames = [SemaLoopValueFrame]{}
         lambda_context.loop_break_flows = [SemaLoopBreakFlows]{}
@@ -1691,8 +1751,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             &diagnostics.push(sema_error("E0801", parameter.name_span, "tell me the type of `{parameter.name}`", "this lambda parameter has no type to go on", "write `({parameter.name}: Int) -> …` (or whatever type fits)"))
             return None
         }
+        // A written `(item: Item)` and an expected `module::Item` (resolved
+        // by the generic slot that supplied it) name one declaration.
         if parameter.ty != None && expected_params == .Val(required_params) {
-            if index < required_params.len() && !type_identity_equal(parameter_type, required_params[index]) {
+            if index < required_params.len() && !type_identity_equal(sema_expr_expected_type(parameter_type, environment, program), sema_expr_expected_type(required_params[index], environment, program)) {
                 &diagnostics.push(sema_type_mismatch(required_params[index], parameter_type, parameter.ty_span ?? parameter.name_span))
                 return None
             }
@@ -1703,6 +1765,12 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         if !sema_scope_declare_local(&lambda_scopes, parameter_symbol, host_callback && host_write, AccessConvention.Read, None, false) {
             &diagnostics.push(sema_already_defined(parameter.name, parameter.name_span))
             return None
+        }
+        if context.lambda_lending_views && parameter_type == .Apply(view_name, view_args) && view_name == "ViewMut" && view_args.len() == 1 {
+            sema_ownership_declare_binding(&lambda_state, parameter_symbol, true)
+            source :: sema_ownership_place_from_expr_inner(Expr.Ident{name: parameter.name, span: parameter.name_span}, lambda_scopes) ?? return None
+            _ := sema_ownership_record_view_fact(&lambda_state, parameter.name, parameter.name_span, source, [String]{}, AccessConvention.Write, lambda_scopes, -1)
+            &lambda_context.lending_view_parameter_keys.push(parameter_id.key)
         }
         &param_symbols.push(parameter_id)
         &lambda_context.return_view_parameter_keys.push(parameter_id.key)
@@ -1720,20 +1788,31 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         }
         else -> {
             lambda_scopes.return_type = child_return
-            // D-FAILURE-FOUNDATION1=A: a callback expected to return a Result
-            // propagates into that carrier. An unannotated callback whose
-            // expected function type returns a plain non-Unit value (or
-            // nothing), or that has no expected function type at all, infers
-            // its carrier from its first propagated call (the Rust reference's
-            // callback failure-carrier inference), so the closure's own type
-            // carries the failure. Every other callback has no failure route:
-            // a fallible call in it is E0403.
-            carrier_source := child_return
-            if expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
-            infers :: expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
-            lambda_scopes.failure_carrier = if infers -> None else -> Val(sema_expression_failure_carrier(carrier_source ?? Type.Named{name: "Unit"}))
-            lambda_context.failure_inference = infers
-            lambda_context.inferred_failure_carrier = None
+            if task_body {
+                // Rust infers a callback carrier only for an expected
+                // callable; a `task` body has none. A failure it propagates
+                // leaves through the enclosing callable's carrier
+                // (`task_body_propagates`), and its Task element stays the
+                // body's success type.
+                lambda_scopes.failure_carrier = outer_failure_carrier
+                lambda_context.failure_inference = false
+                lambda_context.inferred_failure_carrier = None
+            } else {
+                // D-FAILURE-FOUNDATION1=A: a callback expected to return a Result
+                // propagates into that carrier. An unannotated callback whose
+                // expected function type returns a plain non-Unit value (or
+                // nothing), or that has no expected function type at all, infers
+                // its carrier from its first propagated call (the Rust reference's
+                // callback failure-carrier inference), so the closure's own type
+                // carries the failure. Every other callback has no failure route:
+                // a fallible call in it is E0403.
+                carrier_source := child_return
+                if expected_ret == .Val(.Result(_, _)) -> carrier_source = expected_ret
+                infers :: expected_ret != (Val(Type.Named{name: "Unit"})) && !sema_expression_lambda_type_is_result(expected_ret ?? Type.Named{name: "Unit"})
+                lambda_scopes.failure_carrier = if infers -> None else -> Val(sema_expression_failure_carrier(carrier_source ?? Type.Named{name: "Unit"}))
+                lambda_context.failure_inference = infers
+                lambda_context.inferred_failure_carrier = None
+            }
         }
     }
     loop_label := String?{None}
@@ -1757,7 +1836,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     executable := TLambdaBody?{None}
     if lambda.body == {
         .Expr(value) -> {
-            checked_value := sema_check_expression(value, body_expected, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
+            checked_value := sema_check_expression(value, body_expected, environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
             sema_ownership_keep_share_found(&state, lambda_state)
             checked :: checked_value ?? return None
             body_result_ty = checked.ty
@@ -1779,7 +1858,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                 }
                 statement_index += 1
             }
-            checked_block :: sema_check_statements(statement_body, statement_return, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics, 0)
+            checked_block :: sema_check_statements(statement_body, statement_return, environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics, 0)
             sema_ownership_keep_share_found(&state, lambda_state)
             sema_single_use_check_scope_end(lambda_state, &diagnostics)
             if !checked_block.complete {
@@ -1794,7 +1873,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             if {
                 tail_source != None -> {
                     tail :: tail_source ?? Expr.Unit{span: lambda.span}
-                    checked_tail_value := sema_check_expression(tail, body_expected, environment, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
+                    checked_tail_value := sema_check_expression(tail, body_expected, environment, program, &lambda_scopes, &lambda_state, &tail_store, &lambda_context, &diagnostics)
                     sema_ownership_keep_share_found(&state, lambda_state)
                     checked_tail :: checked_tail_value ?? return None
                     body_result_ty = checked_tail.ty
@@ -1816,8 +1895,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             // A declared `module::Name` slot and a written `Name` item are one
             // type: both sides are compared in their resolved form.
             if expected_ret == .Val(.List(expected_item)) {
-                resolved_expected :: sema_expr_expected_type(expected_item, environment)
-                resolved_item :: sema_expr_expected_type(item_type, environment)
+                resolved_expected :: sema_expr_expected_type(expected_item, environment, program)
+                resolved_item :: sema_expr_expected_type(item_type, environment, program)
                 if !type_identity_equal(resolved_item, resolved_expected) {
                     common :: sema_expr_numeric_join(resolved_item, resolved_expected) ?? {
                         &diagnostics.push(sema_type_mismatch(Type.List{element: expected_item}, Type.List{element: item_type}, lambda.span))
@@ -1832,7 +1911,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             lambda_work.meta.collect_item_type = Val(item_type)
             body_result_ty = Type.List{element: item_type}
             if executable == .Val(.Block(checked_body)) {
-                lowered_body :: sema_loop_value_lower_collecting_body(checked_body, item_type, lambda.span, environment, &diagnostics) ?? return None
+                lowered_body :: sema_loop_value_lower_collecting_body(checked_body, item_type, lambda.span, environment, program, &diagnostics) ?? return None
                 executable = Val(TLambdaBody.Block{body: lowered_body})
             }
         }
@@ -1881,6 +1960,23 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     lambda_work.meta.effect_maximal = effect_maximal
 
+    // D-CALLSITE-MARK1=A (Rust `once_lambda_sites`): a `^` take of a captured
+    // name inside the body moves it into the lambda, and the lambda runs
+    // once. The capture is gone for the enclosing body too. An explicit
+    // `task ^name` capture keeps its own capture move.
+    if !inline_loop {
+        loop moved in lambda_state.moved {
+            if sema_ownership_place_moved(&lambda_parent_state, moved.place) != None -> next
+            if sema_expression_lambda_outer_binding_key(moved.place.root_key, frame, &lambda_scopes) == None -> next
+            explicit_capture := false
+            loop capture in lambda.take_names {
+                if capture.name == moved.place.root -> explicit_capture = true
+            }
+            if explicit_capture -> next
+            sema_ownership_note_once_lambda(&state, lambda.span, moved.place.root)
+            &state.moved.push(moved)
+        }
+    }
     captures := [TCapture]{}
     escapes := false
     if {
@@ -1926,8 +2022,14 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             sema_expression_lambda_add_capture_key(&mutable_keys, key)
         }
     }
-    if capture_keys.len() == 0 && lambda.body == .Expr(value) && sema_expression_lambda_uses_outer(value, frame, param_names, &lambda_scopes) -> return None
-    if capture_keys.len() == 0 && lambda.body == .Block(statements) && sema_expression_lambda_statements_use_outer(statements, frame, param_names, &lambda_scopes) -> return None
+    uses_outer :: if lambda.body == {
+        .Expr(value) -> sema_expression_lambda_uses_outer(value, frame, param_names, &lambda_scopes)
+        .Block(statements) -> sema_expression_lambda_statements_use_outer(statements, frame, param_names, &lambda_scopes)
+    }
+    if capture_keys.len() == 0 && uses_outer {
+        sema_check_unsupported(&context, "the lambda at offset {lambda.span.start} reads an enclosing local, but no capture was recorded for it")
+        return None
+    }
     loop key in mutable_keys {
         binding_index := sema_expression_lambda_outer_binding_key(key, frame, &lambda_scopes)
         if binding_index != None -> sema_expression_lambda_append_name(&lambda_work.meta.mut_captures, lambda_scopes.bindings[binding_index ?? 0].symbol.name)
@@ -1952,11 +2054,12 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         key :: binding.symbol.id.key
         if binding.frame < frame && sema_expression_lambda_name_contains(capture_keys, key) {
             sema_expression_lambda_add_capture_key(&found_capture_keys, key)
-            capture_ty :: binding.symbol.ty ?? return None
+            capture_ty :: sema_scope_binding_type(environment, lambda_scopes, index) ?? return None
             local := tir_symbol_local(binding.symbol.name, binding.symbol.span, binding.symbol.id)
             local.mutable = binding.mutable
             local.integer_bounds = binding.integer_bounds
             &captures.push(TCapture{source: binding.symbol.name, local: local, ty: capture_ty})
+            if sema_ownership_frozen_for_key(state, key) != None -> sema_expression_lambda_append_name(&lambda_work.meta.frozen_captures, binding.symbol.name)
             sema_cell_guard_check_capture(binding.symbol.name, capture_ty, lambda.span, &diagnostics)
             explicit_move := sema_expression_lambda_name_contains(lambda_work.meta.moved_captures, binding.symbol.name)
             is_view := sema_expression_lambda_is_view_type(capture_ty, binding.string_view)
@@ -1970,7 +2073,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                         &diagnostics.push(sema_expression_lambda_view_diagnostic(binding.symbol.name, binding.symbol.span))
                         return None
                     }
-                    facts := sema_copy_classify(capture_ty, SemaCopyIntent.Clone, environment, context.generic_params, binding.string_view)
+                    facts := sema_copy_classify(capture_ty, SemaCopyIntent.Clone, environment, program, context.generic_params, binding.string_view)
                     if !facts.complete -> return None
                     if !facts.accepted || !facts.materializes_view {
                         &diagnostics.push(sema_expression_lambda_view_diagnostic(binding.symbol.name, binding.symbol.span))
@@ -1984,7 +2087,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
                     sema_expression_lambda_append_name(&lambda_work.meta.moved_captures, binding.symbol.name)
                 }
                 else -> {
-                    facts := sema_copy_classify(capture_ty, SemaCopyIntent.Clone, environment, context.generic_params, binding.string_view)
+                    facts := sema_copy_classify(capture_ty, SemaCopyIntent.Clone, environment, program, context.generic_params, binding.string_view)
                     if !facts.complete -> return None
                     if {
                         facts.accepted -> {
@@ -2009,6 +2112,10 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     }
     }
 
+    // D-CONC-SPAWN1 (Rust `fallible_propagation`): a `task` body that
+    // propagated into the enclosing carrier is not a total lambda, so it keeps
+    // its plain success type rather than taking the Never rail below.
+    if task_body && lambda_context.task_body_propagates -> lambda_work.meta.fallible_propagation = true
     success_ty := body_result_ty
     ret_ty := success_ty
     if expected_ret == {
@@ -2025,7 +2132,7 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
             lambda_work.meta.fallible_carrier = Val(ret_ty)
         }
     }
-    if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? ret_ty, ret_ty, environment) {
+    if expected_ret != None && !sema_expression_lambda_return_fits(expected_ret ?? ret_ty, ret_ty, environment, program) {
         // The inferred carrier cannot fit a plain expected return: the
         // failure has no route out of this callback (lambdas.rs E0403).
         if lambda_work.meta.fallible_propagation && ret_ty == .Result(_, inferred_error) {
@@ -2035,6 +2142,20 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         }
         &diagnostics.push(sema_type_mismatch(expected_ret ?? ret_ty, ret_ty, lambda.span))
         return None
+    }
+    // A concrete lambda's checked body, not a same-named file function,
+    // establishes its failure rail. An unconstrained total value lambda
+    // retains Never instead of acquiring the default Err at the call site.
+    if expected == None && !inline_loop && !lambda_work.meta.fallible_propagation && ret_ty != (Type.Named{name: "Unit"}) {
+        has_carrier :: if ret_ty == {
+            .Result(_, _) | .Option(_) -> true
+            .Named(name) -> name == "Never"
+            else -> false
+        }
+        if !has_carrier {
+            ret_ty = Type.Result{ok: ret_ty, err: Type.Named{name: "Never"}}
+            lambda_work.meta.fallible_carrier = Val(ret_ty)
+        }
     }
     ret_slot := Type?{None}
     if ret_ty != (Type.Named{name: "Unit"}) -> ret_slot = Val(ret_ty)
@@ -2068,8 +2189,8 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
         frozen_captures: lambda_work.meta.frozen_captures,
         uses_stack_sentry: false,
     }
-    result := sema_tir_expr(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
-    checked :: if (host_callback || open_result) && expected_ret == None -> result else -> sema_expr_expected(result, expected, environment, &diagnostics) ?? return None
+    result := sema_tir_node(fn_ty, TExprKind.Lambda{value: lambda_value}, lambda.span)
+    checked :: if (host_callback || open_result) && expected_ret == None -> result else -> sema_expr_expected(result, expected, environment, program, &diagnostics) ?? return None
     if inline_loop {
         sema_scope_leave(&lambda_scopes, &lambda_state)
         sema_ownership_join_paths(&state, lambda_parent_state, lambda_state, lambda_parent_state, true)
@@ -2101,9 +2222,9 @@ fn sema_expression_lambda_with_host_in_frame(lambda: Lambda, expected: Type?, en
     if inline_loop {
         // An inline loop body is the owner's body: its default-route failures
         // join the owner's failure-union row.
-        context.failure_union_members = ~lambda_context.failure_union_members
-        context.failure_union_cases = ~lambda_context.failure_union_cases
-        context.failure_union_edges = ~lambda_context.failure_union_edges
+        context.failure_union_members = lambda_context.failure_union_members.copy()
+        context.failure_union_cases = lambda_context.failure_union_cases.copy()
+        context.failure_union_edges = lambda_context.failure_union_edges.copy()
         context.failure_union_general = context.failure_union_general || lambda_context.failure_union_general
     }
     Val(checked)
@@ -2123,19 +2244,19 @@ fn sema_expression_lambda_lift_value(value: TExpr, carrier: Type) -> TExpr Never
                 rehomed.ty = carrier
                 return rehomed
             }
-            return ~value
+            return value.copy()
         }
-        if value.ty == (Type.Named{name: "Never"}) -> return ~value
-        return sema_tir_expr(carrier, TExprKind.Ok{value: value}, value.span)
+        if value.ty == (Type.Named{name: "Never"}) -> return value.copy()
+        return sema_tir_node(carrier, TExprKind.Ok{value: value}, value.span)
     }
-    ~value
+    value.copy()
 }
 
 // Rust `lift_fallible_lambda_returns`: lift the expression body, or every
 // `return` of a block body (its tail is one), into the `Result` carrier. A
 // shared block body stays as checked, as Rust reuses it unlifted.
 fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -> TLambdaBody Never! {
-    if !sema_expression_lambda_type_is_result(carrier) -> return ~executable
+    if !sema_expression_lambda_type_is_result(carrier) -> return executable.copy()
     if executable == {
         .Expr(value) -> TLambdaBody.Expr{value: sema_expression_lambda_lift_value(value, carrier)}
         .Block(body) -> {
@@ -2143,7 +2264,7 @@ fn sema_expression_lambda_lift_returns(executable: TLambdaBody, carrier: Type) -
             sema_expression_lambda_lift_block(&lifted, carrier)
             TLambdaBody.Block{body: lifted}
         }
-        .SharedBlock(_) -> ~executable
+        .SharedBlock(_) -> executable.copy()
     }
 }
 
@@ -2206,14 +2327,14 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 sema_expression_lambda_lift_block(&updated_then, carrier)
                 updated_else := else_body
                 if else_body == .Val(else_statements) {
-                    lifted := ~else_statements
+                    lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(&lifted, carrier)
                     updated_else = Val(lifted)
                 }
                 statements[index] = TStmt.If{condition: condition, then_body: updated_then, else_body: updated_else, else_is_elseif: else_is_elseif, span: span}
             }
             .Match(subject, arms, exhaustive, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2222,7 +2343,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 statements[index] = TStmt.Match{subject: subject, arms: updated_arms, exhaustive: exhaustive, span: span}
             }
             .EnumMatch(subject, clone_subject, arms, else_body, fallthrough, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2230,14 +2351,14 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 }
                 updated_else := else_body
                 if else_body == .Val(else_statements) {
-                    lifted := ~else_statements
+                    lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(&lifted, carrier)
                     updated_else = Val(lifted)
                 }
                 statements[index] = TStmt.EnumMatch{scrutinee: subject, clone_subject: clone_subject, arms: updated_arms, else_body: updated_else, fallthrough: fallthrough, span: span}
             }
             .RangeSwitch(subject, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2248,7 +2369,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 statements[index] = TStmt.RangeSwitch{subject: subject, arms: updated_arms, else_body: updated_else, span: span}
             }
             .MixedSwitch(subject, branch_class, arms, else_body, span) -> {
-                updated_arms := ~arms
+                updated_arms := arms.copy()
                 loop arm_index in 0..<updated_arms.len() {
                     arm_body := updated_arms[arm_index].body
                     sema_expression_lambda_lift_block(&arm_body, carrier)
@@ -2256,7 +2377,7 @@ fn sema_expression_lambda_lift_block(statements: &[TStmt], carrier: Type) Never!
                 }
                 updated_else := else_body
                 if else_body == .Val(else_statements) {
-                    lifted := ~else_statements
+                    lifted := else_statements.copy()
                     sema_expression_lambda_lift_block(&lifted, carrier)
                     updated_else = Val(lifted)
                 }

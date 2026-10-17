@@ -1,0 +1,33 @@
+
+use core.encoding as encoding
+use core.encoding.json as json
+use core.encoding.jsonl as jsonl
+use core.encoding.csv as csv
+use core.encoding.cbor as cbor
+use core.files as files
+
+fn run() {
+    input :: files.open("{work}/cbor_trunc/input.data") ?? panic("open")
+    reader :: cbor.reader(^input) ?? panic("reader")
+    loop {
+        result :: reader.next()
+        if result == {
+            .Ok(maybe) -> {
+                if maybe == None {
+                    print("eof-missed")
+                    break
+                }
+            }
+            .Err(first) -> {
+                again :: reader.next()
+                if again == {
+                    .Ok(_) -> { print("not-latched") }
+                    .Err(second) -> {
+                        print(first.byte_offset == second.byte_offset && first.reason == second.reason)
+                    }
+                }
+                break
+            }
+        }
+    }
+}

@@ -1,0 +1,109 @@
+use jet_foundation.[
+    MIRAccess, MIRCallArg, MIRConstant, MIRCopyFact, MIRDropKind, MIRFunction, MIROperation,
+    MIRPlaceID, MIRPreludeABI, MIRPreludeFamily, MIRProgram, MIRSemanticOp,
+    MIRTerminator, MIRType, MIRTypeDef, MIRTypeKind, MIRValueID,
+    mir_nominal_ref, mir_owned_ownership, mir_ownership_from_access,
+    mir_type_from_kind,
+]
+
+fn fx_queue_type(elem: MIRType) -> MIRType Never! {
+    mir_type_from_kind(MIRTypeKind.Apply{name: mir_nominal_ref("Queue"), args: [MIRType]{elem}})
+}
+
+fn fx_queue_program(b: FxBuilder) -> MIRProgram Never! {
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    members :: [String]{"deque_from", "deque_push_front", "deque_push_back", "deque_pop_front", "deque_pop_back", "deque_peek_front", "deque_peek_back", "deque_get", "deque_contains", "deque_delete", "deque_reverse", "deque_split", "deque_to_list", "deque_join", "deque_clear", "deque_len", "deque_capacity", "deque_is_empty"}
+    symbols :: [String]{"jet_deque_from", "jet_deque_push_front", "jet_deque_push_back", "jet_deque_pop_front_kernel", "jet_deque_pop_back_kernel", "jet_deque_peek_front", "jet_deque_peek_back", "jet_deque_get", "jet_deque_contains", "jet_deque_delete", "jet_deque_reverse", "jet_deque_split", "jet_deque_to_list", "jet_deque_join", "std::collections::VecDeque::clear", "jet_deque_len", "jet_deque_capacity", "jet_deque_is_empty"}
+    loop (index, member) in members {
+        binary :: index == 1 || index == 2 || index == 7 || index == 8 || index == 9 || index == 11 || index == 13
+        row := fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], if binary -> 2 else -> 1, MIRPreludeABI.Value)
+        row.signature.borrow_mask[0] = index != 0
+        if binary -> row.signature.borrow_mask[1] = index == 7 || index == 8 || index == 11 || index == 13
+        &p.prelude_calls.push(row)
+    }
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.StaticPrelude, "core.builtin", "deque_new", "std::collections::VecDeque::new", 0, MIRPreludeABI.Value))
+    p
+}
+
+// The first back push wraps; the front push then grows and linearizes the ring.
+// A clone survives source mutation/drop. Split transfers the suffix, while
+// deletion shifts the shorter side. String payloads exercise owned clone/drop.
+// expect-stdout queues: "[1, 2, 3]\n1\n[2, 3, 4]\n[0, 2, 3, 4]\n0\n4\n2\ntrue\n0,2,3,4\n[4, 3, 2, 0]\n[4, 2, 0]\n[4, 2]\n[0]\ntrue\n[0, 2, 3, 4]\n0\ntrue\n[red, blue]\nblue\n[red]\n"
+// expect-runtime-only queues: native ring and canonical text/Int ownership exports
+fn fx_queues() -> MIRProgram Never! {
+    b := fx_builder()
+    ty :: fx_queue_type(fx_int())
+    list_ty :: fx_list_type(fx_int())
+    option_ty :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    root :: fx_local(&b, "queue", ty, mir_owned_ownership())
+    one :: fx_int_const(&b, 1)
+    two :: fx_int_const(&b, 2)
+    three :: fx_int_const(&b, 3)
+    four :: fx_int_const(&b, 4)
+    zero :: fx_int_const(&b, 0)
+    values :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{one, two, three}, trait_coercion: None})
+    queue :: fx_list_method(&b, "deque_from", values, None, [MIRValueID]{}, ty, true)
+    fx_do(&b, MIROperation.WritePlace{place: root, value: queue})
+    lent :: fx_value(&b, ty, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: root, access: MIRAccess.Write})
+    fx_print(&b, queue)
+    front :: fx_list_method(&b, "deque_pop_front", lent, Val(root), [MIRValueID]{}, option_ty, true)
+    fx_print(&b, front)
+    fx_do(&b, MIROperation.Drop{value: front, kind: MIRDropKind.Value})
+    _ := fx_list_method(&b, "deque_push_back", lent, Val(root), [MIRValueID]{four}, fx_unit(), false)
+    fx_print(&b, queue)
+    _ := fx_list_method(&b, "deque_push_front", lent, Val(root), [MIRValueID]{zero}, fx_unit(), false)
+    fx_print(&b, queue)
+    saved :: fx_owned(&b, ty, MIROperation.Copy{value: queue, fact: MIRCopyFact.Explicit})
+    queries :: [String]{"deque_peek_front", "deque_peek_back", "deque_get"}
+    loop (index, member) in queries {
+        args :: if index == 2 -> [MIRValueID]{one} else -> [MIRValueID]{}
+        result :: fx_list_method(&b, member, queue, None, args, option_ty, true)
+        fx_print(&b, result)
+        fx_do(&b, MIROperation.Drop{value: result, kind: MIRDropKind.Value})
+    }
+    contains :: fx_list_method(&b, "deque_contains", queue, None, [MIRValueID]{three}, fx_bool(), false)
+    fx_print(&b, contains)
+    comma :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: ","}})
+    joined :: fx_list_method(&b, "deque_join", queue, None, [MIRValueID]{comma}, fx_string(), true)
+    fx_print(&b, joined)
+    _ := fx_list_method(&b, "deque_reverse", lent, Val(root), [MIRValueID]{}, fx_unit(), false)
+    fx_print(&b, queue)
+    _ := fx_list_method(&b, "deque_delete", lent, Val(root), [MIRValueID]{three}, fx_unit(), false)
+    fx_print(&b, queue)
+    rest :: fx_list_method(&b, "deque_split", lent, Val(root), [MIRValueID]{two}, ty, true)
+    fx_print(&b, queue)
+    fx_print(&b, rest)
+    _ := fx_list_method(&b, "deque_clear", lent, Val(root), [MIRValueID]{}, fx_unit(), false)
+    empty :: fx_list_method(&b, "deque_is_empty", queue, None, [MIRValueID]{}, fx_bool(), false)
+    fx_print(&b, empty)
+    lost :: fx_owned(&b, ty, MIROperation.MovePlace{place: root})
+    fx_do(&b, MIROperation.Drop{value: lost, kind: MIRDropKind.Value})
+    fx_print(&b, saved)
+    fresh :: fx_owned(&b, ty, MIROperation.Semantic{operation: MIRSemanticOp.StaticPreludeCall{call: fx_prelude_id("core.builtin", "deque_new"), args: [MIRCallArg]{}, owner_type_args: [], type_args: [MIRType]{}}})
+    count :: fx_list_method(&b, "deque_len", fresh, None, [MIRValueID]{}, fx_int(), false)
+    fx_print(&b, count)
+    vacant :: fx_list_method(&b, "deque_is_empty", fresh, None, [MIRValueID]{}, fx_bool(), false)
+    fx_print(&b, vacant)
+
+    string_ty :: fx_queue_type(fx_string())
+    strings :: fx_list_type(fx_string())
+    text_root :: fx_local(&b, "texts", string_ty, mir_owned_ownership())
+    red :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "red"}})
+    blue :: fx_owned(&b, fx_string(), MIROperation.Constant{value: MIRConstant.String{value: "blue"}})
+    text_values :: fx_owned(&b, strings, MIROperation.BuildList{values: [MIRValueID]{red, blue}, trait_coercion: None})
+    texts :: fx_list_method(&b, "deque_from", text_values, None, [MIRValueID]{}, string_ty, true)
+    fx_do(&b, MIROperation.WritePlace{place: text_root, value: texts})
+    backup :: fx_owned(&b, string_ty, MIROperation.Copy{value: texts, fact: MIRCopyFact.Explicit})
+    retired :: fx_owned(&b, string_ty, MIROperation.MovePlace{place: text_root})
+    fx_do(&b, MIROperation.Drop{value: retired, kind: MIRDropKind.Value})
+    fx_print(&b, backup)
+    backup_root :: fx_local(&b, "backup", string_ty, mir_owned_ownership())
+    fx_do(&b, MIROperation.WritePlace{place: backup_root, value: backup})
+    backup_lent :: fx_value(&b, string_ty, mir_ownership_from_access(MIRAccess.Write), MIROperation.AddressOf{place: backup_root, access: MIRAccess.Write})
+    last :: fx_list_method(&b, "deque_pop_back", backup_lent, Val(backup_root), [MIRValueID]{}, mir_type_from_kind(MIRTypeKind.Option{inner: fx_string()}), true)
+    fx_print(&b, last)
+    fx_do(&b, MIROperation.Drop{value: last, kind: MIRDropKind.Value})
+    fx_print(&b, backup)
+    fx_block(&b, U64{0}, MIRTerminator.Return{value: None})
+    fx_queue_program(b)
+}

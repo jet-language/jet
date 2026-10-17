@@ -91,7 +91,7 @@ pub const CATEGORIES: &[&str] = &[
 
 fn category_for(cmd: &str) -> &'static str {
     match cmd {
-        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" | "learn" => "Build & Run",
+        "run" | "check" | "test" | "build" | "debug" | "eval" | "emit" => "Build & Run",
         "dev" => "Development Server",
         "devtools" => "Reference",
         "new" | "fmt" | "fix" | "lint" | "env" | "init" | "config" | "toolchain" => {
@@ -120,7 +120,6 @@ fn example_for(cmd: &str) -> Option<String> {
         "run" => Some("jet run".to_string()),
         "check" | "build" => Some(format!("jet {} Examples/features/basics/hello.jet", cmd)),
         "dev" => Some("jet dev run.jet".to_string()),
-        "learn" => Some("jet learn".to_string()),
         "notebook" => Some("jet notebook analysis.jetnb".to_string()),
         "explain" => Some("jet explain E0102".to_string()),
         "new" => Some("jet new web-api".to_string()),
@@ -132,7 +131,6 @@ fn see_also_for(cmd: &str) -> Vec<&'static str> {
     match cmd {
         "run" => vec!["build", "test", "dev"],
         "dev" => vec!["run"],
-        "learn" => vec!["dev", "explain"],
         "build" => vec!["run", "check"],
         "test" => vec!["run", "check"],
         "add" => vec!["fetch", "update"],
@@ -157,7 +155,6 @@ fn keywords_for(cmd: &str) -> Vec<&'static str> {
             "start a web app",
         ],
         "run" => vec!["watch", "run on save"],
-        "learn" => vec!["kata", "exercise", "hint", "offline"],
         "add" => vec!["add a dependency", "dependency"],
         "explain" => vec!["understand an error message", "error", "diagnostic"],
         _ => Vec::new(),
@@ -450,26 +447,29 @@ mod tests {
                 "Error Codes",
             ]
         );
-        let forbidden = [
-            "D-",
-            "U19",
-            "c77",
-            "E2-M",
-            "milestone",
-            "requirement",
-            "epoch",
-            "decision",
-            "ratified",
-        ];
+        // Planning vocabulary only. "decision" is product vocabulary now: the
+        // ratified `inspect decisions` plane shows compiler decisions, and
+        // `explain --verbose` names a token's owning decision (cli.md).
+        // Planning identifiers keep their case (`D-` is a decision ID, never
+        // the `d-` inside `read-view`); planning words match any case.
+        let forbidden_ids = ["D-", "U19", "c77", "E2-M"];
+        let forbidden_words = ["milestone", "requirement", "epoch", "ratified"];
         for entry in build_index() {
             let copy = std::iter::once(entry.symbol.summary.as_str())
                 .chain(entry.flags.iter().map(|(_, help)| *help))
                 .collect::<Vec<_>>()
-                .join(" ")
-                .to_lowercase();
-            for term in forbidden {
+                .join(" ");
+            let lower = copy.to_lowercase();
+            for term in forbidden_ids {
                 assert!(
-                    !copy.contains(&term.to_lowercase()),
+                    !copy.contains(term),
+                    "help for `{}` exposes internal planning term `{term}`: {copy}",
+                    entry.symbol.name
+                );
+            }
+            for term in forbidden_words {
+                assert!(
+                    !lower.contains(term),
                     "help for `{}` exposes internal planning term `{term}`: {copy}",
                     entry.symbol.name
                 );
@@ -523,8 +523,10 @@ mod tests {
         assert!(search(&index, "--release").iter().any(|hit| {
             matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "run")
         }));
+        // `jet run` documents its project default (`jet run`); the file example
+        // lives on `check` and `build`.
         assert!(search(&index, "hello.jet").iter().any(|hit| {
-            matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "run")
+            matches!(hit, Hit::Command { entry, .. } if entry.symbol.name == "check")
         }));
     }
 

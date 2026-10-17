@@ -1,0 +1,19 @@
+
+use core.sync as sync
+
+fn run() {
+    left :: sync.map_set(sync.map_new(), "k", "left")
+    right :: sync.map_set(sync.map_new(), "k", "right")
+    merged_lr :: sync.map_merge(left, right)
+    merged_rl :: sync.map_merge(right, left)
+    left_value :: sync.map_get(merged_lr, "k") ?? ""
+    right_value :: sync.map_get(merged_rl, "k") ?? ""
+    print("winner:{left_value}/{right_value}")
+
+    deleted :: sync.map_delete(sync.map_new(), "k")
+    delete_lr :: sync.map_merge(right, deleted)
+    delete_rl :: sync.map_merge(deleted, right)
+    delete_lr_wins :: sync.map_get(delete_lr, "k") == .None
+    delete_rl_wins :: sync.map_get(delete_rl, "k") == .None
+    print("tombstone:{delete_lr_wins}/{delete_rl_wins}")
+}

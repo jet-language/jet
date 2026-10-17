@@ -1,0 +1,33 @@
+// D-MOD-CYCLE1=A: the files of a package share one namespace. Types.jet and
+// Sub/Ops.jet call each other, and Ops.jet extends Span declared here.
+struct Span {
+    start: Int
+    end: Int
+}
+
+enum Kind { Alpha Beta(Int) }
+
+// Shape and Sub/Ops.jet's Label hold each other, so their equality derives
+// as one cycle across two files.
+enum Shape {
+    Dot
+    Boxed(bounds: Span)
+    Labeled(label: Label)
+}
+
+struct Note {
+    span: Span?
+}
+
+enum Mark {
+    Blank
+    Point(at: Span)
+}
+
+LIMIT :: 7
+
+struct Hidden { value: Int }
+
+fn make_span(start: Int, end: Int) -> Span Never! {
+    Span{start: start, end: widen(end)}
+}

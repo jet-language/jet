@@ -26,15 +26,15 @@ fn run() {
     assert!(
         diags
             .iter()
-            .all(|diagnostic| !diagnostic.fix.contains("~_")),
+            .all(|diagnostic| !diagnostic.fix.contains("_.copy()")),
         "a discard must never receive a copy suggestion: {diags:?}"
     );
 }
 
-/// D-MEM1/S2: no clone is ever silent (I8) — the former lint (`L0201`) is now
-/// a hard error (`E0209`), regardless of liveness.
+/// D-COPY-DEFAULT1=A: an unmarked argument to a take parameter at its last
+/// use moves like `^name`; no clone is inserted and nothing is reported.
 #[test]
-fn implicit_clone_is_error_not_lint() {
+fn unmarked_take_argument_moves_at_last_use() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -45,10 +45,11 @@ msg :: "hello"
     consume(msg)
 }
 "#;
-    let diags = jet::compile(src).expect_err("should error");
+    let out = jet::compile(src).expect("an unmarked last use moves");
     assert!(
-        diags.iter().any(|d| d.code == "E0209"),
-        "expected E0209 implicit-clone hard error"
+        !out.rust.contains("msg.clone()"),
+        "a last-use move must not clone: {}",
+        out.rust
     );
 }
 
@@ -85,7 +86,7 @@ fn run() {
 fn generic_clone_bound_is_usage_sensitive() {
     let src = r#"
 fn inspect<T>(value: T) -> Int { 1 }
-fn duplicate<T>(value: T) -[..E]> T { return ~value }
+fn duplicate<T>(value: T) -[..E]> T { return value.copy() }
 fn increment(value: Int) -[]> Int { return value + 1 }
 
 fn run() {
@@ -180,6 +181,50 @@ fn run() {
         "a nested stored-field read must project the field chain: {frame_width}"
     );
     tir_support::assert_tiers_agree("stored_field_read", src, "24\n8\n");
+}
+
+/// D-COPY-DEFAULT1=A (#3714): `^place.field` moves the field out of its owner
+/// in every value position. The emitted Rust takes the field (the owner keeps
+/// its other fields) instead of cloning it, and every tier prints the same.
+#[test]
+fn exact_field_move_takes_the_field_without_a_clone() {
+    let src = r#"
+struct Graph {
+    names: [String]
+    size: Int
+}
+struct Run {
+    graph: Graph
+    values: [String]
+}
+fn make_run() -> Run {
+    return Run{graph: Graph{names: ["a", "b"], size: 2}, values: ["v"]}
+}
+fn hop(run: ^Run) -> Graph {
+    graph := ^run.graph
+    print(run.values.len())
+    return graph
+}
+fn hop_local() -> Int {
+    run := make_run()
+    names := ^run.graph.names
+    run.graph.names = ["c"]
+    return names.len() + run.graph.names.len()
+}
+fn run() {
+    print(hop(make_run()).names.len())
+    print(hop_local())
+}
+"#;
+    let out = jet::compile(src).expect("exact field moves should compile");
+    for clone in ["__jet_graph).clone()", "__jet_names).clone()"] {
+        assert!(
+            !out.rust.contains(clone),
+            "a `^` field move must not clone (`{clone}`): {}",
+            out.rust
+        );
+    }
+    tir_support::assert_tiers_agree("exact_field_move", src, "1\n2\n3\n");
 }
 
 /// D-CONC-SHARE1=A (card #1561): plain field access on a `Shared<T>` is the
@@ -413,7 +458,7 @@ fn shared_guard_is_owned_and_noncloneable() {
 fn run() {
     cell := shared 1
     guard :: cell.guard_read()
-    _ :: ~guard
+    _ :: guard.copy()
 }
 "#;
     let diagnostics = jet::compile(src).expect_err("a lock token must have one owner");
@@ -550,7 +595,7 @@ fn local_cell_runtime_releases_original_loans_on_drop_and_unwind() {
     let carrier = "pub type JetOutcome<T, E> = Result<T, E>;";
     let absent_derive =
         "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]";
-    let absent = "pub struct JetAbsent;";
+    let absent = "struct JetAbsent;";
     for line in [carrier, absent_derive, absent] {
         assert!(
             outcome.contains(line),
@@ -2347,7 +2392,7 @@ fn imported_call_uses_the_same_place_access_rule() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("helper.jet"),
-        "pub fn both(a: &Int, b: Int) { a += b }\n",
+        "fn both(a: &Int, b: Int) { a += b }\n",
     )
     .unwrap();
     let entry = root.join("main.jet");
@@ -2411,7 +2456,7 @@ fn run() {
 "#,
         r#"
 module helper {
-    pub fn both(a: &Int, b: Int) { a += b }
+    fn both(a: &Int, b: Int) { a += b }
 }
 fn run() {
     value := 1
@@ -2535,11 +2580,10 @@ fn run() {
     jet::compile(src).expect("separate calls on disjoint places must not share access frames");
 }
 
-/// E0209 liveness gate (was D-L0201): when the value is still used after the
-/// call, `^` would break that later use — E0209 still fires (hard error), but
-/// the fix menu offers `~name`/reorder instead of `^`.
+/// D-COPY-DEFAULT1=A: an unmarked take argument that is not the name's last
+/// use is E0209 at the argument, teaching the explicit copy `name.copy()`.
 #[test]
-fn implicit_clone_errors_with_reorder_menu_when_live_after_call() {
+fn unmarked_take_argument_reused_later_teaches_copy() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2555,18 +2599,120 @@ msg :: "hello"
     let d = diags
         .iter()
         .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
+        .expect("expected E0209 at the take argument");
     assert!(
-        d.fix.contains("reorder"),
-        "live-after fix menu should suggest reordering, got: {}",
+        d.fix.contains("msg.copy()") && d.fix.contains("reorder"),
+        "the fix should teach `msg.copy()` or a reorder, got: {}",
         d.fix
+    );
+    assert!(
+        !diags.iter().any(|d| d.code == "E0121"),
+        "the reuse is reported once, at the argument: {diags:?}"
     );
 }
 
-/// E0209 liveness gate (was D-L0201): when the value IS dead after the call,
-/// `^` is safe (this is its last use) — the fix menu leads with `^`.
+/// D-CALLSITE-MARK1=A: one name in two take slots of one call has no last
+/// use in that call, so each take slot is E0209 (`both(t.copy(), ^t)` is the fix).
 #[test]
-fn implicit_clone_errors_with_move_menu_when_dead_after_call() {
+fn unmarked_take_argument_twice_in_one_call_reports_each_slot() {
+    let src = r#"
+fn both(a: ^String, b: ^String) -> String { "{a}{b}" }
+
+fn run() {
+    t :: "vault"
+    print(both(t, t))
+}
+"#;
+    let diags = jet::compile(src).expect_err("should error");
+    let e0209: Vec<_> = diags.iter().filter(|d| d.code == "E0209").collect();
+    assert_eq!(e0209.len(), 2, "{diags:?}");
+    let first = src.find("both(t").unwrap() + 5;
+    let starts: Vec<usize> = e0209.iter().map(|d| d.span.expect("E0209 span").start).collect();
+    assert!(starts.contains(&first) && starts.contains(&(first + 3)), "{diags:?}");
+    assert!(e0209.iter().all(|d| d.what.contains("more than once")), "{diags:?}");
+}
+
+/// D-CALLSITE-MARK1=A: `&` on an argument whose parameter only reads it is
+/// E0225 with a Safe edit that removes the mark.
+#[test]
+fn write_mark_on_read_parameter_is_e0225() {
+    let src = r#"
+fn show(n: Int) { print(n) }
+
+fn bump(n: &Int) { n += 1 }
+
+fn run() {
+    score := 41
+    bump(&score)
+    show(&score)
+}
+"#;
+    let diags = jet::compile(src).expect_err("should error");
+    let e0225: Vec<_> = diags.iter().filter(|d| d.code == "E0225").collect();
+    assert_eq!(e0225.len(), 1, "{diags:?}");
+    let span = e0225[0].span.expect("E0225 span");
+    assert_eq!(span.start, src.find("show(&").unwrap() + 5, "{diags:?}");
+    assert_eq!(&src[span.start..span.end], "&");
+}
+
+/// D-CALLSITE-MARK1=A: `^` on a captured name inside a lambda moves it into
+/// the lambda; one call runs, a second call on any path is E0121.
+#[test]
+fn lambda_taking_a_capture_runs_once() {
+    let once = r#"
+fn archive(name: ^String) -> String { name }
+
+fn run() {
+    title :: "vault"
+    keep :: () -> print(archive(^title))
+    keep()
+}
+"#;
+    jet::compile(once).expect("one call of a run-once lambda is accepted");
+    for second in ["keep()\n    keep()", "loop i in 0..<2 {\n        keep()\n    }", "keep()\n    print(title)"] {
+        let src = format!(
+            r#"
+fn archive(name: ^String) -> String {{ name }}
+
+fn run() {{
+    title :: "vault"
+    keep :: () -> print(archive(^title))
+    {second}
+}}
+"#
+        );
+        let diags = jet::compile(&src).expect_err("a second run or a later use is refused");
+        assert!(diags.iter().any(|d| d.code == "E0121"), "{second}: {diags:?}");
+    }
+}
+
+/// #4702: one call that reads a name and takes it is E0204, never a MIR
+/// legality ICE, whether the take is marked or unmarked.
+#[test]
+fn read_and_take_of_one_name_in_one_call_is_e0204() {
+    for call in ["pair(t, ^t)", "pair(t, t)"] {
+        let src = format!(
+            r#"
+fn pair(a: String, b: ^String) -> String {{ "{{a}}{{b}}" }}
+
+fn run() {{
+    t :: "vault"
+    print({call})
+}}
+"#
+        );
+        let diags = jet::compile(&src).expect_err("should error");
+        assert!(
+            diags.iter().any(|d| d.code == "E0204"),
+            "{call}: expected E0204, got {diags:?}"
+        );
+    }
+}
+
+/// D-COPY-DEFAULT1=A: a take inside a loop body of a name declared outside
+/// the loop repeats on the next iteration, so it is not the last use.
+#[test]
+fn unmarked_take_argument_in_loop_is_not_last_use() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2574,19 +2720,70 @@ fn consume(s: ^String) {
 
 fn run() {
 msg :: "hello"
-    consume(msg)
+    loop i in 0..2 {
+        consume(msg)
+    }
 }
 "#;
     let diags = jet::compile(src).expect_err("should error");
-    let d = diags
-        .iter()
-        .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
+    assert!(diags.iter().any(|d| d.code == "E0209"), "{diags:?}");
+}
+
+/// Values with cleanup, type parameters, and captures keep `^` at a take.
+#[test]
+fn unmarked_take_keeps_mark_for_cleanup_generic_and_capture() {
+    let close_src = r#"
+struct Lock {
+    name: String
+}
+
+impl Lock.Close {
+    fn close(^self) { print("release {self.name}") }
+}
+
+struct Session {
+    lock: Lock
+    user: String
+}
+
+fn hand_off(s: ^Session) { print(s.user) }
+
+fn run() {
+    held :: Session{lock: Lock{name: "db"}, user: "ada"}
+    hand_off(held)
+}
+"#;
+    let diags = jet::compile(close_src).expect_err("a value holding a Close field keeps `^`");
     assert!(
-        d.fix.contains("^msg"),
-        "dead-after fix menu should lead with `^msg`, got: {}",
-        d.fix
+        diags.iter().any(|d| d.code == "E0209" || d.code == "E0201"),
+        "{diags:?}"
     );
+
+    let generic_src = r#"
+fn sink<T>(x: ^T) { print("sunk") }
+
+fn forward<T>(x: ^T) {
+    sink(x)
+}
+
+fn run() {
+    forward("v")
+}
+"#;
+    let diags = jet::compile(generic_src).expect_err("a type parameter keeps `^`");
+    assert!(diags.iter().any(|d| d.code == "E0209"), "{diags:?}");
+
+    let capture_src = r#"
+fn consume(s: ^String) -> String { s }
+
+fn run() {
+    t :: "vault"
+    f :: () -> print(consume(t))
+    f()
+}
+"#;
+    let diags = jet::compile(capture_src).expect_err("a capture keeps `^`");
+    assert!(diags.iter().any(|d| d.code == "E0209"), "{diags:?}");
 }
 
 #[test]
@@ -2601,14 +2798,10 @@ x :: 1
     assert!(diags.iter().any(|d| d.code == "E0208"));
 }
 
-/// E0209 liveness gate (was D-L0201): a clone inside a nested `if` block gets
-/// the reorder/copy menu (not the `^`-leads menu) when the value is used in
-/// the enclosing block after the `if`. `is_name_live_after` checks the
-/// current block's tail AND all enclosing scopes — missing enclosing scopes
-/// would wrongly advise `^msg` here, which would use-after-move the
-/// `print(msg)` below.
+/// D-COPY-DEFAULT1=A: a take inside a nested `if` is not the last use when
+/// the enclosing block reads the name after the `if`.
 #[test]
-fn implicit_clone_uses_reorder_menu_when_live_in_enclosing_block() {
+fn unmarked_take_argument_reused_after_branch_teaches_copy() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2628,19 +2821,14 @@ msg :: "hello"
     let d = diags
         .iter()
         .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
-    assert!(
-        d.fix.contains("reorder"),
-        "live-in-enclosing-block fix menu should suggest reordering, got: {}",
-        d.fix
-    );
+        .expect("expected E0209 at the take argument");
+    assert!(d.fix.contains("msg.copy()"), "the fix should teach `msg.copy()`, got: {}", d.fix);
 }
 
-/// E0209 liveness gate (was D-L0201): a clone inside a nested block where the
-/// value is genuinely dead everywhere after (enclosing block included) gets
-/// the `^`-leads menu.
+/// D-COPY-DEFAULT1=A: a take inside a nested block is the last use when no
+/// path reads the name afterwards.
 #[test]
-fn implicit_clone_uses_move_menu_when_dead_in_all_enclosing_blocks() {
+fn unmarked_take_argument_moves_at_last_use_in_branch() {
     let src = r#"
 fn consume(s: ^String) {
     print(s)
@@ -2655,16 +2843,7 @@ msg :: "hello"
     }
 }
 "#;
-    let diags = jet::compile(src).expect_err("should error");
-    let d = diags
-        .iter()
-        .find(|d| d.code == "E0209")
-        .expect("expected E0209 implicit-clone hard error");
-    assert!(
-        d.fix.contains("^msg"),
-        "dead-in-all-enclosing-blocks fix menu should lead with `^msg`, got: {}",
-        d.fix
-    );
+    jet::compile(src).expect("a last use inside a branch moves");
 }
 
 /// D-MEM1 S9 / #649: owner storage cannot move while a read view still points
@@ -2763,12 +2942,12 @@ fn copied_range_is_owned_and_does_not_borrow_owner() {
     let src = r#"
 fn run() {
     xs := [1, 2, 3]
-    copied :: ~xs[0..1]
+    copied :: xs[0..1].copy()
     &xs.push(4)
     print(copied.len() + xs.len())
 }
 "#;
-    jet::compile(src).expect("`~range` must stay an independent owned copy");
+    jet::compile(src).expect("`range.copy()` must stay an independent owned copy");
 }
 
 #[test]
@@ -3083,7 +3262,7 @@ fn run() {
         Tile{ force: 11 }
     }
 
-    middle_before :: ~particles[1]
+    middle_before :: particles[1].copy()
     left :: &particles[0]
     right :: &particles[2]
     left.velocity += grid[0].force
@@ -3362,7 +3541,7 @@ fn run() {
 }
 
 /// #1164: returning a string view as owned String materializes the same copy
-/// that `~` requests — no extra E2305 from treating the ident as a boundary.
+/// that `.copy()` requests — no extra E2305 from treating the ident as a boundary.
 #[test]
 fn string_view_as_owned_return_materializes_copy_once() {
     let src = r#"
@@ -3807,7 +3986,7 @@ fn run() {
 fn inline_module_write_argument_conflicts_with_live_view_once() {
     let src = r#"
 module edit {
-    pub fn touch(values: &[Int]) {
+    fn touch(values: &[Int]) {
         &values.push(9)
     }
 }
@@ -4616,7 +4795,7 @@ fn edit(values: &[Int]) -[]> Edit {
 fn run() {
     target := [1, 2]
     borrowed :: edit(&target)
-    duplicate :: ~borrowed
+    duplicate :: borrowed.copy()
     print(duplicate.values[0])
 }
 "#;
@@ -4670,7 +4849,6 @@ fn run() {
 #[test]
 fn mutable_view_bounds_fail_at_construction_in_every_tier() {
     use jet::Interpreter::RunOutcome;
-    use jet::JitBackend::JitBackend;
 
     let src = r#"
 fn run() {
@@ -4699,41 +4877,31 @@ fn run() {
     let path = root.join("main.jet");
     fs::write(&path, src).unwrap();
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-        .into_iter()
+    let (diagnostics, _facts, checked_nominals) =
+        jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics.into_iter()
         .filter(|diag| diag.severity == jet::Diagnostics::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
-    let mut jit_report = None;
-    if jet_jit::cranelift_host_supported() {
-        assert!(
-            common::cranelift_resident_safe(&bundle),
-            "{}",
-            common::cranelift_resident_safe_detail(&bundle)
-        );
-        let policy = common::development_policy();
-        common::compile_cranelift_bundle(&bundle, &policy)
-            .expect("mutable view bounds must lower to JIT");
-        let mut backend = jet_jit::CraneliftBackend::new();
-        match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-            RunOutcome::Ran {
-                stderr, exit_code, ..
-            } => {
-                assert_eq!(exit_code, 70, "resident JIT exit drift: {stderr}");
-                assert!(
-                    stderr.starts_with(stop),
-                    "resident JIT reported the wrong runtime failure: {stderr}"
-                );
-                jit_report = Some(stderr);
-            }
-            RunOutcome::Problems(diags) => {
-                panic!("resident JIT returned diagnostics instead of running: {diags:?}")
-            }
+    let in_process_report = match common::run_interpreted(&bundle, &checked_nominals, &common::development_policy()) {
+        RunOutcome::Ran {
+            stderr, exit_code, ..
+        } => {
+            assert_eq!(exit_code, 70, "in-process evaluator exit drift: {stderr}");
+            assert!(
+                stderr.starts_with(stop),
+                "in-process evaluator reported the wrong runtime failure: {stderr}"
+            );
+            stderr
         }
-    }
+        RunOutcome::Problems(diags) => {
+            panic!("in-process evaluator returned diagnostics instead of running: {diags:?}")
+        }
+    };
 
-    match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(path.to_str().unwrap(), false, true) {
         RunOutcome::Ran {
             stderr, exit_code, ..
         } => {
@@ -4749,12 +4917,10 @@ fn run() {
                 stderr.contains("main.jet:4 in run"),
                 "forced interpreter dropped the Jet source location: {stderr}"
             );
-            if let Some(jit) = jit_report {
-                assert_eq!(
-                    jit, stderr,
-                    "the resident JIT and the interpreter must report one failure"
-                );
-            }
+            assert_eq!(
+                in_process_report, stderr,
+                "the in-process evaluator and the forced interpreter must report one failure"
+            );
         }
         RunOutcome::Problems(diags) => {
             panic!("forced interpreter returned diagnostics instead of running: {diags:?}")
@@ -4874,22 +5040,15 @@ fn run() {
     }
 
     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-    let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors: Vec<_> = diagnostics
         .into_iter()
         .filter(|diag| diag.severity == jet::Diagnostics::Severity::Error)
         .collect();
     assert!(errors.is_empty(), "{errors:?}");
-    assert!(
-        common::cranelift_resident_safe(&bundle),
-        "{}",
-        common::cranelift_resident_safe_detail(&bundle)
-    );
-    common::compile_cranelift_bundle(&bundle, &common::development_policy())
-        .expect("disjoint views must lower to resident JIT");
 
-    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-        jet_jit::reset_jit_trace_for_test();
-        match jet::Interpreter::dev_iteration(path.to_str().unwrap(), false, force_interpreter) {
+    for (tier, force_interpreter) in [("default run", false), ("interpreter", true)] {
+        match crate::common::dev_run(path.to_str().unwrap(), false, force_interpreter) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -4900,16 +5059,6 @@ fn run() {
                 assert_eq!(stdout, expected, "{tier} output drift");
             }
             RunOutcome::Problems(diags) => panic!("{tier} failed: {diags:?}"),
-        }
-        if !force_interpreter {
-            assert!(
-                jet_jit::jit_executed_for_test(),
-                "resident JIT did not execute"
-            );
-            assert!(
-                !jet_jit::fallback_invoked_for_test() && !jet_jit::deopt_invoked_for_test(),
-                "resident JIT used an interpreter fallback"
-            );
         }
     }
 
@@ -5506,7 +5655,7 @@ fn run() {
         .find(|diag| diag.code == "E0120")
         .expect("borrowed binding must report E0120 instead of cloning");
     assert!(
-        escape.fix.contains("~text"),
+        escape.fix.contains("text.copy()"),
         "fix must name explicit copy: {escape:?}"
     );
 }
@@ -5537,12 +5686,12 @@ fn run() { print(0) }
         Some(jet::Diagnostics::FixSafety::BehaviorPreserving)
     );
     let safe_edit = safe.edit.as_ref().expect("safe E0120 must carry an edit");
-    assert_eq!(safe_edit.new_text, "~");
+    assert_eq!(safe_edit.new_text, ".copy()");
     assert_eq!(&safe_src[safe_edit.span.start..safe_edit.span.end], "");
     let safe_fixed = jet::LSP::apply_edit(safe_src, safe_edit);
     assert!(
         jet::compile(&safe_fixed).is_ok(),
-        "the safe `~` edit must clear the E0120 report: {safe_fixed}"
+        "the safe `.copy()` edit must clear the E0120 report: {safe_fixed}"
     );
 
     let suggested_src = r#"
@@ -5560,18 +5709,18 @@ fn run() { print(0) }
         .iter()
         .find(|diagnostic| diagnostic.code == "E0120")
         .expect("suggested E0120");
-    // `~` on a value that cannot be copied is itself an error (E0211), so no
+    // `.copy()` on a value that cannot be copied is itself an error (E0211), so no
     // machine edit is offered at all.
     assert!(
         suggested.edit.is_none(),
-        "a non-cloneable E0120 must not offer a `~` edit"
+        "a non-cloneable E0120 must not offer a `.copy()` edit"
     );
     assert!(jet::LSP::fixes_from_diagnostics(suggested_diags.clone()).is_empty());
 }
 
-/// The `~` edit for a borrowed field or element starts at the root of the
+/// The `.copy()` edit for a borrowed field or element starts at the root of the
 /// place. Field and index nodes span only their selector, so an edit anchored
-/// there produced `outer.inner.~name` and `outer.names~[0]`, which do not
+/// there produced `outer.inner.name.copy()` and `outer.names~[0]`, which do not
 /// parse.
 #[test]
 fn ownership_copy_edit_wraps_the_whole_place() {
@@ -5607,20 +5756,20 @@ fn run() { print(0) }
             diagnostic
                 .edit
                 .clone()
-                .expect("a cloneable E0120 must carry the `~` edit")
+                .expect("a cloneable E0120 must carry the `.copy()` edit")
         })
         .collect();
     assert_eq!(edits.len(), 2);
     edits.sort_by_key(|edit| std::cmp::Reverse(edit.span.start));
     for edit in &edits {
-        assert_eq!(edit.new_text, "~");
+        assert_eq!(edit.new_text, ".copy()");
         fixed = jet::LSP::apply_edit(&fixed, edit);
     }
-    assert!(fixed.contains("picked :: ~outer.inner.name ?? return"), "{fixed}");
-    assert!(fixed.contains("picked :: ~outer.names[0] ?? return"), "{fixed}");
+    assert!(fixed.contains("picked :: outer.inner.name.copy() ?? return"), "{fixed}");
+    assert!(fixed.contains("picked :: outer.names[0].copy() ?? return"), "{fixed}");
     assert!(
         jet::compile(&fixed).is_ok(),
-        "the `~` edits must clear the E0120 reports: {fixed}"
+        "the `.copy()` edits must clear the E0120 reports: {fixed}"
     );
 }
 
@@ -5644,10 +5793,10 @@ fn core_string_view_copy_edit_names_consuming_expression() {
         .edit
         .as_ref()
         .expect("the named Core expression must carry a structured copy edit");
-    assert_eq!(edit.new_text, "~");
+    assert_eq!(edit.new_text, ".copy()");
     assert_eq!(&src[edit.span.start..edit.span.end], "");
     let diagnostic_span = diagnostic.span.expect("the Core expression must be highlighted");
-    assert_eq!(edit.span.start, diagnostic_span.start);
+    assert_eq!(edit.span.start, diagnostic_span.end);
     assert_eq!(&src[diagnostic_span.start..diagnostic_span.end], "view");
     let fixed = jet::LSP::apply_edit(src, edit);
     assert!(
@@ -5713,7 +5862,7 @@ fn run() {
         jet::compile(src).expect("a cloneable read parameter materializes at an owned return");
     assert!(
         out.rust
-            .contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {"),
+            .contains("fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {"),
         "the escape must be paid for in the signature, not laundered: {}",
         out.rust
     );
@@ -5785,7 +5934,8 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("all plain parameters are read borrows");
-    assert!(out.rust.contains("__jet_text: &String"), "{}", out.rust);
+    // Read-only concrete String parameters lend `&str` (Docs/spec/tir.md).
+    assert!(out.rust.contains("__jet_text: &str"), "{}", out.rust);
     assert!(out.rust.contains("__jet_values: &Vec<i64>"), "{}", out.rust);
     assert!(
         out.rust.contains("__jet_parcel: &__jet_Parcel"),
@@ -5833,23 +5983,25 @@ fn run() {
 }
 "#;
     let out = jet::compile(src).expect("function-value call must preserve read access");
-    // f003de290 (2026-07-31) stores function values as `Rc` so a collection can
-    // clone them; `Box` was the container, never the property. The property is
-    // the `&`: the callback crosses this call as a read borrow, so the caller
-    // still owns its function value afterwards. Pin the whole prefix — the
-    // parameter's own borrow AND the callback's read-borrowed `&String`
-    // argument — so neither half can drift into an owned slot unnoticed.
+    // The callable slot retains its function between invocations. Pin both
+    // the parameter's read borrow and the callback's concrete read-String ABI,
+    // rather than the retired immutable `Rc<dyn Fn>` representation.
     assert!(
-        out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn(&String)"),
+        out.rust.contains("__jet_f: &std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut(&str)"),
         "the function value must arrive as a read borrow: {}",
         out.rust
     );
-    assert!(out.rust.contains("__jet_value: &String"), "{}", out.rust);
-    assert!(
-        out.rust.contains("((*__jet_f))(&((*__jet_value)))"),
-        "{}",
-        out.rust
-    );
+    assert!(out.rust.contains("__jet_value: &str"), "{}", out.rust);
+    let call_args = out.rust
+        .split_once("let __jet_fn_result = (*__jet_fn)(")
+        .expect("borrowed function value invocation")
+        .1
+        .split_once(");")
+        .expect("completed function value invocation")
+        .0;
+    assert!(call_args.contains("__jet_value"), "{}", out.rust);
+    assert!(!call_args.contains(".to_owned()") && !call_args.contains(".clone()"), "{}", out.rust);
+    assert!(out.rust.contains("__jet_fn_slot.borrow_mut().replace(__jet_fn)"), "{}", out.rust);
     assert!(
         !out.rust.contains("((*__jet_value)).clone()"),
         "{}",
@@ -6397,7 +6549,7 @@ fn run() {
 fn borrowed_parameter_can_feed_stored_lambda_after_explicit_copy() {
     let src = r#"
 fn store(text: String) {
-    owned :: ~text
+    owned :: text.copy()
     callback :: () -> owned.len()
     print(callback())
 }
@@ -6410,7 +6562,7 @@ fn run() { store("read") }
 fn borrowed_parameter_can_feed_task_after_explicit_copy() {
     let src = r#"
 fn launch(text: String) {
-    owned :: ~text
+    owned :: text.copy()
     handle :: task owned.len()
     print(handle.join() ?? 0)
 }

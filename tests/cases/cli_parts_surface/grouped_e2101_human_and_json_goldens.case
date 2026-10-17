@@ -1,0 +1,23 @@
+# Port of tests/cli_parts/surface.rs:841-886; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+step: jet publish sentinel
+env: NO_COLOR=1
+exit: 2
+stdout: empty
+stderr: = moved_bare_e2101_human.txt
+step: jet publish "sentinel\\\"quoted" --json
+env: NO_COLOR=1
+exit: 2
+stderr: empty
+stdout: = moved_bare_e2101_json.txt
+step: jet inspect "bad\\\"action"
+env: NO_COLOR=1
+exit: 2
+stdout: empty
+stderr: = invalid_nested_e2101_human.txt
+step: jet inspect "bad\\\"action" --json
+env: NO_COLOR=1
+exit: 2
+stderr: empty
+stdout: = invalid_nested_e2101_json.txt

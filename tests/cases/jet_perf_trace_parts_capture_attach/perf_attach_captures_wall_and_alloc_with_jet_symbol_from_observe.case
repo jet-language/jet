@@ -1,0 +1,50 @@
+# PORT tests/jet_perf_trace_parts/capture_attach.rs:4-157 + support.rs129-345 honest helpers; original ChildGuard cleanup.
+# PENDING-GRAMMAR(batch-four/read_bytes); PENDING-SAME-HEAD.
+# have_rustc is toolchain-availability, erased per owner; no replacement skip.
+fixture: perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe.fixture
+mkdir: honesty
+mkdir: readiness
+copy: {root}/tests/cases/jet_perf_trace_parts/fixtures/honesty.jet honesty/honesty.jet
+copy: {root}/tests/cases/jet_perf_trace_parts/fixtures/observe_ready.jet readiness/observe_ready.jet
+step: jet build live.jet
+exit: 0
+session live line: built
+env: JET_OBSERVE=1
+stderr: null
+recv live
+stdout.trim: = ready.out # Original read_line().trim() equality.
+step: jet test readiness/observe_ready.jet
+env: S6_JET_BIN={jet}
+env: S6_LIVE_PID={pid:live}
+exit: 0
+step: jet perf attach {pid:live} --source live.jet --out capture.jettrace
+exit: 0
+file: capture.jettrace is-file
+step: jet test honesty/honesty.jet
+env: S6_TRACE={work}/capture.jettrace
+env: S6_CAPTURE_MODE=attach
+exit: 0
+file: capture.jettrace ~ "\"name\":\"probe_work\"" # Original parsed non-entry identity.
+file: capture.jettrace ~ "\"name\":\"run\""
+file: capture.jettrace ~ "live.jet"
+file: capture.jettrace !~ "\"duration_ns\":1," # Original anti-fabrication predicate.
+file: capture.jettrace !~ "\"count\":0," # Original zero-alloc scrape rejection.
+step: jet perf view capture.jettrace
+exit: 0
+stdout: ~ "sample wall" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:141 contains predicate
+stdout: ~ "alloc count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:142 contains predicate
+stdout: !~ "alloc count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:143 not contains predicate
+stdout: ~ "tasks count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:144 contains predicate
+stdout: ~ "children=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:145 contains predicate
+stdout: !~ "tasks count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:146 not contains predicate
+stdout: ~ "locks count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:147 contains predicate
+stdout: ~ "waiters=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:148 contains predicate
+stdout: !~ "locks count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:149 not contains predicate
+stdout: ~ "io count=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:150 contains predicate
+stdout: !~ "io count=0 " # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:151 not contains predicate
+stdout: ~ "native process_cpu=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:152 contains predicate
+stdout: ~ "spans unavailable reason=" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:153 contains predicate
+stdout: ~ "live.jet#run" # original ed77c235f tests/jet_perf_trace_parts/capture_attach.rs:154 contains predicate
+signal live: KILL
+close live
+exit: any # Original ChildGuard kill/wait status unasserted; case-sent signal is expected cleanup.

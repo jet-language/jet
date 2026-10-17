@@ -1,0 +1,43 @@
+// The reason is eager even for a present receiver; receiver evaluation is first.
+struct Holder {
+    item: String?
+}
+
+fn receiver(present: Bool) -> String? {
+    print("receiver")
+    if present -> return Val("payload")
+    None
+}
+
+fn reason() -> String {
+    print("reason")
+    "missing optional"
+}
+
+fn borrowed(value: &String?) -> String Err! {
+    return value.or_err("borrowed absence")
+}
+
+fn propagate(value: String?) -> String Err! {
+    payload :: value.or_err("propagated absence") ?? {
+        return err
+    }
+    return Ok(payload)
+}
+
+fn run() {
+    print(receiver(true).or_err(reason()) ?? "bad present")
+    print(receiver(false).or_err(reason()) ?? err.message)
+    copy :: Int?{Val(7)}
+    print(copy.or_err("copy absence") ?? 0)
+    print(copy ?? 0)
+    owned := String?{Val("kept")}
+    print(owned.or_err("owned absence") ?? "bad owned")
+    print(owned ?? "lost owned")
+    print(borrowed(&owned) ?? "bad borrowed")
+    print(owned ?? "lost borrowed")
+    holder :: Holder{item: Val("field")}
+    print(holder.item.or_err("field absence") ?? "bad field")
+    print(holder.item ?? "lost field")
+    print(propagate(None) ?? err.message)
+}

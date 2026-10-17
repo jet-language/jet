@@ -3,19 +3,19 @@
 // consistent snapshots, monotonic versions, metadata size limits,
 // trusted-time expiry, and signature-stripping rejection.
 
-pub struct TrustEngine {
-    pub root: TUFRootMetadata
-    pub root_digest: String
-    pub policy: TrustRootPolicy
+struct TrustEngine {
+    root: TUFRootMetadata
+    root_digest: String
+    policy: TrustRootPolicy
     // Last accepted monotonic version per role label.
-    pub versions: [String: Int]
+    versions: [String: Int]
     // Canonical-bytes digest accepted per role label: an equal version may
     // be rechecked, but different signed bytes are a replacement attack.
-    metadata_digests: [String: String]
-    pub keyring: Keyring
+    priv metadata_digests: [String: String]
+    keyring: Keyring
     // One binding per identity kind label.
-    pub identities: [String: BoundIdentity]
-    roots_dir: String?
+    identities: [String: BoundIdentity]
+    priv roots_dir: String?
 
     // Pin and accept the first root; its digest must match `expected_pin`
     // when one is given, and an existing on-disk pin when `roots_dir` is.
@@ -52,9 +52,9 @@ pub struct TrustEngine {
             .None -> {}
         }
         versions := [String: Int]{}
-        versions[MetadataRole.Root.label()] = signed_root.signed.version
+        versions[(MetadataRole.Root).label()] = signed_root.signed.version
         metadata_digests := [String: String]{}
-        metadata_digests[MetadataRole.Root.label()] = digest
+        metadata_digests[(MetadataRole.Root).label()] = digest
         Ok(TrustEngine{
             root: signed_root.signed,
             root_digest: digest,
@@ -101,7 +101,7 @@ pub struct TrustEngine {
         incoming_role :: signed_root.signed.role(MetadataRole.Root) ?? return Err(TrustRootError.InvalidThreshold{detail: "incoming root missing root role"})
         trust_verify_role_signatures(MetadataRole.Root, canonical, signed_root.signatures, incoming_role, self.keyring)
         trust_check_expiry(MetadataRole.Root, signed_root.signed.expires_unix, clock)
-        current_version :: self.versions.get(MetadataRole.Root.label()) ?? 0
+        current_version :: self.versions.get((MetadataRole.Root).label()) ?? 0
         if signed_root.signed.version <= current_version -> return Err(TrustRootError.Rollback{role: MetadataRole.Root, current: current_version, incoming: signed_root.signed.version})
         digest :: crypto.sha256(canonical.bytes()).hex()
         if self.roots_dir == {
@@ -116,9 +116,9 @@ pub struct TrustEngine {
         self.root = signed_root.signed
         self.root_digest = digest
         self.versions = [String: Int]{}
-        self.versions[MetadataRole.Root.label()] = signed_root.signed.version
+        self.versions[(MetadataRole.Root).label()] = signed_root.signed.version
         self.metadata_digests = [String: String]{}
-        self.metadata_digests[MetadataRole.Root.label()] = digest
+        self.metadata_digests[(MetadataRole.Root).label()] = digest
     }
 
     // Threshold-minus-one recovery drill: a rotation signed by fewer than
@@ -140,7 +140,7 @@ pub struct TrustEngine {
     }
 
     fn clone_for_drill(self) -> TrustEngine Never! {
-        ~self
+        self.copy()
     }
 
     fn verify_targets(&self, signed: SignedMetadata<TargetsMetadata>, delegated_path: String?, clock: TrustedClock) TrustRootError! -[Time]> {
@@ -156,7 +156,7 @@ pub struct TrustEngine {
             .None -> {}
         }
         trust_enforce_metadata_digest(&self, MetadataRole.Targets, signed.signed.version, canonical)
-        self.versions[MetadataRole.Targets.label()] = signed.signed.version
+        self.versions[(MetadataRole.Targets).label()] = signed.signed.version
     }
 
     fn verify_snapshot(&self, signed: SignedMetadata<SnapshotMetadata>, targets_canonical: String, targets_version: Int, clock: TrustedClock) TrustRootError! -[Time]> {
@@ -178,7 +178,7 @@ pub struct TrustEngine {
             if entry.length != length -> return Err(TrustRootError.ConsistentSnapshotMismatch{role: "targets", detail: "length {entry.length} != {length}"})
         }
         trust_enforce_metadata_digest(&self, MetadataRole.Snapshot, signed.signed.version, canonical)
-        self.versions[MetadataRole.Snapshot.label()] = signed.signed.version
+        self.versions[(MetadataRole.Snapshot).label()] = signed.signed.version
     }
 
     fn verify_timestamp(&self, signed: SignedMetadata<TimestampMetadata>, snapshot_canonical: String, snapshot_version: Int, clock: TrustedClock) TrustRootError! -[Time]> {
@@ -198,7 +198,7 @@ pub struct TrustEngine {
         length :: snapshot_canonical.bytes().len()
         if entry.length != length -> return Err(TrustRootError.ConsistentSnapshotMismatch{role: "snapshot", detail: "length {entry.length} != {length}"})
         trust_enforce_metadata_digest(&self, MetadataRole.Timestamp, signed.signed.version, canonical)
-        self.versions[MetadataRole.Timestamp.label()] = signed.signed.version
+        self.versions[(MetadataRole.Timestamp).label()] = signed.signed.version
     }
 
     // The first delegation whose path bound matches; otherwise top-level
@@ -296,15 +296,15 @@ fn trust_check_clock(policy: TrustRootPolicy, clock: TrustedClock) TrustRootErro
 }
 
 // The keys and root of a fixture threshold root.
-pub struct TrustFixtureRoot {
-    pub root: TUFRootMetadata
-    pub keyring: Keyring
+struct TrustFixtureRoot {
+    root: TUFRootMetadata
+    keyring: Keyring
     // root-1, root-2, root-3, targets, snapshot, timestamp.
-    pub keys: [TrustKey]
+    keys: [TrustKey]
 }
 
 // A minimal 2-of-3 offline root for drills and tests.
-pub fn trust_fixture_threshold_root(version: Int, expires_unix: Int) -> TrustFixtureRoot TrustRootError! {
+fn trust_fixture_threshold_root(version: Int, expires_unix: Int) -> TrustFixtureRoot TrustRootError! {
     labels :: [String]{"root-1", "root-2", "root-3", "targets", "snapshot", "timestamp"}
     keys := [TrustKey]{}
     loop label in labels -> &keys.push(TrustKey.generate(label))
@@ -315,10 +315,10 @@ pub fn trust_fixture_threshold_root(version: Int, expires_unix: Int) -> TrustFix
         public_key_ids[key.key_id] = TRUST_ALG_HMAC_SHA256
     }
     roles := [String: RoleKeys]{}
-    roles[MetadataRole.Root.label()] = RoleKeys.new([String]{keys[0].key_id, keys[1].key_id, keys[2].key_id}, 2)
-    roles[MetadataRole.Targets.label()] = RoleKeys.new([String]{keys[3].key_id}, 1)
-    roles[MetadataRole.Snapshot.label()] = RoleKeys.new([String]{keys[4].key_id}, 1)
-    roles[MetadataRole.Timestamp.label()] = RoleKeys.new([String]{keys[5].key_id}, 1)
+    roles[(MetadataRole.Root).label()] = RoleKeys.new([String]{keys[0].key_id, keys[1].key_id, keys[2].key_id}, 2)
+    roles[(MetadataRole.Targets).label()] = RoleKeys.new([String]{keys[3].key_id}, 1)
+    roles[(MetadataRole.Snapshot).label()] = RoleKeys.new([String]{keys[4].key_id}, 1)
+    roles[(MetadataRole.Timestamp).label()] = RoleKeys.new([String]{keys[5].key_id}, 1)
     delegation :: Delegation{name: "jetsrc", role: RoleKeys.new([String]{keys[3].key_id}, 1), path_prefixes: [String]{"jetsrc/"}, terminating: true}
     root :: TUFRootMetadata{version, expires_unix, consistent_snapshot: true, roles, delegations: [Delegation]{delegation}, public_key_ids}
     Ok(TrustFixtureRoot{root, keyring, keys})

@@ -1,0 +1,33 @@
+# HAND-PORT tests/jetpack_engine.rs:9117-9156 jet_build_never_reports_tampered_output_as_cached
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: jet_build_never_reports_tampered_output_as_cached.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+step: jetpack explain hello@mine --json --no-color
+cwd: project
+exit: 0
+capture: out stdout doc $.explain.entry.output_path
+when os unix: chmod: {cap:out} 755
+when os unix: chmod: {cap:out}/bin 755
+when os unix: chmod: {cap:out}/bin/hello 755
+write: {cap:out}/bin/hello tampered.template
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: nonzero
+stderr: ~ "E2604" # original contains predicate
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "built" # original contains predicate
+stderr: !~ "1 cached" # original negative contains predicate
+

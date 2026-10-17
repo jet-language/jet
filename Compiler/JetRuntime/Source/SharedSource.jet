@@ -1,0 +1,322 @@
+// SourceData is a code-free physical table, NOT an ordinary callback descriptor.
+// Descriptor80 (all integer words are u64, little endian): nominal0, hash8,
+// size16, align24, kind32, count40, fields48, child56, aux0@64, aux1@72.
+// Fields are ordered [offset, descriptor] pairs. Kinds: Word0, E4Text1,
+// List2, ExactInt3, Record4, Option5. No code address or TypeId is stored.
+// Layout authority: Lower/Values.jet lower_size/lower_place_members,
+// lower_list_stride and lower_option_box_size. List aux0 is the actual stride,
+// not the child size. Option is the native nullable pointer: None=0, Some=box
+// containing child at offset0; aux0=0, aux1=box allocation size. E4 size8 is
+// the native heap-header handle; size24 is the inline Source physical carrier.
+// Factories must refuse unsupported layouts before emitting a descriptor.
+// The same encoding is instantiated separately in Source and pinned Core;
+// addresses, cells and borrowed views NEVER cross process/segment boundaries.
+source_meta_kind :: I64{100}
+source_borrows := I64{0}
+
+// Hash encoding: FNV-1a-64, initial 0xcbf29ce484222325, prime 0x100000001b3.
+// Feed LE u64 nominal,size,align,kind,count,aux0,aux1; then declaration-order
+// (field offset, recursive field hash) pairs; finally child hash, or zero.
+// Stored hashes and pointer addresses are excluded. Both source codecs and
+// native runtime use this encoding, independent of Rust's randomized hashers.
+fn source_hash_word(initial: I64, value: I64) -> I64 {
+    hash := initial
+    word := value
+    at := I64{0}
+    loop at < (I64{8}) {
+        hash = wrapping((hash.bit_xor((word.bit_and(I64{255})))) * I64{1099511628211})
+        word = word >> I64{8}
+        at += I64{1}
+    }
+    hash
+}
+
+#Export(c) fn jet_rt_source_schema_hash(schema: I64) -> I64 {
+    hash := I64{-3750763034362895579}
+    hash = source_hash_word(hash, trap_word(schema))
+    at := I64{16}
+    loop at <= (I64{40}) {
+        hash = source_hash_word(hash, trap_word(schema + at))
+        at += I64{8}
+    }
+    hash = source_hash_word(hash, trap_word(schema + I64{64}))
+    hash = source_hash_word(hash, trap_word(schema + I64{72}))
+    fields :: trap_word(schema + I64{48})
+    at = I64{0}
+    loop at < trap_word(schema + I64{40}) {
+        field :: fields + at * I64{16}
+        hash = source_hash_word(hash, trap_word(field))
+        hash = source_hash_word(hash, jet_rt_source_schema_hash(trap_word(field + I64{8})))
+        at += I64{1}
+    }
+    child :: trap_word(schema + I64{56})
+    hash = source_hash_word(hash, if child == (I64{0}) -> I64{0} else -> jet_rt_source_schema_hash(child))
+    hash
+}
+
+fn source_schema_copy(schema: I64) -> I64 {
+    owned :: jet_rt_alloc(I64{80}, I64{8})
+    coll_copy(schema, owned, I64{80})
+    count :: trap_word(schema + I64{40})
+    fields := I64{0}
+    if (count != I64{0}) {
+        fields = jet_rt_alloc(count * I64{16}, I64{8})
+        at := I64{0}
+        loop at < count {
+            from :: trap_word(schema + I64{48}) + at * I64{16}
+            to :: fields + at * I64{16}
+            trap_store(to, trap_word(from))
+            trap_store(to + I64{8}, source_schema_copy(trap_word(from + I64{8})))
+            at += I64{1}
+        }
+    }
+    trap_store(owned + I64{48}, fields)
+    child :: trap_word(schema + I64{56})
+    trap_store(owned + I64{56}, if child == (I64{0}) -> I64{0} else -> source_schema_copy(child))
+    owned
+}
+
+fn source_schema_drop(schema: I64) {
+    if (schema == I64{0}) -> return
+    fields :: trap_word(schema + I64{48})
+    count :: trap_word(schema + I64{40})
+    at := I64{0}
+    loop at < count {
+        source_schema_drop(trap_word(fields + at * I64{16} + I64{8}))
+        at += I64{1}
+    }
+    if (count != I64{0}) { jet_rt_free(fields, count * I64{16}, I64{8}) }
+    source_schema_drop(trap_word(schema + I64{56}))
+    jet_rt_free(schema, I64{80}, I64{8})
+}
+
+fn source_payload_size(schema: I64) -> I64 {
+    size :: trap_word(schema + I64{16})
+    if (size == I64{0}) -> I64{1} else -> size
+}
+
+#Export(c) fn jet_rt_source_data_clone(source: I64, target: I64, schema: I64) {
+    kind :: trap_word(schema + I64{32})
+    size :: trap_word(schema + I64{16})
+    if (kind == I64{0}) {
+        coll_copy(source, target, size)
+        return
+    }
+    if (kind == I64{1}) {
+        if (size == I64{8}) { trap_store(target, jet_rt_string_clone(trap_word(source))) } else { rt_e4_slot_clone(source, target) }
+        return
+    }
+    if (kind == I64{3}) {
+        trap_store(target, jet_rt_int_clone(trap_word(source)))
+        return
+    }
+    if (kind == I64{4}) {
+        coll_zero(target, size)
+        fields :: trap_word(schema + I64{48})
+        at := I64{0}
+        loop at < trap_word(schema + I64{40}) {
+            field :: fields + at * I64{16}
+            offset :: trap_word(field)
+            jet_rt_source_data_clone(source + offset, target + offset, trap_word(field + I64{8}))
+            at += I64{1}
+        }
+        return
+    }
+    child :: trap_word(schema + I64{56})
+    if (kind == I64{2}) {
+        length :: trap_word(source)
+        stride :: trap_word(schema + I64{64})
+        data := I64{0}
+        if (length != I64{0}) {
+            data = jet_rt_alloc(length * stride, I64{8})
+            coll_zero(data, length * stride)
+            at := I64{0}
+            loop at < length {
+                jet_rt_source_data_clone(trap_word(source + I64{16}) + at * stride, data + at * stride, child)
+                at += I64{1}
+            }
+        }
+        trap_store(target, length)
+        trap_store(target + I64{8}, length)
+        trap_store(target + I64{16}, data)
+        return
+    }
+    if (kind == I64{5}) {
+        box :: trap_word(source)
+        owned := I64{0}
+        if (box != I64{0}) {
+            bytes :: trap_word(schema + I64{72})
+            owned = jet_rt_alloc(bytes, I64{8})
+            coll_zero(owned, bytes)
+            jet_rt_source_data_clone(box, owned, child)
+        }
+        trap_store(target, owned)
+        return
+    }
+    jet_rt_unreachable(I64{0}, I64{0})
+}
+
+#Export(c) fn jet_rt_source_data_drop(slot: I64, schema: I64) {
+    kind :: trap_word(schema + I64{32})
+    if (kind == I64{0}) -> return
+    if (kind == I64{1}) {
+        if (trap_word(schema + I64{16}) == I64{8}) { jet_rt_string_drop(trap_word(slot)) } else { rt_e4_slot_drop(slot) }
+        return
+    }
+    if (kind == I64{3}) {
+        jet_rt_int_drop(trap_word(slot))
+        return
+    }
+    if (kind == I64{4}) {
+        fields :: trap_word(schema + I64{48})
+        at := I64{0}
+        loop at < trap_word(schema + I64{40}) {
+            field :: fields + at * I64{16}
+            jet_rt_source_data_drop(slot + trap_word(field), trap_word(field + I64{8}))
+            at += I64{1}
+        }
+        return
+    }
+    child :: trap_word(schema + I64{56})
+    if (kind == I64{2}) {
+        data :: trap_word(slot + I64{16})
+        stride :: trap_word(schema + I64{64})
+        at := I64{0}
+        loop at < trap_word(slot) {
+            jet_rt_source_data_drop(data + at * stride, child)
+            at += I64{1}
+        }
+        capacity :: trap_word(slot + I64{8})
+        if (capacity != I64{0}) { jet_rt_free(data, capacity * stride, I64{8}) }
+        return
+    }
+    if (kind == I64{5}) {
+        box :: trap_word(slot)
+        if (box != I64{0}) {
+            jet_rt_source_data_drop(box, child)
+            jet_rt_free(box, trap_word(schema + I64{72}), I64{8})
+        }
+        return
+    }
+    jet_rt_unreachable(I64{0}, I64{0})
+}
+
+fn source_shared_free(payload: I64, meta: I64) {
+    schema :: trap_word(meta + I64{56})
+    jet_rt_source_data_drop(payload, schema)
+    jet_rt_free(payload, source_payload_size(schema), trap_word(schema + I64{24}))
+    source_schema_drop(schema)
+    jet_rt_free(meta, I64{72}, I64{8})
+}
+
+// Transfers the slot's contents. Schema is borrowed, then recursively copied;
+// all callbacks in the distinct Source meta are zero. Shared's Cell80 is intact.
+#Export(c) fn jet_rt_native_shared_source_new(slot: I64, schema: I64) -> I64 {
+    // Checked source codecs emit SourceData kinds, never callback meta nodes.
+    if (trap_word(schema + I64{32}) < I64{0} || trap_word(schema + I64{32}) > I64{5}) {
+        jet_rt_unreachable(I64{0}, I64{0})
+    }
+    owned :: source_schema_copy(schema)
+    meta :: jet_rt_alloc(I64{72}, I64{8})
+    coll_zero(meta, I64{72})
+    trap_store(meta, source_payload_size(owned))
+    trap_store(meta + I64{48}, source_meta_kind)
+    trap_store(meta + I64{56}, owned)
+    // Exclusive meta-kind admission: never accept ordinary callback metadata.
+    if (trap_word(meta + I64{48}) != source_meta_kind) { jet_rt_unreachable(I64{0}, I64{0}) }
+    payload :: jet_rt_alloc(source_payload_size(owned), trap_word(owned + I64{24}))
+    coll_zero(payload, source_payload_size(owned))
+    coll_copy(slot, payload, trap_word(owned + I64{16}))
+    shared :: jet_rt_alloc(I64{80}, I64{8})
+    thread_zero(shared, I64{80})
+    sync_store(shared, I64{1})
+    sync_store(shared + I64{56}, meta)
+    sync_store(shared + I64{64}, payload)
+    shared
+}
+
+// runtime-init: 4
+#Export(c) fn jet_rt_source_shared_init() {
+    if (source_borrows == I64{0}) {
+        source_borrows = jet_rt_alloc(I64{16}, I64{8})
+        thread_zero(source_borrows, I64{16})
+    }
+}
+
+// Borrow token32: thread-id0, shared8, editable16, next24. Registry mutex is
+// NEVER held over a payload access/callback; Shared's existing futex lock is.
+fn source_borrow_reentrant(shared: I64) -> Bool {
+    tid :: thread_tid()
+    sync_mutex_lock(source_borrows)
+    token := sync_load(source_borrows + I64{8})
+    found := false
+    loop token != (I64{0}) {
+        if (sync_load(token) == tid && sync_load(token + I64{8}) == shared) {
+            found = true
+            break
+        }
+        token = sync_load(token + I64{24})
+    }
+    sync_mutex_unlock(source_borrows)
+    found
+}
+
+fn source_borrow_begin(shared: I64, expected: I64, lifetime: I64, out: I64, editable: Bool) -> I64 {
+    // Result codes: 0 Alias, 1 SourceSchemaProcessMismatch,
+    // 2 SourceSchemaWorldLeaseBoundary, 3 SourceBorrowReentrant.
+    // Every refusal leaves out and the old state untouched; World reset is
+    // exclusively jet_rt_global_reset_registered at the explicit lease boundary.
+    if source_borrow_reentrant(shared) -> return I64{3}
+    shared_retain(shared)
+    shared_acquire(shared, editable)
+    meta :: sync_load(shared + I64{56})
+    matches := trap_word(meta + I64{48}) == source_meta_kind
+    if matches {
+        schema :: trap_word(meta + I64{56})
+        matches = trap_word(schema) == trap_word(expected) && trap_word(schema + I64{8}) == trap_word(expected + I64{8})
+    }
+    if !matches {
+        shared_release(shared, editable)
+        jet_rt_native_shared_drop(shared)
+        return if (lifetime == I64{0}) -> I64{1} else -> I64{2}
+    }
+    // A stopped begin leaves out unread, exactly like a stopped Shared callback.
+    if editable && !shared_revision_begin(shared, sync_load(shared + I64{48})) -> return I64{0}
+    token :: jet_rt_alloc(I64{32}, I64{8})
+    sync_store(token, thread_tid())
+    sync_store(token + I64{8}, shared)
+    sync_store(token + I64{16}, if editable -> I64{1} else -> I64{0})
+    sync_mutex_lock(source_borrows)
+    sync_store(token + I64{24}, sync_load(source_borrows + I64{8}))
+    sync_store(source_borrows + I64{8}, token)
+    sync_mutex_unlock(source_borrows)
+    sync_store(out, token)
+    sync_store(out + I64{8}, sync_load(shared + I64{64}))
+    I64{0}
+}
+
+#Export(c) fn jet_rt_source_shared_borrow_begin(shared: I64, expected: I64, lifetime: I64, out: I64) -> I64 {
+    source_borrow_begin(shared, expected, lifetime, out, false)
+}
+
+#Export(c) fn jet_rt_source_shared_edit_begin(shared: I64, expected: I64, lifetime: I64, out: I64) -> I64 {
+    source_borrow_begin(shared, expected, lifetime, out, true)
+}
+
+#Export(c) fn jet_rt_source_shared_borrow_end(token: I64) {
+    // Tokens are scoped, non-Send borrowed views owned by their issuing thread.
+    if (sync_load(token) != thread_tid()) { jet_rt_unreachable(I64{0}, I64{0}) }
+    sync_mutex_lock(source_borrows)
+    link := source_borrows + I64{8}
+    loop sync_load(link) != token { link = sync_load(link) + I64{24} }
+    sync_store(link, sync_load(token + I64{24}))
+    sync_mutex_unlock(source_borrows)
+    shared :: sync_load(token + I64{8})
+    editable :: sync_load(token + I64{16}) != I64{0}
+    if editable && jet_rt_session_propagate() == (I64{0}) {
+        sync_store(shared + I64{48}, wrapping(sync_load(shared + I64{48}) + I64{1}))
+    }
+    shared_release(shared, editable)
+    jet_rt_native_shared_drop(shared)
+    jet_rt_free(token, I64{32}, I64{8})
+}

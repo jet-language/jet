@@ -1,0 +1,19 @@
+# Port of tests/bind.rs:377-403; sources copied verbatim.
+# HISTORICAL SMOKE: original project assertions held; concat remains PENDING-GRAMMAR.
+fixture: fixtures/json_bind_generated_project_executes_typed_fields
+step: jet inspect bind json "fixtures/repo.json" --type "Repo"
+file: fixtures/.jet/bindings/repo.jet = json_bind_generated_project_executes_typed_fields.0.generated.jet.out
+# PENDING-GRAMMAR: concat preserves generated + newline + verbatim program.
+concat: main.jet fixtures/.jet/bindings/repo.jet separator program-1.jet
+step: jet check main.jet
+step: jet build --profile=debug main.jet
+step: built
+stdout: = json_bind_generated_project_executes_typed_fields.0.out
+step: jet run main.jet
+env: JET_STORE_DIR={work}/run-cache
+stdout: = json_bind_generated_project_executes_typed_fields.0.out
+stderr: = json_bind_generated_project_executes_typed_fields.0.default.stderr
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/interpreter-cache
+stdout: = json_bind_generated_project_executes_typed_fields.0.out
+stderr: = json_bind_generated_project_executes_typed_fields.0.interpreter.stderr

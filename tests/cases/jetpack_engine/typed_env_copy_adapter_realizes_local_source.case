@@ -1,0 +1,22 @@
+# HAND-PORT tests/jetpack_engine.rs:4264-4332 typed_env_copy_adapter_realizes_local_source
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: typed_env_copy_adapter_realizes_local_source.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+step: jetpack build --no-color
+cwd: project
+env: HOME={work}/home
+exit: 0
+step: jetpack explain adapt:tool:./vendor/tool --json --no-color
+cwd: project
+exit: 0
+capture: out stdout doc $.explain.entry.output_path
+file: {cap:out}/share/readme.txt = typed_env_copy_adapter_realizes_local_source.expected
+step: jetpack build --no-color
+cwd: project
+exit: 0
+stderr: ~ "1 cached" # original contains predicate
+

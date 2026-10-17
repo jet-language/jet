@@ -1,0 +1,13 @@
+# PORT tests/review.rs::review_uses_a_recorded_rename_and_ignores_hand_spelling; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_uses_a_recorded_rename_and_ignores_hand_spelling.fixture
+mkdir: head/.jet/codemods
+write: head/.jet/codemods/rename.log.json rename.txt
+step: jet review {work}/base/run.jet {work}/head/run.jet --json
+exit: 0
+stdout: ~ "\"kind\":\"renamed\"" # Original contains predicate.
+step: jet review {work}/base/run.jet {work}/hand/run.jet --json
+exit: 0
+stdout: !~ "\"kind\":\"renamed\"" # Original negative predicate.
+stdout: ~ "\"kind\":\"removed\"" # Original contains predicate.
+stdout: ~ "\"kind\":\"added\"" # Original contains predicate.

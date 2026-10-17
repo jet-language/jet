@@ -6,6 +6,8 @@
 
 # == Compiler hash (referenced from Compiler/, never copied) ==
 Compiler/JetFoundation/Source/Hash/SHA256.jet
+Compiler/JetFoundation/Source/Encoding/CanonicalJson.jet
+Compiler/JetFoundation/Source/Encoding/Json.jet
 
 # == Compiler front end (referenced from Compiler/, never copied) ==
 Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet
@@ -15,7 +17,10 @@ Compiler/JetLexer/Source/Lexer/Tokens.jet
 Compiler/JetLexer/Source/Lexer/Payload.jet
 Compiler/JetFoundation/Source/Registry/CoreCalls.jet
 Compiler/JetFoundation/Source/Registry/CoreModules.jet
+Compiler/JetFoundation/Source/Registry/CoreRecordRows.jet
 Compiler/JetFoundation/Source/Registry/CoreCallRows.jet
+Compiler/JetFoundation/Source/Registry/CoreEnumRows.jet
+Compiler/JetFoundation/Source/Registry/CoreEnumPayloadRows.jet
 Compiler/JetFoundation/Source/Registry/Diagnostics.jet
 Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet
 Compiler/JetFoundation/Source/Diagnostics/Render.jet
@@ -29,6 +34,8 @@ Compiler/JetFoundation/Source/Derivations.jet
 Compiler/JetFoundation/Source/TIR/TIR.jet
 Compiler/JetFoundation/Source/TIR/InlineAssembly.jet
 Compiler/JetFoundation/Source/TIR/TestArtifacts.jet
+Compiler/JetFoundation/Source/Record/RecordCodec.jet
+Compiler/JetFoundation/Source/Record/JetLib.jet
 Compiler/JetFoundation/Source/Rings/RingLayer.jet
 Compiler/JetFoundation/Source/Target/Layout.jet
 Compiler/JetFoundation/Source/Target/TargetMachine.jet
@@ -42,6 +49,10 @@ Compiler/JetFoundation/Source/Registry/CoreSignatures.jet
 Compiler/JetFoundation/Source/Registry/WebCoreSignatures.jet
 Compiler/JetFoundation/Source/Policy/CoreMenus.jet
 Compiler/JetFoundation/Source/Policy/AppliedRules.jet
+Compiler/JetFoundation/Source/Policy/Policy.jet
+Compiler/JetFoundation/Source/Policy/LintPolicy.jet
+Compiler/JetFoundation/Source/Evidence/Evidence.jet
+Compiler/JetFoundation/Source/Evidence/TestingComparison.jet
 Compiler/JetFoundation/Source/AST/Expressions.jet
 Compiler/JetFoundation/Source/AST/Patterns.jet
 Compiler/JetFoundation/Source/AST/Statements.jet
@@ -71,6 +82,20 @@ Compiler/JetParser/Source/Parser/DeclarationMarkers.jet
 Compiler/JetParser/Source/Parser/Declarations/Migrations.jet
 Compiler/JetParser/Source/Parser/Declarations/Policies.jet
 Compiler/JetParser/Source/Parser/AuthorityScopes.jet
+Compiler/JetFoundation/Source/AST/Names.jet
+Compiler/JetFoundation/Source/DerivationTypes.jet
+Compiler/JetFoundation/Source/TIR/CostFacts.jet
+Compiler/JetFoundation/Source/Text/Read.jet
+Compiler/JetFoundation/Source/Encoding/ProtocolJson.jet
+Compiler/JetFoundation/Source/Encoding/CanonicalJsonRead.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceReport.jet
+Compiler/JetFoundation/Source/Evidence/EvidenceCodecTables.jet
+Compiler/JetFoundation/Source/Evidence/ComparisonVerdict.jet
+Compiler/JetParser/Source/Parser/BuildTemplates.jet
+Compiler/JetParser/Source/Parser/NamedMarkerGroups.jet
+Compiler/JetParser/Source/Parser/Declarations/Outputs.jet
+Compiler/JetFoundation/Source/CLISchema/Schema.jet
+Compiler/JetFoundation/Source/Names/Casing.jet
 
 # == Foundation ==
 Jetpack/Foundation/Source/CoreImports.jet
@@ -94,6 +119,7 @@ Jetpack/Foundation/Source/Net/PublicDestination.jet
 Jetpack/PackageModel/Source/Text/ByteText.jet
 Jetpack/PackageModel/Source/Text/Digest.jet
 Jetpack/PackageModel/Source/Text/JsonTree.jet
+Jetpack/PackageModel/Source/Text/JsonBounded.jet
 Jetpack/PackageModel/Source/Platform/Platform.jet
 Jetpack/PackageModel/Source/CompilerExtension/CompilerExtension.jet
 Jetpack/PackageModel/Source/Refs/RefSpec.jet
@@ -108,6 +134,7 @@ Jetpack/PackageModel/Source/Recipe/StagedPlan.jet
 Jetpack/PackageModel/Source/Variant/Variant.jet
 Jetpack/PackageModel/Source/Provider/ProviderSelector.jet
 Jetpack/PackageModel/Source/Provider/ProviderFacts.jet
+Jetpack/PackageModel/Source/Provider/ProviderFactsJson.jet
 Jetpack/PackageModel/Source/Mcp/McpProtocol.jet
 Jetpack/PackageModel/Source/Mcp/McpMessages.jet
 Jetpack/PackageModel/Source/Bundle/BundlePlan.jet
@@ -177,6 +204,7 @@ Jetpack/PackageModel/Source/Manifest/Blocks/Targets.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/BuildProfiles.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/Authority.jet
 Jetpack/PackageModel/Source/Manifest/Blocks/Policy.jet
+Jetpack/PackageModel/Source/Policy/GatePolicy.jet
 Jetpack/PackageModel/Source/Manifest/Edit.jet
 Jetpack/PackageModel/Source/Manifest/InlinePackage.jet
 Jetpack/PackageModel/Source/Manifest/PackageFacts.jet
@@ -195,6 +223,8 @@ Jetpack/PackageModel/Source/Lock/Write.jet
 Jetpack/PackageModel/Source/Lock/Parse.jet
 Jetpack/PackageModel/Source/Lock/Verify.jet
 Jetpack/PackageModel/Source/Lock/Record.jet
+Jetpack/PackageModel/Source/Store/SourceStore.jet
+Jetpack/PackageModel/Source/Store/CapabilityDigest.jet
 Jetpack/PackageModel/Source/Workspace/WorkspacePlan.jet
 Jetpack/PackageModel/Source/Workspace/WorkspaceLockRead.jet
 Jetpack/PackageModel/Source/Scripts/InlineDeps.jet
@@ -211,10 +241,11 @@ Jetpack/PackageModel/Source/Store/SealTupleWalk.jet
 Jetpack/PackageModel/Source/Policy/LintPolicy.jet
 Jetpack/PackageModel/Source/Policy/EffectProjection.jet
 Jetpack/PackageModel/Source/Policy/EffectBudget.jet
-Jetpack/PackageModel/Source/Artifacts/JetLibStamp.jet
-Jetpack/PackageModel/Source/Artifacts/JetLibTrust.jet
 Jetpack/PackageModel/Source/Public/PackageViews.jet
 Jetpack/PackageModel/Source/Manifest/EntryCarrier.jet
+Jetpack/PackageModel/Source/Artifacts/JetLibStamp.jet
+Jetpack/PackageModel/Source/Artifacts/JetLibTrust.jet
+Jetpack/PackageModel/Source/Bundle/Materialize.jet
 
 # == Publication ==
 Jetpack/Publication/Source/SemVer.jet
@@ -234,9 +265,15 @@ Jetpack/Publication/Source/Registry/OCI.jet
 Jetpack/Publication/Source/Policy.jet
 Jetpack/Publication/Source/Registry/Metadata.jet
 Jetpack/Publication/Source/Registry/Verify.jet
+Jetpack/Publication/Source/Registry/Artifact.jet
+Jetpack/Publication/Source/Fetch/Graph.jet
+Jetpack/Publication/Source/Fetch/Registry.jet
+Jetpack/Publication/Source/Fetch/Git.jet
+Jetpack/Publication/Source/Fetch/Fetch.jet
 
 # == EnvModel ==
 Jetpack/EnvModel/Source/Environment/FactReaders.jet
+Jetpack/EnvModel/Source/Environment/DotenvAuthority.jet
 Jetpack/EnvModel/Source/Environment/Integrations.jet
 Jetpack/EnvModel/Source/Environment/ManagedFiles.jet
 Jetpack/EnvModel/Source/Environment/Presets.jet
@@ -256,6 +293,7 @@ Jetpack/EnvModel/Source/ModuleEval/IntegrationImports.jet
 Jetpack/EnvModel/Source/ModuleEval/ProfileEval.jet
 Jetpack/EnvModel/Source/ModuleEval/ModuleEval.jet
 Jetpack/EnvModel/Source/ModuleEval/SourceLoader.jet
+Jetpack/EnvModel/Source/ModuleEval/PackageFactsLoad.jet
 Jetpack/EnvModel/Source/ModuleEval/EnvPlanBuilder.jet
 
 # == NixEval ==
@@ -367,6 +405,7 @@ Jetpack/Store/Source/Reuse/VerifiedReuse.jet
 Jetpack/Store/Source/Explain/PackageExplain.jet
 Jetpack/Store/Source/Explain/ExplainProfiles.jet
 Jetpack/Store/Source/Explain/PackageWhy.jet
+Jetpack/Store/Source/ArtifactStore/NativeRuntimePack.jet
 
 # == Trust ==
 Jetpack/Trust/Source/Text/TrustText.jet
@@ -381,8 +420,10 @@ Jetpack/Trust/Source/SemanticLock/FlakeLock.jet
 Jetpack/Trust/Source/SemanticLock/FlakeGraph.jet
 Jetpack/Trust/Source/SemanticLock/LockStore.jet
 Jetpack/Trust/Source/Gate/TrustStore.jet
+Jetpack/Trust/Source/Gate/TrustCommandText.jet
 Jetpack/Trust/Source/Gate/EnvironmentHash.jet
 Jetpack/Trust/Source/Gate/TrustGate.jet
+Jetpack/Trust/Source/Pin/PinRead.jet
 Jetpack/Trust/Source/Pin/JetPin.jet
 Jetpack/Trust/Source/Secrets/RepoSecrets.jet
 Jetpack/Trust/Source/TrustError.jet
@@ -489,9 +530,6 @@ Jetpack/JetOS/Source/Types.jet
 Jetpack/JetOS/Source/OptionsRendering.jet
 Jetpack/JetOS/Source/Identity.jet
 Jetpack/JetOS/Source/EtcBootFacts.jet
-Jetpack/JetOS/Source/RootProjection.jet
-Jetpack/JetOS/Source/SystemFacts.jet
-Jetpack/JetOS/Source/UserFlatpakPerf.jet
 
 # == CLI ==
 Jetpack/CLI/Source/CliError.jet

@@ -1,14 +1,73 @@
 use core as core
 
-// core.web.storage.session — tab-scoped key/value store.
-pub fn get(key: String) -> String? Never! { core.web.storage.session.get(key) }
+// The shipped process-default store is separate from local storage
+// (App.rs:1783,1815-1841). Web is registered-unsupported, not a tab store.
+struct SessionStorage {
+    entries: [String:String]
+}
 
-pub fn set(key: String, value: String) Never! { core.web.storage.session.set(key, value) }
+fn init_session_storage() -> Shared<SessionStorage> Never! {
+    shared SessionStorage{entries: [String:String]{}}
+}
 
-pub fn remove(key: String) Never! { core.web.storage.session.remove(key) }
+fn get(key: String) -[Browser]> String? Never! {
+    state :: core.mem.__process_shared(init_session_storage)
+    guard :: state.guard_read()
+    guard.value.entries.get(key)
+}
 
-pub fn clear() Never! { core.web.storage.session.clear() }
+fn set(key: String, value: String) Never! -[Browser]> {
+    state :: core.mem.__process_shared(init_session_storage)
+    guard := state.guard_edit()
+    _ :: &guard.value.entries.add(key, value)
+}
 
-pub fn get_or(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
+fn remove(key: String) Never! -[Browser]> {
+    state :: core.mem.__process_shared(init_session_storage)
+    guard := state.guard_edit()
+    _ :: &guard.value.entries.remove(key)
+}
 
-pub fn has(key: String) -> Bool Never! { get(key) != None }
+fn clear() Never! -[Browser]> {
+    state :: core.mem.__process_shared(init_session_storage)
+    guard := state.guard_edit()
+    &guard.value.entries.clear()
+}
+
+fn get_or(key: String, fallback: String) -> String Never! { get(key) ?? fallback }
+
+fn has(key: String) -> Bool Never! { get(key) != None }
+
+fn test_helper_effects() Never! -[Browser]> {
+    key :: "Core.web.storage.session.helper.effects"
+    remove(key)
+    assert_eq(get_or(key, "fallback"), "fallback")
+    assert_eq(has(key), false)
+}
+
+#Test("session helper calls fit the shipped Browser effect row") {
+    test_helper_effects()
+}
+
+#Test("session storage preserves miss, replacement and removal") {
+    key :: "Core.web.storage.session.contract"
+    remove(key)
+    assert_eq(get(key), None)
+    set(key, "first")
+    set(key, "second")
+    assert_eq(get(key), Val("second"))
+    remove(key)
+    assert_eq(get(key), None)
+}
+
+#Test("session clear removes all session entries without clearing local") {
+    key :: "Core.web.storage.clear"
+    core.web.storage.local.set(key, "local")
+    set(key, "session")
+    set("", "empty key")
+    clear()
+    assert_eq(get(key), None)
+    assert_eq(get(""), None)
+    assert_eq(core.web.storage.local.get(key), Val("local"))
+    core.web.storage.local.remove(key)
+}

@@ -1,18 +1,18 @@
-pub enum RuleCondition {
+enum RuleCondition {
     AtLeast(Int)
     Equals(Int)
 }
 
-pub enum RuleAction {
+enum RuleAction {
     Add(Int)
     Set(Int)
 }
 
-pub struct Rule {
-    name: String
-    fact: String
-    condition: RuleCondition
-    action: RuleAction
+struct Rule {
+    priv name: String
+    priv fact: String
+    priv condition: RuleCondition
+    priv action: RuleAction
 }
 
 fn matches(condition: RuleCondition, value: Int) -> Bool {
@@ -25,7 +25,7 @@ fn matches(condition: RuleCondition, value: Int) -> Bool {
 fn apply(action: RuleAction, facts: &[String:Int], key: String) -> String {
     if action == {
         .Add(delta) -> {
-            next :: (facts.get(~key) ?? 0) + delta
+            next :: (facts.get(key.copy()) ?? 0) + delta
             facts[key] = next
             return "{key}={next}"
         }
@@ -36,17 +36,17 @@ fn apply(action: RuleAction, facts: &[String:Int], key: String) -> String {
     }
 }
 
-pub fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
+fn fire(facts: &[String:Int], rules: [Rule]) -> [String] {
     events := [String]{}
     loop rule in rules {
-        value :: facts.get(~rule.fact) ?? 0
-        if !matches(~rule.condition, value) -> &events.push("{rule.name}:skip")
-        else -> &events.push("{rule.name}:{apply(~rule.action, &facts, ~rule.fact)}")
+        value :: facts.get(rule.fact.copy()) ?? 0
+        if !matches(rule.condition.copy(), value) -> &events.push("{rule.name}:skip")
+        else -> &events.push("{rule.name}:{apply(rule.action.copy(), &facts, rule.fact.copy())}")
     }
     return events
 }
 
-pub fn sample() -> [String] {
+fn sample() -> [String] {
     facts := [String:Int]{"score": 7}
     rules :: [Rule]{
         Rule{ name: "bonus", fact: "score", condition: RuleCondition.AtLeast(5), action: RuleAction.Add(3) },

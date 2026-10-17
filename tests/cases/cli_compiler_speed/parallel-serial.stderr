@@ -1,0 +1,65 @@
+Error [E0112]: `double` wants Int (a whole number) here, but this is String (text)
+  --> main.jet:2:35
+    |
+  2 | fn first() -> Int { helper.double("two") }
+    |                                   ^^^^^
+ Why: Every argument must match its parameter's type
+ Fix: Use Int (a whole number) here
+More: jet-lang.dev/e/E0112
+
+Error [E0109]: Text isn't joined with `+`
+  --> main.jet:3:32
+    |
+  3 | fn second() -> String { helper.label(4) + 1 }
+    |                                ^^^^^^^^^^^^
+ Why: There's one way to build text: interpolation (S8)
+ Fix: Write the pieces inside one interpolated string (schematic: the checked operands are not simple names)
+More: jet-lang.dev/e/E0109
+
+Error [E0102]: Nothing named `unknown_call` exists here
+  --> main.jet:4:21
+    |
+  4 | fn third() -> Int { unknown_call(3) }
+    |                     ^^^^^^^^^^^^
+ Why: Only functions that have been defined (or built in, like `print` / `input`) can be called
+ Fix: Define it first (fn unknown_call() { ... }), or call one that exists
+More: jet-lang.dev/e/E0102
+
+Error [E0109]: `==` can't compare or combine Bool (true or false) and String (text)
+  --> main.jet:5:30
+    |
+  5 | fn fourth() -> Bool { helper.flag(2) == "yes" }
+    |                              ^^^^^^^^^^^^^^^^
+ Why: The operator has no built-in rule and no user-defined `impl Type.Trait` hook for this operand pair
+ Fix: Use a supported operand pair, call a named method, or implement the operator's hook trait on your own type for this pair
+More: jet-lang.dev/e/E0109
+
+Error [E0113]: This value is Int (a whole number), but `label` returns String
+  --> helper.jet:2:38
+    |
+  2 | pub fn label(value: Int) -> String { value }
+    |                                      ^^^^^
+ Why: `label` declares String as its result, so the value it hands back must be String
+ Fix: Put the value in text with interpolation: "{value}"
+More: jet-lang.dev/e/E0113
+
+Error [E0107]: Nothing named `missing` exists here
+  --> helper.jet:3:63
+    |
+  3 | pub fn ratio(total: Int, count: Int) -> Int { total / count + missing }
+    |                                                               ^^^^^^^
+ Why: A name must be declared before it's used
+ Fix: Declare it first: `missing :: ...`
+More: jet-lang.dev/e/E0107
+
+Error [E0113]: This value is Int (a whole number), but `flag` returns Bool
+  --> helper.jet:4:35
+    |
+  4 | pub fn flag(value: Int) -> Bool { value + 1 }
+    |                                   ^^^^^^^^^
+ Why: `flag` declares Bool as its result, so the value it hands back must be Bool
+ Fix: Hand back a Bool value: convert this value to Bool, or return the value you meant
+More: jet-lang.dev/e/E0113
+
+7 problems found
+run `jet explain E0112` to learn more

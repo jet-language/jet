@@ -9,7 +9,7 @@
 // The six lexical source rungs used by every build fact. Package is the
 // outermost source and Item is the nearest source.
 #Comparable
-pub enum SourceScope {
+enum SourceScope {
     Package
     File
     Module
@@ -44,7 +44,7 @@ pub enum SourceScope {
 // may replace an earlier layer; two different values at one deciding layer
 // are a hard conflict.
 #Comparable
-pub enum ContributionLayer {
+enum ContributionLayer {
     Declaration
     OptimizationBundle
     Workspace
@@ -86,24 +86,24 @@ pub enum ContributionLayer {
 }
 
 // How a fact combines across the contribution ladder.
-pub enum FactMerge {
+enum FactMerge {
     Override
     TightenOnly
 }
 
 // A resolver-owned declaration default and its source label.
-pub struct FactDefault {
-    pub value: FactValue
-    pub source: String
+struct FactDefault {
+    value: FactValue
+    source: String
 }
 
 // A fact key carries its resolver merge direction and an optional
 // resolver-owned default writer; contributors supply only a value and
 // provenance.
-pub struct FactKey {
-    pub name: String
-    pub merge: FactMerge{FactMerge.Override}
-    pub default: FactDefault?{None}
+struct FactKey {
+    name: String
+    merge: FactMerge{FactMerge.Override}
+    default: FactDefault?{None}
 
     fn new(name: String) -> FactKey Never! {
         FactKey{name: name}
@@ -127,7 +127,7 @@ pub struct FactKey {
 
 // Tier-0 values that can travel through the contribution law. Facts erase
 // before runtime; this carrier exists only for folding and explanation.
-pub enum FactValue {
+enum FactValue {
     Bool(value: Bool)
     Int(value: Int)
     Char(value: Char)
@@ -212,7 +212,7 @@ enum SafetyRelation {
 }
 
 // Rust `PolicyValue::display`.
-pub fn pkg_policy_value_display(value: PolicyValue) -> String Never! {
+fn pkg_policy_value_display(value: PolicyValue) -> String Never! {
     if value == {
         .Enabled -> "true"
         .Limit(limit) -> "{limit}"
@@ -232,7 +232,7 @@ pub fn pkg_policy_value_display(value: PolicyValue) -> String Never! {
 }
 
 // True when moving from `outer` to `inner` loosens a policy gate.
-pub fn pkg_policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+fn pkg_policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
     if inner == PolicyValue.Allow -> return outer == PolicyValue.Forbid
     if outer == {
         .Forbid -> inner != PolicyValue.Forbid
@@ -254,21 +254,21 @@ pub fn pkg_policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Ne
 
 // One written contributor to one fact. `target` lets a source-scoped value
 // identify the item it governs without changing the global ordering law.
-pub struct FactContribution {
-    pub key: String
-    pub value: FactValue
-    pub scope: SourceScope
-    pub layer: ContributionLayer
-    pub span: Span{Span{start: 0, end: 0}}
-    pub target: Span?{None}
-    pub source: String
+struct FactContribution {
+    key: String
+    value: FactValue
+    scope: SourceScope
+    layer: ContributionLayer
+    span: Span{Span{start: 0, end: 0}}
+    target: Span?{None}
+    source: String
     // Human-readable reason retained for explain and lock provenance. The
     // caller supplies this only when the writer is computed rather than a
     // manifest or command-line declaration.
-    pub reason: String?{None}
-    pub force: Bool{false}
-    pub force_reason: String?{None}
-    pub default: Bool{false}
+    reason: String?{None}
+    force: Bool{false}
+    force_reason: String?{None}
+    default: Bool{false}
 
     fn new(key: String, value: FactValue, scope: SourceScope, layer: ContributionLayer, source: String) -> FactContribution Never! {
         FactContribution{key: key, value: value, scope: scope, layer: layer, source: source}
@@ -310,12 +310,12 @@ pub struct FactContribution {
 
 // The resolved value plus the complete writer chain. `effective` indexes
 // `provenance`, so explain output can mark exactly one writer.
-pub struct EffectiveFact {
-    pub key: FactKey
-    pub value: FactValue
-    pub provenance: [FactContribution]
-    pub effective: Int
-    pub forced: Bool
+struct EffectiveFact {
+    key: FactKey
+    value: FactValue
+    provenance: [FactContribution]
+    effective: Int
+    forced: Bool
 
     fn explain(self) -> String Never! {
         out := "{self.key.name} = {self.value.display()}"
@@ -341,7 +341,7 @@ pub struct EffectiveFact {
 }
 
 #Error
-pub enum FactError {
+enum FactError {
     InvalidForce(key: String, layer: ContributionLayer, source: String)
     Conflict(key: String, layer: ContributionLayer, first: FactContribution, second: FactContribution)
     SafetyWidening(key: String, previous: FactContribution, next: FactContribution)
@@ -379,7 +379,7 @@ fn pkg_fact_precedes(left: FactContribution, right: FactContribution) -> Bool Ne
 // eligible layer and nearest scope decide, `.Force` caps eligibility at its
 // layer, and a tighten-only key may never widen along the chain. None when
 // nobody writes the fact and the key has no default.
-pub fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
+fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> EffectiveFact? FactError! {
     chain := [FactContribution]{}
     loop declaration in declarations {
         if declaration.key == key.name { &chain.push(declaration) }
@@ -458,7 +458,7 @@ pub fn pkg_fact_resolve(key: FactKey, declarations: [FactContribution]) -> Effec
             }
         }
     }
-    value :: ~first.value
+    value :: first.value.copy()
     forced :: first.force || force_layer >= 0
     Ok(Val(EffectiveFact{key: key, value: value, provenance: chain, effective: candidates[0], forced: forced}))
 }

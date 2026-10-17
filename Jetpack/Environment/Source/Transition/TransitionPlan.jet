@@ -10,19 +10,21 @@
 
 TRANSITION_ROLE_FILES :: prep { [String]{"pkg.jet", "env.jet", "workspace.jet", "config.jet"} }
 
-pub enum SplitTarget {
+enum SplitTarget {
     Environment
     Package(String)
+    Hosts(String)
 
     fn operation(self) -> String Never! {
         if self == {
             .Environment -> "split-env"
             .Package(name) -> "split-package-{name}"
+            .Hosts(name) -> "split-hosts-{name}"
         }
     }
 }
 
-pub enum ChangeAction {
+enum ChangeAction {
     Create
     Remove
     Update
@@ -36,21 +38,21 @@ pub enum ChangeAction {
     }
 }
 
-pub struct ChangeSummary {
-    pub path: String
-    pub action: ChangeAction
+struct ChangeSummary {
+    path: String
+    action: ChangeAction
 }
 
-pub struct TransitionSummary {
-    pub operation: String
-    pub changes: [ChangeSummary]
-    pub before_fingerprint: String
-    pub after_fingerprint: String
-    pub journal: String
+struct TransitionSummary {
+    operation: String
+    changes: [ChangeSummary]
+    before_fingerprint: String
+    after_fingerprint: String
+    journal: String
 }
 
-pub struct TransitionResult {
-    pub summary: TransitionSummary
+struct TransitionResult {
+    summary: TransitionSummary
 }
 
 struct TransitionPlan {
@@ -76,12 +78,12 @@ struct TransitionPlan {
     }
 
     // The summary for a `--check` preview, or the applied result.
-    fn finish(self, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+    fn finish(self, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
         if check_only -> return Ok(TransitionResult{summary: self.summary()})
         self.apply()
     }
 
-    fn apply(self) -[FS, Env]> TransitionResult EnvironmentError! {
+    fn apply(self) -[FS, Env, Time]> TransitionResult EnvironmentError! {
         held :: env_runtime_lock(self.root, "package-transition") ?? return Err(env_transition_error("couldn't lock package transition: {err}"))
         if self.apply_locked() == {
             .Ok(result) -> Ok(result)
@@ -172,7 +174,7 @@ struct TransitionSnapshot {
 }
 
 // Plan and apply one of the ratified `jet split` transitions.
-pub fn env_transition_split(root: String, target: SplitTarget, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_split(root: String, target: SplitTarget, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     plan :: env_transition_split_plan(root, target)
     plan.finish(check_only)
 }
@@ -180,7 +182,7 @@ pub fn env_transition_split(root: String, target: SplitTarget, check_only: Bool)
 // Plan and apply the reverse of a recorded transition. `path` is the
 // generated file named by `jet fold`, relative to the Package root or an
 // absolute path inside it.
-pub fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     plan :: env_transition_fold_plan(root, path)
     plan.finish(check_only)
 }
@@ -189,14 +191,14 @@ pub fn env_transition_fold(root: String, path: String, check_only: Bool) -[FS, E
 // closed, typed role files convert; a file with an open or unknown field is
 // rejected before any file changes, because copying it into `package.jet`
 // would create a second interpretation of the graph.
-pub fn env_transition_init(root: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_init(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     plan :: env_transition_legacy_plan(root)
     plan.finish(check_only)
 }
 
 // Restore the last successful role-file migration: the explicit
 // migration-epoch escape hatch of `jet init --restore-role-files`.
-pub fn env_transition_restore_role_files(root: String, check_only: Bool) -[FS, Env]> TransitionResult EnvironmentError! {
+fn env_transition_restore_role_files(root: String, check_only: Bool) -[FS, Env, Time]> TransitionResult EnvironmentError! {
     canonical :: env_transition_canonical_root(root)
     journal_path :: env_transition_latest_legacy_journal(canonical)
     journal :: env_transition_read_journal(journal_path)
@@ -271,6 +273,21 @@ fn env_transition_split_plan(root: String, target: SplitTarget) -[FS, Env]> Tran
             semantic_before = env_transition_semantic_fingerprint(package)
             semantic_after = env_transition_semantic_fingerprint(composed_after)
             &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(member.bytes())})
+        }
+        .Hosts(name) -> {
+            env_transition_validate_name(name, "host")
+            env_transition_require_output_declaration(entries, name, package_path)
+            output :: package.outputs.get(name) ?? return Err(env_transition_error("outputs.{name} is not declared in {TRANSITION_PACKAGE_FILE}"))
+            if output.kind != PackageOutputKind.System -> return Err(env_transition_error("outputs.{name} is {output.kind.debug_name()}, but host extraction needs a System Output"))
+            destination :: "package/fleet.jet"
+            env_transition_ensure_new_file(canonical, destination)
+            config_text :: env_transition_render_fleet_config(name, output.name)
+            config :: ConfigFacts.parse(config_text, destination) ?? return Err(env_transition_parse_error(destination, err))
+            root_after = env_transition_add_config_reference(package_text, package.configs, destination)
+            env_transition_validate_composed_root(root_after, package, config)
+            semantic_before = "sha256:{pkg_sha256_hex(pkg_debug_output(output).bytes())}"
+            semantic_after = semantic_before
+            &changes.push(TransitionFileChange{relative: destination, before: None, after: Val(config_text.bytes())})
         }
     }
     if root_after.bytes() == package_bytes {

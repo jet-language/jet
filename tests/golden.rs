@@ -7,6 +7,7 @@
 //!   I2 — rustc accepting the generated code; a rejection here is a
 //!        front-end soundness bug, reported loudly
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -48,13 +49,54 @@ struct GoldenScratch {
 
 impl Drop for GoldenScratch {
     fn drop(&mut self) {
+        // The run-private Jetpack hangar realizes batteries read-only.
+        common::make_tree_writable(&self.path);
         let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+/// One example's generated source and executable. Removed when the example's
+/// check passes, so a full run does not leave ~2.5 GB of binaries in the test
+/// temp directory; a failing example keeps them for inspection.
+struct ProgramFiles([PathBuf; 2]);
+
+impl Drop for ProgramFiles {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            return;
+        }
+        for path in &self.0 {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
+
+/// Keep the prebuilt runtime directory to this test build's keys: a runtime
+/// exported before the binary was linked belongs to an earlier build, and a
+/// checkout's long-lived target dir would otherwise gain ~120 MB per stale key
+/// on every rebuild. A pruned key that is still current rebuilds once.
+fn prune_prebuilt_runtimes_older_than(prebuilt: &Path, exe: &Path) {
+    let Ok(built) = fs::metadata(exe).and_then(|meta| meta.modified()) else {
+        return;
+    };
+    let Ok(entries) = fs::read_dir(prebuilt) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified < built);
+        if stale && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
+            let _ = fs::remove_dir_all(entry.path());
+        }
     }
 }
 
 struct FeatureFixtureScratch {
     root: PathBuf,
     entry: PathBuf,
+    runtime_cwd: Option<PathBuf>,
 }
 
 impl FeatureFixtureScratch {
@@ -86,11 +128,45 @@ impl FeatureFixtureScratch {
             .as_nanos();
         let root = base.join(format!("golden-fixture-{}-{stamp}", std::process::id()));
         fs::create_dir_all(&root).expect("create golden fixture project");
-        copy_feature_project(project_root, &root);
-        Some(Self {
-            entry: root.join(entry.file_name()?),
+        // This fixture's authority grants and plugin paths are repository-relative.
+        // Mirror that layout under scratch and build the real guest there: neither
+        // stale checkout artifacts nor a canned component may satisfy the witness.
+        let capability_fixture = entry.ends_with("foundations/capabilities/run.jet");
+        let project = if capability_fixture {
+            root.join("Examples/features/foundations/capabilities")
+        } else {
+            root.clone()
+        };
+        fs::create_dir_all(&project).expect("create staged golden project");
+        copy_feature_project(project_root, &project);
+        let scratch = Self {
+            entry: project.join(entry.file_name()?),
+            runtime_cwd: capability_fixture.then(|| root.clone()),
             root,
-        })
+        };
+        if capability_fixture {
+            let output = Command::new(env!("CARGO_BIN_EXE_jet"))
+                .args([
+                    "build",
+                    "capability_guest.jet",
+                    "--target=sandbox",
+                    "--color=never",
+                ])
+                .current_dir(project.join("guest"))
+                .output()
+                .expect("build capability fixture guest");
+            assert!(
+                output.status.success(),
+                "capability fixture Component build failed:\nstdout:\n{}\nstderr:\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                project.join("guest/build/capability_guest.wasm").is_file(),
+                "capability fixture build did not publish its real Component"
+            );
+        }
+        Some(scratch)
     }
 }
 
@@ -195,6 +271,121 @@ fn assert_compute_vulkan_webgpu_output(stdout: &str) {
     );
 }
 
+fn nonnegative_host_observation(value: &str) -> i64 {
+    assert!(
+        !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()),
+        "host observation must be a non-negative integer: {value:?}"
+    );
+    value.parse().expect("host observation must fit the receipt's Int")
+}
+
+fn labelled_host_observation(field: &str, label: &str) -> i64 {
+    nonnegative_host_observation(
+        field.strip_prefix(label).unwrap_or_else(|| panic!("expected {label:?}: {field:?}")),
+    )
+}
+
+/// This probe measures the host, not a deterministic scheduling simulation.
+/// Check the complete output shape and the two independent receipts' aggregate
+/// invariants; callback lateness and control-loop jitter are not the same clock sample.
+fn assert_foundations_realtime_output(stdout: &str) {
+    let lines: Vec<_> = stdout.split('\n').collect();
+    assert_eq!(lines.len(), 4, "unexpected realtime output: {stdout:?}");
+    assert_eq!(lines[2], "receipt cancelled:true joined:true");
+    assert_eq!(lines[3], "");
+    let audio: Vec<_> = lines[0]
+        .strip_prefix("audio_callback=cancelled rate:48000 frames:256 ")
+        .expect("callback request and cancellation must match the source")
+        .split(' ')
+        .collect();
+    assert_eq!(audio.len(), 4);
+    let callbacks = labelled_host_observation(audio[0], "callbacks:");
+    let frames = labelled_host_observation(audio[1], "completed_frames:");
+    let missed = labelled_host_observation(audio[2], "missed:");
+    let lateness = labelled_host_observation(audio[3], "max_lateness_ns:");
+    assert!(callbacks > 0, "the callback must have completed real work");
+    assert_eq!(i128::from(frames), i128::from(callbacks) * 256);
+    // This callback has no contended adapter or blocking operation that can
+    // skip it: each miss is a completed callback that began after its deadline.
+    assert!(missed <= callbacks);
+    assert_eq!(missed == 0, lateness == 0);
+
+    let control: Vec<_> = lines[1]
+        .strip_prefix("control_loop=1kHz ticks:10000 ")
+        .expect("control-loop rate and tick count must match the source")
+        .split(' ')
+        .collect();
+    assert_eq!(control.len(), 2);
+    let missed = labelled_host_observation(control[0], "missed:");
+    let jitter: Vec<_> = control[1]
+        .strip_prefix("jitter_us=")
+        .expect("control-loop jitter receipt")
+        .split(',')
+        .collect();
+    assert_eq!(jitter.len(), 3);
+    let min = labelled_host_observation(jitter[0], "min:");
+    let max = labelled_host_observation(jitter[1], "max:");
+    let sum = labelled_host_observation(jitter[2], "sum:");
+    assert!(missed <= 10_000 && min <= max);
+    assert!(i128::from(sum) >= i128::from(min) * 10_000);
+    assert!(i128::from(sum) <= i128::from(max) * i128::from(missed));
+    assert!(sum >= missed);
+    assert_eq!(missed == 0, max == 0);
+    assert_eq!(missed == 10_000, min > 0);
+}
+
+fn assert_foundations_text_output(stdout: &str, expected: &str) {
+    let actual: Vec<_> = stdout.split('\n').collect();
+    let expected: Vec<_> = expected.split('\n').collect();
+    assert_eq!(actual.len(), 9, "unexpected text probe output: {stdout:?}");
+    assert_eq!(actual.len(), expected.len());
+    for (index, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+        if index == 0 || index == 4 {
+            let (actual_values, elapsed) = actual
+                .rsplit_once(" elapsed_ms=")
+                .expect("measured text operation must report elapsed milliseconds");
+            let (expected_values, sample_elapsed) = expected
+                .rsplit_once(" elapsed_ms=")
+                .expect("golden must retain the real elapsed-milliseconds output shape");
+            assert_eq!(actual_values, expected_values);
+            nonnegative_host_observation(elapsed);
+            nonnegative_host_observation(sample_elapsed);
+        } else {
+            assert_eq!(actual, expected, "non-timing text output changed at line {}", index + 1);
+        }
+    }
+}
+
+#[test]
+fn host_timing_oracles_reject_receipt_and_non_timing_drift() {
+    let realtime = "audio_callback=cancelled rate:48000 frames:256 callbacks:2 completed_frames:512 missed:1 max_lateness_ns:10\ncontrol_loop=1kHz ticks:10000 missed:9999 jitter_us=min:0,max:2,sum:9999\nreceipt cancelled:true joined:true\n";
+    assert_foundations_realtime_output(realtime);
+    for (before, after) in [
+        ("frames:256", "frames:128"),
+        ("completed_frames:512", "completed_frames:511"),
+        ("missed:1 ", "missed:3 "),
+        ("max_lateness_ns:10", "max_lateness_ns:0"),
+        ("ticks:10000", "ticks:9999"),
+        ("min:0", "min:1"),
+        ("sum:9999", "sum:9998"),
+        ("max:2", "max:-2"),
+        ("joined:true", "joined:false"),
+    ] {
+        let invalid = realtime.replacen(before, after, 1);
+        assert!(std::panic::catch_unwind(|| assert_foundations_realtime_output(&invalid)).is_err());
+    }
+    let text = "bpe bytes=1048576 elapsed_ms=12\nsegments fixed\nnormalized=fixed\ncasefold_equal=true\nscan bytes=100000000 elapsed_ms=34\nshape_arabic=fixed\nshape_devanagari=fixed\ntext_probe_complete\n";
+    let timing_changed = text.replace("elapsed_ms=12", "elapsed_ms=99");
+    assert_foundations_text_output(&timing_changed, text);
+    for invalid in [
+        text.replace("elapsed_ms=12", "elapsed_ms=-1"),
+        text.replace("bytes=1048576", "bytes=1048575"),
+        text.replace("shape_arabic=fixed", "shape_arabic=changed"),
+    ] {
+        assert!(std::panic::catch_unwind(|| assert_foundations_text_output(&invalid, text)).is_err());
+    }
+}
+
 fn assert_front_end(entry: &GoldenEntry, src: &str) {
     let diagnostics = jet::check_with_path(entry.path.to_str().expect("example path is utf8"));
     assert!(
@@ -207,18 +398,21 @@ fn assert_front_end(entry: &GoldenEntry, src: &str) {
     );
 }
 
-/// Does running this example start a service that serves until the process is
-/// stopped? One canonical answer, `jet::AST::bundle_serves_until_stopped` — the
-/// same fact `tests/dev_parts/support.rs` reads, never a stem list.
-fn example_serves_until_stopped(path: &Path) -> bool {
-    let Some(path) = path.to_str() else {
-        return false;
-    };
-    let Ok(mut bundle) = jet::Loader::load_entry(path) else {
-        return false;
-    };
+/// Why this example's native binary is built but not run, from facts the
+/// program declares — never a stem list. A service serves until stopped
+/// (`jet::AST::bundle_serves_until_stopped`, the same fact
+/// `tests/dev_parts/support.rs` reads). A browser-only program (`#Target(Web)`
+/// on its entry file) has its run proof in `tests/web_build.rs`.
+fn example_native_run_skip(path: &Path) -> Option<&'static str> {
+    let mut bundle = jet::Loader::load_entry(path.to_str()?).ok()?;
     let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-    jet::AST::bundle_serves_until_stopped(&bundle)
+    if jet::AST::bundle_serves_until_stopped(&bundle) {
+        return Some("service entry serves until stopped");
+    }
+    let browser_only = bundle.modules.get(bundle.entry).is_some_and(|module| {
+        module.default_target.as_deref() == Some(jet::Syntax::BUILD_TARGET_WEB)
+    });
+    browser_only.then_some("declared #Target(Web): browser-only, run by tests/web_build.rs")
 }
 
 #[test]
@@ -409,14 +603,29 @@ fn examples_compile_and_run() {
     let ffi_cache = scratch.join("ffi");
     // #2074/#2516: the store is content-addressed and re-verified against the
     // artifact digest on every hit, so sharing it across runs cannot
-    // resurrect a stale artifact — a wrong key is a miss, never a reuse. A
-    // per-run store would instead pay one cold runtime compile per key on
-    // every golden run, which is the exact cost this substrate exists to
-    // remove. Living under the target dir keeps `cargo clean` as the reset.
+    // resurrect a stale artifact — a wrong key is a miss, never a reuse.
+    // Living under the target dir keeps `cargo clean` as the reset.
     let store = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("jet-golden-store");
     std::env::set_var("JET_STORE_DIR", &store);
+    // D-BUILD-PREBUILT1: the runtime/Core closure is compiled once per test
+    // build, not once per example process. Every example links the
+    // `jet-runtime/<key>` rlib beside this binary in place, the layout a
+    // shipped `jet` reads; the first process to need a key builds and exports
+    // it while the others wait (`common::add_generated_rust`). Without this,
+    // each example process verified and copied a ~120 MB rlib out of its
+    // store, and every golden shard compiled every key it met.
+    let exe = std::env::current_exe().expect("golden test binary path");
+    let prebuilt = exe
+        .parent()
+        .expect("golden test binary has a directory")
+        .join(jet_store::runtime::PREBUILT_DIR_NAME);
+    prune_prebuilt_runtimes_older_than(&prebuilt, &exe);
+    std::env::set_var(jet_store::runtime::PREBUILD_EXPORT_ENV, &prebuilt);
     std::env::set_var("JET_FFI_CACHE_DIR", &ffi_cache);
+    let jetpack_root = scratch.join("jetpack-root");
     let _scratch = GoldenScratch { path: scratch };
+    realize_first_party_batteries(&jetpack_root);
+    std::env::set_var("JETPACK_ROOT", &jetpack_root);
     if !have_rustc {
         eprintln!("note: rustc not found; checking codegen only, skipping build+run");
     }
@@ -428,6 +637,7 @@ fn examples_compile_and_run() {
     // This keeps the corpus census complete without turning implementation
     // files into false golden entries.
     let mut entries = collect_feature_golden_entries(&ex_dir, ext);
+    let rust_defects = rust_known_failures(&root, &entries);
     let filter = fixture_filter("JET_GOLDEN_FILTER");
     entries.retain(|entry| fixture_matches(filter.as_deref(), &entry.shown));
     assert!(
@@ -435,6 +645,17 @@ fn examples_compile_and_run() {
         "JET_GOLDEN_FILTER matched no examples: {}",
         filter.as_deref().unwrap_or("<unfiltered>")
     );
+    // This harness always compiles with the Rust reference, so a listed stem is
+    // reported as SKIP-RUST-DEFECT (never counted as checked); the Jet-built
+    // compiler's runners do not read the list and still hold it to the golden.
+    let mut skipped_rust_defects = Vec::new();
+    entries.retain(|entry| match rust_defects.get(&entry.stem) {
+        Some(defect) => {
+            skipped_rust_defects.push(format!("{} ({defect})", entry.stem));
+            false
+        }
+        None => true,
+    });
     let update_expected = match std::env::var("JET_UPDATE_GOLDEN") {
         Err(_) => false,
         Ok(value) if value == "1" => {
@@ -493,6 +714,28 @@ fn examples_compile_and_run() {
             .join()
             .expect("golden worker panicked outside harness");
     }
+    // Written straight to the process stderr, past libtest's output capture,
+    // so a passing run still shows every polyglot example it could not run.
+    let unavailable = POLYGLOT_UNAVAILABLE.lock().unwrap();
+    if !unavailable.is_empty() {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "golden polyglot UNAVAILABLE: {} — {} (the foreign toolchains come from the Nix integration shell: run under `Tools/agent/jet-env full`)",
+            unavailable.len(),
+            unavailable.join(", ")
+        );
+    }
+    drop(unavailable);
+    if !skipped_rust_defects.is_empty() {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "golden SKIP-RUST-DEFECT: {} — {}",
+            skipped_rust_defects.len(),
+            skipped_rust_defects.join(", ")
+        );
+    }
     let failures = failures.lock().unwrap();
     assert!(
         failures.is_empty(),
@@ -507,9 +750,88 @@ fn examples_compile_and_run() {
     );
 }
 
-/// I1's one exception: the examples that TEACH the audited `#Unsafe` tier, so
-/// their generated Rust must carry `unsafe` — in gated `unsafe { … }` /
-/// `unsafe fn` / `unsafe extern` form only. Every other stem must generate none.
+/// `tests/golden-rust-known-failures.tsv`: the transition list of goldens the
+/// frozen Rust reference compiler gets wrong (stem, then the defect). Every
+/// listed stem must name an existing golden.
+fn rust_known_failures(root: &Path, entries: &[GoldenEntry]) -> BTreeMap<String, String> {
+    let path = root.join("tests/golden-rust-known-failures.tsv");
+    let text = fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+    let mut defects = BTreeMap::new();
+    for (index, line) in text.lines().enumerate() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let (stem, defect) = line.split_once('\t').unwrap_or_else(|| {
+            panic!("{}:{}: expected `stem<TAB>defect`", path.display(), index + 1)
+        });
+        assert!(
+            entries.iter().any(|entry| entry.stem == stem),
+            "{}:{}: `{stem}` is not a golden under Examples/features",
+            path.display(),
+            index + 1
+        );
+        assert!(
+            defects.insert(stem.to_string(), defect.to_string()).is_none(),
+            "{}:{}: `{stem}` is listed twice",
+            path.display(),
+            index + 1
+        );
+    }
+    defects
+}
+
+/// Battery examples declare a first-party battery (`deps: { gui: "0.1.0" }`)
+/// and consume it with `use gui`. The loader never realizes on demand (E0983),
+/// so the harness stages every battery the way `jetpack env --prep` does —
+/// through the built-in `batteries` source into a run-private Jetpack root —
+/// exactly as `tests/lib_use.rs` stages its library before `use` resolves it.
+fn realize_first_party_batteries(jetpack_root: &Path) {
+    let roots = jetpack::Store::Roots::at(jetpack_root.to_path_buf());
+    let store_dir = roots.hangar_dir();
+    fs::create_dir_all(&store_dir).expect("create the golden Jetpack hangar");
+    let table = jetpack::Batteries::source_table();
+    let ctx = jetpack::Provider::Ctx {
+        fixtures: None,
+        store_dir: &store_dir,
+        offline: true,
+        project_dir: None,
+        nix_index: None,
+        nix_roots: None,
+        allow_local_nix_catalog: false,
+    };
+    for slug in jetpack::Batteries::package_slugs() {
+        let reference = format!("{slug}@{}", jetpack::Batteries::SOURCE_NAME);
+        let spec = jetpack::RefSpec::classify_in(&reference, &table).unwrap_or_else(|error| {
+            panic!("classify first-party battery `{reference}`: {error:?}")
+        });
+        jetpack::Store::realize_verified(
+            &roots,
+            &ctx,
+            jetpack::Store::RealizeRequest::Package {
+                spec: &spec,
+                table: &table,
+            },
+        )
+        .unwrap_or_else(|error| {
+            // The run-private root is deleted with the scratch directory, so
+            // carry any unreproducible-action report in the failure itself.
+            let reports = fs::read_dir(jetpack_root.join("private/unreproducible"))
+                .map(|dir| {
+                    dir.flatten()
+                        .filter_map(|item| fs::read_to_string(item.path()).ok())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                })
+                .unwrap_or_default();
+            panic!("realize first-party battery `{slug}`: {error:?}\n{reports}")
+        });
+    }
+}
+
+/// I1's one exception: examples that teach the audited `#Unsafe` tier.
+/// Every approved source region must retain its own audit evidence; unrelated
+/// prelude unsafe or another region's sentry cannot satisfy the positive check.
 ///
 /// DERIVED, never hand-typed: the repository already keeps exactly one registry
 /// of approved user-written unsafe regions — the `unsafe-ratchet` baseline in
@@ -527,15 +849,23 @@ fn examples_compile_and_run() {
 /// list behind — so `golden` reported an APPROVED region as an I1 violation.
 ///
 /// Deriving cannot widen I1: a region only enters the baseline through the
-/// ratchet, a stem with no approved region that emits `unsafe` still fails the
-/// negative assertion below, and a stem with one that stops emitting still fails
-/// the positive one.
+/// ratchet, and a stem with no approved region that emits `unsafe` still fails
+/// the negative assertion below. Expert crypto gates audit misuse and secret
+/// exposure even when the loaded Core Jet implementation needs no Rust unsafe.
 ///
 /// Both directions are still asserted below, and the gated form is scanned with
 /// `common::unsafe_keyword_columns` — three audited stems carry the word in
 /// their own file name, which a plain substring scan could not tell from code.
-static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>> =
-    std::sync::LazyLock::new(|| {
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AuditRegion {
+    line: usize,
+    column: usize,
+    reason: String,
+}
+
+static GATED_UNSAFE_REGIONS: std::sync::LazyLock<
+    std::collections::HashMap<String, Vec<AuditRegion>>,
+> = std::sync::LazyLock::new(|| {
         let baseline_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Docs/spec/safety.md");
         let baseline = fs::read_to_string(&baseline_path).unwrap_or_else(|err| {
             panic!(
@@ -553,27 +883,137 @@ static GATED_UNSAFE_STEMS: std::sync::LazyLock<std::collections::HashSet<String>
                     baseline_path.display()
                 )
             });
-        let example_prefix = "Examples/features/";
-        let jet_suffix = format!(".{}", jet::Syntax::FILE_EXT);
-        let stems: std::collections::HashSet<String> = data
-            .lines()
-            .filter_map(|line| {
-                let quoted = line.trim().strip_prefix("\"file\":")?.trim_start();
-                let file = quoted.strip_prefix('"')?.split('"').next()?;
-                let stem = file
-                    .strip_prefix(example_prefix)?
-                    .strip_suffix(&jet_suffix)?;
-                Some(stem.to_owned())
-            })
-            .collect();
-        assert!(
-            !stems.is_empty(),
-            "{} records no approved `Examples/features` unsafe region; the audited-tier \
-             examples (lowlevel/memory/effects/crypto) must appear there",
-            baseline_path.display()
-        );
-        stems
+        let data = jet_foundation::EncodingJson::parse_json(data, true)
+            .expect("unsafe-region baseline must be valid JSON");
+        let mut regions = std::collections::HashMap::<String, Vec<AuditRegion>>::new();
+        for row in data.get("regions").unwrap().as_array().unwrap() {
+            let file = row.get("file").unwrap().as_str().unwrap();
+            let Some(stem) = file
+                .strip_prefix("Examples/features/")
+                .and_then(|file| file.strip_suffix(".jet"))
+            else {
+                continue;
+            };
+            let position = |key| match row.get(key).unwrap() {
+                jet_foundation::Dyn::Dyn::Int(value) => {
+                    value.to_usize().expect("audit position must be nonnegative")
+                }
+                _ => panic!("audit {key} must be an integer"),
+            };
+            regions.entry(stem.to_owned()).or_default().push(AuditRegion {
+                line: position("line"),
+                column: position("column"),
+                reason: row.get("reason").unwrap().as_str().unwrap().to_owned(),
+            });
+        }
+        assert!(!regions.is_empty(), "baseline records no audited feature examples");
+        regions
     });
+
+/// Use Jet's lexer so strings/comments containing marker spellings do not
+/// invent regions, and escapes in reasons have their source-language meaning.
+fn source_audit_regions(source: &str) -> Vec<AuditRegion> {
+    use jet::Lexer::{StrTokPart, TokKind};
+    let (mut tokens, diagnostics) = jet::Lexer::lex(source);
+    assert!(diagnostics.is_empty(), "audit source failed lexing: {diagnostics:?}");
+    tokens.retain(|token| !jet::Lexer::is_comment(&token.kind));
+    let mut regions = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if token.kind != TokKind::Hash {
+            continue;
+        }
+        let marker_indices = match tokens.get(index + 1).map(|token| &token.kind) {
+            Some(TokKind::Ident(name)) if name == "Unsafe" => index + 1..index + 2,
+            Some(TokKind::LBracket) => {
+                let mut depth = 1;
+                let end = tokens[index + 2..].iter().position(|token| {
+                    match token.kind {
+                        TokKind::LBracket => depth += 1,
+                        TokKind::RBracket => depth -= 1,
+                        _ => {}
+                    }
+                    depth == 0
+                }).map(|offset| index + 2 + offset)
+                    .expect("checked source has an unfinished marker group");
+                index + 2..end
+            }
+            _ => continue,
+        };
+        for marker in marker_indices {
+            if !matches!(&tokens[marker].kind, TokKind::Ident(name) if name == "Unsafe")
+                || tokens[marker - 1].kind == TokKind::Bang
+                || tokens.get(marker + 1).map(|token| &token.kind) != Some(&TokKind::LParen)
+            {
+                continue;
+            }
+            let reason = match tokens.get(marker + 2).map(|token| &token.kind) {
+                Some(TokKind::Str(parts)) => parts.iter().map(|part| match part {
+                    StrTokPart::Lit(text) => text.as_str(),
+                    _ => panic!("approved audit reason must be literal text"),
+                }).collect::<String>(),
+                Some(TokKind::RawStr(text)) => text.clone(),
+                _ => panic!("approved audit reason must be literal text"),
+            };
+            let prefix = &source[..token.span.start];
+            regions.push(AuditRegion {
+                line: prefix.bytes().filter(|byte| *byte == b'\n').count() + 1,
+                column: prefix.rsplit('\n').next().unwrap().chars().count() + 1,
+                reason,
+            });
+        }
+    }
+    regions
+}
+
+/// True when the source declares a `#Test` block, read from Jet tokens so a
+/// string or comment naming the marker does not count.
+fn source_declares_tests(source: &str) -> bool {
+    use jet::Lexer::TokKind;
+    let (mut tokens, _) = jet::Lexer::lex(source);
+    tokens.retain(|token| !jet::Lexer::is_comment(&token.kind));
+    tokens.windows(2).any(|pair| {
+        pair[0].kind == TokKind::Hash
+            && matches!(&pair[1].kind, TokKind::Ident(name) if name == "Test")
+    })
+}
+
+fn audit_region_failures(
+    source: &str,
+    file: &str,
+    approved: &[AuditRegion],
+    user_code: &str,
+) -> Vec<String> {
+    let source_regions = source_audit_regions(source);
+    let mut failures = Vec::new();
+    if source_regions != approved {
+        failures.push(format!(
+            "source audit regions differ from the approved baseline:\nsource: {source_regions:?}\napproved: {approved:?}"
+        ));
+    }
+    let basename = Path::new(file).file_name().unwrap().to_str().unwrap();
+    let mut required = std::collections::BTreeMap::new();
+    for region in &source_regions {
+        *required.entry((region.line, &region.reason)).or_insert(0usize) += 1;
+    }
+    for ((line_number, reason), count) in required {
+        let site = format!(", {line_number}, {reason:?})");
+        let full_site = format!("{file:?}{site}");
+        let short_site = format!("{basename:?}{site}");
+        let matches = user_code.lines().filter(|line| {
+            (line.contains("jet_mem::jet_sentry_scope(")
+                || line.contains("jet_mem::jet_sentry_fenced_scope("))
+                && (line.contains(&full_site) || line.contains(&short_site))
+        }).count();
+        // Generic instantiations may emit a source region more than once.
+        // They cannot make up for a missing different source site or reason.
+        if matches < count {
+            failures.push(format!(
+                "missing lowered audit region at {file}:{line_number}: {reason:?} (expected {count}, found {matches})"
+            ));
+        }
+    }
+    failures
+}
 
 fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     // D-JPK-TASKRUN1 / I5 (card #476): job_runner proves both `#Job` entry
@@ -664,13 +1104,25 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
     let ffi_link = compiled.ffi;
     let user_code = strip_vetted_prelude_modules(&rust_code);
 
-    if GATED_UNSAFE_STEMS.contains(stem) {
+    if let Some(approved) = GATED_UNSAFE_REGIONS.get(stem) {
+        // `#Test` bodies (and the regions inside them) exist only in the test
+        // harness build, so the evidence is the run build plus that harness.
+        let mut audit_code = user_code.clone();
+        if source_declares_tests(&src) {
+            let (harness, _) = jet::compile_tests_with_path(&src, &compile_path).unwrap_or_else(|diags| {
+                panic!(
+                    "audited example {stem} failed the test-harness front end:\n{}",
+                    jet::render_diagnostics(&entry.shown, &src, &diags)
+                )
+            });
+            audit_code.push('\n');
+            audit_code.push_str(&strip_vetted_prelude_modules(&harness));
+        }
+        let failures = audit_region_failures(&src, &compile_path, approved, &audit_code);
         assert!(
-            user_code
-                .lines()
-                .any(|line| !unsafe_keyword_columns(line).is_empty()),
-            "the audited example {} should exercise the gated `unsafe` tier",
-            stem
+            failures.is_empty(),
+            "audited example {stem} lost source-region evidence:\n{}",
+            failures.join("\n")
         );
         for (i, line) in user_code.lines().enumerate() {
             for col in unsafe_keyword_columns(line) {
@@ -734,6 +1186,7 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         flat_stem
     ));
     let bin = dir.join(format!("jet_golden_{}_{}", std::process::id(), flat_stem));
+    let _program_files = ProgramFiles([rs.clone(), bin.clone()]);
     let mut rustc_cmd = Command::new("rustc");
     let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &rust_code, ffi_link.is_some(), &[]);
     rustc_cmd.arg("-o").arg(&bin);
@@ -747,7 +1200,12 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 .arg(format!("dependency={}", deps_dir.display()));
         }
     }
-    let clinks = jet::resolve_c_links(entry.path.to_str().unwrap())
+    // Link resolution reads the same project state the front end compiled
+    // against: a staged fixture's `.jet` exists only in its scratch copy.
+    let project_entry = staged_fixture
+        .as_ref()
+        .map_or(entry.path.as_path(), |scratch| scratch.entry.as_path());
+    let clinks = jet::resolve_c_links(project_entry.to_str().unwrap())
         .expect("resolve_c_links should succeed for example C bindings");
     for arg in &clinks {
         rustc_cmd.arg(arg);
@@ -759,23 +1217,27 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         stem,
         String::from_utf8_lossy(&out.stderr)
     );
-    // #2016 / D-WEBAPP-SERVE1=D: an `App`-returning entry is handed to
-    // `App::serve`, which binds a listener and then serves until the process is
-    // stopped. Such a program has no terminating stdout and no exit code of its
-    // own, so it cannot have a `.out` golden — running it here would hang the
-    // suite (or, for the three `App` examples, race a fixed port). It stays in
-    // the COMPILE universe: front end, I1, and I2 above all still apply.
-    // Held back by the canonical derived predicate — the same one
-    // `tests/dev_parts/support.rs` uses — so a fourth service example is
-    // classified instead of discovered as a timeout.
-    if example_serves_until_stopped(&entry.path) {
-        eprintln!(
-            "note: built Examples/features/{stem}.jet; not run (service entry serves until stopped)"
-        );
+    // #2016 / D-WEBAPP-SERVE1=D: a service entry (an `App`-returning `run`, or
+    // a declared `Output.Service`) binds a listener and then serves until the
+    // process is stopped. Such a program has no terminating stdout and no exit
+    // code of its own, so it cannot have a `.out` golden — running it here
+    // would hang the suite or race a fixed port. A browser-only program's
+    // native run fails closed by design; its run proof is tests/web_build.rs.
+    // Both stay in the COMPILE universe: front end, I1, and I2 above all still
+    // apply. Held back by declared facts, so a new example is classified
+    // instead of discovered as a timeout.
+    if let Some(reason) = example_native_run_skip(project_entry) {
+        eprintln!("note: built Examples/features/{stem}.jet; not run ({reason})");
         return;
     }
 
     let mut run_cmd = Command::new(&bin);
+    if let Some(cwd) = staged_fixture
+        .as_ref()
+        .and_then(|scratch| scratch.runtime_cwd.as_ref())
+    {
+        run_cmd.current_dir(cwd);
+    }
     if needs_gtk {
         run_cmd.env("JET_UI_HEADLESS", "1");
     }
@@ -820,18 +1282,33 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
         .join("expected")
         .join(format!("{}.stderr.out", stem));
     if err_path.exists() {
+        let expected_err = fs::read_to_string(&err_path)
+            .unwrap_or_else(|_| panic!("missing Examples/features/expected/{stem}.err.out"));
+        let expected_code = expected_failure_exit(stem, &expected_err).unwrap_or_else(|| {
+            panic!("ambiguous failure exit oracle for example {stem}: {expected_err:?}")
+        });
         let code = run.status.code();
-        assert!(
-            code == Some(70) || code == Some(1),
-            "exit code mismatch for example {stem}: expected 70 (panic) or 1 (uncaught Err), got {code:?}"
-        );
+        assert_eq!(code, Some(expected_code), "exit code mismatch for example {stem}");
+        let out_path = env.ex_dir.join("expected").join(format!("{stem}.out"));
+        if env.update_expected {
+            if out_path.exists() || !run.stdout.is_empty() {
+                fs::write(&out_path, &run.stdout).unwrap();
+            }
+        } else {
+            let expected_stdout = match fs::read(&out_path) {
+                Ok(bytes) => bytes,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                Err(error) => panic!("could not read {}: {error}", out_path.display()),
+            };
+            assert_failure_stdout(stem, &expected_stdout, &run.stdout);
+        }
         let actual_err = String::from_utf8_lossy(&run.stderr);
         if env.update_expected {
-            fs::write(&err_path, actual_err.as_bytes()).unwrap();
+            if out_path.exists() || !run.stdout.is_empty() {
+                fs::write(&out_path, &run.stdout).unwrap();
+            }
         } else {
-            let expected_err = fs::read_to_string(&err_path)
-                .unwrap_or_else(|_| panic!("missing Examples/features/expected/{}.err.out", stem));
-            if actual_err != expected_err {
+            if run.stderr.as_slice() != expected_err.as_bytes() {
                 panic!(
                     "stderr mismatch for example {stem}:\n{}",
                     unified_diff(
@@ -892,6 +1369,11 @@ fn check_golden_entry(entry: &GoldenEntry, env: &GoldenEnv) {
                 // Validate the portable contract instead of pinning one host's
                 // acceptance bit in a cross-host golden.
                 assert_compute_vulkan_webgpu_output(actual);
+            } else if stem == "foundations/realtime" {
+                assert_foundations_realtime_output(&expected);
+                assert_foundations_realtime_output(actual);
+            } else if stem == "foundations/text" {
+                assert_foundations_text_output(actual, &expected);
             } else if actual != expected {
                 panic!(
                     "output mismatch for example {stem}:\n{}",
@@ -951,14 +1433,17 @@ fn record_golden_receipt(
         .ex_dir
         .join("expected")
         .join(format!("{}.stderr.out", entry.stem));
-    let expected = if err_path.is_file() {
-        err_path
+    let mut expected_paths = if err_path.is_file() {
+        let mut paths = vec![err_path];
+        if stdout_path.is_file() {
+            paths.push(stdout_path);
+        }
+        paths
     } else if stdout_path.is_file() {
-        stdout_path
+        vec![stdout_path]
     } else {
         return;
     };
-    let mut expected_paths = vec![expected];
     if stderr_path.is_file() {
         expected_paths.push(stderr_path);
     }
@@ -1063,10 +1548,46 @@ fn has_package_build_entry(path: &Path, source: &str) -> bool {
         .is_some()
 }
 
+/// Polyglot examples this host could not run, as `stem (missing tool)`. The
+/// run reports their count as UNAVAILABLE; an unavailable example is never a
+/// silent pass.
+static POLYGLOT_UNAVAILABLE: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// Record one polyglot example this host cannot run. A tool named in
+/// `JET_REQUIRE_POLYGLOT` (comma-separated tool names, or `all`) is required
+/// on this machine, so its absence fails the example instead.
+fn polyglot_unavailable(stem: &str, tool: &str) {
+    let required = std::env::var("JET_REQUIRE_POLYGLOT").unwrap_or_default();
+    let required = required
+        .split(',')
+        .map(str::trim)
+        .any(|name| name == "all" || name == tool);
+    assert!(
+        !required,
+        "Examples/features/{stem}: required polyglot toolchain `{tool}` is unavailable on this machine (JET_REQUIRE_POLYGLOT)"
+    );
+    POLYGLOT_UNAVAILABLE
+        .lock()
+        .unwrap()
+        .push(format!("{stem} ({tool})"));
+}
+
 /// I5 for card #502: each managed-runtime example binds its checked foreign
 /// source through the public CLI, then runs the generated project binding.
 /// Generated caches and native archives stay temp-only and host-specific.
+/// The front end needs the generated binding cache (E3208), so it is checked
+/// after the bind step, never against the bare example directory.
 fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
+    if entry.stem == "lowlevel/polyglot_com" {
+        // COM binds a host-compiled Windows type library and the example
+        // claims no Windows execution; `tests/ffi_com.rs` proves its E3260
+        // gate on every other host.
+        if !cfg!(windows) {
+            polyglot_unavailable(&entry.stem, "windows-com");
+            return;
+        }
+        panic!("Examples/features/lowlevel/polyglot_com: the Windows COM golden has no host runner yet");
+    }
     let (language, package, foreign_source) = match entry.stem.as_str() {
         "lowlevel/polyglot_go" => ("go", "handles", "handles.go"),
         "lowlevel/polyglot_java" => ("java", "counter", "Counter.java"),
@@ -1078,43 +1599,34 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         "lowlevel/polyglot_dart" => ("dart", "callbacks", "callbacks.dart"),
         other => panic!("unknown polyglot golden `{other}`"),
     };
-    let src = fs::read_to_string(&entry.path).unwrap();
-    if language != "dart" {
-        assert_front_end(entry, &src);
-    }
     if !env.have_rustc || !env.have_cargo {
-        eprintln!(
-            "note: front end checked; skipping Examples/features/{} golden (need provisioned compiler toolchain)",
-            entry.stem
-        );
+        polyglot_unavailable(&entry.stem, "rustc+cargo");
         return;
     }
-    // These examples exercise the real foreign-language inspection path. The
-    // source fixture is still valid when a host does not provision that
-    // language tool, so use the same capability-gated skip shape as the GTK
-    // and raylib examples instead of turning an environmental absence into a
-    // golden failure.
-    let tool = match language {
-        "go" => "go",
-        "fortran" => "gfortran",
-        "java" => "javac",
-        "cs" => "dotnet",
-        "pascal" => "fpc",
-        "ada" => "gnatmake",
-        "tcl" => "tclsh",
-        "dart" => "dart",
+    // These examples exercise the real foreign-language inspection path. A
+    // host without the language tool reports the example UNAVAILABLE, or
+    // fails it when JET_REQUIRE_POLYGLOT names that tool.
+    // Each tool's own version query: `go` takes a `version` subcommand and
+    // `fpc` prints its version with `-iV`; neither accepts `--version`, so a
+    // provisioned toolchain was misreported UNAVAILABLE.
+    let (tool, version_arg) = match language {
+        "go" => ("go", "version"),
+        "fortran" => ("gfortran", "--version"),
+        "java" => ("javac", "--version"),
+        "cs" => ("dotnet", "--version"),
+        "pascal" => ("fpc", "-iV"),
+        "ada" => ("gnatmake", "--version"),
+        "tcl" => ("tclsh", "--version"),
+        "dart" => ("dart", "--version"),
         _ => unreachable!("binder language has no provisioned tool"),
     };
     let have_tool = Command::new(tool)
-        .arg("--version")
+        .arg(version_arg)
         .output()
         .map(|output| output.status.success())
         .unwrap_or(false);
     if !have_tool {
-        eprintln!(
-            "note: front end checked; skipping Examples/features/{} golden (need provisioned {})",
-            entry.stem, tool
-        );
+        polyglot_unavailable(&entry.stem, tool);
         return;
     }
 
@@ -1145,19 +1657,18 @@ fn check_polyglot_binder_example(entry: &GoldenEntry, env: &GoldenEnv) {
         language,
         String::from_utf8_lossy(&bind.stderr)
     );
-    if language == "dart" {
-        let check = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["check", "run.jet"])
-            .current_dir(&dir)
-            .env("NO_COLOR", "1")
-            .output()
-            .unwrap();
-        assert!(
-            check.status.success(),
-            "Dart generated binding failed its front end:\n{}",
-            String::from_utf8_lossy(&check.stderr)
-        );
-    }
+    let check = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .args(["check", "run.jet"])
+        .current_dir(&dir)
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        check.status.success(),
+        "{} generated binding failed its front end:\n{}",
+        language,
+        String::from_utf8_lossy(&check.stderr)
+    );
 
     let run = if language == "dart" {
         Command::new("dart")
@@ -1350,4 +1861,119 @@ fn semantic_corpus_policy_runs_with_the_golden_gate() {
         .expect("corpus manifest")
         .check_gate("golden")
         .expect("golden corpus semantic policy");
+}
+
+#[test]
+fn audit_region_check_rejects_a_missing_sentry() {
+    let source = "fn run() {\n    #Unsafe(\"same reason\") {}\n    #Unsafe(\"same reason\") {}\n}\n";
+    let approved = source_audit_regions(source);
+    let one_sentry = "let a = jet_mem::jet_sentry_scope(true, \"example.jet\", 2, \"same reason\");\n";
+    let failures = audit_region_failures(source, "example.jet", &approved, one_sentry);
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("example.jet:3:"), "{failures:?}");
+    // An unrelated unsafe block or repeated evidence for the first source
+    // region must not make the missing second region pass.
+    let false_positive = format!("{one_sentry}{one_sentry}unsafe {{ prelude_fd() }}\n");
+    assert_eq!(
+        audit_region_failures(source, "example.jet", &approved, &false_positive).len(),
+        1
+    );
+    let complete = format!(
+        "{one_sentry}let b = jet_mem::jet_sentry_fenced_scope(false, \"example.jet\", 3, \"same reason\");\n"
+    );
+    assert!(audit_region_failures(source, "example.jet", &approved, &complete).is_empty());
+    let same_line = "fn run() {\n    #Unsafe(\"same reason\") {} #Unsafe(\"same reason\") {}\n}\n";
+    let failures = audit_region_failures(
+        same_line, "example.jet", &source_audit_regions(same_line), one_sentry,
+    );
+    assert_eq!(failures.len(), 1, "{failures:?}");
+    assert!(failures[0].contains("expected 2, found 1"), "{failures:?}");
+}
+
+#[test]
+fn audit_region_source_scan_uses_jet_strings_and_markers() {
+    let source = "// #Unsafe(\"comment\") {}\nfn run() {\n    text :: \"#Unsafe(\\\"string\\\")\"\n    #Unsafe(\"quoted \\\"reason\\\"\") {}\n}\n#[Pure, Unsafe(\"function reason\")]\nfn expert() {}\n";
+    let regions = source_audit_regions(source);
+    assert_eq!(regions.len(), 2, "{regions:?}");
+    assert_eq!(regions[0].reason, "quoted \"reason\"");
+    assert_eq!(regions[0].line, 4);
+    assert_eq!(regions[1].reason, "function reason");
+    assert_eq!(regions[1].line, 6);
+}
+
+fn expected_failure_exit(stem: &str, stderr: &str) -> Option<i32> {
+    // D-FAIL-EXIT1 / S36: runtime faults are not unhandled entry returns.
+    // D-DEADLINE1 explicitly gives an expired join (E3003) exit 70.
+    if stderr.starts_with("Stop [") || stderr.starts_with("Error [E3003]:") {
+        return Some(70);
+    }
+    if stderr.starts_with("Runtime fault [R0801]:")
+        || stderr.starts_with("Runtime fault [R0802]:")
+    {
+        // D-MEM-SENTRY1 is a runtime fault. Reject an oracle which itself
+        // claims another exit rather than silently accepting its contradiction.
+        if stderr.lines().any(|line| {
+            line.trim().strip_prefix("exit:").is_some_and(|exit| exit.trim() != "70")
+        }) {
+            return None;
+        }
+        return Some(70);
+    }
+    // io/log_fatal.jet:10-11 suppresses emission before log.fatal exits 1
+    // (ledger #1474). Empty stderr alone is not an exit oracle.
+    if stderr.is_empty() {
+        return (stem == "io/log_fatal").then_some(1);
+    }
+    // Source-proved entry returns (D-FAIL-EXIT1), not a generic Error-prefix
+    // inference. Each source leaves the named Err unhandled at run's edge;
+    // fatal_exit instead explicitly calls process.exit(1).
+    match stem {
+        "errors/propagation_journey"
+        | "errors/propagation_journey_direct"
+        | "errors/propagation_journey_one_hop"
+        | "errors/propagation_journey_core"
+        | "errors/error_context"
+        | "errors/default_error_conversion"
+        | "errors/default_err_edge"
+        | "errors/fatal_exit"
+        | "serde/decode_error_exit"
+        | "crypto/crypto_error_run" => Some(1),
+        _ => None,
+    }
+}
+
+fn assert_failure_stdout(stem: &str, expected: &[u8], actual: &[u8]) {
+    if actual != expected {
+        panic!(
+            "output mismatch for failing example {stem}:\n{}",
+            unified_diff(
+                &format!("Examples/features/expected/{stem}.out"),
+                &format!("Examples/features/{stem} stdout (actual)"),
+                &String::from_utf8_lossy(expected),
+                &String::from_utf8_lossy(actual),
+            )
+        );
+    }
+}
+
+#[test]
+fn failure_oracle_requires_exact_exit_and_stdout() {
+    assert_eq!(expected_failure_exit("test", "Stop [E3001]: panic\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Stop [E3012]: Stack overflow\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Error [E3003]: Deadline exceeded\n"), Some(70));
+    assert_eq!(expected_failure_exit("errors/default_err_edge", "Error [RUNFAIL]: bad input\n"), Some(1));
+    assert_eq!(expected_failure_exit("errors/fatal_exit", "[fatal] bad input\n"), Some(1));
+    assert_eq!(expected_failure_exit("test", "Error [E3999]: unknown fault\n"), None);
+    assert_eq!(expected_failure_exit("test", "Error: unknown entry\n"), None);
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\nexit: 70\n"), Some(70));
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\nexit: 1\n"), None);
+    assert_eq!(expected_failure_exit("test", "Runtime fault [R0802]: bad storage\n"), Some(70));
+    assert_eq!(expected_failure_exit("serde/decode_error_exit", "[at `name`: expected Text]\n  failed here: run (a.jet:1)\n"), Some(1));
+    assert_eq!(expected_failure_exit("io/log_fatal", ""), Some(1));
+    assert_eq!(expected_failure_exit("unknown", ""), None);
+    assert_eq!(expected_failure_exit("test", "unknown report\n"), None);
+    assert_failure_stdout("empty", b"", b"");
+    assert_failure_stdout("close", b"closed\n", b"closed\n");
+    assert!(std::panic::catch_unwind(|| assert_failure_stdout("close", b"closed\n", b"")).is_err());
+    assert!(std::panic::catch_unwind(|| assert_failure_stdout("empty", b"", b"unexpected\n")).is_err());
 }

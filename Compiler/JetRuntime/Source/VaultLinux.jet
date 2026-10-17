@@ -1,0 +1,1463 @@
+// SecretsCrypto.rs:1244-1354. Linux x86-64 raw descriptor policy; no Core fd
+// carrier. Paths borrow native raw-byte Text spans, never Rust Path/File objects.
+// os_syscall_i64 via the audited trap_syscall leaf preserves negative errno.
+VAULT_O_CLOEXEC :: prep { I64{524288} }
+VAULT_O_NOFOLLOW :: prep { I64{131072} }
+VAULT_O_DIRECTORY :: prep { I64{65536} }
+VAULT_RESOLVE :: prep { I64{12} }
+VAULT_STAT_BYTES :: prep { I64{144} }
+VAULT_STAT_MODE :: prep { I64{24} }
+VAULT_STAT_UID :: prep { I64{28} }
+// Only the temporary NUL shell is allocated; embedded NUL is invalid exactly
+// as CString::new. No normalization or UTF-8 conversion of filesystem bytes.
+fn vault_linux_path(path: I64) -> I64 {
+    length :: rt_text_len(path)
+    if (length < I64{0} || length == I64{9223372036854775807}) -> return I64{0}
+    data :: rt_text_data(path)
+    at := I64{0}
+    loop at < length {
+        if (rt_text_byte(data + at) == I64{0}) -> return I64{0}
+        at += I64{1}
+    }
+    result :: jet_rt_alloc(length + I64{1}, I64{1})
+    rt_text_bytes_copy(result, data, length)
+    rt_text_put(result + length, I64{0})
+    result
+}
+fn vault_linux_close(fd: I64) {
+    // close is not retried: Linux releases the descriptor even on EINTR.
+    if (fd >= I64{0}) {
+        _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+}
+// name is a borrowed NUL path; how exclusively borrows 24 writable bytes.
+// Seed flags and resolve bits are literal policy: no openat fallback on failure.
+fn vault_linux_openat(dirfd: I64, name: I64, flags: I64, mode: I64, how: I64) -> I64 {
+    rt_text_store(how, flags.bit_or(VAULT_O_NOFOLLOW).bit_or(VAULT_O_CLOEXEC))
+    rt_text_store(how + I64{8}, mode)
+    rt_text_store(how + I64{16}, VAULT_RESOLVE)
+    trap_syscall(I64{437}, dirfd, name, how, I64{24}, I64{0}, I64{0})
+}
+// fstat's x86-64 kernel layout agrees with SentryLedger's newfstatat layout.
+// The caller owns all 144 scratch bytes; no allocation and no retained pointer.
+fn vault_linux_stat(fd: I64, scratch: I64) -> I64 {
+    trap_syscall(I64{5}, fd, scratch, I64{0}, I64{0}, I64{0}, I64{0})
+}
+fn vault_linux_dir_unsupported(errno: I64) -> Bool {
+    errno == I64{-18} || errno == I64{-20} || errno == I64{-22} || errno == I64{-38} || errno == I64{-40}
+}
+// Adopt synthesized operation/path owners directly, avoiding clone+drop copies.
+// scratch exclusively borrows 24 bytes and is reused only after the syscall.
+fn vault_linux_dir_io(stat: Bool, repository: Bool, scratch: I64) -> I64 {
+    rt_text_store(scratch, if stat -> I64{1952543859} else -> I64{1852141679})
+    operation :: jet_rt_string_from_static(scratch, I64{4})
+    rt_text_store(scratch, if repository -> I64{8388362703418520124} else -> I64{7218553786919384636})
+    rt_text_store(scratch + I64{8}, if repository -> I64{1048146543} else -> I64{4092521})
+    path :: jet_rt_string_from_static(scratch, if repository -> I64{12} else -> I64{11})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{11})
+    rt_text_store(error + VAULT_ERROR_FIRST, operation)
+    rt_text_store(error + VAULT_ERROR_SECOND, path)
+    error
+}
+// Returns zero on success and adopts the held .jet fd into out. On error returns
+// a real private error owner; out is unchanged. Root may follow symlinks just
+// as File::open in the seed; the child .jet path may not follow any symlink.
+fn vault_linux_dir_at_root(root: I64, out: I64) -> I64 {
+    scratch :: jet_rt_alloc(VAULT_STAT_BYTES + I64{24}, I64{8})
+    root_path :: vault_linux_path(root)
+    root_fd :: if (root_path == I64{0}) -> I64{-22} else -> vault_linux_plain_open(root_path)
+    if (root_path != I64{0}) -> jet_rt_free(root_path, rt_text_len(root) + I64{1}, I64{1})
+    if (root_fd < I64{0}) {
+        error :: vault_linux_dir_io(false, true, scratch)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return error
+    }
+    rt_text_store(scratch + VAULT_STAT_BYTES, I64{1952803374}) // ".jet\0"
+    dir_fd :: vault_linux_openat(root_fd, scratch + VAULT_STAT_BYTES, VAULT_O_DIRECTORY, I64{0}, scratch)
+    vault_linux_close(root_fd)
+    if (dir_fd < I64{0}) {
+        error :: if vault_linux_dir_unsupported(dir_fd) -> vault_error_new(I64{7}, I64{0}, I64{0}) else -> vault_linux_dir_io(false, false, scratch)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return error
+    }
+    if (vault_linux_stat(dir_fd, scratch) != I64{0}) {
+        vault_linux_close(dir_fd)
+        error :: vault_linux_dir_io(true, false, scratch)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return error
+    }
+    mode :: rt_text_word(scratch + VAULT_STAT_MODE).bit_and(I64{4294967295})
+    uid :: rt_text_word(scratch + VAULT_STAT_UID).bit_and(I64{4294967295})
+    user :: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    // Seed authority_identity also rejects an unavailable session identity.
+    session :: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (session < I64{0} || (mode.bit_and(I64{61440})) != I64{16384} || uid != user || (mode.bit_and(I64{18})) != I64{0}) {
+        vault_linux_close(dir_fd)
+        jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+        return vault_error_new(I64{7}, I64{0}, I64{0})
+    }
+    jet_rt_free(scratch, VAULT_STAT_BYTES + I64{24}, I64{8})
+    rt_text_store(out, dir_fd)
+    I64{0}
+}
+
+// SecretsCrypto.rs:2178-2257. Borrowed NUL names, exclusive scratch>=80.
+// Diagnostics adopt only provider-selected operation/redacted-path text.
+fn vault_linux_entry_io(operation: I64, length: I64, entry: Bool, scratch: I64) -> I64 {
+    rt_text_store(scratch, operation)
+    op :: jet_rt_string_from_static(scratch, length)
+    rt_text_store(scratch, if entry -> I64{7290611380957312572} else -> I64{8299417697488303676})
+    rt_text_store(scratch + I64{8}, if entry -> I64{268325516398} else -> I64{267989970804})
+    path :: jet_rt_string_from_static(scratch, I64{13})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{11})
+    rt_text_store(error + VAULT_ERROR_FIRST, op)
+    rt_text_store(error + VAULT_ERROR_SECOND, path)
+    error
+}
+fn vault_linux_rename(dirfd: I64, old: I64, new: I64, flags: I64, scratch: I64) -> I64 {
+    result :: trap_syscall(I64{316}, dirfd, old, dirfd, new, flags, I64{0})
+    if (result >= I64{0}) -> return I64{0}
+    if (result == I64{-38} || result == I64{-22}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+    vault_linux_entry_io(I64{30518463306100329}, I64{7}, false, scratch)
+}
+fn vault_linux_unlink(dirfd: I64, name: I64, scratch: I64) -> I64 {
+    result :: trap_syscall(I64{263}, dirfd, name, I64{0}, I64{0}, I64{0}, I64{0})
+    if (result == I64{0}) -> return I64{0}
+    vault_linux_entry_io(I64{118121959288437}, I64{6}, true, scratch)
+}
+fn vault_linux_link_file(file: I64, dirfd: I64, name: I64, scratch: I64) -> I64 {
+    rt_text_store(scratch, I64{7310238724270485551})
+    rt_text_store(scratch + I64{8}, I64{52108257617516})
+    // Build /proc/self/fd/<decimal fd> directly in caller scratch, no builder.
+    number := file
+    end := I64{64}
+    loop {
+        end -= I64{1}
+        rt_text_put(scratch + end, I64{48} + number % I64{10})
+        number = number /% I64{10}
+        if (number == I64{0}) -> break
+    }
+    count :: I64{64} - end
+    rt_text_bytes_copy(scratch + I64{14}, scratch + end, count)
+    rt_text_put(scratch + I64{14} + count, I64{0})
+    result :: trap_syscall(I64{265}, I64{-100}, scratch, dirfd, name, I64{1024}, I64{0})
+    if (result == I64{0}) -> return I64{0}
+    if (result == I64{-38} || result == I64{-22}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+    vault_error_new(I64{6}, I64{0}, I64{0})
+}
+// SecretsCrypto.rs:2260-2277. Borrowed fds; exclusive stat scratch288.
+fn vault_linux_same_inode(left: I64, right: I64, scratch: I64) -> Bool {
+    if (vault_linux_stat(left, scratch) != I64{0}) -> return false
+    if (vault_linux_stat(right, scratch + VAULT_STAT_BYTES) != I64{0}) -> return false
+    rt_text_word(scratch) == rt_text_word(scratch + VAULT_STAT_BYTES) &&
+        rt_text_word(scratch + I64{8}) == rt_text_word(scratch + VAULT_STAT_BYTES + I64{8})
+}
+fn vault_linux_write_all(fd: I64, bytes: I64, count: I64) -> Bool {
+    at := I64{0}
+    loop at < count {
+        written :: trap_syscall(I64{1}, fd, bytes + at, count - at, I64{0}, I64{0}, I64{0})
+        if (written > I64{0}) { at += written } else if (written != I64{-4}) -> return false
+    }
+    true
+}
+// The exact seed substitution hook is consulted only for the lock basename.
+// Its borrowed native Text header/raw bytes occupy caller scratch after stat.
+fn vault_linux_lock_substitution(name: I64, scratch: I64) -> Bool {
+    rt_text_store(scratch, I64{8319385953628418862})
+    rt_text_store(scratch + I64{8}, I64{7165064478695317806})
+    rt_text_store(scratch + I64{16}, I64{107})
+    at := I64{0}
+    loop {
+        if (at == I64{18}) -> break
+        if (rt_text_byte(name + at) != rt_text_byte(scratch + at)) -> return false
+        at += I64{1}
+    }
+    rt_text_store(scratch, I64{8463505548608959859})
+    rt_text_store(scratch + I64{8}, I64{3272818884422231412})
+    rt_text_store(scratch + I64{16}, I64{7521905771990509153})
+    rt_text_store(scratch + I64{24}, I64{7037797})
+    rt_text_store(scratch + I64{288}, scratch)
+    rt_text_store(scratch + I64{296}, I64{27})
+    rt_text_store(scratch + I64{304}, I64{0})
+    jet_rt_vault_test_fault(scratch + I64{288})
+}
+// SecretsCrypto.rs:2279-2342. Scratch336: stat288 + raw local24 + outcome8.
+// Returns an owned error or zero; successful out is Bool encoded as word0/1.
+// Mutation is fd-relative. Reopen the quarantined entry and compare the HELD
+// inode again before permitting unlink. On substitution try restoring the name.
+fn vault_linux_quarantine_exact(dirfd: I64, name: I64, held: I64, quarantine: I64, out: I64, scratch: I64) -> I64 {
+    visible :: vault_linux_openat(dirfd, name, I64{0}, I64{0}, scratch)
+    if (visible == I64{-2}) {
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    if (visible < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    same :: vault_linux_same_inode(visible, held, scratch)
+    vault_linux_close(visible)
+    if !same {
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    if vault_linux_lock_substitution(name, scratch) {
+        acquired :: scratch + I64{288}
+        rt_text_store(acquired, I64{8319385953628418862})
+        rt_text_store(acquired + I64{8}, I64{7165064478695317806})
+        rt_text_store(acquired + I64{16}, I64{8244249722737471083})
+        rt_text_store(acquired + I64{24}, I64{25701})
+        error :: vault_linux_rename(dirfd, name, acquired, I64{1}, scratch)
+        if (error != I64{0}) -> return error
+        replacement :: vault_linux_openat(dirfd, name, I64{193}, I64{384}, scratch)
+        if (replacement < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        rt_text_store(acquired, I64{7882815992864204146})
+        rt_text_store(acquired + I64{8}, I64{7630437})
+        written :: vault_linux_write_all(replacement, acquired, I64{11})
+        synced :: if written -> vault_linux_fsync(replacement) else -> I64{-1}
+        vault_linux_close(replacement)
+        if (!written || synced != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    }
+    error :: vault_linux_rename(dirfd, name, quarantine, I64{1}, scratch)
+    if (error != I64{0}) -> return error
+    moved :: vault_linux_openat(dirfd, quarantine, I64{0}, I64{0}, scratch)
+    if (moved < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    matches :: vault_linux_same_inode(moved, held, scratch)
+    vault_linux_close(moved)
+    if !matches {
+        ignored :: vault_linux_rename(dirfd, quarantine, name, I64{1}, scratch)
+        vault_error_drop(ignored)
+    }
+    rt_text_store(out, if matches -> I64{1} else -> I64{0})
+    I64{0}
+}
+fn vault_linux_remove_exact(dirfd: I64, name: I64, held: I64, quarantine: I64, out: I64, scratch: I64) -> I64 {
+    result :: scratch + I64{328}
+    error :: vault_linux_quarantine_exact(dirfd, name, held, quarantine, result, scratch)
+    if (error != I64{0}) -> return error
+    if (rt_text_word(result) == I64{0}) {
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    unlinked :: vault_linux_unlink(dirfd, quarantine, scratch)
+    if (unlinked != I64{0}) -> return unlinked
+    rt_text_store(out, I64{1})
+    I64{0}
+}
+// SecretsCrypto.rs:2818-2834 only: the caller must already have staged/decoded
+// ciphertext, checked start state and retained its lock. This raw inode gate
+// performs the visible-name and installed-name checks, not a new writer policy.
+// Success adopts the VERIFIED installed fd; failure leaves installed_out alone.
+fn vault_linux_install_exact(dirfd: I64, next: I64, final_name: I64, temp: I64, absent: Bool, scratch: I64, installed_out: I64) -> I64 {
+    visible :: vault_linux_openat(dirfd, next, I64{0}, I64{0}, scratch)
+    if (visible < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    same :: vault_linux_same_inode(visible, temp, scratch)
+    vault_linux_close(visible)
+    if !same -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    flags :: if absent -> I64{1} else -> I64{2}
+    error :: vault_linux_rename(dirfd, next, final_name, flags, scratch)
+    if (error != I64{0}) -> return error
+    installed :: vault_linux_openat(dirfd, final_name, I64{0}, I64{0}, scratch)
+    if (installed < I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    matches :: vault_linux_same_inode(installed, temp, scratch)
+    if !matches {
+        vault_linux_close(installed)
+        if !absent {
+            ignored :: vault_linux_rename(dirfd, next, final_name, I64{2}, scratch)
+            vault_error_drop(ignored)
+        }
+        return vault_error_new(I64{9}, I64{0}, I64{0})
+    }
+    rt_text_store(installed_out, installed)
+    I64{0}
+}
+
+// SecretsCrypto.rs:2268-2277. The duplicate shares the seek offset as Rust
+// File::try_clone does. It is closed on all paths; the borrowed original stays
+// live. Binary result adopts a packed DataSequence, not a Rust Vec carrier.
+// scratch borrows one exclusive byte for EOF probing; a full buffer does not
+// allocate or copy merely to discover EOF.
+fn vault_linux_read_file(file: I64, out: I64, scratch: I64) -> I64 {
+    cloned :: trap_syscall(I64{72}, file, I64{1030}, I64{3}, I64{0}, I64{0}, I64{0})
+    if (cloned < I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
+    if (trap_syscall(I64{8}, cloned, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}) < I64{0}) {
+        vault_linux_close(cloned)
+        return vault_error_new(I64{4}, I64{0}, I64{0})
+    }
+    error :: vault_linux_read_to_end(cloned, out, scratch)
+    vault_linux_close(cloned)
+    error
+}
+// std::fs::read_to_string's opened fd has no duplicate or seek. This shared
+// EOF loop accepts regular files AND FIFOs/char devices/pipes. It borrows the
+// descriptor and one caller byte, retries EINTR and wipes partial error bytes.
+fn vault_linux_read_to_end(file: I64, out: I64, scratch: I64) -> I64 {
+    bytes :: data_sequence_new(I64{8192}, RT_HOST_U8_STRIDE)
+    loop {
+        length :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
+        capacity :: rt_text_word(bytes + DATA_SEQUENCE_CAPACITY)
+        full :: length == capacity
+        target :: if full -> scratch else -> rt_text_word(bytes + DATA_SEQUENCE_DATA) + length
+        available :: if full -> I64{1} else -> capacity - length
+        count :: trap_syscall(I64{0}, file, target, available, I64{0}, I64{0}, I64{0})
+        if (count > I64{0}) {
+            if full {
+                slot :: data_sequence_reserve(bytes, RT_HOST_U8_STRIDE)
+                rt_text_put(slot, rt_text_byte(scratch))
+            }
+            rt_text_store(bytes + DATA_SEQUENCE_LENGTH, length + count)
+        } else if (count == I64{0}) {
+            rt_text_store(out, bytes)
+            return I64{0}
+        } else if (count != I64{-4}) {
+            thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+            rt_text_put(scratch, I64{0})
+            data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+            return vault_error_new(I64{4}, I64{0}, I64{0})
+        }
+    }
+}
+// SecretsCrypto.rs:1428-1445. Successful absence writes null; present data
+// transfers one owned packed sequence. Every error leaves out unchanged.
+fn vault_linux_read_at_root(root: I64, name: I64, out: I64) -> I64 {
+    slots :: jet_rt_alloc(I64{32}, I64{8})
+    error :: vault_linux_dir_at_root(root, slots)
+    if (error != I64{0}) {
+        jet_rt_free(slots, I64{32}, I64{8})
+        return error
+    }
+    dirfd :: rt_text_word(slots)
+    path :: vault_linux_path(name)
+    file :: if (path == I64{0}) -> I64{-22} else -> vault_linux_openat(dirfd, path, I64{0}, I64{0}, slots + I64{8})
+    if (path != I64{0}) -> jet_rt_free(path, rt_text_len(name) + I64{1}, I64{1})
+    vault_linux_close(dirfd)
+    if (file == I64{-2}) {
+        jet_rt_free(slots, I64{32}, I64{8})
+        rt_text_store(out, I64{0})
+        return I64{0}
+    }
+    if (file < I64{0}) {
+        jet_rt_free(slots, I64{32}, I64{8})
+        kind :: if (file == I64{-38} || file == I64{-22} || file == I64{-40}) -> I64{7} else -> I64{4}
+        return vault_error_new(kind, I64{0}, I64{0})
+    }
+    result :: vault_linux_read_file(file, out, slots + I64{8})
+    vault_linux_close(file)
+    jet_rt_free(slots, I64{32}, I64{8})
+    result
+}
+
+// Path equality is component-wise: ".", "./", ".//" and "./." are CurDir,
+// while an empty path, a rooted path and any other component are not.
+fn vault_root_is_current(root: I64) -> Bool {
+    data :: rt_text_data(root)
+    length :: rt_text_len(root)
+    if (length == I64{0} || rt_text_byte(data) != I64{46}) -> return false
+    if (length == I64{1}) -> return true
+    if (rt_text_byte(data + I64{1}) != I64{47}) -> return false
+    at := I64{1}
+    loop at < length {
+        if (rt_text_byte(data + at) == I64{47}) {
+            at += I64{1}
+        } else {
+            if (rt_text_byte(data + at) != I64{46}) -> return false
+            at += I64{1}
+            if (at < length && rt_text_byte(data + at) != I64{47}) -> return false
+        }
+    }
+    true
+}
+// Reuse the ONE Host startup environment view, just as Deadline/Scheduler/
+// SentryLedger do. HostStartup.jet:227-239 owns rt_env_get: absent or invalid
+// UTF-8 is null; empty is a real empty Text. D-ENV-MUTATE1=A leaves std's host
+// environment immutable, so this capture preserves the seed std::env::var read.
+fn vault_identity_env(first: I64, second: I64, length: I64, scratch: I64) -> I64 {
+    rt_text_store(scratch, first)
+    rt_text_store(scratch + I64{8}, second)
+    view :: scratch + I64{16}
+    rt_text_store(view, scratch)
+    rt_text_store(view + I64{8}, length)
+    rt_text_store(view + I64{16}, I64{0})
+    rt_env_get(view)
+}
+// SecretsCrypto.rs:137-150,1237-1242. A final owned NUL path is assembled once;
+// no intermediate path joins/copies and no private getenv/environ provider.
+fn vault_identity_path(root: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{64}, I64{8})
+    base := root
+    owned_base := I64{0}
+    dot := false
+    suffix_kind := I64{0}
+    if vault_root_is_current(root) {
+        keys :: vault_identity_env(I64{6005907768099489098}, I64{1380533343}, I64{12}, scratch)
+        if (keys != I64{0} && rt_text_len(keys) != I64{0}) {
+            base = keys
+            owned_base = keys
+            suffix_kind = I64{1}
+        } else {
+            jet_rt_string_drop(keys)
+            home := vault_identity_env(I64{1162694472}, I64{0}, I64{4}, scratch)
+            if (home == I64{0}) -> home = vault_identity_env(I64{5066358610746233685}, I64{4541513}, I64{11}, scratch)
+            if (home == I64{0}) { dot = true } else {
+                base = home
+                owned_base = home
+            }
+            suffix_kind = I64{2}
+        }
+    }
+    base_length :: if dot -> I64{1} else -> rt_text_len(base)
+    base_data :: if dot -> I64{0} else -> rt_text_data(base)
+    at := I64{0}
+    if !dot {
+        loop at < base_length {
+            if (rt_text_byte(base_data + at) == I64{0}) {
+                jet_rt_string_drop(owned_base)
+                jet_rt_free(scratch, I64{64}, I64{8})
+                return I64{0}
+            }
+            at += I64{1}
+        }
+    }
+    suffix_length := I64{21}
+    if (suffix_kind == I64{0}) {
+        rt_text_store(scratch, I64{7162257430040634731})
+        rt_text_store(scratch + I64{8}, I64{7306080143728207218})
+        rt_text_store(scratch + I64{16}, I64{521644110958})
+    } else if (suffix_kind == I64{1}) {
+        suffix_length = I64{16}
+        rt_text_store(scratch, I64{3347146927126046067})
+        rt_text_store(scratch + I64{8}, I64{8751735924676977769})
+    } else {
+        suffix_length = I64{26}
+        rt_text_store(scratch, I64{8747515702797494830})
+        rt_text_store(scratch + I64{8}, I64{8387235652276793203})
+        rt_text_store(scratch + I64{16}, I64{7598819853036236403})
+        rt_text_store(scratch + I64{24}, I64{31092})
+    }
+    separator :: base_length != I64{0} && (dot || rt_text_byte(base_data + base_length - I64{1}) != I64{47})
+    if (base_length > I64{9223372036854775807} - suffix_length - I64{2}) {
+        jet_rt_string_drop(owned_base)
+        jet_rt_free(scratch, I64{64}, I64{8})
+        return I64{0}
+    }
+    length :: base_length + (if separator -> I64{1} else -> I64{0}) + suffix_length
+    result :: jet_rt_alloc(I64{24}, I64{8})
+    data :: jet_rt_alloc(length + I64{1}, I64{1})
+    if dot { rt_text_put(data, I64{46}) } else { rt_text_bytes_copy(data, base_data, base_length) }
+    cursor := base_length
+    if separator {
+        rt_text_put(data + cursor, I64{47})
+        cursor += I64{1}
+    }
+    rt_text_bytes_copy(data + cursor, scratch, suffix_length)
+    rt_text_put(data + length, I64{0})
+    rt_text_store(result, data)
+    rt_text_store(result + I64{8}, length)
+    rt_text_store(result + I64{16}, length + I64{1})
+    jet_rt_string_drop(owned_base)
+    jet_rt_free(scratch, I64{64}, I64{8})
+    result
+}
+// Identity reads intentionally follow symlinks, unlike vault-directory reads.
+// InvalidData is mapped by the subsequent crypto UTF-8 preflight to Locked.
+fn vault_identity_read_at_root(root: I64, out: I64) -> I64 {
+    path :: vault_identity_path(root)
+    if (path == I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
+    file :: vault_linux_plain_open(rt_text_data(path))
+    jet_rt_string_drop(path)
+    if (file < I64{0}) -> return vault_error_new(I64{4}, I64{0}, I64{0})
+    scratch :: jet_rt_alloc(I64{8}, I64{8})
+    error :: vault_linux_read_to_end(file, out, scratch)
+    vault_linux_close(file)
+    jet_rt_free(scratch, I64{8}, I64{8})
+    error
+}
+
+// Every seed std File::open/fs::read* site uses cvt_r; raw openat2/pidfd sites
+// do NOT. This single plain reader follows symlinks and retries only EINTR.
+fn vault_linux_plain_open_at(dir: I64, path: I64, flags: I64, mode: I64) -> I64 {
+    file := I64{-4}
+    loop file == (I64{-4}) {
+        file = trap_syscall(I64{257}, dir, path, flags.bit_or(VAULT_O_CLOEXEC), mode, I64{0}, I64{0})
+    }
+    file
+}
+fn vault_linux_plain_open(path: I64) -> I64 {
+    vault_linux_plain_open_at(I64{-100}, path, I64{0}, I64{0})
+}
+// Reuse Display.jet's unsigned split and final integer-digit writer directly,
+// avoiding a temporary Text owner/copy for decimal path and lock fields.
+fn vault_decimal_put(out: I64, value: I64) -> I64 {
+    half :: (value >> I64{1}).bit_and(I64{9223372036854775807})
+    quotient :: half /% I64{5}
+    remainder :: (half % I64{5}) * I64{2} + (value.bit_and(I64{1}))
+    if (quotient == I64{0}) {
+        rt_text_put(out, I64{48} + remainder)
+        return I64{1}
+    }
+    digits :: display_integer_length(quotient)
+    display_integer_digits(out, digits, quotient, digits)
+    rt_text_put(out + digits, I64{48} + remainder)
+    digits + I64{1}
+}
+// Scheduler.jet:454-472's checked unsigned accumulation, without zero->one
+// thread-count policy. Uint::from_str accepts '+' but neither '-' nor spaces.
+fn vault_parse_uint(bytes: I64, length: I64, narrow: Bool, out: I64) -> Bool {
+    if (length == I64{0}) -> return false
+    start :: if (rt_text_byte(bytes) == I64{43}) -> I64{1} else -> I64{0}
+    if (start == length) -> return false
+    limit :: if narrow -> I64{429496729} else -> I64{1844674407370955161}
+    value := I64{0}
+    at := start
+    loop at < length {
+        byte :: rt_text_byte(bytes + at)
+        if (byte < I64{48} || byte > I64{57}) -> return false
+        digit :: byte - I64{48}
+        if (value < I64{0} || value > limit || (value == limit && digit > I64{5})) -> return false
+        value = wrapping(value * I64{10} + digit)
+        at += I64{1}
+    }
+    rt_text_store(out, value)
+    true
+}
+// SecretsCrypto.rs:2345-2348: LAST ')' then the TWENTIETH whitespace token.
+// Successful zero and all 64-bit values remain distinct from parse failure.
+fn vault_process_start_parse(bytes: I64, length: I64, out: I64) -> Bool {
+    if (length == I64{0} || !vault_utf8_valid(bytes, length)) -> return false
+    close := length
+    loop {
+        if (close == I64{0}) -> return false
+        close -= I64{1}
+        if (rt_text_byte(bytes + close) == I64{41}) -> break
+    }
+    at := close + I64{1}
+    token := I64{0}
+    loop {
+        at += vault_crypto_trim_start(bytes + at, length - at)
+        if (at == length) -> return false
+        end := at
+        loop end < length {
+            if unicode_is_white_space(rt_text_decode(bytes + end)) -> break
+            end += rt_text_width(bytes + end)
+        }
+        if (token == I64{19}) -> return vault_parse_uint(bytes + at, end - at, false, out)
+        token += I64{1}
+        at = end
+    }
+}
+fn vault_process_start(pid: I64, out: I64) -> Bool {
+    scratch :: jet_rt_alloc(I64{48}, I64{8})
+    rt_text_store(scratch, I64{52104118038575}) // "/proc/"
+    digits :: vault_decimal_put(scratch + I64{6}, pid)
+    rt_text_store(scratch + I64{6} + digits, I64{499851227951}) // "/stat\0"
+    file :: vault_linux_plain_open(scratch)
+    if (file < I64{0}) {
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return false
+    }
+    error :: vault_linux_read_to_end(file, scratch + I64{32}, scratch + I64{40})
+    vault_linux_close(file)
+    if (error != I64{0}) {
+        vault_error_drop(error)
+        jet_rt_free(scratch, I64{48}, I64{8})
+        return false
+    }
+    bytes :: rt_text_word(scratch + I64{32})
+    parsed :: vault_process_start_parse(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_LENGTH), out)
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    jet_rt_free(scratch, I64{48}, I64{8})
+    parsed
+}
+
+// SecretsCrypto.rs:2351-2413. All spans borrow the validated UTF-8 lock text.
+// No case normalization: only the nonce accepts uppercase ASCII hex.
+fn vault_valid_hex(bytes: I64, length: I64, count: I64) -> Bool {
+    if (length != count) -> return false
+    nonzero := false
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(bytes + at)
+        if !((byte >= I64{48} && byte <= I64{57}) || (byte >= I64{65} && byte <= I64{70}) || (byte >= I64{97} && byte <= I64{102})) -> return false
+        if (byte != I64{48}) -> nonzero = true
+        at += I64{1}
+    }
+    nonzero
+}
+fn vault_lock_key(bytes: I64, length: I64, first: I64, second: I64, count: I64) -> Bool {
+    if (length != count) -> return false
+    at := I64{0}
+    loop at < count {
+        word :: if (at < I64{8}) -> first else -> second
+        if (rt_text_byte(bytes + at) != ((word >> ((at % I64{8}) * I64{8})).bit_and(I64{255}))) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn vault_lock_hex_equal(text: I64, length: I64, raw: I64, count: I64) -> Bool {
+    if (length != count * I64{2}) -> return false
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(raw + at /% I64{2})
+        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte.bit_and(I64{15})
+        expected :: if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87}
+        if (rt_text_byte(text + at) != expected) -> return false
+        at += I64{1}
+    }
+    true
+}
+// out exclusively borrows 32 bytes (pid/start/nonce span); scratch borrows8.
+// Failure leaves out untouched, including invalid UTF-8/missing/invalid fields.
+// Each occurrence replaces the previous value, EVEN when numeric parsing fails.
+fn vault_lock_fields(bytes: I64, length: I64, expected_repo: I64, expected_revision: I64, expected_hash: I64, out: I64, scratch: I64) -> Bool {
+    if !vault_utf8_valid(bytes, length) -> return false
+    repo := I64{0}
+    repo_length := I64{0}
+    hash := I64{0}
+    hash_length := I64{0}
+    nonce := I64{0}
+    nonce_length := I64{0}
+    pid := I64{0}
+    start := I64{0}
+    revision := I64{0}
+    pid_valid := false
+    start_valid := false
+    revision_valid := false
+    at := I64{0}
+    loop at < length {
+        at += vault_crypto_trim_start(bytes + at, length - at)
+        if (at == length) -> break
+        end := at
+        equals := length
+        loop end < length {
+            if unicode_is_white_space(rt_text_decode(bytes + end)) -> break
+            if (equals == length && rt_text_byte(bytes + end) == I64{61}) -> equals = end
+            end += rt_text_width(bytes + end)
+        }
+        if (equals != length) {
+            key :: bytes + at
+            key_length :: equals - at
+            value :: bytes + equals + I64{1}
+            value_length :: end - equals - I64{1}
+            if vault_lock_key(key, key_length, I64{1869636978}, I64{0}, I64{4}) {
+                repo = value
+                repo_length = value_length
+            } else if vault_lock_key(key, key_length, I64{7957695010998478194}, I64{0}, I64{8}) {
+                revision_valid = vault_parse_uint(value, value_length, false, scratch)
+                if revision_valid -> revision = rt_text_word(scratch)
+            } else if vault_lock_key(key, key_length, I64{6580592}, I64{0}, I64{3}) {
+                pid_valid = vault_parse_uint(value, value_length, true, scratch)
+                if pid_valid -> pid = rt_text_word(scratch)
+            } else if vault_lock_key(key, key_length, I64{3275088233325621872}, I64{500135195763}, I64{13}) {
+                start_valid = vault_parse_uint(value, value_length, false, scratch)
+                if start_valid -> start = rt_text_word(scratch)
+            } else if vault_lock_key(key, key_length, I64{435459878766}, I64{0}, I64{5}) {
+                nonce = value
+                nonce_length = value_length
+            } else if vault_lock_key(key, key_length, I64{1752392040}, I64{0}, I64{4}) {
+                hash = value
+                hash_length = value_length
+            }
+        }
+        at = end
+    }
+    if (!pid_valid || !start_valid || !revision_valid || revision != expected_revision) -> return false
+    if !vault_lock_hex_equal(repo, repo_length, expected_repo, I64{16}) -> return false
+    if !vault_lock_hex_equal(hash, hash_length, expected_hash, I64{32}) -> return false
+    if !vault_valid_hex(nonce, nonce_length, I64{32}) -> return false
+    rt_text_store(out, pid)
+    rt_text_store(out + I64{8}, start)
+    rt_text_store(out + I64{16}, nonce)
+    rt_text_store(out + I64{24}, nonce_length)
+    true
+}
+
+// SecretsCrypto.rs:2170,2338-2342. Private fd ownership only; no Core FD carrier.
+VAULT_LOCK_BYTES :: prep { I64{32} }
+VAULT_LOCK_DIR :: prep { I64{0} }
+VAULT_LOCK_FILE :: prep { I64{8} }
+VAULT_LOCK_NONCE :: prep { I64{16} }
+fn vault_hex_put(out: I64, raw: I64, count: I64) {
+    at := I64{0}
+    loop at < count * (I64{2}) {
+        byte :: rt_text_byte(raw + at /% I64{2})
+        nibble :: if (at % I64{2} == I64{0}) -> byte >> I64{4} else -> byte.bit_and(I64{15})
+        rt_text_put(out + at, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87})
+        at += I64{1}
+    }
+}
+// Adopts both descriptors only after acquire has completed writing+fsync.
+fn vault_lock_adopt(dir: I64, file: I64, nonce: I64) -> I64 {
+    guard :: jet_rt_alloc(VAULT_LOCK_BYTES, I64{8})
+    rt_text_store(guard + VAULT_LOCK_DIR, dir)
+    rt_text_store(guard + VAULT_LOCK_FILE, file)
+    rt_text_bytes_copy(guard + VAULT_LOCK_NONCE, nonce, I64{16})
+    guard
+}
+fn vault_lock_drop(guard: I64) {
+    if (guard == I64{0}) -> return
+    scratch :: jet_rt_alloc(I64{424}, I64{8})
+    name :: scratch + I64{336}
+    quarantine :: scratch + I64{360}
+    rt_text_store(name, I64{8319385953628418862})
+    rt_text_store(name + I64{8}, I64{7165064478695317806})
+    rt_text_store(name + I64{16}, I64{107})
+    rt_text_bytes_copy(quarantine, name, I64{16})
+    rt_text_store(quarantine + I64{16}, I64{13059373918334571})
+    vault_hex_put(quarantine + I64{23}, guard + VAULT_LOCK_NONCE, I64{16})
+    rt_text_put(quarantine + I64{55}, I64{0})
+    dir :: rt_text_word(guard + VAULT_LOCK_DIR)
+    file :: rt_text_word(guard + VAULT_LOCK_FILE)
+    ignored :: vault_linux_remove_exact(dir, name, file, quarantine, scratch + I64{416}, scratch)
+    vault_error_drop(ignored)
+    vault_linux_close(dir)
+    vault_linux_close(file)
+    thread_zero(scratch, I64{424})
+    jet_rt_free(scratch, I64{424}, I64{8})
+    thread_zero(guard, VAULT_LOCK_BYTES)
+    jet_rt_free(guard, VAULT_LOCK_BYTES, I64{8})
+}
+
+// Seed-generated diagnostics adopt their final texts, never clone temporaries.
+fn vault_lock_io(scratch: I64) -> I64 {
+    rt_text_store(scratch, I64{1801678700})
+    operation :: jet_rt_string_from_static(scratch, I64{4})
+    rt_text_store(scratch, I64{7795014539222808124})
+    rt_text_store(scratch + I64{8}, I64{1047225199})
+    path :: jet_rt_string_from_static(scratch, I64{12})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{11})
+    rt_text_store(error + VAULT_ERROR_FIRST, operation)
+    rt_text_store(error + VAULT_ERROR_SECOND, path)
+    error
+}
+fn vault_zero_lock_nonce(scratch: I64) -> I64 {
+    rt_text_store(scratch, I64{7312206923048509814})
+    rt_text_store(scratch + I64{8}, I64{3272818884422233970})
+    rt_text_store(scratch + I64{16}, I64{435459878766})
+    incident :: jet_rt_string_from_static(scratch, I64{21})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{12})
+    rt_text_store(error + VAULT_ERROR_FIRST, incident)
+    rt_text_store(error + VAULT_ERROR_SECOND, I64{0})
+    error
+}
+// SecretsCrypto.rs:2449-2519. Scratch328 owns the pre-guard fds. Failures close
+// descriptors but deliberately leave the created name, matching seed RAII.
+fn vault_acquire_lock_inner(root: I64, repo: I64, revision: I64, hash: I64, recover: Bool, out: I64, scratch: I64) -> I64 {
+    dir_slot :: scratch + I64{304}
+    file_slot :: scratch + I64{312}
+    error :: vault_linux_dir_at_root(root, dir_slot)
+    if (error != I64{0}) -> return error
+    dir :: rt_text_word(dir_slot)
+    rt_text_store(scratch, I64{8319385953628418862})
+    rt_text_store(scratch + I64{8}, I64{7165064478695317806})
+    rt_text_store(scratch + I64{16}, I64{107})
+    file := vault_linux_openat(dir, scratch, I64{193}, I64{384}, scratch + I64{48})
+    if (file < I64{0}) {
+        if (file == I64{-17} && recover) {
+            stale_error :: vault_recover_stale_lock(root, dir, hash, revision, repo)
+            if (stale_error != I64{0}) -> return stale_error
+            backup_error :: vault_recover_backup_at_root(root)
+            if (backup_error != I64{0}) -> return backup_error
+            file = vault_linux_openat(dir, scratch, I64{193}, I64{384}, scratch + I64{48})
+            if (file < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        } else {
+            return vault_error_new(if (file == I64{-38} || file == I64{-22}) -> I64{7} else -> I64{6}, I64{0}, I64{0})
+        }
+    }
+    rt_text_store(file_slot, file)
+    nonce :: scratch + I64{24}
+    if (rt_crypto_entropy_fill(nonce, I64{16}) != I64{0}) -> return vault_error_new(I64{10}, VAULT_CRYPTO_UNAVAILABLE, I64{0})
+    if vault_bytes_zero(nonce, I64{16}) -> return vault_zero_lock_nonce(scratch + I64{48})
+    pid :: trap_syscall(I64{39}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    if !vault_process_start(pid, scratch + I64{40}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+    buffer :: scratch + I64{48}
+    rt_text_store(buffer, I64{263862642034}) // repo=
+    vault_hex_put(buffer + I64{5}, repo, I64{16})
+    rt_text_store(buffer + I64{37}, I64{8028074707559739936})
+    rt_text_store(buffer + I64{45}, I64{15726})
+    at := I64{47} + vault_decimal_put(buffer + I64{47}, revision)
+    rt_text_store(buffer + at, I64{263677636640})
+    at += I64{5}
+    at += vault_decimal_put(buffer + at, pid)
+    rt_text_put(buffer + at, I64{32})
+    at += I64{1}
+    rt_text_store(buffer + at, I64{3275088233325621872})
+    rt_text_store(buffer + at + I64{8}, I64{67570344490099})
+    at += I64{14}
+    at += vault_decimal_put(buffer + at, rt_text_word(scratch + I64{40}))
+    rt_text_store(buffer + at, I64{17281451308314144})
+    at += I64{7}
+    vault_hex_put(buffer + at, nonce, I64{16})
+    at += I64{32}
+    rt_text_store(buffer + at, I64{67518821656608})
+    at += I64{6}
+    vault_hex_put(buffer + at, hash, I64{32})
+    at += I64{64}
+    rt_text_put(buffer + at, I64{10})
+    if !vault_linux_write_all(file, buffer, at + I64{1}) -> return vault_lock_io(buffer)
+    if (vault_linux_fsync(file) != I64{0}) -> return vault_lock_io(buffer)
+    guard :: vault_lock_adopt(dir, file, nonce)
+    rt_text_store(dir_slot, I64{-1})
+    rt_text_store(file_slot, I64{-1})
+    rt_text_store(out, guard)
+    I64{0}
+}
+fn vault_acquire_lock_mode(root: I64, repo: I64, revision: I64, hash: I64, recover: Bool, out: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{328}, I64{8})
+    rt_text_store(scratch + I64{304}, I64{-1})
+    rt_text_store(scratch + I64{312}, I64{-1})
+    error :: vault_acquire_lock_inner(root, repo, revision, hash, recover, out, scratch)
+    vault_linux_close(rt_text_word(scratch + I64{312}))
+    vault_linux_close(rt_text_word(scratch + I64{304}))
+    thread_zero(scratch, I64{328})
+    jet_rt_free(scratch, I64{328}, I64{8})
+    error
+}
+fn vault_acquire_lock(root: I64, repo: I64, revision: I64, hash: I64, out: I64) -> I64 {
+    vault_acquire_lock_mode(root, repo, revision, hash, true, out)
+}
+
+// Read/decode a borrowed held file. Decode errors may be remapped by the policy
+// caller; the seed's ? on vault_read_file remains Locked where required.
+fn vault_decode_held_at_root(root: I64, file: I64, store: I64, hash: I64, kind: I64, scratch: I64) -> I64 {
+    error :: vault_linux_read_file(file, scratch, scratch + I64{8})
+    if (error != I64{0}) -> return error
+    bytes :: rt_text_word(scratch)
+    decoded :: vault_decode_ciphertext_at_root(root, bytes, store, hash, kind)
+    thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    decoded
+}
+// SecretsCrypto.rs:2357-2447. The wrapper owns file/text/store lifetimes, while
+// the inner function keeps seed return/error ordering without cleanup copies.
+fn vault_recover_stale_inner(root: I64, dir: I64, hash: I64, revision: I64, repo: I64, scratch: I64) -> I64 {
+    name :: scratch + I64{336}
+    quarantine :: scratch + I64{360}
+    rt_text_store(name, I64{8319385953628418862})
+    rt_text_store(name + I64{8}, I64{7165064478695317806})
+    rt_text_store(name + I64{16}, I64{107})
+    file :: vault_linux_openat(dir, name, I64{0}, I64{0}, scratch)
+    if (file < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    rt_text_store(scratch + I64{424}, file)
+    if (vault_linux_stat(file, scratch) != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    user :: trap_syscall(I64{107}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    session :: trap_syscall(I64{124}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    if (session < I64{0}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+    mode :: rt_text_word(scratch + VAULT_STAT_MODE).bit_and(I64{4294967295})
+    uid :: rt_text_word(scratch + VAULT_STAT_UID).bit_and(I64{4294967295})
+    if ((mode.bit_and(I64{61440})) != I64{32768} || uid != user) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    if (trap_syscall(I64{228}, I64{0}, scratch + I64{144}, I64{0}, I64{0}, I64{0}, I64{0}) != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    now :: rt_text_word(scratch + I64{144})
+    nanos :: rt_text_word(scratch + I64{152})
+    modified :: rt_text_word(scratch + I64{88})
+    modified_nanos :: rt_text_word(scratch + I64{96})
+    if (modified > now) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    age :: wrapping(now - modified)
+    if (vault_unsigned_less(age, I64{600}) || (age == I64{600} && modified_nanos >= nanos)) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    read_error :: vault_linux_read_file(file, scratch + I64{432}, scratch)
+    if (read_error != I64{0}) -> return read_error
+    text :: rt_text_word(scratch + I64{432})
+    if !vault_lock_fields(rt_text_word(text + DATA_SEQUENCE_DATA), rt_text_word(text + DATA_SEQUENCE_LENGTH), repo, revision, hash, scratch + I64{464}, scratch) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    pid :: rt_text_word(scratch + I64{464})
+    start :: rt_text_word(scratch + I64{472})
+    current_valid :: vault_process_start(pid, scratch)
+    current_start :: rt_text_word(scratch)
+    pidfd :: trap_syscall(I64{434}, pid, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    dead := false
+    if (pidfd >= I64{0}) {
+        vault_linux_close(pidfd)
+        dead = !current_valid || current_start != start
+    } else if (pidfd == I64{-3}) {
+        dead = true
+    } else if (pidfd == I64{-38} || pidfd == I64{-22}) {
+        return vault_error_new(I64{7}, I64{0}, I64{0})
+    }
+    if !dead -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    current_error :: vault_read_contents_unrecovered_at_root(root, scratch + I64{440}, scratch + I64{496}, scratch + I64{528})
+    current :: rt_text_word(scratch + I64{440})
+    current_matches :: current_error == I64{0} && rt_text_word(current + VAULT_STORE_REVISION) == revision && rt_text_equal_bytes(scratch + I64{496}, hash, I64{32})
+    vault_error_drop(current_error)
+    // Backup is evaluated even if current matches; its read errors propagate.
+    rt_text_store(quarantine, I64{8319385953628418862})
+    rt_text_store(quarantine + I64{8}, I64{7161112833905090862})
+    rt_text_store(quarantine + I64{16}, I64{7370091})
+    rt_text_store(scratch + I64{536}, quarantine)
+    rt_text_store(scratch + I64{544}, I64{19})
+    rt_text_store(scratch + I64{552}, I64{0})
+    backup_error :: vault_linux_read_at_root(root, scratch + I64{536}, scratch + I64{456})
+    if (backup_error != I64{0}) -> return backup_error
+    ciphertext :: rt_text_word(scratch + I64{456})
+    backup_matches := false
+    if (ciphertext != I64{0}) {
+        decoded :: vault_decode_ciphertext_at_root(root, ciphertext, scratch + I64{448}, scratch + I64{496}, scratch + I64{528})
+        backup :: rt_text_word(scratch + I64{448})
+        backup_matches = decoded == I64{0} && rt_text_word(backup + VAULT_STORE_REVISION) == revision && rt_text_equal_bytes(scratch + I64{496}, hash, I64{32})
+        vault_error_drop(decoded)
+    }
+    if (!current_matches && !backup_matches) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    rt_text_store(quarantine, I64{8319385953628418862})
+    rt_text_store(quarantine + I64{8}, I64{7165064478695317806})
+    rt_text_store(quarantine + I64{16}, I64{3343197464213794411})
+    rt_text_bytes_copy(quarantine + I64{24}, rt_text_word(scratch + I64{480}), I64{32})
+    rt_text_put(quarantine + I64{56}, I64{0})
+    // NUL shares out416: remove_exact writes out only after its last name use.
+    remove_error :: vault_linux_remove_exact(dir, name, file, quarantine, scratch + I64{416}, scratch)
+    if (remove_error != I64{0}) -> return remove_error
+    if (rt_text_word(scratch + I64{416}) == I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    I64{0}
+}
+fn vault_recover_stale_lock(root: I64, dir: I64, hash: I64, revision: I64, repo: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{560}, I64{8})
+    thread_zero(scratch, I64{560})
+    rt_text_store(scratch + I64{424}, I64{-1})
+    error :: vault_recover_stale_inner(root, dir, hash, revision, repo, scratch)
+    vault_linux_close(rt_text_word(scratch + I64{424}))
+    vault_store_drop(rt_text_word(scratch + I64{440}))
+    vault_store_drop(rt_text_word(scratch + I64{448}))
+    text :: rt_text_word(scratch + I64{432})
+    if (text != I64{0}) {
+        thread_zero(rt_text_word(text + DATA_SEQUENCE_DATA), rt_text_word(text + DATA_SEQUENCE_CAPACITY))
+        data_sequence_drop(text, DATA_TREE_BYTE_LIST)
+    }
+    ciphertext :: rt_text_word(scratch + I64{456})
+    if (ciphertext != I64{0}) {
+        thread_zero(rt_text_word(ciphertext + DATA_SEQUENCE_DATA), rt_text_word(ciphertext + DATA_SEQUENCE_CAPACITY))
+        data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+    }
+    thread_zero(scratch, I64{560})
+    jet_rt_free(scratch, I64{560}, I64{8})
+    error
+}
+
+// {:x} without leading zeros, including all unsigned inode bits.
+fn vault_uint_hex_put(out: I64, value: I64) -> I64 {
+    shift := I64{60}
+    loop {
+        if (shift == I64{0} || ((value >> shift).bit_and(I64{15})) != I64{0}) -> break
+        shift -= I64{4}
+    }
+    at := I64{0}
+    loop {
+        nibble :: (value >> shift).bit_and(I64{15})
+        rt_text_put(out + at, if (nibble < I64{10}) -> nibble + I64{48} else -> nibble + I64{87})
+        at += I64{1}
+        if (shift == I64{0}) -> break
+        shift -= I64{4}
+    }
+    rt_text_put(out + at, I64{0})
+    at
+}
+// SecretsCrypto.rs:1548-1649. Raw rename errors propagate; durability remapping
+// applies only where the seed says so, not to the entire recovery transaction.
+fn vault_recover_backup_inner(root: I64, scratch: I64) -> I64 {
+    backup_name :: scratch + I64{336}
+    final_name :: scratch + I64{368}
+    quarantine :: scratch + I64{400}
+    error :: vault_linux_dir_at_root(root, scratch + I64{512})
+    if (error != I64{0}) -> return error
+    dir :: rt_text_word(scratch + I64{512})
+    rt_text_store(backup_name, I64{8319385953628418862})
+    rt_text_store(backup_name + I64{8}, I64{7161112833905090862})
+    rt_text_store(backup_name + I64{16}, I64{7370091})
+    rt_text_store(final_name, I64{3347146927126046067})
+    rt_text_store(final_name + I64{8}, I64{6645601})
+    backup :: vault_linux_openat(dir, backup_name, I64{0}, I64{0}, scratch)
+    if (backup == I64{-2}) -> return I64{0}
+    if (backup < I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    rt_text_store(scratch + I64{520}, backup)
+    read_error :: vault_linux_read_file(backup, scratch + I64{640}, scratch + I64{648})
+    if (read_error != I64{0}) -> return read_error
+    ciphertext :: rt_text_word(scratch + I64{640})
+    decoded :: vault_decode_ciphertext_at_root(root, ciphertext, scratch + I64{536}, scratch + I64{560}, scratch + I64{592})
+    thread_zero(rt_text_word(ciphertext + DATA_SEQUENCE_DATA), rt_text_word(ciphertext + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+    rt_text_store(scratch + I64{640}, I64{0})
+    if (decoded != I64{0}) {
+        vault_error_drop(decoded)
+        return vault_error_new(I64{9}, I64{0}, I64{0})
+    }
+    final :: vault_linux_openat(dir, final_name, I64{0}, I64{0}, scratch)
+    if (final < I64{0} && final != I64{-2}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    rt_text_store(scratch + I64{528}, final)
+    if (final >= I64{0}) {
+        final_error :: vault_decode_held_at_root(root, final, scratch + I64{544}, scratch + I64{600}, scratch + I64{632}, scratch + I64{640})
+        vault_error_drop(final_error)
+    }
+    backup_store :: rt_text_word(scratch + I64{536})
+    final_store :: rt_text_word(scratch + I64{544})
+    recovery :: if (final_store != I64{0}) -> final_store else -> backup_store
+    recovery_hash :: if (final_store != I64{0}) -> scratch + I64{600} else -> scratch + I64{560}
+    lock_error :: vault_acquire_lock_mode(root, recovery + VAULT_STORE_UUID, rt_text_word(recovery + VAULT_STORE_REVISION), recovery_hash, false, scratch + I64{552})
+    if (lock_error != I64{0}) -> return lock_error
+    backup_kind :: rt_text_word(scratch + I64{592})
+    final_kind :: rt_text_word(scratch + I64{632})
+    successor :: final_store != I64{0} &&
+        !vault_unsigned_less(rt_text_word(final_store + VAULT_STORE_REVISION), rt_text_word(backup_store + VAULT_STORE_REVISION)) &&
+        ((backup_kind == VAULT_START_HISTORICAL && final_kind == VAULT_START_V2) ||
+        (backup_kind == VAULT_START_V2 && final_kind == VAULT_START_V2 && rt_text_equal_bytes(backup_store + VAULT_STORE_UUID, final_store + VAULT_STORE_UUID, I64{16})))
+    if (vault_linux_stat(backup, scratch) != I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    rt_text_store(quarantine, I64{8319385953628418862})
+    rt_text_store(quarantine + I64{8}, I64{7161112833905090862})
+    rt_text_store(quarantine + I64{16}, I64{7308901721335428459})
+    rt_text_put(quarantine + I64{24}, I64{46})
+    _ := vault_uint_hex_put(quarantine + I64{25}, rt_text_word(scratch + I64{8}))
+    if successor {
+        remove_error :: vault_linux_remove_exact(dir, backup_name, backup, quarantine, scratch + I64{504}, scratch)
+        if (remove_error != I64{0}) -> return remove_error
+        if (rt_text_word(scratch + I64{504}) == I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    } else {
+        rename_error :: vault_linux_rename(dir, backup_name, final_name, if (final >= I64{0}) -> I64{2} else -> I64{1}, scratch)
+        if (rename_error != I64{0}) -> return rename_error
+        installed :: vault_linux_openat(dir, final_name, I64{0}, I64{0}, scratch)
+        if (installed < I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+        same :: vault_linux_same_inode(installed, backup, scratch)
+        vault_linux_close(installed)
+        if !same {
+            if (final >= I64{0}) {
+                ignored :: vault_linux_rename(dir, backup_name, final_name, I64{2}, scratch)
+                vault_error_drop(ignored)
+            }
+            return vault_error_new(I64{9}, I64{0}, I64{0})
+        }
+        if (final >= I64{0}) {
+            if (vault_linux_stat(final, scratch) != I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+            rt_text_store(quarantine, I64{8319385953628418862})
+            rt_text_store(quarantine + I64{8}, I64{7666659484263473454})
+            rt_text_store(quarantine + I64{16}, I64{51008733733733})
+            _ := vault_uint_hex_put(quarantine + I64{22}, rt_text_word(scratch + I64{8}))
+            remove_error :: vault_linux_remove_exact(dir, backup_name, final, quarantine, scratch + I64{504}, scratch)
+            if (remove_error != I64{0}) -> return remove_error
+            if (rt_text_word(scratch + I64{504}) == I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+        }
+    }
+    if (vault_linux_fsync(dir) != I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    I64{0}
+}
+fn vault_recover_backup_at_root(root: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{656}, I64{8})
+    thread_zero(scratch, I64{656})
+    rt_text_store(scratch + I64{512}, I64{-1})
+    rt_text_store(scratch + I64{520}, I64{-1})
+    rt_text_store(scratch + I64{528}, I64{-1})
+    error :: vault_recover_backup_inner(root, scratch)
+    vault_lock_drop(rt_text_word(scratch + I64{552}))
+    vault_store_drop(rt_text_word(scratch + I64{536}))
+    vault_store_drop(rt_text_word(scratch + I64{544}))
+    vault_linux_close(rt_text_word(scratch + I64{528}))
+    vault_linux_close(rt_text_word(scratch + I64{520}))
+    vault_linux_close(rt_text_word(scratch + I64{512}))
+    thread_zero(scratch, I64{656})
+    jet_rt_free(scratch, I64{656}, I64{8})
+    error
+}
+
+// library/std/src/sys/fs/unix.rs File::fsync uses cvt_r: retry EINTR only.
+fn vault_linux_fsync(fd: I64) -> I64 {
+    result := I64{-4}
+    loop result == (I64{-4}) {
+        result = trap_syscall(I64{74}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+    }
+    result
+}
+// Borrowed fault Text in caller scratch64; only the shared thread-local hook
+// chooses faults. These words are literal seed fixture names, not new policy.
+fn vault_writer_fault(first: I64, second: I64, third: I64, fourth: I64, length: I64, scratch: I64) -> Bool {
+    rt_text_store(scratch, first)
+    rt_text_store(scratch + I64{8}, second)
+    rt_text_store(scratch + I64{16}, third)
+    rt_text_store(scratch + I64{24}, fourth)
+    rt_text_store(scratch + I64{32}, scratch)
+    rt_text_store(scratch + I64{40}, length)
+    rt_text_store(scratch + I64{48}, I64{0})
+    jet_rt_vault_test_fault(scratch + I64{32})
+}
+fn vault_writer_io(operation: I64, length: I64, temp: Bool, scratch: I64) -> I64 {
+    rt_text_store(scratch, operation)
+    op :: jet_rt_string_from_static(scratch, length)
+    rt_text_store(scratch, if temp -> I64{8371475291526231612} else -> I64{8299417697488303676})
+    rt_text_store(scratch + I64{8}, if temp -> I64{1047555429} else -> I64{267989970804})
+    path :: jet_rt_string_from_static(scratch, if temp -> I64{12} else -> I64{13})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{11})
+    rt_text_store(error + VAULT_ERROR_FIRST, op)
+    rt_text_store(error + VAULT_ERROR_SECOND, path)
+    error
+}
+fn vault_zero_temp_nonce(scratch: I64) -> I64 {
+    rt_text_store(scratch, I64{7312206923048509814})
+    rt_text_store(scratch + I64{8}, I64{3274237211606609778})
+    rt_text_store(scratch + I64{16}, I64{435459878766})
+    incident :: jet_rt_string_from_static(scratch, I64{21})
+    error :: jet_rt_alloc(VAULT_ERROR_BYTES, I64{8})
+    rt_text_store(error + VAULT_ERROR_TAG, I64{12})
+    rt_text_store(error + VAULT_ERROR_FIRST, incident)
+    rt_text_store(error + VAULT_ERROR_SECOND, I64{0})
+    error
+}
+fn vault_writer_snapshot_matches(snapshot: I64, snapshot_hash: I64, snapshot_provider: I64, snapshot_kind: I64, hash: I64, provider: I64, kind: I64, revision: I64) -> Bool {
+    rt_text_equal_bytes(snapshot_hash, hash, I64{32}) &&
+        rt_text_equal_bytes(snapshot_provider, provider, I64{32}) &&
+        snapshot_kind == kind && rt_text_word(snapshot + VAULT_STORE_REVISION) == revision
+}
+// Returns the precise encoding error, or zero iff canonical bytes match.
+// scratch borrows an output Text slot; no duplicate persistent plaintext owner.
+fn vault_writer_plaintext_matches(store: I64, plaintext: I64, scratch: I64) -> I64 {
+    status :: vault_encode_v2(store, scratch)
+    if (status != I64{-1}) -> return vault_error_new(status, I64{0}, I64{0})
+    encoded :: rt_text_word(scratch)
+    equal :: jet_rt_string_eq(encoded, plaintext)
+    vault_text_zero(encoded)
+    jet_rt_string_drop(encoded)
+    if !equal -> return vault_error_new(I64{8}, I64{0}, I64{0})
+    I64{0}
+}
+// Seed test-only substitution uses fs::rename/fs::write, not renameat2's
+// noreplace policy. Own the replacement fd briefly; never substitute the temp.
+fn vault_writer_substitute(dir: I64, next: I64, scratch: I64) -> I64 {
+    stolen :: scratch + I64{64}
+    rt_text_bytes_copy(stolen, next, I64{50})
+    rt_text_put(stolen + I64{50}, I64{46})
+    rt_text_store(stolen + I64{51}, I64{1684825448}) // held
+    rt_text_put(stolen + I64{55}, I64{0})
+    if (trap_syscall(I64{264}, dir, next, dir, stolen, I64{0}, I64{0}) != I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    file :: vault_linux_plain_open_at(dir, next, I64{577}, I64{438})
+    if (file < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    rt_text_store(scratch, I64{8463505548608959859})
+    rt_text_store(scratch + I64{8}, I64{6579572})
+    written :: vault_linux_write_all(file, scratch, I64{11})
+    vault_linux_close(file)
+    if !written -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    I64{0}
+}
+// SecretsCrypto.rs:2721-2870. scratch928 owns all temporary fds and data owners;
+// the wrapper releases them and the consumed lock on EVERY return.
+fn vault_write_inner(root: I64, store: I64, hash: I64, provider: I64, kind: I64, revision: I64, scratch: I64) -> I64 {
+    final_name :: scratch + I64{336}
+    backup_name :: scratch + I64{360}
+    next :: scratch + I64{384}
+    quarantine :: scratch + I64{448}
+    fault :: scratch + I64{512}
+    dir_error :: vault_linux_dir_at_root(root, scratch + I64{800})
+    if (dir_error != I64{0}) -> return dir_error
+    dir :: rt_text_word(scratch + I64{800})
+    current_error :: vault_read_at_root(root, scratch + I64{832}, scratch + I64{576}, scratch + I64{608}, scratch + I64{640})
+    if (current_error != I64{0}) -> return current_error
+    current :: rt_text_word(scratch + I64{832})
+    if (!vault_writer_snapshot_matches(current, scratch + I64{576}, scratch + I64{608}, rt_text_word(scratch + I64{640}), hash, provider, kind, revision) ||
+        (kind == VAULT_START_V2 && !rt_text_equal_bytes(current + VAULT_STORE_UUID, store + VAULT_STORE_UUID, I64{16}))) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    recipients_error :: vault_recipients_at_root(root, scratch + I64{888}, scratch + I64{608})
+    if (recipients_error != I64{0}) -> return recipients_error
+    encoded_status :: vault_encode_v2(store, scratch + I64{872})
+    if (encoded_status != I64{-1}) -> return vault_error_new(encoded_status, I64{0}, I64{0})
+    plaintext :: rt_text_word(scratch + I64{872})
+    view :: scratch + I64{696}
+    rt_text_store(view + DATA_SEQUENCE_LENGTH, rt_text_len(plaintext))
+    rt_text_store(view + DATA_SEQUENCE_CAPACITY, rt_text_len(plaintext))
+    rt_text_store(view + DATA_SEQUENCE_DATA, rt_text_data(plaintext))
+    recipients :: rt_text_word(scratch + I64{888})
+    encrypt_error :: vault_crypto_encrypt(rt_text_word(recipients + DATA_SEQUENCE_DATA), rt_text_word(recipients + DATA_SEQUENCE_LENGTH) /% I64{32}, view, scratch + I64{880})
+    if (encrypt_error != I64{0}) {
+        vault_error_drop(encrypt_error)
+        return vault_error_new(I64{4}, I64{0}, I64{0})
+    }
+    rt_text_store(final_name, I64{3347146927126046067})
+    rt_text_store(final_name + I64{8}, I64{6645601})
+    rt_text_store(backup_name, I64{8319385953628418862})
+    rt_text_store(backup_name + I64{8}, I64{7161112833905090862})
+    rt_text_store(backup_name + I64{16}, I64{7370091})
+    rt_text_store(fault, I64{46})
+    temp :: vault_linux_openat(dir, fault, I64{4259842}, I64{384}, scratch)
+    if (temp < I64{0}) {
+        if (temp == I64{-38} || temp == I64{-22} || temp == I64{-95}) -> return vault_error_new(I64{7}, I64{0}, I64{0})
+        return vault_writer_io(I64{111550524650083}, I64{6}, true, fault)
+    }
+    rt_text_store(scratch + I64{808}, temp)
+    ciphertext :: rt_text_word(scratch + I64{880})
+    if !vault_linux_write_all(temp, rt_text_word(ciphertext + DATA_SEQUENCE_DATA), rt_text_word(ciphertext + DATA_SEQUENCE_LENGTH)) -> return vault_writer_io(I64{435744764535}, I64{5}, false, fault)
+    if (vault_linux_fsync(temp) != I64{0}) -> return vault_writer_io(I64{427055215462}, I64{5}, false, fault)
+    staged_error :: vault_decode_held_at_root(root, temp, scratch + I64{840}, scratch + I64{656}, scratch + I64{648}, scratch + I64{688})
+    if (staged_error != I64{0}) -> return staged_error
+    staged :: rt_text_word(scratch + I64{840})
+    if (rt_text_word(scratch + I64{648}) != VAULT_START_V2 || !rt_text_equal_bytes(staged + VAULT_STORE_UUID, store + VAULT_STORE_UUID, I64{16}) ||
+        rt_text_word(staged + VAULT_STORE_REVISION) != rt_text_word(store + VAULT_STORE_REVISION)) -> return vault_error_new(I64{8}, I64{0}, I64{0})
+    staged_match :: vault_writer_plaintext_matches(staged, plaintext, scratch + I64{896})
+    if (staged_match != I64{0}) -> return staged_match
+    if vault_writer_fault(I64{7074429772384592227}, I64{7955940130461541989}, I64{465674794099}, I64{0}, I64{21}, fault) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    recheck_error :: vault_read_at_root(root, scratch + I64{848}, scratch + I64{576}, scratch + I64{608}, scratch + I64{640})
+    if (recheck_error != I64{0}) -> return recheck_error
+    recheck :: rt_text_word(scratch + I64{848})
+    if !vault_writer_snapshot_matches(recheck, scratch + I64{576}, scratch + I64{608}, rt_text_word(scratch + I64{640}), hash, provider, kind, revision) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+    if (kind != VAULT_START_ABSENT) {
+        file :: vault_linux_openat(dir, final_name, I64{0}, I64{0}, scratch)
+        if (file < I64{0}) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        rt_text_store(scratch + I64{816}, file)
+        file_error :: vault_decode_held_at_root(root, file, scratch + I64{856}, scratch + I64{656}, scratch + I64{648}, scratch + I64{688})
+        if (file_error != I64{0}) -> return file_error
+        state :: rt_text_word(scratch + I64{856})
+        if (!rt_text_equal_bytes(scratch + I64{656}, hash, I64{32}) || rt_text_word(scratch + I64{648}) != kind || rt_text_word(state + VAULT_STORE_REVISION) != revision) -> return vault_error_new(I64{6}, I64{0}, I64{0})
+        link_error :: vault_linux_link_file(file, dir, backup_name, scratch)
+        if (link_error != I64{0}) -> return link_error
+        jet_rt_vault_test_pause_after_backup(root)
+    }
+    nonce :: scratch + I64{904}
+    if (rt_crypto_entropy_fill(nonce, I64{16}) != I64{0}) -> return vault_error_new(I64{10}, VAULT_CRYPTO_UNAVAILABLE, I64{0})
+    if vault_bytes_zero(nonce, I64{16}) -> return vault_zero_temp_nonce(fault)
+    rt_text_store(next, I64{8319385953628418862})
+    rt_text_store(next + I64{8}, I64{8675461402747953454})
+    rt_text_store(next + I64{16}, I64{11892})
+    vault_hex_put(next + I64{18}, nonce, I64{16})
+    rt_text_put(next + I64{50}, I64{0})
+    next_error :: vault_linux_link_file(temp, dir, next, scratch)
+    if (next_error != I64{0}) -> return next_error
+    if vault_writer_fault(I64{8463505548608959859}, I64{3274237211606607220}, I64{7578825290104071522}, I64{119212747289454}, I64{30}, fault) {
+        substitute_error :: vault_writer_substitute(dir, next, fault)
+        if (substitute_error != I64{0}) -> return substitute_error
+    }
+    install_error :: vault_linux_install_exact(dir, next, final_name, temp, kind == VAULT_START_ABSENT, scratch, scratch + I64{824})
+    if (install_error != I64{0}) -> return install_error
+    installed :: rt_text_word(scratch + I64{824})
+    // Seed's nested read_file ? propagates Locked BEFORE decode's map_err.
+    installed_read :: vault_linux_read_file(installed, scratch + I64{688}, scratch + I64{920})
+    if (installed_read != I64{0}) -> return installed_read
+    installed_bytes :: rt_text_word(scratch + I64{688})
+    installed_decode :: vault_decode_ciphertext_at_root(root, installed_bytes, scratch + I64{864}, scratch + I64{656}, scratch + I64{648})
+    thread_zero(rt_text_word(installed_bytes + DATA_SEQUENCE_DATA), rt_text_word(installed_bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(installed_bytes, DATA_TREE_BYTE_LIST)
+    if (installed_decode != I64{0}) {
+        vault_error_drop(installed_decode)
+        return vault_error_new(I64{9}, I64{0}, I64{0})
+    }
+    installed_store :: rt_text_word(scratch + I64{864})
+    if (rt_text_word(scratch + I64{648}) != VAULT_START_V2 || !rt_text_equal_bytes(installed_store + VAULT_STORE_UUID, store + VAULT_STORE_UUID, I64{16}) ||
+        rt_text_word(installed_store + VAULT_STORE_REVISION) != rt_text_word(store + VAULT_STORE_REVISION)) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    installed_match :: vault_writer_plaintext_matches(installed_store, plaintext, scratch + I64{896})
+    if (installed_match != I64{0}) {
+        vault_error_drop(installed_match)
+        return vault_error_new(I64{9}, I64{0}, I64{0})
+    }
+    current_file :: rt_text_word(scratch + I64{816})
+    if (current_file >= I64{0}) {
+        rt_text_bytes_copy(quarantine, next, I64{50})
+        rt_text_store(quarantine + I64{50}, I64{1684827950}) // .old
+        rt_text_put(quarantine + I64{54}, I64{0})
+        remove_old :: vault_linux_remove_exact(dir, next, current_file, quarantine, scratch + I64{920}, scratch)
+        if (remove_old != I64{0}) -> return remove_old
+        if (rt_text_word(scratch + I64{920}) == I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    }
+    if vault_writer_fault(I64{7596562542729786724}, I64{8243122676037417332}, I64{7812726606361684269}, I64{0}, I64{24}, fault) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    if (vault_linux_fsync(dir) != I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    if (current_file >= I64{0}) {
+        rt_text_store(quarantine, I64{8319385953628418862})
+        rt_text_store(quarantine + I64{8}, I64{7161112833905090862})
+        rt_text_store(quarantine + I64{16}, I64{7308901721335428459})
+        rt_text_put(quarantine + I64{24}, I64{46})
+        vault_hex_put(quarantine + I64{25}, nonce, I64{16})
+        rt_text_put(quarantine + I64{57}, I64{0})
+        remove_backup :: vault_linux_remove_exact(dir, backup_name, current_file, quarantine, scratch + I64{920}, scratch)
+        if (remove_backup != I64{0}) -> return remove_backup
+        if (rt_text_word(scratch + I64{920}) == I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+        if (vault_linux_fsync(dir) != I64{0}) -> return vault_error_new(I64{9}, I64{0}, I64{0})
+    }
+    _ := vault_writer_fault(I64{7002372178346664291}, I64{8317701205713581158}, I64{1819042164}, I64{0}, I64{20}, fault)
+    I64{0}
+}
+fn vault_write_at_root(root: I64, store: I64, hash: I64, provider: I64, kind: I64, revision: I64, lock: I64) -> I64 {
+    scratch :: jet_rt_alloc(I64{928}, I64{8})
+    thread_zero(scratch, I64{928})
+    at := I64{800}
+    loop at < (I64{832}) {
+        rt_text_store(scratch + at, I64{-1})
+        at += I64{8}
+    }
+    error :: vault_write_inner(root, store, hash, provider, kind, revision, scratch)
+    at = I64{800}
+    loop at < (I64{832}) {
+        vault_linux_close(rt_text_word(scratch + at))
+        at += I64{8}
+    }
+    at = I64{832}
+    loop at < (I64{872}) {
+        vault_store_drop(rt_text_word(scratch + at))
+        at += I64{8}
+    }
+    plaintext :: rt_text_word(scratch + I64{872})
+    if (plaintext != I64{0}) {
+        vault_text_zero(plaintext)
+        jet_rt_string_drop(plaintext)
+    }
+    ciphertext :: rt_text_word(scratch + I64{880})
+    if (ciphertext != I64{0}) {
+        thread_zero(rt_text_word(ciphertext + DATA_SEQUENCE_DATA), rt_text_word(ciphertext + DATA_SEQUENCE_CAPACITY))
+        data_sequence_drop(ciphertext, DATA_TREE_BYTE_LIST)
+    }
+    recipients :: rt_text_word(scratch + I64{888})
+    if (recipients != I64{0}) -> data_sequence_drop(recipients, DATA_TREE_BYTE_LIST)
+    vault_lock_drop(lock)
+    thread_zero(scratch, I64{928})
+    jet_rt_free(scratch, I64{928}, I64{8})
+    error
+}
+
+// Seed2058-2083 var_os(HOME) parity. The shared HostStartup raw accessor lends
+// process-lifetime bytes only while this final NUL path is constructed.
+fn vault_trust_home_path(home: I64) -> I64 {
+    length :: host_startup_byte_length(home)
+    separator :: length != I64{0} && rt_text_byte(home + length - I64{1}) != I64{47}
+    if (length > I64{9223372036854775795}) -> return I64{0}
+    suffix :: length + (if separator -> I64{1} else -> I64{0})
+    path :: jet_rt_alloc(suffix + I64{11}, I64{1})
+    rt_text_bytes_copy(path, home, length)
+    if separator -> rt_text_put(path + length, I64{47})
+    rt_text_store(path + suffix, I64{8462954396947671598})
+    rt_text_put(path + suffix + I64{8}, I64{115})
+    rt_text_put(path + suffix + I64{9}, I64{116})
+    rt_text_put(path + suffix + I64{10}, I64{0})
+    path
+}
+fn vault_trust_lines(bytes: I64, length: I64, repo: I64, scratch: I64) -> Bool {
+    if !vault_utf8_valid(bytes, length) -> return false
+    rt_text_store(scratch, I64{8319620158379356775})
+    rt_text_store(scratch + I64{8}, I64{8389209267340210789})
+    rt_text_store(scratch + I64{16}, I64{16437099308939054})
+    vault_hex_put(scratch + I64{23}, repo, I64{16})
+    start := I64{0}
+    loop start < length {
+        end := start
+        loop end < length {
+            if (rt_text_byte(bytes + end) == I64{10}) -> break
+            end += I64{1}
+        }
+        begin :: vault_crypto_trim_start(bytes + start, end - start)
+        finish :: vault_crypto_trim_end(bytes + start, begin, end - start)
+        if (finish - begin == I64{55}) {
+            line :: bytes + start + begin
+            rt_text_store(scratch, I64{8319620158379356775})
+            rt_text_store(scratch + I64{8}, I64{8389209267340210789})
+            if rt_text_equal_bytes(line, scratch, I64{55}) -> return true
+            rt_text_store(scratch, I64{7309969416918233703})
+            rt_text_store(scratch + I64{8}, I64{8389209267340210032})
+            if rt_text_equal_bytes(line, scratch, I64{55}) -> return true
+        }
+        start = end + I64{1}
+    }
+    false
+}
+fn vault_headless_granted(repo: I64) -> Bool {
+    scratch :: jet_rt_alloc(I64{128}, I64{8})
+    test_path :: jet_rt_vault_test_trust_path()
+    path := I64{0}
+    if (test_path != I64{0}) {
+        path = vault_linux_path(test_path)
+    } else {
+        rt_text_store(scratch + I64{64}, I64{1162694472}) // HOME
+        rt_text_store(scratch + I64{72}, scratch + I64{64})
+        rt_text_store(scratch + I64{80}, I64{4})
+        rt_text_store(scratch + I64{88}, I64{0})
+        home :: host_environment_value(scratch + I64{72})
+        if (home != I64{0}) -> path = vault_trust_home_path(home)
+    }
+    if (path == I64{0}) {
+        thread_zero(scratch, I64{128})
+        jet_rt_free(scratch, I64{128}, I64{8})
+        return false
+    }
+    path_bytes :: host_startup_byte_length(path) + I64{1}
+    file :: vault_linux_plain_open(path)
+    jet_rt_free(path, path_bytes, I64{1})
+    if (file < I64{0}) {
+        thread_zero(scratch, I64{128})
+        jet_rt_free(scratch, I64{128}, I64{8})
+        return false
+    }
+    error :: vault_linux_read_to_end(file, scratch + I64{104}, scratch + I64{112})
+    vault_linux_close(file)
+    if (error != I64{0}) {
+        vault_error_drop(error)
+        thread_zero(scratch, I64{128})
+        jet_rt_free(scratch, I64{128}, I64{8})
+        return false
+    }
+    bytes :: rt_text_word(scratch + I64{104})
+    granted :: vault_trust_lines(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_LENGTH), repo, scratch)
+    thread_zero(rt_text_word(bytes + DATA_SEQUENCE_DATA), rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    thread_zero(scratch, I64{128})
+    jet_rt_free(scratch, I64{128}, I64{8})
+    granted
+}
+// Seed BufReader::read_line: grow only when the line fills the current buffer,
+// stop at its FIRST LF (ignore any read-ahead), and retry only read's EINTR.
+fn vault_tty_answer(file: I64) -> Bool {
+    bytes :: data_sequence_new(I64{8192}, RT_HOST_U8_STRIDE)
+    complete := false
+    valid := true
+    loop {
+        if complete -> break
+        length :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
+        if (length == rt_text_word(bytes + DATA_SEQUENCE_CAPACITY)) -> _ := data_sequence_reserve(bytes, RT_HOST_U8_STRIDE)
+        data :: rt_text_word(bytes + DATA_SEQUENCE_DATA)
+        capacity :: rt_text_word(bytes + DATA_SEQUENCE_CAPACITY)
+        read :: trap_syscall(I64{0}, file, data + length, capacity - length, I64{0}, I64{0}, I64{0})
+        if (read == I64{-4}) -> next
+        if (read < I64{0}) {
+            valid = false
+            break
+        }
+        if (read == I64{0}) -> break
+        end := length
+        loop end < length + read {
+            if (rt_text_byte(data + end) == I64{10}) {
+                end += I64{1}
+                complete = true
+                break
+            }
+            end += I64{1}
+        }
+        rt_text_store(bytes + DATA_SEQUENCE_LENGTH, end)
+    }
+    data :: rt_text_word(bytes + DATA_SEQUENCE_DATA)
+    length :: rt_text_word(bytes + DATA_SEQUENCE_LENGTH)
+    accepted := false
+    if valid && vault_utf8_valid(data, length) {
+        begin :: vault_crypto_trim_start(data, length)
+        end :: vault_crypto_trim_end(data, begin, length)
+        if (end - begin == I64{9}) {
+            accepted = vault_lock_key(data + begin, I64{9}, I64{8820707168001226081}, I64{101}, I64{9})
+        }
+    }
+    thread_zero(data, rt_text_word(bytes + DATA_SEQUENCE_CAPACITY))
+    data_sequence_drop(bytes, DATA_TREE_BYTE_LIST)
+    accepted
+}
+// Seed2085-2125: test hook FIRST; tty open failure alone allows headless trust.
+fn vault_native_authorize(preview: I64, repo: I64) -> Bool {
+    test_answer :: jet_rt_vault_test_authorize(preview)
+    if (test_answer != I64{-1}) -> return test_answer == I64{1}
+    scratch :: jet_rt_alloc(I64{16}, I64{8})
+    rt_text_store(scratch, I64{8751747723086357551})
+    rt_text_store(scratch + I64{8}, I64{0})
+    tty :: vault_linux_plain_open_at(I64{-100}, scratch, I64{2}, I64{0})
+    jet_rt_free(scratch, I64{16}, I64{8})
+    if (tty < I64{0}) -> return vault_headless_granted(repo)
+    request :: jet_rt_string_builder_new()
+    rt_text_push_word(request, I64{8248096926960279894}, I64{8})
+    rt_text_push_word(request, I64{8462656715650069609}, I64{8})
+    rt_text_push_word(request, I64{138419663717}, I64{5})
+    jet_rt_string_builder_push(request, preview)
+    rt_text_push_word(request, I64{7016643839494018058}, I64{8})
+    rt_text_push_word(request, I64{7312272885205726325}, I64{8})
+    rt_text_push_word(request, I64{7957688057546940512}, I64{8})
+    rt_text_push_word(request, I64{2878957203384692}, I64{7})
+    written :: vault_linux_write_all(tty, rt_text_data(request), rt_text_len(request))
+    jet_rt_string_drop(request)
+    accepted := false
+    if written {
+        cloned :: trap_syscall(I64{72}, tty, I64{1030}, I64{3}, I64{0}, I64{0}, I64{0})
+        if (cloned >= I64{0}) {
+            accepted = vault_tty_answer(cloned)
+            vault_linux_close(cloned)
+        }
+    }
+    vault_linux_close(tty)
+    accepted
+}

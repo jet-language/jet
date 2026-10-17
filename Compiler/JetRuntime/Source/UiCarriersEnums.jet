@@ -1,0 +1,41 @@
+// Native-private carriers only; UiCarriersABI.jet supplies every layout.
+// Seed Clone/PartialEq: CommonTypes.rs:50-54; Open.rs:88-97; Ui.rs:678-682.
+// Source record enum fields cross as raw declaration-order tags, not handles.
+fn ui_carrier_word(address: I64) -> I64 {
+    #Unsafe("address borrows an initialized native UI carrier or E4 header word") {
+        return os_load_i64(address)
+    }
+}
+fn ui_carrier_store(address: I64, word: I64) {
+    #Unsafe("address exclusively owns one writable native UI carrier word") {
+        os_store_i64(address, word)
+    }
+}
+fn ui_carrier_checked_tag(value: I64, count: I64) -> I64 {
+    // Existing CAbiRoutes.rs range_stop: E3010, <core.prelude>:0, exit 70.
+    if (value < I64{0} || value >= count) {
+        trap_native_index_range_stop()
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    value
+}
+fn ui_carrier_scalar_new(word: I64) -> I64 {
+    result :: jet_rt_alloc(UI_CARRIER_SCALAR_BYTES, I64{8})
+    ui_carrier_store(result, word)
+    result
+}
+fn ui_carrier_scalar_drop(value: I64) {
+    if (value != I64{0}) -> jet_rt_free(value, UI_CARRIER_SCALAR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_clone_terminal_mode(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value)) }
+#Export(c) fn jet_rt_handle_drop_terminal_mode(value: I64) { ui_carrier_scalar_drop(value) }
+#Export(c) fn jet_rt_handle_eq_terminal_mode(a: I64, b: I64) -> Bool { ui_carrier_word(a) == ui_carrier_word(b) }
+#Export(c) fn jet_rt_handle_clone_text_width_ambiguous(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value)) }
+#Export(c) fn jet_rt_handle_drop_text_width_ambiguous(value: I64) { ui_carrier_scalar_drop(value) }
+#Export(c) fn jet_rt_handle_eq_text_width_ambiguous(a: I64, b: I64) -> Bool { ui_carrier_word(a) == ui_carrier_word(b) }
+#Export(c) fn jet_rt_handle_clone_text_width_controls(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value)) }
+#Export(c) fn jet_rt_handle_drop_text_width_controls(value: I64) { ui_carrier_scalar_drop(value) }
+#Export(c) fn jet_rt_handle_eq_text_width_controls(a: I64, b: I64) -> Bool { ui_carrier_word(a) == ui_carrier_word(b) }
+#Export(c) fn jet_rt_handle_clone_jet_tui_direction(value: I64) -> I64 { ui_carrier_scalar_new(ui_carrier_word(value)) }
+#Export(c) fn jet_rt_handle_drop_jet_tui_direction(value: I64) { ui_carrier_scalar_drop(value) }
+#Export(c) fn jet_rt_handle_eq_jet_tui_direction(a: I64, b: I64) -> Bool { ui_carrier_word(a) == ui_carrier_word(b) }

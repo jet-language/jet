@@ -12,7 +12,7 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
     if !src.trim().is_empty() {
         if let Ok(tmp_path) = write_unique_temp_file("docs", &src) {
             let path_str = tmp_path.to_string_lossy().to_string();
-            let (_, bundle, facts) = jet_driver::Driver::check_file_with_effect_facts(
+            let (_, bundle, facts, _) = jet_driver::Driver::check_file_with_effect_facts(
                 &path_str,
                 Some((&tmp_path, &src)),
                 true,
@@ -32,7 +32,7 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
             let _ = std::fs::remove_file(&tmp_path);
         }
     }
-    for (name, value) in &session.scope {
+    for (name, shown) in &session.scope {
         // Docs keeps the type in the live symbol fact. The workspace renderer
         // intentionally uses the bare binding spelling after D-BIND-BARE1.
         let sigil = if session.mutable_names.contains(name) {
@@ -50,9 +50,9 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
             signature: format!(
                 "{}: {} {} {}",
                 name,
-                super::type_name(value),
+                binding_type_name(session, name),
                 sigil,
-                value.jet_show()
+                shown
             ),
             summary: String::new(),
             examples: Vec::new(),
@@ -62,6 +62,28 @@ pub(crate) fn symbol_index(session: &Session) -> jet_semindex::SemanticSymbolInd
         });
     }
     index
+}
+
+/// The checked type spelling of a live binding (`?` if sema recorded none).
+pub(crate) fn binding_type_name(session: &Session, name: &str) -> String {
+    session
+        .binding_types
+        .get(name)
+        .map(|ty| ty.name())
+        .unwrap_or_else(|| "?".to_string())
+}
+
+/// The member-completion owner of a checked type (`[Int]` → `List`).
+fn completion_owner(ty: &crate::AST::Type) -> String {
+    use crate::AST::Type;
+    match ty {
+        Type::List(_) | Type::FixedList { .. } => "List".to_string(),
+        Type::Map { .. } => "Map".to_string(),
+        Type::Option(_) => "Option".to_string(),
+        Type::Named(name) | Type::Apply { name, .. } => name.clone(),
+        Type::Tagged { inner, .. } | Type::Shared(inner) => completion_owner(inner),
+        other => other.name(),
+    }
 }
 
 pub(crate) fn completion_candidates(
@@ -90,8 +112,9 @@ pub(crate) fn dotted_completion_candidates(
     receiver: &str,
     partial: &str,
 ) -> Vec<jet_semindex::SemanticSymbol> {
-    if let Some(value) = session.scope.get(receiver) {
-        return completion_candidates(session, partial, Some(super::type_name(value)));
+    if session.scope.contains_key(receiver) {
+        let owner = session.binding_types.get(receiver).map(completion_owner);
+        return completion_candidates(session, partial, owner.as_deref());
     }
     if let Some(module) = session.core_imports.get(receiver) {
         return jet_semindex::SemanticSymbolIndex::complete_core_module(module, partial);
@@ -159,9 +182,10 @@ mod tests {
     #[test]
     fn session_binding_lookup_shows_live_value() {
         let mut session = Session::new();
+        session.scope.insert("answer".to_string(), "42".to_string());
         session
-            .scope
-            .insert("answer".to_string(), crate::AST::CtValue::Int(42));
+            .binding_types
+            .insert("answer".to_string(), crate::AST::Type::Int);
         let doc = lookup(&session, "answer").expect("binding should resolve");
         assert!(doc.starts_with("answer: Int :: 42\n"));
         assert!(doc.contains("Source: this session"));
@@ -173,9 +197,7 @@ mod tests {
         session
             .item_srcs
             .push("fn answer() -> Int { return 1 }".to_string());
-        session
-            .scope
-            .insert("answer".to_string(), crate::AST::CtValue::Int(42));
+        session.scope.insert("answer".to_string(), "42".to_string());
         let candidates = completion_candidates(&session, "ans", None);
         assert_eq!(candidates.len(), 1, "{candidates:?}");
         assert_eq!(candidates[0].identity, "session:binding:answer");
@@ -199,12 +221,10 @@ mod tests {
         session
             .core_imports
             .insert("items".to_string(), "core.math".to_string());
-        session.scope.insert(
+        session.scope.insert("items".to_string(), "[1, 2]".to_string());
+        session.binding_types.insert(
             "items".to_string(),
-            crate::AST::CtValue::List(vec![
-                crate::AST::CtValue::Int(1),
-                crate::AST::CtValue::Int(2),
-            ]),
+            crate::AST::Type::List(Box::new(crate::AST::Type::Int)),
         );
         let candidates = dotted_completion_candidates(&session, "items", "f");
         assert!(

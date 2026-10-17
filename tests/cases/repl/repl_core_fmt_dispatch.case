@@ -1,0 +1,25 @@
+# PORT tests/repl.rs:3219-3255; verbatim inputs and original predicate forms.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no blessed snapshots.
+# Banner/prompt non-overlap: crates/jet-repl/src/Render.rs24-37,67-74; stderr discovery41-61.
+# lib.rs2469-2470 cooked floor mirrors transcript. No stripping/projection.
+fixture: repl_core_fmt_dispatch.fixture
+step: jet repl
+env: NO_COLOR=1
+env: XDG_STATE_HOME={work}/state
+stdin: repl_core_fmt_dispatch.fixture/input.txt
+exit: any # original library predicates did not assert process status
+stdout: !~ "E0956" # original predicate
+stderr: !~ "E0956" # original predicate
+stdout|stderr: ~ "\"1,234,567\" : String" # original predicate
+stdout|stderr: ~ "\"3.14\" : String" # original predicate
+stdout|stderr: ~ "\"1234.57\" : String" # original predicate
+stdout|stderr: ~ "\"1,234.57\" : String" # original predicate
+stdout|stderr: ~ "\"45.7%\" : String" # original predicate
+stdout|stderr: ~ "\"1.5 MB\" : String" # original predicate
+stdout|stderr: ~ "\"1d 2h 3m\" : String" # original predicate
+stdout|stderr: ~ "\"23rd\" : String" # original predicate
+stdout|stderr: ~ "\"1 item\" : String" # original predicate
+stdout|stderr: ~ "\"3 items\" : String" # original predicate
+stdout|stderr: ~ "\"007\" : String" # original predicate
+stdout|stderr: ~ "\"ab...\" : String" # original predicate
+stdout|stderr: ~ "\"**hi**\" : String" # original predicate

@@ -1,148 +1,114 @@
-use core.math as math
+// core.data.sketch.tdigest — the shipped unit-weight, step-quantile digest.
+// All samples, including non-finite values, follow the original insertion and
+// compression order. Cloning produces an independent centroid value.
+struct TDigest {
+    centroids: [Centroid]
 
-// Deterministic weighted t-digest.  Centroids stay sorted by (mean, weight)
-// and are compressed in that order, so the result does not depend on hash
-// iteration or provider row order.  `add` updates the digest in place
-// through a write receiver.
-pub struct TDigest {
-    pub delta: Float
-    pub means: [Float]
-    pub weights: [Float]
-    pub total: Float
+    impl Display {
+        fn display(self) -> String { "TDigest" }
+    }
 }
 
-pub struct Centroid {
-    pub mean: Float
-    pub weight: Float
+struct Centroid {
+    mean: Float
+    weight: Float
 }
 
-pub fn new() -> TDigest Never! {
-    {delta: Float{100.0}, means: [Float]{}, weights: [Float]{}, total: Float{0.0}}
-}
+fn new() -> TDigest Never! { TDigest.new() }
 
 impl TDigest {
-    /// Record one finite sample with a positive weight (1.0 by default).
-    pub fn add(&self, x: Float, w: Float{1.0}) Never! {
-        if !math.is_finite(x) || !math.is_finite(w) || w <= (Float{0.0}) -> return
-        if !digest_shape_ok(self) {
-            self.means = [Float]{}
-            self.weights = [Float]{}
-            self.total = Float{0.0}
-        }
-        if !math.is_finite(self.delta) || self.delta <= (Float{0.0}) -> self.delta = Float{100.0}
-        total :: self.total + w
-        if !math.is_finite(total) -> return
-        &self.means.push(x)
-        &self.weights.push(w)
-        insert_sorted(&self.means, &self.weights)
-        self.total = total
-        if self.means.len() > 64 {
-            packed :: compress(self.means, self.weights, self.delta, total)
-            self.means = packed.means
-            self.weights = packed.weights
-        }
+    fn new() -> TDigest Never! {
+        TDigest{centroids: [Centroid]{}}
     }
 
-    /// The interpolated value at quantile `q` in `0.0..=1.0`.
-    pub fn quantile(self, q: Float) -> Float Never! { digest_quantile(self, q) }
-}
-
-fn digest_quantile(td: TDigest, q: Float) -> Float Never! {
-    if !digest_shape_ok(td) || td.total <= (Float{0.0}) -> return Float{0.0}
-    if !math.is_finite(q) -> return Float{0.0}
-    if q <= (Float{0.0}) -> return td.means[0]
-    if q >= (Float{1.0}) -> return td.means[td.means.len() - 1]
-
-    // Interpolate between centroid centers rather than returning a step
-    // function.  This keeps one-point and weighted samples exact while
-    // making the result useful between centroids.
-    target :: q * td.total
-    cumulative := Float{0.0}
-    previous_center := Float{0.0}
-    loop i in 0..<td.means.len() {
-        w :: td.weights[i]
-        center :: cumulative + w / (Float{2.0})
-        if target <= center {
-            if i == 0 || center <= previous_center -> return td.means[i]
-            fraction :: (target - previous_center) / (center - previous_center)
-            return td.means[i - 1] + (td.means[i] - td.means[i - 1]) * fraction
-        }
-        cumulative = cumulative + w
-        previous_center = center
+    /// Record one sample with the shipped unit weight.
+    fn add(&self, value: Float) Never! {
+        add_sample(&self.centroids, value)
     }
-    td.means[td.means.len() - 1]
+
+    /// Return the first centroid whose cumulative weight reaches q * total.
+    fn quantile(self, q: Float) -> Float Never! {
+        step_quantile(self.centroids, q)
+    }
 }
 
-pub struct Packed {
-    pub means: [Float]
-    pub weights: [Float]
+fn insertion_index(values: [Centroid], value: Float) -> Int Never! {
+    if values.len() == 0 -> return 0
+    base := 0
+    size := values.len()
+    loop size > 1 {
+        half :: size /% 2
+        middle :: base + half
+        if values[middle].mean < value -> base = middle
+        size = size - half
+    }
+    if values[base].mean < value -> base + 1 else -> base
 }
 
-fn compress(means: [Float], weights: [Float], delta: Float, total: Float) -> Packed {
-    if means.len() == 0 -> return Packed{means: [Float]{}, weights: [Float]{}}
-    if delta <= (Float{0.0}) || total <= (Float{0.0}) -> return Packed{means: copy_floats(means), weights: copy_floats(weights)}
-    om := [Float]{means[0]}
-    ow := [Float]{weights[0]}
-    cumulative := weights[0]
-    loop i in 1..<means.len() {
-        // t-digest's scale is smallest at the tails and largest near the
-        // median.  A minimum capacity of one keeps tiny samples alive.
-        q :: (cumulative - ow[ow.len() - 1] / (Float{2.0})) / total
-        cap := total * (Float{4.0}) * q * ((Float{1.0}) - q) / delta
-        if cap < (Float{1.0}) -> cap = Float{1.0}
-        candidate :: ow[ow.len() - 1] + weights[i]
-        if candidate <= cap {
-            old_weight :: ~ow[ow.len() - 1]
-            ow[ow.len() - 1] = candidate
-            om[om.len() - 1] = (om[om.len() - 1] * old_weight + means[i] * weights[i]) / candidate
+fn add_sample(values: &[Centroid], value: Float) Never! {
+    index :: insertion_index(values, value)
+    &values.push(Centroid{mean: value, weight: Float{1.0}})
+    at := values.len() - 1
+    loop at > index {
+        values[at] = values[at - 1].copy()
+        at = at - 1
+    }
+    values[index] = Centroid{mean: value, weight: Float{1.0}}
+
+    total := Float{0.0}
+    loop centroid in values -> total = total + centroid.weight
+    last := 0
+    cumulative := values[0].weight
+    loop i in 1..<values.len() {
+        sample :: values[i].copy()
+        previous :: values[last].copy()
+        q :: cumulative / total
+        limit :: Float{4.0} * total * q * (Float{1.0} - q) / Float{100.0}
+        capacity :: if limit > (Float{1.0}) -> limit else -> Float{1.0}
+        if previous.weight + sample.weight <= capacity {
+            weight :: previous.weight + sample.weight
+            values[last] = Centroid{
+                mean: (previous.mean * previous.weight + sample.mean * sample.weight) / weight,
+                weight: weight,
+            }
         } else {
-            &om.push(means[i])
-            &ow.push(weights[i])
+            last = last + 1
+            values[last] = sample
+            cumulative = cumulative + sample.weight
         }
-        cumulative = cumulative + weights[i]
     }
-    Packed{means: om, weights: ow}
+    loop values.len() > last + 1 -> _ :: &values.pop()
 }
 
-fn insert_sorted(means: &[Float], weights: &[Float]) {
-    i := 1
-    loop i < means.len() {
-        j := i
-        loop {
-            if j <= 0 -> break
-            if means[j - 1] < means[j] -> break
-            if means[j - 1] == means[j] && weights[j - 1] <= weights[j] -> break
-            tm :: ~means[j]
-            means[j] = means[j - 1]
-            means[j - 1] = tm
-            tw :: ~weights[j]
-            weights[j] = weights[j - 1]
-            weights[j - 1] = tw
-            j = j - 1
-        }
-        i = i + 1
+fn step_quantile(values: [Centroid], q: Float) -> Float Never! {
+    if values.len() == 0 -> return Float{0.0}
+    total := Float{0.0}
+    loop centroid in values -> total = total + centroid.weight
+    target :: q * total
+    cumulative := Float{0.0}
+    loop centroid in values {
+        cumulative = cumulative + centroid.weight
+        if cumulative >= target -> return centroid.mean
     }
+    values[values.len() - 1].mean
 }
 
-fn copy_floats(values: [Float]) -> [Float] {
-    out := [Float]{}
-    loop value in values -> &out.push(value)
-    out
+#Test("unit-weight digest retains shipped step quantiles") {
+    digest := new()
+    assert_eq(digest.quantile(Float{0.5}), Float{0.0})
+    &digest.add(Float{2.0})
+    &digest.add(Float{1.0})
+    assert_eq(digest.quantile(Float{0.5}), Float{1.0})
+    assert_eq(digest.quantile(Float{0.51}), Float{2.0})
+    assert_eq(digest.quantile(Float{-1.0}), Float{1.0})
+    assert_eq(digest.quantile(Float{2.0}), Float{2.0})
 }
 
-fn digest_shape_ok(td: TDigest) -> Bool {
-    if td.means.len() == 0 || td.means.len() != td.weights.len() -> return false
-    if !math.is_finite(td.delta) || td.delta <= (Float{0.0}) -> return false
-    if !math.is_finite(td.total) || td.total <= (Float{0.0}) -> return false
-    sum := Float{0.0}
-    loop i in 0..<td.means.len() {
-        if !math.is_finite(td.means[i]) || !math.is_finite(td.weights[i]) || td.weights[i] <= (Float{0.0}) -> return false
-        if i > 0 && td.means[i] < td.means[i - 1] -> return false
-        sum = sum + td.weights[i]
-    }
-    if !math.is_finite(sum) || sum <= (Float{0.0}) -> return false
-    difference :: math.fabs(sum - td.total)
-    scale := math.fabs(td.total)
-    if scale < (Float{1.0}) -> scale = Float{1.0}
-    difference <= Float{0.000000001} * scale
+#Test("digest clones have independent samples") {
+    digest := new()
+    &digest.add(Float{7.0})
+    clone := digest.copy()
+    &clone.add(Float{1.0})
+    assert_eq(digest.quantile(Float{0.5}), Float{7.0})
+    assert_eq(clone.quantile(Float{0.5}), Float{1.0})
 }

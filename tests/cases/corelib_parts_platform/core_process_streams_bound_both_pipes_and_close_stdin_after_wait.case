@@ -1,0 +1,12 @@
+# Port of tests/corelib_parts/platform.rs:759-801; source and scripts verbatim after original Rust format expansion.
+# PENDING-SAME-HEAD; no snapshots blessed.
+fixture: fixtures/core_process_streams_bound_both_pipes_and_close_stdin_after_wait
+write: main.jet main.template
+write: flood.sh flood.sh.template
+chmod: flood.sh 755
+requires: os:unix
+step: jet build main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = "limit:refused\nclosed:typed-error\n"

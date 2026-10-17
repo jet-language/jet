@@ -22,6 +22,7 @@ pub fn build_graph_json(path: &str, text: &str) -> Result<Option<String>, Vec<Di
 }
 
 /// Check one document, also returning the bundle and effect facts for symbol analysis.
+/// Symbol projection does not consume the check's MIR nominal carrier.
 pub fn check_document_with_bundle(
     path: &str,
     text: &str,
@@ -31,7 +32,9 @@ pub fn check_document_with_bundle(
     jet_semindex::SemIndexEffectFacts,
 ) {
     let abs = canonical_path(path);
-    crate::Driver::check_file_with_effect_facts(path, Some((&abs, text)), true)
+    let (diagnostics, bundle, facts, _) =
+        crate::Driver::check_file_with_effect_facts(path, Some((&abs, text)), true);
+    (diagnostics, bundle, facts)
 }
 
 /// Apply a single teaching edit to source text (for scripted LSP tests and the

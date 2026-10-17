@@ -2,8 +2,8 @@
 // Core `WalkEntry` fields `path`, `relative`, `is_dir` and `depth`.
 package {
     name: "grep_scan"
-    // Walks and reads need FS.Read; fixture creation needs FS.Write.
-    authority: { holds: { allow: [FS.Read, FS.Write, IO, Mem.Alloc] } }
+    // Walking declares FS; reads need FS.Read and fixture creation FS.Write.
+    authority: { holds: { allow: [FS, FS.Read, FS.Write, IO, Mem.Alloc] } }
 }
 
 use core.files as fs
@@ -12,12 +12,12 @@ use core.testing as testing
 fn run() {
     root :: testing.temp_dir("grep-scan")
     src :: Path.from(root).join("src")
-    fs.create_dir_all(src)
+    fs.create_dir_all(src.to_string())
     fs.write(Path.from(root).join("notes.txt"), "needle in notes\n")
     fs.write(src.join("alpha.txt"), "needle in alpha\n")
     fs.write(src.join("beta.txt"), "no match\n")
     ignored :: Path.from(root).join("ignored")
-    fs.create_dir_all(ignored)
+    fs.create_dir_all(ignored.to_string())
     fs.write(ignored.join("hidden.txt"), "needle must stay ignored\n")
     fs.write(Path.from(root).join(".gitignore"), "ignored/\n")
 

@@ -1,0 +1,66 @@
+// RFC8439 2.8 and XChaCha draft AEAD. Borrowed spans, no message copies.
+// key32/nonce12 (extended nonce24); output plaintext+16 tag for seal.
+// Caller scratch560 (XChaCha608), aligned8/disjoint; wiped on every return.
+// Exact in-place payload permitted. Open verifies before any plaintext write.
+fn rt_aead_tag(key: I64, nonce: I64, aad: I64, aad_len: I64, cipher: I64, cipher_len: I64, auth_tag: I64, scratch: I64) {
+    one_time :: scratch + I64{320}
+    state :: scratch + I64{384}
+    rt_crypto_chacha_block(key, nonce, I64{0}, one_time, scratch)
+    rt_poly_init(one_time, state)
+    rt_poly_update(aad, aad_len, true, state)
+    rt_poly_update(cipher, cipher_len, true, state)
+    lengths :: scratch + I64{352}
+    rt_crypto_put32(lengths, aad_len)
+    rt_crypto_put32(lengths + I64{4}, aad_len >> I64{32})
+    rt_crypto_put32(lengths + I64{8}, cipher_len)
+    rt_crypto_put32(lengths + I64{12}, cipher_len >> I64{32})
+    rt_poly_block(lengths, I64{16}, false, state)
+    rt_poly_finish(state, auth_tag)
+}
+fn rt_crypto_aead_seal(key: I64, nonce: I64, aad: I64, aad_len: I64, plain: I64, length: I64, output: I64, scratch: I64) -> Bool {
+    if (aad_len < I64{0} || length < I64{0} || length > I64{274877906880}) {
+        rt_crypto_wipe(scratch, I64{560})
+        return false
+    }
+    if (!rt_crypto_chacha_xor(key, nonce, I64{1}, plain, length, output, scratch)) {
+        rt_crypto_wipe(scratch, I64{560})
+        return false
+    }
+    rt_aead_tag(key, nonce, aad, aad_len, output, length, output + length, scratch)
+    rt_crypto_wipe(scratch, I64{560})
+    true
+}
+fn rt_crypto_aead_open(key: I64, nonce: I64, aad: I64, aad_len: I64, cipher: I64, length: I64, output: I64, scratch: I64) -> Bool {
+    if (aad_len < I64{0} || length < I64{16} || length - I64{16} > I64{274877906880}) {
+        rt_crypto_wipe(scratch, I64{560})
+        return false
+    }
+    count :: length - I64{16}
+    auth_tag :: scratch + I64{544}
+    rt_aead_tag(key, nonce, aad, aad_len, cipher, count, auth_tag, scratch)
+    valid :: rt_crypto_equal(auth_tag, cipher + count, I64{16})
+    if (!valid) {
+        rt_crypto_wipe(scratch, I64{560})
+        return false
+    }
+    accepted :: rt_crypto_chacha_xor(key, nonce, I64{1}, cipher, count, output, scratch)
+    rt_crypto_wipe(scratch, I64{560})
+    accepted
+}
+fn rt_aead_xkey(key: I64, nonce: I64, scratch: I64) {
+    rt_crypto_hchacha(key, nonce, scratch + I64{560}, scratch)
+    rt_crypto_wipe(scratch + I64{592}, I64{4})
+    rt_text_bytes_copy(scratch + I64{596}, nonce + I64{16}, I64{8})
+}
+fn rt_crypto_xaead_seal(key: I64, nonce: I64, aad: I64, aad_len: I64, plain: I64, length: I64, output: I64, scratch: I64) -> Bool {
+    rt_aead_xkey(key, nonce, scratch)
+    accepted :: rt_crypto_aead_seal(scratch + I64{560}, scratch + I64{592}, aad, aad_len, plain, length, output, scratch)
+    rt_crypto_wipe(scratch, I64{608})
+    accepted
+}
+fn rt_crypto_xaead_open(key: I64, nonce: I64, aad: I64, aad_len: I64, cipher: I64, length: I64, output: I64, scratch: I64) -> Bool {
+    rt_aead_xkey(key, nonce, scratch)
+    accepted :: rt_crypto_aead_open(scratch + I64{560}, scratch + I64{592}, aad, aad_len, cipher, length, output, scratch)
+    rt_crypto_wipe(scratch, I64{608})
+    accepted
+}

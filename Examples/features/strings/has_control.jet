@@ -5,22 +5,22 @@ fn scalar(cp: Int) -> String {
     if {
         cp < 128 -> &raw.push(U8{cp})
         cp < 2048 -> {
-            &raw.push(U8{Int{192} | (cp >> 6)})
-            &raw.push(U8{Int{128} | (cp & Int{63})})
+            &raw.push(U8{Int{192}.bit_or((cp >> 6))})
+            &raw.push(U8{Int{128}.bit_or((cp.bit_and(Int{63})))})
         }
         cp < 65536 -> {
-            &raw.push(U8{Int{224} | (cp >> 12)})
-            &raw.push(U8{Int{128} | ((cp >> 6) & Int{63})})
-            &raw.push(U8{Int{128} | (cp & Int{63})})
+            &raw.push(U8{Int{224}.bit_or((cp >> 12))})
+            &raw.push(U8{Int{128}.bit_or(((cp >> 6).bit_and(Int{63})))})
+            &raw.push(U8{Int{128}.bit_or((cp.bit_and(Int{63})))})
         }
         else -> {
-            &raw.push(U8{Int{240} | (cp >> 18)})
-            &raw.push(U8{Int{128} | ((cp >> 12) & Int{63})})
-            &raw.push(U8{Int{128} | ((cp >> 6) & Int{63})})
-            &raw.push(U8{Int{128} | (cp & Int{63})})
+            &raw.push(U8{Int{240}.bit_or((cp >> 18))})
+            &raw.push(U8{Int{128}.bit_or(((cp >> 12).bit_and(Int{63})))})
+            &raw.push(U8{Int{128}.bit_or(((cp >> 6).bit_and(Int{63})))})
+            &raw.push(U8{Int{128}.bit_or((cp.bit_and(Int{63})))})
         }
     }
-    String.from_bytes(~raw) ?? panic("invalid Unicode scalar")
+    String.from_bytes(raw.copy()) ?? panic("invalid Unicode scalar")
 }
 
 fn run() {

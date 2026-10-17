@@ -1,0 +1,21 @@
+# Port of tests/jetpack_jetos.rs:683-744; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_zero_hangar_generation_has_ledger_without_external_root.fixture
+mkdir: package-root
+step first: jet os build empty --name zero-hangar --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+json: file package-root/systems/generations/zero-hangar/generation-root.json doc $.output_digests #= 0
+capture: witness file package-root/systems/generations/zero-hangar/generation-root.json doc $.witness
+file.trim_end.split("\t", 4): package-root/systems/generations.log = "{cap:witness}"
+file: package-root/hangar/lifecycle-db absent
+copy: package-root/systems/generations.log original-ledger
+step retry: jet os build empty --name zero-hangar --no-color --offline
+cwd: project
+env: JETPACK_ROOT={work}/package-root
+env: PATH=/usr/bin:/bin
+exit: 0
+file: package-root/systems/generations.log == original-ledger
+file: package-root/hangar/lifecycle-db absent

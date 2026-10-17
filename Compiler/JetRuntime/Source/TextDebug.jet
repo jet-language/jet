@@ -1,0 +1,44 @@
+// Exact Rust 1.97.1 str Debug, commit 8bab26f4f68e0e26f0bb7960be334d5b520ea452:
+// library/core/src/fmt/mod.rs:2916-2960, char/methods.rs:474-487.
+// The existing TRAP_DEBUG_RANGES/decoder are canonical. Pinned-source checker
+// Tools/agent/gen-text-debug-tables.mjs found 0/1,111,936 non-ASCII differences.
+fn rt_text_push_rust_unicode_escape(target: I64, cp: I64) {
+    rt_text_push_word(target, I64{8090972}, I64{3}) // "\\u{"
+    divisor := I64{1}
+    loop cp /% divisor >= (I64{16}) -> divisor *= I64{16}
+    loop {
+        digit :: (cp /% divisor).bit_and(I64{15})
+        rt_text_push_word(target, if (digit < I64{10}) -> digit + I64{48} else -> digit + I64{87}, I64{1})
+        divisor = divisor /% I64{16}
+        if (divisor == I64{0}) -> break
+    }
+    rt_text_push_word(target, I64{125}, I64{1})
+}
+// Borrow valid E4 text and append into a distinct live builder. The only mode
+// difference is NUL: Rust's \0 versus Jet D-STR-ESCAPE1's \u{0}.
+// Plain runs append directly; no transient String/scalar buffer allocation.
+fn rt_text_push_debug_str(target: I64, text: I64, rust_nul: Bool) {
+    rt_text_push_word(target, I64{34}, I64{1})
+    data :: rt_text_data(text)
+    length :: rt_text_len(text)
+    at := I64{0}
+    start := I64{0}
+    loop at < length {
+        scalar :: trap_scalar(data + at)
+        cp :: scalar.code
+        width :: scalar.width
+        short :: if (rust_nul && cp == I64{0}) -> I64{48} else -> trap_debug_short(cp)
+        escape :: short >= I64{0} || cp < I64{32} || cp == I64{127} || (cp >= I64{128} && trap_debug_escaped(cp))
+        if escape {
+            rt_text_append(target, data + start, at - start)
+            if (short >= I64{0}) {
+                rt_text_push_word(target, I64{92}.bit_or((short << I64{8})), I64{2})
+            } else { rt_text_push_rust_unicode_escape(target, cp) }
+            start = at + width
+        }
+        at += width
+    }
+    rt_text_append(target, data + start, length - start)
+    rt_text_push_word(target, I64{34}, I64{1})
+}
+#Export(c) fn rt_text_push_rust_debug_str(target: I64, text: I64) { rt_text_push_debug_str(target, text, true) }

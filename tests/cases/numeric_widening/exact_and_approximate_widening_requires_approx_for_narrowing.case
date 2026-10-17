@@ -1,0 +1,39 @@
+# HAND-PORT tests/numeric_widening.rs:555-582 exact_and_approximate_widening_requires_approx_for_narrowing
+# PENDING-KIT; PENDING-GRAMMAR; no runtime/reference proof.
+# All original success+trap programs and guards. AOT requires runtime70; default/forced-interpreter permit ONLY70 raw trap or1 exact same-diagnostic E0953+why, matching original RunOutcome branches. No arbitrary nonzero acceptance.
+fixture: exact_and_approximate_widening_requires_approx_for_narrowing.fixture
+env: NO_COLOR=1
+step successdefault: jet run success/main.jet
+exit: 0
+stdout: = exact_and_approximate_widening_requires_approx_for_narrowing.successstdout.expected
+step successinterpret: jet run --interpret success/main.jet
+exit: 0
+stdout: = exact_and_approximate_widening_requires_approx_for_narrowing.successstdout.expected
+when tool rustc
+step: jet build --profile=debug success/main.jet
+exit: 0
+step: built
+exit: 0
+stdout: = exact_and_approximate_widening_requires_approx_for_narrowing.successstdout.expected
+end when
+when tool rustc
+step: jet build --profile=debug narrowing/main.jet
+exit: 0
+step: built
+exit: 70
+stdout: empty
+stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+stderr: ~ "[E3010]" # original runtime code
+end when
+step narrowingdefault: jet run --json narrowing/main.jet
+exit: in [70, 1]
+when exit == 70: stdout: empty
+when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "[E3010]" # original runtime code
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1
+step narrowinginterpret: jet run --json --interpret narrowing/main.jet
+exit: in [70, 1]
+when exit == 70: stdout: empty
+when exit == 70: stderr: ~ "whole number cannot cross into the decimal without losing precision" # original runtime precision trap
+when exit == 70: stderr: ~ "[E3010]" # original runtime code
+when exit == 1: json: stdout doc $.reports[?code="E0953"][?why~="whole number cannot cross into the decimal without losing precision"] #>= 1

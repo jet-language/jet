@@ -1,0 +1,180 @@
+// Exact hostile Recipe matrix: tests/build_sandbox.rs:664-852 and1170-1322.
+// PENDING-SEAM(package-tests): canonical Jetpack package staging, not a public entry.
+use core.net as hostile_net
+
+fn recipe_hostile_rows() -> [[String]] {
+    root :: sys.get("JET_REPO_ROOT") ?? "."
+    corpus :: files.read(files.join(root, "tests/fixtures/build_sandbox/hostile-corpus.tsv")) ?? panic("hostile corpus")
+    rows := [[String]]{}
+    ids := [String]{}
+    categories :: [String]{"escape", "exfiltration", "resource-abuse", "toctou", "child-process-abuse"}
+    loop line in corpus.lines() {
+        if line == "" || line.starts_with("#") -> next
+        fields :: line.split("\t").to_list()
+        assert_eq(fields.len(), 4, "malformed hostile corpus row")
+        assert(!ids.contains(fields[0]), "hostile corpus repeats case")
+        &ids.push(fields[0])
+        assert(categories.contains(fields[1]), "unknown hostile category")
+        assert(fields[2] != "", "missing hostile attempt")
+        assert_eq(fields[3], "blocked-or-unsupported")
+        &rows.push(fields)
+    }
+    assert_eq(rows.len(), 7, "hostile corpus lost required case")
+    loop category in categories {
+        found := false
+        loop row in rows { if row[1] == category -> found = true }
+        assert(found, "hostile corpus lacks category")
+    }
+    rows
+}
+
+fn recipe_hostile_quote(path: String) -> String {
+    "'{path.replace("'", "'\\''")}'"
+}
+
+fn recipe_hostile_observe(listener: TCPListener, milliseconds: Int, bytes_predicate: Bool) -> Bool {
+    deadline :: time.instant() + time.duration_ms(milliseconds)
+    loop {
+        // Exact WouldBlock polling: deadline0 drains queued sockets; ONLY Timeout polls.
+        if &listener.accept(deadline: 0s) == {
+            .Ok(stream) -> {
+                if !bytes_predicate {
+                    hostile_net.tcp_close(stream) ?? panic("drop observer connection")
+                    return true
+                }
+                bytes := [U8]{}
+                loop {
+                    if hostile_net.tcp_read_bytes(stream, 8192) == {
+                        .Ok(chunk) -> {
+                            if chunk.len() == 0 -> break
+                            &bytes.extend(chunk)
+                        }
+                        .Err(_) -> break // Original ignores read_to_end error, retains collected bytes.
+                    }
+                }
+                hostile_net.tcp_close(stream) ?? panic("drop observer connection")
+                return bytes == "escaped".bytes()
+            }
+            .Err(error) -> if error == {
+                .Timeout(_) -> {
+                    if time.instant() >= deadline -> return false
+                    time.sleep(5ms)
+                }
+                else -> return false // Exact original other-error Boolean, not Timeout conflation.
+            }
+        }
+    }
+}
+
+fn recipe_hostile_execute(base: String, ctx: RecipeBuildContext, tool: String, args: [String], windows: Bool, id: String) {
+    result :: recipe_run(recipe_sandbox_test_exec(tool, args), ctx, None)
+    if result == {
+        .Ok(report) -> {
+            if windows {
+                assert_eq(report.sandbox_class, "windows-appcontainer")
+            } else {
+                assert(report.sandbox_class != "non-executing")
+                status :: files.read(files.join(ctx.output_root, "status")) ?? panic("corpus status")
+                assert_eq(status.trim(), "blocked", "corpus attempt must be blocked")
+            }
+            policies :: [String]{"filesystem=", "process=", "network=", "environment=", "devices=", "resources="}
+            loop policy in policies -> assert(report.sandbox_policy.contains(policy), "missing sandbox policy")
+        }
+        .Err(error) -> {
+            if windows {
+                assert(error.code == "E1237" || error.code == "E1238" || error.code == "E1275", "unrelated diagnostic")
+            } else {
+                assert(error.code == "E1237" || error.code == "E1275", "unrelated diagnostic")
+            }
+        }
+    }
+    if windows && id == "source-symlink" -> assert(!files.exists(files.join(ctx.output_root, "leak")), "source-symlink leak")
+    if id == "child-process" -> time.sleep(100ms)
+    assert(!files.exists(files.join(base, "host-marker")), "hostile command wrote host marker")
+    if !windows {
+        if files.read(files.join(ctx.output_root, "status")) == {
+            .Ok(status) -> {
+                assert(status != "leaked")
+                assert(status != "escaped")
+            }
+            .Err(_) -> {} // Original if let Ok(status).
+        }
+    }
+}
+
+fn recipe_hostile_matrix(windows: Bool) {
+    if windows && !sys.is_windows() -> return
+    if !windows && !sys.is_unix() -> return
+    rows :: recipe_hostile_rows()
+    shell :: if windows -> recipe_sandbox_test_cmd() else -> process.which("bash") ?? process.which("sh") ?? panic("hostile corpus needs shell")
+    loop row in rows {
+        id :: row[0]
+        base :: recipe_test_scratch("hostile-{id}")
+        src :: files.join(base, "src")
+        out :: files.join(base, "out")
+        secret :: files.join(base, "host-secret")
+        marker :: files.join(base, "host-marker")
+        fill :: "/tmp/jet-build-hostile-fill-{sys.pid()}-{id}"
+        files.create_dir_all(src) ?? panic("source directory")
+        files.write(secret, "host-only-secret") ?? panic("host secret")
+        if id == "source-symlink" -> files.symlink(secret, files.join(src, "link")) ?? panic("source symlink")
+        tool :: if windows -> "hostile-tool" else -> "sh"
+        ctx := RecipeBuildContext{source_dir: src, output_root: out, tools: [String: String]{tool: shell}, fetch_cache: files.join(base, "cache"), offline: false}
+        if id == "network-exfiltration" {
+            listener :: hostile_net.tcp_listen("127.0.0.1:0") ?? panic("network observer")
+            port :: hostile_net.socket_port(hostile_net.listener_local_socket_addr(listener) ?? panic("observer address"))
+            peer :: task { recipe_hostile_observe(listener, if windows -> 750 else -> 500, !windows) }
+            if windows {
+                windir :: sys.get("WINDIR") ?? "C:\\Windows"
+                powershell :: files.join(windir, "System32/WindowsPowerShell/v1.0/powershell.exe")
+                ctx.tools = [String: String]{tool: powershell}
+                command :: "try {{$c=New-Object Net.Sockets.TcpClient('127.0.0.1',{port});$c.Close();exit 70}} catch {{exit 0}}"
+                recipe_hostile_execute(base, ctx, tool, [String]{"-NoProfile", "-NonInteractive", "-Command", command}, true, id)
+            } else {
+                command :: "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                recipe_hostile_execute(base, ctx, tool, [String]{"-c", command}, false, id)
+            }
+            assert(!(peer.join() ?? panic("network observer")), "hostile corpus reached network")
+        } else {
+            command :: if windows -> {
+                if id == {
+                    "host-read" -> "copy /Y \"{secret}\" \"{marker}\" >NUL 2>&1 && exit /b 70 || echo blocked>\"%JET_BUILD_OUTPUT%\\status\""
+                    "host-write" -> "echo escaped>\"{marker}\""
+                    "source-symlink" -> "if exist \"%CD%\\link\" (copy /Y \"%CD%\\link\" \"%JET_BUILD_OUTPUT%\\leak\" >NUL 2>&1 && exit /b 70) else echo blocked>\"%JET_BUILD_OUTPUT%\\status\""
+                    "output-symlink" -> "mklink \"%JET_BUILD_OUTPUT%\\link\" \"{marker}\" >NUL 2>&1 && echo escaped>\"%JET_BUILD_OUTPUT%\\link\" || echo blocked>\"%JET_BUILD_OUTPUT%\\status\""
+                    "child-process" -> "start \"\" /b \"{shell}\" /C \"echo escaped>\\\"{marker}\\\"\""
+                    "tmpfs-exhaustion" -> "for /L %i in (1,1,300) do @start \"\" /b \"{shell}\" /C \"timeout /T 3 /NOBREAK >NUL\" & echo blocked>\"%JET_BUILD_OUTPUT%\\status\""
+                    else -> panic("unmapped hostile corpus")
+                }
+            } else -> {
+                secret_q :: recipe_hostile_quote(secret)
+                marker_q :: recipe_hostile_quote(marker)
+                ln_q :: recipe_hostile_quote(recipe_sandbox_test_tool("ln"))
+                fill_q :: recipe_hostile_quote(fill)
+                if id == {
+                    "host-read" -> "if [ -r {secret_q} ]; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                    "host-write" -> "if printf escaped > {marker_q}; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                    "source-symlink" -> "if [ -r \"$PWD/link\" ]; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                    "output-symlink" -> "if {ln_q} -s {marker_q} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                    "child-process" -> "(printf escaped > {marker_q}) & child=$!; wait \"$child\"; if [ -e {marker_q} ]; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                    "tmpfs-exhaustion" -> "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {fill_q}; then printf blocked > \"$JET_BUILD_OUTPUT/status\"; break; fi; i=$((i + 1)); done; if [ \"$i\" -ge 1025 ]; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                    else -> panic("unmapped hostile corpus")
+                }
+            }
+            args :: [String]{if windows -> "/C" else -> "-c", command}
+            recipe_hostile_execute(base, ctx, tool, args, windows, id)
+        }
+        if !windows {
+            files.remove(fill).drop("hostile fill cleanup")
+            assert_eq(row[3], "blocked-or-unsupported")
+        }
+        files.remove_all(base).drop("hostile scratch cleanup")
+    }
+}
+
+#Test("native_windows_appcontainer_uses_the_shared_hostile_corpus") {
+    recipe_hostile_matrix(true)
+}
+#Test("shared_hostile_corpus_uses_the_recipe_production_path") {
+    recipe_hostile_matrix(false)
+}

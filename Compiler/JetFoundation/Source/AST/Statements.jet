@@ -1,6 +1,6 @@
 // Rust-shaped statements and their parser/semantic support records.
 
-pub enum Stmt {
+enum Stmt {
     Expr(expr: Expr)
     Val(binding: Binding)
     Assign(target: LValue, op: BinOp?, op_span: Span, value: Expr)
@@ -38,40 +38,40 @@ pub enum Stmt {
     DeferClose(close: Expr, span: Span)
 }
 
-pub struct IfStmt {
-    pub cond: Expr
-    pub then_body: [Stmt]
-    pub else_branch: ElseBranch?
-    pub span: Span
+struct IfStmt {
+    cond: Expr
+    then_body: [Stmt]
+    else_branch: ElseBranch?
+    span: Span
 }
 
-pub enum ElseBranch {
+enum ElseBranch {
     ElseIf(branch: IfStmt)
     Else(body: [Stmt])
 }
 
-pub struct SwitchArm {
-    pub cond: Expr
-    pub body: [Stmt]
-    pub span: Span
+struct SwitchArm {
+    cond: Expr
+    body: [Stmt]
+    span: Span
 }
 
-pub struct ContextField {
-    pub name: String
-    pub value: Expr
-    pub span: Span
+struct ContextField {
+    name: String
+    value: Expr
+    span: Span
 }
 
-pub struct PolicyDeclaration {
-    pub key: PolicyKey
-    pub value: PolicyValue
-    pub scope: PolicyScope
-    pub span: Span
-    pub target: Span?
-    pub source: String
+struct PolicyDeclaration {
+    key: PolicyKey
+    value: PolicyValue
+    scope: PolicyScope
+    span: Span
+    target: Span?
+    source: String
 }
 
-pub enum PolicyKey {
+enum PolicyKey {
     Unsafe
     Impure
     Nondeterministic
@@ -92,7 +92,7 @@ pub enum PolicyKey {
     Sentries
 }
 
-pub enum PolicyValue {
+enum PolicyValue {
     Enabled
     Limit(value: Int)
     Forbid
@@ -109,7 +109,7 @@ pub enum PolicyValue {
     Explicit
 }
 
-pub enum PolicyScope {
+enum PolicyScope {
     Organization
     Package
     Module
@@ -117,89 +117,91 @@ pub enum PolicyScope {
     Block
 }
 
-pub enum ForKind {
+enum ForKind {
     Range(start: Expr, end: Expr, step: Expr?, exclusive: Bool)
     In(collection: Expr, step: Expr?)
 }
 
-pub enum LValue {
+enum LValue {
     Local(name: String, name_span: Span)
     Index(base: Expr, index: Expr, span: Span, kind: IndexKind)
     Field(base: Expr, field: String, span: Span)
 }
 
-pub enum MetaField {
+enum MetaField {
     Category(value: Expr, span: Span)
     Tunable(span: Span)
     Maturity(value: Expr, span: Span)
     Unknown(name: String, value: Expr?, span: Span)
 }
 
-pub struct MetaAttr {
-    pub fields: [MetaField]
-    pub span: Span
+struct MetaAttr {
+    fields: [MetaField]
+    span: Span
 }
 
-pub struct MetaFacts {
-    pub category: String?
-    pub tunable: Bool
+struct MetaFacts {
+    category: String?
+    tunable: Bool
 }
 
-pub struct Binding {
-    pub mutable: Bool
-    pub markers: [Marker]
-    pub reactive_upgrade: Bool
-    pub meta: MetaAttr?
-    pub name: String
-    pub name_span: Span
-    pub sigil_span: Span?
-    pub pattern: BindPattern?
-    pub ty: Type?
-    pub ty_span: Span?
-    pub init: Expr
-    pub is_comptime: Bool
-    pub ct: CtValue?
-    pub uninit: Bool
-    pub arena_view: Bool
-    pub string_view: Bool
-    pub gc_promotion: GCPromotion?
-    pub gc_transferred: Bool
+struct Binding {
+    mutable: Bool
+    markers: [Marker]
+    reactive_upgrade: Bool
+    meta: MetaAttr?
+    name: String
+    name_span: Span
+    sigil_span: Span?
+    pattern: BindPattern?
+    ty: Type?
+    ty_span: Span?
+    init: Expr
+    is_comptime: Bool
+    ct: CtValue?
+    uninit: Bool
+    arena_view: Bool
+    string_view: Bool
+    gc_promotion: GCPromotion?
+    gc_transferred: Bool
 }
 
-pub struct GCPromotion {
-    pub span: Span
-    pub scope: String
-    pub policy_provenance: String
-    pub reason: String
-    pub edges: [GCPromotionEdge]
-    pub collection_len: Int?
+struct GCPromotion {
+    span: Span
+    scope: String
+    policy_provenance: String
+    reason: String
+    edges: [GCPromotionEdge]
+    collection_len: Int?
 }
 
-pub struct GCPromotionEdge {
-    pub binding: String
-    pub slot: String
-    pub group: Int
+struct GCPromotionEdge {
+    binding: String
+    slot: String
+    group: Int
 }
 
-pub struct Marker {
-    pub name: String
-    pub negated: Bool
-    pub name_span: Span
-    pub args: [MarkerCallArg]
-    pub arg_labels: [CallLabel?]
-    pub span: Span
-    pub ct: CtValue?
+struct Marker {
+    name: String
+    declaration_module: String? { None }
+    declaration_span: Span? { None }
+    negated: Bool
+    name_span: Span
+    args: [MarkerCallArg]
+    arg_labels: [CallLabel?]
+    span: Span
+    ct: CtValue?
 }
 
-pub struct AutoVectorizationFacts {
-    pub element_type: Type
-    pub no_aliasing: Bool
-    pub no_early_exit: Bool
-    pub effect_free_body: Bool
-    pub no_cross_iteration_deps: Bool
+struct AutoVectorizationFacts {
+    element_type: Type
+    no_aliasing: Bool
+    no_early_exit: Bool
+    effect_free_body: Bool
+    no_cross_iteration_deps: Bool
 }
 
-pub fn ast_binding(name: String, name_span: Span, mutable: Bool, init: Expr, sigil_span: Span?) -> Binding Never! {
+fn ast_binding(name: String, name_span: Span, mutable: Bool, init: Expr, sigil_span: Span?) -> Binding Never! {
     Binding{
         mutable: mutable,
         markers: [Marker]{},

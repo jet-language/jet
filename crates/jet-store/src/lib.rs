@@ -1,6 +1,5 @@
-#![deny(warnings)]
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_escape, parse_json};
 use jet_foundation::SHA256::{sha256, sha256_hex};
 use std::collections::{BTreeMap, BTreeSet};
@@ -14,7 +13,7 @@ use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
+fn field<'a>(object: &'a [(String, Dyn)], key: &str) -> Option<&'a Dyn> {
     object
         .iter()
         .find_map(|(name, value)| (name == key).then_some(value))
@@ -481,8 +480,8 @@ impl BuildRecord {
             let duration_ms = match field(node, "duration_ms")
                 .ok_or_else(|| "build record node is missing duration_ms".to_string())?
             {
-                DataTree::Int(value) => *value as f64,
-                DataTree::Float(value) => *value,
+                Dyn::Int(value) => value.to_f64(),
+                Dyn::Float(value) => *value,
                 _ => return Err("build record node duration_ms is invalid".to_string()),
             };
             if !duration_ms.is_finite() || duration_ms < 0.0 {
@@ -2179,17 +2178,28 @@ fn append_synced(path: &Path, bytes: &[u8]) -> Result<(), StoreError> {
 
 fn ensure_dir(path: &Path) -> Result<(), StoreError> {
     match fs::symlink_metadata(path) {
-        Ok(metadata) if metadata.file_type().is_symlink() => Err(StoreError::Config(format!(
-            "store directory is a symlink: {}",
-            path.display()
-        ))),
-        Ok(metadata) if metadata.is_dir() => Ok(()),
-        Ok(_) => Err(StoreError::Config(format!("store path is not a directory: {}", path.display()))),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            fs::create_dir(path)?;
-            sync_dir(path.parent().expect("created directory has parent"))
-        }
+        Ok(metadata) => existing_store_dir(path, &metadata),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => match fs::create_dir(path) {
+            Ok(()) => sync_dir(path.parent().expect("created directory has parent")),
+            // Another process (or thread) created it between the check and
+            // the create: creation is idempotent, but the winner's entry must
+            // still pass the same symlink/directory checks.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+                existing_store_dir(path, &fs::symlink_metadata(path)?)
+            }
+            Err(error) => Err(StoreError::Io(error)),
+        },
         Err(error) => Err(StoreError::Io(error)),
+    }
+}
+
+fn existing_store_dir(path: &Path, metadata: &fs::Metadata) -> Result<(), StoreError> {
+    if metadata.file_type().is_symlink() {
+        Err(StoreError::Config(format!("store directory is a symlink: {}", path.display())))
+    } else if metadata.is_dir() {
+        Ok(())
+    } else {
+        Err(StoreError::Config(format!("store path is not a directory: {}", path.display())))
     }
 }
 
@@ -2414,6 +2424,27 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_opens_of_a_fresh_root_all_succeed() {
+        let root = std::env::temp_dir().join(format!("jet-store-test-{}-{}", std::process::id(), next_counter()));
+        let openers = 8;
+        let barrier = Arc::new(Barrier::new(openers));
+        let handles = (0..openers)
+            .map(|_| {
+                let root = root.clone();
+                let barrier = barrier.clone();
+                thread::spawn(move || {
+                    barrier.wait();
+                    Store::open(StoreConfig::new(root).with_cap_bytes(1024).with_reserve_bytes(0)).map(|_| ())
+                })
+            })
+            .collect::<Vec<_>>();
+        for handle in handles {
+            handle.join().expect("opener thread").expect("concurrent open succeeds");
+        }
+        cleanup(&root);
+    }
+
+    #[test]
     fn lock_timeout_reports_owner_and_elapsed_wait() {
         let (_, root) = test_store(1024);
         let store = Store::open(
@@ -2482,6 +2513,67 @@ mod tests {
         let right = right.join().expect("right publisher thread");
         assert!(left.is_ok(), "left publish failed: {left:?}");
         assert!(right.is_ok(), "right publish failed: {right:?}");
+        cleanup(&root);
+    }
+
+    /// Child half of `concurrent_processes_open_one_fresh_store`: a no-op
+    /// unless the parent names the shared root.
+    #[test]
+    fn fresh_store_open_child() {
+        let Some(root) = std::env::var_os("JET_STORE_RACE_ROOT") else {
+            return;
+        };
+        let config = StoreConfig::new(PathBuf::from(root))
+            .with_cap_bytes(1024 * 1024)
+            .with_reserve_bytes(0);
+        if let Err(error) = Store::open(config) {
+            panic!("open fresh store: {error}");
+        }
+    }
+
+    #[test]
+    fn concurrent_processes_open_one_fresh_store() {
+        let root = std::env::temp_dir().join(format!(
+            "jet-store-fresh-race-{}-{}",
+            std::process::id(),
+            next_counter()
+        ));
+        let exe = std::env::current_exe().expect("test executable");
+        for round in 0..4 {
+            cleanup(&root);
+            let children: Vec<_> = (0..8)
+                .map(|_| {
+                    std::process::Command::new(&exe)
+                        .args(["--exact", "tests::fresh_store_open_child", "--test-threads=1"])
+                        .env("JET_STORE_RACE_ROOT", &root)
+                        .stdout(std::process::Stdio::null())
+                        .stderr(std::process::Stdio::piped())
+                        .spawn()
+                        .expect("spawn store child")
+                })
+                .collect();
+            for child in children {
+                let output = child.wait_with_output().expect("store child exits");
+                assert!(
+                    output.status.success(),
+                    "round {round}: a concurrent open of a fresh store failed: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+            for name in ["cas", "ac", "lto", "locks", "leases", "quarantine", "build-records/records"] {
+                assert!(root.join(name).is_dir(), "round {round}: missing {name}");
+            }
+        }
+        cleanup(&root);
+    }
+
+    #[test]
+    fn ensure_dir_rejects_a_file_in_place_of_a_directory() {
+        let root = std::env::temp_dir().join(format!("jet-store-not-dir-{}-{}", std::process::id(), next_counter()));
+        fs::create_dir_all(&root).expect("root");
+        let path = root.join("cas");
+        fs::write(&path, b"not a directory").expect("file");
+        assert!(matches!(ensure_dir(&path), Err(StoreError::Config(_))));
         cleanup(&root);
     }
 

@@ -5,24 +5,21 @@
 // provenance sidecar.
 
 // The result of one package-provider projection.
-pub struct ForeignRealization {
-    pub name: String
-    pub language: ForeignLanguage
+struct ForeignRealization {
+    name: String
+    language: ForeignLanguage
     // The provider ref inside the language-qualified manifest value.
-    pub reference: String
+    reference: String
     // The canonical cache/lock identity (`<language>@<provider-ref>`).
-    pub provider_reference: String
-    pub entry: StoreEntry
-    pub binding: String
-    pub provenance: String
+    provider_reference: String
+    entry: StoreEntry
+    binding: String
+    provenance: String
 }
 
-// Realize every foreign dependency of a compiler manifest. Missing or
-// malformed provider output is an error, never an empty binding or a guessed
-// fallback. The project lock is published only after every artifact passed
-// Hangar ingest and projection, so a later failure never leaves a lock that
-// claims an earlier dependency succeeded.
-pub fn provider_realize_foreign_dependencies(verification: &StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
+// Realize and project every foreign dependency without publishing the project
+// lock. Fetch commits the complete graph and semantic records in one write.
+fn provider_realize_foreign_dependencies(verification: &StoreVerification, roots: HangarRoots, project_root: String, manifest: Manifest, ctx: ProviderCtx) -[FS, Env, Exec, Time, Time.Wait]> [ForeignRealization] ProviderError! {
     realized := [ForeignRealization]{}
     names := manifest.dependencies.keys().to_list()
     &names.sort()
@@ -31,17 +28,6 @@ pub fn provider_realize_foreign_dependencies(verification: &StoreVerification, r
             .Foreign(language, reference) -> &realized.push(provider_realize_foreign_one(&verification, roots, project_root, name, language, reference, ctx))
             else -> {}
         }
-    }
-    loop item in realized {
-        envelope :: LockEnvelope{
-            output_hash: item.entry.envelope.output_hash,
-            platform: item.entry.envelope.platform,
-            signature: item.entry.envelope.signature,
-            provenance: item.entry.envelope.provenance,
-            catalog_tier: "",
-            catalog_trust: "",
-        }
-        pkg_lock_record_foreign_realization(project_root, item.name, item.entry.version, item.language, item.reference, item.entry.out, envelope) ?? return Err(ProviderError.Ingest(err.message()))
     }
     Ok(realized)
 }
@@ -95,12 +81,12 @@ fn provider_foreign_binding_in(root: String, language: ForeignLanguage, name: St
 }
 
 // The project-side binding the compiler foreign loader reads.
-pub fn provider_foreign_binding_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
+fn provider_foreign_binding_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
     provider_foreign_binding_in(project_root, language, name)
 }
 
 // The provenance sidecar beside the project binding.
-pub fn provider_foreign_provenance_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
+fn provider_foreign_provenance_path(project_root: String, language: ForeignLanguage, name: String) -> String Never! {
     files.join(files.join(files.join(project_root, SOURCE_ROOT_DIR), language.bindings_subdir()), "{name}.provenance")
 }
 

@@ -1,16 +1,16 @@
 // Locked provider objects and the fetch authority they grant, ported from
 // jetpack::ProviderGraph.
 
-pub struct ProviderObject {
-    pub family: ProviderFamily
-    pub ref_key: String
-    pub exact_identity: String
-    pub hash: String
-    pub platform: String
-    pub signature: String
-    pub audit: [String]
-    pub sandbox_effects: [String]
-    pub build_effects: [String]
+struct ProviderObject {
+    family: ProviderFamily
+    ref_key: String
+    exact_identity: String
+    hash: String
+    platform: String
+    signature: String
+    audit: [String]
+    sandbox_effects: [String]
+    build_effects: [String]
 
     // A binary artifact: its hash and platform are its identity, and it runs
     // no build.
@@ -32,16 +32,16 @@ pub struct ProviderObject {
     }
 }
 
-pub struct ProviderRequest {
-    pub family: ProviderFamily
-    pub ref_key: String
-    pub exact_identity: String
-    pub hash: String
-    pub platform: String
-    pub offline: Bool
+struct ProviderRequest {
+    family: ProviderFamily
+    ref_key: String
+    exact_identity: String
+    hash: String
+    platform: String
+    offline: Bool
 }
 
-pub enum FetchDecision {
+enum FetchDecision {
     AllowedOfflineSatisfied
     AllowedNetworkWithGrant(authority: String)
     DeniedOfflineMissingLock
@@ -49,12 +49,12 @@ pub enum FetchDecision {
 
 // Why a provider object or report cannot be formed.
 #Error
-pub struct ProviderGraphError {
-    pub message: String
+struct ProviderGraphError {
+    message: String
 }
 
-pub struct AuthorityGraph {
-    pub locked_objects: [ProviderObject]
+struct AuthorityGraph {
+    locked_objects: [ProviderObject]
 
     fn empty() -> AuthorityGraph Never! {
         AuthorityGraph{locked_objects: [ProviderObject]{}}

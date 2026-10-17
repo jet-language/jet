@@ -1,0 +1,15 @@
+# HAND-PORT tests/encoding_hostile_io.rs:732-773 encoding_hostile_drop_scope_emits_no_false_success
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Exact original source helper format expansions; original codec bytes, env hooks, every stdout/file/exit/stderr predicate retained.
+fixture: encoding_hostile_drop_scope_emits_no_false_success.fixture
+env: NO_COLOR=1
+write: program/main.jet program/source.template
+step: jet build program/main.jet
+exit: 0
+step hostile: built
+env: JET_ENC_HOSTILE_IO=1
+env: JET_ENC_HOSTILE_WRITE_MAX=1
+cwd: .
+exit: 0
+stderr: empty
+stdout: = encoding_hostile_drop_scope_emits_no_false_success.stdout.expected

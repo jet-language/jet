@@ -2,14 +2,14 @@
 // The checked producer (#4445) and Root provider cutover (#4262) are separate
 // composition gates; this module does not parse or reconstruct public APIs.
 // Diagnostics use the single registry constructor and its sentence casing.
-pub struct PublicationBreakingChange {
-    pub description: String
-    pub item_name: String
+struct PublicationBreakingChange {
+    description: String
+    item_name: String
 }
 
 // Match the first unused full triple before the first unused kind/name pair.
 // Duplicate legacy names therefore retain signature-multiset semantics.
-pub fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreakingChange] Never! {
+fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -> [PublicationBreakingChange] Never! {
     changes := [PublicationBreakingChange]{}
     matched := (loop _ in new -> false)
     loop old_item in old {
@@ -38,19 +38,19 @@ pub fn publication_diff_public_api(old: [PublicAPIItem], new: [PublicAPIItem]) -
             item :: new[replacement]
             &changes.push(PublicationBreakingChange{
                 description: "pub {old_item.kind} `{old_item.name}` changed signature\n   | was: {old_item.signature}\n   | now: {item.signature}",
-                item_name: ~old_item.name,
+                item_name: old_item.name.copy(),
             })
         } else {
             &changes.push(PublicationBreakingChange{
                 description: "pub {old_item.kind} `{old_item.name}` was removed\n   | {old_item.signature}\n   | (removed)",
-                item_name: ~old_item.name,
+                item_name: old_item.name.copy(),
             })
         }
     }
     changes
 }
 
-pub fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
+fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
     bump :: if bump_kind == {
         .Minor -> "minor"
         .Patch -> "patch"
@@ -66,7 +66,7 @@ pub fn publication_e2601(version: String, bump_kind: PublicationBumpKind, change
         "bump to {next_major}.0.0, or restore `{change.item_name}` (a deprecated shim counts). Use `jet registry publish --force` to override with a warning banner.")
 }
 
-pub fn publication_e1218(old_version: String, new_version: String, bump: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
+fn publication_e1218(old_version: String, new_version: String, bump: PublicationBumpKind, change: PublicationBreakingChange, next_major: Int) -> Diagnostic Never! {
     label :: if bump == {
         .Minor -> "minor"
         .Patch -> "patch"
@@ -79,13 +79,13 @@ pub fn publication_e1218(old_version: String, new_version: String, bump: Publica
         "bump to {next_major}.0.0 (a major release), or restore `{change.item_name}` (a deprecated shim counts).")
 }
 
-pub struct PublicationPrePublishGate {
-    pub build_ok: Bool
-    pub tests_ok: Bool
-    pub breaking: [PublicationBreakingChange]
-    pub version: String
-    pub bump_kind: PublicationBumpKind
-    pub next_major: Int
+struct PublicationPrePublishGate {
+    build_ok: Bool
+    tests_ok: Bool
+    breaking: [PublicationBreakingChange]
+    version: String
+    bump_kind: PublicationBumpKind
+    next_major: Int
 
     fn is_blocked(self) -> Bool Never! {
         !self.build_ok || !self.tests_ok || (self.breaking.len() != 0 && self.bump_kind != .Major)

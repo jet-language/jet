@@ -1,0 +1,53 @@
+// Real filesystem and process-identity witnesses. No producer or runtime
+// publication is claimed: these are hostile/valid transport inputs.
+fn live_transport_fixture(pid: Int, start: String, captured: Int, events: String) -> String Never! {
+    "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"s\",\"source_id\":\"app.jet\",\"build_id\":\"b\",\"revision\":\"r\",\"world_id\":\"w\",\"values\":[],\"schema_version\":1,\"pid\":{pid},\"start_id\":{foundation_json_quote(start)},\"captured_ms\":{captured},\"tasks\":[],\"channels\":[],\"effects\":{{\"compute\":0,\"waiting\":0,\"channel\":0,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":0,\"running\":0,\"queued\":0,\"cancelled\":0,\"arenas\":0,\"arena_allocations\":0,\"arena_bytes\":0}}{events}}}"
+}
+fn live_transport_rejected(pid: Int, path: String, message: String) {
+    if jet_cli_live_read_at(pid, path) == {
+        .Err(error) -> assert(error.message.contains(message))
+        .Ok(_) -> panic("unsafe transport accepted: {message}")
+    }
+}
+fn run() {
+    // /proc start identity is the Linux/Android transport's actual authority.
+    platform :: cli_sys.name()
+    if platform != "linux" && platform != "android" -> return
+    pid :: cli_process.current_pid()
+    root :: "{cli_sys.temp_dir()}/jet-live-transport-{pid}"
+    cli_files.create_dir(root) ?? panic("exclusive transport fixture directory")
+    path :: "{root}/snapshot.json"
+    alias :: "{root}/alias.json"
+    start :: jet_cli_live_process_start(pid) ?? panic("actual process start")
+    now :: max(0, live_time.unix_ns() /% 1000000)
+    bytes :: live_transport_fixture(pid, start, now, ",\"event_observations\":[]")
+    cli_files.write(path, bytes) ?? panic("snapshot fixture")
+    cli_files.set_mode(path, 0o600) ?? panic("private snapshot fixture")
+    actual :: jet_cli_live_read_at(pid, path) ?? panic("actual private retained-descriptor read")
+    assert(actual.pid == pid && actual.start_id == start && actual.events == Val(""))
+    // The snapshot is never accepted merely because it is a regular file.
+    cli_files.set_mode(path, 0o644) ?? panic("hostile snapshot mode")
+    live_transport_rejected(pid, path, "permissions expose runtime state")
+    cli_files.set_mode(path, 0o600) ?? panic("restore private mode")
+    cli_files.symlink(path, alias) ?? panic("hostile final link")
+    live_transport_rejected(pid, alias, "not a regular file")
+    live_transport_rejected(pid, root, "not a regular file")
+    cli_files.write(path, live_transport_fixture(pid, "wrong-start", now, ",\"event_observations\":[]")) ?? panic("stale process start fixture")
+    live_transport_rejected(pid, path, "does not belong to process")
+    cli_files.write(path, live_transport_fixture(pid, start, max(0, now - 2001), ",\"event_observations\":[]")) ?? panic("stale publication fixture")
+    live_transport_rejected(pid, path, "not publishing a live runtime snapshot")
+    cli_files.write(path, live_transport_fixture(pid + 1, start, now, ",\"event_observations\":[]")) ?? panic("wrong pid fixture")
+    live_transport_rejected(pid, path, "does not belong to process")
+    // PID error precedes event-validation error, exactly as LiveInspect::read.
+    cli_files.write(path, live_transport_fixture(pid + 1, start, now, ",\"event_observations\":false")) ?? panic("wrong pid plus invalid event fixture")
+    live_transport_rejected(pid, path, "does not belong to process")
+    cli_files.write(path, live_transport_fixture(pid, start, now, "")) ?? panic("missing event sequence fixture")
+    live_transport_rejected(pid, path, "live runtime event observations are invalid: runtime observation has no event sequence")
+    cli_files.write(path, live_transport_fixture(pid, start, now, ",\"event_observations\":false")) ?? panic("invalid event sequence fixture")
+    live_transport_rejected(pid, path, "live runtime event observations are invalid")
+    cli_files.write(path, " ".repeat(1048577)) ?? panic("oversized snapshot fixture")
+    live_transport_rejected(pid, path, "1 MiB safety limit")
+    cli_files.write_bytes(path, [U8]{U8{255}}) ?? panic("invalid UTF-8 fixture")
+    live_transport_rejected(pid, path, "not contain valid UTF-8")
+    cli_files.remove_all(root) ?? panic("transport fixture cleanup")
+}

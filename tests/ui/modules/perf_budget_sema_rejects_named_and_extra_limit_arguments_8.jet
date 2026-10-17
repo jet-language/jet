@@ -1,0 +1,12 @@
+module env.dev { services: { api: { enable: true } } }
+module perf.release {
+    budgets: [Budget{
+        name: "hostile",
+        scope: .Service("api"),
+        metric: .Throughput,
+        provider: .ServiceProbe("api"),
+        comparison: .AbsoluteFrom("ci/linux-x64"),
+        limit: .AtLeast(Rate{ count: 100, per: 1s }, Rate{ count: 100, per: 1s }),
+        enforcement: .Fail,
+    }]
+}

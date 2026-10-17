@@ -1,0 +1,173 @@
+// Seed WebForms.rs:12,59,933-936,987-995,1580-1601,2651-2667.
+// Map uses Maps.jet's sorted inline entry List; not JetOrderedMap<String,String>.
+fn ui_form_sequence_init(value: I64) {
+    ui_carrier_store(value + DATA_SEQUENCE_LENGTH, I64{0})
+    ui_carrier_store(value + DATA_SEQUENCE_CAPACITY, I64{0})
+    ui_carrier_store(value + DATA_SEQUENCE_DATA, I64{8})
+}
+fn ui_form_sequence_copy(value: I64, result: I64, stride: I64) {
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    data :: if (length == I64{0}) -> I64{8} else -> jet_rt_alloc(length * stride, I64{8})
+    ui_carrier_store(result + DATA_SEQUENCE_LENGTH, length)
+    ui_carrier_store(result + DATA_SEQUENCE_CAPACITY, length)
+    ui_carrier_store(result + DATA_SEQUENCE_DATA, data)
+}
+fn ui_form_sequence_buffer_drop(value: I64, stride: I64) {
+    capacity :: ui_carrier_word(value + DATA_SEQUENCE_CAPACITY)
+    if (capacity != I64{0}) -> jet_rt_free(ui_carrier_word(value + DATA_SEQUENCE_DATA), capacity * stride, I64{8})
+}
+fn ui_form_messages_copy(value: I64, result: I64) {
+    ui_form_sequence_copy(value, result, DATA_TREE_ELEMENT_BYTES)
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    source :: ui_carrier_word(value + DATA_SEQUENCE_DATA)
+    target :: ui_carrier_word(result + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        ui_carrier_store(target + at * DATA_TREE_ELEMENT_BYTES, jet_rt_string_clone(ui_carrier_word(source + at * DATA_TREE_ELEMENT_BYTES)))
+        at += I64{1}
+    }
+}
+fn ui_form_messages_drop(value: I64) {
+    length :: ui_carrier_word(value + DATA_SEQUENCE_LENGTH)
+    data :: ui_carrier_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        jet_rt_string_drop(ui_carrier_word(data + at * DATA_TREE_ELEMENT_BYTES))
+        at += I64{1}
+    }
+    ui_form_sequence_buffer_drop(value, DATA_TREE_ELEMENT_BYTES)
+}
+fn ui_form_messages_eq(a: I64, b: I64) -> Bool {
+    length :: ui_carrier_word(a + DATA_SEQUENCE_LENGTH)
+    if (length != ui_carrier_word(b + DATA_SEQUENCE_LENGTH)) -> return false
+    first :: ui_carrier_word(a + DATA_SEQUENCE_DATA)
+    second :: ui_carrier_word(b + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (!jet_rt_string_eq(ui_carrier_word(first + at * DATA_TREE_ELEMENT_BYTES), ui_carrier_word(second + at * DATA_TREE_ELEMENT_BYTES))) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn ui_form_messages_push(value: I64, message: I64) {
+    slot :: data_sequence_reserve(value, DATA_TREE_ELEMENT_BYTES)
+    ui_carrier_store(slot, message)
+    ui_carrier_store(value + DATA_SEQUENCE_LENGTH, ui_carrier_word(value + DATA_SEQUENCE_LENGTH) + I64{1})
+}
+fn ui_form_valid_name(name: I64) -> Bool {
+    length :: rt_text_len(name)
+    if (length == I64{0} || length > I64{256}) -> return false
+    data :: rt_text_data(name)
+    at := I64{0}
+    loop at < length {
+        byte :: rt_text_byte(data + at)
+        alphabetic :: (byte >= I64{65} && byte <= I64{90}) || (byte >= I64{97} && byte <= I64{122})
+        if (byte != I64{95} && !alphabetic && !(at != I64{0} && byte >= I64{48} && byte <= I64{57})) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn ui_form_bound_message(message: I64) -> I64 {
+    if (rt_text_len(message) <= I64{4096}) -> return message
+    // Keep the entire scalar whose start is below 4096. The original buffer
+    // capacity remains owned for drop; no unnecessary replacement allocation.
+    data :: rt_text_data(message)
+    end := I64{0}
+    limit :: I64{4096}
+    loop end < limit { end += rt_text_width(data + end) }
+    rt_text_store(message + I64{8}, end)
+    message
+}
+#Export(c) fn jet_web_forms_action_error() -> I64 {
+    result :: jet_rt_alloc(UI_FORM_ACTION_ERROR_BYTES, I64{8})
+    ui_form_sequence_init(result + UI_FORM_ACTION_ERROR_FIELDS)
+    ui_form_sequence_init(result + UI_FORM_ACTION_ERROR_FORM)
+    result
+}
+// By-value consumed error; the returned I64 owns the SAME carrier.
+#Export(c) fn jet_web_forms_action_form_error(error: I64, message: I64) -> I64 {
+    ui_form_messages_push(error + UI_FORM_ACTION_ERROR_FORM, ui_form_bound_message(message))
+    error
+}
+#Export(c) fn jet_web_forms_action_field_error(error: I64, name: I64, message: I64) -> I64 {
+    if (!ui_form_valid_name(name)) {
+        jet_rt_string_drop(name)
+        jet_rt_string_drop(message)
+        ui_form_messages_push(error + UI_FORM_ACTION_ERROR_FORM, jet_rt_string_clone(rt_static_text("action returned an invalid field error")))
+        return error
+    }
+    fields :: error + UI_FORM_ACTION_ERROR_FIELDS
+    length :: ui_carrier_word(fields + DATA_SEQUENCE_LENGTH)
+    data :: ui_carrier_word(fields + DATA_SEQUENCE_DATA)
+    low := I64{0}
+    high := length
+    loop low < high {
+        middle :: low + (high - low) /% I64{2}
+        order :: jet_rt_string_compare(ui_carrier_word(data + middle * UI_FORM_ERROR_ENTRY_BYTES + UI_FORM_ERROR_ENTRY_KEY), name)
+        if (order < I64{0}) { low = middle + I64{1} } else { high = middle }
+    }
+    if (low < length && jet_rt_string_eq(ui_carrier_word(data + low * UI_FORM_ERROR_ENTRY_BYTES + UI_FORM_ERROR_ENTRY_KEY), name)) {
+        jet_rt_string_drop(name)
+    } else {
+        data_sequence_reserve(fields, UI_FORM_ERROR_ENTRY_BYTES)
+        buffer :: ui_carrier_word(fields + DATA_SEQUENCE_DATA)
+        at := length
+        loop at > low {
+            coll_copy(buffer + (at - I64{1}) * UI_FORM_ERROR_ENTRY_BYTES, buffer + at * UI_FORM_ERROR_ENTRY_BYTES, UI_FORM_ERROR_ENTRY_BYTES)
+            at -= I64{1}
+        }
+        entry :: buffer + low * UI_FORM_ERROR_ENTRY_BYTES
+        ui_carrier_store(entry + UI_FORM_ERROR_ENTRY_KEY, name)
+        ui_form_sequence_init(entry + UI_FORM_ERROR_ENTRY_MESSAGES)
+        ui_carrier_store(fields + DATA_SEQUENCE_LENGTH, length + I64{1})
+    }
+    entry :: ui_carrier_word(fields + DATA_SEQUENCE_DATA) + low * UI_FORM_ERROR_ENTRY_BYTES
+    ui_form_messages_push(entry + UI_FORM_ERROR_ENTRY_MESSAGES, ui_form_bound_message(message))
+    error
+}
+#Export(c) fn jet_rt_handle_clone_jet_web_form_action_error(value: I64) -> I64 {
+    result :: jet_rt_alloc(UI_FORM_ACTION_ERROR_BYTES, I64{8})
+    ui_form_sequence_copy(value + UI_FORM_ACTION_ERROR_FIELDS, result + UI_FORM_ACTION_ERROR_FIELDS, UI_FORM_ERROR_ENTRY_BYTES)
+    length :: ui_carrier_word(value + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_LENGTH)
+    source :: ui_carrier_word(value + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_DATA)
+    target :: ui_carrier_word(result + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        first :: source + at * UI_FORM_ERROR_ENTRY_BYTES
+        second :: target + at * UI_FORM_ERROR_ENTRY_BYTES
+        ui_carrier_store(second + UI_FORM_ERROR_ENTRY_KEY, jet_rt_string_clone(ui_carrier_word(first + UI_FORM_ERROR_ENTRY_KEY)))
+        ui_form_messages_copy(first + UI_FORM_ERROR_ENTRY_MESSAGES, second + UI_FORM_ERROR_ENTRY_MESSAGES)
+        at += I64{1}
+    }
+    ui_form_messages_copy(value + UI_FORM_ACTION_ERROR_FORM, result + UI_FORM_ACTION_ERROR_FORM)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_web_form_action_error(value: I64) {
+    if (value == I64{0}) -> return
+    length :: ui_carrier_word(value + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_LENGTH)
+    data :: ui_carrier_word(value + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        entry :: data + at * UI_FORM_ERROR_ENTRY_BYTES
+        jet_rt_string_drop(ui_carrier_word(entry + UI_FORM_ERROR_ENTRY_KEY))
+        ui_form_messages_drop(entry + UI_FORM_ERROR_ENTRY_MESSAGES)
+        at += I64{1}
+    }
+    ui_form_sequence_buffer_drop(value + UI_FORM_ACTION_ERROR_FIELDS, UI_FORM_ERROR_ENTRY_BYTES)
+    ui_form_messages_drop(value + UI_FORM_ACTION_ERROR_FORM)
+    jet_rt_free(value, UI_FORM_ACTION_ERROR_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_web_form_action_error(a: I64, b: I64) -> Bool {
+    length :: ui_carrier_word(a + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_LENGTH)
+    if (length != ui_carrier_word(b + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_LENGTH)) -> return false
+    first :: ui_carrier_word(a + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_DATA)
+    second :: ui_carrier_word(b + UI_FORM_ACTION_ERROR_FIELDS + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        left :: first + at * UI_FORM_ERROR_ENTRY_BYTES
+        right :: second + at * UI_FORM_ERROR_ENTRY_BYTES
+        if (!jet_rt_string_eq(ui_carrier_word(left + UI_FORM_ERROR_ENTRY_KEY), ui_carrier_word(right + UI_FORM_ERROR_ENTRY_KEY)) || !ui_form_messages_eq(left + UI_FORM_ERROR_ENTRY_MESSAGES, right + UI_FORM_ERROR_ENTRY_MESSAGES)) -> return false
+        at += I64{1}
+    }
+    ui_form_messages_eq(a + UI_FORM_ACTION_ERROR_FORM, b + UI_FORM_ACTION_ERROR_FORM)
+}

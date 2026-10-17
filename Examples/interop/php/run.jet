@@ -3,15 +3,15 @@ use core.encoding.json as json
 
 fn run() {
     pool :: ops.open() ?? panic("PHP pool open failed")
-    input :: DataTree.Object(["nested": DataTree.Object(["ok": DataTree.Bool(true)]), "list": DataTree.Array([DataTree.Int(1), DataTree.Text("two")]), "scalar": DataTree.Float(3.5), "nothing": DataTree.Null])
-    print(json.canonical(ops.transform(pool, ~input, 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
-    print(json.canonical(ops.transform(pool, ~input, 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
-    print(json.canonical(ops.transform(pool, ~input, 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
-    print(json.canonical(ops.transform(pool, ~input, 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
-    print(json.canonical(ops.transform(pool, ~input, 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
-    failed :: ops.fail_call(pool, DataTree.Null, 5000) ?? DataTree.Text("failed")
+    input :: Dyn.Object(["nested": Dyn.Object(["ok": Dyn.Bool(true)]), "list": Dyn.Array([Dyn.Int(1), Dyn.Text("two")]), "scalar": Dyn.Float(3.5), "nothing": Dyn.Null])
+    print(json.canonical(ops.transform(pool, input.copy(), 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.transform(pool, input.copy(), 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.transform(pool, input.copy(), 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.transform(pool, input.copy(), 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
+    print(json.canonical(ops.transform(pool, input.copy(), 5000) ?? panic("call failed")) ?? panic("value is not canonical JSON"))
+    failed :: ops.fail_call(pool, Dyn.Null, 5000) ?? Dyn.Text("failed")
     print(json.canonical(failed) ?? panic("value is not canonical JSON"))
-    timed :: ops.sleep_call(pool, DataTree.Int(1), 100) ?? DataTree.Text("timeout")
+    timed :: ops.sleep_call(pool, Dyn.Int(1), 100) ?? Dyn.Text("timeout")
     print(json.canonical(timed) ?? panic("value is not canonical JSON"))
     ops.close(^pool)
 }

@@ -15,10 +15,10 @@ fn run() [FieldError]! {
     // `ports` and `env` are absent on the wire → both defaults apply.
     c :: json.decode<Config>("{{\"name\":\"web\"}}")
     // No derive marker is needed for the generated Codable body.
-    print(json.to_string(c))
+    print(json.to_string(c) ?? panic("JSON encode"))
     print(c.name, c.ports, c.env)
     // The same plain struct is encodable without a derive marker.
-    print(json.to_string(c))
+    print(json.to_string(c) ?? panic("JSON encode"))
     // A wire value overrides the default.
     d :: json.decode<Config>("{{\"name\":\"api\",\"ports\":[8080]}}")
     print(d.ports)

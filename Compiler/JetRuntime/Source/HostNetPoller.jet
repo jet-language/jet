@@ -1,0 +1,253 @@
+// One shared epoll worker, with scheduler ParkSlots (never per-wait threads).
+// Root80: mutex0, epollfd8, nextID16, state buckets24, ID buckets32,
+// started40, startup errno48, packed epoll_event scratch56..71, reserved72.
+// Node64: ID-next0, state-next8, monotonic ID16, borrowed FD72 state24,
+// waiters32, armed mask40, closed48, reserved56. Each linked waiter retains
+// FD72, so explicit close cannot recycle its descriptor before deregistration.
+// Waiter48: next0, node8, ParkSlot16, interest24, ready32, failure40.
+// Events carry an ID, not a node pointer: stale kernel events cannot dereference
+// freed nodes. Both ID/state bucket tables are guarded by the root mutex.
+net_poller_root := I64{0}
+// runtime-init: 4
+#Export(c) fn jet_rt_net_poller_init() {
+    if (net_poller_root != I64{0}) -> return
+    root :: jet_rt_alloc(I64{80}, I64{8})
+    thread_zero(root, I64{80})
+    states :: jet_rt_alloc(I64{8192}, I64{8})
+    ids :: jet_rt_alloc(I64{8192}, I64{8})
+    thread_zero(states, I64{8192})
+    thread_zero(ids, I64{8192})
+    net_put(root, I64{8}, host_call(I64{291}, I64{524288}, I64{0}, I64{0}))
+    net_put(root, I64{16}, I64{1})
+    net_put(root, I64{24}, states)
+    net_put(root, I64{32}, ids)
+    net_poller_root = root
+}
+fn rt_net_poller_worker_address() -> I64 { loop { jet_rt_unreachable(I64{0}, I64{0}) } }
+fn net_state_bucket(root: I64, state: I64) -> I64 {
+    wrapping(net_word(root, I64{24}) + (((state >> I64{4}).bit_xor((state >> I64{14}))).bit_and(I64{1023})) * I64{8})
+}
+fn net_id_bucket(root: I64, id: I64) -> I64 { wrapping(net_word(root, I64{32}) + (id.bit_and(I64{1023})) * I64{8}) }
+fn net_node_for_state(root: I64, state: I64) -> I64 {
+    node := net_word(net_state_bucket(root, state), I64{0})
+    loop node != (I64{0}) {
+        if (net_word(node, I64{24}) == state) -> return node
+        node = net_word(node, I64{8})
+    }
+    I64{0}
+}
+fn net_node_for_id(root: I64, id: I64) -> I64 {
+    node := net_word(net_id_bucket(root, id), I64{0})
+    loop node != (I64{0}) {
+        if (net_word(node, I64{16}) == id) -> return node
+        node = net_word(node, I64{0})
+    }
+    I64{0}
+}
+fn net_node_interest(node: I64) -> I64 {
+    interest := I64{0}
+    waiter := net_word(node, I64{32})
+    loop waiter != (I64{0}) {
+        if (net_word(waiter, I64{32}) == I64{0} && net_word(waiter, I64{40}) == I64{0}) -> interest = interest.bit_or(net_word(waiter, I64{24}))
+        waiter = net_word(waiter, I64{0})
+    }
+    interest
+}
+fn net_epoll_ctl(root: I64, node: I64, operation: I64, interest: I64) -> I64 {
+    event :: wrapping(root + I64{56})
+    net_store_uint(event, I64{4}, interest.bit_or(I64{1073741824}).bit_or(I64{8192}))
+    net_store_uint(wrapping(event + I64{4}), I64{8}, net_word(node, I64{16}))
+    #Unsafe("the root lock owns a packed 12B epoll_event; state retains the native fd through this synchronous call") {
+        return os_syscall_i64(I64{233}, net_word(root, I64{8}), operation, net_word(net_word(node, I64{24}), I64{8}), event, I64{0}, I64{0})
+    }
+}
+fn net_node_fail(node: I64, failure: I64) {
+    waiter := net_word(node, I64{32})
+    loop waiter != (I64{0}) {
+        net_put(waiter, I64{40}, failure)
+        sync_park_wake(net_word(waiter, I64{16}))
+        waiter = net_word(waiter, I64{0})
+    }
+}
+fn net_node_rearm(root: I64, node: I64) {
+    if (net_word(node, I64{48}) != I64{0}) -> return
+    interest :: net_node_interest(node)
+    if (interest == I64{0}) {
+        net_put(node, I64{40}, I64{0})
+        return
+    }
+    result :: net_epoll_ctl(root, node, I64{3}, interest)
+    if (result < I64{0}) { net_node_fail(node, result) } else { net_put(node, I64{40}, interest) }
+}
+#Export(c) fn jet_rt_net_poller_worker(root: I64) -> I64 {
+    events :: jet_rt_alloc(I64{768}, I64{8})
+    loop {
+        count := I64{0}
+        #Unsafe("events owns 64 packed epoll_event entries; epoll_wait retains no buffer pointer") {
+            count = os_syscall_i64(I64{232}, net_word(root, I64{8}), events, I64{64}, I64{-1}, I64{0}, I64{0})
+        }
+        if (count == I64{-4}) { next }
+        sync_mutex_lock(root)
+        if (count < I64{0}) {
+            net_put(root, I64{48}, count)
+            bucket := I64{0}
+            loop bucket < (I64{1024}) {
+                node := net_word(wrapping(net_word(root, I64{32}) + bucket * I64{8}), I64{0})
+                loop node != (I64{0}) {
+                    net_node_fail(node, count)
+                    node = net_word(node, I64{0})
+                }
+                bucket = bucket + I64{1}
+            }
+            sync_mutex_unlock(root)
+            jet_rt_free(events, I64{768}, I64{8})
+            return I64{0}
+        }
+        at := I64{0}
+        loop at < count {
+            event :: wrapping(events + at * I64{12})
+            bits :: net_load_uint(event, I64{4})
+            node :: net_node_for_id(root, net_load_uint(wrapping(event + I64{4}), I64{8}))
+            if (node != I64{0} && net_word(node, I64{48}) == I64{0}) {
+                waiter := net_word(node, I64{32})
+                loop waiter != (I64{0}) {
+                    // HUP/ERR satisfy every interest; the subsequent socket
+                    // syscall supplies EOF or the real SO_ERROR/errno fact.
+                    ready :: (bits.bit_and(net_word(waiter, I64{24}))).bit_or((if ((bits.bit_and(I64{8216})) != I64{0}) -> net_word(waiter, I64{24}) else -> I64{0}))
+                    if (ready != I64{0}) {
+                        net_put(waiter, I64{32}, ready)
+                        sync_park_wake(net_word(waiter, I64{16}))
+                    }
+                    waiter = net_word(waiter, I64{0})
+                }
+                net_node_rearm(root, node)
+            }
+            at = at + I64{1}
+        }
+        sync_mutex_unlock(root)
+    }
+}
+// Called UNDER FD72 mutex after closed16 is set; never drops/relocks FD72.
+// True asks the host carrier to defer physical close until net refs drain.
+fn net_fd_closed(state: I64) -> Bool {
+    root :: net_poller_root
+    if (root == I64{0}) -> return false
+    sync_mutex_lock(root)
+    node :: net_node_for_state(root, state)
+    if (node != I64{0}) {
+        net_put(node, I64{48}, I64{1})
+        _ := net_epoll_ctl(root, node, I64{2}, I64{0})
+        net_node_fail(node, I64{-9})
+    }
+    sync_mutex_unlock(root)
+    node != I64{0}
+}
+fn net_chain_unlink(head: I64, node: I64, next_offset: I64) {
+    cursor := head
+    loop net_word(cursor, I64{0}) != (I64{0}) {
+        item :: net_word(cursor, I64{0})
+        if (item == node) {
+            net_put(cursor, I64{0}, net_word(node, next_offset))
+            return
+        }
+        cursor = wrapping(item + next_offset)
+    }
+}
+fn net_waiter_remove(root: I64, waiter: I64) {
+    node :: net_word(waiter, I64{8})
+    state :: net_word(node, I64{24})
+    sync_mutex_lock(root)
+    net_chain_unlink(wrapping(node + I64{32}), waiter, I64{0})
+    if (net_word(node, I64{32}) == I64{0}) {
+        if (net_word(node, I64{48}) == I64{0}) -> _ := net_epoll_ctl(root, node, I64{2}, I64{0})
+        net_chain_unlink(net_id_bucket(root, net_word(node, I64{16})), node, I64{0})
+        net_chain_unlink(net_state_bucket(root, state), node, I64{8})
+        jet_rt_free(node, I64{64}, I64{8})
+    } else { net_node_rearm(root, node) }
+    sync_mutex_unlock(root)
+    sync_park_drop(net_word(waiter, I64{16}))
+    jet_rt_free(waiter, I64{48}, I64{8})
+    // FD lock acquisition happens only AFTER the root mutex is released.
+    jet_fd_drop_raw(state)
+}
+#Export(c) fn jet_socket_ready_raw(state: I64, interest: I64, timeout_ns: I64, error: I64) -> I64 {
+    jet_rt_world_reject_uncontrolled(I64{1})
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    wait_kind :: host_net_wait_kind()
+    if (scheduler_wait_point_cancel_check() != I64{0} || scheduler_deadline_check(wait_kind) != I64{0}) {
+        jet_rt_string_drop(wait_kind)
+        return I64{0}
+    }
+    root :: net_poller_root
+    fd_lock(state)
+    sync_mutex_lock(root)
+    failure := if (fd_word(state, I64{16}) != I64{0}) -> I64{-9} else -> net_word(root, I64{8})
+    if (failure >= I64{0}) -> failure = net_word(root, I64{48})
+    if (failure >= I64{0} && net_word(root, I64{40}) == I64{0}) {
+        worker :: thread_spawn(rt_net_poller_worker_address(), root)
+        if (worker < I64{0}) {
+            net_put(root, I64{48}, worker)
+            failure = worker
+        } else {
+            net_put(root, I64{40}, I64{1})
+            _ := thread_detach(worker)
+        }
+    }
+    if (failure < I64{0}) {
+        sync_mutex_unlock(root)
+        fd_unlock(state)
+        jet_rt_string_drop(wait_kind)
+        return fd_error(failure, error)
+    }
+    node := net_node_for_state(root, state)
+    fresh :: node == I64{0}
+    if fresh {
+        id :: net_word(root, I64{16})
+        if (id == I64{9223372036854775807}) -> host_record_index_refused()
+        net_put(root, I64{16}, id + I64{1})
+        node = jet_rt_alloc(I64{64}, I64{8})
+        thread_zero(node, I64{64})
+        net_put(node, I64{16}, id)
+        net_put(node, I64{24}, state)
+        id_head :: net_id_bucket(root, id)
+        state_head :: net_state_bucket(root, state)
+        net_put(node, I64{0}, net_word(id_head, I64{0}))
+        net_put(node, I64{8}, net_word(state_head, I64{0}))
+        net_put(id_head, I64{0}, node)
+        net_put(state_head, I64{0}, node)
+    }
+    waiter :: jet_rt_alloc(I64{48}, I64{8})
+    thread_zero(waiter, I64{48})
+    net_put(waiter, I64{0}, net_word(node, I64{32}))
+    net_put(waiter, I64{8}, node)
+    net_put(waiter, I64{16}, sync_park_new())
+    net_put(waiter, I64{24}, interest.bit_and(I64{5}))
+    net_put(node, I64{32}, waiter)
+    fd_put(state, I64{64}, fd_word(state, I64{64}) + I64{1})
+    if fresh {
+        added :: net_epoll_ctl(root, node, I64{1}, interest.bit_and(I64{5}))
+        if (added < I64{0}) -> net_node_fail(node, added)
+    } else { net_node_rearm(root, node) }
+    sync_mutex_unlock(root)
+    fd_unlock(state)
+    deadline :: sync_deadline(timeout_ns)
+    jet_rt_stdout_flush()
+    loop jet_scheduler_native_propagate() == (I64{0}) {
+        if (scheduler_wait_point_cancel_check() != I64{0}) -> break
+        if (sync_load(wrapping(waiter + I64{32})) != I64{0} || sync_load(wrapping(waiter + I64{40})) != I64{0}) -> break
+        remaining :: if (deadline < I64{0}) -> I64{-1} else -> deadline - sync_now_ns()
+        if (deadline >= I64{0} && remaining <= I64{0}) -> break
+        if (scheduler_yield(wait_kind, net_word(waiter, I64{16}), remaining) != I64{0}) -> break
+    }
+    _ := scheduler_deadline_check(wait_kind)
+    sync_mutex_lock(root)
+    ready :: net_word(waiter, I64{32})
+    failed :: net_word(waiter, I64{40})
+    sync_mutex_unlock(root)
+    net_waiter_remove(root, waiter)
+    jet_rt_string_drop(wait_kind)
+    if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    if (failed < I64{0}) -> return fd_error(failed, error)
+    _ := fd_error(I64{0}, error)
+    ready
+}

@@ -1,0 +1,20 @@
+# Port of tests/crypto_diagnostics.rs:110-153; sources verbatim; original predicates.
+# PENDING-SAME-HEAD: authored, no reference/runtime proof.
+fixture: fixtures/multiple_e2702_diagnostics_are_independent_json_lines
+# volatile: current source emits a newer report envelope
+env: NO_COLOR=1
+step: jet check main.jet --json
+exit: 1
+stdout: = ""
+stderr: lines = 2 # original ed77c235f tests/crypto_diagnostics.rs:136-137 Rust lines count
+stderr.line(0): ^= "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\"" # original ed77c235f tests/crypto_diagnostics.rs:138-141 first line starts_with envelope
+stderr.line(0): ~ "\"code\":\"E2702\"" # original ed77c235f tests/crypto_diagnostics.rs:143 first line contains code
+stderr.line(0): ~ "\"reason\":\"output_length\"" # original ed77c235f tests/crypto_diagnostics.rs:144 first line contains reason
+stderr.line(0): ~ "\"operation\":\"hkdf_sha256\"" # original ed77c235f tests/crypto_diagnostics.rs:145 first line contains operation
+stderr.line(0): ~ "\"actual\":8161" # original ed77c235f tests/crypto_diagnostics.rs:138,146 first line contains actual
+stderr.line(1): ^= "{\"schema\":\"jet.report/v1\",\"moment\":\"compile\"" # original ed77c235f tests/crypto_diagnostics.rs:138-141 second line starts_with envelope
+stderr.line(1): ~ "\"code\":\"E2702\"" # original ed77c235f tests/crypto_diagnostics.rs:143 second line contains code
+stderr.line(1): ~ "\"reason\":\"output_length\"" # original ed77c235f tests/crypto_diagnostics.rs:144 second line contains reason
+stderr.line(1): ~ "\"operation\":\"hkdf_sha256\"" # original ed77c235f tests/crypto_diagnostics.rs:145 second line contains operation
+stderr.line(1): ~ "\"actual\":8162" # original ed77c235f tests/crypto_diagnostics.rs:138,146 second line contains actual
+file: .jet/build absent

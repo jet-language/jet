@@ -1,0 +1,108 @@
+#Test("fetch capability digest is package then signature ordered and excludes release headers") {
+    first :: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 1.0.0\nfn z(v: &Value)\nfn a() Int\n") ?? panic("snapshot")
+    second :: pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 2.0.0\nfn read(v: Value)\n") ?? panic("snapshot")
+    assert_eq(pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first, second}), "a\nfn read(v: Value)\n--\nb\nfn a() Int\nfn z(v: &Value)")
+    assert(pkg_capability_snapshot_parse("api_version = nope\npackage = a\npublished_version = 1\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = 3\npackage = a\npublished_version = 1\nunknown\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = -1\npackage = a\npublished_version = 1\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = 4294967296\npackage = a\npublished_version = 1\n") == None)
+    assert(pkg_capability_snapshot_parse("api_version = 4294967295\npackage = a\npublished_version = 1\n") != None)
+    changed :: pkg_capability_snapshot_parse("api_version = 3\npackage = b\npublished_version = 99\nfn z(v: Value)\nfn a() Int\n") ?? panic("changed")
+    assert(pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{first})) != pkg_lock_compute_fingerprint("tree", [String]{}, pkg_capability_snapshot_text([PackageCapabilitySnapshot]{changed})))
+}
+#Test("fetch selected update closure excludes unrelated packages and terminates on repeated graph edges") {
+    lock := LockFile.empty()
+    lock.packages = [LockedPackage]{LockedPackage{name: "root", version: "1", source: .Root, dependencies: [String]{"a", "unrelated"}}, LockedPackage{name: "a", version: "1", source: .Path("a"), dependencies: [String]{"b"}}, LockedPackage{name: "b", version: "1", source: .Path("b"), dependencies: [String]{"a"}}, LockedPackage{name: "unrelated", version: "1", source: .Path("unrelated")}}
+    assert_eq(pkg_fetch_closure(lock, "a"), [String]{"a", "b"})
+    assert_eq(pkg_fetch_update_scope(Val(lock), PackageFetchOptions{update: true, update_dep: Val("a")}), [String]{"a", "b"})
+    assert_eq(pkg_fetch_update_scope(Val(lock), PackageFetchOptions{}), [String]{})
+    assert_eq(pkg_fetch_normalize_path("/a/b/../c"), "/a/c")
+    assert_eq(pkg_fetch_normalize_path("../../a"), "../../a")
+}
+
+#Test("fetch cached version retains the canonical conflict diagnostic") {
+    resolver := PackageFetchResolver{root: "", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    pkg_fetch_record_version(&resolver, "shared", "1.0.0", [String]{"root", "first"}) ?? panic("first version")
+    pkg_fetch_record_version(&resolver, "shared", "1.0.0", [String]{"root", "second"}) ?? panic("same version")
+    if pkg_fetch_record_version(&resolver, "shared", "2.0.0", [String]{"root", "third"}) == {
+        .Ok(_) -> panic("conflicting cached version must fail")
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E1201")
+            assert_eq(error.diagnostic.what, "two versions of `shared` are required")
+            assert_eq(error.diagnostic.why, "a package graph can have only one version of each package — two different packages require `shared` at conflicting versions")
+            assert_eq(error.diagnostic.fix, "choose one version and update the conflicting dependencies:\n  root → first (1.0.0)\n  root → third (2.0.0)")
+        }
+    }
+}
+
+#Test("fetch subprocess arguments reject both Unicode line separators") {
+    separator :: String.from_bytes([U8]{226, 128, 168}) ?? panic("UTF-8 line separator")
+    paragraph :: String.from_bytes([U8]{226, 128, 169}) ?? panic("UTF-8 paragraph separator")
+    assert(pkg_fetch_git_has_control("main{separator}forged"))
+    assert(pkg_fetch_git_has_control("main{paragraph}forged"))
+    assert(!pkg_fetch_git_has_control("main-é"))
+}
+#Test("fetch all-answer public destination policy rejects mixed and malformed DNS results") {
+    assert(publication_addresses_public([[U8]]{[U8]{8, 8, 8, 8}}))
+    assert(!publication_addresses_public([[U8]]{}))
+    assert(!publication_addresses_public([[U8]]{[U8]{8, 8, 8, 8}, [U8]{127, 0, 0, 1}}))
+    assert(!publication_addresses_public([[U8]]{[U8]{192, 0, 0, 9}}))
+    assert(!publication_addresses_public([[U8]]{[U8]{8, 8, 8}}))
+    assert_eq(publication_address_text([U8]{8, 8, 8, 8}), "8.8.8.8")
+    assert_eq(publication_registry_ip([U8]{32, 1, 72, 96, 72, 96, 0, 0, 0, 0, 0, 0, 0, 0, 136, 136}), "[2001:4860:4860:0000:0000:0000:0000:8888]")
+}
+#Test("fetch git revisions refuse options controls and unsafe cache components") {
+    assert(pkg_fetch_git_revision("main", false) == .Ok(_))
+    assert(pkg_fetch_git_revision("--upload-pack=touch pwned", false) == .Err(_))
+    assert(pkg_fetch_git_revision("main\nforged", false) == .Err(_))
+    assert(pkg_fetch_git_revision("refs/tags/v1", false) == .Ok(_))
+    assert(pkg_fetch_git_revision("refs/tags/v1", true) == .Err(_))
+}
+#Test("fetch registry identity includes every visible auxiliary file and excludes managed state") {
+    root :: files.tmpdir("jet-fetch-registry-hash-") ?? panic("fixture")
+    files.write(files.join(root, "package.jet"), "package {{ name: \"hash\", version: \"1.0.0\" }}\n") ?? panic("manifest")
+    files.write(files.join(root, "asset.bin"), "before") ?? panic("asset")
+    files.write(files.join(root, "registry.json"), "{{\"name\":\"hash\",\"version\":\"1.0.0\",\"dependencies\":[]}}\n") ?? panic("metadata")
+    before :: publication_registry_artifact_hash(root) ?? panic("hash")
+    files.write(files.join(root, "asset.bin"), "after") ?? panic("asset update")
+    after :: publication_registry_artifact_hash(root) ?? panic("hash after")
+    assert(before != after)
+    files.create_dir_all(files.join(root, ".jet")) ?? panic("managed")
+    files.write(files.join(root, ".jet/lock"), "version = 1\n") ?? panic("lock")
+    assert_eq(publication_registry_artifact_hash(root) ?? panic("managed hash"), after)
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("fetch semantic source maps use the canonical policy vector and preserve source authority order") {
+    root :: files.tmpdir("jet-fetch-semantic-sources-") ?? panic("fixture")
+    manifest :: Manifest.parse("package.jet", "name: \"consumer\"\nversion: \"1.0.0\"\npolicy: {{ sources: {{ \"Z.*\": [\"second\", \"first\"], \"A.*\": [\"internal\"] }} }}\n") ?? panic("manifest")
+    semantic :: pkg_fetch_semantic_records(root, LockFile.empty(), manifest, PackageFetchOptions{}) ?? panic("semantic")
+    assert_eq(semantic.source_maps, [SourceMapEntry]{SourceMapEntry{pattern: "A.*", sources: [String]{"internal"}}, SourceMapEntry{pattern: "Z.*", sources: [String]{"second", "first"}}})
+    assert_eq(trust_write_semantic_lock(semantic), "semantic-lock-version = 1\n\n[[source_map]]\npattern = \"A.*\"\nsources = [\"internal\"]\n\n[[source_map]]\npattern = \"Z.*\"\nsources = [\"second\", \"first\"]\n")
+    files.remove_all(root) ?? panic("cleanup")
+}
+
+#Test("fetch cached dependency aliases only check an already recorded alias version") {
+    verification := StoreVerification.new()
+    roots :: HangarRoots{root: ".", dev_mode: false}
+    context :: ProviderCtx{fixtures: None, store_dir: ".", offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false}
+    resolver := PackageFetchResolver{root: ".", previous: None, options: PackageFetchOptions{}, policy: PackagePolicy.default(), nodes: [String: PackageFetchNode]{}, versions: [String: PackageFetchVersion]{}, visiting: [String]{}, registry_plan: [String: PublicationIndexEntry]{}, update_scope: [String]{}, foreign: [String: ForeignRealization]{}, advisory_loaded: false, advisory: None}
+    actual :: PackageFetchNode{package: LockedPackage{name: "actual", version: "1.0.0", source: .Path(".")}, directory: "."}
+    resolver.nodes["alias"] = actual
+    pkg_fetch_record_version(&resolver, "actual", "1.0.0", [String]{"root", "actual"}) ?? panic("first authored version")
+    pkg_fetch_resolve(&verification, roots, context, &resolver, "alias", .Path("."), ".", [String]{"root", "alias"}) ?? panic("cached alias")
+    assert_eq(resolver.versions.len(), 1)
+    assert(resolver.versions.get("alias") == None)
+    assert_eq(resolver.versions["actual"].chain, [String]{"root", "actual"})
+    resolver.versions["alias"] = PackageFetchVersion{version: "2.0.0", chain: [String]{"root", "previous-alias"}}
+    if pkg_fetch_resolve(&verification, roots, context, &resolver, "alias", .Path("."), ".", [String]{"root", "alias"}) == {
+        .Ok(_) -> panic("cached conflicting alias must fail")
+        .Err(error) -> {
+            assert_eq(error.diagnostic.code, "E1201")
+            assert_eq(error.diagnostic.what, "two versions of `alias` are required")
+            assert_eq(error.diagnostic.fix, "choose one version and update the conflicting dependencies:\n  root → previous-alias (2.0.0)\n  root → alias (1.0.0)")
+        }
+    }
+    assert_eq(resolver.versions["alias"].version, "2.0.0")
+    assert_eq(resolver.versions.len(), 2)
+}

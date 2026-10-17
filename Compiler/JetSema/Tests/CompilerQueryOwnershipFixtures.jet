@@ -1,0 +1,52 @@
+// The production request is not cloneable (its optional TraceSink is a trait
+// object). These real parse/query calls must transfer that carrier, even when
+// authorization rejects the entry before checking. No manufactured success.
+fn query_ownership_request() -> JetDriverCompileRequest Never! {
+    JetDriverCompileRequest{
+        authorized_sources: JetDriverAuthorizedSourceSnapshot{roots: [JetDriverAuthorizedSourceRoot]{}, entry_root_identity: "query-ownership", entry_path: "main.jet"},
+        canonical_effect_source: "effect IO\n",
+        core_sources: [JetDriverCoreSource]{},
+        host_facts: JetDriverHostFacts{target_triple: Val("x86_64-unknown-linux-gnu"), active_os: Val("linux"), compiler_identity: None},
+        eval_config: jet_eval_default_config(),
+        target: JetDriverCompileTarget.Native,
+        record_store: None,
+        trace_sink: None,
+        mir_lint_every_pass: false,
+        compiler_threads: compiler_threads_single(),
+    }
+}
+
+fn query_ownership_case(label: String, source: String, disk: Bool, parse_error: Bool, queries: &JetDriverCompilerQueries, failures: &[String]) {
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source.copy(), preparation: None}) ?? {
+        &failures.push("{label}: genuine parser did not return facts")
+        return
+    }
+    if sema_has_error_since(parsed.parsed.diagnostics, 0) != parse_error -> &failures.push("{label}: unexpected genuine parse verdict {parsed.parsed.diagnostics:Debug}")
+    request :: query_ownership_request()
+    result :: if disk -> jet_driver_compiler_queries_check_disk(&queries, parsed, ^request) else -> jet_driver_compiler_queries_check_text(&queries, parsed, ^request)
+    if result.product == .Failed {} else { &failures.push("{label}: missing authorized entry fabricated a compiler product") }
+    if result.complete || result.failed_stage != (Val(JetDriverStage.Collect)) -> &failures.push("{label}: authorization failure changed its collection-stage meaning")
+    missing_entry := false
+    loop diagnostic in result.diagnostics {
+        if diagnostic.code == "E0603" -> missing_entry = true
+    }
+    if !missing_entry -> &failures.push("{label}: genuine loader entry diagnostic is missing")
+    documents :: jet_driver_compiler_queries_documents(&queries)
+    if documents.len() != 1 {
+        &failures.push("{label}: document carrier was not retained exactly once")
+    } else if documents[0].path != "main.jet" || documents[0].source != source {
+        &failures.push("{label}: pre-move source read did not retain the exact document bytes")
+    }
+    if queries.roots.len() != 1 -> &failures.push("{label}: repeated same-root failure replaced the invocation's cache slots")
+    stats :: jet_driver_compiler_queries_stats(&queries)
+    if stats.item_hits != 0 || stats.item_recomputes != 0 || stats.live_items != 0 || stats.live_item_bytes != 0 -> &failures.push("{label}: failed ingress fabricated Sema cache work")
+}
+
+fn run() {
+    failures := [String]{}
+    queries := jet_driver_compiler_queries_new()
+    query_ownership_case("text owned request", "fn run() {{}}\n", false, false, &queries, &failures)
+    query_ownership_case("disk-to-text owned request", "fn helper() {{}}\n", true, false, &queries, &failures)
+    query_ownership_case("parse failure still retains actual document", "fn {{\n", false, true, &queries, &failures)
+    if failures.len() > 0 -> panic("CompilerQueryOwnershipFixtures collected {failures.len()} failures:\n{failures.join("\n")}")
+}

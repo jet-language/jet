@@ -1,0 +1,25 @@
+# Port of tests/jetpack_services.rs:1299-1369. PENDING-GRAMMAR(batch-four).
+# alive-nonzombie preserves process_is_alive: Linux state Z is dead, else kill0.
+requires: os-name:linux
+fixture: production_path_kills_descendants_in_the_supervisor_process_group.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH={work}/bin:{env:PATH}
+env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+mkdir: root
+mkdir: home
+copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+mkdir: state
+chmod: bin/systemd-run 755
+chmod: bin/systemctl 755
+step: jetpack services up --no-color
+await: file .jet/services/fixture/data/child.pid lines >= 1 timeout 5s every 50ms # original ed77c235f tests/jetpack_services.rs:1330 wait_for_file_lines helper610-625 counts lines >=1 with 5s deadline and 50ms sleep
+capture: child = text file.trim .jet/services/fixture/data/child.pid
+cap:child: is-u32 # original ed77c235f tests/jetpack_services.rs:1331-1335 child PID trim then parse::<u32>().unwrap
+capture: leader = text file.strip_prefix_lines("pid=").line(0) .jet/services/fixture/pid
+cap:leader: is-u32 # original ed77c235f tests/jetpack_services.rs:1336-1340 first successful pid= strip_prefix and parse::<u32>().ok then unwrap
+cap:child: != "{cap:leader}"
+process {cap:child}: alive-nonzombie
+step: jetpack services down --no-color
+repeat while process {cap:child} alive-nonzombie timeout 3s every 25ms fail "descendant survived systemd scope shutdown"
+end repeat

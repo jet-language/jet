@@ -334,9 +334,7 @@ pub(super) fn lower_bin_match_pattern_bindings(
 
 pub(super) fn struct_pattern_field_type(cx: &Cx, subject_ty: &Type, field: &str) -> Option<Type> {
     match subject_ty {
-        Type::Apply { name, .. } => cx
-            .struct_fields
-            .get(name)?
+        Type::Apply { name, .. } => cx.fact_struct_fields(name)?
             .iter()
             .find(|(f, _)| f == field)
             .map(|(_, t)| t.clone()),
@@ -422,6 +420,23 @@ pub(crate) fn lower_fallible_match<'a>(
         env.fallback_subject = fallback_subject;
         subject_t
     };
+    // A Never! call has no failure alternative. Preserve an optional success
+    // value for its patterns, not the checked outer Result<T?, Never> carrier.
+    if let Some(success) = super::super::mir::never_carrier_success(&subject_t.ty).cloned() {
+        let (line, column) = cx.src_line_col(subject.span().start);
+        subject_t = TExpr {
+            ty: success,
+            kind: TExprKind::Try {
+                inner: Box::new(subject_t),
+                note: None,
+                convert: crate::Codegen::TIR::TTryConvert::Never,
+                file: crate::Codegen::escape_rust_str(&cx.file),
+                line,
+                column,
+                fn_name: crate::Codegen::escape_rust_str(&env.fn_name),
+            },
+        };
+    }
     let subject_ty = match subject_t.ty.without_user_tags() {
         Type::Option(_) | Type::Result { .. } => subject_t.ty.clone(),
         _ => {
@@ -768,7 +783,7 @@ pub(crate) fn tir_add_pattern_bindings(
                 Type::Named(name) | Type::Apply { name, .. } => {
                     let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, name);
                     crate::Codegen::is_json_type_name(name)
-                        || resolved == "DataTree"
+                        || resolved == "Dyn"
                         || resolved == crate::Syntax::TYPE_KEY
                 }
                 _ => false,
@@ -777,8 +792,7 @@ pub(crate) fn tir_add_pattern_bindings(
                 return Err("enum pattern payload slot count");
             }
             let payload = owner.as_deref().and_then(|owner| {
-                cx.enum_variants
-                    .get(owner)?
+                cx.fact_enum_variants(owner)?
                     .iter()
                     .find(|(name, _)| name == variant)
                     .map(|(_, payload)| payload)
@@ -802,7 +816,7 @@ pub(crate) fn tir_add_pattern_bindings(
                                 .as_ref()
                                 .zip(edge.as_ref())
                                 .is_some_and(|(owner, edge)| {
-                                    cx.boxed_edges.contains(&(owner.clone(), edge.clone()))
+                                    cx.fact_box_edge(&owner, &edge)
                                 });
                         let local = if boxed {
                             TLocal::user(name).through_ref()
@@ -811,7 +825,7 @@ pub(crate) fn tir_add_pattern_bindings(
                         };
                         env.bind(name, local, Some(ty.clone()));
                     }
-                    PatSlot::Wildcard => {}
+                    PatSlot::Wildcard | PatSlot::Value(_) => {}
                     PatSlot::Nested(inner) => tir_add_nested_pattern_bindings(cx, inner, env, ty)?,
                     PatSlot::Range { lo, hi } => {
                         if range_slots_forbidden
@@ -836,7 +850,10 @@ pub(crate) fn tir_add_pattern_bindings(
             let Some(first) = alts.first() else {
                 return Err("empty enum or-pattern");
             };
-            tir_add_pattern_bindings(cx, first, env, subject_ty)?;
+            match subject_ty {
+                Some(ty) => tir_add_nested_pattern_bindings(cx, first, env, ty)?,
+                None => tir_add_pattern_bindings(cx, first, env, None)?,
+            }
             let first_names = first.binding_names();
             let expected: Vec<(String, Option<Type>)> = first_names
                 .iter()
@@ -849,15 +866,21 @@ pub(crate) fn tir_add_pattern_bindings(
                 .collect();
             for alternative in alts.iter().skip(1) {
                 let mut alternative_env = clone_env(env);
-                tir_add_pattern_bindings(cx, alternative, &mut alternative_env, subject_ty)?;
+                match subject_ty {
+                    Some(ty) => tir_add_nested_pattern_bindings(cx, alternative, &mut alternative_env, ty)?,
+                    None => tir_add_pattern_bindings(cx, alternative, &mut alternative_env, None)?,
+                }
                 let names = alternative.binding_names();
                 if names.len() != expected.len() {
                     return Err("enum or-pattern binding count");
                 }
-                for (binding, (expected_name, expected_ty)) in names.iter().zip(&expected) {
-                    if binding.local_name() != expected_name
-                        || alternative_env.ty_of(binding.local_name()).as_ref()
-                            != expected_ty.as_ref()
+                for binding in &names {
+                    let Some((_, expected_ty)) = expected.iter()
+                        .find(|(name, _)| name == binding.local_name()) else {
+                        return Err("enum or-pattern binding shape");
+                    };
+                    if alternative_env.ty_of(binding.local_name()).as_ref()
+                        != expected_ty.as_ref()
                     {
                         return Err("enum or-pattern binding shape");
                     }
@@ -878,6 +901,42 @@ pub(crate) fn tir_add_nested_pattern_bindings(
     env: &mut LowerEnv,
     subject_ty: &Type,
 ) -> Result<(), &'static str> {
+    match (pattern, subject_ty.without_user_tags()) {
+        (Pattern::Struct { fields, .. }, _) => {
+            for field in fields {
+                let ty = struct_pattern_field_type(cx, subject_ty, field.field_name())
+                    .ok_or("struct pattern field type")?;
+                match field {
+                    crate::AST::StructPatField::Bind { local, .. } => {
+                        env.bind(local, TLocal::user(local), Some(ty));
+                    }
+                    crate::AST::StructPatField::Nested { pattern, .. } => {
+                        tir_add_nested_pattern_bindings(cx, pattern, env, &ty)?;
+                    }
+                    crate::AST::StructPatField::Value { .. } => {}
+                }
+            }
+            return Ok(());
+        }
+        (Pattern::List { items, rest, .. }, Type::List(elem) | Type::FixedList { elem, .. }) => {
+            for slot in items {
+                tir_add_slot_bindings(cx, slot, env, elem)?;
+            }
+            if let Some(name) = rest.as_ref().and_then(|rest| rest.name.as_ref()) {
+                env.bind(&name.0, TLocal::user(&name.0), Some(Type::List(elem.clone())));
+            }
+            return Ok(());
+        }
+        (Pattern::Map { entries, .. }, Type::Map { value, .. }) => {
+            for entry in entries {
+                let ty = if entry.optional { Type::Option(value.clone()) } else { (**value).clone() };
+                tir_add_slot_bindings(cx, &entry.slot, env, &ty)?;
+            }
+            return Ok(());
+        }
+        (Pattern::Range { .. } | Pattern::StrMatch { .. } | Pattern::BinMatch { .. }, _) => return Ok(()),
+        _ => {}
+    }
     let payload_ty = match (pattern, subject_ty.without_user_tags()) {
         (Pattern::Present { .. }, Type::Option(inner)) => (**inner).clone(),
         (Pattern::Ok { .. }, Type::Result { ok, .. }) => (**ok).clone(),
@@ -902,6 +961,18 @@ pub(crate) fn tir_add_nested_pattern_bindings(
         },
         _ => Ok(()),
     }
+}
+
+fn tir_add_slot_bindings(
+    cx: &Cx, slot: &PatSlot, env: &mut LowerEnv, ty: &Type,
+) -> Result<(), &'static str> {
+    match slot {
+        PatSlot::Bind { name, .. } => env.bind(name, TLocal::user(name), Some(ty.clone())),
+        PatSlot::Nested(pattern) => return tir_add_nested_pattern_bindings(cx, pattern, env, ty),
+        PatSlot::Wildcard | PatSlot::Range { .. } | PatSlot::Value(_) => {}
+        PatSlot::Named { .. } | PatSlot::Rest(_) => return Err("unplaced named payload entry"),
+    }
+    Ok(())
 }
 
 /// The payload field types a variant binds, from the resolved subject type and
@@ -949,7 +1020,7 @@ pub(crate) fn variant_payload_types(
             .ok_or("union variant payload type"),
         Type::Named(name) | Type::Apply { name, .. } => {
             let resolved = crate::Codegen::TIR::canonical_enum_owner(cx, name);
-            if (crate::Codegen::is_json_type_name(name) || resolved == "DataTree")
+            if (crate::Codegen::is_json_type_name(name) || resolved == "Dyn")
                 && crate::Codegen::is_json_variant(variant)
             {
                 return match variant {
@@ -958,14 +1029,13 @@ pub(crate) fn variant_payload_types(
                     "Int" => Ok(vec![Type::Int]),
                     "Float" => Ok(vec![Type::Float]),
                     "Text" => Ok(vec![Type::String]),
+                    "Bytes" => Ok(vec![Type::List(Box::new(Type::IntN { signed: false, bits: 8 }))]),
+                    "DateTime" => Ok(vec![Type::Named("ZonedDateTime".to_string())]),
                     "Array" => Ok(vec![Type::List(Box::new(Type::Named(
                         crate::Syntax::TYPE_DATA.to_string(),
                     )))]),
-                    "Object" => Ok(vec![Type::Map {
-                        key: Box::new(Type::String),
-                        key_span: None,
-                        value: Box::new(Type::Named(crate::Syntax::TYPE_DATA.to_string())),
-                    }]),
+                    "Object" => Ok(crate::Sema::core_json_pattern_types("Object")
+                        .expect("DataTree.Object has a payload type")),
                     "Number" => Ok(vec![Type::String]),
                     _ => Err("unknown data enum variant"),
                 };
@@ -979,17 +1049,9 @@ pub(crate) fn variant_payload_types(
                 };
             }
             if resolved == "DataEvent" {
-                return match variant {
-                    "Bool" => Ok(vec![Type::Bool]),
-                    "Int" => Ok(vec![Type::Int]),
-                    "Float" => Ok(vec![Type::Float]),
-                    "Text" | "Key" => Ok(vec![Type::String]),
-                    "Bytes" => Ok(vec![Type::List(Box::new(Type::Int))]),
-                    "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd" => {
-                        Ok(Vec::new())
-                    }
-                    _ => Err("unknown data-event enum variant"),
-                };
+                return crate::Sema::data_event_payload(variant)
+                    .map(|payload| payload.into_iter().collect())
+                    .ok_or("unknown data-event enum variant");
             }
             variant_binding_types_for_enum(cx, &resolved, variant)
                 .ok_or("enum variant payload type")
@@ -1032,9 +1094,7 @@ pub(crate) fn enum_variant_payload_type<'a>(
     edge: &str,
 ) -> Result<Option<&'a Type>, &'static str> {
     let type_name = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
-    let variants = cx
-        .enum_variants
-        .get(&type_name)
+    let variants = cx.fact_enum_variants(&type_name)
         .ok_or("enum payload owner layout")?;
     // A positional payload's edge is the complete variant path. Check that form
     // before splitting on `.`: a grouped leaf such as `Net.Ping` is a variant in
@@ -1123,12 +1183,19 @@ pub(crate) fn lower_enum_arg(
     };
     let mut value = lower_expr(payload_expr, cx, env);
     if let Some(want) = payload_ty {
-        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want);
+        value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, want, cx);
     }
-    // `None` carries no payload to type it; the declared variant field does.
-    if matches!(value.kind, TExprKind::Absent) {
-        if let Some(want @ Type::Option(_)) = enum_edge_declared_type(cx, type_name, edge) {
+    // `None` carries no payload to type it, and sema erases the element type
+    // from an empty list literal (`args: []`); the declared variant field
+    // names both (a generic field's parameters stay with the value).
+    if let Some(want) = enum_edge_declared_type(cx, type_name, edge) {
+        if matches!(value.kind, TExprKind::Absent) && matches!(want, Type::Option(_)) {
             value.ty = want.clone();
+        }
+        if matches!(value.kind, TExprKind::ListLit(_))
+            && crate::Generics::free_type_params(want).is_empty()
+        {
+            value = super::preserve_typed_list_shape(value, want, cx);
         }
     }
     TEnumArg {
@@ -1146,9 +1213,7 @@ fn enum_edge_declared_type<'a>(cx: &'a Cx, type_name: &str, edge: &str) -> Optio
     }
     let (variant, label) = edge.rsplit_once('.')?;
     let owner = crate::Codegen::TIR::canonical_enum_owner(cx, type_name);
-    let (_, payload) = cx
-        .enum_variants
-        .get(&owner)?
+    let (_, payload) = cx.fact_enum_variants(&owner)?
         .iter()
         .find(|(candidate, _)| candidate == variant)?;
     match payload {

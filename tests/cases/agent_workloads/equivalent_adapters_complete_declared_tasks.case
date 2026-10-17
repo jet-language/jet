@@ -1,0 +1,239 @@
+# HAND-PORT tests/agent_workloads.rs:2633-2820 equivalent_adapters_complete_declared_tasks
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# LIVE original manifest/schema/version/path/authority/closed exact and starts_with stem mapping, every4adapter cold/warm120s/1MiB/exactstdout/stability/input contents+paths or SHA unchanged/precise scratch assertions; competitor pins exact live receipt23fields/all3adapters+same actual version every row. Windows FAIL (not SKIP). Original JET_CORPUS_BASELINE_DIR presence skips Jet only; recorder/metrics are lead-approved retired unasserted Rust receipt layer. No pinned-version relaxation or generated reference receipt.
+fixture: equivalent_adapters_complete_declared_tasks.fixture
+env: NO_COLOR=1
+when os-name windows: step: fail "Bash is explicitly unavailable as a native Windows adapter; this task cannot pass"
+step version_jet: jet --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,875 command_version !limit_exceeded
+step version_bash: bash --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,875 command_version !limit_exceeded
+when version_bash.stdout != "": capture: version_bash = text stdout.line(0).trim
+when version_bash.stdout = "": capture: version_bash = text stderr.line(0).trim
+step version_python: python3 --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,875 command_version !limit_exceeded
+when version_python.stdout != "": capture: version_python = text stdout.line(0).trim
+when version_python.stdout = "": capture: version_python = text stderr.line(0).trim
+step version_node: node --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,875 command_version !limit_exceeded
+when version_node.stdout != "": capture: version_node = text stdout.line(0).trim
+when version_node.stdout = "": capture: version_node = text stderr.line(0).trim
+step version_git: git --version
+limit: time=120
+exit: 0
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,875 command_version !limit_exceeded
+copy: {root}/tests/agent_workloads/baselines/receipt.tsv pins.tsv
+file.line(0): pins.tsv = "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest" # original ed77c235f tests/agent_workloads.rs:709-713 first Rust line equals BASELINE_HEADER
+for line file.after_first("\n").filter(!= "") pins.tsv as pin
+write: pin.row = "{pin}"
+file.append("_").replace("\t", "\n"): pin.row lines = 23 # original ed77c235f tests/agent_workloads.rs:715-717 tab-split exactly23 fields; sentinel preserves empty final field
+capture: adapter = text file.split("\t", 3) pin.row
+when !(cap:adapter in ["bash","python","node"]): step: fail "unknown pinned adapter"
+capture: pin_version = text file.split("\t", 21) pin.row
+cap:pin_version: nonempty # original ed77c235f tests/agent_workloads.rs:725 pinned tool version is not empty
+cap:pin_version: != "unknown"
+when cap:adapter = "bash"
+cap:pin_version: = "{cap:version_bash}"
+capture: seen_bash += text "x\n"
+end when
+when cap:adapter = "python"
+cap:pin_version: = "{cap:version_python}"
+capture: seen_python += text "x\n"
+end when
+when cap:adapter = "node"
+cap:pin_version: = "{cap:version_node}"
+capture: seen_node += text "x\n"
+end when
+end for
+cap:seen_bash: nonempty # original ed77c235f tests/agent_workloads.rs:730-736 baseline pins every competitor adapter including Bash
+cap:seen_python: nonempty # original ed77c235f tests/agent_workloads.rs:730-736 baseline pins every competitor adapter including Python
+cap:seen_node: nonempty # original ed77c235f tests/agent_workloads.rs:730-736 baseline pins every competitor adapter including Node
+copy: {root}/tests/agent_workloads/policy.tsv policy.tsv
+capture: policy_version = text file.filter(^= "version=").line(0).strip_prefix("version=") policy.tsv
+capture: policy_plan = text file.filter(^= "plan=").line(0).strip_prefix("plan=") policy.tsv
+capture: policy_launch_transaction = text file.filter(^= "launch_transaction=").line(0).strip_prefix("launch_transaction=") policy.tsv
+capture: policy_descendants = text file.filter(^= "descendants=").line(0).strip_prefix("descendants=") policy.tsv
+capture: policy_limits = text file.filter(^= "limits=").line(0).strip_prefix("limits=") policy.tsv
+capture: policy_outputs = text file.filter(^= "outputs=").line(0).strip_prefix("outputs=") policy.tsv
+capture: policy_receipt = text file.filter(^= "receipt=").line(0).strip_prefix("receipt=") policy.tsv
+capture: policy_authority = text file.filter(^= "authority=").line(0).strip_prefix("authority=") policy.tsv
+copy: {root}/tests/agent_workloads/manifest.tsv manifest.tsv
+file.line(0): manifest.tsv = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards" # original ed77c235f tests/agent_workloads.rs:625-632 first Rust line equals HEADER
+for line file.after_first("\n").filter(!= "") manifest.tsv as row
+write: task.row = "{row}"
+file.append("_").replace("\t", "\n"): task.row lines = 13 # original ed77c235f tests/agent_workloads.rs:636-637 tab-split exactly13 fields; sentinel preserves empty final field
+capture: version = text file.split("\t", 0) task.row
+cap:version: = "1"
+capture: id = text file.split("\t", 1) task.row
+capture: input = text file.split("\t", 5) task.row
+capture: expected_path = text file.split("\t", 6) task.row
+capture: authority = text file.split("\t", 7) task.row
+cap:authority: = "{cap:policy_authority}"
+cap:input: nonempty # original ed77c235f tests/agent_workloads.rs:535-541,639 input corpus path rejects empty
+cap:input: !~ ":" # original corpus relative-path colon rejection
+cap:input.replace("\\", "/").append("/marker").replace("/", "\n"): each-line where != "" && != "." && != ".." # original ed77c235f tests/agent_workloads.rs:539-541,639 every slash/backslash-split input component excludes empty/dot/parent
+cap:expected_path: nonempty # original ed77c235f tests/agent_workloads.rs:535-541,640 expected corpus path rejects empty
+cap:expected_path: !~ ":" # original corpus relative-path colon rejection
+cap:expected_path.replace("\\", "/").append("/marker").replace("/", "\n"): each-line where != "" && != "." && != ".." # original ed77c235f tests/agent_workloads.rs:539-541,640 every slash/backslash-split expected component excludes empty/dot/parent
+write: selected.txt = ""
+when cap:id in ["repository-marker-scan","repository-marker-scan-empty"]: write: selected.txt = "repository_marker_scan"
+when cap:id in ["repository-semantic-inspection"]: write: selected.txt = "repository_semantic_inspection"
+when cap:id in ["repository-semantic-edit"]: write: selected.txt = "repository_semantic_edit"
+when cap:id in ["git-diff-review","git-diff-empty"]: write: selected.txt = "git_diff_review"
+when cap:id in ["build-test-failure-recovery"]: write: selected.txt = "build_test_recovery"
+when cap:id in ["browser-automation-preflight"]: write: selected.txt = "browser_automation_preflight"
+when cap:id in ["desktop-interaction-focus"]: write: selected.txt = "desktop_interaction_focus"
+when cap:id in ["document-markdown-inspection"]: write: selected.txt = "document_markdown_inspection"
+when cap:id in ["media-asset-inventory"]: write: selected.txt = "media_asset_inventory"
+when cap:id ^= "incident-report-": write: selected.txt = "incident_report"
+when cap:id ^= "structured-data-": write: selected.txt = "structured_data"
+when cap:id ^= "database-": write: selected.txt = "database_access"
+when cap:id ^= "http-": write: selected.txt = "http_api"
+when cap:id ^= "process-batch-": write: selected.txt = "process_batch"
+when cap:id ^= "mcp-environment-": write: selected.txt = "mcp_resource"
+when cap:id ^= "interactive-terminal-": write: selected.txt = "interactive_terminal"
+when cap:id ^= "service-lifecycle-": write: selected.txt = "service_lifecycle"
+capture: stem = text file selected.txt
+cap:stem: nonempty # original ed77c235f tests/agent_workloads.rs:556-593 adapter_stem returns a named source or panics for an unknown task
+copy: {root}/tests/agent_workloads/{cap:expected_path} expected.out
+capture: expected = text file expected.out
+copy: {root}/tests/agent_workloads/{cap:input} input.before
+when dir-readable input.before: capture: before = tree-contents input.before recursive
+when !dir-readable input.before: capture: before = sha256 file input.before
+when !env-set JET_CORPUS_BASELINE_DIR
+mkdir: run_jet
+copy: sources/{cap:stem}.jet run_jet/{cap:stem}.jet
+copy: package.source run_jet/package.jet
+step jet_cold: jet run --release {cap:stem}.jet -- {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+env: JET_RECEIPT_BYPASS=1
+cwd: run_jet
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2702 cold !limit_exceeded
+step jet_warm: jet run --release {cap:stem}.jet -- {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+env: JET_RECEIPT_BYPASS=1
+cwd: run_jet
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
+stdout: == jet_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+remove: run_jet/package.jet
+remove: run_jet/{cap:stem}.jet
+file: run_jet/.jet is-dir
+file: run_jet/.jet not-symlink
+file: run_jet/.jet/build is-dir
+file: run_jet/.jet/build not-symlink
+file: run_jet/.jet/build/{cap:stem} is-file
+entries: run_jet name != ".jet" = 0
+entries: run_jet/.jet name != "build" = 0
+entries: run_jet/.jet/build name != "{cap:stem}" name != "{cap:stem}.rs" = 0
+for file run_jet/.jet/build as artifact
+file: {artifact.path} is-file
+file: {artifact.path} not-symlink
+end for
+remove: run_jet
+end when
+mkdir: run_bash
+step bash_cold: bash {root}/tests/agent_workloads/adapters/{cap:stem}.bash {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_bash
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2702 cold !limit_exceeded
+step bash_warm: bash {root}/tests/agent_workloads/adapters/{cap:stem}.bash {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_bash
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
+stdout: == bash_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+entries: run_bash recursive = 0
+remove: run_bash
+mkdir: run_python
+step python_cold: python3 {root}/tests/agent_workloads/adapters/{cap:stem}.py {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_python
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2702 cold !limit_exceeded
+step python_warm: python3 {root}/tests/agent_workloads/adapters/{cap:stem}.py {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_python
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
+stdout: == python_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+entries: run_python recursive = 0
+remove: run_python
+mkdir: run_node
+step node_cold: node {root}/tests/agent_workloads/adapters/{cap:stem}.js {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_node
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2702 cold !limit_exceeded
+step node_warm: node {root}/tests/agent_workloads/adapters/{cap:stem}.js {root}/tests/agent_workloads/{cap:input}
+env: JET_CORPUS_JET={jet}
+env: JET_CORPUS_JETPACK={jetpack}
+env: JET_CORPUS_TASK={cap:id}
+cwd: run_node
+limit: time=120
+exit: 0
+stdout: = "{cap:expected}"
+stdout+stderr: len <= 1048576 # original ed77c235f tests/agent_workloads.rs:38,780,783,2707 warm !limit_exceeded
+stdout: == node_cold
+copy: {root}/tests/agent_workloads/{cap:input} input.after
+when dir-readable input.after: capture: after = tree-contents input.after recursive
+when !dir-readable input.after: capture: after = sha256 file input.after
+cap:after: = "{cap:before}"
+remove: input.after
+entries: run_node recursive = 0
+remove: run_node
+remove: input.before
+end for

@@ -1,0 +1,41 @@
+# Port of tests/cli_parts/expand.rs:682-750; exact original sources and predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): text split/filter, cap comparisons, zero-key JSON.
+step human: jet inspect expand --facts layout {root}/tests/fixtures/expand_layout_facts.jet
+env: NO_COLOR=1
+exit: 0
+stdout: !~ "\u001b" # original predicate
+stdout: ~ "PlainPacket.$layout" # original predicate
+stdout: ~ "CPacket.$layout" # original predicate
+stdout: ~ "ColumnPacket.$layout" # original predicate
+stdout: ~ "PacketState.$layout" # original predicate
+stdout: ~ "PlainPacket.$layout   kind=default size=unknown" # original predicate
+stdout: ~ "CPacket.$layout   kind=c size=8 alignment=4 stride=8" # original predicate
+stdout: ~ "fields=[count:U32(offset=0,size=4),flag:U8(offset=4,size=1)]" # original predicate
+stdout: ~ "ColumnPacket.$layout   kind=columnar size=32 alignment=8 stride=32" # original predicate
+stdout: ~ "fields=[count:Int(offset=0,size=8),label:String(offset=8,size=24)]" # original predicate
+stdout: ~ "byte_facts=unavailable" # original predicate
+stdout: ~ "E0959" # original predicate
+step: jet inspect expand --facts layout {root}/tests/fixtures/expand_layout_facts.jet
+env: NO_COLOR=1
+exit: any # original predicate: exit not asserted
+stdout.filter(!^= "check: " "proof: "): == human # original predicate; lines joined LF without trailing LF
+step json_first: jet inspect expand --facts layout --json {root}/tests/fixtures/expand_layout_facts.jet
+env: NO_COLOR=1
+exit: 0
+json: stdout doc $ valid # original predicate: JSON parses
+stdout: ~ "\"selection\":\"layout\"" # original predicate
+stdout: ~ "\"kind\":\"c\"" # original predicate
+stdout: ~ "\"kind\":\"columnar\"" # original predicate
+stdout: ~ "\"type\":\"PacketState\"" # original predicate
+stdout: ~ "\"size\":null" # original predicate
+stdout: ~ "\"offset\":null" # original predicate
+stdout: ~ "\"size\":8" # original predicate
+stdout: ~ "\"offset\":4" # original predicate
+stdout: ~ "\"byte_facts\":{\"diagnostic\"" # original predicate
+stdout: ~ "\"status\":\"unavailable\"" # original predicate
+stdout: ~ "\"code\":\"E0959\"" # original predicate
+step: jet inspect expand --facts layout --json {root}/tests/fixtures/expand_layout_facts.jet
+env: NO_COLOR=1
+exit: any # original predicate: exit not asserted
+json: stdout doc[zero elapsed_ms] $ == json_first # original predicate

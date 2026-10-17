@@ -62,14 +62,17 @@ pub const KW_FN: &str = "fn";
 pub const GENERIC_CALL_OPEN: &str = "<";
 pub const GENERIC_CALL_CLOSE: &str = ">";
 
-/// S18 (ratified): marks an item as visible to other files (via `use`).
+/// D-MOD4: `pub use` re-export is the only remaining `pub` form (re-export
+/// ballot pending, card #4723). D-VIS-MODULE1: `pub` on a declaration or field is
+/// rejected (E0411) with a fix that deletes it.
 pub const KW_PUB: &str = "pub";
 
-/// D-VISDEFAULT2=A (ratified): marks an item private inside a `#PubFile` file.
+/// D-VIS-MODULE1 (owner directive 2026-10-07, card #4723): everything is public by
+/// default. `priv` marks a module (`priv module name`, usable only by its
+/// enclosing module) or a struct field (usable only by the type's own module).
 pub const KW_PRIV: &str = "priv";
 
-/// D-VISDEFAULT2=A (ratified): file-scope marker that flips default visibility to
-/// public-by-default for following top-level items (D-VISDEFAULT1=C).
+/// D-VIS-MODULE1: retired file marker, recognized only so E0418 can delete it.
 pub const MARKER_PUB_FILE: &str = "PubFile";
 
 /// D-PRELUDEX1=A (ratified 2026-06-28): file-scope marker that disables the
@@ -77,20 +80,20 @@ pub const MARKER_PUB_FILE: &str = "PubFile";
 /// the no-prefix surface.
 pub const MARKER_NO_PRELUDE: &str = "NoPrelude";
 
-/// D-VISDEFAULT2 option B (rejected): retired spelling for the private exception
-/// keyword — recognized only for E0412 teaching diagnostics.
+/// D-VISDEFAULT2 option B (rejected): foreign spelling of `priv`, recognized
+/// only for E0412 teaching diagnostics.
 pub const FOREIGN_PRIVATE: &str = "private";
 /// D-SHAPE-CLI-COMPLETE1=A: external program schema source for
 /// `jet self completions SHELL --for PROGRAM`.
 pub const CLI_COMPLETIONS_FOR: &str = "--for";
 
-/// D-VISDEFAULT2 option B (rejected): retired spelling for the file marker —
-/// recognized only for E0418 teaching diagnostics.
+/// D-VIS-MODULE1: retired file marker spelling, recognized only so E0418 can
+/// delete it.
 pub const MARKER_PUBLIC_FILE: &str = "PublicFile";
 
-/// D-PUBPKG1=A (ratified): the `pub(package)` visibility qualifier — restricts
-/// access to sibling packages in the same payload/workspace.
-pub const PUB_PACKAGE_QUALIFIER: &str = "package";
+/// D-VIS-MODULE1: `priv(package) module` — the module is usable by every module
+/// of the same package and invisible to other packages.
+pub const PRIV_PACKAGE_QUALIFIER: &str = "package";
 
 /// S2 / D-BIND1 / D-BIND4 / D-BIND-BARE1: immutable binding sigil `name :: expr`.
 /// D-BIND-BARE1 retires typed bindings (`name: Type :: expr`); types ride the
@@ -301,6 +304,11 @@ pub const TYPE_HTML: &str = "HTML";
 /// S80 (ratified; amended by D-FAIL-ERROR1=A): default error type and
 /// constructor share `Err`.
 pub const TYPE_ERR: &str = "Err";
+/// The package that owns the original Prelude `Err` declaration (and its
+/// private error metadata records). Checked identities of its declarations
+/// are `jet:canonical-prelude::<path>::<name>`; like `<corelib>/` Core
+/// identities they reduce to their leaf for native carrier projection.
+pub const ERROR_PRELUDE_PACKAGE: &str = "jet:canonical-prelude";
 /// D-FAILURE-FOUNDATION1=A / D-NEVER2=B: `Never` is the existing bottom
 /// error-domain name and is also legal in callable success-return slots.
 /// It remains uninhabited in every ordinary value position.
@@ -366,10 +374,10 @@ pub const SIZED_NUMERIC_TYPES: &[&str] = &[
     TYPE_F64,
 ];
 
-/// D-MEM1 / D-MEM-PARAM1=A / D-SHAPE-PLACE1=A (ratified, supersedes D-CAP7): memory model v5 sigils. Three
+/// D-MEM1 / D-MEM-PARAM1=A / D-SHAPE-PLACE1=A (ratified, supersedes D-CAP7): memory model v5 sigils. Two
 /// sigils plus unmarked: unmarked = read (enforced in S2), `&T` = exclusive
-/// write, `^T` = move (consume), `~T` = copy (D-SHAPE-COPY1=A, supersedes
-/// D-CAP2/S4's `copy` verb). D-CAP-RECEIVER1=D: at call sites `&`/`^` mark the
+/// write, `^T` = move (consume). A deliberate copy is the built-in method
+/// `x.copy()` (D-COPY-WORD1=A). D-CAP-RECEIVER1=D: at call sites `&`/`^` mark the
 /// named place a call writes or takes, receiver or argument alike
 /// (`&buf.append(x)`, `^buf.seal()`, `edit(&buf)`).
 pub const SIGIL_MOVE: &str = "^";
@@ -394,15 +402,72 @@ pub fn access_label(sigil: &str) -> &'static str {
 pub const PARAM_ZONE_POSITIONAL_ONLY: &str = "/";
 pub const PARAM_ZONE_LABEL_ONLY: &str = "*";
 
-/// D-SHAPE-COPY1=A (supersedes D-CAP2/S4): the one copy spelling — `~x`
-/// produces an owned, independent value. A temporary (no named binding
-/// survives to be used-after), so it never needs `^` and never trips E0209.
-/// `.clone()` is not user-typable Jet syntax (I8 — one way to mean it).
-pub const SIGIL_COPY: &str = "~";
+/// D-COPY-WORD1=A (amends D-SHAPE-COPY1=A's spelling): the one copy spelling
+/// is the compiler-owned method `x.copy()`, producing an owned, independent
+/// value. The parser reads `receiver.copy()` as an ordinary method call; sema
+/// decides by name resolution: on a value receiver (no arguments) it is the
+/// built-in copy, resolved before ordinary method lookup so no type can
+/// redefine it, and on a type receiver (`Recipe.copy()`) it stays an
+/// associated call. A temporary (no named binding survives to be used-after),
+/// so it never needs `^` and never trips E0209. `.clone()` is not
+/// user-typable Jet syntax (I8).
+pub const METHOD_COPY: &str = "copy";
+
+/// The copy call spelled on `operand`, for diagnostics and fix-its.
+pub fn copy_call(operand: &str) -> String {
+    format!("{operand}.{METHOD_COPY}()")
+}
+
+/// The copy call for an authored operand's source text: `x.copy()` when the
+/// text is one postfix chain (a name, literal, or bracketed head followed by
+/// `.member`, calls, indexes, `?.member`), otherwise `(a + b).copy()` /
+/// `(x?).copy()` so the call applies to the whole operand.
+pub fn copy_call_source(text: &str) -> String {
+    if is_postfix_operand(text) {
+        copy_call(text)
+    } else {
+        copy_call(&format!("({text})"))
+    }
+}
+
+fn is_postfix_operand(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut in_str = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            match c {
+                b'\\' => i += 1,
+                b'"' => in_str = false,
+                _ => {}
+            }
+        } else {
+            match c {
+                b'"' => in_str = true,
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+                _ if depth > 0 => {}
+                b'.' => {}
+                b'?' if bytes.get(i + 1) == Some(&b'.') => {}
+                c if c.is_ascii_alphanumeric() || c == b'_' => {}
+                _ => return false,
+            }
+        }
+        i += 1;
+    }
+    depth == 0 && !in_str && !text.is_empty()
+}
+
+/// D-COPY-WORD1=A: the retired prefix copy sigil (was D-SHAPE-COPY1=A's
+/// spelling). Recognized only for the E0941 teaching error whose Safe fix
+/// rewrites `~x` to `x.copy()`.
+pub const SIGIL_COPY_RETIRED: &str = "~";
 
 /// D-SHAPE-COPY1=A: the retired `copy` word (was D-CAP2/S4's one copy
 /// spelling). Recognized only for the E0991 teaching error that points at
-/// the `~` sigil.
+/// `x.copy()` (D-COPY-WORD1=A).
 pub const KW_COPY: &str = "copy";
 
 /// S10 (M2) → D-MEM1: the retired write keyword. Recognized only for the E0056
@@ -477,7 +542,7 @@ pub const EXTERNAL_METHOD_CONNECTOR: &str = ".";
 pub const EXTERNAL_METHOD_CONNECTOR_RETIRED: &str = "~~";
 
 /// D-STRUCT-POLICY1=A (ratified 2026-08-19): user-declared policy settings use
-/// `pub policy name(...) { wrap(call) { ... } }`.
+/// `policy name(...) { wrap(call) { ... } }`, public like every declaration.
 pub const KW_POLICY: &str = "policy";
 /// D-STRUCT-POLICY1=A: the checked body that wraps the declared callable.
 pub const KW_WRAP: &str = "wrap";
@@ -662,14 +727,13 @@ impl TypedHeadKind {
         }
     }
 
-    /// The Core module whose same-named record IS this built-in value: only
-    /// `core.net.url`'s `URL` declares itself the built-in carrier. Every other
-    /// Core record sharing a head's leaf (`core.files.path`'s `Path`,
-    /// `core.time`'s civil `DateTime`) is a different type.
+    /// The Core module whose same-named source record is this built-in value.
+    /// A different module's same-named record retains its own nominal identity.
     pub const fn carrier_record_module(self) -> Option<&'static str> {
         match self {
             Self::URL => Some("core.net.url"),
-            Self::Path | Self::DateTime | Self::SQL | Self::HTML | Self::Sh => None,
+            Self::DateTime => Some("core.time"),
+            Self::Path | Self::SQL | Self::HTML | Self::Sh => None,
         }
     }
 }
@@ -871,6 +935,11 @@ pub const CORE_MEM_GATE_TIERS: &[(&str, CoreMemGate)] = &[
     (MEM_FROM_ADDR, CoreMemGate::Audit),
     (MEM_VOLATILE_READ, CoreMemGate::Audit),
     (MEM_VOLATILE_WRITE, CoreMemGate::Audit),
+    ("__string_data", CoreMemGate::Audit),
+    ("__string_byte_len", CoreMemGate::Audit),
+    ("__bytes_pack", CoreMemGate::Audit),
+    ("__bytes_free", CoreMemGate::Audit),
+    ("__bytes_unpack", CoreMemGate::Audit),
     (MEM_ADDRESS_OF, CoreMemGate::Import),
     (MEM_PIN, CoreMemGate::Import),
     (TYPE_PIN, CoreMemGate::Import),
@@ -994,8 +1063,6 @@ pub const RNG_TYPE: &str = "RNG";
 /// world carrying the controlled clock, scheduler, external-input providers,
 /// and seeded test randomness.
 pub const DETERMINISTIC_WORLD_TYPE: &str = "DeterministicWorld";
-/// D-TESTDATA1: deterministic locale-aware fake-data capability.
-pub const FAKE_TYPE: &str = "Fake";
 
 /// D-SHAPE-DURATION1=A / D-SHAPE-DURATIONCONVERT1=A (ratified 2026-07-14) /
 /// D-TYPE2-TIME1=A (ratified 2026-08-06): runtime numbers become checked

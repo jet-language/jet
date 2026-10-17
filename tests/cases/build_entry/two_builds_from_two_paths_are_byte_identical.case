@@ -1,0 +1,20 @@
+# Port of build_entry.rs::two_builds_from_two_paths_are_byte_identical.
+# PENDING-GRAMMAR: filtered/projected JSON, count/prefix/relational operations.
+# The duplicate env assignment makes the build store run-cache; original log store remains store.
+fixture: fixtures/determinism
+step: jet build main.jet
+cwd: {work}/left
+env: JET_STORE_DIR={work}/left/run-cache
+step: jet build main.jet
+cwd: {work}/right
+env: JET_STORE_DIR={work}/right/run-cache
+file: left/.jet/build/main == right/.jet/build/main
+# Byte equality also entails the original SHA256 equality assertion.
+step leftlog: jet inspect explain-build main.jet --json
+cwd: {work}/left
+env: JET_STORE_DIR={work}/left/store
+json: stdout doc $.nodes #>= 1
+step: jet inspect explain-build main.jet --json
+cwd: {work}/right
+env: JET_STORE_DIR={work}/right/store
+json: stdout doc $.nodes[*].{kind,key,subject,why_ran} == leftlog

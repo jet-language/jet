@@ -1,0 +1,216 @@
+use jet_foundation.[
+    MIRBinaryOp, MIRDropKind, MIRFunction,
+    MIROperation, MIRPreludeABI, MIRPreludeFamily, MIRProgram,
+    MIRTerminator, MIRTypeDef, MIRTypeKind, MIRValueID, mir_type_from_kind,
+    MIRAccess, MIRCallArg, MIRCallee, MIRForeign, MIRForeignID,
+    MIRForeignABI, MIRForeignLanguage, MIRType, MIRTypeDefKind,
+    mir_copy_ownership, mir_field_id,
+    MIRField, MIRFunctionID,
+]
+
+// expect-stdout value-builtins: "true\nfalse\ntrue\nfalse\ntrue\nSome(1)\nNone\nNone\nSome(1)\ntrue\nSome(1)\nNone\ntrue\n"
+// expect-runtime-only value-builtins: native exact/text equality and List/Float value carriers
+fn fx_value_builtins() -> MIRProgram Never! {
+    b := fx_builder()
+    left :: fx_strings_literal(&b, "same")
+    right :: fx_strings_literal(&b, "same")
+    other :: fx_strings_literal(&b, "other")
+    fx_builtin_print_method(&b, "eq", left, [MIRValueID]{right}, fx_bool())
+    fx_builtin_print_method(&b, "eq", left, [MIRValueID]{other}, fx_bool())
+    one :: fx_int_const(&b, 1)
+    two :: fx_int_const(&b, 2)
+    three :: fx_int_const(&b, 3)
+    absent :: fx_int_const(&b, 4)
+    list_ty :: fx_list_type(fx_int())
+    option_int :: mir_type_from_kind(MIRTypeKind.Option{inner: fx_int()})
+    list :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{one, two, three}, trait_coercion: None})
+    fx_builtin_print_method(&b, "contains", list, [MIRValueID]{two}, fx_bool())
+    fx_builtin_print_method(&b, "contains", list, [MIRValueID]{absent}, fx_bool())
+    text_list :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{left, other}, trait_coercion: None})
+    fx_builtin_print_method(&b, "contains", text_list, [MIRValueID]{right}, fx_bool())
+    hit :: fx_list_method(&b, "list_binary_search", list, None, [MIRValueID]{two}, option_int, true)
+    miss :: fx_list_method(&b, "list_binary_search", list, None, [MIRValueID]{absent}, option_int, true)
+    fx_print(&b, hit)
+    fx_print(&b, miss)
+    fx_do(&b, MIROperation.Drop{value: hit, kind: MIRDropKind.Value})
+    fx_do(&b, MIROperation.Drop{value: miss, kind: MIRDropKind.Value})
+    empty :: fx_owned(&b, list_ty, MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    empty_hit :: fx_list_method(&b, "list_binary_search", empty, None, [MIRValueID]{one}, option_int, true)
+    fx_print(&b, empty_hit)
+    fx_do(&b, MIROperation.Drop{value: empty_hit, kind: MIRDropKind.Value})
+    a :: fx_strings_literal(&b, "a")
+    z :: fx_strings_literal(&b, "z")
+    ordered_text :: fx_owned(&b, fx_list_type(fx_string()), MIROperation.BuildList{values: [MIRValueID]{a, z}, trait_coercion: None})
+    text_hit :: fx_list_method(&b, "list_binary_search", ordered_text, None, [MIRValueID]{z}, option_int, true)
+    fx_print(&b, text_hit)
+    fx_do(&b, MIROperation.Drop{value: text_hit, kind: MIRDropKind.Value})
+    float_ty :: mir_type_from_kind(MIRTypeKind.Float)
+    option_float :: mir_type_from_kind(MIRTypeKind.Option{inner: float_ty})
+    zero_left :: fx_numeric_float(&b, 0.0)
+    zero_right :: fx_numeric_float(&b, 0.0)
+    nan :: fx_numeric_float_binary(&b, MIRBinaryOp.Div, zero_left, zero_right)
+    float_one :: fx_numeric_float(&b, 1.0)
+    float_three :: fx_numeric_float(&b, 3.0)
+    floats :: fx_owned(&b, fx_list_type(float_ty), MIROperation.BuildList{values: [MIRValueID]{nan, float_one, float_three}, trait_coercion: None})
+    max :: fx_list_method(&b, "max_float", floats, None, [MIRValueID]{}, option_float, true)
+    max_value :: fx_copy(&b, float_ty, MIROperation.OptionValue{subject: max})
+    maximum_nan :: fx_compare(&b, MIRBinaryOp.Ne, max_value, max_value)
+    fx_print(&b, maximum_nan)
+    min :: fx_list_method(&b, "min_float", floats, None, [MIRValueID]{}, option_float, true)
+    fx_print(&b, min)
+    empty_float :: fx_owned(&b, fx_list_type(float_ty), MIROperation.BuildList{values: [MIRValueID]{}, trait_coercion: None})
+    empty_max :: fx_list_method(&b, "max_float", empty_float, None, [MIRValueID]{}, option_float, true)
+    fx_print(&b, empty_max)
+    // This source has a different ordinary left-fold result (7) from the
+    // fixed eight-lane tree (6): it witnesses the association contract.
+    numbers := [MIRValueID]{}
+    loop value in ([Float]{1e16, 1.0, -1e16, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0}) -> &numbers.push(fx_numeric_float(&b, value))
+    reduction :: fx_owned(&b, fx_list_type(float_ty), MIROperation.BuildList{values: numbers, trait_coercion: None})
+    total :: fx_list_method(&b, "sum_fixed_f64", reduction, None, [MIRValueID]{}, float_ty, false)
+    expected_total :: fx_numeric_float(&b, 6.0)
+    tree_equal :: fx_compare(&b, MIRBinaryOp.Eq, total, expected_total)
+    fx_print(&b, tree_equal)
+    loop owned in ([MIRValueID]{list, empty, text_list, right, ordered_text, floats, max, min, empty_float, empty_max, reduction}) -> fx_do(&b, MIROperation.Drop{value: owned, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    members :: [String]{"eq", "contains", "list_binary_search", "max_float", "min_float", "sum_fixed_f64"}
+    symbols :: [String]{"jet_eq", "jet_list_contains", "jet_list_binary_search", "jet_list_max_float", "jet_list_min_float", "jet_list_sum_fixed_f64"}
+    loop (index, member) in members -> &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", member, symbols[index], if index < 3 -> 2 else -> 1, MIRPreludeABI.Value))
+    p
+}
+
+fn fx_builtin_print_method(b: &FxBuilder, member: String, receiver: MIRValueID, args: [MIRValueID], result_ty: MIRType) Never! {
+    result :: fx_list_method(&b, member, receiver, None, args, result_ty, false)
+    fx_print(&b, result)
+}
+
+fn fx_capacity_raw_type() -> MIRType Never! { mir_type_from_kind(MIRTypeKind.IntN{signed: true, bits: 64}) }
+
+fn fx_capacity_raw(b: &FxBuilder, value: Int) -> MIRValueID Never! {
+    fx_copy(&b, fx_capacity_raw_type(), MIROperation.Constant{value: .Int{value: value, width: None, spelling: None}})
+}
+
+fn fx_capacity_foreign(id: U64, symbol: String, types: [MIRType], result: MIRType?) -> MIRForeign Never! {
+    b := fx_builder()
+    loop (index, ty) in types -> fx_param(&b, "arg{index}", ty, mir_copy_ownership()).drop("foreign signature only")
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    row :: fx_function(symbol, b, result ?? fx_unit())
+    MIRForeign{id: MIRForeignID{value: id}, module_id: row.module_id, key: row.key, module_name: row.module_name, name: row.name, span: row.span, symbol: symbol, path: "", params: row.params, raw_scalar_abi: true, bridge_eligible: false, return_type: result, foreign_abi: MIRForeignABI.C, foreign_language: MIRForeignLanguage.C, target_applicability: row.target_applicability, effects: row.effects, callback_transport: None, callback_plan_digest: None, callback_identity: None, link: None, callback: None, handle: None, close_function: None, close_foreign: None, undo_function: None, unsafe_gate: None}
+}
+
+fn fx_capacity_provider_call(b: &FxBuilder, id: U64, args: [MIRValueID], result: MIRType) -> MIRValueID Never! {
+    operands :: loop arg in args -> fx_arg(arg, MIRAccess.Read)
+    fx_copy(&b, result, MIROperation.Call{callee: MIRCallee.Foreign{id: MIRForeignID{value: id}}, args: operands, type_args: [MIRType]{}})
+}
+
+fn fx_try_capacity_program(mode: String) -> MIRProgram Never! {
+    b := fx_builder()
+    raw :: fx_capacity_raw_type()
+    list_ty :: fx_list_type(if mode == "unit" || mode == "unit-fault" -> fx_unit() else -> fx_int())
+    error_ty :: fx_named("AllocError")
+    result_ty :: mir_type_from_kind(MIRTypeKind.Result{ok: list_ty, err: error_ty})
+    owner :: fx_copy(&b, fx_unit(), MIROperation.Constant{value: .Unit})
+    if mode == "fault" || mode == "unit-fault" {
+        active :: fx_copy(&b, fx_bool(), MIROperation.Constant{value: .Bool{value: true}})
+        fail_ordinal :: fx_capacity_raw(&b, 1)
+        fx_capacity_provider_call(&b, U64{9100}, [MIRValueID]{fail_ordinal, active}, fx_unit()).drop("arm fault")
+    }
+    if mode == "cap" {
+        counting :: fx_capacity_raw(&b, 1)
+        cap_bytes :: fx_capacity_raw(&b, 8192)
+        fx_capacity_provider_call(&b, U64{9103}, [MIRValueID]{counting, cap_bytes}, fx_unit()).drop("counting cap above carrier metadata")
+    }
+    capacities :: if mode == "normal" -> [Int]{4, 0, -1, 2305843009213693952} else if mode == "fault" -> [Int]{4} else if mode == "unit" -> [Int]{0} else if mode == "unit-fault" -> [Int]{5} else -> [Int]{400000000}
+    loop (index, capacity) in capacities {
+        cap_value :: fx_int_const(&b, capacity)
+        outcome :: fx_list_method(&b, "list_try_with_capacity", owner, None, [MIRValueID]{cap_value}, result_ty, true)
+        succeeded :: fx_copy(&b, fx_bool(), MIROperation.ResultIsOk{subject: outcome})
+        fx_print(&b, succeeded)
+        expected_success :: (mode == "normal" && index < 2) || mode == "unit"
+        if expected_success {
+            list :: fx_value(&b, list_ty, fx_borrow(), MIROperation.ResultValue{subject: outcome, ok: true})
+            if mode == "normal" && index == 0 {
+                nine :: fx_int_const(&b, 9)
+                fx_list_method(&b, "list_push", list, None, [MIRValueID]{nine}, fx_unit(), false).drop("push into reserved buffer")
+                fx_builtin_print_method(&b, "len", list, [MIRValueID]{}, fx_int())
+                at :: fx_int_const(&b, 0)
+                first :: fx_list_index(&b, list, at, fx_int(), false)
+                fx_print(&b, first)
+            } else {
+                fx_builtin_print_method(&b, "len", list, [MIRValueID]{}, fx_int())
+            }
+        } else {
+            error :: fx_value(&b, error_ty, fx_borrow(), MIROperation.ResultValue{subject: outcome, ok: false})
+            requested :: fx_copy(&b, fx_int(), MIROperation.Field{base: error, field: mir_field_id("AllocError.requested_bytes")})
+            allocator :: fx_value(&b, fx_string(), fx_borrow(), MIROperation.Field{base: error, field: mir_field_id("AllocError.allocator")})
+            fx_print(&b, requested)
+            fx_print(&b, allocator)
+        }
+        fx_do(&b, MIROperation.Drop{value: outcome, kind: MIRDropKind.Value})
+    }
+    if mode == "fault" || mode == "unit-fault" {
+        count_index :: fx_capacity_raw(&b, 0)
+        count :: fx_capacity_provider_call(&b, U64{9101}, [MIRValueID]{count_index}, raw)
+        fx_print(&b, count)
+        fx_capacity_provider_call(&b, U64{9102}, [MIRValueID]{}, fx_unit()).drop("retire fault state")
+    }
+    if mode == "cap" {
+        system_mode :: fx_capacity_raw(&b, 0)
+        no_cap :: fx_capacity_raw(&b, 0)
+        fx_capacity_provider_call(&b, U64{9104}, [MIRValueID]{system_mode, no_cap}, fx_unit()).drop("restore isolated fixture system allocator")
+    }
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_list_program(b)
+    p.types = [MIRTypeDef]{fx_type_def("AllocError", MIRTypeDefKind.Struct{fields: [MIRField]{fx_field("AllocError", "requested_bytes", fx_int()), fx_field("AllocError", "allocator", fx_string())}, methods: [MIRFunctionID]{}})}
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "list_try_with_capacity", "jet_list_try_with_capacity", 2, MIRPreludeABI.Value))
+    p.foreign = [MIRForeign]{
+        fx_capacity_foreign(U64{9100}, "jet_rt_fault_allocation_arm", [MIRType]{raw, fx_bool()}, None),
+        fx_capacity_foreign(U64{9101}, "jet_rt_fault_allocation_fact", [MIRType]{raw}, Val(raw)),
+        fx_capacity_foreign(U64{9102}, "jet_rt_fault_allocation_clear", [MIRType]{}, None),
+        fx_capacity_foreign(U64{9103}, "jet_rt_program_allocator_configure", [MIRType]{raw, raw}, None),
+        fx_capacity_foreign(U64{9104}, "jet_rt_program_allocator_restore", [MIRType]{raw, raw}, None),
+    }
+    p
+}
+
+// expect-stdout try-capacity: "true\n1\n9\ntrue\n0\nfalse\n0\nList\nfalse\n9223372036854775807\nList\n"
+// expect-runtime-only try-capacity: fallible allocation and canonical AllocError record
+fn fx_try_capacity() -> MIRProgram Never! { fx_try_capacity_program("normal") }
+
+// expect-stdout try-capacity-fault: "false\n32\nList\n1\n"
+// expect-runtime-only try-capacity-fault: TLS fault rail counts only the try
+fn fx_try_capacity_fault() -> MIRProgram Never! { fx_try_capacity_program("fault") }
+
+// expect-stdout try-capacity-cap: "false\n3200000000\nList\n"
+// expect-runtime-only try-capacity-cap: configured cap refuses the buffer, not carrier metadata
+fn fx_try_capacity_cap() -> MIRProgram Never! { fx_try_capacity_program("cap") }
+
+// expect-stdout try-capacity-unit: "true\n0\n"
+// expect-runtime-only try-capacity-unit: zero-sized elements never allocate a buffer
+fn fx_try_capacity_unit() -> MIRProgram Never! { fx_try_capacity_program("unit") }
+
+// expect-stdout try-capacity-unit-fault: "false\n5\nList\n1\n"
+// expect-runtime-only try-capacity-unit-fault: zero-sized capacity consumes one fault probe
+fn fx_try_capacity_unit_fault() -> MIRProgram Never! { fx_try_capacity_program("unit-fault") }
+
+fn fx_int_radix_program(radix: Int) -> MIRProgram Never! {
+    b := fx_builder()
+    value :: fx_int_const(&b, -31)
+    base :: fx_int_const(&b, radix)
+    text :: fx_list_method(&b, "int_to_radix", value, None, [MIRValueID]{base}, fx_string(), true)
+    fx_print(&b, text)
+    fx_do(&b, MIROperation.Drop{value: text, kind: MIRDropKind.Value})
+    fx_block(&b, 0, MIRTerminator.Return{value: None})
+    p := fx_program([MIRFunction]{fx_function("run", b, fx_unit())}, [MIRTypeDef]{})
+    &p.prelude_calls.push(fx_prelude(MIRPreludeFamily.BuiltinMethod, "core.builtin", "int_to_radix", "jet_std::jet_int_to_radix", 2, MIRPreludeABI.Value))
+    p
+}
+
+// expect-stdout int-radix: "-1f\n"
+// expect-runtime-only int-radix: exact-Int radix kernel returns owned Text
+fn fx_int_radix() -> MIRProgram Never! { fx_int_radix_program(16) }
+
+// expect-stdout int-radix-invalid: ""
+// expect-exit int-radix-invalid: 70
+// expect-runtime-only int-radix-invalid: kernel Err is the caller's arithmetic stop
+fn fx_int_radix_invalid() -> MIRProgram Never! { fx_int_radix_program(1) }

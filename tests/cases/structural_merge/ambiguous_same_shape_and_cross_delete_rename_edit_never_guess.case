@@ -1,0 +1,11 @@
+# PORT tests/structural_merge.rs::ambiguous_same_shape_and_cross_delete_rename_edit_never_guess
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four). No runtime/reference snapshot claim.
+fixture: ambiguous_same_shape_and_cross_delete_rename_edit_never_guess.fixture
+step: jet merge --structural {work}/base.jet {work}/ours.jet {work}/theirs.jet --out {work}/must-not-exist.jet --json
+exit: 1
+file: must-not-exist.jet absent
+stderr: ~ "ambiguous_identity" # Original contains predicate.
+step: jet merge --structural {work}/delete_base.jet {work}/deleted.jet {work}/edited.jet --out {work}/delete-edit-must-not-exist.jet --json
+exit: 1
+file: delete-edit-must-not-exist.jet absent
+stderr: ~ "delete_edit" # Original contains predicate.

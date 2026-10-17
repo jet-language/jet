@@ -1,0 +1,11 @@
+# Port of tests/cli_parts/core.rs:63-85; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+# Original configured policy file deliberately missing. Snapshot scrub inversion only.
+fixture: fixtures/org_missing
+step: jet check main.jet
+env: JET_ORG_UNSAFE_POLICY={work}/org-policy.jet
+exit: 1
+stderr: = org-missing.stderr
+stderr: ~ "E3109" # original predicate
+stderr: ~ "{work}/org-policy.jet" # original predicate

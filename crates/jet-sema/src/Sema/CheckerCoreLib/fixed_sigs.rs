@@ -1,4 +1,4 @@
-use super::alloc_ptrs::{db_error_ty, db_row_ty, io_error_ty, result_ty};
+use super::alloc_ptrs::{db_error_ty, io_error_ty, result_ty};
 use super::core_types::{encoding_error_ty, json_ty, u8_ty, unit_ty};
 use crate::Syntax;
 use crate::AST::{AccessConvention, FunctionCallMetadata, Type};
@@ -15,18 +15,17 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
         ("core.prelude", "keep")
             // D-TEST-HISTORY1=A: the operation type is explicit while the
             // callback/result shape is resolved by the Core call arm.
-            | ("core.testing", "histories")
+            | ("core.testing", "histories" | "__histories_with_provenance")
             | ("core.math", "abs")
             | ("core.math", "min")
             | ("core.math", "max")
-            | ("core.text.fmt", "pretty" | "decimal" | "grouped")
+            | ("core.text.fmt", "pretty" | "decimal")
             | ("core.math", "clamp")
-            // D-FLOATW1: sqrt/floor/ceil/pow are width-generic (Float→Float, F32→F32);
+            // D-FLOATW1: sqrt/floor/ceil are width-generic (Float→Float, F32→F32);
             // their return type is arg-type-dependent, so they use resolved_ret.
             | ("core.math", "sqrt")
             | ("core.math", "floor")
             | ("core.math", "ceil")
-            | ("core.math", "pow")
             | ("core.math", "sin")
             | ("core.math", "cos")
             | ("core.math", "tan")
@@ -59,7 +58,6 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "saturating_add")
             | ("core.math", "saturating_sub")
             | ("core.math", "saturating_mul")
-            | ("core.math", "int_pow")
             | ("core.math", "gcd")
             | ("core.math", "lcm")
             | ("core.math", "acosh")
@@ -96,7 +94,6 @@ pub fn is_polymorphic_core_special(module: &str, name: &str) -> bool {
             | ("core.math", "sin_cos")
             | ("core.math", "binomial")
             | ("core.math", "cmp")
-            | ("core.math", "copy")
             | ("core.math", "cot")
             | ("core.math", "div_mod")
             | ("core.math", "div_rem")
@@ -245,6 +242,13 @@ pub fn core_call_semantic_signature(
         .map(|(params, ret)| (params, ret.unwrap_or_else(unit_ty)))
 }
 
+/// The result shape a Core call's native kernel returns: the registered
+/// signature before tuple canonicalization, so a labeled tuple keeps the
+/// kernel's declared slot order (the checked type sorts it by label).
+pub fn core_call_native_return(module: &str, name: &str) -> Option<Type> {
+    core_fixed_sig_raw(module, name)?.1
+}
+
 /// Complete the signature projection for polymorphic Core spellings whose
 /// ordinary Canvas/default-call shape is still known to sema. The row and
 /// fixed-signature paths remain first; this is only the resolved surface
@@ -266,19 +270,19 @@ pub fn core_call_surface_signature(
         ))
     };
     match (module, name) {
-        ("core.math", "abs") => Some((vec![(read, int.clone())], Some(int))),
+        ("core.math", "abs" | "sign") => Some((vec![(read, int.clone())], Some(int))),
         (
             "core.math",
             "sqrt" | "floor" | "ceil" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "sinh"
             | "cosh" | "tanh" | "exp" | "ln" | "log2" | "log10" | "trunc" | "truncate" | "fract"
-            | "sign" | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians"
+            | "real" | "imag" | "conj" | "float32" | "float64" | "degrees" | "radians"
             | "fabs" | "expm1",
         ) => Some((vec![(read, float.clone())], Some(float))),
         ("core.math", "round") => Some((vec![(read, float)], Some(int))),
-        ("core.math", "int_pow" | "gcd" | "lcm") => {
+        ("core.math", "gcd" | "lcm") => {
             Some((vec![(read, int.clone()), (read, int.clone())], Some(int)))
         }
-        ("core.math", "pow" | "atan2" | "hypot") => Some((
+        ("core.math", "atan2" | "hypot") => Some((
             vec![(read, float.clone()), (read, float.clone())],
             Some(Type::Float),
         )),
@@ -396,6 +400,17 @@ fn web_fn(param: Type, ret: Type) -> Type {
     }
 }
 
+pub(super) fn web_nullary_callback() -> Type {
+    Type::Fn {
+        params: Vec::new(),
+        ret: Some(Box::new(unit_ty())),
+        effect_bound: None,
+        return_view_provenance: None,
+        param_contract: None,
+        call_metadata: None,
+    }
+}
+
 fn web_apply(name: &str, arg: Type) -> Type {
     Type::Apply {
         name: name.to_string(),
@@ -413,6 +428,7 @@ fn web_fixed_sig(
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
     let read = AccessConvention::Read;
+    let moved = AccessConvention::Move;
     let string = Type::String;
     let int = Type::Int;
     let bool_ = Type::Bool;
@@ -437,7 +453,6 @@ fn web_fixed_sig(
     let query_mutation = web_fn(string.clone(), string.clone());
     let query_replay = web_fn(string.clone(), unit_ty());
     let form_action_error = web_named("WebFormActionError");
-    let signal = string.clone();
     let form = web_named("WebForm");
     let form_input = web_named("WebFormInput");
     let form_field = web_named("WebFormFieldSpec");
@@ -452,6 +467,117 @@ fn web_fixed_sig(
     let form_submission = web_named("WebFormTypedSubmission");
     let form_field_state = web_named("WebFormFieldState");
     match (module, name) {
+        ("core.web.browser", "__report_options") => Some((vec![(read, web_named("BrowserTestReport"))],
+            Some(Type::Tuple(vec![("reporter".into(), Box::new(string.clone())), ("ui".into(), Box::new(bool_.clone()))])))),
+        ("core.web.browser", "__report_json" | "__report_html" | "__report_text") =>
+            Some((vec![(read, web_named("BrowserTestReport"))], Some(string.clone()))),
+        ("core.web.browser", "__write_report_bytes") => Some((vec![(read, string.clone()), (read, web_list(u8_ty()))],
+            Some(web_result_error(unit_ty(), "BrowserError")))),
+        ("core.web.browser", "__server_start") => Some((vec![(read, web_named("BrowserTestConfig"))],
+            Some(web_result_error(web_named("BrowserTestServer"), "BrowserError")))),
+        ("core.web.browser", "__server_stop") => Some((vec![(AccessConvention::Write, web_named("BrowserTestServer"))], None)),
+        ("core.web", "__openapi_inputs") => Some((vec![(read, http_router.clone())],
+            Some(result_ty(web_list(web_named("OpenApiRouteInput")), string.clone())))),
+        ("core.web", "__openapi_render") => Some((vec![(moved, web_list(web_named("OpenApiRouteInput"))),
+            (moved, string.clone()), (moved, string.clone()), (moved, web_list(web_named("OpenApiServer")))],
+            Some(result_ty(string.clone(), string.clone())))),
+        ("core.web", "__contract_stop") => Some((vec![(read, string.clone())], Some(web_named("Never")))),
+        ("core.web", "__live_stats_snapshot") => Some((vec![], Some(Type::Option(Box::new(Type::Tuple(vec![
+            ("queries".into(), Box::new(int.clone())), ("active".into(), Box::new(int.clone())),
+            ("refreshing".into(), Box::new(int.clone())),
+            ("evictions".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+            ("invalidations".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+            ("ws_pushes".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+        ])))))),
+        ("core.web.store", "__transact") => Some((vec![(read, web_apply("WebStore", t.clone())),
+            (moved, string.clone()), (moved, web_list(string.clone())), (moved, web_fn(t.clone(), unit_ty()))],
+            Some(web_apply("WebStoreTransaction", t.clone())))),
+        ("core.web.store", "__facts_snapshot") => Some((vec![(read, web_apply("WebStore", t.clone()))],
+            Some(Type::Tuple(vec![
+                ("generation".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+                ("cursor".into(), Box::new(Type::IntN { signed: false, bits: 64 })),
+                ("history_length".into(), Box::new(int.clone())), ("history_limit".into(), Box::new(int.clone())),
+                ("event_length".into(), Box::new(int.clone())), ("history_enabled".into(), Box::new(bool_.clone())),
+            ])))),
+        ("core.web.table", "__columns") => Some((vec![(read, table.clone())], Some(web_list(table_column.clone())))),
+        ("core.web.table", "__replace_columns") => Some((vec![(read, table.clone()), (moved, web_list(table_column.clone()))], Some(table.clone()))),
+        ("core.web.table", "__state") => Some((vec![(read, table.clone())], Some(table_state.clone()))),
+        ("core.web.table", "__set_state") => Some((vec![(read, table.clone()), (moved, table_state.clone())], None)),
+        ("core.web.table", "__alias") => Some((vec![(read, table.clone())], Some(table.clone()))),
+        ("core.web.table", "__has_loader") => Some((vec![(read, table.clone())], Some(bool_.clone()))),
+        ("core.web.table", "__invoke_loader") => Some((vec![(read, table.clone()), (moved, table_state.clone())],
+            Some(result_ty(table_page.clone(), string.clone())))),
+        ("core.web.table", "__generation") => Some((vec![(read, table.clone()), (moved, bool_.clone())],
+            Some(Type::IntN { signed: false, bits: 64 }))),
+        ("core.web.table", "__query_facts") => Some((vec![(read, table_state.clone())], Some(Type::Tuple(vec![
+            ("index".into(), Box::new(int.clone())), ("size".into(), Box::new(int.clone())),
+            ("server".into(), Box::new(bool_.clone())),
+            ("sort".into(), Box::new(Type::Option(Box::new(Type::Tuple(vec![
+                ("column".into(), Box::new(string.clone())), ("descending".into(), Box::new(bool_.clone()))]))))),
+            ("filter".into(), Box::new(Type::Option(Box::new(Type::Tuple(vec![
+                ("column".into(), Box::new(string.clone())), ("value".into(), Box::new(string.clone()))]))))),
+        ])))),
+        ("core.web.table", "__state_equal") => Some((vec![(read, table_state.clone()), (read, table_state.clone())], Some(bool_.clone()))),
+        ("core.web.table", "__page_facts") => Some((vec![(read, table_page.clone())], Some(Type::Tuple(
+            ["total", "index", "size", "count", "rows", "keys"].into_iter()
+                .map(|name| (name.into(), Box::new(int.clone()))).collect())))),
+        ("core.web.table", "__commit_keys") => Some((vec![(read, table.clone()), (read, table_page.clone()),
+            (moved, Type::Fn {
+                params: vec![int.clone(), web_list(string.clone())],
+                ret: Some(Box::new(result_ty(unit_ty(), string.clone()))),
+                effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None,
+            })], Some(result_ty(unit_ty(), string.clone())))),
+        ("core.web.table", "__loading_store") => Some((vec![(read, table.clone()), (moved, bool_.clone())], None)),
+        ("core.web.table", "__error_store") => Some((vec![(read, table.clone()), (moved, string.clone())], None)),
+        ("core.web.table", "__page_store") => Some((vec![(read, table.clone()),
+            (moved, Type::Option(Box::new(table_page.clone())))], None)),
+        ("core.web.table", "__state_store") => Some((vec![(read, table.clone()), (moved, table_state.clone())], None)),
+        ("core.web.table", "__has_key") => Some((vec![(read, table.clone())], Some(bool_.clone()))),
+        ("core.web.table", "__page_accessor_keys") => Some((vec![(read, table.clone()), (moved, table_page.clone())], Some(table_page.clone()))),
+        ("core.web.table", "__page_keys") => Some((vec![(read, table_page.clone())], Some(web_list(string.clone())))),
+        ("core.web.table", "__page_replace_keys") => Some((vec![(moved, table_page.clone()), (moved, web_list(string.clone()))], Some(table_page.clone()))),
+        ("core.web.table", "__column_info") => Some((vec![(read, table_column.clone())],
+            Some(Type::Tuple(vec![("name".into(), Box::new(string.clone())), ("cell_type".into(), Box::new(string.clone()))])))),
+        ("core.web.table", "__cell") => Some((vec![(read, table_column.clone()), (read, t.clone())], Some(string.clone()))),
+        ("core.web.table", "__rows") => Some((vec![(read, table.clone())], Some(web_list(t.clone())))),
+        ("core.web.table", "__row_key") => Some((vec![(read, table.clone()), (read, t.clone())], Some(string.clone()))),
+        ("core.web.table", "__make_page") => Some((vec![(moved, web_list(t.clone())), (moved, web_list(string.clone())),
+            (moved, int.clone()), (moved, int.clone()), (moved, int.clone()), (moved, int.clone())], Some(table_page.clone()))),
+
+        ("core.devtools", "__publish_payload") => Some((vec![(moved, string.clone()), (moved, string.clone()),
+            (moved, string.clone()), (moved, string.clone()), (moved, t.clone())], None)),
+        ("core.email", "__address_parts") => Some((vec![(moved, Type::Option(Box::new(string.clone()))),
+            (moved, string.clone())], Some(web_named("Address")))),
+        ("core.email", "__attachment_parts") => Some((vec![(moved, string.clone()),
+            (moved, string.clone()), (moved, web_list(u8_ty()))], Some(web_named("Attachment")))),
+        ("core.email", "__envelope_parts") => Some((vec![(moved, web_named("Address")),
+            (moved, web_list(web_named("Address")))], Some(web_named("Envelope")))),
+        ("core.email", "__address_view") => Some((vec![(read, web_named("Address"))], Some(web_named("__EmailAddressView")))),
+        ("core.email", "__attachment_view") => Some((vec![(read, web_named("Attachment"))], Some(web_named("__EmailAttachmentView")))),
+        ("core.email", "__message_view") => Some((vec![(read, web_named("Message"))], Some(web_named("__EmailMessageView")))),
+        ("core.email", "__message_parts") => Some((vec![(moved, web_named("Address")),
+            (moved, web_list(web_named("Address"))), (moved, web_list(web_named("Address"))),
+            (moved, string.clone()), (moved, string.clone()), (moved, string.clone()),
+            (moved, web_list(web_named("Attachment"))), (moved, web_named("Envelope")),
+            (moved, int.clone())], Some(web_named("Message")))),
+        ("core.mod", "__supported") => Some((vec![], Some(bool_.clone()))),
+        ("core.mod", "__os") => Some((vec![], Some(string.clone()))),
+        ("core.mod", "__read_context") => Some((vec![(read, string.clone()), (read, web_named("ModGrant"))],
+            Some(result_ty(int.clone(), string.clone())))),
+        ("core.mod", "__parse_context" | "__check_context" | "__stage_context" | "__open_context") =>
+            Some((vec![(read, int.clone())], Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__context_name") => Some((vec![(read, int.clone())], Some(string.clone()))),
+        ("core.mod", "__context_digest") => Some((vec![(read, int.clone())], Some(bool_.clone()))),
+        ("core.mod", "__exports_count") => Some((vec![(read, int.clone())], Some(int.clone()))),
+        ("core.mod", "__export_info") => Some((vec![(read, int.clone()), (read, int.clone())],
+            Some(Type::Tuple(vec![("name".into(), Box::new(string.clone())),
+                ("symbol".into(), Box::new(string.clone())), ("text".into(), Box::new(bool_.clone()))])))),
+        ("core.mod", "__resolve_export") => Some((vec![(read, int.clone()), (read, int.clone())],
+            Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__resolve_symbol") => Some((vec![(read, int.clone()), (read, string.clone())],
+            Some(result_ty(unit_ty(), string.clone())))),
+        ("core.mod", "__close_context") => Some((vec![(read, int.clone())], None)),
+        ("core.mod", "__finish_context") => Some((vec![(read, int.clone())], Some(web_named("Mod")))),
         ("core.data.sketch", "empty") => Some((vec![], Some(string.clone()))),
         ("core.data.sketch", "merge") => Some((
             vec![(read, string.clone()), (read, string.clone())],
@@ -851,7 +977,7 @@ fn web_fixed_sig(
         ("core.web.table", "with_server_page") => Some((
             vec![
                 (read, table.clone()),
-                (read, web_fn(table_state.clone(), table_page.clone())),
+                (read, web_fn(table_state.clone(), web_result_error(table_page.clone(), "WebTableError"))),
             ],
             Some(table.clone()),
         )),
@@ -1079,7 +1205,7 @@ fn web_fixed_sig(
         )),
         ("core.web.store", "signal" | "state_signal") => Some((
             vec![(read, web_apply("WebStore", t.clone()))],
-            Some(signal.clone()),
+            Some(web_apply("Signal", t.clone())),
         )),
         ("core.web.store", "new") => Some((
             vec![(read, string.clone()), (read, t.clone())],
@@ -1098,7 +1224,7 @@ fn web_fixed_sig(
                 (read, web_apply("WebStore", t.clone())),
                 (read, string.clone()),
                 (read, web_list(string.clone())),
-                (read, web_fn(t.clone(), unit_ty())),
+                (read, web_nullary_callback()),
             ],
             Some(web_apply("WebStoreTransaction", t.clone())),
         )),
@@ -1111,7 +1237,7 @@ fn web_fixed_sig(
                 (read, web_apply("WebStore", t.clone())),
                 (read, string.clone()),
                 (read, web_list(string.clone())),
-                (read, web_fn(t.clone(), unit_ty())),
+                (read, web_nullary_callback()),
             ],
             Some(web_apply("WebStorePatch", t.clone())),
         )),
@@ -1221,7 +1347,55 @@ fn web_fixed_sig(
 }
 
 
+// S73: synthesized registry types obey the same tuple construction invariant
+// as parsed types, including tuples nested inside containers and failures.
+fn canonicalize_signature_tuples(ty: &mut Type) {
+    match ty {
+        Type::Tuple(fields) => {
+            for (_, field) in fields.iter_mut() {
+                canonicalize_signature_tuples(field);
+            }
+            *fields = crate::AST::canonicalize_tuple_fields(std::mem::take(fields));
+        }
+        Type::List(inner) | Type::Shared(inner) | Type::Option(inner)
+        | Type::Tagged { inner, .. } | Type::InlineRange { base: inner, .. }
+        | Type::Quantity { base: inner, .. } | Type::FixedList { elem: inner, .. } => {
+            canonicalize_signature_tuples(inner);
+        }
+        Type::Map { key, value, .. } => {
+            canonicalize_signature_tuples(key);
+            canonicalize_signature_tuples(value);
+        }
+        Type::Result { ok, err } => {
+            canonicalize_signature_tuples(ok);
+            canonicalize_signature_tuples(err);
+        }
+        Type::Apply { args, .. } | Type::Union(args) => {
+            for arg in args { canonicalize_signature_tuples(arg); }
+        }
+        Type::Fn { params, ret, .. } => {
+            for param in params { canonicalize_signature_tuples(param); }
+            if let Some(ret) = ret { canonicalize_signature_tuples(ret); }
+        }
+        Type::Int | Type::Float | Type::Bool | Type::String | Type::Char
+        | Type::Named(_) | Type::TraitObject(_) | Type::IntN { .. }
+        | Type::Float32 | Type::Measure(_) => {}
+    }
+}
+
 fn core_fixed_sig_impl(
+    module: &str,
+    name: &str,
+) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
+    let (mut parameters, mut result) = core_fixed_sig_raw(module, name)?;
+    for (_, parameter) in &mut parameters {
+        canonicalize_signature_tuples(parameter);
+    }
+    if let Some(result) = &mut result { canonicalize_signature_tuples(result); }
+    Some((parameters, result))
+}
+
+fn core_fixed_sig_raw(
     module: &str,
     name: &str,
 ) -> Option<(Vec<(AccessConvention, Type)>, Option<Type>)> {
@@ -1266,7 +1440,7 @@ fn core_fixed_sig_impl(
         param_contract: None,
         call_metadata: None,
     };
-    let comparison_data = Type::Named("DataTree".to_string());
+    let comparison_data = Type::Named("Dyn".to_string());
     let comparison_fn = Type::Fn {
         params: vec![comparison_data.clone()],
         ret: Some(Box::new(comparison_data.clone())),
@@ -1280,6 +1454,313 @@ fn core_fixed_sig_impl(
     }
 
     match (module, name) {
+        ("core.crypto", "__jetc_open_directory" | "__jetc_open_source" | "__jetc_create_named") => Some((
+            vec![(read, Type::String)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_open_child_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_tmpfile" | "__jetc_fsync" | "__jetc_close") => Some((
+            vec![(read, Type::Int)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_read" | "__jetc_seek") => Some((
+            vec![(read, Type::Int), (read, Type::Int)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_write") => Some((
+            vec![(read, Type::Int), (read, Type::List(Box::new(u8_ty()))), (read, Type::Int), (read, Type::Int)],
+            Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__jetc_stat") => Some((
+            vec![(read, Type::Int)], Some(Type::Named("__JetcStat".into())))),
+        ("core.crypto", "__jetc_link") => Some((
+            vec![(read, Type::Int), (read, Type::Int), (read, Type::String)], Some(Type::Named("__JetcRaw".into())))),
+        ("core.crypto", "__migrate_v1") => Some((
+            vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::Named("Path".into())),
+                (read, Type::List(Box::new(Type::Named("X25519PublicKey".into())))), (read, Type::Named("Path".into()))],
+            Some(result_ty(Type::Bool, Type::Named("FileCryptoError".into()))))),
+        ("core.auth", "__state_load") => Some((vec![], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.auth", "__state_replace") => Some((vec![(read, Type::List(Box::new(u8_ty()))), (moved, Type::List(Box::new(u8_ty())))], Some(Type::Bool))),
+        ("core.files", "__read_bytes_os") => Some((vec![(read, Type::String)], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
+        ("core.files", "__write_bytes_os" | "__append_bytes_os") => Some((vec![(read, Type::String), (read, Type::List(Box::new(u8_ty())))], Some(io_unit.clone()))),
+        ("core.files", "__create_dirs_os") => Some((vec![(read, Type::String)], Some(io_unit.clone()))),
+        ("core.files", "__writer_refusal") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(io.clone()))))),
+        ("core.files", "__read_at_os") => Some((vec![(read, Type::String), (read, Type::Int), (read, Type::Int)], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
+        ("core.files", "__write_at_os") => Some((vec![(read, Type::String), (read, Type::Int), (read, Type::List(Box::new(u8_ty())))], Some(io_unit.clone()))),
+        ("core.files", "__read_link_os") => Some((vec![(read, Type::String)], Some(result_ty(Type::String, io.clone())))),
+        ("core.files", "__host_path_is_absolute") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.files", "__host_path_join") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::String))),
+        ("core.files", "__temp_path_sample") => Some((vec![], Some(Type::Tuple(vec![
+            ("clock_available".into(), Box::new(Type::Bool)),
+            ("nanos".into(), Box::new(Type::String)),
+        ])))),
+        ("core.files", "__temp_directory") => Some((vec![], Some(Type::String))),
+        ("core.testing", "__fault_should_fail") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.testing", "__evidence_read") => Some((vec![(read, Type::String)], Some(Type::Named("__EvidenceRead".into())))),
+        ("core.testing", "__record_failure") => Some((vec![(read, Type::String), (read, Type::String)], Some(unit_ty()))),
+        ("core.testing", "__clear_failure") => Some((vec![], Some(unit_ty()))),
+        ("core.testing", "__temp_facts") => Some((vec![], Some(Type::Named("__TempFacts".into())))),
+        ("core.testing", "__temp_join") => Some((vec![(read, Type::String)], Some(Type::Named("__TempPath".into())))),
+        ("core.testing", "__temp_remove") => Some((vec![(read, list_u8.clone())], Some(Type::Named("__TempRemove".into())))),
+        ("core.testing", "__temp_create") => Some((vec![(read, list_u8.clone())], Some(Type::Named("__TempCreate".into())))),
+        ("core.testing", "__text_window") => Some((vec![
+            (read, Type::String),
+            (read, Type::IntN { signed: false, bits: 64 }),
+            (read, Type::IntN { signed: false, bits: 64 }),
+        ], Some(Type::String))),
+        ("core.testing", "__suite_snapshot") => Some((vec![], Some(Type::Named("TestSuite".into())))),
+        ("core.sys", "__env_value") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))))),
+        ("core.sys", "__env_set") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(unit_ty(), Type::Named("EnvError".into()))))),
+        ("core.sys", "__env_remove") => Some((vec![(read, Type::String)], Some(result_ty(Type::Bool, Type::Named("EnvError".into()))))),
+        ("core.sys", "__env_columns" | "__startup_env_columns") => Some((vec![], Some(Type::List(Box::new(Type::List(Box::new(u8_ty()))))))),
+        ("core.sys", "__env_key_compare") => Some((vec![(read, Type::List(Box::new(u8_ty()))), (read, Type::List(Box::new(u8_ty())))], Some(Type::Int))),
+        ("core.sys", "__family_os") => Some((vec![], Some(Type::String))),
+        ("core.sys", "__pid_os") => Some((vec![], Some(Type::Int))),
+        ("core.sys", "__sync_os") => Some((vec![], Some(unit_ty()))),
+        ("core.sys", "__close_fd_os") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
+        ("core.sys", "__atexit_os") => Some((vec![(read, Type::Fn { params: vec![], ret: Some(Box::new(unit_ty())), effect_bound: None, return_view_provenance: None, param_contract: None, call_metadata: None })], Some(unit_ty()))),
+        ("core.process", "__signal_arm") => Some((vec![(read, Type::Int)], Some(result_ty(unit_ty(), Type::String)))),
+        ("core.process", "__pipeline_run") => Some((vec![(read, Type::List(Box::new(Type::Named("ProcessSpec".into()))))], Some(result_ty(Type::Named("ProcessReceipt".into()), io.clone())))),
+        ("core.files", "__path_windows") => Some((vec![], Some(Type::Bool))),
+        ("core.files", "__atomic_pid") => Some((vec![], Some(Type::Int))),
+        ("core.files", "__atomic_reserve") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(Type::Int, io.clone())))),
+        ("core.files", "__atomic_finish") => Some((vec![(read, Type::Int), (read, Type::List(Box::new(u8_ty()))), (read, Type::String), (read, Type::String)], Some(io_unit.clone()))),
+        ("core.files", "__atomic_remove") => Some((vec![(read, Type::String)], Some(io_unit.clone()))),
+        ("core.files", "__atomic_rename" | "__atomic_sync_parent") => Some((vec![(read, Type::String), (read, Type::String)], Some(io_unit.clone()))),
+        ("core.files", "__atomic_close") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__scope_roots") => Some((vec![(read, Type::Named("FileScope".into()))], Some(Type::List(Box::new(Type::Tuple(vec![("encoded".into(), Box::new(Type::List(Box::new(u8_ty())))), ("absolute".into(), Box::new(Type::Bool))])))))),
+        ("core.files", "__scope_read_at") => Some((vec![(read, Type::Named("FileScope".into())), (read, Type::Int), (read, Type::String), (read, Type::String)], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
+        ("core.sys", "__dotenv_read") => Some((vec![(read, Type::String)], Some(result_ty(Type::String, Type::Tuple(vec![("not_found".into(), Box::new(Type::Bool)), ("cause".into(), Box::new(Type::String))]))))),
+        ("core.sys", "__config_object") => Some((vec![(moved, Type::List(Box::new(Type::Tuple(vec![("key".into(), Box::new(Type::String)), ("value".into(), Box::new(Type::Named("Dyn".into())))]))))], Some(Type::Named("Dyn".into())))),
+        ("core.files", "__reader_path") => Some((vec![(read, Type::Named("FileReader".into()))], Some(Type::String))),
+        ("core.files", "__reader_line_bytes") => Some((vec![(AccessConvention::Write, Type::Named("FileReader".into()))], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
+        ("core.process", "__stdout_line_bytes") => Some((vec![(read, Type::Named("ProcessStdoutStream".into()))], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
+        ("core.process", "__stderr_line_bytes") => Some((vec![(read, Type::Named("ProcessStderrStream".into()))], Some(result_ty(Type::List(Box::new(u8_ty())), io.clone())))),
+        ("core.tui", "__cap_env_bytes") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
+        )),
+        ("core.font", "__shape_text") => Some((vec![(read, Type::String), (read, Type::Named("FontFace".into()))], Some(result_ty(Type::Named("GlyphRun".into()), Type::String)))),
+        // Existing stdio seed contracts: Prelude/Term.rs:954,993,1018,74,79;
+        // Core/StdinReader.rs:54 and Prelude/FaultInjection.rs:78.
+        ("core.term", "__stdio_write") => Some((vec![(read, Type::String), (read, Type::Bool), (read, Type::Bool), (read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__stdio_bytes") => Some((vec![(read, list_u8.clone()), (read, Type::Bool), (read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__stdio_flush") => Some((vec![(read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__stdio_fault") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.term", "__stdout_terminal" | "__stderr_terminal") => Some((vec![], Some(Type::Bool))),
+        ("core.term", "__stdin_line") => Some((vec![], Some(result_ty(Type::Option(Box::new(Type::String)), io.clone())))),
+        ("core.term", "__terminal8_fault" | "__terminal8_env_has") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.term", "__terminal8_env") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__terminal8_write_stdout" | "__terminal8_write_stderr") => Some((vec![(read, Type::String), (read, Type::Bool)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.term", "__terminal8_stdin_tty" | "__terminal8_stdout_tty" | "__terminal8_stderr_tty" | "__terminal8_machine_output") => Some((vec![], Some(Type::Bool))),
+        ("core.term", "__terminal8_mode_enter") => Some((vec![(read, Type::Bool)], Some(Type::Bool))),
+        ("core.term", "__terminal8_mode_leave") => Some((vec![], Some(unit_ty()))),
+        ("core.term", "__terminal8_color_mode") => Some((vec![], Some(Type::Int))),
+        ("core.term", "__terminal8_stty") => Some((vec![], Some(Type::Option(Box::new(Type::Tuple(vec![("w".into(), Box::new(Type::Int)), ("h".into(), Box::new(Type::Int))])))))),
+        ("core.term", "__terminal8_line") => Some((vec![], Some(Type::Tuple(vec![("eof".into(), Box::new(Type::Bool)), ("line".into(), Box::new(Type::String)), ("cause".into(), Box::new(Type::Option(Box::new(Type::String))))])))),
+        ("core.term", "__terminal8_read_all" | "__terminal8_read_until") => Some((if name == "__terminal8_read_until" { vec![(read, Type::String)] } else { vec![] }, Some(Type::Tuple(vec![("text".into(), Box::new(Type::String)), ("cause".into(), Box::new(Type::Option(Box::new(Type::String))))])))),
+        ("core.term", "__terminal8_take") => Some((vec![(read, Type::Int)], Some(Type::Tuple(vec![("bytes".into(), Box::new(Type::List(Box::new(u8_ty())))), ("cause".into(), Box::new(Type::Option(Box::new(Type::String))))])))),
+        ("core.term", "__terminal8_key_bytes") => Some((vec![], Some(Type::Tuple(vec![("bytes".into(), Box::new(Type::List(Box::new(u8_ty())))), ("platform".into(), Box::new(Type::Int))])))),
+        ("core.files", "__walk_context") => Some((vec![(read, Type::String), (read, Type::String), (read, Type::Bool)], Some(Type::Int))),
+        ("core.files", "__walk_close" | "__walk_matcher_new") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__walk_validation_path") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Int))),
+        ("core.files", "__walk_ancestors") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::List(Box::new(Type::Int))))),
+        ("core.files", "__walk_shown") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::String))),
+        ("core.files", "__walk_before") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)], Some(Type::Bool))),
+        ("core.files", "__walk_inherit") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__walk_ignored") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::String), (read, Type::Bool)], Some(Type::Bool))),
+        ("core.files", "__walk_rules" | "__walk_read_dir" | "__walk_metadata" | "__walk_next") => {
+            let mut params = vec![(read, Type::Int), (read, Type::Int)];
+            if name == "__walk_rules" { params.push((read, Type::String)); }
+            let mut fields = Vec::new();
+            if name == "__walk_metadata" {
+                fields.extend([("directory".into(), Box::new(Type::Bool)), ("symlink".into(), Box::new(Type::Bool))]);
+            } else if name == "__walk_next" {
+                fields.extend([
+                    ("end".into(), Box::new(Type::Bool)), ("child".into(), Box::new(Type::Int)),
+                    ("directory".into(), Box::new(Type::Bool)), ("file".into(), Box::new(Type::Bool)),
+                    ("path".into(), Box::new(Type::String)), ("relative".into(), Box::new(Type::String)),
+                    ("ignore_file".into(), Box::new(Type::Bool)),
+                ]);
+            }
+            fields.extend([
+                ("kind".into(), Box::new(Type::Int)),
+                ("code".into(), Box::new(Type::Option(Box::new(Type::Int)))),
+                ("cause".into(), Box::new(Type::Option(Box::new(Type::String)))),
+            ]);
+            Some((params, Some(Type::Tuple(fields))))
+        }
+        ("core.files", "__entries_context") => Some((vec![(read, Type::String), (read, Type::String), (read, Type::Bool)], Some(Type::Int))),
+        ("core.files", "__entries_close") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__entries_release") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(unit_ty()))),
+        ("core.files", "__entries_shown") => Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::String))),
+        ("core.files", "__entries_before") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)], Some(Type::Bool))),
+        ("core.files", "__entries_read_dir" | "__entries_mkdir" | "__entries_copy" | "__entries_next" | "__entries_file_type") => {
+            let mut fields = Vec::new();
+            if name == "__entries_next" {
+                fields.extend([("end".into(), Box::new(Type::Bool)), ("child".into(), Box::new(Type::Int))]);
+            } else if name == "__entries_file_type" {
+                fields.extend([("directory".into(), Box::new(Type::Bool)), ("file".into(), Box::new(Type::Bool))]);
+            }
+            fields.extend([
+                ("kind".into(), Box::new(Type::Int)),
+                ("code".into(), Box::new(Type::Option(Box::new(Type::Int)))),
+                ("cause".into(), Box::new(Type::Option(Box::new(Type::String)))),
+            ]);
+            Some((vec![(read, Type::Int), (read, Type::Int)], Some(Type::Tuple(fields))))
+        }
+        ("core.mem", "__list_capacity") => Some((
+            vec![(read, Type::List(Box::new(Type::Named("__element".to_string()))))],
+            Some(Type::Int),
+        )),
+        ("core.mem", "__list_reserve_exact") => Some((
+            vec![
+                (AccessConvention::Write, Type::List(Box::new(Type::Named("__element".to_string())))),
+                (read, Type::Int),
+            ],
+            Some(Type::Bool),
+        )),
+        ("core.mem", "__type_size") => Some((vec![], Some(Type::Int))),
+        ("core.data.plot", "__plot_aggregate_none") => Some((vec![], Some(Type::Named("JetDataPlotAggregate".to_string())))),
+        ("core.mem", "__loader_new") => Some((
+            vec![
+                (AccessConvention::Move, Type::Named("DataLoaderKind".to_string())),
+                (AccessConvention::Move, Type::String),
+                (AccessConvention::Move, Type::String),
+                (AccessConvention::Move, Type::List(Box::new(Type::String))),
+                (AccessConvention::Move, Type::Named("DataFormat".to_string())),
+                (AccessConvention::Move, Type::Named("DataLimits".to_string())),
+                (AccessConvention::Move, Type::Named("DataAuthority".to_string())),
+            ],
+            Some(result_ty(Type::Apply { name: "DataLoader".to_string(), args: vec![Type::Named("T".to_string())] }, Type::Named("DataError".to_string()))),
+        )),
+        ("core.encoding", "__coerce_now") => Some((vec![], Some(Type::Int))),
+        ("core.encoding", "__coerce_emit") => Some((vec![(read, Type::String)], Some(unit.clone()))),
+        ("core.encoding", "__query_read_bounded") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::Named("__QueryRead".to_string()), Type::String)),
+        )),
+        ("core.encoding", "__query_validate_fields") => Some((
+            vec![(read, Type::List(Box::new(Type::String))), (read, Type::Named("SQL".to_string()))],
+            Some(result_ty(unit.clone(), Type::String)),
+        )),
+        ("core.encoding", "__read_byte") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileReader".to_string()))],
+            Some(result_ty(Type::Option(Box::new(u8_ty())), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__read_into") => Some((
+            vec![
+                (AccessConvention::Write, Type::Named("FileReader".to_string())),
+                (AccessConvention::Write, list_u8.clone()),
+                (read, Type::Int),
+            ],
+            Some(result_ty(Type::Int, Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__write_bytes") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::Apply { name: "View".to_string(), args: vec![u8_ty()] })],
+            Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__flush") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string()))],
+            Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__utf8_validate") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(unit.clone(), Type::String)),
+        )),
+        ("core.encoding", "__bytes_into_text") => Some((
+            vec![(AccessConvention::Move, list_u8.clone())],
+            Some(Type::String),
+        )),
+        ("core.encoding", "__string_byte") => Some((
+            vec![(read, Type::String), (read, Type::IntN { signed: false, bits: 64 })],
+            Some(u8_ty()),
+        )),
+        ("core.encoding", "__object_from_entries") => Some((
+            vec![(AccessConvention::Move, Type::List(Box::new(Type::Tuple(vec![
+                ("key".to_string(), Box::new(Type::String)),
+                ("value".to_string(), Box::new(Type::Named("Dyn".to_string()))),
+            ]))))],
+            Some(Type::Named("Dyn".to_string())),
+        )),
+        ("core.encoding", "__write_text") => Some((
+            vec![(AccessConvention::Write, Type::Named("FileWriter".to_string())), (read, Type::String)],
+            Some(result_ty(unit.clone(), Type::Named("EncodingCause".to_string()))),
+        )),
+        ("core.encoding", "__text_into_bytes") => Some((
+            vec![(AccessConvention::Move, Type::String)],
+            Some(list_u8.clone()),
+        )),
+        ("core.encoding", "__typed_text") => Some((
+            vec![(AccessConvention::Move, Type::String)],
+            Some(Type::Named("Dyn".to_string())),
+        )),
+        ("core.encoding", "__object_entries_view") => Some((
+            vec![(read, Type::Named("Dyn".to_string()))],
+            Some(Type::Apply { name: "View".to_string(), args: vec![Type::Tuple(vec![
+                ("key".to_string(), Box::new(Type::String)),
+                ("value".to_string(), Box::new(Type::Named("Dyn".to_string()))),
+            ])] }),
+        )),
+        ("core.encoding", "__bytes_view") => Some((
+            vec![(read, Type::Named("Dyn".to_string()))],
+            Some(Type::Apply { name: "View".to_string(), args: vec![u8_ty()] }),
+        )),
+        ("core.net", "__unix_connect_host") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("UnixStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.net", "__unix_connect_deadline_host") => Some((vec![(read, Type::String), (read, Type::Named("Duration".to_string()))], Some(result_ty(Type::Named("UnixStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.net.tls", "__client_stream") => Some((vec![(moved, Type::Named("TCPStream".to_string())), (read, Type::String)], Some(result_ty(Type::Named("TLSStream".to_string()), Type::Named("IOError".to_string()))))),
+        ("core.net.tls", "__client_deadline") => Some((vec![(moved, Type::Named("TCPStream".to_string())), (read, Type::String), (read, Type::Named("Duration".to_string()))], Some(result_ty(Type::Named("TLSStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.net.tls", "__client_config_deadline") => Some((vec![(moved, Type::Named("TCPStream".to_string())), (read, Type::String), (read, Type::Named("TLSClientConfig".to_string())), (read, Type::Named("Duration".to_string()))], Some(result_ty(Type::Named("TLSStream".to_string()), Type::Named("NetError".to_string()))))),
+        ("core.http.server", "__serve") => Some((vec![(read, Type::String), (read, Type::Named("HTTPMux".to_string())), (read, Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string())))), (read, Type::Option(Box::new(Type::Named("Duration".to_string()))))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__bind") => Some((vec![(read, Type::String), (read, Type::Named("HTTPMux".to_string())), (read, Type::Option(Box::new(Type::Named("HTTPServerTLS".to_string())))), (read, Type::Option(Box::new(Type::Named("Duration".to_string()))))], Some(result_ty(Type::Named("HTTPServer".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__static_files") => Some((vec![(read, Type::Named("HTTPMux".to_string())), (read, Type::String), (read, Type::String), (read, Type::Option(Box::new(Type::Bool))), (read, Type::Option(Box::new(Type::Bool))), (read, Type::Option(Box::new(Type::Bool)))], Some(unit_ty()))),
+        ("core.http.server", "__middleware") => Some((vec![(read, Type::Named("HTTPMux".to_string())), (moved, Type::Fn { params: vec![Type::Named("HTTPHandler".to_string())], ret: Some(Box::new(Type::Named("HTTPHandler".to_string()))), effect_bound: None, param_contract: None, call_metadata: None, return_view_provenance: None })], Some(unit_ty()))),
+        ("core.http", "__router") => Some((vec![], Some(Type::Named("HTTPRouter".to_string())))),
+        ("core.http", "__parse") => Some((vec![(read, Type::String)], Some(Type::Named("HTTPRequest".to_string())))),
+        ("core.http", "__dispatch") => Some((vec![(read, Type::Named("HTTPRouter".to_string())), (read, Type::Named("HTTPRequest".to_string()))], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.net.ws", "__connect") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("WsConn".to_string()), Type::Named("WsError".to_string()))))),
+        ("core.net.ws", "__upgrade") => Some((vec![(read, Type::Named("HTTPRequest".to_string()))], Some(result_ty(Type::Named("WsConn".to_string()), Type::Named("WsError".to_string()))))),
+        ("core.http.client", "__get") => Some((vec![(read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.client", "__post") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.client", "__request") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::Named("HTTPRequest".to_string())))),
+        ("core.http.client", "jet_http_build_resolve") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::List(Box::new(u8_ty())))), Type::String)),
+        )),
+        ("core.http.client", "jet_http_build_get") => Some((
+            vec![
+                (read, Type::String), (read, Type::String), (read, Type::String), (read, Type::Bool),
+                (read, Type::List(Box::new(Type::List(Box::new(u8_ty()))))),
+                (read, Type::Int), (read, Type::Int), (read, Type::Int),
+            ],
+            Some(result_ty(Type::List(Box::new(Type::List(Box::new(u8_ty())))), Type::String)),
+        )),
+        ("core.http.server", "__mux") => Some((vec![], Some(Type::Named("HTTPMux".to_string())))),
+        ("core.http.server", "__serve_once") => Some((vec![(read, Type::String), (read, Type::Named("HTTPMux".to_string()))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__serve_once_listener") => Some((vec![(read, Type::Named("TCPListener".to_string())), (read, Type::Named("HTTPMux".to_string()))], Some(result_ty(unit_ty(), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__static_file") => Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__static_file_range") => Some((vec![(read, Type::Named("HTTPRequest".to_string())), (read, Type::String), (read, Type::String)], Some(result_ty(Type::Named("HTTPResponse".to_string()), Type::Named("HTTPError".to_string()))))),
+        ("core.http.server", "__cors") => Some((vec![(read, Type::Named("HTTPMux".to_string())), (read, Type::Named("HTTPCorsPolicy".to_string()))], Some(unit_ty()))),
+        ("core.http.server", "__request_id") => Some((vec![(read, Type::Named("HTTPMux".to_string()))], Some(unit_ty()))),
+        // Core DNS source classifies native resolver String failures once.
+        ("core.net", "__dns_a_lookup" | "__dns_aaaa_lookup") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("IPAddr".to_string()))), Type::String)),
+        )),
+        ("core.net", "__dns_a_at_lookup" | "__dns_aaaa_at_lookup") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("IPAddr".to_string()))), Type::String)),
+        )),
+        ("core.net", "__dns_txt_lookup" | "__dns_ptr_lookup") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+        )),
+        ("core.net", "__dns_txt_at_lookup") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::String)), Type::String)),
+        )),
+        ("core.net", "__dns_srv_lookup") => Some((
+            vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("DNSSRV".to_string()))), Type::String)),
+        )),
+        ("core.net", "__dns_srv_at_lookup") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(Type::List(Box::new(Type::Named("DNSSRV".to_string()))), Type::String)),
+        )),
         ("core.files", "scope") => Some((
             vec![(read, Type::Named(Syntax::TYPE_AUTHORITY.to_string()))],
             Some(Type::Named("FileScope".to_string())),
@@ -1307,6 +1788,49 @@ fn core_fixed_sig_impl(
         ("core.files", "write_bytes") => {
             Some((vec![(read, path), (read, list_u8.clone())], Some(io_unit)))
         }
+        ("core.files", "__fault_should_fail") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.files", "__os_family" | "__temp_directory_raw") => Some((vec![], Some(Type::String))),
+        ("core.files", "__process_id_raw") => Some((vec![], Some(Type::Int))),
+        ("core.files", "__temp_clock_raw") => Some((vec![], Some(Type::Tuple(vec![
+            ("clock_available".to_string(), Box::new(Type::Bool)), ("nanos".to_string(), Box::new(Type::String)),
+        ])))),
+        ("core.files", "__map_raw") => Some((vec![(read, Type::String)],
+            Some(result_ty(Type::Named("MappedFile".to_string()), io_error_ty())))),
+        ("core.files", "__remove_raw" | "__remove_dir_raw" | "__fsync_raw") =>
+            Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), io_error_ty())))),
+        ("core.files", "__remove_all_raw") => Some((vec![(read, Type::String), (read, Type::Bool)],
+            Some(result_ty(unit_ty(), io_error_ty())))),
+        ("core.files", "__copy_raw" | "__hard_link_raw") =>
+            Some((vec![(read, Type::String), (read, Type::String)], Some(result_ty(unit_ty(), io_error_ty())))),
+        ("core.files", "__list_dir_raw") => Some((vec![(read, Type::String)],
+            Some(result_ty(Type::List(Box::new(Type::Named("DirEntry".to_string()))), io_error_ty())))),
+        ("core.files", "__stat_mode_raw") => Some((vec![(read, Type::String)],
+            Some(result_ty(Type::Int, io_error_ty())))),
+        ("core.files", "__chown_raw") => Some((vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())))),
+        ("core.files", "__set_mode_raw") => Some((vec![(read, Type::String), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io_error_ty())))),
+        ("core.files", "__symlink_directory_raw") => Some((vec![(read, Type::String)],
+            Some(result_ty(Type::Bool, io_error_ty())))),
+        ("core.files", "__symlink_raw") => Some((vec![(read, Type::String), (read, Type::String), (read, Type::Bool)],
+            Some(result_ty(unit_ty(), io_error_ty())))),
+        ("core.files", "__mkdtemp_raw") => Some((vec![(moved, Type::String)],
+            Some(result_ty(Type::String, io_error_ty())))),
+        ("core.files", "__temp_dir_raw") => Some((vec![(moved, Type::String)],
+            Some(result_ty(Type::Named("TempDir".to_string()), io_error_ty())))),
+        ("core.files", "__temp_file_raw") => Some((vec![(moved, Type::String)],
+            Some(result_ty(Type::Named("TempFile".to_string()), io_error_ty())))),
+        ("core.files", "__lock_open" | "__lock_path_identity") => Some((vec![(read, Type::String)],
+            Some(Type::Named(if name == "__lock_open" { "__LockCall" } else { "__LockIdentity" }.to_string())))),
+        ("core.files", "__lock_try" | "__lock_fd_identity") => Some((vec![(read, Type::Int)],
+            Some(Type::Named(if name == "__lock_try" { "__LockCall" } else { "__LockIdentity" }.to_string())))),
+        ("core.files", "__lock_wait") => Some((vec![(read, Type::Int), (read, Type::Int), (read, Type::Bool), (read, Type::Int)],
+            Some(Type::Named("__LockWait".to_string())))),
+        ("core.files", "__lock_close") => Some((vec![(read, Type::Int)], Some(Type::Int))),
+        ("core.files", "__lock_owner") => Some((vec![(moved, Type::String), (read, Type::Int)],
+            Some(Type::Named("FileLock".to_string())))),
+        ("core.files", "__canonicalize_raw") => Some((vec![(read, Type::String)],
+            Some(result_ty(Type::String, io_error_ty())))),
         ("core.files", "exists" | "is_dir") => Some((vec![(read, path)], Some(bool_))),
         (
             "core.files",
@@ -1314,10 +1838,6 @@ fn core_fixed_sig_impl(
         ) => Some((
             vec![(read, path)],
             Some(result_ty(unit_ty(), io_error_ty())),
-        )),
-        ("core.files", "stat" | "lstat") => Some((
-            vec![(read, path)],
-            Some(result_ty(Type::Named("Stat".to_string()), io_error_ty())),
         )),
         ("core.files", "is_fifo" | "is_socket") => Some((
             vec![(read, path.clone())],
@@ -1351,7 +1871,7 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.files", "copy" | "rename") => Some((
+        ("core.files", "copy") => Some((
             vec![(read, path.clone()), (read, path.clone())],
             Some(result_ty(unit_ty(), io_error_ty())),
         )),
@@ -1412,16 +1932,14 @@ fn core_fixed_sig_impl(
             )),
         )),
         ("core.files", "lock") => Some((
-            vec![(
-                read,
-                Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
-            )],
-            Some(result_ty(
-                Type::Named("FileLock".to_string()),
-                io_error_ty(),
-            )),
+            vec![(read, path), (read, Type::Option(Box::new(Type::Named("Duration".to_string()))))],
+            Some(result_ty(Type::Named("FileLock".to_string()), io_error_ty())),
         )),
-        ("core.watcher", "files") => Some((
+        ("core.files", "try_lock") => Some((
+            vec![(read, path)],
+            Some(result_ty(Type::Option(Box::new(Type::Named("FileLock".to_string()))), io_error_ty())),
+        )),
+        ("core.watcher", "files" | "__files") => Some((
             vec![(
                 read,
                 Type::Union(vec![Type::String, Type::Named("Path".to_string())]),
@@ -1431,15 +1949,15 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.watcher", "process_pid") => Some((
+        ("core.watcher", "process_pid" | "__process_pid") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("WatchHandle".to_string())),
         )),
-        ("core.watcher", "port") => Some((
+        ("core.watcher", "port" | "__port") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(Type::Named("WatchHandle".to_string())),
         )),
-        ("core.watcher", "set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
+        ("core.watcher", "set" | "__set") => Some((vec![], Some(Type::Named("WatchSet".to_string())))),
         ("core.process", "argv" | "args") => {
             Some((vec![], Some(Type::List(Box::new(Type::String)))))
         }
@@ -1499,6 +2017,7 @@ fn core_fixed_sig_impl(
         ("core.term", "stdout") => Some((vec![], Some(Type::Named("Stdout".to_string())))),
         ("core.term", "stderr") => Some((vec![], Some(Type::Named("Stderr".to_string())))),
         ("core.term", "terminal_width" | "terminal_height") => Some((vec![], Some(Type::Int))),
+        ("core.term", "jet_term_is_terminal_raw") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.term", "style" | "style_force") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(Type::String),
@@ -1510,6 +2029,10 @@ fn core_fixed_sig_impl(
         ("core.sys", "get") => Some((
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.sys", "__host_env") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Option(Box::new(Type::List(Box::new(u8_ty()))))),
         )),
         ("core.sys", "set") => Some((vec![(read, Type::String), (read, Type::String)], None)),
         ("core.sys", "unset") => Some((
@@ -1536,6 +2059,91 @@ fn core_fixed_sig_impl(
             "pid" | "getpid" | "cpu_count" | "getppid" | "getuid" | "geteuid" | "getgid"
             | "getegid" | "getpgrp",
         ) => Some((vec![], Some(Type::Int))),
+        ("core.sys", "__getppid" | "__getuid" | "__geteuid" | "__getgid" | "__getegid" | "__getpgrp") => {
+            Some((vec![], Some(Type::Option(Box::new(Type::Int)))))
+        }
+        ("core.sys", "__cpu_count" | "__groups_count") => Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.sys", "__executable") => Some((vec![], Some(Type::Option(Box::new(Type::String))))),
+        ("core.sys", "__umask") => Some((vec![(read, Type::Int)], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.sys", "__errno_text") => Some((vec![(read, Type::Int)], Some(Type::String))),
+        ("core.sys", "__groups_fill") => Some((vec![(read, Type::Int)], Some(Type::List(Box::new(Type::Int))))),
+        ("core.sys", "__loadavg") => Some((vec![], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("count".into(), Box::new(Type::Int)),
+            ("first".into(), Box::new(Type::Float)),
+            ("second".into(), Box::new(Type::Float)),
+            ("third".into(), Box::new(Type::Float)),
+        ])))),
+        ("core.sys", "__times") => Some((vec![], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("user".into(), Box::new(Type::Int)),
+            ("system".into(), Box::new(Type::Int)),
+            ("child_user".into(), Box::new(Type::Int)),
+            ("child_system".into(), Box::new(Type::Int)),
+            ("elapsed".into(), Box::new(Type::Int)),
+            ("ticks".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.sys", "__getpgid" | "__getsid" | "__getpriority" | "__setuid" | "__setgid"
+            | "__setpriority" | "__setpgid" | "__kill" | "__fork" | "__setsid" | "__setpgrp"
+            | "__utime" | "__mkfifo" | "__initgroups" | "__wait" | "__waitpid" | "__pipe") => {
+            let params = match name {
+                "__getpgid" | "__getsid" | "__getpriority" | "__setuid" | "__setgid" => vec![(read, Type::Int)],
+                "__setpriority" | "__setpgid" | "__kill" | "__waitpid" => vec![(read, Type::Int), (read, Type::Int)],
+                "__utime" => vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
+                "__mkfifo" | "__initgroups" => vec![(read, Type::String), (read, Type::Int)],
+                _ => vec![],
+            };
+            let mut fields = vec![
+                ("available".into(), Box::new(Type::Bool)),
+                ("value".into(), Box::new(Type::Int)),
+                ("errno".into(), Box::new(Type::Int)),
+            ];
+            if matches!(name, "__wait" | "__waitpid") {
+                fields.push(("status".into(), Box::new(Type::Int)));
+            } else if name == "__pipe" {
+                fields.push(("read_fd".into(), Box::new(Type::Int)));
+                fields.push(("write_fd".into(), Box::new(Type::Int)));
+            }
+            Some((params, Some(Type::Tuple(fields))))
+        }
+        ("core.process", "__spec_fields") => Some((vec![
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::Bool), (read, Type::String), (read, Type::Bool),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::List(Box::new(Type::String))),
+            (read, Type::Bool), (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Named("ProcessStreamMode".into())),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Int),
+            (read, Type::Bool), (read, Type::Bool), (read, Type::Named("TerminalPolicy".into())),
+            (read, Type::Bool), (read, Type::String),
+        ], Some(Type::Named("ProcessSpec".into())))),
+        ("core.files", "jet_files_link_reader_at_raw") => Some((vec![
+            (read, Type::Named("FileReader".into())), (read, Type::Int), (read, Type::String),
+        ], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),
+            ("value".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.files", "__metadata_directory") => Some((vec![(read, Type::String)], Some(result_ty(Type::Bool, Type::String)))),
+        ("core.files", "__directory_fd") => Some((vec![(read, Type::Int)], Some(Type::Tuple(vec![
+            ("available".into(), Box::new(Type::Bool)), ("held".into(), Box::new(Type::Bool)),
+            ("fd".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.process", "__with_directory_raw") => Some((vec![
+            (read, Type::Named("ProcessSpec".into())), (read, Type::Int),
+            (read, Type::Int), (read, Type::Bool),
+        ], Some(Type::Tuple(vec![
+            ("spec".into(), Box::new(Type::Named("ProcessSpec".into()))),
+            ("available".into(), Box::new(Type::Bool)),
+            ("assigned_fd".into(), Box::new(Type::Int)), ("errno".into(), Box::new(Type::Int)),
+        ])))),
+        ("core.sys", "__current_dir") => Some((vec![], Some(result_ty(Type::String, Type::String)))),
+        ("core.sys", "__set_current_dir") => Some((vec![(read, Type::String)], Some(result_ty(unit_ty(), Type::String)))),
         ("core.sys", "umask" | "exitcode") => Some((vec![(read, Type::Int)], Some(Type::Int))),
         ("core.sys", "success") => Some((vec![(read, Type::Int)], Some(Type::Bool))),
         ("core.sys", "uptime") => Some((vec![], Some(Type::Float))),
@@ -1615,66 +2223,15 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(Type::Option(Box::new(Type::String))),
         )),
-        // D-AUTH2=A / D-AUTH-TOKENPOLICY1=A: closed token verification. The
-        // three-argument form is the beginner surface; verify_jwt's fixed
-        // signature also describes its five-parameter registry ABI. The
-        // arity-sensitive optional controls remain in core_call.rs.
-        ("core.auth", "verify_jwt") => Some((
+        // D-AUTH1=A: the process byte cell behind the Jet auth store
+        // (`Core/auth/auth.jet` owns its layout and every session rule).
+        ("core.auth", "__store_load") => Some((vec![], Some(Type::List(Box::new(u8_ty()))))),
+        ("core.auth", "__store_replace") => Some((
             vec![
-                (read, Type::String),
                 (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::String),
-                (read, Type::String),
-                (read, Type::Named("Duration".into())),
-            ],
-            Some(result_ty(
-                Type::Named("Claims".into()),
-                Type::Named("AuthError".into()),
-            )),
-        )),
-        ("core.auth", "verify_paseto") => Some((
-            vec![
-                (read, Type::String),
                 (read, Type::List(Box::new(u8_ty()))),
-                (read, Type::String),
             ],
-            Some(result_ty(
-                Type::Named("Claims".into()),
-                Type::Named("AuthError".into()),
-            )),
-        )),
-        ("core.auth", "register_user") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(unit_ty(), Type::String)),
-        )),
-        ("core.auth", "password_login" | "oauth_finish") => Some((
-            vec![
-                (read, Type::String),
-                (read, Type::String),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "magic_link_consume") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "session_validate") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(Type::Named("Session".into()), Type::String)),
-        )),
-        ("core.auth", "session_show" | "session_user" | "session_cookie" | "session_id") => Some((
-            vec![(read, Type::Named("Session".into()))],
-            Some(Type::String),
-        )),
-        ("core.auth", "magic_link_issue") => Some((
-            vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
-            Some(result_ty(Type::String, Type::String)),
-        )),
-        ("core.auth", "oauth_begin") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::String, Type::String)),
+            Some(Type::Bool),
         )),
         ("core.sync", "text_new") => Some((
             vec![(read, Type::String), (read, Type::String)],
@@ -1783,22 +2340,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("SyncList".into()))],
             Some(Type::String),
         )),
-        ("core.sync", "policy_new") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(result_ty(Type::Named("RowPolicy".into()), Type::String)),
-        )),
-        ("core.sync", "policy_allows") => Some((
-            vec![
-                (read, Type::Named("RowPolicy".into())),
-                (read, Type::String),
-                (read, Type::String),
-            ],
-            Some(Type::Bool),
-        )),
-        ("core.sync", "policy_show") => Some((
-            vec![(read, Type::Named("RowPolicy".into()))],
-            Some(Type::String),
-        )),
         ("core.process", "exit") => Some((
             vec![(read, int)],
             Some(Type::Named(Syntax::TYPE_NEVER.to_string())),
@@ -1812,6 +2353,11 @@ fn core_fixed_sig_impl(
             vec![(read, Type::List(Box::new(Type::String)))],
             Some(Type::Named("ProcessSpec".to_string())),
         )),
+        // Compiler-private raw leaf: the waited child's exact exit display.
+        ("core.process", "jet_process_exit_status_raw") => Some((
+            vec![(read, int)],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
         // D-PROCESS1=A: pipeline takes a list of `ProcessSpec` (built via
         // `process.cmd(argv)...`), not raw argv lists — one canonical builder (I8).
         ("core.process", "pipeline") => Some((
@@ -1824,17 +2370,6 @@ fn core_fixed_sig_impl(
                 io_error_ty(),
             )),
         )),
-        ("core.testing", "snap" | "golden") => Some((
-            vec![(read, Type::String), (read, Type::String)],
-            Some(Type::Bool),
-        )),
-        ("core.testing", "fixture" | "temp_dir") => {
-            Some((vec![(read, Type::String)], Some(Type::String)))
-        }
-        ("core.testing", "corpus") => Some((
-            vec![(read, Type::String)],
-            Some(Type::List(Box::new(Type::String))),
-        )),
         ("core.testing", "fake_clock") => Some((
             vec![(read, Type::Int)],
             Some(Type::Named("Clock".to_string())),
@@ -1843,13 +2378,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Int)],
             Some(Type::Named("RNG".to_string())),
         )),
-        ("core.testing", "fake_data") => Some((
-            vec![(read, Type::Int)],
-            Some(Type::Named("Fake".to_string())),
-        )),
-        ("core.testing", "test_suite") => {
-            Some((vec![], Some(Type::Named("TestSuite".to_string()))))
-        }
         ("core.testing", "world") => Some((
             vec![(
                 read,
@@ -1882,6 +2410,10 @@ fn core_fixed_sig_impl(
         ("core.testing", "status") => Some((
             vec![(read, Type::Named("TestComparison".to_string()))],
             Some(Type::String),
+        )),
+        ("core.math", "__numeric_stop") => Some((
+            vec![(read, Type::String)],
+            Some(Type::Named("Never".to_string())),
         )),
         ("core.math", "abs_float" | "log1p") => {
             Some((vec![(read, float.clone())], Some(float)))
@@ -1919,7 +2451,7 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::Option(Box::new(int.clone()))),
         )),
-        ("core.math", "abs_diff" | "xor") => Some((
+        ("core.math", "abs_diff") => Some((
             vec![(read, int.clone()), (read, int.clone())],
             Some(int.clone()),
         )),
@@ -1938,7 +2470,7 @@ fn core_fixed_sig_impl(
             Some((vec![(read, float.clone())], Some(float)))
         }
         ("core.math", "round") => Some((vec![(read, float.clone())], Some(int.clone()))),
-        ("core.math", "pow") => Some((
+        ("core.math", "hypot") => Some((
             vec![(read, Type::Float), (read, Type::Float)],
             Some(Type::Float),
         )),
@@ -2397,6 +2929,12 @@ fn core_fixed_sig_impl(
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
         ("core.math.random", "seed") => Some((vec![(read, Type::Int)], None)),
+        ("core.math.random", "__word") => Some((vec![], Some(Type::Int))),
+        ("core.math.random", "__rng_state") => Some((vec![], Some(Type::IntN { signed: false, bits: 64 }))),
+        ("core.math.random", "__rng_try_update") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 }), (read, Type::IntN { signed: false, bits: 64 })],
+            Some(Type::Bool),
+        )),
         // D-RANDSPLIT1=A: seedable PRNG bytes — fast, NOT cryptographically secure.
         // Returns raw `[Int8N]`; for crypto contexts use `core.crypto.random.bytes`.
         ("core.math.random", "bytes" | "randbytes") => {
@@ -2442,16 +2980,16 @@ fn core_fixed_sig_impl(
         ("core.math.random", "paretovariate") => {
             Some((vec![(read, Type::Float)], Some(Type::Float)))
         }
-        // D-CRYPTO-RNG1=A: the fail-closed OS CSPRNG kernel behind the Jet
-        // `core.crypto.random.bytes` wrapper. A missing or rejected provider is
-        // `None` here; the wrapper surfaces it as `CryptoError.Unavailable`.
-        ("core.crypto.random", "bytes") => Some((
+        // D-CRYPTO-RNG1=A: the one fail-closed OS CSPRNG fill behind the Jet
+        // `core.crypto.random.bytes` policy. A missing or rejected provider is
+        // `None` here; the Jet body surfaces it as `CryptoError.Unavailable`.
+        ("core.crypto.random", "__os_entropy") => Some((
             vec![(read, Type::Int)],
             Some(Type::Option(Box::new(list_u8.clone()))),
         )),
         // D-SHAPE-RESOURCE1=A: the Core-internal wipe that each secret-bearing
-        // crypto type's `Close` hands its owned bytes to.
-        ("core.crypto", "__zeroize") => Some((vec![(moved, list_u8.clone())], None)),
+        // crypto type's `Close` lends its resident bytes to exclusively.
+        ("core.crypto", "__zeroize") => Some((vec![(AccessConvention::Write, list_u8.clone())], None)),
         // D-DET1: deterministic injected RNG capability. `random.rng(seed)` builds a
         // reproducible `Rng` from a caller-supplied seed (a pure value); a `#Pure fn`
         // may draw randomness through it (`rng.int(lo, hi)` / `rng.float()`) while the
@@ -2476,7 +3014,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("Instant".to_string()))],
             None,
         )),
-        ("core.rt", "callback") => Some((
+        ("core.rt", "callback" | "__callback") => Some((
             vec![
                 (read, Type::Int),
                 (read, Type::Int),
@@ -2497,6 +3035,30 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::Named("RealtimeStream".to_string())),
         )),
+        ("core.rt", "__next_deadline") => Some((
+            vec![(read, Type::Named("RealtimeStream".to_string()))],
+            Some(Type::Named("Instant".to_string())),
+        )),
+        ("core.rt", "__receipt") => Some((
+            vec![(read, Type::Named("RealtimeStream".to_string()))],
+            Some(Type::Named("RealtimeReceipt".to_string())),
+        )),
+        ("core.rt", "__cancel") => Some((
+            vec![(AccessConvention::Write, Type::Named("RealtimeStream".to_string()))],
+            Some(unit_ty()),
+        )),
+        ("core.rt", "__is_cancelled") => Some((
+            vec![(read, Type::Named("RealtimeStream".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.tasks", "__interval_ms") => Some((
+            vec![(read, Type::Int)],
+            Some(Type::Apply { name: "Receiver".to_string(), args: vec![Type::Int] }),
+        )),
+        ("core.tasks", "__condition_notify_one" | "__condition_notify_all") => Some((
+            vec![(read, Type::Named("Condition".to_string()))],
+            Some(unit_ty()),
+        )),
         ("core.tasks", "timeout") => Some((
             vec![(read, Type::Named(crate::Syntax::DURATION_TYPE.to_string()))],
             Some(unit),
@@ -2508,8 +3070,25 @@ fn core_fixed_sig_impl(
                 args: vec![Type::Int],
             }),
         )),
-        ("core.tasks", "yield_now") => Some((vec![], Some(unit))),
+        ("core.tasks", "yield_now" | "__yield_now") => Some((vec![], Some(unit))),
         ("core.tasks", "current_task") => Some((vec![], Some(string.clone()))),
+        ("core.tasks", "__task_paused" | "__task_cancelled") => {
+            Some((vec![], Some(Type::Option(Box::new(Type::Bool)))))
+        }
+        ("core.time", "__wall_sample") => Some((vec![], Some(Type::Tuple(vec![
+            ("seconds".to_string(), Box::new(Type::Int)),
+            ("nanoseconds".to_string(), Box::new(Type::Int)),
+            ("before_epoch".to_string(), Box::new(Type::Bool)),
+        ])))),
+        ("core.time", "__world_wall_ms" | "__wall_override_ms" | "__controlled_monotonic_ns" | "__world_monotonic_ns") =>
+            Some((vec![], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.time", "__host_monotonic_ns" | "__clock_mono_ns") => Some((vec![], Some(Type::Int))),
+        ("core.time", "__sleep_ns") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
+        ("core.time", "__reject_uncontrolled") => Some((vec![(read, Type::String)], Some(unit))),
+        ("core.time", "__zone_env") =>
+            Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.time", "__zone_file_bytes" | "__embedded_zone_bytes") =>
+            Some((vec![(read, Type::String)], Some(Type::Option(Box::new(list_u8.clone()))))),
         ("core.time", "start") => Some((vec![], Some(Type::Named("Stopwatch".to_string())))),
         ("core.time", "instant") => Some((vec![], Some(Type::Named("Instant".to_string())))),
         ("core.time", "now") | ("core.time", "now_utc") => {
@@ -2621,6 +3200,7 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::String),
         )),
+        ("core.encoding", "__edition") => Some((vec![], Some(Type::Int))),
         // D-ENC1 + D-JSONVERB1: unified encoding. `parse` → dynamic JSON value; `decode`
         // → lenient typed decode (D-JSON3); `to_string`/`to_string_pretty` → serialize.
         ("core.encoding.json", "parse" | "loads") => Some((
@@ -2631,8 +3211,8 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String)],
             Some(result_ty(json.clone(), encoding_error_ty())),
         )),
-        ("core.encoding.json", "to_string" | "to_string_pretty" | "dumps") => {
-            Some((vec![(read, json)], Some(Type::String)))
+        ("core.encoding.json", "to_string" | "to_string_pretty" | "dumps" | "dump") => {
+            Some((vec![(read, json)], Some(result_ty(Type::String, encoding_error_ty()))))
         }
         // D-JSONCANON1=A: edition 2026 keeps the infallible prototype; 2027 is
         // fallible RFC 8785 JCS with optional EncodingLimits.
@@ -2680,7 +3260,7 @@ fn core_fixed_sig_impl(
         )),
         ("core.encoding.jsonl", "to_string") => Some((
             vec![(read, Type::List(Box::new(json.clone())))],
-            Some(Type::String),
+            Some(result_ty(Type::String, encoding_error_ty())),
         )),
         ("core.encoding.jsonl", "loads") => Some((
             vec![(read, Type::String)],
@@ -2691,14 +3271,14 @@ fn core_fixed_sig_impl(
         )),
         ("core.encoding.jsonl", "dumps") => Some((
             vec![(read, Type::List(Box::new(json.clone())))],
-            Some(Type::String),
+            Some(result_ty(Type::String, encoding_error_ty())),
         )),
         ("core.encoding.jsonl", "count_rows") => {
             Some((vec![(read, Type::String)], Some(Type::Int)))
         }
         ("core.encoding.jsonl", "append_line") => Some((
             vec![(read, Type::String), (read, json.clone())],
-            Some(Type::String),
+            Some(result_ty(Type::String, encoding_error_ty())),
         )),
         ("core.encoding.jsonl", "first") => Some((
             vec![(read, Type::String)],
@@ -2792,6 +3372,17 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
+        ("core.jobs", "__publish_parts") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::String),
+            ],
+            Some(unit_ty()),
+        )),
+        ("core.jobs", "__sleep_ms") => Some((vec![(read, Type::Int)], Some(unit_ty()))),
         ("core.data.loader", "snapshot_reusable") => Some((
             vec![
                 (read, Type::Named("DataSnapshotIdentity".to_string())),
@@ -3161,6 +3752,102 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
+        // Mechanical worker-policy transports; native Services shapes, no policy.
+        ("core.service", "__authority_issue") => Some((vec![],
+            Some(result_ty(Type::String, Type::Named("ServiceError".into()))))),
+        ("core.service", "__tree_write_authority") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (moved, Type::String)], None,
+        )),
+        ("core.service", "__endpoint_unchecked") => Some((
+            vec![(moved, Type::String), (moved, Type::String), (read, Type::Int), (moved, Type::String)],
+            Some(result_ty(Type::Named("ServiceEndpoint".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__worker_mailbox_new") => Some((
+            vec![(moved, Type::Named("ServiceEndpoint".into())),
+                (read, Type::IntN { signed: true, bits: 64 }), (moved, list_string.clone())],
+            Some(result_ty(Type::Named("__WorkerMailbox".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__worker_task_new") => Some((
+            vec![(read, Type::Named("__WorkerStatus".into()))], Some(Type::Named("__TreeSupervisorState".into())),
+        )),
+        ("core.service", "__topology_worker_id") => Some((
+            vec![(read, Type::String), (read, Type::String)], Some(Type::String),
+        )),
+        ("core.service", "__topology_root_id") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.service", "__task_bind_topology") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (read, Type::Named("__WorkerTopologyKind".into())),
+                (moved, Type::String), (moved, Type::Option(Box::new(Type::String)))],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__worker_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (moved, Type::String),
+                (read, Type::Named("__WorkerHandler".into())), (moved, Type::String),
+                (moved, Type::Named("ServiceEndpoint".into())), (moved, Type::Named("__WorkerMailbox".into())),
+                (moved, Type::List(Box::new(Type::IntN { signed: true, bits: 64 }))), (read, Type::Bool),
+                (read, Type::IntN { signed: false, bits: 64 }), (read, Type::IntN { signed: false, bits: 64 }),
+                (moved, Type::Named("__TreeSupervisorState".into()))], None,
+        )),
+        ("core.service", "__worker_tree_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("workers".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                    ("restarts".into(), Box::new(Type::List(Box::new(Type::IntN { signed: true, bits: 64 })))),
+                    ("task".into(), Box::new(Type::Named("__TreeSupervisorState".into()))),
+                ]))))),
+                ("groups".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("restart".into(), Box::new(Type::Named("ServiceRestart".into()))),
+                    ("max".into(), Box::new(Type::Int)), ("per_ms".into(), Box::new(Type::Int)),
+                ]))))),
+                ("supervisors".into(), Box::new(Type::List(Box::new(Type::Named("__TreeSupervisorState".into()))))),
+                ("partitioned".into(), Box::new(list_string.clone())),
+            ])),
+        )),
+        ("core.service", "__authority_now") => Some((vec![], Some(Type::IntN { signed: true, bits: 64 }))),
+        ("core.service", "__task_escalate" | "__task_fail") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (moved, Type::String)],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__task_restart") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into()))],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__authority_update" | "__authority_register") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (read, Type::Bool)],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__close_runtime_groups") => Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into()))], None)),
+        ("core.service", "__tree_write_started") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__publish_tree_topology") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Named("__WorkerTopologyState".into()))], None,
+        )),
+        ("core.service", "__worker_write_restarts") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (moved, Type::List(Box::new(Type::IntN { signed: true, bits: 64 })))], None,
+        )),
+        ("core.service", "__worker_write_running") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__mailbox_close") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], None,
+        )),
+        ("core.service", "__worker_mailbox_depth") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Int),
+        )),
+        ("core.service", "__worker_write_mailbox") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (moved, Type::Named("__WorkerMailbox".into()))], None,
+        )),
+        ("core.service", "__record_topology_restart") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (read, Type::IntN { signed: false, bits: 64 }),
+                (read, Type::Named("__WorkerRestartReason".into()))],
+            Some(result_ty(unit.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__task_write_partition") => Some((
+            vec![(read, Type::Named("__TreeSupervisorState".into())), (read, Type::Named("__WorkerStatus".into())),
+                (moved, Type::Named("TaskFailure".into()))], None,
+        )),
         ("core.service", "worker") => Some((
             vec![
                 (
@@ -3279,10 +3966,369 @@ fn core_fixed_sig_impl(
                 Type::Named("ServiceError".to_string()),
             )),
         )),
-        ("core.service", "dead_letter_count" | "event_count" | "directory_generation") => Some((
+        ("core.service", "dead_letter_count" | "event_count" | "directory_generation"
+            | "__tree_dead_letter_count" | "__tree_event_count" | "__tree_generation") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::Int),
         )),
+        ("core.service", "__tree_started" | "__tree_has_snapshot") =>
+            Some((vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Bool))),
+        ("core.service", "__tree_group_count") =>
+            Some((vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Int))),
+        ("core.service", "__tree_write_delivery") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (AccessConvention::Move, Type::Named("ServiceDelivery".into()))], None)),
+        ("core.service", "__tree_write_restart") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (AccessConvention::Move, Type::Named("ServiceRestart".into()))], None)),
+        ("core.service", "__group_write_restart") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (read, Type::Int)], None)),
+        ("core.service", "__tree_clear_dead_letters" | "__tree_write_empty_adapter" | "__tree_clear_state_authority") =>
+            Some((vec![(AccessConvention::Write, Type::Named("ServiceTree".into()))], None)),
+        ("core.service", "__endpoint_parts") =>
+            Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(Type::Tuple(vec![
+                ("tree".into(), Box::new(Type::String)), ("worker".into(), Box::new(Type::String)),
+                ("generation".into(), Box::new(Type::Int))])))),
+        ("core.service", "__active_endpoint") =>
+            Some((vec![], Some(result_ty(Type::Named("ServiceEndpoint".into()), Type::Named("ServiceError".into()))))),
+        ("core.service", "__endpoint_authority_parts") =>
+            Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(result_ty(Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("tree".into(), Box::new(Type::String)),
+                ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
+                ("started".into(), Box::new(Type::Bool)), ("draining".into(), Box::new(Type::Bool)),
+                ("partitioned".into(), Box::new(Type::Bool))]), Type::Named("ServiceError".into()))))),
+        ("core.service", "__authority_signing_key") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(list_u8.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__authority_validate") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__upgrade_receipt_display") => Some((
+            vec![(read, Type::Named("ServiceUpgradeReceipt".into()))], Some(Type::String),
+        )),
+        ("core.service", "__tree_write_state_adapter") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__tree_write_state_authority") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())),
+                (AccessConvention::Move, Type::String), (AccessConvention::Move, Type::String),
+                (read, Type::Int), (AccessConvention::Move, Type::String), (read, Type::Bool)], None,
+        )),
+        ("core.service", "__tree_state_authority") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))],
+            Some(Type::Option(Box::new(Type::Tuple(vec![
+                ("store".into(), Box::new(Type::String)), ("schema".into(), Box::new(Type::String)),
+                ("version".into(), Box::new(Type::Int)), ("migration".into(), Box::new(Type::String)),
+            ])))),
+        )),
+        ("core.service", "__tree_state_adapter") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Named("__TreeStateAdapter".into())),
+        )),
+        ("core.service", "__tree_chaos_count") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Int),
+        )),
+        ("core.service", "__tree_write_chaos_count") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int)], None,
+        )),
+        ("core.service", "__first_running_endpoint") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Option(Box::new(Type::Named("ServiceEndpoint".into())))),
+        )),
+        ("core.service", "__group_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("workers".into(), Box::new(list_string.clone())),
+                ("groups".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("name".into(), Box::new(Type::String)), ("workers".into(), Box::new(list_string.clone())),
+                ]))))),
+            ])),
+        )),
+        ("core.service", "__group_reparent") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::String), (read, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__group_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String),
+                (AccessConvention::Move, list_string.clone())], None,
+        )),
+        ("core.service", "__event_store_append") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__tree_event_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)], None,
+        )),
+        ("core.service", "__snapshot_store_write") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__tree_route_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("name".into(), Box::new(Type::String)),
+                ("generation".into(), Box::new(Type::Int)),
+                ("upgrade".into(), Box::new(Type::Option(Box::new(Type::Tuple(vec![
+                    ("from_generation".into(), Box::new(Type::Int)), ("to_generation".into(), Box::new(Type::Int)),
+                    ("pinned".into(), Box::new(list_string.clone())),
+                ]))))),
+                ("draining".into(), Box::new(list_string.clone())),
+            ])),
+        )),
+        ("core.service", "__directory_entry") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::String)],
+            Some(Type::Option(Box::new(Type::Tuple(vec![
+                ("name".into(), Box::new(Type::String)), ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("signature".into(), Box::new(Type::String)),
+            ])))),
+        )),
+        ("core.service", "__worker_route") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Named("ServiceEndpoint".into()))],
+            Some(Type::Option(Box::new(Type::Tuple(vec![
+                ("index".into(), Box::new(Type::Int)), ("name".into(), Box::new(Type::String)),
+                ("running".into(), Box::new(Type::Bool)), ("capacity".into(), Box::new(Type::Int)),
+                ("depth".into(), Box::new(Type::Int)),
+            ])))),
+        )),
+        ("core.service", "__worker_sent_account") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], None,
+        )),
+        ("core.service", "__authority_try_send") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (AccessConvention::Move, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__validate_directory_proof") => Some((
+            vec![(read, Type::String), (read, Type::String), (read, Type::String),
+                (read, Type::Named("ServiceEndpoint".into())), (read, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__delivery_read") => Some((
+            vec![(read, Type::Named("Delivery".into())), (read, Type::Bool)],
+            Some(result_ty(Type::Named("__DeliveryFacts".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__delivery_probe") => Some((
+            vec![(read, Type::Named("Delivery".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__delivery_store") => Some((
+            vec![(read, Type::Named("Delivery".into()))], Some(Type::String),
+        )),
+        ("core.service", "__runtime_retry") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("Delivery".into()))],
+            Some(result_ty(Type::Named("Delivery".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__endpoint_mailbox") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into()))],
+            Some(result_ty(Type::Named("__EndpointMailbox".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__mailbox_started" | "__mailbox_draining") => Some((
+            vec![(read, Type::Named("__EndpointMailbox".into()))], Some(Type::Bool),
+        )),
+        ("core.service", "__mailbox_depth") => Some((
+            vec![(read, Type::Named("__EndpointMailbox".into()))], Some(Type::Int),
+        )),
+        ("core.service", "__mailbox_receive") => Some((
+            vec![(read, Type::Named("__EndpointMailbox".into()))], Some(Type::Named("__MailboxRead".into())),
+        )),
+        ("core.service", "__tree_delivery") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Named("ServiceDelivery".into())),
+        )),
+        ("core.service", "__mailbox_snapshot") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(list_string.clone()),
+        )),
+        ("core.service", "__idempotency_records") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::List(Box::new(Type::Tuple(vec![
+                ("key".into(), Box::new(Type::String)), ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("message".into(), Box::new(Type::String)),
+            ])))),
+        )),
+        ("core.service", "__worker_named_index") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::String)],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.service", "__delivery_allocate") => Some((
+            vec![(AccessConvention::Move, Type::String), (AccessConvention::Move, Type::String), (read, Type::Bool),
+                (AccessConvention::Move, Type::String), (read, Type::Int)], Some(Type::Named("Delivery".into())),
+        )),
+        ("core.service", "__delivery_identity") => Some((
+            vec![(read, Type::Named("Delivery".into()))], Some(Type::Tuple(vec![
+                ("id".into(), Box::new(Type::String)), ("store".into(), Box::new(Type::String)),
+                ("duplicate".into(), Box::new(Type::Bool)), ("authority".into(), Box::new(Type::String)),
+                ("generation".into(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.service", "__mailbox_restore") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (AccessConvention::Move, list_string.clone()), (read, Type::Bool)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__dead_letter_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)], None,
+        )),
+        ("core.service", "__idempotency_push") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String),
+                (read, Type::Named("ServiceEndpoint".into())), (AccessConvention::Move, Type::String)], None,
+        )),
+        ("core.service", "__mailbox_try_send") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::String)], Some(Type::Int),
+        )),
+        ("core.service", "__mailbox_try_receive") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Tuple(vec![
+                ("message".into(), Box::new(Type::Option(Box::new(Type::String)))), ("status".into(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.service", "__worker_wait_notify") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int),
+                (read, Type::Named("ServiceEndpoint".into()))], None,
+        )),
+        ("core.service", "__worker_receive_account") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::Bool),
+        )),
+        ("core.service", "__delivery_id") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("ServiceEndpoint".into())),
+                (read, Type::String), (read, Type::String)], Some(Type::String),
+        )),
+        ("core.service", "__runtime_send") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("ServiceEndpoint".into())),
+                (read, Type::String), (read, Type::String)],
+            Some(result_ty(Type::Named("Delivery".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__runtime_dead_letter") => Some((
+            vec![(read, Type::Named("ServiceRuntime".into())), (read, Type::Named("Delivery".into()))],
+            Some(result_ty(Type::Named("Delivery".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__mark_delivered") => Some((
+            vec![(read, Type::String), (read, Type::String)], Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__take_pending") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (read, Type::Int), (read, list_string.clone())],
+            Some(result_ty(Type::List(Box::new(Type::Tuple(vec![
+                ("id".into(), Box::new(Type::String)), ("message".into(), Box::new(Type::String)), ("store".into(), Box::new(Type::String)),
+            ]))), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__requeue_pending") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into())), (AccessConvention::Move, Type::List(Box::new(Type::Tuple(vec![
+                ("id".into(), Box::new(Type::String)), ("message".into(), Box::new(Type::String)), ("store".into(), Box::new(Type::String)),
+            ]))))], Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__finish_drain") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Named("ServiceEndpoint".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__state_load") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Bool)],
+            Some(result_ty(list_string.clone(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__tree_event_records") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(list_string.clone()),
+        )),
+        ("core.service", "__tree_upgrade_receipt") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))],
+            Some(Type::Option(Box::new(Type::Named("ServiceUpgradeReceipt".into())))),
+        )),
+        ("core.service", "__upgrade_receipt_parts") => Some((
+            vec![(read, Type::Named("ServiceUpgradeReceipt".into()))], Some(Type::Tuple(vec![
+                ("from_generation".into(), Box::new(Type::Int)),
+                ("to_generation".into(), Box::new(Type::Int)), ("migration".into(), Box::new(Type::String)),
+                ("rollback_available".into(), Box::new(Type::Bool)), ("pinned_shards".into(), Box::new(list_string.clone())),
+            ])),
+        )),
+        ("core.service", "__tree_display_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("name".into(), Box::new(Type::String)), ("workers".into(), Box::new(Type::Int)),
+                ("handlers".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("name".into(), Box::new(Type::String)), ("handler".into(), Box::new(Type::String)),
+                ]))))),
+                ("started".into(), Box::new(Type::Bool)),
+                ("restart".into(), Box::new(Type::Named("ServiceRestart".into()))),
+                ("budget_max".into(), Box::new(Type::Int)), ("budget_per_ms".into(), Box::new(Type::Int)),
+                ("delivery".into(), Box::new(Type::Named("ServiceDelivery".into()))),
+            ])),
+        )),
+        ("core.service", "__workflow_replay_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(result_ty(
+                Type::List(Box::new(Type::Tuple(vec![
+                    ("run_id".into(), Box::new(Type::Int)), ("history".into(), Box::new(list_string.clone())),
+                    ("outcome".into(), Box::new(Type::Option(Box::new(Type::Named("TaskOutcome".into()))))),
+                ]))), Type::Named("ServiceError".into()),
+            )),
+        )),
+        ("core.service", "__tree_observation_parts") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Tuple(vec![
+                ("workers".into(), Box::new(Type::Int)), ("started".into(), Box::new(Type::Bool)),
+                ("generation".into(), Box::new(Type::Int)), ("dead_letters".into(), Box::new(Type::Int)),
+                ("events".into(), Box::new(Type::Int)), ("chaos".into(), Box::new(Type::Int)),
+                ("draining".into(), Box::new(Type::Int)), ("partitions".into(), Box::new(Type::Int)),
+                ("rollback".into(), Box::new(Type::Bool)),
+                ("workflows".into(), Box::new(Type::List(Box::new(Type::Tuple(vec![
+                    ("status".into(), Box::new(Type::Int)), ("outcome".into(), Box::new(Type::Int)),
+                ]))))),
+            ])),
+        )),
+        ("core.service", "__endpoint_identity_parts") => Some((
+            vec![(read, Type::Named("ServiceEndpoint".into()))], Some(Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("tree".into(), Box::new(Type::String)),
+                ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
+            ])),
+        )),
+        ("core.service", "__endpoint_validation_snapshot") => {
+            let facts = Type::Tuple(vec![
+                ("authority".into(), Box::new(Type::String)), ("tree".into(), Box::new(Type::String)),
+                ("worker".into(), Box::new(Type::String)), ("generation".into(), Box::new(Type::Int)),
+                ("started".into(), Box::new(Type::Bool)), ("draining".into(), Box::new(Type::Bool)),
+                ("partitioned".into(), Box::new(Type::Bool)),
+            ]);
+            Some((vec![(read, Type::Named("ServiceEndpoint".into()))], Some(result_ty(
+                Type::Tuple(vec![
+                    ("exact".into(), Box::new(Type::Option(Box::new(facts.clone())))),
+                    ("candidates".into(), Box::new(Type::List(Box::new(facts)))),
+                ]), Type::Named("ServiceError".into()),
+            ))))
+        },
+        ("core.service", "__tree_task_group_new") => Some((
+            vec![], Some(Type::Named("__TreeTaskGroup".into())),
+        )),
+        ("core.service", "__tree_allocate") => {
+            let native_i64 = Type::IntN { signed: true, bits: 64 };
+            let endpoint_record = Type::Tuple(vec![
+                ("key".into(), Box::new(Type::String)),
+                ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("value".into(), Box::new(Type::String)),
+            ]);
+            let directory_record = Type::Tuple(vec![
+                ("key".into(), Box::new(Type::String)),
+                ("endpoint".into(), Box::new(Type::Named("ServiceEndpoint".into()))),
+                ("handler".into(), Box::new(Type::String)),
+            ]);
+            Some((vec![
+                (AccessConvention::Move, Type::String), // authority
+                (AccessConvention::Move, Type::String), // name
+                (read, native_i64.clone()), // generation
+                (AccessConvention::Move, Type::Named("ServiceDelivery".into())),
+                (AccessConvention::Move, Type::Named("ServiceRestart".into())),
+                (AccessConvention::Move, Type::Tuple(vec![
+                    ("max".into(), Box::new(native_i64.clone())),
+                    ("per_ms".into(), Box::new(native_i64.clone())),
+                ])),
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeWorker".into())))),
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeGroup".into())))),
+                (read, Type::Bool),
+                (AccessConvention::Move, Type::Named("__TreeStateAdapter".into())),
+                (AccessConvention::Move, Type::Option(Box::new(Type::Named("__TreeStateAuthority".into())))),
+                (AccessConvention::Move, Type::Option(Box::new(Type::String))),
+                (AccessConvention::Move, list_string.clone()), // event_log
+                (AccessConvention::Move, list_string.clone()), // dead_letters
+                (AccessConvention::Move, Type::List(Box::new(endpoint_record))),
+                (AccessConvention::Move, Type::List(Box::new(directory_record))),
+                (AccessConvention::Move, list_string.clone()), // draining
+                (AccessConvention::Move, list_string.clone()), // partitioned
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeWorkflowState".into())))),
+                (AccessConvention::Move, Type::Named("__TreeTaskGroup".into())),
+                (AccessConvention::Move, Type::List(Box::new(Type::Named("__TreeSupervisorState".into())))),
+                (read, native_i64.clone()), // chaos_fails
+                (read, native_i64), // previous_generation
+                (AccessConvention::Move, Type::Option(Box::new(Type::Named("ServiceUpgradeReceipt".into())))),
+            ], Some(Type::Named("ServiceTree".into()))))
+        },
         ("core.service", "drain_dead_letters") => Some((
             vec![(
                 AccessConvention::Write,
@@ -3345,6 +4391,45 @@ fn core_fixed_sig_impl(
         ("core.service", "replay_events" | "observe") => Some((
             vec![(read, Type::Named("ServiceTree".to_string()))],
             Some(Type::String),
+        )),
+        ("core.service", "__workflow_sync_tree") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into()))],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__workflow_append") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (AccessConvention::Move, Type::String)],
+            Some(result_ty(unit_ty(), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__workflow_handle") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)],
+            Some(result_ty(Type::Named("ServiceWorkflow".into()), Type::Named("ServiceError".into()))),
+        )),
+        ("core.service", "__workflow_count") => Some((
+            vec![(read, Type::Named("ServiceTree".into()))], Some(Type::Int),
+        )),
+        ("core.service", "__workflow_id_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::String),
+        )),
+        ("core.service", "__workflow_version_at" | "__workflow_run_at" | "__workflow_cursor_at" | "__workflow_history_len" | "__workflow_steps_len" | "__workflow_activity_count") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Int),
+        )),
+        ("core.service", "__workflow_status_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Named("TaskStatus".into())),
+        )),
+        ("core.service", "__workflow_outcome_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int)], Some(Type::Option(Box::new(Type::Named("TaskOutcome".into())))),
+        )),
+        ("core.service", "__workflow_event_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.service", "__workflow_step_at" | "__workflow_activity_key_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::String),
+        )),
+        ("core.service", "__workflow_activity_outcome_at") => Some((
+            vec![(read, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], Some(Type::Named("TaskOutcome".into())),
+        )),
+        ("core.service", "__workflow_set_cursor") => Some((
+            vec![(AccessConvention::Write, Type::Named("ServiceTree".into())), (read, Type::Int), (read, Type::Int)], None,
         )),
         ("core.service", "workflow_start") => Some((
             vec![
@@ -3550,6 +4635,10 @@ fn core_fixed_sig_impl(
                 )),
             ))
         }
+        ("core.data", "__host_path_is_file") => Some((
+            vec![(read, list_u8.clone())],
+            Some(result_ty(Type::Bool, Type::Named("EncodingCause".to_string()))),
+        )),
         ("core.data", "status") => Some((
             vec![],
             Some(Type::List(Box::new(Type::Named("DataStatus".to_string())))),
@@ -3599,7 +4688,7 @@ fn core_fixed_sig_impl(
         ("core.text.fmt", "number" | "bytes" | "duration" | "ordinal") => {
             Some((vec![(read, Type::Int)], Some(Type::String)))
         }
-        ("core.text.fmt", "decimal" | "grouped" | "percent" | "sci") => Some((
+        ("core.text.fmt", "decimal" | "percent" | "sci") => Some((
             vec![(read, Type::Float), (read, Type::Int)],
             Some(Type::String),
         )),
@@ -3667,9 +4756,10 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(json.clone(), Type::Named("XMLError".to_string()))),
         )),
-        ("core.encoding.xml", "to_string") => {
-            Some((vec![(read, json.clone())], Some(Type::String)))
-        }
+        ("core.encoding.xml", "to_string") => Some((
+            vec![(read, json.clone())],
+            Some(result_ty(Type::String, Type::Named("XMLError".to_string()))),
+        )),
         ("core.encoding.xml", "to_bytes") => Some((
             vec![
                 (read, json.clone()),
@@ -3746,14 +4836,111 @@ fn core_fixed_sig_impl(
                 encoding_error_ty(),
             )),
         )),
-        // E2-M7: streaming file handles (D-IO2).
-        ("core.files", "open") => Some((
-            vec![(read, path.clone())],
+        // #3593: policy-free provider leaves behind Core/files/files.jet. Only
+        // embedded Core sources may spell the reserved `__` names.
+        ("core.files", "__create_dir_all_raw") => Some((vec![(read, string.clone())],
+            Some(result_ty(unit_ty(), io.clone())))),
+        ("core.files", "__open_reader") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
             Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
         )),
-        ("core.files", "append" | "create") => Some((
-            vec![(read, path)],
+        // Compiler-private raw leaf for `jet self completions --for`: open
+        // without waiting on a FIFO or device peer.
+        ("core.files", "jet_std_files_open_reader_nonblocking") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Named("FileReader".to_string()), io.clone())),
+        )),
+        ("core.files", "__open_writer") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Bool),
+                (read, Type::Int),
+                (read, Type::Int),
+                (read, Type::Int),
+            ],
             Some(result_ty(Type::Named("FileWriter".to_string()), io.clone())),
+        )),
+        ("core.files", "__open_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(result_ty(Type::Int, io.clone())),
+        )),
+        ("core.files", "__close_directory") => Some((vec![(read, Type::Int)], None)),
+        ("core.files", "__fsync_directory") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__flock") => Some((
+            vec![(read, Type::Int), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__create_directory") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__list_directory") => Some((
+            vec![(read, Type::Int)],
+            Some(result_ty(
+                Type::List(Box::new(Type::List(Box::new(u8_ty())))),
+                io.clone(),
+            )),
+        )),
+        ("core.files", "__stat_at") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__path_kind") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::Int, io.clone())),
+        )),
+        ("core.files", "__rename_at") => Some((
+            vec![
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Int),
+                (read, Type::String),
+                (read, Type::Int),
+            ],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__remove_at") => Some((
+            vec![(read, Type::Int), (read, Type::String), (read, Type::Bool)],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__read_link_at") => Some((
+            vec![(read, Type::Int), (read, Type::String)],
+            Some(result_ty(Type::String, io.clone())),
+        )),
+        ("core.files", "__xattr_names") => Some((
+            vec![(read, Type::String)],
+            Some(result_ty(Type::List(Box::new(Type::String)), io.clone())),
+        )),
+        ("core.files", "__xattr_get") => Some((
+            vec![(read, Type::String), (read, Type::String)],
+            Some(result_ty(
+                Type::Option(Box::new(Type::List(Box::new(u8_ty())))),
+                io.clone(),
+            )),
+        )),
+        ("core.files", "__xattr_set") => Some((
+            vec![
+                (read, Type::String),
+                (read, Type::String),
+                (read, Type::List(Box::new(u8_ty()))),
+            ],
+            Some(result_ty(unit_ty(), io.clone())),
+        )),
+        ("core.files", "__reader_stat") => Some((
+            vec![(read, Type::Named("FileReader".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_stat") => Some((
+            vec![(read, Type::Named("FileWriter".to_string()))],
+            Some(result_ty(Type::List(Box::new(Type::Int)), io.clone())),
+        )),
+        ("core.files", "__writer_set_mode") => Some((
+            vec![(read, Type::Named("FileWriter".to_string())), (read, Type::Int)],
+            Some(result_ty(unit_ty(), io.clone())),
         )),
         // D-URL1=A: typed URLs, query strings, component escaping, and MIME values.
         ("core.net.url", "parse") => Some((
@@ -3775,13 +4962,6 @@ fn core_fixed_sig_impl(
         )),
         ("core.net.url", "file") => Some((
             vec![(read, Type::String)],
-            Some(Type::Named("URL".to_string())),
-        )),
-        ("core.net.url", "data") => Some((
-            vec![
-                (read, Type::Named("MIME".to_string())),
-                (read, Type::String),
-            ],
             Some(Type::Named("URL".to_string())),
         )),
         ("core.net.url", "query") => Some((
@@ -3848,10 +5028,6 @@ fn core_fixed_sig_impl(
                 ("url".to_string(), Box::new(Type::String)),
                 ("fragment".to_string(), Box::new(Type::String)),
             ])),
-        )),
-        ("core.net.mime", "parse") => Some((
-            vec![(read, Type::String)],
-            Some(result_ty(Type::Named("MIME".to_string()), Type::String)),
         )),
         ("core.net.mime", "from_extension" | "extension") => Some((
             vec![(read, Type::String)],
@@ -3922,13 +5098,6 @@ fn core_fixed_sig_impl(
                 AccessConvention::Read,
                 Type::Named("SMTPConfig".to_string()),
             )],
-            Some(result_ty(
-                Type::Named("Mailer".to_string()),
-                Type::Named("EmailError".to_string()),
-            )),
-        )),
-        ("core.email", "smtp_from_env") => Some((
-            vec![],
             Some(result_ty(
                 Type::Named("Mailer".to_string()),
                 Type::Named("EmailError".to_string()),
@@ -4206,71 +5375,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::String), (read, Type::Bool)],
             Some(Type::String),
         )),
-        ("core.time.calendar", "isleap") => {
-            Some((vec![(read, Type::Int)], Some(Type::Bool)))
-        }
-        ("core.time.calendar", "leapdays") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::Int),
-        )),
-        ("core.time.calendar", "weekday") => Some((
-            vec![(read, Type::Int), (read, Type::Int), (read, Type::Int)],
-            Some(Type::Int),
-        )),
-        ("core.time.calendar", "monthrange") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::Tuple(vec![
-                ("days".to_string(), Box::new(Type::Int)),
-                ("weekday".to_string(), Box::new(Type::Int)),
-            ])),
-        )),
-        ("core.time.calendar", "monthcalendar") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
-        )),
-        ("core.time.calendar", "monthcalendar_start") => Some((
-            vec![
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(Type::List(Box::new(Type::List(Box::new(Type::Int))))),
-        )),
-        ("core.time.calendar", "yearcalendar") => Some((
-            vec![(read, Type::Int)],
-            Some(Type::List(Box::new(Type::List(Box::new(
-                Type::List(Box::new(Type::Int)),
-            ))))),
-        )),
-        ("core.time.calendar", "weekheader") => Some((
-            vec![(read, Type::Int), (read, Type::Int)],
-            Some(Type::List(Box::new(Type::String))),
-        )),
-        ("core.time.calendar", "formatmonth") => Some((
-            vec![
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(Type::String),
-        )),
-        ("core.time.calendar", "formatyear") => {
-            Some((vec![(read, Type::Int)], Some(Type::String)))
-        }
-        ("core.time.calendar", "day_name" | "day_abbr" | "month_name" | "month_abbr") => {
-            Some((vec![(read, Type::Int)], Some(Type::String)))
-        }
-        ("core.time.calendar", "timegm") => Some((
-            vec![
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-                (read, Type::Int),
-            ],
-            Some(Type::Int),
-        )),
         ("core.time.expiring", "expired") => Some((
             vec![(read, Type::Int), (read, Type::Int)],
             Some(Type::Bool),
@@ -4313,11 +5417,37 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
+        ("core.log", "__record_emit") => Some((vec![(read, Type::String), (read, Type::String),
+            (read, Type::List(Box::new(Type::Named("LogField".to_string()))))], None)),
+        ("core.log", "__flush") => Some((vec![], None)),
+        ("core.log", "__process_exit") => Some((vec![(read, Type::Int)], None)),
+        ("core.log", "__span_allocate") => Some((vec![(read, Type::String)], Some(Type::Tuple(vec![
+            ("id".to_string(), Box::new(Type::Int)), ("name".to_string(), Box::new(Type::String)),
+        ])))),
+        ("core.log", "__metric_publish") => Some((vec![(read, Type::String), (read, Type::Int)], None)),
+        ("core.web.browser", "__path_join") => Some((vec![(read, Type::String), (read, Type::String)], Some(Type::String))),
+        ("core.web.browser", "__html_path") => Some((vec![(read, Type::String)], Some(Type::String))),
+        ("core.web.browser", "__read_text") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::String))))),
+        ("core.web.browser", "__is_file") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.web.browser", "__file_size" | "__modified_ms") => Some((vec![(read, Type::String)], Some(Type::Option(Box::new(Type::Int))))),
+        ("core.web.browser", "__ws_set_timeout") => Some((vec![(read, Type::Named("WsConn".to_string())), (moved, Type::Int)],
+            Some(result_ty(unit_ty(), Type::Named("WsError".to_string()))))),
+        ("core.web.browser", "__from_connection") => Some((vec![(moved, Type::Named("WsConn".to_string())),
+            (read, Type::Named("BrowserProfile".to_string())), (moved, Type::Named("BrowserTimeout".to_string()))],
+            Some(Type::Named("Browser".to_string())))),
+        ("core.web.browser", "__command") => Some((vec![(read, Type::Named("Browser".to_string())),
+            (read, Type::String), (moved, Type::Named("Dyn".to_string()))],
+            Some(result_ty(Type::Named("Dyn".to_string()), Type::Named("BrowserError".to_string()))))),
+        ("core.web.browser", "__session_started") => Some((vec![(read, Type::Named("Browser".to_string()))], None)),
+        ("core.web.browser", "__cdp") => Some((vec![(read, Type::Named("Browser".to_string())), (moved, Type::Bool)], None)),
+        ("core.web.browser", "__begin_fixture") => Some((vec![(read, Type::Named("BrowserTestConfig".to_string())),
+            (read, Type::String), (read, Type::String), (read, Type::Int), (read, Type::String), (read, Type::Int), (read, Type::Int)],
+            Some(result_ty(Type::Named("BrowserTestFixture".to_string()), Type::Named("BrowserError".to_string()))))),
         ("core.log", "span") => Some((
             vec![(read, string.clone())],
             Some(Type::Named("LogSpan".to_string())),
         )),
-        ("core.log", "enter" | "close") => {
+        ("core.log", "enter" | "close" | "__span_enter" | "__span_close") => {
             Some((vec![(read, Type::Named("LogSpan".to_string()))], None))
         }
         ("core.log", "set_sink") => {
@@ -4333,9 +5463,16 @@ fn core_fixed_sig_impl(
         ("core.log", "disable" | "flush") => Some((vec![], None)),
         ("core.log", "enabled") => Some((vec![(read, Type::String)], Some(bool_))),
         // D-OBS3: set OTel trace_id for all subsequent log entries on this thread.
-        ("core.log", "set_trace_id") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "set_trace_id" | "__trace_store") => Some((vec![(read, Type::String)], None)),
         // D-LOGFMT1=A: override log output format ("json" | "text").
         ("core.log", "setup") => Some((vec![(read, Type::String)], None)),
+        ("core.log", "__level_load") => Some((vec![], Some(Type::Int))),
+        ("core.log", "__disabled_load") => Some((vec![], Some(Type::Bool))),
+        ("core.log", "__level_store" | "__format_store" | "__sample_store" | "__sample_count_store") => {
+            Some((vec![(read, Type::Int)], None))
+        }
+        ("core.log", "__disabled_store") => Some((vec![(read, Type::Bool)], None)),
+        ("core.log", "__sink_store") => Some((vec![(read, Type::String)], None)),
         // core.crypto: vetted hash functions (D-LR3).
         ("core.crypto", "sha256") => Some((
             vec![(read, Type::List(Box::new(u8_ty())))],
@@ -4720,8 +5857,50 @@ fn core_fixed_sig_impl(
             )),
         )),
         // E2-M10: core.net — blocking TCP/UDP sockets (std::net, zero external deps).
+        ("core.net", "__resolve_ordered") => Some((
+            vec![(read, Type::String), (read, Type::IntN { signed: false, bits: 16 })],
+            Some(result_ty(
+                Type::List(Box::new(Type::Named("SocketAddr".to_string()))),
+                Type::Named("__ResolveError".to_string()),
+            )),
+        )),
+        ("core.net", "__ip_from_bytes") => Some((
+            vec![(moved, Type::List(Box::new(u8_ty())))],
+            Some(Type::Named("IPAddr".to_string())),
+        )),
+        ("core.net", "__ip_bytes") => Some((
+            vec![(read, Type::Named("IPAddr".to_string()))],
+            Some(Type::List(Box::new(u8_ty()))),
+        )),
+        ("core.net", "__ip_is_v4") => Some((
+            vec![(read, Type::Named("IPAddr".to_string()))],
+            Some(Type::Bool),
+        )),
+        ("core.net", "__socket_from_parts") => Some((
+            vec![(moved, Type::Named("IPAddr".to_string())),
+                (read, Type::IntN { signed: false, bits: 16 }),
+                (read, Type::IntN { signed: false, bits: 32 }),
+                (read, Type::IntN { signed: false, bits: 32 })],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
+        ("core.net", "__socket_ip") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::Named("IPAddr".to_string())),
+        )),
+        ("core.net", "__socket_port") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::Int),
+        )),
+        ("core.net", "__socket_scope") => Some((
+            vec![(read, Type::Named("SocketAddr".to_string()))],
+            Some(Type::Option(Box::new(Type::Int))),
+        )),
+        ("core.net", "__udp_packet_addr") => Some((
+            vec![(read, Type::Named("UDPPacket".to_string()))],
+            Some(Type::Named("SocketAddr".to_string())),
+        )),
         ("core.net", "gethostname") => Some((vec![], Some(Type::String))),
-        ("core.net", "tcp_listen") => Some((
+        ("core.net", "tcp_listen" | "__tcp_listen") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("TCPListener".to_string()),
@@ -4743,13 +5922,6 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("IPAddr".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.net", "socket_addr") => Some((
-            vec![(read, Type::String), (read, Type::Int)],
-            Some(result_ty(
-                Type::Named("SocketAddr".to_string()),
-                Type::Named("NetError".to_string()),
-            )),
-        )),
         ("core.net", "socket_addr_parse") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
@@ -4765,14 +5937,14 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(Type::Int),
         )),
-        ("core.net", "tcp_listen_addr") => Some((
+        ("core.net", "tcp_listen_addr" | "__tcp_listen_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("TCPListener".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_accept") => Some((
+        ("core.net", "tcp_accept" | "__tcp_accept") => Some((
             vec![(
                 AccessConvention::Read,
                 Type::Named("TCPListener".to_string()),
@@ -4782,21 +5954,21 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect") => Some((
+        ("core.net", "tcp_connect" | "__tcp_connect") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect_addr") => Some((
+        ("core.net", "tcp_connect_addr" | "__tcp_connect_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("TCPStream".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect_timeout") => Some((
+        ("core.net", "tcp_connect_timeout" | "__tcp_connect_timeout") => Some((
             vec![
                 (read, Type::Named("SocketAddr".to_string())),
                 (read, Type::Int),
@@ -4806,7 +5978,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "tcp_connect_happy") => Some((
+        ("core.net", "tcp_connect_happy" | "__tcp_connect_happy") => Some((
             vec![(read, Type::String), (read, Type::Int), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("TCPStream".to_string()),
@@ -4934,21 +6106,21 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::String, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr") => Some((
+        ("core.net", "tcp_local_socket_addr" | "tcp_peer_socket_addr" | "__tcp_local_socket_addr" | "__tcp_peer_socket_addr") => Some((
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "listener_local_socket_addr") => Some((
+        ("core.net", "listener_local_socket_addr" | "__listener_local_socket_addr") => Some((
             vec![(read, Type::Named("TCPListener".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "set_timeout") => Some((
+        ("core.net", "set_timeout" | "__set_timeout") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -4958,7 +6130,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "set_read_timeout" | "set_write_timeout") => Some((
+        ("core.net", "set_read_timeout" | "set_write_timeout" | "__set_read_timeout" | "__set_write_timeout") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -4968,11 +6140,11 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "nodelay") => Some((
+        ("core.net", "nodelay" | "__nodelay") => Some((
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::Bool, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "set_nodelay") => Some((
+        ("core.net", "set_nodelay" | "__set_nodelay") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -4982,11 +6154,11 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "ttl") => Some((
+        ("core.net", "ttl" | "__ttl") => Some((
             vec![(read, Type::Named("TCPStream".to_string()))],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "set_ttl") => Some((
+        ("core.net", "set_ttl" | "__set_ttl") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5011,7 +6183,7 @@ fn core_fixed_sig_impl(
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
         // Convenience: send a complete HTTP/1.1 response and close the stream.
-        ("core.net", "tcp_reply") => Some((
+        ("core.net", "tcp_reply" | "__tcp_reply") => Some((
             vec![
                 (AccessConvention::Move, Type::Named("TCPStream".to_string())),
                 (read, Type::String),
@@ -5019,35 +6191,35 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_bind") => Some((
+        ("core.net", "udp_bind" | "__udp_bind") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("UDPSocket".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_bind_addr") => Some((
+        ("core.net", "udp_bind_addr" | "__udp_bind_addr") => Some((
             vec![(read, Type::Named("SocketAddr".to_string()))],
             Some(result_ty(
                 Type::Named("UDPSocket".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_local_addr") => Some((
+        ("core.net", "udp_local_addr" | "__udp_local_addr") => Some((
             vec![(read, Type::Named("UDPSocket".to_string()))],
             Some(result_ty(
                 Type::Named("SocketAddr".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_set_timeout") => Some((
+        ("core.net", "udp_set_timeout" | "__udp_set_timeout") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_send_to") => Some((
+        ("core.net", "udp_send_to" | "__udp_send_to") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::String),
@@ -5055,7 +6227,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_recv_from") => Some((
+        ("core.net", "udp_recv_from" | "__udp_recv_from") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
@@ -5065,7 +6237,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "udp_send_bytes_to") => Some((
+        ("core.net", "udp_send_bytes_to" | "__udp_send_bytes_to") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::List(Box::new(u8_ty()))),
@@ -5073,7 +6245,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(Type::Int, Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "udp_receive") => Some((
+        ("core.net", "udp_receive" | "__udp_receive") => Some((
             vec![
                 (read, Type::Named("UDPSocket".to_string())),
                 (read, Type::Int),
@@ -5103,14 +6275,14 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("UDPPacket".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.net", "unix_listen") => Some((
+        ("core.net", "unix_listen" | "__unix_listen") => Some((
             vec![(read, Type::String)],
             Some(result_ty(
                 Type::Named("UnixListener".to_string()),
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "unix_accept") => Some((
+        ("core.net", "unix_accept" | "__unix_accept") => Some((
             vec![(read, Type::Named("UnixListener".to_string()))],
             Some(result_ty(
                 Type::Named("UnixStream".to_string()),
@@ -5124,7 +6296,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "unix_read") => Some((
+        ("core.net", "unix_read" | "__unix_read") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("UnixStream".to_string()),
@@ -5154,7 +6326,7 @@ fn core_fixed_sig_impl(
                 Type::Named("NetError".to_string()),
             )),
         )),
-        ("core.net", "unix_write_all_bytes") => Some((
+        ("core.net", "unix_write_all_bytes" | "__unix_write_all_bytes") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5164,7 +6336,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "unix_shutdown") => Some((
+        ("core.net", "unix_shutdown" | "__unix_shutdown") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5174,7 +6346,7 @@ fn core_fixed_sig_impl(
             ],
             Some(result_ty(unit_ty(), Type::Named("NetError".to_string()))),
         )),
-        ("core.net", "unix_close") => Some((
+        ("core.net", "unix_close" | "__unix_close") => Some((
             vec![(
                 AccessConvention::Write,
                 Type::Named("UnixStream".to_string()),
@@ -5258,6 +6430,28 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("DNSSRV".to_string()))],
             Some(Type::Int),
         )),
+        ("core.http.server", "__route_template") => Some((
+            vec![(read, Type::Named("HTTPRequest".to_string()))],
+            Some(Type::Option(Box::new(Type::String))),
+        )),
+        ("core.http.server", "__response_parts") => Some((
+            vec![
+                (read, Type::IntN { signed: true, bits: 64 }),
+                (moved, Type::String),
+                (moved, Type::Named("Headers".to_string())),
+                (moved, Type::Named("Body".to_string())),
+                (moved, Type::Named("Headers".to_string())),
+                (read, Type::Option(Box::new(Type::IntN { signed: false, bits: 64 }))),
+                (read, Type::Bool),
+                (moved, Type::String),
+                (moved, Type::String),
+                (moved, Type::List(Box::new(Type::String))),
+                (moved, Type::List(Box::new(Type::IntN { signed: true, bits: 64 }))),
+                (read, Type::Bool),
+                (moved, Type::Option(Box::new(Type::String))),
+            ],
+            Some(Type::Named("HTTPResponse".to_string())),
+        )),
         ("core.net", "tls_connect") => Some((
             vec![
                 (AccessConvention::Move, Type::Named("TCPStream".to_string())),
@@ -5305,7 +6499,7 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
-        ("core.net.tls", "read") => Some((
+        ("core.net.tls", "read" | "__read") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5331,7 +6525,7 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
-        ("core.net.tls", "write") => Some((
+        ("core.net.tls", "write" | "__write") => Some((
             vec![
                 (
                     AccessConvention::Write,
@@ -5344,26 +6538,13 @@ fn core_fixed_sig_impl(
                 Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
             )),
         )),
-        ("core.net.tls", "write_all") => Some((
+        ("core.net.tls", "write_all" | "__write_all") => Some((
             vec![
                 (
                     AccessConvention::Write,
                     Type::Named("TLSStream".to_string()),
                 ),
                 (read, Type::List(Box::new(u8_ty()))),
-            ],
-            Some(result_ty(
-                unit_ty(),
-                Type::Named(Syntax::TYPE_IO_ERROR.to_string()),
-            )),
-        )),
-        ("core.net.tls", "write_text") => Some((
-            vec![
-                (
-                    AccessConvention::Write,
-                    Type::Named("TLSStream".to_string()),
-                ),
-                (read, Type::String),
             ],
             Some(result_ty(
                 unit_ty(),
@@ -5465,7 +6646,7 @@ fn core_fixed_sig_impl(
             Some(Type::Named("RegexFlags".to_string())),
         )),
         ("core.regex", "escape") => Some((vec![(read, Type::String)], Some(Type::String))),
-        ("core.regex", "compile") => Some((
+        ("core.regex", "compile" | "regex") => Some((
             vec![(read, Type::String)],
             Some(result_ty(Type::Named("Regex".to_string()), Type::String)),
         )),
@@ -5536,6 +6717,22 @@ fn core_fixed_sig_impl(
             ],
             Some(Type::String),
         )),
+        ("core.regex", "join") => Some((
+            vec![(read, Type::Named(Syntax::TYPE_REGEX.to_string()))],
+            Some(Type::String),
+        )),
+        ("core.regex", "expand") => Some((
+            vec![(read, Type::Named("Match".to_string())), (read, Type::String)],
+            Some(Type::String),
+        )),
+        ("core.regex", "purge") => Some((vec![], None)),
+        ("core.regex", "subn") => Some((
+            vec![(read, Type::Named(Syntax::TYPE_REGEX.to_string())), (read, Type::String), (read, Type::String)],
+            Some(Type::Tuple(vec![
+                ("text".to_string(), Box::new(Type::String)),
+                ("count".to_string(), Box::new(Type::Int)),
+            ])),
+        )),
         // Jet owns archive containers and keeps malformed-input paths typed.
         ("core.archive", "zip_decompress") => Some((
             vec![(read, list_u8.clone())],
@@ -5602,25 +6799,25 @@ fn core_fixed_sig_impl(
         )),
         // D-RAYLIB1=A / D-FLAGSHIP-RAYLIB1=A: first bounded `core.game.raylib`
         // bridge. The surface is intentionally tiny and display-gated.
-        ("core.game.raylib", "window_open") => Some((
+        ("core.game.raylib", "window_open" | "__window_open") => Some((
             vec![(read, Type::Int), (read, Type::Int), (read, Type::String)],
             Some(Type::Named("RaylibWindow".to_string())),
         )),
-        ("core.game.raylib", "window_should_close") => Some((
+        ("core.game.raylib", "window_should_close" | "__window_should_close") => Some((
             vec![(read, Type::Named("RaylibWindow".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "window_ready") => Some((
+        ("core.game.raylib", "window_ready" | "__window_ready") => Some((
             vec![(read, Type::Named("RaylibWindow".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "begin_drawing") => {
+        ("core.game.raylib", "begin_drawing" | "__begin_drawing") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
-        ("core.game.raylib", "clear_background") => {
+        ("core.game.raylib", "clear_background" | "__clear_background") => {
             Some((vec![(read, Type::Named("RaylibColor".to_string()))], None))
         }
-        ("core.game.raylib", "draw_rectangle") => Some((
+        ("core.game.raylib", "draw_rectangle" | "__draw_rectangle") => Some((
             vec![
                 (read, Type::Int),
                 (read, Type::Int),
@@ -5630,7 +6827,7 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
-        ("core.game.raylib", "draw_text") => Some((
+        ("core.game.raylib", "draw_text" | "__draw_text") => Some((
             vec![
                 (read, Type::String),
                 (read, Type::Int),
@@ -5640,12 +6837,12 @@ fn core_fixed_sig_impl(
             ],
             None,
         )),
-        ("core.game.raylib", "end_drawing") => Some((vec![], None)),
-        ("core.game.raylib", "close_window") => {
+        ("core.game.raylib", "end_drawing" | "__end_drawing") => Some((vec![], None)),
+        ("core.game.raylib", "close_window" | "__close_window") => {
             Some((vec![(read, Type::Named("RaylibWindow".to_string()))], None))
         }
-        ("core.game.raylib", "key_down") => Some((vec![(read, Type::String)], Some(Type::Bool))),
-        ("core.game.raylib", "set_target_fps") => Some((vec![(read, Type::Int)], None)),
+        ("core.game.raylib", "key_down" | "__key_down") => Some((vec![(read, Type::String)], Some(Type::Bool))),
+        ("core.game.raylib", "set_target_fps" | "__set_target_fps") => Some((vec![(read, Type::Int)], None)),
         ("core.game.raylib", "color") => Some((
             vec![
                 (read, Type::Int),
@@ -5663,19 +6860,19 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("RaylibSound".to_string()))],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "gamepad_down") => Some((
+        ("core.game.raylib", "gamepad_down" | "__gamepad_down") => Some((
             vec![(read, Type::Int), (read, Type::String)],
             Some(Type::Bool),
         )),
-        ("core.game.raylib", "gamepad_axis") => Some((
+        ("core.game.raylib", "gamepad_axis" | "__gamepad_axis") => Some((
             vec![(read, Type::Int), (read, Type::String)],
             Some(Type::Float),
         )),
-        ("core.game.raylib", "load_texture_atlas") => Some((
+        ("core.game.raylib", "load_texture_atlas" | "__load_texture_atlas") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("RaylibTextureAtlas".to_string())),
         )),
-        ("core.game.raylib", "draw_sprite") => Some((
+        ("core.game.raylib", "draw_sprite" | "__draw_sprite") => Some((
             vec![
                 (read, Type::Named("RaylibTextureAtlas".to_string())),
                 (read, Type::String),
@@ -5742,12 +6939,39 @@ fn core_fixed_sig_impl(
         // below), not a second module-call surface. There is no raw-string
         // `execute(sql)` escape (D-DBDRIVER1's build plan: "must not expose a
         // generic `execute_raw(sql)` escape").
-        ("core.db", "open") => Some((
+        // Core-private mechanical SQLite queue leaves; source owns SQL policy.
+        ("core.db", "__queue_raw_open") => Some((
+            vec![(read, Type::String)],
+            Some(Type::IntN { signed: false, bits: 64 }),
+        )),
+        ("core.db", "__queue_raw_close" | "__queue_raw_begin" | "__queue_raw_commit" | "__queue_raw_rollback") => Some((
+            vec![(read, Type::IntN { signed: false, bits: 64 })],
+            Some(Type::Bool),
+        )),
+        ("core.db", "__queue_raw_execute" | "__queue_raw_query") => {
+            let row = Type::Map {
+                key: Box::new(Type::String),
+                key_span: None,
+                value: Box::new(Type::Named("DBValue".to_string())),
+            };
+            Some((
+                vec![
+                    (read, Type::IntN { signed: false, bits: 64 }),
+                    (read, Type::String),
+                    (read, Type::List(Box::new(Type::Named("DBValue".to_string())))),
+                ],
+                Some(result_ty(
+                    if name == "__queue_raw_execute" { Type::Int } else { Type::List(Box::new(row)) },
+                    db_error_ty(),
+                )),
+            ))
+        },
+        ("core.db", "open" | "__open") => Some((
             vec![(read, Type::String)],
             Some(Type::Named("DBConnection".to_string())),
         )),
-        ("core.db", "open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
-        ("core.db", "pool") => Some((
+        ("core.db", "open_memory" | "__open_memory") => Some((vec![], Some(Type::Named("DBConnection".to_string())))),
+        ("core.db", "pool" | "__pool") => Some((
             vec![(read, Type::String), (read, Type::Int)],
             Some(result_ty(
                 Type::Named("DBPool".to_string()),
@@ -5756,7 +6980,7 @@ fn core_fixed_sig_impl(
         )),
         // D-DBPOLICY1: policy compilation and row reads report on the module's
         // one failure domain, `DBError`, like pool/transaction/migrate.
-        ("core.db", "policy") => Some((
+        ("core.db", "policy" | "__policy") => Some((
             vec![(read, Type::String), (read, Type::String)],
             Some(result_ty(
                 Type::Named("RowPolicy".to_string()),
@@ -5765,34 +6989,11 @@ fn core_fixed_sig_impl(
         )),
         // D-DBPOLICY1: audit is scoped to the active DBScope, so it cannot
         // inspect or manufacture authority for another connection.
-        ("core.db", "policy_audit") => Some((
+        ("core.db", "policy_audit" | "__policy_audit") => Some((
             vec![(read, Type::Named("DBScope".to_string()))],
             Some(Type::String),
         )),
-        ("core.db", "row_value") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(
-                Type::Named(Syntax::TYPE_DB_VALUE.to_string()),
-                db_error_ty(),
-            )),
-        )),
-        ("core.db", "row_int") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Int, db_error_ty())),
-        )),
-        ("core.db", "row_float") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Float, db_error_ty())),
-        )),
-        ("core.db", "row_text") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::String, db_error_ty())),
-        )),
-        ("core.db", "row_bool") => Some((
-            vec![(read, db_row_ty()), (read, Type::String)],
-            Some(result_ty(Type::Bool, db_error_ty())),
-        )),
-        ("core.db", "transaction") | ("core.db", "migrate") => Some((
+        ("core.db", "transaction" | "__transaction" | "migrate" | "__migrate") => Some((
             vec![
                 (read, Type::Named("DBScope".to_string())),
                 (read, Type::String),
@@ -5970,6 +7171,8 @@ fn core_fixed_sig_impl(
             Some(Type::Named(crate::Syntax::TYPE_KEY.to_string())),
         )),
         // D-FIDELITY-API1=A: runtime-global fidelity signal.
+        ("core.perf", "__read_bits") => Some((vec![], Some(int))),
+        ("core.perf", "__write_bits") => Some((vec![(read, int)], Some(unit))),
         ("core.perf", "fidelity") => Some((vec![], Some(float))),
         ("core.perf", "default_fidelity") => Some((vec![], Some(float.clone()))),
         ("core.perf", "override_fidelity") => Some((
@@ -6009,10 +7212,10 @@ fn core_fixed_sig_impl(
             Some(ui_preview),
         )),
         // D-RENDERTGT2=A (c133 M1): UI geometry constructors.
-        ("core.ui", "null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
-        ("core.ui", "tui_backend") => Some((vec![], Some(Type::Named("TUIBackend".to_string())))),
+        ("core.ui", "null_backend" | "__null_backend") => Some((vec![], Some(Type::Named("NullBackend".to_string())))),
+        ("core.ui", "tui_backend" | "__tui_backend") => Some((vec![], Some(Type::Named("TUIBackend".to_string())))),
         // D-UIDEVSHELL1=A (c134 Phase 8): native Linux GTK4 backend constructor.
-        ("core.ui", "gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
+        ("core.ui", "gtk_backend" | "__gtk_backend") => Some((vec![], Some(Type::Named("GtkBackend".to_string())))),
         ("core.ui", "point") => Some((
             vec![(read, float.clone()), (read, float)],
             Some(Type::Named("Point".to_string())),
@@ -6038,6 +7241,47 @@ fn core_fixed_sig_impl(
                 (read, float),
             ],
             Some(Type::Named("SizeConstraint".to_string())),
+        )),
+        ("core.ui", "__node_transfer") => Some((
+            vec![
+                (read, string.clone()),
+                (read, float.clone()),
+                (read, float.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, Type::List(Box::new(Type::Named("UINode".to_string())))),
+                (read, bool_.clone()),
+                (read, string.clone()),
+                (read, int.clone()),
+                (read, bool_),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+                (read, int.clone()),
+            ],
+            Some(Type::Named("UINode".to_string())),
+        )),
+        ("core.ui", "__viewport_transfer") => Some((
+            vec![(read, int.clone()), (read, int.clone()), (read, int.clone()), (read, int.clone())],
+            Some(Type::Named("UIPreviewViewport".to_string())),
+        )),
+        ("core.ui.host", "__request_transfer") => Some((
+            vec![(read, int.clone()), (read, string.clone()),
+                (read, Type::Named("UIFSGrant".to_string())), (read, bool_.clone()),
+                (read, Type::List(Box::new(Type::Named("UIFileFilter".to_string())))),
+                (read, bool_)],
+            Some(Type::Named("UIFileDialogRequest".to_string())),
+        )),
+        ("core.ui", "__accessibility_transfer") => Some((
+            vec![(read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UIAccessibility".to_string())), (read, bool_)],
+            Some(Type::Named("UINode".to_string())),
+        )),
+        ("core.ui", "__shortcut_transfer") => Some((
+            vec![(read, Type::Named("UINode".to_string())),
+                (read, Type::Named("UIShortcut".to_string())), (read, bool_)],
+            Some(Type::Named("UINode".to_string())),
         )),
         ("core.ui", "node") => Some((
             vec![(read, string.clone()), (read, float.clone()), (read, float)],
@@ -6263,7 +7507,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("TUIListState".to_string()))],
             Some(int),
         )),
-        ("core.ui.host", "capabilities") => Some((
+        ("core.ui.host", "capabilities" | "__capabilities") => Some((
             vec![],
             Some(Type::Named("UICapabilityFacts".to_string())),
         )),
@@ -6279,9 +7523,6 @@ fn core_fixed_sig_impl(
             vec![],
             Some(Type::Named("UIFileFilter".to_string())),
         )),
-        ("core.ui.host", "fs_rights_read" | "fs_rights_write" | "fs_rights_read_write") => {
-            Some((vec![], Some(Type::Named("UIFSRights".to_string()))))
-        }
         ("core.ui.host", "fs_grant") => Some((
             vec![
                 (read, string.clone()),
@@ -6293,7 +7534,7 @@ fn core_fixed_sig_impl(
             vec![(read, Type::Named("UIFSGrant".to_string()))],
             Some(Type::Named("UIFileDialogRequest".to_string())),
         )),
-        ("core.ui.host", "open_file" | "save_file") => Some((
+        ("core.ui.host", "open_file" | "save_file" | "__open_file" | "__save_file") => Some((
             vec![(read, Type::Named("UIFileDialogRequest".to_string()))],
             Some(ui_result(Type::Named("UIFileDialogSelection".to_string()))),
         )),
@@ -6308,21 +7549,21 @@ fn core_fixed_sig_impl(
             vec![(read, string.clone()), (read, string.clone())],
             Some(ui_result(Type::Named("UIAccessibility".to_string()))),
         )),
-        ("core.ui.host.clipboard", "read_text") => Some((
+        ("core.ui.host.clipboard", "read_text" | "__read_text") => Some((
             vec![],
             Some(ui_result(Type::Named("UIClipboardText".to_string()))),
         )),
-        ("core.ui.host.clipboard", "write_text") => Some((
+        ("core.ui.host.clipboard", "write_text" | "__write_text") => Some((
             vec![(read, string.clone())],
             Some(ui_result(Type::Named("UIClipboardWrite".to_string()))),
         )),
-        ("core.ui.host.ime", "poll") => Some((
+        ("core.ui.host.ime", "poll" | "__poll") => Some((
             vec![],
             Some(ui_result(Type::Option(Box::new(Type::Named(
                 "UIIMEEvent".to_string(),
             ))))),
         )),
-        ("core.ui.host.drag_drop", "poll") => Some((
+        ("core.ui.host.drag_drop", "poll" | "__poll") => Some((
             vec![],
             Some(ui_result(Type::Option(Box::new(Type::Named(
                 "UIDragEvent".to_string(),
@@ -6335,13 +7576,17 @@ fn core_fixed_sig_impl(
             ],
             Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
         )),
-        ("core.ui.host.shortcuts", "register") => Some((
+        ("core.ui.host.shortcuts", "register" | "__register") => Some((
             vec![(read, Type::Named("UIShortcutBinding".to_string()))],
             Some(ui_result(Type::Named("UIShortcutBinding".to_string()))),
         )),
-        ("core.ui.host.shortcuts", "dispatch") => Some((
+        ("core.ui.host.shortcuts", "dispatch" | "__dispatch") => Some((
             vec![(read, Type::Named("UIShortcut".to_string()))],
             Some(ui_result(Type::Named("UIShortcutDispatch".to_string()))),
+        )),
+        ("core.ui.host.accessibility", "__attach") => Some((
+            vec![(read, Type::Named("UINode".to_string())), (read, Type::Named("UIAccessibility".to_string()))],
+            Some(ui_result(Type::Named("UINode".to_string()))),
         )),
         ("core.ui.host.accessibility", "attach") => Some((
             vec![
@@ -6350,7 +7595,7 @@ fn core_fixed_sig_impl(
             ],
             Some(ui_result(unit.clone())),
         )),
-        ("core.ui.host.accessibility", "project") => Some((
+        ("core.ui.host.accessibility", "project" | "__project") => Some((
             vec![
                 (read, Type::Named("UINode".to_string())),
                 (read, Type::Named("UINodeID".to_string())),
@@ -6537,6 +7782,7 @@ impl CoreDefault {
                 resolved_ret: None,
                 operator_rhs: None,
                 checked_widen: false,
+                checked_callee: None,
             },
             CoreDefault::StaticEnum { type_name, variant } => crate::AST::Expr::EnumLit {
                 type_name: type_name.to_string(),
@@ -6600,6 +7846,14 @@ pub fn core_param_contract(module: &str, name: &str) -> Option<Vec<CoreParam>> {
             required_either("seed"),
             required_either("cases"),
             optional_label_only("strategy"),
+            required_either("model"),
+            required_either("actual"),
+            required_either("observe"),
+        ]),
+        ("core.testing", "__histories_with_provenance") => Some(vec![
+            required_either("seed"),
+            required_either("cases"),
+            required_either("strategy"),
             required_either("model"),
             required_either("actual"),
             required_either("observe"),
@@ -6835,8 +8089,37 @@ pub(crate) fn apply_core_call_defaults(
 
 #[cfg(test)]
 mod tests {
-    use super::{core_fixed_sig, result_ty};
-    use crate::AST::Type;
+    use super::{core_call_semantic_signature, core_fixed_sig, result_ty};
+    use crate::AST::{AccessConvention, Type};
+
+    #[test]
+    fn synthesized_named_tuples_use_canonical_field_order() {
+        let (_, line) = core_fixed_sig("core.term", "__terminal8_line").unwrap();
+        let Type::Tuple(fields) = line.unwrap() else { panic!("line tuple"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            ["cause", "eof", "line"]);
+        let (_, size) = core_fixed_sig("core.term", "__terminal8_stty").unwrap();
+        let Type::Option(inner) = size.unwrap() else { panic!("optional size"); };
+        let Type::Tuple(fields) = *inner else { panic!("nested size tuple"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["h", "w"]);
+        let (_, failure) = core_fixed_sig("core.sys", "__dotenv_read").unwrap();
+        let Type::Result { err, .. } = failure.unwrap() else { panic!("fallible dotenv"); };
+        let Type::Tuple(fields) = *err else { panic!("tuple failure domain"); };
+        assert_eq!(fields.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(), ["cause", "not_found"]);
+    }
+
+    #[test]
+    fn hypot_raw_signature_preserves_polymorphic_checking() {
+        assert!(core_fixed_sig("core.math", "hypot").is_none());
+        assert_eq!(
+            core_call_semantic_signature("core.math", "hypot"),
+            Some((
+                vec![(AccessConvention::Read, Type::Float), (AccessConvention::Read, Type::Float)],
+                Type::Float,
+            )),
+        );
+        assert!(core_call_semantic_signature("core.math", "missing_member").is_none());
+    }
 
     #[test]
     fn ui_host_result_signatures_are_structural_results() {
@@ -6906,6 +8189,64 @@ mod tests {
         for (module, name, ok) in expected {
             let (_, ret) = core_fixed_sig(module, name).expect("UI host row must have a signature");
             assert_eq!(ret, Some(result_ty(ok, ui_error.clone())), "{module}::{name}");
+        }
+    }
+
+    #[test]
+    fn held_directory_kernel_rows_have_exact_typed_field_projections() {
+        let read = super::AccessConvention::Read;
+        let directory = super::Syntax::core_call("core.files", "__directory_fd")
+            .expect("held-directory descriptor row");
+        assert_eq!(directory.arity(), 1);
+        let (params, ret) = super::core_fixed_sig_for_row(directory).expect("typed directory row");
+        assert_eq!(params, vec![(read, Type::Int)]);
+        let Some(Type::Tuple(mut fields)) = ret else { panic!("directory fact tuple"); };
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(fields, vec![
+            ("available".into(), Box::new(Type::Bool)),
+            ("fd".into(), Box::new(Type::Int)),
+            ("held".into(), Box::new(Type::Bool)),
+        ]);
+        let process = super::Syntax::core_call("core.process", "__with_directory_raw")
+            .expect("existing held-directory ProcessSpec attachment row");
+        assert_eq!(process.arity(), 4);
+        let (params, ret) = super::core_fixed_sig_for_row(process).expect("typed process row");
+        assert_eq!(params, vec![
+            (read, Type::Named("ProcessSpec".into())), (read, Type::Int),
+            (read, Type::Int), (read, Type::Bool),
+        ]);
+        let Some(Type::Tuple(mut fields)) = ret else { panic!("process fact tuple"); };
+        fields.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(fields, vec![
+            ("assigned_fd".into(), Box::new(Type::Int)),
+            ("available".into(), Box::new(Type::Bool)),
+            ("errno".into(), Box::new(Type::Int)),
+            ("spec".into(), Box::new(Type::Named("ProcessSpec".into()))),
+        ]);
+    }
+
+    #[test]
+    fn private_file_and_testing_host_rows_have_typed_signatures() {
+        for (module, member) in [
+            ("core.files", "__host_path_is_absolute"),
+            ("core.files", "__host_path_join"),
+            ("core.files", "__temp_path_sample"),
+            ("core.files", "__temp_directory"),
+            ("core.testing", "__evidence_read"),
+            ("core.testing", "__record_failure"),
+            ("core.testing", "__clear_failure"),
+            ("core.testing", "__temp_facts"),
+            ("core.testing", "__temp_join"),
+            ("core.testing", "__temp_remove"),
+            ("core.testing", "__temp_create"),
+            ("core.testing", "__text_window"),
+            ("core.testing", "__suite_snapshot"),
+        ] {
+            let row = super::Syntax::core_call(module, member).expect("registered native row");
+            let (parameters, result) = super::core_fixed_sig_for_row(row)
+                .unwrap_or_else(|| panic!("{module}.{member} needs its Jet registry signature"));
+            assert_eq!(parameters.len(), row.arity());
+            assert!(result.is_some(), "{module}.{member} has an explicit result type");
         }
     }
 }

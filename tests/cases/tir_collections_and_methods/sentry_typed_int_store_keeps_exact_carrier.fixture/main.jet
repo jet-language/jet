@@ -1,0 +1,13 @@
+
+use core.mem
+fn run() {
+    cell := 7
+    address :: mem.address_of(cell)
+    #Unsafe("the typed pointer refers to the live local cell for these stores") {
+        pointer :: mem.Ptr<Int>.from_addr(address)
+        mem.volatile_write(pointer, 11)
+        print(mem.volatile_read(pointer))
+        mem.volatile_write(pointer, 9223372036854775808)
+        print(cell)
+    }
+}

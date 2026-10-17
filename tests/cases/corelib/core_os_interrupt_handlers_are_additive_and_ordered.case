@@ -1,0 +1,14 @@
+# Port of tests/corelib_parts/compile.rs::core_os_interrupt_handlers_are_additive_and_ordered; guest sources preserved verbatim.
+requires: os:unix
+refused: read_bytes
+# PENDING-GRAMMAR(batch-four): raw-session SIGINT; exact ready and rest bytes.
+fixture: fixtures/core_os_interrupt_handlers_are_additive_and_ordered
+step: jet build fixture.jet
+session app raw: built
+recv app until = "ready\n"
+stdout: = "ready\n"
+signal app: INT
+close app
+exit: 0
+stdout: = "second\n"
+stderr: ~ "panic: first handler failed" # original interrupt boundary diagnostic

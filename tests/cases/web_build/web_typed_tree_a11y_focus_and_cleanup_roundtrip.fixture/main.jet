@@ -1,0 +1,38 @@
+#Target(Web)
+use core.ui as ui
+
+#Target(JS)
+fn render_tree(with_role: Bool) {
+    tree := ui.node("plain", 80.0, 24.0)
+    if with_role {
+        tree = ui.node_role("Named", 80.0, 24.0, ui.aria_role_label())
+    }
+    backend := ui.null_backend()
+    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+}
+
+#Target(JS)
+fn render_focus_tree() {
+    tree := ui.box([ui.button("Save"), ui.button("Cancel")])
+    backend := ui.null_backend()
+    size := backend.measure(tree, ui.constraint(0.0, 0.0, 80.0, 24.0))
+    backend.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
+    backend.paint(tree)
+}
+
+#Target(JS)
+fn render_two_backends() {
+    first := ui.null_backend()
+    first_tree := ui.button("Backend A")
+    first.layout(first_tree, ui.rect(0.0, 0.0, 80.0, 24.0))
+    first.paint(first_tree)
+
+    second := ui.null_backend()
+    second_tree := ui.button("Backend B")
+    second.layout(second_tree, ui.rect(0.0, 24.0, 80.0, 24.0))
+    second.paint(second_tree)
+}
+
+fn run() {}

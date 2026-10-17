@@ -1,0 +1,16 @@
+
+use core.data as data
+
+struct Ticket {
+    region: String
+    amount: Float
+}
+
+fn run() {
+    rows :: [Ticket]{Ticket{region: "West", amount: 2.5}}
+    groups :: data.query(rows)
+        .group_by(sale -> sale.region)
+        .sum(sale -> sale.amount)
+        .collect() ?? panic("group")
+    print("{groups[0].key}:{groups[0].value}")
+}

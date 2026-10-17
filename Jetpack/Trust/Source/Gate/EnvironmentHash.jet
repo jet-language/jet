@@ -5,7 +5,7 @@
 // A stable hash over the env definition's trust-sensitive content: every
 // realized ref, every declared named source (`SourceTable.trust_lines`),
 // and every typed secret declaration, each sorted. Any change re-prompts.
-pub fn trust_env_definition_hash(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec]) -> String Never! {
+fn trust_env_definition_hash(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec]) -> String Never! {
     pkg_sha256_hex(trust_env_definition_text(refs, table, secrets).bytes())
 }
 
@@ -30,7 +30,7 @@ fn trust_env_definition_text(refs: [RefSpec], table: SourceTable, secrets: [Secr
 // Extend the trust identity with typed lifecycle facts: hooks, dotenv paths,
 // presets, package profiles, languages, managed files, services, and
 // integrations are executable environment policy just like package refs.
-pub fn trust_environment_definition_hash(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts) -> String Never! {
+fn trust_environment_definition_hash(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts) -> String Never! {
     content := [String]{trust_env_definition_hash(refs, table, secrets), "\n--lifecycle--\n", facts.lifecycle.fingerprint(), "--presets--\n"}
     loop preset in facts.presets {
         &content.push("{preset.name}\n")
@@ -82,7 +82,7 @@ pub fn trust_environment_definition_hash(refs: [RefSpec], table: SourceTable, se
 }
 
 // The environment hash bound to a managed-file source snapshot.
-pub fn trust_environment_definition_hash_with_snapshot(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts, source_snapshot: String?) -> String Never! {
+fn trust_environment_definition_hash_with_snapshot(refs: [RefSpec], table: SourceTable, secrets: [SecretSpec], facts: EnvironmentFacts, source_snapshot: String?) -> String Never! {
     base :: trust_environment_definition_hash(refs, table, secrets, facts)
     snapshot :: source_snapshot ?? return base
     pkg_sha256_hex("jet-env-definition-with-managed-source-v1\nbase={base}\nmanaged-source={snapshot}\n".bytes())
@@ -90,24 +90,24 @@ pub fn trust_environment_definition_hash_with_snapshot(refs: [RefSpec], table: S
 
 // U16: a foreign flake/devenv file is untrusted evaluator input keyed by
 // its content.
-pub fn trust_flake_definition_hash(content: String) -> String Never! {
+fn trust_flake_definition_hash(content: String) -> String Never! {
     "flake:{pkg_sha256_hex(content.bytes())}"
 }
 
 // Whether entering this env should ever prompt: it declares package refs.
-pub fn trust_is_trust_sensitive(refs: [RefSpec]) -> Bool Never! {
+fn trust_is_trust_sensitive(refs: [RefSpec]) -> Bool Never! {
     trust_is_trust_sensitive_ext(refs, false)
 }
 
 // U13: declared `secrets:` are their own trust decision, independent of
 // whether the env declares packages.
-pub fn trust_is_trust_sensitive_ext(refs: [RefSpec], secrets_declared: Bool) -> Bool Never! {
+fn trust_is_trust_sensitive_ext(refs: [RefSpec], secrets_declared: Bool) -> Bool Never! {
     refs.len() > 0 || secrets_declared
 }
 
 // Any typed lifecycle, preset, language, file, service, or integration fact
 // makes the environment typed: only an env/build grant or hash can trust it.
-pub fn trust_is_typed_environment(facts: EnvironmentFacts) -> Bool Never! {
+fn trust_is_typed_environment(facts: EnvironmentFacts) -> Bool Never! {
     lifecycle :: facts.lifecycle
     integration :: facts.integration_facts
     facts.environment_names.len() > 0 || facts.dev_services.len() > 0
@@ -122,7 +122,7 @@ pub fn trust_is_typed_environment(facts: EnvironmentFacts) -> Bool Never! {
 // Unified env trust: a hash or pattern, an env grant naming the project or
 // hash, a build grant naming the hash, or (without secrets) package grants
 // covering every ref.
-pub fn trust_is_env_trusted(store: String, project_dir: String, hash: String, refs: [RefSpec], secrets: [SecretSpec]) -[FS, Env]> Bool {
+fn trust_is_env_trusted(store: String, project_dir: String, hash: String, refs: [RefSpec], secrets: [SecretSpec]) -[FS, Env]> Bool {
     if trust_is_trusted(store, project_dir, hash) -> return true
     records :: trust_list_records(store)
     if trust_has_env_or_build_grant(records, project_dir, hash) -> return true
@@ -169,7 +169,7 @@ fn trust_is_typed_environment_trusted(store: String, project_dir: String, hash: 
 
 // The complete environment check: integration grants first, then the typed
 // or untyped env check.
-pub fn trust_is_environment_trusted(store: String, project_dir: String, hash: String, refs: [RefSpec], secrets: [SecretSpec], facts: EnvironmentFacts) -[FS, Env]> Bool {
+fn trust_is_environment_trusted(store: String, project_dir: String, hash: String, refs: [RefSpec], secrets: [SecretSpec], facts: EnvironmentFacts) -[FS, Env]> Bool {
     if !trust_integration_grants_trusted(store, facts) -> return false
     if trust_is_typed_environment(facts) -> return trust_is_typed_environment_trusted(store, project_dir, hash)
     trust_is_env_trusted(store, project_dir, hash, refs, secrets)
@@ -177,7 +177,7 @@ pub fn trust_is_environment_trusted(store: String, project_dir: String, hash: St
 
 // `--trust` can approve a definition for one run but never manufactures
 // integration authority; every closed integration grant must be persisted.
-pub fn trust_integration_grants_trusted(store: String, facts: EnvironmentFacts) -[FS]> Bool {
+fn trust_integration_grants_trusted(store: String, facts: EnvironmentFacts) -[FS]> Bool {
     trust_missing_integration_grant(store, facts) == None
 }
 

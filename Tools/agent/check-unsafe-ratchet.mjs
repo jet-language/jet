@@ -416,8 +416,7 @@ function markerSequenceLeadsToFunction(text, start) {
     }
     break;
   }
-  if (startsWord(text, index, "fn")) return true;
-  return startsWord(text, index, "pub") && startsWord(text, skipLayout(text, index + 3), "fn");
+  return startsWord(text, index, "fn");
 }
 
 function markerSequenceLeadsToBlockOrFunction(text, start) {
@@ -489,6 +488,186 @@ function scan(root) {
     counts: Object.fromEntries(Object.entries(counts).sort(([left], [right]) => compareText(left, right))),
     regions,
   };
+}
+
+// ---------------------------------------------------------------------------
+// CoreLib audit (#4619). Every raw operation in the CoreLib (`Core/**`) must
+// sit inside an audited gate, and a CoreLib function that opens an `#Unsafe`
+// block without being an `#Unsafe` function itself is a safe abstraction: it
+// discharges the obligation for every caller, so it needs a recorded proof in
+// the safety.md registry. Otherwise a plain public `fn` launders the gate (a
+// caller reaches the raw operation with no `#Unsafe` of its own).
+
+const CORELIB_DIRECTORY = "Core";
+const ABSTRACTIONS_BEGIN = "<!-- unsafe-abstractions:begin -->";
+const ABSTRACTIONS_END = "<!-- unsafe-abstractions:end -->";
+// The POSIX controls sema gates (Compiler/JetSema/Source/Sema/Calls/Core.jet
+// `sema_call_core_posix_control`, E3101).
+const POSIX_CONTROLS = ["fork", "setuid", "setgid", "setpgid", "setpgrp", "setsid", "initgroups", "kill", "wait", "waitpid", "pipe", "close_fd", "mkfifo", "umask", "getpriority", "setpriority", "utime", "atexit", "stop"];
+// Raw operations, spelled as the CoreLib reaches them: postfix dereference
+// `p.*`, address-based pointer construction, volatile access, and the POSIX
+// controls through the `core.sys` intrinsics.
+const RAW_OPERATIONS = [
+  ["pointer dereference", /\.\*/y],
+  ["pointer from address", /\bPtr\s*<[^>]*>\s*\.\s*from_addr\s*\(/y],
+  ["volatile access", /\bcore\s*\.\s*mem\s*\.\s*volatile_(?:read|write)\b/y],
+  ["POSIX control", new RegExp(`\\bcore\\s*\\.\\s*sys\\s*\\.\\s*(?:${POSIX_CONTROLS.join("|")})\\s*\\(`, "y")],
+];
+
+// The text with every comment and string literal replaced by spaces (line
+// breaks kept), so offsets match the source and nothing quoted looks like code.
+function blankLiterals(text) {
+  const out = text.split("");
+  const blank = (start, end) => {
+    for (let index = start; index < end; index += 1) if (out[index] !== "\n") out[index] = " ";
+  };
+  for (let index = 0; index < text.length;) {
+    let end = index;
+    if (text.startsWith("//", index) || text.startsWith("/*", index)) end = skipComment(text, index);
+    else if (text.startsWith("\"\"\"", index)) end = skipQuoted(text, index, "\"\"\"");
+    else if (text[index] === '"' || text[index] === "`" || text[index] === "'") end = skipQuoted(text, index, text[index]);
+    if (end > index) {
+      blank(index, end);
+      index = end;
+    } else index += 1;
+  }
+  return out.join("");
+}
+
+function scanCoreLibSource(text, relativePath) {
+  const code = blankLiterals(text);
+  const starts = lineStarts(text);
+  const frames = [];
+  const gates = [];
+  const abstractions = [];
+  const violations = [];
+  let depth = 0;
+  let parens = 0;
+  let pendingFunction = null;
+  let nextFunctionUnsafe = false;
+  let pendingGate = false;
+  for (let index = 0; index < code.length; index += 1) {
+    const char = code[index];
+    if (char === "#") {
+      const group = markerGroupStart(text, index) !== null ? markerGroupAt(text, index) : null;
+      if (group) {
+        const unsafe = group.markers.some((marker) => marker.name === "Unsafe" && !marker.negated && marker.reason !== null);
+        if (unsafe && markerSequenceLeadsToFunction(text, group.end)) nextFunctionUnsafe = true;
+        index = group.end - 1;
+        continue;
+      }
+      const found = unsafeAt(text, index);
+      if (found) {
+        if (markerSequenceLeadsToFunction(text, found.end)) nextFunctionUnsafe = true;
+        else pendingGate = true;
+        index = found.end - 1;
+        continue;
+      }
+    }
+    if (startsWord(code, index, "fn") && !isIdentifierCharAt(code, index - 1)) {
+      const nameStart = skipLayout(code, index + 2);
+      if (isIdentifierStartAt(code, nameStart)) {
+        let nameEnd = nameStart + codePointLengthAt(code, nameStart);
+        while (isIdentifierCharAt(code, nameEnd)) nameEnd += codePointLengthAt(code, nameEnd);
+        pendingFunction = { name: code.slice(nameStart, nameEnd), unsafe: nextFunctionUnsafe, line: location(text, starts, index).line, parens };
+        nextFunctionUnsafe = false;
+        index = nameEnd - 1;
+        continue;
+      }
+    }
+    if (char === "(" || char === "[") parens += 1;
+    else if (char === ")" || char === "]") parens -= 1;
+    else if (char === "{") {
+      depth += 1;
+      if (pendingGate) {
+        gates.push(depth);
+        pendingGate = false;
+        if (frames.length) frames[frames.length - 1].gates.push(location(text, starts, index).line);
+      } else if (pendingFunction && parens === pendingFunction.parens) {
+        frames.push({ ...pendingFunction, depth, gates: [] });
+        pendingFunction = null;
+      }
+    } else if (char === "}") {
+      // A default parameter can close a value literal before the function body.
+      if (!pendingFunction || parens === pendingFunction.parens) pendingFunction = null;
+      if (gates.length && gates[gates.length - 1] === depth) gates.pop();
+      if (frames.length && frames[frames.length - 1].depth === depth) {
+        const frame = frames.pop();
+        if (frame.gates.length && !frame.unsafe) abstractions.push({ file: relativePath, function: frame.name, line: frame.line, gates: frame.gates });
+      }
+      depth -= 1;
+    }
+    const audited = gates.length > 0 || frames.some((frame) => frame.unsafe);
+    if (audited) continue;
+    for (const [operation, pattern] of RAW_OPERATIONS) {
+      pattern.lastIndex = index;
+      if (pattern.test(code)) {
+        const position = location(text, starts, index);
+        violations.push({ file: relativePath, line: position.line, column: position.column, operation });
+      }
+    }
+  }
+  return { abstractions, violations };
+}
+
+function scanCoreLib(root) {
+  const directory = join(root, CORELIB_DIRECTORY);
+  const result = { abstractions: [], violations: [] };
+  if (!existsSync(directory)) return result;
+  for (const file of jetFiles(directory)) {
+    const scanned = scanCoreLibSource(readFileSync(file, "utf8"), toPosix(relative(root, file)));
+    result.abstractions.push(...scanned.abstractions);
+    result.violations.push(...scanned.violations);
+  }
+  return result;
+}
+
+// The registry is one JSON array between the abstraction markers in the
+// baseline document: `{ "file", "function", "proof" }` rows written by a
+// reviewer. The checker never invents a proof; `--update` leaves it alone.
+function readAbstractions(text) {
+  const begin = text.indexOf(ABSTRACTIONS_BEGIN);
+  const end = text.indexOf(ABSTRACTIONS_END);
+  if (begin < 0 && end < 0) return null;
+  if (begin < 0 || end < begin) throw new Error("safe-abstraction registry markers are unbalanced");
+  const match = text.slice(begin + ABSTRACTIONS_BEGIN.length, end).match(/```json\n([\s\S]*?)\n```/);
+  if (!match) throw new Error("safe-abstraction registry has no ```json block");
+  const rows = JSON.parse(match[1]);
+  if (!Array.isArray(rows)) throw new Error("safe-abstraction registry must be a JSON array");
+  for (const row of rows) {
+    if (!row || typeof row.file !== "string" || typeof row.function !== "string" || typeof row.proof !== "string" || row.proof.trim().length < 20) {
+      throw new Error(`safe-abstraction registry row needs file, function and a proof of at least 20 characters: ${JSON.stringify(row)}`);
+    }
+  }
+  return rows;
+}
+
+function checkCoreLib(root, baselineText) {
+  const current = scanCoreLib(root);
+  const rows = readAbstractions(baselineText) ?? [];
+  const problems = [];
+  for (const violation of current.violations) {
+    problems.push(`  - ${violation.file}:${violation.line}:${violation.column} ${violation.operation} outside an audited #Unsafe gate`);
+  }
+  const key = (row) => `${row.file}\t${row.function}`;
+  const recorded = new Map(rows.map((row) => [key(row), row]));
+  const found = new Set();
+  for (const abstraction of current.abstractions) {
+    found.add(key(abstraction));
+    if (!recorded.has(key(abstraction))) {
+      problems.push(`  - ${abstraction.file}:${abstraction.line} fn ${abstraction.function} opens #Unsafe at line ${abstraction.gates.join(", ")} but is not an #Unsafe function and has no recorded safe-abstraction proof`);
+    }
+  }
+  for (const row of rows) {
+    if (!found.has(key(row))) problems.push(`  - stale safe-abstraction row: ${row.file} fn ${row.function} no longer opens an #Unsafe block`);
+  }
+  if (problems.length === 0) return null;
+  return [
+    "CoreLib unsafe audit failed:",
+    ...problems,
+    "make the function `#Unsafe(\"<caller contract>\") fn …` so every caller audits the call, or record why it is a safe",
+    "abstraction in the safety.md unsafe-abstractions registry (file, function, proof).",
+  ].join("\n");
 }
 
 function validateData(data) {
@@ -654,6 +833,17 @@ function formatStale(details) {
 
 function main() {
   const options = parseArgs(process.argv.slice(2));
+  ratchet(options);
+  const corelib = checkCoreLib(options.root, existsSync(options.baseline) ? readFileSync(options.baseline, "utf8") : "");
+  if (corelib) {
+    console.error(corelib);
+    process.exitCode = 1;
+  } else {
+    console.log("unsafe ratchet: CoreLib raw operations all gated; every safe abstraction has a recorded proof");
+  }
+}
+
+function ratchet(options) {
   const current = scan(options.root);
   let baseline;
   try {

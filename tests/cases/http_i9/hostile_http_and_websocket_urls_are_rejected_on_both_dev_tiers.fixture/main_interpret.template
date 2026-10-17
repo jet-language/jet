@@ -1,0 +1,186 @@
+
+use core.http.client as http_client
+use core.net.ws as ws
+
+fn run() {
+    if http_client.get("http://{cap:addr_interpret}/path\nInjected: yes") == {
+        .Ok(_) -> print("http url accepted")
+        .Err(error) -> {
+            if error == .InvalidURL -> print("http url rejected")
+            else -> print("http url wrong")
+        }
+        else -> print("http url unexpected")
+    }
+    method :: http_client.request("GET\nInjected", "http://{cap:addr_interpret}/method")
+    if method.send() == {
+        .Ok(_) -> print("method accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("method rejected")
+            else -> print("method wrong")
+        }
+        else -> print("method unexpected")
+    }
+    header_name :: http_client.request("GET", "http://{cap:addr_interpret}/header-name")
+        .header("x-bad\nname", "value")
+    if header_name.send() == {
+        .Ok(_) -> print("header name accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("header name rejected")
+            else -> print("header name wrong")
+        }
+        else -> print("header name unexpected")
+    }
+    header_value :: http_client.request("GET", "http://{cap:addr_interpret}/header-value")
+        .header("x-safe", "bad\nvalue")
+    if header_value.send() == {
+        .Ok(_) -> print("header value accepted")
+        .Err(error) -> {
+            if error == .InvalidHeader -> print("header value rejected")
+            else -> print("header value wrong")
+        }
+        else -> print("header value unexpected")
+    }
+    content_length :: http_client.request("POST", "http://{cap:addr_interpret}/content-length")
+        .header("Content-Length", "0")
+        .body("body")
+    if content_length.send() == {
+        .Ok(_) -> print("content length accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("content length rejected")
+            else -> print("content length wrong")
+        }
+        else -> print("content length unexpected")
+    }
+    transfer_encoding :: http_client.request("POST", "http://{cap:addr_interpret}/transfer-encoding")
+        .header("Transfer-Encoding", "chunked")
+        .body("body")
+    if transfer_encoding.send() == {
+        .Ok(_) -> print("transfer encoding accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("transfer encoding rejected")
+            else -> print("transfer encoding wrong")
+        }
+        else -> print("transfer encoding unexpected")
+    }
+    duplicate_host :: http_client.request("GET", "http://{cap:addr_interpret}/duplicate-host")
+        .header("Host", "one")
+        .header("hOsT", "two")
+    if duplicate_host.send() == {
+        .Ok(_) -> print("duplicate host accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("duplicate host rejected")
+            else -> print("duplicate host wrong")
+        }
+        else -> print("duplicate host unexpected")
+    }
+    connection_host :: http_client.request("GET", "http://{cap:addr_interpret}/connection-host")
+        .header("cOnNeCtIoN", "hOsT")
+    if connection_host.send() == {
+        .Ok(_) -> print("connection host accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection host rejected")
+            else -> print("connection host wrong")
+        }
+        else -> print("connection host unexpected")
+    }
+    connection_length :: http_client.request("POST", "http://{cap:addr_interpret}/connection-length")
+        .header("Connection", "Content-Length")
+        .body("body")
+    if connection_length.send() == {
+        .Ok(_) -> print("connection length accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection length rejected")
+            else -> print("connection length wrong")
+        }
+        else -> print("connection length unexpected")
+    }
+    connection_transfer :: http_client.request("POST", "http://{cap:addr_interpret}/connection-transfer")
+        .header("Connection", "tRaNsFeR-EnCoDiNg")
+        .body("body")
+    if connection_transfer.send() == {
+        .Ok(_) -> print("connection transfer accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("connection transfer rejected")
+            else -> print("connection transfer wrong")
+        }
+        else -> print("connection transfer unexpected")
+    }
+    proxy_connection :: http_client.request("GET", "http://{cap:addr_interpret}/proxy-connection")
+        .header("pRoXy-CoNnEcTiOn", "keep-alive")
+    if proxy_connection.send() == {
+        .Ok(_) -> print("proxy connection accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy connection rejected")
+            else -> print("proxy connection wrong")
+        }
+        else -> print("proxy connection unexpected")
+    }
+    keep_alive :: http_client.request("GET", "http://{cap:addr_interpret}/keep-alive")
+        .header("Keep-Alive", "timeout=5")
+    if keep_alive.send() == {
+        .Ok(_) -> print("keep-alive accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("keep-alive rejected")
+            else -> print("keep-alive wrong")
+        }
+        else -> print("keep-alive unexpected")
+    }
+    te :: http_client.request("GET", "http://{cap:addr_interpret}/te")
+        .header("TE", "trailers")
+    if te.send() == {
+        .Ok(_) -> print("te accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("te rejected")
+            else -> print("te wrong")
+        }
+        else -> print("te unexpected")
+    }
+    trailer :: http_client.request("GET", "http://{cap:addr_interpret}/trailer")
+        .header("Trailer", "x-trailer")
+    if trailer.send() == {
+        .Ok(_) -> print("trailer accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("trailer rejected")
+            else -> print("trailer wrong")
+        }
+        else -> print("trailer unexpected")
+    }
+    upgrade :: http_client.request("GET", "http://{cap:addr_interpret}/upgrade")
+        .header("Upgrade", "websocket")
+    if upgrade.send() == {
+        .Ok(_) -> print("upgrade accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("upgrade rejected")
+            else -> print("upgrade wrong")
+        }
+        else -> print("upgrade unexpected")
+    }
+    proxy_authenticate :: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authenticate")
+        .header("Proxy-Authenticate", "Basic")
+    if proxy_authenticate.send() == {
+        .Ok(_) -> print("proxy authenticate accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy authenticate rejected")
+            else -> print("proxy authenticate wrong")
+        }
+        else -> print("proxy authenticate unexpected")
+    }
+    proxy_authorization :: http_client.request("GET", "http://{cap:addr_interpret}/proxy-authorization")
+        .header("pRoXy-AuThOrIzAtIoN", "Basic secret")
+    if proxy_authorization.send() == {
+        .Ok(_) -> print("proxy authorization accepted")
+        .Err(error) -> {
+            if error == .InvalidFraming -> print("proxy authorization rejected")
+            else -> print("proxy authorization wrong")
+        }
+        else -> print("proxy authorization unexpected")
+    }
+    if ws.connect("ws://{cap:addr_interpret}/path\nInjected: yes") == {
+        .Ok(_) -> print("ws accepted")
+        .Err(error) -> {
+            if error == .InvalidURL -> print("ws rejected")
+            else -> print("ws wrong error")
+        }
+        else -> print("ws unexpected")
+    }
+}

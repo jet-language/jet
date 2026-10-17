@@ -27,7 +27,7 @@ PROVIDER_SHORT_READ :: prep { "failed to fill whole buffer" }
 // ── Error carrier ──
 
 // Which provider diagnostic a registry failure reason becomes.
-pub enum RegistryErrorKind {
+enum RegistryErrorKind {
     Cran
     LuaRocks
     Registry(String)
@@ -38,7 +38,7 @@ pub enum RegistryErrorKind {
 // The registry layer's failure: a final reason text (Rust `String` errors of
 // the fetch and provider helpers) or a provider error passed through as is.
 #Error
-pub enum RegistryError {
+enum RegistryError {
     Reason(String)
     Provider(ProviderError)
 
@@ -148,8 +148,8 @@ fn provider_registry_scratch(store: String, label: String, context: String) -[FS
 }
 
 // A provider's build scratch tree, removed when the realization ends.
-pub struct RegistryScratch {
-    pub path: String
+struct RegistryScratch {
+    path: String
 }
 
 impl RegistryScratch.Close {
@@ -157,11 +157,11 @@ impl RegistryScratch.Close {
 }
 
 // One preserved source archive of a resolved closure.
-pub struct RegistrySourceObject {
-    pub name: String
-    pub sha256: String
+struct RegistrySourceObject {
+    name: String
+    sha256: String
     // The archive's file name under the output's `sources/`.
-    pub file_name: String
+    file_name: String
 }
 
 // The CAS closure edges and `dependency.object.*` facts of every non-root
@@ -401,11 +401,11 @@ fn provider_registry_shell_quote(value: String) -> String Never! {
 // Where a native registry provider may fetch from: its registry, the
 // normalized allowed authorities (always including the registry's), and the
 // denied ones. Allow and deny never overlap.
-pub struct RegistryAuthority {
-    pub provider: String
-    pub registry: String
-    pub allow: [String]
-    pub deny: [String]
+struct RegistryAuthority {
+    provider: String
+    registry: String
+    allow: [String]
+    deny: [String]
 
     // The configured `authority.providers.<provider>` entry of the project
     // package, else the provider defaults.
@@ -677,18 +677,18 @@ fn provider_registry_preflight_tar(path: String, gzip: Bool) RegistryError! -[FS
 // any chunking. It counts every header, metadata records included, bounds
 // stored payloads and logical (sparse or PAX) sizes, and stops at the first
 // all-zero header.
-pub struct RegistryTarPreflight {
-    pending: [U8]
-    remaining: Int
-    capture_left: Int
-    capture: [U8]
-    capture_kind: Int
-    entries: Int
-    total: Int
-    pax_logical_size: Int?
-    pub done: Bool
+struct RegistryTarPreflight {
+    priv pending: [U8]
+    priv remaining: Int
+    priv capture_left: Int
+    priv capture: [U8]
+    priv capture_kind: Int
+    priv entries: Int
+    priv total: Int
+    priv pax_logical_size: Int?
+    done: Bool
     // Bytes fed after the end marker.
-    pub trailing: Int
+    trailing: Int
 
     fn new() -> RegistryTarPreflight Never! {
         RegistryTarPreflight{pending: [U8]{}, remaining: 0, capture_left: 0, capture: [U8]{}, capture_kind: -1, entries: 0, total: 0, pax_logical_size: None, done: false, trailing: 0}
@@ -834,7 +834,7 @@ fn provider_registry_tar_number(field: [U8]) -> Int RegistryError! {
 
 // ── Tar listing and extraction through Core's tar reader ──
 
-pub enum RegistryTarKind {
+enum RegistryTarKind {
     File
     Directory
     Symlink
@@ -843,10 +843,10 @@ pub enum RegistryTarKind {
 }
 
 // One listed archive entry: its stored name, kind, and logical size.
-pub struct RegistryTarEntry {
-    pub name: String
-    pub kind: RegistryTarKind
-    pub size: Int
+struct RegistryTarEntry {
+    name: String
+    kind: RegistryTarKind
+    size: Int
 }
 
 fn provider_registry_tar_kind(kind: archive.TarKind) -> RegistryTarKind Never! {
@@ -903,7 +903,7 @@ fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) 
             entry :: found ?? break
             prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
             target :: prepared ?? next
-            out := if files.create(target, if_exists: .Replace, mode: entry.mode & 0o777) == {
+            out := if files.create(target, if_exists: .Replace, mode: (entry.mode).bit_and(0o777)) == {
                 .Ok(writer) -> writer
                 .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
             }
@@ -920,7 +920,7 @@ fn provider_registry_extract_tar(path: String, gzip: Bool, destination: String) 
             entry :: found ?? break
             prepared :: provider_registry_prepare_entry(entry.name, provider_registry_tar_kind(entry.kind), destination)
             target :: prepared ?? next
-            out := if files.create(target, if_exists: .Replace, mode: entry.mode & 0o777) == {
+            out := if files.create(target, if_exists: .Replace, mode: (entry.mode).bit_and(0o777)) == {
                 .Ok(writer) -> writer
                 .Err(error) -> { return Err(RegistryError.Reason("could not create `{entry.name}`: {error}")) }
             }

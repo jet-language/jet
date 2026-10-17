@@ -1,0 +1,162 @@
+// Authority.rs:60-94,155-230; CAbiRoutes.rs:825-835,6969-6971,13826-13839.
+// Native Authority is one owning List24 of byte-sorted unique E4 Text handles.
+// Producers and glue share this layout; no Rust BTreeSet allocation is read.
+fn authority_sift(data: I64, start: I64, count: I64) {
+    root := start
+    loop root < (count /% I64{2}) {
+        child := root * I64{2} + I64{1}
+        if (child + I64{1} < count && jet_rt_string_compare(rt_text_word(data + child * I64{8}), rt_text_word(data + (child + I64{1}) * I64{8})) < I64{0}) -> child += I64{1}
+        if (jet_rt_string_compare(rt_text_word(data + root * I64{8}), rt_text_word(data + child * I64{8})) >= I64{0}) -> return
+        coll_i64_swap(data, root, child)
+        root = child
+    }
+}
+fn authority_sort(data: I64, count: I64) {
+    root := count /% I64{2}
+    loop root > (I64{0}) {
+        root -= I64{1}
+        authority_sift(data, root, count)
+    }
+    end := count
+    loop end > (I64{1}) {
+        end -= I64{1}
+        coll_i64_swap(data, I64{0}, end)
+        authority_sift(data, I64{0}, end)
+    }
+}
+#Export(c) fn jet_authority_from_rights(slots: I64, count: I64) -> I64 {
+    // Match list_in: a null pointer or nonpositive length denotes an empty list.
+    length :: if (slots == I64{0} || count <= I64{0}) -> I64{0} else -> count
+    result :: data_sequence_new(length, I64{8})
+    data :: rt_text_word(result + DATA_SEQUENCE_DATA)
+    coll_copy(slots, data, length * I64{8})
+    authority_sort(data, length)
+    // Sort borrowed pointers in the final buffer, then clone only unique rights.
+    // Tail slots remain nonowners and are never read/dropped beyond final len.
+    at := I64{0}
+    unique := I64{0}
+    previous := I64{0}
+    loop at < length {
+        right :: rt_text_word(data + at * I64{8})
+        if (at == I64{0} || !jet_rt_string_eq(previous, right)) {
+            rt_text_store(data + unique * I64{8}, jet_rt_string_clone(right))
+            unique += I64{1}
+        }
+        previous = right
+        at += I64{1}
+    }
+    rt_text_store(result + DATA_SEQUENCE_LENGTH, unique)
+    result
+}
+#Export(c) fn jet_rt_handle_clone_jet_authority(value: I64) -> I64 {
+    result :: jet_rt_alloc(DATA_SEQUENCE_BYTES, I64{8})
+    data_text_list_copy_into(value, result)
+    result
+}
+#Export(c) fn jet_rt_handle_drop_jet_authority(value: I64) {
+    if (value == I64{0}) -> return
+    coll_text_list_drop(value, true)
+    jet_rt_free(value, DATA_SEQUENCE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_eq_jet_authority(left: I64, right: I64) -> Bool {
+    length :: rt_text_word(left + DATA_SEQUENCE_LENGTH)
+    if (length != rt_text_word(right + DATA_SEQUENCE_LENGTH)) -> return false
+    a :: rt_text_word(left + DATA_SEQUENCE_DATA)
+    b :: rt_text_word(right + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (!jet_rt_string_eq(rt_text_word(a + at * I64{8}), rt_text_word(b + at * I64{8}))) -> return false
+        at += I64{1}
+    }
+    true
+}
+fn authority_covers(held: I64, requested: I64) -> Bool {
+    length :: rt_text_len(held)
+    other :: rt_text_len(requested)
+    if (length > other) -> return false
+    if (!rt_text_equal_bytes(rt_text_data(held), rt_text_data(requested), length)) -> return false
+    if (length == other) -> return true
+    boundary :: rt_text_byte(rt_text_data(requested) + length)
+    boundary == I64{46} || boundary == I64{58} || boundary == I64{47}
+}
+fn authority_narrow_failure(requested: I64) -> I64 {
+    length :: rt_text_len(requested)
+    if (length > I64{9223372036854775807} - I64{60}) -> rt_text_capacity_stop()
+    message :: rt_text_builder_with_capacity(length + I64{60})
+    // One exact seed message: E0712: authority cannot narrow to `...` outside its held rights.
+    rt_text_push_word(message, I64{6998657808182227013}, I64{8})
+    rt_text_push_word(message, I64{8751735916104021109}, I64{8})
+    rt_text_push_word(message, I64{2338616626601091872}, I64{8})
+    rt_text_push_word(message, I64{8367819428199555438}, I64{8})
+    rt_text_push_word(message, I64{6299759}, I64{3})
+    rt_text_append(message, rt_text_data(requested), length)
+    rt_text_push_word(message, I64{7235441220371030112}, I64{8})
+    rt_text_push_word(message, I64{7307126075655004261}, I64{8})
+    rt_text_push_word(message, I64{8388068008561501292}, I64{8})
+    rt_text_push_word(message, I64{115}, I64{1})
+    // NL21: seed raw Rust panic/exit101 is a seed defect. Use the one Jet panic
+    // mechanism (task publication, otherwise root report/exit70), not a new stop.
+    jet_rt_panic_message(rt_text_data(message), rt_text_len(message))
+    jet_rt_string_drop(message)
+    I64{0} // canonical stopped handle if the scheduler published the failure
+}
+#Export(c) fn jet_authority_with(value: I64, requested: I64) -> I64 {
+    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    loop at < length {
+        if (authority_covers(rt_text_word(data + at * I64{8}), requested)) {
+            result :: data_sequence_new(I64{1}, I64{8})
+            rt_text_store(rt_text_word(result + DATA_SEQUENCE_DATA), jet_rt_string_clone(requested))
+            rt_text_store(result + DATA_SEQUENCE_LENGTH, I64{1})
+            return result
+        }
+        at += I64{1}
+    }
+    authority_narrow_failure(requested)
+}
+#Export(c) fn jet_authority_without(value: I64, requested: I64) -> I64 {
+    length :: rt_text_word(value + DATA_SEQUENCE_LENGTH)
+    data :: rt_text_word(value + DATA_SEQUENCE_DATA)
+    at := I64{0}
+    kept := I64{0}
+    loop at < length {
+        if (!authority_covers(requested, rt_text_word(data + at * I64{8}))) -> kept += I64{1}
+        at += I64{1}
+    }
+    result :: data_sequence_new(kept, I64{8})
+    target :: rt_text_word(result + DATA_SEQUENCE_DATA)
+    at = I64{0}
+    kept = I64{0}
+    loop at < length {
+        right :: rt_text_word(data + at * I64{8})
+        if (!authority_covers(requested, right)) {
+            rt_text_store(target + kept * I64{8}, jet_rt_string_clone(right))
+            kept += I64{1}
+        }
+        at += I64{1}
+    }
+    rt_text_store(result + DATA_SEQUENCE_LENGTH, kept)
+    result
+}
+// The seed workspace rights are defined once, directly in the final owners.
+fn authority_workspace_right(write: Bool) -> I64 {
+    text :: rt_text_builder_with_capacity(if write -> I64{19} else -> I64{12})
+    if write {
+        rt_text_push_word(text, I64{7310584034938999622}, I64{8}) // FS.Write
+        rt_text_push_word(text, I64{8458375227119382074}, I64{8}) // :.jet/bu
+        rt_text_push_word(text, I64{6581353}, I64{3}) // ild
+    } else {
+        rt_text_push_word(text, I64{4207595039669244742}, I64{8}) // FS.Read:
+        rt_text_push_word(text, I64{1869636978}, I64{4}) // repo
+    }
+    text
+}
+#Export(c) fn jet_authority_workspace() -> I64 {
+    result :: data_sequence_new(I64{2}, I64{8})
+    data :: rt_text_word(result + DATA_SEQUENCE_DATA)
+    rt_text_store(data, authority_workspace_right(false))
+    rt_text_store(data + I64{8}, authority_workspace_right(true))
+    rt_text_store(result + DATA_SEQUENCE_LENGTH, I64{2})
+    result
+}

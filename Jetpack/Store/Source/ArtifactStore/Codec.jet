@@ -6,8 +6,8 @@
 
 // Why an action or artifact envelope was refused (the Rust `String` error).
 #Error
-pub struct ArtifactEnvelopeError {
-    pub reason: String
+struct ArtifactEnvelopeError {
+    reason: String
 }
 
 // `jet.store.v1\0action\0`
@@ -33,7 +33,7 @@ fn store_artifact_magic(label: String) -> [U8] Never! {
 fn store_artifact_push_le64(out: &[U8], value: Int) Never! {
     shift := 0
     loop shift < 64 {
-        &out.push(U8{(value >> shift) & 255})
+        &out.push(U8{((value >> shift)).bit_and(255)})
         shift += 8
     }
 }
@@ -42,7 +42,7 @@ fn store_artifact_push_le64(out: &[U8], value: Int) Never! {
 fn store_artifact_read_le64(bytes: [U8], start: Int) -> Int Never! {
     value := 0
     loop offset in 0..<8 {
-        value = value | (Int.from_u8(bytes[start + offset]) << (offset * 8))
+        value = (value).bit_or((Int.from_u8(bytes[start + offset]) << (offset * 8)))
     }
     value
 }
@@ -140,7 +140,7 @@ fn store_artifact_io_invalid(error: IOError) -> Bool Never! {
 }
 
 fn store_artifact_is_executable(info: files.Stat) -> Bool Never! {
-    (info.mode & 0o111) != 0
+    ((info.mode).bit_and(0o111)) != 0
 }
 
 // The outcome of reading one store entry.
@@ -162,13 +162,11 @@ fn store_artifact_read_file(path: String) -[FS]> ArtifactRawRead ArtifactStoreEr
         }
     }
     if metadata.is_symlink || !metadata.is_file -> return Ok(ArtifactRawRead.Corrupt("entry is not a regular file"))
-    reader :: if files.open(path) == {
-        .Ok(opened) -> opened
-        .Err(error) -> {
-            if store_artifact_io_missing(error) -> return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
-            return Err(ArtifactStoreError.IO(error))
-        }
+    reader :: files.open(path) ?? {
+        if store_artifact_io_missing(err) -> return Ok(ArtifactRawRead.Corrupt("entry disappeared while opening"))
+        return Err(ArtifactStoreError.IO(err))
     }
+    // FileReader's lexical cleanup keeps the handle live through verification.
     held :: reader.stat()
     if !store_artifact_same_file(metadata, held) -> return Ok(ArtifactRawRead.Corrupt("entry changed while opening"))
     bytes := [U8]{}
@@ -222,7 +220,7 @@ fn store_artifact_replace_with(temporary: String, path: String, parent: String, 
 fn store_artifact_set_executable(path: String, executable: Bool) ArtifactStoreError! -[FS]> {
     info :: files.stat(path)
     mode :: info.mode
-    updated_mode :: if executable -> mode | 0o111 else -> mode - (mode & 0o111)
+    updated_mode :: if executable -> (mode).bit_or(0o111) else -> mode - ((mode).bit_and(0o111))
     files.set_mode(path, updated_mode)
 }
 
@@ -262,8 +260,16 @@ fn store_artifact_ensure_dir(path: String) ArtifactStoreError! -[FS]> {
         }
         .Err(error) -> {
             if !store_artifact_io_missing(error) -> return Err(ArtifactStoreError.IO(error))
-            files.create_dir(path)
-            store_artifact_sync_dir(files.dirname(path))
+            if files.create_dir(path) == {
+                .Ok(_) -> store_artifact_sync_dir(files.dirname(path))
+                .Err(created) -> {
+                    // A concurrent opener of the same store created it first.
+                    if created == {
+                        .AlreadyExists(_) -> return store_artifact_ensure_dir(path)
+                        else -> return Err(ArtifactStoreError.IO(created))
+                    }
+                }
+            }
         }
     }
 }

@@ -8,7 +8,7 @@ impl Buffer {
     }
     fn grow(&self) -> Buffer {
         self.text = "{self.text}!"
-        return Buffer{text: ~self.text}
+        return Buffer{text: self.text.copy()}
     }
     fn clear(&self) {
         self = Buffer{text: "cleared"}
@@ -49,8 +49,7 @@ fn run() {
     // A fresh receiver takes no mark.
     print(make_buffer().len())
     total := 6
-    mask := total
-        & 3
+    mask := (total).bit_and(3)
     print(mask)
     values := [3, 1, 2]
     &values.push(values.len())

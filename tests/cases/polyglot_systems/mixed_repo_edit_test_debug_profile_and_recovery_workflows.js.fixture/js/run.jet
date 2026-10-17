@@ -1,0 +1,12 @@
+use js.ops as ops
+
+#Test("JavaScript sidecar checks result and failure") {
+    assert_eq(ops.add(2, 3) ?? -1, 5)
+    assert_eq(ops.fail(7) ?? -1, -1)
+}
+
+fn run() -[FFI, IO]> {
+    print(ops.add(2, 3) ?? panic("JavaScript add failed"))
+    print(ops.fail(7) ?? 99)
+    print(ops.wrong_type(7) ?? 123)
+}

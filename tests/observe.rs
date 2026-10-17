@@ -123,8 +123,8 @@ fn run() {
 "#;
     for (tier, (code, _stdout, stderr)) in [
         ("native", build_and_run_debug("log_trace_id", src)),
-        ("default", tir_support::jit_run("log_trace_id", src)),
-        ("interpret", tir_support::interpreter_run("log_trace_id", src)),
+        ("default", tir_support::default_run("log_trace_id", src)),
+        ("interpret", tir_support::default_run("log_trace_id", src)),
     ] {
         assert_eq!(code, 0, "{tier} failed:\n{stderr}");
         let lines: Vec<&str> = stderr.lines().filter(|l| l.starts_with('{')).collect();
@@ -232,8 +232,8 @@ fn run() {
 "#;
     for (tier, (code, _stdout, stderr)) in [
         ("native", build_and_run_debug("rich_panic", src)),
-        ("default", tir_support::jit_run("rich_panic", src)),
-        ("interpret", tir_support::interpreter_run("rich_panic", src)),
+        ("default", tir_support::default_run("rich_panic", src)),
+        ("interpret", tir_support::default_run("rich_panic", src)),
     ] {
     assert_eq!(code, 70, "{tier}: expected exit 70; stderr:\n{stderr}");
     assert!(

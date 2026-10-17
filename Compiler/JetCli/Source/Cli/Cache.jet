@@ -1,0 +1,172 @@
+// Source/CmdStatus.rs machine-wide cache CLI. Reuses Jetpack's sole
+// ArtifactStore (jet_store::Store), not a second cache or pruning policy.
+// These are the existing Jetpack CoreImports aliases needed by this closure;
+// its monolithic bootstrap is not included in the compiler's CLI assembly.
+use core.files as files
+use core.sys as sys
+use core.process as process
+use core.time as time
+use core.crypto.random as random
+use core.crypto as crypto
+use core.math as cache_math
+use jet_foundation.[foundation_json_quote, foundation_parse_protocol_json, mir_sha256_hex_bytes]
+
+enum JetCLICacheRequest { Status Prune(bytes: Int) Limit(bytes: Int) }
+
+fn jet_cli_cache_size(value: String) -> Int JetCLIReadError! {
+    Ok(store_artifact_parse_size(value) ?? return Err(jet_cli_read_error("invalid cache size `{value}`: {err.message()}")))
+}
+
+fn jet_cli_cache_parse(args: [String]) -> JetCLICacheRequest JetCLIReadError! {
+    command := String?{None}
+    option := String?{None}
+    value := ""
+    index := 0
+    loop index < args.len() {
+        arg :: args[index]
+        if arg == "--json" || arg == "--quiet" || arg == "--no-color" || arg.starts_with("--color=") {
+            index += 1
+            next
+        }
+        if arg == "--color" {
+            if index + 1 >= args.len() -> return Err(jet_cli_read_error("`jet cache --color` needs auto, always, or never"))
+            index += 2
+            next
+        }
+        if arg == "--to" || arg == "--host" {
+            if index + 1 >= args.len() -> return Err(jet_cli_read_error("`jet cache {arg}` needs a size"))
+            if option != None -> return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+            option = Val(arg)
+            value = args[index + 1]
+            index += 2
+            next
+        }
+        if arg.starts_with("--to=") || arg.starts_with("--host=") {
+            if option != None -> return Err(jet_cli_read_error("`jet cache` accepts one size option"))
+            is_to :: arg.starts_with("--to=")
+            option = Val(if is_to -> "--to" else -> "--host")
+            value = arg.slice(if is_to -> 5 else -> 7, arg.len())
+            index += 1
+            next
+        }
+        if arg.starts_with("-") -> return Err(jet_cli_read_error("unknown `jet cache` flag `{arg}`"))
+        if command != None -> return Err(jet_cli_read_error("`jet cache` accepts one command"))
+        command = Val(arg)
+        index += 1
+    }
+    selected :: command ?? return Err(jet_cli_read_error("missing `jet cache` command"))
+    if selected == {
+        "status" -> {
+            if option != None -> return Err(jet_cli_read_error("`jet cache status` does not take a size option"))
+            Ok(JetCLICacheRequest.Status)
+        }
+        "prune" -> {
+            if option != .Val("--to") -> return Err(jet_cli_read_error("`jet cache prune` requires `--to <size>`"))
+            Ok(JetCLICacheRequest.Prune{bytes: jet_cli_cache_size(value)})
+        }
+        "limit" -> {
+            if option != .Val("--host") -> return Err(jet_cli_read_error("`jet cache limit` requires `--host <size>`"))
+            Ok(JetCLICacheRequest.Limit{bytes: jet_cli_cache_size(value)})
+        }
+        else -> Err(jet_cli_read_error("`{selected}` isn't a jet cache command"))
+    }
+}
+
+fn jet_cli_cache_format_size(bytes: Int) -> String Never! {
+    if bytes < 1024 -> return "{bytes} B"
+    units :: [String]{"B", "KiB", "MiB", "GiB", "TiB"}
+    value := Float.from_int(bytes)
+    unit := 0
+    loop value >= 1024.0 && unit < units.len() - 1 {
+        value /= 1024.0
+        unit += 1
+    }
+    if cache_math.fmod(value, 1.0) == 0.0 || value >= 10.0 -> return "{value:Fixed(0)} {units[unit]}"
+    "{value:Fixed(1)} {units[unit]}"
+}
+
+fn jet_cli_cache_error(code: String, what: String, why: String, fix: String, json: Bool, exit_code: Int) -[FS, Env]> JetDriverVerbOutput Never! {
+    diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
+    if json {
+        text :: jet_cli_reports_status_json("status", false, jet_cli_report_cwd(), "", "", [Diagnostic]{diagnostic}).removesuffix("\n")
+        return JetDriverVerbOutput{stdout: text, stderr: "", exit_code: exit_code}
+    }
+    JetDriverVerbOutput{stdout: "", stderr: jet_cli_report(code, what, why, fix, false), exit_code: exit_code}
+}
+
+fn jet_cli_cache_usage_error(message: String, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    jet_cli_cache_error("E2102", message, "`jet cache` has one read-only status command and two explicit mutations", "run `jet cache status`, `jet cache prune --to <size>`, or `jet cache limit --host <size>`", json, 2)
+}
+
+fn jet_cli_cache_store_error(operation: String, error: ArtifactStoreError, json: Bool) -[FS, Env]> JetDriverVerbOutput Never! {
+    jet_cli_cache_error("E2105", "could not {operation}: {error.message()}", "cache commands use one machine-wide store with atomic, verified entries", "check the JET_STORE_DIR path and permissions, then retry the cache command", json, 1)
+}
+
+fn jet_cli_cache_status(store: ArtifactStore, status: ArtifactStoreStatus, json: Bool) -> JetDriverVerbOutput Never! {
+    blobs := 0
+    records := 0
+    lto := 0
+    loop entry in status.entries {
+        if entry.kind == {
+            .Blob -> blobs += 1
+            .Action -> records += 1
+            .LTO -> lto += 1
+        }
+    }
+    if json {
+        available :: if status.available_bytes == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null
+        host_limit :: if status.host_limit_bytes == .Val(value) -> jet_cli_status_int(value) else -> JetCLIStatusValue.Null
+        cache :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("available_bytes", available), jet_cli_status_field("blobs", jet_cli_status_int(blobs)),
+            jet_cli_status_field("entries", jet_cli_status_int(status.entries.len())), jet_cli_status_field("footprint_bytes", jet_cli_status_int(status.footprint_bytes)),
+            jet_cli_status_field("host_limit_bytes", host_limit), jet_cli_status_field("limit_bytes", jet_cli_status_int(status.limit_bytes)),
+            jet_cli_status_field("live_leases", jet_cli_status_int(status.live_leases)), jet_cli_status_field("records", jet_cli_status_int(records)),
+            jet_cli_status_field("reserve_bytes", jet_cli_status_int(status.reserve_bytes)), jet_cli_status_field("root", jet_cli_status_text(status.root)),
+            jet_cli_status_field("tiers", jet_cli_status_texts(status.tiers)), jet_cli_status_field("thinlto_caches", jet_cli_status_int(lto)),
+        })
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.status", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
+    }
+    source :: if status.host_limit_bytes != None -> "host policy" else if store.config().cap_bytes() != None -> "JET_STORE_CAP_BYTES" else -> "adaptive rule"
+    out :: "store      {status.root}\nlimit      {jet_cli_cache_format_size(status.limit_bytes)} ({source})\nreserve    keep {jet_cli_cache_format_size(status.reserve_bytes)} free on that filesystem\nused       {jet_cli_cache_format_size(status.footprint_bytes)} · {blobs} blobs · {records} records · {lto} ThinLTO caches\nleases     {status.live_leases} live\ntiers      {status.tiers.join(" · ")}\n"
+    JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
+}
+
+fn jet_cli_cache_prune(report: ArtifactPruneReport, json: Bool) -> JetDriverVerbOutput Never! {
+    difference :: report.before_bytes - report.after_bytes
+    freed :: if difference > 0 -> difference else -> 0
+    if json {
+        cache :: jet_cli_status_object([JetCLIStatusField]{
+            jet_cli_status_field("after_bytes", jet_cli_status_int(report.after_bytes)), jet_cli_status_field("before_bytes", jet_cli_status_int(report.before_bytes)),
+            jet_cli_status_field("blocked", jet_cli_status_bool(report.blocked)), jet_cli_status_field("freed_bytes", jet_cli_status_int(freed)),
+            jet_cli_status_field("pinned_bytes", jet_cli_status_int(report.pinned_bytes)), jet_cli_status_field("removed_entries", jet_cli_status_int(report.removed.len())),
+            jet_cli_status_field("target_bytes", jet_cli_status_int(report.target_bytes)),
+        })
+        return JetDriverVerbOutput{stdout: "{jet_cli_status_render("cache.prune", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n", stderr: "", exit_code: 0}
+    }
+    out := "prune      {jet_cli_cache_format_size(report.before_bytes)} -> {jet_cli_cache_format_size(report.after_bytes)} (target {jet_cli_cache_format_size(report.target_bytes)})\nremoved    {report.removed.len()} entries · freed {jet_cli_cache_format_size(freed)}\npinned     {jet_cli_cache_format_size(report.pinned_bytes)}\n"
+    if report.blocked -> out = "{out}result     target blocked by live leases\n"
+    JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
+}
+
+fn jet_cli_cache(args: [String], json: Bool) -[FS, Env, Exec, Time, Rand]> JetDriverVerbOutput Never! {
+    request :: jet_cli_cache_parse(args) ?? return jet_cli_cache_usage_error(err.message, json)
+    store :: ArtifactStore.from_env() ?? return jet_cli_cache_store_error("open the machine-wide store", err, json)
+    if request == {
+        .Status -> {
+            status :: store.status() ?? return jet_cli_cache_store_error("read the machine-wide store", err, json)
+            jet_cli_cache_status(store, status, json)
+        }
+        .Prune(bytes) -> {
+            report :: store.prune_to(bytes) ?? return jet_cli_cache_store_error("prune the machine-wide store", err, json)
+            jet_cli_cache_prune(report, json)
+        }
+        .Limit(bytes) -> {
+            store.set_host_limit(Val(bytes)) ?? return jet_cli_cache_store_error("set the host store limit", err, json)
+            out :: if json -> {
+                cache :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("host_limit_bytes", jet_cli_status_int(bytes)), jet_cli_status_field("root", jet_cli_status_text(store.root()))})
+                "{jet_cli_status_render("cache.limit", true, [JetCLIStatusField]{jet_cli_status_field("cache", cache)})}\n"
+            } else -> "host limit {jet_cli_cache_format_size(bytes)} (persisted)\nstore      {store.root()}\n"
+            JetDriverVerbOutput{stdout: out, stderr: "", exit_code: 0}
+        }
+    }
+}

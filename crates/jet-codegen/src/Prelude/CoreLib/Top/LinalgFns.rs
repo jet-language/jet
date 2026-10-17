@@ -320,6 +320,28 @@ fn jet_math_Vec4_lane(v: &jet_std::Vec4, i: i64, file: &str, line: u32) -> f64 {
     v.0[index]
 }
 
+// D-SWIZZLE1: a write swizzle (`v.xy = …`) stores one lane at a time through
+// `jet_math_<Type>_lane_set` (route `core.math.lane_set`). The setter checks
+// the lane index with the same bounds stop as the `_lane` reader. Only the
+// swizzleable types (`is_swizzleable_math_type`) are writable lane places.
+macro_rules! jet_math_lane_set_fn {
+    ($T:ident, $name:ident, $scalar:ty, $n:literal) => {
+        #[inline(always)]
+        fn $name(v: &mut jet_std::$T, i: i64, value: $scalar, file: &str, line: u32) {
+            let index = match crate::jet_simd_lane_index(i, stringify!($T), $n) {
+                Ok(index) => index,
+                Err(message) => jet_panic(file, line, &message),
+            };
+            v.0[index] = value;
+        }
+    };
+}
+jet_math_lane_set_fn!(F32x4, jet_math_F32x4_lane_set, f32, 4);
+jet_math_lane_set_fn!(F64x2, jet_math_F64x2_lane_set, f64, 2);
+jet_math_lane_set_fn!(Vec2, jet_math_Vec2_lane_set, f64, 2);
+jet_math_lane_set_fn!(Vec3, jet_math_Vec3_lane_set, f64, 3);
+jet_math_lane_set_fn!(Vec4, jet_math_Vec4_lane_set, f64, 4);
+
 #[inline(always)]
 fn jet_math_Vec2_add(left: &jet_std::Vec2, right: jet_std::Vec2) -> jet_std::Vec2 {
     *left + right

@@ -2,11 +2,11 @@
 
 mod common;
 
-use jet::JitBackend::JitBackend;
 use std::fs;
 use std::process::Command;
 
 const QUEUE: &str = include_str!("../Examples/features/memory/shared_guard_queue.jet");
+const CONDITION: &str = include_str!("../Examples/features/memory/shared_condition.jet");
 
 const CANCEL_WAIT: &str = r#"
 fn mark_started(started: Shared<Int>, began: Condition) {
@@ -260,32 +260,22 @@ fn assert_native_and_default(source: &str, expected: &str, tag: &str) {
 
     let (_, default_path) = fixture(&format!("{tag}_default"), source);
     let mut bundle = jet::Loader::load_entry(default_path.to_str().unwrap()).unwrap();
-    let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
+    let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+    let errors = diagnostics
         .into_iter()
         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
         .collect::<Vec<_>>();
     assert!(errors.is_empty(), "{errors:?}");
+    let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
 
-    let policy = common::development_policy();
-    let mut backend = jet_jit::CraneliftBackend::new();
-    let plan = common::cranelift_tier_plan(&bundle);
-    jet_jit::reset_jit_trace_for_test();
-    match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-        jet::Interpreter::RunOutcome::Ran { stdout, .. } => {
-            assert!(
-                !jet_jit::deopt_invoked_for_test(),
-                "{plan:?} strict={:?}",
-                common::cranelift_strict_run(&bundle, &policy)
-            );
-            assert!(!jet_jit::fallback_invoked_for_test());
-            assert_eq!(stdout, expected);
-        }
+    match crate::common::dev_run(default_path.to_str().unwrap(), false, false) {
+        jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
             panic!("default SharedGuard tier failed: {diagnostics:?}")
         }
     }
 
-    match jet::Interpreter::dev_iteration(default_path.to_str().unwrap(), false, true) {
+    match crate::common::dev_run(default_path.to_str().unwrap(), false, true) {
         jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, expected),
         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
             panic!("forced SharedGuard interpreter failed: {diagnostics:?}")
@@ -352,11 +342,30 @@ fn mapped_and_split_guards_write_disjoint_fields_on_all_tiers() {
     with_compiler_stack(|| {
         assert_native_and_default(MAP_AND_SPLIT, "13\n10\n", "jet_shared_guard_projection")
     });
+    let named = MAP_AND_SPLIT
+        .replace(
+            "mapped := handle.guard_edit().map",
+            "guard :: handle.guard_edit()\n    mapped := ^guard.map",
+        )
+        .replace(
+            "(left, right) := handle.guard_edit().split",
+            "guard :: handle.guard_edit()\n    (left, right) := ^guard.split",
+        );
+    with_compiler_stack(move || {
+        assert_native_and_default(&named, "13\n10\n", "jet_shared_guard_named_projection")
+    });
 }
 
 #[test]
 fn stored_and_returned_guards_move_as_read_capabilities_on_all_tiers() {
     with_compiler_stack(|| {
         assert_native_and_default(STORED_GUARDS, "8\n10\n9\n", "jet_shared_guard_storage")
+    });
+}
+
+#[test]
+fn shared_condition_route_accepts_the_checked_predicate_on_all_tiers() {
+    with_compiler_stack(|| {
+        assert_native_and_default(CONDITION, "ticket=1\n", "jet_shared_condition_route")
     });
 }

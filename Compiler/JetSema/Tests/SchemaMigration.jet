@@ -1,0 +1,87 @@
+// Production codec + E0910 pass. The diagnostic renderings are the unchanged
+// tests/ui/{published_schema_breaking,migration_add_needs_default,
+// migration_change_no_converter,published_schema_bracket_marker_migration}.stderr.
+fn schema_require(ok: Bool, detail: String) Never! {
+    if !ok -> panic("SchemaMigration: {detail}")
+}
+fn schema_items(source: String) -> [Item] Never! {
+    parsed :: parse_source(source.bytes())
+    schema_require(parsed.diagnostics.len() == 0, "fixture parses: {source}")
+    parsed.program.items
+}
+fn schema_baseline(fields: [SnapshotField]) -> [String:SchemaSnapshot] Never! {
+    [String:SchemaSnapshot]{"Account": SchemaSnapshot{schema_version: U32{1}, type_name: "Account", published_version: "1.2.3", squashed_before: None, fields: fields}}
+}
+fn schema_has(diagnostics: [Diagnostic], text: String) Never! {
+    found := false
+    loop diagnostic in diagnostics {
+        schema_require(diagnostic.code == "E0910" && diagnostic.why != "" && diagnostic.fix != "" && diagnostic.span != None, "complete registered diagnostic")
+        if diagnostic.what.contains(text) -> found = true
+    }
+    schema_require(found, "expected diagnostic: {text}")
+}
+fn run() Never! {
+    wire :: "schema_version = 1\ntype = Account\npublished_version = 1.2.3\nsquashed_before = 1.0.0\nfield name: String\nfield verified: Bool\n"
+    decoded :: SchemaSnapshot.parse(wire) ?? panic("snapshot codec")
+    schema_require(decoded.write() == wire && decoded.fields.len() == 2, "canonical wire round trip")
+    schema_require(decoded.squashed_before == Val("1.0.0"), "squash cutoff preserved")
+    // Rust accepts unknown versions, duplicate headers (last wins), blank
+    // fields and leading plus/zeroes; the reader does not add a validation rail.
+    loose :: SchemaSnapshot.parse(" schema_version = +0004294967295\ntype = Old\ntype = New\npublished_version = 2\nfield : \n") ?? panic("permissive snapshot grammar")
+    schema_require(loose.schema_version == (U32{4294967295}) && loose.type_name == "New" && loose.fields[0].ty == "", "Rust parser grammar")
+    loop version in ([String]{"", "+", "-1", "1_0", "4294967296", "１２"}) {
+        invalid := false
+        if SchemaSnapshot.parse("schema_version = {version}\ntype = A\npublished_version = 1\n") == .Err(_) -> invalid = true
+        schema_require(invalid, "invalid u32 {version}")
+    }
+    loop raw in ([String]{"type = A\npublished_version = 1\n", "schema_version = 1\npublished_version = 1\n", "schema_version = 1\ntype = A\n", "schema_version = 1\ntype = A\npublished_version = 1\nfield missing\n", "unknown = line\n"}) {
+        invalid := false
+        if SchemaSnapshot.parse(raw) == .Err(_) -> invalid = true
+        schema_require(invalid, "malformed snapshot")
+    }
+    program :: sema_program_tables_init(None, [TTypeDef]{})
+    baseline :: schema_baseline([SnapshotField]{SnapshotField{name: "name", ty: "String"}})
+    current :: schema_items("#PublishedSchema struct Account {{ name: String; verified: Bool }}")
+    added :: check_schema_migrations(current, baseline, None, program)
+    schema_require(added.len() == 1, "added field yields exactly one diagnostic")
+    schema_has(added, "added `verified`, but old data has no value for it")
+    schema_require(check_schema_migrations(current, [String:SchemaSnapshot]{}, None, program).len() == 0, "first publication has no baseline")
+    grouped :: schema_items("#[PublishedSchema, Codable] struct Account {{ name: String; verified: Bool }}")
+    schema_has(check_schema_migrations(grouped, baseline, None, program), "added `verified`")
+    add_ok :: schema_items("#PublishedSchema struct Account {{ name: String; verified: Bool }}\nmigration Account {{ add verified: Bool = false }}")
+    schema_require(check_schema_migrations(add_ok, baseline, None, program).len() == 0, "declared default bridges addition")
+    rename_ok :: schema_items("#PublishedSchema struct Account {{ title: String }}\nmigration Account {{ rename name -> title }}")
+    schema_require(check_schema_migrations(rename_ok, baseline, None, program).len() == 0, "type-preserving rename")
+    remove_ok :: schema_items("#PublishedSchema struct Account {{ }}\nmigration Account {{ remove name }}")
+    schema_require(check_schema_migrations(remove_ok, baseline, None, program).len() == 0, "declared removal")
+    dropped :: schema_items("#PublishedSchema struct Account {{ }}")
+    schema_has(check_schema_migrations(dropped, baseline, None, program), "dropped `name` since version `1.2.3`")
+    changed :: schema_items("#PublishedSchema struct Account {{ name: Int }}")
+    schema_has(check_schema_migrations(changed, baseline, None, program), "changed `name` from `String` to `Int`")
+    missing_converter :: schema_items("#PublishedSchema struct Account {{ name: Int }}\nmigration Account {{ change name: String -> Int }}")
+    schema_has(check_schema_migrations(missing_converter, baseline, None, program), "has no converter")
+    converted :: schema_items("#PublishedSchema struct Account {{ name: Int }}\nmigration Account {{ change name: String -> Int via {{ (old) -> 0 }} }}")
+    schema_require(check_schema_migrations(converted, baseline, None, program).len() == 0, "inline converter")
+    impl_converted :: schema_items("struct Label {{ text: String }}\nimpl String -> Label {{ return Label{{ text: self }} }}\n#PublishedSchema struct Account {{ name: Label }}\nmigration Account {{ change name: String -> Label }}")
+    schema_require(check_schema_migrations(impl_converted, baseline, None, program).len() == 0, "impl converter")
+    invalid_remove :: schema_items("#PublishedSchema struct Account {{ name: String }}\nmigration Account {{ remove name }}")
+    schema_has(check_schema_migrations(invalid_remove, baseline, None, program), "still has that field")
+    invalid_add :: schema_items("#PublishedSchema struct Account {{ name: String }}\nmigration Account {{ add name: String = \"\" }}")
+    schema_has(check_schema_migrations(invalid_add, baseline, None, program), "already had that field")
+    bad_type :: schema_items("#PublishedSchema struct Account {{ name: String; verified: Bool }}\nmigration Account {{ add verified: Int = 0 }}")
+    schema_has(check_schema_migrations(bad_type, baseline, None, program), "declares a type the field doesn't have (`Bool`)")
+    bad_change :: schema_items("#PublishedSchema struct Account {{ name: Int }}\nmigration Account {{ change name: Bool -> Int via {{ (old) -> 0 }} }}")
+    schema_has(check_schema_migrations(bad_change, baseline, None, program), "doesn't match the real shapes (`String` -> `Int`)")
+    unknown :: schema_items("#PublishedSchema struct Account {{ name: String }}\nmigration Account {{ remove typo; add missing: Int = 0; change absent: String -> Int }}")
+    schema_require(check_schema_migrations(unknown, baseline, None, program).len() == 3, "all invalid declared ops reported")
+    renamed_type :: schema_items("#PublishedSchema struct Account {{ title: Bool }}\nmigration Account {{ rename name -> title }}")
+    schema_has(check_schema_migrations(renamed_type, baseline, None, program), "dropped `name`")
+    reorder_baseline :: schema_baseline([SnapshotField]{SnapshotField{name: "verified", ty: "Bool"}, SnapshotField{name: "name", ty: "String"}})
+    schema_require(check_schema_migrations(current, reorder_baseline, None, program).len() == 0, "field order is never breaking")
+    loop item in current {
+        if item == .Struct(definition) {
+            published :: snapshot_from_struct(definition, "2.0.0")
+            schema_require(published.schema_version == SNAPSHOT_VERSION && published.published_version == "2.0.0" && published.squashed_before == None && published.fields[0].name == "name", "publish captures declaration-order current fields")
+        }
+    }
+}

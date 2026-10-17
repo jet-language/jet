@@ -1,0 +1,450 @@
+// Source/CmdExpand.rs: projections of facts from the already checked
+// program. No lens performs another analysis or infers intent from text.
+use jet_driver.[JetDriverDocModule, JetDriverVerbOutput, JET_DRIVER_EXIT_USER_ERROR]
+use jet_foundation.[Diagnostic, diagnostic_from_registry, Func, Item, Span, diagnostic_column_at, diagnostic_line_at, type_name]
+use jet_foundation.[ViewProvenanceEntry, ViewSourcePath, failure_contract_effective_type, failure_contract_source]
+
+struct JetCLIExpandFact {
+    source: String
+    offset: Int
+    name: String
+    text: String
+    value: JetCLIStatusValue
+}
+
+struct JetCLIExpandLensSpec {
+    name: String
+    summary: String
+}
+
+JET_CLI_EXPAND_LENSES :: [JetCLIExpandLensSpec]{
+    JetCLIExpandLensSpec{name: "inline", summary: "#Inline / #Inline(Always) contracts (D-METHODMACRO1)"},
+    JetCLIExpandLensSpec{name: "memory", summary: "transitive Mem.* denial facts (D-MEM-FACTS1 / D-AUTHORITY-MEM1)"},
+    JetCLIExpandLensSpec{name: "web", summary: "D-WEBAPP1 application graph facts (routes/actions/policy)"},
+    JetCLIExpandLensSpec{name: "effects", summary: "resolved function effect rows (D-EFF1 / D-SEMINDEX1)"},
+    JetCLIExpandLensSpec{name: "layout", summary: "D-LAYOUT-FACTS1 compiler-owned type layout facts"},
+    JetCLIExpandLensSpec{name: "origin", summary: "D-TRACK-ORIGIN1 typed #Track provenance facts"},
+    JetCLIExpandLensSpec{name: "derive", summary: "derived behavior already attached to types (D-ONCE-DERIVE1)"},
+    JetCLIExpandLensSpec{name: "templates", summary: "checked prep loop marker in impl, test, and measurement expansions (D-STRUCT-ONCE1)"},
+    JetCLIExpandLensSpec{name: "callable-signature", summary: "typed checked semindex projection; metadata identity and convention producers remain unavailable"},
+}
+
+fn jet_cli_expand_span(span: Span, source: String?) -> JetCLIStatusValue Never! {
+    fields := [JetCLIStatusField]{jet_cli_status_field("start", jet_cli_status_int(span.start)), jet_cli_status_field("end", jet_cli_status_int(span.end))}
+    if source == .Val(text) {
+        &fields.push(jet_cli_status_field("line", jet_cli_status_int(diagnostic_line_at(text, span.start))))
+        &fields.push(jet_cli_status_field("column", jet_cli_status_int(diagnostic_column_at(text, span.start))))
+    }
+    jet_cli_status_object(fields)
+}
+
+fn jet_cli_expand_source(modules: [JetDriverDocModule], path: String) -> String? Never! {
+    loop unit in modules {
+        if unit.path == path || unit.physical_path == path -> return Val(unit.source)
+    }
+    None
+}
+
+fn jet_cli_expand_fact_before(left: JetCLIExpandFact, right: JetCLIExpandFact) -> Ordering Never! {
+    if left.source != right.source -> return left.source <=> right.source
+    if left.offset != right.offset -> return left.offset <=> right.offset
+    left.name <=> right.name
+}
+
+fn jet_cli_expand_sort_facts(facts: &[JetCLIExpandFact]) Never! {
+    loop index in 1..<facts.len() {
+        row :: facts[index].copy()
+        position := index
+        loop position > 0 && jet_cli_expand_fact_before(facts[position - 1], row) == Ordering.Greater {
+            facts[position] = facts[position - 1]
+            position -= 1
+        }
+        facts[position] = row
+    }
+}
+
+fn jet_cli_expand_inline_function(function: Func, owner: String?, unit: JetDriverDocModule, facts: &[JetCLIExpandFact]) Never! {
+    if !function.is_inline && !function.is_inline_always {
+        return
+    }
+    contract :: if function.is_inline_always -> "#Inline(Always)" else -> "#Inline"
+    attribute :: if function.is_inline_always -> "#[inline(always)]" else -> "#[inline]"
+    name :: if owner == .Val(value) -> "{value}.{function.name}" else -> function.name
+    span :: function.inline_span ?? function.name_span
+    line :: diagnostic_line_at(unit.source, span.start)
+    column :: diagnostic_column_at(unit.source, span.start)
+    value :: jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("name", jet_cli_status_text(name)),
+        jet_cli_status_field("source", jet_cli_status_text(unit.path)),
+        jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
+        jet_cli_status_field("contract", jet_cli_status_text(contract)),
+        jet_cli_status_field("rust_attribute", jet_cli_status_text(attribute)),
+    },
+    )
+    &facts.push(JetCLIExpandFact{source: unit.path, offset: span.start, name: name, text: "{unit.path}:{line}:{column}   {name}   {contract}   -> {attribute}", value: value})
+}
+
+fn jet_cli_expand_inline_items(items: [Item], owner: String?, unit: JetDriverDocModule, facts: &[JetCLIExpandFact]) Never! {
+    loop item in items {
+        if item == {
+            .Func(function) -> { jet_cli_expand_inline_function(function, owner, unit, &facts) }
+            .Struct(structure) -> {
+                loop function in structure.methods {
+                    jet_cli_expand_inline_function(function, Val(structure.name), unit, &facts)
+                }
+                loop block in structure.trait_impls {
+                    loop function in block.methods {
+                        jet_cli_expand_inline_function(function, Val(structure.name), unit, &facts)
+                    }
+                }
+            }
+            .Enum(enumeration) -> {
+                loop function in enumeration.methods {
+                    jet_cli_expand_inline_function(function, Val(enumeration.name), unit, &facts)
+                }
+                loop block in enumeration.trait_impls {
+                    loop function in block.methods {
+                        jet_cli_expand_inline_function(function, Val(enumeration.name), unit, &facts)
+                    }
+                }
+            }
+            .Impl(implementation) -> {
+                loop function in implementation.methods {
+                    jet_cli_expand_inline_function(function, Val(implementation.type_name), unit, &facts)
+                }
+            }
+            .CodeModule(code) -> {
+                if code.body == .Val(body) -> jet_cli_expand_inline_items(body, owner, unit, &facts)
+            }
+            else -> {}
+        }
+    }
+}
+
+fn jet_cli_expand_inline(modules: [JetDriverDocModule], json: Bool) -> [JetCLIExpandFact] Never! {
+    output := [JetCLIExpandFact]{}
+    loop unit in modules {
+        rows := [JetCLIExpandFact]{}
+        jet_cli_expand_inline_items(unit.items, None, unit, &rows)
+        loop index in 1..<rows.len() {
+            row :: rows[index].copy()
+            position := index
+            loop position > 0 && rows[position - 1].offset > row.offset {
+                rows[position] = rows[position - 1]
+                position -= 1
+            }
+            rows[position] = row
+        }
+        loop row in rows -> &output.push(row)
+    }
+    if json -> jet_cli_expand_sort_facts(&output)
+    output
+}
+
+fn jet_cli_expand_effects(index: JetCLISemIndex) -> [JetCLIExpandFact] Never! {
+    output := [JetCLIExpandFact]{}
+    loop row in index.effects {
+        provenance :: loop proof in row.provenance -> {
+            spans :: loop span in proof.spans -> jet_cli_expand_span(span, None)
+            jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("effect", jet_cli_status_text(proof.effect_name)),
+                jet_cli_status_field("call_path", jet_cli_status_texts(proof.call_path)),
+                jet_cli_status_field("spans", jet_cli_status_array(spans)),
+            },
+            )
+        }
+        value :: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("function", jet_cli_status_text(row.function)),
+            jet_cli_status_field("direct", jet_cli_status_texts(row.direct)),
+            jet_cli_status_field("callees", jet_cli_status_texts(row.callees)),
+            jet_cli_status_field("inferred", jet_cli_status_texts(row.inferred)),
+            jet_cli_status_field("maximal", jet_cli_status_bool(row.maximal)),
+            jet_cli_status_field("evidence", jet_cli_status_text("checked_static")),
+            jet_cli_status_field("runtime_observation", jet_cli_status_text("not_run")),
+            jet_cli_status_field("provenance", jet_cli_status_array(provenance)),
+        },
+        )
+        maximal :: if row.maximal -> " (maximal)" else -> ""
+        &output.push(JetCLIExpandFact{source: "", offset: 0, name: row.function, text: "{row.function}: resolved=[{row.inferred.join(", ")}]{maximal}", value: value})
+    }
+    output
+}
+
+fn jet_cli_expand_derive(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+    output := [JetCLIExpandFact]{}
+    loop definition in index.definitions {
+        if definition.derives.len() == 0 -> next
+        row :: definition.def
+        value :: jet_cli_status_object(
+        [JetCLIStatusField]{
+            jet_cli_status_field("name", jet_cli_status_text(row.name)),
+            jet_cli_status_field("identity", jet_cli_status_text(row.identity)),
+            jet_cli_status_field("source", jet_cli_status_text(row.module_path)),
+            jet_cli_status_field("span", jet_cli_expand_span(row.def_span, jet_cli_expand_source(modules, row.module_path))),
+            jet_cli_status_field("derives", jet_cli_status_texts(definition.derives)),
+        },
+        )
+        &output.push(JetCLIExpandFact{source: row.module_path, offset: row.def_span.start, name: row.name, text: "{row.name}: {definition.derives.join(", ")} [{row.identity}]", value: value})
+    }
+    jet_cli_expand_sort_facts(&output)
+    output
+}
+
+fn jet_cli_expand_template(unit: JetDriverDocModule, span: Span, kind: String, name: String, methods: [String], text: String) -> JetCLIExpandFact Never! {
+    value :: jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(kind)),
+        jet_cli_status_field("name", jet_cli_status_text(name)),
+        jet_cli_status_field("methods", jet_cli_status_texts(methods)),
+        jet_cli_status_field("text", jet_cli_status_text(text)),
+        jet_cli_status_field("source", jet_cli_status_text(unit.path)),
+        jet_cli_status_field("span", jet_cli_expand_span(span, Val(unit.source))),
+        jet_cli_status_field("origin", jet_cli_status_text("prep loop (closed comptime source)")),
+    },
+    )
+    line :: diagnostic_line_at(unit.source, span.start)
+    column :: diagnostic_column_at(unit.source, span.start)
+    JetCLIExpandFact{source: unit.path, offset: span.start, name: "{kind}:{name}", text: "{unit.path}:{line}:{column}   {text}   [from closed comptime prep loop]", value: value}
+}
+
+fn jet_cli_expand_templates(modules: [JetDriverDocModule]) -> [JetCLIExpandFact] Never! {
+    output := [JetCLIExpandFact]{}
+    loop unit in modules {
+        has_loop := false
+        loop line in unit.source.lines() {
+            if line.trim_start().starts_with("prep loop") -> has_loop = true
+        }
+        if !has_loop -> next
+        loop item in unit.items {
+            if item == {
+                .Struct(structure) -> {
+                    loop marker in structure.type_markers {
+                        &output.push(jet_cli_expand_template(unit, marker.span, "marker", structure.name, [String]{}, "marker #{marker.name} on {structure.name}"))
+                    }
+                    loop derived in structure.derives {
+                        duplicated := false
+                        loop marker in structure.type_markers {
+                            if marker.name == derived.name && marker.span == derived.span {
+                                duplicated = true
+                            }
+                        }
+                        if !duplicated {
+                            &output.push(jet_cli_expand_template(unit, derived.span, "derive", structure.name, [String]{}, "derive #{derived.name} on {structure.name}"))
+                        }
+                    }
+                }
+                .Impl(implementation) -> {
+                    if implementation.is_generated_serde -> next
+                    methods :: loop function in implementation.methods -> function.name
+                    suffix :: if implementation.trait_name == .Val(name) -> ": {name}" else -> ""
+                    members :: if methods.len() == 0 -> "" else -> " [{methods.join(", ")}]"
+                    &output.push(jet_cli_expand_template(unit, implementation.span, "impl", implementation.type_name, methods, "impl {implementation.type_name}{suffix}{members}"))
+                }
+                .Test(test) -> {
+                    name :: test.name ?? "<unresolved>"
+                    kind := "test"
+                    loop statement in test.body {
+                        if statement == .ScopeMember(member, _, _, _, _, _, _, _) && member == "measure" {
+                            kind = "measurement"
+                        }
+                    }
+                    &output.push(jet_cli_expand_template(unit, test.span, kind, name, [String]{}, "{kind} #Test({name})"))
+                }
+                else -> {}
+            }
+        }
+    }
+    jet_cli_expand_sort_facts(&output)
+    output
+}
+
+// Shared presentation for completed lenses. The host supplies the canonical
+// check record, also used by the sibling inspect commands.
+fn jet_cli_expand_text(index: JetCLISemIndex, lens: JetCLIExpandLensSpec, facts: [JetCLIExpandFact], check_text: String) -> String Never! {
+    plural :: if facts.len() == 1 -> "" else -> "s"
+    text := "effect roles\n  {jet_cli_effect_projection_line(index.effect_projection)}\n{lens.name} — {lens.summary} ({facts.len()} fact{plural})\n"
+    if facts.len() == 0 -> text = "{text}  (none in this program)\n"
+    loop fact in facts -> text = "{text}  {fact.text}\n"
+    "{text}{check_text}"
+}
+
+fn jet_cli_expand_json(index: JetCLISemIndex, selection: String, lenses: [JetCLIStatusValue], check: JetCLIStatusValue) -> String {
+    payload :: jet_cli_semindex_payload(index)
+    head :: jet_cli_doc_text(payload.bytes(), 0, payload.bytes().len() - 1)
+    expand :: jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("selection", jet_cli_status_text(selection)), jet_cli_status_field("lenses", jet_cli_status_array(lenses))})
+    expanded :: "{head},\"expand\":{jet_cli_status_json(expand)}}}"
+    "{jet_cli_status_render("inspect.semindex", true, [JetCLIStatusField]{jet_cli_status_field("semindex", JetCLIStatusValue.Float{text: expanded}), jet_cli_status_field("check", check)})}\n"
+}
+
+fn jet_cli_expand_lens_value(lens: JetCLIExpandLensSpec, facts: [JetCLIExpandFact]) -> JetCLIStatusValue Never! {
+    values :: loop fact in facts -> fact.value
+    jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("name", jet_cli_status_text(lens.name)), jet_cli_status_field("summary", jet_cli_status_text(lens.summary)), jet_cli_status_field("facts", jet_cli_status_array(values))})
+}
+
+fn jet_cli_expand_view_source(path: ViewSourcePath) -> String Never! {
+    if path.source == {
+        .Receiver -> "receiver"
+        .Parameter(index) -> "parameter:{index}"
+        .Static(module_path, name) -> "static:{module_path}::{name}"
+    }
+}
+
+fn jet_cli_expand_view_projections(path: ViewSourcePath) -> [String] Never! {
+    loop projection in path.projections -> if projection == {
+        .Field(name) -> "field:{name}"
+        .Index -> "index"
+        .Range -> "range"
+    }
+}
+
+// Types.rs ViewProvenanceFact::canonical; inputs retain semindex order.
+fn jet_cli_expand_view_text(entry: ViewProvenanceEntry) -> String Never! {
+    slot :: if entry.slot.len() == 0 -> "$" else -> entry.slot.join(".")
+    access :: if entry.value.mutable -> "write" else -> "read"
+    if entry.value.sources.len() == 1 {
+        path :: entry.value.sources[0]
+        return "slot:{slot};{jet_cli_expand_view_source(path)};access:{access};path:{jet_cli_expand_view_projections(path).join("/")}"
+    }
+    sources :: loop path in entry.value.sources -> "{jet_cli_expand_view_source(path)};path:{jet_cli_expand_view_projections(path).join("/")}"
+    "slot:{slot};one_of({sources.join(",")});access:{access}"
+}
+
+fn jet_cli_expand_view_value(entry: ViewProvenanceEntry) -> JetCLIStatusValue Never! {
+    sources :: loop path in entry.value.sources -> jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("source", jet_cli_status_text(jet_cli_expand_view_source(path))),
+        jet_cli_status_field("projections", jet_cli_status_texts(jet_cli_expand_view_projections(path))),
+    },
+    )
+    jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("output_path", jet_cli_status_texts(entry.slot)),
+        jet_cli_status_field("sources", jet_cli_status_array(sources)),
+        jet_cli_status_field("mutable", jet_cli_status_bool(entry.value.mutable)),
+    },
+    )
+}
+
+fn jet_cli_expand_parameter_text(parameter: JetCLISemParam) -> String Never! {
+    access_name :: jet_cli_sem_access_name(parameter.access)
+    access :: if access_name == "read" -> "" else -> "{access_name} "
+    label :: if parameter.label == "" || parameter.label == parameter.name -> parameter.name else -> "{parameter.label}: {parameter.name}"
+    default :: if parameter.default == .Val(value) -> "{{{value.source_text}}}" else -> ""
+    variadic :: if parameter.variadic -> "..." else -> ""
+    "{access}{variadic}{label}{default}: {type_name(parameter.ty)} [{jet_cli_sem_zone_name(parameter.zone)}]"
+}
+
+fn jet_cli_expand_callable(index: JetCLISemIndex, modules: [JetDriverDocModule]) -> [JetCLIExpandFact] {
+    output := [JetCLIExpandFact]{}
+    loop definition in index.definitions {
+        row :: definition.def
+        callable :: (if row.kind == .Function(value) -> Val(value) else -> JetCLISemCallable?{None}) ?? next
+        if !callable.signature_facts_available -> next
+        parameters :: loop parameter in callable.params -> jet_cli_expand_parameter_text(parameter)
+        effects := "unavailable"
+        if {
+            callable.effect_via == .Val(via) -> effects = "[via {via.name}]"
+            callable.effects == .Val(rows) -> {
+                names :: loop entry in rows -> entry.name
+                effects = "[{names.join(", ")}]"
+            }
+            else -> {}
+        }
+        errors := "unavailable"
+        failure := "unavailable"
+        failure_source := if callable.failure_unavailable == .Val(unavailable) -> unavailable.reason else -> ""
+        if callable.failure_contract == .Val(contract) {
+            effective :: failure_contract_effective_type(contract)
+            failure = type_name(effective)
+            failure_source = failure_contract_source(contract)
+            names := [String]{}
+            if effective == .Result(_, err) {
+                never :: if err == .Named(name) -> name == "Never" else -> false
+                if !never -> &names.push(type_name(err))
+            }
+            errors = "[{names.join(", ")}]"
+        }
+        generics :: if callable.generic_parameters == .Val(names) -> names.join(", ") else -> "unavailable"
+        policies :: loop policy in callable.policies -> jet_cli_sem_policy_display(policy)
+        return_type :: if callable.return_type == .Val(ty) -> type_name(ty) else -> "no value"
+        view_texts := [String]{}
+        view_values := [JetCLIStatusValue]{}
+        if definition.view_provenance == .Val(map) {
+            loop entry in map.entries {
+                &view_texts.push(jet_cli_expand_view_text(entry))
+                &view_values.push(jet_cli_expand_view_value(entry))
+            }
+        }
+        fields :: jet_cli_sem_json_callable_fields(callable, jet_cli_status_json(jet_cli_status_array(view_values)), "ExistingCallableProducerNeedsExtension")
+        span :: jet_cli_status_json(jet_cli_expand_span(row.def_span, jet_cli_expand_source(modules, row.module_path)))
+        encoded :: "{{\"name\":{jet_cli_json_string(row.name)},\"identity\":{jet_cli_json_string(row.identity)},\"source\":{jet_cli_json_string(row.module_path)},\"evidence\":\"checked_static\",\"runtime_observation\":\"not_run\",\"span\":{span},{fields}}}"
+        text :: "{row.name} [{row.identity}] ({parameters.join(", ")}) -> {return_type} effects={effects} errors={errors} failure={failure} ({failure_source}) views=[{view_texts.join(" | ")}] policies=[{policies.join(", ")}] generics=[{generics}]"
+        &output.push(JetCLIExpandFact{source: row.module_path, offset: row.def_span.start, name: row.name, text: text, value: JetCLIStatusValue.Float{text: encoded}})
+    }
+    jet_cli_expand_sort_facts(&output)
+    output
+}
+
+enum JetCLIExpandParse {
+    Ready(file: String, selection: String?)
+    Done(output: JetDriverVerbOutput)
+}
+
+fn jet_cli_expand_available_lenses() -> String Never! {
+    out := " available lenses:\n"
+    loop lens in JET_CLI_EXPAND_LENSES {
+        out = "{out}   {jet_cli_pad(lens.name, 8)} {lens.summary}\n"
+    }
+    out
+}
+
+fn jet_cli_expand_usage(code: String, what: String, why: String, fix: String, json: Bool, color: Bool, list_lenses: Bool) -> JetCLIExpandParse {
+    if json {
+        diagnostic :: diagnostic_from_registry(code, None, what, why, fix)
+        output :: jet_cli_reports_status_json("cli", false, jet_cli_report_cwd(), "", "", [Diagnostic]{diagnostic})
+        return JetCLIExpandParse.Done{output: JetDriverVerbOutput{stdout: output, stderr: "", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+    }
+    text_why :: if code == "E2941" -> "jet prove accepts only its registered proof lenses" else -> jet_cli_why(code)
+    text_fix :: if code == "E2941" -> "use `all`, `refinements`, `effects`, `taint`, `contracts`, `tests`, `budgets`, `replay`, or `solver`" else -> "correct the named argument or input, then run the command again"
+    error :: jet_cli_report(code, what, text_why, text_fix, color)
+    suffix :: if list_lenses -> jet_cli_expand_available_lenses() else -> ""
+    JetCLIExpandParse.Done{output: JetDriverVerbOutput{stdout: "", stderr: "{error}{suffix}", exit_code: JET_DRIVER_EXIT_USER_ERROR}}
+}
+
+fn jet_cli_expand_parse(args: [String], json: Bool, color: Bool) -> JetCLIExpandParse {
+    selection := String?{None}
+    file := String?{None}
+    index := 0
+    loop index < args.len() {
+        argument :: args[index]
+        if {
+            argument.starts_with("--facts=") -> {
+                selection = Val(jet_cli_doc_text(argument.bytes(), 8, argument.bytes().len()))
+            }
+            argument == "--facts" -> {
+                index += 1
+                if index == args.len() {
+                    return jet_cli_expand_usage("E2104", "`--facts` needs a lens name", "the expand command must know which registered lens to project", "pass `--facts inline`, `--facts memory`, `--facts web`, `--facts effects`, `--facts layout`, `--facts origin`, `--facts derive`, `--facts templates`, or `--facts callable-signature`", json, color, true)
+                }
+                selection = Val(args[index])
+            }
+            !argument.starts_with("-") && file == .None -> file = Val(argument)
+            else -> {}
+        }
+        index += 1
+    }
+    entry :: file ?? return jet_cli_expand_usage("E2104", "`jet inspect expand` needs an entry file", "expand facts come from one checked Jet entry file", "run `jet inspect expand --facts inline Examples/features/basics/hello.jet`", json, color, false)
+    if selection == .Val(name) {
+        known := false
+        loop lens in JET_CLI_EXPAND_LENSES {
+            if lens.name == name -> known = true
+        }
+        if !known {
+            return jet_cli_expand_usage("E2941", "unknown expand lens `{name}`", "only registered lenses have checked semantic facts", "use `inline`, `memory`, `web`, `effects`, `layout`, `origin`, `derive`, `templates`, or `callable-signature`", json, color, true)
+        }
+    }
+    JetCLIExpandParse.Ready{file: entry, selection: selection}
+}

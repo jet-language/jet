@@ -1,0 +1,167 @@
+// CommonTypes.rs:162-165; Top/Process.rs:3325-3343:
+// Rc<RefCell<Option<BufReader<ProcessReader>>>>, NOT a reference to Child.
+// Pipe24 is canonical native storage: non-atomic Rc refs0, RefCell borrow8,
+// owned FD72 pointer16 (0 = None). FD72 owns the one shared refill buffer and
+// cursor (HostFiles.jet:1-3). No Rust Rc/RefCell/Box offset is projected.
+PIPE_BYTES :: prep { I64{24} }
+PIPE_REFS :: prep { I64{0} }
+PIPE_BORROW :: prep { I64{8} }
+PIPE_FD :: prep { I64{16} }
+
+fn pipe_borrow_stop() {
+    // Seed rustc 1.97.1 (8bab26f4f); library/core/src/cell.rs:902,912-917:
+    // panic_already_borrowed(BorrowMutError) => "RefCell already borrowed".
+    // Emit the actual payload without allocating on the failing borrow path.
+    jet_rt_stdout_flush()
+    trap_header(I64{0})
+    trap_write_word(I64{2336361488876725586}, I64{8})
+    trap_write_word(I64{2340011850872286305}, I64{8})
+    trap_write_word(I64{7234319696985747298}, I64{8})
+    trap_msg_prelude_end()
+    trap_footer(I64{0})
+}
+fn pipe_borrow_mut(pipe: I64) -> I64 {
+    if (fd_word(pipe, PIPE_BORROW) != I64{0}) { pipe_borrow_stop() }
+    fd_put(pipe, PIPE_BORROW, I64{-1})
+    fd_word(pipe, PIPE_FD)
+}
+fn pipe_unborrow(pipe: I64) { fd_put(pipe, PIPE_BORROW, I64{0}) }
+
+// TAKES an independently owned reader FD72, obtained from
+// jet_process_take_stream_raw. Taking 0 constructs the shared None cell.
+#Export(c) fn jet_process_pipe_take_raw(fd: I64) -> I64 {
+    pipe :: jet_rt_alloc(PIPE_BYTES, I64{8})
+    fd_put(pipe, PIPE_REFS, I64{1})
+    fd_put(pipe, PIPE_BORROW, I64{0})
+    fd_put(pipe, PIPE_FD, fd)
+    pipe
+}
+fn pipe_clone(pipe: I64) -> I64 {
+    // Rc is !Send; do not turn the counter into Arc or allocate an outer box.
+    fd_put(pipe, PIPE_REFS, wrapping(fd_word(pipe, PIPE_REFS) + I64{1}))
+    pipe
+}
+fn pipe_drop(pipe: I64) {
+    if (pipe == I64{0}) {
+        return
+    }
+    refs :: wrapping(fd_word(pipe, PIPE_REFS) - I64{1})
+    fd_put(pipe, PIPE_REFS, refs)
+    if (refs != I64{0}) {
+        return
+    }
+    jet_fd_drop_raw(fd_word(pipe, PIPE_FD))
+    jet_rt_free(pipe, PIPE_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_handle_clone_process_stdout_stream(pipe: I64) -> I64 { pipe_clone(pipe) }
+#Export(c) fn jet_rt_handle_drop_process_stdout_stream(pipe: I64) { pipe_drop(pipe) }
+#Export(c) fn jet_rt_handle_clone_process_stderr_stream(pipe: I64) -> I64 { pipe_clone(pipe) }
+#Export(c) fn jet_rt_handle_drop_process_stderr_stream(pipe: I64) { pipe_drop(pipe) }
+
+// Option::take drops the reader and is visible through every clone.
+#Export(c) fn jet_process_pipe_close_raw(pipe: I64) {
+    fd :: pipe_borrow_mut(pipe)
+    fd_put(pipe, PIPE_FD, I64{0})
+    jet_fd_drop_raw(fd)
+    pipe_unborrow(pipe)
+}
+fn pipe_output_name() -> I64 {
+    text :: jet_rt_string_builder_new()
+    rt_text_push_word(text, I64{2338339510832558704}, I64{8})
+    rt_text_push_word(text, I64{128047746676079}, I64{6})
+    text
+}
+
+// The checked Core private primitives __stdout_line_bytes/__stderr_line_bytes
+// share this C result ABI: 1 => owned compact U8 data+len, 0 => owned IOError.
+// Empty success means EOF/None; UTF8, error policy and CRLF belong to Core's
+// __stdout_next_line/__stderr_next_line, never to this buffered byte leaf.
+#Export(c) fn jet_process_stream_line_bytes_raw(pipe: I64, data_out: I64, len_out: I64, error_out: I64) -> I64 {
+    fd :: pipe_borrow_mut(pipe)
+    fd_put(data_out, I64{0}, I64{0})
+    fd_put(len_out, I64{0}, I64{0})
+    fd_put(error_out, I64{0}, I64{0})
+    if (fd == I64{0}) {
+        pipe_unborrow(pipe)
+        return I64{1}
+    }
+    fd_lock(fd)
+    line := I64{0}
+    failure := I64{0}
+    done := false
+    loop !done {
+        if (fd_word(fd, I64{16}) != I64{0}) {
+            failure = I64{-9}
+            break
+        }
+        if (fd_word(fd, I64{40}) < I64{0}) {
+            // TAKE hands this state to a BufReader. Convert only after its
+            // private pending output reaches the kernel; failures retain the
+            // writer mode/suffix for the next attempt.
+            // TAKE has no error ABI; first read is its fallible conversion edge.
+            failure = fd_flush_locked(fd)
+            if (failure != I64{0}) { break }
+            fd_put(fd, I64{48}, I64{0})
+            fd_put(fd, I64{56}, I64{0})
+        }
+        buffer :: fd_buffer(fd)
+        fd_put(fd, I64{40}, I64{8192})
+        pos := fd_word(fd, I64{56})
+        filled := fd_word(fd, I64{48})
+        if (pos == filled) {
+            count :: host_call(I64{0}, fd_word(fd, I64{8}), buffer, I64{8192})
+            // BufRead::read_until retries Interrupted; there is no policy retry.
+            if (count == I64{-4}) { next }
+            if (count < I64{0}) {
+                failure = count
+                break
+            }
+            if (count == I64{0}) { break }
+            filled = count
+            pos = I64{0}
+            fd_put(fd, I64{48}, filled)
+            fd_put(fd, I64{56}, I64{0})
+        }
+        end := pos
+        loop end < filled {
+            byte := I64{0}
+            #Unsafe("the FD72 lock protects this initialized refill-buffer byte") {
+                byte = os_load_u8(wrapping(buffer + end))
+            }
+            end = wrapping(end + I64{1})
+            if (byte == I64{10}) {
+                done = true
+                break
+            }
+        }
+        if (line == I64{0}) { line = jet_rt_string_builder_new() }
+        // Private Text24 builder storage is only a byte buffer here: append
+        // copies bytes without decoding, so malformed UTF8 survives to Core.
+        rt_text_append(line, wrapping(buffer + pos), wrapping(end - pos))
+        fd_put(fd, I64{56}, end)
+    }
+    fd_unlock(fd)
+    pipe_unborrow(pipe)
+    if (failure != I64{0}) {
+        jet_rt_string_drop(line)
+        cause :: if (failure == HOST_WRITE_ZERO) -> host_write_zero_text() else -> host_errno_cause(wrapping(I64{0} - failure))
+        return host_io_other_take(HOST_IO_OP_READ, pipe_output_name(), cause, error_out)
+    }
+    if (line != I64{0}) {
+        length :: rt_text_len(line)
+        capacity :: rt_text_word(wrapping(line + I64{16}))
+        bytes := rt_text_data(line)
+        // G1 compact U8 ownership frees length bytes, not builder capacity.
+        if (capacity != length) {
+            bytes = jet_rt_alloc(length, I64{1})
+            rt_text_bytes_copy(bytes, rt_text_data(line), length)
+            jet_rt_string_drop(line)
+        } else {
+            // Transfer the data, freeing only its temporary byte-buffer header.
+            jet_rt_free(line, I64{24}, I64{8})
+        }
+        fd_put(data_out, I64{0}, bytes)
+        fd_put(len_out, I64{0}, length)
+    }
+    I64{1}
+}

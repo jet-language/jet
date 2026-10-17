@@ -9,8 +9,8 @@ use std::process::Command;
 fn package_transition_surface_formats_canonically_and_idempotently() {
     let sources = [
         "name: \"demo\"\noutputs: { app: .Executable{ entry: run } }\n",
-        "pub development :: Config{ environments: { development: .Environment{ tools: [\"git\"] } } }\n",
-        "pub app :: Config{ version: \"1\" }\n",
+        "development :: Config{ environments: { development: .Environment{ tools: [\"git\"] } } }\n",
+        "app :: Config{ version: \"1\" }\n",
     ];
 
     for source in sources {
@@ -326,10 +326,10 @@ fn bar_formatting_is_stable() {
     let twice = jet::format_source(&once).expect("formatted alternatives should parse");
     assert_eq!(once, twice, "alternative formatting must be stable");
 
-    let bit_or = jet::format_source("fn run() { value :: 1 | 2 }")
-        .expect("formatter should preserve value-position bitwise OR");
+    let bit_or = jet::format_source("fn run() { value :: (1).bit_or(2) }")
+        .expect("formatter should preserve the named bitwise OR");
     assert!(
-        bit_or.contains("value :: 1 | 2"),
+        bit_or.contains("bit_or(2)"),
         "formatter lost bitwise OR:\n{bit_or}"
     );
     assert_eq!(
@@ -2421,7 +2421,7 @@ struct Reservation {
     guest: String
 
     #Transition(_, Pending) fn book(guest: String) -> Reservation {
-        return Reservation{guest: ~guest}
+        return Reservation{guest: guest.copy()}
     }
 
     #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {
@@ -2975,10 +2975,10 @@ fn run() {
 }
 
 #[test]
-fn fmt_copy_sigil_d_shape_copy1_stability() {
-    // D-SHAPE-COPY1=A (supersedes D-CAP2/D-MEM1/S4): `~x` is a prefix-verb
-    // expression — must survive fmt unchanged in binding position, call-arg
-    // position, and on a field.
+fn fmt_copy_call_d_copy_word1_stability() {
+    // D-COPY-WORD1=A (amends D-SHAPE-COPY1=A): `x.copy()` is an ordinary
+    // method-call expression — must survive fmt unchanged in binding
+    // position, call-arg position, and on a field.
     let src = "\
 struct Ticket {
     id: Int
@@ -2991,16 +2991,16 @@ fn archive(t: ^Ticket) -> String {
 
 fn run() {
     name :: \"vault\"
-    saved :: ~name
+    saved :: name.copy()
     t :: Ticket{id: 1, label: \"root\"}
-    print(archive(~t))
-    print(~t.label)
+    print(archive(t.copy()))
+    print(t.label.copy())
 }
 ";
     assert_fmt_keeps(
         src,
-        &["saved :: ~name", "print(archive(~t))", "print(~t.label)"],
-        "D-SHAPE-COPY1 copy sigil",
+        &["saved :: name.copy()", "print(archive(t.copy()))", "print(t.label.copy())"],
+        "D-COPY-WORD1 copy call",
     );
 }
 
@@ -3257,7 +3257,7 @@ fn fmt_selective_import_d_selimport1_stability() {
     // D-SELIMPORT1=A: `use mod.[a, b as c]` must survive fmt unchanged.
     let src = "\
 module math {
-    pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    fn clamp(x: Int, lo: Int, hi: Int) -> Int {
         if x < lo { return lo }
         if x > hi { return hi }
         return x
@@ -3804,13 +3804,13 @@ fn run() {
 #[test]
 fn fmt_place_access_stability() {
     // D-SHAPE-PLACE1=A: formatting once must retain every bare/read, `&` write,
-    // and `~` owned-copy token; formatting twice must be byte-identical.
+    // and `.copy()` owned-copy token; formatting twice must be byte-identical.
     let src = "\
 fn run() {
     values := [1, 2, 3, 4]
     read :: values[0..1]
     edit :: &values[2..3].sort()
-    owned :: ~values[0..1]
+    owned :: values[0..1].copy()
     print(\"{read.len()},{edit.len()},{owned.len()}\")
 }
 ";
@@ -3947,19 +3947,6 @@ fn fmt_os_target_marker_stability() {
 // ── #177 §5 syntax-lock sweep: 5 formatter bugs found reformatting the full
 // example tree, all fixed in this pass. Each was silent — `jet fmt` printed
 // no error, it just emitted wrong or missing output.
-
-#[test]
-fn fmt_pub_file_precedes_imports() {
-    // D-VISDEFAULT2: `#PubFile` carries no span (a fixed-position file
-    // marker, like `#Target(Web)`), so it used to render *after* the
-    // imports loop. But an import's `priv`/`pub` qualifier is chosen
-    // relative to `#PubFile` being in effect — emitting the marker after the
-    // import it gates produced `priv use …` with no preceding `#PubFile`,
-    // which doesn't even reparse (E0413). `#PubFile` must render before
-    // imports, not after.
-    let src = "#PubFile\n\nuse core.term\n\nfn run() {\n    print(\"hi\")\n}\n";
-    assert_fmt_stable(src, "#PubFile before imports");
-}
 
 #[test]
 fn fmt_typed_derive_body_comment_not_duplicated() {
@@ -4221,11 +4208,11 @@ fn generic_modules_roundtrip_templates_symbolic_lengths_nested_items_and_alias_c
     let src = r#"module ring<T>(capacity: Int, label: String) {
 #Meta(category: label)
 SIZE :: prep { capacity }
-pub struct Buffer { slots: [T#capacity] }
-module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+struct Buffer { slots: [T#capacity] }
+module nested<U> { fn keep(value: U) -> U { return value.copy() } }
 module inner :: nested<T>
 #Meta(category: label)
-pub fn adjusted() -> Int { return capacity + 1 }
+fn adjusted() -> Int { return capacity + 1 }
 }
 module a :: ring<Int>(2 + 2, "ring")
 module b :: a
@@ -4376,27 +4363,15 @@ fn fmt_keeps_reordered_and_skipped_argument_labels() {
 }
 
 #[test]
-fn fmt_keeps_power_and_exclusive_or_spellings() {
-    // D-EXPOP1=A / D-XORSPELL1=A: `^` is the power, `~|` is exclusive-or, and
-    // both compounds must survive a round trip byte-for-byte (fmt STABILITY —
-    // idempotence alone would not notice a dropped sigil, because a dropped
-    // one stays dropped on the second pass).
-    let src = "fn run() {\n    a :: 2 ^ 3 ^ 2\n    b :: -3 ^ 2\n    c :: (2 ^ 3) ^ 2\n    d :: (-3) ^ 2\n    e :: 2 ^ -1\n    f :: 12 ~| 10\n    g := 2\n    g ^= 10\n    h := 12\n    h ~|= 10\n    print(\"{a}{b}{c}{d}{e}{f}{g}{h}\")\n}\n";
-    let once = jet::format_source(src).expect("fmt should accept power and exclusive-or");
-    for token in [
-        "2 ^ 3 ^ 2",
-        "-3 ^ 2",
-        "(2 ^ 3) ^ 2",
-        "(-3) ^ 2",
-        "2 ^ -1",
-        "12 ~| 10",
-        "g ^= 10",
-        "h ~|= 10",
-    ] {
+fn fmt_keeps_power_and_exclusive_or_methods() {
+    // D-SIGIL-ALGEBRA1=B: methods and reassignment remain byte-stable.
+    let src = "fn run() {\n    a :: (2).pow((3).pow(2))\n    b :: -(3).pow(2)\n    c :: (2).pow(3).pow(2)\n    d :: (-3).pow(2)\n    e :: (2).pow(-1)\n    f :: (12).bit_xor(10)\n    g := 2\n    g = g.pow(10)\n    h := 12\n    h = h.bit_xor(10)\n    print(\"{a}{b}{c}{d}{e}{f}{g}{h}\")\n}\n";
+    let once = jet::format_source(src).expect("fmt should accept numeric methods");
+    for token in ["pow(", "bit_xor(", "g = g.pow(10)", "h = h.bit_xor(10)"] {
         assert!(once.contains(token), "fmt dropped `{token}`:\n{once}");
     }
-    let twice = jet::format_source(&once).expect("power and exclusive-or should re-fmt");
-    assert_eq!(once, twice, "power formatting must be byte-stable");
+    let twice = jet::format_source(&once).expect("numeric methods should re-fmt");
+    assert_eq!(once, twice, "numeric method formatting must be byte-stable");
 }
 
 #[test]

@@ -1,4 +1,13 @@
 // ── D-ITERTOOLS1=A: expanded collection/runtime handles ─────────────────────
+#[inline(always)]
+fn jet_collection_native_int(value: &jet_foundation::Numeric::JetInt) -> i64 {
+    value.to_native_i64().unwrap_or_else(|error| {
+        jet_panic_rich_code(
+            "E3010", "<core.collections>", 0, "", "", 0, 0, error, "",
+        )
+    })
+}
+
 impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
         if self.bound == Some(0) || self.entries.iter().any(|(stored, _)| stored == &key) {
@@ -8,13 +17,13 @@ impl<K: PartialEq + Clone, V: Clone> JetLru<K, V> {
         true
     }
 
-    fn remove(&mut self, key: &K) -> Option<V> {
-        let index = self.entries.iter().position(|(stored, _)| stored == key)?;
+    fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        let index = self.entries.iter().position(|(stored, _)| stored.borrow() == key)?;
         Some(self.entries.remove(index).1)
     }
 
-    fn contains_key(&self, key: &K) -> bool {
-        self.entries.iter().any(|(stored, _)| stored == key)
+    fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        self.entries.iter().any(|(stored, _)| stored.borrow() == key)
     }
 
     fn keys(&self) -> Vec<K> {
@@ -40,7 +49,8 @@ struct JetCache<K, V> {
 }
 
 impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
-    fn new(capacity: i64) -> Self {
+    fn new(capacity: jet_foundation::Numeric::JetInt) -> Self {
+        let capacity = jet_collection_native_int(&capacity);
         Self {
             lru: JetLru::new(Some(capacity.max(0) as usize)),
         }
@@ -51,13 +61,13 @@ impl<K: Eq + Clone, V: Clone> JetCache<K, V> {
     fn add_new(&mut self, key: K, value: V) -> bool {
         self.lru.add_new(key, value)
     }
-    fn get(&mut self, key: &K) -> Option<V> {
-        self.lru.get(key)
+    fn get<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
+        self.lru.get_matching(|stored| stored.borrow() == key)
     }
-    fn remove(&mut self, key: &K) -> Option<V> {
+    fn remove<Q: ?Sized>(&mut self, key: &Q) -> Option<V> where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.remove(key)
     }
-    fn contains_key(&self, key: &K) -> bool {
+    fn contains_key<Q: ?Sized>(&self, key: &Q) -> bool where K: std::borrow::Borrow<Q>, Q: PartialEq {
         self.lru.contains_key(key)
     }
     fn keys(&self) -> Vec<K> {
@@ -149,10 +159,6 @@ impl JetBitSet {
     fn to_list(&self) -> Vec<i64> {
         self.bits.iter().copied().collect()
     }
-}
-
-fn jet_bits_copy(bits: &JetBitSet) -> JetBitSet {
-    bits.clone()
 }
 
 /// One `Bits` membership definition for every execution tier: AOT reaches it
@@ -340,7 +346,38 @@ impl<T> JetListPushSurface for Vec<T> {
         self.push(value);
     }
 }
+impl<T: Ord> JetListPushSurface for std::collections::BinaryHeap<T> {
+    type Item = T;
 
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
+
+
+// #4566 slice 8 inline storage: `jet_mem::JetInlineList` (the vetted memory
+// prelude owns its unsafe storage); the list surfaces here are safe code.
+impl<T, const N: usize> JetListSurface for jet_mem::JetInlineList<T, N> {
+    #[inline(always)]
+    fn jet_len(&self) -> i64 {
+        <[T]>::len(self) as i64
+    }
+
+    #[inline(always)]
+    fn jet_is_empty(&self) -> bool {
+        <[T]>::is_empty(self)
+    }
+}
+
+impl<T, const N: usize> JetListPushSurface for jet_mem::JetInlineList<T, N> {
+    type Item = T;
+
+    #[inline(always)]
+    fn jet_push(&mut self, value: Self::Item) {
+        self.push(value);
+    }
+}
 
 #[inline(always)]
 fn jet_list_push<C: JetListPushSurface>(xs: &mut C, value: C::Item) {
@@ -358,9 +395,46 @@ fn jet_list_reverse<T>(xs: &mut [T]) {
     xs.reverse();
 }
 
+// Embedded Core-only port seam; dies at Rust cutover.
+#[inline(always)]
+fn jet_list_swap<T>(xs: &mut [T], first: i64, second: i64) {
+    // Borrow-only indexing checks reuse the ordinary indexing stop exactly.
+    let _ = jet_index_vec_ref(xs, first, "<core.prelude>", 0);
+    let _ = jet_index_vec_ref(xs, second, "<core.prelude>", 0);
+    xs.swap(first as usize, second as usize);
+}
+
+#[inline(always)]
+fn jet_index_vec_ref<'a, T>(xs: &'a [T], i: i64, file: &str, line: u32) -> &'a T {
+    jet_fixed_list_index(xs.len(), i, |index| &xs[index])
+        .unwrap_or_else(|error| jet_arithmetic_stop(file, line, &error.message()))
+}
 #[inline(always)]
 fn jet_list_sort<T: Ord>(xs: &mut [T]) {
     xs.sort();
+}
+
+// D-FLOATSORT1: a Float list has no `Ord`; its sorts use the one shared
+// comparator (every NaN after every number, NaNs equal). Descending reverses
+// that comparator, so NaNs lead. Float32 widens exactly to the same order.
+#[inline(always)]
+fn jet_list_sort_float(xs: &mut [f64]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(*left, *right));
+}
+
+#[inline(always)]
+fn jet_list_sort_desc_float(xs: &mut [f64]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(*right, *left));
+}
+
+#[inline(always)]
+fn jet_list_sort_float32(xs: &mut [f32]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(f64::from(*left), f64::from(*right)));
+}
+
+#[inline(always)]
+fn jet_list_sort_desc_float32(xs: &mut [f32]) {
+    xs.sort_by(|left, right| jet_float_sort_cmp(f64::from(*right), f64::from(*left)));
 }
 
 trait JetCollectionClear {
@@ -423,11 +497,11 @@ fn jet_list_is_empty<C: JetListSurface + ?Sized>(xs: &C) -> bool {
 }
 
 #[inline(always)]
-pub(crate) fn jet_list_contains<T: PartialEq>(xs: &[T], needle: &T) -> bool {
-    xs.contains(needle)
+pub(crate) fn jet_list_contains<T: PartialEq<U>, U: ?Sized>(xs: &[T], needle: &U) -> bool {
+    xs.iter().any(|item| item == needle)
 }
 #[inline(always)]
-fn jet_list_index_of<T: PartialEq>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
+fn jet_list_index_of<T: PartialEq<U>, U: ?Sized>(xs: &[T], needle: &U) -> JetOutcome<i64, JetAbsent> {
     jet_outcome_of(xs.iter().position(|item| item == needle).map(|index| index as i64))
 }
 
@@ -459,29 +533,31 @@ fn jet_map_is_empty<K: Ord, V>(map: &JetMap<K, V>) -> bool {
     map.is_empty()
 }
 
+/// The key is any borrowed form of `K` (`K: Borrow<Q>`), so a `String`-keyed
+/// map is read with a literal `&str` key without building a `String`.
 #[inline(always)]
-fn jet_map_get_opt<K: Ord, V: Clone>(
+fn jet_map_get_opt<K: Ord + std::borrow::Borrow<Q>, V: Clone, Q: Ord + ?Sized>(
     map: &JetMap<K, V>,
-    key: &K,
+    key: &Q,
 ) -> JetOutcome<V, JetAbsent> {
     jet_outcome_of(map.get(key).cloned())
 }
 #[inline(always)]
-fn jet_map_has_key<K: Ord, V>(map: &JetMap<K, V>, key: &K) -> bool {
+fn jet_map_has_key<K: Ord + std::borrow::Borrow<Q>, V, Q: Ord + ?Sized>(map: &JetMap<K, V>, key: &Q) -> bool {
     map.contains_key(key)
 }
 
 #[inline(always)]
-fn jet_bag_has<T: Eq + std::hash::Hash>(
+fn jet_bag_has<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     bag: &std::collections::HashMap<T, usize>,
-    value: &T,
+    value: &Q,
 ) -> bool {
     bag.get(value).copied().unwrap_or(0) > 0
 }
 
-fn jet_bag_count<T: Eq + std::hash::Hash>(
+fn jet_bag_count<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     bag: &std::collections::HashMap<T, usize>,
-    value: &T,
+    value: &Q,
 ) -> i64 {
     bag.get(value).copied().unwrap_or(0) as i64
 }
@@ -501,9 +577,9 @@ fn jet_set_is_empty<T>(set: &std::collections::HashSet<T>) -> bool {
     set.is_empty()
 }
 #[inline(always)]
-fn jet_set_has<T: Eq + std::hash::Hash>(
+fn jet_set_has<T: Eq + std::hash::Hash + std::borrow::Borrow<Q>, Q: Eq + std::hash::Hash + ?Sized>(
     set: &std::collections::HashSet<T>,
-    value: &T,
+    value: &Q,
 ) -> bool {
     set.contains(value)
 }
@@ -614,12 +690,38 @@ fn jet_lru_is_empty<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> bool {
     cache.is_empty()
 }
 #[inline(always)]
-fn jet_lru_has<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>, key: &K) -> bool {
+fn jet_lru_has<K: Eq + Clone + std::borrow::Borrow<Q>, V: Clone, Q: PartialEq + ?Sized>(cache: &JetCache<K, V>, key: &Q) -> bool {
     cache.contains_key(key)
 }
 #[inline(always)]
 fn jet_lru_keys<K: Eq + Clone, V: Clone>(cache: &JetCache<K, V>) -> Vec<K> {
     cache.keys()
+}
+
+#[inline(always)]
+fn jet_lru_put<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: K,
+    value: V,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(cache.put(key, value))
+}
+
+#[inline(always)]
+fn jet_lru_get<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: &K,
+) -> JetOutcome<V, JetAbsent> {
+    jet_outcome_of(cache.get(key))
+}
+
+#[inline(always)]
+fn jet_lru_add_new<K: Eq + Clone, V: Clone>(
+    cache: &mut JetCache<K, V>,
+    key: K,
+    value: V,
+) -> bool {
+    cache.add_new(key, value)
 }
 
 #[inline(always)]
@@ -642,7 +744,8 @@ fn jet_bit_set_is_empty(bits: &JetBitSet) -> bool {
     bits.is_empty()
 }
 #[inline(always)]
-fn jet_bit_set_has(bits: &JetBitSet, bit: i64) -> bool {
+fn jet_bit_set_has(bits: &JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
+    let bit = jet_collection_native_int(&bit);
     bits.contains(&bit)
 }
 #[inline(always)]
@@ -652,6 +755,18 @@ fn jet_bit_set_to_list(bits: &JetBitSet) -> Vec<i64> {
 #[inline(always)]
 fn jet_bit_set_count(bits: &JetBitSet) -> i64 {
     bits.count()
+}
+
+#[inline(always)]
+fn jet_bitset_add(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) -> bool {
+    let bit = jet_collection_native_int(&bit);
+    bits.add(bit)
+}
+
+#[inline(always)]
+fn jet_bitset_remove(bits: &mut JetBitSet, bit: jet_foundation::Numeric::JetInt) {
+    let bit = jet_collection_native_int(&bit);
+    bits.remove(&bit);
 }
 #[inline(always)]
 fn jet_deque_len<T>(queue: &std::collections::VecDeque<T>) -> i64 {
@@ -677,29 +792,29 @@ fn jet_deque_peek_back<T: Clone>(
 }
 
 #[inline(always)]
-fn jet_deque_contains<T: PartialEq>(
+fn jet_deque_contains<T: PartialEq<U>, U: ?Sized>(
     queue: &std::collections::VecDeque<T>,
-    value: &T,
+    value: &U,
 ) -> bool {
-    queue.contains(value)
+    queue.iter().any(|item| item == value)
 }
 
 #[inline(always)]
-fn jet_string_starts_with(text: &String, prefix: &String) -> bool {
+fn jet_string_starts_with(text: &str, prefix: &str) -> bool {
     text.starts_with(prefix)
 }
 
 #[inline(always)]
-fn jet_string_copy(text: &String) -> String {
-    text.clone()
+fn jet_string_copy(text: &str) -> String {
+    text.to_owned()
 }
 
 #[inline(always)]
-fn jet_string_ends_with(text: &String, suffix: &String) -> bool {
+fn jet_string_ends_with(text: &str, suffix: &str) -> bool {
     text.ends_with(suffix)
 }
 #[inline(always)]
-fn jet_string_replace(text: &String, from: &String, to: &String) -> String {
+fn jet_string_replace(text: &str, from: &str, to: &str) -> String {
     text.replace(from, to)
 }
 
@@ -719,13 +834,17 @@ fn jet_deque_to_list<T: Clone>(queue: &std::collections::VecDeque<T>) -> Vec<T> 
 #[inline(always)]
 fn jet_deque_join<T: JetShow>(
     queue: &std::collections::VecDeque<T>,
-    separator: &String,
+    separator: &str,
 ) -> String {
-    queue
-        .iter()
-        .map(|value| value.jet_show())
-        .collect::<Vec<_>>()
-        .join(separator)
+    jet_deque_join_by(queue, separator, JetShow::jet_show)
+}
+
+fn jet_deque_join_by<T, F: Fn(&T) -> String>(
+    queue: &std::collections::VecDeque<T>,
+    separator: &str,
+    show: F,
+) -> String {
+    queue.iter().map(show).collect::<Vec<_>>().join(separator)
 }
 
 #[inline(always)]
@@ -756,10 +875,20 @@ fn jet_deque_reverse<T>(queue: &mut std::collections::VecDeque<T>) {
     queue.make_contiguous().reverse();
 }
 
-/// Keep `[0, index)` in `queue` and return the tail; the index clamps to the
-/// queue bounds.
+/// Keep `[0, index)` in `queue` and return the tail; the owned Int index
+/// clamps to the queue bounds.
 #[inline(always)]
 fn jet_deque_split<T>(
+    queue: &mut std::collections::VecDeque<T>,
+    index: jet_foundation::Numeric::JetInt,
+) -> std::collections::VecDeque<T> {
+    jet_deque_split_native(queue, jet_int_saturating_word(&index))
+}
+
+/// The machine-word body of `jet_deque_split`; hosts that carry `Int` as a
+/// word call it directly.
+#[inline(always)]
+fn jet_deque_split_native<T>(
     queue: &mut std::collections::VecDeque<T>,
     index: i64,
 ) -> std::collections::VecDeque<T> {
@@ -773,7 +902,7 @@ fn jet_deque_is_empty<T>(queue: &std::collections::VecDeque<T>) -> bool {
 }
 
 #[inline(always)]
-fn jet_string_is_empty(text: &String) -> bool {
+fn jet_string_is_empty(text: &str) -> bool {
     text.is_empty()
 }
 
@@ -782,20 +911,36 @@ pub(crate) fn jet_string_contains(text: &str, needle: &str) -> bool {
     text.contains(needle)
 }
 #[inline(always)]
-fn jet_string_repeat(text: &String, count: i64) -> String {
+fn jet_string_repeat(text: &str, count: i64) -> String {
     text.repeat(count.max(0) as usize)
 }
 
 
 #[inline(always)]
-fn jet_string_count_bytes(text: &String) -> i64 {
+fn jet_string_count_bytes(text: &str) -> i64 {
     text.len() as i64
+}
+
+/// An owned Int size or position as a machine word. A value past the word
+/// saturates, so it keeps its side of every clamp and bound check.
+#[inline(always)]
+fn jet_int_saturating_word(value: &jet_foundation::Numeric::JetInt) -> i64 {
+    value.to_i64().unwrap_or_else(|| {
+        if *value < jet_foundation::Numeric::JetInt::from_i64(0) {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
 }
 
 // D-ALLOCFAIL1=A: collection fallibility is one Prelude path. Native
 // reservations stay here; map storage insertion is a representation hook.
 // AOT, JIT, and TIR-eval marshal these functions.
-fn jet_list_try_new<T>() -> JetOutcome<Vec<T>, AllocError> {
+
+/// `List.try_new<T>()`: the unit operand is the static `List` owner the
+/// builtin route carries in its receiver slot.
+fn jet_list_try_new<T>(_static_owner: ()) -> JetOutcome<Vec<T>, AllocError> {
     if jet_fault_should_fail_allocation() {
         return Err(jet_alloc_error(0, "List"));
     }
@@ -823,8 +968,13 @@ fn jet_list_try_with_capacity_defaulted<T>(
     Ok(list)
 }
 
-fn jet_list_try_with_capacity<T>(capacity: i64) -> JetOutcome<Vec<T>, AllocError> {
-    jet_list_try_with_capacity_defaulted(capacity, |_| true, |_| {})
+/// `List.try_with_capacity<T>(capacity)`: the unit operand is the static
+/// `List` owner in the builtin route's receiver slot.
+fn jet_list_try_with_capacity<T>(
+    _static_owner: (),
+    capacity: jet_foundation::Numeric::JetInt,
+) -> JetOutcome<Vec<T>, AllocError> {
+    jet_list_try_with_capacity_defaulted(jet_int_saturating_word(&capacity), |_| true, |_| {})
 }
 
 fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError> {
@@ -838,7 +988,19 @@ fn jet_list_try_push<T>(xs: &mut Vec<T>, value: T) -> JetOutcome<(), AllocError>
     Ok(())
 }
 
-fn jet_list_try_reserve<T>(xs: &mut Vec<T>, additional: i64) -> JetOutcome<(), AllocError> {
+fn jet_list_try_reserve<T>(
+    xs: &mut Vec<T>,
+    additional: jet_foundation::Numeric::JetInt,
+) -> JetOutcome<(), AllocError> {
+    jet_list_try_reserve_native(xs, jet_int_saturating_word(&additional))
+}
+
+/// The machine-word body of `jet_list_try_reserve`; hosts that carry `Int`
+/// as a word call it directly.
+fn jet_list_try_reserve_native<T>(
+    xs: &mut Vec<T>,
+    additional: i64,
+) -> JetOutcome<(), AllocError> {
     if additional < 0 {
         return Err(jet_alloc_error(0, "List"));
     }
@@ -1061,11 +1223,11 @@ fn jet_map_from_keys_kernel<K: Ord + Clone, V: Clone>(keys: Vec<K>, default: V) 
     keys.into_iter().map(|key| (key, default.clone())).collect()
 }
 
-fn jet_map_contains_value_kernel<K: Ord, V: PartialEq>(m: &JetMap<K, V>, needle: &V) -> bool {
+fn jet_map_contains_value_kernel<K: Ord, V: PartialEq<U>, U: ?Sized>(m: &JetMap<K, V>, needle: &U) -> bool {
     m.values().any(|value| value == needle)
 }
 
-fn jet_map_pop_kernel<M, K: Ord + Clone, V: Clone>(m: &mut M, key: &K) -> JetOutcome<V, JetAbsent>
+fn jet_map_pop_kernel<M, K: Ord + std::borrow::Borrow<Q>, V, Q: Ord + ?Sized>(m: &mut M, key: &Q) -> JetOutcome<V, JetAbsent>
 where
     M: std::ops::DerefMut<Target = std::collections::BTreeMap<K, V>>,
 {
@@ -1082,7 +1244,7 @@ fn jet_list_remove_value_kernel<T: Clone + PartialEq>(xs: &mut Vec<T>, value: T)
         .map(|index| xs.remove(index))
 }
 
-fn jet_list_remove_slot_kernel<T: Clone>(xs: &mut Vec<T>, index: i64) -> Result<T, String> {
+fn jet_list_remove_slot_kernel<T>(xs: &mut Vec<T>, index: i64) -> Result<T, String> {
     let len = xs.len() as i64;
     if index < 0 || index >= len {
         return Err(jet_list_bounds_message(len, index));
@@ -1125,7 +1287,7 @@ fn jet_list_insert_kernel<T>(
     Ok(())
 }
 
-fn jet_list_count_kernel<T: PartialEq>(xs: &[T], value: &T) -> i64 {
+fn jet_list_count_kernel<T: PartialEq<U>, U: ?Sized>(xs: &[T], value: &U) -> i64 {
     jet_count_to_int(xs.iter().filter(|item| *item == value).count())
 }
 
@@ -1446,6 +1608,7 @@ pub(crate) struct JetLoopRangeCursor {
     done: bool,
 }
 
+#[inline]
 pub(crate) fn jet_loop_range_init(
     start: i64,
     end: i64,
@@ -1477,6 +1640,7 @@ pub(crate) fn jet_loop_range_init_checked(
     })
 }
 
+#[inline(always)]
 pub(crate) fn jet_loop_range_has_next(cursor: &JetLoopRangeCursor) -> bool {
     !cursor.done && if cursor.step > 0 {
         if cursor.exclusive { cursor.current < cursor.end } else { cursor.current <= cursor.end }
@@ -1485,6 +1649,7 @@ pub(crate) fn jet_loop_range_has_next(cursor: &JetLoopRangeCursor) -> bool {
     }
 }
 
+#[inline(always)]
 pub(crate) fn jet_loop_range_value(cursor: &JetLoopRangeCursor) -> i64 {
     if !jet_loop_range_has_next(cursor) {
         jet_panic("<core.prelude>", 0, "range loop value requested after exhaustion");
@@ -1492,6 +1657,7 @@ pub(crate) fn jet_loop_range_value(cursor: &JetLoopRangeCursor) -> i64 {
     cursor.current
 }
 
+#[inline(always)]
 pub(crate) fn jet_loop_range_advance(cursor: &mut JetLoopRangeCursor) {
     if cursor.done {
         return;
@@ -1504,6 +1670,156 @@ pub(crate) fn jet_loop_range_advance(cursor: &mut JetLoopRangeCursor) {
         }
     };
     cursor.done = !jet_loop_range_has_next(cursor);
+}
+
+/// #4566: the elements `jet_int_sum_walk` adds in one branch-free pass.
+const JET_INT_SUM_CHUNK: usize = 256;
+/// An element joins a chunk sum only as an inline word in
+/// `[-2^52, 2^52)`, so a chunk sum stays inside `±2^60`.
+const JET_INT_SUM_ELEMENT_BITS: u32 = 52;
+/// A chunk is added only to a running total inside `[-2^61, 2^61)`, so the
+/// new total stays inside the inline range `[-2^62, 2^62)`.
+const JET_INT_SUM_TOTAL_BOUND: i64 = 1 << 61;
+/// Fewer elements than this are left to the exact loop: on so short a walk
+/// the chunk set-up costs more than the per-element checks it saves.
+const JET_INT_SUM_MIN_ELEMENTS: usize = 32;
+
+/// #4566: the native form of an exact `Int` range walk `loop i in a..<b ->
+/// acc += xs[i]` (MIRRust `int_sum_walk`), run just before that loop. It
+/// sums the elements left under `cursor` in chunks of `JET_INT_SUM_CHUNK`,
+/// one pass per chunk that vectorises, and commits a chunk only when every
+/// element and the running total are inline words inside the bounds above,
+/// so each committed total is the exact sum. The cursor is left at the
+/// first element not committed: the exact loop finishes the walk from there
+/// (no iteration once all are committed) and reports an out-of-range index
+/// itself.
+#[inline(always)]
+pub(crate) fn jet_int_sum_walk(
+    cursor: &mut JetLoopRangeCursor,
+    acc: &mut jet_foundation::Numeric::JetInt,
+    xs: &[jet_foundation::Numeric::JetInt],
+) {
+    if cursor.done || cursor.step != 1 || !cursor.exclusive || cursor.current < 0 {
+        return;
+    }
+    let start = cursor.current as usize;
+    let end = usize::try_from(cursor.end).map_or(0, |end| end.min(xs.len()));
+    if end <= start || end - start < JET_INT_SUM_MIN_ELEMENTS {
+        return;
+    }
+    let mut total = acc.to_raw();
+    let mut at = start;
+    for chunk in xs[start..end].chunks(JET_INT_SUM_CHUNK) {
+        if !(-JET_INT_SUM_TOTAL_BOUND..JET_INT_SUM_TOTAL_BOUND).contains(&total) {
+            break;
+        }
+        let mut sum = 0_i64;
+        let mut wide = 0_u64;
+        for element in chunk {
+            let raw = element.to_raw();
+            wide |= (raw.wrapping_add(1 << JET_INT_SUM_ELEMENT_BITS) as u64) >> (JET_INT_SUM_ELEMENT_BITS + 1);
+            sum = sum.wrapping_add(raw);
+        }
+        if wide != 0 {
+            break;
+        }
+        total += sum;
+        at += chunk.len();
+    }
+    if at == start {
+        return;
+    }
+    // The replaced total was an inline word (checked above): no release.
+    std::mem::forget(std::mem::replace(acc, jet_foundation::Numeric::JetInt::from_i64(total)));
+    cursor.current = at as i64;
+    cursor.done = !jet_loop_range_has_next(cursor);
+}
+
+/// #4566: the most a loop capacity hint reserves up front. Past it the list
+/// grows by doubling as before, so a loop that exits early never holds more
+/// than this much unused room.
+const JET_LOOP_RESERVE_MAX_BYTES: usize = 1 << 20;
+
+/// A capacity hint before a loop that pushes onto `xs` once per trip: room
+/// for `trips` more elements, capped at `JET_LOOP_RESERVE_MAX_BYTES`. The
+/// list's contents never change.
+#[inline(always)]
+fn jet_list_reserve_for_loop<T>(xs: &mut Vec<T>, trips: u64) {
+    let cap = JET_LOOP_RESERVE_MAX_BYTES / std::mem::size_of::<T>().max(1);
+    xs.reserve(usize::try_from(trips).unwrap_or(usize::MAX).min(cap));
+}
+
+/// The capacity hint for a range loop: its cursor's remaining trips.
+#[inline(always)]
+fn jet_list_reserve_for_range<T>(xs: &mut Vec<T>, cursor: &JetLoopRangeCursor) {
+    jet_list_reserve_for_loop(xs, jet_loop_range_remaining(cursor));
+}
+
+/// How many values a fresh range cursor still yields.
+fn jet_loop_range_remaining(cursor: &JetLoopRangeCursor) -> u64 {
+    if !jet_loop_range_has_next(cursor) {
+        return 0;
+    }
+    let span = (i128::from(cursor.end) - i128::from(cursor.current)).unsigned_abs();
+    let step = i128::from(cursor.step).unsigned_abs();
+    let trips = if cursor.exclusive { span.div_ceil(step) } else { span / step + 1 };
+    u64::try_from(trips).unwrap_or(u64::MAX)
+}
+
+/// #4566 slice 7 capacity reuse (function-boundary research 4.3): a buffer
+/// the emitter reuses only when dropping it releases memory and runs nothing
+/// else (a String, or a list of scalars or Strings), so an emptied buffer
+/// that keeps its capacity is indistinguishable from a fresh empty one.
+trait JetReusableBuffer: Default {
+    fn jet_reuse_clear(&mut self);
+    fn jet_reuse_bytes(&self) -> usize;
+}
+
+impl<T> JetReusableBuffer for Vec<T> {
+    #[inline(always)]
+    fn jet_reuse_clear(&mut self) {
+        self.clear();
+    }
+
+    #[inline(always)]
+    fn jet_reuse_bytes(&self) -> usize {
+        self.capacity().saturating_mul(std::mem::size_of::<T>())
+    }
+}
+
+impl JetReusableBuffer for String {
+    #[inline(always)]
+    fn jet_reuse_clear(&mut self) {
+        self.clear();
+    }
+
+    #[inline(always)]
+    fn jet_reuse_bytes(&self) -> usize {
+        self.capacity()
+    }
+}
+
+/// A return-slot function's `out := [T]{}` / `out := ""`: the buffer its
+/// caller left in the slot, emptied, else a fresh one. The value is an empty
+/// list or String either way; only the capacity differs.
+#[inline(always)]
+fn jet_reuse_slot<B: JetReusableBuffer>(slot: &mut Option<B>) -> &mut B {
+    let buffer = slot.get_or_insert_with(B::default);
+    buffer.jet_reuse_clear();
+    buffer
+}
+
+/// The drop of a call destination on a path back to the call that refills
+/// it: the contents drop here, as `drop` would drop them, and the emptied
+/// buffer stays in the slot for that call's `jet_reuse_slot`. A buffer past
+/// `JET_LOOP_RESERVE_MAX_BYTES` is released, so a loop never keeps more
+/// than that much idle capacity alive.
+#[inline(always)]
+fn jet_retire_slot<B: JetReusableBuffer>(slot: &mut Option<B>) {
+    match slot {
+        Some(buffer) if buffer.jet_reuse_bytes() <= JET_LOOP_RESERVE_MAX_BYTES => buffer.jet_reuse_clear(),
+        _ => *slot = None,
+    }
 }
 
 include!("LoopCursor.rs");
@@ -1978,37 +2294,54 @@ enum JetStringSplitSeparator {
     Text(String),
 }
 
-struct JetStringSplitIter {
-    source: String,
+/// Where a `split` walk stands in its source: the one piece sequence of
+/// `text.split(sep)`, read as views of the source. `JetStringSplitIter` owns
+/// its source; a loop over a stable source borrows it
+/// (`JetStringSplitCursor`).
+struct JetStringSplitState {
     separator: JetStringSplitSeparator,
     offset: usize,
     phase: u8,
     done: bool,
 }
 
-impl Iterator for JetStringSplitIter {
-    type Item = String;
+impl JetStringSplitState {
+    fn new(sep: &str) -> Self {
+        let mut chars = sep.chars();
+        let separator = match (chars.next(), chars.next()) {
+            (None, _) => JetStringSplitSeparator::Empty,
+            (Some(ch), None) => JetStringSplitSeparator::Scalar(ch),
+            (Some(_), Some(_)) => JetStringSplitSeparator::Text(sep.to_owned()),
+        };
+        JetStringSplitState {
+            separator,
+            offset: 0,
+            phase: 0,
+            done: false,
+        }
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
+    /// The next piece of `source`: an empty separator yields a leading empty
+    /// piece, one piece per scalar and a trailing empty piece.
+    fn next_piece<'a>(&mut self, source: &'a str) -> Option<&'a str> {
         match &self.separator {
             JetStringSplitSeparator::Empty => match self.phase {
                 0 => {
                     self.phase = 1;
-                    Some(String::new())
+                    Some(&source[..0])
                 }
                 1 => {
-                    if self.offset >= self.source.len() {
+                    if self.offset >= source.len() {
                         self.phase = 2;
-                        return Some(String::new());
+                        return Some(&source[..0]);
                     }
-                    let ch = self.source[self.offset..]
+                    let ch = source[self.offset..]
                         .chars()
                         .next()
                         .expect("offset in bounds");
-                    let width = ch.len_utf8();
-                    let out = self.source[self.offset..self.offset + width].to_owned();
-                    self.offset += width;
-                    Some(out)
+                    let start = self.offset;
+                    self.offset += ch.len_utf8();
+                    Some(&source[start..self.offset])
                 }
                 _ => None,
             },
@@ -2018,11 +2351,11 @@ impl Iterator for JetStringSplitIter {
                 }
                 let start = self.offset;
                 let found = match separator {
-                    JetStringSplitSeparator::Scalar(ch) => self.source[start..]
+                    JetStringSplitSeparator::Scalar(ch) => source[start..]
                         .find(*ch)
                         .map(|relative| (relative, ch.len_utf8())),
-                    JetStringSplitSeparator::Text(separator) => self.source[start..]
-                        .find(separator)
+                    JetStringSplitSeparator::Text(separator) => source[start..]
+                        .find(separator.as_str())
                         .map(|relative| (relative, separator.len())),
                     JetStringSplitSeparator::Empty => unreachable!("empty separator handled above"),
                 };
@@ -2030,11 +2363,11 @@ impl Iterator for JetStringSplitIter {
                     Some((relative, separator_len)) => {
                         let end = start + relative;
                         self.offset = end + separator_len;
-                        Some(self.source[start..end].to_owned())
+                        Some(&source[start..end])
                     }
                     None => {
                         self.done = true;
-                        Some(self.source[start..].to_owned())
+                        Some(&source[start..])
                     }
                 }
             }
@@ -2042,20 +2375,115 @@ impl Iterator for JetStringSplitIter {
     }
 }
 
+struct JetStringSplitIter {
+    source: String,
+    state: JetStringSplitState,
+}
+
+impl Iterator for JetStringSplitIter {
+    type Item = String;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.state.next_piece(&self.source).map(str::to_owned)
+    }
+}
+
 fn jet_iter_string_split(s: &str, sep: &str) -> JetIter<String> {
-    let mut chars = sep.chars();
-    let separator = match (chars.next(), chars.next()) {
-        (None, _) => JetStringSplitSeparator::Empty,
-        (Some(ch), None) => JetStringSplitSeparator::Scalar(ch),
-        (Some(_), Some(_)) => JetStringSplitSeparator::Text(sep.to_owned()),
-    };
     JetIter(Box::new(JetStringSplitIter {
         source: s.to_owned(),
-        separator,
-        offset: 0,
-        phase: 0,
-        done: false,
+        state: JetStringSplitState::new(sep),
     }))
+}
+
+/// `loop piece in text.split(sep)` over a source that stays unchanged while
+/// the loop runs (#4566 slice 6; MIRRust `split_loop_cursor`): the loop walks
+/// the pieces of `jet_iter_string_split` as views of the borrowed source, so
+/// the source is never copied and each piece the loop binds is allocated
+/// once.
+struct JetStringSplitCursor<'a> {
+    source: &'a str,
+    state: JetStringSplitState,
+    current: Option<&'a str>,
+}
+
+fn jet_loop_split_init<'a>(source: &'a str, sep: &str) -> JetStringSplitCursor<'a> {
+    let mut state = JetStringSplitState::new(sep);
+    let current = state.next_piece(source);
+    JetStringSplitCursor {
+        source,
+        state,
+        current,
+    }
+}
+
+#[inline(always)]
+fn jet_loop_split_has_next(cursor: &JetStringSplitCursor<'_>) -> bool {
+    cursor.current.is_some()
+}
+
+#[inline(always)]
+fn jet_loop_split_value(cursor: &mut JetStringSplitCursor<'_>) -> String {
+    cursor
+        .current
+        .take()
+        .unwrap_or_else(|| {
+            jet_panic("<core.prelude>", 0, "iterator loop value requested after exhaustion")
+        })
+        .to_owned()
+}
+
+#[inline(always)]
+fn jet_loop_split_advance(cursor: &mut JetStringSplitCursor<'_>) {
+    cursor.current = cursor.state.next_piece(cursor.source);
+}
+
+/// `text.split(sep).join(joiner)` when the split iterator feeds only the join
+/// (#4566 slice 6; MIRRust `fused_split_join`). Same pieces as
+/// `jet_iter_string_split` read as views of `s`: a non-empty separator yields
+/// `s` with every match replaced by `joiner`; an empty one yields a leading
+/// empty piece, one piece per scalar and a trailing empty piece. The result
+/// is allocated once at its exact length.
+fn jet_string_split_join(s: &str, sep: &str, joiner: &str) -> String {
+    if sep.is_empty() {
+        let scalars = s.chars().count();
+        let mut out = String::with_capacity(s.len() + joiner.len() * (scalars + 1));
+        out.push_str(joiner);
+        for (start, ch) in s.char_indices() {
+            out.push_str(&s[start..start + ch.len_utf8()]);
+            out.push_str(joiner);
+        }
+        return out;
+    }
+    if let ([sep_byte], [join_byte]) = (sep.as_bytes(), joiner.as_bytes()) {
+        // One-byte separator and joiner (both ASCII in UTF-8): every piece
+        // keeps its place, so the result is the source with each separator
+        // byte swapped, in one pass that vectorises. An ASCII byte never
+        // occurs inside a multi-byte scalar, so the swap keeps UTF-8.
+        let bytes: Vec<u8> = s.bytes().map(|byte| if byte == *sep_byte { *join_byte } else { byte }).collect();
+        return String::from_utf8(bytes).expect("an ASCII byte swap keeps UTF-8");
+    }
+    if let [sep_byte] = sep.as_bytes() {
+        // One-byte separator: the byte scan instead of the substring searcher.
+        let sep_char = char::from(*sep_byte);
+        let matches = s.bytes().filter(|byte| byte == sep_byte).count();
+        let mut out = String::with_capacity(s.len() - matches + matches * joiner.len());
+        for (index, piece) in s.split(sep_char).enumerate() {
+            if index > 0 {
+                out.push_str(joiner);
+            }
+            out.push_str(piece);
+        }
+        return out;
+    }
+    let matches = s.matches(sep).count();
+    let mut out = String::with_capacity(s.len() - matches * sep.len() + matches * joiner.len());
+    for (index, piece) in s.split(sep).enumerate() {
+        if index > 0 {
+            out.push_str(joiner);
+        }
+        out.push_str(piece);
+    }
+    out
 }
 
 /// Scan ASCII whitespace-delimited byte tokens without materialising each
@@ -2316,9 +2744,11 @@ where
     JetIter(Box::new(it.0.enumerate().map(move |(i, x)| f(i as i64, &x))))
 }
 /// D-RANGE-EXCL1=C: every valid Int index for a sequence of length `n`.
-fn jet_iter_indexes(n: i64) -> JetIter<i64> {
+/// The length is the native word the lowering measured; each index is the
+/// owned `Int` an `Iter<Int>` yields.
+fn jet_iter_indexes(n: i64) -> JetIter<jet_foundation::Numeric::JetInt> {
     let n = n.max(0);
-    JetIter(Box::new((0..n).map(|i| i)))
+    JetIter(Box::new((0..n).map(jet_foundation::Numeric::JetInt::from_i64)))
 }
 fn jet_iter_zip<A: 'static, B: 'static, O: 'static, F: 'static>(
     mut a: JetIter<A>,
@@ -2404,13 +2834,15 @@ where
 
 // D-CORE-EAGER1=A / D-LOOPMAP1=B: concrete collection map/filter are eager.
 // `.lazy()` enters the JetIter plane, where the same names remain deferred.
-fn jet_list_map<T, U, F>(xs: Vec<T>, f: F) -> Vec<U>
+// The map kernels borrow their source (#4566 slice 5): each element is lent
+// to the callback, so neither the list nor its elements are copied.
+fn jet_list_map<T, U, F>(xs: &[T], f: F) -> Vec<U>
 where
     F: Fn(&T) -> U,
 {
     xs.iter().map(f).collect()
 }
-fn jet_list_map_mut<T, U, F>(xs: Vec<T>, mut f: F) -> Vec<U>
+fn jet_list_map_mut<T, U, F>(xs: &[T], mut f: F) -> Vec<U>
 where
     F: FnMut(&T) -> U,
 {
@@ -2448,17 +2880,15 @@ where
 {
     jet_collection_try_filter(xs.iter().cloned(), f)
 }
-/// Adjacent eager adapters may be fused when the intermediate list is not
-/// observable. The callbacks still run in source order, once per element.
-fn jet_list_map_filter<T, U, F, P>(xs: Vec<T>, mut map: F, mut keep: P) -> Vec<U>
+/// A fused eager adapter chain (#4566 slice 5; MIRRust
+/// `fused_adapter_chain`): one pass over the borrowed source in which `step`
+/// runs every stage on an element and yields its mapped value, or `None`
+/// when a filter stage drops it. No intermediate list is built.
+fn jet_list_map_chain<T, U, F>(xs: &[T], step: F) -> Vec<U>
 where
-    F: FnMut(&T) -> U,
-    P: FnMut(&U) -> bool,
+    F: FnMut(&T) -> Option<U>,
 {
-    xs.iter()
-        .map(|x| map(x))
-        .filter(|value| keep(value))
-        .collect()
+    xs.iter().filter_map(step).collect()
 }
 
 // List-shaped helpers serve eager concrete-List adapters and materializing
@@ -2692,11 +3122,13 @@ fn jet_iter_is_sorted<T: 'static + Ord>(it: JetIter<T>) -> bool {
     xs.windows(2).all(|w| w[0] <= w[1])
 }
 
-fn jet_iter_is_sorted_by<T: 'static, K: Ord, F>(it: JetIter<T>, mut f: F) -> bool
+/// `is_sorted_by(f)` reads any sequence: an eager List call passes its `Vec`
+/// and a lazy pipeline its `JetIter`, with one meaning for both.
+fn jet_iter_is_sorted_by<T, K: Ord, F>(items: impl IntoIterator<Item = T>, mut f: F) -> bool
 where
     F: FnMut(&T) -> K,
 {
-    let xs = it.to_list();
+    let xs = items.into_iter().collect::<Vec<T>>();
     xs.windows(2).all(|w| f(&w[0]) <= f(&w[1]))
 }
 
@@ -2777,13 +3209,13 @@ fn jet_iter_average_int<T: 'static + JetIntAverage>(it: JetIter<T>) -> f64 {
 
 /// `Iter.join(sep)` streams each shown item into one String without first
 /// collecting the source into a list.
-fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &String) -> String {
+fn jet_iter_join<T: 'static + JetShow>(it: JetIter<T>, separator: &str) -> String {
     let mut out = String::new();
     for (index, item) in it.0.enumerate() {
         if index > 0 {
             out.push_str(separator);
         }
-        out.push_str(&item.jet_show());
+        item.jet_show_into(&mut out);
     }
     out
 }
@@ -2794,8 +3226,13 @@ fn jet_iter_average_float(it: JetIter<f64>) -> f64 {
     jet_average_of_sum(xs.iter().sum::<f64>(), count)
 }
 
-fn jet_iter_compare<T: 'static + Ord>(it: JetIter<T>, other: Vec<T>) -> i64 {
-    match it.to_list().as_slice().cmp(other.as_slice()) {
+/// Three-way lexicographic order of two sequences. Either side may be a
+/// `Vec` or a `JetIter`; the lowering passes whichever carrier it holds.
+fn jet_iter_compare<T: Ord>(
+    items: impl IntoIterator<Item = T>,
+    other: impl IntoIterator<Item = T>,
+) -> i64 {
+    match items.into_iter().cmp(other) {
         std::cmp::Ordering::Less => -1,
         std::cmp::Ordering::Equal => 0,
         std::cmp::Ordering::Greater => 1,
@@ -2860,8 +3297,8 @@ fn jet_list_slice<T: Clone>(xs: &[T], start: i64, end: i64) -> Vec<T> {
 }
 /// Sorted membership search. Returns the matching position as `?Int`; with
 /// duplicates, the matching position is unspecified and is not a lower bound.
-fn jet_list_binary_search<T: Ord>(xs: &[T], needle: &T) -> JetOutcome<i64, JetAbsent> {
-    jet_outcome_of(xs.binary_search(needle).ok().map(|i| i as i64))
+fn jet_list_binary_search<T: Ord + std::borrow::Borrow<Q>, Q: Ord + ?Sized>(xs: &[T], needle: &Q) -> JetOutcome<i64, JetAbsent> {
+    jet_outcome_of(xs.binary_search_by(|item| item.borrow().cmp(needle)).ok().map(|i| i as i64))
 }
 /// Comparator form of sorted membership search. Returns `?Int`, not an
 /// insertion point or a promise to select the first duplicate.
@@ -3195,7 +3632,7 @@ pub(crate) fn jet_coll_counter_from(keys: &[String]) -> JetCounter {
 
 pub(crate) fn jet_coll_counter_add(
     counter: &JetCounter,
-    key: &String,
+    key: &str,
     amount: i64,
 ) -> JetCounter {
     let mut keys = Vec::with_capacity(counter.keys.len() + usize::from(amount != 0));
@@ -3215,21 +3652,21 @@ pub(crate) fn jet_coll_counter_add(
         }
     }
     if !found && amount != 0 {
-        keys.push(key.clone());
+        keys.push(key.to_owned());
         counts.push(amount);
     }
     JetCounter { keys, counts }
 }
 
-pub(crate) fn jet_coll_counter_inc(counter: &JetCounter, key: &String) -> JetCounter {
+pub(crate) fn jet_coll_counter_inc(counter: &JetCounter, key: &str) -> JetCounter {
     jet_coll_counter_add(counter, key, 1)
 }
 
-pub(crate) fn jet_coll_counter_dec(counter: &JetCounter, key: &String) -> JetCounter {
+pub(crate) fn jet_coll_counter_dec(counter: &JetCounter, key: &str) -> JetCounter {
     jet_coll_counter_add(counter, key, -1)
 }
 
-pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &String) -> i64 {
+pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &str) -> i64 {
     counter
         .keys
         .iter()
@@ -3240,7 +3677,7 @@ pub(crate) fn jet_coll_counter_get(counter: &JetCounter, key: &String) -> i64 {
 
 pub(crate) fn jet_coll_counter_set_count(
     counter: &JetCounter,
-    key: &String,
+    key: &str,
     count: i64,
 ) -> JetCounter {
     let current = jet_coll_counter_get(counter, key);
@@ -3325,7 +3762,7 @@ pub(crate) fn jet_coll_ordered_map() -> JetOrderedMap {
 
 pub(crate) fn jet_coll_map_get(
     map: &JetOrderedMap,
-    key: &String,
+    key: &str,
 ) -> Option<String> {
     map.keys
         .iter()
@@ -3335,16 +3772,16 @@ pub(crate) fn jet_coll_map_get(
 
 pub(crate) fn jet_coll_map_set(
     map: &JetOrderedMap,
-    key: &String,
-    value: &String,
+    key: &str,
+    value: &str,
 ) -> JetOrderedMap {
     let mut keys = Vec::with_capacity(map.keys.len() + 1);
     let mut values = Vec::with_capacity(map.values.len() + 1);
     let mut found = false;
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
         if stored_key == key {
-            keys.push(key.clone());
-            values.push(value.clone());
+            keys.push(key.to_owned());
+            values.push(value.to_owned());
             found = true;
         } else {
             keys.push(stored_key.clone());
@@ -3352,13 +3789,13 @@ pub(crate) fn jet_coll_map_set(
         }
     }
     if !found {
-        keys.push(key.clone());
-        values.push(value.clone());
+        keys.push(key.to_owned());
+        values.push(value.to_owned());
     }
     JetOrderedMap { keys, values }
 }
 
-pub(crate) fn jet_coll_map_remove(map: &JetOrderedMap, key: &String) -> JetOrderedMap {
+pub(crate) fn jet_coll_map_remove(map: &JetOrderedMap, key: &str) -> JetOrderedMap {
     let mut keys = Vec::with_capacity(map.keys.len());
     let mut values = Vec::with_capacity(map.values.len());
     for (stored_key, stored_value) in map.keys.iter().zip(&map.values) {
@@ -3378,7 +3815,7 @@ pub(crate) fn jet_coll_map_values(map: &JetOrderedMap) -> Vec<String> {
     map.values.clone()
 }
 
-pub(crate) fn jet_coll_map_contains(map: &JetOrderedMap, key: &String) -> bool {
+pub(crate) fn jet_coll_map_contains(map: &JetOrderedMap, key: &str) -> bool {
     jet_coll_map_get(map, key).is_some()
 }
 
@@ -3406,7 +3843,7 @@ pub(crate) fn jet_coll_chain_push(
 
 pub(crate) fn jet_coll_chain_get(
     chain: &JetChain,
-    key: &String,
+    key: &str,
 ) -> Option<String> {
     for layer in &chain.layers {
         if let Some(index) = layer.keys.iter().position(|stored_key| stored_key == key) {
@@ -3416,7 +3853,7 @@ pub(crate) fn jet_coll_chain_get(
     None
 }
 
-pub(crate) fn jet_coll_chain_contains(chain: &JetChain, key: &String) -> bool {
+pub(crate) fn jet_coll_chain_contains(chain: &JetChain, key: &str) -> bool {
     jet_coll_chain_get(chain, key).is_some()
 }
 pub(crate) fn jet_coll_set() -> JetStringSet {
@@ -3431,16 +3868,16 @@ pub(crate) fn jet_coll_set_from_list(items: &[String]) -> JetStringSet {
     set
 }
 
-pub(crate) fn jet_coll_set_add(set: &JetStringSet, item: &String) -> JetStringSet {
+pub(crate) fn jet_coll_set_add(set: &JetStringSet, item: &str) -> JetStringSet {
     if jet_coll_set_contains(set, item) {
         return set.clone();
     }
     let mut items = set.items.clone();
-    items.push(item.clone());
+    items.push(item.to_owned());
     JetStringSet { items }
 }
 
-pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &String) -> JetStringSet {
+pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &str) -> JetStringSet {
     JetStringSet {
         items: set.items.iter().filter(|value| *value != item).cloned().collect(),
     }
@@ -3448,7 +3885,7 @@ pub(crate) fn jet_coll_set_discard(set: &JetStringSet, item: &String) -> JetStri
 
 pub(crate) fn jet_coll_set_remove(
     set: &JetStringSet,
-    item: &String,
+    item: &str,
 ) -> Option<JetStringSet> {
     if !jet_coll_set_contains(set, item) {
         return None;
@@ -3456,7 +3893,7 @@ pub(crate) fn jet_coll_set_remove(
     Some(jet_coll_set_discard(set, item))
 }
 
-pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &String) -> bool {
+pub(crate) fn jet_coll_set_contains(set: &JetStringSet, item: &str) -> bool {
     set.items.iter().any(|value| value == item)
 }
 pub(crate) fn jet_coll_set_len(set: &JetStringSet) -> i64 {

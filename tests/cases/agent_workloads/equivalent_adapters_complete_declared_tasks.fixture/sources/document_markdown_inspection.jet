@@ -1,0 +1,38 @@
+use core.files as fs
+
+#CLI
+struct WorkloadArgs {
+    root: String
+}
+
+fn run(args: WorkloadArgs) {
+    root :: args.root
+    entries :: fs.walk(root) ?? panic("cannot walk documents")
+    rows := [String]{}
+    loop entry in entries {
+        if !entry.is_dir {
+            text :: fs.read(entry.path) ?? panic("cannot read document")
+            headings := 0
+            bullets := 0
+            malformed := false
+            loop line in text.split("\n") {
+                trimmed :: line.trim()
+                if line.starts_with("#") {
+                    if trimmed.copy() == "#" {
+                        malformed = true
+                    } else {
+                        headings += 1
+                    }
+                }
+                if line.starts_with("- ") -> bullets += 1
+            }
+            if malformed {
+                &rows.push("reject|{entry.relative}|empty-heading")
+            } else {
+                &rows.push("document|{entry.relative}|headings={headings}|bullets={bullets}")
+            }
+        }
+    }
+    &rows.sort()
+    loop row in rows -> print(row)
+}

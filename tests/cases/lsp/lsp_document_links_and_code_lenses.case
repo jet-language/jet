@@ -1,0 +1,34 @@
+# Port of tests/lsp.rs:2438-2514; fixture/source bytes verbatim.
+# PENDING-GRAMMAR: framed session + raw token-bearing predicates.
+fixture: fixtures/lsp_document_links_and_code_lenses
+# PENDING-SEAM(read_bytes): D-CHILD-READ-BYTES1 + CoreState2 + kit batch three.
+session lsp content-length: jet self lsp
+send lsp: messages/lsp_document_links_and_code_lenses/0.json
+recv lsp
+stdout: ~ "documentLinkProvider" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "codeLensProvider" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_document_links_and_code_lenses/1.json
+send lsp: messages/lsp_document_links_and_code_lenses/2.json
+recv lsp
+stdout: ~ "publishDiagnostics" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_document_links_and_code_lenses/3.json
+recv lsp
+stdout: ~ "\"target\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "file://{work}/app/store.jet" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "\"start\":{\"line\":0,\"character\":4}" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_document_links_and_code_lenses/4.json
+recv lsp
+stdout: ~ "\"location\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "file://{work}/app/store.jet" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_document_links_and_code_lenses/5.json
+recv lsp
+stdout: ~ "\"title\":\"Run file\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "\"command\":\"jet.runFile\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "\"title\":\"Run test\"" # original predicate; response has absolute scratch paths/metadata
+stdout: ~ "\"command\":\"jet.testFile\"" # original predicate; response has absolute scratch paths/metadata
+send lsp: messages/lsp_document_links_and_code_lenses/6.json
+recv lsp
+stdout: ~ "result" # original predicate; response has absolute scratch paths/metadata
+close lsp
+# Original child.wait ignored status.
+exit: any

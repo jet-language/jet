@@ -1,0 +1,17 @@
+# HAND-PORT tests/jetpack_no_daemon.rs:120-151 available_userns_never_labels_unsandboxed_child_strong
+# Original predicates; same-head kit verification pending.
+fixture: available_userns_never_labels_unsandboxed_child_strong.fixture
+env: NO_COLOR=1
+env: HOME={work}/home
+env: JETPACK_ROOT={work}/root
+mkdir: home
+mkdir: root
+step: jetpack config sandbox require --no-color
+exit: 0
+step: jetpack build --no-color
+env: JETPACK_FAKE_SANDBOX=available
+exit: 2
+stderr: ~ "E1275" # original predicate
+stderr: ~ "has not entered a jail" # original predicate
+stderr: !~ "strong" # original predicate
+

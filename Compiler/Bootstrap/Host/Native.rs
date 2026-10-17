@@ -13,7 +13,7 @@ use crate::Codegen::MIRRust::{
     MirRustAotMetadata, MirRustCallableMetadata, MirRustConfig, MirRustTraitMetadata,
     MirRustTraitMethodMetadata, MirRustVariantMetadata,
 };
-use jet_jit::SourceResources::SourceResourceRetireError;
+use jet_evalhost::SourceResources::SourceResourceRetireError;
 use jet_foundation::MIR::{
     MirFieldId, MirProgram, MirType, MirTypeDef, MirTypeDefKind, MirTypeId, MirVariantPayload,
 };
@@ -53,7 +53,7 @@ pub(crate) struct AuthorizedSourceSnapshot {
 struct AuthorizedSourceRootLease {
     resolver: AuthorityResolver,
     root: crate::Authority::CheckedDirectory,
-    manifest: CheckedFile,
+    manifest: Option<CheckedFile>,
     files: Vec<CheckedFile>,
     foreign_cache_files: Vec<CheckedFile>,
 }
@@ -76,7 +76,9 @@ impl AuthorizedSourceLease {
     pub(crate) fn revalidate(&self) -> Result<(), AuthorityError> {
         for root in &self.roots {
             root.resolver.revalidate_directory(&root.root)?;
-            root.resolver.revalidate_file(&root.manifest)?;
+            if let Some(manifest) = &root.manifest {
+                root.resolver.revalidate_file(manifest)?;
+            }
             for file in &root.files {
                 root.resolver.revalidate_file(file)?;
             }
@@ -127,9 +129,13 @@ pub(crate) fn open_authorized_source_candidates(
     for (root_index, root_path) in roots.iter().enumerate() {
         let resolver = AuthorityResolver::open(root_path)?;
         let root_directory = resolver.checked_directory(Path::new("."))?;
-        // This checks both the canonical package.jet and the retired jet.toml
-        // marker before either can enter the source snapshot.
-        let manifest = resolver.checked_manifest(Path::new("."))?.file;
+        // Match the Rust driver's loose-root authorization: absence is valid,
+        // but retired manifests and every other authority failure remain fatal.
+        let manifest = match resolver.checked_manifest(Path::new(".")) {
+            Ok(manifest) => Some(manifest.file),
+            Err(error) if error.is_missing() => None,
+            Err(error) => return Err(error),
+        };
         let mut files = resolver.discover_source_files()?;
         let checked_entry = if root_index == entry_root_index {
             Some(resolver.checked_file(entry)?)
@@ -153,12 +159,11 @@ pub(crate) fn open_authorized_source_candidates(
             None
         };
 
-        if !files
-            .iter()
-            .any(|file| file.relative == manifest.relative)
-        {
-            files.push(manifest.clone());
-            files.sort_by(|left, right| left.relative.cmp(&right.relative));
+        if let Some(manifest) = &manifest {
+            if !files.iter().any(|file| file.relative == manifest.relative) {
+                files.push(manifest.clone());
+                files.sort_by(|left, right| left.relative.cmp(&right.relative));
+            }
         }
         let foreign_cache_files =
             collect_authorized_foreign_cache_files(&resolver, &files)?;
@@ -173,7 +178,9 @@ pub(crate) fn open_authorized_source_candidates(
             resolver.revalidate_file(file)?;
             authorized_foreign_cache_files.push(authorized_source_file(file)?);
         }
-        resolver.revalidate_file(&manifest)?;
+        if let Some(manifest) = &manifest {
+            resolver.revalidate_file(manifest)?;
+        }
         resolver.revalidate_root()?;
 
         let root_identity = identity_key(&root_directory.identity);
@@ -1511,6 +1518,7 @@ fn bootstrap_required_callable<'a>(
 struct BootstrapNativeHelperRoots {
     callback_transfer: jet_foundation::MIR::MirFunctionId,
     host_type_shape: jet_foundation::MIR::MirFunctionId,
+    host_shape_rows: jet_foundation::MIR::MirFunctionId,
 }
 
 fn checked_bootstrap_callable<'a>(
@@ -1578,6 +1586,7 @@ fn checked_bootstrap_native_helper_roots(
     Ok(BootstrapNativeHelperRoots {
         callback_transfer: checked("jet_eval_callback_transfer")?,
         host_type_shape: checked("jet_eval_host_type_shape_from_program")?,
+        host_shape_rows: checked("jet_eval_program_shape_rows")?,
     })
 }
 
@@ -1639,6 +1648,13 @@ pub(crate) fn append_bootstrap_host_glue(
     program: &MirProgram,
 ) -> Result<(), BootstrapHostCodecError> {
     let symbols = BootstrapCodecSymbols::new(bindings, program)?;
+    // RUST-EXIT: dies at cutover (ExecHostEntry6 seam). This is a host BUILD
+    // input, never a runtime library selector or a receipt sidecar lookup.
+    let core_seed_splice = bootstrap_core_seed_splice(
+        source,
+        jet_codegen::ParentRuntimeLibrary::embedded_admission().is_some()
+            || std::env::var_os("JET_PARENT_RUNTIME_ADMISSION_FILE").is_some(),
+    ).map_err(|key| BootstrapHostCodecError::InvalidMetadata(format!("E0956: {key}")))?;
     // Packaging keeps going after a failed check or stage, recording its error
     // beside the failed lookups, so one stage-zero run reports every failure.
     let keep = |result: Result<(), BootstrapHostCodecError>| {
@@ -1762,7 +1778,7 @@ pub(crate) fn append_bootstrap_host_glue(
 pub(crate) const __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY: &str =
     "jet_eval.numeric_unit_conversion_exact";
 fn __jet_bootstrap_native_numeric_unit_conversion(
-    call: &mut ::jet_jit::SourceInterfaces::NativeCallableCall,
+    call: &mut ::jet_evalhost::SourceInterfaces::NativeCallableCall,
 ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
     let identity = call.identity().ok_or_else(|| "numeric-unit native call has no checked identity".to_string())?;
     if identity.key.as_str() != __JET_BOOTSTRAP_NUMERIC_UNIT_CONVERSION_KEY {
@@ -1820,6 +1836,7 @@ fn __jet_bootstrap_native_numeric_unit_conversion(
             entry,
             &eval_runtime_config.symbol,
             native_helper_roots,
+            core_seed_splice,
         ));
     }
     keep(emit_bootstrap_task_roots_fixture(&mut glue, bindings, &symbols));
@@ -1849,6 +1866,7 @@ fn emit_bootstrap_native_compile_entry(
     entry: &MirRustCallableMetadata,
     runtime_config_symbol: &str,
     helpers: &BootstrapNativeHelperRoots,
+    core_seed_splice: &str,
 ) -> Result<(), BootstrapHostCodecError> {
     let eval_config = symbols.type_symbol("JetEvalConfig")?;
     let request_eval_config = symbols.field_symbol("JetDriverCompileRequest", "eval_config")?;
@@ -1863,18 +1881,29 @@ fn emit_bootstrap_native_compile_entry(
     let callback_transfer = helpers.callback_transfer.0.to_string();
     let host_type_shape = helpers.host_type_shape.0.to_string();
     let shape_callable = checked_bootstrap_callable(bindings, "jet_eval_host_type_shape_from_program")?;
-    if shape_callable.metadata.parameter_types.len() != 3 {
+    let shape_rows_callable = checked_bootstrap_callable(bindings, "jet_eval_program_shape_rows")?;
+    if shape_callable.metadata.parameter_types.len() != 4
+        || !shape_callable.metadata.parameter_types[..2].iter().all(|ty| ty.starts_with('&'))
+        || shape_rows_callable.metadata.parameter_types.len() != 1
+        || !shape_rows_callable.metadata.parameter_types[0].starts_with('&')
+        || shape_rows_callable.metadata.function != helpers.host_shape_rows
+    {
         return Err(BootstrapHostCodecError::InvalidMetadata(
-            "Source host-shape accessor must take its program, checked type, and source span".to_string(),
+            "Source host-shape accessor must borrow its program and cached rows, then take its checked type and source span; its row builder must borrow the program".to_string(),
         ));
     }
     let shape_arguments = bootstrap_call_arguments(
         &shape_callable.metadata.parameter_types,
         &[
-            ("__jet_shape_program", "__jet_shape_program.clone()"),
+            ("__jet_shape_program", "__jet_shape_program"),
+            ("__jet_shape_rows", "__jet_shape_rows"),
             ("__jet_shape_type", "__jet_shape_type.clone()"),
             ("__jet_shape_span", "__jet_shape_span.clone()"),
         ],
+    );
+    let shape_rows_arguments = bootstrap_call_arguments(
+        &shape_rows_callable.metadata.parameter_types,
+        &[("__jet_shape_program", "__jet_shape_program")],
     );
     let generated = r#"
 #[doc(hidden)]
@@ -1955,7 +1984,7 @@ fn __jet_bootstrap_native_collect_shared_payload_types(
 
 struct __JetBootstrapCompileLease {
     result: __COMPILE_RESULT__,
-    resources: ::jet_jit::SourceResources::SourceResourceSession,
+    resources: ::jet_evalhost::SourceResources::SourceResourceSession,
     runtime_config: __EVAL_CONFIG__,
     selected_factory_tier: crate::BootstrapFactoryTier,
     actual_factory_tier: crate::BootstrapFactoryTier,
@@ -2003,8 +2032,9 @@ pub fn __jet_bootstrap_compile_with_native(
     }
 
     let __jet_completion_scope = __jet_completion_owner.completion_scope();
+    let __jet_runtime_admission = __jet_completion_owner.parent_runtime_admission()?;
     let __jet_callback_jobs: ::std::sync::Arc<
-        dyn ::jet_jit::SourceCallbacks::SourceCallbackJobOwner,
+        dyn ::jet_evalhost::SourceCallbacks::SourceCallbackJobOwner,
     > = __JetBootstrapNativeCallbackJobs::new();
     __jet_completion_owner
         .register_callback_jobs(__jet_callback_jobs.clone())
@@ -2012,7 +2042,7 @@ pub fn __jet_bootstrap_compile_with_native(
             "compiler invocation already has a callback-job owner".to_string(),
         ))?;
     __jet_completion_scope.with_current(|| {
-    let __jet_resources = ::jet_jit::SourceResources::SourceResourceSession::new();
+    let __jet_resources = ::jet_evalhost::SourceResources::SourceResourceSession::new();
     __jet_completion_owner.set_resources(__jet_resources.clone());
     let mut __jet_resources = Some(__jet_resources);
     let mut __jet_runtime_config: Option<__EVAL_CONFIG__> = None;
@@ -2021,7 +2051,7 @@ pub fn __jet_bootstrap_compile_with_native(
             .ok_or_else(|| "Source resource session is absent".to_string())?;
         let __jet_root_lease = __jet_resource_session.retain_root()?;
         let __jet_bindings = ::std::sync::Arc::new(
-            ::jet_jit::SourceInterfaces::NativeInterfaceBindings::new(),
+            ::jet_evalhost::SourceInterfaces::NativeInterfaceBindings::new(),
         );
         let __jet_receiver_field = crate::__jet_bootstrap_entry_field_type(
             __jet_compiler_image.program.as_ref(),
@@ -2033,15 +2063,13 @@ pub fn __jet_bootstrap_compile_with_native(
             .clone();
         let __jet_template = __jet_bootstrap_native_adapter_template(
             &__jet_bindings,
-            __jet_compiler_image.program.as_ref(),
-            __jet_compiler_image.header.artifact,
+            __jet_compiler_image.as_ref(),
             __jet_receiver_type.clone(),
         )?;
         let (__jet_numeric_object, __jet_numeric_identity) =
             __jet_bootstrap_native_numeric_callable_template(
                 &__jet_bindings,
-                __jet_compiler_image.program.as_ref(),
-                __jet_compiler_image.header.artifact,
+                __jet_compiler_image.as_ref(),
             )?;
         let __jet_numeric_type = crate::__jet_bootstrap_entry_field_type(
             __jet_compiler_image.program.as_ref(),
@@ -2054,21 +2082,19 @@ pub fn __jet_bootstrap_compile_with_native(
         if !__jet_numeric_callable_type.same_checked_type(&__jet_numeric_identity.callable_type) {
             return Err("numeric callable template differs from the exact checked config field".to_string());
         }
-        let __jet_image_execution = __jet_compiler_image.program
-            .sealed_execution_identity(Some(__jet_compiler_image.header.artifact))
-            .map_err(|error| error.to_string())?;
+        let __jet_image_execution = &__jet_compiler_image.header.identity;
         let __jet_numeric_registration = __jet_bootstrap_native_binding_registration(
             &__jet_root_lease,
             None,
             __jet_compiler_image.program.as_ref(),
             __jet_compiler_image.header.artifact,
-            &__jet_image_execution,
+            __jet_image_execution,
             vec!["SemaRegistrationHostHooks".to_string(), "numeric_unit_conversion_exact".to_string()],
             @new.JetEvalNativeBindingIdentity.Callable@{ binding: @s.JetEvalNativeCallableBinding@{
                 key: __jet_numeric_identity.key.clone(),
                 callable_type: __jet_bootstrap_type_from_host(&__jet_numeric_identity.callable_type)?,
             } },
-            ::jet_jit::SourceResources::SourceNativeBindingIdentity::Callable(
+            ::jet_evalhost::SourceResources::SourceNativeBindingIdentity::Callable(
                 __jet_numeric_identity,
             ),
             __jet_numeric_object,
@@ -2084,12 +2110,14 @@ pub fn __jet_bootstrap_compile_with_native(
             .and_then(|function| function.params.first())
             .map(|parameter| &parameter.ty)
             .ok_or_else(|| "checked Source Machine parameter disappeared".to_string())?;
-        // The Source projection exists only for these host-shape queries,
-        // which read type, field, Core-owner and handle rows: it is converted
-        // from the restored body-free signature program and dropped below.
-        let mut __jet_shape_program = crate::__jet_bootstrap_mir_program_from_host(
+        // Project only nominal definitions, Core owners, checked modules and
+        // exact handle lifecycles through the canonical MIR field converters.
+        // One Source index serves all ABI queries; no function/type-instance
+        // tables are converted, and the scoped view is dropped below.
+        let mut __jet_shape_program = crate::__jet_bootstrap_mir_host_shape_program_from_host(
             __jet_compiler_image.program.as_ref(),
         )?;
+        let mut __jet_shape_rows = __HOST_SHAPE_ROWS_SYMBOL__(__HOST_SHAPE_ROWS_ARGUMENTS__);
         let mut __jet_shape_for = |checked_type: &::jet_foundation::MIR::MirType|
             -> Result<crate::compiler_bootstrap_entry_codec::BootstrapEntryHostTypeShape, String> {
             let mut __jet_shape_type = __jet_bootstrap_type_from_host(checked_type)?;
@@ -2109,16 +2137,17 @@ pub fn __jet_bootstrap_compile_with_native(
             __jet_shared_payload_shapes.insert(key, __jet_shape_for(&payload_type)?);
         }
         drop(__jet_shape_for);
+        drop(__jet_shape_rows);
         drop(__jet_shape_program);
         let __jet_native_adapter = __JetBootstrapNativeAdapter::new_with_bindings(
             __jet_root_lease,
             __jet_bindings,
-            __jet_compiler_image.program.clone(),
+            __jet_compiler_image.clone(),
             __jet_machine_abi_shape,
             __jet_shared_payload_shapes,
             __jet_completion_scope.clone(),
             __jet_callback_jobs.clone(),
-            __jet_compiler_image.header.artifact,
+            __jet_runtime_admission,
             __jet_receiver_type,
             __jet_template,
             vec![__jet_numeric_registration],
@@ -2131,6 +2160,8 @@ pub fn __jet_bootstrap_compile_with_native(
                 __HOOK_BOUNDARY__: Err(jet_foundation::Outcome::JetAbsent),
             });
         __jet_runtime_config = Some(__RUNTIME_CONFIG__(&__jet_request.__REQUEST_EVAL_CONFIG__));
+        // RUST-EXIT: dies at cutover (ExecHostEntry6 seam)
+        __CORE_SEED_SPLICE__
         let _activation = __jet_resource_session.activate();
         // D-EXEC1: the compiler factory runs only as the linked Rust AOT root.
         let crate::BootstrapFactoryTier::Aot = __jet_selected_tier;
@@ -2186,6 +2217,8 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__HOST_TYPE_SHAPE_ID__", &host_type_shape)
         .replace("__HOST_TYPE_SHAPE_SYMBOL__", &shape_callable.metadata.symbol)
         .replace("__HOST_TYPE_SHAPE_ARGUMENTS__", &shape_arguments)
+        .replace("__HOST_SHAPE_ROWS_SYMBOL__", &shape_rows_callable.metadata.symbol)
+        .replace("__HOST_SHAPE_ROWS_ARGUMENTS__", &shape_rows_arguments)
         .replace("__HOST_FIELD_OWNER__", &host_field.owner.0.to_string())
         .replace("__HOST_FIELD_ID__", &host_field.field.0.to_string())
         .replace("__NUMERIC_FIELD_OWNER__", &numeric_field.owner.0.to_string())
@@ -2197,6 +2230,7 @@ pub fn __jet_bootstrap_compile_with_native(
         .replace("__HOOK_NUMERIC__", hook_numeric)
         .replace("__HOOK_BOUNDARY__", hook_boundary)
         .replace("__RUNTIME_CONFIG__", runtime_config_symbol)
+        .replace("__CORE_SEED_SPLICE__", core_seed_splice)
         .replace("__FACTORY_SYMBOL__", &entry.symbol);
     out.push_str(&generated);
     Ok(())
@@ -2376,8 +2410,19 @@ fn emit_bootstrap_host_factory(
     let request_trace_sink = symbols.field_symbol("JetDriverCompileRequest", "trace_sink")?;
     let request_mir_lint_every_pass =
         symbols.field_symbol("JetDriverCompileRequest", "mir_lint_every_pass")?;
+    let request_comptime_stop_points =
+        symbols.field_symbol("JetDriverCompileRequest", "comptime_stop_points")?;
+    let request_native_stop_points =
+        symbols.field_symbol("JetDriverCompileRequest", "native_stop_points")?;
     let request_compiler_threads =
         symbols.field_symbol("JetDriverCompileRequest", "compiler_threads")?;
+    // #4643: the request's compile mode; the bootstrap host always compiles a program.
+    let request_mode = symbols.field_symbol("JetDriverCompileRequest", "mode")?;
+    let mode_program = symbols.variant_path("JetDriverCompileMode", "Program")?;
+    let request_schema_snapshots = symbols.field_symbol("JetDriverCompileRequest", "schema_snapshots")?;
+    let request_output_intent = symbols.field_symbol("JetDriverCompileRequest", "output_intent")?;
+    let request_output_address = symbols.field_symbol("JetDriverCompileRequest", "output_address")?;
+    let output_check = symbols.variant_path("SemaOutputIntent", "Check")?;
     let threads_type = symbols.type_symbol("CompilerThreads")?;
     let threads_cap = symbols.field_symbol("CompilerThreads", "cap")?;
     let threads_cores = symbols.field_symbol("CompilerThreads", "cores")?;
@@ -2389,21 +2434,24 @@ fn emit_bootstrap_host_factory(
     let core_source_path = symbols.field_symbol("JetDriverCoreSource", "path")?;
     let core_source_owner = symbols.field_symbol("JetDriverCoreSource", "owner")?;
     let core_source_owned_members = symbols.field_symbol("JetDriverCoreSource", "owned_members")?;
+    let core_source_runtime = symbols.field_symbol("JetDriverCoreSource", "runtime")?;
     let core_source_text = symbols.field_symbol("JetDriverCoreSource", "source")?;
     let target_type = symbols.type_symbol("JetDriverCompileTarget")?;
     let mir_program_type = symbols.type_symbol("MIRProgram")?;
     let eval_config_type = symbols.type_symbol("JetEvalConfig")?;
-    let snapshot_type = symbols.type_symbol("JetDriverAuthorizedSourceSnapshot")?;
-    let snapshot_roots = symbols.field_symbol(
+    // Checked against the record's declared fields, so a new snapshot field
+    // fails packaging instead of emitting a stale initializer. The bootstrap
+    // compiler has no manifestless entry, so it admits no script dependency:
+    // the field's declared default (`[JetDriverScriptDependency]{}`).
+    let authorized_sources = symbols.struct_value(
         "JetDriverAuthorizedSourceSnapshot",
-        "roots",
+        &[
+            ("roots", "__jet_roots"),
+            ("entry_root_identity", "__jet_snapshot.entry_root_identity.clone()"),
+            ("entry_path", "__jet_snapshot.entry_path.clone()"),
+            ("script_dependencies", "Vec::new()"),
+        ],
     )?;
-    let snapshot_entry_root = symbols.field_symbol(
-        "JetDriverAuthorizedSourceSnapshot",
-        "entry_root_identity",
-    )?;
-    let snapshot_entry_path =
-        symbols.field_symbol("JetDriverAuthorizedSourceSnapshot", "entry_path")?;
     let root_type = symbols.type_symbol("JetDriverAuthorizedSourceRoot")?;
     let root_canonical_path =
         symbols.field_symbol("JetDriverAuthorizedSourceRoot", "canonical_path")?;
@@ -2415,6 +2463,40 @@ fn emit_bootstrap_host_factory(
         "JetDriverAuthorizedSourceRoot",
         "foreign_cache_files",
     )?;
+    let root_directories =
+        symbols.field_symbol("JetDriverAuthorizedSourceRoot", "directories")?;
+    let request_gate_set = symbols.field_symbol("JetDriverCompileRequest", "gate_set")?;
+    let gate_set_type = symbols.type_symbol("GateSet")?;
+    let gate_set_allowed = symbols.field_symbol("GateSet", "allowed")?;
+    let gate_set_build_flag = symbols.field_symbol("GateSet", "build_flag")?;
+    let gate_set_session_flag = symbols.field_symbol("GateSet", "session_flag")?;
+    let request_gate_policies =
+        symbols.field_symbol("JetDriverCompileRequest", "gate_policies")?;
+    let request_external_gate_entries =
+        symbols.field_symbol("JetDriverCompileRequest", "external_gate_entries")?;
+    let request_selected_entry =
+        symbols.field_symbol("JetDriverCompileRequest", "selected_entry")?;
+    let request_profile = symbols.field_symbol("JetDriverCompileRequest", "profile")?;
+    let request_build_mode = symbols.field_symbol("JetDriverCompileRequest", "build_mode")?;
+    let build_mode_dev = symbols.variant_path("MIRArtifactBuildMode", "Dev")?;
+    let request_adapter_mode = symbols.field_symbol("JetDriverCompileRequest", "adapter_mode")?;
+    let request_adapter_operation_ids =
+        symbols.field_symbol("JetDriverCompileRequest", "adapter_operation_ids")?;
+    let request_capture_build_program =
+        symbols.field_symbol("JetDriverCompileRequest", "capture_build_program")?;
+    let request_capture_build_nodes =
+        symbols.field_symbol("JetDriverCompileRequest", "capture_build_nodes")?;
+    let request_build_output_names =
+        symbols.field_symbol("JetDriverCompileRequest", "build_output_names")?;
+    let request_capture_cost_report =
+        symbols.field_symbol("JetDriverCompileRequest", "capture_cost_report")?;
+    let request_generated_modules =
+        symbols.field_symbol("JetDriverCompileRequest", "generated_modules")?;
+    let request_build_inputs = symbols.field_symbol("JetDriverCompileRequest", "build_inputs")?;
+    let request_build_http_inputs =
+        symbols.field_symbol("JetDriverCompileRequest", "build_http_inputs")?;
+    let request_execution_host =
+        symbols.field_symbol("JetDriverCompileRequest", "execution_host")?;
     let file_type = symbols.type_symbol("JetDriverAuthorizedSourceFile")?;
     let file_path = symbols.field_symbol("JetDriverAuthorizedSourceFile", "path")?;
     let file_relative_path =
@@ -2452,12 +2534,17 @@ fn emit_bootstrap_host_factory(
             "            {file_identity}: file.identity.clone(),\n",
             "            {file_source}: file.source.clone(),\n",
             "        }}).collect::<Vec<_>>(),\n",
+            "        // The host snapshot carries no App directory listing: the\n",
+            "        // field's declared default (`[AppAuthorizedDirectory]{{}}`).\n",
+            "        {root_directories}: Vec::new(),\n",
             "    }}).collect::<Vec<_>>();\n",
             "    // The Core library bodies the Rust loader embeds: every public source\n",
-            "    // module row plus the compiler-private parts, in table order.\n",
+            "    // module row, the compiler-private parts, then the runtime units, in\n",
+            "    // table order.\n",
             "    let mut __jet_core_sources = Vec::new();\n",
-            "    for (row, owner) in ::jet_foundation::CoreModuleExports::core_source_modules().iter().map(|row| (row, \"\"))\n",
-            "        .chain(::jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS.iter().map(|part| (&part.source, part.owner)))\n",
+            "    for (row, owner, runtime) in ::jet_foundation::CoreModuleExports::core_source_modules().iter().map(|row| (row, \"\", false))\n",
+            "        .chain(::jet_foundation::CoreSourceParts::CORE_PRIVATE_SOURCE_PARTS.iter().map(|part| (&part.source, part.owner, false)))\n",
+            "        .chain(::jet_foundation::CoreSourceParts::CORE_RUNTIME_PARTS.iter().map(|row| (row, \"\", true)))\n",
             "    {{\n",
             "        let text = ::jet_driver::CoreSources::core_source_text(row.module).ok_or_else(|| {{\n",
             "            crate::BootstrapHostCodecError::InvalidMetadata(format!(\"Core source module `{{}}` has no body text\", row.module))\n",
@@ -2468,6 +2555,7 @@ fn emit_bootstrap_host_factory(
             "            {core_source_path}: row.path.to_string(),\n",
             "            {core_source_owner}: owner.to_string(),\n",
             "            {core_source_owned_members}: row.owned_members.iter().map(|member| member.to_string()).collect::<Vec<_>>(),\n",
+            "            {core_source_runtime}: runtime,\n",
             "            {core_source_text}: text.to_string(),\n",
             "        }});\n",
             "    }}\n",
@@ -2475,11 +2563,7 @@ fn emit_bootstrap_host_factory(
             "        .map_err(crate::BootstrapHostCodecError::InvalidMetadata)?;\n",
             "    let __jet_eval_config = {default_symbol}();\n",
             "    let __jet_request = {request_type} {{\n",
-            "        {request_sources}: {snapshot_type} {{\n",
-            "            {snapshot_roots}: __jet_roots,\n",
-            "            {snapshot_entry_root}: __jet_snapshot.entry_root_identity.clone(),\n",
-            "            {snapshot_entry_path}: __jet_snapshot.entry_path.clone(),\n",
-            "        }},\n",
+            "        {request_sources}: {authorized_sources},\n",
             "        {request_host_facts}: {host_facts_type} {{\n",
             "            {host_target_triple}: Ok(::jet_foundation::Layout::TargetLayout::host_triple()),\n",
             "            {host_active_os}: Ok(::std::env::consts::OS.to_string()),\n",
@@ -2490,18 +2574,45 @@ fn emit_bootstrap_host_factory(
             "        {request_eval_config}: __jet_eval_config,\n",
             "        {request_target}: __jet_target,\n",
             "        {request_record_store}: __jet_bootstrap_record_store(),\n",
+            "        {request_schema_snapshots}: Err(Default::default()),\n",
+            "        {request_output_intent}: {output_check},\n",
+            "        {request_output_address}: Err(Default::default()),\n",
             "        {request_trace_sink}: __jet_bootstrap_trace_sink(),\n",
             "        // Full verification (MIR Lint after every optimizer pass) is an\n",
             "        // explicit host opt-in for tests and verification runs.\n",
             "        {request_mir_lint_every_pass}: ::std::env::var_os(\"JET_BOOTSTRAP_MIR_LINT_EVERY_PASS\").is_some_and(|value| value == \"1\"),\n",
+            "        {request_mode}: {mode_program},\n",
+            "        // The declared defaults of the request's gate and evaluation rows:\n",
+            "        // the bootstrap host passes no invocation gates, package gate\n",
+            "        // policies, external gate rows, or selected entry.\n",
+            "        {request_gate_set}: {gate_set_type} {{ {gate_set_allowed}: Vec::new(), {gate_set_build_flag}: false, {gate_set_session_flag}: false }},\n",
+            "        {request_gate_policies}: Vec::new(),\n",
+            "        {request_external_gate_entries}: Vec::new(),\n",
+            "        {request_selected_entry}: Err(Default::default()),\n",
+            "        {request_profile}: \"dev\".to_string(),\n",
+            "        {request_build_mode}: {build_mode_dev},\n",
+            "        {request_adapter_mode}: String::new(),\n",
+            "        {request_adapter_operation_ids}: Vec::new(),\n",
+            "        {request_capture_build_program}: false,\n",
+            "        {request_capture_build_nodes}: false,\n",
+            "        {request_build_output_names}: Vec::new(),\n",
+            "        {request_capture_cost_report}: false,\n",
+            "        {request_generated_modules}: Vec::new(),\n",
+            "        {request_build_inputs}: Err(Default::default()),\n",
+            "        {request_build_http_inputs}: Err(Default::default()),\n",
+            "        {request_execution_host}: Err(Default::default()),\n",
+            "        {request_comptime_stop_points}: false,\n",
             "        // D-JOBS1=A: the bootstrap host takes no `--threads` cap, so the\n",
             "        // compiler admits threads automatically up to the reported cores\n",
-            "        // and within the memory Linux reports available.\n",
+            "        // and within the memory Linux reports available, lowered to the\n",
+            "        // tightest cgroup v2 headroom (memory.max - memory.current) of this\n",
+            "        // process's cgroup and its ancestors.\n",
             "        {request_compiler_threads}: {threads_type} {{\n",
             "            {threads_cap}: Err(Default::default()),\n",
             "            {threads_cores}: jet_foundation::Numeric::JetInt::from_i64(::std::thread::available_parallelism().map(|cores| cores.get() as i64).unwrap_or(1)),\n",
-            "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| jet_foundation::Numeric::JetInt::from_i64(kilobytes.saturating_mul(1024))).ok_or_else(Default::default),\n",
+            "            {threads_memory}: ::std::fs::read_to_string(\"/proc/meminfo\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"MemAvailable:\").and_then(|rest| rest.trim().trim_end_matches(\"kB\").trim().parse::<i64>().ok()))).map(|kilobytes| {{ let mut free = kilobytes.saturating_mul(1024); if let Some(path) = ::std::fs::read_to_string(\"/proc/self/cgroup\").ok().and_then(|text| text.lines().find_map(|line| line.strip_prefix(\"0::\").map(str::to_string))) {{ let mut dir = ::std::path::PathBuf::from(format!(\"/sys/fs/cgroup{{}}\", path.trim_end_matches('/'))); loop {{ let read = |name: &str| ::std::fs::read_to_string(dir.join(name)).ok().and_then(|value| value.trim().parse::<i64>().ok()); if let (Some(max), Some(current)) = (read(\"memory.max\"), read(\"memory.current\")) {{ free = free.min((max - current).max(0)); }} if dir == ::std::path::Path::new(\"/sys/fs/cgroup\") || !dir.pop() {{ break; }} }} }} jet_foundation::Numeric::JetInt::from_i64(free) }}).ok_or_else(Default::default),\n",
             "        }},\n",
+            "        {request_native_stop_points}: false,\n",
             "    }};\n",
             "    Ok(__jet_request)\n",
             "}}\n",
@@ -2512,16 +2623,35 @@ fn emit_bootstrap_host_factory(
         request_eval_config = request_eval_config,
         request_target = request_target,
         target_type = target_type,
-        snapshot_type = snapshot_type,
-        snapshot_roots = snapshot_roots,
-        snapshot_entry_root = snapshot_entry_root,
-        snapshot_entry_path = snapshot_entry_path,
+        authorized_sources = authorized_sources,
         root_type = root_type,
         root_canonical_path = root_canonical_path,
         root_identity = root_identity,
         root_allow_hardlinks = root_allow_hardlinks,
         root_files = root_files,
         root_foreign_cache_files = root_foreign_cache_files,
+        root_directories = root_directories,
+        request_gate_set = request_gate_set,
+        gate_set_type = gate_set_type,
+        gate_set_allowed = gate_set_allowed,
+        gate_set_build_flag = gate_set_build_flag,
+        gate_set_session_flag = gate_set_session_flag,
+        request_gate_policies = request_gate_policies,
+        request_external_gate_entries = request_external_gate_entries,
+        request_selected_entry = request_selected_entry,
+        request_profile = request_profile,
+        request_build_mode = request_build_mode,
+        build_mode_dev = build_mode_dev,
+        request_adapter_mode = request_adapter_mode,
+        request_adapter_operation_ids = request_adapter_operation_ids,
+        request_capture_build_program = request_capture_build_program,
+        request_capture_build_nodes = request_capture_build_nodes,
+        request_build_output_names = request_build_output_names,
+        request_capture_cost_report = request_capture_cost_report,
+        request_generated_modules = request_generated_modules,
+        request_build_inputs = request_build_inputs,
+        request_build_http_inputs = request_build_http_inputs,
+        request_execution_host = request_execution_host,
         file_type = file_type,
         file_path = file_path,
         file_relative_path = file_relative_path,
@@ -2532,9 +2662,17 @@ fn emit_bootstrap_host_factory(
         host_active_os = host_active_os,
         request_effect_source = request_effect_source,
         request_record_store = request_record_store,
+        request_schema_snapshots = request_schema_snapshots,
+        request_output_intent = request_output_intent,
+        request_output_address = request_output_address,
+        output_check = output_check,
         request_trace_sink = request_trace_sink,
         request_mir_lint_every_pass = request_mir_lint_every_pass,
+        request_comptime_stop_points = request_comptime_stop_points,
+        request_native_stop_points = request_native_stop_points,
         request_compiler_threads = request_compiler_threads,
+        request_mode = request_mode,
+        mode_program = mode_program,
         threads_type = threads_type,
         threads_cap = threads_cap,
         threads_cores = threads_cores,
@@ -2546,6 +2684,7 @@ fn emit_bootstrap_host_factory(
         core_source_path = core_source_path,
         core_source_owner = core_source_owner,
         core_source_owned_members = core_source_owned_members,
+        core_source_runtime = core_source_runtime,
         core_source_text = core_source_text,
         host_compiler_identity = host_compiler_identity,
         default_symbol = default_symbol,
@@ -2654,7 +2793,7 @@ fn emit_bootstrap_task_roots_fixture(
     let config = symbols.type_symbol("JetEvalConfig")?;
     let span = symbols.type_symbol("Span")?;
     let carrier = symbols.type_symbol("JetEvalSharedHostCarrier")?;
-    let fixture = checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture", 6, true)?;
+    let fixture = checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture", 7, true)?;
     let produce =
         checked_task_roots_callable(bindings, "jet_eval_task_roots_fixture_shared_produce", 3, false)?;
     let consume =
@@ -2670,6 +2809,7 @@ fn emit_bootstrap_task_roots_fixture(
         &fixture.parameter_types,
         &[
             program_place,
+            ("__jet_shape_program", "__jet_shape_program"),
             config_place,
             ("__jet_callback", "__jet_callback"),
             ("__jet_resource_handle", "__jet_resource_handle"),
@@ -2697,6 +2837,7 @@ fn emit_bootstrap_task_roots_fixture(
          #[allow(unused_mut)]\n\
          pub(crate) fn __jet_bootstrap_task_roots_fixture(\n\
          \x20   __jet_program: &mut {program},\n\
+         \x20   __jet_checked_program: &::jet_foundation::MIR::MirProgram,\n\
          \x20   __jet_config: &mut {config},\n\
          \x20   __jet_callback: &::jet_foundation::MIR::MirFunctionId,\n\
          \x20   __jet_resource_handle: &::jet_foundation::MIR::MirHandleId,\n\
@@ -2706,6 +2847,7 @@ fn emit_bootstrap_task_roots_fixture(
          \x20   let mut __jet_resource_handle = __jet_bootstrap_mir_MIRHandleID_from_host(__jet_resource_handle)?;\n\
          \x20   let mut __jet_resource_raw = jet_foundation::Numeric::JetInt::from_i64(__jet_resource_raw);\n\
          \x20   let mut __jet_span = __jet_bootstrap_task_roots_span()?;\n\
+         \x20   let mut __jet_shape_program = __jet_bootstrap_mir_host_shape_program_from_host(__jet_checked_program)?;\n\
          \x20   Ok({fixture_symbol}({fixture_arguments}))\n\
          }}\n\
          #[doc(hidden)]\n\
@@ -2810,6 +2952,15 @@ fn emit_bootstrap_web_asset_provider(
                         {source_contents}: assets.{source_contents},
                     }};
                     Ok(@new.JetDriverCompileTarget.Web@(assets, release_policy, profile))
+                }}
+                @p.JetDriverCompileTarget.Sandbox@(export_name, frozen_interfaces, _) => {{
+                    let raw = crate::Codegen::canonical_web_raw_assets()
+                        .map_err(|error| error.to_string())?;
+                    let timezone_data = raw.timezone_data.into_iter().map(|(name, bytes)| {timezone_type} {{
+                        {timezone_name}: name,
+                        {timezone_bytes}: bytes,
+                    }}).collect();
+                    Ok(@new.JetDriverCompileTarget.Sandbox@(export_name, frozen_interfaces, timezone_data))
                 }}
             }}
         }}"#,
@@ -2989,6 +3140,10 @@ fn emit_bootstrap_manifest_adapter(
             "    }}\n",
             "    if web_artifact.is_some() || web_artifacts.is_some() {{\n",
             "        if web_artifact.is_none() || web_artifacts.is_none() || mir.is_none() || entry_function.is_none() {{ return Err(\"complete Web result has no exact artifact, artifacts, MIR, or entry function\".to_string()); }}\n",
+            "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
+            "    }}\n",
+            "    // MIR-only native compilation has no Rust source or emission bindings.\n",
+            "    if mir.is_some() && ({value}).{result_manifest}.as_ref().ok().is_none() && ({value}).{result_source}.as_ref().ok().is_none() {{\n",
             "        return Ok(crate::BootstrapJetCompileResult {{ selected_factory_tier, actual_factory_tier, complete, emitted_source: None, bindings: None, source_program, runtime_config: runtime_config.take(), mir, entry_function, runtime_artifact, web_artifact, web_artifacts, comptime_stdout, comptime_stderr, soft_stop, exit_code, internal_problem, reports, resources: None }});\n",
             "    }}\n",
             "    let manifest = ({value}).{result_manifest}.as_ref().ok().ok_or_else(|| \"complete bootstrap compiler result has no Rust emission manifest\".to_string())?;\n",
@@ -3503,7 +3658,10 @@ fn __jet_bootstrap_key_fields_to_host(fields: &[@t.TComptimeKeyField@]) -> Resul
 }
 fn __jet_bootstrap_key_to_host(value: &@t.TComptimeKey@) -> Result<::jet_foundation::MIR::MirConstKey, String> {
     match value {
-        @p.TComptimeKey.Int@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Int(value.to_i64().ok_or_else(|| "constant key exceeds i64".to_string())?)),
+        // Source Int owns the standalone runtime carrier; host MIR receives its
+        // canonical value, never the runtime's nominal CtBigInt allocation.
+        @p.TComptimeKey.Int@{ value } => Ok(match value.to_i64() { Some(number) => ::jet_foundation::MIR::MirConstKey::Int(number), None => ::jet_foundation::MIR::MirConstKey::BigInt(value.to_string_rep()) }),
+        @p.TComptimeKey.BigInt@{ decimal } => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str(decimal)?)),
         @p.TComptimeKey.String@{ value } => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
         @p.TComptimeKey.Bool@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
         @p.TComptimeKey.Char@{ value } => Ok(::jet_foundation::MIR::MirConstKey::Char(char::from_u32(value.to_i64().ok_or_else(|| "constant key character exceeds i64".to_string())? as u32).ok_or_else(|| "constant key character is invalid".to_string())?)),
@@ -3605,6 +3763,7 @@ fn __jet_bootstrap_ct_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) 
 fn __jet_bootstrap_runtime_key_from_host(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<::jet_foundation::MIR::MirConstKey, String> {
     match value {
         ::jet_foundation::MIR::MirRuntimeValue::Int(value) => Ok(::jet_foundation::MIR::MirConstKey::Int(*value)),
+        ::jet_foundation::MIR::MirRuntimeValue::BigInt(value) => Ok(::jet_foundation::MIR::MirConstKey::from_bigint(&::jet_foundation::Numeric::CtBigInt::from_str(value)?)),
         ::jet_foundation::MIR::MirRuntimeValue::String(value) => Ok(::jet_foundation::MIR::MirConstKey::String(value.clone())),
         ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(::jet_foundation::MIR::MirConstKey::Bool(*value)),
         ::jet_foundation::MIR::MirRuntimeValue::Char(value) => Ok(::jet_foundation::MIR::MirConstKey::Char(*value)),
@@ -3674,7 +3833,7 @@ fn __jet_bootstrap_eval_to_host_inner(
         @p.JetEvalRuntimeValue.Aggregate@{ value: aggregate } => __jet_bootstrap_eval_aggregate_to_host(aggregate, allow_foreign_handles),
         @p.JetEvalRuntimeValue.RuntimeFailure@{ .. } => Err("terminal runtime failures cannot cross a native host boundary".to_string()),
         @p.JetEvalRuntimeValue.HostCursor@{ .. } | @p.JetEvalRuntimeValue.Stream@{ .. } => Err("native iterator cursors cannot cross a serializable host boundary".to_string()),
-        @p.JetEvalRuntimeValue.Closure@{ .. } | @p.JetEvalRuntimeValue.Address@{ .. } | @p.JetEvalRuntimeValue.SharedCell@{ .. } | @p.JetEvalRuntimeValue.Shared@{ .. } | @p.JetEvalRuntimeValue.SharedWeak@{ .. } | @p.JetEvalRuntimeValue.SharedGuard@{ .. } | @p.JetEvalRuntimeValue.SharedSnapshot@{ .. } | @p.JetEvalRuntimeValue.Condition@{ .. } | @p.JetEvalRuntimeValue.RangeCursor@{ .. } | @p.JetEvalRuntimeValue.ListCursor@{ .. } => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
+        @p.JetEvalRuntimeValue.Closure@{ .. } | @p.JetEvalRuntimeValue.Address@{ .. } | @p.JetEvalRuntimeValue.Window@{ .. } | @p.JetEvalRuntimeValue.SharedCell@{ .. } | @p.JetEvalRuntimeValue.Shared@{ .. } | @p.JetEvalRuntimeValue.SharedWeak@{ .. } | @p.JetEvalRuntimeValue.SharedGuard@{ .. } | @p.JetEvalRuntimeValue.SharedSnapshot@{ .. } | @p.JetEvalRuntimeValue.Condition@{ .. } | @p.JetEvalRuntimeValue.RangeCursor@{ .. } | @p.JetEvalRuntimeValue.ListCursor@{ .. } => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
     }
 }
 fn __jet_bootstrap_eval_to_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
@@ -3693,6 +3852,7 @@ fn __jet_bootstrap_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR
 fn __jet_bootstrap_key_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeKey@, String> {
     match value {
         ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeKey.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
+        ::jet_foundation::MIR::MirConstKey::BigInt(decimal) => Ok(@new.TComptimeKey.BigInt@{ decimal: decimal.clone() }),
         ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeKey.String@{ value: value.clone() }),
         ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeKey.Bool@{ value: *value }),
         ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeKey.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
@@ -3722,6 +3882,7 @@ fn __jet_bootstrap_ct_key_fields_from_host(fields: &[(String, ::jet_foundation::
 fn __jet_bootstrap_ct_key_value_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeValue@, String> {
     match value {
         ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeValue.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
+        ::jet_foundation::MIR::MirConstKey::BigInt(decimal) => Ok(@new.TComptimeValue.BigInt@{ decimal: decimal.clone() }),
         ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeValue.String@{ value: value.clone() }),
         ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeValue.Bool@{ value: *value }),
         ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeValue.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
@@ -3868,7 +4029,7 @@ fn emit_bootstrap_source_resource_bridge(
     let shape_root = symbols.field_symbol("JetEvalHostTypeShape", "root")?;
     let shape_nodes = symbols.field_symbol("JetEvalHostTypeShape", "nodes")?;
     let host_owner_cursor = symbols.variant_path("JetEvalHostOwner", "Cursor")?;
-    let cap_type = "::jet_jit::SourceResources::SourceResourceHandle";
+    let cap_type = "::jet_evalhost::SourceResources::SourceResourceHandle";
     let mir_type_kind = "::jet_foundation::MIR::MirTypeKind";
     let mir_handle = "::jet_foundation::MIR::MirHandleId";
     let native_error = "::jet_foundation::MIR::MirNativeCursorError";
@@ -3914,7 +4075,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
             shape: &{shape},
             compiler_program: &::jet_foundation::MIR::MirProgram,
             physical: &P,
-        ) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_jit::SourceResources::SourceResourceKind), String>
+        ) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_evalhost::SourceResources::SourceResourceKind), String>
         where
             T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
             P: crate::BootstrapEntryPhysicalBindings,
@@ -3935,7 +4096,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
             if !crate::__jet_bootstrap_entry_verify_core_owner(machine, &fact, compiler_program, physical)? {{
                 return Err("checked Core owner fact is absent from the active MIR program".to_string());
             }}
-            let core_kind = ::jet_jit::SourceResources::SourceResourceKind::from_core_owner_type(&fact, &owner_type)?;
+            let core_kind = ::jet_evalhost::SourceResources::SourceResourceKind::from_core_owner_type(&fact, &owner_type)?;
             Ok(({mir_handle}(name.id.0), owner, fact, owner_type, core_kind))
         }}
          fn __jet_bootstrap_resource_host_handle(
@@ -4097,14 +4258,14 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                      raw: source_raw,
                      source_kind,
                  }};
-                let loop_kind = match ::jet_jit::SourceResources::SourceResourceKind::from_loop_source(&key.source_kind) {{
+                let loop_kind = match ::jet_evalhost::SourceResources::SourceResourceKind::from_loop_source(&key.source_kind) {{
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
                 if core_kind != loop_kind {{
                     return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source kind disagrees with its checked Core owner registration and type".to_string())));
                 }}
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop resource has no active Source arena".to_string())));
                  }};
                 let cursor = arena.init_cursor(&key, step_value, has_step, by_value);
@@ -4146,7 +4307,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                  if !matches!(cursor_owner, {host_owner_cursor}) {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor receiver shape is not a Cursor owner".to_string())));
                  }}
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor has no active Source arena".to_string())));
                  }};
                  let cursor = match arena.lookup_cursor(handle, raw) {{
@@ -4187,7 +4348,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                      Ok(_) => return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource path is not a String".to_string()))),
                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                  }};
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource factory has no active Source arena".to_string())));
                  }};
                  let result = match member {{
@@ -4208,7 +4369,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                     Ok(value) => value,
                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
                 }};
-                 let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+                 let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core stdin resource factory has no active Source arena".to_string())));
                  }};
                  let result = arena.register_stdin(handle).map_err({native_error}::internal);
@@ -4218,7 +4379,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
          }}
          fn __jet_bootstrap_native_handle_call<T>(
              _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-             operation: &String,
+             operation: &str,
              handle: &{source_handle},
              raw: &jet_foundation::Numeric::JetInt,
              span: &{span},
@@ -4232,7 +4393,7 @@ r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
                  Ok(value) => value,
                  Err(_) => return Ok(__jet_bootstrap_host_failure(span, "Source resource capability is outside i64".to_string())),
              }};
-             let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
+             let Some(arena) = ::jet_evalhost::SourceResources::active_source_resource_arena() else {{
                  return Ok(__jet_bootstrap_host_failure(span, "Source resource release has no active arena".to_string()));
              }};
              match arena.release_resource(handle, raw) {{
@@ -4420,7 +4581,6 @@ fn emit_bootstrap_foreign_callback(
     let named_span_name = symbols.field_symbol("MIRNamedSpan", "name")?;
     let named_span_span = symbols.field_symbol("MIRNamedSpan", "span")?;
     let target_rust_aot = symbols.field_symbol("MIRTargetApplicability", "rust_aot")?;
-    let target_cranelift = symbols.field_symbol("MIRTargetApplicability", "cranelift")?;
     let target_interpreter = symbols.field_symbol("MIRTargetApplicability", "interpreter")?;
     let target_web = symbols.field_symbol("MIRTargetApplicability", "web")?;
     let foreign_id = symbols.field_symbol("MIRForeign", "id")?;
@@ -4448,6 +4608,12 @@ fn emit_bootstrap_foreign_callback(
     let foreign_close_function = symbols.field_symbol("MIRForeign", "close_function")?;
     let foreign_close_foreign = symbols.field_symbol("MIRForeign", "close_foreign")?;
     let foreign_undo_function = symbols.field_symbol("MIRForeign", "undo_function")?;
+    let foreign_unsafe_gate = symbols.field_symbol("MIRForeign", "unsafe_gate")?;
+    let unsafe_gate_file = symbols.field_symbol("MIRUnsafeGate", "file")?;
+    let unsafe_gate_line = symbols.field_symbol("MIRUnsafeGate", "line")?;
+    let unsafe_gate_reason = symbols.field_symbol("MIRUnsafeGate", "reason")?;
+    let unsafe_gate_enabled = symbols.field_symbol("MIRUnsafeGate", "enabled")?;
+    let unsafe_gate_fenced = symbols.field_symbol("MIRUnsafeGate", "fenced")?;
     let foreign_id_value = symbols.field_symbol("MIRForeignID", "value")?;
     let module_id_value = symbols.field_symbol("MIRModuleID", "value")?;
     let link_unit_id_value = symbols.field_symbol("MIRLinkUnitID", "value")?;
@@ -4564,7 +4730,6 @@ fn emit_bootstrap_foreign_callback(
              let target = &value.{foreign_target_applicability};
              let target_applicability = ::jet_foundation::MIR::MirTargetApplicability {{
                  rust_aot: target.{target_rust_aot},
-                 cranelift: target.{target_cranelift},
                  interpreter: target.{target_interpreter},
                  web: target.{target_web},
              }};
@@ -4575,6 +4740,16 @@ fn emit_bootstrap_foreign_callback(
              let close_function = value.{foreign_close_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
              let close_foreign = value.{foreign_close_foreign}.ok().map(|id| ::jet_foundation::MIR::MirForeignId(id.{foreign_id_value}));
              let undo_function = value.{foreign_undo_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
+             let unsafe_gate = match value.{foreign_unsafe_gate}.ok() {{
+                 Some(gate) => Some(::jet_foundation::MIR::MirUnsafeGate {{
+                     file: gate.{unsafe_gate_file},
+                     line: gate.{unsafe_gate_line}.to_string_rep().parse::<u32>().map_err(|_| \"foreign unsafe gate line is not a u32\".to_string())?,
+                     reason: gate.{unsafe_gate_reason},
+                     enabled: gate.{unsafe_gate_enabled},
+                     fenced: gate.{unsafe_gate_fenced},
+                 }}),
+                 None => None,
+             }};
              Ok(::jet_foundation::MIR::MirForeign {{
                  id: ::jet_foundation::MIR::MirForeignId(value.{foreign_id}.{foreign_id_value}),
                  module_id: ::jet_foundation::MIR::MirModuleId(value.{foreign_module_id}.{module_id_value}),
@@ -4601,6 +4776,7 @@ fn emit_bootstrap_foreign_callback(
                  close_function,
                  close_foreign,
                  undo_function,
+                 unsafe_gate,
              }})
          }}
          fn __jet_bootstrap_native_foreign_call<T>(
@@ -4656,3 +4832,15 @@ fn emit_bootstrap_foreign_callback(
     Ok(())
 }
 
+// RUST-EXIT: dies at cutover (ExecHostEntry6 seam).
+// The Source generator alone owns ingress; stage zero without it remains the
+// existing seed path. A runtime-producing build may not silently omit ingress.
+fn bootstrap_core_seed_splice(source: &str, runtime_requested: bool) -> Result<&'static str, &'static str> {
+    if source.contains("\n// JET_SOURCE_CORE_PARENT_INGRESS_DEFINED\n") {
+        Ok("__jet_bootstrap_core_ingress(&__jet_request, __jet_runtime_admission)?;")
+    } else if runtime_requested {
+        Err("CoreSharedSeedIngressMissing")
+    } else {
+        Ok("")
+    }
+}

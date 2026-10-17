@@ -9,10 +9,10 @@ fn run() {
     // "enabled" is a string "true" that coerces to a boolean.
     raw :: "{{\"port\":\"8080\",\"enabled\":\"true\",\"name\":\"api\"}}"
     data :: json.decode(raw) ?? panic("bad json")
-    if data == .Object(entries) {
-        port :: entries["port"]
-        name :: entries["name"]
-        enabled :: entries["enabled"]
+    if data == .Object(_) {
+        port :: &data.field("port") ?? Dyn.Null
+        name :: &data.field("name") ?? Dyn.Null
+        enabled :: &data.field("enabled") ?? Dyn.Null
         if port == .Int(n) {
             // n is a plain Int; add 1 to prove it came back numeric
             print(n + 1)

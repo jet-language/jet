@@ -1,0 +1,18 @@
+# HAND-PORT tests/failure_foundation.rs:119-126 failure_contract_matrix_agrees_across_execution_tiers
+# PENDING-KIT; PENDING-GRAMMAR, no historical failure captures blessed.
+# ORACLE-LITERAL; exact original full tier parity.
+fixture: failure_contract_matrix_agrees_across_execution_tiers.fixture
+env: NO_COLOR=1
+step default: jet run main.jet
+exit: 0
+stdout: = failure_contract_matrix_agrees_across_execution_tiers.stdout.expected
+step interpret: jet run --interpret main.jet
+exit: 0
+stdout: = failure_contract_matrix_agrees_across_execution_tiers.stdout.expected
+stderr: == default
+step: jet build --profile=debug main.jet
+exit: 0
+step aot: built
+exit: 0
+stdout: = failure_contract_matrix_agrees_across_execution_tiers.stdout.expected
+stderr: == default

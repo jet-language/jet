@@ -1,0 +1,1862 @@
+// Compiler-AST policy guards are isolated from the filesystem/manifest package.
+// This package requires compiler packages with their Tests/ trees excluded.
+use jet_foundation.[Program, Expr, Item, Stmt, Type, Func, StructDef, Binding, BinOp, UnOp, StrPart, StrFormat, AccessConvention, OrFallback, ForKind, LValue, OutputKind, TypedLitBody, Marker, Span, Pattern, CallArg, expr_span, DIAGNOSTIC_ERROR]
+use jet_foundation.[CORE_MODULE_EXPORTS]
+use jet_parser.parse_source
+use jet_lexer.[lex, Token, TOKEN_IDENT, TOKEN_LINE_COMMENT, TOKEN_BLOCK_COMMENT, TOKEN_LBRACE, TOKEN_RBRACE]
+use core.files as policy_ast_files
+use corpus_manifest.[PolicyError, PolicyManifest, PolicySourceRow, PolicyOccurrence, policy_manifest, policy_source_row, policy_selector_matches, policy_violation, policy_inventory_error, policy_apply_exceptions, policy_inventory, policy_join, policy_validate_manifest, policy_slice_bytes, policy_split_whitespace]
+
+POLICY_TASK_INTERNAL_PREFIX :: prep { String.from_bytes([U8]{0}) ?? panic("UTF-8 task prefix") }
+POLICY_TASK_INTERNAL_RECEIVER :: prep { "{POLICY_TASK_INTERNAL_PREFIX}jet.task" }
+POLICY_TASK_INTERNAL_ALL :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.all" }
+POLICY_TASK_INTERNAL_RACE :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.race" }
+POLICY_TASK_INTERNAL_ANY :: prep { "{POLICY_TASK_INTERNAL_RECEIVER}.any" }
+// The dependency contract is exercised on a real parser result, never a text
+// substitute. A build failure in the compiler packages blocks this guard port.
+fn policy_parse_program(source_label: String, source: String) -> Program PolicyError! {
+    lexed :: lex(source.bytes())
+    if lexed.diagnostics.len() > 0 -> return Err(PolicyError{message: "Jet lexer rejected corpus source `{source_label}`: {lexed.diagnostics}"})
+    stripped :: policy_strip_inline_package(source, lexed.tokens)
+    parsed :: parse_source(stripped.bytes())
+    errors := [String]{}
+    loop diagnostic in parsed.diagnostics {
+        if diagnostic.severity == DIAGNOSTIC_ERROR -> &errors.push(diagnostic.code)
+    }
+    if errors.len() > 0 -> return Err(PolicyError{message: "Jet parser rejected corpus source `{source_label}`: {errors.join(",")}"})
+    Ok(parsed.program)
+}
+fn policy_strip_inline_package(source: String, tokens: [Token]) -> String {
+    first := 0
+    loop first < tokens.len() && (tokens[first].kind == TOKEN_LINE_COMMENT || tokens[first].kind == TOKEN_BLOCK_COMMENT) -> first += 1
+    if first == tokens.len() || tokens[first].kind != TOKEN_IDENT || tokens[first].payload.text != "package" -> return source.copy()
+    opener := first + 1
+    loop opener < tokens.len() && tokens[opener].kind != TOKEN_LBRACE -> opener += 1
+    if opener == tokens.len() -> return source.copy()
+    depth := 0
+    loop index in opener..<tokens.len() {
+        token :: tokens[index]
+        if token.kind == TOKEN_LBRACE -> depth += 1
+        if token.kind == TOKEN_RBRACE {
+            if depth > 0 -> depth -= 1
+            if depth == 0 -> return policy_slice_bytes(source, token.span.end, source.bytes().len())
+        }
+    }
+    source.copy()
+}
+
+fn policy_ast_test_compiler_dependency() {
+    program :: policy_parse_program("planted", "fn run() {{ print(\"process.argv()\") }}") ?? panic("compiler parser rejected valid source")
+    assert_eq(program.items.len(), 1)
+}
+#Test("corpus policy compiler AST dependency") { policy_ast_test_compiler_dependency() }
+
+fn policy_without_parens(expression: Expr) -> View<Expr> from expression {
+    current := expression
+    loop true {
+        if current == {
+            .Paren(inner, _) -> current = inner
+            else -> return current
+        }
+    }
+}
+fn policy_site(kind: String, span: Span) -> String {
+    "{kind}@{span.start}..{span.end}"
+}
+// Match the Rust corpus walk's preorder without recursion through source depth.
+enum PolicyWalkNode {
+    Expression(value: Expr)
+    Statement(value: Stmt)
+    MatchPattern(value: Pattern)
+    Fallback(value: OrFallback)
+}
+fn policy_push_body(stack: &[PolicyWalkNode], body: [Stmt]) {
+    index := body.len()
+    loop index > 0 { index -= 1
+        &stack.push(PolicyWalkNode.Statement(body[index]))
+    }
+}
+fn policy_push_args(stack: &[PolicyWalkNode], args: [CallArg]) {
+    index := args.len()
+    loop index > 0 { index -= 1
+        &stack.push(PolicyWalkNode.Expression(args[index].expr))
+    }
+}
+fn policy_walk(stack: &[PolicyWalkNode], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    loop stack.len() > 0 {
+        node :: &stack.pop() ?? panic("corpus walk node")
+        if node == {
+            .Statement(statement) -> {
+                if statement == {
+                    .Expr(value) | .DeferClose(value, _) | .BreakValue(value, _) |
+                    .Yield(value, _) | .BreakLabelValue(_, _, value, _) -> &stack.push(PolicyWalkNode.Expression(value))
+                    .Val(binding) -> {
+                        if binding.pattern == .Val(.Refutable(pattern, fallback, _, _)) {
+                            &stack.push(PolicyWalkNode.Fallback(fallback))
+                            &stack.push(PolicyWalkNode.MatchPattern(pattern))
+                        }
+                        &stack.push(PolicyWalkNode.Expression(binding.init))
+                    }
+                    .Assign(target, _, _, value) -> {
+                        &stack.push(PolicyWalkNode.Expression(value))
+                        if target == {
+                            .Index(base, index, _, _) -> {
+                                &stack.push(PolicyWalkNode.Expression(index))
+                                &stack.push(PolicyWalkNode.Expression(base))
+                            }
+                            .Field(base, _, _) -> &stack.push(PolicyWalkNode.Expression(base))
+                            else -> {}
+                        }
+                    }
+                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner)) }
+                    .While(condition, body, _, _, _) -> {
+                        policy_push_body(&stack, body)
+                        &stack.push(PolicyWalkNode.Expression(condition))
+                    }
+                    .For(_, _, _, kind, body, _, _, _, _) -> {
+                        policy_push_body(&stack, body)
+                        if kind == {
+                            .Range(start, end, step, _) -> {
+                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                                &stack.push(PolicyWalkNode.Expression(end))
+                                &stack.push(PolicyWalkNode.Expression(start))
+                            }
+                            .In(collection, step) -> {
+                                if step == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                                &stack.push(PolicyWalkNode.Expression(collection))
+                            }
+                        }
+                    }
+                    .Switch(subject, arms, other, _) | .ComptimeSwitch(subject, arms, other, _) -> {
+                        if other == .Val(body) -> policy_push_body(&stack, body)
+                        index := arms.len()
+                        loop index > 0 { index -= 1
+                            policy_push_body(&stack, arms[index].body)
+                            &stack.push(PolicyWalkNode.Expression(arms[index].cond))
+                        }
+                        &stack.push(PolicyWalkNode.Expression(subject))
+                    }
+                    .Loop(body, _, _, _) | .Reactive(body, _) | .Shield(body, _) |
+                    .Switched(_, body, _) | .Region(_, _, body, _) | .Policy(_, body, _) |
+                    .AuthorityScope(_, _, _, body, _) | .ComptimeBlock(body, _, _) |
+                    .Live(body, _) | .Transact(_, _, body, _, _) | .Layout(_, _, body, _) -> policy_push_body(&stack, body)
+                    .Unsafe(_, reason, body, _) | .Impure(_, reason, body, _) -> {
+                        policy_push_body(&stack, body)
+                        if reason == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                    }
+                    .CountedLoop(init, condition, step, body, _, _, _) -> {
+                        policy_push_body(&stack, body)
+                        if step == .Val(value) -> &stack.push(PolicyWalkNode.Statement(value))
+                        &stack.push(PolicyWalkNode.Expression(condition))
+                        &stack.push(PolicyWalkNode.Expression(init.init))
+                    }
+                    .TaskGroup(_, _, limit, body, _) -> {
+                        policy_push_body(&stack, body)
+                        if limit == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                    }
+                    .ContextBlock(fields, body, _) -> {
+                        policy_push_body(&stack, body)
+                        index := fields.len()
+                        loop index > 0 { index -= 1
+                            &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                        }
+                    }
+                    .AssumeDet(_, reason, body, _) -> {
+                        policy_push_body(&stack, body)
+                        &stack.push(PolicyWalkNode.Expression(reason))
+                    }
+                    .ComptimeIf(condition, _, then_body, other, _, _) -> {
+                        if other == .Val(body) -> policy_push_body(&stack, body)
+                        policy_push_body(&stack, then_body)
+                        &stack.push(PolicyWalkNode.Expression(condition))
+                    }
+                    .ScopeMember(_, _, args, _, body, _, _, _) -> {
+                        policy_push_body(&stack, body)
+                        index := args.len()
+                        loop index > 0 { index -= 1
+                            &stack.push(PolicyWalkNode.Expression(args[index]))
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            .Expression(expression) -> {
+                visitor(expression)
+                if expression == {
+                    .Str(parts, _) -> {
+                        index := parts.len()
+                        loop index > 0 { index -= 1
+                            if parts[index] == .Interp(value, _) -> &stack.push(PolicyWalkNode.Expression(value))
+                        }
+                    }
+                    .ListLit(values, _) | .CompareChain(values, _, _, _) -> {
+                        index := values.len()
+                        loop index > 0 { index -= 1
+                            &stack.push(PolicyWalkNode.Expression(values[index]))
+                        }
+                    }
+                    .MemberSpread(value, _, _) | .Spread(value, _) | .Deref(value, _) |
+                    .RawOf(value, _) | .Copy(value, _) | .Place(value, _, _) | .Field(value, _, _) |
+                    .OptField(value, _, _, _, _) | .Present(value, _) | .Ok(value, _) | .Err(value, _) |
+                    .Paren(value, _) | .Unary(_, value, _) | .Tainted(value, _, _) |
+                    .PtrFromAddr(_, _, _, value, _) -> &stack.push(PolicyWalkNode.Expression(value))
+                    .Try(value, _, _, note) -> {
+                        if note == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner))
+                        &stack.push(PolicyWalkNode.Expression(value))
+                    }
+                    .MapLit(entries, _) -> {
+                        index := entries.len()
+                        loop index > 0 { index -= 1
+                            &stack.push(PolicyWalkNode.Expression(entries[index].value))
+                            &stack.push(PolicyWalkNode.Expression(entries[index].key))
+                        }
+                    }
+                    .Index(base, index, _, _) | .Binary(_, base, index, _) |
+                    .Range(base, index, _, _) -> {
+                        &stack.push(PolicyWalkNode.Expression(index))
+                        &stack.push(PolicyWalkNode.Expression(base))
+                    }
+                    .Slice(base, start, end, range, _) -> {
+                        if range == .Val(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                        &stack.push(PolicyWalkNode.Expression(end))
+                        &stack.push(PolicyWalkNode.Expression(start))
+                        &stack.push(PolicyWalkNode.Expression(base))
+                    }
+                    .Call(call) -> policy_push_args(&stack, call.args)
+                    .MethodCall(receiver, _, _, _, _, args, _, _, _, _) |
+                    .OptMethodCall(receiver, _, _, _, args, _) | .CallValue(receiver, args, _) -> {
+                        policy_push_args(&stack, args)
+                        &stack.push(PolicyWalkNode.Expression(receiver))
+                    }
+                    .StructLit(_, _, _, _, fields, _, _) -> {
+                        index := fields.len()
+                        loop index > 0 { index -= 1
+                            &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                        }
+                    }
+                    .TupleLit(fields, _, _) -> {
+                        index := fields.len()
+                        loop index > 0 { index -= 1
+                            &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                        }
+                    }
+                    .TypedLit(_, body, _) -> {
+                        if body == {
+                            .Fields(fields) -> {
+                                index := fields.len()
+                                loop index > 0 { index -= 1
+                                    &stack.push(PolicyWalkNode.Expression(fields[index].value))
+                                }
+                            }
+                            .Elements(values) -> {
+                                index := values.len()
+                                loop index > 0 { index -= 1
+                                    &stack.push(PolicyWalkNode.Expression(values[index]))
+                                }
+                            }
+                            .Entries(entries) -> {
+                                index := entries.len()
+                                loop index > 0 { index -= 1
+                                    &stack.push(PolicyWalkNode.Expression(entries[index].value))
+                                    &stack.push(PolicyWalkNode.Expression(entries[index].key))
+                                }
+                            }
+                            .Value(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                            else -> {}
+                        }
+                    }
+                    .EnumLit(_, _, _, args, _, _) -> {
+                        index := args.len()
+                        loop index > 0 { index -= 1
+                            if args[index] == { .Positional(value) | .Named(_, value) -> &stack.push(PolicyWalkNode.Expression(value)) }
+                        }
+                    }
+                    .PatternTest(subject, pattern, _) -> {
+                        &stack.push(PolicyWalkNode.MatchPattern(pattern))
+                        &stack.push(PolicyWalkNode.Expression(subject))
+                    }
+                    .OrFallback(value, fallback, _, _) -> {
+                        &stack.push(PolicyWalkNode.Fallback(fallback))
+                        &stack.push(PolicyWalkNode.Expression(value))
+                    }
+                    .If(condition, then_body, then_value, else_body, else_value, _) -> {
+                        &stack.push(PolicyWalkNode.Expression(else_value))
+                        policy_push_body(&stack, else_body)
+                        &stack.push(PolicyWalkNode.Expression(then_value))
+                        policy_push_body(&stack, then_body)
+                        &stack.push(PolicyWalkNode.Expression(condition))
+                    }
+                    .Lambda(lambda) -> {
+                        if lambda.body == {
+                            .Expr(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                            .Block(body) -> policy_push_body(&stack, body)
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            .MatchPattern(pattern) -> {
+                if pattern == {
+                    .Or(alternatives, _) -> {
+                        index := alternatives.len()
+                        loop index > 0 { index -= 1
+                            &stack.push(PolicyWalkNode.MatchPattern(alternatives[index]))
+                        }
+                    }
+                    .Struct(fields, _, _) -> {
+                        index := fields.len()
+                        loop index > 0 { index -= 1
+                            if fields[index] == .Value(_, _, value) -> &stack.push(PolicyWalkNode.Expression(value))
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            .Fallback(fallback) -> {
+                if fallback == {
+                    .Value(value) -> &stack.push(PolicyWalkNode.Expression(value))
+                    .Block(body, value, _) -> {
+                        if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner))
+                        policy_push_body(&stack, body)
+                    }
+                    .Return(value, _) -> { if value == .Val(inner) -> &stack.push(PolicyWalkNode.Expression(inner)) }
+                    .Panic(_, args) -> policy_push_args(&stack, args)
+                    else -> {}
+                }
+            }
+        }
+    }
+}
+fn policy_visit_body(body: [Stmt], visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    stack := [PolicyWalkNode]{}
+    policy_push_body(&stack, body)
+    policy_walk(&stack, visitor)
+}
+fn policy_visit_expression(expression: Expr, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    stack := [PolicyWalkNode]{PolicyWalkNode.Expression(expression)}
+    policy_walk(&stack, visitor)
+}
+fn policy_visit_program(program: Program, visitor: fn(Expr) -[Mem.Alloc, Mem.Rc, Time.Wait]> Never!) Never! {
+    policy_visit_body(program.script_body, visitor)
+    loop item in program.items {
+        if item == {
+            .Func(function) -> policy_visit_body(function.body, visitor)
+            .Struct(structure) -> {
+                loop method in structure.methods -> policy_visit_body(method.body, visitor)
+            }
+            else -> {}
+        }
+    }
+}
+fn policy_module_aliases(program: Program) -> [String: String] {
+    aliases := [String: String]{}
+    loop imported in program.imports {
+        if imported.kind == .Module(name, _) {
+            if name == "core" || name == "app" || name.starts_with("core.") {
+                alias :: if imported.alias.is_empty() -> name else -> imported.alias
+                aliases[alias] = name
+            }
+        }
+    }
+    aliases
+}
+fn policy_receiver_is(expression: Expr, expected: String, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .Ident(name, _) {
+        return name == expected || (aliases.get(name) ?? "") == ("core.{expected}")
+    }
+    false
+}
+fn policy_ident_is(expression: Expr, expected: String) -> Bool {
+    if policy_without_parens(expression) == .Ident(name, _) -> return name == expected
+    false
+}
+fn policy_named_type(ty: Type, expected: String) -> Bool {
+    if ty == {
+        .Named(name) -> return name == expected
+        .Bool -> return expected == "Bool"
+        .String -> return expected == "String"
+        .Int -> return expected == "Int"
+        else -> return false
+    }
+}
+fn policy_literal_string(expression: Expr, expected: String) -> Bool {
+    if policy_without_parens(expression) == .Str(parts, _) {
+        if parts.len() == 1 && parts[0] == .Lit(text) -> return text == expected
+    }
+    false
+}
+fn policy_is_process_input(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+        return (method == "argv" || method == "args") && policy_receiver_is(receiver, "process", aliases)
+    }
+    false
+}
+fn policy_is_process_argv(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+        return method == "argv" && policy_receiver_is(receiver, "process", aliases)
+    }
+    false
+}
+fn policy_is_process_argv_view(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        if method == "skip" && args.len() > 0 && policy_without_parens(args[0].expr) == .Int(value, _, _, _) {
+            return value == 1 && policy_is_process_argv(receiver, aliases)
+        }
+    }
+    false
+}
+fn policy_is_legacy_digest_call(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+        if method == "sha256_bytes" && policy_without_parens(receiver) == .Ident(name, _) -> return (aliases.get(name) ?? "") == "core.crypto"
+    }
+    false
+}
+fn policy_duration_method(method: String) -> Bool {
+    method == "nanoseconds" || method == "microseconds" || method == "milliseconds" ||
+    method == "seconds" || method == "minutes" || method == "hours" || method == "days"
+}
+fn policy_nonnegative_numeric_literal(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == {
+        .Int(value, _, _, _) -> return value >= 0 && value < 9223372036854775807
+        .Float(value, _, _, _) -> return value.is_finite() && value >= 0.0 && value < 9223372036854775808.0
+        else -> return false
+    }
+}
+fn policy_constant_expression(expression: Expr) -> Bool {
+    constant := true
+    policy_visit_expression(expression, (child) -> {
+        if policy_without_parens(child) == {
+            .Str(parts, _) -> {
+                loop part in parts { if part == .Interp(_, _) -> constant = false }
+            }
+            .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) | .Char(_, _) |
+            .UnitLit(_, _, _, _, _, _) | .ListLit(_, _) | .TupleLit(_, _, _) |
+            .MapLit(_, _) | .Unary(_, _, _) | .Binary(_, _, _, _) -> {}
+            else -> constant = false
+        }
+    })
+    constant
+}
+fn policy_is_constant_duration(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        return policy_receiver_is(receiver, "Duration", aliases) && policy_duration_method(method) &&
+            args.len() > 0 && policy_nonnegative_numeric_literal(args[0].expr) && policy_constant_expression(args[0].expr)
+    }
+    false
+}
+fn policy_plain_fixed_projection(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .Str(parts, _) {
+        if parts.len() == 1 && parts[0] == .Interp(_, format) {
+            if format == .Fixed(_) -> return true
+        }
+    }
+    false
+}
+fn policy_is_redundant_fixed_cleanup(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        return method == "replace" && args.len() == 2 && policy_literal_string(args[0].expr, ",") &&
+            policy_literal_string(args[1].expr, "") && policy_plain_fixed_projection(receiver)
+    }
+    false
+}
+fn policy_is_unit_projection(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+        return (args.len() == 0 && method == "raw") || method == "in"
+    }
+    false
+}
+fn policy_direct_scalar(expression: Expr) -> Bool {
+    current := expression
+    loop true {
+        if policy_without_parens(current) == {
+            .Int(_, _, _, _) | .Float(_, _, _, _) | .Ident(_, _) -> return true
+            .Unary(op, inner, _) -> {
+                if op != UnOp.Neg -> return false
+                if policy_without_parens(inner) == {
+                    .Int(_, _, _, _) | .Float(_, _, _, _) -> return true
+                    else -> return false
+                }
+            }
+            .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
+                if method != "from_int" || args.len() != 1 || !policy_ident_is(receiver, "Float") -> return false
+                current = args[0].expr
+            }
+            else -> return false
+        }
+    }
+}
+fn policy_is_unit_scalar_rewrap(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        constructor :: method.starts_with("from_") || (policy_receiver_is(receiver, "Duration", aliases) && policy_duration_method(method))
+        if !constructor || args.len() != 1 -> return false
+        if policy_without_parens(args[0].expr) == .Binary(operator, left, right, _) {
+            return (operator == BinOp.Mul || operator == BinOp.Div) &&
+                ((policy_is_unit_projection(left) && policy_direct_scalar(right)) ||
+                (operator == BinOp.Mul && policy_direct_scalar(left) && policy_is_unit_projection(right)))
+        }
+    }
+    false
+}
+fn policy_module_is_files(module_name: String, aliases: [String: String]) -> Bool {
+    module_name == "fs" || module_name == "files" || (aliases.get(module_name) ?? "") == "core.files"
+}
+fn policy_readonly_file_args(module_name: String, method: String, args: [jet_foundation.CallArg], aliases: [String: String]) -> Bool {
+    if !policy_module_is_files(module_name, aliases) -> return false
+    if method != "read" && method != "read_bytes" && method != "read_at" && method != "read_link" && method != "stat" && method != "list_dir" -> return false
+    loop argument in args {
+        if argument.convention == AccessConvention.Read && policy_without_parens(argument.expr) == .Copy(_, _) -> return true
+    }
+    false
+}
+fn policy_is_readonly_copy(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == {
+        .Call(call) -> {
+            parts :: call.name.split(".").to_list()
+            if parts.len() < 2 -> return false
+            method :: parts[parts.len() - 1]
+            module_name :: policy_slice_bytes(call.name, 0, call.name.bytes().len() - method.bytes().len() - 1)
+            return policy_readonly_file_args(module_name, method, call.args, aliases)
+        }
+        .MethodCall(receiver, method, _, _, _, args, _, _, _, _) -> {
+            return policy_receiver_is(receiver, "files", aliases) && policy_readonly_file_args("files", method, args, aliases)
+        }
+        else -> return false
+    }
+}
+fn policy_io_module(module_name: String, aliases: [String: String]) -> Bool {
+    resolved :: aliases.get(module_name) ?? ""
+    module_name == "fs" || module_name == "files" || module_name == "io" || module_name == "env" ||
+    resolved == "core.files" || resolved == "core.io" || resolved == "core.env"
+}
+fn policy_is_io_call(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == {
+        .Call(call) -> {
+            parts :: call.name.split(".").to_list()
+            if parts.len() < 2 -> return false
+            leaf :: parts[parts.len() - 1]
+            return policy_io_module(policy_slice_bytes(call.name, 0, call.name.bytes().len() - leaf.bytes().len() - 1), aliases)
+        }
+        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> return policy_receiver_is(receiver, "files", aliases) || policy_receiver_is(receiver, "io", aliases) || policy_receiver_is(receiver, "env", aliases)
+        else -> return false
+    }
+}
+fn policy_err_constructor(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == {
+        .Call(call) -> return call.name == "Err"
+        .EnumLit(_, variant, _, _, _, _) -> return variant == "Err"
+        .Err(_, _) -> return true
+        else -> return false
+    }
+}
+fn policy_is_identity_fallback(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .OrFallback(value, fallback, _, _) {
+        if fallback == .Return(error, _) {
+            if !policy_is_io_call(value, aliases) -> return false
+            if error == {
+                .None -> return true
+                .Val(returned) -> return policy_err_constructor(returned)
+            }
+        }
+    }
+    false
+}
+fn policy_is_http_request_value(expression: Expr, program: Program) -> Bool {
+    if policy_without_parens(expression) == .Ident(name, _) {
+        loop item in program.items {
+            if item == .Func(function) {
+                loop parameter in function.params {
+                    if parameter.name == name && policy_named_type(parameter.ty, "HTTPRequest") -> return true
+                }
+            }
+        }
+    }
+    false
+}
+fn policy_is_http_ceremony(expression: Expr, program: Program) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        return method == "body" && args.len() > 0 && policy_is_http_request_value(receiver, program)
+    }
+    false
+}
+fn policy_is_http_message_text(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+        if method == "text" && args.len() > 0 && policy_without_parens(receiver) == .MethodCall(_, inner_method, _, _, _, _, _, _, _, _) -> return inner_method == "body"
+    }
+    false
+}
+fn policy_is_raw_delimited_split(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+        return method == "split" && args.len() > 0 && policy_literal_string(args[0].expr, "\t")
+    }
+    false
+}
+fn policy_is_build_command_literal(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .Str(parts, _) {
+        loop part in parts { if part == .Lit(text) && text.contains("jet build") -> return true }
+    }
+    false
+}
+fn policy_is_hand_json_wire(expression: Expr) -> Bool {
+    interpolated := false
+    object_shape := false
+    if policy_without_parens(expression) == .Str(parts, _) {
+        loop part in parts {
+            if part == {
+                .Interp(_, _) -> interpolated = true
+                .Lit(text) -> { if text.contains("{{") && text.contains(":") -> object_shape = true }
+            }
+        }
+    }
+    interpolated && object_shape
+}
+fn policy_is_string_prefix_containment(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+        if method == "starts_with" && args.len() > 0 && policy_without_parens(args[0].expr) == .Str(parts, _) {
+            loop part in parts {
+                if part == {
+                    .Interp(_, _) -> return true
+                    .Lit(text) -> { if text.len() > 1 && text.ends_with("/") -> return true }
+                }
+            }
+        }
+    }
+    false
+}
+fn policy_is_url_query_reparse(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+        return method == "split" && args.len() > 0 && (policy_literal_string(args[0].expr, "&") || policy_literal_string(args[0].expr, "="))
+    }
+    false
+}
+fn policy_is_named_list_equality(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == {
+        .Call(call) -> return call.name == "same_strings"
+        .MethodCall(_, method, _, _, _, _, _, _, _, _) -> return method == "same_strings"
+        else -> return false
+    }
+}
+fn policy_is_non_idempotent_directory(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == {
+        .Call(call) -> {
+            parts :: call.name.split(".").to_list()
+            if parts.len() < 2 -> return false
+            method :: parts[parts.len() - 1]
+            module_name :: policy_slice_bytes(call.name, 0, call.name.bytes().len() - method.bytes().len() - 1)
+            return method == "create_dir" && policy_module_is_files(module_name, aliases)
+        }
+        .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> return method == "create_dir" && policy_receiver_is(receiver, "files", aliases)
+        else -> return false
+    }
+}
+
+fn policy_ascii_literal(expression: Expr) -> Int? {
+    if policy_without_parens(expression) == .Str(parts, _) {
+        if parts.len() != 1 -> return None
+        if parts[0] == .Lit(text) {
+            bytes :: text.bytes()
+            if bytes.len() == 1 && bytes[0] <= 127 -> return Val(Int.from_u8(bytes[0]))
+        }
+    }
+    None
+}
+fn policy_is_ascii_replacement_chain(expression: Expr) -> Bool {
+    current := expression
+    count := 0
+    lower := 0
+    upper := 0
+    loop true {
+        if policy_without_parens(current) == .MethodCall(receiver, method, _, _, _, args, _, _, _, _) {
+            if method != "replace" || args.len() != 2 -> break
+            first :: policy_ascii_literal(args[0].expr) ?? break
+            second :: policy_ascii_literal(args[1].expr) ?? break
+            count += 1
+            if first >= 65 && first <= 90 && second == first + 32 -> lower |= 1 << (first - 65)
+            if first >= 97 && first <= 122 && second == first - 32 -> upper |= 1 << (first - 97)
+            current = receiver
+        } else {
+            break
+        }
+    }
+    count == 26 && (lower == 67108863 || upper == 67108863)
+}
+fn policy_effect_for_module(module_name: String, aliases: [String: String]) -> String? {
+    resolved :: aliases.get(module_name) ?? module_name
+    if resolved == {
+        "core.files" | "core.fs" -> Val("FS")
+        "core.process" | "core.exec" -> Val("Exec")
+        "core.time" -> Val("Time")
+        "core.net" | "core.net.url" | "core.http" | "core.http.client" -> Val("Net")
+        "core.io" -> Val("IO")
+        else -> None
+    }
+}
+fn policy_expression_effect(expression: Expr, aliases: [String: String]) -> String? {
+    if policy_without_parens(expression) == {
+        .Call(call) -> {
+            if call.name == "print" || call.name == "println" || call.name == "eprint" || call.name == "eprintln" -> return Val("IO")
+            parts :: call.name.split(".").to_list()
+            if parts.len() < 2 -> return None
+            leaf :: parts[parts.len() - 1]
+            return policy_effect_for_module(policy_slice_bytes(call.name, 0, call.name.bytes().len() - leaf.bytes().len() - 1), aliases)
+        }
+        .MethodCall(receiver, _, _, _, _, _, _, _, _, _) -> {
+            if policy_without_parens(receiver) == .Ident(name, _) -> return policy_effect_for_module(name, aliases)
+            return None
+        }
+        else -> return None
+    }
+}
+fn policy_redundant_effect_row(function: Func, aliases: [String: String]) -> Bool {
+    declared :: function.declared_effects ?? return false
+    if declared.len() == 0 -> return false
+    inferred := [String]{}
+    policy_visit_body(function.body, (expression) -> {
+        if policy_expression_effect(expression, aliases) == .Val(effect_name) {
+            if !inferred.contains(effect_name) -> &inferred.push(effect_name)
+        }
+    })
+    if inferred.len() == 0 || inferred.len() != declared.len() -> return false
+    loop entry in declared {
+        found := false
+        loop effect_name in inferred { if policy_ascii_equal(effect_name, entry.name) -> found = true }
+        if !found -> return false
+    }
+    true
+}
+fn policy_is_task_expression(expression: Expr, only_all: Bool) -> Bool {
+    current := expression
+    loop true {
+        if policy_without_parens(current) == {
+            .Call(call) -> {
+                if call.name == "task.all" || call.name == POLICY_TASK_INTERNAL_ALL -> return true
+                return !only_all && (call.name == "task.race" || call.name == "task.any" || call.name == POLICY_TASK_INTERNAL_RACE || call.name == POLICY_TASK_INTERNAL_ANY)
+            }
+            .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+                if !policy_ident_is(receiver, "task") && !policy_ident_is(receiver, POLICY_TASK_INTERNAL_RECEIVER) -> return false
+                if method == "all" || method == POLICY_TASK_INTERNAL_ALL -> return true
+                return !only_all && (method == "race" || method == "any" || method == POLICY_TASK_INTERNAL_RACE || method == POLICY_TASK_INTERNAL_ANY)
+            }
+            .OrFallback(value, _, _, _) -> current = value
+            else -> return false
+        }
+    }
+}
+fn policy_is_task_statement(statement: Stmt, only_all: Bool) -> Bool {
+    if statement == {
+        .Expr(expression) -> return policy_is_task_expression(expression, only_all)
+        .Val(binding) -> return policy_is_task_expression(binding.init, only_all)
+        else -> return false
+    }
+}
+fn policy_data_tree_type(ty: Type) -> Bool {
+    if policy_named_type(ty, "Dyn") -> return true
+    if ty == .List(inner) -> return policy_named_type(inner, "Dyn")
+    false
+}
+fn policy_constant_bool_body(body: [Stmt]) -> Bool {
+    if body.len() != 1 -> return false
+    if body[0] == {
+        .Expr(expression) -> {
+            if policy_without_parens(expression) == .Bool(_, _) -> return true
+        }
+        .Return(value, _) -> {
+            if value == .Val(expression) {
+                if policy_without_parens(expression) == .Bool(_, _) -> return true
+            }
+        }
+        else -> {}
+    }
+    false
+}
+fn policy_compares_parameter_pair(function: Func) -> Bool {
+    if function.params.len() < 2 -> return false
+    left_name :: function.params[0].name
+    right_name :: function.params[1].name
+    found := false
+    policy_visit_body(function.body, (expression) -> {
+        if policy_without_parens(expression) == .Binary(operator, left, right, _) {
+            if operator == BinOp.Eq && ((policy_ident_is(left, left_name) && policy_ident_is(right, right_name)) || (policy_ident_is(left, right_name) && policy_ident_is(right, left_name))) -> found = true
+        }
+    })
+    found
+}
+fn policy_named_tower_truthiness(path: String, name: String) -> Bool {
+    if path != "dogfood/tower/run.jet" -> return false
+    name == "javascript_truthy" || name == "javascript_truthy_null" || name == "javascript_truthy_bool" ||
+    name == "javascript_truthy_int" || name == "javascript_truthy_float" || name == "javascript_truthy_text" ||
+    name == "javascript_truthy_array" || name == "javascript_truthy_object"
+}
+fn policy_data_tree_violations(path: String, program: Program) -> [PolicyOccurrence] {
+    violations := [PolicyOccurrence]{}
+    loop item in program.items {
+        if item == .Func(function) {
+            if policy_named_tower_truthiness(path, function.name) -> next
+            result :: function.return_type ?? next
+            if !policy_named_type(result, "Bool") -> next
+            pair :: function.params.len() == 2 && policy_data_tree_type(function.params[0].ty) && policy_data_tree_type(function.params[1].ty)
+            constant :: policy_constant_bool_body(function.body)
+            if (pair && (constant || policy_compares_parameter_pair(function))) ||
+                (function.params.len() == 1 && policy_named_type(function.params[0].ty, "Dyn") && constant) {
+                &violations.push(PolicyOccurrence{file: path, rule: "dyn-domain-policy", site: policy_site("fn:{function.name}", function.span)})
+            }
+        }
+    }
+    violations
+}
+fn policy_unused_parameter(function: Func, parameter: String) -> Bool {
+    declared := false
+    loop param in function.params { if param.name == parameter -> declared = true }
+    if !declared -> return false
+    used := false
+    policy_visit_body(function.body, (expression) -> { if policy_ident_is(expression, parameter) -> used = true })
+    !used
+}
+fn policy_response_decoder(function: Func) -> Bool {
+    if function.name != "decode_response" || function.params.len() != 2 ||
+        !policy_named_type(function.params[0].ty, "String") || !policy_named_type(function.params[1].ty, "Int") -> return false
+    result :: function.return_type ?? return false
+    if result == .Result(ok, _) -> return policy_named_type(ok, "Dyn")
+    false
+}
+fn policy_ordinary_envelope_decoder(function: Func) -> Bool {
+    found := false
+    policy_visit_body(function.body, (expression) -> {
+        if policy_without_parens(expression) == .MethodCall(_, method, _, _, _, args, _, _, _, _) {
+            if method == "field" && args.len() > 0 && policy_literal_string(args[0].expr, "ok") -> found = true
+        }
+    })
+    found
+}
+fn policy_evaluate_generated(manifest: PolicyManifest, producer: String, source: String) -> [PolicyOccurrence] PolicyError! {
+    protocol := String?{None}
+    loop row in manifest.producers { if row.selector == producer { protocol = Val(row.protocol)
+        break
+    } }
+    selected :: protocol ?? return Err(PolicyError{message: policy_inventory_error("unclassified generated-source producer", producer, "inventory:producer")})
+    program :: policy_parse_program(producer, source)
+    if selected == "no-response-protocol" -> return Ok([PolicyOccurrence]{})
+    violations := [PolicyOccurrence]{}
+    count := 0
+    first := Func?{None}
+    loop item in program.items {
+        if item == .Func(function) {
+            if !policy_response_decoder(function) -> next
+            count += 1
+            if count == 1 -> first = Val(function)
+            else -> &violations.push(PolicyOccurrence{file: producer, rule: "bindgen-one-decoder", site: "producer:{producer}#response-decoder@{function.span.start}..{function.span.end}"})
+        }
+    }
+    if count == 0 -> &violations.push(PolicyOccurrence{file: producer, rule: "bindgen-one-decoder", site: "producer:{producer}#decode_response@0..0"})
+    if count == 1 && selected.starts_with("override:") {
+        parts :: policy_slice_bytes(selected, 9, selected.bytes().len()).split(":").to_list()
+        if parts.len() >= 2 {
+            decoder :: first ?? panic("one decoder is present")
+            if policy_ordinary_envelope_decoder(decoder) -> &violations.push(PolicyOccurrence{file: producer, rule: "generated-protocol-override", site: "producer:{producer}#protocol:{parts[0]}@{decoder.span.start}..{decoder.span.end}"})
+        }
+    }
+    Ok(violations)
+}
+
+fn policy_ascii_equal(left: String, right: String) -> Bool {
+    l :: left.bytes()
+    r :: right.bytes()
+    if l.len() != r.len() -> return false
+    loop index in 0..<l.len() {
+        a := Int.from_u8(l[index])
+        b := Int.from_u8(r[index])
+        if a >= 65 && a <= 90 -> a += 32
+        if b >= 65 && b <= 90 -> b += 32
+        if a != b -> return false
+    }
+    true
+}
+
+struct PolicySpanFact { span: Span, matches: Bool }
+struct PolicyStatementFacts {
+    task_groups: [PolicySpanFact]
+    counted_loops: [PolicySpanFact]
+    manual_counter_loops: [Span]
+    file_walks: [Span]
+}
+enum PolicyPendingBody {
+    Body(body: [Stmt])
+    Single(statement: Stmt)
+}
+
+fn policy_indexes_sequence(init: Binding, body: [Stmt]) -> Bool {
+    found := false
+    policy_visit_body(body, (expression) -> {
+        if policy_without_parens(expression) == .Index(_, index, _, _) {
+            if policy_ident_is(index, init.name) -> found = true
+        }
+    })
+    found
+}
+fn policy_counter_increment(statement: Stmt, counter: String) -> Bool {
+    if statement == .Assign(target, op, _, value) {
+        if target == .Local(name, _) && name == counter && op == .Val(selected_op) && selected_op == BinOp.Add {
+            if policy_without_parens(value) == .Int(number, _, _, _) -> return number == 1
+        }
+    }
+    false
+}
+fn policy_manual_counter_body(counter: String, body: [Stmt]) -> Bool {
+    increments := 0
+    used := false
+    loop index in 0..<body.len() {
+        if policy_counter_increment(body[index], counter) {
+            increments += 1
+            next
+        }
+        policy_visit_body(body[index..index], (expression) -> { if policy_ident_is(expression, counter) -> used = true })
+    }
+    increments == 1 && used
+}
+fn policy_is_file_walk(expression: Expr, aliases: [String: String]) -> Bool {
+    if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+        return method == "walk" && policy_receiver_is(receiver, "files", aliases)
+    }
+    false
+}
+fn policy_negative_directory_filter(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .Unary(op, inner, _) {
+        if op == UnOp.Not && policy_without_parens(inner) == .Field(_, member, _) -> return member == "is_dir"
+    }
+    false
+}
+fn policy_body_directory_filter(body: [Stmt]) -> Bool {
+    found := false
+    policy_visit_body(body, (expression) -> { if policy_negative_directory_filter(expression) -> found = true })
+    found
+}
+fn policy_statement_walk_filter(statement: Stmt, aliases: [String: String]) -> Span? {
+    if statement == .For(_, _, _, kind, nested, _, _, _, _) {
+        if kind == .In(collection, _) {
+            if policy_is_file_walk(collection, aliases) && policy_body_directory_filter(nested) -> return Val(expr_span(collection))
+        }
+    }
+    None
+}
+fn policy_body_walk_filter(body: [Stmt], aliases: [String: String]) -> Span? {
+    loop index in 0..<body.len() {
+        if body[index] == .Val(binding) {
+            if index + 1 < body.len() && body[index + 1] == .For(_, _, _, kind, nested, _, _, _, _) {
+                if kind == .In(collection, _) {
+                    if policy_ident_is(collection, binding.name) && policy_is_file_walk(binding.init, aliases) && policy_body_directory_filter(nested) -> return Val(expr_span(binding.init))
+                }
+            }
+        }
+        if policy_statement_walk_filter(body[index], aliases) == .Val(span) -> return Val(span)
+    }
+    None
+}
+fn policy_collect_statement(statement: Stmt, aliases: [String: String], facts: &PolicyStatementFacts, pending: &[PolicyPendingBody]) {
+    if statement == {
+        .TaskGroup(_, _, _, nested, span) -> {
+            combinators := 0
+            has_all := false
+            loop child in nested {
+                if policy_is_task_statement(child, false) -> combinators += 1
+                if policy_is_task_statement(child, true) -> has_all = true
+            }
+            &facts.task_groups.push(PolicySpanFact{span: span, matches: combinators == 1 && !has_all})
+            &pending.push(PolicyPendingBody.Body(nested))
+        }
+        .CountedLoop(init, _, step, nested, span, _, _) -> {
+            &facts.counted_loops.push(PolicySpanFact{span: span, matches: policy_indexes_sequence(init, nested)})
+            &pending.push(PolicyPendingBody.Body(nested))
+            if step == .Val(child) -> &pending.push(PolicyPendingBody.Single(child))
+        }
+        .While(_, nested, _, _, _) | .For(_, _, _, _, nested, _, _, _, _) |
+        .Loop(nested, _, _, _) | .Unsafe(_, _, nested, _) | .Impure(_, _, nested, _) |
+        .Reactive(nested, _) | .Shield(nested, _) | .Switched(_, nested, _) |
+        .Region(_, _, nested, _) | .Policy(_, nested, _) | .Layout(_, _, nested, _) |
+        .AuthorityScope(_, _, _, nested, _) | .ComptimeBlock(nested, _, _) |
+        .ContextBlock(_, nested, _) | .Live(nested, _) | .AssumeDet(_, _, nested, _) |
+        .Transact(_, _, nested, _, _) | .ScopeMember(_, _, _, _, nested, _, _, _) -> &pending.push(PolicyPendingBody.Body(nested))
+        .Switch(_, arms, else_body, _) | .ComptimeSwitch(_, arms, else_body, _) -> {
+            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body(other))
+            index := arms.len()
+            loop index > 0 {
+                index -= 1
+                &pending.push(PolicyPendingBody.Body(arms[index].body))
+            }
+        }
+        .ComptimeIf(_, _, then_body, else_body, _, _) -> {
+            if else_body == .Val(other) -> &pending.push(PolicyPendingBody.Body(other))
+            &pending.push(PolicyPendingBody.Body(then_body))
+        }
+        else -> {}
+    }
+}
+fn policy_collect_body_facts(root: [Stmt], aliases: [String: String], facts: &PolicyStatementFacts) {
+    pending := [PolicyPendingBody]{PolicyPendingBody.Body(root)}
+    loop pending.len() > 0 {
+        selected :: &pending.pop() ?? panic("pending statement body")
+        if selected == {
+            .Single(statement) -> {
+                if policy_statement_walk_filter(statement, aliases) == .Val(span) -> &facts.file_walks.push(span)
+                policy_collect_statement(statement, aliases, &facts, &pending)
+            }
+            .Body(body) -> {
+                if body.len() > 1 {
+                    loop index in 0..<body.len() - 1 {
+                        if body[index] == .Val(binding) && binding.mutable {
+                            if policy_without_parens(binding.init) == .Int(number, _, _, _) && number == 0 {
+                                if body[index + 1] == .For(_, _, _, kind, nested, span, _, _, _) {
+                                    if kind == .In(_, _) && policy_manual_counter_body(binding.name, nested) -> &facts.manual_counter_loops.push(span)
+                                }
+                            }
+                        }
+                    }
+                }
+                if policy_body_walk_filter(body, aliases) == .Val(span) -> &facts.file_walks.push(span)
+                index := body.len()
+                loop index > 0 {
+                    index -= 1
+                    policy_collect_statement(body[index], aliases, &facts, &pending)
+                }
+            }
+        }
+    }
+}
+fn policy_statement_facts(program: Program, aliases: [String: String]) -> PolicyStatementFacts {
+    facts := PolicyStatementFacts{task_groups: [PolicySpanFact]{}, counted_loops: [PolicySpanFact]{}, manual_counter_loops: [Span]{}, file_walks: [Span]{}}
+    policy_collect_body_facts(program.script_body, aliases, &facts)
+    loop item in program.items {
+        if item == {
+            .Func(function) -> policy_collect_body_facts(function.body, aliases, &facts)
+            .Struct(structure) -> { loop method in structure.methods -> policy_collect_body_facts(method.body, aliases, &facts) }
+            else -> {}
+        }
+    }
+    facts
+}
+fn policy_anchored_literal(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == .Str(parts, _) {
+        if parts.len() == 1 && parts[0] == .Lit(text) -> return text.starts_with("^") && text.ends_with("$")
+    }
+    false
+}
+fn policy_body_anchored_regex_capture(body: [Stmt], aliases: [String: String]) -> Bool {
+    anchored := false
+    matched := false
+    captured := false
+    policy_visit_body(body, (expression) -> {
+        if policy_without_parens(expression) == {
+            .StructLit(name, _, _, _, fields, _, _) -> {
+                if name == "Regex" && fields.len() > 0 && policy_anchored_literal(fields[0].value) -> anchored = true
+            }
+            .TypedLit(_, literal, _) -> {
+                if literal == .Value(value) && policy_anchored_literal(value) -> anchored = true
+            }
+            .Call(call) -> { if call.name == "re.match" -> matched = true }
+            .MethodCall(receiver, method, _, _, _, _, _, _, _, _) -> {
+                if method == "group" -> captured = true
+                if method == "match" && policy_without_parens(receiver) == .Ident(name, _) {
+                    if (aliases.get(name) ?? "") == "core.regex" -> matched = true
+                }
+            }
+            else -> {}
+        }
+    })
+    anchored && matched && captured
+}
+fn policy_has_anchored_regex_capture(program: Program, aliases: [String: String]) -> Bool {
+    if policy_body_anchored_regex_capture(program.script_body, aliases) -> return true
+    loop item in program.items {
+        if item == {
+            .Func(function) -> { if policy_body_anchored_regex_capture(function.body, aliases) -> return true }
+            .Struct(structure) -> {
+                loop method in structure.methods { if policy_body_anchored_regex_capture(method.body, aliases) -> return true }
+            }
+            else -> {}
+        }
+    }
+    false
+}
+fn policy_bare_structural_codable(structure: StructDef) -> Bool {
+    if structure.type_params.len() != 0 || structure.type_markers.len() != 1 || structure.is_published_schema -> return false
+    marker :: structure.type_markers[0]
+    if marker.name != "Codable" || marker.negated -> return false
+    loop field in structure.fields {
+        if field.serde_markers.len() != 0 || field.computed != None || field.default != None -> return false
+    }
+    true
+}
+fn policy_cli_scalar(ty: Type) -> Bool {
+    if ty == {
+        .Bool | .Int | .Float | .String | .InlineRange(_, _, _) -> return true
+        .Named(name) -> return name == "Path"
+        else -> return false
+    }
+}
+fn policy_cli_default(expression: Expr) -> Bool {
+    if policy_without_parens(expression) == {
+        .Int(_, _, _, _) | .Float(_, _, _, _) | .Bool(_, _) -> return true
+        .Str(parts, _) -> {
+            if parts.len() == 1 && parts[0] == .Lit(_) -> return true
+            return false
+        }
+        else -> return false
+    }
+}
+fn policy_cli_function_inputs(function: Func) -> Bool {
+    loop parameter in function.params {
+        if parameter.name == "self" -> next
+        if parameter.ty == {
+            .Bool -> {}
+            .Option(inner) -> { if !policy_cli_scalar(inner) -> return false }
+            else -> {
+                if !policy_cli_scalar(parameter.ty) -> return false
+                if parameter.default == .Val(value) && !policy_cli_default(value) -> return false
+            }
+        }
+    }
+    true
+}
+fn policy_local_struct(program: Program, name: String) -> Bool {
+    loop item in program.items { if item == .Struct(structure) && structure.name == name -> return true }
+    false
+}
+fn policy_direct_run(program: Program) -> Bool {
+    loop item in program.items {
+        if item == .Func(function) {
+            if function.name != "run" || function.params.len() == 0 || !policy_cli_function_inputs(function) -> next
+            if function.params.len() == 1 && function.params[0].ty == .Named(name) {
+                if policy_local_struct(program, name) || name.contains(".") -> next
+            }
+            return true
+        }
+    }
+    false
+}
+fn policy_has_typed_cli_entry(program: Program) -> Bool {
+    selected := String?{None}
+    executable_selected := false
+    loop item in program.items {
+        if item == .Const(value) {
+            if value.resolved_output == .Val(output) && output.selected && output.kind == OutputKind.Executable {
+                executable_selected = true
+                if selected == None && output.params.len() == 1 && output.params[0].ty == .Named(name) -> selected = Val(name)
+            }
+        }
+    }
+    direct :: policy_direct_run(program)
+    if selected == None {
+        loop item in program.items {
+            if item == .Func(function) && function.name == "run" {
+                if function.params.len() == 1 && function.params[0].ty == .Named(name) {
+                    if policy_local_struct(program, name) || name.contains(".") || name.contains("::") || !direct {
+                        selected = Val(name)
+                        break
+                    }
+                }
+                if direct { selected = Val("run")
+                    break
+                }
+            }
+        }
+    }
+    name :: selected ?? return false
+    parts :: name.split(".").to_list()
+    leaf :: parts[parts.len() - 1]
+    if leaf == "run" && !executable_selected && direct -> return true
+    loop item in program.items {
+        if item == .Struct(structure) && structure.name == leaf {
+            loop marker in structure.derives { if marker.name == "CLI" -> return true }
+        }
+    }
+    false
+}
+fn policy_has_args_builder(program: Program) -> Bool {
+    aliases :: policy_module_aliases(program)
+    specification := false
+    parsed := false
+    policy_visit_program(program, (expression) -> {
+        if policy_without_parens(expression) == .MethodCall(receiver, method, _, _, _, _, _, _, _, _) {
+            if method == "spec" && policy_receiver_is(receiver, "args", aliases) -> specification = true
+            if method == "parse" || method == "parse_or_exit" -> parsed = true
+        }
+    })
+    specification && parsed
+}
+fn policy_has_raw_process_boundary(program: Program) -> Bool {
+    aliases :: policy_module_aliases(program)
+    found := false
+    policy_visit_program(program, (expression) -> { if policy_is_process_input(expression, aliases) -> found = true })
+    found
+}
+fn policy_guidance_lint(name: String) -> Bool {
+    name == "process_args_view" || name == "message_text" || name == "redundant_fixed_cleanup" ||
+    name == "unit_scalar_rewrap" || name == "path_containment_string_prefix" ||
+    name == "complete_ascii_case_ladder" || name == "walk_files_filter"
+}
+fn policy_marker_expression(marker: Marker, index: Int) -> Expr? {
+    if index < 0 || index >= marker.args.len() -> return None
+    if marker.args[index] == .Expr(expression) -> return Val(expression)
+    None
+}
+fn policy_validate_lint_allows(path: String, row: PolicySourceRow, program: Program) PolicyError! {
+    if row.role != "canonical-teaching" && row.role != "expert-lesson" -> return Ok(Unit{})
+    loop application in program.rule_facts {
+        marker :: application.marker
+        if marker.name != "allow" -> next
+        first :: policy_marker_expression(marker, 0) ?? next
+        if first == .Ident(rule, _) {
+            if !policy_guidance_lint(rule) -> next
+            explained := false
+            if policy_marker_expression(marker, 1) == .Val(reason) {
+                if reason == .Str(parts, _) && parts.len() > 0 {
+                    explained = true
+                    loop part in parts {
+                        if part == {
+                            .Lit(text) -> { if text.trim().is_empty() -> explained = false }
+                            else -> explained = false
+                        }
+                    }
+                }
+            }
+            if !explained -> return Err(PolicyError{message: "file={path}; rule={rule}; site={marker.span.start}..{marker.span.end}; why=maintained #allow needs a reason at its source site; replacement=write #allow({rule}, \"why this lint does not apply\")"})
+        }
+    }
+    Ok(Unit{})
+}
+
+fn policy_semantic_role(role: String) -> Bool {
+    role == "canonical-teaching" || role == "expert-lesson"
+}
+fn policy_applies(manifest: PolicyManifest, path: String, row: PolicySourceRow, rule: String) -> Bool {
+    if !policy_semantic_role(row.role) -> return false
+    if (rule == "raw-cli-fixed-shape" || rule == "raw-cli-builder-shape") && row.profile != "typed-cli" && row.profile != "typed-cli-doc" -> return false
+    loop scope in manifest.scopes {
+        if scope.rule == rule && policy_selector_matches(scope.selector, path) -> return true
+    }
+    false
+}
+fn policy_occurrence(path: String, rule: String, kind: String, span: Span) -> PolicyOccurrence {
+    PolicyOccurrence{file: path, rule: rule, site: policy_site(kind, span)}
+}
+fn policy_evaluate_program(manifest: PolicyManifest, path: String, row: PolicySourceRow, program: Program) -> [PolicyOccurrence] {
+    violations := [PolicyOccurrence]{}
+    aliases :: policy_module_aliases(program)
+    facts :: policy_statement_facts(program, aliases)
+    argv_sites := [Span]{}
+        // Keep Rust's per-expression rule order: occurrence diagnostics are ordered.
+        rules :: [String]{"raw-cli-fixed-shape", "raw-cli-builder-shape", "duration-constant-safe",
+            "unit-scalar-rewrap", "readonly-copy", "error-identity", "http-wrapper-json",
+            "http-message-text", "http-typed-json", "delimited-reader-config", "plain-format-fact",
+            "dogfood-path-containment", "dogfood-json", "dogfood-url-query", "dogfood-list-equality",
+            "dogfood-directory-setup", "dogfood-ascii", "crypto-naming-fact"}
+        kinds :: [String]{"call:process.argv", "call:process.argv.skip", "call:Duration.constructor",
+            "call:unit-rewrap", "call:readonly-copy", "expr:error-propagation", "call:http-wrapper",
+            "call:response.text", "call:request.body", "call:delimited-split", "call:Fixed.replace",
+            "call:path.starts_with", "literal:json-wire", "call:url.query.split", "fn:same_strings",
+            "call:fs.create_dir", "call:String.replace", "call:crypto.sha256_bytes"}
+    first_build := Span?{None}
+    if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Examples/features/types/typed_literal_forms.jet" {
+        policy_visit_program(program, (expression) -> {
+            if first_build == None && policy_is_build_command_literal(expression) -> first_build = Val(expr_span(expression))
+        })
+        if first_build == .Val(span) -> &violations.push(policy_occurrence(path, "first-hour-doc-recipe", "literal:jet-build", span))
+    }
+    enabled := [Bool]{}
+    loop rule in rules -> &enabled.push(policy_applies(manifest, path, row, rule))
+    policy_visit_program(program, (expression) -> {
+        span :: expr_span(expression)
+        if policy_is_process_input(expression, aliases) -> &argv_sites.push(span)
+        loop index in 0..<rules.len() {
+            rule :: rules[index]
+            if !enabled[index] -> next
+            matches :: if rule == {
+                "raw-cli-fixed-shape" -> policy_is_process_input(expression, aliases)
+                "raw-cli-builder-shape" -> policy_is_process_argv_view(expression, aliases)
+                "duration-constant-safe" -> policy_is_constant_duration(expression, aliases)
+                "unit-scalar-rewrap" -> policy_is_unit_scalar_rewrap(expression, aliases)
+                "readonly-copy" -> policy_is_readonly_copy(expression, aliases)
+                "error-identity" -> policy_is_identity_fallback(expression, aliases)
+                "http-wrapper-json" | "http-typed-json" -> policy_is_http_ceremony(expression, program)
+                "http-message-text" -> policy_is_http_message_text(expression)
+                "delimited-reader-config" -> policy_is_raw_delimited_split(expression)
+                "plain-format-fact" -> policy_is_redundant_fixed_cleanup(expression)
+                "dogfood-path-containment" -> policy_is_string_prefix_containment(expression)
+                "dogfood-json" -> policy_is_hand_json_wire(expression)
+                "dogfood-url-query" -> policy_is_url_query_reparse(expression)
+                "dogfood-list-equality" -> policy_is_named_list_equality(expression)
+                "dogfood-directory-setup" -> policy_is_non_idempotent_directory(expression, aliases)
+                "dogfood-ascii" -> policy_is_ascii_replacement_chain(expression)
+                "crypto-naming-fact" -> policy_is_legacy_digest_call(expression, aliases)
+                else -> false
+            }
+            if matches -> &violations.push(policy_occurrence(path, rule, kinds[index], span))
+        }
+    })
+    if policy_applies(manifest, path, row, "raw-cli-process-boundary") && argv_sites.len() > 1 {
+        loop index in 1..<argv_sites.len() -> &violations.push(policy_occurrence(path, "raw-cli-process-boundary", "call:process.argv", argv_sites[index]))
+    }
+    if policy_applies(manifest, path, row, "entry-implicit") {
+        loop item in program.items {
+            if item == .Func(function) && function.name == "run" {
+                &violations.push(policy_occurrence(path, "entry-implicit", "fn:run", function.span))
+                break
+            }
+        }
+    }
+    if policy_applies(manifest, path, row, "codable-structural") {
+        loop item in program.items {
+            if item == .Struct(structure) && policy_bare_structural_codable(structure) -> &violations.push(policy_occurrence(path, "codable-structural", "type:{structure.name}", structure.name_span))
+        }
+    }
+    if policy_applies(manifest, path, row, "effect-row-inference") {
+        loop item in program.items {
+            if item == .Func(function) && function.name == "run" && policy_redundant_effect_row(function, aliases) -> &violations.push(policy_occurrence(path, "effect-row-inference", "fn:{function.name}", function.span))
+        }
+    }
+    if policy_applies(manifest, path, row, "task-one-child") {
+        loop fact in facts.task_groups {
+            if fact.matches -> &violations.push(policy_occurrence(path, "task-one-child", "stmt:task.group", fact.span))
+        }
+    }
+    if policy_applies(manifest, path, row, "indexed-sequence") {
+        loop span in facts.manual_counter_loops -> &violations.push(policy_occurrence(path, "indexed-sequence", "loop:manual-counter", span))
+        loop fact in facts.counted_loops {
+            if fact.matches -> &violations.push(policy_occurrence(path, "indexed-sequence", "loop:counted-sequence", fact.span))
+        }
+    }
+    if policy_applies(manifest, path, row, "datatree-domain-policy") {
+        loop violation in policy_data_tree_violations(path, program) -> &violations.push(violation)
+    }
+    if policy_applies(manifest, path, row, "walk-files-filter") && facts.file_walks.len() > 0 -> &violations.push(policy_occurrence(path, "walk-files-filter", "call:fs.walk", facts.file_walks[0]))
+    if policy_applies(manifest, path, row, "regex-capture-recipe") && !policy_has_anchored_regex_capture(program, aliases) {
+        span := Span{start: 0, end: 0}
+        loop item in program.items {
+            if item == .Func(function) { span = function.span
+                break
+            }
+        }
+        &violations.push(policy_occurrence(path, "regex-capture-recipe", "recipe:regex-capture", span))
+    }
+    if policy_applies(manifest, path, row, "http-unused-request") {
+        loop item in program.items {
+            if item == .Func(function) {
+                loop parameter in function.params {
+                    if policy_named_type(parameter.ty, "HTTPRequest") && policy_unused_parameter(function, parameter.name) {
+                        &violations.push(policy_occurrence(path, "http-unused-request", "param:req", function.span))
+                        break
+                    }
+                }
+            }
+        }
+    }
+    violations
+}
+fn policy_markdown_fences(source: String, language: String) -> [String] {
+    fences := [String]{}
+    inside := false
+    current := ""
+    loop line in source.lines() {
+        trimmed :: line.trim()
+        if !inside {
+            if trimmed == ("```{language}") { inside = true
+                current = ""
+            }
+        } else if trimmed == "```" {
+            &fences.push(current)
+            inside = false
+        } else {
+            current += "{line}\n"
+        }
+    }
+    fences
+}
+fn policy_has_jet_run_command(source: String) -> Bool {
+    languages :: [String]{"bash", "sh", "shell"}
+    loop language in languages {
+        loop fence in policy_markdown_fences(source, language) {
+            loop raw in fence.lines() {
+                line :: raw.trim()
+                if line.is_empty() || line.starts_with("#") -> next
+                words :: policy_split_whitespace(line)
+                index := 0
+                loop index < words.len() && words[index] != "#" {
+                    word :: words[index]
+                    index += 1
+                    if word == "jet" {
+                        if index < words.len() && words[index] != "#" {
+                            if words[index] == "run" -> return true
+                            index += 1
+                        }
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+fn policy_source_programs(path: String, source: String) -> [String] {
+    if path.ends_with(".md") -> return policy_markdown_fences(source, "jet")
+    [String]{source}
+}
+fn policy_evaluate_source(manifest: PolicyManifest, path: String, source: String) -> [PolicyOccurrence] PolicyError! {
+    row :: policy_source_row(manifest, path) ?? return Err(PolicyError{message: policy_inventory_error("unclassified eligible source", path, "inventory:source")})
+    if !policy_semantic_role(row.role) -> return Ok([PolicyOccurrence]{})
+    all := [PolicyOccurrence]{}
+    typed := false
+    loop program_source in policy_source_programs(path, source) {
+        program :: policy_parse_program(path, program_source)
+        policy_validate_lint_allows(path, row, program)
+        if policy_has_typed_cli_entry(program) -> typed = true
+        loop violation in policy_evaluate_program(manifest, path, row, program) -> &all.push(violation)
+    }
+    if policy_applies(manifest, path, row, "first-hour-doc-recipe") && path == "Docs/spec/guides/first-hour.md" {
+        if !typed || !policy_has_jet_run_command(source) {
+            kind :: if typed -> "document:jet-run" else -> "document:typed-cli"
+            &all.push(policy_occurrence(path, "first-hour-doc-recipe", kind, Span{start: 0, end: 0}))
+        }
+    }
+    policy_apply_exceptions(manifest, path, all)
+}
+fn policy_occurrence_messages(violations: [PolicyOccurrence]) -> String {
+    messages := [String]{}
+    loop violation in violations -> &messages.push(policy_violation(violation.file, violation.rule, violation.site))
+    messages.join("\n")
+}
+fn policy_proof_matches(proof: String, gate: String) -> Bool {
+    gate == "all" || proof == gate ||
+    ((gate == "golden" || gate == "dev-corpus") && proof == "golden-and-dev-corpus") ||
+    (gate == "suite" && proof == "suite-goldens") ||
+    (gate == "package" && proof == "package-template-gate") ||
+    (gate == "dogfood" && (proof == "dogfood-gates" || proof == "dogfood/jetpack and workload gates")) ||
+    (gate == "fixture" && (proof == "ui-snapshot-gate" || proof == "fuzz-gate")) ||
+    (gate == "docs" && proof == "doc-gate") || (gate == "site" && proof == "site-gate") ||
+    (gate == "bindgen" && (proof == "generator-IR-renderer-registry" || proof == "bindgen-registry")) ||
+    (gate == "conformance" && proof == "conformance-gate") ||
+    (gate == "workload" && (proof == "compiled-workload-gate" || proof == "workload-gate"))
+}
+
+fn policy_check_fixture_inventory(manifest: PolicyManifest, root: String) PolicyError! {
+    inventory :: policy_inventory(manifest, root)
+    errors := [String]{}
+    loop entry in inventory.files {
+        expected :: if {
+            entry.path.starts_with("tests/ui/") || entry.path.starts_with("tests/ui_lint/") -> "negative-diagnostic"
+            entry.path.starts_with("tests/fuzz/") || entry.path.starts_with("tests/conformance/corpus/") || entry.path.starts_with("Tools/adoption/fixtures/") -> "fixture-harness-boundary"
+            else -> ""
+        }
+        if !expected.is_empty() && entry.role != expected -> &errors.push(policy_violation(entry.path, "fixture-role-classification", "inventory:fixture-role@0..0"))
+    }
+    loop row in manifest.sources {
+        expected :: if {
+            row.profile == "negative" -> "negative-diagnostic"
+            row.profile == "fixture" || row.profile == "canonical-test" || row.profile == "package-template" -> "fixture-harness-boundary"
+            row.profile == "protocol" -> "raw-protocol"
+            else -> ""
+        }
+        compatible :: if row.profile == "generated" -> row.role == "raw-protocol" || row.role == "generated-output" else -> expected.is_empty() || expected == row.role
+        if !compatible {
+            path :: if row.selector.starts_with("file:") || row.selector.starts_with("root:") -> policy_slice_bytes(row.selector, 5, row.selector.bytes().len()) else -> row.selector
+            &errors.push(policy_violation(path, "fixture-cli-role", "manifest:fixture-profile@0..0"))
+        }
+    }
+    if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
+    Ok(Unit{})
+}
+fn policy_read_source(root: String, path: String) -> String PolicyError! {
+    full :: policy_join(root, path)
+    policy_ast_files.read(full) ?? return Err(PolicyError{message: "read {full}: {err}"})
+}
+fn policy_check_cli_recipe_inventory(manifest: PolicyManifest, root: String) PolicyError! {
+    policy_check_fixture_inventory(manifest, root)
+    inventory :: policy_inventory(manifest, root)
+    errors := [String]{}
+    checked := false
+    loop entry in inventory.files {
+        row :: policy_source_row(manifest, entry.path) ?? next
+        profile :: row.profile
+        if profile != "typed-cli" && profile != "typed-cli-doc" && profile != "builder-cli" && profile != "raw-cli" -> next
+        if (entry.path == "package.jet" || entry.path.ends_with("/package.jet")) && profile != "typed-cli-doc" -> next
+        source :: policy_read_source(root, entry.path)
+        count := 0
+        typed_count := 0
+        builder := false
+        raw := false
+        loop program_source in policy_source_programs(entry.path, source) {
+            program :: policy_parse_program(entry.path, program_source)
+            count += 1
+            if policy_has_typed_cli_entry(program) -> typed_count += 1
+            if policy_has_args_builder(program) -> builder = true
+            if policy_has_raw_process_boundary(program) -> raw = true
+        }
+        valid :: if {
+            profile == "typed-cli" -> count > 0 && typed_count == count
+            profile == "typed-cli-doc" -> typed_count > 0 && policy_has_jet_run_command(source)
+            profile == "builder-cli" -> builder
+            else -> raw
+        }
+        if !valid -> &errors.push("CLI recipe profile `{profile}` is not proved by the AST for {entry.path}")
+        checked = true
+    }
+    if !checked -> &errors.push("manifest has no checked CLI recipe profiles")
+    if errors.len() > 0 -> return Err(PolicyError{message: errors.join("\n")})
+    Ok(Unit{})
+}
+fn policy_check_gate(manifest: PolicyManifest, root: String, gate: String) PolicyError! {
+    policy_check_cli_recipe_inventory(manifest, root)
+    inventory :: policy_inventory(manifest, root)
+    violations := [PolicyOccurrence]{}
+    loop entry in inventory.files {
+        row :: policy_source_row(manifest, entry.path) ?? next
+        if row.role == "generated-output" || !policy_proof_matches(row.proof, gate) || !policy_semantic_role(row.role) -> next
+        if entry.path == "package.jet" || entry.path.ends_with("/package.jet") -> next
+        source :: policy_read_source(root, entry.path)
+        loop violation in policy_evaluate_source(manifest, entry.path, source) -> &violations.push(violation)
+    }
+    if gate == "all" || gate == "bindgen" {
+        loop artifact in manifest.artifacts {
+            if !artifact.selector.starts_with("path:") -> next
+            path :: policy_slice_bytes(artifact.selector, 5, artifact.selector.bytes().len())
+            loop producer in manifest.producers {
+                if producer.selector != artifact.producer -> next
+                if producer.protocol == "no-response-protocol" || !path.ends_with(".jet") -> break
+                source :: policy_ast_files.read(policy_join(root, path)) ?? return Err(PolicyError{message: "read generated artifact {path}: {err}"})
+                loop violation in policy_evaluate_generated(manifest, producer.selector, source) -> &violations.push(violation)
+                break
+            }
+        }
+    }
+    if violations.len() > 0 -> return Err(PolicyError{message: policy_occurrence_messages(violations)})
+    Ok(Unit{})
+}
+
+// Gates are deduplicated across callers, not weakened to a classification check.
+#Test("corpus policy golden gate") { policy_check_gate(policy_manifest(), ".", "golden") }
+#Test("corpus policy fixture gate") { policy_check_gate(policy_manifest(), ".", "fixture") }
+#Test("corpus policy bindgen gate") { policy_check_gate(policy_manifest(), ".", "bindgen") }
+#Test("corpus policy workload gate") { policy_check_gate(policy_manifest(), ".", "workload") }
+#Test("corpus policy dev-corpus gate") { policy_check_gate(policy_manifest(), ".", "dev-corpus") }
+#Test("corpus policy conformance gate") { policy_check_gate(policy_manifest(), ".", "conformance") }
+#Test("corpus policy package gate") { policy_check_gate(policy_manifest(), ".", "package") }
+#Test("corpus policy suite gate") { policy_check_gate(policy_manifest(), ".", "suite") }
+#Test("corpus policy site gate") { policy_check_gate(policy_manifest(), ".", "site") }
+#Test("corpus policy docs gate") { policy_check_gate(policy_manifest(), ".", "docs") }
+#Test("corpus policy dogfood gate") { policy_check_gate(policy_manifest(), ".", "dogfood") }
+
+fn policy_has_rule(violations: [PolicyOccurrence], rule: String) -> Bool {
+    loop violation in violations { if violation.rule == rule -> return true }
+    false
+}
+fn policy_ast_test_semantic_shapes() PolicyError! {
+    manifest :: policy_manifest()
+    path :: "Examples/features/basics/first_hour.jet"
+    positive :: policy_evaluate_source(manifest, path, "fn run() {{ args :: process.argv() }}")
+    assert(policy_has_rule(positive, "raw-cli-fixed-shape"))
+    loop violation in positive -> assert_eq(violation.file, path)
+    literal :: policy_evaluate_source(manifest, path, "fn run() {{ print(\"process.argv()\") }}")
+    assert(!policy_has_rule(literal, "raw-cli-fixed-shape"))
+    Ok(Unit{})
+}
+#Test("semantic_rules_use_ast_shapes_not_source_text") { policy_ast_test_semantic_shapes() }
+fn policy_ast_test_cli_boundaries() PolicyError! {
+    manifest :: policy_manifest()
+    path :: "Examples/features/basics/first_hour.jet"
+    builder :: policy_evaluate_source(manifest, path, "fn run() {{ args :: process.argv().skip(1) }}")
+    assert(policy_has_rule(builder, "raw-cli-builder-shape"))
+    repeated :: policy_evaluate_source(manifest, path, "fn run() {{\n    first :: process.argv()\n    second :: process.argv()\n}}")
+    assert(policy_has_rule(repeated, "raw-cli-process-boundary"))
+    single :: policy_evaluate_source(manifest, path, "fn run() {{ args :: process.argv() }}")
+    assert(!policy_has_rule(single, "raw-cli-process-boundary"))
+    Ok(Unit{})
+}
+#Test("cli_boundary_rules_cover_builder_views_and_repeated_process_reads") { policy_ast_test_cli_boundaries() }
+fn policy_ast_test_allow_source_reason() PolicyError! {
+    manifest :: policy_manifest()
+    error := ""
+    if policy_evaluate_source(manifest, "Examples/features/text/unreviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap) print(\"kept\") }}") == {
+        .Err(failure) -> error = failure.message
+        .Ok(_) -> panic("maintained guidance allowance must explain itself")
+    }
+    assert(error.contains("reason at its source site"), error)
+    policy_evaluate_source(manifest, "Examples/features/text/reviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap, \"the example intentionally shows explicit conversion\") print(\"kept\") }}")
+    Ok(Unit{})
+}
+#Test("maintained_guidance_allow_explains_itself_at_the_source_site") { policy_ast_test_allow_source_reason() }
+fn policy_ast_test_response_decoder() PolicyError! {
+    manifest :: policy_manifest()
+    violations :: policy_evaluate_generated(manifest, "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn run() {{}}")
+    assert_eq(violations.len(), 1)
+    assert_eq(violations[0].rule, "bindgen-one-decoder")
+    assert(policy_occurrence_messages(violations).contains("replacement="))
+    no_response :: policy_evaluate_generated(manifest, "producer:crates/jet-pkg-model/src/CBind.rs#render_jet", "fn run() {{}}")
+    assert(no_response.is_empty())
+    Ok(Unit{})
+}
+#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") { policy_ast_test_response_decoder() }
+fn policy_ast_test_binding_renderers() PolicyError! {
+    manifest :: policy_manifest()
+    count := 0
+    loop producer in manifest.producers {
+        if !producer.selector.contains("Bind.rs#render_jet") || producer.protocol == "no-response-protocol" -> next
+        count += 1
+        violations :: policy_evaluate_generated(manifest, producer.selector, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
+        assert(violations.is_empty(), "{producer.selector} did not accept one shared response decoder: {policy_occurrence_messages(violations)}")
+    }
+    assert_eq(count, 7)
+    Ok(Unit{})
+}
+#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") { policy_ast_test_binding_renderers() }
+fn policy_ast_test_canonical_decoder_symbol() PolicyError! {
+    violations :: policy_evaluate_generated(policy_manifest(), "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_other(raw: String, code: Int) -> Dyn Err! {{ return Ok(Dyn.Null) }}")
+    assert_eq(violations.len(), 1)
+    assert_eq(violations[0].rule, "bindgen-one-decoder")
+    Ok(Unit{})
+}
+#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") { policy_ast_test_canonical_decoder_symbol() }
+fn policy_ast_test_protocol_override() PolicyError! {
+    manifest :: policy_manifest()
+    producer :: "producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet"
+    raw :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{ return Ok(json.parse(raw)) }}")
+    assert(raw.is_empty(), "raw JSON override is distinct: {policy_occurrence_messages(raw)}")
+    ordinary :: policy_evaluate_generated(manifest, producer, "fn decode_response(raw: String, code: Int) -> Dyn Err! {{\n    response :: json.parse(raw)\n    ok :: response.field(\"ok\")\n    return Ok(response)\n}}")
+    assert(policy_has_rule(ordinary, "generated-protocol-override"))
+    Ok(Unit{})
+}
+#Test("generated_protocol_override_requires_a_distinct_envelope_shape") { policy_ast_test_protocol_override() }
+
+struct PolicyShapeCase { path: String, source: String, rule: String, present: Bool }
+fn policy_check_shapes(cases: [PolicyShapeCase]) PolicyError! {
+    manifest :: policy_manifest()
+    loop example in cases {
+        violations :: policy_evaluate_source(manifest, example.path, example.source)
+        assert_eq(policy_has_rule(violations, example.rule), example.present, "{example.path}: {example.rule}: {policy_occurrence_messages(violations)}")
+    }
+    Ok(Unit{})
+}
+fn policy_ast_test_reintroduced_ceremony() PolicyError! {
+    cases :: [PolicyShapeCase]{
+        PolicyShapeCase{path: "Examples/features/basics/hello.jet", source: "fn run() {{ print(\"hello\") }}", rule: "entry-implicit", present: true},
+        PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "jet build Examples/features/basics/first_hour.jet", rule: "first-hour-doc-recipe", present: true},
+        PolicyShapeCase{path: "Examples/features/types/typed_literal_forms.jet", source: "fn run() {{ print(\"jet build Examples/features/types/typed_literal_forms.jet\") }}", rule: "first-hour-doc-recipe", present: true},
+        PolicyShapeCase{path: "Examples/features/serde/reintroduced.jet", source: "#Codable\nstruct Sample {{\n    value: Int\n}}\nfn run() {{}}", rule: "codable-structural", present: true},
+        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run() {{\n    delay :: Duration.hours(2) ?? return Err(\"duration\")\n}}", rule: "duration-constant-safe", present: true},
+        PolicyShapeCase{path: "Examples/features/basics/reintroduced_effect.jet", source: "use core.files as fs\nfn run() -[FS, IO]> {{\n    path :: \"input.txt\"\n    text :: fs.read(path)\n    print(text)\n}}", rule: "effect-row-inference", present: true},
+        PolicyShapeCase{path: "Examples/features/concurrency/parallel_scan.jet", source: "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(~path)\n}}", rule: "readonly-copy", present: true},
+        PolicyShapeCase{path: "Examples/features/io/reintroduced.jet", source: "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path) ?? return Err(\"read\")\n}}", rule: "error-identity", present: true},
+        PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "fn run() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
+        PolicyShapeCase{path: "Examples/features/concurrency/reintroduced.jet", source: "fn run() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", rule: "task-one-child", present: true},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/reintroduced.jet", source: "fn run() {{\n    line_number := 0\n    loop item in items {{\n        line_number += 1\n        seen :: line_number\n    }}\n}}", rule: "indexed-sequence", present: true},
+        PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn run() {{\n    value :: Regex{{\"IMG\"}}\n}}", rule: "regex-capture-recipe", present: true},
+    }
+    manifest :: policy_manifest()
+    loop example in cases {
+        violations :: policy_evaluate_source(manifest, example.path, example.source)
+        rendered := ""
+        loop violation in violations {
+            if violation.rule == example.rule { rendered = policy_violation(violation.file, violation.rule, violation.site)
+                break
+            }
+        }
+        assert(!rendered.is_empty(), "{example.path} did not reject {example.rule}")
+        assert(rendered.contains("file={example.path}"), rendered)
+        assert(rendered.contains("rule={example.rule}"), rendered)
+        assert(rendered.contains("site="), rendered)
+        assert(rendered.contains("why="), rendered)
+        assert(rendered.contains("replacement="), rendered)
+    }
+    Ok(Unit{})
+}
+#Test("card_2375_rules_reject_each_reintroduced_ceremony") { policy_ast_test_reintroduced_ceremony() }
+fn policy_ast_test_walk_shapes() PolicyError! {
+    policy_check_shapes([PolicyShapeCase]{
+        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if !entry.is_dir -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn walk() {{\n    entries :: fs.walk(root)\n}}\nfn filter(entry: Entry) {{\n    if !entry.is_dir -> print(entry.path)\n}}", rule: "walk-files-filter", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Tests/StoreIngest.jet", source: "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if entry.is_dir -> print(entry.relative) else -> print(entry.path)\n    }}\n}}", rule: "walk-files-filter", present: false},
+    })
+    Ok(Unit{})
+}
+#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") { policy_ast_test_walk_shapes() }
+fn policy_ast_test_crypto_module() PolicyError! {
+    policy_check_shapes([PolicyShapeCase]{
+        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: true},
+        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "use core.crypto as crypto\nfn run() {{ crypto.sha256(\"abc\".bytes()).hex() }}", rule: "crypto-naming-fact", present: false},
+        PolicyShapeCase{path: "Examples/features/crypto/reintroduced.jet", source: "fn run() {{ sha256_bytes(\"abc\".bytes()) }}", rule: "crypto-naming-fact", present: false},
+    })
+    Ok(Unit{})
+}
+#Test("crypto_digest_rule_uses_the_resolved_core_module") { policy_ast_test_crypto_module() }
+fn policy_ast_test_migration_shapes() PolicyError! {
+    policy_check_shapes([PolicyShapeCase]{
+        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run() {{ delay :: Duration.seconds(1.5) }}", rule: "duration-constant-safe", present: true},
+        PolicyShapeCase{path: "Examples/features/memory/reintroduced.jet", source: "fn run(seconds: Float) {{ delay :: Duration.seconds(seconds) }}", rule: "duration-constant-safe", present: false},
+        PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "fn run() {{ value :: Meter.from_float(source.raw() * 2) }}", rule: "unit-scalar-rewrap", present: true},
+        PolicyShapeCase{path: "Examples/features/types/unit_family.jet", source: "fn subtotal(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}", rule: "unit-scalar-rewrap", present: true},
+        PolicyShapeCase{path: "Examples/features/text/reintroduced.jet", source: "fn run() {{ value :: Meter.from_float(source.raw() * calibrate(2.0)) }}", rule: "unit-scalar-rewrap", present: false},
+        PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn run() {{ print(\"{{value:Fixed(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: true},
+        PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn run() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}", rule: "plain-format-fact", present: false},
+        PolicyShapeCase{path: "Docs/site/generate.jet", source: "fn run() {{ files.create_dir(\"dist\") }}", rule: "dogfood-directory-setup", present: true},
+        PolicyShapeCase{path: "Docs/site/generate.jet", source: "fn run() {{ files.create_dir_all(\"dist\") }}", rule: "dogfood-directory-setup", present: false},
+        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn duplicate_equal(left: Dyn, right: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: true},
+        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn javascript_truthy(value: Dyn) -> Bool {{ return true }}", rule: "dyn-domain-policy", present: false},
+        PolicyShapeCase{path: "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", source: "fn run() {{ value :: \"text\".replace(\"A\", \"a\").replace(\"B\", \"b\") }}", rule: "dogfood-ascii", present: false},
+        PolicyShapeCase{path: "Tools/gauntlet/entries/bulkrename/jet/run.jet", source: "fn pattern() {{ value :: Regex{{\"^x$\"}} }}\nfn run(value: String) {{\n    matched :: re.match(Regex{{\"x\"}}, value)\n    print(matched.group(1) ?? \"\")\n}}", rule: "regex-capture-recipe", present: true},
+        PolicyShapeCase{path: "Docs/spec/guides/first-hour.md", source: "```jet\n#CLI\nstruct Args {{ name: String }}\n```\n```bash\njet build\n```", rule: "first-hour-doc-recipe", present: true},
+    })
+    lower :: policy_planted_ascii_ladder()
+    violations :: policy_evaluate_source(policy_manifest(), "Jetpack/PackageModel/Source/Envelope/PathLaw.jet", "fn run() {{ value :: {lower} }}")
+    assert(policy_has_rule(violations, "dogfood-ascii"))
+    Ok(Unit{})
+}
+#Test("semantic_migration_rules_match_only_their_structural_shapes") { policy_ast_test_migration_shapes() }
+fn policy_ast_test_dogfood_and_workload_shapes() PolicyError! {
+    policy_check_shapes([PolicyShapeCase]{
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/incident_report.jet", source: "fn run() {{ rows :: input.split(\"\\t\") }}", rule: "delimited-reader-config", present: true},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/incident_report.jet", source: "fn run() {{ rows :: input.split(\"|\") }}", rule: "delimited-reader-config", present: false},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn run(req: HTTPRequest) {{ payload :: req.body(Json) }}", rule: "http-wrapper-json", present: true},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn run(req: HTTPRequest) {{ payload :: req.body(Json) }}", rule: "http-typed-json", present: true},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn run() {{ answer :: response.body().text(100) }}", rule: "http-message-text", present: true},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn run() {{ answer :: response.text() }}", rule: "http-message-text", present: false},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn run(req: HTTPRequest) {{ payload :: req.json(Json) }}", rule: "http-wrapper-json", present: false},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn run(req: HTTPRequest) {{ payload :: req.json(Json) }}", rule: "http-typed-json", present: false},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn handle(req: HTTPRequest) -> HTTPResponse {{ return response }}", rule: "http-unused-request", present: true},
+        PolicyShapeCase{path: "tests/agent_workloads/adapters/http_api.jet", source: "fn handle(req: HTTPRequest) -> HTTPResponse {{ return req.response() }}", rule: "http-unused-request", present: false},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "fn run() {{ allowed :: candidate.starts_with(\"root/\") }}", rule: "dogfood-path-containment", present: true},
+        PolicyShapeCase{path: "Jetpack/Store/Source/Ingest/TreeIngest.jet", source: "fn run() {{ allowed :: candidate == root }}", rule: "dogfood-path-containment", present: false},
+        PolicyShapeCase{path: "Jetpack/CLI/Source/Entry/Main.jet", source: "fn run() {{ wire :: \"{{{{\\\"key\\\": {{value}}}}}}\" }}", rule: "dogfood-json", present: true},
+        PolicyShapeCase{path: "Jetpack/CLI/Source/Entry/Main.jet", source: "fn run() {{ wire :: json.to_string(value) }}", rule: "dogfood-json", present: false},
+        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn run() {{ fields :: query.split(\"&\") }}", rule: "dogfood-url-query", present: true},
+        PolicyShapeCase{path: "Tools/tower/run.jet", source: "fn run() {{ fields :: url.query() }}", rule: "dogfood-url-query", present: false},
+        PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "fn run() {{ same_strings(left, right) }}", rule: "dogfood-list-equality", present: true},
+        PolicyShapeCase{path: "Jetpack/CLI/Source/Realize/ProjectPlan.jet", source: "fn run() {{ left == right }}", rule: "dogfood-list-equality", present: false},
+    })
+    Ok(Unit{})
+}
+#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") { policy_ast_test_dogfood_and_workload_shapes() }
+fn policy_ast_test_fixture_roles() PolicyError! {
+    manifest :: policy_manifest()
+    policy_check_fixture_inventory(manifest, ".")
+    fixture :: policy_evaluate_source(manifest, "tests/ui/args_spec_bad_parse_arity.jet", "fn run() {{ process.argv() }}")
+    assert(fixture.is_empty(), "negative fixtures are role-gated")
+    builder :: policy_evaluate_source(manifest, "Jetpack/CLI/Source/Entry/Main.jet", "fn run() {{\n    args.spec()\n    process.argv()\n}}")
+    loop violation in builder -> assert(violation.rule != "raw-cli-fixed-shape" && violation.rule != "raw-cli-builder-shape")
+    Ok(Unit{})
+}
+#Test("fixture_roles_and_approved_builder_boundary_are_explicit") { policy_ast_test_fixture_roles() }
+fn policy_ast_test_cli_recipe_inventory() PolicyError! {
+    manifest :: policy_manifest()
+    policy_check_cli_recipe_inventory(manifest, ".")
+    typed_selectors :: [String]{"file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/features/basics/first_hour.jet", "file:Examples/features/basics/onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet", "file:Jetpack/CLI/Source/Entry/Main.jet"}
+    loop selector in typed_selectors {
+        found := false
+        loop row in manifest.sources {
+            if row.selector == selector { found = true
+                assert(row.profile == "typed-cli" || row.profile == "typed-cli-doc", "canonical CLI source is not typed: {selector}")
+            }
+        }
+        assert(found, "missing CLI recipe source row: {selector}")
+    }
+    expert_selectors :: [String]{"file:Examples/features/io/args_spec.jet", "file:Examples/features/io/args_audit.jet", "file:Examples/features/io/cli_args.jet", "file:Examples/features/io/watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"}
+    loop selector in expert_selectors {
+        found := false
+        expected :: if selector.contains("args_spec.jet") || selector.contains("args_audit.jet") -> "builder-cli" else -> "raw-cli"
+        loop row in manifest.sources {
+            if row.selector == selector { found = true
+                assert_eq(row.profile, expected, "CLI boundary drifted: {selector}")
+            }
+        }
+        assert(found, "missing CLI recipe source row: {selector}")
+    }
+    starter_selectors :: [String]{"producer:Source/CmdCompile.rs#run_new.native_run_src", "producer:crates/jet-pkg-model/src/Package/Convert.rs#new_template"}
+    loop selector in starter_selectors {
+        found := false
+        loop producer in manifest.producers { if producer.selector == selector -> found = true }
+        assert(found, "missing CLI starter producer row: {selector}")
+    }
+    Ok(Unit{})
+}
+#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") { policy_ast_test_cli_recipe_inventory() }
+
+// corelib_parts/system.rs:1027-1041. Use the compiler's built module registry,
+// not Core/ directory names: unregistered files are not necessarily modules.
+fn policy_ast_test_core_reference() {
+    docs :: policy_ast_files.read("Docs/spec/reference/core-library.md") ?? panic("core library reference must exist")
+    missing := [String]{}
+    loop module_entry in CORE_MODULE_EXPORTS {
+        if module_entry.module_name == "core" -> next
+        if !docs.contains("`{module_entry.module_name}`") -> &missing.push(module_entry.module_name)
+    }
+    assert(missing.is_empty(), "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {missing}")
+}
+#Test("core_reference_lists_every_built_core_module") { policy_ast_test_core_reference() }
+
+fn policy_ast_test_unicode_shell_words() {
+    nel :: String.from_bytes([U8]{194, 133}) ?? panic("NEL UTF-8")
+    nbsp :: String.from_bytes([U8]{194, 160}) ?? panic("NBSP UTF-8")
+    emspace :: String.from_bytes([U8]{226, 128, 131}) ?? panic("EM SPACE UTF-8")
+    assert_eq(policy_split_whitespace("jet{nel}run{nbsp}file"), [String]{"jet", "run", "file"})
+    assert(policy_has_jet_run_command("```bash\njet{emspace}run example.jet\n```"))
+    assert(!policy_has_jet_run_command("```bash\n# jet run\n```"))
+    assert(!policy_has_jet_run_command("```bash\njet # run\n```"))
+}
+#Test("corpus document shell words use Rust Unicode whitespace") { policy_ast_test_unicode_shell_words() }
+
+fn policy_planted_ascii_ladder() -> String {
+    lower := "\"text\""
+    loop index in 0..<26 {
+        from :: String.from_bytes([U8]{U8.from_int(65 + index) ?? panic("ASCII uppercase byte")}) ?? panic("ASCII")
+        to :: String.from_bytes([U8]{U8.from_int(97 + index) ?? panic("ASCII lowercase byte")}) ?? panic("ASCII")
+        lower += ".replace(\"{from}\", \"{to}\")"
+    }
+    lower
+}
+
+struct PolicyPlantedPair { rule: String, kind: String, rejected: String, clean: String }
+fn policy_ast_test_planted_rule_pairs() PolicyError! {
+    ladder :: policy_planted_ascii_ladder()
+    pairs :: [PolicyPlantedPair]{
+        PolicyPlantedPair{rule: "raw-cli-fixed-shape", kind: "call:process.argv", rejected: "fn run() {{ process.argv() }}", clean: "fn run(args: Args) {{ print(args) }}"},
+        PolicyPlantedPair{rule: "raw-cli-builder-shape", kind: "call:process.argv.skip", rejected: "fn run() {{ process.argv().skip(1) }}", clean: "fn run() {{ process.args() }}"},
+        PolicyPlantedPair{rule: "duration-constant-safe", kind: "call:Duration.constructor", rejected: "fn run() {{ Duration.hours(2) }}", clean: "fn run(hours: Int) {{ Duration.hours(hours) }}"},
+        PolicyPlantedPair{rule: "unit-scalar-rewrap", kind: "call:unit-rewrap", rejected: "fn run() {{ Meter.from_float(value.raw() * 2) }}", clean: "fn run() {{ value * 2 }}"},
+        PolicyPlantedPair{rule: "readonly-copy", kind: "call:readonly-copy", rejected: "use core.files as fs\nfn run() {{ fs.read(~path) }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
+        PolicyPlantedPair{rule: "error-identity", kind: "expr:error-propagation", rejected: "use core.files as fs\nfn run() {{ fs.read(path) ?? return Err(\"read\") }}", clean: "use core.files as fs\nfn run() {{ fs.read(path) }}"},
+        PolicyPlantedPair{rule: "http-wrapper-json", kind: "call:http-wrapper", rejected: "fn run(req: HTTPRequest) {{ req.body(Json) }}", clean: "fn run(req: HTTPRequest) {{ req.json(Json) }}"},
+        PolicyPlantedPair{rule: "http-message-text", kind: "call:response.text", rejected: "fn run() {{ response.body().text(100) }}", clean: "fn run() {{ response.text() }}"},
+        PolicyPlantedPair{rule: "http-typed-json", kind: "call:request.body", rejected: "fn run(req: HTTPRequest) {{ req.body(Json) }}", clean: "fn run(req: HTTPRequest) {{ req.json(Json) }}"},
+        PolicyPlantedPair{rule: "delimited-reader-config", kind: "call:delimited-split", rejected: "fn run() {{ input.split(\"\\t\") }}", clean: "fn run() {{ input.split(\"|\") }}"},
+        PolicyPlantedPair{rule: "plain-format-fact", kind: "call:Fixed.replace", rejected: "fn run() {{ \"{{value:Fixed(2)}}\".replace(\",\", \"\") }}", clean: "fn run() {{ \"{{value:Fixed(2)}}\" }}"},
+        PolicyPlantedPair{rule: "dogfood-path-containment", kind: "call:path.starts_with", rejected: "fn run() {{ candidate.starts_with(\"root/\") }}", clean: "fn run() {{ candidate.is_within(root) }}"},
+        PolicyPlantedPair{rule: "dogfood-json", kind: "literal:json-wire", rejected: "fn run() {{ \"{{{{\\\"key\\\": {{value}}}}}}\" }}", clean: "fn run() {{ json.to_string(value) }}"},
+        PolicyPlantedPair{rule: "dogfood-url-query", kind: "call:url.query.split", rejected: "fn run() {{ query.split(\"&\") }}", clean: "fn run() {{ url.query() }}"},
+        PolicyPlantedPair{rule: "dogfood-list-equality", kind: "fn:same_strings", rejected: "fn run() {{ same_strings(left, right) }}", clean: "fn run() {{ left == right }}"},
+        PolicyPlantedPair{rule: "dogfood-directory-setup", kind: "call:fs.create_dir", rejected: "use core.files as files\nfn run() {{ files.create_dir(\"dir\") }}", clean: "use core.files as files\nfn run() {{ files.create_dir_all(\"dir\") }}"},
+        PolicyPlantedPair{rule: "crypto-naming-fact", kind: "call:crypto.sha256_bytes", rejected: "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(bytes) }}", clean: "use core.crypto as crypto\nfn run() {{ crypto.sha256(bytes).hex() }}"},
+        PolicyPlantedPair{rule: "raw-cli-process-boundary", kind: "call:process.argv", rejected: "fn run() {{\n    first :: process.argv()\n    second :: process.argv()\n}}", clean: "fn run() {{ process.argv() }}"},
+        PolicyPlantedPair{rule: "entry-implicit", kind: "fn:run", rejected: "fn run() {{ print(\"hello\") }}", clean: "print(\"hello\")"},
+        PolicyPlantedPair{rule: "codable-structural", kind: "type:Record", rejected: "#Codable\nstruct Record {{ value: Int }}", clean: "struct Record {{ value: Int }}"},
+        PolicyPlantedPair{rule: "effect-row-inference", kind: "fn:run", rejected: "fn run() -[IO]> {{ print(\"hello\") }}", clean: "fn run() {{ print(\"hello\") }}"},
+        PolicyPlantedPair{rule: "task-one-child", kind: "stmt:task.group", rejected: "fn run() {{ task.group g {{ task.race {{1, 2}} }} }}", clean: "fn run() {{ task.race {{1, 2}} }}"},
+        PolicyPlantedPair{rule: "indexed-sequence", kind: "loop:manual-counter", rejected: "fn run() {{\n    count := 0\n    loop item in items {{\n        count += 1\n        print(count)\n    }}\n}}", clean: "fn run() {{ loop (index, item) in items -> print(index) }}"},
+        PolicyPlantedPair{rule: "dyn-domain-policy", kind: "fn:duplicate", rejected: "fn duplicate(left: Dyn, right: Dyn) -> Bool {{ true }}", clean: "fn duplicate(left: Dyn, right: Dyn) -> Bool {{ left.equal_unordered(right) }}"},
+        PolicyPlantedPair{rule: "walk-files-filter", kind: "call:fs.walk", rejected: "use core.files as fs\nfn run() {{ loop entry in fs.walk(root) {{ if !entry.is_dir -> print(entry.path) }} }}", clean: "use core.files as fs\nfn run() {{ loop entry in fs.walk_files(root) -> print(entry.path) }}"},
+        PolicyPlantedPair{rule: "regex-capture-recipe", kind: "recipe:regex-capture", rejected: "fn run() {{ Regex{{\"x\"}} }}", clean: "fn run() {{\n    pattern :: Regex{{\"^x$\"}}\n    matched :: re.match(pattern, value)\n    print(matched.group(1) ?? \"\")\n}}"},
+        PolicyPlantedPair{rule: "dogfood-ascii", kind: "call:String.replace", rejected: "fn run() {{ {ladder} }}", clean: "fn run() {{ \"text\".to_ascii_lower() }}"},
+        PolicyPlantedPair{rule: "first-hour-doc-recipe", kind: "literal:jet-build", rejected: "fn run() {{ print(\"jet build example.jet\") }}", clean: "fn run() {{ print(\"jet run example.jet\") }}"},
+        PolicyPlantedPair{rule: "http-unused-request", kind: "param:req", rejected: "fn handle(req: HTTPRequest) -> HTTPResponse {{ response }}", clean: "fn handle(req: HTTPRequest) -> HTTPResponse {{ req.response() }}"},
+    }
+    loop pair in pairs {
+        // A closed synthetic manifest makes one rule active, independently of
+        // real corpus exceptions or scope changes. Checked-manifest tests above
+        // still require every original source/provenance/classification.
+        path :: if pair.rule == "first-hour-doc-recipe" -> "Examples/features/types/typed_literal_forms.jet" else -> "planted/{pair.rule}.jet"
+        manifest := PolicyManifest{sources: [PolicySourceRow]{PolicySourceRow{selector: "file:{path}", role: "canonical-teaching", profile: "typed-cli", decision: "planted", proof: "planted", owner: "corpus-policy", reason: "planted AST pair"}}, scopes: [corpus_manifest.PolicyScopeRow]{corpus_manifest.PolicyScopeRow{rule: pair.rule, selector: "file:{path}", reason: "planted AST pair"}}, producers: [corpus_manifest.PolicyProducerRow]{}, artifacts: [corpus_manifest.PolicyArtifactRow]{}, findings: [corpus_manifest.PolicyFindingRow]{}, exceptions: [corpus_manifest.PolicyExceptionRow]{}}
+        bad :: policy_evaluate_source(manifest, path, pair.rejected)
+        assert_eq(bad.len(), 1, "{pair.rule}: exactly one planted violation")
+        assert_eq(bad[0].file, path)
+        assert_eq(bad[0].rule, pair.rule)
+        assert(bad[0].site.starts_with("{pair.kind}@"), "stable semantic site: {bad[0].site}")
+        assert_eq(policy_occurrence_messages(bad), policy_violation(path, pair.rule, bad[0].site))
+        good :: policy_evaluate_source(manifest, path, pair.clean)
+        assert_eq(good, [PolicyOccurrence]{}, "{pair.rule}: clean AST shape")
+    }
+    Ok(Unit{})
+}
+#Test("corpus executable AST rules planted violation and clean pairs") { policy_ast_test_planted_rule_pairs() }

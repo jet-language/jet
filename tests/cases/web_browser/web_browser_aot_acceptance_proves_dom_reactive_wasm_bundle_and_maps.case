@@ -1,0 +1,51 @@
+# tests/web_browser.rs::web_browser_aot_acceptance_proves_dom_reactive_wasm_bundle_and_maps
+# Exact five-source preparation/build/publish sequence and original browser oracle.
+# PENDING-SAME-HEAD/PENDING-GRAMMAR(batch-four probes), runtime UNRUN.
+requires: probe {env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium} --version stdout+stderr: ~any "Chromium" "Chrome"
+requires: probe {env:JET_WEB_NODE|env:NODE|node} --version stdout: ^= "v0" | ^= "v1" | ^= "v2" | ^= "v3" | ^= "v4" | ^= "v5" | ^= "v6" | ^= "v7" | ^= "v8" | ^= "v9"
+fixture: fixtures/acceptance
+step: jet build --target=web app.jet
+cwd: {work}/click_src
+exit: 0
+mkdir: {work}/click
+for file {work}/click_src/.jet/build as f
+copy: {f.path} {work}/click/{f.name}
+end for
+step: jet build --target=web app.jet
+cwd: {work}/reactive_src
+exit: 0
+mkdir: {work}/reactive
+for file {work}/reactive_src/.jet/build as f
+copy: {f.path} {work}/reactive/{f.name}
+end for
+step: jet build --target=web app.jet
+cwd: {work}/compute_src
+exit: 0
+mkdir: {work}/compute
+for file {work}/compute_src/.jet/build as f
+copy: {f.path} {work}/compute/{f.name}
+end for
+step: jet build --target=web app.jet
+cwd: {work}/callback_src
+exit: 0
+mkdir: {work}/callback
+for file {work}/callback_src/.jet/build as f
+copy: {f.path} {work}/callback/{f.name}
+end for
+step: jet build --target=web app.jet
+cwd: {work}/lifecycle_src
+exit: 0
+mkdir: {work}/lifecycle
+for file {work}/lifecycle_src/.jet/build as f
+copy: {f.path} {work}/lifecycle/{f.name}
+end for
+spawn server: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-test/serve.mjs --port {free-port:static} --root {work}
+stdout: null
+poll ready: jet run {root}/tests/cases/web_browser/fixtures/http-ready.jet 127.0.0.1:{free-port:static} /click/web.manifest.json - - until stdout: ~ "200 OK" timeout 10s every 50ms
+step: {env:JET_WEB_NODE|env:NODE|node} {root}/Tools/web-test/acceptance.mjs --port {free-port:static}
+env: CHROMIUM={env:JET_WEB_CHROMIUM|env:CHROMIUM|chromium}
+exit: 0
+stdout: ~ "PASS web backend browser acceptance matrix" # original completion predicate
+signal server: KILL
+wait: server
+exit: any # original server cleanup ignores status

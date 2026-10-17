@@ -1,0 +1,26 @@
+Error [E1004]: `core.process` has no item `run`
+  --> external_boundaries_seed_origin_facts_3.jet:4:23
+    |
+  4 |     result :: process.run(["echo", "payload"]) ?? return Err("test")
+    |                       ^^^
+ Why: Standard library modules expose a fixed set of public items
+ Fix: Use one of: ProcessSignal, args, argv, check, cmd, current_pid, cwd, env, env_get, exit, on_signal, pipeline, run_spec, status_ok, stdin_text, which, Completed, ProcessReceipt, ProcessSpec, arg, args_extend, call, capture, check_call, check_output, combined_output, env_get_or, env_keys, env_set, env_truthy, failed, getoutput, getstatusoutput, list2cmdline, shell, signal_number, stderr_lines, stdout_lines, exited
+More: jet-lang.dev/e/E1004
+
+Error [E0433]: This SQL value is thrown away
+  --> external_boundaries_seed_origin_facts_3.jet:5:9
+    |
+  5 |     SQL.raw(result.output)
+    |         ^^^
+ Why: `run` has no return type, so it returns nothing and the value of its last line is lost
+ Fix: If `run` should return it, write `-> SQL` after its parameter list; to discard it on purpose, write `.drop("reason")`
+More: jet-lang.dev/e/E0433
+
+Error [E0721]: A `$origin.process` value is denied at `SQL.raw`
+  --> tests/ui/taint/external_boundaries_seed_origin_facts_3.jet:5:9
+    |
+  5 |     SQL.raw(result.output)
+    |         ^^^
+ Why: The declaration for `$origin.process` denies `SQL.raw`, which covers this destination
+ Fix: Remove the destination use, decode the value into a declared type, or pass it through an audited #Scrub function
+More: jet-lang.dev/e/E0721

@@ -1,10 +1,10 @@
 // D-TEST-HISTORY1=A: typed operation histories share the Foundation runner,
 // comparison record, and shrinker with host-side evidence.
 
-type JetHistoryCaptureReader<'a> = dyn Fn() -> Result<jet_std::DataTree, String> + 'a;
-type JetHistorySendCaptureReader<'a> = dyn Fn() -> Result<jet_std::DataTree, String> + Send + Sync + 'a;
-type JetHistoryWeakReader = crate::jet_testing_history_foundation::HistoryCallbackReader<Result<jet_std::DataTree, String>>;
-type JetHistoryWeakSendReader = crate::jet_testing_history_foundation::HistorySendCallbackReader<Result<jet_std::DataTree, String>>;
+type JetHistoryCaptureReader<'a> = dyn Fn() -> Result<jet_std::Dyn, String> + 'a;
+type JetHistorySendCaptureReader<'a> = dyn Fn() -> Result<jet_std::Dyn, String> + Send + Sync + 'a;
+type JetHistoryWeakReader = crate::jet_testing_history_foundation::HistoryCallbackReader<Result<jet_std::Dyn, String>>;
+type JetHistoryWeakSendReader = crate::jet_testing_history_foundation::HistorySendCallbackReader<Result<jet_std::Dyn, String>>;
 
 // A generic call carries the codecs of its checked type arguments. Factories
 // retain this dictionary with their environment, so invocation after return
@@ -13,7 +13,7 @@ type JetHistoryWeakSendReader = crate::jet_testing_history_foundation::HistorySe
 #[derive(Clone)]
 struct JetHistoryTypeCodec {
     checked_type: String,
-    encode: std::sync::Arc<dyn Fn(&dyn std::any::Any, usize) -> Result<jet_std::DataTree, String> + Send + Sync>,
+    encode: std::sync::Arc<dyn Fn(&dyn std::any::Any, usize) -> Result<jet_std::Dyn, String> + Send + Sync>,
 }
 type JetHistoryTypes = std::collections::BTreeMap<String, JetHistoryTypeCodec>;
 thread_local! {
@@ -34,7 +34,7 @@ fn jet_history_with_types<R>(types: JetHistoryTypes, body: impl FnOnce() -> R) -
 }
 fn jet_history_type_codec<T: 'static>(
     checked_type: String,
-    encode: impl Fn(&T, usize) -> Result<jet_std::DataTree, String> + Send + Sync + 'static,
+    encode: impl Fn(&T, usize) -> Result<jet_std::Dyn, String> + Send + Sync + 'static,
 ) -> JetHistoryTypeCodec {
     JetHistoryTypeCodec { checked_type, encode: std::sync::Arc::new(move |value, depth| {
         let value = value.downcast_ref::<T>().ok_or_else(|| "history capture type does not match its checked instantiation".to_string())?;
@@ -43,7 +43,7 @@ fn jet_history_type_codec<T: 'static>(
 }
 fn jet_history_encode_type<T: 'static>(
     types: &JetHistoryTypes, name: &str, value: &T, depth: usize,
-) -> Result<jet_std::DataTree, String> {
+) -> Result<jet_std::Dyn, String> {
     if depth >= 64 { return Err("history capture exceeds the nesting bound".to_string()); }
     (types.get(name).ok_or_else(|| "history capture type is unresolved".to_string())?.encode)(value, depth)
 }
@@ -56,6 +56,7 @@ fn jet_history_encode_type<T: 'static>(
 macro_rules! jet_history_callable_argument {
     (owned, $arg:ident, $lifetime:lifetime) => { $arg };
     (read, $arg:ident, $lifetime:lifetime) => { &$lifetime $arg };
+    (text, $arg:ident, $lifetime:lifetime) => { &$lifetime str };
     (write, $arg:ident, $lifetime:lifetime) => { &$lifetime mut $arg };
 }
 
@@ -238,7 +239,7 @@ fn jet_history_register_send_callback<'a, F: ?Sized + 'a>(
     callback
 }
 
-fn jet_history_callback_captures<F: ?Sized>(callback: &F) -> Result<jet_std::DataTree, String> {
+fn jet_history_callback_captures<F: ?Sized>(callback: &F) -> Result<jet_std::Dyn, String> {
     struct Depth;
     impl Drop for Depth {
         fn drop(&mut self) {
@@ -276,13 +277,13 @@ fn jet_history_callback_fingerprint<F: ?Sized>(callback: &F) -> Result<String, S
     let metadata = jet_history_callback_captures(callback)?;
     let identity = metadata.get("function_identity")?.as_str()?;
     let captures = metadata.get("captures")?;
-    let bytes = jet_std::render_datatree_json(captures, false, 0).into_bytes();
+    let bytes = jet_std::render_dyn_json(captures, false, 0).into_bytes();
     crate::jet_testing_history_foundation::history_callback_value_fingerprint(identity, &bytes)
         .map_err(|error| error.to_string())
 }
 
-fn jet_history_data_tree_capture(value: &jet_std::DataTree, depth: usize) -> Result<jet_std::DataTree, String> {
-    use jet_std::DataTree as Tree;
+fn jet_history_dyn_capture(value: &jet_std::Dyn, depth: usize) -> Result<jet_std::Dyn, String> {
+    use jet_std::Dyn as Tree;
     if depth >= 64 {
         return Err("history capture exceeds the nesting bound".to_string());
     }
@@ -293,31 +294,31 @@ fn jet_history_data_tree_capture(value: &jet_std::DataTree, depth: usize) -> Res
         Tree::Float(value) => ("float", Tree::Text(value.to_bits().to_string())),
         Tree::Number(value) => ("number", Tree::Text(value.clone())),
         Tree::Text(value) => ("text", Tree::Text(value.clone())),
-        Tree::TypedText(value) => ("typed_text", Tree::Text(value.clone())),
-        Tree::Bytes(value) => ("bytes", Tree::Array(value.iter().map(|value| Tree::Int(i64::from(*value))).collect())),
+        Tree::Bytes(value) => ("bytes", Tree::Array(value.iter().map(|value| Tree::Int(i64::from(*value).into())).collect())),
+        Tree::DateTime(value) => ("datetime", Tree::Text(value.to_rfc3339())),
         Tree::Array(values) => ("array", Tree::Array(values.iter().map(|value| {
-            jet_history_data_tree_capture(value, depth + 1)
+            jet_history_dyn_capture(value, depth + 1)
         }).collect::<Result<_, _>>()?)),
         Tree::Object(fields) => ("object", Tree::Object(fields.iter().map(|(name, value)| {
-            Ok((name.clone(), jet_history_data_tree_capture(value, depth + 1)?))
+            Ok((name.clone(), jet_history_dyn_capture(value, depth + 1)?))
         }).collect::<Result<_, String>>()?)),
     };
     Ok(Tree::Array(vec![Tree::Text(kind.to_string()), value]))
 }
 
 fn jet_testing_history_observation(
-    value: &jet_std::DataTree,
+    value: &jet_std::Dyn,
 ) -> crate::jet_testing_comparison_foundation::ComparisonObservation {
     crate::jet_testing_comparison_foundation::ComparisonObservation::value(
-        jet_std::render_datatree_json(value, false, 0),
+        jet_std::render_dyn_json(value, false, 0),
     )
 }
 
 fn jet_testing_history_apply<Input>(
-    callback: &dyn Fn(&Input) -> JetOutcome<jet_std::DataTree, JetErr>,
+    callback: &dyn Fn(&Input) -> JetOutcome<jet_std::Dyn, JetErr>,
     input: Input,
     role: &str,
-) -> Result<jet_std::DataTree, String> {
+) -> Result<jet_std::Dyn, String> {
     let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| callback(&input)))
         .map_err(|_| format!("{role} callback crashed while replaying a typed history"))?;
     result.map_err(|error| format!("{role} callback failed: {error}"))
@@ -337,16 +338,16 @@ pub(crate) fn jet_testing_history_rng_below(
 }
 
 fn jet_testing_history_execute<Command>(
-    model: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
-    actual: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr>,
-    observe: &dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr>,
+    model: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr>,
+    actual: &dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr>,
+    observe: &dyn Fn(&jet_std::Dyn) -> JetOutcome<jet_std::Dyn, JetErr>,
     commands: &[Command],
 ) -> Result<
     (
-        jet_std::DataTree,
-        jet_std::DataTree,
-        crate::jet_testing_comparison_foundation::ComparisonObservation,
-        crate::jet_testing_comparison_foundation::ComparisonObservation,
+        jet_std::Dyn,
+        jet_std::Dyn,
+        jet_std::Dyn,
+        jet_std::Dyn,
     ),
     String,
 >
@@ -358,11 +359,9 @@ where
     let candidate_value =
         jet_testing_history_apply(actual, commands.to_vec(), "actual")?;
     let reference_observed =
-        jet_testing_history_apply(observe, reference_value.clone(), "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
+        jet_testing_history_apply(observe, reference_value.clone(), "observe")?;
     let candidate_observed =
-        jet_testing_history_apply(observe, candidate_value.clone(), "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
+        jet_testing_history_apply(observe, candidate_value.clone(), "observe")?;
     Ok((
         reference_value,
         candidate_value,
@@ -372,9 +371,9 @@ where
 }
 fn jet_testing_history_record(
     record: crate::jet_testing_comparison_foundation::ComparisonRecord,
-    inputs: Vec<jet_std::DataTree>,
-    reference: Vec<jet_std::DataTree>,
-    candidate: Vec<jet_std::DataTree>,
+    inputs: Vec<jet_std::Dyn>,
+    reference: Vec<jet_std::Dyn>,
+    candidate: Vec<jet_std::Dyn>,
     seed: Option<i64>,
     provenance: Option<&crate::jet_testing_history_foundation::HistoryProvenance>,
 ) -> jet_std::JetTestComparison {
@@ -412,36 +411,6 @@ fn jet_testing_history_record(
         universal_proof: record.universal_proof,
     }
 }
-pub(crate) fn jet_testing_histories<Command>(
-    seed: i64,
-    cases: i64,
-    strategy: Option<JetHistoryStrategy<Command>>,
-    model: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    actual: Box<dyn Fn(Vec<Command>) -> jet_std::DataTree>,
-    observe: Box<dyn Fn(jet_std::DataTree) -> jet_std::DataTree>,
-) -> Result<jet_std::JetTestComparison, String>
-where
-    Command: crate::jet_testing_history_foundation::HistoryCommand + 'static,
-{
-    let model = Box::new(move |commands: &Vec<Command>| {
-        Ok::<_, JetErr>(model(commands.clone()))
-    });
-    let actual = Box::new(move |commands: &Vec<Command>| {
-        Ok::<_, JetErr>(actual(commands.clone()))
-    });
-    let observe = Box::new(move |value: &jet_std::DataTree| {
-        Ok::<_, JetErr>(observe(value.clone()))
-    });
-    jet_testing_histories_with_provenance(
-        seed,
-        cases,
-        strategy,
-        model,
-        actual,
-        observe,
-        None,
-    )
-}
 
 /// Compiler-private entrypoint used when the checked caller carries selected
 /// artifact/callback provenance outside the six Jet-visible history values.
@@ -450,13 +419,13 @@ pub(crate) fn jet_testing_histories_with_provenance<'callback, Command>(
     cases: i64,
     strategy: Option<JetHistoryStrategy<Command>>,
     model: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     actual: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     observe: Box<
-        dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&jet_std::Dyn) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
 ) -> Result<jet_std::JetTestComparison, String>
@@ -522,13 +491,13 @@ fn jet_testing_histories_result_with_strategy<'callback, Command, Strategy>(
     seed: i64,
     cases: i64,
     model: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     actual: Box<
-        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&Vec<Command>) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     observe: Box<
-        dyn Fn(&jet_std::DataTree) -> JetOutcome<jet_std::DataTree, JetErr> + 'callback,
+        dyn Fn(&jet_std::Dyn) -> JetOutcome<jet_std::Dyn, JetErr> + 'callback,
     >,
     strategy: Strategy,
     provenance: Option<crate::jet_testing_history_foundation::HistoryProvenance>,
@@ -600,7 +569,7 @@ where
     let run = runner
         .run_strategy::<Command, _, _>(&strategy, |typed| {
             let case = &typed.case;
-            let input = match jet_std::parse_json_datatree(&case.json()) {
+            let input = match jet_std::parse_json_dyn(&case.json()) {
                 Ok(input) => input,
                 Err(error) => {
                     return crate::jet_testing_comparison_foundation::ComparisonRecord::terminal(
@@ -658,12 +627,24 @@ where
                 provenance.target.clone(),
             );
             identity.seed = Some(case.seed);
-            let sample = crate::jet_testing_comparison_foundation::ComparisonSample::new(
+            let mut sample = crate::jet_testing_comparison_foundation::ComparisonSample::new(
                 identity,
-                reference_observed,
-                candidate_observed,
-            )
-            .with_replays(reference_replay, candidate_replay);
+                jet_testing_history_observation(&reference_observed),
+                jet_testing_history_observation(&candidate_observed),
+            );
+            if matches!(
+                &relation,
+                crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
+            ) {
+                sample = sample.with_declared_equal(jet_std::JetDynAccess::equal_unordered(
+                    &reference_observed,
+                    &candidate_observed,
+                ));
+            }
+            let sample = sample.with_replays(
+                jet_testing_history_observation(&reference_replay),
+                jet_testing_history_observation(&candidate_replay),
+            );
             inputs.push(input);
             reference_values.push(reference_value);
             candidate_values.push(candidate_value);
@@ -708,7 +689,7 @@ mod jet_testing_history_web {
     };
     use std::cell::RefCell;
 
-    type Tree = jet_std::DataTree;
+    type Tree = jet_std::Dyn;
     const MAX_WIRE_BYTES: usize = 8 * 1024 * 1024;
 
     thread_local! {
@@ -788,7 +769,9 @@ mod jet_testing_history_web {
 
     fn integer(value: &Tree, name: &str) -> Result<i64, String> {
         match value {
-            Tree::Int(value) => Ok(*value),
+            Tree::Int(value) => value
+                .to_i64()
+                .ok_or_else(|| format!("{name} must be an exact integer")),
             Tree::Number(value) => value
                 .parse::<i64>()
                 .map_err(|_| format!("{name} must be an exact integer")),
@@ -798,8 +781,9 @@ mod jet_testing_history_web {
 
     fn unsigned(value: &Tree, name: &str) -> Result<u64, String> {
         match value {
-            Tree::Int(value) => u64::try_from(*value)
-                .map_err(|_| format!("{name} must be a non-negative exact integer")),
+            Tree::Int(value) => value
+                .to_u64()
+                .ok_or_else(|| format!("{name} must be a non-negative exact integer")),
             Tree::Number(value) => value
                 .parse::<u64>()
                 .map_err(|_| format!("{name} must be a non-negative exact integer")),
@@ -816,7 +800,7 @@ mod jet_testing_history_web {
 
     fn required_text(root: &Tree, name: &str) -> Result<String, String> {
         match field(root, name) {
-            Some(Tree::Text(value) | Tree::TypedText(value)) => Ok(value.clone()),
+            Some(Tree::Text(value)) => Ok(value.clone()),
             Some(_) => Err(format!("{name} must be text")),
             None => Err(format!("history wire field `{name}` is missing")),
         }
@@ -836,11 +820,11 @@ mod jet_testing_history_web {
     }
 
     fn integer_tree(value: i64) -> Tree {
-        Tree::Int(value)
+        Tree::Int(value.into())
     }
 
     fn unsigned_tree(value: u64) -> Tree {
-        Tree::Number(value.to_string())
+        Tree::Int(value.into())
     }
 
     fn id_tree(value: u32) -> Tree {
@@ -956,7 +940,7 @@ mod jet_testing_history_web {
 
     fn required_text_any(root: &Tree, names: &[&str], label: &str) -> Result<String, String> {
         match required_any(root, names, label)? {
-            Tree::Text(value) | Tree::TypedText(value) => Ok(value.clone()),
+            Tree::Text(value) => Ok(value.clone()),
             _ => Err(format!("{label} must be text")),
         }
     }
@@ -987,7 +971,7 @@ mod jet_testing_history_web {
 
     fn tagged<'a>(value: &'a Tree, label: &str) -> Result<(&'a str, &'a [Tree]), String> {
         let tag = match field(value, "tag") {
-            Some(Tree::Text(tag) | Tree::TypedText(tag)) => tag.as_str(),
+            Some(Tree::Text(tag)) => tag.as_str(),
             _ => return Err(format!("{label}.tag must be text")),
         };
         let values = match required_any(value, &["values"], label)? {
@@ -1000,13 +984,16 @@ mod jet_testing_history_web {
     fn history_value(value: &Tree, label: &str) -> Result<HistoryValue, String> {
         let Tree::Object(_) = value else {
             return match value {
-                Tree::Int(value) => Ok(HistoryValue::Integer(*value)),
+                Tree::Int(value) => value
+                    .to_i64()
+                    .map(HistoryValue::Integer)
+                    .ok_or_else(|| format!("{label} integer is out of range")),
                 Tree::Number(value) => value
                     .parse::<i64>()
                     .map(HistoryValue::Integer)
                     .map_err(|_| format!("{label} integer is out of range")),
                 Tree::Bool(value) => Ok(HistoryValue::Boolean(*value)),
-                Tree::Text(value) | Tree::TypedText(value) => Ok(HistoryValue::Text(value.clone())),
+                Tree::Text(value) => Ok(HistoryValue::Text(value.clone())),
                 _ => Err(format!("{label} is not a HistoryValue")),
             };
         };
@@ -1014,11 +1001,11 @@ mod jet_testing_history_web {
         match (tag, values) {
             ("Integer", [value]) => Ok(HistoryValue::Integer(integer(value, label)?)),
             ("Boolean", [Tree::Bool(value)]) => Ok(HistoryValue::Boolean(*value)),
-            ("Text", [Tree::Text(value) | Tree::TypedText(value)]) => Ok(HistoryValue::Text(value.clone())),
+            ("Text", [Tree::Text(value)]) => Ok(HistoryValue::Text(value.clone())),
             ("Handle", [value]) => Ok(HistoryValue::Handle(crate::jet_testing_history_foundation::HandleId {
                 value: history_id(value, label)?,
             })),
-            ("Redacted", [Tree::Text(value) | Tree::TypedText(value)]) => Ok(HistoryValue::Redacted(value.clone())),
+            ("Redacted", [Tree::Text(value)]) => Ok(HistoryValue::Redacted(value.clone())),
             _ => Err(format!("{label} has an invalid HistoryValue variant")),
         }
     }
@@ -1028,7 +1015,7 @@ mod jet_testing_history_web {
             return Ok(None);
         }
         if let Tree::Object(_) = value {
-            if let Some(Tree::Text(tag) | Tree::TypedText(tag)) = field(value, "tag") {
+            if let Some(Tree::Text(tag)) = field(value, "tag") {
                 let values = match required_any(value, &["values"], label)? {
                     Tree::Array(values) => values,
                     _ => return Err(format!("{label}.values must be an array")),
@@ -1045,7 +1032,7 @@ mod jet_testing_history_web {
 
     fn history_precondition(value: &Tree, label: &str) -> Result<HistoryPrecondition, String> {
         if let Tree::Object(_) = value {
-            if let Some(Tree::Text(kind) | Tree::TypedText(kind)) = field(value, "kind") {
+            if let Some(Tree::Text(kind)) = field(value, "kind") {
                 return match kind.as_str() {
                     "handle_live" => Ok(HistoryPrecondition::HandleLive(
                         crate::jet_testing_history_foundation::HandleId {
@@ -1079,7 +1066,7 @@ mod jet_testing_history_web {
                     value: history_id(value, label)?,
                 },
             )),
-            ("HandleState", [handle, Tree::Text(state) | Tree::TypedText(state)]) => {
+            ("HandleState", [handle, Tree::Text(state)]) => {
                 Ok(HistoryPrecondition::HandleState {
                     handle: crate::jet_testing_history_foundation::HandleId {
                         value: history_id(handle, label)?,
@@ -1207,7 +1194,7 @@ mod jet_testing_history_web {
             return Ok(None);
         }
         if let Tree::Object(_) = value {
-            if let Some(Tree::Text(tag) | Tree::TypedText(tag)) = field(value, "tag") {
+            if let Some(Tree::Text(tag)) = field(value, "tag") {
                 let values = match required_any(value, &["values"], label)? {
                     Tree::Array(values) => values,
                     _ => return Err(format!("{label}.values must be an array")),
@@ -1349,7 +1336,7 @@ mod jet_testing_history_web {
             matches!(response, Some(Tree::Bool(true)))
         }
 
-        fn commands_to_data_tree(&self, commands: &[Tree]) -> Option<Tree> {
+        fn commands_to_dyn(&self, commands: &[Tree]) -> Option<Tree> {
             Some(Tree::Array(commands.to_vec()))
         }
     }
@@ -1357,7 +1344,7 @@ mod jet_testing_history_web {
 
     fn set_output(value: Tree) {
         OUTPUT.with(|cell| {
-            *cell.borrow_mut() = jet_std::render_datatree_json(&value, false, 0).into_bytes();
+            *cell.borrow_mut() = jet_std::render_dyn_json(&value, false, 0).into_bytes();
         });
     }
 
@@ -1383,7 +1370,7 @@ mod jet_testing_history_web {
                 ("tag".to_string(), Tree::Text("Some".to_string())),
                 (
                     "values".to_string(),
-                    Tree::Array(vec![Tree::Int(value)]),
+                    Tree::Array(vec![Tree::Int(value.into())]),
                 ),
             ]),
             None => Tree::Object(vec![
@@ -1411,7 +1398,7 @@ mod jet_testing_history_web {
             ("candidate".to_string(), Tree::Array(value.candidate)),
             (
                 "first_difference".to_string(),
-                Tree::Int(value.first_difference),
+                Tree::Int(value.first_difference.into()),
             ),
             ("reason".to_string(), Tree::Text(value.reason)),
             (
@@ -1437,7 +1424,7 @@ mod jet_testing_history_web {
         input: &Tree,
         role: &str,
     ) -> Result<Tree, String> {
-        let encoded = jet_std::render_datatree_json(input, false, 0).into_bytes();
+        let encoded = jet_std::render_dyn_json(input, false, 0).into_bytes();
         if encoded.len() > MAX_WIRE_BYTES {
             return Err(format!("{role} history callback input exceeds the Web limit"));
         }
@@ -1470,7 +1457,7 @@ mod jet_testing_history_web {
             };
             std::str::from_utf8(bytes)
                 .ok()
-                .and_then(|value| jet_std::parse_json_typed_datatree(value).ok())
+                .and_then(|value| jet_std::parse_json_dyn(value).ok())
         });
         OUTPUT.with(|cell| cell.borrow_mut().clear());
         let parsed = parsed.ok_or_else(|| format!("{role} callback returned invalid JSON"))?;
@@ -1484,7 +1471,7 @@ mod jet_testing_history_web {
                 .ok_or_else(|| format!("{role} callback omitted its value"))
         } else {
             match field(&parsed, "reason") {
-                Some(Tree::Text(reason) | Tree::TypedText(reason)) => Err(format!(
+                Some(Tree::Text(reason)) => Err(format!(
                     "{role} callback failed: {reason}"
                 )),
                 _ => Err(format!("{role} callback failed without a reason")),
@@ -1533,9 +1520,9 @@ mod jet_testing_history_web {
                 return Err("history derived strategy provenance does not match its descriptor".to_string());
             }
             // The typed JSON parser retains exact integer lexemes and ordered
-            // nested DataTree values. The emitter's capture type tags travel
+            // nested Dyn values. The emitter's capture type tags travel
             // inside this existing wire tree, never through an f64 conversion.
-            let bytes = jet_std::render_datatree_json(captures, false, 0).into_bytes();
+            let bytes = jet_std::render_dyn_json(captures, false, 0).into_bytes();
             let fingerprint = crate::jet_testing_history_foundation::history_callback_value_fingerprint(
                 &identity, &bytes,
             ).map_err(|error| error.to_string())?;
@@ -1580,8 +1567,8 @@ mod jet_testing_history_web {
         (
             Tree,
             Tree,
-            crate::jet_testing_comparison_foundation::ComparisonObservation,
-            crate::jet_testing_comparison_foundation::ComparisonObservation,
+            Tree,
+            Tree,
         ),
         String,
     >
@@ -1590,14 +1577,12 @@ mod jet_testing_history_web {
         Strategy: crate::jet_testing_history_foundation::HistoryStrategyBehavior<Command>,
     {
         let input = strategy
-            .commands_to_data_tree(commands)
+            .commands_to_dyn(commands)
             .ok_or_else(|| "history command codec is unavailable on Web".to_string())?;
         let reference_value = callback(model, &input, "model")?;
         let candidate_value = callback(actual, &input, "actual")?;
-        let reference_observed = callback(observe, &reference_value, "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
-        let candidate_observed = callback(observe, &candidate_value, "observe")
-            .map(|value| jet_testing_history_observation(&value))?;
+        let reference_observed = callback(observe, &reference_value, "observe")?;
+        let candidate_observed = callback(observe, &candidate_value, "observe")?;
         Ok((
             reference_value,
             candidate_value,
@@ -1625,13 +1610,13 @@ mod jet_testing_history_web {
         if let Some(dispatch) = dispatch {
             return dispatch(root);
         }
-        if command_type_matches(&command_type, "DataTree") {
+        if command_type_matches(&command_type, "Dyn") {
             return run_wire_with_strategy::<
-                jet_std::DataTree,
+                jet_std::Dyn,
                 crate::jet_testing_history_foundation::HistorySchemaStrategy,
             >(
                 root,
-                <jet_std::DataTree as crate::jet_testing_history_foundation::HistoryCommand>::history_strategy(),
+                <jet_std::Dyn as crate::jet_testing_history_foundation::HistoryCommand>::history_strategy(),
             );
         }
         Err(crate::jet_testing_history_foundation::history_unsupported_type_reason(
@@ -1719,7 +1704,7 @@ mod jet_testing_history_web {
         let run = runner
             .run_strategy::<Command, _, _>(&strategy, |typed| {
                 let case = &typed.case;
-                let input = match jet_std::parse_json_typed_datatree(&case.json()) {
+                let input = match jet_std::parse_json_dyn(&case.json()) {
                     Ok(input) => input,
                     Err(error) => {
                         return ComparisonRecord::terminal(
@@ -1767,12 +1752,25 @@ mod jet_testing_history_web {
                     provenance.target.clone(),
                 );
                 identity.seed = Some(case.seed);
-                let sample = ComparisonSample::new(
+                let mut sample = ComparisonSample::new(
                     identity,
-                    reference_observed,
-                    candidate_observed,
-                )
-                .with_replays(reference_replay, candidate_replay);
+                    jet_testing_history_observation(&reference_observed),
+                    jet_testing_history_observation(&candidate_observed),
+                );
+                if matches!(
+                    &relation,
+                    crate::jet_testing_comparison_foundation::ObservationRelation::TypedEquality
+                ) {
+                    sample =
+                        sample.with_declared_equal(jet_std::JetDynAccess::equal_unordered(
+                            &reference_observed,
+                            &candidate_observed,
+                        ));
+                }
+                let sample = sample.with_replays(
+                    jet_testing_history_observation(&reference_replay),
+                    jet_testing_history_observation(&candidate_replay),
+                );
                 inputs.push(input);
                 reference_values.push(reference_value);
                 candidate_values.push(candidate_value);
@@ -1869,7 +1867,7 @@ mod jet_testing_history_web {
         });
         let result = input
             .and_then(|bytes| std::str::from_utf8(&bytes).ok().map(str::to_string))
-            .and_then(|wire| jet_std::parse_json_typed_datatree(&wire).ok())
+            .and_then(|wire| jet_std::parse_json_dyn(&wire).ok())
             .map_or_else(
                 || Err("invalid testing history WebWasm wire JSON".to_string()),
                 |wire| run_wire(&wire),

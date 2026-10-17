@@ -1,0 +1,100 @@
+// Rust Bundle.rs generic-instance/inline-module display paths, reused from
+// origin/port/compiler CheckProgram.jet. Identity paths remain untouched.
+use jet_foundation.[MIRNameFacts, MIRNameDisplayPath, Item, Func, CodeModule]
+fn sema_name_strip_prefix(name: String, prefix: String) -> String Never! {
+    if !name.starts_with(prefix) -> return name.copy()
+    name.slice(prefix.len(), name.len())
+}
+fn sema_name_display_add(facts: &MIRNameFacts, module_index: Int, module_alias: String, internal: String, display: String) Never! {
+    &facts.display_paths.push(MIRNameDisplayPath{module_index: module_index, internal_path: "{module_alias}.{internal}", display_path: display})
+}
+fn sema_name_display_methods(facts: &MIRNameFacts, module_index: Int, module_alias: String, internal: String, display: String, methods: [Func]) Never! {
+    loop method in methods -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
+}
+fn sema_name_display_item(facts: &MIRNameFacts, module_index: Int, module_alias: String, scope: String, internal_prefix: String, display_prefix: String, item: Item) Never! {
+    type_prefix :: sema_inline_type_prefix(scope)
+    value_prefix :: sema_genmod_value_name(scope, "")
+    if item == {
+        .Struct(definition) -> {
+            internal :: sema_name_scoped(internal_prefix, definition.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            loop field in definition.fields -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{field.name}", "{display}.{field.name}")
+            sema_name_display_methods(&facts, module_index, module_alias, internal, display, definition.methods)
+            loop implementation in definition.trait_impls -> sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
+        }
+        .Enum(definition) -> {
+            internal :: sema_name_scoped(internal_prefix, definition.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            loop variant in definition.variants -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{variant.name}", "{display}.{variant.name}")
+            sema_name_display_methods(&facts, module_index, module_alias, internal, display, definition.methods)
+            loop implementation in definition.trait_impls -> sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
+        }
+        .Trait(definition) -> {
+            internal :: sema_name_scoped(internal_prefix, definition.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            loop method in definition.methods -> sema_name_display_add(&facts, module_index, module_alias, "{internal}.{method.name}", "{display}.{method.name}")
+        }
+        .Tag(definition) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, definition.name), "{display_prefix}.{sema_name_strip_prefix(definition.name, type_prefix)}")
+        .Const(definition) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, definition.name), "{display_prefix}.{sema_name_strip_prefix(definition.name, value_prefix)}")
+        .Func(function) -> sema_name_display_add(&facts, module_index, module_alias, sema_name_scoped(internal_prefix, function.name), "{display_prefix}.{function.name}")
+        .Impl(implementation) -> {
+            internal :: sema_name_scoped(internal_prefix, implementation.type_name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(implementation.type_name, type_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            sema_name_display_methods(&facts, module_index, module_alias, internal, display, implementation.methods)
+        }
+        .CodeModule(child) -> {
+            internal :: sema_name_scoped(internal_prefix, child.name)
+            display :: "{display_prefix}.{sema_name_strip_prefix(child.name, value_prefix)}"
+            sema_name_display_add(&facts, module_index, module_alias, internal, display)
+            if child.body == .Val(body) {
+                loop nested in body -> sema_name_display_item(&facts, module_index, module_alias, child.name, internal, display, nested)
+            }
+        }
+        else -> {}
+    }
+}
+fn sema_name_display_selected(item: Item, type_prefix: String, value_prefix: String?) -> Bool Never! {
+    if item == {
+        .Struct(definition) -> definition.name.starts_with(type_prefix)
+        .Enum(definition) -> definition.name.starts_with(type_prefix)
+        .Trait(definition) -> definition.name.starts_with(type_prefix)
+        .Tag(definition) -> definition.name.starts_with(type_prefix)
+        .Impl(implementation) -> implementation.type_name.starts_with(type_prefix)
+        .Const(definition) -> if value_prefix == .Val(prefix) -> definition.name.starts_with(prefix) else -> false
+        .CodeModule(child) -> if value_prefix == .Val(prefix) -> child.name.starts_with(prefix) else -> false
+        else -> false
+    }
+}
+fn sema_name_plain_display_paths(facts: &MIRNameFacts, module_index: Int, module_alias: String, instance: CodeModule, source_path: String, display_path: String, items: [Item]) Never! {
+    scope :: sema_inline_type_alias(source_path)
+    type_prefix :: sema_inline_type_prefix(scope)
+    loop item in items {
+        if sema_name_display_selected(item, type_prefix, None) -> sema_name_display_item(&facts, module_index, module_alias, scope, "", display_path, item)
+    }
+    if instance.body == .Val(body) {
+        loop item in body {
+            if item == .CodeModule(child) -> sema_name_plain_display_paths(&facts, module_index, module_alias, child, "{source_path}.{child.name}", "{display_path}.{child.name}", items)
+        }
+    }
+}
+fn sema_name_add_display_paths(facts: &MIRNameFacts, module_index: Int, module_alias: String, items: [Item]) Never! {
+    loop item in items {
+        if item == .CodeModule(instance) {
+            if instance.instance_identity != None {
+                sema_name_display_add(&facts, module_index, module_alias, instance.name, instance.name)
+                if instance.body == .Val(body) {
+                    loop nested in body -> sema_name_display_item(&facts, module_index, module_alias, instance.name, instance.name, instance.name, nested)
+                }
+                type_prefix :: sema_inline_type_prefix(instance.name)
+                value_prefix :: sema_genmod_value_name(instance.name, "")
+                loop lifted in items {
+                    if sema_name_display_selected(lifted, type_prefix, Val(value_prefix)) -> sema_name_display_item(&facts, module_index, module_alias, instance.name, "", instance.name, lifted)
+                }
+            } else if instance.body != None -> sema_name_plain_display_paths(&facts, module_index, module_alias, instance, instance.name, instance.name, items)
+        }
+    }
+}

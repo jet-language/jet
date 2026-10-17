@@ -1,0 +1,18 @@
+# HAND-PORT tests/http_client_law.rs:915-976 cookie_jar_enforces_per_domain_and_global_count_bounds
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All original23domains/47seed requests/4141cookies, original header count136+44absent+45/180present; exact generated source expansion retained.
+fixture: cookie_jar_enforces_per_domain_and_global_count_bounds.fixture
+env: NO_COLOR=1
+write: peer/main.jet peer/source.template
+step: jet build peer/main.jet
+exit: 0
+spawn peer: built
+await: file addr.txt timeout 30s
+capture: addr = text file addr.txt
+write: main.jet main.template
+step: jet build main.jet
+exit: 0
+step: built
+exit: 0
+wait: peer
+exit: 0

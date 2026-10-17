@@ -1,0 +1,12 @@
+# PORT tests/pkg.rs::transitive_path_dependency_cannot_escape_declaring_package:3288-3326; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/transitive_path_dependency_cannot_escape_declaring_package
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+step: jet fetch
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1206]"
+stderr.after_first("Error [E1206]:").split("\n", 0): ~ "escapes"
+file: store/outside absent

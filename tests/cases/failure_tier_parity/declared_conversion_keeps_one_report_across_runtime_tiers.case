@@ -1,0 +1,22 @@
+# Original tests/failure_tier_parity.rs:166-195; verbatim input and every runtime parity assertion.
+# PENDING-GRAMMAR(batch-four); PENDING-SAME-HEAD; exact .normalize_failure_journey_paths helper125-156 differs from CheckedText.
+fixture: declared_conversion_keeps_one_report_across_runtime_tiers.fixture
+step jit: jet run main.jet
+env: NO_COLOR=1
+exit: 1
+stdout: empty
+stderr: ~ "converted" # original ed77c235f tests/failure_tier_parity.rs:174 contains predicate
+step interpreter: jet run --interpret main.jet
+env: NO_COLOR=1
+exit: 1
+stdout: == jit
+stderr.normalize_failure_journey_paths: == jit
+when tool rustc
+step: jet build main.jet
+env: NO_COLOR=1
+exit: 0
+step aot: built
+exit: 1
+stdout: == jit
+stderr.normalize_failure_journey_paths: == jit
+end when

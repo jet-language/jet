@@ -5,7 +5,7 @@ use std::fs;
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
+use jet::Interpreter::RunOutcome;
 use jet::REPL::run_transcript;
 
 mod common;
@@ -62,7 +62,7 @@ fn f32_math_view() -> String {
     ceil_input :: F32{ 1.25 }
     wide :: 16777217.0
     wide_root :: 2.0
-    return "{math.to_bits(rounded)}|{math.sqrt(root_input)}|{math.pow(root_input, exponent)}|{math.floor(floor_input)}|{math.ceil(ceil_input)}|{math.sin(root_input)}|{math.atan2(root_input, exponent)}|{math.hypot(root_input, exponent)}|{math.lerp(low, high, t)}|{math.min(low, high)}|{math.max(low, high)}|{math.clamp(exponent, low, root_input)}|{math.abs(-root_input)}|{math.is_inf(positive_overflow)}|{math.is_inf(negative_overflow)}|{math.is_nan(nan)}|{math.is_finite(rounded)}|{math.sign(negative_zero)}|{math.to_bits(negative_zero)}|{wide}|{math.sqrt(wide_root)}"
+    return "{math.to_bits(rounded)}|{math.sqrt(root_input)}|{root_input.pow(exponent)}|{math.floor(floor_input)}|{math.ceil(ceil_input)}|{math.sin(root_input)}|{math.atan2(root_input, exponent)}|{math.hypot(root_input, exponent)}|{math.lerp(low, high, t)}|{math.min(low, high)}|{math.max(low, high)}|{math.clamp(exponent, low, root_input)}|{math.abs(-root_input)}|{math.is_inf(positive_overflow)}|{math.is_inf(negative_overflow)}|{math.is_nan(nan)}|{math.is_finite(rounded)}|{math.sign(0)}|{math.to_bits(negative_zero)}|{wide}|{math.sqrt(wide_root)}"
 }"#;
 const F32_MATH_EXPECTED: &str = "1266679808|1.4142135|8.0|1.0|2.0|0.9092974|0.5880026|3.6055512|1.75|1.0|4.0|2.0|2.0|true|true|true|true|0|2147483648|16777217.0|1.4142135623730951";
 const PRIMITIVE_INSTANCE_DECLS: &str = r#"fn primitive_instance_view() -> String {
@@ -870,7 +870,7 @@ fn check_dev_tier_output(label: &str, source: &str, expected: &str, force_interp
     fs::write(&path, source).unwrap();
     let path = path.to_string_lossy();
     for (tier, interpreter_only) in [("interpreter", true), ("default-dev", false)] {
-        match dev_iteration(
+        match crate::common::dev_run(
             &path,
             force_interpreter && interpreter_only,
             interpreter_only,
@@ -913,8 +913,8 @@ fn rustc_backed_aot_comptime_differentials_cover_return_shapes() {
         (
             "xml/float-shape-error",
             parity_source(
-                "xml_shape_reason(DataTree.Float(1.5))",
-                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: DataTree) -> String {\n    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
+                "xml_shape_reason(Dyn.Float(1.5))",
+                "use core.encoding.xml as xml\nfn xml_shape_reason(tree: Dyn) -> String {\n    if xml.canonical(tree, xml.XMLCanonical{ mode: .Inclusive11, comments: false, inclusive_prefixes: [] }) == {\n        Ok(_) -> return \"unexpected success\"\n        Err(error) -> return error.reason\n    }\n    return \"unreachable\"\n}",
             ),
         ),
         (
@@ -998,18 +998,18 @@ use core.data.sketch.reservoir as reservoir
 fn sketch_edges() -> String {
     cardinality := hll.new()
     empty_count :: cardinality.count()
-    cardinality.add("same")
-    cardinality.add("same")
+    &cardinality.add("same")
+    &cardinality.add("same")
     distribution := tdigest.new()
     empty_quantile :: distribution.quantile(0.5)
-    distribution.add(-1.0)
-    distribution.add(1.0)
+    &distribution.add(-1.0)
+    &distribution.add(1.0)
     frequencies := cms.new()
     missing :: frequencies.count("missing")
-    frequencies.add("seen")
+    &frequencies.add("seen")
     sample := reservoir.new(0)
-    sample.add("first")
-    sample.add("second")
+    &sample.add("first")
+    &sample.add("second")
     return "{empty_count}|{cardinality.count()}|{empty_quantile}|{distribution.quantile(0.0)}|{distribution.quantile(1.0)}|{missing}|{frequencies.count("seen")}|{sample.sample().len()}"
 }"#,
             ),
@@ -1062,7 +1062,8 @@ fn xml_edges() -> String {
     book_name :: xml.expanded_name(children[0]) ?? panic("book name")
     attribute :: xml.attribute(children[0], "id")
     id :: attribute ?? "missing"
-    return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{xml.to_string(document)}"
+    rendered :: xml.to_string(document) ?? panic("xml render")
+    return "{root_name.local}|{children.len()}|{book_name.local}|{id}|{rendered}"
 }"#,
             ),
         ),
@@ -1545,6 +1546,33 @@ fn public_transcript_covers_solver_exactly() {
     assert_eq!(values, [format!("\"{SOLVER_EXPECTED}\" : String")]);
 }
 
+const SOLVER_RENDER_DECLS: &str = r#"use core.compute.solve as solve
+fn solver_render_view() -> String {
+    solver := solve.Solver.new(-17)
+    &solver.require(true)
+    &solver.require(false)
+    &solver.require(false)
+    return "{solver}|{solver:Debug}|{[solver]}"
+}"#;
+const SOLVER_RENDER_EXPECTED: &str =
+    "Solver { seed: -17, checked: 3, failures: 2 }|Solver { seed: -17, checked: 3, failures: 2 }|[Solver { seed: -17, checked: 3, failures: 2 }]";
+
+#[test]
+fn solver_source_render_hooks_match_aot_comptime_and_dev_tiers() {
+    let source = parity_source("solver_render_view()", SOLVER_RENDER_DECLS);
+    assert_eq!(
+        check_aot_comptime("solver/source-render", &source),
+        SOLVER_RENDER_EXPECTED
+    );
+    check_dev_tiers("solver-source-render", &source, SOLVER_RENDER_EXPECTED);
+}
+
+#[test]
+fn public_transcript_covers_solver_source_render_hooks() {
+    let values = exact_values(&[SOLVER_RENDER_DECLS, "solver_render_view()"]);
+    assert_eq!(values, [format!("\"{SOLVER_RENDER_EXPECTED}\" : String")]);
+}
+
 const ARCHIVE_DECLS: &str = r#"use core.archive as archive
 fn archive_view() -> String {
     bytes :: [U8]{ 72, 101, 108, 108, 111 }
@@ -1731,13 +1759,10 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     assert!(random.contains("std::f64::consts::TAU"));
     assert!(read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs")
         .contains("seeded_random_kernel::jet_seeded_rng_normal"));
-    assert!(read("crates/jet-jit/src/Random.rs")
-        .contains("include!(\"../../jet-codegen/src/Prelude/Core/SeededRandom.rs\")"));
 
     let path = read("crates/jet-codegen/src/Prelude/Core/Path.rs");
     assert!(path.contains("ParentDir if normal_depth > 0"));
     assert!(path.contains("ParentDir if !rooted"));
-    assert!(read("crates/jet-jit/src/CoreHost.rs").contains("path_kernel::jet_std_path_normalize"));
 
     let fmt = read("crates/jet-codegen/src/Prelude/Core/Fmt.rs");
     assert!(fmt.contains("precision.clamp(0, 9)"));
@@ -1758,7 +1783,6 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     assert!(math.contains("if value < 0"));
     assert!(math.contains("value.unsigned_abs()"));
     assert!(math.contains("x.is_nan()"));
-    assert!(read("crates/jet-jit/build.rs").contains("MathLibPure.rs"));
     assert!(
         read("crates/jet-comptime/src/Comptime/Methods/core_calls.rs")
             .contains("math_lib_pure::jet_std_math_gcd")
@@ -1767,16 +1791,10 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     let loadable = read("crates/jet-codegen/src/Prelude/Core/Loadable.rs");
     assert!(loadable.contains("JET_LOADABLE_FAILED: u8 = 3"));
     assert!(loadable.contains("jet_loadable_has_value"));
-    assert!(
-        read("crates/jet-jit/src/Reactive.rs").contains("loadable_kernel::jet_loadable_has_value")
-    );
 
     let encoding = read("crates/jet-codegen/src/Prelude/Core/EncodingBase.rs");
     assert!(encoding.contains("while out.len() % 8 != 0"));
     assert!(encoding.contains("s.len() % 2 != 0"));
-    assert!(
-        read("crates/jet-jit/src/Encoding.rs").contains("encoding_base_rt::jet_std_base32_encode")
-    );
 
     let text = read("crates/jet-comptime/src/Comptime/TextLite.rs");
     assert!(text.contains("UnicodeTables.rs"));
@@ -1788,4 +1806,18 @@ fn round_three_shared_kernels_keep_edge_rules_in_one_adapter_path() {
     assert!(url.contains("CoreLib/JetStd/UrlMime.rs"));
     assert!(url.contains("jet_url_percent_decode_str"));
     assert!(!url.contains("fn url_valid_scheme"));
+}
+
+#[test]
+fn prep_core_calls_resolve_concrete_surface_contracts() {
+    let source = r#"use core.math as math
+MAGNITUDE :: prep { math.hypot(Float{3.0}, Float{4.0}) }
+fn run() { print(MAGNITUDE) }
+"#;
+    jet::compile(source).expect("checked prep hypot should resolve its Float carrier");
+    if common::have_rustc() {
+        let (code, stdout, stderr) = common::build_and_run("prep_hypot", "main", source);
+        assert_eq!(code, 0, "{stderr}");
+        assert_eq!(stdout, "5.0\n");
+    }
 }

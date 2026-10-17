@@ -99,7 +99,7 @@ impl<'a> Checker<'a> {
                     .bindings
                     .get(name)
                     .map(|info| (name.clone(), info.ty.clone()))
-                    .or_else(|| self.consts.get(name).map(|ty| (name.clone(), ty.clone())))
+                    .or_else(|| self.const_type(name).map(|ty| (name.clone(), ty.clone())))
             })
             .collect()
     }
@@ -216,7 +216,7 @@ impl<'a> Checker<'a> {
     ) -> bool {
         match base {
             Expr::Field(inner, ..) => self.qualifies_explicit_constant(inner, values),
-            Expr::Ident(name, _) if self.lookup(name).is_none() && !self.consts.contains_key(name) => {
+            Expr::Ident(name, _) if self.lookup(name).is_none() && self.const_type(name).is_none() => {
                 true
             }
             _ => self.is_explicit_constant(base, values),
@@ -287,6 +287,7 @@ impl<'a> Checker<'a> {
     /// or the flow-narrowed refinement of it when a proven test recorded one
     /// at the same depth or deeper (D-FLOWTYPE1).
     pub(crate) fn lookup(&self, name: &str) -> Option<&LocalInfo> {
+        jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ScopeLookups, 1);
         if name == "_" {
             return None;
         }
@@ -304,6 +305,7 @@ impl<'a> Checker<'a> {
     /// Keep the permission fact on the declaration; do not create a second
     /// mutable-binding table beside `consts`.
     pub(crate) fn is_global_mutable_binding(&self, name: &str) -> bool {
+        jet_foundation::WorkCounters::add(jet_foundation::WorkCounters::Work::ItemScans, self.items.len());
         self.items.iter().any(|item| {
             matches!(
                 item,
@@ -402,7 +404,7 @@ impl<'a> Checker<'a> {
             self.note_unused_binding(name, info.def_span, info.param_conv.is_some());
         }
         if self.lookup(name).is_some()
-            || self.consts.contains_key(name)
+            || self.const_type(name).is_some()
             || self.loop_labels.iter().any(|label| label == name)
         {
             self.diags.push(already_defined(name, name_span));
@@ -444,7 +446,7 @@ impl<'a> Checker<'a> {
             return;
         }
         if self.lookup(&name).is_some()
-            || self.consts.contains_key(&name)
+            || self.const_type(&name).is_some()
             || self.loop_labels.iter().any(|label| label == &name)
         {
             self.diags.push(already_defined(&name, name_span));
@@ -535,7 +537,7 @@ impl<'a> Checker<'a> {
 
     pub(crate) fn declare_loop_label(&mut self, name: &str, name_span: Span) {
         if self.lookup(name).is_some()
-            || self.consts.contains_key(name)
+            || self.const_type(name).is_some()
             || self.loop_labels.iter().any(|label| label == name)
         {
             self.diags.push(already_defined(name, name_span));

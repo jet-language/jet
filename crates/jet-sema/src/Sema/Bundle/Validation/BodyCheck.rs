@@ -111,8 +111,10 @@ pub(crate) fn checker_for_module<'a>(
         concrete_unit_values: vec![HashMap::new()],
         suppress_partial_move_root_read: false,
         loop_depth: 0,
-        loop_exit_depth: None,
         share_sites: Vec::new(),
+        implicit_take_sites: HashMap::new(),
+        once_lambda_sites: HashMap::new(),
+        once_lambdas: HashMap::new(),
         implicit_loop_subject_depth: 0,
         subject_shorthand_depth: 0,
         source_nesting: 0,
@@ -135,6 +137,7 @@ pub(crate) fn checker_for_module<'a>(
         fx_authority_delegations: Vec::new(),
         fx_callback_obligations: Vec::new(),
         fx_autodiff_obligations: Vec::new(),
+        fx_shared_sites: Vec::new(),
         fx_compute_calls: Vec::new(),
         fx_autodiff_safe_panic: false,
         fx_autodiff_unsafe_panic: false,
@@ -195,6 +198,7 @@ pub(crate) fn checker_for_module<'a>(
         allow_string_view_read: false,
         lambda_escapes: true,
         in_lambda_body: false,
+        lambda_scope_floor: 0,
         inferred_lambda_mut_captures: HashSet::new(),
         lambda_params_are_lending_views: false,
         receiver_marks: HashMap::new(),
@@ -205,8 +209,11 @@ pub(crate) fn checker_for_module<'a>(
         failure_union_probe: None,
         failure_carrier_inference: false,
         failure_carrier: None,
+        failure_carrier_success: None,
         statement_expr_inference: false,
         http_handler_depth: 0,
+        http_routes: HashSet::new(),
+        http_mux_aliases: HashMap::new(),
         interrupt_callback_depth: 0,
         lambda_param_mutable: false,
         lambda_param_is_secret_loan: false,
@@ -400,10 +407,10 @@ pub(super) fn check_func_body(
     ck.unqualified_file = scoped_unqualified_file;
     ck.core_item_imports = scoped_core_item_imports;
     ck.inline_module = inline_module.map(str::to_owned);
-    // Canonicalize the declaration before the shared body checker projects
-    // the implicit failure carrier. This keeps alias-backed returns from
-    // becoming nested `Result<Result<...>, Err>` values in later seams.
-    ck.canonicalize_function_return_type(f);
+    // Publish canonical parameter and return types before body checking so
+    // later lowering reads the same nominal and builtin identities.
+    // Projecting the failure carrier afterwards also avoids nested Results.
+    ck.canonicalize_function_signature(f);
     ck.ret = crate::Sema::checked_body_return_type(f, raw_protocol_return);
     for (active, name, span) in [
         (f.is_pure, crate::Syntax::KW_PURE, f.name_span),
@@ -672,6 +679,7 @@ pub(super) fn check_func_body(
             authority_delegations: std::mem::take(&mut ck.fx_authority_delegations),
             callback_obligations: std::mem::take(&mut ck.fx_callback_obligations),
             autodiff_obligations: std::mem::take(&mut ck.fx_autodiff_obligations),
+            shared_sites: std::mem::take(&mut ck.fx_shared_sites),
             compute_calls: std::mem::take(&mut ck.fx_compute_calls),
             autodiff_safe_panic: ck.fx_autodiff_safe_panic,
             autodiff_unsafe_panic: ck.fx_autodiff_unsafe_panic,
@@ -857,6 +865,34 @@ pub(crate) fn fn_types_compatible(want: &Type, got: &Type) -> bool {
                         Type::Apply { name: got_name, .. },
                     ) => want_name == got_name,
                     (Type::Fn { .. }, Type::Fn { .. }) => fn_types_compatible(want, got),
+                    (Type::Shared(want), Type::Shared(got)) => carrier_compatible(want, got),
+                    (
+                        Type::Map { key: want_key, value: want_value, .. },
+                        Type::Map { key: got_key, value: got_value, .. },
+                    ) => carrier_compatible(want_key, got_key)
+                        && carrier_compatible(want_value, got_value),
+                    (
+                        Type::FixedList { elem: want, len: want_len, .. },
+                        Type::FixedList { elem: got, len: got_len, .. },
+                    ) => want_len == got_len && carrier_compatible(want, got),
+                    (Type::Tuple(want), Type::Tuple(got)) => {
+                        want.len() == got.len()
+                            && want.iter().zip(got).all(|((want_name, want), (got_name, got))| {
+                                want_name == got_name && carrier_compatible(want, got)
+                            })
+                    }
+                    (Type::Union(want), Type::Union(got)) => {
+                        want.len() == got.len()
+                            && want.iter().zip(got).all(|(want, got)| carrier_compatible(want, got))
+                    }
+                    (
+                        Type::Tagged { marker: want_marker, inner: want },
+                        Type::Tagged { marker: got_marker, inner: got },
+                    ) => want_marker == got_marker && carrier_compatible(want, got),
+                    (
+                        Type::Quantity { base: want, dimension: want_dimension },
+                        Type::Quantity { base: got, dimension: got_dimension },
+                    ) => want_dimension == got_dimension && carrier_compatible(want, got),
                     _ => want == got,
                 };
             }
@@ -1166,6 +1202,13 @@ pub(crate) fn collect_fixed_length_write_params(
             continue;
         }
         for (index, param) in function.params.iter().enumerate() {
+            // A `ViewMut<T>` parameter is a fixed-length window by type, so a
+            // range write window always fits it (D-MEMPROVENANCE2).
+            if matches!(param.ty.without_user_tags(), Type::Apply { name, args } if name == "ViewMut" && args.len() == 1)
+            {
+                proven.insert((name.clone(), index));
+                continue;
+            }
             if param.convention != crate::AST::AccessConvention::Write
                 || !matches!(param.ty, Type::List(_))
             {
@@ -1193,21 +1236,6 @@ pub(crate) fn collect_fixed_length_write_params(
         }
     }
 }
-
-/// Length-preserving list methods: a `&param.method()` call with one of these
-/// names edits elements in place and never changes the list's length.
-const LENGTH_PRESERVING_LIST_METHODS: &[&str] = &[
-    "sort",
-    "sort_desc",
-    "sort_by",
-    "sort_by_key",
-    "reverse",
-    "swap",
-    "fill",
-    "shuffle",
-    "rotate_left",
-    "rotate_right",
-];
 
 /// The onward `(callee, parameter index)` uses of list write parameter `param`
 /// in `body`, or `None` when the body may resize it: a write-marked method
@@ -1240,7 +1268,9 @@ fn write_list_param_onward_uses(body: &[Stmt], param: &str) -> Option<Vec<(Strin
                 if let Expr::Place(inner, crate::AST::PlaceAccess::Write, _) = receiver.as_ref() {
                     if is_param(inner, param) {
                         accounted += 1;
-                        if !LENGTH_PRESERVING_LIST_METHODS.contains(&method.as_str()) {
+                        if !jet_foundation::Collections::LENGTH_PRESERVING_LIST_METHODS
+                            .contains(&method.as_str())
+                        {
                             resizes = true;
                         }
                     }

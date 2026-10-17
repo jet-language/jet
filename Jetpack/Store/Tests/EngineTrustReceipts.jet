@@ -1,0 +1,111 @@
+// Exact tests/jetpack_engine.rs:718-1080 signed receipt tampering matrix.
+// Independent wire encoder ports the original receipt_text closure, not production encode.
+// PENDING-SEAM(package-tests): no runtime/reference proof claimed.
+fn engine_receipt_text(receipt: CacheReceipt) -> String {
+    "jet-cache-receipt-v1\nrole={receipt.role}\nwitness={receipt.witness}\nversion={receipt.version}\nissued={receipt.issued_unix}\nexpires={receipt.expires_unix}\nreference={receipt.provenance.reference}\nsource={receipt.provenance.source}\nbuilder={receipt.provenance.builder}\naction={receipt.provenance.action}\noutput={receipt.provenance.output}\nplatform={receipt.provenance.platform}\nsandbox={receipt.provenance.sandbox}\npolicy={receipt.provenance.policy}\nsignature_key={receipt.signature.key_id}\nsignature_algorithm={receipt.signature.algorithm}\nsignature={receipt.signature.sig_hex}\n"
+}
+fn engine_receipt_field(bytes: [U8], name: String) -> String {
+    text :: String.from_bytes(bytes) ?? panic("receipt UTF-8")
+    prefix :: "{name}="
+    loop line in text.lines() {
+        if line.starts_with(prefix) -> return line.removeprefix(prefix).copy()
+    }
+    panic("receipt field {name}")
+}
+#Test("binary_cache_trust_receipt_rejects_rollback_freeze_and_mix_and_match") {
+    root :: files.tmpdir("engine-cache-trust-root-") ?? panic("root")
+    source :: files.tmpdir("engine-cache-trust-source-") ?? panic("source")
+    dependency_source :: files.tmpdir("engine-cache-trust-dependency-") ?? panic("dependency")
+    mirror :: files.tmpdir("engine-cache-trust-mirror-") ?? panic("mirror")
+    files.write(files.join(source, "payload"), "trusted bytes\n") ?? panic("payload")
+    files.write(files.join(dependency_source, "payload"), "dependency bytes\n") ?? panic("dependency payload")
+    roots :: HangarRoots{root, dev_mode: false}
+    verification := StoreVerification.new()
+    dependency :: engine_cache_ingest(&verification, roots, "cache-trust-dependency", "./cache-trust-dependency", dependency_source, engine_cache_identity("cache-trust-dependency"), [String]{}, "cache trust dependency")
+    identity :: engine_cache_identity("cache-trust")
+    entry :: engine_cache_ingest(&verification, roots, "cache-trust-demo", "./cache-trust-demo", source, identity, [String]{dependency.envelope.output_hash}, "cache trust test")
+    no_closure_root :: files.tmpdir("engine-cache-trust-no-closure-") ?? panic("no closure")
+    no_closure_roots :: HangarRoots{root: no_closure_root, dev_mode: false}
+    no_closure :: engine_cache_ingest(&verification, no_closure_roots, "cache-trust-demo", "./cache-trust-demo", source, identity, [String]{}, "cache trust test")
+    with_action :: (ProducerRecord.decode(entry.producer_record) ?? panic("producer")).facts.get("cache.action") ?? panic("closure action")
+    without_action :: (ProducerRecord.decode(no_closure.producer_record) ?? panic("producer without closure")).facts.get("cache.action") ?? panic("no closure action")
+    assert(with_action != without_action)
+    store_bind_cache(roots, "public", [String]{mirror}, None, None, true) ?? panic("binding")
+    store_publish_cache_entry(&verification, roots, entry.id, "public") ?? panic("publish")
+    store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("verify")
+    nar :: files.join(mirror, "nar/{entry.envelope.output_hash}.nar")
+    info :: files.join(mirror, "{entry.envelope.output_hash}-{entry.id}.narinfo")
+    nar_bytes :: files.read_bytes(nar) ?? panic("nar")
+    info_bytes :: files.read_bytes(info) ?? panic("info")
+    key :: TrustKey.from_secret(files.read_bytes(files.join(root, "trust/cache-public.key")) ?? panic("key")) ?? panic("decode key")
+    receipt_path :: files.join(mirror, "trust/{entry.envelope.output_hash}-{entry.id}.receipt")
+    receipt_bytes :: files.read_bytes(receipt_path) ?? panic("receipt bytes")
+    provenance :: CacheProvenance{reference: engine_receipt_field(receipt_bytes, "reference"), source: engine_receipt_field(receipt_bytes, "source"), builder: engine_receipt_field(receipt_bytes, "builder"), action: engine_receipt_field(receipt_bytes, "action"), output: engine_receipt_field(receipt_bytes, "output"), platform: engine_receipt_field(receipt_bytes, "platform"), sandbox: engine_receipt_field(receipt_bytes, "sandbox"), policy: engine_receipt_field(receipt_bytes, "policy")}
+    now :: time.unix_ns() /% 1000000000
+    wrong_closure := provenance
+    wrong_closure.action = without_action
+    closure_receipt :: CacheReceipt.issue("public", wrong_closure, 2, (now - 1).max(0), now + 600, key) ?? panic("wrong closure receipt")
+    files.write(receipt_path, engine_receipt_text(closure_receipt)) ?? panic("wrong closure")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("mix-and-match"))
+    files.write_bytes(receipt_path, receipt_bytes) ?? panic("restore receipt")
+    receipt_text :: String.from_bytes(receipt_bytes) ?? panic("receipt text")
+    tampered :: receipt_text.replace("signature={engine_receipt_field(receipt_bytes, "signature")}", "signature=00")
+    files.write(receipt_path, tampered) ?? panic("tampered signature")
+    compromised :: engine_cache_verify_error(&verification, roots, entry.id)
+    assert(compromised.contains("signature"))
+    assert(compromised.contains("discard"))
+    files.write_bytes(receipt_path, receipt_bytes) ?? panic("restore receipt")
+    files.remove(receipt_path) ?? panic("remove receipt")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("no signed trust receipt"))
+    files.write_bytes(receipt_path, receipt_bytes) ?? panic("restore receipt")
+    v2 :: CacheReceipt.issue("public", provenance, 2, (now - 1).max(0), now + 600, key) ?? panic("v2")
+    files.write(receipt_path, engine_receipt_text(v2)) ?? panic("v2 write")
+    store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("v2 verify")
+    witness :: if engine_receipt_field(receipt_bytes, "witness") == "stranger" -> "other-stranger" else -> "stranger"
+    untrusted :: CacheReceipt.issue_with_witness("public", witness, provenance, 3, (now - 1).max(0), now + 600, key) ?? panic("untrusted witness")
+    files.write(receipt_path, engine_receipt_text(untrusted)) ?? panic("untrusted write")
+    witness_error :: engine_cache_verify_error(&verification, roots, entry.id)
+    assert(witness_error.contains(witness))
+    assert(witness_error.contains("trust policy 'cache-witnesses/public.allow'"))
+    files.write(receipt_path, engine_receipt_text(v2)) ?? panic("restore v2")
+    store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("restore verify")
+    v3 :: CacheReceipt.issue("public", provenance, 3, (now - 1).max(0), now + 600, key) ?? panic("v3")
+    files.write(receipt_path, engine_receipt_text(v3)) ?? panic("v3 write")
+    wrong_source :: files.tmpdir("engine-cache-trust-wrong-payload-") ?? panic("wrong source")
+    files.write(files.join(wrong_source, "payload"), "wrong trusted bytes\n") ?? panic("wrong payload")
+    wrong_nar :: store_write_nar(wrong_source) ?? panic("wrong nar")
+    wrong_info := NarInfo.parse(String.from_bytes(info_bytes) ?? panic("info text")) ?? panic("wrong info")
+    wrong_info.file_size = wrong_nar.stats.bytes
+    wrong_info.nar_size = wrong_nar.stats.bytes
+    wrong_info.nar_hash = wrong_nar.stats.digest
+    files.write_bytes(nar, wrong_nar.bytes) ?? panic("wrong nar write")
+    files.write(info, (wrong_info.signed(key) ?? panic("wrong info signature")).to_text() ?? panic("wrong info text")) ?? panic("wrong info write")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("output identity"))
+    files.write_bytes(nar, nar_bytes) ?? panic("restore nar")
+    files.write_bytes(info, info_bytes) ?? panic("restore info")
+    files.write(receipt_path, engine_receipt_text(v2)) ?? panic("restore v2")
+    store_verify_cache_transfer(&verification, roots, entry.id, "public") ?? panic("failed payload did not consume pin")
+    same_version :: CacheReceipt.issue("public", provenance, 2, (now - 2).max(0), now + 601, key) ?? panic("same version")
+    files.write(receipt_path, engine_receipt_text(same_version)) ?? panic("same version write")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("same version"))
+    v1 :: CacheReceipt.issue("public", provenance, 1, (now - 1).max(0), now + 600, key) ?? panic("v1")
+    files.write(receipt_path, engine_receipt_text(v1)) ?? panic("v1 write")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("rollback"))
+    frozen :: CacheReceipt.issue("public", provenance, 3, (now - 20).max(0), (now - 1).max(0), key) ?? panic("frozen")
+    files.write(receipt_path, engine_receipt_text(frozen)) ?? panic("frozen write")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("expired"))
+    engine_cache_substitute_rejected(&verification, roots, entry.id, files.join(root, "frozen-destination/out"))
+    mixed := provenance
+    mixed.output = "sha256:another-output"
+    mixed_receipt :: CacheReceipt.issue("public", mixed, 4, (now - 1).max(0), now + 600, key) ?? panic("mixed receipt")
+    files.write(receipt_path, engine_receipt_text(mixed_receipt)) ?? panic("mixed receipt write")
+    assert(engine_cache_verify_error(&verification, roots, entry.id).contains("mix-and-match"))
+    store_make_tree_writable_for_removal(root).drop("cleanup")
+    store_make_tree_writable_for_removal(no_closure_root).drop("cleanup")
+    files.remove_all(root).drop("cleanup")
+    files.remove_all(no_closure_root).drop("cleanup")
+    files.remove_all(source).drop("cleanup")
+    files.remove_all(dependency_source).drop("cleanup")
+    files.remove_all(mirror).drop("cleanup")
+    files.remove_all(wrong_source).drop("cleanup")
+}

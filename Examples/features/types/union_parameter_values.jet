@@ -1,0 +1,34 @@
+// Union injection preserves both the payload and a read argument's ownership.
+struct Circle {
+    r: Float
+}
+
+struct Square {
+    s: Float
+}
+
+fn area(shape: Circle | Square) -> Float {
+    if shape == {
+        .Circle(c) -> 3.0 * c.r * c.r
+        .Square(q) -> q.s * q.s
+    }
+}
+
+fn circle(radius: Float) -> Circle { Circle{r: radius} }
+
+struct Shapes {
+    circle: Circle
+}
+
+fn run() {
+    print(area(Circle{r: 1.0}))  // 3 * 1 * 1 = 3
+    one :: Circle{r: 2.0}
+    print(area(one))  // 12
+    print(area(one))  // 12: a Read call must not move `one`
+    print(one.r)  // 2
+    print(area(Square{s: 3.0}))  // 9: the other variant's temporary
+    print(area(circle(3.0)))  // 27: a function-returned aggregate
+    shapes :: Shapes{circle: Circle{r: 4.0}}
+    print(area(shapes.circle))  // 48: a projected aggregate
+    print(area(shapes.circle))  // 48: the projection also remains readable
+}

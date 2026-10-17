@@ -1,0 +1,45 @@
+// Fixed-size float reductions: the optimizer rewrites a reduction over a
+// `[Float#N]` (2..16 lanes) into an adjacent-pairs-then-root tree and must
+// refresh its loop facts after the rewrite. Every value is exactly
+// representable, so any summation order prints the same total.
+fn sum4(xs: [Float#4]) -> Float {
+    total := Float{0.0}
+    loop x in xs -> total += x
+    return total
+}
+
+fn sum8(xs: [Float#8]) -> Float {
+    total := Float{0.0}
+    loop x in xs -> total += x
+    return total
+}
+
+fn sum16(xs: [Float#16]) -> Float {
+    total := Float{0.0}
+    loop x in xs -> total += x
+    return total
+}
+
+fn positive4(xs: [Float#4]) -> Float {
+    zero :: Float{0.0}
+    total := zero
+    loop x in xs {
+        if x > zero -> total += x
+    }
+    return total
+}
+
+fn run() {
+    pair :: [Float#2]{1.5, 2.5}
+    pair_total := Float{0.0}
+    loop x in pair -> pair_total += x
+    print("pair {pair_total}")
+    print("four {sum4([Float#4]{1.0, 2.0, 3.0, 4.0})}")
+    print("eight {sum8([Float#8]{0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5})}")
+    print("sixteen {sum16([Float#16]{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0})}")
+    print("positive {positive4([Float#4]{-1.0, 2.0, -3.0, 4.0})}")
+    // The same reduction called repeatedly: each call sees fresh facts.
+    running := Float{0.0}
+    loop i in 0..<3 -> running += sum4([Float#4]{0.25, 0.25, 0.25, 0.25})
+    print("running {running}")
+}

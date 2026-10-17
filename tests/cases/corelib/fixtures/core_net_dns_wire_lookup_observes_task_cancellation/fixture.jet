@@ -1,0 +1,25 @@
+use core.net as net
+use core.files as files
+use core.process as process
+use core.sys as sys
+
+fn fixture_build(address: String) {
+    original :: files.read("guest.template") ?? panic("read original guest")
+    source :: original.replace("@ADDR@", address)
+    files.write("guest.jet", source) ?? panic("write guest")
+    jet :: sys.get("JET_BIN") ?? panic("JET_BIN missing")
+    build :: process.cmd([jet, "build", "guest.jet"]).stdout(.Capture).stderr(.Capture).run() ?? panic("build guest")
+    assert(build.code == 0, "original guest compilation must succeed")
+}
+fn fixture_run() -> ProcessReceipt {
+    process.cmd([".jet/build/guest"]).stdout(.Capture).stderr(.Capture).run() ?? panic("run original guest")
+}
+#Test("core_net_dns_wire_lookup_observes_task_cancellation") {
+    socket :: net.udp_bind("127.0.0.1:0") ?? panic("bind UDP")
+    address :: net.socket_to_string(net.udp_local_addr(socket) ?? panic("UDP address"))
+    fixture_build(address)
+    observed :: fixture_run()
+    net.udp_close(socket) ?? panic("drop socket")
+    assert(observed.code == 0, "guest exit")
+    assert(observed.output == "network operation cancelled during DNS lookup for `service.example.test`\n", "original typed cancellation")
+}

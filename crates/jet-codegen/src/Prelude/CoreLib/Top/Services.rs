@@ -941,6 +941,11 @@ struct JetWorkflowHandle {
     state: std::sync::Arc<std::sync::Mutex<JetServiceWorkflow>>,
 }
 
+// Exact aliases of the existing fields at lines 970-971, not new carriers.
+// Required by the existing root-prefixed type-name mapper; dies at cutover.
+type JetServiceTreeTaskGroup = std::sync::Arc<JetTaskGroupRuntime<JetServiceSupervisorTask>>;
+type JetServiceTreeSupervisorState = std::sync::Arc<std::sync::Mutex<JetServiceSupervisorState>>;
+
 #[derive(Clone, Debug)]
 struct JetServiceTree {
     name: String,
@@ -1319,16 +1324,34 @@ fn jet_services_tree(name: String) -> JetServiceTree {
     }
 }
 
-pub fn jet_services_state_store(path: String) -> Result<JetServiceStateStore, JetServiceError> {
-    service_authority_validate_text(
-        &path,
-        "service state store",
-        MAX_SERVICE_STATE_STORE,
-        false,
-    )?;
-    jet_services_state_validate_path(std::path::Path::new(&path))?;
-    Ok(JetServiceStateStore { path })
+fn jet_services_raw_tree_task_group_new() -> JetServiceTreeTaskGroup {
+    std::sync::Arc::new(JetTaskGroupRuntime::new())
 }
+
+// Allocation/materialization only. Every field value, including empty stores
+// and absent records, is supplied by Core/service/service.jet::tree in the
+// original initializer order. No policy check or default is chosen here.
+fn jet_services_raw_tree_allocate(
+    authority: String, name: String, generation: i64, delivery: JetServiceDelivery,
+    restart: JetServiceRestart, budget: (i64, i64),
+    workers: Vec<JetServiceWorker>, groups: Vec<JetServiceGroup>, started: bool,
+    state_adapter: JetServiceStateAdapter, state_authority: Option<JetServiceStateAuthority>,
+    snapshot: Option<String>, event_log: Vec<String>, dead_letters: Vec<String>,
+    idempotency_seen: Vec<(String, JetServiceEndpoint, String)>,
+    directory: Vec<(String, JetServiceEndpoint, String)>,
+    draining: Vec<String>, partitioned: Vec<String>, workflows: Vec<JetServiceWorkflow>,
+    task_group: JetServiceTreeTaskGroup, supervisor_tasks: Vec<JetServiceTreeSupervisorState>,
+    chaos_fails: i64, previous_generation: i64, last_upgrade: Option<JetServiceUpgradeReceipt>,
+) -> JetServiceTree {
+    JetServiceTree {
+        authority, name, generation, delivery, restart,
+        restart_budget: JetServiceRestartBudget { max: budget.0, per_ms: budget.1 },
+        workers, groups, started, state_adapter, state_authority, snapshot, event_log,
+        dead_letters, idempotency_seen, directory, draining, partitioned, workflows,
+        task_group, supervisor_tasks, chaos_fails, previous_generation, last_upgrade,
+    }
+}
+
 
 fn jet_services_state_authority(
     store: &JetServiceStateStore,
@@ -1421,25 +1444,6 @@ fn jet_services_attach_state_authority(
     Ok(JetServiceStateAuthority { adapter, ..checked })
 }
 
-fn jet_services_restart_one_for_one() -> JetServiceRestart {
-    JetServiceRestart::OneForOne
-}
-
-fn jet_services_restart_one_for_all() -> JetServiceRestart {
-    JetServiceRestart::OneForAll
-}
-
-fn jet_services_restart_rest_for_one() -> JetServiceRestart {
-    JetServiceRestart::RestForOne
-}
-
-fn jet_services_delivery_at_most_once() -> JetServiceDelivery {
-    JetServiceDelivery::AtMostOnce
-}
-
-fn jet_services_delivery_durable() -> JetServiceDelivery {
-    JetServiceDelivery::DurableAtLeastOnce
-}
 
 fn jet_services_set_restart(
     tree: &mut JetServiceTree,
@@ -3242,8 +3246,221 @@ fn jet_services_send_durable(
     }
 }
 
-fn jet_services_dead_letter_count(tree: &JetServiceTree) -> i64 {
+fn jet_services_raw_tree_dead_letter_count(tree: &JetServiceTree) -> i64 {
     tree.dead_letters.len() as i64
+}
+
+// Existing service field operations used by the Jet policy implementation.
+// No validation belongs in these leaves; the exclusive ServiceTree borrow
+// covers the source-side validation/order and every write below.
+fn jet_services_raw_tree_started(tree: &JetServiceTree) -> bool { tree.started }
+fn jet_services_raw_tree_has_snapshot(tree: &JetServiceTree) -> bool { tree.snapshot.is_some() }
+fn jet_services_raw_tree_group_count(tree: &JetServiceTree) -> i64 { tree.groups.len() as i64 }
+fn jet_services_raw_tree_write_delivery(tree: &mut JetServiceTree, value: JetServiceDelivery) {
+    tree.delivery = value;
+}
+fn jet_services_raw_tree_write_restart(tree: &mut JetServiceTree, value: JetServiceRestart) {
+    tree.restart = value;
+}
+fn jet_services_raw_group_write_restart(tree: &mut JetServiceTree, index: i64) {
+    tree.groups[index as usize].restart = tree.restart.clone();
+}
+fn jet_services_raw_tree_clear_dead_letters(tree: &mut JetServiceTree) { tree.dead_letters.clear(); }
+fn jet_services_raw_tree_write_empty_adapter(tree: &mut JetServiceTree) {
+    tree.state_adapter = JetServiceStateAdapter::Empty;
+}
+fn jet_services_raw_tree_clear_state_authority(tree: &mut JetServiceTree) { tree.state_authority = None; }
+fn jet_services_raw_endpoint_parts(endpoint: &JetServiceEndpoint) -> (String, String, jet_foundation::Numeric::JetInt) {
+    (endpoint.tree.clone(), endpoint.worker.clone(), jet_std::jet_int_owned_from_i64(endpoint.generation))
+}
+
+fn jet_services_raw_tree_write_state_adapter(tree: &mut JetServiceTree, event_log: bool) {
+    tree.state_adapter = if event_log { JetServiceStateAdapter::EventLog } else { JetServiceStateAdapter::Snapshot };
+}
+fn jet_services_raw_tree_write_state_authority(
+    tree: &mut JetServiceTree, store: String, schema: String, version: i64, migration: String, event_log: bool,
+) {
+    tree.state_authority = Some(JetServiceStateAuthority { store, schema, version, migration,
+        adapter: if event_log { JetServiceStateAdapter::EventLog } else { JetServiceStateAdapter::Snapshot } });
+}
+fn jet_services_raw_tree_state_authority(tree: &JetServiceTree)
+    -> Option<(String, String, jet_foundation::Numeric::JetInt, String)>
+{
+    tree.state_authority.as_ref().map(|authority| (authority.store.clone(), authority.schema.clone(),
+        jet_std::jet_int_owned_from_i64(authority.version), authority.migration.clone()))
+}
+fn jet_services_raw_state_load(tree: &JetServiceTree, event_log: bool) -> Result<Vec<String>, JetServiceError> {
+    let authority = tree.state_authority.as_ref().expect("checked source state authority");
+    let adapter = if event_log { JetServiceStateAdapter::EventLog } else { JetServiceStateAdapter::Snapshot };
+    jet_services_state_store_load(authority, &adapter)
+}
+fn jet_services_raw_tree_event_records(tree: &JetServiceTree) -> Vec<String> { tree.event_log.clone() }
+
+fn jet_services_raw_tree_state_adapter(tree: &JetServiceTree) -> JetServiceStateAdapter { tree.state_adapter.clone() }
+fn jet_services_raw_tree_chaos_count(tree: &JetServiceTree) -> i64 { tree.chaos_fails }
+fn jet_services_raw_tree_write_chaos_count(tree: &mut JetServiceTree, count: i64) { tree.chaos_fails = count; }
+fn jet_services_raw_first_running_endpoint(tree: &JetServiceTree) -> Option<JetServiceEndpoint> {
+    tree.workers.iter().find(|worker| worker.running).map(|worker| worker.endpoint.clone())
+}
+fn jet_services_raw_group_parts(tree: &JetServiceTree) -> (Vec<String>, Vec<(String, Vec<String>)>) {
+    (tree.workers.iter().map(|worker| worker.name.clone()).collect(),
+        tree.groups.iter().map(|group| (group.name.clone(), group.workers.clone())).collect())
+}
+fn jet_services_raw_group_reparent(tree: &mut JetServiceTree, name: &String, worker_name: &String) -> Result<(), JetServiceError> {
+    let worker = tree.workers.iter().find(|worker| &worker.name == worker_name).expect("source checked group member");
+    jet_services_reparent_topology(&worker.task, Some(jet_services_topology_group_id(&tree.name, name)))
+}
+fn jet_services_raw_group_push(tree: &mut JetServiceTree, name: String, workers: Vec<String>) {
+    tree.groups.push(JetServiceGroup { name, workers, restart: tree.restart.clone(), budget: tree.restart_budget.clone() });
+}
+fn jet_services_raw_event_store_append(tree: &JetServiceTree, record: &String) -> Result<(), JetServiceError> {
+    jet_services_state_store_append(tree.state_authority.as_ref().expect("source checked event authority"), record)
+}
+fn jet_services_raw_tree_event_push(tree: &mut JetServiceTree, record: String) { tree.event_log.push(record); }
+fn jet_services_raw_snapshot_store_write(tree: &mut JetServiceTree, record: String) -> Result<(), JetServiceError> {
+    let authority = tree.state_authority.as_ref().expect("source checked snapshot authority");
+    let _guard = service_authority_lock().lock()
+        .map_err(|_| jet_services_state_error("service state lock is poisoned"))?;
+    jet_services_state_store_write(authority, &JetServiceStateAdapter::Snapshot, &[record.clone()])?;
+    tree.snapshot = Some(record);
+    Ok(())
+}
+fn jet_services_raw_tree_route_parts(tree: &JetServiceTree) -> (
+    String, String, jet_foundation::Numeric::JetInt,
+    Option<(jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, Vec<String>)>, Vec<String>,
+) {
+    (tree.authority.clone(), tree.name.clone(), jet_std::jet_int_owned_from_i64(tree.generation),
+        tree.last_upgrade.as_ref().map(|receipt| (
+            jet_std::jet_int_owned_from_i64(receipt.from_generation),
+            jet_std::jet_int_owned_from_i64(receipt.to_generation), receipt.pinned_shards.clone())),
+        tree.draining.clone())
+}
+fn jet_services_raw_directory_entry(tree: &JetServiceTree, name: &String) -> Option<(String, JetServiceEndpoint, String)> {
+    tree.directory.iter().find(|(entry, _, _)| entry == name).cloned()
+}
+fn jet_services_raw_worker_route(tree: &JetServiceTree, endpoint: &JetServiceEndpoint) -> Option<(
+    jet_foundation::Numeric::JetInt, String, bool, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt,
+)> {
+    tree.workers.iter().enumerate().find(|(_, worker)| worker.name == endpoint.worker
+        && worker.endpoint.tree == endpoint.tree && worker.endpoint.authority == endpoint.authority
+        && worker.endpoint.generation == endpoint.generation)
+        .map(|(index, worker)| (jet_std::jet_int_owned_from_i64(index as i64), worker.name.clone(), worker.running,
+            jet_std::jet_int_owned_from_i64(worker.mailbox.capacity), jet_std::jet_int_owned_from_i64(worker.mailbox.channel.depth() as i64)))
+}
+fn jet_services_raw_worker_sent_account(tree: &mut JetServiceTree, index: i64, message_bytes: i64) {
+    let worker = &mut tree.workers[index as usize];
+    worker.received_bytes = worker.received_bytes.saturating_add(message_bytes as u64);
+    if let Ok(mut state) = worker.task.lock() {
+        state.status = JetServiceSupervisorStatus::Running;
+        state.topology_wait_target = None;
+        let snapshot = state.clone();
+        drop(state);
+        jet_services_topology_publish_state(&snapshot);
+    }
+}
+fn jet_services_raw_tree_delivery(tree: &JetServiceTree) -> JetServiceDelivery { tree.delivery.clone() }
+fn jet_services_raw_mailbox_snapshot(tree: &JetServiceTree, index: i64) -> Vec<String> {
+    tree.workers[index as usize].mailbox.channel.snapshot()
+}
+fn jet_services_raw_idempotency_records(tree: &JetServiceTree) -> Vec<(String, JetServiceEndpoint, String)> {
+    tree.idempotency_seen.clone()
+}
+fn jet_services_raw_worker_named_index(tree: &JetServiceTree, name: &String) -> Option<jet_foundation::Numeric::JetInt> {
+    tree.workers.iter().position(|worker| &worker.name == name).map(|index| jet_std::jet_int_owned_from_i64(index as i64))
+}
+fn jet_services_raw_delivery_allocate(id: String, store: String, duplicate: bool, authority: String, generation: i64) -> JetDelivery {
+    JetDelivery { id, store, duplicate, authority, generation }
+}
+fn jet_services_raw_delivery_identity(delivery: &JetDelivery) -> (String, String, bool, String, jet_foundation::Numeric::JetInt) {
+    (delivery.id.clone(), delivery.store.clone(), delivery.duplicate, delivery.authority.clone(),
+        jet_std::jet_int_owned_from_i64(delivery.generation))
+}
+fn jet_services_raw_mailbox_restore(tree: &mut JetServiceTree, index: i64, messages: Vec<String>, draining: bool) -> Result<(), JetServiceError> {
+    jet_services_restore_mailbox(&mut tree.workers[index as usize], messages, draining)
+}
+fn jet_services_raw_dead_letter_push(tree: &mut JetServiceTree, id: String) { tree.dead_letters.push(id); }
+fn jet_services_raw_idempotency_push(tree: &mut JetServiceTree, key: String, endpoint: &JetServiceEndpoint, message: String) {
+    tree.idempotency_seen.push((key, endpoint.clone(), message));
+}
+fn jet_services_raw_mailbox_try_send(tree: &mut JetServiceTree, index: i64, message: &String) -> i64 {
+    match tree.workers[index as usize].mailbox.channel.try_send(message.clone()) {
+        Ok(()) => 0,
+        Err(JetServiceChannelError::Full(_)) => 1,
+        Err(JetServiceChannelError::Closed) => 2,
+        Err(JetServiceChannelError::Empty) => 3,
+    }
+}
+fn jet_services_raw_mailbox_try_receive(tree: &mut JetServiceTree, index: i64) -> (Option<String>, jet_foundation::Numeric::JetInt) {
+    let (message, status) = match tree.workers[index as usize].mailbox.channel.try_recv() {
+        Ok(message) => (Some(message), 0),
+        Err(JetServiceChannelError::Empty) => (None, 1),
+        Err(JetServiceChannelError::Closed) => (None, 2),
+        Err(JetServiceChannelError::Full(_)) => (None, 3),
+    };
+    (message, jet_std::jet_int_owned_from_i64(status))
+}
+fn jet_services_raw_worker_wait_notify(tree: &mut JetServiceTree, index: i64, endpoint: &JetServiceEndpoint) {
+    let worker = &mut tree.workers[index as usize];
+    let wait_target = jet_services_topology_endpoint_id(&endpoint.tree, &endpoint.worker);
+    if let Ok(mut state) = worker.task.lock() {
+        state.status = JetServiceSupervisorStatus::Running;
+        state.topology_wait_target = Some(wait_target);
+        let snapshot = state.clone();
+        drop(state);
+        jet_services_topology_publish_state(&snapshot);
+    }
+}
+fn jet_services_raw_worker_receive_account(tree: &mut JetServiceTree, index: i64, message_bytes: i64) -> bool {
+    let worker = &mut tree.workers[index as usize];
+    worker.sent_bytes = worker.sent_bytes.saturating_add(message_bytes as u64);
+    let snapshot = if let Ok(mut state) = worker.task.lock() {
+        state.status = JetServiceSupervisorStatus::Running;
+        state.topology_wait_target = None;
+        Some(state.clone())
+    } else { None };
+    let empty = worker.mailbox.channel.depth() == 0;
+    if let Some(snapshot) = snapshot.as_ref() { jet_services_topology_publish_state(snapshot); }
+    empty
+}
+fn jet_services_raw_tree_upgrade_receipt(tree: &JetServiceTree) -> Option<JetServiceUpgradeReceipt> { tree.last_upgrade.clone() }
+fn jet_services_raw_upgrade_receipt_parts(receipt: &JetServiceUpgradeReceipt)
+    -> (jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, String, bool, Vec<String>)
+{
+    (jet_std::jet_int_owned_from_i64(receipt.from_generation), jet_std::jet_int_owned_from_i64(receipt.to_generation),
+        receipt.migration.clone(), receipt.rollback_available, receipt.pinned_shards.clone())
+}
+fn jet_services_raw_tree_display_parts(tree: &JetServiceTree)
+    -> (String, jet_foundation::Numeric::JetInt, Vec<(String, String)>, bool, JetServiceRestart,
+        jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, JetServiceDelivery)
+{
+    (tree.name.clone(), jet_std::jet_int_owned_from_i64(tree.workers.len() as i64),
+        tree.workers.iter().map(|worker| (worker.name.clone(), worker.handler_name.clone())).collect(),
+        tree.started, tree.restart.clone(), jet_std::jet_int_owned_from_i64(tree.restart_budget.max),
+        jet_std::jet_int_owned_from_i64(tree.restart_budget.per_ms), tree.delivery.clone())
+}
+fn jet_services_raw_workflow_replay_parts(tree: &JetServiceTree)
+    -> Result<Vec<(jet_foundation::Numeric::JetInt, Vec<String>, Option<JetTaskOutcome>)>, JetServiceError>
+{
+    Ok(jet_services_workflow_replay(&jet_services_workflow_authority(tree)?)?.into_iter()
+        .map(|workflow| (jet_std::jet_int_owned_from_i64(workflow.run_id), workflow.history, workflow.outcome)).collect())
+}
+fn jet_services_raw_tree_observation_parts(tree: &JetServiceTree)
+    -> (jet_foundation::Numeric::JetInt, bool, jet_foundation::Numeric::JetInt,
+        jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt,
+        jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt, bool,
+        Vec<(jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)>)
+{
+    let workflows = tree.workflows.iter().map(|workflow| {
+        let status = match workflow.status { JetTaskStatus::Running => 0, JetTaskStatus::Paused => 1, JetTaskStatus::CancelRequested => 2 };
+        let outcome = match &workflow.outcome { None => -1, Some(JetTaskOutcome::Finished) => 0,
+            Some(JetTaskOutcome::Panicked(_)) => 1, Some(JetTaskOutcome::Cancelled) => 2, Some(JetTaskOutcome::DeadlineBlown) => 3 };
+        (jet_std::jet_int_owned_from_i64(status), jet_std::jet_int_owned_from_i64(outcome))
+    }).collect();
+    (jet_std::jet_int_owned_from_i64(tree.workers.len() as i64), tree.started, jet_std::jet_int_owned_from_i64(tree.generation),
+        jet_std::jet_int_owned_from_i64(tree.dead_letters.len() as i64), jet_std::jet_int_owned_from_i64(tree.event_log.len() as i64),
+        jet_std::jet_int_owned_from_i64(tree.chaos_fails), jet_std::jet_int_owned_from_i64(tree.draining.len() as i64),
+        jet_std::jet_int_owned_from_i64(tree.partitioned.len() as i64),
+        tree.last_upgrade.as_ref().is_some_and(|receipt| receipt.rollback_available), workflows)
 }
 
 fn jet_services_drain_dead_letters(tree: &mut JetServiceTree) -> Result<i64, JetServiceError> {
@@ -4515,7 +4732,7 @@ fn jet_services_append_event(
     Ok(())
 }
 
-fn jet_services_event_count(tree: &JetServiceTree) -> i64 {
+fn jet_services_raw_tree_event_count(tree: &JetServiceTree) -> i64 {
     tree.event_log.len() as i64
 }
 
@@ -5990,7 +6207,7 @@ fn jet_services_directory_register(
 
 fn jet_services_directory_resolve(
     tree: &JetServiceTree,
-    name: &String,
+    name: &str,
 ) -> Result<JetServiceEndpoint, JetServiceError> {
     let Some((entry, endpoint, signature)) = tree
         .directory
@@ -6052,7 +6269,7 @@ fn jet_services_directory_signature(
     service_authority_sign_directory(&tree.authority, &tree.name, name, endpoint)
 }
 
-fn jet_services_directory_generation(tree: &JetServiceTree) -> i64 {
+fn jet_services_raw_tree_generation(tree: &JetServiceTree) -> i64 {
     tree.generation
 }
 
@@ -7021,3 +7238,110 @@ fn jet_services_observe(tree: &JetServiceTree) -> String {
         jet_services_workflow_observation(&tree.workflows)
     )
 }
+
+// Mechanical access to the existing exclusively borrowed workflow carrier.
+// Validation, lookup, replay and cursor policy are owned by core.service Jet.
+fn jet_services_raw_workflow_count(tree: &JetServiceTree) -> i64 { tree.workflows.len() as i64 }
+fn jet_services_raw_workflow_id_at(tree: &JetServiceTree, index: i64) -> String { tree.workflows[index as usize].id.clone() }
+fn jet_services_raw_workflow_version_at(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].version }
+fn jet_services_raw_workflow_run_at(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].run_id }
+fn jet_services_raw_workflow_status_at(tree: &JetServiceTree, index: i64) -> JetTaskStatus { tree.workflows[index as usize].status.clone() }
+fn jet_services_raw_workflow_outcome_at(tree: &JetServiceTree, index: i64) -> Option<JetTaskOutcome> { tree.workflows[index as usize].outcome.clone() }
+fn jet_services_raw_workflow_cursor_at(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].replay_cursor as i64 }
+fn jet_services_raw_workflow_history_len(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].history.len() as i64 }
+fn jet_services_raw_workflow_steps_len(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].steps.len() as i64 }
+fn jet_services_raw_workflow_event_at(tree: &JetServiceTree, index: i64, cursor: i64) -> Option<String> { tree.workflows[index as usize].history.get(cursor as usize).cloned() }
+fn jet_services_raw_workflow_step_at(tree: &JetServiceTree, index: i64, step: i64) -> String { tree.workflows[index as usize].steps[step as usize].clone() }
+fn jet_services_raw_workflow_activity_count(tree: &JetServiceTree, index: i64) -> i64 { tree.workflows[index as usize].activity_outcomes.len() as i64 }
+fn jet_services_raw_workflow_activity_key_at(tree: &JetServiceTree, index: i64, pair: i64) -> String { tree.workflows[index as usize].activity_outcomes[pair as usize].0.clone() }
+fn jet_services_raw_workflow_activity_outcome_at(tree: &JetServiceTree, index: i64, pair: i64) -> JetTaskOutcome { tree.workflows[index as usize].activity_outcomes[pair as usize].1.clone() }
+fn jet_services_raw_workflow_set_cursor(tree: &mut JetServiceTree, index: i64, cursor: i64) { tree.workflows[index as usize].replay_cursor = cursor as usize; }
+
+// Mechanical source-policy transports; all die at the Jet-runtime cutover.
+// No restart selection, validation, budget test, rollback or error remap here.
+fn jet_services_raw_worker_tree_parts(tree: &JetServiceTree) -> (
+    Vec<(JetServiceEndpoint, Vec<i64>, JetServiceTreeSupervisorState)>,
+    Vec<(JetServiceRestart, jet_foundation::Numeric::JetInt, jet_foundation::Numeric::JetInt)>,
+    Vec<JetServiceTreeSupervisorState>,
+    Vec<String>,
+) {
+    (
+        tree.workers.iter().map(|worker| (
+            worker.endpoint.clone(), worker.restarts.clone(), worker.task.clone(),
+        )).collect(),
+        tree.groups.iter().map(|group| (
+            group.restart.clone(), jet_std::jet_int_owned_from_i64(group.budget.max),
+            jet_std::jet_int_owned_from_i64(group.budget.per_ms),
+        )).collect(),
+        tree.supervisor_tasks.clone(),
+        tree.partitioned.clone(),
+    )
+}
+
+fn jet_services_raw_tree_write_authority(tree: &mut JetServiceTree, authority: String) {
+    tree.authority = authority;
+}
+
+fn jet_services_raw_worker_task_new(status: JetServiceSupervisorStatus) -> JetServiceTreeSupervisorState {
+    std::sync::Arc::new(std::sync::Mutex::new(JetServiceSupervisorState::new(status)))
+}
+
+fn jet_services_raw_worker_push(
+    tree: &mut JetServiceTree,
+    name: String,
+    handler: JetServiceWorkerHandler,
+    handler_name: String,
+    endpoint: JetServiceEndpoint,
+    mailbox: JetServiceMailbox,
+    restarts: Vec<i64>,
+    running: bool,
+    received_bytes: u64,
+    sent_bytes: u64,
+    task: JetServiceTreeSupervisorState,
+) {
+    tree.workers.push(JetServiceWorker {
+        name, handler_name, handler, endpoint, mailbox, restarts, running,
+        received_bytes, sent_bytes, task,
+    });
+}
+
+fn jet_services_raw_worker_write_restarts(tree: &mut JetServiceTree, index: i64, restarts: Vec<i64>) {
+    tree.workers[index as usize].restarts = restarts;
+}
+
+fn jet_services_raw_worker_write_running(tree: &mut JetServiceTree, index: i64, running: bool) {
+    tree.workers[index as usize].running = running;
+}
+
+fn jet_services_raw_tree_write_started(tree: &mut JetServiceTree, started: bool) {
+    tree.started = started;
+}
+
+fn jet_services_raw_worker_write_mailbox(tree: &mut JetServiceTree, index: i64, mailbox: JetServiceMailbox) {
+    tree.workers[index as usize].mailbox = mailbox;
+}
+
+fn jet_services_raw_mailbox_close(tree: &JetServiceTree, index: i64) {
+    tree.workers[index as usize].mailbox.channel.close();
+}
+
+fn jet_services_raw_worker_mailbox_depth(tree: &JetServiceTree, index: i64) -> i64 {
+    tree.workers[index as usize].mailbox.channel.depth() as i64
+}
+
+// Services3070-3073 holds exactly this one Mutex across these two writes.
+// Poison is ignored there, so this leaf preserves that same host outcome.
+fn jet_services_raw_task_write_partition(
+    task: &JetServiceTreeSupervisorState,
+    status: JetServiceSupervisorStatus,
+    failure: JetTaskFailure,
+) {
+    if let Ok(mut state) = task.lock() {
+        state.status = status;
+        state.failure = Some(failure);
+    }
+}
+
+// A type-name binding only: lets both emitters qualify the existing Arc as
+// one root symbol without incorrectly qualifying `std` or its inner channel.
+type JetServiceWorkerChannel = std::sync::Arc<JetServiceChannel<String>>;

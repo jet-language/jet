@@ -1,0 +1,128 @@
+use core.net as net
+use core.files as files
+use core.time as time
+PEER_CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+
+fn prefix(raw: [U8], want: [U8]) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop i in 0..<want.len() { if raw[i] != want[i] -> return false }
+    return true
+}
+fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop start in 0..<(raw.len() - want.len() + 1) {
+        same := true
+        loop i in 0..<want.len() {
+            n := Int.from_u8(raw[start + i])
+            if ascii_casefold && n >= 65 && n <= 90 -> n += 32
+            if n != Int.from_u8(want[i]) -> same = false
+        }
+        if same -> return true
+    }
+    return false
+}
+fn request_head(stream: TCPStream) -> [U8] {
+    // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    request := [U8]{}
+    loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
+        block :: stream.read(512) ?? panic("request read")
+        assert(block.len() > 0)
+        loop byte in block { &request.push(byte) }
+        assert(request.len() <= 65536)
+    }
+    return request
+}
+fn publish(listener: TCPListener, path: String) {
+    address :: listener.local_addr() ?? panic("address")
+    files.write_atomic(path, address.bytes()) ?? panic("publish address")
+}
+use core.process as process
+fn subject(mode: String, path: String) -> ProcessReceipt {
+    if mode != "aot" {
+        argv := [String]{"{jet}", "run"}
+        if mode == "interpret" -> &argv.push("--interpret")
+        &argv.push(path)
+        return process.cmd(argv).run() ?? panic("run subject")
+    }
+    // Source/CmdCompile.rs482-488 public built: path; compile happens INSIDE runner task.
+    build :: process.cmd([String]{"{jet}", "build", path}).run() ?? panic("build subject")
+    assert(build.success)
+    artifact := ""
+    loop line in build.output.split("\n") {
+        if line.starts_with("built: ") {
+            rest :: line.slice(7..<line.len()).copy()
+            artifact = rest.split(" (").to_list()[0].trim().copy()
+            break
+        }
+    }
+    assert(artifact.len() > 0)
+    return process.cmd([String]{artifact}).run() ?? panic("run artifact")
+}
+fn retry_connect(address: String, started: Instant) -> TCPStream {
+    loop {
+        if net.tcp_connect(address) == {
+            .Ok(stream) -> return stream
+            .Err(_) -> {
+                assert(time.instant() < started + 30s)
+                time.sleep(100ms)
+            }
+        }
+    }
+}
+fn reserve_address() -> String {
+    reservation :: net.tcp_listen("127.0.0.1:0") ?? panic("reserve port")
+    return reservation.local_addr() ?? panic("address")
+    // Returning drops the only listener before the runner is spawned.
+}
+fn run() {
+    modes :: [String]{"default", "interpret"}
+    loop mode in modes {
+        address :: reserve_address()
+        port :: address.split(":").to_list()[1].copy()
+        source :: files.read("{work}/server/main.template") ?? panic("source")
+        files.write("{work}/server/main.jet", source.replace("__PORT__", port)) ?? panic("stage")
+        runner :: task { return subject(mode, "{work}/server/main.jet") }
+        started :: time.instant()
+        client :: retry_connect(address, started)
+        client.write_all("POST / HTTP/1.1{PEER_CRLF}Host: local{PEER_CRLF}Transfer-Encoding: chunked{PEER_CRLF}Trailer: X-Test{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}1{PEER_CRLF}x{PEER_CRLF}0{PEER_CRLF}".bytes()) ?? panic("chunked prefix")
+        net.set_read_timeout(client, 35000) ?? panic("response timeout")
+        stop :: "{work}/stop-{mode}"
+        writer :: task {
+            trailer :: "X-Test: value{PEER_CRLF}".bytes()
+            loop index in 0..<trailer.len() {
+                if files.exists(stop) -> return
+                if client.write_all([U8]{trailer[index]}) == {
+                    .Err(_) -> return
+                    else -> {}
+                }
+                if index + 1 < trailer.len() {
+                    loop tick in 0..<80 {
+                        if files.exists(stop) -> return
+                        time.sleep(100ms)
+                    }
+                }
+            }
+        }
+        response := [U8]{}
+        read_ok := true
+        loop {
+            if client.read(8192) == {
+                .Ok(block) -> {
+                    if block.len() == 0 -> break
+                    loop byte in block { &response.push(byte) }
+                }
+                .Err(_) -> { read_ok = false; break }
+            }
+        }
+        files.write_atomic(stop, "stop".bytes()) ?? panic("stop writer")
+        _ :: client.close()
+        writer.join() ?? panic("trickle writer")
+        output :: runner.join() ?? panic("server runner")
+        assert(read_ok && prefix(response, "HTTP/1.1 ".bytes()))
+        assert(time.instant() < started + 35s)
+        assert_eq(output.code, 0)
+        assert_eq(output.errors, "")
+        // Original server stdout is NOT asserted.
+    }
+}

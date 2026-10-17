@@ -1,0 +1,13 @@
+# Port of tests/build_entry.rs:602-623; public acceptance/files and exact private BuildRun subclaims split.
+# PENDING-SAME-HEAD. No invented metrics/graph projection.
+fixture: fixtures/warm_dependency_cache_still_runs_frontend_diagnostics
+step: jet build main.jet --allow-exec --allow-fs
+exit: 0
+file: .jet/package-artifacts/dep_b.sealed is-file
+remove: .jet/package-artifacts/dep_b.sealed
+copy: dep_b.negative deps/dep_b/dep_b.jet
+step: jet build main.jet --allow-exec --allow-fs --json
+exit: nonzero
+json: machine doc $.reports[*].code != "ICE"
+json: machine doc $.reports[?code^="E"] #>= 1
+file: .jet/package-artifacts/dep_b.sealed absent

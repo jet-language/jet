@@ -1,0 +1,30 @@
+# HAND-PORT tests/web_build.rs:4361-4417 selected_browser_machine_emits_dossier_bound_web_artifact
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# All six manifest contains, both public JS binding names, unchanged compute golden; exact FIRST artifactIdentity replacement, actual mutation inequality and failure-before-output. Private TargetMachine booleans compiler-lib ledger; generated-Rust identity pointers retire.
+requires: tool:node
+fixture: selected_browser_machine_emits_dossier_bound_web_artifact.fixture
+env: NO_COLOR=1
+step: jet build --target web Examples/features/web/web_compute.jet
+exit: 0
+file: .jet/build/app.wasm is-file
+file: .jet/build/web.manifest.json ~ "\"runtimeLayer\": \"hosted\"" # original generated JavaScript predicate
+file: .jet/build/web.manifest.json ~ "\"providerIdentity\": \"target-providers-v1:" # original generated JavaScript predicate
+file: .jet/build/web.manifest.json ~ "\"preludeClosureIdentity\": \"prelude-closure-v1:" # original generated JavaScript predicate
+file: .jet/build/web.manifest.json ~ "\"targetEnvironment\": \"browser\"" # original generated JavaScript predicate
+file: .jet/build/web.manifest.json ~ "\"artifactIdentity\": \"" # original generated JavaScript predicate
+file: .jet/build/web.manifest.json ~ "\"targetDossierIdentity\": \"" # original generated JavaScript predicate
+file: .jet/build/app.js ~ "const JET_TARGET_DOSSIER" # original generated JavaScript predicate
+file: .jet/build/app.js ~ "jet_web_verify_target_binding" # original generated JavaScript predicate
+step: node app.js
+cwd: .jet/build
+exit: 0
+stdout: = selected_browser_machine_emits_dossier_bound_web_artifact.stdout.expected
+copy: .jet/build/app.js app.before.js
+capture: broken = text file.replace_first("artifactIdentity: \"", "artifactIdentity: \"mismatch-") .jet/build/app.js
+write: .jet/build/app.js = "{cap:broken}"
+file: .jet/build/app.js != app.before.js
+step: node app.js
+cwd: .jet/build
+exit: nonzero
+stdout: empty
+stderr: ~ "target binding mismatch" # original fail-before-user-code diagnostic

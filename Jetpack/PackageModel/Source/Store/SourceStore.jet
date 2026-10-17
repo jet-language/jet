@@ -1,0 +1,194 @@
+// Source/Store.rs source snapshots and legacy compiler package-source entries.
+// The machine artifact store and canonical Hangar remain distinct stores; this
+// source store holds path/git dependency trees identified by their full lock
+// fingerprint. All filesystem operations reuse Foundation's retained authority.
+
+#Error
+struct PackageSourceStoreError { diagnostic: Diagnostic }
+
+struct PackageSourceSnapshot {
+    directory: FoundationDirectoryAuthority
+    content_hash: String
+    parent: FoundationDirectoryAuthority
+    name: String
+
+    fn path(self) -> String Never! { self.directory.path() }
+}
+impl PackageSourceSnapshot.Close {
+    fn close(^self) -[FS]> {
+        // Never remove a replacement bound at the private snapshot name.
+        self.directory.revalidate() ?? return
+        self.parent.remove_tree(self.name).drop("snapshot cleanup must not replace the caller's outcome")
+    }
+}
+
+struct PackageSourceEntry {
+    path: String
+    content_hash: String
+}
+
+fn pkg_source_store_dir() -[Env]> String Never! {
+    explicit :: sys.get("JET_PACKAGE_STORE_DIR")
+    if explicit == .Val(path) -> return path
+    home :: sys.get("HOME") ?? sys.get("USERPROFILE") ?? "."
+    files.join(files.join(home, ".jet"), "store")
+}
+
+fn pkg_source_store_path(name: String, version: String, fingerprint: String) -[Env]> String Never! {
+    fp :: fingerprint.removeprefix("sha256-")
+    files.join(pkg_source_store_dir(), "{name}-{version}-{fp}")
+}
+
+fn pkg_source_store_component(value: String) PackageSourceStoreError! {
+    invalid := value == "" || value == "." || value == ".." || value.contains("/") || value.contains("\\") || value.contains(":")
+    // Unicode C0/C1 controls, exactly char::is_control in the reference.
+    bytes :: value.bytes()
+    loop index in 0..<bytes.len() {
+        code :: Int.from_u8(bytes[index])
+        // C1 controls encode as C2 80..9F in UTF-8.
+        if code < 32 || code == 127 || (code == 194 && index + 1 < bytes.len() && Int.from_u8(bytes[index + 1]) >= 128 && Int.from_u8(bytes[index + 1]) <= 159) -> invalid = true
+    }
+    if invalid -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1206", None,
+        "package store path component `{value}` is not allowed",
+        "the value must be one safe path component",
+        "use a package name, version, and fingerprint without path separators")})
+}
+
+fn pkg_source_store_io(action: String, path: String, error: IOError) -> PackageSourceStoreError Never! {
+    PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1206", None,
+        "I/O error while {action} at `{path}`",
+        "a filesystem operation failed during package installation",
+        "check permissions and disk space: {error}")}
+}
+
+fn pkg_source_snapshot_tree(path: String) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    source :: foundation_open_directory_authority(path) ?? return Err(pkg_source_store_io("checking package source", path, err))
+    pkg_source_snapshot_authority(source)
+}
+
+fn pkg_source_snapshot_authority(source: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    root :: pkg_source_store_dir()
+    store :: foundation_open_directory_authority(root, true) ?? return Err(pkg_source_store_io("creating source snapshot store", root, err))
+    snapshots :: store.child(".snapshots", true) ?? return Err(pkg_source_store_io("opening source snapshot root", files.join(root, ".snapshots"), err))
+    pkg_source_snapshot_into(source, snapshots)
+}
+
+fn pkg_source_snapshot_into(source: FoundationDirectoryAuthority, snapshots: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceSnapshot PackageSourceStoreError! {
+    stage :: snapshots.private_child("source") ?? return Err(pkg_source_store_io("creating source snapshot", snapshots.path(), err))
+    name :: files.basename(stage.path())
+    stage.copy_tree_from(source) ?? {
+        snapshots.remove_tree(name).drop("snapshot cleanup must preserve the copy error")
+        return Err(pkg_source_store_io("snapshotting package source", source.path(), err))
+    }
+    hash :: stage.tree_hash() ?? {
+        snapshots.remove_tree(name).drop("snapshot cleanup must preserve the hash error")
+        return Err(pkg_source_store_io("hashing source snapshot", stage.path(), err))
+    }
+    Ok(PackageSourceSnapshot{directory: stage, content_hash: hash, parent: snapshots, name: name})
+}
+
+// Path and git dependencies use this one install path, as ensure_git_dep does
+// in the reference. The caller must retain its source snapshot while installing.
+fn pkg_source_store_ensure(name: String, version: String, fingerprint: String, source: FoundationDirectoryAuthority) -[FS, Env, Time]> PackageSourceEntry PackageSourceStoreError! {
+    pkg_source_store_component(name)
+    pkg_source_store_component(version)
+    fp :: fingerprint.removeprefix("sha256-")
+    pkg_source_store_component(fp)
+    root :: pkg_source_store_dir()
+    destination_name :: "{name}-{version}-{fp}"
+    destination :: files.join(root, destination_name)
+    parent :: foundation_open_directory_authority(root, true) ?? return Err(pkg_source_store_io("creating store entry parent", root, err))
+    if parent.child(destination_name) == {
+        .Ok(existing) -> {
+            hash :: existing.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", destination, err))
+            return Ok(PackageSourceEntry{path: destination, content_hash: hash})
+        }
+        .Err(error) -> if error == {
+            .NotFound(_) -> {}
+            else -> { return Err(pkg_source_store_io("checking store entry", destination, error)) }
+        }
+    }
+    stage :: parent.private_child("entry") ?? return Err(pkg_source_store_io("creating store staging entry", root, err))
+    stage_name :: files.basename(stage.path())
+    result :: pkg_source_store_publish_copy(parent, stage, stage_name, destination_name, destination, source)
+    parent.remove_tree(stage_name).drop("install cleanup must preserve the publication outcome")
+    hash :: result
+    Ok(PackageSourceEntry{path: destination, content_hash: hash})
+}
+
+fn pkg_source_store_publish_copy(parent: FoundationDirectoryAuthority, stage: FoundationDirectoryAuthority, stage_name: String, destination_name: String, destination: String, source: FoundationDirectoryAuthority) -[FS]> String PackageSourceStoreError! {
+    stage.copy_tree_from(source) ?? return Err(pkg_source_store_io("copying to store", destination, err))
+    hash :: stage.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", destination, err))
+    parent.rename(stage_name, destination_name) ?? {
+        if err == {
+            .AlreadyExists(_) -> {}
+            else -> { return Err(pkg_source_store_io("publishing store entry", destination, err)) }
+        }
+        winner :: parent.child(destination_name) ?? return Err(pkg_source_store_io("opening concurrent store entry", destination, err))
+        winner_hash :: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent store entry", destination, err))
+        if winner_hash != hash -> return Err(pkg_source_store_io("publishing store entry", destination, IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(destination), os_code: None, cause: Val("concurrent store entry has different contents")})))
+        return Ok(winner_hash)
+    }
+    parent.fsync() ?? return Err(pkg_source_store_io("publishing store entry", destination, err))
+    Ok(hash)
+}
+
+fn pkg_source_store_verify(name: String, entry: String, expected: String) PackageSourceStoreError! -[FS, Env]> {
+    source :: foundation_open_directory_authority(entry) ?? {
+        if err == .NotFound(_) -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1204", None,
+            "the store entry for `{name}` is missing",
+            "a package source tree must be present in the store",
+            "run `jet fetch` to re-download the package")})
+        return Err(pkg_source_store_io("checking store entry", entry, err))
+    }
+    if expected == "" -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1204", None,
+        "the store entry for `{name}` has no content hash",
+        "locked package sources must carry a content hash before they are used",
+        "run `jet fetch` to recreate the lock with verified content hashes")})
+    actual :: source.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", entry, err))
+    if actual != expected -> return Err(PackageSourceStoreError{diagnostic: diagnostic_from_registry("E1204", None,
+        "the store entry for `{name}` has been modified",
+        "expected content hash `{expected}` but got `{actual}`",
+        "delete the store entry and run `jet fetch` to re-install")})
+}
+
+fn pkg_source_store_link_into_project(store_entry: String, link_root: String) PackageSourceStoreError! -[FS, Env, Time]> {
+    source :: foundation_open_directory_authority(store_entry) ?? return Err(pkg_source_store_io("checking store entry", store_entry, err))
+    expected :: source.tree_hash() ?? return Err(pkg_source_store_io("hashing store entry", store_entry, err))
+    parent_path :: if files.dirname(link_root) == "" -> "." else -> files.dirname(link_root)
+    link_name :: files.basename(link_root)
+    parent :: foundation_open_directory_authority(parent_path, true) ?? return Err(pkg_source_store_io("creating dep link parent", parent_path, err))
+    if parent.child(link_name) == {
+        .Ok(existing) -> {
+            actual :: existing.tree_hash() ?? return Err(pkg_source_store_io("hashing dependency link", link_root, err))
+            if actual != expected -> return Err(pkg_source_store_io("checking dependency link", link_root, IOError.InvalidInput(IOContext{operation: .Read, resource: Val(link_root), os_code: None, cause: Val("existing dependency link does not match its immutable store entry")})))
+            return
+        }
+        .Err(error) -> if error == {
+            .NotFound(_) -> {}
+            else -> { return Err(pkg_source_store_io("checking dependency link", link_root, error)) }
+        }
+    }
+    stage :: parent.private_child("dep-link") ?? return Err(pkg_source_store_io("creating dep link staging dir", parent_path, err))
+    stage_name :: files.basename(stage.path())
+    result :: pkg_source_store_publish_link(parent, stage, stage_name, link_name, link_root, source, expected)
+    parent.remove_tree(stage_name).drop("dependency link cleanup must preserve the publication outcome")
+    result
+}
+
+fn pkg_source_store_publish_link(parent: FoundationDirectoryAuthority, stage: FoundationDirectoryAuthority, stage_name: String, link_name: String, link_root: String, source: FoundationDirectoryAuthority, expected: String) PackageSourceStoreError! -[FS, Env]> {
+    stage.link_tree_from(source) ?? return Err(pkg_source_store_io("linking dependency tree", link_root, err))
+    actual :: stage.tree_hash() ?? return Err(pkg_source_store_io("hashing staged dependency link", link_root, err))
+    if actual != expected -> return Err(pkg_source_store_io("checking staged dependency link", link_root, IOError.InvalidInput(IOContext{operation: .Read, resource: Val(link_root), os_code: None, cause: Val("staged dependency link does not match its immutable store entry")})))
+    parent.rename(stage_name, link_name) ?? {
+        if err == {
+            .AlreadyExists(_) -> {}
+            else -> { return Err(pkg_source_store_io("publishing dependency link", link_root, err)) }
+        }
+        winner :: parent.child(link_name) ?? return Err(pkg_source_store_io("opening concurrent dependency link", link_root, err))
+        winner_hash :: winner.tree_hash() ?? return Err(pkg_source_store_io("hashing concurrent dependency link", link_root, err))
+        if winner_hash != expected -> return Err(pkg_source_store_io("publishing dependency link", link_root, IOError.AlreadyExists(IOContext{operation: .Write, resource: Val(link_root), os_code: None, cause: Val("concurrent dependency link has different contents")})))
+        return
+    }
+    parent.fsync() ?? return Err(pkg_source_store_io("publishing dependency link", link_root, err))
+}

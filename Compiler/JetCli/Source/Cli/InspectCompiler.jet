@@ -1,0 +1,140 @@
+// Source/Compiler.rs checked_value + status_ct_value. A check is a source query,
+// not check_file: its filename is metadata and imports use the eval source root.
+use core.files as cli_files
+use jet_foundation.[TComptimeValue, TComptimeKey, TComptimeKeyField, TComptimeField, Diagnostic]
+use jet_driver.[JetDriverVerbOutput, JetDriverCompileMode, JetDriverAuthorizedSourceFile, JetDriverAuthorizedSourceRoot, JetDriverAuthorizedSourceSnapshot, JetDriverCompilerCheckInput, jet_driver_compiler_check, JET_DRIVER_EXIT_OK]
+use jet_eval.[JetCompilerServicesSourceInput, JetCompilerServicesSourcePreparation, jet_eval_compiler_services_parse]
+
+fn jet_cli_compiler_key_value(key: TComptimeKey) -> TComptimeValue Never! {
+    if key == {
+        .Int(number) -> TComptimeValue.Int{value: number}
+        .BigInt(decimal) -> TComptimeValue.BigInt{decimal: decimal}
+        .String(text) -> TComptimeValue.String{value: text}
+        .Bool(flag) -> TComptimeValue.Bool{value: flag}
+        .Char(code) -> TComptimeValue.Char{value: code}
+        .Tuple(fields) -> TComptimeValue.Struct{type_name: "tuple", fields: loop field in fields -> TComptimeField{name: field.name, value: jet_cli_compiler_key_value(field.key)}}
+        .Struct(name, fields) -> TComptimeValue.Struct{type_name: name, fields: loop field in fields -> TComptimeField{name: field.name, value: jet_cli_compiler_key_value(field.key)}}
+        .Enum(name, variant) -> TComptimeValue.Enum{type_name: name, variant: variant, args: []}
+    }
+}
+
+fn jet_cli_compiler_key_text(key: TComptimeKey) -> String Never! {
+    if key == {
+        .Int(number) -> "{number}"
+        .BigInt(decimal) -> decimal
+        .String(text) -> text
+        .Bool(flag) -> "{flag}"
+        .Char(code) -> jet_eval_format_char_text(code)
+        else -> jet_cli_status_json(jet_cli_compiler_checked_value(jet_cli_compiler_key_value(key)))
+    }
+}
+
+fn jet_cli_compiler_checked_value(value: TComptimeValue) -> JetCLIStatusValue Never! {
+    if value == {
+        .Int(number) -> jet_cli_status_int(number)
+        .Float(number, _) -> JetCLIStatusValue.Float{text: "{number}"}
+        .Bool(flag) -> jet_cli_status_bool(flag)
+        .Char(code) -> jet_cli_status_text(jet_eval_format_char_text(code))
+        .String(text) | .BigInt(text) -> jet_cli_status_text(text)
+        .Bytes(bytes) -> jet_cli_status_array(loop byte in bytes -> jet_cli_status_int(Int.from_u8(byte)))
+        .List(values) -> jet_cli_status_array(loop entry in values -> jet_cli_compiler_checked_value(entry))
+        .Map(entries) -> jet_cli_status_object(loop entry in entries -> jet_cli_status_field(jet_cli_compiler_key_text(entry.key), jet_cli_compiler_checked_value(entry.value)))
+        .Struct(_, fields) -> {
+            entries := [JetCLIStatusField]{}
+            loop field in fields {
+                if !ast_comptime_memo_storage_name(field.name) {
+                    &entries.push(jet_cli_status_field(field.name, jet_cli_compiler_checked_value(field.value)))
+                }
+            }
+            jet_cli_status_object(entries)
+        }
+        .Enum(_, variant, args) -> {
+            if args.len() == 0 -> return jet_cli_status_text(variant)
+            named := true
+            loop arg in args {
+                if arg.name == .None -> named = false
+            }
+            body :: if named -> jet_cli_status_object(loop arg in args -> jet_cli_status_field(arg.name ?? "", jet_cli_compiler_checked_value(arg.value))) else -> jet_cli_status_array(loop arg in args -> jet_cli_compiler_checked_value(arg.value))
+            jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field(variant, body)})
+        }
+        .Present(inner) -> jet_cli_compiler_checked_value(inner)
+        .Failed(report) -> if report == {
+            .Clean(_) -> JetCLIStatusValue.Null
+            .Told(inner) -> jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("err", jet_cli_compiler_checked_value(inner))})
+        }
+        .Unit | .Closure(_) -> JetCLIStatusValue.Null
+    }
+}
+
+fn jet_cli_inspect_compiler_check(file: String, source: String) -> JetDriverVerbOutput Never! {
+    core_sources :: if jet_cli_core_sources() == {
+        .Loaded(sources) -> sources
+        .Missing(what, fix) -> {
+            return JetDriverVerbOutput{stdout: "", stderr: jet_cli_report("E2105", what, jet_cli_why("E2105"), fix, false), exit_code: 1}
+
+        }
+    }
+    carrier :: jet_driver_inline_package(source)
+    masked :: jet_driver_mask_inline_package(source, carrier)
+    preparation :: if carrier.error == .Val(error) -> JetCompilerServicesSourcePreparation.Rejected{diagnostic: error} else -> JetCompilerServicesSourcePreparation.Masked{source: masked}
+    parsed :: jet_eval_compiler_services_parse(JetCompilerServicesSourceInput{source: source, preparation: Val(preparation)}) ?? return jet_cli_ice("the compiler source query could not parse its source input")
+    cwd :: cli_files.cwd() ?? "."
+    path :: jet_cli_authority_path(cwd, "core.compiler.jet")
+    identity :: "compiler-eval-source"
+    snapshot :: JetDriverAuthorizedSourceSnapshot{
+        roots: [JetDriverAuthorizedSourceRoot]{JetDriverAuthorizedSourceRoot{canonical_path: cwd, identity: identity, allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: path, relative_path: "core.compiler.jet", identity: identity, source: source}}, foreign_cache_files: []}},
+        entry_root_identity: identity,
+        entry_path: path,
+    }
+    result :: jet_driver_compiler_check(JetDriverCompilerCheckInput{parsed: parsed, request: jet_cli_driver_request(snapshot, core_sources, None, JetDriverCompileMode.Doc), sema_session: None, retain_projection: false}) ?? return jet_cli_ice("the compiler check query failed before returning its diagnostics")
+    if result.internal_problem == .Val(problem) -> return jet_cli_ice(problem)
+    value := JetCLIStatusValue.Null
+    if result.product == {
+        .CheckedCompilerValue(checked) -> value = jet_cli_compiler_checked_value(checked.value)
+        .RetainedCheckedProjection(_) -> { return jet_cli_ice("the compiler check query returned a retained projection instead of its compiler value") }
+        .Failed -> {
+            // Compiler.rs's no-bundle path preserves syntax and diagnostics while
+            // semantic_index/effects are absent, rather than failing the API call.
+            functions := [JetCLIStatusValue]{}
+            loop item in parsed.parsed.program.items {
+                if item == .Func(function) {
+                    &functions.push(
+                    jet_cli_status_object(
+                    [JetCLIStatusField]{
+                        jet_cli_status_field("name", jet_cli_status_text(function.name)),
+                        jet_cli_status_field("module", jet_cli_status_text("core.compiler")),
+                        jet_cli_status_field("identity", jet_cli_status_text("core.compiler::{function.name}")),
+                        jet_cli_status_field("params", jet_cli_status_array([JetCLIStatusValue]{})),
+                        jet_cli_status_field("span", jet_cli_compiler_span(function.name_span.start, function.name_span.end)),
+                        jet_cli_status_field("effects", jet_cli_status_object([JetCLIStatusField]{jet_cli_status_field("values", jet_cli_status_array([JetCLIStatusValue]{}))})),
+                        jet_cli_status_field("reaches_panic", jet_cli_status_bool(false)),
+                        jet_cli_status_field("arithmetic", jet_cli_status_array([JetCLIStatusValue]{})),
+                    },
+                    ),
+                    )
+                }
+            }
+            value = jet_cli_status_object(
+            [JetCLIStatusField]{
+                jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+                jet_cli_status_field("source", jet_cli_status_text(source)),
+                jet_cli_status_field("syntax", jet_cli_compiler_checked_value(parsed.value)),
+                jet_cli_status_field("diagnostics", jet_cli_compiler_diagnostics(result.diagnostics)),
+                jet_cli_status_field("functions", jet_cli_status_array(functions)),
+                jet_cli_status_field("effects", JetCLIStatusValue.Null),
+                jet_cli_status_field("semantic_index", JetCLIStatusValue.Null),
+            },
+            )
+        }
+    }
+    payload :: jet_cli_status_object(
+    [JetCLIStatusField]{
+        jet_cli_status_field("schema_version", jet_cli_status_int(1)),
+        jet_cli_status_field("api_version", jet_cli_status_int(1)),
+        jet_cli_status_field("operation", jet_cli_status_text("check")),
+        jet_cli_status_field("file", jet_cli_status_text(file)),
+        jet_cli_status_field("value", value),
+    },
+    )
+    JetDriverVerbOutput{stdout: "{jet_cli_status_render("inspect.compiler.check", true, [JetCLIStatusField]{jet_cli_status_field("compiler", payload)})}\n", stderr: "", exit_code: JET_DRIVER_EXIT_OK}
+}

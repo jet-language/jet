@@ -1,0 +1,19 @@
+# Port of tests/bind.rs:405-425; sources copied verbatim.
+# PENDING-REFERENCE: snapshots are written only after the original assertion check.
+fixture: fixtures/csv_bind_generated_project_executes_typed_fields
+step: jet inspect bind csv "fixtures/people.csv" --type "Person"
+file: fixtures/.jet/bindings/people.jet = csv_bind_generated_project_executes_typed_fields.0.generated.jet.out
+# PENDING-GRAMMAR: concat preserves generated + newline + verbatim program.
+concat: main.jet fixtures/.jet/bindings/people.jet separator program-1.jet
+step: jet check main.jet
+step: jet build --profile=debug main.jet
+step: built
+stdout: = csv_bind_generated_project_executes_typed_fields.0.out
+step: jet run main.jet
+env: JET_STORE_DIR={work}/run-cache
+stdout: = csv_bind_generated_project_executes_typed_fields.0.out
+stderr: = csv_bind_generated_project_executes_typed_fields.0.default.stderr
+step: jet run --interpret main.jet
+env: JET_STORE_DIR={work}/interpreter-cache
+stdout: = csv_bind_generated_project_executes_typed_fields.0.out
+stderr: = csv_bind_generated_project_executes_typed_fields.0.interpreter.stderr

@@ -1,0 +1,15 @@
+# HAND-PORT tests/jetpack_engine.rs:7898-7925 failed_first_dependency_reports_zero_completed_nodes
+# PENDING-GRAMMAR: exact assertions; no runtime parity claim.
+fixture: failed_first_dependency_reports_zero_completed_nodes.fixture
+env: JETPACK_ROOT={work}/root
+mkdir: project
+mkdir: root
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack build --no-color
+cwd: project
+exit: nonzero
+stderr: ~ "building completed 0/2 · current: mine -> missing · resolving" # original predicate
+stderr: !~ "building completed 1/2 · current: mine -> missing" # original predicate
+stderr: ~ "error:" | ~i "could not" # original predicate
+

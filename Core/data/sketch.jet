@@ -5,9 +5,9 @@
 // treats malformed or legacy input as one opaque payload instead of dropping
 // it.  Lengths are byte lengths, so delimiters inside arbitrary UTF-8 payloads
 // cannot change the frame boundary.
-pub fn empty() -> String Never! { "jet-sketch:v1;0;" }
+fn empty() -> String Never! { "jet-sketch:v1;0;" }
 
-pub fn merge(left: String, right: String) -> String Never! {
+fn merge(left: String, right: String) -> String Never! {
     values := [String]{}
     append_state(left, &values)
     append_state(right, &values)
@@ -94,3 +94,12 @@ fn slice_bytes(raw: [U8], start: Int, end: Int) -> String? {
 }
  
 fn c_int_max() -> Int Never! { 9223372036854775807 }
+
+/// Internal seeded FNV-1a kernel shared by the shipped HLL and CMS algorithms.
+fn __fnv1a64(key: String, seed: U64) -> U64 Never! {
+    hash := seed
+    loop byte in key.bytes() {
+        hash = (hash.bit_xor(U64.from_u8(byte))).wrapping_mul(U64{1099511628211})
+    }
+    hash
+}

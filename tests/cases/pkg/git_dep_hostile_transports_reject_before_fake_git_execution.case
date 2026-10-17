@@ -1,0 +1,88 @@
+# PORT tests/pkg.rs::git_dep_hostile_transports_reject_before_fake_git_execution:4618-4737; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/git_dep_hostile_transports_reject_before_fake_git_execution
+requires: os:unix
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+chmod: fake-bin/git 0755
+mkdir: outside
+mkdir: project0
+mkdir: project0/store
+write: project0/package.jet package0.template
+step: jet fetch
+cwd: project0
+env: JET_PACKAGE_STORE_DIR={work}/project0/store
+env: PATH={work}/fake-bin:{env:PATH}
+env: JET_TEST_GIT_INVOKED={work}/project0/git-transport-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+stderr: ~ "destination resolves to a non-public address"
+file: project0/git-transport-invoked absent
+file: project0/.jet absent
+mkdir: project1
+mkdir: project1/store
+write: project1/package.jet package1.template
+step: jet fetch
+cwd: project1
+env: JET_PACKAGE_STORE_DIR={work}/project1/store
+env: PATH={work}/fake-bin:{env:PATH}
+env: JET_TEST_GIT_INVOKED={work}/project1/git-transport-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+stderr: ~ "destination resolves to a non-public address"
+file: project1/git-transport-invoked absent
+file: project1/.jet absent
+mkdir: project2
+mkdir: project2/store
+write: project2/package.jet package2.template
+step: jet fetch
+cwd: project2
+env: JET_PACKAGE_STORE_DIR={work}/project2/store
+env: PATH={work}/fake-bin:{env:PATH}
+env: JET_TEST_GIT_INVOKED={work}/project2/git-transport-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+stderr: ~ "destination resolves to a non-public address"
+file: project2/git-transport-invoked absent
+file: project2/.jet absent
+mkdir: project3
+mkdir: project3/store
+write: project3/package.jet package3.template
+step: jet fetch
+cwd: project3
+env: JET_PACKAGE_STORE_DIR={work}/project3/store
+env: PATH={work}/fake-bin:{env:PATH}
+env: JET_TEST_GIT_INVOKED={work}/project3/git-transport-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+stderr: ~ "SSH user-info must be a safe username"
+file: project3/git-transport-invoked absent
+file: project3/.jet absent
+mkdir: project4
+mkdir: project4/store
+write: project4/package.jet package4.template
+step: jet fetch
+cwd: project4
+env: JET_PACKAGE_STORE_DIR={work}/project4/store
+env: PATH={work}/fake-bin:{env:PATH}
+env: JET_TEST_GIT_INVOKED={work}/project4/git-transport-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+stderr: ~ "local Git path resolves outside the project root"
+file: project4/git-transport-invoked absent
+file: project4/.jet absent
+mkdir: project5
+mkdir: project5/store
+write: project5/package.jet package5.template
+step: jet fetch
+cwd: project5
+env: JET_PACKAGE_STORE_DIR={work}/project5/store
+env: PATH={work}/fake-bin:{env:PATH}
+env: JET_TEST_GIT_INVOKED={work}/project5/git-transport-invoked
+exit: nonzero
+stderr.after_first("Error ["): ^= "E1203]"
+stderr: ~ "local git paths must use file:// inside the project root"
+file: project5/git-transport-invoked absent
+file: project5/.jet absent

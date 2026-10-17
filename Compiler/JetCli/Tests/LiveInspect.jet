@@ -1,0 +1,135 @@
+// Full-unit pure witnesses for the authoritative LiveInspect/EventObservation
+// consumer contract. Transport witnesses are separate real-filesystem fixtures.
+use jet_optimizer.mir_decision_ledger_json
+
+fn live_inspect_fixture(events: String, runtime: String, decisions: String) -> String Never! {
+    "{{\"protocol\":\"jet.live.v1\",\"session_id\":\"session\",\"source_id\":\"app.jet\",\"build_id\":\"build-1\",\"revision\":\"rev-1\",\"world_id\":\"world-1\",\"values\":[{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\",\"rendered_value\":\"7\"}}],\"schema_version\":1,\"pid\":42,\"start_id\":\"test\",\"captured_ms\":1,\"tasks\":[{{\"id\":2,\"parent\":1,\"state\":\"blocked\",\"wait\":\"channel send\",\"deadline_ms\":480,\"cancelled\":false}}],\"channels\":[{{\"id\":1,\"depth\":4,\"capacity\":4,\"send_waiters\":1,\"recv_waiters\":0,\"closed\":false}}],\"effects\":{{\"compute\":1,\"waiting\":1,\"channel\":1,\"time\":0,\"io\":0}},\"resources\":{{\"workers\":1,\"running\":1,\"queued\":0,\"cancelled\":0,\"arenas\":1,\"arena_allocations\":2,\"arena_bytes\":64}}{events}{runtime}{decisions}}}"
+}
+fn live_inspect_rejected(text: String, message: String) Never! {
+    if jet_cli_live_decode(text) == {
+        .Err(error) -> assert(error.message.contains(message))
+        .Ok(snapshot) -> {
+            if jet_cli_live_event_render(snapshot.raw_events) == {
+                .Err(error) -> assert(error.message.contains(message))
+                .Ok(_) -> panic("unsafe live snapshot accepted: {message}")
+            }
+        }
+    }
+}
+fn live_inspect_event(sequence: Int) -> String Never! {
+    "{{\"sequence\":{sequence},\"source\":\"AsyncEvent\",\"event_id\":2,\"owner_id\":3,\"subscription_id\":4,\"dispatch_id\":5,\"lifecycle\":\"HandlerFailed\",\"queued\":-1,\"blocked\":0,\"running\":1,\"capacity\":8,\"overflow\":\"DropNewest\",\"priority\":-17,\"failure\":\"Handler\",\"terminal\":\"None\"}}"
+}
+fn run() {
+    record :: live_inspect_event(1)
+    events :: ",\"event_observations\":[{record}]"
+    text :: live_inspect_fixture(events, "", "")
+    snapshot :: jet_cli_live_decode(text) ?? panic("closed live snapshot")
+    assert(snapshot.values[0].rendered_value == Val("7"))
+    assert((jet_cli_live_event_render(snapshot.raw_events) ?? panic(err.message)) == "sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None")
+    expected :: "jet inspect live · pid 42\nprotocol=jet.live.v1 session=session source=app.jet build=build-1 revision=rev-1 world=world-1\n\ntask tree\n  task 2     parent 1     blocked  wait=channel send deadline=480 cancelled=false\n\nchannels\n  channel 1     depth 4/4 blocked send=1 recv=0 closed=false\n\neffects: compute=1 waiting=1 channel=1 time=0 io=0\nresources: workers=1 running=1 queued=0 cancelled=0 arenas=1 arena_allocations=2 arena_bytes=64\n\nvalues\n  app::counter type=Int kept value=7\n\nevents\n  sequence=1 source=AsyncEvent event=2 owner=3 subscription=4 dispatch=5 lifecycle=HandlerFailed queued=-1 blocked=0 running=1 capacity=8 overflow=DropNewest priority=-17 failure=Handler terminal=None\n"
+    assert(jet_cli_live_text(snapshot) == expected)
+    loop plane in ([String]{"types", "rights", "claims", "shapes", "structure", "build", "gates"}) {
+        json :: jet_cli_live_json_report(snapshot, plane)
+        assert(json.contains("\"action\":\"inspect.{plane}\""))
+        assert(json.contains("\"rendered_value\":\"7\""))
+        assert(json.contains("\"shapes\":[{{\"type_identity\":\"Int\",\"value_ids\":[\"app::counter\"]}}]"))
+    }
+    unavailable :: jet_cli_live_decisions_report(snapshot, false)
+    assert(unavailable.starts_with("decisions: scope=live pid=42 source=app.jet build=build-1 revision=rev-1 world=world-1 record_status=unavailable retention=bounded redaction=transport-safe\n"))
+    assert(unavailable.contains("decision kind=tier disposition=unavailable derivation_disposition=unavailable"))
+    ledger :: jet_cli_live_unavailable_ledger(snapshot)
+    payload :: mir_decision_ledger_json(ledger)
+    published :: jet_cli_live_decode(live_inspect_fixture(events, "", ",\"decisions\":{payload}")) ?? panic("canonical live ledger")
+    assert(published.decisions != None)
+    assert(jet_cli_live_decisions_report(published, true).contains("\"record_status\":\"current\""))
+    live_inspect_rejected(live_inspect_fixture(events, "", ",\"decisions\":{payload.replace("\"run\":\"rev-1\"", "\"run\":\"forged\"")}"), "untrusted derivation")
+    runtime :: ",\"runtime\":{{\"elapsed_ns\":7,\"cpu_ns\":5,\"exit\":true}}"
+    window :: jet_cli_live_decode(live_inspect_fixture(events, runtime, "")) ?? panic("runtime window")
+    assert(window.runtime == Val(JetCLILiveRuntime{elapsed_ns: 7, cpu_ns: Val(5), exit: true}))
+    live_inspect_rejected(live_inspect_fixture(events, runtime.replace("\"cpu_ns\":5", "\"cpu_ns\":-1"), ""), "negative `cpu_ns`")
+    live_inspect_rejected(live_inspect_fixture(events, runtime.replace(",\"cpu_ns\":5", ""), ""), "missing or unsafe")
+    live_inspect_rejected(text.replace("\"schema_version\":1", "\"schema_version\":2"), "unsupported schema")
+    live_inspect_rejected(text.replace("jet.live.v1", "jet.live.v2"), "protocol must be")
+    live_inspect_rejected(text.replace("\"rendered_value\":\"7\"", "\"rendered_value\":false"), "invalid `rendered_value`")
+    oversized_value :: "x".repeat(16385)
+    live_inspect_rejected(text.replace("\"rendered_value\":\"7\"", "\"rendered_value\":\"{oversized_value}\""), "Prelude limit")
+    live_inspect_rejected(text.replace("\"world_id\":\"world-1\"", "\"world_id\":\"world\\n1\""), "control characters")
+    live_inspect_rejected(text.replace("\"depth\":4", "\"depth\":-1"), "negative `depth`")
+    live_inspect_rejected(text.replace("\"disposition\":\"kept\"", "\"disposition\":\"invented\""), "unsupported disposition")
+    live_inspect_rejected(text.replace("\"terminal\":\"None\"", "\"terminal\":\"None\",\"payload\":\"secret\""), "unsafe or unknown field")
+    live_inspect_rejected(text.replace("\"sequence\":1", "\"sequence\":1.0"), "invalid `sequence`")
+    live_inspect_rejected(text.replace("\"queued\":-1", "\"queued\":-2"), "invalid `queued`")
+    live_inspect_rejected(text.replace("\"event_id\":2", "\"event_id\":-1"), "negative `event_id`")
+    live_inspect_rejected(text.replace("\"source\":\"AsyncEvent\"", "\"source\":\"Payload\""), "unknown `source`")
+    repeated :: ",\"event_observations\":[{record},{record}]"
+    live_inspect_rejected(live_inspect_fixture(repeated, "", ""), "not strictly increasing")
+    records := [String]{}
+    loop sequence in 1..<258 -> &records.push(live_inspect_event(sequence))
+    live_inspect_rejected(live_inspect_fixture(",\"event_observations\":[{records.join(",")} ]", "", ""), "256-record limit")
+    // JSON::json_int casts Float for LiveInspect; EventObservation does not.
+    floats :: jet_cli_live_decode(text.replace("\"depth\":4", "\"depth\":4.9")) ?? panic("reference Float integer cast")
+    assert(floats.channels[0].depth == 4)
+    // Optional Dyn fields are discriminated after unwrapping, not compared.
+    null_value :: jet_cli_live_decode(text.replace("\"rendered_value\":\"7\"", "\"rendered_value\":null")) ?? panic("null rendered value")
+    assert(null_value.values[0].rendered_value == None)
+    missing_value :: jet_cli_live_decode(text.replace(",\"rendered_value\":\"7\"", "")) ?? panic("absent rendered value")
+    assert(missing_value.values[0].rendered_value == None)
+    null_deadline :: jet_cli_live_decode(text.replace("\"deadline_ms\":480", "\"deadline_ms\":null")) ?? panic("null deadline")
+    assert(null_deadline.tasks[0].deadline_ms == None)
+    ordered :: Dyn.Object([(key: String, value: Dyn)]{(key: "z", value: Dyn.Int(2)), (key: "a", value: Dyn.Text("first"))})
+    assert((jet_cli_live_json(ordered) ?? panic(err.message)) == "{{\"a\":\"first\",\"z\":2}}")
+    wide :: jet_cli_live_decode(text.replace("\"arena_bytes\":64", "\"arena_bytes\":9223372036854775807")) ?? panic("i64 maximum retained exactly")
+    assert(wide.resources.get("arena_bytes") == Val(9223372036854775807))
+    live_inspect_rejected(text.replace("\"arena_bytes\":64", "\"arena_bytes\":9223372036854775808"), "not valid JSON")
+    // Deliberate transport-policy divergence: our runtime never emits repeated
+    // keys. Strict Core JSON rejects them as corruption, rather than reproducing
+    // Rust's first-scalar/last-container lookup quirks.
+    live_inspect_rejected(text.replace("\"pid\":42", "\"pid\":42,\"pid\":43"), "not valid JSON")
+    live_inspect_rejected(text.replace("\"values\":", "\"values\":[],\"values\":"), "not valid JSON")
+    live_inspect_rejected(text.replace("\"depth\":4", "\"depth\":4,\"depth\":5"), "not valid JSON")
+    live_inspect_rejected(text.replace("\"sequence\":1", "\"sequence\":1,\"sequence\":2"), "not valid JSON")
+    live_inspect_rejected(live_inspect_fixture(events, "", ",\"decisions\":{payload.replace("\"run\":\"rev-1\"", "\"run\":\"rev-1\",\"run\":\"forged\"")}"), "not valid JSON")
+    absent :: jet_cli_live_decode(live_inspect_fixture("", "", "")) ?? panic("pure renderer permits absent event sequence")
+    assert(absent.events == None && !jet_cli_live_text(absent).contains("\nevents\n"))
+    proc_fields := [String]{"S"}
+    loop _ in 1..<19 -> &proc_fields.push("0")
+    &proc_fields.push("1234")
+    assert((jet_cli_live_start_from_stat("42 (name ) with spaces) {proc_fields.join(" ")}\n") ?? panic(err.message)) == "1234")
+    saturating :: jet_cli_live_decode(text.replace("\"arena_bytes\":64", "\"arena_bytes\":1e30")) ?? panic("reference saturating i64 cast")
+    assert(saturating.resources.get("arena_bytes") == Val(9223372036854775807))
+    // Exact boundaries: permitted task labels are ignored by this consumer,
+    // so they can fill the transport without tripping a rendered-value bound.
+    empty_label :: text.replace("\"cancelled\":false", "\"cancelled\":false,\"label\":\"\"")
+    padding :: "x".repeat(1048576 - empty_label.bytes().len())
+    at_limit :: text.replace("\"cancelled\":false", "\"cancelled\":false,\"label\":\"{padding}\"")
+    assert(at_limit.bytes().len() == 1048576)
+    assert(jet_cli_live_decode(at_limit) == .Ok(_))
+    live_inspect_rejected("{at_limit} ", "not valid JSON")
+    oversized_ledger :: payload.replace("the live runtime produced no compiler decision ledger for this run", "x".repeat(524289))
+    live_inspect_rejected(live_inspect_fixture(events, "", ",\"decisions\":{oversized_ledger}"), "transport limit")
+    value :: "{{\"value_id\":\"app::counter\",\"type_identity\":\"Int\",\"disposition\":\"kept\",\"reason\":\"\",\"rendered_value\":\"7\"}}"
+    many_values := [String]{}
+    loop _ in 0..<4096 -> &many_values.push(value)
+    accepted :: text.replace("\"values\":[{value}]", "\"values\":[{many_values.join(",")}]")
+    assert(jet_cli_live_decode(accepted) == .Ok(_))
+    &many_values.push(value)
+    live_inspect_rejected(text.replace("\"values\":[{value}]", "\"values\":[{many_values.join(",")}]"), "too many values")
+    mixed :: jet_cli_live_decode(text.replace("\"values\":[{value}]", "\"values\":[{value},{value},{{\"value_id\":\"b\",\"type_identity\":\"Bool\",\"disposition\":\"reset\",\"reason\":\"\"}}]")) ?? panic("shape grouping")
+    assert(jet_cli_live_json_report(mixed, "shapes").contains("\"shapes\":[{{\"type_identity\":\"Bool\",\"value_ids\":[\"b\"]}},{{\"type_identity\":\"Int\",\"value_ids\":[\"app::counter\",\"app::counter\"]}}]"))
+    loop source in ([String]{"Event", "AsyncEvent", "DecisionHook"}) {
+        assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"source\":\"AsyncEvent\"", "\"source\":\"{source}\"")) ?? panic("closed source")).contains("source={source}"))
+    }
+    loop lifecycle in ([String]{"Subscribed", "Removed", "DispatchStarted", "Queued", "Backpressured", "Running", "HandlerStarted", "HandlerDelivered", "HandlerFailed", "HandlerContinue", "HandlerTransform", "HandlerCancel", "HandlerFail", "Terminal"}) {
+        assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"lifecycle\":\"HandlerFailed\"", "\"lifecycle\":\"{lifecycle}\"")) ?? panic("closed lifecycle")).contains("lifecycle={lifecycle}"))
+    }
+    loop overflow in ([String]{"None", "Block", "DropNewest", "DropOldest"}) {
+        assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"overflow\":\"DropNewest\"", "\"overflow\":\"{overflow}\"")) ?? panic("closed overflow")).contains("overflow={overflow}"))
+    }
+    loop failure in ([String]{"None", "Handler", "Panic"}) {
+        assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"failure\":\"Handler\"", "\"failure\":\"{failure}\"")) ?? panic("closed failure")).contains("failure={failure}"))
+    }
+    loop terminal in ([String]{"None", "Delivered", "HandlerFailed", "DroppedNewest", "DroppedOldest", "Closed", "Cancelled", "DeadlineExceeded", "Continue", "Cancel", "Fail"}) {
+        assert(jet_cli_live_text(jet_cli_live_decode(text.replace("\"terminal\":\"None\"", "\"terminal\":\"{terminal}\"")) ?? panic("closed terminal")).contains("terminal={terminal}"))
+    }
+    live_inspect_rejected("\"x\"".repeat(1048577), "not valid JSON")
+}

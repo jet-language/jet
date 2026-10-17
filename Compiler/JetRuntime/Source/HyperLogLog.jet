@@ -1,0 +1,346 @@
+// Native272 shared owner, Sketch.rs:21-58; #4828 preserves Arc/Mutex sharing.
+// Linear counts are frozen seed results; no logarithm provider or runtime table allocation.
+fn hll_linear(empty: I64) -> I64 {
+    if empty == {
+        1 -> I64{1420}
+        2 -> I64{1242}
+        3 -> I64{1138}
+        4 -> I64{1065}
+        5 -> I64{1008}
+        6 -> I64{961}
+        7 -> I64{921}
+        8 -> I64{887}
+        9 -> I64{857}
+        10 -> I64{830}
+        11 -> I64{806}
+        12 -> I64{783}
+        13 -> I64{763}
+        14 -> I64{744}
+        15 -> I64{726}
+        16 -> I64{710}
+        17 -> I64{694}
+        18 -> I64{680}
+        19 -> I64{666}
+        20 -> I64{653}
+        21 -> I64{640}
+        22 -> I64{628}
+        23 -> I64{617}
+        24 -> I64{606}
+        25 -> I64{596}
+        26 -> I64{585}
+        27 -> I64{576}
+        28 -> I64{567}
+        29 -> I64{558}
+        30 -> I64{549}
+        31 -> I64{540}
+        32 -> I64{532}
+        33 -> I64{524}
+        34 -> I64{517}
+        35 -> I64{509}
+        36 -> I64{502}
+        37 -> I64{495}
+        38 -> I64{488}
+        39 -> I64{482}
+        40 -> I64{475}
+        41 -> I64{469}
+        42 -> I64{463}
+        43 -> I64{457}
+        44 -> I64{451}
+        45 -> I64{445}
+        46 -> I64{439}
+        47 -> I64{434}
+        48 -> I64{429}
+        49 -> I64{423}
+        50 -> I64{418}
+        51 -> I64{413}
+        52 -> I64{408}
+        53 -> I64{403}
+        54 -> I64{398}
+        55 -> I64{394}
+        56 -> I64{389}
+        57 -> I64{385}
+        58 -> I64{380}
+        59 -> I64{376}
+        60 -> I64{371}
+        61 -> I64{367}
+        62 -> I64{363}
+        63 -> I64{359}
+        64 -> I64{355}
+        65 -> I64{351}
+        66 -> I64{347}
+        67 -> I64{343}
+        68 -> I64{339}
+        69 -> I64{336}
+        70 -> I64{332}
+        71 -> I64{328}
+        72 -> I64{325}
+        73 -> I64{321}
+        74 -> I64{318}
+        75 -> I64{314}
+        76 -> I64{311}
+        77 -> I64{308}
+        78 -> I64{304}
+        79 -> I64{301}
+        80 -> I64{298}
+        81 -> I64{295}
+        82 -> I64{291}
+        83 -> I64{288}
+        84 -> I64{285}
+        85 -> I64{282}
+        86 -> I64{279}
+        87 -> I64{276}
+        88 -> I64{273}
+        89 -> I64{270}
+        90 -> I64{268}
+        91 -> I64{265}
+        92 -> I64{262}
+        93 -> I64{259}
+        94 -> I64{256}
+        95 -> I64{254}
+        96 -> I64{251}
+        97 -> I64{248}
+        98 -> I64{246}
+        99 -> I64{243}
+        100 -> I64{241}
+        101 -> I64{238}
+        102 -> I64{236}
+        103 -> I64{233}
+        104 -> I64{231}
+        105 -> I64{228}
+        106 -> I64{226}
+        107 -> I64{223}
+        108 -> I64{221}
+        109 -> I64{219}
+        110 -> I64{216}
+        111 -> I64{214}
+        112 -> I64{212}
+        113 -> I64{209}
+        114 -> I64{207}
+        115 -> I64{205}
+        116 -> I64{203}
+        117 -> I64{200}
+        118 -> I64{198}
+        119 -> I64{196}
+        120 -> I64{194}
+        121 -> I64{192}
+        122 -> I64{190}
+        123 -> I64{188}
+        124 -> I64{186}
+        125 -> I64{184}
+        126 -> I64{181}
+        127 -> I64{179}
+        128 -> I64{177}
+        129 -> I64{175}
+        130 -> I64{173}
+        131 -> I64{172}
+        132 -> I64{170}
+        133 -> I64{168}
+        134 -> I64{166}
+        135 -> I64{164}
+        136 -> I64{162}
+        137 -> I64{160}
+        138 -> I64{158}
+        139 -> I64{156}
+        140 -> I64{155}
+        141 -> I64{153}
+        142 -> I64{151}
+        143 -> I64{149}
+        144 -> I64{147}
+        145 -> I64{146}
+        146 -> I64{144}
+        147 -> I64{142}
+        148 -> I64{140}
+        149 -> I64{139}
+        150 -> I64{137}
+        151 -> I64{135}
+        152 -> I64{133}
+        153 -> I64{132}
+        154 -> I64{130}
+        155 -> I64{128}
+        156 -> I64{127}
+        157 -> I64{125}
+        158 -> I64{124}
+        159 -> I64{122}
+        160 -> I64{120}
+        161 -> I64{119}
+        162 -> I64{117}
+        163 -> I64{116}
+        164 -> I64{114}
+        165 -> I64{112}
+        166 -> I64{111}
+        167 -> I64{109}
+        168 -> I64{108}
+        169 -> I64{106}
+        170 -> I64{105}
+        171 -> I64{103}
+        172 -> I64{102}
+        173 -> I64{100}
+        174 -> I64{99}
+        175 -> I64{97}
+        176 -> I64{96}
+        177 -> I64{94}
+        178 -> I64{93}
+        179 -> I64{92}
+        180 -> I64{90}
+        181 -> I64{89}
+        182 -> I64{87}
+        183 -> I64{86}
+        184 -> I64{85}
+        185 -> I64{83}
+        186 -> I64{82}
+        187 -> I64{80}
+        188 -> I64{79}
+        189 -> I64{78}
+        190 -> I64{76}
+        191 -> I64{75}
+        192 -> I64{74}
+        193 -> I64{72}
+        194 -> I64{71}
+        195 -> I64{70}
+        196 -> I64{68}
+        197 -> I64{67}
+        198 -> I64{66}
+        199 -> I64{64}
+        200 -> I64{63}
+        201 -> I64{62}
+        202 -> I64{61}
+        203 -> I64{59}
+        204 -> I64{58}
+        205 -> I64{57}
+        206 -> I64{56}
+        207 -> I64{54}
+        208 -> I64{53}
+        209 -> I64{52}
+        210 -> I64{51}
+        211 -> I64{49}
+        212 -> I64{48}
+        213 -> I64{47}
+        214 -> I64{46}
+        215 -> I64{45}
+        216 -> I64{43}
+        217 -> I64{42}
+        218 -> I64{41}
+        219 -> I64{40}
+        220 -> I64{39}
+        221 -> I64{38}
+        222 -> I64{36}
+        223 -> I64{35}
+        224 -> I64{34}
+        225 -> I64{33}
+        226 -> I64{32}
+        227 -> I64{31}
+        228 -> I64{30}
+        229 -> I64{29}
+        230 -> I64{27}
+        231 -> I64{26}
+        232 -> I64{25}
+        233 -> I64{24}
+        234 -> I64{23}
+        235 -> I64{22}
+        236 -> I64{21}
+        237 -> I64{20}
+        238 -> I64{19}
+        239 -> I64{18}
+        240 -> I64{17}
+        241 -> I64{15}
+        242 -> I64{14}
+        243 -> I64{13}
+        244 -> I64{12}
+        245 -> I64{11}
+        246 -> I64{10}
+        247 -> I64{9}
+        248 -> I64{8}
+        249 -> I64{7}
+        250 -> I64{6}
+        251 -> I64{5}
+        252 -> I64{4}
+        253 -> I64{3}
+        254 -> I64{2}
+        255 -> I64{1}
+        else -> I64{0}
+    }
+}
+// Exact positive IEEE round (ties away), then Rust's saturating as-i64.
+fn hll_round(value: Float) -> I64 {
+    bits :: rt_f64_bits(value)
+    exponent :: ((bits >> I64{52}).bit_and(I64{2047})) - I64{1023}
+    if (exponent >= I64{63}) -> return I64{9223372036854775807}
+    if (exponent < I64{-1}) -> return I64{0}
+    if (exponent == I64{-1}) -> return I64{1}
+    significand :: (bits.bit_and(I64{4503599627370495})).bit_or(I64{4503599627370496})
+    if (exponent >= I64{52}) -> return significand << (exponent - I64{52})
+    shift :: I64{52} - exponent
+    (significand >> shift) + ((significand >> (shift - I64{1})).bit_and(I64{1}))
+}
+fn hll_count(value: I64) -> I64 {
+    sync_mutex_lock(value + HLL_MUTEX)
+    empty := I64{0}
+    at := I64{0}
+    loop at < HLL_REGISTERS {
+        rank :: rt_text_byte(value + HLL_DATA + at * HLL_REGISTER_BYTES)
+        if (rank == I64{0}) -> empty += I64{1}
+        at += I64{1}
+    }
+    if (empty > I64{0}) {
+        sync_mutex_unlock(value + HLL_MUTEX)
+        return hll_linear(empty)
+    }
+    sum := Float{-0.0}
+    at = I64{0}
+    loop at < HLL_REGISTERS {
+        rank :: rt_text_byte(value + HLL_DATA + at * HLL_REGISTER_BYTES)
+        // Every U8 rank0..255 gives a normal, exact power-of-two exponent.
+        sum += rt_f64_from_bits((I64{1023} - rank) << I64{52})
+        at += I64{1}
+    }
+    sync_mutex_unlock(value + HLL_MUTEX)
+    alpha :: Float{0.7213} / (Float{1.0} + Float{1.079} / Float{256.0})
+    hll_round(alpha * Float{256.0} * Float{256.0} / sum)
+}
+#Export(c) fn jet_hyper_log_log_new() -> I64 {
+    value :: jet_rt_alloc(HLL_BYTES, I64{8})
+    thread_zero(value, HLL_BYTES)
+    sync_store(value + HLL_REFS, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_clone_jet_hyper_log_log(value: I64) -> I64 {
+    _ := sync_add(value + HLL_REFS, I64{1})
+    value
+}
+#Export(c) fn jet_rt_handle_drop_jet_hyper_log_log(value: I64) {
+    if (value == I64{0}) -> return
+    if (sync_add(value + HLL_REFS, I64{-1}) == I64{1}) -> jet_rt_free(value, HLL_BYTES, I64{8})
+}
+#Export(c) fn jet_rt_native_hll_add(value: I64, text: I64) {
+    hash :: cms_hash(text, I64{-3750763034362895579})
+    index :: hash.bit_and(I64{255})
+    rest := (hash >> I64{8}).bit_and(I64{72057594037927935})
+    rank := I64{57}
+    if (rest != I64{0}) {
+        // Logical shift left eight high zeros in the seed's u64 rest.
+        rank = I64{9}
+        bit := I64{36028797018963968}
+        loop {
+            if ((rest.bit_and(bit)) != I64{0}) -> break
+            rank += I64{1}
+            bit >>= I64{1}
+        }
+    }
+    sync_mutex_lock(value + HLL_MUTEX)
+    address :: value + HLL_DATA + index * HLL_REGISTER_BYTES
+    if (rank > rt_text_byte(address)) {
+        #Unsafe("one native HLL mutex protects this packed register byte") { os_store_u8(address, rank) }
+    }
+    sync_mutex_unlock(value + HLL_MUTEX)
+}
+#Export(c) fn jet_rt_native_hll_count(value: I64) -> I64 { jet_int_owned_from_i64(hll_count(value)) }
+#Export(c) fn jet_rt_handle_show_jet_hyper_log_log(value: I64) -> I64 {
+    count :: hll_count(value)
+    text :: jet_rt_string_builder_new()
+    rt_text_push_word(text, I64{7453259962533312840}, I64{8}) // HyperLog
+    rt_text_push_word(text, I64{7959390388117532492}, I64{8}) // Log(coun
+    rt_text_push_word(text, I64{15732}, I64{2}) // t=
+    rt_text_push_number(text, count)
+    rt_text_push_word(text, I64{41}, I64{1})
+    jet_rt_string_builder_finish(text)
+}

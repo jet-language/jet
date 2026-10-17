@@ -1,0 +1,59 @@
+// Loaded policy facts (Rust Loader.rs read_load): the canonical Package
+// reader owns package vocabulary/values; Foundation owns the one policy ladder.
+// The bootstrap unit already includes Jetpack's PackageModel source closure.
+use jet_foundation.[Diagnostic, PolicyDeclaration, PolicyError, PolicyKey, PolicyScope, Program, Span, POLICY_RULES, diagnostic_with_source_path, policy_key_name, policy_resolve]
+
+fn jet_driver_read_package_policy(value: String) -> PackagePolicy PackageParseError! {
+    // PackageFacts.parse rejects this shape before reading any fields. Retain
+    // that same refusal when the driver asks for just the policy field.
+    if pkg_retired_record_head_spans(value).len() > 0 -> return Err(PackageParseError.RetiredRecordHead)
+    policy :: pkg_parse_package_policy(pkg_record_body(value, "policy"))
+    Ok(policy)
+}
+
+fn jet_driver_policy_ladder_diagnostic(key: PolicyKey, error: PolicyError, path: String) -> Diagnostic Never! {
+    span :: if error == {
+        .ProhibitedScope(_, _, span) | .Widening(_, _, _, span) -> span
+        .Conflict(_, _, _, second) -> second
+    }
+    diagnostic_with_source_path(jet_driver_diagnostic("E0355", span, "invalid effective `{policy_key_name(key)}` policy", "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint", "remove the conflict or tighten the inner declaration"), path, 0)
+}
+
+fn jet_driver_policy_outer(scope: PolicyScope) -> Bool Never! {
+    scope == PolicyScope.Organization || scope == PolicyScope.Package || scope == PolicyScope.Module
+}
+
+fn jet_driver_load_policy(program: &Program, package_policy: [PolicyDeclaration], path: String, diagnostics: &[Diagnostic]) -> Bool Never! {
+    if program.policy_declarations.len() == 0 && package_policy.len() == 0 -> return true
+    // Rewrite only source-authored declarations, then prepend the package
+    // chain. Package declarations retain their absolute manifest/carrier path.
+    loop index in 0..<program.policy_declarations.len() -> program.policy_declarations[index].source = path
+    effective := package_policy.copy()
+    &effective.extend(program.policy_declarations)
+    program.policy_declarations = ^effective
+    outer := [PolicyDeclaration]{}
+    loop declaration in program.policy_declarations {
+        if jet_driver_policy_outer(declaration.scope) -> &outer.push(declaration)
+    }
+    loop rule in POLICY_RULES {
+        if policy_resolve(rule.key, outer) == .Err(error) {
+            &diagnostics.push(jet_driver_policy_ladder_diagnostic(rule.key, error, path))
+            return false
+        }
+        // Match Rust's target-specific chains: include every declaration at
+        // that exact function/block target, not a CLI reconstruction by line.
+        loop declaration in program.policy_declarations {
+            if jet_driver_policy_outer(declaration.scope) || declaration.key != rule.key -> next
+            target :: declaration.target ?? next
+            chain := outer.copy()
+            loop candidate in program.policy_declarations {
+                if !jet_driver_policy_outer(candidate.scope) && candidate.target == (Val(target)) -> &chain.push(candidate)
+            }
+            if policy_resolve(rule.key, chain) == .Err(error) {
+                &diagnostics.push(jet_driver_policy_ladder_diagnostic(rule.key, error, path))
+                return false
+            }
+        }
+    }
+    true
+}

@@ -1,0 +1,9 @@
+use core.compiler as compiler
+
+#Test("original FFI leaf lexer diagnostics and nonempty parsed items") {
+    source :: prep { String.from_bytes([U8]{10,77,69,83,83,65,71,69,32,58,58,32,112,114,101,112,32,123,32,34,102,102,105,32,108,101,97,102,34,32,125,10,10,102,110,32,114,117,110,40,41,32,45,91,70,70,73,46,80,121,44,32,73,79,93,62,32,123,10,32,32,32,32,112,114,105,110,116,40,77,69,83,83,65,71,69,41,10,125,10}) ?? panic("original source UTF-8") }
+    lexed :: prep { compiler.lex(source) ?? panic("lex original FFI source") }
+    assert(lexed.diagnostics.is_empty())
+    parsed :: prep { compiler.parse(source) ?? panic("parse original FFI source") }
+    assert(!parsed.items.is_empty())
+}

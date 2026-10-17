@@ -134,7 +134,9 @@ pub(crate) fn expand_generic_module_aliases(
         traits.register_synthetic_rollback();
         traits.register_synthetic_display_debug();
         traits.register_synthetic_close();
-        traits.register_synthetic_operators();
+        // Bound-resolution-only registry: discarded before checked source
+        // registration, whose builtin rows use bundle-wide Core ownership.
+        traits.register_synthetic_operators(|_| false);
         traits.register_synthetic_iter_index();
         traits.register_synthetic_io();
         traits.register_synthetic_driver();
@@ -221,8 +223,8 @@ pub(crate) fn expand_generic_module_aliases(
                             "`{original}` is private in module `{}`",
                             module_aliases[source_idx]
                         ),
-                        "only `pub` items can be brought into scope with `use`".to_string(),
-                        format!("add `pub` before `module {original}` in the defining file"),
+                        "an item of a `priv module` is usable only by its enclosing module (D-VIS-MODULE1)".to_string(),
+                        "import it from inside its enclosing module, or remove `priv` from its module".to_string(),
                         Some(import.span),
                     ));
                     continue;
@@ -511,10 +513,10 @@ pub(crate) fn expand_generic_module_aliases(
 /// projection (`plain_inline_module_display_paths`), no engine change. Generic
 /// instances are skipped — `expand_alias` already lifted their members.
 ///
-/// Visibility is preserved: the bare name and the qualified `bank.Account`
-/// spelling resolve inside the module body, but only a `pub` member's
-/// qualified spelling resolves in the rest of the file, so a private member
-/// stays unreachable from outside exactly as `pub` promises.
+/// Visibility (D-VIS-MODULE1): the bare name and the qualified `bank.Account`
+/// spelling resolve inside the module body, and the qualified spelling
+/// resolves in the rest of the file — the file is the enclosing module, which
+/// reaches the members of its `priv module`s too.
 pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
     for module in bundle.modules.iter_mut() {
         let mut declarations: Vec<Item> = Vec::new();
@@ -530,8 +532,8 @@ pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
             continue;
         }
         // The rest of the file reaches a lifted member only through its
-        // qualified `module.Type` spelling, and only when it is `pub` — the
-        // same consumer rewrite generic-module instances get.
+        // qualified `module.Type` spelling — the same consumer rewrite
+        // generic-module instances get.
         if !exported.is_empty() {
             rewrite_exported_inline_types(&mut module.items, &exported);
         }
@@ -539,10 +541,9 @@ pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
     }
 }
 
-/// Rewrite public inline-module type projections in every function scope in
-/// one file. A sibling inline module is outside the declaring module's body,
-/// but it still uses the enclosing file's public module surface. Private
-/// members never enter `exported`, so this cannot widen their reach.
+/// Rewrite inline-module type projections in every function scope in one
+/// file. A sibling inline module is outside the declaring module's body, but
+/// it still sees every member type of the enclosing file's modules.
 fn rewrite_exported_inline_types(items: &mut [Item], exported: &HashMap<String, Type>) {
     for item in items {
         match item {
@@ -582,11 +583,11 @@ fn hoist_inline_module_types(
     let mut direct_names = Vec::new();
     let display_alias = inline_type_alias(&module_name);
     for inner in body.iter() {
-        let (name, is_pub) = match inner {
-            Item::Struct(def) => (&def.name, def.is_pub || def.is_package_pub),
-            Item::Enum(def) => (&def.name, def.is_pub || def.is_package_pub),
-            Item::Trait(def) => (&def.name, def.is_pub || def.is_package_pub),
-            Item::Tag(def) => (&def.name, def.is_pub || def.is_package_pub),
+        let name = match inner {
+            Item::Struct(def) => &def.name,
+            Item::Enum(def) => &def.name,
+            Item::Trait(def) => &def.name,
+            Item::Tag(def) => &def.name,
             _ => continue,
         };
         let resolved = Type::Named(module_type_name(&module_alias, name));
@@ -598,10 +599,11 @@ fn hoist_inline_module_types(
         // to the wrapper's canonical identity before body checking.
         direct_types.insert(module_type_name(&display_alias, name), resolved.clone());
         direct_names.push(name.clone());
-        if is_pub {
-            exported.insert(format!("{source_path}.{name}"), resolved.clone());
-            exported.insert(format!("{module_name}.{name}"), resolved);
-        }
+        // The file reaches a public member only by its full module path. A
+        // nested module's own name (`bank` inside `vis2`) is a relative
+        // spelling inside its parent's body; exporting it file-wide would let
+        // `vis2.bank.Account` answer for a top-level `bank.Account`.
+        exported.insert(format!("{source_path}.{name}"), resolved);
     }
 
     let mut kept = Vec::with_capacity(body.len());

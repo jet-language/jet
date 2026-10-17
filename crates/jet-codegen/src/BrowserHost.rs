@@ -28,7 +28,7 @@ fn jet_deadline_remaining_ms() -> Option<i64> {
 }
 
 mod jet_std {
-    pub use jet_foundation::DataTree::DataTree;
+    pub use jet_foundation::Dyn::Dyn;
     pub use jet_foundation::Outcome::{JetAbsent, JetOutcome};
 
     #[derive(Clone, Debug, PartialEq)]
@@ -187,50 +187,6 @@ fn timeout_value(value: &CtValue, span: Span) -> Result<JetBrowserTimeout, Diagn
     }
 }
 
-fn profile_value(value: &CtValue, span: Span) -> Result<JetBrowserProfile, Diagnostic> {
-    match (
-        field(value, "BrowserProfile", "name"),
-        field(value, "BrowserProfile", "version"),
-    ) {
-        (Some(CtValue::Str(name)), Some(CtValue::Str(version))) => Ok(JetBrowserProfile {
-            name: name.clone(),
-            version: version.clone(),
-        }),
-        _ => Err(host_error("profile", span)),
-    }
-}
-
-fn profile_ct(value: JetBrowserProfile) -> CtValue {
-    CtValue::Struct {
-        type_name: "BrowserProfile".to_string(),
-        fields: vec![
-            ("name".to_string(), CtValue::Str(value.name)),
-            ("version".to_string(), CtValue::Str(value.version)),
-        ],
-    }
-}
-
-fn timeout_ct(value: JetBrowserTimeout) -> CtValue {
-    CtValue::Struct {
-        type_name: "BrowserTimeout".to_string(),
-        fields: vec![("milliseconds".to_string(), CtValue::Int(value.milliseconds))],
-    }
-}
-
-fn locked_ct(value: JetBrowserLocked) -> CtValue {
-    CtValue::Struct {
-        type_name: "BrowserLocked".to_string(),
-        fields: vec![
-            ("engine".to_string(), CtValue::Str(value.engine)),
-            ("version".to_string(), CtValue::Str(value.version)),
-            ("binary".to_string(), CtValue::Str(value.binary)),
-            ("protocol".to_string(), CtValue::Str(value.protocol)),
-            ("size".to_string(), CtValue::Int(value.size)),
-            ("output_hash".to_string(), CtValue::Str(value.output_hash)),
-        ],
-    }
-}
-
 fn locked_value(value: &CtValue, span: Span) -> Result<JetBrowserLocked, Diagnostic> {
     match (
         field(value, "BrowserLocked", "engine"),
@@ -259,46 +215,6 @@ fn locked_value(value: &CtValue, span: Span) -> Result<JetBrowserLocked, Diagnos
     }
 }
 
-pub(crate) fn eval_core_call(
-    method: &str,
-    args: Vec<CtValue>,
-    span: Span,
-) -> Result<CtValue, Diagnostic> {
-    Ok(match method {
-        "profile" => result(
-            jet_browser_profile(&string_arg(&args, 0, span)?),
-            profile_ct,
-        ),
-        "timeout" => {
-            let milliseconds = match args.first() {
-                Some(CtValue::Int(value)) => *value,
-                _ => return Err(host_error("timeout argument", span)),
-            };
-            result(jet_browser_timeout(milliseconds), timeout_ct)
-        }
-        "locked" => result(jet_browser_locked(&string_arg(&args, 0, span)?), locked_ct),
-        "connect" => result(
-            jet_browser_connect(&string_arg(&args, 0, span)?),
-            |browser| store("Browser", BrowserHostValue::Browser(browser)),
-        ),
-        "connect_profile" => {
-            let endpoint = string_arg(&args, 0, span)?;
-            let profile = profile_value(
-                args.get(1).ok_or_else(|| host_error("profile", span))?,
-                span,
-            )?;
-            let timeout = timeout_value(
-                args.get(2).ok_or_else(|| host_error("timeout", span))?,
-                span,
-            )?;
-            result(
-                jet_browser_connect_profile(&endpoint, &profile, timeout),
-                |browser| store("Browser", BrowserHostValue::Browser(browser)),
-            )
-        }
-        _ => return Err(host_error(method, span)),
-    })
-}
 
 pub(crate) fn eval_method(
     kind: &str,

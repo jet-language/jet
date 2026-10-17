@@ -1,0 +1,81 @@
+// The `jet trust` / `jetpack config trust` command surface over the U19 trust
+// store: record JSON (Rust `record_json`/`records_json`), grant selector
+// parsing, and gated grant writers. Kept apart from TrustStore.jet so the
+// store's read path (path, typed records) carries no JSON-writer, TrustError,
+// or PackageGateError dependency: the compiler unit assembles TrustStore.jet
+// for `jet inspect gates` alone.
+
+// Rust `record_json`.
+fn trust_record_json(record: TrustRecord) -> String Never! {
+    if record == {
+        .Hash(hash) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: Dyn.Text("hash")},
+            TrustJSONField{key: "hash", value: Dyn.Text(hash.copy())},
+            TrustJSONField{key: "revocationKey", value: Dyn.Text("{TRUST_HASH_PREFIX}{hash}")}
+        })
+        .Pattern(pattern) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: Dyn.Text("pattern")},
+            TrustJSONField{key: "pattern", value: Dyn.Text(pattern.copy())},
+            TrustJSONField{key: "revocationKey", value: Dyn.Text("{TRUST_PATTERN_PREFIX}{pattern}")}
+        })
+        .Grant(grant) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: Dyn.Text("grant")},
+            TrustJSONField{key: "authority", value: Dyn.Text(grant.authority.copy())},
+            TrustJSONField{key: "subject", value: Dyn.Text(grant.subject.copy())},
+            TrustJSONField{key: "scope", value: Dyn.Text(grant.scope.copy())},
+            TrustJSONField{key: "revocationKey", value: Dyn.Text(grant.key())}
+        })
+        .Raw(line) -> trust_json_object_text([TrustJSONField]{
+            TrustJSONField{key: "type", value: Dyn.Text("raw")},
+            TrustJSONField{key: "line", value: Dyn.Text(line.copy())},
+            TrustJSONField{key: "revocationKey", value: Dyn.Text(line.copy())}
+        })
+    }
+}
+
+// Rust `records_json`: `{"grants":[...]}`.
+fn trust_records_json(records: [TrustRecord]) -> String Never! {
+    rendered := [String]{}
+    loop record in records -> &rendered.push(trust_record_json(record))
+    "{{\"grants\":[{rendered.join(",")}]}}"
+}
+
+// `jet trust grant <selector> [--scope user|repo]`: an explicit
+// `authority:subject` selector, or a bare subject whose authority is
+// inferred.
+fn trust_parse_grant_selector(selector: String, scope: String) -> TrustGrant TrustError! {
+    trimmed :: selector.trim()
+    if trimmed == "" -> return Err(TrustError.Grant("grant selector is empty"))
+    if trust_text_split_first(trimmed, TRUST_COLON) == {
+        .Val(parts) -> {
+            if TrustAuthority.parse(parts.before) != None && parts.after.trim() == "" -> return Err(TrustError.Grant("trust grant `{parts.before}:` needs a subject"))
+        }
+        .None -> {}
+    }
+    if scope != TRUST_SCOPE_USER && scope != TRUST_SCOPE_REPO -> return Err(TrustError.Grant("unknown trust scope `{scope}`"))
+    if trust_text_split_first(trimmed, TRUST_COLON) == {
+        .Val(parts) -> {
+            if TrustAuthority.parse(parts.before) != None -> return Ok(TrustGrant{authority: parts.before, subject: parts.after, scope})
+        }
+        .None -> {}
+    }
+    Ok(TrustGrant{authority: TrustAuthority.infer(trimmed).label(), subject: trimmed, scope})
+}
+
+// crates/jetpack/src/Trust.rs:680: gate before even reading the store.
+fn trust_grant_hash(store: String, project_dir: String, hash: String) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "hash:{hash} -> {store}")
+    Ok(trust_store_add_line(store, "{TRUST_HASH_PREFIX}{hash}"))
+}
+
+// crates/jetpack/src/Trust.rs:691; false only when already present.
+fn trust_add_pattern(store: String, project_dir: String, pattern: String) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "pattern:{pattern} -> {store}")
+    Ok(trust_store_add_line(store, "{TRUST_PATTERN_PREFIX}{pattern}"))
+}
+
+// crates/jetpack/src/Trust.rs:703; keep the complete gate diagnostics.
+fn trust_add_grant(store: String, project_dir: String, grant: TrustGrant) -[FS, Env]> Bool PackageGateError! {
+    pkg_check_project_gate(project_dir, PolicyKey.TrustGrant, "{grant.key()} -> {store}")
+    Ok(trust_store_add_line(store, grant.line()))
+}

@@ -1,0 +1,170 @@
+use core.files as files
+use core.time as time
+use core.sys as sys
+
+// D-CHILD-READ-BYTES1 option A plugs in here; no line iterator emulation.
+fn kit_steps_session_read(step: KitStep, state: KitStepState) -> KitStepResult {
+    KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "read_bytes")}
+}
+
+fn kit_steps_recv_valid(text: String) -> Bool {
+    words :: kit_steps_tokens(kit_steps_body(text)) ?? return false
+    if words.len() < 2 || words[0].text != "recv" -> return false
+    cursor := 2
+    if cursor < words.len() && words[cursor].text == "line" -> cursor += 1
+    collecting :: cursor < words.len() && words[cursor].text == "collect"
+    if collecting -> cursor += 1
+    if cursor < words.len() && words[cursor].text == "until" {
+        cursor += 1
+        start :: cursor
+        loop cursor < words.len() {
+            raw :: kit_steps_byte_slice(text, words[cursor].start, words[cursor].end)
+            if kit_expect_named(["timeout", "within", "every", "optional"], raw) -> break
+            cursor += 1
+        }
+        if cursor == start -> return false
+        predicates :: kit_steps_predicates(kit_steps_byte_slice(text, words[start].start, words[cursor - 1].end)) ?? return false
+        reason :: kit_steps_byte_slice(text, kit_steps_comment(text), text.count_bytes())
+        loop predicate in predicates {
+            tokens :: kit_steps_tokens(predicate) ?? return false
+            if predicate.starts_with("$") {
+                if tokens.len() < 3 || tokens[1].text != "=" || kit_steps_json_path(tokens[0].text) == None -> return false
+                _ :: kit_steps_json_assertion("stdout doc {predicate}") ?? return false
+            } else if predicate.starts_with("ndjson ") {
+                _ :: kit_steps_json_assertion("stdout {predicate} {reason}") ?? return false
+            } else {
+                _ :: kit_steps_stream_assertion("stdout", "{predicate} {reason}") ?? return false
+            }
+        }
+    } else if collecting -> return false
+    deadline := ""
+    every := false
+    loop cursor < words.len() {
+        key :: words[cursor].text
+        if key == "optional" -> return deadline != "" && cursor + 1 == words.len()
+        if cursor + 1 >= words.len() || kit_steps_duration_ns(words[cursor + 1].text) == None -> return false
+        if key == "timeout" || key == "within" {
+            if deadline != "" -> return false
+            deadline = key
+        } else if key == "every" {
+            if every -> return false
+            every = true
+        } else {
+            return false
+        }
+        cursor += 2
+    }
+    if every && deadline == "" -> return false
+    true
+}
+
+fn kit_steps_session_action(step: KitStep, context: KitStepCtx, previous: KitStepState) -> KitStepResult {
+    state := previous
+    if step.action == "recv" -> return kit_steps_session_read(step, state)
+    if step.action == "session" {
+        policy :: kit_steps_policy(step, context.env) ?? return kit_steps_action_error(state, "invalid session policy")
+        overlay :: kit_steps_environment(context.plan, policy, context.work, context.scratch, state.built)
+        prepared :: kit_steps_prepare(step, context.env, context.work, context.scratch, context.snapshots, state.built, overlay) ?? return kit_steps_action_error(state, "{err}")
+        started :: time.instant()
+        child := kit_exec_spec(prepared.env, prepared.argv, prepared.cwd, context.scratch, prepared.overlay).spawn() ?? return kit_steps_action_error(state, "session spawn: {err}")
+        input_error := ""
+        if step.stdin == "null" -> child.stdin.close()
+        else if prepared.stdin != "" {
+            &child.stdin.write(prepared.stdin) ?? {
+                input_error = "session stdin: {err}"
+                ()
+            }
+        }
+        &state.children.push(KitPendingChild{label: step.label, child: child, started: started, step: step, joined: false, input_error: input_error})
+        if input_error != "" -> return kit_steps_action_error(state, input_error)
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    loop index in 0..<state.children.len() {
+        if state.children[index].label != step.label || state.children[index].joined -> next
+        pending := state.children[index]
+        if step.action == "send" {
+            payload :: if step.literal_input -> step.argv[0] else -> files.read(files.join(context.snapshots, step.argv[0])) ?? return kit_steps_action_error(state, "send file: {err}")
+            if kit_steps_build_target_text(payload) -> return KitStepResult{state: state, verdict: kit_expect_verdict("REFUSED", "build-target")}
+            expanded :: kit_steps_runtime_expand(payload, context, state) ?? return kit_steps_action_error(state, "send token unavailable")
+            cr :: String.from_bytes([U8{13}]) ?? panic("CR")
+            framed :: if pending.step.session_mode == "content-length" -> "Content-Length: {expanded.len()}{cr}\n{cr}\n{expanded}" else if pending.step.session_mode == "line" -> "{expanded}\n" else -> expanded
+            &pending.child.stdin.write(framed) ?? return kit_steps_action_error(state, "session send: {err}")
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
+        if step.action == "signal" {
+            delivered :: kit_steps_signal(pending.child.id(), step.argv[0]) ?? return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "signal delivery: {err}")}
+            state.children[index].signalled = delivered
+            return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+        }
+        if step.action == "close" -> pending.child.stdin.close()
+        if step.duration > 0 {
+            started :: time.instant()
+            loop !(pending.child.exited() ?? return kit_steps_action_error(state, "wait status: {err}")) {
+                if started.elapsed().ns >= step.duration -> return KitStepResult{state: state, verdict: kit_expect_verdict("FAIL", "wait deadline exceeded")}
+                time.sleep(1ms)
+            }
+        }
+        receipt :: pending.child.wait() ?? return kit_steps_action_error(state, "session wait: {err}")
+        state.last = kit_exec_receipt(receipt, pending.started.elapsed().ns, pending.input_error)
+        if pending.signalled -> state.last.signal = None
+        state.children[index].joined = true
+        return KitStepResult{state: state, verdict: kit_expect_verdict("PASS", "")}
+    }
+    kit_steps_action_error(state, "session label unavailable")
+}
+
+fn kit_steps_signal(pid: Int, name: String) -> Bool Err! {
+    number :: if name == "INT" || name == "SIGINT" -> 2 else if name == "TERM" || name == "SIGTERM" -> 15 else if name == "KILL" || name == "SIGKILL" -> 9 else if name == "HUP" || name == "SIGHUP" -> 1 else if name == "STOP" || name == "SIGSTOP" -> 19 else if name == "CONT" || name == "SIGCONT" -> 18 else -> Int.parse(name) ?? return Err("unknown signal")
+    #Unsafe("the case explicitly authorizes signalling its own spawned child") {
+        sys.kill(pid, number) ?? return Err("signal delivery failed")
+    }
+    Ok(number != 0)
+}
+
+fn kit_steps_parallel(steps: [KitStep], context: KitStepCtx, state: KitStepState) -> KitStepResult {
+    // #4790: keep task handles in joined call frames, not a typed Task list.
+    (sender, reports) :: channel<String>()
+    errors := [String]{}
+    task.group sends {
+        kit_steps_parallel_start(sends, steps, 0, context, state, sender)
+    }
+    sender.close()
+    loop message in reports {
+        if message != "" -> &errors.push(message)
+    }
+    KitStepResult{state: state, verdict: if errors.len() == 0 -> kit_expect_verdict("PASS", "") else -> kit_expect_verdict("ERROR", errors.join("; "))}
+}
+
+// Keep the report infallible; transport failures remain ordinary ERROR details.
+fn kit_steps_send_result(step: KitStep, context: KitStepCtx, state: KitStepState) -> String Never! {
+    result :: kit_steps_session_action(step, context, state)
+    if result.verdict.status == "PASS" -> "" else -> result.verdict.detail
+}
+
+fn kit_steps_send_report(step: KitStep, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
+    sender.send(kit_steps_send_result(step, context, state))
+}
+
+fn kit_steps_parallel_start(group: Group, steps: [KitStep], index: Int, context: KitStepCtx, state: KitStepState, sender: Sender<String>) Never! {
+    if index >= steps.len() -> return
+    original :: steps[index]
+    if original.action != "send" {
+        sender.send("parallel contains a non-send action")
+        kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+        return
+    }
+    step :: kit_steps_resolve_step(original, context, state) ?? {
+        sender.send("parallel send token unavailable")
+        kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+        return
+    }
+    reporter :: sender.copy()
+    worker :: task kit_steps_send_report(step, context, state, reporter)
+    // Start all remaining sends before joining this one, preserving concurrency.
+    kit_steps_parallel_start(group, steps, index + 1, context, state, sender)
+    joined :: ^worker.join() ?? {
+        sender.send("parallel task join failed")
+        return
+    }
+    joined ?? panic("infallible parallel report")
+}

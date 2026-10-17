@@ -10,7 +10,7 @@
 NIX_FALLBACK_IMPORT_SCHEMA :: prep { "jetpack.nix-fallback.v1" }
 
 // One required projection of a fallback document.
-pub enum NixFallbackProjection {
+enum NixFallbackProjection {
     Graph
     SelectedOutputs
     Dependencies
@@ -68,13 +68,13 @@ pub enum NixFallbackProjection {
 }
 
 // Every required projection, in the reference's lookup order.
-pub fn nix_fallback_projections() -> [NixFallbackProjection] Never! {
+fn nix_fallback_projections() -> [NixFallbackProjection] Never! {
     [NixFallbackProjection]{.Graph, .SelectedOutputs, .Dependencies, .Sources, .Hashes, .Losses, .Proof}
 }
 
 // The root field holding the import object (`jetpackImport`, then
 // `jetpack`); None when the root object is the import object itself.
-pub fn nix_fallback_import_field(root_keys: [String]) -> String? Never! {
+fn nix_fallback_import_field(root_keys: [String]) -> String? Never! {
     wrappers :: [String]{"jetpackImport", "jetpack"}
     loop field in wrappers {
         if root_keys.contains(field) -> return Val(field)
@@ -84,7 +84,7 @@ pub fn nix_fallback_import_field(root_keys: [String]) -> String? Never! {
 
 // Whether a record carries fallback projections; a record without any is the
 // old pinned `nix build --json` shape and retains nothing.
-pub fn nix_fallback_detect(root_keys: [String], import_keys: [String]) -> Bool Never! {
+fn nix_fallback_detect(root_keys: [String], import_keys: [String]) -> Bool Never! {
     markers :: [String]{"jetpackImport", "jetpack", "fallback"}
     loop field in markers {
         if root_keys.contains(field) -> return true
@@ -100,17 +100,17 @@ pub fn nix_fallback_detect(root_keys: [String], import_keys: [String]) -> Bool N
 
 // The canonical JSON of a fallback record, of each selected projection, and
 // of the optional `recipe` and `lock` fields of the import object.
-pub struct NixFallbackCanonical {
-    pub document: String
-    pub graph: String
-    pub selected_outputs: String
-    pub dependencies: String
-    pub sources: String
-    pub hashes: String
-    pub losses: String
-    pub proof: String
-    pub recipe: String?
-    pub lock: String?
+struct NixFallbackCanonical {
+    document: String
+    graph: String
+    selected_outputs: String
+    dependencies: String
+    sources: String
+    hashes: String
+    losses: String
+    proof: String
+    recipe: String?
+    lock: String?
 
     // The facts retained in the producer record, key-ordered.
     fn imported(self) -> NixImportedState Never! {
@@ -140,13 +140,13 @@ pub struct NixFallbackCanonical {
 }
 
 // Jetpack-owned state imported from one fallback record.
-pub struct NixImportedState {
-    pub facts: [String: String]
+struct NixImportedState {
+    facts: [String: String]
 }
 
 // Import a rich fallback record. None means the record is the old pinned
 // `nix build --json` shape with no fallback projections to retain.
-pub fn nix_fallback_import_record(record: DataTree) -> NixImportedState? NixError! {
+fn nix_fallback_import_record(record: Dyn) -> NixImportedState? NixError! {
     root :: nix_fallback_object(record)
     import :: nix_fallback_import_object(root)
     if !nix_fallback_detect(root.keys().to_list(), import.keys().to_list()) -> return Ok(None)
@@ -174,37 +174,42 @@ pub fn nix_fallback_import_record(record: DataTree) -> NixImportedState? NixErro
     Ok(Val(canonical.imported()))
 }
 
-fn nix_fallback_object(value: DataTree) -> [String: DataTree] NixError! {
+fn nix_fallback_object(value: Dyn) -> [String: Dyn] NixError! {
     if value == {
-        .Object(entries) -> return Ok(entries)
+        // D-DATATREE-ORDER1=A: the object's ordered pairs, indexed by name.
+        .Object(entries) -> {
+            members := [String: Dyn]{}
+            loop pair in entries -> members[pair.key] = pair.value
+            return Ok(members)
+        }
         else -> return Err(NixError.FallbackNotObject)
     }
 }
 
 // The import object: the `jetpackImport` or `jetpack` field of the root, or
 // the root itself.
-fn nix_fallback_import_object(root: [String: DataTree]) -> [String: DataTree] NixError! {
+fn nix_fallback_import_object(root: [String: Dyn]) -> [String: Dyn] NixError! {
     if nix_fallback_import_field(root.keys().to_list()) == {
         .Val(field) -> return nix_fallback_object(root[field])
         else -> {}
     }
-    Ok(~root)
+    Ok(root.copy())
 }
 
 // The compact JSON of `projection`'s one field of `object`.
-fn nix_fallback_render(object: [String: DataTree], projection: NixFallbackProjection) -> String NixError! {
+fn nix_fallback_render(object: [String: Dyn], projection: NixFallbackProjection) -> String NixError! {
     field :: projection.select(object.keys().to_list())
     Ok(pkg_json_render(object[field]))
 }
 
-fn nix_fallback_optional(object: [String: DataTree], field: String) -> String? Never! {
+fn nix_fallback_optional(object: [String: Dyn], field: String) -> String? Never! {
     value :: object.get(field) ?? return None
     Val(pkg_json_render(value))
 }
 
 // Whether every number in `value` is finite (JSON has no NaN or infinity).
-fn nix_fallback_is_finite(value: DataTree) -> Bool Never! {
-    children := [DataTree]{}
+fn nix_fallback_is_finite(value: Dyn) -> Bool Never! {
+    children := [Dyn]{}
     if value == {
         .Float(number) -> return number - number == 0.0
         .Array(items) -> {

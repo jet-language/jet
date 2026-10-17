@@ -1,0 +1,13 @@
+# Port of tests/corelib_parts/derives.rs::json_and_toml_hostile_depth_match_all_execution_tiers; original source unchanged.
+# ORACLE-LITERAL: tests/corelib_parts/derives.rs:1270.
+# PENDING-SAME-HEAD: E2 historical reference build E0302, oracle retained.
+fixture: fixtures/json_and_toml_hostile_depth_match_all_execution_tiers
+step: jet build fixture.jet
+step baseline: built
+stdout: = json_and_toml_hostile_depth_match_all_execution_tiers.out
+step: jet run fixture.jet
+stdout: = json_and_toml_hostile_depth_match_all_execution_tiers.out
+stderr: == baseline
+step: jet run --interpret fixture.jet
+stdout: = json_and_toml_hostile_depth_match_all_execution_tiers.out
+stderr: == baseline

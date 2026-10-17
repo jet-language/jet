@@ -1,0 +1,378 @@
+// C FFI is a System V call, not a runtime-handle call. Float values already
+// use the selector's xmm argument/result plan; narrow integers live as words
+// in Jet and normalize exactly the bits the C ABI defines.
+use jet_foundation.[MIRProgram, MIRInstruction, MIRCallArg, MIRForeign, MIRType, MIRLinkArtifactKind, MIRPreludeCallID, MIRValueID]
+
+fn lower_c_scalar(ty: MIRType) -> Bool Never! {
+    kind :: lower_convert_type(ty).kind
+    if kind == {
+        .Int | .Bool | .Float | .Char -> true
+        .IntN(_, bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64
+        else -> lower_ptr_element(ty) != None
+    }
+}
+
+
+fn lower_c_link_valid(p: MIRProgram, id: U64) -> Bool Never! {
+    loop link in p.links {
+        if link.id.value != id -> next
+        loop artifact in link.artifacts {
+            if artifact.kind != .Object && artifact.kind != .StaticLibrary -> return false
+        }
+        return true
+    }
+    false
+}
+
+fn lower_c_encode(m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LIRValueID Never! {
+    base :: lower_convert_type(ty)
+    if base.kind == .Int {
+        raw :: lower_word(&f)
+        lower_convert_exact(&m, &f, raw, value, "jet_int_owned_to_i64", false)
+        return raw
+    }
+    if base.kind == .IntN(signed, bits) {
+        if bits < 64 {
+            raw :: lower_word(&f)
+            lower_narrow_wrap(&f, raw, value, signed, bits)
+            return raw
+        }
+    }
+    value.copy()
+}
+
+fn lower_c_decode(m: &LowerModule, f: &LowerFunction, ty: MIRType, raw: LIRValueID, dst: LIRValueID) Never! {
+    base :: lower_convert_type(ty)
+    if base.kind == .Int -> return lower_convert_exact(&m, &f, dst, raw, "jet_int_owned_from_i64", false)
+    if base.kind == .IntN(signed, bits) {
+        if bits < 64 -> return lower_narrow_wrap(&f, dst, raw, signed, bits)
+    }
+    if base.kind == .Bool {
+        mask :: lower_const(&f, 255)
+        byte :: lower_numeric_binary(&f, LIRBinaryOp.And, raw, mask)
+        zero :: lower_const(&f, 0)
+        return lower_emit(&f, LIRInst.Compare{dst: dst, condition: LIRCondition.Ne, left: byte, right: zero})
+    }
+    if base.kind == .Char {
+        word :: lower_word(&f)
+        lower_narrow_wrap(&f, word, raw, false, 32)
+        maximum :: lower_const(&f, 1114111)
+        too_large :: lower_numeric_compare(&f, LIRCondition.UGt, word, maximum)
+        lower_iter_check(&m, &f, too_large, "native C Char is invalid")
+        start :: lower_const(&f, 55296)
+        shifted :: lower_numeric_binary(&f, LIRBinaryOp.Sub, word, start)
+        span :: lower_const(&f, 2047)
+        surrogate :: lower_numeric_compare(&f, LIRCondition.ULe, shifted, span)
+        lower_iter_check(&m, &f, surrogate, "native C Char is invalid")
+        return lower_emit(&f, LIRInst.Copy{dst: dst, src: word})
+    }
+    lower_emit(&f, LIRInst.Copy{dst: dst, src: raw})
+}
+
+struct LowerCWrite {
+    writeback: LowerWriteBack
+    temporary: LIRValueID
+    ty: MIRType
+}
+
+struct LowerCStringTemporary {
+    pointer: LIRValueID
+    bytes: LIRValueID
+}
+
+// The prepared Rust helper owns its Rust ABI. Its exported descriptor ABI is
+// repr(C) JetFfiSlot { value: u64, ptr: *mut u8, len: usize }, never a Rust
+// String/Vec layout. On the native x64 target each slot is 24 bytes, align 8.
+fn lower_ffi_scalar(ty: MIRType) -> Bool Never! {
+    base :: lower_convert_type(ty)
+    if base.kind == .Float32 -> return true
+    lower_c_scalar(base) && lower_ptr_element(base) == None
+}
+
+fn lower_ffi_encode(m: &LowerModule, f: &LowerFunction, ty: MIRType, value: LIRValueID) -> LIRValueID Never! {
+    if lower_convert_type(ty).kind == .Float {
+        bits :: lower_word(&f)
+        lower_emit(&f, LIRInst.Bitcast{dst: bits, src: value})
+        return bits
+    }
+    if lower_convert_type(ty).kind == .Float32 {
+        bits :: lower_word(&f)
+        lower_narrow_wrap(&f, bits, value, false, 32)
+        return bits
+    }
+    if lower_convert_type(ty).kind == .Bool {
+        bits :: lower_word(&f)
+        lower_emit(&f, LIRInst.Convert{dst: bits, src: value})
+        return bits
+    }
+    lower_c_encode(&m, &f, ty, value)
+}
+
+fn lower_ffi_decode(m: &LowerModule, f: &LowerFunction, ty: MIRType, raw: LIRValueID, dst: LIRValueID) Never! {
+    if lower_convert_type(ty).kind == .Float -> return lower_emit(&f, LIRInst.Bitcast{dst: dst, src: raw})
+    if lower_convert_type(ty).kind == .Float32 -> return lower_narrow_wrap(&f, dst, raw, false, 32)
+    lower_c_decode(&m, &f, ty, raw, dst)
+}
+
+fn lower_ffi_load(f: &LowerFunction, slot: LIRValueID, offset: Int) -> LIRValueID Never! {
+    value :: lower_word(&f)
+    lower_emit(&f, LIRInst.Load{dst: value, base: slot, offset: offset})
+    value
+}
+
+fn lower_ffi_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, row: MIRForeign, args: [MIRCallArg], type_args: [MIRType]) Never! {
+    if row.foreign_abi != .Rust || row.callback != None || row.close_function != None || row.close_foreign != None || row.undo_function != None || type_args.len() != 0 || row.symbol == "" {
+        return lower_fail(&m, &f, "Rust foreign import requires a checked descriptor signature")
+    }
+    link :: row.link ?? return lower_fail(&m, &f, "Rust foreign import has no prepared helper artifact")
+    if !lower_c_link_valid(p, link.value) -> return lower_fail(&m, &f, "Rust foreign import has no native object/static-archive link closure")
+    prepared := false
+    loop unit in p.links {
+        if unit.id == link -> prepared = unit.artifacts.len() > 0
+    }
+    if !prepared -> return lower_fail(&m, &f, "Rust foreign import has no prepared helper artifact")
+    if args.len() != row.params.len() -> return lower_fail(&m, &f, "Rust foreign import argument count disagrees with its checked signature")
+    // Match emit_cabi_trampoline's Rust admissibility, not Rust AOT's much
+    // wider set of types. No descriptor is emitted for containers or &/^.
+    loop (position, parameter) in row.params {
+        if parameter.variadic || parameter.access != .Read || args[position].access != parameter.access {
+            return lower_fail(&m, &f, "Rust helper descriptor requires read parameters")
+        }
+        if !lower_ffi_scalar(parameter.ty) && lower_convert_type(parameter.ty).kind != .String {
+            return lower_fail(&m, &f, "Rust helper descriptor has no carrier for this parameter")
+        }
+    }
+    if row.return_type == .Val(ty) {
+        if !lower_ffi_scalar(ty) && lower_convert_type(ty).kind != .String && lower_repr(p, ty) != .Absent {
+            return lower_fail(&m, &f, "Rust helper descriptor has no carrier for this result")
+        }
+    }
+    slots :: lower_pointer(&f)
+    // The helper requires a nonnull pointer even for an empty argument list.
+    lower_emit(&f, LIRInst.StackSlot{dst: slots, size: if args.len() == 0 -> 24 else -> args.len() * 24, align: 8})
+    out :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: out, size: 24, align: 8})
+    zero :: lower_const(&f, 0)
+    loop offset in ([Int]{0, 8, 16}) -> lower_emit(&f, LIRInst.Store{base: out, offset: offset, value: zero})
+    loop (position, arg) in args {
+        ty :: row.params[position].ty
+        value :: lower_use(&m, &f, arg.value) ?? return
+        offset :: position * 24
+        if lower_convert_type(ty).kind == .String {
+            pointer :: lower_pointer(&f)
+            length :: lower_word(&f)
+            lower_call_runtime(&m, &f, "jet_rt_string_data", [LIRValueID]{value}, Val(pointer))
+            lower_call_runtime(&m, &f, "jet_rt_string_byte_len", [LIRValueID]{value}, Val(length))
+            lower_emit(&f, LIRInst.Store{base: slots, offset: offset, value: zero})
+            lower_emit(&f, LIRInst.Store{base: slots, offset: offset + 8, value: pointer})
+            lower_emit(&f, LIRInst.Store{base: slots, offset: offset + 16, value: length})
+        } else {
+            bits :: lower_ffi_encode(&m, &f, ty, value)
+            lower_emit(&f, LIRInst.Store{base: slots, offset: offset, value: bits})
+            lower_emit(&f, LIRInst.Store{base: slots, offset: offset + 8, value: zero})
+            lower_emit(&f, LIRInst.Store{base: slots, offset: offset + 16, value: zero})
+        }
+    }
+    discarded_failure :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_ffi_take_failure", [LIRValueID]{}, Val(discarded_failure))
+    status :: lower_word(&f)
+    count :: lower_const(&f, args.len())
+    // The helper exports `jet_ffi_<declared name>_cabi` (RustForeignSource.jet);
+    // the checked symbol is the module-qualified Rust path, not a C name.
+    lower_call_runtime(&m, &f, "jet_ffi_{row.name}_cabi", [LIRValueID]{slots, count, out}, Val(status))
+    failure_word :: lower_word(&f)
+    lower_call_runtime(&m, &f, "jet_ffi_take_failure", [LIRValueID]{}, Val(failure_word))
+    mask :: lower_const(&f, 255)
+    failure :: lower_numeric_binary(&f, LIRBinaryOp.And, failure_word, mask)
+    panic_code :: lower_const(&f, 1)
+    panicked :: lower_numeric_compare(&f, LIRCondition.Eq, failure, panic_code)
+    lower_iter_check(&m, &f, panicked, "a foreign function panicked")
+    nonzero_status :: lower_numeric_compare(&f, LIRCondition.Ne, status, zero)
+    nonzero_failure :: lower_numeric_compare(&f, LIRCondition.Ne, failure, zero)
+    fault :: lower_flag(&f)
+    lower_emit(&f, LIRInst.Binary{dst: fault, op: LIRBinaryOp.Or, left: nonzero_status, right: nonzero_failure})
+    lower_iter_check(&m, &f, fault, "foreign FFI bridge `{row.symbol}` panicked")
+    ty :: row.return_type ?? return
+    if lower_repr(p, ty) == .Absent -> return
+    layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? lower_new_value(&f, layout, lower_drop(&m, lower_repr(p, ty), true), ty.identity)
+    if lower_convert_type(ty).kind == .String {
+        pointer :: lower_ffi_load(&f, out, 8)
+        length :: lower_ffi_load(&f, out, 16)
+        // The helper returns an owned boxed UTF-8 byte buffer. Own it in Jet
+        // before releasing it through its allocator, including ignored results.
+        lower_call_runtime(&m, &f, "jet_rt_string_from_static", [LIRValueID]{pointer, length}, Val(dst))
+        lower_call_runtime(&m, &f, "jet_ffi_cabi_free", [LIRValueID]{pointer, length}, None)
+    } else {
+        bits :: lower_ffi_load(&f, out, 0)
+        lower_ffi_decode(&m, &f, ty, bits, dst)
+    }
+    if instruction.result == None -> lower_emit(&f, LIRInst.Drop{value: dst})
+}
+
+fn lower_c_import_call(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, foreign: U64, args: [MIRCallArg], type_args: [MIRType]) Never! {
+    index :: m.foreign_rows.get(foreign) ?? return lower_fail(&m, &f, "foreign import names a missing binding")
+    row :: p.foreign[index]
+    if row.foreign_language == .Rust -> return lower_ffi_import_call(p, c, &m, &f, instruction, row, args, type_args)
+    if row.foreign_language != .C || row.foreign_abi != .C || row.callback != None || row.close_function != None || row.close_foreign != None || row.undo_function != None || type_args.len() != 0 || row.symbol == "" {
+        return lower_fail(&m, &f, "foreign import requires a checked direct C scalar signature")
+    }
+    if row.link == .Val(link) {
+        if !lower_c_link_valid(p, link.value) -> return lower_fail(&m, &f, "foreign C import has no checked object/archive link unit")
+    }
+    if args.len() != row.params.len() -> return lower_fail(&m, &f, "foreign import argument count differs from its checked signature")
+    loop (position, param) in row.params {
+        if param.variadic || param.access != args[position].access -> return lower_fail(&m, &f, "foreign C import has a variadic or mismatched access convention")
+        if !lower_c_scalar(param.ty) && !(lower_convert_type(param.ty).kind == .String && param.access != .Write) {
+            return lower_fail(&m, &f, "foreign C parameter {param.name} has no native C ABI marshalling")
+        }
+    }
+    if row.return_type == .Val(ty) {
+        if lower_repr(p, ty) != .Absent && !lower_c_scalar(ty) && lower_convert_type(ty).kind != .String -> return lower_fail(&m, &f, "foreign C result has no native C ABI marshalling")
+    }
+    lowered := [LIRValueID]{}
+    writes := [LowerCWrite]{}
+    strings := [LowerCStringTemporary]{}
+    loop (position, arg) in args {
+        ty :: row.params[position].ty
+        if arg.access == .Write {
+            writeback :: lower_write_arg(p, c, &m, &f, arg) ?? return
+            scalar :: ty
+            layout :: lower_repr_layout(lower_repr(p, scalar)) ?? return
+            initial :: lower_new_value(&f, layout, LIRDrop.Trivial, scalar.identity)
+            lower_emit(&f, LIRInst.Load{dst: initial, base: writeback.cell, offset: 0})
+            encoded :: lower_c_encode(&m, &f, scalar, initial)
+            // Never lend native storage directly: C owns only its low-width
+            // slot. Full-word native cells are updated after normalization.
+            temporary :: lower_pointer(&f)
+            lower_emit(&f, LIRInst.StackSlot{dst: temporary, size: 8, align: 8})
+            lower_emit(&f, LIRInst.Store{base: temporary, offset: 0, value: encoded})
+            &lowered.push(temporary)
+            &writes.push(LowerCWrite{writeback: writeback, temporary: temporary, ty: ty})
+            next
+        }
+        value :: lower_use(&m, &f, arg.value) ?? return
+        if lower_convert_type(ty).kind == .String {
+            pointer :: lower_pointer(&f)
+            lower_call_runtime(&m, &f, "jet_rt_c_string_pack", [LIRValueID]{value}, Val(pointer))
+            length :: lower_word(&f)
+            lower_call_runtime(&m, &f, "jet_rt_string_byte_len", [LIRValueID]{value}, Val(length))
+            one :: lower_const(&f, 1)
+            bytes :: lower_numeric_binary(&f, LIRBinaryOp.Add, length, one)
+            &strings.push(LowerCStringTemporary{pointer: pointer, bytes: bytes})
+            &lowered.push(pointer)
+        } else {
+            &lowered.push(lower_c_encode(&m, &f, ty, value))
+        }
+    }
+    // A C function cannot fail. When its call site keeps a failure carrier (a
+    // per-callable `#Import(c)` with a default `!Err` return, Rust
+    // `guest-import-result` emitting `Ok(call)`), the C value is that
+    // carrier's `Ok` payload, boxed below.
+    carrier := MIRType?{None}
+    if lower_checked_type(c, instruction) == .Val(checked) {
+        if checked.kind == .Result(_, _) -> carrier = Val(checked)
+    }
+    dst := if carrier == None -> lower_result(p, c, &m, &f, instruction) else -> LIRValueID?{None}
+    return_ty :: row.return_type
+    raw := LIRValueID?{None}
+    if return_ty == .Val(ty) {
+        if lower_repr(p, ty) != .Absent {
+            scalar :: ty
+            layout :: if lower_convert_type(scalar).kind == .Float -> lir_layout_float() else -> lir_layout_word()
+            raw = Val(lower_new_value(&f, layout, LIRDrop.Trivial, None))
+            if dst == None {
+                native_layout :: lower_repr_layout(lower_repr(p, ty)) ?? return
+                // A boxed payload moves into the carrier; only a discarded
+                // result owns its drop.
+                drop :: if carrier == None -> lower_drop(&m, lower_repr(p, ty), true) else -> LIRDrop.Trivial
+                dst = Val(lower_new_value(&f, native_layout, drop, ty.identity))
+            }
+        }
+    }
+    lower_call_runtime(&m, &f, row.symbol, lowered, raw)
+    // Own a String return before freeing arguments: a C function may return
+    // an interior pointer into one of its borrowed CString arguments.
+    if return_ty == .Val(ty) && raw == .Val(value) && dst == .Val(output) {
+        if lower_convert_type(ty).kind == .String {
+            lower_call_runtime(&m, &f, "jet_rt_c_string_unpack", [LIRValueID]{value}, Val(output))
+        } else {
+            lower_c_decode(&m, &f, ty, value, output)
+        }
+    }
+    if carrier == .Val(checked) {
+        if checked.kind == .Result(ok_ty, err_ty) {
+            boxed :: lower_result(p, c, &m, &f, instruction) ?? return
+            lower_alloc(&m, &f, boxed, lower_result_box_size(p, ok_ty, err_ty))
+            lower_store_word(&f, boxed, 0, lower_result_selector(true))
+            if dst == .Val(payload) -> lower_write_at(p, &f, boxed, lower_result_payload_offset(), payload, ok_ty)
+        }
+    }
+    loop write in writes {
+        scalar :: write.ty
+        layout :: if lower_convert_type(scalar).kind == .Float -> lir_layout_float() else -> lir_layout_word()
+        raw_value :: lower_new_value(&f, layout, LIRDrop.Trivial, None)
+        lower_emit(&f, LIRInst.Load{dst: raw_value, base: write.temporary, offset: 0})
+        native_layout :: lower_repr_layout(lower_repr(p, scalar)) ?? return
+        native :: lower_new_value(&f, native_layout, LIRDrop.Trivial, scalar.identity)
+        lower_c_decode(&m, &f, scalar, raw_value, native)
+        lower_emit(&f, LIRInst.Store{base: write.writeback.cell, offset: 0, value: native})
+        lower_write_back(p, c, &m, &f, write.writeback, None)
+    }
+    loop string in strings {
+        lower_call_runtime(&m, &f, "jet_rt_c_string_free", [LIRValueID]{string.pointer, string.bytes}, None)
+    }
+    if instruction.result == None && return_ty == .Val(ty) && dst == .Val(output) {
+        if lower_is_inline(p, ty) {
+            lower_inline_drop(p, &m, &f, output, ty)
+        } else {
+            lower_emit(&f, LIRInst.Drop{value: output})
+        }
+    }
+}
+
+// Private Core carrier kernels are not C's public List/String ABI. Their
+// checked inputs are borrowed native headers; only lengths are raw i64.
+fn lower_c_mem_route(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, call: MIRPreludeCallID, args: [MIRValueID]) -> Bool Never! {
+    row :: lower_prelude_row(p, call) ?? return false
+    if row.module_name != "core.mem" -> return false
+    symbol :: if row.member == {
+        "__string_data" -> "jet_rt_string_data"
+        "__string_byte_len" -> "jet_rt_string_byte_len"
+        "__bytes_pack" -> "jet_rt_bytes_pack"
+        "__bytes_free" -> "jet_rt_bytes_free"
+        "__bytes_unpack" -> "jet_rt_bytes_unpack"
+        else -> { return false }
+    }
+    arity :: if row.member == "__bytes_free" || row.member == "__bytes_unpack" -> 2 else -> 1
+    if args.len() != arity {
+        lower_fail(&m, &f, "private Core C carrier kernel has a mismatched signature")
+        return true
+    }
+    values := [LIRValueID]{}
+    loop (index, arg) in args {
+        value :: lower_use(&m, &f, arg) ?? return true
+        ty :: lower_value_type(c, arg) ?? {
+            lower_fail(&m, &f, "private Core C carrier kernel has no checked argument type")
+            return true
+        }
+        if index == 1 {
+            if lower_convert_type(ty).kind != .Int {
+                lower_fail(&m, &f, "private Core C carrier length is not Int")
+                return true
+            }
+            &values.push(lower_c_encode(&m, &f, ty, value))
+        } else {
+            &values.push(value)
+        }
+    }
+    dst :: lower_result(p, c, &m, &f, instruction)
+    if row.member == "__string_byte_len" {
+        raw :: lower_word(&f)
+        lower_call_runtime(&m, &f, symbol, values, Val(raw))
+        if dst == .Val(output) -> lower_convert_exact(&m, &f, output, raw, "jet_int_owned_from_i64", false)
+    } else {
+        lower_call_runtime(&m, &f, symbol, values, dst)
+    }
+    true
+}

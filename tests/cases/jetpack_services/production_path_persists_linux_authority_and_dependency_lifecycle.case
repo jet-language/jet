@@ -1,0 +1,23 @@
+# Port of tests/jetpack_services.rs:1229-1296. PENDING-GRAMMAR(batch-four).
+requires: os-name:linux
+fixture: production_path_persists_linux_authority_and_dependency_lifecycle.fixture
+env: JETPACK_ROOT={work}/root
+env: HOME={work}/home
+env: PATH={work}/bin:{env:PATH}
+env: JETPACK_FAKE_SYSTEMD_STATE={work}/state
+mkdir: root
+mkdir: home
+copy: {root}/tests/cases/jetpack_services/services_up_health_logs_down_roundtrip.fixture/bin bin
+mkdir: state
+chmod: bin/systemd-run 755
+chmod: bin/systemctl 755
+step: jetpack services up --no-color
+file: .jet/services/api/lifecycle ~ "backend=linux-systemd-user" # original ed77c235f tests/jetpack_services.rs:1257-1259 lifecycle contains backend
+file: .jet/services/api/lifecycle ~ "containment=delegated-cgroup" # original ed77c235f tests/jetpack_services.rs:1261-1263 lifecycle contains containment
+file: .jet/services/api/lifecycle ~ "phase=ready" # original ed77c235f tests/jetpack_services.rs:1265 lifecycle contains ready phase
+file: .jet/services/api/lifecycle ~ "dependency=database" # original ed77c235f tests/jetpack_services.rs:1266 lifecycle contains dependency
+step: jetpack services health --json --no-color
+stdout: ~ "linux-systemd-user" # original ed77c235f tests/jetpack_services.rs:1280 contains predicate
+stdout: ~ "\"after\":[\"database\"]" # original ed77c235f tests/jetpack_services.rs:1281 contains predicate
+step: jetpack services down --no-color
+file: .jet/services/api/lifecycle ~ "phase=stopped" # original ed77c235f tests/jetpack_services.rs:1294-1295 stopped lifecycle contains stopped phase

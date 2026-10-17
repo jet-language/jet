@@ -1,0 +1,118 @@
+# Port of tests/cli_parts/core.rs:754-855; original sources/predicates retained.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four): new typed/data/relational forms are explicit.
+# PENDING-SEAM(budget-verify)
+refused: budget-verify
+fixture: fixtures/budget_fact
+step: jet budget check --json
+exit: 0
+stderr: empty
+json: stdout canonical # original predicate
+stdout: ~ "\"schema\":\"jet.status/v1\"" # original predicate
+stdout: ~ "\"budget\":{" # original predicate
+stdout: ~ "\"budget_id\":\"package:public-api\"" # original predicate
+stdout: ~ "\"num\":1" # original predicate
+entries: .jet/perf/reports = 1 # original predicate
+# EVERY original assertion and fixture operation (verbatim):
+# #[test]
+# fn budget_check_uses_real_compiler_fact_and_writes_verified_report() {
+#     let dir = budget_project("budget_check", 10);
+#     let out = Command::new(jet())
+#         .args(["budget", "check", "--json"])
+#         .current_dir(&dir)
+#         .output()
+#         .unwrap();
+#     assert_eq!(
+#         out.status.code(),
+#         Some(0),
+#         "{}",
+#         String::from_utf8_lossy(&out.stderr)
+#     );
+#     assert!(out.stderr.is_empty());
+#     let value =
+#         jet_foundation::PerformanceBudget::CanonicalJson::parse_canonical(&out.stdout).unwrap();
+#     let text = String::from_utf8(out.stdout).unwrap();
+#     assert!(text.contains("\"schema\":\"jet.status/v1\""));
+#     assert!(text.contains("\"budget\":{"));
+#     assert!(text.contains("\"budget_id\":\"package:public-api\""));
+#     assert!(
+#         text.contains("\"num\":1"),
+#         "public API count must be measured: {text}"
+#     );
+#     let reports = fs::read_dir(dir.join(".jet/perf/reports"))
+#         .unwrap()
+#         .collect::<Result<Vec<_>, _>>()
+#         .unwrap();
+#     assert_eq!(reports.len(), 1);
+#     let bytes = fs::read(reports[0].path()).unwrap();
+#     jet_foundation::PerformanceBudget::verify_budget_report(&bytes).unwrap();
+#     let command = match &value {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+#         _ => panic!("command JSON is not an object"),
+#     };
+#     let report = match canonical_field(&command["budget"], "report") {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+#         _ => panic!("report is not an object"),
+#     };
+#     let content = match &report["content"] {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+#         _ => panic!("content is not an object"),
+#     };
+#     let tool = match &content["toolchain"] {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+#         _ => panic!("toolchain is not an object"),
+#     };
+#     for key in ["compiler_build_id", "stdlib_id", "runner_id"] {
+#         let jet_foundation::PerformanceBudget::CanonicalJson::String(id) = &tool[key] else {
+#             panic!("{key} is not text")
+#         };
+#         assert_eq!(id.len(), 64, "{key} must identify real executable bytes");
+#         assert!(id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+#         assert!(!matches!(id.as_str(), "jet" | "stdlib" | "compiler"));
+#     }
+#     let subject = match &content["subject"] {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+#         _ => panic!("subject is not an object"),
+#     };
+#     let jet_foundation::PerformanceBudget::CanonicalJson::String(triple) =
+#         &subject["target_triple"]
+#     else {
+#         panic!("target triple is not text")
+#     };
+#     assert!(
+#         triple.split('-').count() >= 3,
+#         "target triple must be canonical: {triple}"
+#     );
+#     let jet_foundation::PerformanceBudget::CanonicalJson::String(measured_start) =
+#         &subject["measured_start"]
+#     else {
+#         panic!("measurement start is not text")
+#     };
+#     let jet_foundation::PerformanceBudget::CanonicalJson::String(measured_end) =
+#         &subject["measured_end"]
+#     else {
+#         panic!("measurement end is not text")
+#     };
+#     assert!(
+#         measured_start < measured_end,
+#         "measurement must cover preflight and evidence: {measured_start}..{measured_end}"
+#     );
+#     let measurements = match &content["measurements"] {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Array(value) => value,
+#         _ => panic!("measurements is not an array"),
+#     };
+#     let measurement = match &measurements[0] {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+#         _ => panic!("measurement is not an object"),
+#     };
+#     let provider = match &measurement["provider"] {
+#         jet_foundation::PerformanceBudget::CanonicalJson::Object(value) => value,
+#         _ => panic!("provider is not an object"),
+#     };
+#     for key in ["cpu_model", "kernel", "power_governor"] {
+#         let jet_foundation::PerformanceBudget::CanonicalJson::String(value) = &provider[key] else {
+#             panic!("{key} is not text")
+#         };
+#         assert!(!value.is_empty() && !matches!(value.as_str(), "compiler" | "unknown"));
+#     }
+# }

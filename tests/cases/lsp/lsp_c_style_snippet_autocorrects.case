@@ -1,0 +1,15 @@
+# Port of tests/lsp.rs:2040-2069; fixture source bytes unchanged.
+# Partial forms reproduce original predicates; literal expected bytes need no blessing.
+# Original check_document/apply_edit assertions do not assert a CLI stream.
+# Public check --json projects those diagnostics on stdout; stderr was a port bug.
+fixture: lsp_c_style_snippet_autocorrects.fixture
+step: jet check snippet.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0037"] #>= 1 # original predicate
+json: stdout doc $.reports[?code="E0008"] #= 0 # original predicate
+step: jet fix snippet.jet
+exit: any # original predicate; apply_edit did not assert fixed program compilation
+file: snippet.jet ~ "print(" # original predicate
+file: snippet.jet ~ "fn greet" # original predicate
+file: snippet.jet !~ "val count" # original predicate
+file: snippet.jet !~ "println(" # original predicate

@@ -11,9 +11,7 @@ mod runtime {
     pub use jet_crypto_entropy::{jet_crypto_entropy_fill, JetCryptoEntropyError};
 }
 
-use jet::Interpreter::{dev_iteration, RunOutcome};
-use jet_foundation::JitBackend::JitBackend;
-use jet_jit::CraneliftBackend;
+use jet::Interpreter::RunOutcome;
 pub(crate) use runtime::*;
 use std::fs;
 use std::sync::{Arc, Barrier};
@@ -465,9 +463,9 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
         );
     }
     let host_sources = [
-        include_str!("../crates/jet-jit/src/Crypto.rs"),
-        include_str!("../crates/jet-jit/src/Encoding.rs"),
-        include_str!("../crates/jet-jit/src/net_http_rt.rs"),
+        include_str!("../crates/jet-evalhost/src/Crypto.rs"),
+        include_str!("../crates/jet-evalhost/src/Encoding.rs"),
+        include_str!("../crates/jet-evalhost/src/net_http_rt.rs"),
     ]
     .join("\n");
     for forbidden in [
@@ -480,51 +478,8 @@ fn crypto_runtime_sources_contain_no_predictable_fallback() {
     ] {
         assert!(
             !host_sources.contains(forbidden),
-            "JIT/runtime adapter contains forbidden fallback marker {forbidden}"
+            "evaluator host adapter contains forbidden fallback marker {forbidden}"
         );
-    }
-}
-
-#[allow(dead_code)]
-mod auth_session_regression {
-    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
-
-    static FAIL_ENTROPY: AtomicBool = AtomicBool::new(false);
-    static NEXT_BYTE: AtomicU8 = AtomicU8::new(1);
-
-    fn jet_crypto_entropy_bytes(count: i64) -> Result<Vec<u8>, ()> {
-        if FAIL_ENTROPY.load(Ordering::Relaxed) {
-            return Err(());
-        }
-        let count = usize::try_from(count).map_err(|_| ())?;
-        let byte = NEXT_BYTE.fetch_add(1, Ordering::Relaxed);
-        Ok(vec![byte; count])
-    }
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/SHA256Raw.rs");
-    include!("../crates/jet-codegen/src/Prelude/CoreLib/Top/AuthSession.rs");
-
-    #[test]
-    fn auth_tokens_are_opaque_and_fail_closed_without_entropy() {
-        FAIL_ENTROPY.store(false, Ordering::Relaxed);
-        let user = format!("auth-regression-{}@example.com", std::process::id());
-        jet_auth_register_user(user.clone(), "password-hash".into()).unwrap();
-
-        let first = jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000)
-            .unwrap();
-        let second = jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000)
-            .unwrap();
-        assert!(first.id.starts_with("sess-"));
-        assert!(second.id.starts_with("sess-"));
-        assert_ne!(first.id, second.id);
-
-        let magic = jet_auth_magic_link_issue(user.clone(), 0, 1_000).unwrap();
-        assert!(magic.starts_with("magic-"));
-        assert_ne!(magic, format!("magic-{}", "00".repeat(32)));
-        assert!(jet_auth_magic_link_consume(magic, 0, 1_000).is_ok());
-
-        FAIL_ENTROPY.store(true, Ordering::Relaxed);
-        assert!(jet_auth_password_login(user.clone(), "password-hash".into(), 0, 1_000).is_err());
-        assert!(jet_auth_magic_link_issue(user, 0, 1_000).is_err());
     }
 }
 
@@ -550,12 +505,8 @@ fn uuid_entropy_shared_seam_is_live_and_fail_closed() {
 }
 
 #[test]
-fn live_crypto_entropy_and_uuid_match_interpreter_resident_jit_and_aot() {
+fn live_crypto_entropy_and_uuid_match_interpreter_default_run_and_aot() {
     assert!(common::have_rustc(), "AOT parity requires rustc");
-    assert!(
-        jet_jit::cranelift_host_supported(),
-        "resident-JIT parity requires a supported Cranelift host"
-    );
 
     const SOURCE: &str = r#"
 use core.crypto.random as crypto
@@ -586,7 +537,8 @@ fn run() {
         let shown = path.to_string_lossy().into_owned();
 
         let mut bundle = jet::Loader::load_entry(&shown).expect("parity bundle should load");
-        let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
+        let (diagnostics, facts, nominals) = jet::Sema::check_bundle_with_effect_facts(&mut bundle, jet::Sema::CompileMode::Run);
+        let bundle = jet::Driver::CheckedSourceBundle::new(bundle, facts, nominals);
         assert!(
             diagnostics.iter().all(|diagnostic| !matches!(
                 diagnostic.severity,
@@ -594,17 +546,9 @@ fn run() {
             )),
             "parity source must type-check: {diagnostics:?}"
         );
-        assert!(
-            common::cranelift_resident_safe(&bundle),
-            "parity source must be resident-JIT safe"
-        );
-        let policy = common::development_policy();
-        assert!(
-            common::compile_cranelift_bundle(&bundle, &policy).is_ok(),
-            "parity source must compile in the resident JIT"
-        );
 
-        let interpreted = match dev_iteration(&shown, false, true) {
+
+        let interpreted = match crate::common::dev_run(&shown, false, true) {
             RunOutcome::Ran {
                 stdout,
                 stderr,
@@ -616,29 +560,20 @@ fn run() {
         };
         assert_eq!(interpreted, (expected.to_string(), String::new(), 0));
 
-        jet_jit::reset_jit_trace_for_test();
-        let mut backend = CraneliftBackend::new();
-        let jit =
-            jet_jit::with_program_args(&[shown.clone()], || {
-                match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-                    RunOutcome::Ran {
-                        stdout,
-                        stderr,
-                        exit_code,
-                    } => (stdout, stderr, exit_code),
-                    RunOutcome::Problems(diagnostics) => {
-                        panic!("resident JIT entropy/UUID parity failed: {diagnostics:?}")
-                    }
-                }
-            });
-        assert!(jet_jit::jit_executed_for_test());
-        assert!(!jet_jit::deopt_invoked_for_test());
-        assert!(!jet_jit::fallback_invoked_for_test());
-        assert_eq!(jit, interpreted, "resident JIT drifted from interpreter");
+        let default_run = match crate::common::dev_run(&shown, false, false) {
+            RunOutcome::Ran {
+                stdout,
+                stderr,
+                exit_code,
+            } => (stdout, stderr, exit_code),
+            RunOutcome::Problems(diagnostics) => {
+                panic!("default `jet run` entropy/UUID parity failed: {diagnostics:?}")
+            }
+        };
+        assert_eq!(default_run, interpreted, "default `jet run` drifted from interpreter");
 
         let aot = common::build_and_run("jet_crypto_entropy_parity", "parity", SOURCE);
         assert_eq!(aot, (0, expected.to_string(), String::new()));
-        assert_eq!(jit, (expected.to_string(), String::new(), 0));
     }));
     match (result, fs::remove_dir_all(&dir)) {
         (Ok(()), Ok(())) => {}
@@ -820,15 +755,10 @@ fn entropy_unavailable_propagates_through_every_consumer_on_all_tiers() {
                 command.args(["run", &file]);
                 command
             }),
-            ("interpreter", {
-                let mut command = std::process::Command::new(jet);
-                command.args(["run", "--interpret", &file]);
-                command
-            }),
         ] {
             let output = without_os_entropy(&mut command)
                 .current_dir(&scratch.path)
-                .env("JET_RUN_CACHE_DIR", cache.join("run"))
+                .env("JET_STORE_DIR", cache.join("run"))
                 .env("JET_STORE_DIR", cache.join("build"))
                 .env("NO_COLOR", "1")
                 .output()

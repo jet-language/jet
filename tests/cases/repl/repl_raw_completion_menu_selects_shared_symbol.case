@@ -1,0 +1,19 @@
+# PORT tests/repl.rs:1946-1990 plus helpers13-62/343-357; original inputs/predicates, no reference snapshot.
+# PENDING-SEAM(pty); runtime PENDING-SAME-HEAD.
+refused: pty
+env: NO_COLOR=1
+requires: os-name:linux
+env: JET_REPL_HISTORY=off
+step raw: jet repl
+pty: true
+limit: time=5
+pty-send: "alpha :: 1\r" after 200ms
+pty-send: "alpine :: 2\r" after 100ms
+pty-send: "al\t\u001b[B\r\r" after 100ms
+pty-send: ":quit\r" after 200ms
+exit: 0
+stdout: ~ "completion —" # Original selection menu rs1975.
+stdout: ~ "> alpha" # Original selected-row conjunction rs1979.
+stdout: ~ "> alpine" # Original selected-row conjunction rs1979.
+stdout: ~ "2 : Int" # Original chosen symbol rs1983.
+stdout: !~ "\u001b[7m" # Original NO_COLOR absence rs1987.

@@ -16,13 +16,13 @@ struct SealTuple {
 }
 
 // The walk's node count and `sha256-…` digest of the sorted tuple table.
-pub struct SealTupleTable {
-    pub node_count: Int
-    pub digest: String
+struct SealTupleTable {
+    node_count: Int
+    digest: String
 }
 
 // Stat-walk `path` and hash the sorted identity-tuple table.
-pub fn pkg_seal_tuple_table(path: String) -[FS]> SealTupleTable IOError! {
+fn pkg_seal_tuple_table(path: String) -[FS]> SealTupleTable IOError! {
     tuples := [SealTuple]{}
     pkg_seal_collect_tuples(path, "", &tuples)
     // Stable passes from the least significant key: (relative, kind).
@@ -42,7 +42,7 @@ fn pkg_seal_collect_tuples(path: String, relative: String, tuples: &[SealTuple])
     info :: files.stat(path)
     if info.is_symlink || info.is_file {
         kind :: if info.is_symlink -> U8{108} else -> U8{102}
-        &tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.unix_ns})
+        &tuples.push(SealTuple{relative: relative, kind: kind, inode: info.id.inode, size: info.size, mtime_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds")})
         return
     }
     if !info.is_dir {

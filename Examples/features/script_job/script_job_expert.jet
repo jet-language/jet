@@ -38,7 +38,7 @@ struct InputError {
     name: String
 }
 
-fn acquire(name: String) -> Lease { Lease{name: ~name} }
+fn acquire(name: String) -> Lease { Lease{name: name.copy()} }
 
 fn release(lease: ^Lease) { print("cleanup: released {lease.name}") }
 
@@ -49,7 +49,7 @@ fn checked_input(value: String) -> String InputError! {
 
 #[Job(.Ship), Doc("run the controlled scripting job")]
 fn ship_job() {
-    #Context(deadline: time.now() + 1000) {
+    #Context(deadline: time.unix_ns() /% 1_000_000 + 1000) {
         print("expert: environment=dev")
         print("expert: authority=IO")
         print("expert: deadline=1000ms")

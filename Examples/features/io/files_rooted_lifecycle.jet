@@ -31,7 +31,7 @@ fn fd_count() -> Int {
 }
 
 fn first_line(path: String) -> String IOError! {
-    handle :: files.open(~path)
+    handle :: files.open(path.copy())
     loop line in handle.lines() -> return Ok(line)
     Ok("")
 }
@@ -55,11 +55,8 @@ fn temporaries() -> [String] {
 fn hold_lock(path: String) {
     held :: files.lock(path) ?? panic("first lock")
     print("lock held: {files.exists(held.path)}")
-    _second :: files.lock(path) ?? {
-        print("second lock while held: rejected {kind(err)}")
-        return
-    }
-    print("second lock while held: acquired")
+    second :: files.try_lock(path) ?? panic("probe lock")
+    print("second lock while held: contended={second == None}")
 }
 
 fn run() {
@@ -100,6 +97,7 @@ fn run() {
     print("lock after release: exists={files.exists(lock_path)}")
     again :: files.lock(lock_path) ?? panic("relock")
     print("relock after release: {files.exists(again.path)}")
+    close(^again)
 
     // Ignore-aware walk: `.gitignore` patterns and the ignore file itself.
     tree :: "{base}/tree"

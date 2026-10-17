@@ -1,0 +1,58 @@
+use core.net as net
+use core.files as files
+use core.time as time
+PEER_CRLF :: prep { String.from_bytes([U8]{13, 10}) ?? panic("fixture CRLF") }
+
+fn prefix(raw: [U8], want: [U8]) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop i in 0..<want.len() { if raw[i] != want[i] -> return false }
+    return true
+}
+fn contains_bytes(raw: [U8], want: [U8], ascii_casefold: Bool) -> Bool {
+    if raw.len() < want.len() -> return false
+    loop start in 0..<(raw.len() - want.len() + 1) {
+        same := true
+        loop i in 0..<want.len() {
+            n := Int.from_u8(raw[start + i])
+            if ascii_casefold && n >= 65 && n <= 90 -> n += 32
+            if n != Int.from_u8(want[i]) -> same = false
+        }
+        if same -> return true
+    }
+    return false
+}
+fn request_head(stream: TCPStream) -> [U8] {
+    // Original request_head10-23: persistent 5s read timeout,512-byte reads, positive read, <=64KiB bound, exact CRLFCRLF terminator.
+    net.set_read_timeout(stream, 5000) ?? panic("request timeout")
+    request := [U8]{}
+    loop !contains_bytes(request, [U8]{13,10,13,10}, false) {
+        block :: stream.read(512) ?? panic("request read")
+        assert(block.len() > 0)
+        loop byte in block { &request.push(byte) }
+        assert(request.len() <= 65536)
+    }
+    return request
+}
+fn publish(listener: TCPListener, path: String) {
+    address :: listener.local_addr() ?? panic("address")
+    files.write_atomic(path, address.bytes()) ?? panic("publish address")
+}
+
+fn run() {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    publish(listener, "{work}/addr.txt")
+    loop request in 0..<2 {
+        stream :: &listener.accept() ?? panic("accept")
+        head :: request_head(stream)
+        _ :: String.from_bytes(head) ?? panic("original UTF8 request head")
+        if request == 0 {
+            assert(!contains_bytes(head, "{PEER_CRLF}cookie:".bytes(), true))
+    stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Set-Cookie: host=ok; Path=/{PEER_CRLF}Set-Cookie: suffix=bad; Domain=0.0.1; Path=/{PEER_CRLF}Set-Cookie: exact=bad; Domain=127.0.0.1; Path=/{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+        } else {
+            assert(contains_bytes(head, "{PEER_CRLF}cookie: host=ok{PEER_CRLF}".bytes(), true))
+            assert(!contains_bytes(head, "suffix=".bytes(), true) && !contains_bytes(head, "exact=".bytes(), true))
+    stream.write_all("HTTP/1.1 200 OK{PEER_CRLF}Content-Length: 0{PEER_CRLF}Connection: close{PEER_CRLF}{PEER_CRLF}".bytes()) ?? panic("response write")
+        }
+        stream.close() ?? panic("close")
+    }
+}

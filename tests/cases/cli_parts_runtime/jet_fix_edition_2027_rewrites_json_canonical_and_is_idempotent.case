@@ -1,0 +1,15 @@
+# Port of tests/cli_parts/runtime.rs:11-75; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/jsoncanon
+step: jet fix run.jet --edition=2027
+env: NO_COLOR=1
+exit: 0
+file: run.jet ~ "json.canonical(data) ?? panic(\"value is not canonical JSON\")\n    print(r)\n}\n\npub fn sign" # original predicate
+file: run.jet ~ "r :: json.canonical(data)\n    r\n}" # original predicate
+file: run.jet !~ "value is not canonical JSON\") ?? panic" # original predicate
+copy: run.jet first.bytes
+step: jet fix run.jet --edition=2027
+env: NO_COLOR=1
+exit: 0
+file: run.jet == first.bytes

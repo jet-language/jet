@@ -1,0 +1,218 @@
+// Rust BudgetStore.rs:1259-1367 `nfc` / `canonical_decompose` / `ccc` /
+// `compose`, Text.rs jet_text_nfc/nfd/nfkc/nfkd: Unicode 17.0.0 UAX #15
+// normalization over the pinned decomposition, CCC and composition-pair JUCD
+// assets. One owner for core.text.nfc/nfd/nfkc/nfkd and String.normalize().
+use core.text.runtime.unicode_assets as normal_assets
+use core.text.runtime.kernel_unicode_string as normal_string
+use core.text.runtime.assets.unicode_decomp_index as normal_index
+use core.text.runtime.assets.unicode_decomp_pool as normal_pool
+use core.text.runtime.assets.unicode_ccc as normal_ccc_table
+use core.text.runtime.assets.unicode_compose_pairs as normal_compose
+
+C_SBASE :: 44032
+C_LBASE :: 4352
+C_VBASE :: 4449
+C_TBASE :: 4519
+C_LCOUNT :: 19
+C_VCOUNT :: 21
+C_TCOUNT :: 28
+C_NCOUNT :: 588
+C_SCOUNT :: 11172
+
+fn hangul_compose(a: Int, b: Int) -> Int? {
+    lindex :: a - C_LBASE
+    if lindex >= 0 && lindex < C_LCOUNT {
+        vindex :: b - C_VBASE
+        if vindex >= 0 && vindex < C_VCOUNT -> return Val(C_SBASE + (lindex * C_VCOUNT + vindex) * C_TCOUNT)
+    }
+    sindex :: a - C_SBASE
+    if sindex >= 0 && sindex < C_SCOUNT && sindex % C_TCOUNT == 0 {
+        tindex :: b - C_TBASE
+        if tindex > 0 && tindex < C_TCOUNT -> return Val(a + tindex)
+    }
+    None
+}
+
+fn encode_cps_prefix(cps: [Int], length: Int) -> String Never! {
+    out := [U8]{}
+    loop i in 0..<length -> normal_string.append_cp(&out, cps[i])
+    String.from_bytes(out) ?? ""
+}
+
+// Rust `nfc` / `canonical_decompose` (BudgetStore.rs:1259-1325);
+// compatibility uses the same jet_unicode decomposition index, including tagged rows.
+// `compat` selects NFK*, `recompose` selects *C.
+fn normalize(text: String, compat: Bool, recompose: Bool) -> String Never! {
+    bytes :: text.bytes()
+    non_ascii := false
+    loop byte in bytes {
+        if byte >= (U8{128}) {
+            non_ascii = true
+            break
+        }
+    }
+    if !non_ascii -> return text.copy()
+    // #4318: capture static-list values once, not at each lookup/recursive child;
+    // current bootstrap constant emission copies a list at each mention.
+    index_asset :: normal_index.UNICODE_DECOMP_INDEX
+    pool_asset :: normal_pool.UNICODE_DECOMP_POOL
+    ccc_asset :: normal_ccc_table.UNICODE_CCC
+    // #4392: keep validated record borrows inside their retained asset scope.
+    assert(normal_assets.valid(index_asset, 5, 7), "invalid Unicode asset schema/version/extent")
+    assert(normal_assets.valid(pool_asset, 1, 3), "invalid Unicode asset schema/version/extent")
+    assert(normal_assets.valid(ccc_asset, 3, 7), "invalid Unicode asset schema/version/extent")
+    index_bytes :: index_asset[0..<index_asset.len()]
+    pool_bytes :: pool_asset[0..<pool_asset.len()]
+    ccc_bytes :: ccc_asset[0..<ccc_asset.len()]
+    index :: index_asset[40..<normal_assets.uint(index_bytes, 28, 4)]
+    pool :: pool_asset[40..<normal_assets.uint(pool_bytes, 28, 4)]
+    ccc :: ccc_asset[40..<normal_assets.uint(ccc_bytes, 28, 4)]
+    out := [Int]{}
+    at := 0
+    loop at < bytes.len() {
+        width :: normal_string.utf8_width_at(bytes, at)
+        cp := Int.from_u8(bytes[at])
+        if width == 2 -> cp = cp.bit_and(31)
+        if width == 3 -> cp = cp.bit_and(15)
+        if width == 4 -> cp = cp.bit_and(7)
+        loop k in 1..<width -> cp = (cp << 6).bit_or((Int.from_u8(bytes[at + k]).bit_and(63)))
+        decompose_cp(&out, cp, compat, index, pool)
+        at = at + width
+    }
+    canon_order(&out, ccc)
+    if recompose {
+        pairs_asset :: normal_compose.UNICODE_COMPOSE_PAIRS
+        assert(normal_assets.valid(pairs_asset, 6, 9), "invalid Unicode asset schema/version/extent")
+        pairs_bytes :: pairs_asset[0..<pairs_asset.len()]
+        pairs :: pairs_asset[40..<normal_assets.uint(pairs_bytes, 28, 4)]
+        return compose(&out, ccc, pairs)
+    }
+    encode_cps_prefix(out, out.len())
+}
+
+// Recursive expansion appends to one buffer, including algorithmic Hangul LV/LVT.
+fn decompose_cp(out: &[Int], cp: Int, compat: Bool, index: View<U8>, pool: View<U8>) Never! {
+    sindex :: cp - C_SBASE
+    if sindex >= 0 && sindex < C_SCOUNT {
+        &out.push(C_LBASE + sindex /% C_NCOUNT)
+        &out.push(C_VBASE + (sindex % C_NCOUNT) /% C_TCOUNT)
+        if sindex % C_TCOUNT != 0 -> &out.push(C_TBASE + sindex % C_TCOUNT)
+        return
+    }
+    low := 0
+    high := index.len() /% 7
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * 7
+        code :: normal_assets.uint(index, row, 3)
+        if {
+            cp < code -> high = mid
+            cp > code -> low = mid + 1
+            else -> {
+                if compat || index[row + 6] == (U8{1}) {
+                    offset :: normal_assets.uint(index, row + 3, 2)
+                    length :: Int.from_u8(index[row + 5])
+                    loop child in offset..<(offset + length) {
+                        decompose_cp(&out, normal_assets.scalar(pool, child), compat, index, pool)
+                    }
+                    return
+                }
+                break
+            }
+        }
+    }
+    &out.push(cp)
+}
+
+// Rust `ccc` (BudgetStore.rs:1326-1342): binary search the generated nonzero ranges.
+fn normal_ccc(table: View<U8>, cp: Int) -> Int Never! {
+    normal_assets.range_tag(table, cp, 0)
+}
+
+// Rust `nfc` canonical ordering (BudgetStore.rs:1264-1276).
+// Stable counting sort of each nonstarter run gives linear time even for hostile
+// descending CCC sequences. Sorted runs (the usual case) need no scratch allocation.
+fn canon_order(cps: &[Int], ccc: View<U8>) Never! {
+    positions := [Int]{}
+    scratch := [Int]{}
+    at := 0
+    loop at < cps.len() {
+        if normal_ccc(ccc, cps[at]) == 0 {
+            at = at + 1
+            next
+        }
+        start :: at
+        previous := 0
+        unordered := false
+        loop at < cps.len() {
+            class :: normal_ccc(ccc, cps[at])
+            if class == 0 -> break
+            if previous > class -> unordered = true
+            previous = class
+            at = at + 1
+        }
+        if !unordered -> next
+        if positions.len() == 0 -> loop _ in 0..<256 -> &positions.push(0)
+        loop class in 1..<256 -> positions[class] = 0
+        loop i in start..<at {
+            class :: normal_ccc(ccc, cps[i])
+            positions[class] = positions[class] + 1
+        }
+        offset := 0
+        loop class in 1..<256 {
+            count :: positions[class].copy()
+            positions[class] = offset
+            offset = offset + count
+        }
+        loop scratch.len() < at - start -> &scratch.push(0)
+        loop i in start..<at {
+            class :: normal_ccc(ccc, cps[i])
+            scratch[positions[class]] = cps[i]
+            positions[class] = positions[class] + 1
+        }
+        loop i in 0..<(at - start) -> cps[start + i] = scratch[i]
+    }
+}
+
+// Rust `nfc` composition/blocking (BudgetStore.rs:1277-1293).
+// Compact in place: a successful composition does not change last_class.
+fn compose(cps: &[Int], ccc: View<U8>, pairs: View<U8>) -> String Never! {
+    length := 0
+    starter := 0
+    last_class := 0
+    loop i in 0..<cps.len() {
+        cp :: cps[i].copy()
+        class :: normal_ccc(ccc, cp)
+        if length > 0 && (last_class < class || last_class == 0) {
+            if compose_pair(pairs, cps[starter], cp) == .Val(combined) {
+                cps[starter] = combined
+                next
+            }
+        }
+        if class == 0 -> starter = length
+        cps[length] = cp
+        length = length + 1
+        last_class = class
+    }
+    encode_cps_prefix(cps, length)
+}
+
+// Rust `compose` (BudgetStore.rs:1343-1367); excluded compositions are absent
+// from the generated pairs, including singleton and nonstarter exclusions.
+fn compose_pair(pairs: View<U8>, a: Int, b: Int) -> Int? {
+    if hangul_compose(a, b) == .Val(cp) -> return Val(cp)
+    low := 0
+    high := pairs.len() /% 9
+    loop low < high {
+        mid :: (low + high) /% 2
+        row :: mid * 9
+        left :: normal_assets.uint(pairs, row, 3)
+        right :: normal_assets.uint(pairs, row + 3, 3)
+        if {
+            a < left || (a == left && b < right) -> high = mid
+            a > left || (a == left && b > right) -> low = mid + 1
+            else -> return Val(normal_assets.uint(pairs, row + 6, 3))
+        }
+    }
+    None
+}

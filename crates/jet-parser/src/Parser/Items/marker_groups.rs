@@ -86,7 +86,7 @@ impl<'a> Parser<'a> {
     pub(in crate::Parser) fn read_marker_name(&mut self) -> Result<MarkerHead, Diagnostic> {
         let negated_span = matches!(self.peek().kind, TokKind::Bang).then(|| self.bump().span);
         let name_token = self.bump();
-        let TokKind::Ident(name) = name_token.kind else {
+        let TokKind::Ident(mut name) = name_token.kind else {
             return Err(Diagnostic::error(
                 "E0003",
                 "expected a marker name".to_string(),
@@ -96,11 +96,19 @@ impl<'a> Parser<'a> {
                 Some(name_token.span),
             ));
         };
+        let mut name_span = name_token.span;
+        while matches!(self.peek().kind, TokKind::Dot) {
+            self.bump();
+            let (member, span) = self.expect_ident("a library marker path segment")?;
+            name.push('.');
+            name.push_str(&member);
+            name_span.end = span.end;
+        }
         let start = negated_span.unwrap_or(name_token.span).start;
         Ok(MarkerHead {
             name,
-            name_span: name_token.span,
-            span: Span::new(start, name_token.span.end),
+            name_span,
+            span: Span::new(start, name_span.end),
             negated_span,
         })
     }
@@ -148,6 +156,30 @@ impl<'a> Parser<'a> {
         Ok(marker)
     }
 
+    pub(super) fn parse_marker_group_member(&mut self) -> Result<Marker, Diagnostic> {
+        let head = self.read_marker_name()?;
+        let mut args = Vec::new();
+        let mut arg_labels = Vec::new();
+        let mut end = head.name_span.end;
+        if matches!(self.peek().kind, TokKind::LParen) {
+            self.bump();
+            while !matches!(self.peek().kind, TokKind::RParen | TokKind::Eof) {
+                let (arg, label) = self.marker_call_arg()?;
+                args.push(arg);
+                arg_labels.push(label);
+                if !matches!(self.peek().kind, TokKind::Comma) { break; }
+                self.bump();
+            }
+            end = self.peek().span.end;
+            self.expect(TokKind::RParen, "to close fixed marker arguments")?;
+        }
+        let marker = Marker {
+            name: head.name, name_span: head.name_span, negated: head.negated_span.is_some(),
+            declaration: None,
+            args, arg_labels, span: Span::new(head.span.start, end), ct: None,
+        };
+        Ok(marker)
+    }
 
     fn parse_one_marker_at_site(
         &mut self,
@@ -190,6 +222,7 @@ impl<'a> Parser<'a> {
         }
         let marker = Marker {
             name,
+            declaration: None,
             negated: false,
             name_span,
             args,
@@ -221,15 +254,13 @@ impl<'a> Parser<'a> {
 
     pub(in crate::Parser) fn bind_rule_fact(
         &mut self,
+        name: &str,
         name_span: Span,
         target: Option<Span>,
         site: crate::Policy::RuleSite,
     ) {
-        if let Some(application) = self
-            .rule_facts
-            .iter_mut()
-            .rev()
-            .find(|application| application.marker.name_span == name_span)
+        for application in self.rule_facts.iter_mut().filter(|application|
+            application.marker.name == name && application.marker.name_span == name_span)
         {
             application.target = target;
             application.site = Some(site);
@@ -477,13 +508,13 @@ impl<'a> Parser<'a> {
         // resolution sees the row even for a parser-specific projection;
         // the enclosing parser fills in the block/item span once it has
         // consumed the target.
-        self.bind_rule_fact(marker.name_span, None, site);
+        self.bind_rule_fact(&marker.name, marker.name_span, None, site);
         let Some(rule) = crate::Policy::applied_rule(&marker.name) else {
             // D-META-USER1=A: source-declared rules are not in the
             // built-in registry while this file is being parsed. Keep
             // their application in the shared fact stream; the bundle
             // registry validates the declaration and site later.
-            if self.source_declares_marker(&marker.name) {
+            if marker.name.contains('.') || self.source_declares_marker(&marker.name) {
                 return Ok(marker);
             }
             return Err(crate::Policy::marker_unknown_error(
@@ -513,7 +544,7 @@ impl<'a> Parser<'a> {
         self.toks.windows(3).any(|tokens| {
             matches!(&tokens[0].kind, TokKind::Ident(marker) if marker == Syntax::KW_MARKER)
                 && matches!(&tokens[1].kind, TokKind::Ident(declared) if declared == name)
-                && matches!(tokens[2].kind, TokKind::LParen)
+                && matches!(tokens[2].kind, TokKind::LParen | TokKind::Eq)
         })
     }
 
@@ -606,7 +637,7 @@ impl<'a> Parser<'a> {
         let mut group = Vec::new();
         loop {
             let m = self.parse_one_marker_at_site(site)?;
-            self.bind_rule_fact(m.name_span, None, site);
+            self.bind_rule_fact(&m.name, m.name_span, None, site);
             group.push(m);
             if matches!(self.peek().kind, TokKind::Comma) {
                 self.bump();
@@ -687,22 +718,21 @@ impl<'a> Parser<'a> {
                 markers.extend(self.parse_marker_bracket_group(site, noun)?);
                 continue;
             }
-            let Some(name) = self.marker_name_at(self.pos).map(str::to_string) else {
-                break;
-            };
+            if !self.at_marker_head() { break; }
+            let name = self.unqualified_marker_name_at(self.pos);
             if !markers.is_empty()
-                && crate::Policy::applied_rule(&name)
+                && name.and_then(crate::Policy::applied_rule)
                     .is_some_and(|rule| matches!(rule.status, crate::Policy::RuleStatus::Active))
-                && !crate::Policy::rule_allows(&name, site)
+                && name.is_some_and(|name| !crate::Policy::rule_allows(name, site))
             {
                 break;
             }
             chunks += 1;
             let marker = self.parse_rule_marker_at_site(site)?;
-            self.bind_rule_fact(marker.name_span, None, site);
-            if crate::Policy::applied_rule(&name)
+            self.bind_rule_fact(&marker.name, marker.name_span, None, site);
+            if crate::Policy::applied_rule(&marker.name)
                 .is_some_and(|rule| matches!(rule.status, crate::Policy::RuleStatus::Active))
-                && !crate::Policy::rule_allows(&name, site)
+                && !crate::Policy::rule_allows(&marker.name, site)
             {
                 return Err(Self::wrong_rule_site(&marker, site, noun));
             }
@@ -802,6 +832,12 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub(in crate::Parser) fn unqualified_marker_name_at(&self, index: usize) -> Option<&str> {
+        let name = self.marker_name_at(index)?;
+        let start = index + if matches!(self.toks.get(index + 1).map(|token| &token.kind), Some(TokKind::Bang)) { 2 } else { 1 };
+        (super::super::marker_path_end(self.toks, start)? == start + 1).then_some(name)
+    }
+
     fn target_marker_selects_file_web_at(&self, name_index: usize) -> bool {
         if !matches!(
             (
@@ -864,15 +900,10 @@ impl<'a> Parser<'a> {
             return None;
         }
         self.marker_name_at(index)?;
-        let mut cursor = index
-            + if matches!(
-                self.toks.get(index + 1).map(|token| &token.kind),
-                Some(TokKind::Bang)
-            ) {
-                3
-            } else {
-                2
-            };
+        let name_index = index + if matches!(
+            self.toks.get(index + 1).map(|token| &token.kind), Some(TokKind::Bang)
+        ) { 2 } else { 1 };
+        let mut cursor = super::super::marker_path_end(self.toks, name_index)?;
         if matches!(
             self.toks.get(cursor).map(|token| &token.kind),
             Some(TokKind::LParen)
@@ -900,6 +931,41 @@ impl<'a> Parser<'a> {
         }
         Some(cursor)
     }
+    pub(in crate::Parser) fn marker_sequence_leads_to_constant(&self) -> bool {
+        let mut cursor = self.pos;
+        loop {
+            while matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Semi)) { cursor += 1; }
+            let next = if matches!(self.toks.get(cursor + 1).map(|token| &token.kind), Some(TokKind::LBracket)) {
+                Self::skip_bracket_group(self.toks, cursor + 1)
+            } else {
+                self.skip_bare_marker(cursor)
+            };
+            let Some(next) = next else { break };
+            cursor = next;
+        }
+        matches!(self.toks.get(cursor).map(|token| &token.kind), Some(TokKind::Ident(_)))
+            && matches!(self.toks.get(cursor + 1).map(|token| &token.kind), Some(TokKind::ColonColon | TokKind::ColonEq | TokKind::Colon))
+    }
+
+    pub(in crate::Parser) fn constant_with_marker_list(&mut self) -> Result<crate::AST::ConstDef, Diagnostic> {
+        let start = self.peek().span.start;
+        let markers = self.parse_attached_marker_sequence(crate::Policy::RuleSite::Constant, "constant")?;
+        let mut constant = self.module_binding_def()?;
+        constant.span.start = start;
+        for marker in markers {
+            self.bind_rule_fact(&marker.name, marker.name_span, Some(constant.span), crate::Policy::RuleSite::Constant);
+            match marker.name.as_str() {
+                Syntax::MARKER_STATIC => {
+                    constant.attrs.push(crate::AST::ConstAttr::ForceStatic);
+                    constant.rust_kind = crate::AST::RustConstKind::Static;
+                }
+                Syntax::MARKER_INLINE => constant.attrs.push(crate::AST::ConstAttr::ForceInline),
+                Syntax::MARKER_META => constant.meta = Some(self.meta_attr_from_marker(marker)?),
+                _ => {}
+            }
+        }
+        Ok(constant)
+    }
 
     fn bracket_group_allows_site(&self, open_index: usize, site: crate::Policy::RuleSite) -> bool {
         let mut cursor = open_index + 1;
@@ -915,6 +981,8 @@ impl<'a> Parser<'a> {
                 Some(TokKind::Ident(name)) => name.as_str(),
                 _ => return false,
             };
+            let Some(end) = super::super::marker_path_end(self.toks, cursor) else { return false };
+            let qualified = end != cursor + 1;
             if site == crate::Policy::RuleSite::Function
                 && self.target_marker_selects_file_web_at(cursor)
             {
@@ -924,12 +992,12 @@ impl<'a> Parser<'a> {
             // loaded. Keep their bracket group intact here; the bundle
             // vocabulary applies the site check once it can see the
             // declaration.
-            if crate::Policy::applied_rule(name).is_some()
+            if !qualified && crate::Policy::applied_rule(name).is_some()
                 && !crate::Policy::rule_allows(name, site)
             {
                 return false;
             }
-            cursor += 1;
+            cursor = end;
             if matches!(
                 self.toks.get(cursor).map(|token| &token.kind),
                 Some(TokKind::LParen)
@@ -969,17 +1037,17 @@ impl<'a> Parser<'a> {
                 // `#Target(Web)` is the file default. It must be consumed by
                 // the top-level file-marker path before a following
                 // `#Target(JS|Wasm)` can attach to a function.
-                || (self.marker_name_at(self.pos) == Some(Syntax::MARKER_TARGET)
+                || (self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_TARGET)
                     && self.target_marker_selects_file_web_at(self.pos + 1))
                 // D-MARK-META1=B: maturity is a `#Meta` field, not a
                 // standalone marker. Let the top-level parser issue its
                 // ordinary unknown-marker diagnostic instead of classifying
                 // this spelling as an attached function marker.
-                || self.marker_name_at(self.pos).is_some_and(|name| {
+                || self.unqualified_marker_name_at(self.pos).is_some_and(|name| {
                     crate::Policy::rule_arg_declaration("Maturity")
                         .is_some_and(|declaration| declaration.variants.contains(&name))
                 })
-                || self.marker_name_at(self.pos).is_some_and(|name| {
+                || self.unqualified_marker_name_at(self.pos).is_some_and(|name| {
                     crate::Policy::applied_rule(name).is_some_and(|rule| {
                         rule.policy_scopes
                             .contains(&crate::Policy::PolicyScope::Module)
@@ -1016,14 +1084,14 @@ impl<'a> Parser<'a> {
                         ),
                 )
             } else {
-                let Some(name) = self.marker_name_at(cursor) else {
+                let Some(_) = self.marker_name_at(cursor) else {
                     break;
                 };
                 (
                     self.skip_bare_marker(cursor),
-                    crate::Policy::rule_allows(name, crate::Policy::RuleSite::File)
+                    self.unqualified_marker_name_at(cursor).is_some_and(|name| crate::Policy::rule_allows(name, crate::Policy::RuleSite::File)
                         && (!crate::Policy::rule_allows(name, crate::Policy::RuleSite::Function)
-                            || self.target_marker_selects_file_web_at(cursor + 1)),
+                            || self.target_marker_selects_file_web_at(cursor + 1))),
                 )
             };
             let Some(next) = next else { break };
@@ -1067,7 +1135,7 @@ impl<'a> Parser<'a> {
     // D-MARK-SCOPE1: at file scope a newline-terminated `#Policy` can be
     // a module declaration; inside a type it can prefix a method.
     fn policy_marker_sequence_leads_to_method(&self) -> bool {
-        if self.marker_name_at(self.pos) != Some(Syntax::MARKER_POLICY) {
+        if self.unqualified_marker_name_at(self.pos) != Some(Syntax::MARKER_POLICY) {
             return false;
         }
         let mut cursor = self.pos;
@@ -1131,6 +1199,8 @@ impl<'a> Parser<'a> {
         if !self.at_marker_list() || self.marker_sequence_leads_to_function() {
             return false;
         }
+        if self.bracket_group_allows_site(self.pos + 1, crate::Policy::RuleSite::File)
+            && !self.bracket_group_allows_site(self.pos + 1, crate::Policy::RuleSite::Type) { return true; }
         // A source-declared marker group can be attached to a type even
         // before the bundle registry is available. Keep `#[A, B] struct`
         // on the type path instead of treating its PascalCase names as
@@ -1156,7 +1226,7 @@ impl<'a> Parser<'a> {
         if self.marker_sequence_leads_to_function() {
             return false;
         }
-        if self.marker_name_at(self.pos) == Some(Syntax::MARKER_TARGET)
+        if self.unqualified_marker_name_at(self.pos) == Some(Syntax::MARKER_TARGET)
             && self.target_marker_selects_file_web_at(self.pos + 1)
         {
             // Keep the deliberate file-default/partition split:
@@ -1169,7 +1239,7 @@ impl<'a> Parser<'a> {
                 ) {
                     next += 1;
                 }
-                if self.marker_name_at(next) == Some(Syntax::MARKER_TARGET)
+                if self.unqualified_marker_name_at(next) == Some(Syntax::MARKER_TARGET)
                     && self.target_marker_selects_web_partition_at(next + 1)
                 {
                     return false;
@@ -1178,6 +1248,12 @@ impl<'a> Parser<'a> {
         }
         if self.at_marker_list() {
             return self.marker_list_is_file_rules();
+        }
+        if self.at_single_type_marker() || self.marker_sequence_leads_to_constant() { return false; }
+        if self.at_marker_head() && self.unqualified_marker_name_at(self.pos).is_none_or(|name| crate::Policy::applied_rule(name).is_none()) {
+            // Library declarations are not available until the bundle is
+            // loaded. Retain an unattached head as a file fact for replay.
+            return true;
         }
         let mut cursor = self.pos;
         let mut count = 0usize;
@@ -1188,7 +1264,7 @@ impl<'a> Parser<'a> {
             ) {
                 cursor += 1;
             }
-            let Some(name) = self.marker_name_at(cursor) else {
+            let Some(name) = self.unqualified_marker_name_at(cursor) else {
                 break;
             };
             if !crate::Policy::rule_allows(name, crate::Policy::RuleSite::File) {
@@ -1603,7 +1679,7 @@ impl<'a> Parser<'a> {
             .cloned()
             .collect();
         for marker in &ordered_markers {
-            self.bind_rule_fact(marker.name_span, Some(function.span), site);
+            self.bind_rule_fact(&marker.name, marker.name_span, Some(function.span), site);
         }
         self.applied_rules.extend(
             ordered_markers
@@ -1771,6 +1847,7 @@ impl<'a> Parser<'a> {
         };
         for marker in &markers {
             self.bind_rule_fact(
+                &marker.name,
                 marker.name_span,
                 Some(target),
                 crate::Policy::RuleSite::Type,
@@ -1942,10 +2019,10 @@ impl<'a> Parser<'a> {
         while matches!(self.peek().kind, TokKind::Semi) {
             self.bump();
         }
-        let is_pub = matches!(self.peek().kind, TokKind::KwPub);
-        if is_pub {
-            self.bump();
+        if matches!(self.peek().kind, TokKind::KwPub) {
+            self.reject_retired_pub();
         }
+        let is_pub = true;
         match &self.peek().kind {
                 TokKind::KwStruct => self.struct_def_after_pub(is_pub).map(Item::Struct),
                 TokKind::KwEnum => self.enum_def_after_pub(is_pub, false).map(Item::Enum),

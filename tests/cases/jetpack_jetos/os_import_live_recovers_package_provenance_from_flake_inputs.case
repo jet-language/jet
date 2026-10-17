@@ -1,0 +1,10 @@
+# Port of tests/jetpack_jetos.rs:189-263; runtime PENDING-SAME-HEAD.
+opt-in: epoch-7 jetos suite: writes ~24G scratch under TMPDIR (card 1638); run deliberately with -- --ignored
+fixture: os_import_live_recovers_package_provenance_from_flake_inputs.fixture
+chmod: tools/nix 0755
+step: jet os import {work}/src --host halcyon --no-color
+env: PATH={work}/tools
+exit: 0
+stdout: ~ "zen_beta: 0xc000022070/zen-browser-flake/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa@github" # original pinned source
+stdout: ~any "zen_beta.zen-browser" "packages: [nixpkgs.git, zen_beta.zen-browser]" # original ed77c235f tests/jetpack_jetos.rs:255-256 contains disjunction
+stdout: !~ "package-provenance import will recover it" # original no deferred omission

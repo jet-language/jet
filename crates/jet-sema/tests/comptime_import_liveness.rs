@@ -29,9 +29,9 @@ fn check(source: &str) -> Vec<Diagnostic> {
             items: std::mem::take(&mut program.items),
             script_body: std::mem::take(&mut program.script_body),
             source: source.into(),
+            core_identifier_demand: Lexer::core_identifier_demand(&tokens),
             block_spans: std::mem::take(&mut program.block_spans),
             web_target_ceiling: program.web_target_ceiling,
-            pub_file: program.pub_file,
             no_prelude: program.no_prelude,
             default_target: program.default_target,
             html_path: program.html_path,
@@ -89,5 +89,17 @@ fn failed_comptime_qualified_import_stays_unused() {
     assert!(
         lint_names(&diagnostics).contains(&"compiler"),
         "failed qualified comptime resolution must not consume the import: {diagnostics:#?}"
+    );
+}
+
+#[test]
+fn deferred_checker_snapshots_keep_comptime_calls_and_body_constants_visible() {
+    let diagnostics = check(
+        "VALUE :: prep { number() }\nfn number() -> Int { 7 }\nfn run() -> Int { VALUE }\n",
+    );
+    assert!(
+        diagnostics.iter().all(|diagnostic|
+            diagnostic.severity != jet_sema::Diagnostics::Severity::Error),
+        "comptime rows need callable bodies before deferred checker snapshots are published: {diagnostics:#?}"
     );
 }

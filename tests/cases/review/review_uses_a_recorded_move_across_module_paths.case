@@ -1,0 +1,17 @@
+# PORT tests/review.rs::review_uses_a_recorded_move_across_module_paths; helpers review.rs17-176 preserved.
+# PENDING-SAME-HEAD; PENDING-GRAMMAR(batch-four); no reference snapshot claim.
+fixture: review_uses_a_recorded_move_across_module_paths.fixture
+mkdir: head/.jet/codemods
+write: head/.jet/codemods/move.log.json move.txt
+step: jet review {work}/base/old.jet {work}/head/new.jet --json
+exit: 0
+stdout: ~ "\"kind\":\"moved\"" # Original contains predicate.
+stdout: ~ "\"alignment\":\"recorded\"" # Original contains predicate.
+stdout: ~ "\"before\":\"old.jet\"" # Original contains predicate.
+stdout: ~ "\"after\":\"new.jet\"" # Original contains predicate.
+stdout: ~ "\"before_identity\":\"fn:module:old::report\"" # Original contains predicate.
+stdout: ~ "\"after_identity\":\"fn:module:new::report\"" # Original contains predicate.
+stdout: ~ "\"source_operation\":\"move\"" # Original contains predicate.
+stdout: !~ "\"kind\":\"renamed\"" # Original negative predicate.
+stdout: !~ "\"kind\":\"added\"" # Original negative predicate.
+stdout: !~ "\"kind\":\"removed\"" # Original negative predicate.

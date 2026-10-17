@@ -1,0 +1,29 @@
+// Offline syntax dictionary lookup, plaintext essays, and typo classification.
+fn run() Never! {
+    keyword_index :: jet_cli_syntax_lookup("  Fn  ") ?? panic("case-insensitive syntax lookup")
+    keyword :: JET_CLI_SYNTAX_ROWS[keyword_index]
+    if keyword.token != "fn" || keyword.kind != JetCLISyntaxKind.Keyword -> panic("canonical keyword")
+    if jet_cli_syntax_plain_text(keyword) != "The Jet keyword `fn`.\nExample:\n  fn …\n" -> panic("keyword essay")
+    marker_index :: jet_cli_syntax_lookup("#Inline") ?? panic("marker display lookup")
+    marker_row :: JET_CLI_SYNTAX_ROWS[marker_index]
+    if marker_row.kind != JetCLISyntaxKind.Marker || jet_cli_syntax_display(marker_row) != "#Inline" -> panic("marker identity")
+    copy_index :: jet_cli_syntax_lookup("~") ?? panic("copy sigil lookup")
+    if !jet_cli_syntax_plain_text(JET_CLI_SYNTAX_ROWS[copy_index]).contains("Related: E0211\n") -> panic("curated related diagnostic")
+    move_index :: jet_cli_syntax_lookup("^") ?? panic("move/power token lookup")
+    essay :: jet_cli_syntax_plain_text(JET_CLI_SYNTAX_ROWS[move_index])
+    if !essay.contains("Before a name (move):\n") || !essay.contains("Between two numbers (power):\n") -> panic("one token's multiple meanings")
+    if !jet_cli_syntax_query("#Inlin") || !jet_cli_syntax_query(":::") || !jet_cli_syntax_query("é") -> panic("syntax typo classification")
+    if jet_cli_syntax_query("npm:tool") || jet_cli_syntax_query("pkg@registry") || jet_cli_syntax_query("package-overlay:local") -> panic("package references are not syntax typos")
+    if jet_cli_syntax_nearest("#Inlin") != "#Inline" -> panic("nearest registered spelling")
+    if jet_cli_edit_distance("é", "f") != 1 -> panic("nearest syntax counts Unicode scalars")
+    if jet_cli_explain_policy("copies", false, true) == .None -> panic("standalone policy explanation")
+    if jet_cli_explain_policy("not_a_policy", false, true) != .None -> panic("unknown policy remains with caller")
+    if jet_cli_explain_build_fact_name("$build.os") != .Val("Build.OS") -> panic("build fact precedes syntax typo classification")
+    if jet_cli_explain_build_fact_name("Build.Settings.Mode") != .Val("Build.Settings.mode") -> panic("dynamic setting normalization")
+    if jet_cli_explain_build_fact_name("$build.settings.") != .None || jet_cli_explain_build_fact_name("$build.settings.a.b") != .None -> panic("invalid setting paths are not source queries")
+    loop row in JET_CLI_SYNTAX_ROWS {
+        if row.meanings.len() == 0 || row.registry_name == "" || row.decision == "" -> panic("every syntax row explains itself")
+        found :: jet_cli_syntax_lookup(jet_cli_syntax_display(row)) ?? panic("every dictionary display is searchable")
+        if JET_CLI_SYNTAX_ROWS[found].token != row.token -> panic("dictionary lookup precedence")
+    }
+}

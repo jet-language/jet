@@ -1,0 +1,24 @@
+// A package is one namespace: each name resolves to the sibling file that
+// declares it, with no import, for values, calls, generic calls, aliases,
+// traits and compile-time folds alike.
+use values
+
+FOLDED :: prep { fold_record().value }
+
+fn run() {
+    callback :: plus
+    result :: callback(2)
+    maker :: make
+    record :: maker()
+    amount :: measure(record)
+    boxed :: wrap(identity(result + amount))
+    state :: State.Ready(boxed.value)
+    if state == {
+        .Ready(value) -> print("ready {value}")
+    }
+    print("folded {FOLDED}")
+    print("scaled {scale(factor: 3, value: 4)}")
+    print("qualified {values.identity("q")} {values.plus(1)}")
+    print("own {doubled_token()}")
+    print("label {record_label(record)} {boxed_value(boxed)}")
+}

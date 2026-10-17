@@ -1,0 +1,23 @@
+# HAND-PORT tests/jetpack_engine.rs:4758-4833 env_wizard_detects_remembers_catalog_and_shows_progress
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: env_wizard_detects_remembers_catalog_and_shows_progress.fixture
+env: NO_COLOR=1
+requires: os:unix
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+step: jet run native-setup.jet -- {work}/project/target-nixfeed/feed {work}/project
+exit: 0
+step: jetpack env --prep --no-color --trust --yes
+cwd: project
+env: PATH=
+exit: 0
+stdout+stderr: ~ "package catalog setup" # original contains predicate
+stdout+stderr: ~ "catalog saved for this project" # original contains predicate
+stdout+stderr: ~ "Resolving env.dev package plan" # original contains predicate
+step: jetpack env --prep --no-color --trust --yes
+cwd: project
+env: PATH=
+exit: 0
+stdout+stderr: ~ "remembered for this project" # original contains predicate
+

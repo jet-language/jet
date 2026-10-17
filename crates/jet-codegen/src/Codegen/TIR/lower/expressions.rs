@@ -3,6 +3,7 @@ use crate::AST::{
     OrFallback, Pattern, Stmt, StrPart, TryConvert, Type, TypedLitBody, UnOp,
 };
 use crate::Codegen::Cx;
+use super::method_calls::lower_measurement_source_call;
 use crate::Codegen::TIR::ListSpreadPart;
 use crate::Codegen::TIR::LowerEnv;
 use crate::Codegen::TIR::TAddressLifetime;
@@ -57,7 +58,6 @@ use crate::Codegen::TIR::lower_require_stop;
 use crate::Codegen::TIR::lower_stmts;
 use crate::Codegen::TIR::module_call_source_return_type;
 use crate::Codegen::TIR::preserve_typed_list_shape;
-use crate::Codegen::TIR::solve_new_type;
 use crate::Codegen::TIR::struct_field_type;
 use crate::Codegen::TIR::tir_address_lifetime;
 use crate::Codegen::TIR::unit_type;
@@ -65,6 +65,7 @@ use crate::Codegen::TIR::view_copy_owned_type;
 use crate::Codegen::TIR::{TContract, TContractDisposition, TContractKind};
 use crate::Codegen::TIR::{
     THandleOp, call_return_type, call_return_type_with_args, demand_generic_free_function,
+    demand_module_generic_function,
 };
 use crate::Codegen::escape_rust_str;
 use crate::Codegen::is_db_value_type_name;
@@ -269,31 +270,18 @@ pub(crate) fn lower_fn_value_call(
         Type::Fn { .. } => callee_t.ty.with_effective_fn_returns(),
         _ => callee_t.ty.clone(),
     };
-    let (source_ret_ty, effective_ret_ty, needs_carrier) =
-        match (&callee_t.ty, &effective_callee_ty) {
-            (
-                Type::Fn {
-                    ret: Some(source_ret),
-                    ..
-                },
-                Type::Fn {
-                    ret: Some(effective_ret),
-                    ..
-                },
-            ) => {
-                let source_ret = (**source_ret).clone();
-                let effective_ret = (**effective_ret).clone();
-                let source_is_carrier =
-                    matches!(&source_ret, Type::Result { .. } | Type::Option(_))
-                        || matches!(
-                            &source_ret,
-                            Type::Named(name) if name == Syntax::TYPE_NEVER
-                        );
-                let needs_carrier = !source_is_carrier && source_ret != effective_ret;
-                (source_ret, effective_ret, needs_carrier)
-            }
-            _ => (unit_type(), unit_type(), false),
-        };
+    // Source `fn(...) T` omits the implicit Result spelling; compiled
+    // callables already return that carrier (`func_to_sig` /
+    // `with_effective_fn_returns`). Type the call as the effective
+    // Result/Option. Wrapping `Ok(call())` would double-box a Result
+    // handle into another Result and later print as an interned string.
+    let effective_ret_ty = match &effective_callee_ty {
+        Type::Fn {
+            ret: Some(effective_ret),
+            ..
+        } => (**effective_ret).clone(),
+        _ => unit_type(),
+    };
     let effective_params = match &effective_callee_ty {
         Type::Fn { params, .. } => Some(params.as_slice()),
         _ => None,
@@ -344,7 +332,7 @@ pub(crate) fn lower_fn_value_call(
         })
         .collect();
     let call = TExpr {
-        ty: source_ret_ty,
+        ty: effective_ret_ty.clone(),
         kind: TExprKind::FnValue {
             kind: TFnValueKind::Call {
                 callee: Box::new(callee_t),
@@ -356,16 +344,9 @@ pub(crate) fn lower_fn_value_call(
         Some(order) => preserve_source_arg_order(call, &order, args.len(), site),
         None => call,
     };
-    if needs_carrier {
-        TExpr {
-            ty: effective_ret_ty,
-            kind: TExprKind::Ok(Box::new(call)),
-        }
-    } else {
-        TExpr {
-            ty: effective_ret_ty,
-            kind: call.kind,
-        }
+    TExpr {
+        ty: effective_ret_ty,
+        kind: call.kind,
     }
 }
 
@@ -414,12 +395,11 @@ pub(crate) fn resolve_unknown_index_kind(
     let index_ty = index_t.ty.without_user_tags();
     let is_range = matches!(index_ty, Type::Named(name) if name == Syntax::TYPE_RANGE);
     match base_ty {
-        Type::List(_) => Some(if is_range {
+        Type::List(_) | Type::FixedList { .. } => Some(if is_range {
             IndexKind::Range
         } else {
             IndexKind::List
         }),
-        Type::FixedList { .. } => Some(IndexKind::List),
         Type::Apply { name, args }
             if matches!(name.as_str(), "View" | "ViewMut" | "ComputeViewMut")
                 && args.len() == 1 =>
@@ -429,7 +409,7 @@ pub(crate) fn resolve_unknown_index_kind(
         Type::Apply { name, args } if name == "Pool" && args.len() == 1 => Some(IndexKind::Pool),
         ty if ty.is_compute_tensor_family() && is_range => Some(IndexKind::Range),
         Type::Map { .. } => Some(IndexKind::Map),
-        Type::Named(name) if Syntax::is_simd_lane_type(name) && !cx.type_names.contains(name) => {
+        Type::Named(name) if Syntax::is_simd_lane_type(name) && !cx.fact_type_name(name) => {
             Some(IndexKind::Lane(name.clone()))
         }
         Type::Named(name) if cx.index_hooks.contains_key(name) => {
@@ -604,7 +584,7 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
                 }
                 let field_ty = struct_field_type(cx, &recv.ty, field).unwrap_or(Type::Int);
                 let boxed = match &recv.ty {
-                    Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), field.to_string())),
+                    Type::Named(n) => cx.fact_box_edge(&n, &field),
                     _ => false,
                 };
                 TExpr {
@@ -618,7 +598,82 @@ pub(crate) fn lower_expr_as_mut_place(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> 
             }
         }
         Expr::Paren(inner, _) => lower_expr_as_mut_place(inner, cx, env),
+        // D-SHAPE-PLACE1=A: a mutating method on `xs[a..b]` edits the
+        // range write window in place, never a copied slice.
+        Expr::Slice {
+            base,
+            start,
+            end,
+            range,
+            span,
+        } => lower_slice_window(base, start, end, range.as_deref(), true, *span, cx, env),
         _ => lower_expr(e, cx, env),
+    }
+}
+
+/// D-DYNARRAY1 / D-SHAPE-PLACE1: `xs[a..b]` lent as a place is a zero-copy
+/// window over its owner; a write window keeps the owner a mutable place.
+#[allow(clippy::too_many_arguments)]
+fn lower_slice_window(
+    base: &Expr,
+    start: &Expr,
+    end: &Expr,
+    range: Option<&Expr>,
+    mutable: bool,
+    span: Span,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let recv = if mutable {
+        lower_expr_as_mut_place(base, cx, env)
+    } else {
+        lower_expr(base, cx, env)
+    };
+    // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
+    // Prelude. The foundation predicate is exact, so ordinary
+    // generics cannot accidentally enter the tensor-view path.
+    let is_tensor = recv.ty.is_compute_tensor_family();
+    let elem = if is_tensor {
+        Type::Float
+    } else {
+        match recv.ty.without_user_tags() {
+            Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
+            Type::Apply { name, args }
+                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
+            {
+                args[0].clone()
+            }
+            _ => Type::Int,
+        }
+    };
+    let line = cx.src_line_col(span.start).0;
+    let args = if let Some(range) = range {
+        vec![lower_expr(range, cx, env)]
+    } else {
+        vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
+    };
+    TExpr {
+        ty: Type::Apply {
+            name: if mutable && is_tensor {
+                "ComputeViewMut"
+            } else if mutable {
+                "ViewMut"
+            } else {
+                "View"
+            }
+            .to_string(),
+            args: vec![elem],
+        },
+        kind: TExprKind::BuiltinMethod {
+            recv: Box::new(recv),
+            op: match (mutable, is_tensor) {
+                (true, true) => TBuiltinOp::ComputeViewMutNew { line },
+                (true, false) => TBuiltinOp::ViewMutNew { line },
+                (false, true) => TBuiltinOp::ComputeViewNew { line },
+                (false, false) => TBuiltinOp::ViewNew { line },
+            },
+            args,
+        },
     }
 }
 /// Canonicalize an operator's sema identity against the lowered receiver.
@@ -661,11 +716,9 @@ fn canonicalize_operator_method_identity(expr: &mut TExpr, cx: &Cx) {
 /// calls. These routes deliberately remain total: an absent AST annotation must
 /// not turn a known checked root/handle operation into an unresolved MIR call.
 fn fallback_checked_method_return(
-    receiver: &Expr,
     method: &str,
     recv_type: Option<&str>,
     cx: &Cx,
-    env: &LowerEnv,
 ) -> Option<Type> {
     let is_root = match recv_type {
         Some(name) => {
@@ -682,7 +735,7 @@ fn fallback_checked_method_return(
         return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
     }
     if is_root {
-        if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fn_source_types.get(method) {
+        if let Some(Type::Fn { ret: Some(ret), .. }) = cx.fact_fn_source_types(method) {
             return Some(cx.expand_type_aliases(ret));
         }
     }
@@ -690,12 +743,6 @@ fn fallback_checked_method_return(
         && matches!(method, Syntax::TXN_ON_COMMIT | Syntax::TXN_ON_ROLLBACK)
     {
         return Some(Type::Named(Syntax::INTERNAL_UNIT_TYPE.to_string()));
-    }
-    if method == Syntax::MEM_ALLOC_NEW || method == "new" {
-        let locals = env.locals.keys().cloned().collect::<HashSet<_>>();
-        if solve_new_type(receiver, method, cx, &locals).is_some() {
-            return Some(Type::Named(Syntax::SOLVER_TYPE.to_string()));
-        }
     }
     None
 }
@@ -726,12 +773,13 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             operator_rhs,
             resolved_ret,
             checked_widen,
+            checked_callee: _,
         } = call
         else {
             unreachable!("method chain contains only method calls")
         };
         let resolved_ret = resolved_ret.clone().or_else(|| {
-            fallback_checked_method_return(receiver, method, recv_type.as_deref(), cx, env)
+            fallback_checked_method_return(method, recv_type.as_deref(), cx)
         });
         // A field receiver does not persist `recv_type` on the AST method
         // node, and a specialized generic operator (`left < right` under
@@ -886,17 +934,21 @@ fn lower_method_chain(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                     args.first_mut()
                         .map(|arg| {
-                            let empty_collection = matches!(
+                            // A payload lowered without its context: an
+                            // empty collection or a bare `None` (whose
+                            // placeholder element is `Int`).
+                            let contextless = matches!(
                                 &arg.value.kind,
                                 TExprKind::MapLit(entries) if entries.is_empty()
                             ) || matches!(
                                 &arg.value.kind,
                                 TExprKind::ListLit(items) if items.is_empty()
-                            );
-                            if empty_collection {
+                            ) || (matches!(&arg.value.kind, TExprKind::Absent)
+                                && matches!(&shared_payload, Type::Option(_)));
+                            if contextless {
                                 arg.value.ty = shared_payload.clone();
                             }
-                            empty_collection
+                            contextless
                         })
                         .unwrap_or(false)
                 }
@@ -1121,25 +1173,31 @@ pub(super) fn lower_or_fallback(
         let Some(return_ty) = env.ret_ty.clone() else {
             return value;
         };
-        // A typed empty list is rewritten by sema to `ListLit([])`, so its
-        // element type is absent from the AST by the time TIR lowers it.
-        // Restore the enclosing return payload before constructing the carrier.
+        // Contextual literals have no payload from which to recover their
+        // checked type. A Result's success slot, not its outer carrier,
+        // supplies the type of `None` in `T? E!`.
         let payload_ty = match &return_ty {
-            Type::Result { ok, .. } | Type::Option(ok) => ok.as_ref(),
+            Type::Result { ok, .. } => ok.as_ref(),
             other => other,
         };
-        let value = if matches!(&value.kind, TExprKind::Absent)
-            && matches!(&return_ty, Type::Option(_))
-        {
-            TExpr {
-                ty: return_ty.clone(),
-                kind: TExprKind::Absent,
-            }
-        } else if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
-            value
-        } else {
-            preserve_typed_list_shape(value, payload_ty, cx)
+        // A bare `None` takes the return's Option slot: the callable's own
+        // `T?`, or the success slot of its `T? E!` carrier (as
+        // `lower_return_value` types an explicit `return None`).
+        let absent_slot = match &return_ty {
+            Type::Result { ok, .. } => ok.as_ref(),
+            other => other,
         };
+        let value =
+            if matches!(&value.kind, TExprKind::Absent) && matches!(absent_slot, Type::Option(_)) {
+                TExpr {
+                    ty: absent_slot.clone(),
+                    kind: TExprKind::Absent,
+                }
+            } else if matches!(&value.ty, Type::Result { .. } | Type::Option(_)) {
+                value
+            } else {
+                preserve_typed_list_shape(value, payload_ty, cx)
+            };
         // An explicit `Err(...)`/`Ok(...)` (or any carrier-typed expression)
         // already IS the failure carrier; wrapping it again emits the invalid
         // double carrier `Ok(Err(...))` (leaked rustc E0308 on every
@@ -1407,14 +1465,14 @@ pub(super) fn lower_or_fallback(
 }
 
 fn lower_expr_node(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
-    canonicalize_pre_tier_expr(match e {
+    super::method_calls::lower_checked_core_source_expr(canonicalize_pre_tier_expr(match e {
         Expr::MethodCall { .. } => lower_method_chain(e, cx, env),
         Expr::ListLit(elems, _) => lower_list_lit(elems, cx, env),
         Expr::OrFallback {
             value, fallback, ..
         } => lower_or_fallback(value, fallback, cx, env),
         _ => lower_expr_inner(e, cx, env),
-    })
+    }), cx)
 }
 
 /// Lower callee preconditions at the call site.  The argument values are
@@ -1546,14 +1604,14 @@ fn lower_call_pre_contracts(
     cx: &Cx,
     caller_env: &LowerEnv,
 ) -> (Vec<TStmt>, Vec<TContract>) {
-    let Some(param_names) = cx.fn_param_names.get(&call.name) else {
+    let Some(param_names) = cx.fact_fn_param_names(&call.name) else {
         return (Vec::new(), Vec::new());
     };
     lower_pre_contracts_for_args(
         call.name_span,
         args,
         param_names,
-        cx.sigs.get(&call.name).map(Vec::as_slice),
+        cx.fact_sigs(&call.name).map(Vec::as_slice),
         clauses,
         cx,
         caller_env,
@@ -1588,10 +1646,10 @@ fn lower_method_pre_contracts(
                 return lowered;
             };
             let key = format!("{owner}::{method}");
-            let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+            let Some((pre, _)) = cx.fact_contract_sigs(&key) else {
                 return lowered;
             };
-            let Some(param_names) = cx.fn_param_names.get(&key) else {
+            let Some(param_names) = cx.fact_fn_param_names(&key) else {
                 return lowered;
             };
             (key, pre.clone(), param_names.clone())
@@ -1601,10 +1659,10 @@ fn lower_method_pre_contracts(
             ..
         } => {
             let key = format!("{owner}::{method}");
-            let Some((pre, _)) = cx.contract_sigs.get(&key) else {
+            let Some((pre, _)) = cx.fact_contract_sigs(&key) else {
                 return lowered;
             };
-            let Some(param_names) = cx.fn_param_names.get(&key) else {
+            let Some(param_names) = cx.fact_fn_param_names(&key) else {
                 return lowered;
             };
             (key, pre.clone(), param_names.clone())
@@ -1627,9 +1685,7 @@ fn lower_method_pre_contracts(
             let type_name = owner
                 .split_once("::")
                 .map_or(owner.as_str(), |(type_name, _)| type_name);
-            let self_conv = cx
-                .method_self_convs
-                .get(&(type_name.to_string(), method.to_string()))
+            let self_conv = cx.fact_method_self_convs(&(type_name.to_string(), method.to_string()))
                 .copied()
                 .unwrap_or(AccessConvention::Read);
             let self_ty = recv_value.ty.clone();
@@ -1645,9 +1701,7 @@ fn lower_method_pre_contracts(
                 widen_to_union: None,
                 box_as_trait: None,
             };
-            let method_sig = cx
-                .method_sigs
-                .get(&(type_name.to_string(), method.to_string()));
+            let method_sig = cx.fact_method_sigs(&(type_name.to_string(), method.to_string()));
             let mut sig = Vec::with_capacity(method_sig.map_or(0, |sig| sig.len()) + 1);
             sig.push((self_conv, self_ty));
             if let Some(method_sig) = method_sig {
@@ -1674,9 +1728,7 @@ fn lower_method_pre_contracts(
             let type_name = owner
                 .split_once("::")
                 .map_or(owner.as_str(), |(type_name, _)| type_name);
-            let method_sig = cx
-                .method_sigs
-                .get(&(type_name.to_string(), method.to_string()));
+            let method_sig = cx.fact_method_sigs(&(type_name.to_string(), method.to_string()));
             lower_pre_contracts_for_args(
                 *method_span,
                 args,
@@ -2124,7 +2176,7 @@ fn checked_direct_call_sig(
     call: &crate::AST::Call,
     cx: &Cx,
 ) -> Option<Vec<(AccessConvention, Type)>> {
-    let sig = cx.sigs.get(&call.name)?;
+    let sig = cx.fact_sigs(&call.name)?;
     let Some(order) = cx.fn_type_param_order.get(&call.name) else {
         return Some(sig.clone());
     };
@@ -2148,7 +2200,7 @@ fn direct_call_conventions(
     cx: &Cx,
     env: &LowerEnv,
 ) -> Option<Vec<(AccessConvention, Type)>> {
-    if env.locals.contains_key(&call.name) && !cx.consts.contains_key(&call.name) {
+    if env.locals.contains_key(&call.name) && !cx.fact_consts(&call.name).is_some() {
         return match env.ty_of(&call.name) {
             Some(Type::Fn { params, .. }) => Some(
                 params
@@ -2169,16 +2221,15 @@ fn direct_call_conventions(
         .and_then(|scope| scope.get(&call.name))
         .or_else(|| cx.unqualified_inline.get(&call.name));
     if let Some(mangled) = inline_mangled {
-        return cx.sigs.get(mangled).cloned();
+        return cx.fact_sigs(mangled).cloned();
     }
     let inline_file = cx
         .inline_unqualified_file
         .get(&env.fn_name)
         .and_then(|scope| scope.get(&call.name))
-        .or_else(|| cx.unqualified_file.get(&call.name));
+        .or_else(|| cx.fact_unqualified_file(&call.name));
     inline_file.and_then(|(_, function)| {
-        cx.import_sigs
-            .get(&(call.name.clone(), function.clone()))
+        cx.fact_import_sigs(&(call.name.clone(), function.clone()))
             .cloned()
     })
 }
@@ -2196,7 +2247,7 @@ fn method_arg_contract(
     cx: &Cx,
 ) -> Option<Vec<(AccessConvention, Type)>> {
     let ty = recv_type.as_ref()?;
-    let sig = cx.method_sigs.get(&(ty.clone(), method.to_string()))?;
+    let sig = cx.fact_method_sigs(&(ty.clone(), method.to_string()))?;
     Some(crate::Codegen::TIR::instantiate_method_sig(
         cx,
         ty,
@@ -3311,6 +3362,26 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                 let else_reaches_merge =
                     tir_if_branch_reaches_merge(&state.else_lowered, &else_value);
                 if then_reaches_merge && else_reaches_merge {
+                    // An Err literal has no success payload. Sema inferred
+                    // that phantom slot from the live carrier-valued sibling,
+                    // not from this function's unrelated return type.
+                    if matches!(&then_value.kind, TExprKind::Err(..))
+                        && !matches!(&else_value.kind, TExprKind::Err(..))
+                    {
+                        if let (Type::Result { ok, .. }, Type::Result { ok: peer, .. }) =
+                            (&mut then_value.ty, &else_value.ty)
+                        {
+                            *ok = peer.clone();
+                        }
+                    } else if matches!(&else_value.kind, TExprKind::Err(..))
+                        && !matches!(&then_value.kind, TExprKind::Err(..))
+                    {
+                        if let (Type::Result { ok, .. }, Type::Result { ok: peer, .. }) =
+                            (&mut else_value.ty, &then_value.ty)
+                        {
+                            *ok = peer.clone();
+                        }
+                    }
                     let then_absent = matches!(&then_value.kind, TExprKind::Absent);
                     let else_absent = matches!(&else_value.kind, TExprKind::Absent);
                     // `None` has no payload from which to infer its option type.
@@ -3322,6 +3393,23 @@ fn lower_expr_segment<'a>(root: &'a Expr, cx: &'a Cx, env: &mut LowerEnv) -> TEx
                         && matches!(&then_value.ty, Type::Option(_))
                     {
                         else_value.ty = then_value.ty.clone();
+                    }
+                    // Sema erases the element type from an empty list
+                    // literal (`else -> []`); a live peer list names it.
+                    let empty_list = |value: &TExpr| matches!(&value.kind, TExprKind::ListLit(elems) if elems.is_empty());
+                    let is_list = |ty: &Type| matches!(ty, Type::List(_) | Type::FixedList { .. });
+                    if empty_list(&then_value)
+                        && !empty_list(&else_value)
+                        && is_list(&else_value.ty)
+                    {
+                        let want = else_value.ty.clone();
+                        then_value = preserve_typed_list_shape(then_value, &want, cx);
+                    } else if empty_list(&else_value)
+                        && !empty_list(&then_value)
+                        && is_list(&then_value.ty)
+                    {
+                        let want = then_value.ty.clone();
+                        else_value = preserve_typed_list_shape(else_value, &want, cx);
                     }
                 }
                 let ty = tir_if_join_type(
@@ -3520,10 +3608,10 @@ pub(crate) fn grouped_enum_unit_variant(
         return None;
     }
     let variant = path[1..].join(".");
-    if cx.variant_owner.get(&variant).map(String::as_str) != Some(enum_name.as_str()) {
+    if cx.fact_variant_owner(&variant).map(String::as_str) != Some(enum_name.as_str()) {
         return None;
     }
-    let is_unit = cx.enum_variants.get(&enum_name).is_some_and(|variants| {
+    let is_unit = cx.fact_enum_variants(&enum_name).is_some_and(|variants| {
         variants.iter().any(|(name, payload)| {
             name == &variant && matches!(payload, crate::AST::VariantPayload::Unit)
         })
@@ -3640,6 +3728,9 @@ fn lower_boundary_typed_lit(
     }
     let kind = Syntax::typed_head_kind(type_name).filter(|kind| kind.is_boundary())?;
     let ty = Type::Named(kind.internal_type_name().to_string());
+    if kind == Syntax::TypedHeadKind::URL {
+        return Some(lower_url_recipe(literals, holes, cx));
+    }
     Some(TExpr {
         ty,
         kind: TExprKind::HostCall(Box::new(crate::Codegen::TIR::THostCall::TypedTextInterp {
@@ -3649,6 +3740,49 @@ fn lower_boundary_typed_lit(
             trusted_html,
         })),
     })
+}
+
+fn lower_url_recipe(literals: Vec<String>, holes: Vec<TExpr>, cx: &Cx) -> TExpr {
+    let signature = cx.core_source_sigs
+        .get(&("core.net.url".to_string(), "literal".to_string()))
+        .expect("URL literal source signature is loaded");
+    let ty = signature.return_type.as_ref().expect("URL literal return type").clone();
+    let literals = literals.into_iter().map(|text| TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Lit(text)]),
+    }).collect();
+    let holes = holes.into_iter().map(|hole| TExpr {
+        ty: Type::String,
+        kind: TExprKind::StrLit(vec![TStrPart::Interp(hole, crate::AST::StrFormat::Display)]),
+    }).collect();
+    let args = [literals, holes].into_iter().map(|elements| TCallArg {
+        value: TExpr {
+            ty: Type::List(Box::new(Type::String)),
+            kind: TExprKind::ListLit(elements),
+        },
+        template_items: None,
+        borrow: true,
+        mut_borrow: false,
+        clone: false,
+        arc_clone: false,
+        fn_coerce: None,
+        widen_to_vec: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    }).collect();
+    TExpr {
+        ty: ty.clone(),
+        kind: TExprKind::ModuleCall {
+            form: crate::Codegen::TIR::TModuleCallForm::Qualified {
+                rust_mod: signature.module_identity.clone(),
+                rust_fn: "literal".to_string(),
+            },
+            target_return: Some(crate::Codegen::TIR::module_call_target_return(cx, Some(&ty))
+                .expect("URL literal checked return")),
+            type_args: Vec::new(),
+            args,
+        },
+    }
 }
 
 /// D-BYTELIT1=B: mirror sema's byte-text rewrite for raw comptime fragments
@@ -3666,9 +3800,7 @@ fn byte_text_exprs(parts: &[crate::AST::ByteTextPart], span: Span) -> Option<Vec
 fn lower_unit_text(value: TExpr, style: crate::AST::UnitFormat, cx: &Cx) -> TExpr {
     let original_ty = value.ty.clone();
     let raw = if let Type::Named(name) = &original_ty {
-        let base = cx
-            .distinct_types
-            .get(name)
+        let base = cx.fact_distinct_types(name)
             .map(|(base, _)| base.clone())
             .unwrap_or(Type::Float);
         TExpr {
@@ -3756,7 +3888,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     // TIR with a `Print` whose payload type has no print dispatch, which the
     // resident JIT can only report as a compile gap and deopt on.
     if matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_COMPLEX)
-        && !cx.type_names.contains(Syntax::TYPE_COMPLEX)
+        && !cx.fact_type_name(Syntax::TYPE_COMPLEX)
     {
         return TExpr {
             ty: Type::String,
@@ -3771,7 +3903,7 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
     // display on the shared precise Prelude path so interpolation does not ask
     // the resident engine to treat the opaque rational handle as a user record.
     if matches!(&value.ty, Type::Named(name) if name == Syntax::TYPE_FRACTION)
-        && !cx.type_names.contains(Syntax::TYPE_FRACTION)
+        && !cx.fact_type_name(Syntax::TYPE_FRACTION)
     {
         return TExpr {
             ty: Type::String,
@@ -3781,6 +3913,9 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
                 args: vec![value],
             },
         };
+    }
+    if matches!(&value.ty, Type::Apply { name, args } if name == "Measurement" && args == &[Type::Float]) {
+        return lower_measurement_source_call("__measurement_show", [value], Type::String, Span::new(0, 0), cx);
     }
     let Type::Named(name) = &value.ty else {
         return value;
@@ -3825,7 +3960,8 @@ fn lower_display_value(value: TExpr, cx: &Cx) -> TExpr {
 /// backend sees the erased numeric carrier.
 fn lower_print_value(value: TExpr, cx: &Cx) -> TExpr {
     let printable_unit = value.ty.quantity_parts().is_some() || cx.unit_label(&value.ty).is_some();
-    let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name));
+    let explicit_display = matches!(&value.ty, Type::Named(name) if cx.has_display_type(name))
+        || matches!(&value.ty, Type::Apply { name, args } if name == "Measurement" && args == &[Type::Float]);
     if printable_unit || explicit_display {
         lower_display_value(value, cx)
     } else {
@@ -3975,16 +4111,55 @@ pub(crate) fn lower_debug_trace(call: &crate::AST::Call, cx: &Cx, env: &mut Lowe
     }
 }
 
-fn lower_fmt_call(method: &str, args: Vec<TExpr>, source_span: crate::Diagnostics::Span) -> TExpr {
-    let widen_to_vec = vec![false; args.len()];
-    core_call_expr(
-        Type::String,
-        "core.text.fmt",
-        method,
-        args,
-        source_span,
-        widen_to_vec,
-    )
+fn lower_fmt_call(method: &str, args: Vec<TExpr>, source_span: crate::Diagnostics::Span, cx: &Cx) -> TExpr {
+    if Syntax::core_call("core.text.fmt", method).is_some() {
+        let widen_to_vec = vec![false; args.len()];
+        return core_call_expr(Type::String, "core.text.fmt", method, args, source_span, widen_to_vec);
+    }
+    let signature = cx.core_source_sigs
+        .get(&("core.text.fmt".to_string(), method.to_string()))
+        .expect("checked formatting selector has a loaded Core source signature");
+    // Float source functions must not narrow exact Int interpolation. Keep
+    // those holes on their existing typed numeric formatting ABI.
+    if signature.params[0].1 == Type::Float && args[0].ty != Type::Float {
+        let TExprKind::IntLit(digits, _) = args[1].kind else {
+            unreachable!("format selector precision is a checked constant");
+        };
+        let format = match method {
+            "grouped" => crate::AST::StrFormat::Grouped(digits),
+            "sci" => crate::AST::StrFormat::Sci(digits),
+            "percent" => crate::AST::StrFormat::Percent(digits),
+            _ => unreachable!("Float formatting selector"),
+        };
+        return TExpr {
+            ty: Type::String,
+            kind: TExprKind::StrLit(vec![TStrPart::Interp(args.into_iter().next().expect("checked format operand"), format)]),
+        };
+    }
+    let args = args.into_iter().zip(&signature.params).map(|(value, (access, _))| TCallArg {
+        borrow: *access == AccessConvention::Read && !value.ty.is_scalar(),
+        value,
+        template_items: None,
+        mut_borrow: false,
+        clone: false,
+        arc_clone: false,
+        fn_coerce: None,
+        widen_to_vec: false,
+        widen_to_union: None,
+        box_as_trait: None,
+    }).collect();
+    TExpr {
+        ty: Type::String,
+        kind: TExprKind::ModuleCall {
+            form: TModuleCallForm::Qualified {
+                rust_mod: signature.module_identity.clone(),
+                rust_fn: method.to_string(),
+            },
+            target_return: Some(Type::String),
+            type_args: Vec::new(),
+            args,
+        },
+    }
 }
 
 fn lower_fmt_int(value: i64) -> TExpr {
@@ -4071,7 +4246,6 @@ fn lower_raw_err_value(call: &Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ),
             ],
             extra: None,
-            as_trait: None,
         },
     }
 }
@@ -4096,7 +4270,7 @@ fn lower_raw_ok_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> 
     let (ok_ty, err_ty) = match env.ret_ty.as_ref() {
         Some(Type::Result { ok, err }) => {
             payload = preserve_typed_list_shape(payload, ok, cx);
-            payload = crate::Codegen::TIR::maybe_widen_expr_to_union(payload, ok);
+            payload = crate::Codegen::TIR::maybe_widen_expr_to_union(payload, ok, cx);
             ((**ok).clone(), (**err).clone())
         }
         _ => (
@@ -4184,8 +4358,7 @@ fn raw_contextual_return_enum(variant: &str, cx: &Cx, env: &LowerEnv) -> Option<
         .or_else(|| cx.core_qualified_rust_type_name(name))
         .unwrap_or(name.as_str());
     let declared = [name.as_str(), resolved].iter().any(|owner| {
-        cx.enum_variants
-            .get(*owner)
+        cx.fact_enum_variants(*owner)
             .is_some_and(|variants| variants.iter().any(|(candidate, _)| candidate == variant))
     }) || crate::Codegen::TIR::tir_to_mir_types::compiler_owned_enum_variants(name)
         .is_some_and(|variants| variants.contains(&variant))
@@ -4224,20 +4397,17 @@ fn lower_raw_err_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr>
             None => value,
         });
     }
-    let payload = call
-        .args
-        .first()
-        .map(|arg| lower_expr(&arg.expr, cx, env))
-        .unwrap_or_else(|| TExpr {
-            ty: Type::Named(Syntax::TYPE_ERR.to_string()),
-            kind: TExprKind::StructLit {
-                fields: Vec::new(),
-                extra: None,
-                as_trait: None,
-            },
-        });
+    // A typed failure carries its checked payload; an unchecked fragment that
+    // spells none has no carrier to build, so the fold declines.
+    let Some(payload) = call.args.first() else {
+        return Some(invariant_violation_expr(
+            call.name_span,
+            "raw typed `Err` without a failure payload",
+        ));
+    };
+    let payload = lower_expr(&payload.expr, cx, env);
     let payload = match target_error.as_ref() {
-        Some(error) => crate::Codegen::TIR::maybe_widen_expr_to_union(payload, error),
+        Some(error) => crate::Codegen::TIR::maybe_widen_expr_to_union(payload, error, cx),
         None => payload,
     };
     Some(TExpr {
@@ -4274,7 +4444,7 @@ fn integer_literal_is_zero(expr: &Expr) -> bool {
     }
 }
 
-fn lower_negative_power_exponent(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
+pub(super) fn lower_negative_power_exponent(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Option<TExpr> {
     match expr {
         Expr::Paren(inner, _) => lower_negative_power_exponent(inner, cx, env),
         Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
@@ -4297,6 +4467,33 @@ fn lower_negative_power_exponent(expr: &Expr, cx: &Cx, env: &mut LowerEnv) -> Op
     }
 }
 
+pub(super) fn lower_reciprocal_power(base: TExpr, exponent: TExpr, line: u32) -> TExpr {
+    let powered = TExpr {
+        ty: Type::Int,
+        kind: TExprKind::Binary {
+            op: BinOp::Pow,
+            overflow: true,
+            line,
+            lhs: Box::new(base),
+            rhs: Box::new(exponent),
+        },
+    };
+    TExpr {
+        ty: Type::Named(Syntax::TYPE_FRACTION.to_string()),
+        kind: TExprKind::PreciseBuiltin {
+            type_name: Syntax::TYPE_FRACTION.to_string(),
+            func: "from_parts".to_string(),
+            args: vec![
+                TExpr {
+                    ty: Type::Int,
+                    kind: TExprKind::IntLit(1, None),
+                },
+                powered,
+            ],
+        },
+    }
+}
+
 fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     TExpr {
         ty: Type::Named(Syntax::TYPE_NEVER.to_string()),
@@ -4307,9 +4504,55 @@ fn invariant_violation_expr(span: Span, construct: impl Into<String>) -> TExpr {
     }
 }
 
+/// D-META-USER1=A: lower `reject(code:, what:, why:, fix:)` to the registered
+/// `core.compiler.__reject` row with its four fields in that order. The
+/// compile-time evaluator owns the diagnostic (`Comptime::project_rejection`).
+fn lower_reject_call(call: &Call, cx: &Cx, env: &mut LowerEnv) -> TExpr {
+    const FIELDS: [&str; 4] = ["code", "what", "why", "fix"];
+    let record = match crate::Syntax::core_call_projection(
+        "core.compiler",
+        "__reject",
+        crate::Syntax::CoreCallCoverage::TIR_SUBSET,
+        FIELDS.len(),
+    ) {
+        Ok(record) => record,
+        Err(error) => {
+            return invariant_violation_expr(
+                call.name_span,
+                format!("`reject` has no canonical Core row ({error:?})"),
+            )
+        }
+    };
+    let mut args = Vec::with_capacity(FIELDS.len());
+    for field in FIELDS {
+        let Some(arg) = call
+            .args
+            .iter()
+            .find(|arg| arg.label.as_ref().is_some_and(|(label, _)| label == field))
+        else {
+            return invariant_violation_expr(
+                call.name_span,
+                format!("`reject` requires code, what, why, and fix labels; `{field}` is missing"),
+            );
+        };
+        args.push(lower_expr(&arg.expr, cx, env));
+    }
+    TExpr {
+        ty: unit_type(),
+        kind: TExprKind::CoreCall {
+            record,
+            args,
+            source_span: call.name_span,
+            type_args: Vec::new(),
+            widen_to_vec: vec![false; FIELDS.len()],
+            data_plan: None,
+            fallibility: TFailureCarrier::Infallible,
+        },
+    }
+}
+
 fn checked_const_ref_name(name: &str, cx: &Cx) -> String {
-    cx.const_ref_keys
-        .get(name)
+    cx.fact_const_ref_keys(name)
         .cloned()
         .unwrap_or_else(|| name.to_string())
 }
@@ -4324,17 +4567,17 @@ fn lower_named_comptime_binding(name: &str, cx: &Cx, env: &LowerEnv) -> Option<T
             kind: TExprKind::Local(env.local_of(name)),
         });
     }
-    if !cx.consts.contains_key(name)
-        && !cx.const_values.contains_key(name)
-        && !cx.const_ref_keys.contains_key(name)
+    if !cx.fact_consts(name).is_some()
+        && !cx.fact_const_values(name).is_some()
+        && !cx.fact_const_ref_keys(name).is_some()
     {
         return None;
     }
     Some(in_own_frame(|| {
-        let value = cx.const_values.get(name);
+        let value = cx.fact_const_values(name);
         let ty = env
             .ty_of(name)
-            .or_else(|| cx.const_ref_types.get(name).cloned())
+            .or_else(|| cx.fact_const_ref_types(name).cloned())
             .or_else(|| value.map(crate::AST::CtValue::jet_type))
             .unwrap_or(Type::Int);
         TExpr {
@@ -4378,7 +4621,7 @@ pub(crate) fn core_call_expr(
 /// reads, unless a local shadows the constant. Sema wraps a non-Copy field
 /// read in the implicit `Copy` node; the copied value is the same constant.
 fn prepared_constant_path_value<'a>(
-    expr: &Expr,
+    expr: &'a Expr,
     cx: &'a Cx,
     env: &LowerEnv,
 ) -> Option<&'a CtValue> {
@@ -4386,7 +4629,8 @@ fn prepared_constant_path_value<'a>(
         Expr::Paren(inner, _) | Expr::Copy(inner, _) => {
             prepared_constant_path_value(inner, cx, env)
         }
-        Expr::Ident(name, _) if !env.locals.contains_key(name) => cx.const_values.get(name),
+        Expr::Ident(name, _) if !env.locals.contains_key(name) => cx.fact_const_values(name),
+        Expr::ComptimeName { value, .. } => value.as_ref(),
         // Optional facts (`$exactness`, `$unit_scale_provenance`) prepare a
         // present carrier; a field read goes through it to the fact record.
         Expr::Field(base, field, _) => match prepared_constant_path_value(base, cx, env)? {
@@ -4555,7 +4799,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ),
                 ],
                 extra: None,
-                as_trait: None,
             },
         },
         Expr::Char(c, _) => TExpr {
@@ -4572,6 +4815,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             "decimal",
                             vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
                             e.span(),
+                            cx,
                         );
                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
                     }
@@ -4580,6 +4824,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             "grouped",
                             vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
                             e.span(),
+                            cx,
                         );
                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
                     }
@@ -4588,6 +4833,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             "hex",
                             vec![lower_expr(e, cx, env), lower_fmt_int(*width)],
                             e.span(),
+                            cx,
                         );
                         TStrPart::Interp(formatted, crate::AST::StrFormat::Display)
                     }
@@ -4601,6 +4847,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     lower_fmt_string(fill.clone()),
                                 ],
                                 e.span(),
+                                cx,
                             ),
                             crate::AST::StrFormat::Display,
                         )
@@ -4615,6 +4862,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     lower_fmt_string(fill.clone()),
                                 ],
                                 e.span(),
+                                cx,
                             ),
                             crate::AST::StrFormat::Display,
                         )
@@ -4624,6 +4872,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             "sci",
                             vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
                             e.span(),
+                            cx,
                         ),
                         crate::AST::StrFormat::Display,
                     ),
@@ -4633,16 +4882,17 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 "percent",
                                 vec![lower_expr(e, cx, env), lower_fmt_int(*precision)],
                                 e.span(),
+                                cx,
                             ),
                             crate::AST::StrFormat::Display,
                         )
                     }
                     StrPart::Interp(e, crate::AST::StrFormat::Bin) => TStrPart::Interp(
-                        lower_fmt_call("bin", vec![lower_expr(e, cx, env)], e.span()),
+                        lower_fmt_call("bin", vec![lower_expr(e, cx, env)], e.span(), cx),
                         crate::AST::StrFormat::Display,
                     ),
                     StrPart::Interp(e, crate::AST::StrFormat::Oct) => TStrPart::Interp(
-                        lower_fmt_call("oct", vec![lower_expr(e, cx, env)], e.span()),
+                        lower_fmt_call("oct", vec![lower_expr(e, cx, env)], e.span(), cx),
                         crate::AST::StrFormat::Display,
                     ),
                     StrPart::Interp(e, crate::AST::StrFormat::Unit(style)) => {
@@ -4707,13 +4957,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // locals. Parameters and local bindings shadow a same-named
                 // package constant just as every other lexical binding does.
                 // parity: guard tests/tir_patterns_and_fields.rs::lexical_parameter_shadows_same_named_comptime_constant_on_all_tiers
-                if cx.consts.contains_key(name) || cx.const_ref_keys.contains_key(name) {
+                if cx.fact_consts(name).is_some() || cx.fact_const_ref_keys(name).is_some() {
                     return in_own_frame(|| {
-                        let value = cx.const_values.get(name);
+                        let value = cx.fact_const_values(name);
                         let ty = env
                             .ty_of(name)
-                            .or_else(|| cx.const_ref_types.get(name).cloned())
-                            .or_else(|| cx.const_types.get(name).cloned())
+                            .or_else(|| cx.fact_const_ref_types(name).cloned())
+                            .or_else(|| cx.fact_const_types(name).cloned())
                             .or_else(|| value.map(crate::AST::CtValue::jet_type))
                             .unwrap_or(Type::Int);
                         return TExpr {
@@ -4728,20 +4978,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // c109 Phase 13: a bare function name used as a VALUE (not a local, not a
                 // const) emits `emit_named_fn_value` — `Box::new(move |…| __jet_<name>(…))
                 // as <fn-type>`. Mirrors `emit_expr`'s `Expr::Ident` arm (Expression.rs).
-                if !env.locals.contains_key(name) && !cx.consts.contains_key(name) {
-                    let fn_value_ty = cx
-                        .fn_types
-                        .get(name)
-                        .or_else(|| cx.fn_source_types.get(name));
+                if !env.locals.contains_key(name) && !cx.fact_consts(name).is_some() {
+                    let fn_value_ty = cx.fact_fn_types(name)
+                        .or_else(|| cx.fact_fn_source_types(name));
                     if let Some(ft @ Type::Fn { .. }) = fn_value_ty {
                         return in_own_frame(|| {
                             return TExpr {
                                 ty: ft.clone(),
                                 kind: TExprKind::FnValue {
-                                    kind: TFnValueKind::NamedFn {
-                                        name: Some(name.clone()),
-                                        lambda: None,
-                                    },
+                                    kind: TFnValueKind::NamedFn { name: Some(cx.function_value_name(&name)), lambda: None },
                                 },
                             };
                         });
@@ -4806,7 +5051,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // fragment with an invariant violation.
                 ty: env
                     .ty_of(name)
-                    .or_else(|| cx.const_ref_types.get(name).cloned())
+                    .or_else(|| cx.fact_const_ref_types(name).cloned())
                     .unwrap_or(Type::Int),
                 kind: TExprKind::ConstRef(checked_const_ref_name(name, cx)),
             }),
@@ -4853,7 +5098,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 kind: TExprKind::RawOf(Box::new(operand)),
             }
         }),
-        // D-CAP2 (D-MEM1/S4): `~x` — a fresh, independent value. Keep this
+        // D-CAP2 (D-MEM1/S4): `x.copy()` — a fresh, independent value. Keep this
         // signal distinct from compiler-inserted Clone nodes: Tensor's explicit
         // copy is a Prelude storage operation, while ordinary Clone shares its
         // Arc-backed storage.
@@ -4863,7 +5108,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 let view_owned_ty = view_copy_owned_type(&operand.ty);
                 let is_view_type = view_owned_ty.is_some();
                 let ty = view_owned_ty.unwrap_or_else(|| operand.ty.clone());
-                // D-MEM-COPYSEM1: both written `~` and sema-inserted copies of
+                // D-MEM-COPYSEM1: both written `.copy()` and sema-inserted copies of
                 // read-only views use the shared materialization path. A string
                 // view's Rust place is a bare `&str`, so cloning it would return
                 // another `&str`; the Prelude must produce the owned `String`.
@@ -4876,7 +5121,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 .split_view_handle(name)
                                 .is_some_and(|ty| view_copy_owned_type(&ty).is_some())
                     );
-                // Parser-created `~` spans begin at the sigil. Sema-created
+                // Parser-created `.copy()` spans begin at the sigil. Sema-created
                 // ownership clones reuse the operand span. Preserve that
                 // existing provenance fact as a TIR distinction; do not inspect
                 // source text or make a backend guess.
@@ -4893,8 +5138,33 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 TExpr { ty, kind }
             })
         }
+        // D-COPY-DEFAULT1=A (#3714): sema keeps the take mark only on a
+        // non-`Copy` field read (`^h.item`), the exact move of that field out
+        // of its owner. Lower a record field as the same `Move` a `^T`
+        // argument gets, so MIR moves the projected place instead of reading
+        // a copy (the Jet sema's `sema_expression_exact_move` twin).
+        Expr::Place(inner, crate::AST::PlaceAccess::Take, _) => in_own_frame(|| {
+            let place = lower_expr(inner, cx, env);
+            if !matches!(place.kind, TExprKind::Field { .. }) {
+                return place;
+            }
+            TExpr {
+                ty: place.ty.clone(),
+                kind: TExprKind::Move(Box::new(place)),
+            }
+        }),
         Expr::Place(inner, access, span) => {
             in_own_frame(|| {
+                if *access == crate::AST::PlaceAccess::Take {
+                    // Sema already proved this exact take legal. Resource
+                    // guard slots use through_ref too, but still own the place:
+                    // lower_owned_expr would materialize a clone of their field.
+                    let place = lower_expr(inner, cx, env);
+                    return TExpr {
+                        ty: place.ty.clone(),
+                        kind: TExprKind::Move(Box::new(place)),
+                    };
+                }
                 if let Expr::Slice {
                     base,
                     start,
@@ -4903,60 +5173,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ..
                 } = inner.as_ref()
                 {
-                    let recv = if *access == crate::AST::PlaceAccess::Write {
-                        lower_expr_as_mut_place(base, cx, env)
-                    } else {
-                        lower_expr(base, cx, env)
-                    };
-                    // Tensor, Vec<N>, and Matrix<M, N> all use the ranked compute
-                    // Prelude. The foundation predicate is exact, so ordinary
-                    // generics cannot accidentally enter the tensor-view path.
-                    let is_tensor = recv.ty.is_compute_tensor_family();
-                    let elem = if is_tensor {
-                        Type::Float
-                    } else {
-                        match &recv.ty {
-                            Type::List(elem) | Type::FixedList { elem, .. } => (**elem).clone(),
-                            _ => Type::Int,
-                        }
-                    };
-                    let mutable = *access == crate::AST::PlaceAccess::Write;
-                    let line = cx.src_line_col(span.start).0;
-                    let args = if let Some(range) = range {
-                        vec![lower_expr(range, cx, env)]
-                    } else {
-                        vec![lower_expr(start, cx, env), lower_expr(end, cx, env)]
-                    };
-                    TExpr {
-                        ty: Type::Apply {
-                            name: if mutable && is_tensor {
-                                "ComputeViewMut"
-                            } else if mutable {
-                                "ViewMut"
-                            } else {
-                                "View"
-                            }
-                            .to_string(),
-                            args: vec![elem],
-                        },
-                        kind: TExprKind::BuiltinMethod {
-                            recv: Box::new(recv),
-                            op: if mutable {
-                                if is_tensor {
-                                    TBuiltinOp::ComputeViewMutNew { line }
-                                } else {
-                                    TBuiltinOp::ViewMutNew { line }
-                                }
-                            } else {
-                                if is_tensor {
-                                    TBuiltinOp::ComputeViewNew { line }
-                                } else {
-                                    TBuiltinOp::ViewNew { line }
-                                }
-                            },
-                            args,
-                        },
-                    }
+                    lower_slice_window(
+                        base,
+                        start,
+                        end,
+                        range.as_deref(),
+                        *access == crate::AST::PlaceAccess::Write,
+                        *span,
+                        cx,
+                        env,
+                    )
                 } else {
                     let place = if *access == crate::AST::PlaceAccess::Write {
                         lower_expr_as_mut_place(inner, cx, env)
@@ -5011,9 +5237,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 ) = (expected_enum, &mut rhs.kind)
                 {
-                    let visible_owner_has_variant = cx
-                        .enum_variants
-                        .get(enum_type)
+                    let visible_owner_has_variant = cx.fact_enum_variants(enum_type)
                         .is_some_and(|variants| variants.iter().any(|(name, _)| name == variant));
                     if crate::Codegen::nominal_leaf(enum_type)
                         == crate::Codegen::nominal_leaf(&expected_enum)
@@ -5062,10 +5286,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         }
                     }
                 }
-                // D-TYPE2-UNCERT1=A: sema has made exact operands explicit
-                // zero-uncertainty measurements. Reuse the resident measurement
-                // handle op so AOT, JIT, interpreter, comptime, REPL and web call
-                // the same Prelude kernel.
+                // Sema has made exact operands explicit zero-uncertainty
+                // measurements; the implementation is an ordinary source call.
                 if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
                     && matches!((&lhs.ty, &rhs.ty), (
                         Type::Apply { name: left, .. },
@@ -5073,23 +5295,15 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     ) if left == Syntax::TYPE_MEASUREMENT && right == Syntax::TYPE_MEASUREMENT)
                 {
                     return in_own_frame(|| {
-                        return TExpr {
-                            ty: lhs.ty.clone(),
-                            kind: TExprKind::HandleMethod {
-                                recv: Box::new(lhs),
-                                op: THandleOp::MeasurementMethod {
-                                    method: match op {
-                                        BinOp::Add => "add",
-                                        BinOp::Sub => "sub",
-                                        BinOp::Mul => "mul",
-                                        BinOp::Div => "div",
-                                        _ => unreachable!(),
-                                    }
-                                    .to_string(),
-                                },
-                                args: vec![rhs],
-                            },
+                        let result = lhs.ty.clone();
+                        let function = match op {
+                            BinOp::Add => "__measurement_add",
+                            BinOp::Sub => "__measurement_sub",
+                            BinOp::Mul => "__measurement_mul",
+                            BinOp::Div => "__measurement_div",
+                            _ => unreachable!(),
                         };
+                        return lower_measurement_source_call(function, [lhs, rhs], result, *span, cx);
                     });
                 }
                 // D-SHAPE-QUANTITY1=A: sema has already validated compatibility.
@@ -5245,36 +5459,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     },
                 };
                 // D-EXPNEG1: a written negative exponent on the default
-                // exact Int lowers to `1 / (base ^ |exponent|)` in the
+                // exact Int lowers to `1 / base.pow(abs(exponent))` in the
                 // Fraction Prelude carrier. Dynamic exponents stay on the
                 // trapping whole-number power path.
                 if *op == BinOp::Pow && lhs.ty == Type::Int && rhs.ty == Type::Int {
                     if let Some(exponent) = lower_negative_power_exponent(r, cx, env) {
                         let line = cx.src_line_col(span.start).0 as u32;
-                        let powered = TExpr {
-                            ty: Type::Int,
-                            kind: TExprKind::Binary {
-                                op: BinOp::Pow,
-                                overflow: true,
-                                line,
-                                lhs: Box::new(lhs),
-                                rhs: Box::new(exponent),
-                            },
-                        };
-                        return TExpr {
-                            ty: fraction_ty.clone(),
-                            kind: TExprKind::PreciseBuiltin {
-                                type_name: Syntax::TYPE_FRACTION.to_string(),
-                                func: "from_parts".to_string(),
-                                args: vec![
-                                    TExpr {
-                                        ty: Type::Int,
-                                        kind: TExprKind::IntLit(1, None),
-                                    },
-                                    powered,
-                                ],
-                            },
-                        };
+                        return lower_reciprocal_power(lhs, exponent, line);
                     }
                 }
                 if matches!(
@@ -5411,8 +5602,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         if matches!(left.as_str(), "Duration" | "Instant")
                             && matches!(right.as_str(), "Duration" | "Instant") =>
                     {
-                        let left_kind = cx.unit_facts.get(left).map(|fact| fact.kind);
-                        let right_kind = cx.unit_facts.get(right).map(|fact| fact.kind);
+                        let left_kind = cx.fact_unit_facts(left).map(|fact| fact.kind);
+                        let right_kind = cx.fact_unit_facts(right).map(|fact| fact.kind);
                         match (*op, left_kind, right_kind) {
                             (
                                 BinOp::Add | BinOp::Sub,
@@ -5452,10 +5643,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     } else if let Some(ty) = canonical_time_ty {
                         ty
                     } else if let (Type::Named(ln), Type::Named(rn)) = (&lhs.ty, &rhs.ty) {
-                        let lm = crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln);
-                        let rm = crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn);
+                        let lm = crate::Sema::is_math_type(ln) && !cx.fact_type_name(ln);
+                        let rm = crate::Sema::is_math_type(rn) && !cx.fact_type_name(rn);
                         if lm || rm {
+                            // A Named scalar operand (`Decimal`, `F64`) against a math
+                            // value is a scalar splat, typed like the checker's
+                            // math_scalar_binop_result fallback (`2.0 * v` is `Vec3`).
                             crate::Sema::math_binop_result(*op, ln, rn)
+                                .or_else(|| {
+                                    lm.then(|| crate::Sema::math_scalar_binop_result(*op, ln, &rhs.ty))
+                                        .flatten()
+                                })
+                                .or_else(|| {
+                                    rm.then(|| crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty))
+                                        .flatten()
+                                })
                                 .unwrap_or_else(|| lhs.ty.clone())
                         } else if ln == rn
                             && crate::Sema::precise_binop_result(*op, ln, rn).is_some()
@@ -5465,11 +5667,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             lhs.ty.clone()
                         }
                     } else if let Type::Named(ln) = &lhs.ty {
-                        if crate::Sema::is_math_type(ln) && !cx.type_names.contains(ln) {
+                        if crate::Sema::is_math_type(ln) && !cx.fact_type_name(ln) {
                             crate::Sema::math_scalar_binop_result(*op, ln, &rhs.ty)
                                 .unwrap_or_else(|| lhs.ty.clone())
                         } else if let Type::Named(rn) = &rhs.ty {
-                            if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
+                            if crate::Sema::is_math_type(rn) && !cx.fact_type_name(rn) {
                                 crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
                                     .unwrap_or_else(|| lhs.ty.clone())
                             } else {
@@ -5479,7 +5681,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             lhs.ty.clone()
                         }
                     } else if let Type::Named(rn) = &rhs.ty {
-                        if crate::Sema::is_math_type(rn) && !cx.type_names.contains(rn) {
+                        if crate::Sema::is_math_type(rn) && !cx.fact_type_name(rn) {
                             crate::Sema::math_scalar_binop_result(*op, rn, &lhs.ty)
                                 .unwrap_or_else(|| lhs.ty.clone())
                         } else {
@@ -5584,6 +5786,38 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     } else {
                         test
                     };
+                }
+                // Math aggregates are runtime values, not primitive numbers (or
+                // numeric handle ids). Use the same typed kernels as methods so
+                // arithmetic results remain usable on every execution tier.
+                if let (Type::Named(left), Type::Named(right)) = (&lhs.ty, &rhs.ty) {
+                    if crate::Sema::is_math_type(left)
+                        && crate::Sema::is_math_type(right)
+                        && !cx.fact_type_name(left)
+                        && !cx.fact_type_name(right)
+                        && crate::Sema::math_binop_result(*op, left, right).is_some()
+                    {
+                        let func = match op {
+                            BinOp::Add => Some("add"),
+                            BinOp::Sub => Some("sub"),
+                            BinOp::Mul if left != right => Some("transform"),
+                            BinOp::Mul if matches!(left.as_str(), "Mat3" | "Mat4") => Some("matmul"),
+                            BinOp::Mul if left == "Vec3" => Some("hadamard_mul"),
+                            BinOp::Mul => Some("mul"),
+                            BinOp::Div => Some("div"),
+                            _ => None,
+                        };
+                        if let Some(func) = func {
+                            return TExpr {
+                                ty,
+                                kind: TExprKind::MathBuiltin {
+                                    type_name: left.clone(),
+                                    func: func.to_string(),
+                                    args: vec![lhs, rhs],
+                                },
+                            };
+                        }
+                    }
                 }
                 if let Some((type_name, func)) = math_scalar_builtin(*op, &lhs.ty, &rhs.ty) {
                     let math_on_left =
@@ -5774,122 +6008,19 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         },
                         _ => None,
                     };
-                    let user_policy = call.args[..call.args.len().saturating_sub(1)]
-                        .iter()
-                        .find_map(|argument| {
-                            let Expr::Call(policy) = &argument.expr else {
-                                return None;
-                            };
-                            if crate::AST::CallablePolicyChain::is_builtin(&policy.name) {
-                                return None;
-                            }
-                            let target_name = target_name?;
-                            let wrapper = crate::AST::CallablePolicyChain::user_wrapper_name(
-                                &policy.name,
-                                target_name,
-                            );
-                            cx.sigs.contains_key(&wrapper).then_some((wrapper, policy))
+                    let user_policies = call.args[..call.args.len().saturating_sub(1)]
+                        .iter().filter_map(|argument| {
+                            let Expr::Call(policy) = &argument.expr else { return None; };
+                            if crate::AST::CallablePolicyChain::is_builtin(&policy.name) { return None; }
+                            let wrapper = crate::AST::CallablePolicyChain::user_wrapper_name(&policy.name, target_name?);
+                            cx.fact_sigs(&wrapper).map(|_| (wrapper, policy))
                         });
-                    if let Some((wrapper, policy)) = user_policy {
-                        let callee_expr = &call.args.last().expect("checked above").expr;
-                        let mut callee = lower_expr(callee_expr, cx, env);
-                        let policy_sig = cx
-                            .sigs
-                            .get(&wrapper)
-                            .expect("sema materialized the user policy wrapper");
-                        // The wrapper's `call` parameter (after the policy
-                        // parameters, before the target's own) is this
-                        // `apply`'s checked callable type. Sema fixed it before
-                        // the failure solve, so a named target inferred
-                        // `T Never!` since then enters that slot through the
-                        // plain-function adapter with the slot's carrier.
-                        let target_arity = match callee.ty.without_user_tags() {
-                            Type::Fn { params, .. } => Some(params.len()),
-                            _ => None,
-                        };
-                        let call_slot = target_arity
-                            .and_then(|arity| policy_sig.len().checked_sub(arity + 1))
-                            .and_then(|index| policy_sig.get(index))
-                            .map(|(_, slot)| slot)
-                            .filter(|slot| matches!(slot.without_user_tags(), Type::Fn { .. }));
-                        let named_target = matches!(
-                            &callee.kind,
-                            TExprKind::FnValue {
-                                kind: TFnValueKind::NamedFn {
-                                    name: Some(_),
-                                    lambda: None,
-                                },
-                            }
-                        );
-                        if let Some(slot) = call_slot.filter(|_| named_target) {
-                            callee.ty = slot.clone();
-                        }
-                        let policy_args = policy
-                            .args
-                            .iter()
-                            .enumerate()
-                            .map(|(index, argument)| {
-                                lower_one_call_arg(
-                                    argument,
-                                    policy_sig.get(index).cloned(),
-                                    env,
-                                    cx,
-                                )
-                            })
-                            .collect();
-                        let policy_conventions = policy
-                            .args
-                            .iter()
-                            .enumerate()
-                            .map(|(index, _)| {
-                                policy_sig
-                                    .get(index)
-                                    .map(|(convention, _)| *convention)
-                                    .unwrap_or(AccessConvention::Read)
-                            })
-                            .collect();
-                        let mut capture_names = HashSet::new();
-                        for argument in &policy.args {
-                            let (reads, calls) =
-                                crate::Sema::expr_free_reads_and_calls(&argument.expr);
-                            capture_names.extend(reads);
-                            capture_names.extend(calls);
-                        }
-                        let (reads, calls) = crate::Sema::expr_free_reads_and_calls(callee_expr);
-                        capture_names.extend(reads);
-                        capture_names.extend(calls);
-                        let mut capture_names = capture_names.into_iter().collect::<Vec<_>>();
-                        capture_names.sort();
-                        let captures = capture_names
-                            .into_iter()
-                            .filter_map(|name| {
-                                env.locals.contains_key(&name).then(|| {
-                                    (
-                                        name.clone(),
-                                        env.local_of(&name).name,
-                                        env.ty_of(&name)
-                                            .expect("checked policy capture has a type")
-                                            .clone(),
-                                    )
-                                })
-                            })
-                            .collect();
-                        let fn_type = callee.ty.clone();
-                        return TExpr {
-                            ty: fn_type.clone(),
-                            kind: TExprKind::FnValue {
-                                kind: TFnValueKind::Policy {
-                                    fn_type,
-                                    policy_args,
-                                    policy_conventions,
-                                    wrapper_name: Some(wrapper),
-                                    captures,
-                                    callee: Box::new(callee),
-                                },
-                            },
-                        };
+                    let callee_expr = &call.args.last().expect("checked above").expr;
+                    let mut callee = lower_expr(callee_expr, cx, env);
+                    for (wrapper, policy) in user_policies.rev() {
+                        callee = lower_user_policy_value(callee_expr, callee, policy, wrapper, cx, env);
                     }
-                    return lower_expr(&call.args.last().expect("checked above").expr, cx, env);
+                    return callee;
                 }
                 // Early comptime registration runs before sema annotates calls with
                 // `widen_approx`. Recognize the unshadowed builtin here too; sema
@@ -5913,38 +6044,40 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     });
                 }
                 // D-TYPE2-UNCERT1=A: the canonical source constructor uses the
-                // existing typed Prelude route directly. `core.units.from` is
-                // source-owned and is not a second CoreCall dispatcher entry.
+                // ordinary source function. The checked constructor spelling
+                // remains distinct from `core.units.from`.
                 if call.name == "measurement"
                     && !cx.sigs.contains_key(&call.name)
                     && !env.locals.contains_key(&call.name)
                     && call.args.len() == 2
                 {
                     return in_own_frame(|| {
-                        let args = call
-                            .args
-                            .iter()
-                            .map(|argument| lower_expr(&argument.expr, cx, env))
-                            .collect::<Vec<_>>();
-                        TExpr {
-                            ty: Type::Apply {
-                                name: Syntax::TYPE_MEASUREMENT.to_string(),
-                                args: vec![Type::Float],
-                            },
-                            kind: TExprKind::PreciseBuiltin {
-                                type_name: Syntax::TYPE_MEASUREMENT.to_string(),
-                                func: "new".to_string(),
-                                args,
-                            },
-                        }
+                        let args = call.args.iter().map(|argument| lower_expr(&argument.expr, cx, env));
+                        let result = Type::Apply {
+                            name: Syntax::TYPE_MEASUREMENT.to_string(),
+                            args: vec![Type::Float],
+                        };
+                        lower_measurement_source_call("__measurement_new", args, result, call.name_span, cx)
                     });
+                }
+                // Direct calls use the exact same checked policy value as apply.
+                if let Some(policies) = cx.fn_policy_calls.get(&call.name) {
+                    let target = Expr::Ident(call.name.clone(), call.name_span);
+                    let mut callee = lower_expr(&target, cx, env);
+                    for policy in policies.iter().rev() {
+                        let wrapper = crate::AST::CallablePolicyChain::user_wrapper_name(&policy.name, &call.name);
+                        callee = lower_user_policy_value(&target, callee, policy, wrapper, cx, env);
+                    }
+                    let lowered = lower_fn_value_call(None, callee, &call.args, call.name_span.start as u32, cx, env);
+                    let resolved_ret = call.resolved_ret.clone().or_else(|| crate::Codegen::TIR::mir::never_carrier_success(&lowered.ty).cloned());
+                    return consume_plain_helper_route(resolved_ret.as_ref(), call.name_span, lowered, cx, env);
                 }
                 // c109 Phase 13: `f(args)` where `f` is a LOCAL (a fn-typed binding/param)
                 // parses as `Expr::Call`. Function-type params are unmarked Read params.
                 // A declared function of the same name wins over the local, exactly
                 // as sema's `check_call` resolves it.
                 if env.locals.contains_key(&call.name)
-                    && !cx.consts.contains_key(&call.name)
+                    && !cx.fact_consts(&call.name).is_some()
                     && !cx.sigs.contains_key(&call.name)
                 {
                     return in_own_frame(|| {
@@ -6025,6 +6158,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 holes.push(hole);
                             }
                         }
+                        if kind == Syntax::TypedHeadKind::URL {
+                            return lower_url_recipe(literals, holes, cx);
+                        }
                         let ty = Type::Named(kind.internal_type_name().to_string());
                         if kind == Syntax::TypedHeadKind::HTML && holes.is_empty() {
                             return TExpr {
@@ -6054,13 +6190,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     && call.args.len() == 1
                 {
                     return in_own_frame(|| {
-                        return core_call_expr(
-                            Type::Named(Syntax::TYPE_REGEX.to_string()),
-                            "core.regex",
-                            "literal",
-                            vec![lower_expr(&call.args[0].expr, cx, env)],
-                            call.name_span,
-                            vec![false],
+                        return super::method_calls::lower_regex_literal(
+                            &call.args[0].expr, call.name_span, cx, env,
                         );
                     });
                 }
@@ -6153,6 +6284,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 },
                             };
                         });
+                    }
+                    // D-META-USER1=A: a checked rule's `reject(code:, what:,
+                    // why:, fix:)` is the registered `core.compiler.__reject`
+                    // row; the compile-time evaluator turns it into the
+                    // project diagnostic (card #4696).
+                    if call.name == Syntax::BUILTIN_REJECT {
+                        return in_own_frame(|| lower_reject_call(call, cx, env));
                     }
                 }
                 // c109 Phase 25: the ambient prelude `input(...)` (D-PRELUDE1 = B). Same
@@ -6252,7 +6390,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                         let c_abi = extern_fn.c_abi;
                         return in_own_frame(|| {
-                            let sig = cx.sigs.get(&call.name).cloned();
+                            let sig = cx.fact_sigs(&call.name).cloned();
                             let eargs = call
                                 .args
                                 .iter()
@@ -6272,9 +6410,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             let lowered = TExpr {
                                 ty: return_type,
                                 kind: TExprKind::ExternCall {
-                                    symbol: cx
-                                        .foreign_call_keys
-                                        .get(&call.name)
+                                    symbol: cx.fact_foreign_call_key(&call.name)
                                         .cloned()
                                         .unwrap_or(wrapper),
                                     c_abi,
@@ -6292,16 +6428,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             };
                             return wrap_foreign_undo(
                                 lowered,
-                                cx.foreign_undos.get(&call.name).map(String::as_str),
+                                cx.fact_foreign_undo(&call.name).map(String::as_str),
                                 call.name_span.start as u32,
                                 cx,
                                 env,
                             );
                         });
                     }
-                    if let Some(foreign_key) = cx.foreign_call_keys.get(&call.name).cloned() {
+                    if let Some(foreign_key) = cx.fact_foreign_call_key(&call.name).cloned() {
                         return in_own_frame(|| {
-                            let sig = cx.sigs.get(&call.name).cloned();
+                            let sig = cx.fact_sigs(&call.name).cloned();
                             let eargs = call
                                 .args
                                 .iter()
@@ -6333,7 +6469,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             };
                             wrap_foreign_undo(
                                 lowered,
-                                cx.foreign_undos.get(&call.name).map(String::as_str),
+                                cx.fact_foreign_undo(&call.name).map(String::as_str),
                                 call.name_span.start as u32,
                                 cx,
                                 env,
@@ -6350,8 +6486,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .cloned();
                     if let Some(mangled_key) = inline_mangled {
                         return in_own_frame(|| {
-                            let undo = cx.foreign_undos.get(&mangled_key).map(String::as_str);
-                            let sig = cx.sigs.get(&mangled_key).cloned();
+                            let undo = cx.fact_foreign_undo(&mangled_key).map(String::as_str);
+                            let sig = cx.fact_sigs(&mangled_key).cloned();
                             let args: Vec<_> = call
                                 .args
                                 .iter()
@@ -6422,19 +6558,16 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .inline_unqualified_file
                         .get(&env.fn_name)
                         .and_then(|scope| scope.get(&call.name))
-                        .or_else(|| cx.unqualified_file.get(&call.name))
+                        .or_else(|| cx.fact_unqualified_file(&call.name))
                         .cloned();
                     if let Some((rust_mod, fn_name)) = inline_file {
                         return in_own_frame(|| {
-                            let undo = cx
-                                .foreign_undos
-                                .get(&format!("{rust_mod}::{fn_name}"))
+                            let undo = cx.fact_foreign_undo(&format!("{rust_mod}::{fn_name}"))
                                 .map(String::as_str);
-                            let sig = cx
-                                .import_sigs
-                                .get(&(call.name.clone(), fn_name.clone()))
-                                .cloned();
-                            let args = call
+                            let sig = crate::Codegen::TIR::module_call_signature(
+                                cx, &(call.name.clone(), fn_name.clone()), &call.type_args,
+                            );
+                            let args: Vec<TCallArg> = call
                                 .args
                                 .iter()
                                 .enumerate()
@@ -6467,13 +6600,28 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     return invariant_violation_expr(call.name_span, error);
                                 }
                             };
+                            // #4609: a generic target names the instance its
+                            // declaring module lowers, by canonical key.
+                            let form = match demand_module_generic_function(
+                                cx,
+                                &(call.name.clone(), fn_name.clone()),
+                                &fn_name,
+                                &call.type_args,
+                            ) {
+                                Ok(Some((owner, instance))) => TModuleCallForm::Qualified {
+                                    rust_mod: owner,
+                                    rust_fn: instance,
+                                },
+                                Ok(None) => TModuleCallForm::Qualified {
+                                    rust_mod,
+                                    rust_fn: mangle(&fn_name).to_string(),
+                                },
+                                Err(error) => return invariant_violation_expr(call.name_span, error),
+                            };
                             let lowered = TExpr {
                                 ty: ret,
                                 kind: TExprKind::ModuleCall {
-                                    form: TModuleCallForm::Qualified {
-                                        rust_mod,
-                                        rust_fn: mangle(&fn_name).to_string(),
-                                    },
+                                    form,
                                     target_return,
                                     type_args: call.type_args.clone(),
                                     args,
@@ -6560,7 +6708,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // D-DECIMAL1: `Decimal(…)` constructor.
                 if !env.locals.contains_key(&call.name)
                     && call.name == crate::Syntax::TYPE_DECIMAL
-                    && !cx.type_names.contains(&call.name)
+                    && !cx.fact_type_name(&call.name)
                 {
                     return in_own_frame(|| {
                         let targs: Vec<TExpr> = call
@@ -6582,7 +6730,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // construction share the precise builtin constructor seam.
                 if !env.locals.contains_key(&call.name)
                     && call.name == crate::Syntax::TYPE_COMPLEX
-                    && !cx.type_names.contains(&call.name)
+                    && !cx.fact_type_name(&call.name)
                 {
                     return in_own_frame(|| {
                         let targs: Vec<TExpr> = call
@@ -6604,7 +6752,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // float components and emit `{root}jet_math_<T>_new(…)`.
                 if !env.locals.contains_key(&call.name)
                     && crate::Sema::is_math_type(&call.name)
-                    && !cx.type_names.contains(&call.name)
+                    && !cx.fact_type_name(&call.name)
                 {
                     return in_own_frame(|| {
                         let targs: Vec<TExpr> = call
@@ -6640,7 +6788,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 if !env.locals.contains_key(&call.name) {
                     if let (Some((base, _)), Some(arg)) =
-                        (cx.distinct_types.get(&call.name), call.args.first())
+                        (cx.fact_distinct_types(&call.name), call.args.first())
                     {
                         return in_own_frame(|| {
                             return TExpr {
@@ -6709,7 +6857,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             args,
                         },
                     };
-                    if let Some((pre, _)) = cx.contract_sigs.get(&call.name) {
+                    if let Some((pre, _)) = cx.fact_contract_sigs(&call.name) {
                         let (bindings, contracts) = lower_call_pre_contracts(
                             call,
                             match &mut lowered.kind {
@@ -6751,9 +6899,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     // expression. This matters for task payloads, whose `Task<T>`
                     // element type is the callable's declared `T`, not its body
                     // reachability fact.
-                    let declared_never = cx
-                        .fn_source_types
-                        .get(&call.name)
+                    let declared_never = cx.fact_fn_source_types(&call.name)
                         .and_then(|ty| match ty {
                             Type::Fn { ret: Some(ret), .. } => Some(cx.expand_type_aliases(ret)),
                             _ => None,
@@ -6801,11 +6947,10 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         // delegate here as well so this dispatch remains total when called directly.
         Expr::If { .. } => lower_expr_segment(e, cx, env),
 
-        // c109 Phase 3: a struct literal. The gate already proved the type is a
-        // plain covered user struct (no trait coercion, no import namespace, no
-        // generic args), so the Rust head is `__jet_<name>` and field names mangle.
-        // Field values are lowered as-is — no clone/coercion at the literal site
-        // (mirrors the AST path; a value's own move/clone facts live in itself).
+        // Construct the original checked concrete type, including its generic
+        // arguments, before any explicitly requested owned TraitBox wrapper.
+        // Field values retain their own move/copy facts; a trait formal's Read
+        // loan is not an owned conversion at this literal boundary.
         Expr::StructLit {
             type_name,
             type_args,
@@ -6828,7 +6973,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .map(String::as_str)
                         .unwrap_or(enum_name);
                     let is_variant = [enum_name, owner].into_iter().any(|enum_key| {
-                        cx.enum_variants.get(enum_key).is_some_and(|variants| {
+                        cx.fact_enum_variants(enum_key).is_some_and(|variants| {
                             variants.iter().any(|(candidate, _)| candidate == variant)
                         })
                     });
@@ -6852,14 +6997,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
             }
             in_own_frame(|| {
-                // c109 Phase 30: a trait-object coercion (`Circle {…}` in a `[Shape]` list). The
-                // AST wraps the rendered literal `Box::new(<lit>) as Box<dyn __jet_<Trait>>`; the
-                // value's type is the trait object. Resolved here (totality) — only the plain
-                // user-struct branch below carries it (a coerced import_ns/prelude literal is
-                // not a construct any covered program produces; the gate keeps those uncoerced).
-                let trait_coerce = as_trait
-                    .as_ref()
-                    .map(|trait_name| (trait_name.clone(), type_name.clone()));
                 // c109 Phase 19: a FOREIGN (imported user) struct literal `alias.Type { … }`
                 // (`import_ns`). The AST `emit_struct_lit` `import_ns` branch emits
                 // `{root}{import_mods[alias]}::{mangle(Type)}[::<args>]` with MANGLED fields.
@@ -6867,31 +7004,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // exactly as the AST path (the gate already required the alias to resolve).
                 if let Some(alias) = import_ns {
                     return in_own_frame(|| {
-                        if cx.core_import_module_for_function(&env.fn_name, alias)
-                            == Some("core.encoding")
-                            && matches!(
-                                type_name.as_str(),
-                                "EncodingLimits" | "EncodingCause" | "EncodingError"
-                            )
-                            && type_args.is_empty()
-                        {
-                            return in_own_frame(|| {
-                                let tfields = fields
-                                    .iter()
-                                    .map(|(name, _, value)| {
-                                        (name.clone(), lower_expr(value, cx, env), false)
-                                    })
-                                    .collect();
-                                return TExpr {
-                                    ty: Type::Named(type_name.clone()),
-                                    kind: TExprKind::StructLit {
-                                        fields: tfields,
-                                        extra: None,
-                                        as_trait: None,
-                                    },
-                                };
-                            });
-                        }
                         if cx.core_import_module_for_function(&env.fn_name, alias)
                             == Some("core.encoding.cbor")
                             && matches!(type_name.as_str(), "CBOROptions" | "CBORError")
@@ -6909,7 +7021,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind: TExprKind::StructLit {
                                         fields: tfields,
                                         extra: None,
-                                        as_trait: None,
                                     },
                                 };
                             });
@@ -6938,7 +7049,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind: TExprKind::StructLit {
                                         fields: tfields,
                                         extra: None,
-                                        as_trait: None,
                                     },
                                 };
                             });
@@ -6973,7 +7083,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                     kind: TExprKind::StructLit {
                                         fields: tfields,
                                         extra: None,
-                                        as_trait: None,
                                     },
                                 };
                             });
@@ -7013,7 +7122,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7049,7 +7157,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields.drain(..).collect(),
                                 extra,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7074,7 +7181,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7093,7 +7199,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7111,7 +7216,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7133,7 +7237,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7153,7 +7256,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7181,7 +7283,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             kind: TExprKind::StructLit {
                                 fields: tfields,
                                 extra: None,
-                                as_trait: None,
                             },
                         };
                     });
@@ -7200,12 +7301,11 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     // sema's synthetic patch item. Reconstruct that one derived
                     // shape from the base fields, preserving the computed-field
                     // exclusion owned by the patchable sema pass.
-                    let all = cx.struct_fields.get(base_name).map(|base_fields| {
+                    let all = cx.fact_struct_fields(base_name).map(|base_fields| {
                         base_fields
                             .iter()
                             .filter(|(name, _)| {
-                                !cx.computed_fields
-                                    .get(base_name)
+                                !cx.fact_computed_fields(base_name)
                                     .is_some_and(|computed| computed.contains(name))
                             })
                             .map(|(name, field_ty)| {
@@ -7236,7 +7336,6 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 kind: TExprKind::StructLit {
                                     fields: tfields,
                                     extra: None,
-                                    as_trait: None,
                                 },
                             };
                         });
@@ -7253,7 +7352,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .get(type_name)
                         .cloned()
                         .or_else(|| {
-                            if cx.struct_fields.contains_key(type_name) {
+                            if cx.fact_struct_fields(type_name).is_some() {
                                 Some(type_name.clone())
                             } else {
                                 cx.foreign_type_identity("", type_name)
@@ -7283,7 +7382,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             .count();
                         if same_leaf
                             && leaf_count > 1
-                            && cx.struct_fields.contains_key(context_name)
+                            && cx.fact_struct_fields(context_name).is_some()
                         {
                             resolved_name = context_name.to_string();
                         }
@@ -7303,7 +7402,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         .iter()
                         .map(|(n, _, fe)| {
                             let boxed =
-                                cx.boxed_edges.contains(&(resolved_name.clone(), n.clone()));
+                                cx.fact_box_edge(&resolved_name, &n);
                             let mut value = lower_owned_expr(fe, cx, env);
                             // D-UNIONTYPE1=A: member → union inject at Codable/struct field sites.
                             if let Some(fty) = struct_field_type(cx, &resolved_ty, n) {
@@ -7318,7 +7417,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                                 // receives a `Vec<T>` and rustc reports an internal
                                 // type error (I2).
                                 value = preserve_typed_list_shape(value, &fty, cx);
-                                value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty);
+                                value = crate::Codegen::TIR::maybe_widen_expr_to_union(value, &fty, cx);
                                 value = crate::Codegen::TIR::box_present_trait_payload(value, &fty, cx);
                                 value = lower_atomic_initializer(value, &fty);
                             }
@@ -7344,19 +7443,18 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         };
                         tfields.push((Syntax::PUBLISHED_UNKNOWN_FIELDS.to_string(), holder, false));
                     }
-                    // c109 Phase 30: a trait-coerced literal's value type is the trait object (so a
-                    // list of them types `[Shape]`); an uncoerced literal keeps its struct type.
-                    let ty = match as_trait {
-                        Some(t) => Type::TraitObject(vec![t.clone()]),
-                        None => resolved_ty,
+                    let source = TExpr {
+                        ty: resolved_ty,
+                        kind: TExprKind::StructLit { fields: tfields, extra: None },
                     };
-                    TExpr {
-                        ty,
-                        kind: TExprKind::StructLit {
-                            fields: tfields,
-                            extra: None,
-                            as_trait: trait_coerce,
-                        },
+                    if let Some(trait_name) = as_trait {
+                        let target = Type::TraitObject(vec![trait_name.clone()]);
+                        TExpr {
+                            ty: target.clone(),
+                            kind: TExprKind::TraitBox { value: Box::new(source), target },
+                        }
+                    } else {
+                        source
                     }
                 })
             })
@@ -7373,6 +7471,21 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         ty: ty.clone(),
                         kind: TExprKind::ConstRef(key.clone()),
                     };
+                }
+                if Syntax::compiler_fact_member(member).is_some() && !cx.comptime_type_facts.is_empty() {
+                    if let Some((root, path)) = compiler_fact_subject_path(receiver) {
+                        if !env.locals.contains_key(root) {
+                            if let Some(value) = cx.comptime_type_facts
+                                .get(path.as_str())
+                                .and_then(|facts| facts.get(member))
+                            {
+                                let ty = value.jet_type();
+                                let kind = lower_comptime_scalar(Some(value), Some(&ty))
+                                    .unwrap_or_else(|| TExprKind::CtLit(value.clone()));
+                                return TExpr { ty, kind };
+                            }
+                        }
+                    }
                 }
                 if core_module_path_from_receiver(receiver, cx, env).as_deref() == Some("core.math")
                 {
@@ -7508,10 +7621,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     }
                     if env.ty_of(enum_name).is_none()
                         && enum_name == "DataEvent"
-                        && matches!(
-                            member.as_str(),
-                            "Null" | "ArrayStart" | "ArrayEnd" | "ObjectStart" | "ObjectEnd"
-                        )
+                        && matches!(crate::Sema::data_event_payload(member), Some(None))
                     {
                         return in_own_frame(|| {
                             return TExpr {
@@ -7617,7 +7727,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         });
                     }
                     if env.ty_of(enum_name).is_none()
-                        && cx.variant_owner.get(member).map(String::as_str)
+                        && cx.fact_variant_owner(member).map(String::as_str)
                             == Some(enum_name.as_str())
                     {
                         return in_own_frame(|| {
@@ -7637,9 +7747,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                         });
                     }
                     if env.ty_of(enum_name).is_none() {
-                        if let Some(owner) = cx
-                            .variant_owner
-                            .get(member)
+                        if let Some(owner) = cx.fact_variant_owner(member)
                             .filter(|owner| owner.rsplit("::").next() == Some(enum_name))
                         {
                             return in_own_frame(|| {
@@ -7654,7 +7762,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             });
                         }
                     }
-                    // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::DataTree::Null` (a unit
+                    // D-ENC-DYN1=A+: `Data.Null` → `{root}jet_std::Dyn::Null` (a unit
                     // construction reaching codegen as a `Field`, the gate proved it).
                     if env.ty_of(enum_name).is_none()
                         && is_json_type_name(enum_name)
@@ -7843,9 +7951,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     None
                 };
                 if let Some(type_name) = field_owner {
-                    if cx
-                        .computed_fields
-                        .get(type_name)
+                    if cx.fact_computed_fields(type_name)
                         .is_some_and(|c| c.contains(member))
                     {
                         let field_ty =
@@ -7858,7 +7964,9 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                             },
                             kind: TExprKind::MethodCall {
                                 recv: Box::new(recv),
-                                method: crate::Codegen::TIR::TMethodRef::inherent(member),
+                                method: crate::Codegen::TIR::TMethodRef::inherent(
+                                    &Syntax::computed_field_getter_name(member),
+                                ),
                                 type_args: Vec::new(),
                                 args: vec![],
                                 source_first_string_literal: None,
@@ -7890,7 +7998,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 if let Type::Named(type_name) = &recv.ty {
                     if crate::Sema::is_swizzleable_math_type(type_name)
-                        && !cx.struct_fields.contains_key(type_name)
+                        && !cx.fact_struct_fields(type_name).is_some()
                     {
                         if let crate::Sema::SwizzleParse::Ok(lanes) =
                             crate::Sema::parse_swizzle_member(member, type_name)
@@ -7924,7 +8032,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 // to the inner type (total fact from `cx.boxed_edges`, keyed on the receiver's
                 // resolved struct name — mirrors the AST `boxed_field_read`).
                 let boxed = match &recv.ty {
-                    Type::Named(n) => cx.boxed_edges.contains(&(n.clone(), member.to_string())),
+                    Type::Named(n) => cx.fact_box_edge(&n, &member),
                     _ => false,
                 };
                 TExpr {
@@ -8080,6 +8188,12 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     .iter()
                     .map(|(n, fty)| {
                         let v = match value_of.get(n.as_str()) {
+                            // A bare `[]` carries no element type of its own;
+                            // the checked field type (found by name, not by
+                            // the literal's written order) restores it.
+                            Some(e @ Expr::ListLit(..)) => {
+                                preserve_typed_list_shape(lower_expr(e, cx, env), fty, cx)
+                            }
                             Some(e) => lower_expr(e, cx, env),
                             // A missing field never occurs in a sema-checked tuple literal;
                             // mirror the AST's `0i64` default defensively (an Int literal).
@@ -8280,9 +8394,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 }
                 if let IndexKind::User(type_name) = kind {
                     return in_own_frame(|| {
-                        let value_ty = cx
-                            .index_hooks
-                            .get(type_name)
+                        let value_ty = cx.fact_index_hook(type_name)
                             .map(|h| h.value_type.clone())
                             .unwrap_or(Type::Int);
                         return TExpr {
@@ -8397,8 +8509,30 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             let range_t = range
                 .as_ref()
                 .map(|range| Box::new(lower_expr(range, cx, env)));
-            let result_ty = base_t.ty.clone();
             let line = cx.src_line_col(span.start).0;
+            // D-MEMPROVENANCE2: a bare subrange of a declared view reborrows
+            // the view as a read window; it never copies.
+            if let Type::Apply { name, args } = base_t.ty.without_user_tags() {
+                if matches!(name.as_str(), "View" | "ViewMut") && args.len() == 1 {
+                    let elem = args[0].clone();
+                    let args = match range_t {
+                        Some(range) => vec![*range],
+                        None => vec![start_t, end_t],
+                    };
+                    return TExpr {
+                        ty: Type::Apply {
+                            name: "View".to_string(),
+                            args: vec![elem],
+                        },
+                        kind: TExprKind::BuiltinMethod {
+                            recv: Box::new(base_t),
+                            op: TBuiltinOp::ViewNew { line },
+                            args,
+                        },
+                    };
+                }
+            }
+            let result_ty = base_t.ty.clone();
             TExpr {
                 ty: result_ty,
                 kind: TExprKind::Slice {
@@ -8459,7 +8593,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     t.ty = (**ok).clone();
                 }
                 t = preserve_typed_list_shape(t, ok, cx);
-                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok);
+                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, ok, cx);
             }
             let err_ty = match env.ret_ty.as_ref() {
                 Some(Type::Result { err, .. }) => (**err).clone(),
@@ -8483,7 +8617,7 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             };
             if let Some(Type::Result { err, .. }) = &env.ret_ty {
                 t = preserve_typed_list_shape(t, err, cx);
-                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err);
+                t = crate::Codegen::TIR::maybe_widen_expr_to_union(t, err, cx);
             }
             TExpr {
                 ty: Type::Result {
@@ -8512,7 +8646,14 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                     env.fallback_subject = fallback_subject;
                     inner_t
                 };
-                if matches!(&inner_t.ty, Type::Named(name) if name == Syntax::TYPE_NEVER) {
+                // The failure solve can erase an inferred carrier after sema
+                // installed this automatic propagation node. Only a genuinely
+                // plain operand is already the success value: `T Never!` has
+                // no failures, but its checked Result carrier still needs to
+                // be consumed by this Try.
+                if !inner_t.ty.is_fallible()
+                    && crate::Codegen::TIR::mir::never_carrier_success(&inner_t.ty).is_none()
+                {
                     return inner_t;
                 }
                 let note_t = note
@@ -8670,13 +8811,8 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 if head == Type::Named(Syntax::TYPE_REGEX.to_string()) {
                     if let TypedLitBody::Value(pattern) = body {
                         return in_own_frame(|| {
-                            return core_call_expr(
-                                head,
-                                "core.regex",
-                                "literal",
-                                vec![lower_expr(pattern, cx, env)],
-                                *span,
-                                vec![false],
+                            return super::method_calls::lower_regex_literal(
+                                pattern, *span, cx, env,
                             );
                         });
                     }
@@ -8855,12 +8991,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
                 ty: Type::Bool,
                 kind: TExprKind::PatternMatches {
                     subj: Box::new(subj),
-                    pattern: TPattern::from_ast(
+                    pattern: TPattern::from_ast_with_values(
                         pattern.clone(),
                         enum_type,
                         TPatternPosition::Arm,
                         false,
                         false,
+                        |value| lower_expr(value, cx, env),
                     ),
                 },
             }
@@ -8877,12 +9014,13 @@ fn lower_expr_inner(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
             ty: Type::Bool,
             kind: TExprKind::PatternMatches {
                 subj: Box::new(lower_expr(subject, cx, env)),
-                pattern: TPattern::from_ast(
+                pattern: TPattern::from_ast_with_values(
                     pattern.clone(),
                     None,
                     TPatternPosition::Arm,
                     false,
                     false,
+                    |value| lower_expr(value, cx, env),
                 ),
             },
         },
@@ -9102,14 +9240,10 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
     let type_name = crate::AST::UnitFamilyDef::type_name(suffix);
     // Sema's `unit_literal("Time", suffix)` lookup, from the one fact a
     // lowering `Cx` does carry: the minted type's family name.
-    let canonical_time = cx
-        .unit_facts
-        .get(&type_name)
+    let canonical_time = cx.fact_unit_facts(&type_name)
         .is_some_and(|fact| fact.family == "Time");
     if !canonical_time
-        && cx
-            .distinct_types
-            .get(&type_name)
+        && cx.fact_distinct_types(&type_name)
             .is_some_and(|(base, numeric)| *numeric && *base == Type::Float)
     {
         return Some(Expr::MethodCall {
@@ -9125,6 +9259,7 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
             resolved_ret: None,
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         });
     }
     if suffix != Syntax::UNIT_SUFFIX_IMAGINARY {
@@ -9151,7 +9286,7 @@ fn unit_lit_elaborated(e: &Expr, cx: &Cx) -> Option<Expr> {
 /// operation sema rejects.
 fn complexize_operands(op: BinOp, lhs: TExpr, rhs: TExpr, cx: &Cx) -> (TExpr, TExpr) {
     if !matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div)
-        || cx.type_names.contains(Syntax::TYPE_COMPLEX)
+        || cx.fact_type_name(Syntax::TYPE_COMPLEX)
     {
         return (lhs, rhs);
     }
@@ -9220,7 +9355,10 @@ pub(crate) fn consume_plain_helper_route(
     env: &LowerEnv,
 ) -> TExpr {
     if env.fallback_subject
-        || !resolved_ret.is_some_and(|declared| !declared.is_fallible())
+        || !resolved_ret.is_some_and(|declared| {
+            !declared.is_fallible()
+                || crate::Codegen::TIR::mir::never_carrier_success(declared).is_some()
+        })
         || resolved_ret.is_some_and(|declared| {
             matches!(
                 declared,
@@ -9313,6 +9451,55 @@ pub(crate) fn lower_owned_expr(e: &Expr, cx: &Cx, env: &mut LowerEnv) -> TExpr {
         }
     } else {
         lowered
+    }
+}
+
+/// Close a sema-checked user policy over its values and the captured callable.
+/// Shared by declaration defaults and explicit replacement chains.
+fn lower_user_policy_value(
+    callee_expr: &Expr,
+    mut callee: TExpr,
+    policy: &crate::AST::Call,
+    wrapper: String,
+    cx: &Cx,
+    env: &mut LowerEnv,
+) -> TExpr {
+    let policy_sig = cx.fact_sigs(&wrapper).expect("sema materialized the policy wrapper");
+    let target_arity = match callee.ty.without_user_tags() {
+        Type::Fn { params, .. } => params.len(),
+        _ => unreachable!("checked policy target is callable"),
+    };
+    let call_slot = policy_sig.len().checked_sub(target_arity + 1)
+        .and_then(|index| policy_sig.get(index)).map(|(_, slot)| slot);
+    if matches!(&callee.kind, TExprKind::FnValue { kind: TFnValueKind::NamedFn { name: Some(_), lambda: None } }) {
+        if let Some(slot) = call_slot { callee.ty = slot.clone(); }
+    }
+    let policy_args = policy.args.iter().enumerate().map(|(index, argument)| {
+        lower_one_call_arg(argument, policy_sig.get(index).cloned(), env, cx)
+    }).collect();
+    let policy_conventions = policy.args.iter().enumerate().map(|(index, _)| {
+        policy_sig[index].0
+    }).collect();
+    let mut capture_names = HashSet::new();
+    for expression in policy.args.iter().map(|arg| &arg.expr).chain(std::iter::once(callee_expr)) {
+        let (reads, calls) = crate::Sema::expr_free_reads_and_calls(expression);
+        capture_names.extend(reads);
+        capture_names.extend(calls);
+    }
+    let mut capture_names = capture_names.into_iter().collect::<Vec<_>>();
+    capture_names.sort();
+    let captures = capture_names.into_iter().filter_map(|name| {
+        env.locals.contains_key(&name).then(|| {
+            (name.clone(), env.local_of(&name).name, env.ty_of(&name).expect("checked capture type").clone())
+        })
+    }).collect();
+    let fn_type = callee.ty.clone();
+    TExpr {
+        ty: fn_type.clone(),
+        kind: TExprKind::FnValue { kind: TFnValueKind::Policy {
+            fn_type, policy_args, policy_conventions, wrapper_name: Some(wrapper),
+            captures, callee: Box::new(callee),
+        }},
     }
 }
 
@@ -9449,7 +9636,7 @@ pub(crate) fn wrap_foreign_undo(
     if let Some(flag) = &env.txn_undo_needed {
         flag.set(true);
     }
-    let inverse_params = cx.sigs.get(inverse).cloned().unwrap_or_default();
+    let inverse_params = cx.fact_sigs(inverse).cloned().unwrap_or_default();
     let mut forward_extern_args = Vec::with_capacity(args.len());
     let mut forward_module_args = Vec::with_capacity(args.len());
     let mut inverse_args = Vec::with_capacity(args.len());
@@ -10062,5 +10249,20 @@ mod source_order_tests {
             panic!("last statement must remain the Core call");
         };
         assert!(matches!(&args[0].kind, TExprKind::Local(local) if local.name == "key"));
+    }
+}
+
+/// The lexical root and source spelling of a nominal fact subject. The root
+/// lets lexical reflected values shadow a same-named nominal intrinsic.
+pub(crate) fn compiler_fact_subject_path(expr: &Expr) -> Option<(&str, String)> {
+    match expr {
+        Expr::Ident(name, _) => Some((name, name.clone())),
+        Expr::Field(base, member, _) => {
+            let (root, mut path) = compiler_fact_subject_path(base)?;
+            path.push('.');
+            path.push_str(member);
+            Some((root, path))
+        }
+        _ => None,
     }
 }

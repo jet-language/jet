@@ -1366,11 +1366,7 @@ fn source_field(raw: &str) -> Option<String> {
     let raw = strip_comments(raw);
     let raw = raw.trim().trim_end_matches(';').trim();
     if let Some(separator) = raw.find("::") {
-        let left = raw[..separator]
-            .trim()
-            .strip_prefix("pub ")
-            .unwrap_or(raw[..separator].trim())
-            .trim();
+        let left = raw[..separator].trim();
         if raw[separator + 2..].trim_start().starts_with("Config") {
             return Some(format!("::{left}"));
         }
@@ -1719,10 +1715,10 @@ fn add_member_reference(
 
 fn render_config(name: &str, field: &str, value: &str) -> String {
     if field == "raw" {
-        format!("pub {name} :: Config{{\n{}\n}}\n", value.trim())
+        format!("{name} :: Config{{\n{}\n}}\n", value.trim())
     } else {
         format!(
-            "pub {name} :: Config{{\n    {field}: {}\n}}\n",
+            "{name} :: Config{{\n    {field}: {}\n}}\n",
             value.trim()
         )
     }
@@ -2001,7 +1997,7 @@ fn validate_legacy_dependency_block(value: &str) -> Result<(), TransitionError> 
 
 fn render_fleet_config(host: &str, system: &str) -> String {
     format!(
-        "pub home :: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\"\n            hosts: {{ {host}: system.{system} }}\n        }}\n    }}\n}}\n"
+        "home :: Config{{\n    outputs: {{\n        home: Fleet{{\n            name: \"home\"\n            hosts: {{ {host}: system.{system} }}\n        }}\n    }}\n}}\n"
     )
 }
 

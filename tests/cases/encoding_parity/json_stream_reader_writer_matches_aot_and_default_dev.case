@@ -1,0 +1,38 @@
+# tests/encoding_parity.rs::json_stream_reader_writer_matches_aot_and_default_dev
+# ORACLE-LITERAL and exact original tier equality; PENDING-SAME-HEAD, runtime UNRUN.
+# Rust emitter/rustc compile infrastructure retires; native AOT build and execution retained.
+fixture: json_stream_reader_writer_matches_aot_and_default_dev.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+file: {work}/expected.golden = json_stream_reader_writer_matches_aot_and_default_dev.out
+step python: python3 reference.py {work}/python.json
+exit: 0
+stdout: = json_stream_reader_writer_matches_aot_and_default_dev-json.out
+file: {work}/python.json = json_stream_reader_writer_matches_aot_and_default_dev-json.out
+step: jet build run.jet
+exit: 0
+step aot: built
+exit: 0
+stderr: empty
+stdout: = json_stream_reader_writer_matches_aot_and_default_dev.out
+stdout: ~ "{\"a\":1,\"b\":2}"
+step default: jet run run.jet
+stdin: null
+exit: 0
+stderr: empty
+stdout: = json_stream_reader_writer_matches_aot_and_default_dev.out
+stdout: ~ "{\"a\":1,\"b\":2}"
+exit: == aot
+stdout: == aot
+stderr: == aot
+step interpret: jet run --interpret run.jet
+stdin: null
+exit: 0
+stderr: empty
+stdout: = json_stream_reader_writer_matches_aot_and_default_dev.out
+stdout: ~ "{\"a\":1,\"b\":2}"
+exit: == aot
+stdout: == aot
+stderr: == aot

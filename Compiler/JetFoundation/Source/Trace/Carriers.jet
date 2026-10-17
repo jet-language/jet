@@ -1,0 +1,190 @@
+// JetTrace.rs:46-1137. Typed artifact carriers, independent of streaming compiler trace.
+struct TraceToolchain { jet_version: String, compiler_build_id: String, stdlib_id: String, runner_id: String }
+struct TraceHardware { cpu_arch: String, logical_cpus: U64, os: String, target: String }
+struct CapturePolicy {
+    allowlist: [String], browser_rows_truncated: Bool, io_rows_truncated: Bool,
+    native_rows_truncated: Bool, span_rows_truncated: Bool, task_rows_truncated: Bool
+}
+fn capture_policy_default_exclusions() -> CapturePolicy Never! {
+    CapturePolicy{allowlist: [String]{}, browser_rows_truncated: false, io_rows_truncated: false, native_rows_truncated: false, span_rows_truncated: false, task_rows_truncated: false}
+}
+struct JetSymbolRef { path: String, name: String }
+struct TraceProfileSource { path: String, sha256: String, start_line: U64, start_column: U64, end_line: U64, end_column: U64 }
+struct TraceProfileRow { clock: String, execution_count: U64?, sample_count: U64, sample_weight: U64, source: TraceProfileSource, symbol: JetSymbolRef }
+struct TraceProfile {
+    method: String, status: String, coverage: String, rows: [TraceProfileRow],
+    row_limit: U64, rows_truncated: Bool, overhead_ns: U64?, overhead_status: String,
+    overhead_reason: String, reason: String, window_status: String,
+    window_wall_ns: U64?, window_cpu_ns: U64?, window_reason: String
+}
+fn trace_profile_unsupported(reason: String) -> TraceProfile Never! {
+    TraceProfile{method: "sampling", status: "unsupported", coverage: "unsupported", rows: [TraceProfileRow]{}, row_limit: U64{4096}, rows_truncated: false,
+        overhead_ns: None, overhead_status: "not_applicable", overhead_reason: "source sampling was not available", reason: reason.copy(),
+        window_status: "unavailable", window_wall_ns: None, window_cpu_ns: None, window_reason: "the runtime published no run window"}
+}
+struct TraceSample { domain: String, duration_ns: U64, symbol: JetSymbolRef }
+struct TraceGameFunctionSource { source_id: String, file: String, start_line: U64, start_column: U64, end_line: U64, end_column: U64 }
+struct TraceGameFunction { function_id: String, name: String, source: TraceGameFunctionSource }
+struct TraceGameFrame {
+    sequence: U64, frame_id: U64, scene: String, frame_index: U64, build: String,
+    revision: String, trace_id: String, start_ns: U64, cpu_ns: U64, gpu_ns: U64?, responsible_function: TraceGameFunction?
+}
+struct TraceGameDrawEvent {
+    sequence: U64, frame_id: U64, scene: String, frame_index: U64, build: String,
+    revision: String, trace_id: String, event_index: U64, event_id: U64,
+    function: TraceGameFunction, phase: String, domain: String, start_ns: U64,
+    duration_ns: U64, object_id: String?, resource_id: String?
+}
+struct TraceAllocation { count: U64, bytes: U64, symbol: JetSymbolRef }
+struct TraceTask { id: U64, parent: U64, state: String, wait: String, cancelled: Bool, symbol: JetSymbolRef }
+struct TraceLock { kind: String, id: U64, depth: U64, capacity: U64?, send_waiters: U64, recv_waiters: U64, closed: Bool, symbol: JetSymbolRef }
+struct TraceIO { start_ns: U64, end_ns: U64, kind: String, task_id: U64, wait: String, symbol: JetSymbolRef }
+fn trace_io_is_io_wait(wait: String) -> Bool Never! { wait.contains("tcp") || wait.contains("network") || wait.starts_with("io ") }
+fn trace_io_kind_for_wait(wait: String) -> String? Never! {
+    if !trace_io_is_io_wait(wait) -> return None
+    if wait.contains("tcp") -> return Val("tcp")
+    if wait.contains("network") -> return Val("network")
+    Val("io")
+}
+struct TraceNative { clock: String, duration_ns: U64?, observed_at_ns: U64, reason: String, status: String, symbol: JetSymbolRef, target: String, task_id: U64? }
+struct TraceSpan { clock: String, end_ns: U64?, kind: String, parent_task_id: U64?, reason: String, start_ns: U64?, status: String, symbol: JetSymbolRef, task_id: U64? }
+struct TraceBrowser { class: String, duration_ns: U64, start_ns: U64, symbol: JetSymbolRef }
+struct SourceIdentity { path: String, sha256: String, symbols: [(name: String, kind: String)] }
+struct TraceSourceMap { kind: String, path: String, sha256: String, map: String }
+struct TraceReceiptSection { name: String, type_name: String, value: CanonicalJSON, digest: String }
+struct TraceSkeleton {
+    command: String, argv: [String], toolchain: TraceToolchain, hardware: TraceHardware,
+    capture_policy: CapturePolicy, samples: [TraceSample], profile: TraceProfile,
+    allocations: [TraceAllocation], browser: [TraceBrowser], game_frames: [TraceGameFrame],
+    game_draw_events: [TraceGameDrawEvent], tasks: [TraceTask], locks: [TraceLock],
+    io: [TraceIO], native: [TraceNative], spans: [TraceSpan],
+    receipt_sections: [TraceReceiptSection], source_identity: [SourceIdentity], source_maps: [TraceSourceMap]
+}
+fn jettrace_uint(value: U64) -> CanonicalJSON Never! { CanonicalJSON.Integer("{value}") }
+fn jettrace_optional_uint(value: U64?) -> CanonicalJSON Never! {
+    return if value == {
+        .Val(number) -> jettrace_uint(number)
+        else -> CanonicalJSON.Null
+    }
+}
+fn jettrace_optional_text(value: String?) -> CanonicalJSON Never! {
+    return if value == {
+        .Val(text) -> CanonicalJSON.String(text.copy())
+        else -> CanonicalJSON.Null
+    }
+}
+fn trace_toolchain_to_json(value: TraceToolchain) -> CanonicalJSON JetTraceError! {
+    fields := [CanonicalJSONField]{jettrace_field("compiler_build_id", .String(value.compiler_build_id.copy())), jettrace_field("jet_version", .String(value.jet_version.copy())), jettrace_field("runner_id", .String(value.runner_id.copy())), jettrace_field("stdlib_id", .String(value.stdlib_id.copy()))}
+    body :: jettrace_object(fields)
+    &fields.push(jettrace_field("digest", .String(canonical_json_sha256(body))))
+    jettrace_object(fields)
+}
+fn trace_hardware_to_json(value: TraceHardware) -> CanonicalJSON JetTraceError! {
+    fields := [CanonicalJSONField]{jettrace_field("cpu_arch", .String(value.cpu_arch.copy())), jettrace_field("logical_cpus", jettrace_uint(value.logical_cpus)), jettrace_field("os", .String(value.os.copy())), jettrace_field("target", .String(value.target.copy()))}
+    body :: jettrace_object(fields)
+    &fields.push(jettrace_field("fingerprint", .String(canonical_json_sha256(body))))
+    jettrace_object(fields)
+}
+fn capture_policy_to_json(value: CapturePolicy) -> CanonicalJSON JetTraceError! {
+    names := value.allowlist.copy()
+    &names.sort()
+    allowlist := [CanonicalJSON]{}
+    prior := String?{None}
+    loop name in names {
+        if prior != Val(name) -> &allowlist.push(.String(name.copy()))
+        prior = Val(name.copy())
+    }
+    exclusions := [CanonicalJSON]{}
+    loop name in DEFAULT_EXCLUSIONS -> &exclusions.push(.String(name.copy()))
+    jettrace_object([CanonicalJSONField]{
+        jettrace_field("allowlist", .Array(^allowlist)), jettrace_field("browser_row_limit", jettrace_uint(TRACE_BROWSER_ROW_LIMIT)),
+        jettrace_field("browser_rows_truncated", .Bool(value.browser_rows_truncated)), jettrace_field("default_exclusions", .Array(^exclusions)),
+        jettrace_field("io_row_limit", jettrace_uint(TRACE_IO_ROW_LIMIT)), jettrace_field("io_rows_truncated", .Bool(value.io_rows_truncated)),
+        jettrace_field("native_row_limit", jettrace_uint(TRACE_NATIVE_ROW_LIMIT)), jettrace_field("native_rows_truncated", .Bool(value.native_rows_truncated)),
+        jettrace_field("span_row_limit", jettrace_uint(TRACE_SPAN_ROW_LIMIT)), jettrace_field("span_rows_truncated", .Bool(value.span_rows_truncated)),
+        jettrace_field("schema", .Integer(CAPTURE_POLICY_SCHEMA)), jettrace_field("task_row_limit", jettrace_uint(TRACE_TASK_ROW_LIMIT)), jettrace_field("task_rows_truncated", .Bool(value.task_rows_truncated))
+    })
+}
+fn jet_symbol_ref_to_json(value: JetSymbolRef) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("name", .String(value.name.copy())), jettrace_field("path", .String(value.path.copy()))})
+}
+fn trace_profile_source_to_json(value: TraceProfileSource) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("end_column", jettrace_uint(value.end_column)), jettrace_field("end_line", jettrace_uint(value.end_line)), jettrace_field("path", .String(value.path.copy())), jettrace_field("sha256", .String(value.sha256.copy())), jettrace_field("start_column", jettrace_uint(value.start_column)), jettrace_field("start_line", jettrace_uint(value.start_line))})
+}
+fn trace_profile_row_to_json(value: TraceProfileRow) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("execution_count", jettrace_optional_uint(value.execution_count)), jettrace_field("sample_count", jettrace_uint(value.sample_count)), jettrace_field("sample_weight", jettrace_uint(value.sample_weight)), jettrace_field("source", trace_profile_source_to_json(value.source)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+}
+fn trace_profile_to_json(value: TraceProfile) -> CanonicalJSON JetTraceError! {
+    rows := [CanonicalJSON]{}
+    loop row in value.rows -> &rows.push(trace_profile_row_to_json(row))
+    jettrace_object([CanonicalJSONField]{jettrace_field("coverage", .String(value.coverage.copy())), jettrace_field("method", .String(value.method.copy())), jettrace_field("overhead_ns", jettrace_optional_uint(value.overhead_ns)), jettrace_field("overhead_reason", .String(value.overhead_reason.copy())), jettrace_field("overhead_status", .String(value.overhead_status.copy())), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("row_limit", jettrace_uint(value.row_limit)), jettrace_field("rows", .Array(^rows)), jettrace_field("rows_truncated", .Bool(value.rows_truncated)), jettrace_field("status", .String(value.status.copy())), jettrace_field("window_cpu_ns", jettrace_optional_uint(value.window_cpu_ns)), jettrace_field("window_reason", .String(value.window_reason.copy())), jettrace_field("window_status", .String(value.window_status.copy())), jettrace_field("window_wall_ns", jettrace_optional_uint(value.window_wall_ns))})
+}
+fn trace_sample_to_json(value: TraceSample) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("domain", .String(value.domain.copy())), jettrace_field("duration_ns", jettrace_uint(value.duration_ns)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+}
+fn trace_game_function_source_to_json(value: TraceGameFunctionSource) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("end_column", jettrace_uint(value.end_column)), jettrace_field("end_line", jettrace_uint(value.end_line)), jettrace_field("file", .String(value.file.copy())), jettrace_field("source_id", .String(value.source_id.copy())), jettrace_field("start_column", jettrace_uint(value.start_column)), jettrace_field("start_line", jettrace_uint(value.start_line))})
+}
+fn trace_game_function_to_json(value: TraceGameFunction) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("function_id", .String(value.function_id.copy())), jettrace_field("name", .String(value.name.copy())), jettrace_field("source", trace_game_function_source_to_json(value.source))})
+}
+fn trace_game_frame_to_json(value: TraceGameFrame) -> CanonicalJSON JetTraceError! {
+    function :: if value.responsible_function == {
+        .Val(item) -> trace_game_function_to_json(item)
+        else -> CanonicalJSON.Null
+    }
+    jettrace_object([CanonicalJSONField]{jettrace_field("build", .String(value.build.copy())), jettrace_field("cpu_ns", jettrace_uint(value.cpu_ns)), jettrace_field("frame_id", jettrace_uint(value.frame_id)), jettrace_field("frame_index", jettrace_uint(value.frame_index)), jettrace_field("gpu_ns", jettrace_optional_uint(value.gpu_ns)), jettrace_field("responsible_function", ^function), jettrace_field("revision", .String(value.revision.copy())), jettrace_field("scene", .String(value.scene.copy())), jettrace_field("sequence", jettrace_uint(value.sequence)), jettrace_field("start_ns", jettrace_uint(value.start_ns)), jettrace_field("trace_id", .String(value.trace_id.copy()))})
+}
+fn trace_game_draw_event_to_json(value: TraceGameDrawEvent) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("build", .String(value.build.copy())), jettrace_field("domain", .String(value.domain.copy())), jettrace_field("duration_ns", jettrace_uint(value.duration_ns)), jettrace_field("event_id", jettrace_uint(value.event_id)), jettrace_field("event_index", jettrace_uint(value.event_index)), jettrace_field("frame_id", jettrace_uint(value.frame_id)), jettrace_field("frame_index", jettrace_uint(value.frame_index)), jettrace_field("function", trace_game_function_to_json(value.function)), jettrace_field("object_id", jettrace_optional_text(value.object_id)), jettrace_field("phase", .String(value.phase.copy())), jettrace_field("resource_id", jettrace_optional_text(value.resource_id)), jettrace_field("revision", .String(value.revision.copy())), jettrace_field("scene", .String(value.scene.copy())), jettrace_field("sequence", jettrace_uint(value.sequence)), jettrace_field("start_ns", jettrace_uint(value.start_ns)), jettrace_field("trace_id", .String(value.trace_id.copy()))})
+}
+fn trace_allocation_to_json(value: TraceAllocation) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("bytes", jettrace_uint(value.bytes)), jettrace_field("count", jettrace_uint(value.count)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+}
+fn trace_task_to_json(value: TraceTask) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("cancelled", .Bool(value.cancelled)), jettrace_field("id", jettrace_uint(value.id)), jettrace_field("parent", jettrace_uint(value.parent)), jettrace_field("state", .String(value.state.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("wait", .String(value.wait.copy()))})
+}
+fn trace_lock_to_json(value: TraceLock) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("capacity", jettrace_optional_uint(value.capacity)), jettrace_field("closed", .Bool(value.closed)), jettrace_field("depth", jettrace_uint(value.depth)), jettrace_field("id", jettrace_uint(value.id)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("recv_waiters", jettrace_uint(value.recv_waiters)), jettrace_field("send_waiters", jettrace_uint(value.send_waiters)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+}
+fn trace_io_to_json(value: TraceIO) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("end_ns", jettrace_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("start_ns", jettrace_uint(value.start_ns)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_uint(value.task_id)), jettrace_field("wait", .String(value.wait.copy()))})
+}
+fn trace_native_to_json(value: TraceNative) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("duration_ns", jettrace_optional_uint(value.duration_ns)), jettrace_field("observed_at_ns", jettrace_uint(value.observed_at_ns)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("target", .String(value.target.copy())), jettrace_field("task_id", jettrace_optional_uint(value.task_id))})
+}
+fn trace_span_to_json(value: TraceSpan) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("clock", .String(value.clock.copy())), jettrace_field("end_ns", jettrace_optional_uint(value.end_ns)), jettrace_field("kind", .String(value.kind.copy())), jettrace_field("parent_task_id", jettrace_optional_uint(value.parent_task_id)), jettrace_field("reason", .String(value.reason.copy())), jettrace_field("start_ns", jettrace_optional_uint(value.start_ns)), jettrace_field("status", .String(value.status.copy())), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol)), jettrace_field("task_id", jettrace_optional_uint(value.task_id))})
+}
+fn trace_browser_to_json(value: TraceBrowser) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("class", .String(value.class.copy())), jettrace_field("clock", .String("browser_monotonic_mapped")), jettrace_field("duration_ns", jettrace_uint(value.duration_ns)), jettrace_field("start_ns", jettrace_uint(value.start_ns)), jettrace_field("symbol", jet_symbol_ref_to_json(value.symbol))})
+}
+fn source_identity_to_json(value: SourceIdentity) -> CanonicalJSON JetTraceError! {
+    order := [Int]{}
+    loop index in 0..<value.symbols.len() -> &order.push(index)
+    &order.sort_by((left: Int, right: Int) -> value.symbols[left] <=> value.symbols[right])
+    symbols := [CanonicalJSON]{}
+    loop index in order {
+        pair :: value.symbols[index]
+        &symbols.push(jettrace_object([CanonicalJSONField]{jettrace_field("kind", .String(pair.kind.copy())), jettrace_field("name", .String(pair.name.copy()))}))
+    }
+    jettrace_object([CanonicalJSONField]{jettrace_field("path", .String(value.path.copy())), jettrace_field("sha256", .String(value.sha256.copy())), jettrace_field("symbols", .Array(^symbols))})
+}
+fn trace_source_map_from_map_bytes(^kind: String, ^path: String, ^map: String) -> TraceSourceMap Never! {
+    raw :: map.bytes()
+    hash :: mir_sha256_bytes(raw[0..<raw.len()])
+    digest :: mir_sha256_hex_bytes(hash[0..<hash.len()])
+    TraceSourceMap{kind: ^kind, path: ^path, sha256: digest, map: ^map}
+}
+fn trace_source_map_jet_with_source(^path: String, source: String) -> TraceSourceMap JetTraceError! {
+    map :: jettrace_object([CanonicalJSONField]{jettrace_field("file", .String(path.copy())), jettrace_field("mappings", .String("")), jettrace_field("names", .Array([CanonicalJSON]{})), jettrace_field("sources", .Array([CanonicalJSON]{.String(path.copy())})), jettrace_field("sourcesContent", .Array([CanonicalJSON]{.String(source.copy())})), jettrace_field("version", .Integer("3"))})
+    text :: String.from_bytes(canonical_json_bytes(map)) ?? return Err(jettrace_error("canonical json is not utf-8"))
+    Ok(trace_source_map_from_map_bytes("jet", ^path, ^text))
+}
+fn trace_source_map_to_json(value: TraceSourceMap) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("kind", .String(value.kind.copy())), jettrace_field("map", .String(value.map.copy())), jettrace_field("path", .String(value.path.copy())), jettrace_field("sha256", .String(value.sha256.copy()))})
+}
+fn trace_receipt_section_to_json(value: TraceReceiptSection) -> CanonicalJSON JetTraceError! {
+    jettrace_object([CanonicalJSONField]{jettrace_field("digest", .String(value.digest.copy())), jettrace_field("name", .String(value.name.copy())), jettrace_field("type_name", .String(value.type_name.copy())), jettrace_field("value", value.value.copy())})
+}
+fn trace_receipt_section_from_json(value: CanonicalJSON) -> TraceReceiptSection JetTraceError! { trace_receipt_section_from_json_at(value, "trace receipt section") }

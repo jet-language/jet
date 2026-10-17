@@ -1032,7 +1032,35 @@ function validateProjectedPhases(s, history) {
   validateStoredPhases(history?.cards, 'archived card');
 }
 
+// Owner projections must not expose scratch ballots through secondary surfaces
+// (card details, activity, questions, or Now report links). Agent CLI reads and
+// briefs use the raw store, so drafts remain available for review.
+function withoutDrafts(s) {
+  const hidden = new Set(s.decisions.filter(d => d.draft).map(d => d.id));
+  for (const e of s.events || []) if (e.draft && e.ref) hidden.add(e.ref);
+  if (!hidden.size) return s;
+  const questions = items => (items || []).filter(q => !hidden.has(q.decisionId));
+  const linked = item => ({ ...item, links: (item.links || []).filter(link => !hidden.has(link.decision)) });
+  return {
+    ...s,
+    decisions: s.decisions.filter(d => !d.draft),
+    cards: s.cards.map(c => ({
+      ...c, blockedBy: (c.blockedBy || []).filter(id => !hidden.has(id)),
+      ...(c.questions ? { questions: questions(c.questions) } : {}),
+    })),
+    questions: questions(s.questions),
+    events: (s.events || []).filter(e => !hidden.has(e.ref)),
+    briefings: (s.briefings || []).map(b => ({ ...b, sections: (b.sections || []).map(linked) })),
+    statusSnapshot: s.statusSnapshot ? {
+      ...s.statusSnapshot,
+      milestones: s.statusSnapshot.milestones.map(linked),
+      workstreams: s.statusSnapshot.workstreams.map(linked),
+    } : null,
+  };
+}
+
 export function project(s, config = null, history = null) {
+  s = withoutDrafts(s);
   validateProjectedPhases(s, history);
   const cards = s.cards.map(c => projectCardRecord(c, s.decisions, s.cards, s.questions));
   const historyCards = history?.cards || [];
@@ -1069,6 +1097,7 @@ export function project(s, config = null, history = null) {
 // navigation, but leave descriptions, logs, criteria, and ratified decisions
 // for the card detail endpoint. Closed-card content is in projectClosed().
 export function projectBoard(s, config = null) {
+  s = withoutDrafts(s);
   validateProjectedPhases(s);
   const active = s.cards.filter(c => c.phase !== 'done');
   const activeIds = new Set(active.map(c => c.id));
@@ -1115,8 +1144,9 @@ export function projectBoard(s, config = null) {
 // the active board (no bodies, logs, or criteria). One card's full record
 // comes from projectCard() when it is opened.
 export function projectClosed(s, config = null, history = null) {
+  s = withoutDrafts(s);
   validateProjectedPhases(s, history);
-  const h = history || emptyHistory();
+  const h = withoutDrafts(history || emptyHistory());
   const liveGroups = { decisions: byCardId(s.decisions), questions: byCardId(s.questions) };
   const liveDone = s.cards.filter(c => c.phase === 'done')
     .map(c => projectCardSummary(projectCardRecord(c, s.decisions, s.cards, s.questions, liveGroups)));
@@ -1136,10 +1166,11 @@ export function projectClosed(s, config = null, history = null) {
 
 // Return one full card for the detail modal without building the full board.
 export function projectCard(s, ref, history = null) {
+  s = withoutDrafts(s);
   validateProjectedPhases(s, history);
   const live = findCard(s, ref);
   if (live) return projectCardRecord(live, s.decisions, s.cards, s.questions);
-  const h = history || emptyHistory();
+  const h = withoutDrafts(history || emptyHistory());
   const str = String(ref ?? '');
   const num = Number(str.replace(/^#/, ''));
   const archived = h.cards.find(c => c.id === str || (Number.isInteger(num) && c.num === num));
@@ -1276,8 +1307,8 @@ const checkRefs = (val) => {
     fail('E_INVALID', 'refs must be an array of strings');
 };
 
-export function logEvent(s, { by = 'agent', action, ref = null, note = '' }) {
-  s.events.unshift({ at: now(), by, action, ref, note });
+export function logEvent(s, { by = 'agent', action, ref = null, note = '', draft = false }) {
+  s.events.unshift({ at: now(), by, action, ref, note, ...(draft ? { draft: true } : {}) });
   if (s.events.length > 2000) s.events.length = 2000;
 }
 
@@ -1875,13 +1906,14 @@ export function deleteCard(s, ref, p = {}, ownerUi = null) {
     fail('E_INVALID', `card #${c.num} has ${openMessages.length} open message${openMessages.length === 1 ? '' : 's'} — mark each message done before deleting the card`);
   const attached = s.decisions.filter(d => d.cardId === c.id);
   const attachedIds = new Set(attached.map(d => d.id));
+  const owner = ownerUi?.kind === 'owner-ui' && !!ownerUi.session;
+  const visibleIds = owner ? new Set(attached.filter(d => !d.draft).map(d => d.id)) : attachedIds;
   if (p.decisions != null) {
     const shown = new Set(idList(p.decisions));
-    if (shown.size !== attachedIds.size || [...attachedIds].some(id => !shown.has(id)))
-      fail('E_CONFLICT', `card #${c.num} ballots changed since the delete confirmation was shown (now: ${[...attachedIds].join(', ') || 'none'}) — review them and confirm again`);
+    if (shown.size !== visibleIds.size || [...visibleIds].some(id => !shown.has(id)))
+      fail('E_CONFLICT', `card #${c.num} ballots changed since the delete confirmation was shown (now: ${[...visibleIds].join(', ') || 'none'}) — review them and confirm again`);
   }
   const ratified = attached.filter(d => d.status === 'ratified');
-  const owner = ownerUi?.kind === 'owner-ui' && !!ownerUi.session;
   if (ratified.length) {
     const confirmed = new Set(idList(p.deleteRatified));
     const unconfirmed = ratified.filter(d => !confirmed.has(d.id));
@@ -1901,13 +1933,14 @@ export function deleteCard(s, ref, p = {}, ownerUi = null) {
   s.questions = s.questions.filter(q => q.cardId !== c.id);
   for (const x of s.cards) x.blockedBy = (x.blockedBy || []).filter(id => id !== c.id && !attachedIds.has(id));
   syncMilestones(s, [oldMilestoneId]);
-  const removed = attached.map(d => ({ id: d.id, title: d.title, status: d.status, outcome: d.outcome ?? null }));
+  const removed = attached.map(d => ({ id: d.id, title: d.title, status: d.status, outcome: d.outcome ?? null, ...(d.draft ? { draft: true } : {}) }));
   for (const d of removed)
-    logEvent(s, { by, action: 'decision.delete', ref: d.id,
+    logEvent(s, { by, action: 'decision.delete', ref: d.id, draft: !!d.draft,
       note: `deleted with card #${c.num} — ${d.status}${d.status === 'ratified' ? ` (outcome ${d.outcome})` : ''}: ${d.title}` });
-  const withBallots = removed.length ? ` — with ballot${removed.length > 1 ? 's' : ''} ${removed.map(d => `${d.id} (${d.status})`).join(', ')}` : '';
+  const visibleRemoved = removed.filter(d => !d.draft);
+  const withBallots = visibleRemoved.length ? ` — with ballot${visibleRemoved.length > 1 ? 's' : ''} ${visibleRemoved.map(d => `${d.id} (${d.status})`).join(', ')}` : '';
   logEvent(s, { by, action: 'card.delete', ref: c.id, note: `${c.title}${withBallots}${owner ? ` · owner-ui session=${ownerUi.session}` : ''}` });
-  return { ok: true, id: c.id, num: c.num, decisions: removed };
+  return { ok: true, id: c.id, num: c.num, decisions: owner ? visibleRemoved : removed };
 }
 
 const idList = (value) => (value == null ? [] : Array.isArray(value) ? value : String(value).split(','))
@@ -2401,8 +2434,9 @@ function verdictSupersededBy(s, p) {
   const id = typeof p.supersededBy === 'string' ? p.supersededBy.trim() : '';
   if (!id) fail('E_INVALID', 'verdict needs a supersession link (`supersededBy`)');
   if (id === p.id) fail('E_INVALID', 'verdict cannot supersede itself');
-  if (!s.decisions.some(d => d.id === id))
-    fail('E_NOT_FOUND', `verdict supersession link points to unknown decision ${id}`);
+  const previous = s.decisions.find(d => d.id === id);
+  if (!previous) fail('E_NOT_FOUND', `verdict supersession link points to unknown decision ${id}`);
+  assertReadyForVerdict(previous);
   return id;
 }
 
@@ -2464,8 +2498,13 @@ function appendSyntaxChores(s, c, by) {
   for (const text of SYNTAX_RATIFY_CHORES) if (!have.has(text)) addCriterion(s, c.id, text, by || 'agent');
 }
 
+function assertReadyForVerdict(d) {
+  if (d.draft) fail('E_DRAFT', `${d.id} is a draft ballot — no verdict is allowed until fresh-reader review and validation pass and it is marked ready`);
+}
+
 export function ratify(s, decisionId, outcome, comment, by, quote) {
   const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
+  assertReadyForVerdict(d);
   if (d.group === 'acceptance' || d.id.startsWith('D-ACCEPT-'))
     fail('E_ACCEPTANCE_OWNER_UI', `${d.id} is an owner-verification ballot — generic ratify, --by owner, and --quote cannot resolve it; use the dedicated owner verification UI`);
   if (!outcome) fail('E_INVALID', 'ratify needs an outcome (option key)');
@@ -2490,6 +2529,7 @@ export function ratify(s, decisionId, outcome, comment, by, quote) {
 export function createAcceptanceResolver() {
   return (s, decisionId, outcome, comment, provenance) => {
     const d = s.decisions.find(x => x.id === decisionId) || fail('E_NOT_FOUND', `no decision ${decisionId}`);
+    assertReadyForVerdict(d);
     if (d.group !== 'acceptance' || !d.id.startsWith('D-ACCEPT-'))
       fail('E_ACCEPTANCE_OWNER_UI', `${d.id} is not an owner-verification ballot`);
     if (d.status === 'ratified') fail('E_INVALID', `${d.id} is already resolved`);
@@ -2627,7 +2667,7 @@ export function deleteDecision(s, id, by) {
   s.decisions = s.decisions.filter(x => x.id !== id);
   const card = s.cards.find(c => c.id === d.cardId);
   if (card) touchCard(card, by);
-  logEvent(s, { by, action: 'decision.delete', ref: id, note: d.title });
+  logEvent(s, { by, action: 'decision.delete', ref: id, note: d.title, draft: !!d.draft });
   return { ok: true, id };
 }
 

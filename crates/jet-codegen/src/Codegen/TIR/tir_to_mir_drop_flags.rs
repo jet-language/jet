@@ -45,7 +45,6 @@ struct Guard {
 /// Locals an operation names by identity rather than through a place.
 fn identity_locals(operation: &MirOperation) -> Vec<MirLocalId> {
     match operation {
-        MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => vec![*local],
         MirOperation::Semantic(MirSemanticOp::RequireStop { context, .. }) => {
             context.locals.iter().map(|(_, local)| *local).collect()
         }
@@ -181,9 +180,20 @@ impl LowerCtx<'_> {
         // Forward constant propagation of every flag to a fixed point. A
         // resolved guard only passes its state along the edge it takes.
         // Blocks entered through cleanup edges (failure or unwind drop
-        // rows) start unknown.
+        // rows) start unknown. Only the flags still eligible are tracked: a
+        // rejected flag's reads never resolve a guard or pick a branch edge
+        // (below), and each flag's state evolves independently, so leaving
+        // rejected flags out changes no tracked state, only the work.
+        let mut slot_of_flag: Vec<Option<usize>> = vec![None; count];
+        let mut tracked = 0usize;
+        for (flag, slot) in slot_of_flag.iter_mut().enumerate() {
+            if !rejected[flag] {
+                *slot = Some(tracked);
+                tracked += 1;
+            }
+        }
         let mut entry_state: Vec<Option<Vec<Live>>> = vec![None; block_count];
-        let unknown = vec![Live::Unknown; count];
+        let unknown = vec![Live::Unknown; tracked];
         let mut pending: Vec<usize> = Vec::new();
         let mut queued = vec![false; block_count];
         let mut seed = |block: usize, entry_state: &mut Vec<Option<Vec<Live>>>| {
@@ -211,8 +221,8 @@ impl LowerCtx<'_> {
             for instruction in &self.blocks[block].instructions {
                 match &instruction.operation {
                     MirOperation::WritePlace { place, value } => {
-                        if let Some(flag) = flag_of_place.get(place) {
-                            state[*flag] = match constants.get(value) {
+                        if let Some(slot) = flag_of_place.get(place).and_then(|flag| slot_of_flag[*flag]) {
+                            state[slot] = match constants.get(value) {
                                 Some(true) => Live::Yes,
                                 Some(false) => Live::No,
                                 None => Live::Unknown,
@@ -220,10 +230,11 @@ impl LowerCtx<'_> {
                         }
                     }
                     MirOperation::ReadPlace(place) => {
-                        if let (Some(flag), Some(result)) =
-                            (flag_of_place.get(place), instruction.result)
-                        {
-                            read_state.insert(result, state[*flag]);
+                        if let (Some(slot), Some(result)) = (
+                            flag_of_place.get(place).and_then(|flag| slot_of_flag[*flag]),
+                            instruction.result,
+                        ) {
+                            read_state.insert(result, state[slot]);
                         }
                     }
                     _ => {}
@@ -246,18 +257,27 @@ impl LowerCtx<'_> {
                 let Some(target) = block_index.get(&target).copied() else {
                     continue;
                 };
-                let merged = match &entry_state[target] {
-                    None => state.clone(),
+                // Join in place: a changed entry state requeues the target.
+                let changed = match &mut entry_state[target] {
                     Some(previous) => {
-                        previous.iter().zip(&state).map(|(left, right)| join(*left, *right)).collect()
+                        let mut changed = false;
+                        for (left, right) in previous.iter_mut().zip(&state) {
+                            let joined = join(*left, *right);
+                            if joined != *left {
+                                *left = joined;
+                                changed = true;
+                            }
+                        }
+                        changed
+                    }
+                    None => {
+                        entry_state[target] = Some(state.clone());
+                        true
                     }
                 };
-                if entry_state[target].as_ref() != Some(&merged) {
-                    entry_state[target] = Some(merged);
-                    if !queued[target] {
-                        queued[target] = true;
-                        pending.push(target);
-                    }
+                if changed && !queued[target] {
+                    queued[target] = true;
+                    pending.push(target);
                 }
             }
         }

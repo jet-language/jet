@@ -389,7 +389,7 @@ fn semindex_projects_arithmetic_policy_and_exact_scope() {
     assert!(json.contains("\"arithmetic\":[{"));
     assert!(json.contains("\"policy\":\"Wrapping\""));
 
-    let (diagnostics, bundle, facts) =
+    let (diagnostics, bundle, facts, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let db = build_symbol_db(&bundle.expect("checked bundle"), &facts);
@@ -464,7 +464,7 @@ impl Door {
 fn run() {}
 "#,
     );
-    let (diagnostics, bundle, facts) =
+    let (diagnostics, bundle, facts, _) =
         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
     let bundle = bundle.expect("checked bundle");
@@ -778,7 +778,7 @@ fn semantic_symbols_include_module_and_selected_imports() {
     fs::create_dir_all(&root).unwrap();
     fs::write(
         root.join("library.jet"),
-        "pub fn score(name: String) -> Int { return 1 }\n",
+        "fn score(name: String) -> Int { return 1 }\n",
     )
     .unwrap();
     let main = root.join("main.jet");
@@ -819,7 +819,7 @@ fn semindex_hello_json_shape() {
 fn semindex_identity_stable_across_reorder() {
     let a = r#"
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         n * 2
     }
 }
@@ -873,7 +873,7 @@ struct Point {
 }
 
 module math {
-    pub fn double(n: Int) -> Int {
+    fn double(n: Int) -> Int {
         n * 2
     }
 }
@@ -1231,7 +1231,7 @@ fn semindex_projects_omitted_inferred_effects() {
 fn semindex_projects_inline_module_inferred_effects() {
     let path = temp_fixture(
         "inline_inferred_effect_signature.jet",
-        "module inner { pub fn announce() { print(\"hello\") } }\nfn run() { inner.announce() }\n",
+        "module inner { fn announce() { print(\"hello\") } }\nfn run() { inner.announce() }\n",
     );
     let symbols = open_symbols(&path).expect("inline inferred effects index");
     let announce = symbols.lookup("announce");
@@ -1390,7 +1390,7 @@ struct Widget {
     title: String
 
     fn label(self) -> String {
-        ~self.title
+        self.title.copy()
     }
 }
 
@@ -1445,7 +1445,7 @@ struct Client {
 
 impl Client {
     fn connect(self, host: String, /, timeout seconds: Int{30}, *, tls enabled: Bool{true}, rest: ...String) -> String {
-        ~host
+        host.copy()
     }
 }
 

@@ -6,11 +6,11 @@
 // never exposes partial JSON.
 
 // What the environment image included, changed, omitted, or rejected.
-pub struct ProjectionReport {
-    pub included: [String]
-    pub changed: [String]
-    pub omitted: [String]
-    pub rejected: [String]
+struct ProjectionReport {
+    included: [String]
+    changed: [String]
+    omitted: [String]
+    rejected: [String]
 
     // Rust `ProjectionReport::default()`.
     fn empty() -> ProjectionReport Never! {
@@ -21,39 +21,41 @@ pub struct ProjectionReport {
 // Secret-free realization facts written beside the OCI layout. Hangar,
 // `.jet/lock`, and the remote binding policy stay the owners of content,
 // cache, provenance, and transport facts.
-pub struct ProjectionPlan {
-    pub source: String
-    pub platform: String
-    pub entrypoint: [String]
-    pub user: Int
-    pub expose: [Int]
-    pub healthcheck: Bool
-    pub env_keys: [String]
-    pub layer_paths: [String]
-    pub services: [String]
-    pub base: Bool
-    pub lock: String
+struct ProjectionPlan {
+    source: String
+    platform: String
+    entrypoint: [String]
+    user: Int
+    expose: [Int]
+    healthcheck: Bool
+    env_keys: [String]
+    layer_paths: [String]
+    services: [String]
+    base: Bool
+    lock: String
 }
 
 // Write the classification ledger and the plan and dossier inspection views.
-pub fn image_write_projection_artifacts(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
+fn image_write_projection_artifacts(layout: String, manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) ImageError! -[FS, Env]> {
     image_write_projection_report(layout, manifest_digest, report)
-    image_write_atomic_json(layout, "plan.json", image_render_projection_plan(manifest_digest, plan))
-    image_write_atomic_json(layout, "dossier.json", image_render_projection_dossier(manifest_digest, plan, report))
+    plan_json :: image_render_projection_plan(manifest_digest, plan) ?? return Err(err)
+    image_write_atomic_json(layout, "plan.json", plan_json)
+    dossier_json :: image_render_projection_dossier(manifest_digest, plan, report) ?? return Err(err)
+    image_write_atomic_json(layout, "dossier.json", dossier_json)
 }
 
 // Write `projection.json`: the sorted, deduplicated classification ledger.
-pub fn image_write_projection_report(layout: String, manifest_digest: String, report: ProjectionReport) ImageError! -[FS, Env]> {
+fn image_write_projection_report(layout: String, manifest_digest: String, report: ProjectionReport) ImageError! -[FS, Env]> {
     path :: files.join(layout, "projection.json")
-    document := [String: DataTree]{}
-    document["schema"] = DataTree.Text("jet.image.projection")
-    document["version"] = DataTree.Int(1)
-    document["manifest"] = DataTree.Text(manifest_digest)
+    document := [String: Dyn]{}
+    document["schema"] = Dyn.Text("jet.image.projection")
+    document["version"] = Dyn.Int(1)
+    document["manifest"] = Dyn.Text(manifest_digest)
     document["included"] = image_report_values(report.included)
     document["changed"] = image_report_values(report.changed)
     document["omitted"] = image_report_values(report.omitted)
     document["rejected"] = image_report_values(report.rejected)
-    json_text :: image_json_text(DataTree.Object(document))
+    json_text :: image_json_text(Dyn.Object(document)) ?? return Err(err)
     temporary :: image_with_extension(path, "json.tmp-{sys.pid()}")
     node :: image_node(path) ?? OCINode.Missing
     if node != OCINode.Missing && !node.is_file() {
@@ -62,58 +64,58 @@ pub fn image_write_projection_report(layout: String, manifest_digest: String, re
     image_publish_json(temporary, path, json_text)
 }
 
-fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -> String Never! {
-    expose := [DataTree]{}
-    loop port in plan.expose -> &expose.push(DataTree.Int(port))
-    document := [String: DataTree]{}
-    document["schema"] = DataTree.Text("jet.image.plan")
-    document["version"] = DataTree.Int(1)
-    document["manifest"] = DataTree.Text(manifest_digest)
-    document["source"] = DataTree.Text(plan.source)
-    document["platform"] = DataTree.Text(plan.platform)
-    document["user"] = DataTree.Int(plan.user)
+fn image_render_projection_plan(manifest_digest: String, plan: ProjectionPlan) -> String ImageError! {
+    expose := [Dyn]{}
+    loop port in plan.expose -> &expose.push(Dyn.Int(port))
+    document := [String: Dyn]{}
+    document["schema"] = Dyn.Text("jet.image.plan")
+    document["version"] = Dyn.Int(1)
+    document["manifest"] = Dyn.Text(manifest_digest)
+    document["source"] = Dyn.Text(plan.source)
+    document["platform"] = Dyn.Text(plan.platform)
+    document["user"] = Dyn.Int(plan.user)
     document["entrypoint"] = image_json_strings(plan.entrypoint)
-    document["expose"] = DataTree.Array(expose)
-    document["healthcheck"] = DataTree.Bool(plan.healthcheck)
+    document["expose"] = Dyn.Array(expose)
+    document["healthcheck"] = Dyn.Bool(plan.healthcheck)
     document["env_keys"] = image_report_values(plan.env_keys)
     document["layers"] = image_report_values(plan.layer_paths)
     document["services"] = image_report_values(plan.services)
-    document["base"] = DataTree.Text(if plan.base -> "local" else -> "none")
-    document["lock"] = DataTree.Text(plan.lock)
+    document["base"] = Dyn.Text(if plan.base -> "local" else -> "none")
+    document["lock"] = Dyn.Text(plan.lock)
     document["ownership"] = image_ownership(plan)
-    image_json_text(DataTree.Object(document))
+    image_json_text(Dyn.Object(document))
 }
 
-fn image_render_projection_dossier(manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -> String Never! {
-    classification := [String: DataTree]{}
+fn image_render_projection_dossier(manifest_digest: String, plan: ProjectionPlan, report: ProjectionReport) -> String ImageError! {
+    classification := [String: Dyn]{}
     classification["included"] = image_report_values(report.included)
     classification["changed"] = image_report_values(report.changed)
     classification["omitted"] = image_report_values(report.omitted)
     classification["rejected"] = image_report_values(report.rejected)
-    document := [String: DataTree]{}
-    document["schema"] = DataTree.Text("jet.image.dossier")
-    document["version"] = DataTree.Int(1)
-    document["manifest"] = DataTree.Text(manifest_digest)
-    document["secret_policy"] = DataTree.Text("runtime-mount-or-reference-only")
-    document["classification"] = DataTree.Object(classification)
+    document := [String: Dyn]{}
+    document["schema"] = Dyn.Text("jet.image.dossier")
+    document["version"] = Dyn.Int(1)
+    document["manifest"] = Dyn.Text(manifest_digest)
+    document["secret_policy"] = Dyn.Text("runtime-mount-or-reference-only")
+    document["classification"] = Dyn.Object(classification)
     document["ownership"] = image_ownership(plan)
-    image_json_text(DataTree.Object(document))
+    image_json_text(Dyn.Object(document))
 }
 
 // Who owns each fact: Hangar and `.jet/lock` for environment images, the
 // project build and image builder for package images.
-fn image_ownership(plan: ProjectionPlan) -> DataTree Never! {
+fn image_ownership(plan: ProjectionPlan) -> Dyn Never! {
     environment :: plan.source.starts_with("env:")
     owners :: if environment -> [String]{"Hangar", "Hangar", "Hangar", "Hangar", "Hangar+.jet/lock", ".jet/lock", ".jet/lock", "Hangar"} else -> [String]{"project build", "image builder", "image builder", "image builder", "image plan", "package/build", "image target", "jetpack image"}
     keys :: [String]{"content", "cache", "archive", "signing", "provenance", "inputs", "platforms", "publish"}
-    ownership := [String: DataTree]{}
-    loop index in 0..<keys.len() -> ownership[keys[index]] = DataTree.Text(owners[index])
-    ownership["remote"] = DataTree.Text("D-JPK-REMOTE1")
-    DataTree.Object(ownership)
+    ownership := [String: Dyn]{}
+    loop index in 0..<keys.len() -> ownership[keys[index]] = Dyn.Text(owners[index])
+    ownership["remote"] = Dyn.Text("D-JPK-REMOTE1")
+    Dyn.Object(ownership)
 }
 
 // Sorted, deduplicated values as a JSON string array.
-fn image_report_values(values: [String]) -> DataTree Never! {
+fn image_report_values(values: [String]) -> Dyn Never! {
     sorted := values
     &sorted.sort()
     unique := [String]{}
@@ -123,10 +125,10 @@ fn image_report_values(values: [String]) -> DataTree Never! {
     image_json_strings(unique)
 }
 
-fn image_json_strings(values: [String]) -> DataTree Never! {
-    items := [DataTree]{}
-    loop value in values -> &items.push(DataTree.Text(value))
-    DataTree.Array(items)
+fn image_json_strings(values: [String]) -> Dyn Never! {
+    items := [Dyn]{}
+    loop value in values -> &items.push(Dyn.Text(value))
+    Dyn.Array(items)
 }
 
 // Rust `write_atomic_json`: one inspection view through create-new, sync,

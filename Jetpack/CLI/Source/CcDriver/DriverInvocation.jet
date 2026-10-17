@@ -7,15 +7,15 @@
 
 // The normalized compiler invocation: the forwarded argv plus the declared
 // sources, inputs, and outputs, all project-relative.
-pub struct CcInvocation {
-    pub argv: [String]
-    pub sources: [String]
-    pub inputs: [String]
-    pub outputs: [String]
+struct CcInvocation {
+    argv: [String]
+    sources: [String]
+    inputs: [String]
+    outputs: [String]
 }
 
 // `jet cc` / `jet c++` entry, reached from the CLI before flag parsing.
-pub fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> Int {
+fn cli_cc_main(verification: &StoreVerification, verb: String, args: [String]) -[FS, Env, Exec, IO, Net, Time, Time.Wait, Rand]> Int {
     options :: cli_cc_parse_args(verb, args) ?? {
         cli_cc_report_usage_error(verb, err.message)
         return EXIT_USAGE
@@ -391,7 +391,7 @@ fn cli_cc_mark_link_outputs_executable(project_root: String, outputs: [String]) 
         reader :: files.open(path, links: .Refuse) ?? return Err(CLIToolError.new("open link output `{output}`: {err}"))
         metadata :: reader.stat() ?? return Err(CLIToolError.new("inspect link output `{output}`: {err}"))
         if !metadata.is_file -> return Err(CLIToolError.new("link output `{output}` is not a regular file"))
-        files.set_mode(path, metadata.mode | 0o111) ?? return Err(CLIToolError.new("set executable mode on link output `{output}`: {err}"))
+        files.set_mode(path, (metadata.mode).bit_or(0o111)) ?? return Err(CLIToolError.new("set executable mode on link output `{output}`: {err}"))
     }
 }
 

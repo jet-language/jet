@@ -1,27 +1,22 @@
 //! D-DBG1 / D-DBG3 — `jet debug` source-level step-debugger tests.
 //!
-//! Drives the debugger programmatically via `jet::Debug::run_session(file,
-//! inputs)`, which feeds a scripted sequence of `(jet)` commands and returns
-//! the full transcript (banners, `<- here` carets, `locals:` dumps, command
-//! echoes, program output, and the final marker). We assert on the exact
-//! protocol/output: that a breakpoint resolves to the right Jet line, that the
-//! stack frame and locals are in Jet terms (I2 — never generated Rust), and
-//! that step / next / continue / finish behave as ratified.
+//! D-EXEC1/D-EXEC2: live stepping is native only (LLDB/DAP). The live tests
+//! drive the production `jet debug <file>` session with scripted stdin and
+//! assert on the protocol/output: that a breakpoint resolves to the right Jet
+//! line, that frames and locals are in Jet terms (I2 — never generated Rust),
+//! and that step / next / continue / finish behave as ratified. They gate only
+//! on `rustc`/`lldb` being absent; once both tools exist, a stop or cleanup
+//! failure is a test failure.
 //!
-//! The fixtures are tiny owned scratch projects so the test is hermetic. The debugger drives
-//! the same dev interpreter `jet dev`/`jet repl` use, so no rustc is needed.
-//!
-//! Also covers D-DBG3 step 2 (dap-debugger) — the native lldb-backed `jet
-//! debug` backend (see the section below): codegen-only line-marker checks
-//! (no rustc/lldb needed), a production DAP wire failure check, and a full
-//! native session. The live session gates only on `rustc`/`lldb` being absent;
-//! once both tools exist, a stop or cleanup failure is a test failure.
+//! Also covers codegen-only line-marker checks (no rustc/lldb needed), the
+//! production DAP wire, the native recorder and its `--replay` browser
+//! (D-DX-DEBUGBACK1), and the Canvas debug panel's recorded native tier.
 
 mod common;
 #[path = "tir_support/mod.rs"]
 mod tir_support;
 
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 use jet_foundation::JSON::{json_get, json_str, parse_json};
 use std::ffi::OsStr;
 use std::fmt;
@@ -108,48 +103,6 @@ fn run() {
 ";
 
 #[test]
-fn structured_session_status_ignores_program_output() {
-    let file = fixture(
-        "structured_status",
-        "fn run() {\n    print(\"program finished\")\n}\n",
-    );
-    let result = jet::Debug::run_session_result(&file, &["c"]);
-
-    assert_eq!(result.status, jet::Debug::SessionStatus::Finished);
-    assert_eq!(
-        result
-            .transcript
-            .lines()
-            .filter(|line| *line == "program finished")
-            .count(),
-        2,
-        "transcript must retain program output and the debugger completion marker"
-    );
-}
-
-#[test]
-fn paused_session_stops_at_a_live_command_boundary() {
-    let file = fixture("paused_status", LOOPS);
-    let result = jet::Debug::run_session_result_paused(&file, &["s"]);
-
-    assert_eq!(result.status, jet::Debug::SessionStatus::Running);
-    assert!(
-        result.transcript.contains("<- here"),
-        "missing live stop: {}",
-        result.transcript
-    );
-    assert!(
-        !result.transcript.contains("program finished"),
-        "a paused session must not fabricate completion: {}",
-        result.transcript
-    );
-
-    let finished = jet::Debug::run_session_result_paused(&file, &["c"]);
-    assert_eq!(finished.status, jet::Debug::SessionStatus::Finished);
-    assert!(finished.transcript.contains("program finished"));
-}
-
-#[test]
 fn canvas_debug_session_replays_one_source_bound_session() {
     let file = fixture("canvas_live_protocol", LOOPS);
     let path = Path::new(&file);
@@ -166,7 +119,7 @@ fn canvas_debug_session_replays_one_source_bound_session() {
             .expect("Canvas should expose the first live stop");
     assert!(first.contains("\"state\":\"running\""), "{first}");
     assert!(
-        first.contains("\"tier\":\"jet-dev-interpreter\""),
+        first.contains("\"tier\":\"native-recorded\""),
         "{first}"
     );
     assert!(
@@ -253,7 +206,7 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     let source_id = canvas_source_id(path);
     let sessions = jet::Canvas::DebugSessions::default();
     let first_request = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"commands\":[\"s\"]}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"commands\":[\"s\"]}}",
         source_id, revision
     );
     let first =
@@ -281,7 +234,7 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
         jet::Canvas::source_revision(&std::fs::read_to_string(&other_file).unwrap());
     let other_source_id = canvas_source_id(Path::new(&other_file));
     let wrong_source = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"stop\":true}}",
         other_source_id, other_revision, session_id
     );
     let error = jet::Canvas::debug_session_json_for_file_with_sessions(
@@ -293,14 +246,14 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     assert!(error.contains("\"kind\":\"conflict\""), "{error}");
 
     let next_request = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"commands\":[\"s\"]}}",
         source_id, revision, session_id
     );
     jet::Canvas::debug_session_json_for_file_with_sessions(path, &next_request, &sessions)
         .expect("a mismatched stop must leave the live session intact");
 
     let stale_stop = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"sha256-stale\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"sha256-stale\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"stop\":true}}",
         source_id, session_id
     );
     let error =
@@ -309,7 +262,7 @@ fn canvas_debug_stop_requires_matching_source_revision_and_tier() {
     assert!(error.contains("\"kind\":\"conflict\""), "{error}");
 
     let ended = format!(
-        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"jet-dev-interpreter\",\"session_id\":\"{}\",\"stop\":true}}",
+        "{{\"schema_version\":1,\"source_id\":\"{}\",\"revision\":\"{}\",\"tier\":\"native-recorded\",\"session_id\":\"{}\",\"stop\":true}}",
         source_id, revision, session_id
     );
     let stopped = jet::Canvas::debug_session_json_for_file_with_sessions(path, &ended, &sessions)
@@ -337,7 +290,7 @@ fn canvas_debug_rejects_unbounded_breakpoint_spans_before_execution() {
 }
 
 #[test]
-fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
+fn canvas_debug_live_native_tier_keeps_its_tier() {
     let file = fixture("canvas_native_protocol", LOOPS);
     let path = Path::new(&file);
     let source = std::fs::read_to_string(path).unwrap();
@@ -351,7 +304,7 @@ fn canvas_debug_native_tier_never_falls_back_to_interpreter() {
     match jet::Canvas::debug_session_json_for_file_with_sessions(path, &request, &sessions) {
         Ok(body) => {
             assert!(body.contains("\"tier\":\"native-lldb\""), "{body}");
-            assert!(!body.contains("\"tier\":\"jet-dev-interpreter\""), "{body}");
+            assert!(!body.contains("\"tier\":\"native-recorded\""), "{body}");
             assert!(body.contains("\"state\":\"running\""), "{body}");
             let marker = "\"id\":\"canvas-debug-";
             let start = body.find(marker).expect("native session id") + 6;
@@ -387,199 +340,134 @@ fn canvas_graph_source_id_stays_project_relative_for_relative_entries() {
     );
 }
 
-/// `step`/`s` stops on the very first statement of `main`, with the right Jet
-/// line, a `<- here` caret, and a `locals:` dump — all in Jet terms.
+/// Drive the production `jet debug <file>` native session (D-EXEC1: LLDB is
+/// the only live stepping backend) with scripted stdin. Returns the exit code
+/// and stdout+stderr, or `None` when rustc/lldb are absent.
+fn native_cli_session(tag: &str, src: &str, commands: &str) -> Option<(Option<i32>, String)> {
+    if !have("rustc") || !have("lldb") {
+        eprintln!("skipping: native jet debug needs rustc and lldb on PATH");
+        return None;
+    }
+    let file = native_fixture(tag, src);
+    let dir = Path::new(&*file).parent().unwrap().to_path_buf();
+    let mut session = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .current_dir(&dir)
+        .args(["debug", &*file])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start jet debug");
+    session
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(commands.as_bytes())
+        .unwrap();
+    let output = session.wait_with_output().unwrap();
+    Some((
+        output.status.code(),
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        ),
+    ))
+}
+
+/// The first stop names the entry function and line with a `<- here` caret;
+/// locals and `print` are Jet names and values (I2), and `continue` runs the
+/// program to completion.
 #[test]
-fn step_stops_at_first_line_with_caret_and_locals() {
-    let file = fixture("step", LOOPS);
-    let out = jet::Debug::run_session(&file, &["s"]);
-    // The first stop names the file:line and the function.
+fn native_cli_steps_shows_locals_and_finishes() {
+    let Some((code, out)) = native_cli_session("cli_step", LOOPS, "s\ns\nlocals\np total\nc\n") else {
+        return;
+    };
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("breakpoint hit") && out.contains(":2  in run()"), "{out}");
+    assert!(out.contains("<- here"), "{out}");
+    assert!(out.contains("total = 0"), "{out}");
+    assert!(out.contains("total is 6"), "{out}");
+    assert!(out.contains("program finished"), "{out}");
+    assert!(!out.contains("__jet_"), "generated names leaked:\n{out}");
+}
+
+#[test]
+fn native_cli_break_then_continue_stops_at_breakpoint() {
+    let Some((code, out)) = native_cli_session("cli_break", LOOPS, "break 7\nc\nc\n") else {
+        return;
+    };
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("breakpoint set"), "{out}");
     assert!(
-        out.contains("breakpoint hit  jet_debug_step.jet:2  in main()"),
-        "missing breakpoint banner; got:\n{out}"
-    );
-    // The current line carries the `<- here` caret (D-DBG3 layout).
-    assert!(
-        out.contains("<- here"),
-        "missing `<- here` caret; got:\n{out}"
-    );
-    // The `(jet)` prompt echoes the typed command (D-DBG3 prompt = `(jet)`).
-    assert!(
-        out.contains("(jet) s"),
-        "missing `(jet)` prompt echo; got:\n{out}"
-    );
-    // Locals are shown in Jet terms; after the first `s` the second stop sees `n`.
-    assert!(out.contains("locals:"), "missing locals dump; got:\n{out}");
-    // The program runs to completion once the script ends.
-    assert!(
-        out.contains("total is 6"),
-        "program output missing; got:\n{out}"
-    );
-    assert!(
-        out.contains("program finished"),
-        "missing end marker; got:\n{out}"
+        out.contains("print(\"total is {total}\")        <- here"),
+        "continue should stop on the line-7 breakpoint:\n{out}"
     );
 }
 
-/// `locals` after stepping into the loop shows the live `total`/`n`/`i` values
-/// through the Jet display path (I2), and `print X` shows one named local.
 #[test]
-fn locals_and_print_show_jet_values() {
-    let file = fixture("locals", LOOPS);
-    // step to line 3 (total := 0), step to 4 (loop header), step into loop body
-    // (i bound), then inspect.
-    let out = jet::Debug::run_session(&file, &["s", "s", "s", "locals", "p total"]);
+fn native_cli_steps_into_a_call_and_backtraces() {
+    let Some((code, out)) = native_cli_session("cli_calls", CALLS, "s\ns\nbt\nc\n") else {
+        return;
+    };
+    assert_eq!(code, Some(0), "{out}");
+    assert!(out.contains("y := x * 2"), "step should descend into the callee:\n{out}");
     assert!(
-        out.contains("locals:  i = 1   n = 3   total = 0"),
-        "locals dump should show all three in Jet terms; got:\n{out}"
-    );
-    assert!(
-        out.contains("total = 0"),
-        "`print total` should show the value; got:\n{out}"
+        out.contains("double()") && out.contains("run()"),
+        "backtrace should show both Jet frames:\n{out}"
     );
 }
 
-/// A `break N` + `continue`/`c` runs to the breakpoint line — not stopping at
-/// every statement in between.
 #[test]
-fn break_then_continue_stops_at_breakpoint() {
-    let file = fixture("brk", LOOPS);
-    // First stop is line 2; set a breakpoint on line 7 (the print) and continue.
-    let out = jet::Debug::run_session(&file, &["break 7", "c"]);
+fn native_cli_next_steps_over_a_call() {
+    let Some((code, out)) = native_cli_session("cli_next", CALLS, "n\nn\nc\n") else {
+        return;
+    };
+    assert_eq!(code, Some(0), "{out}");
     assert!(
-        out.contains("breakpoint set  jet_debug_brk.jet:7"),
-        "break should confirm the line; got:\n{out}"
+        !out.contains("y := x * 2        <- here"),
+        "`next` must not stop inside the callee:\n{out}"
     );
-    // The continue lands on line 7 with the loop already finished (total = 6).
-    assert!(
-        out.contains("7 |") && out.contains("total = 6"),
-        "continue should stop on line 7 with the final total; got:\n{out}"
-    );
+    assert!(out.contains("print(\"{b}\")        <- here"), "{out}");
 }
 
-/// `step` descends into a called function (`double`), and `backtrace`/`bt`
-/// shows the two-frame Jet call stack in Jet terms.
 #[test]
-fn step_into_call_and_backtrace() {
-    let file = fixture("calls", CALLS);
-    // main:6 (a := 5) -> main:7 (b := double(a)) -> step into double body.
-    let out = jet::Debug::run_session(&file, &["s", "s", "bt"]);
+fn native_cli_finish_returns_to_caller() {
+    let Some((code, out)) = native_cli_session("cli_finish", CALLS, "s\ns\nfinish\nc\n") else {
+        return;
+    };
+    assert_eq!(code, Some(0), "{out}");
     assert!(
-        out.contains("y := x * 2"),
-        "step should descend into the callee body; got:\n{out}"
+        out.contains("b := double(a)") || out.contains("print(\"{b}\")"),
+        "finish should return control to the caller frame:\n{out}"
     );
-    // The backtrace shows the callee innermost, the caller below — Jet frames.
-    assert!(
-        out.contains("#0  double()") && out.contains("#1  main()"),
-        "backtrace should show both Jet frames; got:\n{out}"
-    );
+    assert!(out.contains("10"), "{out}");
 }
 
-/// `finish`/`f` runs to the end of the current function and stops back in the
-/// caller.
 #[test]
-fn finish_returns_to_caller() {
-    let file = fixture("finish", CALLS);
-    // Descend into double (s,s,s), then finish back to main.
-    let out = jet::Debug::run_session(&file, &["s", "s", "s", "finish"]);
-    assert!(
-        out.contains("b := double(a)") || out.contains("print"),
-        "finish should return control to the caller frame; got:\n{out}"
-    );
-    assert!(
-        out.contains("program finished"),
-        "should run to the end; got:\n{out}"
-    );
+fn native_cli_quit_ends_session_with_e2204() {
+    let Some((code, out)) = native_cli_session("cli_quit", LOOPS, "q\n") else {
+        return;
+    };
+    assert_ne!(code, Some(0), "{out}");
+    assert!(out.contains("E2204"), "{out}");
+    assert!(!out.contains("total is 6"), "quit must not run the program on:\n{out}");
 }
 
-/// `quit`/`q` ends the session before the program finishes — surfaced as the
-/// E2204 debug-session-aborted diagnostic (I4).
 #[test]
-fn quit_ends_session_with_e2204() {
-    let file = fixture("quit", LOOPS);
-    let out = jet::Debug::run_session(&file, &["s", "q"]);
-    assert!(
-        out.contains("E2204"),
-        "quitting mid-session must surface E2204; got:\n{out}"
-    );
-    // The success marker is a line of its own; the E2204 message also contains
-    // the words "finished", so check for the standalone marker line.
-    assert!(
-        !out.lines().any(|l| l == "program finished"),
-        "the program must NOT have finished after quit; got:\n{out}"
-    );
-}
-
-/// `help`/`h` lists every verb (D-DBG3: `help` lists the verbs).
-#[test]
-fn help_lists_the_verbs() {
-    let file = fixture("help", LOOPS);
-    let out = jet::Debug::run_session(&file, &["help", "c"]);
-    for verb in [
-        "step",
-        "next",
-        "continue",
-        "finish",
-        "break",
-        "print",
-        "backtrace",
-        "quit",
-    ] {
-        assert!(
-            out.contains(verb),
-            "help should mention `{verb}`; got:\n{out}"
-        );
+fn native_cli_help_lists_the_verbs() {
+    let Some((_, out)) = native_cli_session("cli_help", LOOPS, "help\nc\n") else {
+        return;
+    };
+    for verb in ["step", "next", "continue", "finish", "break", "print", "backtrace", "quit"] {
+        assert!(out.contains(verb), "help must list `{verb}`:\n{out}");
     }
 }
 
-/// A program using a feature the dev interpreter can't step (here `core.files`)
-/// declines at the debug boundary with E2203, pointing at the real build (I2 —
-/// the message names `jet debug`, never the generated Rust).
+/// `next` and `next(outer)` statements carry line markers so the native
+/// debugger can stop on them.
 #[test]
-fn unsupported_feature_stops_at_e2203_boundary() {
-    let file = fixture(
-        "boundary",
-        "use core.files as fs\nfn run() {\n    print(\"hi\")\n}\n",
-    );
-    let out = jet::Debug::run_session(&file, &["c"]);
-    assert!(
-        out.contains("E2203"),
-        "an unsteppable feature must stop at E2203; got:\n{out}"
-    );
-    assert!(
-        out.contains("jet debug") && (out.contains("jet run") || out.contains("jet build")),
-        "E2203 must name `jet debug` and point at the real build; got:\n{out}"
-    );
-}
-
-/// Card #2029 / I4: a library with no `run` is registered E0101, not a bare line.
-#[test]
-fn missing_run_is_registered_e0101() {
-    let file = fixture("no_run", "fn helper() { print(1) }\n");
-    let out = jet::Debug::run_session(&file, &["c"]);
-    assert!(
-        out.contains("E0101") && out.contains("no `run` function"),
-        "no-run must be registered E0101; got:\n{out}"
-    );
-}
-
-/// `next`/`n` steps over the loop body without descending statement-by-statement
-/// at a deeper position — the line advances within `main`, not into a callee.
-#[test]
-fn next_steps_over() {
-    let file = fixture("next", CALLS);
-    // main:6 (a:=5), then `next` over the `double(a)` call to main's next line.
-    let out = jet::Debug::run_session(&file, &["s", "n", "n"]);
-    // `next` from `b := double(a)` must NOT stop inside `double` — the callee's
-    // `y := x * 2` line should never appear as a stop before we reach main's print.
-    assert!(
-        out.contains("program finished"),
-        "should run to the end; got:\n{out}"
-    );
-}
-
-#[test]
-fn loop_next_edges_are_step_visible_and_line_mapped() {
+fn loop_next_edges_are_line_mapped() {
     let src = "\
 fn run() {
     hits := 0
@@ -604,46 +492,6 @@ fn run() {
 }
 ";
     let file = fixture("loop_next_edges", src);
-
-    let plain = jet::Debug::run_session(&file, &["break 5", "c", "n", "p i", "n", "p i", "c"]);
-    let next_stop = plain
-        .find("5 |             next        <- here")
-        .expect("plain next stop");
-    let step_stop = plain[next_stop..]
-        .find("3 |     loop i in 0..<3 {        <- here")
-        .map(|offset| next_stop + offset)
-        .expect("plain next must stop on the loop afterthought");
-    assert!(
-        !plain[next_stop..step_stop].contains("7 |         hits += i        <- here"),
-        "plain next leaked into the skipped body before its afterthought:\n{plain}"
-    );
-    assert!(
-        plain.contains("i = 2"),
-        "afterthought did not advance i:\n{plain}"
-    );
-    assert!(plain.contains("2,3,0"), "wrong loop result:\n{plain}");
-
-    let labeled = jet::Debug::run_session(&file, &["break 14", "c", "n", "p i", "n", "p i", "c"]);
-    let next_stop = labeled
-        .find("14 |                 next(outer)        <- here")
-        .expect("labeled next stop");
-    let outer_step = labeled[next_stop..]
-        .find("11 |     outer :: loop i in 0..<3 {        <- here")
-        .map(|offset| next_stop + offset)
-        .expect("labeled next must target the outer afterthought");
-    assert!(
-        !labeled[next_stop..outer_step].contains("12 |         loop j in 0..<3 {        <- here"),
-        "labeled next stepped through the inner loop edge first:\n{labeled}"
-    );
-    assert!(
-        labeled.contains("i = 1"),
-        "outer afterthought did not advance i:\n{labeled}"
-    );
-    assert!(
-        labeled.contains("2,3,0"),
-        "wrong labeled loop result:\n{labeled}"
-    );
-
     let generated = jet::compile_for_debug(&file).expect("loop next fixture compiles for debug");
     for line in [5, 14] {
         assert!(
@@ -704,6 +552,62 @@ fn native_binary(tag: &str, rust: &str) -> (common::Scratch, PathBuf) {
     (scratch, binary)
 }
 
+/// D-DX-DEBUGBACK1=A: `jet debug --record` records one complete native LLDB
+/// run, and `--replay` browses that history without executing the program.
+#[test]
+fn native_record_then_replay_browses_without_executing() {
+    if !have("rustc") || !have("lldb") {
+        eprintln!("skipping: native record needs rustc and lldb on PATH");
+        return;
+    }
+    let file = native_fixture("record_replay", LOOPS);
+    let dir = Path::new(&*file).parent().unwrap().to_path_buf();
+    let recorded = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .current_dir(&dir)
+        .args(["debug", &*file, "--record=loops"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("run jet debug --record");
+    assert_eq!(
+        recorded.status.code(),
+        Some(0),
+        "native record failed:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&recorded.stdout),
+        String::from_utf8_lossy(&recorded.stderr)
+    );
+    assert!(
+        dir.join(".jet/replays/loops.jetproof-replay").is_file(),
+        "native record wrote no replay receipt"
+    );
+    let mut replay = Command::new(env!("CARGO_BIN_EXE_jet"))
+        .current_dir(&dir)
+        .args(["debug", &*file, "--replay=loops"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("start jet debug --replay");
+    replay
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"when total\nc\n")
+        .unwrap();
+    let output = replay.wait_with_output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "replay failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(stdout.contains("last change:"), "{stdout}");
+    assert!(
+        !stdout.contains("total is"),
+        "replay re-executed the recorded program: {stdout}"
+    );
+}
+
 fn dap_frame(body: &str) -> String {
     format!("Content-Length: {}\r\n\r\n{}", body.as_bytes().len(), body)
 }
@@ -728,14 +632,14 @@ fn dap_response(output: &str, request_seq: u32, command: &str) -> Option<String>
         };
         let type_name = json_get(&value, "type").and_then(json_str);
         let actual_request_seq = match json_get(&value, "request_seq") {
-            Some(DataTree::Int(value)) => Some(*value),
+            Some(Dyn::Int(value)) => value.to_i64(),
             _ => None,
         };
         let success = json_get(&value, "success");
         let actual_command = json_get(&value, "command").and_then(json_str);
         if type_name == Some("response")
             && actual_request_seq == Some(i64::from(request_seq))
-            && matches!(success, Some(DataTree::Bool(_)))
+            && matches!(success, Some(Dyn::Bool(_)))
             && actual_command == Some(command)
         {
             return Some(body.to_string());
@@ -1622,6 +1526,272 @@ fn dap_cli_projects_raw_frames_only_when_requested_through_production_wire() {
     }
     let _ = std::fs::remove_file(&file);
     assert!(status.success(), "DAP command failed:\nstdout:\n{stdout}");
+}
+
+/// #4881: exercise the production root and the debug C stop channel, not a
+/// scheduler/interrupt flag injected into generated code. The Jet input is the
+/// exact fixed-width witness already used by the remainder parity test.
+#[test]
+fn ordinary_root_and_debug_dispatch_stop_after_lifo_cleanup() {
+    assert!(have("rustc"), "root/debug stop proof requires rustc");
+    let source = r#"
+fn remainder(value: I8, divisor: I8) -> I8 {
+    return value % divisor
+}
+
+fn run() {
+    print(remainder(I8{7}, I8{0}))
+}
+"#;
+    assert!(include_str!("dev_parts/routine.rs").contains(source));
+    let file = native_fixture("root_stop_cleanup", source);
+    let compiled = jet::compile_for_debug(&file).expect("fixed-width witness compiles for debug");
+    let callable = compiled
+        .rust
+        .lines()
+        .find(|line| {
+            line.starts_with("// jet-native-callable:")
+                && line.split_whitespace().any(|field| field == "jet=remainder")
+        })
+        .and_then(|line| {
+            line.split_whitespace()
+                .find_map(|field| field.strip_prefix("name="))
+        })
+        .expect("the trap witness must use actual native debug dispatch");
+    let probes = r#"
+#[cfg(test)]
+mod root_stop_regression {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn ordinary_root() {
+        jet_runtime_boundary(|| {
+            let _first = JetDeferredClose::new(|| println!("close-first"));
+            let _second = JetDeferredClose::new(|| println!("close-second"));
+            println!("body");
+            jet_panic("<root-stop>", 1, "root-stop");
+        });
+        panic!("a stopped root returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn rendered_diagnostic_root() {
+        jet_runtime_boundary(|| {
+            let _first = JetDeferredClose::new(|| println!("close-first"));
+            let _second = JetDeferredClose::new(|| println!("close-second"));
+            println!("body");
+            let report = jet_runtime_stop_report(
+                "E3010", "<root-stop>", 1, "", "", 1, 1, "diagnostic-stop", "",
+            );
+            jet_runtime_diagnostic(report.rendered);
+        });
+        panic!("a diagnostic root returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn debug_dispatch() {
+        jet_runtime_boundary(|| {
+            let _first = JetDeferredClose::new(|| println!("close-first"));
+            let _second = JetDeferredClose::new(|| println!("close-second"));
+            println!("body");
+            let value = @REMAINDER@(7i8, 0i8);
+            println!("unexpected-value {value}");
+        });
+        panic!("a stopped debug call returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn callback_registration_timing() {
+        jet_runtime_boundary(|| {
+            let _body = JetDeferredClose::new(|| println!("close-body"));
+            println!("body");
+            jet_runtime_atexit::register(|| {
+                let _callback = JetDeferredClose::new(|| println!("close-callback"));
+                println!("atexit-first");
+                jet_runtime_atexit::register(|| println!("late-before-stop"));
+                jet_panic("<callback-stop>", 1, "callback-stop");
+            });
+            jet_runtime_atexit::register(|| {
+                println!("atexit-second");
+                let capture = JetDeferredClose::new(|| println!("drop-after-stop"));
+                jet_runtime_atexit::register(move || {
+                    let _borrowed = &capture;
+                    println!("unexpected-after-stop-body");
+                });
+            });
+        });
+        panic!("a stopped callback returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn lexical_registration_after_stop() {
+        jet_runtime_boundary(|| {
+            let _body = JetDeferredClose::new(|| {
+                println!("close-body");
+                let capture = JetDeferredClose::new(|| println!("drop-after-stop"));
+                jet_runtime_atexit::register(move || {
+                    let _borrowed = &capture;
+                    println!("unexpected-after-stop-body");
+                });
+            });
+            println!("body");
+            jet_panic("<lexical-stop>", 1, "lexical-stop");
+        });
+        panic!("a stopped root returned");
+    }
+
+    #[test]
+    #[ignore]
+    fn stopped_callback_double_panic() {
+        jet_runtime_boundary(|| {
+            jet_runtime_atexit::register(|| jet_panic("<second-stop>", 1, "second-stop"));
+            jet_panic("<first-stop>", 1, "first-stop");
+        });
+        panic!("stopped cleanup returned");
+    }
+
+    #[test]
+    fn carrier_roundtrip() {
+        assert!(!jet_runtime_process_should_unwind());
+        let mut stop = None;
+        let value = jet_native_dispatch_boundary(&mut stop, || {
+            assert!(jet_runtime_process_should_unwind());
+            assert!(jet_runtime_fault_should_unwind());
+            assert!(!jet_scheduler_panic_should_unwind(), "an ordinary Root is not a cancellation catch frame");
+            let nested = JetRuntimeProcessBoundary::enter();
+            drop(nested);
+            assert!(jet_runtime_process_should_unwind());
+            7u8
+        });
+        assert!(!jet_runtime_process_should_unwind());
+        assert!(stop.is_none());
+        assert_eq!(jet_native_dispatch_finish(stop, value), 7);
+
+        let mut stop = None;
+        let value: u8 = jet_native_dispatch_boundary(&mut stop, || {
+            jet_panic("<debug-stop>", 1, "channel-stop")
+        });
+        assert!(!jet_runtime_process_should_unwind());
+        assert!(stop.is_some());
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_native_dispatch_finish(stop, value)))
+            .expect_err("the transport scalar must not escape as a result");
+        let report = caught.downcast::<JetRenderedRuntimeStop>().expect("typed report");
+        assert_eq!(report.exit_code, 70);
+        assert!(report.rendered.contains("channel-stop"));
+
+        let mut stop = None;
+        let value: u8 = jet_native_dispatch_boundary(&mut stop, || {
+            std::panic::resume_unwind(Box::new(123usize))
+        });
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_native_dispatch_finish(stop, value)))
+            .expect_err("an opaque host payload must not become a scalar");
+        assert_eq!(*caught.downcast::<usize>().expect("original host payload"), 123);
+        assert!(!jet_runtime_process_should_unwind());
+
+        let mut stop = None;
+        let value: u8 = jet_native_dispatch_boundary(&mut stop, || jet_runtime_explicit_exit(0));
+        let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| jet_native_dispatch_finish(stop, value)))
+            .expect_err("explicit exit zero is still a stop, not successful return");
+        assert_eq!(caught.downcast::<JetExplicitExit>().expect("explicit exit").code, 0);
+    }
+}
+"#
+    .replace("@REMAINDER@", callable);
+    let scratch = common::Scratch::new("jet_root_debug_stop_probe");
+    let rust_file = scratch.path.join("probe.rs");
+    let binary = scratch.path.join("probe");
+    std::fs::write(&rust_file, format!("{}\n{probes}", compiled.rust)).unwrap();
+    let built = Command::new("rustc")
+        .args(["--edition", "2021", "--test"])
+        .arg(&rust_file)
+        .arg("-o")
+        .arg(&binary)
+        .output()
+        .unwrap();
+    assert!(
+        built.status.success(),
+        "rustc rejected production root/debug probes:\n{}",
+        String::from_utf8_lossy(&built.stderr)
+    );
+    let carrier = Command::new(&binary)
+        .args(["--exact", "root_stop_regression::carrier_roundtrip", "--nocapture"])
+        .output()
+        .unwrap();
+    assert!(
+        carrier.status.success(),
+        "carrier regression failed: {carrier:?}"
+    );
+    for (probe, code, cleanup) in [
+        ("ordinary_root", "E3001", "body\nclose-second\nclose-first\n"),
+        ("rendered_diagnostic_root", "E3010", "body\nclose-second\nclose-first\n"),
+        ("debug_dispatch", "E3010", "body\nclose-second\nclose-first\n"),
+        (
+            "callback_registration_timing",
+            "E3001",
+            "body\nclose-body\natexit-first\nclose-callback\natexit-second\ndrop-after-stop\nlate-before-stop\n",
+        ),
+        (
+            "lexical_registration_after_stop",
+            "E3001",
+            "body\nclose-body\ndrop-after-stop\n",
+        ),
+    ] {
+        // Share the same file description for both streams so the assertion
+        // observes report-vs-cleanup order, not two independently captured logs.
+        let path = scratch.path.join(format!("{probe}.log"));
+        let log = std::fs::File::create(&path).unwrap();
+        let status = Command::new(&binary)
+            .args([
+                "--exact",
+                &format!("root_stop_regression::{probe}"),
+                "--ignored",
+                "--nocapture",
+            ])
+            .stdout(Stdio::from(log.try_clone().unwrap()))
+            .stderr(Stdio::from(log))
+            .status()
+            .unwrap();
+        let transcript = std::fs::read_to_string(path).unwrap();
+        assert_eq!(status.code(), Some(70), "{probe}: {transcript}");
+        assert!(transcript.contains(cleanup), "{probe}: {transcript}");
+        let report = format!("Stop [{code}]");
+        assert_eq!(transcript.matches(&report).count(), 1, "{probe}: {transcript}");
+        let last_cleanup = cleanup.trim_end().rsplit('\n').next().unwrap();
+        assert!(
+            transcript.find(last_cleanup).unwrap() < transcript.find(&report).unwrap(),
+            "{probe}: report preceded owed cleanup: {transcript}"
+        );
+        assert!(!transcript.contains("unexpected-value"), "{probe}: {transcript}");
+        assert!(!transcript.contains("unexpected-after-stop-body"), "{probe}: {transcript}");
+    }
+    let path = scratch.path.join("stopped_callback_double_panic.log");
+    let log = std::fs::File::create(&path).unwrap();
+    let status = Command::new(&binary)
+        .args([
+            "--exact",
+            "root_stop_regression::stopped_callback_double_panic",
+            "--ignored",
+            "--nocapture",
+        ])
+        .stdout(Stdio::from(log.try_clone().unwrap()))
+        .stderr(Stdio::from(log))
+        .status()
+        .unwrap();
+    let transcript = std::fs::read_to_string(path).unwrap();
+    assert!(!status.success(), "{transcript}");
+    assert_ne!(status.code(), Some(70), "{transcript}");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        assert_eq!(status.signal(), Some(6), "{transcript}");
+    }
+    assert!(transcript.contains("panic in a destructor during cleanup\n"), "{transcript}");
+    assert!(!transcript.contains("Stop [E3001]"), "{transcript}");
 }
 
 #[test]

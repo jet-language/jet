@@ -74,6 +74,41 @@ function jet_time_wall_now_ms() {
   return world ? world.now() : BigInt(Date.now());
 }
 
+// Browser host facts. Environment/filesystem access is absent on this tier;
+// named-zone bytes come from the same bundled TZif inputs as native WASM.
+function jet_time_raw_wall_sample() {
+  const millis = BigInt(Date.now());
+  const magnitude = millis < 0n ? -millis : millis;
+  return { seconds: magnitude / 1000n, nanoseconds: magnitude % 1000n * 1000000n, before_epoch: millis < 0n };
+}
+function jet_time_raw_world_wall_ms() {
+  const world = globalThis.__jet_deterministic_world;
+  return world ? jet_time_some(world.now()) : jet_time_none();
+}
+function jet_time_raw_wall_override_ms() {
+  return jet_time_none();
+}
+function jet_time_raw_controlled_monotonic_ns() {
+  return jet_time_none();
+}
+function jet_time_raw_world_monotonic_ns() {
+  const world = globalThis.__jet_deterministic_world;
+  return world ? jet_time_some(world.monotonic_ns) : jet_time_none();
+}
+function jet_time_raw_host_monotonic_ns() {
+  return BigInt(Math.trunc((performance.now() - JET_TIME_EPOCH_MS) * 1000000));
+}
+function jet_time_raw_zone_env(_name) {
+  return jet_time_none();
+}
+function jet_time_raw_zone_file_bytes(_path) {
+  return jet_time_none();
+}
+function jet_time_raw_embedded_zone_bytes(name) {
+  const bytes = JET_TIME_ZONE_DATA[String(name)];
+  return bytes === undefined ? jet_time_none() : jet_time_some(Array.from(bytes, BigInt));
+}
+
 function jet_time_floor_div(left, right) {
   let quotient = BigInt(left) / BigInt(right);
   if (BigInt(left) % BigInt(right) < 0n) quotient -= 1n;

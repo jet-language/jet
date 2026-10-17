@@ -1,0 +1,25 @@
+# Port of tests/diagnostic_gate.rs::denied_lint_still_blocks_execution (163-186).
+# PENDING-GRAMMAR and PENDING-SAME-HEAD: original assertions; no runtime snapshot.
+fixture: denied.fixture
+env: NO_COLOR=1
+step: jet build main.jet
+env: JET_STORE_DIR={work}/cache/build/build
+exit: nonzero
+stderr: ~ "Error [E1293]" # original predicate
+stderr: ~ L0103 # original predicate
+stderr: !~ "Warning [L0103]" # original predicate
+stdout: !~ DENIED_SENTINEL # original predicate
+step: jet run main.jet
+env: JET_STORE_DIR={work}/cache/run/build
+exit: nonzero
+stderr: ~ "Error [E1293]" # original predicate
+stderr: ~ L0103 # original predicate
+stderr: !~ "Warning [L0103]" # original predicate
+stdout: !~ DENIED_SENTINEL # original predicate
+step: jet dev main.jet --watch=off
+env: JET_STORE_DIR={work}/cache/dev/build
+exit: nonzero
+stderr: ~ "Error [E1293]" # original predicate
+stderr: ~ L0103 # original predicate
+stderr: !~ "Warning [L0103]" # original predicate
+stdout: !~ DENIED_SENTINEL # original predicate

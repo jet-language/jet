@@ -1,0 +1,60 @@
+use core.crypto as crypto
+use core.crypto.expert as expert
+use core.files as files
+
+// tests/fixtures/crypto_bridge_entropy.rs:862-912. KNOWN-FAILING #4821.
+// Rust private jetc_v2_plain_len/record_shape_valid predicates ported verbatim
+// in arithmetic form below, including final-record lower/upper/cap bounds.
+struct Record { length: Int, flags: Int }
+fn little(bytes: [U8], start: Int, count: Int) -> Int {
+    value := 0
+    loop i in 0..<count -> value = value | (Int.from_u8(bytes[start + i]) << (8 * i))
+    value
+}
+fn plain_length(body: Int) -> Int? {
+    record_length :: 1048576 + 21
+    full :: body /% record_length
+    final_length :: body % record_length
+    if final_length < 21 || final_length >= record_length -> return None
+    length :: full * 1048576 + final_length - 21
+    if length > 1099511627776 -> return None
+    Val(length)
+}
+#Test("jetc_v2_record_boundaries_are_canonical") {
+    recipient :: crypto.X25519SecretKey.new_random() ?? panic("recipient")
+    public :: recipient.public_key()
+    loop size in [0, 1048575, 1048576, 1048577] {
+        source :: "source-{size}.bin"
+        envelope :: "envelope-{size}.jetc"
+        restored :: "restored-{size}.out"
+        plaintext := [U8]{}
+        loop index in 0..<size -> &plaintext.push((U8{index % 251}))
+        files.write_bytes(source, plaintext) ?? panic("source")
+        crypto.file_seal([public], Path.from(source), Path.from(envelope)) ?? panic("seal")
+        encoded :: files.read_bytes(envelope) ?? panic("encoded")
+        header_length :: little(encoded, 8, 4)
+        body_length :: little(encoded, 12, 8)
+        assert_eq(plain_length(body_length), Val(size))
+        at := 20 + header_length
+        records := [Record]{}
+        loop at < encoded.len() {
+            length :: little(encoded, at, 4)
+            flags :: Int.from_u8(encoded[at + 4])
+            assert((flags == 0 && length == 1048576) || (flags == 1 && length < 1048576))
+            &records.push(Record{length: length, flags: flags})
+            at += 5 + length + 16
+        }
+        assert_eq(at, encoded.len())
+        expected := [Record]{}
+        if size < 1048576 -> &expected.push(Record{length: size, flags: 1})
+        else {
+            &expected.push(Record{length: 1048576, flags: 0})
+            &expected.push(Record{length: size - 1048576, flags: 1})
+        }
+        assert_eq(records, expected)
+        crypto.file_open(recipient, Path.from(envelope), Path.from(restored)) ?? panic("open")
+        assert_eq(files.read_bytes(restored) ?? panic("restored"), plaintext)
+        assert_eq(files.read_bytes(source) ?? panic("preserved"), plaintext)
+    }
+    loop entry in files.read_dir(".") ?? panic("root") -> assert(!entry.name.starts_with(".jetc-"))
+}

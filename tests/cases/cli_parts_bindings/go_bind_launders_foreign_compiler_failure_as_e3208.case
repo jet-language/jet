@@ -1,0 +1,9 @@
+# Port of tests/cli_parts/bindings.rs:680-721. Source copied verbatim.
+# PENDING-SAME-HEAD: historical Could/Export capitalization differs from the original lowercase snapshot; do not bless it.
+# Original scrub maps the source path to BAD.jet; expected snapshot maps that token
+# back to {work}/broken.go for the kit's standard paths normalization.
+fixture: fixtures/go_broken
+step: jet inspect bind go {work}/broken.go --pkg broken
+exit: nonzero
+stderr: = bind-go-invalid.stderr
+stderr: !~ broken.go: # Original forbids raw foreign compiler location leakage.

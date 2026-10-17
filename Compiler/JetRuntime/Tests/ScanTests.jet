@@ -1,0 +1,227 @@
+// Runtime-only ABI witness: exported calls, capture initialization, receiver
+// commit, borrowed-input independence, UTF-8 and exact scalar representation.
+fn scan_test_require(ok: Bool) {
+    if ok {
+        return
+    }
+    trap_exit(I64{1})
+    loop {}
+}
+fn scan_test_row(row: I64, row_tag: I64, a: I64, b: I64, destination: I64, storage: I64) {
+    coll_zero(row, I64{64})
+    rt_text_store(row, row_tag)
+    rt_text_store(row + I64{8}, a)
+    rt_text_store(row + I64{16}, b)
+    rt_text_store(row + I64{24}, I64{8})
+    rt_text_store(row + I64{32}, destination)
+    rt_text_store(row + I64{40}, storage)
+}
+fn scan_test_float(text: I64, expected: I64) {
+    scan_test_require(scan_decimal(rt_text_data(text), rt_text_len(text), I64{1}).valid)
+    scan_test_require(scan_float_bits(rt_text_data(text), rt_text_len(text), I64{1}) == expected)
+    jet_rt_string_drop(text)
+}
+fn scan_tests() {
+    jet_rt_alloc_init()
+    scan_stream_tests()
+    slots :: jet_rt_alloc(I64{40}, I64{8})
+    rows :: jet_rt_alloc(I64{192}, I64{8})
+    data :: jet_rt_alloc(I64{64}, I64{8})
+    literal :: jet_rt_alloc(I64{8}, I64{8})
+    coll_zero(slots, I64{40})
+    // First Bits field succeeds but the second field is truncated: no writes.
+    rt_text_store(data, I64{171})
+    scan_test_row(rows, I64{17}, I64{4}, I64{0}, slots, I64{0})
+    scan_test_row(rows + I64{64}, I64{17}, I64{16}, I64{0}, slots + I64{8}, I64{0})
+    rt_text_store(slots, I64{777})
+    rt_text_store(slots + I64{8}, I64{888})
+    scan_test_require(jet_rt_binary_pattern_match(data, I64{1}, I64{8}, rows, I64{2}) == I64{0})
+    scan_test_require(rt_text_word(slots) == I64{777} && rt_text_word(slots + I64{8}) == I64{888})
+    // A partial-byte Reader prefix must miss without committing its position.
+    scan_test_require(scan_take(slots + I64{16}, data, I64{1}, I64{8}, rows, I64{1}, slots + I64{24}, true) == I64{0})
+    scan_test_require(rt_text_word(slots + I64{16}) == I64{0} && rt_text_word(slots) == I64{777})
+    error :: rt_text_word(slots + I64{24})
+    expected :: scan_miss(I64{0}, true)
+    scan_test_require(jet_rt_string_eq(error, expected))
+    jet_rt_string_drop(error)
+    jet_rt_string_drop(expected)
+    // The same nibbles now complete one byte and both captures initialize.
+    scan_test_row(rows + I64{64}, I64{17}, I64{4}, I64{0}, slots + I64{8}, I64{0})
+    scan_test_require(scan_take(slots + I64{16}, data, I64{1}, I64{8}, rows, I64{2}, slots + I64{24}, true) == I64{1})
+    scan_test_require(rt_text_word(slots) == I64{10} && rt_text_word(slots + I64{8}) == I64{11} && rt_text_word(slots + I64{16}) == I64{1})
+    // End-of-input zero-row scans do not dereference the dangling empty ptr.
+    scan_test_require(jet_rt_binary_pattern_match(I64{1}, I64{0}, I64{1}, rows, I64{0}) == I64{1})
+    scan_test_require(jet_rt_text_pattern_match(I64{1}, I64{0}, I64{1}, rows, I64{0}) == I64{1})
+    // Byte-order, all-ones U64 (signed intermediate), and owned rest capture.
+    at := I64{0}
+    loop at < (I64{8}) {
+        rt_text_store(data + at * I64{8}, I64{255})
+        at += I64{1}
+    }
+    scan_test_row(rows, I64{17}, I64{64}, I64{1}, slots, I64{0})
+    scan_test_require(jet_rt_binary_pattern_match(data, I64{8}, I64{8}, rows, I64{1}) == I64{1})
+    scan_test_require(rt_text_word(slots) == I64{-1})
+    scan_test_row(rows, I64{18}, I64{0}, I64{0}, slots, I64{6})
+    scan_test_require(jet_rt_binary_pattern_match(data, I64{8}, I64{8}, rows, I64{1}) == I64{1})
+    bytes :: rt_text_word(slots)
+    rt_text_store(data, I64{0})
+    scan_test_require(rt_text_word(bytes) == I64{8} && rt_text_word(rt_text_word(bytes + I64{16})) == I64{255})
+    jet_rt_free(rt_text_word(bytes + I64{16}), I64{64}, I64{8})
+    jet_rt_free(bytes, I64{24}, I64{8})
+    // Current native U8 carriers are packed. A packed capture must not write
+    // into the adjacent field; a packed Rest owns exactly len bytes, align8.
+    rt_text_store(data, I64{171})
+    scan_test_row(rows, I64{17}, I64{8}, I64{0}, slots, I64{0})
+    rt_text_store(rows + I64{24}, I64{1})
+    rt_text_store(slots, I64{-1})
+    scan_test_require(jet_rt_binary_pattern_match(data, I64{1}, I64{8}, rows, I64{1}) == I64{1})
+    scan_test_require(rt_text_byte(slots) == I64{171} && rt_text_byte(slots + I64{1}) == I64{255})
+    scan_test_row(rows, I64{18}, I64{0}, I64{0}, slots, I64{6})
+    rt_text_store(rows + I64{24}, I64{1})
+    scan_test_require(jet_rt_binary_pattern_match(data, I64{1}, I64{8}, rows, I64{1}) == I64{1})
+    packed :: rt_text_word(slots)
+    scan_test_require(rt_text_word(packed) == I64{1} && rt_text_byte(rt_text_word(packed + I64{16})) == I64{171})
+    jet_rt_free(rt_text_word(packed + I64{16}), I64{1}, I64{8})
+    jet_rt_free(packed, I64{24}, I64{8})
+    scan_test_row(rows, I64{18}, I64{0}, I64{0}, I64{0}, I64{5})
+    scan_test_require(jet_rt_binary_pattern_match(data, I64{1}, I64{8}, rows, I64{1}) == I64{1})
+    // Valid padded UTF-8 becomes owned packed E4 text; malformed tail misses.
+    rt_text_store(data, I64{226})
+    rt_text_store(data + I64{8}, I64{130})
+    rt_text_store(data + I64{16}, I64{172})
+    scan_test_row(rows, I64{1}, I64{0}, I64{0}, slots, I64{4})
+    scan_test_require(jet_rt_text_pattern_match(data, I64{3}, I64{8}, rows, I64{1}) == I64{1})
+    captured :: rt_text_word(slots)
+    rt_text_store(data, I64{0})
+    scan_test_require(rt_text_len(captured) == I64{3} && rt_text_decode(rt_text_data(captured)) == I64{8364})
+    jet_rt_string_drop(captured)
+    rt_text_store(data, I64{226})
+    rt_text_store(slots, I64{777})
+    scan_test_require(jet_rt_text_pattern_match(data, I64{2}, I64{8}, rows, I64{1}) == I64{0})
+    scan_test_require(rt_text_word(slots) == I64{777})
+    // Bool only writes its initialized byte, not adjacent tuple payload bytes.
+    rt_text_store(data, I64{1702195796})
+    scan_test_row(rows, I64{4}, I64{0}, I64{0}, slots, I64{3})
+    rt_text_store(slots, I64{-1})
+    scan_test_require(jet_rt_text_pattern_match(data, I64{4}, I64{1}, rows, I64{1}) == I64{1})
+    scan_test_require(rt_text_byte(slots) == I64{1} && rt_text_byte(slots + I64{1}) == I64{255})
+    rt_text_store(data, I64{116})
+    scan_test_require(jet_rt_text_pattern_match(data, I64{1}, I64{1}, rows, I64{1}) == I64{0})
+    // Literal-only whole matches reject trailing input; takes consume prefixes.
+    rt_text_store(data, I64{25185})
+    rt_text_store(literal, I64{97})
+    scan_test_row(rows, I64{0}, literal, I64{1}, I64{0}, I64{0})
+    rt_text_store(slots + I64{16}, I64{0})
+    scan_test_require(jet_rt_text_pattern_match(data, I64{2}, I64{1}, rows, I64{1}) == I64{0})
+    scan_test_require(scan_take(slots + I64{16}, data, I64{2}, I64{1}, rows, I64{1}, slots + I64{24}, false) == I64{1})
+    scan_test_require(rt_text_word(slots + I64{16}) == I64{1})
+    rt_text_store(literal, I64{122})
+    scan_test_require(scan_take(slots + I64{16}, data, I64{2}, I64{1}, rows, I64{1}, slots + I64{24}, false) == I64{0})
+    scan_test_require(rt_text_word(slots + I64{16}) == I64{1})
+    error2 :: rt_text_word(slots + I64{24})
+    expected2 :: scan_miss(I64{1}, false)
+    scan_test_require(jet_rt_string_eq(error2, expected2))
+    jet_rt_string_drop(error2)
+    jet_rt_string_drop(expected2)
+    jet_rt_free(literal, I64{8}, I64{8})
+    jet_rt_free(data, I64{64}, I64{8})
+    jet_rt_free(rows, I64{192}, I64{8})
+    jet_rt_free(slots, I64{40}, I64{8})
+}
+
+fn scan_stream_tests() {
+    input :: jet_rt_alloc(I64{64}, I64{8})
+    slots :: jet_rt_alloc(I64{32}, I64{8})
+    rows :: jet_rt_alloc(I64{64}, I64{8})
+    scan_test_f32(input, slots, I64{1065353216}) // 1.0
+    scan_test_f32(input, slots, I64{2147483648}) // -0.0
+    scan_test_f32(input, slots, I64{1}) // minimum subnormal
+    scan_test_f32(input, slots, I64{2139095040}) // +inf
+    scan_test_f32(input, slots, I64{2143363909}) // quiet NaN + payload
+    scan_test_f32(input, slots, I64{2139169605}) // signaling NaN + payload
+    stride := I64{1}
+    loop stride <= (I64{8}) {
+        at := I64{0}
+        loop at < (I64{8}) {
+            if (stride == I64{1}) { rt_text_put(input + at, I64{255}) } else { rt_text_store(input + at * stride, I64{255}) }
+            at += I64{1}
+        }
+        reader :: jet_reader_over(input, I64{8}, stride)
+        // Borrowed source copies; caller mutation cannot change the receiver.
+        rt_text_put(input, I64{0})
+        scan_test_require(jet_reader_read_i8(reader, slots, slots + I64{8}) == I64{1} && rt_text_word(slots) == I64{-1})
+        scan_test_require(jet_reader_seek(reader, I64{0}, slots + I64{8}) == I64{1})
+        scan_test_require(jet_reader_read_u64_be(reader, slots, slots + I64{8}) == I64{1} && rt_text_word(slots) == I64{-1})
+        scan_test_require(jet_reader_at_end(reader))
+        scan_test_require(jet_reader_seek(reader, I64{0}, slots + I64{8}) == I64{1})
+        rt_text_put(rt_text_data(reader), I64{128})
+        at = I64{1}
+        loop at < (I64{8}) {
+            rt_text_put(rt_text_data(reader) + at, I64{0})
+            at += I64{1}
+        }
+        scan_test_require(jet_reader_read_i64_be(reader, slots, slots + I64{8}) == I64{1})
+        scan_test_require(rt_text_word(slots) == I64{-9223372036854775808})
+        scan_test_require(jet_reader_seek(reader, I64{0}, slots + I64{8}) == I64{1})
+        clone :: jet_rt_handle_clone_jet_reader(reader)
+        scan_test_row(rows, I64{17}, I64{8}, I64{0}, slots, I64{0})
+        rt_text_store(rows + I64{24}, I64{1})
+        scan_test_require(jet_rt_reader_take_pattern(reader, rows, I64{1}, slots + I64{8}) == I64{1})
+        scan_test_require(rt_text_byte(slots) == I64{128} && jet_reader_remaining(reader) == I64{7})
+        scan_test_require(jet_reader_remaining(clone) == I64{8})
+        scan_test_require(jet_reader_skip(reader, I64{8}, slots + I64{8}) == I64{0})
+        jet_rt_string_drop(rt_text_word(slots + I64{8}))
+        scan_test_require(jet_reader_remaining(reader) == I64{7})
+        scan_test_require(jet_reader_take(clone, I64{8}, stride, slots, slots + I64{16}, slots + I64{8}) == I64{1})
+        output :: rt_text_word(slots)
+        scan_test_require(rt_text_word(slots + I64{16}) == I64{8} && scan_byte(output, stride, I64{0}) == I64{128})
+        scan_test_require(scan_byte(output, stride, I64{7}) == I64{0})
+        jet_rt_free(output, I64{8} * stride, I64{8})
+        scan_test_require(jet_reader_take(clone, I64{0}, stride, slots, slots + I64{16}, slots + I64{8}) == I64{1})
+        scan_test_require(rt_text_word(slots) == I64{0} && rt_text_word(slots + I64{16}) == I64{0})
+        jet_rt_handle_drop_jet_reader(reader)
+        jet_rt_handle_drop_jet_reader(clone)
+        stride *= I64{8}
+    }
+    empty :: jet_reader_over(I64{1}, I64{0}, I64{1})
+    scan_test_require(rt_text_data(empty) == I64{1} && rt_text_word(empty + I64{16}) == I64{0})
+    scan_test_require(jet_reader_peek(empty, slots, slots + I64{8}) == I64{0})
+    jet_rt_string_drop(rt_text_word(slots + I64{8}))
+    jet_rt_handle_drop_jet_reader(empty)
+    text :: rt_text_builder_with_capacity(I64{8})
+    rt_text_push_scalar(text, I64{8195})
+    rt_text_push_word(text, I64{25185}, I64{2}) // ab
+    cursor :: jet_cursor_over(text)
+    jet_rt_string_drop(text)
+    jet_cursor_skip_ws(cursor)
+    scan_test_require(rt_text_word(cursor + I64{24}) == I64{3})
+    cloned_cursor :: jet_rt_handle_clone_jet_cursor(cursor)
+    scan_test_row(rows, I64{1}, I64{0}, I64{0}, slots, I64{4})
+    scan_test_require(jet_rt_cursor_take_pattern(cursor, rows, I64{1}, slots + I64{8}) == I64{1})
+    capture :: rt_text_word(slots)
+    scan_test_require(rt_text_len(capture) == I64{2} && rt_text_word(cloned_cursor + I64{24}) == I64{3})
+    jet_rt_string_drop(capture)
+    jet_rt_handle_drop_jet_cursor(cursor)
+    jet_rt_handle_drop_jet_cursor(cloned_cursor)
+    jet_rt_free(rows, I64{64}, I64{8})
+    jet_rt_free(slots, I64{32}, I64{8})
+    jet_rt_free(input, I64{64}, I64{8})
+}
+
+fn scan_test_f32(input: I64, slots: I64, word: I64) {
+    order := I64{0}
+    loop order < (I64{2}) {
+        at := I64{0}
+        loop at < (I64{4}) {
+            shift :: (if (order == I64{0}) -> at else -> I64{3} - at) * I64{8}
+            rt_text_put(input + at, (word >> shift).bit_and(I64{255}))
+            at += I64{1}
+        }
+        reader :: jet_reader_over(input, I64{4}, I64{1})
+        status :: if (order == I64{0}) -> jet_reader_read_f32_le(reader, slots, slots + I64{8}) else -> jet_reader_read_f32_be(reader, slots, slots + I64{8})
+        scan_test_require(status == I64{1} && rt_text_word(slots) == word)
+        scan_test_require(jet_reader_at_end(reader))
+        jet_rt_handle_drop_jet_reader(reader)
+        order += I64{1}
+    }
+}

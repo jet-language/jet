@@ -1,0 +1,54 @@
+# HAND-PORT tests/jetpack_engine.rs:8714-8815 jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable.fixture
+env: NO_COLOR=1
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: mirror
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack hangar cache bind public {work}/mirror --yes --write --no-color
+cwd: project
+exit: 0
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+step: jetpack explain hello@mine --json --no-color
+cwd: project
+exit: 0
+json: stdout doc $.explain.provider.producer_facts["cache.reproducibility"] ^= "independent-agreeing-v1:" # original starts_with predicate
+capture: out stdout doc $.explain.entry.output_path
+file: root/private/unreproducible absent
+entries: mirror ext = "narinfo" >= 1 # original ed77c235f tests/jetpack_engine.rs:8760-8765 requires any narinfo entry for signed cache publication
+when os unix: chmod: {cap:out} 755
+when os unix: chmod: {cap:out}/bin 755
+when os unix: chmod: {cap:out}/bin/hello 755
+write: {cap:out}/bin/hello tampered.template
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+env: JETPACK_FAKE_SANDBOX=unavailable
+exit: 0
+stderr: ~ "L0205" # original contains predicate
+stderr: ~ "substituted" # original contains predicate
+stderr: ~ "1 substituted" # original contains predicate
+step: jetpack explain hello@mine --json --no-color
+cwd: project
+exit: 0
+capture: repaired_out stdout doc $.explain.entry.output_path
+file: {cap:repaired_out}/bin/hello = jet_build_publishes_then_falls_back_to_source_when_cache_is_unavailable.expected
+when os unix: chmod: {cap:repaired_out} 755
+when os unix: chmod: {cap:repaired_out}/bin 755
+when os unix: chmod: {cap:repaired_out}/bin/hello 755
+write: {cap:repaired_out}/bin/hello tampered-again.template
+remove: mirror
+write: mirror unavailable.template
+step: jetpack build --no-color
+cwd: project
+env: PATH=/usr/bin:/bin
+exit: 0
+stderr: ~ "built" # original contains predicate
+stderr: !~ "1 cached" # original negative contains predicate
+

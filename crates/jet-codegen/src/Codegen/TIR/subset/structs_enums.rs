@@ -49,8 +49,8 @@ pub(crate) fn enum_tag_is_covered(name: &str, cx: &Cx) -> bool {
         .foreign_type_identity("", name)
         .unwrap_or_else(|| name.to_string());
     let is_foreign = super::types::foreign_type_module(&canonical_name, cx).is_some();
-    cx.enum_variants.contains_key(&canonical_name)
-        && (is_foreign || cx.cloneable.contains(name) || cx.cloneable.contains(&canonical_name))
+    cx.fact_enum_variants(&canonical_name).is_some()
+        && (is_foreign || cx.fact_cloneable(name) || cx.fact_cloneable(&canonical_name))
 }
 
 /// Core enum values with a concrete `PartialEq` representation in the shared
@@ -123,7 +123,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     if name == crate::Syntax::TYPE_TASK_FAILURE {
         return true;
     }
-    if (crate::Generics::is_type_var_name(name) && !cx.enum_variants.contains_key(name))
+    if (crate::Generics::is_type_var_name(name) && !cx.fact_enum_variants(name).is_some())
         || is_json_type_name(name)
         || is_db_value_type_name(name)
         || core_enum_or_prelude(name)
@@ -147,7 +147,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
         .foreign_type_identity("", name)
         .unwrap_or_else(|| name.to_string());
     let is_foreign = super::types::foreign_type_module(&canonical_name, cx).is_some();
-    let Some(variants) = cx.enum_variants.get(&canonical_name) else {
+    let Some(variants) = cx.fact_enum_variants(&canonical_name) else {
         return false;
     };
     let carries_mutable_view = cx.type_contains_mutable_view(&Type::Named(name.to_string()));
@@ -171,7 +171,7 @@ pub(crate) fn enum_is_covered_inner(name: &str, cx: &Cx, seen: &mut HashSet<Stri
     // the codegen registry stores its canonical identity. A covered payload is
     // itself the stronger Clone fact needed by the generated enum.
     let ok =
-        payloads_covered && (is_foreign || cx.cloneable.contains(name) || carries_mutable_view);
+        payloads_covered && (is_foreign || cx.fact_cloneable(name) || carries_mutable_view);
     seen.remove(&canonical_name);
     ok
 }
@@ -217,7 +217,7 @@ pub(crate) fn enum_payload_ty_covered(ty: &Type, cx: &Cx, seen: &mut HashSet<Str
                     .all(|member| enum_payload_ty_covered(member, cx, seen))
         }
         Type::Named(n) => {
-            if cx.enum_variants.contains_key(n) {
+            if cx.fact_enum_variants(n).is_some() {
                 enum_is_covered_inner(n, cx, seen)
             } else {
                 is_covered_struct_ty(ty, cx)
@@ -282,9 +282,9 @@ pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<S
     // `P`. The `is_type_var_name` heuristic only excludes *undeclared* single-letter
     // names (true generic type vars `T`/`U`), so guard it on non-declaration.
     let is_type_var =
-        crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
+        crate::Generics::is_type_var_name(name) && !cx.fact_struct_fields(name).is_some();
     if cx.trait_names.contains(name)
-        || cx.enum_variants.contains_key(name)
+        || cx.fact_enum_variants(name).is_some()
         || super::types::foreign_type_module(name, cx).is_some()
         || net_handle_rust_type(name).is_some()
         || is_type_var
@@ -292,7 +292,7 @@ pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<S
     {
         return false;
     }
-    let Some(fields) = cx.struct_fields.get(name) else {
+    let Some(fields) = cx.fact_struct_fields(name) else {
         return false;
     };
     if !seen.insert(name.to_string()) {
@@ -302,7 +302,7 @@ pub(crate) fn struct_lit_constructible(name: &str, cx: &Cx, seen: &mut HashSet<S
     let ok = fields.iter().all(|(fname, fty)| {
         // A boxed (recursive) edge: its payload struct must itself be constructible.
         // The boxed-payload type unwraps Option/the bare Named to the struct name.
-        if cx.boxed_edges.contains(&(name.to_string(), fname.clone())) {
+        if cx.fact_box_edge(&name, &fname) {
             return boxed_field_payload_constructible(fty, cx, seen);
         }
         // A non-boxed field: the ordinary covered-field rule.
@@ -336,8 +336,7 @@ pub(crate) fn boxed_field_payload_constructible(
 /// c148: uses `cx.struct_type_params` (populated from `StructDef.type_params`) rather
 /// than `ty_mentions_type_var`, so multi-char type params (`Kind`, `Elem`) are recognized.
 pub(crate) fn struct_is_generic(name: &str, cx: &Cx) -> bool {
-    cx.struct_type_params
-        .get(name)
+    cx.fact_struct_type_params(name)
         .map(|params| !params.is_empty())
         .unwrap_or(false)
 }
@@ -349,15 +348,15 @@ pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>)
     // A declared struct is a concrete type, never a type var (see
     // `struct_lit_constructible`): a single-uppercase-letter struct name (`P`) is real.
     let is_type_var =
-        crate::Generics::is_type_var_name(name) && !cx.struct_fields.contains_key(name);
+        crate::Generics::is_type_var_name(name) && !cx.fact_struct_fields(name).is_some();
     if cx.trait_names.contains(name)
-        || cx.enum_variants.contains_key(name)
+        || cx.fact_enum_variants(name).is_some()
         || net_handle_rust_type(name).is_some()
         || is_type_var
     {
         return false;
     }
-    let Some(fields) = cx.struct_fields.get(name) else {
+    let Some(fields) = cx.fact_struct_fields(name) else {
         return false;
     };
     if !seen.insert(name.to_string()) {
@@ -366,11 +365,11 @@ pub(crate) fn struct_is_covered(name: &str, cx: &Cx, seen: &mut HashSet<String>)
         // (`TExprKind::Field { boxed: true }`); construction wraps `Box::new(…)`.
         return true;
     }
-    let declared_params = cx.struct_type_params.get(name);
+    let declared_params = cx.fact_struct_type_params(name);
     let ok = fields.iter().all(|(fname, fty)| {
         // A boxed (recursive) edge: its payload struct must itself be covered. The read
         // derefs the `Box` (total fact), so the edge is now in-subset.
-        if cx.boxed_edges.contains(&(name.to_string(), fname.clone())) {
+        if cx.fact_box_edge(&name, &fname) {
             return boxed_field_payload_covered(fty, cx, seen);
         }
         if matches!(fty, Type::Named(param)

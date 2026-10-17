@@ -1,8 +1,8 @@
 use core.text as diagnostic_unicode
 
-pub enum DiagnosticRegistryStatus { Active Retired Reserved }
+enum DiagnosticRegistryStatus { Active Retired Reserved }
 
-pub enum DiagnosticRegistryFix {
+enum DiagnosticRegistryFix {
     SourceEdit
     SuggestedSourceEdit
     CryptoMisuse
@@ -20,21 +20,30 @@ pub enum DiagnosticRegistryFix {
 // and canonical construction rules. Human wording at a raise site remains
 // authored input, while moment, severity, row edits, grades, and no-fix facts
 // come from the generated row.
-pub struct DiagnosticRegistryRow {
-    pub code: String
-    pub lint_name: String?
-    pub stage: String
-    pub severity: Int
-    pub moment: DiagnosticMoment
-    pub status: DiagnosticRegistryStatus
-    pub meaning: String
-    pub what: String
-    pub why: String
-    pub fix: String
-    pub detail: Bool
-    pub structured_fix: DiagnosticRegistryFix?
-    pub fix_safety: DiagnosticFixSafety?
-    pub no_fix_reason: DiagnosticNoFixReason?
+struct DiagnosticRegistryRow {
+    code: String
+    lint_name: String?
+    stage: String
+    severity: Int
+    moment: DiagnosticMoment
+    status: DiagnosticRegistryStatus
+    meaning: String
+    what: String
+    why: String
+    fix: String
+    detail: Bool
+    structured_fix: DiagnosticRegistryFix?
+    fix_safety: DiagnosticFixSafety?
+    no_fix_reason: DiagnosticNoFixReason?
+}
+
+impl DiagnosticRegistryRow {
+    fn has_stage(self, stage: String) -> Bool Never! {
+        loop component in self.stage.split("/") {
+            if component == stage -> return true
+        }
+        false
+    }
 }
 
 fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
@@ -42,20 +51,14 @@ fn diagnostic_byte_at(source: [U8], index: Int) -> Int Never! {
     Int.from_u8(source[index])
 }
 
-fn diagnostic_is_continuation(value: Int) -> Bool Never! {
-    value >= 128 && value <= 191
-}
-
 fn diagnostic_utf8_width(source: [U8], index: Int) -> Int Never! {
-    first :: diagnostic_byte_at(source, index)
-    if {
-        first < 0 -> 0
-        first < 128 -> 1
-        first >= 194 && first <= 223 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) -> 2
-        first >= 224 && first <= 239 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) -> 3
-        first >= 240 && first <= 244 && diagnostic_is_continuation(diagnostic_byte_at(source, index + 1)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 2)) && diagnostic_is_continuation(diagnostic_byte_at(source, index + 3)) -> 4
-        else -> 1
-    }
+    width := foundation_utf8_lead_width(diagnostic_byte_at(source, index))
+    if width <= 1 -> return width
+    width = foundation_utf8_width(width, diagnostic_byte_at(source, index + 1))
+    if width <= 2 -> return width
+    width = foundation_utf8_width(width, diagnostic_byte_at(source, index + 2))
+    if width <= 3 -> return width
+    foundation_utf8_width(width, diagnostic_byte_at(source, index + 3))
 }
 
 fn diagnostic_scalar_at(source: [U8], index: Int) -> String Never! {
@@ -143,9 +146,12 @@ fn diagnostic_registry_row_in(rows: [DiagnosticRegistryRow], code: String) -> Di
     None
 }
 
-pub fn diagnostic_registry_row(code: String) -> DiagnosticRegistryRow? Never! {
+fn diagnostic_registry_row(code: String) -> DiagnosticRegistryRow? Never! {
     diagnostic_registry_row_in(DIAGNOSTIC_ROWS, code)
 }
+
+// Every registry row in source order (Registry.rs `diagnostic_rows`).
+fn diagnostic_registry_rows() -> [DiagnosticRegistryRow] Never! { DIAGNOSTIC_ROWS }
 
 fn diagnostic_registry_static_edit(row: DiagnosticRegistryRow, span: Span) -> TextEdit? {
     fix :: row.structured_fix ?? return None
@@ -182,7 +188,7 @@ fn diagnostic_registry_project_row(diagnostic: ^Diagnostic, row: DiagnosticRegis
 
 // Canonical Source-side constructor. The raise site owns the filled prose and
 // span; the generated registry row owns protocol metadata and static edits.
-pub fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
+fn diagnostic_from_registry(code: String, span: Span?, what: String, why: String, fix: String) -> Diagnostic Never! {
     row :: diagnostic_registry_row(code) ?? panic("diagnostic `{code}` has no generated Source registry row")
     diagnostic :: Diagnostic{
         moment: row.moment,
@@ -199,7 +205,7 @@ pub fn diagnostic_from_registry(code: String, span: Span?, what: String, why: St
 // Dynamic Source edits are authorized and graded by the generated row. This
 // preserves the exact replacement/span authored by the producer without
 // deriving safety from human Fix prose.
-pub fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+fn diagnostic_registry_with_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
@@ -233,7 +239,7 @@ fn diagnostic_registry_safety_auto_apply(safety: DiagnosticFixSafety) -> Bool Ne
     }
 }
 
-pub fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
+fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEdit, applicability: DiagnosticFixApplicability, safety: DiagnosticFixSafety) -> Diagnostic Never! {
     updated := diagnostic
     row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
@@ -246,7 +252,7 @@ pub fn diagnostic_registry_with_edit_grade(diagnostic: ^Diagnostic, edit: TextEd
     updated
 }
 
-pub fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
     if updated.no_fix_reason != None || row.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and a registry no-fix reason")
@@ -258,7 +264,7 @@ pub fn diagnostic_registry_with_structured_edit(diagnostic: ^Diagnostic, edit: T
     updated
 }
 
-pub fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
+fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnostic, span: Span, new_text: String) -> Diagnostic Never! {
     updated := diagnostic
     if updated.edit != None -> panic("updated `{updated.code}` already carries an edit")
     row :: diagnostic_registry_row(updated.code) ?? panic("updated `{updated.code}` has no generated Source registry row")
@@ -270,7 +276,7 @@ pub fn diagnostic_registry_with_source_derived_suggestion(diagnostic: ^Diagnosti
     updated
 }
 
-pub fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
+fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: TextEdit) -> Diagnostic Never! {
     updated := diagnostic
     if updated.no_fix_reason != None -> panic("updated `{updated.code}` cannot carry an edit and no-fix reason")
     if updated.edit == None || updated.applicability == None || updated.safety == None -> panic("updated `{updated.code}` needs a graded primary edit before an alternative")
@@ -281,7 +287,7 @@ pub fn diagnostic_registry_with_alternative_edit(diagnostic: ^Diagnostic, edit: 
     structured :: updated.structured ?? return updated
     if structured == {
         .SuggestedEdits(edits) -> {
-            alternatives := ~edits
+            alternatives := edits.copy()
             &alternatives.push(edit)
             updated.structured = Val(DiagnosticStructured.SuggestedEdits{edits: alternatives})
             updated

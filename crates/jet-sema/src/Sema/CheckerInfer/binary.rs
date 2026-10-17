@@ -9,11 +9,11 @@ use crate::Sema::{KnowledgeGate, KnowledgePlane};
 use crate::AST::{BinOp, CtValue, Dimension, Expr, StrPart, Type};
 use std::collections::HashMap;
 
-/// D-EXPSEM1=A: a written-out negative exponent, such as the `-1` in `2 ^ -1`.
+/// D-EXPSEM1=A: a written negative exponent, such as `-1` in `(2).pow(-1)`.
 /// Only a spelled numeral counts. An exponent whose sign the checker cannot
 /// see keeps the whole-number result type, and the Prelude traps if the value
 /// turns out negative at run time.
-fn is_written_negative_int(expr: &Expr) -> bool {
+pub(super) fn is_written_negative_int(expr: &Expr) -> bool {
     match expr {
         Expr::Paren(inner, _) => is_written_negative_int(inner),
         Expr::Int(value, _, _, raw) => {
@@ -490,6 +490,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(target.clone()),
             operator_rhs: None,
             checked_widen: widening && checked,
+            checked_callee: None,
         };
     }
 
@@ -546,6 +547,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(base),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -580,6 +582,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(Type::Named(destination_name.to_string())),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -639,6 +642,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(Type::Named(destination_name.to_string())),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -678,6 +682,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(Type::Named(unit_name.to_string())),
             operator_rhs: None,
             checked_widen: false,
+            checked_callee: None,
         }
     }
 
@@ -980,7 +985,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn is_exact_numeric_literal(expr: &Expr) -> bool {
+    pub(crate) fn is_exact_numeric_literal(expr: &Expr) -> bool {
         match expr {
             Expr::Int(..) | Expr::Float(..) => true,
             Expr::Paren(inner, _) | Expr::Unary(crate::AST::UnOp::Neg, inner, _) => {
@@ -1079,10 +1084,13 @@ impl<'a> Checker<'a> {
         }
 
         let mut receiver_is_left = true;
-        let mut row = self
-            .trait_reg
-            .operator_impl_for(lt, trait_name, rt)
-            .cloned();
+        let source_row = self.source_operator_row(lt, trait_name, rt);
+        let mut row = source_row.map(|(owner, row)| {
+            let mut row = row.clone();
+            row.result = self.qualify_method_type(owner, &row.result, &std::collections::HashSet::new());
+            row.rhs = self.qualify_method_type(owner, &row.rhs, &std::collections::HashSet::new());
+            row
+        }).or_else(|| self.trait_reg.operator_impl_for(lt, trait_name, rt).cloned());
         if row.is_none() {
             if let Some(candidate) = self.trait_reg.operator_impl_for(rt, trait_name, lt) {
                 if candidate.operator_marker == Some(crate::AST::OperatorMarker::Commutative) {
@@ -1096,10 +1104,15 @@ impl<'a> Checker<'a> {
         {
             let receiver_ty = if receiver_is_left { lt } else { rt };
             let argument_ty = if receiver_is_left { rt } else { lt };
+            let (_, registry, _) = self.capability_type_context(receiver_ty);
+            let key = jet_foundation::Traits::operator_method_identity(&row.left, trait_name, method, &row.rhs);
+            let result = registry.operator_signatures.get(&key)
+                .and_then(|signature| signature.return_type.clone())
+                .unwrap_or(row.result);
             (
                 receiver_ty.clone(),
                 argument_ty.clone(),
-                row.result,
+                result,
                 row.left,
                 Some(row.rhs),
             )
@@ -1118,6 +1131,16 @@ impl<'a> Checker<'a> {
             )
         };
 
+        let checked_callee = match &receiver_ty {
+            Type::Named(name) | Type::Apply { name, .. } => {
+                self.resolve_method_sig(name, method).and_then(|(owner, _)| {
+                    let (_, owner_name) = self.struct_type_name_parts(name);
+                    let declaration_name = format!("{owner_name}.{method}");
+                    self.checked_method_callee(owner, owner_name, &declaration_name)
+                })
+            }
+            _ => None,
+        };
         let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
         let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
         let (receiver, argument) = if receiver_is_left {
@@ -1143,6 +1166,7 @@ impl<'a> Checker<'a> {
             resolved_ret: Some(result_ty.clone()),
             operator_rhs,
             checked_widen: false,
+            checked_callee,
         };
         *replacement = Some(call);
         let _ = (receiver_ty, argument_ty);
@@ -1183,7 +1207,9 @@ impl<'a> Checker<'a> {
         if matches!(op, BinOp::And | BinOp::Or) {
             let lt = self.infer(lhs);
             if let Some(lt) = &lt {
-                if *lt != Type::Bool {
+                if crate::Sema::CheckerCoreLib::is_dyn_type(lt) {
+                    self.diags.push(Diagnostic::from_row("E0170", &[], Some(lhs.span())));
+                } else if *lt != Type::Bool {
                     self.diags.push(Diagnostic::error(
                         "E0110",
                         format!(
@@ -1200,7 +1226,9 @@ impl<'a> Checker<'a> {
             }
             let rt = self.infer(rhs);
             if let Some(rt) = &rt {
-                if *rt != Type::Bool {
+                if crate::Sema::CheckerCoreLib::is_dyn_type(rt) {
+                    self.diags.push(Diagnostic::from_row("E0170", &[], Some(rhs.span())));
+                } else if *rt != Type::Bool {
                     // D-S25-RETIRE1=A: comparison distribution via `||`/`&&` is gone.
                     // Each side of `||`/`&&` must be a Bool expression.
                     self.diags.push(Diagnostic::error(
@@ -1233,10 +1261,22 @@ impl<'a> Checker<'a> {
         // operand; other operators retain the canonical owning-read clone rule.
         self.borrow_ctx = self.operator_operand_needs_borrow(lhs, op);
         let saved_expected = self.expected_type.clone();
+        let dyn_float_lhs = crate::Sema::CheckerCoreLib::dyn_float_literal(lhs).then(|| lhs.clone());
         if Self::is_exact_numeric_literal(lhs)
             && (self.known_measurement_expr(rhs)
                 || (matches!(op, BinOp::Mul | BinOp::Div) && self.known_unit_expr(rhs)))
         {
+            self.expected_type = Some(Type::Float);
+        }
+        let right_dyn = self.compound_expr_type(rhs).as_ref()
+            .is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type)
+            || matches!(rhs.as_ref(), Expr::MethodCall { resolved_ret: Some(ty), .. }
+                if crate::Sema::CheckerCoreLib::is_dyn_type(ty))
+            || matches!(rhs.as_ref(), Expr::MethodCall { receiver, .. }
+                if matches!(receiver.as_ref(), Expr::Ident(name, _) if is_json_type_name(name)))
+            || matches!(rhs.as_ref(), Expr::Call(call)
+                if call.resolved_ret.as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type));
+        if right_dyn && crate::Sema::CheckerCoreLib::dyn_float_literal(lhs) {
             self.expected_type = Some(Type::Float);
         }
         let lt = self.infer(lhs);
@@ -1274,7 +1314,9 @@ impl<'a> Checker<'a> {
                 | BinOp::Gt
                 | BinOp::Ge
         ) {
-            self.expected_type = if lt.as_ref().is_some_and(Self::is_measurement_type)
+            self.expected_type = if lt.as_ref().is_some_and(crate::Sema::CheckerCoreLib::is_dyn_type) {
+                Some(json_ty())
+            } else if lt.as_ref().is_some_and(Self::is_measurement_type)
                 && Self::is_exact_numeric_literal(rhs)
             {
                 Some(Type::Float)
@@ -1292,6 +1334,85 @@ impl<'a> Checker<'a> {
         let rt = self.infer(rhs);
         self.expected_type = saved_expected;
         let (mut lt, mut rt) = (lt?, rt?);
+        if crate::Sema::CheckerCoreLib::is_dyn_type(&rt)
+            && matches!(&lt, Type::Named(name) if name == "Decimal")
+        {
+            if let Some(original) = dyn_float_lhs {
+                *lhs = original;
+                let saved = self.expected_type.replace(Type::Float);
+                let inferred = self.infer(lhs);
+                self.expected_type = saved;
+                lt = inferred?;
+            }
+        }
+        if crate::Sema::CheckerCoreLib::is_dyn_type(&lt)
+            || crate::Sema::CheckerCoreLib::is_dyn_type(&rt)
+        {
+            if matches!(op, BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div
+                | BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge)
+            {
+                self.wrap_dyn_value(lhs, &lt)?;
+                self.wrap_dyn_value(rhs, &rt)?;
+                if matches!(op, BinOp::Eq | BinOp::Ne) { return Some(Type::Bool); }
+                let comparison = matches!(op, BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge);
+                let ret = if comparison { Type::Bool } else { json_ty() };
+                *replacement = Some(crate::Sema::CheckerCoreLib::dyn_call(
+                    std::mem::replace(lhs.as_mut(), Expr::Absent(span)),
+                    if comparison { "__dyn_compare" } else { "__dyn_binary" },
+                    vec![std::mem::replace(rhs.as_mut(), Expr::Absent(span)),
+                        Expr::Str(vec![crate::AST::StrPart::Lit(op.spell().to_string())], span),
+                        self.dyn_site(span)], ret.clone(), span));
+                return Some(ret);
+            }
+        }
+        let source_instant = |ty: &Type| matches!(ty, Type::Named(name)
+            if name.ends_with("::Instant")
+                && jet_foundation::CoreModuleExports::core_source_owns_type(name));
+        let left_point = source_instant(&lt);
+        let right_point = source_instant(&rt);
+        let left_delta = lt == Type::Named(crate::Syntax::DURATION_TYPE.to_string());
+        let right_delta = rt == Type::Named(crate::Syntax::DURATION_TYPE.to_string());
+        let instant_method = match (op, left_point, right_point, left_delta, right_delta) {
+            (BinOp::Add, true, false, false, true) => Some("__add"),
+            (BinOp::Add, false, true, true, false) => Some("__delta_add"),
+            (BinOp::Sub, true, false, false, true) => Some("__subtract"),
+            (BinOp::Sub, true, true, false, false) => Some("__difference"),
+            _ => None,
+        };
+        if let Some(method) = instant_method {
+            let argument = |expr: Expr| crate::AST::CallArg {
+                convention: crate::AST::AccessConvention::Read,
+                expr, span, flags: crate::AST::CallArgFlags::default(),
+                label: None, spread: false,
+            };
+            let mut call = Expr::MethodCall {
+                receiver: Box::new(Expr::Ident("Instant".to_string(), span)),
+                method: method.to_string(), method_span: span,
+                owner_type_args: Vec::new(), type_args: Vec::new(),
+                args: vec![
+                    argument(*std::mem::replace(lhs, Box::new(Expr::Absent(span)))),
+                    argument(*std::mem::replace(rhs, Box::new(Expr::Absent(span)))),
+                ],
+                recv_type: None, resolved_ret: None,
+                operator_rhs: None, checked_widen: false,
+                checked_callee: None,
+            };
+            let result = self.infer(&mut call);
+            *replacement = Some(call);
+            return result;
+        }
+        if (op == BinOp::Add && left_point && right_point)
+            || (op == BinOp::Sub && left_delta && right_point)
+        {
+            self.diags.push(Diagnostic::error(
+                "E0127", format!("{} is not available between `{}` and `{}`",
+                    operator_label(op), lt.show(), rt.show()),
+                "Time points are positions; only point + delta, point - delta, point - point, and delta + delta are defined".to_string(),
+                "subtract two Instants for a Duration, or add a Duration to an Instant".to_string(),
+                Some(span),
+            ));
+            return None;
+        }
         // D-OPT-LIFT1=A: `x == 5` holds only when the optional `x` holds 5,
         // and `x != 5` is its opposite. The plain side lifts once, so the
         // comparison is the existing optional equality on every tier.
@@ -1442,6 +1563,7 @@ impl<'a> Checker<'a> {
             }
         }
 
+
         let joins_numeric = matches!(
             op,
             BinOp::Add
@@ -1505,6 +1627,44 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math
+        // family (lane + linalg types). Element-wise `+`/`-`/`*`/`/`, scalar-free
+        // matrix×vector, and `==`/`!=`. Runs before the builtin numeric match (a
+        // math type isn't `is_numeric`, so the builtin path would reject it).
+        {
+            // A user struct sharing a math name isn't part of the closed family;
+            // skip the math-operator path so it gets the normal operator handling.
+            let lname = match &lt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
+            let rname = match &rt {
+                Type::Named(n) if !self.registry.contains(n) => n.clone(),
+                _ => String::new(),
+            };
+            if is_math_type(&lname) || is_math_type(&rname) {
+                if let Some(result) = math_binop_result(op, &lname, &rname) {
+                    return Some(result);
+                }
+                if let Some(result) = math_scalar_binop_result(op, &lname, &rt) {
+                    return Some(result);
+                }
+                if let Some(result) = math_scalar_binop_result(op, &rname, &lt) {
+                    return Some(result);
+                }
+                // A math operand with an unsupported operator/operand pairing.
+                // The built-in family keeps fixed shapes (D-SIMD2/D-LINALG1);
+                // other pairs go through the D-OPDEF1/D-OPMIX1 hook traits.
+                self.diags.push(Diagnostic::error(
+                    "E2511",
+                    format!("{} isn't defined between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
+                    "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook".to_string(),
+                    "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair".to_string(),
+                    Some(span),
+                ));
+                return None;
+            }
+        }
         if let Some(mixed) = self.infer_mixed_operator(op, lhs, rhs, &lt, &rt, span, replacement) {
             return Some(mixed);
         }
@@ -1555,11 +1715,8 @@ impl<'a> Checker<'a> {
                     let operator_rhs = owner_traits
                         .operator_impl_for(&owner_type, trait_name, &owner_type)
                         .map(|implementation| {
-                            ret = if implementation.result == owner_type {
-                                lt.clone()
-                            } else {
-                                implementation.result.clone()
-                            };
+                            let result = &implementation.result;
+                            ret = if result == &owner_type { lt.clone() } else { result.clone() };
                             implementation.rhs.clone()
                         })
                         .or_else(|| {
@@ -1602,6 +1759,13 @@ impl<'a> Checker<'a> {
                             crate::Sema::effect_key(Some(Self::split_type_name(type_name).1), method),
                             span,
                         );
+                        let checked_callee = self
+                            .resolve_method_sig(type_name, method)
+                            .and_then(|(owner, _)| {
+                                let (_, owner_name) = self.struct_type_name_parts(type_name);
+                                let declaration_name = format!("{owner_name}.{method}");
+                                self.checked_method_callee(owner, owner_name, &declaration_name)
+                            });
                         let left = std::mem::replace(lhs, Box::new(Expr::Absent(span)));
                         let right = std::mem::replace(rhs, Box::new(Expr::Absent(span)));
                         let call = Expr::MethodCall {
@@ -1632,6 +1796,7 @@ impl<'a> Checker<'a> {
                             resolved_ret: Some(ret.clone()),
                             operator_rhs,
                             checked_widen: false,
+                            checked_callee,
                         };
                         *replacement = Some(match op {
                             BinOp::Eq | BinOp::Ne if comparable_hook => Expr::Binary(
@@ -2304,44 +2469,6 @@ impl<'a> Checker<'a> {
             return None;
         }
 
-        // D-SIMD2 / D-LINALG1: operator overloading on the closed built-in math
-        // family (lane + linalg types). Element-wise `+`/`-`/`*`/`/`, scalar-free
-        // matrix×vector, and `==`/`!=`. Runs before the builtin numeric match (a
-        // math type isn't `is_numeric`, so the builtin path would reject it).
-        {
-            // A user struct sharing a math name isn't part of the closed family;
-            // skip the math-operator path so it gets the normal operator handling.
-            let lname = match &lt {
-                Type::Named(n) if !self.registry.contains(n) => n.clone(),
-                _ => String::new(),
-            };
-            let rname = match &rt {
-                Type::Named(n) if !self.registry.contains(n) => n.clone(),
-                _ => String::new(),
-            };
-            if is_math_type(&lname) || is_math_type(&rname) {
-                if let Some(result) = math_binop_result(op, &lname, &rname) {
-                    return Some(result);
-                }
-                if let Some(result) = math_scalar_binop_result(op, &lname, &rt) {
-                    return Some(result);
-                }
-                if let Some(result) = math_scalar_binop_result(op, &rname, &lt) {
-                    return Some(result);
-                }
-                // A math operand with an unsupported operator/operand pairing.
-                // The built-in family keeps fixed shapes (D-SIMD2/D-LINALG1);
-                // other pairs go through the D-OPDEF1/D-OPMIX1 hook traits.
-                self.diags.push(Diagnostic::error(
-                    "E2511",
-                    format!("{} isn't defined between `{}` and `{}`", operator_label(op), lt.name(), rt.name()),
-                    "built-in lane and linalg operators keep fixed shapes: one lane/vector type on both sides, or a matrix and its matching vector; any other pair needs an operator hook".to_string(),
-                    "match the operand types (`T.splat(x)` lifts a scalar into every lane), call a named method like `.dot()`/`.matmul()`, or implement the operator's hook trait on your own type for this pair".to_string(),
-                    Some(span),
-                ));
-                return None;
-            }
-        }
 
         // D-TYPE2-DEFAULT1 / D-NUMTYPE1: exact decimal and rational operators.
         {

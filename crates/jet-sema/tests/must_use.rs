@@ -30,8 +30,8 @@ fn err_codes(src: &str) -> Vec<String> {
             script_body: std::mem::take(&mut prog.script_body),
             block_spans: std::mem::take(&mut prog.block_spans),
             source: src.to_string(),
+            core_identifier_demand: Lexer::core_identifier_demand(&toks),
             web_target_ceiling: prog.web_target_ceiling,
-            pub_file: prog.pub_file,
             no_prelude: prog.no_prelude,
             default_target: prog.default_target,
             html_path: prog.html_path.clone(),
@@ -176,4 +176,52 @@ fn run() {
 "#;
     let codes = err_codes(src);
     assert!(codes.is_empty(), "expected clean compile, got {:?}", codes);
+}
+
+#[test]
+fn operator_hooks_resolve_by_rhs_in_binary_and_dot_calls() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/OperatorRhsFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn duplicate_operator_pair_is_coherence_error_not_method_name_collision() {
+    let codes = err_codes(include_str!("../../../tests/ui/operator_duplicate_hook.jet"));
+    assert_eq!(codes, ["E0908"], "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn scalar_conversion_heads_do_not_contextualize_arithmetic_operands() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ScalarConversionFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn embedded_generic_methods_keep_owner_and_method_scopes() {
+    let codes = err_codes(include_str!("../../../tests/ui/embedded_generic_method_scope.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn fallible_sibling_supplies_uncontextual_err_arm_carrier() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmJoinFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn deferred_err_arm_keeps_branch_bindings_and_optional_flow() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmScopeFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn deferred_err_arm_joins_actual_moves_and_checks_scope_end_after_payload() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmFlowFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
+}
+
+#[test]
+fn user_err_function_keeps_ordinary_branch_call_semantics() {
+    let codes = err_codes(include_str!("../../../Compiler/JetSema/Tests/ErrArmShadowFixtures.jet"));
+    assert!(codes.is_empty(), "unexpected errors: {codes:?}");
 }

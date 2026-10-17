@@ -1,0 +1,23 @@
+# tests/encoding_parity.rs::comptime_rejects_file_backed_streams_at_named_boundary
+# ORACLE-LITERAL and exact original tier equality; PENDING-SAME-HEAD, runtime UNRUN.
+# Rust emitter/rustc compile infrastructure retires; native AOT build and execution retained.
+fixture: comptime_rejects_file_backed_streams_at_named_boundary.fixture
+env: NO_COLOR=1
+env: JET_STORE_DIR={work}/cache
+env: JETPACK_ROOT={work}/jetpack
+env: JETPACK_ENV=1
+step json: jet check json.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E3410"] #>= 1 # original code membership
+step jsonl: jet check jsonl.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E3410"] #>= 1 # original code membership
+step csv: jet check csv.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E3410"] #>= 1 # original code membership
+step xml: jet check xml.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E3410"] #>= 1 # original code membership
+step cbor: jet check cbor.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E3410"] #>= 1 # original code membership

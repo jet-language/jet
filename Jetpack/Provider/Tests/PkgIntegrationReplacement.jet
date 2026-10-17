@@ -1,0 +1,158 @@
+// Reviewed tests/pkg.rs replacement proof ports; package-tests seam.
+// Ported from pkg.rs:358-384; original signatures, effects, errors, golden
+// assertion bytes, example identities, and platform are retained verbatim.
+fn provider_pkg_integration_surface(provider: String, name: String, version: String) -> CompatibilitySurface Never! {
+    surface := CompatibilitySurface.new(PackageIdentity.new(provider, name, version))
+    surface.public_symbols = [PublicSymbol]{
+        PublicSymbol.new("pad_left", "fn(String, Int) -> String").with_effects([String]{"pure"}).with_errors([String]{"ValueError"}),
+        PublicSymbol.new("trim", "fn(String) -> String").with_effects([String]{"pure"})
+    }
+    surface.examples = [String]{"examples/replacement/pad.jet"}
+    surface.goldens = [GoldenFixture]{GoldenFixture.new("pad_left_basic", "  hi\n")}
+    surface.platforms = [String]{"x86_64-linux"}
+    surface
+}
+
+fn provider_pkg_integration_candidate() -> ReplacementCandidate Never! {
+    foreign :: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
+    native :: provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    native.prove_against(foreign, "x86_64-linux").candidate("MIT", [String]{"x86_64-linux"})
+}
+
+fn provider_pkg_integration_failure(report: ProofReport, kind: ProofFailureKind, name: String) -> Bool Never! {
+    loop failure in report.failures {
+        if failure.kind == kind && failure.name == name -> return true
+    }
+    false
+}
+
+fn provider_pkg_integration_active(decision: ReplacementDecision) -> ActiveReplacement Never! {
+    if decision == {
+        .Active(active) -> active
+        else -> panic("passed proof and policy should activate replacement")
+    }
+}
+
+// Ported from pkg.rs:1314-1340,312-337; the entire original record is retained.
+#Test("pkg integration replacement_candidate_visible_but_inactive") {
+    facts := MetadataFacts.from_npm("{{\"name\":\"left-pad\",\"version\":\"1.0.0\"}}")
+    &facts.replacement_candidates.push(ReplacementCandidate{foreign_identity: PackageIdentity.new("npm", "left-pad", "1.0.0"), native_identity: PackageIdentity.new("core", "core.text.pad", "1.0.0"), covered_public_symbols: [String]{}, unsupported_symbols: [String]{}, license: "MIT", platforms: [String]{"x86_64-linux"}, proof_status: ProofStatus.Missing, proof_digest: "", proof_inputs: [String]{}})
+    record :: SemanticRecord.new(
+        LockIdentity{kind: LockRecordKind.Package, key: facts.name, exact: facts.version, hash: "sha256-{facts.version}", platform: "x86_64-linux"},
+        LockRationale{owner_package: "app", reason: "app declared {facts.name}", source_ref: "catalog:{facts.name}", provider: "core", channel_input: "stable", exact_output: facts.version, policy_fingerprint: "policy-1", recipe_id: "", adapter_id: "", signature: "ed25519:sig", cache_provenance: "hangar", update_command: "jet update {facts.name}"}
+    )
+    assert_eq(facts.source_identity, "npm:left-pad@1.0.0")
+    assert_eq(record.identity.semantic_key(), "package:left-pad")
+    assert_eq(facts.replacement_candidates[0].proof_status, ProofStatus.Missing)
+    assert_eq(facts.replacement_candidates[0].native_identity.ref_string(), "core:core.text.pad@1.0.0")
+}
+
+// Ported from pkg.rs:1343-1353.
+#Test("pkg integration replacement_compat_proof_fails_on_missing_symbol") {
+    foreign :: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
+    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    kept := [PublicSymbol]{}
+    loop symbol in native.public_symbols {
+        if symbol.name != "trim" -> &kept.push(symbol)
+    }
+    native.public_symbols = kept
+    assert(provider_pkg_integration_failure(native.prove_against(foreign, "x86_64-linux"), ProofFailureKind.MissingPublicSymbol, "trim"))
+}
+
+// Ported from pkg.rs:1356-1366.
+#Test("pkg integration replacement_compat_proof_fails_on_effect_mismatch") {
+    foreign :: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
+    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    native.public_symbols[0].effects = [String]{"fs.read"}
+    assert(provider_pkg_integration_failure(native.prove_against(foreign, "x86_64-linux"), ProofFailureKind.EffectMismatch, "pad_left"))
+}
+
+// Ported from pkg.rs:1369-1379.
+#Test("pkg integration replacement_compat_proof_fails_on_error_shape_mismatch") {
+    foreign :: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
+    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    native.public_symbols[0].errors = [String]{"RangeError"}
+    assert(provider_pkg_integration_failure(native.prove_against(foreign, "x86_64-linux"), ProofFailureKind.ErrorShapeMismatch, "pad_left"))
+}
+
+// Ported from pkg.rs:1382-1392.
+#Test("pkg integration replacement_compat_proof_fails_on_golden_output_diff") {
+    foreign :: provider_pkg_integration_surface("npm", "left-pad", "1.0.0")
+    native := provider_pkg_integration_surface("core", "core.text.pad", "1.0.0")
+    native.goldens = [GoldenFixture]{GoldenFixture.new("pad_left_basic", "hi\n")}
+    assert(provider_pkg_integration_failure(native.prove_against(foreign, "x86_64-linux"), ProofFailureKind.GoldenOutputDiff, "pad_left_basic"))
+}
+
+// Ported from pkg.rs:1395-1415.
+#Test("pkg integration replacement_compat_proof_pass_enables_policy_replacement") {
+    candidate :: provider_pkg_integration_candidate()
+    policy :: ReplacementPolicy.allow(candidate.foreign_identity, candidate.native_identity, "app")
+    active :: provider_pkg_integration_active(candidate.resolve(policy, "app", "x86_64-linux"))
+    assert_eq(active.native_identity.ref_string(), "core:core.text.pad@1.0.0")
+    assert_eq(active.lock_record.identity.kind.label(), "replacement-overlay")
+}
+
+// Ported from pkg.rs:1418-1428.
+#Test("pkg integration replacement_policy_deny_blocks_replacement") {
+    decision :: provider_pkg_integration_candidate().resolve(ReplacementPolicy.deny_all(), "app", "x86_64-linux")
+    denied :: if decision == {
+        .Denied(_) -> true
+        else -> false
+    }
+    assert(denied)
+}
+
+// Ported from pkg.rs:1431-1452.
+#Test("pkg integration replacement_preserves_foreign_call_site") {
+    candidate :: provider_pkg_integration_candidate()
+    policy :: ReplacementPolicy.prefer(candidate.foreign_identity, candidate.native_identity, "app")
+    active :: provider_pkg_integration_active(candidate.resolve(policy, "app", "x86_64-linux"))
+    assert_eq(active.foreign_call_site, "npm:left-pad@1.0.0")
+    assert_eq(active.lock_record.identity.key, "npm:left-pad@1.0.0@x86_64-linux")
+    assert_eq(active.lock_record.identity.exact, "core:core.text.pad@1.0.0")
+}
+
+// Ported from pkg.rs:1455-1494.
+#Test("pkg integration replacement_lock_records_foreign_native_proof_and_policy") {
+    candidate :: provider_pkg_integration_candidate()
+    record :: candidate.lock_record("app", "x86_64-linux", "policy.replacements:npm:left-pad@1.0.0=>core:core.text.pad@1.0.0:allow")
+    assert_eq(record.future_fields.get("replacement-foreign"), Val("npm:left-pad@1.0.0"))
+    assert_eq(record.future_fields.get("replacement-native"), Val("core:core.text.pad@1.0.0"))
+    assert_eq(record.future_fields.get("replacement-proof-digest"), Val(candidate.proof_digest))
+    inputs :: record.future_fields.get("replacement-proof-inputs") ?? panic("proof inputs must exist")
+    assert(inputs.contains("platform=x86_64-linux"))
+    assert(record.rationales[0].policy_fingerprint.contains("policy.replacements"))
+}
+
+// Ported from pkg.rs:1497-1539; this fixture intentionally supplies proof data
+// exactly as the original does rather than substituting a recomputed proof.
+fn provider_pkg_integration_merge_candidate(native: String) -> ReplacementCandidate Never! {
+    ReplacementCandidate{foreign_identity: PackageIdentity.new("npm", "left-pad", "1.0.0"), native_identity: PackageIdentity.new("core", native, "1.0.0"), covered_public_symbols: [String]{"pad_left"}, unsupported_symbols: [String]{}, license: "MIT", platforms: [String]{"x86_64-linux"}, proof_status: ProofStatus.Passed, proof_digest: "proof-{native}", proof_inputs: [String]{"platform=x86_64-linux;native={native}"}}
+}
+
+#Test("pkg integration replacement_lock_merge_conflict_names_owners") {
+    left :: SemanticLockFile.with_records([SemanticRecord]{provider_pkg_integration_merge_candidate("core.text.pad").lock_record("app", "x86_64-linux", "policy-left")})
+    right :: SemanticLockFile.with_records([SemanticRecord]{provider_pkg_integration_merge_candidate("core.string.pad").lock_record("app", "x86_64-linux", "policy-right")})
+    out :: trust_merge_semantic_locks(SemanticLockFile.empty(), left, right)
+    assert_eq(out.conflicts.len(), 1)
+    assert_eq(out.conflicts[0].owner_package, "app")
+    assert_eq(out.conflicts[0].semantic_key, "replacement-overlay:npm:left-pad@1.0.0@x86_64-linux")
+}
+
+// Ported from pkg.rs:1542-1553.
+#Test("pkg integration replacement_lock_keys_are_platform_specific") {
+    candidate :: provider_pkg_integration_candidate()
+    linux :: candidate.lock_record("app", "x86_64-linux", "policy")
+    macos :: candidate.lock_record("app", "aarch64-apple-darwin", "policy")
+    assert(linux.identity.semantic_key() != macos.identity.semantic_key())
+}
+
+// Ported from pkg.rs:1556-1564.
+#Test("pkg integration replacement_importer_reports_replacement_progress") {
+    candidate :: provider_pkg_integration_candidate()
+    proof :: ImporterProgressFact.from_candidate(candidate)
+    active :: ImporterProgressFact.active(candidate)
+    assert_eq(proof.status, ImporterReplacementStatus.ProofPassed)
+    assert_eq(active.status, ImporterReplacementStatus.ReplacementActive)
+    assert_eq(active.proof_digest, candidate.proof_digest)
+}

@@ -1,7 +1,7 @@
 package {
     name: "serde_encoding_jsonl_stream"
     version: "0.1.0"
-    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc] } }
+    authority: { holds: { allow: [Exec, FS, FS.Read, IO, Mem.Alloc, Time.Wait] } }
 }
 
 // D-ENCSTREAM-SURFACE1=A: bounded JSONL reader/writer lifecycle.
@@ -11,10 +11,10 @@ use core.files as files
 
 fn write_catalog(path: Path) -> Bool (EncodingError | IOError)! {
     output :: files.create(path) ?? return Err(err)
-    writer :: jsonl.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
-    &writer.write(DataTree.Object(["ok": DataTree.Bool(true)])) ?? return Err(err)
+    writer := jsonl.writer(^output, encoding.EncodingLimits.safe()) ?? return Err(err)
+    &writer.write(Dyn.Object(["ok": Dyn.Bool(true)])) ?? return Err(err)
     &writer.flush() ?? return Err(err)
-    writer.finish() ?? return Err(err)
+    &writer.finish() ?? return Err(err)
     return Ok(true)
 }
 
@@ -25,7 +25,11 @@ fn run() (EncodingError | IOError)! {
     path :: Path.from(scratch.path).join("catalog.jsonl")
     write_catalog(path) ?? return
     input :: files.open(path) ?? return
-    reader :: jsonl.reader(^input) ?? return
-    loop record in reader -> print("record")
+    reader := jsonl.reader(^input) ?? return
+    loop {
+        item :: &reader.next() ?? return Err(err)
+        _value :: item ?? break
+        print("record")
+    }
     print("eof")
 }

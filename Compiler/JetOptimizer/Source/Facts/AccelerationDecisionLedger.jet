@@ -273,9 +273,5 @@ fn mir_pass_sort_decision_rows_for_program(program: &MIRProgram) Never! {
 
 // Rust: none (Jet-only pass)
 fn mir_pass_sort_decision_rows(rows: &[MIRDecisionRow]) Never! {
-    ids := [U64]{}
-    loop index in 0..<rows.len() -> &ids.push(rows[index].id)
-    sorted := [MIRDecisionRow]{}
-    loop position in mir_pass_id_order(ids) -> &sorted.push(rows[position])
-    loop index in 0..<sorted.len() -> rows[index] = sorted[index]
+    &rows.sort_by((left: MIRDecisionRow, right: MIRDecisionRow) -> left.id <=> right.id)
 }

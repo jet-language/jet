@@ -1,0 +1,13 @@
+# Port of tests/resource_close.rs:111-121. PENDING-SAME-HEAD. Source bytes verbatim; formatted scheduled templates use original Rust format expansion.
+# ORACLE-LITERAL original byte/string stdout assertions.
+# Only generated-Rust structure/text predicates retire; every observable predicate below stays.
+fixture: fixtures/defer_rejects_general_actions_blocks_and_values_without_close_capability
+step: jet check source0.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0003"] #>= 1 # original contains code
+step: jet check source1.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0003"] #>= 1 # original contains code
+step: jet check source2.jet --json
+exit: nonzero
+json: stdout doc $.reports[?code="E0905"] #>= 1 # original contains code

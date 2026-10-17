@@ -1,0 +1,81 @@
+// Source admission only: no compiler, Cargo, provider or network invocation.
+// End-to-end run/check predicates remain in tests/cases/inline_deps unchanged.
+use jet_driver.[jet_driver_build_source_catalog, jet_driver_package_target_facts, jet_driver_receipt_closure]
+
+fn script_deps_test_root(path: String, source: String) -> JetDriverAuthorizedSourceRoot {
+    stat :: cli_files.stat(path) ?? panic("script root identity")
+    JetDriverAuthorizedSourceRoot{canonical_path: path, identity: jet_cli_identity_key("directory", stat), allow_hardlinks: false, files: [JetDriverAuthorizedSourceFile]{JetDriverAuthorizedSourceFile{path: "{path}/stats.jet", relative_path: "stats.jet", identity: "entry", source: source}}, foreign_cache_files: [JetDriverAuthorizedSourceFile]{}}
+}
+
+fn run() {
+    scratch :: cli_files.temp_dir("jet-native-script-deps") ?? panic("script scratch")
+    path :: scratch.path
+    package :: "{path}/.jet/inline-deps/textkit/1.4.2"
+    cli_files.create_dir_all(package) ?? panic("offline source tree")
+    cli_files.write("{package}/textkit.jet", "fn hi() -> String {{ \"hi\" }}\n") ?? panic("dependency source")
+    source :: "use textkit#1.4\nfn run() {{ print(textkit.hi()) }}\n"
+    roots := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, source)}
+    admitted := [JetDriverScriptDependency]{}
+    assert(jet_cli_script_dependency_roots(&roots, "{path}/stats.jet", &admitted, false) == None)
+    assert(roots.len() == 2 && admitted.len() == 1)
+    assert(admitted[0].name == "textkit" && admitted[0].selector == "1.4" && admitted[0].resolved_version == "1.4.2")
+    assert(admitted[0].content_hash.starts_with("sha256-") && admitted[0].content_hash.len() == 71)
+    assert(roots[1].files.len() == 1 && roots[1].files[0].relative_path == "textkit.jet")
+    snapshot :: JetDriverAuthorizedSourceSnapshot{roots: roots, entry_root_identity: roots[0].identity, entry_path: "{path}/stats.jet", script_dependencies: admitted}
+    request := jet_cli_driver_request(snapshot, [JetDriverCoreSource]{}, None, .Program)
+    catalog :: jet_driver_build_source_catalog(request)
+    assert(catalog.packages[0].dependencies.len() == 1)
+    assert(catalog.packages[0].dependencies[0].target_root_index == 1)
+    selected_version :: catalog.packages[0].dependencies[0].script_version ?? panic("selected script dependency version")
+    assert(selected_version == "1.4.2")
+    assert(catalog.packages[1].manifest_path == None && catalog.packages[1].version == None)
+    lint_found := false
+    loop diagnostic in catalog.diagnostics {
+        assert(!diagnostic.code.starts_with("E"))
+        if diagnostic.code == "L0203" {
+            lint_found = true
+            span :: diagnostic.span ?? panic("the L0203 selector span must be retained")
+            assert(span == admitted[0].span)
+        }
+    }
+    assert(lint_found)
+    before :: jet_driver_receipt_closure("check", request, [String]{})
+    facts :: jet_driver_package_target_facts(request, catalog.packages[0])
+    request.authorized_sources.script_dependencies[0].content_hash = "sha256-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    assert(jet_driver_receipt_closure("check", request, [String]{}) != before)
+    assert(jet_driver_package_target_facts(request, catalog.packages[0]) != facts)
+
+    unmatched := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, "use textkit#9.9.9\nfn run() {{}}\n")}
+    rejected := [JetDriverScriptDependency]{}
+    refusal :: jet_cli_script_dependency_roots(&unmatched, "{path}/stats.jet", &rejected, false) ?? panic("local package with no matching version must fail")
+    assert(refusal.exit_code != 0 && refusal.stderr.contains("E1253") && refusal.stderr.contains("no version satisfies"))
+    assert(unmatched.len() == 1 && rejected.len() == 0)
+
+    cli_files.symlink(".", "{package}/loop") ?? panic("hostile dependency link")
+    hostile := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, source)}
+    refusal_link :: jet_cli_script_dependency_roots(&hostile, "{path}/stats.jet", &rejected, false) ?? panic("hostile source must fail")
+    assert(refusal_link.stderr.contains("E1253") && refusal_link.stderr.contains("symlink"))
+    cli_files.remove("{package}/loop") ?? panic("remove hostile link")
+    cli_files.symlink("{path}/.jet/inline-deps", "{path}/alias") ?? panic("hostile ancestor")
+    assert(jet_cli_script_dependency_authority("{path}/alias", "textkit") == .Err(_))
+    assert(jet_cli_script_dependency_authority("{path}/alias/textkit", "1.4.2") == .Err(_))
+
+    manifest := script_deps_test_root(path, source)
+    &manifest.files.push(JetDriverAuthorizedSourceFile{path: "{path}/package.jet", relative_path: "package.jet", identity: "manifest", source: "name: \"project\"\n"})
+    declared := [JetDriverAuthorizedSourceRoot]{manifest}
+    assert(jet_cli_script_dependency_roots(&declared, "{path}/stats.jet", &rejected, false) == None)
+    assert(declared.len() == 1 && rejected.len() == 0)
+
+    // A valid carrier is a package, not a manifestless script; malformed
+    // carriers must reach the package loader without an inline-dep refusal.
+    inline_sources :: [String]{
+        "package {{\nname: \"script-package\"\n}}\nuse textkit#9.9.9\nfn run() {{}}\n",
+        "package {{\nname: 17\n}}\nuse textkit#9.9.9\nfn run() {{}}\n",
+    }
+    loop inline_source in inline_sources {
+        inline_roots := [JetDriverAuthorizedSourceRoot]{script_deps_test_root(path, inline_source)}
+        inline_admitted := [JetDriverScriptDependency]{}
+        assert(jet_cli_script_dependency_roots(&inline_roots, "{path}/stats.jet", &inline_admitted, false) == None)
+        assert(inline_roots.len() == 1 && inline_admitted.len() == 0)
+    }
+}

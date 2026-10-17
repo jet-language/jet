@@ -1,0 +1,172 @@
+use core.process as process
+use core.sys as sys
+use core.files as files
+
+fn kit_steps_tool(alternatives: String) -> String? {
+    loop name in alternatives.split("|") {
+        if name == "" -> return None
+        found :: process.which(name)
+        if found != None -> return found
+    }
+    None
+}
+
+fn kit_steps_dll_suffix() -> String {
+    if sys.family() == "windows" -> return ".dll"
+    name :: sys.name()
+    if name == "macos" || name == "darwin" -> return ".dylib"
+    ".so"
+}
+
+// Exact Layout.rs:709-719 host_triple table. Unknown pairs retain its fallback.
+fn kit_steps_host_triple() -> String {
+    arch :: kit_steps_host_arch()
+    os :: kit_steps_host_name()
+    if arch == "x86_64" || arch == "aarch64" {
+        if os == "linux" -> return "{arch}-unknown-linux-gnu"
+        if os == "windows" -> return "{arch}-pc-windows-msvc"
+        if os == "macos" -> return "{arch}-apple-darwin"
+    }
+    if os == "wasi" -> return "{arch}-wasi"
+    "{arch}-unknown-{os}"
+}
+
+fn kit_steps_runtime_expand(text: String, context: KitStepCtx, state: KitStepState) -> String? {
+    expanded := kit_steps_expand(text, context.env, context.work, context.scratch, state.built)
+    loop binding in state.bindings {
+        if binding.value == {
+            .Text(value) -> expanded = expanded.replace("{{{binding.name}}}", value)
+            else -> {}
+        }
+    }
+    if expanded.contains("{{sys:dll-suffix}}") -> expanded = expanded.replace("{{sys:dll-suffix}}", kit_steps_dll_suffix())
+    loop pending in state.children {
+        expanded = expanded.replace("{{pid:{pending.label}}}", "{pending.child.id()}")
+    }
+    if expanded.contains("{{pid:") -> return None
+    loop reserved in state.free_ports -> expanded = expanded.replace("{{free-port:{reserved.name}}}", "{reserved.port}")
+    if expanded.contains("{{free-port:") -> return None
+    loop capture in state.captures {
+        token :: "{{cap:{capture.name}}}"
+        if capture.value == {
+            .Text(value) -> expanded = expanded.replace(token, value)
+            else -> { if expanded.contains(token) -> return None }
+        }
+    }
+    if expanded.contains("{{cap:") -> return None
+    rest := expanded
+    result := ""
+    loop {
+        start :: kit_steps_byte_index(rest, "{{tool:") ?? break
+        after :: start + 6
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
+        tool :: kit_steps_tool(kit_steps_byte_slice(rest, after, after + end)) ?? return None
+        result = "{result}{kit_steps_byte_slice(rest, 0, start)}{tool}"
+        rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
+    }
+    Val("{result}{rest}")
+}
+
+fn kit_steps_resolve_step(original: KitStep, context: KitStepCtx, state: KitStepState) -> KitStep? {
+    step := original
+    conditional_env := false
+    loop variable in original.environment {
+        if variable.conditions.len() > 0 -> conditional_env = true
+    }
+    if conditional_env {
+        selected := [KitEnvVar]{}
+        loop variable in original.environment {
+            if kit_steps_conditions(variable.conditions, context, state) -> &selected.push(variable)
+        }
+        // Select before expanding values: unselected branches may name tools
+        // or captures unavailable on this host.
+        step.environment = selected
+    }
+    step.replacements = context.plan.replacements
+    loop rule in original.replacements -> &step.replacements.push(rule)
+    argv := [String]{}
+    loop word in original.argv -> &argv.push(kit_steps_runtime_expand(word, context, state) ?? return None)
+    step.argv = argv
+    step.cwd = kit_steps_runtime_expand(original.cwd, context, state) ?? return None
+    step.stdin = kit_steps_runtime_expand(original.stdin, context, state) ?? return None
+    step.stdout_target = kit_steps_runtime_expand(original.stdout_target, context, state) ?? return None
+    step.stderr_target = kit_steps_runtime_expand(original.stderr_target, context, state) ?? return None
+    loop i in 0..<step.environment.len() {
+        if step.environment[i].value == {
+            .Val(value) -> step.environment[i].value = Val(kit_steps_runtime_expand(value, context, state) ?? return None)
+            .None -> {}
+        }
+    }
+    loop i in 0..<step.assertions.len() {
+        // NonZ assertion conditions are selected after the command. Leave its
+        // PID untouched only on unsupported hosts so the checker can refuse
+        // after condition selection, without changing Linux token precedence.
+        if !(step.assertions[i].stream == "process" && kit_steps_process_nonzombie_mode(step.assertions[i].mode) && sys.name() != "linux") -> step.assertions[i].path = kit_steps_runtime_expand(step.assertions[i].path, context, state) ?? return None
+        step.assertions[i].json_path = kit_steps_runtime_expand(step.assertions[i].json_path, context, state) ?? return None
+        // Keep predicate values unexpanded: the checker chooses raw or normalized
+        // matching based on the presence of path tokens in the original value.
+    }
+    if step.action == "wait" || step.action == "close" {
+        loop pending in state.children {
+            if pending.label == step.label {
+                if step.limit_time == 0 -> step.limit_time = pending.step.limit_time
+                if step.limit_memory == 0 -> step.limit_memory = pending.step.limit_memory
+                step.isolate = pending.step.isolate
+                step.isolate_network = pending.step.isolate_network
+                step.env_clear = pending.step.env_clear
+                step.stdout_target = pending.step.stdout_target
+                step.stderr_target = pending.step.stderr_target
+                if original.replacements.len() == 0 -> step.replacements = pending.step.replacements
+                rules := pending.step.json_normalize
+                loop rule in step.json_normalize -> &rules.push(rule)
+                step.json_normalize = rules
+            }
+        }
+    }
+    Val(step)
+}
+
+fn kit_steps_replacements(original: [KitReplacement], context: KitStepCtx, state: KitStepState) -> [KitReplacement]? {
+    rules := [KitReplacement]{}
+    loop rule in original {
+        from :: if rule.literal_from -> rule.from else -> kit_steps_runtime_expand(rule.from, context, state) ?? return None
+        if from == "" -> return None
+        &rules.push(KitReplacement{from: from, to: rule.to, literal_from: rule.literal_from})
+    }
+    Val(rules)
+}
+
+fn kit_steps_replace(text: String, rules: [KitReplacement], context: KitStepCtx, state: KitStepState, normalized: Bool, source_name: String) -> String {
+    result := text
+    loop rule in rules {
+        from := rule.from
+        to :: rule.to
+        if normalized && !rule.literal_from -> from = kit_steps_normalize(from, context.env, context.work, context.scratch, context.plan.normalize, state.built, source_name)
+        result = result.replace(from, to)
+    }
+    result
+}
+
+fn kit_steps_free_port_names(text: String) -> [String]? {
+    names := [String]{}
+    rest := text
+    loop {
+        start :: kit_steps_byte_index(rest, "{{free-port:") ?? break
+        after :: start + 11
+        end :: kit_steps_byte_index(kit_steps_byte_slice(rest, after, rest.count_bytes()), "}}") ?? return None
+        name :: kit_steps_byte_slice(rest, after, after + end)
+        if name == "" || name.contains(" ") || name.contains("{{") || name.contains(":") -> return None
+        &names.push(name)
+        rest = kit_steps_byte_slice(rest, after + end + 1, rest.count_bytes())
+    }
+    Val(names)
+}
+
+fn kit_steps_free_port(context: KitStepCtx) -> Int Err! {
+    probe :: files.join(context.env.root, "Tools/testkit/probes/free_port.jet")
+    result :: kit_exec_invoke(context.env, [context.env.jet, "run", probe], context.work, context.scratch, "") ?? return Err("free-port probe: {err}")
+    if result.code != 0 || kit_exec_process_failure(result) != None -> return Err("free-port probe failed: {result.error} {result.stderr}")
+    port :: Int.parse(result.stdout.trim().copy()) ?? return Err("free-port probe did not print a port")
+    if port < 1 || port > 65535 -> return Err("free-port probe returned an invalid port")
+    Ok(port)
+}

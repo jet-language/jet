@@ -1,0 +1,445 @@
+// Seed parity: Observe.rs:1049-1052 tests active==0 && allocated==retired.
+// The only counter writes are run_iocp (Scheduler.rs:2653 Windows-only cfg,
+// :2732-2889). Linux never changes them, including during blocked pipe reads.
+// Do not instrument Linux host operations: these facts describe IOCP owners,
+// not all host I/O. Preserve the predicate without a store or allocation.
+#Export(c) fn jet_rt_observe_io_quiescent() -> Bool {
+    active :: I64{0}
+    allocated :: I64{0}
+    retired :: I64{0}
+    active == I64{0} && allocated == retired
+}
+
+// Reviewed L7b C carriers. All offsets are defined here, not Rust struct
+// layout. IOError tags are the CoreEnumPayloadRows declaration-order ordinals.
+// IOError: [kind, operation, resource-text?, has-os-code, os-code, cause-text?,
+// limit]. Text children use the one E4 carrier and are independently owned.
+#Export(c) fn jet_rt_handle_drop_io_error(value: I64) {
+    if (value == I64{0}) {
+        return
+    }
+    #Unsafe("value transfers one 56-byte error header and its nullable owned E4 text children") {
+        resource :: os_load_i64(wrapping(value + I64{16}))
+        cause :: os_load_i64(wrapping(value + I64{40}))
+        if (resource != I64{0}) { jet_rt_string_drop(resource) }
+        if (cause != I64{0}) { jet_rt_string_drop(cause) }
+    }
+    jet_rt_free(value, I64{56}, I64{8})
+}
+
+#Export(c) fn jet_rt_handle_clone_io_error(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("value borrows the complete error header; result exclusively owns 56 fresh bytes") {
+        offset := I64{0}
+        loop offset < (I64{56}) {
+            word := os_load_i64(wrapping(value + offset))
+            if (offset == I64{16} || offset == I64{40}) && word != (I64{0}) {
+                word = jet_rt_string_clone(word)
+            }
+            os_store_i64(wrapping(result + offset), word)
+            offset = wrapping(offset + I64{8})
+        }
+    }
+    result
+}
+
+// Match jet_stdio_error -> IOError::other: cause contains the OS description,
+// but os_code itself is absent. Resources and causes are owned only on error.
+fn host_stdio_result(failure: I64, operation: I64, stderr: Bool, error: I64) -> I64 {
+    if (failure == I64{0}) { return I64{1} }
+    resource :: if {
+        stderr -> host_stderr_name()
+        else -> host_stdout_name()
+    }
+    host_io_other_take(operation, resource, host_stdio_cause(failure), error)
+}
+
+// The owned OS description of a nonzero stdio failure (0, -errno or
+// HOST_WRITE_ZERO): io::Error's Display, as IOError::other's cause carries it.
+fn host_stdio_cause(failure: I64) -> I64 {
+    if (failure == HOST_WRITE_ZERO) -> return host_write_zero_text()
+    host_errno_cause(wrapping(I64{0} - failure))
+}
+
+// Both stdio and buffered process transport take these two owned children.
+// Keep the canonical IOError carrier in one place, not in each OS leaf.
+fn host_io_other_take(operation: I64, resource: I64, cause: I64, error: I64) -> I64 {
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("value exclusively owns a new initialized IOError with two owned text children; error lends the caller's pointer slot") {
+        os_store_i64(value, HOST_IO_KIND_OTHER)
+        os_store_i64(wrapping(value + I64{8}), operation)
+        os_store_i64(wrapping(value + I64{16}), resource)
+        os_store_i64(wrapping(value + I64{24}), I64{0})
+        os_store_i64(wrapping(value + I64{32}), I64{0})
+        os_store_i64(wrapping(value + I64{40}), cause)
+        os_store_i64(wrapping(value + I64{48}), I64{0})
+        os_store_i64(error, value)
+    }
+    I64{0}
+}
+
+// IOContext is the contiguous five-word payload at IOError+8, independently
+// owned when projected. OS code is i64 internally, exact Int at its C seam.
+fn host_context_copy(value: I64) -> I64 {
+    result :: jet_rt_alloc(I64{40}, I64{8})
+    #Unsafe("value lends five initialized context words; result exclusively owns its header and cloned nullable E4 children") {
+        offset := I64{0}
+        loop offset < (I64{40}) {
+            word := os_load_i64(wrapping(value + offset))
+            if ((offset == I64{8} || offset == I64{32}) && word != I64{0}) -> word = jet_rt_string_clone(word)
+            os_store_i64(wrapping(result + offset), word)
+            offset = wrapping(offset + I64{8})
+        }
+    }
+    result
+}
+
+#Export(c) fn jet_rt_handle_clone_io_context(value: I64) -> I64 { host_context_copy(value) }
+
+#Export(c) fn jet_rt_handle_drop_io_context(value: I64) {
+    if (value == I64{0}) -> return
+    #Unsafe("value transfers its 40-byte header and two independently owned nullable text children") {
+        resource :: os_load_i64(wrapping(value + I64{8}))
+        cause :: os_load_i64(wrapping(value + I64{32}))
+        if (resource != I64{0}) -> jet_rt_string_drop(resource)
+        if (cause != I64{0}) -> jet_rt_string_drop(cause)
+    }
+    jet_rt_free(value, I64{40}, I64{8})
+}
+
+#Export(c) fn jet_rt_record_new_io_context(operation: I64, resource: I64, os_code: I64, cause: I64) -> I64 {
+    if (operation < I64{0} || operation >= HOST_IO_OP_COUNT) {
+        host_record_index_refused()
+        return I64{0}
+    }
+    raw_code := I64{0}
+    if (os_code != I64{0}) {
+        #Unsafe("the optional code box borrows one initialized exact-Int word") {
+            raw_code = jet_int_owned_to_i64(os_load_i64(os_code))
+        }
+        if (jet_scheduler_native_propagate() != I64{0}) -> return I64{0}
+    }
+    value :: jet_rt_alloc(I64{40}, I64{8})
+    #Unsafe("nullable option boxes lend one initialized payload word; value owns cloned texts and the complete new context") {
+        os_store_i64(value, operation)
+        os_store_i64(wrapping(value + I64{8}), if (resource == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(resource)))
+        os_store_i64(wrapping(value + I64{16}), if (os_code == I64{0}) -> I64{0} else -> I64{1})
+        os_store_i64(wrapping(value + I64{24}), raw_code)
+        os_store_i64(wrapping(value + I64{32}), if (cause == I64{0}) -> I64{0} else -> jet_rt_string_clone(os_load_i64(cause)))
+    }
+    value
+}
+
+#Export(c) fn jet_rt_record_get_io_context_operation(value: I64) -> I64 {
+    #Unsafe("value borrows an initialized context header") { return os_load_i64(value) }
+}
+
+fn host_context_text(value: I64, offset: I64, some: I64) -> I64 {
+    #Unsafe("value borrows a context; some lends the writable pointer output for a present field") {
+        text :: os_load_i64(wrapping(value + offset))
+        if (text == I64{0}) -> return I64{0}
+        os_store_i64(some, jet_rt_string_clone(text))
+    }
+    I64{1}
+}
+
+#Export(c) fn jet_rt_record_get_io_context_resource(value: I64, some: I64) -> I64 { host_context_text(value, I64{8}, some) }
+#Export(c) fn jet_rt_record_get_io_context_cause(value: I64, some: I64) -> I64 { host_context_text(value, I64{32}, some) }
+
+#Export(c) fn jet_rt_record_get_io_context_os_code(value: I64, some: I64) -> I64 {
+    #Unsafe("value borrows a context; some lends the writable exact-Int word output for a present field") {
+        if (os_load_i64(wrapping(value + I64{16})) == I64{0}) -> return I64{0}
+        os_store_i64(some, jet_int_owned_from_i64(os_load_i64(wrapping(value + I64{24}))))
+    }
+    I64{1}
+}
+
+#Export(c) fn jet_rt_record_tag_io_error(value: I64) -> I64 {
+    #Unsafe("value borrows an initialized error header") { return os_load_i64(value) }
+}
+
+fn host_error_context(value: I64, kind: I64) -> I64 {
+    #Unsafe("value borrows a complete error header; the selected payload must match its canonical tag") {
+        if (os_load_i64(value) != kind) {
+            host_record_index_refused()
+            return I64{0}
+        }
+    }
+    host_context_copy(wrapping(value + I64{8}))
+}
+
+fn host_error_with_context(context: I64, kind: I64) -> I64 {
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("context transfers its initialized five words and text owners into the fresh error; only the context header is then freed") {
+        os_store_i64(value, kind)
+        offset := I64{0}
+        loop offset < (I64{40}) {
+            os_store_i64(wrapping(value + I64{8} + offset), os_load_i64(wrapping(context + offset)))
+            offset = wrapping(offset + I64{8})
+        }
+        os_store_i64(wrapping(value + I64{48}), I64{0})
+    }
+    jet_rt_free(context, I64{40}, I64{8})
+    value
+}
+
+#Export(c) fn jet_rt_record_get_io_error_resource_limit(value: I64) -> I64 {
+    #Unsafe("value borrows an initialized ResourceLimit error") {
+        if (os_load_i64(value) != HOST_IO_KIND_RESOURCE_LIMIT) {
+            host_record_index_refused()
+            return I64{0}
+        }
+        return os_load_i64(wrapping(value + I64{48}))
+    }
+}
+
+#Export(c) fn jet_rt_record_new_io_error_resource_limit(limit: I64) -> I64 {
+    if (limit < I64{0} || limit >= HOST_PROCESS_LIMIT_COUNT) {
+        host_record_index_refused()
+        return I64{0}
+    }
+    value :: jet_rt_alloc(I64{56}, I64{8})
+    #Unsafe("value exclusively owns seven initialized words; ResourceLimit has no text children") {
+        os_store_i64(value, HOST_IO_KIND_RESOURCE_LIMIT)
+        offset := I64{8}
+        loop offset < (I64{56}) {
+            os_store_i64(wrapping(value + offset), I64{0})
+            offset = wrapping(offset + I64{8})
+        }
+        os_store_i64(wrapping(value + I64{48}), limit)
+    }
+    value
+}
+
+// CAbiHost.rs:220 interprets the entire presence word, not a C Bool byte.
+fn host_context_equal(left: I64, right: I64) -> Bool {
+    if (rt_text_word(left) != rt_text_word(right)) -> return false
+    left_present :: rt_text_word(left + I64{16}) != I64{0}
+    right_present :: rt_text_word(right + I64{16}) != I64{0}
+    if (left_present != right_present) -> return false
+    if (left_present && rt_text_word(left + I64{24}) != rt_text_word(right + I64{24})) -> return false
+    return host_optional_text_equal(rt_text_word(left + I64{8}), rt_text_word(right + I64{8})) &&
+        host_optional_text_equal(rt_text_word(left + I64{32}), rt_text_word(right + I64{32}))
+}
+
+fn host_optional_text_equal(left: I64, right: I64) -> Bool {
+    if (left == I64{0} || right == I64{0}) -> return left == right
+    return jet_rt_string_compare(left, right) == I64{0}
+}
+
+#Export(c) fn jet_rt_handle_eq_io_context(left: I64, right: I64) -> Bool { host_context_equal(left, right) }
+
+#Export(c) fn jet_rt_handle_eq_io_error(left: I64, right: I64) -> Bool {
+    kind :: rt_text_word(left)
+    if (kind != rt_text_word(right)) -> return false
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> return rt_text_word(left + I64{48}) == rt_text_word(right + I64{48})
+    host_context_equal(left + I64{8}, right + I64{8})
+}
+
+#Export(c) fn jet_rt_handle_clone_io_operation(value: I64) -> I64 { encoding_enum_clone(value) }
+
+#Export(c) fn jet_rt_handle_drop_io_operation(value: I64) { encoding_enum_drop(value) }
+
+#Export(c) fn jet_rt_handle_eq_io_operation(left: I64, right: I64) -> Bool { encoding_enum_eq(left, right) }
+
+// Streaming labels follow StructuralDebug.rs:182-228 and the seed's custom
+// JetDebug implementations at preregeneration-runtime.rs:72109-72218.
+fn host_io_operation_label(target: I64, ordinal: I64, debug: Bool) {
+    word :: if {
+        (ordinal == I64{0}) -> I64{1684104530}
+        (ordinal == I64{1}) -> I64{435744764503}
+        (ordinal == I64{2}) -> I64{448613674054}
+        (ordinal == I64{3}) -> I64{32760384594014019}
+        (ordinal == I64{4}) -> I64{128026086171457}
+        (ordinal == I64{5}) -> I64{435728378947}
+        (ordinal == I64{6}) -> I64{28559180746155346}
+        else -> I64{426902843203}
+    }
+    length :: if {
+        (ordinal == I64{0}) -> I64{4}
+        (ordinal == I64{3} || ordinal == I64{6}) -> I64{7}
+        (ordinal == I64{4}) -> I64{6}
+        else -> I64{5}
+    }
+    rt_text_push_word(target, if debug -> word else -> word + I64{32}, length)
+}
+
+fn host_io_kind_debug(target: I64, kind: I64) {
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(target, I64{5288467776652340809}, I64{8})
+            rt_text_push_word(target, I64{1953853550}, I64{4})
+        }
+        (kind == I64{1}) -> rt_text_push_word(target, I64{7236850772014821198}, I64{8})
+        (kind == I64{2}) -> {
+            rt_text_push_word(target, I64{7598543892949132624}, I64{8})
+            rt_text_push_word(target, I64{7234304299306872431}, I64{8})
+        }
+        (kind == I64{3}) -> rt_text_push_word(target, I64{8391700773291780436}, I64{8})
+        (kind == I64{4}) -> {
+            rt_text_push_word(target, I64{7308335478031147331}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{5}) -> rt_text_push_word(target, I64{110386891156547}, I64{6})
+        (kind == I64{6}) -> rt_text_push_word(target, I64{7813573208857080400}, I64{8})
+        (kind == I64{8}) -> {
+            rt_text_push_word(target, I64{7305808869231650130}, I64{8})
+            rt_text_push_word(target, I64{499984984396}, I64{5})
+        }
+        (kind == I64{9}) -> {
+            rt_text_push_word(target, I64{5006142830275619905}, I64{8})
+            rt_text_push_word(target, I64{495874959736}, I64{5})
+        }
+        (kind == I64{10}) -> {
+            rt_text_push_word(target, I64{8245933071047814741}, I64{8})
+            rt_text_push_word(target, I64{6579572}, I64{3})
+        }
+        else -> rt_text_push_word(target, I64{491327616079}, I64{5})
+    }
+}
+
+fn host_io_kind_show(target: I64, kind: I64) {
+    if {
+        (kind == I64{0}) -> {
+            rt_text_push_word(target, I64{2334106421097295465}, I64{8})
+            rt_text_push_word(target, I64{500186508905}, I64{5})
+        }
+        (kind == I64{1}) -> {
+            rt_text_push_word(target, I64{7959390400869068654}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{2}) -> {
+            rt_text_push_word(target, I64{7598543892949132656}, I64{8})
+            rt_text_push_word(target, I64{7307493252135939695}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{3}) -> {
+            rt_text_push_word(target, I64{8462017840422938996}, I64{8})
+            rt_text_push_word(target, I64{116}, I64{1})
+        }
+        (kind == I64{4}) -> {
+            rt_text_push_word(target, I64{7308335478031147363}, I64{8})
+            rt_text_push_word(target, I64{100}, I64{1})
+        }
+        (kind == I64{5}) -> rt_text_push_word(target, I64{110386891156579}, I64{6})
+        (kind == I64{6}) -> {
+            rt_text_push_word(target, I64{7813573208857080432}, I64{8})
+            rt_text_push_word(target, I64{125822987035936}, I64{6})
+        }
+        else -> {
+            rt_text_push_word(target, I64{8030606864214339401}, I64{8})
+            rt_text_push_word(target, I64{114}, I64{1})
+        }
+    }
+}
+
+fn host_io_limit_label(target: I64, limit: I64, debug: Bool) {
+    if debug {
+        if {
+            (limit == I64{0}) -> rt_text_push_word(target, I64{7308613581609394519}, I64{8})
+            (limit == I64{1}) -> rt_text_push_word(target, I64{28549271803752515}, I64{7})
+            (limit == I64{2}) -> rt_text_push_word(target, I64{133532402672973}, I64{6})
+            (limit == I64{3}) -> {
+                rt_text_push_word(target, I64{7308332046536241231}, I64{8})
+                rt_text_push_word(target, I64{115}, I64{1})
+            }
+            else -> rt_text_push_word(target, I64{128047746676047}, I64{6})
+        }
+    } else {
+        if {
+            (limit == I64{0}) -> {
+                rt_text_push_word(target, I64{7883960305295581559}, I64{8})
+                rt_text_push_word(target, I64{101}, I64{1})
+            }
+            (limit == I64{1}) -> rt_text_push_word(target, I64{7308613717771767875}, I64{8})
+            (limit == I64{2}) -> rt_text_push_word(target, I64{133532402673005}, I64{6})
+            (limit == I64{3}) -> {
+                rt_text_push_word(target, I64{7811887318127964271}, I64{8})
+                rt_text_push_word(target, I64{7308326720558866533}, I64{8})
+                rt_text_push_word(target, I64{115}, I64{1})
+            }
+            else -> rt_text_push_word(target, I64{128047746676079}, I64{6})
+        }
+    }
+}
+
+fn host_io_optional_debug(target: I64, text: I64) {
+    if (text == I64{0}) {
+        rt_text_push_word(target, I64{1701736270}, I64{4})
+    } else {
+        rt_text_push_word(target, I64{678191446}, I64{4})
+        rt_text_push_rust_debug_str(target, text)
+        rt_text_push_word(target, I64{41}, I64{1})
+    }
+}
+
+fn host_context_debug_into(target: I64, value: I64) {
+    rt_text_push_word(target, I64{8675468274861035337}, I64{8})
+    rt_text_push_word(target, I64{8243118315560181876}, I64{8})
+    rt_text_push_word(target, I64{9071445244736609}, I64{7})
+    host_io_operation_label(target, rt_text_word(value), true)
+    rt_text_push_word(target, I64{8247620834012831788}, I64{8})
+    rt_text_push_word(target, I64{540697955}, I64{4})
+    host_io_optional_debug(target, rt_text_word(value + I64{8}))
+    rt_text_push_word(target, I64{7237112387817381932}, I64{8})
+    rt_text_push_word(target, I64{2112101}, I64{3})
+    if (rt_text_word(value + I64{16}) == I64{0}) {
+        rt_text_push_word(target, I64{1701736270}, I64{4})
+    } else {
+        rt_text_push_word(target, I64{678191446}, I64{4})
+        rt_text_push_number(target, rt_text_word(value + I64{24}))
+        rt_text_push_word(target, I64{41}, I64{1})
+    }
+    rt_text_push_word(target, I64{4207896374829850668}, I64{8})
+    rt_text_push_word(target, I64{32}, I64{1})
+    host_io_optional_debug(target, rt_text_word(value + I64{32}))
+    rt_text_push_word(target, I64{32032}, I64{2}) // " }"
+}
+
+#Export(c) fn jet_rt_handle_debug_io_context(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    host_context_debug_into(result, value)
+    jet_rt_string_builder_finish(result)
+}
+
+#Export(c) fn jet_rt_handle_debug_io_error(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    kind :: rt_text_word(value)
+    host_io_kind_debug(result, kind)
+    rt_text_push_word(result, I64{40}, I64{1})
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) -> host_io_limit_label(result, rt_text_word(value + I64{48}), true)
+    else -> host_context_debug_into(result, value + I64{8})
+    rt_text_push_word(result, I64{41}, I64{1})
+    jet_rt_string_builder_finish(result)
+}
+
+#Export(c) fn jet_rt_handle_show_io_error(value: I64) -> I64 {
+    result :: jet_rt_string_builder_new()
+    kind :: rt_text_word(value)
+    if (kind == HOST_IO_KIND_RESOURCE_LIMIT) {
+        rt_text_push_word(result, I64{2338339510832558704}, I64{8})
+        rt_text_push_word(result, I64{7305808869231650162}, I64{8})
+        rt_text_push_word(result, I64{7286952193241476128}, I64{8})
+        rt_text_push_word(result, I64{4207599433743164280}, I64{8})
+        rt_text_push_word(result, I64{32}, I64{1})
+        host_io_limit_label(result, rt_text_word(value + I64{48}), false)
+    } else {
+        host_io_kind_show(result, kind)
+        rt_text_push_word(result, I64{2334956330985808928}, I64{8})
+        host_io_operation_label(result, rt_text_word(value + I64{8}), false)
+        resource :: rt_text_word(value + I64{16})
+        if (resource != I64{0}) {
+            rt_text_push_word(result, I64{24608}, I64{2}) // " `"
+            rt_text_append(result, rt_text_data(resource), rt_text_len(resource))
+            rt_text_push_word(result, I64{96}, I64{1})
+        }
+        cause :: rt_text_word(value + I64{40})
+        if (cause != I64{0}) {
+            rt_text_push_word(result, I64{8250}, I64{2}) // ": "
+            rt_text_append(result, rt_text_data(cause), rt_text_len(cause))
+        }
+    }
+    jet_rt_string_builder_finish(result)
+}
+
+#Export(c) fn jet_rt_handle_display_io_error(value: I64) -> I64 { jet_rt_handle_show_io_error(value) }

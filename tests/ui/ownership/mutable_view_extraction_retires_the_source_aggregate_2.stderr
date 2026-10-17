@@ -1,0 +1,12 @@
+Error [E0121]: `optional` was consumed by the pattern match, so it can't be used here
+  --> mutable_view_extraction_retires_the_source_aggregate_2.jet:10:15
+    |
+ 10 |         print(optional)
+    |               ^^^^^^^^
+  --> mutable_view_extraction_retires_the_source_aggregate_2.jet:9:8
+    |
+  9 |     if optional == Val(selected) {
+    |        ^^^^^^^^ `optional` moved to the pattern match here
+ Why: After a value moves somewhere else, its old name no longer gives access to it
+ Fix: Stop using `optional` after the move, or give the pattern match a copy with `~optional` where it moved.
+More: jet-lang.dev/e/E0121

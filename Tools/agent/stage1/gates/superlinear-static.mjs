@@ -181,7 +181,7 @@ try {
     for(const u of units) for(const f of u.functions) for(let i=f.a+1;i<f.b;++i) {
       const callees=byName.get(u.t[i].v), open=callOpener(u.t,i);
       if(!callees || open===null || u.t[i-1]?.v==='.') continue;
-      const args=argumentsOf(u,open).map(s=>s.replace(/^[&~]\s*/,''));
+      const args=argumentsOf(u,open).map(s=>s.replace(/^&\s*/,'').replace(/\s*\.\s*copy\s*\(\s*\)\s*$/,''));
       for(const c of callees) {
         const params=[...c.params.matchAll(/(?:^|,)\s*&?(\w+)\s*:/g)].map(m=>m[1]);
         for(let n=0;n<params.length;++n) if(c.scans.has(params[n]) && f.types.has(args[n]) && !f.scans.has(args[n])) {f.scans.add(args[n]);changed=true;}
@@ -212,23 +212,22 @@ try {
           let end=i+1; while(end<=l.b && u.t[end].line===tok.line) ++end;
           const body=u.text(i+1,end);
           if(f.types.get(prev)?.match(/^(String|\[)/) && new RegExp(`\\b${prev}\\b`).test(body) && body.includes('+')) hit(u,f,i,'prefix-concat',`+ concatenation of ${prev} inside loop`);
-          if(rhs && aggregate(f.types.get(rhs.v)) && !['~','&'].includes(rhs.v) && !['[','.'].includes(u.t[i+2]?.v)) hit(u,f,i,'aggregate-copy',`by-value assignment of aggregate ${rhs.v}`);
+          if(rhs && aggregate(f.types.get(rhs.v)) && rhs.v!=='&' && !['[','.'].includes(u.t[i+2]?.v)) hit(u,f,i,'aggregate-copy',`by-value assignment of aggregate ${rhs.v}`);
         }
         if(tok.v==='+=' && f.types.get(prev)?.match(/^(String|\[)/)) hit(u,f,i,'prefix-concat',`+= of ${prev} inside loop`);
         if(tok.v==='+' && (u.t[i-1]?.kind==='string' || u.t[i+1]?.kind==='string' || f.types.get(prev)?.trim().match(/^(String|\[)/) || f.types.get(next)?.trim().match(/^(String|\[)/))) hit(u,f,i,'prefix-concat','String/list + inside loop; establish bounded/disjoint operands or use one final join');
         if(['clone','copy','to_list','to_vec','to_owned','collect'].includes(tok.v) && next==='(') hit(u,f,i,'aggregate-copy',`${tok.v} materializes a collection each iteration`);
-        if(['=','::',':=','~'].includes(tok.v)) {
+        if(['=','::',':='].includes(tok.v)) {
           const expression=expressionType(u,f,i+1);
           if(expression && aggregate(expression.type)) hit(u,f,i,'aggregate-copy',`by-value aggregate expression ${u.text(i+1,expression.end)} inside loop (${expression.type})`);
         }
-        if(tok.v==='~' && (aggregate(f.types.get(next)) || f.types.get(next)?.trim()==='String') && !['[','.'].includes(u.t[i+2]?.v)) hit(u,f,i,'aggregate-copy',`explicit Jet copy of whole ${next} each iteration`);
-        if(['::',':='].includes(tok.v) && aggregate(f.types.get(u.t[i+1]?.v)) && !['~','&'].includes(u.t[i+1]?.v) && !['[','.'].includes(u.t[i+2]?.v)) hit(u,f,i,'aggregate-copy',`by-value binding of aggregate ${u.t[i+1].v}`);
+        if(['::',':='].includes(tok.v) && aggregate(f.types.get(u.t[i+1]?.v)) && u.t[i+1]?.v!=='&' && !['[','.'].includes(u.t[i+2]?.v)) hit(u,f,i,'aggregate-copy',`by-value binding of aggregate ${u.t[i+1].v}`);
         if(tok.v==='push' && next==='(') {
-          let argIndex=i+2;
-          if(u.t[argIndex]?.v==='~') ++argIndex;
+          const argIndex=i+2;
           const arg=u.t[argIndex];
           if(arg?.kind==='string' && /\{/.test(arg.v)) hit(u,f,i,'copy-push','push of interpolated copy; establish non-growing/disjoint input');
-          if(arg && aggregate(f.types.get(arg.v)) && !['[','.'].includes(u.t[argIndex+1]?.v)) hit(u,f,i,'copy-push',`push copies aggregate ${arg.v}`);
+          const copyCall=u.t[argIndex+1]?.v==='.' && u.t[argIndex+2]?.v==='copy' && u.t[argIndex+3]?.v==='(' && u.t[argIndex+4]?.v===')';
+          if(arg && aggregate(f.types.get(arg.v)) && (copyCall || !['[','.'].includes(u.t[argIndex+1]?.v))) hit(u,f,i,'copy-push',`push copies aggregate ${arg.v}`);
         }
         const callees=byName.get(tok.v);
         const open=callOpener(u.t,i);

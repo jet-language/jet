@@ -1,0 +1,193 @@
+// Original client algorithms: tests/web_dev.rs68-179,2828-2842.
+// Exact raw request bytes, read-to-end and original error->None behavior.
+use core.net as net
+use core.time as time
+use core.sys as sys
+
+struct S5HTTPResponse { status: Int, content_type: String, body: [U8] }
+
+fn s5_web_crlf() -> String { String.from_bytes([U8]{13, 10}) ?? panic("CRLF") }
+
+fn s5_web_bytes(bytes: [U8], start: Int, end: Int) -> [U8] {
+    selected := [U8]{}
+    loop index in start..<end -> &selected.push(bytes[index])
+    selected
+}
+
+// Reused TestPolicy2's exact Rust Unicode White_Space byte-width algorithm.
+fn s5_web_space_width(bytes: [U8], index: Int) -> Int {
+    first :: Int.from_u8(bytes[index])
+    if first == 32 || (first >= 9 && first <= 13) -> return 1
+    if index + 1 >= bytes.len() -> return 0
+    second :: Int.from_u8(bytes[index + 1])
+    if first == 194 && (second == 133 || second == 160) -> return 2
+    if index + 2 >= bytes.len() -> return 0
+    third :: Int.from_u8(bytes[index + 2])
+    if first == 225 && second == 154 && third == 128 -> return 3
+    if first == 226 && second == 128 && ((third >= 128 && third <= 138) || third == 168 || third == 169 || third == 175) -> return 3
+    if first == 226 && second == 129 && third == 159 -> return 3
+    if first == 227 && second == 128 && third == 128 -> return 3
+    0
+}
+
+fn s5_web_words(text: String) -> [String] {
+    bytes :: text.bytes()
+    words := [String]{}
+    index := 0
+    start := -1
+    loop index < bytes.len() {
+        width :: s5_web_space_width(bytes, index)
+        if width > 0 {
+            if start >= 0 -> &words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, index)))
+            start = -1
+            index = index + width
+        } else {
+            if start < 0 -> start = index
+            index = index + 1
+        }
+    }
+    if start >= 0 -> &words.push(String.from_bytes_lossy(s5_web_bytes(bytes, start, bytes.len())))
+    words
+}
+
+fn s5_web_find(bytes: [U8], marker: [U8]) -> Int? {
+    index := 0
+    loop index + marker.len() <= bytes.len() {
+        found := true
+        loop part in 0..<marker.len() {
+            if bytes[index + part] != marker[part] -> found = false
+        }
+        if found -> return Val(index)
+        index = index + 1
+    }
+    None
+}
+
+fn s5_web_read_to_end(stream: net.TCPStream) -> [U8]? {
+    output := [U8]{}
+    loop {
+        part :: net.tcp_read_bytes(stream, 8192) ?? return None
+        if part.len() == 0 -> return Val(output)
+        loop byte in part -> &output.push(byte)
+    }
+}
+
+fn s5_web_ascii_equal(left: String, right: String) -> Bool {
+    a :: left.bytes()
+    b :: right.bytes()
+    if a.len() != b.len() -> return false
+    loop index in 0..<a.len() {
+        x := Int.from_u8(a[index])
+        y := Int.from_u8(b[index])
+        if x >= 65 && x <= 90 -> x = x + 32
+        if y >= 65 && y <= 90 -> y = y + 32
+        if x != y -> return false
+    }
+    true
+}
+
+fn s5_web_u16(text: String) -> Int? {
+    bytes :: text.bytes()
+    if bytes.len() == 0 -> return None
+    index := 0
+    if Int.from_u8(bytes[0]) == 43 -> index = 1
+    if index == bytes.len() -> return None
+    value := 0
+    loop index < bytes.len() {
+        digit :: Int.from_u8(bytes[index]) - 48
+        if digit < 0 || digit > 9 -> return None
+        if value > (65535 - digit) /% 10 -> return None
+        value = value * 10 + digit
+        index = index + 1
+    }
+    Val(value)
+}
+
+fn s5_web_response(raw: [U8]) -> S5HTTPResponse? {
+    separator :: [U8]{13, 10, 13, 10}
+    split :: (s5_web_find(raw, separator) ?? return None) + 4
+    header :: String.from_bytes_lossy(s5_web_bytes(raw, 0, split))
+    first :: header.lines().get(0) ?? return None
+    words :: s5_web_words(first)
+    status :: s5_web_u16(words.get(1) ?? return None) ?? return None
+    content_type := ""
+    seen := false
+    loop line in header.lines() {
+        bytes :: line.bytes()
+        if s5_web_find(bytes, [U8]{58}) == .Val(colon) {
+            name :: String.from_bytes_lossy(s5_web_bytes(bytes, 0, colon))
+            if !seen && s5_web_ascii_equal(name, "content-type") {
+                content_type = String.from_bytes_lossy(s5_web_bytes(bytes, colon + 1, bytes.len())).trim().copy()
+                seen = true
+            }
+        }
+    }
+    Val(S5HTTPResponse{status, content_type, body: s5_web_bytes(raw, split, raw.len())})
+}
+
+fn s5_web_get(port: Int, path: String, session: String?) -> S5HTTPResponse? {
+    stream :: net.tcp_connect("127.0.0.1:{port}") ?? return None
+    net.set_read_timeout(stream, 5000) ?? return None
+    crlf :: s5_web_crlf()
+    authorization :: if session == .Val(token) -> "Authorization: Bearer {token}{crlf}" else -> ""
+    request :: "GET {path} HTTP/1.1{crlf}Host: localhost:{port}{crlf}{authorization}Sec-Fetch-Site: same-origin{crlf}Connection: close{crlf}{crlf}"
+    net.tcp_write_all_bytes(stream, request.bytes()) ?? return None
+    raw :: s5_web_read_to_end(stream)
+    net.tcp_close(stream).drop("original socket drop ignores close errors")
+    s5_web_response(raw ?? return None)
+}
+
+fn s5_web_post(port: Int, path: String, body: String, session: String?) -> S5HTTPResponse? {
+    stream :: net.tcp_connect("127.0.0.1:{port}") ?? return None
+    net.set_read_timeout(stream, 5000) ?? return None
+    crlf :: s5_web_crlf()
+    authorization :: if session == .Val(token) -> "Authorization: Bearer {token}{crlf}" else -> ""
+    request :: "POST {path} HTTP/1.1{crlf}Host: localhost:{port}{crlf}{authorization}Origin: http://localhost:{port}{crlf}Content-Type: application/json{crlf}Content-Length: {body.bytes().len()}{crlf}Connection: close{crlf}{crlf}{body}"
+    net.tcp_write_all_bytes(stream, request.bytes()) ?? return None
+    raw :: s5_web_read_to_end(stream)
+    net.tcp_close(stream).drop("original socket drop ignores close errors")
+    s5_web_response(raw ?? return None)
+}
+
+fn s5_web_raw(port: Int, request: [U8]) -> [U8]? {
+    stream :: net.tcp_connect("127.0.0.1:{port}") ?? return None
+    net.set_read_timeout(stream, 5000) ?? return None
+    net.tcp_write_all_bytes(stream, request) ?? return None
+    net.tcp_shutdown(stream, .Write) ?? return None
+    raw :: s5_web_read_to_end(stream)
+    net.tcp_close(stream).drop("original socket drop ignores close errors")
+    raw
+}
+
+fn s5_web_raw_get(target: String, headers: [String]) -> [U8] {
+    crlf :: s5_web_crlf()
+    request := "GET {target} HTTP/1.1{crlf}"
+    loop header in headers -> request = "{request}{header}{crlf}"
+    "{request}{crlf}".bytes()
+}
+
+fn s5_web_port() -> Int {
+    s5_web_u16(sys.get("S5_PORT") ?? panic("port")) ?? panic("u16 port")
+}
+
+fn s5_web_wait_up(port: Int, timeout_ms: Int) {
+    started :: time.start()
+    loop {
+        if s5_web_get(port, "/__jet_dev_version", None) == .Val(response) {
+            if response.status == 200 -> return
+        }
+        assert(time.elapsed(started).ns <= timeout_ms * 1000000, "devserver did not become ready")
+        time.sleep(time.duration_ms(100))
+    }
+}
+
+fn s5_web_wait_root(port: Int, required: Bool) {
+    started :: time.start()
+    loop time.elapsed(started).ns < 10000000000 {
+        if s5_web_get(port, "/", None) == .Val(response) {
+            if response.status == 200 -> return
+        }
+        time.sleep(time.duration_ms(25))
+    }
+    if required -> panic("test web server did not become ready")
+}

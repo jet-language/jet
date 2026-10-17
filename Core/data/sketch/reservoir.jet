@@ -1,46 +1,73 @@
-// Reservoir sample (Algorithm R).
-//
-// `add` updates the sample in place through a write receiver. Replacement
-// draws come from a SplitMix64 stream carried in the value and seeded by
-// `new`, so replaying a stream produces the same sample on every tier.
-C_DEFAULT_K :: 32
-C_INT_MAX :: 9223372036854775807
+// The shipped Algorithm R sampler, with its fixed xorshift seed and slot order.
+struct ReservoirSampler {
+    state: ReservoirState
 
-pub struct Reservoir {
-    pub k: Int
-    pub seen: Int
-    pub items: [String]
-    state: U64
+    impl Display {
+        fn display(self) -> String {
+            "ReservoirSampler(n={self.state.count})"
+        }
+    }
 }
 
-pub fn new(k: Int{C_DEFAULT_K}) -> Reservoir Never! {
-    capacity := k
-    if capacity < 1 -> capacity = 1
-    Reservoir{k: capacity, seen: 0, items: [String]{}, state: U64{0}}
+struct ReservoirState {
+    capacity: Int
+    items: [String]
+    count: U64
+    rng: U64
 }
 
-impl Reservoir {
-    /// Offer one item; every item seen so far is kept with equal probability.
-    pub fn add(&self, item: String) Never! {
-        if self.k < 1 -> self.k = 1
-        if self.seen < self.items.len() -> self.seen = self.items.len()
-        if self.seen < C_INT_MAX -> self.seen = self.seen + 1
-        if self.items.len() < self.k {
-            &self.items.push(item)
+fn new(capacity: Int) -> ReservoirSampler Never! { ReservoirSampler.new(capacity) }
+
+impl ReservoirSampler {
+    fn new(capacity: Int) -> ReservoirSampler Never! {
+        limit :: if capacity < 1 -> 1 else -> capacity
+        ReservoirSampler{state: ReservoirState{
+            capacity: limit,
+            items: [String]{},
+            count: U64{0},
+            rng: U64{16045690984503098046},
+        }}
+    }
+
+    fn add(&self, item: String) Never! {
+        self.state.count = self.state.count.wrapping_add(U64{1})
+        if self.state.items.len() < self.state.capacity {
+            &self.state.items.push(item)
             return
         }
-        self.state = self.state.wrapping_add(U64{11400714819323198485})
-        z := (self.state ~| (self.state >> 30)).wrapping_mul(U64{13787848793156543929})
-        z = (z ~| (z >> 27)).wrapping_mul(U64{10723151780598845931})
-        z = z ~| (z >> 31)
-        index :: Int.from_u64(z >> 1) %% self.seen
-        if index < self.k -> self.items[index] = item
+        state := self.state.rng
+        state = state.bit_xor((state << 13))
+        state = state.bit_xor((state >> 7))
+        state = state.bit_xor((state << 17))
+        self.state.rng = state
+        index :: state %% self.state.count
+        if index < (U64{self.state.capacity}) -> self.state.items[Int.from_u64(index)] = item
     }
 
-    /// The current sample, in slot order.
-    pub fn sample(self) -> [String] Never! {
-        out := [String]{}
-        loop item in self.items -> &out.push(item)
-        out
+    fn sample(self) -> [String] Never! {
+        self.state.items.copy()
     }
+}
+
+#Test("reservoir keeps filled slots and native minimum capacity") {
+    sampler := new(3)
+    &sampler.add("x")
+    clone := sampler.copy()
+    &clone.add("y")
+    &clone.add("z")
+    assert_eq(sampler.sample(), [String]{"x"})
+    assert_eq(clone.sample(), [String]{"x", "y", "z"})
+    minimum := new(-1)
+    &minimum.add("only")
+    assert_eq(minimum.sample(), [String]{"only"})
+}
+
+#Test("reservoir replacement is replayable") {
+    left := new(3)
+    right := new(3)
+    loop i in 0..<20 {
+        &left.add("{i}")
+        &right.add("{i}")
+    }
+    assert_eq(left.sample(), right.sample())
 }

@@ -1,0 +1,11 @@
+# HAND-PORT tests/codemod.rs:768-795 directory_lock_ignores_hostile_hardlinked_lock_filename
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: directory_lock_ignores_hostile_hardlinked_lock_filename.fixture
+env: NO_COLOR=1
+requires: os:unix
+mkdir: .jet/codemods
+hardlink: sentinel .jet/codemods/codemod.lock
+step: jet inspect codemod apply rename.codemod.json --yes
+exit: 0
+file: sentinel = directory_lock_ignores_hostile_hardlinked_lock_filename.sentinel.expected
+

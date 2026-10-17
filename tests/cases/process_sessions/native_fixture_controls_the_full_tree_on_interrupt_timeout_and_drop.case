@@ -1,0 +1,33 @@
+# Port of tests/process_sessions.rs:550-654; source verbatim after original format expansion.
+# ORACLE-LITERAL; PENDING-SAME-HEAD; have_rustc guard erased.
+# Windows PID query retains PENDING-SEAM(win-process-query); Unix liveness is exactly original kill -0.
+fixture: subjects
+when os windows
+refused: PENDING-SEAM(win-process-query)
+end when
+step: jet build session_fixture.jet
+exit: 0
+copy: .jet/build/session_fixture session_fixture
+write: run.jet native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop.source
+step default: jet run run.jet
+exit: 0
+stdout: = native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop.out
+step: jet run --interpret run.jet
+exit: == default
+stdout: == default
+stderr: == default
+step: jet build run.jet
+exit: 0
+step: built
+exit: == default
+stdout: == default
+stderr: == default
+entries: . kind file ext = "pid" = 15
+when os unix
+for file . kind file ext = "pid" as pidfile
+# The subject writes decimal PID bytes without whitespace, so original trim is an identity.
+capture: pid = text file {pidfile.path}
+repeat while process {cap:pid} alive timeout 2s every 10ms fail "native process-session descendant {cap:pid} survived {pidfile.path}"
+end repeat
+end for
+end when

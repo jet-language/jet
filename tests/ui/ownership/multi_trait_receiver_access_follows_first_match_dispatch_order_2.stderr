@@ -1,0 +1,26 @@
+Error [E0202]: Cannot write to `item` — it does not have the write-access marker `&`; required before calling `.touch()`
+  --> multi_trait_receiver_access_follows_first_match_dispatch_order_2.jet:11:27
+    |
+ 11 |         call(() -> { item.touch() })
+    |                           ^^^^^
+ Why: This method edits the value it's called on; the write-access marker `&` is required
+ Fix: Declare `item := ...`
+More: jet-lang.dev/e/E0202
+
+Error [E0224]: This call writes `item`, but `item` has no `&` mark
+  --> multi_trait_receiver_access_follows_first_match_dispatch_order_2.jet:11:22
+    |
+ 11 |         call(() -> { item.touch() })
+    |                      ^^^^
+ Why: The method is declared with `&self`, so the call writes the named place it is called on; the mark sits on that place, the same way `edit(&buf)` and `consume(^text)` mark arguments
+ Fix: Write `&item`
+More: jet-lang.dev/e/E0224
+
+Error [E0202]: Cannot write to `item` — it does not have the write-access marker `&`; required before calling `.touch()`
+  --> multi_trait_receiver_access_follows_first_match_dispatch_order_2.jet:11:27
+    |
+ 11 |         call(() -> { item.touch() })
+    |                           ^^^^^
+ Why: This method edits the value it's called on; the write-access marker `&` is required
+ Fix: Declare `item := ...`
+More: jet-lang.dev/e/E0202

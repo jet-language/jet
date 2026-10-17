@@ -25,7 +25,7 @@ struct OverlayInputIdentity {
 // The pinned identity of a regular file, or the reason it may not be used.
 fn env_overlay_identity(info: Stat) -> OverlayInputIdentity String! {
     if info.links != 1 -> return Err("is hard-linked (multiple directory entries)")
-    Ok(OverlayInputIdentity{length: info.size, modified_ns: info.modified.unix_ns, id: info.id, links: info.links})
+    Ok(OverlayInputIdentity{length: info.size, modified_ns: info.modified.to_unix_ns() ?? panic("file times fit Unix nanoseconds"), id: info.id, links: info.links})
 }
 
 fn env_overlay_io(cause: String) -> IOError Never! {
@@ -35,7 +35,7 @@ fn env_overlay_io(cause: String) -> IOError Never! {
 // One opened input file and the bytes read from that same handle.
 struct OverlayHeldFile {
     path: String
-    parent: Directory
+    parent: CheckedDirectory
     name: String
     handle: FileReader
     identity: OverlayInputIdentity
@@ -46,8 +46,7 @@ struct OverlayHeldFile {
 // One patched file waiting for commit: its original and patched bytes.
 struct OverlayStagedFile {
     path: String
-    root: Directory
-    parent: Directory
+    parent: CheckedDirectory
     name: String
     input: FileReader
     identity: OverlayInputIdentity
@@ -75,15 +74,11 @@ struct OverlayStage {
 
 // A held authority root: patches and patched files open below it only.
 struct OverlayAuthority {
-    root: String
     resolver: AuthorityResolver
-    root_handle: Directory
 
     fn open(path: String, label: String) -[FS, Env]> OverlayAuthority OverlayError! {
         resolver :: AuthorityResolver.open(path) ?? return Err(OverlayError.IO("could not open {label} authority `{path}`: {err.message()}"))
-        root :: ~resolver.root
-        checked :: resolver.checked_directory("") ?? return Err(OverlayError.IO("could not hold {label} authority `{root}`: {err.message()}"))
-        Ok(OverlayAuthority{root, resolver, root_handle: checked.handle})
+        Ok(OverlayAuthority{resolver: ^resolver})
     }
 
     fn open_file(self, raw: String, label: String) -[FS, Env]> OverlayHeldFile OverlayError! {
@@ -93,15 +88,16 @@ struct OverlayAuthority {
 
     fn open_relative_file(self, relative: String, label: String) -[FS, Env]> OverlayHeldFile OverlayError! {
         parent_relative :: files.dirname(relative)
-        parent_path :: files.join(self.root, parent_relative)
+        parent_path :: files.join(self.resolver.root, parent_relative)
         parent :: self.resolver.checked_directory(parent_relative) ?? return Err(OverlayError.IO("could not open {label} parent `{parent_path}`: {err.message()}"))
         name :: files.basename(relative)
         if name == "" -> return Err(OverlayError.Patch("{label} `{relative}` has no ordinary final name"))
-        path :: files.join(self.root, relative)
-        handle :: if parent.handle.open(name) == {
+        path :: files.join(self.resolver.root, relative)
+        parent_handle :: self.resolver.directory_handle(parent)
+        handle :: if parent_handle.open(name) == {
             .Ok(file) -> file
             .Err(error) -> {
-                if env_overlay_is_symlink(parent.handle, name) -> return Err(OverlayError.Patch("{label} `{path}` contains a symlink"))
+                if env_overlay_is_symlink(parent_handle, name) -> return Err(OverlayError.Patch("{label} `{path}` contains a symlink"))
                 return Err(OverlayError.IO("could not read {label} `{path}`: {error}"))
             }
         }
@@ -113,7 +109,7 @@ struct OverlayAuthority {
         after :: handle.stat() ?? return Err(OverlayError.IO("could not revalidate {label} `{path}`: {err}"))
         unchanged :: after.is_file && env_overlay_identity(after) == .Ok(identity)
         if !unchanged -> return Err(OverlayError.IO("{label} `{path}` changed while it was read"))
-        Ok(OverlayHeldFile{path, parent: parent.handle, name, handle, identity, mode: info.mode & 0o7777, bytes})
+        Ok(OverlayHeldFile{path, parent: ^parent, name, handle: ^handle, identity, mode: (info.mode).bit_and(0o7777), bytes})
     }
 }
 
@@ -125,7 +121,7 @@ fn env_overlay_is_symlink(parent: Directory, name: String) -[FS]> Bool Never! {
 
 // Apply every patch of `package` (read below `workspace_root`) to the tree
 // below `source_root`: all or nothing.
-pub fn env_apply_overlay_patches(workspace_root: String, source_root: String, package: PackageOverride) -[FS, Env, Rand]> [PatchApplication] OverlayError! {
+fn env_apply_overlay_patches(workspace_root: String, source_root: String, package: PackageOverride) -[FS, Env, Rand]> [PatchApplication] OverlayError! {
     workspace :: OverlayAuthority.open(workspace_root, "workspace root")
     source :: OverlayAuthority.open(source_root, "source root")
     stage := OverlayStage.new()
@@ -136,7 +132,7 @@ pub fn env_apply_overlay_patches(workspace_root: String, source_root: String, pa
         applications :: env_overlay_apply_unified_patch_staged(source, text, &stage)
         loop application in applications -> &applied.push(application)
     }
-    env_overlay_commit_staged(&stage, (current: OverlayStage) -> current)
+    env_overlay_commit_staged(source, &stage, (path: String) -[FS]> {})
     Ok(applied)
 }
 
@@ -175,10 +171,9 @@ fn env_overlay_apply_unified_patch_staged(source: OverlayAuthority, patch_text: 
             opened :: source.open_relative_file(relative, "patched file")
             stage.entries[relative] = OverlayStagedFile{
                 path: opened.path,
-                root: source.root_handle,
-                parent: opened.parent,
+                parent: ^opened.parent,
                 name: opened.name,
-                input: opened.handle,
+                input: ^opened.handle,
                 identity: opened.identity,
                 mode: opened.mode,
                 original: opened.bytes,
@@ -273,19 +268,23 @@ fn env_overlay_has_control(raw: String) -> Bool Never! {
 
 // Commit changed files in path order; on failure restore the ones already
 // written and report both the commit and any rollback failure. `after_commit`
-// receives the stage after each committed file and returns the stage to keep.
-fn env_overlay_commit_staged(stage: &OverlayStage, after_commit: fn(OverlayStage) -> OverlayStage) OverlayError! -[FS, Rand]> {
+// borrows the committed path; the stage retains all of its descriptor owners.
+fn env_overlay_commit_staged(source: OverlayAuthority, stage: &OverlayStage, after_commit: fn(String) -[FS]> Never!) OverlayError! -[FS, Env, Rand]> {
+    root :: source.resolver.checked_directory(".") ?? return Err(OverlayError.IO("could not validate source authority: {err.message()}"))
+    root_handle :: source.resolver.directory_handle(root)
     committed := [String]{}
     keys :: stage.sorted_keys()
     loop key in keys {
         entry :: stage.entries[key]
         if entry.output == entry.original -> next
-        if env_overlay_write_atomically(entry, entry.output, true) == .Err(error) {
+        parent :: source.resolver.directory_handle(entry.parent)
+        if env_overlay_write_atomically(entry, root_handle, parent, entry.output, true) == .Err(error) {
             rollback_errors := [String]{}
             at := committed.len() - 1
             loop at >= 0 {
                 done :: stage.entries[committed[at]]
-                if env_overlay_write_atomically(done, done.original, false) == .Err(rollback) {
+                rollback_parent :: source.resolver.directory_handle(done.parent)
+                if env_overlay_write_atomically(done, root_handle, rollback_parent, done.original, false) == .Err(rollback) {
                     &rollback_errors.push("{done.path}: {rollback}")
                 }
                 at -= 1
@@ -294,19 +293,19 @@ fn env_overlay_commit_staged(stage: &OverlayStage, after_commit: fn(OverlayStage
             return Err(OverlayError.IO("could not commit patched file `{stage.entries[key].path}`: {error}{suffix}"))
         }
         &committed.push(key)
-        stage = after_commit(stage)
+        after_commit(entry.path)
     }
 }
 
 // The target still is the file that was read: same parent entry, same
 // identity, and the input handle unchanged since staging.
-fn env_overlay_validate_target(entry: OverlayStagedFile) IOError! -[FS]> {
-    root :: entry.root.stat()
+fn env_overlay_validate_target(entry: OverlayStagedFile, root_handle: Directory, parent: Directory) IOError! -[FS]> {
+    root :: root_handle.stat()
     if !root.is_dir -> return Err(env_overlay_io("source root authority is no longer a directory"))
-    current :: if entry.parent.open(entry.name) == {
+    current :: if parent.open(entry.name) == {
         .Ok(file) -> file
         .Err(error) -> {
-            if env_overlay_is_symlink(entry.parent, entry.name) -> return Err(env_overlay_io("patched target contains a symlink"))
+            if env_overlay_is_symlink(parent, entry.name) -> return Err(env_overlay_io("patched target contains a symlink"))
             return Err(error)
         }
     }
@@ -320,18 +319,18 @@ fn env_overlay_validate_target(entry: OverlayStagedFile) IOError! -[FS]> {
 
 // Write `bytes` to a fresh exclusive temporary beside the target, make it
 // durable, and rename it over the target inside the held parent.
-fn env_overlay_write_atomically(entry: OverlayStagedFile, bytes: [U8], verify_target: Bool) IOError! -[FS, Rand]> {
+fn env_overlay_write_atomically(entry: OverlayStagedFile, root_handle: Directory, parent: Directory, bytes: [U8], verify_target: Bool) IOError! -[FS, Rand]> {
     if verify_target {
-        env_overlay_validate_target(entry)
+        env_overlay_validate_target(entry, root_handle, parent)
     } else {
-        root :: entry.root.stat()
+        root :: root_handle.stat()
         if !root.is_dir -> return Err(env_overlay_io("source root authority is no longer a directory"))
     }
     collision := IOError?{None}
     loop _ in 0..<OVERLAY_TEMP_ATTEMPTS {
         token :: random.token_hex(8) ?? return Err(env_overlay_io("could not draw an overlay temporary name"))
         temporary :: ".{entry.name}.jet-overlay-{sys.pid()}-{token}"
-        file :: if entry.parent.create(temporary, if_exists: .Refuse, mode: Val(OVERLAY_TEMP_MODE)) == {
+        file :: if parent.create(temporary, if_exists: .Refuse, mode: Val(OVERLAY_TEMP_MODE)) == {
             .Ok(created) -> created
             .Err(error) -> {
                 if error == {
@@ -343,13 +342,13 @@ fn env_overlay_write_atomically(entry: OverlayStagedFile, bytes: [U8], verify_ta
                 }
             }
         }
-        write_error :: if env_overlay_publish(entry, file, temporary, bytes) == {
+        write_error :: if env_overlay_publish(entry, parent, file, temporary, bytes) == {
             .Ok(_) -> {
                 return
             }
             .Err(error) -> error
         }
-        if entry.parent.remove(temporary) == .Err(cleanup) {
+        if parent.remove(temporary) == .Err(cleanup) {
             if cleanup == {
                 .NotFound(_) -> {}
                 else -> return Err(env_overlay_io("{write_error}; temporary cleanup failed: {cleanup}"))
@@ -363,13 +362,13 @@ fn env_overlay_write_atomically(entry: OverlayStagedFile, bytes: [U8], verify_ta
 // The file is durable before publication. The directory sync after the
 // rename is best effort, so a reporting failure cannot claim a failed commit
 // after the destination already changed.
-fn env_overlay_publish(entry: OverlayStagedFile, file: FileWriter, temporary: String, bytes: [U8]) IOError! -[FS]> {
+fn env_overlay_publish(entry: OverlayStagedFile, parent: Directory, file: FileWriter, temporary: String, bytes: [U8]) IOError! -[FS]> {
     file.write_all(bytes)
     file.set_mode(entry.mode)
     file.fsync()
-    entry.parent.fsync()
-    entry.parent.rename(temporary, entry.name)
-    entry.parent.fsync().drop("the post-rename directory sync is best effort")
+    parent.fsync()
+    parent.rename(temporary, entry.name)
+    parent.fsync().drop("the post-rename directory sync is best effort")
 }
 
 // `@@ -a,b +c,d @@` -> (old start, old count, new count).

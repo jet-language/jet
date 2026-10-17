@@ -2,17 +2,18 @@
 // one package (request origin, trust, disk, dependents) as text or a JSON
 // status object.
 
-pub fn cli_cmd_why(theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
+fn cli_cmd_why(verification: &StoreVerification, theme: Theme, parsed: CLIParsed) -[IO, FS, Env, Exec, Net, Time, Time.Wait, Rand]> Int Never! {
     json_output :: parsed.flags.json
     query :: parsed.positional.get(0) ?? return cli_status_error(theme, json_output, "why", "E1274", "why needs a package name", "`jetpack why` reads the package's environment request and stored provenance records.", "write `jetpack why <package>`.")
     roots :: pkg_resolve_roots()
-    if store_why_package(roots, query) == {
+    if store_why_package(&verification, roots, query) == {
         .Ok(found) -> {
             report :: found ?? return cli_status_error(theme, json_output, "why", "E1274", "no stored package record for `{query}`", "`jetpack why` can answer only packages with a realized StoreEntry or recorded build attempt.", "realize `{query}` first, then rerun `jetpack why {query}`.")
             if json_output {
-                print(report.to_json())
+                print(report.to_json() ?? return cli_status_encoding_error(err))
             } else {
-                term.stdout().write(report.text()).drop("why output is best-effort")
+                stdout_handle := term.stdout()
+                &stdout_handle.write(report.text()).drop("why output is best-effort")
             }
             EXIT_OK
         }

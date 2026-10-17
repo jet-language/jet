@@ -1,0 +1,281 @@
+// Source/ReceiptStore.rs: comparison claims use the exact framed invocation
+// context and canonical target closure. Terminal bits are host facts, not color.
+use jet_foundation.[foundation_json_quote]
+
+fn jet_cli_receipt_secret_component(component: String) -> Bool Never! {
+    bytes :: component.bytes()
+    end := bytes.len()
+    loop end > 0 && bytes[end - 1] >= (U8{48}) && bytes[end - 1] <= (U8{57}) -> end -= 1
+    name :: component.slice(0, end)
+    [String]{"secret", "token", "password", "passwd", "credential", "key"}.contains(name)
+}
+
+fn jet_cli_receipt_secret_name(name: String) -> Bool Never! {
+    bytes :: name.bytes()
+    component := ""
+    loop (index, byte) in bytes {
+        upper :: byte >= U8{65} && byte <= U8{90}
+        lower :: byte >= U8{97} && byte <= U8{122}
+        digit :: byte >= U8{48} && byte <= U8{57}
+        boundary := false
+        if upper && index > 0 {
+            previous :: bytes[index - 1]
+            boundary = (previous >= U8{97} && previous <= U8{122}) || (previous >= U8{48} && previous <= U8{57})
+            if previous >= (U8{65}) && previous <= (U8{90}) && index + 1 < bytes.len() {
+                following :: bytes[index + 1]
+                if following >= (U8{97}) && following <= (U8{122}) -> boundary = true
+            }
+        }
+        if (!upper && !lower && !digit) || boundary {
+            if jet_cli_receipt_secret_component(component) -> return true
+            component = ""
+            if !upper && !lower && !digit -> next
+        }
+        normalized :: if upper -> U8{Int.from_u8(byte) + 32} else -> byte
+        component = "{component}{String.from_bytes([U8]{normalized}) ?? ""}"
+    }
+    jet_cli_receipt_secret_component(component)
+}
+
+fn jet_cli_receipt_secret_environment(name: String) -> Bool Never! {
+    if jet_cli_receipt_secret_name(name) -> return true
+    normalized :: name.to_lower()
+    loop part in ([String]{"secret", "token", "password", "passwd", "credential", "key"}) {
+        if normalized.contains(part) -> return true
+    }
+    false
+}
+
+fn jet_cli_receipt_argv_identity(argv: [String]) -> [U8] Never! {
+    out := [U8]{}
+    redact_next := false
+    loop arg in argv {
+        if redact_next {
+            jet_cli_receipt_frame(&out, "<redacted>".bytes())
+            redact_next = false
+            next
+        }
+        pieces :: arg.split("=").to_list()
+        if pieces.len() > 1 {
+            value :: if jet_cli_receipt_secret_name(pieces[0]) -> "{pieces[0]}=<redacted>" else -> arg
+            jet_cli_receipt_frame(&out, value.bytes())
+            next
+        }
+        jet_cli_receipt_frame(&out, arg.bytes())
+        redact_next = jet_cli_receipt_secret_name(arg)
+    }
+    out
+}
+
+fn jet_cli_receipt_environment_identity(names: [String]) -[Env]> [U8] Never! {
+    sorted := names
+    &sorted.sort()
+    out := [U8]{}
+    loop name in sorted {
+        if ([String]{"INVOCATION_ID", "JET_RECEIPT_BYPASS", "NIX_BUILD_TOP", "TEMP", "TEMPDIR", "TMP", "TMPDIR"}).contains(name) -> next
+        value :: cli_sys.get(name) ?? next
+        jet_cli_receipt_frame(&out, name.bytes())
+        jet_cli_receipt_frame(&out, (if jet_cli_receipt_secret_environment(name) -> "<redacted>" else -> value).bytes())
+    }
+    out
+}
+
+fn jet_cli_receipt_regular(path: String) -[FS]> Bool Never! {
+    if cli_files.stat(path) == .Ok(info) -> return info.is_file && !info.is_symlink
+    false
+}
+
+fn jet_cli_receipt_tool_path(name: String) -[FS, Env]> String? Never! {
+    if name == "jet" {
+        path :: cli_sys.executable()
+        return if path == "" -> None else -> Val(path)
+    }
+    path :: cli_sys.get("PATH") ?? return None
+    loop directory in path.split(":") {
+        candidate :: if directory == "" -> name else -> jet_cli_rooted_join(directory, name)
+        if jet_cli_receipt_regular(candidate) -> return Val(candidate)
+    }
+    None
+}
+
+fn jet_cli_receipt_context_identity(verb: String, argv: [String], terminal: [U8]) -[FS, Env]> [U8] JetCLIReadError! {
+    if verb == "" -> return Err(jet_cli_read_error("receipt verb is empty"))
+    if terminal.len() != 3 -> return Err(jet_cli_read_error("receipt terminal identity requires three host bits"))
+    loop bit in terminal {
+        if bit != (U8{48}) && bit != (U8{49}) -> return Err(jet_cli_read_error("receipt terminal identity requires three host bits"))
+    }
+    out := jet_cli_receipt_section_marker(JET_CLI_RECEIPT_MAGIC)
+    jet_cli_receipt_frame(&out, verb.bytes())
+    jet_cli_receipt_frame(&out, (cli_sys.current_dir() ?? ".").bytes())
+    jet_cli_receipt_frame(&out, jet_cli_receipt_argv_identity(argv))
+    names :: cli_sys.vars() ?? return Err(jet_cli_read_error("could not read receipt environment: {err}"))
+    jet_cli_receipt_frame(&out, jet_cli_receipt_environment_identity(names))
+    tools := [U8]{}
+    loop name in ([String]{"jet", "jetpack", "rustc", "cargo", "wasm-tools"}) {
+        jet_cli_receipt_frame(&tools, name.bytes())
+        path :: jet_cli_receipt_tool_path(name) ?? {
+            jet_cli_receipt_frame(&tools, "missing".bytes())
+            next
+        }
+        jet_cli_receipt_frame(&tools, path.bytes())
+        digest :: if name == "jet" -> cli_sys.get(JET_CLI_COMPILER_IDENTITY_ENV) ?? return Err(jet_cli_read_error("packaging host did not supply compiler identity")) else -> {
+            if cli_files.read_bytes(path) == {
+                .Ok(bytes) -> receipt_crypto.sha256(bytes).hex()
+                .Err(_) -> "unreadable"
+            }
+        }
+        jet_cli_receipt_frame(&tools, digest.bytes())
+    }
+    jet_cli_receipt_frame(&out, tools)
+    jet_cli_receipt_frame(&out, terminal)
+    Ok(out)
+}
+
+// Checked root discovery is authoritative; the lexical floor retains changed
+// malformed authorities so they cannot make an old claim appear current.
+fn jet_cli_receipt_authority_roots(cache: &WorkspaceDeclarationCache, start: String) -[FS, Env]> [String] Never! {
+    root := cli_files.realpath(start) ?? start
+    if jet_cli_find_workspace_root_checked(&cache, start) == .Ok(found) && found == .Val(found_root) {
+        root = found_root
+    } else if jet_cli_find_package_root_checked(&cache, start) == .Ok(found) && found == .Val(found_root) {
+        root = found_root
+    }
+    roots := [String]{root}
+    directory := start
+    package_seen := false
+    loop {
+        package :: jet_cli_receipt_regular(jet_cli_rooted_join(directory, "package.jet")) || jet_cli_receipt_regular(jet_cli_rooted_join(directory, "pkg.jet"))
+        workspace :: jet_cli_receipt_regular(jet_cli_rooted_join(directory, "workspace.jet"))
+        if package && !package_seen {
+            &roots.push(directory)
+            package_seen = true
+        }
+        if workspace {
+            &roots.push(directory)
+            break
+        }
+        directory = AuthorityResolver.authority_walk_parent(directory) ?? break
+    }
+    jet_cli_lock_canonical(roots)
+}
+
+fn jet_cli_receipt_generated_paths(path: String, strict: Bool, paths: &[String]) JetCLIReadError! -[FS]> {
+    info :: cli_files.stat(path) ?? {
+        if jet_cli_rooted_missing(err) -> return
+        if !strict -> return
+        return Err(jet_cli_read_error("couldn't inspect canonical generated inputs `{path}`: {jet_cli_io_error_text(err)}"))
+    }
+    if info.is_symlink {
+        if strict -> return Err(jet_cli_read_error("canonical generated inputs `{path}` must not contain a symlink"))
+        return
+    }
+    if info.is_file {
+        &paths.push(path)
+        return
+    }
+    if !info.is_dir -> return
+    held :: JetCLIRootedDirectory.open(path, [String]{}, false) ?? return Err(err)
+    entries :: held.list() ?? return Err(err)
+    loop entry in entries {
+        if entry.is_dir && ([String]{".git", "target", "build"}).contains(entry.name) && !strict -> next
+        jet_cli_receipt_generated_paths(jet_cli_rooted_join(path, entry.name), strict, &paths)
+    }
+}
+
+fn jet_cli_comparison_input_paths(cache: &WorkspaceDeclarationCache, target: String) -[FS, Env]> [String] JetCLIReadError! {
+    absolute :: cli_files.realpath(target) ?? return Err(jet_cli_read_error("could not canonicalize input {target}: {jet_cli_io_error_text(err)}"))
+    if !jet_cli_receipt_regular(target) -> return Err(jet_cli_read_error("receipt input is not a regular file: {target}"))
+    directory :: AuthorityResolver.authority_walk_root(absolute) ?? return Err(jet_cli_read_error("could not resolve comparison corpus directory"))
+    paths := [String]{absolute}
+    loop root in jet_cli_receipt_authority_roots(&cache, directory) {
+        loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
+            path :: jet_cli_rooted_join(root, name)
+            if jet_cli_receipt_regular(path) -> &paths.push(path)
+        }
+        jet_cli_receipt_generated_paths(jet_cli_rooted_join(root, ".jet/generated"), false, &paths)
+    }
+    Ok(jet_cli_lock_canonical(paths))
+}
+
+fn jet_cli_receipt_claim(verb: String, paths: [String], argv: [String], terminal: [U8]) -[FS, Env, Time.Wait]> JetCLIReceiptClaim JetCLIReadError! {
+    identity := jet_cli_receipt_context_identity(verb, argv, terminal)
+    inputs := [JetCLIReceiptInput]{}
+    loop path in paths {
+        canonical :: cli_files.realpath(path) ?? return Err(jet_cli_read_error("could not canonicalize input {path}: {jet_cli_io_error_text(err)}"))
+        observed :: jet_cli_receipt_observe_input(JetCLIReceiptInput{path: canonical, digest: ""})
+        &inputs.push(observed)
+    }
+    &inputs.sort_by((left: JetCLIReceiptInput, right: JetCLIReceiptInput) -> left.path <=> right.path)
+    previous := ""
+    unique := [JetCLIReceiptInput]{}
+    loop input in inputs {
+        if input.path == previous -> next
+        previous = input.path
+        jet_cli_receipt_frame(&identity, input.path.bytes())
+        jet_cli_receipt_frame(&identity, input.digest.bytes())
+        &unique.push(input)
+    }
+    Ok(JetCLIReceiptClaim{verb: verb, key: receipt_crypto.sha256(identity).hex(), inputs: unique})
+}
+
+fn jet_cli_receipt_canonical_member(input: JetCLIReceiptInput, cwd: String, members: &[JetCLIReceiptInput]) JetCLIReadError! {
+    path := input.path.replace("\\", "/")
+    prefix :: if cwd.ends_with("/") -> cwd else -> "{cwd}/"
+    if path.starts_with(prefix) -> path = path.removeprefix(prefix)
+    components :: path.split("/").to_list()
+    loop index in 1..<components.len() {
+        if components[index - 1] == ".jet" && components[index] == "generated" -> return
+    }
+    loop member in members {
+        if member.path != path -> next
+        if member.digest != input.digest -> return Err(jet_cli_read_error("canonical target identity has conflicting digests for `{path}`"))
+        return
+    }
+    &members.push(JetCLIReceiptInput{path: path, digest: input.digest})
+}
+
+struct JetCLICanonicalTargetIdentity {
+    input_sha256: String
+    authority_root: String
+}
+fn jet_cli_receipt_target_identity(cache: &WorkspaceDeclarationCache, target: String, inputs: [JetCLIReceiptInput]) -[FS, Env, Time.Wait]> JetCLICanonicalTargetIdentity JetCLIReadError! {
+    target_info :: cli_files.stat(target) ?? return Err(jet_cli_read_error("couldn't inspect canonical target `{target}`: {jet_cli_io_error_text(err)}"))
+    if target_info.is_symlink -> return Err(jet_cli_read_error("canonical target `{target}` must not be a symlink"))
+    start :: AuthorityResolver.authority_walk_root(target) ?? return Err(jet_cli_read_error("couldn't resolve canonical target directory"))
+    roots := [String]{}
+    if jet_cli_find_workspace_root_checked(&cache, start) == {
+        .Ok(found) -> { if found == .Val(root) -> &roots.push(root) }
+        .Err(error) -> { return Err(jet_cli_read_error("couldn't resolve workspace authority for `{target}`: {error.diagnostic}")) }
+    }
+    if jet_cli_find_package_root_checked(&cache, start) == {
+        .Ok(found) -> { if found == .Val(root) -> &roots.push(root) }
+        .Err(error) -> { return Err(jet_cli_read_error("couldn't resolve package authority for `{target}`: {error.diagnostic}")) }
+    }
+    authority_root :: jet_cli_selected_project_root(&cache, start) ?? return Err(jet_cli_read_error("couldn't resolve the workspace root for `{target}`: {err.diagnostic}"))
+    cwd :: cli_sys.current_dir() ?? "."
+    members := [JetCLIReceiptInput]{}
+    loop input in inputs -> jet_cli_receipt_canonical_member(input, cwd, &members)
+    loop root in jet_cli_lock_canonical(roots) {
+        loop name in ([String]{"package.jet", "pkg.jet", "workspace.jet", "build.jet", ".jet/lock"}) {
+            path :: jet_cli_rooted_join(root, name)
+            info :: cli_files.stat(path) ?? {
+                if jet_cli_rooted_missing(err) -> next
+                return Err(jet_cli_read_error("couldn't inspect canonical authority input `{path}`: {jet_cli_io_error_text(err)}"))
+            }
+            if info.is_symlink -> return Err(jet_cli_read_error("canonical authority input `{path}` must not be a symlink"))
+            if !info.is_file -> next
+            observed :: jet_cli_receipt_observe_input(JetCLIReceiptInput{path: path, digest: ""})
+            jet_cli_receipt_canonical_member(observed, cwd, &members)
+        }
+        generated := [String]{}
+        jet_cli_receipt_generated_paths(jet_cli_rooted_join(root, ".jet/generated"), true, &generated)
+        loop path in generated {
+            observed :: jet_cli_receipt_observe_input(JetCLIReceiptInput{path: path, digest: ""})
+            jet_cli_receipt_canonical_member(observed, cwd, &members)
+        }
+    }
+    &members.sort_by((left: JetCLIReceiptInput, right: JetCLIReceiptInput) -> left.path <=> right.path)
+    text := ""
+    loop member in members -> text = "{text}{{\"path\":{foundation_json_quote(member.path)},\"sha256\":{foundation_json_quote(member.digest)}}}\n"
+    Ok(JetCLICanonicalTargetIdentity{input_sha256: receipt_crypto.sha256(text.bytes()).hex(), authority_root: authority_root})
+}

@@ -31,17 +31,23 @@ const BACKEND_DEV_HOST_PROFILE: &str = "\n[profile.dev.package.jet-foundation]\n
 /// Parallel rustc jobs (and codegen tokens) of a backend build. The
 /// stage-zero backend build runs inside the bootstrap test's memory cap, so
 /// at most this many unit or repository crates compile at once. Measured
-/// peaks: sharded unit crates <= 2.1 GB each, jet_jit 5.7 GB, so six jobs
-/// stay well inside a 22 GB cap.
+/// peaks: sharded unit crates <= 2.1 GB each, jet_evalhost <= 5.7 GB, so six
+/// jobs stay well inside a 22 GB cap. `JET_BACKEND_BUILD_JOBS` overrides it
+/// (`backend_build_jobs`).
 const BACKEND_BUILD_JOBS: &str = "6";
 /// Stack for the backend build's rustc threads (`RUST_MIN_STACK`): the
 /// emitted units' deeply nested blocks overflow rustc's default 8 MiB in
 /// LLVM's debuginfo scope walk (`DwarfCompileUnit::createAndAddScopeChildren`).
 const BACKEND_RUSTC_STACK: &str = "268435456";
 /// A unit crate longer than this is sharded (`shard_unit`) into crates of
-/// about this size: rustc's memory grows with the crate, and the compiler's
-/// largest units alone would not fit the bootstrap's memory cap.
-const BACKEND_SHARD_BYTES: usize = 12 << 20;
+/// at most about this size on average: rustc's memory and time grow with
+/// the crate, and one rustc per shard is the backend build's unit of
+/// parallelism. At 12 MB the compiler's unit split into 13 hot shards whose
+/// slowest took 590 s at opt-level 1 after the 128 s facade, the whole
+/// backend build's critical path; 4 MB shards spread the same code over
+/// several times as many rustc runs. `JET_BACKEND_SHARD_BYTES` overrides it
+/// (`backend_shard_bytes`).
+const BACKEND_SHARD_BYTES: usize = 4 << 20;
 /// Impl methods at least this long move out of a sharded unit's facade.
 const BACKEND_DELEGATE_METHOD_BYTES: usize = 2048;
 /// A moved function at least this long is cold (`shard_unit`) whatever its
@@ -49,6 +55,8 @@ const BACKEND_DELEGATE_METHOD_BYTES: usize = 2048;
 /// function (one function is one codegen unit). Measured at opt-level 2:
 /// seven Jet functions of 200-455 KB (2.3 MB) build in 55 s at 1.1 GB, while
 /// a shard holding 2-3 MB decoders and tables took 773 s at 9.1 GB.
+/// `JET_BACKEND_COLD_FUNCTION_BYTES` overrides it
+/// (`backend_cold_function_bytes`).
 const BACKEND_COLD_FUNCTION_BYTES: usize = 1 << 20;
 /// Traits whose impl methods are cold (`shard_unit`): the derived codecs run
 /// only on compiler image load and save, derived orderings rarely, and their
@@ -62,9 +70,46 @@ const BACKEND_COLD_TRAITS: [&str; 3] = ["__jet_Decode", "__jet_Encode", "__jet_C
 const BACKEND_COLD_PROFILE: &str = "opt-level = 0\ndebug = false\n";
 /// `BACKEND_BUILD_JOBS` of a release-profile backend build. Measured peaks:
 /// 12 MB hot shards about 3 GB (opt-level 2), the runtime 2 GB, the largest
-/// cold shard 4.6 GB (opt-level 0); with jet_jit (5.7 GB in dev) five jobs
-/// stay under a 22 GB cap.
+/// cold shard 4.6 GB (opt-level 0); with jet_evalhost (<= 5.7 GB in dev) five
+/// jobs stay under a 22 GB cap.
 const BACKEND_RELEASE_BUILD_JOBS: &str = "5";
+
+/// A positive integer from environment variable `name`, if set and
+/// non-empty; any other value is a harness misconfiguration.
+fn backend_env_count(name: &str) -> Option<usize> {
+    let value = std::env::var(name).ok().filter(|value| !value.is_empty())?;
+    match value.parse::<usize>() {
+        Ok(count) if count > 0 => Some(count),
+        _ => panic!("`{name}` must be a positive integer, not `{value}`"),
+    }
+}
+
+/// The shard size of backend unit crates: `JET_BACKEND_SHARD_BYTES`, else
+/// `BACKEND_SHARD_BYTES`. Smaller shards trade more crates (each re-reading
+/// its facade's metadata) for shorter critical-path rustc runs and more
+/// parallelism; shard boundaries never change what the program does.
+fn backend_shard_bytes() -> usize {
+    backend_env_count("JET_BACKEND_SHARD_BYTES").unwrap_or(BACKEND_SHARD_BYTES)
+}
+
+/// The size from which a moved function is cold:
+/// `JET_BACKEND_COLD_FUNCTION_BYTES`, else `BACKEND_COLD_FUNCTION_BYTES`.
+/// Cold shards build unoptimized under the release profile, so a lower
+/// threshold trades the run time of the largest functions for a shorter
+/// backend critical path.
+fn backend_cold_function_bytes() -> usize {
+    backend_env_count("JET_BACKEND_COLD_FUNCTION_BYTES").unwrap_or(BACKEND_COLD_FUNCTION_BYTES)
+}
+
+/// Parallel rustc jobs of a backend build: `JET_BACKEND_BUILD_JOBS`, else
+/// `BACKEND_BUILD_JOBS` (dev) or `BACKEND_RELEASE_BUILD_JOBS` (release
+/// profile).
+fn backend_build_jobs(release: bool) -> String {
+    backend_env_count("JET_BACKEND_BUILD_JOBS").map_or_else(
+        || (if release { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS }).to_string(),
+        |jobs| jobs.to_string(),
+    )
+}
 /// `JET_STAGE_ZERO_PROFILE=release` builds this test run's backend artifacts
 /// (jetc0 above all) with this Cargo profile instead of dev: stage one is
 /// jetc0 compiling the whole compiler, where a debug jetc0 is many times
@@ -92,17 +137,29 @@ const UNINIT_FIXED_PARTIAL_EXIT_SOURCE: &str =
 const SMALL_PROGRAM_SOURCE: &str = r#"SOURCE_TEXT :: prep { "π🙂" }
 SOURCE_LIST :: prep { [Int]{7, 8} }
 SOURCE_BYTES :: prep { SOURCE_TEXT.bytes() }
-MATERIALIZED_TEXT :: prep { ~(SOURCE_TEXT.after("")) }
-MATERIALIZED_LIST :: prep { ~(SOURCE_LIST[0..<SOURCE_LIST.len()]) }
-MATERIALIZED_BYTES :: prep { ~(SOURCE_BYTES[0..<SOURCE_BYTES.len()]) }
+MATERIALIZED_TEXT :: prep { SOURCE_TEXT.after("").copy() }
+MATERIALIZED_LIST :: prep { SOURCE_LIST[0..<SOURCE_LIST.len()].copy() }
+MATERIALIZED_BYTES :: prep { SOURCE_BYTES[0..<SOURCE_BYTES.len()].copy() }
 MATERIALIZED_LIST_LEN :: prep { MATERIALIZED_LIST.len() }
 MATERIALIZED_BYTES_LEN :: prep { MATERIALIZED_BYTES.len() }
+MIR_INTEGER_MAX :: 18446744073709551615
 
-pub fn main() {
+fn main() {
     print("bootstrap-small-program")
     print("{MATERIALIZED_TEXT}")
     print("{MATERIALIZED_LIST_LEN}")
     print("{MATERIALIZED_BYTES_LEN}")
+    direct := 18446744073709551615
+    sized := U64{18446744073709551615}
+    a := 'a'
+    space := ' '
+    non_ascii := 'π'
+    scalar_keys := [Char:Int]{'a': 97, ' ': 32, 'π': 960}
+    print("{MIR_INTEGER_MAX}")
+    print("{direct}")
+    print("{sized}")
+    print("{a}{space}{non_ascii}")
+    print("{scalar_keys.len()}")
 }
 "#;
 const SMALL_PROGRAM_MANIFEST: &str = r#"name: "bootstrap_small"
@@ -251,12 +308,12 @@ impl Drop for BootstrapTaskRootsCursorState {
 }
 // bootstrap:task-roots-end
 fn assert_source_completion_retired(
-    completion: ::jet_jit::SourceExecutionCompletion,
+    completion: ::jet_evalhost::SourceExecutionCompletion,
 ) {
     match completion.disposition {
-        ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+        ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
             retirement: Some(
-                ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
             ),
             ..
         } => {
@@ -384,15 +441,178 @@ fn bootstrap_mir_calls_target(
             _ => false,
         })
 }
+/// Size-class allocator for the compiler process. Blocks up to 32 KiB with
+/// alignment up to 16 come from per-thread free lists refilled by bumping
+/// through 1 MiB chunks; everything else goes to the system allocator.
+/// A freed block joins the freeing thread's list for its class, so the hot
+/// path is a thread-local pop or push with no locking and no headers.
+/// Chunks are never returned to the system: the compiler is a run-to-exit
+/// process, and reuse within a class bounds the retained memory.
+mod jet_class_allocator {
+    use std::alloc::{GlobalAlloc, Layout, System};
+    use std::cell::UnsafeCell;
+    use std::ptr::null_mut;
+
+    const CLASS_COUNT: usize = 44;
+    const MAX_SMALL: usize = 32 * 1024;
+    const MAX_ALIGN: usize = 16;
+    const CHUNK_BYTES: usize = 1 << 20;
+
+    const fn class_size(class: usize) -> usize {
+        if class < 16 {
+            (class + 1) * 16
+        } else {
+            let step = class - 16;
+            let lg = 8 + step / 4;
+            (5 + step % 4) << (lg - 2)
+        }
+    }
+
+    const CLASS_SIZES: [usize; CLASS_COUNT] = {
+        let mut sizes = [0; CLASS_COUNT];
+        let mut class = 0;
+        while class < CLASS_COUNT {
+            sizes[class] = class_size(class);
+            class += 1;
+        }
+        sizes
+    };
+
+    #[inline(always)]
+    fn class_of(size: usize) -> usize {
+        if size <= 256 {
+            (size.max(1) + 15) / 16 - 1
+        } else {
+            let s = size - 1;
+            let lg = (usize::BITS - 1 - s.leading_zeros()) as usize;
+            16 + (lg - 8) * 4 + ((s >> (lg - 2)) & 3)
+        }
+    }
+
+    #[inline(always)]
+    fn is_small(size: usize, align: usize) -> bool {
+        size <= MAX_SMALL && align <= MAX_ALIGN
+    }
+
+    struct Cache {
+        heads: [*mut u8; CLASS_COUNT],
+        bump: *mut u8,
+        end: *mut u8,
+    }
+
+    thread_local! {
+        static CACHE: UnsafeCell<Cache> = const {
+            UnsafeCell::new(Cache { heads: [null_mut(); CLASS_COUNT], bump: null_mut(), end: null_mut() })
+        };
+    }
+
+    #[cold]
+    #[inline(never)]
+    unsafe fn refill(cache: &mut Cache, size: usize) -> *mut u8 {
+        if (cache.end as usize) - (cache.bump as usize) < size {
+            let chunk = unsafe { System.alloc(Layout::from_size_align_unchecked(CHUNK_BYTES, 4096)) };
+            if chunk.is_null() {
+                return null_mut();
+            }
+            cache.bump = chunk;
+            cache.end = unsafe { chunk.add(CHUNK_BYTES) };
+        }
+        let block = cache.bump;
+        cache.bump = unsafe { block.add(size) };
+        block
+    }
+
+    #[inline(always)]
+    unsafe fn take(class: usize) -> *mut u8 {
+        CACHE.with(|cell| {
+            let cache = unsafe { &mut *cell.get() };
+            let head = cache.heads[class];
+            if !head.is_null() {
+                cache.heads[class] = unsafe { *(head as *mut *mut u8) };
+                return head;
+            }
+            unsafe { refill(cache, CLASS_SIZES[class]) }
+        })
+    }
+
+    #[inline(always)]
+    unsafe fn give(ptr: *mut u8, class: usize) {
+        CACHE.with(|cell| {
+            let cache = unsafe { &mut *cell.get() };
+            unsafe { *(ptr as *mut *mut u8) = cache.heads[class] };
+            cache.heads[class] = ptr;
+        })
+    }
+
+    pub struct JetClassAllocator;
+
+    unsafe impl GlobalAlloc for JetClassAllocator {
+        #[inline]
+        unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+            if is_small(layout.size(), layout.align()) {
+                unsafe { take(class_of(layout.size())) }
+            } else {
+                unsafe { System.alloc(layout) }
+            }
+        }
+
+        #[inline]
+        unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+            if is_small(layout.size(), layout.align()) {
+                let ptr = unsafe { take(class_of(layout.size())) };
+                if !ptr.is_null() {
+                    unsafe { ptr.write_bytes(0, layout.size()) };
+                }
+                ptr
+            } else {
+                unsafe { System.alloc_zeroed(layout) }
+            }
+        }
+
+        #[inline]
+        unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+            if is_small(layout.size(), layout.align()) {
+                unsafe { give(ptr, class_of(layout.size())) }
+            } else {
+                unsafe { System.dealloc(ptr, layout) }
+            }
+        }
+
+        #[inline]
+        unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+            let align = layout.align();
+            let old_small = is_small(layout.size(), align);
+            let new_small = is_small(new_size, align);
+            if !old_small && !new_small {
+                return unsafe { System.realloc(ptr, layout, new_size) };
+            }
+            if old_small && new_small && class_of(layout.size()) == class_of(new_size) {
+                return ptr;
+            }
+            let new_layout = unsafe { Layout::from_size_align_unchecked(new_size, align) };
+            let fresh = unsafe { self.alloc(new_layout) };
+            if !fresh.is_null() {
+                unsafe { std::ptr::copy_nonoverlapping(ptr, fresh, layout.size().min(new_size)) };
+                unsafe { self.dealloc(ptr, layout) };
+            }
+            fresh
+        }
+    }
+}
+
+#[global_allocator]
+static JET_COMPILER_ALLOCATOR: jet_class_allocator::JetClassAllocator = jet_class_allocator::JetClassAllocator;
+
 /// The generated compiler recurses over a whole compiler unit (parser, sema,
 /// lowering, emission). The process main thread only has the `ulimit -s`
 /// stack, so the harness runs on its own thread with a large reserved stack
 /// (address space, committed page by page). Overflowing it hits the guard
 /// page, and std reports `thread 'jet-bootstrap' has overflowed its stack`
 /// instead of a bare SIGSEGV; a panic keeps its message and exit status 101.
+const BOOTSTRAP_STACK_BYTES: usize = 512 * 1024 * 1024;
+
 #[doc(hidden)]
 fn main() {
-    const BOOTSTRAP_STACK_BYTES: usize = 512 * 1024 * 1024;
     let worker = std::thread::Builder::new()
         .name("jet-bootstrap".to_string())
         .stack_size(BOOTSTRAP_STACK_BYTES)
@@ -405,6 +625,13 @@ fn main() {
 
 #[doc(hidden)]
 fn __jet_bootstrap_harness_main() {
+    // The shared E3012 budget (`JET_RUNTIME_STACK_LIMIT` frames) is sized for
+    // an 8 MiB program stack; the compiler's own recursion over a whole unit
+    // is deeper. This process is a host that knows its stacks: this thread's
+    // is `BOOTSTRAP_STACK_BYTES` (64Ki frames), and every thread the compiler
+    // spawns (scheduler workers, task groups, para chunks) derives its budget
+    // from its own stack at the same per-frame assumption.
+    jet_runtime_stack_scale_to_host(BOOTSTRAP_STACK_BYTES);
     let mode = std::env::var("JET_BOOTSTRAP_MODE")
         .unwrap_or_else(|error| panic!("bootstrap mode is unavailable: {error}"));
     let factory_tier_name = std::env::var("JET_BOOTSTRAP_FACTORY_TIER")
@@ -415,6 +642,23 @@ fn __jet_bootstrap_harness_main() {
             "unknown bootstrap factory tier `{factory_tier_name}`: stage zero runs the compiler factory only as AOT"
         ),
     };
+    if mode == "image-identity-check" {
+        let image = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("cannot restore compiler identity: {error}"));
+        let cached = crate::__jet_bootstrap_compiler_image()
+            .unwrap_or_else(|error| panic!("cannot reuse compiler identity: {error}"));
+        assert!(std::sync::Arc::ptr_eq(&image, &cached), "compiler image cache changed owner");
+        let fresh = image.program.sealed_execution_identity(Some(image.header.artifact))
+            .unwrap_or_else(|error| panic!("cannot recompute compiler identity: {error}"));
+        let encode = crate::compiler_bootstrap_compiler_image::encode_identity;
+        assert_eq!(
+            encode(&image.header.identity).expect("cannot encode cached compiler identity"),
+            encode(&fresh).expect("cannot encode fresh compiler identity"),
+            "cached compiler identity differs from the same artifact"
+        );
+        println!("compiler-image-identity-check: complete");
+        return;
+    }
     // JET_BOOTSTRAP_BATCH names a file of `source_root<TAB>entry<TAB>output<TAB>receipt`
     // rows: one process compiles them in order, restoring the compiler image
     // once. A panicking entry is reported between its `jet-bootstrap-batch:`
@@ -532,11 +776,35 @@ fn __jet_bootstrap_harness_entry(
             ]),
         );
         assert!(crate::__jet_bootstrap_type_from_host(&zero_trait_ty).is_err());
+        for ssa_value in [None, Some(::jet_foundation::MIR::MirValueId(41))] {
+            let local = ::jet_foundation::MIR::MirLocal {
+                id: ::jet_foundation::MIR::MirLocalId(43),
+                name: "$int-owner".to_string(),
+                span: ::jet_foundation::Diagnostics::Span::new(1, 2),
+                ty: present.clone(),
+                place: ::jet_foundation::MIR::MirPlaceId(47),
+                ssa_value,
+                mutable: true,
+                ownership: ::jet_foundation::MIR::MirOwnership::copy_value(),
+                comptime: false,
+                uninit: false,
+                arena_view: false,
+                string_view: false,
+                gc_root: false,
+            };
+            let carrier = crate::__jet_bootstrap_mir_MIRLocal_from_host(&local)
+                .expect("Copy+Value local encoding");
+            let restored = crate::__jet_bootstrap_mir_MIRLocal_to_host(&carrier)
+                .expect("Copy+Value local decoding");
+            assert_eq!(restored.ssa_value, ssa_value);
+            assert_eq!(restored.ownership, local.ownership);
+            assert_eq!(restored.ty, local.ty);
+        }
         std::fs::write(&output_path, "identity=absent,present\ntrait=exact-id-name\n")
             .unwrap_or_else(|error| panic!("cannot write optional codec result: {error}"));
         std::fs::write(
             &receipt_path,
-            "mode=optional-roundtrip\nidentity_absent=roundtrip\nidentity_present=roundtrip\ntrait_id_name=roundtrip\ntrait_zero=rejected\n",
+            "mode=optional-roundtrip\nidentity_absent=roundtrip\nidentity_present=roundtrip\ntrait_id_name=roundtrip\ntrait_zero=rejected\nint_copy_value=roundtrip\nssa_value_absent_present=roundtrip\n",
         )
         .unwrap_or_else(|error| panic!("cannot write optional codec receipt: {error}"));
         return;
@@ -548,7 +816,7 @@ fn __jet_bootstrap_harness_entry(
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
             compiler_image.artifact,
         );
-        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
         let mut completion_owner =
             crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                 completion_scope.clone(),
@@ -602,7 +870,7 @@ fn __jet_bootstrap_harness_entry(
         let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
             compiler_image.header.artifact,
         );
-        let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+        let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
         let mut completion_owner =
             crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                 completion_scope.clone(),
@@ -688,7 +956,7 @@ fn __jet_bootstrap_harness_entry(
         );
 
         let close_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let cursor_handle = ::jet_jit::SourceResources::loop_cursor_handle_id();
+        let cursor_handle = ::jet_evalhost::SourceResources::loop_cursor_handle_id();
         let cursor_state = BootstrapTaskRootsCursorState {
             close_count: close_count.clone(),
         };
@@ -699,6 +967,7 @@ fn __jet_bootstrap_harness_entry(
             .unwrap_or_else(|error| panic!("cannot register task-root Source cursor: {error}"));
         let fixture_ok = crate::__jet_bootstrap_task_roots_fixture(
             &mut source_program,
+            checked_mir,
             &mut runtime_config,
             &callback_id,
             &capability.handle,
@@ -725,16 +994,16 @@ fn __jet_bootstrap_harness_entry(
         let shared_finalizer = finalizer.id;
         let shared_finalizer_return_type = finalizer.return_type.clone();
         fn assert_shared_finalizer_completed(
-            completion: ::jet_jit::SourceExecutionCompletion,
+            completion: ::jet_evalhost::SourceExecutionCompletion,
             helper: ::jet_foundation::MIR::MirFunctionId,
             mir: &::jet_foundation::MIR::MirProgram,
             return_type: &::jet_foundation::MIR::MirType,
         ) {
             assert_eq!(completion.function, Some(helper));
             match completion.disposition {
-                ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
                     retirement: Some(
-                        ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                        ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
                     ),
                     writebacks,
                     ..
@@ -831,7 +1100,7 @@ fn __jet_bootstrap_harness_entry(
                 .unwrap_or_else(|error| panic!("task-root Source resource retirement failed: {error:?}"))
             {
                 if let Err(completion) =
-                    ::jet_jit::SourceExecutionCompletionScope::record_current(completion)
+                    ::jet_evalhost::SourceExecutionCompletionScope::record_current(completion)
                 {
                     panic!("task-root parent produced an unrouted completion: {completion:?}");
                 }
@@ -964,6 +1233,10 @@ fn __jet_bootstrap_harness_entry(
     if mode == "task-roots" {
         panic!("this compiler artifact was built without the task-root fixture");
     }
+    let mut source_retirement_receipt = String::new();
+    // An escaped compiler failure (JetDriverCompileResult.internal_problem)
+    // is reported, never dropped: stderr and one receipt line.
+    let mut internal_problem_receipt = String::new();
     let (complete, source, callable_count, type_count, field_count, variant_count, reports, selected_tier, actual_tier) =
         if mode == "factory" {
             let compiler_image = crate::__jet_bootstrap_compiler_image_envelope()
@@ -971,7 +1244,7 @@ fn __jet_bootstrap_harness_entry(
             let execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(
                 compiler_image.artifact,
             );
-            let completion_scope = ::jet_jit::SourceExecutionCompletionScope::new();
+            let completion_scope = ::jet_evalhost::SourceExecutionCompletionScope::new();
             let mut completion_owner =
                 crate::compiler_bootstrap_runner::BootstrapRunCompletionOwner::new(
                     completion_scope.clone(),
@@ -991,12 +1264,35 @@ fn __jet_bootstrap_harness_entry(
                 })
                 .unwrap_or_else(|error| panic!("generated Jet factory authority call failed: {error:?}"))
                 .unwrap_or_else(|error| panic!("generated Jet compiler codec failed: {error:?}"));
+            let library_resources = std::env::var_os("JET_FRONT_LIBRARY_OBJECT_OUTPUT").map(|_| {
+                result.resources.as_ref()
+                    .unwrap_or_else(|| panic!("library-object factory result has no Source resources"))
+                    .arena()
+            });
             if let Some(resources) = result.resources.take() {
                 completion_owner.set_resources(resources);
             }
             drop(result.runtime_config.take());
             completion_owner.allow_resource_retirement();
             finish_source_completion_owner(&completion_owner);
+            if let Some(resources) = library_resources {
+                let requested = resources.is_retirement_requested()
+                    .unwrap_or_else(|error| panic!("cannot inspect library-object retirement request: {error}"));
+                let retired = resources.is_retired()
+                    .unwrap_or_else(|error| panic!("cannot inspect library-object resource retirement: {error}"));
+                let roots = resources.retained_root_count()
+                    .unwrap_or_else(|error| panic!("cannot inspect library-object retained roots: {error}"));
+                assert!(requested, "library-object Source retirement was not requested");
+                assert!(retired, "library-object Source resources did not retire");
+                assert_eq!(roots, 0, "library-object retained Source roots after completion");
+                source_retirement_receipt = format!(
+                    "source_retirement_requested={requested}\nsource_resources_retired={retired}\nsource_retained_roots={roots}\n"
+                );
+            }
+            if let Some(problem) = result.internal_problem.as_ref() {
+                eprintln!("jet factory: compiler internal failure: {problem}");
+                internal_problem_receipt = format!("internal_problem={}\n", problem.replace('\n', "\\n"));
+            }
             let counts = result.bindings.as_ref().map_or((0, 0, 0, 0), |bindings| {
                 (
                     bindings.callables.len(),
@@ -1029,12 +1325,12 @@ fn __jet_bootstrap_harness_entry(
                 execution,
             };
             fn assert_source_completion_retired(
-                completion: ::jet_jit::SourceExecutionCompletion,
+                completion: ::jet_evalhost::SourceExecutionCompletion,
             ) {
                 match completion.disposition {
-                    ::jet_jit::SourceExecutionCompletionDisposition::Invoked {
+                    ::jet_evalhost::SourceExecutionCompletionDisposition::Invoked {
                         retirement: Some(
-                            ::jet_jit::SourceExecutionCompletionRetirement::Completed(retirement),
+                            ::jet_evalhost::SourceExecutionCompletionRetirement::Completed(retirement),
                         ),
                         ..
                     } => {
@@ -1163,6 +1459,8 @@ fn __jet_bootstrap_harness_entry(
         reports.len(),
     );
     receipt.push_str(&format!("selected_factory_tier={selected_tier:?}\nactual_factory_tier={actual_tier:?}\n"));
+    receipt.push_str(&source_retirement_receipt);
+    receipt.push_str(&internal_problem_receipt);
     for report in reports {
         receipt.push_str("report_json=");
         receipt.push_str(&report.json());
@@ -1170,6 +1468,11 @@ fn __jet_bootstrap_harness_entry(
     }
     receipt.push_str("compiler_identity=");
     receipt.push_str(option_env!("JET_COMPILER_BUILD_ID").unwrap_or("unavailable"));
+    receipt.push('\n');
+    // The identity the factory's HostFacts carry (Host/Native.rs): native CLI
+    // stages need the same `name@version#source-id` in JET_COMPILER_IDENTITY.
+    receipt.push_str("compiler_source_identity=");
+    receipt.push_str(&option_env!("JET_COMPILER_SOURCE_ID").map(|value| format!("{}@{}#{}", ::jet_foundation::Syntax::BINARY_NAME, ::jet_pkg_model::Manifest::COMPILER_VERSION, value)).unwrap_or_else(|| "unavailable".to_string()));
     receipt.push('\n');
     std::fs::write(&receipt_path, receipt)
         .unwrap_or_else(|error| panic!("cannot write generated bootstrap receipt: {error}"));
@@ -1301,7 +1604,7 @@ fn emit_stage_zero_source(
     // The compiler unit has no `fn run`: the Host/Runner splice supplies the
     // Rust `main`, so the unit lowers as a `NativeLibrary` (D4), never as an
     // executable without an entry.
-    let (bundle, _lints, reference_ffi) =
+    let (bundle, _lints, reference_ffi, checked_nominals, _effect_facts) =
         crate::Driver::check_bundle_path_with_source_closure_for_artifact(
             &compiler_snapshot.entry_path,
             crate::Sema::CompileMode::Check,
@@ -1309,7 +1612,21 @@ fn emit_stage_zero_source(
             &source_closure,
         )
         .unwrap_or_else(|diagnostics| {
-            panic!("stage-zero Rust frontend rejected compiler sources: {diagnostics:?}")
+            // Keep every canonical report, not the Debug representation of its
+            // origin: Debug repeats the complete assembled source per report.
+            let file = jet_foundation::Report::ReportPath::from_process(
+                &compiler_snapshot.entry_path,
+            );
+            let source = fs::read_to_string(&compiler_snapshot.entry_path)
+                .expect("the rejected stage-zero entry source must remain available");
+            let clears = jet_foundation::Diagnostics::report_clear_counts(&diagnostics);
+            for (diagnostic, clears) in diagnostics.iter().zip(clears) {
+                eprintln!("{}", diagnostic.to_json_with_clears(&file, &source, clears));
+            }
+            panic!(
+                "stage-zero Rust frontend rejected compiler sources: {} diagnostics; canonical reports emitted above",
+                diagnostics.len()
+            )
         });
     source_lease
         .revalidate()
@@ -1334,7 +1651,7 @@ fn emit_stage_zero_source(
             MirArtifactBuildMode::Dev,
         );
         let mut lower_span = jet_driver::Trace::span("lower");
-        let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, request);
+        let (mir, artifact) = crate::lower_checked_semantic_mir_program_for(bundle, &checked_nominals, request);
         lower_span.items(mir.functions.len());
         drop(lower_span);
         assert_evaluator_materialization_helpers_in_mir(&mir);
@@ -1344,7 +1661,6 @@ fn emit_stage_zero_source(
         execution.emit_foreign = true;
         execution.emit_metadata = false;
         execution.emit_runtime = true;
-        execution.prune_unreachable_codecs = true;
         execution.release_devtools_policy =
             crate::Driver::release_devtools_policy_for_bundle(bundle, "dev");
         let metadata_config = MirRustConfig {
@@ -1836,6 +2152,46 @@ fn bootstrap_private_self_compile_harness() {
         include_str!("../../Examples/features/expected/basics/pattern_matching.out"),
     );
 
+    // Exercise the real generated Runner/Driver path: metadata is data, not
+    // an automatic request to parse and check unrelated Core owner sources.
+    let core_words = jet_foundation::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+        .iter().map(|row| row.name).collect::<Vec<_>>().join(" ");
+    let core_literals = jet_foundation::CoreModuleExports::CORE_BARE_SOURCE_MODULES
+        .iter().map(|row| format!("\"{}\"", row.name)).collect::<Vec<_>>().join(", ");
+    let core_data_source = format!(
+        "// {core_words} url or_err\n/* {core_words} Clock Path read_file */\n\
+         fn run() {{\n\
+             names :: [String]{{{core_literals}}}\n\
+             raw :: `{core_words} url or_err`\n\
+             multiline :: \"\"\"\n{core_words} url or_err\n\"\"\"\n\
+             nested :: \"{{\"URL\"}}\"\n\
+             print(names.len())\n\
+             print(raw)\n\
+             print(multiline)\n\
+             print(nested)\n\
+         }}\n"
+    );
+    let core_data_project = session.join("core-demand-literal-metadata");
+    write_source_fixture_project(&core_data_project, SOURCE_FIXTURE_MANIFEST, &core_data_source);
+    let core_data_output = session.join("core-demand-literal-metadata.rs");
+    let core_data_receipt = session.join("core-demand-literal-metadata.receipt");
+    run_generated_artifact(
+        &stage_two_binary,
+        "runner",
+        &core_data_project,
+        SMALL_ENTRY_RELATIVE,
+        &core_data_output,
+        &core_data_receipt,
+    );
+    let core_data_receipt_text = fs::read_to_string(&core_data_receipt).unwrap();
+    assert!(core_data_receipt_text.lines().any(|line| line == "complete=true"));
+    let core_data_reports = receipt_reports(&core_data_receipt);
+    assert!(
+        core_data_reports.iter().all(|report| !report.contains("\"severity\":\"error\"")),
+        "literal metadata must not demand unrelated Core: {core_data_reports:?}"
+    );
+    assert!(core_data_output.is_file(), "the checked metadata fixture must emit its backend source");
+
     let invalid_project = session.join("invalid-imported-source");
     let (invalid_entry, invalid_entry_source, imported_source_path, imported_source) =
         write_invalid_import_project(&invalid_project);
@@ -2034,6 +2390,11 @@ fn bootstrap_private_self_compile_harness() {
 
     for (label, source, expected) in [
         (
+            "shared_compound_places",
+            include_str!("../../Examples/features/memory/shared_compound_places.jet"),
+            include_str!("../../Examples/features/expected/memory/shared_compound_places.out"),
+        ),
+        (
             "operator_user_defined",
             USER_OPERATOR_FIXTURE_SOURCE,
             USER_OPERATOR_FIXTURE_EXPECTED,
@@ -2125,7 +2486,7 @@ fn run() {{
     print(Int.from_u8(window[0]))
     loop line in mapped.lines() {{
         print(Int.from_u8(line[0]))
-        print(String.from_bytes(~line) ?? panic("utf8"))
+        print(String.from_bytes(line.copy()) ?? panic("utf8"))
     }}
 }}
 "#, scoped_files_project.display(), scoped_files_path.display());
@@ -2357,6 +2718,127 @@ fn write_small_program(project: &Path) -> PathBuf {
     entry
 }
 
+#[test]
+fn bootstrap_completion_owner_requests_authorized_zero_root_retirement() {
+    use crate::compiler_bootstrap_runner::{
+        BootstrapRunCompletionFinish, BootstrapRunCompletionOwner,
+    };
+    let resources = jet_evalhost::SourceResources::SourceResourceSession::new();
+    let mut owner = BootstrapRunCompletionOwner::new(
+        jet_evalhost::SourceExecutionCompletionScope::new(),
+    );
+    owner.set_resources(resources.clone());
+    assert!(!resources.is_retirement_requested().unwrap());
+    assert_eq!(resources.retained_root_count().unwrap(), 0);
+    owner.allow_resource_retirement();
+    match owner.finish().expect("finish authorized Source retirement") {
+        BootstrapRunCompletionFinish::Complete { failures } => assert!(failures.is_empty()),
+        finish => panic!("authorized zero-root retirement did not complete: {finish:?}"),
+    }
+    assert!(resources.is_retirement_requested().unwrap());
+    assert!(resources.arena().is_retired().unwrap());
+}
+
+#[test]
+fn bootstrap_completion_owner_requires_retirement_permission() {
+    use crate::compiler_bootstrap_runner::{
+        BootstrapRunCompletionFinish, BootstrapRunCompletionOwner,
+    };
+    let resources = jet_evalhost::SourceResources::SourceResourceSession::new();
+    let mut owner = BootstrapRunCompletionOwner::new(
+        jet_evalhost::SourceExecutionCompletionScope::new(),
+    );
+    owner.set_resources(resources.clone());
+    assert!(matches!(
+        owner.finish().expect("inspect unauthorized Source retirement"),
+        BootstrapRunCompletionFinish::Pending {
+            retirement_requested: false,
+            retained_roots: 0,
+            open_callback_sessions: 0,
+            pending_jobs: 0,
+        }
+    ));
+    assert!(!resources.is_retirement_requested().unwrap());
+    assert!(!resources.arena().is_retired().unwrap());
+}
+
+#[test]
+fn bootstrap_completion_owner_preserves_retained_root_gate() {
+    use crate::compiler_bootstrap_runner::{
+        BootstrapRunCompletionFinish, BootstrapRunCompletionOwner,
+    };
+    let resources = jet_evalhost::SourceResources::SourceResourceSession::new();
+    let root = resources.retain_root().expect("retain Source root");
+    let mut owner = BootstrapRunCompletionOwner::new(
+        jet_evalhost::SourceExecutionCompletionScope::new(),
+    );
+    owner.set_resources(resources.clone());
+    owner.allow_resource_retirement();
+    assert!(matches!(
+        owner.finish().expect("inspect retained Source root"),
+        BootstrapRunCompletionFinish::Pending {
+            retirement_requested: false,
+            retained_roots: 1,
+            open_callback_sessions: 0,
+            pending_jobs: 0,
+        }
+    ));
+    assert!(!resources.is_retirement_requested().unwrap());
+    assert!(!resources.arena().is_retired().unwrap());
+    drop(root);
+    match owner.finish().expect("finish after Source root release") {
+        BootstrapRunCompletionFinish::Complete { failures } => assert!(failures.is_empty()),
+        finish => panic!("released Source root did not allow retirement: {finish:?}"),
+    }
+    assert!(resources.is_retirement_requested().unwrap());
+    assert!(resources.arena().is_retired().unwrap());
+}
+
+#[test]
+fn native_loose_root_accepts_sources_without_a_manifest() {
+    let project = bootstrap_session_root();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("main.jet"), "use other\nfn run() { other.answer() }\n").unwrap();
+    fs::write(project.join("other.jet"), "fn answer() -> Int => 42\n").unwrap();
+    let lease = crate::compiler_bootstrap_host::open_authorized_sources(&project, Path::new("main.jet"))
+        .unwrap_or_else(|error| panic!("loose source authorization failed: {error:?}"));
+    let snapshot = lease.snapshot();
+    assert_eq!(snapshot.roots.len(), 1);
+    assert_eq!(snapshot.entry_root_identity, snapshot.roots[0].identity);
+    assert!(snapshot.entry_path.ends_with("/main.jet"));
+    let files = &snapshot.roots[0].files;
+    assert!(files.iter().any(|file| file.relative_path == "main.jet"));
+    assert!(files.iter().any(|file| file.relative_path == "other.jet"));
+    assert!(!files.iter().any(|file| file.relative_path == "package.jet"));
+    lease.revalidate().expect("revalidate loose source handles");
+    drop(lease);
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
+fn native_loose_root_does_not_hide_a_retired_manifest() {
+    let project = bootstrap_session_root();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("main.jet"), "fn run() {}\n").unwrap();
+    fs::write(project.join(crate::Syntax::PAYLOAD_FILE), "package { name: \"retired\", version: \"0.0.1\" }\n").unwrap();
+    assert!(matches!(
+        crate::compiler_bootstrap_host::open_authorized_sources(&project, Path::new("main.jet")),
+        Err(crate::Authority::AuthorityError::RetiredManifest(_))
+    ));
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn native_loose_root_does_not_hide_a_manifest_symlink() {
+    let project = bootstrap_session_root();
+    fs::create_dir_all(&project).unwrap();
+    fs::write(project.join("main.jet"), "fn run() {}\n").unwrap();
+    std::os::unix::fs::symlink("missing.jet", project.join("package.jet")).unwrap();
+    assert!(crate::compiler_bootstrap_host::open_authorized_sources(&project, Path::new("main.jet")).is_err());
+    fs::remove_dir_all(project).unwrap();
+}
+
 fn write_source_fixture_project(project: &Path, manifest: &str, source: &str) -> PathBuf {
     fs::create_dir_all(project).unwrap_or_else(|error| {
         panic!("cannot create source fixture project `{}`: {error}", project.display())
@@ -2585,8 +3067,8 @@ fn write_invalid_import_project(project: &Path) -> (PathBuf, String, PathBuf, St
     });
     let manifest = project.join("package.jet");
     let entry = project.join(SMALL_ENTRY_RELATIVE);
-    let entry_source = "use \"broken\" as broken\npub fn main() {\n    print(\"entry\")\n}\n".to_string();
-    let imported_source = "pub fn broken() { print(\"🧪\")".to_string();
+    let entry_source = "use \"broken\" as broken\nfn main() {\n    print(\"entry\")\n}\n".to_string();
+    let imported_source = "fn broken() { print(\"🧪\")".to_string();
     let imported = project.join("broken.jet");
     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
         panic!("cannot write invalid Jet manifest `{}`: {error}", manifest.display())
@@ -2624,12 +3106,12 @@ fn BadFunction(BadParam: Int) -> Int {
     return callback(BadLocal)
 }
 
-pub fn main() {
+fn main() {
     print(BadFunction(BAD_CONSTANT))
 }
 "#
     .to_string();
-    let helper_source = "pub fn helper() -> Int {\n    return 1\n}\n".to_string();
+    let helper_source = "fn helper() -> Int {\n    return 1\n}\n".to_string();
     fs::write(&manifest, SMALL_PROGRAM_MANIFEST).unwrap_or_else(|error| {
         panic!("cannot write identifier-casing manifest `{}`: {error}", manifest.display())
     });
@@ -2649,7 +3131,7 @@ fn write_valid_report_project(project: &Path) -> (PathBuf, String) {
     });
     let manifest = project.join("package.jet");
     let entry = project.join(SMALL_ENTRY_RELATIVE);
-    let entry_source = "fn unused() Int -> 1\n\npub fn main() {}\n".to_string();
+    let entry_source = "fn unused() Int -> 1\n\nfn main() {}\n".to_string();
     let manifest_source = r#"name: "bootstrap_small"
 version: "0.1.0"
 edition: "2028"
@@ -2679,7 +3161,7 @@ fn write_nested_closure_callback_project(project: &Path) {
     fn call(cb: fn(I32) I32 -[]>, x: I32) I32 = "call"
 }
 
-pub fn main() {
+fn main() {
     prefix :: "nested"
     captured :: () -> prefix
     print(captured())
@@ -2814,7 +3296,7 @@ fn backend_identity_build_script(
     });
     // The identity code is inlined (the root build.rs `#[path]`-includes the
     // same two files) rather than taken from a `jet` build-dependency: that
-    // dependency compiled the `jet` and `jet-jit` crates a second time for the
+    // dependency compiled the `jet` and `jet-evalhost` crates a second time for the
     // host, doubling the largest repository crates' share of the build.
     let inline_module = |relative: &str| {
         let path = repo.join(relative);
@@ -3067,14 +3549,14 @@ fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
                 prelude.push_str(&format!("use {dep}::*;\n"));
             }
             let text = members.iter().map(|member| sections[*member].1.as_str()).collect::<String>();
-            let (source, shards) = match shard_unit(&text, BACKEND_SHARD_BYTES) {
+            let (source, shards) = match shard_unit(&text, backend_shard_bytes()) {
                 Some(sharded) => {
                     let source = format!(
                         "{prelude}{}unsafe extern \"Rust\" {{\n{}}}\n",
                         jet_store::runtime::export_crate_source(&sharded.facade),
                         sharded.declarations,
                     );
-                    let shard = |(index, text): (usize, &String), cold: bool| BackendShard {
+                    let shard = |(index, text): &(usize, String), cold: bool| BackendShard {
                         name: format!("{crate_name}_{}{index}", if cold { "cold" } else { "s" }),
                         source: format!(
                             "{prelude}use {crate_name}::*;\n{}",
@@ -3082,8 +3564,8 @@ fn split_backend_workspace(source: &str) -> Option<BackendWorkspace> {
                         ),
                         cold,
                     };
-                    let hot = sharded.shards.iter().enumerate().map(|indexed| shard(indexed, false));
-                    let cold = sharded.cold_shards.iter().enumerate().map(|indexed| shard(indexed, true));
+                    let hot = sharded.shards.iter().map(|indexed| shard(indexed, false));
+                    let cold = sharded.cold_shards.iter().map(|indexed| shard(indexed, true));
                     let shards = hot.chain(cold).collect();
                     (source, shards)
                 }
@@ -3343,23 +3825,25 @@ struct ShardedUnit {
     facade: String,
     /// `unsafe extern "Rust"` block members declaring each moved function.
     declarations: String,
-    /// Moved hot function definitions, at most about `shard_bytes` each.
-    shards: Vec<String>,
+    /// Moved hot function definitions by shard index (`pack_shards`).
+    shards: Vec<(usize, String)>,
     /// Moved cold function definitions (`MovedFunction::cold`), packed the
     /// same way into their own crates.
-    cold_shards: Vec<String>,
+    cold_shards: Vec<(usize, String)>,
 }
 
 /// One function moved out of a facade: its declaration and its definition
 /// under its own symbol.
 struct MovedFunction {
+    /// The function's symbol, which alone places it (`pack_shards`).
+    name: String,
     declaration: String,
     definition: String,
     /// Code an optimized build should not optimize: a cold-trait impl
     /// method (`BACKEND_COLD_TRAITS`), constant table code (a parameterless
     /// function whose body is a `vec!` literal, or one chunk of a cached
     /// table's row fill, whose body starts `rows.push(`), or any function of
-    /// at least `BACKEND_COLD_FUNCTION_BYTES`.
+    /// at least `backend_cold_function_bytes()`.
     cold: bool,
 }
 
@@ -3371,7 +3855,8 @@ struct MovedFunction {
 /// and no shard depends on another. Impls stay beside their types (orphan
 /// rule), but a large method body moves as a free function the method
 /// calls. Cold and hot functions pack into separate shards, so the release
-/// profile can leave the cold ones unoptimized. `None` for a small unit or
+/// profile can leave the cold ones unoptimized; each function's shard
+/// depends only on its symbol (`pack_shards`). `None` for a small unit or
 /// one with macros, which shards could not see.
 fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
     if text.len() <= shard_bytes {
@@ -3406,22 +3891,42 @@ fn shard_unit(text: &str, shard_bytes: usize) -> Option<ShardedUnit> {
         }
     }
     facade.push_str(&text[end..]);
-    let (mut shards, mut cold_shards): (Vec<String>, Vec<String>) = (Vec::new(), Vec::new());
-    for function in moved {
-        let packed = if function.cold { &mut cold_shards } else { &mut shards };
-        match packed.last_mut() {
-            Some(shard) if shard.len() + function.definition.len() <= shard_bytes => {
-                shard.push_str(&function.definition)
-            }
-            _ => packed.push(format!("{uses}{}", function.definition)),
-        }
-    }
+    let (cold, hot): (Vec<MovedFunction>, Vec<MovedFunction>) = moved.into_iter().partition(|function| function.cold);
     Some(ShardedUnit {
         facade,
         declarations,
-        shards,
-        cold_shards,
+        shards: pack_shards(&hot, &uses, shard_bytes),
+        cold_shards: pack_shards(&cold, &uses, shard_bytes),
     })
+}
+
+/// Pack moved functions into shard texts by symbol: a function lands in
+/// shard `symbol_hash(name) % count`, where `count` is the functions' total
+/// size over `shard_bytes` rounded up to a power of two. A function's shard
+/// so depends only on its own symbol and that rarely changing count, never
+/// on the size of the functions emitted before it: an edit rewrites only the
+/// shards whose functions change (cargo rebuilds nothing else), and the two
+/// arms of an A/B build give a function the same shard and profile. Each
+/// shard keeps its index; empty ones make no crate.
+fn pack_shards(functions: &[MovedFunction], uses: &str, shard_bytes: usize) -> Vec<(usize, String)> {
+    let total = functions.iter().map(|function| function.definition.len()).sum::<usize>();
+    let count = total.div_ceil(shard_bytes).max(1).next_power_of_two();
+    let mut shards = vec![String::new(); count];
+    for function in functions {
+        shards[(symbol_hash(&function.name) % count as u64) as usize].push_str(&function.definition);
+    }
+    shards
+        .into_iter()
+        .enumerate()
+        .filter(|(_, text)| !text.is_empty())
+        .map(|(index, text)| (index, format!("{uses}{text}")))
+        .collect()
+}
+
+/// FNV-1a of a symbol: stable across toolchains and runs, unlike std's
+/// hashers, so shard placement is reproducible.
+fn symbol_hash(symbol: &str) -> u64 {
+    symbol.bytes().fold(0xcbf2_9ce4_8422_2325, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3))
 }
 
 /// Byte ranges of the top-level items of masked Rust `code`, each starting
@@ -3561,6 +4066,7 @@ fn movable_function(item: &str, code: &str) -> Option<MovedFunction> {
     let body_code = code[body + 1..].trim_start();
     let table = (parameters.is_empty() && body_code.starts_with("vec![")) || body_code.starts_with("rows.push(");
     Some(MovedFunction {
+        name: name.to_string(),
         declaration: format!(
             "    pub {} fn {name}({}) {};\n",
             if unsafe_function { "unsafe" } else { "safe" },
@@ -3568,7 +4074,7 @@ fn movable_function(item: &str, code: &str) -> Option<MovedFunction> {
             item[close + 1..body].trim()
         ),
         definition: format!("\n#[no_mangle]\n{}", &item[lead..]),
-        cold: table || code.len() >= BACKEND_COLD_FUNCTION_BYTES,
+        cold: table || code.len() >= backend_cold_function_bytes(),
     })
 }
 
@@ -3870,7 +4376,7 @@ fn backend_workspace_splits_runtime_without_unit_sections() {
 #[test]
 fn backend_shards_separate_cold_code() {
     let steps = "    __jet_n += 1;\n".repeat(200);
-    let giant = "    __jet_n += 1;\n".repeat(BACKEND_COLD_FUNCTION_BYTES / 16);
+    let giant = "    __jet_n += 1;\n".repeat(backend_cold_function_bytes() / 16);
     let text = format!(
         "pub struct __jet_T {{ __jet_n: i64 }}\n\
          pub fn __jet_hot(__jet_x: i64) -> i64 {{ __jet_x + 1 }}\n\
@@ -3882,7 +4388,8 @@ fn backend_shards_separate_cold_code() {
          pub fn __jet_giant(mut __jet_n: i64) -> i64 {{\n{giant}    __jet_n\n}}\n"
     );
     let sharded = shard_unit(&text, 64 << 10).expect("a unit over the shard size shards");
-    let (hot, cold) = (sharded.shards.concat(), sharded.cold_shards.concat());
+    let texts = |shards: &[(usize, String)]| shards.iter().map(|(_, text)| text.as_str()).collect::<String>();
+    let (hot, cold) = (texts(&sharded.shards), texts(&sharded.cold_shards));
     for name in ["fn __jet_hot(", "fn __jet_list(", "fn __jet_impl___jet_T___jet_Equatable_equals("] {
         assert!(hot.contains(name) && !cold.contains(name), "`{name}` is hot");
     }
@@ -3894,8 +4401,38 @@ fn backend_shards_separate_cold_code() {
     ] {
         assert!(cold.contains(name) && !hot.contains(name), "`{name}` is cold");
     }
-    // The tables and the decoder share a cold shard; the giant fills its own.
-    assert_eq!(sharded.cold_shards.len(), 2);
+}
+
+/// `shard_unit` places a function by its symbol alone: growing or adding
+/// other functions leaves every function's shard index unchanged while the
+/// shard count holds.
+#[test]
+fn backend_shard_placement_depends_only_on_the_symbol() {
+    let body = |lines: usize| "    __jet_n += 1;\n".repeat(lines);
+    let unit = |first_lines: usize, extra: bool| {
+        let mut text = format!("pub fn __jet_first(mut __jet_n: i64) -> i64 {{\n{}    __jet_n\n}}\n", body(first_lines));
+        if extra {
+            text.push_str(&format!("pub fn __jet_extra(mut __jet_n: i64) -> i64 {{\n{}    __jet_n\n}}\n", body(8)));
+        }
+        for index in 0..64 {
+            text.push_str(&format!("pub fn __jet_f{index}(mut __jet_n: i64) -> i64 {{\n{}    __jet_n\n}}\n", body(16)));
+        }
+        shard_unit(&text, 5 << 10).expect("a unit over the shard size shards")
+    };
+    let placement = |sharded: &ShardedUnit| {
+        (0..64)
+            .map(|index| {
+                let name = format!("fn __jet_f{index}(");
+                let shards = sharded.shards.iter().filter(|(_, text)| text.contains(&name)).collect::<Vec<_>>();
+                assert_eq!(shards.len(), 1, "`{name}` is in exactly one shard");
+                shards[0].0
+            })
+            .collect::<Vec<_>>()
+    };
+    let base = unit(16, false);
+    assert!(base.shards.len() > 1, "the unit spreads over several shards");
+    assert_eq!(placement(&base), placement(&unit(40, false)));
+    assert_eq!(placement(&base), placement(&unit(16, true)));
 }
 
 /// The release profile leaves only cold shards unoptimized; the dev profile
@@ -4017,25 +4554,23 @@ fn write_backend_project(
             Err(error) => panic!("cannot remove stale backend compiler image `{}`: {error}", image_path.display()),
         },
     }
-    // The backend project is its own workspace root, so it repeats the
-    // repository's `[patch.crates-io]` (the vendored cranelift-jit that
-    // jet-jit needs) and starts from the repository lockfile, keeping every
-    // dependency at the version the repository builds with.
+    // The backend project is its own workspace root, so it starts from the
+    // repository lockfile, keeping every dependency at the version the
+    // repository builds with.
     let manifest = format!(
-        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-jit = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n[patch.crates-io]\ncranelift-jit = {{ path = {:?} }}\n{unit_profiles}{build_profile}",
+        "[package]\nname = {:?}\nversion = \"0.0.0\"\nedition = \"2021\"\nbuild = \"build.rs\"\n\n[dependencies]\njet = {{ path = {:?} }}\njet-codegen = {{ path = {:?} }}\njet-driver = {{ path = {:?} }}\njet-evalhost = {{ path = {:?} }}\njet-foundation = {{ path = {:?} }}\njet-net = {{ path = {:?} }}\njet-pkg-model = {{ path = {:?} }}\njet-rt = {{ path = {:?} }}\njet-store = {{ path = {:?} }}\n{ffi_dependency}{unit_dependencies}\n{unit_profiles}{build_profile}",
         package_name,
         repo.display().to_string(),
         // The linked Host modules name these crates directly (codegen's native
         // loop cursor key, the package model's devtools policy, the record store).
         repo.join("crates/jet-codegen").display().to_string(),
         repo.join("crates/jet-driver").display().to_string(),
+        repo.join("crates/jet-evalhost").display().to_string(),
         repo.join("crates/jet-foundation").display().to_string(),
-        repo.join("crates/jet-jit").display().to_string(),
         repo.join("crates/jet-net").display().to_string(),
         repo.join("crates/jet-pkg-model").display().to_string(),
         repo.join("crates/jet-rt").display().to_string(),
         repo.join("crates/jet-store").display().to_string(),
-        repo.join("crates/vendor/cranelift-jit-0.112.3").display().to_string(),
         ffi_dependency = ffi_dependency,
         unit_dependencies = unit_dependencies,
         unit_profiles = unit_profiles,
@@ -4071,7 +4606,9 @@ fn build_backend_artifact_with_native_library(
 ) -> (PathBuf, String) {
     let manifest_path =
         write_backend_project(repo, project, package_name, source, compiler_image, native_library, ffi);
-    let target = repo.join("target");
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo.join("target"));
     let profile = backend_release_profile();
 
     let mut command = Command::new(repo.join("Tools/agent/jet-env"));
@@ -4085,13 +4622,14 @@ fn build_backend_artifact_with_native_library(
         // memory unchanged at about 2.8 GB). The release profile stays
         // non-incremental, as its manifest profile says.
         .env("JET_CARGO_INCREMENTAL", if profile.is_some() { "0" } else { "1" })
-        .env("CARGO_BUILD_JOBS", if profile.is_some() { BACKEND_RELEASE_BUILD_JOBS } else { BACKEND_BUILD_JOBS })
+        .env("CARGO_BUILD_JOBS", backend_build_jobs(profile.is_some()))
         .env("RUST_MIN_STACK", BACKEND_RUSTC_STACK)
         .env("JET_NO_SCCACHE", "1")
         .env_remove("RUSTC_WRAPPER")
         .args([
             "cargo",
             "build",
+            "--keep-going",
             "--manifest-path",
             manifest_path.to_str().unwrap_or_else(|| {
                 panic!("backend manifest path is not valid UTF-8: {}", manifest_path.display())
@@ -4235,10 +4773,12 @@ fn assert_optional_codec_roundtrip(binary: &Path, project: &Path, session: &Path
     assert!(receipt_text.lines().any(|line| line == "mode=optional-roundtrip"));
     assert!(receipt_text.lines().any(|line| line == "identity_absent=roundtrip"));
     assert!(receipt_text.lines().any(|line| line == "identity_present=roundtrip"));
+    assert!(receipt_text.lines().any(|line| line == "int_copy_value=roundtrip"));
+    assert!(receipt_text.lines().any(|line| line == "ssa_value_absent_present=roundtrip"));
     assert_eq!(
         fs::read_to_string(&output)
             .unwrap_or_else(|error| panic!("cannot read {stage} optional codec output: {error}")),
-        "identity=absent,present\n"
+        "identity=absent,present\ntrait=exact-id-name\n"
     );
 }
 fn assert_mir_optimizer_compiler_source(binary: &Path, compiler_project: &Path, session: &Path) {
@@ -4293,8 +4833,12 @@ fn assert_small_program_runs(binary: &Path, stage: &str) {
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert_eq!(
         stdout.lines().collect::<Vec<_>>(),
-        vec!["bootstrap-small-program", "π🙂", "2", "6"],
-        "{stage} generated compiler must execute String/List/Bytes materialization copies: {stdout:?}"
+        vec![
+            "bootstrap-small-program", "π🙂", "2", "6",
+            "18446744073709551615", "18446744073709551615",
+            "18446744073709551615", "a π", "3",
+        ],
+        "{stage} generated compiler must preserve materialization copies, exact integers and Unicode MIR constants/keys: {stdout:?}"
     );
 }
 
@@ -4308,4 +4852,83 @@ fn assert_command_success(label: &str, output: &Output) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
+}
+
+/// I9 parity of the Jet host's runtime prefix (Compiler/JetCodegen
+/// Emit/RuntimePrefix.jet) with MIRRust `emit_mir_runtime_text`. Driven by
+/// the Jet-hosted build proof: `JET_RUNTIME_PREFIX_CASES` holds
+/// `;`-separated `<release|test>=<source.jet>=<hosted .rs>` cases, where the
+/// hosted `.rs` is what the Jet-hosted `jet build --release` / `jet test`
+/// wrote. The Rust compiler emits the same program through the profile that
+/// command uses; its text must begin with the hosted file's prefix (every
+/// byte before the Jet emitter's header), and that prefix must end where the
+/// runtime block does.
+#[test]
+#[ignore = "driven by the Jet-hosted runtime-prefix parity proof"]
+fn jet_hosted_runtime_prefix_matches_rust() {
+    const JET_ITEMS_HEADER: &str =
+        "// Generated by Jet MIR Rust source emission; checked MIR is authoritative.";
+    let cases = std::env::var("JET_RUNTIME_PREFIX_CASES")
+        .expect("JET_RUNTIME_PREFIX_CASES names the parity cases");
+    let mut checked = 0usize;
+    for case in cases.split(';').filter(|case| !case.is_empty()) {
+        let fields = case.split('=').collect::<Vec<_>>();
+        let [kind, source_path, hosted_path] = fields.as_slice() else {
+            panic!("parity case `{case}` is not `<kind>=<source>=<hosted .rs>`");
+        };
+        let source = std::fs::read_to_string(source_path)
+            .unwrap_or_else(|error| panic!("cannot read {source_path}: {error}"));
+        let rust = match *kind {
+            "release" => crate::compile_with_target_and_gates_and_profile(
+                &source,
+                source_path,
+                crate::Policy::GateSet::default(),
+                None,
+                "release",
+            )
+            .unwrap_or_else(|diagnostics| panic!("{source_path}: {diagnostics:?}"))
+            .rust,
+            "test" => crate::compile_tests_with_path(&source, source_path)
+                .unwrap_or_else(|diagnostics| panic!("{source_path}: {diagnostics:?}"))
+                .0,
+            other => panic!("parity case kind `{other}` is neither `release` nor `test`"),
+        };
+        let hosted = std::fs::read_to_string(hosted_path)
+            .unwrap_or_else(|error| panic!("cannot read {hosted_path}: {error}"));
+        let prefix_len = hosted
+            .find(JET_ITEMS_HEADER)
+            .unwrap_or_else(|| panic!("{hosted_path} has no Jet emitter header"));
+        let prefix = &hosted[..prefix_len];
+        assert!(
+            prefix.ends_with("// jet:cached-core-end\n\n"),
+            "{hosted_path}: the hosted prefix does not end at the runtime block"
+        );
+        if !rust.starts_with(prefix) {
+            let at = rust
+                .bytes()
+                .zip(prefix.bytes())
+                .position(|(left, right)| left != right)
+                .unwrap_or(rust.len().min(prefix.len()));
+            let window = |text: &str| {
+                let mut start = at.saturating_sub(120).min(text.len());
+                let mut end = (at + 120).min(text.len());
+                while !text.is_char_boundary(start) {
+                    start -= 1;
+                }
+                while !text.is_char_boundary(end) {
+                    end += 1;
+                }
+                text[start..end].to_string()
+            };
+            panic!(
+                "{kind} {source_path}: the hosted prefix ({} bytes) and the Rust program ({} bytes) differ at byte {at}\nrust:   {:?}\nhosted: {:?}",
+                prefix.len(),
+                rust.len(),
+                window(&rust),
+                window(prefix),
+            );
+        }
+        checked += 1;
+    }
+    assert!(checked > 0, "JET_RUNTIME_PREFIX_CASES selected no case");
 }

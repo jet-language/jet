@@ -1,0 +1,53 @@
+
+use core.encoding as encoding
+use core.encoding.[xml as fmt]
+use core.files as files
+
+
+fn xml_name(local: String) -[]> Dyn {
+    return Dyn.Object([
+        "raw": Dyn.Text(local.copy()),
+        "prefix": Dyn.Null,
+        "local": Dyn.Text(local.copy()),
+        "namespace_uri": Dyn.Null,
+    ])
+}
+
+fn run() {
+    path := "{work}/doc.xml"
+    output :: files.create(path) ?? panic("create")
+    writer :: fmt.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(Dyn.Object([
+        "$xml_event": Dyn.Text("document_start"),
+        "encoding": Dyn.Null,
+        "bom": Dyn.Array([]),
+    ])) ?? panic("document_start")
+    writer.write(Dyn.Object([
+        "$xml_event": Dyn.Text("element_start"),
+        "name": xml_name("r"),
+        "namespaces": Dyn.Array([]),
+        "attributes": Dyn.Array([]),
+        "empty_style": Dyn.Text("empty"),
+        "open_lexical": Dyn.Object([
+            "raw_text": Dyn.Null,
+            "raw_bytes": Dyn.Null,
+            "semantic": Dyn.Object([
+                "name": xml_name("r"),
+                "namespaces": Dyn.Array([]),
+                "attributes": Dyn.Array([]),
+                "empty_style": Dyn.Text("empty"),
+            ]),
+        ]),
+    ])) ?? panic("root")
+    writer.write(Dyn.Object(["$xml_event": Dyn.Text("document_end")])) ?? panic("end")
+    writer.finish() ?? panic("finish")
+    input :: files.open(path) ?? panic("open")
+    reader :: fmt.reader(^input) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(_) -> print(true)
+        .None -> print(false)
+    }
+    print(files.read(path) ?? panic("read"))
+}
+

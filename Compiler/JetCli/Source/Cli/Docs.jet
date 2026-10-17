@@ -1,0 +1,955 @@
+// The documentation projection of the Jet-hosted `jet doc` (jet-semindex
+// Docs.rs `build_doc_graph`, `DocGraph::to_status_envelope`, `to_markdown`,
+// `to_html`). The callable failure and nominal trait-contract facts it reads
+// are the shared semantic index's (SemIndexBuild.jet `jet_cli_build_semindex`),
+// exactly as Docs.rs reads `SemIndex`. The command checks a bundle, builds the
+// index once, asks this module for a projection, and chooses an output
+// format; it does not walk the AST a second time. The items are the checked
+// modules' items as sema settled them, so derived impls and inferred failure
+// contracts are the checker's.
+use jet_driver.[
+    JetDriverDocModule,
+]
+use jet_foundation.[
+    Func,
+    Item,
+    Marker,
+    Span,
+]
+
+JET_CLI_DOC_SCHEMA_VERSION :: 1
+JET_CLI_DOC_EXPECT_MARKER :: "// =>"
+
+struct JetCLIDocSource {
+    path: String
+    start: Int
+    end: Int
+    line: Int
+    column: Int
+    link: String
+}
+
+struct JetCLIDocItem {
+    kind: String
+    name: String
+    qualified_name: String
+    module_path: String
+    public: Bool
+    package_public: Bool
+    signature: String
+    // Effective failure carrier and its provenance from the checked callable
+    // fact; `None` for a non-callable item or a callable with no fact.
+    failure_contract: String?
+    failure_source: String?
+    summary: String
+    examples: [String]
+    markers: [String]
+    source: JetCLIDocSource
+}
+
+struct JetCLIDocModule {
+    name: String
+    path: String
+    public: Bool
+    summary: String
+    source: JetCLIDocSource
+}
+
+struct JetCLIDocImpl {
+    kind: String
+    type_name: String
+    trait_name: String?
+    module_path: String
+    public: Bool
+    methods: [String]
+    source: JetCLIDocSource
+}
+
+struct JetCLIDocExpectation {
+    expression: String
+    expected: String
+}
+
+struct JetCLIDocTest {
+    module_path: String
+    line: Int
+    setup: [String]
+    expectations: [JetCLIDocExpectation]
+    source: JetCLIDocSource
+}
+
+// `effect_projection` holds the application-boundary roles from the same
+// checked program `jet build` authorizes (Authority.jet).
+struct JetCLIDocGraph {
+    schema_version: Int
+    root: String
+    effect_projection: JetCLIAuthority
+    modules: [JetCLIDocModule]
+    items: [JetCLIDocItem]
+    impls: [JetCLIDocImpl]
+    doctests: [JetCLIDocTest]
+}
+
+// The text of `bytes[start..<end]`, or "" when the range is empty.
+fn jet_cli_doc_text(bytes: [U8], start: Int, end: Int) -> String Never! {
+    if start >= end -> return ""
+    String.from_bytes(bytes[start..end - 1]) ?? ""
+}
+
+fn jet_cli_doc_is_space(byte: U8) -> Bool Never! {
+    code :: Int.from_u8(byte)
+    code == 32 || (code >= 9 && code <= 13)
+}
+
+// Rust `str::lines`: split on `\n`, drop one trailing `\r` per line, and no
+// final empty line after a trailing newline.
+fn jet_cli_doc_lines(text: String) -> [String] Never! {
+    bytes :: text.bytes()
+    lines := [String]{}
+    start := 0
+    loop index in 0..<bytes.len() {
+        if bytes[index] != (U8{10}) -> next
+        end := index
+        if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
+        &lines.push(jet_cli_doc_text(bytes, start, end))
+        start = index + 1
+    }
+    if start < bytes.len() {
+        end := bytes.len()
+        if end > start && bytes[end - 1] == (U8{13}) -> end -= 1
+        &lines.push(jet_cli_doc_text(bytes, start, end))
+    }
+    lines
+}
+
+// `line.strip_prefix(prefix)`.
+fn jet_cli_doc_strip_prefix(line: String, prefix: String) -> String? Never! {
+    if !line.starts_with(prefix) -> return None
+    bytes :: line.bytes()
+    Val(jet_cli_doc_text(bytes, prefix.bytes().len(), bytes.len()))
+}
+
+// Rust `split_whitespace().join(" ")`.
+fn jet_cli_doc_collapse_whitespace(text: String) -> String Never! {
+    bytes :: text.bytes()
+    words := [String]{}
+    start := -1
+    loop index in 0..<bytes.len() {
+        if jet_cli_doc_is_space(bytes[index]) {
+            if start >= 0 -> &words.push(jet_cli_doc_text(bytes, start, index))
+            start = -1
+        } else if start < 0 {
+            start = index
+        }
+    }
+    if start >= 0 -> &words.push(jet_cli_doc_text(bytes, start, bytes.len()))
+    words.join(" ")
+}
+
+fn jet_cli_doc_min(left: Int, right: Int) -> Int Never! {
+    if left < right -> left else -> right
+}
+
+fn jet_cli_doc_max(left: Int, right: Int) -> Int Never! {
+    if left > right -> left else -> right
+}
+
+// Docs.rs `line_column`: 1-based line and byte column of `offset`.
+fn jet_cli_doc_line_column(bytes: [U8], offset: Int) -> [Int] Never! {
+    end :: jet_cli_doc_min(offset, bytes.len())
+    line := 1
+    line_start := 0
+    loop index in 0..<end {
+        if bytes[index] == (U8{10}) {
+            line += 1
+            line_start = index + 1
+        }
+    }
+    [Int]{line, end - line_start + 1}
+}
+
+// Docs.rs `source_for`.
+fn jet_cli_doc_source_for(path: String, source: String, span: Span) -> JetCLIDocSource Never! {
+    bytes :: source.bytes()
+    start :: jet_cli_doc_min(span.start, bytes.len())
+    end :: jet_cli_doc_max(jet_cli_doc_min(span.end, bytes.len()), start)
+    position :: jet_cli_doc_line_column(bytes, start)
+    JetCLIDocSource{path: path, start: start, end: end, line: position[0], column: position[1], link: "{path}#L{position[0]}"}
+}
+
+// Docs.rs `declaration_text`: the declaration head before its first `{`,
+// whitespace collapsed.
+fn jet_cli_doc_declaration_text(source: String, span: Span) -> String Never! {
+    bytes :: source.bytes()
+    start :: jet_cli_doc_min(span.start, bytes.len())
+    end := jet_cli_doc_max(jet_cli_doc_min(span.end, bytes.len()), start)
+    loop index in start..<end {
+        if bytes[index] == (U8{123}) {
+            end = index
+            break
+        }
+    }
+    jet_cli_doc_collapse_whitespace(jet_cli_doc_text(bytes, start, end))
+}
+
+// Docs.rs `source_docs`: the `///` block directly above the declaration
+// line, as its first summary line and its `Example:` lines.
+fn jet_cli_doc_source_docs(source: String, def_start: Int) -> JetCLIDocComment Never! {
+    bytes :: source.bytes()
+    prefix_end :: jet_cli_doc_min(def_start, bytes.len())
+    before_end := -1
+    loop index in 0..<prefix_end {
+        if bytes[index] == (U8{10}) -> before_end = index
+    }
+    before :: if before_end < 0 -> "" else -> jet_cli_doc_text(bytes, 0, before_end)
+    lines :: jet_cli_doc_lines(before)
+    collected := [String]{}
+    position := lines.len() - 1
+    loop position >= 0 {
+        doc :: jet_cli_doc_strip_prefix(lines[position].trim(), "///") ?? break
+        &collected.push(doc.trim())
+        position -= 1
+    }
+    comment := JetCLIDocComment{summary: "", examples: [String]{}}
+    position = collected.len() - 1
+    loop position >= 0 {
+        line :: collected[position]
+        if jet_cli_doc_strip_prefix(line, "Example:") == .Val(example) {
+            &comment.examples.push(example.trim())
+        } else if comment.summary == "" && line != "" && !line.starts_with("```") {
+            comment.summary = line
+        }
+        position -= 1
+    }
+    comment
+}
+
+struct JetCLIDocComment {
+    summary: String
+    examples: [String]
+}
+
+// Docs.rs `leading_summary`: the first summary line of the file's leading
+// `///` block.
+fn jet_cli_doc_leading_summary(source: String) -> String Never! {
+    summary := ""
+    loop raw in jet_cli_doc_lines(source) {
+        line :: raw.trim()
+        doc :: jet_cli_doc_strip_prefix(line, "///") ?? {
+            if line != "" -> break
+            next
+        }
+        text :: doc.trim()
+        if summary == "" && text != "" && !text.starts_with("```") -> summary = text
+    }
+    summary
+}
+
+// Docs.rs `stable_module_path` is the display path the driver carries; a
+// Windows separator is printed as `/`.
+fn jet_cli_doc_stable_path(path: String) -> String Never! {
+    path.replace("\\", "/")
+}
+
+// Docs.rs `module_name`: the alias, else the file stem.
+fn jet_cli_doc_module_name(path: String, alias: String) -> String Never! {
+    if alias != "" -> return alias.copy()
+    parts :: path.split("/").to_list()
+    file :: parts[parts.len() - 1]
+    if file == "" || file == "." || file == ".." -> return path.copy()
+    bytes :: file.bytes()
+    dot := -1
+    loop index in 1..<bytes.len() {
+        if bytes[index] == (U8{46}) -> dot = index
+    }
+    if dot <= 0 -> return file
+    jet_cli_doc_text(bytes, 0, dot)
+}
+
+fn jet_cli_doc_qualified(parent: String, name: String) -> String Never! {
+    if parent == "" -> return name.copy()
+    "{parent}::{name}"
+}
+
+fn jet_cli_doc_kind_rank(kind: String) -> Int Never! {
+    if kind == {
+        "module" -> 0
+        "marker" | "fact" -> 1
+        "protocol" | "trait" | "tag" | "effect" -> 2
+        "struct" | "enum" | "distinct" | "type_alias" | "unit_family" -> 3
+        "field" | "variant" -> 4
+        "function" -> 5
+        else -> 6
+    }
+}
+
+fn jet_cli_doc_marker_names(markers: [Marker]) -> [String] Never! {
+    loop marker in markers -> marker.name
+}
+
+// Where one module's items are documented from.
+struct JetCLIDocUnit {
+    path: String
+    source: String
+}
+
+// Docs.rs `add_item`.
+fn jet_cli_doc_add_item(output: &[JetCLIDocItem], unit: JetCLIDocUnit, kind: String, name: String, parent: String, public: Bool, package_public: Bool, span: Span, name_span: Span, markers: [String]) Never! {
+    comment :: jet_cli_doc_source_docs(unit.source, name_span.start)
+    &output.push(JetCLIDocItem{
+        kind: kind,
+        name: name,
+        qualified_name: jet_cli_doc_qualified(parent, name),
+        module_path: unit.path,
+        public: public,
+        package_public: package_public,
+        signature: jet_cli_doc_declaration_text(unit.source, span),
+        failure_contract: None,
+        failure_source: None,
+        summary: comment.summary,
+        examples: comment.examples,
+        markers: markers,
+        source: jet_cli_doc_source_for(unit.path, unit.source, span),
+    })
+}
+
+// Docs.rs `add_function`.
+fn jet_cli_doc_add_function(output: &[JetCLIDocItem], unit: JetCLIDocUnit, function: Func, parent: String, inherited_public: Bool) Never! {
+    jet_cli_doc_add_item(&output, unit, "function", function.name, parent, function.is_pub || inherited_public, function.is_package_pub, function.span, function.name_span, jet_cli_doc_marker_names(function.markers))
+}
+
+fn jet_cli_doc_sorted_names(functions: [Func]) -> [String] Never! {
+    listed :: loop function in functions -> function.name
+    names := listed
+    jet_cli_doc_sort_strings(&names)
+    names
+}
+
+// Docs.rs `add_nested_impl`: a trait block written inside a struct or enum.
+fn jet_cli_doc_add_nested_impl(output: &[JetCLIDocItem], impls: &[JetCLIDocImpl], unit: JetCLIDocUnit, trait_name: String, type_name: String, methods: [Func], public: Bool, span: Span) Never! {
+    &impls.push(JetCLIDocImpl{
+        kind: "trait_impl",
+        type_name: type_name,
+        trait_name: Val(trait_name),
+        module_path: unit.path,
+        public: public,
+        methods: jet_cli_doc_sorted_names(methods),
+        source: jet_cli_doc_source_for(unit.path, unit.source, span),
+    })
+    loop method in methods -> jet_cli_doc_add_function(&output, unit, method, type_name, public)
+}
+
+// Docs.rs `collect_protocol_names`.
+fn jet_cli_doc_collect_protocol_names(items: [Item], names: &[String]) Never! {
+    loop item in items {
+        if item == {
+            .ProtocolDecl(protocol) -> if !names.contains(protocol.name) -> &names.push(protocol.name)
+            .CodeModule(code_module) -> if code_module.body == .Val(body) -> jet_cli_doc_collect_protocol_names(body, &names)
+            .GenericModule(generic_module) -> jet_cli_doc_collect_protocol_names(generic_module.body, &names)
+            else -> {}
+        }
+    }
+}
+
+// Docs.rs `collect_items`.
+fn jet_cli_doc_collect_items(items: [Item], unit: JetCLIDocUnit, parent: String, inherited_public: Bool, protocol_names: [String], output: &[JetCLIDocItem], impls: &[JetCLIDocImpl]) Never! {
+    no_markers :: [String]{}
+    loop item in items {
+        if item == {
+            .Func(function) -> jet_cli_doc_add_function(&output, unit, function, parent, inherited_public)
+            .Struct(definition) -> {
+                public :: definition.is_pub || inherited_public
+                struct_item :: output.len()
+                jet_cli_doc_add_item(&output, unit, "struct", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, jet_cli_doc_marker_names(definition.type_markers))
+                if definition.state == .Val(state) {
+                    state_names :: loop entry in state.states -> entry.name
+                    output[struct_item].signature = "{output[struct_item].signature} {{ state {{ {state_names.join(", ")} }} }}"
+                }
+                owner :: jet_cli_doc_qualified(parent, definition.name)
+                loop field in definition.fields {
+                    jet_cli_doc_add_item(&output, unit, "field", field.name, owner, field.is_pub, field.is_package_pub, field.name_span, field.name_span, jet_cli_doc_marker_names(field.serde_markers))
+                }
+                loop method in definition.methods -> jet_cli_doc_add_function(&output, unit, method, owner, public)
+                loop block in definition.trait_impls -> jet_cli_doc_add_nested_impl(&output, &impls, unit, block.trait_name, definition.name, block.methods, public, definition.span)
+            }
+            .Enum(definition) -> {
+                public :: definition.is_pub || inherited_public
+                jet_cli_doc_add_item(&output, unit, "enum", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+                owner :: jet_cli_doc_qualified(parent, definition.name)
+                loop variant in definition.variants {
+                    jet_cli_doc_add_item(&output, unit, "variant", variant.name, owner, public, false, variant.name_span, variant.name_span, jet_cli_doc_marker_names(variant.serde_markers))
+                }
+                loop method in definition.methods -> jet_cli_doc_add_function(&output, unit, method, owner, public)
+                loop block in definition.trait_impls -> jet_cli_doc_add_nested_impl(&output, &impls, unit, block.trait_name, definition.name, block.methods, public, definition.span)
+            }
+            .Distinct(definition) -> jet_cli_doc_add_item(&output, unit, "distinct", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, jet_cli_doc_marker_names(definition.type_markers))
+            .TypeAlias(definition) -> jet_cli_doc_add_item(&output, unit, "type_alias", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .UnitFamily(definition) -> jet_cli_doc_add_item(&output, unit, "unit_family", definition.family, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.family_span, no_markers)
+            .Trait(definition) -> {
+                public :: definition.is_pub || inherited_public
+                jet_cli_doc_add_item(&output, unit, "trait", definition.name, parent, public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+                owner :: jet_cli_doc_qualified(parent, definition.name)
+                loop method in definition.methods {
+                    jet_cli_doc_add_item(&output, unit, "function", method.name, owner, public, false, method.span, method.name_span, no_markers)
+                }
+            }
+            .Tag(definition) -> jet_cli_doc_add_item(&output, unit, "tag", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .ProtocolDecl(definition) -> jet_cli_doc_add_item(&output, unit, "protocol", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .EffectDecl(definition) -> jet_cli_doc_add_item(&output, unit, "effect", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
+            .Impl(definition) -> {
+                type_parts :: definition.type_name.split(".").to_list()
+                endpoint :: type_parts[type_parts.len() - 1]
+                protocol_handle :: type_parts.len() > 1 && (endpoint == "Client" || endpoint == "Server")
+                implemented :: definition.trait_name ?? ""
+                kind :: if {
+                    protocol_handle || (definition.trait_name != None && protocol_names.contains(implemented)) -> "protocol_impl"
+                    definition.trait_name != None -> "trait_impl"
+                    else -> "inherent_impl"
+                }
+                &impls.push(JetCLIDocImpl{
+                    kind: kind,
+                    type_name: definition.type_name,
+                    trait_name: definition.trait_name,
+                    module_path: unit.path,
+                    public: true,
+                    methods: jet_cli_doc_sorted_names(definition.methods),
+                    source: jet_cli_doc_source_for(unit.path, unit.source, definition.span),
+                })
+                owner :: jet_cli_doc_qualified(parent, definition.type_name)
+                loop method in definition.methods -> jet_cli_doc_add_function(&output, unit, method, owner, inherited_public)
+            }
+            .CodeModule(code_module) -> {
+                public :: code_module.is_pub || inherited_public
+                jet_cli_doc_add_item(&output, unit, "module", code_module.name, parent, public, code_module.is_package_pub, code_module.span, code_module.name_span, no_markers)
+                if code_module.body == .Val(body) -> jet_cli_doc_collect_items(body, unit, jet_cli_doc_qualified(parent, code_module.name), public, protocol_names, &output, &impls)
+            }
+            .GenericModule(generic_module) -> {
+                public :: generic_module.is_pub || inherited_public
+                jet_cli_doc_add_item(&output, unit, "module", generic_module.name, parent, public, generic_module.is_package_pub, generic_module.span, generic_module.name_span, no_markers)
+                jet_cli_doc_collect_items(generic_module.body, unit, jet_cli_doc_qualified(parent, generic_module.name), public, protocol_names, &output, &impls)
+            }
+            .ModuleAlias(definition) -> jet_cli_doc_add_item(&output, unit, "module_alias", definition.name, parent, definition.is_pub || inherited_public, definition.is_package_pub, definition.span, definition.name_span, no_markers)
+            .MarkerDecl(definition) -> jet_cli_doc_add_item(&output, unit, "marker", definition.name, parent, true, false, definition.span, definition.name_span, no_markers)
+            .FactDecl(definition) -> jet_cli_doc_add_item(&output, unit, "fact", definition.name, parent, true, false, definition.span, definition.name_span, no_markers)
+            .Const(definition) -> jet_cli_doc_add_item(&output, unit, "const", definition.name, parent, false, false, definition.span, definition.name_span, no_markers)
+            else -> {}
+        }
+    }
+}
+
+// Docs.rs `definition_belongs_to_doc_item`: semindex definitions keep the
+// checked module path, documentation names its stable project path.
+fn jet_cli_doc_belongs(definition: JetCLISemDef, item: JetCLIDocItem) -> Bool Never! {
+    jet_cli_doc_stable_path(definition.module_path) == item.module_path && item.source.start <= definition.def_span.start && definition.def_span.end <= item.source.end
+}
+
+// The first semindex function definition that documents `item`.
+fn jet_cli_doc_callable_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCLISemCallable? Never! {
+    loop definition in index.definitions {
+        if definition.def.name != item.name || !jet_cli_doc_belongs(definition.def, item) -> next
+        if definition.def.kind == .Function(callable) -> return Val(callable)
+    }
+    None
+}
+
+// The first semindex distinct nominal definition that documents `item`.
+fn jet_cli_doc_nominal_for(index: JetCLISemIndex, item: JetCLIDocItem) -> JetCLISemDefinition? Never! {
+    loop definition in index.definitions {
+        if definition.def.name == item.name && definition.nominal_base != None && jet_cli_doc_belongs(definition.def, item) -> return Val(definition.copy())
+    }
+    None
+}
+
+// Docs.rs `render_trait_contract`.
+fn jet_cli_doc_trait_contract(contract: JetCLISemTraitContract) -> String Never! {
+    lines := [String]{"implements {contract.trait_name}"}
+    loop entry in contract.associated_types {
+        if entry.ty == .Val(ty) {
+            &lines.push("  type {entry.name} = {ty}")
+        } else {
+            &lines.push("  type {entry.name}")
+        }
+    }
+    loop method in contract.methods -> &lines.push("  {method}")
+    lines.join("\n")
+}
+
+// The checked module whose stable path is `path`.
+fn jet_cli_doc_module_at(modules: [JetDriverDocModule], path: String) -> JetDriverDocModule? Never! {
+    loop candidate in modules {
+        if jet_cli_doc_stable_path(candidate.path) == path -> return Val(candidate.copy())
+    }
+    None
+}
+
+// Docs.rs `enrich_callable_contracts` and `enrich_type_contracts`.
+fn jet_cli_doc_enrich(items: &[JetCLIDocItem], index: JetCLISemIndex) Never! {
+    loop item_index in 0..<items.len() {
+        item :: items[item_index].copy()
+        if item.kind == "function" {
+            callable :: jet_cli_doc_callable_for(index, item) ?? next
+            if !callable.signature_facts_available -> next
+            failure :: jet_cli_sem_failure_contract_name(callable)
+            source :: jet_cli_sem_failure_source_name(callable)
+            items[item_index].failure_contract = failure
+            items[item_index].failure_source = source
+            signature := "{item.signature}\nfailure: unavailable"
+            if failure == .Val(failure_name) {
+                if source == .Val(source_name) -> signature = "{item.signature}\nfailure: {failure_name} ({source_name})"
+            }
+            items[item_index].signature = signature
+        } else if item.kind == "distinct" {
+            found :: jet_cli_doc_nominal_for(index, item) ?? next
+            signature := item.signature
+            loop contract in found.trait_contracts -> signature = "{signature}\n{jet_cli_doc_trait_contract(contract)}"
+            items[item_index].signature = signature
+        }
+    }
+}
+
+// Docs.rs `doctest_fence_is_jet`.
+fn jet_cli_doc_fence_is_jet(fence: String) -> Bool Never! {
+    bytes :: fence.bytes()
+    start := 0
+    loop start < bytes.len() && bytes[start] == (U8{96}) {
+        start += 1
+    }
+    language :: jet_cli_doc_text(bytes, start, bytes.len()).trim()
+    language == "" || jet_cli_ascii_lower(language) == "jet"
+}
+
+// Docs.rs `find_doctest_expect_marker`: the `// =>` outside a string.
+fn jet_cli_doc_expect_marker(line: String) -> Int? Never! {
+    bytes :: line.bytes()
+    marker :: JET_CLI_DOC_EXPECT_MARKER.bytes()
+    in_string := false
+    escaped := false
+    loop index in 0..<bytes.len() {
+        byte :: bytes[index]
+        if in_string {
+            if {
+                escaped -> escaped = false
+                byte == (U8{92}) -> escaped = true
+                byte == (U8{34}) -> in_string = false
+            }
+            next
+        }
+        if byte == (U8{34}) {
+            in_string = true
+            next
+        }
+        if index + marker.len() > bytes.len() -> next
+        matched := true
+        loop offset in 0..<marker.len() {
+            if bytes[index + offset] != marker[offset] {
+                matched = false
+                break
+            }
+        }
+        if matched -> return Val(index)
+    }
+    None
+}
+
+// Docs.rs `discover_doctests`: fenced Jet blocks in `///` comments.
+fn jet_cli_doc_discover_doctests(unit: JetCLIDocUnit) -> [JetCLIDocTest] Never! {
+    tests := [JetCLIDocTest]{}
+    in_fence := false
+    setup := [String]{}
+    expectations := [JetCLIDocExpectation]{}
+    fence_line := 0
+    line_starts := [Int]{0}
+    source_bytes :: unit.source.bytes()
+    loop index in 0..<source_bytes.len() {
+        if source_bytes[index] == (U8{10}) -> &line_starts.push(index + 1)
+    }
+    loop (index, raw_line) in jet_cli_doc_lines(unit.source) {
+        line_number :: index + 1
+        doc_text :: jet_cli_doc_strip_prefix(raw_line.trim(), "///") ?? {
+            if in_fence {
+                in_fence = false
+                setup = [String]{}
+                expectations = [JetCLIDocExpectation]{}
+            }
+            next
+        }
+        doc_line :: doc_text.trim()
+        if !in_fence {
+            if doc_line.starts_with("```") && jet_cli_doc_fence_is_jet(doc_line) {
+                in_fence = true
+                fence_line = line_number
+                setup = [String]{}
+                expectations = [JetCLIDocExpectation]{}
+            }
+            next
+        }
+        if doc_line == "```" {
+            offset :: if fence_line - 1 < line_starts.len() -> line_starts[fence_line - 1] else -> source_bytes.len()
+            &tests.push(JetCLIDocTest{
+                module_path: unit.path,
+                line: fence_line,
+                setup: setup,
+                expectations: expectations,
+                source: jet_cli_doc_source_for(unit.path, unit.source, Span{start: offset, end: offset + raw_line.bytes().len()}),
+            })
+            setup = [String]{}
+            expectations = [JetCLIDocExpectation]{}
+            in_fence = false
+            next
+        }
+        if jet_cli_doc_expect_marker(doc_line) == .Val(marker) {
+            bytes :: doc_line.bytes()
+            &expectations.push(JetCLIDocExpectation{
+                expression: jet_cli_doc_text(bytes, 0, marker).trim(),
+                expected: jet_cli_doc_text(bytes, marker + JET_CLI_DOC_EXPECT_MARKER.bytes().len(), bytes.len()).trim(),
+            })
+        } else if doc_line != "" {
+            &setup.push(doc_line)
+        }
+    }
+    tests
+}
+
+fn jet_cli_doc_sort_strings(values: &[String]) Never! {
+    loop index in 1..<values.len() {
+        value :: values[index]
+        position := index
+        loop position > 0 && values[position - 1] > value {
+            values[position] = values[position - 1]
+            position -= 1
+        }
+        values[position] = value
+    }
+}
+
+// -1, 0, or 1 as `left` sorts before, with, or after `right`.
+fn jet_cli_doc_compare_text(left: String, right: String) -> Int Never! {
+    if {
+        left < right -> -1
+        left > right -> 1
+        else -> 0
+    }
+}
+
+fn jet_cli_doc_compare_int(left: Int, right: Int) -> Int Never! {
+    if {
+        left < right -> -1
+        left > right -> 1
+        else -> 0
+    }
+}
+
+// Rust `Option<String>` order: `None` first.
+fn jet_cli_doc_compare_optional(left: String?, right: String?) -> Int Never! {
+    if left == .Val(left_text) {
+        if right == .Val(right_text) -> return jet_cli_doc_compare_text(left_text, right_text)
+        return 1
+    }
+    if right == None -> 0 else -> -1
+}
+
+fn jet_cli_doc_module_order(left: JetCLIDocModule, right: JetCLIDocModule) -> Int Never! {
+    by_path :: jet_cli_doc_compare_text(left.path, right.path)
+    if by_path != 0 -> return by_path
+    jet_cli_doc_compare_text(left.name, right.name)
+}
+
+fn jet_cli_doc_item_order(left: JetCLIDocItem, right: JetCLIDocItem) -> Int Never! {
+    by_module :: jet_cli_doc_compare_text(left.module_path, right.module_path)
+    if by_module != 0 -> return by_module
+    by_name :: jet_cli_doc_compare_text(left.qualified_name, right.qualified_name)
+    if by_name != 0 -> return by_name
+    by_kind :: jet_cli_doc_compare_int(jet_cli_doc_kind_rank(left.kind), jet_cli_doc_kind_rank(right.kind))
+    if by_kind != 0 -> return by_kind
+    jet_cli_doc_compare_int(left.source.start, right.source.start)
+}
+
+fn jet_cli_doc_impl_order(left: JetCLIDocImpl, right: JetCLIDocImpl) -> Int Never! {
+    by_module :: jet_cli_doc_compare_text(left.module_path, right.module_path)
+    if by_module != 0 -> return by_module
+    by_type :: jet_cli_doc_compare_text(left.type_name, right.type_name)
+    if by_type != 0 -> return by_type
+    by_trait :: jet_cli_doc_compare_optional(left.trait_name, right.trait_name)
+    if by_trait != 0 -> return by_trait
+    jet_cli_doc_compare_int(left.source.start, right.source.start)
+}
+
+fn jet_cli_doc_test_order(left: JetCLIDocTest, right: JetCLIDocTest) -> Int Never! {
+    by_module :: jet_cli_doc_compare_text(left.module_path, right.module_path)
+    if by_module != 0 -> return by_module
+    jet_cli_doc_compare_int(left.line, right.line)
+}
+
+// Stable insertion sorts (Rust `sort_by` is stable).
+fn jet_cli_doc_sort_modules(values: &[JetCLIDocModule]) Never! {
+    loop index in 1..<values.len() {
+        value :: values[index]
+        position := index
+        loop position > 0 && jet_cli_doc_module_order(values[position - 1], value) > 0 {
+            values[position] = values[position - 1]
+            position -= 1
+        }
+        values[position] = value
+    }
+}
+
+fn jet_cli_doc_sort_items(values: &[JetCLIDocItem]) Never! {
+    loop index in 1..<values.len() {
+        value :: values[index]
+        position := index
+        loop position > 0 && jet_cli_doc_item_order(values[position - 1], value) > 0 {
+            values[position] = values[position - 1]
+            position -= 1
+        }
+        values[position] = value
+    }
+}
+
+fn jet_cli_doc_sort_impls(values: &[JetCLIDocImpl]) Never! {
+    loop index in 1..<values.len() {
+        value :: values[index]
+        position := index
+        loop position > 0 && jet_cli_doc_impl_order(values[position - 1], value) > 0 {
+            values[position] = values[position - 1]
+            position -= 1
+        }
+        values[position] = value
+    }
+}
+
+fn jet_cli_doc_sort_tests(values: &[JetCLIDocTest]) Never! {
+    loop index in 1..<values.len() {
+        value :: values[index]
+        position := index
+        loop position > 0 && jet_cli_doc_test_order(values[position - 1], value) > 0 {
+            values[position] = values[position - 1]
+            position -= 1
+        }
+        values[position] = value
+    }
+}
+
+// Docs.rs `build_doc_graph`: the projection of the checked modules, enriched
+// from the semantic index of the same checked program (whose effect
+// projection is the application authority).
+fn jet_cli_build_doc_graph(modules: [JetDriverDocModule], index: JetCLISemIndex) -> JetCLIDocGraph {
+    protocol_names := [String]{}
+    loop doc_module in modules -> jet_cli_doc_collect_protocol_names(doc_module.items, &protocol_names)
+    graph := JetCLIDocGraph{
+        schema_version: JET_CLI_DOC_SCHEMA_VERSION,
+        root: ".",
+        effect_projection: index.effect_projection,
+        modules: [JetCLIDocModule]{},
+        items: [JetCLIDocItem]{},
+        impls: [JetCLIDocImpl]{},
+        doctests: [JetCLIDocTest]{},
+    }
+    loop doc_module in modules {
+        unit :: JetCLIDocUnit{path: jet_cli_doc_stable_path(doc_module.path), source: doc_module.source}
+        &graph.modules.push(JetCLIDocModule{
+            name: jet_cli_doc_module_name(unit.path, doc_module.alias),
+            path: unit.path,
+            public: true,
+            summary: jet_cli_doc_leading_summary(doc_module.source),
+            source: jet_cli_doc_source_for(unit.path, doc_module.source, Span{start: 0, end: 0}),
+        })
+        loop test in jet_cli_doc_discover_doctests(unit) -> &graph.doctests.push(test)
+        jet_cli_doc_collect_items(doc_module.items, unit, "", false, protocol_names, &graph.items, &graph.impls)
+    }
+    jet_cli_doc_enrich(&graph.items, index)
+    jet_cli_doc_sort_modules(&graph.modules)
+    jet_cli_doc_sort_items(&graph.items)
+    jet_cli_doc_sort_impls(&graph.impls)
+    jet_cli_doc_sort_tests(&graph.doctests)
+    graph
+}
+
+// `DocGraph::undocumented_public`.
+fn jet_cli_doc_undocumented_public(graph: JetCLIDocGraph) -> [JetCLIDocItem] Never! {
+    undocumented := [JetCLIDocItem]{}
+    loop item in graph.items {
+        if item.public && item.summary == "" -> &undocumented.push(item)
+    }
+    undocumented
+}
+
+fn jet_cli_doc_source_value(source: JetCLIDocSource) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("path", jet_cli_status_text(source.path)),
+        jet_cli_status_field("start", jet_cli_status_int(source.start)),
+        jet_cli_status_field("end", jet_cli_status_int(source.end)),
+        jet_cli_status_field("line", jet_cli_status_int(source.line)),
+        jet_cli_status_field("column", jet_cli_status_int(source.column)),
+        jet_cli_status_field("link", jet_cli_status_text(source.link)),
+    })
+}
+
+fn jet_cli_doc_module_value(doc_module: JetCLIDocModule) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("name", jet_cli_status_text(doc_module.name)),
+        jet_cli_status_field("path", jet_cli_status_text(doc_module.path)),
+        jet_cli_status_field("public", jet_cli_status_bool(doc_module.public)),
+        jet_cli_status_field("summary", jet_cli_status_text(doc_module.summary)),
+        jet_cli_status_field("source", jet_cli_doc_source_value(doc_module.source)),
+    })
+}
+
+fn jet_cli_doc_item_value(item: JetCLIDocItem) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(item.kind)),
+        jet_cli_status_field("name", jet_cli_status_text(item.name)),
+        jet_cli_status_field("qualified_name", jet_cli_status_text(item.qualified_name)),
+        jet_cli_status_field("module", jet_cli_status_text(item.module_path)),
+        jet_cli_status_field("public", jet_cli_status_bool(item.public)),
+        jet_cli_status_field("package_public", jet_cli_status_bool(item.package_public)),
+        jet_cli_status_field("signature", jet_cli_status_text(item.signature)),
+        jet_cli_status_field("failure_contract", jet_cli_status_optional_text(item.failure_contract)),
+        jet_cli_status_field("failure_source", jet_cli_status_optional_text(item.failure_source)),
+        jet_cli_status_field("summary", jet_cli_status_text(item.summary)),
+        jet_cli_status_field("examples", jet_cli_status_texts(item.examples)),
+        jet_cli_status_field("markers", jet_cli_status_texts(item.markers)),
+        jet_cli_status_field("source", jet_cli_doc_source_value(item.source)),
+    })
+}
+
+fn jet_cli_doc_impl_value(implementation: JetCLIDocImpl) -> JetCLIStatusValue Never! {
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("kind", jet_cli_status_text(implementation.kind)),
+        jet_cli_status_field("type_name", jet_cli_status_text(implementation.type_name)),
+        jet_cli_status_field("trait_name", jet_cli_status_optional_text(implementation.trait_name)),
+        jet_cli_status_field("module", jet_cli_status_text(implementation.module_path)),
+        jet_cli_status_field("public", jet_cli_status_bool(implementation.public)),
+        jet_cli_status_field("methods", jet_cli_status_texts(implementation.methods)),
+        jet_cli_status_field("source", jet_cli_doc_source_value(implementation.source)),
+    })
+}
+
+fn jet_cli_doc_test_value(test: JetCLIDocTest) -> JetCLIStatusValue Never! {
+    expectations :: loop expectation in test.expectations -> jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("expression", jet_cli_status_text(expectation.expression)),
+        jet_cli_status_field("expected", jet_cli_status_text(expectation.expected)),
+    })
+    jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("module", jet_cli_status_text(test.module_path)),
+        jet_cli_status_field("line", jet_cli_status_int(test.line)),
+        jet_cli_status_field("setup", jet_cli_status_texts(test.setup)),
+        jet_cli_status_field("expectations", jet_cli_status_array(expectations)),
+        jet_cli_status_field("source", jet_cli_doc_source_value(test.source)),
+    })
+}
+
+// `DocGraph::to_status_envelope().json()`: the `inspect.doc` status line.
+fn jet_cli_doc_status_json(graph: JetCLIDocGraph) -> String Never! {
+    projection :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("required_effects", jet_cli_status_texts(graph.effect_projection.required)),
+        jet_cli_status_field("granted_effects", jet_cli_status_texts(graph.effect_projection.granted)),
+        jet_cli_status_field("denied_effects", jet_cli_status_texts(graph.effect_projection.denied)),
+        jet_cli_status_field("authority", jet_cli_status_text(graph.effect_projection.authority)),
+    })
+    modules :: loop doc_module in graph.modules -> jet_cli_doc_module_value(doc_module)
+    items :: loop item in graph.items -> jet_cli_doc_item_value(item)
+    impls :: loop implementation in graph.impls -> jet_cli_doc_impl_value(implementation)
+    doctests :: loop test in graph.doctests -> jet_cli_doc_test_value(test)
+    doc :: jet_cli_status_object([JetCLIStatusField]{
+        jet_cli_status_field("schema_version", jet_cli_status_int(graph.schema_version)),
+        jet_cli_status_field("root", jet_cli_status_text(graph.root)),
+        jet_cli_status_field("effect_projection", projection),
+        jet_cli_status_field("modules", jet_cli_status_array(modules)),
+        jet_cli_status_field("items", jet_cli_status_array(items)),
+        jet_cli_status_field("impls", jet_cli_status_array(impls)),
+        jet_cli_status_field("doctests", jet_cli_status_array(doctests)),
+    })
+    jet_cli_status_render("inspect.doc", true, [JetCLIStatusField]{jet_cli_status_field("doc", doc)})
+}
+
+// Docs.rs `docs_link`: the generated pages live one directory below the
+// sources they link to.
+fn jet_cli_doc_link(link: String) -> String Never! {
+    "../{link}"
+}
+
+// Docs.rs `html_escape` (`&<>"'`).
+fn jet_cli_html_escape(value: String) -> String Never! {
+    value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;")
+}
+
+fn jet_cli_doc_summary_text(item: JetCLIDocItem) -> String Never! {
+    if item.summary == "" -> "Undocumented public item." else -> item.summary
+}
+
+// `DocGraph::to_markdown`.
+fn jet_cli_doc_markdown(graph: JetCLIDocGraph) -> String Never! {
+    out := "# Jet Documentation\n\nGenerated from the checked semantic graph.\n\n## Effect Roles\n\n{jet_cli_effect_projection_line(graph.effect_projection)}\n\n## Modules\n\n"
+    loop doc_module in graph.modules {
+        out = "{out}- `{doc_module.name}` — `{doc_module.path}` ([source]({jet_cli_doc_link(doc_module.source.link)}))\n"
+        if doc_module.summary != "" -> out = "{out}  {doc_module.summary}\n"
+    }
+    out = "{out}\n## API\n\n"
+    loop item in graph.items {
+        if !item.public -> next
+        out = "{out}### `{item.qualified_name}`\n\n{jet_cli_doc_summary_text(item)}\n\n```jet\n{item.signature}\n```\n\n"
+        if item.examples.len() > 0 {
+            out = "{out}Examples:\n\n"
+            loop example in item.examples -> out = "{out}- `{example}`\n"
+            out = "{out}\n"
+        }
+        out = "{out}[Source]({jet_cli_doc_link(item.source.link)})\n\n"
+    }
+    if graph.impls.len() > 0 {
+        out = "{out}## Implementations\n\n"
+        loop implementation in graph.impls {
+            trait_name :: implementation.trait_name ?? "inherent"
+            out = "{out}- `{trait_name}` for `{implementation.type_name}` in `{implementation.module_path}` ([source]({jet_cli_doc_link(implementation.source.link)}))\n"
+        }
+        out = "{out}\n"
+    }
+    if graph.doctests.len() > 0 {
+        out = "{out}## Doctests\n\n"
+        loop test in graph.doctests {
+            out = "{out}### `{test.module_path}` line {test.line}\n\n```jet\n"
+            loop line in test.setup -> out = "{out}{line}\n"
+            loop expectation in test.expectations -> out = "{out}{expectation.expression} // => {expectation.expected}\n"
+            out = "{out}```\n\n[Source]({jet_cli_doc_link(test.source.link)})\n\n"
+        }
+    }
+    out
+}
+
+// `DocGraph::to_html`.
+fn jet_cli_doc_html(graph: JetCLIDocGraph) -> String Never! {
+    out := "<!doctype html><html><head><meta charset=\"utf-8\"><title>Jet Documentation</title></head><body><h1>Jet Documentation</h1><p>Generated from the checked semantic graph.</p><h2>Effect Roles</h2><p>{jet_cli_html_escape(jet_cli_effect_projection_line(graph.effect_projection))}</p><h2>Modules</h2><ul>"
+    loop doc_module in graph.modules {
+        out = "{out}<li><code>{jet_cli_html_escape(doc_module.name)}</code> — <code>{jet_cli_html_escape(doc_module.path)}</code> (<a href=\"{jet_cli_html_escape(jet_cli_doc_link(doc_module.source.link))}\">source</a>)"
+        if doc_module.summary != "" -> out = "{out}<p>{jet_cli_html_escape(doc_module.summary)}</p>"
+        out = "{out}</li>"
+    }
+    out = "{out}</ul><h2>API</h2>"
+    loop item in graph.items {
+        if !item.public -> next
+        out = "{out}<article><h3 id=\"{jet_cli_html_escape(item.qualified_name)}\"><code>{jet_cli_html_escape(item.qualified_name)}</code></h3><p>{jet_cli_html_escape(jet_cli_doc_summary_text(item))}</p><pre><code>{jet_cli_html_escape(item.signature)}</code></pre>"
+        if item.examples.len() > 0 {
+            out = "{out}<h4>Examples</h4><ul>"
+            loop example in item.examples -> out = "{out}<li><code>{jet_cli_html_escape(example)}</code></li>"
+            out = "{out}</ul>"
+        }
+        out = "{out}<p><a href=\"{jet_cli_html_escape(jet_cli_doc_link(item.source.link))}\">Source</a></p></article>"
+    }
+    if graph.impls.len() > 0 {
+        out = "{out}<h2>Implementations</h2><ul>"
+        loop implementation in graph.impls {
+            trait_name :: implementation.trait_name ?? "inherent"
+            out = "{out}<li><code>{jet_cli_html_escape(trait_name)}</code> for <code>{jet_cli_html_escape(implementation.type_name)}</code> (<a href=\"{jet_cli_html_escape(jet_cli_doc_link(implementation.source.link))}\">source</a>)</li>"
+        }
+        out = "{out}</ul>"
+    }
+    if graph.doctests.len() > 0 {
+        out = "{out}<h2>Doctests</h2>"
+        loop test in graph.doctests {
+            out = "{out}<article><h3><code>{jet_cli_html_escape(test.module_path)}</code> line {test.line}</h3><pre><code>"
+            loop line in test.setup -> out = "{out}{jet_cli_html_escape(line)}\n"
+            loop expectation in test.expectations -> out = "{out}{jet_cli_html_escape(expectation.expression)} // =&gt; {jet_cli_html_escape(expectation.expected)}\n"
+            out = "{out}</code></pre><a href=\"{jet_cli_html_escape(jet_cli_doc_link(test.source.link))}\">Source</a></article>"
+        }
+    }
+    "{out}</body></html>\n"
+}

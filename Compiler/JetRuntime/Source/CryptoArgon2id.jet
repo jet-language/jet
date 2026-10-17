@@ -1,0 +1,213 @@
+// RFC9106 Argon2id v19; reused Core/crypto/expert.jet:899-1109@5933a61b2.
+// Existing JVKW reach: VaultKeyWrap.rs:593->346->354->370->334, params at336.
+// Borrowed password/salt/secret/AD/output, caller memory=m' *1024, scratch4800
+// aligned8. No internal allocation; all caller memory and scratch wiped.
+// Argon2id intentionally uses data-dependent references after its first half
+// pass, as required by RFC9106. Its arithmetic (BlaMka) has no secret branches.
+fn rt_argon_index(base: I64, index: I64, column: Bool) -> I64 {
+    base + if column -> (index / I64{2}) * I64{16} + index % I64{2} else -> index
+}
+#Arithmetic(.Wrapping)
+fn rt_argon_g(block: I64, ai: I64, bi: I64, ci: I64, di: I64) {
+    a := rt_text_word(block + ai * I64{8})
+    b := rt_text_word(block + bi * I64{8})
+    c := rt_text_word(block + ci * I64{8})
+    d := rt_text_word(block + di * I64{8})
+    a = a + b + I64{2} * (a.bit_and(I64{0xffffffff})) * (b.bit_and(I64{0xffffffff}))
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{32})
+    c = c + d + I64{2} * (c.bit_and(I64{0xffffffff})) * (d.bit_and(I64{0xffffffff}))
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{24})
+    a = a + b + I64{2} * (a.bit_and(I64{0xffffffff})) * (b.bit_and(I64{0xffffffff}))
+    d = rt_crypto_rotr64(d.bit_xor(a), I64{16})
+    c = c + d + I64{2} * (c.bit_and(I64{0xffffffff})) * (d.bit_and(I64{0xffffffff}))
+    b = rt_crypto_rotr64(b.bit_xor(c), I64{63})
+    rt_text_store(block + ai * I64{8}, a)
+    rt_text_store(block + bi * I64{8}, b)
+    rt_text_store(block + ci * I64{8}, c)
+    rt_text_store(block + di * I64{8}, d)
+}
+fn rt_argon_round(block: I64, base: I64, column: Bool) {
+    i := I64{0}
+    loop {
+        if (i >= I64{4}) -> break
+        rt_argon_g(block, rt_argon_index(base, i, column), rt_argon_index(base, i + I64{4}, column), rt_argon_index(base, i + I64{8}, column), rt_argon_index(base, i + I64{12}, column))
+        i += I64{1}
+    }
+    i = I64{0}
+    loop {
+        if (i >= I64{4}) -> break
+        rt_argon_g(block, rt_argon_index(base, i, column), rt_argon_index(base, I64{4} + (i + I64{1}) % I64{4}, column), rt_argon_index(base, I64{8} + (i + I64{2}) % I64{4}, column), rt_argon_index(base, I64{12} + (i + I64{3}) % I64{4}, column))
+        i += I64{1}
+    }
+}
+fn rt_argon_permute(block: I64) {
+    i := I64{0}
+    loop {
+        if (i >= I64{8}) -> break
+        rt_argon_round(block, i * I64{16}, false)
+        i += I64{1}
+    }
+    i = I64{0}
+    loop {
+        if (i >= I64{8}) -> break
+        rt_argon_round(block, i * I64{2}, true)
+        i += I64{1}
+    }
+}
+fn rt_argon_addresses(address: I64, input: I64, saved: I64) {
+    rt_text_store(input + I64{48}, rt_text_word(input + I64{48}) + I64{1})
+    rt_text_bytes_copy(address, input, I64{1024})
+    rt_text_bytes_copy(saved, input, I64{1024})
+    rt_argon_permute(address)
+    i := I64{0}
+    loop {
+        if (i >= I64{1024}) -> break
+        mixed :: rt_text_word(address + i).bit_xor(rt_text_word(saved + i))
+        rt_text_store(address + i, mixed)
+        rt_text_store(saved + i, mixed)
+        i += I64{8}
+    }
+    rt_argon_permute(address)
+    i = I64{0}
+    loop {
+        if (i >= I64{1024}) -> break
+        rt_text_store(address + i, rt_text_word(address + i).bit_xor(rt_text_word(saved + i)))
+        i += I64{8}
+    }
+}
+fn rt_argon_fill(previous: I64, reference: I64, next: I64, work: I64, saved: I64, with_xor: Bool) {
+    i := I64{0}
+    loop {
+        if (i >= I64{1024}) -> break
+        mixed :: rt_text_word(previous + i).bit_xor(rt_text_word(reference + i))
+        rt_text_store(work + i, mixed)
+        rt_text_store(saved + i, if with_xor -> mixed.bit_xor(rt_text_word(next + i)) else -> mixed)
+        i += I64{8}
+    }
+    rt_argon_permute(work)
+    i = I64{0}
+    loop {
+        if (i >= I64{1024}) -> break
+        rt_text_store(next + i, rt_text_word(work + i).bit_xor(rt_text_word(saved + i)))
+        i += I64{8}
+    }
+}
+#Arithmetic(.Wrapping)
+fn rt_argon_mapping(random: I64, area: I64) -> I64 {
+    j1 :: random.bit_and(I64{0xffffffff})
+    x :: ((j1 * j1) >> I64{32}).bit_and(I64{0xffffffff})
+    area - I64{1} - ((area * x) >> I64{32})
+}
+fn rt_argon_h0_part(state: I64, field: I64, input: I64, length: I64) {
+    rt_crypto_put32(field, length)
+    rt_blake_update(state, field, I64{4})
+    rt_blake_update(state, input, length)
+}
+// Internal general form carries the RFC vector's optional secret and AD.
+// JVKW calls the fixed-policy wrapper below with neither optional field.
+fn rt_crypto_argon2id(password: I64, password_len: I64, salt: I64, salt_len: I64, secret: I64, secret_len: I64, ad: I64, ad_len: I64, memory_kib: I64, iterations: I64, lanes: I64, output: I64, output_len: I64, memory: I64, scratch: I64) -> Bool {
+    if (lanes < I64{1} || lanes > I64{8} || memory_kib < I64{8} * lanes || memory_kib > I64{262144} || iterations < I64{1} || iterations > I64{10} || output_len < I64{4} || output_len > I64{64} || password_len < I64{0} || password_len > I64{1048576} || salt_len < I64{8} || salt_len > I64{64} || secret_len < I64{0} || secret_len > I64{1048576} || ad_len < I64{0} || ad_len > I64{1048576}) {
+        rt_crypto_wipe(scratch, I64{4800})
+        return false
+    }
+    blocks :: (memory_kib / (I64{4} * lanes)) * I64{4} * lanes
+    lane_length :: blocks / lanes
+    segment :: lane_length / I64{4}
+    work :: scratch
+    saved :: scratch + I64{1024}
+    address :: scratch + I64{2048}
+    input :: scratch + I64{3072}
+    blake :: scratch + I64{4096}
+    header :: scratch + I64{4704}
+    field :: scratch + I64{4776}
+    rt_crypto_wipe(scratch, I64{4800})
+    rt_crypto_put32(header, lanes)
+    rt_crypto_put32(header + I64{4}, output_len)
+    rt_crypto_put32(header + I64{8}, memory_kib)
+    rt_crypto_put32(header + I64{12}, iterations)
+    rt_crypto_put32(header + I64{16}, I64{19})
+    rt_crypto_put32(header + I64{20}, I64{2})
+    rt_blake_init(blake, I64{64})
+    rt_blake_update(blake, header, I64{24})
+    rt_argon_h0_part(blake, field, password, password_len)
+    rt_argon_h0_part(blake, field, salt, salt_len)
+    rt_argon_h0_part(blake, field, secret, secret_len)
+    rt_argon_h0_part(blake, field, ad, ad_len)
+    rt_blake_finish(blake, header)
+    lane := I64{0}
+    loop lane < lanes {
+        index := I64{0}
+        loop {
+            if (index >= I64{2}) -> break
+            rt_crypto_put32(header + I64{64}, index)
+            rt_crypto_put32(header + I64{68}, lane)
+            rt_argon_hprime(header, I64{72}, memory + (lane * lane_length + index) * I64{1024}, I64{1024}, blake)
+            index += I64{1}
+        }
+        lane += I64{1}
+    }
+    pass := I64{0}
+    loop pass < iterations {
+        slice := I64{0}
+        loop {
+            if (slice >= I64{4}) -> break
+            lane = I64{0}
+            loop lane < lanes {
+                independent :: pass == I64{0} && slice < I64{2}
+                first :: if (pass == I64{0} && slice == I64{0}) -> I64{2} else -> I64{0}
+                if independent {
+                    rt_crypto_wipe(input, I64{1024})
+                    rt_text_store(input, pass)
+                    rt_text_store(input + I64{8}, lane)
+                    rt_text_store(input + I64{16}, slice)
+                    rt_text_store(input + I64{24}, blocks)
+                    rt_text_store(input + I64{32}, iterations)
+                    rt_text_store(input + I64{40}, I64{2})
+                    if (first != I64{0}) -> rt_argon_addresses(address, input, saved)
+                }
+                index := first
+                loop index < segment {
+                    position :: lane * lane_length + slice * segment + index
+                    previous :: if (index == I64{0} && slice == I64{0}) -> lane * lane_length + lane_length - I64{1} else -> position - I64{1}
+                    if (independent && index % I64{128} == I64{0}) -> rt_argon_addresses(address, input, saved)
+                    random :: if independent -> rt_text_word(address + (index % I64{128}) * I64{8}) else -> rt_text_word(memory + previous * I64{1024})
+                    reference_lane :: if (pass == I64{0} && slice == I64{0}) -> lane else -> ((random >> I64{32}).bit_and(I64{0xffffffff})) % lanes
+                    same :: reference_lane == lane
+                    area :: if {
+                        (pass == I64{0} && slice == I64{0}) -> index - I64{1}
+                        (pass == I64{0} && same) -> slice * segment + index - I64{1}
+                        (pass == I64{0}) -> slice * segment - if (index == I64{0}) -> I64{1} else -> I64{0}
+                        same -> lane_length - segment + index - I64{1}
+                        else -> lane_length - segment - if (index == I64{0}) -> I64{1} else -> I64{0}
+                    }
+                    start :: if (pass != I64{0} && slice != I64{3}) -> (slice + I64{1}) * segment else -> I64{0}
+                    reference :: reference_lane * lane_length + (start + rt_argon_mapping(random, area)) % lane_length
+                    rt_argon_fill(memory + previous * I64{1024}, memory + reference * I64{1024}, memory + position * I64{1024}, work, saved, pass != I64{0})
+                    index += I64{1}
+                }
+                lane += I64{1}
+            }
+            slice += I64{1}
+        }
+        pass += I64{1}
+    }
+    rt_crypto_wipe(work, I64{1024})
+    lane = I64{0}
+    loop lane < lanes {
+        last :: memory + (lane * lane_length + lane_length - I64{1}) * I64{1024}
+        at := I64{0}
+        loop {
+            if (at >= I64{1024}) -> break
+            rt_text_store(work + at, rt_text_word(work + at).bit_xor(rt_text_word(last + at)))
+            at += I64{8}
+        }
+        lane += I64{1}
+    }
+    rt_argon_hprime(work, I64{1024}, output, output_len, blake)
+    rt_crypto_wipe(memory, blocks * I64{1024})
+    rt_crypto_wipe(scratch, I64{4800})
+    true
+}
+fn rt_crypto_jvkw_argon(password: I64, password_len: I64, salt: I64, output: I64, memory: I64, scratch: I64) -> Bool {
+    rt_crypto_argon2id(password, password_len, salt, I64{16}, I64{1}, I64{0}, I64{1}, I64{0}, I64{65536}, I64{3}, I64{1}, output, I64{32}, memory, scratch)
+}

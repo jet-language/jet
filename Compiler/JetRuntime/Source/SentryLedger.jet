@@ -1,0 +1,125 @@
+// MemSentry.rs:134-239. Observational JSONL persistence never changes the fault.
+// Linux syscalls borrow owned NUL paths and stack-independent scratch. Failures
+// are discarded just as jet_sentry_check discards its ledger-record Result.
+fn sentry_ledger_stat(path: I64, scratch: I64) -> I64 {
+    trap_syscall(I64{262}, I64{-100}, path, scratch, I64{256}, I64{0}, I64{0})
+}
+fn sentry_ledger_parent(path: I64, scratch: I64) -> Bool {
+    length :: rt_text_len(path)
+    data :: rt_text_data(path)
+    end := I64{-1}
+    at := I64{0}
+    loop at < length {
+        if (trap_byte(data + at) == I64{47}) -> end = at
+        at += I64{1}
+    }
+    if (end < I64{0}) -> return true
+    parent_len :: if (end == I64{0}) -> I64{1} else -> end
+    parent :: jet_rt_alloc(parent_len + I64{1}, I64{1})
+    coll_copy(data, parent, parent_len)
+    trap_put(parent + parent_len, I64{0})
+    status :: sentry_ledger_stat(parent, scratch)
+    valid := false
+    if {
+        (status == I64{0}) -> valid = ((sync_load(scratch + I64{24})).bit_and(I64{61440})) == I64{16384}
+        (status == I64{-2}) -> {
+            valid = true
+            at = I64{1}
+            // create_dir_all's mkdir succeeds over existing parents; inspect
+            // the final directory nofollow before granting its 0700 mode.
+            loop at <= parent_len {
+                if (at == parent_len || trap_byte(parent + at) == I64{47}) {
+                    saved :: trap_byte(parent + at)
+                    trap_put(parent + at, I64{0})
+                    created :: trap_syscall(I64{83}, parent, I64{511}, I64{0}, I64{0}, I64{0}, I64{0})
+                    trap_put(parent + at, saved)
+                    if (created != I64{0} && created != I64{-17}) {
+                        valid = false
+                        break
+                    }
+                }
+                at += I64{1}
+            }
+            if valid {
+                valid = sentry_ledger_stat(parent, scratch) == I64{0} && (sync_load(scratch + I64{24}).bit_and(I64{61440})) == I64{16384}
+                if valid -> valid = trap_syscall(I64{90}, parent, I64{448}, I64{0}, I64{0}, I64{0}, I64{0}) == I64{0}
+            }
+        }
+    }
+    jet_rt_free(parent, parent_len + I64{1}, I64{1})
+    valid
+}
+fn sentry_ledger_write(path: I64, row: I64) {
+    length :: rt_text_len(path)
+    data :: rt_text_data(path)
+    at := I64{0}
+    loop at < length {
+        if (trap_byte(data + at) == I64{0}) -> return
+        at += I64{1}
+    }
+    name :: jet_rt_alloc(length + I64{1}, I64{1})
+    coll_copy(data, name, length)
+    trap_put(name + length, I64{0})
+    scratch :: jet_rt_alloc(I64{144}, I64{8})
+    sync_mutex_lock(sentry_root)
+    allowed := rt_text_len(row) <= I64{4194304} && sentry_ledger_parent(path, scratch)
+    if allowed {
+        status :: sentry_ledger_stat(name, scratch)
+        if {
+            (status == I64{0}) -> allowed = ((sync_load(scratch + I64{24})).bit_and(I64{61440})) == I64{32768} && sync_load(scratch + I64{48}) <= I64{4194304} - rt_text_len(row)
+            (status != I64{-2}) -> allowed = false
+        }
+    }
+    if allowed {
+        fd :: trap_syscall(I64{2}, name, I64{525377}, I64{384}, I64{0}, I64{0}, I64{0})
+        if (fd >= I64{0}) {
+            used := I64{0}
+            count :: rt_text_len(row)
+            loop used < count {
+                written :: trap_syscall(I64{1}, fd, rt_text_data(row) + used, count - used, I64{0}, I64{0}, I64{0})
+                if (written == I64{-4}) -> next
+                if (written <= I64{0}) -> break
+                used += written
+            }
+            _ := trap_syscall(I64{3}, fd, I64{0}, I64{0}, I64{0}, I64{0}, I64{0})
+        }
+    }
+    sync_mutex_unlock(sentry_root)
+    jet_rt_free(scratch, I64{144}, I64{8})
+    jet_rt_free(name, length + I64{1}, I64{1})
+}
+fn sentry_ledger(fault: I64, gate: I64, detail: I64) {
+    name :: services_msg_ledger_key()
+    path := rt_env_get(name)
+    jet_rt_string_drop(name)
+    if (path == I64{0} || rt_text_len(path) == I64{0}) {
+        jet_rt_string_drop(path)
+        path = services_msg_ledger_default()
+    }
+    code :: sentry_code(fault)
+    row :: services_msg_ledger_head()
+    rt_text_push_scalar(row, I64{48} + code)
+    sentry_append_owned(row, services_msg_ledger_source())
+    base :: thread_base()
+    file :: rt_text_copy(sync_load(base + I64{136}), sync_load(base + I64{144}))
+    sentry_quote(row, file, true)
+    jet_rt_string_drop(file)
+    sentry_append_owned(row, services_msg_ledger_start())
+    sentry_append_number(row, sync_load(base + I64{152}))
+    sentry_append_owned(row, services_msg_ledger_end())
+    sentry_append_number(row, sync_load(base + I64{152}))
+    sentry_append_owned(row, services_msg_ledger_scope())
+    sentry_quote(row, gate, true)
+    sentry_append_owned(row, services_msg_ledger_provenance())
+    sentry_quote(row, detail, true)
+    sentry_append_owned(row, services_msg_ledger_repairs())
+    repairs :: if {
+        (code == I64{2}) -> services_msg_ledger_repairs2()
+        (code == I64{3}) -> services_msg_ledger_repairs3()
+        else -> services_msg_ledger_repairs1()
+    }
+    sentry_append_owned(row, repairs)
+    sentry_ledger_write(path, row)
+    jet_rt_string_drop(path)
+    jet_rt_string_drop(row)
+}

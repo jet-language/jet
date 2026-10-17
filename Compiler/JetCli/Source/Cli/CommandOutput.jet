@@ -1,0 +1,18 @@
+// Source/OutputAdapter.rs `write_renderable`, Source/main.rs `run_version`.
+// --json selects machine stdout and hides primary human content; help and
+// version have no machine record and succeed without writing either stream.
+fn jet_cli_renderable(text: String, json: Bool) -> JetCLIPlan Never! {
+    jet_cli_done(if json -> "" else -> text, "", JET_DRIVER_EXIT_OK)
+}
+
+// Reuse the package model's canonical release/edition/protocol projection
+// (Jetpack/PackageModel/Source/Manifest/Manifest.jet; origin/port/compiler).
+fn jet_cli_version(json: Bool) -> JetCLIPlan Never! {
+    jet_cli_renderable(pkg_version_banner(), json)
+}
+
+// D-ADOPT-CCSPELL1=A: engine compiler aliases own every raw argument,
+// including --version and --help, before Jet's output/flag parser runs.
+fn jet_cli_foreign_compile_plan(raw: [String]) -> JetCLIPlan Never! {
+    JetCLIPlan.InspectB{plan: JetCLIInspectBPlan.Engine{engine: JET_CLI_JETPACK_BINARY, verb: raw[0], argv: raw}}
+}

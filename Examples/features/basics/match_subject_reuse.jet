@@ -1,0 +1,32 @@
+// An enum match whose subject is used after the match: each payload binding
+// reads its payload, the subject stays whole, and no arm copies (or leaks)
+// the whole subject, matched or not.
+struct Blob {
+    data: [Int]
+    text: String
+}
+
+enum Node {
+    Leaf(blob: Blob)
+    Other(blob: Blob)
+    Empty
+}
+
+fn run() {
+    node :: Node.Leaf{blob: Blob{data: [Int]{1, 2, 3}, text: "leaf"}}
+    total := 0
+    loop k in 0..<4 {
+        if node == {
+            .Leaf(blob) -> total += blob.data.len()
+            else -> total += 100
+        }
+        if node == {
+            .Other(blob) -> total += blob.data.len() * 1000
+            else -> total += 1
+        }
+    }
+    if node == {
+        .Leaf(blob) -> print("after {blob.text} {total}")
+        else -> print("empty {total}")
+    }
+}

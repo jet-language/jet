@@ -1,0 +1,21 @@
+# HAND-PORT tests/jetpack_engine.rs:6935-6987 bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: bridge_flake_breadth_and_json_budget_use_native_evaluator_without_nix.fixture
+env: NO_COLOR=1
+mkdir: project
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: 0
+stdout: ~ "packages: [fd, ripgrep]" # original contains predicate
+copy: project/.jet/lock before.lock
+copy: over-budget.nix project/flake.nix
+step: jetpack bridge flake --no-color
+cwd: project
+env: PATH=
+exit: nonzero
+stderr: ~ "E1256" # original contains predicate
+stderr: ~ "JSON value is too deeply nested" # original contains predicate
+stderr: !~ "nix eval" # original negative contains predicate
+file: project/.jet/lock == before.lock
+

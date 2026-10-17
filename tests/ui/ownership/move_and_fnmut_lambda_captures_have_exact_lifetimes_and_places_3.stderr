@@ -1,0 +1,8 @@
+Error [E0204]: `pair.right` is being changed in this call, so it can't be used again here
+  --> move_and_fnmut_lambda_captures_have_exact_lifetimes_and_places_3.jet:9:42
+    |
+  9 |     both(() -> &pair.right.push(3), pair.right)
+    |                                          ^^^^^
+ Why: While something is being changed through the write-access marker `&`, nobody else may be looking at it
+ Fix: Pass the write-access marker `&` (`&pair.right`) only once, or copy first with `~pair.right`
+More: jet-lang.dev/e/E0204

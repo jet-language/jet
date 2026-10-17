@@ -1,0 +1,36 @@
+// Production parser regression for D-META-STAGE1=B / D-PREP-SURFACE2=A.
+// Assemble with the canonical parser L2 unit, not a replacement parser.
+// Native UI proof: jet check tests/ui/marker_retired_known.jet (E0377),
+// and jet check tests/ui/comptime_known_retired.jet (E0377 plus retired read).
+fn known_retirement_expect(source: String, wanted: [String]) -> ParseResult {
+    parsed :: parse_source(source.bytes())
+    if parsed.diagnostics.len() != wanted.len() -> panic("Known recovery emitted extra or missing diagnostics")
+    loop (index, diagnostic) in parsed.diagnostics {
+        if diagnostic.code != "E0377" || diagnostic.fix != wanted[index] -> panic("Known repair differs from the canonical parser")
+        span :: diagnostic.span ?? panic("Known repair has no span")
+        if source.slice(span.start, span.end) != "#Known" -> panic("Known diagnostic lost its marker span")
+    }
+    parsed
+}
+
+fn run() {
+    global :: known_retirement_expect("#Known httpLimit :: 1000\nfn run() {{}}", [String]{"write `HTTP_LIMIT :: prep {{ … }}`"})
+    if global.program.items[0] != .Const(_) -> panic("Known global was not recovered as a declaration")
+    local :: known_retirement_expect("fn run() {{\n#Known HTTPValue :: 1\n}}", [String]{"write `http_value :: prep {{ … }}`"})
+    if local.program.items[0] == .Func(function) {
+        if function.body[0] == .Val(binding) {
+            if !binding.is_comptime || binding.name != "HTTPValue" -> panic("Known local lost its authored name or staging")
+        } else { panic("Known local was not recovered as a binding") }
+    } else { panic("Known local lost its enclosing function") }
+    branches :: known_retirement_expect("fn run() {{\n#Known if true {{}} else #Known if false {{}} else {{}}\n}}", [String]{"write `prep if <condition> {{ … }}`", "write `prep if <condition> {{ … }}`"})
+    if branches.program.items[0] == .Func(function) {
+        if function.body[0] != .ComptimeIf(_, _, _, _, _, _) -> panic("Known branch lost its compile-time form")
+    } else { panic("Known branch lost its enclosing function") }
+    block :: known_retirement_expect("fn run() {{\n#Known {{\nvalue :: 1\n}}\n}}", [String]{"write `prep {{ … }}`"})
+    if block.program.items[0] == .Func(function) {
+        if function.body[0] != .ComptimeBlock(_, _, _) -> panic("Known block lost its compile-time form")
+    } else { panic("Known block lost its enclosing function") }
+    canonical :: parse_source("VALUE :: prep {{ 1 }}\nfn run() {{\nvalue :: prep {{ 1 }}\nprep if true {{}}\nprep {{}}\n}}".bytes())
+    if canonical.diagnostics.len() != 0 -> panic("canonical prep forms were changed")
+    print("Known retirement: passed")
+}

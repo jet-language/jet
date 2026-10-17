@@ -1,0 +1,10 @@
+# Port of tests/cli_parts/commands.rs:804-828; sources copied verbatim.
+# PENDING-SAME-HEAD: original predicates/oracles authored; runtime not run.
+fixture: fixtures/octave_broken
+step: jet inspect bind octave {work}/broken.m --pkg broken
+exit: nonzero
+stderr: ~ "Error [E3208]:" # original predicate
+stderr: ~ "multiple-output" # original predicate
+stderr: ~ " Why:" # original predicate
+stderr: ~ " Fix:" # original predicate
+stderr: !~ "broken.m:" # original predicate

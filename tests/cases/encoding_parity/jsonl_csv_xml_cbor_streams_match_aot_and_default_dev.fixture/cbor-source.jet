@@ -1,0 +1,37 @@
+
+use core.encoding as encoding
+use core.encoding.[cbor as fmt]
+use core.files as files
+
+
+fn run() {
+    path := "{work}/packet.cbor"
+    output :: files.create(path) ?? panic("create")
+    writer :: fmt.writer(^output) ?? panic("writer")
+    writer.write(encoding.DataEvent.ObjectStart) ?? panic("start")
+    writer.write(encoding.DataEvent.Key("aa")) ?? panic("key aa")
+    writer.write(encoding.DataEvent.Int(1)) ?? panic("int aa")
+    writer.write(encoding.DataEvent.Key("b")) ?? panic("key b")
+    writer.write(encoding.DataEvent.Int(2)) ?? panic("int b")
+    writer.write(encoding.DataEvent.Key("f")) ?? panic("key f")
+    writer.write(encoding.DataEvent.Float(1.5)) ?? panic("float f")
+    writer.write(encoding.DataEvent.Key("z")) ?? panic("key z")
+    writer.write(encoding.DataEvent.Float(-0.0)) ?? panic("float z")
+    writer.write(encoding.DataEvent.ObjectEnd) ?? panic("end")
+    writer.finish() ?? panic("finish")
+    input :: files.open(path) ?? panic("open")
+    reader :: fmt.reader(^input) ?? panic("reader")
+    first :: reader.next()
+    if first == {
+        .Val(_) -> print(true)
+        .None -> print(false)
+    }
+    whole := Dyn.Object([
+        "aa": Dyn.Int(1),
+        "b": Dyn.Int(2),
+        "f": Dyn.Float(1.5),
+        "z": Dyn.Float(-0.0),
+    ])
+    print((fmt.to_bytes_canonical(whole) ?? panic("whole")) == (files.read_bytes(path) ?? panic("bytes")))
+}
+

@@ -47,6 +47,7 @@ use jet_foundation.[
     MIRWebBucket,
     MIRWebParamReconstruction,
     Span,
+    compiler_threads_single,
     mir_empty_optimization_facts,
     mir_program_digest,
     mir_sha256_hex,
@@ -82,7 +83,6 @@ fn jet_web_runtime_part_name(part: MIRRuntimePartID) -> String Never! {
         .Browser -> "Browser"
         .Args -> "Args"
         .Reflect -> "Reflect"
-        .AuthTokens -> "AuthTokens"
         .AuthSession -> "AuthSession"
         .Sync -> "Sync"
         .Services -> "Services"
@@ -238,7 +238,7 @@ fn jet_web_context(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitC
     entry_spec :: artifact_row.entry
     entry_id :: if entry_spec == .Val(spec) -> spec.function else -> None
     entry_function :: if entry_id == .Val(id) -> jet_web_find_function(program, id) else -> None
-    entry_row :: entry_function ?? MIRFunction{id: MIRFunctionID{value: 0}, module_id: MIRModuleID{value: 0}, source_file: MIRSourceFileID{value: 0}, key: "", module_name: "", name: "", span: Span{start: 0, end: 0}, kind: MIRFunctionKind.Jet, form: MIRFunctionForm.TopLevel, visibility: MIRVisibility.Private, target_applicability: MIRTargetApplicability{rust_aot: false, cranelift: false, interpreter: false, web: false}, web_bucket: None, web_marker: None, generic_params: [MIRGenericParam]{}, capture_params: [MIRCaptureParam]{}, params: [MIRParam]{}, declared_return: None, return_type: MIRType{kind: MIRTypeKind.Int, identity: None, layout: mir_type_layout(MIRTypeKind.Int)}, failure: MIRFailureCarrier.Infallible, effects: MIREffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MIRNamedSpan]{}}, captures: None, generator: None, optimization: mir_empty_optimization_facts(), is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [String]{}, is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false, return_view_provenance: None, web_param_reconstructions: [MIRWebParamReconstruction]{}, blocks: [MIRBasicBlock]{}, entry: MIRBlockID{value: 0}, locals: [MIRLocal]{}, values: [MIRValueFact]{}, places: [MIRPlace]{}, scopes: [MIRScope]{}, drops: [MIRDropAction]{}, foreign_language: None}
+    entry_row :: entry_function ?? MIRFunction{id: MIRFunctionID{value: 0}, module_id: MIRModuleID{value: 0}, source_file: MIRSourceFileID{value: 0}, key: "", module_name: "", name: "", span: Span{start: 0, end: 0}, kind: MIRFunctionKind.Jet, form: MIRFunctionForm.TopLevel, visibility: MIRVisibility.Private, target_applicability: MIRTargetApplicability{rust_aot: false, interpreter: false, web: false}, web_bucket: None, web_marker: None, generic_params: [MIRGenericParam]{}, capture_params: [MIRCaptureParam]{}, params: [MIRParam]{}, declared_return: None, return_type: MIRType{kind: MIRTypeKind.Int, identity: None, layout: mir_type_layout(MIRTypeKind.Int)}, failure: MIRFailureCarrier.Infallible, effects: MIREffectFacts{direct: [String]{}, solved: [String]{}, call_edges: [String]{}, maximal: false, direct_spans: [MIRNamedSpan]{}}, captures: None, generator: None, optimization: mir_empty_optimization_facts(), is_unsafe: false, unsafe_gate: None, is_pure: false, memo_bound: None, memo_unbounded: false, is_reactive: false, reactive_upgrades: [String]{}, is_inline: false, is_inline_always: false, is_scalar: false, kernel_proof: None, gc_return: false, return_view_provenance: None, web_param_reconstructions: [MIRWebParamReconstruction]{}, blocks: [MIRBasicBlock]{}, entry: MIRBlockID{value: 0}, locals: [MIRLocal]{}, values: [MIRValueFact]{}, places: [MIRPlace]{}, scopes: [MIRScope]{}, drops: [MIRDropAction]{}, foreign_language: None}
     context := JetWebEmitContext{program: program, config: config, artifact: artifact_row, functions: [MIRFunction]{}, entry: entry_row, artifact_identity: artifact_row.artifact_identity, history_source: "jet", history_tool: "jet-source-web", history_target: config.layout.triple, failure: None}
     if artifact == None -> jet_web_fail(&context, JetWebEmitFailureKind.InvalidMIR, "E0003", "selected MIR artifact is missing", "Web emission requires the checked WebApplication artifact plan", None)
     canonical_digest :: mir_program_digest(program)
@@ -258,10 +258,10 @@ fn jet_web_context(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitC
     context
 }
 
-pub fn jet_web_emit(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitResult {
+fn jet_web_emit(program: MIRProgram, config: JetWebEmitConfig) -> JetWebEmitResult {
     context := jet_web_context(program, config)
     if context.failure != None -> return JetWebEmitResult.Incomplete{failure: context.failure ?? jet_web_failure(JetWebEmitFailureKind.InvalidMIR, "E0003", "Web context construction failed", "the checked Web context did not retain a failure row", None)}
-    rust_config :: JetRustEmitConfig{target: "web", root_prefix: config.root_prefix, emit_types: true, emit_foreign: true, emit_metadata: true, local_rail: config.release_devtools_policy.local_rail, web_bucket: Val(MIRWebBucket.Wasm)}
+    rust_config :: JetRustEmitConfig{target: "web", root_prefix: config.root_prefix, emit_types: true, emit_foreign: true, emit_metadata: true, local_rail: config.release_devtools_policy.local_rail, web_bucket: Val(MIRWebBucket.Wasm), threads: compiler_threads_single()}
     rust :: jet_rust_emit_program(context.program, rust_config, None)
     wasm :: if rust == {
         .Complete(source, manifest) -> source

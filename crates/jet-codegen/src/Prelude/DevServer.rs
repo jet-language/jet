@@ -184,7 +184,11 @@ mod jet_devserver_impl {
             {
                 let version = Arc::clone(&version);
                 let output_root = Arc::clone(&output_root);
-                thread::spawn(move || jet_devserver_serve_forever(listener, version, output_root));
+                thread::spawn(move || {
+                    #[cfg(jet_native_pack)]
+                    let _jet_thread = crate::JetNativeThreadAttachment::enter();
+                    jet_devserver_serve_forever(listener, version, output_root)
+                });
             }
 
             println!("App preview: http://127.0.0.1:{}/", bound_port);
@@ -515,6 +519,8 @@ mod jet_devserver_impl {
         R: Read + Send + 'static,
     {
         thread::spawn(move || {
+            #[cfg(jet_native_pack)]
+            let _jet_thread = crate::JetNativeThreadAttachment::enter();
             let mut bytes = Vec::new();
             let mut chunk = [0u8; 8192];
             loop {
@@ -1093,6 +1099,8 @@ mod jet_devserver_impl {
                 let output_root = Arc::clone(&output_root);
                 let active_connections = Arc::clone(&active_connections);
                 thread::spawn(move || {
+                    #[cfg(jet_native_pack)]
+                    let _jet_thread = crate::JetNativeThreadAttachment::enter();
                     let _ = jet_devserver_handle_connection(stream, &version, &output_root);
                     active_connections.fetch_sub(1, Ordering::AcqRel);
                 });

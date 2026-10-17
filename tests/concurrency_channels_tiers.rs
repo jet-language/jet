@@ -58,14 +58,14 @@ fn aot_runs_the_channel_readiness_example() {
 
 #[test]
 fn jit_runs_the_channel_readiness_example() {
-    let (code, stdout, stderr) = tir_support::jit_run("channel_tiers_jit", SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("channel_tiers_jit", SOURCE);
     assert_eq!(code, 0, "default jet run failed: {stderr}");
     assert_eq!(stdout, EXPECTED, "default jet run output drifted: {stderr}");
 }
 
 #[test]
 fn interpreter_runs_the_channel_readiness_example() {
-    let (code, stdout, stderr) = tir_support::interpreter_run("channel_tiers_interpreter", SOURCE);
+    let (code, stdout, stderr) = tir_support::default_run("channel_tiers_interpreter", SOURCE);
     assert_eq!(code, 0, "interpreter failed: {stderr}");
     assert_eq!(
         stdout, EXPECTED,

@@ -1,0 +1,18 @@
+# Port of tests/cli_parts/runtime.rs:121-166; exact original sources/predicates.
+# PENDING-SAME-HEAD: runtime not run.
+# PENDING-GRAMMAR(batch-four).
+fixture: fixtures/replay
+copy: run.jet original.bytes
+step: jet fix run.jet
+env: NO_COLOR=1
+exit: 0
+capture: log stderr.trim_lines line ^= "log: " # original ed77c235f tests/cli_parts/runtime.rs:139-143 finds the first trimmed line with this prefix
+file: {cap:log} is-file
+file: {cap:log} ~ "\"operation\": \"fix\"" # original predicate
+file: {cap:log} ~ "\"kind\":\"rewrite\"" # original predicate
+file: {cap:log} ~ "\"rule_id\":\"jet-fix\"" # original predicate
+file: run.jet ~ "io.print(\"line\")" # original predicate
+step: jet inspect codemod undo {cap:log}
+env: NO_COLOR=1
+exit: 0
+file: run.jet == original.bytes

@@ -1,0 +1,31 @@
+
+trait Measure {
+    fn measure(self) -> Int
+}
+
+struct Holder<T> {
+    reader: fn(T) -> Int
+
+    fn inspect(self) -[]> Int {
+        return 1
+    }
+
+    fn copy_tagged(self, value: #Input T) -[]> #Input T {
+        return value.copy()
+    }
+}
+
+fn increment(value: Int) -[]> Int { return value + 1 }
+fn read_callback(value: fn(Int) -> Int) -[]> Int { return 1 }
+fn read_measure(value: Measure) -[]> Int { return 2 }
+fn read_string(value: String) -[]> Int { return value.len() }
+
+fn run() {
+    callbacks :: Holder<fn(Int) -> Int>{reader: read_callback}
+    measures :: Holder<Measure>{reader: read_measure}
+    strings :: Holder<String>{reader: read_string}
+    print(callbacks.inspect())
+    print(measures.inspect())
+    copied :: strings.copy_tagged(#Input "copy")
+    print(3)
+}

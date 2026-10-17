@@ -1,0 +1,38 @@
+// An anonymous union encodes and decodes through its structural enum, alone
+// and as a struct field, and a decoded union matches by member.
+use core.encoding.json
+
+struct Reading {
+    label: String
+    value: Int | String
+}
+
+fn show(value: Int | String) -> String {
+    copied :: value.copy()
+    if copied == {
+        .Int(n) -> { return "int {n}" }
+        .String(s) -> { return "text {s}" }
+    }
+    return "unknown"
+}
+
+fn number_of(n: Int) -> Int | String { n }
+fn word_of(s: String) -> Int | String { s.copy() }
+
+fn run() {
+    number :: number_of(7)
+    word :: word_of("seven")
+    print(json.to_string(number))
+    print(json.to_string(word))
+    reading :: Reading{label: "temp", value: 21}
+    wire :: json.to_string(reading)
+    print(wire)
+    back :: json.decode<Reading>(wire) ?? panic("decode reading")
+    print("{back.label} {show(back.value)}")
+    again :: json.decode<Int | String>(json.to_string(number)) ?? panic("decode int member")
+    print(show(again))
+    named :: json.decode<Reading>("{{\"label\":\"name\",\"value\":\"ada\"}}") ?? panic("decode text field")
+    print("{named.label} {show(named.value)}")
+    spoken :: json.decode<Int | String>(json.to_string(word)) ?? panic("decode text member")
+    print(show(spoken))
+}

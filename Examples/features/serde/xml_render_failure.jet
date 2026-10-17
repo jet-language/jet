@@ -1,0 +1,17 @@
+// The XML serializer reports a real XMLError, never an empty-string fallback.
+use core.encoding as encoding
+use core.encoding.xml as xml
+
+fn run() {
+    if xml.to_string(encoding.Dyn.Float(1.5)) == {
+        .Ok(_) -> panic("invalid XML tree rendered successfully")
+        .Err(error) -> {
+            print(error.kind == xml.XMLReason.Shape)
+            print(error.byte_offset ?? -1)
+            print(error.line == None)
+            print(error.column == None)
+            print("path:{error.path}")
+            print(error.reason)
+        }
+    }
+}

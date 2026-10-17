@@ -1,0 +1,28 @@
+# PORT tests/pkg.rs::git_dep_keeps_local_source_authority_after_path_swap:4370-4523; original helpers min_manifest/manifest_with_deps/with_store retained.
+# KNOWN-FAILING #4833: Jet front-end has no fetch/locked dependency-resolution door.
+# PENDING-GRAMMAR(batch-four); no reference snapshot or runtime proof.
+# Rust CLI: main.rs3684-3691 -> CmdPkg.rs255-325 -> original Fetch::fetch options.
+fixture: fixtures/git_dep_keeps_local_source_authority_after_path_swap
+requires: os:unix
+mkdir: store
+env: JET_PACKAGE_STORE_DIR={work}/store
+requires: os-name:linux|android|macos|ios
+mkdir: project/home
+mkdir: project/store
+write: project/package.jet package.template
+chmod: bin/git 0755
+step: jet fetch
+cwd: project
+env: JET_PACKAGE_STORE_DIR={work}/project/store
+env: PATH={work}/bin:{env:PATH}
+env: HOME={work}/project/home
+env: JET_TEST_GIT_LOG={work}/project/git-authority.log
+env: JET_TEST_GIT_SOURCE={work}/project/source.git
+env: JET_TEST_GIT_BACKUP={work}/project/source.original
+env: JET_TEST_GIT_OUTSIDE={work}/outside
+exit: 0
+file: project/.jet/build/deps/safe/package.jet ~ "name: \"safe\""
+file: project/.jet/build/deps/safe/package.jet !~ "name: \"evil\""
+file.filter(= "authority=fd"): project/git-authority.log nonempty
+file.filter(= "authority=path"): project/git-authority.log empty
+# Typed dep_dirs.get("safe") assertion remains archived; CLI checks the actual installed dependency manifest.

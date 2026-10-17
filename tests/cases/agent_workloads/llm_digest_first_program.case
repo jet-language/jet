@@ -1,0 +1,14 @@
+# HAND-PORT tests/agent_workloads.rs:2822-2863 llm_digest_first_program
+# PENDING-KIT; PENDING-GRAMMAR(batch-four); no runtime/reference proof.
+# Original live digest first fenced Jet program extraction, release execution and unchanged checked-in transcript bytes; no generated example guessed.
+fixture: llm_digest_first_program.fixture
+env: NO_COLOR=1
+step digest: jet inspect digest --topic first-program
+cwd: {root}
+exit: 0
+capture: program = text stdout.after_first("```jet\n").split("\n```", 0)
+write: first_program.jet = "{cap:program}"
+step: jet run --release first_program.jet
+limit: time=120
+exit: 0
+stdout: = llm_digest_first_program.stdout.expected

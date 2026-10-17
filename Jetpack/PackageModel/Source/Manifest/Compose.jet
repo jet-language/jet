@@ -63,14 +63,14 @@ impl PackageFacts {
 }
 
 // Whether a relative path has a `..` component.
-pub fn pkg_path_has_parent_component(path: String) -> Bool Never! {
+fn pkg_path_has_parent_component(path: String) -> Bool Never! {
     loop part in path.split("/") {
         if part == ".." -> return true
     }
     false
 }
 
-pub fn pkg_intent_accepts_kind(intent: String, kind: PackageOutputKind) -> Bool Never! {
+fn pkg_intent_accepts_kind(intent: String, kind: PackageOutputKind) -> Bool Never! {
     if intent == {
         "run" -> kind == PackageOutputKind.Executable || kind == PackageOutputKind.Service
         "test" | "check" -> kind == PackageOutputKind.Check
@@ -102,7 +102,7 @@ fn pkg_validate_intent(intent: String) ComposeError! {
 }
 
 // Merge one Config contribution into the root facts.
-pub fn pkg_merge_config(root: &PackageFacts, config: ConfigFacts) ComposeError! {
+fn pkg_merge_config(root: &PackageFacts, config: ConfigFacts) ComposeError! {
     fallback :: root.origin
     root.version = pkg_merge_optional_field(root.version, config.version, "version", fallback, config.origin, &root.provenance)
     root.source = pkg_merge_optional_field(root.source, config.source, "source", fallback, config.origin, &root.provenance)
@@ -114,7 +114,7 @@ pub fn pkg_merge_config(root: &PackageFacts, config: ConfigFacts) ComposeError! 
 }
 
 // Record provenance for one declared top-level field and its keyed children.
-pub fn pkg_record_declared_provenance(facts: &PackageFacts, field: String, origin: String) Never! {
+fn pkg_record_declared_provenance(facts: &PackageFacts, field: String, origin: String) Never! {
     pkg_record_provenance(&facts.provenance, field, origin)
     if field == {
         "services" -> {
@@ -343,7 +343,7 @@ fn pkg_record_service_provenance(provenance: &[String: [String]], path: String, 
     loop field in pkg_manifest_sorted(service.fields.keys().to_list()) -> pkg_record_provenance(&provenance, "{path}.{field}", origin)
 }
 
-pub fn pkg_record_output_provenance(provenance: &[String: [String]], path: String, origin: String, output: OutputFact) Never! {
+fn pkg_record_output_provenance(provenance: &[String: [String]], path: String, origin: String, output: OutputFact) Never! {
     pkg_record_provenance(&provenance, path, origin)
     pkg_record_provenance(&provenance, "{path}.kind", origin)
     pkg_record_provenance(&provenance, "{path}.name", origin)
@@ -369,7 +369,7 @@ fn pkg_record_environment_provenance(provenance: &[String: [String]], path: Stri
 }
 
 // Append `origin` to a field's contributors once.
-pub fn pkg_record_provenance(provenance: &[String: [String]], field: String, origin: String) Never! {
+fn pkg_record_provenance(provenance: &[String: [String]], field: String, origin: String) Never! {
     origins := provenance.get(field) ?? [String]{}
     if origins.contains(origin) -> return
     &origins.push(origin)
@@ -377,7 +377,7 @@ pub fn pkg_record_provenance(provenance: &[String: [String]], field: String, ori
 }
 
 fn pkg_provenance_origin(provenance: [String: [String]], field: String, fallback: String) -> String Never! {
-    origins :: provenance.get(field) ?? return ~fallback
-    if origins.len() == 0 -> return ~fallback
+    origins :: provenance.get(field) ?? return fallback.copy()
+    if origins.len() == 0 -> return fallback.copy()
     origins[origins.len() - 1]
 }

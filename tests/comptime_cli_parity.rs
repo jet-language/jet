@@ -72,7 +72,7 @@ fn run_jet(args: &[&str], project: &Path, cache: &Path) -> Output {
         .args(args)
         .current_dir(project)
         .env("JET_STORE_DIR", cache.join("build"))
-        .env("JET_RUN_CACHE_DIR", cache.join("run"))
+        .env("JET_STORE_DIR", cache.join("run"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap_or_else(|error| panic!("spawn `{}`: {error}", args.join(" ")))
@@ -118,9 +118,9 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
     );
 
     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", &file_name, "--trace-tiers"])
+        .args(["run", &file_name])
         .current_dir(&case_dir)
-        .env("JET_RUN_CACHE_DIR", cache.join("run"))
+        .env("JET_STORE_DIR", cache.join("run"))
         .env("JET_STORE_DIR", cache.join("build"))
         .env("NO_COLOR", "1")
         .output()
@@ -132,16 +132,6 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
         "default `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{trace}",
         String::from_utf8_lossy(&output.stdout)
     );
-    assert!(
-        trace
-            .lines()
-            .any(|line| line.starts_with("run") && line.contains("tier1 native")),
-        "default `jet run` did not report resident native execution for `{stem}`:\n{trace}"
-    );
-    assert!(
-        !trace.contains("tier0 interp"),
-        "default `jet run` deopted to the interpreter for `{stem}`:\n{trace}"
-    );
     assert_eq!(
         output.stdout, expected,
         "default `jet run` output differs from the checked-in golden for `{stem}`"
@@ -149,9 +139,9 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
 
     let interpreted_cache = cache.join("interpret");
     let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret", &file_name, "--trace-tiers"])
+        .args(["run", "--release", &file_name])
         .current_dir(&case_dir)
-        .env("JET_RUN_CACHE_DIR", interpreted_cache.join("run"))
+        .env("JET_STORE_DIR", interpreted_cache.join("run"))
         .env("JET_STORE_DIR", interpreted_cache.join("build"))
         .env("NO_COLOR", "1")
         .output()
@@ -164,10 +154,6 @@ fn assert_tier_parity_case(root: &Path, scratch: &common::Scratch, stem: &str) {
         interpreted.status.success(),
         "interpreted `jet run` failed for `{stem}`:\nstdout:\n{}\nstderr:\n{interpreted_trace}",
         String::from_utf8_lossy(&interpreted.stdout)
-    );
-    assert!(
-        interpreted_trace.contains("tier0 interp"),
-        "forced interpreter did not report interpreter execution for `{stem}`:\n{interpreted_trace}"
     );
     assert!(
         !interpreted_trace.contains("E2201"),
@@ -250,7 +236,7 @@ fn build_entry_workspace_matches_release_default_and_dev_interpreter() {
         &scratch.join("cache/default"),
     );
     let interpreted = run_jet(
-        &["dev", "run.jet", "--interpret", "--watch=off"],
+        &["dev", "run.jet", "--watch=off"],
         &scratch.path,
         &scratch.join("cache/interpreted"),
     );
@@ -307,7 +293,6 @@ fn build_fact_precedence_example_matches_release_default_and_dev() {
         &[
             "dev",
             "build_fact_precedence.jet",
-            "--interpret",
             "--watch=off",
         ],
         &scratch.path,
@@ -376,7 +361,7 @@ fn computed_constants_match_aot_default_and_interpreter() {
     let default = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "computed_constants.jet"])
         .current_dir(&scratch.path)
-        .env("JET_RUN_CACHE_DIR", cache.join("run"))
+        .env("JET_STORE_DIR", cache.join("run"))
         .env("JET_STORE_DIR", cache.join("default"))
         .env("NO_COLOR", "1")
         .output()
@@ -388,9 +373,9 @@ fn computed_constants_match_aot_default_and_interpreter() {
     );
 
     let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-        .args(["run", "--interpret", "computed_constants.jet"])
+        .args(["run", "--release", "computed_constants.jet"])
         .current_dir(&scratch.path)
-        .env("JET_RUN_CACHE_DIR", cache.join("interpret-run"))
+        .env("JET_STORE_DIR", cache.join("interpret-run"))
         .env("JET_STORE_DIR", cache.join("interpret-build"))
         .env("NO_COLOR", "1")
         .output()
@@ -668,7 +653,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
     let default_help = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "job_runner.jet"])
         .current_dir(&scratch.path)
-        .env("JET_RUN_CACHE_DIR", cache.join("default-run"))
+        .env("JET_STORE_DIR", cache.join("default-run"))
         .env("JET_STORE_DIR", cache.join("default-build"))
         .env("NO_COLOR", "1")
         .output()
@@ -707,7 +692,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
     let default_jobs_help = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "job_runner.jet", "--", "--help"])
         .current_dir(&scratch.path)
-        .env("JET_RUN_CACHE_DIR", cache.join("job-help-run"))
+        .env("JET_STORE_DIR", cache.join("job-help-run"))
         .env("JET_STORE_DIR", cache.join("job-help-build"))
         .env("NO_COLOR", "1")
         .output()
@@ -736,7 +721,7 @@ fn job_runner_help_and_named_jobs_match_default_run_aot_and_goldens() {
         let default_job = Command::new(env!("CARGO_BIN_EXE_jet"))
             .args(["run", "job_runner.jet", "--", job])
             .current_dir(&scratch.path)
-            .env("JET_RUN_CACHE_DIR", cache.join(format!("{job}-run")))
+            .env("JET_STORE_DIR", cache.join(format!("{job}-run")))
             .env("JET_STORE_DIR", cache.join(format!("{job}-build")))
             .env("NO_COLOR", "1")
             .output()
@@ -878,7 +863,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
             .args(&run_args)
             .current_dir(&scratch.path)
             .env(
-                "JET_RUN_CACHE_DIR",
+                "JET_STORE_DIR",
                 cache.join(format!("{golden_name}-run")),
             )
             .env("JET_STORE_DIR", cache.join(format!("{golden_name}-build")))
@@ -901,7 +886,7 @@ fn documented_cli_program_matches_aot_default_interpreter_and_goldens() {
     let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", "subcommands.jet", "--", "--confg", "prod"])
         .current_dir(&scratch.path)
-        .env("JET_RUN_CACHE_DIR", cache.join("unknown-run"))
+        .env("JET_STORE_DIR", cache.join("unknown-run"))
         .env("JET_STORE_DIR", cache.join("unknown-build"))
         .env("NO_COLOR", "1")
         .output()
@@ -953,7 +938,7 @@ fn typed_entry_optional_value_flag_matches_aot_and_default_run() {
             .args(&run_args)
             .current_dir(&scratch.path)
             .env_remove("PORT")
-            .env("JET_RUN_CACHE_DIR", cache.join("run"))
+            .env("JET_STORE_DIR", cache.join("run"))
             .env("JET_STORE_DIR", cache.join("run-build"))
             .env("NO_COLOR", "1")
             .output()
@@ -1029,7 +1014,7 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
             &scratch.join(&format!("cache/help-default-{name}")),
         );
         let interpreted_help = run_jet(
-            &["run", "--interpret", *name, "--", "--help"],
+            &["run", "--release", *name, "--", "--help"],
             &scratch.path,
             &scratch.join(&format!("cache/help-interpreter-{name}")),
         );
@@ -1118,7 +1103,7 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
 
             let interpreted = run_jet(
                 &{
-                    let mut run_args = vec!["run", "--interpret", *name, "--"];
+                    let mut run_args = vec!["run", "--release", *name, "--"];
                     run_args.extend(args.iter().copied());
                     run_args
                 },
@@ -1159,7 +1144,7 @@ fn canonical_cli_recipe_rejects_bad_argv_and_matches_native_tiers() {
     let interpreted = run_jet(
         &[
             "run",
-            "--interpret",
+            "--release",
             "positionals.jet",
             "--",
             "add",
@@ -1247,7 +1232,7 @@ fn run() {
     let interpreted = run_jet(
         &[
             "run",
-            "--interpret",
+            "--release",
             "builder_named.jet",
             "--",
             "bare-loses",
@@ -1367,7 +1352,7 @@ fn measured_test_cli_and_selected_claim_keep_aot_golden_contract() {
         ])
         .current_dir(&root)
         .env("JET_STORE_DIR", scratch.join("bench-cache"))
-        .env("JET_RUN_CACHE_DIR", scratch.join("bench-run-cache"))
+        .env("JET_STORE_DIR", scratch.join("bench-run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .expect("measure keep sink benchmark");
@@ -1458,7 +1443,7 @@ fn command_override_examples_match_aot_default_run_and_interpreter() {
         );
 
         let interpreted = Command::new(env!("CARGO_BIN_EXE_jet"))
-            .args(["dev", file_name, "--interpret", "--watch=off"])
+            .args(["dev", file_name, "--watch=off"])
             .current_dir(&scratch.path)
             .env("NO_COLOR", "1")
             .output()
@@ -1524,7 +1509,7 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
             entry.to_str().expect("entry path is utf8"),
         ])
         .current_dir(&example)
-        .env("JET_RUN_CACHE_DIR", scratch.join("cache/release-run"))
+        .env("JET_STORE_DIR", scratch.join("cache/release-run"))
         .env("JET_STORE_DIR", scratch.join("cache/release-build"))
         .env("NO_COLOR", "1")
         .output()
@@ -1539,7 +1524,7 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
     let default = Command::new(env!("CARGO_BIN_EXE_jet"))
         .args(["run", entry.to_str().expect("entry path is utf8")])
         .current_dir(&example)
-        .env("JET_RUN_CACHE_DIR", scratch.join("cache/run"))
+        .env("JET_STORE_DIR", scratch.join("cache/run"))
         .env("JET_STORE_DIR", scratch.join("cache/default"))
         .env("NO_COLOR", "1")
         .output()
@@ -1555,11 +1540,10 @@ fn package_build_entry_discovery_matches_committed_golden_across_tiers() {
         .args([
             "dev",
             entry.to_str().expect("entry path is utf8"),
-            "--interpret",
             "--watch=off",
         ])
         .current_dir(&example)
-        .env("JET_RUN_CACHE_DIR", scratch.join("cache/dev-run"))
+        .env("JET_STORE_DIR", scratch.join("cache/dev-run"))
         .env("JET_STORE_DIR", scratch.join("cache/dev-build"))
         .env("NO_COLOR", "1")
         .output()
@@ -1631,7 +1615,7 @@ fn build_stamp_example_matches_release_jit_and_interpreter_tiers() {
         &scratch.join("cache/default"),
     );
     let interpreter = run_jet(
-        &["dev", "build_stamp.jet", "--interpret", "--watch=off"],
+        &["dev", "build_stamp.jet", "--watch=off"],
         &scratch.path,
         &scratch.join("cache/interpreter"),
     );

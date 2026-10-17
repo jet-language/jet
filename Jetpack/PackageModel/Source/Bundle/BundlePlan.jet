@@ -5,7 +5,7 @@
 // BLOCKED #4262 integration: shared Encoding/CanonicalJson.jet must land in
 // main Compiler/ after stage 2; Bootstrap never references a worktree path.
 
-pub enum BundleFileKind {
+enum BundleFileKind {
     Executable
     Launcher
     Metadata
@@ -34,11 +34,11 @@ pub enum BundleFileKind {
 }
 
 // One exact file in a plan or emitted artifact.
-pub struct BundleFile {
-    pub path: String
-    pub kind: BundleFileKind
-    pub mode: Int
-    pub bytes: [U8]
+struct BundleFile {
+    path: String
+    kind: BundleFileKind
+    mode: Int
+    bytes: [U8]
 
     fn new(path: String, kind: BundleFileKind, mode: Int, bytes: [U8]) -> BundleFile Never! {
         BundleFile{path: path, kind: kind, mode: mode, bytes: bytes}
@@ -53,17 +53,17 @@ pub struct BundleFile {
             "bytes": pkg_bundle_integer(self.bytes.len()),
             "kind": CanonicalJSON.String(self.kind.as_str()),
             "mode": pkg_bundle_integer(self.mode),
-            "path": CanonicalJSON.String(~self.path),
+            "path": CanonicalJSON.String(self.path.copy()),
             "sha256": CanonicalJSON.String(self.digest())
         ])
     }
 }
 
 // The exact launch paths a later adapter must preserve.
-pub struct LaunchDescriptor {
-    pub launcher: String
-    pub executable: String
-    pub arguments_passthrough: Bool
+struct LaunchDescriptor {
+    launcher: String
+    executable: String
+    arguments_passthrough: Bool
 
     fn new(launcher: String, executable: String) -> LaunchDescriptor Never! {
         LaunchDescriptor{launcher: launcher, executable: executable, arguments_passthrough: true}
@@ -72,25 +72,25 @@ pub struct LaunchDescriptor {
     fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "arguments_passthrough": CanonicalJSON.Bool(self.arguments_passthrough),
-            "executable": CanonicalJSON.String(~self.executable),
-            "launcher": CanonicalJSON.String(~self.launcher)
+            "executable": CanonicalJSON.String(self.executable.copy()),
+            "launcher": CanonicalJSON.String(self.launcher.copy())
         ])
     }
 }
 
 // Updater manifest generated from the exact executable payload.
-pub struct UpdaterManifest {
-    pub schema: String
-    pub package: String
-    pub version: String
-    pub target: BundleTarget
-    pub channel: String
-    pub artifact: String
-    pub url: String
-    pub signature_url: String?
-    pub release_notes_url: String?
-    pub payload_sha256: String
-    pub payload_bytes: Int
+struct UpdaterManifest {
+    schema: String
+    package: String
+    version: String
+    target: BundleTarget
+    channel: String
+    artifact: String
+    url: String
+    signature_url: String?
+    release_notes_url: String?
+    payload_sha256: String
+    payload_bytes: Int
 
     fn for_spec(spec: BundleSpec, updater: UpdaterSpec, payload_sha256: String) -> UpdaterManifest Never! {
         UpdaterManifest{
@@ -110,17 +110,17 @@ pub struct UpdaterManifest {
 
     fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "artifact": CanonicalJSON.String(~self.artifact),
-            "channel": CanonicalJSON.String(~self.channel),
-            "package": CanonicalJSON.String(~self.package),
+            "artifact": CanonicalJSON.String(self.artifact.copy()),
+            "channel": CanonicalJSON.String(self.channel.copy()),
+            "package": CanonicalJSON.String(self.package.copy()),
             "payload_bytes": pkg_bundle_integer(self.payload_bytes),
-            "payload_sha256": CanonicalJSON.String(~self.payload_sha256),
+            "payload_sha256": CanonicalJSON.String(self.payload_sha256.copy()),
             "release_notes_url": pkg_bundle_optional_text(self.release_notes_url),
-            "schema": CanonicalJSON.String(~self.schema),
+            "schema": CanonicalJSON.String(self.schema.copy()),
             "signature_url": pkg_bundle_optional_text(self.signature_url),
             "target": CanonicalJSON.String(self.target.as_str()),
-            "url": CanonicalJSON.String(~self.url),
-            "version": CanonicalJSON.String(~self.version)
+            "url": CanonicalJSON.String(self.url.copy()),
+            "version": CanonicalJSON.String(self.version.copy())
         ])
     }
 
@@ -128,17 +128,17 @@ pub struct UpdaterManifest {
     // are redacted.
     fn receipt_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "artifact": CanonicalJSON.String(~self.artifact),
-            "channel": CanonicalJSON.String(~self.channel),
-            "package": CanonicalJSON.String(~self.package),
+            "artifact": CanonicalJSON.String(self.artifact.copy()),
+            "channel": CanonicalJSON.String(self.channel.copy()),
+            "package": CanonicalJSON.String(self.package.copy()),
             "payload_bytes": pkg_bundle_integer(self.payload_bytes),
-            "payload_sha256": CanonicalJSON.String(~self.payload_sha256),
+            "payload_sha256": CanonicalJSON.String(self.payload_sha256.copy()),
             "release_notes_url": pkg_bundle_optional_receipt_url(self.release_notes_url),
-            "schema": CanonicalJSON.String(~self.schema),
+            "schema": CanonicalJSON.String(self.schema.copy()),
             "signature_url": pkg_bundle_optional_receipt_url(self.signature_url),
             "target": CanonicalJSON.String(self.target.as_str()),
             "url": CanonicalJSON.String(pkg_bundle_receipt_source(self.url)),
-            "version": CanonicalJSON.String(~self.version)
+            "version": CanonicalJSON.String(self.version.copy())
         ])
     }
 
@@ -152,50 +152,50 @@ pub struct UpdaterManifest {
 }
 
 // One input the plan read, with its digest and size.
-pub struct BundleInputFact {
-    pub role: String
-    pub path: String
-    pub digest: String
-    pub bytes: Int
+struct BundleInputFact {
+    role: String
+    path: String
+    digest: String
+    bytes: Int
 
     fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "bytes": pkg_bundle_integer(self.bytes),
-            "digest": CanonicalJSON.String(~self.digest),
-            "path": CanonicalJSON.String(~self.path),
-            "role": CanonicalJSON.String(~self.role)
+            "digest": CanonicalJSON.String(self.digest.copy()),
+            "path": CanonicalJSON.String(self.path.copy()),
+            "role": CanonicalJSON.String(self.role.copy())
         ])
     }
 
     fn receipt_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
             "bytes": pkg_bundle_integer(self.bytes),
-            "digest": CanonicalJSON.String(~self.digest),
+            "digest": CanonicalJSON.String(self.digest.copy()),
             "path": CanonicalJSON.String(pkg_bundle_receipt_source(self.path)),
-            "role": CanonicalJSON.String(~self.role)
+            "role": CanonicalJSON.String(self.role.copy())
         ])
     }
 }
 
 // A complete, deterministic target layout. It contains no host-derived
 // values and can be handed to a platform adapter without re-planning.
-pub struct BundlePlan {
-    pub schema_version: Int
-    pub kind: BundleKind
-    pub target: BundleTarget
-    pub package: String
-    pub version: String
+struct BundlePlan {
+    schema_version: Int
+    kind: BundleKind
+    target: BundleTarget
+    package: String
+    version: String
     // Source path of the executable input, kept for receipt provenance.
-    pub executable_source: String
-    pub artifact_name: String
-    pub metadata: BundleMetadata
-    pub files: [BundleFile]
-    pub launch: LaunchDescriptor
-    pub inputs: [BundleInputFact]
-    pub signing_hooks: [SigningHook]
-    pub updater: UpdaterManifest?
-    pub game: GameBundleSpec?
-    pub identity: String
+    executable_source: String
+    artifact_name: String
+    metadata: BundleMetadata
+    files: [BundleFile]
+    launch: LaunchDescriptor
+    inputs: [BundleInputFact]
+    signing_hooks: [SigningHook]
+    updater: UpdaterManifest?
+    game: GameBundleSpec?
+    identity: String
 
     // Validate `spec` and lay out its target files. A Windows version is
     // normalized to four parts; other versions are trimmed.
@@ -417,37 +417,37 @@ pub struct BundlePlan {
             .None -> CanonicalJSON.Null
         }
         pkg_bundle_object([
-            "artifact_name": CanonicalJSON.String(~self.artifact_name),
+            "artifact_name": CanonicalJSON.String(self.artifact_name.copy()),
             "files": CanonicalJSON.Array(file_values),
             "game": game,
             "format": CanonicalJSON.String(PACKAGE_BUNDLE_FORMAT),
-            "identity": CanonicalJSON.String(~self.identity),
+            "identity": CanonicalJSON.String(self.identity.copy()),
             "kind": CanonicalJSON.String(self.kind.as_str()),
             "launch": self.launch.to_json_tree(),
             "metadata": pkg_bundle_plan_metadata_json(self.metadata),
-            "package": CanonicalJSON.String(~self.package),
-            "executable_source": CanonicalJSON.String(~self.executable_source),
+            "package": CanonicalJSON.String(self.package.copy()),
+            "executable_source": CanonicalJSON.String(self.executable_source.copy()),
             "inputs": CanonicalJSON.Array(inputs),
             "signing_hooks": CanonicalJSON.Array(hooks),
             "target": CanonicalJSON.String(self.target.as_str()),
             "updater": updater,
-            "version": CanonicalJSON.String(~self.version),
+            "version": CanonicalJSON.String(self.version.copy()),
             "schema_version": pkg_bundle_integer(self.schema_version)
         ])
     }
 }
 
 // Bytes plus receipt facts ready for a platform adapter to materialize.
-pub struct BundleArtifact {
-    pub schema_version: Int
-    pub kind: BundleKind
-    pub target: BundleTarget
-    pub package: String
-    pub version: String
-    pub artifact_name: String
-    pub files: [BundleFile]
-    pub launch: LaunchDescriptor
-    pub receipt: BundleReceipt
+struct BundleArtifact {
+    schema_version: Int
+    kind: BundleKind
+    target: BundleTarget
+    package: String
+    version: String
+    artifact_name: String
+    files: [BundleFile]
+    launch: LaunchDescriptor
+    receipt: BundleReceipt
 
     fn digest(self) -> String Never! {
         self.receipt.artifact_sha256
@@ -473,22 +473,22 @@ pub struct BundleArtifact {
 
     fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
-            "artifact_name": CanonicalJSON.String(~self.artifact_name),
+            "artifact_name": CanonicalJSON.String(self.artifact_name.copy()),
             "artifact_sha256": CanonicalJSON.String(self.digest()),
             "format": CanonicalJSON.String(PACKAGE_BUNDLE_FORMAT),
             "kind": CanonicalJSON.String(self.kind.as_str()),
-            "package": CanonicalJSON.String(~self.package),
+            "package": CanonicalJSON.String(self.package.copy()),
             "receipt": self.receipt.to_json_tree(),
             "schema_version": pkg_bundle_integer(self.schema_version),
             "target": CanonicalJSON.String(self.target.as_str()),
-            "version": CanonicalJSON.String(~self.version)
+            "version": CanonicalJSON.String(self.version.copy())
         ])
     }
 }
 
 // Whether the artifact facts describe only the checked plan or a transport a
 // platform adapter produced.
-pub enum BundleArtifactStatus {
+enum BundleArtifactStatus {
     Planned
     Materialized
 
@@ -502,7 +502,7 @@ pub enum BundleArtifactStatus {
 
 // Signing state an adapter recorded. A declared hook is only `Requested`; it
 // never implies a signer ran or produced a signature.
-pub enum BundleSigningStatus {
+enum BundleSigningStatus {
     NotRequested
     Requested
     Signed
@@ -519,12 +519,12 @@ pub enum BundleSigningStatus {
 }
 
 // Signing execution facts attached after a platform adapter runs.
-pub struct BundleSigningFact {
-    pub status: BundleSigningStatus
-    pub tool: String?
-    pub tool_identity: String?
-    pub tool_version: String?
-    pub diagnostic: String?
+struct BundleSigningFact {
+    status: BundleSigningStatus
+    tool: String?
+    tool_identity: String?
+    tool_version: String?
+    diagnostic: String?
 
     fn signed() -> BundleSigningFact Never! {
         BundleSigningFact{status: BundleSigningStatus.Signed, tool: None, tool_identity: None, tool_version: None, diagnostic: None}
@@ -554,7 +554,7 @@ pub struct BundleSigningFact {
 }
 
 // Installability verdict derived from materialization and signing evidence.
-pub enum BundleInstallability {
+enum BundleInstallability {
     NotMaterialized
     Installable
     RequiresSigning
@@ -572,14 +572,14 @@ pub enum BundleInstallability {
 
 // Identity and authority facts for the adapter that produced the transport.
 // `tool_identity` is the SHA-256 digest of the resolved executable.
-pub struct BundleMaterializerFact {
-    pub tool: String
-    pub tool_identity: String
-    pub tool_version: String
-    pub executable: String
-    pub authority: String
-    pub mechanism: String
-    pub policy: String
+struct BundleMaterializerFact {
+    tool: String
+    tool_identity: String
+    tool_version: String
+    executable: String
+    authority: String
+    mechanism: String
+    policy: String
 
     fn to_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
@@ -594,12 +594,12 @@ pub struct BundleMaterializerFact {
     }
 }
 
-pub struct BundleFileFact {
-    pub path: String
-    pub kind: BundleFileKind
-    pub mode: Int
-    pub bytes: Int
-    pub sha256: String
+struct BundleFileFact {
+    path: String
+    kind: BundleFileKind
+    mode: Int
+    bytes: Int
+    sha256: String
 
     fn receipt_json_tree(self) -> CanonicalJSON Never! {
         pkg_bundle_object([
@@ -607,31 +607,31 @@ pub struct BundleFileFact {
             "kind": CanonicalJSON.String(self.kind.as_str()),
             "mode": pkg_bundle_integer(self.mode),
             "path": CanonicalJSON.String(pkg_bundle_receipt_source(self.path)),
-            "sha256": CanonicalJSON.String(~self.sha256)
+            "sha256": CanonicalJSON.String(self.sha256.copy())
         ])
     }
 }
 
 // Machine-readable facts carried beside a packaged artifact.
-pub struct BundleReceipt {
-    pub schema: String
-    pub plan_identity: String
-    pub kind: BundleKind
-    pub target: BundleTarget
-    pub package: String
-    pub version: String
-    pub executable_source: String
-    pub artifact_name: String
-    pub artifact_sha256: String
-    pub artifact_bytes: Int
-    pub files: [BundleFileFact]
-    pub launch: LaunchDescriptor
-    pub inputs: [BundleInputFact]
-    pub signing_hooks: [SigningHook]
-    pub updater: UpdaterManifest?
-    pub game: GameBundleSpec?
-    pub materializer: BundleMaterializerFact?
-    pub signing: BundleSigningFact?
+struct BundleReceipt {
+    schema: String
+    plan_identity: String
+    kind: BundleKind
+    target: BundleTarget
+    package: String
+    version: String
+    executable_source: String
+    artifact_name: String
+    artifact_sha256: String
+    artifact_bytes: Int
+    files: [BundleFileFact]
+    launch: LaunchDescriptor
+    inputs: [BundleInputFact]
+    signing_hooks: [SigningHook]
+    updater: UpdaterManifest?
+    game: GameBundleSpec?
+    materializer: BundleMaterializerFact?
+    signing: BundleSigningFact?
 
     fn from_plan(plan: BundlePlan, artifact_sha256: String) -> BundleReceipt Never! {
         BundleReceipt.from_plan_with_bytes(plan, artifact_sha256, plan.logical_artifact_bytes())
@@ -732,8 +732,8 @@ pub struct BundleReceipt {
         }
         pkg_bundle_object([
             "artifact_bytes": pkg_bundle_integer(self.artifact_bytes),
-            "artifact_name": CanonicalJSON.String(~self.artifact_name),
-            "artifact_sha256": CanonicalJSON.String(~self.artifact_sha256),
+            "artifact_name": CanonicalJSON.String(self.artifact_name.copy()),
+            "artifact_sha256": CanonicalJSON.String(self.artifact_sha256.copy()),
             "artifact_status": CanonicalJSON.String(self.artifact_status().as_str()),
             "executable_source": CanonicalJSON.String(pkg_bundle_receipt_source(self.executable_source)),
             "files": CanonicalJSON.Array(file_values),
@@ -743,15 +743,15 @@ pub struct BundleReceipt {
             "kind": CanonicalJSON.String(self.kind.as_str()),
             "launch": self.launch.to_json_tree(),
             "materializer": materializer,
-            "package": CanonicalJSON.String(~self.package),
-            "plan_identity": CanonicalJSON.String(~self.plan_identity),
-            "schema": CanonicalJSON.String(~self.schema),
+            "package": CanonicalJSON.String(self.package.copy()),
+            "plan_identity": CanonicalJSON.String(self.plan_identity.copy()),
+            "schema": CanonicalJSON.String(self.schema.copy()),
             "signing": signing,
             "signing_hooks": CanonicalJSON.Array(hooks),
             "signing_status": CanonicalJSON.String(self.signing_status().as_str()),
             "target": CanonicalJSON.String(self.target.as_str()),
             "updater": updater,
-            "version": CanonicalJSON.String(~self.version)
+            "version": CanonicalJSON.String(self.version.copy())
         ])
     }
 
@@ -765,12 +765,12 @@ pub struct BundleReceipt {
 }
 
 // The checked plan for `spec` (Rust `package_bundle_plan`).
-pub fn pkg_package_bundle_plan(spec: BundleSpec) -> BundlePlan BundleError! {
+fn pkg_package_bundle_plan(spec: BundleSpec) -> BundlePlan BundleError! {
     BundlePlan.from_spec(spec)
 }
 
 // The logical artifact of `spec` (Rust `emit_package_bundle`).
-pub fn pkg_emit_package_bundle(spec: BundleSpec) -> BundleArtifact BundleError! {
+fn pkg_emit_package_bundle(spec: BundleSpec) -> BundleArtifact BundleError! {
     Ok(BundlePlan.from_spec(spec).emit())
 }
 
@@ -840,29 +840,29 @@ fn pkg_bundle_metadata_json(spec: BundleSpec, metadata: BundleMetadata, executab
     loop hook in hooks -> &hook_values.push(pkg_bundle_signing_hook_json(hook))
     pkg_bundle_object([
         "categories": pkg_bundle_texts(metadata.categories),
-        "description": CanonicalJSON.String(~metadata.description),
-        "executable": CanonicalJSON.String(~spec.executable.name),
-        "executable_sha256": CanonicalJSON.String(~executable_digest),
+        "description": CanonicalJSON.String(metadata.description.copy()),
+        "executable": CanonicalJSON.String(spec.executable.name.copy()),
+        "executable_sha256": CanonicalJSON.String(executable_digest.copy()),
         "format": CanonicalJSON.String(PACKAGE_BUNDLE_FORMAT),
         "icons": CanonicalJSON.Array(icon_values),
         "kind": CanonicalJSON.String(spec.kind.as_str()),
-        "identifier": CanonicalJSON.String(~metadata.identifier),
-        "name": CanonicalJSON.String(~metadata.display_name),
-        "package": CanonicalJSON.String(~spec.package),
-        "publisher": CanonicalJSON.String(~metadata.publisher),
+        "identifier": CanonicalJSON.String(metadata.identifier.copy()),
+        "name": CanonicalJSON.String(metadata.display_name.copy()),
+        "package": CanonicalJSON.String(spec.package.copy()),
+        "publisher": CanonicalJSON.String(metadata.publisher.copy()),
         "signing_hooks": CanonicalJSON.Array(hook_values),
         "target": CanonicalJSON.String(spec.target.as_str()),
-        "version": CanonicalJSON.String(~spec.version)
+        "version": CanonicalJSON.String(spec.version.copy())
     ])
 }
 
 fn pkg_bundle_plan_metadata_json(metadata: BundleMetadata) -> CanonicalJSON Never! {
     pkg_bundle_object([
         "categories": pkg_bundle_texts(metadata.categories),
-        "description": CanonicalJSON.String(~metadata.description),
-        "display_name": CanonicalJSON.String(~metadata.display_name),
-        "identifier": CanonicalJSON.String(~metadata.identifier),
-        "publisher": CanonicalJSON.String(~metadata.publisher)
+        "description": CanonicalJSON.String(metadata.description.copy()),
+        "display_name": CanonicalJSON.String(metadata.display_name.copy()),
+        "identifier": CanonicalJSON.String(metadata.identifier.copy()),
+        "publisher": CanonicalJSON.String(metadata.publisher.copy())
     ])
 }
 
@@ -894,18 +894,18 @@ fn pkg_bundle_game_spec_json(game: GameBundleSpec) -> CanonicalJSON Never! {
     }
     pkg_bundle_object([
         "assets": CanonicalJSON.Array(assets),
-        "backend": CanonicalJSON.String(~game.backend),
-        "build_identity": CanonicalJSON.String(~game.build_identity),
-        "cook_mode": CanonicalJSON.String(~game.cook_mode),
-        "crash_consent": CanonicalJSON.String(~game.crash_consent),
-        "crash_reporter": CanonicalJSON.String(~game.crash_reporter),
+        "backend": CanonicalJSON.String(game.backend.copy()),
+        "build_identity": CanonicalJSON.String(game.build_identity.copy()),
+        "cook_mode": CanonicalJSON.String(game.cook_mode.copy()),
+        "crash_consent": CanonicalJSON.String(game.crash_consent.copy()),
+        "crash_reporter": CanonicalJSON.String(game.crash_reporter.copy()),
         "crash_runtime": pkg_bundle_crash_runtime_json(game.crash_runtime, false),
         "development_stripping": CanonicalJSON.Bool(game.development_stripping),
-        "export_preset": CanonicalJSON.String(~game.export_preset),
+        "export_preset": CanonicalJSON.String(game.export_preset.copy()),
         "format": CanonicalJSON.String("jet.game.bundle"),
-        "profile": CanonicalJSON.String(~game.profile_name),
-        "renderer": CanonicalJSON.String(~game.renderer),
-        "source_revision": CanonicalJSON.String(~game.source_revision)
+        "profile": CanonicalJSON.String(game.profile_name.copy()),
+        "renderer": CanonicalJSON.String(game.renderer.copy()),
+        "source_revision": CanonicalJSON.String(game.source_revision.copy())
     ])
 }
 
@@ -937,7 +937,7 @@ fn pkg_bundle_game_spec_receipt_json(game: GameBundleSpec) -> CanonicalJSON Neve
 }
 
 fn pkg_bundle_crash_runtime_text(value: String, receipt: Bool) -> String Never! {
-    if receipt -> pkg_bundle_receipt_safe_text(value) else -> ~value
+    if receipt -> pkg_bundle_receipt_safe_text(value) else -> value.copy()
 }
 
 // The crash runtime facts; the receipt form redacts sensitive text and
@@ -957,9 +957,9 @@ fn pkg_bundle_crash_runtime_json(runtime: GameCrashReporterSpec, receipt: Bool) 
 fn pkg_bundle_game_manifest_json(spec: BundleSpec, game: GameBundleSpec) -> CanonicalJSON Never! {
     pkg_bundle_object([
         "game": pkg_bundle_game_spec_json(game),
-        "package": CanonicalJSON.String(~spec.package),
+        "package": CanonicalJSON.String(spec.package.copy()),
         "target": CanonicalJSON.String(spec.target.as_str()),
-        "version": CanonicalJSON.String(~spec.version)
+        "version": CanonicalJSON.String(spec.version.copy())
     ])
 }
 
@@ -969,9 +969,9 @@ fn pkg_bundle_signing_hook_json(hook: SigningHook) -> CanonicalJSON Never! {
     pkg_bundle_object([
         "args": pkg_bundle_texts(hook.args),
         "inputs": CanonicalJSON.Array(inputs),
-        "name": CanonicalJSON.String(~hook.name),
+        "name": CanonicalJSON.String(hook.name.copy()),
         "phase": CanonicalJSON.String(hook.phase.as_str()),
-        "program": CanonicalJSON.String(~hook.program)
+        "program": CanonicalJSON.String(hook.program.copy())
     ])
 }
 
@@ -987,7 +987,7 @@ fn pkg_bundle_signing_hook_receipt_json(hook: SigningHook) -> CanonicalJSON Neve
         "args": CanonicalJSON.Array(args),
         "args_redacted": CanonicalJSON.Bool(true),
         "inputs": CanonicalJSON.Array(inputs),
-        "name": CanonicalJSON.String(~hook.name),
+        "name": CanonicalJSON.String(hook.name.copy()),
         "phase": CanonicalJSON.String(hook.phase.as_str()),
         "program": CanonicalJSON.String(pkg_bundle_receipt_source(hook.program))
     ])
@@ -1009,7 +1009,7 @@ fn pkg_bundle_optional_receipt_text(value: String?) -> CanonicalJSON Never! {
 
 fn pkg_bundle_receipt_safe_text(value: String) -> String Never! {
     if pkg_bundle_contains_sensitive_marker(value) -> return "<redacted>"
-    ~value
+    value.copy()
 }
 
 // A source path or URL; credentials, queries, and fragments are redacted.
@@ -1052,7 +1052,7 @@ fn pkg_bundle_frame(out: &[U8], value: [U8]) Never! {
 fn pkg_bundle_push_big_endian(out: &[U8], value: Int, width: Int) Never! {
     shift := (width - 1) * 8
     loop shift >= 0 {
-        &out.push(U8{(value >> shift) & 255})
+        &out.push(U8{((value >> shift)).bit_and(255)})
         shift -= 8
     }
 }
@@ -1103,7 +1103,7 @@ fn pkg_bundle_mac_info_plist(spec: BundleSpec, icon_name: String?) -> [U8] Never
 }
 
 fn pkg_bundle_windows_executable_name(name: String) -> String Never! {
-    if pkg_ascii_lower(name).ends_with(".exe") -> return ~name
+    if pkg_ascii_lower(name).ends_with(".exe") -> return name.copy()
     "{name}.exe"
 }
 

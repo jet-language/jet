@@ -10,7 +10,7 @@
 FOREIGN_SOURCE_RECEIPT_SCHEMA :: prep { "jet-ffi-source-receipt-v1" }
 
 // Whether a foreign family has a checked replacement path or only a binder.
-pub enum ForeignBoundaryDisposition {
+enum ForeignBoundaryDisposition {
     Supported
     BinderOnly
     Unsupported
@@ -26,7 +26,7 @@ pub enum ForeignBoundaryDisposition {
 
 // The source stays authoritative until a recorded comparison accepts the
 // replacement. A state marker, not a second evaluator.
-pub enum ForeignSourceAuthority {
+enum ForeignSourceAuthority {
     ForeignUntilAccepted
     ReplacementAccepted
 
@@ -43,14 +43,14 @@ FOREIGN_BOUNDARY_COMPARISON_OUTCOMES :: prep { [String]{"matched", "mismatch", "
 
 // One raw case from the comparison/evidence machinery. The boundary keeps the
 // input and both raw observations; it runs no relation of its own.
-pub struct ForeignBoundaryObservation {
-    pub case_id: String
-    pub input: String
-    pub foreign: String
-    pub replacement: String
-    pub outcome: String
-    pub assumptions: [String]
-    pub evidence: EvidenceIdentity?
+struct ForeignBoundaryObservation {
+    case_id: String
+    input: String
+    foreign: String
+    replacement: String
+    outcome: String
+    assumptions: [String]
+    evidence: EvidenceIdentity?
 
     fn new(case_id: String, input: String, foreign: String, replacement: String, outcome: String) -> ForeignBoundaryObservation Never! {
         ForeignBoundaryObservation{case_id: case_id, input: input, foreign: foreign, replacement: replacement, outcome: outcome, assumptions: [String]{}, evidence: None}
@@ -82,21 +82,21 @@ pub struct ForeignBoundaryObservation {
 }
 
 // Family-level capability projection over the canonical binder descriptor.
-pub struct ForeignBoundaryCapability {
-    pub language: ForeignLanguage
-    pub disposition: ForeignBoundaryDisposition
-    pub source_import: Bool
-    pub mixed_debug: Bool
-    pub native_export: Bool
-    pub build_host: Bool
-    pub reason: String
+struct ForeignBoundaryCapability {
+    language: ForeignLanguage
+    disposition: ForeignBoundaryDisposition
+    source_import: Bool
+    mixed_debug: Bool
+    native_export: Bool
+    build_host: Bool
+    reason: String
 }
 
 // Project the consumed family matrix without looking at command presence.
 // Active descriptors provide an executable binder. Only the named narrow
 // conversion families claim source import; C/C++ source import and
 // COM/Ada/Pascal semantic translation remain explicitly unavailable.
-pub fn pkg_foreign_boundary_capability(language: ForeignLanguage) -> ForeignBoundaryCapability Never! {
+fn pkg_foreign_boundary_capability(language: ForeignLanguage) -> ForeignBoundaryCapability Never! {
     active :: if pkg_binder_descriptor(language) == {
         .Val(descriptor) -> descriptor.status == BinderStatus.Active
         .None -> false
@@ -131,16 +131,16 @@ pub fn pkg_foreign_boundary_capability(language: ForeignLanguage) -> ForeignBoun
 }
 
 // The complete family matrix used by foreign inspection and comparison views.
-pub fn pkg_foreign_boundary_capabilities() -> [ForeignBoundaryCapability] Never! {
+fn pkg_foreign_boundary_capabilities() -> [ForeignBoundaryCapability] Never! {
     rows := [ForeignBoundaryCapability]{}
-    loop language in ForeignLanguage.all() -> &rows.push(pkg_foreign_boundary_capability(language))
+    loop language in ForeignLanguage.registered() -> &rows.push(pkg_foreign_boundary_capability(language))
     rows
 }
 
 // Build the canonical boundary row for an import operation. The capability
 // matrix stays the authority for semantic conversion; binder-only families
 // are never upgraded here.
-pub fn pkg_source_import_boundary(language: ForeignLanguage, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) -> ForeignBoundaryContract ForeignBridgeError! {
+fn pkg_source_import_boundary(language: ForeignLanguage, library: String, identity: ForeignBoundaryIdentity, coverage: ForeignArtifactCoverage) -> ForeignBoundaryContract ForeignBridgeError! {
     descriptor :: pkg_binder_descriptor(language) ?? return Err(pkg_bridge_error("missing binder descriptor for {language.debug_name()}"))
     boundary :: ForeignBoundaryContract.new(descriptor, library, identity).with_artifact_coverage(coverage)
     boundary.validate()
@@ -154,24 +154,24 @@ fn pkg_bridge_evidence_key(evidence: EvidenceIdentity) -> String Never! {
 // Stable receipt emitted when a checked comparison accepts a replacement
 // projection. It references the derivation/evidence/comparison records; it
 // never copies or re-evaluates their graphs.
-pub struct ForeignSourceReceipt {
-    pub schema: String
-    pub boundary_digest: String
-    pub boundary_identity: ForeignBoundaryIdentity
-    pub artifact_coverage_digest: String
-    pub source_identity: String
-    pub replacement_identity: String
-    pub source_authority: ForeignSourceAuthority
-    pub derivation: MIRDerivationRef
-    pub evidence: [EvidenceIdentity]
-    pub comparison_artifact_id: String
-    pub comparison_schema_version: U16
-    pub comparison_status: String
-    pub comparison_relation: String
-    pub compared_samples: Int
-    pub discarded_cases: Int
-    pub first_difference: Int?
-    pub comparison_reason: String?
+struct ForeignSourceReceipt {
+    schema: String
+    boundary_digest: String
+    boundary_identity: ForeignBoundaryIdentity
+    artifact_coverage_digest: String
+    source_identity: String
+    replacement_identity: String
+    source_authority: ForeignSourceAuthority
+    derivation: MIRDerivationRef
+    evidence: [EvidenceIdentity]
+    comparison_artifact_id: String
+    comparison_schema_version: U16
+    comparison_status: String
+    comparison_relation: String
+    compared_samples: Int
+    discarded_cases: Int
+    first_difference: Int?
+    comparison_reason: String?
 
     fn from_contract(contract: ForeignBoundaryContract, comparison: ComparisonRecord, replacement_identity: String) -> ForeignSourceReceipt ForeignBridgeError! {
         derivation :: contract.derivation ?? return Err(pkg_bridge_error("accepted foreign replacement is missing its derivation reference"))
@@ -185,7 +185,7 @@ pub struct ForeignSourceReceipt {
             replacement_identity: replacement_identity,
             source_authority: contract.source_authority,
             derivation: derivation,
-            evidence: ~contract.evidence,
+            evidence: contract.evidence.copy(),
             comparison_artifact_id: comparison_artifact_id,
             comparison_schema_version: comparison.schema_version,
             comparison_status: comparison_status_as_str(comparison.status),
@@ -252,41 +252,41 @@ fn pkg_bridge_scalar_width(scalar: ForeignScalar) -> String Never! {
 }
 
 // The one consumed boundary row for a binder invocation.
-pub struct ForeignBoundaryContract {
-    pub schema: String
-    pub language: ForeignLanguage
-    pub library: String
-    pub descriptor: String
-    pub abi: ForeignABIContract
-    pub scalar_widths: [String: String]
-    pub alignment: String
-    pub ownership: String
-    pub cleanup: String
-    pub encoding: String
-    pub nullability: String
-    pub errors: String
-    pub exceptions: String
-    pub callbacks: String
-    pub task_thread: String
-    pub target_availability: String
-    pub copy_cost: String
+struct ForeignBoundaryContract {
+    schema: String
+    language: ForeignLanguage
+    library: String
+    descriptor: String
+    abi: ForeignABIContract
+    scalar_widths: [String: String]
+    alignment: String
+    ownership: String
+    cleanup: String
+    encoding: String
+    nullability: String
+    errors: String
+    exceptions: String
+    callbacks: String
+    task_thread: String
+    target_availability: String
+    copy_cost: String
     // The descriptor-owned effect root; never narrowed to purity by evidence.
-    pub effects: String
-    pub effect_root: String
+    effects: String
+    effect_root: String
     // Exact loaded artifact and reachable native coverage shared by all rows.
-    pub artifact_coverage: ForeignArtifactCoverage
-    pub identity: ForeignBoundaryIdentity
-    pub disposition: ForeignBoundaryDisposition
-    pub source_import: Bool
-    pub source_authority: ForeignSourceAuthority
+    artifact_coverage: ForeignArtifactCoverage
+    identity: ForeignBoundaryIdentity
+    disposition: ForeignBoundaryDisposition
+    source_import: Bool
+    source_authority: ForeignSourceAuthority
     // Receipt of the checked comparison that made a replacement selectable.
-    pub source_receipt: ForeignSourceReceipt?
-    pub derivation: MIRDerivationRef?
-    pub evidence: [EvidenceIdentity]
-    pub assumptions: [String]
-    pub observations: [ForeignBoundaryObservation]
+    source_receipt: ForeignSourceReceipt?
+    derivation: MIRDerivationRef?
+    evidence: [EvidenceIdentity]
+    assumptions: [String]
+    observations: [ForeignBoundaryObservation]
     // One evidence row for every canonical ABI/safety/effect obligation.
-    pub obligations: [ForeignObligationEvidence]
+    obligations: [ForeignObligationEvidence]
 
     fn new(descriptor: BinderDescriptor, library: String, identity: ForeignBoundaryIdentity) -> ForeignBoundaryContract Never! {
         capability :: pkg_foreign_boundary_capability(descriptor.language)
@@ -510,13 +510,13 @@ pub struct ForeignBoundaryContract {
         if evidence_outcome_is_failure(evidence.outcome) || evidence_outcome_is_incomplete(evidence.outcome) || evidence.outcome == EvidenceOutcome.Unchecked -> return Err(pkg_bridge_error("foreign replacement evidence is not a complete successful observation: {evidence_outcome_name(evidence.outcome)}"))
         comparison_record_assert_equal(comparison) ?? return Err(pkg_bridge_error("foreign replacement comparison was not accepted: {comparison_assertion_error_text(err)}"))
         // Exactly one copy, Rust's `self.clone()`; the attach steps consume it.
-        candidate := ~self
+        candidate := self.copy()
         candidate = ^candidate.attach_derivation(derivation)
         candidate = ^candidate.attach_evidence(evidence)
         &candidate.record_comparison(comparison, Val(evidence.identity))
         &candidate.mark_replacement_accepted()
         receipt :: ForeignSourceReceipt.from_contract(candidate, comparison, replacement_identity)
-        candidate.source_receipt = Val(~receipt)
+        candidate.source_receipt = Val(receipt.copy())
         candidate.validate()
         self = candidate
         Ok(receipt)

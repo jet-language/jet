@@ -1,0 +1,21 @@
+// D-INFER-PRIVATE1=A: Dyn arithmetic and comparisons are checked while running.
+// Int mixed with Float gives Float; `/` always gives Float; `==` keeps Int and
+// Float distinct; a Dyn is never a condition by itself.
+fn run() {
+    a :: Dyn.Int(7)
+    b :: Dyn.Float(2.0)
+    print(a + a)
+    print(a * b)
+    print(a - 10)
+    print(b / 4)
+    print(a / 2)
+    print(Dyn.Int(4) / 2)
+    print(a == 7)
+    print(Dyn.Int(1) == Dyn.Float(1.0))
+    print(a < b)
+    print(a >= 7)
+    print(Dyn.Text("ab") < Dyn.Text("b"))
+    print(a != "7")
+    flag :: Dyn.Bool(true)
+    if flag.decode<Bool>() ?? false -> print("active")
+}

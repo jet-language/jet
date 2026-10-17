@@ -14,20 +14,24 @@
 //!   retained it, else the shared assembly
 //!   `~/.cache/jet-luna/compiler-bootstrap/project`.
 //!
-//! It writes the fresh packaged source to `<keep-dir>/stage-zero.rs` and into
-//! the kept backend project `<keep-dir>/stage-zero/` (`generated.rs`,
-//! `src/main.rs`, `src/compiler.image` when the image changed). The unit
-//! crates are a function of `reference.rs` alone, so only the main crate
-//! changes.
+//! It writes the fresh packaged source to `<keep-dir>/stage-zero.rs` and, when
+//! the run retained its backend project `<keep-dir>/stage-zero/`, into it
+//! (`generated.rs`, `src/main.rs`, `src/compiler.image` when the image
+//! changed). The unit crates are a function of `reference.rs` alone, so only
+//! the main crate changes. A keep dir without the backend project (an
+//! emission-only run: `JET_STAGE_ZERO_STOP_AFTER_EMIT`) gets `stage-zero.rs`
+//! only; a `JET_STAGE_ZERO_RESUME` of it writes the backend project.
 //!
 //! The harness `main` appended after packaging is `GENERATED_ARTIFACT_MAIN`
 //! of the generator sources' `Compiler/Bootstrap/Tests.rs`, task-root regions
 //! stripped unless the kept `stage-zero.stamp` says `task_roots=true`; it is
 //! also written to `artifact-main.rs`. The first run derives
 //! `stage-zero/main.prefix.rs` (the main crate's text before the packaged
-//! suffix) from the kept run's own output, which is only sound while the
-//! generators still produce it. It keeps the kept run's source as
-//! `stage-zero.base.rs` and reports whether the fresh source is
+//! suffix) from the kept run's own output: the kept source must start with
+//! `reference.rs`, and the kept main crate must end with the kept source's
+//! suffix after it. That needs no generator sources of the kept run, so the
+//! first run may already use edited generators. It keeps the kept run's source
+//! as `stage-zero.base.rs` and reports whether the fresh source is
 //! byte-identical to it.
 
 #![allow(non_snake_case)]
@@ -216,7 +220,6 @@ fn run() -> Result<(), Failure> {
     execution.emit_foreign = true;
     execution.emit_metadata = false;
     execution.emit_runtime = true;
-    execution.prune_unreachable_codecs = true;
     let metadata_config = MirRustConfig {
         target: TargetLayout::host(),
         target_kind: MirRustTarget::Native,
@@ -231,18 +234,6 @@ fn run() -> Result<(), Failure> {
     };
     let reference = read_text(&keep.join("reference.rs"))?;
     let reference_len = reference.len();
-    let snapshot = lease.snapshot();
-    let (program, metadata_config, prepare_config) = (&program, &metadata_config, &prepare_config);
-    let artifact = jet_driver::run_compiler_work(move || {
-        let metadata = Codegen::MIRRust::mir_rust_aot_metadata(program, metadata_config);
-        crate::prepare_bootstrap_artifact_from_aot(reference, program, snapshot, prepare_config, &metadata)
-            .map_err(|error| format!("stage-zero Host/Runner packaging failed: {error}"))
-    })?;
-    lap("packaged");
-    let packaged = artifact.source;
-    let image = artifact
-        .compiler_image
-        .ok_or("stage-zero Host/Runner packaging embedded no compiler image")?;
 
     // Derive the main crate prefix only the kept run's own output carries.
     let base_path = keep.join("stage-zero.base.rs");
@@ -250,15 +241,15 @@ fn run() -> Result<(), Failure> {
         fs::copy(keep.join("stage-zero.rs"), &base_path)
             .map_err(|error| format!("cannot keep the base `stage-zero.rs`: {error}"))?;
     }
+    let has_project = project.join("Cargo.toml").is_file();
     let prefix_path = project.join("main.prefix.rs");
-    if !prefix_path.is_file() {
+    if has_project && !prefix_path.is_file() {
         let base = read_text(&base_path)?;
-        if !base.starts_with(&packaged) {
-            let at = first_difference(base.as_bytes(), packaged.as_bytes());
+        if !base.starts_with(&reference) {
+            let at = first_difference(base.as_bytes(), reference.as_bytes());
             return Err(format!(
-                "first run: the packaged source differs from `{}` at line {}, so `stage-zero/main.prefix.rs` \
-                 cannot be derived; run once with JET_REPACK_SOURCE_ROOT set to the generator sources of the \
-                 kept run",
+                "`{}` does not start with `reference.rs` (first difference at line {}), so \
+                 `stage-zero/main.prefix.rs` cannot be derived",
                 base_path.display(),
                 line_of(base.as_bytes(), at),
             ));
@@ -279,6 +270,19 @@ fn run() -> Result<(), Failure> {
         write(&prefix_path, prefix.as_bytes())?;
         lap("derived stage-zero/main.prefix.rs");
     }
+
+    let snapshot = lease.snapshot();
+    let (program, metadata_config, prepare_config) = (&program, &metadata_config, &prepare_config);
+    let artifact = jet_driver::run_compiler_work(move || {
+        let metadata = Codegen::MIRRust::mir_rust_aot_metadata(program, metadata_config);
+        crate::prepare_bootstrap_artifact_from_aot(reference, program, snapshot, prepare_config, &metadata)
+            .map_err(|error| format!("stage-zero Host/Runner packaging failed: {error}"))
+    })?;
+    lap("packaged");
+    let packaged = artifact.source;
+    let image = artifact
+        .compiler_image
+        .ok_or("stage-zero Host/Runner packaging embedded no compiler image")?;
 
     let stamp_path = keep.join("stage-zero.stamp");
     let task_roots = match read_text(&stamp_path)?.lines().find_map(|line| line.strip_prefix("task_roots=")) {
@@ -309,15 +313,21 @@ fn run() -> Result<(), Failure> {
     } else {
         eprintln!("stage0-repack: compiler image changed; rewriting stage-zero.image");
         write(&keep.join("stage-zero.image"), &image)?;
-        write(&project.join("src/compiler.image"), &image)?;
+        if has_project {
+            write(&project.join("src/compiler.image"), &image)?;
+        }
     }
 
+    write(&keep.join("stage-zero.rs"), source.as_bytes())?;
+    if !has_project {
+        lap("wrote stage-zero.rs (no kept backend project)");
+        return Ok(());
+    }
     let tail = source
         .get(reference_len..)
         .ok_or("the packaged source does not extend reference.rs")?;
     let mut main_source = read_text(&prefix_path)?;
     main_source.push_str(tail);
-    write(&keep.join("stage-zero.rs"), source.as_bytes())?;
     write(&project.join("generated.rs"), source.as_bytes())?;
     write(&project.join("src/main.rs"), main_source.as_bytes())?;
     lap("wrote stage-zero.rs, stage-zero/generated.rs and stage-zero/src/main.rs");

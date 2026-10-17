@@ -1,0 +1,346 @@
+// Compiler-owned scoped policy registry and resolution ladder (D-MARK-SCOPE1),
+// crates/jet-foundation/src/Policy.rs. PolicyKey, PolicyValue, PolicyScope
+// (Rust `Authority::Scope`) and PolicyDeclaration live in AST/Statements.jet.
+// The build-fact contribution law (SourceScope, ContributionLayer, Fact*) is
+// owned by Jetpack/PackageModel/Source/Merge/FactLaw.jet, not repeated here.
+
+// Rust `PolicyKey::name`.
+fn policy_key_name(key: PolicyKey) -> String Never! {
+    if key == {
+        .Unsafe -> "unsafe"
+        .Impure -> "impure"
+        .Nondeterministic -> "nondeterministic"
+        .DependencyGrant -> "dependency_grant"
+        .BuildFlag -> "build_flag"
+        .SessionFlag -> "session_flag"
+        .TrustGrant -> "trust_grant"
+        .ForcePin -> "force_pin"
+        .TaintScrub -> "taint_scrub"
+        .DutyDrop -> "duty_drop"
+        .StateTransition -> "state_transition"
+        .PrecisionDemotion -> "precision_demotion"
+        .Structure -> "structure"
+        .LintAllow -> "lint_allow"
+        .ScopedGC -> "gc"
+        .ExplicitUnits -> "explicit_units"
+        .Copies -> "copies"
+        .Sentries -> "sentries"
+    }
+}
+
+// Rust `PolicyKey::parse`.
+fn policy_key_parse(name: String) -> PolicyKey? Never! {
+    if name == {
+        "unsafe" -> Val(PolicyKey.Unsafe)
+        "impure" -> Val(PolicyKey.Impure)
+        "nondeterministic" -> Val(PolicyKey.Nondeterministic)
+        "dependency_grant" -> Val(PolicyKey.DependencyGrant)
+        "build_flag" -> Val(PolicyKey.BuildFlag)
+        "session_flag" -> Val(PolicyKey.SessionFlag)
+        "trust_grant" -> Val(PolicyKey.TrustGrant)
+        "force_pin" -> Val(PolicyKey.ForcePin)
+        "taint_scrub" -> Val(PolicyKey.TaintScrub)
+        "duty_drop" -> Val(PolicyKey.DutyDrop)
+        "state_transition" -> Val(PolicyKey.StateTransition)
+        "precision_demotion" -> Val(PolicyKey.PrecisionDemotion)
+        "structure" -> Val(PolicyKey.Structure)
+        "lint_allow" -> Val(PolicyKey.LintAllow)
+        "gc" -> Val(PolicyKey.ScopedGC)
+        "explicit_units" -> Val(PolicyKey.ExplicitUnits)
+        "copies" -> Val(PolicyKey.Copies)
+        "sentries" -> Val(PolicyKey.Sentries)
+        else -> None
+    }
+}
+
+// Rust `PolicyKey::is_audited_gate`.
+fn policy_key_is_audited_gate(key: PolicyKey) -> Bool Never! {
+    if key == {
+        .ScopedGC | .ExplicitUnits | .Copies | .Sentries -> false
+        else -> true
+    }
+}
+
+// Rust `PolicyValue::display`.
+fn policy_value_display(value: PolicyValue) -> String Never! {
+    if value == {
+        .Enabled -> "true"
+        .Limit(limit) -> "{limit}"
+        .Forbid -> ".Forbid"
+        .Default -> ".Default"
+        .GateOnly -> ".GateOnly"
+        .Obligations -> ".Obligations"
+        .Relaxed -> ".Relaxed"
+        .PerSite -> ".PerSite"
+        .Track -> ".Track"
+        .Skip -> ".Skip"
+        .Allow -> ".Allow"
+        .On -> ".On"
+        .Off -> ".Off"
+        .Explicit -> ".Explicit"
+    }
+}
+
+// Rust `Authority::Scope::name`.
+fn policy_scope_name(scope: PolicyScope) -> String Never! {
+    if scope == {
+        .Organization -> "organization"
+        .Package -> "package"
+        .Module -> "module"
+        .Function -> "function"
+        .Block -> "block"
+    }
+}
+
+// Rust `Authority::Scope::rank`: the lexical ladder, outer to inner.
+fn policy_scope_rank(scope: PolicyScope) -> Int Never! {
+    if scope == {
+        .Organization -> 0
+        .Package -> 1
+        .Module -> 2
+        .Function -> 3
+        .Block -> 4
+    }
+}
+
+enum PolicyCombine { Tighten Override Merge }
+
+struct PolicyRule {
+    key: PolicyKey
+    scopes: [PolicyScope]
+    combine: PolicyCombine
+}
+
+POLICY_PACKAGE_SCOPES :: prep { [PolicyScope]{PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+POLICY_ALL_SCOPES :: prep { [PolicyScope]{PolicyScope.Organization, PolicyScope.Package, PolicyScope.Module, PolicyScope.Function, PolicyScope.Block} }
+
+// Rust `POLICY_RULES`.
+POLICY_RULES :: prep { [PolicyRule]{
+    PolicyRule{key: PolicyKey.Unsafe, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Impure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Nondeterministic, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.DependencyGrant, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.BuildFlag, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.SessionFlag, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.TrustGrant, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.ForcePin, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.TaintScrub, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.DutyDrop, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.StateTransition, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.PrecisionDemotion, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Structure, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.LintAllow, scopes: POLICY_ALL_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.ScopedGC, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Override},
+    PolicyRule{key: PolicyKey.ExplicitUnits, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Copies, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+    PolicyRule{key: PolicyKey.Sentries, scopes: POLICY_PACKAGE_SCOPES, combine: PolicyCombine.Tighten},
+} }
+
+// Rust `rule`.
+fn policy_rule(key: PolicyKey) -> PolicyRule Never! {
+    loop row in POLICY_RULES {
+        if row.key == key -> return row
+    }
+    panic("registered policy key")
+}
+
+struct EffectivePolicy {
+    key: PolicyKey
+    value: PolicyValue
+    // Outer-to-inner declaration chain, including overridden declarations.
+    provenance: [PolicyDeclaration]
+}
+
+#Error
+enum PolicyError {
+    ProhibitedScope(key: PolicyKey, scope: PolicyScope, span: Span)
+    Conflict(key: PolicyKey, scope: PolicyScope, first: Span, second: Span)
+    Widening(key: PolicyKey, outer: PolicyValue, inner: PolicyValue, span: Span)
+}
+
+// Rust's derived `Debug` spelling of PolicyError (package-policy conflicts
+// print it verbatim).
+impl PolicyError.Debug {
+    fn debug(self) -> String {
+        if self == {
+            .ProhibitedScope(key, scope, span) -> "ProhibitedScope {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, span: {policy_span_debug_text(span)} }}"
+            .Conflict(key, scope, first, second) -> "Conflict {{ key: {policy_key_debug_text(key)}, scope: {policy_scope_debug_text(scope)}, first: {policy_span_debug_text(first)}, second: {policy_span_debug_text(second)} }}"
+            .Widening(key, outer, inner, span) -> "Widening {{ key: {policy_key_debug_text(key)}, outer: {policy_value_debug_text(outer)}, inner: {policy_value_debug_text(inner)}, span: {policy_span_debug_text(span)} }}"
+        }
+    }
+}
+
+fn policy_key_debug_text(key: PolicyKey) -> String Never! {
+    if key == {
+        .Unsafe -> "Unsafe"
+        .Impure -> "Impure"
+        .Nondeterministic -> "Nondeterministic"
+        .DependencyGrant -> "DependencyGrant"
+        .BuildFlag -> "BuildFlag"
+        .SessionFlag -> "SessionFlag"
+        .TrustGrant -> "TrustGrant"
+        .ForcePin -> "ForcePin"
+        .TaintScrub -> "TaintScrub"
+        .DutyDrop -> "DutyDrop"
+        .StateTransition -> "StateTransition"
+        .PrecisionDemotion -> "PrecisionDemotion"
+        .Structure -> "Structure"
+        .LintAllow -> "LintAllow"
+        .ScopedGC -> "ScopedGc"
+        .ExplicitUnits -> "ExplicitUnits"
+        .Copies -> "Copies"
+        .Sentries -> "Sentries"
+    }
+}
+
+fn policy_value_debug_text(value: PolicyValue) -> String Never! {
+    if value == {
+        .Enabled -> "Enabled"
+        .Limit(limit) -> "Limit({limit})"
+        .Forbid -> "Forbid"
+        .Default -> "Default"
+        .GateOnly -> "GateOnly"
+        .Obligations -> "Obligations"
+        .Relaxed -> "Relaxed"
+        .PerSite -> "PerSite"
+        .Track -> "Track"
+        .Skip -> "Skip"
+        .Allow -> "Allow"
+        .On -> "On"
+        .Off -> "Off"
+        .Explicit -> "Explicit"
+    }
+}
+
+fn policy_scope_debug_text(scope: PolicyScope) -> String Never! {
+    if scope == {
+        .Organization -> "Organization"
+        .Package -> "Package"
+        .Module -> "Module"
+        .Function -> "Function"
+        .Block -> "Block"
+    }
+}
+
+fn policy_span_debug_text(span: Span) -> String Never! {
+    "Span {{ start: {span.start}, end: {span.end} }}"
+}
+
+// Rust `resolve_policy` (the `ResolutionKey for PolicyKey` arm of `resolve`):
+// declarations resolve outer-to-inner into one effective value, and every
+// shadowed or tightened declaration stays in the provenance chain.
+fn policy_resolve(key: PolicyKey, declarations: [PolicyDeclaration]) -> EffectivePolicy? PolicyError! {
+    // Rust sorts by scope rank with a stable sort: written order within a rung.
+    ordered := [PolicyDeclaration]{}
+    loop scope in POLICY_ALL_SCOPES {
+        loop declaration in declarations {
+            if declaration.key == key && declaration.scope == scope -> &ordered.push(declaration)
+        }
+    }
+    registry :: policy_rule(key)
+    chain := [PolicyDeclaration]{}
+    effective := PolicyValue?{None}
+    loop declaration in ordered {
+        if !registry.scopes.contains(declaration.scope) -> return Err(PolicyError.ProhibitedScope{key: key, scope: declaration.scope, span: declaration.span})
+        loop previous in chain {
+            if previous.scope == declaration.scope && previous.target == declaration.target -> return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: previous.span, second: declaration.span})
+        }
+        next := declaration.value
+        if effective == .Val(outer) {
+            widens :: policy_widens(key, outer, declaration.value)
+            if registry.combine == PolicyCombine.Tighten && widens -> return Err(PolicyError.Widening{key: key, outer: outer, inner: declaration.value, span: declaration.span})
+            if registry.combine == PolicyCombine.Merge {
+                next = policy_merge(outer, declaration.value) ?? return Err(PolicyError.Conflict{key: key, scope: declaration.scope, first: chain[chain.len() - 1].span, second: declaration.span})
+            }
+        }
+        effective = Val(next)
+        &chain.push(declaration)
+    }
+    value :: effective ?? return Ok(None)
+    Ok(Val(EffectivePolicy{key: key, value: value, provenance: chain}))
+}
+
+// The widening arm of Rust `resolve_policy`.
+fn policy_widens(key: PolicyKey, outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+    if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && outer == PolicyValue.Enabled && inner == PolicyValue.Enabled -> return false
+    if key == PolicyKey.Copies && outer == PolicyValue.Explicit && inner == PolicyValue.Explicit -> return false
+    if key == PolicyKey.Sentries {
+        if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) -> return false
+        if outer == PolicyValue.Off && inner == PolicyValue.On -> return true
+        if outer == PolicyValue.Off && inner == PolicyValue.Off -> return false
+    }
+    if policy_key_is_audited_gate(key) -> return policy_gate_widens(outer, inner)
+    true
+}
+
+// The `PolicyCombine::Merge` arm of Rust `resolve_policy`; None is a conflict.
+fn policy_merge(outer: PolicyValue, inner: PolicyValue) -> PolicyValue? Never! {
+    if outer == .Limit(a) && inner == .Limit(b) -> return Val(PolicyValue.Limit{value: if a < b -> a else -> b})
+    if outer == PolicyValue.Enabled && inner == PolicyValue.Enabled -> return Val(PolicyValue.Enabled)
+    if outer == PolicyValue.Forbid && inner == PolicyValue.Forbid -> return Val(PolicyValue.Forbid)
+    None
+}
+
+// Rust `gate_widens`, arm for arm (including its non-reflexive cases).
+fn policy_gate_widens(outer: PolicyValue, inner: PolicyValue) -> Bool Never! {
+    if outer == PolicyValue.Forbid && inner == PolicyValue.Allow -> return true
+    if inner == PolicyValue.Allow -> return false
+    if outer == PolicyValue.Forbid -> return inner != PolicyValue.Forbid
+    if outer == PolicyValue.Obligations -> return inner != PolicyValue.Obligations && inner != PolicyValue.Track
+    if outer == PolicyValue.PerSite && (inner == PolicyValue.Track || inner == PolicyValue.Skip || inner == PolicyValue.PerSite) -> return false
+    if outer == PolicyValue.Default || outer == PolicyValue.GateOnly || outer == PolicyValue.Relaxed {
+        if inner == {
+            .Track | .Obligations | .Default | .GateOnly | .Relaxed | .Skip -> return false
+            else -> {}
+        }
+    }
+    if outer == PolicyValue.Track && inner == PolicyValue.Track -> return false
+    if outer == PolicyValue.Skip && inner == PolicyValue.Skip -> return false
+    if outer == PolicyValue.On && (inner == PolicyValue.On || inner == PolicyValue.Off) -> return false
+    if outer == PolicyValue.Off && inner == PolicyValue.Off -> return false
+    true
+}
+
+// Rust `parse_value` returns the refusal as a `String`.
+#Error
+struct PolicyValueError {
+    detail: String
+
+    fn message(self) -> String Never! { self.detail }
+}
+
+// Rust `parse_value`: one package-policy value for `key`.
+fn policy_parse_value(key: PolicyKey, raw: String) -> PolicyValue PolicyValueError! {
+    value :: raw.trim()
+    if (key == PolicyKey.ScopedGC || key == PolicyKey.ExplicitUnits) && value == "true" -> return Ok(PolicyValue.Enabled)
+    if key == PolicyKey.Copies {
+        if value == ".Explicit" -> return Ok(PolicyValue.Explicit)
+        return Err(PolicyValueError{detail: "`copies` must be `.Explicit`"})
+    }
+    if key == PolicyKey.Sentries {
+        if value == {
+            ".On" -> return Ok(PolicyValue.On)
+            ".Off" -> return Ok(PolicyValue.Off)
+            else -> return Err(PolicyValueError{detail: "`sentries` must be `.On` or `.Off`"})
+        }
+    }
+    if !policy_key_is_audited_gate(key) -> return Err(PolicyValueError{detail: "package policy `{policy_key_name(key)}` has an unsupported value"})
+    if key != PolicyKey.Unsafe && key != PolicyKey.Impure && key != PolicyKey.Nondeterministic {
+        if value == {
+            ".Forbid" -> return Ok(PolicyValue.Forbid)
+            ".GateOnly" -> return Ok(PolicyValue.GateOnly)
+            else -> return Err(PolicyValueError{detail: "`{policy_key_name(key)}` must be `.Forbid` or `.GateOnly`"})
+        }
+    }
+    if value == {
+        ".Forbid" -> Ok(PolicyValue.Forbid)
+        ".Default" -> Ok(PolicyValue.Default)
+        ".GateOnly" -> Ok(PolicyValue.GateOnly)
+        ".Obligations" -> Ok(PolicyValue.Obligations)
+        ".Relaxed" -> Ok(PolicyValue.Relaxed)
+        ".PerSite" -> Ok(PolicyValue.PerSite)
+        ".Track" -> Ok(PolicyValue.Track)
+        ".Skip" -> Ok(PolicyValue.Skip)
+        else -> Err(PolicyValueError{detail: "`{policy_key_name(key)}` must be one of `.Forbid`, `.Default`, `.GateOnly`, `.Obligations`, `.Relaxed`, `.PerSite`, `.Track`, or `.Skip`"})
+    }
+}

@@ -1,0 +1,10 @@
+Error [E0740]: `narrow` uses the effect `Rand, Time`, which its signature doesn't allow
+  --> tests/ui/job_queue_effects_narrow.jet:5:35
+    |
+  5 | fn narrow(queue: jobs.JobQueue) -[DB]> {
+    |                                   ^^
+ Why: The signature declares `-[DB]>`, so the body may only use those; `Rand, Time` is outside that set
+ Fix: Add `Rand, Time` to the effect list, or stop using it in `narrow`
+ Denial: invocation
+ Call chain: narrow
+More: jet-lang.dev/e/E0740

@@ -1,0 +1,196 @@
+// Raw pointers (D-CAP9 `*T`, `Ptr<T>`): a pointer is the word address of
+// native storage. `*x` takes the address of x's memory cell (Lower.jet makes
+// every raw-addressed root a cell) and registers it with the memory sentries;
+// `p.*` checks the read with the same sentry kernel before it loads, as the
+// generated Rust's jet_sentry_address_of / jet_sentry_read do (Mem.rs). The
+// runtime library (`m.sentry` false) implements those kernels and, like the
+// Rust runtime, is never instrumented: its addresses and reads are raw.
+use jet_foundation.[MIRInstruction, MIRPlaceID, MIRProgram, MIRScope, MIRType, MIRUnsafeGate, MIRValueID, mir_type_display_name]
+
+fn lower_ptr_element(ty: MIRType) -> MIRType? {
+    if ty.kind == .Apply(name, args) {
+        if name.name == "Ptr" && args.len() == 1 -> return Val(args[0])
+    }
+    None
+}
+
+// `*place`: the registered address of the place's storage, as a Ptr word or
+// an exact Int.
+fn lower_raw_address_of(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, place: MIRPlaceID) Never! {
+    row :: lower_place_row(c.mir, place) ?? return lower_fail(&m, &f, "place {place.value} is missing")
+    slot :: c.place_slots.get(place.value) ?? return lower_fail(&m, &f, "place {place.value} has no lowered root")
+    if !c.slots[slot].cell -> return lower_fail(&m, &f, "raw address of a place without storage is not lowered at O0 yet")
+    walk :: lower_cell_walk(p, c, &m, &f, slot, row) ?? return
+    address :: lower_address(&f, walk.base, walk.offset)
+    bytes :: lower_const(&f, lower_size(p, row.ty).size)
+    raw :: lower_word(&f)
+    if m.sentry {
+        lower_call_runtime(&m, &f, "jet_rt_sentry_stack_address_of", [LIRValueID]{address, bytes}, Val(raw))
+    } else {
+        lower_emit(&f, LIRInst.Bitcast{dst: raw, src: address})
+    }
+    result_ty :: lower_checked_type(c, instruction) ?? return lower_fail(&m, &f, "raw address has no checked type")
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_is_exact_int(result_ty) -> return lower_convert_exact(&m, &f, dst, raw, "jet_int_owned_from_i64", false)
+    lower_emit(&f, LIRInst.Move{dst: dst, src: raw})
+}
+
+// `Ptr<T>.from_addr(address)`: the address word itself.
+fn lower_ptr_from_addr(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, address: MIRValueID) Never! {
+    ty :: lower_value_type(c, address) ?? return lower_fail(&m, &f, "pointer address has no checked type")
+    value :: lower_use(&m, &f, address) ?? return
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if lower_is_exact_int(ty) -> return lower_convert_exact(&m, &f, dst, value, "jet_int_owned_to_i64", false)
+    lower_emit(&f, LIRInst.Move{dst: dst, src: value})
+}
+
+// `p.*`: a sentry-checked bitwise read of the pointee. The Ptr word becomes
+// a typed LIR pointer only through the runtime check, which returns the
+// address it validated. A pointee that owns runtime storage would duplicate
+// its owner, so only trivially copied values are read natively.
+fn lower_ptr_deref(p: MIRProgram, c: LowerContext, m: &LowerModule, f: &LowerFunction, instruction: MIRInstruction, value: MIRValueID) Never! {
+    ty :: lower_value_type(c, value) ?? return lower_fail(&m, &f, "dereferenced value has no checked type")
+    elem :: lower_ptr_element(ty) ?? return lower_fail(&m, &f, "dereferencing {mir_type_display_name(ty)} is not lowered at O0 yet")
+    if lower_needs_drop(p, m, elem) -> return lower_fail(&m, &f, "dereferencing a pointer to {mir_type_display_name(elem)} is not lowered at O0 yet")
+    address :: lower_use(&m, &f, value) ?? return
+    size :: lower_size(p, elem)
+    bytes :: lower_const(&f, size.size)
+    align :: lower_const(&f, size.align)
+    pointer :: lower_pointer(&f)
+    if !m.sentry {
+        lower_emit(&f, LIRInst.Bitcast{dst: pointer, src: address})
+    } else if m.stop_points && lower_instruction_has_stop_poll(c, f, instruction) {
+        saved :: lower_poll_call_enter(&m, &f)
+        lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
+        lower_poll_call_leave(&m, &f, saved)
+    } else {
+        lower_call_runtime(&m, &f, "jet_rt_sentry_read", [LIRValueID]{address, bytes, align}, Val(pointer))
+    }
+    if lower_repr(p, elem) == .Absent -> return lower_alias_absent(&f, instruction)
+    dst :: lower_result(p, c, &m, &f, instruction) ?? return
+    if !m.stop_points {
+        if lower_is_inline(p, elem) {
+            lower_storage_into(p, &f, dst, elem)
+            return lower_copy_bytes(&f, dst, 0, pointer, 0, size.size)
+        }
+        return lower_emit(&f, LIRInst.Load{dst: dst, base: pointer, offset: 0})
+    }
+    // A fault has already delivered a stop. Never load its zero pointer or
+    // initialize aggregate payload storage; MIR Propagate owns the cleanup.
+    if lower_is_inline(p, elem) -> lower_storage_into(p, &f, dst, elem)
+    valid :: lower_flag(&f)
+    zero :: lower_const(&f, 0)
+    lower_emit(&f, LIRInst.Compare{dst: valid, condition: LIRCondition.Ne, left: pointer, right: zero})
+    load :: lower_new_block(&f)
+    stopped :: lower_new_block(&f)
+    done :: lower_new_block(&f)
+    lower_seal(&f, LIRTerminator.Branch{condition: valid, then_target: lower_target(load, [LIRValueID]{}), else_target: lower_target(stopped, [LIRValueID]{})})
+    if lower_is_inline(p, elem) {
+        lower_start(&f, load, [LIRValueID]{})
+        lower_copy_bytes(&f, dst, 0, pointer, 0, size.size)
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, stopped, [LIRValueID]{})
+        lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{})})
+        lower_start(&f, done, [LIRValueID]{})
+        return
+    }
+    layout :: lower_repr_layout(lower_repr(p, elem)) ?? return lower_fail(&m, &f, "raw read has no scalar representation")
+    loaded :: lower_new_value(&f, layout, LIRDrop.Trivial, elem.identity)
+    unwritten :: lower_new_value(&f, layout, LIRDrop.Trivial, elem.identity)
+    lower_start(&f, load, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Load{dst: loaded, base: pointer, offset: 0})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{loaded})})
+    lower_start(&f, stopped, [LIRValueID]{})
+    lower_emit(&f, LIRInst.Const{dst: unwritten, value: 0})
+    lower_seal(&f, LIRTerminator.Jump{target: lower_target(done, [LIRValueID]{unwritten})})
+    lower_start(&f, done, [LIRValueID]{dst})
+}
+
+// Sentry guards save the per-thread gate/fence state in caller-owned frame
+// storage. ScopeExit's MIR cleanup chain includes normal and stopped exits.
+fn lower_sentry_save(f: &LowerFunction) -> LIRValueID Never! {
+    save :: lower_pointer(&f)
+    lower_emit(&f, LIRInst.StackSlot{dst: save, size: 64, align: 8})
+    save
+}
+
+fn lower_sentry_gate_enter(m: &LowerModule, f: &LowerFunction, save: LIRValueID, gate: MIRUnsafeGate) Never! {
+    args := [LIRValueID]{save, lower_const(&f, if gate.enabled -> 1 else -> 0), lower_const(&f, if gate.fenced -> 1 else -> 0)}
+    loop arg in lower_static_text(&m, &f, gate.file) -> &args.push(arg)
+    &args.push(lower_const(&f, gate.line))
+    loop arg in lower_static_text(&m, &f, gate.reason) -> &args.push(arg)
+    lower_call_runtime(&m, &f, "jet_rt_sentry_scope_enter", args, None)
+}
+
+fn lower_sentry_fact(row: MIRScope, key: String) -> String? Never! {
+    loop fact in row.facts {
+        if fact.key == key -> return Val(fact.value)
+    }
+    None
+}
+
+fn lower_sentry_bool(row: MIRScope, key: String, fallback: Bool) -> Bool Never! {
+    value :: lower_sentry_fact(row, key) ?? return fallback
+    if value == "true" -> return true
+    if value == "false" -> return false
+    fallback
+}
+
+// The runtime library (`m.sentry` false) has no sentry frame, gate or scope:
+// it implements those hooks, and Rust's runtime never instruments itself.
+fn lower_sentry_frame(c: LowerContext, m: &LowerModule, f: &LowerFunction) Never! {
+    if !m.sentry -> return
+    loop scope in c.mir.scopes {
+        if scope.kind != .Unsafe && scope.kind != .Policy -> next
+        save :: lower_sentry_save(&f)
+        &f.sentry_scopes.add(scope.id.value, save.value).drop("scope IDs are unique")
+    }
+    if c.mir.unsafe_gate == .Val(gate) {
+        save :: lower_sentry_save(&f)
+        f.sentry_function = Val(save)
+        lower_sentry_gate_enter(&m, &f, save, gate)
+    }
+    needs_frame := false
+    loop block in c.mir.blocks {
+        loop instruction in block.instructions {
+            if instruction.operation == .RawAddressOf(_) -> needs_frame = true
+        }
+    }
+    if needs_frame {
+        frame :: lower_word(&f)
+        f.sentry_stack_frame = Val(frame)
+        lower_call_runtime(&m, &f, "jet_rt_sentry_frame_enter", [LIRValueID]{}, Val(frame))
+    }
+}
+
+fn lower_sentry_function_leave(m: &LowerModule, f: &LowerFunction) Never! {
+    stack_frame :: f.sentry_stack_frame.copy()
+    if stack_frame == .Val(frame) -> lower_call_runtime(&m, &f, "jet_rt_sentry_frame_leave", [LIRValueID]{frame}, None)
+    function_save :: f.sentry_function.copy()
+    if function_save == .Val(save) -> lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
+}
+
+fn lower_sentry_scope(c: LowerContext, m: &LowerModule, f: &LowerFunction, row: MIRScope, enter: Bool) Never! {
+    if !m.sentry -> return
+    index :: f.sentry_scopes.get(row.id.value) ?? return lower_fail(&m, &f, "sentry scope has no frame save slot")
+    save :: LIRValueID{value: index}
+    if !enter -> return lower_call_runtime(&m, &f, "jet_rt_sentry_scope_leave", [LIRValueID]{save}, None)
+    if row.kind == .Policy {
+        enabled :: lower_const(&f, if lower_sentry_bool(row, "sentry_enabled", false) -> 1 else -> 0)
+        return lower_call_runtime(&m, &f, "jet_rt_sentry_policy_enter", [LIRValueID]{save, enabled}, None)
+    }
+    gate := c.mir.unsafe_gate ?? MIRUnsafeGate{file: "", line: 0, reason: "", enabled: true, fenced: false}
+    gate.file = lower_sentry_fact(row, "sentry_file") ?? gate.file
+    if lower_sentry_fact(row, "sentry_line") == .Val(text) {
+        line :: Int.parse(text) ?? {
+            lower_fail(&m, &f, "checked sentry line fact cannot be parsed")
+            return
+        }
+        if line < 0 || line > 4294967295 -> return lower_fail(&m, &f, "checked sentry line fact is outside the runtime ABI")
+        gate.line = line
+    }
+    gate.enabled = lower_sentry_bool(row, "sentry_enabled", gate.enabled)
+    gate.fenced = lower_sentry_bool(row, "sentry_fenced", gate.fenced)
+    gate.reason = row.name ?? gate.reason
+    lower_sentry_gate_enter(&m, &f, save, gate)
+}

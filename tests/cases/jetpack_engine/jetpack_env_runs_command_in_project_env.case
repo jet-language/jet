@@ -1,0 +1,66 @@
+# HAND-PORT tests/jetpack_engine.rs:5781-5824 jetpack_env_runs_command_in_project_env
+# PENDING-GRAMMAR / PENDING-SAME-HEAD: authored, not runtime-proven.
+fixture: jetpack_env_runs_command_in_project_env.fixture
+env: NO_COLOR=1
+refused: store-producer-facts
+# Verbatim original setup and ALL predicates; no passing substitute for the named seam.
+# #[test]
+# fn jetpack_env_runs_command_in_project_env() {
+#     // Gap #6 / U §8 (Scale-2): `jetpack env` is the project-env command — it
+#     // never takes an explicit ref, it always composes the env declared by the
+#     // project `env.jet`. The `-- cmd` form runs a one-off command in the
+#     // realized env, which is how we prove `env` put the package on PATH.
+#     let (base, proj, root) = core_hello_project("env");
+#     let output = jetpack()
+#         // U19: `env` trust-gates a project that declares packages; `--trust`
+#         // is the one-shot bypass so this test can assert on PATH composition
+#         // without exercising the interactive prompt.
+#         .args(["env", "--no-color", "--trust", "--", "hello"])
+#         .current_dir(&proj)
+#         .env("JETPACK_ROOT", &root)
+#         .env("HOME", base.join("home"))
+#         .env("PATH", "/usr/bin:/bin") // no nix on PATH
+#         .output()
+#         .unwrap();
+#     assert!(
+#         output.status.success(),
+#         "stderr: {}",
+#         String::from_utf8_lossy(&output.stderr)
+#     );
+#     assert_eq!(
+#         String::from_utf8_lossy(&output.stdout).trim(),
+#         "hello from jet-pkgs"
+#     );
+#     let roots = jetpack::Store::Roots::at(root);
+#     let entry = jetpack::Store::find_by_reference(&roots, "hello@mine")
+#         .expect("core realization should register a Store entry");
+#     let shared = jetpack::ProviderFacts::from_json(
+#         jetpack::Store::ProducerRecord::decode(&entry.producer_record)
+#             .expect("Store producer record")
+#             .facts
+#             .get("provider-facts")
+#             .expect("Store entry should carry shared provider facts"),
+#     )
+#     .expect("shared provider facts JSON");
+#     shared
+#         .validate()
+#         .expect("Store provider facts are lossless");
+#     assert_eq!(shared.reference, entry.reference);
+#     assert!(!shared.native_document.is_empty());
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: home
+when os unix: chmod: jet-pkgs/pkgs/hello/bin/hello 755
+write: project/env.jet env.template
+step: jetpack env --no-color --trust -- hello
+cwd: project
+exit: 0
+stdout.trim: = jetpack_env_runs_command_in_project_env.expected
+

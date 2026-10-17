@@ -1,0 +1,37 @@
+# Port of tests/build_entry.rs:1847-1928; exact three damage branches, unchanged source.
+# PENDING-SAME-HEAD + PENDING-SEAM(build-plan-exec): exact Finished variants, never inferred from successful builds.
+fixture: fixtures/cache_restore_rebuilds_after_missing_or_invalid_store_entries
+mkdir: store
+env: JET_STORE_DIR={work}/store
+mkdir: missing
+copy: main.jet missing/main.jet
+step: jet build main.jet --allow-exec --allow-fs
+cwd: missing
+entries: store/ac kind file > 0
+entries: store/cas kind file > 0
+for file store/cas kind file as f
+remove: {f.path}
+end for
+step: jet build main.jet --allow-exec --allow-fs
+cwd: missing
+mkdir: invalid
+copy: main.jet invalid/main.jet
+step: jet build main.jet --allow-exec --allow-fs
+cwd: invalid
+entries: store/ac kind file > 0
+entries: store/cas kind file > 0
+for file store/cas kind file as f
+write: {f.path} = "corrupt"
+end for
+step: jet build main.jet --allow-exec --allow-fs
+cwd: invalid
+mkdir: invalid-record
+copy: main.jet invalid-record/main.jet
+step: jet build main.jet --allow-exec --allow-fs
+cwd: invalid-record
+entries: store/ac kind file > 0
+for file store/ac kind file as f
+write: {f.path} = "not an action record"
+end for
+step: jet build main.jet --allow-exec --allow-fs
+cwd: invalid-record

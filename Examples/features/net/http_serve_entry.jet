@@ -1,14 +1,17 @@
-// D-HTTP-SERVE1: explicit blocking HTTP entry. Run only with a bounded listener harness.
+// D-FOUND-LIFECYCLE1=A: `http.serve(mux, deadline:)` binds a loopback server
+// whose route deadline is a per-request #Context; `shutdown` drains it and
+// returns the shutdown report.
 package {
     name: "http_serve_entry"
-    authority: { holds: { allow: [Net, Time.Wait] } }
+    authority: { holds: { allow: [IO, Net, Time.Wait] } }
 }
 
 use core.http as http
 use core.http.server as server
 
 fn run() {
-    #Unsafe("core.http.serve blocks until the listener exits") {
-        http.serve("127.0.0.1:0", (req: HTTPRequest) -> server.response(200, "served"))
-    }
+    mux :: server.mux()
+    running :: http.serve(mux, deadline: 5s)
+    _report :: running.shutdown() ?? return
+    print("serve:shutdown")
 }

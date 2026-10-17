@@ -1,0 +1,52 @@
+
+use core.http.client as http
+use core.http.server as server
+use core.net as net
+
+fn reply(status: Int, body: String) -> HTTPResponse HTTPError! {
+    return Ok(server.response(status, body).header("content-type", "application/json"))
+}
+
+fn kv(
+    key: String,
+    req: HTTPRequest,
+    store: Shared<[String:String]>,
+    put: Bool,
+) -> HTTPResponse HTTPError! {
+    if put {
+        value :: req.body().text(8388608) ?? ""
+        store.guard_edit().value[key] = value
+        return reply(200, "{{\"stored\":\"{key}\"}}")
+    }
+    stored :: store.guard_read().value.get(key) ?? return reply(404, "{{\"error\":\"not found\"}}")
+    return reply(200, "{{\"key\":\"{key}\",\"value\":\"{stored}\"}}")
+}
+
+fn run() (HTTPError | NetError | TaskFailure)! {
+    listener :: net.tcp_listen("127.0.0.1:0") ?? panic("listen")
+    address :: listener.local_addr() ?? panic("address")
+    store :: shared [String:String]{}
+    mux :: server.mux()
+    mux.get("/health", () -> reply(200, "{{\"status\":\"ok\"}}"))
+    mux.put("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, true))
+    mux.get("/kv/:key", (req: HTTPRequest) -> kv(req.param("key") ?? "", req, store, false))
+    mux.get("/shutdown", () -> reply(200, "{{\"bye\":true}}"))
+    server_task :: task {
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+        server.serve_once_listener(listener, mux) ?? panic("serve")
+    }
+    health :: http.request("GET", "http://{address}/health").send() ?? panic("health")
+    print("{health.status()}|{health.text() ?? "health body"}")
+    put :: http.request("PUT", "http://{address}/kv/alpha").body("one").send() ?? panic("put")
+    print("{put.status()}|{put.text() ?? "put body"}")
+    get :: http.request("GET", "http://{address}/kv/alpha").send() ?? panic("get")
+    print("{get.status()}|{get.text() ?? "get body"}")
+    missing :: http.request("GET", "http://{address}/kv/nope").send() ?? panic("missing")
+    print("{missing.status()}|{missing.text() ?? "missing body"}")
+    shutdown :: http.request("GET", "http://{address}/shutdown").send() ?? panic("shutdown")
+    print("{shutdown.status()}|{shutdown.text() ?? "shutdown body"}")
+    server_task.join() ?? panic("join")
+}

@@ -1,19 +1,19 @@
 use super::*;
-use jet_foundation::DataTree::DataTree;
+use jet_foundation::Dyn::Dyn;
 
-fn normalize_expand_json(text: &str) -> DataTree {
-    fn scrub(node: &mut DataTree) {
+fn normalize_expand_json(text: &str) -> Dyn {
+    fn scrub(node: &mut Dyn) {
         match node {
-            DataTree::Object(fields) => {
+            Dyn::Object(fields) => {
                 for (key, value) in fields {
                     if key == "elapsed_ms" {
-                        *value = DataTree::Int(0);
+                        *value = Dyn::Int((0).into());
                     } else {
                         scrub(value);
                     }
                 }
             }
-            DataTree::Array(values) => {
+            Dyn::Array(values) => {
                 for value in values {
                     scrub(value);
                 }
@@ -128,14 +128,14 @@ authority: {
     .unwrap();
 
     for args in [
-        vec!["run", "--trace-tiers", "main.jet"],
-        vec!["dev", "--watch=off", "--trace-tiers", "main.jet"],
+        vec!["run", "main.jet"],
+        vec!["dev", "--watch=off", "main.jet"],
     ] {
         let output = Command::new(jet())
             .args(&args)
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", scratch.join("store"))
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1")
             .output()
             .unwrap();
@@ -148,16 +148,6 @@ authority: {
             String::from_utf8_lossy(&output.stdout)
         );
         assert_eq!(output.stdout, b"default-profile\n", "{} output", args[0]);
-        assert!(
-            trace.lines().any(|line| line.contains("tier1 native")),
-            "{} did not use the default fast production lens:\n{trace}",
-            args[0]
-        );
-        assert!(
-            !trace.contains("tier0 interp"),
-            "{} default route deoptimized:\n{trace}",
-            args[0]
-        );
     }
 }
 
@@ -283,7 +273,7 @@ fn run() {}
         ])
         .current_dir(&scratch.path)
         .env("JET_STORE_DIR", scratch.join("store"))
-        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("JET_STORE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -311,7 +301,7 @@ fn run() {}
             .arg(&record_arg)
             .current_dir(&scratch.path)
             .env("JET_STORE_DIR", scratch.join("store"))
-            .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("JET_STORE_DIR", scratch.join("run-cache"))
             .env("NO_COLOR", "1");
         if let Some(filter) = filter {
             command.arg("--filter").arg(filter);
@@ -380,7 +370,7 @@ fn run() {}
         ])
         .current_dir(&scratch.path)
         .env("JET_STORE_DIR", scratch.join("store"))
-        .env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+        .env("JET_STORE_DIR", scratch.join("run-cache"))
         .env("NO_COLOR", "1")
         .output()
         .unwrap();
@@ -1160,7 +1150,7 @@ fn plugin_using_an_effect_is_e1258() {
     let dir = isolated_cwd("plugin_effect_denied");
     fs::write(
         dir.join("main.jet"),
-        "use core.sys as env\n\npub fn get_secret() -> Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n\nfn run() { print(get_secret()) }\n",
+        "use core.sys as env\n\nfn get_secret() -> Int {\n    _ :: env.get(\"SECRET\")\n    return 1\n}\n\nfn run() { print(get_secret()) }\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -1189,7 +1179,7 @@ fn plugin_text_export_allows_guest_memory_allocation() {
     let dir = isolated_cwd("plugin_text_memory_allowed");
     fs::write(
         dir.join("main.jet"),
-        "pub fn echo(value: String) -> String { ~value }\n\nfn run() {}\n",
+        "pub fn echo(value: String) -> String { value.copy() }\n\nfn run() {}\n",
     )
     .unwrap();
     let out = Command::new(jet())
@@ -1234,7 +1224,7 @@ fn plugin_missing_wasm_tools_is_e1259() {
     let dir = isolated_cwd("plugin_no_wasmtools");
     fs::write(
         dir.join("main.jet"),
-        "pub fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n\nfn run() {}\n",
+        "fn scale(a: Float, b: Float) -> Float {\n    return a * b\n}\n\nfn run() {}\n",
     )
     .unwrap();
 

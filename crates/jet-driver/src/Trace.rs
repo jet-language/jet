@@ -8,6 +8,8 @@
 //! A progress kind `counters.<phase>.<counter>` is a #4319 scaling counter
 //! (written once, unthrottled); with `JET_PHASE_COUNTERS` also set, each is
 //! echoed to stderr as a `JET_PHASE_COUNTERS` line for `Tools/perf/scaling`.
+//! The same switch turns on the Rust half's `jet_foundation::WorkCounters`,
+//! drained into `counters.<phase>.<counter>` events whenever a phase ends.
 //!
 //! This is the one trace writer. The Rust driver opens spans with [`span`];
 //! the bootstrap host hands the same sink to the Jet compiler as its
@@ -119,6 +121,9 @@ impl TraceSink {
         match Self::create(std::path::Path::new(&path), functions) {
             Ok(mut sink) => {
                 sink.phase_counters = std::env::var_os(PHASE_COUNTERS_ENV).is_some_and(|value| !value.is_empty());
+                if sink.phase_counters {
+                    jet_foundation::WorkCounters::enable();
+                }
                 Some(sink)
             }
             Err(error) => {
@@ -249,6 +254,14 @@ impl TraceSink {
             }
         }
         state.write_line();
+        drop(guard);
+        // #4601: the Rust half's work counters since the previous phase end
+        // belong to this phase.
+        if phase && self.phase_counters {
+            for (name, value) in jet_foundation::WorkCounters::drain() {
+                self.counter(&format!("{kind}.{name}"), i64::try_from(value).unwrap_or(i64::MAX));
+            }
+        }
     }
 
     /// `done` of `total` items of the open `kind` phase are finished.

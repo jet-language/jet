@@ -21,7 +21,7 @@ fn store_nix_test_parse_fails(text: String) -> Bool Never! {
 // One NAR string field: little-endian length, bytes, zero padding to 8.
 fn store_nix_test_put(output: &[U8], value: [U8]) Never! {
     length :: value.len()
-    loop index in 0..<8 -> &output.push(U8{(length >> (index * 8)) & 255})
+    loop index in 0..<8 -> &output.push(U8{((length >> (index * 8))).bit_and(255)})
     &output.extend(value)
     padding :: (8 - length % 8) % 8
     loop _ in 0..<padding -> &output.push(U8{0})
@@ -147,10 +147,10 @@ fn store_nix_test_hash_key(store_path: String) -> String Never! {
 }
 
 // One signed object served from a fresh claim root (Rust `single_object_cache`).
-pub struct NixTestSingleCache {
-    pub root: String
-    pub roots: HangarRoots
-    pub server: NixTestCacheServer
+struct NixTestSingleCache {
+    root: String
+    roots: HangarRoots
+    server: NixTestCacheServer
 }
 
 fn store_nix_test_single_object_routes(store_path: String, nar_name: String, nar: [U8], seed: [U8]) -> [String: [U8]] Never! {
@@ -216,9 +216,9 @@ fn store_nix_test_single_failure(verification: &StoreVerification, label: String
 }
 
 // Byte counters behind a progress handle (Rust `Output::ByteProgress`).
-pub struct NixTestProgress {
-    pub discovered: Cell<Int>
-    pub transferred: Cell<Int>
+struct NixTestProgress {
+    discovered: Cell<Int>
+    transferred: Cell<Int>
 
     fn new() -> NixTestProgress Never! {
         NixTestProgress{discovered: Cell.new(0), transferred: Cell.new(0)}
@@ -713,7 +713,7 @@ pub struct NixTestProgress {
     assert_eq(files.read_link(files.join(destination, "link")) ?? panic("link"), "lib/target")
     assert_eq(files.read_link(files.join(destination, "nix-link")) ?? panic("nix link"), "/nix/store/11111111111111111111111111111111-target/bin/tool")
     _ :: pkg_try_output_hash_of_in_hangar(destination, destination, false) ?? panic("canonical hash")
-    assert(((files.stat(files.join(destination, "bin")) ?? panic("bin stat")).mode & 0o111) != 0)
+    assert((((files.stat(files.join(destination, "bin")) ?? panic("bin stat")).mode).bit_and(0o111)) != 0)
     store_nix_test_remove_dir(destination)
 }
 
@@ -792,7 +792,7 @@ pub struct NixTestProgress {
 
     zstd_info :: store_nix_test_signed_zstd_narinfo(store_path, "negative.nar.zst", valid_nar, [String]{}, key_id, seed)
     corrupted := store_nix_test_encode_zstd(valid_nar)
-    corrupted[0] = U8{Int.from_u8(corrupted[0]) ~| 1}
+    corrupted[0] = U8{(Int.from_u8(corrupted[0])).bit_xor(1)}
     _ :: store_nix_test_single_failure(&verification, "compressed-corruption", store_path, zstd_info, corrupted, seed, NixCacheErrorKind.CompressedCorruption)
 
     nar_error :: store_nix_test_single_failure(&verification, "nar-corruption", store_path, store_nix_test_signed_narinfo(store_path, "negative.nar", invalid_magic_nar, [String]{}, key_id, seed), invalid_magic_nar, seed, NixCacheErrorKind.NarCorruption)

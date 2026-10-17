@@ -19,7 +19,7 @@ fn run() {
     cell :: compute.get(tensor, [1, 2]) ?? panic("cell")
     result :: Regression{slope: Float{3.5}, intercept: Float{0.0}, r_squared: Float{1.0}}
     receipt :: Receipt{tensor_shape: shape, tensor_cell: cell, regression: result}
-    text :: json.to_string(receipt)
+    text :: json.to_string(receipt) ?? panic(err.reason)
     files.write("/home/nate/.cache/jet-dev/dx3/area-data/tensor.receipt.json", text) ?? panic("write")
     print(text)
 }

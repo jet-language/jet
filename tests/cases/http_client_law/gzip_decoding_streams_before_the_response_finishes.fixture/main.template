@@ -1,0 +1,30 @@
+use core.http.client as http
+use core.net as net
+fn run() {
+    client :: http.Client.new()
+    response :: client.send(http.request("GET", "http://{cap:addr}/gzip")) ?? panic("gzip send")
+    count := 0
+    // HTTPMessage.rs746-773 transparent SAME-handle max5 reads; first normal None is mandatory.
+    loop chunk in response.body().chunks(5) {
+        bytes :: chunk ?? panic("gzip read")
+        count += 1
+        if count == 1 {
+            assert_eq(bytes, "hello".bytes())
+            print("hello")
+            _ :: net.tcp_connect("{cap:signal}") ?? panic("signal decoded prefix")
+        } else if count == 2 {
+            assert_eq(bytes, "world".bytes())
+            print("world")
+        } else { panic("unexpected third chunk instead of first None") }
+    }
+    print(count)
+    if client.send(http.request("GET", "http://{cap:addr}/gzip")) == {
+        .Err(error) -> {
+            if error == {
+                .UnsupportedEncoding -> print("UnsupportedEncoding")
+                else -> panic("wrong br encoding error")
+            }
+        }
+        else -> panic("br accepted")
+    }
+}

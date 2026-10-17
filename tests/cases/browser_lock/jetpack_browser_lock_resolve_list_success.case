@@ -1,0 +1,22 @@
+# HAND-PORT tests/browser_lock.rs:71-117 jetpack_browser_lock_resolve_list_success
+# PENDING-GRAMMAR: approved batch-two forms; no runtime parity claim.
+fixture: jetpack_browser_lock_resolve_list_success.fixture
+env: NO_COLOR=1
+requires: os:unix
+chmod: tools/chromium 0755
+step: jetpack browser lock chromium --binary {work}/tools/chromium --version 131.0.6778.0 --protocol bidi-2025.5
+exit: 0
+file: .jet/lock ~ "[[browser]]" # original predicate
+file: .jet/lock ~ "engine = \"chromium\"" # original predicate
+file: .jet/lock ~ "protocol = \"bidi-2025.5\"" # original predicate
+file: .jet/lock ~ "output-hash = \"sha256-" # original predicate
+step: jetpack browser resolve chromium
+exit: 0
+stdout: ~ "engine=chromium" # original predicate
+stdout: ~ "protocol=bidi-2025.5" # original predicate
+stdout: ~ "binary={work}/tools/chromium" # original predicate
+step: jetpack browser list
+exit: 0
+stdout: ~ "chromium" # original predicate
+stdout: ~ "bidi-2025.5" # original predicate
+

@@ -1,0 +1,117 @@
+# HAND-PORT tests/jetpack_engine.rs:4440-4540 typed_env_build_hook_approval_binds_declared_dependency_refs
+# PENDING-GRAMMAR(batch-four) / PENDING-SAME-HEAD: source only.
+fixture: typed_env_build_hook_approval_binds_declared_dependency_refs.fixture
+env: NO_COLOR=1
+refused: hangar-verified-realization
+# Full original setup, observations and predicates preserved: this refusal is NOT a passing replacement.
+# #[test]
+# fn typed_env_build_hook_approval_binds_declared_dependency_refs() {
+#     let proj = Scratch::new("build-hook-dependency-identity-project");
+#     let root = Scratch::new("build-hook-dependency-identity-root");
+#     let fixtures = Scratch::new("build-hook-dependency-identity-fixtures");
+#     let home = Scratch::new("build-hook-dependency-identity-home");
+#     let staging = Scratch::new("build-hook-dependency-identity-staging");
+#     write_runnable_fixture(&fixtures.path, &root.path, &staging.path);
+#     // Both refs resolve to the same fixture executable. Only the declared
+#     // package ref changes, so a cache/trust key that ignores adapter deps would
+#     // incorrectly accept the second build.
+#     fs::copy(
+#         fixtures.join("nixpkgs-greet.json"),
+#         fixtures.join("nixpkgs-hello.json"),
+#     )
+#     .unwrap();
+#     fs::create_dir_all(proj.join("vendor/tool")).unwrap();
+#     fs::write(
+#         proj.join("env.jet"),
+#         r#"
+# module dev {
+#     env.dev: Env{
+#         packages: [
+#             Pkg.adapt(
+#                 name: "tool",
+#                 source: "./vendor/tool",
+#                 deps: [default.greet],
+#                 recipe: Recipe.build(steps: [
+#                     .exec(tool: "greet", args: []),
+#                 ])
+#             )
+#         ],
+#     }
+# }
+# "#,
+#     )
+#     .unwrap();
+#     let first = jetpack()
+#         .args(["build", "--no-color", "--offline", "--trust"])
+#         .current_dir(&proj.path)
+#         .env("HOME", &home.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         first.status.success(),
+#         "initial build failed: {}",
+#         String::from_utf8_lossy(&first.stderr)
+#     );
+# 
+#     let roots = jetpack::Store::Roots {
+#         root: root.path.clone(),
+#         dev_mode: false,
+#     };
+#     let entry = jetpack::Store::list(&roots)
+#         .into_iter()
+#         .find(|entry| entry.reference == "adapt:tool:./vendor/tool")
+#         .expect("initial adapter should be recorded");
+#     let old_identity = jetpack::Store::ProducerRecord::decode(&entry.producer_record)
+#         .expect("adapter producer record should decode")
+#         .facts
+#         .get("build.identity")
+#         .cloned()
+#         .expect("adapter producer should record its build identity");
+# 
+#     let selector = format!("build:{old_identity}");
+#     let grant = jetpack()
+#         .args(["trust", "grant", &selector, "--scope", "user"])
+#         .env("HOME", &home.path)
+#         .output()
+#         .unwrap();
+#     assert!(
+#         grant.status.success(),
+#         "build identity trust setup failed: {}",
+#         String::from_utf8_lossy(&grant.stderr)
+#     );
+# 
+#     let changed = fs::read_to_string(proj.join("env.jet"))
+#         .unwrap()
+#         .replace("default.greet", "default.hello");
+#     fs::write(proj.join("env.jet"), changed).unwrap();
+#     let second = jetpack()
+#         .args(["build", "--no-color", "--offline"])
+#         .current_dir(&proj.path)
+#         .env("HOME", &home.path)
+#         .env("JETPACK_ROOT", &root.path)
+#         .env("JETPACK_FIXTURES", &fixtures.path)
+#         .output()
+#         .unwrap();
+#     let stderr = String::from_utf8_lossy(&second.stderr);
+#     assert_eq!(second.status.code(), Some(1), "stderr: {stderr}");
+#     assert!(
+#         stderr.contains("E1255"),
+#         "changed dependency was accepted: {stderr}"
+#     );
+#     assert!(
+#         stderr.contains("build hook"),
+#         "wrong trust failure: {stderr}"
+#     );
+# }
+env: JETPACK_ROOT={work}/root
+mkdir: root
+mkdir: project
+mkdir: fixtures
+env: JETPACK_FIXTURES={work}/fixtures
+mkdir: project/vendor/tool
+step: jetpack build --no-color --offline --trust
+cwd: project
+exit: 0
+
